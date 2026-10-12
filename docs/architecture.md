@@ -64,3 +64,7 @@ These protections are in-memory lab semantics. Durable WAN Node health, clock ro
 ## Phase 2 remote Agent transport boundary
 
 The LAB HUB can optionally bind a distinct Agent-only TLS1.3 listener (no owner API or UI). The Node Agent refuses remote HTTP, requires normal chain+IP/DNS-SAN certificate verification plus a SHA256 leaf pin, and never follows redirects. The operator must explicitly enable remote Agent mode; default remains localhost-only. This feature has no Xray data-plane, production lease, IP-limit or Node replacement, and is not public-release-ready. See [Node WAN TLS LAB phase 2](node-remote-tls-lab-phase2.md).
+
+## Phase 3 operator-approved replacement route draft
+
+Explicit Direct/Swap choices and deterministic nonactivating SHA-256 previews live in Go `internal/routeplan`, with no previous tunnel inheritance. This foundation may be inspected in [Route preflight](node-replacement-route-preflight.md). Persistent replace orchestration, remote probes, Xray apply and subscription publication remain release blockers.
