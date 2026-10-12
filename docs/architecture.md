@@ -54,3 +54,9 @@ No requirement is declared accepted merely because this document exists; tests a
 ## Phase 1 pairing contract
 
 The first durably registered LAB Nodes now use owner-issued, 10-minute one-time invites and self-generated per-installation Agent credentials. See [Node identity Phase 1](node-enrollment-phase1.md). This is **not** permission to run remote/internet Node pairing. The Node Manager replacement and production mTLS workflows remain blocked. Old node credentials and tunnels are never imported.
+
+## Independent Node health sampling (Phase 1b)
+
+A dedicated 3-second authenticated Pulse carries logical Node ID, pinned installation, random process boot ID and sequence. This request never calls CPU, RAM, Xray or network counters. A separate 5-second metrics loop can fail without removing a healthy Agent from Online. A Node becomes Offline after more than 15 seconds without a valid pulse **or** telemetry sample. Metrics older than 12 seconds render as unavailable with 'Stats delayed', not as current 0%. Replayed pulses and retired boot IDs do not extend Online; Node stays visible when offline. The last known CPU core count may remain displayed for identification, not as fresh telemetry. 
+
+These protections are in-memory lab semantics. Durable WAN Node health, clock rollback handling, remote mTLS, signed leases and broader soak tests remain required before any real production Node deploy. The reported RX/TX values are for a default-route interface and are NOT unique billable per-user traffic or individually attributed Inbound Direct/Tunnel traffic.
