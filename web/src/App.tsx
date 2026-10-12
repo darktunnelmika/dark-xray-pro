@@ -140,7 +140,15 @@ function NodeRow({ node, history, lang }: { node: NodeSnapshot; history: number[
 }
 
 export default function App() {
-  const [page, setPage] = useState<Page>("overview");
+  const [page, setPage] = useState<Page>(() => {
+    try {
+      const last = sessionStorage.getItem("dark-pro-page");
+      if (last === "overview" || last === "nodes" || last === "inbounds" || last === "settings") {
+        return last;
+      }
+    } catch { /* storage disabled */ }
+    return "overview";
+  });
   const [language, setLanguage] = useState<Language>(() => stored("dark-pro-lang", "en", ["en", "fa"]));
   const [theme, setTheme] = useState<Theme>(() => stored("dark-pro-theme", "system", ["system", "light", "dark"]));
   const [systemDark, setSystemDark] = useState(() => window.matchMedia("(prefers-color-scheme: dark)").matches);
@@ -149,6 +157,11 @@ export default function App() {
   const [problem, setProblem] = useState<string | null>(null);
   const [history, setHistory] = useState<Record<string, number[]>>({});
   const t = translations[language];
+
+  // Route persistence is per-tab: refresh never unexpectedly returns to Overview.
+  useEffect(() => {
+    try { sessionStorage.setItem("dark-pro-page", page); } catch { /* storage disabled */ }
+  }, [page]);
 
   useEffect(() => {
     const m = window.matchMedia("(prefers-color-scheme: dark)");
