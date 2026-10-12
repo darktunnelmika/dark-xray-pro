@@ -9,8 +9,8 @@ export interface NodeSnapshot {
   cpu_percent: number;
   ram_total_bytes: number;
   ram_used_bytes: number;
-  rx_bits_per_second: number;
-  tx_bits_per_second: number;
+  rx_bits_per_second: number | null;
+  tx_bits_per_second: number | null;
   last_seen: string;
 }
 
@@ -22,6 +22,7 @@ export interface FleetSnapshot {
   physical_rx_bits_per_second: number;
   physical_tx_bits_per_second: number;
   metric_scope: "physical_interface_not_billable";
+  physical_rates_complete: boolean;
   nodes: NodeSnapshot[];
 }
 
@@ -44,6 +45,7 @@ export async function getFleet(signal: AbortSignal): Promise<FleetSnapshot> {
     typeof data.physical_rx_bits_per_second !== "number" ||
     typeof data.physical_tx_bits_per_second !== "number" ||
     data.metric_scope !== "physical_interface_not_billable" ||
+    typeof data.physical_rates_complete !== "boolean" ||
     data.nodes.some(
       (node) =>
         !node ||
@@ -52,7 +54,9 @@ export async function getFleet(signal: AbortSignal): Promise<FleetSnapshot> {
         typeof node.cpu_cores !== "number" ||
         typeof node.cpu_percent !== "number" ||
         typeof node.ram_total_bytes !== "number" ||
-        typeof node.ram_used_bytes !== "number",
+        typeof node.ram_used_bytes !== "number" ||
+        (node.rx_bits_per_second !== null && typeof node.rx_bits_per_second !== "number") ||
+        (node.tx_bits_per_second !== null && typeof node.tx_bits_per_second !== "number"),
     )
   ) {
     throw new Error("Invalid or incomplete fleet data; previous values retained");

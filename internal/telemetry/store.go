@@ -45,8 +45,8 @@ type Node struct {
     CPUPercent   float64   `json:"cpu_percent"`
     RAMTotal     uint64    `json:"ram_total_bytes"`
     RAMUsed      uint64    `json:"ram_used_bytes"`
-    RXBitsPerSec float64   `json:"rx_bits_per_second"`
-    TXBitsPerSec float64   `json:"tx_bits_per_second"`
+    RXBitsPerSec *float64  `json:"rx_bits_per_second"`
+    TXBitsPerSec *float64  `json:"tx_bits_per_second"`
     LastSeen     time.Time `json:"last_seen"`
 }
 
@@ -57,6 +57,7 @@ type Fleet struct {
     Offline        int       `json:"offline_nodes"`
     PhysicalRXBps  float64   `json:"physical_rx_bits_per_second"`
     PhysicalTXBps  float64   `json:"physical_tx_bits_per_second"`
+    RatesComplete  bool      `json:"physical_rates_complete"`
     MetricScope    string    `json:"metric_scope"`
     Nodes          []Node    `json:"nodes"`
 }
@@ -66,6 +67,7 @@ type lastSample struct {
     seen   time.Time
     rxBps  float64
     txBps  float64
+    rateReady bool
 }
 
 type Store struct {
@@ -127,6 +129,7 @@ func (s *Store) Record(sample Sample) error {
            sample.TXBytes >= last.sample.TXBytes {
             next.rxBps = float64(sample.RXBytes-last.sample.RXBytes) * 8 / elapsed
             next.txBps = float64(sample.TXBytes-last.sample.TXBytes) * 8 / elapsed
+            next.rateReady = true
         }
         // Counter reset, process reboot, or time reversal: start a fresh rate baseline.
     }
@@ -139,7 +142,7 @@ func (s *Store) Snapshot() Fleet {
     s.mu.RLock()
     defer s.mu.RUnlock()
     now := s.clock().UTC()
-    fleet := Fleet{AsOf: now, MetricScope: "physical_interface_not_billable", Nodes: make([]Node, 0, len(s.nodes))}
+    fleet := Fleet{AsOf: now, MetricScope: "physical_interface_not_billable", RatesComplete: true, Nodes: make([]Node, 0, len(s.nodes))}
     for _, item := range s.nodes {
         sample := item.sample
         node := Node{
@@ -152,9 +155,14 @@ func (s *Store) Snapshot() Fleet {
             node.Status = "offline"
             fleet.Offline++
         } else {
-            node.RXBitsPerSec, node.TXBitsPerSec = item.rxBps, item.txBps
-            fleet.PhysicalRXBps += item.rxBps
-            fleet.PhysicalTXBps += item.txBps
+            if item.rateReady {
+                rx, tx := item.rxBps, item.txBps
+                node.RXBitsPerSec, node.TXBitsPerSec = &rx, &tx
+                fleet.PhysicalRXBps += item.rxBps
+                fleet.PhysicalTXBps += item.txBps
+            } else {
+                fleet.RatesComplete = false
+            }
             fleet.Online++
         }
         fleet.Nodes = append(fleet.Nodes, node)
@@ -163,5 +171,6 @@ func (s *Store) Snapshot() Fleet {
         return fleet.Nodes[i].NodeID < fleet.Nodes[j].NodeID
     })
     fleet.Total = len(fleet.Nodes)
+    if fleet.Online == 0 { fleet.RatesComplete = false }
     return fleet
 }

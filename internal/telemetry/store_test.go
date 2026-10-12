@@ -22,7 +22,7 @@ func TestFleetFreshnessAndPhysicalCounters(t *testing.T) {
     a := baseline()
     if err := store.Record(a); err != nil { t.Fatal(err) }
     first := store.Snapshot()
-    if first.Total != 1 || first.Online != 1 || first.Nodes[0].RXBitsPerSec != 0 {
+    if first.Total != 1 || first.Online != 1 || first.Nodes[0].RXBitsPerSec != nil || first.RatesComplete {
         t.Fatalf("bad first snapshot: %+v", first)
     }
     now = now.Add(3*time.Second)
@@ -31,6 +31,7 @@ func TestFleetFreshnessAndPhysicalCounters(t *testing.T) {
     a.TXBytes += 500000
     if err := store.Record(a); err != nil { t.Fatal(err) }
     second := store.Snapshot()
+    if !second.RatesComplete || second.Nodes[0].RXBitsPerSec == nil { t.Fatal("second sample must establish physical network rates") }
     if math.Abs(second.PhysicalRXBps-4000000) > 0.01 {
         t.Fatalf("RX rate should be 4 Mbps, got %.2f", second.PhysicalRXBps)
     }
@@ -40,7 +41,7 @@ func TestFleetFreshnessAndPhysicalCounters(t *testing.T) {
     now = now.Add(16*time.Second)
     stale := store.Snapshot()
     if stale.Total != 1 || stale.Online != 0 || stale.Offline != 1 ||
-       stale.Nodes[0].Status != "offline" || stale.PhysicalRXBps != 0 {
+       stale.Nodes[0].Status != "offline" || stale.PhysicalRXBps != 0 || stale.RatesComplete {
         t.Fatalf("disconnected node must remain visible but uncounted: %+v", stale)
     }
     a.BootID = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
@@ -49,7 +50,7 @@ func TestFleetFreshnessAndPhysicalCounters(t *testing.T) {
     a.TXBytes = 240
     if err := store.Record(a); err != nil { t.Fatal(err) }
     resumed := store.Snapshot()
-    if resumed.Online != 1 || resumed.PhysicalRXBps != 0 {
+    if resumed.Online != 1 || resumed.RatesComplete || resumed.Nodes[0].RXBitsPerSec != nil {
         t.Fatalf("new boot must reset baseline: %+v", resumed)
     }
 }

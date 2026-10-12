@@ -131,7 +131,7 @@ function NodeRow({ node, history, lang }: { node: NodeSnapshot; history: number[
         <Meter value={ramPercent} />
       </div>
       <div className="node-network">
-        <div className="network-lines"><span>↓ {good ? rate(node.rx_bits_per_second) : "—"}</span><span>↑ {good ? rate(node.tx_bits_per_second) : "—"}</span></div>
+        <div className="network-lines"><span>↓ {good ? rate(node.rx_bits_per_second ?? undefined) : "—"}</span><span>↑ {good ? rate(node.tx_bits_per_second ?? undefined) : "—"}</span></div>
         <Trend values={history} />
       </div>
       <div className={"status-tag " + (good ? "status-online" : "status-offline")}><i />{good ? t.online : t.offline}</div>
@@ -183,6 +183,7 @@ export default function App() {
           const after = { ...before };
           for (const node of fresh.nodes) {
             if (node.status !== "online") continue;
+            if (node.rx_bits_per_second === null || node.tx_bits_per_second === null) continue;
             const rate = node.rx_bits_per_second + node.tx_bits_per_second;
             after[node.node_id] = [...(before[node.node_id] ?? []), rate].slice(-20);
           }
@@ -205,8 +206,8 @@ export default function App() {
 
   const ready = fleet !== null;
   const summary = [
-    { label: t.download, value: ready ? rate(fleet.physical_rx_bits_per_second) : "—", Icon: ArrowDownLeft },
-    { label: t.upload, value: ready ? rate(fleet.physical_tx_bits_per_second) : "—", Icon: ArrowUpRight },
+    { label: t.download, value: ready && fleet.physical_rates_complete ? rate(fleet.physical_rx_bits_per_second) : "—", Icon: ArrowDownLeft },
+    { label: t.upload, value: ready && fleet.physical_rates_complete ? rate(fleet.physical_tx_bits_per_second) : "—", Icon: ArrowUpRight },
     { label: t.online, value: ready ? String(fleet.online_nodes) : "—", Icon: Activity },
     { label: t.offline, value: ready ? String(fleet.offline_nodes) : "—", Icon: Server },
   ];
@@ -246,7 +247,7 @@ export default function App() {
           <div className="topbar-right">
             <span className="lab-pill"><span className="pulse-dot" /> ISOLATED LAB</span>
             <button className="topbar-lang" onClick={() => setLanguage(language === "en" ? "fa" : "en")} aria-label="Switch language"><Globe2 size={17} />{language.toUpperCase()}</button>
-            <button className="icon-button theme-shortcut" aria-label="Toggle dark and light mode" onClick={() => setTheme(theme === "dark" ? "light" : "dark")}>{theme === "dark" || (theme === "system" && systemDark) ? <Sun size={20} /> : <Moon size={20} />}</button>
+            <button className="icon-button theme-shortcut" aria-label="Toggle dark and light mode" onClick={() => setTheme(theme === "dark" || (theme === "system" && systemDark) ? "light" : "dark")}>{theme === "dark" || (theme === "system" && systemDark) ? <Sun size={20} /> : <Moon size={20} />}</button>
           </div>
         </header>
 
