@@ -31,3 +31,7 @@ New LAB Nodes can be enrolled with a one-time pairing ticket and private per-ins
 ## Phase 2: opt-in Agent-only HTTPS for NEW lab machines
 
 The Node Agent may connect over verified TLS 1.3 with a manually pinned certificate and per-installation credential to a **separate** Agent listener. The owner dashboard remains local-only. Remote transport is disabled by default and must be explicitly enabled for isolated machines. See [Node WAN TLS LAB contract](docs/node-remote-tls-lab-phase2.md). This is **not a production-ready remote Node Manager**.
+
+## Phase 3: safe Node replacement preflight (not live)
+
+An operator-defined route plan can now be validated for a new Node, preserving Direct and Tunnel simultaneously and accepting the three-field Dark Swap. It refuses to mark routes activated before remote checks. See [Node replacement plan](docs/node-replacement-route-preflight.md). Actual replace/apply and subscription updates are not yet implemented.
