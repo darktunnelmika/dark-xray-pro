@@ -59,3 +59,31 @@ jobs:
         run: test -s dist/index.html && test -n "$(find dist/assets -type f -name '*.js' -print -quit)"
 
   # Intentionally no deploy jobs. A clean lab build is not a production release.
+
+  browser:
+    name: Real Chromium routes and theme QA
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install UI and browser runner
+        run: npm install --no-audit --no-fund
+      - name: Install Chromium dependencies
+        run: npx playwright install --with-deps chromium
+      - name: Run isolated route and responsive acceptance
+        run: npm run test:browser
+      - name: Upload failure evidence
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dark-xray-pro-browser-failures
+          path: |
+            web/test-results/
+            web/playwright-report/
+          if-no-files-found: ignore
