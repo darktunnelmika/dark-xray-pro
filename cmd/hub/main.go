@@ -15,6 +15,7 @@ import (
     "time"
 
     "github.com/darktunnelmika/dark-xray-pro/internal/api"
+    "github.com/darktunnelmika/dark-xray-pro/internal/noderegistry"
     "github.com/darktunnelmika/dark-xray-pro/internal/telemetry"
 )
 
@@ -28,6 +29,7 @@ func loopbackAddr(addr string) bool {
 func main() {
     address := flag.String("listen", "127.0.0.1:2087", "local lab HTTP listener")
     static := flag.String("static", "web/dist", "optional compiled frontend directory")
+    registryPath := flag.String("registry", "./lab-state/registry.json", "private durable LAB node enrollment file")
     flag.Parse()
 
     if os.Getenv("DARK_PRO_LAB_MODE") != "1" {
@@ -37,7 +39,9 @@ func main() {
         log.Fatal("lab HUB refuses non-loopback listeners; use an SSH tunnel")
     }
     store := telemetry.NewStore(telemetry.DefaultOfflineAfter, nil)
-    service, err := api.NewServer(store, os.Getenv("DARK_PRO_LAB_TOKEN"))
+    registry, err := noderegistry.Open(*registryPath, nil)
+    if err != nil { log.Fatal("cannot load private node registry: ", err) }
+    service, err := api.NewServer(store, registry, os.Getenv("DARK_PRO_LAB_TOKEN"))
     if err != nil { log.Fatal(err) }
 
     apiHandler := service.Handler()

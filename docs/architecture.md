@@ -50,3 +50,7 @@ Current foundation routes: Overview (live aggregate), Nodes (line monitor CPU/co
 - Full backup and restore proves archive hash, encryption, key inclusion, replay and source-state preservation for 1+ GiB snapshots.
 
 No requirement is declared accepted merely because this document exists; tests and real authenticated QA must demonstrate it.
+
+## Phase 1 pairing contract
+
+The first durably registered LAB Nodes now use owner-issued, 10-minute one-time invites and self-generated per-installation Agent credentials. See [Node identity Phase 1](node-enrollment-phase1.md). This is **not** permission to run remote/internet Node pairing. The Node Manager replacement and production mTLS workflows remain blocked. Old node credentials and tunnels are never imported.
