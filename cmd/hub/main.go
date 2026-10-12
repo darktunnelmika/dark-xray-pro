@@ -41,6 +41,17 @@ func separateAgentPort(agent, owner string) error {
 	return nil
 }
 
+// A separately opened public TLS listener must not load a world-readable
+// private key or follow a symlink to an unrelated host secret.
+func privateTLSKey(path string) error {
+	info, err := os.Lstat(path)
+	if err != nil { return err }
+	if !info.Mode().IsRegular() || info.Mode().Perm()&0077 != 0 {
+		return errors.New("Agent TLS key must be a regular, private (0600/0400) file without symlink")
+	}
+	return nil
+}
+
 func main() {
 	address := flag.String("listen", "127.0.0.1:2087", "loopback-only LAB owner UI listener")
 	static := flag.String("static", "web/dist", "optional compiled frontend directory")
@@ -65,6 +76,7 @@ func main() {
 		if *agentCert == "" || *agentKey == "" {
 			log.Fatal("dedicated Agent TLS certificate and key are both required")
 		}
+		if err := privateTLSKey(*agentKey); err != nil { log.Fatal(err) }
 		if _, err := tls.LoadX509KeyPair(*agentCert, *agentKey); err != nil {
 			log.Fatal("invalid Agent TLS keypair: ", err)
 		}
