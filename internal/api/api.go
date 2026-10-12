@@ -2,6 +2,7 @@ package api
 
 import (
 	"crypto/subtle"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"io"
@@ -101,5 +102,34 @@ func (s *Server) Handler() http.Handler {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Referrer-Policy", "no-referrer")
 		mux.ServeHTTP(w, r)
+	})
+}
+
+// AgentHandler is the ONLY handler permitted on the optional remote TLS
+// listener. It does not route owner/admin, web assets, Node registry or fleet
+// summaries. Even a reverse-proxy plaintext backend cannot bypass TLS here.
+func (s *Server) AgentHandler() http.Handler {
+	local := s.Handler()
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-store")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		if r.TLS == nil || r.TLS.Version < tls.VersionTLS13 {
+			respond(w, http.StatusUpgradeRequired, map[string]string{"error": "tls13_required"})
+			return
+		}
+		if r.Method == http.MethodGet && r.URL.Path == "/api/v1/agent/health" {
+			respond(w, http.StatusOK, map[string]string{
+				"status": "ok", "mode": "new-node-lab", "data_plane": "disabled",
+			})
+			return
+		}
+		if r.Method != http.MethodPost ||
+			(r.URL.Path != "/api/v1/agent/enroll" &&
+			 r.URL.Path != "/api/v1/agent/pulse" &&
+			 r.URL.Path != "/api/v1/agent/heartbeat") {
+			http.NotFound(w, r)
+			return
+		}
+		local.ServeHTTP(w, r)
 	})
 }
