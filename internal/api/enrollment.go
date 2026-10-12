@@ -75,6 +75,29 @@ func (s *Server) attachEnrollment(mux *http.ServeMux) {
 		}
 	})
 
+	// Lightweight health pulse: no CPU, RAM, network, Xray or SQLite reads.
+	// A failed expensive measurement can never remove an authenticated Node.
+	mux.HandleFunc("POST /api/v1/agent/pulse", func(w http.ResponseWriter, r *http.Request) {
+		var pulse telemetry.Pulse
+		if err := decode(w, r, 512, &pulse); err != nil {
+			respond(w, http.StatusBadRequest, map[string]string{"error": "invalid_json"})
+			return
+		}
+		if _, ok := s.registry.Authenticate(pulse.NodeID, pulse.InstallationID, bearer(r)); !ok {
+			respond(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+			return
+		}
+		if err := s.fleet.Heartbeat(pulse); err != nil {
+			if errors.Is(err, telemetry.ErrOutOfOrder) {
+				respond(w, http.StatusConflict, map[string]string{"error": "out_of_order"})
+			} else {
+				respond(w, http.StatusUnprocessableEntity, map[string]string{"error": "invalid_pulse"})
+			}
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
+
 	mux.HandleFunc("POST /api/v1/agent/heartbeat", func(w http.ResponseWriter, r *http.Request) {
 		var sample telemetry.Sample
 		if err := decode(w, r, maxHeartbeatBytes, &sample); err != nil {
