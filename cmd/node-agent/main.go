@@ -193,6 +193,29 @@ func main() {
         }
     }()
 
+    // Explicit LAB-only opt-in. Preflight never changes Xray or subscriptions.
+    // Keep it in its own worker so a slow TCP test cannot block authenticated
+    // liveness pulses or CPU/memory sampling.
+    if os.Getenv("DARK_PRO_ENABLE_TCP_ROUTE_PROBES") == "1" {
+        workers.Add(1)
+        go func() {
+            defer workers.Done()
+            timer := time.NewTicker(12 * time.Second)
+            defer timer.Stop()
+            for {
+                select {
+                case <-ctx.Done():
+                    return
+                case <-timer.C:
+                    if err := pollPreflight(ctx,client,endpoint,*nodeID,
+                        identity.InstallationID,identity.AgentToken); err != nil && ctx.Err() == nil {
+                        log.Printf("replacement TCP preflight failed: %v",err)
+                    }
+                }
+            }
+        }()
+    }
+
     initial, err := hostmetrics.Read()
     hasInitial := err == nil
     if err != nil { log.Printf("initial stats unavailable; liveness continues independently: %v", err) }

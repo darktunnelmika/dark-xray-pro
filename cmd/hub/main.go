@@ -19,6 +19,7 @@ import (
 
 	"github.com/darktunnelmika/dark-xray-pro/internal/api"
 	"github.com/darktunnelmika/dark-xray-pro/internal/noderegistry"
+	"github.com/darktunnelmika/dark-xray-pro/internal/replacement"
 	"github.com/darktunnelmika/dark-xray-pro/internal/telemetry"
 )
 
@@ -56,6 +57,7 @@ func main() {
 	address := flag.String("listen", "127.0.0.1:2087", "loopback-only LAB owner UI listener")
 	static := flag.String("static", "web/dist", "optional compiled frontend directory")
 	registryPath := flag.String("registry", "./lab-state/registry.json", "private durable LAB node enrollment")
+	replacementsPath := flag.String("replacements", "./lab-state/replacements.json", "private nonactivating replacement journal")
 	agentListen := flag.String("agent-tls-listen", "", "optional dedicated HTTPS LAB Node listener (disabled by default)")
 	agentCert := flag.String("agent-tls-cert", "", "certificate with valid IP/DNS SAN for new LAB Node listener")
 	agentKey := flag.String("agent-tls-key", "", "private key for dedicated LAB Node listener")
@@ -89,6 +91,9 @@ func main() {
 	if err != nil { log.Fatal("cannot load private node registry: ", err) }
 	service, err := api.NewServer(store, registry, os.Getenv("DARK_PRO_LAB_TOKEN"))
 	if err != nil { log.Fatal(err) }
+	ops, err := replacement.Open(*replacementsPath, nil)
+	if err != nil { log.Fatal("replacement journal unavailable: ", err) }
+	if err := service.EnableReplacementLab(ops); err != nil { log.Fatal(err) }
 
 	apiHandler := service.Handler()
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
