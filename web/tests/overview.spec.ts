@@ -8,6 +8,7 @@ const baseNode = {
   ram_total_bytes: 8_589_934_592, ram_used_bytes: 3_221_225_472,
   rx_bits_per_second: 8_000_000, tx_bits_per_second: 2_000_000,
   last_seen: "2026-10-12T07:00:00Z",
+  metrics_at: "2026-10-12T07:00:00Z", metrics_current: true,
 };
 const fleet = {
   as_of: "2026-10-12T07:00:00Z",
@@ -19,7 +20,7 @@ const fleet = {
   nodes: [
     baseNode,
     { ...baseNode, node_id: "nl-02", name: "Netherlands lab", status: "offline",
-      rx_bits_per_second: null, tx_bits_per_second: null },
+      rx_bits_per_second: null, tx_bits_per_second: null, metrics_current: false },
   ],
 };
 async function mockFleet(page: Page, getData: () => unknown = () => fleet) {
@@ -96,4 +97,20 @@ test("320px viewport avoids body overflow", async ({ page }) => {
   await expect(page.getByText("Germany lab")).toBeVisible();
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 2);
   expect(overflow).toBe(false);
+});
+
+test("Online heartbeat stays Online while delayed metrics show unknown instead of stale CPU", async ({ page }) => {
+  const busy = {
+    ...fleet, physical_rates_complete: false,
+    nodes: fleet.nodes.map((node) =>
+      node.node_id === "de-01"
+        ? { ...node, metrics_current: false, rx_bits_per_second: null, tx_bits_per_second: null }
+        : node),
+  };
+  await mockFleet(page, () => busy);
+  await page.goto("/");
+  await expect(page.getByText("Germany lab")).toBeVisible();
+  await expect(page.getByText("Stats delayed")).toBeVisible();
+  await expect(page.getByText("Online", { exact: true }).last()).toBeVisible();
+  await expect(page.getByText("0 Mbps")).toHaveCount(0);
 });

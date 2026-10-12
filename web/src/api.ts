@@ -12,6 +12,8 @@ export interface NodeSnapshot {
   rx_bits_per_second: number | null;
   tx_bits_per_second: number | null;
   last_seen: string | null;
+  metrics_at: string | null;
+  metrics_current: boolean;
 }
 
 export interface FleetSnapshot {
@@ -55,6 +57,7 @@ export async function getFleet(signal: AbortSignal): Promise<FleetSnapshot> {
         typeof node.cpu_percent !== "number" ||
         typeof node.ram_total_bytes !== "number" ||
         typeof node.ram_used_bytes !== "number" ||
+        typeof node.metrics_current !== "boolean" ||
         (node.rx_bits_per_second !== null && typeof node.rx_bits_per_second !== "number") ||
         (node.tx_bits_per_second !== null && typeof node.tx_bits_per_second !== "number"),
     )
