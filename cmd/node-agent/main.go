@@ -137,6 +137,7 @@ func main() {
     ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
     defer stop()
     var caPEM []byte
+    var err error
     if *caFile != "" {
         caPEM, err = os.ReadFile(*caFile)
         if err != nil { log.Fatal("cannot load trusted Agent CA: ", err) }
