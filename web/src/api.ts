@@ -11,7 +11,7 @@ export interface NodeSnapshot {
   ram_used_bytes: number;
   rx_bits_per_second: number | null;
   tx_bits_per_second: number | null;
-  last_seen: string;
+  last_seen: string | null;
 }
 
 export interface FleetSnapshot {

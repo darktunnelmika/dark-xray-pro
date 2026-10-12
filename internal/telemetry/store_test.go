@@ -9,7 +9,7 @@ import (
 
 func baseline() Sample {
     return Sample{
-        NodeID: "de-01", Name: "Germany 01", BootID: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        NodeID: "de-01", Name: "Germany 01", InstallationID: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", BootID: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         Sequence: 1, Interface: "eth0", CPUCores: 4, CPUPercent: 30,
         RAMTotal: 8 << 30, RAMUsed: 3 << 30,
         RXBytes: 1000000, TXBytes: 2000000,

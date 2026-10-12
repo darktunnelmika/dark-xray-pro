@@ -88,7 +88,8 @@ function ram(bytes: number): string {
   if (!Number.isFinite(bytes)) return "—";
   return (bytes / (1024 ** 3)).toFixed(1) + " GB";
 }
-function dateTime(value: string, lang: Language): string {
+function dateTime(value: string | null, lang: Language): string {
+  if (!value) return "—";
   const date = new Date(value);
   return Number.isFinite(date.getTime())
     ? date.toLocaleTimeString(lang === "fa" ? "fa-IR" : "en-GB", { hour: "2-digit", minute: "2-digit", second: "2-digit" })
@@ -123,11 +124,11 @@ function NodeRow({ node, history, lang }: { node: NodeSnapshot; history: number[
         </div>
       </div>
       <div className="node-resource">
-        <div className="resource-top"><span>{t.cpu} <small>({node.cpu_cores} {t.cores})</small></span><strong>{good ? node.cpu_percent.toFixed(1) + "%" : "—"}</strong></div>
+        <div className="resource-top"><span>{t.cpu} <small>({node.cpu_cores > 0 ? node.cpu_cores : "—"} {t.cores})</small></span><strong>{good ? node.cpu_percent.toFixed(1) + "%" : "—"}</strong></div>
         <Meter value={good ? node.cpu_percent : 0} />
       </div>
       <div className="node-resource">
-        <div className="resource-top"><span>{t.memory}</span><strong>{good ? ram(node.ram_used_bytes) : "—"} / {ram(node.ram_total_bytes)}</strong></div>
+        <div className="resource-top"><span>{t.memory}</span><strong>{good ? ram(node.ram_used_bytes) : "—"} / {node.ram_total_bytes ? ram(node.ram_total_bytes) : "—"}</strong></div>
         <Meter value={good ? ramPercent : 0} />
       </div>
       <div className="node-network">

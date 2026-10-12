@@ -24,6 +24,7 @@ const DefaultOfflineAfter = 15 * time.Second
 // Sample contains physical interface counters, NOT user-billable Xray traffic.
 type Sample struct {
     NodeID       string  `json:"node_id"`
+    InstallationID string `json:"installation_id"`
     Name         string  `json:"name"`
     BootID       string  `json:"boot_id"`
     Sequence     uint64  `json:"sequence"`
@@ -47,7 +48,7 @@ type Node struct {
     RAMUsed      uint64    `json:"ram_used_bytes"`
     RXBitsPerSec *float64  `json:"rx_bits_per_second"`
     TXBitsPerSec *float64  `json:"tx_bits_per_second"`
-    LastSeen     time.Time `json:"last_seen"`
+    LastSeen     *time.Time `json:"last_seen"`
 }
 
 type Fleet struct {
@@ -89,7 +90,7 @@ func NewStore(offlineAfter time.Duration, clock func() time.Time) *Store {
 }
 
 func validate(s Sample) bool {
-    if !idPattern.MatchString(s.NodeID) || !bootPattern.MatchString(s.BootID) || s.Sequence == 0 {
+    if !idPattern.MatchString(s.NodeID) || !bootPattern.MatchString(s.BootID) || !bootPattern.MatchString(s.InstallationID) || s.Sequence == 0 {
         return false
     }
     if strings.TrimSpace(s.Name) == "" || utf8.RuneCountInString(s.Name) > 80 ||
@@ -148,9 +149,11 @@ func (s *Store) Snapshot() Fleet {
         node := Node{
             NodeID: sample.NodeID, Name: sample.Name, Interface: sample.Interface,
             CPUCores: sample.CPUCores, CPUPercent: sample.CPUPercent,
-            RAMTotal: sample.RAMTotal, RAMUsed: sample.RAMUsed, LastSeen: item.seen,
+            RAMTotal: sample.RAMTotal, RAMUsed: sample.RAMUsed,
             Status: "online",
         }
+        seen := item.seen
+        node.LastSeen = &seen
         if now.Sub(item.seen) > s.offlineAfter {
             node.Status = "offline"
             fleet.Offline++
