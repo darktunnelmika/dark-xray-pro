@@ -127,7 +127,7 @@ function NodeRow({ node, history, lang }: { node: NodeSnapshot; history: number[
         <Meter value={node.cpu_percent} />
       </div>
       <div className="node-resource">
-        <div className="resource-top"><span>{t.memory}</span><strong>{ram(node.ram_used)} / {ram(node.ram_total_bytes)}</strong></div>
+        <div className="resource-top"><span>{t.memory}</span><strong>{ram(node.ram_used_bytes)} / {ram(node.ram_total_bytes)}</strong></div>
         <Meter value={ramPercent} />
       </div>
       <div className="node-network">
