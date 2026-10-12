@@ -42,7 +42,7 @@ Access the UI from a trusted computer using an SSH tunnel:
 ssh -L 2087:127.0.0.1:2087 root@NEW_LAB_SERVER
 ```
 
-Browse `http://127.0.0.1:2087/`. If the agent is not running, the Nodes view correctly shows no data. Turning off the agent marks it Offline **after 15 seconds**, without deleting it from the list. Physical traffic is displayed separately from billable user accounting (not implemented yet).
+Browse `http://127.0.0.1:2087/`. If the agent is not running, the Nodes view correctly shows no data. Turning off the agent marks it Offline **after 15 seconds**, without deleting it from the list. Network interface traffic is displayed separately from billable user accounting (not implemented yet).
 
 Test read-only APIs:
 

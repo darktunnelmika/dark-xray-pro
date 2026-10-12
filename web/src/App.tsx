@@ -31,10 +31,10 @@ const translations = {
     emptyLead: "Start the isolated Go lab agent to see actual host measurements here. No fabricated sample traffic.",
     errorTitle: "Live data unavailable", errorLead: "The last verified snapshot remains visible. Check the local HUB service.",
     online: "Online", offline: "Offline", total: "Total Nodes",
-    download: "Fleet physical RX", upload: "Fleet physical TX",
+    download: "Fleet interface RX", upload: "Fleet interface TX",
     fleetMonitor: "Node monitor", updated: "Last received",
     memory: "RAM", iface: "Interface", cpu: "CPU", cores: "cores",
-    units: "Network rate on the default interface. Not customer-billable usage.",
+    units: "Default-route interface rate, not customer-billable traffic.",
     inboundsEmpty: "No Inbounds engine connected",
     inboundsNote: "Direct, Tunnel and Dark Swap will be configured per node within each Inbound. No legacy tunnel settings will be imported automatically.",
     plan: "Next build milestone", swap: "Dark Swap: tunnel port + node port + tunnel address",
@@ -56,10 +56,10 @@ const translations = {
     emptyLead: "Agent آزمایشی Go را اجرا کن تا آمار واقعی سرور نمایش داده شود. عدد ساختگی نداریم.",
     errorTitle: "داده زنده در دسترس نیست", errorLead: "آخرین اطلاعات معتبر حفظ شده است. سرویس HUB محلی را بررسی کن.",
     online: "آنلاین", offline: "آفلاین", total: "کل نودها",
-    download: "دریافت فیزیکی شبکه", upload: "ارسال فیزیکی شبکه",
+    download: "دریافت شبکه نودها", upload: "ارسال شبکه نودها",
     fleetMonitor: "مانیتور نودها", updated: "آخرین دریافت",
     memory: "رم", iface: "اینترفیس", cpu: "پردازنده", cores: "هسته",
-    units: "نرخ شبکه روی اینترفیس پیش‌فرض؛ نه مصرف قابل کسر از سهمیه کاربران.",
+    units: "سرعت اینترفیس مسیر پیش‌فرض، نه مصرف قابل کسر از سهمیه کاربران.",
     inboundsEmpty: "هنوز موتور اینباند متصل نیست",
     inboundsNote: "Direct، Tunnel و Dark Swap برای هر نود داخل اینباند تنظیم می‌شوند. تونل قدیمی خودکار وارد نمی‌شود.",
     plan: "مرحله بعدی توسعه", swap: "دارک سواپ: پورت تونل + پورت نود + آدرس تونل",
@@ -123,12 +123,12 @@ function NodeRow({ node, history, lang }: { node: NodeSnapshot; history: number[
         </div>
       </div>
       <div className="node-resource">
-        <div className="resource-top"><span>{t.cpu} <small>({node.cpu_cores} {t.cores})</small></span><strong>{node.cpu_percent.toFixed(1)}%</strong></div>
-        <Meter value={node.cpu_percent} />
+        <div className="resource-top"><span>{t.cpu} <small>({node.cpu_cores} {t.cores})</small></span><strong>{good ? node.cpu_percent.toFixed(1) + "%" : "—"}</strong></div>
+        <Meter value={good ? node.cpu_percent : 0} />
       </div>
       <div className="node-resource">
-        <div className="resource-top"><span>{t.memory}</span><strong>{ram(node.ram_used_bytes)} / {ram(node.ram_total_bytes)}</strong></div>
-        <Meter value={ramPercent} />
+        <div className="resource-top"><span>{t.memory}</span><strong>{good ? ram(node.ram_used_bytes) : "—"} / {ram(node.ram_total_bytes)}</strong></div>
+        <Meter value={good ? ramPercent : 0} />
       </div>
       <div className="node-network">
         <div className="network-lines"><span>↓ {good ? rate(node.rx_bits_per_second ?? undefined) : "—"}</span><span>↑ {good ? rate(node.tx_bits_per_second ?? undefined) : "—"}</span></div>
@@ -206,8 +206,8 @@ export default function App() {
 
   const ready = fleet !== null;
   const summary = [
-    { label: t.download, value: ready && fleet.physical_rates_complete ? rate(fleet.physical_rx_bits_per_second) : "—", Icon: ArrowDownLeft },
-    { label: t.upload, value: ready && fleet.physical_rates_complete ? rate(fleet.physical_tx_bits_per_second) : "—", Icon: ArrowUpRight },
+    { label: t.download, value: ready && fleet.physical_rates_complete ? rate(fleet.interface_rx_bits_per_second) : "—", Icon: ArrowDownLeft },
+    { label: t.upload, value: ready && fleet.physical_rates_complete ? rate(fleet.interface_tx_bits_per_second) : "—", Icon: ArrowUpRight },
     { label: t.online, value: ready ? String(fleet.online_nodes) : "—", Icon: Activity },
     { label: t.offline, value: ready ? String(fleet.offline_nodes) : "—", Icon: Server },
   ];

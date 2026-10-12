@@ -32,8 +32,8 @@ func TestFleetFreshnessAndPhysicalCounters(t *testing.T) {
     if err := store.Record(a); err != nil { t.Fatal(err) }
     second := store.Snapshot()
     if !second.RatesComplete || second.Nodes[0].RXBitsPerSec == nil { t.Fatal("second sample must establish physical network rates") }
-    if math.Abs(second.PhysicalRXBps-4000000) > 0.01 {
-        t.Fatalf("RX rate should be 4 Mbps, got %.2f", second.PhysicalRXBps)
+    if math.Abs(second.InterfaceRXBps-4000000) > 0.01 {
+        t.Fatalf("RX rate should be 4 Mbps, got %.2f", second.InterfaceRXBps)
     }
     if err := store.Record(a); !errors.Is(err, ErrOutOfOrder) {
         t.Fatalf("replay not rejected: %v", err)
@@ -41,7 +41,7 @@ func TestFleetFreshnessAndPhysicalCounters(t *testing.T) {
     now = now.Add(16*time.Second)
     stale := store.Snapshot()
     if stale.Total != 1 || stale.Online != 0 || stale.Offline != 1 ||
-       stale.Nodes[0].Status != "offline" || stale.PhysicalRXBps != 0 || stale.RatesComplete {
+       stale.Nodes[0].Status != "offline" || stale.InterfaceRXBps != 0 || stale.RatesComplete {
         t.Fatalf("disconnected node must remain visible but uncounted: %+v", stale)
     }
     a.BootID = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"

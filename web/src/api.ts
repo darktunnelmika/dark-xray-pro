@@ -19,9 +19,9 @@ export interface FleetSnapshot {
   total_nodes: number;
   online_nodes: number;
   offline_nodes: number;
-  physical_rx_bits_per_second: number;
-  physical_tx_bits_per_second: number;
-  metric_scope: "physical_interface_not_billable";
+  interface_rx_bits_per_second: number;
+  interface_tx_bits_per_second: number;
+  metric_scope: "default_route_interface_not_billable";
   physical_rates_complete: boolean;
   nodes: NodeSnapshot[];
 }
@@ -42,9 +42,9 @@ export async function getFleet(signal: AbortSignal): Promise<FleetSnapshot> {
     typeof data.online_nodes !== "number" ||
     typeof data.offline_nodes !== "number" ||
     typeof data.total_nodes !== "number" ||
-    typeof data.physical_rx_bits_per_second !== "number" ||
-    typeof data.physical_tx_bits_per_second !== "number" ||
-    data.metric_scope !== "physical_interface_not_billable" ||
+    typeof data.interface_rx_bits_per_second !== "number" ||
+    typeof data.interface_tx_bits_per_second !== "number" ||
+    data.metric_scope !== "default_route_interface_not_billable" ||
     typeof data.physical_rates_complete !== "boolean" ||
     data.nodes.some(
       (node) =>

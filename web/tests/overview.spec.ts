@@ -12,10 +12,10 @@ const baseNode = {
 const fleet = {
   as_of: "2026-10-12T07:00:00Z",
   total_nodes: 2, online_nodes: 1, offline_nodes: 1,
-  physical_rx_bits_per_second: 8_000_000,
-  physical_tx_bits_per_second: 2_000_000,
+  interface_rx_bits_per_second: 8_000_000,
+  interface_tx_bits_per_second: 2_000_000,
   physical_rates_complete: true,
-  metric_scope: "physical_interface_not_billable",
+  metric_scope: "default_route_interface_not_billable",
   nodes: [
     baseNode,
     { ...baseNode, node_id: "nl-02", name: "Netherlands lab", status: "offline",
@@ -50,7 +50,7 @@ test("theme, language and mobile navigation survive refresh without horizontal o
   await page.getByRole("button", { name: "Open menu" }).click();
   await page.getByRole("button", { name: "Settings" }).click();
   await page.getByRole("button", { name: "فارسی" }).click();
-  await page.getByRole("button", { name: "شب" }).click();
+  await page.getByRole("button", { name: "شب", exact: true }).click();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
   await expect(page.locator("html")).toHaveAttribute("dir", "rtl");
   await page.reload();
@@ -78,7 +78,7 @@ test("transient API failure preserves last verified Nodes and reports an actual 
 test("first physical sample has no invented zero or billable usage", async ({ page }) => {
   await mockFleet(page, () => ({
     ...fleet, physical_rates_complete: false,
-    physical_rx_bits_per_second: 0, physical_tx_bits_per_second: 0,
+    interface_rx_bits_per_second: 0, interface_tx_bits_per_second: 0,
     nodes: fleet.nodes.map((node) => ({
       ...node, rx_bits_per_second: null, tx_bits_per_second: null,
     })),
@@ -86,7 +86,7 @@ test("first physical sample has no invented zero or billable usage", async ({ pa
   await page.goto("/");
   await expect(page.getByText("Germany lab")).toBeVisible();
   await expect(page.getByText("0 Mbps")).toHaveCount(0);
-  await expect(page.getByText("Network rate on the default interface. Not customer-billable usage.").first()).toBeVisible();
+  await expect(page.getByText("Default-route interface rate, not customer-billable traffic.").first()).toBeVisible();
 });
 
 test("320px viewport avoids body overflow", async ({ page }) => {

@@ -43,7 +43,7 @@ func TestHeartbeatAuthAndVisibleFleet(t *testing.T) {
     if res.Code != 200 { t.Fatal(res.Code) }
     var fleet telemetry.Fleet
     if err := json.Unmarshal(res.Body.Bytes(), &fleet); err != nil { t.Fatal(err) }
-    if fleet.Total != 1 || fleet.Online != 1 || fleet.MetricScope != "physical_interface_not_billable" {
+    if fleet.Total != 1 || fleet.Online != 1 || fleet.MetricScope != "default_route_interface_not_billable" {
         t.Fatalf("bad fleet %+v", fleet)
     }
 }

@@ -12,14 +12,14 @@ The lab HUB binds **127.0.0.1:2087** only. It refuses to run without `DARK_PRO_L
 
 | Domain | Source of truth | Reads and safety |
 |---|---|---|
-| Physical fleet telemetry | Fresh verified Agent samples | O(nodes) in-memory snapshot, no DB scans |
+| Network interface telemetry | Fresh verified Agent samples | O(nodes) in-memory snapshot, no DB scans |
 | Billable per-user traffic | Future idempotent Xray charge ledger | **Not** the sum of physical RX/TX across multiple hops |
 | Inbound and per-route traffic | Future uniquely tagged counters and routing graph | Distinct Direct/Tunnel, including transit duplication flags |
 | Node desired config | Future revisioned transaction + signed ACK | No deletion upon temporary outage |
 | Representative balance and history | Future immutable transactions and aggregate state | Unknown/API failure never rendered as empty/zero |
 | Backup/migration | Future consistent encrypted snapshot and selective import | Old Node secrets/leases never imported into the new fleet |
 
-**Telemetry contract:** Each sample includes node ID, per-process random boot ID, sequence number, logical CPU count, host CPU percentage, RAM total/used, default physical interface and cumulative RX/TX bytes. HUB receive time is authoritative for Online/Offline. New boot ID or decreasing network counters resets the *rate baseline*, not historical billed usage. Replayed/out-of-order sequences do not refresh heartbeat. Default offline deadline 15 seconds; a missed individual poll cannot toggle Online/Offline immediately. No "suspended" status or hiding Nodes.
+**Telemetry contract:** Each sample includes node ID, per-process random boot ID, sequence number, logical CPU count, host CPU percentage, RAM total/used, default default-route interface and cumulative RX/TX bytes. HUB receive time is authoritative for Online/Offline. New boot ID or decreasing network counters resets the *rate baseline*, not historical billed usage. Replayed/out-of-order sequences do not refresh heartbeat. Default offline deadline 15 seconds; a missed individual poll cannot toggle Online/Offline immediately. No "suspended" status or hiding Nodes.
 
 **Explicit accuracy boundary:** The current lab dashboard reports only physical network interface bit rate and does not imply customer traffic charged. Per-client accounting, tunnel source-IP provenance and independently metered Direct/Tunnel totals are not implemented in foundation. Do not infer client IP from a GRE/relay's exit IP; mark unknown unless an authenticated trusted peer supplies verified original metadata. A public IP-limit feature is blocked until verified identity and topology-specific tests exist.
 

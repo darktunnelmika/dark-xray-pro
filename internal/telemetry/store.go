@@ -55,8 +55,8 @@ type Fleet struct {
     Total          int       `json:"total_nodes"`
     Online         int       `json:"online_nodes"`
     Offline        int       `json:"offline_nodes"`
-    PhysicalRXBps  float64   `json:"physical_rx_bits_per_second"`
-    PhysicalTXBps  float64   `json:"physical_tx_bits_per_second"`
+    InterfaceRXBps  float64   `json:"interface_rx_bits_per_second"`
+    InterfaceTXBps  float64   `json:"interface_tx_bits_per_second"`
     RatesComplete  bool      `json:"physical_rates_complete"`
     MetricScope    string    `json:"metric_scope"`
     Nodes          []Node    `json:"nodes"`
@@ -142,7 +142,7 @@ func (s *Store) Snapshot() Fleet {
     s.mu.RLock()
     defer s.mu.RUnlock()
     now := s.clock().UTC()
-    fleet := Fleet{AsOf: now, MetricScope: "physical_interface_not_billable", RatesComplete: true, Nodes: make([]Node, 0, len(s.nodes))}
+    fleet := Fleet{AsOf: now, MetricScope: "default_route_interface_not_billable", RatesComplete: true, Nodes: make([]Node, 0, len(s.nodes))}
     for _, item := range s.nodes {
         sample := item.sample
         node := Node{
@@ -158,8 +158,8 @@ func (s *Store) Snapshot() Fleet {
             if item.rateReady {
                 rx, tx := item.rxBps, item.txBps
                 node.RXBitsPerSec, node.TXBitsPerSec = &rx, &tx
-                fleet.PhysicalRXBps += item.rxBps
-                fleet.PhysicalTXBps += item.txBps
+                fleet.InterfaceRXBps += item.rxBps
+                fleet.InterfaceTXBps += item.txBps
             } else {
                 fleet.RatesComplete = false
             }
