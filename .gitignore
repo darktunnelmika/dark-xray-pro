@@ -1,0 +1,22 @@
+# Secrets and live data never belong in a public repository.
+.env
+.env.*
+!.env.example
+*.db
+*.db-*
+*.sqlite
+*.sqlite3
+*.sqlite3-*
+*.darkbackup
+*.pem
+*.key
+*.crt
+*.log
+node_modules/
+web/dist/
+dist/
+coverage/
+.vscode/
+.DS_Store
+web/test-results/
+web/playwright-report/
