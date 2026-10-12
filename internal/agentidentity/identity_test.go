@@ -44,7 +44,7 @@ func TestEnrollmentIdentityCanRecoverAfterLostResponse(t *testing.T) {
 }
 
 func TestMustNotInventOrReuseLegacyIdentity(t *testing.T) {
-	path:=filepath.Join(t.TempDir(),"agent.json")
+	path:=filepath.Join(t.TempDir(),"private","agent.json")
 	if _,err:=LoadOrCreate(path,"de-01","");!errors.Is(err,ErrPairRequired) {
 		t.Fatalf("created identity without enrollment: %v",err)
 	}
@@ -65,7 +65,8 @@ func TestMustNotInventOrReuseLegacyIdentity(t *testing.T) {
 }
 
 func TestUnsafePermissionsAndSymlinkRefused(t *testing.T) {
-	parent:=t.TempDir()
+	parent:=filepath.Join(t.TempDir(),"private")
+	if err:=os.Mkdir(parent,0700);err!=nil {t.Fatal(err)}
 	path:=filepath.Join(parent,"id.json")
 	_,err:=LoadOrCreate(path,"de-01",code)
 	if err!=nil {t.Fatal(err)}

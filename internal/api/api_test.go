@@ -39,7 +39,7 @@ func request(t *testing.T, h http.Handler, method, route, token string, body any
 func newLab(t *testing.T) (*Server, *noderegistry.Registry, *time.Time, string) {
 	t.Helper()
 	now := time.Date(2026,10,12,8,0,0,0,time.UTC)
-	path := filepath.Join(t.TempDir(),"nodes.json")
+	path := filepath.Join(t.TempDir(),"private","nodes.json")
 	reg,err := noderegistry.Open(path,func()time.Time{return now})
 	if err!=nil {t.Fatal(err)}
 	s,err:=NewServer(telemetry.NewStore(15*time.Second,func()time.Time{return now}),reg,ownerToken)

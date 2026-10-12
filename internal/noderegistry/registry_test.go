@@ -19,7 +19,7 @@ const (
 
 func openTest(t *testing.T, now *time.Time) (*Registry, string) {
 	t.Helper()
-	file := filepath.Join(t.TempDir(), "registry.json")
+	file := filepath.Join(t.TempDir(), "private", "registry.json")
 	reg, err := Open(file, func() time.Time { return *now })
 	if err != nil {
 		t.Fatal(err)
