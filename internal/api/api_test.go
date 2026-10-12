@@ -158,3 +158,43 @@ func TestStrictJSONAndNewServerRejectsMissingOwnerSecret(t *testing.T) {
 	if w.Code!=400{t.Fatalf("unknown JSON fields accepted: %d",w.Code)}
 	if w:=request(t,h,"GET","/api/v1/health","",nil);w.Code!=200{t.Fatal(w.Code)}
 }
+
+func TestPulseWithoutStatisticsStillReportsAuthenticOnline(t *testing.T) {
+	s,_,now,_:=newLab(t)
+	h:=s.Handler()
+	inv:=request(t,h,"POST","/api/v1/admin/nodes/invites",ownerToken,
+		map[string]string{"node_id":"nl-01","name":"Netherlands lab"})
+	var ticket noderegistry.PairTicket
+	if err:=json.Unmarshal(inv.Body.Bytes(),&ticket);err!=nil{t.Fatal(err)}
+	join:=map[string]string{"pair_code":ticket.PairCode,"node_id":"nl-01",
+		"installation_id":installID,"agent_token":nodeToken}
+	if w:=request(t,h,"POST","/api/v1/agent/enroll","",join);w.Code!=200{t.Fatal(w.Code)}
+	pulse:=telemetry.Pulse{NodeID:"nl-01",InstallationID:installID,
+		BootID:"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",Sequence:1}
+	if w:=request(t,h,"POST","/api/v1/agent/pulse",otherToken,pulse);w.Code!=401{
+		t.Fatalf("unpaired token sent pulse: %d",w.Code)
+	}
+	if w:=request(t,h,"POST","/api/v1/agent/pulse",nodeToken,pulse);w.Code!=204{
+		t.Fatalf("legitimate pulse rejected: %d %s",w.Code,w.Body.String())
+	}
+	w:=request(t,h,"GET","/api/v1/fleet","",nil)
+	var fleet telemetry.Fleet
+	if err:=json.Unmarshal(w.Body.Bytes(),&fleet);err!=nil{t.Fatal(err)}
+	if fleet.Total!=1||fleet.Online!=1||fleet.Nodes[0].Name!="Netherlands lab"||
+		fleet.Nodes[0].MetricsCurrent||fleet.Nodes[0].LastSeen==nil{
+		t.Fatalf("a pulse-only Node must be Online with unknown metrics: %+v",fleet)
+	}
+	*now=now.Add(16*time.Second)
+	if w:=request(t,h,"POST","/api/v1/agent/pulse",nodeToken,pulse);w.Code!=409{
+		t.Fatalf("replayed pulse changed offline status: %d",w.Code)
+	}
+	w=request(t,h,"GET","/api/v1/fleet","",nil)
+	if err:=json.Unmarshal(w.Body.Bytes(),&fleet);err!=nil{t.Fatal(err)}
+	if fleet.Offline!=1||fleet.Nodes[0].Status!="offline"{
+		t.Fatalf("offline transition failed: %+v",fleet)
+	}
+	pulse.Sequence=2
+	if w:=request(t,h,"POST","/api/v1/agent/pulse",nodeToken,pulse);w.Code!=204{
+		t.Fatalf("fresh Pulse did not recover Node: %d",w.Code)
+	}
+}

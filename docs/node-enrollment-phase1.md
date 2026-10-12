@@ -26,3 +26,7 @@ Node replacement will have separate `prepare -> validate fresh routes -> explici
 - HUB restart preserves 0700/0600 private roster, but never invents online status or fake zero telemetry.
 - Concurrent invitation conflicts, symlink/world-readable credentials rejected, no secret fields returned in fleet API.
 - Go race/vet, Go HTTP integration tests, TypeScript production build, Chromium browser tests at 320px and 375px, RTL, Light/Dark, route persistence and stale API error.
+
+## Liveness independent of telemetry (Phase 1b)
+
+Authenticated lightweight `POST /api/v1/agent/pulse` runs at 3 seconds and can prove the Agent is Online even if Linux resource measurements fail or are delayed. `POST /api/v1/agent/heartbeat` remains the independent full 5-second metrics path. The API rejects old sequences and mismatched boot/installation identities; the HUB keeps the last registered node and marks outdated resource readings as unavailable. The Online/Offline state cannot be inferred from CPU pressure, tunnel traffic or an Xray failure. This is still a localhost-only lab and does not claim a remote WAN safety guarantee.

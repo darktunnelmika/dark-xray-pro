@@ -44,7 +44,7 @@ go run ./cmd/node-agent -id new-lab-01 -name "First independent LAB Node" \
   -identity-file ./lab-state/agent-new-lab-01.json
 ```
 
-On first run, the Agent generates a **new random installation ID and per-Node token**, persists them in a 0600 private file, claims the code once, and begins 3-second CPU/RAM/network telemetry. If an HTTP reply is lost, the Agent reuses the same saved identity and code on the next run; it does not demand a new code. Once paired, remove `DARK_PRO_PAIR_CODE` from the shell and run the Agent again **without** that environment variable. Do not share the Agent identity file or Node token.
+On first run, the Agent generates a **new random installation ID and per-Node token**, persists them in a 0600 private file, claims the code once, and begins independent 3-second liveness heartbeats and 5-second CPU/RAM/network telemetry. If an HTTP reply is lost, the Agent reuses the same saved identity and code on the next run; it does not demand a new code. Once paired, remove `DARK_PRO_PAIR_CODE` from the shell and run the Agent again **without** that environment variable. Do not share the Agent identity file or Node token.
 
 ```sh
 unset DARK_PRO_PAIR_CODE
@@ -63,3 +63,5 @@ To open the UI remotely, forward port 2087 over SSH from your trusted computer: 
 - The `/api/v1/fleet` display reports the new Node's default-route interface counters, not per-user traffic or Direct/Tunnel billing.
 - No representative, Inbound, client, route deployment or Xray configuration is activated by this prototype.
 - Further work is tracked in GitHub issues #1-#5. Keep your old HUB live until a separately approved migration.
+
+The heartbeat and statistics clocks are intentionally different: stopping the Agent makes the Node Offline after more than 15 seconds, while temporary Linux metric errors show **Stats delayed** without changing Online. Unknown CPU/RAM values are never reported as genuine 0% utilization.

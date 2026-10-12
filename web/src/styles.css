@@ -237,3 +237,6 @@ button:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
 }
+
+/* A healthy heartbeat with delayed metrics is still Online, never flapping. */
+.stats-delayed { color: var(--sub); font-size: 10px; font-weight: 600; }

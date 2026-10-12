@@ -43,7 +43,7 @@ const translations = {
     language: "Language", boundary: "Lab boundary", boundaryText: "Localhost-only server. No old Hub, Node Agent, customer database or Telegram credentials are connected.",
     developing: "Isolated development build", collecting: "Collecting live samples…",
     retry: "Retry is automatic", selected: "Select an item to view more details",
-    health: "Fleet health", notLive: "Live connection interrupted",
+    health: "Fleet health", notLive: "Live connection interrupted", statsDelayed: "Stats delayed",
     pro: "DARK XRAY PRO", role: "Control center", soon: "Planned feature",
   },
   fa: {
@@ -68,7 +68,7 @@ const translations = {
     language: "زبان", boundary: "محدوده آزمایشی", boundaryText: "فقط روی localhost. هیچ HUB یا نود قدیمی، دیتابیس مشتری یا اطلاعات ربات متصل نیست.",
     developing: "نسخه آزمایشی مستقل", collecting: "در حال جمع‌آوری نمونه واقعی…",
     retry: "تلاش مجدد خودکار است", selected: "برای دیدن جزئیات یک مورد انتخاب کن",
-    health: "سلامت ناوگان", notLive: "ارتباط زنده قطع شده",
+    health: "سلامت ناوگان", notLive: "ارتباط زنده قطع شده", statsDelayed: "تأخیر در آمار",
     pro: "DARK XRAY PRO", role: "مرکز کنترل", soon: "قابلیت در دست ساخت",
   },
 } as const;
@@ -113,6 +113,7 @@ function Trend({ values }: { values: number[] }) {
 function NodeRow({ node, history, lang }: { node: NodeSnapshot; history: number[]; lang: Language }) {
   const t = translations[lang];
   const good = node.status === "online";
+  const current = good && node.metrics_current;
   const ramPercent = node.ram_total_bytes ? node.ram_used_bytes / node.ram_total_bytes * 100 : 0;
   return (
     <article className={"node-row " + (good ? "" : "node-offline")}>
@@ -120,19 +121,19 @@ function NodeRow({ node, history, lang }: { node: NodeSnapshot; history: number[
         <span className="node-glyph"><Server size={19} strokeWidth={1.7} /></span>
         <div>
           <div className="node-name">{node.name}</div>
-          <div className="node-meta">{node.node_id} <span className="dot-separator">·</span> {t.updated} {dateTime(node.last_seen, lang)}</div>
+          <div className="node-meta">{node.node_id} <span className="dot-separator">·</span> {t.updated} {dateTime(node.last_seen, lang)}{good && !current && <span className="stats-delayed"> · {t.statsDelayed}</span>}</div>
         </div>
       </div>
       <div className="node-resource">
-        <div className="resource-top"><span>{t.cpu} <small>({node.cpu_cores > 0 ? node.cpu_cores : "—"} {t.cores})</small></span><strong>{good ? node.cpu_percent.toFixed(1) + "%" : "—"}</strong></div>
-        <Meter value={good ? node.cpu_percent : 0} />
+        <div className="resource-top"><span>{t.cpu} <small>({node.cpu_cores > 0 ? node.cpu_cores : "—"} {t.cores})</small></span><strong>{current ? node.cpu_percent.toFixed(1) + "%" : "—"}</strong></div>
+        <Meter value={current ? node.cpu_percent : 0} />
       </div>
       <div className="node-resource">
-        <div className="resource-top"><span>{t.memory}</span><strong>{good ? ram(node.ram_used_bytes) : "—"} / {node.ram_total_bytes ? ram(node.ram_total_bytes) : "—"}</strong></div>
-        <Meter value={good ? ramPercent : 0} />
+        <div className="resource-top"><span>{t.memory}</span><strong>{current ? ram(node.ram_used_bytes) : "—"} / {node.ram_total_bytes ? ram(node.ram_total_bytes) : "—"}</strong></div>
+        <Meter value={current ? ramPercent : 0} />
       </div>
       <div className="node-network">
-        <div className="network-lines"><span>↓ {good ? rate(node.rx_bits_per_second ?? undefined) : "—"}</span><span>↑ {good ? rate(node.tx_bits_per_second ?? undefined) : "—"}</span></div>
+        <div className="network-lines"><span>↓ {current ? rate(node.rx_bits_per_second ?? undefined) : "—"}</span><span>↑ {current ? rate(node.tx_bits_per_second ?? undefined) : "—"}</span></div>
         <Trend values={history} />
       </div>
       <div className={"status-tag " + (good ? "status-online" : "status-offline")}><i />{good ? t.online : t.offline}</div>
@@ -196,7 +197,7 @@ export default function App() {
         setHistory((before) => {
           const after = { ...before };
           for (const node of fresh.nodes) {
-            if (node.status !== "online") continue;
+            if (node.status !== "online" || !node.metrics_current) continue;
             if (node.rx_bits_per_second === null || node.tx_bits_per_second === null) continue;
             const rate = node.rx_bits_per_second + node.tx_bits_per_second;
             after[node.node_id] = [...(before[node.node_id] ?? []), rate].slice(-20);

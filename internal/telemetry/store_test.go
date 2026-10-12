@@ -83,3 +83,81 @@ func TestFleetOrderingAndDistinctNodes(t *testing.T) {
         t.Fatalf("unexpected ordering %v", nodes)
     }
 }
+
+func TestFreshPulseKeepsNodeOnlineWhenStatsCollectorIsStale(t *testing.T) {
+	now := time.Date(2026, 10, 12, 8, 0, 0, 0, time.UTC)
+	store := NewStore(15*time.Second, func() time.Time { return now })
+	pulse := Pulse{
+		NodeID: "de-01", InstallationID: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		BootID: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", Sequence: 1,
+	}
+	if err := store.Heartbeat(pulse); err != nil { t.Fatal(err) }
+	live := store.Snapshot()
+	if live.Total != 1 || live.Online != 1 || live.Offline != 0 ||
+		live.Nodes[0].MetricsCurrent || live.Nodes[0].LastSeen == nil {
+		t.Fatalf("heartbeat-only Node did not appear Online with UNKNOWN metrics: %+v", live)
+	}
+	sample := baseline()
+	sample.BootID = pulse.BootID
+	if err := store.Record(sample); err != nil { t.Fatal(err) }
+	now = now.Add(13*time.Second)
+	pulse.Sequence = 2
+	if err := store.Heartbeat(pulse); err != nil { t.Fatal(err) }
+	stale := store.Snapshot()
+	if stale.Online != 1 || stale.Nodes[0].Status != "online" ||
+		stale.Nodes[0].MetricsCurrent || stale.Nodes[0].CPUPercent != 0 ||
+		stale.Nodes[0].RXBitsPerSec != nil || stale.RatesComplete {
+		t.Fatalf("stats failure falsely put Node Offline or reported stale CPU: %+v", stale)
+	}
+	// A duplicate pulse after 16s cannot extend the last authentic heartbeat.
+	now = now.Add(16*time.Second)
+	if err := store.Heartbeat(pulse); !errors.Is(err, ErrOutOfOrder) {
+		t.Fatalf("replayed heartbeat renewed Online: %v", err)
+	}
+	offline := store.Snapshot()
+	if offline.Total != 1 || offline.Offline != 1 || offline.Nodes[0].Status != "offline" {
+		t.Fatalf("missed heartbeat did not mark Node Offline: %+v", offline)
+	}
+}
+
+func TestRetiredBootReplayAndInterfaceChangeNeverForgeRates(t *testing.T) {
+	now := time.Date(2026, 10, 12, 8, 0, 0, 0, time.UTC)
+	store := NewStore(15*time.Second, func() time.Time { return now })
+	a := baseline()
+	if err := store.Record(a); err != nil { t.Fatal(err) }
+	now = now.Add(5*time.Second)
+	a.Interface = "ens3"
+	a.Sequence++
+	a.RXBytes += 200
+	if err := store.Record(a); err != nil { t.Fatal(err) }
+	snapshot := store.Snapshot()
+	if snapshot.RatesComplete || snapshot.Nodes[0].RXBitsPerSec != nil {
+		t.Fatal("switching network interfaces fabricated a live rate")
+	}
+	now = now.Add(5*time.Second)
+	a.BootID = "cccccccccccccccccccccccccccccccc"
+	a.Sequence = 1
+	if err := store.Record(a); err != nil { t.Fatal(err) }
+	a.BootID = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	a.Sequence = 4
+	if err := store.Record(a); !errors.Is(err, ErrOutOfOrder) {
+		t.Fatalf("old boot sequence was replayed: %v", err)
+	}
+}
+
+func TestPulseRebootRejectsRetiredBootAndWrongIdentity(t *testing.T) {
+	now := time.Now()
+	store := NewStore(0, func() time.Time { return now })
+	p := Pulse{NodeID:"lab",InstallationID:"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		BootID:"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",Sequence:1}
+	if err:=store.Heartbeat(p);err!=nil {t.Fatal(err)}
+	p.BootID="cccccccccccccccccccccccccccccccc"
+	p.Sequence=1
+	if err:=store.Heartbeat(p);err!=nil {t.Fatal(err)}
+	p.BootID="bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	p.Sequence=99
+	if err:=store.Heartbeat(p);!errors.Is(err,ErrOutOfOrder){t.Fatalf("old boot replay accepted: %v",err)}
+	p.BootID="cccccccccccccccccccccccccccccccc"
+	p.InstallationID="dddddddddddddddddddddddddddddddd"
+	if err:=store.Heartbeat(p);!errors.Is(err,ErrOutOfOrder){t.Fatalf("installation switched without Pair: %v",err)}
+}

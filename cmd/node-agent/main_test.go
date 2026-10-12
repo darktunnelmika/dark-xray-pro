@@ -66,6 +66,14 @@ func TestAgentGeneratedSecretAndHubEndToEndInMemoryHTTP(t *testing.T) {
 		RAMTotal:8192,RAMUsed:1024,RXBytes:12345,TXBytes:6789,
 	}
 	if err:=transmit(ctx,client,server.URL,identity.AgentToken,sample);err!=nil {t.Fatal(err)}
+	pulse:=telemetry.Pulse{NodeID:"lab-01",InstallationID:identity.InstallationID,
+		BootID:sample.BootID,Sequence:1}
+	if err:=sendPulse(ctx,client,server.URL,identity.AgentToken,pulse);err!=nil{
+		t.Fatal("independent heartbeat failed:",err)
+	}
+	if err:=sendPulse(ctx,client,server.URL,identity.AgentToken,pulse);err==nil{
+		t.Fatal("duplicate pulse incorrectly renewed online status")
+	}
 	response,err:=client.Get(server.URL+"/api/v1/fleet")
 	if err!=nil {t.Fatal(err)}
 	defer response.Body.Close()
