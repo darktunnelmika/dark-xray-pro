@@ -63,8 +63,17 @@ func decode(w http.ResponseWriter, r *http.Request, max int64, dest any) error {
 func (s *Server) snapshot() telemetry.Fleet {
 	fleet := s.fleet.Snapshot()
 	known := make(map[string]bool, len(fleet.Nodes))
-	for _, n := range fleet.Nodes { known[n.NodeID] = true }
-	for _, n := range s.registry.List() {
+	authoritative := make(map[string]noderegistry.NodeInfo)
+	for _, n := range s.registry.List() { authoritative[n.NodeID] = n }
+	for i := range fleet.Nodes {
+		node := &fleet.Nodes[i]
+		if paired, ok := authoritative[node.NodeID]; ok {
+			// A heartbeat without a stats payload still gets its trusted name.
+			node.Name = paired.Name
+		}
+		known[node.NodeID] = true
+	}
+	for _, n := range authoritative {
 		if known[n.NodeID] { continue }
 		fleet.Nodes = append(fleet.Nodes, telemetry.Node{
 			NodeID: n.NodeID, Name: n.Name, Status: "offline",
