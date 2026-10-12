@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import {
   Activity, ArrowDownLeft, ArrowUpRight, CheckCircle2, ChevronRight,
-  CircleHelp, Cpu, Database, Globe2, HardDrive, LayoutDashboard,
+  CircleHelp, Globe2, HardDrive, LayoutDashboard,
   Menu, Moon, Network, RadioTower, Server, Settings2, ShieldCheck,
   Sun, Waypoints, X, Zap,
 } from "lucide-react";

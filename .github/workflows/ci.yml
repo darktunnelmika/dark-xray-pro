@@ -1,0 +1,61 @@
+name: DARK XRAY PRO — Foundation CI
+
+on:
+  push:
+    branches:
+      - main
+      - "feature/**"
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  go:
+    name: Go unit, race and vet
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Go unit/race tests
+        run: go test -race ./...
+      - name: Go vet
+        run: go vet ./...
+      - name: Compile HUB and Node Agent
+        run: |
+          go build -o /tmp/dark-xray-pro-hub ./cmd/hub
+          go build -o /tmp/dark-xray-pro-agent ./cmd/node-agent
+      - name: Verify no production defaults
+        run: |
+          if DARK_PRO_LAB_MODE=0 /tmp/dark-xray-pro-hub > /tmp/hub-refusal.log 2>&1; then
+            echo "ERROR: refused-to-run safeguard failed"
+            exit 1
+          fi
+          grep -q "not production-ready" /tmp/hub-refusal.log
+
+  web:
+    name: Web TypeScript and production build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install pinned dependencies
+        run: npm install --no-audit --no-fund
+      - name: Strict TypeScript and Vite build
+        run: npm run build
+      - name: Confirm real bundle output
+        run: test -s dist/index.html && test -n "$(find dist/assets -type f -name '*.js' -print -quit)"
+
+  # Intentionally no deploy jobs. A clean lab build is not a production release.
