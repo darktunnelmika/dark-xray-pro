@@ -68,3 +68,7 @@ The LAB HUB can optionally bind a distinct Agent-only TLS1.3 listener (no owner 
 ## Phase 3 operator-approved replacement route draft
 
 Explicit Direct/Swap choices and deterministic nonactivating SHA-256 previews live in Go `internal/routeplan`, with no previous tunnel inheritance. This foundation may be inspected in [Route preflight](node-replacement-route-preflight.md). Persistent replace orchestration, remote probes, Xray apply and subscription publication remain release blockers.
+
+## Phase 4 replacement command integrity
+
+Side-effect-free `routeplan` choices now have a persistent, revisioned journal, scoped pull and signed-per-identity (bearer authenticated) TCP evidence from the freshly paired Node Agent. The Admin API cannot activate Xray or publish subscriptions. A TCP listener alone does not validate Xray, tunnel forwarding or customer routes. See [Phase 4](node-replacement-phase4-tcp-preflight.md) for security and activation blockers.
