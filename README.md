@@ -35,3 +35,7 @@ The Node Agent may connect over verified TLS 1.3 with a manually pinned certific
 ## Phase 3: safe Node replacement preflight (not live)
 
 An operator-defined route plan can now be validated for a new Node, preserving Direct and Tunnel simultaneously and accepting the three-field Dark Swap. It refuses to mark routes activated before remote checks. See [Node replacement plan](docs/node-replacement-route-preflight.md). Actual replace/apply and subscription updates are not yet implemented.
+
+## Phase 4: durable replacement TCP preflight (no activation)
+
+The new HUB now stores replacement drafts and exact Agent-generated TCP reachability reports in a private durable journal. An explicitly opted-in *new* Agent polls only tasks for its paired installation, and the owner sees actual per-route evidence. **This is not Xray protocol validation, activation, or Subscription publication.** Read [Phase 4 boundary and API contract](docs/node-replacement-phase4-tcp-preflight.md).
