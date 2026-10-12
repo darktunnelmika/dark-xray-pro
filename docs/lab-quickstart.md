@@ -65,3 +65,7 @@ To open the UI remotely, forward port 2087 over SSH from your trusted computer: 
 - Further work is tracked in GitHub issues #1-#5. Keep your old HUB live until a separately approved migration.
 
 The heartbeat and statistics clocks are intentionally different: stopping the Agent makes the Node Offline after more than 15 seconds, while temporary Linux metric errors show **Stats delayed** without changing Online. Unknown CPU/RAM values are never reported as genuine 0% utilization.
+
+## Optional second-machine TLS lab
+
+The original same-host test is unchanged. For strictly new and isolated machines, the Agent supports an opt-in HTTPS connection to a dedicated Agent-only TLS 1.3 HUB port, independently pinned and chain-validated. The owner panel remains on SSH-tunneled localhost port 2087. See [Phase 2: new Node WAN TLS test](node-remote-tls-lab-phase2.md). Do **not** expose the owner API publicly or reuse any legacy Node identity.

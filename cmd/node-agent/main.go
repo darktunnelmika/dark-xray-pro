@@ -11,17 +11,18 @@ import (
     "fmt"
     "io"
     "log"
-    "net"
     "net/http"
     "net/url"
     "os"
     "os/signal"
     "runtime"
+    "strings"
     "sync"
     "syscall"
     "time"
 
     "github.com/darktunnelmika/dark-xray-pro/internal/agentidentity"
+    "github.com/darktunnelmika/dark-xray-pro/internal/agenttransport"
     "github.com/darktunnelmika/dark-xray-pro/internal/hostmetrics"
     "github.com/darktunnelmika/dark-xray-pro/internal/telemetry"
 )
@@ -108,13 +109,25 @@ func main() {
     name := flag.String("name", "", "display name")
     hub := flag.String("hub", "http://127.0.0.1:2087", "local lab HUB")
     identityPath := flag.String("identity-file", "", "private local Agent enrollment identity file")
+    pin := flag.String("hub-cert-sha256", "", "required SHA256 fingerprint of the verified HTTPS HUB leaf certificate")
+    caFile := flag.String("hub-ca-file", "", "optional trusted LAB CA certificate bundle")
     flag.Parse()
 
     if os.Getenv("DARK_PRO_LAB_MODE") != "1" {
         log.Fatal("node agent is lab-only; set DARK_PRO_LAB_MODE=1")
     }
     if *nodeID == "" { log.Fatal("specify -id for a new LAB node; do not reuse old node identities") }
-    if _, err := checkLabEndpoint(*hub); err != nil { log.Fatal(err) }
+    // The legacy unencrypted lab path is accepted ONLY on this machine.
+    // Remote enrollment requires opt-in, TLS1.3, normal cert verification
+    // and an explicit pinned certificate fingerprint.
+    remote := strings.HasPrefix(*hub, "https://")
+    if remote && os.Getenv("DARK_PRO_ENABLE_REMOTE_AGENT") != "1" {
+        log.Fatal("remote Node connection requires DARK_PRO_ENABLE_REMOTE_AGENT=1 in the isolated LAB")
+    }
+    if !remote {
+        if _, err := checkLabEndpoint(*hub); err != nil { log.Fatal(err) }
+    }
+
     if *name == "" { *name = *nodeID }
     if len(*name) > 80 { log.Fatal("name too long") }
 
@@ -123,11 +136,21 @@ func main() {
     bootID := hex.EncodeToString(boot[:])
     ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
     defer stop()
-    dialer := &net.Dialer{Timeout: 2 * time.Second}
-    client := &http.Client{
-        Timeout: 4 * time.Second,
-        Transport: &http.Transport{DialContext: dialer.DialContext},
-        CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+    var caPEM []byte
+    var err error
+    if *caFile != "" {
+        caPEM, err = os.ReadFile(*caFile)
+        if err != nil { log.Fatal("cannot load trusted Agent CA: ", err) }
+    }
+    client, endpoint, err := agenttransport.New(agenttransport.Config{
+        Endpoint: *hub, PinSHA256: *pin, CABundle: caPEM,
+    })
+    if err != nil { log.Fatal("unsafe HUB transport: ", err) }
+    if remote {
+        probe, cancel := context.WithTimeout(ctx, 6*time.Second)
+        err = agenttransport.Probe(probe, client, endpoint)
+        cancel()
+        if err != nil { log.Fatal("verified HTTPS LAB Agent endpoint is not ready: ", err) }
     }
     location := *identityPath
     if location == "" {
@@ -137,7 +160,7 @@ func main() {
     if err != nil { log.Fatal("Node identity unavailable: ", err) }
     if !identity.Paired {
         attempt, cancel := context.WithTimeout(ctx, 8*time.Second)
-        err = enroll(attempt, client, *hub, identity)
+        err = enroll(attempt, client, endpoint, identity)
         cancel()
         if err != nil { log.Fatal("LAB pairing incomplete: ", err) }
         identity, err = agentidentity.MarkPaired(location, identity)
@@ -162,7 +185,7 @@ func main() {
                     NodeID: *nodeID, InstallationID: identity.InstallationID,
                     BootID: bootID, Sequence: pulseSeq,
                 }
-                if err := sendPulse(ctx, client, *hub, identity.AgentToken, pulse); err != nil &&
+                if err := sendPulse(ctx, client, endpoint, identity.AgentToken, pulse); err != nil &&
                     ctx.Err() == nil {
                     log.Printf("HUB liveness pulse unavailable: %v", err)
                 }
@@ -205,7 +228,7 @@ func main() {
                 RAMTotal: now.RAMTotal, RAMUsed: now.RAMUsed,
                 RXBytes: now.RXBytes, TXBytes: now.TXBytes,
             }
-            if err := transmit(ctx, client, *hub, identity.AgentToken, sample); err != nil && ctx.Err() == nil {
+            if err := transmit(ctx, client, endpoint, identity.AgentToken, sample); err != nil && ctx.Err() == nil {
                 log.Printf("HUB stats unavailable; liveness runs separately: %v", err)
             }
         }

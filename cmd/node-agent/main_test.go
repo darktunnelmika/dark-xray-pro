@@ -2,6 +2,9 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/pem"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -10,6 +13,7 @@ import (
 	"time"
 
 	"github.com/darktunnelmika/dark-xray-pro/internal/agentidentity"
+	"github.com/darktunnelmika/dark-xray-pro/internal/agenttransport"
 	"github.com/darktunnelmika/dark-xray-pro/internal/api"
 	"github.com/darktunnelmika/dark-xray-pro/internal/noderegistry"
 	"github.com/darktunnelmika/dark-xray-pro/internal/telemetry"
@@ -86,5 +90,60 @@ func TestAgentGeneratedSecretAndHubEndToEndInMemoryHTTP(t *testing.T) {
 	sample.NodeID="unpaired"
 	if err:=transmit(ctx,client,server.URL,identity.AgentToken,sample);err==nil {
 		t.Fatal("Agent illegally sent heartbeat for an unpaired logical Node")
+	}
+}
+
+func TestVerifiedHTTPSNodeAgentEndToEndWithoutLegacyHub(t *testing.T) {
+	base:=t.TempDir()
+	now:=time.Date(2026,10,12,8,0,0,0,time.UTC)
+	reg,err:=noderegistry.Open(filepath.Join(base,"private-hub","registry.json"),func()time.Time{return now})
+	if err!=nil {t.Fatal(err)}
+	invite,err:=reg.Issue("new-de-01","New DE lab")
+	if err!=nil {t.Fatal(err)}
+	identityFile:=filepath.Join(base,"private-agent","identity.json")
+	identity,err:=agentidentity.LoadOrCreate(identityFile,"new-de-01",invite.PairCode)
+	if err!=nil {t.Fatal(err)}
+	store:=telemetry.NewStore(15*time.Second,func()time.Time{return now})
+	hub,err:=api.NewServer(store,reg,"lab-only-owner-token-longer-than-thirty-two-characters")
+	if err!=nil {t.Fatal(err)}
+	remote:=httptest.NewTLSServer(hub.AgentHandler())
+	defer remote.Close()
+	sum:=sha256.Sum256(remote.Certificate().Raw)
+	pin:=hex.EncodeToString(sum[:])
+	roots:=pem.EncodeToMemory(&pem.Block{Type:"CERTIFICATE",Bytes:remote.Certificate().Raw})
+	client,endpoint,err:=agenttransport.New(agenttransport.Config{
+		Endpoint:remote.URL,PinSHA256:pin,CABundle:roots,
+	})
+	if err!=nil {t.Fatal(err)}
+	defer client.CloseIdleConnections()
+	ctx,cancel:=context.WithTimeout(context.Background(),5*time.Second)
+	defer cancel()
+	if err:=agenttransport.Probe(ctx,client,endpoint);err!=nil {t.Fatal(err)}
+	if err:=enroll(ctx,client,endpoint,identity);err!=nil {t.Fatal(err)}
+	// Lost first response: repeat exact same one-time request, no new token.
+	if err:=enroll(ctx,client,endpoint,identity);err!=nil {t.Fatal(err)}
+	identity,err=agentidentity.MarkPaired(identityFile,identity)
+	if err!=nil {t.Fatal(err)}
+	pulse:=telemetry.Pulse{
+		NodeID:"new-de-01",InstallationID:identity.InstallationID,
+		BootID:"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",Sequence:1,
+	}
+	if err:=sendPulse(ctx,client,endpoint,identity.AgentToken,pulse);err!=nil {t.Fatal(err)}
+	sample:=telemetry.Sample{
+		NodeID:"new-de-01",InstallationID:identity.InstallationID,
+		Name:"spoofed-from-agent",BootID:pulse.BootID,Sequence:1,Interface:"ens3",
+		CPUCores:4,CPUPercent:18,RAMTotal:8192,RAMUsed:2048,
+		RXBytes:5000,TXBytes:1000,
+	}
+	if err:=transmit(ctx,client,endpoint,identity.AgentToken,sample);err!=nil {t.Fatal(err)}
+	// The remote listener has no owner UI or fleet route; inspect the
+	// in-memory state through the trusted local Go Store, not public WAN.
+	fleet:=store.Snapshot()
+	if fleet.Total!=1||fleet.Online!=1||fleet.Nodes[0].CPUCores!=4 {
+		t.Fatalf("verified remote Agent did not deliver authentic stats: %+v",fleet)
+	}
+	sample.NodeID="legacy-id-not-paired"
+	if err:=transmit(ctx,client,endpoint,identity.AgentToken,sample);err==nil {
+		t.Fatal("per-Agent credential used to forge a legacy Node")
 	}
 }
