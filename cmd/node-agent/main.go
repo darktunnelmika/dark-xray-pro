@@ -17,6 +17,7 @@ import (
     "os"
     "os/signal"
     "runtime"
+    "sync"
     "syscall"
     "time"
 
@@ -62,6 +63,25 @@ func enroll(ctx context.Context, client *http.Client, endpoint string, identity 
     if err := json.NewDecoder(io.LimitReader(res.Body, 1024)).Decode(&ack); err != nil { return err }
     if !ack.Paired || ack.NodeID != identity.NodeID || ack.InstallationID != identity.InstallationID {
         return errors.New("pairing response identity mismatch")
+    }
+    return nil
+}
+
+// sendPulse never collects CPU, RAM, disk, Xray or interface telemetry.
+// It is independent of the slower and failure-prone stats sampling loop.
+func sendPulse(ctx context.Context, client *http.Client, endpoint, token string, pulse telemetry.Pulse) error {
+    payload, err := json.Marshal(pulse)
+    if err != nil { return err }
+    req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint+"/api/v1/agent/pulse", bytes.NewReader(payload))
+    if err != nil { return err }
+    req.Header.Set("Content-Type", "application/json")
+    req.Header.Set("Authorization", "Bearer "+token)
+    resp, err := client.Do(req)
+    if err != nil { return err }
+    defer resp.Body.Close()
+    if resp.StatusCode != http.StatusNoContent {
+        _, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 512))
+        return fmt.Errorf("HUB pulse rejected: HTTP %d", resp.StatusCode)
     }
     return nil
 }
@@ -123,36 +143,70 @@ func main() {
         identity, err = agentidentity.MarkPaired(location, identity)
         if err != nil { log.Fatal("LAB pairing succeeded but local receipt was not saved; retry with the same identity: ", err) }
     }
+    // Heartbeats are independent of stats. A busy CPU, broken /proc, or
+    // unavailable network counters must not manufacture Offline state.
+    var workers sync.WaitGroup
+    workers.Add(1)
+    go func() {
+        defer workers.Done()
+        ticker := time.NewTicker(3 * time.Second)
+        defer ticker.Stop()
+        var pulseSeq uint64
+        for {
+            select {
+            case <-ctx.Done():
+                return
+            case <-ticker.C:
+                pulseSeq++
+                pulse := telemetry.Pulse{
+                    NodeID: *nodeID, InstallationID: identity.InstallationID,
+                    BootID: bootID, Sequence: pulseSeq,
+                }
+                if err := sendPulse(ctx, client, *hub, identity.AgentToken, pulse); err != nil &&
+                    ctx.Err() == nil {
+                    log.Printf("HUB liveness pulse unavailable: %v", err)
+                }
+            }
+        }
+    }()
+
     initial, err := hostmetrics.Read()
-    if err != nil { log.Fatal("cannot sample host telemetry: ", err) }
-    ticker := time.NewTicker(3 * time.Second)
-    defer ticker.Stop()
+    hasInitial := err == nil
+    if err != nil { log.Printf("initial stats unavailable; liveness continues independently: %v", err) }
     previous := initial
-    var seq uint64
+    ticker := time.NewTicker(5 * time.Second)
+    defer ticker.Stop()
+    var metricSeq uint64
     log.Printf("DARK PRO LAB-only telemetry for %s; no Xray config or customer data access", *nodeID)
     for {
         select {
         case <-ctx.Done():
+            workers.Wait()
             return
         case <-ticker.C:
             now, err := hostmetrics.Read()
             if err != nil {
-                log.Printf("telemetry unavailable: %v", err)
+                log.Printf("telemetry unavailable; Node liveness unaffected: %v", err)
+                continue
+            }
+            if !hasInitial {
+                previous = now
+                hasInitial = true
                 continue
             }
             cpu, available := hostmetrics.CPUPercent(previous, now)
             previous = now
-            if !available { log.Printf("CPU sample pending; not reporting invented 0%%"); continue }
-            seq++
+            if !available { log.Printf("CPU sample pending; no invented 0%%"); continue }
+            metricSeq++
             sample := telemetry.Sample{
                 NodeID: *nodeID, InstallationID: identity.InstallationID,
-                Name: *name, BootID: bootID, Sequence: seq,
+                Name: *name, BootID: bootID, Sequence: metricSeq,
                 Interface: now.Interface, CPUCores: runtime.NumCPU(), CPUPercent: cpu,
                 RAMTotal: now.RAMTotal, RAMUsed: now.RAMUsed,
                 RXBytes: now.RXBytes, TXBytes: now.TXBytes,
             }
-            if err := transmit(ctx, client, *hub, identity.AgentToken, sample); err != nil {
-                log.Printf("HUB telemetry failed: %v", err)
+            if err := transmit(ctx, client, *hub, identity.AgentToken, sample); err != nil && ctx.Err() == nil {
+                log.Printf("HUB stats unavailable; liveness runs separately: %v", err)
             }
         }
     }
