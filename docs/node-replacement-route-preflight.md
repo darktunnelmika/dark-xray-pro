@@ -33,3 +33,7 @@
 - Owner authorization, CSRF, immutable audit and secure per-Node desired-state checks are mandatory.
 
 This phase is explicitly **not** a functional self-service replacement yet.
+
+## Phase 4 follow-on
+
+The initial hash-stable preflight preview is now durably journaled. A new Agent can opt into bounded TCP checks and submit exact authenticated port evidence, but `can_activate=false` remains mandatory until real Xray config staging, end-to-end protocol/data-plane checks and safe Subscription publication are implemented. See [Phase 4](node-replacement-phase4-tcp-preflight.md).
