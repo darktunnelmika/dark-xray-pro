@@ -1,54 +1,65 @@
-# First isolated lab run
+# First isolated LAB: one-time Node enrollment
 
-**Never run these instructions on the existing DARK XRAY HUB.** This is a disconnected, pre-production Go+React prototype.
+DARK XRAY PRO is a **pre-production laboratory prototype**. These instructions are ONLY for the new, unoccupied test machine. The original HUB, Agents, customer database, subscriptions and tunnels are not accessed. The Agent is explicitly restricted to the same machine as the LAB HUB; remote pairing and production TLS are not implemented yet.
 
 ## Requirements
+Ubuntu 24.04 or equivalent, Go 1.23+, Node.js 22+, npm, OpenSSL, git. Port 2087 must be available on **127.0.0.1**. Clone the new repository:
 
-- Ubuntu 24.04 or modern Linux; Go >=1.23; Node.js >=22, npm; OpenSSL.
-- No live Node Agents, previous HUB data, public bind, DNS or production secrets.
-
-## Start the lab
-
-Open a terminal on the **new isolated test machine**:
-
-```bash
+```sh
 git clone https://github.com/darktunnelmika/dark-xray-pro.git
 cd dark-xray-pro
-# Use the foundation branch until CI passes and it is reviewed.
-git switch feature/foundation-go-react-telemetry
+go test ./...
+cd web && npm install --no-audit --no-fund && npm run build && cd ..
+```
 
+## Terminal A — start the LAB HUB
+
+```sh
 export DARK_PRO_LAB_MODE=1
 export DARK_PRO_LAB_TOKEN="$(openssl rand -hex 32)"
-
-cd web
-npm install --no-audit --no-fund
-npm run build
-cd ..
-go test ./...
-go run ./cmd/hub -listen 127.0.0.1:2087 -static web/dist
+go run ./cmd/hub -listen 127.0.0.1:2087 -registry ./lab-state/registry.json -static web/dist
 ```
 
-In **another terminal on the same machine**, export the **same random lab token** (do not paste it into tickets or screenshots) and run:
+Keep that process running. On the same machine in another shell which has the **exact same owner token** (enter it privately; do not copy it to the Agent), an operator creates a one-time invitation:
 
-```bash
+```sh
+curl -fsS -X POST http://127.0.0.1:2087/api/v1/admin/nodes/invites \
+  -H "Authorization: Bearer $DARK_PRO_LAB_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"node_id":"new-lab-01","name":"First independent LAB Node"}'
+```
+
+The response prints a one-time, 64-character hexadecimal `pair_code`, valid for ten minutes. It is a secret. Keep it private and do not paste it into public chats or GitHub. The HUB stores only its hash.
+
+## Terminal B — Agent initial pairing
+
+In a separate LAB terminal on the **same machine**, enter the code securely (without command-line flags or a visible command history):
+
+```sh
+cd dark-xray-pro
 export DARK_PRO_LAB_MODE=1
-# Set DARK_PRO_LAB_TOKEN to the exact random value from the HUB terminal.
-go run ./cmd/node-agent -id new-lab-01 -name "New lab server"
+read -rsp "One-time LAB Pair Code: " DARK_PRO_PAIR_CODE; echo
+export DARK_PRO_PAIR_CODE
+go run ./cmd/node-agent -id new-lab-01 -name "First independent LAB Node" \
+  -identity-file ./lab-state/agent-new-lab-01.json
 ```
 
-Access the UI from a trusted computer using an SSH tunnel:
+On first run, the Agent generates a **new random installation ID and per-Node token**, persists them in a 0600 private file, claims the code once, and begins 3-second CPU/RAM/network telemetry. If an HTTP reply is lost, the Agent reuses the same saved identity and code on the next run; it does not demand a new code. Once paired, remove `DARK_PRO_PAIR_CODE` from the shell and run the Agent again **without** that environment variable. Do not share the Agent identity file or Node token.
 
-```bash
-ssh -L 2087:127.0.0.1:2087 root@NEW_LAB_SERVER
-```
-
-Browse `http://127.0.0.1:2087/`. If the agent is not running, the Nodes view correctly shows no data. Turning off the agent marks it Offline **after 15 seconds**, without deleting it from the list. Network interface traffic is displayed separately from billable user accounting (not implemented yet).
-
-Test read-only APIs:
-
-```bash
-curl -fsS http://127.0.0.1:2087/api/v1/health
+```sh
+unset DARK_PRO_PAIR_CODE
 curl -fsS http://127.0.0.1:2087/api/v1/fleet
 ```
 
-**Do not place the lab API on a public network.** The production-grade new Agent protocol will require verified TLS, per-Node identity, enrollment and stronger authentication. Do not copy old Node credentials or customer databases into this prototype.
+The Node stays in the roster as `offline` after a HUB restart or Agent shutdown. It becomes `online` only after an authenticated new heartbeat. A missing or first network-rate sample is shown as unavailable, not invented zero usage.
+
+To open the UI remotely, forward port 2087 over SSH from your trusted computer: `ssh -L 2087:127.0.0.1:2087 root@NEW_LAB_SERVER`, then browse `http://127.0.0.1:2087/`.
+
+## Hard boundaries and next milestones
+
+- **No live Node connection is possible from the Agent:** only `http://127.0.0.1:2087` is accepted. Do not expose this LAB listener on `0.0.0.0` or a public reverse proxy.
+- LAB pairing has a private one-time code and per-Agent token, **not** remote mTLS, hardware attestation, per-Node Lease or production RBAC. These remain required before real multi-server deployment.
+- No old Node registry, credentials, customer traffic/accounting, products or Restore history are loaded by this software.
+- The `/api/v1/fleet` display reports the new Node's default-route interface counters, not per-user traffic or Direct/Tunnel billing.
+- No representative, Inbound, client, route deployment or Xray configuration is activated by this prototype.
+- Further work is tracked in GitHub issues #1-#5. Keep your old HUB live until a separately approved migration.

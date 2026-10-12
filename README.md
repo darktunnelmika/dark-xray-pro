@@ -23,3 +23,7 @@ This repository is separate from the existing DARK XRAY HUB. Do not connect lega
 5. No production cutover without a verified rehearsal and explicit operator approval.
 
 See [docs/architecture.md](docs/architecture.md) for the versioned acceptance contracts after the foundation is committed.
+
+## Current implementation checkpoint: Phase 1 LAB Node identity
+
+New LAB Nodes can be enrolled with a one-time pairing ticket and private per-installation credentials; the HUB keeps Node registrations across restarts. The telemetry API rejects mismatched Node IDs, installations, tokens and replayed samples. **This is a same-host development protocol, not WAN TLS or complete Node Manager.** See [isolated LAB quickstart](docs/lab-quickstart.md) and [identity guarantees](docs/node-enrollment-phase1.md). Public installation, production users and Node replacement are not ready.
