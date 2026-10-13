@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -200,5 +201,24 @@ func TestDuplicateNodeListeningPortsAcrossInboundsRejected(t *testing.T){
 	b,err:=Render(p,[]Profile{testProfile(1),testProfile(2)})
 	if err!=nil||a.SHA256!=b.SHA256||!reflect.DeepEqual(a.Listeners,b.Listeners){
 		t.Fatalf("profile order altered config identity: %v",err)
+	}
+}
+
+func TestGenerateThousandUsersWithoutLedgerQueriesOrSecretDisclosure(t *testing.T){
+	p:=testProfile(1)
+	p.Users=nil
+	for i:=0;i<1000;i++ {
+		p.Users=append(p.Users,User{
+			UUID:fmt.Sprintf("%08x-1111-4111-8111-%012x",i+1,i+1),
+			Email:fmt.Sprintf("user%06d@pro.invalid",i+1),
+		})
+	}
+	c,err:=Render(planFor(t,8569,1185),[]Profile{p})
+	if err!=nil{t.Fatal(err)}
+	if len(c.Config)==0||len(c.Config)>MaxCandidateBytes||len(c.Listeners)!=2{
+		t.Fatalf("1000 users did not render bounded config: %d, %d",len(c.Config),len(c.Listeners))
+	}
+	if c.CanActivate||!c.RequiresDataPlaneProof||!c.RequiresSubscriptionCommit{
+		t.Fatal("synthetic user count bypassed required production rollout gates")
 	}
 }
