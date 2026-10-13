@@ -93,3 +93,7 @@ Before a **real self-service replacement**, implement:
 
 **The old HUB remains completely untouched. No PRO code was deployed to a VPS
 by this commit.**
+
+## Next checkpoint (Phase 5)
+
+Typed new-node Xray Reality candidates can now be rendered and optionally checked with a pinned offline Xray executable. This does not advance a stored replacement operation to active; `can_activate=false` remains mandatory until explicit staged desired-revision ACK, genuine Xray data-plane testing, and transactional Subscription publication are implemented. [Phase 5 design](xray-render-phase5.md).

@@ -39,3 +39,7 @@ An operator-defined route plan can now be validated for a new Node, preserving D
 ## Phase 4: durable replacement TCP preflight (no activation)
 
 The new HUB now stores replacement drafts and exact Agent-generated TCP reachability reports in a private durable journal. An explicitly opted-in *new* Agent polls only tasks for its paired installation, and the owner sees actual per-route evidence. **This is not Xray protocol validation, activation, or Subscription publication.** Read [Phase 4 boundary and API contract](docs/node-replacement-phase4-tcp-preflight.md).
+
+## Phase 5: typed Xray REALITY configuration with offline validation
+
+The new Go `internal/xrayconfig` package now renders deterministic, explicitly selected **VLESS+REALITY TCP/Vision or gRPC** candidates for fresh PRO Nodes. It preserves both Direct and Tunnel, enables native inbound/user counters, refuses duplicate Node ports, and explicitly marks shared-port route usage as **ambiguous** instead of inventing Direct/Tunnel totals. A pinned local Xray binary can run `run -test` against a temporary private config without any Xray restart or Subscription publication. Tests include 1000 synthetic clients. **Not an active config staging/deploy system and not production-ready.** [Phase 5 contract](docs/xray-render-phase5.md).
