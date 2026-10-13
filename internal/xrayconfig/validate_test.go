@@ -84,7 +84,7 @@ func TestCoreErrorAndTimeoutDoNotReturnSecrets(t *testing.T){
 	}else if strings.Contains(err.Error(),"PRIVATE-KEY")||strings.Contains(err.Error(),testProfile(1).RealityPrivateKey){
 		t.Fatal("Xray error message leaked private config")
 	}
-	slow,slowPin:=testBinary(t,"#!/bin/sh\nsleep 30\n")
+	slow,slowPin:=testBinary(t,"#!/bin/sh\nexec sleep 30\n")
 	ctx,cancel:=context.WithTimeout(context.Background(),100*time.Millisecond)
 	defer cancel()
 	start:=time.Now()
