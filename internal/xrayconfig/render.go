@@ -250,7 +250,7 @@ func Render(plan routeplan.Preview, profiles []Profile)(Candidate,error){
 		}
 	}
 	sort.Slice(listeners,func(i,j int)bool{
-		if listeners[i].InboundID==listeners[j].InboundID{return listeners[i].NodePort<listeners[j].NodePort}
+		if listeners[i].InboundID==listeners[j].InboundID{return listeners[i].Kind<listeners[j].Kind}
 		return listeners[i].InboundID<listeners[j].InboundID
 	})
 	doc:=struct{
