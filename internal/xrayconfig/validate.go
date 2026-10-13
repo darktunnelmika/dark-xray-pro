@@ -80,6 +80,8 @@ func ValidateOffline(ctx context.Context, c Candidate, binaryPath, expectedBinar
 	defer cancel()
 	command:=exec.CommandContext(runCtx,binaryPath,"run","-test","-config",path)
 	command.Dir=dir
+	// Bound subprocess and inherited descriptor waits after cancellation.
+	command.WaitDelay=250*time.Millisecond
 	command.Stdout=io.Discard
 	command.Stderr=io.Discard
 	// Command runs only a locally pinned executable. No shell expansion.
