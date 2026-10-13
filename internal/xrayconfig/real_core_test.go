@@ -14,6 +14,7 @@ func TestRealPinnedXrayCoreOptIn(t *testing.T){
 	bin:=os.Getenv("DARK_PRO_TEST_XRAY_BINARY")
 	pin:=os.Getenv("DARK_PRO_TEST_XRAY_SHA256")
 	if bin==""&&pin==""{t.Skip("no pinned real Xray binary configured for isolated LAB")}
+	if os.Getenv("DARK_PRO_LAB_MODE")!="1"{t.Fatal("real Xray integration is permitted only in explicit isolated LAB mode")}
 	if bin==""||pin==""{t.Fatal("real Xray validation requires BOTH absolute path and trusted SHA256")}
 	profile:=testProfile(1)
 	candidate,err:=Render(planFor(t,18443,0),[]Profile{profile})
