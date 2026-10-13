@@ -102,6 +102,7 @@ verified Xray-core binary, run:
 
 ```bash
 # NEVER use a production HUB/Node core or fetch an unverified "latest" executable.
+export DARK_PRO_LAB_MODE=1
 export DARK_PRO_TEST_XRAY_BINARY=/absolute/path/to/verified/xray
 export DARK_PRO_TEST_XRAY_SHA256=trusted_lowercase_64_character_sha256
 go test ./internal/xrayconfig -run '^TestRealPinnedXrayCoreOptIn$' -v
