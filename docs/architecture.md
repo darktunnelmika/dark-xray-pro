@@ -72,3 +72,7 @@ Explicit Direct/Swap choices and deterministic nonactivating SHA-256 previews li
 ## Phase 4 replacement command integrity
 
 Side-effect-free `routeplan` choices now have a persistent, revisioned journal, scoped pull and signed-per-identity (bearer authenticated) TCP evidence from the freshly paired Node Agent. The Admin API cannot activate Xray or publish subscriptions. A TCP listener alone does not validate Xray, tunnel forwarding or customer routes. See [Phase 4](node-replacement-phase4-tcp-preflight.md) for security and activation blockers.
+
+## Phase 5 typed Xray rendering and usage scope
+
+`internal/xrayconfig` accepts only an untampered, explicit `routeplan.Preview` with a matching profile for each selected Inbound. It renders VLESS TCP+REALITY Vision or gRPC+REALITY in a deterministic, private candidate, independently tags Direct/Tunnel when on different Node ports, and reports shared-port route attribution as **ambiguous**, not billed. User/Inbound counters are enabled but are NOT automatically an exact-once multi-hop accounting engine. Xray's actual `run -test` is opt-in with a verified locally pinned binary, private temporary file, bounded execution and no service impact. Runtime Xray apply, direct/tunnel protocol proof, durable desired revision and subscription publication remain blocked. [Details](xray-render-phase5.md).
