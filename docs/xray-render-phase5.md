@@ -93,3 +93,22 @@ a listener can actually bind or forward client traffic.
 **Current status:** source-level schema generation and a safe opt-in offline
 validator. No Xray process, systemd unit, Node deployment, user record, old HUB,
 or Subscription is modified by this milestone.
+
+## Optional pinned REAL Xray-core integration test
+
+An extra `TestRealPinnedXrayCoreOptIn` is available and **skipped by default**
+in ordinary GitHub CI. Only on a disposable new LAB machine with a separately
+verified Xray-core binary, run:
+
+```bash
+# NEVER use a production HUB/Node core or fetch an unverified "latest" executable.
+export DARK_PRO_TEST_XRAY_BINARY=/absolute/path/to/verified/xray
+export DARK_PRO_TEST_XRAY_SHA256=trusted_lowercase_64_character_sha256
+go test ./internal/xrayconfig -run '^TestRealPinnedXrayCoreOptIn$' -v
+```
+
+The test creates a synthetic Reality profile, checks the binary's exact SHA
+before executing `run -test`, destroys the temporary private config, and
+must return a proof that **cannot** authorize deployment. Running this optional
+test is a required additional preflight before a real new-node rollout, but is
+not a substitute for a genuine client handshake/port-binding test.
