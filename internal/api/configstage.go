@@ -50,9 +50,8 @@ func (s *Server) attachConfigStaging(mux *http.ServeMux){
   if op.Phase!=replacement.TCPChecked||op.CanActivate{
    respond(w,http.StatusConflict,map[string]string{"error":"tcp_preflight_required"});return
   }
-  _,paired:=pairedNodes(s.registry,op.OldNodeID,op.NewNodeID)
-  currentInstall,exists:=pairedNodes(s.registry,op.OldNodeID,op.NewNodeID)
-  if !paired||!exists||op.InstallationID!=currentInstall{
+  currentInstall,paired:=pairedNodes(s.registry,op.OldNodeID,op.NewNodeID)
+  if !paired||op.InstallationID!=currentInstall{
    respond(w,http.StatusConflict,map[string]string{"error":"node_installation_changed"});return
   }
   candidate,err:=xrayconfig.Render(op.Preview,input.Profiles)
