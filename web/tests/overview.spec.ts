@@ -114,3 +114,54 @@ test("Online heartbeat stays Online while delayed metrics show unknown instead o
   await expect(page.getByText("Online", { exact: true }).last()).toBeVisible();
   await expect(page.getByText("0 Mbps")).toHaveCount(0);
 });
+
+
+test("Node Manager inspects the exact selected identity and preserves it across refresh", async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 750 });
+  await mockFleet(page);
+  await page.goto("/");
+  await page.getByRole("button", { name: "Nodes" }).click();
+  await expect(page.getByText("Select a Node to inspect its status.")).toBeVisible();
+  await page.getByRole("button", { name: "Inspect Netherlands lab" }).click();
+  const detail = page.getByRole("region", { name: "Node details" });
+  await expect(detail.getByRole("heading", { name: "Netherlands lab" })).toBeVisible();
+  await expect(detail.getByText("Offline")).toBeVisible();
+  await expect(detail.locator(".node-inspector-field").filter({ hasText: "CPU" }).locator("strong")).toHaveText("—");
+  await expect(page.getByRole("button", { name: "Inspect Netherlands lab" })).toHaveAttribute("aria-pressed", "true");
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 2);
+  expect(overflow).toBe(false);
+  await page.reload();
+  await expect(page.getByRole("region", { name: "Node details" }).getByRole("heading", { name: "Netherlands lab" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Inspect Netherlands lab" })).toHaveAttribute("aria-pressed", "true");
+});
+
+test("Node Manager does not mislabel delayed metrics as Offline or fabricate zero rates", async ({ page }) => {
+  await mockFleet(page, () => ({
+    ...fleet,
+    nodes: fleet.nodes.map((node) => node.node_id === "de-01" ? {
+      ...node, metrics_current: false, rx_bits_per_second: null, tx_bits_per_second: null,
+    } : node),
+  }));
+  await page.goto("/");
+  await page.getByRole("button", { name: "Nodes" }).click();
+  await page.getByRole("button", { name: "Inspect Germany lab" }).click();
+  const detail = page.getByRole("region", { name: "Node details" });
+  await expect(detail.getByText("Online")).toBeVisible();
+  await expect(detail.getByText("Delayed / unavailable")).toBeVisible();
+  await expect(detail.locator(".node-inspector-field").filter({ hasText: "Fleet interface RX" }).locator("strong")).toHaveText("—");
+  await expect(detail.getByText("Read-only LAB view.", { exact: false })).toBeVisible();
+});
+
+test("empty Node Manager explicitly keeps enrollment private, without trying owner API", async ({ page }) => {
+  let ownerRequests = 0;
+  page.on("request", (request) => { if (request.url().includes("/api/v1/admin/")) ownerRequests++; });
+  await mockFleet(page, () => ({
+    ...fleet, nodes: [], total_nodes: 0, online_nodes: 0, offline_nodes: 0,
+    physical_rates_complete: false,
+  }));
+  await page.goto("/");
+  await page.getByRole("button", { name: "Nodes" }).click();
+  await expect(page.getByText("New LAB Node pairing is owner-only on localhost.", { exact: false })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Node details" })).toHaveCount(0);
+  expect(ownerRequests).toBe(0);
+});
