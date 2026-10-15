@@ -113,7 +113,7 @@ func TestSQLiteEventAuditCannotBeUpdatedOrDeleted(t *testing.T){
  if _,err:=s.db.ExecContext(ctx,"UPDATE events SET unlimited_delta_units=999 WHERE event_id='grant-immutable-0001'");err==nil{t.Fatal("audit event updated")}
  if _,err:=s.db.ExecContext(ctx,"DELETE FROM events WHERE event_id='grant-immutable-0001'");err==nil{t.Fatal("audit event deleted")}
  events,err:=s.ListEvents(ctx,"repC",100,0)
- if err!=nil||len(events)!=1||events[0].UnlimitedDeltaUnits!=20{t.Fatalf("audit corrupted: %+v %v",events,err)}
+ if err!=nil||len(events)!=1||events[0].UnlimitedDeltaUnits!=20||events[0].Reason!="Operator allocation"{t.Fatalf("audit corrupted: %+v %v",events,err)}
 }
 func TestConcurrentIdempotentDebitsNeverGoBelowZero(t *testing.T){
  s,_:=opened(t);ctx:=context.Background();newRep(t,s,"repD")
@@ -169,4 +169,14 @@ func TestInvalidFinancialAndClientRequests(t *testing.T){
  if !errors.Is(err,ErrInvalid){t.Fatalf("unlimited with unlimited IP allowed: %v",err)}
  _,err=s.CreateClient(ctx,NewClient{EventID:"issue-invalid-0002",ClientID:"invalid",RepresentativeID:"repE",Name:"x",DurationDays:30,VolumeBytes:0,IPCount:0})
  if !errors.Is(err,ErrInvalid){t.Fatalf("zero volumetric plan allowed: %v",err)}
+}
+
+func TestCannotAdoptForeignSQLiteEvenWhenSchemaVersionIsZero(t *testing.T){
+ s,path:=opened(t)
+ if _,err:=s.db.Exec("CREATE TABLE foreign_old_panel_records(id TEXT PRIMARY KEY)");err!=nil{t.Fatal(err)}
+ if _,err:=s.db.Exec("PRAGMA user_version=0");err!=nil{t.Fatal(err)}
+ if err:=s.Close();err!=nil{t.Fatal(err)}
+ if _,err:=Open(path);!errors.Is(err,ErrUnsafePath){
+  t.Fatalf("foreign SQLite schema was silently merged into PRO: %v",err)
+ }
 }
