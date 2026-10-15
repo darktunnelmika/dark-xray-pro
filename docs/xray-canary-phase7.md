@@ -85,3 +85,7 @@ live Direct/Tunnel hop or user subscription under test.
 
 [Official Xray CLI reference](https://xtls.github.io/en/document/command.html)
 and [official Xray-core releases](https://github.com/XTLS/Xray-core/releases).
+
+## Phase 8 follow-on
+
+A fully validated, stopped Phase 7 canary may now be copied into a private AES-GCM encrypted LAB revision journal. The owner can select/revert version pointers under CAS and audit/HMAC validation, but this is not an Xray service configuration apply or rollback. [Phase 8 state model](lab-revision-rollback-phase8.md).

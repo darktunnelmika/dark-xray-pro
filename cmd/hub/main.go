@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"crypto/tls"
+	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"flag"
@@ -20,6 +21,7 @@ import (
 
 	"github.com/darktunnelmika/dark-xray-pro/internal/api"
 	"github.com/darktunnelmika/dark-xray-pro/internal/configstage"
+	"github.com/darktunnelmika/dark-xray-pro/internal/labrevision"
 	"github.com/darktunnelmika/dark-xray-pro/internal/noderegistry"
 	"github.com/darktunnelmika/dark-xray-pro/internal/replacement"
 	"github.com/darktunnelmika/dark-xray-pro/internal/telemetry"
@@ -61,6 +63,7 @@ func main() {
 	registryPath := flag.String("registry", "./lab-state/registry.json", "private durable LAB node enrollment")
 	replacementsPath := flag.String("replacements", "./lab-state/replacements.json", "private nonactivating replacement journal")
 	stagingPath := flag.String("staging", "./lab-state/private-staging/configs.json", "optional encrypted Reality candidate journal")
+	labRevisionsPath := flag.String("lab-revisions", "./lab-state/private-staging/lab-revisions.json", "optional LAB-only encrypted revision selection and rollback journal")
 	agentListen := flag.String("agent-tls-listen", "", "optional dedicated HTTPS LAB Node listener (disabled by default)")
 	agentCert := flag.String("agent-tls-cert", "", "certificate with valid IP/DNS SAN for new LAB Node listener")
 	agentKey := flag.String("agent-tls-key", "", "private key for dedicated LAB Node listener")
@@ -106,6 +109,13 @@ func main() {
 		stage, err := configstage.Open(*stagingPath, key, nil)
 		if err != nil { log.Fatal("private encrypted stage registry unavailable: ", err) }
 		if err := service.EnableConfigStaging(stage); err != nil { log.Fatal(err) }
+		if os.Getenv("DARK_PRO_ENABLE_LAB_REVISION_ROLLBACK") == "1" {
+			material:=append([]byte("DARK-PRO-LABREV-AES-v1:"),key...)
+			revisionKey:=sha256.Sum256(material)
+			versions,err:=labrevision.Open(*labRevisionsPath,revisionKey[:],nil)
+			if err!=nil{log.Fatal("private LAB revision journal unavailable: ",err)}
+			if err:=service.EnableLabRevisions(versions);err!=nil{log.Fatal(err)}
+		}
 	}
 
 	apiHandler := service.Handler()

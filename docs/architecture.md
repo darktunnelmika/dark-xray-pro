@@ -84,3 +84,7 @@ Replacement status `tcp_preflight_passed_not_activated` may feed typed Reality c
 ## Phase 7 isolated core canary
 
 `internal/xraycanary` remaps all explicitly validated Xray listener tags to new loopback-only ephemeral ports. A root user, missing LAB flag or missing explicit canary opt-in is refused. The pinned real Xray executable first passes offline syntax validation, then starts on the remapped ports for a short listener smoke test; the subprocess group is forcibly terminated afterward. Stage receipts separately preserve canary attempt/bind flags while retaining `can_activate=false` and outstanding data-plane/Subscription verification gates. CI checks a fixed official release archive digest before running real Xray inside disposable GitHub Actions runners. [Details](xray-canary-phase7.md).
+
+## Phase 8 — prepare/rollback selection, never active Apply
+
+After Stage metadata reports syntax verified and stopped loopback Xray canary passed, `internal/labrevision` keeps encrypted private candidate versions and a fully HMAC-authenticated, CAS-fenced selection/rollback journal. Only the SSH-tunneled owner API may prepare and change LAB selections. Multi-node/multi-instance cross-selection is prohibited. The current phase has **no** active Xray process controller, systemd touch, data-plane verification or Subscription publish; these are explicit blockers. [Phase 8](lab-revision-rollback-phase8.md).

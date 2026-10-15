@@ -51,3 +51,7 @@ The private Reality candidate can now be stored encrypted on the NEW HUB and del
 ## Phase 7 — real Xray lab-only loopback canary
 
 After Phase 6's encrypted Reality staging and offline validation, a new unprivileged LAB Agent may additionally prove that a checksum-pinned **real Xray-core** process starts and binds *only ephemeral localhost listeners*. A disposable process is always stopped and private configs deleted before returning a separate `canary_loopback_bound` receipt. It **never** validates customer VLESS data-plane, applies a public Node config, changes users or publishes Subscription links. [Phase 7 runbook](docs/xray-canary-phase7.md).
+
+## Phase 8 — private LAB revision selection + rollback journal
+
+The new HUB can now hold multiple encrypted versions of an already Xray-syntax-verified, loopback-canary-verified Reality candidate. Owner-only API requests use compare-and-swap generation numbers to choose a **LAB rehearsal** version and reverse that choice without deleting the previous encrypted snapshot. AES-GCM protects confidential config and HMAC authenticates journal pointers, generations and audit events. **This is a reversible metadata/config selection, NOT live Xray apply or service rollback.** [Safety/runbook](docs/lab-revision-rollback-phase8.md).

@@ -330,3 +330,28 @@ func (s *Store) Report(proof Proof)(Metadata,error){
  if err:=s.persist(next);err!=nil{return Metadata{},err}
  return copyMeta(meta),nil
 }
+
+// VerifiedPrivateForLabRevision is ONLY for server-side, owner-authorized
+// LAB revision preparation after a successful stopped Xray canary. It is not
+// exposed on either the public Agent surface or the owner metadata API.
+// The returned bytes must be re-encrypted, never logged or persisted raw.
+func (s *Store) VerifiedPrivateForLabRevision(id string)(Metadata,[]byte,error){
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	entry,ok:=s.state.Stages[id]
+	if !ok{return Metadata{},nil,ErrNotFound}
+	m:=entry.Meta
+	if m.Status!=Verified||!m.CanaryAttempted||!m.CanaryLoopbackBound||
+		m.CanActivate||!m.NeedsDataPlaneProof||!m.NeedsSubscriptionCommit {
+		return Metadata{},nil,ErrInvalid
+	}
+	aead,err:=makeAEAD(s.key)
+	if err!=nil{return Metadata{},nil,ErrUnsafe}
+	raw,err:=aead.Open(nil,entry.Nonce,entry.Ciphertext,aad(m))
+	if err!=nil{return Metadata{},nil,ErrUnsafe}
+	digest:=sha256.Sum256(raw)
+	if subtle.ConstantTimeCompare(digest[:],mustHex(m.ConfigSHA256))!=1 {
+		return Metadata{},nil,ErrUnsafe
+	}
+	return copyMeta(m),raw,nil
+}
