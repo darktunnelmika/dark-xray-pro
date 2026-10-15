@@ -211,7 +211,7 @@ export default function BusinessWorkspace({ language }: { language: Language }) 
     void fetchData().catch((error: unknown) => {
       if (controller.signal.aborted) return;
       if (error instanceof ApiError && error.status === 401) {
-        setSession(null); setMode("signedout"); setMe(null); setReps(null); setClients(null); setEvents(null); setGroups(null);
+        setSession(null); setMode("signedout"); setMe(null); setReps(null); setClients(null); setEvents(null); setGroups(null); setGroups(null);
       pendingCreditKey.current = null; pendingClientKey.current = null;
       } else {
         setNotice(words[language].unavailable);
@@ -228,6 +228,7 @@ export default function BusinessWorkspace({ language }: { language: Language }) 
         body: JSON.stringify({ username: loginName, password: loginPassword }),
       });
       if (!result.user || !result.csrf_token) throw new Error("Invalid login response");
+      setMe(null); setReps(null); setClients(null); setEvents(null); setGroups(null);
       setSession(result); setMode("signedin"); setLoginPassword("");
     } catch { setNotice(t.loginError); }
     finally { setActionBusy(false); }
@@ -244,7 +245,7 @@ export default function BusinessWorkspace({ language }: { language: Language }) 
     if (!session) return;
     await runAction(async () => {
       await mutation("/api/v1/session/logout", {}, session.csrf_token);
-      setSession(null); setMode("signedout"); setMe(null); setReps(null); setClients(null); setEvents(null);
+      setSession(null); setMode("signedout"); setMe(null); setReps(null); setClients(null); setEvents(null); setGroups(null);
     }, true);
   }
   async function changePassword(event: FormEvent<HTMLFormElement>) {
