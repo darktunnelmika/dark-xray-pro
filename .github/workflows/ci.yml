@@ -43,6 +43,7 @@ jobs:
         run: |
           go build -o /tmp/dark-xray-pro-hub ./cmd/hub
           go build -o /tmp/dark-xray-pro-agent ./cmd/node-agent
+          go build -o /tmp/dark-pro-owner-setup ./cmd/owner-setup
       - name: Verify no production defaults
         run: |
           if DARK_PRO_LAB_MODE=0 /tmp/dark-xray-pro-hub > /tmp/hub-refusal.log 2>&1; then
