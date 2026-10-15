@@ -166,3 +166,68 @@ test("empty Node Manager explicitly keeps enrollment private, without trying own
   await expect(page.getByRole("region", { name: "Node details" })).toHaveCount(0);
   expect(ownerRequests).toBe(0);
 });
+
+
+test("Inbound planning keeps enrollment and activation private with no connected Nodes", async ({ page }) => {
+  let unsafeRequests = 0;
+  page.on("request", (request) => {
+    if (request.method() !== "GET" || request.url().includes("/api/v1/admin/")) unsafeRequests++;
+  });
+  await mockFleet(page, () => ({ ...fleet, nodes: [], total_nodes: 0, online_nodes: 0, offline_nodes: 0 }));
+  await page.goto("/");
+  await page.getByRole("button", { name: "Inbounds" }).click();
+  await expect(page.getByRole("heading", { name: "Inbound deployment draft" })).toBeVisible();
+  await expect(page.getByText("No independently paired PRO Nodes are available yet.")).toBeVisible();
+  await expect(page.getByLabel("Target Node")).toBeDisabled();
+  await expect(page.getByText("PREVIEW ONLY", { exact: false })).toBeVisible();
+  expect(unsafeRequests).toBe(0);
+});
+
+test("Direct + Dark Swap preview uses exactly three swap inputs and flags shared-port attribution", async ({ page }) => {
+  let unsafeRequests = 0;
+  page.on("request", (request) => {
+    if (request.url().includes("/api/v1/admin/") || request.method() === "POST") unsafeRequests++;
+  });
+  await mockFleet(page);
+  await page.goto("/");
+  await page.getByRole("button", { name: "Inbounds" }).click();
+  await page.getByLabel("Target Node").selectOption("de-01");
+  await page.getByLabel("Inbound ID").fill("1185");
+  await page.getByLabel("Direct Node port").fill("8443");
+  await page.getByRole("checkbox", { name: "Dark Swap" }).check();
+  await expect(page.locator(".inbound-swap-fields input")).toHaveCount(3);
+  await page.getByLabel("Destination tunnel port").fill("6800");
+  await page.getByLabel("Node port", { exact: true }).fill("8443");
+  await page.getByLabel("Tunnel host or IPv4").fill("example.net");
+  const preview = page.getByRole("region", { name: "Inbound route preview" });
+  await expect(preview.locator(".inbound-preview-rows > div")).toHaveCount(2);
+  await expect(preview.getByText("Shared Node port:", { exact: false })).toBeVisible();
+  await expect(preview).toContainText("example.net:6800");
+  await expect(preview).toContainText("Activation blocked");
+  await page.getByLabel("Node port", { exact: true }).fill("9443");
+  await expect(preview.getByText("Distinct Node ports:", { exact: false })).toBeVisible();
+  await page.getByLabel("Tunnel host or IPv4").fill("https://invalid.example");
+  await expect(preview.getByText("Use a valid IPv4 address or DNS hostname", { exact: false })).toBeVisible();
+  await expect(preview.locator(".inbound-preview-rows")).toHaveCount(0);
+  expect(unsafeRequests).toBe(0);
+});
+
+test("mobile RTL Dark Swap draft stays readable and never enables Apply", async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 750 });
+  await mockFleet(page);
+  await page.goto("/");
+  await page.getByRole("button", { name: "Open menu" }).click();
+  await page.getByRole("button", { name: "Inbounds" }).click();
+  await page.getByRole("button", { name: "EN" }).click();
+  await expect(page.getByRole("heading", { name: "پیش‌نویس اینباند" })).toBeVisible();
+  await page.getByLabel("نود مقصد").selectOption("de-01");
+  await page.getByLabel("شناسه اینباند").fill("42");
+  await page.getByLabel("پورت نود مستقیم").fill("8443");
+  await page.getByRole("checkbox", { name: "دارک سواپ" }).check();
+  await page.getByLabel("پورت تانل مقصد").fill("6800");
+  await page.getByLabel("پورت نود", { exact: true }).fill("9443");
+  await page.getByLabel("هاست یا IP تانل").fill("198.51.100.1");
+  await expect(page.getByText("فقط پیش‌نمایش", { exact: false })).toBeVisible();
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 2);
+  expect(overflow).toBe(false);
+});
