@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/darktunnelmika/dark-xray-pro/internal/configstage"
+	"github.com/darktunnelmika/dark-xray-pro/internal/labrevision"
 	"github.com/darktunnelmika/dark-xray-pro/internal/noderegistry"
 	"github.com/darktunnelmika/dark-xray-pro/internal/replacement"
 	"github.com/darktunnelmika/dark-xray-pro/internal/telemetry"
@@ -22,6 +23,7 @@ type Server struct {
 	ownerKey string
 	replacements *replacement.Journal
 	stages *configstage.Store
+	labRevisions *labrevision.Store
 }
 
 // This is a localhost-only lab interface. Remote Nodes must NOT be allowed
@@ -103,6 +105,7 @@ func (s *Server) Handler() http.Handler {
 	s.attachEnrollment(mux)
 	s.attachReplacement(mux)
 	s.attachConfigStaging(mux)
+	s.attachLabRevisions(mux)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
