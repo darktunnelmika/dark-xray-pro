@@ -88,3 +88,7 @@ Replacement status `tcp_preflight_passed_not_activated` may feed typed Reality c
 ## Phase 8 — prepare/rollback selection, never active Apply
 
 After Stage metadata reports syntax verified and stopped loopback Xray canary passed, `internal/labrevision` keeps encrypted private candidate versions and a fully HMAC-authenticated, CAS-fenced selection/rollback journal. Only the SSH-tunneled owner API may prepare and change LAB selections. Multi-node/multi-instance cross-selection is prohibited. The current phase has **no** active Xray process controller, systemd touch, data-plane verification or Subscription publish; these are explicit blockers. [Phase 8](lab-revision-rollback-phase8.md).
+
+## Phase 9 lab delivery boundary
+
+The source-only Go/React application is now packaged as a checksum-verified Linux amd64 LAB release artifact by GitHub Actions. A guarded installer requires exact NEW VPS public IPv4 confirmation and an explicit empty-server acknowledgement before installing a separate non-root localhost-only HUB service. It never installs/updates old Xray or Nodes and never turns on public owner management. This is NOT a production installer or proof the new VPS is already accessible. [Phase 9 lab packaging](lab-bundle-phase9.md).
