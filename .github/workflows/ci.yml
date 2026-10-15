@@ -25,7 +25,7 @@ jobs:
           cache: false
       - name: Guard against dropped Go packages and unsafe legacy imports
         run: |
-          for path in internal/routeplan/draft.go internal/replacement/journal.go internal/routecheck/tcp.go internal/noderegistry/registry.go internal/telemetry/store.go internal/agenttransport/client.go internal/xrayconfig/render.go internal/xrayconfig/validate.go internal/configstage/store.go internal/api/configstage.go cmd/node-agent/configstage.go; do
+          for path in internal/routeplan/draft.go internal/replacement/journal.go internal/routecheck/tcp.go internal/noderegistry/registry.go internal/telemetry/store.go internal/agenttransport/client.go internal/xrayconfig/render.go internal/xrayconfig/validate.go internal/configstage/store.go internal/api/configstage.go cmd/node-agent/configstage.go internal/xraycanary/canary_linux.go; do
             test -s "$path" || { echo "MISSING expected Go module: $path"; exit 1; }
           done
           test ! -e backend/dark_policy.py || { echo "Legacy HUB files must not be imported into PRO"; exit 1; }
@@ -93,3 +93,47 @@ jobs:
             web/test-results/
             web/playwright-report/
           if-no-files-found: ignore
+
+  pinned-xray-core:
+    name: Pinned real Xray core — LAB-only syntax and loopback smoke
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Retrieve exact upstream Xray release and verify artifact digest
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/dark-pro-isolated-xray"
+          cd "$RUNNER_TEMP/dark-pro-isolated-xray"
+          curl -fLSs --retry 3 --connect-timeout 10 --max-time 120 \
+            "https://github.com/XTLS/Xray-core/releases/download/v26.9.9/Xray-linux-64.zip" \
+            -o Xray-linux-64.zip
+          printf '%s  %s\n' \
+            '1eb9175d0f0a8f8149c9230a7fc5ae66ce332ed20a53155ce61fe62e3f58b7df' \
+            'Xray-linux-64.zip' | sha256sum -c -
+          unzip -j Xray-linux-64.zip xray -d "$RUNNER_TEMP/dark-pro-isolated-xray/bin"
+          chmod 0700 "$RUNNER_TEMP/dark-pro-isolated-xray/bin/xray"
+          printf 'DARK_PRO_TEST_XRAY_BINARY=%s\n' "$RUNNER_TEMP/dark-pro-isolated-xray/bin/xray" >> "$GITHUB_ENV"
+          printf 'DARK_PRO_TEST_XRAY_SHA256=%s\n' \
+            "$(sha256sum "$RUNNER_TEMP/dark-pro-isolated-xray/bin/xray" | cut -d' ' -f1)" >> "$GITHUB_ENV"
+      - name: Run actual pinned Xray syntax test with disposable users
+        env:
+          DARK_PRO_LAB_MODE: "1"
+        run: go test ./internal/xrayconfig -run '^TestRealPinnedXrayCoreOptIn$' -v -count=1
+      - name: Run and stop real Xray on ephemeral loopback listeners only
+        env:
+          DARK_PRO_LAB_MODE: "1"
+          DARK_PRO_ENABLE_LOOPBACK_CANARY: "1"
+        run: go test ./internal/xraycanary -run '^TestRealPinnedXrayCanaryOptIn$' -v -count=1
+      - name: Keep Xray and user credentials out of all persisted artifacts
+        shell: bash
+        run: |
+          # No generated configs or Xray executable are uploaded to Actions artifacts.
+          test ! -e lab-state
