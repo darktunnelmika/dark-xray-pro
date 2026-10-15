@@ -43,3 +43,7 @@ The new HUB now stores replacement drafts and exact Agent-generated TCP reachabi
 ## Phase 5: typed Xray REALITY configuration with offline validation
 
 The new Go `internal/xrayconfig` package now renders deterministic, explicitly selected **VLESS+REALITY TCP/Vision or gRPC** candidates for fresh PRO Nodes. It preserves both Direct and Tunnel, enables native inbound/user counters, refuses duplicate Node ports, and explicitly marks shared-port route usage as **ambiguous** instead of inventing Direct/Tunnel totals. A pinned local Xray binary can run `run -test` against a temporary private config without any Xray restart or Subscription publication. Tests include 1000 synthetic clients. **Not an active config staging/deploy system and not production-ready.** [Phase 5 contract](docs/xray-render-phase5.md).
+
+## Phase 6 — AES-256-GCM Xray candidate staging (LAB ONLY)
+
+The private Reality candidate can now be stored encrypted on the NEW HUB and delivered only to the newly paired Agent over verified TLS 1.3. The Agent validates exact config and inbound tags/ports with a separately pinned local Xray executable, then returns a bounded, secret-free validation receipt. This is **offline-only**: it never writes to a running Xray, activates Inbounds, charges traffic or publishes subscriptions. Explicit enable flags and a persistent external staging encryption key are required. [Phase 6 instructions](docs/xray-stage-phase6.md).
