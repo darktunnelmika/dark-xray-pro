@@ -29,7 +29,7 @@ const (
  MaxUnlimitedCredit int64 = 1_000_000_000
  MaxDays = 3650
  MaxIPLimit = 1000
- SchemaVersion = 3
+ SchemaVersion = 4
 )
 var (
  ErrInvalid = errors.New("invalid business operation")
@@ -83,6 +83,7 @@ type Client struct {
  ExpiresUnix int64 `json:"expires_unix"`
  CreatedUnix int64 `json:"created_unix"`
  DeploymentState string `json:"deployment_state"`
+ Archived bool `json:"archived"`
 }
 type Event struct {
  EventID string `json:"event_id"`
@@ -164,7 +165,7 @@ func Open(path string)(*Store,error){
  if _,err=db.Exec("PRAGMA trusted_schema = OFF");err!=nil{return fail(err)}
  var version int
  if err=db.QueryRow("PRAGMA user_version").Scan(&version);err!=nil{return fail(err)}
- if version!=0 && version!=1 && version!=2 && version!=SchemaVersion{return fail(fmt.Errorf("business schema version %d is not supported: %w",version,ErrUnavailable))}
+ if version!=0 && version!=1 && version!=2 && version!=3 && version!=SchemaVersion{return fail(fmt.Errorf("business schema version %d is not supported: %w",version,ErrUnavailable))}
  if version==0 {
   // A pre-existing legacy/foreign SQLite file is NOT an empty PRO business
   // database even if its user_version is zero. Refuse silent cross-schema
@@ -182,6 +183,10 @@ func Open(path string)(*Store,error){
  }
  if version==2 {
   if err=migrateGroups(db);err!=nil{return fail(err)}
+  version=3
+ }
+ if version==3 {
+  if err=migrateClientLifecycle(db);err!=nil{return fail(err)}
  }
  return &Store{db:db},nil
 }
@@ -290,10 +295,12 @@ func (s *Store)AdjustCredits(ctx context.Context,c CreditChange)(Representative,
 }
 func clientScan(row interface{Scan(...any)error})(Client,error){
  var c Client
- err:=row.Scan(&c.ID,&c.RepresentativeID,&c.Name,&c.UUID,&c.PlanKind,&c.IPCount,&c.VolumeBytes,&c.DurationDays,&c.ChargeVolumeBytes,&c.ChargeUnlimitedUnits,&c.CreatedUnix,&c.ExpiresUnix,&c.DeploymentState)
+ var archived int
+ err:=row.Scan(&c.ID,&c.RepresentativeID,&c.Name,&c.UUID,&c.PlanKind,&c.IPCount,&c.VolumeBytes,&c.DurationDays,&c.ChargeVolumeBytes,&c.ChargeUnlimitedUnits,&c.CreatedUnix,&c.ExpiresUnix,&c.DeploymentState,&archived)
+ c.Archived=archived==1
  return c,err
 }
-const clientColumns="id,representative_id,display_name,uuid,plan_kind,ip_count,volume_bytes,duration_days,charged_volume_bytes,charged_unlimited_units,created_unix,expires_unix,deployment_state"
+const clientColumns="id,representative_id,display_name,uuid,plan_kind,ip_count,volume_bytes,duration_days,charged_volume_bytes,charged_unlimited_units,created_unix,expires_unix,deployment_state,archived"
 func readClient(ctx context.Context,tx *sql.Tx,id string)(Client,error){
  return clientScan(tx.QueryRowContext(ctx,"SELECT "+clientColumns+" FROM clients WHERE id=?",id))
 }
@@ -366,7 +373,7 @@ func (s *Store)CreateClient(ctx context.Context,n NewClient)(Client,error){
  now:=time.Now().UTC().Unix()
  expires:=now+n.DurationDays*86400
  c:=Client{ID:n.ClientID,RepresentativeID:r.ID,Name:n.Name,UUID:uuid,PlanKind:plan,IPCount:n.IPCount,VolumeBytes:n.VolumeBytes,DurationDays:n.DurationDays,ChargeVolumeBytes:chargeVolume,ChargeUnlimitedUnits:chargeUnits,CreatedUnix:now,ExpiresUnix:expires,DeploymentState:"pending_node_apply"}
- _,err=tx.ExecContext(ctx,"INSERT INTO clients("+clientColumns+") VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",c.ID,c.RepresentativeID,c.Name,c.UUID,c.PlanKind,c.IPCount,c.VolumeBytes,c.DurationDays,c.ChargeVolumeBytes,c.ChargeUnlimitedUnits,c.CreatedUnix,c.ExpiresUnix,c.DeploymentState)
+ _,err=tx.ExecContext(ctx,"INSERT INTO clients("+clientColumns+") VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",c.ID,c.RepresentativeID,c.Name,c.UUID,c.PlanKind,c.IPCount,c.VolumeBytes,c.DurationDays,c.ChargeVolumeBytes,c.ChargeUnlimitedUnits,c.CreatedUnix,c.ExpiresUnix,c.DeploymentState,0)
  if err!=nil{return Client{},ErrConflict}
  volumeDelta,unitDelta:=int64(0),int64(0)
  if r.Kind=="representative"{volumeDelta,unitDelta=-chargeVolume,-chargeUnits}
