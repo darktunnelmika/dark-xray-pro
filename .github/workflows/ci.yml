@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - "feature/**"
+      - "fix/**"
   pull_request:
     branches:
       - main
@@ -156,7 +157,10 @@ jobs:
       - name: Validate installer shell syntax and strict safety guards
         run: |
           bash -n scripts/install-lab.sh
+          bash -n scripts/build-lab-bundle.sh
           grep -q 'DARK_PRO_EXPECT_PUBLIC_IP' scripts/install-lab.sh
+          grep -q 'ip -4 -o addr show scope global' scripts/install-lab.sh
+          grep -q 'ip -4 route get 1.1.1.1' scripts/install-lab.sh
           grep -q '127.0.0.1:2087' scripts/install-lab.sh
           grep -q 'I_CONFIRM_NEW_EMPTY_SERVER' scripts/install-lab.sh
       - name: Build isolated static Go executables and compiled UI
@@ -166,15 +170,7 @@ jobs:
           GOARCH: amd64
         run: |
           set -euo pipefail
-          mkdir -p release/bin release/web release/scripts
-          go build -trimpath -ldflags="-s -w" -o release/bin/dark-pro-hub ./cmd/hub
-          go build -trimpath -ldflags="-s -w" -o release/bin/dark-pro-agent ./cmd/node-agent
-          cd web
-          npm install --no-audit --no-fund
-          npm run build
-          cd ..
-          cp -a web/dist/. release/web/
-          install -m 0755 scripts/install-lab.sh release/scripts/install-lab.sh
+          DARK_PRO_PINNED_COMMIT="$GITHUB_SHA" bash scripts/build-lab-bundle.sh
           test -s release/web/index.html
           test -s release/bin/dark-pro-hub
           test -s release/bin/dark-pro-agent

@@ -25,6 +25,7 @@ command -v systemctl >/dev/null || abort "systemd is required"
 command -v openssl >/dev/null || abort "openssl is required"
 command -v sha256sum >/dev/null || abort "sha256sum is required"
 command -v ss >/dev/null || abort "iproute2 ss command is required"
+command -v ip >/dev/null || abort "iproute2 ip command is required"
 command -v useradd >/dev/null || abort "useradd is required"
 
 [[ -f "$BUNDLE/SHA256SUMS" && -s "$BUNDLE/bin/dark-pro-hub" &&
@@ -33,12 +34,31 @@ command -v useradd >/dev/null || abort "useradd is required"
 (cd "$BUNDLE" && sha256sum -c --status SHA256SUMS) ||
   abort "bundle checksum verification failed — no installation performed"
 
-# Verify the actual VPS public address. DO NOT allow blind installation on
-# the old production HUB or an unknown/unauthorized Remote Desktop device.
-ACTUAL_IP="$(curl --noproxy '*' -4fsS --connect-timeout 5 --max-time 10 https://api.ipify.org)" ||
-  abort "could not verify external LAB IP; refusing to guess"
-[[ "$ACTUAL_IP" == "$DARK_PRO_EXPECT_PUBLIC_IP" ]] ||
-  abort "server mismatch: detected $ACTUAL_IP, expected $DARK_PRO_EXPECT_PUBLIC_IP"
+# Verify the IP that is REALLY ASSIGNED to this new VPS's global NIC,
+# and the selected outbound route's source address. An upstream NAT can make
+# the Internet-visible egress IP differ, so never mistake that for host identity.
+# Both local checks are required, not optional; neither accepts a second host.
+LOCAL_IP_MATCH="$(ip -4 -o addr show scope global | awk -v target="$DARK_PRO_EXPECT_PUBLIC_IP" '
+  {split($4, cidr, "/"); if (cidr[1] == target) found=1}
+  END {print found+0}
+')"
+[[ "$LOCAL_IP_MATCH" == "1" ]] ||
+  abort "expected LAB IP is NOT assigned to any global IPv4 interface"
+
+ROUTE_SRC="$(ip -4 route get 1.1.1.1 | awk '
+  {for (i=1;i<NF;i++) if ($i=="src") {print $(i+1); exit}}
+')" || abort "cannot determine source IP for selected outbound route"
+[[ "$ROUTE_SRC" == "$DARK_PRO_EXPECT_PUBLIC_IP" ]] ||
+  abort "route source $ROUTE_SRC does not match intended new LAB IP $DARK_PRO_EXPECT_PUBLIC_IP"
+
+# Egress is diagnostic only. It may legitimately be SNATed by the upstream.
+ACTUAL_EGRESS_IP="$(curl --noproxy '*' -4fsS --connect-timeout 5 --max-time 10 https://api.ipify.org)" ||
+  abort "cannot contact external IP reflector over HTTPS"
+if [[ "$ACTUAL_EGRESS_IP" != "$DARK_PRO_EXPECT_PUBLIC_IP" ]]; then
+  printf 'NOTICE: lab interface IP %s exits the Internet as %s (upstream NAT).\\n' \
+    "$DARK_PRO_EXPECT_PUBLIC_IP" "$ACTUAL_EGRESS_IP" >&2
+fi
+ACTUAL_IP="$DARK_PRO_EXPECT_PUBLIC_IP"
 
 # Check for any pre-existing user service or old production panel.
 for unit in dark-xray-hub.service dark-xray-node.service dark-xray.service \
