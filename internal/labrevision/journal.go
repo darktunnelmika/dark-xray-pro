@@ -6,6 +6,7 @@ package labrevision
 import (
 	"bytes"
 	"crypto/aes"
+	"crypto/hmac"
 	"crypto/cipher"
 	"crypto/rand"
 	"crypto/sha256"
@@ -82,6 +83,7 @@ type disk struct {
 	Previous string `json:"previous"`
 	Versions map[string]sealed `json:"versions"`
 	Events []Event `json:"events"`
+	IntegrityHMAC string `json:"integrity_hmac"`
 }
 
 type Store struct {
@@ -124,7 +126,20 @@ func aeadFor(key []byte)(cipher.AEAD,error){
 	if err!=nil{return nil,err}
 	return cipher.NewGCM(block)
 }
+func signState(state disk,key []byte)string{
+	state.IntegrityHMAC=""
+	payload,_:=json.Marshal(state)
+	material:=append([]byte("DARK-PRO-LABREV-MAC-v1:"),key...)
+	derived:=sha256.Sum256(material)
+	h:=hmac.New(sha256.New,derived[:])
+	_,_=h.Write(payload)
+	return hex.EncodeToString(h.Sum(nil))
+}
 func checkState(current disk,key []byte)error{
+	if !validHex(current.IntegrityHMAC,64)||
+		!hmac.Equal([]byte(current.IntegrityHMAC),[]byte(signState(current,key))){
+		return ErrUnsafe
+	}
 	if current.Schema!=1||current.Generation==0||
 		current.Versions==nil||len(current.Versions)>maxVersions||
 		len(current.Events)>maxEvents{return ErrUnsafe}
@@ -189,6 +204,7 @@ func Open(path string,key []byte,clock func()time.Time)(*Store,error){
 }
 
 func (s *Store) persist(next disk)error{
+	next.IntegrityHMAC=signState(next,s.key)
 	raw,err:=json.Marshal(next)
 	if err!=nil||len(raw)>maxStoredBytes{return ErrUnsafe}
 	dir:=filepath.Dir(s.path)
@@ -213,6 +229,7 @@ func clone(d disk)disk{
 		Schema:1,Generation:d.Generation,Selected:d.Selected,Previous:d.Previous,
 		Versions:make(map[string]sealed,len(d.Versions)),
 		Events:append([]Event(nil),d.Events...),
+		IntegrityHMAC:d.IntegrityHMAC,
 	}
 	for k,v:=range d.Versions{out.Versions[k]=v}
 	return out
@@ -291,6 +308,13 @@ func (s *Store) Select(id string,expectedGeneration uint64)(Snapshot,error){
 	if s.state.Generation!=expectedGeneration{return Snapshot{},ErrConflict}
 	if _,ok:=s.state.Versions[id];!ok{return Snapshot{},ErrMissing}
 	if s.state.Selected==id{return view(s.state),nil}
+	if s.state.Selected!="" {
+		prior:=s.state.Versions[s.state.Selected].Version
+		candidate:=s.state.Versions[id].Version
+		if prior.NodeID!=candidate.NodeID||prior.InstallationID!=candidate.InstallationID{
+			return Snapshot{},ErrConflict
+		}
+	}
 	if len(s.state.Events)>=maxEvents{return Snapshot{},ErrConflict}
 	next:=clone(s.state)
 	next.Generation++
