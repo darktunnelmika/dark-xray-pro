@@ -5,7 +5,8 @@ type Language = "en" | "fa";
 type User = { id: string; username: string; role: "owner" | "representative"; representative_id: string };
 type Session = { authenticated: boolean; user: User; csrf_token: string; expires_unix: number };
 type Representative = { id: string; display_name: string; kind: string; enabled: boolean; volume_credit_bytes: number; unlimited_credit_units: number };
-type Client = { id: string; representative_id: string; name: string; plan_kind: string; ip_count: number; volume_bytes: number; duration_days: number; deployment_state: string; expires_unix: number };
+type Client = { id: string; representative_id: string; name: string; plan_kind: string; ip_count: number; volume_bytes: number; duration_days: number; deployment_state: string; expires_unix: number; archived: boolean };
+type ClientOperation = { event_id: string; client_id: string; representative_id: string; kind: string; reason: string; added_days: number; added_volume_bytes: number; volume_credit_debit: number; unlimited_credit_debit: number; created_unix: number };
 type ClientGroup = { id: string; representative_id: string; name: string; color: string; member_count: number; created_unix: number; updated_unix: number };
 type LedgerEvent = { event_id: string; kind: string; representative_id: string; object_id: string; reason: string; volume_delta_bytes: number; unlimited_delta_units: number };
 type Workspace = { user: User; balance: Representative; data_plane: "not_activated" };
@@ -57,6 +58,13 @@ const words = {
     groupRemove: "Remove member from group", groupSingleClient: "Client ID to detach",
     confirmGroup: "Delete this group? All clients and financial history will remain intact.",
     groupWarning: "Deleting a group never deletes clients, consumed traffic or credit history.",
+    manageClient: "Manage", clientLifecycle: "Renew and manage clients", renew: "Extend / add volume",
+    extraDays: "Additional days", extraVolume: "Additional volume (GB)",
+    archive: "Archive", disable: "Disable", enable: "Enable", stateAction: "Client action",
+    applyState: "Record state change", archiveConfirm: "Archive client? UUID, history, spent credit and group memberships remain preserved.",
+    clientOps: "Client operation history", archived: "Archived", chooseClient: "Choose an existing client",
+    safeLifecycle: "Enable only returns to pending Node Apply; no Xray service is activated.",
+    newClientReason: "Operation reason",
     createRep: "Create representative", repId: "Representative ID", displayName: "Display name",
     provision: "Set representative login", setLogin: "Create login", repUsername: "Representative username", repPassword: "New password (12+ characters)",
     grant: "Adjust representative credit", reason: "Reason", addVolume: "Volume delta (GB, +/-)", addUnits: "Unlimited-unit delta (+/-)",
@@ -88,6 +96,13 @@ const words = {
     groupRemove: "حذف عضو از گروه", groupSingleClient: "شناسه کلاینت برای جداسازی",
     confirmGroup: "این گروه حذف شود؟ کلاینت‌ها و سوابق مالی محفوظ می‌مانند.",
     groupWarning: "حذف گروه هرگز کلاینت‌ها، ترافیک مصرف‌شده و اعتبار تاریخی را پاک نمی‌کند.",
+    manageClient: "مدیریت", clientLifecycle: "تمدید و مدیریت کلاینت‌ها", renew: "تمدید / افزایش حجم",
+    extraDays: "روز اضافه", extraVolume: "حجم اضافه (گیگ)",
+    archive: "آرشیو", disable: "غیرفعال", enable: "فعال‌سازی رکورد", stateAction: "عملیات کلاینت",
+    applyState: "ثبت تغییر وضعیت", archiveConfirm: "کلاینت آرشیو شود؟ UUID، تاریخچه، اعتبار مصرف‌شده و عضویت گروه‌ها محفوظ می‌مانند.",
+    clientOps: "تاریخچه عملیات کلاینت", archived: "آرشیوشده", chooseClient: "انتخاب کلاینت",
+    safeLifecycle: "فعال‌سازی فقط رکورد را در انتظار Node Apply قرار می‌دهد؛ Xray فعال نمی‌شود.",
+    newClientReason: "دلیل عملیات",
     createRep: "ساخت نماینده", repId: "شناسه نماینده", displayName: "نام نمایشی",
     provision: "ساخت ورود نماینده", setLogin: "ثبت ورود", repUsername: "نام کاربری نماینده", repPassword: "رمز جدید (حداقل ۱۲ کاراکتر)",
     grant: "تغییر اعتبار نماینده", reason: "دلیل تغییر", addVolume: "تغییر اعتبار حجمی (گیگ، +/-)", addUnits: "تغییر اعتبار نامحدود (+/-)",
@@ -135,10 +150,12 @@ export default function BusinessWorkspace({ language }: { language: Language }) 
   const [clients, setClients] = useState<Client[] | null>(null);
   const [events, setEvents] = useState<LedgerEvent[] | null>(null);
   const [groups, setGroups] = useState<ClientGroup[] | null>(null);
+  const [clientOps, setClientOps] = useState<ClientOperation[] | null>(null);
   const [repOffset, setRepOffset] = useState(0);
   const [clientOffset, setClientOffset] = useState(0);
   const [eventOffset, setEventOffset] = useState(0);
   const [groupOffset, setGroupOffset] = useState(0);
+  const [clientOpsOffset, setClientOpsOffset] = useState(0);
   const [repId, setRepId] = useState("");
   const [repName, setRepName] = useState("");
   const [loginRep, setLoginRep] = useState("");
@@ -165,6 +182,14 @@ export default function BusinessWorkspace({ language }: { language: Language }) 
   const [groupEditName, setGroupEditName] = useState("");
   const [groupEditColor, setGroupEditColor] = useState("");
   const [unassignID, setUnassignID] = useState("");
+  const [lifeClientID, setLifeClientID] = useState("");
+  const [lifeDays, setLifeDays] = useState("30");
+  const [lifeVolumeGB, setLifeVolumeGB] = useState("0");
+  const [lifeReason, setLifeReason] = useState("");
+  const [lifeAction, setLifeAction] = useState<"disable" | "enable" | "archive">("disable");
+  const [lifeStateReason, setLifeStateReason] = useState("");
+  const pendingRenew = useRef<{ key: string; id: string } | null>(null);
+  const pendingState = useRef<{ key: string; id: string } | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -191,7 +216,7 @@ export default function BusinessWorkspace({ language }: { language: Language }) 
     const controller = new AbortController();
     const p = "?limit=50&offset=";
     const fetchData = async () => {
-      const [account, ownClients, ownEvents, ownerReps, ownGroups] = await Promise.all([
+      const [account, ownClients, ownEvents, ownerReps, ownGroups, lifecycle] = await Promise.all([
         api<Workspace>("/api/v1/workspace/me", { signal: controller.signal }),
         api<{ clients: Client[] }>("/api/v1/workspace/clients" + p + clientOffset, { signal: controller.signal }),
         api<{ events: LedgerEvent[] }>("/api/v1/workspace/events" + p + eventOffset, { signal: controller.signal }),
@@ -199,26 +224,27 @@ export default function BusinessWorkspace({ language }: { language: Language }) 
           ? api<{ representatives: Representative[] }>("/api/v1/workspace/representatives" + p + repOffset, { signal: controller.signal })
           : Promise.resolve(null),
         api<{ groups: ClientGroup[] }>("/api/v1/workspace/groups" + p + groupOffset, { signal: controller.signal }),
+        api<{ operations: ClientOperation[] }>("/api/v1/workspace/client-operations" + p + clientOpsOffset, { signal: controller.signal }),
       ]);
       if (controller.signal.aborted) return;
       if (!Array.isArray(ownClients.clients) || !Array.isArray(ownEvents.events) ||
-        (ownerReps !== null && !Array.isArray(ownerReps.representatives)) || !Array.isArray(ownGroups.groups)) {
+        (ownerReps !== null && !Array.isArray(ownerReps.representatives)) || !Array.isArray(ownGroups.groups) || !Array.isArray(lifecycle.operations)) {
         throw new Error("Malformed business response");
       }
       setMe(account); setClients(ownClients.clients); setEvents(ownEvents.events);
-      setReps(ownerReps?.representatives ?? null); setGroups(ownGroups.groups); setNotice(null);
+      setReps(ownerReps?.representatives ?? null); setGroups(ownGroups.groups); setClientOps(lifecycle.operations); setNotice(null);
     };
     void fetchData().catch((error: unknown) => {
       if (controller.signal.aborted) return;
       if (error instanceof ApiError && error.status === 401) {
-        setSession(null); setMode("signedout"); setMe(null); setReps(null); setClients(null); setEvents(null); setGroups(null);
+        setSession(null); setMode("signedout"); setMe(null); setReps(null); setClients(null); setEvents(null); setGroups(null); setClientOps(null);
         pendingCreditKey.current = null; pendingClientKey.current = null;
       } else {
         setNotice(words[language].unavailable);
       }
     });
     return () => controller.abort();
-  }, [session, refreshKey, clientOffset, eventOffset, repOffset, groupOffset, language]);
+  }, [session, refreshKey, clientOffset, eventOffset, repOffset, groupOffset, clientOpsOffset, language]);
 
   async function signIn(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); setNotice(null); setActionBusy(true);
@@ -314,6 +340,45 @@ export default function BusinessWorkspace({ language }: { language: Language }) 
         volume_bytes: volumeBytes, unlimited: clientKind === "unlimited",
       }, session.csrf_token);
       setClientId(""); setClientName(""); setClientOffset(0); pendingClientKey.current = null;
+    });
+  }
+
+  async function extendExistingClient(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!session || !lifeClientID.trim() || !lifeReason.trim()) { setNotice(t.missing); return; }
+    const client = clients?.find((c) => c.id === lifeClientID);
+    if (!client || client.archived) { setNotice(t.missing); return; }
+    const days = Number(lifeDays);
+    const volumeBytes = bytesFromGB(lifeVolumeGB, true);
+    if (!Number.isSafeInteger(days) || days < 0 || days > 3650 || volumeBytes === null || volumeBytes < 0 ||
+      (days === 0 && volumeBytes === 0) || (client.plan_kind === "unlimited" && volumeBytes !== 0)) {
+      setNotice(t.missing); return;
+    }
+    const payload = { client_id: client.id, additional_days: days,
+      additional_volume_bytes: volumeBytes, reason: lifeReason.trim() };
+    const key = JSON.stringify(payload);
+    const eventID = pendingRenew.current?.key === key ? pendingRenew.current.id : uid();
+    pendingRenew.current = { key, id: eventID };
+    await runAction(async () => {
+      await mutation("/api/v1/workspace/clients/" + encodeURIComponent(client.id) + "/extend",
+        { event_id: eventID, ...payload }, session.csrf_token);
+      pendingRenew.current = null; setLifeReason("");
+    });
+  }
+  async function changeExistingClientState(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!session || !lifeClientID || !lifeStateReason.trim()) { setNotice(t.missing); return; }
+    const client = clients?.find((c) => c.id === lifeClientID);
+    if (!client || client.archived) { setNotice(t.missing); return; }
+    if (lifeAction === "archive" && !window.confirm(t.archiveConfirm)) return;
+    const payload = { client_id: client.id, action: lifeAction, reason: lifeStateReason.trim() };
+    const key = JSON.stringify(payload);
+    const eventID = pendingState.current?.key === key ? pendingState.current.id : uid();
+    pendingState.current = { key, id: eventID };
+    await runAction(async () => {
+      await mutation("/api/v1/workspace/clients/" + encodeURIComponent(client.id) + "/state",
+        { event_id: eventID, ...payload }, session.csrf_token);
+      pendingState.current = null; setLifeStateReason("");
     });
   }
 
@@ -453,10 +518,53 @@ export default function BusinessWorkspace({ language }: { language: Language }) 
       <div className="business-panel">
         <h3>{t.clients}</h3>
         {clients && clients.length ? <div className="business-records">{clients.map((c) => <div key={c.id}>
-          <strong>{c.name} ({c.id})</strong><span>{c.plan_kind} · {c.duration_days}d · {dateTime(c.expires_unix, language)} · {c.deployment_state}</span>
+          <strong>{c.name} ({c.id})</strong><span>{c.plan_kind} · {c.duration_days}d · {dateTime(c.expires_unix, language)} · {c.deployment_state}{c.archived ? " · " + t.archived : ""}</span>
+          <button type="button" className="business-manage-client" onClick={() => setLifeClientID(c.id)}>{t.manageClient}</button>
         </div>)}</div> : <p>{clients ? t.empty : t.loading}</p>}
         <div className="business-pagination"><button disabled={clientOffset === 0} onClick={() => setClientOffset((x) => Math.max(0, x - 50))}>{t.previous}</button>
           <button disabled={!clients || clients.length < 50} onClick={() => setClientOffset((x) => x + 50)}>{t.next}</button></div>
+      </div>
+      <div className="business-panel">
+        <h3>{t.clientLifecycle}</h3>
+        <label>{t.chooseClient}
+          <select value={lifeClientID} onChange={(e) => setLifeClientID(e.target.value)}>
+            <option value="">{t.chooseClient}</option>
+            {clients?.map((c) => <option key={c.id} value={c.id} disabled={c.archived}>{c.name} ({c.id})</option>)}
+          </select>
+        </label>
+        <p className="business-warning">{t.safeLifecycle}</p>
+      </div>
+      <div className="business-form-grid">
+        <form className="business-panel" onSubmit={(e) => { void extendExistingClient(e); }}>
+          <h3>{t.renew}</h3>
+          <label>{t.extraDays}<input type="number" step="1" min="0" max="3650"
+            value={lifeDays} onChange={(e) => setLifeDays(e.target.value)} required/></label>
+          <label>{t.extraVolume}<input type="number" step="any" min="0"
+            value={lifeVolumeGB} onChange={(e) => setLifeVolumeGB(e.target.value)} required/></label>
+          <label>{t.newClientReason}<input value={lifeReason} onChange={(e) => setLifeReason(e.target.value)} required/></label>
+          <button type="submit" disabled={actionBusy || !lifeClientID}>{t.renew}</button>
+        </form>
+        <form className="business-panel" onSubmit={(e) => { void changeExistingClientState(e); }}>
+          <h3>{t.stateAction}</h3>
+          <label>{t.stateAction}<select value={lifeAction} onChange={(e) => setLifeAction(e.target.value as "disable" | "enable" | "archive")}>
+            <option value="disable">{t.disable}</option><option value="enable">{t.enable}</option><option value="archive">{t.archive}</option>
+          </select></label>
+          <label>{t.newClientReason}<input value={lifeStateReason} onChange={(e) => setLifeStateReason(e.target.value)} required/></label>
+          <button type="submit" disabled={actionBusy || !lifeClientID}>{t.applyState}</button>
+        </form>
+      </div>
+      <div className="business-panel">
+        <h3>{t.clientOps}</h3>
+        {clientOps && clientOps.length ? <div className="business-records">
+          {clientOps.map((op) => <div key={op.event_id}>
+            <strong>{op.kind} · {op.client_id}</strong>
+            <span>{op.reason} · {op.added_days}d · +{gb(op.added_volume_bytes)} · -{op.unlimited_credit_debit} {t.unlimited}</span>
+          </div>)}
+        </div> : <p>{clientOps ? t.empty : t.loading}</p>}
+        <div className="business-pagination">
+          <button disabled={clientOpsOffset === 0} onClick={() => setClientOpsOffset((x) => Math.max(0, x - 50))}>{t.previous}</button>
+          <button disabled={!clientOps || clientOps.length < 50} onClick={() => setClientOpsOffset((x) => x + 50)}>{t.next}</button>
+        </div>
       </div>
       <div className="business-panel">
         <h3><CreditCard size={17}/>{t.history}</h3>
