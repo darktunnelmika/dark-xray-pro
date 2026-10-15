@@ -165,3 +165,7 @@ Still missing:
 No stage output authorizes activation or retirement of old Nodes. The
 original DARK XRAY HUB is not contacted, and **nothing is deployed to
 either real production or new test VPS** by GitHub changes in this phase.
+
+## Phase 7 follow-on — optional loopback canary
+
+The same paired, encrypted and pinned stage can optionally run a disposable checksum-verified Xray-core on random **localhost-only** ports. This confirms ephemeral listener startup without modifying an active Xray process. The status remains `offline_syntax_validated_not_active`, with separate `canary_attempted` and `canary_loopback_bound` fields; no subscription or billable traffic changes. [Phase 7 runbook](xray-canary-phase7.md).
