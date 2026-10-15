@@ -174,6 +174,8 @@ func validMeta(m Metadata)bool{
   m.NodeID==""||len(m.Listeners)==0||m.Revision==0||m.CanActivate||
   !m.NeedsDataPlaneProof||!m.NeedsSubscriptionCommit||
   m.CreatedAt.IsZero()||m.UpdatedAt.IsZero(){return false}
+ if m.CanaryLoopbackBound && (!m.CanaryAttempted||m.Status!=Verified){return false}
+ if m.Status==Pending&&(m.CanaryAttempted||m.CanaryLoopbackBound){return false}
  switch m.Status{case Pending,Verified,Rejected:return true}
  return false
 }
