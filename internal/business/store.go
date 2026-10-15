@@ -153,6 +153,13 @@ func Open(path string)(*Store,error){
  if err=db.QueryRow("PRAGMA user_version").Scan(&version);err!=nil{return fail(err)}
  if version!=0 && version!=SchemaVersion{return fail(fmt.Errorf("business schema version %d is not supported: %w",version,ErrUnavailable))}
  if version==0 {
+  // A pre-existing legacy/foreign SQLite file is NOT an empty PRO business
+  // database even if its user_version is zero. Refuse silent cross-schema
+  // adoption or CREATE TABLE mutations inside such a file.
+  var foreignTable string
+  scanErr:=db.QueryRow("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' LIMIT 1").Scan(&foreignTable)
+  if scanErr==nil{return fail(ErrUnsafePath)}
+  if !errors.Is(scanErr,sql.ErrNoRows){return fail(scanErr)}
   if err=bootstrap(db);err!=nil{return fail(err)}
  }
  return &Store{db:db},nil
