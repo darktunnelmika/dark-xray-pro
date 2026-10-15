@@ -120,11 +120,24 @@ func randomUUID()(string,error){
  return raw[:8]+"-"+raw[8:12]+"-"+raw[12:16]+"-"+raw[16:20]+"-"+raw[20:],nil
 }
 
+// Refuse symlinked ancestor directories BEFORE creating files. This also
+// rejects a renamed new-LAB state directory that points at legacy storage.
+func checkPathAncestors(target string)error{
+ for dir:=filepath.Dir(target);dir!="/"&&dir!=".";dir=filepath.Dir(dir){
+  info,err:=os.Lstat(dir)
+  if errors.Is(err,os.ErrNotExist){continue}
+  if err!=nil{return err}
+  if !info.IsDir()||info.Mode()&os.ModeSymlink!=0{return ErrUnsafePath}
+ }
+ return nil
+}
 func Open(path string)(*Store,error){
  if strings.TrimSpace(path)=="" {return nil,ErrUnsafePath}
  abs,err:=filepath.Abs(path);if err!=nil{return nil,err}
+ if err=checkPathAncestors(abs);err!=nil{return nil,err}
  parent:=filepath.Dir(abs)
  if err:=os.MkdirAll(parent,0700);err!=nil{return nil,err}
+ if err=checkPathAncestors(abs);err!=nil{return nil,err}
  p,err:=os.Lstat(parent)
  if err!=nil || !p.IsDir() || p.Mode().Perm()&0077!=0 {return nil,ErrUnsafePath}
  fd,err:=os.OpenFile(abs,os.O_CREATE|os.O_EXCL|os.O_RDWR,0600)
