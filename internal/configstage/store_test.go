@@ -7,6 +7,7 @@ import (
  "encoding/json"
  "errors"
  "os"
+ "reflect"
  "path/filepath"
  "strings"
  "sync"
@@ -95,7 +96,7 @@ func TestSealedCandidateDurableWithoutPlaintextLeak(t *testing.T){
  st,err:=os.Stat(path)
  if err!=nil||st.Mode().Perm()!=0600{t.Fatal("stage file permissions unsafe",err)}
  got,plaintext,ok,err:=s.PendingFor(op.NewNodeID,op.InstallationID)
- if err!=nil||!ok||got!=m||!bytes.Equal(plaintext,c.Config){
+ if err!=nil||!ok||!reflect.DeepEqual(got,m)||!bytes.Equal(plaintext,c.Config){
   t.Fatal("paired Agent couldn't fetch exactly hashed private candidate",err)
  }
  if _,_,ok,err:=s.PendingFor("old-lab",op.InstallationID);ok||err!=nil{t.Fatal("old node accessed new config")}
@@ -125,7 +126,7 @@ func TestIdempotentStageAndProofCannotActivate(t *testing.T){
  a,err:=s.Create(op,c,testBinarySHA)
  if err!=nil{t.Fatal(err)}
  b,err:=s.Create(op,c,testBinarySHA)
- if err!=nil||a!=b{t.Fatalf("reissued identical stage was not idempotent: %v",err)}
+ if err!=nil||!reflect.DeepEqual(a,b){t.Fatalf("reissued identical stage was not idempotent: %v",err)}
  modified:=c
  modified.Config=append([]byte(nil),c.Config...)
  modified.Config[0]='!'
@@ -149,7 +150,7 @@ func TestIdempotentStageAndProofCannotActivate(t *testing.T){
   t.Fatalf("syntax validation illegally published live routes: %+v",result)
  }
  replay,err:=s.Report(p)
- if err!=nil||replay!=result{t.Fatalf("lost ACK wasn't idempotent: %v",err)}
+ if err!=nil||!reflect.DeepEqual(replay,result){t.Fatalf("lost ACK wasn't idempotent: %v",err)}
  if _,_,ok,err:=s.PendingFor(op.NewNodeID,op.InstallationID);ok||err!=nil{
   t.Fatal("completed syntax proof was reissued for validation")
  }
@@ -238,4 +239,33 @@ func TestConcurrentDuplicateStageNeverChangesIdentity(t *testing.T){
   }
  }
  if len(s.List())!=1{t.Fatal("concurrency created duplicate staged configs")}
+}
+
+func TestListenerMetadataBoundToEncryptedCandidateAndDetachedFromCaller(t *testing.T){
+ s,key,path:=initStore(t)
+ op,c:=fixture(t)
+ meta,err:=s.Create(op,c,testBinarySHA)
+ if err!=nil{t.Fatal(err)}
+ if len(meta.Listeners)!=2{t.Fatalf("expected independently tagged Direct+Tunnel: %+v",meta.Listeners)}
+ meta.Listeners[0].Tag="unauthorized-change"
+ fromDisk,err:=s.Get(op.ID)
+ if err!=nil{t.Fatal(err)}
+ if fromDisk.Listeners[0].Tag=="unauthorized-change"{
+  t.Fatal("public metadata changed confidential backing record")
+ }
+ buf,err:=os.ReadFile(path)
+ if err!=nil{t.Fatal(err)}
+ var disk map[string]any
+ if err:=json.Unmarshal(buf,&disk);err!=nil{t.Fatal(err)}
+ entry:=disk["stages"].(map[string]any)[op.ID].(map[string]any)
+ record:=entry["metadata"].(map[string]any)
+ listeners:=record["listeners"].([]any)
+ one:=listeners[0].(map[string]any)
+ one["tag"]="forged-route-tag"
+ tampered,err:=json.Marshal(disk)
+ if err!=nil{t.Fatal(err)}
+ if err:=os.WriteFile(path,tampered,0600);err!=nil{t.Fatal(err)}
+ if _,err:=Open(path,key,nil);!errors.Is(err,ErrUnsafe){
+  t.Fatalf("modifying Listener metadata did not invalidate AES authentication: %v",err)
+ }
 }
