@@ -3,9 +3,10 @@ import {
   Activity, ArrowDownLeft, ArrowUpRight, CheckCircle2, ChevronRight,
   CircleHelp, Globe2, HardDrive, LayoutDashboard,
   Menu, Moon, Network, RadioTower, Server, Settings2, ShieldCheck,
-  Sun, Waypoints, X, Zap,
+  Sun, Waypoints, X,
 } from "lucide-react";
 import { getFleet, type FleetSnapshot, type NodeSnapshot } from "./api";
+import InboundPlanner from "./InboundPlanner";
 
 type Page = "overview" | "nodes" | "inbounds" | "settings";
 type Theme = "light" | "dark" | "system";
@@ -336,15 +337,7 @@ export default function App() {
             </>
           )}
 
-          {page === "inbounds" && (
-            <div className="placeholder-panel">
-              <div className="placeholder-icon"><Waypoints size={30} strokeWidth={1.6} /></div>
-              <span className="eyebrow">{t.soon}</span>
-              <h2>{t.inboundsEmpty}</h2>
-              <p>{t.inboundsNote}</p>
-              <div className="roadmap-items"><span><Zap size={16} />{t.swap}</span><span><CheckCircle2 size={16} />{t.replacement}</span></div>
-            </div>
-          )}
+          {page === "inbounds" && <InboundPlanner nodes={fleet?.nodes ?? []} language={language} />}
 
           {page === "settings" && (
             <div className="settings-list">
