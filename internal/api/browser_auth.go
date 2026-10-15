@@ -10,6 +10,7 @@ import (
  "net/http"
  "net/url"
  "sync"
+ "strings"
  "time"
 
  "github.com/darktunnelmika/dark-xray-pro/internal/business"
@@ -23,15 +24,25 @@ type loginGate struct {
  mu sync.Mutex
  window time.Time
  attempts int
+ perUser map[string]int
  parallel chan struct{}
 }
-func newLoginGate()*loginGate{return &loginGate{parallel:make(chan struct{},3)}}
-func (g *loginGate) admit()bool{
+func newLoginGate()*loginGate{return &loginGate{
+ parallel:make(chan struct{},3),perUser:make(map[string]int),
+}}
+func (g *loginGate) admit(username string)bool{
+ username=strings.ToLower(username)
  g.mu.Lock()
  now:=time.Now()
- if now.Sub(g.window)>time.Minute{g.window=now;g.attempts=0}
- if g.attempts>=24 {g.mu.Unlock();return false}
+ if now.Sub(g.window)>=time.Minute{
+  g.window=now;g.attempts=0;g.perUser=make(map[string]int)
+ }
+ if g.attempts>=240||g.perUser[username]>=10||
+   (len(g.perUser)>=4096&&g.perUser[username]==0){
+  g.mu.Unlock();return false
+ }
  g.attempts++
+ g.perUser[username]++
  g.mu.Unlock()
  select {
  case g.parallel<-struct{}{}:return true
@@ -126,12 +137,6 @@ func(s *Server) attachBrowserAuth(mux *http.ServeMux){
    respond(w,http.StatusForbidden,map[string]string{"error":"same_origin_json_required"})
    return
   }
-  if !s.loginGate.admit(){
-   w.Header().Set("Retry-After","60")
-   respond(w,http.StatusTooManyRequests,map[string]string{"error":"login_temporarily_rate_limited"})
-   return
-  }
-  defer s.loginGate.release()
   var input struct{
    Username string `json:"username"`
    Password string `json:"password"`
@@ -140,6 +145,12 @@ func(s *Server) attachBrowserAuth(mux *http.ServeMux){
    respond(w,http.StatusBadRequest,map[string]string{"error":"invalid_request"})
    return
   }
+  if !s.loginGate.admit(input.Username){
+   w.Header().Set("Retry-After","60")
+   respond(w,http.StatusTooManyRequests,map[string]string{"error":"login_temporarily_rate_limited"})
+   return
+  }
+  defer s.loginGate.release()
   state,err:=s.business.Login(r.Context(),input.Username,input.Password)
   if err!=nil{
    if errors.Is(err,business.ErrUnauthenticated){
