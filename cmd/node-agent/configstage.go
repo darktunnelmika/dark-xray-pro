@@ -10,12 +10,14 @@ import (
  "errors"
  "fmt"
  "io"
+ "os"
  "net/http"
  "net/url"
  "strings"
 
  "github.com/darktunnelmika/dark-xray-pro/internal/configstage"
  "github.com/darktunnelmika/dark-xray-pro/internal/xrayconfig"
+ "github.com/darktunnelmika/dark-xray-pro/internal/xraycanary"
 )
 
 func proofCode(err error)string {
@@ -126,6 +128,12 @@ func pollConfigStage(ctx context.Context,client *http.Client,endpoint,nodeID,
    return errors.New("offline validator returned inconsistent evidence")
   }
   proof.SyntaxValid=true
+  if os.Getenv("DARK_PRO_ENABLE_LOOPBACK_CANARY")=="1" {
+   proof.CanaryAttempted=true
+   canary,canaryErr:=xraycanary.Run(ctx,candidate,xrayBinary,trustedXraySHA)
+   proof.CanaryLoopbackBound=canaryErr==nil&&canary.SyntaxValidated&&
+    canary.LoopbackBound&&!canary.CanActivate&&!canary.DataPlaneVerified
+  }
  }else{
   proof.ErrorCode=proofCode(err)
  }
@@ -149,6 +157,8 @@ func pollConfigStage(ctx context.Context,client *http.Client,endpoint,nodeID,
  if ack.OperationID!=m.OperationID||ack.InstallationID!=installation||
   ack.ConfigSHA256!=m.ConfigSHA256||ack.TrustedXraySHA256!=trustedXraySHA||
   ack.CanActivate||!ack.NeedsDataPlaneProof||!ack.NeedsSubscriptionCommit||
+  ack.CanaryAttempted!=proof.CanaryAttempted||
+  ack.CanaryLoopbackBound!=proof.CanaryLoopbackBound||
   (proof.SyntaxValid&&ack.Status!=configstage.Verified)||
   (!proof.SyntaxValid&&ack.Status!=configstage.Rejected){
   return errors.New("HUB returned an untrusted Xray validation acknowledgment")
