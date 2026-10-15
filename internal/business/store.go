@@ -89,6 +89,7 @@ type Event struct {
  Kind string `json:"kind"`
  RepresentativeID string `json:"representative_id"`
  ObjectID string `json:"object_id"`
+ Reason string `json:"reason"`
  VolumeDeltaBytes int64 `json:"volume_delta_bytes"`
  UnlimitedDeltaUnits int64 `json:"unlimited_delta_units"`
  CreatedUnix int64 `json:"created_unix"`
@@ -163,7 +164,7 @@ func bootstrap(db *sql.DB)error{
   "CREATE TABLE IF NOT EXISTS representatives (id TEXT PRIMARY KEY, display_name TEXT NOT NULL, kind TEXT NOT NULL CHECK(kind IN ('owner','representative')), enabled INTEGER NOT NULL DEFAULT 1 CHECK(enabled IN(0,1)), volume_credit_bytes INTEGER NOT NULL DEFAULT 0 CHECK(volume_credit_bytes>=0 AND volume_credit_bytes<=1000000000000000000), unlimited_credit_units INTEGER NOT NULL DEFAULT 0 CHECK(unlimited_credit_units>=0 AND unlimited_credit_units<=1000000000), created_unix INTEGER NOT NULL)",
   "CREATE TABLE IF NOT EXISTS clients (id TEXT PRIMARY KEY, representative_id TEXT NOT NULL REFERENCES representatives(id), display_name TEXT NOT NULL, uuid TEXT NOT NULL UNIQUE, plan_kind TEXT NOT NULL CHECK(plan_kind IN ('volume','unlimited')), ip_count INTEGER NOT NULL CHECK(ip_count BETWEEN 0 AND 1000), volume_bytes INTEGER NOT NULL CHECK(volume_bytes>=0), duration_days INTEGER NOT NULL CHECK(duration_days BETWEEN 1 AND 3650), charged_volume_bytes INTEGER NOT NULL CHECK(charged_volume_bytes>=0), charged_unlimited_units INTEGER NOT NULL CHECK(charged_unlimited_units>=0), created_unix INTEGER NOT NULL, expires_unix INTEGER NOT NULL, deployment_state TEXT NOT NULL CHECK(deployment_state IN ('pending_node_apply','disabled')))",
   "CREATE INDEX IF NOT EXISTS clients_rep_id ON clients(representative_id,id)",
-  "CREATE TABLE IF NOT EXISTS events (event_id TEXT PRIMARY KEY, fingerprint TEXT NOT NULL, kind TEXT NOT NULL CHECK(kind IN ('credit_adjustment','client_created')), representative_id TEXT NOT NULL REFERENCES representatives(id), object_id TEXT NOT NULL, volume_delta_bytes INTEGER NOT NULL, unlimited_delta_units INTEGER NOT NULL, created_unix INTEGER NOT NULL)",
+  "CREATE TABLE IF NOT EXISTS events (event_id TEXT PRIMARY KEY, fingerprint TEXT NOT NULL, kind TEXT NOT NULL CHECK(kind IN ('credit_adjustment','client_created')), representative_id TEXT NOT NULL REFERENCES representatives(id), object_id TEXT NOT NULL, reason TEXT NOT NULL, volume_delta_bytes INTEGER NOT NULL, unlimited_delta_units INTEGER NOT NULL, created_unix INTEGER NOT NULL)",
   "CREATE INDEX IF NOT EXISTS events_rep_created ON events(representative_id,created_unix,event_id)",
   "CREATE TRIGGER IF NOT EXISTS events_immutable_update BEFORE UPDATE ON events BEGIN SELECT RAISE(ABORT,'business events are append-only'); END",
   "CREATE TRIGGER IF NOT EXISTS events_immutable_delete BEFORE DELETE ON events BEGIN SELECT RAISE(ABORT,'business events are append-only'); END",
@@ -253,7 +254,7 @@ func (s *Store)AdjustCredits(ctx context.Context,c CreditChange)(Representative,
  unlimited,ok:=safeAdd(r.UnlimitedCreditUnits,c.UnlimitedDeltaUnits,MaxUnlimitedCredit)
  if !ok{return Representative{},ErrInsufficient}
  if _,err=tx.ExecContext(ctx,"UPDATE representatives SET volume_credit_bytes=?, unlimited_credit_units=? WHERE id=?",volume,unlimited,c.RepresentativeID);err!=nil{return Representative{},err}
- _,err=tx.ExecContext(ctx,"INSERT INTO events(event_id,fingerprint,kind,representative_id,object_id,volume_delta_bytes,unlimited_delta_units,created_unix) VALUES(?,?,'credit_adjustment',?,'',?,?,?)",c.EventID,hash,c.RepresentativeID,c.VolumeDeltaBytes,c.UnlimitedDeltaUnits,time.Now().UTC().Unix())
+ _,err=tx.ExecContext(ctx,"INSERT INTO events(event_id,fingerprint,kind,representative_id,object_id,reason,volume_delta_bytes,unlimited_delta_units,created_unix) VALUES(?,?,'credit_adjustment',?,'',?,?,?,?)",c.EventID,hash,c.RepresentativeID,c.Reason,c.VolumeDeltaBytes,c.UnlimitedDeltaUnits,time.Now().UTC().Unix())
  if err!=nil{return Representative{},err}
  if err=tx.Commit();err!=nil{return Representative{},err}
  r.VolumeCreditBytes=volume;r.UnlimitedCreditUnits=unlimited
@@ -341,14 +342,14 @@ func (s *Store)CreateClient(ctx context.Context,n NewClient)(Client,error){
  if err!=nil{return Client{},ErrConflict}
  volumeDelta,unitDelta:=int64(0),int64(0)
  if r.Kind=="representative"{volumeDelta,unitDelta=-chargeVolume,-chargeUnits}
- _,err=tx.ExecContext(ctx,"INSERT INTO events(event_id,fingerprint,kind,representative_id,object_id,volume_delta_bytes,unlimited_delta_units,created_unix) VALUES(?,?,'client_created',?,?,?,?,?)",n.EventID,hash,r.ID,c.ID,volumeDelta,unitDelta,now)
+ _,err=tx.ExecContext(ctx,"INSERT INTO events(event_id,fingerprint,kind,representative_id,object_id,reason,volume_delta_bytes,unlimited_delta_units,created_unix) VALUES(?,?,'client_created',?,?,?,?,?,?)",n.EventID,hash,r.ID,c.ID,"client_created",volumeDelta,unitDelta,now)
  if err!=nil{return Client{},err}
  if err=tx.Commit();err!=nil{return Client{},err}
  return c,nil
 }
 func (s *Store)ListEvents(ctx context.Context,repID string,limit,offset int)([]Event,error){
  if (repID!=""&&!idRE.MatchString(repID))||limit<1||limit>200||offset<0||offset>1_000_000{return nil,ErrInvalid}
- q:="SELECT event_id,kind,representative_id,object_id,volume_delta_bytes,unlimited_delta_units,created_unix FROM events"
+ q:="SELECT event_id,kind,representative_id,object_id,reason,volume_delta_bytes,unlimited_delta_units,created_unix FROM events"
  args:=[]any{}
  if repID!=""{q+=" WHERE representative_id=?";args=append(args,repID)}
  q+=" ORDER BY created_unix DESC,event_id LIMIT ? OFFSET ?"
@@ -356,6 +357,6 @@ func (s *Store)ListEvents(ctx context.Context,repID string,limit,offset int)([]E
  rows,err:=s.db.QueryContext(ctx,q,args...);if err!=nil{return nil,err}
  defer rows.Close()
  out:=make([]Event,0)
- for rows.Next(){var e Event;if err:=rows.Scan(&e.EventID,&e.Kind,&e.RepresentativeID,&e.ObjectID,&e.VolumeDeltaBytes,&e.UnlimitedDeltaUnits,&e.CreatedUnix);err!=nil{return nil,err};out=append(out,e)}
+ for rows.Next(){var e Event;if err:=rows.Scan(&e.EventID,&e.Kind,&e.RepresentativeID,&e.ObjectID,&e.Reason,&e.VolumeDeltaBytes,&e.UnlimitedDeltaUnits,&e.CreatedUnix);err!=nil{return nil,err};out=append(out,e)}
  return out,rows.Err()
 }
