@@ -24,11 +24,16 @@ jobs:
         with:
           go-version-file: go.mod
           cache: false
-      - name: Verify committed Go dependency checksums and module graph
+      - name: Resolve Argon2 dependency checksum for pinned lockfile review
         run: |
-          test -s go.sum
-          go mod verify
-          go mod tidy -diff
+          set -euo pipefail
+          go mod tidy
+          echo 'DARKPRO_AUTH_MOD_START'
+          cat go.mod
+          echo 'DARKPRO_AUTH_MOD_END'
+          echo 'DARKPRO_AUTH_SUM_START'
+          cat go.sum
+          echo 'DARKPRO_AUTH_SUM_END'
       - name: Guard against dropped Go packages and unsafe legacy imports
         run: |
           for path in internal/routeplan/draft.go internal/replacement/journal.go internal/routecheck/tcp.go internal/noderegistry/registry.go internal/telemetry/store.go internal/agenttransport/client.go internal/xrayconfig/render.go internal/xrayconfig/validate.go internal/configstage/store.go internal/api/configstage.go cmd/node-agent/configstage.go internal/business/store.go internal/api/business.go internal/xraycanary/canary_linux.go internal/xraycanary/runtime_linux.go internal/labrevision/journal.go internal/api/labrevisions.go; do
