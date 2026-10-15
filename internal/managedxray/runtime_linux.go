@@ -27,6 +27,7 @@ func SignLease(key []byte,l Lease)(Lease,error){
 }
 type Options struct{Directory string;StateKey []byte;LeaseKey []byte;NodeID string;InstallationID string;ListenIP string;Binary string;BinarySHA string;ReservedPorts []uint16}
 type Snapshot struct{
+ NoListeners bool `json:"no_listeners"`;
  ActiveSequence uint64 `json:"active_sequence"`;ActiveSHA string `json:"active_sha"`;SavedSequence uint64 `json:"saved_sequence"`;SavedSHA string `json:"saved_sha"`
  PreviousSHA string `json:"previous_sha"`;Highwater uint64 `json:"highwater"`;Phase string `json:"phase"`;ProcessReady bool `json:"process_ready"`
  LeaseExpires int64 `json:"lease_expires_unix_nano"`;DataPlaneVerified bool `json:"data_plane_verified"`;SubscriptionPublished bool `json:"subscription_published"`
@@ -65,7 +66,7 @@ func(r *Runtime)start(ctx context.Context,v *savedRevision,deadline time.Time)(*
 func(r *Runtime)snapshot()Snapshot{
  s:=Snapshot{Phase:r.state.Phase,Highwater:r.state.Highwater}
  if r.state.Good!=nil{s.SavedSequence=r.state.Good.Sequence;s.SavedSHA=r.state.Good.SHA};if r.state.Previous!=nil{s.PreviousSHA=r.state.Previous.SHA}
- if r.active!=nil&&!r.process.dead()&&time.Now().Before(r.deadline){s.ActiveSequence=r.active.Sequence;s.ActiveSHA=r.active.SHA;s.LeaseExpires=r.lease.Expires;s.ProcessReady=r.process.bound(r.active.Listeners)}
+ if r.active!=nil&&!r.process.dead()&&time.Now().Before(r.deadline){s.NoListeners=r.active.NoListeners;s.ActiveSequence=r.active.Sequence;s.ActiveSHA=r.active.SHA;s.LeaseExpires=r.lease.Expires;s.ProcessReady=r.process.bound(r.active.Listeners)}
  return s
 }
 func(r *Runtime)Snapshot()Snapshot{r.mu.Lock();defer r.mu.Unlock();return r.snapshot()}
@@ -82,7 +83,9 @@ func(r *Runtime)Apply(ctx context.Context,v Revision,l Lease)(Snapshot,error){
  if ctx.Err()!=nil||!r.validLease(l,saved){return r.snapshot(),ErrLease}
  next:=r.state;next.Highwater=saved.Sequence;next.DesiredSHA=saved.SHA;next.DesiredManifest=saved.Manifest;next.Pending=saved;next.Phase="applying";next.LastLeaseIssued=l.Issued
  if err:=r.persist(next);err!=nil{return r.snapshot(),err};if r.afterIntent!=nil{r.afterIntent()}
- old:=r.state.Good;oldLease,oldDeadline:=r.lease,r.deadline;r.process.stop();r.process=nil;r.active=nil
+ old:=r.state.Good;oldLease,oldDeadline:=r.lease,r.deadline
+ if removesAuthority(old,saved){oldLease=Lease{};oldDeadline=time.Time{}}
+ r.process.stop();r.process=nil;r.active=nil
  p,err:=startChild(ctx,saved.candidate(),r.options.Binary,leaseDeadline(l))
  if err==nil&&!r.validLease(l,saved){p.stop();p=nil;err=ErrLease}
  if err!=nil{
@@ -94,6 +97,7 @@ func(r *Runtime)Apply(ctx context.Context,v Revision,l Lease)(Snapshot,error){
   if e:=r.persist(next);e!=nil{return r.snapshot(),e};return r.snapshot(),err
  }
  r.process=p;r.active=saved;r.previousLease=oldLease;r.previousDeadline=oldDeadline;r.lease=l;r.deadline=leaseDeadline(l)
+ if saved.NoListeners{r.previousLease=Lease{};r.previousDeadline=time.Time{}}
  next=r.state;next.Previous=old;next.Good=saved;next.Pending=nil;next.Phase="ready"
  if err:=r.persist(next);err!=nil{return r.snapshot(),err};return r.snapshot(),nil
 }

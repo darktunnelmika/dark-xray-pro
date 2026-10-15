@@ -41,7 +41,7 @@ func ValidateOffline(ctx context.Context, c Candidate, binaryPath, expectedBinar
 	if c.CanActivate||!c.RequiresXrayTest||!c.RequiresDataPlaneProof||
 		!c.RequiresSubscriptionCommit||len(c.Config)==0||
 		len(c.Config)>MaxCandidateBytes||len(c.SHA256)!=64||
-		len(c.ManifestSHA256)!=64||len(c.Listeners)==0 {
+		len(c.ManifestSHA256)!=64||(len(c.Listeners)==0&&!IsStoppedCandidate(c))||(c.NoListeners&&!IsStoppedCandidate(c)) {
 		return empty,ErrCandidateInvalid
 	}
 	h:=sha256.Sum256(c.Config)

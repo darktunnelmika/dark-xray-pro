@@ -33,7 +33,7 @@ type User struct{UUID string `json:"uuid"`;Email string `json:"email"`}
 type Profile struct{InboundID uint64 `json:"inbound_id"`;Transport string `json:"transport"`;GRPCService string `json:"grpc_service,omitempty"`;RealityTarget string `json:"reality_target"`;ServerNames []string `json:"server_names"`;RealityPrivateKey string `json:"reality_private_key"`;ShortIDs []string `json:"short_ids"`;Users []User `json:"users"`}
 type Listener struct{InboundID uint64 `json:"inbound_id"`;NodePort uint16 `json:"node_port"`;Kind string `json:"kind"`;Tag string `json:"tag"`;Attribution string `json:"attribution"`}
 type Candidate struct{
- Config []byte `json:"-"`;SHA256 string `json:"sha256"`;ManifestSHA256 string `json:"manifest_sha256"`;Listeners []Listener `json:"listeners"`
+ Config []byte `json:"-"`;NoListeners bool `json:"no_listeners,omitempty"`;SHA256 string `json:"sha256"`;ManifestSHA256 string `json:"manifest_sha256"`;Listeners []Listener `json:"listeners"`
  CanActivate bool `json:"can_activate"`;RequiresXrayTest bool `json:"requires_xray_test"`;RequiresDataPlaneProof bool `json:"requires_data_plane_proof"`;RequiresSubscriptionCommit bool `json:"requires_subscription_commit"`
 }
 func validDNS(name string)bool{

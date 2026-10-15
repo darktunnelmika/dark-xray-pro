@@ -17,6 +17,8 @@ import (
  "os"
  "path/filepath"
  "strings"
+ "strconv"
+ "time"
  "testing"
  "github.com/darktunnelmika/dark-xray-pro/internal/agenttransport"
  "github.com/darktunnelmika/dark-xray-pro/internal/business"
@@ -69,6 +71,18 @@ func nativeAPIExercise(t *testing.T,binary,pin string){
  raw,e:=base64.StdEncoding.DecodeString(delivery.ConfigBase64);if e!=nil{t.Fatal(e)};if bytes.Contains(raw,[]byte(c.UUID))||!bytes.Contains(raw,[]byte("\"clients\":[]")){t.Fatal("revoked UUID still active in delivered config")}
  runtime.Close();restarted,e:=managedxray.Open(o);if e!=nil{t.Fatal(e)};defer restarted.Close();if restarted.Snapshot().ProcessReady{t.Fatal("reboot invented active runtime")}
  recovered,e:=restarted.Sync(ctx,client,endpoint);if e!=nil||!recovered.ProcessReady||recovered.ActiveSHA!=revoked.ActiveSHA||recovered.ActiveSequence!=2{t.Fatalf("fresh pinned TLS recovery failed: %+v %v",recovered,e)}
+ // Owner lifecycle travels through the same pinned TLS Agent, including the last-listener stop.
+ for _,step:=range []struct{action string;expected uint64;stopped bool}{{"disable",1,true},{"enable",2,false},{"archive",3,true}}{
+  w:=call("/api/v1/workspace/native-inbounds/101/lifecycle",business.InboundMutation{EventID:"native-inbound-life-"+step.action,ExpectedRevision:step.expected,Action:step.action,Reason:"Real Agent lifecycle acceptance"})
+  if w.Code!=200{t.Fatalf("lifecycle %s failed: %d %s",step.action,w.Code,w.Body.String())}
+  observed,e:=restarted.Sync(ctx,client,endpoint)
+  if e!=nil||!observed.ProcessReady||observed.NoListeners!=step.stopped{t.Fatalf("lifecycle runtime %s: %+v %v",step.action,observed,e)}
+  connection,e:=net.DialTimeout("tcp4",net.JoinHostPort("127.0.0.1",strconv.Itoa(int(port))),100*time.Millisecond)
+  if e==nil{connection.Close()}
+  if (e!=nil)!=step.stopped{t.Fatalf("lifecycle %s listener removal=%v",step.action,e!=nil)}
+  report,e:=s.business.NativeRuntimeStatus(ctx,"native-node",installID)
+  if e!=nil||report.NoListeners!=step.stopped||(step.stopped&&report.State!="listeners_disabled"){t.Fatalf("lifecycle report %s %+v %v",step.action,report,e)}
+ }
  if _,e=s.business.Client(ctx,c.ID);e!=nil{t.Fatal("revocation deleted billing identity",e)};events,e:=s.business.ListEvents(ctx,"owner",100,0);if e!=nil||len(events)!=1{t.Fatal("native Apply altered immutable finance",e)}
 }
 func TestNativeOwnerToPinnedAgentRuntimeEndToEnd(t *testing.T){b,p:=nativeFixture(t);nativeAPIExercise(t,b,p)}

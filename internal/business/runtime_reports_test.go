@@ -67,7 +67,7 @@ func TestRuntimeReportV5MigrationPreservesBusinessIdentity(t *testing.T){
  names:=[]string{};for rows.Next(){var name string;if e=rows.Scan(&name);e!=nil{rows.Close();t.Fatal(e)};names=append(names,name)}
  e=rows.Err();rows.Close();if e!=nil{t.Fatal(e)}
  for _,name:=range names{if _,e=s.db.Exec("DROP TRIGGER "+name);e!=nil{t.Fatal(e)}}
- for _,q:=range []string{"DROP TABLE native_runtime_reports","DROP TABLE native_runtime_delivery","DROP TABLE native_config_generation","PRAGMA user_version=5"}{if _,e=s.db.Exec(q);e!=nil{t.Fatal(e)}}
+ for _,q:=range []string{"DROP TABLE native_runtime_reports","DROP TABLE native_runtime_delivery","DROP TABLE native_config_generation","DROP TABLE native_inbound_operations","ALTER TABLE native_inbounds DROP COLUMN revision","ALTER TABLE native_inbounds DROP COLUMN archived","ALTER TABLE native_inbounds DROP COLUMN enabled","PRAGMA user_version=5"}{if _,e=s.db.Exec(q);e!=nil{t.Fatal(e)}}
  if e=s.Close();e!=nil{t.Fatal(e)};up,e:=Open(path);if e!=nil{t.Fatal(e)};defer up.Close()
  kept,e:=up.Client(ctx,c.ID);if e!=nil||kept.UUID!=c.UUID{t.Fatal("v6 lost identity",e)}
  rep,e:=up.Representative(ctx,"report-rep");if e!=nil||rep.VolumeCreditBytes!=900||rep.UnlimitedCreditUnits!=50{t.Fatal("v6 changed credit",e)}

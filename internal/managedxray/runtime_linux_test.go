@@ -73,7 +73,10 @@ func TestFailedApplyRestoresPreviousAndDoesNotAdoptForeignSocket(t *testing.T){
  if _,e:=r.Apply(context.Background(),Revision{1,good},grant(t,o,1,good,40*time.Second));e!=nil{t.Fatal(e)}
  s,e:=r.Apply(context.Background(),Revision{2,bad},grant(t,o,2,bad,40*time.Second));if e==nil||!s.ProcessReady||s.ActiveSHA!=good.SHA256||s.Phase!="rolled_back_after_failed_apply"{t.Fatalf("failed apply: %+v %v",s,e)};assertPort(t,port,true)
  foreign,e:=net.Listen("tcp4","127.0.0.1:0");if e!=nil{t.Fatal(e)};defer foreign.Close();target:=testCandidate(t,uint16(foreign.Addr().(*net.TCPAddr).Port),"three")
- s,e=r.Apply(context.Background(),Revision{3,target},grant(t,o,3,target,40*time.Second));if e==nil||s.ActiveSHA!=good.SHA256||!s.ProcessReady{t.Fatalf("foreign listener impersonated Xray: %+v %v",s,e)}
+ s,e=r.Apply(context.Background(),Revision{3,target},grant(t,o,3,target,40*time.Second));// Changing the port withdraws the old endpoint. A failed restrictive apply must not reopen it.
+ if e==nil||s.ProcessReady||s.SavedSHA!=good.SHA256||s.Phase!="apply_failed_stopped"{t.Fatalf("foreign listener impersonated Xray or old endpoint revived: %+v %v",s,e)}
+ assertPort(t,port,false)
+ assertPort(t,uint16(foreign.Addr().(*net.TCPAddr).Port),true)
 }
 func TestLeaseExpiryStopsOnlyOwnProcessAndKeepsEncryptedGood(t *testing.T){
  o:=testOptions(t);r:=mustOpen(t,o);port:=freePort(t);c:=testCandidate(t,port,"one");lease:=grant(t,o,1,c,time.Second)

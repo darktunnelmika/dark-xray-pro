@@ -87,7 +87,7 @@ func TestAuthSchemaUpgradeFromV1KeepsFinancialRecords(t *testing.T){
   "DROP TABLE auth_users",
   "DROP TABLE client_operations",
   "ALTER TABLE clients DROP COLUMN archived",
-  "PRAGMA user_version=1",
+  "DROP TABLE native_inbound_operations","ALTER TABLE native_inbounds DROP COLUMN revision","ALTER TABLE native_inbounds DROP COLUMN archived","ALTER TABLE native_inbounds DROP COLUMN enabled","PRAGMA user_version=1",
  }{
   if _,err=s.db.ExecContext(ctx,statement);err!=nil{t.Fatal(err)}
  }
