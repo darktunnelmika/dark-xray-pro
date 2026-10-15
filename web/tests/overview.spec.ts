@@ -120,6 +120,7 @@ test("Node Manager inspects the exact selected identity and preserves it across 
   await page.setViewportSize({ width: 320, height: 750 });
   await mockFleet(page);
   await page.goto("/");
+  await page.getByRole("button", { name: "Open menu" }).click();
   await page.getByRole("button", { name: "Nodes" }).click();
   await expect(page.getByText("Select a Node to inspect its status.")).toBeVisible();
   await page.getByRole("button", { name: "Inspect Netherlands lab" }).click();
