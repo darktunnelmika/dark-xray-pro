@@ -49,16 +49,21 @@ func fixture(t *testing.T,kind string)(string,string){
 	var command string
 	switch kind {
 	case "listen":
-		command=`exec python3 -u -c 'import json,socket,sys,time
+		command=`exec python3 -u -c 'import json,socket,sys,time,select
 with open(sys.argv[1],encoding="utf-8") as f: c=json.load(f)
 servers=[]
 for x in c["inbounds"]:
  s=socket.socket(socket.AF_INET,socket.SOCK_STREAM)
  s.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1)
  s.bind((x["listen"],x["port"]))
- s.listen(4)
+ s.listen(64)
  servers.append(s)
-time.sleep(30)' "$3"`
+deadline=time.monotonic()+30
+while time.monotonic()<deadline:
+ readable,_,_=select.select(servers,[],[],0.2)
+ for s in readable:
+  conn,_=s.accept()
+  conn.close()' "$3"`
 	case "reject":command="exit 19"
 	case "sleep":command="exec sleep 30"
 	default:t.Fatal("unknown fixture kind")
