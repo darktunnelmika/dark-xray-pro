@@ -31,7 +31,7 @@ jobs:
           go mod tidy -diff
       - name: Guard against dropped Go packages and unsafe legacy imports
         run: |
-          for path in internal/routeplan/draft.go internal/replacement/journal.go internal/routecheck/tcp.go internal/noderegistry/registry.go internal/telemetry/store.go internal/agenttransport/client.go internal/xrayconfig/render.go internal/xrayconfig/validate.go internal/configstage/store.go internal/api/configstage.go cmd/node-agent/configstage.go internal/business/store.go internal/business/auth.go internal/business/groups.go internal/business/lifecycle.go internal/api/business.go internal/api/browser_auth.go internal/api/workspace.go internal/api/groups.go internal/api/client_lifecycle.go cmd/owner-setup/main.go internal/xraycanary/canary_linux.go internal/xraycanary/runtime_linux.go internal/labrevision/journal.go internal/api/labrevisions.go; do
+          for path in internal/routeplan/draft.go internal/replacement/journal.go internal/routecheck/tcp.go internal/noderegistry/registry.go internal/telemetry/store.go internal/agenttransport/client.go internal/xrayconfig/render.go internal/xrayconfig/validate.go internal/configstage/store.go internal/api/configstage.go cmd/node-agent/configstage.go internal/business/store.go internal/business/auth.go internal/business/groups.go internal/business/lifecycle.go internal/api/business.go internal/api/browser_auth.go internal/api/workspace.go internal/api/groups.go internal/api/client_lifecycle.go cmd/owner-setup/main.go internal/xraycanary/canary_linux.go internal/xraycanary/runtime_linux.go internal/managedxray/runtime_linux.go internal/managedxray/delivery_linux.go internal/business/inbounds.go internal/api/native_inbounds.go internal/xrayconfig/assigned.go internal/labrevision/journal.go internal/api/labrevisions.go; do
             test -s "$path" || { echo "MISSING expected Go module: $path"; exit 1; }
           done
           test ! -e backend/dark_policy.py || { echo "Legacy HUB files must not be imported into PRO"; exit 1; }
@@ -144,6 +144,14 @@ jobs:
           DARK_PRO_LAB_MODE: "1"
           DARK_PRO_ENABLE_SANDBOX_APPLY: "1"
         run: go test ./internal/xraycanary -run '^TestRealPinnedXraySandboxApplyRollbackOptIn$' -v -count=1
+      - name: Prove durable Xray same-port rollback and actual REALITY traffic
+        env:
+          DARK_PRO_LAB_MODE: "1"
+        run: go test ./internal/managedxray -run '^TestRealPinned' -v -count=1
+      - name: Prove native owner to pinned TLS Agent and real Xray revocation
+        env:
+          DARK_PRO_LAB_MODE: "1"
+        run: go test ./internal/api -run '^TestRealPinnedNativeOwnerToAgentRuntime$' -v -count=1
       - name: Keep Xray and user credentials out of all persisted artifacts
         shell: bash
         run: |

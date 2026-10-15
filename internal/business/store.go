@@ -29,7 +29,7 @@ const (
  MaxUnlimitedCredit int64 = 1_000_000_000
  MaxDays = 3650
  MaxIPLimit = 1000
- SchemaVersion = 4
+ SchemaVersion = 5
 )
 var (
  ErrInvalid = errors.New("invalid business operation")
@@ -165,7 +165,7 @@ func Open(path string)(*Store,error){
  if _,err=db.Exec("PRAGMA trusted_schema = OFF");err!=nil{return fail(err)}
  var version int
  if err=db.QueryRow("PRAGMA user_version").Scan(&version);err!=nil{return fail(err)}
- if version!=0 && version!=1 && version!=2 && version!=3 && version!=SchemaVersion{return fail(fmt.Errorf("business schema version %d is not supported: %w",version,ErrUnavailable))}
+ if version!=0 && version!=1 && version!=2 && version!=3 && version!=4 && version!=SchemaVersion{return fail(fmt.Errorf("business schema version %d is not supported: %w",version,ErrUnavailable))}
  if version==0 {
   // A pre-existing legacy/foreign SQLite file is NOT an empty PRO business
   // database even if its user_version is zero. Refuse silent cross-schema
@@ -187,6 +187,10 @@ func Open(path string)(*Store,error){
  }
  if version==3 {
   if err=migrateClientLifecycle(db);err!=nil{return fail(err)}
+  version=4
+ }
+ if version==4 {
+  if err=migrateNativeInbounds(db);err!=nil{return fail(err)}
  }
  return &Store{db:db},nil
 }
