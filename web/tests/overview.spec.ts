@@ -218,7 +218,7 @@ test("mobile RTL Dark Swap draft stays readable and never enables Apply", async 
   await page.goto("/");
   await page.getByRole("button", { name: "Open menu" }).click();
   await page.getByRole("button", { name: "Inbounds" }).click();
-  await page.getByRole("button", { name: "EN" }).click();
+  await page.getByRole("button", { name: "Switch language" }).click();
   await expect(page.getByRole("heading", { name: "پیش‌نویس اینباند" })).toBeVisible();
   await page.getByLabel("نود مقصد").selectOption("de-01");
   await page.getByLabel("شناسه اینباند").fill("42");
