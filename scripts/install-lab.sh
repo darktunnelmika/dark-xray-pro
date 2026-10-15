@@ -31,7 +31,8 @@ command -v runuser >/dev/null || abort "runuser is required"
 command -v find >/dev/null || abort "find is required"
 
 [[ -f "$BUNDLE/SHA256SUMS" && -s "$BUNDLE/bin/dark-pro-hub" &&
-   -s "$BUNDLE/bin/dark-pro-agent" && -s "$BUNDLE/web/index.html" ]] ||
+   -s "$BUNDLE/bin/dark-pro-agent" &&
+   -s "$BUNDLE/bin/dark-pro-owner-setup" && -s "$BUNDLE/web/index.html" ]] ||
   abort "expected checked LAB release bundle is incomplete"
 (cd "$BUNDLE" && sha256sum -c --status SHA256SUMS) ||
   abort "bundle checksum verification failed — no installation performed"
