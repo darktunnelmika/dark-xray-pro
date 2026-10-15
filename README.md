@@ -59,3 +59,11 @@ The new HUB can now hold multiple encrypted versions of an already Xray-syntax-v
 ## Phase 9 — isolated Linux amd64 LAB bundle (not a production installer)
 
 GitHub Actions can now compile the Go HUB/Node Agent, the React/TypeScript frontend and a guarded install script into a checksum-verified **LAB-only** archive. The installer refuses to operate without the exact independently verified NEW VPS public IPv4 and an explicit acknowledgement, and refuses existing production/Xray services or existing LAB installation paths. It starts a separate non-root localhost:2087 HUB service; **no Xray-core binary, production Node, user data, tunnel or Subscription is included or changed**. [LAB release and installation safety](docs/lab-bundle-phase9.md).
+
+## Phase 10 — live cached Node Manager inspection (LAB ONLY)
+
+The Nodes page now supports explicit per-Node selection by stable identity,
+refresh-safe inspection of real metrics, and correct Online/Offline/Stats-delayed
+distinctions. It cannot pair Nodes in the browser, issue credentials, publish
+Inbounds, or perform live Xray Apply/Rollback. See
+[Phase 10 Node Manager boundary](docs/node-manager-read-only-phase10.md).
