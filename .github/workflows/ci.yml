@@ -163,6 +163,10 @@ jobs:
           grep -q 'ip -4 route get 1.1.1.1' scripts/install-lab.sh
           grep -q '127.0.0.1:2087' scripts/install-lab.sh
           grep -q 'I_CONFIRM_NEW_EMPTY_SERVER' scripts/install-lab.sh
+          grep -Fq 'find "$APP/web" -type d -exec chmod 0755' scripts/install-lab.sh
+          grep -Fq 'find "$APP/web" -type f -exec chmod 0644' scripts/install-lab.sh
+          grep -Fq 'for attempt in $(seq 1 30)' scripts/install-lab.sh
+          grep -Fq 'runuser -u darkprolab -- test -r' scripts/install-lab.sh
       - name: Build isolated static Go executables and compiled UI
         env:
           CGO_ENABLED: "0"

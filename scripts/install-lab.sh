@@ -27,6 +27,8 @@ command -v sha256sum >/dev/null || abort "sha256sum is required"
 command -v ss >/dev/null || abort "iproute2 ss command is required"
 command -v ip >/dev/null || abort "iproute2 ip command is required"
 command -v useradd >/dev/null || abort "useradd is required"
+command -v runuser >/dev/null || abort "runuser is required"
+command -v find >/dev/null || abort "find is required"
 
 [[ -f "$BUNDLE/SHA256SUMS" && -s "$BUNDLE/bin/dark-pro-hub" &&
    -s "$BUNDLE/bin/dark-pro-agent" && -s "$BUNDLE/web/index.html" ]] ||
@@ -55,7 +57,7 @@ ROUTE_SRC="$(ip -4 route get 1.1.1.1 | awk '
 ACTUAL_EGRESS_IP="$(curl --noproxy '*' -4fsS --connect-timeout 5 --max-time 10 https://api.ipify.org)" ||
   abort "cannot contact external IP reflector over HTTPS"
 if [[ "$ACTUAL_EGRESS_IP" != "$DARK_PRO_EXPECT_PUBLIC_IP" ]]; then
-  printf 'NOTICE: lab interface IP %s exits the Internet as %s (upstream NAT).\\n' \
+  printf 'NOTICE: lab interface IP %s exits the Internet as %s (upstream NAT).\n' \
     "$DARK_PRO_EXPECT_PUBLIC_IP" "$ACTUAL_EGRESS_IP" >&2
 fi
 ACTUAL_IP="$DARK_PRO_EXPECT_PUBLIC_IP"
@@ -89,6 +91,11 @@ install -d -o root -g root -m 0700 "$ENV_DIR"
 install -o root -g root -m 0755 "$BUNDLE/bin/dark-pro-hub" "$APP/bin/dark-pro-hub"
 install -o root -g root -m 0755 "$BUNDLE/bin/dark-pro-agent" "$APP/bin/dark-pro-agent"
 cp -a -- "$BUNDLE/web/." "$APP/web/"
+# The source bundle is intentionally built with umask 077. Public static UI
+# assets must be readable by the NON-ROOT darkprolab process, though private
+# LAB state, owner token, Agent credentials and Reality keys stay 0600/0700.
+find "$APP/web" -type d -exec chmod 0755 {} +
+find "$APP/web" -type f -exec chmod 0644 {} +
 chmod -R go-w "$APP"
 chown -R root:root "$APP"
 
@@ -140,10 +147,27 @@ chmod 0644 "$UNIT"
 systemctl daemon-reload
 systemctl enable --now "$SERVICE"
 
-if ! curl --noproxy '*' -fsS --connect-timeout 3 --max-time 8 \
-    http://127.0.0.1:2087/api/v1/health | grep -q '"status":"ok"'; then
+# systemctl may return before the new Go process has entered ListenAndServe.
+# Poll only localhost with a bounded cold-start deadline; never infer failure
+# from the first instant of Connection Refused.
+READY=0
+for attempt in $(seq 1 30); do
+  if curl --noproxy '*' -fsS --connect-timeout 1 --max-time 2 \
+       http://127.0.0.1:2087/api/v1/health 2>/dev/null | grep -q '"status":"ok"'; then
+    READY=1
+    break
+  fi
+  systemctl is-active --quiet "$SERVICE" || break
+  sleep 0.3
+done
+if [[ "$READY" != "1" ]]; then
   systemctl stop "$SERVICE" || true
-  abort "LAB health check failed; new LAB service stopped. No old services were changed"
+  abort "LAB did not become healthy within the startup window; ONLY its own service was stopped"
+fi
+# Also verify that the unprivileged service can really read the compiled UI.
+if ! runuser -u darkprolab -- test -r "$APP/web/index.html"; then
+  systemctl stop "$SERVICE" || true
+  abort "LAB UI is not readable by its unprivileged service account"
 fi
 
 printf '\nDARK XRAY PRO isolated LAB installed successfully on NEW server %s.\n' "$ACTUAL_IP"
