@@ -180,3 +180,19 @@ func TestCannotAdoptForeignSQLiteEvenWhenSchemaVersionIsZero(t *testing.T){
   t.Fatalf("foreign SQLite schema was silently merged into PRO: %v",err)
  }
 }
+
+
+func TestAncestorSymlinkCannotRedirectPrivatePROBusinessDatabase(t *testing.T){
+ root:=t.TempDir()
+ real:=filepath.Join(root,"real-storage")
+ if err:=os.Mkdir(real,0700);err!=nil{t.Fatal(err)}
+ alias:=filepath.Join(root,"new-lab-alias")
+ if err:=os.Symlink(real,alias);err!=nil{t.Fatal(err)}
+ path:=filepath.Join(alias,"business.sqlite")
+ if _,err:=Open(path);!errors.Is(err,ErrUnsafePath){
+  t.Fatalf("ancestor symlink accepted: %v",err)
+ }
+ if _,err:=os.Stat(filepath.Join(real,"business.sqlite"));!errors.Is(err,os.ErrNotExist){
+  t.Fatalf("unsafe file was written behind symlink: %v",err)
+ }
+}
