@@ -20,6 +20,7 @@ function successfulLogin(user: typeof rep) {
 async function mockBusiness(page: Page, user: typeof rep) {
   const requests: { path: string; method: string; csrf: string; body: unknown }[] = [];
   const runningClients: unknown[] = [];
+  const operations: unknown[] = [];
   const runningGroups: Array<{ id: string; representative_id: string; name: string; color: string; member_count: number; created_unix: number; updated_unix: number }> = [];
   await page.route("**/api/v1/session/**", async (route) => {
     const request = route.request();
@@ -41,6 +42,26 @@ async function mockBusiness(page: Page, user: typeof rep) {
     if (request.method() !== "GET") {
       const body: unknown = request.postDataJSON();
       requests.push({ path, method: request.method(), csrf: request.headers()["x-csrf-token"] ?? "", body });
+      if (path.includes("/clients/") && path.endsWith("/extend")) {
+        const n = body as { event_id: string; client_id: string; additional_days: number; additional_volume_bytes: number; reason: string };
+        const c = runningClients.find((item) => (item as { id: string }).id === n.client_id) as Record<string, unknown> | undefined;
+        if (c) {
+          c.duration_days = Number(c.duration_days) + n.additional_days;
+          c.expires_unix = Number(c.expires_unix) + n.additional_days * 86400;
+          c.volume_bytes = Number(c.volume_bytes) + n.additional_volume_bytes;
+        }
+        operations.push({ event_id: n.event_id, client_id: n.client_id, representative_id: user.representative_id,
+          kind: "extend", reason: n.reason, added_days: n.additional_days,
+          added_volume_bytes: n.additional_volume_bytes, volume_credit_debit: n.additional_volume_bytes,
+          unlimited_credit_debit: 5, created_unix: 1800000000 });
+      } else if (path.includes("/clients/") && path.endsWith("/state")) {
+        const n = body as { event_id: string; client_id: string; action: string; reason: string };
+        const c = runningClients.find((item) => (item as { id: string }).id === n.client_id) as Record<string, unknown> | undefined;
+        if (c) { c.archived = n.action === "archive"; c.deployment_state = n.action === "enable" ? "pending_node_apply" : "disabled"; }
+        operations.push({ event_id: n.event_id, client_id: n.client_id, representative_id: user.representative_id,
+          kind: n.action, reason: n.reason, added_days: 0,
+          added_volume_bytes: 0, volume_credit_debit: 0, unlimited_credit_debit: 0, created_unix: 1800000000 });
+      }
       if (path === "/api/v1/workspace/groups" && request.method() === "POST") {
         const n = body as { id: string; representative_id: string; name: string; color: string };
         runningGroups.push({ ...n, member_count: 0, created_unix: 0, updated_unix: 0 });
@@ -63,7 +84,7 @@ async function mockBusiness(page: Page, user: typeof rep) {
           id: n.client_id, name: n.name, representative_id: n.representative_id,
           plan_kind: n.unlimited ? "unlimited" : "volume", ip_count: n.ip_count,
           volume_bytes: n.volume_bytes, duration_days: n.duration_days,
-          charged_unlimited_units: 10, deployment_state: "pending_node_apply",
+          charged_unlimited_units: 10, deployment_state: "pending_node_apply", archived: false,
           expires_unix: 1800000000,
         });
       }
@@ -71,7 +92,10 @@ async function mockBusiness(page: Page, user: typeof rep) {
         contentType: "application/json", body: JSON.stringify(body) });
       return;
     }
-    if (path.endsWith("/me")) {
+    if (path.endsWith("/client-operations")) {
+      await route.fulfill({ status: 200, contentType: "application/json",
+        body: JSON.stringify({ operations }) });
+    } else if (path.endsWith("/me")) {
       await route.fulfill({ status: 200, contentType: "application/json",
         body: JSON.stringify({ user, balance: {
           id: user.representative_id, display_name: "Visible Account", kind: user.role,
@@ -212,4 +236,50 @@ test("owner can create and bulk-edit a real group in Persian then delete group w
   expect(assignBody.client_ids).toEqual(["client-one", "client-two"]);
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 2);
   expect(overflow).toBe(false);
+});
+
+
+test("representative can extend then archive a client without publishing Xray, altering groups or exposing other accounts", async ({ page }) => {
+  await mockBase(page);
+  const requests = await mockBusiness(page, rep);
+  await page.goto("/");
+  await page.getByRole("button", { name: "Business" }).click();
+  await page.getByLabel("Username").fill("rep-a");
+  await page.getByLabel("Password").fill("test-private-password-for-lab");
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await expect(page.getByText("Scoped to your representative account.")).toBeVisible();
+  await page.getByLabel("Client ID", { exact: false }).first().fill("test-lifecycle-user");
+  await page.getByLabel("Client name").fill("Lifecycle test");
+  await page.getByLabel("Plan type").selectOption("unlimited");
+  await page.getByLabel("Duration (days)").fill("30");
+  await page.getByLabel("IP/User slots (0 = unlimited for volume)").fill("5");
+  await page.getByRole("button", { name: "Create pending client" }).click();
+  await expect(page.getByText("Lifecycle test (test-lifecycle-user)")).toBeVisible();
+  await page.getByRole("button", { name: "Manage", exact: true }).click();
+  await page.getByLabel("Additional days").fill("30");
+  await page.getByLabel("Additional volume (GB)").fill("0");
+  const renewForm = page.getByRole("heading", { name: "Extend / add volume" }).locator("..");
+  await renewForm.getByLabel("Operation reason").fill("Renewing for 30 days");
+  await renewForm.getByRole("button", { name: "Extend / add volume" }).click();
+  await expect(page.getByText("Renewing for 30 days", { exact: false })).toBeVisible();
+  const actionForm = page.getByRole("heading", { name: "Client action" }).locator("..");
+  await actionForm.getByLabel("Client action").selectOption("archive");
+  await actionForm.getByLabel("Operation reason").fill("Archived after expiry");
+  page.once("dialog", (dialog) => dialog.accept());
+  await actionForm.getByRole("button", { name: "Record state change" }).click();
+  await expect(page.getByText("Archived after expiry", { exact: false })).toBeVisible();
+  expect(requests.map((v) => v.path)).toEqual([
+    "/api/v1/workspace/clients",
+    "/api/v1/workspace/clients/test-lifecycle-user/extend",
+    "/api/v1/workspace/clients/test-lifecycle-user/state",
+  ]);
+  for (const item of requests) expect(item.csrf).toBe("a".repeat(64));
+  const renew = requests[1].body as Record<string, unknown>;
+  expect(renew.additional_days).toBe(30);
+  expect(renew.additional_volume_bytes).toBe(0);
+  const archived = requests[2].body as Record<string, unknown>;
+  expect(archived.action).toBe("archive");
+  expect(archived.client_id).toBe("test-lifecycle-user");
+  const xrayCalls = requests.filter((v) => v.path.includes("xray") || v.path.includes("telegram"));
+  expect(xrayCalls).toHaveLength(0);
 });
