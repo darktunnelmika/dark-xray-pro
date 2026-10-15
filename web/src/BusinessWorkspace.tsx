@@ -211,8 +211,8 @@ export default function BusinessWorkspace({ language }: { language: Language }) 
     void fetchData().catch((error: unknown) => {
       if (controller.signal.aborted) return;
       if (error instanceof ApiError && error.status === 401) {
-        setSession(null); setMode("signedout"); setMe(null); setReps(null); setClients(null); setEvents(null); setGroups(null); setGroups(null);
-      pendingCreditKey.current = null; pendingClientKey.current = null;
+        setSession(null); setMode("signedout"); setMe(null); setReps(null); setClients(null); setEvents(null); setGroups(null);
+        pendingCreditKey.current = null; pendingClientKey.current = null;
       } else {
         setNotice(words[language].unavailable);
       }
@@ -258,7 +258,7 @@ export default function BusinessWorkspace({ language }: { language: Language }) 
       setOldPassword(""); setNewPassword("");
       pendingCreditKey.current = null; pendingClientKey.current = null;
       setSession(null); setMode("signedout");
-      setMe(null); setReps(null); setClients(null); setEvents(null);
+      setMe(null); setReps(null); setClients(null); setEvents(null); setGroups(null);
     }, true);
   }
   async function createRepresentative(event: FormEvent<HTMLFormElement>) {
