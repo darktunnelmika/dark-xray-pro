@@ -2,6 +2,7 @@ package api
 
 import (
  "bytes"
+ "context"
  "crypto/tls"
  "encoding/json"
  "net/http"
@@ -35,7 +36,7 @@ func browserRequest(t *testing.T,h http.Handler,method,path string,body any,cook
 func enabledOwner(t *testing.T)*Server{
  t.Helper()
  s:=businessLab(t)
- if _,err:=s.business.BootstrapOwner(t.Context(),ownerUsername,ownerPassword);err!=nil{t.Fatal(err)}
+ if _,err:=s.business.BootstrapOwner(context.Background(),ownerUsername,ownerPassword);err!=nil{t.Fatal(err)}
  return s
 }
 func browserLogin(t *testing.T,s *Server,username,password string)(*http.Cookie,string){
