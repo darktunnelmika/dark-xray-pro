@@ -2,7 +2,10 @@ module github.com/darktunnelmika/dark-xray-pro
 
 go 1.23
 
-require modernc.org/sqlite v1.33.1
+require (
+	golang.org/x/crypto v0.32.0
+	modernc.org/sqlite v1.33.1
+)
 
 require (
 	github.com/dustin/go-humanize v1.0.1 // indirect
