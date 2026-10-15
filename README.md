@@ -103,3 +103,14 @@ The feature is **OFF by default** on the installed LAB. Its private database
 does not read or migrate the legacy HUB. Active Xray subscriptions, Telegram
 bots, 2FA and the full old-to-PRO migration are separate release blockers.
 See [private owner and representative access](docs/owner-rep-auth-business-v1.md).
+
+## P0 client groups — durable, scoped, non-destructive (PRO-only)
+
+The new business workspace now includes persisted groups with representative ownership,
+Unicode names/colors, transactional bulk membership transfer, true member counts and
+safe group deletion that never deletes clients or credit/usage history. The SQLite
+schema upgrades forward to version 3 without discarding existing PRO sessions,
+accounts or financial events. [Native client group contract](docs/client-groups-v1.md).
+
+Legacy group migration, real Xray Apply, historical usage attribution, Telegram bots
+and full production parity remain pending. No old service or customer is changed.
