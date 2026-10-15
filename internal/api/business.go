@@ -16,6 +16,7 @@ func (s *Server) EnableBusinessLab(store *business.Store) error {
  if store==nil {return errors.New("business store is required")}
  if s.business!=nil {return errors.New("business store already set")}
  s.business=store
+ s.loginGate=newLoginGate()
  return nil
 }
 func businessError(w http.ResponseWriter,err error){

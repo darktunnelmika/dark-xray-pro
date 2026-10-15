@@ -27,6 +27,8 @@ CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags='-s -w' \
   -o release/bin/dark-pro-hub ./cmd/hub
 CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags='-s -w' \
   -o release/bin/dark-pro-agent ./cmd/node-agent
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags='-s -w' \
+  -o release/bin/dark-pro-owner-setup ./cmd/owner-setup
 
 echo 'Compiling isolated React UI...'
 (cd web && npm install --no-audit --no-fund && npm run build)

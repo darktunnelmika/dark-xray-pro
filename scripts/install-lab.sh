@@ -31,7 +31,8 @@ command -v runuser >/dev/null || abort "runuser is required"
 command -v find >/dev/null || abort "find is required"
 
 [[ -f "$BUNDLE/SHA256SUMS" && -s "$BUNDLE/bin/dark-pro-hub" &&
-   -s "$BUNDLE/bin/dark-pro-agent" && -s "$BUNDLE/web/index.html" ]] ||
+   -s "$BUNDLE/bin/dark-pro-agent" &&
+   -s "$BUNDLE/bin/dark-pro-owner-setup" && -s "$BUNDLE/web/index.html" ]] ||
   abort "expected checked LAB release bundle is incomplete"
 (cd "$BUNDLE" && sha256sum -c --status SHA256SUMS) ||
   abort "bundle checksum verification failed — no installation performed"
@@ -90,6 +91,7 @@ install -d -o root -g root -m 0700 "$ENV_DIR"
 
 install -o root -g root -m 0755 "$BUNDLE/bin/dark-pro-hub" "$APP/bin/dark-pro-hub"
 install -o root -g root -m 0755 "$BUNDLE/bin/dark-pro-agent" "$APP/bin/dark-pro-agent"
+install -o root -g root -m 0755 "$BUNDLE/bin/dark-pro-owner-setup" "$APP/bin/dark-pro-owner-setup"
 cp -a -- "$BUNDLE/web/." "$APP/web/"
 # The source bundle is intentionally built with umask 077. Public static UI
 # assets must be readable by the NON-ROOT darkprolab process, though private

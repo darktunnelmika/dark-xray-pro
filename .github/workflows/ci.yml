@@ -31,7 +31,7 @@ jobs:
           go mod tidy -diff
       - name: Guard against dropped Go packages and unsafe legacy imports
         run: |
-          for path in internal/routeplan/draft.go internal/replacement/journal.go internal/routecheck/tcp.go internal/noderegistry/registry.go internal/telemetry/store.go internal/agenttransport/client.go internal/xrayconfig/render.go internal/xrayconfig/validate.go internal/configstage/store.go internal/api/configstage.go cmd/node-agent/configstage.go internal/business/store.go internal/api/business.go internal/xraycanary/canary_linux.go internal/xraycanary/runtime_linux.go internal/labrevision/journal.go internal/api/labrevisions.go; do
+          for path in internal/routeplan/draft.go internal/replacement/journal.go internal/routecheck/tcp.go internal/noderegistry/registry.go internal/telemetry/store.go internal/agenttransport/client.go internal/xrayconfig/render.go internal/xrayconfig/validate.go internal/configstage/store.go internal/api/configstage.go cmd/node-agent/configstage.go internal/business/store.go internal/business/auth.go internal/api/business.go internal/api/browser_auth.go internal/api/workspace.go cmd/owner-setup/main.go internal/xraycanary/canary_linux.go internal/xraycanary/runtime_linux.go internal/labrevision/journal.go internal/api/labrevisions.go; do
             test -s "$path" || { echo "MISSING expected Go module: $path"; exit 1; }
           done
           test ! -e backend/dark_policy.py || { echo "Legacy HUB files must not be imported into PRO"; exit 1; }
@@ -43,6 +43,7 @@ jobs:
         run: |
           go build -o /tmp/dark-xray-pro-hub ./cmd/hub
           go build -o /tmp/dark-xray-pro-agent ./cmd/node-agent
+          go build -o /tmp/dark-pro-owner-setup ./cmd/owner-setup
       - name: Verify no production defaults
         run: |
           if DARK_PRO_LAB_MODE=0 /tmp/dark-xray-pro-hub > /tmp/hub-refusal.log 2>&1; then
@@ -188,6 +189,7 @@ jobs:
           test -s release/web/index.html
           test -s release/bin/dark-pro-hub
           test -s release/bin/dark-pro-agent
+          test -s release/bin/dark-pro-owner-setup
       - name: Create verifiable LAB-only archive
         shell: bash
         run: |

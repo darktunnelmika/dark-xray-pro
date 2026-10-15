@@ -1,14 +1,15 @@
 import { useEffect, useState } from "react";
 import {
   Activity, ArrowDownLeft, ArrowUpRight, CheckCircle2, ChevronRight,
-  CircleHelp, Globe2, HardDrive, LayoutDashboard,
+  CircleHelp, CreditCard, Globe2, HardDrive, LayoutDashboard,
   Menu, Moon, Network, RadioTower, Server, Settings2, ShieldCheck,
   Sun, Waypoints, X,
 } from "lucide-react";
 import { getFleet, type FleetSnapshot, type NodeSnapshot } from "./api";
 import InboundPlanner from "./InboundPlanner";
+import BusinessWorkspace from "./BusinessWorkspace";
 
-type Page = "overview" | "nodes" | "inbounds" | "settings";
+type Page = "overview" | "nodes" | "inbounds" | "business" | "settings";
 type Theme = "light" | "dark" | "system";
 type Language = "en" | "fa";
 
@@ -23,10 +24,11 @@ function stored<T extends string>(key: string, fallback: T, allowed: readonly T[
 
 const translations = {
   en: {
-    overview: "Overview", nodes: "Nodes", inbounds: "Inbounds", settings: "Settings",
+    overview: "Overview", nodes: "Nodes", inbounds: "Inbounds", business: "Business", settings: "Settings",
     overviewTitle: "Infrastructure, at a glance.", overviewLead: "A clearer view of every server. No heavy accounting queries on page load.",
     nodesTitle: "Node fleet", nodesLead: "Live agent heartbeat, CPU, memory and physical network rates.",
     inboundsTitle: "Inbounds & routes", inboundsLead: "A simpler deployment model is coming next.",
+    businessTitle: "Business & accounts", businessLead: "Private owner and representative credit, clients and immutable financial history.",
     settingsTitle: "Appearance & lab", settingsLead: "A calm interface, built for long sessions.",
     liveFleet: "Live fleet", emptyTitle: "No Nodes connected yet",
     emptyLead: "Start the isolated Go lab agent to see actual host measurements here. No fabricated sample traffic.",
@@ -52,10 +54,11 @@ const translations = {
     pairingBoundary: "New LAB Node pairing is owner-only on localhost. No legacy Nodes or customer data are connected.",
   },
   fa: {
-    overview: "داشبورد", nodes: "نودها", inbounds: "اینباندها", settings: "تنظیمات",
+    overview: "داشبورد", nodes: "نودها", inbounds: "اینباندها", business: "حسابداری و نمایندگان", settings: "تنظیمات",
     overviewTitle: "نمای کامل زیرساخت، در یک نگاه", overviewLead: "وضعیت واقعی سرورها، بدون اجرای گزارش‌های سنگین هنگام ورود.",
     nodesTitle: "مدیریت نودها", nodesLead: "وضعیت زنده Agent، پردازنده، حافظه و سرعت شبکه.",
     inboundsTitle: "اینباندها و مسیرها", inboundsLead: "مدیریت ساده‌تر مقصدها در مرحله بعد ساخته می‌شود.",
+    businessTitle: "نمایندگان، کلاینت‌ها و اعتبار", businessLead: "ورود امن و مدیریت اعتبار و سوابق مالی فقط با اطلاعات واقعی.",
     settingsTitle: "ظاهر و محیط آزمایش", settingsLead: "طراحی خلوت برای استفاده طولانی‌مدت.",
     liveFleet: "وضعیت ناوگان", emptyTitle: "هنوز نودی متصل نشده",
     emptyLead: "Agent آزمایشی Go را اجرا کن تا آمار واقعی سرور نمایش داده شود. عدد ساختگی نداریم.",
@@ -86,6 +89,7 @@ const nav: { id: Page; Icon: typeof LayoutDashboard }[] = [
   { id: "overview", Icon: LayoutDashboard },
   { id: "nodes", Icon: Server },
   { id: "inbounds", Icon: Waypoints },
+  { id: "business", Icon: CreditCard },
   { id: "settings", Icon: Settings2 },
 ];
 
@@ -158,7 +162,7 @@ export default function App() {
   const [page, setPage] = useState<Page>(() => {
     try {
       const last = sessionStorage.getItem("dark-pro-page");
-      if (last === "overview" || last === "nodes" || last === "inbounds" || last === "settings") {
+      if (last === "overview" || last === "nodes" || last === "inbounds" || last === "business" || last === "settings") {
         return last;
       }
     } catch { /* storage disabled */ }
@@ -338,6 +342,7 @@ export default function App() {
           )}
 
           {page === "inbounds" && <InboundPlanner nodes={fleet?.nodes ?? []} language={language} />}
+          {page === "business" && <BusinessWorkspace language={language} />}
 
           {page === "settings" && (
             <div className="settings-list">
