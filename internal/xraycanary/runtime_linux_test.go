@@ -139,6 +139,50 @@ func TestSandboxFinalizeAndCloseRetireOnlyItsOwnProcesses(t *testing.T) {
   }
 }
 
+func TestSandboxAutomaticallyRollsBackOnNewProcessCrash(t *testing.T) {
+  sandboxLab(t)
+  binary, sha := fixture(t, "listen")
+  s, err := NewSandboxRuntime(binary, sha)
+  if err != nil { t.Fatal(err) }
+  defer s.Close()
+  prior := candidate(t, true)
+  next := candidate(t, false)
+  if _, err := s.Apply(context.Background(), prior); err != nil { t.Fatal(err) }
+  old := s.current
+  if _, err := s.Apply(context.Background(), next); err != nil { t.Fatal(err) }
+  failing := s.current
+  if err := failing.command.Process.Kill(); err != nil { t.Fatal(err) }
+  deadline := time.Now().Add(3*time.Second)
+  var state SandboxSnapshot
+  for time.Now().Before(deadline) {
+    state = s.Snapshot()
+    if state.ActiveConfigSHA == prior.SHA256 &&
+      state.LastEvent == "auto_rollback_after_process_exit" { break }
+    time.Sleep(30*time.Millisecond)
+  }
+  if state.ActiveConfigSHA != prior.SHA256 ||
+    state.PreviousConfigSHA != "" ||
+    state.LastEvent != "auto_rollback_after_process_exit" {
+    t.Fatalf("crashed new revision was not rolled back: %+v", state)
+  }
+  if s.current != old { t.Fatal("new process replaced the actual previous process") }
+  assertSandboxPorts(t, s.current)
+  if state.CustomerDataPlaneVerified || state.CanPublishSubscriptions {
+    t.Fatal("automatic rollback falsely published a customer route")
+  }
+  // With no previous snapshot, a crashing runtime must fail closed.
+  if err := old.command.Process.Kill(); err != nil { t.Fatal(err) }
+  deadline = time.Now().Add(3*time.Second)
+  for time.Now().Before(deadline) {
+    state = s.Snapshot()
+    if state.ActiveConfigSHA == "" { break }
+    time.Sleep(30*time.Millisecond)
+  }
+  if state.ActiveConfigSHA != "" || state.PreviousConfigSHA != "" {
+    t.Fatalf("sandbox retained an unusable active process: %+v", state)
+  }
+}
+
 func TestSandboxOptInAndWrongCorePinFailClosed(t *testing.T) {
   binary, sha := fixture(t, "listen")
   t.Setenv("DARK_PRO_LAB_MODE", "")
