@@ -87,3 +87,19 @@ a candidate trial. This is entirely in-memory and never manages systemd,
 public inbounds, customers or subscriptions. A live VLESS/REALITY handshake
 and crash-safe production rollout remain unavailable. See
 [Phase 12 controlled process runtime](docs/isolated-xray-sandbox-runtime-phase12.md).
+
+
+## P0 business identity and role-scoped workspace — experimental (not migration-ready)
+
+The new PRO-only SQLite business ledger now supports a forward-only identity
+schema migration, local unprivileged first-owner bootstrap, unique representative
+logins, salted Argon2id passwords, revocable secure cookie sessions and CSRF-
+protected owner/representative business APIs. A real bilingual mobile-friendly
+**Business** UI can create PRO-only representative accounts and pending clients
+and inspect their actual credit/audit state. Representatives cannot read/write
+other tenants, and Agent credentials cannot authenticate to the owner workspace.
+
+The feature is **OFF by default** on the installed LAB. Its private database
+does not read or migrate the legacy HUB. Active Xray subscriptions, Telegram
+bots, 2FA and the full old-to-PRO migration are separate release blockers.
+See [private owner and representative access](docs/owner-rep-auth-business-v1.md).
