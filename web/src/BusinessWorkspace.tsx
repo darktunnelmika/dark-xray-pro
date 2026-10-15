@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { CheckCircle2, CircleHelp, CreditCard, KeyRound, LockKeyhole, LogOut, RefreshCw, ShieldCheck, Users } from "lucide-react";
 
 type Language = "en" | "fa";
@@ -45,6 +45,7 @@ const words = {
     disabledNote: "The private owner setup, database and authenticated API must be enabled first. No fabricated accounts or credits are shown.",
     unavailable: "Business service unavailable. Previous verified information is retained.",
     login: "Sign in", logout: "Sign out", username: "Username", password: "Password",
+    rotate: "Change password", oldPassword: "Current password", newPassword: "New password (12+ characters)", change: "Change and sign out",
     loginHelp: "Owner and representative credentials are separate from Node pairing and the temporary HTTPS preview password.",
     account: "Account", role: "Role", volume: "Volume credit", unlimited: "Unlimited units",
     reps: "Representatives", clients: "Clients", history: "Financial audit",
@@ -68,6 +69,7 @@ const words = {
     disabledNote: "ابتدا باید حساب مالک، دیتابیس خصوصی و API امن فعال شوند. اطلاعات و اعتبار ساختگی نمایش نمی‌دهیم.",
     unavailable: "سرویس حسابداری در دسترس نیست. آخرین اطلاعات معتبر حفظ شده است.",
     login: "ورود", logout: "خروج", username: "نام کاربری", password: "رمز عبور",
+    rotate: "تغییر رمز عبور", oldPassword: "رمز فعلی", newPassword: "رمز جدید (حداقل ۱۲ کاراکتر)", change: "تغییر رمز و خروج",
     loginHelp: "ورود مالک و نماینده مستقل از Pair Code نودها و رمز موقت HTTPS است.",
     account: "حساب", role: "نقش", volume: "اعتبار حجمی", unlimited: "اعتبار نامحدود",
     reps: "نمایندگان", clients: "کلاینت‌ها", history: "تاریخچه مالی",
@@ -106,6 +108,10 @@ export default function BusinessWorkspace({ language }: { language: Language }) 
   const [session, setSession] = useState<Session | null>(null);
   const [loginName, setLoginName] = useState("");
   const [loginPassword, setLoginPassword] = useState("");
+  const [oldPassword, setOldPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const pendingCreditKey = useRef<string | null>(null);
+  const pendingClientKey = useRef<string | null>(null);
   const [actionBusy, setActionBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
@@ -178,6 +184,7 @@ export default function BusinessWorkspace({ language }: { language: Language }) 
       if (controller.signal.aborted) return;
       if (error instanceof ApiError && error.status === 401) {
         setSession(null); setMode("signedout"); setMe(null); setReps(null); setClients(null); setEvents(null);
+      pendingCreditKey.current = null; pendingClientKey.current = null;
       } else {
         setNotice(words[language].unavailable);
       }
@@ -212,6 +219,19 @@ export default function BusinessWorkspace({ language }: { language: Language }) 
       setSession(null); setMode("signedout"); setMe(null); setReps(null); setClients(null); setEvents(null);
     }, true);
   }
+  async function changePassword(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!session || newPassword.length < 12) { setNotice(t.missing); return; }
+    await runAction(async () => {
+      await mutation("/api/v1/session/change-password", {
+        old_password: oldPassword, new_password: newPassword,
+      }, session.csrf_token);
+      setOldPassword(""); setNewPassword("");
+      pendingCreditKey.current = null; pendingClientKey.current = null;
+      setSession(null); setMode("signedout");
+      setMe(null); setReps(null); setClients(null); setEvents(null);
+    }, true);
+  }
   async function createRepresentative(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); if (!session) return;
     await runAction(async () => {
@@ -236,13 +256,14 @@ export default function BusinessWorkspace({ language }: { language: Language }) 
     if (bytes === null || !Number.isSafeInteger(units) || Math.abs(units) > 1_000_000_000 || (bytes === 0 && units === 0)) {
       setNotice(t.missing); return;
     }
-    const eventId = uid();
+    const eventId = pendingCreditKey.current ?? uid();
+    pendingCreditKey.current = eventId;
     await runAction(async () => {
       await mutation("/api/v1/workspace/representatives/" + encodeURIComponent(creditRep) + "/credits", {
         event_id: eventId, representative_id: creditRep, volume_delta_bytes: bytes,
         unlimited_delta_units: units, reason: creditReason.trim(),
       }, session.csrf_token);
-      setCreditReason("");
+      setCreditReason(""); pendingCreditKey.current = null;
     });
   }
   async function createClient(event: FormEvent<HTMLFormElement>) {
@@ -254,7 +275,8 @@ export default function BusinessWorkspace({ language }: { language: Language }) 
     if (!clientId.trim() || !clientName.trim() || !Number.isSafeInteger(duration) || duration < 1 || duration > 3650 ||
       !Number.isSafeInteger(ipCount) || ipCount < 0 || ipCount > 1000 || (clientKind === "unlimited" && ipCount === 0) ||
       volumeBytes === null) { setNotice(t.missing); return; }
-    const eventId = uid();
+    const eventId = pendingClientKey.current ?? uid();
+    pendingClientKey.current = eventId;
     await runAction(async () => {
       await mutation("/api/v1/workspace/clients", {
         event_id: eventId, client_id: clientId.trim(),
@@ -262,7 +284,7 @@ export default function BusinessWorkspace({ language }: { language: Language }) 
         name: clientName.trim(), duration_days: duration, ip_count: ipCount,
         volume_bytes: volumeBytes, unlimited: clientKind === "unlimited",
       }, session.csrf_token);
-      setClientId(""); setClientName(""); setClientOffset(0);
+      setClientId(""); setClientName(""); setClientOffset(0); pendingClientKey.current = null;
     });
   }
 
@@ -365,6 +387,16 @@ export default function BusinessWorkspace({ language }: { language: Language }) 
         <div className="business-pagination"><button disabled={eventOffset === 0} onClick={() => setEventOffset((x) => Math.max(0, x - 50))}>{t.previous}</button>
           <button disabled={!events || events.length < 50} onClick={() => setEventOffset((x) => x + 50)}>{t.next}</button></div>
       </div>
+      <form className="business-panel business-password-form" onSubmit={(e) => { void changePassword(e); }}>
+        <h3><KeyRound size={17}/>{t.rotate}</h3>
+        <div className="business-fields">
+          <label>{t.oldPassword}<input type="password" autoComplete="current-password" value={oldPassword}
+            onChange={(e) => setOldPassword(e.target.value)} required/></label>
+          <label>{t.newPassword}<input type="password" autoComplete="new-password" minLength={12}
+            value={newPassword} onChange={(e) => setNewPassword(e.target.value)} required/></label>
+        </div>
+        <button type="submit" disabled={actionBusy}>{t.change}</button>
+      </form>
       <p className="business-footnote"><CheckCircle2 size={16}/>{t.unsafe}</p>
     </>}
     {notice && <div className="business-notice" role="status">{notice}</div>}
