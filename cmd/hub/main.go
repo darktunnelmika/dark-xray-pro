@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/darktunnelmika/dark-xray-pro/internal/api"
+	"github.com/darktunnelmika/dark-xray-pro/internal/business"
 	"github.com/darktunnelmika/dark-xray-pro/internal/configstage"
 	"github.com/darktunnelmika/dark-xray-pro/internal/labrevision"
 	"github.com/darktunnelmika/dark-xray-pro/internal/noderegistry"
@@ -63,6 +64,7 @@ func main() {
 	registryPath := flag.String("registry", "./lab-state/registry.json", "private durable LAB node enrollment")
 	replacementsPath := flag.String("replacements", "./lab-state/replacements.json", "private nonactivating replacement journal")
 	stagingPath := flag.String("staging", "./lab-state/private-staging/configs.json", "optional encrypted Reality candidate journal")
+	businessPath := flag.String("business-db", "", "optional private PRO-only business SQLite path (explicit opt-in)")
 	labRevisionsPath := flag.String("lab-revisions", "./lab-state/private-staging/lab-revisions.json", "optional LAB-only encrypted revision selection and rollback journal")
 	agentListen := flag.String("agent-tls-listen", "", "optional dedicated HTTPS LAB Node listener (disabled by default)")
 	agentCert := flag.String("agent-tls-cert", "", "certificate with valid IP/DNS SAN for new LAB Node listener")
@@ -100,6 +102,25 @@ func main() {
 	ops, err := replacement.Open(*replacementsPath, nil)
 	if err != nil { log.Fatal("replacement journal unavailable: ", err) }
 	if err := service.EnableReplacementLab(ops); err != nil { log.Fatal(err) }
+
+	// Production billing/representative storage is not coupled to any Node.
+	// Require a dedicated new LAB-only directory to prevent accidental access
+	// to the legacy HUB SQLite, restore archive or business configuration.
+	if os.Getenv("DARK_PRO_ENABLE_BUSINESS_CORE") == "1" {
+		clean := filepath.Clean(*businessPath)
+		relative, pathErr := filepath.Rel("/var/lib/dark-xray-pro-lab", clean)
+		if pathErr != nil || !filepath.IsAbs(clean) || relative == "." ||
+			relative == ".." || strings.HasPrefix(relative, "../") ||
+			!strings.HasSuffix(clean, ".sqlite") {
+			log.Fatal("PRO business database must be a NEW private .sqlite file under /var/lib/dark-xray-pro-lab")
+		}
+		biz, err := business.Open(clean)
+		if err != nil { log.Fatal("PRO business database initialization failed: ", err) }
+		defer biz.Close()
+		if err := service.EnableBusinessLab(biz); err != nil { log.Fatal(err) }
+	} else if *businessPath != "" {
+		log.Fatal("business database path supplied without explicit DARK_PRO_ENABLE_BUSINESS_CORE=1")
+	}
 	if os.Getenv("DARK_PRO_ENABLE_CONFIG_STAGE") == "1" {
 		if *agentListen == "" || os.Getenv("DARK_PRO_ENABLE_REMOTE_AGENT") != "1" {
 			log.Fatal("encrypted config staging requires dedicated verified remote Agent TLS listener")
