@@ -112,5 +112,17 @@ safe group deletion that never deletes clients or credit/usage history. The SQLi
 schema upgrades forward to version 3 without discarding existing PRO sessions,
 accounts or financial events. [Native client group contract](docs/client-groups-v1.md).
 
+## Native Client lifecycle — idempotent renewal and non-destructive archive
+
+The owner and scoped representatives can now renew native PRO client duration,
+top up volume, disable, logically re-enable and archive client records without
+deleting UUIDs or historical balances. Renewals charge only the additional
+cumulative user-month capacity, and use immutable request IDs to avoid double
+charges. Re-enabling still marks the record **pending Xray Apply** rather than
+pretending to activate a Node. Historical group membership and audit are
+preserved. [Lifecycle v1 contract](docs/native-client-lifecycle-v1.md).
+
+This is **not** subscription or Telegram production cutover functionality.
+
 Legacy group migration, real Xray Apply, historical usage attribution, Telegram bots
 and full production parity remain pending. No old service or customer is changed.

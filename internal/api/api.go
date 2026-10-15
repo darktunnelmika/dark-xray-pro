@@ -113,6 +113,7 @@ func (s *Server) Handler() http.Handler {
 	s.attachBrowserAuth(mux)
 	s.attachWorkspace(mux)
 	s.attachGroups(mux)
+	s.attachClientLifecycle(mux)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
 		w.Header().Set("X-Content-Type-Options", "nosniff")

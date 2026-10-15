@@ -131,6 +131,8 @@ func TestBusinessV2ToV3GroupsMigrationPreservesSessionCreditsAndClients(t *testi
  session,err:=s.Login(ctx,"ownerpro","initial-owner-strong-password")
  if err!=nil{t.Fatal(err)}
  for _,q:=range []string{
+  "DROP TABLE client_operations",
+  "ALTER TABLE clients DROP COLUMN archived",
   "DROP TABLE client_group_members",
   "DROP TABLE client_groups",
   "PRAGMA user_version=2",
