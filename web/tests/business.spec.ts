@@ -20,6 +20,7 @@ function successfulLogin(user: typeof rep) {
 async function mockBusiness(page: Page, user: typeof rep) {
   const requests: { path: string; method: string; csrf: string; body: unknown }[] = [];
   const runningClients: unknown[] = [];
+  const runningGroups: Array<{ id: string; representative_id: string; name: string; color: string; member_count: number; created_unix: number; updated_unix: number }> = [];
   await page.route("**/api/v1/session/**", async (route) => {
     const request = route.request();
     const path = new URL(request.url()).pathname;
@@ -37,9 +38,25 @@ async function mockBusiness(page: Page, user: typeof rep) {
   await page.route("**/api/v1/workspace/**", async (route) => {
     const request = route.request();
     const path = new URL(request.url()).pathname;
-    if (request.method() === "POST") {
+    if (request.method() !== "GET") {
       const body: unknown = request.postDataJSON();
-      requests.push({ path, method: "POST", csrf: request.headers()["x-csrf-token"] ?? "", body });
+      requests.push({ path, method: request.method(), csrf: request.headers()["x-csrf-token"] ?? "", body });
+      if (path === "/api/v1/workspace/groups" && request.method() === "POST") {
+        const n = body as { id: string; representative_id: string; name: string; color: string };
+        runningGroups.push({ ...n, member_count: 0, created_unix: 0, updated_unix: 0 });
+      } else if (path.endsWith("/members") && request.method() === "POST") {
+        const groupId = path.split("/").at(-2);
+        const g = runningGroups.find((row) => row.id === groupId);
+        if (g) g.member_count = (body as { client_ids: string[] }).client_ids.length;
+      } else if (path.includes("/groups/") && request.method() === "DELETE") {
+        const groupId = path.split("/").at(-1);
+        const i = runningGroups.findIndex((row) => row.id === groupId);
+        if (i >= 0) runningGroups.splice(i, 1);
+      } else if (path.includes("/groups/") && request.method() === "PATCH") {
+        const groupId = path.split("/").at(-1);
+        const g = runningGroups.find((row) => row.id === groupId);
+        if (g) Object.assign(g, body);
+      }
       if (path.endsWith("/clients")) {
         const n = body as Record<string, unknown>;
         runningClients.push({
@@ -50,7 +67,8 @@ async function mockBusiness(page: Page, user: typeof rep) {
           expires_unix: 1800000000,
         });
       }
-      await route.fulfill({ status: 201, contentType: "application/json", body: JSON.stringify(body) });
+      await route.fulfill({ status: request.method() === "POST" ? 201 : 200,
+        contentType: "application/json", body: JSON.stringify(body) });
       return;
     }
     if (path.endsWith("/me")) {
@@ -63,6 +81,9 @@ async function mockBusiness(page: Page, user: typeof rep) {
     } else if (path.endsWith("/clients")) {
       await route.fulfill({ status: 200, contentType: "application/json",
         body: JSON.stringify({ clients: runningClients }) });
+    } else if (path.endsWith("/groups")) {
+      await route.fulfill({ status: 200, contentType: "application/json",
+        body: JSON.stringify({ groups: runningGroups }) });
     } else if (path.endsWith("/events")) {
       await route.fulfill({ status: 200, contentType: "application/json",
         body: JSON.stringify({ events: [{ event_id: "credit-test-123456789", kind: "credit_adjustment",
@@ -149,4 +170,46 @@ test("owner gets real scoped representative forms in Persian without sending own
   const leaked = await page.evaluate(() => JSON.stringify(localStorage));
   expect(leaked).not.toContain("csrf_token");
   expect(leaked).not.toContain("test-private-password-for-lab");
+});
+
+
+test("owner can create and bulk-edit a real group in Persian then delete group without deleting clients", async ({ page }) => {
+  await mockBase(page);
+  const requests = await mockBusiness(page, owner);
+  await page.setViewportSize({ width: 320, height: 750 });
+  await page.goto("/");
+  await page.getByRole("button", { name: "Open menu" }).click();
+  await page.getByRole("button", { name: "Business" }).click();
+  await page.getByLabel("Username").fill("proowner");
+  await page.getByLabel("Password").fill("test-private-password-for-lab");
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await page.getByRole("button", { name: "Switch language" }).click();
+  await expect(page.getByRole("heading", { name: "گروه‌های کلاینت‌ها" })).toBeVisible();
+  const create = page.getByRole("heading", { name: "ساخت گروه" }).locator("..");
+  await create.getByLabel("شناسه گروه").fill("group-new");
+  await create.getByLabel("نام گروه").fill("وی آی پی");
+  await create.getByLabel("رنگ (اختیاری #RRGGBB)").fill("#FF00AA");
+  await create.getByRole("button", { name: "ساخت گروه" }).click();
+  await expect(page.getByText("وی آی پی (group-new)")).toBeVisible();
+  const assign = page.getByRole("heading", { name: "انتقال گروهی کلاینت‌ها" }).locator("..");
+  await assign.getByLabel("شناسه گروه").fill("group-new");
+  await assign.getByLabel("شناسه کلاینت‌ها (با کاما، حداکثر ۵۰۰)").fill("client-one,client-two");
+  await assign.getByRole("button", { name: "انتقال گروهی کلاینت‌ها" }).click();
+  await expect(page.getByText("2 عضو", { exact: false })).toBeVisible();
+  const groupList = page.getByRole("heading", { name: "گروه‌های کلاینت‌ها" }).locator("..");
+  page.once("dialog", (dialog) => dialog.accept());
+  await groupList.getByRole("button", { name: "حذف گروه" }).click();
+  await expect(page.getByText("وی آی پی (group-new)")).toHaveCount(0);
+  expect(requests.map((r) => r.path)).toEqual([
+    "/api/v1/workspace/groups",
+    "/api/v1/workspace/groups/group-new/members",
+    "/api/v1/workspace/groups/group-new",
+  ]);
+  for (const request of requests) expect(request.csrf).toBe("a".repeat(64));
+  const groupCreate = requests[0].body as Record<string, unknown>;
+  expect(groupCreate.name).toBe("وی آی پی");
+  const assignBody = requests[1].body as { client_ids: string[] };
+  expect(assignBody.client_ids).toEqual(["client-one", "client-two"]);
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 2);
+  expect(overflow).toBe(false);
 });
