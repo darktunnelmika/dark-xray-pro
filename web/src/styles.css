@@ -240,3 +240,36 @@ button:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
 
 /* A healthy heartbeat with delayed metrics is still Online, never flapping. */
 .stats-delayed { color: var(--sub); font-size: 10px; font-weight: 600; }
+
+
+/* Node Manager is read-only: no browser route exposes owner credentials or apply controls. */
+.node-selected { background: var(--accent-wash); }
+.node-inspect-button {
+  display: inline-flex; align-items: center; gap: 3px; margin-top: 7px; padding: 3px 1px;
+  border: 0; background: transparent; color: var(--accent); font-size: 11px; font-weight: 730;
+}
+.node-inspect-button:hover { text-decoration: underline; }
+.node-inspect-button svg { transform: scaleX(1); }
+:root[dir="rtl"] .node-inspect-button svg { transform: scaleX(-1); }
+.node-inspector, .node-manager-note {
+  margin-top: 18px; background: var(--surface); border: 1px solid var(--border);
+  border-radius: 17px; box-shadow: var(--shadow);
+}
+.node-inspector { padding: clamp(18px, 2.5vw, 29px); min-width: 0; }
+.node-inspector-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
+.node-inspector-heading .eyebrow { margin-bottom: 8px; }
+.node-inspector-heading h2 { font-size: 20px; margin: 0; overflow-wrap: anywhere; }
+.node-inspector-heading p { margin: 5px 0 0; color: var(--sub); font-size: 11px; overflow-wrap: anywhere; }
+.node-inspector-grid {
+  margin-top: 23px; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(175px, 100%), 1fr));
+  gap: 10px;
+}
+.node-inspector-field { padding: 15px; border-radius: 12px; background: var(--surface-2); min-width: 0; }
+.node-inspector-field span { display: block; font-size: 11px; color: var(--sub); margin-bottom: 7px; }
+.node-inspector-field strong { display: block; font-size: 13px; font-weight: 690; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+.node-inspector-boundary { display: flex; gap: 9px; align-items: flex-start; color: var(--sub); font-size: 11px; margin-top: 20px; }
+.node-inspector-boundary svg { color: var(--accent); flex: 0 0 auto; }
+.node-manager-note { display: flex; align-items: flex-start; gap: 13px; padding: 20px; }
+.node-manager-note svg { color: var(--accent); flex-shrink: 0; }
+.node-manager-note strong { font-size: 13px; }
+.node-manager-note p { margin: 5px 0 0; color: var(--sub); font-size: 12px; overflow-wrap: anywhere; }
