@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"crypto/tls"
+	"encoding/hex"
 	"errors"
 	"flag"
 	"fmt"
@@ -18,6 +19,7 @@ import (
 	"time"
 
 	"github.com/darktunnelmika/dark-xray-pro/internal/api"
+	"github.com/darktunnelmika/dark-xray-pro/internal/configstage"
 	"github.com/darktunnelmika/dark-xray-pro/internal/noderegistry"
 	"github.com/darktunnelmika/dark-xray-pro/internal/replacement"
 	"github.com/darktunnelmika/dark-xray-pro/internal/telemetry"
@@ -58,6 +60,7 @@ func main() {
 	static := flag.String("static", "web/dist", "optional compiled frontend directory")
 	registryPath := flag.String("registry", "./lab-state/registry.json", "private durable LAB node enrollment")
 	replacementsPath := flag.String("replacements", "./lab-state/replacements.json", "private nonactivating replacement journal")
+	stagingPath := flag.String("staging", "./lab-state/private-staging/configs.json", "optional encrypted Reality candidate journal")
 	agentListen := flag.String("agent-tls-listen", "", "optional dedicated HTTPS LAB Node listener (disabled by default)")
 	agentCert := flag.String("agent-tls-cert", "", "certificate with valid IP/DNS SAN for new LAB Node listener")
 	agentKey := flag.String("agent-tls-key", "", "private key for dedicated LAB Node listener")
@@ -94,6 +97,16 @@ func main() {
 	ops, err := replacement.Open(*replacementsPath, nil)
 	if err != nil { log.Fatal("replacement journal unavailable: ", err) }
 	if err := service.EnableReplacementLab(ops); err != nil { log.Fatal(err) }
+	if os.Getenv("DARK_PRO_ENABLE_CONFIG_STAGE") == "1" {
+		if *agentListen == "" || os.Getenv("DARK_PRO_ENABLE_REMOTE_AGENT") != "1" {
+			log.Fatal("encrypted config staging requires dedicated verified remote Agent TLS listener")
+		}
+		key, err := hex.DecodeString(os.Getenv("DARK_PRO_STAGE_KEY_HEX"))
+		if err != nil || len(key) != 32 { log.Fatal("staging requires a privately supplied 32-byte hex AES key") }
+		stage, err := configstage.Open(*stagingPath, key, nil)
+		if err != nil { log.Fatal("private encrypted stage registry unavailable: ", err) }
+		if err := service.EnableConfigStaging(stage); err != nil { log.Fatal(err) }
+	}
 
 	apiHandler := service.Handler()
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

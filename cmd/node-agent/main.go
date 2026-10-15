@@ -109,6 +109,8 @@ func main() {
     name := flag.String("name", "", "display name")
     hub := flag.String("hub", "http://127.0.0.1:2087", "local lab HUB")
     identityPath := flag.String("identity-file", "", "private local Agent enrollment identity file")
+    stageXrayBinary := flag.String("stage-xray-binary", "", "explicit trusted Xray binary for OFFLINE validation only")
+    stageXraySHA := flag.String("stage-xray-sha256", "", "SHA256 of separately trusted Xray binary")
     pin := flag.String("hub-cert-sha256", "", "required SHA256 fingerprint of the verified HTTPS HUB leaf certificate")
     caFile := flag.String("hub-ca-file", "", "optional trusted LAB CA certificate bundle")
     flag.Parse()
@@ -210,6 +212,32 @@ func main() {
                     if err := pollPreflight(ctx,client,endpoint,*nodeID,
                         identity.InstallationID,identity.AgentToken); err != nil && ctx.Err() == nil {
                         log.Printf("replacement TCP preflight failed: %v",err)
+                    }
+                }
+            }
+        }()
+    }
+
+    // Private Reality staging is disabled by default. It always uses the
+    // verified HTTPS Agent connection and never writes live Xray config.
+    if os.Getenv("DARK_PRO_ENABLE_XRAY_STAGE_VALIDATION") == "1" {
+        if !remote || *stageXrayBinary == "" || len(*stageXraySHA) != 64 {
+            log.Fatal("offline Xray stage worker requires HTTPS and a separately pinned executable")
+        }
+        workers.Add(1)
+        go func() {
+            defer workers.Done()
+            timer := time.NewTicker(15 * time.Second)
+            defer timer.Stop()
+            for {
+                select {
+                case <-ctx.Done():
+                    return
+                case <-timer.C:
+                    if err := pollConfigStage(ctx,client,endpoint,*nodeID,
+                        identity.InstallationID,identity.AgentToken,*stageXrayBinary,
+                        *stageXraySHA); err != nil && ctx.Err() == nil {
+                        log.Printf("offline Xray stage validation unavailable: %v",err)
                     }
                 }
             }
