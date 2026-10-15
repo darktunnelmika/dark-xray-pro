@@ -322,6 +322,13 @@ func (s *Store)CreateClient(ctx context.Context,n NewClient)(Client,error){
  if errors.Is(err,sql.ErrNoRows){return Client{},ErrNotFound}
  if err!=nil{return Client{},err}
  if !r.Enabled{return Client{},ErrConflict}
+ // A duplicate logical identity must fail as an identity conflict BEFORE
+ // checking available credit. Never let insufficient credit conceal it.
+ if _,existingErr:=readClient(ctx,tx,n.ClientID); existingErr==nil {
+  return Client{},ErrConflict
+ } else if !errors.Is(existingErr,sql.ErrNoRows) {
+  return Client{},existingErr
+ }
  if r.Kind=="representative"{
   if r.VolumeCreditBytes<chargeVolume||r.UnlimitedCreditUnits<chargeUnits{return Client{},ErrInsufficient}
   if _,err=tx.ExecContext(ctx,"UPDATE representatives SET volume_credit_bytes=volume_credit_bytes-?,unlimited_credit_units=unlimited_credit_units-? WHERE id=?",chargeVolume,chargeUnits,r.ID);err!=nil{return Client{},err}
