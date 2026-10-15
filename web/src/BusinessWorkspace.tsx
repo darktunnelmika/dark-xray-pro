@@ -6,6 +6,7 @@ type User = { id: string; username: string; role: "owner" | "representative"; re
 type Session = { authenticated: boolean; user: User; csrf_token: string; expires_unix: number };
 type Representative = { id: string; display_name: string; kind: string; enabled: boolean; volume_credit_bytes: number; unlimited_credit_units: number };
 type Client = { id: string; representative_id: string; name: string; plan_kind: string; ip_count: number; volume_bytes: number; duration_days: number; deployment_state: string; expires_unix: number };
+type ClientGroup = { id: string; representative_id: string; name: string; color: string; member_count: number; created_unix: number; updated_unix: number };
 type LedgerEvent = { event_id: string; kind: string; representative_id: string; object_id: string; reason: string; volume_delta_bytes: number; unlimited_delta_units: number };
 type Workspace = { user: User; balance: Representative; data_plane: "not_activated" };
 type Mode = "loading" | "disabled" | "signedout" | "signedin" | "unavailable";
@@ -49,6 +50,13 @@ const words = {
     loginHelp: "Owner and representative credentials are separate from Node pairing and the temporary HTTPS preview password.",
     account: "Account", role: "Role", volume: "Volume credit", unlimited: "Unlimited units",
     reps: "Representatives", clients: "Clients", history: "Financial audit",
+    groups: "Client groups", newGroup: "Create group", groupId: "Group ID", groupName: "Group name",
+    groupColor: "Color (optional #RRGGBB)", groupCount: "members",
+    groupAssign: "Move clients to group", clientIDs: "Client IDs (comma-separated, max 500)",
+    groupEdit: "Rename / edit group", groupSave: "Save group", groupDelete: "Delete group",
+    groupRemove: "Remove member from group", groupSingleClient: "Client ID to detach",
+    confirmGroup: "Delete this group? All clients and financial history will remain intact.",
+    groupWarning: "Deleting a group never deletes clients, consumed traffic or credit history.",
     createRep: "Create representative", repId: "Representative ID", displayName: "Display name",
     provision: "Set representative login", setLogin: "Create login", repUsername: "Representative username", repPassword: "New password (12+ characters)",
     grant: "Adjust representative credit", reason: "Reason", addVolume: "Volume delta (GB, +/-)", addUnits: "Unlimited-unit delta (+/-)",
@@ -73,6 +81,13 @@ const words = {
     loginHelp: "ورود مالک و نماینده مستقل از Pair Code نودها و رمز موقت HTTPS است.",
     account: "حساب", role: "نقش", volume: "اعتبار حجمی", unlimited: "اعتبار نامحدود",
     reps: "نمایندگان", clients: "کلاینت‌ها", history: "تاریخچه مالی",
+    groups: "گروه‌های کلاینت‌ها", newGroup: "ساخت گروه", groupId: "شناسه گروه", groupName: "نام گروه",
+    groupColor: "رنگ (اختیاری #RRGGBB)", groupCount: "عضو",
+    groupAssign: "انتقال گروهی کلاینت‌ها", clientIDs: "شناسه کلاینت‌ها (با کاما، حداکثر ۵۰۰)",
+    groupEdit: "ویرایش گروه", groupSave: "ذخیره گروه", groupDelete: "حذف گروه",
+    groupRemove: "حذف عضو از گروه", groupSingleClient: "شناسه کلاینت برای جداسازی",
+    confirmGroup: "این گروه حذف شود؟ کلاینت‌ها و سوابق مالی محفوظ می‌مانند.",
+    groupWarning: "حذف گروه هرگز کلاینت‌ها، ترافیک مصرف‌شده و اعتبار تاریخی را پاک نمی‌کند.",
     createRep: "ساخت نماینده", repId: "شناسه نماینده", displayName: "نام نمایشی",
     provision: "ساخت ورود نماینده", setLogin: "ثبت ورود", repUsername: "نام کاربری نماینده", repPassword: "رمز جدید (حداقل ۱۲ کاراکتر)",
     grant: "تغییر اعتبار نماینده", reason: "دلیل تغییر", addVolume: "تغییر اعتبار حجمی (گیگ، +/-)", addUnits: "تغییر اعتبار نامحدود (+/-)",
@@ -119,9 +134,11 @@ export default function BusinessWorkspace({ language }: { language: Language }) 
   const [reps, setReps] = useState<Representative[] | null>(null);
   const [clients, setClients] = useState<Client[] | null>(null);
   const [events, setEvents] = useState<LedgerEvent[] | null>(null);
+  const [groups, setGroups] = useState<ClientGroup[] | null>(null);
   const [repOffset, setRepOffset] = useState(0);
   const [clientOffset, setClientOffset] = useState(0);
   const [eventOffset, setEventOffset] = useState(0);
+  const [groupOffset, setGroupOffset] = useState(0);
   const [repId, setRepId] = useState("");
   const [repName, setRepName] = useState("");
   const [loginRep, setLoginRep] = useState("");
@@ -138,6 +155,16 @@ export default function BusinessWorkspace({ language }: { language: Language }) 
   const [clientDuration, setClientDuration] = useState("30");
   const [clientIPs, setClientIPs] = useState("0");
   const [clientVolume, setClientVolume] = useState("10");
+  const [groupID, setGroupID] = useState("");
+  const [groupName, setGroupName] = useState("");
+  const [groupColor, setGroupColor] = useState("");
+  const [groupRep, setGroupRep] = useState("owner");
+  const [groupTarget, setGroupTarget] = useState("");
+  const [memberIDs, setMemberIDs] = useState("");
+  const [groupEditID, setGroupEditID] = useState("");
+  const [groupEditName, setGroupEditName] = useState("");
+  const [groupEditColor, setGroupEditColor] = useState("");
+  const [unassignID, setUnassignID] = useState("");
 
   useEffect(() => {
     let alive = true;
@@ -164,33 +191,34 @@ export default function BusinessWorkspace({ language }: { language: Language }) 
     const controller = new AbortController();
     const p = "?limit=50&offset=";
     const fetchData = async () => {
-      const [account, ownClients, ownEvents, ownerReps] = await Promise.all([
+      const [account, ownClients, ownEvents, ownerReps, ownGroups] = await Promise.all([
         api<Workspace>("/api/v1/workspace/me", { signal: controller.signal }),
         api<{ clients: Client[] }>("/api/v1/workspace/clients" + p + clientOffset, { signal: controller.signal }),
         api<{ events: LedgerEvent[] }>("/api/v1/workspace/events" + p + eventOffset, { signal: controller.signal }),
         session.user.role === "owner"
           ? api<{ representatives: Representative[] }>("/api/v1/workspace/representatives" + p + repOffset, { signal: controller.signal })
           : Promise.resolve(null),
+        api<{ groups: ClientGroup[] }>("/api/v1/workspace/groups" + p + groupOffset, { signal: controller.signal }),
       ]);
       if (controller.signal.aborted) return;
       if (!Array.isArray(ownClients.clients) || !Array.isArray(ownEvents.events) ||
-        (ownerReps !== null && !Array.isArray(ownerReps.representatives))) {
+        (ownerReps !== null && !Array.isArray(ownerReps.representatives)) || !Array.isArray(ownGroups.groups)) {
         throw new Error("Malformed business response");
       }
       setMe(account); setClients(ownClients.clients); setEvents(ownEvents.events);
-      setReps(ownerReps?.representatives ?? null); setNotice(null);
+      setReps(ownerReps?.representatives ?? null); setGroups(ownGroups.groups); setNotice(null);
     };
     void fetchData().catch((error: unknown) => {
       if (controller.signal.aborted) return;
       if (error instanceof ApiError && error.status === 401) {
-        setSession(null); setMode("signedout"); setMe(null); setReps(null); setClients(null); setEvents(null);
+        setSession(null); setMode("signedout"); setMe(null); setReps(null); setClients(null); setEvents(null); setGroups(null);
       pendingCreditKey.current = null; pendingClientKey.current = null;
       } else {
         setNotice(words[language].unavailable);
       }
     });
     return () => controller.abort();
-  }, [session, refreshKey, clientOffset, eventOffset, repOffset, language]);
+  }, [session, refreshKey, clientOffset, eventOffset, repOffset, groupOffset, language]);
 
   async function signIn(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); setNotice(null); setActionBusy(true);
@@ -285,6 +313,56 @@ export default function BusinessWorkspace({ language }: { language: Language }) 
         volume_bytes: volumeBytes, unlimited: clientKind === "unlimited",
       }, session.csrf_token);
       setClientId(""); setClientName(""); setClientOffset(0); pendingClientKey.current = null;
+    });
+  }
+
+  async function addGroup(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault(); if (!session) return;
+    await runAction(async () => {
+      await mutation("/api/v1/workspace/groups", {
+        id: groupID.trim(), name: groupName.trim(), color: groupColor.trim(),
+        representative_id: session.user.role === "owner" ? groupRep : session.user.representative_id,
+      }, session.csrf_token);
+      setGroupID(""); setGroupName(""); setGroupColor(""); setGroupOffset(0);
+    });
+  }
+  async function assignGroup(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault(); if (!session || !groupTarget.trim()) return;
+    const ids = memberIDs.split(/[\s,]+/).map((v) => v.trim()).filter(Boolean);
+    if (ids.length === 0 || ids.length > 500 || new Set(ids).size !== ids.length) { setNotice(t.missing); return; }
+    await runAction(async () => {
+      await mutation("/api/v1/workspace/groups/" + encodeURIComponent(groupTarget) + "/members",
+        { client_ids: ids }, session.csrf_token);
+      setMemberIDs("");
+    });
+  }
+  async function editGroup(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault(); if (!session || !groupEditID.trim()) return;
+    await runAction(async () => {
+      await api("/api/v1/workspace/groups/" + encodeURIComponent(groupEditID), {
+        method: "PATCH", headers: { "Content-Type": "application/json", "X-CSRF-Token": session.csrf_token },
+        body: JSON.stringify({ name: groupEditName, color: groupEditColor }),
+      });
+    });
+  }
+  async function deleteGroup(id: string, name: string) {
+    if (!session || !window.confirm(t.confirmGroup + " " + name)) return;
+    await runAction(async () => {
+      await api("/api/v1/workspace/groups/" + encodeURIComponent(id), {
+        method: "DELETE", headers: { "Content-Type": "application/json", "X-CSRF-Token": session.csrf_token },
+        body: JSON.stringify({}),
+      });
+      if (groupEditID === id) setGroupEditID("");
+    });
+  }
+  async function unassignMember(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault(); if (!session || !groupTarget || !unassignID) return;
+    await runAction(async () => {
+      await api("/api/v1/workspace/groups/" + encodeURIComponent(groupTarget) + "/members/" + encodeURIComponent(unassignID), {
+        method: "DELETE", headers: { "Content-Type": "application/json", "X-CSRF-Token": session.csrf_token },
+        body: JSON.stringify({}),
+      });
+      setUnassignID("");
     });
   }
 
@@ -386,6 +464,62 @@ export default function BusinessWorkspace({ language }: { language: Language }) 
         </div>)}</div> : <p>{events ? t.empty : t.loading}</p>}
         <div className="business-pagination"><button disabled={eventOffset === 0} onClick={() => setEventOffset((x) => Math.max(0, x - 50))}>{t.previous}</button>
           <button disabled={!events || events.length < 50} onClick={() => setEventOffset((x) => x + 50)}>{t.next}</button></div>
+      </div>
+      <div className="business-panel">
+        <h3><Users size={17}/>{t.groups}</h3>
+        <p className="business-warning">{t.groupWarning}</p>
+        {groups && groups.length ? <div className="business-records">
+          {groups.map((g) => <div className="business-group-row" key={g.id}>
+            <div className="business-group-name">
+              <span className="business-group-color" style={{ backgroundColor: g.color || "var(--accent)" }} />
+              <strong>{g.name} ({g.id})</strong>
+              <span>{g.representative_id} · {g.member_count} {t.groupCount}</span>
+            </div>
+            <div className="business-group-actions">
+              <button type="button" onClick={() => {
+                setGroupEditID(g.id); setGroupEditName(g.name); setGroupEditColor(g.color); setGroupTarget(g.id);
+              }}>{t.groupEdit}</button>
+              <button type="button" disabled={actionBusy} onClick={() => { void deleteGroup(g.id,g.name); }}>{t.groupDelete}</button>
+            </div>
+          </div>)}
+        </div> : <p>{groups ? t.empty : t.loading}</p>}
+        <div className="business-pagination">
+          <button disabled={groupOffset === 0} onClick={() => setGroupOffset((x) => Math.max(0, x - 50))}>{t.previous}</button>
+          <button disabled={!groups || groups.length < 50} onClick={() => setGroupOffset((x) => x + 50)}>{t.next}</button>
+        </div>
+      </div>
+      <div className="business-form-grid">
+        <form className="business-panel" onSubmit={(e) => { void addGroup(e); }}>
+          <h3><Users size={17}/>{t.newGroup}</h3>
+          <label>{t.groupId}<div className="business-inline"><input value={groupID} onChange={(e) => setGroupID(e.target.value)} required/>
+            <button type="button" onClick={() => setGroupID(uid())}>Random</button></div></label>
+          <label>{t.groupName}<input value={groupName} onChange={(e) => setGroupName(e.target.value)} required/></label>
+          <label>{t.groupColor}<input value={groupColor} onChange={(e) => setGroupColor(e.target.value)} placeholder="#123ABC" pattern="(#[A-Fa-f0-9]{6})?"/></label>
+          {session.user.role === "owner" && <label>{t.repId}<select value={groupRep} onChange={(e) => setGroupRep(e.target.value)}>
+            <option value="owner">owner</option>
+            {reps?.filter((r) => r.kind === "representative").map((r) => <option key={r.id} value={r.id}>{r.display_name}</option>)}
+          </select></label>}
+          <button type="submit" disabled={actionBusy}>{t.newGroup}</button>
+        </form>
+        <form className="business-panel" onSubmit={(e) => { void assignGroup(e); }}>
+          <h3>{t.groupAssign}</h3>
+          <label>{t.groupId}<input value={groupTarget} onChange={(e) => setGroupTarget(e.target.value)} required/></label>
+          <label>{t.clientIDs}<textarea value={memberIDs} onChange={(e) => setMemberIDs(e.target.value)} required rows={3}/></label>
+          <button type="submit" disabled={actionBusy}>{t.groupAssign}</button>
+        </form>
+        <form className="business-panel" onSubmit={(e) => { void editGroup(e); }}>
+          <h3>{t.groupEdit}</h3>
+          <label>{t.groupId}<input value={groupEditID} onChange={(e) => setGroupEditID(e.target.value)} required/></label>
+          <label>{t.groupName}<input value={groupEditName} onChange={(e) => setGroupEditName(e.target.value)} required/></label>
+          <label>{t.groupColor}<input value={groupEditColor} onChange={(e) => setGroupEditColor(e.target.value)} pattern="(#[A-Fa-f0-9]{6})?"/></label>
+          <button type="submit" disabled={actionBusy}>{t.groupSave}</button>
+        </form>
+        <form className="business-panel" onSubmit={(e) => { void unassignMember(e); }}>
+          <h3>{t.groupRemove}</h3>
+          <label>{t.groupId}<input value={groupTarget} onChange={(e) => setGroupTarget(e.target.value)} required/></label>
+          <label>{t.groupSingleClient}<input value={unassignID} onChange={(e) => setUnassignID(e.target.value)} required/></label>
+          <button type="submit" disabled={actionBusy}>{t.groupRemove}</button>
+        </form>
       </div>
       <form className="business-panel business-password-form" onSubmit={(e) => { void changePassword(e); }}>
         <h3><KeyRound size={17}/>{t.rotate}</h3>
