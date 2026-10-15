@@ -76,3 +76,14 @@ Dark Swap's exactly three fields (tunnel port, Node port and tunnel host).
 Shared-port ambiguity is explicitly disclosed. No Apply button, privileged
 admin request or subscription publication is enabled. Read
 [Phase 11 safety boundary](docs/inbounds-direct-swap-draft-phase11.md).
+
+## Phase 12 — real isolated Xray process apply/rollback rehearsal (LAB ONLY)
+
+An opt-in, non-root Go sandbox now validates checksum-pinned Xray candidates,
+remaps every selected listener to ephemeral localhost ports and tests
+**real process-level Apply, previous-process Rollback, automatic fallback on
+process exit, and safe shutdown**. The previous process stays alive during
+a candidate trial. This is entirely in-memory and never manages systemd,
+public inbounds, customers or subscriptions. A live VLESS/REALITY handshake
+and crash-safe production rollout remain unavailable. See
+[Phase 12 controlled process runtime](docs/isolated-xray-sandbox-runtime-phase12.md).
