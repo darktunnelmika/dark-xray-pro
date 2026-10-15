@@ -127,7 +127,7 @@ test("representative only sees own scoped business tools and submits CSRF-bound 
   await expect(page.getByText("90", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Create representative" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Record credit transaction" })).toHaveCount(0);
-  await page.getByLabel("Client ID").fill("sample-pro-rep");
+  await page.locator(".business-client-form").getByLabel("Client ID").fill("sample-pro-rep");
   await page.getByLabel("Client name").fill("Private Test User");
   await page.getByLabel("Plan type").selectOption("unlimited");
   await page.getByLabel("Duration (days)").fill("60");
