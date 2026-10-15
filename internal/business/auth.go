@@ -114,6 +114,11 @@ func (s *Store) Login(ctx context.Context,username,password string)(LoginSession
  defer tx.Rollback()
  if _,err=tx.ExecContext(ctx,"DELETE FROM auth_sessions WHERE expires_unix<=?",now);err!=nil{return LoginSession{},err}
  if _,err=tx.ExecContext(ctx,"INSERT INTO auth_sessions(token_sha256,user_id,created_unix,expires_unix) VALUES(?,?,?,?)",digestSession(token),u.ID,now,expiry);err!=nil{return LoginSession{},err}
+ // Cap live sessions per account without trusting client-side logout. New
+ // successful logins keep their own token while oldest sessions are evicted.
+ if _,err=tx.ExecContext(ctx,`DELETE FROM auth_sessions WHERE user_id=? AND token_sha256 NOT IN (
+  SELECT token_sha256 FROM auth_sessions WHERE user_id=? ORDER BY created_unix DESC, rowid DESC LIMIT 20
+ )`,u.ID,u.ID);err!=nil{return LoginSession{},err}
  if err=tx.Commit();err!=nil{return LoginSession{},err}
  return LoginSession{Token:token,User:u,ExpiresUnix:expiry},nil
 }
