@@ -43,7 +43,7 @@ func(s *Server)Handler()http.Handler{
  mux:=http.NewServeMux()
  mux.HandleFunc("GET /api/v1/health",func(w http.ResponseWriter,_ *http.Request){respond(w,http.StatusOK,map[string]string{"status":"ok","mode":"isolated-lab","data_plane":"not_enabled"})})
  mux.HandleFunc("GET /api/v1/fleet",func(w http.ResponseWriter,_ *http.Request){respond(w,http.StatusOK,s.snapshot())})
- s.attachEnrollment(mux);s.attachReplacement(mux);s.attachConfigStaging(mux);s.attachLabRevisions(mux);s.attachBusiness(mux);s.attachBrowserAuth(mux);s.attachWorkspace(mux);s.attachGroups(mux);s.attachClientLifecycle(mux);s.attachNativeInbounds(mux)
+ s.attachEnrollment(mux);s.attachReplacement(mux);s.attachConfigStaging(mux);s.attachLabRevisions(mux);s.attachBusiness(mux);s.attachBrowserAuth(mux);s.attachWorkspace(mux);s.attachGroups(mux);s.attachClientLifecycle(mux);s.attachNativeInbounds(mux);s.attachRuntimeReports(mux)
  return http.HandlerFunc(func(w http.ResponseWriter,r *http.Request){w.Header().Set("Cache-Control","no-store");w.Header().Set("X-Content-Type-Options","nosniff");w.Header().Set("Referrer-Policy","no-referrer");mux.ServeHTTP(w,r)})
 }
 // Only the strict Agent allowlist is routed on the separately verified TLS listener.
@@ -52,7 +52,7 @@ func(s *Server)AgentHandler()http.Handler{
   w.Header().Set("Cache-Control","no-store");w.Header().Set("X-Content-Type-Options","nosniff")
   if r.TLS==nil||r.TLS.Version<tls.VersionTLS13{respond(w,http.StatusUpgradeRequired,map[string]string{"error":"tls13_required"});return}
   if r.Method==http.MethodGet&&r.URL.Path=="/api/v1/agent/health"{respond(w,http.StatusOK,map[string]string{"status":"ok","mode":"new-node-lab","data_plane":"disabled"});return}
-  if !((r.Method==http.MethodPost&&(r.URL.Path=="/api/v1/agent/enroll"||r.URL.Path=="/api/v1/agent/config-stage-report"||r.URL.Path=="/api/v1/agent/pulse"||r.URL.Path=="/api/v1/agent/heartbeat"||r.URL.Path=="/api/v1/agent/replacement-report"))||(r.Method==http.MethodGet&&(r.URL.Path=="/api/v1/agent/replacement-task"||r.URL.Path=="/api/v1/agent/config-stage"||r.URL.Path=="/api/v1/agent/native-runtime"))){http.NotFound(w,r);return}
+  if !((r.Method==http.MethodPost&&(r.URL.Path=="/api/v1/agent/enroll"||r.URL.Path=="/api/v1/agent/config-stage-report"||r.URL.Path=="/api/v1/agent/native-runtime-report"||r.URL.Path=="/api/v1/agent/pulse"||r.URL.Path=="/api/v1/agent/heartbeat"||r.URL.Path=="/api/v1/agent/replacement-report"))||(r.Method==http.MethodGet&&(r.URL.Path=="/api/v1/agent/replacement-task"||r.URL.Path=="/api/v1/agent/config-stage"||r.URL.Path=="/api/v1/agent/native-runtime"))){http.NotFound(w,r);return}
   local.ServeHTTP(w,r)
  })
 }

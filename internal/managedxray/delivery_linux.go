@@ -29,7 +29,10 @@ func(r *Runtime)Sync(ctx context.Context,client *http.Client,endpoint string)(Sn
  if d.Version!=1||d.NodeID!=r.options.NodeID||d.InstallationID!=r.options.InstallationID||d.ListenIP!=r.options.ListenIP{return r.Snapshot(),ErrLease}
  raw,err:=base64.StdEncoding.Strict().DecodeString(d.ConfigBase64);if err!=nil||len(raw)>xrayconfig.MaxCandidateBytes{return r.Snapshot(),ErrInvalid}
  d.Candidate.Config=raw;rev:=Revision{Sequence:d.Sequence,Candidate:d.Candidate};state:=r.Snapshot()
- if state.ProcessReady&&state.ActiveSequence==rev.Sequence&&state.ActiveSHA==rev.Candidate.SHA256{return r.Refresh(d.Lease)}
- if !state.ProcessReady&&state.SavedSequence==rev.Sequence&&state.SavedSHA==rev.Candidate.SHA256{return r.Recover(ctx,d.Lease)}
- return r.Apply(ctx,rev,d.Lease)
+ var observed Snapshot;var operationErr error
+ if state.ProcessReady&&state.ActiveSequence==rev.Sequence&&state.ActiveSHA==rev.Candidate.SHA256{observed,operationErr=r.Refresh(d.Lease)
+ }else if !state.ProcessReady&&state.SavedSequence==rev.Sequence&&state.SavedSHA==rev.Candidate.SHA256{observed,operationErr=r.Recover(ctx,d.Lease)
+ }else{observed,operationErr=r.Apply(ctx,rev,d.Lease)}
+ reportErr:=reportObservation(ctx,&secure,strings.TrimRight(endpoint,"/"),string(r.options.LeaseKey),RuntimeReport{Lease:d.Lease,Observed:observed})
+ if operationErr!=nil{return observed,operationErr};return observed,reportErr
 }

@@ -24,10 +24,9 @@ const fleet = {
   ],
 };
 async function mockFleet(page: Page, getData: () => unknown = () => fleet) {
+  await page.route("**/api/v1/session/status", route => route.fulfill({ status: 404, contentType: "application/json", body: "{}" }));
   await page.route("**/api/v1/fleet", async (route) => {
-    await route.fulfill({
-      status: 200, contentType: "application/json", body: JSON.stringify(getData()),
-    });
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(getData()) });
   });
 }
 
@@ -58,8 +57,7 @@ test("theme, language and mobile navigation survive refresh without horizontal o
   await expect(page.getByRole("heading", { name: "ظاهر و محیط آزمایش" })).toBeVisible();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
   await expect(page.locator("html")).toHaveAttribute("lang", "fa");
-  const overflow = await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 2);
-  expect(overflow).toBe(false);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 2)).toBe(false);
 });
 
 test("transient API failure preserves last verified Nodes and reports an actual error", async ({ page }) => {
@@ -80,9 +78,7 @@ test("first physical sample has no invented zero or billable usage", async ({ pa
   await mockFleet(page, () => ({
     ...fleet, physical_rates_complete: false,
     interface_rx_bits_per_second: 0, interface_tx_bits_per_second: 0,
-    nodes: fleet.nodes.map((node) => ({
-      ...node, rx_bits_per_second: null, tx_bits_per_second: null,
-    })),
+    nodes: fleet.nodes.map((node) => ({ ...node, rx_bits_per_second: null, tx_bits_per_second: null })),
   }));
   await page.goto("/");
   await expect(page.getByText("Germany lab")).toBeVisible();
@@ -95,17 +91,14 @@ test("320px viewport avoids body overflow", async ({ page }) => {
   await mockFleet(page);
   await page.goto("/");
   await expect(page.getByText("Germany lab")).toBeVisible();
-  const overflow = await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 2);
-  expect(overflow).toBe(false);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 2)).toBe(false);
 });
 
 test("Online heartbeat stays Online while delayed metrics show unknown instead of stale CPU", async ({ page }) => {
   const busy = {
     ...fleet, physical_rates_complete: false,
-    nodes: fleet.nodes.map((node) =>
-      node.node_id === "de-01"
-        ? { ...node, metrics_current: false, rx_bits_per_second: null, tx_bits_per_second: null }
-        : node),
+    nodes: fleet.nodes.map((node) => node.node_id === "de-01"
+      ? { ...node, metrics_current: false, rx_bits_per_second: null, tx_bits_per_second: null } : node),
   };
   await mockFleet(page, () => busy);
   await page.goto("/");
@@ -114,7 +107,6 @@ test("Online heartbeat stays Online while delayed metrics show unknown instead o
   await expect(page.getByText("Online", { exact: true }).last()).toBeVisible();
   await expect(page.getByText("0 Mbps")).toHaveCount(0);
 });
-
 
 test("Node Manager inspects the exact selected identity and preserves it across refresh", async ({ page }) => {
   await page.setViewportSize({ width: 320, height: 750 });
@@ -129,8 +121,7 @@ test("Node Manager inspects the exact selected identity and preserves it across 
   await expect(detail.getByText("Offline")).toBeVisible();
   await expect(detail.locator(".node-inspector-field").filter({ hasText: "CPU" }).locator("strong")).toHaveText("—");
   await expect(page.getByRole("button", { name: "Inspect Netherlands lab" })).toHaveAttribute("aria-pressed", "true");
-  const overflow = await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 2);
-  expect(overflow).toBe(false);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 2)).toBe(false);
   await page.reload();
   await expect(page.getByRole("region", { name: "Node details" }).getByRole("heading", { name: "Netherlands lab" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Inspect Netherlands lab" })).toHaveAttribute("aria-pressed", "true");
@@ -139,9 +130,7 @@ test("Node Manager inspects the exact selected identity and preserves it across 
 test("Node Manager does not mislabel delayed metrics as Offline or fabricate zero rates", async ({ page }) => {
   await mockFleet(page, () => ({
     ...fleet,
-    nodes: fleet.nodes.map((node) => node.node_id === "de-01" ? {
-      ...node, metrics_current: false, rx_bits_per_second: null, tx_bits_per_second: null,
-    } : node),
+    nodes: fleet.nodes.map((node) => node.node_id === "de-01" ? { ...node, metrics_current: false, rx_bits_per_second: null, tx_bits_per_second: null } : node),
   }));
   await page.goto("/");
   await page.getByRole("button", { name: "Nodes" }).click();
@@ -155,11 +144,8 @@ test("Node Manager does not mislabel delayed metrics as Offline or fabricate zer
 
 test("empty Node Manager explicitly keeps enrollment private, without trying owner API", async ({ page }) => {
   let ownerRequests = 0;
-  page.on("request", (request) => { if (request.url().includes("/api/v1/admin/")) ownerRequests++; });
-  await mockFleet(page, () => ({
-    ...fleet, nodes: [], total_nodes: 0, online_nodes: 0, offline_nodes: 0,
-    physical_rates_complete: false,
-  }));
+  page.on("request", request => { if (request.url().includes("/api/v1/admin/")) ownerRequests++; });
+  await mockFleet(page, () => ({ ...fleet, nodes: [], total_nodes: 0, online_nodes: 0, offline_nodes: 0, physical_rates_complete: false }));
   await page.goto("/");
   await page.getByRole("button", { name: "Nodes" }).click();
   await expect(page.getByText("New LAB Node pairing is owner-only on localhost.", { exact: false })).toBeVisible();
@@ -167,12 +153,9 @@ test("empty Node Manager explicitly keeps enrollment private, without trying own
   expect(ownerRequests).toBe(0);
 });
 
-
 test("Inbound planning keeps enrollment and activation private with no connected Nodes", async ({ page }) => {
   let unsafeRequests = 0;
-  page.on("request", (request) => {
-    if (request.method() !== "GET" || request.url().includes("/api/v1/admin/")) unsafeRequests++;
-  });
+  page.on("request", request => { if (request.method() !== "GET" || request.url().includes("/api/v1/admin/")) unsafeRequests++; });
   await mockFleet(page, () => ({ ...fleet, nodes: [], total_nodes: 0, online_nodes: 0, offline_nodes: 0 }));
   await page.goto("/");
   await page.getByRole("button", { name: "Inbounds" }).click();
@@ -185,9 +168,7 @@ test("Inbound planning keeps enrollment and activation private with no connected
 
 test("Direct + Dark Swap preview uses exactly three swap inputs and flags shared-port attribution", async ({ page }) => {
   let unsafeRequests = 0;
-  page.on("request", (request) => {
-    if (request.url().includes("/api/v1/admin/") || request.method() === "POST") unsafeRequests++;
-  });
+  page.on("request", request => { if (request.url().includes("/api/v1/admin/") || request.method() === "POST") unsafeRequests++; });
   await mockFleet(page);
   await page.goto("/");
   await page.getByRole("button", { name: "Inbounds" }).click();
@@ -228,6 +209,5 @@ test("mobile RTL Dark Swap draft stays readable and never enables Apply", async 
   await page.getByLabel("پورت نود", { exact: true }).fill("9443");
   await page.getByLabel("هاست یا IP تانل").fill("198.51.100.1");
   await expect(page.getByText("فقط پیش‌نمایش", { exact: false })).toBeVisible();
-  const overflow = await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 2);
-  expect(overflow).toBe(false);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 2)).toBe(false);
 });

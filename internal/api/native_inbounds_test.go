@@ -58,6 +58,7 @@ func nativeAPIExercise(t *testing.T,binary,pin string){
  o:=managedxray.Options{Directory:filepath.Join(t.TempDir(),"private-runtime"),StateKey:bytes.Repeat([]byte{8},32),LeaseKey:[]byte(nodeToken),NodeID:"native-node",InstallationID:installID,ListenIP:"127.0.0.1",Binary:binary,BinarySHA:pin}
  runtime,e:=managedxray.Open(o);if e!=nil{t.Fatal(e)};defer runtime.Close();state,e:=runtime.Sync(ctx,client,endpoint)
  if e!=nil||!state.ProcessReady||state.ActiveSequence!=1||state.DataPlaneVerified||state.SubscriptionPublished{t.Fatalf("TLS delivery/apply failed: %+v %v",state,e)}
+ status,err:=s.business.NativeRuntimeStatus(ctx,"native-node",installID);if err!=nil||status.State!="applied"||!status.ProcessReady||status.DataPlaneVerified{t.Fatalf("durable report missing: %+v %v",status,err)}
  same,e:=runtime.Sync(ctx,client,endpoint);if e!=nil||same.ActiveSHA!=state.ActiveSHA||same.ActiveSequence!=1{t.Fatal("unchanged native config churned",e)}
  wrongReq,_:=http.NewRequest("GET",server.URL+"/api/v1/agent/native-runtime?node_id=native-node&installation_id="+installID,nil);wrongReq.Header.Set("Authorization","Bearer "+otherToken)
  wrong,e:=client.Do(wrongReq);if e!=nil{t.Fatal(e)};wrong.Body.Close();if wrong.StatusCode!=401{t.Fatal("unpaired Agent read native secrets")}

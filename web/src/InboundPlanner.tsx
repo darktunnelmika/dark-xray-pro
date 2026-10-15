@@ -1,3 +1,4 @@
+import NativeInbounds from "./NativeInbounds";
 import { useState } from "react";
 import { AlertTriangle, ArrowRightLeft, CheckCircle2, LockKeyhole, Server, Waypoints } from "lucide-react";
 import type { NodeSnapshot } from "./api";
@@ -44,13 +45,11 @@ function port(value: string): number | null {
   const parsed = Number(value);
   return parsed >= 1 && parsed <= 65535 ? parsed : null;
 }
-
 function inboundId(value: string): number | null {
   if (!/^[0-9]+$/.test(value)) return null;
   const parsed = Number(value);
   return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
 }
-
 function tunnelHost(value: string): boolean {
   if (!value || value.length > 253 || value.trim() !== value || /[\s/:@\\]/.test(value)) return false;
   if (/^[\d.]+$/.test(value)) {
@@ -62,9 +61,9 @@ function tunnelHost(value: string): boolean {
   return parts.length >= 2 && parts.every((part) => /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$/.test(part));
 }
 
-// Client-only preview, not an implementation of Go's authoritative routeplan
-// validator. Every selected route still needs server-side validation.
-export default function InboundPlanner({ nodes, language }: { nodes: NodeSnapshot[]; language: Language }) {
+// Legacy LAB preview remains non-persistent. The native owner workflow is
+// displayed when its separate private session/backend capability is present.
+function DraftInboundPlanner({ nodes, language }: { nodes: NodeSnapshot[]; language: Language }) {
   const t = labels[language];
   const [nodeId, setNodeId] = useState("");
   const [inboundText, setInboundText] = useState("");
@@ -74,7 +73,6 @@ export default function InboundPlanner({ nodes, language }: { nodes: NodeSnapsho
   const [tunnelText, setTunnelText] = useState("");
   const [swapPortText, setSwapPortText] = useState("");
   const [hostText, setHostText] = useState("");
-
   const chosen = nodes.find((node) => node.node_id === nodeId);
   const inbound = inboundId(inboundText);
   const directPort = port(directText);
@@ -92,7 +90,6 @@ export default function InboundPlanner({ nodes, language }: { nodes: NodeSnapsho
   }
   const ready = errors.length === 0;
   const sharedPort = enableDirect && enableSwap && directPort !== null && directPort === swapPort;
-
   return (
     <section className="inbound-planner">
       <div className="inbound-planner-heading">
@@ -139,7 +136,6 @@ export default function InboundPlanner({ nodes, language }: { nodes: NodeSnapsho
           </div> : <p className="inbound-route-off">—</p>}
         </fieldset>
       </div>
-
       <section className="inbound-preview" role="region" aria-label="Inbound route preview">
         <div className="inbound-preview-heading"><h3><ArrowRightLeft size={18}/>{t.preview}</h3><span>{t.pending}</span></div>
         {ready ? (
@@ -153,4 +149,7 @@ export default function InboundPlanner({ nodes, language }: { nodes: NodeSnapsho
       </section>
     </section>
   );
+}
+export default function InboundPlanner({ nodes, language }: { nodes: NodeSnapshot[]; language: Language }) {
+ return <NativeInbounds language={language} fallback={<DraftInboundPlanner nodes={nodes} language={language} />} />;
 }
