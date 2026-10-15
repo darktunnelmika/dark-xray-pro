@@ -414,3 +414,29 @@ button:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
   .business-records > div { flex-direction: column; gap: 4px; }
   .business-records span { text-align: start; }
 }
+
+
+/* Scoped, durable client group management: no link to billable counters. */
+.business-panel textarea {
+  width: 100%; min-width: 0; max-width: 100%; resize: vertical;
+  padding: 10px 11px; color: var(--text); background: var(--surface-2);
+  border: 1px solid var(--border); border-radius: 10px; font: inherit; font-size: 12px;
+}
+.business-group-row { display: flex; align-items: center; gap: 12px; }
+.business-records > .business-group-row { flex-direction: row; align-items: center; }
+.business-group-name { display: flex; align-items: center; gap: 10px; min-width: 0; flex: 1; }
+.business-group-name strong { overflow-wrap: anywhere; }
+.business-group-name span:last-child { margin-inline-start: auto; }
+.business-group-color {
+  width: 10px; height: 10px; border-radius: 99px; flex: 0 0 auto;
+  border: 1px solid var(--border);
+}
+.business-group-actions { display: flex; align-items: center; gap: 7px; }
+.business-group-actions button { flex-shrink: 0; min-height: 33px; font-size: 11px; }
+.business-group-actions button:last-child { color: var(--red); }
+@media (max-width: 760px) {
+  .business-records > .business-group-row { flex-direction: column; align-items: stretch; }
+  .business-group-name { flex-wrap: wrap; }
+  .business-group-name span:last-child { margin-inline-start: 0; }
+  .business-group-actions { justify-content: flex-start; flex-wrap: wrap; }
+}
