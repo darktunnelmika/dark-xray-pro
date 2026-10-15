@@ -114,15 +114,9 @@ func validVersion(v Version)bool{
 		!v.LiveApplied&&!v.CanActivate&&!v.CreatedAt.IsZero()
 }
 func versionAAD(v Version)[]byte{
-	encoded,_:=json.Marshal(struct{
-		ID string `json:"id"`
-		Node string `json:"node"`
-		Installation string `json:"installation"`
-		Manifest string `json:"manifest"`
-		Config string `json:"config"`
-		Binary string `json:"binary"`
-		Operation string `json:"operation"`
-	}{v.ID,v.NodeID,v.InstallationID,v.ManifestSHA256,v.ConfigSHA256,v.TrustedXraySHA256,v.SourceOperationID})
+	// Authenticate every immutable metadata field alongside private bytes,
+	// including listener count, creation time and nonactivation flags.
+	encoded,_:=json.Marshal(v)
 	return append([]byte("DARK-PRO-LABREV-v1|"),encoded...)
 }
 func aeadFor(key []byte)(cipher.AEAD,error){
