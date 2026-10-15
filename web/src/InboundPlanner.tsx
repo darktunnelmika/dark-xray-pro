@@ -109,7 +109,7 @@ export default function InboundPlanner({ nodes, language }: { nodes: NodeSnapsho
           </select>
         </label>
         <label className="inbound-field">{t.inbound}
-          <input aria-label={t.inbound} value={inboundText} inputMode="numeric" placeholder="1185" maxLength={20}
+          <input aria-label={t.inbound} value={inboundText} inputMode="numeric" placeholder="1001" maxLength={20}
             onChange={(event) => setInboundText(event.target.value)} />
         </label>
       </div>
