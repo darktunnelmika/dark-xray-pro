@@ -49,6 +49,7 @@ type Metadata struct {
  InstallationID string `json:"installation_id"`
  ManifestSHA256 string `json:"manifest_sha256"`
  ConfigSHA256 string `json:"config_sha256"`
+ Listeners []xrayconfig.Listener `json:"listeners"`
  TrustedXraySHA256 string `json:"trusted_xray_sha256"`
  Status Status `json:"status"`
  Revision uint64 `json:"revision"`
@@ -95,7 +96,10 @@ type Store struct {
  state disk
 }
 
-func (s *Store) keyCopy() []byte {return append([]byte(nil),s.key...)}
+func copyMeta(m Metadata) Metadata {
+ m.Listeners=append([]xrayconfig.Listener(nil),m.Listeners...)
+ return m
+}
 
 func Open(path string,key []byte,clock func()time.Time)(*Store,error){
  if len(key)!=32||path=="" {return nil,ErrUnsafe}
@@ -137,7 +141,9 @@ func Open(path string,key []byte,clock func()time.Time)(*Store,error){
   if err!=nil{return nil,ErrUnsafe}
   digest:=sha256.Sum256(clear)
   if subtle.ConstantTimeCompare(digest[:],mustHex(m.ConfigSHA256))!=1{return nil,ErrUnsafe}
-  if entry.Proof!=nil&&!matches(m,*entry.Proof){return nil,ErrUnsafe}
+  if entry.Proof!=nil&&(!matches(m,*entry.Proof)||
+    (m.Status==Verified&&!entry.Proof.SyntaxValid)||
+    (m.Status==Rejected&&entry.Proof.SyntaxValid)) {return nil,ErrUnsafe}
  }
  s.state=current
  return s,nil
@@ -150,14 +156,16 @@ func makeAEAD(key []byte)(cipher.AEAD,error){
 }
 func mustHex(s string)[]byte{value,_:=hex.DecodeString(s);return value}
 func aad(m Metadata)[]byte{
- return []byte("DARK-PRO-STAGE-v1|"+m.OperationID+"|"+m.NodeID+"|"+
+ listenerData,_:=json.Marshal(m.Listeners)
+ listenerHash:=sha256.Sum256(listenerData)
+ return []byte("DARK-PRO-STAGE-v1|"+hex.EncodeToString(listenerHash[:])+"|"+m.OperationID+"|"+m.NodeID+"|"+
   m.InstallationID+"|"+m.ManifestSHA256+"|"+m.ConfigSHA256+"|"+m.TrustedXraySHA256)
 }
 func validMeta(m Metadata)bool{
  if !hex32.MatchString(m.OperationID)||!hex32.MatchString(m.InstallationID)||
   !hex64.MatchString(m.ManifestSHA256)||!hex64.MatchString(m.ConfigSHA256)||
   !hex64.MatchString(m.TrustedXraySHA256)||
-  m.NodeID==""||m.Revision==0||m.CanActivate||
+  m.NodeID==""||len(m.Listeners)==0||m.Revision==0||m.CanActivate||
   !m.NeedsDataPlaneProof||!m.NeedsSubscriptionCommit||
   m.CreatedAt.IsZero()||m.UpdatedAt.IsZero(){return false}
  switch m.Status{case Pending,Verified,Rejected:return true}
@@ -208,7 +216,7 @@ func (s *Store) Create(op replacement.Operation,c xrayconfig.Candidate,trustedXr
   c.CanActivate||!c.RequiresXrayTest||!c.RequiresDataPlaneProof||
   !c.RequiresSubscriptionCommit||c.ManifestSHA256!=op.Preview.ManifestSHA256||
   len(c.Config)==0||len(c.Config)>xrayconfig.MaxCandidateBytes||
-  !hex64.MatchString(c.SHA256){return Metadata{},ErrInvalid}
+  !hex64.MatchString(c.SHA256)||len(c.Listeners)==0{return Metadata{},ErrInvalid}
  if op.Evidence.OperationID!=op.ID||op.Evidence.NewNodeID!=op.NewNodeID||
   op.Evidence.InstallationID!=op.InstallationID||
   op.Evidence.ManifestSHA256!=op.Preview.ManifestSHA256{return Metadata{},ErrInvalid}
@@ -221,7 +229,7 @@ func (s *Store) Create(op replacement.Operation,c xrayconfig.Candidate,trustedXr
   if found.Meta.ConfigSHA256==c.SHA256&&
    found.Meta.TrustedXraySHA256==trustedXray&&
    found.Meta.ManifestSHA256==c.ManifestSHA256&&
-   found.Meta.InstallationID==op.InstallationID{return found.Meta,nil}
+   found.Meta.InstallationID==op.InstallationID{return copyMeta(found.Meta),nil}
   return Metadata{},ErrConflict
  }
  if len(s.state.Stages)>=maxEntries{return Metadata{},ErrConflict}
@@ -229,6 +237,7 @@ func (s *Store) Create(op replacement.Operation,c xrayconfig.Candidate,trustedXr
  meta:=Metadata{
   OperationID:op.ID,NodeID:op.NewNodeID,InstallationID:op.InstallationID,
   ManifestSHA256:c.ManifestSHA256,ConfigSHA256:c.SHA256,
+  Listeners:append([]xrayconfig.Listener(nil),c.Listeners...),
   TrustedXraySHA256:trustedXray,Status:Pending,Revision:1,
   CreatedAt:now,UpdatedAt:now,CanActivate:false,
   NeedsDataPlaneProof:true,NeedsSubscriptionCommit:true,
@@ -241,19 +250,19 @@ func (s *Store) Create(op replacement.Operation,c xrayconfig.Candidate,trustedXr
  next:=clone(s.state)
  next.Stages[op.ID]=sealed{Meta:meta,Nonce:nonce,Ciphertext:ciphertext}
  if err:=s.persist(next);err!=nil{return Metadata{},err}
- return meta,nil
+ return copyMeta(meta),nil
 }
 
 func (s *Store) Get(id string)(Metadata,error){
  s.mu.RLock();defer s.mu.RUnlock()
  entry,ok:=s.state.Stages[id]
  if !ok{return Metadata{},ErrNotFound}
- return entry.Meta,nil
+ return copyMeta(entry.Meta),nil
 }
 func (s *Store) List()[]Metadata{
  s.mu.RLock();defer s.mu.RUnlock()
  entries:=make([]Metadata,0,len(s.state.Stages))
- for _,v:=range s.state.Stages{entries=append(entries,v.Meta)}
+ for _,v:=range s.state.Stages{entries=append(entries,copyMeta(v.Meta))}
  sort.Slice(entries,func(i,j int)bool{return entries[i].CreatedAt.Before(entries[j].CreatedAt)})
  return entries
 }
@@ -276,7 +285,7 @@ func (s *Store) PendingFor(nodeID,installation string)(Metadata,[]byte,bool,erro
  if err!=nil{return Metadata{},nil,false,err}
  raw,err:=aead.Open(nil,selected.Nonce,selected.Ciphertext,aad(selected.Meta))
  if err!=nil{return Metadata{},nil,false,ErrUnsafe}
- return selected.Meta,raw,true,nil
+ return copyMeta(selected.Meta),raw,true,nil
 }
 
 func (s *Store) Report(proof Proof)(Metadata,error){
@@ -294,7 +303,7 @@ func (s *Store) Report(proof Proof)(Metadata,error){
   }
  }
  if entry.Meta.Status!=Pending{
-  if entry.Proof!=nil&&*entry.Proof==proof{return entry.Meta,nil}
+  if entry.Proof!=nil&&*entry.Proof==proof{return copyMeta(entry.Meta),nil}
   return Metadata{},ErrConflict
  }
  next:=clone(s.state)
@@ -307,5 +316,5 @@ func (s *Store) Report(proof Proof)(Metadata,error){
  entry.Proof=&proof
  next.Stages[proof.OperationID]=entry
  if err:=s.persist(next);err!=nil{return Metadata{},err}
- return meta,nil
+ return copyMeta(meta),nil
 }
