@@ -228,3 +228,56 @@ func TestWrongEncryptionKeyCorruptionAndSymlinksRefused(t *testing.T){
 		t.Fatal("symlink private revision state accepted")
 	}
 }
+
+func TestRevisionPointerAuditAndGenerationAreAuthenticated(t *testing.T){
+	s,key,path:=newStore(t)
+	m1,raw1:=revisionCandidate(t,strings.Repeat("a",32),18569)
+	m2,raw2:=revisionCandidate(t,strings.Repeat("b",32),18570)
+	v1,err:=s.Prepare(m1,raw1)
+	if err!=nil{t.Fatal(err)}
+	v2,err:=s.Prepare(m2,raw2)
+	if err!=nil{t.Fatal(err)}
+	if _,err:=s.Select(v1.ID,3);err!=nil{t.Fatal(err)}
+	if _,err:=s.Select(v2.ID,4);err!=nil{t.Fatal(err)}
+	original,err:=os.ReadFile(path)
+	if err!=nil{t.Fatal(err)}
+	for _,tamper:=range []func(map[string]any){
+		func(doc map[string]any){doc["selected"]=v1.ID},
+		func(doc map[string]any){doc["generation"]=float64(999)},
+		func(doc map[string]any){doc["events"].([]any)[0].(map[string]any)["action"]="forged-owner-approval"},
+	}{
+		var decoded map[string]any
+		if err:=json.Unmarshal(original,&decoded);err!=nil{t.Fatal(err)}
+		tamper(decoded)
+		written,err:=json.Marshal(decoded)
+		if err!=nil{t.Fatal(err)}
+		if err:=os.WriteFile(path,written,0600);err!=nil{t.Fatal(err)}
+		if _,err:=Open(path,key,nil);!errors.Is(err,ErrUnsafe){
+			t.Fatalf("unauthenticated journal selection/event modification loaded: %v",err)
+		}
+	}
+	if err:=os.WriteFile(path,original,0600);err!=nil{t.Fatal(err)}
+	if _,err:=Open(path,key,nil);err!=nil{
+		t.Fatalf("untampered revision journal did not recover: %v",err)
+	}
+}
+
+func TestSelectionsCannotCrossNodeInstallations(t *testing.T){
+	s,_,_:=newStore(t)
+	m1,raw1:=revisionCandidate(t,strings.Repeat("a",32),18569)
+	m2,raw2:=revisionCandidate(t,strings.Repeat("b",32),18570)
+	m2.NodeID="different-new-lab"
+	m2.InstallationID=strings.Repeat("e",32)
+	v1,err:=s.Prepare(m1,raw1)
+	if err!=nil{t.Fatal(err)}
+	v2,err:=s.Prepare(m2,raw2)
+	if err!=nil{t.Fatal(err)}
+	if _,err:=s.Select(v1.ID,3);err!=nil{t.Fatal(err)}
+	if _,err:=s.Select(v2.ID,4);!errors.Is(err,ErrConflict){
+		t.Fatalf("one Node was replaced by another Node's candidate: %v",err)
+	}
+	snap:=s.Snapshot()
+	if snap.SelectedVersion!=v1.ID||snap.PreviousVersion!=""||snap.Generation!=4{
+		t.Fatalf("cross-Node selection changed live journal: %+v",snap)
+	}
+}
