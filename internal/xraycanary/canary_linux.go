@@ -87,12 +87,14 @@ func remap(c xrayconfig.Candidate)([]byte,[]int,error){
 	if err:=json.Unmarshal(root["inbounds"],&inbounds);err!=nil ||
 		len(inbounds)!=len(c.Listeners) {return nil,nil,ErrCandidate}
 	expected:=make(map[string]uint16,len(c.Listeners))
+	originalPorts:=map[int]bool{}
 	for _,l:=range c.Listeners{
 		if l.Tag==""||l.NodePort==0||l.InboundID==0||expected[l.Tag]!=0{
 			return nil,nil,ErrCandidate
 		}
 		switch l.Kind {case "direct","swap","shared":default:return nil,nil,ErrCandidate}
 		expected[l.Tag]=l.NodePort
+		originalPorts[int(l.NodePort)]=true
 	}
 	// Reserve all local ephemeral endpoints at once, release directly before
 	// launching Xray. Any port allocation race fails closed, never affects old.
@@ -121,10 +123,18 @@ func remap(c xrayconfig.Candidate)([]byte,[]int,error){
 			stream.Security!="reality"|| (stream.Network!="tcp"&&stream.Network!="grpc"){
 			return nil,nil,ErrCandidate
 		}
-		listener,err:=net.Listen("tcp4","127.0.0.1:0")
-		if err!=nil{return nil,nil,ErrNotReady}
+		var listener net.Listener
+		var port int
+		for attempt:=0;attempt<30;attempt++{
+			x,err:=net.Listen("tcp4","127.0.0.1:0")
+			if err!=nil{return nil,nil,ErrNotReady}
+			p:=x.Addr().(*net.TCPAddr).Port
+			if originalPorts[p]{_ = x.Close();continue}
+			listener,port=x,p
+			break
+		}
+		if listener==nil{return nil,nil,ErrNotReady}
 		reservations=append(reservations,listener)
-		port:=listener.Addr().(*net.TCPAddr).Port
 		ports=append(ports,port)
 		in["port"],_=json.Marshal(port)
 		in["listen"],_=json.Marshal("127.0.0.1")
@@ -144,6 +154,9 @@ func remap(c xrayconfig.Candidate)([]byte,[]int,error){
 // It never executes systemctl, writes active configs, or publishes accounts.
 func Run(ctx context.Context,c xrayconfig.Candidate,binaryPath,sha string)(Proof,error){
 	proof:=starting(c,sha)
+	if os.Getenv("DARK_PRO_LAB_MODE")!="1" ||
+		os.Getenv("DARK_PRO_ENABLE_LOOPBACK_CANARY")!="1" ||
+		os.Geteuid()==0 {return proof,ErrStart}
 	if _,err:=xrayconfig.ValidateOffline(ctx,c,binaryPath,sha);err!=nil{
 		return proof,fmt.Errorf("%w: %v",ErrCore,err)
 	}
