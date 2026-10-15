@@ -189,6 +189,7 @@ jobs:
           test -s release/web/index.html
           test -s release/bin/dark-pro-hub
           test -s release/bin/dark-pro-agent
+          test -s release/bin/dark-pro-owner-setup
       - name: Create verifiable LAB-only archive
         shell: bash
         run: |
