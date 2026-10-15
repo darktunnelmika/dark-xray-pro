@@ -85,6 +85,8 @@ func TestAuthSchemaUpgradeFromV1KeepsFinancialRecords(t *testing.T){
  for _,statement:=range []string{
   "DROP TABLE auth_sessions",
   "DROP TABLE auth_users",
+  "DROP TABLE client_operations",
+  "ALTER TABLE clients DROP COLUMN archived",
   "PRAGMA user_version=1",
  }{
   if _,err=s.db.ExecContext(ctx,statement);err!=nil{t.Fatal(err)}
