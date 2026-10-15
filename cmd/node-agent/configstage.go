@@ -70,7 +70,7 @@ func pollConfigStage(ctx context.Context,client *http.Client,endpoint,nodeID,
   m.NodeID!=nodeID||m.InstallationID!=installation||
   m.TrustedXraySHA256!=trustedXraySHA||
   len(m.ManifestSHA256)!=64||len(m.ConfigSHA256)!=64||
-  len(m.OperationID)!=32 {
+  len(m.OperationID)!=32 || len(m.Listeners)==0 {
   return errors.New("stage metadata does not match paired Node and trusted binary identity")
  }
  raw,err:=base64.StdEncoding.Strict().DecodeString(delivery.ConfigBase64)
@@ -81,8 +81,33 @@ func pollConfigStage(ctx context.Context,client *http.Client,endpoint,nodeID,
  if hex.EncodeToString(digest[:])!=m.ConfigSHA256{
   return errors.New("private candidate SHA mismatch")
  }
+ // Bind the authenticated route metadata to the actual config bytes:
+ // a forged sidecar cannot claim different Direct/Tunnel listener ports.
+ var decoded struct {
+  Inbounds []struct {
+   Tag string `json:"tag"`
+   Port uint16 `json:"port"`
+  } `json:"inbounds"`
+ }
+ if err:=json.Unmarshal(raw,&decoded);err!=nil||
+  len(decoded.Inbounds)!=len(m.Listeners){
+  return errors.New("staged Xray listener manifest differs from config")
+ }
+ listeners:=make(map[string]uint16,len(decoded.Inbounds))
+ for _,in:=range decoded.Inbounds{
+  if in.Tag==""||in.Port==0||listeners[in.Tag]!=0 {
+   return errors.New("staged Xray has a duplicate or invalid listener")
+  }
+  listeners[in.Tag]=in.Port
+ }
+ for _,listener:=range m.Listeners{
+  if listener.NodePort==0||listeners[listener.Tag]!=listener.NodePort{
+   return errors.New("staged Xray route tags/ports do not match private config")
+  }
+ }
  candidate:=xrayconfig.Candidate{
   Config:raw,SHA256:m.ConfigSHA256,ManifestSHA256:m.ManifestSHA256,
+  Listeners:append([]xrayconfig.Listener(nil),m.Listeners...),
   CanActivate:false,RequiresXrayTest:true,
   RequiresDataPlaneProof:true,RequiresSubscriptionCommit:true,
  }
