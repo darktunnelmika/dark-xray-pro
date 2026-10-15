@@ -26,7 +26,7 @@ jobs:
           cache: false
       - name: Guard against dropped Go packages and unsafe legacy imports
         run: |
-          for path in internal/routeplan/draft.go internal/replacement/journal.go internal/routecheck/tcp.go internal/noderegistry/registry.go internal/telemetry/store.go internal/agenttransport/client.go internal/xrayconfig/render.go internal/xrayconfig/validate.go internal/configstage/store.go internal/api/configstage.go cmd/node-agent/configstage.go internal/xraycanary/canary_linux.go internal/labrevision/journal.go internal/api/labrevisions.go; do
+          for path in internal/routeplan/draft.go internal/replacement/journal.go internal/routecheck/tcp.go internal/noderegistry/registry.go internal/telemetry/store.go internal/agenttransport/client.go internal/xrayconfig/render.go internal/xrayconfig/validate.go internal/configstage/store.go internal/api/configstage.go cmd/node-agent/configstage.go internal/xraycanary/canary_linux.go internal/xraycanary/runtime_linux.go internal/labrevision/journal.go internal/api/labrevisions.go; do
             test -s "$path" || { echo "MISSING expected Go module: $path"; exit 1; }
           done
           test ! -e backend/dark_policy.py || { echo "Legacy HUB files must not be imported into PRO"; exit 1; }
@@ -133,6 +133,11 @@ jobs:
           DARK_PRO_LAB_MODE: "1"
           DARK_PRO_ENABLE_LOOPBACK_CANARY: "1"
         run: go test ./internal/xraycanary -run '^TestRealPinnedXrayCanaryOptIn$' -v -count=1
+      - name: Rehearse real Xray process apply and rollback on localhost only
+        env:
+          DARK_PRO_LAB_MODE: "1"
+          DARK_PRO_ENABLE_SANDBOX_APPLY: "1"
+        run: go test ./internal/xraycanary -run '^TestRealPinnedXraySandboxApplyRollbackOptIn$' -v -count=1
       - name: Keep Xray and user credentials out of all persisted artifacts
         shell: bash
         run: |
