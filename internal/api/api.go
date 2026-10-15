@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/darktunnelmika/dark-xray-pro/internal/configstage"
 	"github.com/darktunnelmika/dark-xray-pro/internal/noderegistry"
 	"github.com/darktunnelmika/dark-xray-pro/internal/replacement"
 	"github.com/darktunnelmika/dark-xray-pro/internal/telemetry"
@@ -20,6 +21,7 @@ type Server struct {
 	registry *noderegistry.Registry
 	ownerKey string
 	replacements *replacement.Journal
+	stages *configstage.Store
 }
 
 // This is a localhost-only lab interface. Remote Nodes must NOT be allowed
@@ -100,6 +102,7 @@ func (s *Server) Handler() http.Handler {
 	})
 	s.attachEnrollment(mux)
 	s.attachReplacement(mux)
+	s.attachConfigStaging(mux)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
@@ -128,10 +131,11 @@ func (s *Server) AgentHandler() http.Handler {
 		}
 		if !((r.Method == http.MethodPost &&
 			(r.URL.Path == "/api/v1/agent/enroll" ||
+			 r.URL.Path == "/api/v1/agent/config-stage-report" ||
 			 r.URL.Path == "/api/v1/agent/pulse" ||
 			 r.URL.Path == "/api/v1/agent/heartbeat" ||
 			 r.URL.Path == "/api/v1/agent/replacement-report")) ||
-			(r.Method == http.MethodGet && r.URL.Path == "/api/v1/agent/replacement-task")) {
+			(r.Method == http.MethodGet && (r.URL.Path == "/api/v1/agent/replacement-task" || r.URL.Path == "/api/v1/agent/config-stage"))) {
 			http.NotFound(w, r)
 			return
 		}
