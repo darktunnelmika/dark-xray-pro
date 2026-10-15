@@ -80,8 +80,10 @@ func sandboxDead(p *sandboxProcess) bool {
 
 func sandboxStop(p *sandboxProcess) {
   if p == nil { return }
-  if p.command.Process != nil {
-    // Kill ONLY the process group started by this exact sandbox object.
+  // The direct subprocess may already have been reaped. Never send a
+  // negative-PID group kill after Wait completed: that PID could be reused.
+  if !sandboxDead(p) && p.command.Process != nil {
+    // Kill ONLY the process group created by this exact unprivileged sandbox.
     _ = syscall.Kill(-p.command.Process.Pid, syscall.SIGKILL)
     _ = p.command.Process.Kill()
   }
