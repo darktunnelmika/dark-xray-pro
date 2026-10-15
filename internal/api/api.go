@@ -43,7 +43,7 @@ func(s *Server)Handler()http.Handler{
  mux:=http.NewServeMux()
  mux.HandleFunc("GET /api/v1/health",func(w http.ResponseWriter,_ *http.Request){respond(w,http.StatusOK,map[string]string{"status":"ok","mode":"isolated-lab","data_plane":"not_enabled"})})
  mux.HandleFunc("GET /api/v1/fleet",func(w http.ResponseWriter,_ *http.Request){respond(w,http.StatusOK,s.snapshot())})
- s.attachEnrollment(mux);s.attachReplacement(mux);s.attachConfigStaging(mux);s.attachLabRevisions(mux);s.attachBusiness(mux);s.attachBrowserAuth(mux);s.attachWorkspace(mux);s.attachGroups(mux);s.attachClientLifecycle(mux);s.attachNativeInbounds(mux);s.attachRuntimeReports(mux)
+ s.attachEnrollment(mux);s.attachReplacement(mux);s.attachConfigStaging(mux);s.attachLabRevisions(mux);s.attachBusiness(mux);s.attachBrowserAuth(mux);s.attachWorkspace(mux);s.attachGroups(mux);s.attachClientLifecycle(mux);s.attachNativeInbounds(mux);s.attachRuntimeReports(mux);s.attachInboundLifecycle(mux)
  return http.HandlerFunc(func(w http.ResponseWriter,r *http.Request){w.Header().Set("Cache-Control","no-store");w.Header().Set("X-Content-Type-Options","nosniff");w.Header().Set("Referrer-Policy","no-referrer");mux.ServeHTTP(w,r)})
 }
 // Only the strict Agent allowlist is routed on the separately verified TLS listener.

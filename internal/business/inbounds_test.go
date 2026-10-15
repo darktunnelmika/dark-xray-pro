@@ -47,6 +47,6 @@ func TestNativeExpiryDisabledRepresentativeAndPortConflicts(t *testing.T){
 }
 func TestNativeV4SchemaUpgradePreservesPriorData(t *testing.T){
  ctx:=context.Background();path:=filepath.Join(t.TempDir(),"private","test.sqlite");s,e:=Open(path);if e!=nil{t.Fatal(e)};newRep(t,s,"upgrade-native");grant(t,s,"upgrade-native","grant-native-upgrade001",3000,20)
- for _,q:=range []string{"DROP TABLE native_inbound_clients","DROP TABLE native_inbound_targets","DROP TABLE native_inbounds","DROP TABLE native_node_revisions","PRAGMA user_version=4"}{if _,e=s.db.Exec(q);e!=nil{t.Fatal(e)}};if e=s.Close();e!=nil{t.Fatal(e)}
+ for _,q:=range []string{"DROP TABLE native_inbound_operations","DROP TABLE native_inbound_clients","DROP TABLE native_inbound_targets","DROP TABLE native_inbounds","DROP TABLE native_node_revisions","PRAGMA user_version=4"}{if _,e=s.db.Exec(q);e!=nil{t.Fatal(e)}};if e=s.Close();e!=nil{t.Fatal(e)}
  s,e=Open(path);if e!=nil{t.Fatal(e)};defer s.Close();r,e:=s.Representative(ctx,"upgrade-native");if e!=nil||r.VolumeCreditBytes!=3000||r.UnlimitedCreditUnits!=20{t.Fatal("schema migration lost credit",e)};if _,e=s.CreateInbound(ctx,bytes.Repeat([]byte{7},32),nativeInput());e!=nil{t.Fatal(e)}
 }

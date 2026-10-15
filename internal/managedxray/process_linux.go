@@ -28,6 +28,7 @@ func(p *child)arm(deadline time.Time)bool{
 func(p *child)dead()bool{if p==nil{return true};select{case <-p.done:return true;default:return false}}
 func(p *child)stop(){if p==nil{return};p.guardMu.Lock();p.ending=true;if p.timer!=nil{p.timer.Stop()};if !p.dead(){_=p.cmd.Process.Kill()};p.guardMu.Unlock();<-p.done;p.cleanup.Do(func(){_=os.RemoveAll(p.dir)})}
 func validateLayout(c xrayconfig.Candidate,ip string,reserved map[uint16]bool)error{
+ if c.NoListeners {if xrayconfig.IsStoppedCandidate(c){return nil};return ErrInvalid}
  var body struct{Inbounds []struct{Listen string `json:"listen"`;Port uint16 `json:"port"`;Tag string `json:"tag"`;Protocol string `json:"protocol"`} `json:"inbounds"`}
  if len(c.Listeners)==0||len(c.Listeners)>512||json.Unmarshal(c.Config,&body)!=nil||len(body.Inbounds)!=len(c.Listeners){return ErrInvalid}
  tags:=map[string]uint16{};ports:=map[uint16]bool{}
@@ -40,7 +41,7 @@ func(p *child)bound(listeners []xrayconfig.Listener)bool{
  for _,fd:=range fds{value,err:=os.Readlink(filepath.Join(fdDir,fd.Name()));if err==nil&&strings.HasPrefix(value,"socket:["){sockets[strings.TrimSuffix(strings.TrimPrefix(value,"socket:["),"]")]=true}}
  bound:=map[uint16]bool{}
  for _,name:=range []string{"/proc/net/tcp","/proc/net/tcp6"}{raw,err:=os.ReadFile(name);if err!=nil{continue};for _,line:=range strings.Split(string(raw),"\n"){cols:=strings.Fields(line);if len(cols)<10||cols[3]!="0A"||!sockets[cols[9]]{continue};pieces:=strings.Split(cols[1],":");if len(pieces)!=2{continue};port,err:=strconv.ParseUint(pieces[1],16,16);if err==nil{bound[uint16(port)]=true}}}
- for _,l:=range listeners{if !bound[l.NodePort]{return false}};return !p.dead()
+ if len(listeners)==0{return len(bound)==0&&!p.dead()};for _,l:=range listeners{if !bound[l.NodePort]{return false}};return !p.dead()
 }
 func startChild(ctx context.Context,c xrayconfig.Candidate,binary string,deadline time.Time)(*child,error){
  if ctx.Err()!=nil{return nil,ctx.Err()};dir,err:=os.MkdirTemp("","dark-pro-managed-xray-");if err!=nil{return nil,ErrRuntime}

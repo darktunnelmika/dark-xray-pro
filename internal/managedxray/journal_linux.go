@@ -28,13 +28,13 @@ var (
 type Revision struct{Sequence uint64;Candidate xrayconfig.Candidate}
 type savedRevision struct{
  Sequence uint64 `json:"sequence"`;Raw []byte `json:"config"`;SHA string `json:"sha"`
- Manifest string `json:"manifest"`;Listeners []xrayconfig.Listener `json:"listeners"`
+ Manifest string `json:"manifest"`;Listeners []xrayconfig.Listener `json:"listeners"`;NoListeners bool `json:"no_listeners,omitempty"`
 }
 func freeze(r Revision)*savedRevision{
- return &savedRevision{Sequence:r.Sequence,Raw:append([]byte(nil),r.Candidate.Config...),SHA:r.Candidate.SHA256,Manifest:r.Candidate.ManifestSHA256,Listeners:append([]xrayconfig.Listener(nil),r.Candidate.Listeners...)}
+ return &savedRevision{Sequence:r.Sequence,NoListeners:r.Candidate.NoListeners,Raw:append([]byte(nil),r.Candidate.Config...),SHA:r.Candidate.SHA256,Manifest:r.Candidate.ManifestSHA256,Listeners:append([]xrayconfig.Listener(nil),r.Candidate.Listeners...)}
 }
 func(r *savedRevision)candidate()xrayconfig.Candidate{
- return xrayconfig.Candidate{Config:append([]byte(nil),r.Raw...),SHA256:r.SHA,ManifestSHA256:r.Manifest,Listeners:append([]xrayconfig.Listener(nil),r.Listeners...),RequiresXrayTest:true,RequiresDataPlaneProof:true,RequiresSubscriptionCommit:true}
+ return xrayconfig.Candidate{NoListeners:r.NoListeners,Config:append([]byte(nil),r.Raw...),SHA256:r.SHA,ManifestSHA256:r.Manifest,Listeners:append([]xrayconfig.Listener(nil),r.Listeners...),RequiresXrayTest:true,RequiresDataPlaneProof:true,RequiresSubscriptionCommit:true}
 }
 type journal struct{
  DesiredSHA string `json:"desired_sha"`;DesiredManifest string `json:"desired_manifest"`

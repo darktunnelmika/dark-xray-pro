@@ -1,10 +1,11 @@
 import "./NativeInbounds.css";
+import InboundLifecycle from "./InboundLifecycle";
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { ArrowRightLeft, CheckCircle2, KeyRound, LockKeyhole, RefreshCw, Server, ShieldCheck, Users, Waypoints } from "lucide-react";
 
 type Lang = "fa" | "en";
 type Session = { authenticated: boolean; csrf_token?: string; user?: { role: "owner" | "representative"; username: string } };
-type Inbound = { id: number; name: string; transport: string; grpc_service: string; reality_target: string; server_names: string[]; short_ids: string[]; public_key: string; bound_clients: number };
+type Inbound = { revision: number; enabled: boolean; archived: boolean; id: number; name: string; transport: string; grpc_service: string; reality_target: string; server_names: string[]; short_ids: string[]; public_key: string; bound_clients: number };
 type Target = { inbound_id: number; node_id: string; installation_id: string; listen_ip: string; direct_port: number; swap_port: number };
 type Node = { node_id: string; installation_id: string; name: string };
 type Status = { node_id: string; installation_id: string; desired_sequence: number; desired_sha: string; reported_sequence: number; reported_sha: string; state: string; phase: string; reported_at?: string; lease_expires_at?: string; process_ready: boolean };
@@ -28,7 +29,7 @@ const text = {
   create: "Create REALITY Inbound", name: "Inbound name", transport: "Transport", dest: "REALITY target (host:port)", sni: "Server names (comma-separated)", service: "gRPC service", save: "Create Inbound",
   empty: "No native Inbounds yet.", select: "Select Inbound", bound: "bound clients", members: "Client bindings", search: "Search this page", add: "Attach selected", remove: "Detach selected", previous: "Previous", next: "Next", all: "Select this page", noClients: "No clients on this page.", bindingHelp: "Detaching removes access from this Inbound; it never deletes the client or financial history.",
   nodes: "Node deployment", node: "New paired Node", choose: "Choose a Node", listen: "Node's assigned IP", direct: "Direct port (0 = disabled)", swap: "Dark Swap destination port (0 = disabled)", targetSave: "Save Node target", noNodes: "No new paired PRO Nodes. Legacy Nodes are not imported.", targetHelp: "Saving changes desired configuration. An opted-in Agent may restart its own Xray process. This does not create the transit tunnel.", confirm: "Save this Node target? An opted-in PRO Agent may restart Xray on this Node. Existing connections can be interrupted.",
-  status: "Apply reports", desired: "Desired revision", observed: "Reported revision", waiting: "Awaiting Agent report", applied: "Matching process reported", stale: "Report stale / lease expired", changed: "Configuration changed; awaiting Apply", stopped: "Process not ready", mismatch: "Reported revision differs", evidence: "An authenticated Agent report is not proof of customer connectivity or billing correctness. No subscription is published here.", phase: "Agent phase", last: "Last report", saved: "Saved. Waiting for a fresh Agent report; no migration occurred.", shared: "Shared Direct/Swap port: route-specific usage is ambiguous.",
+  listenersDisabled: "All managed listeners are disabled", enabledLabel: "Enabled", disabledLabel: "Disabled", archivedLabel: "Archived", status: "Apply reports", desired: "Desired revision", observed: "Reported revision", waiting: "Awaiting Agent report", applied: "Matching process reported", stale: "Report stale / lease expired", changed: "Configuration changed; awaiting Apply", stopped: "Process not ready", mismatch: "Reported revision differs", evidence: "An authenticated Agent report is not proof of customer connectivity or billing correctness. No subscription is published here.", phase: "Agent phase", last: "Last report", saved: "Saved. Waiting for a fresh Agent report; no migration occurred.", shared: "Shared Direct/Swap port: route-specific usage is ambiguous.",
  },
  fa: {
   title: "اینباندهای واقعی PRO", lead: "اتصال کلاینت‌ها و ارسال تنظیمات به نودهای جدید PRO.", login: "ورود مالک", user: "نام کاربری", pass: "رمز عبور", enter: "ورود",
@@ -36,7 +37,7 @@ const text = {
   create: "ساخت اینباند REALITY", name: "نام اینباند", transport: "ترنسپورت", dest: "مقصد REALITY (هاست:پورت)", sni: "نام‌های سرور (با کاما)", service: "سرویس gRPC", save: "ساخت اینباند",
   empty: "هنوز اینباند واقعی ساخته نشده است.", select: "انتخاب اینباند", bound: "کلاینت متصل", members: "اتصال کلاینت‌ها", search: "جست‌وجو در این صفحه", add: "اتصال انتخاب‌شده‌ها", remove: "جداسازی انتخاب‌شده‌ها", previous: "قبلی", next: "بعدی", all: "انتخاب این صفحه", noClients: "کلاینتی در این صفحه نیست.", bindingHelp: "جداسازی، دسترسی این اینباند را برمی‌دارد؛ کلاینت و سوابق مالی پاک نمی‌شوند.",
   nodes: "تنظیم مقصد نود", node: "نود جدید متصل", choose: "انتخاب نود", listen: "IP اختصاص‌یافته به نود", direct: "پورت مستقیم (صفر = غیرفعال)", swap: "پورت مقصد Dark Swap (صفر = غیرفعال)", targetSave: "ذخیره مقصد نود", noNodes: "نود جدیدی به PRO متصل نیست؛ نودهای قدیمی خودکار وارد نمی‌شوند.", targetHelp: "ذخیره، نسخهٔ درخواستی را تغییر می‌دهد. Agent فعال ممکن است Xray همین نود را بازراه‌اندازی کند؛ این کار تانل واسط نمی‌سازد.", confirm: "مقصد نود ذخیره شود؟ Agent فعال PRO ممکن است Xray همین نود را بازراه‌اندازی کند و اتصال‌های آن قطع شوند.",
-  status: "گزارش اعمال تنظیمات", desired: "نسخهٔ درخواستی", observed: "نسخهٔ گزارش‌شده", waiting: "در انتظار گزارش Agent", applied: "اجرای نسخهٔ مطابق گزارش شد", stale: "گزارش قدیمی / مجوز منقضی", changed: "تنظیمات تغییر کرده؛ در انتظار Apply", stopped: "فرآیند آماده نیست", mismatch: "نسخهٔ گزارش‌شده متفاوت است", evidence: "گزارش معتبر Agent، اثبات اتصال مشتری یا صحت حسابداری نیست. در این بخش اشتراک منتشر نمی‌شود.", phase: "مرحلهٔ Agent", last: "آخرین گزارش", saved: "ذخیره شد؛ منتظر گزارش تازهٔ Agent هستیم. مهاجرتی انجام نشد.", shared: "پورت Direct و Swap مشترک است؛ مصرف هر مسیر جداگانه قابل انتساب قطعی نیست.",
+  listenersDisabled: "همهٔ پورت‌های تحت مدیریت غیرفعال‌اند", enabledLabel: "فعال", disabledLabel: "غیرفعال", archivedLabel: "آرشیوشده", status: "گزارش اعمال تنظیمات", desired: "نسخهٔ درخواستی", observed: "نسخهٔ گزارش‌شده", waiting: "در انتظار گزارش Agent", applied: "اجرای نسخهٔ مطابق گزارش شد", stale: "گزارش قدیمی / مجوز منقضی", changed: "تنظیمات تغییر کرده؛ در انتظار Apply", stopped: "فرآیند آماده نیست", mismatch: "نسخهٔ گزارش‌شده متفاوت است", evidence: "گزارش معتبر Agent، اثبات اتصال مشتری یا صحت حسابداری نیست. در این بخش اشتراک منتشر نمی‌شود.", phase: "مرحلهٔ Agent", last: "آخرین گزارش", saved: "ذخیره شد؛ منتظر گزارش تازهٔ Agent هستیم. مهاجرتی انجام نشد.", shared: "پورت Direct و Swap مشترک است؛ مصرف هر مسیر جداگانه قابل انتساب قطعی نیست.",
  },
 };
 function freshID(): number { return crypto.getRandomValues(new Uint32Array(1))[0] || 1; }
@@ -114,8 +115,9 @@ export default function NativeInbounds({ language, fallback }: { language: Lang;
  }
  function statusLabel(s: Status): string {
   if (stale || (s.state === "applied" && !matching(s)) || (s.lease_expires_at && Date.parse(s.lease_expires_at) <= tick)) return t.stale;
-  return ({ applied: t.applied, awaiting_report: t.waiting, stale: t.stale, configuration_changed: t.changed, stopped: t.stopped, out_of_sync: t.mismatch } as Record<string,string>)[s.state] ?? t.waiting;
+  return ({ applied: t.applied, awaiting_report: t.waiting, stale: t.stale, configuration_changed: t.changed, stopped: t.stopped, listeners_disabled: t.listenersDisabled, out_of_sync: t.mismatch } as Record<string,string>)[s.state] ?? t.waiting;
  }
+ const current = data?.inbounds.find(i => i.id === chosen);
  const visible = clients.filter(c => (c.name + " " + c.id).toLowerCase().includes(search.toLowerCase()));
  if (legacy) return <>{fallback}</>;
  return <section className="native-workspace" aria-label="Native Inbounds">
@@ -141,16 +143,17 @@ export default function NativeInbounds({ language, fallback }: { language: Lang;
     </form>
     <div className="native-card"><h3>{t.select}</h3>{!data.inbounds.length && <p>{t.empty}</p>}
      <div className="native-inbound-list">{data.inbounds.map(i => <button type="button" key={i.id} aria-pressed={chosen === i.id} onClick={() => { setChosen(i.id);setChecked([]);setNode("");setListen("");setDirect("0");setSwap("0"); }}>
-      <strong>{i.name}</strong><span>#{i.id} · {i.transport} · {i.bound_clients} {t.bound}</span></button>)}</div>
+      <strong>{i.name}</strong><span>#{i.id} · {i.transport} · {i.bound_clients} {t.bound} · {i.archived ? t.archivedLabel : i.enabled ? t.enabledLabel : t.disabledLabel}</span></button>)}</div>
     </div>
    </div>
-   {chosen > 0 && <>
+   {chosen > 0 && current && <>
+    <InboundLifecycle key={chosen} inbound={current} language={language} csrf={session.csrf_token ?? ""} blocked={busy || stale} onChanged={() => setRefresh(n => n + 1)} />
     <div className="native-card"><h3><Users size={19}/>{t.members}</h3><p>{t.bindingHelp}</p>
      <label>{t.search}<input value={search} onChange={e => setSearch(e.target.value)}/></label>
      <div className="native-client-list">{visible.map(c => <label key={c.id} className="native-client-row"><input type="checkbox" checked={checked.includes(c.id)} onChange={e => setChecked(old => e.target.checked ? [...old, c.id] : old.filter(id => id !== c.id))}/>
       <strong>{c.name}</strong><span>{c.id} · {c.representative_id}</span>{bound.includes(c.id) && <CheckCircle2 size={17} aria-label="Bound"/>}</label>)}{!visible.length && <p>{t.noClients}</p>}</div>
      <div className="native-actions"><button type="button" onClick={() => setChecked(visible.map(c => c.id))}>{t.all}</button>
-      <button type="button" disabled={busy || stale || !checked.length || checked.some(id => clients.find(c => c.id === id)?.archived)} onClick={() => { void mutate("/api/v1/workspace/native-inbounds/" + chosen + "/clients", { client_ids: checked, attach: true }, () => setChecked([])); }}>{t.add}</button>
+      <button type="button" disabled={busy || stale || current.archived || !checked.length || checked.some(id => clients.find(c => c.id === id)?.archived)} onClick={() => { void mutate("/api/v1/workspace/native-inbounds/" + chosen + "/clients", { client_ids: checked, attach: true }, () => setChecked([])); }}>{t.add}</button>
       <button type="button" disabled={busy || stale || !checked.length} onClick={() => { void mutate("/api/v1/workspace/native-inbounds/" + chosen + "/clients", { client_ids: checked, attach: false }, () => setChecked([])); }}>{t.remove}</button></div>
      <div className="native-actions"><button type="button" disabled={offset === 0 || busy} onClick={() => { setOffset(n => Math.max(0, n - 100));setChecked([]); }}>{t.previous}</button><button type="button" disabled={clients.length < 100 || busy} onClick={() => { setOffset(n => n + 100);setChecked([]); }}>{t.next}</button></div>
     </div>
@@ -161,7 +164,7 @@ export default function NativeInbounds({ language, fallback }: { language: Lang;
       <label>{t.direct}<input type="number" min={0} max={65535} step={1} value={direct} onChange={e => setDirect(e.target.value)} required/></label>
       <label>{t.swap}<input type="number" min={0} max={65535} step={1} value={swap} onChange={e => setSwap(e.target.value)} required/></label></div>
      {Number(direct) > 0 && direct === swap && <p className="native-warning">{t.shared}</p>}
-     <button type="submit" disabled={busy || stale || !node || (Number(direct) === 0 && Number(swap) === 0)}>{t.targetSave}</button>
+     <button type="submit" disabled={busy || stale || current.archived || !node || (Number(direct) === 0 && Number(swap) === 0)}>{t.targetSave}</button>
     </form>
    </>}
    <div className="native-card"><h3><ArrowRightLeft size={19}/>{t.status}</h3><p>{t.evidence}</p>

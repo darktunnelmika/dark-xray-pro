@@ -8,9 +8,11 @@ import (
  "fmt"
  "time"
  "github.com/darktunnelmika/dark-xray-pro/internal/managedxray"
+ "github.com/darktunnelmika/dark-xray-pro/internal/xrayconfig"
 )
 // Agent observations are not customer-connectivity or billing proof.
 type RuntimeStatus struct {
+ NoListeners bool `json:"no_listeners"`;
  NodeID string `json:"node_id"`;InstallationID string `json:"installation_id"`
  DesiredSequence uint64 `json:"desired_sequence"`;DesiredSHA string `json:"desired_sha"`
  ReportedSequence uint64 `json:"reported_sequence"`;ReportedSHA string `json:"reported_sha"`
@@ -50,6 +52,7 @@ func(s *Store)RecordNativeDelivery(ctx context.Context,c NodeConfig,l managedxra
 }
 func validObservation(o managedxray.Snapshot)bool{
  if o.DataPlaneVerified||o.SubscriptionPublished||o.ActiveSequence>o.Highwater{return false}
+ if o.ProcessReady && o.NoListeners!=xrayconfig.IsStoppedHash(o.ActiveSHA){return false}
  phases:=map[string]bool{"awaiting_fresh_lease":true,"ready":true,"applying":true,"recovered_last_good":true,"apply_failed_stopped":true,"rolled_back_after_failed_apply":true,"rolled_back_after_process_exit":true,"process_exited_stopped":true,"lease_expired_stopped":true,"journal_failure_fenced":true,"closed":true}
  if !phases[o.Phase]{return false}
  hash:=func(v string)bool{if v==""{return true};if len(v)!=64{return false};for _,r:=range v{if !(r>='a'&&r<='f'||r>='0'&&r<='9'){return false}};return true}
@@ -85,7 +88,7 @@ func(s *Store)NativeRuntimeStatus(ctx context.Context,node,installation string)(
  e=tx.QueryRowContext(ctx,"SELECT received,expires,generation,payload FROM native_runtime_reports WHERE node_id=? AND installation_id=?",node,installation).Scan(&received,&expiry,&gen,&raw)
  if errors.Is(e,sql.ErrNoRows){return s0,nil};if e!=nil{return s0,e}
  var o managedxray.Snapshot;if json.Unmarshal([]byte(raw),&o)!=nil||!validObservation(o){return s0,ErrUnavailable}
- s0.ReportedSequence=o.ActiveSequence;s0.ReportedSHA=o.ActiveSHA;s0.Phase=o.Phase
+ s0.ReportedSequence=o.ActiveSequence;s0.ReportedSHA=o.ActiveSHA;s0.Phase=o.Phase;s0.NoListeners=o.NoListeners
  s0.ReportedAt=time.Unix(0,received).UTC().Format(time.RFC3339Nano)
  if o.ProcessReady&&o.LeaseExpires<expiry{expiry=o.LeaseExpires};s0.LeaseExpiresAt=time.Unix(0,expiry).UTC().Format(time.RFC3339Nano)
  now:=time.Now().UnixNano()
@@ -94,7 +97,7 @@ func(s *Store)NativeRuntimeStatus(ctx context.Context,node,installation string)(
  case gen!=generation:s0.State="configuration_changed"
  case !o.ProcessReady:s0.State="stopped"
  case o.ActiveSHA!=s0.DesiredSHA||o.ActiveSequence!=s0.DesiredSequence:s0.State="out_of_sync"
- default:s0.State="applied";s0.ProcessReady=true
+ default:s0.State="applied";s0.ProcessReady=true;if o.NoListeners{s0.State="listeners_disabled"}
  };return s0,nil
 }
 func(s *Store)ListInboundTargets(ctx context.Context)([]InboundTarget,error){

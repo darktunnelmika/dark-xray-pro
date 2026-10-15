@@ -135,7 +135,7 @@ func TestBusinessV2ToV3GroupsMigrationPreservesSessionCreditsAndClients(t *testi
   "ALTER TABLE clients DROP COLUMN archived",
   "DROP TABLE client_group_members",
   "DROP TABLE client_groups",
-  "PRAGMA user_version=2",
+  "DROP TABLE native_inbound_operations","ALTER TABLE native_inbounds DROP COLUMN revision","ALTER TABLE native_inbounds DROP COLUMN archived","ALTER TABLE native_inbounds DROP COLUMN enabled","PRAGMA user_version=2",
  }{
   if _,err=s.db.ExecContext(ctx,q);err!=nil{t.Fatal(err)}
  }
