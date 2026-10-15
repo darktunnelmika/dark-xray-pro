@@ -113,3 +113,7 @@ before executing `run -test`, destroys the temporary private config, and
 must return a proof that **cannot** authorize deployment. Running this optional
 test is a required additional preflight before a real new-node rollout, but is
 not a substitute for a genuine client handshake/port-binding test.
+
+## Phase 6 follow-up: encrypted private delivery to new Node
+
+The typed renderer's output can now be AES-GCM sealed in an opt-in HUB staging journal and delivered via pinned TLS1.3 to the freshly paired Agent for an offline `xray run -test` receipt. This intentionally does **not** apply a live config or publish any subscription. The original standalone pinned-real-core opt-in test still requires a trusted executable on a new test server. See [Phase 6](xray-stage-phase6.md).
