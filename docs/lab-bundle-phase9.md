@@ -2,7 +2,7 @@
 
 **Not a production installer.** The original DARK XRAY HUB, Nodes, clients,
 tunnels, database, representatives, subscriptions and bot must remain
-untouched. The new VPS `213.142.132.207` is not currently connected to
+untouched. The new VPS `80.253.255.181` is not currently connected to
 Desktop Commander; this procedure has **not** been executed on it.
 
 ## GitHub Actions produces the bundle
@@ -41,14 +41,15 @@ sha256sum -c SHA256SUMS
 
 # The installer refuses to continue on a server whose public IPv4 address
 # does not match this independently selected new VPS.
-DARK_PRO_EXPECT_PUBLIC_IP=213.142.132.207 \
+DARK_PRO_EXPECT_PUBLIC_IP=80.253.255.181 \
 DARK_PRO_INSTALL_LAB_ACK=I_CONFIRM_NEW_EMPTY_SERVER \
 bash scripts/install-lab.sh
 ```
 
 The script must run as root **only on the new, empty LAB VPS**. It checks
-archive file hashes before any mutation; confirms external IPv4 via HTTPS;
-rejects mismatched IPs; refuses active legacy/Xray services or an already
+archive file hashes before any mutation; requires the expected IPv4 to be assigned to a global NIC and used as
+outbound route source; it logs (but does not confuse) any different SNAT
+Internet egress IP; rejects mismatched new-server identities; refuses active legacy/Xray services or an already
 occupied port 2087; and refuses to overwrite an existing PRO LAB install.
 It creates a separate unprivileged `darkprolab` service account and only:
 
@@ -71,7 +72,7 @@ that check fails.
 From a trusted computer:
 
 ```bash
-ssh -L 2087:127.0.0.1:2087 root@213.142.132.207
+ssh -L 2087:127.0.0.1:2087 root@80.253.255.181
 ```
 
 Browse `http://127.0.0.1:2087` on that computer. The current React
@@ -89,6 +90,44 @@ reconciliation, IP Limit, user/representative/Restore data models,
 full encrypted backup, verified subscription migration, owner/rep RBAC
 and a safe production installer are still required.
 
-**The controller's previous 403 Forbidden is not solved by this
-repository package**, and this milestone does not assert that the new
-VPS has been installed.
+**Desktop Commander access to the new VPS is verified separately.** The
+installer still requires on-host safety checks; a GitHub CI PASS does not
+mean that the new VPS is installed.
+
+## Building from source if GitHub Actions artifact download requires login
+
+GitHub's `actions/artifacts/{id}/zip` API can require authentication even
+for a public repository. Rather than exposing your GitHub API credentials
+or using an untrusted artifact mirror, clone this public repository **on
+the independently verified new LAB VPS** and build the same file structure
+with `scripts/build-lab-bundle.sh`. On Ubuntu 24.04, the signed distribution
+package `golang-1.24-go` is a supported way to supply Go for this lab. The
+source checkout must be pinned to an explicitly verified Git commit SHA.
+
+```bash
+# ONLY on independently identified NEW LAB server 80.253.255.181.
+sudo apt-get install -y golang-1.24-go
+export PATH=/usr/lib/go-1.24/bin:"$PATH"
+git clone https://github.com/darktunnelmika/dark-xray-pro.git /root/dark-pro-source
+cd /root/dark-pro-source
+git checkout EXACT_TRUSTED_PRO_COMMIT_SHA
+DARK_PRO_PINNED_COMMIT=EXACT_TRUSTED_PRO_COMMIT_SHA bash scripts/build-lab-bundle.sh
+cd release
+sha256sum -c SHA256SUMS
+DARK_PRO_EXPECT_PUBLIC_IP=80.253.255.181 \
+DARK_PRO_INSTALL_LAB_ACK=I_CONFIRM_NEW_EMPTY_SERVER \
+bash scripts/install-lab.sh
+```
+
+`EXACT_TRUSTED_PRO_COMMIT_SHA` must be replaced by the real verified 40
+character commit from GitHub. The builder refuses modified tracked sources,
+incorrect commit, wrong architecture or an existing `release` output.
+
+**Target identity edge case:** on one new lab host the NIC IP was
+`80.253.255.181` while the outward Internet egress appeared as
+`80.253.254.48`. The installer checks the real IPv4 assigned to the
+global network interface **and** the kernel-selected route source for
+`1.1.1.1`, both of which must equal `DARK_PRO_EXPECT_PUBLIC_IP`.
+It separately prints upstream SNAT as a notice. SNAT mismatch alone
+does not cause it to mistake the LAB VPS for a different host. It does
+not relax checks for already running Xray/HUB services.
