@@ -45,6 +45,10 @@ const translations = {
     retry: "Retry is automatic", selected: "Select an item to view more details",
     health: "Fleet health", notLive: "Live connection interrupted", statsDelayed: "Stats delayed",
     pro: "DARK XRAY PRO", role: "Control center", soon: "Planned feature",
+    inspectNode: "Inspect", nodeDetails: "Node details", nodeSelected: "Select a Node to inspect its status.",
+    lastHeartbeat: "Last heartbeat", metricFreshness: "Metrics", metricLive: "Current", metricDelayed: "Delayed / unavailable",
+    nodeAddress: "Interface", activationBoundary: "Read-only LAB view. Pairing and live Xray Apply/Rollback are not exposed through this browser.",
+    pairingBoundary: "New LAB Node pairing is owner-only on localhost. No legacy Nodes or customer data are connected.",
   },
   fa: {
     overview: "داشبورد", nodes: "نودها", inbounds: "اینباندها", settings: "تنظیمات",
@@ -70,6 +74,10 @@ const translations = {
     retry: "تلاش مجدد خودکار است", selected: "برای دیدن جزئیات یک مورد انتخاب کن",
     health: "سلامت ناوگان", notLive: "ارتباط زنده قطع شده", statsDelayed: "تأخیر در آمار",
     pro: "DARK XRAY PRO", role: "مرکز کنترل", soon: "قابلیت در دست ساخت",
+    inspectNode: "جزئیات", nodeDetails: "جزئیات نود", nodeSelected: "برای بررسی وضعیت، یک نود انتخاب کن.",
+    lastHeartbeat: "آخرین ضربان", metricFreshness: "وضعیت آمار", metricLive: "به‌روز", metricDelayed: "با تأخیر / ناموجود",
+    nodeAddress: "اینترفیس", activationBoundary: "نمای آزمایشی فقط‌خواندنی است. اتصال نود و Apply/Rollback زنده Xray از این صفحه فعال نیست.",
+    pairingBoundary: "اتصال نود جدید فقط با دسترسی مالک روی localhost انجام می‌شود. نودها و کاربران قدیمی متصل نیستند.",
   },
 } as const;
 
@@ -110,18 +118,22 @@ function Trend({ values }: { values: number[] }) {
   return <svg className="trend" viewBox="0 0 112 36" preserveAspectRatio="none" aria-hidden="true"><polyline points={points} /></svg>;
 }
 
-function NodeRow({ node, history, lang }: { node: NodeSnapshot; history: number[]; lang: Language }) {
+function NodeRow({ node, history, lang, selected, onSelect }: {
+  node: NodeSnapshot; history: number[]; lang: Language; selected?: boolean; onSelect?: (id: string) => void;
+}) {
   const t = translations[lang];
   const good = node.status === "online";
   const current = good && node.metrics_current;
   const ramPercent = node.ram_total_bytes ? node.ram_used_bytes / node.ram_total_bytes * 100 : 0;
   return (
-    <article className={"node-row " + (good ? "" : "node-offline")}>
+    <article className={"node-row " + (good ? "" : "node-offline") + (selected ? " node-selected" : "")}>
       <div className="node-identity">
         <span className="node-glyph"><Server size={19} strokeWidth={1.7} /></span>
         <div>
           <div className="node-name">{node.name}</div>
           <div className="node-meta">{node.node_id} <span className="dot-separator">·</span> {t.updated} {dateTime(node.last_seen, lang)}{good && !current && <span className="stats-delayed"> · {t.statsDelayed}</span>}</div>
+          {onSelect && <button type="button" className="node-inspect-button" aria-label={t.inspectNode + " " + node.name}
+            aria-pressed={selected ?? false} onClick={() => onSelect(node.node_id)}>{t.inspectNode} <ChevronRight size={13}/></button>}
         </div>
       </div>
       <div className="node-resource">
@@ -158,7 +170,17 @@ export default function App() {
   const [fleet, setFleet] = useState<FleetSnapshot | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const [history, setHistory] = useState<Record<string, number[]>>({});
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(() => {
+    try { return sessionStorage.getItem("dark-pro-selected-node"); } catch { return null; }
+  });
   const t = translations[language];
+
+  useEffect(() => {
+    try {
+      if (selectedNodeId) sessionStorage.setItem("dark-pro-selected-node", selectedNodeId);
+      else sessionStorage.removeItem("dark-pro-selected-node");
+    } catch { /* private mode */ }
+  }, [selectedNodeId]);
 
   // Route persistence is per-tab: refresh never unexpectedly returns to Overview.
   useEffect(() => {
@@ -220,6 +242,7 @@ export default function App() {
   }, []);
 
   const ready = fleet !== null;
+  const selectedNode = fleet?.nodes.find((node) => node.node_id === selectedNodeId) ?? null;
   const summary = [
     { label: t.download, value: ready && fleet.physical_rates_complete ? rate(fleet.interface_rx_bits_per_second) : "—", Icon: ArrowDownLeft },
     { label: t.upload, value: ready && fleet.physical_rates_complete ? rate(fleet.interface_tx_bits_per_second) : "—", Icon: ArrowUpRight },
@@ -300,7 +323,15 @@ export default function App() {
                 <div><h2>{t.liveFleet}</h2><p>{t.selected}</p></div>
                 <span className="count-pill">{ready ? fleet.total_nodes : "—"} {t.total}</span>
               </div>
-              <NodeTable fleet={fleet} history={history} lang={language} />
+              <NodeTable fleet={fleet} history={history} lang={language}
+                selectedNodeId={selectedNodeId} onSelect={setSelectedNodeId} />
+              {selectedNode ? <NodeInspector node={selectedNode} lang={language} /> : (
+                <div className="node-manager-note" role="status">
+                  <ShieldCheck size={19}/>
+                  <div><strong>{ready && fleet.nodes.length === 0 ? t.emptyTitle : t.nodeSelected}</strong>
+                    <p>{ready && fleet.nodes.length === 0 ? t.pairingBoundary : t.activationBoundary}</p></div>
+                </div>
+              )}
               <div className="notice-line"><ShieldCheck size={18} />{t.boundaryText}</div>
             </>
           )}
@@ -340,11 +371,49 @@ export default function App() {
   );
 }
 
-function NodeTable({ fleet, history, lang }: { fleet: FleetSnapshot | null; history: Record<string, number[]>; lang: Language }) {
+function NodeTable({ fleet, history, lang, selectedNodeId, onSelect }: {
+  fleet: FleetSnapshot | null; history: Record<string, number[]>; lang: Language;
+  selectedNodeId?: string | null; onSelect?: (id: string) => void;
+}) {
   const t = translations[lang];
   if (!fleet) return <div className="empty-panel"><span className="spinner" /><strong>{t.collecting}</strong></div>;
   if (fleet.nodes.length === 0) return (
     <div className="empty-panel"><div className="empty-icon"><HardDrive size={27}/></div><h3>{t.emptyTitle}</h3><p>{t.emptyLead}</p></div>
   );
-  return <div className="node-list">{fleet.nodes.map((node) => <NodeRow node={node} history={history[node.node_id] ?? []} lang={lang} key={node.node_id} />)}</div>;
+  return <div className="node-list">{fleet.nodes.map((node) => <NodeRow node={node} history={history[node.node_id] ?? []}
+    lang={lang} key={node.node_id} selected={selectedNodeId === node.node_id} onSelect={onSelect} />)}</div>;
+}
+
+function NodeInspector({ node, lang }: { node: NodeSnapshot; lang: Language }) {
+  const t = translations[lang];
+  const online = node.status === "online";
+  const current = online && node.metrics_current;
+  const lastSeen = node.last_seen ? new Date(node.last_seen) : null;
+  const lastSeenText = lastSeen && Number.isFinite(lastSeen.getTime())
+    ? lastSeen.toLocaleString(lang === "fa" ? "fa-IR" : "en-GB") : "—";
+  const fields = [
+    { label: t.lastHeartbeat, value: lastSeenText },
+    { label: t.metricFreshness, value: current ? t.metricLive : t.metricDelayed },
+    { label: t.nodeAddress, value: current && node.interface ? node.interface : "—" },
+    { label: t.cpu, value: current ? node.cpu_percent.toFixed(1) + "%" : "—" },
+    { label: t.memory, value: current ? ram(node.ram_used_bytes) + " / " + ram(node.ram_total_bytes) : "—" },
+    { label: t.download, value: current ? rate(node.rx_bits_per_second ?? undefined) : "—" },
+    { label: t.upload, value: current ? rate(node.tx_bits_per_second ?? undefined) : "—" },
+  ];
+  return (
+    <section className="node-inspector" role="region" aria-label="Node details">
+      <div className="node-inspector-heading">
+        <div><span className="eyebrow">{t.nodeDetails}</span><h2>{node.name}</h2><p>{node.node_id}</p></div>
+        <span className={"status-tag " + (online ? "status-online" : "status-offline")}>
+          <i />{online ? t.online : t.offline}
+        </span>
+      </div>
+      <div className="node-inspector-grid">
+        {fields.map(({ label, value }) => (
+          <div className="node-inspector-field" key={label}><span>{label}</span><strong>{value}</strong></div>
+        ))}
+      </div>
+      <div className="node-inspector-boundary"><ShieldCheck size={16}/><span>{t.activationBoundary} {t.units}</span></div>
+    </section>
+  );
 }
