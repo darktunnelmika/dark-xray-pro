@@ -26,6 +26,7 @@ type Server struct {
 	stages *configstage.Store
 	labRevisions *labrevision.Store
 	business *business.Store
+	loginGate *loginGate
 }
 
 // This is a localhost-only lab interface. Remote Nodes must NOT be allowed
@@ -109,6 +110,8 @@ func (s *Server) Handler() http.Handler {
 	s.attachConfigStaging(mux)
 	s.attachLabRevisions(mux)
 	s.attachBusiness(mux)
+	s.attachBrowserAuth(mux)
+	s.attachWorkspace(mux)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
