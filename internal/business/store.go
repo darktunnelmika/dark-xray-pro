@@ -29,7 +29,7 @@ const (
  MaxUnlimitedCredit int64 = 1_000_000_000
  MaxDays = 3650
  MaxIPLimit = 1000
- SchemaVersion = 1
+ SchemaVersion = 2
 )
 var (
  ErrInvalid = errors.New("invalid business operation")
@@ -151,7 +151,7 @@ func Open(path string)(*Store,error){
  if _,err=db.Exec("PRAGMA trusted_schema = OFF");err!=nil{return fail(err)}
  var version int
  if err=db.QueryRow("PRAGMA user_version").Scan(&version);err!=nil{return fail(err)}
- if version!=0 && version!=SchemaVersion{return fail(fmt.Errorf("business schema version %d is not supported: %w",version,ErrUnavailable))}
+ if version!=0 && version!=1 && version!=SchemaVersion{return fail(fmt.Errorf("business schema version %d is not supported: %w",version,ErrUnavailable))}
  if version==0 {
   // A pre-existing legacy/foreign SQLite file is NOT an empty PRO business
   // database even if its user_version is zero. Refuse silent cross-schema
@@ -161,6 +161,10 @@ func Open(path string)(*Store,error){
   if scanErr==nil{return fail(ErrUnsafePath)}
   if !errors.Is(scanErr,sql.ErrNoRows){return fail(scanErr)}
   if err=bootstrap(db);err!=nil{return fail(err)}
+  version=1
+ }
+ if version==1 {
+  if err=migrateIdentity(db);err!=nil{return fail(err)}
  }
  return &Store{db:db},nil
 }
@@ -366,4 +370,20 @@ func (s *Store)ListEvents(ctx context.Context,repID string,limit,offset int)([]E
  out:=make([]Event,0)
  for rows.Next(){var e Event;if err:=rows.Scan(&e.EventID,&e.Kind,&e.RepresentativeID,&e.ObjectID,&e.Reason,&e.VolumeDeltaBytes,&e.UnlimitedDeltaUnits,&e.CreatedUnix);err!=nil{return nil,err};out=append(out,e)}
  return out,rows.Err()
+}
+
+
+func migrateIdentity(db *sql.DB)error{
+ tx,err:=db.Begin();if err!=nil{return err}
+ defer tx.Rollback()
+ statements:=[]string{
+  "CREATE TABLE IF NOT EXISTS auth_users (id TEXT PRIMARY KEY, username TEXT NOT NULL UNIQUE COLLATE NOCASE, representative_id TEXT NOT NULL REFERENCES representatives(id), role TEXT NOT NULL CHECK(role IN ('owner','representative')), password_salt BLOB NOT NULL, password_hash BLOB NOT NULL, disabled INTEGER NOT NULL DEFAULT 0 CHECK(disabled IN(0,1)), created_unix INTEGER NOT NULL)",
+  "CREATE UNIQUE INDEX IF NOT EXISTS unique_business_owner_login ON auth_users(role) WHERE role='owner'",
+  "CREATE TABLE IF NOT EXISTS auth_sessions (token_sha256 TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES auth_users(id) ON DELETE CASCADE, created_unix INTEGER NOT NULL, expires_unix INTEGER NOT NULL)",
+  "CREATE INDEX IF NOT EXISTS auth_sessions_user ON auth_sessions(user_id,expires_unix)",
+  "CREATE INDEX IF NOT EXISTS auth_sessions_expiry ON auth_sessions(expires_unix)",
+  "PRAGMA user_version=2",
+ }
+ for _,stmt:=range statements{if _,err=tx.Exec(stmt);err!=nil{return err}}
+ return tx.Commit()
 }
