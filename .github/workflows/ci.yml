@@ -25,7 +25,7 @@ jobs:
           cache: false
       - name: Guard against dropped Go packages and unsafe legacy imports
         run: |
-          for path in internal/routeplan/draft.go internal/replacement/journal.go internal/routecheck/tcp.go internal/noderegistry/registry.go internal/telemetry/store.go internal/agenttransport/client.go internal/xrayconfig/render.go internal/xrayconfig/validate.go internal/configstage/store.go internal/api/configstage.go cmd/node-agent/configstage.go internal/xraycanary/canary_linux.go; do
+          for path in internal/routeplan/draft.go internal/replacement/journal.go internal/routecheck/tcp.go internal/noderegistry/registry.go internal/telemetry/store.go internal/agenttransport/client.go internal/xrayconfig/render.go internal/xrayconfig/validate.go internal/configstage/store.go internal/api/configstage.go cmd/node-agent/configstage.go internal/xraycanary/canary_linux.go internal/labrevision/journal.go internal/api/labrevisions.go; do
             test -s "$path" || { echo "MISSING expected Go module: $path"; exit 1; }
           done
           test ! -e backend/dark_policy.py || { echo "Legacy HUB files must not be imported into PRO"; exit 1; }
