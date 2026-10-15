@@ -28,10 +28,17 @@ func labRevisionServer(t *testing.T)(*Server,*labrevision.Store,configstage.Meta
 		TrustedXraySHA256:metadata.TrustedXraySHA256,
 		SyntaxValid:true,CanaryAttempted:true,CanaryLoopbackBound:true,
 	}
-	report:=request(t,s.Handler(),"POST","/api/v1/agent/config-stage-report",
-		newToken,proof)
-	// The plain localhost Agent handler deliberately refuses secret delivery,
-	// but the read-only report is accepted through the existing internal API.
+	// Simulate the authenticated TLS1.3 request at the HTTP handler boundary.
+	// Separate tests perform actual pinned HTTPS, so do not weaken the route.
+	payload,err:=json.Marshal(proof)
+	if err!=nil{t.Fatal(err)}
+	req:=httptest.NewRequest("POST","/api/v1/agent/config-stage-report",
+		bytes.NewReader(payload))
+	req.TLS=&tls.ConnectionState{Version:tls.VersionTLS13}
+	req.Header.Set("Authorization","Bearer "+newToken)
+	req.Header.Set("Content-Type","application/json")
+	report:=httptest.NewRecorder()
+	s.Handler().ServeHTTP(report,req)
 	if report.Code!=200{t.Fatalf("authentic canary result rejected: %d %s",report.Code,report.Body.String())}
 	versions,err:=labrevision.Open(filepath.Join(t.TempDir(),"lab-only","versions.json"),
 		bytes.Repeat([]byte{0x55},32),nil)
