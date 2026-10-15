@@ -157,7 +157,7 @@ test("representative only sees own scoped business tools and submits CSRF-bound 
   await page.getByLabel("Duration (days)").fill("60");
   await page.getByLabel("IP/User slots (0 = unlimited for volume)").fill("5");
   await page.getByRole("button", { name: "Create pending client" }).click();
-  await expect(page.getByText("Private Test User", { exact: false })).toBeVisible();
+  await expect(page.locator(".business-records strong").filter({ hasText: "Private Test User (sample-pro-rep)" })).toBeVisible();
   expect(requests).toHaveLength(1);
   expect(requests[0].path).toBe("/api/v1/workspace/clients");
   expect(requests[0].csrf).toBe("a".repeat(64));
@@ -254,7 +254,7 @@ test("representative can extend then archive a client without publishing Xray, a
   await page.getByLabel("Duration (days)").fill("30");
   await page.getByLabel("IP/User slots (0 = unlimited for volume)").fill("5");
   await page.getByRole("button", { name: "Create pending client" }).click();
-  await expect(page.getByText("Lifecycle test (test-lifecycle-user)")).toBeVisible();
+  await expect(page.locator(".business-records strong").filter({ hasText: "Lifecycle test (test-lifecycle-user)" })).toBeVisible();
   await page.getByRole("button", { name: "Manage", exact: true }).click();
   await page.getByLabel("Additional days").fill("30");
   await page.getByLabel("Additional volume (GB)").fill("0");
