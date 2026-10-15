@@ -55,3 +55,7 @@ After Phase 6's encrypted Reality staging and offline validation, a new unprivil
 ## Phase 8 — private LAB revision selection + rollback journal
 
 The new HUB can now hold multiple encrypted versions of an already Xray-syntax-verified, loopback-canary-verified Reality candidate. Owner-only API requests use compare-and-swap generation numbers to choose a **LAB rehearsal** version and reverse that choice without deleting the previous encrypted snapshot. AES-GCM protects confidential config and HMAC authenticates journal pointers, generations and audit events. **This is a reversible metadata/config selection, NOT live Xray apply or service rollback.** [Safety/runbook](docs/lab-revision-rollback-phase8.md).
+
+## Phase 9 — isolated Linux amd64 LAB bundle (not a production installer)
+
+GitHub Actions can now compile the Go HUB/Node Agent, the React/TypeScript frontend and a guarded install script into a checksum-verified **LAB-only** archive. The installer refuses to operate without the exact independently verified NEW VPS public IPv4 and an explicit acknowledgement, and refuses existing production/Xray services or existing LAB installation paths. It starts a separate non-root localhost:2087 HUB service; **no Xray-core binary, production Node, user data, tunnel or Subscription is included or changed**. [LAB release and installation safety](docs/lab-bundle-phase9.md).
