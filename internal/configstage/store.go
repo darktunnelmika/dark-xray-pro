@@ -56,6 +56,8 @@ type Metadata struct {
  CreatedAt time.Time `json:"created_at"`
  UpdatedAt time.Time `json:"updated_at"`
  CanActivate bool `json:"can_activate"`
+ CanaryAttempted bool `json:"canary_attempted"`
+ CanaryLoopbackBound bool `json:"canary_loopback_bound"`
  NeedsDataPlaneProof bool `json:"needs_data_plane_proof"`
  NeedsSubscriptionCommit bool `json:"needs_subscription_commit"`
 }
@@ -68,6 +70,8 @@ type Proof struct {
  ConfigSHA256 string `json:"config_sha256"`
  TrustedXraySHA256 string `json:"trusted_xray_sha256"`
  SyntaxValid bool `json:"syntax_valid"`
+ CanaryAttempted bool `json:"canary_attempted"`
+ CanaryLoopbackBound bool `json:"canary_loopback_bound"`
  ErrorCode string `json:"error_code,omitempty"`
 }
 
@@ -143,7 +147,9 @@ func Open(path string,key []byte,clock func()time.Time)(*Store,error){
   if subtle.ConstantTimeCompare(digest[:],mustHex(m.ConfigSHA256))!=1{return nil,ErrUnsafe}
   if entry.Proof!=nil&&(!matches(m,*entry.Proof)||
     (m.Status==Verified&&!entry.Proof.SyntaxValid)||
-    (m.Status==Rejected&&entry.Proof.SyntaxValid)) {return nil,ErrUnsafe}
+    (m.Status==Rejected&&entry.Proof.SyntaxValid)||
+    m.CanaryAttempted!=entry.Proof.CanaryAttempted||
+    m.CanaryLoopbackBound!=entry.Proof.CanaryLoopbackBound) {return nil,ErrUnsafe}
  }
  s.state=current
  return s,nil
@@ -293,6 +299,8 @@ func (s *Store) Report(proof Proof)(Metadata,error){
  entry,ok:=s.state.Stages[proof.OperationID]
  if !ok{return Metadata{},ErrNotFound}
  if !matches(entry.Meta,proof){return Metadata{},ErrMismatch}
+ if proof.CanaryLoopbackBound && (!proof.CanaryAttempted||!proof.SyntaxValid){return Metadata{},ErrInvalid}
+ if !proof.SyntaxValid && proof.CanaryAttempted{return Metadata{},ErrInvalid}
  if proof.SyntaxValid {
   if proof.ErrorCode!=""{return Metadata{},ErrInvalid}
  }else {
@@ -311,6 +319,8 @@ func (s *Store) Report(proof Proof)(Metadata,error){
  meta.Revision++
  meta.UpdatedAt=s.clock().UTC()
  meta.Status=Rejected
+ meta.CanaryAttempted=proof.CanaryAttempted
+ meta.CanaryLoopbackBound=proof.CanaryLoopbackBound
  if proof.SyntaxValid{meta.Status=Verified}
  entry.Meta=meta
  entry.Proof=&proof
