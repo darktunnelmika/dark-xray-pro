@@ -47,3 +47,7 @@ The new Go `internal/xrayconfig` package now renders deterministic, explicitly s
 ## Phase 6 — AES-256-GCM Xray candidate staging (LAB ONLY)
 
 The private Reality candidate can now be stored encrypted on the NEW HUB and delivered only to the newly paired Agent over verified TLS 1.3. The Agent validates exact config and inbound tags/ports with a separately pinned local Xray executable, then returns a bounded, secret-free validation receipt. This is **offline-only**: it never writes to a running Xray, activates Inbounds, charges traffic or publishes subscriptions. Explicit enable flags and a persistent external staging encryption key are required. [Phase 6 instructions](docs/xray-stage-phase6.md).
+
+## Phase 7 — real Xray lab-only loopback canary
+
+After Phase 6's encrypted Reality staging and offline validation, a new unprivileged LAB Agent may additionally prove that a checksum-pinned **real Xray-core** process starts and binds *only ephemeral localhost listeners*. A disposable process is always stopped and private configs deleted before returning a separate `canary_loopback_bound` receipt. It **never** validates customer VLESS data-plane, applies a public Node config, changes users or publishes Subscription links. [Phase 7 runbook](docs/xray-canary-phase7.md).
