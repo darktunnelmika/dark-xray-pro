@@ -34,13 +34,14 @@ func(s *Server)attachNativeInbounds(mux *http.ServeMux){
  })
  mux.HandleFunc("POST /api/v1/workspace/native-nodes/{id}/preview",func(w http.ResponseWriter,r *http.Request){
   if _,ok:=s.authorizeBrowser(w,r,true,true);!ok{return};node:=r.PathValue("id");installation,ok:=s.nativeNode(node);if !ok{businessError(w,business.ErrNotFound);return};cfg,err:=s.business.BuildNodeConfig(r.Context(),s.inboundKey,node,installation);if err!=nil{businessError(w,err);return}
-  respond(w,200,cfg) // Config/private key cannot be serialized in NodeConfig.
+  respond(w,200,cfg)
  })
  mux.HandleFunc("GET /api/v1/agent/native-runtime",func(w http.ResponseWriter,r *http.Request){
   if r.TLS==nil||r.TLS.Version<tls.VersionTLS13{respond(w,426,map[string]string{"error":"tls13_required"});return};node,installation:=r.URL.Query().Get("node_id"),r.URL.Query().Get("installation_id");token:=bearer(r)
   if _,ok:=s.registry.Authenticate(node,installation,token);!ok{respond(w,401,map[string]string{"error":"unauthorized"});return}
   cfg,err:=s.business.BuildNodeConfig(r.Context(),s.inboundKey,node,installation);if errors.Is(err,business.ErrNotFound){w.WriteHeader(204);return};if err!=nil{businessError(w,err);return}
   lease,err:=managedxray.SignLease([]byte(token),managedxray.Lease{NodeID:node,InstallationID:installation,Sequence:cfg.Sequence,ConfigSHA:cfg.ConfigSHA,ManifestSHA:cfg.ManifestSHA,Issued:time.Now().UnixNano(),Expires:cfg.LeaseNotAfter});if err!=nil{businessError(w,business.ErrUnavailable);return}
+  if err=s.business.RecordNativeDelivery(r.Context(),cfg,lease);err!=nil{businessError(w,err);return}
   respond(w,200,managedxray.Delivery{Version:1,NodeID:node,InstallationID:installation,ListenIP:cfg.ListenIP,Sequence:cfg.Sequence,Candidate:cfg.Candidate,ConfigBase64:base64.StdEncoding.EncodeToString(cfg.Candidate.Config),Lease:lease})
  })
 }

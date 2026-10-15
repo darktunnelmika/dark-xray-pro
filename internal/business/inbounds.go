@@ -20,7 +20,7 @@ import (
 type InboundInput struct{ID uint64 `json:"id"`;Name string `json:"name"`;Transport string `json:"transport"`;GRPCService string `json:"grpc_service"`;RealityTarget string `json:"reality_target"`;ServerNames []string `json:"server_names"`;ShortIDs []string `json:"short_ids"`}
 type NativeInbound struct{InboundInput;PublicKey string `json:"public_key"`;BoundClients int `json:"bound_clients"`}
 type InboundTarget struct{InboundID uint64 `json:"inbound_id"`;NodeID string `json:"node_id"`;InstallationID string `json:"installation_id"`;ListenIP string `json:"listen_ip"`;DirectPort uint16 `json:"direct_port"`;SwapPort uint16 `json:"swap_port"`}
-type NodeConfig struct{NodeID string `json:"node_id"`;InstallationID string `json:"installation_id"`;ListenIP string `json:"listen_ip"`;Sequence uint64 `json:"sequence"`;ConfigSHA string `json:"config_sha"`;ManifestSHA string `json:"manifest_sha"`;UserCount int `json:"user_count"`;LeaseNotAfter int64 `json:"lease_not_after_unix_nano"`;Candidate xrayconfig.Candidate `json:"-"`}
+type NodeConfig struct{Generation uint64 `json:"generation"`;NodeID string `json:"node_id"`;InstallationID string `json:"installation_id"`;ListenIP string `json:"listen_ip"`;Sequence uint64 `json:"sequence"`;ConfigSHA string `json:"config_sha"`;ManifestSHA string `json:"manifest_sha"`;UserCount int `json:"user_count"`;LeaseNotAfter int64 `json:"lease_not_after_unix_nano"`;Candidate xrayconfig.Candidate `json:"-"`}
 func migrateNativeInbounds(db *sql.DB)error{
  tx,err:=db.Begin();if err!=nil{return err};defer tx.Rollback()
  for _,q:=range []string{
@@ -40,6 +40,7 @@ func openProfile(key,encrypted []byte,id uint64)(xrayconfig.Profile,error){
  raw,e:=a.Open(nil,encrypted[:a.NonceSize()],encrypted[a.NonceSize():],profileAAD(id));if e!=nil||json.Unmarshal(raw,&p)!=nil||p.InboundID!=id{return p,ErrUnavailable};return p,nil
 }
 func(s *Store)CreateInbound(ctx context.Context,key []byte,in InboundInput)(NativeInbound,error){
+ old,found,replayErr:=s.replayInbound(ctx,key,in);if replayErr!=nil{return NativeInbound{},replayErr};if found{return old,nil}
  if in.ID==0||in.ID>1<<53-1||!validName(in.Name,128){return NativeInbound{},ErrInvalid}
  a,err:=profileAEAD(key);if err!=nil{return NativeInbound{},err};priv,err:=ecdh.X25519().GenerateKey(rand.Reader);if err!=nil{return NativeInbound{},err}
  p:=xrayconfig.Profile{InboundID:in.ID,Transport:in.Transport,GRPCService:in.GRPCService,RealityTarget:in.RealityTarget,ServerNames:in.ServerNames,ShortIDs:in.ShortIDs,RealityPrivateKey:base64.RawURLEncoding.EncodeToString(priv.Bytes()),Users:[]xrayconfig.User{}}
@@ -80,6 +81,7 @@ func(s *Store)PutInboundTarget(ctx context.Context,t InboundTarget)error{
 func(s *Store)BuildNodeConfig(ctx context.Context,key []byte,node,installation string)(NodeConfig,error){
  result:=NodeConfig{NodeID:node,InstallationID:installation,LeaseNotAfter:time.Now().Add(30*time.Second).UnixNano()};if !idRE.MatchString(node)||len(installation)!=32{return result,ErrInvalid}
  tx,err:=s.db.BeginTx(ctx,nil);if err!=nil{return result,err};defer tx.Rollback()
+ if err=tx.QueryRowContext(ctx,"SELECT value FROM native_config_generation WHERE id=1").Scan(&result.Generation);err!=nil{return result,err}
  type source struct{id uint64;enc []byte;direct,swap uint16};sources:=[]source{}
  rows,err:=tx.QueryContext(ctx,"SELECT i.id,i.profile_enc,t.listen_ip,t.direct_port,t.swap_port FROM native_inbound_targets t JOIN native_inbounds i ON i.id=t.inbound_id WHERE t.node_id=? AND t.installation_id=? ORDER BY i.id LIMIT 257",node,installation);if err!=nil{return result,err}
  for rows.Next(){var x source;var ip string;if err=rows.Scan(&x.id,&x.enc,&ip,&x.direct,&x.swap);err!=nil{rows.Close();return result,err};if result.ListenIP!=""&&result.ListenIP!=ip{rows.Close();return result,ErrConflict};result.ListenIP=ip;sources=append(sources,x)}
