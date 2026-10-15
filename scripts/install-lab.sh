@@ -57,7 +57,7 @@ ROUTE_SRC="$(ip -4 route get 1.1.1.1 | awk '
 ACTUAL_EGRESS_IP="$(curl --noproxy '*' -4fsS --connect-timeout 5 --max-time 10 https://api.ipify.org)" ||
   abort "cannot contact external IP reflector over HTTPS"
 if [[ "$ACTUAL_EGRESS_IP" != "$DARK_PRO_EXPECT_PUBLIC_IP" ]]; then
-  printf 'NOTICE: lab interface IP %s exits the Internet as %s (upstream NAT).\\n' \
+  printf 'NOTICE: lab interface IP %s exits the Internet as %s (upstream NAT).\n' \
     "$DARK_PRO_EXPECT_PUBLIC_IP" "$ACTUAL_EGRESS_IP" >&2
 fi
 ACTUAL_IP="$DARK_PRO_EXPECT_PUBLIC_IP"
