@@ -269,3 +269,51 @@ func TestListenerMetadataBoundToEncryptedCandidateAndDetachedFromCaller(t *testi
   t.Fatalf("modifying Listener metadata did not invalidate AES authentication: %v",err)
  }
 }
+
+func TestCanaryEvidenceNeverImpliesActivationOrBilling(t *testing.T) {
+	s,key,path:=initStore(t)
+	op,c:=fixture(t)
+	meta,err:=s.Create(op,c,testBinarySHA)
+	if err!=nil{t.Fatal(err)}
+	proof:=proofOf(meta,true)
+	proof.CanaryAttempted=true
+	proof.CanaryLoopbackBound=true
+	complete,err:=s.Report(proof)
+	if err!=nil{t.Fatal(err)}
+	if complete.Status!=Verified||!complete.CanaryAttempted||
+		!complete.CanaryLoopbackBound||complete.CanActivate||
+		!complete.NeedsDataPlaneProof||!complete.NeedsSubscriptionCommit {
+		t.Fatalf("canary TCP bind incorrectly changed production state: %+v",complete)
+	}
+	restored,err:=Open(path,key,nil)
+	if err!=nil{t.Fatal(err)}
+	record,err:=restored.Get(meta.OperationID)
+	if err!=nil||!reflect.DeepEqual(record,complete) {
+		t.Fatalf("canary result lost on restart: %+v %v",record,err)
+	}
+	replay,err:=restored.Report(proof)
+	if err!=nil||!reflect.DeepEqual(replay,complete) {
+		t.Fatal("duplicate canary evidence was not idempotent",err)
+	}
+}
+
+func TestForgedCanaryFieldsAreRejected(t *testing.T) {
+	s,_,_:=initStore(t)
+	op,c:=fixture(t)
+	meta,err:=s.Create(op,c,testBinarySHA)
+	if err!=nil{t.Fatal(err)}
+	for _,mutate:=range []func(*Proof){
+		func(p *Proof){p.CanaryLoopbackBound=true},
+		func(p *Proof){p.SyntaxValid=false;p.ErrorCode="xray_rejected";p.CanaryAttempted=true},
+	} {
+		p:=proofOf(meta,true)
+		mutate(&p)
+		if _,err:=s.Report(p);!errors.Is(err,ErrInvalid){
+			t.Fatalf("invalid canary claim accepted: %+v %v",p,err)
+		}
+	}
+	current,err:=s.Get(op.ID)
+	if err!=nil||current.Status!=Pending {
+		t.Fatalf("forgery modified pending stage: %+v %v",current,err)
+	}
+}
