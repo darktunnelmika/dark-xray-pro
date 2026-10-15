@@ -67,3 +67,12 @@ refresh-safe inspection of real metrics, and correct Online/Offline/Stats-delaye
 distinctions. It cannot pair Nodes in the browser, issue credentials, publish
 Inbounds, or perform live Xray Apply/Rollback. See
 [Phase 10 Node Manager boundary](docs/node-manager-read-only-phase10.md).
+
+## Phase 11 — Direct + Dark Swap Inbound draft (LAB ONLY)
+
+The Inbounds page now offers a browser-only, non-persistent preview for a
+**new paired Node**, combining an independently optional Direct port and
+Dark Swap's exactly three fields (tunnel port, Node port and tunnel host).
+Shared-port ambiguity is explicitly disclosed. No Apply button, privileged
+admin request or subscription publication is enabled. Read
+[Phase 11 safety boundary](docs/inbounds-direct-swap-draft-phase11.md).
