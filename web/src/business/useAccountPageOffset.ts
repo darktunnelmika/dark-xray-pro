@@ -11,7 +11,10 @@ export function useAccountPageOffset(account: string, view: string) {
     } catch { return 0; }
   });
   useEffect(() => {
-    try { sessionStorage.setItem(key, String(offset)); } catch { /* restricted storage */ }
+    try {
+      if (offset === 0) sessionStorage.removeItem(key);
+      else sessionStorage.setItem(key, String(offset));
+    } catch { /* restricted storage */ }
   }, [key, offset]);
   return [offset, setOffset] as const;
 }
