@@ -32,7 +32,7 @@ command -v find >/dev/null || abort "find is required"
 
 [[ -f "$BUNDLE/SHA256SUMS" && -s "$BUNDLE/bin/dark-pro-hub" &&
    -s "$BUNDLE/bin/dark-pro-agent" &&
-   -s "$BUNDLE/bin/dark-pro-owner-setup" && -s "$BUNDLE/web/index.html" ]] ||
+   -s "$BUNDLE/bin/dark-pro-owner-setup" ]] ||
   abort "expected checked LAB release bundle is incomplete"
 (cd "$BUNDLE" && sha256sum -c --status SHA256SUMS) ||
   abort "bundle checksum verification failed — no installation performed"
@@ -85,19 +85,13 @@ if ! id darkprolab >/dev/null 2>&1; then
   useradd --system --user-group --no-create-home \
     --home-dir "$STATE" --shell /usr/sbin/nologin darkprolab
 fi
-install -d -o root -g root -m 0755 "$APP" "$APP/bin" "$APP/web"
+install -d -o root -g root -m 0755 "$APP" "$APP/bin"
 install -d -o darkprolab -g darkprolab -m 0700 "$STATE"
 install -d -o root -g root -m 0700 "$ENV_DIR"
 
 install -o root -g root -m 0755 "$BUNDLE/bin/dark-pro-hub" "$APP/bin/dark-pro-hub"
 install -o root -g root -m 0755 "$BUNDLE/bin/dark-pro-agent" "$APP/bin/dark-pro-agent"
 install -o root -g root -m 0755 "$BUNDLE/bin/dark-pro-owner-setup" "$APP/bin/dark-pro-owner-setup"
-cp -a -- "$BUNDLE/web/." "$APP/web/"
-# The source bundle is intentionally built with umask 077. Public static UI
-# assets must be readable by the NON-ROOT darkprolab process, though private
-# LAB state, owner token, Agent credentials and Reality keys stay 0600/0700.
-find "$APP/web" -type d -exec chmod 0755 {} +
-find "$APP/web" -type f -exec chmod 0644 {} +
 chmod -R go-w "$APP"
 chown -R root:root "$APP"
 
@@ -123,7 +117,7 @@ User=darkprolab
 Group=darkprolab
 EnvironmentFile=$ENV_DIR/lab.env
 WorkingDirectory=$APP
-ExecStart=$APP/bin/dark-pro-hub -listen 127.0.0.1:2087 -static $APP/web -registry $STATE/registry.json -replacements $STATE/replacements.json
+ExecStart=$APP/bin/dark-pro-hub -listen 127.0.0.1:2087 -registry $STATE/registry.json -replacements $STATE/replacements.json
 Restart=on-failure
 RestartSec=5
 UMask=0077
@@ -166,10 +160,10 @@ if [[ "$READY" != "1" ]]; then
   systemctl stop "$SERVICE" || true
   abort "LAB did not become healthy within the startup window; ONLY its own service was stopped"
 fi
-# Also verify that the unprivileged service can really read the compiled UI.
-if ! runuser -u darkprolab -- test -r "$APP/web/index.html"; then
+# The UI is inside the unprivileged HUB binary; check the served HTML.
+if ! curl --noproxy '*' -fsS --connect-timeout 1 --max-time 3 http://127.0.0.1:2087/ | grep -qi '<!doctype html>'; then
   systemctl stop "$SERVICE" || true
-  abort "LAB UI is not readable by its unprivileged service account"
+  abort "embedded LAB UI failed its HTTP check"
 fi
 
 printf '\nDARK XRAY PRO isolated LAB installed successfully on NEW server %s.\n' "$ACTUAL_IP"

@@ -182,10 +182,10 @@ jobs:
           grep -q 'ip -4 route get 1.1.1.1' scripts/install-lab.sh
           grep -q '127.0.0.1:2087' scripts/install-lab.sh
           grep -q 'I_CONFIRM_NEW_EMPTY_SERVER' scripts/install-lab.sh
-          grep -Fq 'find "$APP/web" -type d -exec chmod 0755' scripts/install-lab.sh
-          grep -Fq 'find "$APP/web" -type f -exec chmod 0644' scripts/install-lab.sh
+          grep -Fq 'webui.Embedded()' cmd/hub/main.go
+          grep -Fq '//go:embed dist' internal/webui/webui.go
           grep -Fq 'for attempt in $(seq 1 30)' scripts/install-lab.sh
-          grep -Fq 'runuser -u darkprolab -- test -r' scripts/install-lab.sh
+          grep -Fq 'embedded LAB UI failed its HTTP check' scripts/install-lab.sh
       - name: Build isolated static Go executables and compiled UI
         env:
           CGO_ENABLED: "0"
@@ -194,7 +194,9 @@ jobs:
         run: |
           set -euo pipefail
           DARK_PRO_PINNED_COMMIT="$GITHUB_SHA" bash scripts/build-lab-bundle.sh
-          test -s release/web/index.html
+          test ! -e release/web
+          DARK_PRO_REQUIRE_EMBEDDED_UI=1 go test ./internal/webui -run '^TestReleaseContainsCompiledUI$' -count=1 -v
+          test -z "$(find release -type d \( -name node_modules -o -name .git -o -name test-results \) -print -quit)"
           test -s release/bin/dark-pro-hub
           test -s release/bin/dark-pro-agent
           test -s release/bin/dark-pro-owner-setup
@@ -203,7 +205,7 @@ jobs:
         run: |
           set -euo pipefail
           cd release
-          find bin web scripts -type f -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS
+          find bin scripts -type f -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS
           sha256sum -c SHA256SUMS
           cd ..
           tar -czf dark-xray-pro-lab-linux-amd64.tar.gz -C release .

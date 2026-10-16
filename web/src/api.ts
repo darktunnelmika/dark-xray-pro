@@ -1,3 +1,4 @@
+import { api } from "./session";
 export type NodeStatus = "online" | "offline";
 
 export interface NodeSnapshot {
@@ -29,14 +30,7 @@ export interface FleetSnapshot {
 }
 
 export async function getFleet(signal: AbortSignal): Promise<FleetSnapshot> {
-  const response = await fetch("/api/v1/fleet", {
-    signal,
-    credentials: "same-origin",
-    cache: "no-store",
-    headers: { Accept: "application/json" },
-  });
-  if (!response.ok) throw new Error("Fleet service returned HTTP " + response.status);
-  const body: unknown = await response.json();
+  const body: unknown = await api<unknown>("/api/v1/fleet", { signal });
   if (!body || typeof body !== "object") throw new Error("Malformed fleet response");
   const data = body as Partial<FleetSnapshot>;
   if (

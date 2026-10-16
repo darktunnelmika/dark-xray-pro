@@ -1,7 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 
 // Disposable browser fixtures only: no real server, credential or customer.
-const csrf = "test-browser-csrf";
+const csrf = "a".repeat(64);
 const installation = "a".repeat(32);
 const digest = "d".repeat(64);
 async function fixture(page: Page, role = "owner") {
@@ -12,7 +12,7 @@ async function fixture(page: Page, role = "owner") {
  const bindings: string[] = [];
  let applied = false;
  await page.route("**/api/v1/fleet", r => r.fulfill({ json: { nodes: [], total_nodes: 0, online_nodes: 0, offline_nodes: 0, as_of: new Date().toISOString(), interface_rx_bits_per_second: 0, interface_tx_bits_per_second: 0, physical_rates_complete: false, metric_scope: "default_route_interface_not_billable" } }));
- await page.route("**/api/v1/session/status", r => r.fulfill({ json: { authenticated: true, user: { role, username: "test-owner" }, csrf_token: csrf } }));
+ await page.route("**/api/v1/session/status", r => r.fulfill({ json: { authenticated: true, user: { id: role, role, username: "test-owner", representative_id: role === "owner" ? "owner" : "rep-a" }, csrf_token: csrf, expires_unix: 1900000000 } }));
  await page.route("**/api/v1/workspace/**", async route => {
   const req = route.request();const path = new URL(req.url()).pathname;
   if (req.method() === "POST") {
@@ -90,7 +90,8 @@ test("native workflow binds selected clients and reports only acknowledged Node 
 
 test("representative view does not display owner deployment controls", async ({ page }) => {
  await fixture(page, "representative");let reads = 0;page.on("request", r => { if (r.url().includes("/workspace/native-")) reads++; });
- await openPage(page);await expect(page.getByText("Only the owner can manage Inbounds.", { exact: false })).toBeVisible();
+ await page.goto("/inbounds");await expect(page).toHaveURL(/\/clients$/);
+ await expect(page.getByRole("button", { name: "Inbounds", exact: true })).toHaveCount(0);
  await expect(page.getByRole("button", { name: "Create Inbound", exact: true })).toHaveCount(0);expect(reads).toBe(0);
 });
 

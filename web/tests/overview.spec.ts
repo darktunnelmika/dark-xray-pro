@@ -1,5 +1,11 @@
 import { expect, test, type Page } from "@playwright/test";
 
+test.beforeEach(async ({ page }) => {
+  await page.route("**/api/v1/session/status", route => route.fulfill({ json: { authenticated: true, user: { id: "owner", username: "test-owner", role: "owner", representative_id: "owner" }, csrf_token: "a".repeat(64), expires_unix: 1900000000 } }));
+  await page.route("**/api/v1/workspace/native-inbounds-state", route => route.fulfill({ status: 404, json: {} }));
+  await page.route("**/api/v1/workspace/clients**", route => route.fulfill({ json: { clients: [] } }));
+});
+
 // Synthetic browser fixtures are restricted to the test harness.
 // Runtime UI never ships mock customer, Node or billing data.
 const baseNode = {
@@ -24,7 +30,6 @@ const fleet = {
   ],
 };
 async function mockFleet(page: Page, getData: () => unknown = () => fleet) {
-  await page.route("**/api/v1/session/status", route => route.fulfill({ status: 404, contentType: "application/json", body: "{}" }));
   await page.route("**/api/v1/fleet", async (route) => {
     await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(getData()) });
   });
