@@ -34,6 +34,7 @@ import (
 
 	"github.com/darktunnelmika/dark-xray-pro/internal/business"
 	"github.com/darktunnelmika/dark-xray-pro/internal/managedxray"
+	"github.com/darktunnelmika/dark-xray-pro/internal/webui"
 	uc "github.com/darktunnelmika/dark-xray-pro/internal/usagecheckpoint"
 	"github.com/darktunnelmika/dark-xray-pro/internal/xrayconfig"
 )
@@ -70,7 +71,7 @@ func TestRealBrowserNativeUsageXraySQLiteAndRevocation(t *testing.T) {
 	owner := s.Handler()
 	mux := http.NewServeMux()
 	mux.Handle("/api/", owner)
-	mux.Handle("/", http.FileServer(http.Dir(webRoot)))
+	mux.Handle("/", webui.Directory(webRoot))
 	ui := httptest.NewServer(mux)
 	defer ui.Close()
 	private := t.TempDir()

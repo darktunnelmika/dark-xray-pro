@@ -12,8 +12,7 @@ try {
   page.setDefaultTimeout(15000);
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
-  await page.goto(base.href);
-  await page.getByRole('button', { name: 'Business', exact: true }).click();
+  await page.goto(new URL("/representatives", base).href);
   await page.getByLabel('Username', { exact: true }).fill(control.username);
   await page.getByLabel('Password', { exact: true }).fill(control.password);
   await page.getByRole('button', { name: 'Sign in', exact: true }).click();
@@ -32,6 +31,7 @@ try {
   await grant.getByRole('button', { name: 'Record credit transaction', exact: true }).click();
   await expect(grant.getByLabel('Reason', { exact: true })).toHaveValue('');
 
+  await page.getByRole('button', { name: 'Clients', exact: true }).click();
   const form = page.locator('.business-client-form');
   // Scope to the real customer form. Implicit labels include the Random
   // button or select option text; do not assume an option-free exact name.

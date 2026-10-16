@@ -25,6 +25,7 @@ import (
  "github.com/darktunnelmika/dark-xray-pro/internal/noderegistry"
  "github.com/darktunnelmika/dark-xray-pro/internal/replacement"
  "github.com/darktunnelmika/dark-xray-pro/internal/telemetry"
+ "github.com/darktunnelmika/dark-xray-pro/internal/webui"
 )
 func loopbackAddr(addr string)bool{host,_,err:=net.SplitHostPort(addr);if err!=nil{return false};ip:=net.ParseIP(host);return ip!=nil&&ip.IsLoopback()}
 func separateAgentPort(agent,owner string)error{
@@ -34,7 +35,7 @@ func separateAgentPort(agent,owner string)error{
 func privateTLSKey(path string)error{info,err:=os.Lstat(path);if err!=nil{return err};if !info.Mode().IsRegular()||info.Mode().Perm()&0077!=0{return errors.New("Agent TLS key must be a regular, private (0600/0400) file without symlink")};return nil}
 func main(){
  address:=flag.String("listen","127.0.0.1:2087","loopback-only LAB owner UI listener")
- static:=flag.String("static","web/dist","optional compiled frontend directory")
+ static:=flag.String("static","","optional development UI override; release uses its embedded UI")
  registryPath:=flag.String("registry","./lab-state/registry.json","private durable LAB node enrollment")
  replacementsPath:=flag.String("replacements","./lab-state/replacements.json","private nonactivating replacement journal")
  stagingPath:=flag.String("staging","./lab-state/private-staging/configs.json","optional encrypted Reality candidate journal")
@@ -75,10 +76,11 @@ func main(){
   stage,err:=configstage.Open(*stagingPath,key,nil);if err!=nil{log.Fatal("private encrypted stage registry unavailable: ",err)};if err:=service.EnableConfigStaging(stage);err!=nil{log.Fatal(err)}
   if os.Getenv("DARK_PRO_ENABLE_LAB_REVISION_ROLLBACK")=="1"{material:=append([]byte("DARK-PRO-LABREV-AES-v1:"),key...);revisionKey:=sha256.Sum256(material);versions,err:=labrevision.Open(*labRevisionsPath,revisionKey[:],nil);if err!=nil{log.Fatal("private LAB revision journal unavailable: ",err)};if err:=service.EnableLabRevisions(versions);err!=nil{log.Fatal(err)}}
  }
- apiHandler:=service.Handler();handler:=http.HandlerFunc(func(w http.ResponseWriter,r *http.Request){
+ apiHandler:=service.BrowserHandler()
+ ui:=webui.Embedded();if *static!=""{ui=webui.Directory(*static)}
+ handler:=http.HandlerFunc(func(w http.ResponseWriter,r *http.Request){
   if strings.HasPrefix(r.URL.Path,"/api/"){apiHandler.ServeHTTP(w,r);return}
-  index:=filepath.Join(*static,"index.html");if _,err:=os.Stat(index);err!=nil{http.Error(w,"Frontend not built: run npm install && npm run build in web/",http.StatusServiceUnavailable);return}
-  if r.URL.Path!="/"&&filepath.Ext(r.URL.Path)==""{r2:=r.Clone(r.Context());r2.URL.Path="/";http.FileServer(http.Dir(*static)).ServeHTTP(w,r2);return};http.FileServer(http.Dir(*static)).ServeHTTP(w,r)
+  ui.ServeHTTP(w,r)
  })
  admin:=&http.Server{Addr:*address,Handler:handler,ReadHeaderTimeout:5*time.Second,IdleTimeout:45*time.Second,WriteTimeout:15*time.Second}
  if *agentListen!=""{agentTLS=&http.Server{Addr:*agentListen,Handler:service.AgentHandler(),TLSConfig:&tls.Config{MinVersion:tls.VersionTLS13},ReadHeaderTimeout:5*time.Second,ReadTimeout:10*time.Second,WriteTimeout:10*time.Second,MaxHeaderBytes:16*1024}}

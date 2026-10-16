@@ -18,6 +18,7 @@ function successfulLogin(user: typeof rep) {
   return { authenticated: true, user, csrf_token: "a".repeat(64), expires_unix: 1800000000 };
 }
 async function mockBusiness(page: Page, user: typeof rep) {
+  let signedIn = false;
   const requests: { path: string; method: string; csrf: string; body: unknown }[] = [];
   const runningClients: unknown[] = [];
   const operations: unknown[] = [];
@@ -27,8 +28,9 @@ async function mockBusiness(page: Page, user: typeof rep) {
     const path = new URL(request.url()).pathname;
     if (path.endsWith("/status")) {
       await route.fulfill({ status: 200, contentType: "application/json",
-        body: JSON.stringify({ enabled: true, authenticated: false }) });
+        body: JSON.stringify(signedIn ? successfulLogin(user) : { enabled: true, authenticated: false }) });
     } else if (path.endsWith("/login")) {
+      signedIn = true;
       const body = request.postDataJSON() as Record<string, unknown>;
       expect(body.password).toBe("test-private-password-for-lab");
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(successfulLogin(user)) });
@@ -128,9 +130,8 @@ async function mockBusiness(page: Page, user: typeof rep) {
 test("Business page never invents owner, representative or credit when backend is disabled", async ({ page }) => {
   await mockBase(page);
   await page.route("**/api/v1/session/status", (route) => route.fulfill({ status: 404, body: "{}" }));
-  await page.goto("/");
-  await page.getByRole("button", { name: "Business" }).click();
-  await expect(page.getByText("Business storage is not enabled on this LAB HUB yet.")).toBeVisible();
+  await page.goto("/clients");
+  await expect(page.getByText("Sign-in service unavailable. No account or permissions are assumed.")).toBeVisible();
   await expect(page.getByRole("button", { name: "Create representative" })).toHaveCount(0);
   await expect(page.getByText("90", { exact: true })).toHaveCount(0);
 });
@@ -139,9 +140,7 @@ test("representative only sees own scoped business tools and submits CSRF-bound 
   await mockBase(page);
   const requests = await mockBusiness(page, rep);
   await page.setViewportSize({ width: 320, height: 750 });
-  await page.goto("/");
-  await page.getByRole("button", { name: "Open menu" }).click();
-  await page.getByRole("button", { name: "Business" }).click();
+  await page.goto("/clients");
   await expect(page.getByRole("heading", { name: "Sign in" })).toBeVisible();
   await page.getByLabel("Username").fill("rep-a");
   await page.getByLabel("Password").fill("test-private-password-for-lab");
@@ -173,8 +172,7 @@ test("representative only sees own scoped business tools and submits CSRF-bound 
 test("owner gets real scoped representative forms in Persian without sending owner token to browser", async ({ page }) => {
   await mockBase(page);
   const requests = await mockBusiness(page, owner);
-  await page.goto("/");
-  await page.getByRole("button", { name: "Business" }).click();
+  await page.goto("/representatives");
   await page.getByLabel("Username").fill("proowner");
   await page.getByLabel("Password").fill("test-private-password-for-lab");
   await page.getByRole("button", { name: "Sign in" }).click();
@@ -201,9 +199,7 @@ test("owner can create and bulk-edit a real group in Persian then delete group w
   await mockBase(page);
   const requests = await mockBusiness(page, owner);
   await page.setViewportSize({ width: 320, height: 750 });
-  await page.goto("/");
-  await page.getByRole("button", { name: "Open menu" }).click();
-  await page.getByRole("button", { name: "Business" }).click();
+  await page.goto("/groups");
   await page.getByLabel("Username").fill("proowner");
   await page.getByLabel("Password").fill("test-private-password-for-lab");
   await page.getByRole("button", { name: "Sign in" }).click();
@@ -242,8 +238,7 @@ test("owner can create and bulk-edit a real group in Persian then delete group w
 test("representative can extend then archive a client without publishing Xray, altering groups or exposing other accounts", async ({ page }) => {
   await mockBase(page);
   const requests = await mockBusiness(page, rep);
-  await page.goto("/");
-  await page.getByRole("button", { name: "Business" }).click();
+  await page.goto("/clients");
   await page.getByLabel("Username").fill("rep-a");
   await page.getByLabel("Password").fill("test-private-password-for-lab");
   await page.getByRole("button", { name: "Sign in" }).click();

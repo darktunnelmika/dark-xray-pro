@@ -20,7 +20,18 @@ for tool in git go node npm sha256sum find sort xargs install; do
   command -v "$tool" >/dev/null || fail "required builder tool not found: $tool"
 done
 [[ ! -e release ]] || fail "release directory already exists; use a fresh checkout"
-mkdir -p release/bin release/web release/scripts
+mkdir -p release/bin release/scripts
+
+# A release is built in CI, never by the installed server. Build frontend FIRST
+# so one binary contains exactly this source revision's compiled UI.
+echo 'Compiling and embedding the matching React UI...'
+(cd web && npm install --no-audit --no-fund && npm run build)
+[[ ! -L internal/webui/dist && ! -L internal/webui/dist/assets ]] || fail "unsafe generated asset path"
+mkdir -p internal/webui/dist
+# Only generated files inside the fixed source-local embedding directory.
+find internal/webui/dist -mindepth 1 -maxdepth 1 ! -name README.txt -exec rm -rf -- {} +
+cp -a -- web/dist/. internal/webui/dist/
+[[ -s internal/webui/dist/index.html ]] || fail "compiled UI is missing"
 
 echo "Building isolated HUB + Agent from pinned source $(git rev-parse --short HEAD)..."
 CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags='-s -w' \
@@ -30,12 +41,9 @@ CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags='-s -w' \
 CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags='-s -w' \
   -o release/bin/dark-pro-owner-setup ./cmd/owner-setup
 
-echo 'Compiling isolated React UI...'
-(cd web && npm install --no-audit --no-fund && npm run build)
-cp -a -- web/dist/. release/web/
 install -m 0755 scripts/install-lab.sh release/scripts/install-lab.sh
 
-(cd release && find bin web scripts -type f -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS)
+(cd release && find bin scripts -type f -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS)
 (cd release && sha256sum -c SHA256SUMS)
 echo "Build verified from pinned commit: $DARK_PRO_PINNED_COMMIT"
 echo "Bundle directory: $ROOT/release"

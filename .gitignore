@@ -21,3 +21,7 @@ coverage/
 web/test-results/
 web/playwright-report/
 lab-state/
+
+# Build-only UI embedding: no generated assets in Git.
+/internal/webui/dist/*
+!/internal/webui/dist/README.txt

@@ -2,14 +2,17 @@ import { useEffect, useState } from "react";
 import {
   Activity, ArrowDownLeft, ArrowUpRight, CheckCircle2, ChevronRight,
   CircleHelp, CreditCard, Globe2, HardDrive, LayoutDashboard,
-  Menu, Moon, Network, RadioTower, Server, Settings2, ShieldCheck,
+  Menu, Moon, Network, RadioTower, Server, Settings2, ShieldCheck, Users, FolderOpen, UserRound, LogOut,
   Sun, Waypoints, X,
 } from "lucide-react";
 import { getFleet, type FleetSnapshot, type NodeSnapshot } from "./api";
 import InboundPlanner from "./InboundPlanner";
 import BusinessWorkspace from "./BusinessWorkspace";
+import { useSession } from "./session";
+import { allowed, useNavigation, type Page } from "./navigation";
+import LoginPage from "./LoginPage";
+import "./Shell.css";
 
-type Page = "overview" | "nodes" | "inbounds" | "business" | "settings";
 type Theme = "light" | "dark" | "system";
 type Language = "en" | "fa";
 
@@ -24,7 +27,10 @@ function stored<T extends string>(key: string, fallback: T, allowed: readonly T[
 
 const translations = {
   en: {
-    overview: "Overview", nodes: "Nodes", inbounds: "Inbounds", business: "Business", settings: "Settings",
+    overview: "Overview", nodes: "Nodes", inbounds: "Inbounds", settings: "Settings",
+    clients: "Clients", groups: "Groups", representatives: "Representatives", finance: "Finance", account: "My account",
+    clientsTitle: "Clients", clientsLead: "Create and manage customers in one place.", groupsTitle: "Groups", groupsLead: "Organize customers without changing their financial history.",
+    representativesTitle: "Representatives", representativesLead: "Accounts, permissions and representative credit.", financeTitle: "Finance", financeLead: "Account balances and immutable transaction history.", accountTitle: "My account", accountLead: "Your profile and password settings.",
     overviewTitle: "Infrastructure, at a glance.", overviewLead: "A clearer view of every server. No heavy accounting queries on page load.",
     nodesTitle: "Node fleet", nodesLead: "Live agent heartbeat, CPU, memory and physical network rates.",
     inboundsTitle: "Inbounds & routes", inboundsLead: "A simpler deployment model is coming next.",
@@ -54,7 +60,10 @@ const translations = {
     pairingBoundary: "New LAB Node pairing is owner-only on localhost. No legacy Nodes or customer data are connected.",
   },
   fa: {
-    overview: "داشبورد", nodes: "نودها", inbounds: "اینباندها", business: "حسابداری و نمایندگان", settings: "تنظیمات",
+    overview: "داشبورد", nodes: "نودها", inbounds: "اینباندها", settings: "تنظیمات",
+    clients: "کلاینت‌ها", groups: "گروه‌ها", representatives: "نمایندگان", finance: "مالی", account: "حساب من",
+    clientsTitle: "مدیریت کلاینت‌ها", clientsLead: "ساخت، تمدید و مدیریت مشتری در یک بخش مشخص.", groupsTitle: "مدیریت گروه‌ها", groupsLead: "دسته‌بندی مشتری‌ها بدون تغییر سوابق مالی.",
+    representativesTitle: "مدیریت نمایندگان", representativesLead: "حساب‌ها، دسترسی و اعتبار نمایندگان.", financeTitle: "حسابداری", financeLead: "موجودی حساب و تاریخچهٔ ثبت‌شدهٔ تراکنش‌ها.", accountTitle: "حساب من", accountLead: "مشخصات حساب و تغییر رمز عبور.",
     overviewTitle: "نمای کامل زیرساخت، در یک نگاه", overviewLead: "وضعیت واقعی سرورها، بدون اجرای گزارش‌های سنگین هنگام ورود.",
     nodesTitle: "مدیریت نودها", nodesLead: "وضعیت زنده Agent، پردازنده، حافظه و سرعت شبکه.",
     inboundsTitle: "اینباندها و مسیرها", inboundsLead: "مدیریت ساده‌تر مقصدها در مرحله بعد ساخته می‌شود.",
@@ -89,7 +98,11 @@ const nav: { id: Page; Icon: typeof LayoutDashboard }[] = [
   { id: "overview", Icon: LayoutDashboard },
   { id: "nodes", Icon: Server },
   { id: "inbounds", Icon: Waypoints },
-  { id: "business", Icon: CreditCard },
+  { id: "clients", Icon: Users },
+  { id: "groups", Icon: FolderOpen },
+  { id: "representatives", Icon: UserRound },
+  { id: "finance", Icon: CreditCard },
+  { id: "account", Icon: UserRound },
   { id: "settings", Icon: Settings2 },
 ];
 
@@ -159,15 +172,9 @@ function NodeRow({ node, history, lang, selected, onSelect }: {
 }
 
 export default function App() {
-  const [page, setPage] = useState<Page>(() => {
-    try {
-      const last = sessionStorage.getItem("dark-pro-page");
-      if (last === "overview" || last === "nodes" || last === "inbounds" || last === "business" || last === "settings") {
-        return last;
-      }
-    } catch { /* storage disabled */ }
-    return "overview";
-  });
+  const auth = useSession();
+  const { page, setPage } = useNavigation(auth.session?.user.role);
+  const [logoutError, setLogoutError] = useState(false);
   const [language, setLanguage] = useState<Language>(() => stored("dark-pro-lang", "en", ["en", "fa"]));
   const [theme, setTheme] = useState<Theme>(() => stored("dark-pro-theme", "system", ["system", "light", "dark"]));
   const [systemDark, setSystemDark] = useState(() => window.matchMedia("(prefers-color-scheme: dark)").matches);
@@ -209,6 +216,7 @@ export default function App() {
     try { localStorage.setItem("dark-pro-lang", language); } catch { /* private mode */ }
   }, [language]);
   useEffect(() => {
+    if (!auth.session || auth.session.user.role !== "owner") return;
     let running = true;
     let nextTimer: number | undefined;
     let request: AbortController | undefined;
@@ -244,7 +252,7 @@ export default function App() {
       window.clearTimeout(nextTimer);
       request?.abort();
     };
-  }, []);
+  }, [auth.session?.user.id]);
 
   const ready = fleet !== null;
   const selectedNode = fleet?.nodes.find((node) => node.node_id === selectedNodeId) ?? null;
@@ -255,6 +263,11 @@ export default function App() {
     { label: t.offline, value: ready ? String(fleet.offline_nodes) : "—", Icon: Server },
   ];
 
+  const darkMode = theme === "dark" || (theme === "system" && systemDark);
+  const toggleTheme = () => setTheme(darkMode ? "light" : "dark");
+  if (!auth.session) return <LoginPage language={language} setLanguage={setLanguage} dark={darkMode} toggleTheme={toggleTheme} />;
+  if (!allowed(page, auth.session.user.role)) return <main role="status">{language === "fa" ? "در حال بازکردن فضای مجاز حساب…" : "Opening your workspace…"}</main>;
+  async function logout() { try { setLogoutError(false); await auth.signOut(); } catch { setLogoutError(true); } }
   return (
     <div className="app-frame">
       <aside className={"sidebar " + (mobileMenu ? "sidebar-open" : "")}>
@@ -265,7 +278,7 @@ export default function App() {
         </div>
         <p className="sidebar-caption">WORKSPACE</p>
         <nav className="sidebar-nav" aria-label="Main navigation">
-          {nav.map(({ id, Icon }) => (
+          {nav.filter(item => allowed(item.id, auth.session!.user.role)).map(({ id, Icon }) => (
             <button key={id} className={"nav-item " + (page === id ? "selected" : "")}
               aria-current={page === id ? "page" : undefined}
               onClick={() => { setPage(id); setMobileMenu(false); }}>
@@ -288,13 +301,15 @@ export default function App() {
             <strong>{t[page]}</strong>
           </div>
           <div className="topbar-right">
-            <span className="lab-pill"><span className="pulse-dot" /> ISOLATED LAB</span>
+            <button type="button" className="account-shortcut" onClick={() => setPage("account")}><UserRound size={17}/><span>{auth.session.user.username}</span></button>
+            <button type="button" className="icon-button" aria-label={language === "fa" ? "خروج" : "Sign out"} onClick={() => { void logout(); }}><LogOut size={18}/></button>
             <button className="topbar-lang" onClick={() => setLanguage(language === "en" ? "fa" : "en")} aria-label="Switch language"><Globe2 size={17} />{language.toUpperCase()}</button>
             <button className="icon-button theme-shortcut" aria-label="Toggle dark and light mode" onClick={() => setTheme(theme === "dark" || (theme === "system" && systemDark) ? "light" : "dark")}>{theme === "dark" || (theme === "system" && systemDark) ? <Sun size={20} /> : <Moon size={20} />}</button>
           </div>
         </header>
 
         <main className="workspace">
+          {logoutError && <p role="alert">{language === "fa" ? "خروج تأیید نشد؛ دوباره تلاش کن." : "Logout was not confirmed. Please retry."}</p>}
           <section className="page-heading">
             <div className="eyebrow"><span className="eyebrow-dot" /> {t.pro} / {t[page]}</div>
             <h1>{t[page + "Title" as keyof typeof t]}</h1>
@@ -342,7 +357,7 @@ export default function App() {
           )}
 
           {page === "inbounds" && <InboundPlanner nodes={fleet?.nodes ?? []} language={language} />}
-          {page === "business" && <BusinessWorkspace language={language} />}
+          {(["clients", "groups", "representatives", "finance", "account"] as Page[]).includes(page) && <BusinessWorkspace key={auth.session.user.id + ":" + page} language={language} section={page as "clients" | "groups" | "representatives" | "finance" | "account"} />}
 
           {page === "settings" && (
             <div className="settings-list">

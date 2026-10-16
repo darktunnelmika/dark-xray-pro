@@ -1,26 +1,20 @@
 import "./NativeInbounds.css";
+import { useSession, api, ApiError as Fault } from "./session";
 import InboundLifecycle from "./InboundLifecycle";
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
-import { ArrowRightLeft, CheckCircle2, KeyRound, LockKeyhole, RefreshCw, Server, ShieldCheck, Users, Waypoints } from "lucide-react";
+import { ArrowRightLeft, CheckCircle2, KeyRound, RefreshCw, Server, ShieldCheck, Users, Waypoints } from "lucide-react";
 
 type Lang = "fa" | "en";
-type Session = { authenticated: boolean; csrf_token?: string; user?: { role: "owner" | "representative"; username: string } };
 type Inbound = { revision: number; enabled: boolean; archived: boolean; id: number; name: string; transport: string; grpc_service: string; reality_target: string; server_names: string[]; short_ids: string[]; public_key: string; bound_clients: number };
 type Target = { inbound_id: number; node_id: string; installation_id: string; listen_ip: string; direct_port: number; swap_port: number };
 type Node = { node_id: string; installation_id: string; name: string };
 type Status = { node_id: string; installation_id: string; desired_sequence: number; desired_sha: string; reported_sequence: number; reported_sha: string; state: string; phase: string; reported_at?: string; lease_expires_at?: string; process_ready: boolean };
 type Overview = { inbounds: Inbound[]; nodes: Node[]; targets: Target[]; runtime: Status[] };
 type Client = { id: string; name: string; representative_id: string; archived: boolean; deployment_state: string };
-class Fault extends Error { constructor(public status: number, message: string) { super(message); } }
 async function request<T>(path: string, signal: AbortSignal, body?: unknown, csrf?: string): Promise<T> {
- const timeout = new AbortController();const timer = setTimeout(() => timeout.abort(), 8000);
- const abort = () => timeout.abort();signal.addEventListener("abort", abort, { once: true });if (signal.aborted) timeout.abort();
- try {
-  const r = await fetch(path, { method: body === undefined ? "GET" : "POST", credentials: "same-origin", cache: "no-store", signal: timeout.signal,
-   headers: { Accept: "application/json", ...(body === undefined ? {} : { "Content-Type": "application/json", ...(csrf ? { "X-CSRF-Token": csrf } : {}) }) },
-   ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
-  if (!r.ok) throw new Fault(r.status, "HTTP " + r.status);return await r.json() as T;
- } finally { clearTimeout(timer);signal.removeEventListener("abort", abort); }
+ return api<T>(path, { signal, method: body === undefined ? "GET" : "POST",
+  headers: body === undefined ? {} : { "Content-Type": "application/json", ...(csrf ? { "X-CSRF-Token": csrf } : {}) },
+  ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
 }
 const text = {
  en: {
@@ -45,11 +39,10 @@ function shortID(): string { return Array.from(crypto.getRandomValues(new Uint8A
 const split = (s: string) => s.split(/[\s,]+/).filter(Boolean);
 export default function NativeInbounds({ language, fallback }: { language: Lang; fallback: ReactNode }) {
  const t = text[language];
- const [session, setSession] = useState<Session | null>(null);const [legacy, setLegacy] = useState(false);const [disabled, setDisabled] = useState(false);
+ const { session, expire } = useSession();const [disabled, setDisabled] = useState(false);
  const [data, setData] = useState<Overview | null>(null);const [clients, setClients] = useState<Client[]>([]);const [bound, setBound] = useState<string[]>([]);
  const [failure, setFailure] = useState(false);const [notice, setNotice] = useState("");const [busy, setBusy] = useState(false);
  const [refresh, setRefresh] = useState(0);const [tick, setTick] = useState(Date.now());const lastSuccess = useRef(0);
- const [username, setUsername] = useState("");const [password, setPassword] = useState("");
  const [chosen, setChosen] = useState(() => { try { const n = Number(sessionStorage.getItem("dark-pro-native-inbound"));return Number.isSafeInteger(n) && n > 0 ? n : 0; } catch { return 0; } });
  const [checked, setChecked] = useState<string[]>([]);const [offset, setOffset] = useState(0);const [search, setSearch] = useState("");
  const [name, setName] = useState("");const [transport, setTransport] = useState("tcp");const [target, setTarget] = useState("");const [sni, setSni] = useState("");const [service, setService] = useState("");
@@ -59,8 +52,6 @@ export default function NativeInbounds({ language, fallback }: { language: Lang;
  useEffect(() => { try { sessionStorage.setItem("dark-pro-native-inbound", String(chosen)); } catch { /* private browsing */ } }, [chosen]);
  useEffect(() => {
   const controller = new AbortController();lifetime.current = controller;
-  void request<Session>("/api/v1/session/status", controller.signal).then(s => { if (!controller.signal.aborted) setSession(s); })
-   .catch(e => { if (!controller.signal.aborted) { if (e instanceof Fault && e.status === 404) setLegacy(true);else setFailure(true); } });
   const timer = setInterval(() => setTick(Date.now()), 1000);return () => { controller.abort();clearInterval(timer); };
  }, [refresh]);
  useEffect(() => {
@@ -79,21 +70,16 @@ export default function NativeInbounds({ language, fallback }: { language: Lang;
     if (chosen && !overview.inbounds.some(i => i.id === chosen)) { setChosen(0);setChecked([]); }
    } catch (e) {
     if (controller.signal.aborted) return;
-    if (e instanceof Fault && (e.status === 401 || e.status === 403)) { setSession({ authenticated: false });setData(null);setClients([]);setChecked([]); }
+    if (e instanceof Fault && e.status === 401) { expire();setData(null);setClients([]);setChecked([]); }
     else if (e instanceof Fault && e.status === 404) { setDisabled(true);setData(null); }else setFailure(true);
    } finally { if (!controller.signal.aborted) timer = setTimeout(() => { if (document.hidden) timer = setTimeout(poll, 5000);else void poll(); }, 5000); }
   }
   void poll();return () => { controller.abort();clearTimeout(timer); };
- }, [session, chosen, offset, refresh]);
+ }, [session, chosen, offset, refresh, expire]);
  async function mutate(path: string, body: unknown, after: () => void) {
   const controller = lifetime.current;if (!controller || controller.signal.aborted || busy) return;setBusy(true);setNotice("");
   try { await request(path, controller.signal, body, session?.csrf_token);if (!controller.signal.aborted) { after();setNotice(t.saved);setRefresh(n => n + 1); } }
   catch { if (!controller.signal.aborted) { setFailure(true);setNotice(t.error); } }finally { if (!controller.signal.aborted) setBusy(false); }
- }
- async function login(e: FormEvent) {
-  e.preventDefault();const c = lifetime.current;if (!c) return;setBusy(true);
-  try { const s = await request<Session>("/api/v1/session/login", c.signal, { username, password });if (!c.signal.aborted) { setSession(s);setPassword("");setFailure(false); } }
-  catch { if (!c.signal.aborted) setFailure(true); }finally { if (!c.signal.aborted) setBusy(false); }
  }
  function create(e: FormEvent) {
   e.preventDefault();if (!createIdentity.current) createIdentity.current = { id: freshID(), short: shortID() };const identity = createIdentity.current;
@@ -119,16 +105,12 @@ export default function NativeInbounds({ language, fallback }: { language: Lang;
  }
  const current = data?.inbounds.find(i => i.id === chosen);
  const visible = clients.filter(c => (c.name + " " + c.id).toLowerCase().includes(search.toLowerCase()));
- if (legacy) return <>{fallback}</>;
+ if (disabled) return <>{fallback}</>;
  return <section className="native-workspace" aria-label="Native Inbounds">
   <header className="native-heading"><div><span className="eyebrow">DARK XRAY PRO</span><h2><Waypoints size={24}/>{t.title}</h2><p>{t.lead}</p></div>
    <button type="button" onClick={() => setRefresh(n => n + 1)} disabled={busy}><RefreshCw size={16}/>{t.retry}</button></header>
   {failure && <p className="native-warning" role="alert">{t.error}</p>}
   {!session && !failure && <p>{t.checking}</p>}
-  {session && !session.authenticated && <form className="native-card native-login" onSubmit={e => { void login(e); }}>
-   <h3><LockKeyhole size={20}/>{t.login}</h3><label>{t.user}<input value={username} onChange={e => setUsername(e.target.value)} autoComplete="username" required/></label>
-   <label>{t.pass}<input type="password" value={password} onChange={e => setPassword(e.target.value)} autoComplete="current-password" required/></label>
-   <button type="submit" disabled={busy}>{t.enter}</button></form>}
   {session?.authenticated && session.user?.role !== "owner" && <p className="native-warning">{t.ownerOnly}</p>}
   {disabled && <p className="native-warning">{t.unavailable}</p>}
   {session?.authenticated && session.user?.role === "owner" && data && <>

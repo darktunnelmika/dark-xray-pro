@@ -6,7 +6,7 @@ const known={client_id:client.id,representative_id:"rep-a",uplink_bytes:"600",do
 const envelope=(usage:Record<string,unknown>)=>({usage,scope:"committed_user_counters",live_collection_enabled:false,distributed_hard_limit_verified:false});
 async function fixture(page:Page) {
  await page.route("**/api/v1/fleet",r=>r.fulfill({json:{nodes:[],total_nodes:0,online_nodes:0,offline_nodes:0,as_of:new Date().toISOString(),interface_rx_bits_per_second:0,interface_tx_bits_per_second:0,physical_rates_complete:false,metric_scope:"default_route_interface_not_billable"}}));
- await page.route("**/api/v1/session/status",r=>r.fulfill({json:{authenticated:true,user,csrf_token:"test-csrf",expires_unix:1900000000}}));
+ await page.route("**/api/v1/session/status",r=>r.fulfill({json:{authenticated:true,user,csrf_token:"a".repeat(64),expires_unix:1900000000}}));
  await page.route("**/api/v1/workspace/**",r=>{
   const path=new URL(r.request().url()).pathname;
   if(path.endsWith("/me"))return r.fulfill({json:{user,balance:{id:"rep-a",volume_credit_bytes:1000,unlimited_credit_units:10},data_plane:"not_activated"}});
@@ -19,8 +19,8 @@ async function fixture(page:Page) {
  });
 }
 async function openUsage(page:Page,mobile=false) {
- await page.goto("/");if(mobile)await page.getByRole("button",{name:"Open menu"}).click();
- await page.getByRole("button",{name:"Business",exact:true}).click();
+ await page.goto("/clients");
+ if(mobile)expect(await page.evaluate(()=>innerWidth)).toBe(320);
  await page.getByRole("button",{name:"Manage",exact:true}).click();
  return page.getByRole("region",{name:"Recorded client usage"});
 }
