@@ -29,6 +29,8 @@ func TestRemoteTLSKeyMustBePrivateAndRegular(t *testing.T) {
 	dir:=t.TempDir()
 	key:=filepath.Join(dir,"agent.key")
 	if err:=os.WriteFile(key,[]byte("placeholder"),0644);err!=nil{t.Fatal(err)}
+	// Make the unsafe fixture explicit even under a secure inherited umask.
+	if err:=os.Chmod(key,0644);err!=nil{t.Fatal(err)}
 	if err:=privateTLSKey(key);err==nil {t.Fatal("world-readable private key allowed")}
 	if err:=os.Chmod(key,0600);err!=nil{t.Fatal(err)}
 	if err:=privateTLSKey(key);err!=nil{t.Fatal(err)}

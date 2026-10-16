@@ -28,10 +28,18 @@ func checkBinary(path,pin string)error{
 type boundedOutput struct{data bytes.Buffer;limit int;cancel context.CancelFunc}
 func(b *boundedOutput)Write(p []byte)(int,error){if len(p)>b.limit-b.data.Len(){b.cancel();return 0,ErrFull};return b.data.Write(p)}
 func Collect(ctx context.Context,binary,pin,endpoint string,epoch Epoch)([]Usage,error){
+ e,err:=normalize(epoch);if err!=nil{return nil,err};raw,err:=collectRaw(ctx,binary,pin,endpoint,e);if err!=nil{return nil,err};return ParseStats(raw,e.Bindings)
+}
+func collectRaw(ctx context.Context,binary,pin,endpoint string,epoch Epoch)([]byte,error){
  e,err:=normalize(epoch);if err!=nil{return nil,err};args,err:=StatsArguments(endpoint);if err!=nil{return nil,err};if err=checkBinary(binary,pin);err!=nil{return nil,err}
  if err=sameProcess(e);err!=nil{return nil,err};if !ownsStatsPort(e.PID,endpoint){return nil,ErrEpoch}
  call,cancel:=context.WithTimeout(ctx,5*time.Second);defer cancel();output:=&boundedOutput{limit:MaxStatsBytes,cancel:cancel}
  cmd:=exec.CommandContext(call,binary,args...);cmd.Env=[]string{"PATH=/usr/bin:/bin"};cmd.Stdout=output;cmd.Stderr=io.Discard;cmd.WaitDelay=250*time.Millisecond
  if err=cmd.Run();err!=nil{return nil,ErrIncomplete};if err=sameProcess(e);err!=nil{return nil,err};if !ownsStatsPort(e.PID,endpoint){return nil,ErrEpoch}
- return ParseStats(output.data.Bytes(),e.Bindings)
+ return append([]byte(nil),output.data.Bytes()...),nil
+}
+
+// VerifyOwnedStatsEndpoint rechecks the exact kernel-bound child before an API mutation.
+func VerifyOwnedStatsEndpoint(epoch Epoch,endpoint string)error{
+ e,err:=normalize(epoch);if err!=nil{return err};if err=sameProcess(e);err!=nil{return err};if !ownsStatsPort(e.PID,endpoint){return ErrEpoch};return nil
 }
