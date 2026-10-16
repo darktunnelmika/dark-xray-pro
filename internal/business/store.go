@@ -20,6 +20,7 @@ import (
  "time"
  "unicode"
  "unicode/utf8"
+ "github.com/darktunnelmika/dark-xray-pro/internal/usageledger"
  _ "modernc.org/sqlite"
 )
 const (
@@ -39,7 +40,7 @@ var (
  idRE = regexp.MustCompile("^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
  eventRE = regexp.MustCompile("^[A-Za-z0-9][A-Za-z0-9_.:-]{15,127}$")
 )
-type Store struct{ db *sql.DB }
+type Store struct{ db *sql.DB;usage *usageledger.Ledger }
 type Representative struct {
  ID string `json:"id"`
  DisplayName string `json:"display_name"`
@@ -160,7 +161,8 @@ func Open(path string)(*Store,error){
  if version==4 {if err=migrateNativeInbounds(db);err!=nil{return fail(err)};version=5}
  if version==5 {if err=migrateRuntimeReports(db);err!=nil{return fail(err)};version=6}
  if version==6 {if err=migrateInboundLifecycle(db);err!=nil{return fail(err)}}
- return &Store{db:db},nil
+ s:=&Store{db:db};if err=s.restoreUsageLedger(context.Background());err!=nil{return fail(err)}
+ return s,nil
 }
 func bootstrap(db *sql.DB)error{
  tx,err:=db.Begin();if err!=nil{return err};defer tx.Rollback()
@@ -259,6 +261,7 @@ func(s *Store)CreateClient(ctx context.Context,n NewClient)(Client,error){
  _,err=tx.ExecContext(ctx,"INSERT INTO clients("+clientColumns+") VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",c.ID,c.RepresentativeID,c.Name,c.UUID,c.PlanKind,c.IPCount,c.VolumeBytes,c.DurationDays,c.ChargeVolumeBytes,c.ChargeUnlimitedUnits,c.CreatedUnix,c.ExpiresUnix,c.DeploymentState,0);if err!=nil{return Client{},ErrConflict}
  volumeDelta,unitDelta:=int64(0),int64(0);if r.Kind=="representative"{volumeDelta,unitDelta=-chargeVolume,-chargeUnits}
  _,err=tx.ExecContext(ctx,"INSERT INTO events(event_id,fingerprint,kind,representative_id,object_id,reason,volume_delta_bytes,unlimited_delta_units,created_unix) VALUES(?,?,'client_created',?,?,?,?,?,?)",n.EventID,hash,r.ID,c.ID,"client_created",volumeDelta,unitDelta,now);if err!=nil{return Client{},err}
+ if err=s.seedNewUsage(ctx,tx,c);err!=nil{return Client{},err}
  if err=tx.Commit();err!=nil{return Client{},err};return c,nil
 }
 func(s *Store)ListEvents(ctx context.Context,repID string,limit,offset int)([]Event,error){

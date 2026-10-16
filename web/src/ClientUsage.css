@@ -1,0 +1,12 @@
+/* Exact committed usage, distinct from physical traffic and live proof. */
+.client-usage { display:grid; gap:12px; min-width:0; }
+.client-usage-heading { display:flex; justify-content:space-between; align-items:start; gap:12px; flex-wrap:wrap; }
+.client-usage-heading h3 { margin:0; }
+.client-usage-values { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(190px,100%),1fr)); gap:12px; margin:0; }
+.client-usage-values > div { min-width:0; border:1px solid var(--border); background:var(--surface-2); padding:14px; border-radius:12px; }
+.client-usage-values dt { color:var(--sub); font-size:11px; }
+.client-usage-values dd { margin:7px 0 0; font-size:13px; font-weight:700; font-variant-numeric:tabular-nums; overflow-wrap:anywhere; }
+.client-usage-state { border:1px solid var(--border); border-radius:11px; padding:12px; margin:0; }
+.client-usage-boundary { display:flex; align-items:start; gap:8px; margin:0; }
+.client-usage-boundary svg { flex-shrink:0; color:var(--sub); }
+@media(max-width:760px) { .client-usage-values { grid-template-columns:minmax(0,1fr); } }

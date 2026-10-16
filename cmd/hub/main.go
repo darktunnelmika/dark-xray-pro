@@ -60,13 +60,14 @@ func main(){
  if os.Getenv("DARK_PRO_ENABLE_BUSINESS_CORE")=="1"{
   clean:=filepath.Clean(*businessPath);relative,pathErr:=filepath.Rel("/var/lib/dark-xray-pro-lab",clean)
   if pathErr!=nil||!filepath.IsAbs(clean)||relative=="."||relative==".."||strings.HasPrefix(relative,"../")||!strings.HasSuffix(clean,".sqlite"){log.Fatal("PRO business database must be a NEW private .sqlite file under /var/lib/dark-xray-pro-lab")}
-  biz,err:=business.Open(clean);if err!=nil{log.Fatal("PRO business database initialization failed: ",err)};defer biz.Close();if err:=service.EnableBusinessLab(biz);err!=nil{log.Fatal(err)}
+  biz,err:=business.Open(clean);if err!=nil{log.Fatal("PRO business database initialization failed: ",err)};defer biz.Close();if os.Getenv("DARK_PRO_ENABLE_USAGE_LEDGER")=="1"{if err:=biz.EnableUsageLedger(context.Background());err!=nil{log.Fatal("private usage ledger unavailable: ",err)}};if err:=service.EnableBusinessLab(biz);err!=nil{log.Fatal(err)}
   if os.Getenv("DARK_PRO_ENABLE_NATIVE_INBOUNDS")=="1"{
    if *agentListen==""{log.Fatal("native runtime requires a separate verified TLS Agent listener")}
    inboundKey,keyErr:=hex.DecodeString(os.Getenv("DARK_PRO_NATIVE_INBOUND_KEY_HEX"));if keyErr!=nil||len(inboundKey)!=32{log.Fatal("native inbounds require an independent private 32-byte key")}
    if err:=service.EnableNativeInbounds(inboundKey);err!=nil{log.Fatal(err)}
   }
  }else if *businessPath!=""{log.Fatal("business database path supplied without explicit DARK_PRO_ENABLE_BUSINESS_CORE=1")}
+ if os.Getenv("DARK_PRO_ENABLE_USAGE_LEDGER")=="1"&&os.Getenv("DARK_PRO_ENABLE_BUSINESS_CORE")!="1"{log.Fatal("usage accounting requires explicit independent PRO business storage")}
  if os.Getenv("DARK_PRO_ENABLE_NATIVE_INBOUNDS")=="1"&&os.Getenv("DARK_PRO_ENABLE_BUSINESS_CORE")!="1"{log.Fatal("native inbounds require explicit new PRO business database")}
  if os.Getenv("DARK_PRO_ENABLE_CONFIG_STAGE")=="1"{
   if *agentListen==""||os.Getenv("DARK_PRO_ENABLE_REMOTE_AGENT")!="1"{log.Fatal("encrypted config staging requires dedicated verified remote Agent TLS listener")}
