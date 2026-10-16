@@ -44,6 +44,9 @@ type UsageObservationStatus struct {
 	SettlementRequired       bool   `json:"settlement_required"`
 }
 type usageObserver struct {
+ fresh *uc.FreshCounters
+ ready chan struct{}
+ readyOnce sync.Once
 	mu           sync.Mutex
 	status       UsageObservationStatus
 	lastSaved    time.Time
@@ -162,7 +165,7 @@ func (r *Runtime) StartUsageObservation(ctx context.Context, o UsageObservation)
 	o = normalized
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if r.state.Usage != nil || r.observer != nil {
+	if r.state.Admission != nil || r.state.Usage != nil || r.observer != nil {
 		return ErrUsageSettlement
 	}
 	if err = r.checkObservationLocked(o); err != nil {
@@ -272,7 +275,9 @@ func (m *usageObserver) run(ctx context.Context) {
 		if ctx.Err() != nil {
 			return
 		}
-		values, err := uc.Collect(ctx, m.binary, m.pin, m.options.StatsEndpoint, m.options.Epoch)
+		var values []uc.Usage
+        var err error
+        if m.fresh!=nil { values,err=m.fresh.Collect(ctx,m.binary,m.pin,m.options.StatsEndpoint) } else { values,err=uc.Collect(ctx,m.binary,m.pin,m.options.StatsEndpoint,m.options.Epoch) }
 		if err != nil {
 			if ctx.Err() == nil {
 				m.fail("observation_failed")
@@ -288,6 +293,7 @@ func (m *usageObserver) run(ctx context.Context) {
 		m.status.LastSavedUnixNano = m.lastSaved.UnixNano()
 		m.status.Samples++
 		m.mu.Unlock()
+        if m.ready!=nil{m.readyOnce.Do(func(){close(m.ready)})}
 		queue, err := m.box.Pending()
 		if err != nil {
 			m.fail("outbox_failed")
@@ -326,6 +332,7 @@ func (m *usageObserver) run(ctx context.Context) {
 }
 func (r *Runtime) usageStatusLocked() UsageObservationStatus {
 	if r.state.Usage == nil {
+        if r.state.Admission!=nil{return UsageObservationStatus{Required:true,SettlementRequired:true,Failure:"prepared_admission_incomplete"}}
 		return UsageObservationStatus{}
 	}
 	if r.observer != nil {

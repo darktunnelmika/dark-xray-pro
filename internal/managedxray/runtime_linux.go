@@ -62,7 +62,7 @@ func(r *Runtime)persist(j journal)error{
  if err:=r.disk.save(j);err!=nil{if r.observer!=nil{r.observer.cancel()};r.process.stop();r.process=nil;r.active=nil;r.fenced=true;r.state.Phase="journal_failure_fenced";return err};r.state=j;return nil
 }
 func(r *Runtime)start(ctx context.Context,v *savedRevision,deadline time.Time)(*child,error){
- c:=v.candidate();if err:=validateLayout(c,r.options.ListenIP,r.reserved);err!=nil{return nil,err}
+ c:=v.candidate();if xrayconfig.RequiresUsageAdmission(c){return nil,ErrUsageSettlement};if err:=validateLayout(c,r.options.ListenIP,r.reserved);err!=nil{return nil,err}
  if _,err:=xrayconfig.ValidateOffline(ctx,c,r.options.Binary,r.options.BinarySHA);err!=nil{return nil,err}
  return startChild(ctx,c,r.options.Binary,deadline)
 }
@@ -79,7 +79,7 @@ func(r *Runtime)Apply(ctx context.Context,v Revision,l Lease)(Snapshot,error){
  r.mu.Lock();defer r.mu.Unlock();if r.closed||r.fenced{return r.snapshot(),ErrClosed}
  saved:=freeze(v);if !r.validLease(l,saved){return r.snapshot(),ErrLease}
  if saved.Sequence==r.state.Highwater&&r.active!=nil&&saved.Sequence==r.active.Sequence&&saved.SHA==r.active.SHA&&saved.Manifest==r.active.Manifest{return r.refreshLocked(l)}
- if r.state.Usage!=nil{return r.snapshot(),ErrUsageSettlement}
+ if r.state.Usage!=nil||r.state.Admission!=nil||xrayconfig.RequiresUsageAdmission(saved.candidate()){return r.snapshot(),ErrUsageSettlement}
  if saved.Sequence<r.state.Highwater||(saved.Sequence==r.state.Highwater&&(saved.SHA!=r.state.DesiredSHA||saved.Manifest!=r.state.DesiredManifest)){return r.snapshot(),ErrStale}
  if l.Issued<=r.state.LastLeaseIssued{return r.snapshot(),ErrLease}
  if err:=validateLayout(saved.candidate(),r.options.ListenIP,r.reserved);err!=nil{return r.snapshot(),err}
@@ -106,6 +106,7 @@ func(r *Runtime)Apply(ctx context.Context,v Revision,l Lease)(Snapshot,error){
  if err:=r.persist(next);err!=nil{return r.snapshot(),err};return r.snapshot(),nil
 }
 func(r *Runtime)refreshLocked(l Lease)(Snapshot,error){
+ if r.state.Admission!=nil&&r.state.Usage==nil{return r.snapshot(),ErrUsageSettlement}
  if r.state.Usage!=nil&&(r.observer==nil||!r.observer.healthy()){return r.snapshot(),ErrUsageSettlement}
  if r.active==nil||r.process.dead()||!time.Now().Before(r.deadline)||!r.validLease(l,r.active){return r.snapshot(),ErrLease}
  if l.Issued<=r.state.LastLeaseIssued{if l==r.lease{return r.snapshot(),nil};return r.snapshot(),ErrLease}
@@ -116,7 +117,7 @@ func(r *Runtime)Refresh(l Lease)(Snapshot,error){r.mu.Lock();defer r.mu.Unlock()
 // Recover needs a fresh lease, never adopts PIDs or starts an interrupted intent.
 func(r *Runtime)Recover(ctx context.Context,l Lease)(Snapshot,error){
  r.mu.Lock();defer r.mu.Unlock();if r.closed||r.fenced{return r.snapshot(),ErrClosed};if r.process!=nil&&!r.process.dead(){return r.snapshot(),ErrBusy}
- if r.state.Usage!=nil{return r.snapshot(),ErrUsageSettlement}
+ if r.state.Usage!=nil||r.state.Admission!=nil{return r.snapshot(),ErrUsageSettlement}
  v:=r.state.Good;if !r.validLease(l,v)||l.Issued<=r.state.LastLeaseIssued{return r.snapshot(),ErrLease}
  p,err:=r.start(ctx,v,leaseDeadline(l));if err!=nil{return r.snapshot(),err};if !r.validLease(l,v){p.stop();return r.snapshot(),ErrLease}
  r.process=p;r.active=v;r.lease=l;r.deadline=leaseDeadline(l)
@@ -138,7 +139,7 @@ func(r *Runtime)watch(){
    if expired||r.process.dead(){
     r.process.stop();r.process=nil;r.active=nil;next:=r.state;next.Phase="process_exited_stopped";if expired{next.Phase="lease_expired_stopped"}
     // Old settings only regain authority while their prior lease is valid.
-    if !expired&&r.state.Usage==nil&&r.state.Previous!=nil&&time.Now().Before(r.previousDeadline)&&r.validLease(r.previousLease,r.state.Previous){
+    if !expired&&r.state.Usage==nil&&r.state.Admission==nil&&r.state.Previous!=nil&&time.Now().Before(r.previousDeadline)&&r.validLease(r.previousLease,r.state.Previous){
      previous:=r.state.Previous;ctx,cancel:=context.WithTimeout(context.Background(),6*time.Second);p,err:=r.start(ctx,previous,r.previousDeadline);cancel()
      if err==nil&&time.Now().Before(r.previousDeadline){r.process=p;r.active=previous;r.lease=r.previousLease;r.deadline=r.previousDeadline;next.Good=previous;next.Previous=nil;next.Phase="rolled_back_after_process_exit"}else if p!=nil{p.stop()}
     }

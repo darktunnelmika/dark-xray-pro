@@ -58,6 +58,22 @@ jobs:
           for e in events:
               if e.get('Output'): print(e['Output'],end='')
           PYTEST
+      - name: Prove initial receipt gates the first customer listener
+        shell: bash
+        run: |
+          set -euo pipefail
+          go test -race ./internal/api -run '^TestRealPinnedPretrafficUsageAdmission$' -count=1 -json -timeout=180s > "$RUNNER_TEMP/pretraffic-admission.jsonl"
+          python3 - "$RUNNER_TEMP/pretraffic-admission.jsonl" <<'PYGATE'
+          import json,sys
+          events=[json.loads(line) for line in open(sys.argv[1])]
+          name='TestRealPinnedPretrafficUsageAdmission'
+          required={name}|{name+'/'+s for s in ('receipt-before-first-byte','lost-zero-receipt','wrong-pin','lease-expires-at-barrier','restart-while-prepared','cancel-at-barrier')}
+          passed={e.get('Test') for e in events if e.get('Action')=='pass'}
+          assert required<=passed, required-passed
+          assert not any(e.get('Action') in ('fail','skip') and e.get('Test','').startswith(name) for e in events)
+          for e in events:
+              if e.get('Output'): print(e['Output'],end='')
+          PYGATE
       - name: Create customer in real UI and verify committed usage after real traffic
         env:
           DARK_PRO_TEST_LIVE_USAGE_BROWSER: '1'
@@ -81,3 +97,4 @@ jobs:
         run: |
           if test -f "$RUNNER_TEMP/live-native-usage.jsonl"; then cat "$RUNNER_TEMP/live-native-usage.jsonl"; fi
           if test -f "$RUNNER_TEMP/continuous-observer.jsonl"; then cat "$RUNNER_TEMP/continuous-observer.jsonl"; fi
+          if test -f "$RUNNER_TEMP/pretraffic-admission.jsonl"; then cat "$RUNNER_TEMP/pretraffic-admission.jsonl"; fi

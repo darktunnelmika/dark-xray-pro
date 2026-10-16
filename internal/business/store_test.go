@@ -144,6 +144,8 @@ func TestUnsafeDatabasePathsAndUnknownSchemaFailClosed(t *testing.T){
  parent:=t.TempDir()
  exposed:=filepath.Join(parent,"exposed")
  if err:=os.Mkdir(exposed,0755);err!=nil{t.Fatal(err)}
+ // The test must actually create an exposed parent even with umask 077.
+ if err:=os.Chmod(exposed,0755);err!=nil{t.Fatal(err)}
  if _,err:=Open(filepath.Join(exposed,"state.sqlite"));!errors.Is(err,ErrUnsafePath){t.Fatalf("world-readable parent accepted: %v",err)}
  private:=filepath.Join(parent,"private")
  if err:=os.Mkdir(private,0700);err!=nil{t.Fatal(err)}
