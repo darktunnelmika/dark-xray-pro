@@ -1,0 +1,48 @@
+name: Materialize reviewed usage edits on preparation branch only
+on:
+  push:
+    branches: [prep/native-usage-product-materialization]
+permissions:
+  contents: write
+jobs:
+  materialize:
+    if: github.repository == 'darktunnelmika/dark-xray-pro'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: prep/native-usage-product-materialization
+      - name: Apply only four exact pre-reviewed, hash-bound text edits
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = refs/heads/prep/native-usage-product-materialization
+          python3 - <<'PY'
+          import json,hashlib,pathlib,subprocess
+          root=pathlib.Path.cwd()
+          payload=json.loads((root/'.delivery/usage-edits.json').read_text())
+          assert payload['base_commit']=='13edab9df7e2757587809143fad8e59f26846dac'
+          allowed={'internal/business/inbounds.go','internal/business/store.go','internal/usageledger/schema.go','web/src/BusinessWorkspace.tsx'}
+          assert {e['path'] for e in payload['files']}==allowed and len(payload['files'])==4
+          def blob(raw): return hashlib.sha1(b'blob '+str(len(raw)).encode()+b'\0'+raw).hexdigest()
+          changed=[]
+          for entry in payload['files']:
+              path=root/entry['path']; assert path.is_file() and not path.is_symlink()
+              raw=path.read_bytes()
+              if blob(raw)==entry['sha']: continue
+              assert blob(raw)==entry['before_sha'],entry['path']
+              lines=raw.decode('utf-8').splitlines(keepends=True)
+              last=len(lines)+1
+              for edit in reversed(entry['line_edits']):
+                  a,b=edit['start'],edit['end']
+                  assert 0<=a<=b<=len(lines) and b<=last
+                  lines[a:b]=edit['lines']; last=a
+              result=''.join(lines).encode('utf-8')
+              assert blob(result)==entry['sha'],entry['path']
+              path.write_bytes(result);changed.append(entry['path'])
+          if changed: subprocess.run(['git','add','--',*changed],check=True)
+          print('Verified text edits:',len(changed))
+          PY
+          if git diff --cached --quiet; then exit 0; fi
+          git -c user.name='DARK PRO source materializer' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit -m 'Materialize exact reviewed native usage source blobs'
+          git push origin HEAD:refs/heads/prep/native-usage-product-materialization
