@@ -1,3 +1,4 @@
+import ClientUsage from "./ClientUsage";
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { CheckCircle2, CircleHelp, CreditCard, KeyRound, LockKeyhole, LogOut, RefreshCw, ShieldCheck, Users } from "lucide-react";
 
@@ -534,6 +535,7 @@ export default function BusinessWorkspace({ language }: { language: Language }) 
         </label>
         <p className="business-warning">{t.safeLifecycle}</p>
       </div>
+      {lifeClientID && <ClientUsage key={session.user.id + ":" + lifeClientID} clientID={lifeClientID} language={language} refresh={refreshKey} />}
       <div className="business-form-grid">
         <form className="business-panel" onSubmit={(e) => { void extendExistingClient(e); }}>
           <h3>{t.renew}</h3>

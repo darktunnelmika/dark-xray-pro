@@ -71,7 +71,7 @@ func Open(ctx context.Context, db *sql.DB) (*Ledger, error) {
 				}
 				r.Close()
 			}
-			return nil
+			return verifySchema(ctx,c)
 		}
 		if e := c.QueryRowContext(ctx, "SELECT COUNT(*) FROM sqlite_master WHERE name GLOB 'pro_usage_*'").Scan(&count); e != nil {
 			return e
