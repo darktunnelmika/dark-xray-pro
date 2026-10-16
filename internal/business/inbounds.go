@@ -15,6 +15,7 @@ import (
  "fmt"
  "net"
  "time"
+ "strings"
  "github.com/darktunnelmika/dark-xray-pro/internal/xrayconfig"
 )
 type InboundInput struct{ID uint64 `json:"id"`;Name string `json:"name"`;Transport string `json:"transport"`;GRPCService string `json:"grpc_service"`;RealityTarget string `json:"reality_target"`;ServerNames []string `json:"server_names"`;ShortIDs []string `json:"short_ids"`}
@@ -92,7 +93,9 @@ func(s *Store)BuildNodeConfig(ctx context.Context,key []byte,node,installation s
  for _,x:=range sources{
   if !x.enabled||x.archived{continue}
   p,e:=openProfile(key,x.enc,x.id);if e!=nil{return result,e};p.Users=[]xrayconfig.User{}
-  clients,e:=tx.QueryContext(ctx,"SELECT c.id,c.uuid,c.expires_unix FROM native_inbound_clients b JOIN clients c ON c.id=b.client_id JOIN representatives r ON r.id=c.representative_id WHERE b.inbound_id=? AND c.archived=0 AND c.deployment_state!='disabled' AND c.expires_unix>? AND r.enabled=1 ORDER BY c.id LIMIT 20001",x.id,time.Now().Unix());if e!=nil{return result,e}
+  clientQuery:="SELECT c.id,c.uuid,c.expires_unix FROM native_inbound_clients b JOIN clients c ON c.id=b.client_id JOIN representatives r ON r.id=c.representative_id WHERE b.inbound_id=? AND c.archived=0 AND c.deployment_state!='disabled' AND c.expires_unix>? AND r.enabled=1 ORDER BY c.id LIMIT 20001"
+  if s.usage!=nil{clientQuery= strings.Replace(clientQuery," WHERE b.inbound_id=?"," JOIN pro_usage_eligibility usage_policy ON usage_policy.client_id=c.id WHERE usage_policy.eligible=1 AND b.inbound_id=?",1)}
+  clients,e:=tx.QueryContext(ctx,clientQuery,x.id,time.Now().Unix());if e!=nil{return result,e}
   for clients.Next(){var id,uuid string;var expiry int64;if e=clients.Scan(&id,&uuid,&expiry);e!=nil{clients.Close();return result,e};digest:=sha256.Sum256([]byte(id));email:=hex.EncodeToString(digest[:16])+"@pro.invalid";p.Users=append(p.Users,xrayconfig.User{UUID:uuid,Email:email});seen[id]=true;if expiry*int64(time.Second)<result.LeaseNotAfter{result.LeaseNotAfter=expiry*int64(time.Second)}}
   e=clients.Err();clients.Close();if e!=nil{return result,e};if len(p.Users)>20000{return result,ErrInvalid};assignments=append(assignments,xrayconfig.Assignment{Profile:p,DirectPort:x.direct,SwapPort:x.swap})
  }
