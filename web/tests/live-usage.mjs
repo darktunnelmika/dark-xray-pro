@@ -33,7 +33,9 @@ try {
   await expect(grant.getByLabel('Reason', { exact: true })).toHaveValue('');
 
   const form = page.locator('.business-client-form');
-  await form.getByLabel('Client ID', { exact: true }).fill('live-usage-client');
+  // The labelled ID row also contains a Random button; scope the input to
+  // this form rather than assuming that the full accessible label is exact.
+  await form.getByLabel('Client ID').fill('live-usage-client');
   await form.getByLabel('Client name', { exact: true }).fill('Live metered customer');
   await form.getByLabel('Representative ID', { exact: true }).selectOption('live-usage-rep');
   await form.getByLabel('Plan type', { exact: true }).selectOption('volume');
