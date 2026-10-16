@@ -43,7 +43,9 @@ func meterSign(t *testing.T,o managedxray.Options,sequence uint64,c xrayconfig.C
 
 // A controlled native pipeline, not a production metering rollout. The test
 // injects ONLY disposable loopback StatsService and a local REALITY target.
-func TestRealPinnedUsageCountersSQLiteQuotaAndXrayRevocation(t *testing.T){
+func TestRealPinnedUsageCountersSQLiteQuotaAndXrayRevocation(t *testing.T){exerciseRealPinnedUsage(t,false)}
+func TestRealPinnedContinuousUsageObserverTLSReplay(t *testing.T){exerciseRealPinnedUsage(t,true)}
+func exerciseRealPinnedUsage(t *testing.T,continuous bool){
  binary,pin:=os.Getenv("DARK_PRO_TEST_XRAY_BINARY"),os.Getenv("DARK_PRO_TEST_XRAY_SHA256")
  if binary==""&&pin==""{t.Skip("explicit independently pinned Xray required")};if binary==""||pin==""{t.Fatal("incomplete core pin")}
  if os.Geteuid()==0{t.Skip("Xray QA must be unprivileged")}
@@ -89,6 +91,7 @@ func TestRealPinnedUsageCountersSQLiteQuotaAndXrayRevocation(t *testing.T){
  var counters []uc.Usage
  meterWait(t,func()bool{sample,e:=uc.Collect(ctx,binary,pin,statsAddress,epoch);if e==nil&&len(sample)==1&&sample[0].Downlink>=int64(len(proof)){counters=sample;return true};return false})
  second,e:=uc.Collect(ctx,binary,pin,statsAddress,epoch);if e!=nil||second[0].Uplink<counters[0].Uplink||second[0].Downlink<counters[0].Downlink{t.Fatal("stats reset or collector failed",e)}
+ if continuous{exerciseContinuousUsage(t,s,runtime,options,cfg,epoch,statsAddress,fetch,proof,c.ID);return}
  box,e:=uc.Open(uc.Options{Directory:filepath.Join(t.TempDir(),"outbox"),Key:bytes.Repeat([]byte{6},32),Epoch:epoch,Create:true});if e!=nil{t.Fatal(e)};defer box.Close()
  report,e:=box.Observe(second,false);if e!=nil{t.Fatal(e)};receipt,e:=s.UsageLedger().Accept(ctx,usageledger.Principal{NodeID:epoch.NodeID,InstallationID:epoch.InstallationID},report);if e!=nil{t.Fatal(e)}
  if e=box.Acknowledge(receipt);e!=nil{t.Fatal(e)}

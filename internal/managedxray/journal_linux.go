@@ -14,6 +14,7 @@ import (
  "path/filepath"
  "syscall"
  "github.com/darktunnelmika/dark-xray-pro/internal/xrayconfig"
+ uc "github.com/darktunnelmika/dark-xray-pro/internal/usagecheckpoint"
 )
 var (
  ErrInvalid=errors.New("invalid managed Xray revision")
@@ -37,6 +38,7 @@ func(r *savedRevision)candidate()xrayconfig.Candidate{
  return xrayconfig.Candidate{NoListeners:r.NoListeners,Config:append([]byte(nil),r.Raw...),SHA256:r.SHA,ManifestSHA256:r.Manifest,Listeners:append([]xrayconfig.Listener(nil),r.Listeners...),RequiresXrayTest:true,RequiresDataPlaneProof:true,RequiresSubscriptionCommit:true}
 }
 type journal struct{
+ Usage *observedUsage `json:"usage,omitempty"`
  DesiredSHA string `json:"desired_sha"`;DesiredManifest string `json:"desired_manifest"`
  Version int `json:"version"`;Highwater uint64 `json:"highwater"`;LastLeaseIssued int64 `json:"last_lease_issued"`;Updated int64 `json:"updated"`
  Good *savedRevision `json:"good,omitempty"`;Previous *savedRevision `json:"previous,omitempty"`;Pending *savedRevision `json:"pending,omitempty"`;Phase string `json:"phase"`
@@ -72,7 +74,9 @@ func openDisk(dir string,key []byte,aad string)(*disk,journal,error){
  if len(raw)<aead.NonceSize()+aead.Overhead(){d.close();return nil,empty,ErrCorrupt}
  plain,err:=aead.Open(nil,raw[:aead.NonceSize()],raw[aead.NonceSize():],d.aad);if err!=nil{d.close();return nil,empty,ErrCorrupt}
  var j journal
- if json.Unmarshal(plain,&j)!=nil||j.Version!=1||j.Good!=nil&&j.Good.Sequence>j.Highwater{d.close();return nil,empty,ErrCorrupt}
+ if json.Unmarshal(plain,&j)!=nil||(j.Version!=1&&j.Version!=2)||j.Good!=nil&&j.Good.Sequence>j.Highwater{d.close();return nil,empty,ErrCorrupt}
+ if (j.Version==2)!=(j.Usage!=nil){d.close();return nil,empty,ErrCorrupt}
+ if j.Usage!=nil{e,_,err:=uc.CanonicalEpoch(j.Usage.Epoch);if err!=nil||j.Good==nil||e.ConfigSHA!=j.Good.SHA{d.close();return nil,empty,ErrCorrupt};if _,err=uc.StatsArguments(j.Usage.StatsEndpoint);err!=nil{d.close();return nil,empty,ErrCorrupt}}
  return d,j,nil
 }
 func(d *disk)save(j journal)error{
