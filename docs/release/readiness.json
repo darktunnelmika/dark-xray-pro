@@ -1,0 +1,68 @@
+{
+  "schema_version": 1,
+  "kind": "design_acceptance_matrix_not_runtime_attestation",
+  "reviewed_on": "2026-10-16",
+  "pro_baseline": {
+    "commit": "077ed6d0608cdccb07ffdacaaedc3de24475ee15",
+    "tree": "fafaadb07241f43451c34acce83466fd0ea616e0",
+    "business_schema": 7
+  },
+  "legacy_source_commit": "ed66ded4ec09c9d023635f64d9b05eb592ce06a1",
+  "inputs": {
+    "kit_name": "DARK_XRAY_PRO_integrated_acceptance_kit.zip",
+    "kit_sha256": "c7bdecc502c537873aa9713a11cb3c0744ad9a5892646e221caa29c9798d3dde"
+  },
+  "core_pins": {
+    "project": {
+      "version": "v26.9.9",
+      "archive_sha256": "1eb9175d0f0a8f8149c9230a7fc5ae66ce332ed20a53155ce61fe62e3f58b7df"
+    },
+    "local_kit": {
+      "version": "v25.9.11",
+      "archive_sha256": "e3e26d15b0306401a6ec80e46bf165669c0fc2ac32626f19ad35071bd721115c"
+    },
+    "interchangeable_results": false
+  },
+  "public_panel_contract": {
+    "legacy_public_port": null,
+    "legacy_public_port_verified": false,
+    "pro_internal_listen": "127.0.0.1:2087",
+    "copy_internal_port_as_public_default": false
+  },
+  "runtime_implementation_added_this_review": false,
+  "production_ready": false,
+  "migration_authorized": false,
+  "required_capability_inventory_verified": false,
+  "gates": {
+    "S01": {"status": "source_reference_read_only", "execution_evidence": null},
+    "S02": {"status": "not_run", "execution_evidence": null},
+    "D01": {"status": "not_run", "execution_evidence": null},
+    "D02": {"status": "not_run", "execution_evidence": null},
+    "D03": {"status": "not_run", "execution_evidence": null},
+    "D04": {"status": "not_run", "execution_evidence": null},
+    "D05": {"status": "not_run", "execution_evidence": null},
+    "R01": {"status": "not_run", "execution_evidence": null},
+    "R02": {"status": "not_run", "execution_evidence": null},
+    "R03": {"status": "not_run", "execution_evidence": null},
+    "R04": {"status": "not_run", "execution_evidence": null},
+    "R05": {"status": "not_run", "execution_evidence": null},
+    "R06": {"status": "not_run", "execution_evidence": null},
+    "R07": {"status": "not_run", "execution_evidence": null},
+    "R08": {"status": "not_run", "execution_evidence": null},
+    "R09": {"status": "not_run", "execution_evidence": null},
+    "R10": {"status": "not_run", "execution_evidence": null},
+    "R11": {"status": "not_run", "execution_evidence": null},
+    "U01": {"status": "not_run", "execution_evidence": null},
+    "U02": {"status": "not_run", "execution_evidence": null},
+    "P01": {"status": "not_run", "execution_evidence": null},
+    "M01": {"status": "not_run", "execution_evidence": null},
+    "M02": {"status": "not_run", "execution_evidence": null},
+    "M03": {"status": "not_run", "execution_evidence": null},
+    "M04": {"status": "not_run", "execution_evidence": null},
+    "M05": {"status": "not_run", "execution_evidence": null},
+    "M06": {"status": "not_run", "execution_evidence": null},
+    "M07": {"status": "not_run", "execution_evidence": null}
+  },
+  "gate_definitions": "acceptance-matrix.fa.md",
+  "interpretation": "Source review and CI success do not imply quota-runtime integration, product completeness, or authorization to migrate."
+}
