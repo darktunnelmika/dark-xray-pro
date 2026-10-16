@@ -33,12 +33,12 @@ try {
   await expect(grant.getByLabel('Reason', { exact: true })).toHaveValue('');
 
   const form = page.locator('.business-client-form');
-  // The labelled ID row also contains a Random button; scope the input to
-  // this form rather than assuming that the full accessible label is exact.
+  // Scope to the real customer form. Implicit labels include the Random
+  // button or select option text; do not assume an option-free exact name.
   await form.getByLabel('Client ID').fill('live-usage-client');
   await form.getByLabel('Client name', { exact: true }).fill('Live metered customer');
-  await form.getByLabel('Representative ID', { exact: true }).selectOption('live-usage-rep');
-  await form.getByLabel('Plan type', { exact: true }).selectOption('volume');
+  await form.getByLabel('Representative ID').selectOption('live-usage-rep');
+  await form.getByLabel('Plan type').selectOption('volume');
   await form.getByLabel('Plan volume (GB)', { exact: true }).fill('0.01');
   await form.getByRole('button', { name: 'Create pending client', exact: true }).click();
   await expect(page.locator('.business-records strong').filter({ hasText: 'Live metered customer (live-usage-client)' })).toBeVisible();
