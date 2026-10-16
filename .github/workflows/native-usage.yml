@@ -45,6 +45,19 @@ jobs:
           echo "DARK_PRO_TEST_XRAY_SHA256=$(sha256sum bin/xray | cut -d' ' -f1)" >> "$GITHUB_ENV"
       - name: Prove actual counters, quota filtering and same-UUID revocation
         run: go test ./internal/business -run '^TestRealPinnedUsageCountersSQLiteQuotaAndXrayRevocation$' -count=1 -v -timeout=60s
+      - name: Prove continuous observation, outage fencing and preserved replay
+        run: |
+          set -euo pipefail
+          go test ./internal/business -run '^TestRealPinnedContinuousUsageObserverTLSReplay$' -count=1 -json -timeout=90s > "$RUNNER_TEMP/continuous-observer.jsonl"
+          python3 - "$RUNNER_TEMP/continuous-observer.jsonl" <<'PYTEST'
+          import json,sys
+          events=[json.loads(line) for line in open(sys.argv[1])]
+          name='TestRealPinnedContinuousUsageObserverTLSReplay'
+          assert any(e.get('Test')==name and e.get('Action')=='pass' for e in events)
+          assert not any(e.get('Test')==name and e.get('Action') in ('skip','fail') for e in events)
+          for e in events:
+              if e.get('Output'): print(e['Output'],end='')
+          PYTEST
       - name: Create customer in real UI and verify committed usage after real traffic
         env:
           DARK_PRO_TEST_LIVE_USAGE_BROWSER: '1'
@@ -67,3 +80,4 @@ jobs:
         if: failure()
         run: |
           if test -f "$RUNNER_TEMP/live-native-usage.jsonl"; then cat "$RUNNER_TEMP/live-native-usage.jsonl"; fi
+          if test -f "$RUNNER_TEMP/continuous-observer.jsonl"; then cat "$RUNNER_TEMP/continuous-observer.jsonl"; fi

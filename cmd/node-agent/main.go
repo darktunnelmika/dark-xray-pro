@@ -24,6 +24,7 @@ import (
  "github.com/darktunnelmika/dark-xray-pro/internal/agenttransport"
  "github.com/darktunnelmika/dark-xray-pro/internal/hostmetrics"
  "github.com/darktunnelmika/dark-xray-pro/internal/managedxray"
+ uc "github.com/darktunnelmika/dark-xray-pro/internal/usagecheckpoint"
  "github.com/darktunnelmika/dark-xray-pro/internal/telemetry"
 )
 func checkLabEndpoint(raw string)(*url.URL,error){
@@ -67,12 +68,15 @@ func main(){
  identity,err:=agentidentity.LoadOrCreate(location,*nodeID,os.Getenv("DARK_PRO_PAIR_CODE"));if err!=nil{log.Fatal("Node identity unavailable: ",err)}
  if !identity.Paired{attempt,cancel:=context.WithTimeout(ctx,8*time.Second);err=enroll(attempt,client,endpoint,identity);cancel();if err!=nil{log.Fatal("LAB pairing incomplete: ",err)};identity,err=agentidentity.MarkPaired(location,identity);if err!=nil{log.Fatal("LAB pairing succeeded but local receipt was not saved; retry with the same identity: ",err)}}
  var nativeRuntime *managedxray.Runtime
+ var usageSender *uc.Sender
  if os.Getenv("DARK_PRO_ENABLE_NATIVE_RUNTIME")=="1"{
   if !remote||!identity.Paired||*stageXrayBinary==""||len(*stageXraySHA)!=64||*runtimeDir==""{log.Fatal("native runtime requires verified TLS, a freshly paired installation, a pinned core and private state directory")}
   stateKey,keyErr:=hex.DecodeString(os.Getenv("DARK_PRO_NATIVE_RUNTIME_KEY_HEX"));if keyErr!=nil||len(stateKey)!=32{log.Fatal("native runtime requires an independent private 32-byte state key")}
   if err:=managedxray.CheckLocalAddress(*runtimeIP);err!=nil{log.Fatal("native runtime IP must belong to this host")}
   nativeRuntime,err=managedxray.Open(managedxray.Options{Directory:*runtimeDir,StateKey:stateKey,LeaseKey:[]byte(identity.AgentToken),NodeID:*nodeID,InstallationID:identity.InstallationID,ListenIP:*runtimeIP,Binary:*stageXrayBinary,BinarySHA:*stageXraySHA,ReservedPorts:[]uint16{2087,8443,24443}})
   if err!=nil{log.Fatal("native Xray supervisor refused private state: ",err)};defer nativeRuntime.Close()
+  usageSender,err=uc.NewSender(uc.SenderOptions{Endpoint:endpoint,NodeID:*nodeID,InstallationID:identity.InstallationID,Token:identity.AgentToken,PinSHA256:*pin,Client:client})
+  if err!=nil{log.Fatal("private usage recovery transport refused")};defer usageSender.Close()
  }else if *runtimeDir!=""||*runtimeIP!=""{log.Fatal("native runtime flags supplied without explicit opt-in")}
  // Liveness is independent of resource sampling, staging and runtime Apply.
  var workers sync.WaitGroup;workers.Add(1)
@@ -80,7 +84,10 @@ func main(){
   for{select{case <-ctx.Done():return;case <-ticker.C:pulseSeq++;pulse:=telemetry.Pulse{NodeID:*nodeID,InstallationID:identity.InstallationID,BootID:bootID,Sequence:pulseSeq};if err:=sendPulse(ctx,client,endpoint,identity.AgentToken,pulse);err!=nil&&ctx.Err()==nil{log.Printf("HUB liveness pulse unavailable: %v",err)}}}
  }()
  if nativeRuntime!=nil{workers.Add(1);go func(){defer workers.Done();ticker:=time.NewTicker(3*time.Second);defer ticker.Stop();for{
-  if ctx.Err()!=nil{return};attempt,cancel:=context.WithTimeout(ctx,12*time.Second);_,err:=nativeRuntime.Sync(attempt,client,endpoint);cancel();if err!=nil&&ctx.Err()==nil{log.Printf("native runtime synchronization unavailable; short lease remains enforced")};select{case <-ctx.Done():return;case <-ticker.C:}
+  if ctx.Err()!=nil{return};attempt,cancel:=context.WithTimeout(ctx,12*time.Second)
+  blocked,replayErr:=replayUsageBeforeSync(attempt,nativeRuntime,usageSender)
+  if blocked { cancel();if ctx.Err()==nil{if replayErr!=nil{log.Printf("interrupted usage replay unavailable; recorded bytes and runtime fence retained")}else{log.Printf("recorded usage replayed; previous epoch still requires explicit settlement")}};select{case <-ctx.Done():return;case <-ticker.C:};continue }
+  _,err:=nativeRuntime.Sync(attempt,client,endpoint);cancel();if err!=nil&&ctx.Err()==nil{log.Printf("native runtime synchronization unavailable; short lease remains enforced")};select{case <-ctx.Done():return;case <-ticker.C:}
  }}()}
  if os.Getenv("DARK_PRO_ENABLE_TCP_ROUTE_PROBES")=="1"{workers.Add(1);go func(){defer workers.Done();timer:=time.NewTicker(12*time.Second);defer timer.Stop();for{select{case <-ctx.Done():return;case <-timer.C:if err:=pollPreflight(ctx,client,endpoint,*nodeID,identity.InstallationID,identity.AgentToken);err!=nil&&ctx.Err()==nil{log.Printf("replacement TCP preflight failed: %v",err)}}}}()}
  if os.Getenv("DARK_PRO_ENABLE_XRAY_STAGE_VALIDATION")=="1"{

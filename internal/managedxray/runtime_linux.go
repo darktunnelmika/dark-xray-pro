@@ -27,12 +27,14 @@ func SignLease(key []byte,l Lease)(Lease,error){
 }
 type Options struct{Directory string;StateKey []byte;LeaseKey []byte;NodeID string;InstallationID string;ListenIP string;Binary string;BinarySHA string;ReservedPorts []uint16}
 type Snapshot struct{
+ Usage *UsageObservationStatus `json:"usage_observation,omitempty"`
  NoListeners bool `json:"no_listeners"`;
  ActiveSequence uint64 `json:"active_sequence"`;ActiveSHA string `json:"active_sha"`;SavedSequence uint64 `json:"saved_sequence"`;SavedSHA string `json:"saved_sha"`
  PreviousSHA string `json:"previous_sha"`;Highwater uint64 `json:"highwater"`;Phase string `json:"phase"`;ProcessReady bool `json:"process_ready"`
  LeaseExpires int64 `json:"lease_expires_unix_nano"`;DataPlaneVerified bool `json:"data_plane_verified"`;SubscriptionPublished bool `json:"subscription_published"`
 }
 type Runtime struct{
+ observer *usageObserver
  mu sync.Mutex;options Options;disk *disk;state journal;process *child;active *savedRevision;lease Lease;deadline time.Time
  previousLease Lease;previousDeadline time.Time;reserved map[uint16]bool;closed bool;fenced bool;stop chan struct{};done chan struct{}
  afterIntent func() // Test-only crash checkpoint, never externally configured.
@@ -44,6 +46,7 @@ func Open(o Options)(*Runtime,error){
  if err:=CheckLocalAddress(ip.String());err!=nil{return nil,err}
  o.ListenIP=ip.String();o.StateKey=append([]byte(nil),o.StateKey...);o.LeaseKey=append([]byte(nil),o.LeaseKey...)
  d,j,err:=openDisk(o.Directory,o.StateKey,"DARK-PRO-RUNTIME-v1\x00"+o.NodeID+"\x00"+o.InstallationID+"\x00"+o.ListenIP);if err!=nil{return nil,err}
+ if j.Usage!=nil&&(j.Usage.Epoch.NodeID!=o.NodeID||j.Usage.Epoch.InstallationID!=o.InstallationID){d.close();return nil,ErrCorrupt}
  if j.Updated>time.Now().Add(2*time.Second).UnixNano(){d.close();return nil,ErrLease}
  j.Phase="awaiting_fresh_lease" // Persisted readiness is not process evidence.
  r:=&Runtime{options:o,disk:d,state:j,reserved:map[uint16]bool{},stop:make(chan struct{}),done:make(chan struct{})}
@@ -56,7 +59,7 @@ func(r *Runtime)validLease(l Lease,v *savedRevision)bool{
 func leaseDeadline(l Lease)time.Time{return time.Now().Add(time.Duration(l.Expires-time.Now().UnixNano()))}
 func(r *Runtime)persist(j journal)error{
  j.Updated=time.Now().UnixNano()
- if err:=r.disk.save(j);err!=nil{r.process.stop();r.process=nil;r.active=nil;r.fenced=true;r.state.Phase="journal_failure_fenced";return err};r.state=j;return nil
+ if err:=r.disk.save(j);err!=nil{if r.observer!=nil{r.observer.cancel()};r.process.stop();r.process=nil;r.active=nil;r.fenced=true;r.state.Phase="journal_failure_fenced";return err};r.state=j;return nil
 }
 func(r *Runtime)start(ctx context.Context,v *savedRevision,deadline time.Time)(*child,error){
  c:=v.candidate();if err:=validateLayout(c,r.options.ListenIP,r.reserved);err!=nil{return nil,err}
@@ -64,7 +67,7 @@ func(r *Runtime)start(ctx context.Context,v *savedRevision,deadline time.Time)(*
  return startChild(ctx,c,r.options.Binary,deadline)
 }
 func(r *Runtime)snapshot()Snapshot{
- s:=Snapshot{Phase:r.state.Phase,Highwater:r.state.Highwater}
+ s:=Snapshot{Phase:r.state.Phase,Highwater:r.state.Highwater};if r.state.Usage!=nil{usage:=r.usageStatusLocked();s.Usage=&usage}
  if r.state.Good!=nil{s.SavedSequence=r.state.Good.Sequence;s.SavedSHA=r.state.Good.SHA};if r.state.Previous!=nil{s.PreviousSHA=r.state.Previous.SHA}
  if r.active!=nil&&!r.process.dead()&&time.Now().Before(r.deadline){s.NoListeners=r.active.NoListeners;s.ActiveSequence=r.active.Sequence;s.ActiveSHA=r.active.SHA;s.LeaseExpires=r.lease.Expires;s.ProcessReady=r.process.bound(r.active.Listeners)}
  return s
@@ -76,6 +79,7 @@ func(r *Runtime)Apply(ctx context.Context,v Revision,l Lease)(Snapshot,error){
  r.mu.Lock();defer r.mu.Unlock();if r.closed||r.fenced{return r.snapshot(),ErrClosed}
  saved:=freeze(v);if !r.validLease(l,saved){return r.snapshot(),ErrLease}
  if saved.Sequence==r.state.Highwater&&r.active!=nil&&saved.Sequence==r.active.Sequence&&saved.SHA==r.active.SHA&&saved.Manifest==r.active.Manifest{return r.refreshLocked(l)}
+ if r.state.Usage!=nil{return r.snapshot(),ErrUsageSettlement}
  if saved.Sequence<r.state.Highwater||(saved.Sequence==r.state.Highwater&&(saved.SHA!=r.state.DesiredSHA||saved.Manifest!=r.state.DesiredManifest)){return r.snapshot(),ErrStale}
  if l.Issued<=r.state.LastLeaseIssued{return r.snapshot(),ErrLease}
  if err:=validateLayout(saved.candidate(),r.options.ListenIP,r.reserved);err!=nil{return r.snapshot(),err}
@@ -102,6 +106,7 @@ func(r *Runtime)Apply(ctx context.Context,v Revision,l Lease)(Snapshot,error){
  if err:=r.persist(next);err!=nil{return r.snapshot(),err};return r.snapshot(),nil
 }
 func(r *Runtime)refreshLocked(l Lease)(Snapshot,error){
+ if r.state.Usage!=nil&&(r.observer==nil||!r.observer.healthy()){return r.snapshot(),ErrUsageSettlement}
  if r.active==nil||r.process.dead()||!time.Now().Before(r.deadline)||!r.validLease(l,r.active){return r.snapshot(),ErrLease}
  if l.Issued<=r.state.LastLeaseIssued{if l==r.lease{return r.snapshot(),nil};return r.snapshot(),ErrLease}
  next:=r.state;next.LastLeaseIssued=l.Issued;if err:=r.persist(next);err!=nil{return r.snapshot(),err}
@@ -111,6 +116,7 @@ func(r *Runtime)Refresh(l Lease)(Snapshot,error){r.mu.Lock();defer r.mu.Unlock()
 // Recover needs a fresh lease, never adopts PIDs or starts an interrupted intent.
 func(r *Runtime)Recover(ctx context.Context,l Lease)(Snapshot,error){
  r.mu.Lock();defer r.mu.Unlock();if r.closed||r.fenced{return r.snapshot(),ErrClosed};if r.process!=nil&&!r.process.dead(){return r.snapshot(),ErrBusy}
+ if r.state.Usage!=nil{return r.snapshot(),ErrUsageSettlement}
  v:=r.state.Good;if !r.validLease(l,v)||l.Issued<=r.state.LastLeaseIssued{return r.snapshot(),ErrLease}
  p,err:=r.start(ctx,v,leaseDeadline(l));if err!=nil{return r.snapshot(),err};if !r.validLease(l,v){p.stop();return r.snapshot(),ErrLease}
  r.process=p;r.active=v;r.lease=l;r.deadline=leaseDeadline(l)
@@ -132,7 +138,7 @@ func(r *Runtime)watch(){
    if expired||r.process.dead(){
     r.process.stop();r.process=nil;r.active=nil;next:=r.state;next.Phase="process_exited_stopped";if expired{next.Phase="lease_expired_stopped"}
     // Old settings only regain authority while their prior lease is valid.
-    if !expired&&r.state.Previous!=nil&&time.Now().Before(r.previousDeadline)&&r.validLease(r.previousLease,r.state.Previous){
+    if !expired&&r.state.Usage==nil&&r.state.Previous!=nil&&time.Now().Before(r.previousDeadline)&&r.validLease(r.previousLease,r.state.Previous){
      previous:=r.state.Previous;ctx,cancel:=context.WithTimeout(context.Background(),6*time.Second);p,err:=r.start(ctx,previous,r.previousDeadline);cancel()
      if err==nil&&time.Now().Before(r.previousDeadline){r.process=p;r.active=previous;r.lease=r.previousLease;r.deadline=r.previousDeadline;next.Good=previous;next.Previous=nil;next.Phase="rolled_back_after_process_exit"}else if p!=nil{p.stop()}
     }
@@ -141,4 +147,4 @@ func(r *Runtime)watch(){
   };r.mu.Unlock()
  }}
 }
-func(r *Runtime)Close(){r.mu.Lock();if r.closed{r.mu.Unlock();return};r.closed=true;close(r.stop);r.process.stop();r.process=nil;r.active=nil;r.state.Phase="closed";r.disk.close();r.mu.Unlock();<-r.done}
+func(r *Runtime)Close(){r.mu.Lock();if r.closed{r.mu.Unlock();return};r.closed=true;close(r.stop);if r.observer!=nil{r.observer.cancel()};r.process.stop();r.process=nil;r.active=nil;r.state.Phase="closed";r.disk.close();r.mu.Unlock();<-r.done;if r.observer!=nil{select{case <-r.observer.done:case <-time.After(3*time.Second):}}}
