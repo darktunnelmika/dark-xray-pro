@@ -49,8 +49,8 @@ test("dashboard uses fresh-only CPU and refuses incomplete physical rates or fab
   const panel = page.getByRole("region", { name: "Fleet intelligence" });
   await expect(panel).toBeVisible();
   await expect(panel.getByText("37.5%")).toBeVisible();
-  await expect(panel.getByText("Fresh metrics")).toBeVisible();
-  await expect(panel.getByText("Delayed metrics")).toBeVisible();
+  await expect(panel.getByText("Fresh metrics", { exact: true })).toBeVisible();
+  await expect(panel.getByText("Delayed metrics", { exact: true })).toBeVisible();
   await expect(panel.getByText("2 / 2")).toBeVisible();
   await expect(panel.getByText("—", { exact: true }).first()).toBeVisible();
   expect(calls.some(s => s.includes("/history?"))).toBe(false);
@@ -96,8 +96,8 @@ test("320px Persian RTL dark mode keeps grouped menu usable, account controls vi
 
 test("business pages do not keep polling fleet while the owner is elsewhere", async ({ page }) => {
   const calls = await setup(page);
-  await page.goto("/clients");
-  await expect(page.getByRole("heading", { name: "Clients", exact: true }).first()).toBeVisible();
+  await page.goto("/settings");
+  await expect(page.getByRole("heading", { name: "Appearance & lab" })).toBeVisible();
   await page.waitForTimeout(1200);
   expect(calls.filter(s => s.startsWith("GET /api/v1/fleet"))).toHaveLength(0);
   await page.getByRole("button", { name: "Overview" }).click();

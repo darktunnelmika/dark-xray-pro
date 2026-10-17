@@ -30,7 +30,8 @@ secrets or third-party UI/telemetry dependencies.
   is not the Xray customer connection count.
 - Real 1h/24h historical charts use the existing owner-session-only
   `GET /api/v1/workspace/nodes/{id}/history`. They are fetched lazily only
-  after owner opens them, for an explicitly selected authenticated Node.
+  after owner opens them, with Node selection revealed inside the expanded
+  inspector for an authenticated Node.
   No fabricated time series, synthetic sales/user counts or billing labels.
 - Missing CPU/RAM readings produce an unknown bar, not a fabricated empty 0%.
 - Browser transport validates fleet counts, Node identities, finite CPU, RAM

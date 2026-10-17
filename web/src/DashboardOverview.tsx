@@ -108,11 +108,11 @@ export default function DashboardOverview({ fleet, language, stale }: {
         <div className="dash-insight-heading"><div><h2>{t.historyTitle}</h2><p>{t.historyLead}</p></div><ChartNoAxesCombined size={20}/></div>
         {selectedNode ?
           <div className="dash-history-controls">
-            <label>{t.choose}
+            {showHistory && <label>{t.choose}
               <select value={selectedNode.node_id} onChange={event => setSelected(event.target.value)}>
                 {nodes.map(node => <option value={node.node_id} key={node.node_id}>{node.name}</option>)}
               </select>
-            </label>
+            </label>}
             <button type="button" onClick={() => setShowHistory(v => !v)}>
               {showHistory ? t.hideHistory : t.openHistory}
             </button>
