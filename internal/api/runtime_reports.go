@@ -13,7 +13,7 @@ func(s *Server)attachRuntimeReports(mux *http.ServeMux){
  if _,ok:=s.authorizeBrowser(w,r,false,true);!ok{return};inbounds,e:=s.business.ListInbounds(r.Context(),s.inboundKey);if e!=nil{businessError(w,e);return}
  targets,e:=s.business.ListInboundTargets(r.Context());if e!=nil{businessError(w,e);return};nodes:=s.registry.List();if len(nodes)>200{businessError(w,business.ErrInvalid);return}
  states:=make([]business.RuntimeStatus,0,len(nodes));for _,n:=range nodes{state,e:=s.business.NativeRuntimeStatus(r.Context(),n.NodeID,n.InstallationID);if e!=nil{businessError(w,e);return};states=append(states,state)}
- respond(w,200,map[string]any{"inbounds":inbounds,"targets":targets,"nodes":nodes,"runtime":states,"evidence":"authenticated_agent_report","data_plane_verified":false,"subscription_publication":false})
+ respond(w,200,map[string]any{"inbounds":inbounds,"targets":targets,"nodes":nodes,"runtime":states,"evidence":"authenticated_agent_report","data_plane_verified":false,"subscription_publication":false,"preflight":s.nativeReadiness(inbounds,targets,nodes)})
  })
  mux.HandleFunc("GET /api/v1/workspace/native-inbounds/{id}/clients",func(w http.ResponseWriter,r *http.Request){
  if _,ok:=s.authorizeBrowser(w,r,false,true);!ok{return};id,e:=strconv.ParseUint(r.PathValue("id"),10,53);if e!=nil||id==0{businessError(w,business.ErrInvalid);return}

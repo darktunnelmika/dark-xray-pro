@@ -39,6 +39,15 @@ async function fixture(page: Page, role = "owner") {
    return route.fulfill({ json: { saved: true } });
   }
   if (path.endsWith("native-inbounds-state")) return route.fulfill({ json: {
+   preflight: {
+    scope: "new_pro_lab_only", paired_nodes: 1, online_nodes: 1, fresh_nodes: 1,
+    configured_inbounds: inbounds.filter(i => i.enabled && !i.archived).length,
+    configured_targets: 0, client_bindings: bindings.length,
+    usage_ledger_enabled: true,
+    remote_metered_admission: "trusted_remote_epoch_registration_pending",
+    customer_data_plane_verified: false, subscription_published: false,
+    deployment_ready: false, blocking_reason: "remote_metered_admission_not_wired",
+   },
    inbounds, nodes: [{ node_id: "new-node", installation_id: installation, name: "New PRO Node" }], targets: [], runtime: [{
     node_id: "new-node", installation_id: installation, desired_sequence: 1, desired_sha: digest,
     reported_sequence: applied ? 1 : 0, reported_sha: applied ? digest : "", state: applied ? "applied" : "awaiting_report",
@@ -189,4 +198,53 @@ test("320px Persian shared-port warning remains readable and no save is possible
  await expect(page.getByRole("button",{name:"ذخیره مقصد نود"})).toBeDisabled();
  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+2)).toBe(true);
  expect(f.calls.filter(c=>c.path.endsWith("/target"))).toHaveLength(0);
+});
+
+
+test("owner sees true native deployment prerequisites and an explicit durable accounting blocker",async({page})=>{
+ const f=await fixture(page);
+ await openPage(page);
+ const readiness=page.getByRole("region",{name:"Native deployment readiness"});
+ await expect(readiness).toBeVisible();
+ await expect(readiness.getByRole("heading",{name:"Native Xray · release gates"})).toBeVisible();
+ await expect(readiness.getByText("Customer activation blocked").first()).toBeVisible();
+ await expect(readiness.getByText(/trusted remote process-birth/)).toBeVisible();
+ await expect(readiness.getByText(/initial usage receipt/)).toBeVisible();
+ await expect(readiness.getByText("Paired Nodes")).toBeVisible();
+ await expect(readiness.getByText("Online Agents")).toBeVisible();
+ await expect(readiness.getByRole("heading",{name:"Accounting journal"})).toBeVisible();
+ await expect(readiness.getByRole("heading",{name:"First-use receipt barrier"})).toBeVisible();
+ await expect(readiness.locator(".native-preflight-step-status").last()).toHaveText("Requires implementation");
+ const link=readiness.getByRole("link",{name:"Inspect live Nodes"});
+ await expect(link).toHaveAttribute("href","/nodes");
+ expect(f.calls).toHaveLength(0);
+ await expect(readiness.getByText(/old DARK XRAY subscriptions never imported/)).toBeVisible();
+});
+
+test("readiness remains blocked with successful Agent report, and expired owner API fails closed",async({page})=>{
+ const f=await fixture(page);f.reportReady();
+ await openPage(page);
+ const readiness=page.getByRole("region",{name:"Native deployment readiness"});
+ await expect(page.getByText("Matching process reported",{exact:true})).toBeVisible();
+ await expect(readiness.getByText("Customer activation blocked").first()).toBeVisible();
+ await page.route("**/api/v1/workspace/native-inbounds-state",r=>r.fulfill({status:503,json:{error:"unavailable"}}));
+ await page.getByRole("button",{name:"Refresh",exact:true}).click();
+ await expect(page.getByRole("alert")).toBeVisible();
+ await expect(readiness.locator(".native-preflight-stats strong").first()).toHaveText("—");
+ await expect(readiness.getByText("Customer activation blocked").first()).toBeVisible();
+ expect(f.calls).toHaveLength(0);
+});
+
+test("native readiness fits 320px Persian RTL and never claims customer traffic is verified",async({page})=>{
+ const f=await fixture(page);
+ await page.setViewportSize({width:320,height:760});
+ await openPage(page,true);
+ await page.getByRole("button",{name:"Switch language"}).click();
+ const readiness=page.getByRole("region",{name:"Native deployment readiness"});
+ await expect(readiness.getByRole("heading",{name:"آمادگی استقرار Native Xray"})).toBeVisible();
+ await expect(readiness.getByText("فعال‌سازی مشتری مسدود است").first()).toBeVisible();
+ await expect(readiness.getByRole("heading",{name:"سد تأیید اولین مصرف"})).toBeVisible();
+ await expect(readiness.getByText(/HUB عمداً درخواست اجرای Xray/)).toBeVisible();
+ expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+2)).toBe(true);
+ expect(f.calls).toHaveLength(0);
 });
