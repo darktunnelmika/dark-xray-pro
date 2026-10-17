@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import {
-  Activity, ArrowDownLeft, ArrowUpRight, CheckCircle2, ChevronRight,
+  CheckCircle2, ChevronRight,
   CircleHelp, CreditCard, Globe2, HardDrive, LayoutDashboard,
   Menu, Moon, Network, RadioTower, Server, Settings2, ShieldCheck, Users, FolderOpen, UserRound, LogOut,
   Sun, Waypoints, X,
@@ -9,6 +9,7 @@ import { getFleet, type FleetSnapshot, type NodeSnapshot } from "./api";
 import InboundPlanner from "./InboundPlanner";
 import NodeManager from "./NodeManager";
 import NodeHistory from "./NodeHistory";
+import DashboardOverview from "./DashboardOverview";
 import BusinessWorkspace from "./BusinessWorkspace";
 import { useSession } from "./session";
 import { allowed, useNavigation, type Page } from "./navigation";
@@ -30,6 +31,7 @@ function stored<T extends string>(key: string, fallback: T, allowed: readonly T[
 const translations = {
   en: {
     overview: "Overview", nodes: "Nodes", inbounds: "Inbounds", settings: "Settings",
+    infrastructure: "INFRASTRUCTURE", management: "MANAGEMENT", workspaceGroup: "WORKSPACE",
     clients: "Clients", groups: "Groups", representatives: "Representatives", finance: "Finance", account: "My account",
     clientsTitle: "Clients", clientsLead: "Create and manage customers in one place.", groupsTitle: "Groups", groupsLead: "Organize customers without changing their financial history.",
     representativesTitle: "Representatives", representativesLead: "Accounts, permissions and representative credit.", financeTitle: "Finance", financeLead: "Account balances and immutable transaction history.", accountTitle: "My account", accountLead: "Your profile and password settings.",
@@ -64,6 +66,7 @@ const translations = {
   },
   fa: {
     overview: "داشبورد", nodes: "نودها", inbounds: "اینباندها", settings: "تنظیمات",
+    infrastructure: "زیرساخت", management: "مدیریت", workspaceGroup: "حساب و تنظیمات",
     clients: "کلاینت‌ها", groups: "گروه‌ها", representatives: "نمایندگان", finance: "مالی", account: "حساب من",
     clientsTitle: "مدیریت کلاینت‌ها", clientsLead: "ساخت، تمدید و مدیریت مشتری در یک بخش مشخص.", groupsTitle: "مدیریت گروه‌ها", groupsLead: "دسته‌بندی مشتری‌ها بدون تغییر سوابق مالی.",
     representativesTitle: "مدیریت نمایندگان", representativesLead: "حساب‌ها، دسترسی و اعتبار نمایندگان.", financeTitle: "حسابداری", financeLead: "موجودی حساب و تاریخچهٔ ثبت‌شدهٔ تراکنش‌ها.", accountTitle: "حساب من", accountLead: "مشخصات حساب و تغییر رمز عبور.",
@@ -110,6 +113,12 @@ const nav: { id: Page; Icon: typeof LayoutDashboard }[] = [
   { id: "settings", Icon: Settings2 },
 ];
 
+const navGroups: { id: "infrastructure" | "management" | "workspaceGroup"; pages: Page[] }[] = [
+  { id: "infrastructure", pages: ["overview", "nodes", "inbounds"] },
+  { id: "management", pages: ["clients", "groups", "representatives", "finance"] },
+  { id: "workspaceGroup", pages: ["account", "settings"] },
+];
+
 function rate(bps: number | undefined): string {
   if (bps === undefined || !Number.isFinite(bps)) return "—";
   return (bps / 1_000_000).toLocaleString("en-US", { maximumFractionDigits: 2 }) + " Mbps";
@@ -125,9 +134,12 @@ function dateTime(value: string | null, lang: Language): string {
     ? date.toLocaleTimeString(lang === "fa" ? "fa-IR" : "en-GB", { hour: "2-digit", minute: "2-digit", second: "2-digit" })
     : "—";
 }
-function Meter({ value }: { value: number }) {
-  const n = Number.isFinite(value) ? Math.min(100, Math.max(0, value)) : 0;
-  return <div className="meter" aria-label={n.toFixed(0) + "%"}><span style={{ width: n + "%" }} /></div>;
+function Meter({ value }: { value: number | null }) {
+  const valid = value !== null && Number.isFinite(value);
+  const n = valid ? Math.min(100, Math.max(0, value)) : 0;
+  return <div className={"meter" + (valid ? "" : " meter-unknown")} aria-label={valid ? n.toFixed(0) + "%" : "Unknown"}>
+    {valid && <span style={{ width: n + "%" }} />}
+  </div>;
 }
 function Trend({ values }: { values: number[] }) {
   if (values.length < 2) return <span className="trend-empty" aria-label="Awaiting multiple readings">—</span>;
@@ -146,7 +158,7 @@ function NodeRow({ node, history, lang, selected, onSelect }: {
   const t = translations[lang];
   const good = node.status === "online";
   const current = good && node.metrics_current;
-  const ramPercent = node.ram_total_bytes ? node.ram_used_bytes / node.ram_total_bytes * 100 : 0;
+  const ramPercent = current && node.ram_total_bytes > 0 ? node.ram_used_bytes / node.ram_total_bytes * 100 : null;
   return (
     <article className={"node-row " + (good ? "" : "node-offline") + (selected ? " node-selected" : "")}>
       <div className="node-identity">
@@ -160,11 +172,11 @@ function NodeRow({ node, history, lang, selected, onSelect }: {
       </div>
       <div className="node-resource">
         <div className="resource-top"><span>{t.cpu} <small>({node.cpu_cores > 0 ? node.cpu_cores : "—"} {t.cores})</small></span><strong>{current ? node.cpu_percent.toFixed(1) + "%" : "—"}</strong></div>
-        <Meter value={current ? node.cpu_percent : 0} />
+        <Meter value={current ? node.cpu_percent : null} />
       </div>
       <div className="node-resource">
         <div className="resource-top"><span>{t.memory}</span><strong>{current ? ram(node.ram_used_bytes) : "—"} / {node.ram_total_bytes ? ram(node.ram_total_bytes) : "—"}</strong></div>
-        <Meter value={current ? ramPercent : 0} />
+        <Meter value={ramPercent} />
       </div>
       <div className="node-network">
         <div className="network-lines"><span>↓ {current ? rate(node.rx_bits_per_second ?? undefined) : "—"}</span><span>↑ {current ? rate(node.tx_bits_per_second ?? undefined) : "—"}</span></div>
@@ -190,6 +202,28 @@ export default function App() {
     try { return sessionStorage.getItem("dark-pro-selected-node"); } catch { return null; }
   });
   const t = translations[language];
+  const infrastructureVisible = page === "overview" || page === "nodes" || page === "inbounds";
+
+  useEffect(() => {
+    if (!mobileMenu) return;
+    const originalOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const onEscape = (event: KeyboardEvent) => { if (event.key === "Escape") setMobileMenu(false); };
+    const wider = window.matchMedia("(min-width: 761px)");
+    const onResize = () => { if (wider.matches) setMobileMenu(false); };
+    document.addEventListener("keydown", onEscape);
+    wider.addEventListener("change", onResize);
+    return () => {
+      document.body.style.overflow = originalOverflow;
+      document.removeEventListener("keydown", onEscape);
+      wider.removeEventListener("change", onResize);
+    };
+  }, [mobileMenu]);
+
+  useEffect(() => {
+    if (auth.session?.user.role === "owner") return;
+    setFleet(null); setProblem(null); setHistory({});
+  }, [auth.session?.user.role, auth.session?.user.id]);
 
   useEffect(() => {
     try {
@@ -219,53 +253,68 @@ export default function App() {
     document.documentElement.dir = language === "fa" ? "rtl" : "ltr";
     try { localStorage.setItem("dark-pro-lang", language); } catch { /* private mode */ }
   }, [language]);
+  // Read-only polling runs only in infrastructure sections. Hidden tabs pause
+  // requests entirely; visibility/online restores them immediately. No
+  // billing/representative endpoints are called by the dashboard.
   useEffect(() => {
-    if (!auth.session || auth.session.user.role !== "owner") return;
-    let running = true;
-    let nextTimer: number | undefined;
+    if (!auth.session || auth.session.user.role !== "owner" || !infrastructureVisible) return;
+    let active = true;
+    let timer: number | undefined;
     let request: AbortController | undefined;
     async function poll() {
-      request = new AbortController();
-      const current = request;
-      const timeout = window.setTimeout(() => current.abort(), 4000);
+      if (!active || document.hidden || request) return;
+      const current = new AbortController();
+      request = current;
+      const deadline = window.setTimeout(() => current.abort(), 4000);
       try {
         const fresh = await getFleet(current.signal);
-        if (!running) return;
+        if (!active || current.signal.aborted) return;
         setFleet(fresh);
         setProblem(null);
-        setHistory((before) => {
-          const after = { ...before };
+        setHistory(before => {
+          const after: Record<string, number[]> = {};
           for (const node of fresh.nodes) {
-            if (node.status !== "online" || !node.metrics_current) continue;
-            if (node.rx_bits_per_second === null || node.tx_bits_per_second === null) continue;
-            const rate = node.rx_bits_per_second + node.tx_bits_per_second;
-            after[node.node_id] = [...(before[node.node_id] ?? []), rate].slice(-20);
+            const past = before[node.node_id] ?? [];
+            if (node.status === "online" && node.metrics_current &&
+                node.rx_bits_per_second != null && node.tx_bits_per_second != null) {
+              const reading = node.rx_bits_per_second + node.tx_bits_per_second;
+              after[node.node_id] = Number.isFinite(reading) && reading >= 0 ? [...past, reading].slice(-20) : past;
+            } else if (past.length > 0) {
+              after[node.node_id] = past;
+            }
           }
           return after;
         });
       } catch (error) {
-        if (running) setProblem(error instanceof Error ? error.message : "Unknown network error");
+        if (active && !current.signal.aborted) setProblem(error instanceof Error ? error.message : "Unknown network error");
+        else if (active && !document.hidden) setProblem("fleet_request_timeout");
       } finally {
-        window.clearTimeout(timeout);
-        if (running) nextTimer = window.setTimeout(() => { void poll(); }, 5000);
+        window.clearTimeout(deadline);
+        request = undefined;
+        if (active) timer = window.setTimeout(() => { void poll(); }, 5000);
       }
     }
-    void poll();
-    return () => {
-      running = false;
-      window.clearTimeout(nextTimer);
-      request?.abort();
+    const resume = () => {
+      if (!document.hidden && active && !request) {
+        window.clearTimeout(timer);
+        void poll();
+      }
     };
-  }, [auth.session?.user.id]);
+    void poll();
+    document.addEventListener("visibilitychange", resume);
+    window.addEventListener("online", resume);
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+      request?.abort();
+      document.removeEventListener("visibilitychange", resume);
+      window.removeEventListener("online", resume);
+    };
+  }, [auth.session?.user.id, auth.session?.user.role, infrastructureVisible]);
 
   const ready = fleet !== null;
   const selectedNode = fleet?.nodes.find((node) => node.node_id === selectedNodeId) ?? null;
-  const summary = [
-    { label: t.download, value: ready && fleet.physical_rates_complete ? rate(fleet.interface_rx_bits_per_second) : "—", Icon: ArrowDownLeft },
-    { label: t.upload, value: ready && fleet.physical_rates_complete ? rate(fleet.interface_tx_bits_per_second) : "—", Icon: ArrowUpRight },
-    { label: t.online, value: ready ? String(fleet.online_nodes) : "—", Icon: Activity },
-    { label: t.offline, value: ready ? String(fleet.offline_nodes) : "—", Icon: Server },
-  ];
+
 
   const darkMode = theme === "dark" || (theme === "system" && systemDark);
   const toggleTheme = () => setTheme(darkMode ? "light" : "dark");
@@ -274,22 +323,27 @@ export default function App() {
   async function logout() { try { setLogoutError(false); await auth.signOut(); } catch { setLogoutError(true); } }
   return (
     <div className="app-frame">
-      <aside className={"sidebar " + (mobileMenu ? "sidebar-open" : "")}>
+      <aside id="pro-sidebar" className={"sidebar " + (mobileMenu ? "sidebar-open" : "")}>
         <div className="brand">
           <div className="brand-mark"><Network size={22} strokeWidth={1.8} /></div>
           <div><strong>DARK XRAY <span>PRO</span></strong><small>INFRASTRUCTURE OS</small></div>
-          <button className="mobile-close icon-button" aria-label="Close menu" onClick={() => setMobileMenu(false)}><X size={20} /></button>
+          <button className="mobile-close icon-button" aria-label={language === "fa" ? "بستن منو" : "Close menu"} onClick={() => setMobileMenu(false)}><X size={20} /></button>
         </div>
-        <p className="sidebar-caption">WORKSPACE</p>
         <nav className="sidebar-nav" aria-label="Main navigation">
-          {nav.filter(item => allowed(item.id, auth.session!.user.role)).map(({ id, Icon }) => (
-            <button key={id} className={"nav-item " + (page === id ? "selected" : "")}
-              aria-current={page === id ? "page" : undefined}
-              onClick={() => { setPage(id); setMobileMenu(false); }}>
-              <Icon size={19} strokeWidth={1.8} /><span>{t[id]}</span>
-              {page === id && <ChevronRight className="nav-chevron" size={15} />}
-            </button>
-          ))}
+          {navGroups.map(group => {
+            const entries = nav.filter(item => group.pages.includes(item.id) && allowed(item.id, auth.session!.user.role));
+            if (entries.length === 0) return null;
+            return <div className="nav-group" key={group.id}>
+              <p className="sidebar-caption">{t[group.id]}</p>
+              {entries.map(({ id, Icon }) => <button type="button" key={id}
+                className={"nav-item " + (page === id ? "selected" : "")}
+                aria-current={page === id ? "page" : undefined}
+                onClick={() => { setPage(id); setMobileMenu(false); }}>
+                <Icon size={18} strokeWidth={1.8}/><span>{t[id]}</span>
+                {page === id && <ChevronRight className="nav-chevron" size={14}/>}
+              </button>)}
+            </div>;
+          })}
         </nav>
         <div className="sidebar-bottom">
           <div className="sidebar-safety"><ShieldCheck size={17} /><span>{t.developing}</span></div>
@@ -300,12 +354,12 @@ export default function App() {
       <div className="main-area">
         <header className="topbar">
           <div className="topbar-left">
-            <button className="mobile-menu icon-button" aria-label="Open menu" onClick={() => setMobileMenu(true)}><Menu size={21} /></button>
+            <button className="mobile-menu icon-button" aria-label={language === "fa" ? "بازکردن منو" : "Open menu"} aria-controls="pro-sidebar" aria-expanded={mobileMenu} onClick={() => setMobileMenu(true)}><Menu size={21} /></button>
             <span className="breadcrumb">DARK XRAY PRO</span><ChevronRight size={15} className="muted-icon" />
             <strong>{t[page]}</strong>
           </div>
           <div className="topbar-right">
-            <button type="button" className="account-shortcut" onClick={() => setPage("account")}><UserRound size={17}/><span>{auth.session.user.username}</span></button>
+            <button type="button" className="account-shortcut" aria-label={t.account + ": " + auth.session.user.username} onClick={() => setPage("account")}><UserRound size={17}/><span>{auth.session.user.username}</span></button>
             <button type="button" className="icon-button" aria-label={language === "fa" ? "خروج" : "Sign out"} onClick={() => { void logout(); }}><LogOut size={18}/></button>
             <button className="topbar-lang" onClick={() => setLanguage(language === "en" ? "fa" : "en")} aria-label="Switch language"><Globe2 size={17} />{language.toUpperCase()}</button>
             <button className="icon-button theme-shortcut" aria-label="Toggle dark and light mode" onClick={() => setTheme(theme === "dark" || (theme === "system" && systemDark) ? "light" : "dark")}>{theme === "dark" || (theme === "system" && systemDark) ? <Sun size={20} /> : <Moon size={20} />}</button>
@@ -320,24 +374,16 @@ export default function App() {
             <p>{t[page + "Lead" as keyof typeof t]}</p>
           </section>
 
-          {problem && <div className="error-banner" role="alert"><CircleHelp size={20} /><div><strong>{t.errorTitle}</strong><p>{t.errorLead} <span className="technical">{problem}</span></p></div></div>}
+          {infrastructureVisible && problem && <div className="error-banner" role="alert"><CircleHelp size={20} /><div><strong>{t.errorTitle}</strong><p>{t.errorLead} <span className="technical">{problem}</span></p></div></div>}
 
           {page === "overview" && (
             <>
-              <div className="summary-grid">
-                {summary.map(({ label, value, Icon }) => (
-                  <div className="summary-card" key={label}>
-                    <div className="card-heading"><span>{label}</span><Icon size={19} strokeWidth={1.8} /></div>
-                    <div className="metric">{value}</div>
-                    <div className="metric-foot">{t.units}</div>
-                  </div>
-                ))}
-              </div>
+              <DashboardOverview fleet={fleet} language={language} stale={problem !== null}/>
               <div className="section-head">
                 <div><h2>{t.fleetMonitor}</h2><p>{t.units}</p></div>
-                <div className="updated-caption"><RadioTower size={16} /> {ready ? dateTime(fleet.as_of, language) : t.collecting}</div>
+                <div className="updated-caption"><RadioTower size={16}/> {ready ? dateTime(fleet.as_of, language) : t.collecting}</div>
               </div>
-              <NodeTable fleet={fleet} history={history} lang={language} />
+              <NodeTable fleet={fleet} history={history} lang={language}/>
             </>
           )}
 
