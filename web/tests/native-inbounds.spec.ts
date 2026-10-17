@@ -158,3 +158,35 @@ test("an external profile revision blocks stale editor without silently overwrit
  await expect(editor.getByLabel("Name",{exact:true})).toHaveValue("Uncommitted local draft");
  expect(f.calls).toHaveLength(0);
 });
+
+test("shared port is blocked at owner form and cannot reach live Node mutation endpoint",async({page})=>{
+ const f=await fixture(page);
+ await openPage(page);
+ await page.getByRole("button",{name:"Native Test",exact:false}).click();
+ await page.getByLabel("New paired Node").selectOption("new-node");
+ await page.getByLabel("Node's assigned IP").fill("203.0.113.7");
+ await page.getByLabel("Direct port (0 = disabled)").fill("19600");
+ await page.getByLabel("Dark Swap destination port (0 = disabled)").fill("19600");
+ await expect(page.getByRole("alert").filter({hasText:"Direct and Dark Swap cannot use the same Node port"})).toBeVisible();
+ await expect(page.getByRole("button",{name:"Save Node target"})).toBeDisabled();
+ expect(f.calls.filter(c=>c.path.endsWith("/target"))).toHaveLength(0);
+ await page.getByLabel("Dark Swap destination port (0 = disabled)").fill("19601");
+ await expect(page.getByRole("button",{name:"Save Node target"})).toBeEnabled();
+ expect(f.calls).toHaveLength(0);
+});
+
+test("320px Persian shared-port warning remains readable and no save is possible",async({page})=>{
+ const f=await fixture(page);
+ await page.setViewportSize({width:320,height:780});
+ await openPage(page,true);
+ await page.getByRole("button",{name:"Native Test",exact:false}).click();
+ await page.getByRole("button",{name:"Switch language"}).click();
+ await page.getByLabel("نود جدید متصل").selectOption("new-node");
+ await page.getByLabel("IP اختصاص‌یافته به نود").fill("203.0.113.7");
+ await page.getByLabel("پورت مستقیم (صفر = غیرفعال)").fill("19600");
+ await page.getByLabel("پورت مقصد Dark Swap (صفر = غیرفعال)").fill("19600");
+ await expect(page.getByRole("alert").filter({hasText:"پورت Direct و Dark Swap نباید یکسان باشد"})).toBeVisible();
+ await expect(page.getByRole("button",{name:"ذخیره مقصد نود"})).toBeDisabled();
+ expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+2)).toBe(true);
+ expect(f.calls.filter(c=>c.path.endsWith("/target"))).toHaveLength(0);
+});
