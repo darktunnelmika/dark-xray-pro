@@ -1,6 +1,7 @@
 import type { BusinessModel } from "./useBusinessWorkspace";
 import { Users } from "lucide-react";
 import { uid } from "./shared";
+import GroupMemberManager from "./GroupMemberManager";
 export default function Groups({ model }: { model: BusinessModel }) {
   const { t, session, actionBusy, reps, groups, groupOffset, setGroupOffset, groupID, setGroupID, groupName, setGroupName, groupColor, setGroupColor, groupRep, setGroupRep, groupTarget, setGroupTarget, memberIDs, setMemberIDs, groupEditID, setGroupEditID, groupEditName, setGroupEditName, groupEditColor, setGroupEditColor, unassignID, setUnassignID, addGroup, assignGroup, editGroup, deleteGroup, unassignMember } = model;
   return <>
@@ -15,6 +16,10 @@ export default function Groups({ model }: { model: BusinessModel }) {
               <span>{g.representative_id} · {g.member_count} {t.groupCount}</span>
             </div>
             <div className="business-group-actions">
+              <button type="button" className="group-members-select-button"
+                aria-pressed={groupTarget === g.id} onClick={() => setGroupTarget(g.id)}>
+                {model.language === "fa" ? "مدیریت اعضا" : "Manage members"}
+              </button>
               <button type="button" onClick={() => {
                 setGroupEditID(g.id); setGroupEditName(g.name); setGroupEditColor(g.color); setGroupTarget(g.id);
               }}>{t.groupEdit}</button>
@@ -27,6 +32,9 @@ export default function Groups({ model }: { model: BusinessModel }) {
           <button disabled={!groups || groups.length < 50} onClick={() => setGroupOffset((x) => x + 50)}>{t.next}</button>
         </div>
       </div>
+      {groups?.filter(g => g.id === groupTarget).map(g =>
+        <GroupMemberManager key={g.id} group={g} language={model.language}
+          session={session} refresh={model.reload}/>)}
       <div className="business-form-grid">
         <form className="business-panel" onSubmit={(e) => { void addGroup(e); }}>
           <h3><Users size={17}/>{t.newGroup}</h3>

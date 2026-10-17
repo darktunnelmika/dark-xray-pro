@@ -8,7 +8,18 @@ export default function Representatives({ model }: { model: BusinessModel }) {
         <div className="business-panel">
           <h3><Users size={17}/>{t.reps}</h3>
           {reps && reps.length ? <div className="business-records">{reps.map((r) => (
-            <div key={r.id}><strong>{r.display_name} ({r.id})</strong><span>{gb(r.volume_credit_bytes)} · {r.unlimited_credit_units.toLocaleString()} {t.unlimited}</span></div>
+            <div key={r.id} className="business-rep-row">
+              <strong>{r.display_name} ({r.id})</strong>
+              <span>{gb(r.volume_credit_bytes)} · {r.unlimited_credit_units.toLocaleString()} {t.unlimited}</span>
+              {r.kind === "representative" && <div className="business-rep-select">
+                <button type="button" disabled={actionBusy} onClick={() => setCreditRep(r.id)}>
+                  {model.language === "fa" ? "انتخاب برای اعتبار" : "Select for credit"}
+                </button>
+                <button type="button" disabled={actionBusy} onClick={() => setLoginRep(r.id)}>
+                  {model.language === "fa" ? "انتخاب برای ورود" : "Select for login"}
+                </button>
+              </div>}
+            </div>
           ))}</div> : <p>{reps ? t.empty : t.loading}</p>}
           <div className="business-pagination">
             <button disabled={repOffset === 0} onClick={() => setRepOffset((x) => Math.max(0, x - 50))}>{t.previous}</button>

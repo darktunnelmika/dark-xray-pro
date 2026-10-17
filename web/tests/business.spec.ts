@@ -17,12 +17,24 @@ async function mockBase(page: Page) {
 function successfulLogin(user: typeof rep) {
   return { authenticated: true, user, csrf_token: "a".repeat(64), expires_unix: 1800000000 };
 }
-async function mockBusiness(page: Page, user: typeof rep) {
+async function mockBusiness(page: Page, user: typeof rep, seedClientCount=0) {
   let signedIn = false;
   const requests: { path: string; method: string; csrf: string; body: unknown }[] = [];
-  const runningClients: unknown[] = [];
+  const runningClients: unknown[] = Array.from({length:seedClientCount},(_,i)=>({
+    id:"paged-client-"+String(i).padStart(3,"0"),
+    name:"Member "+String(i).padStart(3,"0"),
+    representative_id:user.representative_id,archived:false,
+    deployment_state:"pending_node_apply",plan_kind:"volume",duration_days:30,
+    volume_bytes:1024,expires_unix:1800000000,
+  }));
   const operations: unknown[] = [];
   const runningGroups: Array<{ id: string; representative_id: string; name: string; color: string; member_count: number; created_unix: number; updated_unix: number }> = [];
+  const membership = new Map<string,string>();
+  const updateCounts = () => {
+    for (const group of runningGroups) {
+      group.member_count = [...membership.values()].filter(id => id === group.id).length;
+    }
+  };
   await page.route("**/api/v1/session/**", async (route) => {
     const request = route.request();
     const path = new URL(request.url()).pathname;
@@ -68,13 +80,19 @@ async function mockBusiness(page: Page, user: typeof rep) {
         const n = body as { id: string; representative_id: string; name: string; color: string };
         runningGroups.push({ ...n, member_count: 0, created_unix: 0, updated_unix: 0 });
       } else if (path.endsWith("/members") && request.method() === "POST") {
-        const groupId = path.split("/").at(-2);
-        const g = runningGroups.find((row) => row.id === groupId);
-        if (g) g.member_count = (body as { client_ids: string[] }).client_ids.length;
+        const groupId = path.split("/").at(-2)!;
+        for (const id of (body as { client_ids: string[] }).client_ids) membership.set(id, groupId);
+        updateCounts();
+      } else if (path.includes("/members/") && request.method() === "DELETE") {
+        const groupId = path.split("/").at(-3)!;
+        const id = path.split("/").at(-1)!;
+        if (membership.get(id) === groupId) membership.delete(id);
+        updateCounts();
       } else if (path.includes("/groups/") && request.method() === "DELETE") {
         const groupId = path.split("/").at(-1);
         const i = runningGroups.findIndex((row) => row.id === groupId);
         if (i >= 0) runningGroups.splice(i, 1);
+        for (const [client,owner] of membership) if (owner === groupId) membership.delete(client);
       } else if (path.includes("/groups/") && request.method() === "PATCH") {
         const groupId = path.split("/").at(-1);
         const g = runningGroups.find((row) => row.id === groupId);
@@ -105,8 +123,25 @@ async function mockBusiness(page: Page, user: typeof rep) {
         }, data_plane: "not_activated" }),
       });
     } else if (path.endsWith("/clients")) {
+      const requested = new URL(request.url()).searchParams.get("representative_id");
+      if (user.role !== "owner" && requested && requested !== user.representative_id) {
+        return route.fulfill({status:403,json:{error:"representative_scope_denied"}});
+      }
+      const repID = user.role === "representative" ? user.representative_id : requested;
+      const page = new URL(request.url()).searchParams;
+      const limit = Number(page.get("limit") ?? 50),offset = Number(page.get("offset") ?? 0);
+      const scoped = runningClients.filter(c => !repID || (c as {representative_id:string}).representative_id === repID);
       await route.fulfill({ status: 200, contentType: "application/json",
-        body: JSON.stringify({ clients: runningClients }) });
+        body: JSON.stringify({ clients: scoped.slice(offset,offset+limit) }) });
+    } else if (/^\/api\/v1\/workspace\/groups\/[^/]+\/members$/.test(path)) {
+      const groupId=path.split("/").at(-2)!;
+      const group=runningGroups.find(g=>g.id===groupId);
+      if (!group || user.role!=="owner" && group.representative_id!==user.representative_id)
+        return route.fulfill({status:403,json:{error:"representative_scope_denied"}});
+      const q=new URL(request.url()).searchParams;
+      const limit=Number(q.get("limit")??50),offset=Number(q.get("offset")??0);
+      const ids=[...membership.entries()].filter(([_,g])=>g===groupId).map(([id])=>id).sort();
+      return route.fulfill({status:200,json:{client_ids:ids.slice(offset,offset+limit),limit,offset}});
     } else if (path.endsWith("/groups")) {
       await route.fulfill({ status: 200, contentType: "application/json",
         body: JSON.stringify({ groups: runningGroups }) });
@@ -215,7 +250,7 @@ test("owner can create and bulk-edit a real group in Persian then delete group w
   await assign.getByLabel("شناسه گروه").fill("group-new");
   await assign.getByLabel("شناسه کلاینت‌ها (با کاما، حداکثر ۵۰۰)").fill("client-one,client-two");
   await assign.getByRole("button", { name: "انتقال گروهی کلاینت‌ها" }).click();
-  await expect(page.getByText("2 عضو", { exact: false })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "گروه‌های کلاینت‌ها" }).locator("..").getByText("owner · 2 عضو")).toBeVisible();
   const groupList = page.getByRole("heading", { name: "گروه‌های کلاینت‌ها" }).locator("..");
   page.once("dialog", (dialog) => dialog.accept());
   await groupList.getByRole("button", { name: "حذف گروه" }).click();
@@ -277,4 +312,135 @@ test("representative can extend then archive a client without publishing Xray, a
   expect(archived.client_id).toBe("test-lifecycle-user");
   const xrayCalls = requests.filter((v) => v.path.includes("xray") || v.path.includes("telegram"));
   expect(xrayCalls).toHaveLength(0);
+});
+
+
+// This scoped picker is a user-driven convenience around EXISTING tenant
+// guarded endpoints. It must neither touch credit nor assume a Node Apply.
+test("owner moves only same-representative clients through safe picker then removes a member without deleting account",async({page})=>{
+ await mockBase(page);
+ const requests=await mockBusiness(page,owner);
+ await page.goto("/clients");
+ await page.getByLabel("Username").fill("proowner");
+ await page.getByLabel("Password").fill("test-private-password-for-lab");
+ await page.getByRole("button",{name:"Sign in"}).click();
+
+ const create=page.getByRole("heading",{name:"Create client record"}).locator("..");
+ await create.getByLabel("Client ID").fill("owner-isolated");
+ await create.getByLabel("Client name").fill("Owner only");
+ await create.getByRole("button",{name:"Create pending client"}).click();
+ await expect(page.locator(".business-records strong").filter({hasText:"Owner only (owner-isolated)"})).toBeVisible();
+
+ await create.getByLabel("Client ID").fill("rep-isolated");
+ await create.getByLabel("Client name").fill("Rep selected");
+ await create.getByLabel("Representative ID").selectOption("rep-a");
+ await create.getByRole("button",{name:"Create pending client"}).click();
+ await expect(page.locator(".business-records strong").filter({hasText:"Rep selected (rep-isolated)"})).toBeVisible();
+ await page.goto("/groups");
+ const groupForm=page.getByRole("heading",{name:"Create group"}).locator("..");
+ await groupForm.getByLabel("Group ID").fill("rep-group-v2");
+ await groupForm.getByLabel("Group name").fill("Rep group");
+ await groupForm.getByLabel("Representative ID").selectOption("rep-a");
+ await groupForm.getByRole("button",{name:"Create group"}).click();
+ await expect(page.getByText("Rep group (rep-group-v2)")).toBeVisible();
+ await page.getByRole("button",{name:"Manage members"}).click();
+ const m=page.getByRole("region",{name:"Group membership manager"});
+ await expect(m.getByRole("heading",{name:"Group members: Rep group"})).toBeVisible();
+ await expect(m.getByText("Rep selected")).toBeVisible();
+ await expect(m.getByText("Owner only")).toHaveCount(0);
+ await expect(m.getByText(/Group ownership is enforced by the HUB/)).toBeVisible();
+
+ await m.locator(".group-members-choice input").check();
+ await expect(m.getByRole("button",{name:"Move selected clients to this group"})).toBeEnabled();
+ page.once("dialog",dialog=>dialog.accept());
+ await m.getByRole("button",{name:"Move selected clients to this group"}).click();
+ await expect(m.locator(".group-members-existing-row").getByText("rep-isolated")).toBeVisible();
+ await expect(m.getByText("1 members")).toBeVisible();
+ page.once("dialog",dialog=>dialog.accept());
+ await m.locator(".group-members-existing-row").getByRole("button",{name:"Remove membership"}).click();
+ await expect(m.locator(".group-members-existing-row")).toHaveCount(0);
+ await expect(m.getByText("0 members")).toBeVisible();
+ const paths=requests.map(r=>r.path);
+ expect(paths).toEqual([
+  "/api/v1/workspace/clients",
+  "/api/v1/workspace/clients",
+  "/api/v1/workspace/groups",
+  "/api/v1/workspace/groups/rep-group-v2/members",
+  "/api/v1/workspace/groups/rep-group-v2/members/rep-isolated",
+ ]);
+ for(const r of requests)expect(r.csrf).toBe("a".repeat(64));
+ expect(requests[3].body).toEqual({client_ids:["rep-isolated"]});
+ expect(paths.filter(x=>/usage|xray|telegram|credits/.test(x))).toHaveLength(0);
+});
+
+test("mobile Persian group picker restores selected group and candidate page after browser refresh",async({page})=>{
+ await mockBase(page);
+ const requests=await mockBusiness(page,owner,55);
+ await page.setViewportSize({width:320,height:750});
+ await page.goto("/groups");
+ await page.getByLabel("Username").fill("proowner");
+ await page.getByLabel("Password").fill("test-private-password-for-lab");
+ await page.getByRole("button",{name:"Sign in"}).click();
+ await page.getByRole("button",{name:"Switch language"}).click();
+ const form=page.getByRole("heading",{name:"ساخت گروه"}).locator("..");
+ await form.getByLabel("شناسه گروه").fill("owners-paged-v2");
+ await form.getByLabel("نام گروه").fill("گروه تست");
+ await form.getByRole("button",{name:"ساخت گروه"}).click();
+ await page.getByRole("button",{name:"مدیریت اعضا"}).click();
+ const panel=page.getByRole("region",{name:"Group membership manager"});
+ await expect(panel.getByRole("heading",{name:"مدیریت اعضای گروه: گروه تست"})).toBeVisible();
+ await expect(panel.getByText("Member 000")).toBeVisible();
+ await panel.locator(".group-members-column").first().getByRole("button",{name:"بعدی"}).click();
+ await expect(panel.getByText("Member 054")).toBeVisible();
+ await expect(panel.getByText("Member 000")).toHaveCount(0);
+ await page.reload();
+ await expect(panel.getByRole("heading",{name:"مدیریت اعضای گروه: گروه تست"})).toBeVisible();
+ await expect(panel.getByText("Member 054")).toBeVisible();
+ await expect(panel.getByText("Member 000")).toHaveCount(0);
+ await expect(panel.getByRole("checkbox")).toHaveCount(5);
+ expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+2)).toBe(true);
+ expect(requests).toHaveLength(1); // Only group create; selection & navigation are read-only
+});
+
+test("group picker fails closed when membership lookup fails and sends no mutation",async({page})=>{
+ await mockBase(page);
+ const requests=await mockBusiness(page,rep,1);
+ await page.goto("/groups");
+ await page.getByLabel("Username").fill("rep-a");
+ await page.getByLabel("Password").fill("test-private-password-for-lab");
+ await page.getByRole("button",{name:"Sign in"}).click();
+ const form=page.getByRole("heading",{name:"Create group"}).locator("..");
+ await form.getByLabel("Group ID").fill("rep-offline-v2");
+ await form.getByLabel("Group name").fill("Offline safe");
+ await form.getByRole("button",{name:"Create group"}).click();
+ await page.route("**/api/v1/workspace/groups/rep-offline-v2/members?*",r=>r.fulfill({status:503,json:{error:"unavailable"}}));
+ await page.getByRole("button",{name:"Manage members"}).click();
+ const panel=page.getByRole("region",{name:"Group membership manager"});
+ await expect(panel.getByRole("alert")).toContainText("Membership data unavailable");
+ await expect(panel.getByRole("button",{name:"Move selected clients to this group"})).toBeDisabled();
+ await expect(panel.locator(".group-members-existing-row")).toHaveCount(0);
+ expect(requests).toHaveLength(1);
+});
+
+// Selecting a representative is a local form action only; it must not
+// grant quota, create a session or leak a password until owner submits.
+test("owner representative cards prefill credit and login targets without creating credit transactions",async({page})=>{
+ await mockBase(page);
+ const requests=await mockBusiness(page,owner);
+ await page.goto("/representatives");
+ await page.getByLabel("Username").fill("proowner");
+ await page.getByLabel("Password").fill("test-private-password-for-lab");
+ await page.getByRole("button",{name:"Sign in"}).click();
+ const credits=page.getByRole("heading",{name:"Adjust representative credit"}).locator("..");
+ const login=page.getByRole("heading",{name:"Set representative login"}).locator("..");
+ await page.getByRole("button",{name:"Select for credit"}).click();
+ await expect(credits.getByLabel("Representative ID")).toHaveValue("rep-a");
+ await page.getByRole("button",{name:"Select for login"}).click();
+ await expect(login.getByLabel("Representative ID")).toHaveValue("rep-a");
+ expect(requests).toHaveLength(0);
+ await page.getByRole("button",{name:"Switch language"}).click();
+ await page.getByRole("button",{name:"انتخاب برای اعتبار"}).click();
+ await expect(page.getByRole("heading",{name:"تغییر اعتبار نماینده"}).locator("..")
+  .getByLabel("شناسه نماینده")).toHaveValue("rep-a");
+ expect(requests).toHaveLength(0);
 });
