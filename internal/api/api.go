@@ -9,6 +9,7 @@ import (
 	"github.com/darktunnelmika/dark-xray-pro/internal/configstage"
 	"github.com/darktunnelmika/dark-xray-pro/internal/hubmonitor"
 	"github.com/darktunnelmika/dark-xray-pro/internal/labrevision"
+	"github.com/darktunnelmika/dark-xray-pro/internal/nodebootstrap"
 	"github.com/darktunnelmika/dark-xray-pro/internal/nodehistory"
 	"github.com/darktunnelmika/dark-xray-pro/internal/noderegistry"
 	"github.com/darktunnelmika/dark-xray-pro/internal/replacement"
@@ -20,17 +21,19 @@ import (
 )
 
 type Server struct {
-	fleet        *telemetry.Store
-	registry     *noderegistry.Registry
-	ownerKey     string
-	replacements *replacement.Journal
-	stages       *configstage.Store
-	labRevisions *labrevision.Store
-	business     *business.Store
-	loginGate    *loginGate
-	inboundKey   []byte
-	nodeHistory  *nodehistory.Store
-	hubMonitor   *hubmonitor.Monitor
+	fleet              *telemetry.Store
+	registry           *noderegistry.Registry
+	ownerKey           string
+	replacements       *replacement.Journal
+	stages             *configstage.Store
+	labRevisions       *labrevision.Store
+	business           *business.Store
+	loginGate          *loginGate
+	inboundKey         []byte
+	nodeHistory        *nodehistory.Store
+	hubMonitor         *hubmonitor.Monitor
+	nodeBundle         *nodebootstrap.Bundle
+	nodeTransportScope string
 }
 
 func NewServer(fleet *telemetry.Store, registry *noderegistry.Registry, ownerKey string) (*Server, error) {

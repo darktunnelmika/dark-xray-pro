@@ -23,8 +23,14 @@ async function setup(page: Page, role: "owner" | "representative" = "owner") {
       metric_scope: "default_route_interface_not_billable",
     } });
     if (req.method() === "GET" && path === "/api/v1/workspace/nodes") return route.fulfill({
-      json: { mode: "new_pro_lab_only", nodes: [] },
+      json: { mode: "new_pro_lab_only", nodes: [],
+        installer_available: true, agent_transport_scope: "loopback_only" },
     });
+    if (req.method() === "GET" && path === "/api/v1/workspace/nodes/installer-bundle") {
+      return route.fulfill({ status: 200, contentType: "application/zip",
+        headers: { "Content-Disposition": "attachment; filename=\"dark-pro-new-node-installer.zip\"" },
+        body: "PK-test-only-isolated-bundle" });
+    }
     if (req.method() === "POST" && path === "/api/v1/workspace/nodes/invites") {
       expect(req.headers()["x-csrf-token"]).toBe(session.csrf_token);
       expect(req.headers().origin).toBe("http://127.0.0.1:" + new URL(req.url()).port);
@@ -102,4 +108,46 @@ test("Node enrollment form fits 320px Persian and does not expose fake live stat
   await expect(page.locator(".pro-node-ticket-code")).toHaveText(pairCode);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 2)).toBe(true);
   expect(probe.invites()).toBe(1);
+});
+
+
+test("owner downloads verified installer before the short-lived ticket and never places Pair Code into a shell command",async({page})=>{
+  const probe=await setup(page);
+  await page.goto("/nodes");await login(page);
+  const installer=page.getByRole("region",{name:"New Node installer · signed-in owner only"});
+  await expect(installer).toBeVisible();
+  await expect(installer.getByText(/loopback-only/)).toBeVisible();
+  const download=page.waitForEvent("download");
+  await installer.getByRole("button",{name:"Download checked Agent bundle"}).click();
+  const file=await download;
+  expect(file.suggestedFilename()).toBe("dark-pro-new-node-installer.zip");
+  await page.getByLabel("New Node ID").fill("qa-new-node");
+  await page.getByLabel("Display name").fill("Fresh QA only");
+  await page.getByRole("button",{name:"Generate one-time Pair Code"}).click();
+  await expect(page.locator(".pro-node-ticket-code")).toHaveText(pairCode);
+  const command=await page.locator(".pro-node-command pre").innerText();
+  expect(command).toContain("DARK_PRO_NODE_ID='qa-new-node'");
+  expect(command).toContain("DARK_PRO_HUB_AGENT_URL='https://VERIFIED_AGENT_HOST:24443'");
+  expect(command).toContain("DARK_PRO_NEW_NODE_ACK=I_CONFIRM_NEW_EMPTY_PRO_NODE");
+  expect(command).not.toContain(pairCode);
+  expect(command).not.toContain("agent_token");
+  expect(probe.paths.some(p=>p==="GET /api/v1/workspace/nodes/installer-bundle")).toBe(true);
+  await page.reload();
+  await expect(page.locator(".pro-node-ticket-code")).toHaveCount(0);
+  await expect(page.locator(".pro-node-command")).toHaveCount(0);
+  const stored=await page.evaluate(()=>JSON.stringify({...localStorage,...sessionStorage}));
+  expect(stored).not.toContain(pairCode);
+});
+
+test("fresh Node installer instructions and command do not overflow 320px Persian RTL",async({page})=>{
+  await setup(page);
+  await page.setViewportSize({width:320,height:760});
+  await page.goto("/nodes");await login(page);
+  await page.getByRole("button",{name:"Switch language"}).click();
+  await expect(page.getByRole("region",{name:"نصب Agent نود جدید · فقط مالک"})).toBeVisible();
+  await page.getByLabel("شناسه نود جدید").fill("qa-new-node");
+  await page.getByLabel("نام نمایشی").fill("نود جدید");
+  await page.getByRole("button",{name:"ساخت کد اتصال یک‌بارمصرف"}).click();
+  await expect(page.getByRole("region",{name:"فقط داخل VPS جدید اجرا کن"})).toBeVisible();
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+2)).toBe(true);
 });

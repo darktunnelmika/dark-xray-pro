@@ -13,6 +13,7 @@ import (
 	"github.com/darktunnelmika/dark-xray-pro/internal/configstage"
 	"github.com/darktunnelmika/dark-xray-pro/internal/hubmonitor"
 	"github.com/darktunnelmika/dark-xray-pro/internal/labrevision"
+	"github.com/darktunnelmika/dark-xray-pro/internal/nodebootstrap"
 	"github.com/darktunnelmika/dark-xray-pro/internal/nodehistory"
 	"github.com/darktunnelmika/dark-xray-pro/internal/noderegistry"
 	"github.com/darktunnelmika/dark-xray-pro/internal/replacement"
@@ -116,6 +117,26 @@ func main() {
 	hubMonitor := hubmonitor.New(nil, nil, nil)
 	if err := service.EnableHubMonitor(hubMonitor); err != nil {
 		log.Fatal(err)
+	}
+	// Export the matching release Agent only to an authenticated owner.
+	executable, executableErr := os.Executable()
+	if executableErr == nil {
+		artifact, artifactErr := nodebootstrap.Open(filepath.Join(filepath.Dir(executable), "dark-pro-agent"))
+		if artifactErr == nil {
+			if err := service.EnableNodeInstaller(artifact); err != nil {
+				log.Fatal(err)
+			}
+		} else {
+			log.Printf("matching NEW PRO Agent bundle unavailable; Node installer download disabled")
+		}
+	}
+	if *agentListen == "" {
+		service.SetNodeTransportScope("disabled")
+	} else if loopbackAddr(*agentListen) {
+		service.SetNodeTransportScope("loopback_only")
+	} else {
+		// A listener does not prove reachable/verified external transport.
+		service.SetNodeTransportScope("external_tls_unverified")
 	}
 	if os.Getenv("DARK_PRO_ENABLE_NODE_HISTORY") == "1" {
 		clean := filepath.Clean(*nodeHistoryPath)
