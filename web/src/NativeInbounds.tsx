@@ -1,6 +1,7 @@
 import "./NativeInbounds.css";
 import { useSession, api, ApiError as Fault } from "./session";
 import InboundLifecycle from "./InboundLifecycle";
+import NativeReadiness, { type NativePreflight } from "./NativeReadiness";
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { ArrowRightLeft, CheckCircle2, KeyRound, RefreshCw, Server, ShieldCheck, Users, Waypoints } from "lucide-react";
 
@@ -9,7 +10,7 @@ type Inbound = { revision: number; enabled: boolean; archived: boolean; id: numb
 type Target = { inbound_id: number; node_id: string; installation_id: string; listen_ip: string; direct_port: number; swap_port: number };
 type Node = { node_id: string; installation_id: string; name: string };
 type Status = { node_id: string; installation_id: string; desired_sequence: number; desired_sha: string; reported_sequence: number; reported_sha: string; state: string; phase: string; reported_at?: string; lease_expires_at?: string; process_ready: boolean };
-type Overview = { inbounds: Inbound[]; nodes: Node[]; targets: Target[]; runtime: Status[] };
+type Overview = { inbounds: Inbound[]; nodes: Node[]; targets: Target[]; runtime: Status[]; preflight?: NativePreflight };
 type Client = { id: string; name: string; representative_id: string; archived: boolean; deployment_state: string };
 async function request<T>(path: string, signal: AbortSignal, body?: unknown, csrf?: string): Promise<T> {
  return api<T>(path, { signal, method: body === undefined ? "GET" : "POST",
@@ -115,6 +116,7 @@ export default function NativeInbounds({ language, fallback }: { language: Lang;
   {session?.authenticated && session.user?.role !== "owner" && <p className="native-warning">{t.ownerOnly}</p>}
   {disabled && <p className="native-warning">{t.unavailable}</p>}
   {session?.authenticated && session.user?.role === "owner" && data && <>
+   <NativeReadiness preflight={data.preflight} stale={stale} language={language}/>
    <div className="native-grid">
     <form className="native-card" onSubmit={create}><h3><KeyRound size={19}/>{t.create}</h3>
      <label>{t.name}<input value={name} onChange={e => setName(e.target.value)} required maxLength={128}/></label>
