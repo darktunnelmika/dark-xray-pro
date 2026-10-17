@@ -8,6 +8,7 @@ import {
 import { getFleet, type FleetSnapshot, type NodeSnapshot } from "./api";
 import InboundPlanner from "./InboundPlanner";
 import NodeManager from "./NodeManager";
+import NodeHistory from "./NodeHistory";
 import BusinessWorkspace from "./BusinessWorkspace";
 import { useSession } from "./session";
 import { allowed, useNavigation, type Page } from "./navigation";
@@ -44,6 +45,7 @@ const translations = {
     download: "Fleet interface RX", upload: "Fleet interface TX",
     fleetMonitor: "Node monitor", updated: "Last received",
     memory: "RAM", iface: "Interface", cpu: "CPU", cores: "cores",
+    disk: "Root disk", load: "Load (1m / 5m / 15m)", uptime: "Host uptime", tcp: "Host TCP sockets",
     units: "Default-route interface rate, not customer-billable traffic.",
     inboundsEmpty: "No Inbounds engine connected",
     inboundsNote: "Direct, Tunnel and Dark Swap will be configured per node within each Inbound. No legacy tunnel settings will be imported automatically.",
@@ -77,6 +79,7 @@ const translations = {
     download: "دریافت شبکه نودها", upload: "ارسال شبکه نودها",
     fleetMonitor: "مانیتور نودها", updated: "آخرین دریافت",
     memory: "رم", iface: "اینترفیس", cpu: "پردازنده", cores: "هسته",
+    disk: "دیسک ریشه", load: "لود (۱ / ۵ / ۱۵ دقیقه)", uptime: "زمان روشن‌بودن سرور", tcp: "سوکت‌های TCP سرور",
     units: "سرعت اینترفیس مسیر پیش‌فرض، نه مصرف قابل کسر از سهمیه کاربران.",
     inboundsEmpty: "هنوز موتور اینباند متصل نیست",
     inboundsNote: "Direct، Tunnel و Dark Swap برای هر نود داخل اینباند تنظیم می‌شوند. تونل قدیمی خودکار وارد نمی‌شود.",
@@ -346,7 +349,10 @@ export default function App() {
               </div>
               <NodeTable fleet={fleet} history={history} lang={language}
                 selectedNodeId={selectedNodeId} onSelect={setSelectedNodeId} />
-              {selectedNode ? <NodeInspector node={selectedNode} lang={language} /> : (
+              {selectedNode ? <>
+                <NodeInspector node={selectedNode} lang={language} />
+                <NodeHistory nodeID={selectedNode.node_id} language={language}/>
+              </> : (
                 <div className="node-manager-note" role="status">
                   <ShieldCheck size={19}/>
                   <div><strong>{ready && fleet.nodes.length === 0 ? t.emptyTitle : t.nodeSelected}</strong>
@@ -399,6 +405,11 @@ function NodeTable({ fleet, history, lang, selectedNodeId, onSelect }: {
     lang={lang} key={node.node_id} selected={selectedNodeId === node.node_id} onSelect={onSelect} />)}</div>;
 }
 
+function uptimeDisplay(seconds: number, language: Language): string {
+  const days = Math.floor(seconds / 86400);
+  const hours = Math.floor((seconds % 86400) / 3600);
+  return days > 0 ? (days + (language === "fa" ? " روز · " : "d · ") + hours + "h") : hours + "h";
+}
 function NodeInspector({ node, lang }: { node: NodeSnapshot; lang: Language }) {
   const t = translations[lang];
   const online = node.status === "online";
@@ -412,6 +423,10 @@ function NodeInspector({ node, lang }: { node: NodeSnapshot; lang: Language }) {
     { label: t.nodeAddress, value: current && node.interface ? node.interface : "—" },
     { label: t.cpu, value: current ? node.cpu_percent.toFixed(1) + "%" : "—" },
     { label: t.memory, value: current ? ram(node.ram_used_bytes) + " / " + ram(node.ram_total_bytes) : "—" },
+    { label: t.disk, value: current && node.disk_used_bytes != null && node.disk_total_bytes != null ? ram(node.disk_used_bytes) + " / " + ram(node.disk_total_bytes) : "—" },
+    { label: t.load, value: current && node.load_1 != null && node.load_5 != null && node.load_15 != null ? [node.load_1,node.load_5,node.load_15].map(v=>v.toFixed(2)).join(" / ") : "—" },
+    { label: t.uptime, value: current && node.uptime_seconds != null ? uptimeDisplay(node.uptime_seconds,lang) : "—" },
+    { label: t.tcp, value: current && node.tcp_inuse != null ? node.tcp_inuse.toLocaleString("en-US") : "—" },
     { label: t.download, value: current ? rate(node.rx_bits_per_second ?? undefined) : "—" },
     { label: t.upload, value: current ? rate(node.tx_bits_per_second ?? undefined) : "—" },
   ];

@@ -2,6 +2,7 @@ package api
 
 import (
 	"errors"
+	"log"
 	"net/http"
 
 	"github.com/darktunnelmika/dark-xray-pro/internal/noderegistry"
@@ -118,6 +119,19 @@ func (s *Server) attachEnrollment(mux *http.ServeMux) {
 				respond(w, http.StatusUnprocessableEntity, map[string]string{"error": "invalid_telemetry"})
 			}
 			return
+		}
+		// History is host monitoring only; a storage error must never cause
+		// a valid Agent heartbeat to lose its independent liveness ACK.
+		if s.nodeHistory != nil {
+			snapshot := s.fleet.Snapshot()
+			for _, node := range snapshot.Nodes {
+				if node.NodeID == sample.NodeID && node.MetricsCurrent {
+					if err := s.nodeHistory.Record(r.Context(), node, sample.InstallationID); err != nil {
+						log.Printf("PRO nonbilling telemetry history unavailable: %v", err)
+					}
+					break
+				}
+			}
 		}
 		w.WriteHeader(http.StatusNoContent)
 	})

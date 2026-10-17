@@ -15,6 +15,13 @@ export interface NodeSnapshot {
   last_seen: string | null;
   metrics_at: string | null;
   metrics_current: boolean;
+  disk_total_bytes?: number | null;
+  disk_used_bytes?: number | null;
+  load_1?: number | null;
+  load_5?: number | null;
+  load_15?: number | null;
+  uptime_seconds?: number | null;
+  tcp_inuse?: number | null;
 }
 
 export interface FleetSnapshot {
@@ -52,6 +59,14 @@ export async function getFleet(signal: AbortSignal): Promise<FleetSnapshot> {
         typeof node.ram_total_bytes !== "number" ||
         typeof node.ram_used_bytes !== "number" ||
         typeof node.metrics_current !== "boolean" ||
+        (node.disk_total_bytes != null && (!Number.isSafeInteger(node.disk_total_bytes) || node.disk_total_bytes <= 0)) ||
+        (node.disk_used_bytes != null && (!Number.isSafeInteger(node.disk_used_bytes) || node.disk_used_bytes < 0)) ||
+        (node.disk_total_bytes != null && node.disk_used_bytes != null && node.disk_used_bytes > node.disk_total_bytes) ||
+        (node.load_1 != null && (!Number.isFinite(node.load_1) || node.load_1 < 0)) ||
+        (node.load_5 != null && (!Number.isFinite(node.load_5) || node.load_5 < 0)) ||
+        (node.load_15 != null && (!Number.isFinite(node.load_15) || node.load_15 < 0)) ||
+        (node.uptime_seconds != null && (!Number.isSafeInteger(node.uptime_seconds) || node.uptime_seconds < 0)) ||
+        (node.tcp_inuse != null && (!Number.isSafeInteger(node.tcp_inuse) || node.tcp_inuse < 0)) ||
         (node.rx_bits_per_second !== null && typeof node.rx_bits_per_second !== "number") ||
         (node.tx_bits_per_second !== null && typeof node.tx_bits_per_second !== "number"),
     )

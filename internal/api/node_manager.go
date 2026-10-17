@@ -2,6 +2,7 @@ package api
 
 import (
 	"errors"
+	"github.com/darktunnelmika/dark-xray-pro/internal/nodehistory"
 	"net/http"
 	"time"
 
@@ -17,6 +18,16 @@ type ownerNode struct {
 	Status         string     `json:"status"`
 	MetricsCurrent bool       `json:"metrics_current"`
 	LastSeen       *time.Time `json:"last_seen"`
+}
+
+// EnableNodeHistory is an explicit isolated-PRO-only opt-in. Nothing is
+// written into the business database, and no Node can be enrolled implicitly.
+func (s *Server) EnableNodeHistory(h *nodehistory.Store) error {
+	if h == nil {
+		return errors.New("independent history store required")
+	}
+	s.nodeHistory = h
+	return nil
 }
 
 func (s *Server) attachNodeManager(mux *http.ServeMux) {
@@ -40,6 +51,42 @@ func (s *Server) attachNodeManager(mux *http.ServeMux) {
 			rows = append(rows, row)
 		}
 		respond(w, http.StatusOK, map[string]any{"nodes": rows, "mode": "new_pro_lab_only"})
+	})
+	mux.HandleFunc("GET /api/v1/workspace/nodes/{id}/history", func(w http.ResponseWriter, r *http.Request) {
+		if _, ok := s.authorizeBrowser(w, r, false, true); !ok {
+			return
+		}
+		id := r.PathValue("id")
+		var installation string
+		for _, registration := range s.registry.List() {
+			if registration.NodeID == id {
+				installation = registration.InstallationID
+				break
+			}
+		}
+		if installation == "" {
+			respond(w, http.StatusNotFound, map[string]string{"error": "node_not_found"})
+			return
+		}
+		if s.nodeHistory == nil {
+			respond(w, http.StatusServiceUnavailable, map[string]string{"error": "node_history_unavailable"})
+			return
+		}
+		window := r.URL.Query().Get("window")
+		points, err := s.nodeHistory.Query(r.Context(), id, installation, window)
+		if errors.Is(err, nodehistory.ErrWindow) || errors.Is(err, nodehistory.ErrInvalid) {
+			respond(w, http.StatusUnprocessableEntity, map[string]string{"error": "invalid_history_window"})
+			return
+		}
+		if err != nil {
+			respond(w, http.StatusServiceUnavailable, map[string]string{"error": "node_history_unavailable"})
+			return
+		}
+		bucket := 60
+		if window == "24h" {
+			bucket = 300
+		}
+		respond(w, http.StatusOK, map[string]any{"node_id": id, "window": window, "bucket_seconds": bucket, "scope": "host_interface_not_billable", "points": points})
 	})
 	mux.HandleFunc("POST /api/v1/workspace/nodes/invites", func(w http.ResponseWriter, r *http.Request) {
 		if _, ok := s.authorizeBrowser(w, r, true, true); !ok {
