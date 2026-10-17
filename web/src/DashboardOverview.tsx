@@ -6,6 +6,7 @@ import {
 import type { FleetSnapshot } from "./api";
 import NodeHistory from "./NodeHistory";
 import HubLive from "./HubLive";
+import DashboardNodeFleet from "./DashboardNodeFleet";
 
 type Language = "en" | "fa";
 
@@ -53,15 +54,19 @@ function Metric({ label, value, note, Icon, kind }: {
     <small className="dash-metric-note">{note}</small>
   </article>;
 }
-export default function DashboardOverview({ fleet, language, stale }: {
-  fleet: FleetSnapshot | null; language: Language; stale: boolean;
+export default function DashboardOverview({ fleet, history, language, stale, onInspectNode }: {
+  fleet: FleetSnapshot | null;
+  history: Record<string, number[]>;
+  language: Language;
+  stale: boolean;
+  onInspectNode: (nodeID: string) => void;
 }) {
   const t = labels[language];
   const nodes = fleet?.nodes ?? [];
   const [selected, setSelected] = useState("");
   const [showHistory, setShowHistory] = useState(false);
   const selectedNode = nodes.find(node => node.node_id === selected) ?? nodes.find(node => node.status === "online") ?? nodes[0];
-  const fresh = nodes.filter(node => node.status === "online" && node.metrics_current);
+  const fresh = stale ? [] : nodes.filter(node => node.status === "online" && node.metrics_current);
   const delayed = nodes.filter(node => node.status === "online" && !node.metrics_current);
   const avgCPU = fresh.length > 0
     ? (fresh.reduce((total, node) => total + node.cpu_percent, 0) / fresh.length).toLocaleString("en-US", { maximumFractionDigits: 1 }) + "%"
@@ -69,11 +74,13 @@ export default function DashboardOverview({ fleet, language, stale }: {
   const known = fleet !== null;
   // A zero physical rate can be real, but a missing sample / incomplete
   // fleet must remain unknown. Never merge these counters with billing.
-  const networkReady = known && fleet.physical_rates_complete && fleet.online_nodes > 0;
+  const networkReady = !stale && known && fleet.physical_rates_complete && fleet.online_nodes > 0;
   const percentage = known && fleet.total_nodes > 0 ? fleet.online_nodes / fleet.total_nodes * 100 : 0;
 
   return <section className="dashboard-v2" aria-label={t.title}>
     <HubLive language={language}/>
+    <DashboardNodeFleet fleet={fleet} history={history} language={language}
+      stale={stale} onInspect={onInspectNode}/>
     <div className="dash-intro">
       <div><span className="dash-eyebrow"><Signal size={15}/>{t.title}</span><p>{t.explanation}</p></div>
       <span className={"dash-sync-state " + (!known ? "is-pending" : stale ? "is-stale" : "is-verified")} role="status">
@@ -101,8 +108,8 @@ export default function DashboardOverview({ fleet, language, stale }: {
           <span style={{ width: percentage + "%" }}/>
         </div>
         <div className="dash-quality-line">
-          <span><i className="dot-fresh"/>{t.fresh}<b>{known ? fresh.length : "—"}</b></span>
-          <span><i className="dot-delayed"/>{t.outdated}<b>{known ? delayed.length : "—"}</b></span>
+          <span><i className="dot-fresh"/>{t.fresh}<b>{known && !stale ? fresh.length : "—"}</b></span>
+          <span><i className="dot-delayed"/>{t.outdated}<b>{known && !stale ? delayed.length : "—"}</b></span>
         </div>
         <p className="dash-quality-note">{t.missing}</p>
       </article>

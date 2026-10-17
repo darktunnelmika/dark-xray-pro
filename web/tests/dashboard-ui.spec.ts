@@ -48,7 +48,7 @@ test("dashboard uses fresh-only CPU and refuses incomplete physical rates or fab
   await page.goto("/dashboard");
   const panel = page.getByRole("region", { name: "Fleet intelligence" });
   await expect(panel).toBeVisible();
-  await expect(panel.getByText("37.5%")).toBeVisible();
+  await expect(panel.locator(".dash-metric-grid").getByText("37.5%")).toBeVisible();
   await expect(panel.locator(".dash-quality-line").getByText("Fresh metrics")).toBeVisible();
   await expect(panel.locator(".dash-quality-line").getByText("Delayed metrics")).toBeVisible();
   await expect(panel.getByText("2 / 2")).toBeVisible();
