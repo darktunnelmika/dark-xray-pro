@@ -5,6 +5,7 @@ import {
 } from "lucide-react";
 import type { FleetSnapshot } from "./api";
 import NodeHistory from "./NodeHistory";
+import HubLive from "./HubLive";
 
 type Language = "en" | "fa";
 
@@ -72,6 +73,7 @@ export default function DashboardOverview({ fleet, language, stale }: {
   const percentage = known && fleet.total_nodes > 0 ? fleet.online_nodes / fleet.total_nodes * 100 : 0;
 
   return <section className="dashboard-v2" aria-label={t.title}>
+    <HubLive language={language}/>
     <div className="dash-intro">
       <div><span className="dash-eyebrow"><Signal size={15}/>{t.title}</span><p>{t.explanation}</p></div>
       <span className={"dash-sync-state " + (!known ? "is-pending" : stale ? "is-stale" : "is-verified")} role="status">

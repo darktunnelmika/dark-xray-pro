@@ -7,6 +7,7 @@ import (
 	"errors"
 	"github.com/darktunnelmika/dark-xray-pro/internal/business"
 	"github.com/darktunnelmika/dark-xray-pro/internal/configstage"
+	"github.com/darktunnelmika/dark-xray-pro/internal/hubmonitor"
 	"github.com/darktunnelmika/dark-xray-pro/internal/labrevision"
 	"github.com/darktunnelmika/dark-xray-pro/internal/nodehistory"
 	"github.com/darktunnelmika/dark-xray-pro/internal/noderegistry"
@@ -29,6 +30,7 @@ type Server struct {
 	loginGate    *loginGate
 	inboundKey   []byte
 	nodeHistory  *nodehistory.Store
+	hubMonitor   *hubmonitor.Monitor
 }
 
 func NewServer(fleet *telemetry.Store, registry *noderegistry.Registry, ownerKey string) (*Server, error) {
@@ -102,6 +104,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/fleet", func(w http.ResponseWriter, _ *http.Request) { respond(w, http.StatusOK, s.snapshot()) })
 	s.attachEnrollment(mux)
 	s.attachNodeManager(mux)
+	s.attachHubMonitor(mux)
 	s.attachReplacement(mux)
 	s.attachConfigStaging(mux)
 	s.attachLabRevisions(mux)

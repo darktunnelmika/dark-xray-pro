@@ -11,6 +11,7 @@ import (
 	"github.com/darktunnelmika/dark-xray-pro/internal/api"
 	"github.com/darktunnelmika/dark-xray-pro/internal/business"
 	"github.com/darktunnelmika/dark-xray-pro/internal/configstage"
+	"github.com/darktunnelmika/dark-xray-pro/internal/hubmonitor"
 	"github.com/darktunnelmika/dark-xray-pro/internal/labrevision"
 	"github.com/darktunnelmika/dark-xray-pro/internal/nodehistory"
 	"github.com/darktunnelmika/dark-xray-pro/internal/noderegistry"
@@ -108,6 +109,12 @@ func main() {
 	}
 	service, err := api.NewServer(store, registry, os.Getenv("DARK_PRO_LAB_TOKEN"))
 	if err != nil {
+		log.Fatal(err)
+	}
+	// Sample only this NEW PRO HUB's local Linux host. No remote Agent and no
+	// business accounting operation is consulted for these observations.
+	hubMonitor := hubmonitor.New(nil, nil, nil)
+	if err := service.EnableHubMonitor(hubMonitor); err != nil {
 		log.Fatal(err)
 	}
 	if os.Getenv("DARK_PRO_ENABLE_NODE_HISTORY") == "1" {
@@ -222,6 +229,7 @@ func main() {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	go hubMonitor.Run(ctx)
 	errs := make(chan error, 2)
 	go func() { errs <- admin.ListenAndServe() }()
 	if agentTLS != nil {
