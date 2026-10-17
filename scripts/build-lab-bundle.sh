@@ -42,6 +42,7 @@ CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags='-s -w' \
   -o release/bin/dark-pro-owner-setup ./cmd/owner-setup
 
 install -m 0755 scripts/install-lab.sh release/scripts/install-lab.sh
+install -m 0755 internal/nodebootstrap/install-new-pro-node.sh release/scripts/install-new-pro-node.sh
 
 (cd release && find bin scripts -type f -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS)
 (cd release && sha256sum -c SHA256SUMS)

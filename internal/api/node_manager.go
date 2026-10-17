@@ -50,7 +50,29 @@ func (s *Server) attachNodeManager(mux *http.ServeMux) {
 			}
 			rows = append(rows, row)
 		}
-		respond(w, http.StatusOK, map[string]any{"nodes": rows, "mode": "new_pro_lab_only"})
+		respond(w, http.StatusOK, map[string]any{
+			"nodes": rows, "mode": "new_pro_lab_only",
+			"installer_available":   s.nodeBundle != nil,
+			"agent_transport_scope": s.nodeTransportScope,
+		})
+	})
+	// Explicit owner-session-only download. Never serves old Nodes, Xray,
+	// customer credentials or a generated Pair Code in the ZIP package.
+	mux.HandleFunc("GET /api/v1/workspace/nodes/installer-bundle", func(w http.ResponseWriter, r *http.Request) {
+		if _, ok := s.authorizeBrowser(w, r, false, true); !ok {
+			return
+		}
+		if s.nodeBundle == nil {
+			respond(w, http.StatusServiceUnavailable, map[string]string{"error": "installer_bundle_unavailable"})
+			return
+		}
+		if err := s.nodeBundle.Download(w); err != nil {
+			// No secret is ever returned, and we must never substitute a
+			// silently different Agent binary.
+			if w.Header().Get("Content-Type") == "" {
+				respond(w, http.StatusServiceUnavailable, map[string]string{"error": "installer_bundle_unavailable"})
+			}
+		}
 	})
 	mux.HandleFunc("GET /api/v1/workspace/nodes/{id}/history", func(w http.ResponseWriter, r *http.Request) {
 		if _, ok := s.authorizeBrowser(w, r, false, true); !ok {

@@ -36,3 +36,38 @@
 .pro-node-boundary{display:flex;align-items:center;gap:8px;color:var(--sub);font-size:11px;margin:0}
 @media(max-width:970px){.pro-node-manager-form{grid-template-columns:1fr 1fr}.pro-node-manager-form>button{grid-column:1/-1}}
 @media(max-width:580px){.pro-node-manager-form,.pro-node-cancel{grid-template-columns:1fr}.pro-node-manager-form>button,.pro-node-cancel>strong,.pro-node-cancel>small{grid-column:auto}.pro-node-roster-row{align-items:flex-start;flex-direction:column}.pro-node-ticket-actions button{flex:1}}
+
+/* V2: verified NEW Node bootstrap, owner-only; never embed Pair Codes in commands. */
+.pro-node-installer { display: grid; gap: 10px; padding: clamp(14px,2vw,20px);
+  border: 1px solid var(--border); border-radius: 17px; background: var(--surface-2); min-width: 0; }
+.pro-node-installer-top { display: flex; justify-content: space-between; align-items: center;
+  gap: 12px; flex-wrap: wrap; }
+.pro-node-installer-top h3 { margin: 0 0 6px; font-size: 14px; }
+.pro-node-installer-top p { margin: 0; color: var(--sub); font-size: 11px; max-width: 680px; line-height: 1.85; }
+.pro-node-installer-top button { background: var(--accent); color: var(--accent-contrast);
+  flex: 0 0 auto; }
+.pro-node-installer-warning { margin: 0; display: flex; align-items: start; gap: 9px;
+  padding: 11px 12px; border: 1px solid var(--border); background: var(--surface);
+  border-radius: 12px; color: var(--red); font-size: 11px; line-height: 1.8; }
+.pro-node-installer-warning svg { flex: 0 0 auto; }
+.pro-node-installer-note { margin: 0; color: var(--sub); font-size: 11px; line-height: 1.8; }
+.pro-node-command { min-width: 0; display: grid; gap: 10px; padding: 14px;
+  border: 1px solid var(--border); background: var(--surface); border-radius: 12px; }
+.pro-node-command h3 { display: flex; align-items: center; gap: 8px; color: var(--text);
+  font-size: 13px; margin: 0; }
+.pro-node-command h3 svg { color: var(--accent); }
+.pro-node-command p { color: var(--sub); font-size: 11px; margin: 0; line-height: 1.9; }
+.pro-node-command pre { direction: ltr; text-align: left; margin: 0; width: 100%;
+  min-width: 0; overflow-x: auto; white-space: pre; border: 1px solid var(--border);
+  background: var(--surface-2); color: var(--text); border-radius: 9px; padding: 12px; }
+.pro-node-command code { font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  line-height: 1.8; font-size: 11px; }
+.pro-node-command small { color: var(--sub); font-size: 10px; }
+.pro-node-command button { justify-self: start; min-width: 0; }
+@media(max-width:580px) {
+  .pro-node-installer-top { align-items: stretch; flex-direction: column; }
+  .pro-node-installer-top button { width: 100%; }
+  .pro-node-command { padding: 11px; }
+  .pro-node-command pre { padding: 9px; }
+  .pro-node-command code { font-size: 10px; }
+}

@@ -121,6 +121,8 @@ func main() {
 	name := flag.String("name", "", "display name")
 	hub := flag.String("hub", "http://127.0.0.1:2087", "local lab HUB")
 	identityPath := flag.String("identity-file", "", "private local Agent enrollment identity file")
+	probeOnly := flag.Bool("probe-only", false, "verify pinned Agent-only HUB TLS without loading an identity or pairing")
+	enrollOnly := flag.Bool("enroll-only", false, "pair the new Agent identity and exit; do not start telemetry or native runtime")
 	stageXrayBinary := flag.String("stage-xray-binary", "", "explicit trusted Xray binary for OFFLINE validation only")
 	stageXraySHA := flag.String("stage-xray-sha256", "", "SHA256 of separately trusted Xray binary")
 	pin := flag.String("hub-cert-sha256", "", "required SHA256 fingerprint of the verified HTTPS HUB leaf certificate")
@@ -168,6 +170,9 @@ func main() {
 	if err != nil {
 		log.Fatal("unsafe HUB transport: ", err)
 	}
+	if *probeOnly && !remote {
+		log.Fatal("probe-only requires explicitly verified remote HTTPS TLS")
+	}
 	if remote {
 		probe, cancel := context.WithTimeout(ctx, 6*time.Second)
 		err = agenttransport.Probe(probe, client, endpoint)
@@ -175,6 +180,10 @@ func main() {
 		if err != nil {
 			log.Fatal("verified HTTPS LAB Agent endpoint is not ready: ", err)
 		}
+	}
+	if *probeOnly {
+		log.Printf("verified dedicated PRO Agent TLS1.3 transport and certificate pin; no identity or installation created")
+		return
 	}
 	location := *identityPath
 	if location == "" {
@@ -195,6 +204,13 @@ func main() {
 		if err != nil {
 			log.Fatal("LAB pairing succeeded but local receipt was not saved; retry with the same identity: ", err)
 		}
+	}
+	if *enrollOnly {
+		if !remote || !identity.Paired {
+			log.Fatal("enroll-only requires successfully paired remote TLS Agent")
+		}
+		log.Printf("PRO isolated Agent paired; exiting before any native runtime or telemetry service")
+		return
 	}
 	var nativeRuntime *managedxray.Runtime
 	var usageSender *uc.Sender
