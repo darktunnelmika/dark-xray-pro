@@ -154,6 +154,20 @@ func registerEpoch(ctx context.Context, c sqlWriter, authority uc.Epoch) error {
 	if !errors.Is(err, sql.ErrNoRows) {
 		return err
 	}
+	// A fresh process cannot open a second unsealed epoch on one Node
+	// installation. This includes a previously committed initial zero receipt,
+	// uncertain tails and a changed kernel PID. The original epoch can only
+	// be replaced after a verified final quiesced receipt seals its ledger.
+	// Exact replay of the SAME epoch was accepted above.
+	var outstanding int
+	if err = c.QueryRowContext(ctx,
+		"SELECT COUNT(*) FROM pro_usage_epochs WHERE node_id=? AND installation_id=? AND state!='sealed'",
+		e.NodeID, e.InstallationID).Scan(&outstanding); err != nil {
+		return err
+	}
+	if outstanding != 0 {
+		return ErrConflict
+	}
 	for _, b := range e.Bindings {
 		var n int
 		if err = c.QueryRowContext(ctx, "SELECT COUNT(*) FROM pro_usage_accounts WHERE client_id=?", b.ClientID).Scan(&n); err != nil {

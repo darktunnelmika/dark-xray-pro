@@ -214,6 +214,10 @@ func main() {
 	}
 	var nativeRuntime *managedxray.Runtime
 	var usageSender *uc.Sender
+	remoteMetered := os.Getenv("DARK_PRO_ENABLE_NATIVE_METERED_ADMISSION") == "1"
+	if remoteMetered && (os.Getenv("DARK_PRO_ENABLE_NATIVE_RUNTIME") != "1" || !remote) {
+		log.Fatal("metered admission needs explicit native runtime and pinned remote TLS")
+	}
 	if os.Getenv("DARK_PRO_ENABLE_NATIVE_RUNTIME") == "1" {
 		if !remote || !identity.Paired || *stageXrayBinary == "" || len(*stageXraySHA) != 64 || *runtimeDir == "" {
 			log.Fatal("native runtime requires verified TLS, a freshly paired installation, a pinned core and private state directory")
@@ -269,7 +273,7 @@ func main() {
 				if ctx.Err() != nil {
 					return
 				}
-				attempt, cancel := context.WithTimeout(ctx, 12*time.Second)
+				attempt, cancel := context.WithTimeout(ctx, managedxray.MeteredSyncTimeout)
 				blocked, replayErr := replayUsageBeforeSync(attempt, nativeRuntime, usageSender)
 				if blocked {
 					cancel()
@@ -287,7 +291,12 @@ func main() {
 					}
 					continue
 				}
-				_, err := nativeRuntime.Sync(attempt, client, endpoint)
+				var err error
+				if remoteMetered {
+					_, err = nativeRuntime.MeteredRemoteSync(attempt, client, endpoint, usageSender)
+				} else {
+					_, err = nativeRuntime.Sync(attempt, client, endpoint)
+				}
 				cancel()
 				if err != nil && ctx.Err() == nil {
 					log.Printf("native runtime synchronization unavailable; short lease remains enforced")
