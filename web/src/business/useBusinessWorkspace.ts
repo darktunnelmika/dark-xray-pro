@@ -8,8 +8,11 @@ export function useBusinessWorkspace(language: Language, section: Section) {
   if (!session) throw new Error("Authenticated workspace required");
   const [oldPassword, setOldPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
-  const pendingCreditKey = useRef<string | null>(null);
-  const pendingClientKey = useRef<string | null>(null);
+  // Reuse an operation ID ONLY for an identical canonical payload after
+  // an ambiguous network result. Editing the target, amount, name or plan
+  // must never reuse an earlier financial/identity event ID.
+  const pendingCreditKey = useRef<{ key: string; id: string } | null>(null);
+  const pendingClientKey = useRef<{ key: string; id: string } | null>(null);
   const [actionBusy, setActionBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
@@ -152,12 +155,14 @@ export function useBusinessWorkspace(language: Language, section: Section) {
     if (bytes === null || !Number.isSafeInteger(units) || Math.abs(units) > 1_000_000_000 || (bytes === 0 && units === 0)) {
       setNotice(t.missing); return;
     }
-    const eventId = pendingCreditKey.current ?? uid();
-    pendingCreditKey.current = eventId;
+    const payload = { representative_id: creditRep, volume_delta_bytes: bytes,
+      unlimited_delta_units: units, reason: creditReason.trim() };
+    const key = JSON.stringify(payload);
+    const eventId = pendingCreditKey.current?.key === key ? pendingCreditKey.current.id : uid();
+    pendingCreditKey.current = { key, id: eventId };
     await runAction(async () => {
-      await mutation("/api/v1/workspace/representatives/" + encodeURIComponent(creditRep) + "/credits", {
-        event_id: eventId, representative_id: creditRep, volume_delta_bytes: bytes,
-        unlimited_delta_units: units, reason: creditReason.trim(),
+      await mutation("/api/v1/workspace/representatives/" + encodeURIComponent(payload.representative_id) + "/credits", {
+        event_id: eventId, ...payload,
       }, session.csrf_token);
       setCreditReason(""); pendingCreditKey.current = null;
     });
@@ -171,14 +176,16 @@ export function useBusinessWorkspace(language: Language, section: Section) {
     if (!clientId.trim() || !clientName.trim() || !Number.isSafeInteger(duration) || duration < 1 || duration > 3650 ||
       !Number.isSafeInteger(ipCount) || ipCount < 0 || ipCount > 1000 || (clientKind === "unlimited" && ipCount === 0) ||
       volumeBytes === null) { setNotice(t.missing); return; }
-    const eventId = pendingClientKey.current ?? uid();
-    pendingClientKey.current = eventId;
+    const payload = { client_id: clientId.trim(),
+      representative_id: session.user.role === "owner" ? clientRep : session.user.representative_id,
+      name: clientName.trim(), duration_days: duration, ip_count: ipCount,
+      volume_bytes: volumeBytes, unlimited: clientKind === "unlimited" };
+    const key = JSON.stringify(payload);
+    const eventId = pendingClientKey.current?.key === key ? pendingClientKey.current.id : uid();
+    pendingClientKey.current = { key, id: eventId };
     await runAction(async () => {
       await mutation("/api/v1/workspace/clients", {
-        event_id: eventId, client_id: clientId.trim(),
-        representative_id: session.user.role === "owner" ? clientRep : session.user.representative_id,
-        name: clientName.trim(), duration_days: duration, ip_count: ipCount,
-        volume_bytes: volumeBytes, unlimited: clientKind === "unlimited",
+        event_id: eventId, ...payload,
       }, session.csrf_token);
       setClientId(""); setClientName(""); setClientOffset(0); pendingClientKey.current = null;
     });
