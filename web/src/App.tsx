@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import { getFleet, type FleetSnapshot, type NodeSnapshot } from "./api";
 import InboundPlanner from "./InboundPlanner";
+import NodeManager from "./NodeManager";
 import BusinessWorkspace from "./BusinessWorkspace";
 import { useSession } from "./session";
 import { allowed, useNavigation, type Page } from "./navigation";
@@ -352,6 +353,7 @@ export default function App() {
                     <p>{ready && fleet.nodes.length === 0 ? t.pairingBoundary : t.activationBoundary}</p></div>
                 </div>
               )}
+              <NodeManager language={language} />
               <div className="notice-line"><ShieldCheck size={18} />{t.boundaryText}</div>
             </>
           )}

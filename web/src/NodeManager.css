@@ -1,0 +1,38 @@
+.pro-node-manager{margin-top:28px;border:1px solid var(--border);background:var(--surface);border-radius:18px;padding:clamp(18px,3vw,28px);box-shadow:var(--shadow);min-width:0;display:grid;gap:22px}
+.pro-node-manager-title{display:flex;align-items:flex-start;gap:14px}
+.pro-node-manager-icon{background:var(--accent-wash);color:var(--accent);border-radius:13px;padding:12px;display:grid;place-items:center}
+.pro-node-manager-title h2{font-size:18px;margin:0 0 5px}
+.pro-node-manager-title p{margin:0;color:var(--sub);font-size:12px}
+.pro-node-manager-form{display:grid;grid-template-columns:minmax(140px,1fr) minmax(140px,1fr) auto;gap:12px;align-items:end}
+.pro-node-manager label{display:grid;gap:7px;color:var(--sub);font-size:12px;font-weight:650}
+.pro-node-manager input{width:100%;min-width:0;padding:12px 13px;border:1px solid var(--border);border-radius:10px;background:var(--surface-2);color:var(--text);font:inherit;font-weight:500}
+.pro-node-manager button{display:inline-flex;align-items:center;justify-content:center;gap:8px;background:var(--accent);border:0;border-radius:10px;color:var(--accent-contrast);font-weight:700;padding:12px 16px;min-height:45px}
+.pro-node-manager button:disabled{opacity:.5;cursor:not-allowed}
+.pro-node-ticket{border:1px solid var(--accent);background:var(--accent-wash);padding:15px;border-radius:13px;min-width:0;display:grid;gap:13px}
+.pro-node-ticket-top{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;font-size:12px}
+.pro-node-ticket-top span{color:var(--sub)}
+.pro-node-ticket-code{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;word-break:break-all;white-space:normal;overflow-wrap:anywhere;direction:ltr;text-align:start;display:block;font-size:12px;line-height:1.8;background:var(--surface);border:1px solid var(--border);border-radius:9px;padding:13px;user-select:all}
+.pro-node-ticket-actions{display:flex;flex-wrap:wrap;gap:10px}
+.pro-node-ticket-actions button:nth-child(2),.pro-node-cancel button,.pro-node-roster-top button{background:var(--surface-2);color:var(--text);border:1px solid var(--border)}
+.pro-node-notice{margin:0;color:var(--accent);font-size:13px}
+.pro-node-instructions{display:flex;gap:12px;align-items:flex-start;background:var(--surface-2);border-radius:12px;padding:15px}
+.pro-node-instructions svg{flex:0 0 auto;color:var(--accent)}
+.pro-node-instructions p{margin:0;font-size:12px;line-height:1.9;color:var(--sub)}
+.pro-node-cancel{border-block-start:1px solid var(--border);padding-top:16px;display:grid;gap:10px;grid-template-columns:minmax(150px,1fr) auto;align-items:end}
+.pro-node-cancel>strong,.pro-node-cancel>small{grid-column:1/-1}
+.pro-node-cancel>small{color:var(--sub);font-size:11px}
+.pro-node-roster{border-block-start:1px solid var(--border);padding-top:20px;display:grid;gap:13px}
+.pro-node-roster-top{display:flex;align-items:center;justify-content:space-between;gap:15px}
+.pro-node-roster-top h3{display:flex;align-items:center;gap:8px;font-size:15px;margin:0}
+.pro-node-roster-top button{font-size:12px;padding:8px 12px;min-height:36px}
+.pro-node-roster>p{color:var(--sub);margin:0;font-size:13px}
+.pro-node-roster-row{border:1px solid var(--border);border-radius:12px;padding:13px;display:flex;align-items:center;justify-content:space-between;gap:12px;min-width:0}
+.pro-node-roster-row>div{display:grid;gap:5px;min-width:0}
+.pro-node-roster-row strong{overflow-wrap:anywhere}
+.pro-node-roster-row small{color:var(--sub);font-size:11px;overflow-wrap:anywhere}
+.pro-node-roster-status{font-size:11px;border-radius:100px;padding:7px 10px;white-space:nowrap}
+.pro-node-roster-status.is-online{background:var(--green-bg);color:var(--green)}
+.pro-node-roster-status.is-offline{background:var(--red-bg);color:var(--red)}
+.pro-node-boundary{display:flex;align-items:center;gap:8px;color:var(--sub);font-size:11px;margin:0}
+@media(max-width:970px){.pro-node-manager-form{grid-template-columns:1fr 1fr}.pro-node-manager-form>button{grid-column:1/-1}}
+@media(max-width:580px){.pro-node-manager-form,.pro-node-cancel{grid-template-columns:1fr}.pro-node-manager-form>button,.pro-node-cancel>strong,.pro-node-cancel>small{grid-column:auto}.pro-node-roster-row{align-items:flex-start;flex-direction:column}.pro-node-ticket-actions button{flex:1}}
