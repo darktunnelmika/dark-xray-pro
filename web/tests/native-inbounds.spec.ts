@@ -4,12 +4,14 @@ import { expect, test, type Page } from "@playwright/test";
 const csrf = "a".repeat(64);
 const installation = "a".repeat(32);
 const digest = "d".repeat(64);
-async function fixture(page: Page, role = "owner") {
+async function fixture(page: Page, role = "owner", includeUSA = false) {
  const calls: Array<{ path: string; body: Record<string, unknown>; csrf: string }> = [];
  const base = { enabled: true, archived: false, revision: 1, grpc_service: "", reality_target: "example.org:443", server_names: ["example.org"], short_ids: ["aa"], public_key: "PUBLIC_ONLY_TEST_KEY" };
  const inbounds = [{ ...base, id: 301, name: "Native Test", transport: "tcp", bound_clients: 0 }];
  const operations: Array<Record<string,unknown>> = [];
  const bindings: string[] = [];
+ const targets: Array<Record<string,unknown>> = [];
+ let canaryStaged = false;
  let applied = false;
  await page.route("**/api/v1/fleet", r => r.fulfill({ json: { nodes: [], total_nodes: 0, online_nodes: 0, offline_nodes: 0, as_of: new Date().toISOString(), interface_rx_bits_per_second: 0, interface_tx_bits_per_second: 0, physical_rates_complete: false, metric_scope: "default_route_interface_not_billable" } }));
  await page.route("**/api/v1/session/status", r => r.fulfill({ json: { authenticated: true, user: { id: role, role, username: "test-owner", representative_id: role === "owner" ? "owner" : "rep-a" }, csrf_token: csrf, expires_unix: 1900000000 } }));
@@ -18,6 +20,15 @@ async function fixture(page: Page, role = "owner") {
   if (req.method() === "POST") {
    const body = req.postDataJSON() as Record<string, unknown>;
    calls.push({ path, body, csrf: req.headers()["x-csrf-token"] ?? "" });
+   if (path.endsWith("/native-canary/stage")) {
+    if (!includeUSA || body.confirmation !== "USA_PRO_LOOPBACK_QA_ONLY") return route.fulfill({status:422,json:{error:"confirmation_required"}});
+    if (!canaryStaged) {
+     inbounds.push({ ...base, id:901617, name:"USA PRO QA", transport:"tcp", bound_clients:1 });
+     targets.push({ inbound_id:901617,node_id:"usa-pro-01",installation_id:installation,listen_ip:"127.0.0.1",direct_port:19666,swap_port:0 });
+    }
+    canaryStaged = true;
+    return route.fulfill({status:201,json:{stage:"staged_only",customer_listener_started:false,subscription_published:false}});
+   }
    if (path.endsWith("native-inbounds")) inbounds.push({ ...base, id: Number(body.id), name: String(body.name), transport: String(body.transport), bound_clients: 0 });
    if (path.endsWith("/clients")) {
     for (const id of body.client_ids as string[]) { const i = bindings.indexOf(id);if (body.attach && i < 0) bindings.push(id);else if (!body.attach && i >= 0) bindings.splice(i, 1); }
@@ -48,14 +59,20 @@ async function fixture(page: Page, role = "owner") {
     customer_data_plane_verified: false, subscription_published: false,
     deployment_ready: false, blocking_reason: "remote_metered_admission_not_wired",
    },
-   inbounds, nodes: [{ node_id: "new-node", installation_id: installation, name: "New PRO Node" }], targets: [], runtime: [{
+   inbounds, nodes: [
+    { node_id: "new-node", installation_id: installation, name: "New PRO Node" },
+    ...(includeUSA ? [{node_id:"usa-pro-01",installation_id:installation,name:"USA PRO"}] : []),
+   ], targets, runtime: [{
     node_id: "new-node", installation_id: installation, desired_sequence: 1, desired_sha: digest,
     reported_sequence: applied ? 1 : 0, reported_sha: applied ? digest : "", state: applied ? "applied" : "awaiting_report",
     phase: applied ? "ready" : "", process_ready: applied, reported_at: applied ? new Date().toISOString() : "",
     lease_expires_at: applied ? new Date(Date.now() + 30000).toISOString() : "",
    }],
   } });
-  if (path === "/api/v1/workspace/clients") return route.fulfill({ json: { clients: [{ id: "client-one", name: "Client One", representative_id: "owner", archived: false, deployment_state: "pending_node_apply" }] } });
+  if (path === "/api/v1/workspace/clients") return route.fulfill({ json: { clients: [
+   { id: "client-one", name: "Client One", representative_id: "owner", archived: false, deployment_state: "pending_node_apply" },
+   ...(canaryStaged ? [{ id: "pro-usa-qa01",name:"USA QA LOOPBACK ONLY",representative_id:"owner",archived:false,deployment_state:"pending_node_apply" }] : []),
+  ] } });
   if (path.endsWith("/clients")) return route.fulfill({ json: { client_ids: bindings } });
   if(path.endsWith("/operations"))return route.fulfill({json:{operations}});
   return route.fulfill({ status: 404, json: {} });
@@ -245,6 +262,53 @@ test("native readiness fits 320px Persian RTL and never claims customer traffic 
  await expect(readiness.getByText("فعال‌سازی مشتری مسدود است").first()).toBeVisible();
  await expect(readiness.getByRole("heading",{name:"سد تأیید اولین مصرف"})).toBeVisible();
  await expect(readiness.getByText(/HUB عمداً درخواست اجرای Xray/)).toBeVisible();
+ expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+2)).toBe(true);
+ expect(f.calls).toHaveLength(0);
+});
+
+
+test("owner stages a single isolated USA canary only after explicit checkbox consent, never activates Xray",async({page})=>{
+ const f=await fixture(page,"owner",true);
+ await openPage(page);
+ const canary=page.getByRole("region",{name:"USA PRO loopback canary"});
+ await expect(canary.getByRole("heading",{name:"USA loopback canary"})).toBeVisible();
+ await expect(canary.getByText(/127.0.0.1:19666/)).toBeVisible();
+ await expect(canary.getByText(/1 MiB limit/)).toBeVisible();
+ const stage=canary.getByRole("button",{name:"Stage private test"});
+ await expect(stage).toBeDisabled();
+ const checkbox=canary.getByRole("checkbox");
+ await checkbox.check();
+ await expect(stage).toBeEnabled();
+ await stage.click();
+ await expect(canary.getByRole("button",{name:/Canary staged/})).toBeDisabled();
+ expect(f.calls).toHaveLength(1);
+ expect(f.calls[0].path).toBe("/api/v1/workspace/native-canary/stage");
+ expect(f.calls[0].csrf).toBe(csrf);
+ expect(f.calls[0].body).toEqual({confirmation:"USA_PRO_LOOPBACK_QA_ONLY"});
+ await expect(page.getByText("Matching process reported",{exact:true})).toHaveCount(0);
+});
+
+test("unpaired USA and delayed API never allow a canary command",async({page})=>{
+ const f=await fixture(page);
+ await openPage(page);
+ const canary=page.getByRole("region",{name:"USA PRO loopback canary"});
+ await expect(canary.getByRole("button",{name:"Stage private test"})).toBeDisabled();
+ expect(f.calls).toHaveLength(0);
+ await expect(canary.getByText(/Requires a fresh authenticated USA PRO Node/)).toBeVisible();
+});
+
+test("320px Persian owner canary requires consent and does not overflow",async({page})=>{
+ const f=await fixture(page,"owner",true);
+ await page.setViewportSize({width:320,height:760});
+ await openPage(page,true);
+ await page.getByRole("button",{name:"Switch language"}).click();
+ const card=page.getByRole("region",{name:"USA PRO loopback canary"});
+ await expect(card.getByRole("heading",{name:"تست کنترل‌شدهٔ آمریکا"})).toBeVisible();
+ await expect(card.getByText(/127.0.0.1:19666/)).toBeVisible();
+ const button=card.getByRole("button",{name:"آماده‌سازی تست خصوصی"});
+ await expect(button).toBeDisabled();
+ await card.getByRole("checkbox").check();
+ await expect(button).toBeEnabled();
  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+2)).toBe(true);
  expect(f.calls).toHaveLength(0);
 });

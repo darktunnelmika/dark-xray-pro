@@ -2,6 +2,7 @@ import "./NativeInbounds.css";
 import { useSession, api, ApiError as Fault } from "./session";
 import InboundLifecycle from "./InboundLifecycle";
 import NativeReadiness, { type NativePreflight } from "./NativeReadiness";
+import NativeCanary from "./NativeCanary";
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { ArrowRightLeft, CheckCircle2, KeyRound, RefreshCw, Server, ShieldCheck, Users, Waypoints } from "lucide-react";
 
@@ -117,6 +118,15 @@ export default function NativeInbounds({ language, fallback }: { language: Lang;
   {disabled && <p className="native-warning">{t.unavailable}</p>}
   {session?.authenticated && session.user?.role === "owner" && data && <>
    <NativeReadiness preflight={data.preflight} stale={stale} language={language}/>
+   <NativeCanary language={language}
+     hasUSA={data.nodes.some(n => n.node_id === "usa-pro-01")}
+     staged={data.inbounds.some(i => i.id === 901617) &&
+       data.targets.some(t => t.inbound_id === 901617 && t.node_id === "usa-pro-01") &&
+       clients.some(c => c.id === "pro-usa-qa01")}
+     unavailable={busy || stale}
+     busy={busy}
+     onStage={() => void mutate("/api/v1/workspace/native-canary/stage",
+       { confirmation: "USA_PRO_LOOPBACK_QA_ONLY" }, () => setChosen(901617))}/>
    <div className="native-grid">
     <form className="native-card" onSubmit={create}><h3><KeyRound size={19}/>{t.create}</h3>
      <label>{t.name}<input value={name} onChange={e => setName(e.target.value)} required maxLength={128}/></label>
