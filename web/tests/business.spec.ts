@@ -250,7 +250,7 @@ test("owner can create and bulk-edit a real group in Persian then delete group w
   await assign.getByLabel("شناسه گروه").fill("group-new");
   await assign.getByLabel("شناسه کلاینت‌ها (با کاما، حداکثر ۵۰۰)").fill("client-one,client-two");
   await assign.getByRole("button", { name: "انتقال گروهی کلاینت‌ها" }).click();
-  await expect(page.getByText("2 عضو", { exact: false })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "گروه‌های کلاینت‌ها" }).locator("..").getByText("owner · 2 عضو")).toBeVisible();
   const groupList = page.getByRole("heading", { name: "گروه‌های کلاینت‌ها" }).locator("..");
   page.once("dialog", (dialog) => dialog.accept());
   await groupList.getByRole("button", { name: "حذف گروه" }).click();
@@ -329,13 +329,13 @@ test("owner moves only same-representative clients through safe picker then remo
  await create.getByLabel("Client ID").fill("owner-isolated");
  await create.getByLabel("Client name").fill("Owner only");
  await create.getByRole("button",{name:"Create pending client"}).click();
- await expect(page.getByText("Owner only (owner-isolated)")).toBeVisible();
+ await expect(page.locator(".business-records strong").filter({hasText:"Owner only (owner-isolated)"})).toBeVisible();
 
  await create.getByLabel("Client ID").fill("rep-isolated");
  await create.getByLabel("Client name").fill("Rep selected");
  await create.getByLabel("Representative ID").selectOption("rep-a");
  await create.getByRole("button",{name:"Create pending client"}).click();
- await expect(page.getByText("Rep selected (rep-isolated)")).toBeVisible();
+ await expect(page.locator(".business-records strong").filter({hasText:"Rep selected (rep-isolated)"})).toBeVisible();
  await page.goto("/groups");
  const groupForm=page.getByRole("heading",{name:"Create group"}).locator("..");
  await groupForm.getByLabel("Group ID").fill("rep-group-v2");
@@ -440,6 +440,7 @@ test("owner representative cards prefill credit and login targets without creati
  expect(requests).toHaveLength(0);
  await page.getByRole("button",{name:"Switch language"}).click();
  await page.getByRole("button",{name:"انتخاب برای اعتبار"}).click();
- await expect(credits.getByLabel("شناسه نماینده")).toHaveValue("rep-a");
+ await expect(page.getByRole("heading",{name:"تغییر اعتبار نماینده"}).locator("..")
+  .getByLabel("شناسه نماینده")).toHaveValue("rep-a");
  expect(requests).toHaveLength(0);
 });
