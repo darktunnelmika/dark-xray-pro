@@ -34,6 +34,7 @@ type Server struct {
 	hubMonitor         *hubmonitor.Monitor
 	nodeBundle         *nodebootstrap.Bundle
 	nodeTransportScope string
+	meteredNode string // explicitly allowlisted NEW PRO Node; disabled by default
 }
 
 func NewServer(fleet *telemetry.Store, registry *noderegistry.Registry, ownerKey string) (*Server, error) {
@@ -146,6 +147,10 @@ func (s *Server) AgentHandler() http.Handler {
 				usage.ServeHTTP(w, r)
 			}
 			return
+		}
+		if (r.Method==http.MethodGet && r.URL.Path=="/api/v1/agent/native-metered-runtime") ||
+			(r.Method==http.MethodPost && r.URL.Path=="/api/v1/agent/native-metered-register") {
+			s.handleRemoteMetered(w,r);return
 		}
 		if r.Method == http.MethodGet && r.URL.Path == "/api/v1/agent/health" {
 			respond(w, http.StatusOK, map[string]string{"status": "ok", "mode": "new-node-lab", "data_plane": "disabled"})

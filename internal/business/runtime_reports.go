@@ -53,7 +53,7 @@ func(s *Store)RecordNativeDelivery(ctx context.Context,c NodeConfig,l managedxra
 func validObservation(o managedxray.Snapshot)bool{
  if o.DataPlaneVerified||o.SubscriptionPublished||o.ActiveSequence>o.Highwater{return false}
  if o.ProcessReady && o.NoListeners!=xrayconfig.IsStoppedHash(o.ActiveSHA){return false}
- phases:=map[string]bool{"awaiting_fresh_lease":true,"ready":true,"applying":true,"recovered_last_good":true,"apply_failed_stopped":true,"rolled_back_after_failed_apply":true,"rolled_back_after_process_exit":true,"process_exited_stopped":true,"lease_expired_stopped":true,"journal_failure_fenced":true,"closed":true}
+ phases:=map[string]bool{"awaiting_fresh_lease":true,"ready":true,"ready_observed_admission":true,"applying":true,"recovered_last_good":true,"apply_failed_stopped":true,"rolled_back_after_failed_apply":true,"rolled_back_after_process_exit":true,"process_exited_stopped":true,"lease_expired_stopped":true,"journal_failure_fenced":true,"closed":true}
  if !phases[o.Phase]{return false}
  hash:=func(v string)bool{if v==""{return true};if len(v)!=64{return false};for _,r:=range v{if !(r>='a'&&r<='f'||r>='0'&&r<='9'){return false}};return true}
  if !hash(o.ActiveSHA)||!hash(o.SavedSHA)||!hash(o.PreviousSHA){return false}
