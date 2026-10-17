@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import {
   CheckCircle2, ChevronRight,
   CircleHelp, CreditCard, Globe2, HardDrive, LayoutDashboard,
-  Menu, Moon, Network, RadioTower, Server, Settings2, ShieldCheck, Users, FolderOpen, UserRound, LogOut,
+  Menu, Moon, Network, Server, Settings2, ShieldCheck, Users, FolderOpen, UserRound, LogOut,
   Sun, Waypoints, X,
 } from "lucide-react";
 import { getFleet, type FleetSnapshot, type NodeSnapshot } from "./api";
@@ -378,12 +378,9 @@ export default function App() {
 
           {page === "overview" && (
             <>
-              <DashboardOverview fleet={fleet} language={language} stale={problem !== null}/>
-              <div className="section-head">
-                <div><h2>{t.fleetMonitor}</h2><p>{t.units}</p></div>
-                <div className="updated-caption"><RadioTower size={16}/> {ready ? dateTime(fleet.as_of, language) : t.collecting}</div>
-              </div>
-              <NodeTable fleet={fleet} history={history} lang={language}/>
+              <DashboardOverview fleet={fleet} history={history} language={language}
+                stale={problem !== null}
+                onInspectNode={id => { setSelectedNodeId(id); setPage("nodes"); }}/>
             </>
           )}
 
