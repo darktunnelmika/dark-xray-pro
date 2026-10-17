@@ -68,8 +68,7 @@ test("owner creates and revokes a one-use pairing ticket without storing it in b
   expect(storage).not.toContain(pairCode);
   expect(storage).not.toContain("test-secret-not-persisted");
   await page.getByRole("button", { name: "Cancel unused code" }).click();
-  await expect(page.getByText("Pending Pair Code revoked.")).toHaveCount(0);
-  await expect(page.getByText(/Pending Pair Code revoked/)).toBeVisible();
+  await expect(page.getByText("Pending Pair Code revoked. No Node or client was changed.", { exact: true })).toBeVisible();
   await expect(page.locator(".pro-node-ticket-code")).toHaveCount(0);
   expect(probe.cancellations()).toBe(1);
   await page.getByRole("button", { name: "Generate one-time Pair Code" }).click();
@@ -77,6 +76,7 @@ test("owner creates and revokes a one-use pairing ticket without storing it in b
   await page.reload();
   await expect(page.getByRole("heading", { name: "Add a new PRO Node" })).toBeVisible();
   await expect(page.locator(".pro-node-ticket-code")).toHaveCount(0);
+  await expect(page.getByText(/Pending Pair Code revoked/)).toHaveCount(0);
 });
 
 test("representative cannot see or request Node management", async ({ page }) => {
