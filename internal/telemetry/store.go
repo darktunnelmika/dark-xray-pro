@@ -15,8 +15,8 @@ import (
 var (
 	ErrInvalidSample = errors.New("invalid telemetry sample")
 	ErrOutOfOrder    = errors.New("out-of-order heartbeat or telemetry sequence")
-	idPattern       = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$`)
-	bootPattern     = regexp.MustCompile(`^[a-f0-9]{32}$`)
+	idPattern        = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$`)
+	bootPattern      = regexp.MustCompile(`^[a-f0-9]{32}$`)
 )
 
 const DefaultOfflineAfter = 15 * time.Second
@@ -34,18 +34,25 @@ type Pulse struct {
 
 // Sample contains default-route interface counters, NOT billable user traffic.
 type Sample struct {
-	NodeID         string  `json:"node_id"`
-	InstallationID string  `json:"installation_id"`
-	Name           string  `json:"name"`
-	BootID         string  `json:"boot_id"`
-	Sequence       uint64  `json:"sequence"`
-	Interface      string  `json:"interface"`
-	CPUCores       int     `json:"cpu_cores"`
-	CPUPercent     float64 `json:"cpu_percent"`
-	RAMTotal       uint64  `json:"ram_total_bytes"`
-	RAMUsed        uint64  `json:"ram_used_bytes"`
-	RXBytes        uint64  `json:"rx_bytes"`
-	TXBytes        uint64  `json:"tx_bytes"`
+	NodeID         string   `json:"node_id"`
+	InstallationID string   `json:"installation_id"`
+	Name           string   `json:"name"`
+	BootID         string   `json:"boot_id"`
+	Sequence       uint64   `json:"sequence"`
+	Interface      string   `json:"interface"`
+	CPUCores       int      `json:"cpu_cores"`
+	CPUPercent     float64  `json:"cpu_percent"`
+	RAMTotal       uint64   `json:"ram_total_bytes"`
+	RAMUsed        uint64   `json:"ram_used_bytes"`
+	RXBytes        uint64   `json:"rx_bytes"`
+	TXBytes        uint64   `json:"tx_bytes"`
+	DiskTotalBytes *uint64  `json:"disk_total_bytes,omitempty"`
+	DiskUsedBytes  *uint64  `json:"disk_used_bytes,omitempty"`
+	Load1          *float64 `json:"load_1,omitempty"`
+	Load5          *float64 `json:"load_5,omitempty"`
+	Load15         *float64 `json:"load_15,omitempty"`
+	UptimeSeconds  *uint64  `json:"uptime_seconds,omitempty"`
+	TCPInUse       *uint64  `json:"tcp_inuse,omitempty"`
 }
 
 type Node struct {
@@ -61,19 +68,26 @@ type Node struct {
 	TXBitsPerSec   *float64   `json:"tx_bits_per_second"`
 	MetricsCurrent bool       `json:"metrics_current"`
 	MetricsAt      *time.Time `json:"metrics_at"`
+	DiskTotalBytes *uint64    `json:"disk_total_bytes,omitempty"`
+	DiskUsedBytes  *uint64    `json:"disk_used_bytes,omitempty"`
+	Load1          *float64   `json:"load_1,omitempty"`
+	Load5          *float64   `json:"load_5,omitempty"`
+	Load15         *float64   `json:"load_15,omitempty"`
+	UptimeSeconds  *uint64    `json:"uptime_seconds,omitempty"`
+	TCPInUse       *uint64    `json:"tcp_inuse,omitempty"`
 	LastSeen       *time.Time `json:"last_seen"`
 }
 
 type Fleet struct {
-	AsOf          time.Time `json:"as_of"`
-	Total         int       `json:"total_nodes"`
-	Online        int       `json:"online_nodes"`
-	Offline       int       `json:"offline_nodes"`
-	InterfaceRXBps float64  `json:"interface_rx_bits_per_second"`
-	InterfaceTXBps float64  `json:"interface_tx_bits_per_second"`
-	RatesComplete bool      `json:"physical_rates_complete"`
-	MetricScope   string    `json:"metric_scope"`
-	Nodes         []Node    `json:"nodes"`
+	AsOf           time.Time `json:"as_of"`
+	Total          int       `json:"total_nodes"`
+	Online         int       `json:"online_nodes"`
+	Offline        int       `json:"offline_nodes"`
+	InterfaceRXBps float64   `json:"interface_rx_bits_per_second"`
+	InterfaceTXBps float64   `json:"interface_tx_bits_per_second"`
+	RatesComplete  bool      `json:"physical_rates_complete"`
+	MetricScope    string    `json:"metric_scope"`
+	Nodes          []Node    `json:"nodes"`
 }
 
 type lastSample struct {
@@ -100,8 +114,12 @@ type Store struct {
 }
 
 func NewStore(offlineAfter time.Duration, clock func() time.Time) *Store {
-	if offlineAfter <= 0 { offlineAfter = DefaultOfflineAfter }
-	if clock == nil { clock = time.Now }
+	if offlineAfter <= 0 {
+		offlineAfter = DefaultOfflineAfter
+	}
+	if clock == nil {
+		clock = time.Now
+	}
 	return &Store{
 		clock: clock, offlineAfter: offlineAfter,
 		nodes: make(map[string]lastSample), pulses: make(map[string]lastPulse),
@@ -126,11 +144,29 @@ func validate(s Sample) bool {
 		return false
 	}
 	for _, r := range s.Name + s.Interface {
-		if unicode.IsControl(r) { return false }
+		if unicode.IsControl(r) {
+			return false
+		}
 	}
 	if s.CPUCores < 1 || s.CPUCores > 1024 || math.IsNaN(s.CPUPercent) ||
 		math.IsInf(s.CPUPercent, 0) || s.CPUPercent < 0 || s.CPUPercent > 100 ||
 		s.RAMTotal == 0 || s.RAMUsed > s.RAMTotal {
+		return false
+	}
+	if (s.DiskTotalBytes == nil) != (s.DiskUsedBytes == nil) ||
+		(s.DiskTotalBytes != nil && (*s.DiskTotalBytes == 0 || *s.DiskTotalBytes > math.MaxInt64 || *s.DiskUsedBytes > *s.DiskTotalBytes)) ||
+		(s.Load1 == nil) != (s.Load5 == nil) || (s.Load1 == nil) != (s.Load15 == nil) {
+		return false
+	}
+	for _, v := range []*float64{s.Load1, s.Load5, s.Load15} {
+		if v != nil && (math.IsNaN(*v) || math.IsInf(*v, 0) || *v < 0 || *v > 1e6) {
+			return false
+		}
+	}
+	if s.UptimeSeconds != nil && *s.UptimeSeconds > 1e12 {
+		return false
+	}
+	if s.TCPInUse != nil && *s.TCPInUse > 1e8 {
 		return false
 	}
 	return true
@@ -138,33 +174,45 @@ func validate(s Sample) bool {
 
 func seenBoot(history []string, boot string) bool {
 	for _, known := range history {
-		if boot == known { return true }
+		if boot == known {
+			return true
+		}
 	}
 	return false
 }
 
 func retireBoot(history []string, boot string) []string {
 	next := append(append([]string(nil), history...), boot)
-	if len(next) > maxRetiredBoots { next = next[len(next)-maxRetiredBoots:] }
+	if len(next) > maxRetiredBoots {
+		next = next[len(next)-maxRetiredBoots:]
+	}
 	return next
 }
 
 // Heartbeat updates liveness without requiring or modifying any telemetry data.
 // A duplicate pulse does not refresh last_seen, preventing replayed "online".
 func (s *Store) Heartbeat(p Pulse) error {
-	if !validPulse(p) { return ErrInvalidSample }
+	if !validPulse(p) {
+		return ErrInvalidSample
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	now := s.clock().UTC()
 	last, exists := s.pulses[p.NodeID]
 	next := lastPulse{pulse: p, seen: now}
 	if exists {
-		if p.InstallationID != last.pulse.InstallationID { return ErrOutOfOrder }
+		if p.InstallationID != last.pulse.InstallationID {
+			return ErrOutOfOrder
+		}
 		next.retired = last.retired
 		if p.BootID == last.pulse.BootID {
-			if p.Sequence <= last.pulse.Sequence { return ErrOutOfOrder }
+			if p.Sequence <= last.pulse.Sequence {
+				return ErrOutOfOrder
+			}
 		} else {
-			if seenBoot(last.retired, p.BootID) { return ErrOutOfOrder }
+			if seenBoot(last.retired, p.BootID) {
+				return ErrOutOfOrder
+			}
 			next.retired = retireBoot(last.retired, last.pulse.BootID)
 		}
 	}
@@ -175,7 +223,9 @@ func (s *Store) Heartbeat(p Pulse) error {
 // Record is independent of Node Online state. A slow stats collector cannot
 // prevent Heartbeat from keeping a healthy Agent Online.
 func (s *Store) Record(sample Sample) error {
-	if !validate(sample) { return ErrInvalidSample }
+	if !validate(sample) {
+		return ErrInvalidSample
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	now := s.clock().UTC()
@@ -189,9 +239,13 @@ func (s *Store) Record(sample Sample) error {
 	next := lastSample{sample: sample, seen: now}
 	if exists {
 		next.retired = last.retired
-		if sample.InstallationID != last.sample.InstallationID { return ErrOutOfOrder }
+		if sample.InstallationID != last.sample.InstallationID {
+			return ErrOutOfOrder
+		}
 		if sample.BootID == last.sample.BootID {
-			if sample.Sequence <= last.sample.Sequence { return ErrOutOfOrder }
+			if sample.Sequence <= last.sample.Sequence {
+				return ErrOutOfOrder
+			}
 			elapsed := now.Sub(last.seen).Seconds()
 			if elapsed > 0 && sample.Interface == last.sample.Interface &&
 				sample.RXBytes >= last.sample.RXBytes && sample.TXBytes >= last.sample.TXBytes {
@@ -200,7 +254,9 @@ func (s *Store) Record(sample Sample) error {
 				next.rateReady = true
 			}
 		} else {
-			if seenBoot(last.retired, sample.BootID) { return ErrOutOfOrder }
+			if seenBoot(last.retired, sample.BootID) {
+				return ErrOutOfOrder
+			}
 			next.retired = retireBoot(last.retired, last.sample.BootID)
 		}
 	}
@@ -220,8 +276,12 @@ func (s *Store) Snapshot() Fleet {
 		RatesComplete: true, Nodes: make([]Node, 0, len(s.nodes)+len(s.pulses)),
 	}
 	all := make(map[string]bool, len(s.nodes)+len(s.pulses))
-	for id := range s.nodes { all[id] = true }
-	for id := range s.pulses { all[id] = true }
+	for id := range s.nodes {
+		all[id] = true
+	}
+	for id := range s.pulses {
+		all[id] = true
+	}
 
 	for id := range all {
 		sample, hasSample := s.nodes[id]
@@ -237,7 +297,9 @@ func (s *Store) Snapshot() Fleet {
 			node.MetricsAt = &seen
 			liveAt = sample.seen
 		}
-		if hasPulse && pulse.seen.After(liveAt) { liveAt = pulse.seen }
+		if hasPulse && pulse.seen.After(liveAt) {
+			liveAt = pulse.seen
+		}
 		if !liveAt.IsZero() {
 			seen := liveAt
 			node.LastSeen = &seen
@@ -247,11 +309,20 @@ func (s *Store) Snapshot() Fleet {
 			node.Status = "online"
 			fleet.Online++
 			freshFor := metricsFreshAfter
-			if s.offlineAfter < freshFor { freshFor = s.offlineAfter }
+			if s.offlineAfter < freshFor {
+				freshFor = s.offlineAfter
+			}
 			if hasSample && now.Sub(sample.seen) < freshFor {
 				node.MetricsCurrent = true
 				node.CPUPercent = sample.sample.CPUPercent
 				node.RAMUsed = sample.sample.RAMUsed
+				node.DiskTotalBytes = sample.sample.DiskTotalBytes
+				node.DiskUsedBytes = sample.sample.DiskUsedBytes
+				node.Load1 = sample.sample.Load1
+				node.Load5 = sample.sample.Load5
+				node.Load15 = sample.sample.Load15
+				node.UptimeSeconds = sample.sample.UptimeSeconds
+				node.TCPInUse = sample.sample.TCPInUse
 				if sample.rateReady {
 					rx, tx := sample.rxBps, sample.txBps
 					node.RXBitsPerSec, node.TXBitsPerSec = &rx, &tx
@@ -272,6 +343,8 @@ func (s *Store) Snapshot() Fleet {
 		return fleet.Nodes[i].NodeID < fleet.Nodes[j].NodeID
 	})
 	fleet.Total = len(fleet.Nodes)
-	if fleet.Online == 0 { fleet.RatesComplete = false }
+	if fleet.Online == 0 {
+		fleet.RatesComplete = false
+	}
 	return fleet
 }
