@@ -44,7 +44,19 @@ export function useBusinessWorkspace(language: Language, section: Section) {
   const [groupName, setGroupName] = useState("");
   const [groupColor, setGroupColor] = useState("");
   const [groupRep, setGroupRep] = useState("owner");
-  const [groupTarget, setGroupTarget] = useState("");
+  const selectedGroupKey = "dark-pro-group-selection:" + session.user.id;
+  const [groupTarget, setGroupTarget] = useState(() => {
+    try {
+      const id = sessionStorage.getItem(selectedGroupKey) || "";
+      return /^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/.test(id) ? id : "";
+    } catch { return ""; }
+  });
+  useEffect(() => {
+    try {
+      if (groupTarget) sessionStorage.setItem(selectedGroupKey, groupTarget);
+      else sessionStorage.removeItem(selectedGroupKey);
+    } catch { /* private browsing */ }
+  }, [groupTarget, selectedGroupKey]);
   const [memberIDs, setMemberIDs] = useState("");
   const [groupEditID, setGroupEditID] = useState("");
   const [groupEditName, setGroupEditName] = useState("");
@@ -248,6 +260,7 @@ export function useBusinessWorkspace(language: Language, section: Section) {
         body: JSON.stringify({}),
       });
       if (groupEditID === id) setGroupEditID("");
+      if (groupTarget === id) setGroupTarget("");
     });
   }
   async function unassignMember(event: FormEvent<HTMLFormElement>) {
