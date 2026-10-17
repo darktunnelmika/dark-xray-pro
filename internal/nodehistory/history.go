@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"sync"
 	"time"
 
@@ -28,6 +29,16 @@ var installRE = regexp.MustCompile(`^[a-f0-9]{32}$`)
 
 const MaxHistoryDBSize int64 = 256 * 1024 * 1024
 const minutesPerDay = 24 * 60
+const historyApplicationID = 0x44585048 // DXPH: private DARK PRO host history, not billing
+
+const samplesTableDDL = `CREATE TABLE IF NOT EXISTS samples(
+    node_id TEXT NOT NULL, installation_id TEXT NOT NULL, minute INTEGER NOT NULL,
+    cpu REAL NOT NULL CHECK(cpu BETWEEN 0 AND 100),
+    ram_used INTEGER NOT NULL, ram_total INTEGER NOT NULL,
+    disk_used INTEGER, disk_total INTEGER,
+    load1 REAL, tcp_inuse INTEGER, rx_bps REAL, tx_bps REAL,
+    PRIMARY KEY(node_id,installation_id,minute)
+  ) WITHOUT ROWID`
 
 // Point is a TIME-BUCKETED HOST-ONLY observation, never billable traffic.
 // Sparse/missing periods are left missing, not filled with fabricated zeros.
@@ -99,7 +110,7 @@ func Open(path string, clock func() time.Time) (*Store, error) {
 	if clock == nil {
 		clock = time.Now
 	}
-	u := url.URL{Scheme: "file", Path: abs, RawQuery: "_pragma=busy_timeout(4000)"}
+	u := url.URL{Scheme: "file", Path: abs, RawQuery: "_pragma=busy_timeout(250)"}
 	db, err := sql.Open("sqlite", u.String())
 	if err != nil {
 		return nil, err
@@ -107,16 +118,37 @@ func Open(path string, clock func() time.Time) (*Store, error) {
 	db.SetMaxOpenConns(1)
 	fail := func(e error) (*Store, error) { _ = db.Close(); return nil, e }
 	for _, pragma := range []string{
-		"PRAGMA busy_timeout=4000",
+		"PRAGMA busy_timeout=250",
 		"PRAGMA journal_mode=WAL",
 		"PRAGMA synchronous=FULL",
 		"PRAGMA trusted_schema=OFF",
 		"PRAGMA wal_autocheckpoint=100",
-		"PRAGMA max_page_count=65536",
 	} {
 		if _, err = db.Exec(pragma); err != nil {
 			return fail(err)
 		}
+	}
+	// Enforce an actual byte budget even if a pre-existing private database
+	// uses a non-default SQLite page size.
+	var pageSize, effectiveMaxPages int64
+	if err = db.QueryRow("PRAGMA page_size").Scan(&pageSize); err != nil {
+		return fail(err)
+	}
+	if pageSize <= 0 || pageSize > MaxHistoryDBSize {
+		return fail(ErrUnsafe)
+	}
+	if err = db.QueryRow(fmt.Sprintf("PRAGMA max_page_count=%d", MaxHistoryDBSize/pageSize)).Scan(&effectiveMaxPages); err != nil {
+		return fail(err)
+	}
+	if effectiveMaxPages <= 0 || effectiveMaxPages*pageSize > MaxHistoryDBSize {
+		return fail(ErrUnsafe)
+	}
+	var appID int
+	if err = db.QueryRow("PRAGMA application_id").Scan(&appID); err != nil {
+		return fail(err)
+	}
+	if appID != 0 && appID != historyApplicationID {
+		return fail(ErrUnsafe)
 	}
 	var version int
 	if err = db.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
@@ -127,7 +159,7 @@ func Open(path string, clock func() time.Time) (*Store, error) {
 	}
 	if version == 0 {
 		var foreign string
-		e := db.QueryRow("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' LIMIT 1").Scan(&foreign)
+		e := db.QueryRow("SELECT name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' LIMIT 1").Scan(&foreign)
 		if e == nil {
 			return fail(ErrUnsafe)
 		}
@@ -164,18 +196,23 @@ func Open(path string, clock func() time.Time) (*Store, error) {
 		if count != 1 {
 			return fail(ErrUnsafe)
 		}
+		// Never adopt a foreign v1 SQLite that merely happens to call its
+		// table "samples". This also safely recognizes the already-created
+		// PRO v1 database from the first monitoring release.
+		var actualDDL string
+		if e := db.QueryRow("SELECT sql FROM sqlite_master WHERE type='table' AND name='samples'").Scan(&actualDDL); e != nil {
+			return fail(ErrUnsafe)
+		}
+		canonical := func(v string) string { return strings.Join(strings.Fields(v), " ") }
+		if canonical(actualDDL) != canonical(strings.Replace(samplesTableDDL, "CREATE TABLE IF NOT EXISTS", "CREATE TABLE", 1)) {
+			return fail(ErrUnsafe)
+		}
 	}
 	statements := []string{
-		`CREATE TABLE IF NOT EXISTS samples(
-    node_id TEXT NOT NULL, installation_id TEXT NOT NULL, minute INTEGER NOT NULL,
-    cpu REAL NOT NULL CHECK(cpu BETWEEN 0 AND 100),
-    ram_used INTEGER NOT NULL, ram_total INTEGER NOT NULL,
-    disk_used INTEGER, disk_total INTEGER,
-    load1 REAL, tcp_inuse INTEGER, rx_bps REAL, tx_bps REAL,
-    PRIMARY KEY(node_id,installation_id,minute)
-  ) WITHOUT ROWID`,
+		samplesTableDDL,
 		"CREATE INDEX IF NOT EXISTS samples_minute_idx ON samples(minute)",
 		"PRAGMA user_version=1",
+		fmt.Sprintf("PRAGMA application_id=%d", historyApplicationID),
 	}
 	for _, stmt := range statements {
 		if _, err = db.Exec(stmt); err != nil {
@@ -253,6 +290,12 @@ func (h *Store) Record(ctx context.Context, node telemetry.Node, installation st
 		cutoff := minute - minutesPerDay
 		if _, err = h.db.ExecContext(ctx, "DELETE FROM samples WHERE minute<?", cutoff); err != nil {
 			return fmt.Errorf("nonbilling telemetry retention: %w", err)
+		}
+		// Expired installations must not leak unbounded in-memory map keys.
+		for k, last := range h.latest {
+			if last < cutoff {
+				delete(h.latest, k)
+			}
 		}
 		h.lastPurge = minute
 	}

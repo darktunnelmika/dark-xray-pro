@@ -27,9 +27,14 @@ installer, customer traffic report, network tunnel, or an accounting feature.
   when `DARK_PRO_ENABLE_NODE_HISTORY=1` and the matching
   `-node-history-db` flag are deliberately configured.
 - Separate 0700 directory / 0600 database permissions; symlinks and
-  unsafe paths rejected. WAL, durable transactions and an explicit
-  256 MiB max page budget; one accepted observation per Node installation
-  per minute; 24-hour retention purged hourly. This database contains
+  unsafe paths rejected. A PRO-only SQLite application ID plus exact v1
+  schema validation refuses foreign databases (the original matching PRO
+  v1 file upgrades in place at reopen). WAL, durable transactions and a
+  verified 256 MiB page-size-aware database budget; one accepted observation
+  per Node installation per minute; 24-hour retention and in-memory key
+  cleanup every hour. SQLite lock waits are capped at 250ms so a temporarily
+  busy history file cannot stall Agent monitoring for multiple seconds.
+  This database contains
   **no customer identity, tokens, traffic ledger, purchase or credits**.
   No Node or Inbound config/port is changed.
 - History is keyed by **logical Node ID AND installation ID**. Replacing
