@@ -67,7 +67,7 @@ func(s *Store)BindInboundClients(ctx context.Context,id uint64,ids []string,atta
 }
 func validNativeTarget(t InboundTarget)bool{
  ip:=net.ParseIP(t.ListenIP);_,err:=hex.DecodeString(t.InstallationID)
- return t.InboundID>0&&idRE.MatchString(t.NodeID)&&len(t.InstallationID)==32&&err==nil&&ip!=nil&&!ip.IsUnspecified()&&!ip.IsMulticast()&&(t.DirectPort>=1024||t.SwapPort>=1024)&&(t.DirectPort==0||t.DirectPort>=1024)&&(t.SwapPort==0||t.SwapPort>=1024)
+ return t.InboundID>0&&idRE.MatchString(t.NodeID)&&len(t.InstallationID)==32&&err==nil&&ip!=nil&&!ip.IsUnspecified()&&!ip.IsMulticast()&&(t.DirectPort>=1024||t.SwapPort>=1024)&&(t.DirectPort==0||t.DirectPort>=1024)&&(t.SwapPort==0||t.SwapPort>=1024)&&(t.DirectPort==0||t.SwapPort==0||t.DirectPort!=t.SwapPort)
 }
 func(s *Store)PutInboundTarget(ctx context.Context,t InboundTarget)error{
  if !validNativeTarget(t){return ErrInvalid};t.ListenIP=net.ParseIP(t.ListenIP).String();tx,err:=s.db.BeginTx(ctx,nil);if err!=nil{return err};defer tx.Rollback();var n int
