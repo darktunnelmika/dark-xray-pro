@@ -88,7 +88,8 @@ test("first physical sample has no invented zero or billable usage", async ({ pa
   await page.goto("/");
   await expect(page.getByText("Germany lab")).toBeVisible();
   await expect(page.getByText("0 Mbps")).toHaveCount(0);
-  await expect(page.getByText("Default-route interface rate, not customer-billable traffic.").first()).toBeVisible();
+  await expect(page.getByRole("region", { name: "Node fleet monitoring" })
+    .getByText("Host interface only · not customer-billable traffic")).toBeVisible();
 });
 
 test("320px viewport avoids body overflow", async ({ page }) => {
@@ -108,8 +109,11 @@ test("Online heartbeat stays Online while delayed metrics show unknown instead o
   await mockFleet(page, () => busy);
   await page.goto("/");
   await expect(page.getByText("Germany lab")).toBeVisible();
-  await expect(page.getByText("Stats delayed")).toBeVisible();
-  await expect(page.getByText("Online", { exact: true }).last()).toBeVisible();
+  const germany = page.getByRole("region", { name: "Node fleet monitoring" })
+    .locator(".node-deck-card").filter({ hasText: "Germany lab" });
+  await expect(germany.getByText("Metrics delayed")).toBeVisible();
+  await expect(germany.locator(".node-deck-state")).toContainText("Online");
+  await expect(germany.locator(".node-deck-cpu-text strong")).toHaveText("—");
   await expect(page.getByText("0 Mbps")).toHaveCount(0);
 });
 
