@@ -2,13 +2,18 @@ package noderegistry
 
 import (
 	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
 
 func TestCancelPendingRevokesOnlyUnclaimedInvitation(t *testing.T) {
-	r, err := Open(filepath.Join(t.TempDir(), "registry.json"), nil)
+	dir := t.TempDir()
+	if err := os.Chmod(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	r, err := Open(filepath.Join(dir, "registry.json"), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
