@@ -56,6 +56,27 @@ async function mockBusiness(page: Page, user: typeof rep, seedClientCount=0) {
     if (request.method() !== "GET") {
       const body: unknown = request.postDataJSON();
       requests.push({ path, method: request.method(), csrf: request.headers()["x-csrf-token"] ?? "", body });
+      if (path === "/api/v1/workspace/clients/bulk/state") {
+        const input=body as {event_id:string;client_ids:string[];action:"disable"|"enable"|"archive";reason:string};
+        const chosen=input.client_ids.map(id =>
+          runningClients.find(c => (c as {id:string}).id === id) as Record<string,unknown>|undefined);
+        if(chosen.some(c=>!c)||chosen.some(c=>c!.representative_id!==(user.role==="owner"?c!.representative_id:user.representative_id)) ||
+          chosen.some(c=>c!.archived || input.action==="disable"&&c!.deployment_state==="disabled" ||
+            input.action==="enable"&&c!.deployment_state!=="disabled")){
+          return route.fulfill({status:409,json:{error:"bulk_conflict"}});
+        }
+        for(const c of chosen){
+          if(!c)continue;
+          c.archived=input.action==="archive";
+          c.deployment_state=input.action==="enable"?"pending_node_apply":"disabled";
+          operations.push({event_id:input.event_id+"-"+c.id,client_id:c.id,
+            representative_id:c.representative_id,kind:input.action,reason:input.reason,
+            added_days:0,added_volume_bytes:0,volume_credit_debit:0,unlimited_credit_debit:0,
+            created_unix:1800000000});
+        }
+        return route.fulfill({status:200,json:{count:chosen.length,replayed:false,
+          applied_to_xray:false,customer_traffic_changed:false,client_or_usage_history_deleted:false}});
+      }
       if (path.includes("/clients/") && path.endsWith("/extend")) {
         const n = body as { event_id: string; client_id: string; additional_days: number; additional_volume_bytes: number; reason: string };
         const c = runningClients.find((item) => (item as { id: string }).id === n.client_id) as Record<string, unknown> | undefined;
@@ -678,4 +699,126 @@ test("global directory prevents stale actions when second page is malformed",asy
  await expect(page.getByRole("button",{name:"Extend / add volume"})).toBeDisabled();
  await expect(page.getByText(/Business data unavailable or unverified/)).toBeVisible();
  expect(requests).toHaveLength(0);
+});
+
+test("representative bulk disable, enable and archive are explicit, scoped and never change credits",async({page})=>{
+ await mockBase(page);
+ const requests=await mockBusiness(page,rep,4);
+ await page.goto("/clients");
+ await page.getByLabel("Username").fill("rep-a");
+ await page.getByLabel("Password").fill("test-private-password-for-lab");
+ await page.getByRole("button",{name:"Sign in"}).click();
+ const list=page.getByRole("region",{name:"Client directory"});
+ const bulk=page.locator(".clients-bulk");
+ await expect(list.locator(".clients-explorer-row")).toHaveCount(4);
+ const inputs=list.locator(".clients-bulk-checkbox input");
+ await inputs.nth(0).check();await inputs.nth(1).check();
+ await bulk.getByLabel("Required audit reason").fill("Reviewed operator disable");
+ const button=bulk.getByRole("button",{name:"Apply to selected"});
+ await expect(button).toBeEnabled();
+ page.once("dialog",dialog=>dialog.accept());
+ await button.click();
+ await expect(list.locator(".clients-explorer-status.is-disabled")).toHaveCount(2);
+ expect(requests).toHaveLength(1);
+ expect(requests[0].path).toBe("/api/v1/workspace/clients/bulk/state");
+ expect((requests[0].body as {client_ids:string[]}).client_ids).toEqual(["paged-client-000","paged-client-001"]);
+ expect(requests[0].csrf).toBe("a".repeat(64));
+ await inputs.nth(0).check();await inputs.nth(1).check();
+ await bulk.getByLabel("Action").selectOption("enable");
+ await bulk.getByLabel("Required audit reason").fill("Reapproved logical status");
+ page.once("dialog",dialog=>dialog.accept());
+ await button.click();
+ await expect(list.locator(".clients-explorer-status.is-disabled")).toHaveCount(0);
+ expect(requests).toHaveLength(2);
+ await inputs.nth(0).check();
+ await bulk.getByLabel("Action").selectOption("archive");
+ await bulk.getByLabel("Required audit reason").fill("Expired archived without deleting billing");
+ page.once("dialog",dialog=>dialog.accept());
+ await button.click();
+ await expect(list.locator(".clients-explorer-status.is-archived")).toHaveCount(1);
+ expect(requests).toHaveLength(3);
+ expect(requests.map(r=>r.path)).toEqual(Array(3).fill("/api/v1/workspace/clients/bulk/state"));
+ expect(requests.every(r=>r.csrf==="a".repeat(64))).toBe(true);
+ expect(requests.some(r=>/credits|usage|telegram|xray/.test(r.path))).toBe(false);
+});
+
+test("bulk selection is capped at 50, resets on page changes and never writes on cancel",async({page})=>{
+ await mockBase(page);
+ const requests=await mockBusiness(page,rep,125);
+ await page.goto("/clients");
+ await page.getByLabel("Username").fill("rep-a");
+ await page.getByLabel("Password").fill("test-private-password-for-lab");
+ await page.getByRole("button",{name:"Sign in"}).click();
+ const list=page.getByRole("region",{name:"Client directory"});
+ const bulk=page.locator(".clients-bulk");
+ await list.getByLabel("Per page").selectOption("200");
+ await expect(list.locator(".clients-explorer-row")).toHaveCount(125);
+ await bulk.getByRole("button",{name:"Select up to 50 visible"}).click();
+ await expect(bulk.getByText("50 selected")).toBeVisible();
+ await expect(list.locator(".clients-bulk-checkbox input:checked")).toHaveCount(50);
+ await expect(list.locator(".clients-bulk-checkbox input").nth(55)).toBeDisabled();
+ await list.locator(".clients-bulk-checkbox input").first().uncheck();
+ await expect(list.locator(".clients-bulk-checkbox input").nth(55)).toBeEnabled();
+ await list.locator(".clients-bulk-checkbox input").nth(55).check();
+ await expect(list.locator(".clients-bulk-checkbox input:checked")).toHaveCount(50);
+ await bulk.getByLabel("Required audit reason").fill("Do not apply without confirmation");
+ page.once("dialog",dialog=>dialog.dismiss());
+ await bulk.getByRole("button",{name:"Apply to selected"}).click();
+ expect(requests).toHaveLength(0);
+ await list.getByLabel("Per page").selectOption("25");
+ await expect(bulk.getByText("0 selected")).toBeVisible();
+ await expect(list.locator(".clients-bulk-checkbox input:checked")).toHaveCount(0);
+ await list.getByRole("button",{name:"Next"}).click();
+ await expect(bulk.getByText("0 selected")).toBeVisible();
+ expect(requests).toHaveLength(0);
+});
+
+test("bulk selection and confirmation work on 320px Persian RTL without exposing Xray",async({page})=>{
+ await mockBase(page);
+ const requests=await mockBusiness(page,rep,3);
+ await page.setViewportSize({width:320,height:770});
+ await page.goto("/clients");
+ await page.getByLabel("Username").fill("rep-a");
+ await page.getByLabel("Password").fill("test-private-password-for-lab");
+ await page.getByRole("button",{name:"Sign in"}).click();
+ await page.getByRole("button",{name:"Switch language"}).click();
+ const list=page.getByRole("region",{name:"Client directory"});
+ const bulk=page.locator(".clients-bulk");
+ await expect(bulk.getByText("مدیریت گروهی کلاینت‌ها")).toBeVisible();
+ await bulk.getByRole("button",{name:"انتخاب حداکثر ۵۰ مورد نمایان"}).click();
+ await expect(list.locator(".clients-bulk-checkbox input:checked")).toHaveCount(3);
+ await bulk.getByLabel("دلیل ضروری برای حسابرسی").fill("تست خصوصی نماینده");
+ expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+2)).toBe(true);
+ expect(requests).toHaveLength(0);
+});
+
+test("ambiguous response reuses bulk event ID only for an identical reviewed selection",async({page})=>{
+ await mockBase(page);
+ const writes=await mockBusiness(page,rep,4);
+ const outgoing:Array<Record<string,unknown>>=[];
+ await page.route("**/api/v1/workspace/clients/bulk/state",async route=>{
+  outgoing.push(route.request().postDataJSON() as Record<string,unknown>);
+  await route.fulfill({status:503,json:{error:"business_store_unavailable"}});
+ });
+ await page.goto("/clients");
+ await page.getByLabel("Username").fill("rep-a");
+ await page.getByLabel("Password").fill("test-private-password-for-lab");
+ await page.getByRole("button",{name:"Sign in"}).click();
+ const bulk=page.locator(".clients-bulk");
+ await page.locator(".clients-bulk-checkbox input").first().check();
+ await bulk.getByLabel("Required audit reason").fill("First attempted reviewed operation");
+ const apply=bulk.getByRole("button",{name:"Apply to selected"});
+ page.once("dialog",dialog=>dialog.accept());await apply.click();
+ await expect(page.locator(".business-notice")).toContainText("Request failed");
+ page.once("dialog",dialog=>dialog.accept());await apply.click();
+ await expect(page.locator(".business-notice")).toContainText("Request failed");
+ expect(outgoing).toHaveLength(2);
+ expect(outgoing[0].event_id).toBe(outgoing[1].event_id);
+ await bulk.getByLabel("Required audit reason").fill("Changed after first outage");
+ page.once("dialog",dialog=>dialog.accept());await apply.click();
+ expect(outgoing).toHaveLength(3);
+ expect(outgoing[2].event_id).not.toBe(outgoing[1].event_id);
+ expect(outgoing.every(b=>b.action==="disable")).toBe(true);
+ expect(outgoing.every(b=>JSON.stringify(b.client_ids)==='["paged-client-000"]')).toBe(true);
+ expect(writes).toHaveLength(0);
 });
