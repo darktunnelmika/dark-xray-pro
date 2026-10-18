@@ -1,9 +1,11 @@
 import type { BusinessModel } from "./useBusinessWorkspace";
 import { Users } from "lucide-react";
-import { uid, gb, dateTime } from "./shared";
+import { uid, gb } from "./shared";
+import ClientPlanWorkbench from "./ClientPlanWorkbench";
+import ClientListExplorer from "./ClientListExplorer";
 import ClientUsage from "../ClientUsage";
 export default function Clients({ model }: { model: BusinessModel }) {
-  const { t, session, language, actionBusy, refreshKey, reps, clients, clientOps, clientOffset, setClientOffset, clientOpsOffset, setClientOpsOffset, clientId, setClientId, clientName, setClientName, clientRep, setClientRep, clientKind, setClientKind, clientDuration, setClientDuration, clientIPs, setClientIPs, clientVolume, setClientVolume, lifeClientID, setLifeClientID, lifeDays, setLifeDays, lifeVolumeGB, setLifeVolumeGB, lifeReason, setLifeReason, lifeAction, setLifeAction, lifeStateReason, setLifeStateReason, createClient, extendExistingClient, changeExistingClientState } = model;
+  const { t, session, language, actionBusy, refreshKey, reps, clients, clientOps, clientOpsOffset, setClientOpsOffset, clientId, setClientId, clientName, setClientName, clientRep, setClientRep, clientKind, setClientKind, clientDuration, setClientDuration, clientIPs, setClientIPs, clientVolume, setClientVolume, lifeClientID, setLifeClientID, lifeDays, setLifeDays, lifeVolumeGB, setLifeVolumeGB, lifeReason, setLifeReason, lifeAction, setLifeAction, lifeStateReason, setLifeStateReason, createClient, extendExistingClient, changeExistingClientState } = model;
   return <>
       <form className="business-panel business-client-form" onSubmit={(e) => { void createClient(e); }}>
         <h3><Users size={17}/>{t.createClient}</h3>
@@ -21,18 +23,11 @@ export default function Clients({ model }: { model: BusinessModel }) {
           <label>{t.slots}<input type="number" min={clientKind === "unlimited" ? 1 : 0} max={1000} step={1} value={clientIPs} onChange={(e) => setClientIPs(e.target.value)} required/></label>
           {clientKind === "volume" && <label>{t.volumeGB}<input type="number" step="any" min="0.01" value={clientVolume} onChange={(e) => setClientVolume(e.target.value)} required/></label>}
         </div>
+        <ClientPlanWorkbench model={model}/>
         <p className="business-warning">{t.pending}</p>
         <button type="submit" disabled={actionBusy}>{t.saveClient}</button>
       </form>
-      <div className="business-panel">
-        <h3>{t.clients}</h3>
-        {clients && clients.length ? <div className="business-records">{clients.map((c) => <div key={c.id}>
-          <strong>{c.name} ({c.id})</strong><span>{c.plan_kind} · {c.duration_days}d · {dateTime(c.expires_unix, language)} · {c.deployment_state}{c.archived ? " · " + t.archived : ""}</span>
-          <button type="button" className="business-manage-client" onClick={() => setLifeClientID(c.id)}>{t.manageClient}</button>
-        </div>)}</div> : <p>{clients ? t.empty : t.loading}</p>}
-        <div className="business-pagination"><button disabled={clientOffset === 0} onClick={() => setClientOffset((x) => Math.max(0, x - 50))}>{t.previous}</button>
-          <button disabled={!clients || clients.length < 50} onClick={() => setClientOffset((x) => x + 50)}>{t.next}</button></div>
-      </div>
+      <ClientListExplorer model={model}/>
       <div className="business-panel">
         <h3>{t.clientLifecycle}</h3>
         <label>{t.chooseClient}
