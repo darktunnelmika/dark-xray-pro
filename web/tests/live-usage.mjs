@@ -41,8 +41,9 @@ try {
   await form.getByLabel('Plan type').selectOption('volume');
   await form.getByLabel('Plan volume (GB)', { exact: true }).fill('0.01');
   await form.getByRole('button', { name: 'Create pending client', exact: true }).click();
-  await expect(page.locator('.business-records strong').filter({ hasText: 'Live metered customer (live-usage-client)' })).toBeVisible();
-  await page.getByRole('button', { name: 'Manage', exact: true }).click();
+  const storedClient = page.locator('.clients-explorer-row').filter({ hasText: 'live-usage-client' });
+  await expect(storedClient.getByText('Live metered customer', { exact: true })).toBeVisible();
+  await storedClient.getByRole('button', { name: 'Manage', exact: true }).click();
   const card = page.getByRole('region', { name: 'Recorded client usage', exact: true });
   await expect(card.getByRole('status')).toHaveText('Eligible in the quota ledger only');
   await expect(card.locator('dl > div').filter({ hasText: 'Total recorded' }).locator('dd')).toHaveText('0 bytes');
