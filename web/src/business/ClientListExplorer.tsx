@@ -1,6 +1,8 @@
-import { CalendarDays, Search, ShieldCheck, UserRoundCheck, Users } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { CalendarDays, Search, ShieldCheck, UserRoundCheck, Users, CheckSquare, Archive, AlertTriangle } from "lucide-react";
+import { mutation } from "../session";
 import type { BusinessModel } from "./useBusinessWorkspace";
-import { dateTime, gb, type Client } from "./shared";
+import { dateTime, gb, uid, type Client } from "./shared";
 import "./ClientSales.css";
 
 type Filter = "all" | "pending" | "disabled" | "expired" | "archived" | "other";
@@ -19,6 +21,14 @@ const words = {
     byName:"Name", expirySoon:"Expiry first", expiryLate:"Expiry last",
     pageSize:"Per page", repFilter:"Representative ID (owner, optional)",
     matches:"Matches", loadingFilter:"Checking server filters…",
+    bulkTitle:"Bulk client action",selectClient:"Select client",selectVisible:"Select up to 50 visible",clear:"Clear",
+    selectedCount:"selected",action:"Action",disableAction:"Disable",enableAction:"Enable",
+    archiveAction:"Archive (keep history)",reason:"Required audit reason",
+    execute:"Apply to selected",confirm:"Apply this action to the selected clients? All records are checked together; financial usage is never deleted.",
+    archiveConfirm:"Archive selected clients? Client IDs, UUIDs and ALL historical usage/credits stay intact. This does not remove any Xray process.",
+    bulkNote:"At most 50 individually selected clients per transaction. All-or-none, immutable audit, no usage reset or direct Xray Apply.",
+    missingReason:"Enter an audit reason and select permitted clients.",
+    tooMany:"A maximum of 50 clients can be selected per operation.",
   },
   fa: {
     title:"فهرست کلاینت‌ها",subtitle:"جست‌وجو، فیلتر و مرتب‌سازی سراسری تمام کلاینت‌های مجاز حساب، با صفحه‌بندی واقعی سمت سرور.",
@@ -34,6 +44,14 @@ const words = {
     byName:"نام",expirySoon:"نزدیک‌ترین انقضا",expiryLate:"دورترین انقضا",
     pageSize:"در هر صفحه",repFilter:"شناسه نماینده (فقط مالک، اختیاری)",
     matches:"تعداد کل",loadingFilter:"در حال دریافت فیلترهای سرور…",
+    bulkTitle:"مدیریت گروهی کلاینت‌ها",selectClient:"انتخاب کلاینت",selectVisible:"انتخاب حداکثر ۵۰ مورد نمایان",clear:"پاک‌کردن انتخاب",
+    selectedCount:"انتخاب‌شده",action:"عملیات",disableAction:"غیرفعال",enableAction:"فعال‌سازی منطقی",
+    archiveAction:"آرشیو (با حفظ سوابق)",reason:"دلیل ضروری برای حسابرسی",
+    execute:"اعمال به انتخاب‌شده‌ها",confirm:"این عملیات روی کلاینت‌های انتخاب‌شده اعمال شود؟ همه هم‌زمان بررسی می‌شوند و هیچ مصرف مالی حذف نمی‌شود.",
+    archiveConfirm:"کلاینت‌ها آرشیو شوند؟ شناسه‌ها، UUID و تمام مصرف و اعتبار تاریخی می‌مانند؛ هیچ پردازش Xray مستقیم حذف نمی‌شود.",
+    bulkNote:"حداکثر ۵۰ کلاینتِ مشخص در هر تراکنش. همه یا هیچ، با حسابرسی تغییرناپذیر و بدون صفرکردن مصرف.",
+    missingReason:"دلیل حسابرسی را وارد کن و کلاینت‌های معتبر انتخاب کن.",
+    tooMany:"در هر درخواست حداکثر ۵۰ کلاینت مجاز است.",
   },
 } as const;
 
@@ -48,8 +66,16 @@ function clientState(client:Client,now:number): Filter {
 export default function ClientListExplorer({model}: {model:BusinessModel}) {
   const { clients, clientOffset, setClientOffset, lifeClientID, setLifeClientID, language, t, session,
     clientLimit, changeClientLimit, clientTotal, clientHasMore, clientSearchDraft,setClientSearchDraft,
-    clientSearch,clientStateFilter,clientPlanFilter,clientSort,clientRepFilter,changeClientFilters,actionBusy }=model;
+    clientSearch,clientStateFilter,clientPlanFilter,clientSort,clientRepFilter,changeClientFilters,actionBusy,
+    runAction,setNotice }=model;
   const copy=words[language];
+  const [selected,setSelected]=useState<string[]>([]);
+  const [bulkAction,setBulkAction]=useState<"disable"|"enable"|"archive">("disable");
+  const [bulkReason,setBulkReason]=useState("");
+  const pendingBulk=useRef<{key:string;id:string}|null>(null);
+  useEffect(()=>{
+    setSelected([]); pendingBulk.current=null;
+  },[session.user.id,clientOffset,clientLimit,clientSearch,clientStateFilter,clientPlanFilter,clientSort,clientRepFilter]);
   const now=Date.now()/1000;
   // The server owns the filtered result set; no client-side partial-page
   // pretending to offer a global search. Debounce hides old matches.
@@ -61,6 +87,33 @@ export default function ClientListExplorer({model}: {model:BusinessModel}) {
   const matches=valid?safe:[];
   const more=clientHasMore===null?(valid&&matches.length===clientLimit):clientHasMore;
   const total=valid&&clientTotal!==null?clientTotal.toLocaleString("en-US"):"—";
+  const allowedSelected=selected.filter(id=>valid&&matches.some(c=>c.id===id&&!c.archived));
+  const canSelect=valid&&!actionBusy;
+  function toggle(id:string,checked:boolean){
+    if(!canSelect)return;
+    setSelected(current=>{
+      if(!checked)return current.filter(x=>x!==id);
+      if(current.includes(id))return current;
+      if(current.length>=50)return current;
+      return [...current,id];
+    });
+  }
+  async function executeBulk(){
+    if(!canSelect||allowedSelected.length<1||allowedSelected.length>50||
+      bulkReason.trim().length<1||bulkReason.trim().length>200){
+      setNotice(copy.missingReason);return;
+    }
+    const confirmed=window.confirm(bulkAction==="archive"?copy.archiveConfirm:copy.confirm);
+    if(!confirmed)return;
+    const payload={client_ids:[...allowedSelected].sort(),action:bulkAction,reason:bulkReason.trim()};
+    const key=JSON.stringify(payload);
+    const eventId=pendingBulk.current?.key===key?pendingBulk.current.id:uid();
+    pendingBulk.current={key,id:eventId};
+    await runAction(async()=>{
+      await mutation("/api/v1/workspace/clients/bulk/state",{event_id:eventId,...payload},session.csrf_token);
+      setSelected([]);setBulkReason("");pendingBulk.current=null;
+    });
+  }
   return <section className="clients-explorer business-panel" aria-label="Client directory">
     <header className="clients-explorer-heading">
       <span className="clients-explorer-icon"><Users size={19}/></span>
@@ -100,6 +153,36 @@ export default function ClientListExplorer({model}: {model:BusinessModel}) {
           onChange={e=>changeClientFilters("rep",e.target.value.trim())}
           placeholder={copy.repFilter} disabled={actionBusy}/></label>}
     </div>
+    <div className="clients-bulk" aria-label="Bulk client actions">
+      <div className="clients-bulk-header">
+        <strong><CheckSquare size={16}/>{copy.bulkTitle}</strong>
+        <span>{allowedSelected.length} {copy.selectedCount}</span>
+      </div>
+      {allowedSelected.length>=50 && <p role="status">{copy.tooMany}</p>}
+      <div className="clients-bulk-quick">
+        <button type="button" disabled={!canSelect||!matches.some(c=>!c.archived)}
+          onClick={()=>setSelected(matches.filter(c=>!c.archived).slice(0,50).map(c=>c.id))}>
+          <CheckSquare size={14}/>{copy.selectVisible}</button>
+        <button type="button" disabled={!canSelect||allowedSelected.length===0}
+          onClick={()=>setSelected([])}>{copy.clear}</button>
+      </div>
+      <div className="clients-bulk-fields">
+        <label>{copy.action}<select value={bulkAction} disabled={!canSelect}
+          onChange={e=>setBulkAction(e.target.value as typeof bulkAction)}>
+          <option value="disable">{copy.disableAction}</option>
+          <option value="enable">{copy.enableAction}</option>
+          <option value="archive">{copy.archiveAction}</option>
+        </select></label>
+        <label>{copy.reason}<input type="text" value={bulkReason} maxLength={200}
+          disabled={!canSelect} onChange={e=>setBulkReason(e.target.value)}
+          placeholder={copy.reason}/></label>
+      </div>
+      <button type="button" className="clients-bulk-submit"
+        disabled={!canSelect||!allowedSelected.length||!bulkReason.trim()}
+        onClick={()=>void executeBulk()}>
+        <Archive size={14}/>{copy.execute}</button>
+      <p><AlertTriangle size={14}/>{copy.bulkNote}</p>
+    </div>
     <div className="clients-explorer-list">
       {valid&&matches.map(c=>{
         const status=clientState(c,now);
@@ -109,6 +192,12 @@ export default function ClientListExplorer({model}: {model:BusinessModel}) {
           :c.plan_kind==="volume"?copy.volume:copy.other;
         return <article className={"clients-explorer-row"+(c.id===lifeClientID?" is-selected":"")} key={c.id}>
           <div className="clients-explorer-main">
+            <label className="clients-bulk-checkbox">
+              <input type="checkbox" aria-label={copy.selectClient+" "+c.id}
+                checked={allowedSelected.includes(c.id)}
+                disabled={!canSelect||c.archived}
+                onChange={e=>toggle(c.id,e.target.checked)}/>
+            </label>
             <div className="clients-explorer-identity">
               <span className="clients-explorer-avatar"><UserRoundCheck size={16}/></span>
               <div><strong>{c.name}</strong><small dir="auto">{c.id}</small></div>

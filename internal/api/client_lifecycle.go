@@ -21,6 +21,35 @@ func(s *Server) attachClientLifecycle(mux *http.ServeMux){
   }
   return c,true
  }
+ mux.HandleFunc("POST /api/v1/workspace/clients/bulk/state",func(w http.ResponseWriter,r *http.Request){
+  session,ok:=s.authorizeBrowser(w,r,true,false);if !ok{return}
+  var req business.BulkClientState
+  if err:=decode(w,r,maxBusinessRequestBytes,&req);err!=nil{
+   respond(w,http.StatusBadRequest,map[string]string{"error":"invalid_request"});return
+  }
+  if session.User.Role!="owner"{
+   // Fail with a generic 403 before entering a write transaction; the
+   // transaction independently rechecks every client's tenant scope.
+   for _,id:=range req.ClientIDs{
+    c,err:=s.business.Client(r.Context(),id)
+    if err!=nil{businessError(w,err);return}
+    if c.RepresentativeID!=session.User.RepresentativeID{
+     respond(w,http.StatusForbidden,map[string]string{"error":"representative_scope_denied"});return
+    }
+   }
+  }
+  scope:=""
+  if session.User.Role!="owner"{scope=session.User.RepresentativeID}
+  result,err:=s.business.BulkSetClientState(r.Context(),req,scope)
+  if err!=nil{businessError(w,err);return}
+  ids:=make([]string,0,len(result.Clients))
+  for _,c:=range result.Clients{ids=append(ids,c.ID)}
+  respond(w,http.StatusOK,map[string]any{
+   "client_ids":ids,"count":result.Count,"replayed":result.Replayed,
+   "applied_to_xray":false,"billing_refunded":false,
+   "customer_traffic_changed":false,"client_or_usage_history_deleted":false,
+  })
+ })
  mux.HandleFunc("GET /api/v1/workspace/clients/{id}",func(w http.ResponseWriter,r *http.Request){
   c,ok:=ownedClient(w,r,false);if !ok{return}
   respond(w,http.StatusOK,c)
