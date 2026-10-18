@@ -14,7 +14,9 @@ billing states. This implementation preserves immutable records.
 - Up to **50 individually selected, verified nonarchived client IDs** from
   one authenticated page. The page may itself display 25, 50, 100 or 200
   filtered rows; selecting visible checks only the first 50 permissible
-  items. Page/filter/representative changes clear selected IDs.
+  items. At the cap, unselected checkboxes become disabled until an
+  existing item is unchecked (rather than appearing clickable but ignoring
+  changes). Page/filter/representative changes clear selected IDs.
 - Operator explicitly chooses disable / logical enable / archive and
   must provide an audit reason. Every operation requires an explicit
   confirmation; archive warns that UUID, spent credit, group membership

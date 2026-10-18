@@ -195,7 +195,8 @@ export default function ClientListExplorer({model}: {model:BusinessModel}) {
             <label className="clients-bulk-checkbox">
               <input type="checkbox" aria-label={copy.selectClient+" "+c.id}
                 checked={allowedSelected.includes(c.id)}
-                disabled={!canSelect||c.archived}
+                disabled={!canSelect||c.archived||
+                  (allowedSelected.length>=50&&!allowedSelected.includes(c.id))}
                 onChange={e=>toggle(c.id,e.target.checked)}/>
             </label>
             <div className="clients-explorer-identity">

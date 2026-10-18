@@ -756,6 +756,9 @@ test("bulk selection is capped at 50, resets on page changes and never writes on
  await bulk.getByRole("button",{name:"Select up to 50 visible"}).click();
  await expect(bulk.getByText("50 selected")).toBeVisible();
  await expect(list.locator(".clients-bulk-checkbox input:checked")).toHaveCount(50);
+ await expect(list.locator(".clients-bulk-checkbox input").nth(55)).toBeDisabled();
+ await list.locator(".clients-bulk-checkbox input").first().uncheck();
+ await expect(list.locator(".clients-bulk-checkbox input").nth(55)).toBeEnabled();
  await list.locator(".clients-bulk-checkbox input").nth(55).check();
  await expect(list.locator(".clients-bulk-checkbox input:checked")).toHaveCount(50);
  await bulk.getByLabel("Required audit reason").fill("Do not apply without confirmation");
