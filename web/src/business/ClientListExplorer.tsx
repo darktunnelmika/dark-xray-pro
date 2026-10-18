@@ -1,4 +1,3 @@
-import { useEffect, useState } from "react";
 import { CalendarDays, Search, ShieldCheck, UserRoundCheck, Users } from "lucide-react";
 import type { BusinessModel } from "./useBusinessWorkspace";
 import { dateTime, gb, type Client } from "./shared";
@@ -7,26 +6,34 @@ import "./ClientSales.css";
 type Filter = "all" | "pending" | "disabled" | "expired" | "archived" | "other";
 const words = {
   en: {
-    title:"Client directory", subtitle:"Only the current authenticated page (up to 50). Search and status filters are NOT fleet-wide.",
-    search:"Search name or ID on this page", status:"Filter page", all:"All", pending:"Pending Node Apply",
+    title:"Client directory", subtitle:"Search, filter and sort across every client available to your account. Results are server-scoped and paged.",
+    search:"Search all clients by name or ID", status:"Status", all:"All", pending:"Pending Node Apply",
     disabled:"Disabled", expired:"Expired", archived:"Archived", other:"Other / unknown",
     total:"Loaded", noResults:"No matches on this page", empty:"No clients returned for this page",
     load:"Loading authenticated client records", page:"Page", previous:"Previous",next:"Next",
     manage:"Manage", volume:"Volume", unlimited:"Unlimited",
     slotUnlimited:"Unlimited IPs", slots:"user/IP slots", end:"Expires",
-    note:"No online status or billed traffic inferred here. Open a client to read authoritative usage. Selecting Manage does not activate Xray.",
+    note:"Exact status and server-side count reflect saved records, not a live Xray guarantee. Open the authenticated usage view for billable bytes.",
     selected:"Selected for management", rep:"Representative",
+    plan:"Plan", allPlans:"All plans", sort:"Sort", newest:"Newest", oldest:"Oldest",
+    byName:"Name", expirySoon:"Expiry first", expiryLate:"Expiry last",
+    pageSize:"Per page", repFilter:"Representative ID (owner, optional)",
+    matches:"Matches", loadingFilter:"Checking server filters…",
   },
   fa: {
-    title:"فهرست کلاینت‌ها",subtitle:"فقط همین صفحهٔ احرازشده (حداکثر ۵۰ نفر). جست‌وجو و فیلتر وضعیت، کل سرور را پوشش نمی‌دهد.",
-    search:"جست‌وجوی نام یا شناسه در همین صفحه",status:"فیلتر صفحه",all:"همه",pending:"در انتظار اعمال نود",
+    title:"فهرست کلاینت‌ها",subtitle:"جست‌وجو، فیلتر و مرتب‌سازی سراسری تمام کلاینت‌های مجاز حساب، با صفحه‌بندی واقعی سمت سرور.",
+    search:"جست‌وجوی سراسری نام یا شناسه",status:"وضعیت",all:"همه",pending:"در انتظار اعمال نود",
     disabled:"غیرفعال",expired:"منقضی",archived:"آرشیوشده",other:"سایر / نامشخص",
     total:"بارگذاری‌شده",noResults:"در این صفحه نتیجه‌ای وجود ندارد",empty:"در این صفحه کلاینتی ثبت نشده",
     load:"در حال دریافت کلاینت‌های معتبر",page:"صفحه",previous:"قبلی",next:"بعدی",
     manage:"مدیریت",volume:"حجمی",unlimited:"نامحدود",
     slotUnlimited:"IP نامحدود",slots:"کاربر / IP",end:"انقضا",
-    note:"وضعیت آنلاین یا مصرف مالی از این لیست حدس زده نمی‌شود. برای مصرف معتبر، کلاینت را باز کن. «مدیریت» Xray را فعال نمی‌کند.",
+    note:"تعداد و فیلترها از دیتابیس واقعی خوانده می‌شوند؛ وضعیت آنلاین و مصرف Xray از روی فهرست حدس زده نمی‌شود.",
     selected:"انتخاب‌شده برای مدیریت",rep:"نماینده",
+    plan:"نوع پلن",allPlans:"همهٔ پلن‌ها",sort:"مرتب‌سازی",newest:"جدیدترین",oldest:"قدیمی‌ترین",
+    byName:"نام",expirySoon:"نزدیک‌ترین انقضا",expiryLate:"دورترین انقضا",
+    pageSize:"در هر صفحه",repFilter:"شناسه نماینده (فقط مالک، اختیاری)",
+    matches:"تعداد کل",loadingFilter:"در حال دریافت فیلترهای سرور…",
   },
 } as const;
 
@@ -39,38 +46,59 @@ function clientState(client:Client,now:number): Filter {
 }
 
 export default function ClientListExplorer({model}: {model:BusinessModel}) {
-  const { clients, clientOffset, setClientOffset, lifeClientID, setLifeClientID, language, t, session }=model;
+  const { clients, clientOffset, setClientOffset, lifeClientID, setLifeClientID, language, t, session,
+    clientLimit, changeClientLimit, clientTotal, clientHasMore, clientSearchDraft,setClientSearchDraft,
+    clientSearch,clientStateFilter,clientPlanFilter,clientSort,clientRepFilter,changeClientFilters,actionBusy }=model;
   const copy=words[language];
-  const [query,setQuery]=useState("");
-  const [filter,setFilter]=useState<Filter>("all");
-  useEffect(()=>{setQuery("");setFilter("all");},[clientOffset,session.user.id]);
+  const now=Date.now()/1000;
+  // The server owns the filtered result set; no client-side partial-page
+  // pretending to offer a global search. Debounce hides old matches.
   const safe=clients===null?null:clients.filter(c=>
     typeof c.id==="string"&&typeof c.name==="string"&&typeof c.representative_id==="string"&&
     typeof c.archived==="boolean" && Number.isFinite(c.expires_unix));
-  // An incomplete/malformed API response must never be treated as a full
-  // verified page; the mutation-capable lifecycle is independently guarded.
-  const valid=!!safe && safe.length===clients?.length && safe.length<=50;
-  const now=Date.now()/1000;
-  const needle=query.trim().toLocaleLowerCase();
-  const matches=(valid?safe:[]).filter(c=>
-    (filter==="all"||clientState(c,now)===filter) &&
-    (!needle||c.id.toLocaleLowerCase().includes(needle)||c.name.toLocaleLowerCase().includes(needle)));
+  const valid=!!safe && safe.length===clients?.length && safe.length<=clientLimit &&
+    clientSearchDraft.trim()===clientSearch;
+  const matches=valid?safe:[];
+  const more=clientHasMore===null?(valid&&matches.length===clientLimit):clientHasMore;
+  const total=valid&&clientTotal!==null?clientTotal.toLocaleString("en-US"):"—";
   return <section className="clients-explorer business-panel" aria-label="Client directory">
     <header className="clients-explorer-heading">
       <span className="clients-explorer-icon"><Users size={19}/></span>
       <div><h3>{copy.title}</h3><p>{copy.subtitle}</p></div>
-      <span className="clients-explorer-count">{copy.total}: {valid?clients!.length:"—"}</span>
+      <span className="clients-explorer-count">{copy.matches}: {total}</span>
     </header>
     <div className="clients-explorer-filters">
       <label>{copy.search}<div className="clients-explorer-search">
-        <Search size={15}/><input type="search" value={query}
-          onChange={e=>setQuery(e.target.value)} disabled={!valid}
-          placeholder={copy.search}/></div></label>
-      <label>{copy.status}<select aria-label={copy.status} value={filter}
-        disabled={!valid} onChange={e=>setFilter(e.target.value as Filter)}>
+        <Search size={15}/><input type="search" value={clientSearchDraft}
+          onChange={e=>{setClientSearchDraft(e.target.value.slice(0,128));setClientOffset(0);setLifeClientID("");}}
+          disabled={actionBusy} maxLength={128} placeholder={copy.search}/></div></label>
+      <label>{copy.status}<select aria-label={copy.status} value={clientStateFilter}
+        disabled={actionBusy} onChange={e=>changeClientFilters("state",e.target.value)}>
         {(["all","pending","disabled","expired","archived","other"] as Filter[])
           .map(k=><option key={k} value={k}>{copy[k]}</option>)}
       </select></label>
+      <label>{copy.plan}<select aria-label={copy.plan} value={clientPlanFilter}
+        disabled={actionBusy} onChange={e=>changeClientFilters("plan",e.target.value)}>
+        <option value="all">{copy.allPlans}</option>
+        <option value="volume">{copy.volume}</option><option value="unlimited">{copy.unlimited}</option>
+      </select></label>
+      <label>{copy.sort}<select aria-label={copy.sort} value={clientSort}
+        disabled={actionBusy} onChange={e=>changeClientFilters("sort",e.target.value)}>
+        <option value="newest">{copy.newest}</option>
+        <option value="oldest">{copy.oldest}</option>
+        <option value="name">{copy.byName}</option>
+        <option value="expiry_soon">{copy.expirySoon}</option>
+        <option value="expiry_late">{copy.expiryLate}</option>
+      </select></label>
+      <label>{copy.pageSize}<select aria-label={copy.pageSize} value={clientLimit}
+        disabled={actionBusy}
+        onChange={e=>changeClientLimit(Number(e.target.value) as 25|50|100|200)}>
+        {[25,50,100,200].map(n=><option key={n} value={n}>{n}</option>)}
+      </select></label>
+      {session.user.role==="owner" && <label>{copy.repFilter}
+        <input type="text" maxLength={64} value={clientRepFilter}
+          onChange={e=>changeClientFilters("rep",e.target.value.trim())}
+          placeholder={copy.repFilter} disabled={actionBusy}/></label>}
     </div>
     <div className="clients-explorer-list">
       {valid&&matches.map(c=>{
@@ -100,15 +128,15 @@ export default function ClientListExplorer({model}: {model:BusinessModel}) {
           </div>
         </article>;
       })}
-      {valid&&matches.length===0&&<p className="clients-explorer-empty">{clients!.length===0?copy.empty:copy.noResults}</p>}
-      {!valid&&<p className="clients-explorer-empty">{clients===null?copy.load:t.unavailable}</p>}
+      {valid&&matches.length===0&&<p className="clients-explorer-empty">{clientTotal===0?copy.empty:copy.noResults}</p>}
+      {!valid&&<p className="clients-explorer-empty">{clientSearchDraft.trim()!==clientSearch?copy.loadingFilter:clients===null?copy.load:t.unavailable}</p>}
     </div>
     <div className="clients-explorer-pager">
       <button type="button" disabled={!valid||clientOffset===0}
-        onClick={()=>setClientOffset(x=>Math.max(0,x-50))}>{copy.previous}</button>
-      <strong>{copy.page}: {Math.floor(clientOffset/50)+1}</strong>
-      <button type="button" disabled={!valid||clients!.length<50}
-        onClick={()=>setClientOffset(x=>x+50)}>{copy.next}</button>
+        onClick={()=>setClientOffset(x=>Math.max(0,x-clientLimit))}>{copy.previous}</button>
+      <strong>{copy.page}: {Math.floor(clientOffset/clientLimit)+1}</strong>
+      <button type="button" disabled={!valid||!more}
+        onClick={()=>setClientOffset(x=>Math.min(1_000_000,x+clientLimit))}>{copy.next}</button>
     </div>
     <p className="clients-explorer-note"><ShieldCheck size={14}/>{copy.note}</p>
   </section>;

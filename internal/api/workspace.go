@@ -67,19 +67,21 @@ func(s *Server) attachWorkspace(mux *http.ServeMux){
  })
  mux.HandleFunc("GET /api/v1/workspace/clients",func(w http.ResponseWriter,r *http.Request){
   session,ok:=s.authorizeBrowser(w,r,false,false);if !ok{return}
-  limit,offset,err:=pageParams(r)
+  options,err:=clientSearchParams(r)
   if err!=nil{businessError(w,business.ErrInvalid);return}
-  repID:=r.URL.Query().Get("representative_id")
   if session.User.Role=="representative"{
-   if repID!=""&&repID!=session.User.RepresentativeID{
+   if options.RepresentativeID!=""&&options.RepresentativeID!=session.User.RepresentativeID{
     respond(w,http.StatusForbidden,map[string]string{"error":"representative_scope_denied"});return
    }
-   repID=session.User.RepresentativeID
+   options.RepresentativeID=session.User.RepresentativeID
   }
-  rows,err:=s.business.ListClients(r.Context(),repID,limit,offset)
+  page,err:=s.business.SearchClients(r.Context(),options)
   if err!=nil{businessError(w,err);return}
   respond(w,http.StatusOK,map[string]any{
-   "clients":rows,"limit":limit,"offset":offset,
+   "clients":page.Clients,"limit":page.Limit,"offset":page.Offset,
+   "total":page.Total,"has_more":page.HasMore,
+   "q":options.Query,"state":options.State,"plan":options.Plan,
+   "sort":options.Sort,"representative_id":options.RepresentativeID,
    "activation":"pending_real_node_and_inbound_apply",
   })
  })

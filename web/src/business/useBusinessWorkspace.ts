@@ -2,6 +2,9 @@ import { useCallback, useEffect, useRef, useState, type FormEvent } from "react"
 import { api, mutation, ApiError, useSession, type Language } from "../session";
 import { useAccountPageOffset } from "./useAccountPageOffset";
 import { words, uid, bytesFromGB, type Section, type Workspace, type Representative, type Client, type ClientOperation, type ClientGroup, type LedgerEvent } from "./shared";
+type ClientPageResponse = {clients:Client[];total?:number;has_more?:boolean;
+  limit?:number;offset?:number;q?:string;state?:string;plan?:string;
+  sort?:string;representative_id?:string};
 export function useBusinessWorkspace(language: Language, section: Section) {
   const t = words[language];
   const { session, expire } = useSession();
@@ -19,11 +22,50 @@ export function useBusinessWorkspace(language: Language, section: Section) {
   const [me, setMe] = useState<Workspace | null>(null);
   const [reps, setReps] = useState<Representative[] | null>(null);
   const [clients, setClients] = useState<Client[] | null>(null);
+  // Only page size/offset is persisted per account; search remains in memory.
+  const [clientLimit,setClientLimit] = useState<25|50|100|200>(() => {
+    try {
+      const n=Number(sessionStorage.getItem("dark-pro-client-page-size:"+(session?.user.id??"")));
+      return n===25||n===50||n===100||n===200?n:50;
+    } catch {return 50;}
+  });
+  const [clientSearchDraft,setClientSearchDraft] = useState("");
+  const [clientSearch,setClientSearch] = useState("");
+  const [clientStateFilter,setClientStateFilter] = useState("all");
+  const [clientPlanFilter,setClientPlanFilter] = useState("all");
+  const [clientSort,setClientSort] = useState("newest");
+  const [clientRepFilter,setClientRepFilter] = useState("");
+  const [clientTotal,setClientTotal] = useState<number|null>(null);
+  const [clientHasMore,setClientHasMore] = useState<boolean|null>(null);
+  const [clientLoadedKey,setClientLoadedKey] = useState("");
   const [events, setEvents] = useState<LedgerEvent[] | null>(null);
   const [groups, setGroups] = useState<ClientGroup[] | null>(null);
   const [clientOps, setClientOps] = useState<ClientOperation[] | null>(null);
   const [repOffset, setRepOffset] = useAccountPageOffset(session.user.id, "representatives");
-  const [clientOffset, setClientOffset] = useAccountPageOffset(session.user.id, "clients");
+  const [clientOffset, setClientOffset] = useAccountPageOffset(session.user.id, "clients", clientLimit);
+  useEffect(() => {
+    try {sessionStorage.setItem("dark-pro-client-page-size:"+session.user.id,String(clientLimit));}
+    catch {/* private browsing */}
+  },[clientLimit,session.user.id]);
+  useEffect(()=>{
+    const timer=window.setTimeout(()=>setClientSearch(clientSearchDraft.trim()),300);
+    return ()=>window.clearTimeout(timer);
+  },[clientSearchDraft]);
+  const clientRequestKey=JSON.stringify([session.user.id,clientLimit,clientOffset,
+    clientSearch,clientStateFilter,clientPlanFilter,clientSort,
+    session.user.role==="owner"?clientRepFilter:""]);
+  const visibleClients=clientLoadedKey===clientRequestKey?clients:null;
+  function changeClientLimit(n:25|50|100|200){
+    if (![25,50,100,200].includes(n))return;
+    setClientLimit(n);setClientOffset(0);setLifeClientID("");
+  }
+  function changeClientFilters(kind:"state"|"plan"|"sort"|"rep",value:string){
+    if(kind==="state" && ["all","pending","disabled","expired","archived","other"].includes(value)) setClientStateFilter(value);
+    if(kind==="plan" && ["all","volume","unlimited"].includes(value)) setClientPlanFilter(value);
+    if(kind==="sort" && ["newest","oldest","name","expiry_soon","expiry_late"].includes(value)) setClientSort(value);
+    if(kind==="rep" && session?.user.role==="owner" && value.length<=64) setClientRepFilter(value);
+    setClientOffset(0);setLifeClientID("");
+  }
   const [eventOffset, setEventOffset] = useAccountPageOffset(session.user.id, "finance");
   const [groupOffset, setGroupOffset] = useAccountPageOffset(session.user.id, "groups");
   const [clientOpsOffset, setClientOpsOffset] = useAccountPageOffset(session.user.id, "client-operations");
@@ -80,10 +122,16 @@ export function useBusinessWorkspace(language: Language, section: Section) {
     if (!session) return;
     const controller = new AbortController();
     const p = "?limit=50&offset=";
+    const clientQ = new URLSearchParams({
+      limit:String(clientLimit),offset:String(clientOffset),q:clientSearch,
+      state:clientStateFilter,plan:clientPlanFilter,sort:clientSort,
+    });
+    if(session.user.role==="owner" && clientRepFilter)clientQ.set("representative_id",clientRepFilter);
     const fetchData = async () => {
       const [account, ownClients, ownEvents, ownerReps, ownGroups, lifecycle] = await Promise.all([
         api<Workspace>("/api/v1/workspace/me", { signal: controller.signal }),
-        section === "clients" ? api<{ clients: Client[] }>("/api/v1/workspace/clients" + p + clientOffset, { signal: controller.signal }) : Promise.resolve({ clients: [] as Client[] }),
+        section === "clients" ? api<ClientPageResponse>("/api/v1/workspace/clients?"+clientQ.toString(), { signal: controller.signal })
+          : Promise.resolve<ClientPageResponse>({ clients: [] }),
         section === "finance" ? api<{ events: LedgerEvent[] }>("/api/v1/workspace/events" + p + eventOffset, { signal: controller.signal }) : Promise.resolve({ events: [] as LedgerEvent[] }),
         session.user.role === "owner" && ["clients", "groups", "representatives"].includes(section)
           ? api<{ representatives: Representative[] }>("/api/v1/workspace/representatives" + p + repOffset, { signal: controller.signal })
@@ -99,7 +147,18 @@ export function useBusinessWorkspace(language: Language, section: Section) {
       // A representative's own client data must never be replaced by a
       // malformed or cross-tenant API page. The HUB already enforces scope;
       // client-side validation is a second fail-closed UX boundary.
-      if (section === "clients" && (ownClients.clients.length > 50 ||
+      if (section === "clients" && (ownClients.clients.length > clientLimit ||
+        (ownClients.limit!==undefined && ownClients.limit!==clientLimit) ||
+        (ownClients.offset!==undefined && ownClients.offset!==clientOffset) ||
+        (ownClients.q!==undefined && ownClients.q!==clientSearch) ||
+        (ownClients.state!==undefined && ownClients.state!==clientStateFilter) ||
+        (ownClients.plan!==undefined && ownClients.plan!==clientPlanFilter) ||
+        (ownClients.sort!==undefined && ownClients.sort!==clientSort) ||
+        (ownClients.representative_id!==undefined &&
+          ownClients.representative_id!==(session.user.role==="owner"?clientRepFilter:session.user.representative_id)) ||
+        (ownClients.total!==undefined && (!Number.isSafeInteger(ownClients.total) ||
+          ownClients.total<ownClients.clients.length || ownClients.total<0)) ||
+        (ownClients.has_more!==undefined && typeof ownClients.has_more!=="boolean") ||
         ownClients.clients.some(c =>
           typeof c.id !== "string" || typeof c.name !== "string" ||
           typeof c.representative_id !== "string" || typeof c.archived !== "boolean" ||
@@ -111,6 +170,11 @@ export function useBusinessWorkspace(language: Language, section: Section) {
           (session.user.role === "representative" &&
             c.representative_id !== session.user.representative_id)))) {
         throw new Error("invalid_scoped_client_page");
+      }
+      if (section==="clients") {
+        setClientTotal(ownClients.total??null);
+        setClientHasMore(ownClients.has_more??null);
+        setClientLoadedKey(clientRequestKey);
       }
       setMe(account); setClients(ownClients.clients); setEvents(ownEvents.events);
       // A successful authenticated data refresh must NOT erase the last
@@ -126,12 +190,17 @@ export function useBusinessWorkspace(language: Language, section: Section) {
       } else {
         // Never leave a previously loaded client lifecycle list actionable
         // after a failed or cross-tenant response for another page.
-        if (section === "clients") { setClients(null); setClientOps(null); }
+        if (section === "clients") {
+          setClients(null);setClientOps(null);setClientTotal(null);setClientHasMore(null);
+          setClientLoadedKey("");
+        }
         setNotice(words[language].unavailable);
       }
     });
     return () => controller.abort();
-  }, [session, refreshKey, clientOffset, eventOffset, repOffset, groupOffset, clientOpsOffset, language, section, expire]);
+  }, [session, refreshKey, clientRequestKey, clientLimit, clientOffset, clientSearch,
+    clientStateFilter, clientPlanFilter, clientSort, clientRepFilter,
+    eventOffset, repOffset, groupOffset, clientOpsOffset, language, section, expire]);
 
   async function runAction(fn: () => Promise<void>, silent = false) {
     setActionBusy(true); setNotice(null);
@@ -217,7 +286,7 @@ export function useBusinessWorkspace(language: Language, section: Section) {
   async function extendExistingClient(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!session || !lifeClientID.trim() || !lifeReason.trim()) { setNotice(t.missing); return; }
-    const client = clients?.find((c) => c.id === lifeClientID);
+    const client = visibleClients?.find((c) => c.id === lifeClientID);
     if (!client || client.archived) { setNotice(t.missing); return; }
     const days = Number(lifeDays);
     const volumeBytes = bytesFromGB(lifeVolumeGB, true);
@@ -239,7 +308,7 @@ export function useBusinessWorkspace(language: Language, section: Section) {
   async function changeExistingClientState(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!session || !lifeClientID || !lifeStateReason.trim()) { setNotice(t.missing); return; }
-    const client = clients?.find((c) => c.id === lifeClientID);
+    const client = visibleClients?.find((c) => c.id === lifeClientID);
     if (!client || client.archived) { setNotice(t.missing); return; }
     if (lifeAction === "archive" && !window.confirm(t.archiveConfirm)) return;
     const payload = { client_id: client.id, action: lifeAction, reason: lifeStateReason.trim() };
@@ -304,6 +373,9 @@ export function useBusinessWorkspace(language: Language, section: Section) {
     });
   }
 
-  return { t, session, language, reload, oldPassword, setOldPassword, newPassword, setNewPassword, actionBusy, setActionBusy, notice, setNotice, refreshKey, setRefreshKey, me, setMe, reps, setReps, clients, setClients, events, setEvents, groups, setGroups, clientOps, setClientOps, repOffset, setRepOffset, clientOffset, setClientOffset, eventOffset, setEventOffset, groupOffset, setGroupOffset, clientOpsOffset, setClientOpsOffset, repId, setRepId, repName, setRepName, loginRep, setLoginRep, repUser, setRepUser, repPass, setRepPass, creditRep, setCreditRep, creditVolume, setCreditVolume, creditUnits, setCreditUnits, creditReason, setCreditReason, clientId, setClientId, clientName, setClientName, clientRep, setClientRep, clientKind, setClientKind, clientDuration, setClientDuration, clientIPs, setClientIPs, clientVolume, setClientVolume, groupID, setGroupID, groupName, setGroupName, groupColor, setGroupColor, groupRep, setGroupRep, groupTarget, setGroupTarget, memberIDs, setMemberIDs, groupEditID, setGroupEditID, groupEditName, setGroupEditName, groupEditColor, setGroupEditColor, unassignID, setUnassignID, lifeClientID, setLifeClientID, lifeDays, setLifeDays, lifeVolumeGB, setLifeVolumeGB, lifeReason, setLifeReason, lifeAction, setLifeAction, lifeStateReason, setLifeStateReason, runAction, changePassword, createRepresentative, createRepLogin, adjustCredit, createClient, extendExistingClient, changeExistingClientState, addGroup, assignGroup, editGroup, deleteGroup, unassignMember };
+  return {clientLimit,changeClientLimit,clientTotal,clientHasMore,
+    clientSearchDraft,setClientSearchDraft,clientSearch,clientStateFilter,clientPlanFilter,
+    clientSort,clientRepFilter,changeClientFilters,
+    t, session, language, reload, oldPassword, setOldPassword, newPassword, setNewPassword, actionBusy, setActionBusy, notice, setNotice, refreshKey, setRefreshKey, me, setMe, reps, setReps, clients:visibleClients, setClients, events, setEvents, groups, setGroups, clientOps, setClientOps, repOffset, setRepOffset, clientOffset, setClientOffset, eventOffset, setEventOffset, groupOffset, setGroupOffset, clientOpsOffset, setClientOpsOffset, repId, setRepId, repName, setRepName, loginRep, setLoginRep, repUser, setRepUser, repPass, setRepPass, creditRep, setCreditRep, creditVolume, setCreditVolume, creditUnits, setCreditUnits, creditReason, setCreditReason, clientId, setClientId, clientName, setClientName, clientRep, setClientRep, clientKind, setClientKind, clientDuration, setClientDuration, clientIPs, setClientIPs, clientVolume, setClientVolume, groupID, setGroupID, groupName, setGroupName, groupColor, setGroupColor, groupRep, setGroupRep, groupTarget, setGroupTarget, memberIDs, setMemberIDs, groupEditID, setGroupEditID, groupEditName, setGroupEditName, groupEditColor, setGroupEditColor, unassignID, setUnassignID, lifeClientID, setLifeClientID, lifeDays, setLifeDays, lifeVolumeGB, setLifeVolumeGB, lifeReason, setLifeReason, lifeAction, setLifeAction, lifeStateReason, setLifeStateReason, runAction, changePassword, createRepresentative, createRepLogin, adjustCredit, createClient, extendExistingClient, changeExistingClientState, addGroup, assignGroup, editGroup, deleteGroup, unassignMember };
 }
 export type BusinessModel = ReturnType<typeof useBusinessWorkspace>;
