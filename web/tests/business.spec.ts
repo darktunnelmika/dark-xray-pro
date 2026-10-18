@@ -130,9 +130,35 @@ async function mockBusiness(page: Page, user: typeof rep, seedClientCount=0) {
       const repID = user.role === "representative" ? user.representative_id : requested;
       const page = new URL(request.url()).searchParams;
       const limit = Number(page.get("limit") ?? 50),offset = Number(page.get("offset") ?? 0);
-      const scoped = runningClients.filter(c => !repID || (c as {representative_id:string}).representative_id === repID);
+      const q=page.get("q")??"";
+      const state=page.get("state")??"",plan=page.get("plan")??"",sort=page.get("sort")??"";
+      const now=Date.now()/1000;
+      const scoped = runningClients.filter(raw=>{
+        const c=raw as {id:string;name:string;representative_id:string;plan_kind:string;
+          archived:boolean;deployment_state:string;expires_unix:number};
+        if(repID && c.representative_id!==repID)return false;
+        if(q && !c.id.toLowerCase().includes(q.toLowerCase())&&!c.name.toLowerCase().includes(q.toLowerCase()))return false;
+        if(plan && plan!=="all" && c.plan_kind!==plan)return false;
+        if(state && state!=="all"){
+          const current=c.archived?"archived":c.deployment_state==="disabled"?"disabled":
+            c.expires_unix<=now?"expired":c.deployment_state==="pending_node_apply"?"pending":"other";
+          if(current!==state)return false;
+        }
+        return true;
+      }).slice().sort((a,b)=>{
+        const x=a as {id:string;name:string;expires_unix:number};
+        const y=b as {id:string;name:string;expires_unix:number};
+        if(sort==="name")return x.name.localeCompare(y.name)||x.id.localeCompare(y.id);
+        if(sort==="expiry_soon")return x.expires_unix-y.expires_unix||x.id.localeCompare(y.id);
+        if(sort==="expiry_late")return y.expires_unix-x.expires_unix||x.id.localeCompare(y.id);
+        if(sort==="oldest")return x.id.localeCompare(y.id);
+        return x.id.localeCompare(y.id);
+      });
+      const selected=scoped.slice(offset,offset+limit);
       await route.fulfill({ status: 200, contentType: "application/json",
-        body: JSON.stringify({ clients: scoped.slice(offset,offset+limit) }) });
+        body: JSON.stringify({ clients:selected,total:scoped.length,
+          limit,offset,q,state,plan,sort,representative_id:repID??"",
+          has_more:offset+selected.length<scoped.length }) });
     } else if (/^\/api\/v1\/workspace\/groups\/[^/]+\/members$/.test(path)) {
       const groupId=path.split("/").at(-2)!;
       const group=runningGroups.find(g=>g.id===groupId);
@@ -485,7 +511,7 @@ test("client plan quick presets match HUB debit and never submit until represent
  expect(requests[0].path).toBe("/api/v1/workspace/clients");
 });
 
-test("client explorer filters the authenticated page, selects existing client and preserves pagination",async({page})=>{
+test("client explorer searches all scoped clients from server, selects client and preserves pagination",async({page})=>{
  await mockBase(page);
  const requests=await mockBusiness(page,rep,55);
  await page.goto("/clients");
@@ -494,11 +520,11 @@ test("client explorer filters the authenticated page, selects existing client an
  await page.getByRole("button",{name:"Sign in"}).click();
  const list=page.getByRole("region",{name:"Client directory"});
  await expect(list.locator(".clients-explorer-row")).toHaveCount(50);
- await expect(list.getByText("Only the current authenticated page",{exact:false})).toBeVisible();
- await list.getByPlaceholder("Search name or ID on this page").fill("Member 001");
+ await expect(list.getByText("Search, filter and sort across every client",{exact:false})).toBeVisible();
+ await list.getByPlaceholder("Search all clients by name or ID").fill("Member 001");
  await expect(list.locator(".clients-explorer-row")).toHaveCount(1);
  await expect(list.getByText("Member 001")).toBeVisible();
- await list.getByPlaceholder("Search name or ID on this page").fill("");
+ await list.getByPlaceholder("Search all clients by name or ID").fill("");
  await list.getByRole("button",{name:"Next"}).click();
  await expect(list.locator(".clients-explorer-row")).toHaveCount(5);
  await expect(list.getByText("Member 054")).toBeVisible();
@@ -515,7 +541,7 @@ test("client explorer filters the authenticated page, selects existing client an
 test("representative client directory fails closed on a cross-account or malformed API page",async({page})=>{
  await mockBase(page);
  const requests=await mockBusiness(page,rep,3);
- await page.route("**/api/v1/workspace/clients?limit=50&offset=0",route=>route.fulfill({
+ await page.route("**/api/v1/workspace/clients?*",route=>route.fulfill({
   json:{clients:[{
     id:"other-rep-secret",name:"DO NOT DISCLOSE",representative_id:"not-rep-a",
     archived:false,deployment_state:"pending_node_apply",ip_count:1,
@@ -548,12 +574,108 @@ test("320px Persian sale presets and current-page client status filters avoid fa
  await preview.getByRole("button",{name:"90 روز"}).click();
  const list=page.getByRole("region",{name:"Client directory"});
  await expect(list.getByRole("heading",{name:"فهرست کلاینت‌ها"})).toBeVisible();
- await list.getByLabel("فیلتر صفحه").selectOption("archived");
+ await list.getByLabel("وضعیت").selectOption("archived");
  await expect(list.locator(".clients-explorer-row")).toHaveCount(0);
- await list.getByLabel("فیلتر صفحه").selectOption("pending");
+ await list.getByLabel("وضعیت").selectOption("pending");
  await expect(list.locator(".clients-explorer-row")).toHaveCount(3);
  await expect(list.getByText("IP نامحدود").first()).toBeVisible();
  await expect(list.getByText("مصرف",{exact:true})).toHaveCount(0);
  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+2)).toBe(true);
+ expect(requests).toHaveLength(0);
+});
+
+test("global directory searches clients outside loaded page and supports 25/50/100/200 server page sizes",async({page})=>{
+ await mockBase(page);
+ const requests=await mockBusiness(page,rep,125);
+ await page.goto("/clients");
+ await page.getByLabel("Username").fill("rep-a");
+ await page.getByLabel("Password").fill("test-private-password-for-lab");
+ await page.getByRole("button",{name:"Sign in"}).click();
+ const list=page.getByRole("region",{name:"Client directory"});
+ await expect(list.locator(".clients-explorer-row")).toHaveCount(50);
+ await expect(list.getByText("Matches: 125")).toBeVisible();
+ await list.getByPlaceholder("Search all clients by name or ID").fill("Member 120");
+ await expect(list.locator(".clients-explorer-row")).toHaveCount(1);
+ await expect(list.getByText("Member 120")).toBeVisible();
+ await expect(list.getByText("Matches: 1")).toBeVisible();
+ await list.getByPlaceholder("Search all clients by name or ID").fill("");
+ await expect(list.locator(".clients-explorer-row")).toHaveCount(50);
+ await list.getByLabel("Per page").selectOption("200");
+ await expect(list.locator(".clients-explorer-row")).toHaveCount(125);
+ await expect(list.getByText("Member 124")).toBeVisible();
+ await expect(list.getByRole("button",{name:"Next"})).toBeDisabled();
+ await list.getByLabel("Per page").selectOption("25");
+ await expect(list.locator(".clients-explorer-row")).toHaveCount(25);
+ await list.getByRole("button",{name:"Next"}).click();
+ await expect(list.getByText("Page: 2")).toBeVisible();
+ await expect(list.getByText("Member 025")).toBeVisible();
+ await page.reload();
+ await expect(list.getByText("Page: 2")).toBeVisible();
+ await expect(list.locator(".clients-explorer-row")).toHaveCount(25);
+ await expect(list.getByLabel("Per page")).toHaveValue("25");
+ const storage=await page.evaluate(()=>JSON.stringify({...sessionStorage}));
+ expect(storage).not.toContain("Member 120");
+ expect(storage).not.toContain("a".repeat(64));
+ expect(requests).toHaveLength(0);
+});
+
+test("owner can search/filter across representatives without cross-representative writes",async({page})=>{
+ await mockBase(page);
+ const requests=await mockBusiness(page,owner,58);
+ await page.goto("/clients");
+ await page.getByLabel("Username").fill("proowner");
+ await page.getByLabel("Password").fill("test-private-password-for-lab");
+ await page.getByRole("button",{name:"Sign in"}).click();
+ const form=page.getByRole("heading",{name:"Create client record"}).locator("..");
+ await form.getByLabel("Client ID").fill("other-qa-customer");
+ await form.getByLabel("Client name").fill("Remote verified customer");
+ await form.getByLabel("Representative ID").selectOption("rep-a");
+ await form.getByRole("button",{name:"Create pending client"}).click();
+ const list=page.getByRole("region",{name:"Client directory"});
+ await expect(list.getByText("Matches: 59")).toBeVisible();
+ await list.getByLabel("Representative ID (owner, optional)").fill("rep-a");
+ await expect(list.locator(".clients-explorer-row")).toHaveCount(1);
+ await expect(list.getByText("Remote verified customer")).toBeVisible();
+ await list.getByLabel("Sort").selectOption("name");
+ await expect(list.getByText("Matches: 1")).toBeVisible();
+ await list.getByLabel("Plan").selectOption("unlimited");
+ await expect(list.locator(".clients-explorer-row")).toHaveCount(0);
+ await expect(list.getByText("Matches: 0")).toBeVisible();
+ await list.getByLabel("Plan").selectOption("volume");
+ await expect(list.locator(".clients-explorer-row")).toHaveCount(1);
+ await list.getByLabel("Status").selectOption("archived");
+ await expect(list.locator(".clients-explorer-row")).toHaveCount(0);
+ await list.getByLabel("Status").selectOption("pending");
+ await expect(list.locator(".clients-explorer-row")).toHaveCount(1);
+ expect(requests).toHaveLength(1);
+ expect(requests[0].path).toBe("/api/v1/workspace/clients");
+});
+
+test("global directory prevents stale actions when second page is malformed",async({page})=>{
+ await mockBase(page);
+ const requests=await mockBusiness(page,rep,60);
+ await page.route("**/api/v1/workspace/clients?*",route=>{
+  const params=new URL(route.request().url()).searchParams;
+  if(params.get("offset")==="50"){
+   return route.fulfill({json:{clients:[{
+    id:"untrusted-owner-client",name:"PRIVATE OWNER",representative_id:"owner",
+    archived:false,deployment_state:"pending_node_apply",plan_kind:"volume",ip_count:0,
+    volume_bytes:1024,duration_days:30,expires_unix:1800000000
+   }],total:60,limit:50,offset:50,q:"",state:"all",plan:"all",sort:"newest",
+    representative_id:"rep-a",has_more:false}});
+  }
+  return route.fallback();
+ });
+ await page.goto("/clients");
+ await page.getByLabel("Username").fill("rep-a");
+ await page.getByLabel("Password").fill("test-private-password-for-lab");
+ await page.getByRole("button",{name:"Sign in"}).click();
+ const list=page.getByRole("region",{name:"Client directory"});
+ await expect(list.locator(".clients-explorer-row")).toHaveCount(50);
+ await list.getByRole("button",{name:"Next"}).click();
+ await expect(list.getByText("PRIVATE OWNER")).toHaveCount(0);
+ await expect(list.locator(".clients-explorer-row")).toHaveCount(0);
+ await expect(page.getByRole("button",{name:"Extend / add volume"})).toBeDisabled();
+ await expect(page.getByText(/Business data unavailable or unverified/)).toBeVisible();
  expect(requests).toHaveLength(0);
 });
