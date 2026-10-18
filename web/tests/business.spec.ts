@@ -58,8 +58,8 @@ async function mockBusiness(page: Page, user: typeof rep, seedClientCount=0) {
       requests.push({ path, method: request.method(), csrf: request.headers()["x-csrf-token"] ?? "", body });
       if (path === "/api/v1/workspace/clients/bulk/state") {
         const input=body as {event_id:string;client_ids:string[];action:"disable"|"enable"|"archive";reason:string};
-        const chosen=input.client_ids.map(id=>runningClients.find(c=>(c as {id:string}).id===id)
-          as Record<string,unknown>|undefined);
+        const chosen=input.client_ids.map(id =>
+          runningClients.find(c => (c as {id:string}).id === id) as Record<string,unknown>|undefined);
         if(chosen.some(c=>!c)||chosen.some(c=>c!.representative_id!==(user.role==="owner"?c!.representative_id:user.representative_id)) ||
           chosen.some(c=>c!.archived || input.action==="disable"&&c!.deployment_state==="disabled" ||
             input.action==="enable"&&c!.deployment_state!=="disabled")){
