@@ -96,6 +96,22 @@ export function useBusinessWorkspace(language: Language, section: Section) {
         (ownerReps !== null && !Array.isArray(ownerReps.representatives)) || !Array.isArray(ownGroups.groups) || !Array.isArray(lifecycle.operations)) {
         throw new Error("Malformed business response");
       }
+      // A representative's own client data must never be replaced by a
+      // malformed or cross-tenant API page. The HUB already enforces scope;
+      // client-side validation is a second fail-closed UX boundary.
+      if (section === "clients" && (ownClients.clients.length > 50 ||
+        ownClients.clients.some(c =>
+          typeof c.id !== "string" || typeof c.name !== "string" ||
+          typeof c.representative_id !== "string" || typeof c.archived !== "boolean" ||
+          typeof c.deployment_state !== "string" || !Number.isFinite(c.expires_unix) ||
+          (c.plan_kind !== "volume" && c.plan_kind !== "unlimited") ||
+          !Number.isSafeInteger(c.ip_count) || c.ip_count < 0 || c.ip_count > 1000 ||
+          !Number.isSafeInteger(c.duration_days) || c.duration_days < 1 || c.duration_days > 3650 ||
+          !Number.isFinite(c.volume_bytes) || c.volume_bytes < 0 ||
+          (session.user.role === "representative" &&
+            c.representative_id !== session.user.representative_id)))) {
+        throw new Error("invalid_scoped_client_page");
+      }
       setMe(account); setClients(ownClients.clients); setEvents(ownEvents.events);
       // A successful authenticated data refresh must NOT erase the last
       // user-visible mutation receipt. The next explicit action or tab
@@ -108,6 +124,9 @@ export function useBusinessWorkspace(language: Language, section: Section) {
         expire(); setMe(null); setReps(null); setClients(null); setEvents(null); setGroups(null); setClientOps(null);
         pendingCreditKey.current = null; pendingClientKey.current = null;
       } else {
+        // Never leave a previously loaded client lifecycle list actionable
+        // after a failed or cross-tenant response for another page.
+        if (section === "clients") { setClients(null); setClientOps(null); }
         setNotice(words[language].unavailable);
       }
     });
