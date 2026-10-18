@@ -75,6 +75,7 @@ export function useBusinessWorkspace(language: Language, section: Section) {
   const pendingState = useRef<{ key: string; id: string } | null>(null);
 
   const reload = useCallback(() => setRefreshKey((n) => n + 1), []);
+  useEffect(() => { setNotice(null); }, [section, session.user.id]);
   useEffect(() => {
     if (!session) return;
     const controller = new AbortController();
@@ -96,7 +97,10 @@ export function useBusinessWorkspace(language: Language, section: Section) {
         throw new Error("Malformed business response");
       }
       setMe(account); setClients(ownClients.clients); setEvents(ownEvents.events);
-      setReps(ownerReps?.representatives ?? null); setGroups(ownGroups.groups); setClientOps(lifecycle.operations); setNotice(null);
+      // A successful authenticated data refresh must NOT erase the last
+      // user-visible mutation receipt. The next explicit action or tab
+      // change clears it, not the data read following a committed write.
+      setReps(ownerReps?.representatives ?? null); setGroups(ownGroups.groups); setClientOps(lifecycle.operations);
     };
     void fetchData().catch((error: unknown) => {
       if (controller.signal.aborted) return;
