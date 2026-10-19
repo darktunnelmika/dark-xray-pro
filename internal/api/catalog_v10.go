@@ -67,7 +67,8 @@ func (s *Server) attachCatalog(mux *http.ServeMux) {
 		respond(w, http.StatusOK, page)
 	})
 	mux.HandleFunc("POST /api/v1/workspace/products", func(w http.ResponseWriter, r *http.Request) {
-		if _, ok := s.authorizeBrowser(w, r, true, true); !ok {
+		session, ok := s.catalogMutationSession(w, r)
+		if !ok {
 			return
 		}
 		var input business.CatalogCreate
@@ -75,7 +76,13 @@ func (s *Server) attachCatalog(mux *http.ServeMux) {
 			respond(w, http.StatusBadRequest, map[string]string{"error": "invalid_request"})
 			return
 		}
-		product, err := s.business.CreateCatalogProduct(r.Context(), input)
+		var product business.CatalogProduct
+		var err error
+		if session.User.Role == "owner" {
+			product, err = s.business.CreateCatalogProduct(r.Context(), input)
+		} else {
+			product, err = s.business.CreateCatalogProductScoped(r.Context(), input, session.User.RepresentativeID)
+		}
 		if err != nil {
 			businessError(w, err)
 			return
@@ -98,7 +105,8 @@ func (s *Server) attachCatalog(mux *http.ServeMux) {
 		respond(w, http.StatusOK, product)
 	})
 	mux.HandleFunc("POST /api/v1/workspace/products/{id}/update", func(w http.ResponseWriter, r *http.Request) {
-		if _, ok := s.authorizeBrowser(w, r, true, true); !ok {
+		session, ok := s.catalogMutationSession(w, r)
+		if !ok {
 			return
 		}
 		var input business.CatalogUpdate
@@ -110,7 +118,13 @@ func (s *Server) attachCatalog(mux *http.ServeMux) {
 			businessError(w, business.ErrInvalid)
 			return
 		}
-		product, err := s.business.UpdateCatalogProduct(r.Context(), input)
+		var product business.CatalogProduct
+		var err error
+		if session.User.Role == "owner" {
+			product, err = s.business.UpdateCatalogProduct(r.Context(), input)
+		} else {
+			product, err = s.business.UpdateCatalogProductScoped(r.Context(), input, session.User.RepresentativeID)
+		}
 		if err != nil {
 			businessError(w, err)
 			return

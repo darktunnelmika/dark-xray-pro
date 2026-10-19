@@ -166,7 +166,7 @@ func catalogEventReplayed(ctx context.Context, tx *sql.Tx, id, fp, action string
 	if !errors.Is(err, sql.ErrNoRows) {
 		return false, err
 	}
-	for _, name := range []string{"events", "client_operations", "client_profile_edits", "representative_control_events"} {
+	for _, name := range []string{"events", "client_operations", "client_profile_edits", "representative_control_events", "catalog_policy_events"} {
 		var count int
 		if err = tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM "+name+" WHERE event_id=?", id).Scan(&count); err != nil {
 			return false, err
@@ -178,6 +178,15 @@ func catalogEventReplayed(ctx context.Context, tx *sql.Tx, id, fp, action string
 	return false, nil
 }
 func (s *Store) CreateCatalogProduct(ctx context.Context, req CatalogCreate) (CatalogProduct, error) {
+	return s.createCatalogProduct(ctx, req, "")
+}
+func (s *Store) CreateCatalogProductScoped(ctx context.Context, req CatalogCreate, scope string) (CatalogProduct, error) {
+	if !idRE.MatchString(scope) || scope == "owner" {
+		return CatalogProduct{}, ErrInvalid
+	}
+	return s.createCatalogProduct(ctx, req, scope)
+}
+func (s *Store) createCatalogProduct(ctx context.Context, req CatalogCreate, scope string) (CatalogProduct, error) {
 	var out CatalogProduct
 	spec, err := validateCatalogSpec(req.CatalogSpec)
 	if err != nil || !eventRE.MatchString(req.EventID) || !validName(req.Reason, 200) {
@@ -185,12 +194,34 @@ func (s *Store) CreateCatalogProduct(ctx context.Context, req CatalogCreate) (Ca
 	}
 	req.CatalogSpec = spec
 	req.Reason = strings.TrimSpace(req.Reason)
+	if scope != "" && spec.RepresentativeID != scope {
+		return out, ErrConflict
+	}
 	fp := fingerprint("catalog-v10-create", req)
+	if scope != "" {
+		fp = fingerprint("catalog-v10b-seller-create", struct {
+			Scope   string
+			Request CatalogCreate
+		}{scope, req})
+	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return out, err
 	}
 	defer tx.Rollback()
+	if scope != "" {
+		pol, e := catalogPolicyTx(ctx, tx, scope)
+		if e != nil {
+			return out, e
+		}
+		rep, e := readRep(ctx, tx, scope)
+		if e != nil {
+			return out, e
+		}
+		if rep.Kind != "representative" || !rep.Enabled || !policyPermitsProduct(pol, spec, false) {
+			return out, ErrConflict
+		}
+	}
 	replay, err := catalogEventReplayed(ctx, tx, req.EventID, fp, "create")
 	if err != nil {
 		return out, err
@@ -241,6 +272,15 @@ func (s *Store) CreateCatalogProduct(ctx context.Context, req CatalogCreate) (Ca
 	return out, nil
 }
 func (s *Store) UpdateCatalogProduct(ctx context.Context, req CatalogUpdate) (CatalogProduct, error) {
+	return s.updateCatalogProduct(ctx, req, "")
+}
+func (s *Store) UpdateCatalogProductScoped(ctx context.Context, req CatalogUpdate, scope string) (CatalogProduct, error) {
+	if !idRE.MatchString(scope) || scope == "owner" {
+		return CatalogProduct{}, ErrInvalid
+	}
+	return s.updateCatalogProduct(ctx, req, scope)
+}
+func (s *Store) updateCatalogProduct(ctx context.Context, req CatalogUpdate, scope string) (CatalogProduct, error) {
 	var out CatalogProduct
 	spec, err := validateCatalogSpec(req.CatalogSpec)
 	if err != nil || !eventRE.MatchString(req.EventID) || !validName(req.Reason, 200) ||
@@ -253,12 +293,37 @@ func (s *Store) UpdateCatalogProduct(ctx context.Context, req CatalogUpdate) (Ca
 	}
 	req.CatalogSpec = spec
 	req.Reason = strings.TrimSpace(req.Reason)
+	if scope != "" && spec.RepresentativeID != scope {
+		return out, ErrConflict
+	}
 	fp := fingerprint("catalog-v10-update", req)
+	if scope != "" {
+		fp = fingerprint("catalog-v10b-seller-update", struct {
+			Scope   string
+			Request CatalogUpdate
+		}{scope, req})
+	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return out, err
 	}
 	defer tx.Rollback()
+	if scope != "" {
+		pol, e := catalogPolicyTx(ctx, tx, scope)
+		if e != nil {
+			return out, e
+		}
+		rep, e := readRep(ctx, tx, scope)
+		if e != nil {
+			return out, e
+		}
+		if rep.Kind != "representative" || !rep.Enabled || !pol.ManageProducts {
+			return out, ErrConflict
+		}
+		if req.Status != "archived" && !policyPermitsProduct(pol, spec, req.Status == "published") {
+			return out, ErrConflict
+		}
+	}
 	replay, err := catalogEventReplayed(ctx, tx, req.EventID, fp, "update")
 	if err != nil {
 		return out, err
@@ -278,6 +343,11 @@ func (s *Store) UpdateCatalogProduct(ctx context.Context, req CatalogUpdate) (Ca
 	}
 	if before.Revision != req.ExpectedRevision || before.Status == "archived" ||
 		before.RepresentativeID != spec.RepresentativeID {
+		return out, ErrConflict
+	}
+	// Revocation of a published product is safe even if its original price
+	// is now beneath a newly raised floor: archive WITHOUT changing terms.
+	if scope != "" && req.Status == "archived" && before.CatalogSpec != spec {
 		return out, ErrConflict
 	}
 	if before.Status == req.Status && before.CatalogSpec == spec {
@@ -334,6 +404,18 @@ func (s *Store) CatalogProduct(ctx context.Context, id, scope string) (CatalogPr
 	return out, nil
 }
 func (s *Store) SearchCatalog(ctx context.Context, q CatalogSearch, scope string) (CatalogPage, error) {
+	return s.searchCatalog(ctx, q, scope, false)
+}
+
+// A second authenticated read route exposes own drafts ONLY to a rep with
+// an explicit catalog management policy; normal storefront stays published.
+func (s *Store) SearchCatalogManaged(ctx context.Context, q CatalogSearch, scope string) (CatalogPage, error) {
+	if scope == "" || scope == "owner" || !idRE.MatchString(scope) {
+		return CatalogPage{}, ErrInvalid
+	}
+	return s.searchCatalog(ctx, q, scope, true)
+}
+func (s *Store) searchCatalog(ctx context.Context, q CatalogSearch, scope string, manage bool) (CatalogPage, error) {
 	var out CatalogPage
 	if q.Limit < 1 || q.Limit > 100 || q.Offset < 0 || q.Offset > 1_000_000 ||
 		(q.RepresentativeID != "" && !idRE.MatchString(q.RepresentativeID)) ||
@@ -347,12 +429,16 @@ func (s *Store) SearchCatalog(ctx context.Context, q CatalogSearch, scope string
 		return out, ErrInvalid
 	}
 	if scope != "" {
-		if (q.RepresentativeID != "" && q.RepresentativeID != scope) ||
-			(q.State != "" && q.State != "published" && q.State != "all") {
+		if q.RepresentativeID != "" && q.RepresentativeID != scope {
+			return out, ErrConflict
+		}
+		if !manage && q.State != "" && q.State != "published" && q.State != "all" {
 			return out, ErrConflict
 		}
 		q.RepresentativeID = scope
-		q.State = "published"
+		if !manage {
+			q.State = "published"
+		}
 	}
 	q.Query = strings.TrimSpace(q.Query)
 	args := []any{}
@@ -378,6 +464,19 @@ func (s *Store) SearchCatalog(ctx context.Context, q CatalogSearch, scope string
 		return out, err
 	}
 	defer tx.Rollback()
+	if manage {
+		pol, e := catalogPolicyTx(ctx, tx, scope)
+		if e != nil {
+			return CatalogPage{}, e
+		}
+		rep, e := readRep(ctx, tx, scope)
+		if e != nil {
+			return CatalogPage{}, e
+		}
+		if !pol.ManageProducts || !rep.Enabled {
+			return CatalogPage{}, ErrConflict
+		}
+	}
 	if err = tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM catalog_products"+where, args...).Scan(&out.Total); err != nil {
 		return CatalogPage{}, err
 	}
