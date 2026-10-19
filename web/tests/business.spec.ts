@@ -17,7 +17,7 @@ async function mockBase(page: Page) {
 function successfulLogin(user: typeof rep) {
   return { authenticated: true, user, csrf_token: "a".repeat(64), expires_unix: 1800000000 };
 }
-async function mockBusiness(page: Page, user: typeof rep, seedClientCount=0) {
+async function mockBusiness(page: Page, user: typeof rep, seedClientCount=0, seedRepresentativeCount=0) {
   let signedIn = false;
   const requests: { path: string; method: string; csrf: string; body: unknown }[] = [];
   const runningClients: unknown[] = Array.from({length:seedClientCount},(_,i)=>({
@@ -198,11 +198,35 @@ async function mockBusiness(page: Page, user: typeof rep, seedClientCount=0) {
           representative_id: user.representative_id, object_id: "", reason: "Private grant",
           volume_delta_bytes: 10737418240, unlimited_delta_units: 100 }] }) });
     } else if (path.endsWith("/representatives")) {
-      await route.fulfill({ status: 200, contentType: "application/json",
-        body: JSON.stringify({ representatives: [
-          { id: "owner", display_name: "Owner", kind: "owner", enabled: true, volume_credit_bytes: 0, unlimited_credit_units: 0 },
-          { id: "rep-a", display_name: "Rep A", kind: "representative", enabled: true, volume_credit_bytes: 0, unlimited_credit_units: 90 },
-        ] }) });
+       const directory = [
+         {id:"owner",display_name:"Owner",kind:"owner",enabled:true,
+           volume_credit_bytes:0,unlimited_credit_units:0,client_count:0,archived_count:0,created_unix:0},
+         {id:"rep-a",display_name:"Rep A",kind:"representative",enabled:true,
+           volume_credit_bytes:0,unlimited_credit_units:90,client_count:3,archived_count:1,created_unix:1},
+         ...Array.from({length:seedRepresentativeCount},(_,i)=>({
+           id:"rep-"+String(i).padStart(3,"0"),
+           display_name:i===74?"نماینده نهایی":"Directory Rep "+String(i).padStart(3,"0"),
+           kind:"representative",enabled:i!==69,volume_credit_bytes:i*1024,
+           unlimited_credit_units:i,client_count:i+2,archived_count:1,created_unix:i+2,
+         })),
+       ];
+       const qp=new URL(request.url()).searchParams;
+       const limit=Number(qp.get("limit")??50),offset=Number(qp.get("offset")??0);
+       const q=qp.get("q")??"",state=qp.get("state")??"",sort=qp.get("sort")??"";
+       const items=directory.filter(r=>
+         (!q || r.id.toLowerCase().includes(q.toLowerCase())||
+           r.display_name.toLowerCase().includes(q.toLowerCase())) &&
+         (state===""||state==="all"||r.enabled===(state==="enabled")));
+       items.sort((a,b)=>{
+         if(sort==="newest")return b.created_unix-a.created_unix||a.id.localeCompare(b.id);
+         if(sort==="name")return a.display_name.localeCompare(b.display_name)||a.id.localeCompare(b.id);
+         if(sort==="volume")return b.volume_credit_bytes-a.volume_credit_bytes||a.id.localeCompare(b.id);
+         if(sort==="unlimited")return b.unlimited_credit_units-a.unlimited_credit_units||a.id.localeCompare(b.id);
+         return a.id.localeCompare(b.id);
+       });
+       const repsPage=items.slice(offset,offset+limit);
+       await route.fulfill({status:200,json:{representatives:repsPage,
+         total:items.length,limit,offset,q,state,sort,has_more:offset+repsPage.length<items.length}});
     } else {
       await route.fulfill({ status: 404, body: "{}" });
     }
@@ -820,5 +844,56 @@ test("ambiguous response reuses bulk event ID only for an identical reviewed sel
  expect(outgoing[2].event_id).not.toBe(outgoing[1].event_id);
  expect(outgoing.every(b=>b.action==="disable")).toBe(true);
  expect(outgoing.every(b=>JSON.stringify(b.client_ids)==='["paged-client-000"]')).toBe(true);
+ expect(writes).toHaveLength(0);
+});
+
+
+// V6: owner sees every real representative while no credit can change on selection.
+test("owner representative global search goes beyond 50 without mutations", async ({page})=>{
+ await mockBase(page);
+ const writes=await mockBusiness(page,owner,0,75);
+ await page.goto("/representatives");
+ await page.getByLabel("Username").fill("proowner");
+ await page.getByLabel("Password").fill("test-private-password-for-lab");
+ await page.getByRole("button",{name:"Sign in"}).click();
+ const directory=page.getByRole("region",{name:"Representative directory"});
+ await expect(directory.getByText("Results: 77")).toBeVisible();
+ await expect(directory.getByText("rep-074",{exact:true})).toHaveCount(0);
+ await directory.getByRole("button",{name:"Next"}).click();
+ await expect(directory.getByText("rep-074",{exact:true})).toBeVisible();
+ await directory.getByLabel("Search name or account ID").fill("rep-074");
+ await expect(directory.getByText("Results: 1")).toBeVisible();
+ await directory.getByRole("button",{name:"Select for credit"}).click();
+ await expect(page.getByRole("heading",{name:"Adjust representative credit"}).locator("..")
+  .getByLabel("Representative ID")).toHaveValue("rep-074");
+ await directory.getByLabel("Search name or account ID").fill("");
+ await directory.getByLabel("Representative status").selectOption("disabled");
+ await expect(directory.getByText("Results: 1")).toBeVisible();
+ await expect(directory.getByText("rep-069",{exact:true})).toBeVisible();
+ await directory.getByLabel("Representative status").selectOption("all");
+ await directory.getByLabel("Representative sort").selectOption("unlimited");
+ await expect(directory.getByText("rep-074",{exact:true})).toBeVisible();
+ expect(writes).toHaveLength(0);
+});
+
+test("owner 320px Persian directory fails closed on malformed results", async ({page})=>{
+ await page.setViewportSize({width:320,height:720});
+ await mockBase(page);
+ const writes=await mockBusiness(page,owner);
+ await page.goto("/representatives");
+ await page.getByLabel("Username").fill("proowner");
+ await page.getByLabel("Password").fill("test-private-password-for-lab");
+ await page.getByRole("button",{name:"Sign in"}).click();
+ await page.getByRole("button",{name:"Switch language"}).click();
+ const directory=page.getByRole("region",{name:"Representative directory"});
+ await expect(directory.getByRole("button",{name:"انتخاب برای اعتبار"})).toBeVisible();
+ await page.route("**/api/v1/workspace/representatives?*",route=>route.fulfill({
+   status:200,json:{representatives:[{id:"rep-b",display_name:"foreign",kind:"representative",
+     enabled:true,client_count:-1,archived_count:0,volume_credit_bytes:0,unlimited_credit_units:0}],
+     total:1,limit:50,offset:0,has_more:false,q:"bad",state:"all",sort:"id"}
+ }));
+ await directory.getByLabel("جست‌وجوی نام یا شناسه نماینده").fill("bad");
+ await expect(directory.getByRole("alert")).toBeVisible();
+ await expect(directory.getByRole("button",{name:"انتخاب برای اعتبار"})).toHaveCount(0);
  expect(writes).toHaveLength(0);
 });

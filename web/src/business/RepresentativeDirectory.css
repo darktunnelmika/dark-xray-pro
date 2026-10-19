@@ -1,0 +1,32 @@
+.rep-directory { display: grid; gap: 16px; min-width: 0; }
+.rep-dir-heading { display:flex; justify-content:space-between; align-items:start; gap:16px; flex-wrap:wrap; }
+.rep-dir-heading h3 { margin:0; display:flex; align-items:center; gap:8px; }
+.rep-dir-heading p { margin:5px 0 0; opacity:.72; font-size:.86rem; }
+.rep-dir-total { font-variant-numeric: tabular-nums; padding:8px 12px; border:1px solid rgba(161,189,174,.22); border-radius:999px; }
+.rep-dir-filters { display:grid; grid-template-columns:minmax(190px,2fr) minmax(130px,1fr) minmax(155px,1fr); gap:10px; }
+.rep-dir-filters label { min-width:0; display:flex; flex-direction:column; gap:6px; font-size:.81rem; }
+.rep-dir-filters .rep-dir-search { position:relative; display:flex; flex-direction:row; align-items:center; }
+.rep-dir-search svg { position:absolute; inset-inline-start:12px; opacity:.7; pointer-events:none; }
+.rep-dir-search input { padding-inline-start:38px; width:100%; box-sizing:border-box; }
+.rep-dir-filters input,.rep-dir-filters select { min-height:42px; max-width:100%; }
+.rep-dir-results { display:grid; grid-template-columns:repeat(auto-fill,minmax(min(100%,330px),1fr)); gap:11px; }
+.rep-dir-row { display:flex; flex-direction:column; justify-content:space-between; min-width:0; gap:12px; border:1px solid rgba(161,189,174,.18); border-radius:17px; padding:13px; }
+.rep-dir-identity { display:flex; flex-wrap:wrap; gap:7px 12px; align-items:center; }
+.rep-dir-identity strong { overflow-wrap:anywhere; font-size:1rem; }
+.rep-dir-identity code { direction:ltr; font-size:.77rem; overflow-wrap:anywhere; }
+.rep-dir-identity span { opacity:.73; font-size:.75rem; }
+.rep-dir-stats { display:grid; gap:6px; font-size:.86rem; font-variant-numeric:tabular-nums; }
+.rep-dir-stats span { overflow-wrap:anywhere; }
+.rep-dir-row .business-rep-select { display:flex; gap:8px; flex-wrap:wrap; }
+.rep-dir-row .business-rep-select button { display:flex; align-items:center; justify-content:center; gap:7px; flex:1 1 140px; min-height:39px; border-radius:11px; }
+.rep-dir-pagination { display:flex; justify-content:center; align-items:center; flex-wrap:wrap; gap:10px; font-variant-numeric:tabular-nums; }
+@media (max-width:620px) {
+  .rep-dir-filters { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .rep-dir-search { grid-column:1/-1; }
+  .rep-dir-total { font-size:.8rem; }
+}
+@media (max-width:350px) {
+  .rep-dir-filters { grid-template-columns:1fr; }
+  .rep-dir-search { grid-column:auto; }
+  .rep-dir-row .business-rep-select button { flex-basis:100%; }
+}

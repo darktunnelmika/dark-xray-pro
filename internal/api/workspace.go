@@ -23,11 +23,15 @@ func(s *Server) attachWorkspace(mux *http.ServeMux){
  })
  mux.HandleFunc("GET /api/v1/workspace/representatives",func(w http.ResponseWriter,r *http.Request){
   _,ok:=s.authorizeBrowser(w,r,false,true);if !ok{return}
-  limit,offset,err:=pageParams(r)
-  if err!=nil||r.URL.Query().Has("representative_id"){businessError(w,business.ErrInvalid);return}
-  rows,err:=s.business.ListRepresentatives(r.Context(),limit,offset)
+  opts,err:=representativeSearchParams(r)
+  if err!=nil{businessError(w,business.ErrInvalid);return}
+  page,err:=s.business.SearchRepresentatives(r.Context(),opts)
   if err!=nil{businessError(w,err);return}
-  respond(w,http.StatusOK,map[string]any{"representatives":rows,"limit":limit,"offset":offset})
+  respond(w,http.StatusOK,map[string]any{
+   "representatives":page.Representatives,"total":page.Total,
+   "limit":page.Limit,"offset":page.Offset,"has_more":page.HasMore,
+   "q":opts.Query,"state":opts.State,"sort":opts.Sort,
+  })
  })
  mux.HandleFunc("POST /api/v1/workspace/representatives",func(w http.ResponseWriter,r *http.Request){
   _,ok:=s.authorizeBrowser(w,r,true,true);if !ok{return}
