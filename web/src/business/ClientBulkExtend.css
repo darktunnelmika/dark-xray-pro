@@ -1,0 +1,41 @@
+.bulk-renew{min-width:0;border:1px solid var(--border);border-radius:15px;background:var(--surface);padding:13px;display:grid;gap:12px}
+.bulk-renew>header h4{margin:0;display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text)}
+.bulk-renew>header h4 svg{color:var(--accent)}
+.bulk-renew>header p{font-size:11px!important;line-height:1.7!important;margin:5px 0 0!important;color:var(--sub)!important}
+.bulk-renew-inputs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}
+.bulk-renew-inputs label{display:grid!important;min-width:0;gap:6px!important;font-size:11px!important;color:var(--sub)}
+.bulk-renew-inputs input{width:100%;min-width:0;box-sizing:border-box;border-radius:10px}
+.clients-explorer .bulk-renew-review,.clients-explorer .bulk-renew-commit{
+ display:flex;align-items:center;justify-content:center;gap:8px;min-height:39px;border-radius:11px;
+ background:var(--accent);color:var(--accent-contrast);border:1px solid var(--accent);
+ padding:9px 13px;font-size:12px;font-weight:800;justify-self:start
+}
+.clients-explorer .bulk-renew-review:disabled,.clients-explorer .bulk-renew-commit:disabled{opacity:.4;cursor:not-allowed}
+.bulk-renew-quote{border:1px solid var(--border);border-radius:13px;background:var(--surface-2);padding:12px;display:grid;gap:10px;min-width:0}
+.bulk-renew-quote>header{display:flex;align-items:start;justify-content:space-between;flex-wrap:wrap;gap:7px}
+.bulk-renew-quote>header strong{color:var(--text);display:flex;align-items:center;gap:6px;font-size:12px}
+.bulk-renew-quote>header strong svg{color:var(--accent)}
+.bulk-renew-quote>header span{color:var(--sub);font-size:10px;max-width:430px}
+.bulk-renew-accounts{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,255px),1fr));gap:9px}
+.bulk-renew-account{border:1px solid var(--border);border-radius:12px;padding:11px;display:grid;gap:8px;min-width:0}
+.bulk-renew-account strong{font-size:12px;color:var(--text);overflow-wrap:anywhere}
+.bulk-renew-account span{font-size:11px;color:var(--sub);overflow-wrap:anywhere;line-height:1.8}
+.bulk-renew-account span b{color:var(--text)}
+.bulk-renew-account p{margin:0!important;font-size:11px!important}
+.bulk-renew-clients{display:grid;gap:7px;max-height:260px;overflow:auto;min-width:0}
+.bulk-renew-clients>div{display:flex;align-items:center;flex-wrap:wrap;justify-content:space-between;gap:5px 15px;
+ padding:9px 10px;border:1px solid var(--border);background:var(--surface);border-radius:9px;min-width:0}
+.bulk-renew-clients strong{font-size:11px;overflow-wrap:anywhere;max-width:100%}
+.bulk-renew-clients span,.bulk-renew-clients small{font-size:10px;color:var(--sub)}
+.bulk-renew-error,.bulk-renew-alert{color:var(--red)!important;font-size:11px!important;
+ display:flex;align-items:start;gap:7px;margin:0!important;line-height:1.6!important}
+.bulk-renew-error{border:1px solid var(--border);padding:9px;border-radius:10px}
+.bulk-renew-safety{color:var(--sub)!important;font-size:10px!important;line-height:1.7!important;
+ margin:0!important;display:flex;align-items:start;gap:8px}
+.bulk-renew-safety svg{flex:0 0 auto;color:var(--accent);margin-top:2px}
+@media(max-width:480px){
+ .bulk-renew-inputs{grid-template-columns:minmax(0,1fr)}
+ .clients-explorer .bulk-renew-review,.clients-explorer .bulk-renew-commit{width:100%;justify-self:stretch}
+ .bulk-renew{padding:10px}
+ .bulk-renew-quote{padding:9px}
+}
