@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
-export type Page = "overview" | "clients" | "groups" | "representatives" | "finance" | "nodes" | "inbounds" | "settings" | "account";
+export type Page = "overview" | "clients" | "groups" | "representatives" | "marketplace" | "finance" | "nodes" | "inbounds" | "settings" | "account";
 export type Role = "owner" | "representative";
-const paths: Record<Page, string> = { overview: "/dashboard", clients: "/clients", groups: "/groups", representatives: "/representatives", finance: "/finance", nodes: "/nodes", inbounds: "/inbounds", settings: "/settings", account: "/account" };
-export function allowed(page: Page, role: Role): boolean { return role === "owner" || ["clients", "groups", "finance", "settings", "account"].includes(page); }
+const paths: Record<Page, string> = { overview: "/dashboard", clients: "/clients", groups: "/groups", representatives: "/representatives", marketplace: "/marketplace", finance: "/finance", nodes: "/nodes", inbounds: "/inbounds", settings: "/settings", account: "/account" };
+export function allowed(page: Page, role: Role): boolean { return role === "owner" || ["clients", "groups", "marketplace", "finance", "settings", "account"].includes(page); }
 function fromPath(path: string, role: Role): Page {
   if (path === "/business") return "clients";
   const page = (Object.keys(paths) as Page[]).find(p => paths[p] === path);

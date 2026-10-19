@@ -276,7 +276,7 @@ func (s *Store) CommitClientProfileEdit(ctx context.Context, input ClientProfile
 	}
 	// Shared event ID namespace: old credit and lifecycle requests cannot be
 	// reused for a profile edit (or vice versa).
-	for _, table := range []string{"events", "client_operations", "representative_control_events"} {
+	for _, table := range []string{"events", "client_operations", "representative_control_events", "catalog_events"} {
 		var existingID string
 		e := tx.QueryRowContext(ctx, "SELECT event_id FROM "+table+" WHERE event_id=?", input.EventID).Scan(&existingID)
 		if e == nil {

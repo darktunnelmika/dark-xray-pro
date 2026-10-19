@@ -133,7 +133,7 @@ export function useBusinessWorkspace(language: Language, section: Section) {
         section === "clients" ? api<ClientPageResponse>("/api/v1/workspace/clients?"+clientQ.toString(), { signal: controller.signal })
           : Promise.resolve<ClientPageResponse>({ clients: [] }),
         section === "finance" ? api<{ events: LedgerEvent[] }>("/api/v1/workspace/events" + p + eventOffset, { signal: controller.signal }) : Promise.resolve({ events: [] as LedgerEvent[] }),
-        session.user.role === "owner" && ["clients", "groups", "representatives"].includes(section)
+        session.user.role === "owner" && ["clients", "groups", "representatives", "marketplace"].includes(section)
           ? api<{ representatives: Representative[] }>("/api/v1/workspace/representatives" + p + repOffset, { signal: controller.signal })
           : Promise.resolve(null),
         section === "groups" ? api<{ groups: ClientGroup[] }>("/api/v1/workspace/groups" + p + groupOffset, { signal: controller.signal }) : Promise.resolve({ groups: [] as ClientGroup[] }),
