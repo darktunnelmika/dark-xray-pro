@@ -58,6 +58,8 @@ func checkClientOp(ctx context.Context,tx *sql.Tx,eventID,fp,kind string)(bool,e
   var count int
   if err:=tx.QueryRowContext(ctx,"SELECT COUNT(*) FROM events WHERE event_id=?",eventID).Scan(&count);err!=nil{return false,err}
   if count>0{return false,ErrConflict}
+  if err:=tx.QueryRowContext(ctx,"SELECT COUNT(*) FROM client_profile_edits WHERE event_id=?",eventID).Scan(&count);err!=nil{return false,err}
+  if count>0{return false,ErrConflict}
   return false,nil
  default:return false,err
  }

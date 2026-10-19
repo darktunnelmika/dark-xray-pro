@@ -161,6 +161,7 @@ func Open(path string)(*Store,error){
  if version==4 {if err=migrateNativeInbounds(db);err!=nil{return fail(err)};version=5}
  if version==5 {if err=migrateRuntimeReports(db);err!=nil{return fail(err)};version=6}
  if version==6 {if err=migrateInboundLifecycle(db);err!=nil{return fail(err)}}
+ if err=ensureClientProfileEdits(db);err!=nil{return fail(err)}
  s:=&Store{db:db};if err=s.restoreUsageLedger(context.Background());err!=nil{return fail(err)}
  return s,nil
 }
@@ -208,7 +209,12 @@ func(s *Store)CreateRepresentative(ctx context.Context,id,name string)(Represent
 func checkEvent(ctx context.Context,tx *sql.Tx,id,hash,kind string)(bool,error){
  var existingHash,existingKind string;err:=tx.QueryRowContext(ctx,"SELECT fingerprint,kind FROM events WHERE event_id=?",id).Scan(&existingHash,&existingKind)
  switch{case err==nil:if existingHash==hash&&existingKind==kind{return true,nil};return false,ErrConflict
- case errors.Is(err,sql.ErrNoRows):return false,nil;default:return false,err}
+ case errors.Is(err,sql.ErrNoRows):
+  var count int
+  if err=tx.QueryRowContext(ctx,"SELECT COUNT(*) FROM client_profile_edits WHERE event_id=?",id).Scan(&count);err!=nil{return false,err}
+  if count>0{return false,ErrConflict}
+  return false,nil
+ default:return false,err}
 }
 func(s *Store)AdjustCredits(ctx context.Context,c CreditChange)(Representative,error){
  if !eventRE.MatchString(c.EventID)||!idRE.MatchString(c.RepresentativeID)||c.RepresentativeID=="owner"||!validName(c.Reason,200)||!safeDelta(c.VolumeDeltaBytes,MaxVolumeCredit)||!safeDelta(c.UnlimitedDeltaUnits,MaxUnlimitedCredit)||(c.VolumeDeltaBytes==0&&c.UnlimitedDeltaUnits==0){return Representative{},ErrInvalid}
