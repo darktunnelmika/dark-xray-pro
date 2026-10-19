@@ -212,6 +212,9 @@ func TestRouteTransactionsFailedApplyRetainsGoodAndReceiptWriteFailureFences(t *
 	if err == nil || ack.Outcome != "failed_previous_retained" || !VerifyTransactionReceipt(o.LeaseKey, a2, ack) || r.Status().Observed.ActiveSHA != good.SHA256 {
 		t.Fatal("failed Apply lost previous good or returned false success", err)
 	}
+	if replay, replayErr := r.Execute(context.Background(), a2, xrayconfig.Candidate{}); replayErr == nil || replay != ack {
+		t.Fatal("replaying a failed transaction changed its outcome")
+	}
 	assertPort(t, port, true)
 	other := testCandidate(t, port, "two")
 	s3 := transactionCommand(t, r, o, "stage", 5, 3, "", other)

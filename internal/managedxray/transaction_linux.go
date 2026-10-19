@@ -144,6 +144,9 @@ func (t *TransactionRuntime) Execute(ctx context.Context, c TransactionCommand, 
 		if c.Action == "stage" && TransactionPayloadSHA(candidate) != c.PayloadSHA {
 			return TransactionReceipt{}, ErrTransaction
 		}
+		if t.state.LastReceipt.Outcome == "failed_stopped" || t.state.LastReceipt.Outcome == "failed_previous_retained" {
+			return *t.state.LastReceipt, ErrRuntime
+		}
 		return *t.state.LastReceipt, nil
 	}
 	now := time.Now().UnixNano()
