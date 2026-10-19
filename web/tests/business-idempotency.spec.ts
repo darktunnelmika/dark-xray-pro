@@ -41,10 +41,20 @@ async function fixture(page:Page){
    user,balance:{id:"owner",display_name:"Owner",kind:"owner",enabled:true,
     volume_credit_bytes:0,unlimited_credit_units:0},data_plane:"not_activated",
   }});
-  if(path==="/api/v1/workspace/representatives")return r.fulfill({json:{representatives:[
-   {id:"owner",display_name:"Owner",kind:"owner",enabled:true,volume_credit_bytes:0,unlimited_credit_units:0},
-   {id:"rep-a",display_name:"QA Rep A",kind:"representative",enabled:true,volume_credit_bytes:0,unlimited_credit_units:0},
-  ]}});
+  if(path==="/api/v1/workspace/representatives"){
+   const search=new URL(req.url()).searchParams;
+   const limit=Number(search.get("limit")??50),offset=Number(search.get("offset")??0);
+   const q=search.get("q")??"",state=search.get("state")??"",sort=search.get("sort")??"";
+   const records=[
+    {id:"owner",display_name:"Owner",kind:"owner",enabled:true,
+     volume_credit_bytes:0,unlimited_credit_units:0,client_count:0,archived_count:0},
+    {id:"rep-a",display_name:"QA Rep A",kind:"representative",enabled:true,
+     volume_credit_bytes:0,unlimited_credit_units:0,client_count:0,archived_count:0},
+   ].filter(row=>!q||row.id.toLowerCase().includes(q.toLowerCase())||row.display_name.toLowerCase().includes(q.toLowerCase()));
+   const current=records.slice(offset,offset+limit);
+   return r.fulfill({json:{representatives:current,total:records.length,limit,offset,
+    q,state,sort,has_more:offset+current.length<records.length}});
+  }
   if(path==="/api/v1/workspace/clients")return r.fulfill({json:{clients:[]}});
   if(path==="/api/v1/workspace/client-operations")return r.fulfill({json:{operations:[]}});
   if(path==="/api/v1/workspace/events")return r.fulfill({json:{events:[]}});
