@@ -1,0 +1,27 @@
+.inbound-route-editor{display:grid;gap:13px;min-width:0}
+.inbound-route-editor h3{display:flex;align-items:center;gap:9px}
+.inbound-route-editor h3 svg{color:var(--accent)}
+.inbound-route-editor>p{font-size:11px;line-height:1.75}
+.inbound-route-editor label{display:grid;gap:6px;min-width:0}
+.inbound-route-editor select,.inbound-route-editor input:not([type=checkbox]){
+ width:100%;min-width:0;max-width:100%;box-sizing:border-box;
+ min-height:39px;border-radius:10px}
+.inbound-route-editor .route-revision{display:flex;gap:12px;flex-wrap:wrap;
+ padding:10px;border:1px solid var(--border);border-radius:10px;
+ color:var(--sub);font-size:11px;font-variant-numeric:tabular-nums}
+.inbound-route-editor .route-boolean{display:flex;align-items:center;gap:9px;
+ padding:10px;border:1px solid var(--border);border-radius:11px;
+ font-size:11px;line-height:1.65}
+.inbound-route-editor .route-boolean input{width:18px;height:18px;min-width:18px;
+ min-height:18px;flex:0 0 auto;accent-color:var(--accent)}
+.inbound-route-editor .native-warning{display:flex;align-items:start;gap:7px;line-height:1.75;
+ font-size:11px}
+.inbound-route-editor .native-warning svg{flex:0 0 auto}
+.inbound-route-editor .native-actions{display:flex;gap:8px;flex-wrap:wrap}
+.inbound-route-editor .native-actions button{display:flex;align-items:center;
+ justify-content:center;gap:7px;min-height:39px;padding:8px 12px;border-radius:10px}
+@media(max-width:500px){
+ .inbound-route-editor{padding:11px!important}
+ .inbound-route-editor .native-fields{grid-template-columns:1fr}
+ .inbound-route-editor .native-actions button{flex:1 1 100%}
+}
