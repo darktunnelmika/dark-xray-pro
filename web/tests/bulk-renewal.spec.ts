@@ -80,7 +80,7 @@ test("V7 quote does not charge, cancel does not charge, explicit commit does",as
  const directory=page.getByRole("region",{name:"Client directory"});
  await directory.getByLabel("Select client v7-client-0").check();
  await directory.getByLabel("Select client v7-client-1").check();
- await directory.getByLabel("Action").selectOption("extend");
+ await directory.locator(".clients-bulk-fields select").selectOption("extend");
  const renew=page.getByRole("region",{name:"Bulk client renewal"});
  await renew.getByLabel("Add days").fill("60");
  await renew.getByLabel("Add volume (GB)").fill("0.25");
@@ -108,7 +108,7 @@ test("V7 changing selected clients, terms or audit reason invalidates quote",asy
  await page.goto("/clients");
  const directory=page.getByRole("region",{name:"Client directory"});
  await directory.getByLabel("Select client v7-client-0").check();
- await directory.getByLabel("Action").selectOption("extend");
+ await directory.locator(".clients-bulk-fields select").selectOption("extend");
  const renew=page.getByRole("region",{name:"Bulk client renewal"});
  await directory.getByLabel("Required audit reason").fill("First reviewed payment");
  await renew.getByRole("button",{name:"Review exact charges"}).click();
