@@ -164,6 +164,7 @@ func Open(path string)(*Store,error){
  if err=ensureClientProfileEdits(db);err!=nil{return fail(err)}
  if err=ensureRepresentativeControls(db);err!=nil{return fail(err)}
  if err=ensureCatalog(db);err!=nil{return fail(err)}
+ if err=ensureCatalogPolicy(db);err!=nil{return fail(err)}
  s:=&Store{db:db};if err=s.restoreUsageLedger(context.Background());err!=nil{return fail(err)}
  return s,nil
 }
@@ -218,6 +219,8 @@ func checkEvent(ctx context.Context,tx *sql.Tx,id,hash,kind string)(bool,error){
   if err=tx.QueryRowContext(ctx,"SELECT COUNT(*) FROM representative_control_events WHERE event_id=?",id).Scan(&count);err!=nil{return false,err}
   if count>0{return false,ErrConflict}
   if err=tx.QueryRowContext(ctx,"SELECT COUNT(*) FROM catalog_events WHERE event_id=?",id).Scan(&count);err!=nil{return false,err}
+  if count>0{return false,ErrConflict}
+  if err:=tx.QueryRowContext(ctx,"SELECT COUNT(*) FROM catalog_policy_events WHERE event_id=?",id).Scan(&count);err!=nil{return false,err}
   if count>0{return false,ErrConflict}
   return false,nil
  default:return false,err}

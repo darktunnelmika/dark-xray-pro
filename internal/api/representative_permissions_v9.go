@@ -13,6 +13,24 @@ func requiredRepresentativePermission(r *http.Request) (string, bool) {
 	path := r.URL.Path
 	method := r.Method
 	switch {
+	case path == "/api/v1/workspace/products" && (method == "GET" || method == "POST"):
+		return "view_clients", true
+	case path == "/api/v1/workspace/products/manage" && method == "GET":
+		return "view_clients", true
+	case path == "/api/v1/workspace/products/policy" && method == "GET":
+		return "view_clients", true
+	case strings.HasPrefix(path, "/api/v1/workspace/products/") &&
+		strings.HasSuffix(path, "/update") && method == "POST":
+		return "view_clients", true
+	case path == "/api/v1/workspace/products" && method == "POST":
+		return "view_clients", true
+	case path == "/api/v1/workspace/products/manage" && method == "GET":
+		return "view_clients", true
+	case path == "/api/v1/workspace/products/policy" && method == "GET":
+		return "view_clients", true
+	case strings.HasPrefix(path, "/api/v1/workspace/products/") &&
+		strings.HasSuffix(path, "/update") && method == "POST":
+		return "view_clients", true
 	case path == "/api/v1/workspace/products" && method == "GET":
 		return "view_clients", true
 	case strings.HasPrefix(path, "/api/v1/workspace/products/") && method == "GET":
