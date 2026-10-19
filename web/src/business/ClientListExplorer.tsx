@@ -5,6 +5,7 @@ import type { BusinessModel } from "./useBusinessWorkspace";
 import { dateTime, gb, uid, type Client } from "./shared";
 import "./ClientSales.css";
 import ClientBulkExtend from "./ClientBulkExtend";
+import { businessGranted } from "./permissionsV9";
 
 type Filter = "all" | "pending" | "disabled" | "expired" | "archived" | "other";
 const words = {
@@ -72,8 +73,11 @@ export default function ClientListExplorer({model}: {model:BusinessModel}) {
     clientSearch,clientStateFilter,clientPlanFilter,clientSort,clientRepFilter,changeClientFilters,actionBusy,
     runAction,setNotice }=model;
   const copy=words[language];
+  const canManageBulk=businessGranted(session.user,"manage_clients");
+  const canRenewBulk=businessGranted(session.user,"renew_clients");
   const [selected,setSelected]=useState<string[]>([]);
-  const [bulkAction,setBulkAction]=useState<"disable"|"enable"|"archive"|"extend">("disable");
+  const [bulkAction,setBulkAction]=useState<"disable"|"enable"|"archive"|"extend">(
+    canManageBulk?"disable":"extend");
   const [bulkReason,setBulkReason]=useState("");
   const pendingBulk=useRef<{key:string;id:string}|null>(null);
   useEffect(()=>{
@@ -91,7 +95,7 @@ export default function ClientListExplorer({model}: {model:BusinessModel}) {
   const more=clientHasMore===null?(valid&&matches.length===clientLimit):clientHasMore;
   const total=valid&&clientTotal!==null?clientTotal.toLocaleString("en-US"):"—";
   const allowedSelected=selected.filter(id=>valid&&matches.some(c=>c.id===id&&!c.archived));
-  const canSelect=valid&&!actionBusy;
+  const canSelect=valid&&!actionBusy&&(canManageBulk||canRenewBulk);
   function toggle(id:string,checked:boolean){
     if(!canSelect)return;
     setSelected(current=>{
@@ -156,7 +160,7 @@ export default function ClientListExplorer({model}: {model:BusinessModel}) {
           onChange={e=>changeClientFilters("rep",e.target.value.trim())}
           placeholder={copy.repFilter} disabled={actionBusy}/></label>}
     </div>
-    <div className="clients-bulk" aria-label="Bulk client actions">
+    {(canManageBulk||canRenewBulk) && <div className="clients-bulk" aria-label="Bulk client actions">
       <div className="clients-bulk-header">
         <strong><CheckSquare size={16}/>{copy.bulkTitle}</strong>
         <span>{allowedSelected.length} {copy.selectedCount}</span>
@@ -172,10 +176,10 @@ export default function ClientListExplorer({model}: {model:BusinessModel}) {
       <div className="clients-bulk-fields">
         <label>{copy.action}<select value={bulkAction} disabled={!canSelect}
           onChange={e=>setBulkAction(e.target.value as typeof bulkAction)}>
-          <option value="disable">{copy.disableAction}</option>
-          <option value="enable">{copy.enableAction}</option>
-          <option value="archive">{copy.archiveAction}</option>
-          <option value="extend">{copy.extendAction}</option>
+          {canManageBulk&&<option value="disable">{copy.disableAction}</option>}
+          {canManageBulk&&<option value="enable">{copy.enableAction}</option>}
+          {canManageBulk&&<option value="archive">{copy.archiveAction}</option>}
+          {canRenewBulk&&<option value="extend">{copy.extendAction}</option>}
         </select></label>
         <label>{copy.reason}<input type="text" value={bulkReason} maxLength={200}
           disabled={!canSelect} onChange={e=>setBulkReason(e.target.value)}
@@ -189,7 +193,7 @@ export default function ClientListExplorer({model}: {model:BusinessModel}) {
             onClick={()=>void executeBulk()}>
             <Archive size={14}/>{copy.execute}</button>}
       <p><AlertTriangle size={14}/>{copy.bulkNote}</p>
-    </div>
+    </div>}
     <div className="clients-explorer-list">
       {valid&&matches.map(c=>{
         const status=clientState(c,now);

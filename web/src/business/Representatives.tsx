@@ -1,11 +1,16 @@
+import { useState } from "react";
 import type { BusinessModel } from "./useBusinessWorkspace";
 import { CreditCard, KeyRound, Users } from "lucide-react";
 import RepresentativeDirectory from "./RepresentativeDirectory";
+import RepresentativeControlsV9 from "./RepresentativeControlsV9";
 export default function Representatives({ model }: { model: BusinessModel }) {
   const { t, session, actionBusy, repId, setRepId, repName, setRepName, loginRep, setLoginRep, repUser, setRepUser, repPass, setRepPass, creditRep, setCreditRep, creditVolume, setCreditVolume, creditUnits, setCreditUnits, creditReason, setCreditReason, createRepresentative, createRepLogin, adjustCredit } = model;
+  const [managedRep,setManagedRep]=useState("");
   return <>
       {session.user.role === "owner" && <>
-        <RepresentativeDirectory model={model}/>
+        <RepresentativeDirectory model={model} onManage={setManagedRep}/>
+        {managedRep && <RepresentativeControlsV9 model={model} representativeID={managedRep}
+          onClose={()=>setManagedRep("")}/>}
         <div className="business-form-grid">
           <form className="business-panel" onSubmit={(e) => { void createRepresentative(e); }}>
             <h3><Users size={17}/>{t.createRep}</h3>

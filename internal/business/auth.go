@@ -29,6 +29,7 @@ type AuthUser struct {
  Username string `json:"username"`
  Role string `json:"role"`
  RepresentativeID string `json:"representative_id"`
+ Permissions RepresentativePermissions `json:"permissions"`
 }
 type LoginSession struct {
  Token string `json:"-"`
@@ -87,7 +88,13 @@ func(s *Store)ProvisionRepresentativeLogin(ctx context.Context,repID,username,pa
  if errors.Is(err,sql.ErrNoRows){return AuthUser{},ErrNotFound}
  if err!=nil{return AuthUser{},err}
  if rep.Kind!="representative"||!rep.Enabled{return AuthUser{},ErrConflict}
- if _,err=tx.ExecContext(ctx,"INSERT INTO auth_users(id,username,representative_id,role,password_salt,password_hash,created_unix) VALUES(?, ?, ?, 'representative', ?, ?, ?)",repID,username,repID,salt,hash,time.Now().UTC().Unix());err!=nil{return AuthUser{},ErrConflict}
+ control,err:=readRepresentativeControl(ctx,tx,repID)
+ if err!=nil{return AuthUser{},err}
+ if control.LoginSuspended{return AuthUser{},ErrConflict}
+ // Restricted access remains fail-closed even after rolling back to V8.
+ disabledForRollback:=0
+ if !control.Permissions.AllEnabled(){disabledForRollback=1}
+ if _,err=tx.ExecContext(ctx,"INSERT INTO auth_users(id,username,representative_id,role,password_salt,password_hash,disabled,created_unix) VALUES(?, ?, ?, 'representative', ?, ?, ?, ?)",repID,username,repID,salt,hash,disabledForRollback,time.Now().UTC().Unix());err!=nil{return AuthUser{},ErrConflict}
  if err=tx.Commit();err!=nil{return AuthUser{},err}
  return AuthUser{ID:repID,Username:username,Role:"representative",RepresentativeID:repID},nil
 }
@@ -97,7 +104,7 @@ func (s *Store) Login(ctx context.Context,username,password string)(LoginSession
  if !validUsername(username)||len(password)>256{return LoginSession{},ErrUnauthenticated}
  var u AuthUser;var salt,expected []byte;var disabled,repEnabled int
  err:=s.db.QueryRowContext(ctx,
-  "SELECT a.id,a.username,a.role,a.representative_id,a.password_salt,a.password_hash,a.disabled,r.enabled FROM auth_users a JOIN representatives r ON r.id=a.representative_id WHERE a.username=?",
+  "SELECT a.id,a.username,a.role,a.representative_id,a.password_salt,a.password_hash,CASE WHEN a.role='representative' AND c.representative_id IS NOT NULL THEN c.login_suspended ELSE a.disabled END,r.enabled FROM auth_users a JOIN representatives r ON r.id=a.representative_id LEFT JOIN representative_controls c ON c.representative_id=a.representative_id WHERE a.username=?",
   username).Scan(&u.ID,&u.Username,&u.Role,&u.RepresentativeID,&salt,&expected,&disabled,&repEnabled)
  valid:=err==nil && len(salt)==16 && len(expected)==32 && disabled==0 && repEnabled==1
  // Compute a real Argon2id hash even for missing/disabled users to reduce
@@ -112,6 +119,17 @@ func (s *Store) Login(ctx context.Context,username,password string)(LoginSession
  expiry:=now+int64(SessionLifetime/time.Second)
  tx,err:=s.db.BeginTx(ctx,nil);if err!=nil{return LoginSession{},err}
  defer tx.Rollback()
+ // Recheck under the write transaction: owner revoke cannot interleave
+ // between this test and the new session insert.
+ var authorized int
+ err=tx.QueryRowContext(ctx,`SELECT CASE WHEN r.enabled=1 AND
+  CASE WHEN a.role='representative' AND ctl.representative_id IS NOT NULL
+   THEN ctl.login_suspended ELSE a.disabled END=0
+  THEN 1 ELSE 0 END
+  FROM auth_users a JOIN representatives r ON r.id=a.representative_id
+  LEFT JOIN representative_controls ctl ON ctl.representative_id=a.representative_id
+  WHERE a.id=?`,u.ID).Scan(&authorized)
+ if err!=nil||authorized!=1{return LoginSession{},ErrUnauthenticated}
  if _,err=tx.ExecContext(ctx,"DELETE FROM auth_sessions WHERE expires_unix<=?",now);err!=nil{return LoginSession{},err}
  if _,err=tx.ExecContext(ctx,"INSERT INTO auth_sessions(token_sha256,user_id,created_unix,expires_unix) VALUES(?,?,?,?)",digestSession(token),u.ID,now,expiry);err!=nil{return LoginSession{},err}
  // Cap live sessions per account without trusting client-side logout. New
@@ -120,6 +138,8 @@ func (s *Store) Login(ctx context.Context,username,password string)(LoginSession
   SELECT token_sha256 FROM auth_sessions WHERE user_id=? ORDER BY created_unix DESC, rowid DESC LIMIT 20
  )`,u.ID,u.ID);err!=nil{return LoginSession{},err}
  if err=tx.Commit();err!=nil{return LoginSession{},err}
+ u.Permissions,err=s.RepresentativePermissions(ctx,u.RepresentativeID)
+ if err!=nil{return LoginSession{},err}
  return LoginSession{Token:token,User:u,ExpiresUnix:expiry},nil
 }
 
@@ -130,9 +150,11 @@ func (s *Store) VerifySession(ctx context.Context,token string)(LoginSession,err
  var expires int64
  var disabled,repEnabled int
  err:=s.db.QueryRowContext(ctx,
-  "SELECT a.id,a.username,a.role,a.representative_id,ss.expires_unix,a.disabled,r.enabled FROM auth_sessions ss JOIN auth_users a ON a.id=ss.user_id JOIN representatives r ON r.id=a.representative_id WHERE ss.token_sha256=?",
+  "SELECT a.id,a.username,a.role,a.representative_id,ss.expires_unix,CASE WHEN a.role='representative' AND c.representative_id IS NOT NULL THEN c.login_suspended ELSE a.disabled END,r.enabled FROM auth_sessions ss JOIN auth_users a ON a.id=ss.user_id JOIN representatives r ON r.id=a.representative_id LEFT JOIN representative_controls c ON c.representative_id=a.representative_id WHERE ss.token_sha256=?",
   digestSession(token)).Scan(&u.ID,&u.Username,&u.Role,&u.RepresentativeID,&expires,&disabled,&repEnabled)
  if err!=nil||expires<=time.Now().UTC().Unix()||disabled!=0||repEnabled!=1{return LoginSession{},ErrUnauthenticated}
+ u.Permissions,err=s.RepresentativePermissions(ctx,u.RepresentativeID)
+ if err!=nil{return LoginSession{},err}
  return LoginSession{Token:token,User:u,ExpiresUnix:expires},nil
 }
 func(s *Store) Logout(ctx context.Context,token string)error{

@@ -2,8 +2,10 @@ import type { BusinessModel } from "./useBusinessWorkspace";
 import { Users } from "lucide-react";
 import { uid } from "./shared";
 import GroupMemberManager from "./GroupMemberManager";
+import { businessGranted } from "./permissionsV9";
 export default function Groups({ model }: { model: BusinessModel }) {
   const { t, session, actionBusy, reps, groups, groupOffset, setGroupOffset, groupID, setGroupID, groupName, setGroupName, groupColor, setGroupColor, groupRep, setGroupRep, groupTarget, setGroupTarget, memberIDs, setMemberIDs, groupEditID, setGroupEditID, groupEditName, setGroupEditName, groupEditColor, setGroupEditColor, unassignID, setUnassignID, addGroup, assignGroup, editGroup, deleteGroup, unassignMember } = model;
+  const canManage=businessGranted(session.user,"manage_groups");
   return <>
       <div className="business-panel">
         <h3><Users size={17}/>{t.groups}</h3>
@@ -20,10 +22,10 @@ export default function Groups({ model }: { model: BusinessModel }) {
                 aria-pressed={groupTarget === g.id} onClick={() => setGroupTarget(g.id)}>
                 {model.language === "fa" ? "مدیریت اعضا" : "Manage members"}
               </button>
-              <button type="button" onClick={() => {
+              {canManage && <button type="button" onClick={() => {
                 setGroupEditID(g.id); setGroupEditName(g.name); setGroupEditColor(g.color); setGroupTarget(g.id);
-              }}>{t.groupEdit}</button>
-              <button type="button" disabled={actionBusy} onClick={() => { void deleteGroup(g.id,g.name); }}>{t.groupDelete}</button>
+              }}>{t.groupEdit}</button>}
+              {canManage && <button type="button" disabled={actionBusy} onClick={() => { void deleteGroup(g.id,g.name); }}>{t.groupDelete}</button>}
             </div>
           </div>)}
         </div> : <p>{groups ? t.empty : t.loading}</p>}
@@ -32,10 +34,10 @@ export default function Groups({ model }: { model: BusinessModel }) {
           <button disabled={!groups || groups.length < 50} onClick={() => setGroupOffset((x) => x + 50)}>{t.next}</button>
         </div>
       </div>
-      {groups?.filter(g => g.id === groupTarget).map(g =>
+      {canManage && groups?.filter(g => g.id === groupTarget).map(g =>
         <GroupMemberManager key={g.id} group={g} language={model.language}
           session={session} refresh={model.reload}/>)}
-      <div className="business-form-grid">
+      {canManage && <div className="business-form-grid">
         <form className="business-panel" onSubmit={(e) => { void addGroup(e); }}>
           <h3><Users size={17}/>{t.newGroup}</h3>
           <label>{t.groupId}<div className="business-inline"><input value={groupID} onChange={(e) => setGroupID(e.target.value)} required/>
@@ -67,6 +69,6 @@ export default function Groups({ model }: { model: BusinessModel }) {
           <label>{t.groupSingleClient}<input value={unassignID} onChange={(e) => setUnassignID(e.target.value)} required/></label>
           <button type="submit" disabled={actionBusy}>{t.groupRemove}</button>
         </form>
-      </div>
+      </div>}
   </>;
 }
