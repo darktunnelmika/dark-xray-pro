@@ -76,7 +76,15 @@ func(r *Runtime)Snapshot()Snapshot{r.mu.Lock();defer r.mu.Unlock();return r.snap
 // Apply validates before disruption and fsyncs its encrypted intent first.
 // It replaces processes on ACTUAL assigned ports, not remapped fake listeners.
 func(r *Runtime)Apply(ctx context.Context,v Revision,l Lease)(Snapshot,error){
- r.mu.Lock();defer r.mu.Unlock();if r.closed||r.fenced{return r.snapshot(),ErrClosed}
+ r.mu.Lock();defer r.mu.Unlock();return r.applyLocked(ctx,v,l,nil)
+}
+// A staged command checks its reviewed base under the same lock as Apply.
+func(r *Runtime)applyConditional(ctx context.Context,v Revision,l Lease,expected RuntimeCondition)(Snapshot,error){
+ r.mu.Lock();defer r.mu.Unlock();return r.applyLocked(ctx,v,l,&expected)
+}
+func(r *Runtime)applyLocked(ctx context.Context,v Revision,l Lease,expected *RuntimeCondition)(Snapshot,error){
+ if r.closed||r.fenced{return r.snapshot(),ErrClosed}
+ if expected!=nil&&Condition(r.snapshot())!=*expected{return r.snapshot(),ErrStale}
  saved:=freeze(v);if !r.validLease(l,saved){return r.snapshot(),ErrLease}
  if saved.Sequence==r.state.Highwater&&r.active!=nil&&saved.Sequence==r.active.Sequence&&saved.SHA==r.active.SHA&&saved.Manifest==r.active.Manifest{return r.refreshLocked(l)}
  if r.state.Usage!=nil||r.state.Admission!=nil||xrayconfig.RequiresUsageAdmission(saved.candidate()){return r.snapshot(),ErrUsageSettlement}
@@ -85,6 +93,7 @@ func(r *Runtime)Apply(ctx context.Context,v Revision,l Lease)(Snapshot,error){
  if err:=validateLayout(saved.candidate(),r.options.ListenIP,r.reserved);err!=nil{return r.snapshot(),err}
  if _,err:=xrayconfig.ValidateOffline(ctx,saved.candidate(),r.options.Binary,r.options.BinarySHA);err!=nil{return r.snapshot(),err}
  if ctx.Err()!=nil||!r.validLease(l,saved){return r.snapshot(),ErrLease}
+ if expected!=nil&&Condition(r.snapshot())!=*expected{return r.snapshot(),ErrStale}
  next:=r.state;next.Highwater=saved.Sequence;next.DesiredSHA=saved.SHA;next.DesiredManifest=saved.Manifest;next.Pending=saved;next.Phase="applying";next.LastLeaseIssued=l.Issued
  if err:=r.persist(next);err!=nil{return r.snapshot(),err};if r.afterIntent!=nil{r.afterIntent()}
  old:=r.state.Good;oldLease,oldDeadline:=r.lease,r.deadline

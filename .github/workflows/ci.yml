@@ -45,6 +45,12 @@ jobs:
           test "$(id -u)" -ne 0
           go test -race ./internal/managedxray -count=20 -timeout=120s -v \
             -run '^TestUsageObserver(FailWaitsForOwnedProcessExit|IncompleteStatsStopsWithoutInventingZero)$'
+      - name: Repeat durable route transaction failure cases under Race
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(id -u)" -ne 0
+          go test -race ./internal/managedxray -run '^TestRouteTransactions' -count=3 -timeout=120s -v
       - name: Go vet
         run: go vet ./...
       - name: Compile HUB and Node Agent
@@ -156,6 +162,21 @@ jobs:
         env:
           DARK_PRO_LAB_MODE: "1"
         run: go test ./internal/managedxray -run '^TestRealPinned' -v -count=1
+      - name: Prove staged transactions with real REALITY traffic and rollback under Race
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(id -u)" -ne 0
+          go test -race ./internal/managedxray -run '^TestRealPinnedRouteTransactionsRealityRollback$' -count=1 -json -timeout=90s > "$RUNNER_TEMP/route-transactions.jsonl"
+          python3 - "$RUNNER_TEMP/route-transactions.jsonl" <<'PYROUTE'
+          import json,sys
+          events=[json.loads(line) for line in open(sys.argv[1])]
+          name='TestRealPinnedRouteTransactionsRealityRollback'
+          assert sum(e.get('Action')=='pass' and e.get('Test')==name for e in events)==1
+          assert not any(e.get('Action') in ('skip','fail') and e.get('Test','').startswith(name) for e in events)
+          for event in events:
+              if event.get('Output'): print(event['Output'],end='')
+          PYROUTE
       - name: Prove native owner to pinned TLS Agent and real Xray revocation
         env:
           DARK_PRO_LAB_MODE: "1"
