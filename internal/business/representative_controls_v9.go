@@ -242,7 +242,7 @@ func (s *Store) UpdateRepresentativeControl(ctx context.Context, input Represent
 	if !errors.Is(err, sql.ErrNoRows) {
 		return out, err
 	}
-	for _, table := range []string{"events", "client_operations", "client_profile_edits"} {
+	for _, table := range []string{"events", "client_operations", "client_profile_edits", "catalog_events"} {
 		var found int
 		if err = tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM "+table+" WHERE event_id=?", input.EventID).Scan(&found); err != nil {
 			return out, err

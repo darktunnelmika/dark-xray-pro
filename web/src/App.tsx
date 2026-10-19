@@ -3,7 +3,7 @@ import {
   CheckCircle2, ChevronRight,
   CircleHelp, CreditCard, Globe2, HardDrive, LayoutDashboard,
   Menu, Moon, Network, Server, Settings2, ShieldCheck, Users, FolderOpen, UserRound, LogOut,
-  Sun, Waypoints, X,
+  Sun, Waypoints, ShoppingBag, X,
 } from "lucide-react";
 import { getFleet, type FleetSnapshot, type NodeSnapshot } from "./api";
 import InboundPlanner from "./InboundPlanner";
@@ -32,9 +32,9 @@ const translations = {
   en: {
     overview: "Overview", nodes: "Nodes", inbounds: "Inbounds", settings: "Settings",
     infrastructure: "INFRASTRUCTURE", management: "MANAGEMENT", workspaceGroup: "WORKSPACE",
-    clients: "Clients", groups: "Groups", representatives: "Representatives", finance: "Finance", account: "My account",
+    clients: "Clients", groups: "Groups", representatives: "Representatives", marketplace: "Marketplace", finance: "Finance", account: "My account",
     clientsTitle: "Clients", clientsLead: "Create and manage customers in one place.", groupsTitle: "Groups", groupsLead: "Organize customers without changing their financial history.",
-    representativesTitle: "Representatives", representativesLead: "Accounts, permissions and representative credit.", financeTitle: "Finance", financeLead: "Account balances and immutable transaction history.", accountTitle: "My account", accountLead: "Your profile and password settings.",
+    marketplaceTitle: "Plan marketplace", marketplaceLead: "Owner-defined offers, no live purchases until approved.", representativesTitle: "Representatives", representativesLead: "Accounts, permissions and representative credit.", financeTitle: "Finance", financeLead: "Account balances and immutable transaction history.", accountTitle: "My account", accountLead: "Your profile and password settings.",
     overviewTitle: "Infrastructure, at a glance.", overviewLead: "A clearer view of every server. No heavy accounting queries on page load.",
     nodesTitle: "Node fleet", nodesLead: "Live agent heartbeat, CPU, memory and physical network rates.",
     inboundsTitle: "Inbounds & routes", inboundsLead: "A simpler deployment model is coming next.",
@@ -67,9 +67,9 @@ const translations = {
   fa: {
     overview: "داشبورد", nodes: "نودها", inbounds: "اینباندها", settings: "تنظیمات",
     infrastructure: "زیرساخت", management: "مدیریت", workspaceGroup: "حساب و تنظیمات",
-    clients: "کلاینت‌ها", groups: "گروه‌ها", representatives: "نمایندگان", finance: "مالی", account: "حساب من",
+    clients: "کلاینت‌ها", groups: "گروه‌ها", representatives: "نمایندگان", marketplace: "فروشگاه پلن‌ها", finance: "مالی", account: "حساب من",
     clientsTitle: "مدیریت کلاینت‌ها", clientsLead: "ساخت، تمدید و مدیریت مشتری در یک بخش مشخص.", groupsTitle: "مدیریت گروه‌ها", groupsLead: "دسته‌بندی مشتری‌ها بدون تغییر سوابق مالی.",
-    representativesTitle: "مدیریت نمایندگان", representativesLead: "حساب‌ها، دسترسی و اعتبار نمایندگان.", financeTitle: "حسابداری", financeLead: "موجودی حساب و تاریخچهٔ ثبت‌شدهٔ تراکنش‌ها.", accountTitle: "حساب من", accountLead: "مشخصات حساب و تغییر رمز عبور.",
+    marketplaceTitle: "فروشگاه پلن‌ها", marketplaceLead: "مدیریت محصولات نمایندگان؛ بدون فروش و کسر اعتبار تا تأیید عملیاتی.", representativesTitle: "مدیریت نمایندگان", representativesLead: "حساب‌ها، دسترسی و اعتبار نمایندگان.", financeTitle: "حسابداری", financeLead: "موجودی حساب و تاریخچهٔ ثبت‌شدهٔ تراکنش‌ها.", accountTitle: "حساب من", accountLead: "مشخصات حساب و تغییر رمز عبور.",
     overviewTitle: "نمای کامل زیرساخت، در یک نگاه", overviewLead: "وضعیت واقعی سرورها، بدون اجرای گزارش‌های سنگین هنگام ورود.",
     nodesTitle: "مدیریت نودها", nodesLead: "وضعیت زنده Agent، پردازنده، حافظه و سرعت شبکه.",
     inboundsTitle: "اینباندها و مسیرها", inboundsLead: "مدیریت ساده‌تر مقصدها در مرحله بعد ساخته می‌شود.",
@@ -108,6 +108,7 @@ const nav: { id: Page; Icon: typeof LayoutDashboard }[] = [
   { id: "clients", Icon: Users },
   { id: "groups", Icon: FolderOpen },
   { id: "representatives", Icon: UserRound },
+  { id: "marketplace", Icon: ShoppingBag },
   { id: "finance", Icon: CreditCard },
   { id: "account", Icon: UserRound },
   { id: "settings", Icon: Settings2 },
@@ -115,7 +116,7 @@ const nav: { id: Page; Icon: typeof LayoutDashboard }[] = [
 
 const navGroups: { id: "infrastructure" | "management" | "workspaceGroup"; pages: Page[] }[] = [
   { id: "infrastructure", pages: ["overview", "nodes", "inbounds"] },
-  { id: "management", pages: ["clients", "groups", "representatives", "finance"] },
+  { id: "management", pages: ["clients", "groups", "representatives", "marketplace", "finance"] },
   { id: "workspaceGroup", pages: ["account", "settings"] },
 ];
 
@@ -408,7 +409,7 @@ export default function App() {
           )}
 
           {page === "inbounds" && <InboundPlanner nodes={fleet?.nodes ?? []} language={language} />}
-          {(["clients", "groups", "representatives", "finance", "account"] as Page[]).includes(page) && <BusinessWorkspace key={auth.session.user.id + ":" + page} language={language} section={page as "clients" | "groups" | "representatives" | "finance" | "account"} />}
+          {(["clients", "groups", "representatives", "marketplace", "finance", "account"] as Page[]).includes(page) && <BusinessWorkspace key={auth.session.user.id + ":" + page} language={language} section={page as "clients" | "groups" | "representatives" | "marketplace" | "finance" | "account"} />}
 
           {page === "settings" && (
             <div className="settings-list">

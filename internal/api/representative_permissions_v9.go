@@ -13,6 +13,10 @@ func requiredRepresentativePermission(r *http.Request) (string, bool) {
 	path := r.URL.Path
 	method := r.Method
 	switch {
+	case path == "/api/v1/workspace/products" && method == "GET":
+		return "view_clients", true
+	case strings.HasPrefix(path, "/api/v1/workspace/products/") && method == "GET":
+		return "view_clients", true
 	case path == "/api/v1/workspace/me" && method == "GET":
 		return "", true
 	case path == "/api/v1/workspace/clients":

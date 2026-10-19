@@ -116,6 +116,7 @@ func (s *Server) Handler() http.Handler {
 	s.attachBrowserAuth(mux)
 	s.attachWorkspace(mux)
 	s.attachRepresentativeControls(mux)
+	s.attachCatalog(mux)
 	s.attachGroups(mux)
 	s.attachClientLifecycle(mux)
 	s.attachClientProfileEdits(mux)

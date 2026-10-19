@@ -6,8 +6,9 @@ import Clients from "./business/Clients";
 import Groups from "./business/Groups";
 import Representatives from "./business/Representatives";
 import Finance from "./business/Finance";
+import Marketplace from "./business/Marketplace";
 import Account from "./business/Account";
-const views = { clients: Clients, groups: Groups, representatives: Representatives, finance: Finance, account: Account };
+const views = { clients: Clients, groups: Groups, representatives: Representatives, marketplace: Marketplace, finance: Finance, account: Account };
 export default function BusinessWorkspace({ language, section }: { language: Language; section: Section }) {
   const model = useBusinessWorkspace(language, section);
   const View = views[section];

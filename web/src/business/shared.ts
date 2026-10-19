@@ -6,7 +6,7 @@ export type ClientGroup = { id: string; representative_id: string; name: string;
 export type LedgerEvent = { event_id: string; kind: string; representative_id: string; object_id: string; reason: string; volume_delta_bytes: number; unlimited_delta_units: number };
 export type Workspace = { user: User; balance: Representative; data_plane: "not_activated" };
 
-export type Section = "clients" | "groups" | "representatives" | "finance" | "account";
+export type Section = "clients" | "groups" | "representatives" | "marketplace" | "finance" | "account";
 export function uid(): string { return "pro-" + crypto.randomUUID().slice(0, 18); }
 export const words = {
   en: {
