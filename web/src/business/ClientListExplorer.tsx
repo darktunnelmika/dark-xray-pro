@@ -4,6 +4,7 @@ import { mutation } from "../session";
 import type { BusinessModel } from "./useBusinessWorkspace";
 import { dateTime, gb, uid, type Client } from "./shared";
 import "./ClientSales.css";
+import ClientBulkExtend from "./ClientBulkExtend";
 
 type Filter = "all" | "pending" | "disabled" | "expired" | "archived" | "other";
 const words = {
@@ -23,7 +24,8 @@ const words = {
     matches:"Matches", loadingFilter:"Checking server filters…",
     bulkTitle:"Bulk client action",selectClient:"Select client",selectVisible:"Select up to 50 visible",clear:"Clear",
     selectedCount:"selected",action:"Action",disableAction:"Disable",enableAction:"Enable",
-    archiveAction:"Archive (keep history)",reason:"Required audit reason",
+    archiveAction:"Archive (keep history)",extendAction:"Renew / top up",
+    reason:"Required audit reason",
     execute:"Apply to selected",confirm:"Apply this action to the selected clients? All records are checked together; financial usage is never deleted.",
     archiveConfirm:"Archive selected clients? Client IDs, UUIDs and ALL historical usage/credits stay intact. This does not remove any Xray process.",
     bulkNote:"At most 50 individually selected clients per transaction. All-or-none, immutable audit, no usage reset or direct Xray Apply.",
@@ -46,7 +48,8 @@ const words = {
     matches:"تعداد کل",loadingFilter:"در حال دریافت فیلترهای سرور…",
     bulkTitle:"مدیریت گروهی کلاینت‌ها",selectClient:"انتخاب کلاینت",selectVisible:"انتخاب حداکثر ۵۰ مورد نمایان",clear:"پاک‌کردن انتخاب",
     selectedCount:"انتخاب‌شده",action:"عملیات",disableAction:"غیرفعال",enableAction:"فعال‌سازی منطقی",
-    archiveAction:"آرشیو (با حفظ سوابق)",reason:"دلیل ضروری برای حسابرسی",
+    archiveAction:"آرشیو (با حفظ سوابق)",extendAction:"تمدید / افزایش حجم",
+    reason:"دلیل ضروری برای حسابرسی",
     execute:"اعمال به انتخاب‌شده‌ها",confirm:"این عملیات روی کلاینت‌های انتخاب‌شده اعمال شود؟ همه هم‌زمان بررسی می‌شوند و هیچ مصرف مالی حذف نمی‌شود.",
     archiveConfirm:"کلاینت‌ها آرشیو شوند؟ شناسه‌ها، UUID و تمام مصرف و اعتبار تاریخی می‌مانند؛ هیچ پردازش Xray مستقیم حذف نمی‌شود.",
     bulkNote:"حداکثر ۵۰ کلاینتِ مشخص در هر تراکنش. همه یا هیچ، با حسابرسی تغییرناپذیر و بدون صفرکردن مصرف.",
@@ -70,7 +73,7 @@ export default function ClientListExplorer({model}: {model:BusinessModel}) {
     runAction,setNotice }=model;
   const copy=words[language];
   const [selected,setSelected]=useState<string[]>([]);
-  const [bulkAction,setBulkAction]=useState<"disable"|"enable"|"archive">("disable");
+  const [bulkAction,setBulkAction]=useState<"disable"|"enable"|"archive"|"extend">("disable");
   const [bulkReason,setBulkReason]=useState("");
   const pendingBulk=useRef<{key:string;id:string}|null>(null);
   useEffect(()=>{
@@ -99,7 +102,7 @@ export default function ClientListExplorer({model}: {model:BusinessModel}) {
     });
   }
   async function executeBulk(){
-    if(!canSelect||allowedSelected.length<1||allowedSelected.length>50||
+    if(bulkAction==="extend"||!canSelect||allowedSelected.length<1||allowedSelected.length>50||
       bulkReason.trim().length<1||bulkReason.trim().length>200){
       setNotice(copy.missingReason);return;
     }
@@ -172,15 +175,19 @@ export default function ClientListExplorer({model}: {model:BusinessModel}) {
           <option value="disable">{copy.disableAction}</option>
           <option value="enable">{copy.enableAction}</option>
           <option value="archive">{copy.archiveAction}</option>
+          <option value="extend">{copy.extendAction}</option>
         </select></label>
         <label>{copy.reason}<input type="text" value={bulkReason} maxLength={200}
           disabled={!canSelect} onChange={e=>setBulkReason(e.target.value)}
           placeholder={copy.reason}/></label>
       </div>
-      <button type="button" className="clients-bulk-submit"
-        disabled={!canSelect||!allowedSelected.length||!bulkReason.trim()}
-        onClick={()=>void executeBulk()}>
-        <Archive size={14}/>{copy.execute}</button>
+      {bulkAction==="extend"
+        ? <ClientBulkExtend model={model} selected={allowedSelected} reason={bulkReason}
+            onCommitted={()=>{setSelected([]);setBulkReason("");}}/>
+        : <button type="button" className="clients-bulk-submit"
+            disabled={!canSelect||!allowedSelected.length||!bulkReason.trim()}
+            onClick={()=>void executeBulk()}>
+            <Archive size={14}/>{copy.execute}</button>}
       <p><AlertTriangle size={14}/>{copy.bulkNote}</p>
     </div>
     <div className="clients-explorer-list">

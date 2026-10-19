@@ -1,103 +1,228 @@
 package api
 
 import (
- "net/http"
+	"net/http"
 
- "github.com/darktunnelmika/dark-xray-pro/internal/business"
+	"github.com/darktunnelmika/dark-xray-pro/internal/business"
 )
 
 // New PRO client lifecycle is a durable billing operation ONLY; no route,
 // Node runtime, Xray process or subscription link is ever mutated here.
-func(s *Server) attachClientLifecycle(mux *http.ServeMux){
- if s.business==nil{return}
- ownedClient:=func(w http.ResponseWriter,r *http.Request,mutate bool)(business.Client,bool){
-  session,ok:=s.authorizeBrowser(w,r,mutate,false)
-  if !ok{return business.Client{},false}
-  c,err:=s.business.Client(r.Context(),r.PathValue("id"))
-  if err!=nil{businessError(w,err);return business.Client{},false}
-  if session.User.Role!="owner" && c.RepresentativeID!=session.User.RepresentativeID{
-   respond(w,http.StatusForbidden,map[string]string{"error":"representative_scope_denied"})
-   return business.Client{},false
-  }
-  return c,true
- }
- mux.HandleFunc("POST /api/v1/workspace/clients/bulk/state",func(w http.ResponseWriter,r *http.Request){
-  session,ok:=s.authorizeBrowser(w,r,true,false);if !ok{return}
-  var req business.BulkClientState
-  if err:=decode(w,r,maxBusinessRequestBytes,&req);err!=nil{
-   respond(w,http.StatusBadRequest,map[string]string{"error":"invalid_request"});return
-  }
-  if session.User.Role!="owner"{
-   // Fail with a generic 403 before entering a write transaction; the
-   // transaction independently rechecks every client's tenant scope.
-   for _,id:=range req.ClientIDs{
-    c,err:=s.business.Client(r.Context(),id)
-    if err!=nil{businessError(w,err);return}
-    if c.RepresentativeID!=session.User.RepresentativeID{
-     respond(w,http.StatusForbidden,map[string]string{"error":"representative_scope_denied"});return
-    }
-   }
-  }
-  scope:=""
-  if session.User.Role!="owner"{scope=session.User.RepresentativeID}
-  result,err:=s.business.BulkSetClientState(r.Context(),req,scope)
-  if err!=nil{businessError(w,err);return}
-  ids:=make([]string,0,len(result.Clients))
-  for _,c:=range result.Clients{ids=append(ids,c.ID)}
-  respond(w,http.StatusOK,map[string]any{
-   "client_ids":ids,"count":result.Count,"replayed":result.Replayed,
-   "applied_to_xray":false,"billing_refunded":false,
-   "customer_traffic_changed":false,"client_or_usage_history_deleted":false,
-  })
- })
- mux.HandleFunc("GET /api/v1/workspace/clients/{id}",func(w http.ResponseWriter,r *http.Request){
-  c,ok:=ownedClient(w,r,false);if !ok{return}
-  respond(w,http.StatusOK,c)
- })
- mux.HandleFunc("POST /api/v1/workspace/clients/{id}/extend",func(w http.ResponseWriter,r *http.Request){
-  c,ok:=ownedClient(w,r,true);if !ok{return}
-  var input business.ExtendClient
-  if err:=decode(w,r,maxBusinessRequestBytes,&input);err!=nil{
-   respond(w,http.StatusBadRequest,map[string]string{"error":"invalid_request"});return
-  }
-  if c.ID!=input.ClientID{businessError(w,business.ErrInvalid);return}
-  result,err:=s.business.ExtendClient(r.Context(),input)
-  if err!=nil{businessError(w,err);return}
-  respond(w,http.StatusOK,map[string]any{
-   "client":result,"deployment":"pending_external_node_apply",
-   "subscription_changed":false,"customer_traffic_changed":false,
-  })
- })
- mux.HandleFunc("POST /api/v1/workspace/clients/{id}/state",func(w http.ResponseWriter,r *http.Request){
-  c,ok:=ownedClient(w,r,true);if !ok{return}
-  var input business.SetClientState
-  if err:=decode(w,r,maxBusinessRequestBytes,&input);err!=nil{
-   respond(w,http.StatusBadRequest,map[string]string{"error":"invalid_request"});return
-  }
-  if c.ID!=input.ClientID{businessError(w,business.ErrInvalid);return}
-  result,err:=s.business.SetClientState(r.Context(),input)
-  if err!=nil{businessError(w,err);return}
-  respond(w,http.StatusOK,map[string]any{
-   "client":result,"applied_to_xray":false,
-   "billing_refunded":false,"group_history_deleted":false,
-  })
- })
- mux.HandleFunc("GET /api/v1/workspace/client-operations",func(w http.ResponseWriter,r *http.Request){
-  session,ok:=s.authorizeBrowser(w,r,false,false);if !ok{return}
-  limit,offset,err:=pageParams(r)
-  if err!=nil{businessError(w,business.ErrInvalid);return}
-  rep:=r.URL.Query().Get("representative_id")
-  if session.User.Role!="owner"{
-   if rep!=""&&rep!=session.User.RepresentativeID{
-    respond(w,http.StatusForbidden,map[string]string{"error":"representative_scope_denied"});return
-   }
-   rep=session.User.RepresentativeID
-  }
-  events,err:=s.business.ListClientOperations(r.Context(),rep,limit,offset)
-  if err!=nil{businessError(w,err);return}
-  respond(w,http.StatusOK,map[string]any{
-   "operations":events,"limit":limit,"offset":offset,
-   "audit":"append_only","customer_data_plane":"not_enabled",
-  })
- })
+func (s *Server) attachClientLifecycle(mux *http.ServeMux) {
+	if s.business == nil {
+		return
+	}
+	ownedClient := func(w http.ResponseWriter, r *http.Request, mutate bool) (business.Client, bool) {
+		session, ok := s.authorizeBrowser(w, r, mutate, false)
+		if !ok {
+			return business.Client{}, false
+		}
+		c, err := s.business.Client(r.Context(), r.PathValue("id"))
+		if err != nil {
+			businessError(w, err)
+			return business.Client{}, false
+		}
+		if session.User.Role != "owner" && c.RepresentativeID != session.User.RepresentativeID {
+			respond(w, http.StatusForbidden, map[string]string{"error": "representative_scope_denied"})
+			return business.Client{}, false
+		}
+		return c, true
+	}
+	mux.HandleFunc("POST /api/v1/workspace/clients/bulk/state", func(w http.ResponseWriter, r *http.Request) {
+		session, ok := s.authorizeBrowser(w, r, true, false)
+		if !ok {
+			return
+		}
+		var req business.BulkClientState
+		if err := decode(w, r, maxBusinessRequestBytes, &req); err != nil {
+			respond(w, http.StatusBadRequest, map[string]string{"error": "invalid_request"})
+			return
+		}
+		if session.User.Role != "owner" {
+			// Fail with a generic 403 before entering a write transaction; the
+			// transaction independently rechecks every client's tenant scope.
+			for _, id := range req.ClientIDs {
+				c, err := s.business.Client(r.Context(), id)
+				if err != nil {
+					businessError(w, err)
+					return
+				}
+				if c.RepresentativeID != session.User.RepresentativeID {
+					respond(w, http.StatusForbidden, map[string]string{"error": "representative_scope_denied"})
+					return
+				}
+			}
+		}
+		scope := ""
+		if session.User.Role != "owner" {
+			scope = session.User.RepresentativeID
+		}
+		result, err := s.business.BulkSetClientState(r.Context(), req, scope)
+		if err != nil {
+			businessError(w, err)
+			return
+		}
+		ids := make([]string, 0, len(result.Clients))
+		for _, c := range result.Clients {
+			ids = append(ids, c.ID)
+		}
+		respond(w, http.StatusOK, map[string]any{
+			"client_ids": ids, "count": result.Count, "replayed": result.Replayed,
+			"applied_to_xray": false, "billing_refunded": false,
+			"customer_traffic_changed": false, "client_or_usage_history_deleted": false,
+		})
+	})
+	// Preview is read-only despite POST (strict CSRF + bounded JSON input).
+	// Both stages recheck every representative on the actual HUB; the Store
+	// independently enforces the tenant boundary within its SQLite transaction.
+	batchScope := func(w http.ResponseWriter, r *http.Request, ids []string) (string, bool) {
+		session, ok := s.authorizeBrowser(w, r, true, false)
+		if !ok {
+			return "", false
+		}
+		if len(ids) < 1 || len(ids) > 50 {
+			businessError(w, business.ErrInvalid)
+			return "", false
+		}
+		if session.User.Role == "owner" {
+			return "", true
+		}
+		for _, id := range ids {
+			c, err := s.business.Client(r.Context(), id)
+			if err != nil {
+				businessError(w, err)
+				return "", false
+			}
+			if c.RepresentativeID != session.User.RepresentativeID {
+				respond(w, http.StatusForbidden, map[string]string{"error": "representative_scope_denied"})
+				return "", false
+			}
+		}
+		return session.User.RepresentativeID, true
+	}
+	mux.HandleFunc("POST /api/v1/workspace/clients/bulk/extend/quote", func(w http.ResponseWriter, r *http.Request) {
+		// Authorize before parsing any private data. A second auth check is
+		// performed by batchScope to avoid a bypass in future refactors.
+		if _, ok := s.authorizeBrowser(w, r, true, false); !ok {
+			return
+		}
+		var input business.BulkExtensionIntent
+		if err := decode(w, r, maxBusinessRequestBytes, &input); err != nil {
+			respond(w, http.StatusBadRequest, map[string]string{"error": "invalid_request"})
+			return
+		}
+		scope, ok := batchScope(w, r, input.ClientIDs)
+		if !ok {
+			return
+		}
+		quote, err := s.business.QuoteBulkExtension(r.Context(), input, scope)
+		if err != nil {
+			businessError(w, err)
+			return
+		}
+		respond(w, http.StatusOK, quote)
+	})
+	mux.HandleFunc("POST /api/v1/workspace/clients/bulk/extend/commit", func(w http.ResponseWriter, r *http.Request) {
+		if _, ok := s.authorizeBrowser(w, r, true, false); !ok {
+			return
+		}
+		var input business.BulkExtensionCommit
+		if err := decode(w, r, maxBusinessRequestBytes, &input); err != nil {
+			respond(w, http.StatusBadRequest, map[string]string{"error": "invalid_request"})
+			return
+		}
+		scope, ok := batchScope(w, r, input.ClientIDs)
+		if !ok {
+			return
+		}
+		result, err := s.business.CommitBulkExtension(r.Context(), input, scope)
+		if err != nil {
+			businessError(w, err)
+			return
+		}
+		respond(w, http.StatusOK, result)
+	})
+	mux.HandleFunc("GET /api/v1/workspace/clients/{id}", func(w http.ResponseWriter, r *http.Request) {
+		c, ok := ownedClient(w, r, false)
+		if !ok {
+			return
+		}
+		respond(w, http.StatusOK, c)
+	})
+	mux.HandleFunc("POST /api/v1/workspace/clients/{id}/extend", func(w http.ResponseWriter, r *http.Request) {
+		c, ok := ownedClient(w, r, true)
+		if !ok {
+			return
+		}
+		var input business.ExtendClient
+		if err := decode(w, r, maxBusinessRequestBytes, &input); err != nil {
+			respond(w, http.StatusBadRequest, map[string]string{"error": "invalid_request"})
+			return
+		}
+		if c.ID != input.ClientID {
+			businessError(w, business.ErrInvalid)
+			return
+		}
+		result, err := s.business.ExtendClient(r.Context(), input)
+		if err != nil {
+			businessError(w, err)
+			return
+		}
+		respond(w, http.StatusOK, map[string]any{
+			"client": result, "deployment": "pending_external_node_apply",
+			"subscription_changed": false, "customer_traffic_changed": false,
+		})
+	})
+	mux.HandleFunc("POST /api/v1/workspace/clients/{id}/state", func(w http.ResponseWriter, r *http.Request) {
+		c, ok := ownedClient(w, r, true)
+		if !ok {
+			return
+		}
+		var input business.SetClientState
+		if err := decode(w, r, maxBusinessRequestBytes, &input); err != nil {
+			respond(w, http.StatusBadRequest, map[string]string{"error": "invalid_request"})
+			return
+		}
+		if c.ID != input.ClientID {
+			businessError(w, business.ErrInvalid)
+			return
+		}
+		result, err := s.business.SetClientState(r.Context(), input)
+		if err != nil {
+			businessError(w, err)
+			return
+		}
+		respond(w, http.StatusOK, map[string]any{
+			"client": result, "applied_to_xray": false,
+			"billing_refunded": false, "group_history_deleted": false,
+		})
+	})
+	mux.HandleFunc("GET /api/v1/workspace/client-operations", func(w http.ResponseWriter, r *http.Request) {
+		session, ok := s.authorizeBrowser(w, r, false, false)
+		if !ok {
+			return
+		}
+		limit, offset, err := pageParams(r)
+		if err != nil {
+			businessError(w, business.ErrInvalid)
+			return
+		}
+		rep := r.URL.Query().Get("representative_id")
+		if session.User.Role != "owner" {
+			if rep != "" && rep != session.User.RepresentativeID {
+				respond(w, http.StatusForbidden, map[string]string{"error": "representative_scope_denied"})
+				return
+			}
+			rep = session.User.RepresentativeID
+		}
+		events, err := s.business.ListClientOperations(r.Context(), rep, limit, offset)
+		if err != nil {
+			businessError(w, err)
+			return
+		}
+		respond(w, http.StatusOK, map[string]any{
+			"operations": events, "limit": limit, "offset": offset,
+			"audit": "append_only", "customer_data_plane": "not_enabled",
+		})
+	})
 }
