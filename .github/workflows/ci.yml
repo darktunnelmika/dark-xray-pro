@@ -37,6 +37,14 @@ jobs:
           test ! -e backend/dark_policy.py || { echo "Legacy HUB files must not be imported into PRO"; exit 1; }
       - name: Go unit/race tests
         run: go test -race ./...
+      - name: Repeat observer stop receipt race regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          # These process-lifecycle fixtures must execute, never skip as root.
+          test "$(id -u)" -ne 0
+          go test -race ./internal/managedxray -count=20 -timeout=120s -v \
+            -run '^TestUsageObserver(FailWaitsForOwnedProcessExit|IncompleteStatsStopsWithoutInventingZero)$'
       - name: Go vet
         run: go vet ./...
       - name: Compile HUB and Node Agent
