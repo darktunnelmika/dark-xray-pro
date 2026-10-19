@@ -234,7 +234,12 @@ func TestUsageObserverStalledCollectorDoesNotWaitForRuntimeMutex(t *testing.T) {
 		t.Fatal("stalled collector defeated independent guard")
 	}
 	r.mu.Unlock()
-	waitFor(t, func() bool { return r.UsageStatus().Failure == "sample_deadline" })
+	// Failure fences lease renewal immediately, while Running=false certifies
+	// the owned child has finished stopping and its socket is no longer ours.
+	waitFor(t, func() bool {
+		status := r.UsageStatus()
+		return status.Failure == "sample_deadline" && !status.Running && !r.Snapshot().ProcessReady
+	})
 	assertPort(t, f.candidate.Listeners[0].NodePort, false)
 }
 func TestUsageObserverIncompleteStatsStopsWithoutInventingZero(t *testing.T) {

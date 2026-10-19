@@ -44,9 +44,9 @@ type UsageObservationStatus struct {
 	SettlementRequired       bool   `json:"settlement_required"`
 }
 type usageObserver struct {
- fresh *uc.FreshCounters
- ready chan struct{}
- readyOnce sync.Once
+	fresh        *uc.FreshCounters
+	ready        chan struct{}
+	readyOnce    sync.Once
 	mu           sync.Mutex
 	status       UsageObservationStatus
 	lastSaved    time.Time
@@ -208,12 +208,17 @@ func (m *usageObserver) fail(reason string) {
 	if m.status.Failure == "" {
 		m.status.Failure = reason
 	}
-	m.status.Running = false
+	// Mark the observer unhealthy immediately, so admission/lease refresh
+	// fail closed while the owned process is being stopped.
+	// Running becomes false only AFTER that child has actually exited.
 	m.mu.Unlock()
 	m.cancel()
 	// Only the captured child, never r.process after a replacement, a PID from
 	// the report, another runtime, an old panel or a systemd service.
 	m.process.stop()
+	m.mu.Lock()
+	m.status.Running = false
+	m.mu.Unlock()
 }
 func (m *usageObserver) pending(n int) {
 	m.mu.Lock()
@@ -276,8 +281,12 @@ func (m *usageObserver) run(ctx context.Context) {
 			return
 		}
 		var values []uc.Usage
-        var err error
-        if m.fresh!=nil { values,err=m.fresh.Collect(ctx,m.binary,m.pin,m.options.StatsEndpoint) } else { values,err=uc.Collect(ctx,m.binary,m.pin,m.options.StatsEndpoint,m.options.Epoch) }
+		var err error
+		if m.fresh != nil {
+			values, err = m.fresh.Collect(ctx, m.binary, m.pin, m.options.StatsEndpoint)
+		} else {
+			values, err = uc.Collect(ctx, m.binary, m.pin, m.options.StatsEndpoint, m.options.Epoch)
+		}
 		if err != nil {
 			if ctx.Err() == nil {
 				m.fail("observation_failed")
@@ -293,7 +302,9 @@ func (m *usageObserver) run(ctx context.Context) {
 		m.status.LastSavedUnixNano = m.lastSaved.UnixNano()
 		m.status.Samples++
 		m.mu.Unlock()
-        if m.ready!=nil{m.readyOnce.Do(func(){close(m.ready)})}
+		if m.ready != nil {
+			m.readyOnce.Do(func() { close(m.ready) })
+		}
 		queue, err := m.box.Pending()
 		if err != nil {
 			m.fail("outbox_failed")
@@ -332,7 +343,9 @@ func (m *usageObserver) run(ctx context.Context) {
 }
 func (r *Runtime) usageStatusLocked() UsageObservationStatus {
 	if r.state.Usage == nil {
-        if r.state.Admission!=nil{return UsageObservationStatus{Required:true,SettlementRequired:true,Failure:"prepared_admission_incomplete"}}
+		if r.state.Admission != nil {
+			return UsageObservationStatus{Required: true, SettlementRequired: true, Failure: "prepared_admission_incomplete"}
+		}
 		return UsageObservationStatus{}
 	}
 	if r.observer != nil {
