@@ -170,7 +170,7 @@ export default function ClientBulkExtend({model,selected,reason,onCommitted}: {
     </div>
     <button type="button" onClick={()=>void review()} disabled={!valid||busy||model.actionBusy}
       className="bulk-renew-review"><Wallet size={15}/>{busy?copy.loading:copy.quote}</button>
-    {verifiedQuote && <div className="bulk-renew-quote" aria-label="Verified bulk renewal quote">
+    {verifiedQuote && <div role="region" className="bulk-renew-quote" aria-label="Verified bulk renewal quote">
       <header><strong><ShieldCheck size={16}/>{verifiedQuote.count} {copy.all}</strong>
         <span>{copy.safe}</span></header>
       <div className="bulk-renew-accounts">
