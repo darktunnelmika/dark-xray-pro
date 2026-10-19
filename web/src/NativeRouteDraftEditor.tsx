@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ChangeEvent } from "react";
 import { AlertTriangle, CheckCircle2, RefreshCw, Route } from "lucide-react";
 import { api, ApiError } from "./session";
 import "./NativeRouteDraftEditor.css";
+import NativeRouteReadinessP0G from "./NativeRouteReadinessP0G";
 
 type NodeInfo={node_id:string;installation_id:string;name:string};
 type NativeTarget={inbound_id:number;node_id:string;installation_id:string;
@@ -191,5 +192,11 @@ export default function NativeRouteDraftEditor({inboundID,inboundRevision,nodes,
    </div>
   </>}
   {message&&<p role="status" className="native-notice">{message}</p>}
+  {selected&&form&&loaded&&form.expected_draft_revision>0&&
+   <NativeRouteReadinessP0G
+    key={nodeID+":"+form.expected_draft_revision}
+    inboundID={inboundID} nodeID={nodeID}
+    draftRevision={form.expected_draft_revision}
+    language={language}/>}
  </section>;
 }
