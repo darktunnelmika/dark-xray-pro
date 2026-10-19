@@ -42,7 +42,7 @@ func (s *Server) attachNativeRouteDrafts(mux *http.ServeMux) {
 			if !ok {
 				return
 			}
-			preview, err := s.business.PreviewNativeRouteDraft(r.Context(), input)
+			preview, err := s.business.PreviewNativeRouteDraft(r.Context(), s.inboundKey, input)
 			if err != nil {
 				businessError(w, err)
 				return

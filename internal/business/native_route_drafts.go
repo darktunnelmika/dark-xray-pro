@@ -315,7 +315,7 @@ func nativeDraftPorts(in NativeRouteDraftInput) []uint16 {
 // verifyDraft uses only the business DB's current Native Inbound bindings,
 // without writing any runtime desired state. A registered Agent identity
 // is independently checked by the owner API, never taken from browser JSON.
-func verifyDraft(ctx context.Context, tx *sql.Tx, in NativeRouteDraftInput) (NativeRouteDraftPreview, string, uint16, uint16, error) {
+func verifyDraft(ctx context.Context, tx *sql.Tx, key []byte, in NativeRouteDraftInput) (NativeRouteDraftPreview, string, uint16, uint16, error) {
 	out := NativeRouteDraftPreview{NodeID: in.NodeID, ChangedNodeOnly: true}
 	var inboundRev uint64
 	var enabled, archived int
@@ -363,6 +363,9 @@ func verifyDraft(ctx context.Context, tx *sql.Tx, in NativeRouteDraftInput) (Nat
 			// provisioned tunnel. Actual Agent/Xray validation is a later gate.
 			return out, "", 0, 0, ErrConflict
 		}
+	}
+	if err := verifySwapDraftGraph(ctx, tx, key, in); err != nil {
+		return out, "", 0, 0, err
 	}
 	proposed := map[uint16]bool{}
 	for _, p := range nativeDraftPorts(in) {
@@ -434,7 +437,10 @@ func verifyDraft(ctx context.Context, tx *sql.Tx, in NativeRouteDraftInput) (Nat
 	out.Reason = "owner_preview_only; no runtime configuration or billing changed"
 	return out, ip.String(), direct, swap, nil
 }
-func (s *Store) PreviewNativeRouteDraft(ctx context.Context, in NativeRouteDraftInput) (NativeRouteDraftPreview, error) {
+func (s *Store) PreviewNativeRouteDraft(ctx context.Context, key []byte, in NativeRouteDraftInput) (NativeRouteDraftPreview, error) {
+	if len(key) != 32 {
+		return NativeRouteDraftPreview{}, ErrInvalid
+	}
 	clean, err := checkDraftInput(in)
 	if err != nil {
 		return NativeRouteDraftPreview{}, err
@@ -444,7 +450,7 @@ func (s *Store) PreviewNativeRouteDraft(ctx context.Context, in NativeRouteDraft
 		return NativeRouteDraftPreview{}, err
 	}
 	defer tx.Rollback()
-	out, _, _, _, err := verifyDraft(ctx, tx, clean)
+	out, _, _, _, err := verifyDraft(ctx, tx, key, clean)
 	if err != nil {
 		return NativeRouteDraftPreview{}, err
 	}
@@ -506,7 +512,7 @@ func (s *Store) SaveNativeRouteDraft(ctx context.Context, master []byte, input N
 			return empty, ErrConflict
 		}
 	}
-	preview, listen, nativeDirect, nativeSwap, err := verifyDraft(ctx, tx, in)
+	preview, listen, nativeDirect, nativeSwap, err := verifyDraft(ctx, tx, master, in)
 	if err != nil || !preview.Valid {
 		return empty, err
 	}

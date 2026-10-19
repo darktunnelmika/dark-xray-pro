@@ -52,7 +52,7 @@ func routeDraftFixture(t *testing.T) (*Store, []byte, NativeRouteDraftInput) {
 func TestP0ERouteDraftReadOnlyPreviewEncryptedStoreAndReplay(t *testing.T) {
 	s, key, in := routeDraftFixture(t)
 	ctx := context.Background()
-	preview, err := s.PreviewNativeRouteDraft(ctx, in)
+	preview, err := s.PreviewNativeRouteDraft(ctx, key, in)
 	if err != nil || !preview.Valid || preview.ApplyAllowed || preview.AgentAckVerified ||
 		preview.BillingVerified || preview.DataPlaneVerified {
 		t.Fatal("unsafe preview", preview, err)
@@ -136,7 +136,7 @@ func TestP0ERouteDraftNeverChangesAnyNativeTargetOrLedger(t *testing.T) {
 	}
 }
 func TestP0ERouteDraftRejectsUnsafeTopology(t *testing.T) {
-	s, _, in := routeDraftFixture(t)
+	s, key, in := routeDraftFixture(t)
 	for _, tc := range []struct {
 		name string
 		edit func(*NativeRouteDraftInput)
@@ -164,7 +164,7 @@ func TestP0ERouteDraftRejectsUnsafeTopology(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			input := in
 			tc.edit(&input)
-			if _, err := s.PreviewNativeRouteDraft(context.Background(), input); err == nil {
+			if _, err := s.PreviewNativeRouteDraft(context.Background(), key, input); err == nil {
 				t.Fatal("unsafe draft accepted")
 			}
 		})
@@ -181,7 +181,7 @@ func TestP0ERouteDraftStaleRevisionBlocksReapply(t *testing.T) {
 	}
 	in.EventID = "native-route-draft-after-change-001"
 	in.ExpectedDraftRevision = 1
-	if _, err := s.PreviewNativeRouteDraft(ctx, in); !errors.Is(err, ErrConflict) {
+	if _, err := s.PreviewNativeRouteDraft(ctx, key, in); !errors.Is(err, ErrConflict) {
 		t.Fatal("stale input revision did not fail", err)
 	}
 }
