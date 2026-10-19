@@ -3,6 +3,7 @@ import { useSession, api, ApiError as Fault } from "./session";
 import InboundLifecycle from "./InboundLifecycle";
 import NativeReadiness, { type NativePreflight } from "./NativeReadiness";
 import NativeCanary from "./NativeCanary";
+import NativeRouteDraftEditor from "./NativeRouteDraftEditor";
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { ArrowRightLeft, CheckCircle2, KeyRound, RefreshCw, Server, ShieldCheck, Users, Waypoints } from "lucide-react";
 
@@ -161,6 +162,9 @@ export default function NativeInbounds({ language, fallback }: { language: Lang;
      {sharedNodePort && <p className="native-warning" role="alert">{t.shared}</p>}
      <button type="submit" disabled={busy || stale || current.archived || !node || sharedNodePort || (Number(direct) === 0 && Number(swap) === 0)}>{t.targetSave}</button>
     </form>
+    <NativeRouteDraftEditor key={chosen} inboundID={chosen} inboundRevision={current.revision}
+      nodes={data.nodes} targets={data.targets} language={language}
+      csrf={session.csrf_token ?? ""} blocked={busy || stale || current.archived}/>
    </>}
    <div className="native-card"><h3><ArrowRightLeft size={19}/>{t.status}</h3><p>{t.evidence}</p>
     <div className="native-report-list">{data.runtime.map(s => <article key={s.node_id + s.installation_id} className="native-report">

@@ -122,6 +122,7 @@ func (s *Server) Handler() http.Handler {
 	s.attachClientLifecycle(mux)
 	s.attachClientProfileEdits(mux)
 	s.attachNativeInbounds(mux)
+	s.attachNativeRouteDrafts(mux)
 	s.attachOwnerNativeCanary(mux)
 	s.attachRuntimeReports(mux)
 	s.attachInboundLifecycle(mux)
