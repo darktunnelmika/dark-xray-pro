@@ -52,7 +52,17 @@ func socksDial(ctx context.Context,socks,target string)(net.Conn,error){
 }
 func TestRealPinnedRealityClientRevokeAndRollback(t *testing.T){
  binary,pin:=os.Getenv("DARK_PRO_TEST_XRAY_BINARY"),os.Getenv("DARK_PRO_TEST_XRAY_SHA256");if binary==""&&pin==""{t.Skip("explicit pinned real Xray required")};if binary==""||pin==""{t.Fatal("incomplete pinned core")}
- o:=testOptions(t);o.Binary=binary;o.BinarySHA=pin;r:=mustOpen(t,o);target:=realityTestTarget(t)
+ o:=testOptions(t);o.Binary=binary;o.BinarySHA=pin;r:=mustOpen(t,o)
+ exerciseRealityRevokeRollback(t,o,r)
+}
+// Both the ordinary supervisor and the staged transaction executor must carry
+// real disposable REALITY traffic through the same revocation/rollback test.
+type realityRevisionExecutor interface {
+ Apply(context.Context,Revision,Lease)(Snapshot,error)
+ Rollback(context.Context,uint64,Lease)(Snapshot,error)
+}
+func exerciseRealityRevokeRollback(t *testing.T,o Options,r realityRevisionExecutor){
+ t.Helper();binary:=o.Binary;target:=realityTestTarget(t)
  random:=make([]byte,32);if _,e:=rand.Read(random);e!=nil{t.Fatal(e)};proof:=hex.EncodeToString(random)
  origin:=httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter,r *http.Request){_,_=io.WriteString(w,proof)}));defer origin.Close()
  serverPort:=freePort(t);c1:=testCandidate(t,serverPort,"one");var doc map[string]any;if e:=json.Unmarshal(c1.Config,&doc);e!=nil{t.Fatal(e)}
