@@ -103,6 +103,13 @@ func(s *Server) authorizeBrowser(w http.ResponseWriter,r *http.Request,mutate,ow
   respond(w,http.StatusForbidden,map[string]string{"error":"owner_permission_required"})
   return business.LoginSession{},false
  }
+ if session.User.Role=="representative"{
+  key,allowed:=requiredRepresentativePermission(r)
+  if !allowed||!repPermissionAllowed(session.User.Permissions,key){
+   respond(w,http.StatusForbidden,map[string]string{"error":"representative_permission_denied"})
+   return business.LoginSession{},false
+  }
+ }
  if mutate{
   if !sameOriginMutation(r){
    respond(w,http.StatusForbidden,map[string]string{"error":"same_origin_json_required"})

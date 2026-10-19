@@ -162,6 +162,7 @@ func Open(path string)(*Store,error){
  if version==5 {if err=migrateRuntimeReports(db);err!=nil{return fail(err)};version=6}
  if version==6 {if err=migrateInboundLifecycle(db);err!=nil{return fail(err)}}
  if err=ensureClientProfileEdits(db);err!=nil{return fail(err)}
+ if err=ensureRepresentativeControls(db);err!=nil{return fail(err)}
  s:=&Store{db:db};if err=s.restoreUsageLedger(context.Background());err!=nil{return fail(err)}
  return s,nil
 }
@@ -212,6 +213,8 @@ func checkEvent(ctx context.Context,tx *sql.Tx,id,hash,kind string)(bool,error){
  case errors.Is(err,sql.ErrNoRows):
   var count int
   if err=tx.QueryRowContext(ctx,"SELECT COUNT(*) FROM client_profile_edits WHERE event_id=?",id).Scan(&count);err!=nil{return false,err}
+  if count>0{return false,ErrConflict}
+  if err=tx.QueryRowContext(ctx,"SELECT COUNT(*) FROM representative_control_events WHERE event_id=?",id).Scan(&count);err!=nil{return false,err}
   if count>0{return false,ErrConflict}
   return false,nil
  default:return false,err}
