@@ -22,7 +22,9 @@ try {
   await createRep.getByLabel('Representative ID', { exact: true }).fill('live-usage-rep');
   await createRep.getByLabel('Display name', { exact: true }).fill('Live acceptance representative');
   await createRep.getByRole('button', { name: 'Create representative', exact: true }).click();
-  await expect(page.locator('.business-records').getByText('Live acceptance representative (live-usage-rep)', { exact: true })).toBeVisible();
+  // The directory now renders verified name and ID in the same owner-only row.
+  await expect(page.locator('.rep-dir-row').filter({hasText: 'live-usage-rep'})
+    .getByText('Live acceptance representative', { exact: true })).toBeVisible();
 
   const grant = page.getByRole('heading', { name: 'Adjust representative credit', exact: true }).locator('..');
   await grant.getByLabel('Representative ID', { exact: true }).fill('live-usage-rep');
