@@ -208,12 +208,16 @@ func (m *usageObserver) fail(reason string) {
 	if m.status.Failure == "" {
 		m.status.Failure = reason
 	}
-	m.status.Running = false
 	m.mu.Unlock()
 	m.cancel()
-	// Only the captured child, never r.process after a replacement, a PID from
-	// the report, another runtime, an old panel or a systemd service.
+	// The child MUST exit before Running=false becomes observable. Otherwise
+	// concurrent status readers can see a stopped observer while its Xray
+	// listener is still accepting traffic. This is a fail-closed receipt, not
+	// merely a requested termination. Never kill any unrelated process.
 	m.process.stop()
+	m.mu.Lock()
+	m.status.Running = false
+	m.mu.Unlock()
 }
 func (m *usageObserver) pending(n int) {
 	m.mu.Lock()
