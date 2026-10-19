@@ -4,6 +4,7 @@ import { uid, gb } from "./shared";
 import ClientPlanWorkbench from "./ClientPlanWorkbench";
 import ClientListExplorer from "./ClientListExplorer";
 import ClientUsage from "../ClientUsage";
+import ClientProfileEditor from "./ClientProfileEditor";
 export default function Clients({ model }: { model: BusinessModel }) {
   const { t, session, language, actionBusy, refreshKey, reps, clients, clientOps, clientOpsOffset, setClientOpsOffset, clientId, setClientId, clientName, setClientName, clientRep, setClientRep, clientKind, setClientKind, clientDuration, setClientDuration, clientIPs, setClientIPs, clientVolume, setClientVolume, lifeClientID, setLifeClientID, lifeDays, setLifeDays, lifeVolumeGB, setLifeVolumeGB, lifeReason, setLifeReason, lifeAction, setLifeAction, lifeStateReason, setLifeStateReason, createClient, extendExistingClient, changeExistingClientState } = model;
   return <>
@@ -39,6 +40,7 @@ export default function Clients({ model }: { model: BusinessModel }) {
         <p className="business-warning">{t.safeLifecycle}</p>
       </div>
       {lifeClientID && <ClientUsage key={session.user.id + ":" + lifeClientID} clientID={lifeClientID} language={language} refresh={refreshKey} />}
+      {lifeClientID && <ClientProfileEditor key={session.user.id + ":" + lifeClientID} clientID={lifeClientID} model={model}/>}
       <div className="business-form-grid">
         <form className="business-panel" onSubmit={(e) => { void extendExistingClient(e); }}>
           <h3>{t.renew}</h3>
