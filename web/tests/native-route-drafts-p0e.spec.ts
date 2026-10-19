@@ -32,6 +32,23 @@ test("P0-E owner previews and saves bounded Dark Swap draft without runtime Appl
   if(path==="/api/v1/workspace/clients")return route.fulfill({json:{clients:[]}});
   if(path.endsWith("/clients"))return route.fulfill({json:{client_ids:[]}});
   if(path.endsWith("/operations"))return route.fulfill({json:{operations:[]}});
+  if(path==="/api/v1/workspace/native-inbounds/301/route-drafts/de/readiness"&&req.method()==="GET")
+   return route.fulfill({json:{
+    scope:"new_pro_lab_read_only",as_of_utc:new Date().toISOString(),
+    inbound_id:301,node_id:"de",draft_revision:1,swap_enabled:true,
+    plan_consistent:true,
+    target:{node_id:"de",pairing_matched:true,online:true,metrics_current:true,
+      native_runtime_state:"awaiting_report",native_process_ready:false,
+      native_desired_sequence:1,native_reported_sequence:0},
+    upstream:{node_id:"nl",pairing_matched:true,online:false,metrics_current:false,
+      native_runtime_state:"stale",native_process_ready:false,
+      native_desired_sequence:1,native_reported_sequence:0},
+    blockers:["upstream_agent_offline","upstream_metrics_stale","route_stage_receipt_missing",
+      "swap_forwarding_unverified","unique_billing_unverified"],
+    apply_allowed:false,route_signed_ack_verified:false,swap_forwarding_verified:false,
+    customer_data_plane_verified:false,unique_billing_verified:false,
+    automatic_rollback_verified:false,subscription_published:false,
+   }});
   if(path==="/api/v1/workspace/native-inbounds/301/route-drafts/de"&&req.method()==="GET")
    return saved?route.fulfill({json:saved}):route.fulfill({status:404,json:{error:"not_found"}});
   if(path.endsWith("/route-drafts/preview")&&req.method()==="POST"){
@@ -71,6 +88,15 @@ test("P0-E owner previews and saves bounded Dark Swap draft without runtime Appl
  await expect(editor.getByText("Preview valid; runtime Apply is still forbidden.")).toBeVisible();
  await editor.getByRole("button",{name:"Save protected draft"}).click();
  await expect(editor.getByText("Route draft saved; Agent/Xray acceptance still required.")).toBeVisible();
+
+ const readiness=editor.getByRole("region",{name:"Native route readiness"});
+ await expect(readiness.getByText("Route Apply blocked — this is an advisory snapshot only.")).toBeVisible();
+ await expect(readiness.getByText("Destination — de")).toBeVisible();
+ const upstream=readiness.locator(".route-hop-status").filter({hasText:"Upstream — nl"});
+ await expect(upstream.getByText("Agent: offline")).toBeVisible();
+ await readiness.getByText("Blocking conditions (5)").click();
+ await expect(readiness.getByText("Signed route-stage ACK missing")).toBeVisible();
+
  expect(writes).toHaveLength(2);
  expect(writes[0].body).toMatchObject({inbound_id:301,node_id:"de",swap_enabled:true,
   swap_upstream_node_id:"nl",swap_tunnel_host:"nl-tunnel.example.org",
