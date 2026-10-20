@@ -661,6 +661,14 @@ func (s *Store) RouteChannel(ctx context.Context, key []byte, node string) (Rout
 		return RouteChannelView{}, e
 	}
 	defer tx.Rollback()
+	out, e := readRouteChannel(ctx, tx, key, node)
+	if e != nil {
+		return out, e
+	}
+	return out, tx.Commit()
+}
+
+func readRouteChannel(ctx context.Context, tx *sql.Tx, key []byte, node string) (RouteChannelView, error) {
 	out, _, e := routeObservation(ctx, tx, node)
 	if e != nil {
 		return out, e
@@ -691,7 +699,7 @@ func (s *Store) RouteChannel(ctx context.Context, key []byte, node string) (Rout
 		}
 		out.Commands = append(out.Commands, r.view)
 	}
-	return out, tx.Commit()
+	return out, nil
 }
 
 func routeDraftState(ctx context.Context, tx *sql.Tx, node string) (string, error) {

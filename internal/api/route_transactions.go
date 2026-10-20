@@ -31,6 +31,17 @@ func (s *Server) routeScope(node, installation string) bool {
 	return s.routeNode != "" && node == s.routeNode && installation == s.routeInstall && ok && current == installation
 }
 func (s *Server) attachRouteTransactions(mux *http.ServeMux) {
+	mux.HandleFunc("GET /api/v1/workspace/route-transactions", func(w http.ResponseWriter, r *http.Request) {
+		if _, ok := s.authorizeBrowser(w, r, false, true); !ok {
+			return
+		}
+		// Discovery is read-only; it cannot claim a Node or enable an Agent.
+		out := map[string]any{"enabled": false, "scope": "empty_loopback_lab"}
+		if s.routeScope(s.routeNode, s.routeInstall) {
+			out["enabled"], out["node_id"], out["installation_id"] = true, s.routeNode, s.routeInstall
+		}
+		respond(w, http.StatusOK, out)
+	})
 	if s.routeNode == "" {
 		return
 	}
@@ -43,7 +54,7 @@ func (s *Server) attachRouteTransactions(mux *http.ServeMux) {
 			businessError(w, business.ErrConflict)
 			return
 		}
-		state, e := s.business.RouteChannel(r.Context(), s.inboundKey, s.routeNode)
+		state, e := s.business.RouteControlChannel(r.Context(), s.inboundKey, s.routeNode)
 		if e != nil {
 			businessError(w, e)
 			return

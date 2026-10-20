@@ -4,6 +4,7 @@ import InboundLifecycle from "./InboundLifecycle";
 import NativeReadiness, { type NativePreflight } from "./NativeReadiness";
 import NativeCanary from "./NativeCanary";
 import NativeRouteDraftEditor from "./NativeRouteDraftEditor";
+import NativeRouteTransactions from "./NativeRouteTransactions";
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { ArrowRightLeft, CheckCircle2, KeyRound, RefreshCw, Server, ShieldCheck, Users, Waypoints } from "lucide-react";
 
@@ -166,6 +167,7 @@ export default function NativeInbounds({ language, fallback }: { language: Lang;
       nodes={data.nodes} targets={data.targets} language={language}
       csrf={session.csrf_token ?? ""} blocked={busy || stale || current.archived}/>
    </>}
+   <NativeRouteTransactions language={language}/>
    <div className="native-card"><h3><ArrowRightLeft size={19}/>{t.status}</h3><p>{t.evidence}</p>
     <div className="native-report-list">{data.runtime.map(s => <article key={s.node_id + s.installation_id} className="native-report">
      <h4>{data.nodes.find(n => n.node_id === s.node_id)?.name ?? s.node_id}</h4><strong className={matching(s) ? "native-confirmed" : "native-pending"}>{statusLabel(s)}</strong>

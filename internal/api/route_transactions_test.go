@@ -85,6 +85,13 @@ func TestRouteQueueAPIAuthenticatesOwnerAndAgentWithoutPrivateLeak(t *testing.T)
 		t.Fatal("valid poll", w.Code, w.Body.String())
 	}
 	cookie, csrf := browserLogin(t, s, ownerUsername, ownerPassword)
+	discovery := "/api/v1/workspace/route-transactions"
+	if w := browserRequest(t, s.Handler(), "GET", discovery, nil, nil, "", ""); w.Code != 401 {
+		t.Fatal("anonymous discovery", w.Code)
+	}
+	if w := browserRequest(t, s.Handler(), "GET", discovery, nil, cookie, "", ""); w.Code != 200 || !strings.Contains(w.Body.String(), `"enabled":true`) || !strings.Contains(w.Body.String(), `"node_id":"route-qa"`) {
+		t.Fatal("owner scope discovery", w.Code, w.Body.String())
+	}
 	base := "/api/v1/workspace/native-nodes/route-qa/route-transactions"
 	input := routeOwnerRequest(p.Status, 1, "stage", "", 1)
 	if w := browserRequest(t, s.Handler(), "POST", base, input, nil, csrf, "https://"+browserHost); w.Code != 401 {
@@ -102,6 +109,10 @@ func TestRouteQueueAPIAuthenticatesOwnerAndAgentWithoutPrivateLeak(t *testing.T)
 	w := browserRequest(t, s.Handler(), "GET", base, nil, cookie, "", "")
 	if w.Code != 200 {
 		t.Fatal(w.Code)
+	}
+	var control business.RouteControlView
+	if e := json.Unmarshal(w.Body.Bytes(), &control); e != nil || control.ServerTimeMillis == 0 || len(control.Review) != 1 || control.Review[0].DirectPort != 27612 || control.Controls.Stage {
+		t.Fatal("invalid browser review or pending command enabled", e)
 	}
 	for _, secret := range []string{"privateKey", "config_base64", "payload_enc"} {
 		if strings.Contains(w.Body.String(), secret) {
@@ -125,6 +136,9 @@ func TestRouteQueueAPIAuthenticatesOwnerAndAgentWithoutPrivateLeak(t *testing.T)
 		t.Fatal(e)
 	}
 	rep, repCSRF := browserLogin(t, s, "route-representative", "route-password-123456")
+	if w := browserRequest(t, s.Handler(), "GET", discovery, nil, rep, "", ""); w.Code != 403 {
+		t.Fatal("representative discovered owner executor scope", w.Code)
+	}
 	if w := browserRequest(t, s.Handler(), "GET", base, nil, rep, "", ""); w.Code != 403 {
 		t.Fatal("representative read command queue", w.Code)
 	}
@@ -140,5 +154,22 @@ func TestRouteQueueAPIAuthenticatesOwnerAndAgentWithoutPrivateLeak(t *testing.T)
 	state, e := s.business.RouteChannel(context.Background(), key, "route-qa")
 	if e != nil || state.Commands[0].State != "abandoned_unknown" {
 		t.Fatal(e)
+	}
+}
+
+func TestRouteQueueDiscoveryCannotEnableOrClaimNode(t *testing.T) {
+	s := enabledOwner(t)
+	cookie, csrf := browserLogin(t, s, ownerUsername, ownerPassword)
+	path := "/api/v1/workspace/route-transactions"
+	w := browserRequest(t, s.Handler(), "GET", path, nil, cookie, "", "")
+	if w.Code != 200 || !strings.Contains(w.Body.String(), `"enabled":false`) || strings.Contains(w.Body.String(), `"node_id"`) {
+		t.Fatal("disabled discovery", w.Code, w.Body.String())
+	}
+	w = browserRequest(t, s.Handler(), "POST", path, map[string]any{"enabled": true, "node_id": "usa-pro-01"}, cookie, csrf, "https://"+browserHost)
+	if w.Code < 400 || s.routeNode != "" || s.routeInstall != "" {
+		t.Fatal("browser enabled executor", w.Code)
+	}
+	if w = browserRequest(t, s.AgentHandler(), "GET", path, nil, cookie, "", ""); w.Code == 200 {
+		t.Fatal("Agent exposed owner discovery")
 	}
 }
