@@ -35,7 +35,7 @@ func SignTransactionPoll(key []byte, p TransactionPoll) TransactionPoll {
 }
 func VerifyTransactionPoll(key []byte, p TransactionPoll) bool {
 	want := SignTransactionPoll(key, p)
-	return len(key) >= 32 && transactionNode.MatchString(p.NodeID) && transactionID.MatchString(p.InstallationID) && transactionHash.MatchString(p.BinarySHA) && transactionID.MatchString(p.Status.Instance) && p.Status.Serial <= maxTransactionSerial && p.At > 0 && (p.Status.StagedID == "" || transactionID.MatchString(p.Status.StagedID)) && (p.Status.InterruptedCommandSHA == "" || transactionHash.MatchString(p.Status.InterruptedCommandSHA)) && transactionHash.MatchString(p.Signature) && hmac.Equal([]byte(want.Signature), []byte(p.Signature))
+	return len(key) >= 32 && transactionNode.MatchString(p.NodeID) && transactionID.MatchString(p.InstallationID) && transactionHash.MatchString(p.BinarySHA) && transactionID.MatchString(p.Status.Instance) && p.Status.Serial <= maxTransactionSerial && p.At > 0 && (p.Status.CurrentStageID == "" || transactionID.MatchString(p.Status.CurrentStageID)) && (p.Status.PreviousStageID == "" || transactionID.MatchString(p.Status.PreviousStageID)) && (p.Status.StagedID == "" || transactionID.MatchString(p.Status.StagedID)) && (p.Status.InterruptedCommandSHA == "" || transactionHash.MatchString(p.Status.InterruptedCommandSHA)) && transactionHash.MatchString(p.Signature) && hmac.Equal([]byte(want.Signature), []byte(p.Signature))
 }
 
 // Only the authenticated TLS Agent endpoint may carry these private bytes.

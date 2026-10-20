@@ -466,14 +466,14 @@ func (s *Store) QueueRouteCommand(ctx context.Context, key []byte, node string, 
 			cmd.Expires = stage.payload.Command.Expires
 		}
 		if in.Action == "renew" {
-			if !channel.Status.Observed.ProcessReady || channel.Status.Observed.ActiveSHA != candidate.SHA256 {
+			if channel.Status.CurrentStageID != in.StageID || !channel.Status.Observed.ProcessReady || channel.Status.Observed.ActiveSHA != candidate.SHA256 {
 				return empty, ErrConflict
 			}
 			cmd.RuntimeSequence = channel.Status.Observed.ActiveSequence
 		}
 		if in.Action == "rollback" {
 			o := channel.Status.Observed
-			if candidate.SHA256 != o.PreviousSHA && (o.ProcessReady || candidate.SHA256 != o.SavedSHA) {
+			if in.StageID != channel.Status.PreviousStageID && (o.ProcessReady || in.StageID != channel.Status.CurrentStageID || candidate.SHA256 != o.SavedSHA) {
 				return empty, ErrConflict
 			}
 		}

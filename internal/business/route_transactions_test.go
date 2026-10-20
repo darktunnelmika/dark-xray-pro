@@ -342,3 +342,47 @@ func TestRouteQueueReceiptCommitFailureKeepsExactPendingCommand(t *testing.T) {
 		t.Fatal(e)
 	}
 }
+
+func TestRouteQueueInterruptedRecoveryUsesTransactionStageIdentity(t *testing.T) {
+	s, _, p := routeQueueFixture(t)
+	ctx := context.Background()
+	// A is the last acknowledged Stage. After a later ambiguous Apply and
+	// explicit restaging, the supervisor's previous SHA may differ from the
+	// transaction journal's last acknowledged rollback Stage.
+	req := routeRequest(p, 41, "stage", "")
+	if _, e := s.QueueRouteCommand(ctx, routeTestKey, p.NodeID, req); e != nil {
+		t.Fatal(e)
+	}
+	d := routePoll(t, s, &p, true)
+	routeStageAck(t, s, &p, d)
+	p.Status.Serial = 3
+	p.Status.Observed = mx.Snapshot{Phase: "awaiting_fresh_lease", Highwater: 2, SavedSequence: 2, SavedSHA: strings.Repeat("b", 64)}
+	p.Status.CurrentStageID = req.ID
+	p.Status.InterruptedCommandSHA = strings.Repeat("d", 64)
+	p.Status.Instance = strings.Repeat("4", 32)
+	routePoll(t, s, &p, false)
+	recover := routeRequest(p, 42, "stage", "")
+	if _, e := s.QueueRouteCommand(ctx, routeTestKey, p.NodeID, recover); e != nil {
+		t.Fatal(e)
+	}
+	recovery := routePoll(t, s, &p, true)
+	if recovery.Command.InterruptedCommandSHA != p.Status.InterruptedCommandSHA || recovery.Command.RuntimeInstance != p.Status.Instance || recovery.Command.Serial != 4 || recovery.Command.RuntimeSequence != 3 {
+		t.Fatal("recovery lost exact interrupted intent/instance binding")
+	}
+	routeStageAck(t, s, &p, recovery)
+	p.Status.InterruptedCommandSHA = ""
+	p.Status.StagedID = ""
+	p.Status.CurrentStageID = recover.ID
+	p.Status.PreviousStageID = req.ID
+	p.Status.Serial = 5
+	p.Status.Observed = mx.Snapshot{Phase: "ready", Highwater: 3, SavedSequence: 3, SavedSHA: strings.Repeat("b", 64), ActiveSequence: 3, ActiveSHA: strings.Repeat("b", 64), PreviousSHA: strings.Repeat("c", 64), ProcessReady: true, LeaseExpires: time.Now().Add(20 * time.Second).UnixNano()}
+	routePoll(t, s, &p, false)
+	rollback := routeRequest(p, 43, "rollback", req.ID)
+	if _, e := s.QueueRouteCommand(ctx, routeTestKey, p.NodeID, rollback); e != nil {
+		t.Fatal("last acknowledged transaction Stage incorrectly replaced with supervisor SHA", e)
+	}
+	rb := routePoll(t, s, &p, true)
+	if rb.Command.StageID != req.ID || rb.Command.RuntimeSequence != 4 || rb.Command.Lease.ConfigSHA != d.Candidate.SHA256 {
+		t.Fatal("wrong explicit rollback authority")
+	}
+}

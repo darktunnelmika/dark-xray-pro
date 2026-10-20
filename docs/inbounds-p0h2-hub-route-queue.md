@@ -20,6 +20,9 @@ generation and all current draft revisions. Delivery, Apply and renewal recheck
 this snapshot. Rollback explicitly selects an earlier acknowledged Stage while
 binding a new command to the owner's current reviewed runtime and source state.
 It never silently changes Native targets, draft acceptance flags or billing.
+Current/previous transaction Stage IDs are observed separately from the core
+supervisor's SHA history, including after an interrupted Apply and explicit
+restaging; rollback authority follows the acknowledged transaction Stage.
 
 Each Node has at most one pending command. Agent polling carries a signed fresh
 observation over the existing certificate-pinned TLS 1.3 transport. The first

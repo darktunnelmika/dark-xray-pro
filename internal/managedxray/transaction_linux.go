@@ -49,6 +49,8 @@ type TransactionRuntime struct {
 }
 
 type TransactionStatus struct {
+	CurrentStageID        string   `json:"current_stage_id,omitempty"`
+	PreviousStageID       string   `json:"previous_stage_id,omitempty"`
 	Instance              string   `json:"instance"`
 	Serial                uint64   `json:"serial"`
 	StagedID              string   `json:"staged_id,omitempty"`
@@ -92,6 +94,12 @@ func (t *TransactionRuntime) Status() TransactionStatus {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	out := TransactionStatus{Instance: t.instance, Serial: t.state.Serial, Observed: t.runtime.Snapshot()}
+	if t.state.Current != nil {
+		out.CurrentStageID = t.state.Current.ID
+	}
+	if t.state.Previous != nil {
+		out.PreviousStageID = t.state.Previous.ID
+	}
 	if t.state.Staged != nil {
 		out.StagedID = t.state.Staged.ID
 	}
