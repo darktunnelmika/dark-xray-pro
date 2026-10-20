@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { Check, ClipboardCopy, Download, KeyRound, Link2, RefreshCw, ShieldCheck, ShieldPlus, Terminal, XCircle } from "lucide-react";
 import { api, mutation, ApiError, useSession, type Language } from "./session";
 import "./NodeManager.css";
+import NodeNameEditor from "./NodeNameEditor";
 
 type Registration = {
   node_id: string;
@@ -284,6 +285,7 @@ export default function NodeManager({ language }: { language: Language }) {
             <span className={"pro-node-roster-status " + (node.status === "online" ? "is-online" : "is-offline")}>
               {node.status === "online" ? t.online : t.offline}{node.status === "online" && !node.metrics_current ? " · "+t.delayed : ""}
             </span>
+            <NodeNameEditor key={session?.user.id + ":" + node.node_id} nodeID={node.node_id} language={language} onSaved={() => { void load().catch(() => setRosterFailed(true)); }} />
           </div>
         ))}
       </div>

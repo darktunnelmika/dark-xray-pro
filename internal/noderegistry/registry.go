@@ -61,8 +61,8 @@ type invitation struct {
 }
 
 type binding struct {
-	Info       NodeInfo `json:"info"`
-	TokenHash  string   `json:"token_hash"`
+	Info      NodeInfo `json:"info"`
+	TokenHash string   `json:"token_hash"`
 }
 
 type receipt struct {
@@ -72,10 +72,11 @@ type receipt struct {
 }
 
 type diskState struct {
-	Version  int                   `json:"version"`
-	Invites  map[string]invitation `json:"invites"`
-	Bindings map[string]binding    `json:"bindings"`
-	Receipts map[string]receipt    `json:"receipts"`
+	Version  int                    `json:"version"`
+	Invites  map[string]invitation  `json:"invites"`
+	Bindings map[string]binding     `json:"bindings"`
+	Receipts map[string]receipt     `json:"receipts"`
+	Renames  map[string]NameReceipt `json:"renames,omitempty"`
 }
 
 type Registry struct {
@@ -87,15 +88,16 @@ type Registry struct {
 
 func empty() diskState {
 	return diskState{
-		Version: 1,
-		Invites: map[string]invitation{},
+		Version:  1,
+		Invites:  map[string]invitation{},
 		Bindings: map[string]binding{},
 		Receipts: map[string]receipt{},
+		Renames:  map[string]NameReceipt{},
 	}
 }
 
 func validName(s string) bool {
-	if strings.TrimSpace(s) == "" || utf8.RuneCountInString(s) > 80 {
+	if !utf8.ValidString(s) || strings.TrimSpace(s) == "" || utf8.RuneCountInString(s) > 80 {
 		return false
 	}
 	for _, r := range s {
@@ -129,6 +131,9 @@ func clone(s diskState) diskState {
 	}
 	for k, v := range s.Receipts {
 		d.Receipts[k] = v
+	}
+	for k, v := range s.Renames {
+		d.Renames[k] = v
 	}
 	return d
 }
@@ -192,6 +197,9 @@ func Open(path string, clock func() time.Time) (*Registry, error) {
 			return nil, ErrUnsafeState
 		}
 	}
+	if err := validateRenames(state); err != nil {
+		return nil, err
+	}
 	r.state = state
 	return r, nil
 }
@@ -231,6 +239,10 @@ func (r *Registry) saveLocked(next diskState) error {
 	if err := os.Rename(tmp, r.path); err != nil {
 		return err
 	}
+	// The rename has committed, even if directory sync subsequently fails.
+	// Keep memory consistent with the visible file so a retry cannot overwrite
+	// a committed receipt from a stale in-memory state.
+	r.state = next
 	d, err := os.Open(dir)
 	if err != nil {
 		return err
@@ -239,7 +251,6 @@ func (r *Registry) saveLocked(next diskState) error {
 	if err := d.Sync(); err != nil {
 		return fmt.Errorf("registry persisted but directory sync failed: %w", err)
 	}
-	r.state = next
 	return nil
 }
 

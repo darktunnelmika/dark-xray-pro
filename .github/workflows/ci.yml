@@ -137,6 +137,8 @@ jobs:
           test ! -e backend/dark_policy.py || { echo "Legacy HUB files must not be imported into PRO"; exit 1; }
       - name: Go unit/race tests
         run: go test -race ./...
+      - name: Repeat node name receipt and concurrency contracts
+        run: go test -race ./internal/noderegistry ./internal/api -run 'TestRename|TestOwnerNodeRename' -count=5 -timeout=120s -v
       - name: Repeat observer stop receipt race regression
         shell: bash
         run: |
