@@ -4,6 +4,54 @@ const pairCode = "c".repeat(64);
 const owner = { id: "owner", username: "new-pro-owner", role: "owner", representative_id: "owner" };
 const representative = { id: "rep-01", username: "rep-01", role: "representative", representative_id: "rep-01" };
 
+const dependencyKeys = "inbound_targets active_inbound_targets assigned_clients route_drafts draft_events swap_upstream_references config_revisions runtime_deliveries runtime_reports route_channels route_commands pending_route_commands unknown_route_commands metered_channels metered_commands pending_metered_commands unknown_metered_commands metered_births foreign_installation_rows usage_epochs open_usage_epochs uncertain_usage_epochs sealed_usage_epochs usage_holds usage_receipts usage_deltas foreign_usage_epochs replacement_operations noncancelled_replacements".split(" ");
+async function setupDependencies(page:Page, mode="normal") {
+  await setupNames(page);
+  let reads=0;
+  await page.route("**/api/v1/**",async route=>{
+    if(!new URL(route.request().url()).pathname.endsWith("/lab-name/dependencies"))return route.fallback();
+    expect(route.request().method()).toBe("GET");reads++;
+    if(mode==="normal"&&reads>1)return route.fulfill({status:503,json:{error:"node_dependencies_unavailable"}});
+    const counts:Record<string,number|null>=Object.fromEntries(dependencyKeys.map(k=>[k,0]));
+    counts.inbound_targets=2;counts.swap_upstream_references=1;counts.usage_epochs=null;
+    const body={node_id:"lab-name",installation_id:"a".repeat(32),observed_at:"2026-10-20T12:00:00Z",coverage:"native_sqlite_and_replacement_journal_only",atomic_across_stores:false,can_retire:false,can_replace:false,lifecycle_blocker:"atomic_node_lifecycle_not_implemented",counts,unknown_reasons:mode==="missing-reason"?{}:{usage_epochs:"usage_ledger_disabled"}};
+    if(mode==="wrong-node")body.node_id="other-node";
+    if(mode==="unsafe")body.can_retire=true;
+    return route.fulfill({json:body});
+  });
+  return {reads:()=>reads};
+}
+
+test("dependency inspection is on demand and failed refresh removes old counts",async({page})=>{
+  const probe=await setupDependencies(page);await page.goto("/nodes");await login(page);
+  await expect(page.getByRole("button",{name:"Inspect node dependencies"})).toBeVisible();expect(probe.reads()).toBe(0);
+  await page.getByRole("button",{name:"Inspect node dependencies"}).click();
+  await expect(page.locator('[data-dependency="inbound_targets"] dd')).toHaveText("2");
+  await expect(page.locator('[data-dependency="usage_epochs"] dd')).toContainText("Unknown");
+  await expect(page.getByText(/Empty counts do NOT authorize deletion/)).toBeVisible();
+  await page.getByRole("button",{name:"Refresh dependencies"}).click();
+  await expect(page.getByText(/Counts are unavailable, not zero/)).toBeVisible();
+  await expect(page.locator("[data-dependency]")).toHaveCount(0);expect(probe.reads()).toBe(2);
+});
+
+test("dependency snapshot fits 320px Persian with explicit unknown accounting",async({page})=>{
+  await setupDependencies(page);await page.setViewportSize({width:320,height:760});await page.goto("/nodes");await login(page);
+  await page.getByRole("button",{name:"Switch language"}).click();
+  await page.getByRole("button",{name:"بررسی وابستگی‌های نود"}).click();
+  await expect(page.locator('[data-dependency="usage_epochs"] dd')).toContainText("نامعلوم");
+  await expect(page.locator('[data-dependency="swap_upstream_references"] dd')).toHaveText("۱");
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+2)).toBe(true);
+});
+
+for(const mode of ["wrong-node","unsafe","missing-reason"]){
+  test("dependency inspector rejects "+mode+" evidence",async({page})=>{
+    await setupDependencies(page,mode);await page.goto("/nodes");await login(page);
+    await page.getByRole("button",{name:"Inspect node dependencies"}).click();
+    await expect(page.getByText(/Counts are unavailable, not zero/)).toBeVisible();
+    await expect(page.locator("[data-dependency]")).toHaveCount(0);
+  });
+}
+
 async function setupNames(page: Page, mode: "lost" | "conflict" | "read-error" = "lost") {
   await setup(page);
   let name = "Original";
