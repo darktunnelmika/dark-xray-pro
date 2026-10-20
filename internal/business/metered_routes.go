@@ -51,12 +51,13 @@ type MeteredRouteChannelView struct {
 	Commands         []MeteredRouteCommandView `json:"commands"`
 }
 type meteredRoutePayload struct {
-	Request      MeteredRouteCommandRequest `json:"request"`
-	DraftState   string                     `json:"draft_state"`
-	Generation   uint64                     `json:"generation"`
-	Command      mx.TransactionCommand      `json:"command"`
-	Candidate    xrayconfig.Candidate       `json:"candidate"`
-	ConfigBase64 string                     `json:"config_base64"`
+	DependencyNodes []string                   `json:"dependency_nodes,omitempty"`
+	Request         MeteredRouteCommandRequest `json:"request"`
+	DraftState      string                     `json:"draft_state"`
+	Generation      uint64                     `json:"generation"`
+	Command         mx.TransactionCommand      `json:"command"`
+	Candidate       xrayconfig.Candidate       `json:"candidate"`
+	ConfigBase64    string                     `json:"config_base64"`
 }
 type meteredRouteRow struct {
 	view        MeteredRouteCommandView
@@ -456,6 +457,9 @@ func (s *Store) QueueMeteredRouteCommand(ctx context.Context, key []byte, node s
 			return empty, e
 		}
 		cmd.StageID = cmd.ID
+		// meteredRouteCandidate rejects SwapEnabled, so the authenticated
+		// dependency map currently contains the destination node only.
+		payload.DependencyNodes = []string{node}
 		cmd.RuntimeSequence = in.Expected.Highwater + 1
 		cmd.InterruptedCommandSHA = channel.Status.InterruptedCommandSHA
 	case "apply", "rollback", "renew":
@@ -476,6 +480,7 @@ func (s *Store) QueueMeteredRouteCommand(ctx context.Context, key []byte, node s
 		candidate = stage.payload.Candidate
 		candidate.Config = raw
 		payload.Request.Drafts = stage.payload.Request.Drafts
+		payload.DependencyNodes = append([]string(nil), stage.payload.DependencyNodes...)
 		if in.Action == "rollback" || in.Action == "renew" {
 			payload.Request.Drafts, e = meteredRouteRefs(ctx, tx, node, channel.InstallationID)
 			if e != nil {

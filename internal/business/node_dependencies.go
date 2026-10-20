@@ -139,6 +139,7 @@ func (s *Store) InspectNodeDependencies(ctx context.Context, key []byte, node, i
 			out.Counts["swap_upstream_references"] = &n
 		}
 	}
+	inspectCommandDependencies(ctx, tx, key, node, &out)
 	if err := tx.Commit(); err != nil {
 		return NodeDependencies{}, err
 	}
