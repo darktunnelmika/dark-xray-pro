@@ -39,6 +39,7 @@ func(s *Server)attachNativeInbounds(mux *http.ServeMux){
  mux.HandleFunc("GET /api/v1/agent/native-runtime",func(w http.ResponseWriter,r *http.Request){
   if r.TLS==nil||r.TLS.Version<tls.VersionTLS13{respond(w,426,map[string]string{"error":"tls13_required"});return};node,installation:=r.URL.Query().Get("node_id"),r.URL.Query().Get("installation_id");token:=bearer(r)
   if _,ok:=s.registry.Authenticate(node,installation,token);!ok{respond(w,401,map[string]string{"error":"unauthorized"});return}
+  if owned,e:=s.business.RouteChannelOwned(r.Context(),node);e!=nil||owned{businessError(w,business.ErrConflict);return}
   if s.business.UsageLedger()!=nil{respond(w,503,map[string]string{"error":"metered_runtime_admission_pending"});return}
   cfg,err:=s.business.BuildNodeConfig(r.Context(),s.inboundKey,node,installation);if errors.Is(err,business.ErrNotFound){w.WriteHeader(204);return};if err!=nil{businessError(w,err);return}
   lease,err:=managedxray.SignLease([]byte(token),managedxray.Lease{NodeID:node,InstallationID:installation,Sequence:cfg.Sequence,ConfigSHA:cfg.ConfigSHA,ManifestSHA:cfg.ManifestSHA,Issued:time.Now().UnixNano(),Expires:cfg.LeaseNotAfter});if err!=nil{businessError(w,business.ErrUnavailable);return}

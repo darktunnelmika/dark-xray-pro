@@ -44,6 +44,7 @@ func Condition(s Snapshot) RuntimeCondition {
 // PayloadSHA authenticates all candidate metadata as well as private bytes.
 type TransactionCommand struct {
 	Version               int              `json:"version"`
+	RuntimeInstance       string           `json:"runtime_instance,omitempty"`
 	ID                    string           `json:"id"`
 	Serial                uint64           `json:"serial"`
 	Action                string           `json:"action"`
@@ -85,7 +86,7 @@ func TransactionPayloadSHA(c xrayconfig.Candidate) string {
 }
 
 func validTransactionCommand(c TransactionCommand) bool {
-	if c.Version != 1 || !transactionID.MatchString(c.ID) || !transactionID.MatchString(c.StageID) ||
+	if (c.RuntimeInstance != "" && !transactionID.MatchString(c.RuntimeInstance)) || c.Version != 1 || !transactionID.MatchString(c.ID) || !transactionID.MatchString(c.StageID) ||
 		!transactionNode.MatchString(c.NodeID) || !transactionID.MatchString(c.InstallationID) ||
 		c.Serial == 0 || c.Serial > maxTransactionSerial || c.RuntimeSequence == 0 || c.RuntimeSequence > maxTransactionSerial ||
 		!transactionHash.MatchString(c.PayloadSHA) || !transactionHash.MatchString(c.BinarySHA) ||
@@ -148,23 +149,23 @@ func signTransactionReceipt(key []byte, r TransactionReceipt) TransactionReceipt
 func VerifyTransactionReceipt(key []byte, c TransactionCommand, r TransactionReceipt) bool {
 	if !validTransactionSignature(key, c) || r.Version != 1 || r.CommandID != c.ID || r.CommandSHA != hashJSON(c) ||
 		r.Serial != c.Serial || r.Action != c.Action || r.StageID != c.StageID || r.NodeID != c.NodeID ||
-		r.InstallationID != c.InstallationID || !transactionID.MatchString(r.RuntimeInstance) || r.ObservedAt <= 0 ||
+		r.InstallationID != c.InstallationID || !transactionID.MatchString(r.RuntimeInstance) || (c.RuntimeInstance != "" && c.RuntimeInstance != r.RuntimeInstance) || r.ObservedAt <= 0 ||
 		r.Observed.DataPlaneVerified || r.Observed.SubscriptionPublished || r.Observed.Usage != nil ||
 		!transactionHash.MatchString(r.Signature) {
 		return false
 	}
 	switch r.Outcome {
 	case "staged":
-		if c.Action != "stage" {
+		if c.Action != "stage" || Condition(r.Observed) != c.Expected {
 			return false
 		}
 	case "applied", "rolled_back", "renewed":
 		want := map[string]string{"applied": "apply", "rolled_back": "rollback", "renewed": "renew"}[r.Outcome]
-		if c.Action != want || !r.Observed.ProcessReady || r.Observed.ActiveSequence != c.RuntimeSequence || r.Observed.ActiveSHA != c.Lease.ConfigSHA {
+		if c.Action != want || !r.Observed.ProcessReady || r.Observed.ActiveSequence != c.RuntimeSequence || r.Observed.ActiveSHA != c.Lease.ConfigSHA || r.Observed.LeaseExpires != c.Lease.Expires {
 			return false
 		}
 	case "failed_stopped", "failed_previous_retained":
-		if c.Action == "stage" {
+		if c.Action == "stage" || (r.Outcome == "failed_stopped" && r.Observed.ProcessReady) || (r.Outcome == "failed_previous_retained" && !r.Observed.ProcessReady) {
 			return false
 		}
 	default:

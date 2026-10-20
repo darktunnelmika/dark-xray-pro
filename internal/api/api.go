@@ -21,6 +21,8 @@ import (
 )
 
 type Server struct {
+	routeNode          string
+	routeInstall       string
 	fleet              *telemetry.Store
 	registry           *noderegistry.Registry
 	ownerKey           string
@@ -124,6 +126,7 @@ func (s *Server) Handler() http.Handler {
 	s.attachNativeInbounds(mux)
 	s.attachNativeRouteDrafts(mux)
 	s.attachRouteReadinessP0G(mux)
+	s.attachRouteTransactions(mux)
 	s.attachOwnerNativeCanary(mux)
 	s.attachRuntimeReports(mux)
 	s.attachInboundLifecycle(mux)
@@ -145,6 +148,10 @@ func (s *Server) AgentHandler() http.Handler {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		if r.TLS == nil || r.TLS.Version < tls.VersionTLS13 {
 			respond(w, http.StatusUpgradeRequired, map[string]string{"error": "tls13_required"})
+			return
+		}
+		if r.Method == http.MethodPost && (r.URL.Path == "/api/v1/agent/route-transactions/poll" || r.URL.Path == "/api/v1/agent/route-transactions/receipt") {
+			s.handleRouteTransactionAgent(w, r)
 			return
 		}
 		if r.URL.Path == "/api/v1/agent/native-usage" || r.URL.Path == "/api/v1/agent/native-usage/interrupted" {

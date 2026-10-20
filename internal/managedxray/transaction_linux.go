@@ -149,6 +149,9 @@ func (t *TransactionRuntime) Execute(ctx context.Context, c TransactionCommand, 
 		}
 		return *t.state.LastReceipt, nil
 	}
+	if c.RuntimeInstance != "" && c.RuntimeInstance != t.instance {
+		return TransactionReceipt{}, ErrTransaction
+	}
 	now := time.Now().UnixNano()
 	if c.Serial <= t.state.Serial || c.Issued > now+int64(time.Second) || c.Expires <= now {
 		return TransactionReceipt{}, ErrTransaction

@@ -51,6 +51,8 @@ jobs:
           set -euo pipefail
           test "$(id -u)" -ne 0
           go test -race ./internal/managedxray -run '^TestRouteTransactions' -count=3 -timeout=120s -v
+      - name: Repeat durable HUB queue and owner/Agent API boundaries under Race
+        run: go test -race ./internal/business ./internal/api -run '^TestRouteQueue' -count=3 -timeout=120s -v
       - name: Go vet
         run: go vet ./...
       - name: Compile HUB and Node Agent
@@ -162,6 +164,21 @@ jobs:
         env:
           DARK_PRO_LAB_MODE: "1"
         run: go test ./internal/managedxray -run '^TestRealPinned' -v -count=1
+      - name: Prove HUB queue and pinned Agent lost-ACK recovery on real Xray
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(id -u)" -ne 0
+          go test -race ./internal/api -run '^TestRealPinnedRouteQueueAgentLostACKAndRollback$' -count=1 -json -timeout=120s > "$RUNNER_TEMP/route-queue.jsonl" || { cat "$RUNNER_TEMP/route-queue.jsonl"; exit 1; }
+          python3 - "$RUNNER_TEMP/route-queue.jsonl" <<'PYQUEUE'
+          import json,sys
+          events=[json.loads(line) for line in open(sys.argv[1])]
+          name='TestRealPinnedRouteQueueAgentLostACKAndRollback'
+          assert sum(e.get('Test')==name and e.get('Action')=='pass' for e in events)==1
+          assert not any(e.get('Test')==name and e.get('Action') in ('skip','fail') for e in events)
+          for e in events:
+              if e.get('Output'): print(e['Output'],end='')
+          PYQUEUE
       - name: Prove staged transactions with real REALITY traffic and rollback under Race
         shell: bash
         run: |

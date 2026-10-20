@@ -26,6 +26,9 @@ func (s *Server) EnableRemoteMeteredNode(node string) error {
 	if _, ok := s.nativeNode(node); !ok {
 		return errors.New("explicitly selected new PRO Node must be paired first")
 	}
+	if owned, e := s.business.RouteChannelOwned(context.Background(), node); e != nil || owned {
+		return business.ErrConflict
+	}
 	s.meteredNode = node
 	return nil
 }
@@ -33,6 +36,9 @@ func (s *Server) meteredCandidate(ctx context.Context, node, installation string
 	var result business.NodeConfig
 	if node != s.meteredNode || node == "" || s.business == nil || s.business.UsageLedger() == nil || len(s.inboundKey) != 32 {
 		return result, business.ErrUnavailable
+	}
+	if owned, e := s.business.RouteChannelOwned(ctx, node); e != nil || owned {
+		return result, business.ErrConflict
 	}
 	cfg, err := s.business.BuildNodeConfig(ctx, s.inboundKey, node, installation)
 	if err != nil {
