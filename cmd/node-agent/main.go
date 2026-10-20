@@ -213,10 +213,26 @@ func main() {
 		return
 	}
 	var nativeRuntime *managedxray.Runtime
+	var transactionRuntime *managedxray.TransactionRuntime
+	routeEnabled := os.Getenv("DARK_PRO_ENABLE_ROUTE_TRANSACTIONS") == "1"
 	var usageSender *uc.Sender
 	remoteMetered := os.Getenv("DARK_PRO_ENABLE_NATIVE_METERED_ADMISSION") == "1"
 	if remoteMetered && (os.Getenv("DARK_PRO_ENABLE_NATIVE_RUNTIME") != "1" || !remote) {
 		log.Fatal("metered admission needs explicit native runtime and pinned remote TLS")
+	}
+	if routeEnabled {
+		if !remote || !identity.Paired || remoteMetered || os.Getenv("DARK_PRO_ENABLE_NATIVE_RUNTIME") == "1" || *stageXrayBinary == "" || len(*stageXraySHA) != 64 || *runtimeDir == "" {
+			log.Fatal("route executor requires exclusive loopback runtime, pinned TLS/core and paired installation")
+		}
+		stateKey, keyErr := hex.DecodeString(os.Getenv("DARK_PRO_NATIVE_RUNTIME_KEY_HEX"))
+		if keyErr != nil || len(stateKey) != 32 {
+			log.Fatal("route executor requires independent private state key")
+		}
+		transactionRuntime, err = managedxray.OpenTransactions(managedxray.Options{Directory: *runtimeDir, StateKey: stateKey, LeaseKey: []byte(identity.AgentToken), NodeID: *nodeID, InstallationID: identity.InstallationID, ListenIP: *runtimeIP, Binary: *stageXrayBinary, BinarySHA: *stageXraySHA, ReservedPorts: []uint16{2087, 8443, 24443}})
+		if err != nil {
+			log.Fatal("route executor refused private loopback state: ", err)
+		}
+		defer transactionRuntime.Close()
 	}
 	if os.Getenv("DARK_PRO_ENABLE_NATIVE_RUNTIME") == "1" {
 		if !remote || !identity.Paired || *stageXrayBinary == "" || len(*stageXraySHA) != 64 || *runtimeDir == "" {
@@ -239,7 +255,7 @@ func main() {
 			log.Fatal("private usage recovery transport refused")
 		}
 		defer usageSender.Close()
-	} else if *runtimeDir != "" || *runtimeIP != "" {
+	} else if !routeEnabled && (*runtimeDir != "" || *runtimeIP != "") {
 		log.Fatal("native runtime flags supplied without explicit opt-in")
 	}
 	// Liveness is independent of resource sampling, staging and runtime Apply.
@@ -263,6 +279,30 @@ func main() {
 			}
 		}
 	}()
+	if transactionRuntime != nil {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			ticker := time.NewTicker(3 * time.Second)
+			defer ticker.Stop()
+			for {
+				if ctx.Err() != nil {
+					return
+				}
+				attempt, cancel := context.WithTimeout(ctx, 20*time.Second)
+				err := transactionRuntime.SyncTransaction(attempt, client, endpoint)
+				cancel()
+				if err != nil && ctx.Err() == nil {
+					log.Printf("route command/receipt pending; short lease and exact replay retained")
+				}
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+				}
+			}
+		}()
+	}
 	if nativeRuntime != nil {
 		workers.Add(1)
 		go func() {
@@ -357,7 +397,9 @@ func main() {
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 	var metricSeq uint64
-	if nativeRuntime == nil {
+	if transactionRuntime != nil {
+		log.Printf("NEW loopback route executor enabled for %s; customer bindings and subscriptions disabled", *nodeID)
+	} else if nativeRuntime == nil {
 		log.Printf("DARK PRO LAB-only telemetry for %s; native runtime disabled", *nodeID)
 	} else {
 		log.Printf("DARK PRO native runtime explicitly enabled for NEW paired node %s; no subscription publication", *nodeID)

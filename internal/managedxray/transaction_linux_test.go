@@ -432,3 +432,46 @@ func TestRouteTransactionsAutoRollbackKeepsActualLastGood(t *testing.T) {
 		t.Fatal("rollback restored the crashed revision")
 	}
 }
+
+func TestRouteTransactionsBoundInstanceRejectsNewExecutionButReplaysHistory(t *testing.T) {
+	o := testOptions(t)
+	r, e := OpenTransactions(o)
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer r.Close()
+	candidate := testCandidate(t, freePort(t), "one")
+	cmd := transactionCommand(t, r, o, "stage", 1, 1, "", candidate)
+	cmd.RuntimeInstance = strings.Repeat("f", 32)
+	cmd, _ = SignTransactionCommand(o.LeaseKey, cmd)
+	if _, e = r.Execute(context.Background(), cmd, candidate); e == nil {
+		t.Fatal("command for another executor instance accepted")
+	}
+	cmd.RuntimeInstance = r.Status().Instance
+	cmd, _ = SignTransactionCommand(o.LeaseKey, cmd)
+	ack, e := r.Execute(context.Background(), cmd, candidate)
+	if e != nil {
+		t.Fatal(e)
+	}
+	r.Close()
+	restarted, e := OpenTransactions(o)
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer restarted.Close()
+	replay, e := restarted.Execute(context.Background(), cmd, candidate)
+	if e != nil || replay.Signature != ack.Signature || restarted.Status().Observed.ProcessReady {
+		t.Fatal("historical receipt unavailable or replay activated process", e)
+	}
+	next := transactionCommand(t, restarted, o, "stage", 2, 1, "", candidate)
+	next.RuntimeInstance = cmd.RuntimeInstance
+	next, _ = SignTransactionCommand(o.LeaseKey, next)
+	if _, e = restarted.Execute(context.Background(), next, candidate); e == nil {
+		t.Fatal("fresh execution used pre-restart instance authority")
+	}
+	next.RuntimeInstance = restarted.Status().Instance
+	next, _ = SignTransactionCommand(o.LeaseKey, next)
+	if _, e = restarted.Execute(context.Background(), next, candidate); e != nil {
+		t.Fatal(e)
+	}
+}

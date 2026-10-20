@@ -206,15 +206,25 @@ func main() {
 		log.Fatal("native inbounds require explicit new PRO business database")
 	}
 	if os.Getenv("DARK_PRO_ENABLE_REMOTE_METERED_ADMISSION") == "1" {
-		if os.Getenv("DARK_PRO_LAB_MODE")!="1" || os.Getenv("DARK_PRO_ENABLE_USAGE_LEDGER")!="1" ||
-			os.Getenv("DARK_PRO_ENABLE_NATIVE_INBOUNDS")!="1" {
+		if os.Getenv("DARK_PRO_LAB_MODE") != "1" || os.Getenv("DARK_PRO_ENABLE_USAGE_LEDGER") != "1" ||
+			os.Getenv("DARK_PRO_ENABLE_NATIVE_INBOUNDS") != "1" {
 			log.Fatal("remote metered runtime requires NEW PRO LAB with private usage ledger and native Inbounds")
 		}
-		if err:=service.EnableRemoteMeteredNode(os.Getenv("DARK_PRO_NATIVE_METERED_NODE_ID"));err!=nil {
-			log.Fatal("remote metered Node opt-in refused: ",err)
+		if err := service.EnableRemoteMeteredNode(os.Getenv("DARK_PRO_NATIVE_METERED_NODE_ID")); err != nil {
+			log.Fatal("remote metered Node opt-in refused: ", err)
 		}
-	} else if os.Getenv("DARK_PRO_NATIVE_METERED_NODE_ID")!="" {
+	} else if os.Getenv("DARK_PRO_NATIVE_METERED_NODE_ID") != "" {
 		log.Fatal("remote metered Node ID present without explicit enable switch")
+	}
+	if os.Getenv("DARK_PRO_ENABLE_ROUTE_TRANSACTIONS") == "1" {
+		if *agentListen == "" || os.Getenv("DARK_PRO_ENABLE_REMOTE_AGENT") != "1" {
+			log.Fatal("route transaction queue requires dedicated pinned Agent TLS")
+		}
+		if err := service.EnableRouteTransactions(os.Getenv("DARK_PRO_ROUTE_NODE_ID"), os.Getenv("DARK_PRO_ROUTE_INSTALLATION_ID"), os.Getenv("DARK_PRO_ROUTE_XRAY_SHA256")); err != nil {
+			log.Fatal("empty loopback route Node claim refused: ", err)
+		}
+	} else if os.Getenv("DARK_PRO_ROUTE_NODE_ID") != "" || os.Getenv("DARK_PRO_ROUTE_INSTALLATION_ID") != "" || os.Getenv("DARK_PRO_ROUTE_XRAY_SHA256") != "" {
+		log.Fatal("route transaction scope supplied without explicit enable switch")
 	}
 	if os.Getenv("DARK_PRO_ENABLE_CONFIG_STAGE") == "1" {
 		if *agentListen == "" || os.Getenv("DARK_PRO_ENABLE_REMOTE_AGENT") != "1" {
