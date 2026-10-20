@@ -78,6 +78,10 @@ jobs:
         run: |
           if test -f "$RUNNER_TEMP/active-tcp-settlement.jsonl"; then cat "$RUNNER_TEMP/active-tcp-settlement.jsonl"; fi
           if test -f "$RUNNER_TEMP/core-protocol.jsonl"; then cat "$RUNNER_TEMP/core-protocol.jsonl"; fi
+      - name: Repeat interrupted active stream recovery with transport diagnostics
+        env:
+          DARK_PRO_TEST_FINAL_TCP: '1'
+        run: go test -race ./internal/api -run '^TestRealPinnedActiveTCPSettlement/active-interrupted$' -count=20 -timeout=240s -v
 
   go:
     name: Go unit, race and vet
