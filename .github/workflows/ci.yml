@@ -51,8 +51,9 @@ jobs:
         run: |
           set -euo pipefail
           test "$(id -u)" -ne 0
+          go test -race ./internal/corebarrier -run '^TestRealPinnedCoreFinalTCPProtocol$' -count=3 -json -timeout=90s > "$RUNNER_TEMP/core-protocol.jsonl"
           go test -race ./internal/api -run '^TestRealPinnedActiveTCPSettlement$' -count=3 -json -timeout=240s > "$RUNNER_TEMP/active-tcp-settlement.jsonl"
-          python3 - "$RUNNER_TEMP/active-tcp-settlement.jsonl" <<'PYFINAL'
+          python3 - "$RUNNER_TEMP/active-tcp-settlement.jsonl" "$RUNNER_TEMP/core-protocol.jsonl" <<'PYFINAL'
           import collections,json,sys
           events=[json.loads(line) for line in open(sys.argv[1])]
           name='TestRealPinnedActiveTCPSettlement'
@@ -60,6 +61,11 @@ jobs:
           passed=collections.Counter(e.get('Test') for e in events if e.get('Action')=='pass')
           assert all(passed[n]==3 for n in required),dict(passed)
           assert not any(e.get('Action') in ('skip','fail') and e.get('Test','').startswith(name) for e in events)
+          protocol=[json.loads(line) for line in open(sys.argv[2])]
+          test='TestRealPinnedCoreFinalTCPProtocol'
+          assert sum(e.get('Action')=='pass' and e.get('Test')==test for e in protocol)==3
+          assert not any(e.get('Action') in ('skip','fail') for e in protocol)
+          events+=protocol
           for e in events:
               if e.get('Output'): print(e['Output'],end='')
           PYFINAL
@@ -67,6 +73,7 @@ jobs:
         if: failure()
         run: |
           if test -f "$RUNNER_TEMP/active-tcp-settlement.jsonl"; then cat "$RUNNER_TEMP/active-tcp-settlement.jsonl"; fi
+          if test -f "$RUNNER_TEMP/core-protocol.jsonl"; then cat "$RUNNER_TEMP/core-protocol.jsonl"; fi
 
   go:
     name: Go unit, race and vet

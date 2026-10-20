@@ -79,6 +79,11 @@ tail, interruption without proof, and operation without opt-in. Every selected
 case must execute and pass; a skip is a gate failure. Stock-core acceptance,
 browser, queue and observer regression jobs continue independently.
 
+A separate real-core protocol test checks exact bidirectional payload bytes,
+UDP/Mux/reverse rejection, reset refusal, immutable snapshot replay, conflicting
+nonce refusal and post-drain admission closure. Its plain loopback VLESS fixture
+tests the core primitive only; native runtime admission still requires Reality.
+
 During local upstream test exploration, `common/task/TestPeriodicTaskStop`
 reported an existing unsynchronized test-variable race. The overlay does not
 change periodic tasks. Its targeted upstream gate runs `TestExecuteParallel*`
