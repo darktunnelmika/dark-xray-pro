@@ -182,7 +182,7 @@ export default function NativeMeteredRouteTransactions({ language }: { language:
     <span>{t.revision}: {observed!.active_sequence || "—"}</span><span>{t.report}: {time(v.reported_at_unix_nano)}</span>
     {fresh && observed!.process_ready && leaseRemaining > 0 && <span>{t.remaining}: {Math.ceil(leaseRemaining / 1000)} {t.seconds}</span>}
    </div>
-   {v.status.usage && <div aria-label="Current metered epoch"><span>Epoch: <bdi>{v.status.usage.epoch_id || "—"}</bdi></span><span>Epoch SHA: <bdi>{v.status.usage.epoch_sha || "—"}</bdi></span><span>Settlement: <bdi>{v.status.usage.settlement.sequence === "0" ? "—" : v.status.usage.settlement.sha256}</bdi></span></div>}
+   {v.status.usage && <div className="route-live" aria-label="Current metered epoch"><h4>{language === "fa" ? "شواهد دورهٔ مصرف" : "Usage epoch evidence"}</h4><span>Epoch: <bdi>{v.status.usage.epoch_id || "—"}</bdi></span><span>Epoch SHA: <bdi>{v.status.usage.epoch_sha || "—"}</bdi></span><span>{language === "fa" ? "رسید تسویه" : "Settlement"}: <bdi>{v.status.usage.settlement.sequence === "0" ? "—" : v.status.usage.settlement.sha256}</bdi></span></div>}
    <div><h4>{t.review}</h4><div className="route-draft-review">
     {v.review.map(r => <article key={r.inbound_id}><strong>{r.name} · #{r.inbound_id}</strong><span>{t.inbound}: {r.inbound_revision} · {t.draft}: {r.draft_revision || "—"}</span><span><bdi>{r.listen_ip}</bdi> · {t.direct}: {r.direct_port || "—"} · {t.tunnel}: {r.tunnel_port || "—"}</span></article>)}
     {!v.review.length && <p>{t.noDrafts}</p>}
@@ -201,7 +201,7 @@ export default function NativeMeteredRouteTransactions({ language }: { language:
      <span>{c.receipt ? t.receipt : t.noReceipt}</span>
      {c.registered_epoch_id && <span>{language === "fa" ? "دورهٔ ثبت‌شده در HUB؛ نه اثبات بازبودن پورت" : "HUB registered epoch · not proof of listener admission"}: <bdi>{c.registered_epoch_id}</bdi></span>}
      {c.receipt && <p>{t.outcome}: {t.outcomes[c.receipt.outcome as keyof typeof t.outcomes]} · {time(c.receipt.observed_unix_nano)}</p>}
-     {c.receipt && <div aria-label="Verified metered evidence"><span>Epoch: <bdi>{c.receipt.metered.after.epoch_id || "—"}</bdi></span><span>Prior sealed epoch: <bdi>{c.receipt.metered.prior_settlement.epoch_id || "—"}</bdi></span><span>Final sequence: <bdi>{c.receipt.metered.prior_settlement.sequence}</bdi></span><span>Final SHA: <bdi>{c.receipt.metered.prior_settlement.sha256 || "—"}</bdi></span></div>}
+     {c.receipt && <div className="route-live" aria-label="Verified metered evidence"><span>Epoch: <bdi>{c.receipt.metered.after.epoch_id || "—"}</bdi></span><span>{language === "fa" ? "دورهٔ قبلیِ تسویه‌شده" : "Prior sealed epoch"}: <bdi>{c.receipt.metered.prior_settlement.epoch_id || "—"}</bdi></span><span>{language === "fa" ? "شمارهٔ رسید نهایی" : "Final sequence"}: <bdi>{c.receipt.metered.prior_settlement.sequence}</bdi></span><span>Final SHA: <bdi>{c.receipt.metered.prior_settlement.sha256 || "—"}</bdi></span></div>}
      <details><summary>{t.details}</summary><span>ID: <bdi>{c.id}</bdi></span><span>Stage: <bdi>{c.stage_id}</bdi></span><span>{time(c.created_unix_nano)}</span>{c.receipt && <span>Agent: <bdi>{c.receipt.runtime_instance}</bdi></span>}</details>
     </article>)}
    </div>
