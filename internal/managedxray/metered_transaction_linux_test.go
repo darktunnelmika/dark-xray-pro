@@ -46,6 +46,10 @@ func TestMeteredTransactionProtocolExactEpochSealAndVersionSeparation(t *testing
 	if !VerifyMeteredTransactionReceipt(key, c, r) || VerifyTransactionReceipt(key, c, r) {
 		t.Fatal("separate exact metered proof rejected or v1 accepted")
 	}
+	poll := SignTransactionPoll(key, TransactionPoll{NodeID: c.NodeID, InstallationID: c.InstallationID, BinarySHA: c.BinarySHA, At: now.UnixNano(), Status: TransactionStatus{Instance: c.RuntimeInstance, Usage: c.Usage}})
+	if VerifyTransactionPoll(key, poll) {
+		t.Fatal("metered observation entered the exclusive empty-route channel")
+	}
 	for _, mode := range []string{"missing-seal", "foreign-seal", "reused-epoch", "missing-epoch", "missing-zero-receipt", "observer-stopped", "observer-failed", "observer-settled", "old-instance", "subscription", "missing-proof", "unsigned-proof"} {
 		t.Run(mode, func(t *testing.T) {
 			bad := cloneMeteredReceipt(r)
@@ -175,6 +179,17 @@ func TestMeteredTransactionsStageEncryptedReplayDowngradeAndInterruptedIntent(t 
 		t.Fatal("historical stage replay", e)
 	}
 	apply := command("apply", 2, stage.ID)
+	// A newer issued lease can overtake a staged replacement. Reject its old
+	// lease before persisting intent or draining the reviewed epoch.
+	r.runtime.mu.Lock()
+	r.runtime.state.LastLeaseIssued = apply.Lease.Issued
+	r.runtime.mu.Unlock()
+	if _, e := r.ExecuteMetered(context.Background(), apply, xrayconfig.Candidate{}); !errors.Is(e, ErrLease) || r.Status().Serial != 1 || r.Status().InterruptedCommandSHA != "" {
+		t.Fatal("stale lease consumed transaction intent", e)
+	}
+	r.runtime.mu.Lock()
+	r.runtime.state.LastLeaseIssued = 0
+	r.runtime.mu.Unlock()
 	r.afterIntent = func() { panic("test interruption after fsync") }
 	func() {
 		defer func() {

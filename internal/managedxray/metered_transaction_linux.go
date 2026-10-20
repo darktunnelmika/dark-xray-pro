@@ -232,14 +232,14 @@ func (t *TransactionRuntime) ExecuteMetered(ctx context.Context, c TransactionCo
 	}
 	v := *target.Revision
 	v.Sequence = c.RuntimeSequence
-	if !t.runtime.validLease(c.Lease, &v) {
+	if !t.validMeteredLease(c.Lease, &v) {
 		return TransactionReceipt{}, ErrLease
 	}
 	if err := t.checkMeteredAuthority(opCtx, c, v); err != nil {
 		return TransactionReceipt{}, err
 	}
 	checked, checkedUsage := t.meteredSnapshot()
-	if opCtx.Err() != nil || Condition(checked) != c.Expected || *checkedUsage != *c.Usage || !t.runtime.validLease(c.Lease, &v) {
+	if opCtx.Err() != nil || Condition(checked) != c.Expected || *checkedUsage != *c.Usage || !t.validMeteredLease(c.Lease, &v) {
 		return TransactionReceipt{}, ErrStale
 	}
 	next := t.state
@@ -304,6 +304,13 @@ func cloneMeteredReceipt(r TransactionReceipt) TransactionReceipt {
 		r.Observed.Usage = &u
 	}
 	return r
+}
+
+func (t *TransactionRuntime) validMeteredLease(l Lease, v *savedRevision) bool {
+	r := t.runtime
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return !r.closed && !r.fenced && r.validLease(l, v) && l.Issued > r.state.LastLeaseIssued
 }
 
 func (t *TransactionRuntime) checkMeteredAuthority(ctx context.Context, c TransactionCommand, v savedRevision) error {
