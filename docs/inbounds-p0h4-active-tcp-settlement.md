@@ -86,6 +86,9 @@ replacement, lost terminal receipt, lost seal confirmation, pre-existing unknown
 tail, interruption without proof, and operation without opt-in. Every selected
 case must execute and pass; a skip is a gate failure. Stock-core acceptance,
 browser, queue and observer regression jobs continue independently.
+The interruption fixture drops its first notification, requires an acknowledged
+bounded replay, and proves replacement remains blocked throughout. It never
+treats a failed notification call as proof that the HUB already recorded a hold.
 
 A separate real-core protocol test checks exact bidirectional payload bytes,
 UDP/Mux/reverse rejection, reset refusal, immutable snapshot replay, conflicting

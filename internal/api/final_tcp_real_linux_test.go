@@ -90,10 +90,36 @@ func testActiveTCPOutcome(t *testing.T, ctx context.Context, s *Server, r *manag
 			t.Fatal(e)
 		}
 		defer reopened.Close()
-		_, _ = reopened.ReplayObservedUsage(ctx, sender)
+		// The fixture deliberately loses the first interruption notification.
+		// A transport failure is not a HUB receipt. Exercise the Agent's bounded
+		// retry behavior while proving every attempt keeps fresh admission shut.
+		var replayErr error
+		for attempt := 0; attempt < 3; attempt++ {
+			if reopened.UsageStatus().Settled || !reopened.UsageStatus().SettlementRequired {
+				t.Fatal("unconfirmed interruption released local fence")
+			}
+			if _, e := reopened.PrepareUsageAdmission(ctx, managedxray.Revision{Sequence: cfg.Sequence + 1, Candidate: cfg.Candidate}, liveUsageLease(t, o, cfg.Sequence+1, cfg.Candidate)); !errors.Is(e, managedxray.ErrUsageSettlement) {
+				t.Fatal("unconfirmed interruption admitted a replacement", e)
+			}
+			_, replayErr = reopened.ReplayObservedUsage(ctx, sender)
+			if replayErr == nil {
+				break
+			}
+			if !errors.Is(replayErr, uc.ErrTransport) && !errors.Is(replayErr, uc.ErrLocked) {
+				t.Fatal("interruption replay", replayErr)
+			}
+			select {
+			case <-ctx.Done():
+				t.Fatal(ctx.Err())
+			case <-time.After(100 * time.Millisecond):
+			}
+		}
+		if replayErr != nil {
+			t.Fatal("interruption receipt never confirmed", replayErr)
+		}
 		a, e := s.business.ClientUsage(ctx, customers[0].ID)
 		if e != nil || a.Holds != 1 || a.Eligible || reopened.UsageStatus().Settled || finalReport.Load() != nil {
-			t.Fatal("killed stream invented final proof", a, e)
+			t.Fatal("confirmed interruption did not preserve unknown tail", a, e)
 		}
 		assertClosed()
 		return

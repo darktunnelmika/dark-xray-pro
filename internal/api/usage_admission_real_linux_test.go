@@ -93,9 +93,14 @@ func testRealPinnedPretrafficUsageAdmission(t *testing.T, modes []string) {
 			var requests atomic.Int64
 			var lostConfirmation atomic.Bool
 			var lostFinal atomic.Bool
+			var lostInterruption atomic.Bool
 			var finalReport atomic.Pointer[uc.Report]
 			actual := s.AgentHandler()
 			receiver := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+				if req.URL.Path == "/api/v1/agent/native-usage/interrupted" && mode == "active-interrupted" && !lostInterruption.Swap(true) {
+					w.WriteHeader(503)
+					return
+				}
 				if req.URL.Path == "/api/v1/agent/native-usage/settled" && (mode == "settlement-lost-confirmation" || mode == "active-lost-confirmation") && !lostConfirmation.Swap(true) {
 					rec := httptest.NewRecorder()
 					actual.ServeHTTP(rec, req)
