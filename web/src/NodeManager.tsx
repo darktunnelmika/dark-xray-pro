@@ -3,6 +3,7 @@ import { Check, ClipboardCopy, Download, KeyRound, Link2, RefreshCw, ShieldCheck
 import { api, mutation, ApiError, useSession, type Language } from "./session";
 import "./NodeManager.css";
 import NodeNameEditor from "./NodeNameEditor";
+import NodeDependencies from "./NodeDependencies";
 
 type Registration = {
   node_id: string;
@@ -286,6 +287,7 @@ export default function NodeManager({ language }: { language: Language }) {
               {node.status === "online" ? t.online : t.offline}{node.status === "online" && !node.metrics_current ? " · "+t.delayed : ""}
             </span>
             <NodeNameEditor key={session?.user.id + ":" + node.node_id} nodeID={node.node_id} language={language} onSaved={() => { void load().catch(() => setRosterFailed(true)); }} />
+            <NodeDependencies key={session?.user.id + ":dependencies:" + node.node_id} nodeID={node.node_id} language={language} />
           </div>
         ))}
       </div>
