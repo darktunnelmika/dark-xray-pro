@@ -34,8 +34,8 @@ import (
 
 	"github.com/darktunnelmika/dark-xray-pro/internal/business"
 	"github.com/darktunnelmika/dark-xray-pro/internal/managedxray"
-	"github.com/darktunnelmika/dark-xray-pro/internal/webui"
 	uc "github.com/darktunnelmika/dark-xray-pro/internal/usagecheckpoint"
+	"github.com/darktunnelmika/dark-xray-pro/internal/webui"
 	"github.com/darktunnelmika/dark-xray-pro/internal/xrayconfig"
 )
 
@@ -369,6 +369,11 @@ func liveUsageLease(t *testing.T, o managedxray.Options, seq uint64, c xrayconfi
 }
 
 func liveUsageReality(t *testing.T) *httptest.Server {
+	return liveUsageRealityAt(t, "")
+}
+
+// An explicit listener is used only by the isolated-network acceptance suite.
+func liveUsageRealityAt(t *testing.T, address string) *httptest.Server {
 	t.Helper()
 	key, e := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if e != nil {
@@ -388,6 +393,13 @@ func liveUsageReality(t *testing.T) *httptest.Server {
 		t.Fatal(e)
 	}
 	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNoContent) }))
+	if address != "" {
+		server.Listener.Close()
+		server.Listener, e = net.Listen("tcp4", address)
+		if e != nil {
+			t.Fatal(e)
+		}
+	}
 	server.Config.ErrorLog = log.New(io.Discard, "", 0)
 	server.EnableHTTP2 = true
 	server.TLS = &tls.Config{Certificates: []tls.Certificate{pair}, MinVersion: tls.VersionTLS13, MaxVersion: tls.VersionTLS13}
