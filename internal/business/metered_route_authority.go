@@ -84,6 +84,33 @@ func meteredHash(v any) string {
 	h := sha256.Sum256(raw)
 	return hex.EncodeToString(h[:])
 }
+
+// The owner must review the HUB's latest registered epoch, including an
+// ambiguous registration whose reply never reached the supervisor. An empty
+// or older Agent claim must not hide that durable accounting fence.
+func meteredLatestCondition(ctx context.Context, tx *sql.Tx, node, install string, u mx.MeteredCondition) error {
+	var latest string
+	e := tx.QueryRowContext(ctx, "SELECT epoch_id FROM pro_usage_epochs WHERE node_id=? AND installation_id=? ORDER BY rowid DESC LIMIT 1", node, install).Scan(&latest)
+	if errors.Is(e, sql.ErrNoRows) {
+		if u.EpochID == "" {
+			return nil
+		}
+		return ErrConflict
+	}
+	if e != nil {
+		return e
+	}
+	if latest != u.EpochID {
+		return ErrConflict
+	}
+	if _, e = meteredEpoch(ctx, tx, node, install, u); e != nil {
+		return e
+	}
+	if u.Settlement != (uc.Receipt{}) {
+		return meteredSeal(ctx, tx, node, install, u.Settlement)
+	}
+	return nil
+}
 func meteredEpoch(ctx context.Context, tx *sql.Tx, node, install string, u mx.MeteredCondition) (uc.Epoch, error) {
 	var e uc.Epoch
 	var raw []byte

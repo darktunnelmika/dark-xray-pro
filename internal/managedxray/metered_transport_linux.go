@@ -179,11 +179,10 @@ func (t *TransactionRuntime) SyncMeteredTransaction(ctx context.Context, client 
 	if e != nil {
 		return ErrTransaction
 	}
-	raw, e := base64.StdEncoding.Strict().DecodeString(d.ConfigBase64)
-	if e != nil || len(raw) > xrayconfig.MaxCandidateBytes {
-		return ErrTransaction
+	d.Candidate, e = meteredDeliveryCandidate(d)
+	if e != nil {
+		return e
 	}
-	d.Candidate.Config = raw
 	ack, operationErr := t.ExecuteMetered(ctx, d.Command, d.Candidate)
 	if ack.CommandID == "" {
 		return operationErr
@@ -200,4 +199,23 @@ func (t *TransactionRuntime) SyncMeteredTransaction(ctx context.Context, client 
 		return errors.New("route transaction receipt not committed")
 	}
 	return operationErr
+}
+
+// Only Stage carries private bytes. Decoding an absent base64 string produces
+// a non-nil empty slice, whose authenticated payload hash differs from nil.
+// Require an exactly empty wire candidate for every other action and preserve
+// the nil representation expected by the interpreter.
+func meteredDeliveryCandidate(d TransactionDelivery) (xrayconfig.Candidate, error) {
+	if d.Command.Action != "stage" {
+		if d.ConfigBase64 != "" || TransactionPayloadSHA(d.Candidate) != TransactionPayloadSHA(xrayconfig.Candidate{}) {
+			return xrayconfig.Candidate{}, ErrTransaction
+		}
+		return xrayconfig.Candidate{}, nil
+	}
+	raw, e := base64.StdEncoding.Strict().DecodeString(d.ConfigBase64)
+	if e != nil || len(raw) == 0 || len(raw) > xrayconfig.MaxCandidateBytes {
+		return xrayconfig.Candidate{}, ErrTransaction
+	}
+	d.Candidate.Config = raw
+	return d.Candidate, nil
 }

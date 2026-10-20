@@ -10,6 +10,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -17,6 +18,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -49,8 +51,24 @@ func TestRealPinnedMeteredRouteTransport(t *testing.T) {
 			s, key := meteredRouteAPIFixture(t, pin, portA)
 			var loseBefore, loseAfter, loseRegister, loseSeal, revoke atomic.Bool
 			var registrations atomic.Int64
+			var traceMu sync.Mutex
+			var trace []string
+			t.Cleanup(func() {
+				if t.Failed() {
+					traceMu.Lock()
+					defer traceMu.Unlock()
+					t.Log("sanitized transport trace:\n" + strings.Join(trace, "\n"))
+				}
+			})
 			handler := s.AgentHandler()
 			srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				tracked := &admissionTraceWriter{ResponseWriter: w}
+				w = tracked
+				defer func() {
+					traceMu.Lock()
+					trace = append(trace, fmt.Sprintf("%s HTTP %d", r.URL.Path, tracked.status))
+					traceMu.Unlock()
+				}()
 				if r.URL.Path == "/api/v1/agent/metered-route-transactions/register" {
 					registrations.Add(1)
 				}

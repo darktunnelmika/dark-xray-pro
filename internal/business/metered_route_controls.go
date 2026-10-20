@@ -73,6 +73,12 @@ func (s *Store) MeteredRouteControlChannel(ctx context.Context, key []byte, node
 	if out.Status.Usage == nil || !out.ObservationFresh || pending != 0 || count >= 10000 || !routeID.MatchString(out.Status.Instance) || out.Status.Serial >= routeMax || out.Status.Observed.Highwater >= routeMax {
 		return out, tx.Commit()
 	}
+	if err := meteredLatestCondition(ctx, tx, node, out.InstallationID, *out.Status.Usage); err != nil {
+		if routeReviewBlocked(err) {
+			return out, tx.Commit()
+		}
+		return out, err
+	}
 	for _, c := range out.Commands {
 		if c.Receipt != nil && c.Receipt.ObservedAt > out.ReportedAt {
 			return out, tx.Commit() // Wait for an observation after the receipt.

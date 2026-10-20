@@ -412,6 +412,9 @@ func (s *Store) QueueMeteredRouteCommand(ctx context.Context, key []byte, node s
 	if !channel.ObservationFresh || channel.Status.Instance != in.RuntimeInstance || mx.Condition(channel.Status.Observed) != in.Expected || channel.Status.Usage == nil || *channel.Status.Usage != *in.Usage {
 		return empty, ErrConflict
 	}
+	if e = meteredLatestCondition(ctx, tx, node, channel.InstallationID, *in.Usage); e != nil {
+		return empty, e
+	}
 	if serial < channel.Status.Serial {
 		serial = channel.Status.Serial
 	}

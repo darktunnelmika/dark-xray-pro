@@ -203,6 +203,17 @@ func TestMeteredRouteBirthIsAtomicCommandBoundAndReceiptNeedsLedger(t *testing.T
 	if e = s.AcceptMeteredRouteReceipt(ctx, key, routeTestToken, ack); e != nil {
 		t.Fatal("exact ack replay", e)
 	}
+	p.Status.Serial = 2
+	p.Status.Observed = o
+	p.Status.Usage = &mx.MeteredCondition{}
+	meteredQueuePoll(t, s, key, &p, false)
+	if _, e = s.QueueMeteredRouteCommand(ctx, key, p.NodeID, meteredQueueRequest(p, 3, "stage", "")); e == nil {
+		t.Fatal("empty Agent epoch hid registered HUB birth")
+	}
+	view, e := s.MeteredRouteControlChannel(ctx, key, p.NodeID)
+	if e != nil || view.Controls.Stage || view.Commands[0].RegisteredEpochID != epoch.ID {
+		t.Fatal("ambiguous epoch evidence/controls", e)
+	}
 	for _, q := range []string{"DELETE FROM native_metered_route_births", "UPDATE native_metered_route_births SET epoch_json='{}'", "DELETE FROM native_metered_route_channels"} {
 		if _, e = s.db.Exec(q); e == nil {
 			t.Fatal("audit mutable")

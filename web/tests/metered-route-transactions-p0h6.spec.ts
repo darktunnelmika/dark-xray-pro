@@ -176,3 +176,30 @@ test("P0-H6 representatives cannot discover the owner transaction scope", async 
  await expect(page).toHaveURL(/\/clients$/); await expect(panel(page)).toHaveCount(0);
  expect(f.reads.some(path => path.includes("route-transactions"))).toBe(false); expect(f.writes).toHaveLength(0);
 });
+
+test("P0-H6 exact uint64 settlement sequence survives owner review and retry JSON", async ({ page }) => {
+ const f=await fixture(page);
+ const usage={epoch_id:id(20),epoch_sha:"a".repeat(64),admission_sha:"c".repeat(64),settlement:{epoch_id:id(20),sequence:"18446744073709551615",sha256:"e".repeat(64)}};
+ f.view.status.usage=usage;
+ await page.goto("/inbounds");
+ await confirm(page,"Review and Stage");
+ await expect.poll(()=>f.writes.length).toBe(1);
+ expect((f.writes[0].body as CommandRequest).usage).toEqual(usage);
+ expect(f.writes[0].raw).toContain('"sequence":"18446744073709551615"');
+});
+
+for (const malformed of ["v1-receipt","missing-epoch","cross-epoch-seal"] as const) {
+ test("P0-H6 refuses "+malformed+" evidence without sending a command",async ({page})=>{
+  const f=await fixture(page);
+  if(malformed==="missing-epoch") delete f.view.status.usage;
+  else if(malformed==="cross-epoch-seal") f.view.status.usage={epoch_id:id(20),epoch_sha:"a".repeat(64),admission_sha:"c".repeat(64),settlement:{epoch_id:id(21),sequence:"2",sha256:"e".repeat(64)}};
+  else {
+   const row=ack(command(1,"stage"),"staged");
+   (row.receipt as unknown as {version:number}).version=1;
+   f.view.commands=[row];
+  }
+  await page.goto("/inbounds");
+  await expect(panel(page).getByText("Transaction status could not be verified. Controls are blocked.")).toBeVisible();
+  expect(f.writes).toHaveLength(0);
+ });
+}
