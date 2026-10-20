@@ -25,7 +25,7 @@ func SignLease(key []byte,l Lease)(Lease,error){
  if len(key)<32||l.Sequence==0||l.NodeID==""||len(l.InstallationID)!=32||len(l.ConfigSHA)!=64||len(l.ManifestSHA)!=64||l.Expires<=l.Issued||l.Expires-l.Issued>int64(45*time.Second){return Lease{},ErrLease}
  l.Signature=l.signature(key);return l,nil
 }
-type Options struct{Directory string;StateKey []byte;LeaseKey []byte;NodeID string;InstallationID string;ListenIP string;Binary string;BinarySHA string;ReservedPorts []uint16}
+type Options struct{Directory string;StateKey []byte;LeaseKey []byte;NodeID string;InstallationID string;ListenIP string;Binary string;BinarySHA string;ReservedPorts []uint16;ExperimentalFinalTCP bool}
 type Snapshot struct{
  Usage *UsageObservationStatus `json:"usage_observation,omitempty"`
  NoListeners bool `json:"no_listeners"`;

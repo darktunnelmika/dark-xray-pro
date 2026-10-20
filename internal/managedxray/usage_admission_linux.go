@@ -18,10 +18,13 @@ import (
 )
 
 type usageAdmission struct {
-	TrafficBarrier string      `json:"traffic_barrier,omitempty"`
-	Settlement     *uc.Receipt `json:"settlement,omitempty"`
-	StatsEndpoint  string      `json:"stats_endpoint"`
-	BootstrapSHA   string      `json:"bootstrap_sha"`
+	FinalCounterProtocol string      `json:"final_counter_protocol,omitempty"`
+	DrainNonce           string      `json:"drain_nonce,omitempty"`
+	FinalReceipt         *uc.Receipt `json:"final_receipt,omitempty"`
+	TrafficBarrier       string      `json:"traffic_barrier,omitempty"`
+	Settlement           *uc.Receipt `json:"settlement,omitempty"`
+	StatsEndpoint        string      `json:"stats_endpoint"`
+	BootstrapSHA         string      `json:"bootstrap_sha"`
 }
 
 // PrepareUsageAdmission is a two-phase start on a fresh runtime or a proven
@@ -56,6 +59,9 @@ func (r *Runtime) PrepareUsageAdmission(ctx context.Context, v Revision, l Lease
 	if err != nil {
 		return uc.ProcessToken{}, err
 	}
+	if r.options.ExperimentalFinalTCP && !finalTCPScope(saved.Raw) {
+		return uc.ProcessToken{}, ErrInvalid
+	}
 	if r.reserved[bootstrap.Listeners[0].NodePort] {
 		return uc.ProcessToken{}, ErrInvalid
 	}
@@ -79,11 +85,15 @@ func (r *Runtime) PrepareUsageAdmission(ctx context.Context, v Revision, l Lease
 	next.Pending = nil
 	next.LastLeaseIssued = l.Issued
 	next.Admission = &usageAdmission{StatsEndpoint: endpoint, BootstrapSHA: bootstrap.SHA256, TrafficBarrier: pretrafficNeverInstalled}
+	if r.options.ExperimentalFinalTCP {
+		next.Version = 5
+		next.Admission.FinalCounterProtocol = uc.FinalTCPProtocol
+	}
 	next.Phase = "usage_preparing_api_only"
 	if err = r.persist(next); err != nil {
 		return uc.ProcessToken{}, err
 	}
-	p, err := startChild(ctx, bootstrap, r.options.Binary, leaseDeadline(l))
+	p, err := startChild(ctx, bootstrap, r.options.Binary, leaseDeadline(l), r.options.ExperimentalFinalTCP)
 	if err != nil {
 		r.failAdmissionLocked("usage_prepare_failed")
 		return uc.ProcessToken{}, err
@@ -172,6 +182,11 @@ func (r *Runtime) ActivateUsageAdmission(ctx context.Context, o UsageObservation
 			result = r.snapshot()
 		}
 	}()
+	if r.state.Admission.FinalCounterProtocol != "" {
+		if err = uc.VerifyFinalTCPCapability(ctx, r.options.Binary, r.options.BinarySHA, endpoint, o.Epoch); err != nil {
+			return r.snapshot(), err
+		}
+	}
 	box, err := uc.Open(uc.Options{Directory: directory, Key: usageKey(r.options.StateKey, o.Epoch.ID), Epoch: o.Epoch, Create: true})
 	if err != nil {
 		return r.snapshot(), err
@@ -232,7 +247,7 @@ func (r *Runtime) ActivateUsageAdmission(ctx context.Context, o UsageObservation
 		return r.snapshot(), err
 	}
 	observerCtx, cancel := context.WithCancel(context.Background())
-	observer := &usageObserver{options: o, process: r.process, box: box, binary: r.options.Binary, pin: r.options.BinarySHA, cancel: cancel, done: make(chan struct{}), lastSaved: time.Now(), fresh: counters, ready: make(chan struct{}), status: UsageObservationStatus{Required: true, Running: true, Receipts: 1, SettlementRequired: true}}
+	observer := &usageObserver{settle: make(chan finalTCPRequest), options: o, process: r.process, box: box, binary: r.options.Binary, pin: r.options.BinarySHA, cancel: cancel, done: make(chan struct{}), lastSaved: time.Now(), fresh: counters, ready: make(chan struct{}), status: UsageObservationStatus{Required: true, Running: true, Receipts: 1, SettlementRequired: true}}
 	r.observer = observer
 	ownedBox = false
 	go observer.run(observerCtx)
@@ -315,13 +330,19 @@ func (r *Runtime) installAdmissionInbounds(ctx context.Context, payload []byte, 
 }
 
 func validPersistedAdmission(j journal) bool {
-	if (j.Version != 3 && j.Version != 4) || j.Admission == nil || j.Good == nil {
+	if (j.Version != 3 && j.Version != 4 && j.Version != 5) || j.Admission == nil || j.Good == nil {
 		return false
 	}
 	if j.Version == 3 && (j.Admission.TrafficBarrier != "" || j.Admission.Settlement != nil) {
 		return false
 	}
-	if j.Version == 4 && !validPretrafficJournal(j) {
+	if j.Version >= 4 && !validPretrafficJournal(j) {
+		return false
+	}
+	if !validFinalTCPJournal(j) {
+		return false
+	}
+	if j.Version == 5 && !finalTCPScope(j.Good.Raw) {
 		return false
 	}
 	bootstrap, _, endpoint, err := xrayconfig.UsageBootstrap(j.Good.candidate())

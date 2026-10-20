@@ -33,7 +33,7 @@ type observedUsage struct {
 	StatsEndpoint string   `json:"stats_endpoint"`
 }
 type UsageObservationStatus struct {
-	Settled bool `json:"settled,omitempty"`
+	Settled                  bool   `json:"settled,omitempty"`
 	Required                 bool   `json:"required"`
 	Running                  bool   `json:"running"`
 	Samples                  uint64 `json:"samples"`
@@ -45,9 +45,11 @@ type UsageObservationStatus struct {
 	SettlementRequired       bool   `json:"settlement_required"`
 }
 type usageObserver struct {
- fresh *uc.FreshCounters
- ready chan struct{}
- readyOnce sync.Once
+	settle       chan finalTCPRequest
+	finalSaved   bool // protected by mu; both final outbox and runtime proof fsynced
+	fresh        *uc.FreshCounters
+	ready        chan struct{}
+	readyOnce    sync.Once
 	mu           sync.Mutex
 	status       UsageObservationStatus
 	lastSaved    time.Time
@@ -206,7 +208,7 @@ func (m *usageObserver) healthy() bool {
 }
 func (m *usageObserver) fail(reason string) {
 	m.mu.Lock()
-	if m.status.Failure == "" {
+	if m.status.Failure == "" && !m.finalSaved {
 		m.status.Failure = reason
 	}
 	m.mu.Unlock()
@@ -263,13 +265,18 @@ func (m *usageObserver) run(ctx context.Context) {
 	defer func() {
 		m.cancel()
 		<-guardDone
-		call, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-		err := m.options.Sender.NotifyInterrupted(call, m.options.Epoch)
-		cancel()
-		if err == nil {
-			m.mu.Lock()
-			m.status.InterruptionAcknowledged = true
-			m.mu.Unlock()
+		m.mu.Lock()
+		finalSaved := m.finalSaved
+		m.mu.Unlock()
+		if !finalSaved {
+			call, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			err := m.options.Sender.NotifyInterrupted(call, m.options.Epoch)
+			cancel()
+			if err == nil {
+				m.mu.Lock()
+				m.status.InterruptionAcknowledged = true
+				m.mu.Unlock()
+			}
 		}
 		_ = m.box.Close()
 		close(m.done)
@@ -281,8 +288,12 @@ func (m *usageObserver) run(ctx context.Context) {
 			return
 		}
 		var values []uc.Usage
-        var err error
-        if m.fresh!=nil { values,err=m.fresh.Collect(ctx,m.binary,m.pin,m.options.StatsEndpoint) } else { values,err=uc.Collect(ctx,m.binary,m.pin,m.options.StatsEndpoint,m.options.Epoch) }
+		var err error
+		if m.fresh != nil {
+			values, err = m.fresh.Collect(ctx, m.binary, m.pin, m.options.StatsEndpoint)
+		} else {
+			values, err = uc.Collect(ctx, m.binary, m.pin, m.options.StatsEndpoint, m.options.Epoch)
+		}
 		if err != nil {
 			if ctx.Err() == nil {
 				m.fail("observation_failed")
@@ -298,7 +309,9 @@ func (m *usageObserver) run(ctx context.Context) {
 		m.status.LastSavedUnixNano = m.lastSaved.UnixNano()
 		m.status.Samples++
 		m.mu.Unlock()
-        if m.ready!=nil{m.readyOnce.Do(func(){close(m.ready)})}
+		if m.ready != nil {
+			m.readyOnce.Do(func() { close(m.ready) })
+		}
 		queue, err := m.box.Pending()
 		if err != nil {
 			m.fail("outbox_failed")
@@ -331,14 +344,21 @@ func (m *usageObserver) run(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
+		case request := <-m.settle:
+			m.finishTCP(request)
+			return
 		case <-tick.C:
 		}
 	}
 }
 func (r *Runtime) usageStatusLocked() UsageObservationStatus {
-	if r.pretrafficSettledLocked() { return UsageObservationStatus{Required:true,Settled:true} }
+	if r.pretrafficSettledLocked() || r.finalTCPSettledLocked() {
+		return UsageObservationStatus{Required: true, Settled: true}
+	}
 	if r.state.Usage == nil {
-        if r.state.Admission!=nil{return UsageObservationStatus{Required:true,SettlementRequired:true,Failure:"prepared_admission_incomplete"}}
+		if r.state.Admission != nil {
+			return UsageObservationStatus{Required: true, SettlementRequired: true, Failure: "prepared_admission_incomplete"}
+		}
 		return UsageObservationStatus{}
 	}
 	if r.observer != nil {
@@ -360,7 +380,12 @@ func (r *Runtime) UsageStatus() UsageObservationStatus {
 func (r *Runtime) ReplayObservedUsage(ctx context.Context, sender *uc.Sender) (int, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if r.provenUnopenedLocked() { return r.settleUnopenedUsageLocked(ctx,sender) }
+	if r.provenUnopenedLocked() {
+		return r.settleUnopenedUsageLocked(ctx, sender)
+	}
+	if r.hasFinalTCPProofLocked() {
+		return r.replayFinalTCPLocked(ctx, sender)
+	}
 	if ctx == nil || sender == nil || r.closed || r.fenced || r.observer != nil || !r.process.dead() || r.state.Usage == nil {
 		return 0, ErrInvalid
 	}

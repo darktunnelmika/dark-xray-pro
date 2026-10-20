@@ -43,10 +43,11 @@ func(p *child)bound(listeners []xrayconfig.Listener)bool{
  for _,name:=range []string{"/proc/net/tcp","/proc/net/tcp6"}{raw,err:=os.ReadFile(name);if err!=nil{continue};for _,line:=range strings.Split(string(raw),"\n"){cols:=strings.Fields(line);if len(cols)<10||cols[3]!="0A"||!sockets[cols[9]]{continue};pieces:=strings.Split(cols[1],":");if len(pieces)!=2{continue};port,err:=strconv.ParseUint(pieces[1],16,16);if err==nil{bound[uint16(port)]=true}}}
  if len(listeners)==0{return len(bound)==0&&!p.dead()};for _,l:=range listeners{if !bound[l.NodePort]{return false}};return !p.dead()
 }
-func startChild(ctx context.Context,c xrayconfig.Candidate,binary string,deadline time.Time)(*child,error){
+func startChild(ctx context.Context,c xrayconfig.Candidate,binary string,deadline time.Time,finalTCP ...bool)(*child,error){
  if ctx.Err()!=nil{return nil,ctx.Err()};dir,err:=os.MkdirTemp("","dark-pro-managed-xray-");if err!=nil{return nil,ErrRuntime}
  path:=filepath.Join(dir,"active.json");if err=os.WriteFile(path,c.Config,0600);err!=nil{os.RemoveAll(dir);return nil,ErrRuntime}
  cmd:=exec.Command(binary,"run","-config",path);cmd.Dir=dir;cmd.Env=[]string{"PATH=/usr/bin:/bin","HOME="+dir};cmd.Stdout=io.Discard;cmd.Stderr=io.Discard
+ if len(finalTCP)==1&&finalTCP[0]{cmd.Env=append(cmd.Env,"DARK_PRO_FINAL_TCP_V1=1")}
  cmd.SysProcAttr=&syscall.SysProcAttr{Pdeathsig:syscall.SIGKILL};p:=&child{cmd:cmd,dir:dir,done:make(chan struct{})};started:=make(chan error,1)
  go func(){
   // Pdeathsig follows the creating OS thread. Pin it until the child exits.

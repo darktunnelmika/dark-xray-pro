@@ -42,6 +42,13 @@ func TestRealPinnedPretrafficSettlement(t *testing.T) {
 	testRealPinnedPretrafficUsageAdmission(t, []string{"settlement-restart", "settlement-lost-final-receipt", "settlement-lost-confirmation", "settlement-unknown-tail", "settlement-replacement"})
 }
 
+func TestRealPinnedActiveTCPSettlement(t *testing.T) {
+	if os.Getenv("DARK_PRO_TEST_FINAL_TCP") != "1" {
+		t.Skip("explicit experimental barrier core required")
+	}
+	testRealPinnedPretrafficUsageAdmission(t, []string{"active-replacement", "active-lost-final-receipt", "active-lost-confirmation", "active-unknown-tail", "active-interrupted", "active-no-opt-in"})
+}
+
 func testRealPinnedPretrafficUsageAdmission(t *testing.T, modes []string) {
 	binary, pin := os.Getenv("DARK_PRO_TEST_XRAY_BINARY"), os.Getenv("DARK_PRO_TEST_XRAY_SHA256")
 	if binary == "" && pin == "" {
@@ -52,7 +59,8 @@ func testRealPinnedPretrafficUsageAdmission(t *testing.T, modes []string) {
 	}
 	for _, mode := range modes {
 		t.Run(mode, func(t *testing.T) {
-			ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
+			activeMode := strings.HasPrefix(mode, "active-")
+			ctx, cancel := context.WithTimeout(context.Background(), 35*time.Second)
 			defer cancel()
 			s := enabledOwner(t)
 			if err := s.business.EnableUsageLedger(ctx); err != nil {
@@ -63,8 +71,12 @@ func testRealPinnedPretrafficUsageAdmission(t *testing.T, modes []string) {
 				t.Fatal(err)
 			}
 			customers := make([]business.Client, 2)
+			volume := int64(1 << 20)
+			if activeMode {
+				volume = 128 << 20
+			}
 			for i, id := range []string{"admission-a", "admission-b"} {
-				c, err := s.business.CreateClient(ctx, business.NewClient{EventID: "new-pretraffic-client-" + id, ClientID: id, RepresentativeID: "owner", Name: id, DurationDays: 30, VolumeBytes: 1 << 20})
+				c, err := s.business.CreateClient(ctx, business.NewClient{EventID: "new-pretraffic-client-" + id, ClientID: id, RepresentativeID: "owner", Name: id, DurationDays: 30, VolumeBytes: volume})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -80,9 +92,11 @@ func testRealPinnedPretrafficUsageAdmission(t *testing.T, modes []string) {
 			defer unblock()
 			var requests atomic.Int64
 			var lostConfirmation atomic.Bool
+			var lostFinal atomic.Bool
+			var finalReport atomic.Pointer[uc.Report]
 			actual := s.AgentHandler()
 			receiver := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-				if req.URL.Path == "/api/v1/agent/native-usage/settled" && mode == "settlement-lost-confirmation" && !lostConfirmation.Swap(true) {
+				if req.URL.Path == "/api/v1/agent/native-usage/settled" && (mode == "settlement-lost-confirmation" || mode == "active-lost-confirmation") && !lostConfirmation.Swap(true) {
 					rec := httptest.NewRecorder()
 					actual.ServeHTTP(rec, req)
 					if rec.Code != 200 {
@@ -92,6 +106,28 @@ func testRealPinnedPretrafficUsageAdmission(t *testing.T, modes []string) {
 					return
 				}
 				if req.URL.Path == "/api/v1/agent/native-usage" {
+					if activeMode {
+						raw, e := io.ReadAll(req.Body)
+						if e != nil {
+							t.Error(e)
+							w.WriteHeader(500)
+							return
+						}
+						req.Body = io.NopCloser(bytes.NewReader(raw))
+						var report uc.Report
+						if json.Unmarshal(raw, &report) == nil && report.Quiesced {
+							finalReport.Store(&report)
+							if mode == "active-lost-final-receipt" && !lostFinal.Swap(true) {
+								rec := httptest.NewRecorder()
+								actual.ServeHTTP(rec, req)
+								if rec.Code != 200 {
+									t.Error("active final report did not commit", rec.Code)
+								}
+								w.WriteHeader(503)
+								return
+							}
+						}
+					}
 					requestNumber := requests.Add(1)
 					if requestNumber == 3 && mode == "settlement-lost-final-receipt" {
 						rec := httptest.NewRecorder()
@@ -138,7 +174,30 @@ func testRealPinnedPretrafficUsageAdmission(t *testing.T, modes []string) {
 			}
 			target := liveUsageReality(t)
 			proof := strings.Repeat("pretraffic-owned-payload-", 200)
-			origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = io.WriteString(w, proof) }))
+			var origin *httptest.Server
+			if activeMode {
+				origin = httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+					w.Header().Set("Content-Type", "application/octet-stream")
+					chunk := bytes.Repeat([]byte{42}, 8192)
+					tick := time.NewTicker(2 * time.Millisecond)
+					defer tick.Stop()
+					for {
+						if _, e := w.Write(chunk); e != nil {
+							return
+						}
+						w.(http.Flusher).Flush()
+						select {
+						case <-req.Context().Done():
+							return
+						case <-tick.C:
+						}
+					}
+				}))
+				origin.TLS = &tls.Config{MinVersion: tls.VersionTLS13}
+				origin.StartTLS()
+			} else {
+				origin = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = io.WriteString(w, proof) }))
+			}
 			defer origin.Close()
 			port, statsPort := liveUsagePort(t), liveUsagePort(t)
 			for statsPort == port {
@@ -176,6 +235,7 @@ func testRealPinnedPretrafficUsageAdmission(t *testing.T, modes []string) {
 			cfg.ConfigSHA = cfg.Candidate.SHA256
 			cfg.ManifestSHA = cfg.Candidate.ManifestSHA256
 			options := managedxray.Options{Directory: filepath.Join(t.TempDir(), "private-runtime"), StateKey: bytes.Repeat([]byte{2}, 32), LeaseKey: []byte(nodeToken), NodeID: cfg.NodeID, InstallationID: installID, ListenIP: "127.0.0.1", Binary: binary, BinarySHA: pin}
+			options.ExperimentalFinalTCP = activeMode && mode != "active-no-opt-in"
 			r, err := managedxray.Open(options)
 			if err != nil {
 				t.Fatal(err)
@@ -236,6 +296,10 @@ func testRealPinnedPretrafficUsageAdmission(t *testing.T, modes []string) {
 			}
 			defer sender.Close()
 			observation := managedxray.UsageObservation{Epoch: epoch, StatsEndpoint: stats, Sender: sender, Interval: 100 * time.Millisecond, MaxSampleGap: 3 * time.Second, MaxPendingAge: 3 * time.Second}
+			if activeMode {
+				observation.MaxSampleGap = 8 * time.Second
+				observation.MaxPendingAge = 8 * time.Second
+			}
 			activationCtx, finishActivation := context.WithCancel(ctx)
 			defer finishActivation()
 			outcome := make(chan error, 1)
@@ -261,7 +325,7 @@ func testRealPinnedPretrafficUsageAdmission(t *testing.T, modes []string) {
 			case <-ctx.Done():
 				t.Fatal("activation did not finish")
 			}
-			if mode != "receipt-before-first-byte" {
+			if mode != "receipt-before-first-byte" && !activeMode {
 				if err == nil {
 					t.Fatal("invalid/expired/ambiguous initial authority activated")
 				}
@@ -314,6 +378,10 @@ func testRealPinnedPretrafficUsageAdmission(t *testing.T, modes []string) {
 			profiles, err := s.business.ListInbounds(ctx, key)
 			if err != nil {
 				t.Fatal(err)
+			}
+			if activeMode {
+				testActiveTCPOutcome(t, ctx, s, r, options, cfg, epoch, sender, mode, birth, customers, profiles[0].PublicKey, port, origin, &finalReport, assertClosed)
+				return
 			}
 			for i, c := range customers {
 				transferAdmissionClient(t, ctx, binary, c.UUID, profiles[0].PublicKey, port, origin.URL, proof)

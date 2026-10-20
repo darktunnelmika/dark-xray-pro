@@ -75,8 +75,8 @@ func openDisk(dir string,key []byte,aad string)(*disk,journal,error){
  if len(raw)<aead.NonceSize()+aead.Overhead(){d.close();return nil,empty,ErrCorrupt}
  plain,err:=aead.Open(nil,raw[:aead.NonceSize()],raw[aead.NonceSize():],d.aad);if err!=nil{d.close();return nil,empty,ErrCorrupt}
  var j journal
- if json.Unmarshal(plain,&j)!=nil||(j.Version!=1&&j.Version!=2&&j.Version!=3&&j.Version!=4)||j.Good!=nil&&j.Good.Sequence>j.Highwater{d.close();return nil,empty,ErrCorrupt}
- if (j.Version==1&&(j.Usage!=nil||j.Admission!=nil))||(j.Version==2&&(j.Usage==nil||j.Admission!=nil))||((j.Version==3||j.Version==4)&&!validPersistedAdmission(j)){d.close();return nil,empty,ErrCorrupt}
+ if json.Unmarshal(plain,&j)!=nil||(j.Version!=1&&j.Version!=2&&j.Version!=3&&j.Version!=4&&j.Version!=5)||j.Good!=nil&&j.Good.Sequence>j.Highwater{d.close();return nil,empty,ErrCorrupt}
+ if (j.Version==1&&(j.Usage!=nil||j.Admission!=nil))||(j.Version==2&&(j.Usage==nil||j.Admission!=nil))||((j.Version==3||j.Version==4||j.Version==5)&&!validPersistedAdmission(j)){d.close();return nil,empty,ErrCorrupt}
  if j.Usage!=nil{e,_,err:=uc.CanonicalEpoch(j.Usage.Epoch);if err!=nil||j.Good==nil||e.ConfigSHA!=j.Good.SHA{d.close();return nil,empty,ErrCorrupt};if _,err=uc.StatsArguments(j.Usage.StatsEndpoint);err!=nil{d.close();return nil,empty,ErrCorrupt}}
  return d,j,nil
 }

@@ -1,0 +1,40 @@
+// This file is copied into the pinned Xray app/stats/command package.
+// The modified upstream files remain covered by Xray's MPL-2.0 license.
+package command
+
+import (
+	"context"
+	"sort"
+	"strings"
+
+	darkpro "github.com/xtls/xray-core/common/darkpro"
+	feature_stats "github.com/xtls/xray-core/features/stats"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+)
+
+func (s *statsServer) darkProFinalStats(ctx context.Context, r *QueryStatsRequest) (*QueryStatsResponse, error) {
+	if !darkpro.Enabled() || r.Reset_ {
+		return nil, status.Error(codes.FailedPrecondition, "DARK PRO barrier is not enabled")
+	}
+	if r.Pattern == darkpro.Protocol+"capability" {
+		return &QueryStatsResponse{Stat: []*Stat{{Name: darkpro.Protocol+"scope/vless-direct-tcp", Value: 1}}}, nil
+	}
+	nonce, ok := strings.CutPrefix(r.Pattern, darkpro.Protocol+"drain/")
+	if !ok { return nil, status.Error(codes.InvalidArgument, "unknown DARK PRO barrier request") }
+	values, err := darkpro.Snapshot(ctx, nonce, func() map[string]int64 {
+		values := map[string]int64{}
+		s.stats.VisitCounters(func(name string, c feature_stats.Counter) bool {
+			if strings.HasPrefix(name, "user>>>") { values[name] = c.Value() }
+			return true
+		})
+		return values
+	})
+	if err != nil { return nil, status.Error(codes.FailedPrecondition, "DARK PRO drain did not complete") }
+	names := make([]string, 0, len(values))
+	for name := range values { names = append(names, name) }
+	sort.Strings(names)
+	response := &QueryStatsResponse{Stat: []*Stat{{Name: darkpro.Protocol+"sealed/"+nonce, Value: 1}}}
+	for _, name := range names { response.Stat = append(response.Stat, &Stat{Name:name, Value:values[name]}) }
+	return response, nil
+}

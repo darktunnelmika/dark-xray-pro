@@ -23,7 +23,7 @@ func validPretrafficJournal(j journal) bool {
 	if a.TrafficBarrier != pretrafficNeverInstalled && a.TrafficBarrier != pretrafficActivationPossible {
 		return false
 	}
-	if a.Settlement != nil && (a.TrafficBarrier != pretrafficNeverInstalled || j.Usage == nil ||
+	if a.Settlement != nil && ((a.TrafficBarrier != pretrafficNeverInstalled && !(j.Version == 5 && a.FinalReceipt != nil && *a.Settlement == *a.FinalReceipt)) || j.Usage == nil ||
 		!uc.ValidReceipt(*a.Settlement) || a.Settlement.EpochID != j.Usage.Epoch.ID) {
 		return false
 	}
@@ -31,7 +31,7 @@ func validPretrafficJournal(j journal) bool {
 }
 
 func (r *Runtime) provenUnopenedLocked() bool {
-	return r.state.Version == 4 && r.state.Admission != nil && r.state.Usage != nil &&
+	return (r.state.Version == 4 || r.state.Version == 5) && r.state.Admission != nil && r.state.Usage != nil &&
 		r.state.Admission.TrafficBarrier == pretrafficNeverInstalled && r.observer == nil
 }
 
@@ -46,7 +46,7 @@ func (r *Runtime) canPrepareUsageLocked() bool {
 	if r.state.Highwater == 0 && r.state.Good == nil && r.state.Usage == nil && r.state.Admission == nil {
 		return true
 	}
-	return r.pretrafficSettledLocked()
+	return r.pretrafficSettledLocked() || r.finalTCPSettledLocked()
 }
 
 // SettleUnopenedUsage settles ONLY a registered API-only birth whose encrypted
