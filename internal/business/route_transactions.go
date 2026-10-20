@@ -60,12 +60,13 @@ type RouteChannelView struct {
 	Commands         []RouteCommandView   `json:"commands"`
 }
 type routePayload struct {
-	Request      RouteCommandRequest   `json:"request"`
-	DraftState   string                `json:"draft_state"`
-	Generation   uint64                `json:"generation"`
-	Command      mx.TransactionCommand `json:"command"`
-	Candidate    xrayconfig.Candidate  `json:"candidate"`
-	ConfigBase64 string                `json:"config_base64"`
+	DependencyNodes []string              `json:"dependency_nodes,omitempty"`
+	Request         RouteCommandRequest   `json:"request"`
+	DraftState      string                `json:"draft_state"`
+	Generation      uint64                `json:"generation"`
+	Command         mx.TransactionCommand `json:"command"`
+	Candidate       xrayconfig.Candidate  `json:"candidate"`
+	ConfigBase64    string                `json:"config_base64"`
 }
 type routeRow struct {
 	view        RouteCommandView
@@ -436,6 +437,10 @@ func (s *Store) QueueRouteCommand(ctx context.Context, key []byte, node string, 
 			return empty, e
 		}
 		cmd.StageID = cmd.ID
+		// routeCandidate rejects SwapEnabled: this candidate currently refers
+		// only to its destination node. Preserve this authenticated map for
+		// history; future multi-node rendering must extend it at construction.
+		payload.DependencyNodes = []string{node}
 		cmd.RuntimeSequence = in.Expected.Highwater + 1
 		cmd.InterruptedCommandSHA = channel.Status.InterruptedCommandSHA
 	case "apply", "rollback", "renew":
@@ -456,6 +461,7 @@ func (s *Store) QueueRouteCommand(ctx context.Context, key []byte, node string, 
 		candidate = stage.payload.Candidate
 		candidate.Config = raw
 		payload.Request.Drafts = stage.payload.Request.Drafts
+		payload.DependencyNodes = append([]string(nil), stage.payload.DependencyNodes...)
 		cmd.StageID = in.StageID
 		cmd.RuntimeSequence = in.Expected.Highwater + 1
 		if in.Action == "apply" {

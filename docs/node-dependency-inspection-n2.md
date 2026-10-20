@@ -1,5 +1,9 @@
 # Node Manager N2 — read-only dependency inspection
 
+Historical baseline: N3 extends this coverage with retained Stage/version journals
+and authenticated command maps; see [N3](node-retained-dependencies-n3.md). The
+exclusions and coverage identifier below describe N2 before that extension.
+
 Owner-session GET `/api/v1/workspace/nodes/{id}/dependencies` provides an on-demand
 snapshot for an existing paired PRO node. Representatives and anonymous callers
 cannot read it. It has no mutation endpoint, migration, credential change, runtime

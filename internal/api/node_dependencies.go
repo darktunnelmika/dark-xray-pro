@@ -48,9 +48,10 @@ func (s *Server) attachNodeDependencies(mux *http.ServeMux) {
 		}
 		snapshot.Counts["replacement_operations"] = total
 		snapshot.Counts["noncancelled_replacements"] = pending
+		s.retainedNodeDependencies(node.Node.NodeID, node.Node.InstallationID, &snapshot)
 		respond(w, http.StatusOK, map[string]any{
 			"node_id": node.Node.NodeID, "installation_id": node.Node.InstallationID,
-			"observed_at": time.Now().UTC(), "coverage": "native_sqlite_and_replacement_journal_only",
+			"observed_at": time.Now().UTC(), "coverage": "native_sqlite_and_retained_journals",
 			"atomic_across_stores": false, "can_retire": false, "can_replace": false,
 			"counts": snapshot.Counts, "unknown_reasons": snapshot.UnknownReasons,
 			"lifecycle_blocker": "atomic_node_lifecycle_not_implemented",

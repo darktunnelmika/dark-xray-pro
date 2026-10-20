@@ -4,7 +4,7 @@ const pairCode = "c".repeat(64);
 const owner = { id: "owner", username: "new-pro-owner", role: "owner", representative_id: "owner" };
 const representative = { id: "rep-01", username: "rep-01", role: "representative", representative_id: "rep-01" };
 
-const dependencyKeys = "inbound_targets active_inbound_targets assigned_clients route_drafts draft_events swap_upstream_references config_revisions runtime_deliveries runtime_reports route_channels route_commands pending_route_commands unknown_route_commands metered_channels metered_commands pending_metered_commands unknown_metered_commands metered_births foreign_installation_rows usage_epochs open_usage_epochs uncertain_usage_epochs sealed_usage_epochs usage_holds usage_receipts usage_deltas foreign_usage_epochs replacement_operations noncancelled_replacements".split(" ");
+const dependencyKeys = "inbound_targets active_inbound_targets assigned_clients route_drafts draft_events swap_upstream_references config_revisions runtime_deliveries runtime_reports route_channels route_commands pending_route_commands unknown_route_commands metered_channels metered_commands pending_metered_commands unknown_metered_commands metered_births foreign_installation_rows usage_epochs open_usage_epochs uncertain_usage_epochs sealed_usage_epochs usage_holds usage_receipts usage_deltas foreign_usage_epochs replacement_operations noncancelled_replacements historical_stage_references historical_upstream_command_references unmapped_historical_commands saved_config_stages pending_config_stages foreign_config_stages saved_lab_versions selected_lab_versions previous_lab_versions lab_selection_events foreign_lab_versions".split(" ");
 async function setupDependencies(page:Page, mode="normal") {
   await setupNames(page);
   let reads=0;
@@ -13,8 +13,8 @@ async function setupDependencies(page:Page, mode="normal") {
     expect(route.request().method()).toBe("GET");reads++;
     if(mode==="normal"&&reads>1)return route.fulfill({status:503,json:{error:"node_dependencies_unavailable"}});
     const counts:Record<string,number|null>=Object.fromEntries(dependencyKeys.map(k=>[k,0]));
-    counts.inbound_targets=2;counts.swap_upstream_references=1;counts.usage_epochs=null;
-    const body={node_id:"lab-name",installation_id:"a".repeat(32),observed_at:"2026-10-20T12:00:00Z",coverage:"native_sqlite_and_replacement_journal_only",atomic_across_stores:false,can_retire:false,can_replace:false,lifecycle_blocker:"atomic_node_lifecycle_not_implemented",counts,unknown_reasons:mode==="missing-reason"?{}:{usage_epochs:"usage_ledger_disabled"}};
+    counts.inbound_targets=2;counts.swap_upstream_references=1;counts.usage_epochs=null;counts.saved_config_stages=3;counts.unmapped_historical_commands=2;counts.historical_upstream_command_references=null;
+    const body={node_id:"lab-name",installation_id:"a".repeat(32),observed_at:"2026-10-20T12:00:00Z",coverage:"native_sqlite_and_retained_journals",atomic_across_stores:false,can_retire:false,can_replace:false,lifecycle_blocker:"atomic_node_lifecycle_not_implemented",counts,unknown_reasons:mode==="missing-reason"?{}:{usage_epochs:"usage_ledger_disabled",historical_upstream_command_references:"historical_node_map_missing"}};
     if(mode==="wrong-node")body.node_id="other-node";
     if(mode==="unsafe")body.can_retire=true;
     return route.fulfill({json:body});
@@ -40,6 +40,8 @@ test("dependency snapshot fits 320px Persian with explicit unknown accounting",a
   await page.getByRole("button",{name:"بررسی وابستگی‌های نود"}).click();
   await expect(page.locator('[data-dependency="usage_epochs"] dd')).toContainText("نامعلوم");
   await expect(page.locator('[data-dependency="swap_upstream_references"] dd')).toHaveText("۱");
+  await expect(page.locator('[data-dependency="historical_upstream_command_references"] dd')).toContainText("فرمان‌های قدیمی نقشهٔ نودهای وابسته ندارند");
+  await expect(page.locator('[data-dependency="saved_config_stages"] dd')).toHaveText("۳");
   expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+2)).toBe(true);
 });
 

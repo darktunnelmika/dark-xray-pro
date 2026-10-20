@@ -3,6 +3,9 @@ import { api, type Language } from "./session";
 import "./NodeDependencies.css";
 
 const labels = {
+  historical_stage_references:["Distinct retained command Stages","Stageهای یکتای محفوظ در فرمان‌ها"],historical_upstream_command_references:["Historical commands using this node upstream","فرمان‌های تاریخی وابسته به این نود بالادستی"],unmapped_historical_commands:["Commands without node maps (all nodes)","فرمان‌های بدون نقشهٔ وابستگی؛ همهٔ نودها"],
+  saved_config_stages:["Saved configuration Stages","Stageهای تنظیمات ذخیره‌شده"],pending_config_stages:["Pending configuration Stages","Stageهای تنظیمات در انتظار تأیید"],foreign_config_stages:["Configuration Stages for other installations","Stageهای تنظیمات نصب‌های دیگر"],
+  saved_lab_versions:["Saved LAB versions","نسخه‌های ذخیره‌شدهٔ LAB"],selected_lab_versions:["Selected LAB versions (not process state)","نسخه‌های منتخب LAB؛ مستقل از وضعیت فرایند"],previous_lab_versions:["Previous LAB versions","نسخه‌های قبلی LAB"],lab_selection_events:["LAB selection and rollback events","رویدادهای انتخاب و بازگردانی LAB"],foreign_lab_versions:["LAB versions for other installations","نسخه‌های LAB متعلق به نصب‌های دیگر"],
   inbound_targets:["Inbound targets (including archived)","اتصال‌های اینباند، شامل آرشیوشده"],
   active_inbound_targets:["Enabled non-archived targets","اتصال‌های فعال و آرشیونشده"],
   assigned_clients:["Distinct assigned clients","کلاینت‌های اختصاص‌یافتهٔ یکتا"],
@@ -17,11 +20,11 @@ const labels = {
 } as const;
 type Snapshot = { node_id:string;installation_id:string;observed_at:string;coverage:string;atomic_across_stores:false;can_retire:false;can_replace:false;lifecycle_blocker:string;counts:Record<string,number|null>;unknown_reasons:Record<string,string> };
 const words = {
-  en:{open:"Inspect node dependencies",title:"Node dependency snapshot",refresh:"Refresh dependencies",close:"Close dependencies",loading:"Reading dependencies…",failed:"Dependencies could not be verified. Counts are unavailable, not zero.",unknown:"Unknown",boundary:"Read-only snapshot across separate stores, not atomic. Empty counts do NOT authorize deletion or replacement. Stage files, backups and live process/socket state are outside this inspection.",at:"Observed at",key:"Encryption key unavailable",ledger:"Usage ledger disabled",journal:"Replacement journal disabled",limit:"Draft inspection limit reached"},
-  fa:{open:"بررسی وابستگی‌های نود",title:"تصویر وابستگی‌های نود",refresh:"بازخوانی وابستگی‌ها",close:"بستن وابستگی‌ها",loading:"در حال بررسی وابستگی‌ها…",failed:"وابستگی‌ها قابل تأیید نیستند؛ شمارنده‌ها نامعلوم‌اند، نه صفر.",unknown:"نامعلوم",boundary:"گزارش فقط‌خواندنی از مخزن‌های جداگانه است و یکپارچهٔ اتمیک نیست. صفر بودن شمارنده‌ها مجوز حذف یا جایگزینی نیست. فایل‌های Stage، بکاپ‌ها و وضعیت زندهٔ فرایند و پورت در این بررسی نیستند.",at:"زمان مشاهده",key:"کلید رمزگشایی در دسترس نیست",ledger:"دفتر حسابداری غیرفعال است",journal:"دفتر جایگزینی غیرفعال است",limit:"تعداد پیش‌نویس‌ها از سقف بررسی بیشتر است"},
+  en:{open:"Inspect node dependencies",title:"Node dependency snapshot",refresh:"Refresh dependencies",close:"Close dependencies",loading:"Reading dependencies…",failed:"Dependencies could not be verified. Counts are unavailable, not zero.",unknown:"Unknown",boundary:"Read-only snapshot across separate stores, not atomic. Empty counts do NOT authorize deletion or replacement. Saved Stages and LAB selections are included. Legacy command node maps may be unknown. Backups and live process/socket state are outside this inspection.",at:"Observed at",key:"Encryption key unavailable",ledger:"Usage ledger disabled",journal:"Replacement journal disabled",limit:"Draft inspection limit reached"},
+  fa:{open:"بررسی وابستگی‌های نود",title:"تصویر وابستگی‌های نود",refresh:"بازخوانی وابستگی‌ها",close:"بستن وابستگی‌ها",loading:"در حال بررسی وابستگی‌ها…",failed:"وابستگی‌ها قابل تأیید نیستند؛ شمارنده‌ها نامعلوم‌اند، نه صفر.",unknown:"نامعلوم",boundary:"گزارش فقط‌خواندنی از مخزن‌های جداگانه است و یکپارچهٔ اتمیک نیست. صفر بودن شمارنده‌ها مجوز حذف یا جایگزینی نیست. Stageهای ذخیره‌شده و انتخاب نسخهٔ LAB بررسی می‌شوند. نقشهٔ وابستگی فرمان‌های قدیمی ممکن است نامعلوم باشد. بکاپ‌ها و وضعیت زندهٔ فرایند و پورت در این بررسی نیستند.",at:"زمان مشاهده",key:"کلید رمزگشایی در دسترس نیست",ledger:"دفتر حسابداری غیرفعال است",journal:"دفتر جایگزینی غیرفعال است",limit:"تعداد پیش‌نویس‌ها از سقف بررسی بیشتر است"},
 };
 function validate(raw:Snapshot,node:string) {
-  if (!raw || raw.node_id!==node || !/^[a-f0-9]{32}$/.test(raw.installation_id) || !Number.isFinite(Date.parse(raw.observed_at)) || raw.coverage!=="native_sqlite_and_replacement_journal_only" || raw.atomic_across_stores!==false || raw.can_retire!==false || raw.can_replace!==false || raw.lifecycle_blocker!=="atomic_node_lifecycle_not_implemented" || !raw.counts || !raw.unknown_reasons) throw new Error("invalid_dependencies");
+  if (!raw || raw.node_id!==node || !/^[a-f0-9]{32}$/.test(raw.installation_id) || !Number.isFinite(Date.parse(raw.observed_at)) || raw.coverage!=="native_sqlite_and_retained_journals" || raw.atomic_across_stores!==false || raw.can_retire!==false || raw.can_replace!==false || raw.lifecycle_blocker!=="atomic_node_lifecycle_not_implemented" || !raw.counts || !raw.unknown_reasons) throw new Error("invalid_dependencies");
   for (const key of Object.keys(labels)) {
     const n=raw.counts[key];
     if(n===null ? typeof raw.unknown_reasons[key]!=="string" || !raw.unknown_reasons[key] : !Number.isSafeInteger(n) || n<0) throw new Error("invalid_count");
@@ -41,7 +44,8 @@ export default function NodeDependencies({nodeID,language}:{nodeID:string;langua
     catch{if(active.current===controller)setFailed(true);}
     finally{if(active.current===controller){active.current=null;setBusy(false);}}
   }
-  const reason=(key:string)=>({inbound_key_unavailable:t.key,usage_ledger_disabled:t.ledger,replacement_journal_disabled:t.journal,draft_scan_limit:t.limit}[key]??t.unknown);
+  const extraReasons:Record<string,readonly [string,string]>={config_stage_store_disabled:["Configuration Stage store disabled","مخزن Stage تنظیمات غیرفعال است"],lab_revision_store_disabled:["LAB version journal disabled","دفتر نسخه‌های LAB غیرفعال است"],command_history_limit:["Command history inspection limit reached","سابقهٔ فرمان‌ها از سقف بررسی بیشتر است"],command_history_unverifiable:["Command history could not be authenticated","اصالت سابقهٔ فرمان‌ها قابل تأیید نیست"],historical_node_map_missing:["Legacy commands lack saved node maps","فرمان‌های قدیمی نقشهٔ نودهای وابسته ندارند"]};
+  const reason=(key:string)=>extraReasons[key]?.[index]??({inbound_key_unavailable:t.key,usage_ledger_disabled:t.ledger,replacement_journal_disabled:t.journal,draft_scan_limit:t.limit}[key]??t.unknown);
   if(!open)return <button type="button" onClick={()=>{setOpen(true);void read();}}>{t.open}</button>;
   return <section className="pro-node-dependencies" aria-label={t.title}>
     <h4>{t.title}</h4><p>{t.boundary}</p>

@@ -140,7 +140,7 @@ jobs:
       - name: Repeat node name receipt and concurrency contracts
         run: go test -race ./internal/noderegistry ./internal/api -run 'TestRename|TestOwnerNodeRename' -count=5 -timeout=120s -v
       - name: Repeat read-only node dependency contracts
-        run: go test -race ./internal/business ./internal/api -run 'TestNodeDependencies|TestOwnerNodeDependencies' -count=5 -timeout=120s -v
+        run: go test -race ./internal/business ./internal/api -run 'TestNodeDependencies|TestOwnerNodeDependencies|TestNodeHistory|TestNodeRetained' -count=5 -timeout=120s -v
       - name: Repeat observer stop receipt race regression
         shell: bash
         run: |
