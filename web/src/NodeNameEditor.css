@@ -1,0 +1,11 @@
+.pro-node-roster-row > .pro-node-name-editor { flex-basis:100%; width:100%; max-width:100%; min-width:0; box-sizing:border-box; padding:12px; border:1px solid var(--border); border-radius:12px; overflow-wrap:anywhere; }
+.pro-node-name-editor form { display:flex; gap:12px; align-items:end; flex-wrap:wrap; }
+.pro-node-name-editor label { display:flex; flex-direction:column; gap:6px; min-width:0; flex:1 1 180px; }
+.pro-node-name-editor input { width:100%; min-width:0; box-sizing:border-box; }
+.pro-node-name-editor button { margin-block:6px; white-space:normal; }
+.pro-node-name-editor ul { padding-inline-start:20px; }
+.pro-node-roster-row { flex-wrap:wrap; }
+@media(max-width:580px) {
+  .pro-node-roster-row { flex-wrap:nowrap; }
+  .pro-node-roster-row > .pro-node-name-editor { flex-basis:auto; }
+}

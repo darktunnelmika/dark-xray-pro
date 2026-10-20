@@ -4,6 +4,83 @@ const pairCode = "c".repeat(64);
 const owner = { id: "owner", username: "new-pro-owner", role: "owner", representative_id: "owner" };
 const representative = { id: "rep-01", username: "rep-01", role: "representative", representative_id: "rep-01" };
 
+async function setupNames(page: Page, mode: "lost" | "conflict" | "read-error" = "lost") {
+  await setup(page);
+  let name = "Original";
+  let revision = 1;
+  let reads = 0;
+  const requests: Record<string, unknown>[] = [];
+  let receipt: Record<string, unknown> | null = null;
+  await page.route("**/api/v1/**", async route => {
+    const req = route.request();
+    const path = new URL(req.url()).pathname;
+    const node = { node_id: "lab-name", name, installation_id: "a".repeat(32), paired_at: "2026-10-20T12:00:00Z", status: "offline", metrics_current: false, last_seen: null };
+    if (path === "/api/v1/workspace/nodes") return route.fulfill({json:{mode:"new_pro_lab_only",nodes:[node]}});
+    if (path.endsWith("/lab-name/name")) {
+      reads++;
+      if (mode === "read-error") return route.fulfill({status:503,json:{error:"unavailable"}});
+      return route.fulfill({json:{node,revision,audit_count:receipt ? 1 : 0,recent:receipt ? [receipt] : []}});
+    }
+    if (path.endsWith("/lab-name/rename")) {
+      expect(req.headers()["x-csrf-token"]).toBe("a".repeat(64));
+      const input = req.postDataJSON(); requests.push(input);
+      if (mode === "conflict") { name="Other owner";revision=2;return route.fulfill({status:409,json:{error:"node_name_conflict"}}); }
+      if (!receipt) {
+        expect(input.expected_revision).toBe(1);
+        receipt={...input,previous_name:name,revision:2,actor_id:"owner",at:"2026-10-20T12:01:00Z"};
+        name=input.name;revision=2;
+        return route.fulfill({status:503,json:{error:"node_name_outcome_unknown"}});
+      }
+      expect(input).toEqual(requests[0]);
+      return route.fulfill({json:{receipt}});
+    }
+    return route.fallback();
+  });
+  return {requests, reads:()=>reads};
+}
+
+test("name editor retries a committed lost reply with the identical event and reads live state", async ({page}) => {
+  const probe=await setupNames(page);
+  await page.goto("/nodes");await login(page);
+  await expect(page.getByRole("button",{name:"Manage display name"})).toBeVisible();
+  expect(probe.reads()).toBe(0);
+  await page.getByRole("button",{name:"Manage display name"}).click();
+  await page.getByLabel("New display name").fill("Renamed");
+  await page.getByRole("button",{name:"Save name",exact:true}).click();
+  await expect(page.getByText(/Outcome is unknown/)).toBeVisible();
+  await expect(page.getByLabel("New display name")).toBeDisabled();
+  await page.getByRole("button",{name:"Retry same request"}).click();
+  await expect(page.getByText("Receipt confirmed; current state refreshed.")).toBeVisible();
+  await expect(page.getByLabel("New display name")).toHaveValue("Renamed");
+  expect(probe.requests).toHaveLength(2);
+  expect(probe.requests[0]).toEqual(probe.requests[1]);
+  await expect(page.locator(".pro-node-name-editor li")).toHaveCount(1);
+});
+
+test("name revision conflict locks editing until explicit refresh", async ({page}) => {
+  await setupNames(page,"conflict");await page.goto("/nodes");await login(page);
+  await page.getByRole("button",{name:"Manage display name"}).click();
+  await page.getByLabel("New display name").fill("Stale change");
+  await page.getByRole("button",{name:"Save name",exact:true}).click();
+  await expect(page.getByText(/Revision or event conflict/)).toBeVisible();
+  await expect(page.getByRole("button",{name:"Save name",exact:true})).toBeDisabled();
+  await page.getByRole("button",{name:"Read current name"}).click();
+  await expect(page.getByLabel("New display name")).toHaveValue("Other owner");
+  await expect(page.getByText("Revision: 2",{exact:true})).toBeVisible();
+});
+
+test("Persian name editor remains locked on unreadable state at 320px", async ({page}) => {
+  const probe=await setupNames(page,"read-error");await page.setViewportSize({width:320,height:760});
+  await page.goto("/nodes");await login(page);
+  await page.getByRole("button",{name:"Switch language"}).click();
+  await page.getByRole("button",{name:"مدیریت نام نمایشی"}).click();
+  await expect(page.getByText("نام فعلی قابل دریافت نیست؛ ویرایش قفل است.")).toBeVisible();
+  await expect(page.getByRole("button",{name:"ذخیرهٔ نام"})).toBeDisabled();
+  expect(probe.requests).toHaveLength(0);
+  const overflow = await page.evaluate(() => [...document.querySelectorAll("main *")].map(el => ({ tag: el.tagName, cls: el.className, width: el.getBoundingClientRect().width, left: el.getBoundingClientRect().left, right: el.getBoundingClientRect().right })).filter(el => el.left < -2 || el.right > innerWidth + 2));
+  expect(overflow).toEqual([]);
+});
+
 async function setup(page: Page, role: "owner" | "representative" = "owner") {
   let signed = false;
   let invites = 0;
