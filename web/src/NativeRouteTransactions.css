@@ -1,0 +1,13 @@
+.route-transactions{overflow-wrap:anywhere}
+.route-transactions-heading{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px}
+.route-transactions h4{font-size:13px;margin:0 0 10px;display:flex;align-items:center;gap:8px}
+.route-live,.route-draft-review article,.route-command-history article{border:1px solid var(--border);background:var(--surface-2);border-radius:12px;padding:13px;display:grid;gap:8px;min-width:0}
+.route-live span,.route-draft-review span,.route-command-history span,.route-transactions small{font-size:11px;line-height:1.8;color:var(--sub)}
+.route-live strong,.route-draft-review strong,.route-command-history strong{font-size:12px;line-height:1.7}
+.route-draft-review{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,220px),1fr));gap:9px}
+.route-command-history{display:grid;gap:10px;min-width:0}
+.route-command-history details{font-size:11px;min-width:0}
+.route-command-history summary{cursor:pointer;padding-block:5px}
+.route-command-history details span{display:block}
+.route-transactions bdi{overflow-wrap:anywhere;white-space:normal}
+@media(max-width:360px){.route-transactions-heading button,.route-transactions .native-actions button{width:100%}}
