@@ -74,6 +74,22 @@ jobs:
           for e in events:
               if e.get('Output'): print(e['Output'],end='')
           PYGATE
+      - name: Prove exact pretraffic settlement and fresh replacement on real Xray
+        shell: bash
+        run: |
+          set -euo pipefail
+          go test -race ./internal/api -run '^TestRealPinnedPretrafficSettlement$' -count=3 -json -timeout=180s > "$RUNNER_TEMP/pretraffic-settlement.jsonl"
+          python3 - "$RUNNER_TEMP/pretraffic-settlement.jsonl" <<'PYSETTLE'
+          import collections,json,sys
+          events=[json.loads(line) for line in open(sys.argv[1])]
+          name='TestRealPinnedPretrafficSettlement'
+          required={name}|{name+'/'+s for s in ('settlement-restart','settlement-lost-final-receipt','settlement-lost-confirmation','settlement-unknown-tail','settlement-replacement')}
+          passed=collections.Counter(e.get('Test') for e in events if e.get('Action')=='pass')
+          assert all(passed[n]==3 for n in required), dict(passed)
+          assert not any(e.get('Action') in ('skip','fail') and e.get('Test','').startswith(name) for e in events)
+          for e in events:
+              if e.get('Output'): print(e['Output'],end='')
+          PYSETTLE
       - name: Prove remote Node metered admission on stock Xray and private TLS
         shell: bash
         run: |
@@ -113,3 +129,4 @@ jobs:
           if test -f "$RUNNER_TEMP/live-native-usage.jsonl"; then cat "$RUNNER_TEMP/live-native-usage.jsonl"; fi
           if test -f "$RUNNER_TEMP/continuous-observer.jsonl"; then cat "$RUNNER_TEMP/continuous-observer.jsonl"; fi
           if test -f "$RUNNER_TEMP/pretraffic-admission.jsonl"; then cat "$RUNNER_TEMP/pretraffic-admission.jsonl"; fi
+          if test -f "$RUNNER_TEMP/pretraffic-settlement.jsonl"; then cat "$RUNNER_TEMP/pretraffic-settlement.jsonl"; fi

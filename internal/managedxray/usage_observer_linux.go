@@ -33,6 +33,7 @@ type observedUsage struct {
 	StatsEndpoint string   `json:"stats_endpoint"`
 }
 type UsageObservationStatus struct {
+	Settled bool `json:"settled,omitempty"`
 	Required                 bool   `json:"required"`
 	Running                  bool   `json:"running"`
 	Samples                  uint64 `json:"samples"`
@@ -335,6 +336,7 @@ func (m *usageObserver) run(ctx context.Context) {
 	}
 }
 func (r *Runtime) usageStatusLocked() UsageObservationStatus {
+	if r.pretrafficSettledLocked() { return UsageObservationStatus{Required:true,Settled:true} }
 	if r.state.Usage == nil {
         if r.state.Admission!=nil{return UsageObservationStatus{Required:true,SettlementRequired:true,Failure:"prepared_admission_incomplete"}}
 		return UsageObservationStatus{}
@@ -353,9 +355,12 @@ func (r *Runtime) UsageStatus() UsageObservationStatus {
 // ReplayObservedUsage only drains PREVIOUSLY persisted observations after a
 // restart. It does not read dead Xray counters, fabricate a final sample, seal
 // the epoch, clear the settlement fence, or authorize a recovered listener.
+// The sole exception is a v4 never-installed admission: it uses the separate
+// pretraffic settlement protocol, including exact HUB seal confirmation.
 func (r *Runtime) ReplayObservedUsage(ctx context.Context, sender *uc.Sender) (int, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.provenUnopenedLocked() { return r.settleUnopenedUsageLocked(ctx,sender) }
 	if ctx == nil || sender == nil || r.closed || r.fenced || r.observer != nil || !r.process.dead() || r.state.Usage == nil {
 		return 0, ErrInvalid
 	}

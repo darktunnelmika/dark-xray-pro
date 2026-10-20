@@ -12,7 +12,7 @@ func respond(w http.ResponseWriter,status int,value any){w.Header().Set("Content
 func fail(w http.ResponseWriter,status int,code string){respond(w,status,map[string]string{"error":code})}
 func(h *Handler)ServeHTTP(w http.ResponseWriter,r *http.Request){
  w.Header().Set("Cache-Control","no-store");w.Header().Set("X-Content-Type-Options","nosniff");w.Header().Set("Referrer-Policy","no-referrer")
- if r.URL.Path!=AgentPath&&r.URL.Path!=InterruptionPath{http.NotFound(w,r);return};if r.Method!=http.MethodPost{w.Header().Set("Allow","POST");fail(w,405,"method_not_allowed");return}
+ if r.URL.Path!=AgentPath&&r.URL.Path!=InterruptionPath&&r.URL.Path!=SettlementPath{http.NotFound(w,r);return};if r.Method!=http.MethodPost{w.Header().Set("Allow","POST");fail(w,405,"method_not_allowed");return}
  if r.TLS==nil||r.TLS.Version<tls.VersionTLS13{fail(w,426,"tls13_required");return}
  q,err:=httpQuery(r);if err!=nil{fail(w,400,"invalid_agent_scope");return}
  auth:=r.Header.Values("Authorization");if len(auth)!=1||!strings.HasPrefix(auth[0],"Bearer "){fail(w,401,"unauthorized");return}
@@ -21,9 +21,10 @@ func(h *Handler)ServeHTTP(w http.ResponseWriter,r *http.Request){
  if !ok||p.NodeID!=q[0]||p.InstallationID!=q[1]{fail(w,401,"unauthorized");return}
  select{case h.inflight<-struct{}{}:defer func(){<-h.inflight}();default:w.Header().Set("Retry-After","1");fail(w,429,"usage_ingest_busy");return}
  media,_,err:=mime.ParseMediaType(r.Header.Get("Content-Type"));if err!=nil||media!="application/json"{fail(w,415,"json_required");return}
- limit:=int64(MaxReportBytes);if r.URL.Path==InterruptionPath{limit=1024}
+ limit:=int64(MaxReportBytes);if r.URL.Path==InterruptionPath||r.URL.Path==SettlementPath{limit=1024}
  reader:=http.MaxBytesReader(w,r.Body,limit);defer reader.Close();raw,err:=io.ReadAll(reader);if err!=nil{fail(w,413,"report_too_large");return}
  if r.URL.Path==InterruptionPath{h.interrupted(ctx,w,p,raw);return}
+ if r.URL.Path==SettlementPath{h.settled(ctx,w,p,raw);return}
  var report uc.Report;if usagewire.Decode(raw,&report)!=nil{fail(w,400,"invalid_usage_json");return}
  receipt,err:=h.ledger.Accept(ctx,p,report)
  if err!=nil{switch{

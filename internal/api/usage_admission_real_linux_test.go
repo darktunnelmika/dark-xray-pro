@@ -27,6 +27,7 @@ import (
 	"github.com/darktunnelmika/dark-xray-pro/internal/business"
 	"github.com/darktunnelmika/dark-xray-pro/internal/managedxray"
 	uc "github.com/darktunnelmika/dark-xray-pro/internal/usagecheckpoint"
+	"github.com/darktunnelmika/dark-xray-pro/internal/usageledger"
 	"github.com/darktunnelmika/dark-xray-pro/internal/xrayconfig"
 )
 
@@ -34,6 +35,14 @@ import (
 // observer. The trusted test supervisor registers the birth using Store APIs;
 // ordinary remote metered delivery remains intentionally 503-gated.
 func TestRealPinnedPretrafficUsageAdmission(t *testing.T) {
+	testRealPinnedPretrafficUsageAdmission(t, []string{"receipt-before-first-byte", "lost-zero-receipt", "wrong-pin", "lease-expires-at-barrier", "restart-while-prepared", "cancel-at-barrier"})
+}
+
+func TestRealPinnedPretrafficSettlement(t *testing.T) {
+	testRealPinnedPretrafficUsageAdmission(t, []string{"settlement-restart", "settlement-lost-final-receipt", "settlement-lost-confirmation", "settlement-unknown-tail", "settlement-replacement"})
+}
+
+func testRealPinnedPretrafficUsageAdmission(t *testing.T, modes []string) {
 	binary, pin := os.Getenv("DARK_PRO_TEST_XRAY_BINARY"), os.Getenv("DARK_PRO_TEST_XRAY_SHA256")
 	if binary == "" && pin == "" {
 		t.Skip("explicit pinned real core required")
@@ -41,7 +50,7 @@ func TestRealPinnedPretrafficUsageAdmission(t *testing.T) {
 	if !filepath.IsAbs(binary) || len(pin) != 64 || os.Geteuid() == 0 {
 		t.Fatal("unprivileged pinned real core required")
 	}
-	for _, mode := range []string{"receipt-before-first-byte", "lost-zero-receipt", "wrong-pin", "lease-expires-at-barrier", "restart-while-prepared", "cancel-at-barrier"} {
+	for _, mode := range modes {
 		t.Run(mode, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
 			defer cancel()
@@ -70,25 +79,47 @@ func TestRealPinnedPretrafficUsageAdmission(t *testing.T) {
 			unblock := func() { onceRelease.Do(func() { close(release) }) }
 			defer unblock()
 			var requests atomic.Int64
+			var lostConfirmation atomic.Bool
 			actual := s.AgentHandler()
 			receiver := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-				if req.URL.Path == "/api/v1/agent/native-usage" && requests.Add(1) == 1 {
-					onceArrival.Do(func() { close(arrival) })
-					if mode == "receipt-before-first-byte" || mode == "lease-expires-at-barrier" || mode == "cancel-at-barrier" {
-						select {
-						case <-release:
-						case <-req.Context().Done():
-							return
-						}
+				if req.URL.Path == "/api/v1/agent/native-usage/settled" && mode == "settlement-lost-confirmation" && !lostConfirmation.Swap(true) {
+					rec := httptest.NewRecorder()
+					actual.ServeHTTP(rec, req)
+					if rec.Code != 200 {
+						t.Error("seal confirmation was not successful", rec.Code)
 					}
-					if mode == "lost-zero-receipt" {
+					w.WriteHeader(503)
+					return
+				}
+				if req.URL.Path == "/api/v1/agent/native-usage" {
+					requestNumber := requests.Add(1)
+					if requestNumber == 3 && mode == "settlement-lost-final-receipt" {
 						rec := httptest.NewRecorder()
 						actual.ServeHTTP(rec, req)
 						if rec.Code != 200 {
-							t.Error("baseline was not actually committed", rec.Code)
+							t.Error("final report did not commit", rec.Code)
 						}
 						w.WriteHeader(503)
 						return
+					}
+					if requestNumber == 1 {
+						onceArrival.Do(func() { close(arrival) })
+						if mode == "receipt-before-first-byte" || mode == "lease-expires-at-barrier" || mode == "cancel-at-barrier" {
+							select {
+							case <-release:
+							case <-req.Context().Done():
+								return
+							}
+						}
+						if mode == "lost-zero-receipt" || strings.HasPrefix(mode, "settlement-") {
+							rec := httptest.NewRecorder()
+							actual.ServeHTTP(rec, req)
+							if rec.Code != 200 {
+								t.Error("baseline was not actually committed", rec.Code)
+							}
+							w.WriteHeader(503)
+							return
+						}
 					}
 				}
 				actual.ServeHTTP(w, req)
@@ -247,19 +278,26 @@ func TestRealPinnedPretrafficUsageAdmission(t *testing.T) {
 				if _, e = reopened.Recover(ctx, liveUsageLease(t, options, cfg.Sequence, cfg.Candidate)); !errors.Is(e, managedxray.ErrUsageSettlement) {
 					t.Fatal("failed admission recovered unobserved", e)
 				}
+				if strings.HasPrefix(mode, "settlement-") {
+					testPretrafficSettlementOutcome(t, ctx, s, reopened, options, cfg, epoch, sender, mode, birth, assertClosed)
+					return
+				}
 				if mode == "lost-zero-receipt" {
 					if _, e = reopened.ReplayObservedUsage(ctx, sender); e != nil {
 						t.Fatal(e)
 					}
 					a, e := s.business.ClientUsage(ctx, customers[0].ID)
-					if e != nil || a.Total != 0 || a.Holds != 1 || a.Eligible {
-						t.Fatal("ambiguous start replay changed zero/hold", a, e)
+					if e != nil || a.Total != 0 || a.Holds != 0 || !a.Eligible || !reopened.UsageStatus().Settled {
+						t.Fatal("proven unopened birth failed exact settlement", a, e)
 					}
 				}
 				return
 			}
 			if err != nil {
 				t.Fatal("activation failed", err)
+			}
+			if _, e := r.SettleUnopenedUsage(ctx, sender); !errors.Is(e, managedxray.ErrUsageSettlement) {
+				t.Fatal("active runtime accepted pretraffic settlement", e)
 			}
 			finishActivation() // the short operation context must not own the observer lifetime.
 			observed, err := r.ObservationProcess()
@@ -358,4 +396,95 @@ func transferAdmissionClient(t *testing.T, ctx context.Context, binary, uuid, ke
 	if err != nil || string(body) != proof {
 		t.Fatal("REALITY payload mismatch", err)
 	}
+}
+
+func testPretrafficSettlementOutcome(t *testing.T, ctx context.Context, s *Server, r *managedxray.Runtime, o managedxray.Options, cfg business.NodeConfig, epoch uc.Epoch, sender *uc.Sender, mode string, oldBirth uc.ProcessToken, assertClosed func()) {
+	t.Helper()
+	if mode == "settlement-unknown-tail" {
+		if err := s.business.UsageLedger().MarkEpochUncertain(ctx, usageledger.Principal{NodeID: epoch.NodeID, InstallationID: epoch.InstallationID}, epoch.ID, "test pre-existing uncertainty"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_, err := r.SettleUnopenedUsage(ctx, sender)
+	if mode == "settlement-unknown-tail" {
+		a, e := s.business.ClientUsage(ctx, epoch.Bindings[0].ClientID)
+		if err == nil || e != nil || a.Holds != 1 || a.Eligible || r.UsageStatus().Settled || !r.UsageStatus().SettlementRequired {
+			t.Fatal("unknown tail cleared", a, err, e)
+		}
+		if _, e = r.PrepareUsageAdmission(ctx, managedxray.Revision{Sequence: cfg.Sequence + 1, Candidate: cfg.Candidate}, liveUsageLease(t, o, cfg.Sequence+1, cfg.Candidate)); !errors.Is(e, managedxray.ErrUsageSettlement) {
+			t.Fatal("unknown epoch replaced", e)
+		}
+		assertClosed()
+		return
+	}
+	if mode == "settlement-lost-final-receipt" || mode == "settlement-lost-confirmation" {
+		if err == nil || r.UsageStatus().Settled || !r.UsageStatus().SettlementRequired {
+			t.Fatal("ambiguous final response released fence", err)
+		}
+		assertClosed()
+		r.Close()
+		r, err = managedxray.Open(o)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer r.Close()
+		_, err = r.ReplayObservedUsage(ctx, sender)
+	}
+	if err != nil || !r.UsageStatus().Settled || r.UsageStatus().SettlementRequired {
+		t.Fatal("exact settlement failed", r.UsageStatus(), err)
+	}
+	if _, err = uc.Process(oldBirth.PID); err == nil {
+		t.Fatal("old process survived terminal receipt")
+	}
+	assertClosed()
+	for _, binding := range epoch.Bindings {
+		a, e := s.business.ClientUsage(ctx, binding.ClientID)
+		if e != nil || a.Total != 0 || a.Holds != 0 || !a.Known || !a.Eligible {
+			t.Fatal("settlement changed bytes/identity/eligibility", a, e)
+		}
+	}
+	if sent, e := r.SettleUnopenedUsage(ctx, sender); e != nil || sent != 0 {
+		t.Fatal("settlement replay was not idempotent", sent, e)
+	}
+	if _, e := r.PrepareUsageAdmission(ctx, managedxray.Revision{Sequence: cfg.Sequence, Candidate: cfg.Candidate}, liveUsageLease(t, o, cfg.Sequence, cfg.Candidate)); !errors.Is(e, managedxray.ErrStale) {
+		t.Fatal("old revision reused after settlement", e)
+	}
+	if mode == "settlement-replacement" {
+		// Trusted fixture signs a fresh monotonic revision; the old birth/lease
+		// cannot be adopted. The same UUIDs pass a second zero-receipt barrier.
+		cfg.Sequence++
+		lease := liveUsageLease(t, o, cfg.Sequence, cfg.Candidate)
+		birth, e := r.PrepareUsageAdmission(ctx, managedxray.Revision{Sequence: cfg.Sequence, Candidate: cfg.Candidate}, lease)
+		if e != nil {
+			t.Fatal(e)
+		}
+		assertClosed()
+		if birth == oldBirth {
+			t.Fatal("old process birth reused")
+		}
+		if e = s.business.RecordNativeDelivery(ctx, cfg, lease); e != nil {
+			t.Fatal(e)
+		}
+		fresh, e := s.business.RegisterNativeUsageEpoch(ctx, cfg, business.UsageBirth{EpochID: strings.Repeat("e", 32), KernelBootID: birth.BootID, PID: birth.PID, StartTicks: birth.StartTicks})
+		if e != nil {
+			t.Fatal("new epoch denied after verified seal", e)
+		}
+		if _, e = r.ActivateUsageAdmission(ctx, managedxray.UsageObservation{Epoch: fresh, StatsEndpoint: managedStatsEndpoint(t, cfg.Candidate), Sender: sender, Interval: 100 * time.Millisecond, MaxSampleGap: 3 * time.Second, MaxPendingAge: 3 * time.Second}); e != nil {
+			t.Fatal("new admission", e)
+		}
+		if !r.Snapshot().ProcessReady || !r.UsageStatus().Running || r.UsageStatus().Settled {
+			t.Fatal("new observer did not replace settled status")
+		}
+		if _, e = r.SettleUnopenedUsage(ctx, sender); !errors.Is(e, managedxray.ErrUsageSettlement) {
+			t.Fatal("activated replacement accepted zero settlement", e)
+		}
+	}
+}
+func managedStatsEndpoint(t *testing.T, c xrayconfig.Candidate) string {
+	t.Helper()
+	_, _, endpoint, err := xrayconfig.UsageBootstrap(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return endpoint
 }

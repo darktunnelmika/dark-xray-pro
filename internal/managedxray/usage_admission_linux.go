@@ -18,11 +18,14 @@ import (
 )
 
 type usageAdmission struct {
-	StatsEndpoint string `json:"stats_endpoint"`
-	BootstrapSHA  string `json:"bootstrap_sha"`
+	TrafficBarrier string      `json:"traffic_barrier,omitempty"`
+	Settlement     *uc.Receipt `json:"settlement,omitempty"`
+	StatsEndpoint  string      `json:"stats_endpoint"`
+	BootstrapSHA   string      `json:"bootstrap_sha"`
 }
 
-// PrepareUsageAdmission is a fresh-runtime-only two-phase start. The signed
+// PrepareUsageAdmission is a two-phase start on a fresh runtime or a proven
+// settled pretraffic birth with a NEW monotonic signed revision. The signed
 // revision is validated, but Xray starts with NO customer inbounds. Only its
 // private API socket exists. The returned process birth must be registered by
 // the trusted HUB before ActivateUsageAdmission is called. No baseline or
@@ -36,10 +39,13 @@ func (r *Runtime) PrepareUsageAdmission(ctx context.Context, v Revision, l Lease
 	if r.closed || r.fenced {
 		return uc.ProcessToken{}, ErrClosed
 	}
-	if r.state.Highwater != 0 || r.state.Good != nil || r.state.Usage != nil || r.state.Admission != nil || r.process != nil {
+	if !r.canPrepareUsageLocked() {
 		return uc.ProcessToken{}, ErrUsageSettlement
 	}
 	saved := freeze(v)
+	if saved.Sequence <= r.state.Highwater || l.Issued <= r.state.LastLeaseIssued {
+		return uc.ProcessToken{}, ErrStale
+	}
 	if !r.validLease(l, saved) {
 		return uc.ProcessToken{}, ErrLease
 	}
@@ -63,14 +69,16 @@ func (r *Runtime) PrepareUsageAdmission(ctx context.Context, v Revision, l Lease
 		return uc.ProcessToken{}, ErrLease
 	}
 	next := r.state
-	next.Version = 3
+	next.Version = 4
+	next.Previous = next.Good
+	next.Usage = nil
 	next.Highwater = saved.Sequence
 	next.DesiredSHA = saved.SHA
 	next.DesiredManifest = saved.Manifest
 	next.Good = saved
 	next.Pending = nil
 	next.LastLeaseIssued = l.Issued
-	next.Admission = &usageAdmission{StatsEndpoint: endpoint, BootstrapSHA: bootstrap.SHA256}
+	next.Admission = &usageAdmission{StatsEndpoint: endpoint, BootstrapSHA: bootstrap.SHA256, TrafficBarrier: pretrafficNeverInstalled}
 	next.Phase = "usage_preparing_api_only"
 	if err = r.persist(next); err != nil {
 		return uc.ProcessToken{}, err
@@ -214,6 +222,15 @@ func (r *Runtime) ActivateUsageAdmission(ctx context.Context, o UsageObservation
 	if ctx.Err() != nil || !r.validLease(r.lease, r.active) {
 		return r.snapshot(), ErrLease
 	}
+	// Persist the point of no return BEFORE creating an observer or attempting
+	// AddInbound. A crash here is conservatively an uncertain traffic epoch.
+	next = r.state
+	admission := *next.Admission
+	admission.TrafficBarrier = pretrafficActivationPossible
+	next.Admission = &admission
+	if err = r.persist(next); err != nil {
+		return r.snapshot(), err
+	}
 	observerCtx, cancel := context.WithCancel(context.Background())
 	observer := &usageObserver{options: o, process: r.process, box: box, binary: r.options.Binary, pin: r.options.BinarySHA, cancel: cancel, done: make(chan struct{}), lastSaved: time.Now(), fresh: counters, ready: make(chan struct{}), status: UsageObservationStatus{Required: true, Running: true, Receipts: 1, SettlementRequired: true}}
 	r.observer = observer
@@ -298,7 +315,13 @@ func (r *Runtime) installAdmissionInbounds(ctx context.Context, payload []byte, 
 }
 
 func validPersistedAdmission(j journal) bool {
-	if j.Version != 3 || j.Admission == nil || j.Good == nil {
+	if (j.Version != 3 && j.Version != 4) || j.Admission == nil || j.Good == nil {
+		return false
+	}
+	if j.Version == 3 && (j.Admission.TrafficBarrier != "" || j.Admission.Settlement != nil) {
+		return false
+	}
+	if j.Version == 4 && !validPretrafficJournal(j) {
 		return false
 	}
 	bootstrap, _, endpoint, err := xrayconfig.UsageBootstrap(j.Good.candidate())
