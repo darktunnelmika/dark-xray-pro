@@ -63,7 +63,8 @@ func ValidLeaseSignature(l Lease, token string) bool {
 // protocol. Ordinary Sync can NEVER start a metered candidate. All requests
 // use the already verified/CA-trusted/leaf-pinned Agent HTTPS transport.
 // A missing receipt, crash, unknown process, changed candidate or outage
-// leaves the customer listener CLOSED, with an irreversible settlement fence.
+// leaves the customer listener CLOSED. Only a proven never-installed birth
+// can settle without an active-traffic drain.
 func (r *Runtime) MeteredRemoteSync(ctx context.Context, client *http.Client, endpoint string, sender *uc.Sender) (Snapshot, error) {
 	if ctx == nil || client == nil || sender == nil {
 		return r.Snapshot(), ErrInvalid
@@ -127,8 +128,12 @@ func (r *Runtime) MeteredRemoteSync(ctx context.Context, client *http.Client, en
 		return result, e
 	}
 	// Never restart/adopt a previous Xray birth. A new epoch can only be
-	// prepared by a fresh private, empty supervisor after explicit settlement.
-	if snapshot.Highwater > 0 || snapshot.SavedSequence > 0 || snapshot.Usage != nil {
+	// prepared by a fresh supervisor or a proven settled pretraffic birth;
+	// PrepareUsageAdmission still requires a higher revision and fresh lease.
+	r.mu.Lock()
+	canPrepare := r.canPrepareUsageLocked()
+	r.mu.Unlock()
+	if !canPrepare {
 		return snapshot, ErrUsageSettlement
 	}
 	birth, e := r.PrepareUsageAdmission(ctx, revision, delivery.Lease)

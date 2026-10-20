@@ -48,3 +48,13 @@ func TestAgentReplayGateNeverTreatsRecordedBytesAsRuntimePermission(t *testing.T
 		})
 	}
 }
+
+func TestAgentReplayGateRequiresExplicitSettlement(t *testing.T) {
+	for _, required := range []bool{false, true} {
+		p := &replayProbe{status: managedxray.UsageObservationStatus{Required: true, Settled: true, SettlementRequired: required}}
+		blocked, err := replayUsageBeforeSync(context.Background(), p, nil)
+		if err != nil || blocked != required {
+			t.Fatal("settlement gate", blocked, err)
+		}
+	}
+}

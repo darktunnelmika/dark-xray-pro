@@ -53,6 +53,13 @@ jobs:
           go test -race ./internal/managedxray -run '^TestRouteTransactions' -count=3 -timeout=120s -v
       - name: Repeat durable HUB queue and owner/Agent API boundaries under Race
         run: go test -race ./internal/business ./internal/api -run '^TestRouteQueue' -count=3 -timeout=120s -v
+      - name: Repeat exact settlement and pretraffic recovery under Race
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(id -u)" -ne 0
+          go test -race ./internal/usagecheckpoint ./internal/usageledger ./internal/managedxray ./internal/api ./cmd/node-agent \
+            -run '^Test(UsageSettlement|AgentReplayGate)' -count=3 -timeout=120s -v
       - name: Go vet
         run: go vet ./...
       - name: Compile HUB and Node Agent

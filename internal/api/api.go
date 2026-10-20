@@ -154,7 +154,7 @@ func (s *Server) AgentHandler() http.Handler {
 			s.handleRouteTransactionAgent(w, r)
 			return
 		}
-		if r.URL.Path == "/api/v1/agent/native-usage" || r.URL.Path == "/api/v1/agent/native-usage/interrupted" {
+		if r.URL.Path == "/api/v1/agent/native-usage" || r.URL.Path == "/api/v1/agent/native-usage/interrupted" || r.URL.Path == "/api/v1/agent/native-usage/settled" {
 			if usage == nil {
 				http.NotFound(w, r)
 			} else {
