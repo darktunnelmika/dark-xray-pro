@@ -119,6 +119,7 @@ func Open(path string, clock func()time.Time)(*Journal,error){
  var trailing any
  if err:=decoder.Decode(&trailing);!errors.Is(err,io.EOF){return nil,ErrUnsafe}
  if state.Version!=1||state.Operations==nil||len(state.Operations)>maxOperations{return nil,ErrUnsafe}
+ reserved:=map[string]bool{}
  for id,op:=range state.Operations {
   if len(id)!=32||op.ID!=id||op.Revision==0||op.NewNodeID==op.OldNodeID||
    op.Preview.NewNodeID!=op.NewNodeID||op.Preview.OldNodeID!=op.OldNodeID||
@@ -128,6 +129,10 @@ func Open(path string, clock func()time.Time)(*Journal,error){
     return nil,ErrUnsafe
    }
   switch op.Phase {case Pending,ProbeFailed,TCPChecked,Cancelled: default:return nil,ErrUnsafe}
+  if op.Phase!=Cancelled {
+   if reserved[op.OldNodeID]||reserved[op.NewNodeID]{return nil,ErrUnsafe}
+   reserved[op.OldNodeID]=true;reserved[op.NewNodeID]=true
+  }
  }
  j.state=state
  return j,nil
@@ -178,7 +183,8 @@ func (j *Journal) Create(preview routeplan.Preview, installationID string)(Opera
  if len(j.state.Operations)>=maxOperations{return Operation{},ErrConflict}
  for _,op:=range j.state.Operations {
   if op.Phase!=Cancelled&&(op.OldNodeID==preview.OldNodeID||
-    op.NewNodeID==preview.NewNodeID){return Operation{},ErrConflict}
+    op.NewNodeID==preview.NewNodeID||op.OldNodeID==preview.NewNodeID||
+    op.NewNodeID==preview.OldNodeID){return Operation{},ErrConflict}
  }
  id,err:=newID()
  if err!=nil{return Operation{},err}
@@ -309,6 +315,9 @@ func (j *Journal) Cancel(id string,expectedRevision uint64)(Operation,error){
  j.mu.Lock();defer j.mu.Unlock()
  op,ok:=j.state.Operations[id]
  if !ok{return Operation{},ErrNotFound}
+ // A lost cancellation response may be replayed with its original revision.
+ // Cancelled is terminal: no later probe can advance or replace this receipt.
+ if op.Phase==Cancelled&&op.Revision>1&&expectedRevision==op.Revision-1{return copyOperation(op),nil}
  if op.Revision!=expectedRevision{return Operation{},ErrConflict}
  if op.Phase==Cancelled{return copyOperation(op),nil}
  next:=clone(j.state);op=copyOperation(op)

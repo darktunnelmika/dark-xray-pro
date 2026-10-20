@@ -144,6 +144,9 @@ func TestReplacementIsStrictOnNewPairedAgentAndOwnerRevision(t *testing.T){
  if w:=request(t,h,"POST",uri,ownerToken,map[string]any{"expected_revision":1});w.Code!=200{
   t.Fatal("owner could not safely cancel",w.Code)
  }
+ if w:=request(t,h,"POST",uri,ownerToken,map[string]any{"expected_revision":1});w.Code!=200{
+  t.Fatal("lost cancellation reply cannot be retried",w.Code)
+ }
  if w:=request(t,h,"GET","/api/v1/agent/replacement-task?node_id=new-de&installation_id="+newInstallation,newToken,nil);w.Code!=204{
   t.Fatal("cancelled operation still sent to Agent",w.Code)
  }
