@@ -29,6 +29,11 @@ setting. A normal core/client invocation preserves ordinary behavior.
 
 The admitted configuration is the existing strict native VLESS/Reality profile
 with TCP transport, user-level counters and one direct freedom outbound.
+Because the earlier admission parser tolerates extra outbound/policy fields,
+this path additionally rejects unknown settings and duplicate JSON fields. It
+allows only the native user counter policy, optional inbound system counters,
+and freedom allow/block TCP final rules. Outbound mux/transports/proxy chains,
+redirects, fragments, noise and extra policy levels cannot enter this proof.
 gRPC profiles are rejected at prepare. The core rejects UDP, Mux, XUDP and
 reverse request commands before dispatch, and rejects asynchronous dispatcher
 escape from a tracked session. It does not claim support for arbitrary Xray

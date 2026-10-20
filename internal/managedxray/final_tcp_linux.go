@@ -9,24 +9,69 @@ import (
 	"encoding/json"
 
 	uc "github.com/darktunnelmika/dark-xray-pro/internal/usagecheckpoint"
+	"github.com/darktunnelmika/dark-xray-pro/internal/usagewire"
 )
 
-// UsageBootstrap has already strictly validated VLESS/Reality, the policy,
-// API and single freedom outbound. This first barrier additionally admits only
-// the tested TCP transport. gRPC and datagram payloads need their own proof.
+// UsageBootstrap validates native VLESS/Reality admission but permits extra
+// policy/outbound settings. Final-counter proof requires a narrower grammar:
+// no alternate transports, outbound mux, proxy chains, detached contexts,
+// fragment/noise workers, sniffing or unreviewed settings.
 func finalTCPScope(raw []byte) bool {
 	var c struct {
+		Log    json.RawMessage `json:"log"`
+		Stats  json.RawMessage `json:"stats"`
+		API    json.RawMessage `json:"api"`
+		Policy *struct {
+			Levels map[string]struct {
+				Up   bool `json:"statsUserUplink"`
+				Down bool `json:"statsUserDownlink"`
+			} `json:"levels"`
+			System *struct {
+				Up   bool `json:"statsInboundUplink"`
+				Down bool `json:"statsInboundDownlink"`
+			} `json:"system,omitempty"`
+		} `json:"policy"`
+		Outbounds []struct {
+			Tag      string `json:"tag"`
+			Protocol string `json:"protocol"`
+			Settings *struct {
+				FinalRules []struct {
+					Action  string   `json:"action"`
+					Network string   `json:"network"`
+					IP      []string `json:"ip"`
+					Port    string   `json:"port"`
+				} `json:"finalRules,omitempty"`
+			} `json:"settings,omitempty"`
+		} `json:"outbounds"`
 		Inbounds []struct {
-			Stream struct {
-				Network string `json:"network"`
+			Listen   string          `json:"listen"`
+			Port     uint16          `json:"port"`
+			Tag      string          `json:"tag"`
+			Protocol string          `json:"protocol"`
+			Settings json.RawMessage `json:"settings"`
+			Stream   struct {
+				Network  string          `json:"network"`
+				Security string          `json:"security"`
+				Reality  json.RawMessage `json:"realitySettings"`
 			} `json:"streamSettings"`
 		} `json:"inbounds"`
 	}
-	if json.Unmarshal(raw, &c) != nil || len(c.Inbounds) == 0 {
+	if usagewire.Decode(raw, &c) != nil || len(c.Inbounds) == 0 || c.Policy == nil || len(c.Policy.Levels) != 1 || !c.Policy.Levels["0"].Up || !c.Policy.Levels["0"].Down || len(c.Outbounds) != 1 {
 		return false
 	}
+	out := c.Outbounds[0]
+	if out.Tag != "direct" || out.Protocol != "freedom" {
+		return false
+	}
+	if out.Settings != nil {
+		for _, rule := range out.Settings.FinalRules {
+			if (rule.Action != "allow" && rule.Action != "block") || rule.Network != "tcp" {
+				return false
+			}
+		}
+	}
 	for _, in := range c.Inbounds {
-		if in.Stream.Network != "tcp" {
+		if in.Protocol != "vless" || in.Stream.Network != "tcp" || in.Stream.Security != "reality" {
 			return false
 		}
 	}
