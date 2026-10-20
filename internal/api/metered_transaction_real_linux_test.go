@@ -60,7 +60,9 @@ func testMeteredTransactionOutcome(t *testing.T, ctx context.Context, s *Server,
 	if json.Unmarshal(c1.Config, &doc) != nil {
 		t.Fatal("fixture candidate")
 	}
-	doc["log"] = map[string]any{"loglevel": "warning"}
+	// Keep the strict no-log admission grammar. A second REALITY short ID is
+	// a distinct valid same-port revision; the existing client still uses aa11.
+	doc["inbounds"].([]any)[0].(map[string]any)["streamSettings"].(map[string]any)["realitySettings"].(map[string]any)["shortIds"] = []string{"aa11", "bb22"}
 	c2.Config, _ = json.Marshal(doc)
 	digest := sha256.Sum256(c2.Config)
 	c2.SHA256 = hex.EncodeToString(digest[:])
@@ -68,6 +70,9 @@ func testMeteredTransactionOutcome(t *testing.T, ctx context.Context, s *Server,
 	c2.ManifestSHA256 = hex.EncodeToString(digest[:])
 	if c1.SHA256 == c2.SHA256 {
 		t.Fatal("replacement must have distinct bytes")
+	}
+	if _, _, _, e := xrayconfig.UsageBootstrap(c2); e != nil {
+		t.Fatal("replacement fixture violates admission grammar", e)
 	}
 	allowed := map[string]bool{managedxray.TransactionPayloadSHA(c1): true, managedxray.TransactionPayloadSHA(c2): true}
 	var births []uc.ProcessToken
