@@ -223,6 +223,12 @@ func (r *Runtime) replayFinalTCPLocked(ctx context.Context, sender *uc.Sender) (
 	r.process = nil
 	r.active = nil
 	epoch := r.state.Usage.Epoch
+	// On recovery the child handle is gone, but the durable proof may precede
+	// its stop. Verify the old birth has actually exited without adopting or
+	// killing any PID; lack of read access is not an exit receipt.
+	if err := uc.VerifyEpochStopped(epoch); err != nil {
+		return 0, err
+	}
 	box, err := uc.Open(uc.Options{Directory: usageDirectory(r.options.Directory, epoch.ID), Key: usageKey(r.options.StateKey, epoch.ID), Epoch: epoch, Create: false})
 	if err != nil {
 		return 0, err

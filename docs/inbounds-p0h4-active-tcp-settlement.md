@@ -62,6 +62,9 @@ and final receipts; no new network listener is added.
 5. Stop and wait for the captured child. Only the durable final proof suppresses
    interruption notification. A failed, interrupted or unproven tail remains
    uncertain; no dead process is queried and no missing outbox is recreated.
+   Recovery also verifies that the recorded kernel birth has exited; an absent
+   child handle or unreadable process metadata is not an exit receipt, and a
+   recycled PID is never adopted or killed.
 6. Replay reports in order and obtain the separate authenticated HUB seal for
    that exact terminal report. An ordinary receipt is insufficient; pre-existing
    uncertainty remains held even when final known bytes are charged.
