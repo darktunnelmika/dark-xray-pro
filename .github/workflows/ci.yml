@@ -14,6 +14,67 @@ permissions:
   contents: read
 
 jobs:
+  final-tcp-core:
+    name: Experimental pinned core final TCP counters
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: XTLS/Xray-core
+          ref: 52a412d9e2f5c2a5142b1b4e2ab3771dacb8b120
+          path: .barrier-core
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: .barrier-core/go.mod
+          cache: false
+      - name: Verify immutable upstream and apply the bounded TCP overlay
+        run: python3 scripts/prepare-barrier-core.py .barrier-core
+      - name: Prove late task completion and build the separate experimental core
+        working-directory: .barrier-core
+        run: |
+          go mod verify
+          go test -race ./common/darkpro ./common/task -run 'Test(Drain|InvalidNonce|ExecuteParallel)' -count=20 -timeout=120s
+          go build -trimpath -o "$RUNNER_TEMP/xray-final-tcp" ./main
+          chmod 0700 "$RUNNER_TEMP/xray-final-tcp"
+          echo "DARK_PRO_TEST_XRAY_BINARY=$RUNNER_TEMP/xray-final-tcp" >> "$GITHUB_ENV"
+          echo "DARK_PRO_TEST_XRAY_SHA256=$(sha256sum "$RUNNER_TEMP/xray-final-tcp" | cut -d' ' -f1)" >> "$GITHUB_ENV"
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Prove active Vision streams, exact final receipts and restart replay
+        env:
+          DARK_PRO_TEST_FINAL_TCP: '1'
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(id -u)" -ne 0
+          go test -race ./internal/corebarrier -run '^TestRealPinnedCoreFinalTCPProtocol$' -count=3 -json -timeout=90s > "$RUNNER_TEMP/core-protocol.jsonl"
+          go test -race ./internal/api -run '^TestRealPinnedActiveTCPSettlement$' -count=3 -json -timeout=240s > "$RUNNER_TEMP/active-tcp-settlement.jsonl"
+          python3 - "$RUNNER_TEMP/active-tcp-settlement.jsonl" "$RUNNER_TEMP/core-protocol.jsonl" <<'PYFINAL'
+          import collections,json,sys
+          events=[json.loads(line) for line in open(sys.argv[1])]
+          name='TestRealPinnedActiveTCPSettlement'
+          required={name}|{name+'/'+s for s in ('active-replacement','active-lost-final-receipt','active-lost-confirmation','active-unknown-tail','active-interrupted','active-no-opt-in')}
+          passed=collections.Counter(e.get('Test') for e in events if e.get('Action')=='pass')
+          assert all(passed[n]==3 for n in required),dict(passed)
+          assert not any(e.get('Action') in ('skip','fail') and e.get('Test','').startswith(name) for e in events)
+          protocol=[json.loads(line) for line in open(sys.argv[2])]
+          test='TestRealPinnedCoreFinalTCPProtocol'
+          assert sum(e.get('Action')=='pass' and e.get('Test')==test for e in protocol)==3
+          assert not any(e.get('Action') in ('skip','fail') for e in protocol)
+          events+=protocol
+          for e in events:
+              if e.get('Output'): print(e['Output'],end='')
+          PYFINAL
+      - name: Active stream diagnostics
+        if: failure()
+        run: |
+          if test -f "$RUNNER_TEMP/active-tcp-settlement.jsonl"; then cat "$RUNNER_TEMP/active-tcp-settlement.jsonl"; fi
+          if test -f "$RUNNER_TEMP/core-protocol.jsonl"; then cat "$RUNNER_TEMP/core-protocol.jsonl"; fi
+
   go:
     name: Go unit, race and vet
     runs-on: ubuntu-24.04

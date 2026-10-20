@@ -31,7 +31,10 @@ func Collect(ctx context.Context,binary,pin,endpoint string,epoch Epoch)([]Usage
  e,err:=normalize(epoch);if err!=nil{return nil,err};raw,err:=collectRaw(ctx,binary,pin,endpoint,e);if err!=nil{return nil,err};return ParseStats(raw,e.Bindings)
 }
 func collectRaw(ctx context.Context,binary,pin,endpoint string,epoch Epoch)([]byte,error){
- e,err:=normalize(epoch);if err!=nil{return nil,err};args,err:=StatsArguments(endpoint);if err!=nil{return nil,err};if err=checkBinary(binary,pin);err!=nil{return nil,err}
+ return collectPattern(ctx,binary,pin,endpoint,epoch,"user>>>")
+}
+func collectPattern(ctx context.Context,binary,pin,endpoint string,epoch Epoch,pattern string)([]byte,error){
+ e,err:=normalize(epoch);if err!=nil{return nil,err};args,err:=StatsArguments(endpoint);if err!=nil{return nil,err};args[4]="-pattern="+pattern;if err=checkBinary(binary,pin);err!=nil{return nil,err}
  if err=sameProcess(e);err!=nil{return nil,err};if !ownsStatsPort(e.PID,endpoint){return nil,ErrEpoch}
  call,cancel:=context.WithTimeout(ctx,5*time.Second);defer cancel();output:=&boundedOutput{limit:MaxStatsBytes,cancel:cancel}
  cmd:=exec.CommandContext(call,binary,args...);cmd.Env=[]string{"PATH=/usr/bin:/bin"};cmd.Stdout=output;cmd.Stderr=io.Discard;cmd.WaitDelay=250*time.Millisecond
