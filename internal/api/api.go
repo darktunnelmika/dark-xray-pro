@@ -21,22 +21,24 @@ import (
 )
 
 type Server struct {
-	routeNode          string
-	routeInstall       string
-	fleet              *telemetry.Store
-	registry           *noderegistry.Registry
-	ownerKey           string
-	replacements       *replacement.Journal
-	stages             *configstage.Store
-	labRevisions       *labrevision.Store
-	business           *business.Store
-	loginGate          *loginGate
-	inboundKey         []byte
-	nodeHistory        *nodehistory.Store
-	hubMonitor         *hubmonitor.Monitor
-	nodeBundle         *nodebootstrap.Bundle
-	nodeTransportScope string
-	meteredNode        string // explicitly allowlisted NEW PRO Node; disabled by default
+	meteredRouteNode    string
+	meteredRouteInstall string
+	routeNode           string
+	routeInstall        string
+	fleet               *telemetry.Store
+	registry            *noderegistry.Registry
+	ownerKey            string
+	replacements        *replacement.Journal
+	stages              *configstage.Store
+	labRevisions        *labrevision.Store
+	business            *business.Store
+	loginGate           *loginGate
+	inboundKey          []byte
+	nodeHistory         *nodehistory.Store
+	hubMonitor          *hubmonitor.Monitor
+	nodeBundle          *nodebootstrap.Bundle
+	nodeTransportScope  string
+	meteredNode         string // explicitly allowlisted NEW PRO Node; disabled by default
 }
 
 func NewServer(fleet *telemetry.Store, registry *noderegistry.Registry, ownerKey string) (*Server, error) {
@@ -127,6 +129,7 @@ func (s *Server) Handler() http.Handler {
 	s.attachNativeRouteDrafts(mux)
 	s.attachRouteReadinessP0G(mux)
 	s.attachRouteTransactions(mux)
+	s.attachMeteredRouteTransactions(mux)
 	s.attachOwnerNativeCanary(mux)
 	s.attachRuntimeReports(mux)
 	s.attachInboundLifecycle(mux)
@@ -152,6 +155,10 @@ func (s *Server) AgentHandler() http.Handler {
 		}
 		if r.Method == http.MethodPost && (r.URL.Path == "/api/v1/agent/route-transactions/poll" || r.URL.Path == "/api/v1/agent/route-transactions/receipt") {
 			s.handleRouteTransactionAgent(w, r)
+			return
+		}
+		if r.Method == http.MethodPost && (r.URL.Path == "/api/v1/agent/metered-route-transactions/poll" || r.URL.Path == "/api/v1/agent/metered-route-transactions/receipt" || r.URL.Path == "/api/v1/agent/metered-route-transactions/check" || r.URL.Path == "/api/v1/agent/metered-route-transactions/register") {
+			s.handleMeteredRouteTransactionAgent(w, r)
 			return
 		}
 		if r.URL.Path == "/api/v1/agent/native-usage" || r.URL.Path == "/api/v1/agent/native-usage/interrupted" || r.URL.Path == "/api/v1/agent/native-usage/settled" {

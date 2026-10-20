@@ -78,6 +78,22 @@ jobs:
         run: |
           if test -f "$RUNNER_TEMP/active-tcp-settlement.jsonl"; then cat "$RUNNER_TEMP/active-tcp-settlement.jsonl"; fi
           if test -f "$RUNNER_TEMP/core-protocol.jsonl"; then cat "$RUNNER_TEMP/core-protocol.jsonl"; fi
+      - name: Prove independent metered HUB queue, TLS authority and exact receipts
+        env:
+          DARK_PRO_TEST_FINAL_TCP: '1'
+        run: |
+          go test -race ./internal/api -run '^TestRealPinnedMeteredRouteTransport$' -count=3 -json -timeout=240s > "$RUNNER_TEMP/metered-route-transport.jsonl" || { cat "$RUNNER_TEMP/metered-route-transport.jsonl"; exit 1; }
+          python3 - "$RUNNER_TEMP/metered-route-transport.jsonl" <<'PYMETERED'
+          import collections,json,sys
+          events=[json.loads(line) for line in open(sys.argv[1])]
+          name='TestRealPinnedMeteredRouteTransport'
+          required={name}|{name+'/'+s for s in ('replace-rollback','lost-ack-before','lost-ack-after','revoked-after-final','lost-registration','lost-seal')}
+          passed=collections.Counter(e.get('Test') for e in events if e.get('Action')=='pass')
+          assert all(passed[n]==3 for n in required),dict(passed)
+          assert not any(e.get('Action') in ('skip','fail') for e in events)
+          for e in events:
+              if e.get('Output'): print(e['Output'],end='')
+          PYMETERED
       - name: Repeat interrupted active stream recovery with transport diagnostics
         env:
           DARK_PRO_TEST_FINAL_TCP: '1'

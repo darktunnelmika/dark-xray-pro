@@ -167,6 +167,7 @@ func Open(path string)(*Store,error){
  if err=ensureCatalogPolicy(db);err!=nil{return fail(err)}
  if err=ensureNativeRouteDrafts(db);err!=nil{return fail(err)}
  if err=ensureRouteTransactions(db);err!=nil{return fail(err)}
+ if err=ensureMeteredRouteTransactions(db);err!=nil{return fail(err)}
  s:=&Store{db:db};if err=s.restoreUsageLedger(context.Background());err!=nil{return fail(err)}
  return s,nil
 }
