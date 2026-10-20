@@ -81,6 +81,23 @@ reject missing/foreign seals, reused epochs, missing zero receipts, unhealthy
 observers and v1/v2 confusion. Encrypted reopen, returned-proof mutation,
 downgrade refusal and interrupted-intent restaging are also tested.
 
+CI also exposed an existing intermittent failure in interrupted-epoch recovery.
+A local cancellation stress reproducer confirmed that the pinned SQLite driver's
+query cancellation can strand a native statement and leave a pooled connection
+permanently returning `SQLITE_INTERRUPT`. Discarding that connection alone was
+insufficient: its unfinished native transaction could still hold a lock.
+
+Ledger reads and writes now honor cancellation between fixed SQL statements.
+An in-flight statement finishes without the driver's cancellation race, under
+the verified SQLite busy timeout (positive, at most five seconds). Cancellation
+is checked again before COMMIT, and rollback runs independently. A cancel during
+COMMIT remains a normal lost-receipt case, handled by exact replay. This is a
+bounded ledger workaround, not a change to byte totals, settlement rules or
+the dependency version. Regression tests alternate canceled reads/writes and
+fresh recovery writes, assert exact committed totals, and prove rollback on
+cancellation before COMMIT. CI additionally repeats active interruption
+recovery twenty times, with credential-free timing/status diagnostics on failure.
+
 Still required: a reviewed durable HUB/Agent v2 transport, owner UI for metered
 evidence, channel release/registration reconciliation, coordinated multi-node
 Dark Swap and support/proof for other transports. The custom core is not part

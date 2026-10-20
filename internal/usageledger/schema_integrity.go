@@ -2,14 +2,13 @@ package usageledger
 
 import (
 	"context"
-	"database/sql"
 	"strings"
 )
 
 // A database with the right columns but a missing immutable-audit trigger or
 // an altered eligibility view is not the reviewed schema. Verify the exact
 // versioned DDL at startup, rather than silently adopting damaged policy.
-func verifySchema(ctx context.Context, c *sql.Conn) error {
+func verifySchema(ctx context.Context, c *ledgerConn) error {
 	expected := make(map[string]string)
 	kinds := make(map[string]string)
 	canonical := func(raw string) string { return strings.Join(strings.Fields(strings.TrimSpace(raw)), " ") }
