@@ -21,15 +21,20 @@ if len(sys.argv) != 2:
     raise SystemExit("usage: prepare-barrier-core.py PINNED_XRAY_CHECKOUT")
 source = Path(sys.argv[1]).resolve()
 repo = Path(__file__).resolve().parent.parent
-assert subprocess.check_output(["git", "-C", str(source), "rev-parse", "HEAD"], text=True).strip() == PIN, "wrong upstream commit"
+if subprocess.check_output(["git", "-C", str(source), "rev-parse", "HEAD"], text=True).strip() != PIN:
+    raise SystemExit("wrong upstream commit")
+if subprocess.check_output(["git", "-C", str(source), "status", "--porcelain", "--untracked-files=all"], text=True).strip():
+    raise SystemExit("upstream checkout must be completely clean before applying the overlay")
 contents = {}
 for name, digest in HASHES.items():
     raw = (source / name).read_bytes()
-    assert hashlib.sha256(raw).hexdigest() == digest, f"unexpected upstream file: {name}"
+    if hashlib.sha256(raw).hexdigest() != digest:
+        raise SystemExit(f"unexpected upstream file: {name}")
     contents[name] = raw.decode()
 
 def replace(name, old, new):
-    assert contents[name].count(old) == 1, f"ambiguous patch: {name}"
+    if contents[name].count(old) != 1:
+        raise SystemExit(f"ambiguous patch: {name}")
     contents[name] = contents[name].replace(old, new)
 
 for name in HASHES:
