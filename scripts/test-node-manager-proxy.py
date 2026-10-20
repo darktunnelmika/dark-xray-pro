@@ -55,7 +55,13 @@ def main():
 pid {tmp}/nginx.pid;
 error_log {tmp}/error.log;
 events {{ worker_connections 32; }}
-http {{ access_log off; server {{
+http {{
+client_body_temp_path {tmp}/client-body;
+proxy_temp_path {tmp}/proxy;
+fastcgi_temp_path {tmp}/fastcgi;
+uwsgi_temp_path {tmp}/uwsgi;
+scgi_temp_path {tmp}/scgi;
+access_log off; server {{
 listen 127.0.0.1:{port};
 {snippet}
 location / {{ return 403; }}

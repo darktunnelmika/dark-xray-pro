@@ -21,3 +21,8 @@ Xray or change registry, accounting, node credentials or customer records.
 `scripts/test-node-manager-proxy.py` uses real nginx and a disposable loopback
 authentication-denial backend to prove routing and deny boundaries. It tests
 proxy behavior only; existing Go API tests prove session/CSRF authorization.
+
+Every nginx temporary path is explicitly inside the disposable test directory.
+Setting only `-p` does not override distribution-compiled absolute temp paths:
+when run as root, nginx can change their ownership to its default worker user.
+Never run an older copy of this test on a server with an existing nginx service.
