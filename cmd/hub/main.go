@@ -226,6 +226,16 @@ func main() {
 	} else if os.Getenv("DARK_PRO_ROUTE_NODE_ID") != "" || os.Getenv("DARK_PRO_ROUTE_INSTALLATION_ID") != "" || os.Getenv("DARK_PRO_ROUTE_XRAY_SHA256") != "" {
 		log.Fatal("route transaction scope supplied without explicit enable switch")
 	}
+	if os.Getenv("DARK_PRO_ENABLE_METERED_ROUTE_TRANSACTIONS") == "1" {
+		if os.Getenv("DARK_PRO_LAB_MODE") != "1" || os.Getenv("DARK_PRO_ENABLE_USAGE_LEDGER") != "1" || os.Getenv("DARK_PRO_ENABLE_NATIVE_INBOUNDS") != "1" || *agentListen == "" || os.Getenv("DARK_PRO_ENABLE_REMOTE_AGENT") != "1" {
+			log.Fatal("metered route transactions require isolated PRO LAB, usage ledger and dedicated Agent TLS")
+		}
+		if err := service.EnableMeteredRouteTransactions(os.Getenv("DARK_PRO_METERED_ROUTE_NODE_ID"), os.Getenv("DARK_PRO_METERED_ROUTE_INSTALLATION_ID"), os.Getenv("DARK_PRO_METERED_ROUTE_XRAY_SHA256")); err != nil {
+			log.Fatal("independent metered loopback channel refused: ", err)
+		}
+	} else if os.Getenv("DARK_PRO_METERED_ROUTE_NODE_ID") != "" || os.Getenv("DARK_PRO_METERED_ROUTE_INSTALLATION_ID") != "" || os.Getenv("DARK_PRO_METERED_ROUTE_XRAY_SHA256") != "" {
+		log.Fatal("metered route scope supplied without explicit opt-in")
+	}
 	if os.Getenv("DARK_PRO_ENABLE_CONFIG_STAGE") == "1" {
 		if *agentListen == "" || os.Getenv("DARK_PRO_ENABLE_REMOTE_AGENT") != "1" {
 			log.Fatal("encrypted config staging requires dedicated verified remote Agent TLS listener")

@@ -30,8 +30,8 @@ type MeteredEvidence struct {
 // input. Check must revalidate the immutable candidate against current source,
 // topology, bindings and eligibility. Register must atomically recheck these
 // and register the actual birth with the HUB's authoritative billing mapping.
-// Neither callback may call back into this executor. No shipping HTTP/Agent
-// adapter implements this interface yet; the empty-route channel stays v1.
+// Neither callback may call back into this executor. The separate v2 TLS adapter
+// resolves persisted HUB commands; the empty-route channel stays v1.
 type MeteredTransactionAuthority interface {
 	Check(context.Context, TransactionCommand, xrayconfig.Candidate) error
 	Register(context.Context, TransactionCommand, xrayconfig.Candidate, uc.ProcessToken) (uc.Epoch, error)

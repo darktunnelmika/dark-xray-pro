@@ -103,7 +103,7 @@ func ensureRouteTransactions(db *sql.DB) error {
 }
 func (s *Store) RouteChannelOwned(ctx context.Context, node string) (bool, error) {
 	var n int
-	e := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM native_route_channels WHERE node_id=?", node).Scan(&n)
+	e := s.db.QueryRowContext(ctx, "SELECT (SELECT COUNT(*) FROM native_route_channels WHERE node_id=?)+(SELECT COUNT(*) FROM native_metered_route_channels WHERE node_id=?)", node, node).Scan(&n)
 	return n != 0, e
 }
 

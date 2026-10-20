@@ -215,10 +215,36 @@ func main() {
 	var nativeRuntime *managedxray.Runtime
 	var transactionRuntime *managedxray.TransactionRuntime
 	routeEnabled := os.Getenv("DARK_PRO_ENABLE_ROUTE_TRANSACTIONS") == "1"
+	meteredRouteEnabled := os.Getenv("DARK_PRO_ENABLE_METERED_ROUTE_TRANSACTIONS") == "1"
 	var usageSender *uc.Sender
 	remoteMetered := os.Getenv("DARK_PRO_ENABLE_NATIVE_METERED_ADMISSION") == "1"
 	if remoteMetered && (os.Getenv("DARK_PRO_ENABLE_NATIVE_RUNTIME") != "1" || !remote) {
 		log.Fatal("metered admission needs explicit native runtime and pinned remote TLS")
+	}
+	if meteredRouteEnabled {
+		if routeEnabled || remoteMetered || os.Getenv("DARK_PRO_ENABLE_NATIVE_RUNTIME") == "1" || os.Getenv("DARK_PRO_ENABLE_FINAL_TCP") != "1" || !remote || !identity.Paired || *stageXrayBinary == "" || len(*stageXraySHA) != 64 || *runtimeDir == "" {
+			log.Fatal("metered route executor requires exclusive independent loopback state, paired pinned TLS and explicit custom final-TCP core")
+		}
+		stateKey, keyErr := hex.DecodeString(os.Getenv("DARK_PRO_NATIVE_RUNTIME_KEY_HEX"))
+		if keyErr != nil || len(stateKey) != 32 {
+			log.Fatal("metered route private state key required")
+		}
+		usageSender, err = uc.NewSender(uc.SenderOptions{Endpoint: endpoint, NodeID: *nodeID, InstallationID: identity.InstallationID, Token: identity.AgentToken, PinSHA256: *pin, Client: client})
+		if err != nil {
+			log.Fatal("metered route usage transport refused")
+		}
+		defer usageSender.Close()
+		authority, e := managedxray.NewMeteredRemoteAuthority(client, endpoint, identity.AgentToken, *nodeID, identity.InstallationID)
+		if e != nil {
+			log.Fatal("metered command authority refused")
+		}
+		transactionRuntime, err = managedxray.OpenMeteredTransactions(managedxray.Options{Directory: *runtimeDir, StateKey: stateKey, LeaseKey: []byte(identity.AgentToken), NodeID: *nodeID, InstallationID: identity.InstallationID, ListenIP: *runtimeIP, Binary: *stageXrayBinary, BinarySHA: *stageXraySHA, ReservedPorts: []uint16{2087, 8443, 24443}, ExperimentalFinalTCP: true}, managedxray.MeteredTransactionOptions{Authority: authority, Sender: usageSender, Interval: 2 * time.Second, MaxSampleGap: 12 * time.Second, MaxPendingAge: 20 * time.Second})
+		if err != nil {
+			log.Fatal("metered route executor refused private state: ", err)
+		}
+		defer transactionRuntime.Close()
+	} else if os.Getenv("DARK_PRO_ENABLE_FINAL_TCP") == "1" {
+		log.Fatal("final TCP core flag requires the separate metered route executor")
 	}
 	if routeEnabled {
 		if !remote || !identity.Paired || remoteMetered || os.Getenv("DARK_PRO_ENABLE_NATIVE_RUNTIME") == "1" || *stageXrayBinary == "" || len(*stageXraySHA) != 64 || *runtimeDir == "" {
@@ -255,7 +281,7 @@ func main() {
 			log.Fatal("private usage recovery transport refused")
 		}
 		defer usageSender.Close()
-	} else if !routeEnabled && (*runtimeDir != "" || *runtimeIP != "") {
+	} else if !routeEnabled && !meteredRouteEnabled && (*runtimeDir != "" || *runtimeIP != "") {
 		log.Fatal("native runtime flags supplied without explicit opt-in")
 	}
 	// Liveness is independent of resource sampling, staging and runtime Apply.
@@ -290,7 +316,17 @@ func main() {
 					return
 				}
 				attempt, cancel := context.WithTimeout(ctx, 20*time.Second)
-				err := transactionRuntime.SyncTransaction(attempt, client, endpoint)
+				var err error
+				if meteredRouteEnabled {
+					// Historical usage recovery cannot resume an interrupted
+					// command. A fresh explicit Stage/Apply is still required.
+					if !transactionRuntime.Status().Observed.ProcessReady {
+						_, _ = transactionRuntime.ReplayMeteredUsage(attempt)
+					}
+					err = transactionRuntime.SyncMeteredTransaction(attempt, client, endpoint)
+				} else {
+					err = transactionRuntime.SyncTransaction(attempt, client, endpoint)
+				}
 				cancel()
 				if err != nil && ctx.Err() == nil {
 					log.Printf("route command/receipt pending; short lease and exact replay retained")
@@ -398,7 +434,11 @@ func main() {
 	defer ticker.Stop()
 	var metricSeq uint64
 	if transactionRuntime != nil {
-		log.Printf("NEW loopback route executor enabled for %s; customer bindings and subscriptions disabled", *nodeID)
+		if meteredRouteEnabled {
+			log.Printf("NEW independent metered TCP loopback executor enabled for %s; no migration or subscription publication", *nodeID)
+		} else {
+			log.Printf("NEW loopback route executor enabled for %s; customer bindings and subscriptions disabled", *nodeID)
+		}
 	} else if nativeRuntime == nil {
 		log.Printf("DARK PRO LAB-only telemetry for %s; native runtime disabled", *nodeID)
 	} else {
