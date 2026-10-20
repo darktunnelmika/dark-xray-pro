@@ -52,13 +52,17 @@ jobs:
           set -euo pipefail
           test "$(id -u)" -ne 0
           go test -race ./internal/corebarrier -run '^TestRealPinnedCoreFinalTCPProtocol$' -count=3 -json -timeout=90s > "$RUNNER_TEMP/core-protocol.jsonl"
-          go test -race ./internal/api -run '^TestRealPinnedActiveTCPSettlement$' -count=3 -json -timeout=240s > "$RUNNER_TEMP/active-tcp-settlement.jsonl"
+          go test -race ./internal/api -run '^TestRealPinned(ActiveTCPSettlement|MeteredTransactions)$' -count=3 -json -timeout=360s > "$RUNNER_TEMP/active-tcp-settlement.jsonl"
           python3 - "$RUNNER_TEMP/active-tcp-settlement.jsonl" "$RUNNER_TEMP/core-protocol.jsonl" <<'PYFINAL'
           import collections,json,sys
           events=[json.loads(line) for line in open(sys.argv[1])]
           name='TestRealPinnedActiveTCPSettlement'
           required={name}|{name+'/'+s for s in ('active-replacement','active-lost-final-receipt','active-lost-confirmation','active-unknown-tail','active-interrupted','active-no-opt-in')}
           passed=collections.Counter(e.get('Test') for e in events if e.get('Action')=='pass')
+          assert all(passed[n]==3 for n in required),dict(passed)
+          assert not any(e.get('Action') in ('skip','fail') and e.get('Test','').startswith(name) for e in events)
+          name='TestRealPinnedMeteredTransactions'
+          required={name}|{name+'/'+s for s in ('transaction-apply-rollback','transaction-lost-seal','transaction-revoked-after-seal','transaction-unknown-tail','transaction-register-failed','transaction-lost-ack-restart')}
           assert all(passed[n]==3 for n in required),dict(passed)
           assert not any(e.get('Action') in ('skip','fail') and e.get('Test','').startswith(name) for e in events)
           protocol=[json.loads(line) for line in open(sys.argv[2])]
@@ -111,7 +115,7 @@ jobs:
         run: |
           set -euo pipefail
           test "$(id -u)" -ne 0
-          go test -race ./internal/managedxray -run '^TestRouteTransactions' -count=3 -timeout=120s -v
+          go test -race ./internal/managedxray -run '^Test(RouteTransactions|MeteredTransaction)' -count=3 -timeout=120s -v
       - name: Repeat durable HUB queue and owner/Agent API boundaries under Race
         run: go test -race ./internal/business ./internal/api -run '^TestRouteQueue' -count=3 -timeout=120s -v
       - name: Repeat exact settlement and pretraffic recovery under Race

@@ -20,9 +20,10 @@ import (
 const maxTransactionBytes = 24 << 20
 
 type transactionDisk struct {
-	dir  string
-	aead cipher.AEAD
-	aad  []byte
+	version int
+	dir     string
+	aead    cipher.AEAD
+	aad     []byte
 }
 
 func openTransactionDisk(o Options) (*transactionDisk, error) {
@@ -63,11 +64,11 @@ func openTransactionDisk(o Options) (*transactionDisk, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &transactionDisk{dir: o.Directory, aead: aead, aad: []byte("DARK-PRO-ROUTE-TRANSACTION-v1\x00" + o.NodeID + "\x00" + o.InstallationID + "\x00" + o.ListenIP + "\x00" + o.BinarySHA)}, nil
+	return &transactionDisk{version: 1, dir: o.Directory, aead: aead, aad: []byte("DARK-PRO-ROUTE-TRANSACTION-v1\x00" + o.NodeID + "\x00" + o.InstallationID + "\x00" + o.ListenIP + "\x00" + o.BinarySHA)}, nil
 }
 
 func (d *transactionDisk) load(key []byte) (transactionState, error) {
-	empty := transactionState{Version: 1}
+	empty := transactionState{Version: d.version}
 	raw, err := privateRead(filepath.Join(d.dir, "transactions.enc"), maxTransactionBytes)
 	if errors.Is(err, os.ErrNotExist) {
 		return empty, nil
@@ -90,12 +91,15 @@ func (d *transactionDisk) load(key []byte) (transactionState, error) {
 		return empty, ErrCorrupt
 	}
 	var trailing any
-	if !errors.Is(dec.Decode(&trailing), io.EOF) || s.Version != 1 || s.Serial > maxTransactionSerial {
+	if !errors.Is(dec.Decode(&trailing), io.EOF) || s.Version != d.version || s.Serial > maxTransactionSerial {
 		return empty, ErrCorrupt
 	}
 	for _, stage := range []*transactionStage{s.Staged, s.Current, s.Previous} {
 		if stage == nil {
 			continue
+		}
+		if (d.version == 1 && stage.UsageBase != nil) || (d.version == 2 && (stage.UsageBase == nil || !validMeteredCondition(*stage.UsageBase))) {
+			return empty, ErrCorrupt
 		}
 		if !transactionID.MatchString(stage.ID) || stage.Revision == nil || stage.Revision.Sequence == 0 ||
 			stage.Revision.Sequence > maxTransactionSerial || stage.Expires <= 0 ||
@@ -106,11 +110,15 @@ func (d *transactionDisk) load(key []byte) (transactionState, error) {
 	if (s.LastCommand == nil) != (s.LastReceipt == nil) {
 		return empty, ErrCorrupt
 	}
-	if s.LastCommand != nil && (s.LastCommand.Serial > s.Serial || !VerifyTransactionReceipt(key, *s.LastCommand, *s.LastReceipt)) {
+	verify := VerifyTransactionReceipt
+	if d.version == 2 {
+		verify = VerifyMeteredTransactionReceipt
+	}
+	if s.LastCommand != nil && (s.LastCommand.Version != d.version || s.LastCommand.Serial > s.Serial || !verify(key, *s.LastCommand, *s.LastReceipt)) {
 		return empty, ErrCorrupt
 	}
 	if s.Pending != nil {
-		if !validTransactionSignature(key, *s.Pending) || s.Pending.Serial != s.Serial || s.Pending.Action == "stage" {
+		if s.Pending.Version != d.version || !validTransactionSignature(key, *s.Pending) || s.Pending.Serial != s.Serial || s.Pending.Action == "stage" {
 			return empty, ErrCorrupt
 		}
 	} else if s.Serial != 0 && (s.LastCommand == nil || s.LastCommand.Serial != s.Serial) {

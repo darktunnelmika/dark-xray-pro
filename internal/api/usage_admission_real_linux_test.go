@@ -49,6 +49,13 @@ func TestRealPinnedActiveTCPSettlement(t *testing.T) {
 	testRealPinnedPretrafficUsageAdmission(t, []string{"active-replacement", "active-lost-final-receipt", "active-lost-confirmation", "active-unknown-tail", "active-interrupted", "active-no-opt-in"})
 }
 
+func TestRealPinnedMeteredTransactions(t *testing.T) {
+	if os.Getenv("DARK_PRO_TEST_FINAL_TCP") != "1" {
+		t.Skip("explicit experimental barrier core required")
+	}
+	testRealPinnedPretrafficUsageAdmission(t, []string{"transaction-apply-rollback", "transaction-lost-seal", "transaction-revoked-after-seal", "transaction-unknown-tail", "transaction-register-failed", "transaction-lost-ack-restart"})
+}
+
 func testRealPinnedPretrafficUsageAdmission(t *testing.T, modes []string) {
 	binary, pin := os.Getenv("DARK_PRO_TEST_XRAY_BINARY"), os.Getenv("DARK_PRO_TEST_XRAY_SHA256")
 	if binary == "" && pin == "" {
@@ -59,7 +66,8 @@ func testRealPinnedPretrafficUsageAdmission(t *testing.T, modes []string) {
 	}
 	for _, mode := range modes {
 		t.Run(mode, func(t *testing.T) {
-			activeMode := strings.HasPrefix(mode, "active-")
+			transactionMode := strings.HasPrefix(mode, "transaction-")
+			activeMode := strings.HasPrefix(mode, "active-") || transactionMode
 			ctx, cancel := context.WithTimeout(context.Background(), 35*time.Second)
 			defer cancel()
 			s := enabledOwner(t)
@@ -101,7 +109,7 @@ func testRealPinnedPretrafficUsageAdmission(t *testing.T, modes []string) {
 					w.WriteHeader(503)
 					return
 				}
-				if req.URL.Path == "/api/v1/agent/native-usage/settled" && (mode == "settlement-lost-confirmation" || mode == "active-lost-confirmation") && !lostConfirmation.Swap(true) {
+				if req.URL.Path == "/api/v1/agent/native-usage/settled" && (mode == "settlement-lost-confirmation" || mode == "active-lost-confirmation" || mode == "transaction-lost-seal") && !lostConfirmation.Swap(true) {
 					rec := httptest.NewRecorder()
 					actual.ServeHTTP(rec, req)
 					if rec.Code != 200 {
@@ -241,6 +249,10 @@ func testRealPinnedPretrafficUsageAdmission(t *testing.T, modes []string) {
 			cfg.ManifestSHA = cfg.Candidate.ManifestSHA256
 			options := managedxray.Options{Directory: filepath.Join(t.TempDir(), "private-runtime"), StateKey: bytes.Repeat([]byte{2}, 32), LeaseKey: []byte(nodeToken), NodeID: cfg.NodeID, InstallationID: installID, ListenIP: "127.0.0.1", Binary: binary, BinarySHA: pin}
 			options.ExperimentalFinalTCP = activeMode && mode != "active-no-opt-in"
+			if transactionMode {
+				testMeteredTransactionOutcome(t, ctx, s, options, cfg, receiver, mode, customers, port, origin, &finalReport)
+				return
+			}
 			r, err := managedxray.Open(options)
 			if err != nil {
 				t.Fatal(err)
