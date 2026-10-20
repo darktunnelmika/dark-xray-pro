@@ -34,7 +34,7 @@ func Open(ctx context.Context, db *sql.DB) (*Ledger, error) {
 		return nil, ErrSchema
 	}
 	l := &Ledger{db: db}
-	err := l.write(ctx, func(c *sql.Conn) error {
+	err := l.write(ctx, func(c *ledgerConn) error {
 		var version int
 		if e := c.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); e != nil {
 			return e
@@ -71,7 +71,7 @@ func Open(ctx context.Context, db *sql.DB) (*Ledger, error) {
 				}
 				r.Close()
 			}
-			return verifySchema(ctx,c)
+			return verifySchema(ctx, c)
 		}
 		if e := c.QueryRowContext(ctx, "SELECT COUNT(*) FROM sqlite_master WHERE name GLOB 'pro_usage_*'").Scan(&count); e != nil {
 			return e
@@ -91,9 +91,12 @@ func Open(ctx context.Context, db *sql.DB) (*Ledger, error) {
 	}
 	return l, nil
 }
-func checkConnection(ctx context.Context, c *sql.Conn) error {
-	var fk, sync int
+func checkConnection(ctx context.Context, c *ledgerConn) error {
+	var fk, sync, busy int
 	var mode string
+	if c.QueryRowContext(ctx, "PRAGMA busy_timeout").Scan(&busy) != nil || busy <= 0 || busy > 5000 {
+		return ErrStorage
+	}
 	if c.QueryRowContext(ctx, "PRAGMA foreign_keys").Scan(&fk) != nil || fk != 1 {
 		return ErrStorage
 	}
@@ -108,16 +111,21 @@ func checkConnection(ctx context.Context, c *sql.Conn) error {
 
 // Lock before reading across independent connections/processes. Only COMMIT
 // permits a receipt. Rollback failure discards the poisoned pooled connection.
-func (l *Ledger) write(ctx context.Context, fn func(*sql.Conn) error) (err error) {
-	c, err := l.db.Conn(ctx)
+func (l *Ledger) write(ctx context.Context, fn func(*ledgerConn) error) (err error) {
+	raw, err := l.db.Conn(ctx)
 	if err != nil {
 		return err
 	}
+	c := &ledgerConn{raw}
 	defer c.Close()
 	if err = checkConnection(ctx, c); err != nil {
+		_ = c.Raw(func(any) error { return driver.ErrBadConn })
 		return err
 	}
 	if _, err = c.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
+		// An unsuccessful BEGIN has not established a usable transaction.
+		// Never return that connection to the pool with ambiguous state.
+		_ = c.Raw(func(any) error { return driver.ErrBadConn })
 		return err
 	}
 	committed := false
@@ -137,6 +145,9 @@ func (l *Ledger) write(ctx context.Context, fn func(*sql.Conn) error) (err error
 		if err = l.checkpoint("before_commit"); err != nil {
 			return err
 		}
+	}
+	if err = ctx.Err(); err != nil {
+		return err
 	}
 	if _, err = c.ExecContext(ctx, "COMMIT"); err != nil {
 		return err

@@ -61,7 +61,7 @@ func checkedAdd(a, b int64) (int64, error) {
 	}
 	return a + b, nil
 }
-func eligible(ctx context.Context, c *sql.Conn, id string) (bool, error) {
+func eligible(ctx context.Context, c *ledgerConn, id string) (bool, error) {
 	var n int
 	e := c.QueryRowContext(ctx, "SELECT eligible FROM pro_usage_eligibility WHERE client_id=?", id).Scan(&n)
 	if errors.Is(e, sql.ErrNoRows) {
@@ -70,7 +70,7 @@ func eligible(ctx context.Context, c *sql.Conn, id string) (bool, error) {
 	return n == 1, e
 }
 func (l *Ledger) InitializeAccount(ctx context.Context, s Seed) error {
-	return l.write(ctx, func(c *sql.Conn) error { return initializeAccount(ctx, c, s) })
+	return l.write(ctx, func(c *ledgerConn) error { return initializeAccount(ctx, c, s) })
 }
 func (l *Ledger) InitializeAccountTx(ctx context.Context, tx *sql.Tx, s Seed) error {
 	if tx == nil {
@@ -119,7 +119,7 @@ func initializeAccount(ctx context.Context, c sqlWriter, s Seed) error {
 // Epoch registration is INTERNAL, before admitting traffic, with server-derived
 // bindings and an actual supervised process birth. Never decode it from a report.
 func (l *Ledger) RegisterEpoch(ctx context.Context, authority uc.Epoch) error {
-	return l.write(ctx, func(c *sql.Conn) error { return registerEpoch(ctx, c, authority) })
+	return l.write(ctx, func(c *ledgerConn) error { return registerEpoch(ctx, c, authority) })
 }
 func (l *Ledger) RegisterEpochTx(ctx context.Context, tx *sql.Tx, authority uc.Epoch) error {
 	if tx == nil {
@@ -189,7 +189,7 @@ func registerEpoch(ctx context.Context, c sqlWriter, authority uc.Epoch) error {
 }
 func (l *Ledger) Accept(ctx context.Context, principal Principal, r uc.Report) (uc.Receipt, error) {
 	var receipt uc.Receipt
-	err := l.write(ctx, func(c *sql.Conn) error {
+	err := l.write(ctx, func(c *ledgerConn) error {
 		var epochJSON, cursorJSON []byte
 		var node, installation, binding, state string
 		e := c.QueryRowContext(ctx, "SELECT node_id,installation_id,binding_sha,epoch_json,cursor_json,state FROM pro_usage_epochs WHERE epoch_id=?", r.EpochID).Scan(&node, &installation, &binding, &epochJSON, &cursorJSON, &state)
@@ -308,7 +308,7 @@ func (l *Ledger) MarkEpochUncertain(ctx context.Context, principal Principal, ep
 	if !validReason(reason) {
 		return uc.ErrInvalid
 	}
-	return l.write(ctx, func(c *sql.Conn) error {
+	return l.write(ctx, func(c *ledgerConn) error {
 		var node, installation, state string
 		var raw []byte
 		e := c.QueryRowContext(ctx, "SELECT node_id,installation_id,state,epoch_json FROM pro_usage_epochs WHERE epoch_id=?", epochID).Scan(&node, &installation, &state, &raw)
@@ -360,7 +360,9 @@ func (l *Ledger) MarkEpochUncertain(ctx context.Context, principal Principal, ep
 func (l *Ledger) Account(ctx context.Context, clientID string) (Account, error) {
 	var a Account
 	var complete, allowed int
-	err := l.db.QueryRowContext(ctx, `SELECT a.client_id,c.representative_id,a.uplink,a.downlink,a.baseline_complete,a.holds,c.plan_kind,c.volume_bytes,v.eligible FROM pro_usage_accounts a JOIN clients c ON c.id=a.client_id JOIN pro_usage_eligibility v ON v.client_id=a.client_id WHERE a.client_id=?`, clientID).Scan(&a.ClientID, &a.RepresentativeID, &a.Uplink, &a.Downlink, &complete, &a.Holds, &a.Plan, &a.Limit, &allowed)
+	err := l.read(ctx, func(c *ledgerConn) error {
+		return c.QueryRowContext(ctx, `SELECT a.client_id,c.representative_id,a.uplink,a.downlink,a.baseline_complete,a.holds,c.plan_kind,c.volume_bytes,v.eligible FROM pro_usage_accounts a JOIN clients c ON c.id=a.client_id JOIN pro_usage_eligibility v ON v.client_id=a.client_id WHERE a.client_id=?`, clientID).Scan(&a.ClientID, &a.RepresentativeID, &a.Uplink, &a.Downlink, &complete, &a.Holds, &a.Plan, &a.Limit, &allowed)
+	})
 	if errors.Is(err, sql.ErrNoRows) {
 		return a, ErrMissing
 	}

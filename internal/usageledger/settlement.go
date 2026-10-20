@@ -20,9 +20,11 @@ func (l *Ledger) ConfirmSettlement(ctx context.Context, p Principal, r uc.Receip
 	var cursorJSON []byte
 	var sha sql.NullString
 	var quiesced sql.NullBool
-	err := l.db.QueryRowContext(ctx, `SELECT e.node_id,e.installation_id,e.state,e.cursor_json,r.sha256,r.quiesced
+	err := l.read(ctx, func(c *ledgerConn) error {
+		return c.QueryRowContext(ctx, `SELECT e.node_id,e.installation_id,e.state,e.cursor_json,r.sha256,r.quiesced
 		FROM pro_usage_epochs e LEFT JOIN pro_usage_receipts r ON r.epoch_id=e.epoch_id AND r.sequence=?
 		WHERE e.epoch_id=?`, strconv.FormatUint(r.Sequence, 10), r.EpochID).Scan(&node, &installation, &state, &cursorJSON, &sha, &quiesced)
+	})
 	if errors.Is(err, sql.ErrNoRows) {
 		return uc.SettlementReceipt{}, ErrMissing
 	}

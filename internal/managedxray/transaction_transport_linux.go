@@ -34,6 +34,9 @@ func SignTransactionPoll(key []byte, p TransactionPoll) TransactionPoll {
 	return p
 }
 func VerifyTransactionPoll(key []byte, p TransactionPoll) bool {
+	if p.Status.Usage != nil || p.Status.Observed.Usage != nil {
+		return false
+	}
 	want := SignTransactionPoll(key, p)
 	return len(key) >= 32 && transactionNode.MatchString(p.NodeID) && transactionID.MatchString(p.InstallationID) && transactionHash.MatchString(p.BinarySHA) && transactionID.MatchString(p.Status.Instance) && p.Status.Serial <= maxTransactionSerial && p.At > 0 && (p.Status.CurrentStageID == "" || transactionID.MatchString(p.Status.CurrentStageID)) && (p.Status.PreviousStageID == "" || transactionID.MatchString(p.Status.PreviousStageID)) && (p.Status.StagedID == "" || transactionID.MatchString(p.Status.StagedID)) && (p.Status.InterruptedCommandSHA == "" || transactionHash.MatchString(p.Status.InterruptedCommandSHA)) && transactionHash.MatchString(p.Signature) && hmac.Equal([]byte(want.Signature), []byte(p.Signature))
 }
@@ -49,6 +52,9 @@ type TransactionDelivery struct {
 // signed receipt. Lost responses replay the same command/receipt on next poll;
 // polling never authorizes Apply, recovery or lease renewal by itself.
 func (t *TransactionRuntime) SyncTransaction(ctx context.Context, client *http.Client, endpoint string) error {
+	if t.metered != nil {
+		return ErrTransaction
+	}
 	u, e := url.Parse(endpoint)
 	if e != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || u.Path != "" || u.RawQuery != "" || u.Fragment != "" || client == nil {
 		return ErrTransaction

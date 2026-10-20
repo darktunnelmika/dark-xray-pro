@@ -15,11 +15,12 @@ import (
 )
 
 type transactionStage struct {
-	ID         string           `json:"id"`
-	PayloadSHA string           `json:"payload_sha"`
-	Expires    int64            `json:"expires"`
-	Base       RuntimeCondition `json:"base"`
-	Revision   *savedRevision   `json:"revision"`
+	UsageBase  *MeteredCondition `json:"usage_base,omitempty"`
+	ID         string            `json:"id"`
+	PayloadSHA string            `json:"payload_sha"`
+	Expires    int64             `json:"expires"`
+	Base       RuntimeCondition  `json:"base"`
+	Revision   *savedRevision    `json:"revision"`
 }
 
 type transactionState struct {
@@ -37,6 +38,7 @@ type transactionState struct {
 // native sync worker. It is an internal loopback LAB executor, not permission
 // to activate a paired public Node or to bypass an existing usage epoch.
 type TransactionRuntime struct {
+	metered     *MeteredTransactionOptions
 	mu          sync.Mutex
 	runtime     *Runtime
 	options     Options
@@ -49,16 +51,24 @@ type TransactionRuntime struct {
 }
 
 type TransactionStatus struct {
-	CurrentStageID        string   `json:"current_stage_id,omitempty"`
-	PreviousStageID       string   `json:"previous_stage_id,omitempty"`
-	Instance              string   `json:"instance"`
-	Serial                uint64   `json:"serial"`
-	StagedID              string   `json:"staged_id,omitempty"`
-	InterruptedCommandSHA string   `json:"interrupted_command_sha,omitempty"`
-	Observed              Snapshot `json:"observed"`
+	Usage                 *MeteredCondition `json:"usage,omitempty"`
+	CurrentStageID        string            `json:"current_stage_id,omitempty"`
+	PreviousStageID       string            `json:"previous_stage_id,omitempty"`
+	Instance              string            `json:"instance"`
+	Serial                uint64            `json:"serial"`
+	StagedID              string            `json:"staged_id,omitempty"`
+	InterruptedCommandSHA string            `json:"interrupted_command_sha,omitempty"`
+	Observed              Snapshot          `json:"observed"`
 }
 
 func OpenTransactions(o Options) (*TransactionRuntime, error) {
+	if o.ExperimentalFinalTCP {
+		return nil, ErrTransaction
+	}
+	return openTransactions(o, 1)
+}
+
+func openTransactions(o Options, version int) (*TransactionRuntime, error) {
 	// Public/metered rollout is a separate gate. This executor cannot silently
 	// take over the existing native runtime directory or a system service.
 	ip := net.ParseIP(o.ListenIP)
@@ -68,6 +78,10 @@ func OpenTransactions(o Options) (*TransactionRuntime, error) {
 	d, err := openTransactionDisk(o)
 	if err != nil {
 		return nil, err
+	}
+	d.version = version
+	if version == 2 {
+		d.aad = append(d.aad, []byte("\x00METERED-FINAL-TCP-v2")...)
 	}
 	inner := o
 	inner.Directory = filepath.Join(o.Directory, "owned-runtime")
@@ -94,6 +108,9 @@ func (t *TransactionRuntime) Status() TransactionStatus {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	out := TransactionStatus{Instance: t.instance, Serial: t.state.Serial, Observed: t.runtime.Snapshot()}
+	if t.metered != nil {
+		out.Observed, out.Usage = t.meteredSnapshot()
+	}
 	if t.state.Current != nil {
 		out.CurrentStageID = t.state.Current.ID
 	}
@@ -136,6 +153,9 @@ func (t *TransactionRuntime) receipt(c TransactionCommand, outcome string, s Sna
 func (t *TransactionRuntime) Execute(ctx context.Context, c TransactionCommand, candidate xrayconfig.Candidate) (TransactionReceipt, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	if t.metered != nil || c.Version != 1 {
+		return TransactionReceipt{}, ErrTransaction
+	}
 	if t.closed {
 		return TransactionReceipt{}, ErrClosed
 	}

@@ -10,10 +10,12 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/http/httptrace"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -34,6 +36,25 @@ import (
 // This runs the actual core, Registry, TLS, Store, outbox, admission and
 // observer. The trusted test supervisor registers the birth using Store APIs;
 // ordinary remote metered delivery remains intentionally 503-gated.
+type admissionTraceWriter struct {
+	http.ResponseWriter
+	status int
+}
+
+func (w *admissionTraceWriter) WriteHeader(status int) {
+	if w.status == 0 {
+		w.status = status
+	}
+	w.ResponseWriter.WriteHeader(status)
+}
+
+func (w *admissionTraceWriter) Write(data []byte) (int, error) {
+	if w.status == 0 {
+		w.status = http.StatusOK
+	}
+	return w.ResponseWriter.Write(data)
+}
+
 func TestRealPinnedPretrafficUsageAdmission(t *testing.T) {
 	testRealPinnedPretrafficUsageAdmission(t, []string{"receipt-before-first-byte", "lost-zero-receipt", "wrong-pin", "lease-expires-at-barrier", "restart-while-prepared", "cancel-at-barrier"})
 }
@@ -49,6 +70,13 @@ func TestRealPinnedActiveTCPSettlement(t *testing.T) {
 	testRealPinnedPretrafficUsageAdmission(t, []string{"active-replacement", "active-lost-final-receipt", "active-lost-confirmation", "active-unknown-tail", "active-interrupted", "active-no-opt-in"})
 }
 
+func TestRealPinnedMeteredTransactions(t *testing.T) {
+	if os.Getenv("DARK_PRO_TEST_FINAL_TCP") != "1" {
+		t.Skip("explicit experimental barrier core required")
+	}
+	testRealPinnedPretrafficUsageAdmission(t, []string{"transaction-apply-rollback", "transaction-lost-seal", "transaction-revoked-after-seal", "transaction-unknown-tail", "transaction-register-failed", "transaction-lost-ack-restart"})
+}
+
 func testRealPinnedPretrafficUsageAdmission(t *testing.T, modes []string) {
 	binary, pin := os.Getenv("DARK_PRO_TEST_XRAY_BINARY"), os.Getenv("DARK_PRO_TEST_XRAY_SHA256")
 	if binary == "" && pin == "" {
@@ -59,9 +87,35 @@ func testRealPinnedPretrafficUsageAdmission(t *testing.T, modes []string) {
 	}
 	for _, mode := range modes {
 		t.Run(mode, func(t *testing.T) {
-			activeMode := strings.HasPrefix(mode, "active-")
+			transactionMode := strings.HasPrefix(mode, "transaction-")
+			activeMode := strings.HasPrefix(mode, "active-") || transactionMode
 			ctx, cancel := context.WithTimeout(context.Background(), 35*time.Second)
 			defer cancel()
+			// Record only timing/status, never credentials or private payloads.
+			// An unexpected recovery transport failure must be diagnosable without
+			// broadening timeouts or treating an unconfirmed replay as success.
+			var traceMu sync.Mutex
+			var trace []string
+			traceStart := time.Now()
+			note := func(message string) {
+				traceMu.Lock()
+				trace = append(trace, fmt.Sprintf("%s %s", time.Since(traceStart).Round(time.Millisecond), message))
+				traceMu.Unlock()
+			}
+			if mode == "active-interrupted" {
+				ctx = httptrace.WithClientTrace(ctx, &httptrace.ClientTrace{
+					GotConn:              func(i httptrace.GotConnInfo) { note(fmt.Sprintf("client connection reused=%v", i.Reused)) },
+					WroteRequest:         func(i httptrace.WroteRequestInfo) { note(fmt.Sprintf("client wrote request err=%v", i.Err)) },
+					GotFirstResponseByte: func() { note("client received response") },
+				})
+				t.Cleanup(func() {
+					if t.Failed() {
+						traceMu.Lock()
+						defer traceMu.Unlock()
+						t.Log("interruption transport trace:\n" + strings.Join(trace, "\n"))
+					}
+				})
+			}
 			s := enabledOwner(t)
 			if err := s.business.EnableUsageLedger(ctx); err != nil {
 				t.Fatal(err)
@@ -97,11 +151,19 @@ func testRealPinnedPretrafficUsageAdmission(t *testing.T, modes []string) {
 			var finalReport atomic.Pointer[uc.Report]
 			actual := s.AgentHandler()
 			receiver := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+				if mode == "active-interrupted" {
+					tracked := &admissionTraceWriter{ResponseWriter: w}
+					w = tracked
+					note("server start " + req.URL.Path)
+					defer func() {
+						note(fmt.Sprintf("server end %s status=%d ctx=%v", req.URL.Path, tracked.status, req.Context().Err()))
+					}()
+				}
 				if req.URL.Path == "/api/v1/agent/native-usage/interrupted" && mode == "active-interrupted" && !lostInterruption.Swap(true) {
 					w.WriteHeader(503)
 					return
 				}
-				if req.URL.Path == "/api/v1/agent/native-usage/settled" && (mode == "settlement-lost-confirmation" || mode == "active-lost-confirmation") && !lostConfirmation.Swap(true) {
+				if req.URL.Path == "/api/v1/agent/native-usage/settled" && (mode == "settlement-lost-confirmation" || mode == "active-lost-confirmation" || mode == "transaction-lost-seal") && !lostConfirmation.Swap(true) {
 					rec := httptest.NewRecorder()
 					actual.ServeHTTP(rec, req)
 					if rec.Code != 200 {
@@ -241,6 +303,10 @@ func testRealPinnedPretrafficUsageAdmission(t *testing.T, modes []string) {
 			cfg.ManifestSHA = cfg.Candidate.ManifestSHA256
 			options := managedxray.Options{Directory: filepath.Join(t.TempDir(), "private-runtime"), StateKey: bytes.Repeat([]byte{2}, 32), LeaseKey: []byte(nodeToken), NodeID: cfg.NodeID, InstallationID: installID, ListenIP: "127.0.0.1", Binary: binary, BinarySHA: pin}
 			options.ExperimentalFinalTCP = activeMode && mode != "active-no-opt-in"
+			if transactionMode {
+				testMeteredTransactionOutcome(t, ctx, s, options, cfg, receiver, mode, customers, port, origin, &finalReport)
+				return
+			}
 			r, err := managedxray.Open(options)
 			if err != nil {
 				t.Fatal(err)

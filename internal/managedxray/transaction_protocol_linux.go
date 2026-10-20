@@ -43,23 +43,24 @@ func Condition(s Snapshot) RuntimeCondition {
 // while RuntimeSequence independently orders the underlying Xray revisions.
 // PayloadSHA authenticates all candidate metadata as well as private bytes.
 type TransactionCommand struct {
-	Version               int              `json:"version"`
-	RuntimeInstance       string           `json:"runtime_instance,omitempty"`
-	ID                    string           `json:"id"`
-	Serial                uint64           `json:"serial"`
-	Action                string           `json:"action"`
-	StageID               string           `json:"stage_id"`
-	NodeID                string           `json:"node_id"`
-	InstallationID        string           `json:"installation_id"`
-	RuntimeSequence       uint64           `json:"runtime_sequence"`
-	PayloadSHA            string           `json:"payload_sha"`
-	BinarySHA             string           `json:"binary_sha"`
-	Expected              RuntimeCondition `json:"expected"`
-	InterruptedCommandSHA string           `json:"interrupted_command_sha,omitempty"`
-	Issued                int64            `json:"issued_unix_nano"`
-	Expires               int64            `json:"expires_unix_nano"`
-	Lease                 Lease            `json:"lease"`
-	Signature             string           `json:"signature"`
+	Usage                 *MeteredCondition `json:"usage,omitempty"`
+	Version               int               `json:"version"`
+	RuntimeInstance       string            `json:"runtime_instance,omitempty"`
+	ID                    string            `json:"id"`
+	Serial                uint64            `json:"serial"`
+	Action                string            `json:"action"`
+	StageID               string            `json:"stage_id"`
+	NodeID                string            `json:"node_id"`
+	InstallationID        string            `json:"installation_id"`
+	RuntimeSequence       uint64            `json:"runtime_sequence"`
+	PayloadSHA            string            `json:"payload_sha"`
+	BinarySHA             string            `json:"binary_sha"`
+	Expected              RuntimeCondition  `json:"expected"`
+	InterruptedCommandSHA string            `json:"interrupted_command_sha,omitempty"`
+	Issued                int64             `json:"issued_unix_nano"`
+	Expires               int64             `json:"expires_unix_nano"`
+	Lease                 Lease             `json:"lease"`
+	Signature             string            `json:"signature"`
 }
 
 func transactionMAC(key []byte, domain string, v any) string {
@@ -86,7 +87,10 @@ func TransactionPayloadSHA(c xrayconfig.Candidate) string {
 }
 
 func validTransactionCommand(c TransactionCommand) bool {
-	if (c.RuntimeInstance != "" && !transactionID.MatchString(c.RuntimeInstance)) || c.Version != 1 || !transactionID.MatchString(c.ID) || !transactionID.MatchString(c.StageID) ||
+	if (c.Version == 1 && c.Usage != nil) || (c.Version == 2 && (c.Usage == nil || !validMeteredCondition(*c.Usage) || c.RuntimeInstance == "")) {
+		return false
+	}
+	if (c.RuntimeInstance != "" && !transactionID.MatchString(c.RuntimeInstance)) || (c.Version != 1 && c.Version != 2) || !transactionID.MatchString(c.ID) || !transactionID.MatchString(c.StageID) ||
 		!transactionNode.MatchString(c.NodeID) || !transactionID.MatchString(c.InstallationID) ||
 		c.Serial == 0 || c.Serial > maxTransactionSerial || c.RuntimeSequence == 0 || c.RuntimeSequence > maxTransactionSerial ||
 		!transactionHash.MatchString(c.PayloadSHA) || !transactionHash.MatchString(c.BinarySHA) ||
@@ -123,19 +127,20 @@ func validTransactionSignature(key []byte, c TransactionCommand) bool {
 // never grants traffic authority or proves billing, a REALITY handshake or
 // current liveness. The independent short runtime lease still expires.
 type TransactionReceipt struct {
-	Version         int      `json:"version"`
-	CommandID       string   `json:"command_id"`
-	CommandSHA      string   `json:"command_sha"`
-	Serial          uint64   `json:"serial"`
-	Action          string   `json:"action"`
-	StageID         string   `json:"stage_id"`
-	NodeID          string   `json:"node_id"`
-	InstallationID  string   `json:"installation_id"`
-	RuntimeInstance string   `json:"runtime_instance"`
-	Outcome         string   `json:"outcome"`
-	ObservedAt      int64    `json:"observed_unix_nano"`
-	Observed        Snapshot `json:"observed"`
-	Signature       string   `json:"signature"`
+	Metered         *MeteredEvidence `json:"metered,omitempty"`
+	Version         int              `json:"version"`
+	CommandID       string           `json:"command_id"`
+	CommandSHA      string           `json:"command_sha"`
+	Serial          uint64           `json:"serial"`
+	Action          string           `json:"action"`
+	StageID         string           `json:"stage_id"`
+	NodeID          string           `json:"node_id"`
+	InstallationID  string           `json:"installation_id"`
+	RuntimeInstance string           `json:"runtime_instance"`
+	Outcome         string           `json:"outcome"`
+	ObservedAt      int64            `json:"observed_unix_nano"`
+	Observed        Snapshot         `json:"observed"`
+	Signature       string           `json:"signature"`
 }
 
 func signTransactionReceipt(key []byte, r TransactionReceipt) TransactionReceipt {
@@ -147,6 +152,9 @@ func signTransactionReceipt(key []byte, r TransactionReceipt) TransactionReceipt
 // VerifyTransactionReceipt authenticates the entire result, not just the
 // lease that authorized the request. It does not certify a remote Node OS.
 func VerifyTransactionReceipt(key []byte, c TransactionCommand, r TransactionReceipt) bool {
+	if c.Version != 1 || r.Metered != nil {
+		return false
+	}
 	if !validTransactionSignature(key, c) || r.Version != 1 || r.CommandID != c.ID || r.CommandSHA != hashJSON(c) ||
 		r.Serial != c.Serial || r.Action != c.Action || r.StageID != c.StageID || r.NodeID != c.NodeID ||
 		r.InstallationID != c.InstallationID || !transactionID.MatchString(r.RuntimeInstance) || (c.RuntimeInstance != "" && c.RuntimeInstance != r.RuntimeInstance) || r.ObservedAt <= 0 ||
