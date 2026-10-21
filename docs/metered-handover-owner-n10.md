@@ -74,6 +74,12 @@ invalid publication claims, read failures, representative isolation and Persian
 320px layout. The dedicated CI contract step repeats API/store/schema tests ten
 times. The nginx matrix exercises real path/method forwarding and default denial.
 
+The isolated real-traffic fixture selects customer ports outside the verified
+kernel ephemeral range, preventing its TLS receiver, SOCKS client and outbound
+connections from claiming a planned customer port before Apply. The strict
+closed-listener accounting checks remain in place. CI additionally repeats the
+real unknown-tail scenario twenty times in a disposable network namespace.
+
 Complete two-Node real-traffic transfer acceptance, protocol health proof,
 subscription generation/publication and an explicit cross-Node recovery and
 rollback workflow remain required before production use or enabling any real

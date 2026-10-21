@@ -110,10 +110,7 @@ func testMeteredRouteActiveTraffic(t *testing.T, binary, pin, mode string) {
 	// identity, not the namespace-local synthetic destination address.
 	origin.Client().Transport.(*http.Transport).TLSClientConfig.ServerName = "example.com"
 	defer origin.Close()
-	portA, portB := liveUsagePort(t), liveUsagePort(t)
-	for portA == portB || portA == 29761 || portB == 29761 {
-		portA, portB = liveUsagePort(t), liveUsagePort(t)
-	}
+	portA, portB := meteredTrafficCustomerPorts(t)
 	closed := func(port uint16) bool {
 		c, e := net.DialTimeout("tcp4", net.JoinHostPort("127.0.0.1", strconv.Itoa(int(port))), 100*time.Millisecond)
 		if e == nil {
@@ -579,4 +576,36 @@ func testMeteredRouteActiveTraffic(t *testing.T, binary, pin, mode string) {
 	stream3.stopped(t, ctx)
 	assertClosed()
 	t.Log("HUB ACTIVE: untouched owner-rendered candidates; real Vision TLS streams; initial receipt before listener; exact prior final seal; no duplicate debit; idle client zero; distinct rollback birth")
+}
+
+// This fixture runs alone in a loopback-only namespace. Customer ports must
+// stay outside the kernel's ephemeral range: otherwise the subsequently bound
+// TLS HUB receiver, SOCKS client or an outbound connection can claim an unused
+// customer port and make an accounting-fence probe observe the fixture itself.
+func meteredTrafficCustomerPorts(t *testing.T) (uint16, uint16) {
+	t.Helper()
+	raw, err := os.ReadFile("/proc/sys/net/ipv4/ip_local_port_range")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var low, high int
+	if n, err := fmt.Sscan(string(raw), &low, &high); err != nil || n != 2 || low < 1 || high > 65535 || low > high {
+		t.Fatal("unverified ephemeral port range", err)
+	}
+	ports := []uint16{}
+	for p := 1024; p <= 65535 && len(ports) < 2; p++ {
+		if p >= low && p <= high || p == 10085 || p == 29761 {
+			continue
+		}
+		listener, err := net.Listen("tcp4", net.JoinHostPort("127.0.0.1", strconv.Itoa(p)))
+		if err != nil {
+			continue
+		}
+		ports = append(ports, uint16(p))
+		listener.Close()
+	}
+	if len(ports) != 2 {
+		t.Fatal("two non-ephemeral customer ports required by isolated traffic fixture")
+	}
+	return ports[0], ports[1]
 }
