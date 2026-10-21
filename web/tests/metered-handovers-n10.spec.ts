@@ -69,7 +69,11 @@ test("N10 explicit review, source final receipt and separate target request",asy
  await expect(panel(page).getByRole("button",{name:"Request destination execution",exact:true})).toBeDisabled();
  await confirm(page,"Stop and settle previous Node");await expect(panel(page).getByText("Source stop queued · receipt pending",{exact:true}).first()).toBeVisible();
  await expect(panel(page).getByRole("button",{name:"Request destination execution",exact:true})).toBeDisabled();expect(f.writes).toHaveLength(2);
- f.settle();await refresh(page);await expect(panel(page).getByRole("button",{name:"Request destination execution",exact:true})).toBeEnabled();
+ f.settle();f.state.fresh=false;f.state.source.reported_at_unix_nano=(Date.now()-13000)*1e6;f.state.target.reported_at_unix_nano=(Date.now()-13000)*1e6;await refresh(page);
+ await expect(panel(page).getByText("Source stop and settlement ACK recorded",{exact:true}).first()).toBeVisible();
+ await expect(panel(page).getByText("Current process state unconfirmed · observation stale",{exact:true}).first()).toBeVisible();
+ await expect(panel(page).getByRole("button",{name:"Request destination execution",exact:true})).toBeDisabled();
+ f.state.fresh=true;await refresh(page);await expect(panel(page).getByRole("button",{name:"Request destination execution",exact:true})).toBeEnabled();
  expect(f.writes).toHaveLength(2);await confirm(page,"Request destination execution");
  await expect.poll(()=>f.writes.length).toBe(3);expect(f.writes[2].body).toMatchObject({action:"apply",stage_id:id(21),drafts:[],usage:{settlement:{sequence:"0"}}});
  expect(f.writes.every(w=>w.csrf===csrf)).toBe(true);await expect(panel(page).getByText(/Protocol health, publication and cross-Node rollback are pending/)).toBeVisible();
