@@ -88,8 +88,13 @@ location / {{ return 403; }}
                         assert status == (401 if method == allowed else 403), (path, method, status)
                         assert len(Backend.seen) == before + (method == allowed)
                 metered = "/api/v1/workspace/native-nodes/lab-test_01/metered-route-transactions"
+                handovers = "/api/v1/workspace/metered-handovers"
                 for path, allowed in (("/api/v1/workspace/metered-route-transactions", {"GET"}),
                                       (metered, {"GET", "POST"}),
+                                      (handovers, {"GET", "POST"}),
+                                      (handovers + "/" + "a" * 32, {"GET"}),
+                                      (handovers + "/" + "a" * 32 + "/commands", {"POST"}),
+                                      (handovers + "/" + "a" * 32 + "/cancel", {"POST"}),
                                       (metered + "/" + "a" * 32 + "/abandon", {"POST"})):
                     for method in ("GET", "POST", "PUT", "DELETE", "PATCH"):
                         before = len(Backend.seen)
@@ -104,6 +109,9 @@ location / {{ return 403; }}
                              "/api/v1/workspace/nodes/a/replacements/" + "a" * 32 + "/cancel/extra",
                              "/api/v1/workspace/metered-route-transactions/enable",
                              metered + "/apply", metered + "/abc/abandon",
+                             handovers + "/enable", handovers + "/abc/commands",
+                             handovers + "/" + "a" * 32 + "/apply",
+                             handovers + "/" + "a" * 32 + "/cancel/extra",
                              metered + "/" + "a" * 32 + "/abandon/extra"):
                     before = len(Backend.seen)
                     assert request(port, path, "GET") == 403, path

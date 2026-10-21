@@ -8,6 +8,7 @@ import (
 
 	"github.com/darktunnelmika/dark-xray-pro/internal/business"
 	mx "github.com/darktunnelmika/dark-xray-pro/internal/managedxray"
+	"github.com/darktunnelmika/dark-xray-pro/internal/replacement"
 )
 
 // This separate operator-only startup switch claims a never-delivered metered loopback
@@ -24,6 +25,13 @@ func (s *Server) EnableMeteredRouteNodes(nodes []business.MeteredRouteNode) erro
 	}
 	allowlist := make(map[string]string, len(nodes))
 	for _, node := range nodes {
+		if s.replacements != nil {
+			for _, op := range s.replacements.List() {
+				if op.Phase != replacement.Cancelled && (op.OldNodeID == node.NodeID || op.NewNodeID == node.NodeID) {
+					return errors.New("metered Node is reserved by legacy preflight")
+				}
+			}
+		}
 		current, ok := s.nativeNode(node.NodeID)
 		if node.NodeID == s.meteredNode || !ok || current != node.InstallationID || allowlist[node.NodeID] != "" {
 			return errors.New("route transaction installation is not paired or scope is duplicated")
@@ -44,6 +52,7 @@ func (s *Server) meteredRouteScope(node, installation string) bool {
 	return installation != "" && s.meteredRouteNodes[node] == installation && ok && current == installation
 }
 func (s *Server) attachMeteredRouteTransactions(mux *http.ServeMux) {
+	s.attachMeteredHandovers(mux)
 	mux.HandleFunc("GET /api/v1/workspace/metered-route-transactions", func(w http.ResponseWriter, r *http.Request) {
 		if _, ok := s.authorizeBrowser(w, r, false, true); !ok {
 			return

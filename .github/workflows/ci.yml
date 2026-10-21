@@ -138,7 +138,7 @@ jobs:
       - name: Go unit/race tests
         run: go test -race ./...
       - name: Repeat two-Node handover accounting barrier contracts
-        run: go test -race ./internal/business ./internal/usageledger -run '^(TestMeteredHandover|TestReviewedBusinessSchemaVersions)' -count=10 -timeout=180s -v
+        run: go test -race ./internal/business ./internal/usageledger ./internal/api -run '^(TestMeteredHandover|TestReviewedBusinessSchemaVersions)' -count=10 -timeout=240s -v
       - name: Repeat node name receipt and concurrency contracts
         run: go test -race ./internal/noderegistry ./internal/api -run 'TestRename|TestOwnerNodeRename' -count=5 -timeout=120s -v
       - name: Repeat read-only node dependency contracts
