@@ -2,7 +2,7 @@
 // its nanosecond fields and HMAC belong to the HUB/Agent transport exclusively.
 export type Condition = { highwater: number; saved_sequence: number; saved_sha: string; active_sequence: number; active_sha: string; process_ready: boolean };
 export type Observation = Condition & { phase: string; lease_expires_unix_nano: number; data_plane_verified: false; subscription_published: false; no_listeners: boolean };
-export type Action = "stage" | "apply" | "rollback" | "renew";
+export type Action = "stage" | "apply" | "rollback" | "renew" | "drain";
 export type DraftRef = { inbound_id: number; inbound_revision: number; draft_revision: number };
 export type Seal = { epoch_id: string; sequence: string; sha256: string };
 export type MeteredCondition = { epoch_id?: string; epoch_sha?: string; admission_sha?: string; settlement: Seal };
@@ -22,7 +22,7 @@ export type Channel = {
  server_time_unix_milli: number; drafts_valid: boolean;
  status: { usage?: MeteredCondition; instance: string; serial: number; staged_id?: string; current_stage_id?: string; previous_stage_id?: string; interrupted_command_sha?: string; observed: Observation };
  review: (DraftRef & { name: string; listen_ip: string; direct_port: number; tunnel_port: number })[];
- controls: { stage: boolean; apply?: Target; rollback?: Target; renew?: Target };
+ controls: { stage: boolean; apply?: Target; rollback?: Target; renew?: Target; drain?: Target };
  commands: Command[];
 };
 export type Attempt = { node_id: string; installation_id: string; action: Action | "abandon"; id: string; body: string };
@@ -32,7 +32,7 @@ const natural = (v: unknown): v is number => typeof v === "number" && Number.isS
 const nano = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v) && v >= 0;
 const sha = (v: unknown) => v === "" || hex(v, 64);
 const port = (v: unknown): v is number => natural(v) && v <= 65535;
-const actions: string[] = ["stage", "apply", "rollback", "renew"];
+const actions: string[] = ["stage", "apply", "rollback", "renew", "drain"];
 function condition(v: unknown): v is Condition {
  return object(v) && natural(v.highwater) && natural(v.saved_sequence) && natural(v.active_sequence) && sha(v.saved_sha) && sha(v.active_sha) && typeof v.process_ready === "boolean";
 }
@@ -61,7 +61,7 @@ export function readCommand(v: unknown, scope: Scope): Command {
  if (v.receipt !== undefined) {
   const a = v.receipt;
   if (!object(a) || a.version !== 2 || !object(a.metered) || !meteredCondition(a.metered.after) || !seal(a.metered.prior_settlement) || a.command_id !== v.id || a.serial !== v.serial || a.action !== v.action || a.stage_id !== v.stage_id || a.node_id !== v.node_id || a.installation_id !== v.installation_id || !hex(a.runtime_instance, 32) || !hex(a.signature, 64) || !nano(a.observed_unix_nano) || !observation(a.observed) ||
-   !["staged", "applied", "rolled_back", "renewed", "failed_stopped", "failed_previous_retained"].includes(String(a.outcome))) throw Error("invalid_route_receipt");
+   !["staged", "applied", "rolled_back", "renewed", "drained", "failed_stopped", "failed_previous_retained"].includes(String(a.outcome))) throw Error("invalid_route_receipt");
  }
  if (["acknowledged", "failed", "acknowledged_stale"].includes(String(v.state)) && !v.receipt) throw Error("missing_route_receipt");
  return v as Command;
@@ -79,7 +79,7 @@ export function readChannel(v: unknown, scope: Scope): Channel {
   if (typeof r.name !== "string" || r.name.length > 128 || !["127.0.0.1", "::1"].includes(String(r.listen_ip)) || !port(r.direct_port) || !port(r.tunnel_port)) throw Error("invalid_route_review");
  }
  if (v.controls.stage && (!v.drafts_valid || !v.review.length || v.review.some(r => r.draft_revision === 0))) throw Error("incomplete_route_review");
- for (const action of ["apply", "rollback", "renew"]) {
+ for (const action of ["apply", "rollback", "renew", "drain"]) {
   const t = v.controls[action];
   if (t !== undefined && (!object(t) || !hex(t.stage_id, 32) || !Array.isArray(t.ports) || t.ports.length > 512 || !t.ports.every(p => port(p) && p > 0) || (action === "apply" && !natural(t.expires_unix_milli)))) throw Error("invalid_route_control");
  }

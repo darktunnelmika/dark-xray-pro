@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"time"
 
+	uc "github.com/darktunnelmika/dark-xray-pro/internal/usagecheckpoint"
 	"github.com/darktunnelmika/dark-xray-pro/internal/xrayconfig"
 )
 
@@ -101,6 +102,8 @@ func validTransactionCommand(c TransactionCommand) bool {
 	switch c.Action {
 	case "stage":
 		return c.StageID == c.ID && c.Lease == (Lease{})
+	case "drain":
+		return c.Version == 2 && c.Usage.EpochID != "" && c.Usage.Settlement == (uc.Receipt{}) && c.Lease == (Lease{}) && c.RuntimeSequence == c.Expected.Highwater && c.InterruptedCommandSHA == ""
 	case "apply", "rollback", "renew":
 		return c.InterruptedCommandSHA == "" && c.Lease.Sequence == c.RuntimeSequence &&
 			c.Lease.NodeID == c.NodeID && c.Lease.InstallationID == c.InstallationID && c.Lease.Expires <= c.Expires

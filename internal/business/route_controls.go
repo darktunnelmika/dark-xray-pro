@@ -28,6 +28,7 @@ type RouteControls struct {
 	Apply    *RouteActionTarget `json:"apply,omitempty"`
 	Rollback *RouteActionTarget `json:"rollback,omitempty"`
 	Renew    *RouteActionTarget `json:"renew,omitempty"`
+	Drain    *RouteActionTarget `json:"drain,omitempty"`
 }
 type RouteControlView struct {
 	RouteChannelView

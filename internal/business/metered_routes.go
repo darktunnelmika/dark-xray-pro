@@ -383,6 +383,17 @@ func meteredRouteCandidate(ctx context.Context, tx *sql.Tx, key []byte, node, in
 	return c, nil
 }
 func meteredRouteStillCurrent(ctx context.Context, tx *sql.Tx, key []byte, row meteredRouteRow) error {
+	if row.view.Action == "drain" {
+		c := row.payload.Command
+		channel, _, err := meteredRouteObservation(ctx, tx, row.view.NodeID)
+		if err != nil {
+			return err
+		}
+		if c.Usage == nil || c.Usage.EpochID == "" || c.Usage.Settlement != (uc.Receipt{}) || channel.InstallationID != c.InstallationID || channel.Status.CurrentStageID != c.StageID {
+			return ErrConflict
+		}
+		return meteredLatestCondition(ctx, tx, c.NodeID, c.InstallationID, *c.Usage)
+	}
 	draftState, e := routeDraftState(ctx, tx, row.view.NodeID)
 	if e != nil {
 		return e
@@ -490,7 +501,7 @@ func (s *Store) QueueMeteredRouteCommand(ctx context.Context, key []byte, node s
 		payload.DependencyNodes = []string{node}
 		cmd.RuntimeSequence = in.Expected.Highwater + 1
 		cmd.InterruptedCommandSHA = channel.Status.InterruptedCommandSHA
-	case "apply", "rollback", "renew":
+	case "apply", "rollback", "renew", "drain":
 		if len(in.Drafts) != 0 || !routeID.MatchString(in.StageID) || channel.Status.InterruptedCommandSHA != "" {
 			return empty, ErrConflict
 		}
@@ -517,6 +528,12 @@ func (s *Store) QueueMeteredRouteCommand(ctx context.Context, key []byte, node s
 		}
 		cmd.StageID = in.StageID
 		cmd.RuntimeSequence = in.Expected.Highwater + 1
+		if in.Action == "drain" {
+			if channel.Status.CurrentStageID != in.StageID || in.Usage.EpochID == "" || in.Usage.Settlement != (uc.Receipt{}) {
+				return empty, ErrConflict
+			}
+			cmd.RuntimeSequence = in.Expected.Highwater
+		}
 		if in.Action == "apply" {
 			if channel.Status.StagedID != in.StageID || cmd.Expected != stage.payload.Command.Expected || stage.payload.Command.Usage == nil || *cmd.Usage != *stage.payload.Command.Usage || stage.payload.Command.Expires <= now {
 				return empty, ErrConflict
@@ -539,12 +556,14 @@ func (s *Store) QueueMeteredRouteCommand(ctx context.Context, key []byte, node s
 	default:
 		return empty, ErrInvalid
 	}
-	limit, e := meteredRouteExpiry(ctx, tx, node, channel.InstallationID)
-	if e != nil || limit <= now {
-		return empty, ErrConflict
-	}
-	if cmd.Expires > limit {
-		cmd.Expires = limit
+	if in.Action != "drain" {
+		limit, err := meteredRouteExpiry(ctx, tx, node, channel.InstallationID)
+		if err != nil || limit <= now {
+			return empty, ErrConflict
+		}
+		if cmd.Expires > limit {
+			cmd.Expires = limit
+		}
 	}
 	cmd.PayloadSHA = mx.TransactionPayloadSHA(candidate)
 	payload.Command = cmd
@@ -624,7 +643,7 @@ func (s *Store) PollMeteredRouteCommand(ctx context.Context, key, token []byte, 
 		if row.payload.Request.RuntimeInstance != p.Status.Instance || mx.Condition(p.Status.Observed) != c.Expected || p.Status.Usage == nil || c.Usage == nil || *p.Status.Usage != *c.Usage || p.Status.Serial >= c.Serial || c.Expires <= now {
 			return refuse()
 		}
-		if c.Action != "stage" {
+		if c.Action != "stage" && c.Action != "drain" {
 			expiry := now + int64(30*time.Second)
 			if expiry > c.Expires {
 				expiry = c.Expires
