@@ -9,6 +9,12 @@ test "${GITHUB_ACTIONS:-}" = true
 test -x "$DARK_PRO_TEST_XRAY_BINARY"
 test "$(sha256sum "$DARK_PRO_TEST_XRAY_BINARY" | cut -d' ' -f1)" = "$DARK_PRO_TEST_XRAY_SHA256"
 
+case "${1-}" in
+  '') task_run='^TestRealPinnedMeteredRouteActiveTraffic$'; task_count=3; task_output='hub-active-traffic.jsonl' ;;
+  --unknown-tail-stress) task_run='^TestRealPinnedMeteredRouteActiveTraffic$/^unknown-tail$'; task_count=20; task_output='hub-active-traffic-unknown-tail.jsonl' ;;
+  *) exit 2 ;;
+esac
+
 # Compile before entering a network that has no route to module proxies or DNS.
 go test -race -c ./internal/api -o "$RUNNER_TEMP/h7-api.test"
 task_ns="dark-pro-h7-${GITHUB_RUN_ID:?}-${GITHUB_RUN_ATTEMPT:?}"
@@ -37,7 +43,7 @@ sudo ip netns exec "$task_ns" runuser -u "$task_user" -- env \
   DARK_PRO_TEST_FINAL_TCP=1 DARK_PRO_TEST_HUB_TRAFFIC=1 \
   DARK_PRO_TEST_XRAY_BINARY="$DARK_PRO_TEST_XRAY_BINARY" \
   DARK_PRO_TEST_XRAY_SHA256="$DARK_PRO_TEST_XRAY_SHA256" \
-  "$RUNNER_TEMP/h7-api.test" -test.run='^TestRealPinnedMeteredRouteActiveTraffic$' \
-  -test.count=3 -test.timeout=360s -test.v 2>&1 \
+  "$RUNNER_TEMP/h7-api.test" -test.run="$task_run" \
+  -test.count="$task_count" -test.timeout=360s -test.v 2>&1 \
   | go tool test2json -t -p github.com/darktunnelmika/dark-xray-pro/internal/api \
-  > "$RUNNER_TEMP/hub-active-traffic.jsonl"
+  > "$RUNNER_TEMP/$task_output"

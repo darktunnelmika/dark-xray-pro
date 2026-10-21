@@ -43,6 +43,7 @@ func ensureMeteredHandovers(db *sql.DB) error {
 	for _, q := range []string{
 		`CREATE TABLE IF NOT EXISTS native_metered_handovers(id TEXT PRIMARY KEY,source_node TEXT NOT NULL,target_node TEXT NOT NULL,source_installation TEXT NOT NULL,target_installation TEXT NOT NULL,request TEXT NOT NULL,fingerprint TEXT NOT NULL,created INTEGER NOT NULL,drain_command TEXT NOT NULL DEFAULT '',apply_command TEXT NOT NULL DEFAULT '',cancelled INTEGER NOT NULL DEFAULT 0 CHECK(cancelled IN(0,1)),CHECK(source_node!=target_node))`,
 		`CREATE TABLE IF NOT EXISTS native_metered_handover_nodes(node_id TEXT PRIMARY KEY REFERENCES native_metered_route_channels(node_id),handover_id TEXT NOT NULL REFERENCES native_metered_handovers(id))`,
+		`CREATE INDEX IF NOT EXISTS native_metered_handover_history ON native_metered_handovers(created DESC,id DESC)`,
 		`CREATE TRIGGER IF NOT EXISTS native_metered_handover_identity BEFORE UPDATE OF id,source_node,target_node,source_installation,target_installation,request,fingerprint,created ON native_metered_handovers BEGIN SELECT RAISE(ABORT,'handover identity immutable'); END`,
 		`CREATE TRIGGER IF NOT EXISTS native_metered_handover_no_delete BEFORE DELETE ON native_metered_handovers BEGIN SELECT RAISE(ABORT,'handover audit immutable'); END`,
 		`CREATE TRIGGER IF NOT EXISTS native_metered_handover_drain_immutable BEFORE UPDATE OF drain_command ON native_metered_handovers WHEN OLD.drain_command!='' AND OLD.drain_command!=NEW.drain_command BEGIN SELECT RAISE(ABORT,'handover drain immutable'); END`,

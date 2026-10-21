@@ -1,6 +1,7 @@
 package api
 
 import (
+ "context"
  "errors"
  "net/http"
 
@@ -15,6 +16,11 @@ const maxReplacementBytes=16*1024
 // persistent staging workflow; no activation or subscription API is exposed.
 func (s *Server) EnableReplacementLab(j *replacement.Journal)error{
  if j==nil{return errors.New("replacement journal required")}
+ if s.business!=nil {
+  for _,op:=range j.List(){if op.Phase!=replacement.Cancelled {
+   for _,node:=range []string{op.OldNodeID,op.NewNodeID}{owned,err:=s.business.MeteredRouteChannelOwned(context.Background(),node);if err!=nil||owned{return errors.New("preflight conflicts with metered channel ownership")}}
+  }}
+ }
  s.replacements=j
  return nil
 }
@@ -81,6 +87,11 @@ func (s *Server) attachReplacement(mux *http.ServeMux){
   plan,err:=draft.Preview()
   if err!=nil{
    respond(w,http.StatusUnprocessableEntity,map[string]string{"error":"invalid_plan"});return
+  }
+  s.replacementLifecycle.Lock()
+  defer s.replacementLifecycle.Unlock()
+  if s.business!=nil {
+   for _,node:=range []string{input.OldNodeID,input.NewNodeID}{owned,err:=s.business.MeteredRouteChannelOwned(r.Context(),node);if err!=nil||owned{respond(w,http.StatusConflict,map[string]string{"error":"metered_channel_reserved"});return}}
   }
   op,err:=s.replacements.Create(plan,installation)
   switch{

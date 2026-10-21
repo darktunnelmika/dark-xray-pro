@@ -5,6 +5,7 @@ import "./NodeManager.css";
 import NodeNameEditor from "./NodeNameEditor";
 import NodeDependencies from "./NodeDependencies";
 import NodeReplacements from "./NodeReplacements";
+import MeteredHandovers from "./MeteredHandovers";
 
 type Registration = {
   node_id: string;
@@ -28,7 +29,7 @@ const words = {
     conflict: "This Node ID is already paired or has an unexpired invitation. Cancel the invitation or use another ID.",
     invalid: "Enter a valid new Node ID and name.", unavailable: "Node registry is unavailable. Nothing was changed.",
     steps: "On a fresh test server, install the PRO Agent, verify the HUB TLS certificate and its pin, then enter this code securely. Keep the Agent identity file. This does not install an Agent or enable customer Xray by itself.",
-    boundary: "PRO LAB only · no old Nodes · no deletion · no Xray or subscription activation",
+    boundary: "PRO LAB only · no old Nodes · no deletion · pairing never activates Xray or subscriptions automatically",
     roster: "Registered NEW PRO Nodes", empty: "No freshly paired PRO Nodes yet.",
     online: "Online", offline: "Offline", delayed: "Metrics delayed", lastSeen: "Last heartbeat",
     refreshing: "Checking registrations", retry: "Refresh list", registryIssue: "Cannot load registered Nodes.",
@@ -55,7 +56,7 @@ const words = {
     conflict: "این شناسه قبلاً متصل شده یا کد فعال دارد. کد قبلی را لغو کن یا شناسه تازه بزن.",
     invalid: "شناسه و نام نود جدید را به‌درستی وارد کن.", unavailable: "دفتر نودها در دسترس نیست؛ تغییری اعمال نشد.",
     steps: "روی یک سرور آزمایشی تازه، Agent مخصوص PRO را نصب کن؛ گواهی TLS و اثرانگشت HUB را تأیید کن، سپس این کد را محرمانه وارد کن. فایل هویت Agent باید حفظ شود. این فرم به‌تنهایی Agent یا Xray مشتریان را نصب و فعال نمی‌کند.",
-    boundary: "فقط PRO آزمایشی · بدون دست‌زدن به نودهای قدیمی · بدون حذف · بدون فعال‌سازی Xray یا اشتراک",
+    boundary: "فقط PRO آزمایشی · بدون دست‌زدن به نودهای قدیمی · بدون حذف · اتصال نود، Xray یا اشتراک را خودکار فعال نمی‌کند",
     roster: "نودهای تازهٔ ثبت‌شده در PRO", empty: "هنوز نود تازه‌ای Pair نشده است.",
     online: "آنلاین", offline: "آفلاین", delayed: "آمار با تأخیر", lastSeen: "آخرین Heartbeat",
     refreshing: "در حال دریافت لیست نودها", retry: "بازخوانی", registryIssue: "فهرست نودها قابل دریافت نیست.",
@@ -215,6 +216,7 @@ export default function NodeManager({ language }: { language: Language }) {
         <span className="pro-node-manager-icon"><ShieldPlus size={22}/></span>
         <div><h2>{t.title}</h2><p>{t.lead}</p></div>
       </header>
+      <MeteredHandovers key={session?.user.id} language={language}/>
       <section className="pro-node-installer" aria-label={t.installerTitle}>
         <div className="pro-node-installer-top">
           <div><h3>{t.installerTitle}</h3><p>{t.installerLead}</p></div>

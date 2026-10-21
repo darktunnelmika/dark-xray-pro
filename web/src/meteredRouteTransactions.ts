@@ -18,6 +18,8 @@ export type Command = {
 export type Scope = { enabled: boolean; scope: "metered_tcp_loopback_lab"; node_id?: string; installation_id?: string; nodes?: {node_id:string;installation_id:string}[] };
 export type Target = { stage_id: string; ports: number[]; expires_unix_milli?: number };
 export type Channel = {
+
+ handover_id?: string;
  node_id: string; installation_id: string; binary_sha: string; reported_at_unix_nano: number; observation_fresh: boolean;
  server_time_unix_milli: number; drafts_valid: boolean;
  status: { usage?: MeteredCondition; instance: string; serial: number; staged_id?: string; current_stage_id?: string; previous_stage_id?: string; interrupted_command_sha?: string; observed: Observation };
@@ -111,7 +113,7 @@ function seal(v: unknown): v is Seal {
  if (v.sequence === "0") return v.epoch_id === "" && v.sha256 === "";
  return BigInt(v.sequence) <= 18446744073709551615n && hex(v.epoch_id,32) && hex(v.sha256,64);
 }
-function meteredCondition(v: unknown): v is MeteredCondition {
+export function meteredCondition(v: unknown): v is MeteredCondition {
  if (!object(v) || !seal(v.settlement) || (v.admission_sha !== undefined && !hex(v.admission_sha,64))) return false;
  if (v.epoch_id === undefined) return v.epoch_sha === undefined && v.settlement.sequence === "0";
  return hex(v.epoch_id,32) && hex(v.epoch_sha,64) && hex(v.admission_sha,64) &&
