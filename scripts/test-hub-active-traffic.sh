@@ -13,6 +13,7 @@ case "${1-}" in
   '') task_run='^TestRealPinnedMeteredRouteActiveTraffic$'; task_count=3; task_output='hub-active-traffic.jsonl' ;;
   --unknown-tail-stress) task_run='^TestRealPinnedMeteredRouteActiveTraffic$/^unknown-tail$'; task_count=20; task_output='hub-active-traffic-unknown-tail.jsonl' ;;
   --handover) task_run='^TestRealPinnedMeteredHandoverActiveTraffic$'; task_count=3; task_output='hub-active-handover.jsonl' ;;
+  --handover-health) task_run='^TestRealPinnedMeteredHandoverProtocolHealth$'; task_count=3; task_output='hub-handover-health.jsonl' ;;
   *) exit 2 ;;
 esac
 

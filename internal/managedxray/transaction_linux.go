@@ -38,16 +38,17 @@ type transactionState struct {
 // native sync worker. It is an internal loopback LAB executor, not permission
 // to activate a paired public Node or to bypass an existing usage epoch.
 type TransactionRuntime struct {
-	metered     *MeteredTransactionOptions
-	mu          sync.Mutex
-	runtime     *Runtime
-	options     Options
-	journal     *transactionDisk
-	state       transactionState
-	instance    string
-	closed      bool
-	afterIntent func() // Test-only crash checkpoint.
-	afterChange func() // Test-only crash after process change, before receipt.
+	metered       *MeteredTransactionOptions
+	protocolProbe sync.Mutex
+	mu            sync.Mutex
+	runtime       *Runtime
+	options       Options
+	journal       *transactionDisk
+	state         transactionState
+	instance      string
+	closed        bool
+	afterIntent   func() // Test-only crash checkpoint.
+	afterChange   func() // Test-only crash after process change, before receipt.
 }
 
 type TransactionStatus struct {
