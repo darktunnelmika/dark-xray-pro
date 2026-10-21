@@ -2,7 +2,7 @@ import { expect, test, type Page as BrowserPage } from "@playwright/test";
 import type { Channel, Command, CommandRequest, MeteredCondition, Observation, Scope } from "../src/meteredRouteTransactions";
 import type { Handover, Plan } from "../src/meteredHandovers";
 
-const base="/api/v1/workspace/metered-handovers",csrf="handover-csrf",id=(n:number)=>n.toString(16).padStart(32,"0"),sha="d".repeat(64);
+const base="/api/v1/workspace/metered-handovers",csrf="a".repeat(64),id=(n:number)=>n.toString(16).padStart(32,"0"),sha="d".repeat(64);
 const zero=()=>({epoch_id:"",sequence:"0",sha256:""});
 const stopped=():Observation=>({highwater:0,saved_sequence:0,saved_sha:"",active_sequence:0,active_sha:"",process_ready:false,phase:"awaiting_fresh_lease",lease_expires_unix_nano:0,data_plane_verified:false,subscription_published:false,no_listeners:false});
 function row(node:string,install:string,n:number,action:Command["action"],stage:string):Command{return{id:id(n),node_id:node,installation_id:install,serial:n,action,stage_id:stage,state:"queued",created_unix_nano:Date.now()*1e6};}
@@ -110,7 +110,7 @@ test("N10 storage failure prevents POST and an unverified publication claim bloc
 test("N10 Persian 320px, disabled runtime and representative boundary",async({page})=>{
  const f=await fixture(page);f.state.scope.enabled=false;f.state.scope.nodes=[];delete f.state.scope.node_id;delete f.state.scope.installation_id;
  await page.setViewportSize({width:320,height:780});await open(page);await expect(panel(page).getByText(/Node execution is disabled/)).toBeVisible();
- await page.getByRole("button",{name:"فارسی",exact:true}).click();await expect(panel(page).getByRole("heading",{name:"انتقال بین نودهای LAB",exact:true})).toBeVisible();
+ await page.getByRole("button",{name:"Switch language",exact:true}).click();await expect(panel(page).getByRole("heading",{name:"انتقال بین نودهای LAB",exact:true})).toBeVisible();
  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);expect(f.writes).toHaveLength(0);
 });
 

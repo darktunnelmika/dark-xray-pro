@@ -314,3 +314,31 @@ func TestMeteredHandoverAPIExcludesLegacyReplacementRoles(t *testing.T) {
 		t.Fatal("startup ignored legacy reservation")
 	}
 }
+
+func TestMeteredHandoverAPISafeCancelAndOwnerBearerBoundary(t *testing.T) {
+	f := newHandoverAPI(t)
+	h := f.s.BrowserHandler()
+	if w := request(t, h, "GET", handoverBase, ownerToken, nil); w.Code != 401 {
+		t.Fatal("owner bearer substituted for browser session", w.Code)
+	}
+	if w := f.post(t, handoverBase, f.plan); w.Code != 201 {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	path := handoverBase + "/" + f.plan.ID
+	if w := f.post(t, path+"/cancel", map[string]bool{"confirm_before_drain": false}); w.Code != 422 {
+		t.Fatal("unconfirmed cancel", w.Code)
+	}
+	for i := 0; i < 2; i++ {
+		if w := f.post(t, path+"/cancel", map[string]bool{"confirm_before_drain": true}); w.Code != 200 {
+			t.Fatal("cancel/replay", w.Code, w.Body.String())
+		}
+	}
+	if w := f.post(t, path+"/commands", f.input(0, 13, "drain", f.plan.SourceStageID)); w.Code != 409 {
+		t.Fatal("cancelled command executed", w.Code)
+	}
+	w := browserRequest(t, h, "GET", handoverBase, nil, f.cookie, "", "")
+	var page business.MeteredHandoverPage
+	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &page) != nil || len(page.Operations) != 1 || !page.Operations[0].Cancelled || page.NextCursor != "" {
+		t.Fatal("cancel history", w.Code, w.Body.String())
+	}
+}
