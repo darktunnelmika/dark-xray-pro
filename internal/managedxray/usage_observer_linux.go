@@ -151,7 +151,8 @@ func (r *Runtime) checkObservationLocked(o UsageObservation) error {
 	}
 	for _, binding := range e.Bindings {
 		name, err := uc.CounterEmail(binding.ClientID)
-		if err != nil || !binding.Billable || binding.Email != name || !names[binding.Email] {
+		validRole := binding.Billable && binding.Role == "" || !binding.Billable && binding.Role == uc.SystemProbeRole && r.options.ExperimentalFinalTCP
+		if err != nil || !validRole || binding.Email != name || !names[binding.Email] {
 			return uc.ErrEpoch
 		}
 	}

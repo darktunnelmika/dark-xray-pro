@@ -181,7 +181,7 @@ func probeBinding(ctx context.Context, c sqlWriter, e uc.Epoch, b uc.Binding, en
 	if err != nil {
 		return false, 0, err
 	}
-	if b.Billable || p.NodeID != e.NodeID || p.InstallationID != e.InstallationID {
+	if b.Billable || b.Role != uc.SystemProbeRole || p.NodeID != e.NodeID || p.InstallationID != e.InstallationID {
 		return false, 0, ErrAuthority
 	}
 	return true, holds, nil

@@ -165,7 +165,7 @@ func (t *TransactionRuntime) protocolHealthCurrent(q ProtocolHealthRequest) (xra
 	}
 	found := false
 	for _, b := range r.state.Usage.Epoch.Bindings {
-		if b.ClientID == q.SystemProbeID && b.Email == systemEmail && !b.Billable {
+		if b.ClientID == q.SystemProbeID && b.Email == systemEmail && !b.Billable && b.Role == uc.SystemProbeRole {
 			found = true
 		}
 	}

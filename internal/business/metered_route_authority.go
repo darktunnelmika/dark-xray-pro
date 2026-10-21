@@ -310,6 +310,7 @@ func (s *Store) registerMeteredRouteEpoch(ctx context.Context, tx *sql.Tx, c Nod
 		for _, u := range in.Settings.Clients {
 			var id string
 			billable := true
+			role := ""
 			err = tx.QueryRowContext(ctx, "SELECT id FROM clients WHERE uuid=?", u.UUID).Scan(&id)
 			if errors.Is(err, sql.ErrNoRows) {
 				probe, e := usageledger.ProbeIdentityTx(ctx, tx, c.NodeID, c.InstallationID, inboundTags[in.Tag])
@@ -317,6 +318,7 @@ func (s *Store) registerMeteredRouteEpoch(ctx context.Context, tx *sql.Tx, c Nod
 					return uc.Epoch{}, ErrConflict
 				}
 				id, billable = probe.ID, false
+				role = uc.SystemProbeRole
 			} else if err != nil {
 				return uc.Epoch{}, err
 			}
@@ -333,7 +335,7 @@ func (s *Store) registerMeteredRouteEpoch(ctx context.Context, tx *sql.Tx, c Nod
 			seen[id] = u.Email
 			// A native VLESS receiver TERMINATES customer traffic, including Swap
 			// destinations. This does not label a separate transit server billable.
-			epoch.Bindings = append(epoch.Bindings, uc.Binding{ClientID: id, Email: email, Billable: billable})
+			epoch.Bindings = append(epoch.Bindings, uc.Binding{ClientID: id, Email: email, Billable: billable, Role: role})
 		}
 	}
 	canonical, _, err := uc.CanonicalEpoch(epoch)

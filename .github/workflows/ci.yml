@@ -186,7 +186,7 @@ jobs:
       - name: Repeat protocol health identity, expiry, TLS and SOCKS boundaries
         run: go test -race ./internal/managedxray -run '^TestProtocolHealth' -count=10 -timeout=60s -v
       - name: Repeat isolated system probe accounting, replay and schema contracts
-        run: go test -race ./internal/business ./internal/usageledger -run '^TestSystemProbe' -count=10 -timeout=180s -v
+        run: go test -race ./internal/business ./internal/usageledger ./internal/usagecheckpoint -run '^TestSystemProbe' -count=10 -timeout=180s -v
       - name: Repeat node name receipt and concurrency contracts
         run: go test -race ./internal/noderegistry ./internal/api -run 'TestRename|TestOwnerNodeRename' -count=5 -timeout=120s -v
       - name: Repeat read-only node dependency contracts

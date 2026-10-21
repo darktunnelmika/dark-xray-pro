@@ -264,6 +264,13 @@ func TestUsageObserverScopeMismatchHasNoSideEffects(t *testing.T) {
 			t.Fatal("invalid request changed owned runtime")
 		}
 	}
+	o := f.observation
+	o.Epoch.Bindings = append([]uc.Binding(nil), o.Epoch.Bindings...)
+	o.Epoch.Bindings[0].Billable = false
+	o.Epoch.Bindings[0].Role = uc.SystemProbeRole
+	if err := f.runtime.StartUsageObservation(context.Background(), o); err == nil {
+		t.Fatal("ordinary runtime accepted experimental system-probe role")
+	}
 }
 func TestUsageObserverTransitionDoesNotSilentlyRestartUnmetered(t *testing.T) {
 	f := newObserverFixture(t)

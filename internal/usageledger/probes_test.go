@@ -52,7 +52,11 @@ func probeTestLedger(t *testing.T) (*sql.DB, string, *Ledger, ProbeIdentity, uc.
 		if err != nil {
 			t.Fatal(err)
 		}
-		e.Bindings = append(e.Bindings, uc.Binding{ClientID: id, Email: email, Billable: id == "customer"})
+		role := ""
+		if id == p.ID {
+			role = uc.SystemProbeRole
+		}
+		e.Bindings = append(e.Bindings, uc.Binding{ClientID: id, Email: email, Billable: id == "customer", Role: role})
 	}
 	e, _, err = uc.CanonicalEpoch(e)
 	if err != nil {
@@ -215,6 +219,7 @@ func TestSystemProbeAccountingScopeRoleAndIdentityCollisions(t *testing.T) {
 		for i := range e.Bindings {
 			if e.Bindings[i].ClientID == p.ID {
 				e.Bindings[i].Billable = true
+				e.Bindings[i].Role = ""
 			}
 		}
 	}} {
@@ -241,6 +246,22 @@ func TestSystemProbeAccountingScopeRoleAndIdentityCollisions(t *testing.T) {
 	for _, q := range []string{fmt.Sprintf("UPDATE clients SET uuid='%s' WHERE id='customer'", p.UUID), fmt.Sprintf("UPDATE clients SET id='%s' WHERE id='customer'", p.ID)} {
 		if _, err := db.Exec(q); err == nil {
 			t.Fatal("customer adopted system identity")
+		}
+	}
+	for _, asSystem := range []bool{true, false} {
+		bad := e
+		bad.Bindings = append([]uc.Binding(nil), e.Bindings...)
+		for i := range bad.Bindings {
+			if asSystem && bad.Bindings[i].ClientID == "customer" {
+				bad.Bindings[i].Billable = false
+				bad.Bindings[i].Role = uc.SystemProbeRole
+			}
+			if !asSystem && bad.Bindings[i].ClientID == p.ID {
+				bad.Bindings[i].Role = ""
+			}
+		}
+		if err := l.RegisterEpoch(ctx, bad); !errors.Is(err, ErrAuthority) {
+			t.Fatal("plain nonbillable/system role confused", err)
 		}
 	}
 }

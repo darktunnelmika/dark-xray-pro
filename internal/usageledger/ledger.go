@@ -188,6 +188,8 @@ func registerEpoch(ctx context.Context, c sqlWriter, authority uc.Epoch) error {
 			if holds != 0 {
 				return ErrReconciliation
 			}
+		} else if b.Role != "" {
+			return ErrAuthority
 		}
 	}
 	var duplicate int
