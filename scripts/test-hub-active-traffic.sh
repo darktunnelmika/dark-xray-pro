@@ -12,6 +12,7 @@ test "$(sha256sum "$DARK_PRO_TEST_XRAY_BINARY" | cut -d' ' -f1)" = "$DARK_PRO_TE
 case "${1-}" in
   '') task_run='^TestRealPinnedMeteredRouteActiveTraffic$'; task_count=3; task_output='hub-active-traffic.jsonl' ;;
   --unknown-tail-stress) task_run='^TestRealPinnedMeteredRouteActiveTraffic$/^unknown-tail$'; task_count=20; task_output='hub-active-traffic-unknown-tail.jsonl' ;;
+  --handover) task_run='^TestRealPinnedMeteredHandoverActiveTraffic$'; task_count=3; task_output='hub-active-handover.jsonl' ;;
   *) exit 2 ;;
 esac
 
