@@ -49,7 +49,7 @@ func TestRealPinnedMeteredRouteActiveTraffic(t *testing.T) {
 	if err != nil || len(interfaces) != 1 || interfaces[0].Name != "lo" {
 		t.Fatal("traffic acceptance requires a dedicated loopback-only network namespace", err)
 	}
-	for _, mode := range []string{"replace-rollback", "lost-ack-before", "lost-ack-after", "lost-final-receipt", "lost-seal", "revoked-after-final", "unknown-tail", "interrupted"} {
+	for _, mode := range []string{"replace-rollback", "lost-ack-before", "lost-ack-after", "lost-final-receipt", "lost-seal", "revoked-after-final", "unknown-tail", "interrupted", "drain"} {
 		t.Run(mode, func(t *testing.T) { testMeteredRouteActiveTraffic(t, binary, pin, mode) })
 	}
 }
@@ -434,6 +434,39 @@ func testMeteredRouteActiveTraffic(t *testing.T, binary, pin, mode string) {
 		t.Fatal("lost ACK replay restarted or registered again")
 	}
 	stream1.flowing(t)
+	if mode == "drain" {
+		if _, err := s.business.SetClientState(ctx, business.SetClientState{EventID: "revoke-before-owner-drain", ClientID: customers[0].ID, Action: "disable", Reason: "Stop must still settle a revoked user's real traffic"}); err != nil {
+			t.Fatal(err)
+		}
+		drain := enqueue(3, "drain", stage1.ID, 0)
+		loseAfter.Store(true)
+		if err := runtime.SyncMeteredTransaction(ctx, client, endpoint); err == nil {
+			t.Fatal("lost drain ACK not exercised")
+		}
+		stream1.stopped(t, ctx)
+		assertClosed()
+		syncNow()
+		ack := receipt(drain.ID, "drained")
+		if births.Load() != 1 || !runtime.Status().Observed.Usage.Settled || ack.Metered.After.EpochID != epoch1 || ack.Metered.PriorSettlement != ack.Metered.After.Settlement {
+			t.Fatal("drain created a process or lost final seal")
+		}
+		if _, err := s.business.UsageLedger().ConfirmSettlement(ctx, principal, ack.Metered.PriorSettlement); err != nil {
+			t.Fatal("HUB has no exact final seal", err)
+		}
+		assertAccounting(epoch1)
+		runtime.Close()
+		runtime, e = mx.OpenMeteredTransactions(options, metered)
+		if e != nil {
+			t.Fatal(e)
+		}
+		syncNow()
+		assertClosed()
+		if !reflect.DeepEqual(receipt(drain.ID, "drained"), ack) || births.Load() != 1 || runtime.Status().Observed.ProcessReady {
+			t.Fatal("drain replay after restart changed receipt or resumed traffic")
+		}
+		assertAccounting(epoch1)
+		return
+	}
 	if mode == "interrupted" {
 		before, e := s.business.ClientUsage(ctx, customers[0].ID)
 		if e != nil {

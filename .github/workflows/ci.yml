@@ -101,7 +101,7 @@ jobs:
           import collections,json,sys
           events=[json.loads(line) for line in open(sys.argv[1])]
           name='TestRealPinnedMeteredRouteActiveTraffic'
-          required={name}|{name+'/'+s for s in ('replace-rollback','lost-ack-before','lost-ack-after','lost-final-receipt','lost-seal','revoked-after-final','unknown-tail','interrupted')}
+          required={name}|{name+'/'+s for s in ('replace-rollback','lost-ack-before','lost-ack-after','lost-final-receipt','lost-seal','revoked-after-final','unknown-tail','interrupted','drain')}
           passed=collections.Counter(e.get('Test') for e in events if e.get('Action')=='pass')
           assert all(passed[n]==3 for n in required),dict(passed)
           assert not any(e.get('Action') in ('skip','fail') for e in events)

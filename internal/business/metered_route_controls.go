@@ -140,6 +140,9 @@ func (s *Store) MeteredRouteControlChannel(ctx context.Context, key []byte, node
 	if e != nil {
 		return out, e
 	}
+	if ok && out.Status.Usage.EpochID != "" && out.Status.Usage.Settlement.Sequence == 0 {
+		out.Controls.Drain = target(r)
+	}
 	if ok && observed.ProcessReady && observed.LeaseExpires > now && observed.ActiveSHA == r.payload.Candidate.SHA256 {
 		current, err := meteredRouteCandidate(ctx, tx, key, node, out.InstallationID, refs)
 		if err == nil && mx.TransactionPayloadSHA(current) == r.payload.Command.PayloadSHA {

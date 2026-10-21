@@ -65,6 +65,21 @@ const panel = (page: Page) => page.getByRole("region", { name: "Metered TCP LAB 
 const refresh = (page: Page) => panel(page).getByRole("button", { name: "Refresh transactions", exact: true }).click();
 async function confirm(page: Page, name: string) { page.once("dialog", d => d.accept()); await panel(page).getByRole("button", { name, exact: true }).click(); }
 
+test("N8 explicit stop reviews the exact epoch while stale drafts cannot grant new access",async({page})=>{
+ const f=await fixture(page),epoch=id(41);
+ f.view.status.observed=ready();f.view.status.current_stage_id=id(1);
+ f.view.status.usage={epoch_id:epoch,epoch_sha:digest,admission_sha:digest,settlement:{epoch_id:"",sequence:"0",sha256:""}};
+ f.view.drafts_valid=false;f.view.review[0].draft_revision=0;f.view.controls={stage:false,drain:{stage_id:id(1),ports:[26123]}};
+ await page.goto("/inbounds");const p=panel(page);
+ await expect(p.getByRole("button",{name:"Review and Stage",exact:true})).toBeDisabled();
+ await expect(p.getByRole("button",{name:"Stop and settle usage",exact:true})).toBeEnabled();
+ page.once("dialog",d=>d.dismiss());await p.getByRole("button",{name:"Stop and settle usage",exact:true}).click();expect(f.writes).toHaveLength(0);
+ await confirm(page,"Stop and settle usage");await expect.poll(()=>f.writes.length).toBe(1);
+ expect(f.writes[0].body).toMatchObject({action:"drain",stage_id:id(1),drafts:[],usage:{epoch_id:epoch,settlement:{sequence:"0"}},expected:{process_ready:true,active_sequence:1}});
+ await expect(p.getByText("Queued · not yet delivered",{exact:true})).toBeVisible();
+ expect(f.writes).toHaveLength(1);
+});
+
 test("N7 changing approved Nodes keeps commands and uncertain retries with their original Node",async({page})=>{
  const f=await fixture(page),second="route-new",secondInstall="8".repeat(32);
  f.state.scope.nodes=[{node_id:"route-qa",installation_id:installation},{node_id:second,installation_id:secondInstall}];

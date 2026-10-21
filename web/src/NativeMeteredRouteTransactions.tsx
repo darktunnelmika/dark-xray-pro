@@ -14,13 +14,14 @@ const words = {
   help: "Stage prepares only. Apply and Rollback require a separate confirmation. Viewing or refreshing this page never renews a lease.",
   accepted: "Command recorded by HUB. Check its receipt and the latest Agent observation separately.", conflict: "State changed or the request was refused. Review the refreshed state before creating another command.", unknown: "The response was not confirmed. This exact request is retained; refresh to reconcile it or retry the same request. No new command will be created automatically.", abandoned: "Command abandoned with execution unknown. This does not stop Xray; a fresh Agent observation is still required.",
   history: "Command history (latest 50)", none: "No commands recorded.", historical: "Receipts record what happened at that time. They do not prove the process is running now.", receipt: "Signed receipt verified and stored by HUB", noReceipt: "No committed receipt", outcome: "Recorded outcome", details: "Audit details", stageID: "Stage", ports: "Loopback ports", interrupted: "An interrupted command requires a new reviewed Stage before further execution.",
+  drain:"Stop and settle usage",confirmDrain:"Stop this LAB Node's managed process and obtain its exact final usage receipt? Existing LAB connections will close. No replacement process will start.",
   confirmStage: "Stage all the reviewed Inbounds on this LAB Node? This prepares the configuration without starting it.",
   confirmRun: "Start or replace the managed Xray process on this loopback LAB Node? Existing LAB connections may close. The lease lasts at most 30 seconds and will not renew automatically.",
   confirmRenew: "Extend this LAB process lease once, for at most 30 seconds? No recurring renewal will be enabled.",
   confirmAbandon: "Abandon this pending command? It may already have executed. Abandoning does not stop Xray and does not prove non-execution.",
   confirmRetry: "Retry the exact retained request with the same ID and reviewed state? A committed request will be replayed without a new execution or lease extension.",
   states: { queued: "Queued · not yet delivered", delivered: "Delivered · awaiting committed receipt", acknowledged: "ACK recorded", failed: "Failure receipt recorded", acknowledged_stale: "ACK recorded for an outdated draft", abandoned_unknown: "Abandoned · execution unknown" },
-  outcomes: { staged: "Prepared", applied: "Applied", rolled_back: "Rolled back", renewed: "Renewed once", failed_stopped: "Failed; stopped at receipt time", failed_previous_retained: "Failed; previous process retained at receipt time" },
+  outcomes: { staged: "Prepared", applied: "Applied", rolled_back: "Rolled back", renewed: "Renewed once", drained:"Stopped and usage settled", failed_stopped: "Failed; stopped at receipt time", failed_previous_retained: "Failed; previous process retained at receipt time" },
  },
  fa: {
   title: "تراکنش‌های متری TCP در LAB", boundary: "فقط نود مجاز مستقل روی loopback و هویت‌های آزمایشی PRO. جایگزینی نیازمند تسویهٔ قطعی دورهٔ قبلی و دورهٔ مصرف تازه است. انتقال اطلاعات واقعی، UDP، عبور Dark Swap و انتشار اشتراک مجاز نیست.",
@@ -31,13 +32,14 @@ const words = {
   help: "Stage فقط آماده‌سازی می‌کند. Apply و Rollback تأیید جداگانه می‌خواهند. بازکردن یا به‌روزرسانی صفحه هرگز مجوز اجرا را تمدید نمی‌کند.",
   accepted: "فرمان در HUB ثبت شد. رسید آن و آخرین مشاهدهٔ Agent را جداگانه بررسی کن.", conflict: "وضعیت تغییر کرده یا درخواست پذیرفته نشده است. پیش از فرمان جدید، وضعیت به‌روز را بررسی کن.", unknown: "پاسخ تأیید نشد. همین درخواست حفظ شده است؛ برای تطبیق وضعیت به‌روزرسانی کن یا همان درخواست را دوباره بفرست. فرمان جدیدی خودکار ساخته نمی‌شود.", abandoned: "فرمان با نتیجهٔ اجرای نامشخص رها شد. این کار Xray را متوقف نمی‌کند؛ هنوز مشاهدهٔ تازهٔ Agent لازم است.",
   history: "تاریخچهٔ فرمان‌ها (۵۰ مورد آخر)", none: "هنوز فرمانی ثبت نشده است.", historical: "رسیدها نتیجهٔ همان لحظه را ثبت می‌کنند؛ اثبات اجرای فعلی فرآیند نیستند.", receipt: "رسید امضاشده در HUB بررسی و ثبت شده", noReceipt: "رسید قطعی ثبت نشده", outcome: "نتیجهٔ ثبت‌شده", details: "جزئیات حسابرسی", stageID: "Stage", ports: "پورت‌های loopback", interrupted: "فرمان قطع‌شده نیازمند بررسی و Stage تازه است؛ سپس اجرای بعدی ممکن می‌شود.",
+  drain:"توقف و تسویهٔ مصرف",confirmDrain:"فرآیند مدیریت‌شدهٔ این نود LAB متوقف و رسید نهایی دقیق مصرف دریافت شود؟ اتصال‌های LAB قطع می‌شوند و فرآیند جایگزین شروع نمی‌شود.",
   confirmStage: "همهٔ اینباندهای بررسی‌شده روی این نود LAB آماده شوند؟ این مرحله تنظیمات را آماده می‌کند و آن‌ها را اجرا نمی‌کند.",
   confirmRun: "فرآیند Xray تحت مدیریت روی loopback همین نود LAB شروع یا جایگزین شود؟ اتصال‌های LAB ممکن است قطع شوند. مجوز حداکثر ۳۰ ثانیه است و خودکار تمدید نمی‌شود.",
   confirmRenew: "مجوز این فرآیند LAB فقط یک بار و حداکثر ۳۰ ثانیه تمدید شود؟ تمدید دوره‌ای فعال نخواهد شد.",
   confirmAbandon: "فرمان در انتظار رها شود؟ ممکن است قبلاً اجرا شده باشد. رهاکردن، Xray را متوقف نمی‌کند و اثبات اجرا‌نشدن نیست.",
   confirmRetry: "همین درخواست با همان شناسه و وضعیت بررسی‌شده دوباره فرستاده شود؟ اگر قبلاً ثبت شده باشد، بدون اجرای تازه یا تمدید مجوز بازخوانی می‌شود.",
   states: { queued: "در صف · هنوز تحویل نشده", delivered: "تحویل‌شده · در انتظار رسید قطعی", acknowledged: "ACK ثبت‌شده", failed: "رسید شکست ثبت‌شده", acknowledged_stale: "ACK ثبت‌شده برای پیش‌نویس قدیمی", abandoned_unknown: "رهاشده · نتیجهٔ اجرا نامشخص" },
-  outcomes: { staged: "آماده‌شده", applied: "اعمال‌شده", rolled_back: "بازگردانده‌شده", renewed: "یک‌بار تمدیدشده", failed_stopped: "ناموفق؛ در لحظهٔ رسید متوقف", failed_previous_retained: "ناموفق؛ در لحظهٔ رسید فرآیند قبلی حفظ شده" },
+  outcomes: { staged: "آماده‌شده", applied: "اعمال‌شده", rolled_back: "بازگردانده‌شده", renewed: "یک‌بار تمدیدشده", drained:"متوقف و مصرف تسویه‌شده", failed_stopped: "ناموفق؛ در لحظهٔ رسید متوقف", failed_previous_retained: "ناموفق؛ در لحظهٔ رسید فرآیند قبلی حفظ شده" },
  },
 };
 type Snapshot = { scope: Scope; view: Channel; mono: number; wall: number };
@@ -159,7 +161,7 @@ export default function NativeMeteredRouteTransactions({ language }: { language:
   if (!s || !s.view.status.usage || !allowed(action)) return;
   const target = action === "stage" ? undefined : s.view.controls[action];
   const ports = action === "stage" ? s.view.review.flatMap(r => [r.direct_port, r.tunnel_port]).filter(Boolean) : target!.ports;
-  const prompt = action === "stage" ? t.confirmStage : action === "renew" ? t.confirmRenew : t.confirmRun;
+  const prompt = action === "stage" ? t.confirmStage : action === "renew" ? t.confirmRenew : action==="drain"?t.confirmDrain:t.confirmRun;
   if (!window.confirm(`${t[action]}\n${prompt}\n${t.node}: ${s.view.node_id}\n${t.ports}: ${ports.join(", ") || "—"}${target ? "\nStage: " + target.stage_id : ""}`) || !isFresh(s) || (action === "apply" && target!.expires_unix_milli! <= serverNow(s)) || (action === "renew" && s.view.status.observed.lease_expires_unix_nano / 1e6 <= serverNow(s))) return;
   const body: CommandRequest = { usage: s.view.status.usage!, id: crypto.randomUUID().replaceAll("-", ""), action, stage_id: target?.stage_id ?? "", runtime_instance: s.view.status.instance, expected: expected(s.view.status.observed),
    drafts: action === "stage" ? s.view.review.map(r => ({ inbound_id: r.inbound_id, inbound_revision: r.inbound_revision, draft_revision: r.draft_revision })) : [] };
@@ -200,8 +202,8 @@ export default function NativeMeteredRouteTransactions({ language }: { language:
    {!v.drafts_valid && <p className="native-warning">{t.missing}</p>}
    {v.status.interrupted_command_sha && <p className="native-warning">{t.interrupted}</p>}
    <p>{t.help}</p>
-   <div className="native-actions">{(["stage", "apply", "rollback", "renew"] as const).map(action => <button key={action} type="button" disabled={!allowed(action)} onClick={() => act(action)}>{t[action]}</button>)}</div>
-   {(["apply", "rollback", "renew"] as const).filter(a => v.controls[a]).map(a => <small key={a}>{t[a]} · {t.stageID}: <bdi>{v.controls[a]!.stage_id}</bdi> · {t.ports}: <bdi>{v.controls[a]!.ports.join(", ") || "—"}</bdi></small>)}
+   <div className="native-actions">{(["stage", "apply", "rollback", "renew", "drain"] as const).map(action => <button key={action} type="button" disabled={!allowed(action)} onClick={() => act(action)}>{t[action]}</button>)}</div>
+   {(["apply", "rollback", "renew", "drain"] as const).filter(a => v.controls[a]).map(a => <small key={a}>{t[a]} · {t.stageID}: <bdi>{v.controls[a]!.stage_id}</bdi> · {t.ports}: <bdi>{v.controls[a]!.ports.join(", ") || "—"}</bdi></small>)}
    {pending && <button type="button" disabled={!idle} onClick={abandon}>{t.abandon}</button>}
    {attempt && <div className="native-warning" role="status"><p>{t.unknown}</p><p>{t[attempt.action]} · <bdi>{attempt.id}</bdi></p><button type="button" disabled={busy || !verifiedRead || availability !== "enabled"} onClick={retry}>{t.retry}</button></div>}
    <div className="route-command-history"><h4><History size={16}/>{t.history}</h4><p>{t.historical}</p>

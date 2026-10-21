@@ -138,6 +138,15 @@ func VerifyMeteredTransactionReceipt(key []byte, c TransactionCommand, r Transac
 		if c.Action == "stage" || r.Observed.ProcessReady {
 			return false
 		}
+	case "drained":
+		u := r.Observed.Usage
+		if c.Action != "drain" || r.Observed.ProcessReady || r.Observed.ActiveSequence != 0 || r.Observed.ActiveSHA != "" || r.Observed.LeaseExpires != 0 ||
+			r.Observed.Highwater != c.Expected.Highwater || r.Observed.SavedSequence != c.Expected.SavedSequence || r.Observed.SavedSHA != c.Expected.SavedSHA ||
+			u == nil || !u.Required || !u.Settled || u.Running || u.Failure != "" ||
+			e.After.EpochID != c.Usage.EpochID || e.After.EpochSHA != c.Usage.EpochSHA ||
+			!uc.ValidReceipt(e.PriorSettlement) || e.PriorSettlement.EpochID != c.Usage.EpochID || e.After.Settlement != e.PriorSettlement {
+			return false
+		}
 	default:
 		return false
 	}
@@ -206,6 +215,9 @@ func (t *TransactionRuntime) ExecuteMetered(ctx context.Context, c TransactionCo
 	}
 	if TransactionPayloadSHA(candidate) != TransactionPayloadSHA(xrayconfig.Candidate{}) {
 		return TransactionReceipt{}, ErrTransaction
+	}
+	if c.Action == "drain" {
+		return t.drainMetered(opCtx, c)
 	}
 	var target *transactionStage
 	switch c.Action {
@@ -404,4 +416,61 @@ func (t *TransactionRuntime) replaceMetered(ctx context.Context, c TransactionCo
 	_, err = r.ActivateUsageAdmission(ctx, UsageObservation{Epoch: epoch, StatsEndpoint: endpoint, Sender: t.metered.Sender,
 		Interval: t.metered.Interval, MaxSampleGap: t.metered.MaxSampleGap, MaxPendingAge: t.metered.MaxPendingAge})
 	return prior, err
+}
+
+// drainMetered seals the reviewed epoch without granting a replacement lease.
+// Intent and the final receipt are durable; an ambiguous failure stays stopped.
+func (t *TransactionRuntime) drainMetered(ctx context.Context, c TransactionCommand) (TransactionReceipt, error) {
+	target := t.state.Current
+	if target == nil || target.ID != c.StageID || target.PayloadSHA != c.PayloadSHA {
+		return TransactionReceipt{}, ErrTransaction
+	}
+	next := t.state
+	next.Serial, next.Pending = c.Serial, &c
+	if err := t.save(next); err != nil {
+		return TransactionReceipt{}, err
+	}
+	if t.afterIntent != nil {
+		t.afterIntent()
+	}
+	r := t.runtime
+	r.mu.Lock()
+	unopened := r.provenUnopenedLocked()
+	r.mu.Unlock()
+	var err error
+	if unopened {
+		_, err = r.SettleUnopenedUsage(ctx, t.metered.Sender)
+	} else {
+		_, err = r.SettleActiveTCP(ctx, t.metered.Sender)
+	}
+	_, after := t.meteredSnapshot()
+	prior := after.Settlement
+	if err == nil && (!uc.ValidReceipt(prior) || prior.EpochID != c.Usage.EpochID) {
+		err = ErrUsageSettlement
+	}
+	if err != nil {
+		r.mu.Lock()
+		r.failAdmissionLocked("metered_transaction_failed_stopped")
+		r.mu.Unlock()
+	}
+	if t.afterChange != nil {
+		t.afterChange()
+	}
+	outcome := "drained"
+	if err != nil {
+		outcome = "failed_stopped"
+	}
+	ack := t.meteredReceipt(c, outcome, prior)
+	if !VerifyMeteredTransactionReceipt(t.options.LeaseKey, c, ack) {
+		r.Close()
+		t.closed = true
+		return TransactionReceipt{}, ErrTransactionInterrupted
+	}
+	next = t.state
+	next.Staged = nil
+	next.Pending, next.LastCommand, next.LastReceipt = nil, &c, &ack
+	if e := t.save(next); e != nil {
+		return TransactionReceipt{}, e
+	}
+	return cloneMeteredReceipt(ack), err
 }
