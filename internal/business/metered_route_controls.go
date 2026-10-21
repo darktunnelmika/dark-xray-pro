@@ -12,6 +12,7 @@ import (
 // Browser review contains public routing metadata, never a runnable config.
 type MeteredRouteControlView struct {
 	MeteredRouteChannelView
+	HandoverID       string             `json:"handover_id,omitempty"`
 	ServerTimeMillis int64              `json:"server_time_unix_milli"`
 	DraftsValid      bool               `json:"drafts_valid"`
 	Review           []RouteDraftReview `json:"review"`
@@ -30,6 +31,10 @@ func (s *Store) MeteredRouteControlChannel(ctx context.Context, key []byte, node
 	defer tx.Rollback()
 	out.MeteredRouteChannelView, e = readMeteredRouteChannel(ctx, tx, key, node)
 	if e != nil {
+		return out, e
+	}
+	e = tx.QueryRowContext(ctx, `SELECT handover_id FROM native_metered_handover_nodes WHERE node_id=?`, node).Scan(&out.HandoverID)
+	if e != nil && !errors.Is(e, sql.ErrNoRows) {
 		return out, e
 	}
 	rows, e := tx.QueryContext(ctx, `SELECT i.id,i.revision,i.name,t.listen_ip FROM native_inbound_targets t JOIN native_inbounds i ON i.id=t.inbound_id WHERE t.node_id=? AND t.installation_id=? AND i.enabled=1 AND i.archived=0 ORDER BY i.id`, node, out.InstallationID)
@@ -84,7 +89,7 @@ func (s *Store) MeteredRouteControlChannel(ctx context.Context, key []byte, node
 			return out, tx.Commit() // Wait for an observation after the receipt.
 		}
 	}
-	out.Controls.Stage = out.DraftsValid
+	out.Controls.Stage = out.DraftsValid && out.HandoverID == ""
 	if out.Status.InterruptedCommandSHA != "" {
 		return out, tx.Commit() // Recovery requires an explicit new Stage.
 	}
@@ -142,6 +147,9 @@ func (s *Store) MeteredRouteControlChannel(ctx context.Context, key []byte, node
 	}
 	if ok && out.Status.Usage.EpochID != "" && out.Status.Usage.Settlement.Sequence == 0 {
 		out.Controls.Drain = target(r)
+	}
+	if out.HandoverID != "" {
+		return out, tx.Commit()
 	}
 	if ok && observed.ProcessReady && observed.LeaseExpires > now && observed.ActiveSHA == r.payload.Candidate.SHA256 {
 		current, err := meteredRouteCandidate(ctx, tx, key, node, out.InstallationID, refs)
