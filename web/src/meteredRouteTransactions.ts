@@ -15,7 +15,7 @@ export type Command = {
  created_unix_nano: number;
  receipt?: { version: 2; metered: MeteredEvidence; command_id: string; serial: number; action: Action; stage_id: string; node_id: string; installation_id: string; runtime_instance: string; outcome: string; observed_unix_nano: number; observed: Observation; signature: string };
 };
-export type Scope = { enabled: boolean; scope: "metered_tcp_loopback_lab"; node_id?: string; installation_id?: string };
+export type Scope = { enabled: boolean; scope: "metered_tcp_loopback_lab"; node_id?: string; installation_id?: string; nodes?: {node_id:string;installation_id:string}[] };
 export type Target = { stage_id: string; ports: number[]; expires_unix_milli?: number };
 export type Channel = {
  node_id: string; installation_id: string; binary_sha: string; reported_at_unix_nano: number; observation_fresh: boolean;
@@ -46,6 +46,12 @@ function refs(v: unknown): v is DraftRef[] {
 export function readScope(v: unknown): Scope {
  if (!object(v) || typeof v.enabled !== "boolean" || v.scope !== "metered_tcp_loopback_lab" || (v.enabled &&
   (typeof v.node_id !== "string" || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(v.node_id) || !hex(v.installation_id, 32)))) throw Error("invalid_route_scope");
+ if(v.nodes!==undefined){
+  if(!Array.isArray(v.nodes)||v.nodes.length>64||v.enabled!==(v.nodes.length>0)||
+   !v.nodes.every(n=>object(n)&&typeof n.node_id==="string"&&/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(n.node_id)&&hex(n.installation_id,32))||
+   new Set(v.nodes.map(n=>n.node_id)).size!==v.nodes.length||
+   (v.enabled&&!v.nodes.some(n=>n.node_id===v.node_id&&n.installation_id===v.installation_id)))throw Error("invalid_route_scopes");
+ }
  return v as Scope;
 }
 export function readCommand(v: unknown, scope: Scope): Command {
