@@ -26,3 +26,12 @@ Every nginx temporary path is explicitly inside the disposable test directory.
 Setting only `-p` does not override distribution-compiled absolute temp paths:
 when run as root, nginx can change their ownership to its default worker user.
 Never run an older copy of this test on a server with an existing nginx service.
+
+## Metered channel paths
+
+The same snippet also allows GET discovery at
+`/api/v1/workspace/metered-route-transactions`, GET/POST on the exact per-Node
+`metered-route-transactions` path, and POST on the exact 32-hex command's
+`abandon` path. Owner session, CSRF and the immutable startup allowlist remain
+enforced by the HUB. Discovery cannot enable execution; private Agent/admin
+paths and method/path lookalikes remain denied by nginx.

@@ -87,12 +87,24 @@ location / {{ return 403; }}
                         status = request(port, path, method)
                         assert status == (401 if method == allowed else 403), (path, method, status)
                         assert len(Backend.seen) == before + (method == allowed)
+                metered = "/api/v1/workspace/native-nodes/lab-test_01/metered-route-transactions"
+                for path, allowed in (("/api/v1/workspace/metered-route-transactions", {"GET"}),
+                                      (metered, {"GET", "POST"}),
+                                      (metered + "/" + "a" * 32 + "/abandon", {"POST"})):
+                    for method in ("GET", "POST", "PUT", "DELETE", "PATCH"):
+                        before = len(Backend.seen)
+                        status = request(port, path, method)
+                        assert status == (401 if method in allowed else 403), (path, method, status)
+                        assert len(Backend.seen) == before + (method in allowed)
                 for path in ("/api/v1/agent/config", "/api/v1/admin/nodes", "/api/v1/workspace/nodes/a/delete",
                              "/api/v1/workspace/nodes/a/name/extra", "/api/v1/workspace/nodes/a.b/name",
                              "/api/v1/workspace/nodes/a/b/dependencies",
                              "/api/v1/workspace/nodes/a/replacements/abc/cancel",
                              "/api/v1/workspace/nodes/a/replacements/" + "a" * 32 + "/activate",
-                             "/api/v1/workspace/nodes/a/replacements/" + "a" * 32 + "/cancel/extra"):
+                             "/api/v1/workspace/nodes/a/replacements/" + "a" * 32 + "/cancel/extra",
+                             "/api/v1/workspace/metered-route-transactions/enable",
+                             metered + "/apply", metered + "/abc/abandon",
+                             metered + "/" + "a" * 32 + "/abandon/extra"):
                     before = len(Backend.seen)
                     assert request(port, path, "GET") == 403, path
                     assert len(Backend.seen) == before, path
