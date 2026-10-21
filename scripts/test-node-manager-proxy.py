@@ -79,7 +79,8 @@ location / {{ return 403; }}
                         time.sleep(.05)
                 else:
                     raise RuntimeError("nginx did not start")
-                for endpoint, allowed in (("name", "GET"), ("dependencies", "GET"), ("rename", "POST")):
+                for endpoint, allowed in (("name", "GET"), ("dependencies", "GET"), ("rename", "POST"),
+                                          ("replacements", "GET"), ("replacements/" + "a" * 32 + "/cancel", "POST")):
                     path = "/api/v1/workspace/nodes/lab-test_01/" + endpoint
                     for method in ("GET", "POST", "PUT", "DELETE", "PATCH"):
                         before = len(Backend.seen)
@@ -88,7 +89,10 @@ location / {{ return 403; }}
                         assert len(Backend.seen) == before + (method == allowed)
                 for path in ("/api/v1/agent/config", "/api/v1/admin/nodes", "/api/v1/workspace/nodes/a/delete",
                              "/api/v1/workspace/nodes/a/name/extra", "/api/v1/workspace/nodes/a.b/name",
-                             "/api/v1/workspace/nodes/a/b/dependencies"):
+                             "/api/v1/workspace/nodes/a/b/dependencies",
+                             "/api/v1/workspace/nodes/a/replacements/abc/cancel",
+                             "/api/v1/workspace/nodes/a/replacements/" + "a" * 32 + "/activate",
+                             "/api/v1/workspace/nodes/a/replacements/" + "a" * 32 + "/cancel/extra"):
                     before = len(Backend.seen)
                     assert request(port, path, "GET") == 403, path
                     assert len(Backend.seen) == before, path

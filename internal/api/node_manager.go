@@ -33,6 +33,7 @@ func (s *Server) EnableNodeHistory(h *nodehistory.Store) error {
 func (s *Server) attachNodeManager(mux *http.ServeMux) {
 	s.attachNodeNames(mux)
 	s.attachNodeDependencies(mux)
+	s.attachNodeReplacements(mux)
 	mux.HandleFunc("GET /api/v1/workspace/nodes", func(w http.ResponseWriter, r *http.Request) {
 		if _, ok := s.authorizeBrowser(w, r, false, true); !ok {
 			return
