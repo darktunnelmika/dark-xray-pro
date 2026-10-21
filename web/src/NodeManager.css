@@ -30,6 +30,7 @@
 .pro-node-roster-row>div{display:grid;gap:5px;min-width:0}
 .pro-node-roster-row strong{overflow-wrap:anywhere}
 .pro-node-roster-row small{color:var(--sub);font-size:11px;overflow-wrap:anywhere}
+.pro-node-roster-row:has(.pro-node-replacements){flex-wrap:wrap}
 .pro-node-roster-status{font-size:11px;border-radius:100px;padding:7px 10px;white-space:nowrap}
 .pro-node-roster-status.is-online{background:var(--green-bg);color:var(--green)}
 .pro-node-roster-status.is-offline{background:var(--red-bg);color:var(--red)}

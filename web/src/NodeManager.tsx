@@ -4,6 +4,7 @@ import { api, mutation, ApiError, useSession, type Language } from "./session";
 import "./NodeManager.css";
 import NodeNameEditor from "./NodeNameEditor";
 import NodeDependencies from "./NodeDependencies";
+import NodeReplacements from "./NodeReplacements";
 
 type Registration = {
   node_id: string;
@@ -288,6 +289,7 @@ export default function NodeManager({ language }: { language: Language }) {
             </span>
             <NodeNameEditor key={session?.user.id + ":" + node.node_id} nodeID={node.node_id} language={language} onSaved={() => { void load().catch(() => setRosterFailed(true)); }} />
             <NodeDependencies key={session?.user.id + ":dependencies:" + node.node_id} nodeID={node.node_id} language={language} />
+            <NodeReplacements key={session?.user.id + ":replacements:" + node.node_id} nodeID={node.node_id} language={language} />
           </div>
         ))}
       </div>
