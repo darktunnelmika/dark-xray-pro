@@ -45,13 +45,14 @@ func (s *Server) attachConfigStaging(mux *http.ServeMux){
   if err:=decode(w,r,xrayconfig.MaxCandidateBytes,&input);err!=nil{
    respond(w,http.StatusBadRequest,map[string]string{"error":"invalid_candidate_request"});return
   }
+  s.replacementLifecycle.Lock()
+  defer s.replacementLifecycle.Unlock()
   op,err:=s.replacements.Get(r.PathValue("id"))
   if err!=nil{respond(w,http.StatusNotFound,map[string]string{"error":"replacement_not_found"});return}
   if op.Phase!=replacement.TCPChecked||op.CanActivate{
    respond(w,http.StatusConflict,map[string]string{"error":"tcp_preflight_required"});return
   }
-  currentInstall,paired:=pairedNodes(s.registry,op.OldNodeID,op.NewNodeID)
-  if !paired||op.InstallationID!=currentInstall{
+  if !s.currentReplacement(op.ID,op.NewNodeID,op.InstallationID,op.Preview.ManifestSHA256){
    respond(w,http.StatusConflict,map[string]string{"error":"node_installation_changed"});return
   }
   candidate,err:=xrayconfig.Render(op.Preview,input.Profiles)
@@ -79,9 +80,18 @@ func (s *Server) attachConfigStaging(mux *http.ServeMux){
   if _,ok:=s.registry.Authenticate(id,install,bearer(r));!ok{
    respond(w,http.StatusUnauthorized,map[string]string{"error":"unauthorized"});return
   }
-  meta,private,available,err:=s.stages.PendingFor(id,install)
-  if err!=nil{respond(w,http.StatusServiceUnavailable,map[string]string{"error":"stage_not_available"});return}
-  if !available{w.WriteHeader(http.StatusNoContent);return}
+  s.replacementLifecycle.Lock()
+  defer s.replacementLifecycle.Unlock()
+  var candidate string
+  for _,meta:=range s.stages.List(){
+   if meta.NodeID!=id||meta.InstallationID!=install||meta.Status!=configstage.Pending||
+    !s.currentReplacement(meta.OperationID,id,install,meta.ManifestSHA256){continue}
+   if candidate!=""{respond(w,http.StatusServiceUnavailable,map[string]string{"error":"stage_not_available"});return}
+   candidate=meta.OperationID
+  }
+  if candidate==""{w.WriteHeader(http.StatusNoContent);return}
+  meta,private,available,err:=s.stages.PendingOperation(candidate,id,install)
+  if err!=nil||!available{respond(w,http.StatusServiceUnavailable,map[string]string{"error":"stage_not_available"});return}
   respond(w,http.StatusOK,configstage.Delivery{
    Metadata:meta,ConfigBase64:base64.StdEncoding.EncodeToString(private),
   })
@@ -97,6 +107,11 @@ func (s *Server) attachConfigStaging(mux *http.ServeMux){
   }
   if _,ok:=s.registry.Authenticate(proof.NodeID,proof.InstallationID,bearer(r));!ok{
    respond(w,http.StatusUnauthorized,map[string]string{"error":"unauthorized"});return
+  }
+  s.replacementLifecycle.Lock()
+  defer s.replacementLifecycle.Unlock()
+  if !s.currentReplacement(proof.OperationID,proof.NodeID,proof.InstallationID,proof.ManifestSHA256){
+   respond(w,http.StatusConflict,map[string]string{"error":"replacement_no_longer_current"});return
   }
   meta,err:=s.stages.Report(proof)
   switch {

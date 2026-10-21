@@ -28,6 +28,8 @@ func (s *Server) attachLabRevisions(mux *http.ServeMux){
 	mux.HandleFunc("POST /api/v1/admin/lab-revisions/{operation}/prepare",func(w http.ResponseWriter,r *http.Request){
 		if !s.isOwner(r){respond(w,http.StatusUnauthorized,map[string]string{"error":"unauthorized"});return}
 		operation:=r.PathValue("operation")
+		s.replacementLifecycle.Lock()
+		defer s.replacementLifecycle.Unlock()
 		metadata,config,err:=s.stages.VerifiedPrivateForLabRevision(operation)
 		if err!=nil{
 			respond(w,http.StatusConflict,map[string]string{"error":"verified_stopped_canary_required"})
@@ -48,10 +50,7 @@ func (s *Server) attachLabRevisions(mux *http.ServeMux){
 		// The replacement journal must still match the exact staged route
 		// and must not be cancelled, switched or superseded.
 		op,err:=s.replacements.Get(operation)
-		if err!=nil||op.NewNodeID!=metadata.NodeID||
-			op.InstallationID!=metadata.InstallationID||
-			op.Preview.ManifestSHA256!=metadata.ManifestSHA256||
-			op.CanActivate{
+		if err!=nil||!s.currentReplacement(operation,metadata.NodeID,metadata.InstallationID,metadata.ManifestSHA256)||op.CanActivate{
 			respond(w,http.StatusConflict,map[string]string{"error":"replacement_revision_mismatch"})
 			return
 		}
@@ -74,6 +73,13 @@ func (s *Server) attachLabRevisions(mux *http.ServeMux){
 			respond(w,http.StatusBadRequest,map[string]string{"error":"invalid_request"})
 			return
 		}
+		s.replacementLifecycle.Lock()
+		defer s.replacementLifecycle.Unlock()
+		for _,version:=range s.labRevisions.Snapshot().Versions{
+			if version.ID==input.VersionID && !s.currentReplacement(version.SourceOperationID,version.NodeID,version.InstallationID,version.ManifestSHA256){
+				respond(w,http.StatusConflict,map[string]string{"error":"replacement_no_longer_current"});return
+			}
+		}
 		snapshot,err:=s.labRevisions.Select(input.VersionID,input.ExpectedGeneration)
 		switch{
 		case err==nil:respond(w,http.StatusOK,snapshot)
@@ -89,6 +95,14 @@ func (s *Server) attachLabRevisions(mux *http.ServeMux){
 		if err:=decode(w,r,256,&input);err!=nil{
 			respond(w,http.StatusBadRequest,map[string]string{"error":"invalid_request"})
 			return
+		}
+		s.replacementLifecycle.Lock()
+		defer s.replacementLifecycle.Unlock()
+		current:=s.labRevisions.Snapshot()
+		for _,version:=range current.Versions{
+			if version.ID==current.PreviousVersion && !s.currentReplacement(version.SourceOperationID,version.NodeID,version.InstallationID,version.ManifestSHA256){
+				respond(w,http.StatusConflict,map[string]string{"error":"replacement_no_longer_current"});return
+			}
 		}
 		snapshot,err:=s.labRevisions.RollbackSelection(input.ExpectedGeneration)
 		switch{

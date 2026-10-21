@@ -18,6 +18,7 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+	"sync"
 )
 
 type Server struct {
@@ -29,6 +30,7 @@ type Server struct {
 	registry            *noderegistry.Registry
 	ownerKey            string
 	replacements        *replacement.Journal
+	replacementLifecycle sync.Mutex // serializes cancel and dependent private-stage/LAB mutations
 	stages              *configstage.Store
 	labRevisions        *labrevision.Store
 	business            *business.Store
