@@ -55,6 +55,8 @@ func (s *Server) attachNodeReplacements(mux *http.ServeMux) {
 			respond(w, http.StatusBadRequest, map[string]string{"error": "invalid_request"})
 			return
 		}
+		s.replacementLifecycle.Lock()
+		defer s.replacementLifecycle.Unlock()
 		op, err := s.replacements.Get(r.PathValue("operation"))
 		if err != nil || op.OldNodeID != id && op.NewNodeID != id {
 			respond(w, http.StatusNotFound, map[string]string{"error": "not_found"})

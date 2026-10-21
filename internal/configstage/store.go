@@ -296,6 +296,23 @@ func (s *Store) PendingFor(nodeID,installation string)(Metadata,[]byte,bool,erro
  return copyMeta(selected.Meta),raw,true,nil
 }
 
+// PendingOperation decrypts only one exact pending operation. The caller must
+// check the live replacement journal under its lifecycle lock first: retained
+// cancelled stages must never shadow or leak a fresh replacement for the same
+// paired Agent.
+func (s *Store) PendingOperation(operation,nodeID,installation string)(Metadata,[]byte,bool,error){
+ s.mu.RLock();defer s.mu.RUnlock()
+ entry,ok:=s.state.Stages[operation]
+ if !ok||entry.Meta.Status!=Pending||entry.Meta.NodeID!=nodeID||entry.Meta.InstallationID!=installation{
+  return Metadata{},nil,false,nil
+ }
+ aead,err:=makeAEAD(s.key)
+ if err!=nil{return Metadata{},nil,false,err}
+ raw,err:=aead.Open(nil,entry.Nonce,entry.Ciphertext,aad(entry.Meta))
+ if err!=nil{return Metadata{},nil,false,ErrUnsafe}
+ return copyMeta(entry.Meta),raw,true,nil
+}
+
 func (s *Store) Report(proof Proof)(Metadata,error){
  s.mu.Lock();defer s.mu.Unlock()
  entry,ok:=s.state.Stages[proof.OperationID]

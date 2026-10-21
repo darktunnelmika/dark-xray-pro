@@ -106,7 +106,9 @@ func (s *Server) attachReplacement(mux *http.ServeMux){
   if err:=decode(w,r,256,&input);err!=nil{
    respond(w,http.StatusBadRequest,map[string]string{"error":"invalid_request"});return
   }
+  s.replacementLifecycle.Lock()
   op,err:=s.replacements.Cancel(r.PathValue("id"),input.ExpectedRevision)
+  s.replacementLifecycle.Unlock()
   switch{
    case err==nil:respond(w,http.StatusOK,op)
    case errors.Is(err,replacement.ErrNotFound):
