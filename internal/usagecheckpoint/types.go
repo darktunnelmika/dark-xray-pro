@@ -12,6 +12,7 @@ import (
  "sort"
 )
 const(MaxBindings=20000;MaxStatsBytes=8<<20;MaxPending=32)
+const SystemProbeRole="system_probe"
 var(
  ErrInvalid=errors.New("invalid usage checkpoint")
  ErrIncomplete=errors.New("incomplete usage observation; never substitute zero")
@@ -31,7 +32,7 @@ var(
  emailPattern=regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}@[A-Za-z0-9.-]{1,80}$`)
 )
 // Bindings are supplied by trusted topology, never by the usage report.
-type Binding struct{ClientID string `json:"client_id"`;Email string `json:"email"`;Billable bool `json:"billable"`}
+type Binding struct{ClientID string `json:"client_id"`;Email string `json:"email"`;Billable bool `json:"billable"`;Role string `json:"role,omitempty"`}
 // Each epoch is ONE supervised process incarnation, not merely a config hash.
 type Epoch struct{
  NodeID string `json:"node_id"`;InstallationID string `json:"installation_id"`;ID string `json:"epoch_id"`;ConfigSHA string `json:"config_sha"`
@@ -50,7 +51,7 @@ func normalize(e Epoch)(Epoch,error){
  for i,c:=range e.KernelBootID{if i==8||i==13||i==18||i==23{if c!='-'{return Epoch{},ErrInvalid};continue};if !(c>='0'&&c<='9'||c>='a'&&c<='f'){return Epoch{},ErrInvalid}}
  e.Bindings=append([]Binding(nil),e.Bindings...);sort.Slice(e.Bindings,func(i,j int)bool{return e.Bindings[i].ClientID<e.Bindings[j].ClientID})
  ids,emails:=map[string]bool{},map[string]bool{}
- for _,b:=range e.Bindings{if !idPattern.MatchString(b.ClientID)||!emailPattern.MatchString(b.Email)||ids[b.ClientID]||emails[b.Email]{return Epoch{},ErrInvalid};ids[b.ClientID]=true;emails[b.Email]=true}
+ for _,b:=range e.Bindings{if !idPattern.MatchString(b.ClientID)||!emailPattern.MatchString(b.Email)||ids[b.ClientID]||emails[b.Email]||(b.Role!=""&&(b.Role!=SystemProbeRole||b.Billable)){return Epoch{},ErrInvalid};ids[b.ClientID]=true;emails[b.Email]=true}
  return e,nil
 }
 func hash(v any)string{b,_:=json.Marshal(v);h:=sha256.Sum256(b);return hex.EncodeToString(h[:])}

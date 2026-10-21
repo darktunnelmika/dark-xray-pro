@@ -28,8 +28,8 @@ type Ledger struct {
 	checkpoint func(string) error
 }
 
-// This opt-in subschema supports reviewed business v7 and v8. V8 adds the
-// handover reservation journal without changing accounting tables.
+// V7/v8 use ordinary accounting. Explicit v9 opt-in additionally requires the
+// complete reviewed system-probe schema; missing or altered policy is refused.
 func Open(ctx context.Context, db *sql.DB) (*Ledger, error) {
 	if db == nil {
 		return nil, ErrSchema
@@ -40,8 +40,11 @@ func Open(ctx context.Context, db *sql.DB) (*Ledger, error) {
 		if e := c.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); e != nil {
 			return e
 		}
-		if version != 7 && version != 8 {
+		if version != 7 && version != 8 && version != ProbeBusinessSchemaVersion {
 			return ErrSchema
+		}
+		if e := verifyProbeSchema(ctx, c, version); e != nil {
+			return e
 		}
 		for _, q := range []string{"SELECT id,uuid,representative_id,plan_kind,volume_bytes,archived,expires_unix,deployment_state FROM clients LIMIT 0", "SELECT id,enabled,volume_credit_bytes,unlimited_credit_units FROM representatives LIMIT 0", "SELECT value FROM native_config_generation WHERE id=1"} {
 			rows, e := c.QueryContext(ctx, q)
@@ -59,6 +62,9 @@ func Open(ctx context.Context, db *sql.DB) (*Ledger, error) {
 		}
 		if e := c.QueryRowContext(ctx, "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='pro_usage_meta'").Scan(&count); e != nil {
 			return e
+		}
+		if version == ProbeBusinessSchemaVersion && count != 1 {
+			return ErrSchema
 		}
 		if count == 1 {
 			var v int

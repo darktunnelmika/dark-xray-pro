@@ -50,9 +50,17 @@ func ensureMeteredHandovers(db *sql.DB) error {
 		`CREATE TRIGGER IF NOT EXISTS native_metered_handover_apply_immutable BEFORE UPDATE OF apply_command ON native_metered_handovers WHEN OLD.apply_command!='' AND OLD.apply_command!=NEW.apply_command BEGIN SELECT RAISE(ABORT,'handover apply immutable'); END`,
 		`CREATE TRIGGER IF NOT EXISTS native_metered_handover_cancel_immutable BEFORE UPDATE OF cancelled ON native_metered_handovers WHEN OLD.cancelled=1 OR NEW.drain_command!='' BEGIN SELECT RAISE(ABORT,'handover cancellation unsafe'); END`,
 		// Older readers must refuse this DB rather than ignore node reservations.
-		`PRAGMA user_version=8`,
 	} {
 		if _, err = tx.Exec(q); err != nil {
+			return err
+		}
+	}
+	var version int
+	if err := tx.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil {
+		return err
+	}
+	if version < 8 {
+		if _, err := tx.Exec(`PRAGMA user_version=8`); err != nil {
 			return err
 		}
 	}

@@ -168,13 +168,28 @@ func registerEpoch(ctx context.Context, c sqlWriter, authority uc.Epoch) error {
 	if outstanding != 0 {
 		return ErrConflict
 	}
+	probesEnabled, err := probeAccountingEnabled(ctx, c)
+	if err != nil {
+		return err
+	}
 	for _, b := range e.Bindings {
 		var n int
 		if err = c.QueryRowContext(ctx, "SELECT COUNT(*) FROM pro_usage_accounts WHERE client_id=?", b.ClientID).Scan(&n); err != nil {
 			return err
 		}
 		if n != 1 {
-			return ErrMissing
+			found, holds, err := probeBinding(ctx, c, e, b, probesEnabled)
+			if err != nil {
+				return err
+			}
+			if !found {
+				return ErrMissing
+			}
+			if holds != 0 {
+				return ErrReconciliation
+			}
+		} else if b.Role != "" {
+			return ErrAuthority
 		}
 	}
 	var duplicate int
@@ -273,6 +288,13 @@ func (l *Ledger) Accept(ctx context.Context, principal Principal, r uc.Report) (
 			}
 			dirty = dirty || before != after
 		}
+		probesEnabled, e := probeAccountingEnabled(ctx, c)
+		if e != nil {
+			return e
+		}
+		if e = recordProbeDeltas(ctx, c, canonical, cursor, r, probesEnabled); e != nil {
+			return e
+		}
 		if l.checkpoint != nil {
 			if e = l.checkpoint("after_totals"); e != nil {
 				return e
@@ -332,8 +354,15 @@ func (l *Ledger) MarkEpochUncertain(ctx context.Context, principal Principal, ep
 			return ErrStorage
 		}
 		dirty := false
+		probesEnabled, e := probeAccountingEnabled(ctx, c)
+		if e != nil {
+			return e
+		}
 		for _, b := range epoch.Bindings {
 			if !b.Billable {
+				if e = holdProbe(ctx, c, epoch, b, reason, probesEnabled); e != nil {
+					return e
+				}
 				continue
 			}
 			before, e := eligible(ctx, c, b.ClientID)

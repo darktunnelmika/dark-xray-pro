@@ -27,6 +27,8 @@ import (
 
 var ErrProtocolHealth = errors.New("protocol health proof unavailable or stale")
 
+const ProtocolHealthVersion = 2
+
 // ProtocolHealthEndpoint is operator-approved verifier configuration, never an
 // arbitrary browser URL. Only literal public IPv4 destinations are supported.
 // CABundle is optional; ordinary certificate identity and pin checks both apply.
@@ -80,6 +82,7 @@ type ProtocolHealthRequest struct {
 	InboundID       uint64           `json:"inbound_id"`
 	Port            uint16           `json:"port"`
 	CredentialSHA   string           `json:"credential_sha"`
+	SystemProbeID   string           `json:"system_probe_id"`
 	EndpointSHA     string           `json:"endpoint_sha"`
 	Expected        RuntimeCondition `json:"expected"`
 	Usage           MeteredCondition `json:"usage"`
@@ -89,7 +92,7 @@ type ProtocolHealthRequest struct {
 }
 
 func validProtocolHealthRequest(q ProtocolHealthRequest) bool {
-	return q.Version == 1 && transactionID.MatchString(q.ID) && transactionID.MatchString(q.HandoverID) && transactionNode.MatchString(q.NodeID) && transactionID.MatchString(q.InstallationID) && transactionID.MatchString(q.RuntimeInstance) && transactionID.MatchString(q.StageID) && transactionID.MatchString(q.ApplyCommandID) && q.InboundID > 0 && q.Port >= 1024 && transactionHash.MatchString(q.CredentialSHA) && transactionHash.MatchString(q.EndpointSHA) && q.Expected.ProcessReady && q.Expected.ActiveSequence > 0 && transactionHash.MatchString(q.Expected.ActiveSHA) && validMeteredCondition(q.Usage) && q.Usage.EpochID != "" && q.Usage.Settlement == (uc.Receipt{}) && q.Issued > 0 && q.Expires > q.Issued && q.Expires-q.Issued <= int64(8*time.Second)
+	return q.Version == ProtocolHealthVersion && transactionNode.MatchString(q.SystemProbeID) && transactionID.MatchString(q.ID) && transactionID.MatchString(q.HandoverID) && transactionNode.MatchString(q.NodeID) && transactionID.MatchString(q.InstallationID) && transactionID.MatchString(q.RuntimeInstance) && transactionID.MatchString(q.StageID) && transactionID.MatchString(q.ApplyCommandID) && q.InboundID > 0 && q.Port >= 1024 && transactionHash.MatchString(q.CredentialSHA) && transactionHash.MatchString(q.EndpointSHA) && q.Expected.ProcessReady && q.Expected.ActiveSequence > 0 && transactionHash.MatchString(q.Expected.ActiveSHA) && validMeteredCondition(q.Usage) && q.Usage.EpochID != "" && q.Usage.Settlement == (uc.Receipt{}) && q.Issued > 0 && q.Expires > q.Issued && q.Expires-q.Issued <= int64(8*time.Second)
 }
 
 func SignProtocolHealthRequest(key []byte, q ProtocolHealthRequest) (ProtocolHealthRequest, error) {
@@ -97,7 +100,7 @@ func SignProtocolHealthRequest(key []byte, q ProtocolHealthRequest) (ProtocolHea
 		return ProtocolHealthRequest{}, ErrProtocolHealth
 	}
 	q.Signature = ""
-	q.Signature = transactionMAC(key, "DARK-PRO-PROTOCOL-HEALTH-REQUEST-v1", q)
+	q.Signature = transactionMAC(key, "DARK-PRO-PROTOCOL-HEALTH-REQUEST-v2", q)
 	return q, nil
 }
 
@@ -123,12 +126,12 @@ func protocolHealthResponseSHA(id string) string {
 // Historical cryptographic evidence only. Callers must additionally check
 // live epoch/stage/lease/observation and a persisted, unconsumed HUB challenge.
 func VerifyProtocolHealthReceipt(key []byte, q ProtocolHealthRequest, p ProtocolHealthReceipt, now time.Time) bool {
-	if !verifyProtocolHealthRequest(key, q, now.UnixNano()) || p.Version != 1 || p.RequestSHA != hashJSON(q) || p.ResponseSHA != protocolHealthResponseSHA(q.ID) || p.Completed < q.Issued || p.Completed > now.UnixNano() || p.Completed >= q.Expires || !transactionHash.MatchString(p.Signature) {
+	if !verifyProtocolHealthRequest(key, q, now.UnixNano()) || p.Version != ProtocolHealthVersion || p.RequestSHA != hashJSON(q) || p.ResponseSHA != protocolHealthResponseSHA(q.ID) || p.Completed < q.Issued || p.Completed > now.UnixNano() || p.Completed >= q.Expires || !transactionHash.MatchString(p.Signature) {
 		return false
 	}
 	want := p
 	want.Signature = ""
-	return hmac.Equal([]byte(p.Signature), []byte(transactionMAC(key, "DARK-PRO-PROTOCOL-HEALTH-RECEIPT-v1", want)))
+	return hmac.Equal([]byte(p.Signature), []byte(transactionMAC(key, "DARK-PRO-PROTOCOL-HEALTH-RECEIPT-v2", want)))
 }
 
 // Caller holds t.mu. Neither execution ACKs nor an open foreign socket suffice.
@@ -154,6 +157,19 @@ func (t *TransactionRuntime) protocolHealthCurrent(q ProtocolHealthRequest) (xra
 		u.EpochID, u.EpochSHA = r.state.Usage.Epoch.ID, hashJSON(r.state.Usage.Epoch)
 	}
 	if u != q.Usage {
+		return xrayconfig.Candidate{}, false
+	}
+	systemEmail, err := uc.CounterEmail(q.SystemProbeID)
+	if err != nil || r.state.Usage == nil {
+		return xrayconfig.Candidate{}, false
+	}
+	found := false
+	for _, b := range r.state.Usage.Epoch.Bindings {
+		if b.ClientID == q.SystemProbeID && b.Email == systemEmail && !b.Billable && b.Role == uc.SystemProbeRole {
+			found = true
+		}
+	}
+	if !found {
 		return xrayconfig.Candidate{}, false
 	}
 	return r.active.candidate(), true
@@ -234,11 +250,11 @@ func (t *TransactionRuntime) ProbeMeteredProtocol(ctx context.Context, q Protoco
 	if _, current = t.protocolHealthCurrent(q); !current || probeCtx.Err() != nil || p.dead() || !verifyProtocolHealthRequest(t.options.LeaseKey, q, time.Now().UnixNano()) {
 		return empty, ErrProtocolHealth
 	}
-	proof := ProtocolHealthReceipt{Version: 1, RequestSHA: hashJSON(q), ResponseSHA: protocolHealthResponseSHA(q.ID), Completed: time.Now().UnixNano()}
+	proof := ProtocolHealthReceipt{Version: ProtocolHealthVersion, RequestSHA: hashJSON(q), ResponseSHA: protocolHealthResponseSHA(q.ID), Completed: time.Now().UnixNano()}
 	if proof.Completed >= q.Expires {
 		return empty, ErrProtocolHealth
 	}
-	proof.Signature = transactionMAC(t.options.LeaseKey, "DARK-PRO-PROTOCOL-HEALTH-RECEIPT-v1", proof)
+	proof.Signature = transactionMAC(t.options.LeaseKey, "DARK-PRO-PROTOCOL-HEALTH-RECEIPT-v2", proof)
 	return proof, nil
 }
 
@@ -251,8 +267,9 @@ func protocolHealthClient(c xrayconfig.Candidate, q ProtocolHealthRequest, socks
 			Protocol string `json:"protocol"`
 			Settings struct {
 				Clients []struct {
-					ID   string `json:"id"`
-					Flow string `json:"flow"`
+					ID    string `json:"id"`
+					Email string `json:"email"`
+					Flow  string `json:"flow"`
 				} `json:"clients"`
 			} `json:"settings"`
 			Stream struct {
@@ -286,9 +303,13 @@ func protocolHealthClient(c xrayconfig.Candidate, q ProtocolHealthRequest, socks
 			return xrayconfig.Candidate{}, ErrProtocolHealth
 		}
 		uuid := ""
+		systemEmail, err := uc.CounterEmail(q.SystemProbeID)
+		if err != nil {
+			return xrayconfig.Candidate{}, ErrProtocolHealth
+		}
 		for _, user := range in.Settings.Clients {
 			h := sha256.Sum256([]byte(user.ID))
-			if hex.EncodeToString(h[:]) == q.CredentialSHA && user.Flow == "xtls-rprx-vision" {
+			if hex.EncodeToString(h[:]) == q.CredentialSHA && user.Email == systemEmail && user.Flow == "xtls-rprx-vision" {
 				if uuid != "" {
 					return xrayconfig.Candidate{}, ErrProtocolHealth
 				}

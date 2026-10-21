@@ -21,17 +21,20 @@ import (
 )
 
 type handoverHealthFixture struct {
-	Runtime    *mx.TransactionRuntime
-	Token      string
-	Plan       meteredHandoverInput
-	Origin     *httptest.Server
-	Port       uint16
-	Credential string
-	Behavior   *atomic.Int32
-	Requests   *atomic.Int64
-	Started    <-chan struct{}
-	Release    chan<- struct{}
-	Drain      func()
+	Runtime            *mx.TransactionRuntime
+	Token              string
+	Plan               meteredHandoverInput
+	Origin             *httptest.Server
+	Port               uint16
+	Credential         string
+	SystemProbeID      string
+	CustomerCredential string
+	CustomerID         string
+	Behavior           *atomic.Int32
+	Requests           *atomic.Int64
+	Started            <-chan struct{}
+	Release            chan<- struct{}
+	Drain              func()
 }
 
 func TestRealPinnedMeteredHandoverProtocolHealth(t *testing.T) {
@@ -55,7 +58,7 @@ func TestRealPinnedMeteredHandoverProtocolHealth(t *testing.T) {
 				request := func(n int, e mx.ProtocolHealthEndpoint) mx.ProtocolHealthRequest {
 					t.Helper()
 					status := f.Runtime.Status()
-					q, err := mx.SignProtocolHealthRequest([]byte(f.Token), mx.ProtocolHealthRequest{Version: 1, ID: handoverTestID(100 + n), HandoverID: f.Plan.ID, NodeID: f.Plan.TargetNode, InstallationID: f.Plan.TargetInstallation, RuntimeInstance: status.Instance, StageID: f.Plan.TargetStageID, ApplyCommandID: handoverTestID(22), InboundID: 7612, Port: f.Port, CredentialSHA: hex.EncodeToString(credential[:]), EndpointSHA: e.SHA(), Expected: mx.Condition(status.Observed), Usage: *status.Usage, Issued: time.Now().UnixNano(), Expires: time.Now().Add(6 * time.Second).UnixNano()})
+					q, err := mx.SignProtocolHealthRequest([]byte(f.Token), mx.ProtocolHealthRequest{Version: mx.ProtocolHealthVersion, SystemProbeID: f.SystemProbeID, ID: handoverTestID(100 + n), HandoverID: f.Plan.ID, NodeID: f.Plan.TargetNode, InstallationID: f.Plan.TargetInstallation, RuntimeInstance: status.Instance, StageID: f.Plan.TargetStageID, ApplyCommandID: handoverTestID(22), InboundID: 7612, Port: f.Port, CredentialSHA: hex.EncodeToString(credential[:]), EndpointSHA: e.SHA(), Expected: mx.Condition(status.Observed), Usage: *status.Usage, Issued: time.Now().UnixNano(), Expires: time.Now().Add(6 * time.Second).UnixNano()})
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -110,6 +113,17 @@ func TestRealPinnedMeteredHandoverProtocolHealth(t *testing.T) {
 					}
 					if f.Requests.Load() != 1 {
 						t.Fatal("stale request reached verifier")
+					}
+					customerHash := sha256.Sum256([]byte(f.CustomerCredential))
+					badCustomer := request(30, endpoint)
+					badCustomer.CredentialSHA = hex.EncodeToString(customerHash[:])
+					badCustomer, _ = mx.SignProtocolHealthRequest([]byte(f.Token), badCustomer)
+					reject(badCustomer, endpoint)
+					badCustomer.SystemProbeID = f.CustomerID
+					badCustomer, _ = mx.SignProtocolHealthRequest([]byte(f.Token), badCustomer)
+					reject(badCustomer, endpoint)
+					if f.Requests.Load() != 1 {
+						t.Fatal("financial customer credential reached health verifier")
 					}
 					raw, _ := json.Marshal(p)
 					if strings.Contains(string(raw), f.Credential) || strings.Contains(string(raw), "privateKey") {

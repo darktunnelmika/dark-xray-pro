@@ -55,10 +55,17 @@ traffic. The bound idle client remains at zero.
 
 ## Remaining integration
 
+N13 supersedes the credential/accounting portion below: opt-in system identities
+have a separate nonfinancial ledger, and protocol-health v2 requires an exact
+nonbillable epoch binding. The real health acceptance uses those credentials and
+proves system bytes do not enter customer totals. See
+[N13 accounting](system-probe-accounting-n13.fa.md). The ordinary database remains
+v8; only explicit startup opt-in creates v9. There is still no public trigger.
+
 This internal primitive has no HTTP/Agent endpoint, worker or UI trigger yet.
 There is no database/schema migration or deployment in this step. CI uses only
-synthetic credentials; probe bytes currently belong to the selected credential's
-normal usage and must not be silently assigned to a real customer's account.
+synthetic credentials; the N12 v1 primitive used the selected credential's normal
+usage. N13 v2 requires a separately registered system credential instead.
 
 Before rollout, implement a persisted HUB-issued single-use challenge, exact
 handover/Apply binding and atomic receipt consumption; recheck source settlement,

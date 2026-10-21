@@ -364,7 +364,7 @@ func meteredRouteCandidate(ctx context.Context, tx *sql.Tx, key []byte, node, in
 		if e != nil {
 			return xrayconfig.Candidate{}, e
 		}
-		p.Users, e = meteredRouteUsers(ctx, tx, x.id)
+		p.Users, e = meteredRouteUsers(ctx, tx, x.id, node, install)
 		if e != nil {
 			return xrayconfig.Candidate{}, e
 		}
