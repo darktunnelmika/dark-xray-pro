@@ -19,6 +19,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -50,11 +51,44 @@ func TestRealPinnedMeteredHandoverActiveTraffic(t *testing.T) {
 	}
 }
 
-func testMeteredHandoverTraffic(t *testing.T, binary, pin, mode string) {
+func testMeteredHandoverTraffic(t *testing.T, binary, pin, mode string, afterApply ...func(handoverHealthFixture)) {
 	ctx, cancel := context.WithTimeout(context.Background(), 55*time.Second)
 	defer cancel()
 	target := liveUsageRealityAt(t, net.JoinHostPort(meteredTrafficAddress, "0"))
+	var healthBehavior atomic.Int32
+	healthStarted, healthRelease := make(chan struct{}, 1), make(chan struct{})
+	var healthRequests atomic.Int64
 	origin := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/redirect-must-not-be-followed" {
+			t.Error("protocol health followed a redirect")
+			http.Error(w, "redirect forbidden", 500)
+			return
+		}
+		if strings.HasPrefix(r.URL.Path, "/dark-pro/protocol-health/v1/") {
+			healthRequests.Add(1)
+			id := strings.TrimPrefix(r.URL.Path, "/dark-pro/protocol-health/v1/")
+			switch healthBehavior.Load() {
+			case 1:
+				_, _ = io.WriteString(w, "wrong challenge response")
+				return
+			case 2:
+				http.Redirect(w, r, "/redirect-must-not-be-followed", 302)
+				return
+			case 3:
+				select {
+				case healthStarted <- struct{}{}:
+				default:
+				}
+				select {
+				case <-healthRelease:
+				case <-r.Context().Done():
+					return
+				}
+			}
+			w.Header().Set("Cache-Control", "no-store")
+			_, _ = io.WriteString(w, "DARK-PRO-PROTOCOL-HEALTH-v1\n"+id+"\n")
+			return
+		}
 		tick := time.NewTicker(20 * time.Millisecond)
 		defer tick.Stop()
 		for {
@@ -366,7 +400,13 @@ func testMeteredHandoverTraffic(t *testing.T, binary, pin, mode string) {
 	}
 	// An explicit emergency drain is still allowed under the reservation. It
 	// closes the second real stream and gives exact final accounting evidence.
-	queue(1, 23, "drain", plan.TargetStageID, 0)
+	drained := false
+	for _, check := range afterApply {
+		check(handoverHealthFixture{Runtime: runtimes[1], Token: tokens[1], Plan: plan, Origin: origin, Port: portB, Credential: customers[0].UUID, Behavior: &healthBehavior, Requests: &healthRequests, Started: healthStarted, Release: healthRelease, Drain: func() { queue(1, 23, "drain", plan.TargetStageID, 0); drained = true }})
+	}
+	if !drained {
+		queue(1, 23, "drain", plan.TargetStageID, 0)
+	}
 	newStream.stopped(t, ctx)
 	assertClosed()
 	syncNow(0)
