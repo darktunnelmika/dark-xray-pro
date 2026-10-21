@@ -16,7 +16,7 @@ func protocolHealthTestRequest(t *testing.T) ([]byte, ProtocolHealthRequest) {
 	t.Helper()
 	key := bytes.Repeat([]byte{0x73}, 32)
 	now := time.Now()
-	q, err := SignProtocolHealthRequest(key, ProtocolHealthRequest{Version: 1, ID: strings.Repeat("a", 32), HandoverID: strings.Repeat("b", 32), NodeID: "target", InstallationID: strings.Repeat("c", 32), RuntimeInstance: strings.Repeat("d", 32), StageID: strings.Repeat("e", 32), ApplyCommandID: strings.Repeat("f", 32), InboundID: 7612, Port: 27612, CredentialSHA: strings.Repeat("a", 64), EndpointSHA: strings.Repeat("b", 64), Expected: RuntimeCondition{ProcessReady: true, ActiveSequence: 3, ActiveSHA: strings.Repeat("c", 64)}, Usage: MeteredCondition{EpochID: strings.Repeat("d", 32), EpochSHA: strings.Repeat("e", 64), AdmissionSHA: strings.Repeat("f", 64)}, Issued: now.UnixNano(), Expires: now.Add(6 * time.Second).UnixNano()})
+	q, err := SignProtocolHealthRequest(key, ProtocolHealthRequest{Version: ProtocolHealthVersion, SystemProbeID: "system-probe-test", ID: strings.Repeat("a", 32), HandoverID: strings.Repeat("b", 32), NodeID: "target", InstallationID: strings.Repeat("c", 32), RuntimeInstance: strings.Repeat("d", 32), StageID: strings.Repeat("e", 32), ApplyCommandID: strings.Repeat("f", 32), InboundID: 7612, Port: 27612, CredentialSHA: strings.Repeat("a", 64), EndpointSHA: strings.Repeat("b", 64), Expected: RuntimeCondition{ProcessReady: true, ActiveSequence: 3, ActiveSHA: strings.Repeat("c", 64)}, Usage: MeteredCondition{EpochID: strings.Repeat("d", 32), EpochSHA: strings.Repeat("e", 64), AdmissionSHA: strings.Repeat("f", 64)}, Issued: now.UnixNano(), Expires: now.Add(6 * time.Second).UnixNano()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -25,12 +25,13 @@ func protocolHealthTestRequest(t *testing.T) ([]byte, ProtocolHealthRequest) {
 
 func TestProtocolHealthReceiptBindsRequestChallengeAndExpiry(t *testing.T) {
 	key, q := protocolHealthTestRequest(t)
-	p := ProtocolHealthReceipt{Version: 1, RequestSHA: hashJSON(q), ResponseSHA: protocolHealthResponseSHA(q.ID), Completed: time.Now().UnixNano()}
-	p.Signature = transactionMAC(key, "DARK-PRO-PROTOCOL-HEALTH-RECEIPT-v1", p)
+	p := ProtocolHealthReceipt{Version: ProtocolHealthVersion, RequestSHA: hashJSON(q), ResponseSHA: protocolHealthResponseSHA(q.ID), Completed: time.Now().UnixNano()}
+	p.Signature = transactionMAC(key, "DARK-PRO-PROTOCOL-HEALTH-RECEIPT-v2", p)
 	if !VerifyProtocolHealthReceipt(key, q, p, time.Now()) {
 		t.Fatal("valid evidence rejected")
 	}
 	for _, mutate := range []func(*ProtocolHealthRequest){
+		func(q *ProtocolHealthRequest) { q.SystemProbeID = "other-system-probe" },
 		func(q *ProtocolHealthRequest) { q.ID = strings.Repeat("0", 32) },
 		func(q *ProtocolHealthRequest) { q.HandoverID = strings.Repeat("0", 32) },
 		func(q *ProtocolHealthRequest) { q.NodeID = "different" },
@@ -59,12 +60,12 @@ func TestProtocolHealthReceiptBindsRequestChallengeAndExpiry(t *testing.T) {
 		func(p *ProtocolHealthReceipt) { p.Completed = q.Expires },
 		func(p *ProtocolHealthReceipt) { p.Completed = q.Issued - 1 },
 		func(p *ProtocolHealthReceipt) { p.ResponseSHA = strings.Repeat("0", 64) },
-		func(p *ProtocolHealthReceipt) { p.Version = 2 },
+		func(p *ProtocolHealthReceipt) { p.Version = 1 },
 	} {
 		bad := p
 		mutate(&bad)
 		bad.Signature = ""
-		bad.Signature = transactionMAC(key, "DARK-PRO-PROTOCOL-HEALTH-RECEIPT-v1", bad)
+		bad.Signature = transactionMAC(key, "DARK-PRO-PROTOCOL-HEALTH-RECEIPT-v2", bad)
 		if VerifyProtocolHealthReceipt(key, q, bad, time.Now()) {
 			t.Fatal("invalid signed evidence accepted")
 		}
@@ -117,6 +118,8 @@ func TestProtocolHealthEndpointRejectsUnapprovedAddressAndTLSBypass(t *testing.T
 func TestProtocolHealthRejectsOverlongOrUnboundRequests(t *testing.T) {
 	key, q := protocolHealthTestRequest(t)
 	for _, mutate := range []func(*ProtocolHealthRequest){
+		func(q *ProtocolHealthRequest) { q.Version = 1 },
+		func(q *ProtocolHealthRequest) { q.SystemProbeID = "" },
 		func(q *ProtocolHealthRequest) { q.Expires = q.Issued + int64(9*time.Second) },
 		func(q *ProtocolHealthRequest) { q.Expires = q.Issued },
 		func(q *ProtocolHealthRequest) { q.Issued = 0 },

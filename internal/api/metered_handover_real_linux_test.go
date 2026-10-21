@@ -174,6 +174,21 @@ func testMeteredHandoverTraffic(t *testing.T, binary, pin, mode string, afterApp
 	if err := s.EnableMeteredRouteNodes(approved); err != nil {
 		t.Fatal(err)
 	}
+	var probes []usageledger.ProbeIdentity
+	expectedUsers := 2
+	if len(afterApply) > 0 {
+		if err := s.business.EnableSystemProbeAccounting(ctx); err != nil {
+			t.Fatal(err)
+		}
+		for i, node := range nodes {
+			probe, err := s.business.ProvisionMeteredProbe(ctx, key, node, installs[i], 7612)
+			if err != nil {
+				t.Fatal("dedicated system probe identity", err)
+			}
+			probes = append(probes, probe)
+		}
+		expectedUsers = 3
+	}
 	var mu sync.Mutex
 	epochs := map[string]uc.Epoch{}
 	finals := map[string]uc.Report{}
@@ -200,7 +215,7 @@ func testMeteredHandoverTraffic(t *testing.T, binary, pin, mode string, afterApp
 				t.Error(err)
 			}
 			if report.Sequence == 1 {
-				if !closed(portA) || !closed(portB) || report.Quiesced || len(report.Users) != 2 {
+				if !closed(portA) || !closed(portB) || report.Quiesced || len(report.Users) != expectedUsers {
 					t.Error("initial receipt crossed listener fence")
 				}
 				for _, u := range report.Users {
@@ -401,8 +416,14 @@ func testMeteredHandoverTraffic(t *testing.T, binary, pin, mode string, afterApp
 	// An explicit emergency drain is still allowed under the reservation. It
 	// closes the second real stream and gives exact final accounting evidence.
 	drained := false
+	probeCredential := customers[0].UUID
+	probeID := ""
+	if len(probes) > 0 {
+		probeCredential = probes[1].UUID
+		probeID = probes[1].ID
+	}
 	for _, check := range afterApply {
-		check(handoverHealthFixture{Runtime: runtimes[1], Token: tokens[1], Plan: plan, Origin: origin, Port: portB, Credential: customers[0].UUID, Behavior: &healthBehavior, Requests: &healthRequests, Started: healthStarted, Release: healthRelease, Drain: func() { queue(1, 23, "drain", plan.TargetStageID, 0); drained = true }})
+		check(handoverHealthFixture{Runtime: runtimes[1], Token: tokens[1], Plan: plan, Origin: origin, Port: portB, Credential: probeCredential, SystemProbeID: probeID, CustomerCredential: customers[0].UUID, CustomerID: customers[0].ID, Behavior: &healthBehavior, Requests: &healthRequests, Started: healthStarted, Release: healthRelease, Drain: func() { queue(1, 23, "drain", plan.TargetStageID, 0); drained = true }})
 	}
 	if !drained {
 		queue(1, 23, "drain", plan.TargetStageID, 0)
@@ -419,7 +440,7 @@ func testMeteredHandoverTraffic(t *testing.T, binary, pin, mode string, afterApp
 	totals := map[string]uc.Usage{}
 	for id, epoch := range epochs {
 		f, ok := finals[id]
-		if !ok || len(f.Users) != 2 || zeros[id] != 1 || uc.VerifyReport(epoch, f) != nil || uc.VerifyEpochStopped(epoch) != nil {
+		if !ok || len(f.Users) != expectedUsers || zeros[id] != 1 || uc.VerifyReport(epoch, f) != nil || uc.VerifyEpochStopped(epoch) != nil {
 			t.Fatal("incomplete zero/final/process-stop evidence")
 		}
 		i := 0
@@ -448,6 +469,25 @@ func testMeteredHandoverTraffic(t *testing.T, binary, pin, mode string, afterApp
 		want := totals[c.ID]
 		if err != nil || got.Uplink != want.Uplink || got.Downlink != want.Downlink || got.Total != want.Uplink+want.Downlink {
 			t.Fatal(fmt.Sprintf("handover lost or double billed customer %s", c.ID), got, want, err)
+		}
+	}
+	for i, p := range probes {
+		got, err := s.business.UsageLedger().ProbeUsage(ctx, p.ID)
+		want := totals[p.ID]
+		if err != nil || got.Uplink != want.Uplink || got.Downlink != want.Downlink || got.Total != want.Uplink+want.Downlink || got.Holds != 0 {
+			t.Fatal("system probe bytes lost or charged outside its ledger", got, want, err)
+		}
+		if i == 1 && (got.Uplink == 0 || got.Downlink == 0) {
+			t.Fatal("protocol check did not use the dedicated system credential")
+		}
+		if i == 0 && got.Total != 0 {
+			t.Fatal("unused source system probe billed")
+		}
+		if _, err = s.business.Client(ctx, p.ID); err == nil {
+			t.Fatal("system probe became a customer")
+		}
+		if _, err = s.business.UsageLedger().Account(ctx, p.ID); err == nil {
+			t.Fatal("system probe gained a financial account")
 		}
 	}
 }

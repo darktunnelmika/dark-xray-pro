@@ -30,10 +30,17 @@ func (s *Store) EnableUsageLedger(ctx context.Context) error {
 func (s *Store) UsageLedger() *usageledger.Ledger { return s.usage }
 func (s *Store) restoreUsageLedger(ctx context.Context) error {
 	var count int
-	if err := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM sqlite_master WHERE name GLOB 'pro_usage_*'").Scan(&count); err != nil {
+	if err := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM sqlite_master WHERE name GLOB 'pro_usage_*' OR name GLOB 'pro_probe_*'").Scan(&count); err != nil {
 		return err
 	}
 	if count == 0 {
+		var version int
+		if err := s.db.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); err != nil {
+			return err
+		}
+		if version == usageledger.ProbeBusinessSchemaVersion {
+			return usageledger.ErrSchema
+		}
 		return nil
 	}
 	return s.EnableUsageLedger(ctx)

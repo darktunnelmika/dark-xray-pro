@@ -11,6 +11,7 @@ import (
 	"errors"
 	mx "github.com/darktunnelmika/dark-xray-pro/internal/managedxray"
 	uc "github.com/darktunnelmika/dark-xray-pro/internal/usagecheckpoint"
+	"github.com/darktunnelmika/dark-xray-pro/internal/usageledger"
 	"github.com/darktunnelmika/dark-xray-pro/internal/xrayconfig"
 	"strconv"
 	"time"
@@ -29,7 +30,7 @@ func validMeteredObservation(o mx.Snapshot) bool {
 	return validObservation(o)
 }
 
-func meteredRouteUsers(ctx context.Context, tx *sql.Tx, inbound uint64) ([]xrayconfig.User, error) {
+func meteredRouteUsers(ctx context.Context, tx *sql.Tx, inbound uint64, node, installation string) ([]xrayconfig.User, error) {
 	rows, e := tx.QueryContext(ctx, `SELECT c.id,c.uuid FROM native_inbound_clients b JOIN clients c ON c.id=b.client_id JOIN representatives r ON r.id=c.representative_id JOIN pro_usage_eligibility u ON u.client_id=c.id WHERE b.inbound_id=? AND c.archived=0 AND c.deployment_state!='disabled' AND c.expires_unix>? AND r.enabled=1 AND u.eligible=1 ORDER BY c.id LIMIT 20001`, inbound, time.Now().Unix())
 	if e != nil {
 		return nil, e
@@ -50,7 +51,28 @@ func meteredRouteUsers(ctx context.Context, tx *sql.Tx, inbound uint64) ([]xrayc
 	if len(out) > 20000 {
 		return nil, ErrInvalid
 	}
-	return out, rows.Err()
+	if e = rows.Err(); e != nil {
+		return nil, e
+	}
+	rows.Close()
+	// Never use a system identity to reopen an otherwise empty customer route.
+	if len(out) > 0 {
+		probe, err := usageledger.ProbeIdentityTx(ctx, tx, node, installation, inbound)
+		if err != nil && !errors.Is(err, usageledger.ErrMissing) {
+			return nil, err
+		}
+		if err == nil {
+			if len(out) >= uc.MaxBindings {
+				return nil, ErrInvalid
+			}
+			email, err := uc.CounterEmail(probe.ID)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, xrayconfig.User{UUID: probe.UUID, Email: email})
+		}
+	}
+	return out, nil
 }
 func meteredRouteRefs(ctx context.Context, tx *sql.Tx, node, install string) ([]RouteDraftRef, error) {
 	rows, e := tx.QueryContext(ctx, `SELECT i.id,i.revision,d.revision FROM native_inbound_targets t JOIN native_inbounds i ON i.id=t.inbound_id JOIN native_route_drafts d ON d.inbound_id=i.id AND d.node_id=t.node_id WHERE t.node_id=? AND t.installation_id=? AND i.enabled=1 AND i.archived=0 ORDER BY i.id`, node, install)
@@ -262,6 +284,7 @@ func (s *Store) registerMeteredRouteEpoch(ctx context.Context, tx *sql.Tx, c Nod
 	var err error
 	var config struct {
 		Inbounds []struct {
+			Tag      string `json:"tag"`
 			Protocol string `json:"protocol"`
 			Settings struct {
 				Clients []struct {
@@ -276,14 +299,26 @@ func (s *Store) registerMeteredRouteEpoch(ctx context.Context, tx *sql.Tx, c Nod
 	}
 	epoch := uc.Epoch{NodeID: c.NodeID, InstallationID: c.InstallationID, ID: birth.EpochID, ConfigSHA: c.ConfigSHA, KernelBootID: birth.KernelBootID, PID: birth.PID, ProcessStartTicks: birth.StartTicks}
 	seen := map[string]string{}
+	inboundTags := map[string]uint64{}
+	for _, l := range c.Candidate.Listeners {
+		inboundTags[l.Tag] = l.InboundID
+	}
 	for _, in := range config.Inbounds {
 		if in.Protocol != "vless" {
 			return uc.Epoch{}, ErrInvalid
 		}
 		for _, u := range in.Settings.Clients {
 			var id string
-			if err = tx.QueryRowContext(ctx, "SELECT id FROM clients WHERE uuid=?", u.UUID).Scan(&id); err != nil {
-				return uc.Epoch{}, ErrConflict
+			billable := true
+			err = tx.QueryRowContext(ctx, "SELECT id FROM clients WHERE uuid=?", u.UUID).Scan(&id)
+			if errors.Is(err, sql.ErrNoRows) {
+				probe, e := usageledger.ProbeIdentityTx(ctx, tx, c.NodeID, c.InstallationID, inboundTags[in.Tag])
+				if e != nil || probe.UUID != u.UUID {
+					return uc.Epoch{}, ErrConflict
+				}
+				id, billable = probe.ID, false
+			} else if err != nil {
+				return uc.Epoch{}, err
 			}
 			email, e := uc.CounterEmail(id)
 			if e != nil || email != u.Email {
@@ -298,7 +333,7 @@ func (s *Store) registerMeteredRouteEpoch(ctx context.Context, tx *sql.Tx, c Nod
 			seen[id] = u.Email
 			// A native VLESS receiver TERMINATES customer traffic, including Swap
 			// destinations. This does not label a separate transit server billable.
-			epoch.Bindings = append(epoch.Bindings, uc.Binding{ClientID: id, Email: email, Billable: true})
+			epoch.Bindings = append(epoch.Bindings, uc.Binding{ClientID: id, Email: email, Billable: billable})
 		}
 	}
 	canonical, _, err := uc.CanonicalEpoch(epoch)
