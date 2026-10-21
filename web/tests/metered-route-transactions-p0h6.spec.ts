@@ -21,6 +21,7 @@ async function fixture(page: Page, role = "owner") {
    { inbound_id: 302, inbound_revision: 4, draft_revision: 5, name: "Tunnel LAB", listen_ip: "127.0.0.1", direct_port: 0, tunnel_port: 26124 }],
  };
  const state = { scope, view, readError: false, freshPoll: true, malformed: false, post: "normal" as "normal" | "before_commit" | "after_commit" | "conflict" };
+ const views:Record<string,Channel>={"route-qa":view};
  const writes: { path: string; body: CommandRequest | { confirm_execution_may_have_occurred: boolean }; raw: string; csrf: string }[] = [];
  const reads: string[] = [];
  await page.route("**/api/v1/session/status", r => r.fulfill({ json: { authenticated: true, user: { id: role, username: "test-owner", role, representative_id: role === "owner" ? "owner" : "rep-a" }, csrf_token: csrf, expires_unix: 1900000000 } }));
@@ -32,7 +33,8 @@ async function fixture(page: Page, role = "owner") {
    if (path === "/api/v1/workspace/native-inbounds-state") return route.fulfill({ json: { inbounds: [], nodes: [{ node_id: "route-qa", installation_id: installation, name: "Disposable LAB" }], targets: [], runtime: [] } });
    if (path === "/api/v1/workspace/clients") return route.fulfill({ json: { clients: [] } });
    if (path === "/api/v1/workspace/metered-route-transactions") return route.fulfill({ json: state.scope });
-   if (path === apiBase) {
+   const view=views[path.match(/^\/api\/v1\/workspace\/native-nodes\/([^/]+)\/metered-route-transactions$/)?.[1]??""];
+   if (view) {
     if (state.readError) return route.fulfill({ status: 503, json: { error: "business_store_unavailable" } });
     view.server_time_unix_milli = Date.now();
     if (state.freshPoll) view.reported_at_unix_nano = Date.now() * 1e6;
@@ -43,23 +45,52 @@ async function fixture(page: Page, role = "owner") {
   writes.push({ path, body: req.postDataJSON(), raw: req.postData()!, csrf: req.headers()["x-csrf-token"] ?? "" });
   if (state.post === "before_commit") return route.fulfill({ status: 503, json: { error: "business_store_unavailable" } });
   if (state.post === "conflict") return route.fulfill({ status: 409, json: { error: "business_event_or_identity_conflict" } });
+  const view=views[path.match(/^\/api\/v1\/workspace\/native-nodes\/([^/]+)\/metered-route-transactions(?:\/|$)/)?.[1]??""];
+  if(!view)return route.fulfill({status:404,json:{error:"not_found"}});
   if (path.endsWith("/abandon")) {
    view.commands.find(c => c.id === path.split("/").at(-2))!.state = "abandoned_unknown";
    return route.fulfill({ json: { state: "abandoned_unknown", process_stopped: false, requires_fresh_observation: true } });
   }
-  if (path === apiBase) {
+  if (path.endsWith("/metered-route-transactions")) {
    const body = req.postDataJSON() as CommandRequest;
    let row = view.commands.find(c => c.id === body.id);
-   if (!row) { row = { ...command(view.commands.length + 1, body.action, body.stage_id), id: body.id, stage_id: body.action === "stage" ? body.id : body.stage_id }; view.commands.unshift(row); }
+   if (!row) { row = { ...command(view.commands.length + 1, body.action, body.stage_id), node_id:view.node_id,installation_id:view.installation_id,id: body.id, stage_id: body.action === "stage" ? body.id : body.stage_id }; view.commands.unshift(row); }
    return state.post === "after_commit" ? route.fulfill({ status: 503, json: { error: "business_store_unavailable" } }) : route.fulfill({ status: 202, json: row });
   }
   return route.fulfill({ status: 404, json: { error: "not_found" } });
  });
- return { state, view, writes, reads };
+ return { state, view, views, writes, reads };
 }
 const panel = (page: Page) => page.getByRole("region", { name: "Metered TCP LAB transactions", exact: true });
 const refresh = (page: Page) => panel(page).getByRole("button", { name: "Refresh transactions", exact: true }).click();
 async function confirm(page: Page, name: string) { page.once("dialog", d => d.accept()); await panel(page).getByRole("button", { name, exact: true }).click(); }
+
+test("N7 changing approved Nodes keeps commands and uncertain retries with their original Node",async({page})=>{
+ const f=await fixture(page),second="route-new",secondInstall="8".repeat(32);
+ f.state.scope.nodes=[{node_id:"route-qa",installation_id:installation},{node_id:second,installation_id:secondInstall}];
+ f.views[second]={...structuredClone(f.view),node_id:second,installation_id:secondInstall};
+ f.views[second].status.instance="7".repeat(32);
+ f.views[second].review[0].name="Second Node Direct";
+ f.state.post="before_commit";
+ await page.goto("/inbounds");const p=panel(page);
+ await confirm(page,"Review and Stage");
+ await expect(p.getByRole("button",{name:"Retry same request",exact:true})).toBeEnabled();
+ const original=f.writes[0].raw;
+ await p.getByRole("combobox",{name:"Approved Node",exact:true}).selectOption(second);
+ await expect(p.getByText("Second Node Direct · #301")).toBeVisible();
+ await expect(p.getByRole("button",{name:"Retry same request",exact:true})).toHaveCount(0);
+ expect(f.writes).toHaveLength(1);
+ f.state.post="normal";await confirm(page,"Review and Stage");
+ await expect(p.getByText("Queued · not yet delivered",{exact:true})).toBeVisible();
+ expect(f.writes[1].path).toContain("/"+second+"/");
+ expect((f.writes[1].body as CommandRequest).runtime_instance).toBe("7".repeat(32));
+ await p.getByRole("combobox",{name:"Approved Node",exact:true}).selectOption("route-qa");
+ await expect(p.getByRole("button",{name:"Retry same request",exact:true})).toBeEnabled();
+ await confirm(page,"Retry same request");
+ await expect.poll(()=>f.writes.length).toBe(3);
+ expect(f.writes[2].path).toBe(apiBase);expect(f.writes[2].raw).toBe(original);
+ expect(f.view.commands).toHaveLength(1);expect(f.views[second].commands).toHaveLength(1);
+});
 
 test("P0-H6 Stage reviews all Node drafts; explicit Apply and Renew keep ACK separate from live observation", async ({ page }) => {
  const f = await fixture(page); await page.goto("/inbounds"); const p = panel(page);

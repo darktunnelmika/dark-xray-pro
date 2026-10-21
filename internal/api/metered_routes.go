@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"sort"
 
 	"github.com/darktunnelmika/dark-xray-pro/internal/business"
 	mx "github.com/darktunnelmika/dark-xray-pro/internal/managedxray"
@@ -12,23 +13,35 @@ import (
 // This separate operator-only startup switch claims a never-delivered metered loopback
 // Node persistently. Browser requests cannot enable it or select another Node.
 func (s *Server) EnableMeteredRouteTransactions(node, installation, binarySHA string) error {
-	if s.business == nil || s.business.UsageLedger() == nil || len(s.inboundKey) != 32 || node == "" || s.meteredRouteNode != "" || node == s.meteredNode {
+	return s.EnableMeteredRouteNodes([]business.MeteredRouteNode{{NodeID: node, InstallationID: installation, BinarySHA: binarySHA}})
+}
+
+// EnableMeteredRouteNodes is a startup-only operator allowlist. Persist all
+// claims in one transaction; neither browser nor Agent can add a member.
+func (s *Server) EnableMeteredRouteNodes(nodes []business.MeteredRouteNode) error {
+	if s.business == nil || s.business.UsageLedger() == nil || len(s.inboundKey) != 32 || len(nodes) == 0 || len(nodes) > 64 || s.meteredRouteNodes != nil {
 		return errors.New("isolated route transaction prerequisites missing")
 	}
-	current, ok := s.nativeNode(node)
-	if !ok || current != installation {
-		return errors.New("route transaction installation is not paired")
+	allowlist := make(map[string]string, len(nodes))
+	for _, node := range nodes {
+		current, ok := s.nativeNode(node.NodeID)
+		if node.NodeID == s.meteredNode || !ok || current != node.InstallationID || allowlist[node.NodeID] != "" {
+			return errors.New("route transaction installation is not paired or scope is duplicated")
+		}
+		allowlist[node.NodeID] = node.InstallationID
 	}
-	if e := s.business.ClaimMeteredRouteChannel(context.Background(), node, installation, binarySHA); e != nil {
+	if e := s.business.ClaimMeteredRouteChannels(context.Background(), nodes); e != nil {
 		return e
 	}
-	s.meteredRouteNode = node
-	s.meteredRouteInstall = installation
+	s.meteredRouteNodes = allowlist
+	// Keep the former discovery fields for single-node clients.
+	s.meteredRouteNode = nodes[0].NodeID
+	s.meteredRouteInstall = nodes[0].InstallationID
 	return nil
 }
 func (s *Server) meteredRouteScope(node, installation string) bool {
 	current, ok := s.nativeNode(node)
-	return s.meteredRouteNode != "" && node == s.meteredRouteNode && installation == s.meteredRouteInstall && ok && current == installation
+	return installation != "" && s.meteredRouteNodes[node] == installation && ok && current == installation
 }
 func (s *Server) attachMeteredRouteTransactions(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/workspace/metered-route-transactions", func(w http.ResponseWriter, r *http.Request) {
@@ -37,12 +50,24 @@ func (s *Server) attachMeteredRouteTransactions(mux *http.ServeMux) {
 		}
 		// Discovery is read-only; it cannot claim a Node or enable an Agent.
 		out := map[string]any{"enabled": false, "scope": "metered_tcp_loopback_lab"}
-		if s.meteredRouteScope(s.meteredRouteNode, s.meteredRouteInstall) {
-			out["enabled"], out["node_id"], out["installation_id"] = true, s.meteredRouteNode, s.meteredRouteInstall
+		nodes := make([]map[string]string, 0, len(s.meteredRouteNodes))
+		ids := make([]string, 0, len(s.meteredRouteNodes))
+		for id := range s.meteredRouteNodes {
+			ids = append(ids, id)
+		}
+		sort.Strings(ids)
+		for _, id := range ids {
+			if s.meteredRouteScope(id, s.meteredRouteNodes[id]) {
+				nodes = append(nodes, map[string]string{"node_id": id, "installation_id": s.meteredRouteNodes[id]})
+			}
+		}
+		out["nodes"] = nodes
+		if len(nodes) > 0 {
+			out["enabled"], out["node_id"], out["installation_id"] = true, nodes[0]["node_id"], nodes[0]["installation_id"]
 		}
 		respond(w, http.StatusOK, out)
 	})
-	if s.meteredRouteNode == "" {
+	if len(s.meteredRouteNodes) == 0 {
 		return
 	}
 	base := "/api/v1/workspace/native-nodes/{node}/metered-route-transactions"
@@ -50,11 +75,12 @@ func (s *Server) attachMeteredRouteTransactions(mux *http.ServeMux) {
 		if _, ok := s.authorizeBrowser(w, r, false, true); !ok {
 			return
 		}
-		if !s.meteredRouteScope(r.PathValue("node"), s.meteredRouteInstall) {
+		node := r.PathValue("node")
+		if !s.meteredRouteScope(node, s.meteredRouteNodes[node]) {
 			businessError(w, business.ErrConflict)
 			return
 		}
-		state, e := s.business.MeteredRouteControlChannel(r.Context(), s.inboundKey, s.meteredRouteNode)
+		state, e := s.business.MeteredRouteControlChannel(r.Context(), s.inboundKey, node)
 		if e != nil {
 			businessError(w, e)
 			return
@@ -65,7 +91,8 @@ func (s *Server) attachMeteredRouteTransactions(mux *http.ServeMux) {
 		if _, ok := s.authorizeBrowser(w, r, true, true); !ok {
 			return
 		}
-		if !s.meteredRouteScope(r.PathValue("node"), s.meteredRouteInstall) {
+		node := r.PathValue("node")
+		if !s.meteredRouteScope(node, s.meteredRouteNodes[node]) {
 			businessError(w, business.ErrConflict)
 			return
 		}
@@ -74,7 +101,7 @@ func (s *Server) attachMeteredRouteTransactions(mux *http.ServeMux) {
 			businessError(w, business.ErrInvalid)
 			return
 		}
-		v, e := s.business.QueueMeteredRouteCommand(r.Context(), s.inboundKey, s.meteredRouteNode, in)
+		v, e := s.business.QueueMeteredRouteCommand(r.Context(), s.inboundKey, node, in)
 		if e != nil {
 			businessError(w, e)
 			return
@@ -85,7 +112,8 @@ func (s *Server) attachMeteredRouteTransactions(mux *http.ServeMux) {
 		if _, ok := s.authorizeBrowser(w, r, true, true); !ok {
 			return
 		}
-		if !s.meteredRouteScope(r.PathValue("node"), s.meteredRouteInstall) {
+		node := r.PathValue("node")
+		if !s.meteredRouteScope(node, s.meteredRouteNodes[node]) {
 			businessError(w, business.ErrConflict)
 			return
 		}
@@ -96,7 +124,7 @@ func (s *Server) attachMeteredRouteTransactions(mux *http.ServeMux) {
 			businessError(w, business.ErrInvalid)
 			return
 		}
-		if e := s.business.AbandonMeteredRouteCommand(r.Context(), s.meteredRouteNode, r.PathValue("id")); e != nil {
+		if e := s.business.AbandonMeteredRouteCommand(r.Context(), node, r.PathValue("id")); e != nil {
 			businessError(w, e)
 			return
 		}
@@ -106,7 +134,7 @@ func (s *Server) attachMeteredRouteTransactions(mux *http.ServeMux) {
 
 // Called exclusively from the dedicated TLS 1.3 Agent allowlist.
 func (s *Server) handleMeteredRouteTransactionAgent(w http.ResponseWriter, r *http.Request) {
-	if s.meteredRouteNode == "" {
+	if len(s.meteredRouteNodes) == 0 {
 		http.NotFound(w, r)
 		return
 	}

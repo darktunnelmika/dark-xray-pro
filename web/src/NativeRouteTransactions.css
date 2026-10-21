@@ -11,3 +11,5 @@
 .route-command-history details span{display:block}
 .route-transactions bdi{overflow-wrap:anywhere;white-space:normal}
 @media(max-width:360px){.route-transactions-heading button,.route-transactions .native-actions button{width:100%}}
+.metered-route-node-picker{display:grid;gap:8px;max-width:380px;color:var(--sub);font-size:12px}
+.metered-route-node-picker select{width:100%;min-width:0;padding:10px;border:1px solid var(--border);border-radius:10px;background:var(--surface-2);color:var(--text);font:inherit}

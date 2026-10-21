@@ -22,25 +22,26 @@ import (
 )
 
 type Server struct {
-	meteredRouteNode    string
-	meteredRouteInstall string
-	routeNode           string
-	routeInstall        string
-	fleet               *telemetry.Store
-	registry            *noderegistry.Registry
-	ownerKey            string
-	replacements        *replacement.Journal
+	meteredRouteNode     string
+	meteredRouteInstall  string
+	meteredRouteNodes    map[string]string // immutable after startup: node -> installation
+	routeNode            string
+	routeInstall         string
+	fleet                *telemetry.Store
+	registry             *noderegistry.Registry
+	ownerKey             string
+	replacements         *replacement.Journal
 	replacementLifecycle sync.Mutex // serializes cancel and dependent private-stage/LAB mutations
-	stages              *configstage.Store
-	labRevisions        *labrevision.Store
-	business            *business.Store
-	loginGate           *loginGate
-	inboundKey          []byte
-	nodeHistory         *nodehistory.Store
-	hubMonitor          *hubmonitor.Monitor
-	nodeBundle          *nodebootstrap.Bundle
-	nodeTransportScope  string
-	meteredNode         string // explicitly allowlisted NEW PRO Node; disabled by default
+	stages               *configstage.Store
+	labRevisions         *labrevision.Store
+	business             *business.Store
+	loginGate            *loginGate
+	inboundKey           []byte
+	nodeHistory          *nodehistory.Store
+	hubMonitor           *hubmonitor.Monitor
+	nodeBundle           *nodebootstrap.Bundle
+	nodeTransportScope   string
+	meteredNode          string // explicitly allowlisted NEW PRO Node; disabled by default
 }
 
 func NewServer(fleet *telemetry.Store, registry *noderegistry.Registry, ownerKey string) (*Server, error) {

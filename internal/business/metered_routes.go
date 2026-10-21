@@ -105,19 +105,47 @@ func (s *Store) MeteredRouteChannelOwned(ctx context.Context, node string) (bool
 // Metered ownership is independent and immutable. Only a never-delivered,
 // loopback installation with no ordinary/empty-route history may opt in.
 func (s *Store) ClaimMeteredRouteChannel(ctx context.Context, node, install, binary string) error {
+	return s.ClaimMeteredRouteChannels(ctx, []MeteredRouteNode{{NodeID: node, InstallationID: install, BinarySHA: binary}})
+}
+
+type MeteredRouteNode struct {
+	NodeID         string `json:"node_id"`
+	InstallationID string `json:"installation_id"`
+	BinarySHA      string `json:"binary_sha"`
+}
+
+// ClaimMeteredRouteChannels commits an operator's complete allowlist together.
+// A rejected member must not leave earlier Nodes claimed by a failed startup.
+func (s *Store) ClaimMeteredRouteChannels(ctx context.Context, nodes []MeteredRouteNode) error {
 	if s.usage == nil {
 		return ErrUnavailable
 	}
-	if !routeNodeID.MatchString(node) || !routeID.MatchString(install) || !routeSHA.MatchString(binary) {
+	if len(nodes) == 0 || len(nodes) > 64 {
 		return ErrInvalid
+	}
+	seen := map[string]bool{}
+	for _, node := range nodes {
+		if !routeNodeID.MatchString(node.NodeID) || !routeID.MatchString(node.InstallationID) || !routeSHA.MatchString(node.BinarySHA) || seen[node.NodeID] {
+			return ErrInvalid
+		}
+		seen[node.NodeID] = true
 	}
 	tx, e := s.db.BeginTx(ctx, nil)
 	if e != nil {
 		return e
 	}
 	defer tx.Rollback()
+	for _, node := range nodes {
+		if e := claimMeteredRouteChannel(ctx, tx, node.NodeID, node.InstallationID, node.BinarySHA); e != nil {
+			return e
+		}
+	}
+	return tx.Commit()
+}
+
+func claimMeteredRouteChannel(ctx context.Context, tx *sql.Tx, node, install, binary string) error {
 	var oldInstall, oldBinary string
-	e = tx.QueryRowContext(ctx, "SELECT installation_id,binary_sha FROM native_metered_route_channels WHERE node_id=?", node).Scan(&oldInstall, &oldBinary)
+	e := tx.QueryRowContext(ctx, "SELECT installation_id,binary_sha FROM native_metered_route_channels WHERE node_id=?", node).Scan(&oldInstall, &oldBinary)
 	if e == nil {
 		if oldInstall != install || oldBinary != binary {
 			return ErrConflict
@@ -141,7 +169,7 @@ func (s *Store) ClaimMeteredRouteChannel(ctx context.Context, node, install, bin
 	if n != 0 {
 		return ErrConflict
 	}
-	if s.usage != nil {
+	{
 		if e = tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM pro_usage_epochs WHERE node_id=?", node).Scan(&n); e != nil {
 			return e
 		}
@@ -156,7 +184,7 @@ func (s *Store) ClaimMeteredRouteChannel(ctx context.Context, node, install, bin
 	if e != nil {
 		return e
 	}
-	return tx.Commit()
+	return nil
 }
 func meteredRouteEmptyNode(ctx context.Context, tx *sql.Tx, node, install string) error {
 	var total, bad int

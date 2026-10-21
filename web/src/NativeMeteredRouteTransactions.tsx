@@ -6,7 +6,7 @@ import "./NativeRouteTransactions.css";
 
 const words = {
  en: {
-  title: "Metered TCP LAB transactions", boundary: "One separately approved loopback Node with disposable PRO identities. Replacement requires an exact prior usage seal and a new epoch. No migration, UDP, Dark Swap forwarding or subscription publication.",
+  title: "Metered TCP LAB transactions", boundary: "Separately approved loopback Nodes with disposable PRO identities. Each Node keeps its own commands and usage epochs. Replacement requires an exact prior usage seal and a new epoch. No migration, UDP, Dark Swap forwarding or subscription publication.",
   disabled: "Route transactions are disabled on this HUB.", loading: "Checking the approved LAB Node…", unavailable: "Transaction status could not be verified. Controls are blocked.", refresh: "Refresh transactions",
   current: "Latest Agent observation", running: "Process reported ready · lease current", stopped: "Agent reports process not ready", expired: "Lease expired · current process state unconfirmed", stale: "Observation stale · current process state unconfirmed", empty: "Agent reports all managed listeners disabled", waiting: "Waiting for a signed Agent observation",
   revision: "Runtime revision", remaining: "Lease remaining", seconds: "s", report: "Last Agent observation", node: "Approved Node", review: "Complete Node draft review", draft: "Draft revision", inbound: "Inbound revision", direct: "Direct", tunnel: "Tunnel", missing: "Save a valid Direct/Tunnel draft for every enabled Inbound before Stage.", noDrafts: "No enabled Inbounds to stage.",
@@ -55,6 +55,7 @@ export default function NativeMeteredRouteTransactions({ language }: { language:
  const t = words[language];
  const { session } = useSession();
  const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
+ const [nodes,setNodes]=useState<{node_id:string;installation_id:string}[]>([]),[selected,setSelected]=useState("");
  const [availability, setAvailability] = useState<"loading" | "enabled" | "disabled" | "error">("loading");
  const [refresh, setRefresh] = useState(0), [, setTick] = useState(0);
  const [busy, setBusy] = useState(false), [verifiedRead, setVerifiedRead] = useState(false);
@@ -84,7 +85,12 @@ export default function NativeMeteredRouteTransactions({ language }: { language:
     try { scope = readScope(await api<unknown>("/api/v1/workspace/metered-route-transactions", { signal: ctrl.signal })); }
     catch (e) { if (e instanceof ApiError && e.status === 404) scope = { enabled: false, scope: "metered_tcp_loopback_lab" }; else throw e; }
     if (ctrl.signal.aborted) return;
-    if (!scope.enabled) { setAvailability("disabled"); setSnapshot(null); setVerifiedRead(false); return; }
+    if (!scope.enabled) { setAvailability("disabled"); setSnapshot(null); setNodes([]); setVerifiedRead(false); return; }
+    const choices=scope.nodes??[{node_id:scope.node_id!,installation_id:scope.installation_id!}];
+    setNodes(choices);
+    const chosen=choices.find(node=>node.node_id===(selected||scope.node_id));
+    if(!chosen)throw Error("selected_node_no_longer_approved");
+    scope={...scope,...chosen};
     // Charge the entire request time against freshness and lease lifetimes.
     const mono = performance.now(), wall = Date.now();
     const view = readChannel(await api<unknown>(base(scope.node_id!), { signal: ctrl.signal }), scope);
@@ -106,7 +112,7 @@ export default function NativeMeteredRouteTransactions({ language }: { language:
   }
   void poll();
   return () => { ctrl.abort(); clearTimeout(timer); };
- }, [session, owner, refresh]);
+ }, [session, owner, refresh, selected]);
 
  async function send(a: Attempt, s: Snapshot) {
   const ctrl = lifetime.current;
@@ -172,6 +178,10 @@ export default function NativeMeteredRouteTransactions({ language }: { language:
  return <section className="native-card route-transactions" aria-label="Metered TCP LAB transactions">
   <div className="route-transactions-heading"><h3><Route size={19}/>{t.title}</h3><button type="button" disabled={busy} onClick={() => setRefresh(n => n + 1)}><RefreshCw size={15}/>{t.refresh}</button></div>
   <p>{t.boundary}</p>
+  {nodes.length>1&&<label className="metered-route-node-picker">{t.node}<select aria-label={t.node} disabled={busy} value={selected||s?.scope.node_id||nodes[0].node_id} onChange={event=>{
+   if(inFlight.current)return;
+   activeRead.current?.abort();setVerifiedRead(false);setSnapshot(null);retained.current=null;setAttempt(null);setNotice("");setAvailability("loading");setSelected(event.target.value);
+  }}>{nodes.map(node=><option key={node.node_id} value={node.node_id}>{node.node_id}</option>)}</select></label>}
   {availability === "loading" && <p>{t.loading}</p>}
   {availability === "disabled" && <p>{t.disabled}</p>}
   {availability === "error" && <p className="native-warning" role="alert">{t.unavailable}</p>}
