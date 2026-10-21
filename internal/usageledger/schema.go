@@ -28,7 +28,8 @@ type Ledger struct {
 	checkpoint func(string) error
 }
 
-// This opt-in subschema is independently versioned against reviewed business v7.
+// This opt-in subschema supports reviewed business v7 and v8. V8 adds the
+// handover reservation journal without changing accounting tables.
 func Open(ctx context.Context, db *sql.DB) (*Ledger, error) {
 	if db == nil {
 		return nil, ErrSchema
@@ -39,7 +40,7 @@ func Open(ctx context.Context, db *sql.DB) (*Ledger, error) {
 		if e := c.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); e != nil {
 			return e
 		}
-		if version != 7 {
+		if version != 7 && version != 8 {
 			return ErrSchema
 		}
 		for _, q := range []string{"SELECT id,uuid,representative_id,plan_kind,volume_bytes,archived,expires_unix,deployment_state FROM clients LIMIT 0", "SELECT id,enabled,volume_credit_bytes,unlimited_credit_units FROM representatives LIMIT 0", "SELECT value FROM native_config_generation WHERE id=1"} {

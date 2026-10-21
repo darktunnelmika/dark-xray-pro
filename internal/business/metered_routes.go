@@ -51,6 +51,7 @@ type MeteredRouteChannelView struct {
 	Commands         []MeteredRouteCommandView `json:"commands"`
 }
 type meteredRoutePayload struct {
+	HandoverID      string                     `json:"handover_id,omitempty"`
 	DependencyNodes []string                   `json:"dependency_nodes,omitempty"`
 	Request         MeteredRouteCommandRequest `json:"request"`
 	DraftState      string                     `json:"draft_state"`
@@ -383,6 +384,9 @@ func meteredRouteCandidate(ctx context.Context, tx *sql.Tx, key []byte, node, in
 	return c, nil
 }
 func meteredRouteStillCurrent(ctx context.Context, tx *sql.Tx, key []byte, row meteredRouteRow) error {
+	if err := meteredHandoverCommandAllowed(ctx, tx, key, row); err != nil {
+		return err
+	}
 	if row.view.Action == "drain" {
 		c := row.payload.Command
 		channel, _, err := meteredRouteObservation(ctx, tx, row.view.NodeID)
@@ -422,22 +426,32 @@ func meteredRouteStillCurrent(ctx context.Context, tx *sql.Tx, key []byte, row m
 }
 
 func (s *Store) QueueMeteredRouteCommand(ctx context.Context, key []byte, node string, in MeteredRouteCommandRequest) (MeteredRouteCommandView, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return MeteredRouteCommandView{}, err
+	}
+	defer tx.Rollback()
+	view, err := queueMeteredRouteCommand(ctx, tx, key, node, in, "")
+	if err != nil {
+		return MeteredRouteCommandView{}, err
+	}
+	return view, tx.Commit()
+}
+
+// Shared with the handover journal: reserving a step and queuing its exact
+// command must commit together, including serial allocation and ciphertext.
+func queueMeteredRouteCommand(ctx context.Context, tx *sql.Tx, key []byte, node string, in MeteredRouteCommandRequest, handover string) (MeteredRouteCommandView, error) {
 	empty := MeteredRouteCommandView{}
 	if !routeID.MatchString(in.ID) || !routeID.MatchString(in.RuntimeInstance) || in.Usage == nil || len(in.Drafts) > 256 {
 		return empty, ErrInvalid
 	}
-	tx, e := s.db.BeginTx(ctx, nil)
-	if e != nil {
-		return empty, e
-	}
-	defer tx.Rollback()
 	prior, e := readMeteredRouteCommand(ctx, tx, key, in.ID)
 	fp := fingerprint("metered-route-command-request-v2", struct {
 		Node    string
 		Request MeteredRouteCommandRequest
 	}{node, in})
 	if e == nil {
-		if prior.fingerprint != fp {
+		if prior.fingerprint != fp || prior.payload.HandoverID != handover {
 			return empty, ErrConflict
 		}
 		return prior.view, nil
@@ -484,7 +498,7 @@ func (s *Store) QueueMeteredRouteCommand(ctx context.Context, key []byte, node s
 	if e != nil {
 		return empty, e
 	}
-	payload := meteredRoutePayload{DraftState: draftState, Request: in, Generation: generation, Command: cmd}
+	payload := meteredRoutePayload{HandoverID: handover, DraftState: draftState, Request: in, Generation: generation, Command: cmd}
 	var candidate xrayconfig.Candidate
 	switch in.Action {
 	case "stage":
@@ -585,9 +599,6 @@ func (s *Store) QueueMeteredRouteCommand(ctx context.Context, key []byte, node s
 	if _, e = tx.ExecContext(ctx, "UPDATE native_metered_route_channels SET serial=? WHERE node_id=?", cmd.Serial, node); e != nil {
 		return empty, e
 	}
-	if e = tx.Commit(); e != nil {
-		return empty, e
-	}
 	return view, nil
 }
 
@@ -632,6 +643,9 @@ func (s *Store) PollMeteredRouteCommand(ctx context.Context, key, token []byte, 
 			return none, false, e
 		}
 		return none, false, ErrConflict
+	}
+	if e = meteredHandoverCommandAllowed(ctx, tx, key, row); e != nil {
+		return refuse()
 	}
 	if row.view.State == "queued" {
 		if e = meteredRouteStillCurrent(ctx, tx, key, row); e != nil {
