@@ -180,6 +180,9 @@ func testMeteredHandoverTraffic(t *testing.T, binary, pin, mode string, afterApp
 		if err := s.business.EnableSystemProbeAccounting(ctx); err != nil {
 			t.Fatal(err)
 		}
+		if err := s.business.EnableMeteredHealthChallenges(ctx); err != nil {
+			t.Fatal(err)
+		}
 		for i, node := range nodes {
 			probe, err := s.business.ProvisionMeteredProbe(ctx, key, node, installs[i], 7612)
 			if err != nil {
@@ -423,7 +426,7 @@ func testMeteredHandoverTraffic(t *testing.T, binary, pin, mode string, afterApp
 		probeID = probes[1].ID
 	}
 	for _, check := range afterApply {
-		check(handoverHealthFixture{Runtime: runtimes[1], Token: tokens[1], Plan: plan, Origin: origin, Port: portB, Credential: probeCredential, SystemProbeID: probeID, CustomerCredential: customers[0].UUID, CustomerID: customers[0].ID, Behavior: &healthBehavior, Requests: &healthRequests, Started: healthStarted, Release: healthRelease, Drain: func() { queue(1, 23, "drain", plan.TargetStageID, 0); drained = true }})
+		check(handoverHealthFixture{Store: s.business, Key: key, Runtime: runtimes[1], Token: tokens[1], Plan: plan, Origin: origin, Port: portB, Credential: probeCredential, SystemProbeID: probeID, CustomerCredential: customers[0].UUID, CustomerID: customers[0].ID, Behavior: &healthBehavior, Requests: &healthRequests, Started: healthStarted, Release: healthRelease, Drain: func() { queue(1, 23, "drain", plan.TargetStageID, 0); drained = true }})
 	}
 	if !drained {
 		queue(1, 23, "drain", plan.TargetStageID, 0)

@@ -17,10 +17,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/darktunnelmika/dark-xray-pro/internal/business"
 	mx "github.com/darktunnelmika/dark-xray-pro/internal/managedxray"
 )
 
 type handoverHealthFixture struct {
+	Store              *business.Store
+	Key                []byte
 	Runtime            *mx.TransactionRuntime
 	Token              string
 	Plan               meteredHandoverInput
@@ -73,13 +76,34 @@ func TestRealPinnedMeteredHandoverProtocolHealth(t *testing.T) {
 				}
 				switch mode {
 				case "verified-and-bound":
-					q := request(1, endpoint)
+					q, err := f.Store.IssueMeteredHealthChallenge(ctx, f.Key, []byte(f.Token), handoverTestID(101), f.Plan.ID, 7612, endpoint)
+					if err != nil {
+						t.Fatal("HUB-issued challenge", err)
+					}
 					p, err := f.Runtime.ProbeMeteredProtocol(ctx, q, endpoint)
 					if err != nil || !mx.VerifyProtocolHealthReceipt([]byte(f.Token), q, p, time.Now()) || f.Requests.Load() != 1 {
 						t.Fatal("real protocol proof", err)
 					}
 					bad := p
 					bad.ResponseSHA = strings.Repeat("a", 64)
+					if _, err := f.Store.ConsumeMeteredHealthProof(ctx, f.Key, []byte(f.Token), q.ID, endpoint, bad); err == nil {
+						t.Fatal("HUB accepted tampered receipt")
+					}
+					evidence, err := f.Store.ConsumeMeteredHealthProof(ctx, f.Key, []byte(f.Token), q.ID, endpoint, p)
+					if err != nil || evidence.Replayed || evidence.RequestSHA != p.RequestSHA {
+						t.Fatal("HUB proof consumption", err)
+					}
+					again, err := f.Store.ConsumeMeteredHealthProof(ctx, f.Key, []byte(f.Token), q.ID, endpoint, p)
+					if err != nil || !again.Replayed || again.Accepted != evidence.Accepted {
+						t.Fatal("HUB lost-reply retry", err)
+					}
+					if _, err := f.Store.IssueMeteredHealthChallenge(ctx, f.Key, []byte(f.Token), handoverTestID(102), f.Plan.ID, 7612, endpoint); err == nil {
+						t.Fatal("consumed operation reissued challenge")
+					}
+					view, err := f.Store.MeteredHandover(ctx, f.Plan.ID)
+					if err != nil || view.CanPublish || view.Phase != "target_applied_health_required" {
+						t.Fatal("HUB proof published subscription", err)
+					}
 					if mx.VerifyProtocolHealthReceipt([]byte(f.Token), q, bad, time.Now()) {
 						t.Fatal("tampered proof accepted")
 					}

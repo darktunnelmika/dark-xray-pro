@@ -41,6 +41,9 @@ type ProtocolHealthEndpoint struct {
 
 func (e ProtocolHealthEndpoint) SHA() string { return hashJSON(e) }
 
+// Valid validates pinned verifier configuration without network I/O.
+func (e ProtocolHealthEndpoint) Valid() bool { _, err := e.tlsConfig(); return err == nil }
+
 func (e ProtocolHealthEndpoint) tlsConfig() (*tls.Config, error) {
 	host, port, err := net.SplitHostPort(e.Address)
 	ip := net.ParseIP(host)
@@ -68,8 +71,8 @@ func (e ProtocolHealthEndpoint) tlsConfig() (*tls.Config, error) {
 }
 
 // The credential is identified by a one-way hash, never included in a receipt.
-// This is not publication authority: a future HUB consumer must issue and
-// consume a unique challenge and recheck current observations transactionally.
+// This is not publication authority: the HUB must issue and consume a unique
+// persisted challenge and recheck current observations transactionally.
 type ProtocolHealthRequest struct {
 	Version         int              `json:"version"`
 	ID              string           `json:"id"`
