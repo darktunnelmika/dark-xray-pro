@@ -77,7 +77,17 @@ func TestRealPinnedMeteredHandoverProtocolHealth(t *testing.T) {
 					}
 					bad := p
 					bad.ResponseSHA = strings.Repeat("a", 64)
-					if mx.VerifyProtocolHealthReceipt([]byte(f.Token), q, bad, time.Now()) || mx.VerifyProtocolHealthReceipt([]byte(newToken), q, p, time.Now()) || mx.VerifyProtocolHealthReceipt([]byte(f.Token), q, p, time.Unix(0, q.Expires)) {
+					if mx.VerifyProtocolHealthReceipt([]byte(f.Token), q, bad, time.Now()) {
+						t.Fatal("tampered proof accepted")
+					}
+					wrongKey := sha256.Sum256([]byte("independent protocol health verifier test key"))
+					if string(wrongKey[:]) == f.Token {
+						t.Fatal("wrong-key fixture reused the target key")
+					}
+					if mx.VerifyProtocolHealthReceipt(wrongKey[:], q, p, time.Now()) {
+						t.Fatal("proof accepted under an independent key")
+					}
+					if mx.VerifyProtocolHealthReceipt([]byte(f.Token), q, p, time.Unix(0, q.Expires)) {
 						t.Fatal("forged/expired proof accepted")
 					}
 					changed := q
