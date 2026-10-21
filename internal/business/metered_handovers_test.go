@@ -21,7 +21,7 @@ type handoverFixture struct {
 	in             MeteredHandoverRequest
 }
 
-func newHandoverFixture(t *testing.T) *handoverFixture {
+func newHandoverFixture(t *testing.T, prepare ...func(*Store, []byte, mx.TransactionPoll, mx.TransactionPoll)) *handoverFixture {
 	t.Helper()
 	ctx := context.Background()
 	s, path, key, client, source := meteredQueueFixture(t)
@@ -37,6 +37,9 @@ func newHandoverFixture(t *testing.T) *handoverFixture {
 		t.Fatal(err)
 	}
 	meteredQueuePoll(t, s, key, &target, false)
+	for _, fn := range prepare {
+		fn(s, key, source, target)
+	}
 	d := meteredQueuedApply(t, s, key, &source)
 	c := d.Command
 	b, err := mx.SignBirthReport(string(routeTestToken), c.Lease, uc.ProcessToken{BootID: "11111111-1111-4111-8111-111111111111", PID: 12345, StartTicks: 77})
@@ -48,7 +51,10 @@ func newHandoverFixture(t *testing.T) *handoverFixture {
 		t.Fatal(err)
 	}
 	_, binding, _ := uc.CanonicalEpoch(epoch)
-	zero := uc.Report{Version: 1, EpochID: epoch.ID, BindingSHA: binding, Sequence: 1, Users: []uc.Usage{{ClientID: client.ID}}}
+	zero := uc.Report{Version: 1, EpochID: epoch.ID, BindingSHA: binding, Sequence: 1}
+	for _, b := range epoch.Bindings {
+		zero.Users = append(zero.Users, uc.Usage{ClientID: b.ClientID})
+	}
 	zero.SHA = meteredHash(zero)
 	if _, err = s.usage.Accept(ctx, usageledger.Principal{NodeID: source.NodeID, InstallationID: source.InstallationID}, zero); err != nil {
 		t.Fatal(err)
@@ -95,7 +101,14 @@ func (f *handoverFixture) drain(t *testing.T) mx.TransactionDelivery {
 func (f *handoverFixture) seal(t *testing.T, d mx.TransactionDelivery) mx.TransactionReceipt {
 	t.Helper()
 	_, binding, _ := uc.CanonicalEpoch(f.epoch)
-	final := uc.Report{Version: 1, EpochID: f.epoch.ID, BindingSHA: binding, Sequence: 2, Quiesced: true, Users: []uc.Usage{{ClientID: f.client.ID, Uplink: 111, Downlink: 222}}}
+	final := uc.Report{Version: 1, EpochID: f.epoch.ID, BindingSHA: binding, Sequence: 2, Quiesced: true}
+	for _, b := range f.epoch.Bindings {
+		u := uc.Usage{ClientID: b.ClientID}
+		if b.ClientID == f.client.ID {
+			u.Uplink, u.Downlink = 111, 222
+		}
+		final.Users = append(final.Users, u)
+	}
 	final.SHA = meteredHash(final)
 	receipt, err := f.s.usage.Accept(context.Background(), usageledger.Principal{NodeID: f.source.NodeID, InstallationID: f.source.InstallationID}, final)
 	if err != nil {

@@ -28,8 +28,8 @@ type Ledger struct {
 	checkpoint func(string) error
 }
 
-// V7/v8 use ordinary accounting. Explicit v9 opt-in additionally requires the
-// complete reviewed system-probe schema; missing or altered policy is refused.
+// V7/v8 use ordinary accounting. Explicit v9/v10 opt-ins require the complete
+// system-probe and, in v10, health schemas; altered policy is refused.
 func Open(ctx context.Context, db *sql.DB) (*Ledger, error) {
 	if db == nil {
 		return nil, ErrSchema
@@ -40,8 +40,11 @@ func Open(ctx context.Context, db *sql.DB) (*Ledger, error) {
 		if e := c.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); e != nil {
 			return e
 		}
-		if version != 7 && version != 8 && version != ProbeBusinessSchemaVersion {
+		if version != 7 && version != 8 && version != ProbeBusinessSchemaVersion && version != HealthBusinessSchemaVersion {
 			return ErrSchema
+		}
+		if e := verifyHealthSchema(ctx, c, version); e != nil {
+			return e
 		}
 		if e := verifyProbeSchema(ctx, c, version); e != nil {
 			return e
@@ -63,7 +66,7 @@ func Open(ctx context.Context, db *sql.DB) (*Ledger, error) {
 		if e := c.QueryRowContext(ctx, "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='pro_usage_meta'").Scan(&count); e != nil {
 			return e
 		}
-		if version == ProbeBusinessSchemaVersion && count != 1 {
+		if (version == ProbeBusinessSchemaVersion || version == HealthBusinessSchemaVersion) && count != 1 {
 			return ErrSchema
 		}
 		if count == 1 {
