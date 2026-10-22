@@ -7,6 +7,7 @@ import (
 	"errors"
 	mx "github.com/darktunnelmika/dark-xray-pro/internal/managedxray"
 	"github.com/darktunnelmika/dark-xray-pro/internal/usageledger"
+	"time"
 )
 
 // Public audit metadata only. Private candidate bytes remain in the encrypted queue.
@@ -16,6 +17,7 @@ type MeteredHandoverAudit struct {
 	ApplyCommand             *MeteredRouteCommandView `json:"apply_command,omitempty"`
 	HistoricalHealthEvidence *MeteredHealthEvidence   `json:"historical_health_evidence,omitempty"`
 	HealthIntents            []MeteredHealthIntent    `json:"health_intents,omitempty"`
+	HealthRounds             []MeteredHealthRound     `json:"health_rounds"`
 }
 type MeteredHandoverPage struct {
 	Operations []MeteredHandoverView `json:"operations"`
@@ -23,7 +25,7 @@ type MeteredHandoverPage struct {
 }
 
 func (s *Store) MeteredHandoverAudit(ctx context.Context, key []byte, id string) (MeteredHandoverAudit, error) {
-	var out MeteredHandoverAudit
+	out := MeteredHandoverAudit{HealthRounds: []MeteredHealthRound{}}
 	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
 		return out, err
@@ -65,7 +67,7 @@ func (s *Store) MeteredHandoverAudit(ctx context.Context, key []byte, id string)
 			return out, err
 		}
 	}
-	if version == usageledger.HealthQueueBusinessSchemaVersion {
+	if usageledger.HasHealthQueueSchema(version) {
 		rows, e := tx.QueryContext(ctx, `SELECT id,handover_id,node_id,installation_id,inbound_id,endpoint_sha,expires FROM pro_health_intents WHERE handover_id=? ORDER BY created DESC LIMIT 50`, id)
 		if e != nil {
 			return out, e
@@ -82,6 +84,33 @@ func (s *Store) MeteredHandoverAudit(ctx context.Context, key []byte, id string)
 		rows.Close()
 		if e != nil {
 			return out, e
+		}
+	}
+	if usageledger.HasHealthRoundsSchema(version) {
+		rows, e := tx.QueryContext(ctx, `SELECT id FROM pro_health_rounds WHERE handover_id=? ORDER BY created DESC,id DESC LIMIT 50`, id)
+		if e != nil {
+			return out, e
+		}
+		ids := []string{}
+		for rows.Next() {
+			var round string
+			if e = rows.Scan(&round); e != nil {
+				rows.Close()
+				return out, e
+			}
+			ids = append(ids, round)
+		}
+		e = rows.Err()
+		rows.Close()
+		if e != nil {
+			return out, e
+		}
+		for _, round := range ids {
+			r, e := readHealthRound(ctx, tx, round)
+			if e != nil {
+				return out, e
+			}
+			out.HealthRounds = append(out.HealthRounds, assessHealthRound(ctx, tx, key, r, time.Now().UnixNano()))
 		}
 	}
 	return out, tx.Commit()

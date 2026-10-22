@@ -61,6 +61,7 @@ func (s *Server) attachMeteredRouteTransactions(mux *http.ServeMux) {
 		// Discovery is read-only; it cannot claim a Node or enable an Agent.
 		out := map[string]any{"enabled": false, "scope": "metered_tcp_loopback_lab"}
 		out["health_enabled"] = s.healthEndpoint != nil
+		out["health_rounds_enabled"] = s.healthRoundsEnabled
 		nodes := make([]map[string]string, 0, len(s.meteredRouteNodes))
 		ids := make([]string, 0, len(s.meteredRouteNodes))
 		for id := range s.meteredRouteNodes {

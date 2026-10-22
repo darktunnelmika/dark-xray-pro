@@ -356,6 +356,8 @@ func main() {
 					return
 				}
 				attempt, cancel := context.WithTimeout(ctx, 12*time.Second)
+				// Sync drains successive health challenges immediately with its
+				// own work bound; the ticker is only an idle/error retry delay.
 				err := transactionRuntime.SyncMeteredHealth(attempt, client, endpoint)
 				cancel()
 				if err != nil && ctx.Err() == nil {

@@ -261,6 +261,22 @@ func (t *TransactionRuntime) ProbeMeteredProtocol(ctx context.Context, q Protoco
 	return proof, nil
 }
 
+// ValidateProtocolHealthSupport performs the same pure configuration checks as
+// the real probe. It opens no sockets and grants no runtime authority. The HUB
+// uses it to reject a whole round if even one required inbound is unsupported.
+func ValidateProtocolHealthSupport(c xrayconfig.Candidate, q ProtocolHealthRequest, endpoint ProtocolHealthEndpoint) error {
+	if !endpoint.Valid() {
+		return ErrProtocolHealth
+	}
+	port := uint16(65535)
+	if q.Port == port {
+		port--
+	}
+	q.EndpointSHA = endpoint.SHA()
+	_, err := protocolHealthClient(c, q, port, endpoint)
+	return err
+}
+
 func protocolHealthClient(c xrayconfig.Candidate, q ProtocolHealthRequest, socksPort uint16, endpoint ProtocolHealthEndpoint) (xrayconfig.Candidate, error) {
 	var doc struct {
 		Inbounds []struct {

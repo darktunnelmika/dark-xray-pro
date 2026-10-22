@@ -95,6 +95,8 @@ location / {{ return 403; }}
                                       (handovers + "/" + "a" * 32, {"GET"}),
                                       (handovers + "/" + "a" * 32 + "/commands", {"POST"}),
                                       (handovers + "/" + "a" * 32 + "/cancel", {"POST"}),
+                                      (handovers + "/" + "a" * 32 + "/health", {"POST"}),
+                                      (handovers + "/" + "a" * 32 + "/health-rounds", {"POST"}),
                                       (metered + "/" + "a" * 32 + "/abandon", {"POST"})):
                     for method in ("GET", "POST", "PUT", "DELETE", "PATCH"):
                         before = len(Backend.seen)
@@ -112,10 +114,16 @@ location / {{ return 403; }}
                              handovers + "/enable", handovers + "/abc/commands",
                              handovers + "/" + "a" * 32 + "/apply",
                              handovers + "/" + "a" * 32 + "/cancel/extra",
+                             handovers + "/" + "a" * 32 + "/health/extra",
+                             handovers + "/" + "a" * 32 + "/health-rounds/extra",
+                             handovers + "/" + "A" * 32 + "/health-rounds",
+                             handovers + "/" + "a" * 32 + "/health-round",
+                             handovers + "/abc/health-rounds",
                              metered + "/" + "a" * 32 + "/abandon/extra"):
-                    before = len(Backend.seen)
-                    assert request(port, path, "GET") == 403, path
-                    assert len(Backend.seen) == before, path
+                    for method in ("GET", "POST"):
+                        before = len(Backend.seen)
+                        assert request(port, path, method) == 403, (path, method)
+                        assert len(Backend.seen) == before, (path, method)
                 print("NODE_MANAGER_PROXY_PASS: exact paths/methods, auth forwarding, private routes denied")
             finally:
                 process.terminate()

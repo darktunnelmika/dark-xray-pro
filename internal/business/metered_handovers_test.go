@@ -40,7 +40,19 @@ func newHandoverFixture(t *testing.T, prepare ...func(*Store, []byte, mx.Transac
 	for _, fn := range prepare {
 		fn(s, key, source, target)
 	}
-	d := meteredQueuedApply(t, s, key, &source)
+	review := func(p mx.TransactionPoll) []RouteDraftRef {
+		tx, err := s.db.BeginTx(ctx, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		refs, err := meteredRouteRefs(ctx, tx, p.NodeID, p.InstallationID)
+		tx.Rollback()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return refs
+	}
+	d := meteredQueuedApply(t, s, key, &source, review(source))
 	c := d.Command
 	b, err := mx.SignBirthReport(string(routeTestToken), c.Lease, uc.ProcessToken{BootID: "11111111-1111-4111-8111-111111111111", PID: 12345, StartTicks: 77})
 	if err != nil {
@@ -68,6 +80,7 @@ func newHandoverFixture(t *testing.T, prepare ...func(*Store, []byte, mx.Transac
 	source.Status.Usage, source.Status.Observed = &u, o
 	meteredQueuePoll(t, s, key, &source, false)
 	stage := meteredQueueRequest(target, 31, "stage", "")
+	stage.Drafts = review(target)
 	if _, err = s.QueueMeteredRouteCommand(ctx, key, target.NodeID, stage); err != nil {
 		t.Fatal(err)
 	}

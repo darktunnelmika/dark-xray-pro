@@ -24,6 +24,7 @@ import (
 
 type Server struct {
 	healthEndpoint       *managedxray.ProtocolHealthEndpoint
+	healthRoundsEnabled  bool // startup-only; requires the pinned health transport
 	meteredRouteNode     string
 	meteredRouteInstall  string
 	meteredRouteNodes    map[string]string // immutable after startup: node -> installation
