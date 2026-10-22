@@ -69,7 +69,7 @@ async function healthFixture(page:BrowserPage){
  const src=f.state.source,dst=f.state.target,usage=structuredClone(src.status.usage!);
  src.status.observed={...src.status.observed,process_ready:false,active_sequence:0,active_sha:"",lease_expires_unix_nano:0};
  src.status.usage={...usage,settlement:{epoch_id:usage.epoch_id!,sequence:"2",sha256:sha}};
- dst.status.current_stage_id=id(21);dst.status.staged_id="";dst.status.serial=32;dst.status.usage={epoch_id:id(42),epoch_sha:sha,admission_sha:sha,settlement:zero()};
+ dst.status.current_stage_id=id(21);delete dst.status.staged_id;dst.status.serial=32;dst.status.usage={epoch_id:id(42),epoch_sha:sha,admission_sha:sha,settlement:zero()};
  dst.status.observed={...src.status.observed,highwater:1,saved_sequence:1,saved_sha:sha,active_sequence:1,active_sha:sha,process_ready:true,lease_expires_unix_nano:(Date.now()+60000)*1e6};
  const c=receipt(row(dst.node_id,dst.installation_id,32,"apply",id(21)),"applied",dst.status.observed,dst.status.usage);
  dst.commands=[c];dst.controls={stage:false};
