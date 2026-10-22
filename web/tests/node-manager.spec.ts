@@ -213,10 +213,10 @@ test("owner creates and revokes a one-use pairing ticket without storing it in b
 });
 
 test("expired pairing secret is removed from the active enrollment view", async ({ page }) => {
-  await page.clock.install({ time: new Date("2026-10-22T12:00:00Z") });
   const probe = await setup(page);
   await page.goto("/nodes");
   await login(page);
+  await page.clock.install({ time: new Date() });
   await page.getByLabel("New Node ID").fill("qa-new-node");
   await page.getByLabel("Display name").fill("QA node");
   await page.getByRole("button", { name: "Generate one-time Pair Code" }).click();
