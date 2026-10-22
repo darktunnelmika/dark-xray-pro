@@ -2,6 +2,13 @@
 
 Status: **isolated laboratory prototype**. Source and tests may be public; production customer secrets must not be committed. The existing DARK XRAY HUB remains untouched.
 
+**Historical foundation contract:** implementation statements below describe the
+foundation and its early phases. Later modules supersede several "future" and
+"not implemented" statements. The acceptance goals remain requirements; use the
+[22 October 2026 source audit](release/feature-scope-and-status.fa.md) for current
+feature status. WARP and ad blocking are entirely excluded from PRO. Existing
+Telegram parity and the recorded representative-bot upgrades remain in scope.
+
 ## Technology
 
 Go standard-library HUB and Node Agent, React + TypeScript + Vite UI, Linux telemetry. A future durable storage implementation will isolate current customer records, immutable billing ledgers and compact operational read models. This foundation deliberately introduces *no* live Xray/Node control actions and *no* user database.
@@ -38,7 +45,7 @@ Current foundation routes: Overview (live aggregate), Nodes (line monitor CPU/co
 5. Subscription updates with persistent token/URL, new route publication only after healthy new deployments. Preserve Restore and representative history, not legacy Node credentials.
 6. Streaming encrypted multi-GiB backup and selective migration; historical customer data preserved, old Nodes excluded. Support manual SSH transfer from a consistent snapshot if full archival migration is unsuitable.
 7. Browser and Go full-flow tests (replaced/offline Node, Direct/Tunnel billing and no-double-charge, authenticated representatives, mobile, slow API, backup corruption, rollback).
-8. Fresh installation and on-new-Nodes load soak, then explicit user-approved cutover. No bot upgrades until core migration.
+8. Fresh installation and on-new-Nodes load soak, then separately authorized cutover after full-product acceptance. Existing Telegram parity and the [recorded representative-bot upgrades](telegram-representative-upgrade.fa.md) are developed with test identities after the Node/Inbound gates; they are not deferred past final migration.
 
 ## Measurable acceptance goals (not current guarantees)
 
