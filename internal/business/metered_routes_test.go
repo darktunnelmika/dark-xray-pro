@@ -58,10 +58,13 @@ func meteredQueueAck(c mx.TransactionCommand, o mx.Snapshot, outcome string, u m
 	a.Signature = hex.EncodeToString(mac.Sum(nil))
 	return a
 }
-func meteredQueuedApply(t *testing.T, s *Store, key []byte, p *mx.TransactionPoll) mx.TransactionDelivery {
+func meteredQueuedApply(t *testing.T, s *Store, key []byte, p *mx.TransactionPoll, refs ...[]RouteDraftRef) mx.TransactionDelivery {
 	t.Helper()
 	ctx := context.Background()
 	in := meteredQueueRequest(*p, 1, "stage", "")
+	if len(refs) != 0 {
+		in.Drafts = refs[0]
+	}
 	if _, e := s.QueueMeteredRouteCommand(ctx, key, p.NodeID, in); e != nil {
 		t.Fatal(e)
 	}

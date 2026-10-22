@@ -52,6 +52,13 @@ func TestRealPinnedMeteredHandoverActiveTraffic(t *testing.T) {
 }
 
 func testMeteredHandoverTraffic(t *testing.T, binary, pin, mode string, afterApply ...func(handoverHealthFixture)) {
+	testMeteredHandoverTrafficInbounds(t, binary, pin, mode, 1, afterApply...)
+}
+
+func testMeteredHandoverTrafficInbounds(t *testing.T, binary, pin, mode string, inboundCount int, afterApply ...func(handoverHealthFixture)) {
+	if inboundCount != 1 && inboundCount != 2 {
+		t.Fatal("handover fixture requires one or two loopback inbounds")
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 55*time.Second)
 	defer cancel()
 	target := liveUsageRealityAt(t, net.JoinHostPort(meteredTrafficAddress, "0"))
@@ -115,6 +122,22 @@ func testMeteredHandoverTraffic(t *testing.T, binary, pin, mode string, afterApp
 	defer origin.Close()
 	portA, portB := meteredTrafficCustomerPorts(t)
 	ports := []uint16{portA, portB}
+	inboundPorts := [][]uint16{ports}
+	if inboundCount == 2 {
+		// Reserve the first pair while selecting another non-ephemeral pair.
+		// All temporary and final customer listeners remain on 127.0.0.1.
+		func() {
+			for _, port := range ports {
+				listener, err := net.Listen("tcp4", net.JoinHostPort("127.0.0.1", strconv.Itoa(int(port))))
+				if err != nil {
+					t.Fatal("reserve first inbound ports", err)
+				}
+				defer listener.Close()
+			}
+			a, b := meteredTrafficCustomerPorts(t)
+			inboundPorts = append(inboundPorts, []uint16{a, b})
+		}()
+	}
 	closed := func(port uint16) bool {
 		c, err := net.DialTimeout("tcp4", net.JoinHostPort("127.0.0.1", strconv.Itoa(int(port))), 100*time.Millisecond)
 		if err == nil {
@@ -122,9 +145,27 @@ func testMeteredHandoverTraffic(t *testing.T, binary, pin, mode string, afterApp
 		}
 		return err != nil
 	}
+	allClosed := func() bool {
+		for _, pair := range inboundPorts {
+			for _, port := range pair {
+				if !closed(port) {
+					return false
+				}
+			}
+		}
+		return true
+	}
+	sourceClosed := func() bool {
+		for _, pair := range inboundPorts {
+			if !closed(pair[0]) {
+				return false
+			}
+		}
+		return true
+	}
 	assertClosed := func() {
 		t.Helper()
-		if !closed(portA) || !closed(portB) {
+		if !allClosed() {
 			t.Fatal("customer listener crossed handover accounting fence")
 		}
 	}
@@ -140,6 +181,13 @@ func testMeteredHandoverTraffic(t *testing.T, binary, pin, mode string, afterApp
 	if err != nil {
 		t.Fatal(err)
 	}
+	inboundIDs := []uint64{7612}
+	if inboundCount == 2 {
+		if _, err := s.business.CreateInbound(ctx, key, business.InboundInput{ID: 7613, Name: "Disposable second two Node inbound", Transport: "tcp", RealityTarget: target.Listener.Addr().String(), ServerNames: []string{"one.example.org"}, ShortIDs: []string{"aa11"}}); err != nil {
+			t.Fatal(err)
+		}
+		inboundIDs = append(inboundIDs, 7613)
+	}
 	var customers []business.Client
 	for _, id := range []string{"handover-active", "handover-idle"} {
 		c, err := s.business.CreateClient(ctx, business.NewClient{ClientID: id, EventID: "handover-real-create-" + id, RepresentativeID: "owner", Name: id, DurationDays: 30, VolumeBytes: 128 << 20})
@@ -148,8 +196,10 @@ func testMeteredHandoverTraffic(t *testing.T, binary, pin, mode string, afterApp
 		}
 		customers = append(customers, c)
 	}
-	if err := s.business.BindInboundClients(ctx, 7612, []string{customers[0].ID, customers[1].ID}, true); err != nil {
-		t.Fatal(err)
+	for _, inbound := range inboundIDs {
+		if err := s.business.BindInboundClients(ctx, inbound, []string{customers[0].ID, customers[1].ID}, true); err != nil {
+			t.Fatal(err)
+		}
 	}
 	nodes := []string{"old-de", "new-de"}
 	installs := []string{installID, newInstallation}
@@ -163,11 +213,13 @@ func testMeteredHandoverTraffic(t *testing.T, binary, pin, mode string, afterApp
 		if _, err := s.registry.Claim(ticket.PairCode, id, installs[i], tokens[i]); err != nil {
 			t.Fatal(err)
 		}
-		if err := s.business.PutInboundTarget(ctx, business.InboundTarget{InboundID: 7612, NodeID: id, InstallationID: installs[i], ListenIP: "127.0.0.1", DirectPort: ports[i]}); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := s.business.SaveNativeRouteDraft(ctx, key, business.NativeRouteDraftInput{EventID: "handover-real-draft-" + id, InboundID: 7612, NodeID: id, InstallationID: installs[i], ExpectedInboundRevision: 1, DirectPort: ports[i], Reason: "Two disposable loopback Agents"}); err != nil {
-			t.Fatal(err)
+		for j, inbound := range inboundIDs {
+			if err := s.business.PutInboundTarget(ctx, business.InboundTarget{InboundID: inbound, NodeID: id, InstallationID: installs[i], ListenIP: "127.0.0.1", DirectPort: inboundPorts[j][i]}); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := s.business.SaveNativeRouteDraft(ctx, key, business.NativeRouteDraftInput{EventID: fmt.Sprintf("handover-real-draft-%s-%d", id, inbound), InboundID: inbound, NodeID: id, InstallationID: installs[i], ExpectedInboundRevision: 1, DirectPort: inboundPorts[j][i], Reason: "Two disposable loopback Agents"}); err != nil {
+				t.Fatal(err)
+			}
 		}
 		approved = append(approved, business.MeteredRouteNode{NodeID: id, InstallationID: installs[i], BinarySHA: pin})
 	}
@@ -188,14 +240,21 @@ func testMeteredHandoverTraffic(t *testing.T, binary, pin, mode string, afterApp
 		if err := s.EnableMeteredHealth(mx.ProtocolHealthEndpoint{Address: origin.Listener.Addr().String(), ServerName: "example.com", CertificateSHA: hex.EncodeToString(h[:]), CABundle: pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: cert.Raw})}); err != nil {
 			t.Fatal(err)
 		}
-		for i, node := range nodes {
-			probe, err := s.business.ProvisionMeteredProbe(ctx, key, node, installs[i], 7612)
-			if err != nil {
-				t.Fatal("dedicated system probe identity", err)
+		if inboundCount == 2 {
+			if err := s.EnableMeteredHealthRounds(); err != nil {
+				t.Fatal(err)
 			}
-			probes = append(probes, probe)
 		}
-		expectedUsers = 3
+		for i, node := range nodes {
+			for _, inbound := range inboundIDs {
+				probe, err := s.business.ProvisionMeteredProbe(ctx, key, node, installs[i], inbound)
+				if err != nil {
+					t.Fatal("dedicated system probe identity", err)
+				}
+				probes = append(probes, probe)
+			}
+		}
+		expectedUsers = 2 + inboundCount
 	}
 	var mu sync.Mutex
 	epochs := map[string]uc.Epoch{}
@@ -228,7 +287,7 @@ func testMeteredHandoverTraffic(t *testing.T, binary, pin, mode string, afterApp
 				t.Error(err)
 			}
 			if report.Sequence == 1 {
-				if !closed(portA) || !closed(portB) || report.Quiesced || len(report.Users) != expectedUsers {
+				if !allClosed() || report.Quiesced || len(report.Users) != expectedUsers {
 					t.Error("initial receipt crossed listener fence")
 				}
 				for _, u := range report.Users {
@@ -247,7 +306,7 @@ func testMeteredHandoverTraffic(t *testing.T, binary, pin, mode string, afterApp
 				if err := json.Unmarshal(rec.Body.Bytes(), &epoch); err != nil {
 					t.Error(err)
 				}
-				if !closed(portA) || !closed(portB) {
+				if !allClosed() {
 					t.Error("birth preceded stop of both listeners")
 				}
 				for id, old := range epochs {
@@ -334,7 +393,13 @@ func testMeteredHandoverTraffic(t *testing.T, binary, pin, mode string, afterApp
 	queue := func(i, n int, action, stage string, rev uint64) {
 		t.Helper()
 		syncNow(i)
-		post("/api/v1/workspace/native-nodes/"+nodes[i]+"/metered-route-transactions", meteredRouteOwnerRequest(runtimes[i].Status(), n, action, stage, rev), 202)
+		request := meteredRouteOwnerRequest(runtimes[i].Status(), n, action, stage, rev)
+		if action == "stage" {
+			for _, inbound := range inboundIDs[1:] {
+				request.Drafts = append(request.Drafts, business.RouteDraftRef{InboundID: inbound, InboundRevision: 1, DraftRevision: rev})
+			}
+		}
+		post("/api/v1/workspace/native-nodes/"+nodes[i]+"/metered-route-transactions", request, 202)
 		syncNow(i)
 	}
 	for i, n := range []int{11, 21} {
@@ -417,7 +482,7 @@ func testMeteredHandoverTraffic(t *testing.T, binary, pin, mode string, afterApp
 	post(commands, apply, 202)
 	post(commands, apply, 202)
 	syncNow(1)
-	if births.Load() != 2 || runtimes[1].Status().Usage.EpochID == sourceEpoch || !closed(portA) {
+	if births.Load() != 2 || runtimes[1].Status().Usage.EpochID == sourceEpoch || !sourceClosed() {
 		t.Fatal("target admission lost distinct epoch/source stop")
 	}
 	newStream := startStream(1)
@@ -431,12 +496,20 @@ func testMeteredHandoverTraffic(t *testing.T, binary, pin, mode string, afterApp
 	drained := false
 	probeCredential := customers[0].UUID
 	probeID := ""
-	if len(probes) > 0 {
-		probeCredential = probes[1].UUID
-		probeID = probes[1].ID
+	var healthInbounds []handoverHealthInbound
+	for j, inbound := range inboundIDs {
+		for _, p := range probes {
+			if p.NodeID == nodes[1] && p.InboundID == inbound {
+				healthInbounds = append(healthInbounds, handoverHealthInbound{ID: inbound, Port: inboundPorts[j][1], Credential: p.UUID, SystemProbeID: p.ID})
+			}
+		}
+	}
+	if len(healthInbounds) > 0 {
+		probeCredential = healthInbounds[0].Credential
+		probeID = healthInbounds[0].SystemProbeID
 	}
 	for _, check := range afterApply {
-		check(handoverHealthFixture{Server: s, Cookie: cookie, CSRF: csrf, Client: client, Endpoint: endpoint, DropBefore: &healthLoseBefore, DropAfter: &healthLoseAfter, Store: s.business, Key: key, Runtime: runtimes[1], Token: tokens[1], Plan: plan, Origin: origin, Port: portB, Credential: probeCredential, SystemProbeID: probeID, CustomerCredential: customers[0].UUID, CustomerID: customers[0].ID, Behavior: &healthBehavior, Requests: &healthRequests, Started: healthStarted, Release: healthRelease, Drain: func() { queue(1, 23, "drain", plan.TargetStageID, 0); drained = true }})
+		check(handoverHealthFixture{Server: s, Cookie: cookie, CSRF: csrf, Client: client, Endpoint: endpoint, DropBefore: &healthLoseBefore, DropAfter: &healthLoseAfter, Store: s.business, Key: key, Runtime: runtimes[1], Token: tokens[1], Plan: plan, Origin: origin, Port: portB, Credential: probeCredential, SystemProbeID: probeID, CustomerCredential: customers[0].UUID, CustomerID: customers[0].ID, Inbounds: healthInbounds, Customers: customers, Behavior: &healthBehavior, Requests: &healthRequests, Started: healthStarted, Release: healthRelease, Drain: func() { queue(1, 23, "drain", plan.TargetStageID, 0); drained = true }})
 	}
 	if !drained {
 		queue(1, 23, "drain", plan.TargetStageID, 0)
@@ -484,16 +557,16 @@ func testMeteredHandoverTraffic(t *testing.T, binary, pin, mode string, afterApp
 			t.Fatal(fmt.Sprintf("handover lost or double billed customer %s", c.ID), got, want, err)
 		}
 	}
-	for i, p := range probes {
+	for _, p := range probes {
 		got, err := s.business.UsageLedger().ProbeUsage(ctx, p.ID)
 		want := totals[p.ID]
 		if err != nil || got.Uplink != want.Uplink || got.Downlink != want.Downlink || got.Total != want.Uplink+want.Downlink || got.Holds != 0 {
 			t.Fatal("system probe bytes lost or charged outside its ledger", got, want, err)
 		}
-		if i == 1 && (got.Uplink == 0 || got.Downlink == 0) {
+		if p.NodeID == nodes[1] && (got.Uplink == 0 || got.Downlink == 0) {
 			t.Fatal("protocol check did not use the dedicated system credential")
 		}
-		if i == 0 && got.Total != 0 {
+		if p.NodeID == nodes[0] && got.Total != 0 {
 			t.Fatal("unused source system probe billed")
 		}
 		if _, err = s.business.Client(ctx, p.ID); err == nil {

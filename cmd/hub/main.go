@@ -264,6 +264,14 @@ func main() {
 	} else if os.Getenv("DARK_PRO_HEALTH_VERIFIER_JSON") != "" {
 		log.Fatal("health verifier supplied without explicit enable switch")
 	}
+	if os.Getenv("DARK_PRO_ENABLE_METERED_HEALTH_ROUNDS") == "1" {
+		if os.Getenv("DARK_PRO_ENABLE_METERED_HEALTH") != "1" {
+			log.Fatal("health rounds require the explicitly enabled pinned health transport")
+		}
+		if err := service.EnableMeteredHealthRounds(); err != nil {
+			log.Fatal("health rounds configuration refused: ", err)
+		}
+	}
 	if os.Getenv("DARK_PRO_ENABLE_CONFIG_STAGE") == "1" {
 		if *agentListen == "" || os.Getenv("DARK_PRO_ENABLE_REMOTE_AGENT") != "1" {
 			log.Fatal("encrypted config staging requires dedicated verified remote Agent TLS listener")

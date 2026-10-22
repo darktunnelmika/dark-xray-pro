@@ -75,7 +75,7 @@ func (f *handoverAPI) input(i, n int, action, stage string) business.MeteredRout
 	}
 	return in
 }
-func newHandoverAPI(t *testing.T) *handoverAPI {
+func newHandoverAPI(t *testing.T, beforeStage ...func(*handoverAPI)) *handoverAPI {
 	t.Helper()
 	ctx := context.Background()
 	s := enabledOwner(t)
@@ -126,6 +126,9 @@ func newHandoverAPI(t *testing.T) *handoverAPI {
 	for i := range f.p {
 		f.poll(t, i, false)
 	}
+	for _, setup := range beforeStage {
+		setup(f)
+	}
 	for i, n := range []int{11, 21} {
 		if _, err = s.business.QueueMeteredRouteCommand(ctx, key, f.p[i].NodeID, f.input(i, n, "stage", "")); err != nil {
 			t.Fatal(err)
@@ -152,7 +155,10 @@ func newHandoverAPI(t *testing.T) *handoverAPI {
 		t.Fatal(err)
 	}
 	_, binding, _ := uc.CanonicalEpoch(f.epoch)
-	zero := uc.Report{Version: 1, EpochID: f.epoch.ID, BindingSHA: binding, Sequence: 1, Users: []uc.Usage{{ClientID: c.ID}}}
+	zero := uc.Report{Version: 1, EpochID: f.epoch.ID, BindingSHA: binding, Sequence: 1}
+	for _, binding := range f.epoch.Bindings {
+		zero.Users = append(zero.Users, uc.Usage{ClientID: binding.ClientID})
+	}
 	zero.SHA = handoverHash(zero)
 	if _, err = s.business.UsageLedger().Accept(ctx, usageledger.Principal{NodeID: f.p[0].NodeID, InstallationID: f.p[0].InstallationID}, zero); err != nil {
 		t.Fatal(err)

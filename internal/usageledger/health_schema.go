@@ -8,10 +8,13 @@ const HealthBusinessSchemaVersion = 10
 const HealthQueueBusinessSchemaVersion = 11
 
 func HasProbeSchema(v int) bool {
-	return v == ProbeBusinessSchemaVersion || v == HealthBusinessSchemaVersion || v == HealthQueueBusinessSchemaVersion
+	return v == ProbeBusinessSchemaVersion || HasHealthSchema(v)
 }
 func HasHealthSchema(v int) bool {
-	return v == HealthBusinessSchemaVersion || v == HealthQueueBusinessSchemaVersion
+	return v == HealthBusinessSchemaVersion || HasHealthQueueSchema(v)
+}
+func HasHealthQueueSchema(v int) bool {
+	return v == HealthQueueBusinessSchemaVersion || HasHealthRoundsSchema(v)
 }
 
 var healthQueueSchema = []string{
@@ -46,8 +49,11 @@ func verifyHealthSchema(ctx context.Context, c *ledgerConn, version int) error {
 		return nil
 	}
 	statements := append([]string(nil), healthSchema...)
-	if version == HealthQueueBusinessSchemaVersion {
+	if HasHealthQueueSchema(version) {
 		statements = append(statements, healthQueueSchema...)
+	}
+	if HasHealthRoundsSchema(version) {
+		statements = append(statements, healthRoundsSchema...)
 	}
 	if err := verifySchemaObjects(ctx, c, statements, "pro_health_*"); err != nil {
 		return err
@@ -109,7 +115,7 @@ func (l *Ledger) EnableHealthQueue(ctx context.Context) error {
 		if err := verifyHealthSchema(ctx, c, v); err != nil {
 			return err
 		}
-		if v == HealthQueueBusinessSchemaVersion {
+		if HasHealthQueueSchema(v) {
 			return nil
 		}
 		for _, ddl := range healthQueueSchema {

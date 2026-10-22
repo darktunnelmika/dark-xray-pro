@@ -20,10 +20,10 @@ func healthEndpoint() mx.ProtocolHealthEndpoint {
 	return mx.ProtocolHealthEndpoint{Address: "11.0.0.1:443", ServerName: "verifier.example.com", CertificateSHA: strings.Repeat("a", 64)}
 }
 
-func healthApplied(t *testing.T) *handoverFixture {
+func healthApplied(t *testing.T, prepare ...func(*Store, []byte, mx.TransactionPoll, mx.TransactionPoll)) *handoverFixture {
 	t.Helper()
 	ctx := context.Background()
-	f := newHandoverFixture(t, func(s *Store, key []byte, source, target mx.TransactionPoll) {
+	setup := []func(*Store, []byte, mx.TransactionPoll, mx.TransactionPoll){func(s *Store, key []byte, source, target mx.TransactionPoll) {
 		if err := s.EnableSystemProbeAccounting(ctx); err != nil {
 			t.Fatal(err)
 		}
@@ -35,7 +35,8 @@ func healthApplied(t *testing.T) *handoverFixture {
 				t.Fatal(err)
 			}
 		}
-	})
+	}}
+	f := newHandoverFixture(t, append(setup, prepare...)...)
 	f.create(t)
 	d := f.drain(t)
 	if err := f.s.AcceptMeteredRouteReceipt(ctx, f.key, routeTestToken, f.seal(t, d)); err != nil {

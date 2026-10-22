@@ -1,6 +1,6 @@
 import { expect, test, type Page as BrowserPage } from "@playwright/test";
 import type { Channel, Command, CommandRequest, MeteredCondition, Observation, Scope } from "../src/meteredRouteTransactions";
-import type { Handover, Plan } from "../src/meteredHandovers";
+import type { Handover, HealthRound, Plan } from "../src/meteredHandovers";
 
 const base="/api/v1/workspace/metered-handovers",csrf="a".repeat(64),id=(n:number)=>n.toString(16).padStart(32,"0"),sha="d".repeat(64);
 const zero=()=>({epoch_id:"",sequence:"0",sha256:""});
@@ -43,6 +43,10 @@ async function fixture(page:BrowserPage,role="owner"){
    const op=state.ops.find(o=>o.id===path.split("/").at(-2))!;
    let v=op.health_intents?.find(i=>i.id===body.id);
    if(!v){v={id:body.id,handover_id:op.id,node_id:op.target_node,installation_id:op.target_installation,inbound_id:body.inbound_id,endpoint_sha:sha,expires_unix_nano:(Date.now()+8000)*1e6};op.health_intents=[v,...(op.health_intents??[])];}reply=v;
+  }else if(path.endsWith("/health-rounds")){
+   const op=state.ops.find(o=>o.id===path.split("/").at(-2))!;
+   let v=op.health_rounds?.find(r=>r.id===body.id);
+   if(!v){v={id:body.id,handover_id:op.id,node_id:op.target_node,installation_id:op.target_installation,endpoint_sha:sha,manifest_sha:sha,created_unix_nano:Date.now()*1e6,expires_unix_nano:(Date.now()+8000)*1e6,members:target.review.map((r,i)=>({inbound_id:r.inbound_id,intent_id:id(1000+(op.health_rounds?.length??0)*256+i),port:r.direct_port,state:"pending"})),state:"pending",current:false};op.health_rounds=[v,...(op.health_rounds??[])];}reply=v;
   }else{
    const input=body as CommandRequest,op=state.ops.find(o=>o.id===path.split("/").at(-2));
    const v=input.action==="drain"?source:target;
@@ -64,8 +68,9 @@ async function confirm(p:BrowserPage,name:string){p.once("dialog",d=>d.accept())
 async function refresh(p:BrowserPage){await panel(p).getByRole("button",{name:"Refresh transfer status",exact:true}).click();}
 async function record(p:BrowserPage){await panel(p).getByRole("button",{name:"Review transfer",exact:true}).click();await confirm(p,"Record reviewed transfer");}
 
-async function healthFixture(page:BrowserPage){
+async function healthFixture(page:BrowserPage,rounds=false){
  const f=await fixture(page);f.state.scope.health_enabled=true;
+ if(rounds){f.state.scope.health_rounds_enabled=true;for(const v of [f.state.source,f.state.target])v.review.push({...v.review[0],inbound_id:7613,name:"Second LAB",direct_port:v.review[0].direct_port+2});}
  const src=f.state.source,dst=f.state.target,usage=structuredClone(src.status.usage!);
  src.status.observed={...src.status.observed,process_ready:false,active_sequence:0,active_sha:"",lease_expires_unix_nano:0};
  src.status.usage={...usage,settlement:{epoch_id:usage.epoch_id!,sequence:"2",sha256:sha}};
@@ -74,9 +79,86 @@ async function healthFixture(page:BrowserPage){
  const c=receipt(row(dst.node_id,dst.installation_id,32,"apply",id(21)),"applied",dst.status.observed,dst.status.usage);
  dst.commands=[c];dst.controls={stage:false};
  const op:Handover={id:id(88),source_node:src.node_id,target_node:dst.node_id,source_installation:src.installation_id,target_installation:dst.installation_id,source_stage_id:id(11),target_stage_id:id(21),source_usage:usage,created_unix_nano:Date.now()*1e6,drain_command_id:"",apply_command_id:c.id,apply_command:c,cancelled:false,can_publish:false,phase:"target_applied_health_required"};
+ if(rounds)op.health_rounds=[];
  f.state.ops=[op];await open(page);await panel(page).getByRole("button",{name:"View transfer",exact:true}).click();
- await panel(page).getByRole("combobox",{name:"Inbound to test",exact:true}).selectOption("7612");return {...f,op};
+ if(!rounds)await panel(page).getByRole("combobox",{name:"Inbound to test",exact:true}).selectOption("7612");return {...f,op};
 }
+
+const roundAction="Test all destination Inbounds",roundCurrent="All destination Inbounds verified · current bounded protocol check";
+function acceptMember(r:HealthRound,i:number){Object.assign(r.members[i],{state:"accepted",challenge_id:id(2000+i),accepted_unix_nano:Date.now()*1e6});}
+
+test("N17 full-round request includes every destination Inbound and expires without publication",async({page})=>{
+ const f=await healthFixture(page,true),button=panel(page).getByRole("button",{name:roundAction,exact:true});
+ await expect(button).toBeEnabled();await expect(panel(page).getByRole("combobox",{name:"Inbound to test",exact:true})).toHaveCount(0);
+ page.once("dialog",d=>d.dismiss());await button.click();expect(f.writes).toHaveLength(0);
+ f.state.post="after";await confirm(page,roundAction);
+ await expect(panel(page).getByText("Accepted Inbounds: 0/2",{exact:true})).toBeVisible();
+ await expect(panel(page).getByRole("button",{name:"Retry exact request",exact:true})).toHaveCount(0);
+ expect(f.writes).toHaveLength(1);expect(f.writes[0].path).toBe(base+"/"+f.op.id+"/health-rounds");
+ expect(f.writes[0].body).toEqual({id:expect.stringMatching(/^[a-f0-9]{32}$/),confirmed:true});expect(f.writes[0].csrf).toBe(csrf);
+ const r=f.op.health_rounds![0];expect(r.members.map(m=>m.inbound_id)).toEqual([7612,7613]);
+ acceptMember(r,0);await refresh(page);await expect(panel(page).getByText("Accepted Inbounds: 1/2",{exact:true})).toBeVisible();
+ await expect(panel(page).getByText(roundCurrent,{exact:true})).toHaveCount(0);await expect(button).toBeDisabled();
+ acceptMember(r,1);r.state="complete";r.current=true;await refresh(page);
+ await expect(panel(page).getByText(roundCurrent,{exact:true})).toBeVisible();await expect(button).toBeDisabled();expect(f.op.can_publish).toBe(false);
+ // Keep returning the same complete audit row: the local timer must still
+ // remove the current claim at its original deadline, without a new receipt.
+ await expect(panel(page).getByText("Round expired · current health is not confirmed",{exact:true})).toBeVisible({timeout:10000});
+ await expect(panel(page).getByText(roundCurrent,{exact:true})).toHaveCount(0);await expect(button).toBeEnabled();expect(f.writes).toHaveLength(1);
+});
+
+test("N17 an unconfirmed round survives reload and retries only the exact saved request",async({page})=>{
+ const f=await healthFixture(page,true);f.state.post="before";await confirm(page,roundAction);
+ await expect(panel(page).getByRole("button",{name:"Retry exact request",exact:true})).toBeEnabled();const raw=f.writes[0].raw;
+ await page.reload();await panel(page).getByRole("button",{name:"Open Node transfer",exact:true}).click();
+ await expect(panel(page).getByRole("button",{name:"Retry exact request",exact:true})).toBeEnabled();expect(f.writes).toHaveLength(1);
+ f.state.scope.health_rounds_enabled=false;await refresh(page);await expect(panel(page).getByRole("button",{name:"Retry exact request",exact:true})).toBeDisabled();
+ f.state.scope.health_rounds_enabled=true;f.state.post="normal";await refresh(page);await confirm(page,"Retry exact request");
+ await expect.poll(()=>f.writes.length).toBe(2);expect(f.writes[1].raw).toBe(raw);expect(f.op.health_rounds).toHaveLength(1);
+ await expect(panel(page).getByRole("button",{name:"Retry exact request",exact:true})).toHaveCount(0);
+});
+
+test("N17 partial or mismatched round evidence blocks current health and controls",async({page})=>{
+ const f=await healthFixture(page,true);await confirm(page,roundAction);await expect.poll(()=>f.op.health_rounds?.length).toBe(1);
+ const original=structuredClone(f.op.health_rounds![0]);
+ for(const mutate of [
+  (r:HealthRound)=>{r.current=true;},
+  (r:HealthRound)=>{r.members[1].inbound_id=r.members[0].inbound_id;},
+  (r:HealthRound)=>{r.installation_id=id(99);},
+ ]){
+  f.op.health_rounds=[structuredClone(original)];await refresh(page);await expect(panel(page).getByRole("alert")).toHaveCount(0);
+  const bad=structuredClone(original);mutate(bad);f.op.health_rounds=[bad];await refresh(page);
+  await expect(panel(page).getByRole("alert")).toContainText("could not be verified");
+  await expect(panel(page).getByRole("button",{name:roundAction,exact:true})).toBeDisabled();await expect(panel(page).getByText(roundCurrent,{exact:true})).toHaveCount(0);
+ }
+ expect(f.writes).toHaveLength(1);
+});
+
+test("N17 complete evidence for a subset never claims full destination coverage",async({page})=>{
+ const f=await healthFixture(page,true);await confirm(page,roundAction);await expect.poll(()=>f.op.health_rounds?.length).toBe(1);
+ const r=f.op.health_rounds![0];r.members.pop();acceptMember(r,0);r.state="complete";r.current=true;await refresh(page);
+ await expect(panel(page).getByText("Complete receipt set recorded · current health is not confirmed",{exact:true})).toBeVisible();
+ await expect(panel(page).getByText(roundCurrent,{exact:true})).toHaveCount(0);expect(f.op.can_publish).toBe(false);
+});
+
+test("N17 a read failure or changed state removes a previously current round claim",async({page})=>{
+ const f=await healthFixture(page,true);await confirm(page,roundAction);await expect.poll(()=>f.op.health_rounds?.length).toBe(1);
+ const r=f.op.health_rounds![0];r.members.forEach((_,i)=>acceptMember(r,i));r.state="complete";r.current=true;await refresh(page);
+ await expect(panel(page).getByText(roundCurrent,{exact:true})).toBeVisible();
+ f.state.readError=true;await refresh(page);await expect(panel(page).getByRole("alert")).toBeVisible();await expect(panel(page).getByText(roundCurrent,{exact:true})).toHaveCount(0);
+ f.state.readError=false;r.current=false;r.state="state_changed";await refresh(page);
+ await expect(panel(page).getByText("Destination or source state changed · this round is no longer current",{exact:true})).toBeVisible();
+ await expect(panel(page).getByRole("button",{name:roundAction,exact:true})).toBeDisabled();expect(f.writes).toHaveLength(1);
+});
+
+test("N17 full-round review remains readable in Persian at 320 pixels",async({page})=>{
+ await page.setViewportSize({width:320,height:780});const f=await healthFixture(page,true);await confirm(page,roundAction);
+ await expect(panel(page).getByText("Accepted Inbounds: 0/2",{exact:true})).toBeVisible();
+ await page.getByRole("button",{name:"Switch language",exact:true}).click();
+ await expect(panel(page).getByRole("button",{name:"آزمون همهٔ اینباندهای مقصد",exact:true})).toBeVisible();
+ await expect(panel(page).getByRole("heading",{name:"دوره‌های آزمون سلامت مقصد",exact:true})).toBeVisible();
+ expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);expect(f.writes).toHaveLength(1);
+});
 
 test("N15 explicit health action reconciles a lost committed reply and shows historical evidence",async({page})=>{
  const f=await healthFixture(page);const button=panel(page).getByRole("button",{name:"Request protocol health test",exact:true});
@@ -115,7 +197,7 @@ test("N10 explicit review, source final receipt and separate target request",asy
  f.state.fresh=true;await refresh(page);await expect(panel(page).getByRole("button",{name:"Request destination execution",exact:true})).toBeEnabled();
  expect(f.writes).toHaveLength(2);await confirm(page,"Request destination execution");
  await expect.poll(()=>f.writes.length).toBe(3);expect(f.writes[2].body).toMatchObject({action:"apply",stage_id:id(21),drafts:[],usage:{settlement:{sequence:"0"}}});
- expect(f.writes.every(w=>w.csrf===csrf)).toBe(true);await expect(panel(page).getByText(/Protocol health, publication and cross-Node rollback are pending/)).toBeVisible();
+ expect(f.writes.every(w=>w.csrf===csrf)).toBe(true);await expect(panel(page).getByText(/Subscription publication and cross-Node rollback remain unavailable/)).toBeVisible();
 });
 
 test("N10 retained create survives reload with identical ID/body and no automatic retry",async({page})=>{

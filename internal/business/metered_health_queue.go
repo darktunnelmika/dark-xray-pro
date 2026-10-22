@@ -60,7 +60,7 @@ func (s *Store) QueueMeteredHealth(ctx context.Context, key []byte, id, op strin
 	if err = tx.QueryRowContext(ctx, `PRAGMA user_version`).Scan(&version); err != nil {
 		return empty, err
 	}
-	if version != usageledger.HealthQueueBusinessSchemaVersion {
+	if !usageledger.HasHealthQueueSchema(version) {
 		return empty, ErrUnavailable
 	}
 	v, _, err := readHealthIntent(ctx, tx, id)
@@ -71,6 +71,9 @@ func (s *Store) QueueMeteredHealth(ctx context.Context, key []byte, id, op strin
 		return v, tx.Commit()
 	}
 	if !errors.Is(err, ErrNotFound) {
+		return empty, err
+	}
+	if err = legacyHealthAllowed(ctx, tx, op); err != nil {
 		return empty, err
 	}
 	now := time.Now().UnixNano()
@@ -106,7 +109,19 @@ func (s *Store) PollMeteredHealth(ctx context.Context, key, token []byte, node, 
 	}
 	defer tx.Rollback()
 	var id string
-	err = tx.QueryRowContext(ctx, `SELECT i.id FROM pro_health_intents i LEFT JOIN pro_health_receipts r ON r.handover_id=i.handover_id WHERE i.node_id=? AND i.installation_id=? AND i.expires>? AND r.challenge_id IS NULL ORDER BY i.created DESC LIMIT 1`, node, install, time.Now().UnixNano()).Scan(&id)
+	var version int
+	if err = tx.QueryRowContext(ctx, `PRAGMA user_version`).Scan(&version); err != nil {
+		return empty, false, err
+	}
+	if !usageledger.HasHealthQueueSchema(version) {
+		return empty, false, ErrUnavailable
+	}
+	now := time.Now().UnixNano()
+	if usageledger.HasHealthRoundsSchema(version) {
+		err = tx.QueryRowContext(ctx, `SELECT i.id FROM pro_health_intents i LEFT JOIN pro_health_round_members m ON m.intent_id=i.id LEFT JOIN pro_health_rounds hr ON hr.id=m.round_id LEFT JOIN pro_health_round_receipts rr ON rr.round_id=m.round_id AND rr.inbound_id=m.inbound_id LEFT JOIN pro_health_receipts r ON r.handover_id=i.handover_id WHERE i.node_id=? AND i.installation_id=? AND i.expires>? AND ((m.round_id IS NOT NULL AND rr.challenge_id IS NULL AND hr.expires>?) OR (m.round_id IS NULL AND r.challenge_id IS NULL AND NOT EXISTS(SELECT 1 FROM pro_health_rounds all_rounds WHERE all_rounds.handover_id=i.handover_id))) ORDER BY i.created DESC,m.inbound_id,i.id LIMIT 1`, node, install, now, now).Scan(&id)
+	} else {
+		err = tx.QueryRowContext(ctx, `SELECT i.id FROM pro_health_intents i LEFT JOIN pro_health_receipts r ON r.handover_id=i.handover_id WHERE i.node_id=? AND i.installation_id=? AND i.expires>? AND r.challenge_id IS NULL ORDER BY i.created DESC LIMIT 1`, node, install, now).Scan(&id)
+	}
 	if errors.Is(err, sql.ErrNoRows) {
 		return empty, false, tx.Commit()
 	}
@@ -126,6 +141,15 @@ func (s *Store) PollMeteredHealth(ctx context.Context, key, token []byte, node, 
 	}
 	if healthBinding(q) != binding {
 		return empty, false, ErrConflict
+	}
+	round, err := healthIntentRound(ctx, tx, id)
+	if err != nil {
+		return empty, false, err
+	}
+	if round != "" {
+		if _, err = liveHealthRoundMember(ctx, tx, key, round, id, v.HandoverID, v.InboundID, v.EndpointSHA, time.Now().UnixNano()); err != nil {
+			return empty, false, err
+		}
 	}
 	if err = tx.Commit(); err != nil {
 		return empty, false, err

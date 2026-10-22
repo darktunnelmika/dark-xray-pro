@@ -20,11 +20,23 @@ import (
 
 const maxTransactionBytes = 24 << 20
 
+// Metered commands and their MAC domains remain version 2. Journal version 3
+// adds replay history and a durable retirement barrier for protocol probes.
+// A version-2 binary rejects this payload instead of forgetting earlier nonces.
+const meteredTransactionJournalVersion = 3
+
 type transactionDisk struct {
-	version int
+	version int // Command protocol version, independent of the journal format.
 	dir     string
 	aead    cipher.AEAD
 	aad     []byte
+}
+
+func (d *transactionDisk) journalVersion() int {
+	if d.version == 2 {
+		return meteredTransactionJournalVersion
+	}
+	return d.version
 }
 
 func openTransactionDisk(o Options) (*transactionDisk, error) {
@@ -69,7 +81,7 @@ func openTransactionDisk(o Options) (*transactionDisk, error) {
 }
 
 func (d *transactionDisk) load(key []byte) (transactionState, error) {
-	empty := transactionState{Version: d.version}
+	empty := transactionState{Version: d.journalVersion()}
 	raw, err := privateRead(filepath.Join(d.dir, "transactions.enc"), maxTransactionBytes)
 	if errors.Is(err, os.ErrNotExist) {
 		return empty, nil
@@ -92,7 +104,11 @@ func (d *transactionDisk) load(key []byte) (transactionState, error) {
 		return empty, ErrCorrupt
 	}
 	var trailing any
-	if !errors.Is(dec.Decode(&trailing), io.EOF) || s.Version != d.version || s.Serial > maxTransactionSerial {
+	legacyMetered := d.version == 2 && s.Version == 2
+	if !errors.Is(dec.Decode(&trailing), io.EOF) || (!legacyMetered && s.Version != d.journalVersion()) || s.Serial > maxTransactionSerial {
+		return empty, ErrCorrupt
+	}
+	if (legacyMetered || d.version != 2) && (len(s.HealthHistory) != 0 || s.HealthRetiredThrough != 0) {
 		return empty, ErrCorrupt
 	}
 	for _, stage := range []*transactionStage{s.Staged, s.Current, s.Previous} {
@@ -111,10 +127,15 @@ func (d *transactionDisk) load(key []byte) (transactionState, error) {
 	if (s.LastCommand == nil) != (s.LastReceipt == nil) {
 		return empty, ErrCorrupt
 	}
-	if a := s.Health; a != nil {
-		if d.version != 2 || !verifyProtocolHealthRequest(key, a.Request, a.Request.Issued) || ((a.Acknowledged || a.RejectedAfterExpiry) && a.Receipt == nil) || (a.Acknowledged && a.RejectedAfterExpiry) {
+	if s.HealthRetiredThrough < 0 || protocolHealthAttemptCount(s) > maxProtocolHealthAttempts {
+		return empty, ErrCorrupt
+	}
+	seenHealth := make(map[string]bool)
+	for _, a := range protocolHealthAttempts(s) {
+		if d.version != 2 || seenHealth[a.Request.ID] || !verifyProtocolHealthRequest(key, a.Request, a.Request.Issued) || ((a.Acknowledged || a.RejectedAfterExpiry) && a.Receipt == nil) || (a.Acknowledged && a.RejectedAfterExpiry) {
 			return empty, ErrCorrupt
 		}
+		seenHealth[a.Request.ID] = true
 		if a.Receipt != nil && !VerifyProtocolHealthReceipt(key, a.Request, *a.Receipt, time.Unix(0, a.Receipt.Completed)) {
 			return empty, ErrCorrupt
 		}
@@ -133,6 +154,9 @@ func (d *transactionDisk) load(key []byte) (transactionState, error) {
 	} else if s.Serial != 0 && (s.LastCommand == nil || s.LastCommand.Serial != s.Serial) {
 		return empty, ErrCorrupt
 	}
+	// Preserve every signed request and saved receipt exactly during upgrade.
+	// The next atomic save makes downgrade refusal durable before another probe.
+	s.Version = d.journalVersion()
 	return s, nil
 }
 

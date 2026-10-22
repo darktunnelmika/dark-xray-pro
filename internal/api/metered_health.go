@@ -3,9 +3,10 @@ package api
 import (
 	"context"
 	"errors"
+	"net/http"
+
 	"github.com/darktunnelmika/dark-xray-pro/internal/business"
 	mx "github.com/darktunnelmika/dark-xray-pro/internal/managedxray"
-	"net/http"
 )
 
 // Startup-only operator configuration. No browser may set a verifier URL or
@@ -29,6 +30,20 @@ func (s *Server) EnableMeteredHealth(endpoint mx.ProtocolHealthEndpoint) error {
 	return nil
 }
 
+// EnableMeteredHealthRounds is an additional startup-only opt-in. The existing
+// pinned transport must be configured first; a browser cannot migrate storage
+// or choose the destination members, verifier, or validity window.
+func (s *Server) EnableMeteredHealthRounds() error {
+	if s.business == nil || s.healthEndpoint == nil || s.healthRoundsEnabled {
+		return errors.New("health rounds require the approved pinned health transport")
+	}
+	if err := s.business.EnableMeteredHealthRounds(context.Background()); err != nil {
+		return err
+	}
+	s.healthRoundsEnabled = true
+	return nil
+}
+
 func (s *Server) healthOperation(w http.ResponseWriter, r *http.Request, id string) (business.MeteredHandoverView, bool) {
 	op, err := s.business.MeteredHandover(r.Context(), id)
 	if err != nil {
@@ -43,6 +58,39 @@ func (s *Server) healthOperation(w http.ResponseWriter, r *http.Request, id stri
 }
 
 func (s *Server) attachMeteredHealth(mux *http.ServeMux) {
+	mux.HandleFunc("POST /api/v1/workspace/metered-handovers/{id}/health-rounds", func(w http.ResponseWriter, r *http.Request) {
+		if _, ok := s.authorizeBrowser(w, r, true, true); !ok {
+			return
+		}
+		if s.business == nil || !handoverID.MatchString(r.PathValue("id")) {
+			businessError(w, business.ErrInvalid)
+			return
+		}
+		var in struct {
+			ID        string `json:"id"`
+			Confirmed bool   `json:"confirmed"`
+		}
+		if decode(w, r, 512, &in) != nil || !handoverID.MatchString(in.ID) || !in.Confirmed {
+			businessError(w, business.ErrInvalid)
+			return
+		}
+		s.replacementLifecycle.Lock()
+		defer s.replacementLifecycle.Unlock()
+		if !s.healthRoundsEnabled {
+			businessError(w, business.ErrConflict)
+			return
+		}
+		op, ok := s.healthOperation(w, r, r.PathValue("id"))
+		if !ok {
+			return
+		}
+		v, err := s.business.QueueMeteredHealthRound(r.Context(), s.inboundKey, in.ID, op.ID, *s.healthEndpoint)
+		if err != nil {
+			businessError(w, err)
+			return
+		}
+		respond(w, http.StatusAccepted, v)
+	})
 	mux.HandleFunc("POST /api/v1/workspace/metered-handovers/{id}/health", func(w http.ResponseWriter, r *http.Request) {
 		if _, ok := s.authorizeBrowser(w, r, true, true); !ok {
 			return
