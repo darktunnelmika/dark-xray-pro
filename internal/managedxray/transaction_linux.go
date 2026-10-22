@@ -24,14 +24,15 @@ type transactionStage struct {
 }
 
 type transactionState struct {
-	Version     int                 `json:"version"`
-	Serial      uint64              `json:"serial"`
-	Staged      *transactionStage   `json:"staged,omitempty"`
-	Current     *transactionStage   `json:"current,omitempty"`
-	Previous    *transactionStage   `json:"previous,omitempty"`
-	Pending     *TransactionCommand `json:"pending,omitempty"`
-	LastCommand *TransactionCommand `json:"last_command,omitempty"`
-	LastReceipt *TransactionReceipt `json:"last_receipt,omitempty"`
+	Health      *protocolHealthAttempt `json:"health,omitempty"`
+	Version     int                    `json:"version"`
+	Serial      uint64                 `json:"serial"`
+	Staged      *transactionStage      `json:"staged,omitempty"`
+	Current     *transactionStage      `json:"current,omitempty"`
+	Previous    *transactionStage      `json:"previous,omitempty"`
+	Pending     *TransactionCommand    `json:"pending,omitempty"`
+	LastCommand *TransactionCommand    `json:"last_command,omitempty"`
+	LastReceipt *TransactionReceipt    `json:"last_receipt,omitempty"`
 }
 
 // TransactionRuntime owns a DIFFERENT, private runtime from the ordinary
@@ -40,6 +41,7 @@ type transactionState struct {
 type TransactionRuntime struct {
 	metered       *MeteredTransactionOptions
 	protocolProbe sync.Mutex
+	healthSync    sync.Mutex
 	mu            sync.Mutex
 	runtime       *Runtime
 	options       Options

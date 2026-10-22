@@ -9,6 +9,7 @@ import (
 	"github.com/darktunnelmika/dark-xray-pro/internal/configstage"
 	"github.com/darktunnelmika/dark-xray-pro/internal/hubmonitor"
 	"github.com/darktunnelmika/dark-xray-pro/internal/labrevision"
+	"github.com/darktunnelmika/dark-xray-pro/internal/managedxray"
 	"github.com/darktunnelmika/dark-xray-pro/internal/nodebootstrap"
 	"github.com/darktunnelmika/dark-xray-pro/internal/nodehistory"
 	"github.com/darktunnelmika/dark-xray-pro/internal/noderegistry"
@@ -22,6 +23,7 @@ import (
 )
 
 type Server struct {
+	healthEndpoint       *managedxray.ProtocolHealthEndpoint
 	meteredRouteNode     string
 	meteredRouteInstall  string
 	meteredRouteNodes    map[string]string // immutable after startup: node -> installation
@@ -158,6 +160,10 @@ func (s *Server) AgentHandler() http.Handler {
 		}
 		if r.Method == http.MethodPost && (r.URL.Path == "/api/v1/agent/route-transactions/poll" || r.URL.Path == "/api/v1/agent/route-transactions/receipt") {
 			s.handleRouteTransactionAgent(w, r)
+			return
+		}
+		if r.Method == http.MethodPost && (r.URL.Path == "/api/v1/agent/metered-health/poll" || r.URL.Path == "/api/v1/agent/metered-health/receipt") {
+			s.handleMeteredHealthAgent(w, r)
 			return
 		}
 		if r.Method == http.MethodPost && (r.URL.Path == "/api/v1/agent/metered-route-transactions/poll" || r.URL.Path == "/api/v1/agent/metered-route-transactions/receipt" || r.URL.Path == "/api/v1/agent/metered-route-transactions/check" || r.URL.Path == "/api/v1/agent/metered-route-transactions/register") {

@@ -57,7 +57,7 @@ func verifyProbeSchema(ctx context.Context, c *ledgerConn, version int) error {
 	if err := c.QueryRowContext(ctx, "SELECT COUNT(*) FROM sqlite_master WHERE name GLOB 'pro_probe_*'").Scan(&n); err != nil {
 		return err
 	}
-	if version != ProbeBusinessSchemaVersion && version != HealthBusinessSchemaVersion {
+	if !HasProbeSchema(version) {
 		if n != 0 {
 			return ErrSchema
 		}
@@ -77,7 +77,7 @@ func probeAccountingEnabled(ctx context.Context, c sqlWriter) (bool, error) {
 	if err := c.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); err != nil {
 		return false, err
 	}
-	return version == ProbeBusinessSchemaVersion || version == HealthBusinessSchemaVersion, nil
+	return HasProbeSchema(version), nil
 }
 
 // EnableProbeAccounting is a reviewed startup migration, never an Agent or
@@ -88,7 +88,7 @@ func (l *Ledger) EnableProbeAccounting(ctx context.Context) error {
 		if err := c.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); err != nil {
 			return err
 		}
-		if version == ProbeBusinessSchemaVersion || version == HealthBusinessSchemaVersion {
+		if HasProbeSchema(version) {
 			if err := verifyHealthSchema(ctx, c, version); err != nil {
 				return err
 			}

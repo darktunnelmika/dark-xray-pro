@@ -53,12 +53,14 @@ func (s *Server) meteredRouteScope(node, installation string) bool {
 }
 func (s *Server) attachMeteredRouteTransactions(mux *http.ServeMux) {
 	s.attachMeteredHandovers(mux)
+	s.attachMeteredHealth(mux)
 	mux.HandleFunc("GET /api/v1/workspace/metered-route-transactions", func(w http.ResponseWriter, r *http.Request) {
 		if _, ok := s.authorizeBrowser(w, r, false, true); !ok {
 			return
 		}
 		// Discovery is read-only; it cannot claim a Node or enable an Agent.
 		out := map[string]any{"enabled": false, "scope": "metered_tcp_loopback_lab"}
+		out["health_enabled"] = s.healthEndpoint != nil
 		nodes := make([]map[string]string, 0, len(s.meteredRouteNodes))
 		ids := make([]string, 0, len(s.meteredRouteNodes))
 		for id := range s.meteredRouteNodes {

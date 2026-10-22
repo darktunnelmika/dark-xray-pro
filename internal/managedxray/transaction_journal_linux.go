@@ -15,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"syscall"
+	"time"
 )
 
 const maxTransactionBytes = 24 << 20
@@ -109,6 +110,14 @@ func (d *transactionDisk) load(key []byte) (transactionState, error) {
 	}
 	if (s.LastCommand == nil) != (s.LastReceipt == nil) {
 		return empty, ErrCorrupt
+	}
+	if a := s.Health; a != nil {
+		if d.version != 2 || !verifyProtocolHealthRequest(key, a.Request, a.Request.Issued) || ((a.Acknowledged || a.RejectedAfterExpiry) && a.Receipt == nil) || (a.Acknowledged && a.RejectedAfterExpiry) {
+			return empty, ErrCorrupt
+		}
+		if a.Receipt != nil && !VerifyProtocolHealthReceipt(key, a.Request, *a.Receipt, time.Unix(0, a.Receipt.Completed)) {
+			return empty, ErrCorrupt
+		}
 	}
 	verify := VerifyTransactionReceipt
 	if d.version == 2 {

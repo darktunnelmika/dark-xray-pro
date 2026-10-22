@@ -40,7 +40,7 @@ func Open(ctx context.Context, db *sql.DB) (*Ledger, error) {
 		if e := c.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); e != nil {
 			return e
 		}
-		if version != 7 && version != 8 && version != ProbeBusinessSchemaVersion && version != HealthBusinessSchemaVersion {
+		if version != 7 && version != 8 && !HasProbeSchema(version) {
 			return ErrSchema
 		}
 		if e := verifyHealthSchema(ctx, c, version); e != nil {
@@ -66,7 +66,7 @@ func Open(ctx context.Context, db *sql.DB) (*Ledger, error) {
 		if e := c.QueryRowContext(ctx, "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='pro_usage_meta'").Scan(&count); e != nil {
 			return e
 		}
-		if (version == ProbeBusinessSchemaVersion || version == HealthBusinessSchemaVersion) && count != 1 {
+		if HasProbeSchema(version) && count != 1 {
 			return ErrSchema
 		}
 		if count == 1 {

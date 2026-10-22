@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"net"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -22,22 +23,28 @@ import (
 )
 
 type handoverHealthFixture struct {
-	Store              *business.Store
-	Key                []byte
-	Runtime            *mx.TransactionRuntime
-	Token              string
-	Plan               meteredHandoverInput
-	Origin             *httptest.Server
-	Port               uint16
-	Credential         string
-	SystemProbeID      string
-	CustomerCredential string
-	CustomerID         string
-	Behavior           *atomic.Int32
-	Requests           *atomic.Int64
-	Started            <-chan struct{}
-	Release            chan<- struct{}
-	Drain              func()
+	Server                *Server
+	Cookie                *http.Cookie
+	CSRF                  string
+	Client                *http.Client
+	Endpoint              string
+	DropBefore, DropAfter *atomic.Bool
+	Store                 *business.Store
+	Key                   []byte
+	Runtime               *mx.TransactionRuntime
+	Token                 string
+	Plan                  meteredHandoverInput
+	Origin                *httptest.Server
+	Port                  uint16
+	Credential            string
+	SystemProbeID         string
+	CustomerCredential    string
+	CustomerID            string
+	Behavior              *atomic.Int32
+	Requests              *atomic.Int64
+	Started               <-chan struct{}
+	Release               chan<- struct{}
+	Drain                 func()
 }
 
 func TestRealPinnedMeteredHandoverProtocolHealth(t *testing.T) {
@@ -49,7 +56,7 @@ func TestRealPinnedMeteredHandoverProtocolHealth(t *testing.T) {
 	if os.Getenv("DARK_PRO_TEST_FINAL_TCP") != "1" || !filepath.IsAbs(binary) || len(pin) != 64 || os.Geteuid() == 0 || err != nil || len(interfaces) != 1 || interfaces[0].Name != "lo" {
 		t.Fatal("nonroot pinned core in isolated loopback namespace required")
 	}
-	for _, mode := range []string{"verified-and-bound", "reject-wrong-verifier", "drain-during-probe"} {
+	for _, mode := range []string{"verified-and-bound", "reject-wrong-verifier", "drain-during-probe", "owner-agent-lost-replies"} {
 		t.Run(mode, func(t *testing.T) {
 			testMeteredHandoverTraffic(t, binary, pin, "normal", func(f handoverHealthFixture) {
 				ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
@@ -75,6 +82,53 @@ func TestRealPinnedMeteredHandoverProtocolHealth(t *testing.T) {
 					}
 				}
 				switch mode {
+				case "owner-agent-lost-replies":
+					body := map[string]any{"id": handoverTestID(240), "inbound_id": 7612, "confirm_probe": true}
+					path := handoverBase + "/" + f.Plan.ID + "/health"
+					post := func() business.MeteredHealthIntent {
+						t.Helper()
+						w := browserRequest(t, f.Server.BrowserHandler(), "POST", path, body, f.Cookie, f.CSRF, "https://"+browserHost)
+						if w.Code != 202 {
+							t.Fatal("owner health queue", w.Code, w.Body.String())
+						}
+						var v business.MeteredHealthIntent
+						if json.Unmarshal(w.Body.Bytes(), &v) != nil {
+							t.Fatal("invalid queue reply")
+						}
+						return v
+					}
+					v := post()
+					if again := post(); again != v {
+						t.Fatal("owner retry replaced intent")
+					}
+					f.DropBefore.Store(true)
+					if err := f.Runtime.SyncMeteredHealth(ctx, f.Client, f.Endpoint); err == nil {
+						t.Fatal("lost precommit reply hidden")
+					}
+					if f.Requests.Load() != 1 {
+						t.Fatal("probe count before commit", f.Requests.Load())
+					}
+					a, err := f.Store.MeteredHandoverAudit(ctx, f.Key, f.Plan.ID)
+					if err != nil || a.HistoricalHealthEvidence != nil {
+						t.Fatal("uncommitted receipt invented evidence", err)
+					}
+					f.DropAfter.Store(true)
+					if err := f.Runtime.SyncMeteredHealth(ctx, f.Client, f.Endpoint); err == nil {
+						t.Fatal("lost committed reply hidden")
+					}
+					a, err = f.Store.MeteredHandoverAudit(ctx, f.Key, f.Plan.ID)
+					if err != nil || a.HistoricalHealthEvidence == nil || a.CanPublish {
+						t.Fatal("HUB receipt not committed", err)
+					}
+					if err := f.Runtime.SyncMeteredHealth(ctx, f.Client, f.Endpoint); err != nil {
+						t.Fatal("durable exact receipt replay", err)
+					}
+					if err := f.Runtime.SyncMeteredHealth(ctx, f.Client, f.Endpoint); err != nil {
+						t.Fatal("empty health poll", err)
+					}
+					if f.Requests.Load() != 1 || f.Runtime.Status().Observed.SubscriptionPublished {
+						t.Fatal("lost reply reran probe or published")
+					}
 				case "verified-and-bound":
 					q, err := f.Store.IssueMeteredHealthChallenge(ctx, f.Key, []byte(f.Token), handoverTestID(101), f.Plan.ID, 7612, endpoint)
 					if err != nil {

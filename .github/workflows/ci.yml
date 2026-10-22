@@ -131,7 +131,7 @@ jobs:
           import collections,json,sys
           events=[json.loads(line) for line in open(sys.argv[1])]
           name='TestRealPinnedMeteredHandoverProtocolHealth'
-          required={name}|{name+'/'+s for s in ('verified-and-bound','reject-wrong-verifier','drain-during-probe')}
+          required={name}|{name+'/'+s for s in ('verified-and-bound','reject-wrong-verifier','drain-during-probe','owner-agent-lost-replies')}
           passed=collections.Counter(e.get('Test') for e in events if e.get('Action')=='pass')
           assert all(passed[n]==3 for n in required),dict(passed)
           assert not any(e.get('Action') in ('skip','fail') for e in events)
@@ -189,6 +189,8 @@ jobs:
         run: go test -race ./internal/business ./internal/usageledger ./internal/usagecheckpoint -run '^TestSystemProbe' -count=10 -timeout=180s -v
       - name: Persisted single-use HUB health challenges
         run: go test -race ./internal/business ./internal/usageledger -run '^TestMeteredHealth' -count=10 -timeout=240s -v
+      - name: Owner health transport boundaries and encrypted Agent replay
+        run: go test -race ./internal/api ./internal/managedxray -run '^(TestMeteredHealthOwner|TestProtocolHealthTransport)' -count=10 -timeout=120s -v
       - name: Repeat node name receipt and concurrency contracts
         run: go test -race ./internal/noderegistry ./internal/api -run 'TestRename|TestOwnerNodeRename' -count=5 -timeout=120s -v
       - name: Repeat read-only node dependency contracts

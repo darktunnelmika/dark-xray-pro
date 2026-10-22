@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"crypto/tls"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -13,12 +14,14 @@ import (
 	"github.com/darktunnelmika/dark-xray-pro/internal/configstage"
 	"github.com/darktunnelmika/dark-xray-pro/internal/hubmonitor"
 	"github.com/darktunnelmika/dark-xray-pro/internal/labrevision"
+	"github.com/darktunnelmika/dark-xray-pro/internal/managedxray"
 	"github.com/darktunnelmika/dark-xray-pro/internal/nodebootstrap"
 	"github.com/darktunnelmika/dark-xray-pro/internal/nodehistory"
 	"github.com/darktunnelmika/dark-xray-pro/internal/noderegistry"
 	"github.com/darktunnelmika/dark-xray-pro/internal/replacement"
 	"github.com/darktunnelmika/dark-xray-pro/internal/telemetry"
 	"github.com/darktunnelmika/dark-xray-pro/internal/webui"
+	"io"
 	"log"
 	"net"
 	"net/http"
@@ -239,6 +242,27 @@ func main() {
 		}
 	} else if os.Getenv("DARK_PRO_METERED_ROUTE_NODE_ID") != "" || os.Getenv("DARK_PRO_METERED_ROUTE_INSTALLATION_ID") != "" || os.Getenv("DARK_PRO_METERED_ROUTE_XRAY_SHA256") != "" || os.Getenv("DARK_PRO_METERED_ROUTE_NODES_JSON") != "" {
 		log.Fatal("metered route scope supplied without explicit opt-in")
+	}
+	if os.Getenv("DARK_PRO_ENABLE_METERED_HEALTH") == "1" {
+		if os.Getenv("DARK_PRO_ENABLE_METERED_ROUTE_TRANSACTIONS") != "1" {
+			log.Fatal("health requires approved LAB metered channels")
+		}
+		var verifier managedxray.ProtocolHealthEndpoint
+		raw := os.Getenv("DARK_PRO_HEALTH_VERIFIER_JSON")
+		if len(raw) > 100000 {
+			log.Fatal("health verifier configuration too large")
+		}
+		decoder := json.NewDecoder(strings.NewReader(raw))
+		decoder.DisallowUnknownFields()
+		var extra any
+		if decoder.Decode(&verifier) != nil || decoder.Decode(&extra) != io.EOF {
+			log.Fatal("invalid health verifier configuration")
+		}
+		if err := service.EnableMeteredHealth(verifier); err != nil {
+			log.Fatal("health configuration refused: ", err)
+		}
+	} else if os.Getenv("DARK_PRO_HEALTH_VERIFIER_JSON") != "" {
+		log.Fatal("health verifier supplied without explicit enable switch")
 	}
 	if os.Getenv("DARK_PRO_ENABLE_CONFIG_STAGE") == "1" {
 		if *agentListen == "" || os.Getenv("DARK_PRO_ENABLE_REMOTE_AGENT") != "1" {
