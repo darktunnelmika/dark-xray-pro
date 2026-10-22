@@ -129,6 +129,12 @@ export default function NodeManager({ language }: { language: Language }) {
   const remaining = ticket ? Math.max(0, Date.parse(ticket.expires_at) - clock) : 0;
   const liveTicket = ticket && remaining > 0 ? ticket : null;
 
+  useEffect(() => {
+    // Pair Codes are bearer secrets. Hiding an expired ticket is not enough:
+    // discard it from this component's memory as soon as its deadline passes.
+    if (ticket && remaining === 0) setTicket(null);
+  }, [ticket, remaining]);
+
   function messageFor(error: unknown): string {
     if (error instanceof ApiError) {
       if (error.status === 409) return t.conflict;
