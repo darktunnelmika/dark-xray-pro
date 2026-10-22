@@ -15,6 +15,7 @@ type MeteredHandoverAudit struct {
 	DrainCommand             *MeteredRouteCommandView `json:"drain_command,omitempty"`
 	ApplyCommand             *MeteredRouteCommandView `json:"apply_command,omitempty"`
 	HistoricalHealthEvidence *MeteredHealthEvidence   `json:"historical_health_evidence,omitempty"`
+	HealthIntents            []MeteredHealthIntent    `json:"health_intents,omitempty"`
 }
 type MeteredHandoverPage struct {
 	Operations []MeteredHandoverView `json:"operations"`
@@ -49,7 +50,7 @@ func (s *Store) MeteredHandoverAudit(ctx context.Context, key []byte, id string)
 	if err = tx.QueryRowContext(ctx, `PRAGMA user_version`).Scan(&version); err != nil {
 		return out, err
 	}
-	if version == usageledger.HealthBusinessSchemaVersion {
+	if usageledger.HasHealthSchema(version) {
 		var v MeteredHealthEvidence
 		var raw string
 		err = tx.QueryRowContext(ctx, `SELECT r.challenge_id,r.handover_id,r.receipt,r.accepted FROM pro_health_receipts r WHERE r.handover_id=?`, id).Scan(&v.ChallengeID, &v.HandoverID, &raw, &v.Accepted)
@@ -62,6 +63,25 @@ func (s *Store) MeteredHandoverAudit(ctx context.Context, key []byte, id string)
 			out.HistoricalHealthEvidence = &v
 		} else if !errors.Is(err, sql.ErrNoRows) {
 			return out, err
+		}
+	}
+	if version == usageledger.HealthQueueBusinessSchemaVersion {
+		rows, e := tx.QueryContext(ctx, `SELECT id,handover_id,node_id,installation_id,inbound_id,endpoint_sha,expires FROM pro_health_intents WHERE handover_id=? ORDER BY created DESC LIMIT 50`, id)
+		if e != nil {
+			return out, e
+		}
+		for rows.Next() {
+			var v MeteredHealthIntent
+			if e = rows.Scan(&v.ID, &v.HandoverID, &v.NodeID, &v.InstallationID, &v.InboundID, &v.EndpointSHA, &v.Expires); e != nil {
+				rows.Close()
+				return out, e
+			}
+			out.HealthIntents = append(out.HealthIntents, v)
+		}
+		e = rows.Err()
+		rows.Close()
+		if e != nil {
+			return out, e
 		}
 	}
 	return out, tx.Commit()

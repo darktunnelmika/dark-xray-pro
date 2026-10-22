@@ -49,7 +49,7 @@ func (s *Store) healthTx(ctx context.Context) (*sql.Tx, error) {
 	var version int
 	if err == nil {
 		err = tx.QueryRowContext(ctx, `PRAGMA user_version`).Scan(&version)
-		if err == nil && version != usageledger.HealthBusinessSchemaVersion {
+		if err == nil && !usageledger.HasHealthSchema(version) {
 			err = ErrUnavailable
 		}
 	}
@@ -176,6 +176,23 @@ func (s *Store) IssueMeteredHealthChallenge(ctx context.Context, key, token []by
 	q, err = healthCurrent(ctx, tx, key, opID, inbound, now)
 	if err != nil {
 		return mx.ProtocolHealthRequest{}, err
+	}
+	var version int
+	if err = tx.QueryRowContext(ctx, `PRAGMA user_version`).Scan(&version); err != nil {
+		return mx.ProtocolHealthRequest{}, err
+	}
+	if version == usageledger.HealthQueueBusinessSchemaVersion {
+		v, binding, e := readHealthIntent(ctx, tx, intent)
+		if e == nil {
+			if v.HandoverID != opID || v.InboundID != inbound || v.EndpointSHA != endpoint.SHA() || v.NodeID != q.NodeID || v.InstallationID != q.InstallationID || binding != healthBinding(q) || v.Expires <= now {
+				return mx.ProtocolHealthRequest{}, ErrConflict
+			}
+			if q.Expires > v.Expires {
+				q.Expires = v.Expires
+			}
+		} else if !errors.Is(e, ErrNotFound) {
+			return mx.ProtocolHealthRequest{}, e
+		}
 	}
 	var nonce [16]byte
 	if _, err = rand.Read(nonce[:]); err != nil {

@@ -38,7 +38,7 @@ func (s *Store) restoreUsageLedger(ctx context.Context) error {
 		if err := s.db.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); err != nil {
 			return err
 		}
-		if version == usageledger.ProbeBusinessSchemaVersion || version == usageledger.HealthBusinessSchemaVersion {
+		if usageledger.HasProbeSchema(version) {
 			return usageledger.ErrSchema
 		}
 		return nil

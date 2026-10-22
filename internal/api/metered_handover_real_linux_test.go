@@ -183,6 +183,11 @@ func testMeteredHandoverTraffic(t *testing.T, binary, pin, mode string, afterApp
 		if err := s.business.EnableMeteredHealthChallenges(ctx); err != nil {
 			t.Fatal(err)
 		}
+		cert := origin.Certificate()
+		h := sha256.Sum256(cert.Raw)
+		if err := s.EnableMeteredHealth(mx.ProtocolHealthEndpoint{Address: origin.Listener.Addr().String(), ServerName: "example.com", CertificateSHA: hex.EncodeToString(h[:]), CABundle: pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: cert.Raw})}); err != nil {
+			t.Fatal(err)
+		}
 		for i, node := range nodes {
 			probe, err := s.business.ProvisionMeteredProbe(ctx, key, node, installs[i], 7612)
 			if err != nil {
@@ -198,9 +203,14 @@ func testMeteredHandoverTraffic(t *testing.T, binary, pin, mode string, afterApp
 	zeros := map[string]int{}
 	var births atomic.Int64
 	var loseBefore, loseAfter, loseFinal atomic.Bool
+	var healthLoseBefore, healthLoseAfter atomic.Bool
 	actual := s.AgentHandler()
 	receiver := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
+		if path == "/api/v1/agent/metered-health/receipt" && healthLoseBefore.CompareAndSwap(true, false) {
+			w.WriteHeader(503)
+			return
+		}
 		if path == "/api/v1/agent/metered-route-transactions/receipt" && loseBefore.CompareAndSwap(true, false) {
 			w.WriteHeader(503)
 			return
@@ -266,7 +276,7 @@ func testMeteredHandoverTraffic(t *testing.T, binary, pin, mode string, afterApp
 			}
 		}
 		mu.Unlock()
-		if path == "/api/v1/agent/metered-route-transactions/receipt" && loseAfter.CompareAndSwap(true, false) || path == "/api/v1/agent/native-usage" && report.Quiesced && loseFinal.CompareAndSwap(true, false) {
+		if path == "/api/v1/agent/metered-route-transactions/receipt" && loseAfter.CompareAndSwap(true, false) || path == "/api/v1/agent/native-usage" && report.Quiesced && loseFinal.CompareAndSwap(true, false) || path == "/api/v1/agent/metered-health/receipt" && healthLoseAfter.CompareAndSwap(true, false) {
 			if rec.Code >= 400 {
 				t.Error("loss did not follow real commit", rec.Code)
 			}
@@ -426,7 +436,7 @@ func testMeteredHandoverTraffic(t *testing.T, binary, pin, mode string, afterApp
 		probeID = probes[1].ID
 	}
 	for _, check := range afterApply {
-		check(handoverHealthFixture{Store: s.business, Key: key, Runtime: runtimes[1], Token: tokens[1], Plan: plan, Origin: origin, Port: portB, Credential: probeCredential, SystemProbeID: probeID, CustomerCredential: customers[0].UUID, CustomerID: customers[0].ID, Behavior: &healthBehavior, Requests: &healthRequests, Started: healthStarted, Release: healthRelease, Drain: func() { queue(1, 23, "drain", plan.TargetStageID, 0); drained = true }})
+		check(handoverHealthFixture{Server: s, Cookie: cookie, CSRF: csrf, Client: client, Endpoint: endpoint, DropBefore: &healthLoseBefore, DropAfter: &healthLoseAfter, Store: s.business, Key: key, Runtime: runtimes[1], Token: tokens[1], Plan: plan, Origin: origin, Port: portB, Credential: probeCredential, SystemProbeID: probeID, CustomerCredential: customers[0].UUID, CustomerID: customers[0].ID, Behavior: &healthBehavior, Requests: &healthRequests, Started: healthStarted, Release: healthRelease, Drain: func() { queue(1, 23, "drain", plan.TargetStageID, 0); drained = true }})
 	}
 	if !drained {
 		queue(1, 23, "drain", plan.TargetStageID, 0)

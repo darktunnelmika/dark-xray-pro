@@ -39,6 +39,10 @@ async function fixture(page:BrowserPage,role="owner"){
    if(!op){op={...(body as Plan),created_unix_nano:Date.now()*1e6,drain_command_id:"",apply_command_id:"",cancelled:false,can_publish:false,phase:"awaiting_source_drain"};state.ops.unshift(op);source.handover_id=op.id;target.handover_id=op.id;source.controls.stage=false;target.controls={stage:false};}reply=op;
   }else if(path.endsWith("/cancel")){
    const op=state.ops.find(o=>o.id===path.split("/").at(-2))!;if(op.drain_command_id)return route.fulfill({status:409,json:{error:"conflict"}});op.cancelled=true;op.phase="cancelled";reply=op;
+  }else if(path.endsWith("/health")){
+   const op=state.ops.find(o=>o.id===path.split("/").at(-2))!;
+   let v=op.health_intents?.find(i=>i.id===body.id);
+   if(!v){v={id:body.id,handover_id:op.id,node_id:op.target_node,installation_id:op.target_installation,inbound_id:body.inbound_id,endpoint_sha:sha,expires_unix_nano:(Date.now()+8000)*1e6};op.health_intents=[v,...(op.health_intents??[])];}reply=v;
   }else{
    const input=body as CommandRequest,op=state.ops.find(o=>o.id===path.split("/").at(-2));
    const v=input.action==="drain"?source:target;
@@ -59,6 +63,41 @@ async function choose(p:BrowserPage){await panel(p).getByRole("combobox",{name:"
 async function confirm(p:BrowserPage,name:string){p.once("dialog",d=>d.accept());await panel(p).getByRole("button",{name,exact:true}).click();}
 async function refresh(p:BrowserPage){await panel(p).getByRole("button",{name:"Refresh transfer status",exact:true}).click();}
 async function record(p:BrowserPage){await panel(p).getByRole("button",{name:"Review transfer",exact:true}).click();await confirm(p,"Record reviewed transfer");}
+
+async function healthFixture(page:BrowserPage){
+ const f=await fixture(page);f.state.scope.health_enabled=true;
+ const src=f.state.source,dst=f.state.target,usage=structuredClone(src.status.usage!);
+ src.status.observed={...src.status.observed,process_ready:false,active_sequence:0,active_sha:"",lease_expires_unix_nano:0};
+ src.status.usage={...usage,settlement:{epoch_id:usage.epoch_id!,sequence:"2",sha256:sha}};
+ dst.status.current_stage_id=id(21);delete dst.status.staged_id;dst.status.serial=32;dst.status.usage={epoch_id:id(42),epoch_sha:sha,admission_sha:sha,settlement:zero()};
+ dst.status.observed={...src.status.observed,highwater:1,saved_sequence:1,saved_sha:sha,active_sequence:1,active_sha:sha,process_ready:true,lease_expires_unix_nano:(Date.now()+60000)*1e6};
+ const c=receipt(row(dst.node_id,dst.installation_id,32,"apply",id(21)),"applied",dst.status.observed,dst.status.usage);
+ dst.commands=[c];dst.controls={stage:false};
+ const op:Handover={id:id(88),source_node:src.node_id,target_node:dst.node_id,source_installation:src.installation_id,target_installation:dst.installation_id,source_stage_id:id(11),target_stage_id:id(21),source_usage:usage,created_unix_nano:Date.now()*1e6,drain_command_id:"",apply_command_id:c.id,apply_command:c,cancelled:false,can_publish:false,phase:"target_applied_health_required"};
+ f.state.ops=[op];await open(page);await panel(page).getByRole("button",{name:"View transfer",exact:true}).click();
+ await panel(page).getByRole("combobox",{name:"Inbound to test",exact:true}).selectOption("7612");return {...f,op};
+}
+
+test("N15 explicit health action reconciles a lost committed reply and shows historical evidence",async({page})=>{
+ const f=await healthFixture(page);const button=panel(page).getByRole("button",{name:"Request protocol health test",exact:true});
+ await expect(button).toBeEnabled();expect(f.writes).toHaveLength(0);
+ page.once("dialog",d=>d.dismiss());await button.click();expect(f.writes).toHaveLength(0);
+ f.state.post="after";await confirm(page,"Request protocol health test");
+ await expect(panel(page).getByText("Health request recorded · waiting for Agent or receipt",{exact:true})).toBeVisible();
+ await expect(panel(page).getByRole("button",{name:"Retry exact request",exact:true})).toHaveCount(0);
+ expect(f.writes).toHaveLength(1);expect(f.writes[0].path).toBe(base+"/"+f.op.id+"/health");expect(Object.keys(f.writes[0].body as object).sort()).toEqual(["confirm_probe","id","inbound_id"]);
+ await expect(button).toBeDisabled();f.op.historical_health_evidence={challenge_id:id(89),handover_id:f.op.id,request_sha:sha,receipt_sha:sha,accepted_unix_nano:Date.now()*1e6,replayed:false};
+ await refresh(page);await expect(panel(page).getByText("Historical protocol health receipt recorded · no subscription published",{exact:true})).toBeVisible();
+ await expect(button).toBeDisabled();expect(f.op.can_publish).toBe(false);expect(f.writes).toHaveLength(1);
+});
+
+test("N15 uncommitted health action survives reload and retries the exact body",async({page})=>{
+ const f=await healthFixture(page);f.state.post="before";await confirm(page,"Request protocol health test");
+ await expect(panel(page).getByRole("button",{name:"Retry exact request",exact:true})).toBeEnabled();const raw=f.writes[0].raw;
+ await page.reload();await panel(page).getByRole("button",{name:"Open Node transfer",exact:true}).click();
+ await expect(panel(page).getByRole("button",{name:"Retry exact request",exact:true})).toBeEnabled();expect(f.writes).toHaveLength(1);
+ f.state.post="normal";await confirm(page,"Retry exact request");await expect.poll(()=>f.writes.length).toBe(2);expect(f.writes[1].raw).toBe(raw);expect(f.writes[1].csrf).toBe(csrf);
+});
 
 test("N10 explicit review, source final receipt and separate target request",async({page})=>{
  const f=await fixture(page);await open(page);await choose(page);expect(f.writes).toHaveLength(0);

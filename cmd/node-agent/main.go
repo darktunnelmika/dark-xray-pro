@@ -216,6 +216,10 @@ func main() {
 	var transactionRuntime *managedxray.TransactionRuntime
 	routeEnabled := os.Getenv("DARK_PRO_ENABLE_ROUTE_TRANSACTIONS") == "1"
 	meteredRouteEnabled := os.Getenv("DARK_PRO_ENABLE_METERED_ROUTE_TRANSACTIONS") == "1"
+	healthEnabled := os.Getenv("DARK_PRO_ENABLE_METERED_HEALTH") == "1"
+	if healthEnabled && !meteredRouteEnabled {
+		log.Fatal("protocol health requires the separate metered LAB executor")
+	}
 	var usageSender *uc.Sender
 	remoteMetered := os.Getenv("DARK_PRO_ENABLE_NATIVE_METERED_ADMISSION") == "1"
 	if remoteMetered && (os.Getenv("DARK_PRO_ENABLE_NATIVE_RUNTIME") != "1" || !remote) {
@@ -330,6 +334,32 @@ func main() {
 				cancel()
 				if err != nil && ctx.Err() == nil {
 					log.Printf("route command/receipt pending; short lease and exact replay retained")
+				}
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+				}
+			}
+		}()
+	}
+	// Independent of the command worker: verifier delay must never block
+	// delivery of an emergency drain or the runtime's lease expiry.
+	if transactionRuntime != nil && healthEnabled {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			ticker := time.NewTicker(3 * time.Second)
+			defer ticker.Stop()
+			for {
+				if ctx.Err() != nil {
+					return
+				}
+				attempt, cancel := context.WithTimeout(ctx, 12*time.Second)
+				err := transactionRuntime.SyncMeteredHealth(attempt, client, endpoint)
+				cancel()
+				if err != nil && ctx.Err() == nil {
+					log.Printf("protocol health pending or unknown; no lease renewed")
 				}
 				select {
 				case <-ctx.Done():
