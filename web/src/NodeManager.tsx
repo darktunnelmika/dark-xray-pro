@@ -155,7 +155,10 @@ export default function NodeManager({ language }: { language: Language }) {
           !(Date.parse(result.expires_at) > Date.now())) throw new Error("unexpected_pairing_response");
       setTicket(result);
       setCancelId(result.node_id);
-    } catch (err) { setTicket(null); setNotice(messageFor(err)); }
+    } catch (err) {
+      // A rejected request does not revoke the existing one-time invitation.
+      setNotice(messageFor(err));
+    }
     finally { setBusy(false); }
   }
   async function revoke(id: string) {
@@ -163,7 +166,8 @@ export default function NodeManager({ language }: { language: Language }) {
     setBusy(true);setNotice("");setCopied(false);
     try {
       await mutation("/api/v1/workspace/nodes/invites/" + encodeURIComponent(id) + "/cancel", {}, session.csrf_token);
-      setTicket(null);setNotice(t.codeCancelled);
+      setTicket(pending => pending?.node_id === id ? null : pending);
+      setNotice(t.codeCancelled);
     } catch(err) { setNotice(messageFor(err)); }
     finally { setBusy(false); }
   }

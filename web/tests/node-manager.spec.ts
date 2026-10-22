@@ -212,6 +212,62 @@ test("owner creates and revokes a one-use pairing ticket without storing it in b
   await expect(page.getByText(/Pending Pair Code revoked/)).toHaveCount(0);
 });
 
+test("a duplicate invitation conflict preserves the existing live Pair Code", async ({ page }) => {
+  const probe = await setup(page);
+  await page.goto("/nodes");
+  await login(page);
+  await page.getByLabel("New Node ID").fill("qa-new-node");
+  await page.getByLabel("Display name").fill("QA node");
+  await page.getByRole("button", { name: "Generate one-time Pair Code" }).click();
+  await expect(page.locator(".pro-node-ticket-code")).toHaveText(pairCode);
+
+  let conflicts = 0;
+  await page.route("**/api/v1/workspace/nodes/invites", async route => {
+    expect(route.request().method()).toBe("POST");
+    expect(route.request().headers()["x-csrf-token"]).toBe("a".repeat(64));
+    expect(route.request().postDataJSON().node_id).toBe("qa-new-node");
+    conflicts += 1;
+    return route.fulfill({ status: 409, json: { error: "node_or_pairing_conflict" } });
+  });
+  await page.getByRole("button", { name: "Generate one-time Pair Code" }).click();
+  await expect(page.getByText("This Node ID is already paired or has an unexpired invitation. Cancel the invitation or use another ID.", { exact: true })).toBeVisible();
+  await expect(page.locator(".pro-node-ticket-code")).toHaveText(pairCode);
+  await expect(page.getByRole("button", { name: "Copy Pair Code", exact: true })).toBeEnabled();
+  expect(conflicts).toBe(1);
+  expect(probe.invites()).toBe(1);
+  expect(probe.cancellations()).toBe(0);
+});
+
+test("revoking another invitation preserves the live Pair Code until its own cancellation", async ({ page }) => {
+  const probe = await setup(page);
+  await page.goto("/nodes");
+  await login(page);
+  await page.getByLabel("New Node ID").fill("qa-new-node");
+  await page.getByLabel("Display name").fill("QA node");
+  await page.getByRole("button", { name: "Generate one-time Pair Code" }).click();
+  await expect(page.locator(".pro-node-ticket-code")).toHaveText(pairCode);
+
+  let otherCancellations = 0;
+  await page.route("**/api/v1/workspace/nodes/invites/qa-older-node/cancel", async route => {
+    expect(route.request().method()).toBe("POST");
+    expect(route.request().headers()["x-csrf-token"]).toBe("a".repeat(64));
+    expect(route.request().postDataJSON()).toEqual({});
+    otherCancellations += 1;
+    return route.fulfill({ json: { cancelled: true } });
+  });
+  await page.getByLabel("Unclaimed Node ID").fill("qa-older-node");
+  await page.getByRole("button", { name: "Revoke unused invitation", exact: true }).click();
+  await expect(page.getByText("Pending Pair Code revoked. No Node or client was changed.", { exact: true })).toBeVisible();
+  await expect(page.locator(".pro-node-ticket-code")).toHaveText(pairCode);
+  await expect(page.getByRole("button", { name: "Copy Pair Code", exact: true })).toBeEnabled();
+  expect(otherCancellations).toBe(1);
+  expect(probe.cancellations()).toBe(0);
+
+  await page.getByRole("button", { name: "Cancel unused code", exact: true }).click();
+  await expect(page.locator(".pro-node-ticket-code")).toHaveCount(0);
+  expect(probe.cancellations()).toBe(1);
+});
+
 test("expired pairing secret is removed from the active enrollment view", async ({ page }) => {
   const probe = await setup(page);
   await page.goto("/nodes");
