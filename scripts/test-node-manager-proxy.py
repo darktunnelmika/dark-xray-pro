@@ -97,12 +97,21 @@ location / {{ return 403; }}
                                       (handovers + "/" + "a" * 32 + "/cancel", {"POST"}),
                                       (handovers + "/" + "a" * 32 + "/health", {"POST"}),
                                       (handovers + "/" + "a" * 32 + "/health-rounds", {"POST"}),
+                                      (handovers + "/" + "a" * 32 + "/lab-subscription-snapshot", {"POST"}),
+                                      ("/api/v1/workspace/clients/synthetic-a/subscription", {"GET"}),
+                                      *(("/api/v1/workspace/clients/synthetic-a/subscription/" + action, {"POST"})
+                                        for action in ("issue", "reveal", "rotate", "revoke")),
                                       (metered + "/" + "a" * 32 + "/abandon", {"POST"})):
                     for method in ("GET", "POST", "PUT", "DELETE", "PATCH"):
                         before = len(Backend.seen)
                         status = request(port, path, method)
                         assert status == (401 if method in allowed else 403), (path, method, status)
                         assert len(Backend.seen) == before + (method in allowed)
+                consumer = "/api/v1/subscriptions/" + "a" * 43
+                for method in ("GET", "HEAD", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"):
+                    before = len(Backend.seen)
+                    assert request(port, consumer + "?format=raw", method) == (401 if method == "GET" else 405)
+                    assert len(Backend.seen) == before + (method == "GET")
                 for path in ("/api/v1/agent/config", "/api/v1/admin/nodes", "/api/v1/workspace/nodes/a/delete",
                              "/api/v1/workspace/nodes/a/name/extra", "/api/v1/workspace/nodes/a.b/name",
                              "/api/v1/workspace/nodes/a/b/dependencies",
@@ -119,6 +128,11 @@ location / {{ return 403; }}
                              handovers + "/" + "A" * 32 + "/health-rounds",
                              handovers + "/" + "a" * 32 + "/health-round",
                              handovers + "/abc/health-rounds",
+                             handovers + "/" + "a" * 32 + "/lab-subscription-snapshot/extra",
+                             "/api/v1/workspace/clients/a/subscription/enable",
+                             "/api/v1/workspace/clients/a/subscription/reveal/extra",
+                             consumer + "/extra", consumer[:-1], consumer + "a",
+                             "/api/v1/subscriptions/enable",
                              metered + "/" + "a" * 32 + "/abandon/extra"):
                     for method in ("GET", "POST"):
                         before = len(Backend.seen)

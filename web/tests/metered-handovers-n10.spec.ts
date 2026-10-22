@@ -1,6 +1,7 @@
 import { expect, test, type Page as BrowserPage } from "@playwright/test";
 import type { Channel, Command, CommandRequest, MeteredCondition, Observation, Scope } from "../src/meteredRouteTransactions";
 import type { Handover, HealthRound, Plan } from "../src/meteredHandovers";
+import type { LabSnapshot, SubscriptionView } from "../src/labSubscriptions";
 
 const base="/api/v1/workspace/metered-handovers",csrf="a".repeat(64),id=(n:number)=>n.toString(16).padStart(32,"0"),sha="d".repeat(64);
 const zero=()=>({epoch_id:"",sequence:"0",sha256:""});
@@ -15,7 +16,10 @@ async function fixture(page:BrowserPage,role="owner"){
  const source=view("old-lab",id(1)),target=view("new-lab",id(2));
  source.status.current_stage_id=id(11);source.status.serial=2;source.status.usage=structuredClone(usage);source.status.observed={...stopped(),highwater:1,saved_sequence:1,saved_sha:sha,active_sequence:1,active_sha:sha,process_ready:true,phase:"ready",lease_expires_unix_nano:(Date.now()+30000)*1e6};source.controls={stage:true,drain:{stage_id:id(11),ports:[27612]}};
  target.status.staged_id=id(21);target.controls.apply={stage_id:id(21),ports:[27613],expires_unix_milli:Date.now()+90000};
- const state={scope,source,target,ops:[] as Handover[],post:"normal" as "normal"|"before"|"after",readError:false,fresh:true,malformed:false};
+ const state={scope,source,target,ops:[] as Handover[],post:"normal" as "normal"|"before"|"after",readError:false,fresh:true,malformed:false,
+  clients:[{id:"client-a",name:"Synthetic A",archived:false},{id:"client-b",name:"Synthetic B",archived:false},{id:"client-archived",name:"Archived synthetic",archived:true}],
+  subscriptions:{} as Record<string,SubscriptionView>,snapshotReceipts:{} as Record<string,LabSnapshot>,snapshotResponse:null as null|((v:LabSnapshot)=>unknown)};
+ for(const client of state.clients)state.subscriptions[client.id]={enabled:true,scope:"lab_single_handover",client_id:client.id,generation:1,state:"active",server_time_unix_milli:Date.now()};
  const writes:{path:string;raw:string;body:unknown;csrf:string}[]=[],reads:string[]=[];
  await page.route("**/api/v1/**",async route=>{
   const req=route.request(),path=new URL(req.url()).pathname;
@@ -23,6 +27,9 @@ async function fixture(page:BrowserPage,role="owner"){
   if(path==="/api/v1/fleet")return route.fulfill({json:{nodes:[],total_nodes:0,online_nodes:0,offline_nodes:0,as_of:new Date().toISOString()}});
   if(req.method()==="GET"){
    reads.push(path);
+   if(path==="/api/v1/workspace/clients")return route.fulfill({json:{clients:state.clients,limit:25,offset:Number(new URL(req.url()).searchParams.get("offset")),has_more:false}});
+   const subscription=path.match(/^\/api\/v1\/workspace\/clients\/([^/]+)\/subscription$/);
+   if(subscription){const v=state.subscriptions[decodeURIComponent(subscription[1])];return route.fulfill(v?{json:v}:{status:404,json:{error:"not_found"}});}
    if(path==="/api/v1/workspace/nodes")return route.fulfill({json:{mode:"new_pro_lab_only",nodes:[],agent_transport_scope:"loopback_only"}});
    if(path==="/api/v1/workspace/metered-route-transactions")return route.fulfill({json:state.scope});
    if(path===base)return route.fulfill({json:{operations:state.ops,next_cursor:""}});
@@ -47,6 +54,12 @@ async function fixture(page:BrowserPage,role="owner"){
    const op=state.ops.find(o=>o.id===path.split("/").at(-2))!;
    let v=op.health_rounds?.find(r=>r.id===body.id);
    if(!v){v={id:body.id,handover_id:op.id,node_id:op.target_node,installation_id:op.target_installation,endpoint_sha:sha,manifest_sha:sha,created_unix_nano:Date.now()*1e6,expires_unix_nano:(Date.now()+8000)*1e6,members:target.review.map((r,i)=>({inbound_id:r.inbound_id,intent_id:id(1000+(op.health_rounds?.length??0)*256+i),port:r.direct_port,state:"pending"})),state:"pending",current:false};op.health_rounds=[v,...(op.health_rounds??[])];}reply=v;
+  }else if(path.endsWith("/lab-subscription-snapshot")){
+   const op=state.ops.find(o=>o.id===path.split("/").at(-2))!,round=op.health_rounds!.find(r=>r.id===body.round_id)!;
+   let v=state.snapshotReceipts[body.event_id];
+   if(!v){v={id:id(3000+writes.length),event_id:body.event_id,client_id:body.client_id,handover_id:op.id,round_id:round.id,node_id:op.target_node,installation_id:op.target_installation,revision:body.expected_revision+1,created_unix_nano:Date.now()*1e6,expires_unix_nano:round.expires_unix_nano,route_count:round.members.length,current:round.current};state.snapshotReceipts[body.event_id]=v;const sub=state.subscriptions[body.client_id];if(sub?.enabled)sub.snapshot=v;}
+   else v={...v,replayed:true,current:v.current&&v.expires_unix_nano>Date.now()*1e6};
+   reply=state.snapshotResponse?state.snapshotResponse(structuredClone(v)):v;
   }else{
    const input=body as CommandRequest,op=state.ops.find(o=>o.id===path.split("/").at(-2));
    const v=input.action==="drain"?source:target;
@@ -197,7 +210,7 @@ test("N10 explicit review, source final receipt and separate target request",asy
  f.state.fresh=true;await refresh(page);await expect(panel(page).getByRole("button",{name:"Request destination execution",exact:true})).toBeEnabled();
  expect(f.writes).toHaveLength(2);await confirm(page,"Request destination execution");
  await expect.poll(()=>f.writes.length).toBe(3);expect(f.writes[2].body).toMatchObject({action:"apply",stage_id:id(21),drafts:[],usage:{settlement:{sequence:"0"}}});
- expect(f.writes.every(w=>w.csrf===csrf)).toBe(true);await expect(panel(page).getByText(/Subscription publication and cross-Node rollback remain unavailable/)).toBeVisible();
+ expect(f.writes.every(w=>w.csrf===csrf)).toBe(true);await expect(panel(page).getByText(/Public subscription publication and cross-Node rollback remain unavailable/)).toBeVisible();
 });
 
 test("N10 retained create survives reload with identical ID/body and no automatic retry",async({page})=>{
@@ -241,4 +254,123 @@ test("N10 Persian 320px, disabled runtime and representative boundary",async({pa
 
 test("N10 representative never loads transfer APIs",async({page})=>{
  const f=await fixture(page,"representative");await page.goto("/nodes");await expect(panel(page)).toHaveCount(0);expect(f.reads.some(p=>p.startsWith(base))).toBe(false);expect(f.writes).toHaveLength(0);
+});
+
+const subscriptionPanel=(p:BrowserPage)=>p.getByRole("region",{name:"LAB subscription snapshot",exact:true});
+const recordSnapshot="Record LAB subscription snapshot",retrySnapshot="Retry exact snapshot request",currentSnapshot="Current LAB delivery verified at recording";
+async function subscriptionFixture(page:BrowserPage,enabled=true){
+ const f=await healthFixture(page,true);f.state.scope.lab_subscriptions_enabled=enabled;
+ const created=Date.now()*1e6;
+ const round:HealthRound={id:id(500),handover_id:f.op.id,node_id:f.op.target_node,installation_id:f.op.target_installation,endpoint_sha:sha,manifest_sha:sha,created_unix_nano:created,expires_unix_nano:created+8e9,state:"complete",current:true,members:f.state.target.review.map((r,i)=>({inbound_id:r.inbound_id,port:r.direct_port,intent_id:id(600+i),state:"accepted",challenge_id:id(700+i),accepted_unix_nano:created}))};
+ f.op.health_rounds=[round];await refresh(page);return{...f,round};
+}
+async function selectSubscriptionClient(page:BrowserPage,client="client-a"){
+ await subscriptionPanel(page).getByRole("combobox",{name:"Subscription client",exact:true}).selectOption(client);
+}
+async function recordSubscription(page:BrowserPage){
+ page.once("dialog",d=>d.accept());await subscriptionPanel(page).getByRole("button",{name:recordSnapshot,exact:true}).click();
+}
+
+test("N18 snapshot feature off stays hidden; active client token and current revision require explicit confirmation",async({page})=>{
+ const f=await subscriptionFixture(page,false);
+ await expect(subscriptionPanel(page)).toHaveCount(0);expect(f.reads.some(p=>p==="/api/v1/workspace/clients")).toBe(false);expect(f.writes).toHaveLength(0);
+ f.state.scope.lab_subscriptions_enabled=true;await refresh(page);
+ const box=subscriptionPanel(page),button=box.getByRole("button",{name:recordSnapshot,exact:true});
+ await expect(button).toBeDisabled();expect(f.writes).toHaveLength(0);
+ const archived=box.getByRole("option",{name:"Archived synthetic (client-archived)",exact:true});await expect(archived).toHaveJSProperty("disabled",true);
+ const revoked=f.state.subscriptions["client-b"];if(revoked.enabled){revoked.generation=2;revoked.state="revoked";}
+ await selectSubscriptionClient(page,"client-b");await expect(box.getByText(/Issue a subscription token/)).toBeVisible();await expect(button).toBeDisabled();
+ const active=f.state.subscriptions["client-a"],oldCreated=(Date.now()-10000)*1e6;
+ if(active.enabled)active.snapshot={id:id(799),event_id:id(798),client_id:"client-a",handover_id:f.op.id,round_id:id(797),node_id:f.op.target_node,installation_id:f.op.target_installation,revision:4,created_unix_nano:oldCreated,expires_unix_nano:oldCreated+7e9,route_count:2,current:false};
+ await selectSubscriptionClient(page);await expect(button).toBeEnabled();expect(f.writes).toHaveLength(0);
+ page.once("dialog",d=>d.dismiss());await button.click();expect(f.writes).toHaveLength(0);
+ await recordSubscription(page);await expect(box.getByText(currentSnapshot,{exact:true})).toBeVisible();
+ expect(f.writes).toHaveLength(1);expect(f.writes[0].path).toBe(base+"/"+f.op.id+"/lab-subscription-snapshot");expect(f.writes[0].csrf).toBe(csrf);
+ expect(f.writes[0].body).toEqual({event_id:expect.stringMatching(/^[a-f0-9]{32}$/),client_id:"client-a",round_id:f.round.id,expected_revision:4});
+ const saved=Object.values(f.state.snapshotReceipts)[0];expect(saved.id).not.toBe(saved.event_id);expect(saved.revision).toBe(5);expect(saved.expires_unix_nano).toBe(f.round.expires_unix_nano);expect(f.op.can_publish).toBe(false);
+});
+
+test("N18 complete evidence for a subset cannot enable snapshot recording",async({page})=>{
+ const f=await subscriptionFixture(page);f.round.members.pop();await refresh(page);await selectSubscriptionClient(page);
+ await expect(subscriptionPanel(page).getByText(/complete, current health round for every destination Inbound/)).toBeVisible();
+ await expect(subscriptionPanel(page).getByRole("button",{name:recordSnapshot,exact:true})).toBeDisabled();expect(f.writes).toHaveLength(0);
+});
+
+test("N18 exact nonsecret snapshot retry survives reload and remains scoped to its original client and round",async({page})=>{
+ const f=await subscriptionFixture(page);await selectSubscriptionClient(page);f.state.post="before";await recordSubscription(page);
+ await expect(subscriptionPanel(page).getByRole("button",{name:retrySnapshot,exact:true})).toBeEnabled();
+ const raw=f.writes[0].raw,body=f.writes[0].body as {event_id:string;client_id:string;round_id:string;expected_revision:number};
+ const retained=await page.evaluate(()=>Object.entries(sessionStorage).filter(([key])=>key.startsWith("dark-pro-lab-snapshot-attempt:")));
+ expect(retained).toHaveLength(1);expect(JSON.parse(retained[0][1])).toEqual(body);expect(Object.keys(JSON.parse(retained[0][1])).sort()).toEqual(["client_id","event_id","expected_revision","round_id"]);
+ await page.reload();await panel(page).getByRole("button",{name:"Open Node transfer",exact:true}).click();await panel(page).getByRole("button",{name:"View transfer",exact:true}).click();
+ await expect(subscriptionPanel(page).getByRole("button",{name:retrySnapshot,exact:true})).toBeEnabled();
+ await expect(subscriptionPanel(page).getByRole("combobox",{name:"Subscription client",exact:true})).toHaveValue("client-a");await expect(subscriptionPanel(page).getByRole("combobox",{name:"Subscription client",exact:true})).toBeDisabled();expect(f.writes).toHaveLength(1);
+ f.state.post="normal";await subscriptionPanel(page).getByRole("button",{name:retrySnapshot,exact:true}).click();await expect(subscriptionPanel(page).getByText(currentSnapshot,{exact:true})).toBeVisible();
+ expect(f.writes).toHaveLength(2);expect(f.writes[1].raw).toBe(raw);expect(f.writes[1].csrf).toBe(csrf);
+ expect(await page.evaluate(()=>Object.keys(sessionStorage).filter(k=>k.startsWith("dark-pro-lab-snapshot-attempt:")))).toHaveLength(0);
+});
+
+test("N18 changing transfer never reuses a retained snapshot request",async({page})=>{
+ const f=await subscriptionFixture(page);await selectSubscriptionClient(page);f.state.post="before";await recordSubscription(page);
+ await expect(subscriptionPanel(page).getByRole("button",{name:retrySnapshot,exact:true})).toBeEnabled();
+ const next=structuredClone(f.op);next.id=id(89);next.health_rounds!.forEach(r=>{r.id=id(501);r.handover_id=next.id;});f.state.ops.push(next);
+ await refresh(page);await expect(panel(page).getByRole("button",{name:"View transfer",exact:true})).toHaveCount(2);await panel(page).getByRole("button",{name:"View transfer",exact:true}).last().click();
+ await expect(panel(page).getByRole("article",{name:"Selected transfer",exact:true}).getByText(next.id,{exact:true})).toBeVisible();
+ await expect(subscriptionPanel(page).getByRole("button",{name:retrySnapshot,exact:true})).toHaveCount(0);await expect(subscriptionPanel(page).getByRole("combobox",{name:"Subscription client",exact:true})).toHaveValue("");
+ expect(f.writes).toHaveLength(1);expect(await page.evaluate(()=>Object.keys(sessionStorage).filter(k=>k.startsWith("dark-pro-lab-snapshot-attempt:")))).toHaveLength(1);
+});
+
+for(const [name,mutate] of [
+ ["event",(v:LabSnapshot)=>{v.event_id=id(901);}],["client",(v:LabSnapshot)=>{v.client_id="client-b";}],
+ ["round",(v:LabSnapshot)=>{v.round_id=id(902);}],["operation",(v:LabSnapshot)=>{v.handover_id=id(903);}],
+ ["original deadline",(v:LabSnapshot)=>{v.created_unix_nano+=1e9;v.expires_unix_nano+=1e9;}],
+] as const){
+ test(`N18 a mismatched ${name} snapshot receipt remains unconfirmed`,async({page})=>{
+  const f=await subscriptionFixture(page);f.state.snapshotResponse=v=>{mutate(v);return v;};await selectSubscriptionClient(page);await recordSubscription(page);
+  await expect(subscriptionPanel(page).getByRole("button",{name:retrySnapshot,exact:true})).toBeEnabled();await expect(subscriptionPanel(page).getByText(currentSnapshot,{exact:true})).toHaveCount(0);
+  expect(f.writes).toHaveLength(1);expect(await page.evaluate(()=>Object.keys(sessionStorage).filter(k=>k.startsWith("dark-pro-lab-snapshot-attempt:")))).toHaveLength(1);
+ });
+}
+
+test("N18 metadata for a different client cannot enable recording",async({page})=>{
+ const f=await subscriptionFixture(page);f.state.subscriptions["client-a"]={...f.state.subscriptions["client-b"]};await selectSubscriptionClient(page);
+ await expect(subscriptionPanel(page).getByRole("alert")).toBeVisible();await expect(subscriptionPanel(page).getByRole("button",{name:recordSnapshot,exact:true})).toBeDisabled();expect(f.writes).toHaveLength(0);
+});
+
+test("N18 a recorded result loses its current claim after round change, failed observation and scope withdrawal",async({page})=>{
+ const f=await subscriptionFixture(page);await selectSubscriptionClient(page);await recordSubscription(page);
+ const box=subscriptionPanel(page);await expect(box.getByText(currentSnapshot,{exact:true})).toBeVisible();
+ const old=structuredClone(f.round);f.round.current=false;f.round.state="state_changed";await refresh(page);
+ await expect(box.getByText(currentSnapshot,{exact:true})).toHaveCount(0);await expect(box.getByText("Snapshot recorded; current delivery not confirmed",{exact:true})).toBeVisible();
+ Object.assign(f.round,old);await refresh(page);await expect(box.getByText(currentSnapshot,{exact:true})).toBeVisible();
+ f.state.readError=true;await refresh(page);await expect(box.getByText(currentSnapshot,{exact:true})).toHaveCount(0);
+ f.state.readError=false;f.state.scope.enabled=false;f.state.scope.nodes=[];delete f.state.scope.node_id;delete f.state.scope.installation_id;await refresh(page);
+ await expect(box.getByText(currentSnapshot,{exact:true})).toHaveCount(0);await expect(box.getByRole("button",{name:recordSnapshot,exact:true})).toBeDisabled();expect(f.writes).toHaveLength(1);
+});
+
+test("N18 confirmation cannot send after the original health deadline passes",async({page})=>{
+ const f=await subscriptionFixture(page);await selectSubscriptionClient(page);
+ f.round.expires_unix_nano=(Date.now()+1400)*1e6;await refresh(page);await expect(subscriptionPanel(page).getByRole("button",{name:recordSnapshot,exact:true})).toBeEnabled();
+ page.once("dialog",async d=>{await new Promise(resolve=>setTimeout(resolve,1700));await d.accept();});
+ await subscriptionPanel(page).getByRole("button",{name:recordSnapshot,exact:true}).click();
+ await expect(subscriptionPanel(page).getByRole("button",{name:recordSnapshot,exact:true})).toBeDisabled();expect(f.writes).toHaveLength(0);
+});
+
+test("N18 a lost committed snapshot can be retried historically without extending its deadline or showing current delivery",async({page})=>{
+ const f=await subscriptionFixture(page);await selectSubscriptionClient(page);f.round.expires_unix_nano=(Date.now()+2200)*1e6;await refresh(page);
+ f.state.post="after";await recordSubscription(page);const box=subscriptionPanel(page);
+ await expect(box.getByRole("button",{name:retrySnapshot,exact:true})).toBeEnabled();const original=f.writes[0].raw,deadline=Object.values(f.state.snapshotReceipts)[0].expires_unix_nano;
+ await expect(box.getByText(/complete, current health round for every destination Inbound/)).toBeVisible({timeout:4000});
+ await expect(box.getByRole("button",{name:retrySnapshot,exact:true})).toBeEnabled();f.state.post="normal";await box.getByRole("button",{name:retrySnapshot,exact:true}).click();
+ await expect(box.getByText("Snapshot recorded; current delivery not confirmed",{exact:true})).toBeVisible();await expect(box.getByText(currentSnapshot,{exact:true})).toHaveCount(0);
+ expect(f.writes).toHaveLength(2);expect(f.writes[1].raw).toBe(original);expect(Object.values(f.state.snapshotReceipts)[0].expires_unix_nano).toBe(deadline);expect(f.op.can_publish).toBe(false);
+});
+
+test("N18 snapshot storage failure prevents POST and narrow Persian remains readable",async({page})=>{
+ await page.setViewportSize({width:320,height:780});const f=await subscriptionFixture(page);await selectSubscriptionClient(page);
+ await page.evaluate(()=>{const original=Storage.prototype.setItem;Storage.prototype.setItem=function(key,value){if(key.startsWith("dark-pro-lab-snapshot-attempt:"))throw Error("quota");return original.call(this,key,value);};});
+ await recordSubscription(page);await expect(subscriptionPanel(page).getByRole("alert")).toBeVisible();expect(f.writes).toHaveLength(0);
+ await page.getByRole("button",{name:"Switch language",exact:true}).click();
+ await expect(subscriptionPanel(page).getByRole("heading",{name:"آماده‌سازی خروجی اشتراک LAB",exact:true})).toBeVisible();await expect(subscriptionPanel(page).getByRole("button",{name:"ثبت نسخهٔ اشتراک LAB",exact:true})).toBeDisabled();
+ expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
 });

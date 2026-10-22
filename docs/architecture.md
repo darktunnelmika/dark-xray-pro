@@ -9,6 +9,12 @@ foundation and its early phases. Later modules supersede several "future" and
 feature status. WARP and ad blocking are entirely excluded from PRO. Existing
 Telegram parity and the recorded representative-bot upgrades remain in scope.
 
+The current [N18 subscription contract](native-lab-subscriptions-n18.fa.md) adds
+revocable client tokens and immutable, generation/revision-fenced LAB snapshots.
+Consumer reads revalidate the complete N17 evidence, applied candidate and fixed
+deadline. This opt-in schema13 path leaves production publication and public
+endpoint/lease lifecycle gates open; normal databases remain schema8.
+
 ## Technology
 
 Go standard-library HUB and Node Agent, React + TypeScript + Vite UI, Linux telemetry. A future durable storage implementation will isolate current customer records, immutable billing ledgers and compact operational read models. This foundation deliberately introduces *no* live Xray/Node control actions and *no* user database.

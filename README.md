@@ -18,16 +18,20 @@ This repository is separate from the existing DARK XRAY HUB. Do not connect lega
 ## Current feature scope and status — 22 October 2026
 
 The [source-linked feature audit](docs/release/feature-scope-and-status.fa.md)
-is the current cross-module reference, audited at `c740c48` after [N17 / PR #96](https://github.com/darktunnelmika/dark-xray-pro/pull/96).
+is the current cross-module reference, audited at `c740c48` after [N17 / PR #96](https://github.com/darktunnelmika/dark-xray-pro/pull/96)
+and extended by [N18 native LAB subscription delivery](docs/native-lab-subscriptions-n18.fa.md).
 It distinguishes implemented source, bounded LAB acceptance and remaining
 product work. Native customer/representative management, credit and usage
 ledgers, Node enrollment/metrics, Inbound lifecycle and isolated metered
 handover/health have substantial implementations. N17 verifies the complete
 inbound set derived from the exact applied destination candidate in a bounded
-loopback health round; it does not publish a
-subscription or prove public customer ingress.
+loopback health round. N18 adds persistent revocable client tokens, immutable
+CAS-fenced snapshots, raw/base64 VLESS delivery and scoped browser controls.
+Every fetch rechecks the exact applied candidate and the original health/lease
+deadline. Delivery is explicitly LAB-only, with at most the remaining eight-second
+round window; public customer ingress and production publication are not proven.
 
-Still open: native subscription delivery and atomic route publication; complete
+Still open: public subscription delivery and atomic route publication; complete
 Node lifecycle and real Tunnel/Dark Swap forwarding; verified IP/HWID and
 first-connection timing; strict shared multi-Node quota and operational recovery;
 Marketplace checkout and Telegram/Mini App; full Backup/Restore and Dark Restore;

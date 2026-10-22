@@ -272,6 +272,14 @@ func main() {
 			log.Fatal("health rounds configuration refused: ", err)
 		}
 	}
+	if os.Getenv("DARK_PRO_ENABLE_LAB_SUBSCRIPTIONS") == "1" {
+		if os.Getenv("DARK_PRO_ENABLE_METERED_HEALTH_ROUNDS") != "1" {
+			log.Fatal("LAB subscriptions require explicitly enabled complete health rounds")
+		}
+		if err := service.EnableLabSubscriptions(); err != nil {
+			log.Fatal("LAB subscription configuration refused: ", err)
+		}
+	}
 	if os.Getenv("DARK_PRO_ENABLE_CONFIG_STAGE") == "1" {
 		if *agentListen == "" || os.Getenv("DARK_PRO_ENABLE_REMOTE_AGENT") != "1" {
 			log.Fatal("encrypted config staging requires dedicated verified remote Agent TLS listener")

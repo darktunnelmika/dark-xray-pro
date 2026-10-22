@@ -134,6 +134,7 @@ jobs:
           required={name}|{name+'/'+s for s in ('verified-and-bound','reject-wrong-verifier','drain-during-probe','owner-agent-lost-replies','owner-agent-complete-round')}
           passed=collections.Counter(e.get('Test') for e in events if e.get('Action')=='pass')
           assert all(passed[n]==3 for n in required),dict(passed)
+          assert sum('LAB_SUBSCRIPTION_REAL_PASS:' in e.get('Output','') for e in events)==3
           assert not any(e.get('Action') in ('skip','fail') for e in events)
           assert not any('WARNING: DATA RACE' in e.get('Output','') for e in events)
           for e in events:
