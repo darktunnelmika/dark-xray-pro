@@ -4,9 +4,11 @@
 `c740c48dea5d25ba61ebc7c55aa7ae2c2ec2c8b3`، درخت
 `d7f5e3603fcf68934bb5b85881439d6954b80946`، پس از
 [PR #96 / N17](https://github.com/darktunnelmika/dark-xray-pro/pull/96).
+افزودهٔ همین نسخه: [N18 — توکن و خروجی اشتراک LAB](../native-lab-subscriptions-n18.fa.md)،
+بر مبنای شاخهٔ اصلی پس از ممیزی PR #97؛ سایر ردیف‌ها همچنان از ممیزی مبنا هستند.
 
 **نتیجه: PRO هنوز نسخهٔ کامل و آمادهٔ جایگزینی نیست.** بخش‌های اصلی کسب‌وکار،
-هویت نود، حسابداری، Inbound و انتقال آزمایشگاهی پیاده شده‌اند؛ انتشار اشتراک،
+هویت نود، حسابداری، Inbound، انتقال و تحویل اشتراک آزمایشگاهی پیاده شده‌اند؛ انتشار اشتراک عمومی،
 مسیرهای چندنودی عملیاتی، فروش کامل، ربات، بکاپ و چند گیت امنیت و پایداری بازند.
 این سند مرجع مشترک دامنه و وضعیت است تا یک مرحلهٔ موفق، به معنی پایان کل محصول
 برداشت نشود و امکانات انجام‌شده نیز به‌علت متن قدیمی «ساخته‌نشده» گزارش نشوند.
@@ -50,7 +52,7 @@ probe در [تنظیمات بدون listener](../../internal/xrayconfig/stopped.
 | F04 — Inbounds و Hosts | Native VLESS/REALITY با rendererِ TCP/Vision و gRPC؛ اتصال مشتری، کلید رمزگذاری‌شده، ویرایش/توقف/آرشیو با حفظ UUID/حساب‌ها؛ draft چند Host و پورت مستقل | پذیرش runtime همهٔ پروتکل/transportهای موردنیاز، مدیریت عملیاتی کامل Hosts/چند IP و مسیر عمومی؛ rendererِ gRPC مدرک پشتیبانی metered final-TCP نیست | [lifecycle](../native-inbound-lifecycle.md)، [renderer](../../internal/xrayconfig/render.go)، [route drafts](../../internal/business/native_route_drafts.go) |
 | F05 — انتقال نود و N17 | reservation، توقف و تسویهٔ مبدأ، Apply/ACK مقصد، receipt ضدتکرار و round سلامت همهٔ اینباندهای candidate؛ آزمون واقعی محدود در محیط ایزوله | تعویض مسیر مصرف‌کننده، publication اتمیک، ادامه/ابطال lease، بازیابی و rollback کل انتقال و آزادسازی صحیح رزروها | [handover](../../internal/business/metered_handovers.go)، [N17](../metered-health-rounds-n17.fa.md) |
 | F06 — Direct/Tunnel/Dark Swap | انتخاب مستقل مسیرها، wizard سه‌فیلدی، draft رمزگذاری‌شده، بررسی برخورد پورت/چرخه و readiness مستقل دو سمت | forwarding واقعی چند hop، failover/last-good، حفظ upstream و سایر نودها، Apply/ACK هر مسیر، مصرف یکتای مقصد و Live/۱h/۲۴h قابل‌انتساب. builderهای فعلی Swap را رد می‌کنند | [route transaction](../../internal/business/route_transactions.go)، [metered route](../../internal/business/metered_routes.go)، [two-hop readiness](../inbounds-p0g-two-hop-readiness.md) |
-| F07 — اشتراک، QR و تحویل سرویس | مقدمات هویت مشتری و اثبات محدود مقصد وجود دارد؛ `can_publish` همچنان false است | native publisher، token/access، endpoint و خروجی مصرف‌کننده، read-store/snapshot فعال، لینک/QR و تعویض اتمیک؛ proof همان host/port عمومی و lifecycle پس از انتشار | [مرز نشر N17](../metered-health-rounds-n17.fa.md)، [گیت U02](acceptance-matrix.fa.md) |
+| F07 — اشتراک، QR و تحویل سرویس | N18: توکن پایدار با صدور/نمایش/تعویض/لغو، snapshot رمزگذاری‌شده و CAS، دریافت واقعی raw/Base64 VLESS از candidate اعمال‌شده و round کامل، UI مالک/نماینده؛ فقط Direct محلی و مهلت اولیهٔ حداکثر ۸ثانیه؛ `can_publish=false` | publisher عمومی و proof همان host/port، تجمیع چند نود و تعویض اتمیک، lifecycle/renew/rollback پس از انتشار؛ QR، متادیتای مصرف/انقضا و خروجی‌های اپلیکیشن‌محور | [قرارداد N18](../native-lab-subscriptions-n18.fa.md)، [گیت U02](acceptance-matrix.fa.md) |
 | F08 — Clients و تمدید | ساخت UUID، debit نماینده و event اتمیک، همراه baseline در همان تراکنش هنگام فعال‌بودن دفتر مصرف؛ نام دستی، حجمی/نامحدود، تمدید/افزایش حجم، ویرایش محدود، توقف/آرشیو و عملیات گروهی اتمیک؛ جست‌وجوی سراسری و pagination | Import/Export بومی مشتریان با حفظ هویت، روابط و مصرف و اعتبارسنجی پیش از اعمال؛ شروع مدت از اولین اتصال، تحویل سرویس و مصرف زندهٔ قابل اتکا؛ «ویرایش همه‌چیز» موجود نیست و تغییر نوع پلن/مالکیت/UUID یا refund صندلی جزو ویرایش فعلی نیست | [Store](../../internal/business/store.go)، [business API](../../internal/api/business.go)، [usage seed](../../internal/business/usage.go)، [lifecycle](../../internal/business/lifecycle.go)، [V8](../client-profile-editor-v8.md)، [search](../client-global-search-v4.md) |
 | F09 — Groups و Representatives | گروه پایدار، انتقال عضویت بدون حذف مشتری/مصرف، مدیریت نماینده و اعتبار/مجوز/تعلیق/ابطال نشست، فهرست و تراکنش‌های واقعی | گزارش مصرف تاریخی گروه و تطبیق گروه/نماینده در Dark Restore؛ نقش نمایندهٔ پنل معادل ادمین ربات نیست | [Groups](../../internal/business/groups.go)، [V9 controls](../../internal/business/representative_controls_v9.go) |
 | F10 — دفتر اعتبار و مصرف | اعتبار حجمی و نامحدود کاربر×ماه، تمدید بدون کسر تکراری، baseline صفر فقط برای مشتری تازه، شمارندهٔ صحیح، receipt و replay، ingest با Registry واقعی، outbox پایدار و settlement/hold | سقف سخت مشترک حجم میان نودهای هم‌زمان، قطع فقط مشتری تمام‌شده با حفظ اتصال مشتری دیگر در همهٔ مسیرهای لازم، رفع عملیاتی unknown-tail و پذیرش بازیابی/فشار | [ledger](../../internal/usageledger/ledger.go)، [usage API](../../internal/api/usage.go)، [metering](../distributed-native-metering-v1.md) |
@@ -70,6 +72,12 @@ Vision را اثبات می‌کند. تست تمام اینباندهای هم�
 عمومی، CDN، Tunnel یا خروجی واقعی subscription نیست. تغییر یک bool به
 `can_publish=true` جای publisher، manifest، proof مسیر مصرف‌کننده و تعویض
 اتمیک را نمی‌گیرد. [دامنهٔ probe](../../internal/managedxray/protocol_health_linux.go)
+
+**N18 خروجی واقعی محدود دارد.** token/access، snapshot و endpoint بومی اکنون
+پیاده شده‌اند و خروجی به همان UUID و candidate اعمال‌شده متصل است. اعتبار
+دریافت از مهلت اولیهٔ round/lease/کلاینت فراتر نمی‌رود و بعد از انقضا متوقف
+می‌شود؛ ثابت‌بودن لینک به معنی تحویل پیوسته یا آمادگی مسیر عمومی نیست.
+[مرز تحویل N18](../native-lab-subscriptions-n18.fa.md)
 
 **ledger معتبر با سقف سخت چندنودی یکی نیست.** receipt و تسویهٔ نهایی واقعی
 وجود دارند؛ API هنوز `distributed_hard_limit_verified=false` اعلام می‌کند.
@@ -96,8 +104,8 @@ checkout پرداخت‌شده، انتشار subscription یا تحویل
 
 ## ترتیب ادامهٔ توسعه
 
-1. تکمیل قرارداد و پیاده‌سازی subscription و مسیر مصرف‌کننده در LAB ایزوله؛
-   اتصال سلامت کامل به انتشار اتمیک، lease، invalidation و rollback انتقال.
+1. در امتداد N18، تکمیل manifest و proof مسیر عمومی مصرف‌کننده با fixture ایزوله؛
+   اتصال آن به انتشار اتمیک، تجمیع، lease، invalidation و rollback انتقال.
 2. تکمیل Node Manager عملیاتی و Direct/Tunnel/Dark Swap واقعی؛ حفظ upstream،
    IP واقعی، آمار مسیر و حسابداری یکتا همراه با آزمون قطع/تعویض/بازیابی.
 3. پیشبرد بخش‌های مستقل Backup/Restore و Dark Restore با دادهٔ مصنوعی،

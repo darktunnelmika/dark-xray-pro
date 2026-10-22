@@ -15,7 +15,7 @@ export type Command = {
  created_unix_nano: number;
  receipt?: { version: 2; metered: MeteredEvidence; command_id: string; serial: number; action: Action; stage_id: string; node_id: string; installation_id: string; runtime_instance: string; outcome: string; observed_unix_nano: number; observed: Observation; signature: string };
 };
-export type Scope = { enabled: boolean; health_enabled?: boolean; health_rounds_enabled?: boolean; scope: "metered_tcp_loopback_lab"; node_id?: string; installation_id?: string; nodes?: {node_id:string;installation_id:string}[] };
+export type Scope = { enabled: boolean; health_enabled?: boolean; health_rounds_enabled?: boolean; lab_subscriptions_enabled?: boolean; scope: "metered_tcp_loopback_lab"; node_id?: string; installation_id?: string; nodes?: {node_id:string;installation_id:string}[] };
 export type Target = { stage_id: string; ports: number[]; expires_unix_milli?: number };
 export type Channel = {
 
@@ -46,6 +46,7 @@ function refs(v: unknown): v is DraftRef[] {
  return Array.isArray(v) && v.length <= 256 && v.every(r => object(r) && natural(r.inbound_id) && r.inbound_id > 0 && natural(r.inbound_revision) && r.inbound_revision > 0 && natural(r.draft_revision)) && new Set(v.map(r => r.inbound_id)).size === v.length;
 }
 export function readScope(v: unknown): Scope {
+ if(object(v)&&((v.lab_subscriptions_enabled!==undefined&&typeof v.lab_subscriptions_enabled!=="boolean")||(v.lab_subscriptions_enabled===true&&v.health_rounds_enabled!==true)))throw Error("invalid_lab_subscriptions_scope");
  if(object(v)&&v.health_enabled!==undefined&&typeof v.health_enabled!=="boolean")throw Error("invalid_health_scope");
  if(object(v)&&((v.health_rounds_enabled!==undefined&&typeof v.health_rounds_enabled!=="boolean")||(v.health_rounds_enabled===true&&v.health_enabled!==true)))throw Error("invalid_health_rounds_scope");
  if (!object(v) || typeof v.enabled !== "boolean" || v.scope !== "metered_tcp_loopback_lab" || (v.enabled &&

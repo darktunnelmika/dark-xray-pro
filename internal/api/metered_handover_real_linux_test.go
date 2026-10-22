@@ -66,6 +66,21 @@ func testMeteredHandoverTrafficInbounds(t *testing.T, binary, pin, mode string, 
 	healthStarted, healthRelease := make(chan struct{}, 1), make(chan struct{})
 	var healthRequests atomic.Int64
 	origin := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/dark-pro/lab-subscription-echo" {
+			if r.Method != http.MethodPost {
+				w.WriteHeader(http.StatusMethodNotAllowed)
+				return
+			}
+			payload, err := io.ReadAll(io.LimitReader(r.Body, (64<<10)+1))
+			if err != nil || len(payload) == 0 || len(payload) > 64<<10 {
+				http.Error(w, "invalid synthetic echo payload", http.StatusBadRequest)
+				return
+			}
+			w.Header().Set("Content-Type", "application/octet-stream")
+			w.Header().Set("Cache-Control", "no-store")
+			_, _ = w.Write(payload)
+			return
+		}
 		if r.URL.Path == "/redirect-must-not-be-followed" {
 			t.Error("protocol health followed a redirect")
 			http.Error(w, "redirect forbidden", 500)
@@ -242,6 +257,9 @@ func testMeteredHandoverTrafficInbounds(t *testing.T, binary, pin, mode string, 
 		}
 		if inboundCount == 2 {
 			if err := s.EnableMeteredHealthRounds(); err != nil {
+				t.Fatal(err)
+			}
+			if err := s.EnableLabSubscriptions(); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -508,8 +526,12 @@ func testMeteredHandoverTrafficInbounds(t *testing.T, binary, pin, mode string, 
 		probeCredential = healthInbounds[0].Credential
 		probeID = healthInbounds[0].SystemProbeID
 	}
+	healthFixture := handoverHealthFixture{Server: s, Cookie: cookie, CSRF: csrf, Client: client, Endpoint: endpoint, DropBefore: &healthLoseBefore, DropAfter: &healthLoseAfter, Store: s.business, Key: key, Runtime: runtimes[1], Token: tokens[1], Plan: plan, Origin: origin, Port: portB, Credential: probeCredential, SystemProbeID: probeID, CustomerCredential: customers[0].UUID, CustomerID: customers[0].ID, Inbounds: healthInbounds, Customers: customers, Behavior: &healthBehavior, Requests: &healthRequests, Started: healthStarted, Release: healthRelease, Drain: func() { queue(1, 23, "drain", plan.TargetStageID, 0); drained = true }}
 	for _, check := range afterApply {
-		check(handoverHealthFixture{Server: s, Cookie: cookie, CSRF: csrf, Client: client, Endpoint: endpoint, DropBefore: &healthLoseBefore, DropAfter: &healthLoseAfter, Store: s.business, Key: key, Runtime: runtimes[1], Token: tokens[1], Plan: plan, Origin: origin, Port: portB, Credential: probeCredential, SystemProbeID: probeID, CustomerCredential: customers[0].UUID, CustomerID: customers[0].ID, Inbounds: healthInbounds, Customers: customers, Behavior: &healthBehavior, Requests: &healthRequests, Started: healthStarted, Release: healthRelease, Drain: func() { queue(1, 23, "drain", plan.TargetStageID, 0); drained = true }})
+		check(healthFixture)
+	}
+	if inboundCount == 2 && len(afterApply) > 0 {
+		testLabSubscriptionRealDelivery(t, ctx, healthFixture, binary)
 	}
 	if !drained {
 		queue(1, 23, "drain", plan.TargetStageID, 0)

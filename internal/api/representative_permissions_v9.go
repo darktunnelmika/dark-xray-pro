@@ -52,6 +52,9 @@ func requiredRepresentativePermission(r *http.Request) (string, bool) {
 		}
 	case strings.HasPrefix(path, "/api/v1/workspace/clients/"):
 		if method == "POST" {
+			if strings.Contains(path, "/subscription/") {
+				return "manage_clients", true
+			}
 			if strings.HasSuffix(path, "/edit/quote") || strings.HasSuffix(path, "/edit/commit") {
 				return "edit_clients", true
 			}

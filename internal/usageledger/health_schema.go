@@ -38,6 +38,9 @@ var healthSchema = []string{
 }
 
 func verifyHealthSchema(ctx context.Context, c *ledgerConn, version int) error {
+	if err := verifyLabSubscriptionsSchema(ctx, c, version); err != nil {
+		return err
+	}
 	if !HasHealthSchema(version) {
 		var n int
 		if err := c.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master WHERE name GLOB 'pro_health_*'`).Scan(&n); err != nil {

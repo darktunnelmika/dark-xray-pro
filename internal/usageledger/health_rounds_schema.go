@@ -6,7 +6,9 @@ import "context"
 // count as new round coverage. Older readers must reject this database.
 const HealthRoundsBusinessSchemaVersion = 12
 
-func HasHealthRoundsSchema(v int) bool { return v == HealthRoundsBusinessSchemaVersion }
+func HasHealthRoundsSchema(v int) bool {
+	return v == HealthRoundsBusinessSchemaVersion || HasLabSubscriptionsSchema(v)
+}
 
 var healthRoundsSchema = []string{
 	`CREATE TABLE pro_health_rounds(id TEXT PRIMARY KEY,handover_id TEXT NOT NULL REFERENCES native_metered_handovers(id),node_id TEXT NOT NULL,installation_id TEXT NOT NULL,endpoint_sha TEXT NOT NULL,manifest TEXT NOT NULL,manifest_sha TEXT NOT NULL,created INTEGER NOT NULL,expires INTEGER NOT NULL,CHECK(expires>created))`,
