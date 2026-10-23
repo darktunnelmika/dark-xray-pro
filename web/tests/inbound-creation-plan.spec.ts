@@ -1,0 +1,392 @@
+import { expect, test, type Locator, type Page } from "@playwright/test";
+import type { CreationPayload, CreationPlan, CreationReceipt } from "../src/InboundCreationModel";
+
+// Synthetic, disposable owner-session fixtures. These tests never contact a
+// running control plane or operate on real Nodes, customers or subscriptions.
+const csrf = "a".repeat(64);
+const api = "/api/v1/workspace/native-inbound-plans";
+const nodes = [
+  { node_id: "de", installation_id: "a".repeat(32), name: "Germany" },
+  { node_id: "fr", installation_id: "b".repeat(32), name: "France" },
+  { node_id: "nl", installation_id: "c".repeat(32), name: "Netherlands" },
+];
+type Call = { path: string; method: string; body: CreationPayload; raw: string; csrf: string };
+type FixtureOptions = { failSaveOnce?: boolean; tamperPreview?: (plan: CreationPlan) => void; normalizeMappedIPs?: boolean;
+  previewError?: { status: number; issue: { node_id?: string; field: string; code: string } }; savedPlan?: CreationPlan;
+  language?: "en" | "fa"; theme?: "light" | "dark" };
+
+async function fixture(page: Page, options: FixtureOptions = {}) {
+  const calls: Call[] = [];
+  const receipts = new Map<string, { raw: string; receipt: CreationReceipt }>();
+  let saved = options.savedPlan ? structuredClone(options.savedPlan) : undefined;
+  let failSave = options.failSaveOnce === true;
+  const profileInput = (profile: CreationPayload["profile"]) => JSON.stringify({ id: profile.id, name: profile.name,
+    transport: profile.transport, grpc_service: profile.grpc_service, reality_target: profile.reality_target,
+    server_names: profile.server_names, short_ids: profile.short_ids });
+  function planFor(body: CreationPayload, saving = false): CreationPlan {
+    const revision = body.expected_inbound_revision === 0 ? 1 : body.expected_inbound_revision +
+      (saved && profileInput(saved.profile) === profileInput(body.profile) ? 0 : 1);
+    const waiting = body.nodes.some(row => row.direct_port > 0 && !row.direct_hosts.length || row.tunnel_port > 0 && !row.tunnel_hosts.length || row.swap_enabled && !row.swap_entry_address);
+    const rows = structuredClone(body.nodes).sort((a, b) => a.node_id.localeCompare(b.node_id));
+    if (options.normalizeMappedIPs) for (const row of rows) {
+      // net.ParseIP(...).String() represents mapped IPv6 as dotted IPv4.
+      row.listen_ip = row.listen_ip.replace(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/i, "$1");
+      row.swap_source_listen_ip = row.swap_source_listen_ip.replace(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/i, "$1");
+    }
+    return { profile: { ...structuredClone(body.profile), name: body.profile.name.trim(), enabled: false, archived: false,
+      bound_clients: 0, revision, public_key: saved?.profile.public_key ?? (saving ? "SYNTHETIC_PUBLIC_KEY" : "") },
+      nodes: rows,
+      plan_revision: body.expected_plan_revision + 1, inbound_revision: revision,
+      status: waiting ? "WAITING_HOST" : "SAVED_DISABLED", last_event_id: body.event_id, reason: body.reason,
+      created_unix: 1800000000, updated_unix: 1800000001, runtime_apply: false, editable: true };
+  }
+  await page.addInitScript(({ language, theme }) => {
+    localStorage.setItem("dark-pro-lang", language); localStorage.setItem("dark-pro-theme", theme);
+  }, { language: options.language ?? "en", theme: options.theme ?? "dark" });
+  await page.route("**/api/v1/session/status", route => route.fulfill({ json: { authenticated: true,
+    user: { id: "owner", role: "owner", username: "test-owner", representative_id: "owner" }, csrf_token: csrf, expires_unix: 1900000000 } }));
+  await page.route("**/api/v1/fleet", route => route.fulfill({ json: { nodes: [], total_nodes: 0, online_nodes: 0, offline_nodes: 0,
+    as_of: new Date().toISOString(), interface_rx_bits_per_second: 0, interface_tx_bits_per_second: 0,
+    physical_rates_complete: false, metric_scope: "default_route_interface_not_billable" } }));
+  await page.route("**/api/v1/workspace/**", async route => {
+    const request = route.request(), path = new URL(request.url()).pathname;
+    if (request.method() === "POST" || request.method() === "PUT") {
+      const body = request.postDataJSON() as CreationPayload, raw = request.postData() ?? "";
+      calls.push({ path, method: request.method(), body, raw, csrf: request.headers()["x-csrf-token"] ?? "" });
+      if (path === api + "/preview") {
+        if (options.previewError) return route.fulfill({ status: options.previewError.status,
+          json: { error: "business_event_or_identity_conflict", issue: options.previewError.issue } });
+        const plan = planFor(body); options.tamperPreview?.(plan);
+        return route.fulfill({ json: { valid: true, plan, runtime_changed: false, topology_validated: true,
+          topology_validation_only: true, topology_key_scope: body.expected_plan_revision ? "saved_profile" : "preview_only", topology: { nodes: [], sha256: "d".repeat(64) } } });
+      }
+      if (path === api || path === api + "/" + body.profile?.id) {
+        const previous = receipts.get(body.event_id);
+        if (previous) {
+          if (previous.raw !== raw) return route.fulfill({ status: 409, json: { error: "business_event_or_identity_conflict" } });
+          return route.fulfill({ json: { ...previous.receipt, replayed: true } });
+        }
+        saved = planFor(body, true);
+        const receipt: CreationReceipt = { plan: saved, event_id: body.event_id, replayed: false, runtime_changed: false,
+          clients_deleted: false, credit_changed: false, usage_reset: false, subscription_published: false };
+        receipts.set(body.event_id, { raw, receipt });
+        // Simulate commit followed by a lost/unusable response, then exact replay.
+        if (failSave) { failSave = false; return route.fulfill({ status: 500, json: { error: "response_lost" } }); }
+        return route.fulfill({ status: request.method() === "POST" ? 201 : 200, json: receipt });
+      }
+      return route.fulfill({ status: 405, json: { error: "unexpected_mutation" } });
+    }
+    if (path === api + "/capabilities") return route.fulfill({ json: { available: true, version: 1, max_nodes: 64,
+      max_hosts_per_node: 64, protocols: ["vless"], securities: ["reality"], transports: ["tcp", "grpc"], runtime_apply: false,
+      plans: saved ? [{ inbound_id: saved.profile.id, plan_revision: saved.plan_revision, inbound_revision: saved.inbound_revision, status: saved.status }] : [] } });
+    if (saved && path === api + "/" + saved.profile.id) return route.fulfill({ json: { plan: saved, references_current: true } });
+    if (path.endsWith("/native-inbounds-state")) return route.fulfill({ json: {
+      preflight: { scope: "new_pro_lab_only", paired_nodes: 3, online_nodes: 0, fresh_nodes: 0, configured_inbounds: 0,
+        configured_targets: 0, client_bindings: 0, usage_ledger_enabled: true, remote_metered_admission: "trusted_remote_epoch_registration_pending",
+        customer_data_plane_verified: false, subscription_published: false, deployment_ready: false, blocking_reason: "remote_metered_admission_not_wired" },
+      inbounds: saved ? [saved.profile] : [], nodes, targets: [], runtime: [],
+    } });
+    if (path.endsWith("/operations")) return route.fulfill({ json: { operations: [] } });
+    if (path.endsWith("/clients")) return route.fulfill({ json: { clients: [], client_ids: [] } });
+    return route.fulfill({ status: 404, json: {} });
+  });
+  return { calls, getSaved: () => saved, makeReadOnly: () => { if (saved) { saved.editable = false; saved.edit_blocker = "profile_changed_or_materialized"; } } };
+}
+
+async function openCreation(page: Page, language: "en" | "fa" = "en") {
+  await page.goto("/inbounds");
+  const add = page.getByRole("button", { name: language === "fa" ? "افزودن اینباند" : "Add Inbound", exact: true });
+  await expect(add).toBeEnabled(); await add.click();
+  const dialog = page.getByRole("dialog", { name: language === "fa" ? "ساخت اینباند" : "Create Inbound", exact: true });
+  await expect(dialog).toBeVisible(); return dialog;
+}
+async function profile(dialog: Locator, name = "Complete DARK setup") {
+  await dialog.getByLabel("Inbound name", { exact: true }).fill(name);
+  await dialog.getByLabel("REALITY target (host:port)", { exact: true }).fill("example.org:443");
+  await dialog.getByLabel("Server names (comma-separated)", { exact: true }).fill("example.org");
+  await dialog.getByLabel("Short IDs", { exact: true }).fill("aabb, ccdd");
+}
+async function destination(dialog: Locator, id: "de" | "fr" | "nl", ip: string, port: string, hosts: string) {
+  await dialog.getByRole("tab", { name: "Nodes & routes", exact: true }).click();
+  await dialog.getByRole("checkbox", { name: "Select destination: " + nodes.find(node => node.node_id === id)!.name, exact: true }).check();
+  await dialog.getByLabel("Destination listening IP: " + id, { exact: true }).fill(ip);
+  await dialog.getByLabel("Direct port: " + id, { exact: true }).fill(port);
+  await dialog.getByLabel("Direct Hosts: " + id, { exact: true }).fill(hosts);
+}
+async function swap(dialog: Locator, id = "de", source = "nl", sourceIP = "203.0.113.30", entry = "entry.example.org") {
+  await dialog.getByRole("checkbox", { name: "Dark Swap: " + id, exact: true }).check();
+  await dialog.getByLabel("Source Node: " + id, { exact: true }).selectOption(source);
+  await dialog.getByLabel("Source relay listening IP: " + id, { exact: true }).fill(sourceIP);
+  await dialog.getByLabel("Source relay port: " + id, { exact: true }).fill("16801");
+  await dialog.getByLabel("External entry address: " + id, { exact: true }).fill(entry);
+  await dialog.getByLabel("External entry port: " + id, { exact: true }).fill("443");
+  await dialog.getByLabel("Destination exit port: " + id, { exact: true }).fill("18443");
+}
+async function review(dialog: Locator, note = "Complete profile and paths") {
+  await dialog.getByRole("tab", { name: "Review", exact: true }).click();
+  await dialog.getByLabel("Change note", { exact: true }).fill(note);
+}
+async function check(dialog: Locator) {
+  await dialog.getByRole("button", { name: "Check complete setup", exact: true }).click();
+  await expect(dialog.getByRole("button", { name: "Save paused setup", exact: true })).toBeEnabled();
+}
+async function save(dialog: Locator) {
+  await dialog.getByRole("button", { name: "Save paused setup", exact: true }).click();
+  await expect(dialog).toBeHidden();
+}
+
+test("one complete plan saves multiple destinations and independent Direct, Tunnel and Swap paths with a relay-only source", async ({ page }) => {
+  const f = await fixture(page), dialog = await openCreation(page);
+  await profile(dialog);
+  await destination(dialog, "de", "203.0.113.10", "10443", "shared.example.org\nde.example.org");
+  await dialog.getByRole("checkbox", { name: "Tunnel: de", exact: true }).check();
+  await dialog.getByLabel("Tunnel port: de", { exact: true }).fill("1185");
+  await dialog.getByLabel("Tunnel Hosts: de", { exact: true }).fill("shared.example.org\ntunnel.example.org");
+  await swap(dialog);
+  await destination(dialog, "fr", "203.0.113.20", "11443", "fr.example.org");
+  await review(dialog);
+  await expect(dialog.getByRole("button", { name: "Save paused setup", exact: true })).toBeDisabled();
+  expect(f.calls).toHaveLength(0); await check(dialog); await save(dialog);
+  expect(f.calls.map(call => call.path)).toEqual([api + "/preview", api]);
+  expect(f.calls[0].raw).toBe(f.calls[1].raw);
+  expect(f.calls.every(call => call.csrf === csrf)).toBe(true);
+  const body = f.calls[1].body;
+  expect(body).toMatchObject({ expected_plan_revision: 0, expected_inbound_revision: 0, profile: { name: "Complete DARK setup", transport: "tcp", short_ids: ["aabb", "ccdd"] } });
+  expect(body.nodes.map(row => row.node_id)).toEqual(["de", "fr"]);
+  expect(body.nodes[0]).toMatchObject({ direct_port: 10443, tunnel_port: 1185, swap_destination_port: 18443,
+    direct_hosts: ["shared.example.org", "de.example.org"], tunnel_hosts: ["shared.example.org", "tunnel.example.org"],
+    swap_source_node_id: "nl", swap_source_installation_id: nodes[2].installation_id, swap_source_listen_ip: "203.0.113.30",
+    swap_source_port: 16801, swap_entry_address: "entry.example.org", swap_entry_port: 443 });
+  expect(body.profile).not.toHaveProperty("private_key"); expect(body.profile).not.toHaveProperty("clients");
+  expect(f.getSaved()?.profile.enabled).toBe(false); expect(f.getSaved()?.runtime_apply).toBe(false);
+  await expect(page.getByRole("button", { name: "Open saved setup", exact: true })).toBeVisible();
+  await expect(page.getByText("The complete Inbound setup was saved paused. No listener or subscription was activated.", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Add Node target", exact: true })).toHaveCount(0);
+});
+
+test("a saved paused setup can be archived without exposing partial activation or profile edits", async ({ page }) => {
+  const f = await fixture(page), dialog = await openCreation(page);
+  await profile(dialog, "Cancel paused setup");
+  await destination(dialog, "de", "203.0.113.10", "10443", "de.example.org");
+  await review(dialog); await check(dialog); await save(dialog);
+  const saved = f.getSaved()!;
+  const lifecycle: Array<Record<string, unknown>> = [];
+  await page.route("**/api/v1/workspace/native-inbounds/" + saved.profile.id + "/lifecycle", async route => {
+    expect(route.request().headers()["x-csrf-token"]).toBe(csrf);
+    const body = route.request().postDataJSON(); lifecycle.push(body);
+    saved.profile = { ...saved.profile, enabled: false, archived: true, revision: saved.profile.revision + 1 };
+    saved.editable = false; saved.edit_blocker = "profile_changed_or_materialized";
+    await route.fulfill({ json: { inbound: saved.profile, clients_deleted: false, ledger_modified: false } });
+  });
+  await page.getByRole("tab", { name: "Overview", exact: true }).click();
+  await page.getByText("More actions", { exact: true }).click();
+  await expect(page.getByRole("button", { name: "Enable Inbound", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Edit profile", exact: true })).toHaveCount(0);
+  await page.getByLabel("Reason for change", { exact: true }).fill("Cancel unused saved configuration");
+  page.once("dialog", prompt => prompt.accept());
+  await page.getByRole("button", { name: "Archive saved setup", exact: true }).click();
+  await expect.poll(() => lifecycle.length).toBe(1);
+  expect(lifecycle[0]).toMatchObject({ action: "archive", expected_revision: 1, reason: "Cancel unused saved configuration" });
+  expect(lifecycle[0]).not.toHaveProperty("profile");
+  await expect(page.getByRole("button", { name: "Archive saved setup", exact: true })).toHaveCount(0);
+});
+
+test("destination Tunnel reuse preserves the source Node ordinary Tunnel and independent relay port", async ({ page }) => {
+  const f = await fixture(page), dialog = await openCreation(page); await profile(dialog);
+  await destination(dialog, "nl", "203.0.113.30", "15443", "nl.example.org");
+  await dialog.getByRole("checkbox", { name: "Tunnel: nl", exact: true }).check();
+  await dialog.getByLabel("Tunnel port: nl", { exact: true }).fill("15185");
+  await dialog.getByLabel("Tunnel Hosts: nl", { exact: true }).fill("nl-tunnel.example.org");
+  await destination(dialog, "de", "203.0.113.10", "10443", "de.example.org");
+  await dialog.getByRole("checkbox", { name: "Tunnel: de", exact: true }).check();
+  await dialog.getByLabel("Tunnel port: de", { exact: true }).fill("1185");
+  await dialog.getByLabel("Tunnel Hosts: de", { exact: true }).fill("de-tunnel.example.org");
+  await swap(dialog);
+  await dialog.getByRole("button", { name: "Use this Node’s Tunnel port", exact: true }).click();
+  await expect(dialog.getByLabel("Destination exit port: de", { exact: true })).toHaveValue("1185");
+  await expect(dialog.getByLabel("Source relay port: de", { exact: true })).toHaveValue("16801");
+  await review(dialog); await check(dialog); await save(dialog);
+  const rows = f.calls[1].body.nodes;
+  expect(rows.find(row => row.node_id === "nl")).toMatchObject({ direct_port: 15443, tunnel_port: 15185, swap_enabled: false });
+  expect(rows.find(row => row.node_id === "de")).toMatchObject({ direct_port: 10443, tunnel_port: 1185, swap_destination_port: 1185, swap_source_port: 16801 });
+});
+
+test("equivalent mapped IPv6 Node addresses accept the backend canonical IPv4 receipt", async ({ page }) => {
+  const f = await fixture(page, { normalizeMappedIPs: true }), dialog = await openCreation(page); await profile(dialog);
+  await destination(dialog, "nl", "::ffff:203.0.113.30", "15443", "nl.example.org");
+  await destination(dialog, "de", "::ffff:203.0.113.10", "10443", "de.example.org");
+  await swap(dialog, "de", "nl", "203.0.113.30");
+  await review(dialog); await check(dialog); await save(dialog);
+  expect(f.getSaved()?.nodes.find(row => row.node_id === "de")).toMatchObject({ listen_ip: "203.0.113.10", swap_source_listen_ip: "203.0.113.30" });
+  expect(f.getSaved()?.nodes.find(row => row.node_id === "nl")?.listen_ip).toBe("203.0.113.30");
+  expect(f.calls.map(call => call.path)).toEqual([api + "/preview", api]);
+});
+
+test("invalid hidden fields reveal their tab and no partial creation request is sent", async ({ page }) => {
+  const f = await fixture(page), dialog = await openCreation(page); await profile(dialog);
+  await review(dialog); await dialog.getByRole("button", { name: "Check complete setup", exact: true }).click();
+  await expect(dialog.getByRole("tab", { name: "Nodes & routes", exact: true })).toHaveAttribute("aria-selected", "true");
+  const firstDestination = dialog.getByRole("checkbox", { name: "Select destination: Germany", exact: true });
+  await expect(firstDestination).toBeVisible(); await expect(firstDestination).toBeFocused(); expect(f.calls).toHaveLength(0);
+  await destination(dialog, "de", "203.0.113.10", "2087", "duplicate.example.org\nduplicate.example.org");
+  await review(dialog); await dialog.getByRole("button", { name: "Check complete setup", exact: true }).click();
+  await expect(dialog.getByRole("tab", { name: "Nodes & routes", exact: true })).toHaveAttribute("aria-selected", "true");
+  await expect(dialog.getByLabel("Direct Hosts: de", { exact: true })).toBeFocused();
+  await expect(dialog.getByRole("alert")).toContainText("Remove duplicate addresses");
+  expect(f.calls).toHaveLength(0);
+  await dialog.getByLabel("Direct Hosts: de", { exact: true }).fill("de.example.org");
+  await dialog.getByLabel("Direct port: de", { exact: true }).fill("10443");
+  await dialog.getByRole("tab", { name: "Profile", exact: true }).click();
+  await dialog.getByRole("radio", { name: "gRPC / REALITY", exact: true }).check();
+  await review(dialog); await dialog.getByRole("button", { name: "Check complete setup", exact: true }).click();
+  await expect(dialog.getByRole("tab", { name: "Profile", exact: true })).toHaveAttribute("aria-selected", "true");
+  await expect(dialog.getByLabel("gRPC service", { exact: true })).toBeFocused(); expect(f.calls).toHaveLength(0);
+  await dialog.getByLabel("gRPC service", { exact: true }).fill("dark-grpc");
+  await review(dialog); await check(dialog);
+  expect(f.calls).toHaveLength(1); expect(f.calls[0].body.profile).toMatchObject({ transport: "grpc", grpc_service: "dark-grpc" });
+});
+
+test("a server-side port conflict reveals its Node field without offering reload for an unsaved setup", async ({ page }) => {
+  const f = await fixture(page, { previewError: { status: 409, issue: { node_id: "de", field: "direct_port", code: "existing_listener_port_collision" } } });
+  const dialog = await openCreation(page); await profile(dialog);
+  await destination(dialog, "de", "203.0.113.10", "10443", "de.example.org"); await review(dialog);
+  await dialog.getByRole("button", { name: "Check complete setup", exact: true }).click();
+  await expect(dialog.getByRole("tab", { name: "Nodes & routes", exact: true })).toHaveAttribute("aria-selected", "true");
+  await expect(dialog.getByLabel("Direct port: de", { exact: true })).toBeFocused();
+  await expect(dialog.getByRole("button", { name: "Reload saved setup", exact: true })).toHaveCount(0);
+  await dialog.getByRole("tab", { name: "Review", exact: true }).click();
+  await expect(dialog.getByRole("button", { name: "Save paused setup", exact: true })).toBeDisabled();
+  expect(f.calls.map(call => call.path)).toEqual([api + "/preview"]); expect(f.getSaved()).toBeUndefined();
+});
+
+test("an uncertain committed save retains the full setup and retries the identical event only on request", async ({ page }) => {
+  const f = await fixture(page, { failSaveOnce: true }), dialog = await openCreation(page); await profile(dialog);
+  await destination(dialog, "de", "203.0.113.10", "10443", "de.example.org"); await swap(dialog);
+  await review(dialog); await check(dialog);
+  await dialog.getByRole("button", { name: "Save paused setup", exact: true }).click();
+  await expect(dialog.getByRole("button", { name: "Retry the same save", exact: true })).toBeEnabled();
+  await expect(dialog.getByRole("alert")).toContainText("complete setup is retained");
+  expect(f.calls).toHaveLength(2);
+  await dialog.getByRole("tab", { name: "Nodes & routes", exact: true }).click();
+  await expect(dialog.getByLabel("Source relay port: de", { exact: true })).toHaveValue("16801");
+  await expect(dialog.getByLabel("Source relay port: de", { exact: true })).toBeDisabled();
+  await expect(dialog.getByLabel("External entry address: de", { exact: true })).toHaveValue("entry.example.org");
+  await dialog.getByRole("tab", { name: "Review", exact: true }).click();
+  await dialog.getByRole("button", { name: "Retry the same save", exact: true }).click();
+  await expect(dialog).toBeHidden(); expect(f.calls).toHaveLength(3);
+  expect(f.calls[2].raw).toBe(f.calls[1].raw); expect(f.calls[2].body.event_id).toBe(f.calls[0].body.event_id);
+  expect(f.getSaved()?.plan_revision).toBe(1);
+});
+
+test("a preview with altered route mappings is rejected even when identity and counts match", async ({ page }) => {
+  const f = await fixture(page, { tamperPreview: plan => { plan.nodes[0].swap_source_port = 16802; } });
+  const dialog = await openCreation(page); await profile(dialog);
+  await destination(dialog, "de", "203.0.113.10", "10443", "de.example.org"); await swap(dialog); await review(dialog);
+  await dialog.getByRole("button", { name: "Check complete setup", exact: true }).click();
+  await expect(dialog.getByRole("alert")).toContainText("could not validate this setup");
+  await expect(dialog.getByRole("button", { name: "Save paused setup", exact: true })).toBeDisabled();
+  expect(f.calls.map(call => call.path)).toEqual([api + "/preview"]); expect(f.getSaved()).toBeUndefined();
+});
+
+test("missing ordinary Hosts and external entry address save as WAITING_HOST without inferred public addresses", async ({ page }) => {
+  const f = await fixture(page), dialog = await openCreation(page); await profile(dialog);
+  await destination(dialog, "de", "203.0.113.10", "10443", ""); await swap(dialog, "de", "nl", "203.0.113.30", "");
+  await expect(dialog.getByLabel("External entry address: de", { exact: true })).toHaveValue("");
+  await review(dialog); await check(dialog); await save(dialog);
+  expect(f.getSaved()).toMatchObject({ status: "WAITING_HOST", runtime_apply: false, profile: { enabled: false } });
+  expect(f.calls[1].body.nodes[0]).toMatchObject({ direct_hosts: [], swap_entry_address: "", swap_source_listen_ip: "203.0.113.30", swap_entry_port: 443 });
+  await expect(page.getByText("Some paths are waiting for Hosts.", { exact: true })).toBeVisible();
+});
+
+test("saved setup reopens from its envelope and updates routes with CAS while preserving identity and profile key", async ({ page }) => {
+  const f = await fixture(page), dialog = await openCreation(page); await profile(dialog);
+  await destination(dialog, "de", "203.0.113.10", "10443", "de.example.org"); await review(dialog); await check(dialog); await save(dialog);
+  const originalID = f.getSaved()!.profile.id, originalKey = f.getSaved()!.profile.public_key;
+  await page.getByRole("button", { name: "Open saved setup", exact: true }).click();
+  const edit = page.getByRole("dialog", { name: "Edit Inbound setup", exact: true }); await expect(edit).toBeVisible();
+  await expect(edit.getByLabel("Short IDs", { exact: true })).toHaveValue("aabb, ccdd");
+  await edit.getByRole("tab", { name: "Nodes & routes", exact: true }).click();
+  await edit.getByLabel("Direct port: de", { exact: true }).fill("10444");
+  await review(edit, "Change destination port only"); await check(edit); await save(edit);
+  expect(f.calls[3]).toMatchObject({ path: api + "/" + originalID, method: "PUT", body: { expected_plan_revision: 1, expected_inbound_revision: 1, profile: { id: originalID } } });
+  expect(f.getSaved()).toMatchObject({ plan_revision: 2, inbound_revision: 1, profile: { id: originalID, public_key: originalKey, revision: 1 } });
+  f.makeReadOnly(); await page.getByRole("button", { name: "Open saved setup", exact: true }).click();
+  await expect(edit.getByLabel("Inbound name", { exact: true })).toBeDisabled();
+  await expect(edit.getByText(/This saved setup is read-only/)).toBeVisible();
+  await edit.getByRole("tab", { name: "Review", exact: true }).click();
+  await expect(edit.getByRole("button", { name: "Check complete setup", exact: true })).toBeDisabled();
+});
+
+test("Persian 320px editor keeps RTL tab navigation, visible footer and contained horizontal layout", async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 320, height: 760 });
+  const f = await fixture(page, { language: "fa", theme: "light" }), dialog = await openCreation(page, "fa");
+  await expect(dialog.getByLabel("نام اینباند", { exact: true })).toBeFocused();
+  await dialog.getByLabel("نام اینباند", { exact: true }).fill("پروفایل یکپارچهٔ دارک");
+  const profileTab = dialog.getByRole("tab", { name: "پروفایل", exact: true }); await profileTab.focus(); await profileTab.press("ArrowLeft");
+  await expect(dialog.getByRole("tab", { name: "نودها و مسیرها", exact: true })).toBeFocused();
+  await dialog.getByRole("checkbox", { name: "انتخاب مقصد: Germany", exact: true }).check();
+  await dialog.getByRole("checkbox", { name: "تونل: de", exact: true }).check();
+  await dialog.getByRole("checkbox", { name: "دارک‌سواپ: de", exact: true }).check();
+  await dialog.getByLabel("نود مبدأ: de", { exact: true }).selectOption("nl");
+  await dialog.getByLabel("پورت خروجی مقصد: de", { exact: true }).fill("18443");
+  await expect(dialog.getByLabel("پورت خروجی مقصد: de", { exact: true })).toHaveAttribute("dir", "ltr");
+  const footer = dialog.locator(".creation-footer"); await expect(footer).toBeInViewport();
+  const bounds = await footer.boundingBox(); expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(761);
+  const widths = await dialog.evaluate(element => ({ client: element.clientWidth, scroll: element.scrollWidth,
+    body: document.documentElement.clientWidth, bodyScroll: document.documentElement.scrollWidth }));
+  expect(widths.scroll).toBeLessThanOrEqual(widths.client + 1); expect(widths.bodyScroll).toBeLessThanOrEqual(widths.body + 1);
+  await page.screenshot({ path: testInfo.outputPath("creation-fa-light-320.png"), fullPage: true });
+  await dialog.getByRole("tab", { name: "نودها و مسیرها", exact: true }).focus();
+  await page.keyboard.press("End"); await expect(dialog.getByRole("tab", { name: "بازبینی", exact: true })).toBeFocused();
+  const dismiss = page.waitForEvent("dialog").then(prompt => prompt.dismiss()); await page.keyboard.press("Escape"); await dismiss;
+  await expect(dialog).toBeVisible(); expect(f.calls).toHaveLength(0);
+});
+
+test("delayed capabilities keep direct-detail mutations blocked until the saved plan index is known", async ({ page }) => {
+  const savedPlan: CreationPlan = { profile: { id: 701, name: "Previously saved setup", transport: "tcp", grpc_service: "",
+    reality_target: "example.org:443", server_names: ["example.org"], short_ids: ["aabb"], public_key: "SYNTHETIC_PUBLIC_KEY",
+    revision: 1, enabled: false, archived: false, bound_clients: 0 },
+    nodes: [{ node_id: "de", installation_id: nodes[0].installation_id, listen_ip: "203.0.113.10", direct_port: 10443,
+      direct_hosts: ["de.example.org"], tunnel_port: 0, tunnel_hosts: [], swap_enabled: false, swap_source_node_id: "",
+      swap_source_installation_id: "", swap_source_listen_ip: "", swap_source_port: 0, swap_entry_address: "", swap_entry_port: 0, swap_destination_port: 0 }],
+    plan_revision: 1, inbound_revision: 1, status: "SAVED_DISABLED", last_event_id: "fixture-saved-plan-event-701", reason: "Saved setup",
+    created_unix: 1800000000, updated_unix: 1800000001, runtime_apply: false, editable: true };
+  const f = await fixture(page, { savedPlan });
+  let releaseCapabilities!: () => void, capabilityRequests = 0;
+  const capabilityGate = new Promise<void>(resolve => { releaseCapabilities = resolve; });
+  await page.route("**/native-inbound-plans/capabilities", async route => {
+    capabilityRequests++; await capabilityGate; await route.fallback();
+  });
+  await page.route("**/api/v1/workspace/clients?*", route => route.fulfill({ json: { clients: [
+    { id: "fixture-client", name: "Fixture Client", representative_id: "owner", archived: false, deployment_state: "pending_node_apply" },
+  ] } }));
+  try {
+    await page.goto("/inbounds?inbound=701&tab=overview");
+    await expect(page.getByRole("heading", { name: "Previously saved setup", exact: true })).toBeVisible();
+    await expect.poll(() => capabilityRequests).toBeGreaterThan(0);
+    await expect(page.getByRole("button", { name: "Copy settings", exact: true })).toBeDisabled();
+    await expect(page.getByRole("button", { name: "Edit profile", exact: true })).toBeDisabled();
+    await page.locator(".inbound-more-actions summary").click();
+    await page.getByLabel("Reason for change", { exact: true }).fill("Cannot mutate until ownership is known");
+    await expect(page.getByRole("button", { name: "Enable Inbound", exact: true })).toBeDisabled();
+    await expect(page.getByRole("button", { name: "Delete safely (archive)", exact: true })).toBeDisabled();
+    await page.getByRole("tab", { name: "Routes", exact: true }).click();
+    await expect(page.getByRole("button", { name: "Add Node target", exact: true })).toBeDisabled();
+    await page.getByRole("tab", { name: "Clients", exact: true }).click();
+    await page.locator(".native-client-row").filter({ hasText: "Fixture Client" }).getByRole("checkbox").check();
+    await expect(page.getByRole("button", { name: "Attach selected", exact: true })).toBeDisabled();
+    await expect(page.getByRole("button", { name: "Detach selected", exact: true })).toBeDisabled();
+    expect(f.calls).toHaveLength(0);
+    await page.getByRole("tab", { name: "Routes", exact: true }).click();
+    releaseCapabilities();
+    await expect(page.getByRole("button", { name: "Open saved setup", exact: true })).toBeEnabled();
+    await expect(page.getByRole("button", { name: "Add Node target", exact: true })).toHaveCount(0);
+    await page.getByRole("tab", { name: "Overview", exact: true }).click();
+    await expect(page.getByRole("button", { name: "Edit profile", exact: true })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Enable Inbound", exact: true })).toHaveCount(0);
+    await page.getByRole("tab", { name: "Clients", exact: true }).click();
+    await expect(page.getByRole("button", { name: "Attach selected", exact: true })).toHaveCount(0);
+    await expect(page.getByText("This setup is paused. Client delivery follows separate activation.", { exact: true })).toBeVisible();
+    expect(f.calls).toHaveLength(0);
+  } finally { releaseCapabilities(); }
+});

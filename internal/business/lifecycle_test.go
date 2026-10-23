@@ -129,7 +129,7 @@ func TestClientLifecycleImmutabilitySchemaUpgradeAndEventCollision(t *testing.T)
  // Simulate historical v3 database, then exercise automatic v3->v4 migration.
  if _,err=s.db.Exec("DROP TABLE client_operations");err!=nil{t.Fatal(err)}
  if _,err=s.db.Exec("ALTER TABLE clients DROP COLUMN archived");err!=nil{t.Fatal(err)}
- for _,q:=range []string{"DROP TABLE native_inbound_operations","ALTER TABLE native_inbounds DROP COLUMN revision","ALTER TABLE native_inbounds DROP COLUMN archived","ALTER TABLE native_inbounds DROP COLUMN enabled","PRAGMA user_version=3"}{if _,err=s.db.Exec(q);err!=nil{t.Fatal(err)}}
+ for _,q:=range []string{"DROP TRIGGER native_dirty_profile_update","DROP TRIGGER native_plan_block_enable","DROP TABLE native_inbound_operations","ALTER TABLE native_inbounds DROP COLUMN revision","ALTER TABLE native_inbounds DROP COLUMN archived","ALTER TABLE native_inbounds DROP COLUMN enabled","PRAGMA user_version=3"}{if _,err=s.db.Exec(q);err!=nil{t.Fatal(err)}}
  if err=s.Close();err!=nil{t.Fatal(err)}
  upgraded,err:=Open(path);if err!=nil{t.Fatal(err)}
  defer upgraded.Close()
