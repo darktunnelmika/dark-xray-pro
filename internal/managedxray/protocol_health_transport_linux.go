@@ -225,7 +225,7 @@ func (t *TransactionRuntime) syncMeteredHealth(ctx context.Context, client *http
 		}
 		res.Body.Close()
 		q := d.Request
-		if err != nil || !verifyProtocolHealthRequest(t.options.LeaseKey, q, clock().UnixNano()) || q.NodeID != t.options.NodeID || q.InstallationID != t.options.InstallationID || q.EndpointSHA != d.Endpoint.SHA() || !d.Endpoint.Valid() {
+		if err != nil || !verifyProtocolHealthRequest(t.options.LeaseKey, q, clock().UnixNano()) || q.NodeID != t.options.NodeID || q.InstallationID != t.options.InstallationID || q.EndpointSHA != d.Endpoint.SHA() || !d.Endpoint.Valid() || !t.consumerProtocolApproved(q) {
 			return ErrProtocolHealth
 		}
 		t.mu.Lock()

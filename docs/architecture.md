@@ -15,6 +15,13 @@ Consumer reads revalidate the complete N17 evidence, applied candidate and fixed
 deadline. This opt-in schema13 path leaves production publication and public
 endpoint/lease lifecycle gates open; normal databases remain schema8.
 
+[N19 consumer endpoint manifests](consumer-endpoint-manifests-n19.fa.md) adds an
+explicit schema14 path with immutable complete mappings, per-inbound startup
+approval, a distinct signed v3 probe and exact consumer-address URI output.
+Replacement, revocation and approval withdrawal invalidate old evidence. The
+probe originates on the Node; independent Internet reachability and production
+publication remain separate acceptance gates. Default storage remains schema8.
+
 ## Technology
 
 Go standard-library HUB and Node Agent, React + TypeScript + Vite UI, Linux telemetry. A future durable storage implementation will isolate current customer records, immutable billing ledgers and compact operational read models. This foundation deliberately introduces *no* live Xray/Node control actions and *no* user database.

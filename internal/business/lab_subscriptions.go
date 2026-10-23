@@ -44,28 +44,33 @@ type SubscriptionSecret struct {
 	Token      string `json:"token"`
 }
 type LabSubscriptionMaterialization struct {
-	EventID          string `json:"event_id"`
-	ClientID         string `json:"client_id"`
-	RoundID          string `json:"round_id"`
-	ExpectedRevision uint64 `json:"expected_revision"`
+	EventID                  string `json:"event_id"`
+	ClientID                 string `json:"client_id"`
+	RoundID                  string `json:"round_id"`
+	ExpectedRevision         uint64 `json:"expected_revision"`
+	ConsumerManifestID       string `json:"consumer_manifest_id,omitempty"`
+	ConsumerManifestRevision uint64 `json:"consumer_manifest_revision,omitempty"`
 }
 
 // One complete experimental LAB snapshot replaces the previous snapshot for
 // this client. This is deliberately not a multi-node production subscription.
 type LabSubscriptionSnapshot struct {
-	ID              string `json:"id"`
-	EventID         string `json:"event_id"`
-	ClientID        string `json:"client_id"`
-	HandoverID      string `json:"handover_id"`
-	RoundID         string `json:"round_id"`
-	NodeID          string `json:"node_id"`
-	InstallationID  string `json:"installation_id"`
-	Revision        uint64 `json:"revision"`
-	CreatedUnixNano int64  `json:"created_unix_nano"`
-	ExpiresUnixNano int64  `json:"expires_unix_nano"`
-	RouteCount      int    `json:"route_count"`
-	Current         bool   `json:"current"`
-	Replayed        bool   `json:"replayed,omitempty"`
+	ID                       string `json:"id"`
+	EventID                  string `json:"event_id"`
+	ClientID                 string `json:"client_id"`
+	HandoverID               string `json:"handover_id"`
+	RoundID                  string `json:"round_id"`
+	ConsumerManifestID       string `json:"consumer_manifest_id,omitempty"`
+	ConsumerManifestRevision uint64 `json:"consumer_manifest_revision,omitempty"`
+	ConsumerManifestSHA      string `json:"consumer_manifest_sha,omitempty"`
+	NodeID                   string `json:"node_id"`
+	InstallationID           string `json:"installation_id"`
+	Revision                 uint64 `json:"revision"`
+	CreatedUnixNano          int64  `json:"created_unix_nano"`
+	ExpiresUnixNano          int64  `json:"expires_unix_nano"`
+	RouteCount               int    `json:"route_count"`
+	Current                  bool   `json:"current"`
+	Replayed                 bool   `json:"replayed,omitempty"`
 }
 type LabSubscriptionContent struct {
 	Raw                  []byte                  `json:"-"`
@@ -302,6 +307,9 @@ func (s *Store) MutateLabSubscription(ctx context.Context, key []byte, actorID, 
 	if !errors.Is(err, sql.ErrNoRows) {
 		return SubscriptionTokenReceipt{}, err
 	}
+	if err = consumerEventUnused(ctx, tx, in.EventID); err != nil {
+		return out, err
+	}
 	var used int
 	if err = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM pro_subscription_snapshots WHERE event_id=?`, in.EventID).Scan(&used); err != nil {
 		return out, err
@@ -433,7 +441,7 @@ func (s *Store) LabSubscription(ctx context.Context, key []byte, actorID, client
 		if _, err = openSubscriptionSnapshot(key, row); err != nil {
 			return out, err
 		}
-		_, proofErr := currentSubscriptionSnapshot(ctx, tx, key, row, &endpoint, time.Now().UnixNano())
+		_, proofErr := s.currentSubscriptionSnapshot(ctx, tx, key, row, &endpoint, time.Now().UnixNano())
 		row.Current = proofErr == nil
 		out.Snapshot = &row.LabSubscriptionSnapshot
 	}

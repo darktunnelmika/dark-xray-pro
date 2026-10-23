@@ -56,6 +56,7 @@ func testMeteredHandoverTraffic(t *testing.T, binary, pin, mode string, afterApp
 }
 
 func testMeteredHandoverTrafficInbounds(t *testing.T, binary, pin, mode string, inboundCount int, afterApply ...func(handoverHealthFixture)) {
+	consumerMode := mode == "consumer-manifest"
 	if inboundCount != 1 && inboundCount != 2 {
 		t.Fatal("handover fixture requires one or two loopback inbounds")
 	}
@@ -219,6 +220,18 @@ func testMeteredHandoverTrafficInbounds(t *testing.T, binary, pin, mode string, 
 	nodes := []string{"old-de", "new-de"}
 	installs := []string{installID, newInstallation}
 	tokens := []string{nodeToken, newToken}
+	var consumerApprovals []mx.ConsumerEndpointApproval
+	var consumerRelays []*consumerIngressRelay
+	if consumerMode {
+		if inboundCount != 2 || len(afterApply) == 0 {
+			t.Fatal("consumer ingress fixture requires a complete two-inbound proof")
+		}
+		for j, inbound := range inboundIDs {
+			relay := reserveConsumerIngressRelay(t, inboundPorts[j][1])
+			consumerRelays = append(consumerRelays, relay)
+			consumerApprovals = append(consumerApprovals, mx.ConsumerEndpointApproval{NodeID: nodes[1], InstallationID: installs[1], InboundID: inbound, Address: consumerTrafficAddress, Port: relay.port})
+		}
+	}
 	var approved []business.MeteredRouteNode
 	for i, id := range nodes {
 		ticket, err := s.registry.Issue(id, "Disposable CI handover")
@@ -261,6 +274,11 @@ func testMeteredHandoverTrafficInbounds(t *testing.T, binary, pin, mode string, 
 			}
 			if err := s.EnableLabSubscriptions(); err != nil {
 				t.Fatal(err)
+			}
+			if consumerMode {
+				if err := s.EnableConsumerEndpoints(consumerApprovals); err != nil {
+					t.Fatal("consumer endpoint startup approval", err)
+				}
 			}
 		}
 		for i, node := range nodes {
@@ -387,7 +405,11 @@ func testMeteredHandoverTrafficInbounds(t *testing.T, binary, pin, mode string, 
 		if err != nil {
 			t.Fatal(err)
 		}
-		runtime, err := mx.OpenMeteredTransactions(mx.Options{Directory: filepath.Join(t.TempDir(), id), StateKey: bytes.Repeat([]byte{byte(0x62 + i)}, 32), LeaseKey: []byte(tokens[i]), NodeID: id, InstallationID: installs[i], ListenIP: "127.0.0.1", Binary: binary, BinarySHA: pin, ExperimentalFinalTCP: true}, mx.MeteredTransactionOptions{Authority: authority, Sender: sender, Interval: 100 * time.Millisecond, MaxSampleGap: 8 * time.Second, MaxPendingAge: 8 * time.Second})
+		var consumerPolicy []mx.ConsumerEndpointApproval
+		if i == 1 {
+			consumerPolicy = consumerApprovals
+		}
+		runtime, err := mx.OpenMeteredTransactions(mx.Options{Directory: filepath.Join(t.TempDir(), id), StateKey: bytes.Repeat([]byte{byte(0x62 + i)}, 32), LeaseKey: []byte(tokens[i]), NodeID: id, InstallationID: installs[i], ListenIP: "127.0.0.1", Binary: binary, BinarySHA: pin, ExperimentalFinalTCP: true}, mx.MeteredTransactionOptions{Authority: authority, Sender: sender, Interval: 100 * time.Millisecond, MaxSampleGap: 8 * time.Second, MaxPendingAge: 8 * time.Second, ConsumerEndpointApprovals: consumerPolicy})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -469,7 +491,7 @@ func testMeteredHandoverTrafficInbounds(t *testing.T, binary, pin, mode string, 
 	loseAfter.Store(mode == "lost-drain-ack-after")
 	loseFinal.Store(mode == "lost-final-receipt")
 	err = runtimes[0].SyncMeteredTransaction(ctx, client, endpoint)
-	if (mode != "normal") != (err != nil) {
+	if strings.HasPrefix(mode, "lost-") != (err != nil) {
 		t.Fatal("loss injection was not exercised", mode, err)
 	}
 	stream.stopped(t, ctx)
@@ -527,6 +549,7 @@ func testMeteredHandoverTrafficInbounds(t *testing.T, binary, pin, mode string, 
 		probeID = healthInbounds[0].SystemProbeID
 	}
 	healthFixture := handoverHealthFixture{Server: s, Cookie: cookie, CSRF: csrf, Client: client, Endpoint: endpoint, DropBefore: &healthLoseBefore, DropAfter: &healthLoseAfter, Store: s.business, Key: key, Runtime: runtimes[1], Token: tokens[1], Plan: plan, Origin: origin, Port: portB, Credential: probeCredential, SystemProbeID: probeID, CustomerCredential: customers[0].UUID, CustomerID: customers[0].ID, Inbounds: healthInbounds, Customers: customers, Behavior: &healthBehavior, Requests: &healthRequests, Started: healthStarted, Release: healthRelease, Drain: func() { queue(1, 23, "drain", plan.TargetStageID, 0); drained = true }}
+	healthFixture.ConsumerApprovals, healthFixture.ConsumerRelays = consumerApprovals, consumerRelays
 	for _, check := range afterApply {
 		check(healthFixture)
 	}

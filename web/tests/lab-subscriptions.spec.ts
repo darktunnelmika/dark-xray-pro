@@ -385,6 +385,25 @@ test("N18 accepts snapshot metadata with a distinct server snapshot ID and clien
   expect(f.consumers).toHaveLength(0);
 });
 
+test("N19 loaded consumer snapshot identifies its approved mapping without relabeling local snapshots",async({page})=>{
+ const f=await fixture(page,{active:true,metadata:v=>snapshotMetadata(v,{consumer_manifest_id:"4".repeat(32),consumer_manifest_revision:2,consumer_manifest_sha:"5".repeat(64)})});
+ await page.goto("/clients");const section=await selectClient(page);
+ await expect(section.getByText("LAB snapshot is within its checked validity window",{exact:true})).toBeVisible();
+ await expect(section.getByText(/This snapshot delivers the consumer routes of one approved mapping/)).toBeVisible();
+ await expect(section.getByText(/This stage delivers the verified local LAB routes/)).toHaveCount(0);
+ expect(f.calls.filter(c=>c.method==="POST")).toHaveLength(0);expect(f.consumers).toHaveLength(0);
+});
+
+for(const [label,ref] of [
+ ["missing revision",{consumer_manifest_id:"4".repeat(32),consumer_manifest_sha:"5".repeat(64)}],
+ ["missing hash",{consumer_manifest_id:"4".repeat(32),consumer_manifest_revision:2}],
+ ["unsafe revision",{consumer_manifest_id:"4".repeat(32),consumer_manifest_revision:Number.MAX_SAFE_INTEGER,consumer_manifest_sha:"5".repeat(64)}],
+] as const)test(`N19 loaded snapshot with ${label} cannot be treated as verified`,async({page})=>{
+ const f=await fixture(page,{active:true,metadata:v=>snapshotMetadata(v,ref)});await page.goto("/clients");const section=await selectClient(page);
+ await expect(section.getByText("Subscription state could not be verified. Refresh before another action.",{exact:true})).toBeVisible();
+ await expect(section.getByRole("button",{name:"Show subscription URL",exact:true})).toHaveCount(0);await expect(section.getByText("LAB snapshot is within its checked validity window",{exact:true})).toHaveCount(0);expect(f.consumers).toHaveLength(0);
+});
+
 test("N18 view-only representatives can read metadata without secret or mutation controls", async ({ page }) => {
   const f = await fixture(page, { manage: false, active: true });
   await page.goto("/clients");

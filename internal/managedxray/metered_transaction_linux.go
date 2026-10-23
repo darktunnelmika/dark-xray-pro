@@ -38,11 +38,12 @@ type MeteredTransactionAuthority interface {
 }
 
 type MeteredTransactionOptions struct {
-	Authority     MeteredTransactionAuthority
-	Sender        *uc.Sender
-	Interval      time.Duration
-	MaxSampleGap  time.Duration
-	MaxPendingAge time.Duration
+	Authority                 MeteredTransactionAuthority
+	Sender                    *uc.Sender
+	Interval                  time.Duration
+	MaxSampleGap              time.Duration
+	MaxPendingAge             time.Duration
+	ConsumerEndpointApprovals []ConsumerEndpointApproval
 }
 
 // OpenMeteredTransactions requires an independent private directory, loopback
@@ -51,6 +52,17 @@ type MeteredTransactionOptions struct {
 func OpenMeteredTransactions(o Options, m MeteredTransactionOptions) (*TransactionRuntime, error) {
 	if !o.ExperimentalFinalTCP || m.Authority == nil || m.Sender == nil {
 		return nil, ErrTransaction
+	}
+	if len(m.ConsumerEndpointApprovals) != 0 {
+		if ValidateConsumerEndpointApprovals(m.ConsumerEndpointApprovals) != nil {
+			return nil, ErrProtocolHealth
+		}
+		for _, approval := range m.ConsumerEndpointApprovals {
+			if approval.NodeID != o.NodeID || approval.InstallationID != o.InstallationID {
+				return nil, ErrProtocolHealth
+			}
+		}
+		m.ConsumerEndpointApprovals = append([]ConsumerEndpointApproval(nil), m.ConsumerEndpointApprovals...)
 	}
 	t, err := openTransactions(o, 2)
 	if err != nil {

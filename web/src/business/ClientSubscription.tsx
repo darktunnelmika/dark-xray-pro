@@ -55,6 +55,7 @@ export default function ClientSubscription({clientID,language,session,canManage,
   finally{if(c===lifetime.current){sending.current=false;if(!c.signal.aborted)setBusy(false);}}
  }
  const snapshot=view?.enabled?view.snapshot:undefined;
+ const scopeText=snapshot?.consumer_manifest_id?(language==="fa"?"این نسخه مسیرهای مصرف‌کنندهٔ یک نگاشت مجاز در LAB ایزوله را تحویل می‌دهد. هر دریافت، همان نگاشت، مجاز بودن کلاینت و مهلت اولیهٔ سلامت را دوباره بررسی می‌کند. دسترسی عمومی تأیید نشده است.":"This snapshot delivers the consumer routes of one approved mapping in the isolated LAB. Every fetch rechecks that mapping, client eligibility and the original health deadline. Public availability remains unverified."):t.scope;
  const current=!!snapshot?.current&&view?.enabled===true&&view.server_time_unix_milli+Math.max(0,performance.now()-checked.current)<snapshot.expires_unix_nano/1e6;
  const url=secret?new URL(secret+(format==="raw"?"?format=raw":""),window.location.origin).href:"";
  return <section className="business-panel lab-subscription" aria-label="Client LAB subscription">
@@ -75,6 +76,6 @@ export default function ClientSubscription({clientID,language,session,canManage,
   {attempt&&<div role="status"><p>{t.unknown}</p><div className="lab-subscription-actions"><button type="button" disabled={!allowed} onClick={()=>void send(attempt)}>{t.retry}</button><button type="button" disabled={busy} onClick={()=>{if(remember(null)){setNotice("");setReload(n=>n+1);}}}>{t.discard}</button></div></div>}
   {notice&&!attempt&&<p role="status">{notice}</p>}
   {secret&&canManage&&<div className="lab-subscription-secret"><p>{t.secret}</p><label>{t.format}<select value={format} onChange={e=>{setFormat(e.target.value);setCopied(false);}}><option value="base64">Base64</option><option value="raw">VLESS URI</option></select></label><label>{t.url}<input aria-label="Subscription URL" value={url} readOnly autoComplete="off" spellCheck={false} dir="ltr"/></label><div className="lab-subscription-actions"><button type="button" onClick={()=>{void navigator.clipboard.writeText(url).then(()=>{if(!lifetime.current?.signal.aborted)setCopied(true);}).catch(()=>setNotice(t.failed));}}>{copied?t.copied:t.copy}</button><button type="button" onClick={()=>{setSecret("");setCopied(false);}}>{t.hide}</button></div></div>}
-  <p className="business-warning">{t.scope}</p><p>{t.boundary}</p>
+  <p className="business-warning">{scopeText}</p><p>{t.boundary}</p>
  </section>;
 }

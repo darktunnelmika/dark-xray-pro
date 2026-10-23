@@ -54,6 +54,8 @@ type handoverHealthFixture struct {
 	CustomerCredential    string
 	CustomerID            string
 	Inbounds              []handoverHealthInbound
+	ConsumerApprovals     []mx.ConsumerEndpointApproval
+	ConsumerRelays        []*consumerIngressRelay
 	Customers             []business.Client
 	Behavior              *atomic.Int32
 	Requests              *atomic.Int64
@@ -71,13 +73,17 @@ func TestRealPinnedMeteredHandoverProtocolHealth(t *testing.T) {
 	if os.Getenv("DARK_PRO_TEST_FINAL_TCP") != "1" || !filepath.IsAbs(binary) || len(pin) != 64 || os.Geteuid() == 0 || err != nil || len(interfaces) != 1 || interfaces[0].Name != "lo" {
 		t.Fatal("nonroot pinned core in isolated loopback namespace required")
 	}
-	for _, mode := range []string{"verified-and-bound", "reject-wrong-verifier", "drain-during-probe", "owner-agent-lost-replies", "owner-agent-complete-round"} {
+	for _, mode := range []string{"verified-and-bound", "reject-wrong-verifier", "drain-during-probe", "owner-agent-lost-replies", "owner-agent-complete-round", "owner-agent-consumer-manifest"} {
 		t.Run(mode, func(t *testing.T) {
 			inboundCount := 1
-			if mode == "owner-agent-complete-round" {
+			if mode == "owner-agent-complete-round" || mode == "owner-agent-consumer-manifest" {
 				inboundCount = 2
 			}
-			testMeteredHandoverTrafficInbounds(t, binary, pin, "normal", inboundCount, func(f handoverHealthFixture) {
+			fixtureMode := "normal"
+			if mode == "owner-agent-consumer-manifest" {
+				fixtureMode = "consumer-manifest"
+			}
+			testMeteredHandoverTrafficInbounds(t, binary, pin, fixtureMode, inboundCount, func(f handoverHealthFixture) {
 				ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 				defer cancel()
 				cert := f.Origin.Certificate()
@@ -101,6 +107,8 @@ func TestRealPinnedMeteredHandoverProtocolHealth(t *testing.T) {
 					}
 				}
 				switch mode {
+				case "owner-agent-consumer-manifest":
+					testConsumerManifestHealthRound(t, ctx, f, pin)
 				case "owner-agent-complete-round":
 					testCompleteHandoverHealthRound(t, ctx, f, pin)
 				case "owner-agent-lost-replies":
@@ -318,8 +326,11 @@ func (t *handoverHealthRecordingTransport) saved() []mx.ProtocolHealthSubmission
 	return append([]mx.ProtocolHealthSubmission(nil), t.receipts...)
 }
 
-func testCompleteHandoverHealthRound(t *testing.T, ctx context.Context, f handoverHealthFixture, pin string) {
+func testCompleteHandoverHealthRound(t *testing.T, ctx context.Context, f handoverHealthFixture, pin string, consumer ...business.ConsumerManifest) {
 	t.Helper()
+	if len(consumer) > 1 || (len(consumer) == 1 && len(consumer[0].Members) != 2) {
+		t.Fatal("consumer round requires one complete two-inbound manifest")
+	}
 	if len(f.Inbounds) != 2 || f.Inbounds[0].ID != 7612 || f.Inbounds[1].ID != 7613 || f.Inbounds[0].Port == f.Inbounds[1].Port || f.Inbounds[0].SystemProbeID == f.Inbounds[1].SystemProbeID {
 		t.Fatal("round requires two distinct destination inbounds and probe identities")
 	}
@@ -339,7 +350,12 @@ func testCompleteHandoverHealthRound(t *testing.T, ctx context.Context, f handov
 	postOwner := func() business.MeteredHealthRound {
 		t.Helper()
 		body := map[string]any{"id": handoverTestID(250), "confirmed": true}
-		w := browserRequest(t, f.Server.BrowserHandler(), "POST", handoverBase+"/"+f.Plan.ID+"/health-rounds", body, f.Cookie, f.CSRF, "https://"+browserHost)
+		path := handoverBase + "/" + f.Plan.ID + "/health-rounds"
+		if len(consumer) == 1 {
+			path = handoverBase + "/" + f.Plan.ID + "/consumer-health-rounds"
+			body["consumer_manifest_id"], body["consumer_manifest_revision"] = consumer[0].ID, consumer[0].Revision
+		}
+		w := browserRequest(t, f.Server.BrowserHandler(), "POST", path, body, f.Cookie, f.CSRF, "https://"+browserHost)
 		var round business.MeteredHealthRound
 		if w.Code != http.StatusAccepted || json.Unmarshal(w.Body.Bytes(), &round) != nil {
 			t.Fatal("owner complete-inbound round", w.Code, w.Body.String())
@@ -347,6 +363,9 @@ func testCompleteHandoverHealthRound(t *testing.T, ctx context.Context, f handov
 		return round
 	}
 	round := postOwner()
+	if len(consumer) == 1 && (round.ConsumerManifestID != consumer[0].ID || round.ConsumerManifestRevision != consumer[0].Revision || round.ConsumerManifestSHA != consumer[0].ConsumerManifestSHA) {
+		t.Fatal("consumer health round lost its exact manifest identity")
+	}
 	if again := postOwner(); !reflect.DeepEqual(round, again) {
 		t.Fatal("owner retry replaced the immutable health round")
 	}
@@ -357,6 +376,9 @@ func testCompleteHandoverHealthRound(t *testing.T, ctx context.Context, f handov
 		if m.InboundID != f.Inbounds[i].ID || m.Port != f.Inbounds[i].Port || m.State != "pending" || m.ChallengeID != "" || m.Accepted != 0 || m.IntentID == "" || (i > 0 && m.IntentID == round.Members[i-1].IntentID) {
 			t.Fatal("owner selected/omitted a required destination member", m)
 		}
+		if len(consumer) == 1 && (m.ConsumerAddress != consumer[0].Members[i].ConsumerAddress || m.ConsumerPort != consumer[0].Members[i].ConsumerPort) {
+			t.Fatal("consumer round changed an approved ingress tuple")
+		}
 	}
 	audit := func() business.MeteredHealthRound {
 		t.Helper()
@@ -366,11 +388,11 @@ func testCompleteHandoverHealthRound(t *testing.T, ctx context.Context, f handov
 			t.Fatal("owner round audit/publication boundary", w.Code, w.Body.String())
 		}
 		r := v.HealthRounds[0]
-		if r.ID != round.ID || r.ManifestSHA != round.ManifestSHA || r.Created != round.Created || r.Expires != round.Expires || len(r.Members) != 2 {
+		if r.ID != round.ID || r.ManifestSHA != round.ManifestSHA || r.ConsumerManifestID != round.ConsumerManifestID || r.ConsumerManifestRevision != round.ConsumerManifestRevision || r.ConsumerManifestSHA != round.ConsumerManifestSHA || r.Created != round.Created || r.Expires != round.Expires || len(r.Members) != 2 {
 			t.Fatal("health proof changed immutable round coverage/deadline")
 		}
 		for i, m := range r.Members {
-			if m.InboundID != round.Members[i].InboundID || m.Port != round.Members[i].Port || m.IntentID != round.Members[i].IntentID {
+			if m.InboundID != round.Members[i].InboundID || m.Port != round.Members[i].Port || m.IntentID != round.Members[i].IntentID || m.ConsumerAddress != round.Members[i].ConsumerAddress || m.ConsumerPort != round.Members[i].ConsumerPort {
 				t.Fatal("health proof changed a required member")
 			}
 		}
@@ -424,6 +446,9 @@ func testCompleteHandoverHealthRound(t *testing.T, ctx context.Context, f handov
 	postAgent("poll", poll, http.StatusOK, &next)
 	if next.Request.InboundID != f.Inbounds[1].ID || next.Request.Port != f.Inbounds[1].Port || next.Request.ID == proofs[0].ChallengeID || next.Request.Expires > round.Expires || next.Request.Expires-next.Request.Issued > int64(8*time.Second) {
 		t.Fatal("second member delivery lost exact coverage/deadline")
+	}
+	if len(consumer) == 1 && (next.Request.Version != mx.ConsumerProtocolHealthVersion || next.Request.ConsumerManifestSHA != consumer[0].ConsumerManifestSHA || next.Request.ConsumerAddress != consumer[0].Members[1].ConsumerAddress || next.Request.ConsumerPort != consumer[0].Members[1].ConsumerPort) {
+		t.Fatal("Agent delivery did not bind the exact current consumer manifest and tuple")
 	}
 	postAgent("receipt", mx.ProtocolHealthSubmission{ChallengeID: next.Request.ID, Receipt: proofs[0].Receipt}, http.StatusConflict, nil)
 	postAgent("receipt", proofs[0], http.StatusNoContent, nil)

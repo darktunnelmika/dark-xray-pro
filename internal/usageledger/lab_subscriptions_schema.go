@@ -7,7 +7,9 @@ import "context"
 // be opened by an older reader that would forget those constraints.
 const LabSubscriptionsBusinessSchemaVersion = 13
 
-func HasLabSubscriptionsSchema(v int) bool { return v == LabSubscriptionsBusinessSchemaVersion }
+func HasLabSubscriptionsSchema(v int) bool {
+	return v == LabSubscriptionsBusinessSchemaVersion || HasConsumerManifestsSchema(v)
+}
 
 var labSubscriptionsSchema = []string{
 	`CREATE TABLE pro_subscription_meta(id INTEGER PRIMARY KEY CHECK(id=1),version INTEGER NOT NULL CHECK(version=1))`,

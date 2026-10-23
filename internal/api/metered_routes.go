@@ -63,6 +63,7 @@ func (s *Server) attachMeteredRouteTransactions(mux *http.ServeMux) {
 		out["health_enabled"] = s.healthEndpoint != nil
 		out["health_rounds_enabled"] = s.healthRoundsEnabled
 		out["lab_subscriptions_enabled"] = s.labSubscriptionsEnabled
+		out["consumer_manifests_enabled"] = s.consumerManifestsEnabled
 		nodes := make([]map[string]string, 0, len(s.meteredRouteNodes))
 		ids := make([]string, 0, len(s.meteredRouteNodes))
 		for id := range s.meteredRouteNodes {

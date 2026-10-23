@@ -38,6 +38,9 @@ var healthSchema = []string{
 }
 
 func verifyHealthSchema(ctx context.Context, c *ledgerConn, version int) error {
+	if err := verifyConsumerManifestsSchema(ctx, c, version); err != nil {
+		return err
+	}
 	if err := verifyLabSubscriptionsSchema(ctx, c, version); err != nil {
 		return err
 	}

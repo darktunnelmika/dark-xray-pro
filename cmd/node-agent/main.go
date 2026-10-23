@@ -39,6 +39,28 @@ func checkLabEndpoint(raw string) (*url.URL, error) {
 	return endpoint, nil
 }
 
+func consumerEndpointPolicy(enabled, health, metered bool, nodeID, raw string) ([]managedxray.ConsumerEndpointApproval, error) {
+	if !enabled {
+		if raw != "" {
+			return nil, errors.New("consumer endpoint policy requires explicit enablement")
+		}
+		return nil, nil
+	}
+	if !health || !metered {
+		return nil, errors.New("consumer endpoint proof requires metered health and the isolated metered executor")
+	}
+	approvals, err := managedxray.ParseConsumerEndpointApprovalsJSON(raw)
+	if err != nil {
+		return nil, errors.New("invalid consumer endpoint startup policy")
+	}
+	for _, approval := range approvals {
+		if approval.NodeID != nodeID {
+			return nil, errors.New("consumer endpoint policy must name this Node")
+		}
+	}
+	return approvals, nil
+}
+
 // Enrollment retries preserve the Agent-generated installation and secret.
 func enroll(ctx context.Context, client *http.Client, endpoint string, identity agentidentity.Identity) error {
 	data, err := json.Marshal(map[string]string{"pair_code": identity.PairCode, "node_id": identity.NodeID, "installation_id": identity.InstallationID, "agent_token": identity.AgentToken})
@@ -136,6 +158,13 @@ func main() {
 	if *nodeID == "" {
 		log.Fatal("specify -id for a new LAB node; do not reuse old node identities")
 	}
+	routeEnabled := os.Getenv("DARK_PRO_ENABLE_ROUTE_TRANSACTIONS") == "1"
+	meteredRouteEnabled := os.Getenv("DARK_PRO_ENABLE_METERED_ROUTE_TRANSACTIONS") == "1"
+	healthEnabled := os.Getenv("DARK_PRO_ENABLE_METERED_HEALTH") == "1"
+	consumerApprovals, policyErr := consumerEndpointPolicy(os.Getenv("DARK_PRO_ENABLE_CONSUMER_ENDPOINTS") == "1", healthEnabled, meteredRouteEnabled, *nodeID, os.Getenv("DARK_PRO_CONSUMER_ENDPOINTS_JSON"))
+	if policyErr != nil {
+		log.Fatal(policyErr)
+	}
 	remote := strings.HasPrefix(*hub, "https://")
 	if remote && os.Getenv("DARK_PRO_ENABLE_REMOTE_AGENT") != "1" {
 		log.Fatal("remote Node connection requires DARK_PRO_ENABLE_REMOTE_AGENT=1 in the isolated LAB")
@@ -193,6 +222,11 @@ func main() {
 	if err != nil {
 		log.Fatal("Node identity unavailable: ", err)
 	}
+	for _, approval := range consumerApprovals {
+		if approval.InstallationID != identity.InstallationID {
+			log.Fatal("consumer endpoint policy must name this exact installation")
+		}
+	}
 	if !identity.Paired {
 		attempt, cancel := context.WithTimeout(ctx, 8*time.Second)
 		err = enroll(attempt, client, endpoint, identity)
@@ -214,9 +248,6 @@ func main() {
 	}
 	var nativeRuntime *managedxray.Runtime
 	var transactionRuntime *managedxray.TransactionRuntime
-	routeEnabled := os.Getenv("DARK_PRO_ENABLE_ROUTE_TRANSACTIONS") == "1"
-	meteredRouteEnabled := os.Getenv("DARK_PRO_ENABLE_METERED_ROUTE_TRANSACTIONS") == "1"
-	healthEnabled := os.Getenv("DARK_PRO_ENABLE_METERED_HEALTH") == "1"
 	if healthEnabled && !meteredRouteEnabled {
 		log.Fatal("protocol health requires the separate metered LAB executor")
 	}
@@ -242,7 +273,7 @@ func main() {
 		if e != nil {
 			log.Fatal("metered command authority refused")
 		}
-		transactionRuntime, err = managedxray.OpenMeteredTransactions(managedxray.Options{Directory: *runtimeDir, StateKey: stateKey, LeaseKey: []byte(identity.AgentToken), NodeID: *nodeID, InstallationID: identity.InstallationID, ListenIP: *runtimeIP, Binary: *stageXrayBinary, BinarySHA: *stageXraySHA, ReservedPorts: []uint16{2087, 8443, 24443}, ExperimentalFinalTCP: true}, managedxray.MeteredTransactionOptions{Authority: authority, Sender: usageSender, Interval: 2 * time.Second, MaxSampleGap: 12 * time.Second, MaxPendingAge: 20 * time.Second})
+		transactionRuntime, err = managedxray.OpenMeteredTransactions(managedxray.Options{Directory: *runtimeDir, StateKey: stateKey, LeaseKey: []byte(identity.AgentToken), NodeID: *nodeID, InstallationID: identity.InstallationID, ListenIP: *runtimeIP, Binary: *stageXrayBinary, BinarySHA: *stageXraySHA, ReservedPorts: []uint16{2087, 8443, 24443}, ExperimentalFinalTCP: true}, managedxray.MeteredTransactionOptions{Authority: authority, Sender: usageSender, Interval: 2 * time.Second, MaxSampleGap: 12 * time.Second, MaxPendingAge: 20 * time.Second, ConsumerEndpointApprovals: consumerApprovals})
 		if err != nil {
 			log.Fatal("metered route executor refused private state: ", err)
 		}

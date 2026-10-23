@@ -280,6 +280,20 @@ func main() {
 			log.Fatal("LAB subscription configuration refused: ", err)
 		}
 	}
+	if os.Getenv("DARK_PRO_ENABLE_CONSUMER_ENDPOINTS") == "1" {
+		if os.Getenv("DARK_PRO_ENABLE_LAB_SUBSCRIPTIONS") != "1" {
+			log.Fatal("consumer endpoints require explicitly enabled LAB subscriptions and complete health rounds")
+		}
+		approvals, err := managedxray.ParseConsumerEndpointApprovalsJSON(os.Getenv("DARK_PRO_CONSUMER_ENDPOINTS_JSON"))
+		if err != nil {
+			log.Fatal("consumer endpoint approval configuration refused: ", err)
+		}
+		if err := service.EnableConsumerEndpoints(approvals); err != nil {
+			log.Fatal("consumer endpoint capability refused: ", err)
+		}
+	} else if os.Getenv("DARK_PRO_CONSUMER_ENDPOINTS_JSON") != "" {
+		log.Fatal("consumer endpoint approvals supplied without explicit enable switch")
+	}
 	if os.Getenv("DARK_PRO_ENABLE_CONFIG_STAGE") == "1" {
 		if *agentListen == "" || os.Getenv("DARK_PRO_ENABLE_REMOTE_AGENT") != "1" {
 			log.Fatal("encrypted config staging requires dedicated verified remote Agent TLS listener")
