@@ -4,7 +4,7 @@ import { expect, test, type Page } from "@playwright/test";
 const csrf = "a".repeat(64);
 const installation = "a".repeat(32);
 const digest = "d".repeat(64);
-async function fixture(page: Page, role = "owner", includeUSA = false) {
+async function fixture(page: Page, role = "owner", includeUSA = false, duplicateNodeNames = false) {
  const calls: Array<{ path: string; body: Record<string, unknown>; csrf: string }> = [];
  const base = { enabled: true, archived: false, revision: 1, grpc_service: "", reality_target: "example.org:443", server_names: ["example.org"], short_ids: ["aa"], public_key: "PUBLIC_ONLY_TEST_KEY" };
  const inbounds = [{ ...base, id: 301, name: "Native Test", transport: "tcp", bound_clients: 0 }];
@@ -61,7 +61,7 @@ async function fixture(page: Page, role = "owner", includeUSA = false) {
    },
    inbounds, nodes: [
     { node_id: "new-node", installation_id: installation, name: "New PRO Node" },
-    ...(includeUSA ? [{node_id:"usa-pro-01",installation_id:installation,name:"USA PRO"}] : []),
+    ...(includeUSA ? [{node_id:"usa-pro-01",installation_id:installation,name:duplicateNodeNames ? "New PRO Node" : "USA PRO"}] : []),
    ], targets, runtime: [{
     node_id: "new-node", installation_id: installation, desired_sequence: 1, desired_sha: digest,
     reported_sequence: applied ? 1 : 0, reported_sha: applied ? digest : "", state: applied ? "applied" : "awaiting_report",
@@ -102,12 +102,15 @@ test("native owner form saves an Inbound without claiming completed deployment",
  await page.getByRole("button", { name: "Add Inbound", exact: true }).click();
  const dialog = page.getByRole("dialog", { name: "Create REALITY Inbound", exact: true });
  await dialog.getByLabel("Inbound name", { exact: true }).fill("New actual inbound");
+ await dialog.getByRole("tab", { name: "Security", exact: true }).click();
  await dialog.getByLabel("REALITY target (host:port)").fill("example.net:443");
  await dialog.getByLabel("Server names (comma-separated)").fill("example.net");
- await dialog.getByRole("button", { name: "Create Inbound", exact: true }).click();
+ await dialog.getByRole("button", { name: "Create and set up routes", exact: true }).click();
  await expect(dialog).toBeHidden();
  await expect(page.getByRole("heading", { name: "New actual inbound", exact: true })).toBeVisible();
  await expect(page).toHaveURL(url => url.pathname === "/inbounds" && url.searchParams.get("inbound") === String(f.calls[0].body.id));
+ await expect(page.getByRole("tab", { name: "Routes", exact: true })).toHaveAttribute("aria-selected", "true");
+ await expect(page.getByRole("button", { name: "Add Node target", exact: true })).toBeVisible();
  expect(f.calls).toHaveLength(1);expect(f.calls[0].csrf).toBe(csrf);expect(f.calls[0].body.transport).toBe("tcp");
  await expect(page.getByText("Matching process reported", { exact: true })).toHaveCount(0);
 });
@@ -125,12 +128,14 @@ test("copy settings prefills the public profile and creates a fresh identity wit
  const dialog = page.getByRole("dialog", { name: "Create REALITY Inbound", exact: true });
  const copyName = source.name + " — copy";
  await expect(dialog.getByLabel("Inbound name", { exact: true })).toHaveValue(copyName);
+ await dialog.getByRole("tab", { name: "Network", exact: true }).click();
  await expect(dialog.getByLabel("Transport", { exact: true })).toHaveValue(source.transport);
  await expect(dialog.getByLabel("gRPC service", { exact: true })).toHaveValue(source.grpc_service);
+ await dialog.getByRole("tab", { name: "Security", exact: true }).click();
  await expect(dialog.getByLabel("REALITY target (host:port)", { exact: true })).toHaveValue(source.reality_target);
  await expect(dialog.getByLabel("Server names (comma-separated)", { exact: true })).toHaveValue(source.server_names.join(", "));
  expect(f.calls).toHaveLength(0);
- await dialog.getByRole("button", { name: "Create Inbound", exact: true }).click();
+ await dialog.getByRole("button", { name: "Create and set up routes", exact: true }).click();
  await expect(dialog).toBeHidden();
  await expect(page.getByRole("heading", { name: copyName, exact: true })).toBeVisible();
  expect(f.calls).toHaveLength(1);
@@ -147,23 +152,33 @@ test("copy settings prefills the public profile and creates a fresh identity wit
  expect(call.body.short_ids).not.toEqual(source.short_ids);
  for (const field of ["public_key", "private_key", "clients", "client_ids", "targets", "node_id", "installation_id"]) expect(call.body).not.toHaveProperty(field);
  await expect(page).toHaveURL(url => url.pathname === "/inbounds" && url.searchParams.get("inbound") === String(call.body.id));
- await expect(page.getByRole("tab", { name: "Overview", exact: true })).toHaveAttribute("aria-selected", "true");
+ await expect(page.getByRole("tab", { name: "Routes", exact: true })).toHaveAttribute("aria-selected", "true");
  expect(f.targets).toHaveLength(1);
  expect(f.inbounds.find(inbound => inbound.id === call.body.id)?.bound_clients).toBe(0);
 });
 
 test("native workflow binds selected clients and reports only acknowledged Node revision", async ({ page }) => {
- const f = await fixture(page);await openPage(page);
+ const f = await fixture(page, "owner", true, true);await openPage(page);
  await openInbound(page);
  await page.getByRole("tab", { name: "Clients", exact: true }).click();
  await page.locator(".native-client-row").filter({ hasText: "Client One" }).getByRole("checkbox").check();
  await page.getByRole("button", { name: "Attach selected", exact: true }).click();
  await expect(page.getByLabel("Bound", { exact: true })).toBeVisible();
  const target = await openTarget(page);
+ await expect(target.getByRole("option", { name: "New PRO Node (new-node)", exact: true })).toHaveCount(1);
+ await expect(target.getByRole("option", { name: "New PRO Node (usa-pro-01)", exact: true })).toHaveCount(1);
  await target.getByLabel("New paired Node").selectOption("new-node");
  await target.getByLabel("Node's assigned IP").fill("203.0.113.7");
+ await target.getByLabel("Direct port (0 = disabled)").fill("2087");
+ await expect(target.getByRole("button", { name: "Save Node target" })).toBeDisabled();
+ await expect(target.getByRole("alert")).toContainText("reserved");
  await target.getByLabel("Direct port (0 = disabled)").fill("19600");
+ await target.getByRole("checkbox", { name: /Dark Swap destination listener/ }).check();
  await target.getByLabel("Dark Swap destination port (0 = disabled)").fill("19601");
+ await target.getByRole("checkbox", { name: /Dark Swap destination listener/ }).uncheck();
+ await expect(target.getByLabel("Dark Swap destination port (0 = disabled)")).toHaveCount(0);
+ await target.getByRole("checkbox", { name: /Dark Swap destination listener/ }).check();
+ await expect(target.getByLabel("Dark Swap destination port (0 = disabled)")).toHaveValue("19601");
  page.once("dialog", d => d.accept());await target.getByRole("button", { name: "Save Node target" }).click();
  await expect(target).toBeHidden();
  await openDiagnostics(page);
@@ -211,6 +226,7 @@ test("native profile edit preserves key fields and disable/archive uses revision
  await control.getByLabel("Reason for change",{exact:true}).fill("Edit without key rotation");
  const editor=page.getByRole("form",{name:"Edit Inbound profile"});
  await editor.getByLabel("Name",{exact:true}).fill("Edited Native");
+ await editor.getByRole("tab",{name:"Security",exact:true}).click();
  await editor.getByLabel("Server names",{exact:true}).fill("updated.example.org");
  page.once("dialog",d=>d.accept());await editor.getByRole("button",{name:"Save profile changes",exact:true}).click();
  await expect(page.getByRole("heading",{name:"Edited Native",exact:true})).toBeVisible();
@@ -218,6 +234,7 @@ test("native profile edit preserves key fields and disable/archive uses revision
  expect(f.calls).toHaveLength(1);expect(f.calls[0].body.expected_revision).toBe(1);
  const p=f.calls[0].body.profile as Record<string,unknown>;
  expect(p.short_ids).toEqual(["aa"]);expect(p.id).toBe(301);expect(p).not.toHaveProperty("private_key");expect(p).not.toHaveProperty("public_key");
+ await control.locator("summary").filter({hasText:"More actions"}).click();
  await control.getByLabel("Reason for change",{exact:true}).fill("Pause temporarily");
  page.once("dialog",d=>d.accept());await control.getByRole("button",{name:"Disable Inbound",exact:true}).click();
  await expect(control.getByRole("button",{name:"Enable Inbound",exact:true})).toBeVisible();
@@ -256,6 +273,7 @@ test("shared port is blocked at owner form and cannot reach live Node mutation e
  await target.getByLabel("New paired Node").selectOption("new-node");
  await target.getByLabel("Node's assigned IP").fill("203.0.113.7");
  await target.getByLabel("Direct port (0 = disabled)").fill("19600");
+ await target.getByRole("checkbox", { name: /Dark Swap destination listener/ }).check();
  await target.getByLabel("Dark Swap destination port (0 = disabled)").fill("19600");
  await expect(target.getByRole("alert").filter({hasText:"Direct and Dark Swap cannot use the same Node port"})).toBeVisible();
  await expect(target.getByRole("button",{name:"Save Node target"})).toBeDisabled();
@@ -275,6 +293,7 @@ test("320px Persian shared-port warning remains readable and no save is possible
  await target.getByLabel("نود جدید متصل").selectOption("new-node");
  await target.getByLabel("IP اختصاص‌یافته به نود").fill("203.0.113.7");
  await target.getByLabel("پورت مستقیم (صفر = غیرفعال)").fill("19600");
+ await target.getByRole("checkbox", { name: /دریافت دارک‌سواپ/ }).check();
  await target.getByLabel("پورت مقصد Dark Swap (صفر = غیرفعال)").fill("19600");
  await expect(target.getByRole("alert").filter({hasText:"پورت Direct و Dark Swap نباید یکسان باشد"})).toBeVisible();
  await expect(target.getByRole("button",{name:"ذخیره مقصد نود"})).toBeDisabled();
@@ -511,9 +530,16 @@ for (const language of ["en", "fa"] as const) {
   await dialog.getByRole("button").last().focus();
   await page.keyboard.press("Tab");
   expect(await dialog.evaluate(element => element.contains(document.activeElement))).toBe(true);
+  let prompts = 0;
+  page.once("dialog", async confirmation => { prompts++; await confirmation.dismiss(); });
+  await page.keyboard.press("Escape");
+  await expect(dialog).toBeVisible();
+  await expect(name).toHaveValue("Unsubmitted browser fixture");
+  page.once("dialog", async confirmation => { prompts++; await confirmation.accept(); });
   await page.keyboard.press("Escape");
   await expect(dialog).toBeHidden();
   await expect(opener).toBeFocused();
+  expect(prompts).toBe(2);
   expect(f.calls).toHaveLength(0);
   await opener.click();
   await dialog.getByRole("button", { name: persian ? "انصراف" : "Cancel", exact: true }).click();
@@ -587,6 +613,174 @@ test("sidebar navigation asks before discarding an unsaved Inbound profile", asy
  await expect(editor).toHaveCount(0);
  expect(prompts).toBe(2);
  expect(f.calls).toHaveLength(0);
+});
+
+for (const language of ["en", "fa"] as const) {
+ test(`DARK creation sections keep fields, keyboard order and visible footer (${language})`, async ({ page }) => {
+  const persian = language === "fa";
+  const f = await fixture(page);
+  await page.setViewportSize(persian ? { width: 320, height: 780 } : { width: 1440, height: 900 });
+  await page.addInitScript(theme => localStorage.setItem("dark-pro-theme", theme), persian ? "dark" : "light");
+  await openPage(page, persian);
+  if (persian) await page.getByRole("button", { name: "Switch language" }).click();
+  await page.getByRole("button", { name: persian ? "افزودن اینباند" : "Add Inbound", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: persian ? "ساخت اینباند REALITY" : "Create REALITY Inbound", exact: true });
+  const basics = dialog.getByRole("tab", { name: persian ? "پایه" : "Basics", exact: true });
+  const network = dialog.getByRole("tab", { name: persian ? "شبکه" : "Network", exact: true });
+  const security = dialog.getByRole("tab", { name: persian ? "امنیت" : "Security", exact: true });
+  const name = dialog.getByLabel(persian ? "نام اینباند" : "Inbound name", { exact: true });
+  const transport = dialog.getByLabel(persian ? "ترنسپورت" : "Transport", { exact: true });
+  const service = dialog.getByLabel(persian ? "سرویس gRPC" : "gRPC service", { exact: true });
+  const target = dialog.getByLabel(persian ? "مقصد REALITY (هاست:پورت)" : "REALITY target (host:port)", { exact: true });
+  const names = dialog.getByLabel(persian ? "نام‌های سرور (با کاما)" : "Server names (comma-separated)", { exact: true });
+  await expect(dialog.getByRole("tab")).toHaveCount(3);
+  await expect(basics).toHaveAttribute("aria-selected", "true");
+  await expect(dialog.getByRole("tabpanel")).toHaveCount(1);
+  await name.fill("Retained creation draft");
+  await basics.focus();
+  await page.keyboard.press(persian ? "ArrowLeft" : "ArrowRight");
+  await expect(network).toBeFocused();
+  await expect(network).toHaveAttribute("aria-selected", "true");
+  await expect(name).toBeHidden();
+  await expect(transport.locator("option")).toHaveText(["TCP / REALITY", "gRPC / REALITY"]);
+  await transport.selectOption("grpc");
+  await service.fill("retained-grpc");
+  await network.focus();
+  await page.keyboard.press("End");
+  await expect(security).toBeFocused();
+  await target.fill("retained.example.org:443");
+  await names.fill("retained.example.org, alternate.example.org");
+  await security.focus();
+  await page.keyboard.press("Home");
+  await expect(basics).toBeFocused();
+  await expect(name).toHaveValue("Retained creation draft");
+  await network.click();
+  await expect(service).toHaveValue("retained-grpc");
+  await transport.selectOption("tcp");
+  await expect(service).toHaveCount(0);
+  await transport.selectOption("grpc");
+  await expect(service).toHaveValue("retained-grpc");
+  await security.click();
+  await expect(target).toHaveValue("retained.example.org:443");
+  await expect(names).toHaveValue("retained.example.org, alternate.example.org");
+  for (const tab of [basics, network, security]) {
+   await tab.click();
+   const layout = await dialog.evaluate((element, minimumHeight) => {
+    const bounds = element.getBoundingClientRect();
+    const footer = element.querySelector("footer")!.getBoundingClientRect();
+    const controls = Array.from(element.querySelectorAll<HTMLElement>("button,input,select")).filter(control => control.getClientRects().length > 0);
+    return { left: bounds.left, right: bounds.right, width: innerWidth, footerTop: footer.top, footerBottom: footer.bottom, height: innerHeight,
+     overflow: element.scrollWidth > element.clientWidth + 2,
+     smallControls: controls.filter(control => control.getBoundingClientRect().height < minimumHeight).map(control => control.getAttribute("aria-label") || control.textContent) };
+   }, persian ? 44 : 39);
+   expect(layout.left).toBeGreaterThanOrEqual(-1);
+   expect(layout.right).toBeLessThanOrEqual(layout.width + 1);
+   expect(layout.footerTop).toBeGreaterThanOrEqual(0);
+   expect(layout.footerBottom).toBeLessThanOrEqual(layout.height + 1);
+   expect(layout.overflow).toBe(false);
+   expect(layout.smallControls).toEqual([]);
+  }
+  expect(f.calls).toHaveLength(0);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 2)).toBe(true);
+ });
+}
+
+test("creation validation reveals the first invalid section without POST and accepts an IPv6 target", async ({ page }) => {
+ const f = await fixture(page); await openPage(page);
+ const browserErrors: string[] = [];
+ page.on("pageerror", error => browserErrors.push(error.message));
+ await page.getByRole("button", { name: "Add Inbound", exact: true }).click();
+ const dialog = page.getByRole("dialog", { name: "Create REALITY Inbound", exact: true });
+ const basics = dialog.getByRole("tab", { name: "Basics", exact: true });
+ const network = dialog.getByRole("tab", { name: "Network", exact: true });
+ const security = dialog.getByRole("tab", { name: "Security", exact: true });
+ const name = dialog.getByLabel("Inbound name", { exact: true });
+ const service = dialog.getByLabel("gRPC service", { exact: true });
+ const target = dialog.getByLabel("REALITY target (host:port)", { exact: true });
+ const names = dialog.getByLabel("Server names (comma-separated)", { exact: true });
+ const save = dialog.getByRole("button", { name: "Create and set up routes", exact: true });
+ await save.click();
+ await expect(basics).toHaveAttribute("aria-selected", "true");
+ await expect(name).toBeFocused();
+ expect(f.calls).toHaveLength(0);
+ await name.fill("Validated IPv6 fixture");
+ await network.click();
+ await dialog.getByLabel("Transport", { exact: true }).selectOption("grpc");
+ await basics.click();
+ await save.click();
+ await expect(network).toHaveAttribute("aria-selected", "true");
+ await expect(service).toBeFocused();
+ await service.fill("not a service");
+ await save.click();
+ await expect(service).toHaveAttribute("aria-invalid", "true");
+ expect(f.calls).toHaveLength(0);
+ await service.fill("valid-grpc");
+ await basics.click();
+ await save.click();
+ await expect(security).toHaveAttribute("aria-selected", "true");
+ await expect(target).toBeFocused();
+ await target.fill("example.org");
+ await names.fill("example.org");
+ await basics.click();
+ await save.click();
+ await expect(target).toBeFocused();
+ expect(f.calls).toHaveLength(0);
+ await target.fill("[2001:db8::10]:443");
+ await names.fill(", , ");
+ await basics.click();
+ await save.click();
+ await expect(security).toHaveAttribute("aria-selected", "true");
+ await expect(names).toBeFocused();
+ expect(f.calls).toHaveLength(0);
+ await names.fill("first.example.org, second.example.org");
+ await dialog.getByRole("button", { name: "Check form", exact: true }).click();
+ await expect(dialog.getByRole("status")).toHaveText("Profile is ready to save.");
+ expect(f.calls).toHaveLength(0);
+ await save.click();
+ await expect(dialog).toBeHidden();
+ expect(f.calls).toHaveLength(1);
+ expect(f.calls[0].body).toMatchObject({ name: "Validated IPv6 fixture", transport: "grpc", grpc_service: "valid-grpc",
+  reality_target: "[2001:db8::10]:443", server_names: ["first.example.org", "second.example.org"] });
+ await expect(page.getByRole("tab", { name: "Routes", exact: true })).toHaveAttribute("aria-selected", "true");
+ expect(browserErrors).toEqual([]);
+});
+
+test("failed creation keeps the drawer and retries the exact identity and payload", async ({ page }) => {
+ const f = await fixture(page);
+ const attempts: Array<{ body: Record<string, unknown>; csrf: string }> = [];
+ await page.route("**/api/v1/workspace/native-inbounds", async route => {
+  if (route.request().method() !== "POST") return route.fallback();
+  attempts.push({ body: route.request().postDataJSON() as Record<string, unknown>, csrf: route.request().headers()["x-csrf-token"] ?? "" });
+  if (attempts.length === 1) return route.fulfill({ status: 503, json: { error: "synthetic_transient_failure" } });
+  return route.fallback();
+ });
+ await openPage(page);
+ await page.getByRole("button", { name: "Add Inbound", exact: true }).click();
+ const dialog = page.getByRole("dialog", { name: "Create REALITY Inbound", exact: true });
+ const save = dialog.getByRole("button", { name: "Create and set up routes", exact: true });
+ await dialog.getByLabel("Inbound name", { exact: true }).fill("Retry creation fixture");
+ await dialog.getByRole("tab", { name: "Security", exact: true }).click();
+ await dialog.getByLabel("REALITY target (host:port)", { exact: true }).fill("retry.example.org:443");
+ await dialog.getByLabel("Server names (comma-separated)", { exact: true }).fill("retry.example.org");
+ await save.click();
+ await expect(dialog.getByRole("alert")).toContainText("Request failed.");
+ await expect(dialog).toBeVisible();
+ await dialog.getByRole("tab", { name: "Basics", exact: true }).click();
+ await expect(dialog.getByLabel("Inbound name", { exact: true })).toHaveValue("Retry creation fixture");
+ await dialog.getByRole("tab", { name: "Security", exact: true }).click();
+ await expect(dialog.getByLabel("REALITY target (host:port)", { exact: true })).toHaveValue("retry.example.org:443");
+ // A fresh state poll clears the existing stale-data gate; it must not resubmit.
+ await expect(save).toBeEnabled({ timeout: 8000 });
+ expect(attempts).toHaveLength(1);
+ expect(f.calls).toHaveLength(0);
+ await save.click();
+ await expect(dialog).toBeHidden();
+ await expect(page.getByRole("heading", { name: "Retry creation fixture", exact: true })).toBeVisible();
+ expect(attempts).toHaveLength(2);
+ expect(attempts[1]).toEqual(attempts[0]);
+ expect(attempts[0].csrf).toBe(csrf);
+ expect(f.calls).toHaveLength(1);
+ expect(f.calls[0].body).toEqual(attempts[0].body);
 });
 
 test("canceling browser Back preserves dirty fields and accepted Back clears the previous Inbound client selection", async ({ page }) => {

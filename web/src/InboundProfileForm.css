@@ -1,0 +1,62 @@
+/* Shared DARK-style profile editor, used by creation and profile editing. */
+.inbound-profile-form { min-width: 0; color: var(--text); }
+.inbound-profile-form .inbound-profile-tabs {
+ display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 5px;
+ padding: 5px; border: 1px solid var(--border); border-radius: 14px;
+ background: var(--surface-2);
+}
+.inbound-profile-form .inbound-profile-tabs button {
+ display: flex; justify-content: center; align-items: center; gap: 8px;
+ min-width: 0; min-height: 44px; padding: 9px 12px; border: 1px solid transparent;
+ border-radius: 10px; background: transparent; color: var(--sub); font: inherit;
+ font-size: 12px; font-weight: 550; line-height: 1.5; cursor: pointer;
+}
+.inbound-profile-form .inbound-profile-tabs button:hover:not(:disabled) { color: var(--text); background: var(--surface); }
+.inbound-profile-form .inbound-profile-tabs button[aria-selected="true"] {
+ border-color: var(--border); background: var(--surface); color: var(--accent);
+ box-shadow: var(--shadow); font-weight: 720;
+}
+.inbound-profile-form .inbound-profile-tabs button svg { flex: 0 0 auto; color: currentColor; }
+.inbound-profile-form .inbound-profile-tabs button:disabled { opacity: .5; cursor: not-allowed; }
+.inbound-profile-form .inbound-profile-panel { display: grid; gap: 19px; min-width: 0; padding-block: 22px 4px; }
+.inbound-profile-form [hidden] { display: none !important; }
+.inbound-profile-form .inbound-profile-section-heading { display: grid; gap: 5px; min-width: 0; }
+.inbound-profile-form .inbound-profile-section-heading h3 { margin: 0; color: var(--text); font-size: 15px; font-weight: 700; line-height: 1.7; }
+.inbound-profile-form .inbound-profile-section-heading p { margin: 0; color: var(--sub); font-size: 12px; line-height: 1.8; }
+.inbound-profile-form .inbound-profile-field-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 17px; align-items: start; min-width: 0; }
+.inbound-profile-form .inbound-profile-field { display: flex; flex-direction: column; align-items: stretch; gap: 8px; min-width: 0; font-size: 12px; color: var(--text); }
+.inbound-profile-form .inbound-profile-field > span:first-child { font-weight: 600; line-height: 1.7; }
+.inbound-profile-form .inbound-profile-field input,
+.inbound-profile-form .inbound-profile-field select {
+ width: 100%; min-width: 0; box-sizing: border-box; min-height: 46px; padding: 10px 12px;
+ border: 1px solid var(--border); border-radius: 11px; background: var(--surface-2);
+ color: var(--text); font: inherit; font-size: 14px; line-height: 1.7;
+}
+.inbound-profile-form .inbound-profile-field input::placeholder { color: var(--sub); opacity: .65; }
+.inbound-profile-form .inbound-profile-field input:focus,
+.inbound-profile-form .inbound-profile-field select:focus { border-color: var(--accent); outline: 2px solid var(--accent-wash); outline-offset: 2px; }
+.inbound-profile-form .inbound-profile-field input[aria-invalid="true"] { border-color: var(--red); }
+.inbound-profile-form .inbound-profile-field input:disabled,
+.inbound-profile-form .inbound-profile-field select:disabled { opacity: .6; cursor: not-allowed; }
+.inbound-profile-form .inbound-profile-field small { color: var(--sub); font-size: 11px; line-height: 1.8; overflow-wrap: anywhere; }
+.inbound-profile-form .inbound-profile-error { color: var(--red); font-size: 11px; font-weight: 500; line-height: 1.8; overflow-wrap: anywhere; }
+.inbound-profile-form .inbound-profile-identity { display: flex; gap: 22px; flex-wrap: wrap; margin: 0; padding-block: 2px; }
+.inbound-profile-form .inbound-profile-identity > div { display: flex; align-items: center; gap: 9px; min-width: 0; }
+.inbound-profile-form .inbound-profile-identity dt { color: var(--sub); font-size: 11px; }
+.inbound-profile-form .inbound-profile-identity dd { display: inline-flex; align-items: center; gap: 5px; margin: 0; padding: 4px 8px; border: 1px solid var(--border); border-radius: 7px; background: var(--surface-2); color: var(--text); font-size: 11px; font-weight: 650; line-height: 1.5; }
+.inbound-profile-form .inbound-profile-identity dd svg { color: var(--accent); flex: 0 0 auto; }
+.inbound-profile-form .inbound-profile-note { display: flex; gap: 9px; align-items: flex-start; margin: 0; color: var(--sub); font-size: 12px; line-height: 1.9; }
+.inbound-profile-form .inbound-profile-note svg { color: var(--accent); flex: 0 0 auto; margin-block-start: 3px; }
+.inbound-profile-form .inbound-profile-note span { min-width: 0; overflow-wrap: anywhere; }
+.inbound-profile-form .inbound-profile-context { min-width: 0; border-block-start: 1px solid var(--border); padding-block-start: 17px; }
+@media (max-width: 620px) {
+ .inbound-profile-form .inbound-profile-tabs { gap: 3px; padding: 4px; border-radius: 12px; }
+ .inbound-profile-form .inbound-profile-tabs button { gap: 5px; min-height: 44px; padding: 8px 4px; font-size: 12px; border-radius: 8px; }
+ .inbound-profile-form .inbound-profile-tabs button svg { width: 15px; height: 15px; }
+ .inbound-profile-form .inbound-profile-panel { gap: 17px; padding-block-start: 19px; }
+ .inbound-profile-form .inbound-profile-field-grid { grid-template-columns: minmax(0, 1fr); gap: 18px; }
+ .inbound-profile-form .inbound-profile-field input,
+ .inbound-profile-form .inbound-profile-field select { min-height: 46px; font-size: 16px; }
+ .inbound-profile-form .inbound-profile-identity { gap: 12px 16px; }
+ .inbound-profile-form .inbound-profile-identity > div { gap: 7px; }
+}
