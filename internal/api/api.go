@@ -134,6 +134,7 @@ func (s *Server) Handler() http.Handler {
 	s.attachClientLifecycle(mux)
 	s.attachClientProfileEdits(mux)
 	s.attachNativeInbounds(mux)
+	s.attachNativeInboundPlans(mux)
 	s.attachNativeRouteDrafts(mux)
 	s.attachRouteReadinessP0G(mux)
 	s.attachRouteTransactions(mux)

@@ -75,6 +75,7 @@ func(s *Store)MutateInbound(ctx context.Context,key []byte,id uint64,m InboundMu
  err=tx.QueryRowContext(ctx,"SELECT fingerprint FROM native_inbound_operations WHERE event_id=?",m.EventID).Scan(&prior)
  if err==nil{if prior!=hash{return NativeInbound{},ErrConflict};return in,nil}
  if !errors.Is(err,sql.ErrNoRows){return NativeInbound{},err}
+ if m.Action=="enable"||m.Action=="edit"{if err=rejectNativePlanMaterialization(ctx,tx,id);err!=nil{return NativeInbound{},err}}
  if in.Archived||in.Revision!=m.ExpectedRevision{return NativeInbound{},ErrConflict}
  enabled,archived:=in.Enabled,in.Archived
  var encrypted []byte

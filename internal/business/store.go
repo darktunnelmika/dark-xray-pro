@@ -166,6 +166,7 @@ func Open(path string)(*Store,error){
  if err=ensureCatalog(db);err!=nil{return fail(err)}
  if err=ensureCatalogPolicy(db);err!=nil{return fail(err)}
  if err=ensureNativeRouteDrafts(db);err!=nil{return fail(err)}
+ if err=ensureNativeInboundPlans(db);err!=nil{return fail(err)}
  if err=ensureRouteTransactions(db);err!=nil{return fail(err)}
  if err=ensureMeteredRouteTransactions(db);err!=nil{return fail(err)}
  if err=ensureMeteredHandovers(db);err!=nil{return fail(err)}

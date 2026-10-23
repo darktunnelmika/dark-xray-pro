@@ -43,6 +43,10 @@ jobs:
           chmod 0700 bin/xray
           echo "DARK_PRO_TEST_XRAY_BINARY=$PWD/bin/xray" >> "$GITHUB_ENV"
           echo "DARK_PRO_TEST_XRAY_SHA256=$(sha256sum bin/xray | cut -d' ' -f1)" >> "$GITHUB_ENV"
+      - name: Validate integrated Direct, Tunnel and Dark Swap configurations on the pinned core
+        env:
+          DARK_PRO_LAB_MODE: '1'
+        run: go test ./internal/xrayconfig -run '^TestRealPinnedCreationTopologyOffline$' -count=1 -v -timeout=60s
       - name: Prove actual counters, quota filtering and same-UUID revocation
         run: go test ./internal/business -run '^TestRealPinnedUsageCountersSQLiteQuotaAndXrayRevocation$' -count=1 -v -timeout=60s
       - name: Prove continuous observation, outage fencing and preserved replay

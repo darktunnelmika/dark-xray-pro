@@ -131,6 +131,8 @@ func TestBusinessV2ToV3GroupsMigrationPreservesSessionCreditsAndClients(t *testi
  session,err:=s.Login(ctx,"ownerpro","initial-owner-strong-password")
  if err!=nil{t.Fatal(err)}
  for _,q:=range []string{
+  "DROP TRIGGER native_dirty_profile_update", // remove post-v6 lifecycle predicate before dropping its columns
+  "DROP TRIGGER native_plan_block_enable",
   "DROP TABLE client_operations",
   "ALTER TABLE clients DROP COLUMN archived",
   "DROP TABLE client_group_members",

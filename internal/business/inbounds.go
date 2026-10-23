@@ -60,6 +60,7 @@ func(s *Store)ListInbounds(ctx context.Context,key []byte)([]NativeInbound,error
 func(s *Store)BindInboundClients(ctx context.Context,id uint64,ids []string,attach bool)error{
  if id==0||!validClientIDBatch(ids){return ErrInvalid};tx,err:=s.db.BeginTx(ctx,nil);if err!=nil{return err};defer tx.Rollback();var found int
  if err=tx.QueryRowContext(ctx,"SELECT COUNT(*) FROM native_inbounds WHERE id=?",id).Scan(&found);err!=nil{return err};if found!=1{return ErrNotFound}
+ if attach {if err=rejectNativePlanMaterialization(ctx,tx,id);err!=nil{return err}}
  if attach {var archived bool;if err=tx.QueryRowContext(ctx,"SELECT archived FROM native_inbounds WHERE id=?",id).Scan(&archived);err!=nil{return err};if archived{return ErrConflict}}
  for _,clientID:=range ids{c,e:=readClient(ctx,tx,clientID);if errors.Is(e,sql.ErrNoRows){return ErrNotFound};if e!=nil{return e};if attach&&c.Archived{return ErrConflict}}
  for _,clientID:=range ids{if attach{_,err=tx.ExecContext(ctx,"INSERT OR IGNORE INTO native_inbound_clients(inbound_id,client_id) VALUES(?,?)",id,clientID)}else{_,err=tx.ExecContext(ctx,"DELETE FROM native_inbound_clients WHERE inbound_id=? AND client_id=?",id,clientID)};if err!=nil{return err}}
@@ -72,6 +73,7 @@ func validNativeTarget(t InboundTarget)bool{
 func(s *Store)PutInboundTarget(ctx context.Context,t InboundTarget)error{
  if !validNativeTarget(t){return ErrInvalid};t.ListenIP=net.ParseIP(t.ListenIP).String();tx,err:=s.db.BeginTx(ctx,nil);if err!=nil{return err};defer tx.Rollback();var n int
  if err=tx.QueryRowContext(ctx,"SELECT COUNT(*) FROM native_inbounds WHERE id=?",t.InboundID).Scan(&n);err!=nil{return err};if n!=1{return ErrNotFound}
+ if err=rejectNativePlanMaterialization(ctx,tx,t.InboundID);err!=nil{return err}
  var archived bool;if err=tx.QueryRowContext(ctx,"SELECT archived FROM native_inbounds WHERE id=?",t.InboundID).Scan(&archived);err!=nil{return err};if archived{return ErrConflict}
  rows,err:=tx.QueryContext(ctx,"SELECT t.inbound_id,t.installation_id,t.listen_ip,t.direct_port,t.swap_port,i.archived FROM native_inbound_targets t JOIN native_inbounds i ON i.id=t.inbound_id WHERE t.node_id=?",t.NodeID);if err!=nil{return err}
  for rows.Next(){var id uint64;var installation,ip string;var direct,swap uint16;var retired bool;if err=rows.Scan(&id,&installation,&ip,&direct,&swap,&retired);err!=nil{rows.Close();return err};if id==t.InboundID{continue}
