@@ -30,6 +30,24 @@ jobs:
           npm install --no-audit --no-fund
           npm run build
           npx playwright install --with-deps chromium
+      - name: Author and edit a full Inbound setup through the real UI and SQLite API
+        env:
+          DARK_PRO_TEST_CREATION_BROWSER: '1'
+          DARK_PRO_TEST_WEB_DIST: ${{ github.workspace }}/web/dist
+          DARK_PRO_TEST_CREATION_BROWSER_SCRIPT: ${{ github.workspace }}/web/tests/live-inbound-creation.mjs
+        shell: bash
+        run: |
+          set -euo pipefail
+          go test ./internal/api -run '^TestRealBrowserInboundCreationPlan$' -count=1 -json -timeout=150s > "$RUNNER_TEMP/live-inbound-creation.jsonl"
+          python3 - "$RUNNER_TEMP/live-inbound-creation.jsonl" <<'PYCREATE'
+          import json,sys
+          events=[json.loads(line) for line in open(sys.argv[1])]
+          name='TestRealBrowserInboundCreationPlan'
+          assert sum(e.get('Test')==name and e.get('Action')=='pass' for e in events)==1
+          assert not any(e.get('Test')==name and e.get('Action') in ('skip','fail') for e in events)
+          for e in events:
+              if e.get('Output'): print(e['Output'],end='')
+          PYCREATE
       - name: Verify the same real Xray release as Foundation CI
         shell: bash
         run: |
@@ -131,6 +149,7 @@ jobs:
         if: failure()
         run: |
           if test -f "$RUNNER_TEMP/live-native-usage.jsonl"; then cat "$RUNNER_TEMP/live-native-usage.jsonl"; fi
+          if test -f "$RUNNER_TEMP/live-inbound-creation.jsonl"; then cat "$RUNNER_TEMP/live-inbound-creation.jsonl"; fi
           if test -f "$RUNNER_TEMP/continuous-observer.jsonl"; then cat "$RUNNER_TEMP/continuous-observer.jsonl"; fi
           if test -f "$RUNNER_TEMP/pretraffic-admission.jsonl"; then cat "$RUNNER_TEMP/pretraffic-admission.jsonl"; fi
           if test -f "$RUNNER_TEMP/pretraffic-settlement.jsonl"; then cat "$RUNNER_TEMP/pretraffic-settlement.jsonl"; fi
