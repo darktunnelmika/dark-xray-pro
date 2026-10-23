@@ -81,9 +81,10 @@ test("320px Persian RTL dark mode keeps grouped menu usable, account controls vi
   await expect(page.getByRole("button", { name: "حساب من: qa-owner" })).toBeVisible();
   await page.getByRole("button", { name: "بازکردن منو" }).click();
   const nav = page.getByRole("navigation", { name: "Main navigation" });
-  await expect(nav.getByText("زیرساخت")).toBeVisible();
-  await expect(nav.getByText("مدیریت")).toBeVisible();
-  await expect(nav.getByText("حساب و تنظیمات")).toBeVisible();
+  await expect(nav.getByRole("button", { name: "زیرساخت", exact: true })).toHaveAttribute("aria-expanded", "true");
+  await expect(nav.getByRole("button", { name: "مشتری و فروش", exact: true })).toHaveAttribute("aria-expanded", "false");
+  await expect(nav.getByRole("button", { name: "پشتیبان و بازیابی", exact: true })).toHaveAttribute("aria-expanded", "false");
+  await expect(nav.getByRole("button", { name: "حساب و تنظیمات", exact: true })).toBeVisible();
   await expect(page.locator("html")).toHaveAttribute("dir", "rtl");
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
   await expect(page.locator(".main-area")).toHaveAttribute("inert", "");
@@ -101,6 +102,7 @@ test("business pages do not keep polling fleet while the owner is elsewhere", as
   await expect(page.getByRole("heading", { name: "Appearance & lab" })).toBeVisible();
   await page.waitForTimeout(1200);
   expect(calls.filter(s => s.startsWith("GET /api/v1/fleet"))).toHaveLength(0);
+  await page.getByRole("navigation").getByRole("button", { name: "Infrastructure", exact: true }).click();
   await page.getByRole("button", { name: "Overview" }).click();
   await expect(page.getByRole("region", { name: "Fleet intelligence" })).toBeVisible();
   await expect.poll(() => calls.filter(s => s.startsWith("GET /api/v1/fleet")).length).toBeGreaterThan(0);

@@ -77,35 +77,96 @@ async function fixture(page: Page, role = "owner", includeUSA = false) {
   if(path.endsWith("/operations"))return route.fulfill({json:{operations}});
   return route.fulfill({ status: 404, json: {} });
  });
- return { calls, reportReady: () => { applied = true; }, externalEdit: () => { inbounds[0].revision++; } };
+ return { calls, inbounds, targets, reportReady: () => { applied = true; }, externalEdit: () => { inbounds[0].revision++; } };
 }
 async function openPage(page: Page, mobile = false) {
  await page.goto("/");if (mobile) await page.getByRole("button", { name: "Open menu" }).click();
  await page.getByRole("button", { name: "Inbounds", exact: true }).click();
 }
+async function openInbound(page: Page, name = "Native Test") {
+ await page.locator(".inbound-name").filter({ hasText: name }).click();
+}
+async function openDiagnostics(page: Page, persian = false) {
+ const toggle = page.getByRole("button", { name: persian ? "عیب‌یابی" : "Diagnostics", exact: true });
+ await expect(toggle).toBeVisible();
+ if (await toggle.getAttribute("aria-expanded") !== "true") await toggle.click();
+}
+async function openTarget(page: Page, persian = false) {
+ await page.getByRole("tab", { name: persian ? "مسیرها" : "Routes", exact: true }).click();
+ await page.getByRole("button", { name: persian ? "افزودن نود مقصد" : "Add Node target", exact: true }).click();
+ return page.getByRole("dialog", { name: persian ? "تنظیم مقصد نود" : "Node deployment", exact: true });
+}
 
 test("native owner form saves an Inbound without claiming completed deployment", async ({ page }) => {
  const f = await fixture(page);await openPage(page);
- await page.getByLabel("Inbound name", { exact: true }).fill("New actual inbound");
- await page.getByLabel("REALITY target (host:port)").fill("example.net:443");
- await page.getByLabel("Server names (comma-separated)").fill("example.net");
- await page.getByRole("button", { name: "Create Inbound", exact: true }).click();
- await expect(page.getByText("New actual inbound", { exact: true })).toBeVisible();
+ await page.getByRole("button", { name: "Add Inbound", exact: true }).click();
+ const dialog = page.getByRole("dialog", { name: "Create REALITY Inbound", exact: true });
+ await dialog.getByLabel("Inbound name", { exact: true }).fill("New actual inbound");
+ await dialog.getByLabel("REALITY target (host:port)").fill("example.net:443");
+ await dialog.getByLabel("Server names (comma-separated)").fill("example.net");
+ await dialog.getByRole("button", { name: "Create Inbound", exact: true }).click();
+ await expect(dialog).toBeHidden();
+ await expect(page.getByRole("heading", { name: "New actual inbound", exact: true })).toBeVisible();
+ await expect(page).toHaveURL(url => url.pathname === "/inbounds" && url.searchParams.get("inbound") === String(f.calls[0].body.id));
  expect(f.calls).toHaveLength(1);expect(f.calls[0].csrf).toBe(csrf);expect(f.calls[0].body.transport).toBe("tcp");
  await expect(page.getByText("Matching process reported", { exact: true })).toHaveCount(0);
 });
 
+test("copy settings prefills the public profile and creates a fresh identity without copying keys or assignments", async ({ page }) => {
+ const f = await fixture(page);
+ Object.assign(f.inbounds[0], { transport: "grpc", grpc_service: "source-grpc", reality_target: "source.example.org:443",
+  server_names: ["source.example.org", "alternate.example.org"], bound_clients: 7 });
+ const source = f.inbounds[0];
+ f.targets.push({ inbound_id: source.id, node_id: "new-node", installation_id: installation,
+  listen_ip: "203.0.113.7", direct_port: 19600, swap_port: 19601 });
+ await openPage(page);
+ await openInbound(page);
+ await page.getByRole("button", { name: "Copy settings", exact: true }).click();
+ const dialog = page.getByRole("dialog", { name: "Create REALITY Inbound", exact: true });
+ const copyName = source.name + " — copy";
+ await expect(dialog.getByLabel("Inbound name", { exact: true })).toHaveValue(copyName);
+ await expect(dialog.getByLabel("Transport", { exact: true })).toHaveValue(source.transport);
+ await expect(dialog.getByLabel("gRPC service", { exact: true })).toHaveValue(source.grpc_service);
+ await expect(dialog.getByLabel("REALITY target (host:port)", { exact: true })).toHaveValue(source.reality_target);
+ await expect(dialog.getByLabel("Server names (comma-separated)", { exact: true })).toHaveValue(source.server_names.join(", "));
+ expect(f.calls).toHaveLength(0);
+ await dialog.getByRole("button", { name: "Create Inbound", exact: true }).click();
+ await expect(dialog).toBeHidden();
+ await expect(page.getByRole("heading", { name: copyName, exact: true })).toBeVisible();
+ expect(f.calls).toHaveLength(1);
+ const call = f.calls[0];
+ expect(call.path).toBe("/api/v1/workspace/native-inbounds");
+ expect(call.csrf).toBe(csrf);
+ expect(Object.keys(call.body).sort()).toEqual(["id", "name", "transport", "grpc_service", "reality_target", "server_names", "short_ids"].sort());
+ expect(call.body).toMatchObject({ name: copyName, transport: source.transport, grpc_service: source.grpc_service,
+  reality_target: source.reality_target, server_names: source.server_names });
+ expect(Number.isSafeInteger(call.body.id)).toBe(true);
+ expect(Number(call.body.id)).toBeGreaterThan(0);
+ expect(call.body.id).not.toBe(source.id);
+ expect(call.body.short_ids).toEqual([expect.stringMatching(/^[a-f0-9]{8}$/)]);
+ expect(call.body.short_ids).not.toEqual(source.short_ids);
+ for (const field of ["public_key", "private_key", "clients", "client_ids", "targets", "node_id", "installation_id"]) expect(call.body).not.toHaveProperty(field);
+ await expect(page).toHaveURL(url => url.pathname === "/inbounds" && url.searchParams.get("inbound") === String(call.body.id));
+ await expect(page.getByRole("tab", { name: "Overview", exact: true })).toHaveAttribute("aria-selected", "true");
+ expect(f.targets).toHaveLength(1);
+ expect(f.inbounds.find(inbound => inbound.id === call.body.id)?.bound_clients).toBe(0);
+});
+
 test("native workflow binds selected clients and reports only acknowledged Node revision", async ({ page }) => {
  const f = await fixture(page);await openPage(page);
- await page.getByRole("button", { name: "Native Test", exact: false }).click();
+ await openInbound(page);
+ await page.getByRole("tab", { name: "Clients", exact: true }).click();
  await page.locator(".native-client-row").filter({ hasText: "Client One" }).getByRole("checkbox").check();
  await page.getByRole("button", { name: "Attach selected", exact: true }).click();
  await expect(page.getByLabel("Bound", { exact: true })).toBeVisible();
- await page.getByLabel("New paired Node").selectOption("new-node");
- await page.getByLabel("Node's assigned IP").fill("203.0.113.7");
- await page.getByLabel("Direct port (0 = disabled)").fill("19600");
- await page.getByLabel("Dark Swap destination port (0 = disabled)").fill("19601");
- page.once("dialog", d => d.accept());await page.getByRole("button", { name: "Save Node target" }).click();
+ const target = await openTarget(page);
+ await target.getByLabel("New paired Node").selectOption("new-node");
+ await target.getByLabel("Node's assigned IP").fill("203.0.113.7");
+ await target.getByLabel("Direct port (0 = disabled)").fill("19600");
+ await target.getByLabel("Dark Swap destination port (0 = disabled)").fill("19601");
+ page.once("dialog", d => d.accept());await target.getByRole("button", { name: "Save Node target" }).click();
+ await expect(target).toBeHidden();
+ await openDiagnostics(page);
  await expect(page.getByText("Awaiting Agent report", { exact: true })).toBeVisible();
  expect(f.calls).toHaveLength(2);expect(f.calls[0].body).toEqual({ client_ids: ["client-one"], attach: true });
  expect(f.calls[1].body.installation_id).toBe(installation);expect(f.calls[1].body.direct_port).toBe(19600);
@@ -123,26 +184,28 @@ test("representative view does not display owner deployment controls", async ({ 
 
 test("native Persian mobile view retains selection on refresh without overflow", async ({ page }) => {
  await fixture(page);await page.setViewportSize({ width: 320, height: 780 });await openPage(page, true);
- await page.getByRole("button", { name: "Native Test", exact: false }).click();
+ await openInbound(page);
  await page.getByRole("button", { name: "Switch language" }).click();
- await expect(page.getByRole("heading", { name: "اینباندهای واقعی PRO" })).toBeVisible();
+ await expect(page.getByRole("heading", { name: "Native Test", exact: true })).toBeVisible();
  await page.getByRole("button", { name: "به‌روزرسانی", exact: true }).click();
- await expect(page.getByRole("button", { name: "Native Test", exact: false })).toHaveAttribute("aria-pressed", "true");
+ await expect(page.getByRole("tab", { name: "خلاصه", exact: true })).toHaveAttribute("aria-selected", "true");
+ await expect(page).toHaveURL(url => url.pathname === "/inbounds" && url.searchParams.get("inbound") === "301");
  expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 2)).toBe(false);
 });
 
 test("failed polling demotes a previous ready report and disables mutation buttons", async ({ page }) => {
  const f = await fixture(page);f.reportReady();await openPage(page);
+ await openDiagnostics(page);
  await expect(page.getByText("Matching process reported", { exact: true })).toBeVisible();
  await page.route("**/api/v1/workspace/native-inbounds-state", r => r.fulfill({ status: 503, json: {} }));
  await page.getByRole("button", { name: "Refresh", exact: true }).click();
  await expect(page.getByRole("alert")).toBeVisible();await expect(page.getByText("Report stale / lease expired", { exact: true })).toBeVisible();
- await expect(page.getByRole("button", { name: "Create Inbound", exact: true })).toBeDisabled();
+ await expect(page.getByRole("button", { name: "Add Inbound", exact: true })).toBeDisabled();
 });
 
 test("native profile edit preserves key fields and disable/archive uses revisioned owner operations", async ({ page }) => {
  const f=await fixture(page);await page.setViewportSize({width:320,height:780});await openPage(page,true);
- await page.getByRole("button",{name:"Native Test",exact:false}).click();
+ await openInbound(page);
  const control=page.getByRole("region",{name:"Inbound lifecycle"});
  await control.getByRole("button",{name:"Edit profile",exact:true}).click();
  await control.getByLabel("Reason for change",{exact:true}).fill("Edit without key rotation");
@@ -150,7 +213,7 @@ test("native profile edit preserves key fields and disable/archive uses revision
  await editor.getByLabel("Name",{exact:true}).fill("Edited Native");
  await editor.getByLabel("Server names",{exact:true}).fill("updated.example.org");
  page.once("dialog",d=>d.accept());await editor.getByRole("button",{name:"Save profile changes",exact:true}).click();
- await expect(page.getByRole("button",{name:"Edited Native",exact:false})).toBeVisible();
+ await expect(page.getByRole("heading",{name:"Edited Native",exact:true})).toBeVisible();
  await expect(control.getByText("Change recorded; a fresh Agent report is still required.")).toBeVisible();
  expect(f.calls).toHaveLength(1);expect(f.calls[0].body.expected_revision).toBe(1);
  const p=f.calls[0].body.profile as Record<string,unknown>;
@@ -172,7 +235,7 @@ test("native profile edit preserves key fields and disable/archive uses revision
 
 test("an external profile revision blocks stale editor without silently overwriting fields", async ({ page }) => {
  const f=await fixture(page);await openPage(page);
- await page.getByRole("button",{name:"Native Test",exact:false}).click();
+ await openInbound(page);
  const control=page.getByRole("region",{name:"Inbound lifecycle"});
  await control.getByRole("button",{name:"Edit profile",exact:true}).click();
  const editor=page.getByRole("form",{name:"Edit Inbound profile"});
@@ -188,16 +251,17 @@ test("an external profile revision blocks stale editor without silently overwrit
 test("shared port is blocked at owner form and cannot reach live Node mutation endpoint",async({page})=>{
  const f=await fixture(page);
  await openPage(page);
- await page.getByRole("button",{name:"Native Test",exact:false}).click();
- await page.getByLabel("New paired Node").selectOption("new-node");
- await page.getByLabel("Node's assigned IP").fill("203.0.113.7");
- await page.getByLabel("Direct port (0 = disabled)").fill("19600");
- await page.getByLabel("Dark Swap destination port (0 = disabled)").fill("19600");
- await expect(page.getByRole("alert").filter({hasText:"Direct and Dark Swap cannot use the same Node port"})).toBeVisible();
- await expect(page.getByRole("button",{name:"Save Node target"})).toBeDisabled();
+ await openInbound(page);
+ const target = await openTarget(page);
+ await target.getByLabel("New paired Node").selectOption("new-node");
+ await target.getByLabel("Node's assigned IP").fill("203.0.113.7");
+ await target.getByLabel("Direct port (0 = disabled)").fill("19600");
+ await target.getByLabel("Dark Swap destination port (0 = disabled)").fill("19600");
+ await expect(target.getByRole("alert").filter({hasText:"Direct and Dark Swap cannot use the same Node port"})).toBeVisible();
+ await expect(target.getByRole("button",{name:"Save Node target"})).toBeDisabled();
  expect(f.calls.filter(c=>c.path.endsWith("/target"))).toHaveLength(0);
- await page.getByLabel("Dark Swap destination port (0 = disabled)").fill("19601");
- await expect(page.getByRole("button",{name:"Save Node target"})).toBeEnabled();
+ await target.getByLabel("Dark Swap destination port (0 = disabled)").fill("19601");
+ await expect(target.getByRole("button",{name:"Save Node target"})).toBeEnabled();
  expect(f.calls).toHaveLength(0);
 });
 
@@ -205,14 +269,15 @@ test("320px Persian shared-port warning remains readable and no save is possible
  const f=await fixture(page);
  await page.setViewportSize({width:320,height:780});
  await openPage(page,true);
- await page.getByRole("button",{name:"Native Test",exact:false}).click();
+ await openInbound(page);
  await page.getByRole("button",{name:"Switch language"}).click();
- await page.getByLabel("نود جدید متصل").selectOption("new-node");
- await page.getByLabel("IP اختصاص‌یافته به نود").fill("203.0.113.7");
- await page.getByLabel("پورت مستقیم (صفر = غیرفعال)").fill("19600");
- await page.getByLabel("پورت مقصد Dark Swap (صفر = غیرفعال)").fill("19600");
- await expect(page.getByRole("alert").filter({hasText:"پورت Direct و Dark Swap نباید یکسان باشد"})).toBeVisible();
- await expect(page.getByRole("button",{name:"ذخیره مقصد نود"})).toBeDisabled();
+ const target = await openTarget(page, true);
+ await target.getByLabel("نود جدید متصل").selectOption("new-node");
+ await target.getByLabel("IP اختصاص‌یافته به نود").fill("203.0.113.7");
+ await target.getByLabel("پورت مستقیم (صفر = غیرفعال)").fill("19600");
+ await target.getByLabel("پورت مقصد Dark Swap (صفر = غیرفعال)").fill("19600");
+ await expect(target.getByRole("alert").filter({hasText:"پورت Direct و Dark Swap نباید یکسان باشد"})).toBeVisible();
+ await expect(target.getByRole("button",{name:"ذخیره مقصد نود"})).toBeDisabled();
  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+2)).toBe(true);
  expect(f.calls.filter(c=>c.path.endsWith("/target"))).toHaveLength(0);
 });
@@ -221,6 +286,7 @@ test("320px Persian shared-port warning remains readable and no save is possible
 test("owner sees true native deployment prerequisites and an explicit durable accounting blocker",async({page})=>{
  const f=await fixture(page);
  await openPage(page);
+ await openDiagnostics(page);
  const readiness=page.getByRole("region",{name:"Native deployment readiness"});
  await expect(readiness).toBeVisible();
  await expect(readiness.getByRole("heading",{name:"Native Xray · release gates"})).toBeVisible();
@@ -241,6 +307,7 @@ test("owner sees true native deployment prerequisites and an explicit durable ac
 test("readiness remains blocked with successful Agent report, and expired owner API fails closed",async({page})=>{
  const f=await fixture(page);f.reportReady();
  await openPage(page);
+ await openDiagnostics(page);
  const readiness=page.getByRole("region",{name:"Native deployment readiness"});
  await expect(page.getByText("Matching process reported",{exact:true})).toBeVisible();
  await expect(readiness.getByText("Customer activation blocked").first()).toBeVisible();
@@ -257,6 +324,7 @@ test("native readiness fits 320px Persian RTL and never claims customer traffic 
  await page.setViewportSize({width:320,height:760});
  await openPage(page,true);
  await page.getByRole("button",{name:"Switch language"}).click();
+ await openDiagnostics(page, true);
  const readiness=page.getByRole("region",{name:"Native deployment readiness"});
  await expect(readiness.getByRole("heading",{name:"آمادگی استقرار Native Xray"})).toBeVisible();
  await expect(readiness.getByText("فعال‌سازی مشتری مسدود است").first()).toBeVisible();
@@ -270,6 +338,7 @@ test("native readiness fits 320px Persian RTL and never claims customer traffic 
 test("owner stages a single isolated USA canary only after explicit checkbox consent, never activates Xray",async({page})=>{
  const f=await fixture(page,"owner",true);
  await openPage(page);
+ await openDiagnostics(page);
  const canary=page.getByRole("region",{name:"USA PRO loopback canary"});
  await expect(canary.getByRole("heading",{name:"USA loopback canary"})).toBeVisible();
  await expect(canary.getByText(/127.0.0.1:19666/)).toBeVisible();
@@ -288,9 +357,52 @@ test("owner stages a single isolated USA canary only after explicit checkbox con
  await expect(page.getByText("Matching process reported",{exact:true})).toHaveCount(0);
 });
 
+test("a staged canary stays staged when client search and later pages exclude its QA client", async ({ page }) => {
+ const f = await fixture(page, "owner", true);
+ f.inbounds.push({ ...f.inbounds[0], id: 901617, name: "USA PRO QA", bound_clients: 1 });
+ f.targets.push({ inbound_id: 901617, node_id: "usa-pro-01", installation_id: installation,
+  listen_ip: "127.0.0.1", direct_port: 19666, swap_port: 0 });
+ const qa = { id: "pro-usa-qa01", name: "USA QA LOOPBACK ONLY", representative_id: "owner", archived: false, deployment_state: "pending_node_apply" };
+ const clients = [qa, ...Array.from({ length: 101 }, (_, index) => ({ ...qa,
+  id: "regular-client-" + index, name: "Regular client " + String(index).padStart(3, "0") }))];
+ const queries: Array<{ q: string; limit: number; offset: number }> = [];
+ await page.route("**/api/v1/workspace/clients?*", route => {
+  const params = new URL(route.request().url()).searchParams;
+  const q = params.get("q") ?? "", limit = Number(params.get("limit") ?? 100), offset = Number(params.get("offset") ?? 0);
+  queries.push({ q, limit, offset });
+  const matches = clients.filter(client => (client.id + " " + client.name).toLowerCase().includes(q.toLowerCase()));
+  return route.fulfill({ json: { clients: matches.slice(offset, offset + limit) } });
+ });
+ await openPage(page);
+ await openInbound(page);
+ await openDiagnostics(page);
+ const canary = page.getByRole("region", { name: "USA PRO loopback canary", exact: true });
+ const staged = canary.getByRole("button", { name: /Canary staged/ });
+ await expect(staged).toBeDisabled();
+ expect(queries).toContainEqual({ q: "pro-usa-qa01", limit: 25, offset: 0 });
+ await page.getByRole("tab", { name: "Clients", exact: true }).click();
+ const clientPanel = page.getByRole("tabpanel", { name: "Clients", exact: true });
+ const rows = clientPanel.locator(".native-client-row");
+ const search = clientPanel.getByLabel("Search all clients", { exact: true });
+ await expect(rows).toHaveCount(100);
+ await search.fill("Regular client 100");
+ await expect(rows).toHaveCount(1);
+ await expect(rows.filter({ hasText: qa.id })).toHaveCount(0);
+ await expect(staged).toBeDisabled();
+ await search.clear();
+ await expect(rows).toHaveCount(100);
+ await clientPanel.getByRole("button", { name: "Next", exact: true }).click();
+ await expect(rows).toHaveCount(2);
+ await expect(rows.filter({ hasText: qa.id })).toHaveCount(0);
+ await expect(staged).toBeDisabled();
+ expect(queries).toContainEqual({ q: "", limit: 100, offset: 100 });
+ expect(f.calls).toHaveLength(0);
+});
+
 test("unpaired USA and delayed API never allow a canary command",async({page})=>{
  const f=await fixture(page);
  await openPage(page);
+ await openDiagnostics(page);
  const canary=page.getByRole("region",{name:"USA PRO loopback canary"});
  await expect(canary.getByRole("button",{name:"Stage private test"})).toBeDisabled();
  expect(f.calls).toHaveLength(0);
@@ -302,6 +414,7 @@ test("320px Persian owner canary requires consent and does not overflow",async({
  await page.setViewportSize({width:320,height:760});
  await openPage(page,true);
  await page.getByRole("button",{name:"Switch language"}).click();
+ await openDiagnostics(page, true);
  const card=page.getByRole("region",{name:"USA PRO loopback canary"});
  await expect(card.getByRole("heading",{name:"تست کنترل‌شدهٔ آمریکا"})).toBeVisible();
  await expect(card.getByText(/127.0.0.1:19666/)).toBeVisible();
@@ -310,5 +423,208 @@ test("320px Persian owner canary requires consent and does not overflow",async({
  await card.getByRole("checkbox").check();
  await expect(button).toBeEnabled();
  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+2)).toBe(true);
+ expect(f.calls).toHaveLength(0);
+});
+
+test("the compact list paginates and combines search, status, transport and Node filters without mutations", async ({ page }) => {
+ const f = await fixture(page);
+ const base = f.inbounds[0];
+ f.inbounds.splice(0, f.inbounds.length, ...Array.from({ length: 26 }, (_, index) => ({
+  ...base, id: 501 + index, name: "Fixture inbound " + String(index + 1).padStart(2, "0"),
+  transport: index % 2 ? "grpc" : "tcp", grpc_service: index % 2 ? "fixture-grpc" : "",
+  enabled: index < 24, archived: index === 25,
+ })));
+ f.targets.push({ inbound_id: 526, node_id: "new-node", installation_id: installation,
+  listen_ip: "203.0.113.7", direct_port: 19600, swap_port: 0 });
+ await openPage(page);
+ const rows = page.locator(".inbound-name").filter({ hasText: /Fixture inbound \d\d/ });
+ const pager = page.getByLabel("Inbound pagination", { exact: true });
+ const search = page.getByLabel("Search Inbounds", { exact: true });
+ await expect(rows).toHaveCount(20);
+ await expect(page.getByRole("dialog")).toHaveCount(0);
+ await expect(page.getByRole("tab")).toHaveCount(0);
+ await expect(page.getByRole("button", { name: "Diagnostics", exact: true })).toHaveAttribute("aria-expanded", "false");
+ for (const region of ["Native deployment readiness", "USA PRO loopback canary", "LAB route transactions", "Metered TCP LAB transactions"]) {
+  await expect(page.getByRole("region", { name: region, exact: true })).toHaveCount(0);
+ }
+ const firstPage = await rows.allTextContents();
+ await pager.getByRole("button", { name: "Next", exact: true }).click();
+ await expect(rows).toHaveCount(6);
+ expect((await rows.allTextContents()).some(row => firstPage.includes(row))).toBe(false);
+ await expect(pager.getByRole("button", { name: "Next", exact: true })).toBeDisabled();
+
+ await search.fill("Fixture inbound 03");
+ await expect(rows).toHaveCount(1);
+ await expect(rows).toContainText("Fixture inbound 03");
+ await expect(pager.getByRole("button", { name: "Previous", exact: true })).toBeDisabled();
+ await search.fill("526");
+ await expect(rows).toHaveCount(1);
+ await expect(rows).toContainText("Fixture inbound 26");
+ await search.clear();
+ await page.getByLabel("Status", { exact: true }).selectOption("disabled");
+ await expect(rows).toHaveCount(1);
+ await expect(rows).toContainText("Fixture inbound 25");
+ await page.getByLabel("Status", { exact: true }).selectOption("archived");
+ await expect(rows).toHaveCount(1);
+ await expect(rows).toContainText("Fixture inbound 26");
+ await page.getByLabel("Status", { exact: true }).selectOption({ index: 0 });
+ await page.getByLabel("Transport", { exact: true }).selectOption("grpc");
+ await expect(rows).toHaveCount(13);
+ await page.getByLabel("Node", { exact: true }).selectOption("new-node");
+ await expect(rows).toHaveCount(1);
+ await expect(rows).toContainText("Fixture inbound 26");
+ await search.fill("No matching inbound");
+ await expect(rows).toHaveCount(0);
+ await search.clear();
+ await expect(rows).toHaveCount(1);
+ expect(f.calls).toHaveLength(0);
+});
+
+for (const language of ["en", "fa"] as const) {
+ test(`create dialog contains keyboard focus and Cancel/Escape never writes (${language})`, async ({ page }) => {
+  const f = await fixture(page);
+  const persian = language === "fa";
+  await page.addInitScript(theme => localStorage.setItem("dark-pro-theme", theme), persian ? "dark" : "light");
+  if (persian) await page.setViewportSize({ width: 320, height: 780 });
+  await openPage(page, persian);
+  if (persian) await page.getByRole("button", { name: "Switch language" }).click();
+  if (persian) {
+   const filters = page.getByRole("button", { name: "فیلترها", exact: true });
+   await expect(filters).toHaveAttribute("aria-expanded", "false");
+   await expect(page.getByLabel("وضعیت", { exact: true })).toBeHidden();
+   await filters.click();
+   await page.getByLabel("وضعیت", { exact: true }).selectOption("disabled");
+   await expect(page.locator(".inbound-table tbody tr")).toHaveCount(0);
+   await page.getByRole("button", { name: "پاک‌کردن فیلترها", exact: true }).click();
+   await expect(page.locator(".inbound-table tbody tr")).toHaveCount(1);
+   await filters.click();
+   await expect(filters).toHaveAttribute("aria-expanded", "false");
+  }
+  const opener = page.getByRole("button", { name: persian ? "افزودن اینباند" : "Add Inbound", exact: true });
+  const dialog = page.getByRole("dialog", { name: persian ? "ساخت اینباند REALITY" : "Create REALITY Inbound", exact: true });
+  await opener.click();
+  await expect(dialog).toBeVisible();
+  expect(await dialog.evaluate(element => element.matches(":modal"))).toBe(true);
+  const name = dialog.getByLabel(persian ? "نام اینباند" : "Inbound name", { exact: true });
+  await expect(name).toBeFocused();
+  await name.fill("Unsubmitted browser fixture");
+  await dialog.getByRole("button").last().focus();
+  await page.keyboard.press("Tab");
+  expect(await dialog.evaluate(element => element.contains(document.activeElement))).toBe(true);
+  await page.keyboard.press("Escape");
+  await expect(dialog).toBeHidden();
+  await expect(opener).toBeFocused();
+  expect(f.calls).toHaveLength(0);
+  await opener.click();
+  await dialog.getByRole("button", { name: persian ? "انصراف" : "Cancel", exact: true }).click();
+  await expect(dialog).toBeHidden();
+  await expect(opener).toBeFocused();
+  expect(f.calls).toHaveLength(0);
+  await expect(page.locator("html")).toHaveAttribute("dir", persian ? "rtl" : "ltr");
+  await expect(page.locator("html")).toHaveAttribute("data-theme", persian ? "dark" : "light");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 2)).toBe(true);
+ });
+}
+
+test("detail tabs support keyboard navigation and preserve an unsaved profile across visited panels", async ({ page }) => {
+ const f = await fixture(page);
+ await openPage(page);
+ await openInbound(page);
+ const overview = page.getByRole("tab", { name: "Overview", exact: true });
+ const routes = page.getByRole("tab", { name: "Routes", exact: true });
+ const activity = page.getByRole("tab", { name: "Activity", exact: true });
+ await expect(overview).toHaveAttribute("aria-selected", "true");
+ await expect(overview).toHaveAttribute("aria-controls", /.+/);
+ await expect(page.getByRole("heading", { name: "Inbound change history", exact: true })).toHaveCount(0);
+ const lifecycle = page.getByRole("region", { name: "Inbound lifecycle", exact: true });
+ await lifecycle.getByRole("button", { name: "Edit profile", exact: true }).click();
+ const editor = page.getByRole("form", { name: "Edit Inbound profile", exact: true });
+ await editor.getByLabel("Name", { exact: true }).fill("Keep this local edit");
+ await lifecycle.getByLabel("Reason for change", { exact: true }).fill("Unsaved tab navigation check");
+ await overview.focus();
+ await page.keyboard.press("ArrowRight");
+ await expect(routes).toBeFocused();
+ await expect(routes).toHaveAttribute("aria-selected", "true");
+ await expect(editor).toBeHidden();
+ await expect(page.getByRole("region", { name: "Protected Inbound routing draft", exact: true })).toBeVisible();
+ await page.keyboard.press("End");
+ await expect(activity).toBeFocused();
+ await expect(activity).toHaveAttribute("aria-selected", "true");
+ await expect(page.getByRole("heading", { name: "Inbound change history", exact: true })).toBeVisible();
+ await expect(page.getByRole("button", { name: "Edit profile", exact: true })).toHaveCount(0);
+ await page.keyboard.press("Home");
+ await expect(overview).toBeFocused();
+ await expect(overview).toHaveAttribute("aria-selected", "true");
+ await expect(editor.getByLabel("Name", { exact: true })).toHaveValue("Keep this local edit");
+ await expect(lifecycle.getByLabel("Reason for change", { exact: true })).toHaveValue("Unsaved tab navigation check");
+ await page.getByRole("tab", { name: "Clients", exact: true }).click();
+ await page.locator(".native-client-row").filter({ hasText: "Client One" }).getByRole("checkbox").check();
+ await routes.click();
+ await page.getByRole("tab", { name: "Clients", exact: true }).click();
+ await expect(page.locator(".native-client-row").filter({ hasText: "Client One" }).getByRole("checkbox")).toBeChecked();
+ expect(f.calls).toHaveLength(0);
+});
+
+test("sidebar navigation asks before discarding an unsaved Inbound profile", async ({ page }) => {
+ const f = await fixture(page);
+ await openPage(page);
+ await openInbound(page);
+ await page.getByRole("button", { name: "Edit profile", exact: true }).click();
+ const editor = page.getByRole("form", { name: "Edit Inbound profile", exact: true });
+ await editor.getByLabel("Name", { exact: true }).fill("Keep before leaving Inbounds");
+ const currentURL = page.url();
+ const nodes = page.getByRole("navigation", { name: "Main navigation" }).getByRole("button", { name: "Nodes", exact: true });
+ let prompts = 0;
+ page.once("dialog", async dialog => { prompts++; await dialog.dismiss(); });
+ await nodes.click();
+ await expect(page).toHaveURL(currentURL);
+ await expect(editor.getByLabel("Name", { exact: true })).toHaveValue("Keep before leaving Inbounds");
+ expect(prompts).toBe(1);
+ expect(f.calls).toHaveLength(0);
+ page.once("dialog", async dialog => { prompts++; await dialog.accept(); });
+ await nodes.click();
+ await expect(page).toHaveURL(/\/nodes$/);
+ await expect(editor).toHaveCount(0);
+ expect(prompts).toBe(2);
+ expect(f.calls).toHaveLength(0);
+});
+
+test("canceling browser Back preserves dirty fields and accepted Back clears the previous Inbound client selection", async ({ page }) => {
+ const f = await fixture(page);
+ f.inbounds.push({ ...f.inbounds[0], id: 302, name: "Second Inbound" });
+ await openPage(page);
+ await openInbound(page);
+ const clientsTab = page.getByRole("tab", { name: "Clients", exact: true });
+ const overviewTab = page.getByRole("tab", { name: "Overview", exact: true });
+ const client = page.locator(".native-client-row").filter({ hasText: "Client One" }).getByRole("checkbox");
+ await clientsTab.click();
+ await page.getByLabel("Search all clients", { exact: true }).fill("Client");
+ await client.check();
+ await overviewTab.click();
+ await page.getByRole("button", { name: "Edit profile", exact: true }).click();
+ const editor = page.getByRole("form", { name: "Edit Inbound profile", exact: true });
+ await editor.getByLabel("Name", { exact: true }).fill("Back must not lose this draft");
+ const currentURL = page.url();
+ let prompts = 0;
+ page.once("dialog", async dialog => { prompts++; await dialog.dismiss(); });
+ await page.goBack();
+ await expect(page).toHaveURL(currentURL);
+ await expect(editor.getByLabel("Name", { exact: true })).toHaveValue("Back must not lose this draft");
+ await clientsTab.click();
+ await expect(client).toBeChecked();
+ await expect(page.getByLabel("Search all clients", { exact: true })).toHaveValue("Client");
+ await overviewTab.click();
+ expect(prompts).toBe(1);
+
+ page.once("dialog", async dialog => { prompts++; await dialog.accept(); });
+ await page.goBack();
+ await expect(page).toHaveURL(url => url.pathname === "/inbounds" && !url.searchParams.has("inbound"));
+ await openInbound(page, "Second Inbound");
+ await clientsTab.click();
+ await expect(page.getByRole("heading", { name: "Second Inbound", exact: true })).toBeVisible();
+ await expect(client).not.toBeChecked();
+ await expect(page.getByLabel("Search all clients", { exact: true })).toHaveValue("");
+ await expect(page.getByRole("button", { name: "Attach selected", exact: true })).toBeDisabled();
+ expect(prompts).toBe(2);
  expect(f.calls).toHaveLength(0);
 });

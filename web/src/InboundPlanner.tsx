@@ -150,6 +150,6 @@ function DraftInboundPlanner({ nodes, language }: { nodes: NodeSnapshot[]; langu
     </section>
   );
 }
-export default function InboundPlanner({ nodes, language }: { nodes: NodeSnapshot[]; language: Language }) {
- return <NativeInbounds language={language} fallback={<DraftInboundPlanner nodes={nodes} language={language} />} />;
+export default function InboundPlanner({ nodes, language, workspace }: { nodes: NodeSnapshot[]; language: Language; workspace?: "inbounds" | "dark-swap" }) {
+ return <NativeInbounds language={language} workspace={workspace} fallback={<DraftInboundPlanner nodes={nodes} language={language} />} />;
 }

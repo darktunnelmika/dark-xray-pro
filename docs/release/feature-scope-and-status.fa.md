@@ -10,6 +10,9 @@
 در **۲۳ اکتبر ۲۰۲۶** بر مبنای `77136723985efd7c35e73c3c2cafdb88bfe12bd1`.
 [پوسته و چیدمان مشترک](../neutral-ui-shell-v1.fa.md) نیز در **۲۳ اکتبر ۲۰۲۶**
 بر مبنای `bc75759797da94b5e2018ed77c2f9b4c4ea89689` به F16 افزوده شده است.
+برنامهٔ [سامان‌دهی مرحله‌ای پنل](../panel-organization-roadmap.fa.md) در همین تاریخ
+به F16 افزوده شد؛ پایهٔ UX اینباندها با build موفق و **۲۲۹ تست موفق مرورگر**
+پذیرش محدود رابط دارد. این تغییر، وضعیت عملکردی سایر حوزه‌ها را کامل اعلام نمی‌کند.
 سایر ردیف‌ها همچنان از ممیزی مبنا هستند.
 
 **نتیجه: PRO هنوز نسخهٔ کامل و آمادهٔ جایگزینی نیست.** بخش‌های اصلی کسب‌وکار،
@@ -66,7 +69,7 @@ probe در [تنظیمات بدون listener](../../internal/xrayconfig/stopped.
 | F13 — Telegram و Mini App | قرارداد نیازها ثبت شده؛ runtime/receiver/worker و Mini App فروش پیاده نشده‌اند | جریان مالک/مشتری/نماینده، shop، خرید/پرداخت/تمدید، QR/اشتراک، پشتیبانی/تیکت، اعلان‌ها؛ ادمین ربات نماینده با scope، پیام همگانی با پیش‌نمایش/تأیید/صف/توقف و گزارش | [نیازهای ربات و Mini App](../telegram-representative-upgrade.fa.md)، [قرارداد حفظ کارکرد](migration-contract.fa.md) |
 | F14 — Backup/Restore محصول | قرارداد پذیرش وجود دارد؛ snapshotهای نصب و journalهای رمزگذاری‌شده، بکاپ کامل محصول نیستند | ساخت/دانلود/آپلود/بررسی/بازیابی از UI مالک، زمان‌بندی روزانه/هفتگی و retention، کپی اختیاری امن خارج از میزبان؛ آرشیو کم‌حجم و رمزگذاری‌شدهٔ streaming با RAM محدود و بدون حذف تاریخ مالی، dry-run، بازیابی سازگار و rollback؛ آزمون مصنوعی بیش از ۳GiB | [گیت بکاپ #4](https://github.com/darktunnelmika/dark-xray-pro/issues/4)، [M03](acceptance-matrix.fa.md) |
 | F15 — Dark Restore مستقل | ابزار واقعی M0 برای بررسی فقط‌خواندنی schema، روابط و جمع مصرف تاریخی، با fixture مصنوعی و گزارش بدون token/URL؛ `ImportEnabled=false` | workspace و namespace مستقل Restore، importer پایدار/idempotent با دادهٔ مصنوعی، group/rep mapping، حفظ UUID/token/URL/baseline، آرشیو expired بدون کاهش مصرف و recovery/rollback | [M0](../../internal/darkrestore/preflight.go)، [مرزهای M0](../dark-restore-m0-offline-preflight.fa.md)، [#60](https://github.com/darktunnelmika/dark-xray-pro/issues/60) |
-| F16 — داشبورد و UX | پوستهٔ خنثی مشترک، فونت محلی فارسی/لاتین، ورود و مجوز، فارسی/انگلیسی و Light/Dark/System با انتخاب تصویری، RTL موبایل ۳۲۰px، منوی کشویی با مدیریت فوکوس و نشست، loading/empty/unavailable متمایز، پایش واقعی HUB و نودها | UX کامل ماژول‌های باز، گزارش/هشدار/لاگ عملیاتی و سنجش latency محصول. تاریخچهٔ HUB فعلاً حدود ۳دقیقه در RAM است؛ با تاریخچهٔ پایدار نود یکسان نیست | [پوسته و چیدمان](../neutral-ui-shell-v1.fa.md)، [shell](../../web/src/App.tsx)، [navigation](../../web/src/navigation.ts)، [HUB monitor](../../internal/hubmonitor/monitor.go)، [یک محصول](../one-product-architecture.md) |
+| F16 — داشبورد و UX | پوستهٔ خنثی مشترک، فونت محلی فارسی/لاتین، ورود و مجوز، فارسی/انگلیسی و Light/Dark/System با انتخاب تصویری، RTL موبایل ۳۲۰px، منوی کشویی با مدیریت فوکوس و نشست، loading/empty/unavailable متمایز، پایش واقعی HUB و نودها؛ ناوبری چهارگروهی، فهرست/فیلتر/صفحه‌بندی اینباند، پنجرهٔ ساخت/کپی/مقصد نود، تب‌های جزئیات با حفظ ویرایش و لینک مستقیم، مسیر مستقل پیش‌نویس Dark Swap؛ پذیرش ۲۲۹ تست مرورگر | UX ماژول‌های باز، گزارش/هشدار/لاگ عملیاتی و سنجش latency باقی‌اند. مقصدهای وضعیت Restore/Telegram/Backup فقط کارهای باقی‌مانده را مشخص می‌کنند و تکمیل ماژول محسوب نمی‌شوند. تاریخچهٔ HUB فعلاً حدود ۳دقیقه در RAM است؛ با تاریخچهٔ پایدار نود یکسان نیست | [برنامهٔ مرحله‌ای و معیار پایان](../panel-organization-roadmap.fa.md)، [پوسته و چیدمان](../neutral-ui-shell-v1.fa.md)، [shell](../../web/src/App.tsx)، [navigation](../../web/src/navigation.ts)، [HUB monitor](../../internal/hubmonitor/monitor.go)، [یک محصول](../one-product-architecture.md) |
 | F17 — نصب، تنظیمات و نگهداری | bundle با UI توکار، checksum، نصب محافظت‌شدهٔ HUB و Agent آزمایشگاهی با systemd غیرroot، TLS/pin و nginx allowlist | نصب عمومی کامل، update/recovery خودسرویس، راه‌اندازی دامنه/TLS/پورت، تمدید گواهی و چرخهٔ اعتماد/rotation، پذیرش ماشین تازه و reboot | [LAB installer](../../scripts/install-lab.sh)، [Node installer](../new-pro-node-installer-v2.md)، [HTTPS](../node-manager-https-deployment.md) |
 | F18 — پذیرش یکپارچه و پایداری | CI واقعی Go/race/vet، Chromium، هستهٔ پین‌شده و سناریوهای replay/crash/settlement/health؛ شواهد N17 در PR #96 | soak با ۷۵۰+ مشتری مصنوعی و تاریخچهٔ بزرگ، latency/RAM/CPU/throughput، چند میزبان مستقل، reboot/DR کامل، امنیت و همهٔ جریان‌های owner/rep/customer/bot روی یک نسخه | [Foundation CI](../../.github/workflows/ci.yml)، [Native CI](../../.github/workflows/native-usage.yml)، [ماتریس پذیرش](acceptance-matrix.fa.md) |
 
@@ -114,6 +117,11 @@ checkout پرداخت‌شده، انتشار subscription یا تحویل
 [اهداف پذیرش](../architecture.md)
 
 ## ترتیب ادامهٔ توسعه
+
+پایهٔ UX اینباندها با دامنهٔ بالا پذیرفته شد. ترتیب اجراییِ تکمیل قابلیت‌ها یکی‌یکی و معیار
+پایان هر ماژول در [برنامهٔ سامان‌دهی پنل](../panel-organization-roadmap.fa.md) ثبت شده؛
+کارهای فنی زیر پس از این پایه ادامه می‌یابند. افزودن منو یا صفحهٔ وضعیت به‌تنهایی
+هیچ‌یک از گیت‌های عملکردی زیر را تکمیل نمی‌کند.
 
 1. در امتداد N19، تکمیل اثبات مستقل دسترسی بیرونی و سیاست مسیر عمومی با fixture ایزوله؛
    اتصال آن به انتشار اتمیک، تجمیع، lease، invalidation و rollback انتقال.

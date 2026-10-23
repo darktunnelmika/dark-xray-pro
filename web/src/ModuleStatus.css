@@ -1,0 +1,35 @@
+.module-status {
+  width: min(920px,100%); min-width: 0; padding: clamp(18px,2.5vw,28px);
+  border: 1px solid var(--border); border-radius: var(--radius-card);
+  background: var(--surface); color: var(--text);
+}
+.module-status-header { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
+.module-status-icon { display: grid; place-items: center; width: 40px; height: 40px; flex: 0 0 auto;
+  border: 1px solid var(--border); border-radius: var(--radius-control); background: var(--surface-2); color: var(--sub); }
+.module-status-badge { min-width: 0; padding: 5px 9px; border-radius: 7px; background: var(--amber-bg);
+  color: var(--amber); font-size: 12px; font-weight: 600; overflow-wrap: anywhere; }
+.module-status-summary { margin: 18px 0 22px; max-width: 75ch; font-size: 14px; line-height: 1.9; }
+.module-status-details { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); gap: 24px;
+  padding-top: 21px; border-top: 1px solid var(--border); }
+.module-status-details section { min-width: 0; }
+.module-status-details h2 { margin: 0 0 9px; font-size: 13px; font-weight: 700; }
+.module-status-details p, .module-status-details ul { margin: 0; color: var(--sub); font-size: 13px; line-height: 1.9; overflow-wrap: anywhere; }
+.module-status-details ul { padding-inline-start: 18px; }
+.module-status-details li + li { margin-top: 7px; }
+.module-status-links { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 23px; }
+.module-status-links button { display: inline-flex; align-items: center; justify-content: space-between; gap: 9px; min-width: 0; min-height: 40px;
+  padding: 9px 12px; border: 1px solid var(--border); border-radius: var(--radius-control); background: var(--surface-2);
+  color: var(--text); font-size: 12px; font-weight: 600; text-align: start; }
+.module-status-links button:hover { border-color: var(--accent); background: var(--accent-wash); color: var(--accent); }
+.module-status-links button span { overflow-wrap: anywhere; }
+.module-status-links button svg { flex: 0 0 auto; }
+:root[dir="rtl"] .module-status-links button svg { transform: scaleX(-1); }
+@media (max-width: 640px) {
+  .module-status-details { grid-template-columns: minmax(0,1fr); gap: 19px; }
+  .module-status-summary { margin-block: 15px 18px; font-size: 13px; }
+  .module-status-links button { min-height: 44px; }
+}
+@media (max-width: 360px) {
+  .module-status { padding: 16px; }
+  .module-status-links { align-items: stretch; flex-direction: column; }
+}

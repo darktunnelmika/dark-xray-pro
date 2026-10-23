@@ -13,6 +13,7 @@ export default function Clients({ model }: { model: BusinessModel }) {
   const canRenew=businessGranted(session.user,"renew_clients");
   const canManage=businessGranted(session.user,"manage_clients");
   const canEdit=businessGranted(session.user,"edit_clients");
+  const canViewFinance=businessGranted(session.user,"view_finance");
   return <>
       {canCreate && <form className="business-panel business-client-form" onSubmit={(e) => { void createClient(e); }}>
         <h3><Users size={17}/>{t.createClient}</h3>
@@ -67,7 +68,7 @@ export default function Clients({ model }: { model: BusinessModel }) {
           <button type="submit" disabled={actionBusy || !lifeClientID}>{t.applyState}</button>
         </form>}
       </div>
-      <div className="business-panel">
+      {canViewFinance && <div className="business-panel">
         <h3>{t.clientOps}</h3>
         {clientOps && clientOps.length ? <div className="business-records">
           {clientOps.map((op) => <div key={op.event_id}>
@@ -79,6 +80,6 @@ export default function Clients({ model }: { model: BusinessModel }) {
           <button disabled={clientOpsOffset === 0} onClick={() => setClientOpsOffset((x) => Math.max(0, x - 50))}>{t.previous}</button>
           <button disabled={!clientOps || clientOps.length < 50} onClick={() => setClientOpsOffset((x) => x + 50)}>{t.next}</button>
         </div>
-      </div>
+      </div>}
   </>;
 }

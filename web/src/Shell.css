@@ -2,10 +2,10 @@
 .app-frame { display: grid; grid-template-columns: 236px minmax(0,1fr); min-height: 100dvh; }
 .sidebar {
   height: 100dvh; position: sticky; top: 0; z-index: 60;
-  display: flex; flex-direction: column; min-width: 0; padding: 25px 14px 16px;
+  display: flex; flex-direction: column; min-width: 0; padding: 20px 12px 14px;
   background: var(--sidebar); border-inline-end: 1px solid var(--border);
 }
-.brand { display: flex; align-items: center; gap: 11px; padding: 0 8px 24px; }
+.brand { display: flex; align-items: center; gap: 10px; padding: 0 7px 18px; }
 .brand-mark {
   width: 40px; height: 40px; flex: 0 0 auto; display: grid; place-items: center;
   border: 1px solid var(--border); border-radius: 12px; color: var(--accent); background: var(--surface);
@@ -13,20 +13,30 @@
 .brand strong { display: block; direction: ltr; unicode-bidi: isolate; font-size: 13px; font-weight: 800; letter-spacing: .01em; white-space: nowrap; }
 .brand strong span { color: var(--accent); font-size: 10px; margin-inline-start: 2px; }
 .brand small { display: block; color: var(--sub); font-size: 10px; margin-top: 3px; }
-.sidebar-nav { display: flex; flex-direction: column; gap: 22px; flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 4px 3px 20px; scrollbar-width: thin; }
-.nav-group { display: grid; gap: 5px; }
-.sidebar-caption { color: var(--sub); font-size: 10px; letter-spacing: .07em; font-weight: 700; margin: 0; padding: 0 11px 5px; }
+.sidebar-nav { display: flex; flex-direction: column; gap: 10px; flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 3px 3px 16px; scrollbar-width: thin; }
+.nav-group { display: grid; gap: 4px; }
+.sidebar-caption { color: var(--sub); font-size: 11px; font-weight: 650; margin: 0; }
+.nav-group-toggle { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; min-height: 36px;
+  padding: 7px 10px; border: 0; border-radius: 8px; background: transparent; text-align: start; }
+.nav-group-toggle span { min-width: 0; overflow-wrap: anywhere; }
+.nav-group-toggle svg { flex: 0 0 auto; transform: rotate(-90deg); }
+.nav-group-toggle[aria-expanded="true"] svg { transform: none; }
+.nav-group-toggle:hover:not(:disabled) { background: var(--surface-3); color: var(--text); }
+.nav-group-toggle:disabled { color: var(--text); cursor: default; opacity: 1; }
+.nav-group-items { display: grid; gap: 3px; }
+.nav-group-items[hidden] { display: none; }
 .nav-item {
-  position: relative; display: flex; align-items: center; gap: 11px; min-height: 43px;
-  padding: 10px 12px; border: 1px solid transparent; border-radius: 10px;
+  position: relative; display: flex; align-items: center; gap: 10px; min-height: 40px; min-width: 0;
+  padding: 8px 11px; border: 1px solid transparent; border-radius: 10px;
   background: transparent; color: var(--sub); text-align: start; font-size: 13px; font-weight: 550;
   transition: background .15s, color .15s, border-color .15s;
 }
 .nav-item svg { flex: 0 0 auto; }
+.nav-item > span { min-width: 0; overflow-wrap: anywhere; }
 .nav-item:hover { background: var(--surface-3); color: var(--text); }
 .nav-item.selected { color: var(--accent); background: var(--accent-wash); font-weight: 750; border-color: color-mix(in srgb,var(--accent) 15%,transparent); }
 .nav-chevron { margin-inline-start: auto; opacity: .8; }
-.sidebar-bottom { border-top: 1px solid var(--border); padding: 16px 7px 0; display: grid; gap: 7px; }
+.sidebar-bottom { border-top: 1px solid var(--border); padding: 13px 7px 0; display: grid; gap: 7px; }
 .sidebar-safety { display: flex; align-items: center; gap: 8px; color: var(--sub); font-size: 11px; }
 .sidebar-safety svg { color: var(--accent); flex: 0 0 auto; }
 .sidebar-bottom small { font-size: 10px; color: var(--sub); }
@@ -72,6 +82,7 @@
   border: 1px solid var(--accent); text-decoration: none; }
 .skip-link:focus { transform: translateY(0); }
 :root[dir="rtl"] .nav-chevron, :root[dir="rtl"] .topbar-left > .muted-icon { transform: scaleX(-1); }
+:root[dir="rtl"] .nav-group-toggle[aria-expanded="false"] svg { transform: rotate(90deg); }
 :root[dir="rtl"] .page-heading h1, :root[dir="rtl"] .sidebar-caption { letter-spacing: 0; }
 
 /* Visible previews keep the three persisted color modes easy to compare. */
@@ -131,8 +142,8 @@
   .brand strong { font-size: 13px; }
   .mobile-close, .mobile-menu { display: inline-flex; }
   .mobile-close { margin-inline-start: auto; }
-  .sidebar-nav { gap: 18px; padding-bottom: 20px; }
-  .nav-item { min-height: 44px; }
+  .sidebar-nav { gap: 10px; padding-bottom: 16px; }
+  .nav-item, .nav-group-toggle { min-height: 44px; }
   .topbar { min-height: 64px; padding: 10px 12px; gap: 5px; }
   .topbar-left, .topbar-right { gap: 3px; }
   .topbar-left strong { font-size: 12px; }

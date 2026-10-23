@@ -26,20 +26,23 @@ const words = {
   changed: "پروفایل پس از شروع ویرایش تغییر کرده است. برای بارگذاری نسخهٔ تازه، ویرایش را ببند و دوباره باز کن.", conflict: "نسخهٔ پروفایل تغییر کرده یا عملیات ناسازگار است. پیش از تلاش دوباره، به‌روزرسانی و بررسی کن.", error: "نتیجه تأیید نشد. تلاش دوباره برای همین تغییر از همان شناسهٔ عملیات استفاده می‌کند.", saved: "تغییر ثبت شد؛ هنوز گزارش تازهٔ Agent لازم است.", history: "تاریخچهٔ تغییرات اینباند", empty: "تغییری ثبت نشده است.", previous: "قبلی", next: "بعدی", historyError: "تاریخچهٔ تغییرات در دسترس نیست.",
  },
 };
-export default function InboundLifecycle({ inbound, language, csrf, blocked, onChanged }: { inbound: LifecycleInbound; language: Lang; csrf: string; blocked: boolean; onChanged: () => void }) {
+export default function InboundLifecycle({ inbound, language, csrf, blocked, mode = "all", onChanged, onDirtyChange }: { inbound: LifecycleInbound; language: Lang; csrf: string; blocked: boolean; mode?: "all" | "controls" | "history"; onChanged: () => void; onDirtyChange?: (dirty: boolean) => void }) {
  const t=words[language];const [editing,setEditing]=useState(false);const [base,setBase]=useState(inbound.revision);
  const [name,setName]=useState(inbound.name);const [transport,setTransport]=useState(inbound.transport);const [service,setService]=useState(inbound.grpc_service);const [dest,setDest]=useState(inbound.reality_target);const [sni,setSni]=useState(inbound.server_names.join(", "));const [shortIDs,setShortIDs]=useState(inbound.short_ids);
  const [reason,setReason]=useState("");const [busy,setBusy]=useState(false);const [message,setMessage]=useState("");
  const [history,setHistory]=useState<Operation[]|null>(null);const [historyError,setHistoryError]=useState(false);const [offset,setOffset]=useState(0);const [refresh,setRefresh]=useState(0);
  const life=useRef<AbortController|null>(null);const pending=useRef<{ semantic: string; payload: Intent & {event_id:string;expected_revision:number} }|null>(null);
  useEffect(()=>{const c=new AbortController();life.current=c;return ()=>c.abort();},[]);
+ useEffect(()=>{onDirtyChange?.(editing || !!reason.trim());},[editing,reason,onDirtyChange]);
+ useEffect(()=>()=>onDirtyChange?.(false),[onDirtyChange]);
  useEffect(()=>{
+  if(mode==="controls")return;
   const c=new AbortController();const timer=setTimeout(()=>c.abort(),8000);
   void fetch(`/api/v1/workspace/native-inbounds/${inbound.id}/operations?limit=20&offset=${offset}`,{signal:c.signal,credentials:"same-origin",cache:"no-store"})
    .then(async r=>{if(!r.ok)throw new Error();const b=await r.json() as {operations:Operation[]};if(!Array.isArray(b.operations))throw new Error();if(!c.signal.aborted){setHistory(b.operations);setHistoryError(false);}})
    .catch(()=>{if(!c.signal.aborted)setHistoryError(true);}).finally(()=>clearTimeout(timer));
   return ()=>{clearTimeout(timer);c.abort();};
- },[inbound.id,inbound.revision,offset,refresh]);
+ },[inbound.id,inbound.revision,offset,refresh,mode]);
  function beginEdit(){pending.current=null;setBase(inbound.revision);setName(inbound.name);setTransport(inbound.transport);setService(inbound.grpc_service);setDest(inbound.reality_target);setSni(inbound.server_names.join(", "));setShortIDs([...inbound.short_ids]);setEditing(true);setMessage("");}
  async function change(intent:Intent,revision:number){
   if(busy||blocked||inbound.archived||!reason.trim()||!life.current||life.current.signal.aborted)return;
@@ -63,7 +66,8 @@ export default function InboundLifecycle({ inbound, language, csrf, blocked, onC
   void change({action:"edit",reason:reason.trim(),profile},base);
  }
  const disabled=blocked||busy||inbound.archived||!reason.trim();
- return <section className="native-card native-lifecycle" aria-label="Inbound lifecycle">
+ return <section className="native-card native-lifecycle" aria-label={mode==="history"?t.history:"Inbound lifecycle"}>
+  {mode!=="history"&&<>
   <h3><ShieldCheck size={19}/>{t.title}</h3>
   <p><strong>{inbound.archived?t.archived:inbound.enabled?t.active:t.disabled}</strong> · {t.revision}: {inbound.revision}</p><p>{t.preserve}</p>
   {!inbound.archived&&<>
@@ -85,8 +89,11 @@ export default function InboundLifecycle({ inbound, language, csrf, blocked, onC
    </form>}
   </>}
   {message&&<p className="native-notice" role="status">{message}</p>}
+  </>}
+  {mode!=="controls"&&<>
   <h4><History size={16}/>{t.history}</h4>{historyError&&<p className="native-warning">{t.historyError}</p>}
   <div className="native-inbound-history">{history?.map(o=><article key={o.event_id}><strong>{({edit:t.edit,disable:t.disable,enable:t.enable,archive:t.archive} as Record<string,string>)[o.action]??o.action}</strong><span>{o.from_revision} → {o.to_revision} · {new Date(o.created_unix*1000).toLocaleString(language==="fa"?"fa-IR":"en-GB")}</span><p>{o.reason}</p></article>)}</div>
   {history?.length===0&&<p>{t.empty}</p>}<div className="native-actions"><button type="button" disabled={offset===0} onClick={()=>setOffset(n=>Math.max(0,n-20))}>{t.previous}</button><button type="button" disabled={!history||history.length<20} onClick={()=>setOffset(n=>n+20)}>{t.next}</button></div>
+  </>}
  </section>;
 }
