@@ -8,6 +8,7 @@ import NativeRouteTransactions from "./NativeRouteTransactions";
 import NativeMeteredRouteTransactions from "./NativeMeteredRouteTransactions";
 import InboundDirectory from "./InboundDirectory";
 import WorkspaceDialog from "./WorkspaceDialog";
+import InboundProfileForm, { type InboundProfileFormHandle, type InboundProfileValue } from "./InboundProfileForm";
 import { navigateURL, registerNavigationGuard } from "./navigation";
 import type { Inbound, InboundOverview as Overview, InboundStatus as Status } from "./inboundTypes";
 import { useEffect, useRef, useState, type FormEvent, type ReactNode, type KeyboardEvent } from "react";
@@ -51,6 +52,9 @@ const workspaceWords = {
   directPort: "Direct", swapPort: "Destination listener", none: "No Node is assigned to this Inbound yet.", routeHelp: "Assign the destination Node first, then review and save its route draft below.",
   searchClients: "Search all clients", boundCount: "Currently bound", clientsFailed: "Client selection is unavailable. Refresh to try again.",
   unsaved: "Discard the unsaved changes to this Inbound?", lab: "Diagnostics / LAB", labHelp: "Readiness, controlled tests and runtime reports for the whole Node fleet.",
+  editorLead: "Set up the profile, then choose its Nodes and routes.", checkForm: "Check form", formReady: "Profile is ready to save.", continueCreate: "Create and set up routes", created: "Inbound created. Choose a Node and its connection paths next.",
+  nextSetup: "After saving, continue to Node and route setup. No listener is activated by creating the profile.", directEnabled: "Direct listener", swapEnabled: "Dark Swap destination listener", listenerHelp: "Choose the connections this Node should receive.", portRange: "Use separate ports from 1024 to 65535. Panel and Agent ports are reserved.", reservedPort: "2087, 8443 and 24443 are reserved. Choose another port.",
+  unavailableTitle: "Inbound management is unavailable on this server version", unavailableHelp: "The server did not provide the Inbound management API. Update the PRO installation to use this editor.", legacyPreview: "Open the older route preview (experimental)",
  },
  fa: {
   overview: "خلاصه", routes: "مسیرها", clients: "کلاینت‌ها", activity: "تاریخچه", diagnostics: "عیب‌یابی", back: "بازگشت به اینباندها", cancel: "انصراف", close: "بستن",
@@ -61,6 +65,9 @@ const workspaceWords = {
   directPort: "مستقیم", swapPort: "پورت مقصد", none: "هنوز نودی به این اینباند اختصاص داده نشده است.", routeHelp: "ابتدا نود مقصد را مشخص کن؛ سپس پیش‌نویس مسیرش را در پایین بررسی و ذخیره کن.",
   searchClients: "جست‌وجو در همهٔ کلاینت‌ها", boundCount: "متصل به اینباند", clientsFailed: "فهرست کلاینت‌ها در دسترس نیست. دوباره به‌روزرسانی کن.",
   unsaved: "تغییرات ذخیره‌نشدهٔ این اینباند کنار گذاشته شوند؟", lab: "عیب‌یابی و آزمایش", labHelp: "آمادگی، تست‌های کنترل‌شده و گزارش اجرای ناوگان نودها.",
+  editorLead: "پروفایل را بساز؛ سپس نودها و مسیرهایش را مشخص کن.", checkForm: "بررسی فرم", formReady: "پروفایل آمادهٔ ذخیره است.", continueCreate: "ساخت و تنظیم مسیر", created: "اینباند ساخته شد. حالا نود و مسیرهای اتصالش را مشخص کن.",
+  nextSetup: "پس از ذخیره، وارد تنظیم نود و مسیر می‌شوی. ساخت پروفایل به‌تنهایی پورتی را فعال نمی‌کند.", directEnabled: "اتصال مستقیم", swapEnabled: "دریافت دارک‌سواپ", listenerHelp: "مشخص کن این نود کدام اتصال‌ها را دریافت کند.", portRange: "پورت‌های جدا از ۱۰۲۴ تا ۶۵۵۳۵ انتخاب کن؛ پورت پنل و Agent رزرو است.", reservedPort: "پورت‌های ۲۰۸۷، ۸۴۴۳ و ۲۴۴۴۳ رزرو هستند. پورت دیگری انتخاب کن.",
+  unavailableTitle: "مدیریت اینباند در این نسخهٔ سرور در دسترس نیست", unavailableHelp: "سرور، رابط مدیریت اینباند را ارائه نکرد. برای استفاده از این ویرایشگر، نسخهٔ نصب‌شدهٔ PRO باید به‌روز شود.", legacyPreview: "بازکردن پیش‌نمایش قدیمی مسیر (آزمایشی)",
  },
 } as const;
 type DetailTab = "overview" | "routes" | "clients" | "activity";
@@ -86,9 +93,14 @@ export default function NativeInbounds({ language, fallback, workspace = "inboun
  const [checked, setChecked] = useState<string[]>([]); const [offset, setOffset] = useState(0); const [search, setSearch] = useState(""); const [clientsReady, setClientsReady] = useState(false); const [clientsFailure, setClientsFailure] = useState(false);
  const [name, setName] = useState(""); const [transport, setTransport] = useState("tcp"); const [target, setTarget] = useState(""); const [sni, setSni] = useState(""); const [service, setService] = useState("");
  const createIdentity = useRef<{ id: number; short: string } | null>(null);
+ const profileForm = useRef<InboundProfileFormHandle>(null); const [formChecked, setFormChecked] = useState(false);
+ const createInitial = useRef(""); const skipNavigationGuard = useRef(false);
  const [node, setNode] = useState(""); const [listen, setListen] = useState(""); const [direct, setDirect] = useState("0"); const [swap, setSwap] = useState("0");
+ const [directEnabled, setDirectEnabled] = useState(true); const [swapEnabled, setSwapEnabled] = useState(false);
  const lifetime = useRef<AbortController | null>(null); const tabElements = useRef<(HTMLButtonElement | null)[]>([]);
- const dirty = profileDirty || routeDirty;
+ const createValue: InboundProfileValue = { name, transport, grpcService: service, realityTarget: target, serverNames: sni };
+ const createDirty = creating && JSON.stringify(createValue) !== createInitial.current;
+ const dirty = profileDirty || routeDirty || createDirty;
  useEffect(() => { const c = new AbortController(); lifetime.current = c; const timer = setInterval(() => setTick(Date.now()), 1000); return () => { c.abort(); clearInterval(timer); }; }, []);
  useEffect(() => {
   if (!dirty) return;
@@ -98,8 +110,8 @@ export default function NativeInbounds({ language, fallback, workspace = "inboun
  useEffect(() => registerNavigationGuard(destination => {
   const destinationID = Number(destination.searchParams.get("inbound"));
   const sameDetail = destination.pathname === "/" + workspace && destinationID === chosen;
-  return !dirty || sameDetail || window.confirm(u.unsaved);
- }), [dirty, chosen, workspace, u.unsaved]);
+  return skipNavigationGuard.current || !dirty || (sameDetail && !createDirty) || window.confirm(u.unsaved);
+ }), [dirty, createDirty, chosen, workspace, u.unsaved]);
  function applyView(id: number, nextTab: DetailTab) {
   if (id !== chosen) {
    setProfileDirty(false); setRouteDirty(false); setVisited([nextTab]); setChecked([]); setBound([]); setClientsReady(false);
@@ -179,9 +191,9 @@ export default function NativeInbounds({ language, fallback, workspace = "inboun
   }
   void pollCanary(); return () => { controller.abort(); clearTimeout(timer); };
  }, [session, diagnostics, refresh, expire]);
- async function mutate(path: string, body: unknown, after: () => void) {
+ async function mutate(path: string, body: unknown, after: () => void, successMessage = t.saved) {
   const controller = lifetime.current; if (!controller || controller.signal.aborted || busy) return; setBusy(true); setNotice("");
-  try { await request(path, controller.signal, body, session?.csrf_token); if (!controller.signal.aborted) { after(); setNotice(t.saved); setRefresh(n => n + 1); } }
+  try { await request(path, controller.signal, body, session?.csrf_token); if (!controller.signal.aborted) { after(); setNotice(successMessage); setRefresh(n => n + 1); } }
   catch (error) { if (!controller.signal.aborted) { if (error instanceof Fault && error.status === 401) expire(); setFailure(true); setNotice(t.error); } }
   finally { if (!controller.signal.aborted) setBusy(false); }
  }
@@ -193,22 +205,30 @@ export default function NativeInbounds({ language, fallback, workspace = "inboun
   const suffix = language === "fa" ? " — کپی" : " — copy";
   createIdentity.current = null; setCopying(!!source); setName(source ? source.name.slice(0, 128 - suffix.length) + suffix : "");
   setTransport(source?.transport ?? "tcp"); setTarget(source?.reality_target ?? ""); setSni(source?.server_names.join(", ") ?? ""); setService(source?.grpc_service ?? ""); setCreating(true);
+  createInitial.current = JSON.stringify({ name: source ? source.name.slice(0, 128 - suffix.length) + suffix : "", transport: source?.transport ?? "tcp", grpcService: source?.grpc_service ?? "", realityTarget: source?.reality_target ?? "", serverNames: source?.server_names.join(", ") ?? "" });
+  setFormChecked(false); setNotice("");
  }
+ function changeCreate(value: InboundProfileValue) { setName(value.name); setTransport(value.transport); setService(value.grpcService); setTarget(value.realityTarget); setSni(value.serverNames); setFormChecked(false); }
+ function closeCreate() { if (!busy && (!createDirty || window.confirm(u.unsaved))) setCreating(false); }
  function create(event: FormEvent) {
-  event.preventDefault(); if (!createIdentity.current) createIdentity.current = { id: freshID(), short: shortID() }; const identity = createIdentity.current;
+  event.preventDefault(); if (busy || stale || !profileForm.current?.validate()) return;
+  if (!createIdentity.current) createIdentity.current = { id: freshID(), short: shortID() }; const identity = createIdentity.current;
   void mutate("/api/v1/workspace/native-inbounds", { id: identity.id, name, transport, grpc_service: transport === "grpc" ? service : "", reality_target: target, server_names: split(sni), short_ids: [identity.short] }, () => {
-   setCreating(false); createIdentity.current = null; setProfileDirty(false); setRouteDirty(false); navigateDetail(identity.id, swapWorkspace ? "routes" : "overview");
-  });
+   setCreating(false); createIdentity.current = null; setProfileDirty(false); setRouteDirty(false);
+   skipNavigationGuard.current = true; navigateDetail(identity.id, "routes"); skipNavigationGuard.current = false;
+  }, u.created);
  }
  function pickNode(id: string) {
   setNode(id); const existing = data?.targets.find(x => x.node_id === id && x.inbound_id === chosen);
-  setListen(existing?.listen_ip ?? ""); setDirect(String(existing?.direct_port ?? 0)); setSwap(String(existing?.swap_port ?? 0));
+  setListen(existing?.listen_ip ?? ""); setDirect(existing?.direct_port ? String(existing.direct_port) : ""); setSwap(existing?.swap_port ? String(existing.swap_port) : "");
+  setDirectEnabled(existing ? existing.direct_port > 0 : true); setSwapEnabled((existing?.swap_port ?? 0) > 0); setNotice("");
  }
  function saveTarget(event: FormEvent) {
   event.preventDefault(); const n = data?.nodes.find(x => x.node_id === node); if (!n || !chosen || !window.confirm(t.confirm)) return;
-  void mutate("/api/v1/workspace/native-inbounds/" + chosen + "/target", { inbound_id: chosen, node_id: node, installation_id: n.installation_id, listen_ip: listen, direct_port: Number(direct), swap_port: Number(swap) }, () => setTargetOpen(false));
+  void mutate("/api/v1/workspace/native-inbounds/" + chosen + "/target", { inbound_id: chosen, node_id: node, installation_id: n.installation_id, listen_ip: listen, direct_port: directEnabled ? Number(direct) : 0, swap_port: swapEnabled ? Number(swap) : 0 }, () => setTargetOpen(false));
  }
- const sharedNodePort = Number(direct) > 0 && Number(swap) > 0 && Number(direct) === Number(swap);
+ const sharedNodePort = directEnabled && swapEnabled && Number(direct) > 0 && Number(swap) > 0 && Number(direct) === Number(swap);
+ const reservedNodePort = (directEnabled && [2087, 8443, 24443].includes(Number(direct))) || (swapEnabled && [2087, 8443, 24443].includes(Number(swap)));
  const stale = failure || tick - lastSuccess.current > 12000;
  function matching(s: Status): boolean {
   const expires = Date.parse(s.lease_expires_at ?? ""); const received = Date.parse(s.reported_at ?? "");
@@ -220,7 +240,7 @@ export default function NativeInbounds({ language, fallback, workspace = "inboun
   return ({ applied: t.applied, awaiting_report: t.waiting, stale: t.stale, configuration_changed: t.changed, stopped: t.stopped, listeners_disabled: t.listenersDisabled, out_of_sync: t.mismatch } as Record<string, string>)[s.state] ?? t.waiting;
  }
  const current = data?.inbounds.find(i => i.id === chosen); const assigned = data?.targets.filter(item => item.inbound_id === chosen) ?? [];
- if (disabled) return <>{fallback}</>;
+ if (disabled) return <section className="native-workspace inbound-capability-missing"><div className="native-card"><Server size={24}/><h2>{u.unavailableTitle}</h2><p>{u.unavailableHelp}</p><button type="button" onClick={() => setRefresh(n => n + 1)}><RefreshCw size={16}/>{t.retry}</button></div><details><summary>{u.legacyPreview}</summary>{fallback}</details></section>;
  return <section className="native-workspace" aria-label="Native Inbounds">
   <div className="inbound-workspace-bar"><p>{swapWorkspace ? u.swapBoundary : u.boundary}</p><div>
    <button type="button" onClick={() => setRefresh(n => n + 1)} disabled={busy} aria-label={t.retry}><RefreshCw size={16}/><span>{t.retry}</span></button>
@@ -274,20 +294,31 @@ export default function NativeInbounds({ language, fallback, workspace = "inboun
      <div className="native-card"><h3><ArrowRightLeft size={19}/>{t.status}</h3><p>{t.evidence}</p><div className="native-report-list">{data.runtime.map(report => <article key={report.node_id + report.installation_id} className="native-report"><h4>{data.nodes.find(n => n.node_id === report.node_id)?.name ?? report.node_id}</h4><strong className={matching(report) ? "native-confirmed" : "native-pending"}>{statusLabel(report)}</strong><div><span>{t.desired}: {report.desired_sequence || "—"}</span><span>{t.observed}: {report.reported_sequence || "—"}</span></div><p>{t.phase}: {report.phase || "—"}</p><p>{t.last}: {report.reported_at ? new Date(report.reported_at).toLocaleTimeString(language === "fa" ? "fa-IR" : "en-GB") : "—"}</p></article>)}</div></div>
     </>}
    </section>
-   <WorkspaceDialog open={creating} title={t.create} closeLabel={u.close} busy={busy} onClose={() => setCreating(false)}><form onSubmit={create}>
-    {copying && <p className="inbound-dialog-note">{u.copyHint}</p>}
-    <label>{t.name}<input data-initial-focus value={name} onChange={event => setName(event.target.value)} required maxLength={128}/></label>
-    <label>{t.transport}<select aria-label={t.transport} value={transport} onChange={event => setTransport(event.target.value)}><option value="tcp">TCP / REALITY</option><option value="grpc">gRPC / REALITY</option></select></label>
-    {transport === "grpc" && <label>{t.service}<input value={service} onChange={event => setService(event.target.value)} required pattern="[A-Za-z0-9_-]{1,64}"/></label>}
-    <label>{t.dest}<input value={target} onChange={event => setTarget(event.target.value)} required placeholder="example.org:443"/></label><label>{t.sni}<input value={sni} onChange={event => setSni(event.target.value)} required placeholder="example.org"/></label>
-    <div className="native-dialog-actions"><button type="button" disabled={busy} onClick={() => setCreating(false)}>{u.cancel}</button><button type="submit" disabled={busy || stale}>{t.save}</button></div>
+   <WorkspaceDialog open={creating} title={t.create} subtitle={u.editorLead} variant="inbound-editor" closeLabel={u.close} busy={busy} onClose={closeCreate}><form onSubmit={create} noValidate className="inbound-editor-form">
+    <div className="inbound-editor-scroll">
+     {copying && <p className="inbound-dialog-note inbound-copy-note">{u.copyHint}</p>}
+     <InboundProfileForm ref={profileForm} language={language} value={createValue} onChange={changeCreate} disabled={busy}>
+      <div className="inbound-next-step"><Server size={18}/><p>{u.nextSetup}</p></div>
+     </InboundProfileForm>
+     {notice && <p className="native-warning" role="alert">{notice}</p>}
+    </div>
+    <footer className="inbound-editor-footer">
+     {formChecked && <p role="status"><CheckCircle2 size={15}/>{u.formReady}</p>}
+     <div><button type="button" disabled={busy} onClick={closeCreate}>{u.cancel}</button><button type="button" disabled={busy} onClick={() => setFormChecked(profileForm.current?.validate() ?? false)}>{u.checkForm}</button><button className="native-primary" type="submit" disabled={busy || stale}>{u.continueCreate}</button></div>
+    </footer>
    </form></WorkspaceDialog>
-   <WorkspaceDialog open={targetOpen} title={t.nodes} closeLabel={u.close} busy={busy} onClose={() => setTargetOpen(false)}><form onSubmit={saveTarget}><p className="inbound-dialog-note">{t.targetHelp}</p>
+   <WorkspaceDialog open={targetOpen} title={t.nodes} subtitle={u.listenerHelp} closeLabel={u.close} busy={busy} onClose={() => setTargetOpen(false)}><form onSubmit={saveTarget}>
     {!data.nodes.length && <p className="native-warning">{t.noNodes}</p>}
-    <label>{t.node}<select data-initial-focus value={node} onChange={event => pickNode(event.target.value)} required><option value="">{t.choose}</option>{data.nodes.map(n => <option value={n.node_id} key={n.node_id}>{n.name} ({n.node_id})</option>)}</select></label><label>{t.listen}<input value={listen} onChange={event => setListen(event.target.value)} required placeholder="203.0.113.10"/></label>
-    <div className="native-fields"><label>{t.direct}<input type="number" min={0} max={65535} step={1} value={direct} onChange={event => setDirect(event.target.value)} required/></label><label>{t.swap}<input type="number" min={0} max={65535} step={1} value={swap} onChange={event => setSwap(event.target.value)} required/></label></div>
+    <label>{t.node}<select data-initial-focus value={node} onChange={event => pickNode(event.target.value)} required><option value="">{t.choose}</option>{data.nodes.map(n => <option value={n.node_id} key={n.node_id}>{data.nodes.filter(other => other.name === n.name).length > 1 ? `${n.name} (${n.node_id})` : n.name}</option>)}</select></label><label>{t.listen}<input dir="ltr" value={listen} onChange={event => setListen(event.target.value)} required placeholder="203.0.113.10"/></label>
+    <div className="inbound-listener-options">
+     <div data-enabled={directEnabled}><label className="inbound-listener-switch"><input type="checkbox" checked={directEnabled} onChange={event => setDirectEnabled(event.target.checked)}/><span>{u.directEnabled}</span><bdi>DIRECT</bdi></label>{directEnabled && <label>{language === "fa" ? "پورت مستقیم" : "Direct port"}<input aria-label={t.direct} dir="ltr" type="number" min={1024} max={65535} step={1} value={direct} onChange={event => setDirect(event.target.value)} required placeholder="10443"/></label>}</div>
+     <div data-enabled={swapEnabled}><label className="inbound-listener-switch"><input type="checkbox" checked={swapEnabled} onChange={event => setSwapEnabled(event.target.checked)}/><span>{u.swapEnabled}</span><bdi>SWAP</bdi></label>{swapEnabled && <label>{language === "fa" ? "پورت مقصد دارک‌سواپ" : "Dark Swap destination port"}<input aria-label={t.swap} dir="ltr" type="number" min={1024} max={65535} step={1} value={swap} onChange={event => setSwap(event.target.value)} required placeholder="18443"/></label>}</div>
+    </div>
+    <p className="inbound-dialog-note">{u.portRange}</p>
     {sharedNodePort && <p className="native-warning" role="alert">{t.shared}</p>}
-    <div className="native-dialog-actions"><button type="button" disabled={busy} onClick={() => setTargetOpen(false)}>{u.cancel}</button><button type="submit" disabled={busy || stale || !current || current.archived || !node || sharedNodePort || (Number(direct) === 0 && Number(swap) === 0)}>{t.targetSave}</button></div>
+    {reservedNodePort && <p className="native-warning" role="alert">{u.reservedPort}</p>}
+    {notice && <p className="native-warning" role="alert">{notice}</p>}
+    <div className="native-dialog-actions"><button type="button" disabled={busy} onClick={() => setTargetOpen(false)}>{u.cancel}</button><button type="submit" disabled={busy || stale || !current || current.archived || !node || sharedNodePort || reservedNodePort || (!directEnabled && !swapEnabled)}>{t.targetSave}</button></div>
    </form></WorkspaceDialog>
   </>}
   {notice && <p className="native-notice" role="status">{notice}</p>}

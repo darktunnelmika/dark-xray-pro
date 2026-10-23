@@ -169,6 +169,9 @@ test("Inbound planning keeps enrollment and activation private with no connected
   await mockFleet(page, () => ({ ...fleet, nodes: [], total_nodes: 0, online_nodes: 0, offline_nodes: 0 }));
   await page.goto("/");
   await page.getByRole("button", { name: "Inbounds" }).click();
+  await expect(page.getByRole("heading", { name: "Inbound management is unavailable on this server version" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Inbound deployment draft" })).toBeHidden();
+  await page.locator("summary").filter({ hasText: "Open the older route preview" }).click();
   await expect(page.getByRole("heading", { name: "Inbound deployment draft" })).toBeVisible();
   await expect(page.getByText("No independently paired PRO Nodes are available yet.")).toBeVisible();
   await expect(page.getByLabel("Target Node")).toBeDisabled();
@@ -182,6 +185,7 @@ test("Direct + Dark Swap preview uses exactly three swap inputs and flags shared
   await mockFleet(page);
   await page.goto("/");
   await page.getByRole("button", { name: "Inbounds" }).click();
+  await page.locator("summary").filter({ hasText: "Open the older route preview" }).click();
   await page.getByLabel("Target Node").selectOption("de-01");
   await page.getByLabel("Inbound ID").fill("1185");
   await page.getByLabel("Direct Node port").fill("8443");
@@ -210,6 +214,7 @@ test("mobile RTL Dark Swap draft stays readable and never enables Apply", async 
   await page.getByRole("button", { name: "Open menu" }).click();
   await page.getByRole("button", { name: "Inbounds" }).click();
   await page.getByRole("button", { name: "Switch language" }).click();
+  await page.locator("summary").filter({ hasText: "بازکردن پیش‌نمایش قدیمی مسیر" }).click();
   await expect(page.getByRole("heading", { name: "پیش‌نویس اینباند" })).toBeVisible();
   await page.getByLabel("نود مقصد").selectOption("de-01");
   await page.getByLabel("شناسه اینباند").fill("42");

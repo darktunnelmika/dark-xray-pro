@@ -1,9 +1,9 @@
 import { useEffect, useRef, type ReactNode } from "react";
 
 /** Native modal semantics keep focus and background isolation in the browser. */
-export default function WorkspaceDialog({ open, title, closeLabel, busy, onClose, children }: {
+export default function WorkspaceDialog({ open, title, closeLabel, busy, onClose, children, variant = "dialog", subtitle }: {
   open: boolean; title: string; closeLabel: string; busy: boolean;
-  onClose: () => void; children: ReactNode;
+  onClose: () => void; children: ReactNode; variant?: "dialog" | "inbound-editor"; subtitle?: string;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
   useEffect(() => {
@@ -21,7 +21,7 @@ export default function WorkspaceDialog({ open, title, closeLabel, busy, onClose
       else document.querySelector<HTMLElement>("[data-workspace-focus]")?.focus();
     };
   }, [open]);
-  return <dialog ref={dialog} className="workspace-dialog" aria-label={title}
+  return <dialog ref={dialog} className={"workspace-dialog" + (variant === "inbound-editor" ? " inbound-editor-dialog" : "")} aria-label={title}
     onKeyDown={event => {
       if (event.key !== "Tab") return;
       const items = Array.from(event.currentTarget.querySelectorAll<HTMLElement>(
@@ -33,7 +33,7 @@ export default function WorkspaceDialog({ open, title, closeLabel, busy, onClose
       else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
     }}
     onCancel={event => { event.preventDefault(); if (!busy) onClose(); }}>
-    <header><h2>{title}</h2><button type="button" disabled={busy} onClick={onClose} aria-label={closeLabel}>×</button></header>
+    <header><div><h2>{title}</h2>{subtitle && <p className="workspace-dialog-subtitle">{subtitle}</p>}</div><button type="button" disabled={busy} onClick={onClose} aria-label={closeLabel}>×</button></header>
     {open && children}
   </dialog>;
 }
