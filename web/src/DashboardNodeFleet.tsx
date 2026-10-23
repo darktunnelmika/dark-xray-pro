@@ -8,9 +8,9 @@ import "./DashboardNodeFleet.css";
 type Language = "en" | "fa";
 const copy = {
   en: {
-    eyebrow: "NODE FLEET  /  LIVE OPERATIONS",
-    title: "Every Node. One clear view.",
-    lead: "Verified PRO Agents · independent of the HUB's own resources.",
+    eyebrow: "NODE METRICS",
+    title: "Node fleet",
+    lead: "Connection status and host resources.",
     synced: "Last verified snapshot", syncing: "Loading authenticated fleet",
     delayed: "Snapshot delayed · connection interrupted",
     total: "Registered", online: "Online", offline: "Offline", fresh: "Fresh metrics",
@@ -24,9 +24,9 @@ const copy = {
     trend: "Recent real interface samples", scope: "Host interface only · not customer-billable traffic",
   },
   fa: {
-    eyebrow: "NODE FLEET  /  پایش زنده",
-    title: "تمام نودها؛ در یک قاب.",
-    lead: "Agentهای احرازشدهٔ PRO؛ مستقل از منابع سرور HUB.",
+    eyebrow: "منابع نودها",
+    title: "ناوگان نودها",
+    lead: "وضعیت اتصال و منابع نودها.",
     synced: "آخرین وضعیت تأییدشده", syncing: "در حال دریافت اطلاعات معتبر نودها",
     delayed: "ارتباط مختل · آخرین اطلاعات معتبر",
     total: "نودهای ثبت‌شده", online: "آنلاین", offline: "آفلاین", fresh: "آمار به‌روز",

@@ -35,9 +35,9 @@ type HubSnapshot = {
 };
 const words = {
   en: {
-    eyebrow: "DARK XRAY PRO  /  CONTROL PLANE",
-    heading: "The heart of your infrastructure.",
-    subtitle: "Actual resources of this HUB server — independent of every Node.",
+    eyebrow: "SERVER METRICS",
+    heading: "HUB monitor",
+    subtitle: "Host resources, independent of Nodes.",
     online: "HUB API responsive", unavailable: "HUB telemetry unavailable", stale: "HUB stats delayed",
     cpu: "CPU", ram: "Memory", disk: "Root disk", load: "Load 1m", process: "HUB process RAM",
     hostUptime: "Host uptime", hubUptime: "HUB service uptime", sockets: "Host TCP sockets",
@@ -49,9 +49,9 @@ const words = {
     memoryUsed: "used", unknown: "No verified reading",
   },
   fa: {
-    eyebrow: "DARK XRAY PRO  /  مرکز کنترل",
-    heading: "قلب زیرساخت، زیر نظر تو.",
-    subtitle: "منابع واقعی سرور اصلی HUB؛ مستقل از تمام نودها.",
+    eyebrow: "منابع سرور",
+    heading: "مانیتور هاب",
+    subtitle: "منابع هاب، مستقل از نودها.",
     online: "ارتباط API هاب برقرار", unavailable: "مانیتورینگ هاب در دسترس نیست", stale: "اطلاعات منابع هاب با تأخیر",
     cpu: "پردازنده", ram: "حافظه", disk: "دیسک ریشه", load: "لود ۱ دقیقه", process: "رم فرایند HUB",
     hostUptime: "آپتایم سرور", hubUptime: "آپتایم سرویس HUB", sockets: "سوکت‌های TCP سرور",
@@ -113,8 +113,8 @@ function elapsed(value: number | null | undefined, lang: Language): string {
   const days = Math.floor(value / 86400);
   const hours = Math.floor(value % 86400 / 3600);
   const mins = Math.floor(value % 3600 / 60);
-  return days > 0 ? `${days}${lang === "fa" ? " روز" : "d"}  ${hours}h` :
-    `${hours}h ${mins}m`;
+  if (lang === "fa") return days > 0 ? `${days} روز و ${hours} ساعت` : `${hours} ساعت و ${mins} دقیقه`;
+  return days > 0 ? `${days}d ${hours}h` : `${hours}h ${mins}m`;
 }
 function percent(a: number | null | undefined, b: number | null | undefined): number | null {
   return a != null && b != null && b > 0 ? Math.max(0, Math.min(100, a / b * 100)) : null;
