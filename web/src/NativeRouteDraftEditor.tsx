@@ -15,6 +15,10 @@ type RouteDraft={
  swap_tunnel_port:number;swap_node_port:number;
  confirm_existing_route_disable:boolean;reason:string;
 };
+// Preserve delimiters while editing; normalize host lists only for API requests.
+type RouteDraftForm=Omit<RouteDraft,"direct_hosts"|"tunnel_hosts"> & {
+ direct_hosts:string;tunnel_hosts:string;
+};
 type Saved=RouteDraft & {
  draft_revision:number;listen_ip:string;native_direct_port:number;
  native_swap_port:number;billing_source_node_id:string;
@@ -57,32 +61,36 @@ const words={
   }
 } as const;
 const comma=(value:string)=>value.split(",").map(x=>x.trim()).filter(Boolean);
-function blank(id:number,rev:number,node:NativeTarget):RouteDraft{
+function blank(id:number,rev:number,node:NativeTarget):RouteDraftForm{
  return {event_id:"",inbound_id:id,node_id:node.node_id,
   installation_id:node.installation_id,expected_inbound_revision:rev,
-  expected_draft_revision:0,direct_port:node.direct_port,direct_hosts:[],
-  tunnel_port:0,tunnel_hosts:[],swap_enabled:false,
+  expected_draft_revision:0,direct_port:node.direct_port,direct_hosts:"",
+  tunnel_port:0,tunnel_hosts:"",swap_enabled:false,
   swap_upstream_node_id:"",swap_tunnel_host:"",swap_tunnel_port:0,swap_node_port:0,
   confirm_existing_route_disable:false,reason:""};
 }
-export default function NativeRouteDraftEditor({inboundID,inboundRevision,nodes,targets,language,csrf,blocked}:{
+export default function NativeRouteDraftEditor({inboundID,inboundRevision,nodes,targets,language,csrf,blocked,onDirtyChange}:{
  inboundID:number;inboundRevision:number;nodes:NodeInfo[];
  targets:NativeTarget[];language:"fa"|"en";csrf:string;blocked:boolean;
+ onDirtyChange?:(dirty:boolean)=>void;
 }){
  const t=words[language];
  const [nodeID,setNodeID]=useState("");
- const [form,setForm]=useState<RouteDraft|null>(null);
+ const [form,setForm]=useState<RouteDraftForm|null>(null);
  const [loaded,setLoaded]=useState(false);
  const [preview,setPreview]=useState(false);
  const [message,setMessage]=useState("");
  const [busy,setBusy]=useState(false);
+ const [dirty,setDirty]=useState(false);
  const pendingID=useRef<string|null>(null);
  const available=targets.filter(x=>x.inbound_id===inboundID&&
   nodes.some(n=>n.node_id===x.node_id&&n.installation_id===x.installation_id));
  const selected=available.find(x=>x.node_id===nodeID);
+ useEffect(()=>{onDirtyChange?.(dirty)},[dirty,onDirtyChange]);
+ useEffect(()=>()=>onDirtyChange?.(false),[onDirtyChange]);
  useEffect(()=>{setNodeID("");setForm(null);setLoaded(false);setPreview(false)},[inboundID]);
  useEffect(()=>{
-  const ctrl=new AbortController();setLoaded(false);setPreview(false);setMessage("");
+  const ctrl=new AbortController();setLoaded(false);setPreview(false);setMessage("");setDirty(false);
   pendingID.current=null;
   if(!selected){setForm(null);return()=>ctrl.abort()}
   setForm(blank(inboundID,inboundRevision,selected));
@@ -92,7 +100,8 @@ export default function NativeRouteDraftEditor({inboundID,inboundRevision,nodes,
    if(existing.inbound_id!==inboundID||existing.node_id!==nodeID||
     existing.installation_id!==selected.installation_id||existing.apply_allowed!==false)
     throw Error("unverified_saved_route");
-   setForm({...existing,expected_inbound_revision:inboundRevision,
+   setForm({...existing,direct_hosts:existing.direct_hosts.join(", "),
+    tunnel_hosts:existing.tunnel_hosts.join(", "),expected_inbound_revision:inboundRevision,
     expected_draft_revision:existing.draft_revision,
     event_id:"",reason:""});
    setLoaded(true);
@@ -106,9 +115,9 @@ export default function NativeRouteDraftEditor({inboundID,inboundRevision,nodes,
   });
   return()=>ctrl.abort();
  },[inboundID,inboundRevision,nodeID,selected?.installation_id]);
- function update(patch:Partial<RouteDraft>){
+ function update(patch:Partial<RouteDraftForm>){
   setForm(before=>before?{...before,...patch}:null);
-  setPreview(false);pendingID.current=null;setMessage("");
+  setPreview(false);pendingID.current=null;setMessage("");setDirty(true);
  }
  function number(e:ChangeEvent<HTMLInputElement>){
   const value=Number(e.target.value);
@@ -121,7 +130,8 @@ export default function NativeRouteDraftEditor({inboundID,inboundRevision,nodes,
   const id=pendingID.current||crypto.randomUUID();
   pendingID.current=id;setBusy(true);setMessage("");
   const uri="/api/v1/workspace/native-inbounds/"+inboundID+"/route-drafts"+(save?"":"/preview");
-  const body={...form,event_id:id};
+  const body:RouteDraft={...form,event_id:id,
+   direct_hosts:comma(form.direct_hosts),tunnel_hosts:comma(form.tunnel_hosts)};
   try{
    const result=await api<any>(uri,{method:"POST",headers:{
     "Content-Type":"application/json","X-CSRF-Token":csrf},body:JSON.stringify(body)});
@@ -129,7 +139,7 @@ export default function NativeRouteDraftEditor({inboundID,inboundRevision,nodes,
     if(!result||result.draft?.apply_allowed!==false||
      result.clients_deleted!==false||result.credit_changed!==false||
      result.runtime_changed!==false)throw Error("invalid_draft_receipt");
-    pendingID.current=null;setForm(v=>v?{...v,expected_draft_revision:result.draft.draft_revision,reason:""}:v);setMessage(t.saved);setPreview(false);
+    pendingID.current=null;setForm(v=>v?{...v,expected_draft_revision:result.draft.draft_revision,reason:""}:v);setMessage(t.saved);setPreview(false);setDirty(false);
    }else{
     if(!result||result.valid!==true||result.apply_allowed!==false)throw Error("invalid_preview");
     setMessage(t.checked);setPreview(true);
@@ -153,12 +163,12 @@ export default function NativeRouteDraftEditor({inboundID,inboundRevision,nodes,
    <div className="native-fields">
     <label>{t.direct}<input aria-label="Route Direct port" type="number" min="0" max="65535"
       value={form.direct_port} onChange={e=>update({direct_port:number(e)})}/></label>
-    <label>{t.directHosts}<input aria-label="Route Direct hosts" value={form.direct_hosts.join(", ")}
-      onChange={e=>update({direct_hosts:comma(e.target.value)})}/></label>
+    <label>{t.directHosts}<input dir="ltr" aria-label="Route Direct hosts" value={form.direct_hosts}
+      onChange={e=>update({direct_hosts:e.target.value})}/></label>
     <label>{t.tunnel}<input aria-label="Route Tunnel port" type="number" min="0" max="65535"
       value={form.tunnel_port} onChange={e=>update({tunnel_port:number(e)})}/></label>
-    <label>{t.tunnelHosts}<input aria-label="Route Tunnel hosts" value={form.tunnel_hosts.join(", ")}
-      onChange={e=>update({tunnel_hosts:comma(e.target.value)})}/></label>
+    <label>{t.tunnelHosts}<input dir="ltr" aria-label="Route Tunnel hosts" value={form.tunnel_hosts}
+      onChange={e=>update({tunnel_hosts:e.target.value})}/></label>
    </div>
    <label className="route-boolean"><input aria-label="Route Dark Swap" type="checkbox"
       checked={form.swap_enabled} onChange={e=>update({
@@ -171,7 +181,7 @@ export default function NativeRouteDraftEditor({inboundID,inboundRevision,nodes,
       onChange={e=>update({swap_upstream_node_id:e.target.value})}><option value="">—</option>
       {available.filter(x=>x.node_id!==nodeID).map(x=><option key={x.node_id}
        value={x.node_id}>{x.node_id}</option>)}</select></label>
-    <label>{t.host}<input aria-label="Route Swap host" value={form.swap_tunnel_host}
+    <label>{t.host}<input dir="ltr" aria-label="Route Swap host" value={form.swap_tunnel_host}
       onChange={e=>update({swap_tunnel_host:e.target.value})}/></label>
     <label>{t.tunnelPort}<input aria-label="Route Swap tunnel port" type="number" min="0" max="65535"
       value={form.swap_tunnel_port} onChange={e=>update({swap_tunnel_port:number(e)})}/></label>

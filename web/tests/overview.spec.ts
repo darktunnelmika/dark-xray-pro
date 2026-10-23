@@ -53,7 +53,8 @@ test("theme, language and mobile navigation survive refresh without horizontal o
   await mockFleet(page);
   await page.goto("/");
   await page.getByRole("button", { name: "Open menu" }).click();
-  await page.getByRole("button", { name: "Settings" }).click();
+  await page.getByRole("button", { name: "Account & settings", exact: true }).click();
+  await page.getByRole("button", { name: "Settings", exact: true }).click();
   await page.getByRole("button", { name: "فارسی" }).click();
   await page.getByRole("button", { name: "شب", exact: true }).click();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");

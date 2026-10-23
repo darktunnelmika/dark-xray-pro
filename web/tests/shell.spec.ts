@@ -50,6 +50,35 @@ test("shared session survives page changes, browser history and reload without d
   expect(stored).not.toContain("only-a-test-password"); expect(stored).not.toContain("a".repeat(64));
 });
 
+test("bookmarked Inbound details retain their tab and filters through login and reload", async ({ page }) => {
+  const f = await setup(page);
+  await page.route("**/api/v1/workspace/native-inbounds-state", route => route.fulfill({ json: {
+    inbounds: [{ id: 301, name: "Bookmarked Inbound", enabled: true, archived: false, revision: 1,
+      transport: "tcp", grpc_service: "", reality_target: "example.org:443", server_names: ["example.org"],
+      short_ids: ["aa"], public_key: "PUBLIC_ONLY_TEST_KEY", bound_clients: 0 }],
+    nodes: [], targets: [], runtime: [],
+  } }));
+  const bookmark = "/inbounds?inbound=301&tab=activity&q=Bookmarked&state=enabled";
+  await page.goto(bookmark);
+  await expect(page.getByRole("heading", { name: "Sign in", exact: true })).toBeVisible();
+  await expect(page).toHaveURL(url => url.pathname === "/login" && url.searchParams.get("next") === bookmark);
+  await login(page);
+  const isBookmark = (url: URL) => url.pathname === "/inbounds" && url.searchParams.get("inbound") === "301" &&
+    url.searchParams.get("tab") === "activity" && url.searchParams.get("q") === "Bookmarked" && url.searchParams.get("state") === "enabled";
+  await expect(page).toHaveURL(isBookmark);
+  await expect(page.getByRole("heading", { name: "Bookmarked Inbound", exact: true })).toBeVisible();
+  await expect(page.getByRole("tab", { name: "Activity", exact: true })).toHaveAttribute("aria-selected", "true");
+  await page.reload();
+  await expect(page).toHaveURL(isBookmark);
+  await expect(page.getByRole("heading", { name: "Bookmarked Inbound", exact: true })).toBeVisible();
+  await expect(page.getByRole("tab", { name: "Activity", exact: true })).toHaveAttribute("aria-selected", "true");
+  await page.getByRole("button", { name: "Back to Inbounds", exact: true }).click();
+  await expect(page.getByLabel("Search Inbounds", { exact: true })).toHaveValue("Bookmarked");
+  await expect(page.getByLabel("Status", { exact: true })).toHaveValue("enabled");
+  expect(f.seen.filter(path => path === "POST /api/v1/session/login")).toHaveLength(1);
+  expect(f.seen.some(path => path.startsWith("POST /api/v1/workspace/"))).toBe(false);
+});
+
 test("logout is global and back navigation cannot restore private pages", async ({ page }) => {
   await setup(page); await page.goto("/clients"); await login(page);
   await page.getByRole("button", { name: "Sign out", exact: true }).click();
@@ -61,7 +90,8 @@ test("logout is global and back navigation cannot restore private pages", async 
 test("representative role cannot load owner pages or poll infrastructure", async ({ page }) => {
   const f = await setup(page, "representative"); await page.goto("/nodes"); await login(page);
   await expect(page).toHaveURL(/\/clients$/);
-  for (const label of ["Overview", "Nodes", "Inbounds", "Representatives"]) await expect(page.getByRole("navigation").getByRole("button", { name: label, exact: true })).toHaveCount(0);
+  for (const label of ["Overview", "Nodes", "Inbounds", "Dark Swap", "Representatives", "Dark Restore", "Backups"]) await expect(page.getByRole("navigation").getByRole("button", { name: label, exact: true, includeHidden: true })).toHaveCount(0);
+  for (const group of ["Infrastructure", "Backup & recovery"]) await expect(page.getByRole("navigation").getByRole("button", { name: group, exact: true, includeHidden: true })).toHaveCount(0);
   expect(f.seen.some(path => path.endsWith("/fleet") || path.endsWith("/representatives"))).toBe(false);
 });
 
@@ -112,6 +142,7 @@ for (const language of ["en", "fa"] as const) {
     expect(await page.evaluate(() => document.body.style.overflow)).toBe("");
 
     await opener.click();
+    await dialog.getByRole("button", { name: language === "fa" ? "مشتری و فروش" : "Customer & sales", exact: true }).click();
     await dialog.getByRole("button", { name: language === "fa" ? "گروه‌ها" : "Groups", exact: true }).click();
     await expect(page).toHaveURL(/\/groups$/);
     await expect(opener).toBeFocused();
@@ -142,6 +173,37 @@ test("an expired session closes the mobile drawer and a new sign-in starts with 
   await expect(page.getByRole("button", { name: "Open menu" })).toHaveAttribute("aria-expanded", "false");
   await expect(page.locator("#pro-sidebar")).toHaveAttribute("inert", "");
   await expect(page.locator(".backdrop")).toHaveCount(0);
+});
+
+test("navigation disclosures keep the active section visible and follow browser history", async ({ page }) => {
+  await setup(page);
+  await page.goto("/settings");
+  await login(page);
+  const nav = page.getByRole("navigation", { name: "Main navigation" });
+  const account = nav.getByRole("button", { name: "Account & settings", exact: true });
+  const customers = nav.getByRole("button", { name: "Customer & sales", exact: true });
+  await expect(account).toHaveAttribute("aria-expanded", "true");
+  await expect(account).toBeDisabled();
+  for (const label of ["Infrastructure", "Customer & sales", "Backup & recovery"]) {
+    await expect(nav.getByRole("button", { name: label, exact: true })).toHaveAttribute("aria-expanded", "false");
+  }
+  await expect(nav.getByRole("button", { name: "Groups", exact: true })).toHaveCount(0);
+  await customers.focus();
+  await page.keyboard.press("Enter");
+  await expect(customers).toHaveAttribute("aria-expanded", "true");
+  const groupID = await customers.getAttribute("aria-controls");
+  expect(groupID).toBeTruthy();
+  await expect(page.locator("#" + groupID)).toBeVisible();
+  await nav.getByRole("button", { name: "Groups", exact: true }).click();
+  await expect(page).toHaveURL(/\/groups$/);
+  await expect(customers).toHaveAttribute("aria-expanded", "true");
+  await expect(customers).toBeDisabled();
+  await expect(account).toHaveAttribute("aria-expanded", "false");
+  await expect(nav.getByRole("button", { name: "Groups", exact: true })).toHaveAttribute("aria-current", "page");
+  await page.goBack();
+  await expect(page).toHaveURL(/\/settings$/);
+  await expect(account).toHaveAttribute("aria-expanded", "true");
+  await expect(customers).toHaveAttribute("aria-expanded", "false");
 });
 
 

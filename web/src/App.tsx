@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import {
-  CheckCircle2, ChevronRight,
+  ArchiveRestore, ArrowLeftRight, Bot, CheckCircle2, ChevronDown, ChevronRight, DatabaseBackup,
   CircleHelp, CreditCard, Globe2, HardDrive, LayoutDashboard,
   Menu, Moon, Network, Server, Settings2, ShieldCheck, Users, FolderOpen, UserRound, LogOut,
   Sun, Waypoints, ShoppingBag, X,
@@ -11,6 +11,7 @@ import NodeManager from "./NodeManager";
 import NodeHistory from "./NodeHistory";
 import DashboardOverview from "./DashboardOverview";
 import BusinessWorkspace from "./BusinessWorkspace";
+import ModuleStatus from "./ModuleStatus";
 import { useSession } from "./session";
 import { allowed, useNavigation, type Page } from "./navigation";
 import LoginPage from "./LoginPage";
@@ -30,7 +31,12 @@ function stored<T extends string>(key: string, fallback: T, allowed: readonly T[
 const translations = {
   en: {
     overview: "Overview", nodes: "Nodes", inbounds: "Inbounds", settings: "Settings",
-    infrastructure: "INFRASTRUCTURE", management: "MANAGEMENT", workspaceGroup: "WORKSPACE",
+    infrastructure: "Infrastructure", management: "Customer & sales", recovery: "Backup & recovery", workspaceGroup: "Account & settings",
+    "dark-swap": "Dark Swap", "dark-restore": "Dark Restore", telegram: "Telegram", backups: "Backups",
+    "dark-swapTitle": "Dark Swap", "dark-swapLead": "Plan and review saved connection routes between Nodes.",
+    "dark-restoreTitle": "Dark Restore", "dark-restoreLead": "Current scope and remaining work for a separate restore workspace.",
+    telegramTitle: "Telegram & MiniApp", telegramLead: "Current scope of bot connection, customer service and representative sales.",
+    backupsTitle: "Backups", backupsLead: "Availability of product backup and recovery for the owner.",
     clients: "Clients", groups: "Groups", representatives: "Representatives", marketplace: "Marketplace", finance: "Finance", account: "My account",
     clientsTitle: "Clients", clientsLead: "Create and manage customers in one place.", groupsTitle: "Groups", groupsLead: "Organize customers without changing their financial history.",
     marketplaceTitle: "Plan marketplace", marketplaceLead: "Owner-defined offers, no live purchases until approved.", representativesTitle: "Representatives", representativesLead: "Accounts, permissions and representative credit.", financeTitle: "Finance", financeLead: "Account balances and immutable transaction history.", accountTitle: "My account", accountLead: "Your profile and password settings.",
@@ -66,7 +72,12 @@ const translations = {
   },
   fa: {
     overview: "داشبورد", nodes: "نودها", inbounds: "اینباندها", settings: "تنظیمات",
-    infrastructure: "زیرساخت", management: "مدیریت", workspaceGroup: "حساب و تنظیمات",
+    infrastructure: "زیرساخت", management: "مشتری و فروش", recovery: "پشتیبان و بازیابی", workspaceGroup: "حساب و تنظیمات",
+    "dark-swap": "دارک سواپ", "dark-restore": "دارک ریستور", telegram: "تلگرام", backups: "پشتیبان‌ها",
+    "dark-swapTitle": "دارک سواپ", "dark-swapLead": "طراحی و بررسی مسیرهای ذخیره‌شدهٔ اتصال میان نودها.",
+    "dark-restoreTitle": "دارک ریستور", "dark-restoreLead": "وضعیت فعلی و بخش‌های باقی‌ماندهٔ فضای مستقل ریستور.",
+    telegramTitle: "تلگرام و مینی‌اپ", telegramLead: "وضعیت اتصال ربات، خدمات مشتری و فروش نمایندگان.",
+    backupsTitle: "پشتیبان‌ها", backupsLead: "وضعیت پشتیبان‌گیری و بازیابی محصول با دسترسی مالک.",
     clients: "کلاینت‌ها", groups: "گروه‌ها", representatives: "نمایندگان", marketplace: "فروشگاه پلن‌ها", finance: "مالی", account: "حساب من",
     clientsTitle: "مدیریت کلاینت‌ها", clientsLead: "ساخت، تمدید و مدیریت مشتری در یک بخش مشخص.", groupsTitle: "مدیریت گروه‌ها", groupsLead: "دسته‌بندی مشتری‌ها بدون تغییر سوابق مالی.",
     marketplaceTitle: "فروشگاه پلن‌ها", marketplaceLead: "مدیریت محصولات نمایندگان؛ بدون فروش و کسر اعتبار تا تأیید عملیاتی.", representativesTitle: "مدیریت نمایندگان", representativesLead: "حساب‌ها، دسترسی و اعتبار نمایندگان.", financeTitle: "حسابداری", financeLead: "موجودی حساب و تاریخچهٔ ثبت‌شدهٔ تراکنش‌ها.", accountTitle: "حساب من", accountLead: "مشخصات حساب و تغییر رمز عبور.",
@@ -106,18 +117,24 @@ const nav: { id: Page; Icon: typeof LayoutDashboard }[] = [
   { id: "overview", Icon: LayoutDashboard },
   { id: "nodes", Icon: Server },
   { id: "inbounds", Icon: Waypoints },
+  { id: "dark-swap", Icon: ArrowLeftRight },
   { id: "clients", Icon: Users },
   { id: "groups", Icon: FolderOpen },
   { id: "representatives", Icon: UserRound },
   { id: "marketplace", Icon: ShoppingBag },
   { id: "finance", Icon: CreditCard },
+  { id: "telegram", Icon: Bot },
+  { id: "backups", Icon: DatabaseBackup },
+  { id: "dark-restore", Icon: ArchiveRestore },
   { id: "account", Icon: UserRound },
   { id: "settings", Icon: Settings2 },
 ];
 
-const navGroups: { id: "infrastructure" | "management" | "workspaceGroup"; pages: Page[] }[] = [
-  { id: "infrastructure", pages: ["overview", "nodes", "inbounds"] },
-  { id: "management", pages: ["clients", "groups", "representatives", "marketplace", "finance"] },
+type NavGroup = "infrastructure" | "management" | "recovery" | "workspaceGroup";
+const navGroups: { id: NavGroup; pages: Page[] }[] = [
+  { id: "infrastructure", pages: ["overview", "nodes", "inbounds", "dark-swap"] },
+  { id: "management", pages: ["clients", "groups", "representatives", "marketplace", "finance", "telegram"] },
+  { id: "recovery", pages: ["backups", "dark-restore"] },
   { id: "workspaceGroup", pages: ["account", "settings"] },
 ];
 
@@ -192,6 +209,8 @@ function NodeRow({ node, history, lang, selected, onSelect }: {
 export default function App() {
   const auth = useSession();
   const { page, setPage } = useNavigation(auth.session?.user.role);
+  const activeNavGroup = navGroups.find(group => group.pages.includes(page))!.id;
+  const [expandedNavGroups, setExpandedNavGroups] = useState<NavGroup[]>([]);
   const [logoutError, setLogoutError] = useState(false);
   const [language, setLanguage] = useState<Language>(() => stored("dark-pro-lang", "en", ["en", "fa"]));
   const [theme, setTheme] = useState<Theme>(() => stored("dark-pro-theme", "system", ["system", "light", "dark"]));
@@ -207,8 +226,12 @@ export default function App() {
     try { return sessionStorage.getItem("dark-pro-selected-node"); } catch { return null; }
   });
   const t = translations[language];
-  const infrastructureVisible = page === "overview" || page === "nodes" || page === "inbounds";
+  const infrastructureVisible = page === "overview" || page === "nodes" || page === "inbounds" || page === "dark-swap";
   const mobileOpen = Boolean(auth.session) && compactNavigation && mobileMenu;
+
+  useEffect(() => {
+    setExpandedNavGroups([]);
+  }, [page, auth.session?.user.id]);
 
   useEffect(() => {
     const query = window.matchMedia("(max-width: 760px)");
@@ -370,8 +393,16 @@ export default function App() {
           {navGroups.map(group => {
             const entries = nav.filter(item => group.pages.includes(item.id) && allowed(item.id, auth.session!.user.role));
             if (entries.length === 0) return null;
-            return <div className="nav-group" key={group.id}>
-              <p className="sidebar-caption">{t[group.id]}</p>
+            const current = group.id === activeNavGroup;
+            const expanded = current || expandedNavGroups.includes(group.id);
+            return <div className={"nav-group" + (current ? " nav-group-current" : "")} key={group.id}>
+              <button type="button" className="sidebar-caption nav-group-toggle"
+                aria-expanded={expanded} aria-controls={"pro-nav-" + group.id} disabled={current}
+                onClick={() => setExpandedNavGroups(open => open.includes(group.id)
+                  ? open.filter(id => id !== group.id) : [...open, group.id])}>
+                <span>{t[group.id]}</span><ChevronDown size={14} aria-hidden="true"/>
+              </button>
+              <div className="nav-group-items" id={"pro-nav-" + group.id} hidden={!expanded}>
               {entries.map(({ id, Icon }) => <button type="button" key={id}
                 className={"nav-item " + (page === id ? "selected" : "")}
                 aria-current={page === id ? "page" : undefined}
@@ -379,6 +410,7 @@ export default function App() {
                 <Icon size={18} strokeWidth={1.8}/><span>{t[id]}</span>
                 {page === id && <ChevronRight className="nav-chevron" size={14}/>}
               </button>)}
+              </div>
             </div>;
           })}
         </nav>
@@ -391,7 +423,7 @@ export default function App() {
         <header className="topbar">
           <div className="topbar-left">
             <button ref={menuButtonRef} className="mobile-menu icon-button" aria-label={language === "fa" ? "بازکردن منو" : "Open menu"} aria-controls="pro-sidebar" aria-expanded={mobileOpen} onClick={() => setMobileMenu(true)}><Menu size={21} /></button>
-            <span className="breadcrumb">{t[navGroups.find(group => group.pages.includes(page))!.id]}</span><ChevronRight size={15} className="muted-icon" />
+            <span className="breadcrumb">{t[activeNavGroup]}</span><ChevronRight size={15} className="muted-icon" />
             <strong>{t[page]}</strong>
           </div>
           <div className="topbar-right">
@@ -443,6 +475,9 @@ export default function App() {
           )}
 
           {page === "inbounds" && <InboundPlanner nodes={fleet?.nodes ?? []} language={language} />}
+          {page === "dark-swap" && <InboundPlanner nodes={fleet?.nodes ?? []} language={language} workspace="dark-swap" />}
+          {(page === "dark-restore" || page === "telegram" || page === "backups") &&
+            <ModuleStatus page={page} language={language} onNavigate={setPage}/>}
           {(["clients", "groups", "representatives", "marketplace", "finance", "account"] as Page[]).includes(page) && <BusinessWorkspace key={auth.session.user.id + ":" + page} language={language} section={page as "clients" | "groups" | "representatives" | "marketplace" | "finance" | "account"} />}
 
           {page === "settings" && (

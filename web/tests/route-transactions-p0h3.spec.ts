@@ -57,12 +57,21 @@ async function fixture(page: Page, role = "owner") {
  });
  return { state, view, writes, reads };
 }
+async function openDiagnostics(page: Page) {
+ const toggle = page.getByRole("button", { name: "Diagnostics", exact: true });
+ await expect(toggle).toBeVisible();
+ if (await toggle.getAttribute("aria-expanded") !== "true") await toggle.click();
+}
+async function openPage(page: Page) {
+ await page.goto("/inbounds");
+ await openDiagnostics(page);
+}
 const panel = (page: Page) => page.getByRole("region", { name: "LAB route transactions", exact: true });
 const refresh = (page: Page) => panel(page).getByRole("button", { name: "Refresh transactions", exact: true }).click();
 async function confirm(page: Page, name: string) { page.once("dialog", d => d.accept()); await panel(page).getByRole("button", { name, exact: true }).click(); }
 
 test("P0-H3 Stage reviews all Node drafts; explicit Apply and Renew keep ACK separate from live observation", async ({ page }) => {
- const f = await fixture(page); await page.goto("/inbounds"); const p = panel(page);
+ const f = await fixture(page); await openPage(page); const p = panel(page);
  await expect(p.getByRole("button", { name: "Review and Stage", exact: true })).toBeEnabled();
  await expect(p.getByText("Direct LAB · #301")).toBeVisible(); await expect(p.getByText("Tunnel LAB · #302")).toBeVisible(); expect(f.writes).toHaveLength(0);
  page.once("dialog", d => d.dismiss()); await p.getByRole("button", { name: "Review and Stage", exact: true }).click(); expect(f.writes).toHaveLength(0);
@@ -93,7 +102,7 @@ test("P0-H3 Stage reviews all Node drafts; explicit Apply and Renew keep ACK sep
 test("P0-H3 historical Apply ACK after restart cannot imply liveness; Rollback names the saved Stage", async ({ page }) => {
  const f = await fixture(page); f.view.commands = [ack(command(2, "apply"), "applied", ready()), ack(command(1, "stage"), "staged")];
  f.view.status = { instance: "3".repeat(32), serial: 2, current_stage_id: id(1), observed: { ...stopped(), highwater: 1, saved_sequence: 1, saved_sha: digest } };
- f.view.controls.rollback = { stage_id: id(1), ports: [26123] }; await page.goto("/inbounds"); const p = panel(page);
+ f.view.controls.rollback = { stage_id: id(1), ports: [26123] }; await openPage(page); const p = panel(page);
  await expect(p.getByText("Agent reports process not ready", { exact: true })).toBeVisible();
  await expect(p.getByText("Signed receipt verified and stored by HUB", { exact: true })).toHaveCount(2);
  await expect(p.getByRole("button", { name: "Renew once (30s max)", exact: true })).toBeDisabled();
@@ -101,11 +110,25 @@ test("P0-H3 historical Apply ACK after restart cannot imply liveness; Rollback n
  expect(f.writes[0].body).toMatchObject({ action: "rollback", stage_id: id(1), runtime_instance: "3".repeat(32), drafts: [], expected: { process_ready: false, saved_sha: digest, highwater: 1 } });
 });
 
-test("P0-H3 ambiguous request survives reload and retries identical bytes; no automatic POST", async ({ page }) => {
- const f = await fixture(page); f.state.post = "before_commit"; await page.goto("/inbounds");
+for (const storageAvailable of [true, false]) {
+test(storageAvailable ? "P0-H3 ambiguous request survives reload and retries identical bytes; no automatic POST" : "P0-H3 ambiguous request survives hiding Diagnostics when browser storage is unavailable", async ({ page }) => {
+ const f = await fixture(page); f.state.post = "before_commit"; await openPage(page);
+ if (!storageAvailable) await page.evaluate(() => {
+  const setItem = Storage.prototype.setItem;
+  Storage.prototype.setItem = function (key: string, value: string) {
+   if (this === sessionStorage && key.startsWith("dark-pro-route-attempt:")) throw new DOMException("Fixture storage unavailable", "QuotaExceededError");
+   return setItem.call(this, key, value);
+  };
+ });
  await confirm(page, "Review and Stage"); await expect(panel(page).getByRole("button", { name: "Retry same request", exact: true })).toBeEnabled();
  expect(f.writes).toHaveLength(1); const first = f.writes[0].raw;
- await page.reload(); await expect(panel(page).getByRole("button", { name: "Retry same request", exact: true })).toBeEnabled();
+ if (!storageAvailable) expect(await page.evaluate(() => Object.keys(sessionStorage).filter(k => k.startsWith("dark-pro-route-attempt:")).length)).toBe(0);
+ await page.getByRole("button", { name: "Diagnostics", exact: true }).click();
+ await expect(panel(page)).toBeHidden();
+ await openDiagnostics(page);
+ await expect(panel(page).getByRole("button", { name: "Retry same request", exact: true })).toBeEnabled();
+ expect(f.writes).toHaveLength(1);
+ if (storageAvailable) { await page.reload(); await openDiagnostics(page); await expect(panel(page).getByRole("button", { name: "Retry same request", exact: true })).toBeEnabled(); }
  expect(f.writes).toHaveLength(1); await expect(panel(page).getByRole("button", { name: "Review and Stage", exact: true })).toBeDisabled();
  f.state.post = "normal"; await confirm(page, "Retry same request");
  await expect(panel(page).getByText("Queued · not yet delivered", { exact: true })).toBeVisible();
@@ -113,9 +136,10 @@ test("P0-H3 ambiguous request survives reload and retries identical bytes; no au
  await expect(panel(page).getByRole("button", { name: "Retry same request", exact: true })).toHaveCount(0);
  expect(await page.evaluate(() => Object.keys(sessionStorage).filter(k => k.startsWith("dark-pro-route-attempt:")).length)).toBe(0);
 });
+}
 
 test("P0-H3 lost reply after HUB commit reconciles by ID; conflicts require a new reviewed action", async ({ page }) => {
- const f = await fixture(page); f.state.post = "after_commit"; await page.goto("/inbounds"); await confirm(page, "Review and Stage");
+ const f = await fixture(page); f.state.post = "after_commit"; await openPage(page); await confirm(page, "Review and Stage");
  await expect(panel(page).getByText("Queued · not yet delivered", { exact: true })).toBeVisible();
  await expect(panel(page).getByRole("button", { name: "Retry same request", exact: true })).toHaveCount(0); expect(f.writes).toHaveLength(1);
  f.view.commands[0].state = "abandoned_unknown"; f.state.post = "conflict";
@@ -128,7 +152,7 @@ test("P0-H3 lost reply after HUB commit reconciles by ID; conflicts require a ne
 test("P0-H3 delivered command and abandonment never claim a stopped process; late ACK stays historical", async ({ page }) => {
  const f = await fixture(page); const pending = command(2, "apply"); pending.state = "delivered";
  f.view.commands = [pending]; f.view.status.observed = ready(); f.view.status.serial = 1;
- await page.goto("/inbounds"); const p = panel(page);
+ await openPage(page); const p = panel(page);
  await expect(p.getByText("Observation stale · current process state unconfirmed", { exact: true })).toBeVisible();
  page.once("dialog", d => d.dismiss()); await p.getByRole("button", { name: "Abandon pending command", exact: true }).click(); expect(f.writes).toHaveLength(0);
  await confirm(page, "Abandon pending command"); await expect(p.getByText("Command abandoned with execution unknown. This does not stop Xray; a fresh Agent observation is still required.")).toBeVisible();
@@ -142,7 +166,7 @@ test("P0-H3 delivered command and abandonment never claim a stopped process; lat
 test("P0-H3 lease expiry uses server time despite browser clock skew and never auto-renews", async ({ page }) => {
  const f = await fixture(page); f.view.status.observed = ready(1, 2500); f.view.status.current_stage_id = id(1); f.view.controls.renew = { stage_id: id(1), ports: [26123] };
  await page.addInitScript(() => { const real = Date.now; Date.now = () => real() - 86400000; });
- await page.goto("/inbounds"); const p = panel(page);
+ await openPage(page); const p = panel(page);
  await expect(p.getByText("Process reported ready · lease current", { exact: true })).toBeVisible();
  await expect(p.getByText("Lease expired · current process state unconfirmed", { exact: true })).toBeVisible();
  await expect(p.getByRole("button", { name: "Renew once (30s max)", exact: true })).toBeDisabled(); expect(f.writes).toHaveLength(0);
@@ -151,7 +175,7 @@ test("P0-H3 lease expiry uses server time despite browser clock skew and never a
 });
 
 test("P0-H3 scope mismatch, missing drafts and disabled capability block commands", async ({ page }) => {
- const f = await fixture(page); f.state.malformed = true; await page.goto("/inbounds"); const p = panel(page);
+ const f = await fixture(page); f.state.malformed = true; await openPage(page); const p = panel(page);
  await expect(p.getByRole("alert")).toBeVisible(); await expect(p.getByRole("button", { name: "Review and Stage", exact: true })).toHaveCount(0);
  f.state.malformed = false; f.view.drafts_valid = false; f.view.review[1].draft_revision = 0; f.view.controls.stage = false; await refresh(page);
  await expect(p.getByText("Save a valid Direct/Tunnel draft for every enabled Inbound before Stage.")).toBeVisible(); await expect(p.getByRole("button", { name: "Review and Stage", exact: true })).toBeDisabled();
@@ -161,7 +185,7 @@ test("P0-H3 scope mismatch, missing drafts and disabled capability block command
 
 test("P0-H3 Persian 320px history and controls stay readable without overflow", async ({ page }) => {
  const f = await fixture(page); f.view.commands = [{ ...command(1, "stage"), state: "abandoned_unknown" }];
- await page.setViewportSize({ width: 320, height: 780 }); await page.goto("/inbounds");
+ await page.setViewportSize({ width: 320, height: 780 }); await openPage(page);
  await page.getByRole("button", { name: "Switch language" }).click(); const p = panel(page);
  await expect(p.getByRole("heading", { name: "تراکنش‌های مسیر LAB" })).toBeVisible();
  await p.getByText("جزئیات حسابرسی", { exact: true }).click();

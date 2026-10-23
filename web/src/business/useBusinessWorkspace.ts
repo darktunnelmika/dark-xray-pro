@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { api, mutation, ApiError, useSession, type Language } from "../session";
 import { useAccountPageOffset } from "./useAccountPageOffset";
+import { businessGranted } from "./permissionsV9";
 import { words, uid, bytesFromGB, type Section, type Workspace, type Representative, type Client, type ClientOperation, type ClientGroup, type LedgerEvent } from "./shared";
 type ClientPageResponse = {clients:Client[];total?:number;has_more?:boolean;
   limit?:number;offset?:number;q?:string;state?:string;plan?:string;
@@ -137,7 +138,9 @@ export function useBusinessWorkspace(language: Language, section: Section) {
           ? api<{ representatives: Representative[] }>("/api/v1/workspace/representatives" + p + repOffset, { signal: controller.signal })
           : Promise.resolve(null),
         section === "groups" ? api<{ groups: ClientGroup[] }>("/api/v1/workspace/groups" + p + groupOffset, { signal: controller.signal }) : Promise.resolve({ groups: [] as ClientGroup[] }),
-        section === "clients" ? api<{ operations: ClientOperation[] }>("/api/v1/workspace/client-operations" + p + clientOpsOffset, { signal: controller.signal }) : Promise.resolve({ operations: [] as ClientOperation[] }),
+        section === "clients" && businessGranted(session.user, "view_finance")
+          ? api<{ operations: ClientOperation[] }>("/api/v1/workspace/client-operations" + p + clientOpsOffset, { signal: controller.signal })
+          : Promise.resolve({ operations: [] as ClientOperation[] }),
       ]);
       if (controller.signal.aborted) return;
       if (!Array.isArray(ownClients.clients) || !Array.isArray(ownEvents.events) ||

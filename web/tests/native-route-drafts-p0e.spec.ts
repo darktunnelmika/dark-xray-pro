@@ -72,17 +72,37 @@ test("P0-E owner previews and saves bounded Dark Swap draft without runtime Appl
  await page.goto("/");
  await page.getByRole("button",{name:"Open menu"}).click();
  await page.getByRole("button",{name:"Inbounds",exact:true}).click();
- await page.getByRole("button",{name:"Native Test",exact:false}).click();
+ await page.getByRole("button",{name:"Native Test",exact:true}).click();
+ await page.getByRole("tab",{name:"Routes",exact:true}).click();
  const editor=page.getByRole("region",{name:"Protected Inbound routing draft"});
  await editor.getByLabel("Route destination Node").selectOption("de");
  await expect(editor.getByText("No saved route draft for this Node.")).toBeVisible();
- await editor.getByLabel("Route Direct hosts").fill("de.example.org");
+ const directHosts=editor.getByLabel("Route Direct hosts");
+ const tunnelHosts=editor.getByLabel("Route Tunnel hosts");
+ await directHosts.fill("de.example.org");
+ await directHosts.pressSequentially(", ");
+ await expect(directHosts).toHaveValue("de.example.org, ");
+ await directHosts.pressSequentially("de-alt.example.org");
+ await editor.getByLabel("Route Tunnel port").fill("23000");
+ await tunnelHosts.fill(" tunnel-a.example.org");
+ await tunnelHosts.pressSequentially(", ");
+ await expect(tunnelHosts).toHaveValue(" tunnel-a.example.org, ");
+ await tunnelHosts.pressSequentially("tunnel-b.example.org, ");
  await editor.getByLabel("Route Dark Swap").check();
  await editor.getByLabel("Route upstream Node").selectOption("nl");
  await editor.getByLabel("Route Swap host").fill("nl-tunnel.example.org");
  await editor.getByLabel("Route Swap tunnel port").fill("26000");
  await editor.getByLabel("Route Swap destination port").fill("26001");
  await editor.getByLabel("Route audit reason").fill("QA: owner-reviewed offline draft");
+ await expect(editor.getByRole("button",{name:"Save protected draft"})).toBeDisabled();
+ await editor.getByRole("button",{name:"Check ports and revision"}).click();
+ await expect(editor.getByText("Preview valid; runtime Apply is still forbidden.")).toBeVisible();
+ expect(writes[0].body).toMatchObject({
+  direct_hosts:["de.example.org","de-alt.example.org"],
+  tunnel_hosts:["tunnel-a.example.org","tunnel-b.example.org"],
+ });
+ await directHosts.press("End");
+ await directHosts.pressSequentially(", de-third.example.org");
  await expect(editor.getByRole("button",{name:"Save protected draft"})).toBeDisabled();
  await editor.getByRole("button",{name:"Check ports and revision"}).click();
  await expect(editor.getByText("Preview valid; runtime Apply is still forbidden.")).toBeVisible();
@@ -97,12 +117,24 @@ test("P0-E owner previews and saves bounded Dark Swap draft without runtime Appl
  await readiness.getByText("Blocking conditions (5)").click();
  await expect(readiness.getByText("Signed route-stage ACK missing")).toBeVisible();
 
- expect(writes).toHaveLength(2);
+ expect(writes).toHaveLength(3);
  expect(writes[0].body).toMatchObject({inbound_id:301,node_id:"de",swap_enabled:true,
   swap_upstream_node_id:"nl",swap_tunnel_host:"nl-tunnel.example.org",
   swap_tunnel_port:26000,swap_node_port:26001});
- expect(writes[1].csrf).toBe(csrf);
- expect(writes[1].path).toBe("/api/v1/workspace/native-inbounds/301/route-drafts");
+ expect(writes[2].body).toMatchObject({
+  direct_hosts:["de.example.org","de-alt.example.org","de-third.example.org"],
+  tunnel_hosts:["tunnel-a.example.org","tunnel-b.example.org"],
+ });
+ expect(writes[0].body.event_id).not.toBe(writes[1].body.event_id);
+ expect(writes[1].body.event_id).toBe(writes[2].body.event_id);
+ expect(writes[2].csrf).toBe(csrf);
+ expect(writes[2].path).toBe("/api/v1/workspace/native-inbounds/301/route-drafts");
+ await editor.getByLabel("Route destination Node").selectOption("nl");
+ await expect(directHosts).toHaveValue("");
+ await expect(tunnelHosts).toHaveValue("");
+ await editor.getByLabel("Route destination Node").selectOption("de");
+ await expect(directHosts).toHaveValue("de.example.org, de-alt.example.org, de-third.example.org");
+ await expect(tunnelHosts).toHaveValue("tunnel-a.example.org, tunnel-b.example.org");
  expect(writes.some(x=>/native-nodes|client|payment|credit/.test(x.path))).toBe(false);
  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+2)).toBe(true);
 });
