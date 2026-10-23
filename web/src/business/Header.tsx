@@ -13,8 +13,8 @@ export default function Header({ model }: { model: BusinessModel }) {
         </div>
       </header>
       {me && <div className="business-metrics">
-        <div><span>{t.volume}</span><strong>{gb(me.balance.volume_credit_bytes)}</strong></div>
-        <div><span>{t.unlimited}</span><strong>{me.balance.unlimited_credit_units.toLocaleString()}</strong></div>
+        <div><span>{t.volume}</span><strong><bdi dir="ltr">{gb(me.balance.volume_credit_bytes)}</bdi></strong></div>
+        <div><span>{t.unlimited}</span><strong><bdi dir="ltr">{me.balance.unlimited_credit_units.toLocaleString()}</bdi></strong></div>
         <div><span>{t.role}</span><strong>{session.user.role}</strong></div>
       </div>}
   </>;

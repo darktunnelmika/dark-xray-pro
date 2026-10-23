@@ -78,6 +78,7 @@ test("320px Persian RTL dark mode keeps grouped menu usable, account controls vi
   await page.goto("/dashboard");
   await page.getByRole("button", { name: "Switch language" }).click();
   await page.getByRole("button", { name: "Toggle dark and light mode" }).click();
+  await expect(page.getByRole("button", { name: "حساب من: qa-owner" })).toBeVisible();
   await page.getByRole("button", { name: "بازکردن منو" }).click();
   const nav = page.getByRole("navigation", { name: "Main navigation" });
   await expect(nav.getByText("زیرساخت")).toBeVisible();
@@ -85,7 +86,7 @@ test("320px Persian RTL dark mode keeps grouped menu usable, account controls vi
   await expect(nav.getByText("حساب و تنظیمات")).toBeVisible();
   await expect(page.locator("html")).toHaveAttribute("dir", "rtl");
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
-  await expect(page.getByRole("button", { name: "حساب من: qa-owner" })).toBeVisible();
+  await expect(page.locator(".main-area")).toHaveAttribute("inert", "");
   expect(await page.evaluate(() => document.body.style.overflow)).toBe("hidden");
   await page.keyboard.press("Escape");
   await expect(page.locator(".sidebar")).not.toHaveClass(/sidebar-open/);

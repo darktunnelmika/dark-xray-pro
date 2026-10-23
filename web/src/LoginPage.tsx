@@ -1,7 +1,6 @@
 import { useState, type FormEvent } from "react";
 import { Globe2, LockKeyhole, Moon, Network, Sun } from "lucide-react";
 import { useSession, type Language } from "./session";
-import "./Shell.css";
 
 export default function LoginPage({ language, setLanguage, dark, toggleTheme }: {
   language: Language; setLanguage: (language: Language) => void; dark: boolean; toggleTheme: () => void;

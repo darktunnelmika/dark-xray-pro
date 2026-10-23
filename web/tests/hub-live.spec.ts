@@ -93,7 +93,7 @@ test("320px RTL premium HUB console retains charts and never overflows viewport"
   await page.getByRole("button",{name:"Switch language"}).click();
   await page.getByRole("button",{name:"Toggle dark and light mode"}).click();
   const hub=page.getByRole("region",{name:"HUB live monitor"});
-  await expect(hub.getByText("قلب زیرساخت، زیر نظر تو.")).toBeVisible();
+  await expect(hub.getByText("مانیتور هاب")).toBeVisible();
   await expect(hub.getByText("رم فرایند HUB")).toBeVisible();
   await hub.getByRole("button",{name:"RX Mbps"}).click();
   await expect(hub.getByRole("img",{name:"HUB physical interface measured history"})).toBeVisible();

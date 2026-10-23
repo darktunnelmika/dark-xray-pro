@@ -130,7 +130,7 @@ test("320px Persian RTL Node deck is immediately below HUB with no horizontal ov
   await page.goto("/dashboard");
   await page.getByRole("button", { name: "Switch language" }).click();
   const deck = page.getByRole("region", { name: "Node fleet monitoring" });
-  await expect(deck.getByRole("heading", { name: "تمام نودها؛ در یک قاب." })).toBeVisible();
+  await expect(deck.getByRole("heading", { name: "ناوگان نودها" })).toBeVisible();
   await expect(deck.getByText("USA PRO QA")).toBeVisible();
   await expect(deck.getByText("دریافت فیزیکی")).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 2)).toBe(true);

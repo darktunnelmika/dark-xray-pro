@@ -102,7 +102,7 @@ export default function DashboardOverview({ fleet, history, language, stale, onI
       <article className="dash-insight">
         <div className="dash-insight-heading"><div><h2>{t.quality}</h2><p>{t.qualityLead}</p></div><ShieldCheck size={20}/></div>
         <div className="dash-coverage">
-          <strong>{known ? fleet.online_nodes + " / " + fleet.total_nodes : "—"}</strong><span>{t.coverage}</span>
+          <strong><bdi dir="ltr">{known ? fleet.online_nodes + " / " + fleet.total_nodes : "—"}</bdi></strong><span>{t.coverage}</span>
         </div>
         <div className="dash-coverage-track" role="progressbar" aria-label={t.coverage} aria-valuenow={known ? percentage : undefined} aria-valuemin={0} aria-valuemax={100}>
           <span style={{ width: percentage + "%" }}/>

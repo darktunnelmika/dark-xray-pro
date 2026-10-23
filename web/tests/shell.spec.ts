@@ -80,6 +80,70 @@ test("root login fits 320px Persian and keeps appearance choice", async ({ page 
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 2)).toBe(true);
 });
 
+for (const language of ["en", "fa"] as const) {
+  test(`mobile navigation keeps keyboard focus inside the open drawer and restores it (${language})`, async ({ page }) => {
+    await setup(page);
+    await page.setViewportSize({ width: 320, height: 780 });
+    await page.goto("/settings");
+    await login(page);
+    if (language === "fa") await page.getByRole("button", { name: "Switch language" }).click();
+    const opener = page.getByRole("button", { name: language === "fa" ? "بازکردن منو" : "Open menu" });
+    const sidebar = page.locator("#pro-sidebar");
+    await expect(sidebar).toHaveAttribute("inert", "");
+    await expect(page.getByRole("navigation")).toHaveCount(0);
+    await opener.focus();
+    await page.keyboard.press("Tab");
+    expect(await sidebar.evaluate(element => element.contains(document.activeElement))).toBe(false);
+
+    await opener.click();
+    const dialog = page.getByRole("dialog", { name: language === "fa" ? "منوی صفحه‌ها" : "Navigation" });
+    const close = dialog.getByRole("button", { name: language === "fa" ? "بستن منو" : "Close menu" });
+    const last = dialog.getByRole("button", { name: language === "fa" ? "تنظیمات" : "Settings", exact: true });
+    await expect(dialog).toHaveAttribute("aria-modal", "true");
+    await expect(close).toBeFocused();
+    await expect(page.locator(".main-area")).toHaveAttribute("inert", "");
+    await page.keyboard.press("Shift+Tab");
+    await expect(last).toBeFocused();
+    await page.keyboard.press("Tab");
+    await expect(close).toBeFocused();
+    await page.keyboard.press("Escape");
+    await expect(opener).toBeFocused();
+    await expect(sidebar).toHaveAttribute("inert", "");
+    expect(await page.evaluate(() => document.body.style.overflow)).toBe("");
+
+    await opener.click();
+    await dialog.getByRole("button", { name: language === "fa" ? "گروه‌ها" : "Groups", exact: true }).click();
+    await expect(page).toHaveURL(/\/groups$/);
+    await expect(opener).toBeFocused();
+    await opener.click();
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    await expect(page.getByRole("navigation")).toBeVisible();
+    await expect(sidebar).not.toHaveAttribute("inert", "");
+    await expect(page.locator(".backdrop")).toHaveCount(0);
+    expect(await page.evaluate(() => document.body.style.overflow)).toBe("");
+  });
+}
+
+test("an expired session closes the mobile drawer and a new sign-in starts with it closed", async ({ page }) => {
+  const fixture = await setup(page);
+  await page.setViewportSize({ width: 320, height: 780 });
+  await page.goto("/settings");
+  await login(page);
+  await page.getByRole("button", { name: "Open menu" }).click();
+  await expect(page.getByRole("dialog", { name: "Navigation" })).toBeVisible();
+  fixture.expire();
+  await page.evaluate(() => window.dispatchEvent(new StorageEvent("storage", {
+    key: "dark-pro-session-change", newValue: "synthetic-session-expiration",
+  })));
+  await expect(page.getByRole("heading", { name: "Sign in", exact: true })).toBeVisible();
+  expect(await page.evaluate(() => document.body.style.overflow)).toBe("");
+  await login(page);
+  await expect(page.getByRole("button", { name: "Open menu" })).toHaveAttribute("aria-expanded", "false");
+  await expect(page.locator("#pro-sidebar")).toHaveAttribute("inert", "");
+  await expect(page.locator(".backdrop")).toHaveCount(0);
+});
+
 
 test("client pagination survives menu changes and page reload without storing client data", async ({ page }) => {
   await setup(page);

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   CheckCircle2, ChevronRight,
   CircleHelp, CreditCard, Globe2, HardDrive, LayoutDashboard,
@@ -14,7 +14,6 @@ import BusinessWorkspace from "./BusinessWorkspace";
 import { useSession } from "./session";
 import { allowed, useNavigation, type Page } from "./navigation";
 import LoginPage from "./LoginPage";
-import "./Shell.css";
 
 type Theme = "light" | "dark" | "system";
 type Language = "en" | "fa";
@@ -35,9 +34,9 @@ const translations = {
     clients: "Clients", groups: "Groups", representatives: "Representatives", marketplace: "Marketplace", finance: "Finance", account: "My account",
     clientsTitle: "Clients", clientsLead: "Create and manage customers in one place.", groupsTitle: "Groups", groupsLead: "Organize customers without changing their financial history.",
     marketplaceTitle: "Plan marketplace", marketplaceLead: "Owner-defined offers, no live purchases until approved.", representativesTitle: "Representatives", representativesLead: "Accounts, permissions and representative credit.", financeTitle: "Finance", financeLead: "Account balances and immutable transaction history.", accountTitle: "My account", accountLead: "Your profile and password settings.",
-    overviewTitle: "Infrastructure, at a glance.", overviewLead: "A clearer view of every server. No heavy accounting queries on page load.",
+    overviewTitle: "Infrastructure, at a glance.", overviewLead: "Monitor your HUB, connected Nodes and network activity in one view.",
     nodesTitle: "Node fleet", nodesLead: "Live agent heartbeat, CPU, memory and physical network rates.",
-    inboundsTitle: "Inbounds & routes", inboundsLead: "A simpler deployment model is coming next.",
+    inboundsTitle: "Inbounds & routes", inboundsLead: "Manage Inbounds, their Nodes and connection routes.",
     businessTitle: "Business & accounts", businessLead: "Private owner and representative credit, clients and immutable financial history.",
     settingsTitle: "Appearance & lab", settingsLead: "A calm interface, built for long sessions.",
     liveFleet: "Live fleet", emptyTitle: "No Nodes connected yet",
@@ -63,6 +62,7 @@ const translations = {
     lastHeartbeat: "Last heartbeat", metricFreshness: "Metrics", metricLive: "Current", metricDelayed: "Delayed / unavailable",
     nodeAddress: "Interface", activationBoundary: "Read-only LAB view. Pairing and live Xray Apply/Rollback are not exposed through this browser.",
     pairingBoundary: "New LAB Node pairing is owner-only on localhost. No legacy Nodes or customer data are connected.",
+    skipToContent: "Skip to content", navigationTitle: "Navigation",
   },
   fa: {
     overview: "داشبورد", nodes: "نودها", inbounds: "اینباندها", settings: "تنظیمات",
@@ -70,9 +70,9 @@ const translations = {
     clients: "کلاینت‌ها", groups: "گروه‌ها", representatives: "نمایندگان", marketplace: "فروشگاه پلن‌ها", finance: "مالی", account: "حساب من",
     clientsTitle: "مدیریت کلاینت‌ها", clientsLead: "ساخت، تمدید و مدیریت مشتری در یک بخش مشخص.", groupsTitle: "مدیریت گروه‌ها", groupsLead: "دسته‌بندی مشتری‌ها بدون تغییر سوابق مالی.",
     marketplaceTitle: "فروشگاه پلن‌ها", marketplaceLead: "مدیریت محصولات نمایندگان؛ بدون فروش و کسر اعتبار تا تأیید عملیاتی.", representativesTitle: "مدیریت نمایندگان", representativesLead: "حساب‌ها، دسترسی و اعتبار نمایندگان.", financeTitle: "حسابداری", financeLead: "موجودی حساب و تاریخچهٔ ثبت‌شدهٔ تراکنش‌ها.", accountTitle: "حساب من", accountLead: "مشخصات حساب و تغییر رمز عبور.",
-    overviewTitle: "نمای کامل زیرساخت، در یک نگاه", overviewLead: "وضعیت واقعی سرورها، بدون اجرای گزارش‌های سنگین هنگام ورود.",
+    overviewTitle: "نمای کامل زیرساخت، در یک نگاه", overviewLead: "وضعیت هاب، نودها و ترافیک شبکه را یک‌جا دنبال کن.",
     nodesTitle: "مدیریت نودها", nodesLead: "وضعیت زنده Agent، پردازنده، حافظه و سرعت شبکه.",
-    inboundsTitle: "اینباندها و مسیرها", inboundsLead: "مدیریت ساده‌تر مقصدها در مرحله بعد ساخته می‌شود.",
+    inboundsTitle: "اینباندها و مسیرها", inboundsLead: "اینباندها، نودهای مقصد و مسیرهای اتصال را مدیریت کن.",
     businessTitle: "نمایندگان، کلاینت‌ها و اعتبار", businessLead: "ورود امن و مدیریت اعتبار و سوابق مالی فقط با اطلاعات واقعی.",
     settingsTitle: "ظاهر و محیط آزمایش", settingsLead: "طراحی خلوت برای استفاده طولانی‌مدت.",
     liveFleet: "وضعیت ناوگان", emptyTitle: "هنوز نودی متصل نشده",
@@ -98,6 +98,7 @@ const translations = {
     lastHeartbeat: "آخرین ضربان", metricFreshness: "وضعیت آمار", metricLive: "به‌روز", metricDelayed: "با تأخیر / ناموجود",
     nodeAddress: "اینترفیس", activationBoundary: "نمای آزمایشی فقط‌خواندنی است. اتصال نود و Apply/Rollback زنده Xray از این صفحه فعال نیست.",
     pairingBoundary: "اتصال نود جدید فقط با دسترسی مالک روی localhost انجام می‌شود. نودها و کاربران قدیمی متصل نیستند.",
+    skipToContent: "رفتن به محتوای صفحه", navigationTitle: "منوی صفحه‌ها",
   },
 } as const;
 
@@ -196,6 +197,9 @@ export default function App() {
   const [theme, setTheme] = useState<Theme>(() => stored("dark-pro-theme", "system", ["system", "light", "dark"]));
   const [systemDark, setSystemDark] = useState(() => window.matchMedia("(prefers-color-scheme: dark)").matches);
   const [mobileMenu, setMobileMenu] = useState(false);
+  const [compactNavigation, setCompactNavigation] = useState(() => window.matchMedia("(max-width: 760px)").matches);
+  const sidebarRef = useRef<HTMLElement>(null);
+  const menuButtonRef = useRef<HTMLButtonElement>(null);
   const [fleet, setFleet] = useState<FleetSnapshot | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const [history, setHistory] = useState<Record<string, number[]>>({});
@@ -204,24 +208,52 @@ export default function App() {
   });
   const t = translations[language];
   const infrastructureVisible = page === "overview" || page === "nodes" || page === "inbounds";
+  const mobileOpen = Boolean(auth.session) && compactNavigation && mobileMenu;
 
   useEffect(() => {
-    if (!mobileMenu) return;
+    const query = window.matchMedia("(max-width: 760px)");
+    const onResize = () => {
+      setCompactNavigation(query.matches);
+      if (!query.matches) setMobileMenu(false);
+    };
+    query.addEventListener("change", onResize);
+    return () => query.removeEventListener("change", onResize);
+  }, []);
+
+  useEffect(() => {
+    if (!mobileOpen) return;
+    const sidebar = sidebarRef.current;
+    if (!sidebar) return;
     const originalOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
-    const onEscape = (event: KeyboardEvent) => { if (event.key === "Escape") setMobileMenu(false); };
-    const wider = window.matchMedia("(min-width: 761px)");
-    const onResize = () => { if (wider.matches) setMobileMenu(false); };
-    document.addEventListener("keydown", onEscape);
-    wider.addEventListener("change", onResize);
+    const focusable = () => Array.from(sidebar.querySelectorAll<HTMLElement>(
+      'button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+    )).filter(element => element.getClientRects().length > 0);
+    focusable()[0]?.focus({ preventScroll: true });
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") { event.preventDefault(); setMobileMenu(false); return; }
+      if (event.key !== "Tab") return;
+      const items = focusable();
+      const first = items[0], last = items.at(-1);
+      if (!first || !last) { event.preventDefault(); return; }
+      if (event.shiftKey && (document.activeElement === first || !sidebar.contains(document.activeElement))) {
+        event.preventDefault(); last.focus();
+      } else if (!event.shiftKey && (document.activeElement === last || !sidebar.contains(document.activeElement))) {
+        event.preventDefault(); first.focus();
+      }
+    };
+    document.addEventListener("keydown", onKeyDown);
     return () => {
       document.body.style.overflow = originalOverflow;
-      document.removeEventListener("keydown", onEscape);
-      wider.removeEventListener("change", onResize);
+      document.removeEventListener("keydown", onKeyDown);
+      const opener = menuButtonRef.current;
+      if (opener?.isConnected && opener.getClientRects().length > 0) opener.focus({ preventScroll: true });
+      else sidebarRef.current?.querySelector<HTMLElement>('[aria-current="page"]')?.focus({ preventScroll: true });
     };
-  }, [mobileMenu]);
+  }, [mobileOpen]);
 
   useEffect(() => {
+    setMobileMenu(false);
     if (auth.session?.user.role === "owner") return;
     setFleet(null); setProblem(null); setHistory({});
   }, [auth.session?.user.role, auth.session?.user.id]);
@@ -324,10 +356,14 @@ export default function App() {
   async function logout() { try { setLogoutError(false); await auth.signOut(); } catch { setLogoutError(true); } }
   return (
     <div className="app-frame">
-      <aside id="pro-sidebar" className={"sidebar " + (mobileMenu ? "sidebar-open" : "")}>
+      <a className="skip-link" href="#pro-content" inert={mobileOpen}>{t.skipToContent}</a>
+      <aside ref={sidebarRef} id="pro-sidebar" className={"sidebar " + (mobileOpen ? "sidebar-open" : "")}
+        inert={compactNavigation && !mobileOpen} aria-hidden={compactNavigation && !mobileOpen ? true : undefined}
+        role={compactNavigation ? "dialog" : undefined} aria-modal={mobileOpen || undefined}
+        aria-label={compactNavigation ? t.navigationTitle : undefined}>
         <div className="brand">
           <div className="brand-mark"><Network size={22} strokeWidth={1.8} /></div>
-          <div><strong>DARK XRAY <span>PRO</span></strong><small>INFRASTRUCTURE OS</small></div>
+          <div><strong>DARK XRAY <span>PRO</span></strong><small>{t.role}</small></div>
           <button className="mobile-close icon-button" aria-label={language === "fa" ? "بستن منو" : "Close menu"} onClick={() => setMobileMenu(false)}><X size={20} /></button>
         </div>
         <nav className="sidebar-nav" aria-label="Main navigation">
@@ -348,15 +384,14 @@ export default function App() {
         </nav>
         <div className="sidebar-bottom">
           <div className="sidebar-safety"><ShieldCheck size={17} /><span>{t.developing}</span></div>
-          <small>v0.1.0 · LAB ONLY</small>
         </div>
       </aside>
 
-      <div className="main-area">
+      <div className="main-area" inert={mobileOpen}>
         <header className="topbar">
           <div className="topbar-left">
-            <button className="mobile-menu icon-button" aria-label={language === "fa" ? "بازکردن منو" : "Open menu"} aria-controls="pro-sidebar" aria-expanded={mobileMenu} onClick={() => setMobileMenu(true)}><Menu size={21} /></button>
-            <span className="breadcrumb">DARK XRAY PRO</span><ChevronRight size={15} className="muted-icon" />
+            <button ref={menuButtonRef} className="mobile-menu icon-button" aria-label={language === "fa" ? "بازکردن منو" : "Open menu"} aria-controls="pro-sidebar" aria-expanded={mobileOpen} onClick={() => setMobileMenu(true)}><Menu size={21} /></button>
+            <span className="breadcrumb">{t[navGroups.find(group => group.pages.includes(page))!.id]}</span><ChevronRight size={15} className="muted-icon" />
             <strong>{t[page]}</strong>
           </div>
           <div className="topbar-right">
@@ -367,10 +402,9 @@ export default function App() {
           </div>
         </header>
 
-        <main className="workspace">
+        <main id="pro-content" className="workspace" tabIndex={-1}>
           {logoutError && <p role="alert">{language === "fa" ? "خروج تأیید نشد؛ دوباره تلاش کن." : "Logout was not confirmed. Please retry."}</p>}
           <section className="page-heading">
-            <div className="eyebrow"><span className="eyebrow-dot" /> {t.pro} / {t[page]}</div>
             <h1>{t[page + "Title" as keyof typeof t]}</h1>
             <p>{t[page + "Lead" as keyof typeof t]}</p>
           </section>
@@ -414,9 +448,11 @@ export default function App() {
           {page === "settings" && (
             <div className="settings-list">
               <section className="settings-row"><div><h2><Sun size={19} /> {t.colors}</h2><p>{t.settingsLead}</p></div>
-                <div className="segment" role="group" aria-label="Color mode">
+                <div className="segment theme-picker" role="group" aria-label="Color mode">
                   {(["light", "dark", "system"] as Theme[]).map((mode) =>
-                    <button className={theme === mode ? "active" : ""} key={mode} aria-pressed={theme === mode} onClick={() => setTheme(mode)}>{t[mode]}</button>)}
+                    <button className={theme === mode ? "active" : ""} key={mode} aria-pressed={theme === mode} onClick={() => setTheme(mode)}>
+                      <span className={"theme-preview theme-preview-" + mode} aria-hidden="true"><i/><span><b/><b/></span></span>{t[mode]}
+                    </button>)}
                 </div>
               </section>
               <section className="settings-row"><div><h2><Globe2 size={19}/>{t.language}</h2><p>English / فارسی</p></div>
@@ -429,9 +465,9 @@ export default function App() {
             </div>
           )}
         </main>
-        <footer className="footer"><span><ShieldCheck size={14} /> No production connections</span><span>DARK XRAY PRO · FOUNDATION BUILD</span></footer>
+        <footer className="footer"><span><ShieldCheck size={14} />{t.developing}</span><span>DARK XRAY PRO</span></footer>
       </div>
-      {mobileMenu && <button className="backdrop" aria-label="Close navigation" onClick={() => setMobileMenu(false)} />}
+      {mobileOpen && <button className="backdrop" tabIndex={-1} aria-label="Close navigation" onClick={() => setMobileMenu(false)} />}
     </div>
   );
 }

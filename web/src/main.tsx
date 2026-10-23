@@ -4,6 +4,7 @@ import App from "./App";
 import { SessionProvider } from "./session";
 import "./styles.css";
 import "./DesignSystem.css";
+import "./Shell.css";
 
 const root = document.getElementById("root");
 if (!root) throw new Error("Missing app root");
