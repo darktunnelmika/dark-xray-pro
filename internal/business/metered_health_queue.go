@@ -63,6 +63,12 @@ func (s *Store) QueueMeteredHealth(ctx context.Context, key []byte, id, op strin
 	if !usageledger.HasHealthQueueSchema(version) {
 		return empty, ErrUnavailable
 	}
+	if exists, e := consumerManifestExists(ctx, tx, op); e != nil || exists {
+		if e != nil {
+			return empty, e
+		}
+		return empty, ErrConflict
+	}
 	v, _, err := readHealthIntent(ctx, tx, id)
 	if err == nil {
 		if v.HandoverID != op || v.InboundID != inbound || v.EndpointSHA != endpoint.SHA() {
@@ -84,7 +90,7 @@ func (s *Store) QueueMeteredHealth(ctx context.Context, key []byte, id, op strin
 	if n != 0 {
 		return empty, ErrConflict
 	}
-	q, err := healthCurrent(ctx, tx, key, op, inbound, now)
+	q, err := s.healthCurrent(ctx, tx, key, op, inbound, now)
 	if err != nil {
 		return empty, err
 	}
@@ -135,7 +141,7 @@ func (s *Store) PollMeteredHealth(ctx context.Context, key, token []byte, node, 
 	if v.EndpointSHA != endpoint.SHA() {
 		return empty, false, ErrConflict
 	}
-	q, err := healthCurrent(ctx, tx, key, v.HandoverID, v.InboundID, time.Now().UnixNano())
+	q, err := s.healthCurrent(ctx, tx, key, v.HandoverID, v.InboundID, time.Now().UnixNano())
 	if err != nil {
 		return empty, false, err
 	}
@@ -147,7 +153,7 @@ func (s *Store) PollMeteredHealth(ctx context.Context, key, token []byte, node, 
 		return empty, false, err
 	}
 	if round != "" {
-		if _, err = liveHealthRoundMember(ctx, tx, key, round, id, v.HandoverID, v.InboundID, v.EndpointSHA, time.Now().UnixNano()); err != nil {
+		if _, err = s.liveHealthRoundMember(ctx, tx, key, round, id, v.HandoverID, v.InboundID, v.EndpointSHA, time.Now().UnixNano()); err != nil {
 			return empty, false, err
 		}
 	}

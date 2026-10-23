@@ -110,7 +110,7 @@ func (s *Store) MeteredHandoverAudit(ctx context.Context, key []byte, id string)
 			if e != nil {
 				return out, e
 			}
-			out.HealthRounds = append(out.HealthRounds, assessHealthRound(ctx, tx, key, r, time.Now().UnixNano()))
+			out.HealthRounds = append(out.HealthRounds, s.assessHealthRound(ctx, tx, key, r, time.Now().UnixNano()))
 		}
 	}
 	return out, tx.Commit()

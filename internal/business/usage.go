@@ -30,7 +30,7 @@ func (s *Store) EnableUsageLedger(ctx context.Context) error {
 func (s *Store) UsageLedger() *usageledger.Ledger { return s.usage }
 func (s *Store) restoreUsageLedger(ctx context.Context) error {
 	var count int
-	if err := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM sqlite_master WHERE name GLOB 'pro_usage_*' OR name GLOB 'pro_probe_*' OR name GLOB 'pro_health_*' OR name GLOB 'pro_subscription_*'").Scan(&count); err != nil {
+	if err := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM sqlite_master WHERE name GLOB 'pro_usage_*' OR name GLOB 'pro_probe_*' OR name GLOB 'pro_health_*' OR name GLOB 'pro_subscription_*' OR name GLOB 'pro_consumer_*'").Scan(&count); err != nil {
 		return err
 	}
 	if count == 0 {

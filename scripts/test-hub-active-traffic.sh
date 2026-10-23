@@ -37,6 +37,9 @@ created=1
 sudo ip -n "$task_ns" link set lo up
 # Synthetic local fixture, never a route to the real public address owner.
 sudo ip -n "$task_ns" addr add 11.0.0.1/32 dev lo
+# N19 ingress lives at a different literal tuple and only forwards to this
+# namespace's loopback origins. No route to either real public owner exists.
+sudo ip -n "$task_ns" addr add 11.0.0.2/32 dev lo
 test -z "$(sudo ip -n "$task_ns" route show table main)"
 test -z "$(sudo ip -n "$task_ns" -6 route show default)"
 test "$(sudo ip -n "$task_ns" -o link show | wc -l)" -eq 1

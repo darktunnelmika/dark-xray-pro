@@ -27,7 +27,10 @@ import (
 
 var ErrProtocolHealth = errors.New("protocol health proof unavailable or stale")
 
-const ProtocolHealthVersion = 2
+const (
+	ProtocolHealthVersion         = 2
+	ConsumerProtocolHealthVersion = 3
+)
 
 // ProtocolHealthEndpoint is operator-approved verifier configuration, never an
 // arbitrary browser URL. Only literal public IPv4 destinations are supported.
@@ -74,28 +77,49 @@ func (e ProtocolHealthEndpoint) tlsConfig() (*tls.Config, error) {
 // This is not publication authority: the HUB must issue and consume a unique
 // persisted challenge and recheck current observations transactionally.
 type ProtocolHealthRequest struct {
-	Version         int              `json:"version"`
-	ID              string           `json:"id"`
-	HandoverID      string           `json:"handover_id"`
-	NodeID          string           `json:"node_id"`
-	InstallationID  string           `json:"installation_id"`
-	RuntimeInstance string           `json:"runtime_instance"`
-	StageID         string           `json:"stage_id"`
-	ApplyCommandID  string           `json:"apply_command_id"`
-	InboundID       uint64           `json:"inbound_id"`
-	Port            uint16           `json:"port"`
-	CredentialSHA   string           `json:"credential_sha"`
-	SystemProbeID   string           `json:"system_probe_id"`
-	EndpointSHA     string           `json:"endpoint_sha"`
-	Expected        RuntimeCondition `json:"expected"`
-	Usage           MeteredCondition `json:"usage"`
-	Issued          int64            `json:"issued_unix_nano"`
-	Expires         int64            `json:"expires_unix_nano"`
-	Signature       string           `json:"signature"`
+	Version         int    `json:"version"`
+	ID              string `json:"id"`
+	HandoverID      string `json:"handover_id"`
+	NodeID          string `json:"node_id"`
+	InstallationID  string `json:"installation_id"`
+	RuntimeInstance string `json:"runtime_instance"`
+	StageID         string `json:"stage_id"`
+	ApplyCommandID  string `json:"apply_command_id"`
+	InboundID       uint64 `json:"inbound_id"`
+	Port            uint16 `json:"port"`
+	CredentialSHA   string `json:"credential_sha"`
+	SystemProbeID   string `json:"system_probe_id"`
+	EndpointSHA     string `json:"endpoint_sha"`
+	// These flat optional fields preserve the exact legacy v2 JSON and MAC.
+	// Version 3 binds the complete immutable consumer manifest and the exact
+	// ingress tuple independently of Port, the applied loopback origin port.
+	ConsumerManifestSHA string           `json:"consumer_manifest_sha,omitempty"`
+	ConsumerAddress     string           `json:"consumer_address,omitempty"`
+	ConsumerPort        uint16           `json:"consumer_port,omitempty"`
+	Expected            RuntimeCondition `json:"expected"`
+	Usage               MeteredCondition `json:"usage"`
+	Issued              int64            `json:"issued_unix_nano"`
+	Expires             int64            `json:"expires_unix_nano"`
+	Signature           string           `json:"signature"`
 }
 
 func validProtocolHealthRequest(q ProtocolHealthRequest) bool {
-	return q.Version == ProtocolHealthVersion && transactionNode.MatchString(q.SystemProbeID) && transactionID.MatchString(q.ID) && transactionID.MatchString(q.HandoverID) && transactionNode.MatchString(q.NodeID) && transactionID.MatchString(q.InstallationID) && transactionID.MatchString(q.RuntimeInstance) && transactionID.MatchString(q.StageID) && transactionID.MatchString(q.ApplyCommandID) && q.InboundID > 0 && q.Port >= 1024 && transactionHash.MatchString(q.CredentialSHA) && transactionHash.MatchString(q.EndpointSHA) && q.Expected.ProcessReady && q.Expected.ActiveSequence > 0 && transactionHash.MatchString(q.Expected.ActiveSHA) && validMeteredCondition(q.Usage) && q.Usage.EpochID != "" && q.Usage.Settlement == (uc.Receipt{}) && q.Issued > 0 && q.Expires > q.Issued && q.Expires-q.Issued <= int64(8*time.Second)
+	return validProtocolHealthConsumer(q) && transactionNode.MatchString(q.SystemProbeID) && transactionID.MatchString(q.ID) && transactionID.MatchString(q.HandoverID) && transactionNode.MatchString(q.NodeID) && transactionID.MatchString(q.InstallationID) && transactionID.MatchString(q.RuntimeInstance) && transactionID.MatchString(q.StageID) && transactionID.MatchString(q.ApplyCommandID) && q.InboundID > 0 && q.Port >= 1024 && transactionHash.MatchString(q.CredentialSHA) && transactionHash.MatchString(q.EndpointSHA) && q.Expected.ProcessReady && q.Expected.ActiveSequence > 0 && transactionHash.MatchString(q.Expected.ActiveSHA) && validMeteredCondition(q.Usage) && q.Usage.EpochID != "" && q.Usage.Settlement == (uc.Receipt{}) && q.Issued > 0 && q.Expires > q.Issued && q.Expires-q.Issued <= int64(8*time.Second)
+}
+
+func validProtocolHealthConsumer(q ProtocolHealthRequest) bool {
+	switch q.Version {
+	case ProtocolHealthVersion:
+		return q.ConsumerManifestSHA == "" && q.ConsumerAddress == "" && q.ConsumerPort == 0
+	case ConsumerProtocolHealthVersion:
+		return transactionHash.MatchString(q.ConsumerManifestSHA) && q.ConsumerManifestSHA != strings.Repeat("0", 64) && ValidateConsumerProtocolEndpoint(q.ConsumerAddress, q.ConsumerPort)
+	default:
+		return false
+	}
+}
+
+func protocolHealthMACDomain(kind string, version int) string {
+	return "DARK-PRO-PROTOCOL-HEALTH-" + kind + "-v" + strconv.Itoa(version)
 }
 
 func SignProtocolHealthRequest(key []byte, q ProtocolHealthRequest) (ProtocolHealthRequest, error) {
@@ -103,7 +127,7 @@ func SignProtocolHealthRequest(key []byte, q ProtocolHealthRequest) (ProtocolHea
 		return ProtocolHealthRequest{}, ErrProtocolHealth
 	}
 	q.Signature = ""
-	q.Signature = transactionMAC(key, "DARK-PRO-PROTOCOL-HEALTH-REQUEST-v2", q)
+	q.Signature = transactionMAC(key, protocolHealthMACDomain("REQUEST", q.Version), q)
 	return q, nil
 }
 
@@ -129,12 +153,12 @@ func protocolHealthResponseSHA(id string) string {
 // Historical cryptographic evidence only. Callers must additionally check
 // live epoch/stage/lease/observation and a persisted, unconsumed HUB challenge.
 func VerifyProtocolHealthReceipt(key []byte, q ProtocolHealthRequest, p ProtocolHealthReceipt, now time.Time) bool {
-	if !verifyProtocolHealthRequest(key, q, now.UnixNano()) || p.Version != ProtocolHealthVersion || p.RequestSHA != hashJSON(q) || p.ResponseSHA != protocolHealthResponseSHA(q.ID) || p.Completed < q.Issued || p.Completed > now.UnixNano() || p.Completed >= q.Expires || !transactionHash.MatchString(p.Signature) {
+	if !verifyProtocolHealthRequest(key, q, now.UnixNano()) || p.Version != q.Version || p.RequestSHA != hashJSON(q) || p.ResponseSHA != protocolHealthResponseSHA(q.ID) || p.Completed < q.Issued || p.Completed > now.UnixNano() || p.Completed >= q.Expires || !transactionHash.MatchString(p.Signature) {
 		return false
 	}
 	want := p
 	want.Signature = ""
-	return hmac.Equal([]byte(p.Signature), []byte(transactionMAC(key, "DARK-PRO-PROTOCOL-HEALTH-RECEIPT-v2", want)))
+	return hmac.Equal([]byte(p.Signature), []byte(transactionMAC(key, protocolHealthMACDomain("RECEIPT", q.Version), want)))
 }
 
 // Caller holds t.mu. Neither execution ACKs nor an open foreign socket suffice.
@@ -178,17 +202,18 @@ func (t *TransactionRuntime) protocolHealthCurrent(q ProtocolHealthRequest) (xra
 	return r.active.candidate(), true
 }
 
-// ProbeMeteredProtocol runs a short-lived, pinned Vision client through this
-// exact active Direct listener. It never changes the server lease or journal,
-// enables a listener, renews authority or sets DataPlaneVerified/CanPublish.
-// No HTTP/Agent endpoint calls this primitive yet.
+// ProbeMeteredProtocol runs a short-lived, pinned Vision client for this exact
+// active Direct listener. Version 3 traverses the independently approved ingress
+// tuple; version 2 uses the loopback origin. The primitive never changes the
+// server lease or journal, enables a server listener, renews authority, or sets
+// DataPlaneVerified/CanPublish. Agent transport persists each attempt separately.
 func (t *TransactionRuntime) ProbeMeteredProtocol(ctx context.Context, q ProtocolHealthRequest, endpoint ProtocolHealthEndpoint) (ProtocolHealthReceipt, error) {
 	empty := ProtocolHealthReceipt{}
 	if ctx == nil || ctx.Err() != nil || !t.protocolProbe.TryLock() {
 		return empty, ErrProtocolHealth
 	}
 	defer t.protocolProbe.Unlock()
-	if !verifyProtocolHealthRequest(t.options.LeaseKey, q, time.Now().UnixNano()) || q.EndpointSHA != endpoint.SHA() {
+	if !verifyProtocolHealthRequest(t.options.LeaseKey, q, time.Now().UnixNano()) || q.EndpointSHA != endpoint.SHA() || !t.consumerProtocolApproved(q) {
 		return empty, ErrProtocolHealth
 	}
 	tlsConfig, err := endpoint.tlsConfig()
@@ -253,11 +278,11 @@ func (t *TransactionRuntime) ProbeMeteredProtocol(ctx context.Context, q Protoco
 	if _, current = t.protocolHealthCurrent(q); !current || probeCtx.Err() != nil || p.dead() || !verifyProtocolHealthRequest(t.options.LeaseKey, q, time.Now().UnixNano()) {
 		return empty, ErrProtocolHealth
 	}
-	proof := ProtocolHealthReceipt{Version: ProtocolHealthVersion, RequestSHA: hashJSON(q), ResponseSHA: protocolHealthResponseSHA(q.ID), Completed: time.Now().UnixNano()}
+	proof := ProtocolHealthReceipt{Version: q.Version, RequestSHA: hashJSON(q), ResponseSHA: protocolHealthResponseSHA(q.ID), Completed: time.Now().UnixNano()}
 	if proof.Completed >= q.Expires {
 		return empty, ErrProtocolHealth
 	}
-	proof.Signature = transactionMAC(t.options.LeaseKey, "DARK-PRO-PROTOCOL-HEALTH-RECEIPT-v2", proof)
+	proof.Signature = transactionMAC(t.options.LeaseKey, protocolHealthMACDomain("RECEIPT", q.Version), proof)
 	return proof, nil
 }
 
@@ -265,7 +290,7 @@ func (t *TransactionRuntime) ProbeMeteredProtocol(ctx context.Context, q Protoco
 // the real probe. It opens no sockets and grants no runtime authority. The HUB
 // uses it to reject a whole round if even one required inbound is unsupported.
 func ValidateProtocolHealthSupport(c xrayconfig.Candidate, q ProtocolHealthRequest, endpoint ProtocolHealthEndpoint) error {
-	if !endpoint.Valid() {
+	if !endpoint.Valid() || !validProtocolHealthConsumer(q) {
 		return ErrProtocolHealth
 	}
 	port := uint16(65535)
@@ -302,7 +327,7 @@ func protocolHealthClient(c xrayconfig.Candidate, q ProtocolHealthRequest, socks
 			} `json:"streamSettings"`
 		} `json:"inbounds"`
 	}
-	if socksPort < 1024 || socksPort == q.Port || json.Unmarshal(c.Config, &doc) != nil {
+	if socksPort < 1024 || socksPort == q.Port || !validProtocolHealthConsumer(q) || json.Unmarshal(c.Config, &doc) != nil {
 		return xrayconfig.Candidate{}, ErrProtocolHealth
 	}
 	tag := ""
@@ -347,6 +372,10 @@ func protocolHealthClient(c xrayconfig.Candidate, q ProtocolHealthRequest, socks
 		if err != nil || q.EndpointSHA != endpoint.SHA() {
 			return xrayconfig.Candidate{}, ErrProtocolHealth
 		}
+		consumerAddress, consumerPort := "127.0.0.1", q.Port
+		if q.Version == ConsumerProtocolHealthVersion {
+			consumerAddress, consumerPort = q.ConsumerAddress, q.ConsumerPort
+		}
 		config := map[string]any{
 			"log": map[string]string{"loglevel": "none"},
 			"inbounds": []any{map[string]any{
@@ -360,7 +389,7 @@ func protocolHealthClient(c xrayconfig.Candidate, q ProtocolHealthRequest, socks
 				map[string]any{
 					"tag": "verifier", "protocol": "vless",
 					"settings": map[string]any{"vnext": []any{map[string]any{
-						"address": "127.0.0.1", "port": q.Port,
+						"address": consumerAddress, "port": consumerPort,
 						"users": []any{map[string]any{"id": uuid, "encryption": "none", "flow": "xtls-rprx-vision"}},
 					}}},
 					"streamSettings": map[string]any{"network": "tcp", "security": "reality", "realitySettings": map[string]any{

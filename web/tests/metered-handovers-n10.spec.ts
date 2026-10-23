@@ -2,6 +2,7 @@ import { expect, test, type Page as BrowserPage } from "@playwright/test";
 import type { Channel, Command, CommandRequest, MeteredCondition, Observation, Scope } from "../src/meteredRouteTransactions";
 import type { Handover, HealthRound, Plan } from "../src/meteredHandovers";
 import type { LabSnapshot, SubscriptionView } from "../src/labSubscriptions";
+import type { ConsumerManifest, ConsumerView } from "../src/consumerManifests";
 
 const base="/api/v1/workspace/metered-handovers",csrf="a".repeat(64),id=(n:number)=>n.toString(16).padStart(32,"0"),sha="d".repeat(64);
 const zero=()=>({epoch_id:"",sequence:"0",sha256:""});
@@ -18,7 +19,8 @@ async function fixture(page:BrowserPage,role="owner"){
  target.status.staged_id=id(21);target.controls.apply={stage_id:id(21),ports:[27613],expires_unix_milli:Date.now()+90000};
  const state={scope,source,target,ops:[] as Handover[],post:"normal" as "normal"|"before"|"after",readError:false,fresh:true,malformed:false,
   clients:[{id:"client-a",name:"Synthetic A",archived:false},{id:"client-b",name:"Synthetic B",archived:false},{id:"client-archived",name:"Archived synthetic",archived:true}],
-  subscriptions:{} as Record<string,SubscriptionView>,snapshotReceipts:{} as Record<string,LabSnapshot>,snapshotResponse:null as null|((v:LabSnapshot)=>unknown)};
+  subscriptions:{} as Record<string,SubscriptionView>,snapshotReceipts:{} as Record<string,LabSnapshot>,snapshotResponse:null as null|((v:LabSnapshot)=>unknown),snapshotWait:null as Promise<void>|null,
+  consumer:null as ConsumerView|null,consumerReceipts:{} as Record<string,ConsumerManifest>,consumerResponse:null as null|((v:unknown)=>unknown)};
  for(const client of state.clients)state.subscriptions[client.id]={enabled:true,scope:"lab_single_handover",client_id:client.id,generation:1,state:"active",server_time_unix_milli:Date.now()};
  const writes:{path:string;raw:string;body:unknown;csrf:string}[]=[],reads:string[]=[];
  await page.route("**/api/v1/**",async route=>{
@@ -33,6 +35,7 @@ async function fixture(page:BrowserPage,role="owner"){
    if(path==="/api/v1/workspace/nodes")return route.fulfill({json:{mode:"new_pro_lab_only",nodes:[],agent_transport_scope:"loopback_only"}});
    if(path==="/api/v1/workspace/metered-route-transactions")return route.fulfill({json:state.scope});
    if(path===base)return route.fulfill({json:{operations:state.ops,next_cursor:""}});
+   if(path.endsWith("/consumer-manifest")){if(state.consumer?.enabled)state.consumer.server_time_unix_milli=Date.now();return route.fulfill(state.consumer?{json:state.consumer}:{status:404,json:{error:"not_found"}});}
    if(path.startsWith(base+"/")){const op=state.ops.find(o=>o.id===path.split("/").at(-1));return route.fulfill(op?{json:state.malformed?{...op,can_publish:true}:op}:{status:404,json:{error:"business_not_found"}});}
    const v=[source,target].find(v=>path===`/api/v1/workspace/native-nodes/${v.node_id}/metered-route-transactions`);
    if(v){if(state.readError)return route.fulfill({status:503,json:{error:"unavailable"}});v.server_time_unix_milli=Date.now();if(state.fresh)v.reported_at_unix_nano=Date.now()*1e6;return route.fulfill({json:v});}
@@ -50,14 +53,27 @@ async function fixture(page:BrowserPage,role="owner"){
    const op=state.ops.find(o=>o.id===path.split("/").at(-2))!;
    let v=op.health_intents?.find(i=>i.id===body.id);
    if(!v){v={id:body.id,handover_id:op.id,node_id:op.target_node,installation_id:op.target_installation,inbound_id:body.inbound_id,endpoint_sha:sha,expires_unix_nano:(Date.now()+8000)*1e6};op.health_intents=[v,...(op.health_intents??[])];}reply=v;
-  }else if(path.endsWith("/health-rounds")){
+  }else if(path.endsWith("/consumer-manifest")){
+   const op=state.ops.find(o=>o.id===path.split("/").at(-2))!,head=state.consumer;
+   if(!head?.enabled)return route.fulfill({status:409,json:{error:"disabled"}});
+   let v=state.consumerReceipts[body.event_id];
+   if(!v){
+    if(body.expected_revision!==head.revision)return route.fulfill({status:409,json:{error:"revision_changed"}});
+    v={id:id(4000+writes.length),event_id:body.event_id,handover_id:op.id,node_id:op.target_node,installation_id:op.target_installation,revision:head.revision+1,state:body.action==="revoke"?"revoked":"active",consumer_manifest_sha:(head.revision+1).toString(16).padStart(64,"0"),created_unix_nano:Date.now()*1e6,members:body.action==="revoke"?structuredClone(head.manifest!.members):body.members.map((m:{inbound_id:number;consumer_address:string;consumer_port:number})=>({...m,origin_port:target.review.find(r=>r.inbound_id===m.inbound_id)!.direct_port})),current:body.action!=="revoke"};
+    state.consumerReceipts[body.event_id]=v;head.revision=v.revision;head.state=v.state;head.manifest=v;
+    op.health_rounds?.forEach(r=>{r.current=false;r.state="state_changed";});
+   }else v={...v,replayed:true,current:head.manifest?.id===v.id&&v.state==="active"};
+   reply=state.consumerResponse?state.consumerResponse(structuredClone(v)):v;
+  }else if(path.endsWith("/health-rounds")||path.endsWith("/consumer-health-rounds")){
    const op=state.ops.find(o=>o.id===path.split("/").at(-2))!;
    let v=op.health_rounds?.find(r=>r.id===body.id);
-   if(!v){v={id:body.id,handover_id:op.id,node_id:op.target_node,installation_id:op.target_installation,endpoint_sha:sha,manifest_sha:sha,created_unix_nano:Date.now()*1e6,expires_unix_nano:(Date.now()+8000)*1e6,members:target.review.map((r,i)=>({inbound_id:r.inbound_id,intent_id:id(1000+(op.health_rounds?.length??0)*256+i),port:r.direct_port,state:"pending"})),state:"pending",current:false};op.health_rounds=[v,...(op.health_rounds??[])];}reply=v;
+   if(!v){const created=Date.now()*1e6;v={id:body.id,handover_id:op.id,node_id:op.target_node,installation_id:op.target_installation,endpoint_sha:sha,manifest_sha:sha,created_unix_nano:created,expires_unix_nano:created+8e9,members:target.review.map((r,i)=>({inbound_id:r.inbound_id,intent_id:id(1000+(op.health_rounds?.length??0)*256+i),port:r.direct_port,state:"pending"})),state:"pending",current:false};
+    if(path.endsWith("/consumer-health-rounds")){const m=state.consumer?.enabled?state.consumer.manifest:undefined;if(!m||m.id!==body.consumer_manifest_id||m.revision!==body.consumer_manifest_revision)return route.fulfill({status:409,json:{error:"manifest_changed"}});Object.assign(v,{consumer_manifest_id:m.id,consumer_manifest_revision:m.revision,consumer_manifest_sha:m.consumer_manifest_sha});v.members.forEach(row=>{const member=m.members.find(x=>x.inbound_id===row.inbound_id)!;Object.assign(row,{consumer_address:member.consumer_address,consumer_port:member.consumer_port});});}
+    op.health_rounds=[v,...(op.health_rounds??[])];}reply=state.consumerResponse&&path.endsWith("/consumer-health-rounds")?state.consumerResponse(structuredClone(v)):v;
   }else if(path.endsWith("/lab-subscription-snapshot")){
    const op=state.ops.find(o=>o.id===path.split("/").at(-2))!,round=op.health_rounds!.find(r=>r.id===body.round_id)!;
    let v=state.snapshotReceipts[body.event_id];
-   if(!v){v={id:id(3000+writes.length),event_id:body.event_id,client_id:body.client_id,handover_id:op.id,round_id:round.id,node_id:op.target_node,installation_id:op.target_installation,revision:body.expected_revision+1,created_unix_nano:Date.now()*1e6,expires_unix_nano:round.expires_unix_nano,route_count:round.members.length,current:round.current};state.snapshotReceipts[body.event_id]=v;const sub=state.subscriptions[body.client_id];if(sub?.enabled)sub.snapshot=v;}
+   if(!v){v={id:id(3000+writes.length),event_id:body.event_id,client_id:body.client_id,handover_id:op.id,round_id:round.id,node_id:op.target_node,installation_id:op.target_installation,revision:body.expected_revision+1,created_unix_nano:Date.now()*1e6,expires_unix_nano:round.expires_unix_nano,route_count:round.members.length,current:round.current};if(round.consumer_manifest_id)Object.assign(v,{consumer_manifest_id:round.consumer_manifest_id,consumer_manifest_revision:round.consumer_manifest_revision,consumer_manifest_sha:round.consumer_manifest_sha});state.snapshotReceipts[body.event_id]=v;const sub=state.subscriptions[body.client_id];if(sub?.enabled)sub.snapshot=v;}
    else v={...v,replayed:true,current:v.current&&v.expires_unix_nano>Date.now()*1e6};
    reply=state.snapshotResponse?state.snapshotResponse(structuredClone(v)):v;
   }else{
@@ -69,6 +85,7 @@ async function fixture(page:BrowserPage,role="owner"){
    if(op&&input.action==="apply"){op.apply_command_id=c.id;op.apply_command=c;op.phase="target_apply_pending";}
    reply=c;
   }
+  if(path.endsWith("/lab-subscription-snapshot")&&state.snapshotWait)await state.snapshotWait;
   return state.post==="after"?route.fulfill({status:503,json:{error:"unavailable"}}):route.fulfill({status:202,json:reply});
  });
  function settle(){const op=state.ops[0],u=structuredClone(usage);u.settlement={epoch_id:usage.epoch_id!,sequence:"2",sha256:sha};source.status.usage=u;source.status.observed={...source.status.observed,active_sequence:0,active_sha:"",process_ready:false,lease_expires_unix_nano:0};op.phase="source_drained";op.drain_command=receipt(op.drain_command!,"drained",source.status.observed,u);source.commands[0]=op.drain_command;source.status.serial=op.drain_command.serial;}
@@ -373,4 +390,121 @@ test("N18 snapshot storage failure prevents POST and narrow Persian remains read
  await page.getByRole("button",{name:"Switch language",exact:true}).click();
  await expect(subscriptionPanel(page).getByRole("heading",{name:"آماده‌سازی خروجی اشتراک LAB",exact:true})).toBeVisible();await expect(subscriptionPanel(page).getByRole("button",{name:"ثبت نسخهٔ اشتراک LAB",exact:true})).toBeDisabled();
  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+});
+
+const consumerPanel=(p:BrowserPage)=>p.getByRole("region",{name:"Consumer endpoint manifest",exact:true});
+const recordConsumer="Record consumer mapping",proveConsumer="Test approved consumer routes",retryConsumer="Retry exact consumer request";
+async function consumerFixture(page:BrowserPage,active=false){
+ const f=await healthFixture(page,true);f.state.scope.lab_subscriptions_enabled=true;f.state.scope.consumer_manifests_enabled=true;
+ f.state.consumer={enabled:true,scope:"consumer_endpoint_lab",handover_id:f.op.id,revision:0,state:"absent",server_time_unix_milli:Date.now(),required_inbounds:f.state.target.review.map(r=>({inbound_id:r.inbound_id,origin_port:r.direct_port})),approved_endpoints:f.state.target.review.flatMap((r,i)=>[0,10].map(delta=>({node_id:f.op.target_node,installation_id:f.op.target_installation,inbound_id:r.inbound_id,address:"11.0.0.2",port:28613+i*2+delta})))};
+ if(active){const v=f.state.consumer;v.revision=1;v.state="active";v.manifest={id:id(4001),event_id:id(3999),handover_id:f.op.id,node_id:f.op.target_node,installation_id:f.op.target_installation,revision:1,state:"active",consumer_manifest_sha:"1".padStart(64,"0"),created_unix_nano:Date.now()*1e6,members:v.required_inbounds.map((r,i)=>({...r,consumer_address:"11.0.0.2",consumer_port:28613+i*2})),current:true};}
+ await refresh(page);await expect(consumerPanel(page).getByRole("button",{name:recordConsumer,exact:true})).toBeVisible();
+ return f;
+}
+function completeConsumerRound(f:Awaited<ReturnType<typeof consumerFixture>>,remaining=8000){
+ const m=f.state.consumer!.enabled?f.state.consumer!.manifest!:null!;
+ const created=(Date.now()-(8000-remaining))*1e6;
+ const round:HealthRound={id:id(500),handover_id:f.op.id,node_id:f.op.target_node,installation_id:f.op.target_installation,endpoint_sha:sha,manifest_sha:sha,consumer_manifest_id:m.id,consumer_manifest_revision:m.revision,consumer_manifest_sha:m.consumer_manifest_sha,created_unix_nano:created,expires_unix_nano:created+8e9,state:"complete",current:true,members:m.members.map((r,i)=>({inbound_id:r.inbound_id,port:r.origin_port,consumer_address:r.consumer_address,consumer_port:r.consumer_port,intent_id:id(600+i),state:"accepted",challenge_id:id(700+i),accepted_unix_nano:created}))};
+ f.op.health_rounds=[round];return round;
+}
+async function chooseConsumer(page:BrowserPage){await consumerPanel(page).getByRole("combobox",{name:"Consumer endpoint 7612",exact:true}).selectOption("11.0.0.2:28613");await consumerPanel(page).getByRole("combobox",{name:"Consumer endpoint 7613",exact:true}).selectOption("11.0.0.2:28615");}
+
+test("N19 complete immutable mapping and explicit consumer proof are required before output",async({page})=>{
+ const f=await consumerFixture(page),box=consumerPanel(page);
+ expect(f.writes).toHaveLength(0);await expect(panel(page).getByRole("button",{name:roundAction,exact:true})).toHaveCount(0);
+ await expect(box.getByRole("button",{name:recordConsumer,exact:true})).toBeDisabled();
+ await box.getByRole("combobox",{name:"Consumer endpoint 7612",exact:true}).selectOption("11.0.0.2:28613");await expect(box.getByRole("button",{name:recordConsumer,exact:true})).toBeDisabled();
+ await chooseConsumer(page);page.once("dialog",d=>d.dismiss());await box.getByRole("button",{name:recordConsumer,exact:true}).click();expect(f.writes).toHaveLength(0);
+ await confirm(page,recordConsumer);await expect(box.getByText("Recorded mapping matches the current destination",{exact:true})).toBeVisible();
+ const manifest=f.state.consumer!.enabled?f.state.consumer!.manifest!:null!;
+ expect(f.writes[0].path).toBe(base+"/"+f.op.id+"/consumer-manifest");expect(f.writes[0].body).toEqual({event_id:expect.stringMatching(/^[a-f0-9]{32}$/),action:"replace",expected_revision:0,members:[{inbound_id:7612,consumer_address:"11.0.0.2",consumer_port:28613},{inbound_id:7613,consumer_address:"11.0.0.2",consumer_port:28615}],confirmed:true});expect(f.writes[0].csrf).toBe(csrf);
+ await selectSubscriptionClient(page);await expect(subscriptionPanel(page).getByRole("button",{name:recordSnapshot,exact:true})).toBeDisabled();
+ await confirm(page,proveConsumer);await expect.poll(()=>f.op.health_rounds?.length).toBe(1);expect(f.writes[1].path).toBe(base+"/"+f.op.id+"/consumer-health-rounds");expect(f.writes[1].body).toEqual({id:expect.stringMatching(/^[a-f0-9]{32}$/),consumer_manifest_id:manifest.id,consumer_manifest_revision:1,confirmed:true});
+ const r=f.op.health_rounds![0];acceptMember(r,0);await refresh(page);await expect(subscriptionPanel(page).getByRole("button",{name:recordSnapshot,exact:true})).toBeDisabled();
+ acceptMember(r,1);r.state="complete";r.current=true;await refresh(page);await expect(subscriptionPanel(page).getByRole("button",{name:recordSnapshot,exact:true})).toBeEnabled();
+ await recordSubscription(page);await expect(subscriptionPanel(page).getByText(currentSnapshot,{exact:true})).toBeVisible();
+ expect(f.writes[2].body).toMatchObject({round_id:r.id,consumer_manifest_id:manifest.id,consumer_manifest_revision:1,client_id:"client-a",expected_revision:0});expect(Object.values(f.state.snapshotReceipts)[0].expires_unix_nano).toBe(r.expires_unix_nano);expect(f.op.can_publish).toBe(false);
+ await confirm(page,"Revoke consumer mapping");await expect(box.getByText("Consumer mapping revoked",{exact:true})).toBeVisible();await expect(subscriptionPanel(page).getByText(currentSnapshot,{exact:true})).toHaveCount(0);await expect(box.getByRole("button",{name:proveConsumer,exact:true})).toBeDisabled();
+ expect(f.writes[3].body).toMatchObject({action:"revoke",expected_revision:1,members:[],confirmed:true});
+});
+
+test("N19 unconfirmed mapping survives reload with exact event, CAS revision and endpoints",async({page})=>{
+ const f=await consumerFixture(page);await chooseConsumer(page);f.state.post="before";await confirm(page,recordConsumer);
+ await expect(consumerPanel(page).getByRole("button",{name:retryConsumer,exact:true})).toBeEnabled();const original=f.writes[0].raw;
+ const stored=await page.evaluate(()=>Object.entries(sessionStorage).filter(([k])=>k.startsWith("dark-pro-consumer-attempt:")));expect(stored).toHaveLength(1);expect(stored[0][1]).not.toContain(csrf);expect(stored[0][1]).not.toContain("/api/v1/subscriptions/");
+ await page.reload();await panel(page).getByRole("button",{name:"Open Node transfer",exact:true}).click();await panel(page).getByRole("button",{name:"View transfer",exact:true}).click();
+ await expect(consumerPanel(page).getByRole("button",{name:retryConsumer,exact:true})).toBeEnabled();expect(f.writes).toHaveLength(1);f.state.post="normal";
+ await consumerPanel(page).getByRole("button",{name:retryConsumer,exact:true}).click();await expect(consumerPanel(page).getByText("Recorded mapping matches the current destination",{exact:true})).toBeVisible();expect(f.writes[1].raw).toBe(original);
+});
+
+test("N19 stale mapping revision must be explicitly reloaded before another mutation",async({page})=>{
+ const f=await consumerFixture(page,true),box=consumerPanel(page);await expect(box.getByRole("button",{name:recordConsumer,exact:true})).toBeEnabled();
+ const head=f.state.consumer!;if(!head.enabled)throw Error("disabled fixture");head.revision=2;head.manifest={...head.manifest!,id:id(4002),event_id:id(3998),revision:2,consumer_manifest_sha:"2".padStart(64,"0")};
+ await expect(box.getByText("The mapping revision changed. Reload its choices before recording another version.",{exact:true})).toBeVisible({timeout:5000});await expect(box.getByRole("button",{name:recordConsumer,exact:true})).toBeDisabled();expect(f.writes).toHaveLength(0);
+ await box.getByRole("button",{name:"Reload current endpoint choices",exact:true}).click();await confirm(page,recordConsumer);await expect.poll(()=>f.writes.length).toBe(1);expect(f.writes[0].body).toMatchObject({expected_revision:2});
+});
+
+test("N19 exact round retry retains its historical mapping across reload and head change",async({page})=>{
+ const f=await consumerFixture(page,true);f.state.post="after";await confirm(page,proveConsumer);await expect(consumerPanel(page).getByRole("button",{name:retryConsumer,exact:true})).toBeEnabled();const original=f.writes[0].raw,r=f.op.health_rounds![0],deadline=r.expires_unix_nano;
+ const head=f.state.consumer!;if(!head.enabled)throw Error("disabled fixture");head.revision=2;head.manifest={...head.manifest!,id:id(4002),event_id:id(3998),revision:2,consumer_manifest_sha:"2".padStart(64,"0")};r.current=false;r.state="state_changed";
+ await page.reload();await panel(page).getByRole("button",{name:"Open Node transfer",exact:true}).click();await panel(page).getByRole("button",{name:"View transfer",exact:true}).click();
+ await expect(consumerPanel(page).getByRole("button",{name:retryConsumer,exact:true})).toBeEnabled();expect(f.writes).toHaveLength(1);f.state.post="normal";await consumerPanel(page).getByRole("button",{name:retryConsumer,exact:true}).click();
+ await expect(consumerPanel(page).getByRole("button",{name:retryConsumer,exact:true})).toHaveCount(0);expect(f.writes[1].raw).toBe(original);expect(r.expires_unix_nano).toBe(deadline);await expect(subscriptionPanel(page).getByRole("button",{name:recordSnapshot,exact:true})).toBeDisabled();
+});
+
+for(const [label,mutate] of [
+ ["manifest event",(v:Record<string,unknown>)=>{v.event_id=id(9000);}],
+ ["manifest revision",(v:Record<string,unknown>)=>{v.revision=30;}],
+ ["manifest target",(v:Record<string,unknown>)=>{v.installation_id=id(9000);}]
+] as const)test(`N19 mismatched ${label} reply remains unconfirmed`,async({page})=>{
+ const f=await consumerFixture(page);await chooseConsumer(page);f.state.consumerResponse=v=>{mutate(v as Record<string,unknown>);return v;};await confirm(page,recordConsumer);
+ await expect(consumerPanel(page).getByRole("button",{name:retryConsumer,exact:true})).toBeEnabled();await expect(consumerPanel(page).getByText("Consumer mapping event recorded.",{exact:true})).toHaveCount(0);expect(f.writes).toHaveLength(1);
+});
+
+test("N19 mismatched round mapping and partial snapshot references remain unconfirmed",async({page})=>{
+ const f=await consumerFixture(page,true);f.state.consumerResponse=v=>({...v as object,consumer_manifest_sha:"e".repeat(64)});await confirm(page,proveConsumer);
+ await expect(consumerPanel(page).getByRole("button",{name:retryConsumer,exact:true})).toBeEnabled();await consumerPanel(page).getByRole("button",{name:"Discard local consumer retry",exact:true}).click();
+ f.state.consumerResponse=null;completeConsumerRound(f);await refresh(page);await selectSubscriptionClient(page);f.state.snapshotResponse=v=>{delete v.consumer_manifest_revision;return v;};await recordSubscription(page);
+ await expect(subscriptionPanel(page).getByRole("button",{name:retrySnapshot,exact:true})).toBeEnabled();await expect(subscriptionPanel(page).getByText(currentSnapshot,{exact:true})).toHaveCount(0);
+});
+
+for(const [label,mutate] of [
+ ["overflow timestamp",(r:HealthRound)=>{r.created_unix_nano=1e25;r.expires_unix_nano=1e25+8e9;}],
+ ["more than eight seconds",(r:HealthRound)=>{r.expires_unix_nano=r.created_unix_nano+9e9;}],
+ ["receipt at expiry",(r:HealthRound)=>{r.members[0].accepted_unix_nano=r.expires_unix_nano;}]
+] as const)test(`N19 strict legacy round validation rejects ${label}`,async({page})=>{
+ const f=await subscriptionFixture(page);await expect(subscriptionPanel(page).getByRole("button",{name:recordSnapshot,exact:true})).toBeVisible();mutate(f.round);await refresh(page);
+ await expect(panel(page).getByRole("alert")).toContainText("could not be verified");await expect(panel(page).getByText(roundCurrent,{exact:true})).toHaveCount(0);await expect(subscriptionPanel(page).getByRole("button",{name:recordSnapshot,exact:true})).toBeDisabled();expect(f.writes).toHaveLength(0);
+});
+
+test("N19 local rerenders cannot restart an unchanged server clock for mapping or output",async({page})=>{
+ await page.addInitScript(()=>{const interval=window.setInterval,timeout=window.setTimeout;window.setInterval=((handler:TimerHandler,delay?:number,...args:unknown[])=>interval(handler,delay===500?60000:delay,...args)) as typeof window.setInterval;window.setTimeout=((handler:TimerHandler,delay?:number,...args:unknown[])=>timeout(handler,delay===3000?60000:delay,...args)) as typeof window.setTimeout;});
+ const f=await consumerFixture(page,true);completeConsumerRound(f,2200);f.state.target.status.observed.lease_expires_unix_nano=(Date.now()+2400)*1e6;await refresh(page);await selectSubscriptionClient(page);
+ const snapshot=subscriptionPanel(page),box=consumerPanel(page);await expect(snapshot.getByRole("button",{name:recordSnapshot,exact:true})).toBeEnabled();await expect(box.getByRole("button",{name:recordConsumer,exact:true})).toBeEnabled();
+ const started=Date.now();let i=0;while(Date.now()-started<3000){await snapshot.getByRole("textbox",{name:"Find a synthetic client",exact:true}).fill(String(i));await box.getByRole("combobox",{name:"Consumer endpoint 7612",exact:true}).selectOption(i++%2?"11.0.0.2:28613":"11.0.0.2:28623");await new Promise(resolve=>setTimeout(resolve,150));}
+ await expect(snapshot.getByRole("button",{name:recordSnapshot,exact:true})).toBeDisabled();await expect(box.getByRole("button",{name:recordConsumer,exact:true})).toBeDisabled();expect(f.writes).toHaveLength(0);
+});
+
+for(const consumer of [false,true])test(`N19 ${consumer?"consumer":"local"} snapshot accepts a client-assigned subset but rejects more routes than its full proof`,async({page})=>{
+ const f=consumer?await consumerFixture(page,true):await subscriptionFixture(page);if(consumer){completeConsumerRound(f);await refresh(page);}await selectSubscriptionClient(page);
+ f.state.snapshotResponse=v=>({...v,route_count:1});await recordSubscription(page);await expect(subscriptionPanel(page).getByText(currentSnapshot,{exact:true})).toBeVisible();
+ f.state.snapshotResponse=v=>({...v,route_count:3});await recordSubscription(page);await expect(subscriptionPanel(page).getByRole("button",{name:retrySnapshot,exact:true})).toBeEnabled();await expect(subscriptionPanel(page).getByText(currentSnapshot,{exact:true})).toHaveCount(0);expect(f.writes).toHaveLength(2);
+});
+
+test("N19 confirmation crossing the original lease cannot send a consumer round",async({page})=>{
+ const f=await consumerFixture(page,true);f.state.target.status.observed.lease_expires_unix_nano=(Date.now()+1400)*1e6;await refresh(page);await expect(consumerPanel(page).getByRole("button",{name:proveConsumer,exact:true})).toBeEnabled();
+ page.once("dialog",async d=>{await new Promise(resolve=>setTimeout(resolve,1700));await d.accept();});await consumerPanel(page).getByRole("button",{name:proveConsumer,exact:true}).click();expect(f.writes).toHaveLength(0);
+});
+
+test("N19 delayed snapshot receipt is historical after its live round is invalidated",async({page})=>{
+ const f=await consumerFixture(page,true),r=completeConsumerRound(f);await refresh(page);await selectSubscriptionClient(page);let release=()=>{};f.state.snapshotWait=new Promise<void>(resolve=>{release=resolve;});
+ await recordSubscription(page);await expect.poll(()=>f.writes.length).toBe(1);r.current=false;r.state="state_changed";await refresh(page);release();
+ await expect(subscriptionPanel(page).getByText("Snapshot recorded; current delivery not confirmed",{exact:true})).toBeVisible();await expect(subscriptionPanel(page).getByText(currentSnapshot,{exact:true})).toHaveCount(0);
+});
+
+test("N19 storage failure blocks writes and Persian consumer controls fit 320 pixels",async({page})=>{
+ await page.setViewportSize({width:320,height:780});const f=await consumerFixture(page);await chooseConsumer(page);
+ await page.evaluate(()=>{const original=Storage.prototype.setItem;Storage.prototype.setItem=function(key,value){if(key.startsWith("dark-pro-consumer-attempt:"))throw Error("quota");return original.call(this,key,value);};});await confirm(page,recordConsumer);
+ await expect(consumerPanel(page).getByRole("alert")).toBeVisible();expect(f.writes).toHaveLength(0);await page.getByRole("button",{name:"Switch language",exact:true}).click();
+ await expect(consumerPanel(page).getByRole("button",{name:"ثبت نگاشت مصرف‌کننده",exact:true})).toBeDisabled();expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
 });

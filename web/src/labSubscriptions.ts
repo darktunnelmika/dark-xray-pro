@@ -1,8 +1,10 @@
 // Native N18 wire validation. No subscription secret is stored here or in
 // browser storage; only an explicit reveal response may reach component state.
+import { readConsumerRef } from "./consumerManifests";
 export type LabSnapshot = {
  id:string; event_id:string; client_id:string; handover_id:string; round_id:string; node_id:string; installation_id:string;
  revision:number; created_unix_nano:number; expires_unix_nano:number; route_count:number; current:boolean; replayed?:boolean;
+ consumer_manifest_id?:string;consumer_manifest_revision?:number;consumer_manifest_sha?:string;
 };
 export type SubscriptionView = { enabled:false; scope:"lab_single_handover"; client_id:string } | {
  enabled:true; scope:"lab_single_handover"; client_id:string; generation:number; state:"absent"|"active"|"revoked";
@@ -28,6 +30,7 @@ export function readLabSnapshot(v:unknown,clientID:string):LabSnapshot {
   !nano(v.created_unix_nano)||!nano(v.expires_unix_nano)||v.expires_unix_nano<=v.created_unix_nano||
   v.expires_unix_nano-v.created_unix_nano>8e9||typeof v.current!=="boolean"||
   (v.replayed!==undefined&&typeof v.replayed!=="boolean"))throw Error("invalid_lab_snapshot");
+ readConsumerRef(v);
  return v as LabSnapshot;
 }
 export function readSubscription(v:unknown,clientID:string):SubscriptionView {

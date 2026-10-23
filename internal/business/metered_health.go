@@ -71,17 +71,25 @@ type meteredHealthSnapshot struct {
 	epoch uc.Epoch
 }
 
-func healthCurrent(ctx context.Context, tx *sql.Tx, key []byte, opID string, inbound uint64, now int64) (mx.ProtocolHealthRequest, error) {
-	state, err := loadMeteredHealthSnapshot(ctx, tx, key, opID, now)
+func (s *Store) healthCurrent(ctx context.Context, tx *sql.Tx, key []byte, opID string, inbound uint64, now int64) (mx.ProtocolHealthRequest, error) {
+	state, err := s.loadMeteredHealthSnapshot(ctx, tx, key, opID, now)
 	if err != nil {
 		return mx.ProtocolHealthRequest{}, err
 	}
-	return state.request(ctx, tx, inbound)
+	manifest, err := s.currentConsumerManifest(ctx, tx, state)
+	if err != nil {
+		return mx.ProtocolHealthRequest{}, err
+	}
+	q, err := state.request(ctx, tx, inbound)
+	if err != nil {
+		return q, err
+	}
+	return consumerHealthRequest(q, manifest)
 }
 
 // Repeat the source accounting barrier and the target's exact applied command,
 // fresh signed observation, live lease and registered epoch.
-func loadMeteredHealthSnapshot(ctx context.Context, tx *sql.Tx, key []byte, opID string, now int64) (meteredHealthSnapshot, error) {
+func (s *Store) loadMeteredHealthSnapshot(ctx context.Context, tx *sql.Tx, key []byte, opID string, now int64) (meteredHealthSnapshot, error) {
 	var out meteredHealthSnapshot
 	op, _, err := readMeteredHandover(ctx, tx, opID)
 	if err != nil {
@@ -200,6 +208,16 @@ func (s *Store) issueMeteredHealthChallenge(ctx context.Context, key, token []by
 		if e != nil || want != q {
 			return mx.ProtocolHealthRequest{}, ErrConflict
 		}
+		// V3 retries can still cause a consumer-endpoint network attempt. Recheck
+		// its current manifest and startup policy even for an already signed
+		// request, closing the gap between poll and its second transaction.
+		// Expired historical retries retain their original, unusable bytes.
+		if now := clock().UnixNano(); q.Version == mx.ConsumerProtocolHealthVersion && now < q.Expires {
+			current, e := s.healthCurrent(ctx, tx, key, q.HandoverID, q.InboundID, now)
+			if e != nil || current.Expires < q.Expires || healthBinding(current) != healthBinding(q) {
+				return mx.ProtocolHealthRequest{}, ErrConflict
+			}
+		}
 		return q, tx.Commit()
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
@@ -212,7 +230,7 @@ func (s *Store) issueMeteredHealthChallenge(ctx context.Context, key, token []by
 	}
 	var roundExpires int64
 	if round != "" {
-		roundExpires, err = liveHealthRoundMember(ctx, tx, key, round, intent, opID, inbound, endpoint.SHA(), now)
+		roundExpires, err = s.liveHealthRoundMember(ctx, tx, key, round, intent, opID, inbound, endpoint.SHA(), now)
 		if err != nil {
 			return q, err
 		}
@@ -228,7 +246,7 @@ func (s *Store) issueMeteredHealthChallenge(ctx context.Context, key, token []by
 			return q, err
 		}
 	}
-	q, err = healthCurrent(ctx, tx, key, opID, inbound, now)
+	q, err = s.healthCurrent(ctx, tx, key, opID, inbound, now)
 	if err != nil {
 		return mx.ProtocolHealthRequest{}, err
 	}
@@ -330,7 +348,7 @@ func (s *Store) consumeMeteredHealthProof(ctx context.Context, key, token []byte
 		return MeteredHealthEvidence{}, ErrConflict
 	}
 	if round != "" {
-		expires, e := liveHealthRoundMember(ctx, tx, key, round, intent, q.HandoverID, q.InboundID, endpoint.SHA(), now.UnixNano())
+		expires, e := s.liveHealthRoundMember(ctx, tx, key, round, intent, q.HandoverID, q.InboundID, endpoint.SHA(), now.UnixNano())
 		if e != nil {
 			return MeteredHealthEvidence{}, e
 		}
@@ -340,7 +358,7 @@ func (s *Store) consumeMeteredHealthProof(ctx context.Context, key, token []byte
 	} else if err = legacyHealthAllowed(ctx, tx, q.HandoverID); err != nil {
 		return MeteredHealthEvidence{}, err
 	}
-	current, err := healthCurrent(ctx, tx, key, q.HandoverID, q.InboundID, now.UnixNano())
+	current, err := s.healthCurrent(ctx, tx, key, q.HandoverID, q.InboundID, now.UnixNano())
 	if err != nil {
 		return MeteredHealthEvidence{}, err
 	}

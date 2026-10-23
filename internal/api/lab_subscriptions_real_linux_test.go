@@ -35,6 +35,38 @@ func testLabSubscriptionRealDelivery(t *testing.T, ctx context.Context, f handov
 		t.Fatal("LAB delivery requires the complete current two-inbound health round", err)
 	}
 	round := audit.HealthRounds[0]
+	consumerMode := round.ConsumerManifestSHA != ""
+	routes := make(map[string]uint64, len(f.Inbounds))
+	if consumerMode {
+		if round.ConsumerManifestID == "" || round.ConsumerManifestRevision == 0 || len(f.ConsumerApprovals) != len(f.Inbounds) || len(round.Members) != len(f.Inbounds) {
+			t.Fatal("consumer delivery lost its approved complete manifest")
+		}
+		approved := make(map[uint64]mx.ConsumerEndpointApproval, len(f.ConsumerApprovals))
+		for _, approval := range f.ConsumerApprovals {
+			if approval.NodeID != f.Plan.TargetNode || approval.InstallationID != f.Plan.TargetInstallation || approved[approval.InboundID].InboundID != 0 {
+				t.Fatal("consumer fixture contains cross-node or repeated inbound authority")
+			}
+			approved[approval.InboundID] = approval
+		}
+		for _, member := range round.Members {
+			approval, ok := approved[member.InboundID]
+			if !ok || member.ConsumerAddress != approval.Address || member.ConsumerPort != approval.Port {
+				t.Fatal("health round and startup policy name different consumer endpoints")
+			}
+			routes[net.JoinHostPort(approval.Address, strconv.Itoa(int(approval.Port)))] = member.InboundID
+			delete(approved, member.InboundID)
+		}
+		if len(approved) != 0 || len(routes) != len(f.Inbounds) {
+			t.Fatal("health round omitted or duplicated an approved consumer endpoint")
+		}
+	} else {
+		if round.ConsumerManifestID != "" || round.ConsumerManifestRevision != 0 || len(f.ConsumerApprovals) != 0 {
+			t.Fatal("consumer manifest silently downgraded to loopback delivery")
+		}
+		for _, inbound := range f.Inbounds {
+			routes[net.JoinHostPort("127.0.0.1", strconv.Itoa(int(inbound.Port)))] = inbound.ID
+		}
+	}
 	before := f.Runtime.Status()
 	beforeClients := make(map[string]business.Client, len(f.Customers))
 	for _, c := range f.Customers {
@@ -49,18 +81,21 @@ func testLabSubscriptionRealDelivery(t *testing.T, ctx context.Context, f handov
 		State      string `json:"state"`
 	}
 	type deliverySnapshot struct {
-		ID             string `json:"id"`
-		EventID        string `json:"event_id"`
-		ClientID       string `json:"client_id"`
-		HandoverID     string `json:"handover_id"`
-		RoundID        string `json:"round_id"`
-		NodeID         string `json:"node_id"`
-		InstallationID string `json:"installation_id"`
-		Revision       uint64 `json:"revision"`
-		Created        int64  `json:"created_unix_nano"`
-		Expires        int64  `json:"expires_unix_nano"`
-		RouteCount     int    `json:"route_count"`
-		Current        bool   `json:"current"`
+		ID                       string `json:"id"`
+		EventID                  string `json:"event_id"`
+		ClientID                 string `json:"client_id"`
+		HandoverID               string `json:"handover_id"`
+		RoundID                  string `json:"round_id"`
+		NodeID                   string `json:"node_id"`
+		InstallationID           string `json:"installation_id"`
+		ConsumerManifestID       string `json:"consumer_manifest_id"`
+		ConsumerManifestRevision uint64 `json:"consumer_manifest_revision"`
+		ConsumerManifestSHA      string `json:"consumer_manifest_sha"`
+		Revision                 uint64 `json:"revision"`
+		Created                  int64  `json:"created_unix_nano"`
+		Expires                  int64  `json:"expires_unix_nano"`
+		RouteCount               int    `json:"route_count"`
+		Current                  bool   `json:"current"`
 	}
 	base := "/api/v1/workspace/clients/" + f.CustomerID + "/subscription"
 	post := func(path string, body any, want int, out any) {
@@ -163,10 +198,16 @@ func testLabSubscriptionRealDelivery(t *testing.T, ctx context.Context, f handov
 	get(path, http.StatusNotFound) // A token cannot publish the mutable desired profile.
 	var snapshot deliverySnapshot
 	body := map[string]any{"event_id": handoverTestID(352), "client_id": f.CustomerID, "round_id": round.ID, "expected_revision": 0}
+	if consumerMode {
+		body["consumer_manifest_id"], body["consumer_manifest_revision"] = round.ConsumerManifestID, round.ConsumerManifestRevision
+	}
 	snapshotPath := handoverBase + "/" + f.Plan.ID + "/lab-subscription-snapshot"
 	post(snapshotPath, body, http.StatusCreated, &snapshot)
 	if snapshot.ID == "" || snapshot.EventID != handoverTestID(352) || snapshot.ClientID != f.CustomerID || snapshot.HandoverID != f.Plan.ID || snapshot.RoundID != round.ID || snapshot.NodeID != f.Plan.TargetNode || snapshot.InstallationID != f.Plan.TargetInstallation || snapshot.Revision != 1 || snapshot.Created < round.Created || snapshot.Expires <= snapshot.Created || snapshot.Expires > round.Expires || snapshot.Expires > before.Observed.LeaseExpires || snapshot.RouteCount != 2 || !snapshot.Current {
 		t.Fatal("LAB snapshot lost its exact current round, candidate scope or bounded deadline")
+	}
+	if snapshot.ConsumerManifestID != round.ConsumerManifestID || snapshot.ConsumerManifestRevision != round.ConsumerManifestRevision || snapshot.ConsumerManifestSHA != round.ConsumerManifestSHA {
+		t.Fatal("consumer snapshot substituted the proven manifest identity or revision")
 	}
 	deliveryExpires = snapshot.Expires
 	var replay deliverySnapshot
@@ -197,25 +238,21 @@ func testLabSubscriptionRealDelivery(t *testing.T, ctx context.Context, f handov
 	if len(lines) != len(f.Inbounds) {
 		t.Fatal("consumer subscription omitted or duplicated destination inbounds")
 	}
-	ports := make(map[uint16]bool, len(f.Inbounds))
-	for _, inbound := range f.Inbounds {
-		ports[inbound.Port] = true
-	}
 	deliveryCtx, finishDelivery := context.WithDeadline(ctx, time.Unix(0, snapshot.Expires))
 	defer finishDelivery()
 	for _, line := range lines {
 		u, err := url.Parse(line)
-		if err != nil || u.Scheme != "vless" || u.User == nil || u.User.Username() != f.CustomerCredential || u.Hostname() != "127.0.0.1" || u.Path != "" || u.Fragment == "" {
-			t.Fatal("consumer URI did not describe the exact synthetic customer's loopback route")
+		if err != nil || u.Scheme != "vless" || u.User == nil || u.User.Username() != f.CustomerCredential || u.Path != "" || u.Fragment == "" {
+			t.Fatal("consumer URI did not describe the exact synthetic customer's route")
 		}
 		if _, password := u.User.Password(); password {
 			t.Fatal("consumer URI included an unexpected credential")
 		}
 		port, err := strconv.ParseUint(u.Port(), 10, 16)
-		if err != nil || !ports[uint16(port)] {
-			t.Fatal("consumer URI changed or repeated an applied inbound port")
+		if err != nil || u.Host != net.JoinHostPort(u.Hostname(), strconv.Itoa(int(port))) || routes[u.Host] == 0 {
+			t.Fatal("consumer URI changed or repeated the exact proven endpoint tuple")
 		}
-		delete(ports, uint16(port))
+		delete(routes, u.Host)
 		q, err := url.ParseQuery(u.RawQuery)
 		if err != nil || len(q) != 8 || q.Get("encryption") != "none" || q.Get("flow") != "xtls-rprx-vision" || q.Get("type") != "tcp" || q.Get("security") != "reality" || q.Get("fp") != "chrome" || q.Get("sni") != "one.example.org" || q.Get("sid") != "aa11" {
 			t.Fatal("consumer URI changed the applied Reality/Vision transport")
@@ -249,8 +286,8 @@ func testLabSubscriptionRealDelivery(t *testing.T, ctx context.Context, f handov
 			}
 		}()
 	}
-	if len(ports) != 0 {
-		t.Fatal("an applied destination listener was not exercised by consumer output")
+	if len(routes) != 0 {
+		t.Fatal("a proven destination endpoint was not exercised by consumer output")
 	}
 	revoked := mutate("revoke", 353, issued.Generation, "revoked")
 	get(path, http.StatusNotFound)
@@ -284,7 +321,11 @@ func testLabSubscriptionRealDelivery(t *testing.T, ctx context.Context, f handov
 			t.Fatal("subscription delivery changed customer UUID, plan, expiry or financial metadata", err)
 		}
 	}
-	t.Log("LAB_SUBSCRIPTION_REAL_PASS: token HTTP raw/base64, both applied Reality/Vision ports, exact customer echo, revoke and original expiry; production publication remains disabled")
+	if consumerMode {
+		t.Log("CONSUMER_MANIFEST_REAL_PASS: owner manifest and v3 round bind both approved ingress tuples; actual token URI consumption crosses each distinct ingress with exact customer echo, revoke and original expiry; node-side proof only, production publication remains disabled")
+	} else {
+		t.Log("LAB_SUBSCRIPTION_REAL_PASS: token HTTP raw/base64, both applied Reality/Vision ports, exact customer echo, revoke and original expiry; production publication remains disabled")
+	}
 	// The surrounding fixture drains the same real runtime and compares each
 	// customer's final ledger totals to its exact final core counters.
 }

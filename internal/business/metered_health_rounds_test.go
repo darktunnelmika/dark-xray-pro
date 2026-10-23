@@ -345,7 +345,7 @@ func TestMeteredHealthRoundFreshnessRechecksAllRuntimeState(t *testing.T) {
 				tx.Rollback()
 				t.Fatal(err)
 			}
-			v := assessHealthRound(ctx, tx, f.key, row, clock().UnixNano())
+			v := f.s.assessHealthRound(ctx, tx, f.key, row, clock().UnixNano())
 			tx.Rollback()
 			want := "state_changed"
 			if mode == "expired" {

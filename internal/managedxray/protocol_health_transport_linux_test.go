@@ -268,9 +268,64 @@ func (h *healthTransportHarness) open() *TransactionRuntime {
 }
 
 func (h *healthTransportHarness) proof(q ProtocolHealthRequest) ProtocolHealthReceipt {
-	p := ProtocolHealthReceipt{Version: ProtocolHealthVersion, RequestSHA: hashJSON(q), ResponseSHA: protocolHealthResponseSHA(q.ID), Completed: q.Issued + 1}
-	p.Signature = transactionMAC(h.key, "DARK-PRO-PROTOCOL-HEALTH-RECEIPT-v2", p)
+	p := ProtocolHealthReceipt{Version: q.Version, RequestSHA: hashJSON(q), ResponseSHA: protocolHealthResponseSHA(q.ID), Completed: q.Issued + 1}
+	p.Signature = transactionMAC(h.key, protocolHealthMACDomain("RECEIPT", q.Version), p)
 	return p
+}
+
+func TestConsumerProtocolTransportRequiresLocalAuthorityAndReplaysExactV3Receipt(t *testing.T) {
+	h := newHealthTransportHarness(t)
+	q := h.request(1, h.base.Issued)
+	q.Version, q.ConsumerManifestSHA, q.ConsumerAddress, q.ConsumerPort = ConsumerProtocolHealthVersion, strings.Repeat("9", 64), "11.0.0.2", 39443
+	q, err := SignProtocolHealthRequest(h.key, q)
+	if err != nil {
+		t.Fatal(err)
+	}
+	policy := []ConsumerEndpointApproval{{NodeID: q.NodeID, InstallationID: q.InstallationID, InboundID: q.InboundID, Address: q.ConsumerAddress, Port: q.ConsumerPort}}
+	probes := 0
+	probe := func(_ context.Context, got ProtocolHealthRequest, _ ProtocolHealthEndpoint) (ProtocolHealthReceipt, error) {
+		probes++
+		if got != q {
+			t.Fatal("consumer delivery changed its signed request")
+		}
+		return h.proof(got), nil
+	}
+	h.deliver(q)
+	if err := h.sync(h.open(), probe); err == nil || probes != 0 {
+		t.Fatal("unapproved consumer tuple reached probe execution")
+	}
+	s, err := h.disk.load(h.key)
+	if err != nil || s.Health != nil || len(s.HealthHistory) != 0 {
+		t.Fatal("unapproved consumer work consumed a nonce", err)
+	}
+	h.deliver(q)
+	h.statuses = []int{503, 204}
+	r := h.open()
+	r.metered.ConsumerEndpointApprovals = policy
+	if err := h.sync(r, probe); err == nil || probes != 1 {
+		t.Fatal("lost consumer receipt response was hidden or repeated execution")
+	}
+	// A retained receipt is historical evidence, so it may be delivered after
+	// restart/policy withdrawal. It never grants permission for another probe.
+	if err := h.sync(h.open(), probe); err != nil || probes != 1 {
+		t.Fatal("v3 outbox replay restarted the consumer probe", err)
+	}
+	h.mu.Lock()
+	if len(h.receipts) != 2 || h.receipts[0] != h.receipts[1] || h.receipts[0].Receipt.Version != ConsumerProtocolHealthVersion {
+		t.Error("consumer receipt was not replayed byte-exactly")
+	}
+	h.mu.Unlock()
+	changed := q
+	changed.ConsumerPort++
+	changed, _ = SignProtocolHealthRequest(h.key, changed)
+	h.deliver(changed)
+	r = h.open()
+	changedPolicy := append([]ConsumerEndpointApproval(nil), policy...)
+	changedPolicy[0].Port++
+	r.metered.ConsumerEndpointApprovals = changedPolicy
+	if err := h.sync(r, probe); err == nil || probes != 1 {
+		t.Fatal("same nonce moved to another approved consumer tuple")
+	}
 }
 
 func (h *healthTransportHarness) sync(r *TransactionRuntime, probe func(context.Context, ProtocolHealthRequest, ProtocolHealthEndpoint) (ProtocolHealthReceipt, error)) error {

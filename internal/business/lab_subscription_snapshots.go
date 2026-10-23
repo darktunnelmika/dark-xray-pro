@@ -52,6 +52,11 @@ func readSubscriptionSnapshot(ctx context.Context, tx *sql.Tx, column, value str
 			return r, ErrUnavailable
 		}
 	}
+	round, err := readHealthRound(ctx, tx, r.RoundID)
+	if err != nil || round.HandoverID != r.HandoverID || round.ManifestSHA != r.ManifestSHA {
+		return r, ErrUnavailable
+	}
+	r.ConsumerManifestID, r.ConsumerManifestRevision, r.ConsumerManifestSHA = round.ConsumerManifestID, round.ConsumerManifestRevision, round.ConsumerManifestSHA
 	return r, nil
 }
 func readSubscriptionSnapshotHead(ctx context.Context, tx *sql.Tx, clientID string) (subscriptionSnapshotRow, error) {
@@ -110,7 +115,7 @@ type subscriptionProof struct {
 // Build only from the authenticated exact applied candidate. The caller picks
 // a client and a complete round, never an endpoint or subset of required routes.
 // Full round coverage is checked before selecting that client's billable UUID.
-func currentSubscriptionProof(ctx context.Context, tx *sql.Tx, key []byte, clientID, handoverID, roundID string, endpoint *mx.ProtocolHealthEndpoint, now int64) (subscriptionProof, error) {
+func (s *Store) currentSubscriptionProof(ctx context.Context, tx *sql.Tx, key []byte, clientID, handoverID, roundID string, endpoint *mx.ProtocolHealthEndpoint, now int64) (subscriptionProof, error) {
 	var out subscriptionProof
 	round, err := readHealthRound(ctx, tx, roundID)
 	if err != nil {
@@ -124,14 +129,14 @@ func currentSubscriptionProof(ctx context.Context, tx *sql.Tx, key []byte, clien
 			return out, ErrConflict
 		}
 	}
-	manifest, _, err := currentHealthRound(ctx, tx, key, handoverID, now, endpoint)
+	manifest, _, err := s.currentHealthRound(ctx, tx, key, handoverID, now, endpoint)
 	if err != nil {
 		return out, err
 	}
 	if meteredHash(manifest) != round.ManifestSHA {
 		return out, ErrConflict
 	}
-	state, err := loadMeteredHealthSnapshot(ctx, tx, key, handoverID, now)
+	state, err := s.loadMeteredHealthSnapshot(ctx, tx, key, handoverID, now)
 	if err != nil {
 		return out, err
 	}
@@ -175,6 +180,22 @@ func currentSubscriptionProof(ctx context.Context, tx *sql.Tx, key []byte, clien
 	routes, err := xrayconfig.LabSubscriptionRoutes(state.apply.payload.Candidate, c.UUID, labels)
 	if err != nil || len(routes) == 0 || len(routes) > maxMeteredHealthMembers {
 		return out, ErrConflict
+	}
+	if manifest.ConsumerManifestID != "" {
+		for i := range routes {
+			matched := false
+			for _, member := range manifest.Members {
+				if member.InboundID == routes[i].InboundID && member.Port == routes[i].Port && mx.ValidateConsumerProtocolEndpoint(member.ConsumerAddress, member.ConsumerPort) {
+					routes[i].Host, routes[i].Port = member.ConsumerAddress, member.ConsumerPort
+					routes[i].Label = fmt.Sprintf("LAB consumer %d", member.InboundID)
+					matched = true
+					break
+				}
+			}
+			if !matched {
+				return out, ErrConflict
+			}
+		}
 	}
 	// Bind the UUID selected by the codec to the exact registered accounting
 	// email in every applied listener. Membership and billability must describe
@@ -234,15 +255,15 @@ func currentSubscriptionProof(ctx context.Context, tx *sql.Tx, key []byte, clien
 	return subscriptionProof{Raw: raw, Round: round, State: state, Handover: op, BindingSHA: binding, Expires: expires, RouteCount: len(routes)}, nil
 }
 
-func currentSubscriptionSnapshot(ctx context.Context, tx *sql.Tx, key []byte, row subscriptionSnapshotRow, endpoint *mx.ProtocolHealthEndpoint, now int64) (subscriptionProof, error) {
+func (s *Store) currentSubscriptionSnapshot(ctx context.Context, tx *sql.Tx, key []byte, row subscriptionSnapshotRow, endpoint *mx.ProtocolHealthEndpoint, now int64) (subscriptionProof, error) {
 	if now < row.CreatedUnixNano || now >= row.ExpiresUnixNano {
 		return subscriptionProof{}, ErrConflict
 	}
-	proof, err := currentSubscriptionProof(ctx, tx, key, row.ClientID, row.HandoverID, row.RoundID, endpoint, now)
+	proof, err := s.currentSubscriptionProof(ctx, tx, key, row.ClientID, row.HandoverID, row.RoundID, endpoint, now)
 	if err != nil {
 		return proof, err
 	}
-	if row.NodeID != proof.Round.NodeID || row.InstallationID != proof.Round.InstallationID || row.EndpointSHA != proof.Round.EndpointSHA || row.ManifestSHA != proof.Round.ManifestSHA || row.BindingSHA != proof.BindingSHA || row.ExpiresUnixNano != proof.Expires || row.RouteCount != proof.RouteCount || row.BodySHA != subscriptionBodySHA(proof.Raw) {
+	if row.NodeID != proof.Round.NodeID || row.InstallationID != proof.Round.InstallationID || row.EndpointSHA != proof.Round.EndpointSHA || row.ManifestSHA != proof.Round.ManifestSHA || row.ConsumerManifestID != proof.Round.ConsumerManifestID || row.ConsumerManifestRevision != proof.Round.ConsumerManifestRevision || row.ConsumerManifestSHA != proof.Round.ConsumerManifestSHA || row.BindingSHA != proof.BindingSHA || row.ExpiresUnixNano != proof.Expires || row.RouteCount != proof.RouteCount || row.BodySHA != subscriptionBodySHA(proof.Raw) {
 		return proof, ErrConflict
 	}
 	return proof, nil
@@ -250,7 +271,7 @@ func currentSubscriptionSnapshot(ctx context.Context, tx *sql.Tx, key []byte, ro
 
 func (s *Store) MaterializeLabSubscription(ctx context.Context, key []byte, actorID, handoverID string, in LabSubscriptionMaterialization, endpoint mx.ProtocolHealthEndpoint) (LabSubscriptionSnapshot, error) {
 	var out LabSubscriptionSnapshot
-	if !eventRE.MatchString(in.EventID) || !idRE.MatchString(in.ClientID) || !routeID.MatchString(in.RoundID) || !routeID.MatchString(handoverID) || in.ExpectedRevision >= routeMax-1 || !endpoint.Valid() {
+	if !eventRE.MatchString(in.EventID) || !idRE.MatchString(in.ClientID) || !routeID.MatchString(in.RoundID) || !routeID.MatchString(handoverID) || in.ExpectedRevision >= routeMax-1 || !endpoint.Valid() || (in.ConsumerManifestID == "" && in.ConsumerManifestRevision != 0) || (in.ConsumerManifestID != "" && (!routeID.MatchString(in.ConsumerManifestID) || in.ConsumerManifestRevision == 0 || in.ConsumerManifestRevision >= routeMax)) {
 		return out, ErrInvalid
 	}
 	tx, err := s.subscriptionTx(ctx, key)
@@ -278,13 +299,16 @@ func (s *Store) MaterializeLabSubscription(ctx context.Context, key []byte, acto
 			return out, err
 		}
 		if headErr == nil && head.ID == prior.ID {
-			_, e := currentSubscriptionSnapshot(ctx, tx, key, prior, &endpoint, time.Now().UnixNano())
+			_, e := s.currentSubscriptionSnapshot(ctx, tx, key, prior, &endpoint, time.Now().UnixNano())
 			prior.Current = e == nil
 		}
 		prior.Replayed = true
 		return prior.LabSubscriptionSnapshot, tx.Commit()
 	}
 	if !errors.Is(err, ErrNotFound) {
+		return out, err
+	}
+	if err = consumerEventUnused(ctx, tx, in.EventID); err != nil {
 		return out, err
 	}
 	var used int
@@ -295,16 +319,19 @@ func (s *Store) MaterializeLabSubscription(ctx context.Context, key []byte, acto
 		return out, ErrConflict
 	}
 	now := time.Now().UnixNano()
-	proof, err := currentSubscriptionProof(ctx, tx, key, in.ClientID, handoverID, in.RoundID, &endpoint, now)
+	proof, err := s.currentSubscriptionProof(ctx, tx, key, in.ClientID, handoverID, in.RoundID, &endpoint, now)
 	if err != nil {
 		return out, err
+	}
+	if proof.Round.ConsumerManifestID != in.ConsumerManifestID || proof.Round.ConsumerManifestRevision != in.ConsumerManifestRevision {
+		return out, ErrConflict
 	}
 	id, err := subscriptionID()
 	if err != nil {
 		return out, err
 	}
 	row := subscriptionSnapshotRow{subscriptionSnapshotBinding: subscriptionSnapshotBinding{
-		LabSubscriptionSnapshot: LabSubscriptionSnapshot{ID: id, EventID: in.EventID, ClientID: in.ClientID, HandoverID: handoverID, RoundID: in.RoundID, NodeID: proof.Round.NodeID, InstallationID: proof.Round.InstallationID, Revision: head.Revision + 1, CreatedUnixNano: now, ExpiresUnixNano: proof.Expires, RouteCount: proof.RouteCount},
+		LabSubscriptionSnapshot: LabSubscriptionSnapshot{ID: id, EventID: in.EventID, ClientID: in.ClientID, HandoverID: handoverID, RoundID: in.RoundID, ConsumerManifestID: proof.Round.ConsumerManifestID, ConsumerManifestRevision: proof.Round.ConsumerManifestRevision, ConsumerManifestSHA: proof.Round.ConsumerManifestSHA, NodeID: proof.Round.NodeID, InstallationID: proof.Round.InstallationID, Revision: head.Revision + 1, CreatedUnixNano: now, ExpiresUnixNano: proof.Expires, RouteCount: proof.RouteCount},
 		ActorID:                 actorID, Fingerprint: fp, EndpointSHA: proof.Round.EndpointSHA, ManifestSHA: proof.Round.ManifestSHA, BindingSHA: proof.BindingSHA, BodySHA: subscriptionBodySHA(proof.Raw),
 	}}
 	row.Payload, err = sealSubscription(key, "snapshot", row.subscriptionSnapshotBinding, proof.Raw)
@@ -386,7 +413,7 @@ func (s *Store) ReadLabSubscription(ctx context.Context, key []byte, token strin
 		return out, err
 	}
 	now := time.Now().UnixNano()
-	proof, err := currentSubscriptionSnapshot(ctx, tx, key, row, &endpoint, now)
+	proof, err := s.currentSubscriptionSnapshot(ctx, tx, key, row, &endpoint, now)
 	if err != nil {
 		return out, err
 	}

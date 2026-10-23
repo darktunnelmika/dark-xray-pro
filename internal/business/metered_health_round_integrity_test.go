@@ -27,7 +27,7 @@ func TestMeteredHealthRoundAuditRejectsMalformedPersistedEvidence(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	q, err := healthCurrent(ctx, tx, f.key, f.in.ID, r.Members[0].InboundID, r.Created)
+	q, err := f.s.healthCurrent(ctx, tx, f.key, f.in.ID, r.Members[0].InboundID, r.Created)
 	tx.Rollback()
 	if err != nil {
 		t.Fatal(err)

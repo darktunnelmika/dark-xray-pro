@@ -15,11 +15,12 @@ This repository is separate from the existing DARK XRAY HUB. Do not connect lega
 - **Out of scope:** WARP and ad blocking are entirely excluded from PRO: no installation, UI/API settings, optional later phase, or migration of those features. Old Node installation identities are not reused.
 - **Telegram scope:** Existing bot/shop/Mini App functionality and the requested representative-bot admin/broadcast workflows remain part of the complete product. Development follows the Node/Inbound/runtime gates with separate synthetic/test identities; see the [recorded Telegram requirements](docs/telegram-representative-upgrade.fa.md).
 
-## Current feature scope and status — 22 October 2026
+## Current feature scope and status — 23 October 2026
 
 The [source-linked feature audit](docs/release/feature-scope-and-status.fa.md)
 is the current cross-module reference, audited at `c740c48` after [N17 / PR #96](https://github.com/darktunnelmika/dark-xray-pro/pull/96)
-and extended by [N18 native LAB subscription delivery](docs/native-lab-subscriptions-n18.fa.md).
+and extended by [N18 native LAB subscription delivery](docs/native-lab-subscriptions-n18.fa.md)
+and [N19 explicit consumer endpoint manifests](docs/consumer-endpoint-manifests-n19.fa.md).
 It distinguishes implemented source, bounded LAB acceptance and remaining
 product work. Native customer/representative management, credit and usage
 ledgers, Node enrollment/metrics, Inbound lifecycle and isolated metered
@@ -27,9 +28,14 @@ handover/health have substantial implementations. N17 verifies the complete
 inbound set derived from the exact applied destination candidate in a bounded
 loopback health round. N18 adds persistent revocable client tokens, immutable
 CAS-fenced snapshots, raw/base64 VLESS delivery and scoped browser controls.
-Every fetch rechecks the exact applied candidate and the original health/lease
-deadline. Delivery is explicitly LAB-only, with at most the remaining eight-second
-round window; public customer ingress and production publication are not proven.
+N19 binds complete immutable consumer endpoint manifests to explicit startup
+approval for each Node/installation/inbound. Its v3 proof and URI output use the
+same approved literal IPv4/port, with manifest replacement/revocation invalidating
+old evidence and snapshots. Every fetch rechecks the exact applied candidate,
+current approval and original health/lease deadline. Delivery is explicitly
+LAB-only, with at most the remaining eight-second round window. N19 proves the
+consumer tuple from the Node's vantage point; independent Internet reachability
+and production publication are not proven.
 
 Still open: public subscription delivery and atomic route publication; complete
 Node lifecycle and real Tunnel/Dark Swap forwarding; verified IP/HWID and

@@ -1,14 +1,16 @@
 import { meteredCondition, readAttempt, readCommand, type Command, type MeteredCondition, type Scope } from "./meteredRouteTransactions";
+import { consumerAddress, readConsumerRef } from "./consumerManifests";
 
 export type Pair = { source_node: string; target_node: string; source_installation: string; target_installation: string };
 export type Plan = Pair & { id: string; source_stage_id: string; target_stage_id: string; source_usage: MeteredCondition };
 export type HealthIntent = {id:string;handover_id:string;node_id:string;installation_id:string;inbound_id:number;endpoint_sha:string;expires_unix_nano:number};
 export type HealthEvidence = {challenge_id:string;handover_id:string;request_sha:string;receipt_sha:string;accepted_unix_nano:number;replayed:boolean};
-export type HealthRoundMember = { inbound_id: number; intent_id: string; port: number; state: "pending" | "accepted"; challenge_id?: string; accepted_unix_nano?: number };
+export type HealthRoundMember = { inbound_id: number; intent_id: string; port: number; state: "pending" | "accepted"; challenge_id?: string; accepted_unix_nano?: number;consumer_address?:string;consumer_port?:number };
 export type HealthRound = {
  id: string; handover_id: string; node_id: string; installation_id: string; endpoint_sha: string; manifest_sha: string;
  created_unix_nano: number; expires_unix_nano: number; members: HealthRoundMember[];
  state: "pending" | "complete" | "expired" | "state_changed"; current: boolean;
+ consumer_manifest_id?:string;consumer_manifest_revision?:number;consumer_manifest_sha?:string;
 };
 export type Handover = Plan & { created_unix_nano: number; drain_command_id: string; apply_command_id: string; cancelled: boolean; can_publish: false;
  phase: "awaiting_source_drain" | "source_drain_pending" | "source_drained" | "target_apply_pending" | "target_applied_health_required" | "recovery_required" | "cancelled";
@@ -25,21 +27,24 @@ export function readHealthIntent(v:unknown,op:string,target:string,install:strin
 // These are audit facts, never credentials or a signed Agent packet. A partial
 // or inconsistent response cannot be promoted to a complete current round.
 export function readHealthRound(v: unknown, op: string, target: string, install: string): HealthRound {
- const nano = (n: unknown): n is number => typeof n === "number" && Number.isFinite(n) && n > 0;
+ const nano = (n: unknown): n is number => typeof n === "number" && Number.isInteger(n) && n > 0 && n <= 9_223_372_036_854_775_000;
  if (!object(v) || !hex(v.id,32) || v.handover_id !== op || v.node_id !== target || v.installation_id !== install ||
-  !hex(v.endpoint_sha,64) || !hex(v.manifest_sha,64) || !nano(v.created_unix_nano) || !nano(v.expires_unix_nano) || v.expires_unix_nano <= v.created_unix_nano ||
+  !hex(v.endpoint_sha,64) || !hex(v.manifest_sha,64) || !nano(v.created_unix_nano) || !nano(v.expires_unix_nano) || v.expires_unix_nano <= v.created_unix_nano || v.expires_unix_nano-v.created_unix_nano>8e9 ||
   !["pending","complete","expired","state_changed"].includes(String(v.state)) || typeof v.current !== "boolean" ||
   !Array.isArray(v.members) || v.members.length === 0 || v.members.length > 256) throw Error("invalid_health_round");
+ const consumer=readConsumerRef(v);
  for (const m of v.members) {
   if (!object(m) || typeof m.inbound_id !== "number" || !Number.isSafeInteger(m.inbound_id) || m.inbound_id <= 0 || !hex(m.intent_id,32) ||
    typeof m.port !== "number" || !Number.isSafeInteger(m.port) || m.port <= 0 || m.port > 65535 || !["pending","accepted"].includes(String(m.state)) ||
    (m.challenge_id !== undefined && !hex(m.challenge_id,32)) ||
-   (m.state === "accepted" ? !hex(m.challenge_id,32) || !nano(m.accepted_unix_nano) || m.accepted_unix_nano < v.created_unix_nano || m.accepted_unix_nano > v.expires_unix_nano : m.accepted_unix_nano !== undefined)) throw Error("invalid_health_round_member");
+   (m.state === "accepted" ? !hex(m.challenge_id,32) || !nano(m.accepted_unix_nano) || m.accepted_unix_nano < v.created_unix_nano || m.accepted_unix_nano >= v.expires_unix_nano : m.accepted_unix_nano !== undefined)) throw Error("invalid_health_round_member");
+  if(consumer? !consumerAddress(m.consumer_address)||typeof m.consumer_port!=="number"||!Number.isSafeInteger(m.consumer_port)||m.consumer_port<1024||m.consumer_port>65535 : m.consumer_address!==undefined||m.consumer_port!==undefined)throw Error("invalid_health_consumer_member");
  }
  const members = v.members as HealthRoundMember[];
  if (new Set(members.map(m=>m.inbound_id)).size !== members.length || new Set(members.map(m=>m.intent_id)).size !== members.length ||
   new Set(members.map(m=>m.port)).size !== members.length || new Set(members.filter(m=>m.challenge_id).map(m=>m.challenge_id)).size !== members.filter(m=>m.challenge_id).length) throw Error("duplicate_health_round_member");
  const complete = members.every(m=>m.state === "accepted");
+ if(consumer&&new Set(members.map(m=>m.consumer_address+":"+m.consumer_port)).size!==members.length)throw Error("duplicate_health_consumer_endpoint");
  if ((v.state === "complete" && !complete) || (v.state === "pending" && complete) || (v.current && (v.state !== "complete" || !complete))) throw Error("invalid_health_round_coverage");
  return v as HealthRound;
 }
