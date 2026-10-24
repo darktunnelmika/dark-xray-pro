@@ -20,6 +20,7 @@ import (
 
 	"github.com/darktunnelmika/dark-xray-pro/internal/business"
 	"github.com/darktunnelmika/dark-xray-pro/internal/webui"
+	"github.com/darktunnelmika/dark-xray-pro/internal/xrayconfig"
 )
 
 // A real browser signs in and authors the complete plan through the compiled UI
@@ -157,7 +158,9 @@ func TestRealBrowserInboundCreationPlan(t *testing.T) {
 		t.Fatal("UI edit lost disabled state, identity, revision or event semantics")
 	}
 	wantProfile := business.InboundInput{ID: proof.InboundID, Name: "Real browser creation edited", Transport: "grpc", GRPCService: "dark-grpc",
-		RealityTarget: "example.org:443", ServerNames: []string{"example.org"}, ShortIDs: []string{"aabb", "ccdd", "eeff"}}
+		RealityTarget: "example.org:443", ServerNames: []string{"example.org"}, ShortIDs: []string{"aabb", "ccdd", "eeff"},
+		Options: &xrayconfig.ProfileOptions{GRPCAuthority: "edge.example.org:8443", GRPCMultiMode: true,
+			RealityXver: 2, RealityMaxTimeDiff: 120000, RealityMinClientVer: "1.8.0", RealityMaxClientVer: "25.9.11"}}
 	if !reflect.DeepEqual(plan.Profile.InboundInput, wantProfile) {
 		t.Fatal("stored profile differs from the browser's complete edit")
 	}

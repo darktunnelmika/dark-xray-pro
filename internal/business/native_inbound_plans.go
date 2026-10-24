@@ -54,6 +54,7 @@ type NativeInboundPlanInput struct {
 	Profile                 InboundInput            `json:"profile"`
 	Nodes                   []NativeInboundPlanNode `json:"nodes"`
 	Reason                  string                  `json:"reason"`
+	profileOptionsProvided  bool
 }
 
 type NativeInboundPlan struct {
@@ -232,6 +233,7 @@ func canonicalPlanIP(raw string) string {
 func planListenerPort(p uint16) bool { return p >= 1024 && p != 2087 && p != 8443 && p != 24443 }
 
 func normalizeNativeInboundPlan(in NativeInboundPlanInput) (NativeInboundPlanInput, error) {
+	in.profileOptionsProvided = in.profileOptionsProvided || in.Profile.Options != nil
 	in.Reason = strings.TrimSpace(in.Reason)
 	in.Profile.Name = strings.TrimSpace(in.Profile.Name)
 	if !eventRE.MatchString(in.EventID) {
@@ -253,6 +255,11 @@ func normalizeNativeInboundPlan(in NativeInboundPlanInput) (NativeInboundPlanInp
 	// Own all slices: caller edits must never change a checked request/receipt.
 	in.Profile.ServerNames = append([]string(nil), in.Profile.ServerNames...)
 	in.Profile.ShortIDs = append([]string(nil), in.Profile.ShortIDs...)
+	options, optionsErr := xrayconfig.NormalizeProfileOptions(in.Profile.Transport, in.Profile.Options)
+	if optionsErr != nil {
+		return in, planError("", "profile.options", "profile_options_invalid", ErrInvalid)
+	}
+	in.Profile.Options = options
 	in.Nodes = append([]NativeInboundPlanNode(nil), in.Nodes...)
 	seen := map[string]bool{}
 	for i := range in.Nodes {
@@ -430,7 +437,7 @@ func nativePlanStatus(nodes []NativeInboundPlanNode) string {
 func plannedProfile(in InboundInput, privateKey string) xrayconfig.Profile {
 	return xrayconfig.Profile{InboundID: in.ID, Transport: in.Transport, GRPCService: in.GRPCService,
 		RealityTarget: in.RealityTarget, ServerNames: in.ServerNames, ShortIDs: in.ShortIDs,
-		RealityPrivateKey: privateKey, Users: []xrayconfig.User{}}
+		Options: in.Options, RealityPrivateKey: privateKey, Users: []xrayconfig.User{}}
 }
 func validatePlannedProfile(p xrayconfig.Profile) error {
 	_, err := xrayconfig.RenderAssigned("profile-validation", "00000000000000000000000000000000", "127.0.0.1", []xrayconfig.Assignment{{Profile: p, DirectPort: 10443}})
@@ -441,19 +448,7 @@ func validatePlannedProfile(p xrayconfig.Profile) error {
 }
 
 func sealPlannedProfile(key []byte, p xrayconfig.Profile) ([]byte, error) {
-	a, err := profileAEAD(key)
-	if err != nil {
-		return nil, err
-	}
-	raw, err := json.Marshal(p)
-	if err != nil {
-		return nil, err
-	}
-	nonce := make([]byte, a.NonceSize())
-	if _, err = rand.Read(nonce); err != nil {
-		return nil, err
-	}
-	return a.Seal(nonce, nonce, raw, profileAAD(p.InboundID)), nil
+	return sealInboundProfile(key, p)
 }
 
 type planReader interface {
@@ -739,6 +734,12 @@ func validateNativeInboundPlanTx(ctx context.Context, tx *sql.Tx, key []byte, in
 		existing, original, err := editablePlanProfile(ctx, tx, key, old)
 		if err != nil {
 			return plan, private, topology, err
+		}
+		// An older open browser does not know about Options. Require explicit
+		// options (including an empty object for clearing) before replacing a
+		// profile that already has extended settings.
+		if existing.Options != nil && !in.profileOptionsProvided {
+			return plan, private, topology, planError("", "profile.options", "profile_options_required", ErrConflict)
 		}
 		plan.CreatedUnix = old.CreatedUnix
 		plan.Profile = existing

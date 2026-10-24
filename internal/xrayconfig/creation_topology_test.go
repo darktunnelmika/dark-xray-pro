@@ -160,25 +160,30 @@ func TestRealPinnedCreationTopologyOffline(t *testing.T) {
 	if bin == "" || pin == "" || os.Getenv("DARK_PRO_LAB_MODE") != "1" {
 		t.Fatal("explicit LAB mode, absolute pinned binary and SHA256 are required")
 	}
-	for _, transport := range []string{"tcp", "grpc"} {
-		for _, reuse := range []bool{false, true} {
-			p := testProfile(7)
-			p.Transport = transport
-			if transport == "grpc" {
-				p.GRPCService = "dark-creation"
-			}
-			nodes, swaps := creationFixture()
-			if reuse {
-				swaps[0].DestinationPort = nodes[0].TunnelPort
-			}
-			topology, err := RenderCreationTopology(p, nodes, swaps)
-			if err != nil {
-				t.Fatal(err)
-			}
-			for _, node := range topology.Nodes {
-				result, err := ValidateOffline(context.Background(), node.Candidate, bin, pin)
-				if err != nil || !result.XraySyntaxValidated || result.CanActivate {
-					t.Fatalf("pinned core rejected %s on %s (Tunnel reuse %t): %v", transport, node.NodeID, reuse, err)
+	for _, advanced := range []bool{false, true} {
+		for _, transport := range []string{"tcp", "grpc"} {
+			for _, reuse := range []bool{false, true} {
+				p := testProfile(7)
+				p.Transport = transport
+				if transport == "grpc" {
+					p.GRPCService = "dark-creation"
+				}
+				if advanced {
+					p.Options = fullProfileOptions(transport)
+				}
+				nodes, swaps := creationFixture()
+				if reuse {
+					swaps[0].DestinationPort = nodes[0].TunnelPort
+				}
+				topology, err := RenderCreationTopology(p, nodes, swaps)
+				if err != nil {
+					t.Fatal(err)
+				}
+				for _, node := range topology.Nodes {
+					result, err := ValidateOffline(context.Background(), node.Candidate, bin, pin)
+					if err != nil || !result.XraySyntaxValidated || result.CanActivate {
+						t.Fatalf("pinned core rejected %s on %s (Tunnel reuse %t, advanced %t): %v", transport, node.NodeID, reuse, advanced, err)
+					}
 				}
 			}
 		}

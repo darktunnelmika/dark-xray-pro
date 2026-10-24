@@ -6,6 +6,12 @@ type Language = "en" | "fa";
 const messages: Record<Language, Record<string, string>> = {
   en: {
     name_required: "Enter an Inbound name.", grpc_service_invalid: "Use 1–64 letters, numbers, underscores or hyphens for the gRPC service.",
+    profile_options_required: "Reload the saved profile to retain its advanced settings before editing.",
+    profile_options_invalid: "Review the advanced REALITY and gRPC settings; the server rejected this combination.",
+    profile_options_unavailable: "This server cannot save advanced profile settings. Update the server before saving this profile.",
+    grpc_authority_invalid: "Enter a valid gRPC authority host or IP with an optional port.",
+    reality_xver_invalid: "Choose REALITY Xver 0, 1 or 2.", reality_max_time_diff_invalid: "Enter a whole number of milliseconds from 0 to 9223372036854.",
+    reality_version_invalid: "Use a client version x.y.z with each component between 0 and 255, without leading zeros.", reality_version_order: "The maximum client version must be at least the minimum version.",
     target_invalid: "Enter a REALITY target with a valid port.", server_names_required: "Enter at least one server name.",
     short_ids_invalid: "Use 1–16 unique Short IDs, each 2–16 lowercase hexadecimal characters with an even length.",
     node_required: "Select at least one destination Node.", pairing_changed: "This Node’s installation changed. Remove and select it again.",
@@ -30,6 +36,12 @@ const messages: Record<Language, Record<string, string>> = {
   },
   fa: {
     name_required: "نام اینباند را وارد کن.", grpc_service_invalid: "برای سرویس gRPC از ۱ تا ۶۴ حرف انگلیسی، عدد، زیرخط یا خط تیره استفاده کن.",
+    profile_options_required: "برای حفظ تنظیمات پیشرفته، پروفایل ذخیره‌شده را پیش از ویرایش دوباره بارگذاری کن.",
+    profile_options_invalid: "تنظیمات پیشرفتهٔ REALITY و gRPC را بررسی کن؛ سرور این ترکیب را نپذیرفت.",
+    profile_options_unavailable: "این نسخهٔ سرور تنظیمات پیشرفته را ذخیره نمی‌کند. پیش از ذخیرهٔ این پروفایل، سرور باید به‌روزرسانی شود.",
+    grpc_authority_invalid: "برای Authority یک هاست یا IP معتبر با پورت اختیاری وارد کن.",
+    reality_xver_invalid: "برای Xver یکی از مقادیر ۰، ۱ یا ۲ را انتخاب کن.", reality_max_time_diff_invalid: "تعداد میلی‌ثانیه را با عدد صحیح بین ۰ و 9223372036854 وارد کن.",
+    reality_version_invalid: "نسخه را با قالب x.y.z وارد کن؛ هر بخش بین ۰ تا ۲۵۵ و بدون صفر اضافه در ابتدا باشد.", reality_version_order: "حداکثر نسخهٔ کلاینت نباید از حداقل نسخه کوچک‌تر باشد.",
     target_invalid: "مقصد REALITY را همراه یک پورت معتبر وارد کن.", server_names_required: "حداقل یک نام سرور وارد کن.",
     short_ids_invalid: "۱ تا ۱۶ شناسهٔ یکتا وارد کن؛ هر Short ID باید ۲ تا ۱۶ رقم هگز کوچک با طول زوج داشته باشد.",
     node_required: "حداقل یک نود مقصد را انتخاب کن.", pairing_changed: "نصب این نود تغییر کرده؛ نود را حذف و دوباره انتخاب کن.",
@@ -84,9 +96,9 @@ const words = {
   },
 };
 
-export default function InboundCreationNodes({ language, state, nodes, targets = [], disabled, expanded, onExpanded, onChange, issues = [] }: {
+export default function InboundCreationNodes({ language, state, nodes, targets = [], disabled, expanded, onExpanded, onChange, issues = [], view = "all" }: {
   language: Language; state: CreationState; nodes: InboundNode[]; disabled: boolean; expanded: string;
-  targets?: InboundTarget[];
+  targets?: InboundTarget[]; view?: "all" | "swap";
   onExpanded: (id: string) => void; onChange: (value: CreationState) => void; issues?: CreationIssue[];
 }) {
   const t = words[language];
@@ -105,14 +117,14 @@ export default function InboundCreationNodes({ language, state, nodes, targets =
     {!nodes.length && <p className="creation-empty"><Server size={22}/>{t.none}</p>}
     {state.selected.length >= 64 && <p className="creation-help">{t.limit}</p>}
     <div className="creation-node-list">
-      {visibleNodes.map(node => {
+      {(view === "swap" ? visibleNodes.filter(node => state.selected.includes(node.node_id)) : visibleNodes).map(node => {
         const id = node.node_id, selected = state.selected.includes(id), row = state.nodes[id];
         const open = selected && expanded === id;
         const nodeIssues = issues.filter(issue => issue.nodeID === id);
         return <article key={id} className="creation-node" data-selected={selected} data-open={open} data-node-id={id}>
           <div className="creation-node-heading">
             <label className="creation-node-select"><input aria-label={`${t.select}: ${creationNodeName(visibleNodes, id)}`} type="checkbox" checked={selected}
-              disabled={disabled || !selected && state.selected.length >= 64} onChange={event => select(node, event.target.checked)}/><Server size={17}/><span>{creationNodeName(visibleNodes, id)}</span></label>
+              disabled={disabled || view === "swap" || !selected && state.selected.length >= 64} onChange={event => select(node, event.target.checked)}/><Server size={17}/><span>{creationNodeName(visibleNodes, id)}</span></label>
             {selected && row && <><div className="creation-node-paths" aria-label={t.paths}>
               {row.direct.enabled && <span title={t.direct}><Globe2 size={12}/><bdi>{row.direct.port || "—"}</bdi></span>}
               {row.tunnel.enabled && <span title={t.tunnel}><Link2 size={12}/><bdi>{row.tunnel.port || "—"}</bdi></span>}
@@ -121,17 +133,17 @@ export default function InboundCreationNodes({ language, state, nodes, targets =
           </div>
           {selected && row && <div className="creation-row-state"><span className={creationWaitingHosts(row) ? "creation-waiting" : ""}>{nodeIssues.length ? `${nodeIssues.length} ${language === "fa" ? "مورد برای بررسی" : "items to review"}` : creationWaitingHosts(row) ? t.waiting : row.direct.enabled || row.tunnel.enabled || row.swap.enabled ? t.configured : t.noPath}</span></div>}
           {open && row && <div className="creation-node-body">
-            <label className="creation-field"><span>{t.listen}</span><input aria-label={`${t.listen}: ${id}`} data-creation-field="listenIP" dir="ltr" value={row.listenIP} disabled={disabled} onChange={event => update(id, { ...row, listenIP: event.target.value })} placeholder="203.0.113.10" autoComplete="off"/><small>{t.listenHint}</small></label>
+            {view === "all" && <label className="creation-field"><span>{t.listen}</span><input aria-label={`${t.listen}: ${id}`} data-creation-field="listenIP" dir="ltr" value={row.listenIP} disabled={disabled} onChange={event => update(id, { ...row, listenIP: event.target.value })} placeholder="203.0.113.10" autoComplete="off"/><small>{t.listenHint}</small></label>}
             <div className="creation-path-toggles" role="group" aria-label={`${t.paths}: ${id}`}>
-              {(["direct", "tunnel", "swap"] as const).map(path => { const Icon = path === "direct" ? Globe2 : path === "tunnel" ? Link2 : ArrowRightLeft; return <label key={path} data-enabled={row[path].enabled}><span><Icon size={15}/>{t[path]}</span><input type="checkbox" aria-label={`${t[path]}: ${id}`} checked={row[path].enabled} disabled={disabled} onChange={event => update(id, { ...row, [path]: { ...row[path], enabled: event.target.checked } })}/></label>; })}
+              {((view === "swap" ? ["swap"] : ["direct", "tunnel", "swap"]) as Array<"direct" | "tunnel" | "swap">).map(path => { const Icon = path === "direct" ? Globe2 : path === "tunnel" ? Link2 : ArrowRightLeft; return <label key={path} data-enabled={row[path].enabled}><span><Icon size={15}/>{t[path]}</span><input type="checkbox" aria-label={`${t[path]}: ${id}`} checked={row[path].enabled} disabled={disabled} onChange={event => update(id, { ...row, [path]: { ...row[path], enabled: event.target.checked } })}/></label>; })}
             </div>
-            {(["direct", "tunnel"] as const).map(path => row[path].enabled && <fieldset className="creation-path-fields" disabled={disabled} key={path}>
+            {view === "all" && (["direct", "tunnel"] as const).map(path => row[path].enabled && <fieldset className="creation-path-fields" disabled={disabled} key={path}>
               <legend>{path === "direct" ? <Globe2 size={15}/> : <Link2 size={15}/>} {t[path]}</legend>
               <div className="creation-port-hosts"><label className="creation-field"><span>{t[`${path}Port`]}</span><input aria-label={`${t[`${path}Port`]}: ${id}`} data-creation-field={`${path}Port`} dir="ltr" inputMode="numeric" value={row[path].port} onChange={event => update(id, { ...row, [path]: { ...row[path], port: event.target.value } })} placeholder={path === "direct" ? "10443" : "1185"}/></label>
                 <label className="creation-field"><span>{t[`${path}Hosts`]}<small>{creationHosts(row[path].hosts).length}</small></span><textarea aria-label={`${t[`${path}Hosts`]}: ${id}`} data-creation-field={`${path}Hosts`} dir="ltr" rows={2} spellCheck={false} value={row[path].hosts} onChange={event => update(id, { ...row, [path]: { ...row[path], hosts: event.target.value } })} placeholder="example.org"/></label></div>
               {!creationHosts(row[path].hosts).length && <p className="creation-help creation-waiting">{t.emptyHost}</p>}
             </fieldset>)}
-            {(row.direct.enabled || row.tunnel.enabled) && <p className="creation-help">{t.hostsHint}</p>}
+            {view === "all" && (row.direct.enabled || row.tunnel.enabled) && <p className="creation-help">{t.hostsHint}</p>}
             {row.swap.enabled && <fieldset className="creation-path-fields creation-swap-fields" disabled={disabled}>
               <legend><ArrowRightLeft size={15}/> {t.swap}</legend><p className="creation-help">{t.swapHint}</p>
               <div className="creation-field-grid"><label className="creation-field"><span>{t.source}</span><select aria-label={`${t.source}: ${id}`} data-creation-field="sourceNode" value={row.swap.sourceNodeID} onChange={event => {

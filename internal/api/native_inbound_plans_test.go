@@ -11,6 +11,7 @@ import (
 
 	"github.com/darktunnelmika/dark-xray-pro/internal/business"
 	"github.com/darktunnelmika/dark-xray-pro/internal/noderegistry"
+	"github.com/darktunnelmika/dark-xray-pro/internal/xrayconfig"
 )
 
 func creationPlanAPIFixture(t *testing.T) (*Server, business.NativeInboundPlanInput, *http.Cookie, string) {
@@ -37,6 +38,68 @@ func creationPlanAPIFixture(t *testing.T) (*Server, business.NativeInboundPlanIn
 	}
 	cookie, csrf := browserLogin(t, s, ownerUsername, ownerPassword)
 	return s, in, cookie, csrf
+}
+
+func TestCreationPlanAPIAdvancedOptionsRoundtripAndValidation(t *testing.T) {
+	s, in, cookie, csrf := creationPlanAPIFixture(t)
+	base := "/api/v1/workspace/native-inbound-plans"
+	capability := browserRequest(t, s.Handler(), "GET", base+"/capabilities", nil, cookie, "", "")
+	if capability.Code != http.StatusOK || !strings.Contains(capability.Body.String(), `"profile_options":true`) {
+		t.Fatal("missing advanced authoring capability", capability.Code)
+	}
+	in.Profile.Transport = "grpc"
+	in.Profile.GRPCService = "new_service"
+	in.Profile.Options = &xrayconfig.ProfileOptions{
+		GRPCAuthority: "edge.example.org:443", GRPCMultiMode: true,
+		RealityMaxTimeDiff: 60000, RealityMinClientVer: "1.8.0", RealityMaxClientVer: "255.255.255",
+	}
+	created := browserRequest(t, s.Handler(), "POST", base, in, cookie, csrf, "https://"+browserHost)
+	var receipt business.NativeInboundPlanReceipt
+	if created.Code != http.StatusCreated || json.Unmarshal(created.Body.Bytes(), &receipt) != nil ||
+		receipt.Plan.Profile.Options == nil || !receipt.Plan.Profile.Options.GRPCMultiMode || receipt.Plan.Profile.Options.GRPCAuthority != "edge.example.org:443" {
+		t.Fatal("HTTP save lost options", created.Code, created.Body.String())
+	}
+	get := browserRequest(t, s.Handler(), "GET", base+"/501", nil, cookie, "", "")
+	var reopened struct {
+		Plan business.NativeInboundPlan `json:"plan"`
+	}
+	if get.Code != 200 || json.Unmarshal(get.Body.Bytes(), &reopened) != nil || reopened.Plan.Profile.Options == nil || reopened.Plan.Profile.Options.RealityMaxTimeDiff != 60000 {
+		t.Fatal("HTTP reopen lost options", get.Code, get.Body.String())
+	}
+	in.EventID = "advanced-api-edit-0001"
+	in.ExpectedInboundRevision, in.ExpectedPlanRevision = 1, 1
+	in.Profile.Options.RealityMaxTimeDiff = 75000
+	edited := browserRequest(t, s.Handler(), "PUT", base+"/501", in, cookie, csrf, "https://"+browserHost)
+	var update business.NativeInboundPlanReceipt
+	if edited.Code != 200 || json.Unmarshal(edited.Body.Bytes(), &update) != nil || update.Plan.Profile.Options.RealityMaxTimeDiff != 75000 || update.Plan.Profile.PublicKey != receipt.Plan.Profile.PublicKey {
+		t.Fatal("HTTP edit lost option or changed identity", edited.Code, edited.Body.String())
+	}
+	in.EventID = "advanced-api-invalid-0001"
+	in.ExpectedInboundRevision, in.ExpectedPlanRevision = 2, 2
+	in.Profile.Options.RealityXver = 3
+	invalid := browserRequest(t, s.Handler(), "PUT", base+"/501", in, cookie, csrf, "https://"+browserHost)
+	if invalid.Code != 422 || !strings.Contains(invalid.Body.String(), `"code":"profile_options_invalid"`) {
+		t.Fatal("invalid setting accepted", invalid.Code, invalid.Body.String())
+	}
+	for _, options := range []map[string]any{
+		{"unexpected": true}, {"reality_max_time_diff": 0.5}, {"grpc_multi_mode": "true"},
+		{"reality_max_time_diff": 9223372036855}, {"reality_xver": -1},
+	} {
+		data, _ := json.Marshal(in)
+		var body map[string]any
+		if err := json.Unmarshal(data, &body); err != nil {
+			t.Fatal(err)
+		}
+		body["profile"].(map[string]any)["options"] = options
+		response := browserRequest(t, s.Handler(), "PUT", base+"/501", body, cookie, csrf, "https://"+browserHost)
+		if response.Code != 422 {
+			t.Fatal("unknown or mistyped advanced option accepted", response.Code)
+		}
+	}
+	get = browserRequest(t, s.Handler(), "GET", base+"/501", nil, cookie, "", "")
+	if get.Code != 200 || json.Unmarshal(get.Body.Bytes(), &reopened) != nil || reopened.Plan.InboundRevision != 2 || reopened.Plan.Profile.Options.RealityMaxTimeDiff != 75000 {
+		t.Fatal("rejected options changed saved state", get.Code)
+	}
 }
 
 func TestCreationPlanAPIOwnerPreviewCreateReopenUpdateAndCapability(t *testing.T) {

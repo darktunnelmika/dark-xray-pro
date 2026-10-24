@@ -1,5 +1,8 @@
 import { forwardRef, useEffect, useId, useImperativeHandle, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from "react";
 import { KeyRound, Network, ShieldCheck, SlidersHorizontal } from "lucide-react";
+import InboundProfileAdvanced from "./InboundProfileAdvanced";
+import { profileOptionIssues, profileOptionSection, type ProfileOptionIssue, type ProfileOptionsDraft } from "./inboundProfileOptions";
+import { creationIssueMessage } from "./InboundCreationNodes";
 import "./InboundProfileForm.css";
 
 export type InboundProfileValue = {
@@ -8,6 +11,7 @@ export type InboundProfileValue = {
  grpcService: string;
  realityTarget: string;
  serverNames: string;
+ options?: ProfileOptionsDraft;
 };
 export type InboundProfileFormHandle = {
  /** Validates the profile, reveals the first invalid field and focuses it. */
@@ -20,12 +24,13 @@ export type InboundProfileFormProps = {
  onChange: (value: InboundProfileValue) => void;
  disabled?: boolean;
  mode?: "create" | "edit";
+ profileOptionsSupported?: boolean;
  /** Optional assignment summary or other parent-owned creation context. */
  children?: ReactNode;
 };
 
 type Tab = "basics" | "network" | "security";
-type Field = keyof InboundProfileValue;
+type Field = Exclude<keyof InboundProfileValue, "options">;
 type Control = HTMLInputElement | HTMLSelectElement;
 const tabOrder: Tab[] = ["basics", "network", "security"];
 const fieldTabs: Record<Field, Tab> = { name: "basics", transport: "network", grpcService: "network", realityTarget: "security", serverNames: "security" };
@@ -63,12 +68,15 @@ const words = {
 };
 
 /** Profile fields only. The parent owns the form, submission and persistent actions. */
-const InboundProfileForm = forwardRef<InboundProfileFormHandle, InboundProfileFormProps>(function InboundProfileForm({ language, value, onChange, disabled = false, mode = "create", children }, ref) {
+const InboundProfileForm = forwardRef<InboundProfileFormHandle, InboundProfileFormProps>(function InboundProfileForm({ language, value, onChange, disabled = false, mode = "create", profileOptionsSupported = false, children }, ref) {
  const t = words[language];
  const id = useId();
  const [activeTab, setActiveTab] = useState<Tab>("basics");
  const [errors, setErrors] = useState<Partial<Record<Field, string>>>({});
  const [focusRequest, setFocusRequest] = useState(0);
+ const [optionErrors, setOptionErrors] = useState<ProfileOptionIssue[]>([]);
+ const surface = useRef<HTMLDivElement>(null);
+ const pendingOptionFocus = useRef<string | null>(null);
  const controls = useRef<Partial<Record<Field, Control | null>>>({});
  const tabButtons = useRef<Partial<Record<Tab, HTMLButtonElement | null>>>({});
  const pendingFocus = useRef<{ field: Field; report: boolean } | null>(null);
@@ -80,6 +88,14 @@ const InboundProfileForm = forwardRef<InboundProfileFormHandle, InboundProfileFo
   setFocusRequest(n => n + 1);
  }
  useEffect(() => {
+  const optionField = pendingOptionFocus.current;
+  if (optionField) {
+   pendingOptionFocus.current = null;
+   const control = surface.current?.querySelector<HTMLElement>(`[data-creation-field="${optionField}"]`);
+   const disclosure = control?.closest("details"); if (disclosure) disclosure.open = true;
+   control?.focus({ preventScroll: true }); control?.scrollIntoView({ block: "nearest", inline: "nearest" });
+   return;
+  }
   const pending = pendingFocus.current;
   if (!pending) return;
   pendingFocus.current = null;
@@ -108,8 +124,15 @@ const InboundProfileForm = forwardRef<InboundProfileFormHandle, InboundProfileFo
    return control && !control.disabled && !control.validity.valid;
   });
   setErrors(next);
+  const optionsInvalid = profileOptionIssues(value.options, value.transport);
+  setOptionErrors(optionsInvalid);
   if (invalid) showField(invalid, true);
-  return !invalid;
+  else if (optionsInvalid.length) {
+   pendingOptionFocus.current = optionsInvalid[0].field;
+   setActiveTab(profileOptionSection(optionsInvalid[0].field) ?? "security");
+   setFocusRequest(n => n + 1);
+  }
+  return !invalid && !optionsInvalid.length;
  }
  useImperativeHandle(ref, () => ({ validate, focusName: () => showField("name") }));
 
@@ -141,7 +164,7 @@ const InboundProfileForm = forwardRef<InboundProfileFormHandle, InboundProfileFo
  const targetLabel = mode === "edit" ? t.editTarget : t.target;
  const serverNamesLabel = mode === "edit" ? t.editServerNames : t.serverNames;
 
- return <div className="inbound-profile-form" dir={language === "fa" ? "rtl" : "ltr"} onInvalidCapture={nativeInvalid}>
+ return <div ref={surface} className="inbound-profile-form" dir={language === "fa" ? "rtl" : "ltr"} onInvalidCapture={nativeInvalid}>
   <div className="inbound-profile-tabs" role="tablist" aria-label={t.sections}>
    {tabOrder.map(tab => { const Icon = icons[tab]; return <button key={tab} ref={node => { tabButtons.current[tab] = node; }} id={`${id}-tab-${tab}`} type="button" role="tab" aria-selected={activeTab === tab} aria-controls={`${id}-panel-${tab}`} tabIndex={activeTab === tab ? 0 : -1} disabled={disabled} onClick={() => setActiveTab(tab)} onKeyDown={event => tabKey(event, tab)}><Icon size={17} aria-hidden="true"/><span>{t[tab]}</span></button>; })}
   </div>
@@ -161,6 +184,8 @@ const InboundProfileForm = forwardRef<InboundProfileFormHandle, InboundProfileFo
     {value.transport === "grpc" && <label className="inbound-profile-field"><span>{t.service}</span><input ref={node => { controls.current.grpcService = node; }} data-profile-field="grpcService" aria-label={t.service} aria-invalid={!!errors.grpcService} aria-describedby={describe("grpcService", `${id}-service-hint`)} value={value.grpcService} onChange={event => update("grpcService", event.target.value)} pattern={"[A-Za-z0-9_\\-]{1,64}"} maxLength={64} required disabled={disabled} dir="ltr" spellCheck={false} autoCapitalize="none" autoComplete="off" placeholder="dark-pro"/><small id={`${id}-service-hint`}>{t.serviceHint}</small>{error("grpcService")}</label>}
    </div>
    {value.transport === "tcp" && <p className="inbound-profile-note"><Network size={16} aria-hidden="true"/><span>{t.tcpHint}</span></p>}
+   {value.transport === "grpc" && <InboundProfileAdvanced language={language} section="network" value={value.options} onChange={options => { setOptionErrors([]); onChange({ ...value, options }); }} supported={profileOptionsSupported} disabled={disabled} invalidFields={optionErrors.map(issue => issue.field)}/>}
+   {optionErrors.filter(issue => profileOptionSection(issue.field) === "network").map(issue => <p key={issue.field} className="inbound-profile-error" role="alert">{creationIssueMessage(issue, language)}</p>)}
   </section>
 
   <section className="inbound-profile-panel" role="tabpanel" id={`${id}-panel-security`} aria-labelledby={`${id}-tab-security`} hidden={activeTab !== "security"}>
@@ -169,6 +194,8 @@ const InboundProfileForm = forwardRef<InboundProfileFormHandle, InboundProfileFo
     <label className="inbound-profile-field"><span>{targetLabel}</span><input ref={node => { controls.current.realityTarget = node; }} data-profile-field="realityTarget" aria-label={targetLabel} aria-invalid={!!errors.realityTarget} aria-describedby={describe("realityTarget", `${id}-target-hint`)} value={value.realityTarget} onChange={event => update("realityTarget", event.target.value)} required disabled={disabled} dir="ltr" spellCheck={false} autoCapitalize="none" autoComplete="off" placeholder="example.org:443"/><small id={`${id}-target-hint`}>{t.targetHint}</small>{error("realityTarget")}</label>
     <label className="inbound-profile-field"><span>{serverNamesLabel}</span><input ref={node => { controls.current.serverNames = node; }} data-profile-field="serverNames" aria-label={serverNamesLabel} aria-invalid={!!errors.serverNames} aria-describedby={describe("serverNames", `${id}-names-hint`)} value={value.serverNames} onChange={event => update("serverNames", event.target.value)} required disabled={disabled} dir="ltr" spellCheck={false} autoCapitalize="none" autoComplete="off" placeholder="example.org"/><small id={`${id}-names-hint`}>{t.serverNamesHint}</small>{error("serverNames")}</label>
    </div>
+   <InboundProfileAdvanced language={language} section="security" value={value.options} onChange={options => { setOptionErrors([]); onChange({ ...value, options }); }} supported={profileOptionsSupported} disabled={disabled} invalidFields={optionErrors.map(issue => issue.field)}/>
+   {optionErrors.filter(issue => profileOptionSection(issue.field) === "security").map(issue => <p key={issue.field} className="inbound-profile-error" role="alert">{creationIssueMessage(issue, language)}</p>)}
   </section>
  </div>;
 });

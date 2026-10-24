@@ -73,14 +73,14 @@ func LabSubscriptionRoutes(c Candidate, clientUUID string, labels map[uint64]str
 		listener, exists := byTag[in.Tag]
 		if !exists || in.Listen != "127.0.0.1" || in.Port != listener.NodePort ||
 			in.Protocol != "vless" || in.Settings.Decryption != "none" ||
-			in.Stream.Network != "tcp" || in.Stream.Security != "reality" || len(in.Stream.GRPC) != 0 {
+			in.Stream.Network != "tcp" || in.Stream.Security != "reality" || in.Stream.GRPC != nil {
 			return nil, ErrInvalid
 		}
 		delete(byTag, in.Tag)
 		profile := Profile{
 			InboundID: listener.InboundID, Transport: "tcp", RealityTarget: in.Stream.Reality.Dest,
 			ServerNames: in.Stream.Reality.ServerNames, ShortIDs: in.Stream.Reality.ShortIDs,
-			RealityPrivateKey: in.Stream.Reality.PrivateKey,
+			RealityPrivateKey: in.Stream.Reality.PrivateKey, Options: optionsFromStream(in.Stream),
 		}
 		matchedUUID := ""
 		for _, user := range in.Settings.Clients {
