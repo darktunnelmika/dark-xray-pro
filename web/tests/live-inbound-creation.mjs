@@ -63,8 +63,8 @@ const expectedOptions = edited => ({
 const expectedNodes = edited => [
   { node_id: 'de', installation_id: 'a'.repeat(32), listen_ip: '198.51.100.10', direct_port: 10443,
     direct_hosts: ['de.example.org', 'shared.example.org'], tunnel_port: 1185, tunnel_hosts: ['tunnel.example.org'],
-    swap_enabled: true, swap_source_node_id: 'nl', swap_source_installation_id: 'c'.repeat(32), swap_source_listen_ip: '198.51.100.30',
-    swap_source_port: 16801, swap_entry_address: 'entry.example.org', swap_entry_port: edited ? 444 : 443, swap_destination_port: 18443 },
+    swap_enabled: edited, swap_source_node_id: edited ? 'nl' : '', swap_source_installation_id: edited ? 'c'.repeat(32) : '', swap_source_listen_ip: edited ? '198.51.100.30' : '',
+    swap_source_port: edited ? 16801 : 0, swap_entry_address: edited ? 'entry.example.org' : '', swap_entry_port: edited ? 444 : 0, swap_destination_port: edited ? 18443 : 0 },
   { node_id: 'fr', installation_id: 'b'.repeat(32), listen_ip: '198.51.100.20', direct_port: 11443,
     direct_hosts: edited ? ['fr.example.org', 'fr-edge.example.org'] : ['fr.example.org'], tunnel_port: 1285, tunnel_hosts: ['fr-tunnel.example.org'],
     swap_enabled: false, swap_source_node_id: '', swap_source_installation_id: '', swap_source_listen_ip: '',
@@ -108,6 +108,20 @@ try {
     await dialog.getByLabel('Tunnel Hosts: ' + id, { exact: true }).fill(tunnelHosts);
   }
   async function checkSetup(dialog, edited) {
+    const connection = dialog.locator('[data-review-section="connection"]');
+    await expect(connection.locator('[data-review-field="realityTarget"]')).toContainText('example.org:443');
+    await expect(connection.locator('[data-review-field="shortIDs"]')).toContainText(edited ? 'eeff' : 'ccdd');
+    await expect(dialog.locator('[data-review-option="realityMaxTimeDiff"]')).toContainText(edited ? '120000' : '60000');
+    await expect(dialog.locator('[data-review-option="sniffing"]')).toHaveAttribute('data-sniffing-enabled', String(!edited));
+    await expect(dialog.locator('[data-review-option="sniffing"]')).toHaveAttribute('data-sniffing-retained', String(edited));
+    for (const row of expectedNodes(edited)) {
+      const summary = dialog.locator(`[data-review-node="${row.node_id}"]`);
+      for (const [path, port] of [['direct', row.direct_port], ['tunnel', row.tunnel_port]]) {
+        await expect(summary.locator(`[data-review-path="${path}"]`)).toHaveAttribute('data-path-enabled', 'true');
+        await expect(summary.locator(`[data-review-path="${path}"]`)).toContainText(String(port));
+      }
+      await expect(summary.locator('[data-review-path="swap"]')).toHaveAttribute('data-path-enabled', String(row.swap_enabled));
+    }
     const pending = observe('POST', api + '/preview');
     await dialog.getByRole('button', { name: 'Check complete setup', exact: true }).click();
     const response = await pending; expect(response.status()).toBe(200);
@@ -117,12 +131,16 @@ try {
     expect(preview.plan.nodes).toEqual(expectedNodes(edited));
     expect(preview.plan.profile.options).toEqual(expectedOptions(edited));
     expect(preview.plan.profile.enabled).toBe(false); expect(preview.plan.runtime_apply).toBe(false);
-    expect(preview.topology.nodes.map(node => node.node_id).sort()).toEqual(['de', 'fr', 'nl']);
+    expect(preview.topology.nodes.map(node => node.node_id).sort()).toEqual(edited ? ['de', 'fr', 'nl'] : ['de', 'fr']);
     for (const node of preview.topology.nodes) expect(node.candidate).toMatchObject({ can_activate: false,
       requires_xray_test: true, requires_data_plane_proof: true, requires_subscription_commit: true });
-    const relay = preview.topology.nodes.find(node => node.node_id === 'nl');
-    expect(relay.candidate.listeners).toHaveLength(1);
-    expect(relay.candidate.listeners[0]).toMatchObject({ kind: 'swap_relay', node_port: 16801, attribution: 'transit_not_billable' });
+    if (edited) {
+      const relay = preview.topology.nodes.find(node => node.node_id === 'nl');
+      expect(relay.candidate.listeners).toHaveLength(1);
+      expect(relay.candidate.listeners[0]).toMatchObject({ kind: 'swap_relay', node_port: 16801, attribution: 'transit_not_billable' });
+    } else {
+      expect(preview.topology.nodes.flatMap(node => node.candidate.listeners).some(listener => listener.kind === 'swap_relay')).toBe(false);
+    }
     await expect(dialog.getByRole('button', { name: 'Save paused setup', exact: true })).toBeEnabled();
     return response.request().postDataJSON();
   }
@@ -146,8 +164,10 @@ try {
     return { dialog, plan: saved.plan };
   }
   async function advanced(dialog, section) {
-    await dialog.getByRole('tab', { name: section === 'network' ? 'Network' : 'Security', exact: true }).click();
-    const details = dialog.locator('.inbound-profile-advanced').filter({ hasText: section === 'network' ? 'Advanced gRPC settings' : 'Advanced REALITY settings' });
+    await dialog.getByRole('tab', { name: 'Connection', exact: true }).click();
+    const group = dialog.locator(`[data-connection-group="${section}"]`);
+    if (await group.getAttribute('open') === null) await group.locator(':scope > summary').click();
+    const details = group.locator('.inbound-profile-advanced').filter({ hasText: section === 'network' ? 'Advanced gRPC settings' : 'Advanced REALITY settings' });
     if (await details.getAttribute('open') === null) await details.locator('summary').click();
   }
   async function traffic(dialog) {
@@ -158,6 +178,8 @@ try {
     if (await exclusions.getAttribute('open') === null) await exclusions.locator('summary').click();
   }
   async function verifyProfile(dialog, edited) {
+    await expect(dialog.getByRole('tab')).toHaveText(['Connection', 'Dark Swap', 'Advanced', 'Review']);
+    for (const label of [/^Inbound name/, /^REALITY target/, /^Server names/, /^Short IDs/]) await expect(dialog.getByLabel(label)).toHaveCount(1);
     await expect(dialog.getByLabel('Inbound name', { exact: true })).toHaveValue(edited ? 'Real browser creation edited' : 'Real browser creation');
     await expect(dialog.getByRole('radio', { name: edited ? 'gRPC / REALITY' : 'TCP / REALITY', exact: true })).toBeChecked();
     if (edited) await expect(dialog.getByLabel('gRPC service', { exact: true })).toHaveValue('dark-grpc');
@@ -190,7 +212,7 @@ try {
     }
   }
   async function verifyNodes(dialog, edited) {
-    await dialog.getByRole('tab', { name: 'Nodes & routes', exact: true }).click();
+    await dialog.getByRole('tab', { name: 'Dark Swap', exact: true }).click();
     await expect(dialog.getByRole('checkbox', { name: 'Select destination: Germany', exact: true })).toBeChecked();
     await expect(dialog.getByRole('checkbox', { name: 'Select destination: France', exact: true })).toBeChecked();
     await expect(dialog.getByRole('checkbox', { name: 'Select destination: Netherlands', exact: true })).not.toBeChecked();
@@ -227,6 +249,8 @@ try {
     profile_traffic_options_scope: 'creation_plan', protocols: ['vless'], securities: ['reality'], transports: ['tcp', 'grpc'] });
   const add = page.getByRole('button', { name: 'Add Inbound', exact: true }); await expect(add).toBeEnabled(); await add.click();
   const dialog = page.getByRole('dialog', { name: 'Create Inbound', exact: true }); await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole('tab')).toHaveText(['Connection', 'Dark Swap', 'Advanced', 'Review']);
+  for (const label of [/^Inbound name/, /^REALITY target/, /^Server names/, /^Short IDs/]) await expect(dialog.getByLabel(label)).toHaveCount(1);
   stage = 'complete creation form';
   await dialog.getByLabel('Inbound name', { exact: true }).fill('Real browser creation');
   await dialog.getByLabel('REALITY target (host:port)', { exact: true }).fill('example.org:443');
@@ -246,15 +270,23 @@ try {
   await dialog.getByLabel('Fallback 1 Destination', { exact: true }).fill('127.0.0.1:8080');
   await dialog.getByLabel('Fallback 1 Path', { exact: true }).fill('/health');
   await dialog.getByLabel('Fallback 1 PROXY protocol', { exact: true }).selectOption('2');
-  await dialog.getByRole('tab', { name: 'Nodes & routes', exact: true }).click();
+  await dialog.getByRole('tab', { name: 'Dark Swap', exact: true }).click();
   await fillDestination(dialog, 'de', 'Germany', '198.51.100.10', '10443', 'de.example.org\nshared.example.org', '1185', 'tunnel.example.org');
-  await dialog.getByRole('checkbox', { name: 'Dark Swap: de', exact: true }).check();
-  await dialog.getByLabel('Source Node: de', { exact: true }).selectOption('nl');
-  await dialog.getByLabel('Source relay listening IP: de', { exact: true }).fill('198.51.100.30');
-  await dialog.getByLabel('Source relay port: de', { exact: true }).fill('16801');
-  await dialog.getByLabel('External entry address: de', { exact: true }).fill('entry.example.org');
-  await dialog.getByLabel('External entry port: de', { exact: true }).fill('443');
-  await dialog.getByLabel('Destination exit port: de', { exact: true }).fill('18443');
+  await expect(dialog.getByRole('checkbox', { name: 'Dark Swap: de', exact: true })).not.toBeChecked();
+  await dialog.getByRole('checkbox', { name: 'Direct: de', exact: true }).uncheck();
+  await expect(dialog.getByLabel('Tunnel port: de', { exact: true })).toHaveValue('1185');
+  await dialog.getByRole('tab', { name: 'Connection', exact: true }).click();
+  await dialog.getByRole('tab', { name: 'Dark Swap', exact: true }).click();
+  await dialog.getByRole('checkbox', { name: 'Direct: de', exact: true }).check();
+  await expect(dialog.getByLabel('Direct port: de', { exact: true })).toHaveValue('10443');
+  await expect(dialog.getByLabel('Direct Hosts: de', { exact: true })).toHaveValue('de.example.org\nshared.example.org');
+  await dialog.getByRole('checkbox', { name: 'Tunnel: de', exact: true }).uncheck();
+  await expect(dialog.getByLabel('Direct port: de', { exact: true })).toHaveValue('10443');
+  await dialog.getByRole('tab', { name: 'Advanced', exact: true }).click();
+  await dialog.getByRole('tab', { name: 'Dark Swap', exact: true }).click();
+  await dialog.getByRole('checkbox', { name: 'Tunnel: de', exact: true }).check();
+  await expect(dialog.getByLabel('Tunnel port: de', { exact: true })).toHaveValue('1185');
+  await expect(dialog.getByLabel('Tunnel Hosts: de', { exact: true })).toHaveValue('tunnel.example.org');
   await fillDestination(dialog, 'fr', 'France', '198.51.100.20', '11443', 'fr.example.org', '1285', 'fr-tunnel.example.org');
   await dialog.getByRole('tab', { name: 'Review', exact: true }).click();
   await dialog.getByLabel('Change note', { exact: true }).fill('Real browser complete setup');
@@ -278,7 +310,7 @@ try {
   await reopened.dialog.getByLabel('Excluded domains', { exact: true }).fill('domain:example.net\nfull:keep.example.org');
   await reopened.dialog.getByRole('button', { name: 'Remove fallback 1', exact: true }).click();
   await expect(reopened.dialog.locator('.inbound-fallback-row')).toHaveCount(0);
-  await reopened.dialog.getByRole('tab', { name: 'Profile', exact: true }).click();
+  await reopened.dialog.getByRole('tab', { name: 'Connection', exact: true }).click();
   await reopened.dialog.getByLabel('Inbound name', { exact: true }).fill('Real browser creation edited');
   await reopened.dialog.getByRole('radio', { name: 'gRPC / REALITY', exact: true }).check();
   await reopened.dialog.getByLabel('gRPC service', { exact: true }).fill('dark-grpc');
@@ -288,9 +320,15 @@ try {
   await advanced(reopened.dialog, 'network');
   await reopened.dialog.getByLabel('gRPC Authority', { exact: true }).fill('edge.example.org:8443');
   await reopened.dialog.getByRole('checkbox', { name: 'gRPC MultiMode', exact: true }).check();
-  await reopened.dialog.getByRole('tab', { name: 'Nodes & routes', exact: true }).click();
+  await reopened.dialog.getByRole('tab', { name: 'Dark Swap', exact: true }).click();
   await expand(reopened.dialog, 'Germany');
+  await reopened.dialog.getByRole('checkbox', { name: 'Dark Swap: de', exact: true }).check();
+  await reopened.dialog.getByLabel('Source Node: de', { exact: true }).selectOption('nl');
+  await reopened.dialog.getByLabel('Source relay listening IP: de', { exact: true }).fill('198.51.100.30');
+  await reopened.dialog.getByLabel('Source relay port: de', { exact: true }).fill('16801');
+  await reopened.dialog.getByLabel('External entry address: de', { exact: true }).fill('entry.example.org');
   await reopened.dialog.getByLabel('External entry port: de', { exact: true }).fill('444');
+  await reopened.dialog.getByLabel('Destination exit port: de', { exact: true }).fill('18443');
   await expand(reopened.dialog, 'France');
   await reopened.dialog.getByLabel('Direct Hosts: fr', { exact: true }).fill('fr.example.org\nfr-edge.example.org');
   await reopened.dialog.getByRole('tab', { name: 'Review', exact: true }).click();

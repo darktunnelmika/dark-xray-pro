@@ -87,7 +87,7 @@ export function creationIssueMessage(issue: CreationIssue, language: Language): 
 
 const words = {
   en: {
-    title: "Destination Nodes", help: "Select the Nodes that will receive this Inbound, then configure each row.", none: "No paired Nodes are available.",
+    title: "Destination Nodes", help: "Select destination Nodes, then configure Direct, Tunnel and optional Dark Swap here. Direct and Tunnel work independently with separate ports.", none: "No paired Nodes are available.",
     selected: "selected", select: "Select destination", configure: "Configure", waiting: "Waiting for Host", configured: "Configured", noPath: "No path selected",
     direct: "Direct", tunnel: "Tunnel", swap: "Dark Swap", listen: "Destination listening IP", listenHint: "Use an IP assigned to this Node.",
     directPort: "Direct port", directHosts: "Direct Hosts", tunnelPort: "Tunnel port", tunnelHosts: "Tunnel Hosts", hostsHint: "One address per line or separated with commas. Up to 64 unique Hosts per Node.",
@@ -100,7 +100,7 @@ const words = {
     relayLabel: "Source relay", entryLabel: "External entry", destinationLabel: "Destination", notSet: "Not set", limit: "Select up to 64 destination Nodes.",
   },
   fa: {
-    title: "نودهای مقصد", help: "نودهایی که این اینباند را دریافت می‌کنند انتخاب کن و مسیرهای هر ردیف را تنظیم کن.", none: "نود متصلی در دسترس نیست.",
+    title: "نودهای مقصد", help: "نودهای مقصد را انتخاب کن و Direct، Tunnel و دارک‌سواپ اختیاری را همین‌جا تنظیم کن. Direct و Tunnel مستقل‌اند و پورت جدا دارند.", none: "نود متصلی در دسترس نیست.",
     selected: "انتخاب‌شده", select: "انتخاب مقصد", configure: "تنظیم", waiting: "در انتظار هاست", configured: "تنظیم‌شده", noPath: "مسیری انتخاب نشده",
     direct: "مستقیم", tunnel: "تونل", swap: "دارک‌سواپ", listen: "IP شنود نود مقصد", listenHint: "یک IP اختصاص‌یافته به همین نود وارد کن.",
     directPort: "پورت مستقیم", directHosts: "هاست‌های مستقیم", tunnelPort: "پورت تونل", tunnelHosts: "هاست‌های تونل", hostsHint: "هر آدرس در یک خط یا با کاما؛ حداکثر ۶۴ هاست یکتا برای هر نود.",
@@ -114,9 +114,9 @@ const words = {
   },
 };
 
-export default function InboundCreationNodes({ language, state, nodes, targets = [], disabled, expanded, onExpanded, onChange, issues = [], view = "all" }: {
+export default function InboundCreationNodes({ language, state, nodes, targets = [], disabled, expanded, onExpanded, onChange, issues = [] }: {
   language: Language; state: CreationState; nodes: InboundNode[]; disabled: boolean; expanded: string;
-  targets?: InboundTarget[]; view?: "all" | "swap";
+  targets?: InboundTarget[];
   onExpanded: (id: string) => void; onChange: (value: CreationState) => void; issues?: CreationIssue[];
 }) {
   const t = words[language];
@@ -135,14 +135,14 @@ export default function InboundCreationNodes({ language, state, nodes, targets =
     {!nodes.length && <p className="creation-empty"><Server size={22}/>{t.none}</p>}
     {state.selected.length >= 64 && <p className="creation-help">{t.limit}</p>}
     <div className="creation-node-list">
-      {(view === "swap" ? visibleNodes.filter(node => state.selected.includes(node.node_id)) : visibleNodes).map(node => {
+      {visibleNodes.map(node => {
         const id = node.node_id, selected = state.selected.includes(id), row = state.nodes[id];
         const open = selected && expanded === id;
         const nodeIssues = issues.filter(issue => issue.nodeID === id);
         return <article key={id} className="creation-node" data-selected={selected} data-open={open} data-node-id={id}>
           <div className="creation-node-heading">
-            <label className="creation-node-select"><input aria-label={`${t.select}: ${creationNodeName(visibleNodes, id)}`} type="checkbox" checked={selected}
-              disabled={disabled || view === "swap" || !selected && state.selected.length >= 64} onChange={event => select(node, event.target.checked)}/><Server size={17}/><span>{creationNodeName(visibleNodes, id)}</span></label>
+            <label className="creation-node-select"><input aria-label={`${t.select}: ${creationNodeName(visibleNodes, id)}`} data-creation-field="node" type="checkbox" checked={selected}
+              disabled={disabled || !selected && state.selected.length >= 64} onChange={event => select(node, event.target.checked)}/><Server size={17}/><span>{creationNodeName(visibleNodes, id)}</span></label>
             {selected && row && <><div className="creation-node-paths" aria-label={t.paths}>
               {row.direct.enabled && <span title={t.direct}><Globe2 size={12}/><bdi>{row.direct.port || "—"}</bdi></span>}
               {row.tunnel.enabled && <span title={t.tunnel}><Link2 size={12}/><bdi>{row.tunnel.port || "—"}</bdi></span>}
@@ -151,17 +151,17 @@ export default function InboundCreationNodes({ language, state, nodes, targets =
           </div>
           {selected && row && <div className="creation-row-state"><span className={creationWaitingHosts(row) ? "creation-waiting" : ""}>{nodeIssues.length ? `${nodeIssues.length} ${language === "fa" ? "مورد برای بررسی" : "items to review"}` : creationWaitingHosts(row) ? t.waiting : row.direct.enabled || row.tunnel.enabled || row.swap.enabled ? t.configured : t.noPath}</span></div>}
           {open && row && <div className="creation-node-body">
-            {view === "all" && <label className="creation-field"><span>{t.listen}</span><input aria-label={`${t.listen}: ${id}`} data-creation-field="listenIP" dir="ltr" value={row.listenIP} disabled={disabled} onChange={event => update(id, { ...row, listenIP: event.target.value })} placeholder="203.0.113.10" autoComplete="off"/><small>{t.listenHint}</small></label>}
+            <label className="creation-field"><span>{t.listen}</span><input aria-label={`${t.listen}: ${id}`} data-creation-field="listenIP" dir="ltr" value={row.listenIP} disabled={disabled} onChange={event => update(id, { ...row, listenIP: event.target.value })} placeholder="203.0.113.10" autoComplete="off"/><small>{t.listenHint}</small></label>
             <div className="creation-path-toggles" role="group" aria-label={`${t.paths}: ${id}`}>
-              {((view === "swap" ? ["swap"] : ["direct", "tunnel", "swap"]) as Array<"direct" | "tunnel" | "swap">).map(path => { const Icon = path === "direct" ? Globe2 : path === "tunnel" ? Link2 : ArrowRightLeft; return <label key={path} data-enabled={row[path].enabled}><span><Icon size={15}/>{t[path]}</span><input type="checkbox" aria-label={`${t[path]}: ${id}`} checked={row[path].enabled} disabled={disabled} onChange={event => update(id, { ...row, [path]: { ...row[path], enabled: event.target.checked } })}/></label>; })}
+              {(["direct", "tunnel", "swap"] as const).map(path => { const Icon = path === "direct" ? Globe2 : path === "tunnel" ? Link2 : ArrowRightLeft; return <label key={path} data-enabled={row[path].enabled}><span><Icon size={15}/>{t[path]}</span><input type="checkbox" data-creation-field={`${path}Enabled`} aria-label={`${t[path]}: ${id}`} checked={row[path].enabled} disabled={disabled} onChange={event => update(id, { ...row, [path]: { ...row[path], enabled: event.target.checked } })}/></label>; })}
             </div>
-            {view === "all" && (["direct", "tunnel"] as const).map(path => row[path].enabled && <fieldset className="creation-path-fields" disabled={disabled} key={path}>
+            {(["direct", "tunnel"] as const).map(path => row[path].enabled && <fieldset className="creation-path-fields" disabled={disabled} key={path}>
               <legend>{path === "direct" ? <Globe2 size={15}/> : <Link2 size={15}/>} {t[path]}</legend>
               <div className="creation-port-hosts"><label className="creation-field"><span>{t[`${path}Port`]}</span><input aria-label={`${t[`${path}Port`]}: ${id}`} data-creation-field={`${path}Port`} dir="ltr" inputMode="numeric" value={row[path].port} onChange={event => update(id, { ...row, [path]: { ...row[path], port: event.target.value } })} placeholder={path === "direct" ? "10443" : "1185"}/></label>
                 <label className="creation-field"><span>{t[`${path}Hosts`]}<small>{creationHosts(row[path].hosts).length}</small></span><textarea aria-label={`${t[`${path}Hosts`]}: ${id}`} data-creation-field={`${path}Hosts`} dir="ltr" rows={2} spellCheck={false} value={row[path].hosts} onChange={event => update(id, { ...row, [path]: { ...row[path], hosts: event.target.value } })} placeholder="example.org"/></label></div>
               {!creationHosts(row[path].hosts).length && <p className="creation-help creation-waiting">{t.emptyHost}</p>}
             </fieldset>)}
-            {view === "all" && (row.direct.enabled || row.tunnel.enabled) && <p className="creation-help">{t.hostsHint}</p>}
+            {(row.direct.enabled || row.tunnel.enabled) && <p className="creation-help">{t.hostsHint}</p>}
             {row.swap.enabled && <fieldset className="creation-path-fields creation-swap-fields" disabled={disabled}>
               <legend><ArrowRightLeft size={15}/> {t.swap}</legend><p className="creation-help">{t.swapHint}</p>
               <div className="creation-field-grid"><label className="creation-field"><span>{t.source}</span><select aria-label={`${t.source}: ${id}`} data-creation-field="sourceNode" value={row.swap.sourceNodeID} onChange={event => {

@@ -15,7 +15,7 @@ const words = {
     fallbacks: "TCP fallbacks", fallbackHint: "Configure VLESS/TCP fallback destinations in this paused setup. These settings cannot be activated or published yet.",
     add: "Add fallback", row: "Fallback", remove: "Remove fallback", destination: "Destination", destinationHint: "Port 1–65535 or host:port, for example 8080 or 127.0.0.1:8080.",
     path: "Path", pathHint: "Optional /path; up to 55 bytes, without spaces, ? or #.", alpnUnavailable: "ALPN matching is unavailable for REALITY fallbacks.", clearALPN: "Clear unsupported ALPN",
-    xver: "PROXY protocol", none: "Disabled (0)", noRows: "No fallbacks configured.", tcp: "Fallbacks require TCP. Switch to TCP in Network or remove every fallback. Your rows are retained.",
+    xver: "PROXY protocol", none: "Disabled (0)", noRows: "No fallbacks configured.", tcp: "Fallbacks require TCP. Switch to TCP in Connection → Network or remove every fallback. Your rows are retained.",
     limit: "Maximum 32 fallbacks. Each Path must be unique; only one default fallback may have an empty Path.",
   },
   fa: {
@@ -28,7 +28,7 @@ const words = {
     fallbacks: "Fallbackهای TCP", fallbackHint: "مقصدهای Fallback در VLESS/TCP را در این طرح خاموش تنظیم کن. فعال‌سازی و انتشار این تنظیمات هنوز ممکن نیست.",
     add: "افزودن Fallback", row: "Fallback", remove: "حذف Fallback", destination: "مقصد", destinationHint: "پورت ۱ تا ۶۵۵۳۵ یا host:port؛ مثلاً 8080 یا 127.0.0.1:8080.",
     path: "مسیر", pathHint: "اختیاری با شروع /؛ حداکثر ۵۵ بایت و بدون فاصله، ? یا #.", alpnUnavailable: "تطبیق ALPN برای Fallback در REALITY در دسترس نیست.", clearALPN: "پاک‌کردن ALPN پشتیبانی‌نشده",
-    xver: "پروتکل PROXY", none: "غیرفعال (۰)", noRows: "هیچ Fallbackی تنظیم نشده.", tcp: "Fallback به TCP نیاز دارد. در تب شبکه TCP را انتخاب کن یا همهٔ Fallbackها را حذف کن. ردیف‌ها حفظ شده‌اند.",
+    xver: "پروتکل PROXY", none: "غیرفعال (۰)", noRows: "هیچ Fallbackی تنظیم نشده.", tcp: "Fallback به TCP نیاز دارد. در گروه شبکهٔ بخش اتصال TCP را انتخاب کن یا همهٔ Fallbackها را حذف کن. ردیف‌ها حفظ شده‌اند.",
     limit: "حداکثر ۳۲ Fallback؛ مسیر هر ردیف باید یکتا باشد. فقط یک Fallback پیش‌فرض می‌تواند مسیر خالی داشته باشد.",
   },
 };
