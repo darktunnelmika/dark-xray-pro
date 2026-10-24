@@ -121,7 +121,7 @@ async function profile(dialog: Locator, name = "Complete DARK setup") {
   await dialog.getByLabel("Short IDs", { exact: true }).fill("aabb, ccdd");
 }
 async function destination(dialog: Locator, id: "de" | "fr" | "nl", ip: string, port: string, hosts: string) {
-  await dialog.getByRole("tab", { name: "Nodes & routes", exact: true }).click();
+  await dialog.getByRole("tab", { name: "Dark Swap", exact: true }).click();
   await dialog.getByRole("checkbox", { name: "Select destination: " + nodes.find(node => node.node_id === id)!.name, exact: true }).check();
   await dialog.getByLabel("Destination listening IP: " + id, { exact: true }).fill(ip);
   await dialog.getByLabel("Direct port: " + id, { exact: true }).fill(port);
@@ -239,34 +239,53 @@ test("equivalent mapped IPv6 Node addresses accept the backend canonical IPv4 re
 test("invalid hidden fields reveal their tab and no partial creation request is sent", async ({ page }) => {
   const f = await fixture(page), dialog = await openCreation(page); await profile(dialog);
   await review(dialog); await dialog.getByRole("button", { name: "Check complete setup", exact: true }).click();
-  await expect(dialog.getByRole("tab", { name: "Nodes & routes", exact: true })).toHaveAttribute("aria-selected", "true");
+  await expect(dialog.getByRole("tab", { name: "Dark Swap", exact: true })).toHaveAttribute("aria-selected", "true");
   const firstDestination = dialog.getByRole("checkbox", { name: "Select destination: Germany", exact: true });
   await expect(firstDestination).toBeVisible(); await expect(firstDestination).toBeFocused(); expect(f.calls).toHaveLength(0);
   await destination(dialog, "de", "203.0.113.10", "2087", "duplicate.example.org\nduplicate.example.org");
   await review(dialog); await dialog.getByRole("button", { name: "Check complete setup", exact: true }).click();
-  await expect(dialog.getByRole("tab", { name: "Nodes & routes", exact: true })).toHaveAttribute("aria-selected", "true");
+  await expect(dialog.getByRole("tab", { name: "Dark Swap", exact: true })).toHaveAttribute("aria-selected", "true");
   await expect(dialog.getByLabel("Direct Hosts: de", { exact: true })).toBeFocused();
   await expect(dialog.getByRole("alert")).toContainText("Remove duplicate addresses");
   expect(f.calls).toHaveLength(0);
   await dialog.getByLabel("Direct Hosts: de", { exact: true }).fill("de.example.org");
   await dialog.getByLabel("Direct port: de", { exact: true }).fill("10443");
-  await dialog.getByRole("tab", { name: "Profile", exact: true }).click();
+  await dialog.getByRole("tab", { name: "Connection", exact: true }).click();
   await dialog.getByRole("radio", { name: "gRPC / REALITY", exact: true }).check();
+  await dialog.locator('[data-connection-group="network"] > summary').click();
   await review(dialog); await dialog.getByRole("button", { name: "Check complete setup", exact: true }).click();
-  await expect(dialog.getByRole("tab", { name: "Profile", exact: true })).toHaveAttribute("aria-selected", "true");
+  await expect(dialog.getByRole("tab", { name: "Connection", exact: true })).toHaveAttribute("aria-selected", "true");
+  await expect(dialog.locator('[data-connection-group="network"]')).toHaveAttribute("open", "");
   await expect(dialog.getByLabel("gRPC service", { exact: true })).toBeFocused(); expect(f.calls).toHaveLength(0);
   await dialog.getByLabel("gRPC service", { exact: true }).fill("dark-grpc");
+  await dialog.getByLabel("Inbound name", { exact: true }).fill("");
+  await dialog.locator('[data-connection-group="general"] > summary').click();
+  await review(dialog); await dialog.getByRole("button", { name: "Check complete setup", exact: true }).click();
+  await expect(dialog.getByLabel("Inbound name", { exact: true })).toBeFocused();
+  await expect(dialog.locator('[data-connection-group="general"]')).toHaveAttribute("open", "");
+  expect(f.calls).toHaveLength(0);
+  await dialog.getByLabel("Inbound name", { exact: true }).fill("Complete DARK setup");
   await review(dialog); await check(dialog);
   expect(f.calls).toHaveLength(1); expect(f.calls[0].body.profile).toMatchObject({ transport: "grpc", grpc_service: "dark-grpc" });
 });
 
-test("a server-side port conflict reveals its Node field without offering reload for an unsaved setup", async ({ page }) => {
-  const f = await fixture(page, { previewError: { status: 409, issue: { node_id: "de", field: "direct_port", code: "existing_listener_port_collision" } } });
+for (const conflict of [
+  { name: "destination port", node: "de", field: "direct_port", label: "Direct port: de" },
+  { name: "unselected relay port", node: "nl", field: "swap_source_port", label: "Source relay port: de" },
+  { name: "unselected relay IP", node: "nl", field: "swap_source_listen_ip", label: "Source relay listening IP: de" },
+]) test(`a server-side ${conflict.name} conflict opens its destination row and exact input`, async ({ page }) => {
+  const f = await fixture(page, { previewError: { status: 409, issue: { node_id: conflict.node, field: conflict.field, code: "existing_listener_port_collision" } } });
   const dialog = await openCreation(page); await profile(dialog);
-  await destination(dialog, "de", "203.0.113.10", "10443", "de.example.org"); await review(dialog);
+  await destination(dialog, "de", "203.0.113.10", "10443", "de.example.org");
+  if (conflict.node === "nl") await swap(dialog);
+  // Leave a different Node expanded so matching the first visible input cannot pass.
+  await destination(dialog, "fr", "203.0.113.20", "11443", "fr.example.org");
+  await review(dialog);
   await dialog.getByRole("button", { name: "Check complete setup", exact: true }).click();
-  await expect(dialog.getByRole("tab", { name: "Nodes & routes", exact: true })).toHaveAttribute("aria-selected", "true");
-  await expect(dialog.getByLabel("Direct port: de", { exact: true })).toBeFocused();
+  await expect(dialog.getByRole("tab", { name: "Dark Swap", exact: true })).toHaveAttribute("aria-selected", "true");
+  await expect(dialog.getByLabel(conflict.label, { exact: true })).toBeFocused();
+  await expect(dialog.getByRole("checkbox", { name: "Select destination: Netherlands", exact: true })).not.toBeChecked();
+  await expect(dialog.getByRole("button", { name: "Configure: Germany", exact: true })).toHaveAttribute("aria-expanded", "true");
   await expect(dialog.getByRole("button", { name: "Reload saved setup", exact: true })).toHaveCount(0);
   await dialog.getByRole("tab", { name: "Review", exact: true }).click();
   await expect(dialog.getByRole("button", { name: "Save paused setup", exact: true })).toBeDisabled();
@@ -281,7 +300,7 @@ test("an uncertain committed save retains the full setup and retries the identic
   await expect(dialog.getByRole("button", { name: "Retry the same save", exact: true })).toBeEnabled();
   await expect(dialog.getByRole("alert")).toContainText("complete setup is retained");
   expect(f.calls).toHaveLength(2);
-  await dialog.getByRole("tab", { name: "Nodes & routes", exact: true }).click();
+  await dialog.getByRole("tab", { name: "Dark Swap", exact: true }).click();
   await expect(dialog.getByLabel("Source relay port: de", { exact: true })).toHaveValue("16801");
   await expect(dialog.getByLabel("Source relay port: de", { exact: true })).toBeDisabled();
   await expect(dialog.getByLabel("External entry address: de", { exact: true })).toHaveValue("entry.example.org");
@@ -312,18 +331,65 @@ test("missing ordinary Hosts and external entry address save as WAITING_HOST wit
   await expect(page.getByText("Some paths are waiting for Hosts.", { exact: true })).toBeVisible();
 });
 
-test("saved setup reopens from its envelope and updates routes with CAS while preserving identity and profile key", async ({ page }) => {
+test("Dark Swap owns independent Direct and Tunnel drafts, zero-port semantics and saved setup reopening while Swap is off", async ({ page }, testInfo) => {
   const f = await fixture(page), dialog = await openCreation(page); await profile(dialog);
-  await destination(dialog, "de", "203.0.113.10", "10443", "de.example.org"); await review(dialog); await check(dialog); await save(dialog);
+  await destination(dialog, "de", "203.0.113.10", "10443", "de.example.org");
+  await dialog.getByRole("checkbox", { name: "Tunnel: de", exact: true }).check();
+  await dialog.getByLabel("Tunnel port: de", { exact: true }).fill("1185");
+  await dialog.getByLabel("Tunnel Hosts: de", { exact: true }).fill("tunnel.example.org\nbackup.example.org");
+  await expect(dialog.getByRole("checkbox", { name: "Dark Swap: de", exact: true })).not.toBeChecked();
+  await expect(dialog.getByLabel("Source Node: de", { exact: true })).toHaveCount(0);
+  await dialog.getByRole("checkbox", { name: "Direct: de", exact: true }).uncheck();
+  await expect(dialog.getByLabel("Direct port: de", { exact: true })).toHaveCount(0);
+  await expect(dialog.getByLabel("Tunnel port: de", { exact: true })).toHaveValue("1185");
+  await review(dialog); await check(dialog);
+  expect(f.calls[0].body.nodes[0]).toMatchObject({ direct_port: 0, direct_hosts: [], tunnel_port: 1185,
+    tunnel_hosts: ["tunnel.example.org", "backup.example.org"], swap_enabled: false, swap_source_port: 0, swap_destination_port: 0 });
+  const retained = dialog.locator('[data-review-node="de"] [data-review-path="direct"]');
+  await expect(retained).toHaveAttribute("data-path-enabled", "false");
+  await expect(retained).toHaveAttribute("data-path-retained", "true");
+  await expect(retained).toContainText("Disabled · draft values are not saved");
+  await retained.getByText("Retained draft", { exact: true }).click();
+  await expect(retained).toContainText("10443"); await expect(retained).toContainText("de.example.org");
+  await dialog.getByRole("button", { name: "Edit Dark Swap", exact: true }).click();
+  await dialog.getByRole("checkbox", { name: "Direct: de", exact: true }).check();
+  await expect(dialog.getByLabel("Direct port: de", { exact: true })).toHaveValue("10443");
+  await expect(dialog.getByLabel("Direct Hosts: de", { exact: true })).toHaveValue("de.example.org");
+  await dialog.getByRole("checkbox", { name: "Tunnel: de", exact: true }).uncheck();
+  await review(dialog); await check(dialog);
+  expect(f.calls[1].body.nodes[0]).toMatchObject({ direct_port: 10443, direct_hosts: ["de.example.org"], tunnel_port: 0, tunnel_hosts: [], swap_enabled: false });
+  await dialog.getByRole("tab", { name: "Connection", exact: true }).click();
+  await dialog.getByRole("tab", { name: "Advanced", exact: true }).click();
+  await dialog.getByRole("tab", { name: "Dark Swap", exact: true }).click();
+  await dialog.getByRole("checkbox", { name: "Tunnel: de", exact: true }).check();
+  await expect(dialog.getByLabel("Tunnel port: de", { exact: true })).toHaveValue("1185");
+  await expect(dialog.getByLabel("Tunnel Hosts: de", { exact: true })).toHaveValue("tunnel.example.org\nbackup.example.org");
+  await expect(dialog.getByLabel("Direct port: de", { exact: true })).toHaveValue("10443");
+  // Deselecting and reselecting the same installation also preserves its draft.
+  const selected = dialog.getByRole("checkbox", { name: "Select destination: Germany", exact: true });
+  page.once("dialog", prompt => prompt.accept());
+  await selected.uncheck(); await expect(selected).not.toBeChecked(); await selected.check();
+  await expect(dialog.getByLabel("Direct port: de", { exact: true })).toHaveValue("10443");
+  await expect(dialog.getByLabel("Tunnel port: de", { exact: true })).toHaveValue("1185");
+  await page.screenshot({ path: testInfo.outputPath("dark-swap-en-desktop.png"), fullPage: true });
+  await review(dialog); await check(dialog); await save(dialog);
+  expect(f.getSaved()?.nodes[0]).toMatchObject({ direct_port: 10443, direct_hosts: ["de.example.org"], tunnel_port: 1185,
+    tunnel_hosts: ["tunnel.example.org", "backup.example.org"], swap_enabled: false });
   const originalID = f.getSaved()!.profile.id, originalKey = f.getSaved()!.profile.public_key;
   await page.getByRole("button", { name: "Open saved setup", exact: true }).click();
   const edit = page.getByRole("dialog", { name: "Edit Inbound setup", exact: true }); await expect(edit).toBeVisible();
   await expect(edit.getByLabel("Short IDs", { exact: true })).toHaveValue("aabb, ccdd");
-  await edit.getByRole("tab", { name: "Nodes & routes", exact: true }).click();
+  await edit.getByRole("tab", { name: "Dark Swap", exact: true }).click();
+  await expect(edit.getByRole("checkbox", { name: "Dark Swap: de", exact: true })).not.toBeChecked();
+  await expect(edit.getByLabel("Direct port: de", { exact: true })).toHaveValue("10443");
+  await expect(edit.getByLabel("Tunnel port: de", { exact: true })).toHaveValue("1185");
+  await expect(edit.getByLabel("Direct Hosts: de", { exact: true })).toHaveValue("de.example.org");
+  await expect(edit.getByLabel("Tunnel Hosts: de", { exact: true })).toHaveValue("tunnel.example.org\nbackup.example.org");
   await edit.getByLabel("Direct port: de", { exact: true }).fill("10444");
   await review(edit, "Change destination port only"); await check(edit); await save(edit);
-  expect(f.calls[3]).toMatchObject({ path: api + "/" + originalID, method: "PUT", body: { expected_plan_revision: 1, expected_inbound_revision: 1, profile: { id: originalID } } });
+  expect(f.calls[f.calls.length - 1]).toMatchObject({ path: api + "/" + originalID, method: "PUT", body: { expected_plan_revision: 1, expected_inbound_revision: 1, profile: { id: originalID } } });
   expect(f.getSaved()).toMatchObject({ plan_revision: 2, inbound_revision: 1, profile: { id: originalID, public_key: originalKey, revision: 1 } });
+  expect(f.getSaved()?.nodes[0]).toMatchObject({ direct_port: 10444, tunnel_port: 1185, tunnel_hosts: ["tunnel.example.org", "backup.example.org"], swap_enabled: false });
   f.makeReadOnly(); await page.getByRole("button", { name: "Open saved setup", exact: true }).click();
   await expect(edit.getByLabel("Inbound name", { exact: true })).toBeDisabled();
   await expect(edit.getByText(/This saved setup is read-only/)).toBeVisible();
@@ -336,9 +402,9 @@ test("Persian 320px editor keeps RTL tab navigation, visible footer and containe
   const f = await fixture(page, { language: "fa", theme: "light" }), dialog = await openCreation(page, "fa");
   await expect(dialog.getByLabel("نام اینباند", { exact: true })).toBeFocused();
   await dialog.getByLabel("نام اینباند", { exact: true }).fill("پروفایل یکپارچهٔ دارک");
-  const profileTab = dialog.getByRole("tab", { name: "پروفایل", exact: true }); await profileTab.focus(); await profileTab.press("ArrowLeft");
-  await expect(dialog.getByRole("tab", { name: "شبکه", exact: true })).toBeFocused();
-  await dialog.getByRole("tab", { name: "نودها و مسیرها", exact: true }).click();
+  const profileTab = dialog.getByRole("tab", { name: "اتصال", exact: true }); await profileTab.focus(); await profileTab.press("ArrowLeft");
+  await expect(dialog.getByRole("tab", { name: "دارک‌سواپ", exact: true })).toBeFocused();
+  await dialog.getByRole("tab", { name: "دارک‌سواپ", exact: true }).click();
   await dialog.getByRole("checkbox", { name: "انتخاب مقصد: Germany", exact: true }).check();
   await dialog.getByRole("checkbox", { name: "تونل: de", exact: true }).check();
   await dialog.getByRole("checkbox", { name: "دارک‌سواپ: de", exact: true }).check();
@@ -351,7 +417,7 @@ test("Persian 320px editor keeps RTL tab navigation, visible footer and containe
     body: document.documentElement.clientWidth, bodyScroll: document.documentElement.scrollWidth }));
   expect(widths.scroll).toBeLessThanOrEqual(widths.client + 1); expect(widths.bodyScroll).toBeLessThanOrEqual(widths.body + 1);
   await page.screenshot({ path: testInfo.outputPath("creation-fa-light-320.png"), fullPage: true });
-  await dialog.getByRole("tab", { name: "نودها و مسیرها", exact: true }).focus();
+  await dialog.getByRole("tab", { name: "دارک‌سواپ", exact: true }).focus();
   await page.keyboard.press("End"); await expect(dialog.getByRole("tab", { name: "بازبینی", exact: true })).toBeFocused();
   const dismiss = page.waitForEvent("dialog").then(prompt => prompt.dismiss()); await page.keyboard.press("Escape"); await dismiss;
   await expect(dialog).toBeVisible(); expect(f.calls).toHaveLength(0);
@@ -406,47 +472,63 @@ test("delayed capabilities keep direct-detail mutations blocked until the saved 
   } finally { releaseCapabilities(); }
 });
 
-test("expanded Inbound editor keeps Network, Security, Dark Swap and Hosts changes in one atomic plan", async ({ page }) => {
+test("four editor sections have one editable location per setting and save one atomic plan", async ({ page }, testInfo) => {
   const f = await fixture(page), dialog = await openCreation(page);
-  const tabs = ["Profile", "Network", "Security", "Nodes & routes", "Dark Swap", "Hosts", "Advanced", "Review"];
-  for (const name of tabs) await expect(dialog.getByRole("tab", { name, exact: true })).toBeVisible();
+  await expect(dialog.getByRole("tab")).toHaveText(["Connection", "Dark Swap", "Advanced", "Review"]);
+  for (const name of ["Profile", "Network", "Security", "Nodes & routes", "Hosts"]) {
+    await expect(dialog.getByRole("tab", { name, exact: true, includeHidden: true })).toHaveCount(0);
+  }
   await profile(dialog, "One editor, every supported setting");
-  await dialog.getByRole("tab", { name: "Network", exact: true }).click();
-  await dialog.getByRole("radio", { name: "gRPC / REALITY — network" }).check();
-  await dialog.getByLabel("gRPC service — network").fill("completepro");
-  await expect(dialog.getByText("XHTTP · Mode / Padding")).toBeVisible();
-  await dialog.getByRole("tab", { name: "Security", exact: true }).click();
-  await dialog.getByLabel("REALITY target (host:port) — security").fill("example.net:443");
-  await dialog.getByLabel("Short IDs — security").fill("aabbccdd");
-  await dialog.getByRole("tab", { name: "Nodes & routes", exact: true }).click();
-  await dialog.getByRole("checkbox", { name: "Select destination: Germany", exact: true }).check();
-  await dialog.getByLabel("Destination listening IP: de").fill("203.0.113.10");
-  await dialog.getByLabel("Direct port: de").fill("10443");
-  await dialog.getByRole("tab", { name: "Dark Swap", exact: true }).click();
-  await expect(dialog.getByRole("checkbox", { name: "Select destination: Germany", exact: true })).toBeDisabled();
+  await dialog.getByRole("radio", { name: "gRPC / REALITY", exact: true }).check();
+  await dialog.getByLabel("gRPC service", { exact: true }).fill("completepro");
+  await dialog.getByLabel("REALITY target (host:port)", { exact: true }).fill("example.net:443");
+  await dialog.getByLabel("Short IDs", { exact: true }).fill("aabbccdd");
+  const connection = dialog.locator("#creation-panel-connection");
+  for (const label of [/^Inbound name/, /^gRPC service/, /^REALITY target/, /^Server names/, /^Short IDs/]) {
+    // getByLabel counts DOM controls in hidden panels too: the previous
+    // duplicated editor must fail even when only one copy is visible.
+    await expect(dialog.getByLabel(label)).toHaveCount(1);
+    await expect(connection.getByLabel(label)).toHaveCount(1);
+  }
+  await expect(dialog.getByRole("radio", { name: /^TCP \/ REALITY/, includeHidden: true })).toHaveCount(1);
+  await expect(dialog.getByRole("radio", { name: /^gRPC \/ REALITY/, includeHidden: true })).toHaveCount(1);
+  await expect(connection.locator("[data-connection-group]")).toHaveCount(3);
+  await page.screenshot({ path: testInfo.outputPath("connection-en-desktop.png"), fullPage: true });
+  await destination(dialog, "de", "203.0.113.10", "10443", "de.example.org");
   await swap(dialog);
-  await dialog.getByRole("tab", { name: "Hosts", exact: true }).click();
-  await dialog.getByLabel("direct hosts — de").fill("de.example.org");
+  const routes = dialog.locator("#creation-panel-swap");
+  for (const label of ["Destination listening IP: de", "Direct port: de", "Direct Hosts: de", "Source Node: de", "Source relay port: de", "External entry address: de", "External entry port: de", "Destination exit port: de"]) {
+    await expect(dialog.getByLabel(label, { exact: true })).toHaveCount(1);
+    await expect(routes.getByLabel(label, { exact: true })).toHaveCount(1);
+  }
   await dialog.getByRole("tab", { name: "Advanced", exact: true }).click();
   await expect(dialog.getByRole("heading", { name: "TCP fallbacks 0", exact: true })).toBeVisible();
   await expect(dialog.getByRole("button", { name: "Add fallback", exact: true })).toBeDisabled();
   await review(dialog, "Editor stages retain every route");
+  const summary = dialog.locator('[data-review-section="connection"]');
+  for (const [field, value] of [["name", "One editor, every supported setting"], ["transport", "gRPC"], ["grpcService", "completepro"], ["realityTarget", "example.net:443"], ["serverNames", "example.org"], ["shortIDs", "aabbccdd"]]) {
+    await expect(summary.locator(`[data-review-field="${field}"]`)).toContainText(field === "transport" ? /grpc/i : value);
+  }
+  await expect(dialog.locator("[data-review-section] input, [data-review-section] select, [data-review-section] textarea")).toHaveCount(0);
+  await page.screenshot({ path: testInfo.outputPath("review-en-desktop.png"), fullPage: true });
+  await dialog.getByRole("button", { name: "Edit connection", exact: true }).click();
+  await expect(dialog.getByRole("tab", { name: "Connection", exact: true })).toHaveAttribute("aria-selected", "true");
+  await expect(dialog.getByLabel("gRPC service", { exact: true })).toHaveValue("completepro");
+  await review(dialog, "Editor stages retain every route");
   await check(dialog);
   const payload = f.calls.find(call => call.path === api + "/preview")?.body;
-  expect(payload?.profile.transport).toBe("grpc");
-  expect(payload?.profile.grpc_service).toBe("completepro");
-  expect(payload?.profile.reality_target).toBe("example.net:443");
-  expect(payload?.profile.short_ids).toEqual(["aabbccdd"]);
-  expect(payload?.nodes[0].direct_hosts).toEqual(["de.example.org"]);
-  expect(payload?.nodes[0].swap_enabled).toBe(true);
+  expect(payload?.profile).toMatchObject({ transport: "grpc", grpc_service: "completepro", reality_target: "example.net:443", short_ids: ["aabbccdd"] });
+  expect(payload?.nodes[0]).toMatchObject({ direct_hosts: ["de.example.org"], swap_enabled: true });
   await save(dialog);
   expect(f.getSaved()?.status).toBe("SAVED_DISABLED");
 });
 
 
 async function advanced(dialog: Locator, section: "network" | "security") {
-  await dialog.getByRole("tab", { name: section === "network" ? "Network" : "Security", exact: true }).click();
-  const disclosure = dialog.locator(".inbound-profile-advanced").filter({ hasText: section === "network" ? "Advanced gRPC settings" : "Advanced REALITY settings" });
+  await dialog.getByRole("tab", { name: "Connection", exact: true }).click();
+  const group = dialog.locator(`[data-connection-group="${section}"]`);
+  if (await group.getAttribute("open") === null) await group.locator(":scope > summary").click();
+  const disclosure = group.locator(".inbound-profile-advanced").filter({ hasText: section === "network" ? "Advanced gRPC settings" : "Advanced REALITY settings" });
   if (await disclosure.getAttribute("open") === null) await disclosure.locator("summary").click();
   return disclosure;
 }
@@ -454,14 +536,14 @@ async function advanced(dialog: Locator, section: "network" | "security") {
 test("advanced gRPC and REALITY options survive exact retry, reopen and profile edits without rotating identity", async ({ page }, testInfo) => {
   const f = await fixture(page, { failSaveOnce: true }), dialog = await openCreation(page);
   await profile(dialog, "Advanced connection");
-  await dialog.getByRole("tab", { name: "Network", exact: true }).click();
-  await dialog.getByRole("radio", { name: "gRPC / REALITY — network", exact: true }).check();
-  await dialog.getByLabel("gRPC service — network", { exact: true }).fill("advanced-grpc");
+  await dialog.getByRole("tab", { name: "Connection", exact: true }).click();
+  await dialog.getByRole("radio", { name: "gRPC / REALITY", exact: true }).check();
+  await dialog.getByLabel("gRPC service", { exact: true }).fill("advanced-grpc");
   await advanced(dialog, "network");
   await dialog.getByLabel("gRPC Authority", { exact: true }).fill("edge.example.org:8443");
   await dialog.getByRole("checkbox", { name: "gRPC MultiMode", exact: true }).check();
-  await dialog.getByRole("radio", { name: "TCP / REALITY — network", exact: true }).check();
-  await dialog.getByRole("radio", { name: "gRPC / REALITY — network", exact: true }).check();
+  await dialog.getByRole("radio", { name: "TCP / REALITY", exact: true }).check();
+  await dialog.getByRole("radio", { name: "gRPC / REALITY", exact: true }).check();
   await advanced(dialog, "network");
   await expect(dialog.getByLabel("gRPC Authority", { exact: true })).toHaveValue("edge.example.org:8443");
   await expect(dialog.getByRole("checkbox", { name: "gRPC MultiMode", exact: true })).toBeChecked();
@@ -473,7 +555,13 @@ test("advanced gRPC and REALITY options survive exact retry, reopen and profile 
   await dialog.getByRole("checkbox", { name: "REALITY Show", exact: true }).check();
   await page.screenshot({ path: testInfo.outputPath("advanced-reality-en-desktop.png"), fullPage: true });
   await destination(dialog, "de", "203.0.113.10", "10443", "de.example.org");
-  await review(dialog); await check(dialog);
+  await review(dialog);
+  for (const [field, value] of [["grpcAuthority", "edge.example.org:8443"], ["realityXver", "2"], ["realityMaxTimeDiff", "60000"], ["realityMinClientVer", "1.8.0"], ["realityMaxClientVer", "25.9.11"]]) {
+    await expect(dialog.locator(`[data-review-option="${field}"]`)).toContainText(value);
+  }
+  await expect(dialog.locator('[data-review-option="grpcMultiMode"]')).toBeVisible();
+  await expect(dialog.locator('[data-review-option="realityShow"]')).toBeVisible();
+  await check(dialog);
   const options = { grpc_authority: "edge.example.org:8443", grpc_multi_mode: true, reality_xver: 2,
     reality_max_time_diff: 60000, reality_min_client_ver: "1.8.0", reality_max_client_ver: "25.9.11", reality_show: true };
   expect(f.calls[0].body.profile.options).toEqual(options);
@@ -492,7 +580,7 @@ test("advanced gRPC and REALITY options survive exact retry, reopen and profile 
   await expect(edit.getByRole("checkbox", { name: "REALITY Show", exact: true })).toBeChecked();
   await advanced(edit, "network");
   await expect(edit.getByLabel("gRPC Authority", { exact: true })).toHaveValue("edge.example.org:8443");
-  await edit.getByRole("radio", { name: "TCP / REALITY — network", exact: true }).check();
+  await edit.getByRole("radio", { name: "TCP / REALITY", exact: true }).check();
   await review(edit, "Use TCP and retain REALITY settings"); await check(edit); await save(edit);
   expect(f.calls[3].body.profile.options).toEqual({ reality_xver: 2, reality_max_time_diff: 60000,
     reality_min_client_ver: "1.8.0", reality_max_client_ver: "25.9.11", reality_show: true });
@@ -543,9 +631,11 @@ test("invalid advanced versions reveal their hidden security field without sendi
   await dialog.getByLabel("Minimum client version", { exact: true }).fill("25.9.11");
   await dialog.getByLabel("Maximum client version", { exact: true }).fill("1.8.0");
   await dialog.locator(".inbound-profile-advanced").filter({ hasText: "Advanced REALITY settings" }).locator("summary").click();
+  await dialog.locator('[data-connection-group="security"] > summary').click();
   await destination(dialog, "de", "203.0.113.10", "10443", "de.example.org"); await review(dialog);
   await dialog.getByRole("button", { name: "Check complete setup", exact: true }).click();
-  await expect(dialog.getByRole("tab", { name: "Security", exact: true })).toHaveAttribute("aria-selected", "true");
+  await expect(dialog.getByRole("tab", { name: "Connection", exact: true })).toHaveAttribute("aria-selected", "true");
+  await expect(dialog.locator('[data-connection-group="security"]')).toHaveAttribute("open", "");
   await expect(dialog.getByLabel("Maximum client version", { exact: true })).toBeFocused();
   await expect(dialog.getByRole("alert")).toContainText("at least the minimum");
   expect(f.calls).toHaveLength(0);
@@ -561,14 +651,31 @@ for (const language of ["en", "fa"] as const) test(`320px ${language} footer nav
       return selected.left >= viewport.left - 1 && selected.right <= viewport.right + 1;
     })).toBe(true);
   };
-  for (let stage = 0; stage < 7; stage++) { await tabVisible(); await dialog.getByRole("button", { name: next, exact: true }).click(); }
+  await expect(dialog.getByRole("tab")).toHaveText(language === "fa" ? ["اتصال", "دارک‌سواپ", "پیشرفته", "بازبینی"] : ["Connection", "Dark Swap", "Advanced", "Review"]);
+  for (let stage = 0; stage < 3; stage++) { await tabVisible(); await dialog.getByRole("button", { name: next, exact: true }).click(); }
   await tabVisible();
-  for (let stage = 7; stage > 0; stage--) { await dialog.getByRole("button", { name: back, exact: true }).click(); await tabVisible(); }
-  await dialog.getByRole("tab", { name: language === "fa" ? "دارک سواپ" : "Dark Swap", exact: true }).click();
-  await dialog.getByRole("button", { name: language === "fa" ? "انتخاب نودهای مقصد" : "Select destination Nodes", exact: true }).click();
-  await expect(dialog.getByRole("tab", { name: language === "fa" ? "نودها و مسیرها" : "Nodes & routes", exact: true })).toHaveAttribute("aria-selected", "true");
+  for (let stage = 3; stage > 0; stage--) { await dialog.getByRole("button", { name: back, exact: true }).click(); await tabVisible(); }
+  await dialog.getByRole("tab", { name: language === "fa" ? "دارک‌سواپ" : "Dark Swap", exact: true }).click();
+  const selectDestination = dialog.getByRole("checkbox", { name: language === "fa" ? "انتخاب مقصد: Germany" : "Select destination: Germany", exact: true });
+  await expect(selectDestination).toBeEnabled();
+  await expect(dialog.getByRole("tab", { name: language === "fa" ? "دارک‌سواپ" : "Dark Swap", exact: true })).toHaveAttribute("aria-selected", "true");
+  await selectDestination.check();
+  await dialog.getByLabel(language === "fa" ? "IP شنود نود مقصد: de" : "Destination listening IP: de", { exact: true }).fill("203.0.113.10");
+  const directPort = dialog.getByLabel(language === "fa" ? "پورت مستقیم: de" : "Direct port: de", { exact: true });
+  await directPort.fill("10443");
+  await dialog.getByLabel(language === "fa" ? "هاست‌های مستقیم: de" : "Direct Hosts: de", { exact: true }).fill("de.example.org");
+  await dialog.getByRole("checkbox", { name: language === "fa" ? "تونل: de" : "Tunnel: de", exact: true }).check();
+  const tunnelPort = dialog.getByLabel(language === "fa" ? "پورت تونل: de" : "Tunnel port: de", { exact: true });
+  await tunnelPort.fill("1185");
+  await dialog.getByLabel(language === "fa" ? "هاست‌های تونل: de" : "Tunnel Hosts: de", { exact: true }).fill("tunnel.example.org");
+  await expect(directPort).toHaveValue("10443"); await expect(tunnelPort).toHaveValue("1185");
+  await expect(dialog.getByRole("checkbox", { name: language === "fa" ? "دارک‌سواپ: de" : "Dark Swap: de", exact: true })).not.toBeChecked();
+  await directPort.scrollIntoViewIfNeeded();
+  await page.screenshot({ path: testInfo.outputPath(`dark-swap-${language}-320-direct.png`), fullPage: true });
+  await tunnelPort.scrollIntoViewIfNeeded();
+  await page.screenshot({ path: testInfo.outputPath(`dark-swap-${language}-320-tunnel.png`), fullPage: true });
   await tabVisible();
-  await dialog.getByRole("tab", { name: language === "fa" ? "امنیت" : "Security", exact: true }).click();
+  await dialog.getByRole("tab", { name: language === "fa" ? "اتصال" : "Connection", exact: true }).click();
   await dialog.locator(".inbound-profile-advanced").filter({ hasText: language === "fa" ? "تنظیمات پیشرفتهٔ REALITY" : "Advanced REALITY settings" }).locator("summary").click();
   const maxTime = dialog.getByLabel(language === "fa" ? "حداکثر اختلاف زمان (میلی‌ثانیه)" : "Maximum time difference (ms)", { exact: true });
   await maxTime.fill("60000");
@@ -633,6 +740,16 @@ test("Sniffing and TCP fallbacks survive exact retry, reopen, disabled edits, co
   await edit.getByRole("checkbox", { name: "Enable Sniffing", exact: true }).uncheck();
   await expect(edit.getByText("Sniffing is off. Its configured settings are retained.", { exact: true })).toBeVisible();
   await fallbackRow(edit, 0); await expect(edit.getByLabel("Fallback 1 Path", { exact: true })).toHaveValue("/health");
+  await review(edit, "Retain settings while Sniffing is disabled");
+  const retainedSniffing = edit.locator('[data-review-option="sniffing"]');
+  await expect(retainedSniffing).toHaveAttribute("data-sniffing-enabled", "false");
+  await expect(retainedSniffing).toHaveAttribute("data-sniffing-retained", "true");
+  await expect(retainedSniffing).toContainText("Disabled · settings retained");
+  await expect(retainedSniffing).toContainText("domain:Example.NET");
+  await expect(edit.locator('[data-review-fallback="0"]')).toContainText("127.0.0.1:8080");
+  await expect(edit.locator('[data-review-fallback="0"]')).toContainText("/health");
+  await edit.getByRole("button", { name: "Edit advanced settings", exact: true }).click();
+  await expect(edit.getByRole("tab", { name: "Advanced", exact: true })).toHaveAttribute("aria-selected", "true");
   await review(edit, "Retain settings while Sniffing is disabled"); await check(edit); await save(edit);
   expect(f.getSaved()?.profile.options).toEqual({ sniffing: { ...sniffing, enabled: false }, fallbacks });
   expect(f.getSaved()).toMatchObject({ plan_revision: 2, inbound_revision: 2, profile: { id: identity, public_key: publicKey, enabled: false } });
@@ -662,9 +779,9 @@ test("switching to gRPC retains fallback rows, blocks preview and allows explici
   await destination(dialog, "de", "203.0.113.10", "10443", "de.example.org");
   await traffic(dialog); await dialog.getByRole("button", { name: "Add fallback", exact: true }).click();
   await dialog.getByLabel("Fallback 1 Destination", { exact: true }).fill("[2001:db8::1]:8443");
-  await dialog.getByRole("tab", { name: "Network", exact: true }).click();
-  await dialog.getByRole("radio", { name: "gRPC / REALITY — network", exact: true }).check();
-  await dialog.getByLabel("gRPC service — network", { exact: true }).fill("grpc-service");
+  await dialog.getByRole("tab", { name: "Connection", exact: true }).click();
+  await dialog.getByRole("radio", { name: "gRPC / REALITY", exact: true }).check();
+  await dialog.getByLabel("gRPC service", { exact: true }).fill("grpc-service");
   await review(dialog); await dialog.getByRole("button", { name: "Check complete setup", exact: true }).click();
   await expect(dialog.getByRole("tab", { name: "Advanced", exact: true })).toHaveAttribute("aria-selected", "true");
   await expect(dialog.getByLabel("Fallback 1 Destination", { exact: true })).toBeFocused();

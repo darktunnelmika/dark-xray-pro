@@ -1,5 +1,11 @@
 # DARK XRAY PRO — Inbound Workspace V3
 
+> چیدمان هشت‌بخشیِ اولیهٔ این سند با
+> [فرم یکپارچهٔ اتصال و دارک‌سواپ](inbound-editor-unified-flow.fa.md)
+> جایگزین شده است. شرح زیر سابقهٔ آن چیدمان و قراردادهای اجراییِ همچنان
+> معتبر را ثبت می‌کند؛ مدیریت نود و پورت‌های مستقل Direct/Tunnel در فرم
+> یکپارچه، داخل بخش دارک‌سواپ قرار دارد.
+
 ## Initial workspace layout (24 October 2026)
 
 - Added directly reachable Network, Security, Dark Swap, Hosts and Advanced stages while preserving existing Profile, Nodes & routes and Review.
