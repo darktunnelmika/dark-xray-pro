@@ -11,7 +11,7 @@ import WorkspaceDialog from "./WorkspaceDialog";
 import { profileOptionsDraft, profileOptionsPayload, type ProfileOptionsDraft } from "./inboundProfileOptions";
 import InboundProfileForm, { type InboundProfileFormHandle, type InboundProfileValue } from "./InboundProfileForm";
 import InboundCreation from "./InboundCreation";
-import type { CreationCapabilities, CreationPlan, CreationPlanResponse } from "./InboundCreationModel";
+import { creationNodeName, type CreationCapabilities, type CreationPlan, type CreationPlanResponse } from "./InboundCreationModel";
 import { navigateURL, registerNavigationGuard } from "./navigation";
 import type { Inbound, InboundOverview as Overview, InboundStatus as Status } from "./inboundTypes";
 import { useEffect, useRef, useState, type FormEvent, type ReactNode, type KeyboardEvent } from "react";
@@ -51,7 +51,7 @@ const workspaceWords = {
   listLead: "Manage profiles, assigned Nodes and client access.", loading: "Loading Inbounds…", missing: "This Inbound is no longer available.",
   boundary: "Route execution and customer delivery have separate verification states.", swapBoundary: "Saved Dark Swap drafts are available. Live forwarding and customer delivery are not yet enabled.",
   copy: "Copy settings", copyHint: "Copy the public profile into a new Inbound. New keys are generated; clients and Node assignments are not copied.",
-  nodeCount: "Assigned Nodes", clientCount: "Bound clients", profile: "Profile", targetAdd: "Add Node target", targetEdit: "Edit target", assigned: "Assigned Nodes and ports",
+  nodeCount: "Assigned Nodes", plannedNodes: "Planned Nodes", clientCount: "Bound clients", profile: "Profile", targetAdd: "Add Node target", targetEdit: "Edit target", assigned: "Assigned Nodes and ports",
   directPort: "Direct", swapPort: "Destination listener", none: "No Node is assigned to this Inbound yet.", routeHelp: "Assign the destination Node first, then review and save its route draft below.",
   searchClients: "Search all clients", boundCount: "Currently bound", clientsFailed: "Client selection is unavailable. Refresh to try again.",
   unsaved: "Discard the unsaved changes to this Inbound?", lab: "Diagnostics / LAB", labHelp: "Readiness, controlled tests and runtime reports for the whole Node fleet.",
@@ -65,7 +65,7 @@ const workspaceWords = {
   listLead: "پروفایل‌ها، نودهای مقصد و دسترسی کلاینت‌ها را مدیریت کن.", loading: "در حال دریافت اینباندها…", missing: "این اینباند دیگر در دسترس نیست.",
   boundary: "اجرای مسیر و تحویل سرویس به مشتری، وضعیت تأیید جداگانه دارند.", swapBoundary: "ذخیره و بررسی پیش‌نویس دارک سواپ در دسترس است. عبور عملیاتی ترافیک و تحویل سرویس هنوز فعال نیست.",
   copy: "کپی تنظیمات", copyHint: "پروفایل عمومی در یک اینباند تازه کپی می‌شود؛ کلیدها تازه‌اند و کلاینت‌ها و نودهای مقصد کپی نمی‌شوند.",
-  nodeCount: "نود مقصد", clientCount: "کلاینت متصل", profile: "پروفایل", targetAdd: "افزودن نود مقصد", targetEdit: "ویرایش مقصد", assigned: "نودها و پورت‌های مقصد",
+  nodeCount: "نودهای اختصاص‌یافته", plannedNodes: "نودهای طرح", clientCount: "کلاینت متصل", profile: "پروفایل", targetAdd: "افزودن نود مقصد", targetEdit: "ویرایش مقصد", assigned: "نودها و پورت‌های مقصد",
   directPort: "مستقیم", swapPort: "پورت مقصد", none: "هنوز نودی به این اینباند اختصاص داده نشده است.", routeHelp: "ابتدا نود مقصد را مشخص کن؛ سپس پیش‌نویس مسیرش را در پایین بررسی و ذخیره کن.",
   searchClients: "جست‌وجو در همهٔ کلاینت‌ها", boundCount: "متصل به اینباند", clientsFailed: "فهرست کلاینت‌ها در دسترس نیست. دوباره به‌روزرسانی کن.",
   unsaved: "تغییرات ذخیره‌نشدهٔ این اینباند کنار گذاشته شوند؟", lab: "عیب‌یابی و آزمایش", labHelp: "آمادگی، تست‌های کنترل‌شده و گزارش اجرای ناوگان نودها.",
@@ -174,7 +174,8 @@ export default function NativeInbounds({ language, fallback, workspace = "inboun
   void request<CreationCapabilities | { available: false; runtime_apply: false }>("/api/v1/workspace/native-inbound-plans/capabilities", controller.signal).then(result => {
    if (controller.signal.aborted) return;
    if (result?.available === false && result.runtime_apply === false) { setSetupCapabilities(null); setSetupPhase("legacy"); setSetupSnapshot(inboundFingerprint); return; }
-   if (!result || result.available !== true || result.version !== 1 || result.runtime_apply !== false || !Array.isArray(result.plans) || !Array.isArray(result.transports) || !result.transports.includes("tcp") || !result.protocols?.includes("vless") || !result.securities?.includes("reality")) throw new Error("invalid_setup_capability");
+   if (!result || result.available !== true || ![1, 2].includes(result.version) || result.runtime_apply !== false || !Array.isArray(result.plans) || !Array.isArray(result.transports) || !result.transports.includes("tcp") || !result.protocols?.includes("vless") || !result.securities?.includes("reality")) throw new Error("invalid_setup_capability");
+   if (result.plans.some(plan => plan.node_ids !== undefined && (!Array.isArray(plan.node_ids) || !plan.node_ids.length || plan.node_ids.length > 128 || new Set(plan.node_ids).size !== plan.node_ids.length || plan.node_ids.some(id => typeof id !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(id))))) throw new Error("invalid_setup_nodes");
    setSetupCapabilities(result); setSetupPhase("available"); setSetupSnapshot(inboundFingerprint);
   }).catch(error => {
    if (controller.signal.aborted) return;
@@ -257,7 +258,8 @@ export default function NativeInbounds({ language, fallback, workspace = "inboun
  function savedSetup(plan: CreationPlan) {
   setSetupEditor(null); setSetupDirty(false); setSetupBusy(false); setProfileDirty(false); setRouteDirty(false);
   setData(previous => previous ? { ...previous, inbounds: [...previous.inbounds.filter(item => item.id !== plan.profile.id), plan.profile] } : previous);
-  setSetupCapabilities(previous => previous ? { ...previous, plans: [...previous.plans.filter(item => item.inbound_id !== plan.profile.id), { inbound_id: plan.profile.id, plan_revision: plan.plan_revision, inbound_revision: plan.inbound_revision, status: plan.status }] } : previous);
+  const plannedNodeIDs = [...new Set(plan.nodes.flatMap(node => [node.node_id, ...(node.swap_enabled ? [node.swap_source_node_id] : [])]))].sort();
+  setSetupCapabilities(previous => previous ? { ...previous, plans: [...previous.plans.filter(item => item.inbound_id !== plan.profile.id), { inbound_id: plan.profile.id, plan_revision: plan.plan_revision, inbound_revision: plan.inbound_revision, status: plan.status, node_ids: plannedNodeIDs }] } : previous);
   skipNavigationGuard.current = true; navigateDetail(plan.profile.id, "routes"); skipNavigationGuard.current = false;
   setNotice(u.setupSaved); setRefresh(value => value + 1);
  }
@@ -306,7 +308,7 @@ export default function NativeInbounds({ language, fallback, workspace = "inboun
   {!data && !failure && <p role="status">{u.loading}</p>}
   {session?.authenticated && session.user?.role !== "owner" && <p className="native-warning">{t.ownerOnly}</p>}
   {session?.authenticated && session.user?.role === "owner" && data && <>
-   <div hidden={chosen > 0}><InboundDirectory data={data} language={language} blocked={busy || stale || !setupStatusReady} swapWorkspace={swapWorkspace}
+   <div hidden={chosen > 0}><InboundDirectory data={data} plans={setupCapabilities?.plans} language={language} blocked={busy || stale || !setupStatusReady} swapWorkspace={swapWorkspace}
     onOpen={item => navigateDetail(item.id, swapWorkspace ? "routes" : "overview")} onCreate={openCreate}/></div>
    {chosen > 0 && <>
     <div className="inbound-detail-heading"><button type="button" className="inbound-back" onClick={() => navigateDetail(0, "overview")}><ChevronLeft size={17}/>{u.back}</button>
@@ -314,11 +316,11 @@ export default function NativeInbounds({ language, fallback, workspace = "inboun
     </div>
     {!current ? <p className="native-warning">{u.missing}</p> : <>
      <nav className="inbound-detail-tabs" role="tablist" aria-label="Inbound sections">{tabs.map((item, index) => <button key={item} ref={element => { tabElements.current[index] = element; }} role="tab" id={"inbound-tab-" + item} aria-controls={"inbound-panel-" + item} aria-selected={tab === item} tabIndex={tab === item ? 0 : -1} onKeyDown={event => tabKey(event, index)} onClick={() => switchTab(item)}>{u[item]}</button>)}</nav>
-     {setupSummary && (tab === "overview" || tab === "routes") && <section className="native-card creation-saved-plan"><ShieldCheck size={21}/><div><h3>{u.setupTitle}</h3><p>{setupUnchanged ? u.setupHelp : u.setupChanged}</p>{setupSummary.status === "WAITING_HOST" && <p className="creation-waiting">{u.setupWaiting}</p>}</div><button type="button" disabled={busy || setupBusy} onClick={() => void openSetupPlan()}>{u.setupOpen}</button></section>}
+     {setupSummary && (tab === "overview" || tab === "routes") && <section className="native-card creation-saved-plan"><ShieldCheck size={21}/><div><h3>{u.setupTitle}</h3><p>{setupUnchanged ? u.setupHelp : u.setupChanged}</p>{setupSummary.node_ids && <p data-planned-nodes>{u.plannedNodes}: {setupSummary.node_ids.map(id => creationNodeName(data.nodes, id)).join(" · ")}</p>}{setupSummary.status === "WAITING_HOST" && <p className="creation-waiting">{u.setupWaiting}</p>}</div><button type="button" disabled={busy || setupBusy} onClick={() => void openSetupPlan()}>{u.setupOpen}</button></section>}
      <section hidden={tab !== "overview"} role="tabpanel" id="inbound-panel-overview" aria-labelledby="inbound-tab-overview" className="inbound-detail-panel">
       {visited.includes("overview") && <>
-       <div className="inbound-summary"><div><span>{u.nodeCount}</span><strong>{assigned.length}</strong></div><div><span>{u.clientCount}</span><strong>{current.bound_clients}</strong></div><div><span>{u.profile}</span><strong>{current.archived ? t.archivedLabel : current.enabled ? t.enabledLabel : t.disabledLabel}</strong></div></div>
-       <dl className="inbound-profile-facts"><div><dt>{t.transport}</dt><dd><bdi dir="ltr">{current.transport === "grpc" ? "gRPC" : "TCP"} / REALITY</bdi></dd></div><div><dt>{t.dest}</dt><dd><bdi dir="ltr">{current.reality_target}</bdi></dd></div><div><dt>{t.sni}</dt><dd><bdi dir="ltr">{current.server_names.join(", ")}</bdi></dd></div></dl>
+       <div className="inbound-summary"><div data-node-summary><span>{setupSummary ? u.plannedNodes : u.nodeCount}</span><strong>{setupSummary ? setupSummary.node_ids?.length ?? "—" : assigned.length}</strong>{setupSummary && <small>{u.nodeCount}: {assigned.length}</small>}</div><div><span>{u.clientCount}</span><strong>{current.bound_clients}</strong></div><div><span>{u.profile}</span><strong>{current.archived ? t.archivedLabel : current.enabled ? t.enabledLabel : t.disabledLabel}</strong></div></div>
+       <dl className="inbound-profile-facts"><div><dt>{t.transport}</dt><dd><bdi dir="ltr">{current.transport === "grpc" ? "gRPC" : current.transport.toUpperCase()} / REALITY</bdi></dd></div><div><dt>{t.dest}</dt><dd><bdi dir="ltr">{current.reality_target}</bdi></dd></div><div><dt>{t.sni}</dt><dd><bdi dir="ltr">{current.server_names.join(", ")}</bdi></dd></div></dl>
        <InboundLifecycle key={chosen + ":" + editorEpoch + ":" + !!setupSummary} inbound={current} language={language} csrf={session.csrf_token ?? ""} blocked={busy || stale || !setupStatusReady} mode="controls" profileOptionsSupported={setupCapabilities?.profile_options === true} setupOnly={!!setupSummary} onDirtyChange={setProfileDirty} onChanged={() => setRefresh(n => n + 1)}/>
       </>}
      </section>

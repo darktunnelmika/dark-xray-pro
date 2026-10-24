@@ -1,4 +1,5 @@
 import { canonicalFallbacks, canonicalSniffingOptions, trafficOptionIssues, trafficOptionsDraft, trafficOptionsPayload, type InboundSniffingOptions, type InboundFallback, type TrafficOptionsDraft } from "./inboundTrafficOptions";
+import { canonicalClientOptions, canonicalXHTTPOptions, networkOptionIssues, networkOptionsDraft, networkOptionsPayload, validAuthority, type InboundClientOptions, type InboundXHTTPOptions, type NetworkOptionsDraft } from "./inboundNetworkOptions";
 
 /** Public profile settings only; REALITY identity remains owned by the server. */
 export type InboundProfileOptions = {
@@ -9,12 +10,14 @@ export type InboundProfileOptions = {
   reality_min_client_ver?: string;
   reality_max_client_ver?: string;
   reality_show?: boolean;
+  xhttp?: InboundXHTTPOptions;
+  client?: InboundClientOptions;
   sniffing?: InboundSniffingOptions;
   fallbacks?: InboundFallback[];
 };
 
 /** Text is retained while editing so partial or invalid input is never lost. */
-export type ProfileOptionsDraft = TrafficOptionsDraft & {
+export type ProfileOptionsDraft = TrafficOptionsDraft & NetworkOptionsDraft & {
   grpcAuthority: string;
   grpcMultiMode: boolean;
   realityXver: string;
@@ -29,6 +32,7 @@ export const maxRealityTimeDiff = 9_223_372_036_854;
 export function profileOptionsDraft(options?: InboundProfileOptions | null): ProfileOptionsDraft {
   return {
     ...trafficOptionsDraft(options),
+    ...networkOptionsDraft(options),
     grpcAuthority: options?.grpc_authority ?? "", grpcMultiMode: options?.grpc_multi_mode ?? false,
     realityXver: String(options?.reality_xver ?? 0), realityMaxTimeDiff: String(options?.reality_max_time_diff ?? 0),
     realityMinClientVer: options?.reality_min_client_ver ?? "", realityMaxClientVer: options?.reality_max_client_ver ?? "",
@@ -42,8 +46,8 @@ export function canonicalProfileOptions(options?: InboundProfileOptions | null):
   if (typeof options !== "object" || Array.isArray(options)) throw new Error("invalid profile options");
   const fields = { grpc_authority: "string", grpc_multi_mode: "boolean", reality_xver: "number", reality_max_time_diff: "number",
     reality_min_client_ver: "string", reality_max_client_ver: "string", reality_show: "boolean" } as const;
-  if (Object.keys(options).some(key => !Object.prototype.hasOwnProperty.call(fields, key) && key !== "sniffing" && key !== "fallbacks")) throw new Error("unknown profile option");
-  const result: Record<string, string | number | boolean | InboundSniffingOptions | InboundFallback[]> = {};
+  if (Object.keys(options).some(key => !Object.prototype.hasOwnProperty.call(fields, key) && !["sniffing", "fallbacks", "xhttp", "client"].includes(key))) throw new Error("unknown profile option");
+  const result: Record<string, string | number | boolean | InboundSniffingOptions | InboundFallback[] | InboundXHTTPOptions | InboundClientOptions> = {};
   for (const key of Object.keys(fields) as Array<keyof typeof fields>) {
     const value = options[key];
     if (value === undefined) continue;
@@ -51,6 +55,9 @@ export function canonicalProfileOptions(options?: InboundProfileOptions | null):
     if (value !== "" && value !== false && value !== 0) result[key] = value;
   }
   const sniffing = canonicalSniffingOptions(options.sniffing), fallbacks = canonicalFallbacks(options.fallbacks);
+  const xhttp = canonicalXHTTPOptions(options.xhttp), client = canonicalClientOptions(options.client);
+  if (xhttp) result.xhttp = xhttp;
+  if (client) result.client = client;
   if (sniffing) result.sniffing = sniffing;
   if (fallbacks) result.fallbacks = fallbacks;
   return Object.keys(result).length ? result : undefined;
@@ -59,6 +66,7 @@ export function canonicalProfileOptions(options?: InboundProfileOptions | null):
 export function profileOptionsPayload(options: ProfileOptionsDraft | undefined, transport: string): InboundProfileOptions | undefined {
   const value = options ?? profileOptionsDraft();
   const traffic = trafficOptionsPayload(value);
+  const network = networkOptionsPayload(value, transport);
   const result = canonicalProfileOptions({
     grpc_authority: transport === "grpc" ? value.grpcAuthority : "",
     grpc_multi_mode: transport === "grpc" && value.grpcMultiMode,
@@ -66,10 +74,13 @@ export function profileOptionsPayload(options: ProfileOptionsDraft | undefined, 
     reality_min_client_ver: value.realityMinClientVer, reality_max_client_ver: value.realityMaxClientVer,
     reality_show: value.realityShow,
     ...traffic,
+    ...network,
   }) ?? {};
   // Empty features carry clear intent on edits; comparison still treats them as defaults.
   if (traffic.sniffing !== undefined && !result.sniffing) result.sniffing = {};
   if (traffic.fallbacks !== undefined && !result.fallbacks) result.fallbacks = [];
+  if (network.xhttp !== undefined && !result.xhttp) result.xhttp = {};
+  if (network.client !== undefined && !result.client) result.client = {};
   return Object.keys(result).length ? result : undefined;
 }
 
@@ -77,24 +88,6 @@ function version(value: string): number[] | null {
   if (!/^(?:0|[1-9][0-9]{0,2})\.(?:0|[1-9][0-9]{0,2})\.(?:0|[1-9][0-9]{0,2})$/.test(value)) return null;
   const parts = value.split(".").map(Number);
   return parts.every(part => part <= 255) ? parts : null;
-}
-
-function validAuthority(value: string): boolean {
-  if (!value) return true;
-  if (value.length > 259 || /[^\x21-\x7e]|[/\\@%?#]/.test(value)) return false;
-  let host = value, port = "";
-  if (value.startsWith("[")) {
-    const match = value.match(/^(\[[0-9a-fA-F:.]+\])(?::([0-9]+))?$/);
-    if (!match) return false;
-    host = match[1]; port = match[2] ?? "";
-    try { if (!new URL("http://" + host).hostname.startsWith("[")) return false; } catch { return false; }
-  } else {
-    const parts = value.split(":");
-    if (parts.length > 2 || parts.length === 2 && !parts[1]) return false;
-    [host, port = ""] = parts;
-    if (!host || host.length > 253 || !host.split(".").every(label => /^[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$/.test(label))) return false;
-  }
-  return !port || /^[1-9][0-9]{0,4}$/.test(port) && Number(port) <= 65535;
 }
 
 export function profileOptionIssues(options: ProfileOptionsDraft | undefined, transport: string): ProfileOptionIssue[] {
@@ -107,12 +100,13 @@ export function profileOptionIssues(options: ProfileOptionsDraft | undefined, tr
   if (value.realityMaxClientVer && !max) issues.push({ field: "realityMaxClientVer", code: "reality_version_invalid" });
   if (min && max && (min[0] * 65536 + min[1] * 256 + min[2]) > (max[0] * 65536 + max[1] * 256 + max[2])) issues.push({ field: "realityMaxClientVer", code: "reality_version_order" });
   issues.push(...trafficOptionIssues(value, transport));
+  issues.push(...networkOptionIssues(value, transport));
   return issues;
 }
 
 export function profileOptionSection(field: string): "network" | "security" | "advanced" | undefined {
-  if (field === "grpcAuthority" || field === "grpcMultiMode") return "network";
-  if (["realityXver", "realityMaxTimeDiff", "realityMinClientVer", "realityMaxClientVer", "realityShow"].includes(field)) return "security";
+  if (field === "grpcAuthority" || field === "grpcMultiMode" || field.startsWith("xhttp")) return "network";
+  if (["realityXver", "realityMaxTimeDiff", "realityMinClientVer", "realityMaxClientVer", "realityShow", "clientFingerprint", "clientSpiderX", "clientOptions"].includes(field)) return "security";
   if (field.startsWith("sniffing") || field.startsWith("fallbacks")) return "advanced";
   return undefined;
 }

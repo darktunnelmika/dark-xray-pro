@@ -1,9 +1,11 @@
-import type { ReactNode } from "react";
-import { Pencil } from "lucide-react";
+import { useState, type ReactNode } from "react";
+import { Copy, Pencil } from "lucide-react";
 import type { InboundNode } from "./inboundTypes";
-import { creationHosts, creationNodeName, creationShortIDs, creationWaitingHosts, selectedCreationNodes, type CreationNode, type CreationState } from "./InboundCreationModel";
+import { creationNodeName, creationPathHosts, creationShortIDs, creationWaitingHosts, selectedCreationNodes, type CreationNode, type CreationState } from "./InboundCreationModel";
 import { profileOptionsDraft } from "./inboundProfileOptions";
 import { trafficLines } from "./inboundTrafficOptions";
+import { effectiveEndpoint } from "./inboundEndpointOptions";
+import type { CreationEndpointPreview } from "./inboundEndpointPreview";
 
 const words = {
   en: {
@@ -15,6 +17,8 @@ const words = {
     source: "Source Node", sourceIP: "Source relay listening IP", sourcePort: "Source relay port", entry: "External entry address", entryPort: "External entry port", destinationPort: "Destination exit port", reuse: "Reuses this Node’s Tunnel port",
     draft: "Retained draft", draftOff: "Disabled · draft values are not saved", sniffing: "Sniffing", retained: "Disabled · settings retained", overrides: "Destination overrides", routeOnly: "Route Only", metadataOnly: "Metadata Only", domains: "Excluded domains", ips: "Excluded IPs or CIDRs",
     noSniffing: "No custom Sniffing settings.", fallbacks: "TCP fallbacks", noFallbacks: "No fallbacks configured.", destination: "Destination", path: "Path", proxy: "PROXY protocol", fallback: "Fallback", tcp: "These retained fallbacks require TCP before this setup can be saved.",
+    xhttpPath: "XHTTP Path", xhttpHost: "XHTTP Host", xhttpMode: "XHTTP Mode", xhttpPadding: "XHTTP Padding", fingerprint: "Client Fingerprint", spider: "Client SpiderX", publicKey: "REALITY public key", copyKey: "Copy public key", copied: "Copied", copyFailed: "Copy unavailable",
+    endpoint: "Host", publicPort: "Public port", sni: "SNI", label: "Display name", endpointOff: "Disabled · settings saved", inherit: "Inherited", checkedEndpoints: "Checked customer endpoints", checkedHint: "Connection settings confirmed by the server for this paused setup.",
   },
   fa: {
     connection: "اتصال", routes: "دارک‌سواپ · نودها و مسیرها", advanced: "تنظیمات پیشرفته", editConnection: "ویرایش اتصال", editRoutes: "ویرایش دارک‌سواپ", editAdvanced: "ویرایش تنظیمات پیشرفته",
@@ -25,6 +29,8 @@ const words = {
     source: "نود مبدأ", sourceIP: "IP شنود رلهٔ مبدأ", sourcePort: "پورت رلهٔ مبدأ", entry: "آدرس ورودی بیرونی", entryPort: "پورت ورودی بیرونی", destinationPort: "پورت خروجی مقصد", reuse: "استفاده از پورت تونل همین نود",
     draft: "مقادیر پیش‌نویس", draftOff: "خاموش · مقادیر پیش‌نویس ذخیره نمی‌شوند", sniffing: "Sniffing", retained: "خاموش · تنظیمات حفظ شده", overrides: "پروتکل‌های تشخیص مقصد", routeOnly: "Route Only", metadataOnly: "Metadata Only", domains: "دامنه‌های مستثنا", ips: "IPها یا CIDRهای مستثنا",
     noSniffing: "تنظیمات سفارشی Sniffing وجود ندارد.", fallbacks: "Fallbackهای TCP", noFallbacks: "هیچ Fallbackی تنظیم نشده.", destination: "مقصد", path: "مسیر", proxy: "پروتکل PROXY", fallback: "Fallback", tcp: "برای ذخیرهٔ این Fallbackهای حفظ‌شده، انتقال باید TCP باشد.",
+    xhttpPath: "Path در XHTTP", xhttpHost: "Host در XHTTP", xhttpMode: "Mode در XHTTP", xhttpPadding: "Padding در XHTTP", fingerprint: "Fingerprint کلاینت", spider: "SpiderX کلاینت", publicKey: "کلید عمومی REALITY", copyKey: "کپی کلید عمومی", copied: "کپی شد", copyFailed: "کپی در دسترس نیست",
+    endpoint: "Host", publicPort: "پورت عمومی", sni: "SNI", label: "نام نمایشی", endpointOff: "خاموش · تنظیمات ذخیره می‌شود", inherit: "ارث‌بری", checkedEndpoints: "نقاط اتصال مشتریِ بررسی‌شده", checkedHint: "تنظیمات اتصال این طرح خاموش به تأیید سرور رسیده است.",
   },
 };
 
@@ -32,24 +38,35 @@ function Value({ label, value, field, option }: { label: string; value: ReactNod
   return <div data-review-field={field} data-review-option={option}><dt>{label}</dt><dd><bdi>{value || "—"}</bdi></dd></div>;
 }
 
-export default function InboundCreationReview({ language, state, nodes, disabled, onEdit }: {
+export default function InboundCreationReview({ language, state, nodes, disabled, onEdit, publicKey, checkedEndpoints }: {
   language: "en" | "fa"; state: CreationState; nodes: InboundNode[]; disabled: boolean; onEdit: (section: "connection" | "swap" | "advanced") => void;
+  publicKey?: string; checkedEndpoints?: CreationEndpointPreview[];
 }) {
   const t = words[language], profile = state.profile, options = profile.options ?? profileOptionsDraft(), rows = selectedCreationNodes(state);
   const domains = trafficLines(options.sniffing.domainsExcluded), ips = trafficLines(options.sniffing.ipsExcluded);
   const sniffingConfigured = (options.sniffingPresent || options.sniffing.enabled) && (options.sniffing.enabled || options.sniffing.destOverride.length > 0 || options.sniffing.routeOnly || options.sniffing.metadataOnly || domains.length > 0 || ips.length > 0);
   const sniffingRetained = sniffingConfigured && !options.sniffing.enabled;
-  const hostCount = new Set(rows.flatMap(row => [...(row.direct.enabled ? creationHosts(row.direct.hosts) : []), ...(row.tunnel.enabled ? creationHosts(row.tunnel.hosts) : [])])).size;
+  const hostCount = new Set(rows.flatMap(row => [...(row.direct.enabled ? creationPathHosts(row.direct) : []), ...(row.tunnel.enabled ? creationPathHosts(row.tunnel) : [])])).size;
+  const defaults = { serverNames: profile.serverNames.split(/[\s,]+/).filter(Boolean), fingerprint: options.clientFingerprint, spiderX: options.clientSpiderX };
+  const [copyState, setCopyState] = useState("");
   const proxy = (value: string) => value === "0" ? `${t.off} (0)` : value === "1" ? "PROXY v1 (1)" : value === "2" ? "PROXY v2 (2)" : value || "—";
   const nondefaultNumber = (value: string) => value.trim() !== "" && Number(value) !== 0;
   const edit = (section: "connection" | "swap" | "advanced", label: string) => <button type="button" disabled={disabled} onClick={() => onEdit(section)}><Pencil size={14}/>{label}</button>;
   function pathValues(row: CreationNode, path: "direct" | "tunnel" | "swap") {
-    return <dl className="creation-review-values">{path === "swap" ? <>
+    return <><dl className="creation-review-values">{path === "swap" ? <>
       <Value label={t.source} value={row.swap.sourceNodeID ? creationNodeName(nodes, row.swap.sourceNodeID) : "—"}/>
       <Value label={t.sourceIP} value={row.swap.sourceListenIP}/><Value label={t.sourcePort} value={row.swap.sourcePort}/>
       <Value label={t.entry} value={row.swap.entryHost || t.noHosts}/><Value label={t.entryPort} value={row.swap.entryPort}/>
       <Value label={t.destinationPort} value={row.swap.destinationPort}/>
-    </> : <><Value label={t.port} value={row[path].port}/><Value label={t.addresses} value={creationHosts(row[path].hosts).join("\n") || t.noHosts}/></>}</dl>;
+    </> : <><Value label={t.port} value={row[path].port}/>{row[path].endpoints === undefined && <Value label={t.addresses} value={creationPathHosts(row[path]).join("\n") || t.noHosts}/>}</>}</dl>
+      {path !== "swap" && row[path].endpoints?.map((endpoint, index) => {
+        const effective = effectiveEndpoint(endpoint, row[path].port, defaults);
+        return <div className="creation-review-endpoint" key={endpoint.key} data-review-endpoint={index} data-endpoint-enabled={endpoint.enabled}>
+          <h6>{endpoint.label || `${t.endpoint} ${index + 1}`}<span>{endpoint.enabled ? t.on : t.endpointOff}</span></h6>
+          <dl className="creation-review-values"><Value label={t.addresses} value={effective.address}/><Value label={t.publicPort} value={effective.port || "—"}/><Value label={t.sni} value={effective.sni}/><Value label={t.fingerprint} value={effective.fingerprint}/><Value label={t.spider} value={effective.spiderX}/></dl>
+        </div>;
+      })}
+    </>;
   }
   return <div className="creation-review-sections">
     <section className="creation-review-card" data-review-section="connection">
@@ -58,6 +75,7 @@ export default function InboundCreationReview({ language, state, nodes, disabled
         <Value label={t.name} value={profile.name} field="name"/><Value label={t.protocol} value="VLESS" field="protocol"/>
         <Value label={t.transport} value={`${profile.transport.toUpperCase()} / REALITY${profile.transport === "tcp" ? " · Vision" : ""}`} field="transport"/>
         {profile.transport === "grpc" && <Value label={t.service} value={profile.grpcService} field="grpcService"/>}
+        {profile.transport === "xhttp" && <><Value label={t.xhttpPath} value={options.xhttpPath || "/"} option="xhttpPath"/><Value label={t.xhttpHost} value={options.xhttpHost || t.default} option="xhttpHost"/><Value label={t.xhttpMode} value={options.xhttpMode || "auto"} option="xhttpMode"/><Value label={t.xhttpPadding} value={options.xhttpPadding || "100-1000"} option="xhttpPadding"/></>}
         <Value label={t.target} value={profile.realityTarget} field="realityTarget"/>
         <Value label={t.serverNames} value={profile.serverNames.split(/[\s,]+/).filter(Boolean).join("\n")} field="serverNames"/>
         <Value label={t.shortIDs} value={creationShortIDs(state.shortIDs).join(", ")} field="shortIDs"/>
@@ -68,7 +86,10 @@ export default function InboundCreationReview({ language, state, nodes, disabled
         {options.realityMinClientVer && <Value label={t.minVersion} value={options.realityMinClientVer} option="realityMinClientVer"/>}
         {options.realityMaxClientVer && <Value label={t.maxVersion} value={options.realityMaxClientVer} option="realityMaxClientVer"/>}
         {options.realityShow && <Value label={t.show} value={t.on} option="realityShow"/>}
+        {(options.clientPresent || options.clientFingerprint || options.clientSpiderX) && <><Value label={t.fingerprint} value={options.clientFingerprint || "chrome"} option="clientFingerprint"/><Value label={t.spider} value={options.clientSpiderX || "/"} option="clientSpiderX"/></>}
+        {publicKey && <Value label={t.publicKey} value={publicKey} field="publicKey"/>}
       </dl>
+      {publicKey && <div className="creation-review-key"><button type="button" disabled={disabled} onClick={() => { if (!navigator.clipboard) { setCopyState(t.copyFailed); return; } void navigator.clipboard.writeText(publicKey).then(() => setCopyState(t.copied), () => setCopyState(t.copyFailed)); }}><Copy size={14}/>{t.copyKey}</button><span role="status">{copyState}</span></div>}
     </section>
     <section className="creation-review-card" data-review-section="routes">
       <header><h4>{t.routes}</h4>{edit("swap", t.editRoutes)}</header>
@@ -79,7 +100,7 @@ export default function InboundCreationReview({ language, state, nodes, disabled
         <dl className="creation-review-values"><Value label={t.listen} value={row.listenIP}/></dl>
         {(["direct", "tunnel", "swap"] as const).map(path => {
           const enabled = row[path].enabled;
-          const retained = !enabled && (path === "swap" ? Object.entries(row.swap).some(([key, value]) => key !== "enabled" && key !== "sourceInstallationID" && value !== "") : row[path].port !== "" || row[path].hosts !== "");
+          const retained = !enabled && (path === "swap" ? Object.entries(row.swap).some(([key, value]) => key !== "enabled" && key !== "sourceInstallationID" && value !== "") : row[path].port !== "" || row[path].hosts !== "" || !!row[path].endpoints?.length);
           return <div key={path} className="creation-review-path" data-review-path={path} data-path-enabled={enabled} data-path-retained={retained}>
             <h5>{t[path]}<span>{enabled ? t.on : retained ? t.draftOff : t.off}</span></h5>
             {enabled ? pathValues(row, path) : retained && <details className="creation-review-disclosure"><summary>{t.draft}</summary>{pathValues(row, path)}</details>}
@@ -87,6 +108,7 @@ export default function InboundCreationReview({ language, state, nodes, disabled
           </div>;
         })}
       </article>)}</div>
+      {checkedEndpoints && <details className="creation-review-disclosure" data-checked-endpoints><summary>{t.checkedEndpoints} <bdi>{checkedEndpoints.length}</bdi></summary><div className="creation-checked-endpoints"><p className="creation-help">{t.checkedHint}</p>{checkedEndpoints.map((endpoint, index) => <div className="creation-review-endpoint" key={index} data-checked-endpoint={index}><h6>{endpoint.label}<span>{endpoint.enabled ? t.on : t.endpointOff}</span></h6><dl className="creation-review-values"><Value label={t.nodes} value={creationNodeName(nodes, endpoint.node_id)}/><Value label={t.path} value={t[endpoint.path]}/><Value label={t.addresses} value={endpoint.address}/><Value label={t.publicPort} value={endpoint.port}/><Value label={t.port} value={endpoint.listen_port}/><Value label={t.sni} value={endpoint.server_name}/><Value label={t.transport} value={`${endpoint.transport.toUpperCase()} / REALITY`}/><Value label={t.fingerprint} value={endpoint.fingerprint}/><Value label={t.spider} value={endpoint.spider_x}/>{endpoint.grpc_service && <Value label={t.service} value={endpoint.grpc_service}/ >}{endpoint.grpc_authority && <Value label={t.authority} value={endpoint.grpc_authority}/ >}{endpoint.grpc_multi_mode && <Value label={t.multiMode} value={t.on}/ >}{endpoint.transport === "xhttp" && <><Value label={t.xhttpPath} value={endpoint.xhttp?.path || "/"}/><Value label={t.xhttpHost} value={endpoint.xhttp?.host || t.default}/><Value label={t.xhttpMode} value={endpoint.xhttp?.mode || "auto"}/><Value label={t.xhttpPadding} value={endpoint.xhttp?.x_padding_bytes || "100-1000"}/></>}</dl></div>)}</div></details>}
     </section>
     <section className="creation-review-card" data-review-section="advanced">
       <header><h4>{t.advanced}</h4>{edit("advanced", t.editAdvanced)}</header>

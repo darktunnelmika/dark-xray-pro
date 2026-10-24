@@ -95,7 +95,7 @@ func openProfile(key, encrypted []byte, id uint64) (xrayconfig.Profile, error) {
 func (s *Store) CreateInbound(ctx context.Context, key []byte, in InboundInput) (NativeInbound, error) {
 	var optionsErr error
 	in.Options, optionsErr = xrayconfig.NormalizeProfileOptions(in.Transport, in.Options)
-	if optionsErr != nil || hasInboundTrafficOptions(in.Options) {
+	if optionsErr != nil || hasInboundTrafficOptions(in.Options) || hasInboundNetworkOptions(in.Transport, in.Options) {
 		return NativeInbound{}, ErrInvalid
 	}
 	old, found, replayErr := s.replayInbound(ctx, key, in)
@@ -122,9 +122,17 @@ func (s *Store) CreateInbound(ctx context.Context, key []byte, in InboundInput) 
 		return NativeInbound{}, err
 	}
 	pub := base64.RawURLEncoding.EncodeToString(priv.PublicKey().Bytes())
-	_, err = s.db.ExecContext(ctx, "INSERT INTO native_inbounds(id,name,profile_enc,public_key,created_unix) VALUES(?,?,?,?,?)", in.ID, in.Name, sealed, pub, time.Now().Unix())
+	result, err := s.db.ExecContext(ctx, `INSERT INTO native_inbounds(id,name,profile_enc,public_key,created_unix)
+ SELECT ?,?,?,?,? WHERE (SELECT COUNT(*) FROM native_inbounds)<256`, in.ID, in.Name, sealed, pub, time.Now().Unix())
 	if err != nil {
 		return NativeInbound{}, ErrConflict
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return NativeInbound{}, err
+	}
+	if count != 1 {
+		return NativeInbound{}, planError("", "profile.id", "inbound_limit", ErrConflict)
 	}
 	return NativeInbound{InboundInput: in, PublicKey: pub, Enabled: true, Revision: 1}, nil
 }

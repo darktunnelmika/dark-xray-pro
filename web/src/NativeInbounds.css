@@ -65,6 +65,8 @@
 .inbound-state{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--border);border-radius:7px;padding:4px 7px;white-space:nowrap;font-size:11px;color:var(--sub);background:var(--surface-2)}
 .inbound-state:before{content:"";width:5px;height:5px;border-radius:50%;background:currentColor}
 .inbound-state-enabled{color:var(--accent);background:var(--accent-wash)}
+.inbound-state[data-plan-state]{white-space:normal;line-height:1.5}
+.inbound-summary small{color:var(--sub);font-size:11px;line-height:1.5;overflow-wrap:anywhere}
 .inbound-row-actions{display:flex;justify-content:flex-end;gap:5px}.native-workspace .inbound-row-actions button{padding:7px;min-width:34px;min-height:34px;font-size:11px;background:transparent}
 .inbound-pagination{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 20px;border-block-start:1px solid var(--border);font-size:12px;color:var(--sub)}
 .inbound-pagination>div{display:flex;gap:8px}.inbound-directory-empty{padding:36px 20px;color:var(--sub);font-size:13px;text-align:center;line-height:1.9}

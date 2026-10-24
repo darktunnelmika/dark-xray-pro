@@ -1,11 +1,22 @@
 import { ArrowRight, ArrowRightLeft, ChevronDown, Globe2, Link2, Plus, Server } from "lucide-react";
 import type { InboundNode, InboundTarget } from "./inboundTypes";
-import { creationHosts, creationNodeName, creationPort, creationWaitingHosts, newCreationNode, type CreationIssue, type CreationNode, type CreationState } from "./InboundCreationModel";
+import { creationNodeName, creationPathHosts, creationPort, creationWaitingHosts, newCreationNode, type CreationIssue, type CreationNode, type CreationState } from "./InboundCreationModel";
+import InboundCreationEndpoints from "./InboundCreationEndpoints";
 
 type Language = "en" | "fa";
 const messages: Record<Language, Record<string, string>> = {
   en: {
     name_required: "Enter an Inbound name.", grpc_service_invalid: "Use 1–64 letters, numbers, underscores or hyphens for the gRPC service.",
+    name_invalid: "Use an Inbound name of up to 128 characters, without control characters.", transport_invalid: "Choose a supported transport.", server_names_invalid: "Use 1–16 valid DNS server names, without IP addresses, schemes or paths.",
+    profile_xhttp_unavailable: "This server cannot save XHTTP in setup plans. Existing settings are retained.", profile_client_options_unavailable: "This server cannot save client connection defaults in setup plans. Existing settings are retained.",
+    profile_xhttp_required: "Reload the saved setup to retain its XHTTP settings before editing.", profile_client_options_required: "Reload the saved setup to retain its client connection defaults before editing.",
+    xhttp_path_invalid: "Use an optional /path of up to 2048 bytes, without spaces, a query, a fragment or invalid percent escapes.", xhttp_host_invalid: "Use an optional DNS name or IPv4 for XHTTP Host, without a port or brackets.",
+    xhttp_mode_invalid: "Choose auto, packet-up, stream-up or stream-one.", xhttp_padding_invalid: "Use padding N or N-M with whole numbers from 1 to 65536 and N no greater than M.",
+    client_fingerprint_invalid: "Choose a supported client fingerprint or inherit the default.", client_spider_x_invalid: "Use /path with an optional valid query, without spaces, a fragment or crawler query keys p, c, t, i and r.",
+    endpoint_options_unavailable: "This server cannot save endpoint settings. Existing rows are retained.", endpoint_options_required: "Reload the saved setup to retain endpoint settings before editing.",
+    endpoint_limit: "Use at most 64 endpoints per path.", endpoint_port_invalid: "Use a public port from 1 to 65535, or leave it blank / 0 to inherit the listener port.",
+    endpoint_label_invalid: "Use a display name of up to 128 characters without control characters.", endpoint_sni_invalid: "Select an SNI from this Inbound’s server names, or inherit the first name.",
+    endpoint_duplicate: "This address, effective port and client settings duplicate another Host in this path.", endpoint_hosts_mismatch: "The endpoint addresses changed unexpectedly. Reload the saved setup.", disabled_path_has_endpoints: "Disabled paths cannot save endpoint rows; their draft values are retained until the path is enabled.",
     profile_options_required: "Reload the saved profile to retain its advanced settings before editing.",
     profile_options_invalid: "Review the advanced REALITY and gRPC settings; the server rejected this combination.",
     profile_options_unavailable: "This server cannot save advanced profile settings. Update the server before saving this profile.",
@@ -26,7 +37,7 @@ const messages: Record<Language, Record<string, string>> = {
     node_required: "Select at least one destination Node.", pairing_changed: "This Node’s installation changed. Remove and select it again.",
     listen_ip_required: "Enter this destination Node’s listening IP.", path_required: "Enable at least one connection path.",
     port_invalid: "Listener ports must be whole numbers from 1024 to 65535.", entry_port_invalid: "The external entry port must be from 1 to 65535.",
-    host_invalid: "Use a host name or IPv4 address without a scheme, path or port.", host_duplicate: "Remove duplicate addresses from this path.",
+    host_invalid: "Use a DNS name, IPv4 or IPv6 address without a scheme, path or port. Wildcard, multicast and link-local IPs are not supported.", host_duplicate: "Remove duplicate addresses from this path.",
     host_limit: "Use at most 64 unique addresses for each destination Node.", source_required: "Choose a different, currently paired source Node.",
     port_reserved: "Ports 2087, 8443 and 24443 are reserved.", port_collision: "Direct and Tunnel need separate ports; Swap may reuse this Node’s Tunnel port.",
     source_port_collision: "The source relay port conflicts with another listener in this plan.", route_cycle: "These Swap links form a loop. Change the source Node.",
@@ -44,6 +55,16 @@ const messages: Record<Language, Record<string, string>> = {
     inbound_id_exists: "This Inbound identity already exists. Reload to check the saved setup.", inbound_limit: "The server’s Inbound limit has been reached.", reason_invalid: "Enter a change note of up to 200 characters.",
   },
   fa: {
+    name_invalid: "نام اینباند حداکثر ۱۲۸ نویسه و بدون نویسهٔ کنترلی باشد.", transport_invalid: "یک انتقال پشتیبانی‌شده را انتخاب کن.", server_names_invalid: "بین ۱ تا ۱۶ نام DNS معتبر وارد کن؛ IP، پیشوند URL و مسیر مجاز نیست.",
+    profile_xhttp_unavailable: "سرور XHTTP را در طرح ذخیره‌شده پشتیبانی نمی‌کند؛ مقادیر قبلی حفظ می‌شوند.", profile_client_options_unavailable: "سرور پیش‌فرض‌های اتصال کلاینت را ذخیره نمی‌کند؛ مقادیر قبلی حفظ می‌شوند.",
+    profile_xhttp_required: "برای حفظ تنظیمات XHTTP، نسخهٔ ذخیره‌شده را دوباره بارگذاری کن.", profile_client_options_required: "برای حفظ پیش‌فرض‌های کلاینت، نسخهٔ ذخیره‌شده را دوباره بارگذاری کن.",
+    xhttp_path_invalid: "مسیر اختیاری /path تا ۲۰۴۸ بایت، بدون فاصله، Query، Fragment یا کد درصد نامعتبر وارد کن.", xhttp_host_invalid: "Host در XHTTP باید نام DNS یا IPv4 بدون پورت و کروشه باشد؛ خالی هم مجاز است.",
+    xhttp_mode_invalid: "یکی از auto، packet-up، stream-up یا stream-one را انتخاب کن.", xhttp_padding_invalid: "Padding با قالب N یا N-M و عدد صحیح بین ۱ تا ۶۵۵۳۶ باشد؛ N از M بیشتر نباشد.",
+    client_fingerprint_invalid: "یک Fingerprint پشتیبانی‌شده یا مقدار ارث‌بری را انتخاب کن.", client_spider_x_invalid: "مسیر /path با Query معتبر اختیاری وارد کن؛ فاصله، Fragment و کلیدهای خزندهٔ p، c، t، i و r مجاز نیست.",
+    endpoint_options_unavailable: "سرور تنظیمات نقطهٔ اتصال را ذخیره نمی‌کند؛ ردیف‌های قبلی حفظ می‌شوند.", endpoint_options_required: "برای حفظ تنظیمات Host، نسخهٔ ذخیره‌شده را دوباره بارگذاری کن.",
+    endpoint_limit: "هر مسیر حداکثر ۶۴ نقطهٔ اتصال دارد.", endpoint_port_invalid: "پورت عمومی بین ۱ تا ۶۵۵۳۵ باشد؛ خالی یا ۰ یعنی ارث‌بری از پورت شنود.",
+    endpoint_label_invalid: "نام نمایشی حداکثر ۱۲۸ نویسه و بدون نویسهٔ کنترلی باشد.", endpoint_sni_invalid: "SNI را از نام‌های سرور همین اینباند انتخاب کن یا از نام اول ارث ببر.",
+    endpoint_duplicate: "این آدرس، پورت مؤثر و تنظیمات کلاینت با Host دیگری در همین مسیر تکراری است.", endpoint_hosts_mismatch: "آدرس‌های نقطهٔ اتصال به‌طور غیرمنتظره تغییر کرده؛ نسخهٔ ذخیره‌شده را دوباره بارگذاری کن.", disabled_path_has_endpoints: "مسیر خاموش ردیف Host ذخیره نمی‌کند؛ مقادیر پیش‌نویس تا فعال‌کردن مسیر حفظ می‌شوند.",
     name_required: "نام اینباند را وارد کن.", grpc_service_invalid: "برای سرویس gRPC از ۱ تا ۶۴ حرف انگلیسی، عدد، زیرخط یا خط تیره استفاده کن.",
     profile_options_required: "برای حفظ تنظیمات پیشرفته، پروفایل ذخیره‌شده را پیش از ویرایش دوباره بارگذاری کن.",
     profile_options_invalid: "تنظیمات پیشرفتهٔ REALITY و gRPC را بررسی کن؛ سرور این ترکیب را نپذیرفت.",
@@ -65,7 +86,7 @@ const messages: Record<Language, Record<string, string>> = {
     node_required: "حداقل یک نود مقصد را انتخاب کن.", pairing_changed: "نصب این نود تغییر کرده؛ نود را حذف و دوباره انتخاب کن.",
     listen_ip_required: "IP شنود این نود مقصد را وارد کن.", path_required: "حداقل یک مسیر اتصال را فعال کن.",
     port_invalid: "پورت شنود باید عدد صحیحی از ۱۰۲۴ تا ۶۵۵۳۵ باشد.", entry_port_invalid: "پورت ورودی بیرونی باید از ۱ تا ۶۵۵۳۵ باشد.",
-    host_invalid: "نام هاست یا IPv4 را بدون پروتکل، مسیر و پورت وارد کن.", host_duplicate: "آدرس‌های تکراری این مسیر را حذف کن.",
+    host_invalid: "نام DNS، آدرس IPv4 یا IPv6 را بدون پروتکل، مسیر و پورت وارد کن؛ IP عمومی شنود، چندپخشی و لینک‌لوکال مجاز نیست.", host_duplicate: "آدرس‌های تکراری این مسیر را حذف کن.",
     host_limit: "برای هر نود مقصد حداکثر ۶۴ آدرس یکتا وارد کن.", source_required: "یک نود مبدأ متصل و متفاوت از مقصد انتخاب کن.",
     port_reserved: "پورت‌های ۲۰۸۷، ۸۴۴۳ و ۲۴۴۴۳ رزرو هستند.", port_collision: "پورت مستقیم و تونل باید جدا باشند؛ دارک‌سواپ می‌تواند پورت تونل همین نود را استفاده کند.",
     source_port_collision: "پورت رلهٔ مبدأ با یک شنوندهٔ دیگر در این تنظیمات تداخل دارد.", route_cycle: "اتصال‌های دارک‌سواپ حلقه ساخته‌اند؛ نود مبدأ را تغییر بده.",
@@ -114,10 +135,11 @@ const words = {
   },
 };
 
-export default function InboundCreationNodes({ language, state, nodes, targets = [], disabled, expanded, onExpanded, onChange, issues = [] }: {
+export default function InboundCreationNodes({ language, state, nodes, targets = [], disabled, expanded, onExpanded, onChange, issues = [], endpointOptionsSupported = false, maxEndpointsPerPath = 64, listenerPortMin = 1024, listenerPortMax = 65535, reservedListenerPorts = [2087, 8443, 24443] }: {
   language: Language; state: CreationState; nodes: InboundNode[]; disabled: boolean; expanded: string;
   targets?: InboundTarget[];
   onExpanded: (id: string) => void; onChange: (value: CreationState) => void; issues?: CreationIssue[];
+  endpointOptionsSupported?: boolean; maxEndpointsPerPath?: number; listenerPortMin?: number; listenerPortMax?: number; reservedListenerPorts?: number[];
 }) {
   const t = words[language];
   const update = (id: string, value: CreationNode) => onChange({ ...state, nodes: { ...state.nodes, [id]: value } });
@@ -152,14 +174,15 @@ export default function InboundCreationNodes({ language, state, nodes, targets =
           {selected && row && <div className="creation-row-state"><span className={creationWaitingHosts(row) ? "creation-waiting" : ""}>{nodeIssues.length ? `${nodeIssues.length} ${language === "fa" ? "مورد برای بررسی" : "items to review"}` : creationWaitingHosts(row) ? t.waiting : row.direct.enabled || row.tunnel.enabled || row.swap.enabled ? t.configured : t.noPath}</span></div>}
           {open && row && <div className="creation-node-body">
             <label className="creation-field"><span>{t.listen}</span><input aria-label={`${t.listen}: ${id}`} data-creation-field="listenIP" dir="ltr" value={row.listenIP} disabled={disabled} onChange={event => update(id, { ...row, listenIP: event.target.value })} placeholder="203.0.113.10" autoComplete="off"/><small>{t.listenHint}</small></label>
+            <p className="creation-help" data-listener-port-limits>{language === "fa" ? "بازهٔ پورت شنود" : "Listener port range"}: <bdi>{listenerPortMin}–{listenerPortMax}</bdi>{reservedListenerPorts.length > 0 && <> · {language === "fa" ? "رزروشده" : "Reserved"}: <bdi>{reservedListenerPorts.join(", ")}</bdi></>}</p>
             <div className="creation-path-toggles" role="group" aria-label={`${t.paths}: ${id}`}>
               {(["direct", "tunnel", "swap"] as const).map(path => { const Icon = path === "direct" ? Globe2 : path === "tunnel" ? Link2 : ArrowRightLeft; return <label key={path} data-enabled={row[path].enabled}><span><Icon size={15}/>{t[path]}</span><input type="checkbox" data-creation-field={`${path}Enabled`} aria-label={`${t[path]}: ${id}`} checked={row[path].enabled} disabled={disabled} onChange={event => update(id, { ...row, [path]: { ...row[path], enabled: event.target.checked } })}/></label>; })}
             </div>
             {(["direct", "tunnel"] as const).map(path => row[path].enabled && <fieldset className="creation-path-fields" disabled={disabled} key={path}>
               <legend>{path === "direct" ? <Globe2 size={15}/> : <Link2 size={15}/>} {t[path]}</legend>
-              <div className="creation-port-hosts"><label className="creation-field"><span>{t[`${path}Port`]}</span><input aria-label={`${t[`${path}Port`]}: ${id}`} data-creation-field={`${path}Port`} dir="ltr" inputMode="numeric" value={row[path].port} onChange={event => update(id, { ...row, [path]: { ...row[path], port: event.target.value } })} placeholder={path === "direct" ? "10443" : "1185"}/></label>
-                <label className="creation-field"><span>{t[`${path}Hosts`]}<small>{creationHosts(row[path].hosts).length}</small></span><textarea aria-label={`${t[`${path}Hosts`]}: ${id}`} data-creation-field={`${path}Hosts`} dir="ltr" rows={2} spellCheck={false} value={row[path].hosts} onChange={event => update(id, { ...row, [path]: { ...row[path], hosts: event.target.value } })} placeholder="example.org"/></label></div>
-              {!creationHosts(row[path].hosts).length && <p className="creation-help creation-waiting">{t.emptyHost}</p>}
+              <div className={"creation-port-hosts" + (row[path].endpoints !== undefined ? " creation-rich-hosts" : "")}><label className="creation-field"><span>{t[`${path}Port`]}</span><input aria-label={`${t[`${path}Port`]}: ${id}`} data-creation-field={`${path}Port`} dir="ltr" inputMode="numeric" value={row[path].port} onChange={event => update(id, { ...row, [path]: { ...row[path], port: event.target.value } })} placeholder={path === "direct" ? "10443" : "1185"}/></label>
+                <InboundCreationEndpoints language={language} path={path} nodeID={id} value={row[path]} onChange={value => update(id, { ...row, [path]: value })} supported={endpointOptionsSupported} disabled={disabled} maximum={maxEndpointsPerPath} invalidFields={nodeIssues.map(issue => issue.field)} defaults={{ serverNames: state.profile.serverNames.split(/[\s,]+/).filter(Boolean), fingerprint: state.profile.options?.clientFingerprint ?? "", spiderX: state.profile.options?.clientSpiderX ?? "" }}/></div>
+              {!creationPathHosts(row[path]).length && <p className="creation-help creation-waiting">{t.emptyHost}</p>}
             </fieldset>)}
             {(row.direct.enabled || row.tunnel.enabled) && <p className="creation-help">{t.hostsHint}</p>}
             {row.swap.enabled && <fieldset className="creation-path-fields creation-swap-fields" disabled={disabled}>

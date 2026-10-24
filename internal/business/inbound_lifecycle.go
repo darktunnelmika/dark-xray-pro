@@ -105,7 +105,7 @@ func (s *Store) MutateInbound(ctx context.Context, key []byte, id uint64, m Inbo
 		optionsPresence = optionsPresence.include(m.Profile.Options)
 		copyProfile := *m.Profile
 		options, err := xrayconfig.NormalizeProfileOptions(copyProfile.Transport, copyProfile.Options)
-		if err != nil || hasInboundTrafficOptions(options) {
+		if err != nil || hasInboundTrafficOptions(options) || hasInboundNetworkOptions(copyProfile.Transport, options) {
 			return NativeInbound{}, ErrInvalid
 		}
 		copyProfile.Options = options

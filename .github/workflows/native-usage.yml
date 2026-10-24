@@ -30,7 +30,7 @@ jobs:
           npm install --no-audit --no-fund
           npm run build
           npx playwright install --with-deps chromium
-      - name: Author and edit a full Inbound setup through the real UI and SQLite API
+      - name: Author TCP, gRPC and XHTTP with endpoint settings through the real UI and SQLite API
         env:
           DARK_PRO_TEST_CREATION_BROWSER: '1'
           DARK_PRO_TEST_WEB_DIST: ${{ github.workspace }}/web/dist

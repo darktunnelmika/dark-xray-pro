@@ -100,22 +100,36 @@ func validTarget(target string) bool {
 	}
 	return validDNS(host)
 }
-func validProfile(p Profile) error {
+func validProfile(p Profile) error { return ValidateProfile(p) }
+
+// ValidateProfile is the single validation contract used by every renderer and
+// authoring API. Public field failures are typed; secret/user failures stay
+// generic so callers cannot accidentally expose their values.
+func ValidateProfile(p Profile) error {
+	if p.Transport != "tcp" && p.Transport != "grpc" && p.Transport != "xhttp" {
+		return &ProfileValidationError{Field: "transport", Code: "transport_invalid"}
+	}
 	if _, err := NormalizeProfileOptions(p.Transport, p.Options); err != nil {
 		return err
 	}
-	if p.InboundID == 0 || len(p.Users) > 20000 || (p.Transport != "tcp" && p.Transport != "grpc") || !validTarget(p.RealityTarget) || len(p.ServerNames) == 0 || len(p.ServerNames) > 16 || len(p.ShortIDs) == 0 || len(p.ShortIDs) > 16 {
+	if p.InboundID == 0 || len(p.Users) > 20000 {
 		return ErrInvalid
 	}
-	if p.Transport == "tcp" && p.GRPCService != "" {
-		return ErrInvalid
+	if !validTarget(p.RealityTarget) {
+		return &ProfileValidationError{Field: "reality_target", Code: "target_invalid"}
 	}
-	if p.Transport == "grpc" && !serviceRE.MatchString(p.GRPCService) {
-		return ErrInvalid
+	if p.Transport != "grpc" && p.GRPCService != "" || p.Transport == "grpc" && !serviceRE.MatchString(p.GRPCService) {
+		return &ProfileValidationError{Field: "grpc_service", Code: "grpc_service_invalid"}
+	}
+	if len(p.ServerNames) == 0 || len(p.ServerNames) > 16 {
+		return &ProfileValidationError{Field: "server_names", Code: "server_names_invalid"}
+	}
+	if len(p.ShortIDs) == 0 || len(p.ShortIDs) > 16 {
+		return &ProfileValidationError{Field: "short_ids", Code: "short_ids_invalid"}
 	}
 	for _, name := range p.ServerNames {
 		if !validDNS(name) {
-			return ErrInvalid
+			return &ProfileValidationError{Field: "server_names", Code: "server_names_invalid"}
 		}
 	}
 	decoded, err := base64.RawURLEncoding.DecodeString(p.RealityPrivateKey)
@@ -138,7 +152,7 @@ func validProfile(p Profile) error {
 	ids := map[string]bool{}
 	for _, id := range p.ShortIDs {
 		if !shortIDRE.MatchString(id) || len(id)%2 != 0 || ids[id] {
-			return ErrInvalid
+			return &ProfileValidationError{Field: "short_ids", Code: "short_ids_invalid"}
 		}
 		ids[id] = true
 	}
@@ -146,7 +160,7 @@ func validProfile(p Profile) error {
 	for _, name := range p.ServerNames {
 		lower := strings.ToLower(name)
 		if server[lower] {
-			return ErrInvalid
+			return &ProfileValidationError{Field: "server_names", Code: "server_names_invalid"}
 		}
 		server[lower] = true
 	}
@@ -181,10 +195,11 @@ type reality struct {
 	Show         bool     `json:"show,omitempty"`
 }
 type stream struct {
-	Network  string        `json:"network"`
-	Security string        `json:"security"`
-	Reality  reality       `json:"realitySettings"`
-	GRPC     *grpcSettings `json:"grpcSettings,omitempty"`
+	Network  string         `json:"network"`
+	Security string         `json:"security"`
+	Reality  reality        `json:"realitySettings"`
+	GRPC     *grpcSettings  `json:"grpcSettings,omitempty"`
+	XHTTP    *xhttpSettings `json:"xhttpSettings,omitempty"`
 }
 type inbound struct {
 	Listen   string `json:"listen"`

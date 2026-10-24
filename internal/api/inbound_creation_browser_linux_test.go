@@ -137,6 +137,9 @@ func TestRealBrowserInboundCreationPlan(t *testing.T) {
 	if !bytes.Contains(output, []byte("NATIVE_UI_CREATION_PLAN_VERIFIED\n")) {
 		t.Fatal("browser completed without verifying persisted creation and edit")
 	}
+	if !bytes.Contains(output, []byte("NATIVE_UI_NETWORK_ENDPOINTS_VERIFIED\n")) {
+		t.Fatal("browser omitted XHTTP and public endpoint acceptance")
+	}
 	var proof struct {
 		InboundID        uint64 `json:"inbound_id"`
 		CreatedPublicKey string `json:"created_public_key"`
@@ -152,14 +155,15 @@ func TestRealBrowserInboundCreationPlan(t *testing.T) {
 	if err != nil {
 		t.Fatal("UI did not persist the full encrypted plan", err)
 	}
-	if plan.PlanRevision != 2 || plan.InboundRevision != 2 || plan.Profile.Revision != 2 || plan.Status != "SAVED_DISABLED" || !plan.Editable ||
+	if plan.PlanRevision != 3 || plan.InboundRevision != 3 || plan.Profile.Revision != 3 || plan.Status != "SAVED_DISABLED" || !plan.Editable ||
 		plan.RuntimeApply || plan.Profile.Enabled || plan.Profile.Archived || plan.Profile.BoundClients != 0 || plan.Profile.PublicKey != proof.CreatedPublicKey ||
-		plan.LastEventID != proof.UpdatedEventID || plan.Reason != "Real browser edited setup" {
+		plan.LastEventID != proof.UpdatedEventID || plan.Reason != "Real browser network and endpoints" {
 		t.Fatal("UI edit lost disabled state, identity, revision or event semantics")
 	}
-	wantProfile := business.InboundInput{ID: proof.InboundID, Name: "Real browser creation edited", Transport: "grpc", GRPCService: "dark-grpc",
+	wantProfile := business.InboundInput{ID: proof.InboundID, Name: "Real browser creation edited", Transport: "xhttp",
 		RealityTarget: "example.org:443", ServerNames: []string{"example.org"}, ShortIDs: []string{"aabb", "ccdd", "eeff"},
-		Options: &xrayconfig.ProfileOptions{GRPCAuthority: "edge.example.org:8443", GRPCMultiMode: true,
+		Options: &xrayconfig.ProfileOptions{XHTTP: &xrayconfig.XHTTPOptions{Path: "/xhttp", Host: "cdn.example.org", Mode: "packet-up", XPaddingBytes: "200-400"},
+			Client:      &xrayconfig.ClientOptions{Fingerprint: "firefox", SpiderX: "/news"},
 			RealityXver: 2, RealityMaxTimeDiff: 120000, RealityMinClientVer: "1.8.0", RealityMaxClientVer: "25.9.11",
 			Sniffing: &xrayconfig.SniffingOptions{Enabled: false, DestOverride: []string{"http", "tls", "quic"}, RouteOnly: true,
 				DomainsExcluded: []string{"domain:example.net", "full:keep.example.org"}, IPsExcluded: []string{"192.0.2.0/24"}}}}
@@ -168,7 +172,9 @@ func TestRealBrowserInboundCreationPlan(t *testing.T) {
 	}
 	wantNodes := []business.NativeInboundPlanNode{
 		{NodeID: "de", InstallationID: strings.Repeat("a", 32), ListenIP: "198.51.100.10",
-			DirectPort: 10443, DirectHosts: []string{"de.example.org", "shared.example.org"}, TunnelPort: 1185, TunnelHosts: []string{"tunnel.example.org"},
+			DirectPort: 10443, DirectHosts: []string{"2001:db8::10"}, TunnelPort: 1185, TunnelHosts: []string{"tunnel.example.org"},
+			DirectEndpoints: []business.NativeInboundEndpoint{{Address: "2001:db8::10", Port: 443, Label: "Public IPv6", Enabled: true, SNI: "example.org", Fingerprint: "safari", SpiderX: "/endpoint"},
+				{Address: "shared.example.org", Enabled: false}},
 			SwapEnabled: true, SwapSourceNodeID: "nl", SwapSourceInstallationID: strings.Repeat("c", 32), SwapSourceListenIP: "198.51.100.30",
 			SwapSourcePort: 16801, SwapEntryAddress: "entry.example.org", SwapEntryPort: 444, SwapDestinationPort: 18443},
 		{NodeID: "fr", InstallationID: strings.Repeat("b", 32), ListenIP: "198.51.100.20", DirectPort: 11443,
@@ -177,8 +183,8 @@ func TestRealBrowserInboundCreationPlan(t *testing.T) {
 	if !reflect.DeepEqual(plan.Nodes, wantNodes) {
 		t.Fatal("stored Node matrix lost an independent Direct, Tunnel or relay mapping")
 	}
-	index, err := s.business.ListNativeInboundPlans(ctx)
-	if err != nil || len(index) != 1 || index[0].InboundID != proof.InboundID || index[0].PlanRevision != 2 {
+	index, err := s.business.ListNativeInboundPlans(ctx, key)
+	if err != nil || len(index) != 1 || index[0].InboundID != proof.InboundID || index[0].PlanRevision != 3 {
 		t.Fatal("saved plan is not discoverable exactly once", err)
 	}
 	profiles, err := s.business.ListInbounds(ctx, key)
@@ -224,8 +230,8 @@ func TestRealBrowserInboundCreationPlan(t *testing.T) {
 	requestsMu.Lock()
 	defer requestsMu.Unlock()
 	planPath := "/api/v1/workspace/native-inbound-plans"
-	wantMutations := map[string]int{"POST /api/v1/session/login": 1, "POST " + planPath + "/preview": 2, "POST " + planPath: 1,
-		"PUT " + planPath + "/" + strconv.FormatUint(proof.InboundID, 10): 1}
+	wantMutations := map[string]int{"POST /api/v1/session/login": 1, "POST " + planPath + "/preview": 3, "POST " + planPath: 1,
+		"PUT " + planPath + "/" + strconv.FormatUint(proof.InboundID, 10): 2}
 	for request, count := range requests {
 		if strings.HasPrefix(request, "GET ") || strings.HasPrefix(request, "HEAD ") {
 			continue
@@ -242,5 +248,5 @@ func TestRealBrowserInboundCreationPlan(t *testing.T) {
 	if requests["GET "+planPath+"/"+strconv.FormatUint(proof.InboundID, 10)] == 0 {
 		t.Fatal("browser did not reopen the persisted plan through the real API")
 	}
-	t.Log("real UI login, full setup preview/save, persisted reopen/edit, and unchanged runtime/customer snapshots verified")
+	t.Log("real UI login, TCP/gRPC/XHTTP setup edits, public IPv6 endpoints, persisted readback, and unchanged runtime/customer snapshots verified")
 }
