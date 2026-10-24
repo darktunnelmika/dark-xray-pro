@@ -100,11 +100,12 @@ func (s *Store) MutateInbound(ctx context.Context, key []byte, id uint64, m Inbo
 	if !validInboundMutation(id, m) {
 		return NativeInbound{}, ErrInvalid
 	}
-	optionsProvided := m.Profile != nil && m.Profile.Options != nil
+	var optionsPresence inboundOptionPresence
 	if m.Profile != nil {
+		optionsPresence = optionsPresence.include(m.Profile.Options)
 		copyProfile := *m.Profile
 		options, err := xrayconfig.NormalizeProfileOptions(copyProfile.Transport, copyProfile.Options)
-		if err != nil {
+		if err != nil || hasInboundTrafficOptions(options) {
 			return NativeInbound{}, ErrInvalid
 		}
 		copyProfile.Options = options
@@ -142,8 +143,10 @@ func (s *Store) MutateInbound(ctx context.Context, key []byte, id uint64, m Inbo
 	if in.Archived || in.Revision != m.ExpectedRevision {
 		return NativeInbound{}, ErrConflict
 	}
-	if m.Action == "edit" && in.Options != nil && !optionsProvided {
-		return NativeInbound{}, ErrConflict
+	if m.Action == "edit" {
+		if _, code := optionsPresence.missing(in.Options); code != "" {
+			return NativeInbound{}, ErrConflict
+		}
 	}
 	enabled, archived := in.Enabled, in.Archived
 	var encrypted []byte

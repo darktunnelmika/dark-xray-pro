@@ -160,7 +160,9 @@ func TestRealBrowserInboundCreationPlan(t *testing.T) {
 	wantProfile := business.InboundInput{ID: proof.InboundID, Name: "Real browser creation edited", Transport: "grpc", GRPCService: "dark-grpc",
 		RealityTarget: "example.org:443", ServerNames: []string{"example.org"}, ShortIDs: []string{"aabb", "ccdd", "eeff"},
 		Options: &xrayconfig.ProfileOptions{GRPCAuthority: "edge.example.org:8443", GRPCMultiMode: true,
-			RealityXver: 2, RealityMaxTimeDiff: 120000, RealityMinClientVer: "1.8.0", RealityMaxClientVer: "25.9.11"}}
+			RealityXver: 2, RealityMaxTimeDiff: 120000, RealityMinClientVer: "1.8.0", RealityMaxClientVer: "25.9.11",
+			Sniffing: &xrayconfig.SniffingOptions{Enabled: false, DestOverride: []string{"http", "tls", "quic"}, RouteOnly: true,
+				DomainsExcluded: []string{"domain:example.net", "full:keep.example.org"}, IPsExcluded: []string{"192.0.2.0/24"}}}}
 	if !reflect.DeepEqual(plan.Profile.InboundInput, wantProfile) {
 		t.Fatal("stored profile differs from the browser's complete edit")
 	}

@@ -160,6 +160,7 @@ func TestRealPinnedCreationTopologyOffline(t *testing.T) {
 	if bin == "" || pin == "" || os.Getenv("DARK_PRO_LAB_MODE") != "1" {
 		t.Fatal("explicit LAB mode, absolute pinned binary and SHA256 are required")
 	}
+	exercisePinnedInboundOptionsOffline(t)
 	for _, advanced := range []bool{false, true} {
 		for _, transport := range []string{"tcp", "grpc"} {
 			for _, reuse := range []bool{false, true} {

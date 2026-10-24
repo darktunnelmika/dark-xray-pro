@@ -56,6 +56,9 @@ const expectedOptions = edited => ({
   ...(edited ? { grpc_authority: 'edge.example.org:8443', grpc_multi_mode: true } : {}),
   reality_xver: 2, reality_max_time_diff: edited ? 120000 : 60000,
   reality_min_client_ver: '1.8.0', reality_max_client_ver: '25.9.11',
+  sniffing: { enabled: !edited, dest_override: ['http', 'tls', 'quic'], route_only: true,
+    domains_excluded: edited ? ['domain:example.net', 'full:keep.example.org'] : ['domain:example.net'], ips_excluded: ['192.0.2.0/24'] },
+  ...(edited ? {} : { fallbacks: [{ dest: '127.0.0.1:8080', path: '/health', xver: 2 }] }),
 });
 const expectedNodes = edited => [
   { node_id: 'de', installation_id: 'a'.repeat(32), listen_ip: '198.51.100.10', direct_port: 10443,
@@ -147,6 +150,13 @@ try {
     const details = dialog.locator('.inbound-profile-advanced').filter({ hasText: section === 'network' ? 'Advanced gRPC settings' : 'Advanced REALITY settings' });
     if (await details.getAttribute('open') === null) await details.locator('summary').click();
   }
+  async function traffic(dialog) {
+    await dialog.getByRole('tab', { name: 'Advanced', exact: true }).click();
+    const settings = dialog.getByRole('region', { name: 'Sniffing', exact: true }).locator('details').first();
+    if (await settings.getAttribute('open') === null) await settings.locator(':scope > summary').click();
+    const exclusions = dialog.locator('.inbound-traffic-exclusions');
+    if (await exclusions.getAttribute('open') === null) await exclusions.locator('summary').click();
+  }
   async function verifyProfile(dialog, edited) {
     await expect(dialog.getByLabel('Inbound name', { exact: true })).toHaveValue(edited ? 'Real browser creation edited' : 'Real browser creation');
     await expect(dialog.getByRole('radio', { name: edited ? 'gRPC / REALITY' : 'TCP / REALITY', exact: true })).toBeChecked();
@@ -163,6 +173,20 @@ try {
       await advanced(dialog, 'network');
       await expect(dialog.getByLabel('gRPC Authority', { exact: true })).toHaveValue('edge.example.org:8443');
       await expect(dialog.getByRole('checkbox', { name: 'gRPC MultiMode', exact: true })).toBeChecked();
+    }
+    await traffic(dialog);
+    await expect(dialog.getByRole('checkbox', { name: 'Enable Sniffing', exact: true })).toBeChecked({ checked: !edited });
+    for (const protocol of ['HTTP', 'TLS', 'QUIC']) await expect(dialog.getByRole('checkbox', { name: protocol, exact: true })).toBeChecked();
+    await expect(dialog.getByRole('checkbox', { name: 'Use the detected domain for routing only', exact: true })).toBeChecked();
+    await expect(dialog.getByLabel('Excluded domains', { exact: true })).toHaveValue(expectedOptions(edited).sniffing.domains_excluded.join('\n'));
+    await expect(dialog.getByLabel('Excluded IPs or CIDRs', { exact: true })).toHaveValue('192.0.2.0/24');
+    await expect(dialog.locator('.inbound-fallback-row')).toHaveCount(edited ? 0 : 1);
+    if (!edited) {
+      const row = dialog.locator('.inbound-fallback-row'); await row.locator('summary').click();
+      await expect(dialog.getByLabel('Fallback 1 Destination', { exact: true })).toHaveValue('127.0.0.1:8080');
+      await expect(dialog.getByLabel('Fallback 1 Path', { exact: true })).toHaveValue('/health');
+      await expect(dialog.getByLabel('Fallback 1 ALPN', { exact: true })).toHaveCount(0);
+      await expect(dialog.getByLabel('Fallback 1 PROXY protocol', { exact: true })).toHaveValue('2');
     }
   }
   async function verifyNodes(dialog, edited) {
@@ -199,7 +223,8 @@ try {
   await page.getByRole('button', { name: 'Sign in', exact: true }).click();
   const capabilityHTTP = await capabilitiesResponse; expect(capabilityHTTP.status()).toBe(200);
   const capabilities = await capabilityHTTP.json(); publicOnly(capabilities);
-  expect(capabilities).toMatchObject({ available: true, runtime_apply: false, profile_options: true, protocols: ['vless'], securities: ['reality'], transports: ['tcp', 'grpc'] });
+  expect(capabilities).toMatchObject({ available: true, runtime_apply: false, profile_options: true, profile_sniffing: true, profile_fallbacks: true,
+    profile_traffic_options_scope: 'creation_plan', protocols: ['vless'], securities: ['reality'], transports: ['tcp', 'grpc'] });
   const add = page.getByRole('button', { name: 'Add Inbound', exact: true }); await expect(add).toBeEnabled(); await add.click();
   const dialog = page.getByRole('dialog', { name: 'Create Inbound', exact: true }); await expect(dialog).toBeVisible();
   stage = 'complete creation form';
@@ -212,6 +237,15 @@ try {
   await dialog.getByLabel('Maximum time difference (ms)', { exact: true }).fill('60000');
   await dialog.getByLabel('Minimum client version', { exact: true }).fill('1.8.0');
   await dialog.getByLabel('Maximum client version', { exact: true }).fill('25.9.11');
+  await traffic(dialog);
+  await dialog.getByRole('checkbox', { name: 'Enable Sniffing', exact: true }).check();
+  await dialog.getByRole('checkbox', { name: 'QUIC', exact: true }).check();
+  await dialog.getByLabel('Excluded domains', { exact: true }).fill('domain:example.net');
+  await dialog.getByLabel('Excluded IPs or CIDRs', { exact: true }).fill('192.0.2.0/24');
+  await dialog.getByRole('button', { name: 'Add fallback', exact: true }).click();
+  await dialog.getByLabel('Fallback 1 Destination', { exact: true }).fill('127.0.0.1:8080');
+  await dialog.getByLabel('Fallback 1 Path', { exact: true }).fill('/health');
+  await dialog.getByLabel('Fallback 1 PROXY protocol', { exact: true }).selectOption('2');
   await dialog.getByRole('tab', { name: 'Nodes & routes', exact: true }).click();
   await fillDestination(dialog, 'de', 'Germany', '198.51.100.10', '10443', 'de.example.org\nshared.example.org', '1185', 'tunnel.example.org');
   await dialog.getByRole('checkbox', { name: 'Dark Swap: de', exact: true }).check();
@@ -239,6 +273,11 @@ try {
   expect(reopened.plan.profile.public_key).toBe(createdPublicKey); expect(reopened.plan.nodes).toEqual(expectedNodes(false));
   await verifyProfile(reopened.dialog, false); await verifyNodes(reopened.dialog, false);
   stage = 'complete persisted setup edit';
+  await traffic(reopened.dialog);
+  await reopened.dialog.getByRole('checkbox', { name: 'Enable Sniffing', exact: true }).uncheck();
+  await reopened.dialog.getByLabel('Excluded domains', { exact: true }).fill('domain:example.net\nfull:keep.example.org');
+  await reopened.dialog.getByRole('button', { name: 'Remove fallback 1', exact: true }).click();
+  await expect(reopened.dialog.locator('.inbound-fallback-row')).toHaveCount(0);
   await reopened.dialog.getByRole('tab', { name: 'Profile', exact: true }).click();
   await reopened.dialog.getByLabel('Inbound name', { exact: true }).fill('Real browser creation edited');
   await reopened.dialog.getByRole('radio', { name: 'gRPC / REALITY', exact: true }).check();
@@ -259,6 +298,7 @@ try {
   stage = 'real update preview and transaction';
   const updatePreviewBody = await checkSetup(reopened.dialog, true), updated = await persist(reopened.dialog, true);
   expect(updated.body).toEqual(updatePreviewBody);
+  expect(updated.body.profile.options.fallbacks).toEqual([]);
   expect(updated.body).toMatchObject({ expected_plan_revision: 1, expected_inbound_revision: 1, reason: 'Real browser edited setup' });
   expect(updated.receipt.plan.profile).toMatchObject({ id: inboundID, name: 'Real browser creation edited', transport: 'grpc', grpc_service: 'dark-grpc',
     short_ids: ['aabb', 'ccdd', 'eeff'], public_key: createdPublicKey });

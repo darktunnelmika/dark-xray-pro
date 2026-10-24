@@ -89,6 +89,7 @@ func creationCustomerInbound(p Profile, listen string, port uint16, kind string)
 		}
 		x.Settings.Clients = append(x.Settings.Clients, client)
 	}
+	applyInboundOptions(&x, p.Options)
 	return x
 }
 

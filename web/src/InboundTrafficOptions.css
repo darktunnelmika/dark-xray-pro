@@ -1,0 +1,41 @@
+.inbound-traffic-options { display: grid; gap: 16px; min-width: 0; }
+.inbound-traffic-card { border: 1px solid var(--border); border-radius: 14px; padding: 16px; background: var(--surface-2); min-width: 0; }
+.inbound-traffic-card > header { display: flex; gap: 12px; margin-bottom: 10px; }
+.inbound-traffic-card h4 { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 14px; line-height: 1.7; }
+.inbound-traffic-card h4 > bdi,.inbound-traffic-exclusions > summary > bdi { border: 1px solid var(--border); border-radius: 6px; padding: 0 6px; font-size: 11px; color: var(--sub); }
+.inbound-traffic-card header p,.inbound-traffic-note,.inbound-traffic-notice { margin: 6px 0 10px; color: var(--sub); font-size: 11px; line-height: 1.9; overflow-wrap: anywhere; }
+.inbound-traffic-notice { padding: 10px 12px; border: 1px solid var(--border); border-radius: 9px; color: var(--text); }
+.inbound-traffic-card .inbound-traffic-check { display: flex; flex-direction: row; align-items: center; gap: 10px; min-height: 44px; min-width: 0; color: var(--text); font-size: 12px; line-height: 1.9; cursor: pointer; }
+.inbound-traffic-card .inbound-traffic-check input { width: 17px; height: 17px; min-height: 17px; padding: 0; flex-shrink: 0; accent-color: var(--accent); }
+.inbound-traffic-enable { margin-bottom: 8px; }
+.inbound-traffic-disclosure { min-width: 0; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); }
+.inbound-traffic-disclosure:not([open]) > :not(summary) { display: none; }
+.inbound-traffic-disclosure > summary { min-height: 44px; padding: 12px; box-sizing: border-box; color: var(--text); font-size: 12px; line-height: 1.8; cursor: pointer; overflow-wrap: anywhere; }
+.inbound-traffic-disclosure > summary > bdi { margin-inline-start: 8px; }
+.inbound-traffic-settings { display: grid; gap: 12px; padding: 0 12px 12px; min-width: 0; }
+.inbound-traffic-protocols { margin: 0; padding: 0; border: 0; min-width: 0; }
+.inbound-traffic-protocols legend { padding: 0; color: var(--sub); font-size: 11px; line-height: 1.9; }
+.inbound-traffic-protocols > div { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 8px; }
+.inbound-traffic-field { display: flex; flex-direction: column; gap: 7px; min-width: 0; font-size: 12px; line-height: 1.8; }
+.inbound-traffic-field input,.inbound-traffic-field textarea,.inbound-traffic-field select { width: 100%; min-width: 0; min-height: 44px; box-sizing: border-box; padding: 10px 12px; border: 1px solid var(--border); border-radius: 9px; background: var(--surface-2); color: var(--text); font: inherit; font-size: 14px; }
+.inbound-traffic-field textarea { resize: vertical; }
+.inbound-traffic-field small { color: var(--sub); font-size: 11px; line-height: 1.8; overflow-wrap: anywhere; }
+.inbound-traffic-field [aria-invalid=true] { border-color: var(--red); }
+.inbound-traffic-options :is(input,textarea,select,button,summary):focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.inbound-traffic-options button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; max-width: 100%; min-height: 44px; padding: 9px 12px; border: 1px solid var(--border); border-radius: 9px; color: var(--text); background: var(--surface); font: inherit; font-size: 12px; line-height: 1.7; cursor: pointer; }
+.inbound-traffic-options button:disabled { opacity: .5; cursor: not-allowed; }
+.inbound-traffic-reset { justify-self: start; }
+.inbound-fallback-list { display: grid; gap: 10px; min-width: 0; }
+.inbound-fallback-label { display: inline-flex; align-items: center; gap: 4px; margin: 0 8px; }
+.inbound-fallback-destination { color: var(--sub); font-size: 11px; overflow-wrap: anywhere; }
+.inbound-fallback-body { padding: 0 12px 12px; min-width: 0; }
+.inbound-fallback-fields { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 14px; min-width: 0; }
+.inbound-fallback-wide { grid-column: 1/-1; }
+.inbound-fallback-remove { margin-top: 14px; }
+.inbound-fallback-add { margin-top: 12px; }
+@media(max-width:620px) {
+ .inbound-traffic-card { padding: 12px; }
+ .inbound-traffic-protocols > div { grid-template-columns: repeat(2,minmax(0,1fr)); }
+ .inbound-fallback-fields { grid-template-columns: minmax(0,1fr); }
+ .inbound-traffic-field input,.inbound-traffic-field textarea,.inbound-traffic-field select { font-size: 16px; }
+}

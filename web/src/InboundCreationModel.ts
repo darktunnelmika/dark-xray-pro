@@ -35,6 +35,9 @@ export type CreationCapabilities = {
   available: true; version: number; max_nodes: number; max_hosts_per_node: number;
   protocols: string[]; securities: string[]; transports: string[]; runtime_apply: false;
   profile_options?: boolean;
+  profile_sniffing?: boolean;
+  profile_fallbacks?: boolean;
+  profile_traffic_options_scope?: "creation_plan";
   plans: Array<{ inbound_id: number; plan_revision: number; inbound_revision: number; status: string }>;
 };
 export type CreationPayload = {

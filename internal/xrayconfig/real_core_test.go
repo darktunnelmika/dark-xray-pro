@@ -38,4 +38,5 @@ func TestRealPinnedXrayCoreOptIn(t *testing.T) {
 		t.Fatal("real Xray syntax test cannot authorize deployment")
 	}
 	t.Run("advanced-loopback", func(t *testing.T) { exerciseRealProfileOptions(t, bin, pin) })
+	t.Run("inbound-options-loopback", func(t *testing.T) { exerciseRealInboundOptions(t, bin, pin) })
 }

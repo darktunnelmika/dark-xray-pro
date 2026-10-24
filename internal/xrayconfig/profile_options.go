@@ -10,13 +10,15 @@ import (
 // Empty options preserve the historical candidate bytes and profile identity.
 // The structure contains no secret material; REALITY keys remain in Profile.
 type ProfileOptions struct {
-	GRPCAuthority       string `json:"grpc_authority,omitempty"`
-	GRPCMultiMode       bool   `json:"grpc_multi_mode,omitempty"`
-	RealityXver         int    `json:"reality_xver,omitempty"`
-	RealityMaxTimeDiff  int64  `json:"reality_max_time_diff,omitempty"`
-	RealityMinClientVer string `json:"reality_min_client_ver,omitempty"`
-	RealityMaxClientVer string `json:"reality_max_client_ver,omitempty"`
-	RealityShow         bool   `json:"reality_show,omitempty"`
+	GRPCAuthority       string           `json:"grpc_authority,omitempty"`
+	GRPCMultiMode       bool             `json:"grpc_multi_mode,omitempty"`
+	RealityXver         int              `json:"reality_xver,omitempty"`
+	RealityMaxTimeDiff  int64            `json:"reality_max_time_diff,omitempty"`
+	RealityMinClientVer string           `json:"reality_min_client_ver,omitempty"`
+	RealityMaxClientVer string           `json:"reality_max_client_ver,omitempty"`
+	RealityShow         bool             `json:"reality_show,omitempty"`
+	Sniffing            *SniffingOptions `json:"sniffing,omitempty"`
+	Fallbacks           []Fallback       `json:"fallbacks,omitempty"`
 }
 
 // The pinned core converts milliseconds to time.Duration (signed nanoseconds).
@@ -43,7 +45,15 @@ func NormalizeProfileOptions(transport string, options *ProfileOptions) (*Profil
 	if !minOK || !maxOK || (o.RealityMinClientVer != "" && o.RealityMaxClientVer != "" && minimum > maximum) {
 		return nil, ErrInvalid
 	}
-	if o == (ProfileOptions{}) {
+	var err error
+	if o.Sniffing, err = normalizeSniffing(o.Sniffing); err != nil {
+		return nil, err
+	}
+	if o.Fallbacks, err = normalizeFallbacks(transport, o.Fallbacks); err != nil {
+		return nil, err
+	}
+	if o.GRPCAuthority == "" && !o.GRPCMultiMode && o.RealityXver == 0 && o.RealityMaxTimeDiff == 0 &&
+		o.RealityMinClientVer == "" && o.RealityMaxClientVer == "" && !o.RealityShow && o.Sniffing == nil && len(o.Fallbacks) == 0 {
 		return nil, nil
 	}
 	return &o, nil
