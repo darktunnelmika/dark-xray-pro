@@ -822,3 +822,31 @@ test("canceling browser Back preserves dirty fields and accepted Back clears the
  expect(prompts).toBe(2);
  expect(f.calls).toHaveLength(0);
 });
+
+
+test("legacy profile edit and copy retain advanced settings even when capability controls are unavailable", async ({ page }) => {
+ const f = await fixture(page);
+ const options = { grpc_authority: "edge.example.org:8443", grpc_multi_mode: true, reality_max_time_diff: 15000,
+  reality_min_client_ver: "1.8.0", reality_max_client_ver: "25.9.11", reality_xver: 2 };
+ Object.assign(f.inbounds[0], { transport: "grpc", grpc_service: "retained-grpc", options });
+ await openPage(page); await openInbound(page);
+ const control = page.getByRole("region", { name: "Inbound lifecycle" });
+ await control.getByRole("button", { name: "Edit profile", exact: true }).click();
+ const editor = page.getByRole("form", { name: "Edit Inbound profile" });
+ await editor.getByLabel("Name", { exact: true }).fill("Retained advanced profile");
+ await editor.getByLabel("Reason for change", { exact: true }).fill("Rename without clearing settings");
+ page.once("dialog", prompt => prompt.accept()); await editor.getByRole("button", { name: "Save profile changes", exact: true }).click();
+ await expect(editor).toBeHidden();
+ expect(f.calls[0].body.profile).toMatchObject({ name: "Retained advanced profile", options });
+ await page.getByRole("button", { name: "Copy settings", exact: true }).click();
+ const dialog = page.getByRole("dialog", { name: "Create REALITY Inbound", exact: true });
+ await dialog.getByRole("tab", { name: "Security", exact: true }).click();
+ await dialog.locator(".inbound-profile-advanced").filter({ hasText: "Advanced REALITY settings" }).locator("summary").click();
+ await expect(dialog.getByLabel("Maximum time difference (ms)", { exact: true })).toHaveValue("15000");
+ await expect(dialog.getByLabel("Maximum time difference (ms)", { exact: true })).toBeDisabled();
+ await dialog.getByRole("button", { name: "Create and set up routes", exact: true }).click();
+ await expect(dialog).toBeHidden();
+ expect(f.calls[1].body).toMatchObject({ name: "Retained advanced profile — copy", options });
+ expect(f.calls[1].body.id).not.toBe(301);
+ expect(f.calls[1].body).not.toHaveProperty("public_key");
+});

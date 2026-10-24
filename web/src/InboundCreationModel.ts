@@ -1,5 +1,6 @@
 import type { Inbound, InboundNode } from "./inboundTypes";
 import type { InboundProfileValue } from "./InboundProfileForm";
+import { canonicalProfileOptions, profileOptionIssues, profileOptionsDraft, profileOptionsPayload } from "./inboundProfileOptions";
 
 export type CreationPath = { enabled: boolean; port: string; hosts: string };
 export type CreationNode = {
@@ -16,6 +17,7 @@ export type CreationState = {
   nodes: Record<string, CreationNode>;
   reason: string;
   shortIDs: string;
+  profileOptionsPresent: boolean;
 };
 export type CreationIssue = { nodeID?: string; field: string; code: string };
 export type CreationPlanNode = {
@@ -32,11 +34,12 @@ export type CreationPlan = {
 export type CreationCapabilities = {
   available: true; version: number; max_nodes: number; max_hosts_per_node: number;
   protocols: string[]; securities: string[]; transports: string[]; runtime_apply: false;
+  profile_options?: boolean;
   plans: Array<{ inbound_id: number; plan_revision: number; inbound_revision: number; status: string }>;
 };
 export type CreationPayload = {
   event_id: string; expected_plan_revision: number; expected_inbound_revision: number;
-  profile: Pick<Inbound, "id" | "name" | "transport" | "grpc_service" | "reality_target" | "server_names" | "short_ids">;
+  profile: Pick<Inbound, "id" | "name" | "transport" | "grpc_service" | "reality_target" | "server_names" | "short_ids" | "options">;
   nodes: CreationPlanNode[]; reason: string;
 };
 export type CreationPreview = { valid: true; plan: CreationPlan; runtime_changed: false; topology_validated: true; topology_validation_only: true; topology_key_scope: "preview_only" | "saved_profile" };
@@ -59,7 +62,8 @@ export function creationPayload(state: CreationState, inboundID: number, planRev
   return { event_id: eventID, expected_plan_revision: planRevision, expected_inbound_revision: inboundRevision,
     profile: { id: inboundID, name: state.profile.name, transport: state.profile.transport,
       grpc_service: state.profile.transport === "grpc" ? state.profile.grpcService : "", reality_target: state.profile.realityTarget,
-      server_names: state.profile.serverNames.split(/[\s,]+/).filter(Boolean), short_ids: creationShortIDs(state.shortIDs) },
+      server_names: state.profile.serverNames.split(/[\s,]+/).filter(Boolean), short_ids: creationShortIDs(state.shortIDs),
+      options: profileOptionsPayload(state.profile.options, state.profile.transport) ?? (planRevision > 0 && state.profileOptionsPresent ? {} : undefined) },
     nodes: selectedCreationNodes(state).map(row => ({ node_id: row.nodeID, installation_id: row.installationID, listen_ip: row.listenIP,
       direct_port: row.direct.enabled ? creationPort(row.direct.port) : 0, direct_hosts: row.direct.enabled ? creationHosts(row.direct.hosts) : [],
       tunnel_port: row.tunnel.enabled ? creationPort(row.tunnel.port) : 0, tunnel_hosts: row.tunnel.enabled ? creationHosts(row.tunnel.hosts) : [],
@@ -78,8 +82,8 @@ export function creationWaitingHosts(row: CreationNode): boolean {
 export function emptyCreation(source?: Inbound): CreationState {
   return {
     profile: { name: source?.name ?? "", transport: source?.transport ?? "tcp", grpcService: source?.grpc_service ?? "",
-      realityTarget: source?.reality_target ?? "", serverNames: source?.server_names.join(", ") ?? "" },
-    selected: [], nodes: {}, reason: "", shortIDs: source?.short_ids.join(", ") ?? freshCreationShortID(),
+      realityTarget: source?.reality_target ?? "", serverNames: source?.server_names.join(", ") ?? "", options: profileOptionsDraft(source?.options) },
+    selected: [], nodes: {}, reason: "", profileOptionsPresent: !!canonicalProfileOptions(source?.options), shortIDs: source?.short_ids.join(", ") ?? freshCreationShortID(),
   };
 }
 export function newCreationNode(node: InboundNode): CreationNode {
@@ -119,6 +123,7 @@ export function creationIssues(state: CreationState, available: InboundNode[]): 
   const target = profile.realityTarget.match(/^(?:\[[0-9a-fA-F:.]+\]|[^:\s/\\@%\[\]]+):([0-9]+)$/);
   if (!target || Number(target[1]) < 1 || Number(target[1]) > 65535) issues.push({ field: "realityTarget", code: "target_invalid" });
   if (!profile.serverNames.split(/[\s,]+/).filter(Boolean).length) issues.push({ field: "serverNames", code: "server_names_required" });
+  issues.push(...profileOptionIssues(profile.options, profile.transport));
   const shortIDs = creationShortIDs(state.shortIDs);
   if (!shortIDs.length || shortIDs.length > 16 || new Set(shortIDs).size !== shortIDs.length || shortIDs.some(id => !/^[0-9a-f]{2,16}$/.test(id) || id.length % 2 !== 0)) issues.push({ field: "shortIDs", code: "short_ids_invalid" });
   if (!state.selected.length) issues.push({ field: "nodes", code: "node_required" });

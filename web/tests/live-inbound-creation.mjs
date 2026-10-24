@@ -52,6 +52,11 @@ function receiptSafe(receipt, planRevision, inboundRevision) {
   expect(receipt.event_id).toMatch(/^[A-Za-z0-9][A-Za-z0-9_.:-]{15,127}$/);
   expect(receipt.plan.last_event_id).toBe(receipt.event_id);
 }
+const expectedOptions = edited => ({
+  ...(edited ? { grpc_authority: 'edge.example.org:8443', grpc_multi_mode: true } : {}),
+  reality_xver: 2, reality_max_time_diff: edited ? 120000 : 60000,
+  reality_min_client_ver: '1.8.0', reality_max_client_ver: '25.9.11',
+});
 const expectedNodes = edited => [
   { node_id: 'de', installation_id: 'a'.repeat(32), listen_ip: '198.51.100.10', direct_port: 10443,
     direct_hosts: ['de.example.org', 'shared.example.org'], tunnel_port: 1185, tunnel_hosts: ['tunnel.example.org'],
@@ -107,6 +112,7 @@ try {
     expect(preview).toMatchObject({ valid: true, runtime_changed: false, topology_validated: true,
       topology_validation_only: true, topology_key_scope: edited ? 'saved_profile' : 'preview_only' });
     expect(preview.plan.nodes).toEqual(expectedNodes(edited));
+    expect(preview.plan.profile.options).toEqual(expectedOptions(edited));
     expect(preview.plan.profile.enabled).toBe(false); expect(preview.plan.runtime_apply).toBe(false);
     expect(preview.topology.nodes.map(node => node.node_id).sort()).toEqual(['de', 'fr', 'nl']);
     for (const node of preview.topology.nodes) expect(node.candidate).toMatchObject({ can_activate: false,
@@ -122,6 +128,7 @@ try {
     await dialog.getByRole('button', { name: 'Save paused setup', exact: true }).click();
     const response = await pending; expect(response.status()).toBe(edited ? 200 : 201);
     const receipt = await response.json(); receiptSafe(receipt, edited ? 2 : 1, edited ? 2 : 1);
+    expect(receipt.plan.profile.options).toEqual(expectedOptions(edited));
     await expect(dialog).toBeHidden();
     return { receipt, body: response.request().postDataJSON() };
   }
@@ -135,6 +142,11 @@ try {
     const dialog = page.getByRole('dialog', { name: 'Edit Inbound setup', exact: true }); await expect(dialog).toBeVisible();
     return { dialog, plan: saved.plan };
   }
+  async function advanced(dialog, section) {
+    await dialog.getByRole('tab', { name: section === 'network' ? 'Network' : 'Security', exact: true }).click();
+    const details = dialog.locator('.inbound-profile-advanced').filter({ hasText: section === 'network' ? 'Advanced gRPC settings' : 'Advanced REALITY settings' });
+    if (await details.getAttribute('open') === null) await details.locator('summary').click();
+  }
   async function verifyProfile(dialog, edited) {
     await expect(dialog.getByLabel('Inbound name', { exact: true })).toHaveValue(edited ? 'Real browser creation edited' : 'Real browser creation');
     await expect(dialog.getByRole('radio', { name: edited ? 'gRPC / REALITY' : 'TCP / REALITY', exact: true })).toBeChecked();
@@ -142,6 +154,16 @@ try {
     await expect(dialog.getByLabel('REALITY target (host:port)', { exact: true })).toHaveValue('example.org:443');
     await expect(dialog.getByLabel('Server names (comma-separated)', { exact: true })).toHaveValue('example.org');
     await expect(dialog.getByLabel('Short IDs', { exact: true })).toHaveValue(edited ? 'aabb, ccdd, eeff' : 'aabb, ccdd');
+    await advanced(dialog, 'security');
+    await expect(dialog.getByLabel('REALITY Xver', { exact: true })).toHaveValue('2');
+    await expect(dialog.getByLabel('Maximum time difference (ms)', { exact: true })).toHaveValue(edited ? '120000' : '60000');
+    await expect(dialog.getByLabel('Minimum client version', { exact: true })).toHaveValue('1.8.0');
+    await expect(dialog.getByLabel('Maximum client version', { exact: true })).toHaveValue('25.9.11');
+    if (edited) {
+      await advanced(dialog, 'network');
+      await expect(dialog.getByLabel('gRPC Authority', { exact: true })).toHaveValue('edge.example.org:8443');
+      await expect(dialog.getByRole('checkbox', { name: 'gRPC MultiMode', exact: true })).toBeChecked();
+    }
   }
   async function verifyNodes(dialog, edited) {
     await dialog.getByRole('tab', { name: 'Nodes & routes', exact: true }).click();
@@ -177,7 +199,7 @@ try {
   await page.getByRole('button', { name: 'Sign in', exact: true }).click();
   const capabilityHTTP = await capabilitiesResponse; expect(capabilityHTTP.status()).toBe(200);
   const capabilities = await capabilityHTTP.json(); publicOnly(capabilities);
-  expect(capabilities).toMatchObject({ available: true, runtime_apply: false, protocols: ['vless'], securities: ['reality'], transports: ['tcp', 'grpc'] });
+  expect(capabilities).toMatchObject({ available: true, runtime_apply: false, profile_options: true, protocols: ['vless'], securities: ['reality'], transports: ['tcp', 'grpc'] });
   const add = page.getByRole('button', { name: 'Add Inbound', exact: true }); await expect(add).toBeEnabled(); await add.click();
   const dialog = page.getByRole('dialog', { name: 'Create Inbound', exact: true }); await expect(dialog).toBeVisible();
   stage = 'complete creation form';
@@ -185,6 +207,11 @@ try {
   await dialog.getByLabel('REALITY target (host:port)', { exact: true }).fill('example.org:443');
   await dialog.getByLabel('Server names (comma-separated)', { exact: true }).fill('example.org');
   await dialog.getByLabel('Short IDs', { exact: true }).fill('aabb, ccdd');
+  await advanced(dialog, 'security');
+  await dialog.getByLabel('REALITY Xver', { exact: true }).selectOption('2');
+  await dialog.getByLabel('Maximum time difference (ms)', { exact: true }).fill('60000');
+  await dialog.getByLabel('Minimum client version', { exact: true }).fill('1.8.0');
+  await dialog.getByLabel('Maximum client version', { exact: true }).fill('25.9.11');
   await dialog.getByRole('tab', { name: 'Nodes & routes', exact: true }).click();
   await fillDestination(dialog, 'de', 'Germany', '198.51.100.10', '10443', 'de.example.org\nshared.example.org', '1185', 'tunnel.example.org');
   await dialog.getByRole('checkbox', { name: 'Dark Swap: de', exact: true }).check();
@@ -217,6 +244,11 @@ try {
   await reopened.dialog.getByRole('radio', { name: 'gRPC / REALITY', exact: true }).check();
   await reopened.dialog.getByLabel('gRPC service', { exact: true }).fill('dark-grpc');
   await reopened.dialog.getByLabel('Short IDs', { exact: true }).fill('aabb, ccdd, eeff');
+  await advanced(reopened.dialog, 'security');
+  await reopened.dialog.getByLabel('Maximum time difference (ms)', { exact: true }).fill('120000');
+  await advanced(reopened.dialog, 'network');
+  await reopened.dialog.getByLabel('gRPC Authority', { exact: true }).fill('edge.example.org:8443');
+  await reopened.dialog.getByRole('checkbox', { name: 'gRPC MultiMode', exact: true }).check();
   await reopened.dialog.getByRole('tab', { name: 'Nodes & routes', exact: true }).click();
   await expand(reopened.dialog, 'Germany');
   await reopened.dialog.getByLabel('External entry port: de', { exact: true }).fill('444');

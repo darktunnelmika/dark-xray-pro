@@ -76,10 +76,7 @@ func creationPort(port uint16) bool {
 func creationCustomerInbound(p Profile, listen string, port uint16, kind string) inbound {
 	x := inbound{
 		Listen: listen, Port: port, Tag: fmt.Sprintf("dxp-in-%d-%s", p.InboundID, kind), Protocol: "vless",
-		Stream: stream{Network: p.Transport, Security: "reality", Reality: reality{
-			Dest: p.RealityTarget, ServerNames: append([]string(nil), p.ServerNames...),
-			PrivateKey: p.RealityPrivateKey, ShortIDs: append([]string(nil), p.ShortIDs...),
-		}},
+		Stream: profileStream(p),
 	}
 	x.Settings.Decryption = "none"
 	x.Settings.Clients = make([]xrayUser, 0, len(p.Users))
@@ -91,9 +88,6 @@ func creationCustomerInbound(p Profile, listen string, port uint16, kind string)
 			client.Flow = "xtls-rprx-vision"
 		}
 		x.Settings.Clients = append(x.Settings.Clients, client)
-	}
-	if p.Transport == "grpc" {
-		x.Stream.GRPC = map[string]string{"serviceName": p.GRPCService}
 	}
 	return x
 }

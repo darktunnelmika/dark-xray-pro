@@ -13,7 +13,7 @@ const nodes = [
 type Call = { path: string; method: string; body: CreationPayload; raw: string; csrf: string };
 type FixtureOptions = { failSaveOnce?: boolean; tamperPreview?: (plan: CreationPlan) => void; normalizeMappedIPs?: boolean;
   previewError?: { status: number; issue: { node_id?: string; field: string; code: string } }; savedPlan?: CreationPlan;
-  language?: "en" | "fa"; theme?: "light" | "dark" };
+  language?: "en" | "fa"; theme?: "light" | "dark"; profileOptions?: boolean };
 
 async function fixture(page: Page, options: FixtureOptions = {}) {
   const calls: Call[] = [];
@@ -22,7 +22,7 @@ async function fixture(page: Page, options: FixtureOptions = {}) {
   let failSave = options.failSaveOnce === true;
   const profileInput = (profile: CreationPayload["profile"]) => JSON.stringify({ id: profile.id, name: profile.name,
     transport: profile.transport, grpc_service: profile.grpc_service, reality_target: profile.reality_target,
-    server_names: profile.server_names, short_ids: profile.short_ids });
+    server_names: profile.server_names, short_ids: profile.short_ids, options: profile.options && Object.keys(profile.options).length ? profile.options : undefined });
   function planFor(body: CreationPayload, saving = false): CreationPlan {
     const revision = body.expected_inbound_revision === 0 ? 1 : body.expected_inbound_revision +
       (saved && profileInput(saved.profile) === profileInput(body.profile) ? 0 : 1);
@@ -34,7 +34,7 @@ async function fixture(page: Page, options: FixtureOptions = {}) {
       row.swap_source_listen_ip = row.swap_source_listen_ip.replace(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/i, "$1");
     }
     return { profile: { ...structuredClone(body.profile), name: body.profile.name.trim(), enabled: false, archived: false,
-      bound_clients: 0, revision, public_key: saved?.profile.public_key ?? (saving ? "SYNTHETIC_PUBLIC_KEY" : "") },
+      bound_clients: 0, revision, options: body.profile.options && Object.keys(body.profile.options).length ? structuredClone(body.profile.options) : undefined, public_key: saved?.profile.public_key ?? (saving ? "SYNTHETIC_PUBLIC_KEY" : "") },
       nodes: rows,
       plan_revision: body.expected_plan_revision + 1, inbound_revision: revision,
       status: waiting ? "WAITING_HOST" : "SAVED_DISABLED", last_event_id: body.event_id, reason: body.reason,
@@ -77,7 +77,7 @@ async function fixture(page: Page, options: FixtureOptions = {}) {
       return route.fulfill({ status: 405, json: { error: "unexpected_mutation" } });
     }
     if (path === api + "/capabilities") return route.fulfill({ json: { available: true, version: 1, max_nodes: 64,
-      max_hosts_per_node: 64, protocols: ["vless"], securities: ["reality"], transports: ["tcp", "grpc"], runtime_apply: false,
+      max_hosts_per_node: 64, profile_options: options.profileOptions !== false, protocols: ["vless"], securities: ["reality"], transports: ["tcp", "grpc"], runtime_apply: false,
       plans: saved ? [{ inbound_id: saved.profile.id, plan_revision: saved.plan_revision, inbound_revision: saved.inbound_revision, status: saved.status }] : [] } });
     if (saved && path === api + "/" + saved.profile.id) return route.fulfill({ json: { plan: saved, references_current: true } });
     if (path.endsWith("/native-inbounds-state")) return route.fulfill({ json: {
@@ -426,4 +426,139 @@ test("expanded Inbound editor keeps Network, Security, Dark Swap and Hosts chang
   expect(payload?.nodes[0].swap_enabled).toBe(true);
   await save(dialog);
   expect(f.getSaved()?.status).toBe("SAVED_DISABLED");
+});
+
+
+async function advanced(dialog: Locator, section: "network" | "security") {
+  await dialog.getByRole("tab", { name: section === "network" ? "Network" : "Security", exact: true }).click();
+  const disclosure = dialog.locator(".inbound-profile-advanced").filter({ hasText: section === "network" ? "Advanced gRPC settings" : "Advanced REALITY settings" });
+  if (await disclosure.getAttribute("open") === null) await disclosure.locator("summary").click();
+  return disclosure;
+}
+
+test("advanced gRPC and REALITY options survive exact retry, reopen and profile edits without rotating identity", async ({ page }, testInfo) => {
+  const f = await fixture(page, { failSaveOnce: true }), dialog = await openCreation(page);
+  await profile(dialog, "Advanced connection");
+  await dialog.getByRole("tab", { name: "Network", exact: true }).click();
+  await dialog.getByRole("radio", { name: "gRPC / REALITY — network", exact: true }).check();
+  await dialog.getByLabel("gRPC service — network", { exact: true }).fill("advanced-grpc");
+  await advanced(dialog, "network");
+  await dialog.getByLabel("gRPC Authority", { exact: true }).fill("edge.example.org:8443");
+  await dialog.getByRole("checkbox", { name: "gRPC MultiMode", exact: true }).check();
+  await dialog.getByRole("radio", { name: "TCP / REALITY — network", exact: true }).check();
+  await dialog.getByRole("radio", { name: "gRPC / REALITY — network", exact: true }).check();
+  await advanced(dialog, "network");
+  await expect(dialog.getByLabel("gRPC Authority", { exact: true })).toHaveValue("edge.example.org:8443");
+  await expect(dialog.getByRole("checkbox", { name: "gRPC MultiMode", exact: true })).toBeChecked();
+  await advanced(dialog, "security");
+  await dialog.getByLabel("REALITY Xver", { exact: true }).selectOption("2");
+  await dialog.getByLabel("Maximum time difference (ms)", { exact: true }).fill("60000");
+  await dialog.getByLabel("Minimum client version", { exact: true }).fill("1.8.0");
+  await dialog.getByLabel("Maximum client version", { exact: true }).fill("25.9.11");
+  await dialog.getByRole("checkbox", { name: "REALITY Show", exact: true }).check();
+  await page.screenshot({ path: testInfo.outputPath("advanced-reality-en-desktop.png"), fullPage: true });
+  await destination(dialog, "de", "203.0.113.10", "10443", "de.example.org");
+  await review(dialog); await check(dialog);
+  const options = { grpc_authority: "edge.example.org:8443", grpc_multi_mode: true, reality_xver: 2,
+    reality_max_time_diff: 60000, reality_min_client_ver: "1.8.0", reality_max_client_ver: "25.9.11", reality_show: true };
+  expect(f.calls[0].body.profile.options).toEqual(options);
+  await dialog.getByRole("button", { name: "Save paused setup", exact: true }).click();
+  await expect(dialog.getByRole("button", { name: "Retry the same save", exact: true })).toBeEnabled();
+  await dialog.getByRole("button", { name: "Retry the same save", exact: true }).click();
+  await expect(dialog).toBeHidden();
+  expect(f.calls[2].raw).toBe(f.calls[1].raw);
+  expect(f.getSaved()?.profile.options).toEqual(options);
+  const identity = f.getSaved()!.profile.id, publicKey = f.getSaved()!.profile.public_key;
+  await page.getByRole("button", { name: "Open saved setup", exact: true }).click();
+  const edit = page.getByRole("dialog", { name: "Edit Inbound setup", exact: true });
+  await advanced(edit, "security");
+  await expect(edit.getByLabel("Maximum time difference (ms)", { exact: true })).toHaveValue("60000");
+  await expect(edit.getByLabel("Minimum client version", { exact: true })).toHaveValue("1.8.0");
+  await expect(edit.getByRole("checkbox", { name: "REALITY Show", exact: true })).toBeChecked();
+  await advanced(edit, "network");
+  await expect(edit.getByLabel("gRPC Authority", { exact: true })).toHaveValue("edge.example.org:8443");
+  await edit.getByRole("radio", { name: "TCP / REALITY — network", exact: true }).check();
+  await review(edit, "Use TCP and retain REALITY settings"); await check(edit); await save(edit);
+  expect(f.calls[3].body.profile.options).toEqual({ reality_xver: 2, reality_max_time_diff: 60000,
+    reality_min_client_ver: "1.8.0", reality_max_client_ver: "25.9.11", reality_show: true });
+  expect(f.calls[3].body.profile.grpc_service).toBe("");
+  expect(f.getSaved()).toMatchObject({ plan_revision: 2, inbound_revision: 2, profile: { id: identity, public_key: publicKey, revision: 2 } });
+  await page.getByRole("button", { name: "Open saved setup", exact: true }).click();
+  await advanced(edit, "security");
+  await edit.getByLabel("REALITY Xver", { exact: true }).selectOption("0");
+  await edit.getByLabel("Maximum time difference (ms)", { exact: true }).fill("0");
+  await edit.getByLabel("Minimum client version", { exact: true }).fill("");
+  await edit.getByLabel("Maximum client version", { exact: true }).fill("");
+  await edit.getByRole("checkbox", { name: "REALITY Show", exact: true }).uncheck();
+  await review(edit, "Clear advanced values explicitly"); await check(edit); await save(edit);
+  expect(f.calls[5].body.profile.options).toEqual({});
+  expect(f.calls[6].body.profile.options).toEqual({});
+  expect(f.getSaved()?.profile.options).toBeUndefined();
+  expect(f.getSaved()?.inbound_revision).toBe(3);
+});
+
+for (const change of ["missing", "altered"] as const) test(`a preview with ${change} advanced options cannot authorize saving`, async ({ page }) => {
+  const f = await fixture(page, { tamperPreview: plan => {
+    if (change === "missing") delete plan.profile.options;
+    else plan.profile.options!.reality_max_time_diff = 1;
+  } });
+  const dialog = await openCreation(page); await profile(dialog);
+  await advanced(dialog, "security");
+  await dialog.getByLabel("Maximum time difference (ms)", { exact: true }).fill("1000");
+  await destination(dialog, "de", "203.0.113.10", "10443", "de.example.org"); await review(dialog);
+  await dialog.getByRole("button", { name: "Check complete setup", exact: true }).click();
+  await expect(dialog.getByRole("alert")).toContainText("could not validate this setup");
+  await expect(dialog.getByRole("button", { name: "Save paused setup", exact: true })).toBeDisabled();
+  expect(f.calls).toHaveLength(1); expect(f.getSaved()).toBeUndefined();
+});
+
+test("advanced controls require the server capability while default requests remain compatible", async ({ page }) => {
+  const f = await fixture(page, { profileOptions: false }), dialog = await openCreation(page); await profile(dialog);
+  await advanced(dialog, "security");
+  await expect(dialog.getByLabel("Maximum time difference (ms)", { exact: true })).toBeDisabled();
+  await expect(dialog.getByRole("status").filter({ hasText: "require an updated server" })).toBeVisible();
+  await destination(dialog, "de", "203.0.113.10", "10443", "de.example.org"); await review(dialog); await check(dialog); await save(dialog);
+  expect(f.calls[0].body.profile).not.toHaveProperty("options");
+  expect(f.getSaved()?.profile.enabled).toBe(false);
+});
+
+test("invalid advanced versions reveal their hidden security field without sending a request", async ({ page }) => {
+  const f = await fixture(page), dialog = await openCreation(page); await profile(dialog);
+  await advanced(dialog, "security");
+  await dialog.getByLabel("Minimum client version", { exact: true }).fill("25.9.11");
+  await dialog.getByLabel("Maximum client version", { exact: true }).fill("1.8.0");
+  await dialog.locator(".inbound-profile-advanced").filter({ hasText: "Advanced REALITY settings" }).locator("summary").click();
+  await destination(dialog, "de", "203.0.113.10", "10443", "de.example.org"); await review(dialog);
+  await dialog.getByRole("button", { name: "Check complete setup", exact: true }).click();
+  await expect(dialog.getByRole("tab", { name: "Security", exact: true })).toHaveAttribute("aria-selected", "true");
+  await expect(dialog.getByLabel("Maximum client version", { exact: true })).toBeFocused();
+  await expect(dialog.getByRole("alert")).toContainText("at least the minimum");
+  expect(f.calls).toHaveLength(0);
+});
+
+for (const language of ["en", "fa"] as const) test(`320px ${language} footer navigation keeps the active stage in its scroll viewport`, async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 320, height: 760 });
+  await fixture(page, { language }); const dialog = await openCreation(page, language);
+  const next = language === "fa" ? "ادامه" : "Continue", back = language === "fa" ? "قبلی" : "Back";
+  const tabVisible = async () => {
+    await expect.poll(() => dialog.locator('.creation-tabs [aria-selected="true"]').evaluate(element => {
+      const selected = element.getBoundingClientRect(), viewport = element.parentElement!.getBoundingClientRect();
+      return selected.left >= viewport.left - 1 && selected.right <= viewport.right + 1;
+    })).toBe(true);
+  };
+  for (let stage = 0; stage < 7; stage++) { await tabVisible(); await dialog.getByRole("button", { name: next, exact: true }).click(); }
+  await tabVisible();
+  for (let stage = 7; stage > 0; stage--) { await dialog.getByRole("button", { name: back, exact: true }).click(); await tabVisible(); }
+  await dialog.getByRole("tab", { name: language === "fa" ? "دارک سواپ" : "Dark Swap", exact: true }).click();
+  await dialog.getByRole("button", { name: language === "fa" ? "انتخاب نودهای مقصد" : "Select destination Nodes", exact: true }).click();
+  await expect(dialog.getByRole("tab", { name: language === "fa" ? "نودها و مسیرها" : "Nodes & routes", exact: true })).toHaveAttribute("aria-selected", "true");
+  await tabVisible();
+  await dialog.getByRole("tab", { name: language === "fa" ? "امنیت" : "Security", exact: true }).click();
+  await dialog.locator(".inbound-profile-advanced").filter({ hasText: language === "fa" ? "تنظیمات پیشرفتهٔ REALITY" : "Advanced REALITY settings" }).locator("summary").click();
+  const maxTime = dialog.getByLabel(language === "fa" ? "حداکثر اختلاف زمان (میلی‌ثانیه)" : "Maximum time difference (ms)", { exact: true });
+  await maxTime.fill("60000");
+  await expect(maxTime).toBeInViewport();
+  const widths = await dialog.evaluate(element => ({ client: element.clientWidth, scroll: element.scrollWidth }));
+  expect(widths.scroll).toBeLessThanOrEqual(widths.client + 1);
+  await page.screenshot({ path: testInfo.outputPath(`advanced-reality-${language}-320.png`), fullPage: true });
 });

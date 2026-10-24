@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Archive, Edit3, History, PauseCircle, PlayCircle, ShieldCheck } from "lucide-react";
+import { profileOptionsDraft, profileOptionsPayload, type InboundProfileOptions } from "./inboundProfileOptions";
 import InboundProfileForm, { type InboundProfileFormHandle, type InboundProfileValue } from "./InboundProfileForm";
 
 type Lang = "en" | "fa";
-export type LifecycleInbound = { id: number; name: string; transport: string; grpc_service: string; reality_target: string; server_names: string[]; short_ids: string[]; public_key: string; revision: number; enabled: boolean; archived: boolean };
+export type LifecycleInbound = { id: number; name: string; transport: string; grpc_service: string; reality_target: string; server_names: string[]; short_ids: string[]; public_key: string; revision: number; enabled: boolean; archived: boolean; options?: InboundProfileOptions };
 type Operation = { event_id: string; action: string; reason: string; from_revision: number; to_revision: number; created_unix: number };
-type Profile = Pick<LifecycleInbound, "id" | "name" | "transport" | "grpc_service" | "reality_target" | "server_names" | "short_ids">;
+type Profile = Pick<LifecycleInbound, "id" | "name" | "transport" | "grpc_service" | "reality_target" | "server_names" | "short_ids" | "options">;
 type Intent = { action: "edit" | "enable" | "disable" | "archive"; reason: string; profile?: Profile };
 const words = {
  en: {
@@ -31,9 +32,10 @@ const words = {
   setupTitle: "کنترل پیکربندی ذخیره‌شده", archiveSetup: "آرشیو پیکربندی", setupPreserve: "آرشیو، این پیکربندی غیرفعال را لغو و رزرو پورت‌هایش را آزاد می‌کند. تنظیمات و تاریخچه برای بازبینی حفظ می‌شوند.", confirmArchiveSetup: "این پیکربندی غیرفعال برای همیشه آرشیو و رزرو پورت‌هایش آزاد شود؟ تنظیمات و تاریخچه برای بازبینی باقی می‌مانند.", setupArchived: "پیکربندی آرشیو شد و رزرو پورت‌هایش آزاد شد.",
  },
 };
-export default function InboundLifecycle({ inbound, language, csrf, blocked, mode = "all", setupOnly = false, onChanged, onDirtyChange }: { inbound: LifecycleInbound; language: Lang; csrf: string; blocked: boolean; mode?: "all" | "controls" | "history"; setupOnly?: boolean; onChanged: () => void; onDirtyChange?: (dirty: boolean) => void }) {
+export default function InboundLifecycle({ inbound, language, csrf, blocked, mode = "all", setupOnly = false, profileOptionsSupported = false, onChanged, onDirtyChange }: { inbound: LifecycleInbound; language: Lang; csrf: string; blocked: boolean; mode?: "all" | "controls" | "history"; setupOnly?: boolean; profileOptionsSupported?: boolean; onChanged: () => void; onDirtyChange?: (dirty: boolean) => void }) {
  const t=words[language];const [editing,setEditing]=useState(false);const [base,setBase]=useState(inbound.revision);
  const [name,setName]=useState(inbound.name);const [transport,setTransport]=useState(inbound.transport);const [service,setService]=useState(inbound.grpc_service);const [dest,setDest]=useState(inbound.reality_target);const [sni,setSni]=useState(inbound.server_names.join(", "));const [shortIDs,setShortIDs]=useState(inbound.short_ids);
+ const [profileOptions,setProfileOptions]=useState(() => profileOptionsDraft(inbound.options));
  const [reason,setReason]=useState("");const [busy,setBusy]=useState(false);const [message,setMessage]=useState("");
  const [history,setHistory]=useState<Operation[]|null>(null);const [historyError,setHistoryError]=useState(false);const [offset,setOffset]=useState(0);const [refresh,setRefresh]=useState(0);
  const life=useRef<AbortController|null>(null);const pending=useRef<{ semantic: string; payload: Intent & {event_id:string;expected_revision:number} }|null>(null);
@@ -49,7 +51,7 @@ export default function InboundLifecycle({ inbound, language, csrf, blocked, mod
    .catch(()=>{if(!c.signal.aborted)setHistoryError(true);}).finally(()=>clearTimeout(timer));
   return ()=>{clearTimeout(timer);c.abort();};
  },[inbound.id,inbound.revision,offset,refresh,mode]);
- function beginEdit(){pending.current=null;setBase(inbound.revision);setName(inbound.name);setTransport(inbound.transport);setService(inbound.grpc_service);setDest(inbound.reality_target);setSni(inbound.server_names.join(", "));setShortIDs([...inbound.short_ids]);setEditing(true);setMessage("");}
+ function beginEdit(){pending.current=null;setBase(inbound.revision);setName(inbound.name);setTransport(inbound.transport);setService(inbound.grpc_service);setDest(inbound.reality_target);setSni(inbound.server_names.join(", "));setShortIDs([...inbound.short_ids]);setProfileOptions(profileOptionsDraft(inbound.options));setEditing(true);setMessage("");}
  async function change(intent:Intent,revision:number){
   if(busy||blocked||inbound.archived||!reason.trim()||!life.current||life.current.signal.aborted||(setupOnly&&intent.action!=="archive"))return;
   const confirmation=setupOnly?t.confirmArchiveSetup:({edit:t.confirmEdit,disable:t.confirmDisable,enable:t.confirmEnable,archive:t.confirmArchive})[intent.action];
@@ -68,10 +70,10 @@ export default function InboundLifecycle({ inbound, language, csrf, blocked, mod
   finally{clearTimeout(timer);life.current.signal.removeEventListener("abort",abort);if(!life.current.signal.aborted)setBusy(false);}
  }
  function save(e:FormEvent){e.preventDefault();if(!profileForm.current?.validate())return;if(base!==inbound.revision){setMessage(t.changed);return;}
-  const profile:Profile={id:inbound.id,name,transport,grpc_service:transport==="grpc"?service:"",reality_target:dest,server_names:sni.split(/[\s,]+/).filter(Boolean),short_ids:shortIDs};
+  const profile:Profile={id:inbound.id,name,transport,grpc_service:transport==="grpc"?service:"",reality_target:dest,server_names:sni.split(/[\s,]+/).filter(Boolean),short_ids:shortIDs,options:profileOptionsPayload(profileOptions,transport) ?? (inbound.options ? {} : undefined)};
   void change({action:"edit",reason:reason.trim(),profile},base);
  }
- function updateProfile(value:InboundProfileValue){setName(value.name);setTransport(value.transport);setService(value.grpcService);setDest(value.realityTarget);setSni(value.serverNames);}
+ function updateProfile(value:InboundProfileValue){setName(value.name);setTransport(value.transport);setService(value.grpcService);setDest(value.realityTarget);setSni(value.serverNames);setProfileOptions(value.options ?? profileOptionsDraft());}
  const disabled=blocked||busy||inbound.archived||!reason.trim();
  return <section className="native-card native-lifecycle" aria-label={mode==="history"?t.history:"Inbound lifecycle"}>
   {mode!=="history"&&<>
@@ -79,7 +81,7 @@ export default function InboundLifecycle({ inbound, language, csrf, blocked, mod
   {!inbound.archived&&<>
    {editing&&<form aria-label="Edit Inbound profile" onSubmit={save} noValidate className="inbound-inline-editor">
     {base!==inbound.revision&&<p className="native-warning" role="alert">{t.changed}</p>}
-    <InboundProfileForm ref={profileForm} language={language} mode="edit" disabled={busy} value={{name,transport,grpcService:service,realityTarget:dest,serverNames:sni}} onChange={updateProfile}/>
+    <InboundProfileForm ref={profileForm} language={language} mode="edit" disabled={busy} value={{name,transport,grpcService:service,realityTarget:dest,serverNames:sni,options:profileOptions}} profileOptionsSupported={profileOptionsSupported} onChange={updateProfile}/>
     <label>{t.reason}<input value={reason} onChange={e=>setReason(e.target.value)} maxLength={200} disabled={busy} required/></label>
     <div className="inbound-inline-footer"><span>{t.keyHint}</span><div className="native-actions"><button type="button" disabled={busy} onClick={()=>{setEditing(false);setReason("");}}>{t.cancel}</button><button type="submit" disabled={disabled||base!==inbound.revision}>{t.save}</button></div></div>
    </form>}

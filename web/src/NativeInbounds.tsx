@@ -8,6 +8,7 @@ import NativeRouteTransactions from "./NativeRouteTransactions";
 import NativeMeteredRouteTransactions from "./NativeMeteredRouteTransactions";
 import InboundDirectory from "./InboundDirectory";
 import WorkspaceDialog from "./WorkspaceDialog";
+import { profileOptionsDraft, profileOptionsPayload, type ProfileOptionsDraft } from "./inboundProfileOptions";
 import InboundProfileForm, { type InboundProfileFormHandle, type InboundProfileValue } from "./InboundProfileForm";
 import InboundCreation from "./InboundCreation";
 import type { CreationCapabilities, CreationPlan, CreationPlanResponse } from "./InboundCreationModel";
@@ -96,6 +97,7 @@ export default function NativeInbounds({ language, fallback, workspace = "inboun
  const [editorEpoch, setEditorEpoch] = useState(0);
  const [checked, setChecked] = useState<string[]>([]); const [offset, setOffset] = useState(0); const [search, setSearch] = useState(""); const [clientsReady, setClientsReady] = useState(false); const [clientsFailure, setClientsFailure] = useState(false);
  const [name, setName] = useState(""); const [transport, setTransport] = useState("tcp"); const [target, setTarget] = useState(""); const [sni, setSni] = useState(""); const [service, setService] = useState("");
+ const [profileOptions, setProfileOptions] = useState<ProfileOptionsDraft>(profileOptionsDraft);
  const createIdentity = useRef<{ id: number; short: string } | null>(null);
  const profileForm = useRef<InboundProfileFormHandle>(null); const [formChecked, setFormChecked] = useState(false);
  const createInitial = useRef(""); const skipNavigationGuard = useRef(false);
@@ -108,7 +110,7 @@ export default function NativeInbounds({ language, fallback, workspace = "inboun
  const [setupDirty, setSetupDirty] = useState(false); const [setupBusy, setSetupBusy] = useState(false);
  const setupLoad = useRef(0);
  const lifetime = useRef<AbortController | null>(null); const tabElements = useRef<(HTMLButtonElement | null)[]>([]);
- const createValue: InboundProfileValue = { name, transport, grpcService: service, realityTarget: target, serverNames: sni };
+ const createValue: InboundProfileValue = { name, transport, grpcService: service, realityTarget: target, serverNames: sni, options: profileOptions };
  const createDirty = creating && JSON.stringify(createValue) !== createInitial.current;
  const dirty = profileDirty || routeDirty || createDirty || setupDirty;
  const inboundFingerprint = data?.inbounds.map(inbound => inbound.id + ":" + inbound.revision).sort().join("|") ?? "";
@@ -235,8 +237,8 @@ export default function NativeInbounds({ language, fallback, workspace = "inboun
    setCreating(false); setNotice(""); setSetupEditor({ source: source ? { ...source, name: source.name.slice(0, 128 - suffix.length) + suffix } : undefined }); return;
   }
   createIdentity.current = null; setCopying(!!source); setName(source ? source.name.slice(0, 128 - suffix.length) + suffix : "");
-  setTransport(source?.transport ?? "tcp"); setTarget(source?.reality_target ?? ""); setSni(source?.server_names.join(", ") ?? ""); setService(source?.grpc_service ?? ""); setCreating(true);
-  createInitial.current = JSON.stringify({ name: source ? source.name.slice(0, 128 - suffix.length) + suffix : "", transport: source?.transport ?? "tcp", grpcService: source?.grpc_service ?? "", realityTarget: source?.reality_target ?? "", serverNames: source?.server_names.join(", ") ?? "" });
+  setTransport(source?.transport ?? "tcp"); setTarget(source?.reality_target ?? ""); setSni(source?.server_names.join(", ") ?? ""); setService(source?.grpc_service ?? ""); setProfileOptions(profileOptionsDraft(source?.options)); setCreating(true);
+  createInitial.current = JSON.stringify({ name: source ? source.name.slice(0, 128 - suffix.length) + suffix : "", transport: source?.transport ?? "tcp", grpcService: source?.grpc_service ?? "", realityTarget: source?.reality_target ?? "", serverNames: source?.server_names.join(", ") ?? "", options: profileOptionsDraft(source?.options) });
   setFormChecked(false); setNotice("");
  }
  async function openSetupPlan() {
@@ -259,12 +261,12 @@ export default function NativeInbounds({ language, fallback, workspace = "inboun
   skipNavigationGuard.current = true; navigateDetail(plan.profile.id, "routes"); skipNavigationGuard.current = false;
   setNotice(u.setupSaved); setRefresh(value => value + 1);
  }
- function changeCreate(value: InboundProfileValue) { setName(value.name); setTransport(value.transport); setService(value.grpcService); setTarget(value.realityTarget); setSni(value.serverNames); setFormChecked(false); }
+ function changeCreate(value: InboundProfileValue) { setName(value.name); setTransport(value.transport); setService(value.grpcService); setTarget(value.realityTarget); setSni(value.serverNames); setProfileOptions(value.options ?? profileOptionsDraft()); setFormChecked(false); }
  function closeCreate() { if (!busy && (!createDirty || window.confirm(u.unsaved))) setCreating(false); }
  function create(event: FormEvent) {
   event.preventDefault(); if (busy || stale || !setupStatusReady || !profileForm.current?.validate()) return;
   if (!createIdentity.current) createIdentity.current = { id: freshID(), short: shortID() }; const identity = createIdentity.current;
-  void mutate("/api/v1/workspace/native-inbounds", { id: identity.id, name, transport, grpc_service: transport === "grpc" ? service : "", reality_target: target, server_names: split(sni), short_ids: [identity.short] }, () => {
+  void mutate("/api/v1/workspace/native-inbounds", { id: identity.id, name, transport, grpc_service: transport === "grpc" ? service : "", reality_target: target, server_names: split(sni), short_ids: [identity.short], options: profileOptionsPayload(profileOptions, transport) }, () => {
    setCreating(false); createIdentity.current = null; setProfileDirty(false); setRouteDirty(false);
    skipNavigationGuard.current = true; navigateDetail(identity.id, "routes"); skipNavigationGuard.current = false;
   }, u.created);
@@ -317,7 +319,7 @@ export default function NativeInbounds({ language, fallback, workspace = "inboun
       {visited.includes("overview") && <>
        <div className="inbound-summary"><div><span>{u.nodeCount}</span><strong>{assigned.length}</strong></div><div><span>{u.clientCount}</span><strong>{current.bound_clients}</strong></div><div><span>{u.profile}</span><strong>{current.archived ? t.archivedLabel : current.enabled ? t.enabledLabel : t.disabledLabel}</strong></div></div>
        <dl className="inbound-profile-facts"><div><dt>{t.transport}</dt><dd><bdi dir="ltr">{current.transport === "grpc" ? "gRPC" : "TCP"} / REALITY</bdi></dd></div><div><dt>{t.dest}</dt><dd><bdi dir="ltr">{current.reality_target}</bdi></dd></div><div><dt>{t.sni}</dt><dd><bdi dir="ltr">{current.server_names.join(", ")}</bdi></dd></div></dl>
-       <InboundLifecycle key={chosen + ":" + editorEpoch + ":" + !!setupSummary} inbound={current} language={language} csrf={session.csrf_token ?? ""} blocked={busy || stale || !setupStatusReady} mode="controls" setupOnly={!!setupSummary} onDirtyChange={setProfileDirty} onChanged={() => setRefresh(n => n + 1)}/>
+       <InboundLifecycle key={chosen + ":" + editorEpoch + ":" + !!setupSummary} inbound={current} language={language} csrf={session.csrf_token ?? ""} blocked={busy || stale || !setupStatusReady} mode="controls" profileOptionsSupported={setupCapabilities?.profile_options === true} setupOnly={!!setupSummary} onDirtyChange={setProfileDirty} onChanged={() => setRefresh(n => n + 1)}/>
       </>}
      </section>
      <section hidden={tab !== "routes"} role="tabpanel" id="inbound-panel-routes" aria-labelledby="inbound-tab-routes" className="inbound-detail-panel">
@@ -353,7 +355,7 @@ export default function NativeInbounds({ language, fallback, workspace = "inboun
    <WorkspaceDialog open={creating} title={t.create} subtitle={u.editorLead} variant="inbound-editor" closeLabel={u.close} busy={busy} onClose={closeCreate}><form onSubmit={create} noValidate className="inbound-editor-form">
     <div className="inbound-editor-scroll">
      {copying && <p className="inbound-dialog-note inbound-copy-note">{u.copyHint}</p>}
-     <InboundProfileForm ref={profileForm} language={language} value={createValue} onChange={changeCreate} disabled={busy}>
+     <InboundProfileForm ref={profileForm} language={language} value={createValue} onChange={changeCreate} disabled={busy} profileOptionsSupported={setupCapabilities?.profile_options === true}>
       <div className="inbound-next-step"><Server size={18}/><p>{u.nextSetup}</p></div>
      </InboundProfileForm>
      {notice && <p className="native-warning" role="alert">{notice}</p>}

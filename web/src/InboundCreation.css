@@ -163,3 +163,7 @@ ul.creation-issues { padding-inline-start: 29px; }
  .inbound-creation .creation-tabs button { flex: 0 0 auto; min-width: 104px; }
  .creation-legacy-grid { grid-template-columns: minmax(0,1fr); }
 }
+
+.creation-swap-empty { display: grid; justify-items: start; gap: 12px; padding: 20px 0; color: var(--sub); font-size: 12px; line-height: 1.9; }
+.creation-swap-empty p { margin: 0; }
+.creation-swap-empty button { min-height: 44px; }

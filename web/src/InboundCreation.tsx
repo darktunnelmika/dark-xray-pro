@@ -5,6 +5,8 @@ import { creationAPI, CreationApiError } from "./InboundCreationApi";
 import WorkspaceDialog from "./WorkspaceDialog";
 import type { Inbound, InboundNode, InboundTarget } from "./inboundTypes";
 import InboundCreationNodes, { creationIssueMessage } from "./InboundCreationNodes";
+import InboundProfileAdvanced from "./InboundProfileAdvanced";
+import { canonicalProfileOptions, profileOptionSection, profileOptionsPayload } from "./inboundProfileOptions";
 import { canonicalCreationIP, creationHosts, creationIssues, creationNodeName, creationPayload, creationShortIDs, creationWaitingHosts, emptyCreation, freshCreationShortID, selectedCreationNodes, stateFromCreationPlan,
   type CreationCapabilities, type CreationIssue, type CreationPayload, type CreationPlan, type CreationPlanNode, type CreationPlanResponse, type CreationPreview, type CreationReceipt, type CreationState } from "./InboundCreationModel";
 import "./InboundCreation.css";
@@ -53,7 +55,7 @@ const words = {
 
 function normalizedProfile(profile: CreationPayload["profile"]): string {
   return JSON.stringify({ id: profile.id, name: profile.name.trim(), transport: profile.transport, grpc_service: profile.grpc_service,
-    reality_target: profile.reality_target, server_names: profile.server_names, short_ids: profile.short_ids });
+    reality_target: profile.reality_target, server_names: profile.server_names, short_ids: profile.short_ids, options: canonicalProfileOptions(profile.options) });
 }
 function normalizedNode(node: CreationPlanNode): string {
   return JSON.stringify({ node_id: node.node_id, installation_id: node.installation_id, listen_ip: canonicalCreationIP(node.listen_ip),
@@ -112,14 +114,19 @@ export default function InboundCreation({ language, nodes, targets, capabilities
   useEffect(() => () => onDirtyChange(false), [onDirtyChange]);
   useEffect(() => { onBusyChange(busy); return () => onBusyChange(false); }, [busy, onBusyChange]);
   useEffect(() => {
+    tabButtons.current[section]?.scrollIntoView({ block: "nearest", inline: "nearest" });
+    surface.current?.querySelector(".creation-scroll")?.scrollTo({ top: 0 });
+  }, [section]);
+  useEffect(() => {
     if (!focusRequest) return;
     const scope = focusRequest.nodeID ? surface.current?.querySelector<HTMLElement>(`[data-node-id="${CSS.escape(focusRequest.nodeID)}"]`) : surface.current;
     const control = scope?.querySelector<HTMLElement>(`[data-creation-field="${CSS.escape(focusRequest.field)}"]`) ?? Array.from(scope?.querySelectorAll<HTMLElement>("input, select, textarea") ?? []).find(element => element.getClientRects().length > 0 && !element.matches(":disabled"));
+    const disclosure = control?.closest("details"); if (disclosure) disclosure.open = true;
     control?.focus({ preventScroll: true }); control?.scrollIntoView({ block: "nearest" });
   }, [focusRequest]);
 
   function update(value: CreationState) { setState(value); setPreview(null); setIssues([]); setMessage(""); setConflict(false); }
-  function profile(field: keyof CreationState["profile"], value: string) { update({ ...state, profile: { ...state.profile, [field]: value } }); }
+  function profile(field: Exclude<keyof CreationState["profile"], "options">, value: string) { update({ ...state, profile: { ...state.profile, [field]: value } }); }
   function close() { if (!busy && (!(dirty || uncertain) || window.confirm(t.unsaved))) onClose(); }
   function move(next: Section) { setSection(next); }
   function tabKey(event: KeyboardEvent<HTMLButtonElement>, current: Section) {
@@ -128,10 +135,12 @@ export default function InboundCreation({ language, nodes, targets, capabilities
     if (next) { event.preventDefault(); move(next); tabButtons.current[next]?.focus(); }
   }
   function validate(): boolean {
-    const next = creationIssues(state, nodes); setIssues(next);
+    const next = creationIssues(state, nodes);
+    if (!next.length && capabilities.profile_options !== true && profileOptionsPayload(state.profile.options, state.profile.transport)) next.push({ field: "profileOptions", code: "profile_options_unavailable" });
+    setIssues(next);
     if (!next.length) return true;
     const first = next[0];
-    setSection(first.nodeID || first.field === "nodes" ? "nodes" : first.field === "reason" ? "review" : "profile");
+    setSection(first.nodeID || first.field === "nodes" ? "nodes" : first.field === "reason" ? "review" : profileOptionSection(first.field) ?? "profile");
     if (first.nodeID) setExpanded(first.nodeID);
     setFocusRequest({ ...first }); return false;
   }
@@ -155,11 +164,12 @@ export default function InboundCreation({ language, nodes, targets, capabilities
     if (issue.nodeID) { setExpanded(issue.nodeID); setSection("nodes"); }
     else if (issue.field === "nodes") setSection("nodes");
     else if (issue.field === "reason") setSection("review");
+    else if (profileOptionSection(issue.field)) setSection(profileOptionSection(issue.field)!);
     else if (issue.field === "name" || issue.field.startsWith("profile")) setSection("profile");
     setFocusRequest({ ...issue });
   }
   function needsReload(error: unknown): boolean {
-    return error instanceof ApiError && error.status === 409 && (!(error instanceof CreationApiError) || !error.issue || ["plan_revision_conflict", "profile_changed_or_materialized", "inbound_id_exists"].includes(error.issue.code));
+    return error instanceof ApiError && error.status === 409 && (!(error instanceof CreationApiError) || !error.issue || ["plan_revision_conflict", "profile_changed_or_materialized", "inbound_id_exists", "profile_options_required"].includes(error.issue.code));
   }
   async function check() {
     if (busy || blocked || uncertain || readOnly || !csrf || !validate()) return;
@@ -207,7 +217,7 @@ export default function InboundCreation({ language, nodes, targets, capabilities
   }
   const rows = selectedCreationNodes(state);
   const hostCount = rows.reduce((count, row) => count + new Set([...(row.direct.enabled ? creationHosts(row.direct.hosts) : []), ...(row.tunnel.enabled ? creationHosts(row.tunnel.hosts) : [])]).size, 0);
-  const profileIssues = issues.filter(issue => !issue.nodeID && !["nodes", "reason"].includes(issue.field));
+  const profileIssues = issues.filter(issue => !issue.nodeID && !["nodes", "reason"].includes(issue.field) && !profileOptionSection(issue.field));
   return <WorkspaceDialog open title={editing ? t.edit : t.create} subtitle={t.lead} variant="inbound-editor" closeLabel={t.close} busy={busy} onClose={close}>
     <div className="inbound-creation" dir={language === "fa" ? "rtl" : "ltr"} ref={surface}>
       <nav className="creation-tabs" role="tablist" aria-label={t.sections}>
@@ -232,18 +242,23 @@ export default function InboundCreation({ language, nodes, targets, capabilities
           <header className="creation-section-heading"><div><h3>{language === "fa" ? "شبکه و انتقال" : "Network and transport"}</h3><p>{language === "fa" ? "انتقال‌های قابل اجرا را انتخاب کن؛ موارد ناسازگار تا تکمیل موتور نمایش غیرفعال دارند." : "Choose a supported transport. Additional transports stay unavailable until runtime support is proven."}</p></div></header>
           <fieldset className="creation-presets" disabled={locked}><legend>{t.preset}</legend>{["tcp", "grpc"].filter(transport => capabilities.transports.includes(transport)).map(transport => <label key={transport} data-selected={state.profile.transport === transport}><input type="radio" name="creation-network-transport" aria-label={transport === "tcp" ? "TCP / REALITY — network" : "gRPC / REALITY — network"} checked={state.profile.transport === transport} onChange={() => profile("transport", transport)}/><span><bdi>{transport === "tcp" ? "TCP / REALITY" : "gRPC / REALITY"}</bdi><small>{transport === "tcp" ? "Vision" : "gRPC"}</small></span></label>)}</fieldset>
           {state.profile.transport === "grpc" && <label className="creation-field"><span>{t.service}</span><input aria-label={t.service + " — network"} dir="ltr" maxLength={64} value={state.profile.grpcService} disabled={locked} onChange={event => profile("grpcService", event.target.value)} autoComplete="off"/></label>}
-          <div className="creation-legacy-features"><strong>{language === "fa" ? "انتقال‌های پنل قدیمی (در انتظار پشتیبانی اجرایی)" : "Legacy transports (not yet operational)"}</strong><div className="creation-legacy-grid">{["WebSocket · Host / Path", "HTTP Upgrade · Host / Path", "XHTTP · Mode / Padding", "mKCP · MTU / TTI", "TCP HTTP camouflage", "gRPC · Authority / MultiMode", "Cloudflare / PROXY Protocol"].map(name => <span key={name} className="creation-legacy-option" title={language === "fa" ? "هنوز توسط backend پشتیبانی نمی‌شود" : "Not supported by the backend"}>{name}<small>{language === "fa" ? "غیرفعال" : "Unavailable"}</small></span>)}</div></div>
+          {state.profile.transport === "grpc" && <InboundProfileAdvanced language={language} section="network" value={state.profile.options} onChange={options => update({ ...state, profile: { ...state.profile, options } })} supported={capabilities.profile_options === true} disabled={locked} invalidFields={issues.map(issue => issue.field)}/>}
+          {issues.filter(issue => profileOptionSection(issue.field) === "network").map((issue, index) => <p key={index} className="creation-issues" role="alert">{creationIssueMessage(issue, language)}</p>)}
+          <div className="creation-legacy-features"><strong>{language === "fa" ? "انتقال‌های پنل قدیمی (در انتظار پشتیبانی اجرایی)" : "Legacy transports (not yet operational)"}</strong><div className="creation-legacy-grid">{["WebSocket · Host / Path", "HTTP Upgrade · Host / Path", "XHTTP · Mode / Padding", "mKCP · MTU / TTI", "TCP HTTP camouflage", "Cloudflare / PROXY Protocol"].map(name => <span key={name} className="creation-legacy-option" title={language === "fa" ? "هنوز توسط backend پشتیبانی نمی‌شود" : "Not supported by the backend"}>{name}<small>{language === "fa" ? "غیرفعال" : "Unavailable"}</small></span>)}</div></div>
         </section>
         <section id="creation-panel-security" role="tabpanel" aria-labelledby="creation-tab-security" hidden={section !== "security"} className="creation-profile">
           <header className="creation-section-heading"><div><h3>{language === "fa" ? "امنیت REALITY" : "REALITY security"}</h3><p>{language === "fa" ? "فیلدهای موجود در همین فرم ذخیره می‌شوند؛ امنیت‌های TLS و None هنوز به موتور متصل نیستند." : "Supported REALITY fields save with this setup. TLS and None are not connected to the native runtime."}</p></div><span className="creation-protocol"><ShieldCheck size={14}/> REALITY</span></header>
           <div className="creation-field-grid"><label className="creation-field"><span>{t.target}</span><input dir="ltr" aria-label={t.target + " — security"} value={state.profile.realityTarget} disabled={locked} onChange={event => profile("realityTarget", event.target.value)} placeholder="example.org:443"/></label><label className="creation-field"><span>{t.serverNames}</span><input dir="ltr" aria-label={t.serverNames + " — security"} value={state.profile.serverNames} disabled={locked} onChange={event => profile("serverNames", event.target.value)}/></label></div>
           <label className="creation-field"><span>{t.shortIDs}</span><input dir="ltr" aria-label={t.shortIDs + " — security"} value={state.shortIDs} disabled={locked} onChange={event => update({ ...state, shortIDs: event.target.value })}/></label>
           <p className="creation-key-note"><KeyRound size={17}/><span>{editing ? t.preserved : t.generated}</span></p>
-          <div className="creation-legacy-features"><strong>{language === "fa" ? "ابزارهای امنیتی باقی‌مانده" : "Security features pending runtime support"}</strong><div className="creation-legacy-grid">{["None", "TLS · ALPN / certificates", "REALITY · Fingerprint / SpiderX", "REALITY · Xver / Max Time Diff", "REALITY · Min / Max Client Version", "REALITY · Target Scan / Ping"].map(name => <span key={name} className="creation-legacy-option">{name}<small>{language === "fa" ? "هنوز قابل تنظیم نیست" : "Not available"}</small></span>)}</div></div>
+          <InboundProfileAdvanced language={language} section="security" value={state.profile.options} onChange={options => update({ ...state, profile: { ...state.profile, options } })} supported={capabilities.profile_options === true} disabled={locked} invalidFields={issues.map(issue => issue.field)}/>
+          {issues.filter(issue => profileOptionSection(issue.field) === "security").map((issue, index) => <p key={index} className="creation-issues" role="alert">{creationIssueMessage(issue, language)}</p>)}
+          <div className="creation-legacy-features"><strong>{language === "fa" ? "ابزارهای امنیتی باقی‌مانده" : "Security features pending runtime support"}</strong><div className="creation-legacy-grid">{["None", "TLS · ALPN / certificates", "REALITY · Fingerprint / SpiderX", "REALITY · Target Scan / Ping"].map(name => <span key={name} className="creation-legacy-option">{name}<small>{language === "fa" ? "هنوز قابل تنظیم نیست" : "Not available"}</small></span>)}</div></div>
         </section>
         <section id="creation-panel-swap" role="tabpanel" aria-labelledby="creation-tab-swap" hidden={section !== "swap"}>
           <header className="creation-section-heading creation-extra-heading"><div><h3><ArrowRightLeft size={16}/> {t.swapTab}</h3><p>{language === "fa" ? "برای هر نود مقصد، واسط، پورت رله، ورودی ایران و پورت مقصد را همین‌جا تنظیم کن. ذخیره فقط طرح خاموش است و اتصال عملیاتی هنوز فعال نمی‌شود." : "Configure relay Node, relay port, Iranian entry and destination port per destination. Saving preserves an inactive plan; it does not apply live traffic."}</p></div></header>
-          {section === "swap" && <InboundCreationNodes view="swap" language={language} state={state} nodes={nodes} targets={targets} disabled={locked} expanded={expanded} onExpanded={setExpanded} onChange={update} issues={issues}/>}
+          {!rows.length && <div className="creation-swap-empty"><p>{t.noNodes}</p><button type="button" disabled={busy} onClick={() => move("nodes")}>{language === "fa" ? "انتخاب نودهای مقصد" : "Select destination Nodes"}<Server size={15}/></button></div>}
+          {section === "swap" && rows.length > 0 && <InboundCreationNodes view="swap" language={language} state={state} nodes={nodes} targets={targets} disabled={locked} expanded={expanded} onExpanded={setExpanded} onChange={update} issues={issues}/>}
         </section>
         <section id="creation-panel-hosts" role="tabpanel" aria-labelledby="creation-tab-hosts" hidden={section !== "hosts"} className="creation-profile">
           <header className="creation-section-heading"><div><h3>{language === "fa" ? "هاست‌ها و خروجی اتصال" : "Hosts and public endpoints"}</h3><p>{language === "fa" ? "آدرس‌های Direct و Tunnel با پورت‌های تعریف‌شدهٔ همان نود ذخیره می‌شوند. انتشار لینک نیاز به فعال‌سازی جداگانه دارد." : "Direct and Tunnel addresses are saved with their Node ports. Publishing customer links remains a separate operation."}</p></div></header>

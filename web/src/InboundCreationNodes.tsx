@@ -6,6 +6,12 @@ type Language = "en" | "fa";
 const messages: Record<Language, Record<string, string>> = {
   en: {
     name_required: "Enter an Inbound name.", grpc_service_invalid: "Use 1–64 letters, numbers, underscores or hyphens for the gRPC service.",
+    profile_options_required: "Reload the saved profile to retain its advanced settings before editing.",
+    profile_options_invalid: "Review the advanced REALITY and gRPC settings; the server rejected this combination.",
+    profile_options_unavailable: "This server cannot save advanced profile settings. Update the server before saving this profile.",
+    grpc_authority_invalid: "Enter a valid gRPC authority host or IP with an optional port.",
+    reality_xver_invalid: "Choose REALITY Xver 0, 1 or 2.", reality_max_time_diff_invalid: "Enter a whole number of milliseconds from 0 to 9223372036854.",
+    reality_version_invalid: "Use a client version x.y.z with each component between 0 and 255, without leading zeros.", reality_version_order: "The maximum client version must be at least the minimum version.",
     target_invalid: "Enter a REALITY target with a valid port.", server_names_required: "Enter at least one server name.",
     short_ids_invalid: "Use 1–16 unique Short IDs, each 2–16 lowercase hexadecimal characters with an even length.",
     node_required: "Select at least one destination Node.", pairing_changed: "This Node’s installation changed. Remove and select it again.",
@@ -30,6 +36,12 @@ const messages: Record<Language, Record<string, string>> = {
   },
   fa: {
     name_required: "نام اینباند را وارد کن.", grpc_service_invalid: "برای سرویس gRPC از ۱ تا ۶۴ حرف انگلیسی، عدد، زیرخط یا خط تیره استفاده کن.",
+    profile_options_required: "برای حفظ تنظیمات پیشرفته، پروفایل ذخیره‌شده را پیش از ویرایش دوباره بارگذاری کن.",
+    profile_options_invalid: "تنظیمات پیشرفتهٔ REALITY و gRPC را بررسی کن؛ سرور این ترکیب را نپذیرفت.",
+    profile_options_unavailable: "این نسخهٔ سرور تنظیمات پیشرفته را ذخیره نمی‌کند. پیش از ذخیرهٔ این پروفایل، سرور باید به‌روزرسانی شود.",
+    grpc_authority_invalid: "برای Authority یک هاست یا IP معتبر با پورت اختیاری وارد کن.",
+    reality_xver_invalid: "برای Xver یکی از مقادیر ۰، ۱ یا ۲ را انتخاب کن.", reality_max_time_diff_invalid: "تعداد میلی‌ثانیه را با عدد صحیح بین ۰ و 9223372036854 وارد کن.",
+    reality_version_invalid: "نسخه را با قالب x.y.z وارد کن؛ هر بخش بین ۰ تا ۲۵۵ و بدون صفر اضافه در ابتدا باشد.", reality_version_order: "حداکثر نسخهٔ کلاینت نباید از حداقل نسخه کوچک‌تر باشد.",
     target_invalid: "مقصد REALITY را همراه یک پورت معتبر وارد کن.", server_names_required: "حداقل یک نام سرور وارد کن.",
     short_ids_invalid: "۱ تا ۱۶ شناسهٔ یکتا وارد کن؛ هر Short ID باید ۲ تا ۱۶ رقم هگز کوچک با طول زوج داشته باشد.",
     node_required: "حداقل یک نود مقصد را انتخاب کن.", pairing_changed: "نصب این نود تغییر کرده؛ نود را حذف و دوباره انتخاب کن.",

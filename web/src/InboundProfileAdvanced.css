@@ -1,0 +1,16 @@
+.inbound-profile-advanced { min-width: 0; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-2); }
+.inbound-profile-advanced:not([open]) > :not(summary) { display: none; }
+.inbound-profile-advanced > summary { min-height: 44px; padding: 12px 14px; box-sizing: border-box; cursor: pointer; color: var(--text); font-size: 12px; line-height: 1.7; }
+.inbound-options-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 17px; padding: 8px 14px 16px; min-width: 0; }
+.inbound-option-field { display: flex; flex-direction: column; gap: 8px; min-width: 0; color: var(--text); font-size: 12px; line-height: 1.7; }
+.inbound-option-field input,.inbound-option-field select { width: 100%; min-width: 0; box-sizing: border-box; min-height: 44px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); color: var(--text); padding: 10px 12px; font: inherit; font-size: 14px; }
+.inbound-option-field input[aria-invalid=true] { border-color: var(--red); }
+.inbound-option-field input:focus-visible,.inbound-option-field select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.inbound-option-field small,.inbound-option-hint { color: var(--sub); font-size: 11px; line-height: 1.8; overflow-wrap: anywhere; }
+.inbound-option-hint { margin: 0; padding: 0 14px 12px; }
+.inbound-options-grid .inbound-option-check { display: flex; flex-direction: row; align-items: center; align-self: start; gap: 10px; min-width: 0; min-height: 44px; font-size: 12px; line-height: 1.8; cursor: pointer; }
+.inbound-options-grid .inbound-option-check input { width: 17px; height: 17px; min-height: 17px; padding: 0; flex-shrink: 0; accent-color: var(--accent); }
+@media(max-width:620px) {
+ .inbound-options-grid { grid-template-columns: minmax(0,1fr); }
+ .inbound-option-field input,.inbound-option-field select { font-size: 16px; }
+}
