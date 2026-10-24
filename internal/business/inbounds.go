@@ -186,6 +186,9 @@ func (s *Store) BindInboundClients(ctx context.Context, id uint64, ids []string,
 	if found != 1 {
 		return ErrNotFound
 	}
+	if err = rejectPromotedInboundMutation(ctx, tx, id); err != nil {
+		return err
+	}
 	if attach {
 		if err = rejectNativePlanMaterialization(ctx, tx, id); err != nil {
 			return err
@@ -248,6 +251,13 @@ func (s *Store) PutInboundTarget(ctx context.Context, t InboundTarget) error {
 	}
 	if err = rejectNativePlanMaterialization(ctx, tx, t.InboundID); err != nil {
 		return err
+	}
+	var reserved int
+	if err = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM native_inbound_plan_promotion_nodes WHERE node_id=?`, t.NodeID).Scan(&reserved); err != nil {
+		return err
+	}
+	if reserved != 0 {
+		return planError(t.NodeID, "node_id", "promotion_node_reserved", ErrConflict)
 	}
 	var archived bool
 	if err = tx.QueryRowContext(ctx, "SELECT archived FROM native_inbounds WHERE id=?", t.InboundID).Scan(&archived); err != nil {

@@ -82,6 +82,7 @@ func TestAuthSchemaUpgradeFromV1KeepsFinancialRecords(t *testing.T){
  grant(t,s,"olderRep","grant-upgrade-0001",1200,9)
  // Simulate the first released business schema version without any auth
  // state. The real migration path cannot drop balances or event history.
+ removePromotionSchemaForHistoricalFixture(t,s)
  for _,statement:=range []string{
   "DROP TRIGGER native_dirty_profile_update", // absent in the simulated pre-lifecycle schema
   "DROP TRIGGER native_plan_block_enable",

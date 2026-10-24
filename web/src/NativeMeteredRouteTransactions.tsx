@@ -53,7 +53,8 @@ function isFresh(s: Snapshot) {
   !s.view.commands.some(c => (c.receipt && c.receipt.observed_unix_nano > s.view.reported_at_unix_nano) || (c.state === "delivered" && c.serial > s.view.status.serial));
 }
 
-export default function NativeMeteredRouteTransactions({ language }: { language: "fa" | "en" }) {
+export type MeteredPlanContext = { nodeID: string; installationID: string; inboundID: number; inboundRevision: number; draftRevision: number };
+export default function NativeMeteredRouteTransactions({ language, context }: { language: "fa" | "en"; context?: MeteredPlanContext }) {
  const t = words[language];
  const { session } = useSession();
  const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
@@ -90,8 +91,8 @@ export default function NativeMeteredRouteTransactions({ language }: { language:
     if (!scope.enabled) { setAvailability("disabled"); setSnapshot(null); setNodes([]); setVerifiedRead(false); return; }
     const choices=scope.nodes??[{node_id:scope.node_id!,installation_id:scope.installation_id!}];
     setNodes(choices);
-    const chosen=choices.find(node=>node.node_id===(selected||scope.node_id));
-    if(!chosen)throw Error("selected_node_no_longer_approved");
+    const chosen=choices.find(node=>node.node_id===(context?.nodeID||selected||scope.node_id));
+    if(!chosen || context && chosen.installation_id !== context.installationID)throw Error("selected_node_no_longer_approved");
     scope={...scope,...chosen};
     // Charge the entire request time against freshness and lease lifetimes.
     const mono = performance.now(), wall = Date.now();
@@ -114,11 +115,11 @@ export default function NativeMeteredRouteTransactions({ language }: { language:
   }
   void poll();
   return () => { ctrl.abort(); clearTimeout(timer); };
- }, [session, owner, refresh, selected]);
+ }, [session, owner, refresh, selected, context?.nodeID, context?.installationID]);
 
  async function send(a: Attempt, s: Snapshot) {
   const ctrl = lifetime.current;
-  if (inFlight.current || !ctrl || ctrl.signal.aborted || !session?.csrf_token) return;
+  if (inFlight.current || !ctrl || ctrl.signal.aborted || !session?.csrf_token || context && (a.node_id !== context.nodeID || a.installation_id !== context.installationID)) return;
   inFlight.current = true; setBusy(true); setVerifiedRead(false); setNotice(""); activeRead.current?.abort();
   remember(a, s.scope); // Persist the exact body before a request can leave the browser.
   try {
@@ -147,9 +148,12 @@ export default function NativeMeteredRouteTransactions({ language }: { language:
  const fresh = !!s && verifiedRead && availability === "enabled" && isFresh(s);
  const leaseRemaining = s && observed ? Math.max(0, Math.floor(observed.lease_expires_unix_nano / 1e6) - serverNow(s)) : 0;
  const pending = v?.commands.find(c => c.state === "queued" || c.state === "delivered");
- const idle = !!s && verifiedRead && availability === "enabled" && !busy && !attempt && !!session?.csrf_token;
+ const contextScopeMatches = !context || !!v && v.node_id === context.nodeID && v.installation_id === context.installationID;
+ const contextMatches = contextScopeMatches && (!context || !!v && v.review.length === 1 && v.review[0].inbound_id === context.inboundID && v.review[0].inbound_revision === context.inboundRevision && v.review[0].draft_revision === context.draftRevision);
+ const idle = !!s && contextScopeMatches && verifiedRead && availability === "enabled" && !busy && !attempt && !!session?.csrf_token;
  function allowed(action: Action) {
   if (!s || !fresh || !idle || pending) return false;
+  if (action !== "drain" && !contextMatches) return false;
   if (action === "stage") return s.view.controls.stage;
   const target = s.view.controls[action];
   if (!target) return false;
@@ -172,7 +176,7 @@ export default function NativeMeteredRouteTransactions({ language }: { language:
   void send({ node_id: s.view.node_id, installation_id: s.view.installation_id, action: "abandon", id: pending.id, body: JSON.stringify({ confirm_execution_may_have_occurred: true }) }, s);
  }
  function retry() {
-  if (!s || !attempt || busy || !verifiedRead || availability !== "enabled" || attempt.node_id !== s.view.node_id || attempt.installation_id !== s.view.installation_id || !window.confirm(t.confirmRetry + "\n" + t[attempt.action] + "\n" + attempt.node_id + "\n" + attempt.id)) return;
+  if (!s || !attempt || !contextScopeMatches || busy || !verifiedRead || availability !== "enabled" || attempt.node_id !== s.view.node_id || attempt.installation_id !== s.view.installation_id || !window.confirm(t.confirmRetry + "\n" + t[attempt.action] + "\n" + attempt.node_id + "\n" + attempt.id)) return;
   void send(attempt, s);
  }
  const time = (nano: number) => nano > 0 ? new Date(nano / 1e6).toLocaleString(language === "fa" ? "fa-IR" : "en-GB") : "—";
@@ -180,7 +184,7 @@ export default function NativeMeteredRouteTransactions({ language }: { language:
  return <section className="native-card route-transactions" aria-label="Metered TCP LAB transactions">
   <div className="route-transactions-heading"><h3><Route size={19}/>{t.title}</h3><button type="button" disabled={busy} onClick={() => setRefresh(n => n + 1)}><RefreshCw size={15}/>{t.refresh}</button></div>
   <p>{t.boundary}</p>
-  {nodes.length>1&&<label className="metered-route-node-picker">{t.node}<select aria-label={t.node} disabled={busy} value={selected||s?.scope.node_id||nodes[0].node_id} onChange={event=>{
+  {nodes.length>1&&!context&&<label className="metered-route-node-picker">{t.node}<select aria-label={t.node} disabled={busy} value={selected||s?.scope.node_id||nodes[0].node_id} onChange={event=>{
    if(inFlight.current)return;
    activeRead.current?.abort();setVerifiedRead(false);setSnapshot(null);retained.current=null;setAttempt(null);setNotice("");setAvailability("loading");setSelected(event.target.value);
   }}>{nodes.map(node=><option key={node.node_id} value={node.node_id}>{node.node_id}</option>)}</select></label>}
@@ -200,12 +204,13 @@ export default function NativeMeteredRouteTransactions({ language }: { language:
     {!v.review.length && <p>{t.noDrafts}</p>}
    </div></div>
    {!v.drafts_valid && <p className="native-warning">{t.missing}</p>}
+   {!contextMatches && <p className="native-warning" role="alert">{language === "fa" ? "پیش‌نویس نود با آماده‌سازی این طرح مطابق نیست؛ اجرای تازه مسدود است. وضعیت را به‌روزرسانی کن." : "The Node draft set no longer matches this plan's preparation. New execution is blocked; refresh its state."}</p>}
    {v.status.interrupted_command_sha && <p className="native-warning">{t.interrupted}</p>}
    <p>{t.help}</p>
    <div className="native-actions">{(["stage", "apply", "rollback", "renew", "drain"] as const).map(action => <button key={action} type="button" disabled={!allowed(action)} onClick={() => act(action)}>{t[action]}</button>)}</div>
    {(["apply", "rollback", "renew", "drain"] as const).filter(a => v.controls[a]).map(a => <small key={a}>{t[a]} · {t.stageID}: <bdi>{v.controls[a]!.stage_id}</bdi> · {t.ports}: <bdi>{v.controls[a]!.ports.join(", ") || "—"}</bdi></small>)}
    {pending && <button type="button" disabled={!idle} onClick={abandon}>{t.abandon}</button>}
-   {attempt && <div className="native-warning" role="status"><p>{t.unknown}</p><p>{t[attempt.action]} · <bdi>{attempt.id}</bdi></p><button type="button" disabled={busy || !verifiedRead || availability !== "enabled"} onClick={retry}>{t.retry}</button></div>}
+   {attempt && <div className="native-warning" role="status"><p>{t.unknown}</p><p>{t[attempt.action]} · <bdi>{attempt.id}</bdi></p><button type="button" disabled={busy || !contextScopeMatches || !verifiedRead || availability !== "enabled"} onClick={retry}>{t.retry}</button></div>}
    <div className="route-command-history"><h4><History size={16}/>{t.history}</h4><p>{t.historical}</p>
     {!v.commands.length && <p>{t.none}</p>}
     {v.commands.map(c => <article key={c.id} aria-label={"Route command " + c.id}>

@@ -23,30 +23,31 @@ import (
 )
 
 type Server struct {
-	healthEndpoint           *managedxray.ProtocolHealthEndpoint
-	healthRoundsEnabled      bool // startup-only; requires the pinned health transport
-	labSubscriptionsEnabled  bool // startup-only; bounded N17-backed consumer delivery
-	consumerManifestsEnabled bool // startup-only; exact approved consumer endpoint proofs
-	meteredRouteNode         string
-	meteredRouteInstall      string
-	meteredRouteNodes        map[string]string // immutable after startup: node -> installation
-	routeNode                string
-	routeInstall             string
-	fleet                    *telemetry.Store
-	registry                 *noderegistry.Registry
-	ownerKey                 string
-	replacements             *replacement.Journal
-	replacementLifecycle     sync.Mutex // serializes cancel and dependent private-stage/LAB mutations
-	stages                   *configstage.Store
-	labRevisions             *labrevision.Store
-	business                 *business.Store
-	loginGate                *loginGate
-	inboundKey               []byte
-	nodeHistory              *nodehistory.Store
-	hubMonitor               *hubmonitor.Monitor
-	nodeBundle               *nodebootstrap.Bundle
-	nodeTransportScope       string
-	meteredNode              string // explicitly allowlisted NEW PRO Node; disabled by default
+	healthEndpoint              *managedxray.ProtocolHealthEndpoint
+	healthRoundsEnabled         bool // startup-only; requires the pinned health transport
+	labSubscriptionsEnabled     bool // startup-only; bounded N17-backed consumer delivery
+	consumerManifestsEnabled    bool // startup-only; exact approved consumer endpoint proofs
+	meteredRouteNode            string
+	meteredRouteInstall         string
+	meteredRouteNodes           map[string]string // immutable after startup: node -> installation
+	inboundPlanPromotionEnabled bool              // startup-only, one previously empty metered LAB Node
+	routeNode                   string
+	routeInstall                string
+	fleet                       *telemetry.Store
+	registry                    *noderegistry.Registry
+	ownerKey                    string
+	replacements                *replacement.Journal
+	replacementLifecycle        sync.Mutex // serializes cancel and dependent private-stage/LAB mutations
+	stages                      *configstage.Store
+	labRevisions                *labrevision.Store
+	business                    *business.Store
+	loginGate                   *loginGate
+	inboundKey                  []byte
+	nodeHistory                 *nodehistory.Store
+	hubMonitor                  *hubmonitor.Monitor
+	nodeBundle                  *nodebootstrap.Bundle
+	nodeTransportScope          string
+	meteredNode                 string // explicitly allowlisted NEW PRO Node; disabled by default
 }
 
 func NewServer(fleet *telemetry.Store, registry *noderegistry.Registry, ownerKey string) (*Server, error) {
@@ -135,6 +136,7 @@ func (s *Server) Handler() http.Handler {
 	s.attachClientProfileEdits(mux)
 	s.attachNativeInbounds(mux)
 	s.attachNativeInboundPlans(mux)
+	s.attachNativeInboundPlanPromotions(mux)
 	s.attachNativeRouteDrafts(mux)
 	s.attachRouteReadinessP0G(mux)
 	s.attachRouteTransactions(mux)

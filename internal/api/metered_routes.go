@@ -20,6 +20,20 @@ func (s *Server) EnableMeteredRouteTransactions(node, installation, binarySHA st
 // EnableMeteredRouteNodes is a startup-only operator allowlist. Persist all
 // claims in one transaction; neither browser nor Agent can add a member.
 func (s *Server) EnableMeteredRouteNodes(nodes []business.MeteredRouteNode) error {
+	return s.enableMeteredRouteNodes(nodes, false)
+}
+
+// EnableMeteredRouteNodesForPlanPromotion reserves one explicitly approved,
+// never-delivered LAB channel before a saved plan has any targets. Candidate
+// generation and Stage/Apply still require exact promoted targets and bindings.
+func (s *Server) EnableMeteredRouteNodesForPlanPromotion(nodes []business.MeteredRouteNode) error {
+	if len(nodes) != 1 {
+		return errors.New("plan promotion requires exactly one isolated metered Node")
+	}
+	return s.enableMeteredRouteNodes(nodes, true)
+}
+
+func (s *Server) enableMeteredRouteNodes(nodes []business.MeteredRouteNode, promotion bool) error {
 	if s.business == nil || s.business.UsageLedger() == nil || len(s.inboundKey) != 32 || len(nodes) == 0 || len(nodes) > 64 || s.meteredRouteNodes != nil {
 		return errors.New("isolated route transaction prerequisites missing")
 	}
@@ -38,10 +52,17 @@ func (s *Server) EnableMeteredRouteNodes(nodes []business.MeteredRouteNode) erro
 		}
 		allowlist[node.NodeID] = node.InstallationID
 	}
-	if e := s.business.ClaimMeteredRouteChannels(context.Background(), nodes); e != nil {
+	var e error
+	if promotion {
+		e = s.business.ReserveMeteredRouteChannelsForPlanPromotion(context.Background(), nodes)
+	} else {
+		e = s.business.ClaimMeteredRouteChannels(context.Background(), nodes)
+	}
+	if e != nil {
 		return e
 	}
 	s.meteredRouteNodes = allowlist
+	s.inboundPlanPromotionEnabled = promotion
 	// Keep the former discovery fields for single-node clients.
 	s.meteredRouteNode = nodes[0].NodeID
 	s.meteredRouteInstall = nodes[0].InstallationID

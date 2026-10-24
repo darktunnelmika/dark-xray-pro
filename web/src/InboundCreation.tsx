@@ -123,9 +123,9 @@ function validPlan(plan: CreationPlan | undefined, body: CreationPayload, expect
   } catch { return false; }
 }
 
-export default function InboundCreation({ language, nodes, targets, capabilities, csrf, blocked, source, initialPlan, referencesCurrent = true, onClose, onSaved, onDirtyChange, onBusyChange, onUnauthorized }: {
+export default function InboundCreation({ language, nodes, targets, capabilities, csrf, blocked, source, initialPlan, initialIssue, referencesCurrent = true, onClose, onSaved, onDirtyChange, onBusyChange, onUnauthorized }: {
   language: Language; nodes: InboundNode[]; targets: InboundTarget[]; capabilities: CreationCapabilities; csrf: string; blocked: boolean;
-  source?: Inbound; initialPlan?: CreationPlan; referencesCurrent?: boolean; onClose: () => void; onSaved: (plan: CreationPlan) => void; onUnauthorized: () => void;
+  source?: Inbound; initialPlan?: CreationPlan; initialIssue?: CreationIssue; referencesCurrent?: boolean; onClose: () => void; onSaved: (plan: CreationPlan) => void; onUnauthorized: () => void;
   onDirtyChange: (dirty: boolean) => void; onBusyChange: (busy: boolean) => void;
 }) {
   const t = words[language];
@@ -140,15 +140,15 @@ export default function InboundCreation({ language, nodes, targets, capabilities
   const savedProfile = useRef(initialPlan?.profile);
   const [readOnly, setReadOnly] = useState(initialPlan?.editable === false);
   const [referencesValid, setReferencesValid] = useState(referencesCurrent);
-  const [section, setSection] = useState<Section>("connection");
-  const [expanded, setExpanded] = useState(initialPlan?.nodes[0]?.node_id ?? "");
+  const [section, setSection] = useState<Section>(initialIssue ? issueSection(initialIssue) : "connection");
+  const [expanded, setExpanded] = useState(initialIssue?.nodeID ?? initialPlan?.nodes[0]?.node_id ?? "");
   const [issues, setIssues] = useState<CreationIssue[]>([]);
   const [preview, setPreview] = useState<CreationPreview | null>(null);
   const [busy, setBusy] = useState(false);
   const [uncertain, setUncertain] = useState(false);
   const [conflict, setConflict] = useState(false);
   const [message, setMessage] = useState("");
-  const [focusRequest, setFocusRequest] = useState<CreationIssue | null>(null);
+  const [focusRequest, setFocusRequest] = useState<CreationIssue | null>(initialIssue ?? null);
   const pending = useRef<{ fingerprint: string; body: CreationPayload } | null>(null);
   const lifetime = useRef<AbortController | null>(null);
   const surface = useRef<HTMLDivElement>(null);
@@ -309,7 +309,7 @@ export default function InboundCreation({ language, nodes, targets, capabilities
         {sections.map(item => { const Icon = item === "connection" ? SlidersHorizontal : item === "swap" ? ArrowRightLeft : item === "advanced" ? KeyRound : ClipboardCheck; return <button key={item} ref={node => { tabButtons.current[item] = node; }} type="button" role="tab" id={`creation-tab-${item}`} aria-controls={`creation-panel-${item}`} aria-selected={section === item} tabIndex={section === item ? 0 : -1} onClick={() => move(item)} onKeyDown={event => tabKey(event, item)}><Icon size={17} aria-hidden="true"/><span>{t[item]}</span></button>; })}
       </nav>
       <div className="creation-scroll">
-        {readOnly && <p className="creation-message" role="status">{t.readOnly}</p>}
+        {readOnly && <p className="creation-message" role="status">{initialPlan?.promotion ? language === "fa" ? "این طرح برای اجرای LAB آماده شده است. پیکربندی اصلی برای بازبینی به‌صورت فقط‌خواندنی حفظ می‌شود؛ وضعیت اجرا را در خلاصه ببین." : "This plan was prepared for LAB execution. Its original configuration is retained read-only; review execution status in Overview." : t.readOnly}</p>}
         {!referencesValid && <p className="creation-message" role="status">{t.staleReferences}</p>}
         <section id="creation-panel-connection" role="tabpanel" aria-labelledby="creation-tab-connection" hidden={section !== "connection"} className="creation-profile">
           <header className="creation-section-heading"><div><h3>{t.profileTitle}</h3><p>{t.profileHelp}</p></div><span className="creation-protocol"><ShieldCheck size={14}/><bdi>VLESS / {tls ? "TLS" : "REALITY"}</bdi></span></header>
