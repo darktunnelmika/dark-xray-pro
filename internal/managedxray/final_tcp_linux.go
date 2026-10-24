@@ -15,7 +15,7 @@ import (
 // UsageBootstrap validates native VLESS/Reality admission but permits extra
 // policy/outbound settings. Final-counter proof requires a narrower grammar:
 // no alternate transports, outbound mux, proxy chains, detached contexts,
-// fragment/noise workers, sniffing or unreviewed settings.
+// fragment/noise workers, sniffing, fallback forwarding or unreviewed settings.
 func finalTCPScope(raw []byte) bool {
 	var c struct {
 		Log    json.RawMessage `json:"log"`
@@ -72,6 +72,14 @@ func finalTCPScope(raw []byte) bool {
 	}
 	for _, in := range c.Inbounds {
 		if in.Protocol != "vless" || in.Stream.Network != "tcp" || in.Stream.Security != "reality" {
+			return false
+		}
+		// VLESS fallback forwarding does not go through the ordinary outbound
+		// traffic barrier. Authoring support must never grant counter proof.
+		var settings struct {
+			Fallbacks json.RawMessage `json:"fallbacks"`
+		}
+		if json.Unmarshal(in.Settings, &settings) != nil || len(settings.Fallbacks) != 0 {
 			return false
 		}
 	}

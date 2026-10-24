@@ -194,8 +194,10 @@ type inbound struct {
 	Settings struct {
 		Clients    []xrayUser `json:"clients"`
 		Decryption string     `json:"decryption"`
+		Fallbacks  []Fallback `json:"fallbacks,omitempty"`
 	} `json:"settings"`
-	Stream stream `json:"streamSettings"`
+	Stream   stream    `json:"streamSettings"`
+	Sniffing *sniffing `json:"sniffing,omitempty"`
 }
 type outbound struct {
 	Tag      string `json:"tag"`
@@ -288,6 +290,7 @@ func Render(plan routeplan.Preview, profiles []Profile) (Candidate, error) {
 			x := inbound{Listen: "0.0.0.0", Port: nodePort, Tag: tag, Protocol: "vless", Stream: profileStream(p)}
 			x.Settings.Decryption = "none"
 			x.Settings.Clients = clients
+			applyInboundOptions(&x, p.Options)
 			attribution := "distinct"
 			if kind == "shared" {
 				attribution = "ambiguous_shared_port"

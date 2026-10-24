@@ -1,3 +1,5 @@
+import { canonicalFallbacks, canonicalSniffingOptions, trafficOptionIssues, trafficOptionsDraft, trafficOptionsPayload, type InboundSniffingOptions, type InboundFallback, type TrafficOptionsDraft } from "./inboundTrafficOptions";
+
 /** Public profile settings only; REALITY identity remains owned by the server. */
 export type InboundProfileOptions = {
   grpc_authority?: string;
@@ -7,10 +9,12 @@ export type InboundProfileOptions = {
   reality_min_client_ver?: string;
   reality_max_client_ver?: string;
   reality_show?: boolean;
+  sniffing?: InboundSniffingOptions;
+  fallbacks?: InboundFallback[];
 };
 
 /** Text is retained while editing so partial or invalid input is never lost. */
-export type ProfileOptionsDraft = {
+export type ProfileOptionsDraft = TrafficOptionsDraft & {
   grpcAuthority: string;
   grpcMultiMode: boolean;
   realityXver: string;
@@ -19,11 +23,12 @@ export type ProfileOptionsDraft = {
   realityMaxClientVer: string;
   realityShow: boolean;
 };
-export type ProfileOptionIssue = { field: keyof ProfileOptionsDraft; code: string };
+export type ProfileOptionIssue = { field: string; code: string };
 export const maxRealityTimeDiff = 9_223_372_036_854;
 
 export function profileOptionsDraft(options?: InboundProfileOptions | null): ProfileOptionsDraft {
   return {
+    ...trafficOptionsDraft(options),
     grpcAuthority: options?.grpc_authority ?? "", grpcMultiMode: options?.grpc_multi_mode ?? false,
     realityXver: String(options?.reality_xver ?? 0), realityMaxTimeDiff: String(options?.reality_max_time_diff ?? 0),
     realityMinClientVer: options?.reality_min_client_ver ?? "", realityMaxClientVer: options?.reality_max_client_ver ?? "",
@@ -37,26 +42,35 @@ export function canonicalProfileOptions(options?: InboundProfileOptions | null):
   if (typeof options !== "object" || Array.isArray(options)) throw new Error("invalid profile options");
   const fields = { grpc_authority: "string", grpc_multi_mode: "boolean", reality_xver: "number", reality_max_time_diff: "number",
     reality_min_client_ver: "string", reality_max_client_ver: "string", reality_show: "boolean" } as const;
-  if (Object.keys(options).some(key => !Object.prototype.hasOwnProperty.call(fields, key))) throw new Error("unknown profile option");
-  const result: Record<string, string | number | boolean> = {};
-  for (const key of Object.keys(fields) as Array<keyof InboundProfileOptions>) {
+  if (Object.keys(options).some(key => !Object.prototype.hasOwnProperty.call(fields, key) && key !== "sniffing" && key !== "fallbacks")) throw new Error("unknown profile option");
+  const result: Record<string, string | number | boolean | InboundSniffingOptions | InboundFallback[]> = {};
+  for (const key of Object.keys(fields) as Array<keyof typeof fields>) {
     const value = options[key];
     if (value === undefined) continue;
     if (typeof value !== fields[key] || typeof value === "number" && !Number.isSafeInteger(value)) throw new Error("invalid profile option");
     if (value !== "" && value !== false && value !== 0) result[key] = value;
   }
+  const sniffing = canonicalSniffingOptions(options.sniffing), fallbacks = canonicalFallbacks(options.fallbacks);
+  if (sniffing) result.sniffing = sniffing;
+  if (fallbacks) result.fallbacks = fallbacks;
   return Object.keys(result).length ? result : undefined;
 }
 
 export function profileOptionsPayload(options: ProfileOptionsDraft | undefined, transport: string): InboundProfileOptions | undefined {
   const value = options ?? profileOptionsDraft();
-  return canonicalProfileOptions({
+  const traffic = trafficOptionsPayload(value);
+  const result = canonicalProfileOptions({
     grpc_authority: transport === "grpc" ? value.grpcAuthority : "",
     grpc_multi_mode: transport === "grpc" && value.grpcMultiMode,
     reality_xver: Number(value.realityXver), reality_max_time_diff: Number(value.realityMaxTimeDiff),
     reality_min_client_ver: value.realityMinClientVer, reality_max_client_ver: value.realityMaxClientVer,
     reality_show: value.realityShow,
-  });
+    ...traffic,
+  }) ?? {};
+  // Empty features carry clear intent on edits; comparison still treats them as defaults.
+  if (traffic.sniffing !== undefined && !result.sniffing) result.sniffing = {};
+  if (traffic.fallbacks !== undefined && !result.fallbacks) result.fallbacks = [];
+  return Object.keys(result).length ? result : undefined;
 }
 
 function version(value: string): number[] | null {
@@ -92,11 +106,13 @@ export function profileOptionIssues(options: ProfileOptionsDraft | undefined, tr
   if (value.realityMinClientVer && !min) issues.push({ field: "realityMinClientVer", code: "reality_version_invalid" });
   if (value.realityMaxClientVer && !max) issues.push({ field: "realityMaxClientVer", code: "reality_version_invalid" });
   if (min && max && (min[0] * 65536 + min[1] * 256 + min[2]) > (max[0] * 65536 + max[1] * 256 + max[2])) issues.push({ field: "realityMaxClientVer", code: "reality_version_order" });
+  issues.push(...trafficOptionIssues(value, transport));
   return issues;
 }
 
-export function profileOptionSection(field: string): "network" | "security" | undefined {
+export function profileOptionSection(field: string): "network" | "security" | "advanced" | undefined {
   if (field === "grpcAuthority" || field === "grpcMultiMode") return "network";
   if (["realityXver", "realityMaxTimeDiff", "realityMinClientVer", "realityMaxClientVer", "realityShow"].includes(field)) return "security";
+  if (field.startsWith("sniffing") || field.startsWith("fallbacks")) return "advanced";
   return undefined;
 }

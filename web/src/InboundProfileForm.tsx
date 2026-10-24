@@ -124,12 +124,14 @@ const InboundProfileForm = forwardRef<InboundProfileFormHandle, InboundProfileFo
    return control && !control.disabled && !control.validity.valid;
   });
   setErrors(next);
-  const optionsInvalid = profileOptionIssues(value.options, value.transport);
+  // Traffic settings belong exclusively to paused setup plans; this editor handles scalar settings.
+  const optionsInvalid = profileOptionIssues(value.options, value.transport).filter(issue => profileOptionSection(issue.field) !== "advanced");
   setOptionErrors(optionsInvalid);
   if (invalid) showField(invalid, true);
   else if (optionsInvalid.length) {
    pendingOptionFocus.current = optionsInvalid[0].field;
-   setActiveTab(profileOptionSection(optionsInvalid[0].field) ?? "security");
+   const section = profileOptionSection(optionsInvalid[0].field);
+   setActiveTab(section === "network" ? "network" : "security");
    setFocusRequest(n => n + 1);
   }
   return !invalid && !optionsInvalid.length;

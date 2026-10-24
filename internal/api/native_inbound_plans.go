@@ -59,7 +59,9 @@ func (s *Server) attachNativeInboundPlans(mux *http.ServeMux) {
 		respond(w, http.StatusOK, map[string]any{"available": true, "version": 1,
 			"max_nodes": business.MaxNativeInboundPlanNodes, "max_hosts_per_node": 64,
 			"protocols": []string{"vless"}, "securities": []string{"reality"}, "transports": []string{"tcp", "grpc"},
-			"profile_options": true, "runtime_apply": false, "plans": plans})
+			"profile_options": true, "profile_sniffing": true, "profile_fallbacks": true,
+			"profile_traffic_options_scope": "creation_plan",
+			"runtime_apply":                 false, "plans": plans})
 	})
 	if s.business == nil || len(s.inboundKey) != 32 {
 		return
