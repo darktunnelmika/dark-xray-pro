@@ -41,6 +41,18 @@
 .inbound-creation .creation-presets input { width: 16px; height: 16px; min-height: 16px; padding: 0; flex-shrink: 0; accent-color: var(--accent); }
 .creation-presets label>span { display: grid; gap: 4px; min-width: 0; font-size: 12px; }
 .creation-presets small { font-size: 10px; color: var(--sub); }
+.creation-security-options { grid-template-columns: repeat(2,minmax(0,1fr)); }
+.creation-tls { display: grid; gap: 14px; min-width: 0; }
+.creation-tls h4 { display: flex; align-items: center; gap: 7px; margin: 0; font-size: 13px; }
+.creation-tls p { margin: 0; color: var(--sub); font-size: 11px; line-height: 1.9; overflow-wrap: anywhere; }
+.creation-tls > button { justify-self: start; min-height: 44px; max-width: 100%; padding: 8px 12px; white-space: normal; }
+.creation-tls-inputs { display: grid; gap: 14px; min-width: 0; }
+.inbound-creation .creation-tls-inputs textarea { min-height: 112px; font-family: monospace; font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
+.creation-tls-metadata { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 12px; min-width: 0; margin: 0; }
+.creation-tls-metadata > div { min-width: 0; }
+.creation-tls-metadata > div:first-child,.creation-tls-metadata > div:nth-last-child(-n+2) { grid-column: 1/-1; }
+.creation-tls-metadata dt { color: var(--sub); font-size: 10px; line-height: 1.8; }
+.creation-tls-metadata dd { margin: 4px 0 0; color: var(--text); font-size: 11px; line-height: 1.8; overflow-wrap: anywhere; }
 .creation-key-note { display: flex; align-items: flex-start; gap: 9px; margin: 0; color: var(--sub); font-size: 12px; line-height: 1.85; }
 .creation-key-note svg { flex-shrink: 0; margin-block-start: 3px; color: var(--accent); }
 .creation-help { margin: 0; font-size: 11px; line-height: 1.85; color: var(--sub); overflow-wrap: anywhere; }
@@ -175,7 +187,7 @@ ul.creation-issues { padding-inline-start: 29px; }
   .inbound-creation .creation-field input,.inbound-creation .creation-field select,.inbound-creation .creation-field textarea { font-size: 16px; }
   .inbound-creation .creation-field>span>button { min-height: 44px; }
   .creation-presets { gap: 7px; grid-template-columns: repeat(2,minmax(0,1fr)); }
-  .creation-presets > label:nth-of-type(3) { grid-column: 1/-1; }
+  .creation-presets > label:nth-of-type(3):last-child { grid-column: 1/-1; }
   .inbound-creation .creation-presets label { gap: 7px; padding: 10px 8px; }
   .creation-presets label>span { font-size: 11px; }
   .creation-node-heading { padding: 8px 10px; flex-wrap: wrap; gap: 6px; }

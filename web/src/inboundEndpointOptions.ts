@@ -2,7 +2,7 @@ import { validClientFingerprint, validClientPath, validUTF8 } from "./inboundNet
 
 export type InboundEndpoint = { address: string; port: number; label?: string; enabled: boolean; sni?: string; fingerprint?: string; spider_x?: string };
 export type EndpointDraft = { key: string; address: string; port: string; label: string; enabled: boolean; sni: string; fingerprint: string; spiderX: string };
-export type EndpointProfileDefaults = { serverNames: string[]; fingerprint: string; spiderX: string };
+export type EndpointProfileDefaults = { serverNames: string[]; fingerprint: string; spiderX: string; security?: string };
 
 function ipv4(value: string): string | undefined {
   if (!/^(?:0|[1-9][0-9]{0,2})(?:\.(?:0|[1-9][0-9]{0,2})){3}$/.test(value)) return undefined;
@@ -46,10 +46,10 @@ export function endpointDraft(value?: InboundEndpoint): EndpointDraft {
 export function endpointPort(value: string): number {
   return value === "" || value === "0" ? 0 : /^[0-9]+$/.test(value) && Number.isSafeInteger(Number(value)) && Number(value) >= 1 && Number(value) <= 65535 ? Number(value) : -1;
 }
-export function endpointPayload(value: EndpointDraft): InboundEndpoint {
+export function endpointPayload(value: EndpointDraft, security = "reality"): InboundEndpoint {
   return { address: canonicalEndpointAddress(value.address), port: endpointPort(value.port), enabled: value.enabled,
     ...(value.label.trim() ? { label: value.label.trim() } : {}), ...(value.sni ? { sni: value.sni } : {}),
-    ...(value.fingerprint ? { fingerprint: value.fingerprint } : {}), ...(value.spiderX ? { spider_x: value.spiderX } : {}) };
+    ...(value.fingerprint ? { fingerprint: value.fingerprint } : {}), ...(security !== "tls" && value.spiderX ? { spider_x: value.spiderX } : {}) };
 }
 /** Strict equality used for server receipts; missing and empty arrays are equivalent. */
 export function canonicalEndpoints(values?: InboundEndpoint[] | null): InboundEndpoint[] | undefined {
@@ -70,7 +70,7 @@ export function endpointAddresses(values: EndpointDraft[]): string[] {
 }
 export function effectiveEndpoint(value: EndpointDraft, listenerPort: string, defaults: EndpointProfileDefaults) {
   return { address: canonicalEndpointAddress(value.address), port: endpointPort(value.port) || Number(listenerPort),
-    sni: value.sni || defaults.serverNames[0] || "", fingerprint: value.fingerprint || defaults.fingerprint || "chrome", spiderX: value.spiderX || defaults.spiderX || "/" };
+    sni: value.sni || defaults.serverNames[0] || "", fingerprint: value.fingerprint || defaults.fingerprint || "chrome", spiderX: defaults.security === "tls" ? "" : value.spiderX || defaults.spiderX || "/" };
 }
 export function endpointIssues(values: EndpointDraft[], listenerPort: string, defaults: EndpointProfileDefaults, prefix: string): Array<{ field: string; code: string }> {
   const issues: Array<{ field: string; code: string }> = [], seen = new Set<string>();
@@ -82,7 +82,7 @@ export function endpointIssues(values: EndpointDraft[], listenerPort: string, de
     if (!validUTF8(value.label) || Array.from(value.label.trim()).length > 128 || /[\u0000-\u001f\u007f-\u009f]/.test(value.label)) add("label", "endpoint_label_invalid");
     if (value.sni && !defaults.serverNames.includes(value.sni)) add("sni", "endpoint_sni_invalid");
     if (!validClientFingerprint(value.fingerprint)) add("fingerprint", "client_fingerprint_invalid");
-    if (!validClientPath(value.spiderX, true)) add("spiderX", "client_spider_x_invalid");
+    if (defaults.security !== "tls" && !validClientPath(value.spiderX, true)) add("spiderX", "client_spider_x_invalid");
     const effective = effectiveEndpoint(value, listenerPort, defaults);
     const identity = JSON.stringify(effective);
     if (seen.has(identity)) add("address", "endpoint_duplicate");

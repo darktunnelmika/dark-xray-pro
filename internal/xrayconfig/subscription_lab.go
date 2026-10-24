@@ -74,6 +74,7 @@ func LabSubscriptionRoutes(c Candidate, clientUUID string, labels map[uint64]str
 		if !exists || in.Listen != "127.0.0.1" || in.Port != listener.NodePort ||
 			in.Protocol != "vless" || in.Settings.Decryption != "none" ||
 			in.Stream.Network != "tcp" || in.Stream.Security != "reality" || in.Stream.GRPC != nil || in.Stream.XHTTP != nil ||
+			in.Stream.TLS != nil || in.Stream.Reality == nil || in.Stream.WebSocket != nil || in.Stream.HTTPUpgrade != nil ||
 			in.Sniffing != nil || len(in.Settings.Fallbacks) != 0 {
 			return nil, ErrInvalid
 		}

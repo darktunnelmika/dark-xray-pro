@@ -182,9 +182,14 @@ func networkListenerReady(address string) bool {
 // In particular extra is decoded JSON, not a double-encoded string, and is
 // passed to the real core's extra parser rather than copied as a direct field.
 func networkClientFromShare(t *testing.T, uri *url.URL, socksPort uint16) []byte {
+	return networkClientFromShareWithTLSRoot(t, uri, socksPort, "")
+}
+
+func networkClientFromShareWithTLSRoot(t *testing.T, uri *url.URL, socksPort uint16, rootPEM string) []byte {
 	t.Helper()
 	query, err := url.ParseQuery(uri.RawQuery)
-	if err != nil || uri.Scheme != "vless" || uri.User == nil || uri.Hostname() != "127.0.0.1" || query.Get("security") != "reality" || query.Get("encryption") != "none" {
+	security := query.Get("security")
+	if err != nil || uri.Scheme != "vless" || uri.User == nil || uri.Hostname() != "127.0.0.1" || (security != "reality" && security != "tls") || query.Get("encryption") != "none" {
 		t.Fatal("invalid exported test URI")
 	}
 	port, err := strconv.ParseUint(uri.Port(), 10, 16)
@@ -197,7 +202,24 @@ func networkClientFromShare(t *testing.T, uri *url.URL, socksPort uint16) []byte
 		reality["spiderX"] = query.Get("spx")
 	}
 	stream := map[string]any{"network": query.Get("type"), "security": "reality", "realitySettings": reality}
+	if security == "tls" {
+		delete(allowed, "pbk")
+		delete(allowed, "sid")
+		delete(allowed, "spx")
+		allowed["alpn"] = true
+		stream = map[string]any{"network": query.Get("type"), "security": "tls", "tlsSettings": map[string]any{
+			"serverName": query.Get("sni"), "fingerprint": query.Get("fp"), "alpn": strings.Split(query.Get("alpn"), ","),
+			"disableSystemRoot": true, "certificates": []any{map[string]any{
+				"usage": "verify", "certificate": strings.Split(strings.TrimSpace(rootPEM), "\n"),
+			}},
+		}}
+	}
 	switch query.Get("type") {
+	case "tcp":
+		allowed["flow"] = true
+		if query.Get("flow") != "xtls-rprx-vision" {
+			t.Fatal("invalid TCP Vision flow")
+		}
 	case "xhttp":
 		for _, key := range []string{"path", "host", "extra"} {
 			allowed[key] = true
@@ -228,6 +250,17 @@ func networkClientFromShare(t *testing.T, uri *url.URL, socksPort uint16) []byte
 			grpc["authority"] = query.Get("authority")
 		}
 		stream["grpcSettings"] = grpc
+	case "ws", "httpupgrade":
+		allowed["path"], allowed["host"] = true, true
+		settings := map[string]any{"path": query.Get("path")}
+		if query.Has("host") {
+			settings["host"] = query.Get("host")
+		}
+		key := "wsSettings"
+		if query.Get("type") == "httpupgrade" {
+			key = "httpupgradeSettings"
+		}
+		stream[key] = settings
 	default:
 		t.Fatal("unsupported test transport")
 	}
@@ -236,11 +269,15 @@ func networkClientFromShare(t *testing.T, uri *url.URL, socksPort uint16) []byte
 			t.Fatal("unknown or duplicate exported query field")
 		}
 	}
+	user := map[string]any{"id": uri.User.Username(), "encryption": "none"}
+	if query.Has("flow") {
+		user["flow"] = query.Get("flow")
+	}
 	client := map[string]any{
 		"log":      map[string]string{"loglevel": "none"},
 		"inbounds": []any{map[string]any{"listen": "127.0.0.1", "port": socksPort, "protocol": "socks", "settings": map[string]any{"auth": "noauth", "udp": false}}},
 		"outbounds": []any{map[string]any{"protocol": "vless", "settings": map[string]any{"vnext": []any{map[string]any{
-			"address": "127.0.0.1", "port": port, "users": []any{map[string]any{"id": uri.User.Username(), "encryption": "none"}},
+			"address": "127.0.0.1", "port": port, "users": []any{user},
 		}}}, "streamSettings": stream}},
 	}
 	raw, err := json.Marshal(client)

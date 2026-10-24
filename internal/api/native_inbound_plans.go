@@ -56,9 +56,10 @@ func (s *Server) attachNativeInboundPlans(mux *http.ServeMux) {
 			nativeInboundPlanError(w, err)
 			return
 		}
-		respond(w, http.StatusOK, map[string]any{"available": true, "version": 2,
+		respond(w, http.StatusOK, map[string]any{"available": true, "version": 3,
 			"max_nodes": business.MaxNativeInboundPlanNodes, "max_hosts_per_node": 64,
-			"protocols": []string{"vless"}, "securities": []string{"reality"}, "transports": []string{"tcp", "grpc", "xhttp"},
+			"protocols": []string{"vless"}, "securities": []string{"reality", "tls"}, "transports": []string{"tcp", "grpc", "xhttp", "ws", "httpupgrade"},
+			"profile_tls": true, "profile_tls_scope": "creation_plan", "profile_websocket": true, "profile_http_upgrade": true,
 			"profile_xhttp": true, "profile_client_options": true, "profile_network_options_scope": "creation_plan",
 			"endpoint_options": true, "max_endpoints_per_path": business.MaxNativeInboundEndpointsPerPath,
 			"listener_port_min": 1024, "listener_port_max": 65535, "reserved_listener_ports": []uint16{2087, 8443, 24443},

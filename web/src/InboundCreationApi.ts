@@ -1,5 +1,6 @@
 import { ApiError } from "./session";
 import type { CreationIssue } from "./InboundCreationModel";
+import { assertPublicInboundData } from "./inboundTLS";
 
 export class CreationApiError extends ApiError {
   constructor(status: number, message: string, public issue?: CreationIssue) { super(status, message); }
@@ -33,10 +34,13 @@ export async function creationAPI<T>(path: string, options: RequestInit, onUnaut
             swap_source_node_id: "sourceNode", swap_source_listen_ip: "sourceListenIP", swap_source_port: "sourcePort", swap_entry_address: "entryHost",
             swap_entry_port: "entryPort", swap_destination_port: "swapPort", swap_ports: "sourcePort", profile: "name", "profile.id": "name", "profile.name": "name",
             "profile.transport": "transport", "profile.grpc_service": "grpcService", "profile.reality_target": "realityTarget", "profile.server_names": "serverNames", "profile.short_ids": "shortIDs",
+            "profile.security": "security", tls_credentials: "tlsCertificate", "tls_credentials.certificate_pem": "tlsCertificate", "tls_credentials.private_key_pem": "tlsPrivateKey",
             "profile.options": "realityMaxTimeDiff", "profile.options.sniffing": "sniffing.domainsExcluded", "profile.options.fallbacks": "fallbacks",
             "profile.options.xhttp": "xhttpPath", "profile.options.xhttp.path": "xhttpPath", "profile.options.xhttp.host": "xhttpHost",
             "profile.options.xhttp.mode": "xhttpMode", "profile.options.xhttp.x_padding_bytes": "xhttpPadding",
             "profile.options.client": "clientFingerprint", "profile.options.client.fingerprint": "clientFingerprint", "profile.options.client.spider_x": "clientSpiderX",
+            "profile.options.websocket": "websocketPath", "profile.options.websocket.path": "websocketPath", "profile.options.websocket.host": "websocketHost",
+            "profile.options.http_upgrade": "httpUpgradePath", "profile.options.http_upgrade.path": "httpUpgradePath", "profile.options.http_upgrade.host": "httpUpgradeHost",
           };
           const endpoint = problem.field.match(/^(direct|tunnel)_endpoints\.(\d{1,2})\.(address|port|label|enabled|sni|fingerprint|spider_x)$/);
           const field = endpoint ? `${endpoint[1]}Endpoints.${endpoint[2]}.${endpoint[3] === "spider_x" ? "spiderX" : endpoint[3]}` : fields[problem.field] ?? problem.field;
@@ -45,6 +49,8 @@ export async function creationAPI<T>(path: string, options: RequestInit, onUnaut
       } catch { /* Responses outside the structured contract are not surfaced. */ }
       throw new CreationApiError(response.status, message, issue);
     }
-    return await response.json() as T;
+    const body = await response.json();
+    assertPublicInboundData(body);
+    return body as T;
   } finally { window.clearTimeout(timer); options.signal?.removeEventListener("abort", abort); }
 }

@@ -1,6 +1,7 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
 import type { CreationPayload, CreationPlan, CreationReceipt } from "../src/InboundCreationModel";
 import type { CreationEndpointPreview } from "../src/inboundEndpointPreview";
+import { certificateMetadata, firstTLS, renewedTLS } from "./tls-fixtures";
 
 // Synthetic, disposable owner-session fixtures. These tests never contact a
 // running control plane or operate on real Nodes, customers or subscriptions.
@@ -15,7 +16,8 @@ type Call = { path: string; method: string; body: CreationPayload; raw: string; 
 type FixtureOptions = { failSaveOnce?: boolean; tamperPreview?: (plan: CreationPlan) => void; normalizeMappedIPs?: boolean;
   previewError?: { status: number; issue: { node_id?: string; destination_node_id?: string; path?: string; port?: number; field: string; code: string } }; savedPlan?: CreationPlan;
   language?: "en" | "fa"; theme?: "light" | "dark"; profileOptions?: boolean; profileSniffing?: boolean; profileFallbacks?: boolean; trafficScope?: boolean;
-  profileXHTTP?: boolean; profileClient?: boolean; endpointOptions?: boolean; networkScope?: boolean; tamperEndpoints?: (rows: CreationEndpointPreview[]) => void };
+  profileXHTTP?: boolean; profileClient?: boolean; endpointOptions?: boolean; networkScope?: boolean; tamperEndpoints?: (rows: CreationEndpointPreview[]) => void;
+  tls?: boolean; tamperSave?: (plan: CreationPlan) => void; tamperRead?: (plan: CreationPlan) => void; };
 
 async function fixture(page: Page, options: FixtureOptions = {}) {
   const calls: Call[] = [];
@@ -33,18 +35,18 @@ async function fixture(page: Page, options: FixtureOptions = {}) {
       else delete result.sniffing;
     }
     if (result.fallbacks?.length === 0) delete result.fallbacks;
-    for (const section of ["xhttp", "client"] as const) {
+    for (const section of ["xhttp", "client", "websocket", "http_upgrade"] as const) {
       const value = result[section];
       if (value && !Object.values(value).some(item => item !== "")) delete result[section];
     }
     return Object.keys(result).length ? result : undefined;
   }
   const profileInput = (profile: CreationPayload["profile"]) => JSON.stringify({ id: profile.id, name: profile.name,
-    transport: profile.transport, grpc_service: profile.grpc_service, reality_target: profile.reality_target,
-    server_names: profile.server_names, short_ids: profile.short_ids, options: persistedOptions(profile.options) });
+    security: profile.security || "reality", transport: profile.transport, grpc_service: profile.grpc_service, reality_target: profile.reality_target || "",
+    server_names: profile.server_names, short_ids: profile.short_ids || [], options: persistedOptions(profile.options) });
   function planFor(body: CreationPayload, saving = false): CreationPlan {
     const revision = body.expected_inbound_revision === 0 ? 1 : body.expected_inbound_revision +
-      (saved && profileInput(saved.profile) === profileInput(body.profile) ? 0 : 1);
+      (!body.tls_credentials && saved && profileInput(saved.profile) === profileInput(body.profile) ? 0 : 1);
     const waiting = body.nodes.some(row => row.direct_port > 0 && !row.direct_hosts.length || row.tunnel_port > 0 && !row.tunnel_hosts.length || row.swap_enabled && !row.swap_entry_address);
     const rows = structuredClone(body.nodes).sort((a, b) => a.node_id.localeCompare(b.node_id));
     for (const row of rows) {
@@ -56,8 +58,10 @@ async function fixture(page: Page, options: FixtureOptions = {}) {
       row.listen_ip = row.listen_ip.replace(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/i, "$1");
       row.swap_source_listen_ip = row.swap_source_listen_ip.replace(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/i, "$1");
     }
-    return { profile: { ...structuredClone(body.profile), name: body.profile.name.trim(), enabled: false, archived: false,
-      bound_clients: 0, revision, options: persistedOptions(body.profile.options), public_key: saved?.profile.public_key ?? (saving ? "SYNTHETIC_PUBLIC_KEY" : "") },
+    const tls = body.profile.security === "tls";
+    return { profile: { ...structuredClone(body.profile), security: tls ? "tls" : undefined, reality_target: body.profile.reality_target || "", short_ids: body.profile.short_ids || [], name: body.profile.name.trim(), enabled: false, archived: false,
+      bound_clients: 0, revision, options: persistedOptions(body.profile.options), public_key: tls ? "" : saved?.profile.public_key ?? (saving ? "SYNTHETIC_PUBLIC_KEY" : ""),
+      ...(tls ? { tls: body.tls_credentials ? certificateMetadata(body.tls_credentials.certificate_pem) : saved?.profile.tls } : {}) },
       nodes: rows,
       plan_revision: body.expected_plan_revision + 1, inbound_revision: revision,
       status: waiting ? "WAITING_HOST" : "SAVED_DISABLED", last_event_id: body.event_id, reason: body.reason,
@@ -72,9 +76,12 @@ async function fixture(page: Page, options: FixtureOptions = {}) {
       for (const { path, endpoint, listener } of entries) result.push({ node_id: row.node_id, path, address: endpoint.address, port: endpoint.port || listener,
         listen_port: listener, label: endpoint.label || plan.profile.name + " · " + ({ direct: "Direct", tunnel: "Tunnel", swap: "Swap" })[path], enabled: endpoint.enabled,
         server_name: endpoint.sni || plan.profile.server_names[0], transport: plan.profile.transport,
-        fingerprint: endpoint.fingerprint || plan.profile.options?.client?.fingerprint || "chrome", spider_x: endpoint.spider_x || plan.profile.options?.client?.spider_x || "/",
+        ...(plan.profile.security === "tls" ? { security: "tls", tls_sha256: plan.profile.tls!.sha256, tls_public_key_sha256: plan.profile.tls!.public_key_sha256 } : {}),
+        fingerprint: endpoint.fingerprint || plan.profile.options?.client?.fingerprint || "chrome", spider_x: plan.profile.security === "tls" ? "" : endpoint.spider_x || plan.profile.options?.client?.spider_x || "/",
         ...(plan.profile.transport === "grpc" ? { grpc_service: plan.profile.grpc_service, grpc_authority: plan.profile.options?.grpc_authority, grpc_multi_mode: plan.profile.options?.grpc_multi_mode } : {}),
-        ...(plan.profile.options?.xhttp ? { xhttp: plan.profile.options.xhttp } : {}) });
+        ...(plan.profile.options?.xhttp ? { xhttp: plan.profile.options.xhttp } : {}),
+        ...(plan.profile.options?.websocket ? { websocket: plan.profile.options.websocket } : {}),
+        ...(plan.profile.options?.http_upgrade ? { http_upgrade: plan.profile.options.http_upgrade } : {}) });
     }
     return result;
   }
@@ -106,6 +113,7 @@ async function fixture(page: Page, options: FixtureOptions = {}) {
           return route.fulfill({ json: { ...previous.receipt, replayed: true } });
         }
         saved = planFor(body, true);
+        options.tamperSave?.(saved);
         const receipt: CreationReceipt = { plan: saved, event_id: body.event_id, replayed: false, runtime_changed: false,
           clients_deleted: false, credit_changed: false, usage_reset: false, subscription_published: false };
         receipts.set(body.event_id, { raw, receipt });
@@ -115,14 +123,15 @@ async function fixture(page: Page, options: FixtureOptions = {}) {
       }
       return route.fulfill({ status: 405, json: { error: "unexpected_mutation" } });
     }
-    if (path === api + "/capabilities") return route.fulfill({ json: { available: true, version: 2, max_nodes: 64,
-      max_hosts_per_node: 64, profile_options: options.profileOptions !== false, protocols: ["vless"], securities: ["reality"], transports: ["tcp", "grpc", "xhttp"], runtime_apply: false,
+    if (path === api + "/capabilities") return route.fulfill({ json: { available: true, version: options.tls ? 3 : 2, max_nodes: 64,
+      max_hosts_per_node: 64, profile_options: options.profileOptions !== false, protocols: ["vless"], securities: options.tls ? ["reality", "tls"] : ["reality"], transports: options.tls ? ["tcp", "grpc", "xhttp", "ws", "httpupgrade"] : ["tcp", "grpc", "xhttp"], runtime_apply: false,
+      profile_tls: options.tls === true, profile_tls_scope: options.tls ? "creation_plan" : undefined, profile_websocket: options.tls === true, profile_http_upgrade: options.tls === true,
       profile_sniffing: options.profileSniffing !== false, profile_fallbacks: options.profileFallbacks !== false, profile_traffic_options_scope: options.trafficScope === false ? undefined : "creation_plan",
       profile_xhttp: options.profileXHTTP !== false, profile_client_options: options.profileClient !== false, profile_network_options_scope: options.networkScope === false ? undefined : "creation_plan",
       endpoint_options: options.endpointOptions !== false, max_endpoints_per_path: 64, listener_port_min: 1024, listener_port_max: 65535, reserved_listener_ports: [2087, 8443, 24443],
       plans: saved ? [{ inbound_id: saved.profile.id, plan_revision: saved.plan_revision, inbound_revision: saved.inbound_revision, status: saved.status,
         node_ids: [...new Set(saved.nodes.flatMap(node => [node.node_id, ...(node.swap_enabled ? [node.swap_source_node_id] : [])]))].sort() }] : [] } });
-    if (saved && path === api + "/" + saved.profile.id) return route.fulfill({ json: { plan: saved, references_current: true } });
+    if (saved && path === api + "/" + saved.profile.id) { const plan = structuredClone(saved); options.tamperRead?.(plan); return route.fulfill({ json: { plan, references_current: true } }); }
     if (path.endsWith("/native-inbounds-state")) return route.fulfill({ json: {
       preflight: { scope: "new_pro_lab_only", paired_nodes: 3, online_nodes: 0, fresh_nodes: 0, configured_inbounds: 0,
         configured_targets: 0, client_bindings: 0, usage_ledger_enabled: true, remote_metered_admission: "trusted_remote_epoch_registration_pending",
@@ -1244,4 +1253,238 @@ for (const language of ["en", "fa"] as const) test(`planned Nodes remain discove
   await expect(page.getByRole("button", { name: fa ? "فعال‌کردن اینباند" : "Enable Inbound", exact: true })).toHaveCount(0);
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
   expect(f.calls).toHaveLength(0);
+});
+
+async function tlsProfile(dialog: Locator, transport: "tcp" | "grpc" | "xhttp" | "ws" | "httpupgrade" = "ws", credentials = firstTLS) {
+  await dialog.getByLabel("Inbound name", { exact: true }).fill("TLS endpoint setup");
+  await dialog.getByRole("radio", { name: "TLS", exact: true }).check();
+  await dialog.getByLabel("Server names (comma-separated)", { exact: true }).fill("edge.example.org, cdn.example.org");
+  await dialog.getByLabel("TLS certificate (PEM)", { exact: true }).fill(credentials.certificate_pem);
+  await dialog.getByLabel("TLS private key (PEM)", { exact: true }).fill(credentials.private_key_pem);
+  await dialog.getByRole("radio", { name: { tcp: "TCP", grpc: "gRPC", xhttp: "XHTTP", ws: "WebSocket", httpupgrade: "HTTPUpgrade" }[transport] + " / TLS", exact: true }).check();
+  if (transport === "grpc") await dialog.getByLabel("gRPC service", { exact: true }).fill("tls_grpc");
+  if (transport === "ws" || transport === "httpupgrade") {
+    await dialog.locator(`[data-creation-field="${transport === "ws" ? "websocket" : "httpUpgrade"}Path"]`).fill("/connect");
+    await dialog.locator(`[data-creation-field="${transport === "ws" ? "websocket" : "httpUpgrade"}Host"]`).fill("edge.example.org");
+  }
+}
+function savedTLSPlan(): CreationPlan {
+  return { profile: { id: 881, name: "Saved TLS setup", security: "tls", transport: "ws", grpc_service: "", reality_target: "", server_names: ["edge.example.org", "cdn.example.org"], short_ids: [], public_key: "", enabled: false, archived: false, bound_clients: 0, revision: 1,
+    tls: certificateMetadata(firstTLS.certificate_pem), options: { websocket: { path: "/connect", host: "edge.example.org" }, client: { fingerprint: "firefox" } } },
+    nodes: [{ node_id: "de", installation_id: nodes[0].installation_id, listen_ip: "203.0.113.10", direct_port: 10443, direct_hosts: ["edge.example.org"], tunnel_port: 0, tunnel_hosts: [], swap_enabled: false, swap_source_node_id: "", swap_source_installation_id: "", swap_source_listen_ip: "", swap_source_port: 0, swap_entry_address: "", swap_entry_port: 0, swap_destination_port: 0 }],
+    plan_revision: 1, inbound_revision: 1, status: "SAVED_DISABLED", last_event_id: "tls-fixture-event-881", reason: "Saved TLS setup", created_unix: 1800000000, updated_unix: 1800000001, runtime_apply: false, editable: true };
+}
+async function openTLSPlan(page: Page) {
+  await page.goto("/inbounds?inbound=881&tab=overview");
+  await page.getByRole("button", { name: "Open saved setup", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "Edit Inbound setup", exact: true });
+  await expect(dialog).toBeVisible(); return dialog;
+}
+
+for (const transport of ["tcp", "grpc", "xhttp", "ws", "httpupgrade"] as const) test(`TLS ${transport} creation submits only matching security and network fields`, async ({ page }) => {
+  const f = await fixture(page, { tls: true }), dialog = await openCreation(page);
+  await tlsProfile(dialog, transport);
+  await expect(dialog.locator('[data-creation-field="realityTarget"]')).toHaveCount(0);
+  await expect(dialog.locator('[data-creation-field="shortIDs"]')).toHaveCount(0);
+  await expect(dialog.getByRole("radio", { name: / \/ TLS$/ })).toHaveCount(5);
+  await clientDefaults(dialog); await expect(dialog.locator('[data-creation-field="clientSpiderX"]')).toHaveCount(0);
+  await dialog.locator('[data-creation-field="clientFingerprint"]').selectOption("firefox");
+  await destination(dialog, "de", "203.0.113.10", "10443", "edge.example.org");
+  await dialog.getByRole("button", { name: "Endpoint settings: Direct: de", exact: true }).click();
+  await dialog.locator('[data-endpoint-index="0"] summary').click();
+  await expect(dialog.locator('[data-creation-field="directEndpoints.0.spiderX"]')).toHaveCount(0);
+  await dialog.locator('[data-creation-field="directEndpoints.0.sni"]').selectOption("cdn.example.org");
+  await dialog.getByRole("tab", { name: "Advanced", exact: true }).click();
+  await expect(dialog.getByRole("button", { name: "Add fallback", exact: true })).toHaveCount(0);
+  await review(dialog); await check(dialog);
+  await expect(dialog.locator("[data-tls-metadata]")).toContainText(certificateMetadata(firstTLS.certificate_pem).sha256);
+  await expect(dialog.locator('[data-review-field="transport"]')).toContainText("TLS");
+  await expect(dialog.locator('[data-review-field="publicKey"]')).toHaveCount(0);
+  await expect(dialog.locator('[data-review-field="shortIDs"]')).toHaveCount(0);
+  const payload = f.calls[0].body;
+  expect(payload.profile).toMatchObject({ security: "tls", transport });
+  expect(payload.profile).not.toHaveProperty("reality_target"); expect(payload.profile).not.toHaveProperty("short_ids");
+  expect(payload.tls_credentials).toEqual(firstTLS);
+  expect(payload.nodes[0].direct_endpoints?.[0]).not.toHaveProperty("spider_x");
+  await save(dialog);
+  await expect(page.getByRole("tab", { name: "Overview", exact: true })).toHaveAttribute("aria-selected", "true");
+  expect(f.calls[0].raw).toBe(f.calls[1].raw);
+  expect(f.getSaved()!.profile.tls).toEqual(certificateMetadata(firstTLS.certificate_pem));
+  expect(JSON.stringify(f.getSaved())).not.toContain("BEGIN");
+  expect(await page.evaluate(() => JSON.stringify({ local: { ...localStorage }, session: { ...sessionStorage } }))).not.toContain("BEGIN");
+});
+
+test("TLS editing retains credentials, clears old transport options and replaces a complete pair with exact retry", async ({ page }) => {
+  const initial = savedTLSPlan(), f = await fixture(page, { tls: true, savedPlan: initial, failSaveOnce: true });
+  const edit = await openTLSPlan(page);
+  await expect(edit.getByRole("radio", { name: "TLS", exact: true })).toBeDisabled();
+  await expect(edit.getByRole("radio", { name: "REALITY", exact: true })).toBeDisabled();
+  await expect(edit.locator("[data-security-immutable]")).toContainText("Security is fixed");
+  await expect(edit.getByLabel("TLS private key (PEM)", { exact: true })).toHaveCount(0);
+  await edit.getByRole("radio", { name: "HTTPUpgrade / TLS", exact: true }).check();
+  await edit.getByLabel("HTTPUpgrade Path", { exact: true }).fill("/upgrade");
+  await edit.getByLabel("HTTPUpgrade Host", { exact: true }).fill("edge.example.org");
+  await review(edit); await check(edit);
+  expect(f.calls[0].body).not.toHaveProperty("tls_credentials");
+  expect(f.calls[0].body.profile.options).toMatchObject({ websocket: {}, http_upgrade: { path: "/upgrade", host: "edge.example.org" } });
+  await edit.getByRole("button", { name: "Save paused setup", exact: true }).click();
+  await expect(edit.getByRole("button", { name: "Retry the same save", exact: true })).toBeEnabled();
+  await edit.getByRole("button", { name: "Retry the same save", exact: true }).click(); await expect(edit).toBeHidden();
+  expect(f.calls[1].raw).toBe(f.calls[2].raw);
+  expect(f.getSaved()).toMatchObject({ plan_revision: 2, inbound_revision: 2, profile: { id: 881, tls: initial.profile.tls } });
+  await page.getByRole("button", { name: "Open saved setup", exact: true }).click();
+  await edit.getByRole("button", { name: "Replace certificate and key", exact: true }).click();
+  await expect(edit.getByLabel("TLS certificate (PEM)", { exact: true })).toHaveValue("");
+  await edit.getByLabel("TLS certificate (PEM)", { exact: true }).fill(renewedTLS.certificate_pem);
+  await edit.getByLabel("TLS private key (PEM)", { exact: true }).fill(renewedTLS.private_key_pem);
+  await edit.getByRole("button", { name: "Keep saved certificate", exact: true }).click();
+  await expect(edit.getByLabel("TLS private key (PEM)", { exact: true })).toHaveCount(0);
+  await edit.getByRole("button", { name: "Replace certificate and key", exact: true }).click();
+  await expect(edit.getByLabel("TLS private key (PEM)", { exact: true })).toHaveValue("");
+  await edit.getByLabel("TLS certificate (PEM)", { exact: true }).fill(renewedTLS.certificate_pem);
+  await edit.getByLabel("TLS private key (PEM)", { exact: true }).fill(renewedTLS.private_key_pem);
+  await review(edit, "Replace TLS certificate"); await check(edit); await save(edit);
+  expect(f.calls[3].body.tls_credentials).toEqual(renewedTLS); expect(f.calls[3].raw).toBe(f.calls[4].raw);
+  expect(f.getSaved()).toMatchObject({ plan_revision: 3, inbound_revision: 3, profile: { id: 881, public_key: "", tls: certificateMetadata(renewedTLS.certificate_pem) } });
+  expect(await page.evaluate(() => JSON.stringify({ ...sessionStorage, ...localStorage }))).not.toContain("BEGIN");
+  await page.getByRole("button", { name: "Open saved setup", exact: true }).click();
+  await expect(edit.getByLabel("TLS private key (PEM)", { exact: true })).toHaveCount(0);
+  await expect(edit.locator('[data-connection-group="security"] [data-tls-metadata]')).toContainText(certificateMetadata(renewedTLS.certificate_pem).sha256);
+});
+
+test("TLS copy requires fresh credentials and read-only setup never reveals a key", async ({ page }) => {
+  const f = await fixture(page, { tls: true, savedPlan: savedTLSPlan() });
+  await page.goto("/inbounds?inbound=881&tab=overview");
+  await page.getByRole("button", { name: "Copy settings", exact: true }).click();
+  const copy = page.getByRole("dialog", { name: "Create Inbound", exact: true });
+  await expect(copy.getByRole("radio", { name: "TLS", exact: true })).toBeChecked();
+  await expect(copy.getByLabel("TLS certificate (PEM)", { exact: true })).toHaveValue("");
+  await expect(copy.getByLabel("TLS private key (PEM)", { exact: true })).toHaveValue("");
+  await expect(copy.locator("[data-tls-metadata]")).toHaveCount(0);
+  await destination(copy, "de", "203.0.113.10", "10444", "edge.example.org"); await review(copy);
+  await copy.getByRole("button", { name: "Check complete setup", exact: true }).click();
+  await expect(copy.getByLabel("TLS certificate (PEM)", { exact: true })).toBeFocused(); expect(f.calls).toHaveLength(0);
+  page.once("dialog", confirmation => confirmation.accept()); await copy.getByRole("button", { name: "Close", exact: true }).click();
+  f.makeReadOnly(); await page.getByRole("button", { name: "Open saved setup", exact: true }).click();
+  const read = page.getByRole("dialog", { name: "Edit Inbound setup", exact: true });
+  await expect(read.getByRole("button", { name: "Replace certificate and key", exact: true })).toBeDisabled();
+  await expect(read.getByLabel("TLS private key (PEM)", { exact: true })).toHaveCount(0);
+  await read.getByRole("tab", { name: "Review", exact: true }).click(); await expect(read.getByRole("button", { name: "Check complete setup", exact: true })).toBeDisabled();
+});
+
+for (const part of ["certificate", "key"] as const) test(`TLS partial ${part} entry is blocked before preview and focuses the missing field`, async ({ page }) => {
+  const f = await fixture(page, { tls: true }), dialog = await openCreation(page);
+  await tlsProfile(dialog);
+  await dialog.getByLabel(part === "certificate" ? "TLS private key (PEM)" : "TLS certificate (PEM)", { exact: true }).fill("");
+  await destination(dialog, "de", "203.0.113.10", "10443", "edge.example.org"); await review(dialog);
+  await dialog.getByRole("button", { name: "Check complete setup", exact: true }).click();
+  await expect(dialog.getByLabel(part === "certificate" ? "TLS private key (PEM)" : "TLS certificate (PEM)", { exact: true })).toBeFocused();
+  expect(f.calls).toHaveLength(0);
+});
+
+for (const mutation of ["private field", "PEM string", "leaf hash", "endpoint hash"] as const) test(`TLS preview rejects a mismatched or private ${mutation}`, async ({ page }) => {
+  const f = await fixture(page, { tls: true,
+    tamperPreview: mutation === "endpoint hash" ? undefined : plan => {
+      if (mutation === "private field") (plan.profile as unknown as Record<string, unknown>).private_key_pem = firstTLS.private_key_pem;
+      else if (mutation === "PEM string") plan.profile.name = firstTLS.certificate_pem;
+      else plan.profile.tls!.sha256 = "f".repeat(64);
+    }, tamperEndpoints: mutation === "endpoint hash" ? rows => { rows[0].tls_public_key_sha256 = "f".repeat(64); } : undefined });
+  const dialog = await openCreation(page); await tlsProfile(dialog); await destination(dialog, "de", "203.0.113.10", "10443", "edge.example.org"); await review(dialog);
+  await dialog.getByRole("button", { name: "Check complete setup", exact: true }).click();
+  await expect(dialog.getByRole("alert")).toContainText("could not validate");
+  await expect(dialog.getByRole("button", { name: "Save paused setup", exact: true })).toBeDisabled();
+  expect(f.calls).toHaveLength(1);
+});
+
+test("TLS save rejects a receipt whose certificate differs from the checked metadata", async ({ page }) => {
+  const f = await fixture(page, { tls: true, tamperSave: plan => { plan.profile.tls = certificateMetadata(renewedTLS.certificate_pem); } });
+  const dialog = await openCreation(page); await tlsProfile(dialog); await destination(dialog, "de", "203.0.113.10", "10443", "edge.example.org"); await review(dialog); await check(dialog);
+  await dialog.getByRole("button", { name: "Save paused setup", exact: true }).click();
+  await expect(dialog.getByRole("button", { name: "Retry the same save", exact: true })).toBeEnabled();
+  await expect(dialog).toBeVisible(); expect(f.calls).toHaveLength(2);
+});
+
+test("TLS plan reads reject injected credentials before opening the editor", async ({ page }) => {
+  await fixture(page, { tls: true, savedPlan: savedTLSPlan(), tamperRead: plan => { (plan as unknown as Record<string, unknown>).tls_credentials = firstTLS; } });
+  await page.goto("/inbounds?inbound=881&tab=overview"); await page.getByRole("button", { name: "Open saved setup", exact: true }).click();
+  await expect(page.getByText(/Request failed\. No successful Apply/)).toBeVisible();
+  await expect(page.getByRole("dialog", { name: "Edit Inbound setup", exact: true })).toHaveCount(0);
+  expect(await page.evaluate(() => document.body.textContent)).not.toContain("BEGIN");
+});
+
+test("TLS retained certificate expiry focuses the visible replacement action", async ({ page }) => {
+  const f = await fixture(page, { tls: true, savedPlan: savedTLSPlan(), previewError: { status: 422, issue: { field: "tls_credentials.certificate_pem", code: "tls_certificate_expired" } } });
+  const dialog = await openTLSPlan(page); await dialog.locator('[data-connection-group="security"] > summary').click();
+  await review(dialog); await dialog.getByRole("button", { name: "Check complete setup", exact: true }).click();
+  await expect(dialog.getByRole("button", { name: "Replace certificate and key", exact: true })).toBeFocused();
+  await expect(dialog.locator('[data-connection-group="security"] .creation-issues')).toContainText("certificate has expired");
+  expect(f.calls[0].body).not.toHaveProperty("tls_credentials");
+});
+
+test("TLS security switching keeps REALITY draft values out of payload and legacy capabilities stay compatible", async ({ page }) => {
+  const f = await fixture(page, { tls: true }), dialog = await openCreation(page); await profile(dialog);
+  await dialog.getByText("Advanced REALITY settings", { exact: true }).click();
+  await dialog.locator('[data-creation-field="realityXver"]').selectOption("2");
+  await clientDefaults(dialog); await dialog.locator('[data-creation-field="clientSpiderX"]').fill("/private-crawl");
+  await dialog.getByRole("tab", { name: "Advanced", exact: true }).click();
+  await dialog.getByRole("button", { name: "Add fallback", exact: true }).click();
+  await dialog.locator('[data-creation-field="fallbacks.0.dest"]').fill("invalid-retained-destination");
+  await dialog.getByRole("tab", { name: "Connection", exact: true }).click();
+  await tlsProfile(dialog, "ws"); await destination(dialog, "de", "203.0.113.10", "10443", "edge.example.org"); await review(dialog); await check(dialog);
+  expect(f.calls[0].body.profile.options).not.toHaveProperty("reality_xver");
+  expect(f.calls[0].body.profile.options).not.toHaveProperty("fallbacks");
+  expect(f.calls[0].body.profile.options?.client).not.toHaveProperty("spider_x");
+  await dialog.getByRole("tab", { name: "Connection", exact: true }).click();
+  await dialog.getByRole("radio", { name: "REALITY", exact: true }).check();
+  await expect(dialog.getByRole("radio", { name: "TCP / REALITY", exact: true })).toBeChecked();
+  await expect(dialog.getByRole("radio", { name: /WebSocket|HTTPUpgrade/ })).toHaveCount(0);
+  await expect(dialog.locator('[data-creation-field="realityTarget"]')).toHaveValue("example.org:443");
+  await expect(dialog.getByLabel("TLS private key (PEM)", { exact: true })).toHaveCount(0);
+  page.once("dialog", confirmation => confirmation.accept()); await dialog.getByRole("button", { name: "Close", exact: true }).click();
+  const old = await fixture(page); const oldDialog = await openCreation(page); await profile(oldDialog);
+  await expect(oldDialog.getByRole("radio", { name: "TLS", exact: true })).toHaveCount(0);
+  await destination(oldDialog, "de", "203.0.113.10", "10443", "edge.example.org"); await review(oldDialog); await check(oldDialog);
+  expect(old.calls[0].body.profile).not.toHaveProperty("security");
+});
+
+test("TLS WebSocket and HTTPUpgrade reject unsafe path and Host spellings locally", async ({ page }) => {
+  const f = await fixture(page, { tls: true }), dialog = await openCreation(page); await tlsProfile(dialog);
+  await destination(dialog, "de", "203.0.113.10", "10443", "edge.example.org");
+  for (const [transport, prefix] of [["WebSocket", "websocket"], ["HTTPUpgrade", "httpUpgrade"]]) {
+    await dialog.getByRole("tab", { name: "Connection", exact: true }).click();
+    await dialog.getByRole("radio", { name: transport + " / TLS", exact: true }).check();
+    for (const path of ["//absolute", "/encoded%20path", "/query?x=1", "/fragment#x", "/back\\slash", "/space path", "/مسیر"]) {
+      await dialog.locator(`[data-creation-field="${prefix}Path"]`).fill(path); await review(dialog);
+      await dialog.getByRole("button", { name: "Check complete setup", exact: true }).click();
+      await expect(dialog.locator(`[data-creation-field="${prefix}Path"]`)).toBeFocused();
+    }
+    await dialog.locator(`[data-creation-field="${prefix}Path"]`).fill("/valid");
+    for (const host of ["edge.example.org:443", "[2001:db8::1]", "https://edge.example.org"]) {
+      await dialog.locator(`[data-creation-field="${prefix}Host"]`).fill(host); await review(dialog);
+      await dialog.getByRole("button", { name: "Check complete setup", exact: true }).click();
+      await expect(dialog.locator(`[data-creation-field="${prefix}Host"]`)).toBeFocused();
+    }
+    await dialog.locator(`[data-creation-field="${prefix}Host"]`).fill("edge.example.org");
+  }
+  expect(f.calls).toHaveLength(0);
+});
+
+for (const language of ["en", "fa"] as const) test(`TLS certificate review and four-stage navigation fit 320px in ${language}`, async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 320, height: 760 });
+  await fixture(page, { tls: true, language, savedPlan: savedTLSPlan() });
+  await page.goto("/inbounds?inbound=881&tab=overview");
+  await page.getByRole("button", { name: language === "fa" ? "بازکردن تنظیمات ذخیره‌شده" : "Open saved setup", exact: true }).click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog.getByRole("radio", { name: "WebSocket / TLS", exact: true })).toBeChecked();
+  await expect(dialog.locator(".creation-tabs [role=tab]")).toHaveCount(4);
+  const cert = dialog.locator('[data-connection-group="security"] [data-tls-metadata]'); await expect(cert).toContainText("edge.example.org");
+  await dialog.getByRole("tab", { name: language === "fa" ? "بازبینی" : "Review", exact: true }).click();
+  await expect(dialog.locator('[data-review-section="connection"] [data-tls-metadata]')).toContainText(certificateMetadata(firstTLS.certificate_pem).sha256);
+  const layout = await dialog.evaluate(element => ({ width: element.clientWidth, scroll: element.scrollWidth, document: document.documentElement.scrollWidth, viewport: window.innerWidth }));
+  expect(layout.scroll).toBeLessThanOrEqual(layout.width + 1); expect(layout.document).toBeLessThanOrEqual(layout.viewport + 1);
+  for (const tab of await dialog.locator(".creation-tabs [role=tab]").all()) {
+    const box = await tab.boundingBox(); expect(box!.x).toBeGreaterThanOrEqual(0); expect(box!.x + box!.width).toBeLessThanOrEqual(320);
+  }
+  await expect(dialog.locator(".creation-footer")).toBeInViewport();
+  await page.screenshot({ path: testInfo.outputPath(`tls-review-${language}-320.png`) });
 });

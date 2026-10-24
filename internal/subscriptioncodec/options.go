@@ -26,6 +26,80 @@ type XHTTPOptions struct {
 	XPaddingBytes string `json:"x_padding_bytes,omitempty"`
 }
 
+// WebSocketOptions and HTTPUpgradeOptions intentionally expose only the
+// paired server/client settings. Early-data query controls, arbitrary headers
+// and PROXY protocol require separate contracts and are not accepted here.
+type WebSocketOptions struct {
+	Path string `json:"path,omitempty"`
+	Host string `json:"host,omitempty"`
+}
+
+type HTTPUpgradeOptions struct {
+	Path string `json:"path,omitempty"`
+	Host string `json:"host,omitempty"`
+}
+
+// NormalizeSecurity keeps the original REALITY representation byte-compatible.
+// TLS must be explicit; an unknown spelling is never treated as a default.
+func NormalizeSecurity(security string) (string, error) {
+	switch security {
+	case "", "reality":
+		return "", nil
+	case "tls":
+		return "tls", nil
+	default:
+		return "", &OptionError{Field: "security", Code: "security_invalid"}
+	}
+}
+
+func NormalizeWebSocketOptions(options *WebSocketOptions) (*WebSocketOptions, error) {
+	if options == nil {
+		return nil, nil
+	}
+	o := *options
+	if err := validateHTTPTransport(o.Path, o.Host, "websocket"); err != nil {
+		return nil, err
+	}
+	if o == (WebSocketOptions{}) {
+		return nil, nil
+	}
+	return &o, nil
+}
+
+func NormalizeHTTPUpgradeOptions(options *HTTPUpgradeOptions) (*HTTPUpgradeOptions, error) {
+	if options == nil {
+		return nil, nil
+	}
+	o := *options
+	if err := validateHTTPTransport(o.Path, o.Host, "http_upgrade"); err != nil {
+		return nil, err
+	}
+	if o == (HTTPUpgradeOptions{}) {
+		return nil, nil
+	}
+	return &o, nil
+}
+
+func validateHTTPTransport(path, host, section string) error {
+	// WebSocket builds a URI by concatenation, whereas HTTPUpgrade assigns
+	// URL.Path. An encoded percent escape has different meanings in those
+	// paths. The shared grammar uses literal ASCII paths and no hidden ?ed=.
+	valid := path == "" || (len(path) <= MaxConnectionPathBytes && strings.HasPrefix(path, "/") &&
+		!strings.HasPrefix(path, "//") && !strings.ContainsAny(path, "%?#\\"))
+	for _, b := range []byte(path) {
+		if b < 33 || b > 126 {
+			valid = false
+		}
+	}
+	if !valid {
+		return &OptionError{Field: "path", Code: section + "_path_invalid"}
+	}
+	if host != "" && (!ValidAuthority(host) || strings.ContainsAny(host, ":[]")) {
+		return &OptionError{Field: "host", Code: section + "_host_invalid"}
+	}
+	return nil
+}
+
 // ClientOptions belongs to exported client connections. It must never be
 // emitted as server REALITY settings or inferred from a server candidate.
 type ClientOptions struct {

@@ -15,9 +15,11 @@ import (
 // retain v1; the original REALITY/gRPC scalar options retain v2. Sniffing and
 // fallbacks require v3. XHTTP transport or typed client/network options require
 // v4, including when combined with recognized settings from earlier versions.
+// TLS credentials and WS/HTTPUpgrade authoring require v5.
 var extendedProfilePrefix = []byte("DXPPRF2\x00")
 var profileV3Prefix = []byte("DXPPRF3\x00")
 var profileV4Prefix = []byte("DXPPRF4\x00")
+var profileV5Prefix = []byte("DXPPRF5\x00")
 
 func extendedProfileAAD(id uint64) []byte {
 	return []byte(fmt.Sprintf("DARK-PRO-NATIVE-INBOUND-v2:%d", id))
@@ -29,10 +31,16 @@ func profileV3AAD(id uint64) []byte {
 func profileV4AAD(id uint64) []byte {
 	return []byte(fmt.Sprintf("DARK-PRO-NATIVE-INBOUND-v4:%d", id))
 }
+func profileV5AAD(id uint64) []byte {
+	return []byte(fmt.Sprintf("DARK-PRO-NATIVE-INBOUND-v5:%d", id))
+}
 
 // options must already be normalized so an empty object does not force a new
 // format. A disabled but configured sniffing object still contains settings.
 func profileEnvelopeVersion(transport string, options *xrayconfig.ProfileOptions) int {
+	if hasInboundTLSAuthoring(transport, options) {
+		return 5
+	}
 	if hasInboundNetworkOptions(transport, options) {
 		return 4
 	}
@@ -45,12 +53,49 @@ func profileEnvelopeVersion(transport string, options *xrayconfig.ProfileOptions
 	return 2
 }
 
-func sealInboundProfile(key []byte, p xrayconfig.Profile) ([]byte, error) {
+func privateProfileEnvelopeVersion(p xrayconfig.Profile) int {
+	if p.Security == "tls" || p.TLS != nil {
+		return 5
+	}
+	return profileEnvelopeVersion(p.Transport, p.Options)
+}
+
+func normalizePrivateProfile(p xrayconfig.Profile) (xrayconfig.Profile, error) {
+	security, err := xrayconfig.NormalizeProfileSecurity(p.Security)
+	if err != nil {
+		return xrayconfig.Profile{}, ErrInvalid
+	}
+	p.Security = security
+	if security == "tls" {
+		material, _, err := xrayconfig.NormalizeTLSMaterial(p.TLS)
+		if err != nil || p.RealityPrivateKey != "" {
+			return xrayconfig.Profile{}, ErrInvalid
+		}
+		p.TLS = material
+	} else if p.TLS != nil {
+		return xrayconfig.Profile{}, ErrInvalid
+	}
 	options, err := xrayconfig.NormalizeProfileOptions(p.Transport, p.Options)
+	if err != nil {
+		return xrayconfig.Profile{}, ErrInvalid
+	}
+	p.Options = options
+	if p.Security == "tls" || hasInboundTLSAuthoring(p.Transport, p.Options) {
+		// New storage must not authenticate a security/transport/SNI mismatch.
+		// This validation is clock-independent: expired material remains
+		// readable for renewal, and historical envelopes retain their behavior.
+		if err := xrayconfig.ValidateProfile(p); err != nil {
+			return xrayconfig.Profile{}, ErrInvalid
+		}
+	}
+	return p, nil
+}
+
+func sealInboundProfile(key []byte, p xrayconfig.Profile) ([]byte, error) {
+	p, err := normalizePrivateProfile(p)
 	if err != nil {
 		return nil, ErrInvalid
 	}
-	p.Options = options
 	a, err := profileAEAD(key)
 	if err != nil {
 		return nil, err
@@ -65,7 +110,7 @@ func sealInboundProfile(key []byte, p xrayconfig.Profile) ([]byte, error) {
 	}
 	aad := profileAAD(p.InboundID)
 	var prefix []byte
-	switch profileEnvelopeVersion(p.Transport, options) {
+	switch privateProfileEnvelopeVersion(p) {
 	case 2:
 		aad = extendedProfileAAD(p.InboundID)
 		prefix = extendedProfilePrefix
@@ -75,6 +120,9 @@ func sealInboundProfile(key []byte, p xrayconfig.Profile) ([]byte, error) {
 	case 4:
 		aad = profileV4AAD(p.InboundID)
 		prefix = profileV4Prefix
+	case 5:
+		aad = profileV5AAD(p.InboundID)
+		prefix = profileV5Prefix
 	}
 	sealed := a.Seal(nonce, nonce, raw, aad)
 	if prefix != nil {
@@ -93,6 +141,10 @@ func openInboundProfile(key, encrypted []byte, id uint64) (xrayconfig.Profile, e
 	aad := profileAAD(id)
 	version := 1
 	switch {
+	case bytes.HasPrefix(encrypted, profileV5Prefix):
+		encrypted = encrypted[len(profileV5Prefix):]
+		aad = profileV5AAD(id)
+		version = 5
 	case bytes.HasPrefix(encrypted, profileV4Prefix):
 		encrypted = encrypted[len(profileV4Prefix):]
 		aad = profileV4AAD(id)
@@ -126,10 +178,9 @@ func openInboundProfile(key, encrypted []byte, id uint64) (xrayconfig.Profile, e
 	if err != nil || usagewire.Decode(raw, &p) != nil || p.InboundID != id {
 		return xrayconfig.Profile{}, ErrUnavailable
 	}
-	options, err := xrayconfig.NormalizeProfileOptions(p.Transport, p.Options)
-	if err != nil || version != profileEnvelopeVersion(p.Transport, options) {
+	p, err = normalizePrivateProfile(p)
+	if err != nil || version != privateProfileEnvelopeVersion(p) {
 		return xrayconfig.Profile{}, ErrUnavailable
 	}
-	p.Options = options
 	return p, nil
 }
