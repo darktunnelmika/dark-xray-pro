@@ -246,7 +246,8 @@ try {
   const capabilityHTTP = await capabilitiesResponse; expect(capabilityHTTP.status()).toBe(200);
   const capabilities = await capabilityHTTP.json(); publicOnly(capabilities);
   expect(capabilities).toMatchObject({ available: true, runtime_apply: false, profile_options: true, profile_sniffing: true, profile_fallbacks: true,
-    profile_traffic_options_scope: 'creation_plan', protocols: ['vless'], securities: ['reality'], transports: ['tcp', 'grpc'] });
+    profile_traffic_options_scope: 'creation_plan', profile_xhttp: true, profile_client_options: true, endpoint_options: true,
+    protocols: ['vless'], securities: ['reality'], transports: ['tcp', 'grpc', 'xhttp'] });
   const add = page.getByRole('button', { name: 'Add Inbound', exact: true }); await expect(add).toBeEnabled(); await add.click();
   const dialog = page.getByRole('dialog', { name: 'Create Inbound', exact: true }); await expect(dialog).toBeVisible();
   await expect(dialog.getByRole('tab')).toHaveText(['Connection', 'Dark Swap', 'Advanced', 'Review']);
@@ -346,11 +347,82 @@ try {
   stage = 'reloaded update persistence';
   const final = await reopen(); expect(final.plan).toEqual(updated.receipt.plan);
   await verifyProfile(final.dialog, true); await verifyNodes(final.dialog, true);
+
+  stage = 'XHTTP and public endpoint edit';
+  const network = final.dialog;
+  await network.getByRole('tab', { name: 'Connection', exact: true }).click();
+  await network.getByRole('radio', { name: 'XHTTP / REALITY', exact: true }).check();
+  await network.locator('[data-creation-field="xhttpPath"]').fill('/xhttp');
+  await network.locator('[data-creation-field="xhttpHost"]').fill('cdn.example.org');
+  await network.locator('[data-creation-field="xhttpMode"]').selectOption('packet-up');
+  await network.locator('[data-creation-field="xhttpPadding"]').fill('200-400');
+  const clientOptions = network.locator('details[data-client-options]');
+  if (await clientOptions.getAttribute('open') === null) await clientOptions.locator(':scope > summary').click();
+  await network.locator('[data-creation-field="clientFingerprint"]').selectOption('firefox');
+  await network.locator('[data-creation-field="clientSpiderX"]').fill('/news');
+  await network.getByRole('tab', { name: 'Dark Swap', exact: true }).click();
+  await expand(network, 'Germany');
+  await network.getByRole('button', { name: 'Endpoint settings: Direct: de', exact: true }).click();
+  await network.locator('[data-creation-field="directEndpoints.0.address"]').fill('2001:0DB8:0:0:0:0:0:10');
+  await network.locator('[data-creation-field="directEndpoints.0.port"]').fill('443');
+  const endpointDetails = network.locator('[data-node-id="de"] details.creation-endpoint-details').first();
+  if (await endpointDetails.getAttribute('open') === null) await endpointDetails.locator(':scope > summary').click();
+  await network.locator('[data-creation-field="directEndpoints.0.label"]').fill('Public IPv6');
+  await network.locator('[data-creation-field="directEndpoints.0.sni"]').selectOption('example.org');
+  await network.locator('[data-creation-field="directEndpoints.0.fingerprint"]').selectOption('safari');
+  await network.locator('[data-creation-field="directEndpoints.0.spiderX"]').fill('/endpoint');
+  await network.locator('[data-creation-field="directEndpoints.1.enabled"]').uncheck();
+  await network.getByRole('tab', { name: 'Review', exact: true }).click();
+  await network.getByLabel('Change note', { exact: true }).fill('Real browser network and endpoints');
+  const expectedNetworkOptions = expectedOptions(true);
+  delete expectedNetworkOptions.grpc_authority; delete expectedNetworkOptions.grpc_multi_mode;
+  expectedNetworkOptions.xhttp = { path: '/xhttp', host: 'cdn.example.org', mode: 'packet-up', x_padding_bytes: '200-400' };
+  expectedNetworkOptions.client = { fingerprint: 'firefox', spider_x: '/news' };
+  const expectedNetworkNodes = expectedNodes(true);
+  expectedNetworkNodes[0].direct_hosts = ['2001:db8::10'];
+  expectedNetworkNodes[0].direct_endpoints = [
+    { address: '2001:db8::10', port: 443, label: 'Public IPv6', enabled: true, sni: 'example.org', fingerprint: 'safari', spider_x: '/endpoint' },
+    { address: 'shared.example.org', port: 0, enabled: false },
+  ];
+  const networkPreviewPending = observe('POST', api + '/preview');
+  await network.getByRole('button', { name: 'Check complete setup', exact: true }).click();
+  const networkPreviewResponse = await networkPreviewPending;
+  expect(networkPreviewResponse.status()).toBe(200);
+  const networkPreview = await networkPreviewResponse.json(); publicOnly(networkPreview);
+  expect(networkPreview.plan.nodes).toEqual(expectedNetworkNodes);
+  expect(networkPreview.plan.profile.options).toEqual(expectedNetworkOptions);
+  expect(networkPreview.plan.profile).toMatchObject({ transport: 'xhttp', grpc_service: '' });
+  expect(networkPreview.endpoints.find(row => row.node_id === 'de' && row.path === 'direct' && row.address === '2001:db8::10')).toMatchObject({
+    port: 443, listen_port: 10443, enabled: true, server_name: 'example.org', fingerprint: 'safari', spider_x: '/endpoint', transport: 'xhttp', xhttp: expectedNetworkOptions.xhttp,
+  });
+  expect(networkPreview.endpoints.find(row => row.address === 'shared.example.org')).toMatchObject({ enabled: false, fingerprint: 'firefox', spider_x: '/news' });
+  await expect(network.getByRole('button', { name: 'Save paused setup', exact: true })).toBeEnabled();
+  const networkSavePending = observe('PUT', api + '/' + inboundID);
+  await network.getByRole('button', { name: 'Save paused setup', exact: true }).click();
+  const networkSaveResponse = await networkSavePending; expect(networkSaveResponse.status()).toBe(200);
+  const networkReceipt = await networkSaveResponse.json(); receiptSafe(networkReceipt, 3, 3);
+  expect(networkSaveResponse.request().postDataJSON()).toEqual(networkPreviewResponse.request().postDataJSON());
+  expect(networkReceipt.plan.profile.public_key).toBe(createdPublicKey);
+  expect(networkReceipt.plan.profile.options).toEqual(expectedNetworkOptions);
+  expect(networkReceipt.plan.nodes).toEqual(expectedNetworkNodes);
+  await expect(network).toBeHidden();
+  stage = 'reloaded XHTTP and endpoint persistence';
+  const networkReloaded = await reopen(); expect(networkReloaded.plan).toEqual(networkReceipt.plan);
+  await expect(networkReloaded.dialog.getByRole('radio', { name: 'XHTTP / REALITY', exact: true })).toBeChecked();
+  await expect(networkReloaded.dialog.locator('[data-creation-field="xhttpPath"]')).toHaveValue('/xhttp');
+  await networkReloaded.dialog.getByRole('tab', { name: 'Dark Swap', exact: true }).click();
+  await expand(networkReloaded.dialog, 'Germany');
+  await expect(networkReloaded.dialog.locator('[data-creation-field="directEndpoints.0.address"]')).toHaveValue('2001:db8::10');
+  await expect(networkReloaded.dialog.locator('[data-creation-field="directEndpoints.0.port"]')).toHaveValue('443');
+  await expect(networkReloaded.dialog.locator('[data-creation-field="directEndpoints.1.enabled"]')).not.toBeChecked();
+  await expect(networkReloaded.dialog.getByLabel('Direct port: de', { exact: true })).toHaveValue('10443');
   expect(mutations).toEqual([{ method: 'POST', path: '/api/v1/session/login' }, { method: 'POST', path: api + '/preview' },
-    { method: 'POST', path: api }, { method: 'POST', path: api + '/preview' }, { method: 'PUT', path: api + '/' + inboundID }]);
+    { method: 'POST', path: api }, { method: 'POST', path: api + '/preview' }, { method: 'PUT', path: api + '/' + inboundID },
+    { method: 'POST', path: api + '/preview' }, { method: 'PUT', path: api + '/' + inboundID }]);
   if (diagnostics.length) throw new Error(diagnostics.join('; '));
   await writeFile(control.result_path, JSON.stringify({ inbound_id: inboundID, created_public_key: createdPublicKey,
-    created_event_id: created.receipt.event_id, updated_event_id: updated.receipt.event_id }) + '\n', { mode: 0o600, flag: 'wx' });
+    created_event_id: created.receipt.event_id, updated_event_id: networkReceipt.event_id }) + '\n', { mode: 0o600, flag: 'wx' });
+  process.stdout.write('NATIVE_UI_NETWORK_ENDPOINTS_VERIFIED\n');
   process.stdout.write('NATIVE_UI_CREATION_PLAN_VERIFIED\n');
 } catch (error) {
   const message = String(error?.message ?? error).split(control.password).join('[REDACTED]');

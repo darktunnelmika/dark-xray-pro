@@ -95,7 +95,7 @@ func TestProfileOptionsPreserveHistoricalDefaultCandidates(t *testing.T) {
 		"grpc": {"16b9d486a1f3090eadc10452287d12ec9d02544d420e7e1ffde49619a19b4e31", "51bca245287b0e7424007ef673d740211925bb584c8176285e312a18c76f0b3f", "a0c3338827846c232119f35dff22da82d9b6a2d8aba6a2e2aa849ebb4b3cf0d6", "42f90d65a41d6bd04c4ab4f159e35d27877e5e817245522272dbd7589aeaf4ea"},
 	}
 	for transport, want := range golden {
-		for _, options := range []*ProfileOptions{nil, {}} {
+		for _, options := range []*ProfileOptions{nil, {}, {XHTTP: &XHTTPOptions{}, Client: &ClientOptions{}}} {
 			p := testProfile(1)
 			p.Transport, p.Options = transport, options
 			if transport == "grpc" {

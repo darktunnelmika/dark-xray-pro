@@ -103,7 +103,7 @@ func ensureNativeRouteDrafts(db *sql.DB) error {
 }
 func canonicalRouteHost(raw string) string {
 	h := strings.ToLower(strings.TrimSpace(raw))
-	if h == "" || len(h) > 253 || strings.ContainsAny(h, "/:@%?#\\ \t\r\n") {
+	if h == "" || len(h) > 253 || strings.ContainsAny(h, "/@%?#\\ \t\r\n") {
 		return ""
 	}
 	if ip := net.ParseIP(h); ip != nil {
@@ -111,6 +111,9 @@ func canonicalRouteHost(raw string) string {
 			return ""
 		}
 		return ip.String()
+	}
+	if strings.Contains(h, ":") {
+		return ""
 	}
 	parts := strings.Split(h, ".")
 	if len(parts) < 2 {

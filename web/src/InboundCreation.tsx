@@ -6,9 +6,12 @@ import WorkspaceDialog from "./WorkspaceDialog";
 import type { Inbound, InboundNode, InboundTarget } from "./inboundTypes";
 import InboundCreationNodes, { creationIssueMessage } from "./InboundCreationNodes";
 import InboundProfileAdvanced from "./InboundProfileAdvanced";
+import InboundNetworkOptions from "./InboundNetworkOptions";
 import InboundTrafficOptions from "./InboundTrafficOptions";
 import InboundCreationReview from "./InboundCreationReview";
 import { canonicalProfileOptions, profileOptionSection, profileOptionsPayload } from "./inboundProfileOptions";
+import { canonicalEndpointAddress, canonicalEndpoints } from "./inboundEndpointOptions";
+import { validEndpointPreviews } from "./inboundEndpointPreview";
 import { canonicalCreationIP, creationIssues, creationPayload, creationPort, creationShortIDs, emptyCreation, freshCreationShortID, selectedCreationNodes, stateFromCreationPlan,
   type CreationCapabilities, type CreationIssue, type CreationPayload, type CreationPlan, type CreationPlanNode, type CreationPlanResponse, type CreationPreview, type CreationReceipt, type CreationState } from "./InboundCreationModel";
 import "./InboundCreation.css";
@@ -34,10 +37,16 @@ function focusField(issue: CreationIssue, state: CreationState): string {
   const row = issue.nodeID ? state.nodes[issue.nodeID] : undefined;
   if (row && issue.field === "hosts") return row.direct.enabled ? "directHosts" : "tunnelHosts";
   if (row && issue.field === "ports") {
+    const pathFields = { direct: "directPort", tunnel: "tunnelPort", swap_source: "sourcePort", swap_destination: "swapPort" };
+    if (issue.path) return pathFields[issue.path];
     const ports: Array<[string, number]> = [];
     if (row.direct.enabled) ports.push(["directPort", creationPort(row.direct.port)]);
     if (row.tunnel.enabled) ports.push(["tunnelPort", creationPort(row.tunnel.port)]);
     if (row.swap.enabled && (!row.tunnel.enabled || row.swap.destinationPort !== row.tunnel.port)) ports.push(["swapPort", creationPort(row.swap.destinationPort)]);
+    if (issue.port) return ports.find(([, port]) => port === issue.port)?.[0] ?? "node";
+    // Older servers did not identify an externally reserved port. Do not
+    // highlight an unrelated Direct input as if it were the known conflict.
+    if (issue.code === "existing_listener_port_collision") return "node";
     const seen = new Set<number>();
     for (const [field, port] of ports) { if (issue.code === "port_reserved" ? [2087, 8443, 24443].includes(port) : seen.has(port)) return field; seen.add(port); }
     return ports[0]?.[0] ?? "directEnabled";
@@ -87,11 +96,11 @@ function normalizedProfile(profile: CreationPayload["profile"]): string {
 }
 function normalizedNode(node: CreationPlanNode): string {
   return JSON.stringify({ node_id: node.node_id, installation_id: node.installation_id, listen_ip: canonicalCreationIP(node.listen_ip),
-    direct_port: node.direct_port, direct_hosts: node.direct_hosts.map(value => value.trim().toLowerCase()),
-    tunnel_port: node.tunnel_port, tunnel_hosts: node.tunnel_hosts.map(value => value.trim().toLowerCase()),
+    direct_port: node.direct_port, direct_hosts: node.direct_hosts.map(canonicalEndpointAddress), direct_endpoints: canonicalEndpoints(node.direct_endpoints),
+    tunnel_port: node.tunnel_port, tunnel_hosts: node.tunnel_hosts.map(canonicalEndpointAddress), tunnel_endpoints: canonicalEndpoints(node.tunnel_endpoints),
     swap_enabled: node.swap_enabled, swap_source_node_id: node.swap_source_node_id, swap_source_installation_id: node.swap_source_installation_id,
     swap_source_listen_ip: canonicalCreationIP(node.swap_source_listen_ip), swap_source_port: node.swap_source_port,
-    swap_entry_address: node.swap_entry_address.trim().toLowerCase(), swap_entry_port: node.swap_entry_port, swap_destination_port: node.swap_destination_port });
+    swap_entry_address: canonicalEndpointAddress(node.swap_entry_address), swap_entry_port: node.swap_entry_port, swap_destination_port: node.swap_destination_port });
 }
 function validPlan(plan: CreationPlan | undefined, body: CreationPayload, expectedInboundRevision: number): plan is CreationPlan {
   try {
@@ -139,6 +148,8 @@ export default function InboundCreation({ language, nodes, targets, capabilities
   const locked = busy || uncertain || readOnly;
   const sniffingSupported = capabilities.profile_sniffing === true && capabilities.profile_traffic_options_scope === "creation_plan";
   const fallbacksSupported = capabilities.profile_fallbacks === true && capabilities.profile_traffic_options_scope === "creation_plan";
+  const xhttpSupported = capabilities.profile_xhttp === true && capabilities.profile_network_options_scope === "creation_plan";
+  const clientOptionsSupported = capabilities.profile_client_options === true && capabilities.profile_network_options_scope === "creation_plan";
   useEffect(() => { const controller = new AbortController(); lifetime.current = controller; return () => controller.abort(); }, []);
   useEffect(() => { onDirtyChange(dirty); }, [dirty, onDirtyChange]);
   useEffect(() => () => onDirtyChange(false), [onDirtyChange]);
@@ -173,6 +184,11 @@ export default function InboundCreation({ language, nodes, targets, capabilities
       if (capabilities.profile_options !== true && options) next.push({ field: "profileOptions", code: "profile_options_unavailable" });
       if (!sniffingSupported && options?.sniffing !== undefined) next.push({ field: "sniffing.enabled", code: "profile_sniffing_unavailable" });
       if (!fallbacksSupported && options?.fallbacks !== undefined) next.push({ field: "fallbacks", code: "profile_fallbacks_unavailable" });
+      if (!xhttpSupported && (state.profile.transport === "xhttp" || options?.xhttp !== undefined)) next.push({ field: "transport", code: "profile_xhttp_unavailable" });
+      if (!clientOptionsSupported && options?.client !== undefined) next.push({ field: "clientOptions", code: "profile_client_options_unavailable" });
+      if (capabilities.endpoint_options !== true) for (const row of selectedCreationNodes(state)) for (const path of ["direct", "tunnel"] as const) {
+        if (row[path].endpoints !== undefined || row[path].endpointsPresent) next.push({ nodeID: row.nodeID, field: path + "Endpoints", code: "endpoint_options_unavailable" });
+      }
     }
     setIssues(next);
     if (!next.length) return true;
@@ -193,8 +209,11 @@ export default function InboundCreation({ language, nodes, targets, capabilities
   function serverIssue(error: unknown) {
     if (!(error instanceof CreationApiError) || !error.issue) return;
     let issue = error.issue;
-    if (issue.nodeID && !state.selected.includes(issue.nodeID)) {
-      const destination = selectedCreationNodes(state).find(row => row.swap.enabled && row.swap.sourceNodeID === issue.nodeID);
+    if (issue.destinationNodeID && state.selected.includes(issue.destinationNodeID)) {
+      issue = { ...issue, nodeID: issue.destinationNodeID };
+      if (issue.path === "swap_source" && (issue.field === "listenIP" || issue.field === "ports")) issue = { ...issue, field: issue.field === "listenIP" ? "sourceListenIP" : "sourcePort" };
+    } else if (issue.nodeID && !state.selected.includes(issue.nodeID)) {
+      const destination = selectedCreationNodes(state).find(row => row.swap.enabled && row.swap.sourceNodeID === issue.nodeID && (!issue.port || creationPort(row.swap.sourcePort) === issue.port));
       if (destination) issue = { ...issue, nodeID: destination.nodeID, field: issue.field === "listenIP" || issue.field === "sourceListenIP" ? "sourceListenIP" : "sourcePort" };
     }
     setIssues([issue]);
@@ -203,7 +222,7 @@ export default function InboundCreation({ language, nodes, targets, capabilities
     setFocusRequest({ ...issue });
   }
   function needsReload(error: unknown): boolean {
-    return error instanceof ApiError && error.status === 409 && (!(error instanceof CreationApiError) || !error.issue || ["plan_revision_conflict", "profile_changed_or_materialized", "inbound_id_exists", "profile_options_required", "profile_sniffing_required", "profile_fallbacks_required"].includes(error.issue.code));
+    return error instanceof ApiError && error.status === 409 && (!(error instanceof CreationApiError) || !error.issue || ["plan_revision_conflict", "profile_changed_or_materialized", "inbound_id_exists", "profile_options_required", "profile_sniffing_required", "profile_fallbacks_required", "profile_xhttp_required", "profile_client_options_required", "endpoint_options_required"].includes(error.issue.code));
   }
   async function check() {
     if (busy || blocked || uncertain || readOnly || !csrf || !validate()) return;
@@ -214,7 +233,7 @@ export default function InboundCreation({ language, nodes, targets, capabilities
       const result = await creationAPI<CreationPreview>("/api/v1/workspace/native-inbound-plans/preview", { method: "POST", signal: controller.signal,
         headers: { "Content-Type": "application/json", "X-CSRF-Token": csrf }, body: JSON.stringify(payload) }, onUnauthorized);
       if (!result || result.valid !== true || result.runtime_changed !== false || result.topology_validated !== true || result.topology_validation_only !== true ||
-        result.topology_key_scope !== (editing ? "saved_profile" : "preview_only") || !validPlan(result.plan, payload, expectedInboundRevision(payload))) throw new Error("invalid_setup_preview");
+        result.topology_key_scope !== (editing ? "saved_profile" : "preview_only") || !validPlan(result.plan, payload, expectedInboundRevision(payload)) || capabilities.endpoint_options === true && !validEndpointPreviews(result.endpoints, payload)) throw new Error("invalid_setup_preview");
       if (!controller.signal.aborted) { setPreview(result); setSection("review"); setReferencesValid(true); setMessage(""); }
     } catch (error) { if (!controller.signal.aborted) { const changed = needsReload(error); setConflict(changed); setMessage(changed ? editing ? t.conflict : t.createConflict : t.error); serverIssue(error); } }
     finally { if (!controller.signal.aborted) setBusy(false); }
@@ -275,9 +294,10 @@ export default function InboundCreation({ language, nodes, targets, capabilities
           <details className="creation-connection-group" data-connection-group="network" open>
             <summary><Link2 size={16} aria-hidden="true"/><span>{t.network}</span></summary>
             <div className="creation-connection-fields">
-              <fieldset className="creation-presets" disabled={locked}><legend>{t.preset}</legend>{["tcp", "grpc"].filter(transport => capabilities.transports.includes(transport)).map(transport => <label key={transport} data-selected={state.profile.transport === transport}><input type="radio" name="creation-transport" data-creation-field={transport === "tcp" ? "transport" : undefined} aria-label={transport === "tcp" ? "TCP / REALITY" : "gRPC / REALITY"} checked={state.profile.transport === transport} onChange={() => profile("transport", transport)}/><span><bdi>{transport === "tcp" ? "TCP / REALITY" : "gRPC / REALITY"}</bdi><small>{transport === "tcp" ? "Vision" : "gRPC"}</small></span></label>)}</fieldset>
+              <fieldset className="creation-presets" disabled={locked}><legend>{t.preset}</legend>{["tcp", "grpc", ...(xhttpSupported ? ["xhttp"] : [])].filter(transport => capabilities.transports.includes(transport)).map(transport => { const title = transport === "tcp" ? "TCP / REALITY" : transport === "grpc" ? "gRPC / REALITY" : "XHTTP / REALITY"; return <label key={transport} data-selected={state.profile.transport === transport}><input type="radio" name="creation-transport" data-creation-field={transport === "tcp" ? "transport" : undefined} aria-label={title} checked={state.profile.transport === transport} onChange={() => profile("transport", transport)}/><span><bdi>{title}</bdi><small>{transport === "tcp" ? "Vision" : transport === "grpc" ? "gRPC" : "XHTTP"}</small></span></label>; })}</fieldset>
               {state.profile.transport === "grpc" && <label className="creation-field"><span>{t.service}</span><input aria-label={t.service} data-creation-field="grpcService" aria-invalid={invalid("grpcService")} dir="ltr" maxLength={64} value={state.profile.grpcService} disabled={locked} onChange={event => profile("grpcService", event.target.value)} autoComplete="off"/><small>{t.serviceHelp}</small></label>}
               {state.profile.transport === "grpc" && <InboundProfileAdvanced language={language} section="network" value={state.profile.options} onChange={options => update({ ...state, profile: { ...state.profile, options } })} supported={capabilities.profile_options === true} disabled={locked} invalidFields={issues.map(issue => issue.field)}/>}
+              {state.profile.transport === "xhttp" && <InboundNetworkOptions language={language} section="xhttp" value={state.profile.options} onChange={options => update({ ...state, profile: { ...state.profile, options } })} supported={xhttpSupported} disabled={locked} invalidFields={issues.map(issue => issue.field)}/>}
               {groupIssues("network")}
             </div>
           </details>
@@ -289,12 +309,13 @@ export default function InboundCreation({ language, nodes, targets, capabilities
               <div className="creation-field"><span><label htmlFor={shortIDInputID}>{t.shortIDs}</label><button type="button" aria-label={t.generate} disabled={locked || creationShortIDs(state.shortIDs).length >= 16} onClick={() => update({ ...state, shortIDs: [...creationShortIDs(state.shortIDs), freshCreationShortID()].join(", ") })}><Plus size={13}/>{t.generate}</button></span><input id={shortIDInputID} aria-label={t.shortIDs} data-creation-field="shortIDs" aria-invalid={invalid("shortIDs")} dir="ltr" value={state.shortIDs} disabled={locked} onChange={event => update({ ...state, shortIDs: event.target.value })} autoComplete="off" spellCheck={false}/><small>{t.shortHelp}</small></div>
               <p className="creation-key-note"><KeyRound size={17}/><span>{editing ? t.preserved : t.generated}</span></p>
               <InboundProfileAdvanced language={language} section="security" value={state.profile.options} onChange={options => update({ ...state, profile: { ...state.profile, options } })} supported={capabilities.profile_options === true} disabled={locked} invalidFields={issues.map(issue => issue.field)}/>
+              {(clientOptionsSupported || state.profile.options?.clientPresent) && <InboundNetworkOptions language={language} section="client" value={state.profile.options} onChange={options => update({ ...state, profile: { ...state.profile, options } })} supported={clientOptionsSupported} disabled={locked} invalidFields={issues.map(issue => issue.field)}/>}
               {groupIssues("security")}
             </div>
           </details>
         </section>
         <section id="creation-panel-swap" role="tabpanel" aria-labelledby="creation-tab-swap" hidden={section !== "swap"}>
-          {section === "swap" && <InboundCreationNodes language={language} state={state} nodes={nodes} targets={targets} disabled={locked} expanded={expanded} onExpanded={setExpanded} onChange={update} issues={issues}/>}
+          {section === "swap" && <InboundCreationNodes language={language} state={state} nodes={nodes} targets={targets} disabled={locked} expanded={expanded} onExpanded={setExpanded} onChange={update} issues={issues} endpointOptionsSupported={capabilities.endpoint_options === true} maxEndpointsPerPath={capabilities.max_endpoints_per_path} listenerPortMin={capabilities.listener_port_min} listenerPortMax={capabilities.listener_port_max} reservedListenerPorts={capabilities.reserved_listener_ports}/>}
           {issues.filter(issue => issue.field === "nodes").map((issue, index) => <p key={index} className="creation-issues" role="alert">{creationIssueMessage(issue, language)}</p>)}
         </section>
         <section id="creation-panel-advanced" role="tabpanel" aria-labelledby="creation-tab-advanced" hidden={section !== "advanced"} className="creation-profile">
@@ -302,15 +323,15 @@ export default function InboundCreation({ language, nodes, targets, capabilities
           <InboundTrafficOptions language={language} value={state.profile.options} transport={state.profile.transport} onChange={options => update({ ...state, profile: { ...state.profile, options } })} sniffingSupported={sniffingSupported} fallbacksSupported={fallbacksSupported} disabled={locked} invalidFields={issues.map(issue => issue.field)}/>
           {issues.filter(issue => issueSection(issue) === "advanced").map((issue, index) => <p key={index} className="creation-issues" role="alert">{creationIssueMessage(issue, language)}</p>)}
           <details className="creation-availability" data-unavailable-features><summary>{language === "fa" ? "امکانات در انتظار پشتیبانی" : "Features pending support"}</summary><dl>
-            <div><dt>{t.network}</dt><dd>WebSocket · HTTP Upgrade · XHTTP · mKCP · TCP HTTP camouflage · Cloudflare / transport PROXY</dd></div>
-            <div><dt>{t.security}</dt><dd>None · TLS / certificates · REALITY Fingerprint / SpiderX · Target Scan / Ping</dd></div>
-            <div><dt>{language === "fa" ? "تنظیمات Host" : "Host settings"}</dt><dd>SNI Override · ALPN · Fingerprint · Path · FinalMask · Mihomo · {language === "fa" ? "حذف از قالب‌های اشتراک" : "per-format exclusion"}</dd></div>
+            <div><dt>{t.network}</dt><dd>WebSocket · HTTP Upgrade · {!xhttpSupported && "XHTTP · "}mKCP · TCP HTTP camouflage · Cloudflare / transport PROXY</dd></div>
+            <div><dt>{t.security}</dt><dd>None · TLS / certificates · {!clientOptionsSupported && "REALITY Fingerprint / SpiderX · "}Target Scan / Ping</dd></div>
+            <div><dt>{language === "fa" ? "تنظیمات Host" : "Host settings"}</dt><dd>{capabilities.endpoint_options !== true && "SNI Override · Fingerprint / SpiderX · "}ALPN · Path · FinalMask · Mihomo · {language === "fa" ? "حذف از قالب‌های اشتراک" : "per-format exclusion"}</dd></div>
             <div><dt>{language === "fa" ? "سایر امکانات" : "Other features"}</dt><dd>Advanced JSON · VMess / Trojan / Shadowsocks / SOCKS / HTTP · Local HUB · Dark Swap Apply / ACK / Diagnostics</dd></div>
           </dl></details>
         </section>
         <section id="creation-panel-review" role="tabpanel" aria-labelledby="creation-tab-review" hidden={section !== "review"} className="creation-review">
           <header className="creation-section-heading"><div><h3>{t.reviewTitle}</h3><p>{t.paused}</p></div></header>
-          <InboundCreationReview language={language} state={state} nodes={nodes} disabled={busy} onEdit={editSection}/>
+          <InboundCreationReview language={language} state={state} nodes={nodes} disabled={busy} onEdit={editSection} publicKey={savedProfile.current?.public_key} checkedEndpoints={preview?.endpoints}/>
           <label className="creation-field"><span>{t.note}</span><input aria-label={t.note} data-creation-field="reason" maxLength={200} value={state.reason} disabled={locked} onChange={event => update({ ...state, reason: event.target.value })} placeholder={t.notePlaceholder}/></label>
           {issues.filter(issue => issue.field === "reason").map((issue, index) => <p key={index} className="creation-issues" role="alert">{creationIssueMessage(issue, language)}</p>)}
           <div className="creation-preview-status" data-checked={!!preview} role="status"><ShieldCheck size={18}/><span>{preview ? t.checked : t.checkFirst}</span></div>

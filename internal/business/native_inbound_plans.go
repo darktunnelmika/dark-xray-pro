@@ -3,6 +3,7 @@ package business
 // Creation plans are an authoring boundary. They deliberately do not create
 // native targets, client bindings, runtime deliveries or billing records.
 import (
+	"bytes"
 	"context"
 	"crypto/cipher"
 	"crypto/ecdh"
@@ -21,6 +22,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/darktunnelmika/dark-xray-pro/internal/usagewire"
 	"github.com/darktunnelmika/dark-xray-pro/internal/xrayconfig"
 )
 
@@ -30,21 +32,23 @@ const MaxNativeInboundPlanNodes = 64
 // EntryAddress/EntryPort describe a manually configured external forward; they
 // are never inferred from either node's bind address and are not health proof.
 type NativeInboundPlanNode struct {
-	NodeID                   string   `json:"node_id"`
-	InstallationID           string   `json:"installation_id"`
-	ListenIP                 string   `json:"listen_ip"`
-	DirectPort               uint16   `json:"direct_port"`
-	DirectHosts              []string `json:"direct_hosts"`
-	TunnelPort               uint16   `json:"tunnel_port"`
-	TunnelHosts              []string `json:"tunnel_hosts"`
-	SwapEnabled              bool     `json:"swap_enabled"`
-	SwapSourceNodeID         string   `json:"swap_source_node_id"`
-	SwapSourceInstallationID string   `json:"swap_source_installation_id"`
-	SwapSourceListenIP       string   `json:"swap_source_listen_ip"`
-	SwapSourcePort           uint16   `json:"swap_source_port"`
-	SwapEntryAddress         string   `json:"swap_entry_address"`
-	SwapEntryPort            uint16   `json:"swap_entry_port"`
-	SwapDestinationPort      uint16   `json:"swap_destination_port"`
+	NodeID                   string                  `json:"node_id"`
+	InstallationID           string                  `json:"installation_id"`
+	ListenIP                 string                  `json:"listen_ip"`
+	DirectPort               uint16                  `json:"direct_port"`
+	DirectHosts              []string                `json:"direct_hosts"`
+	DirectEndpoints          []NativeInboundEndpoint `json:"direct_endpoints,omitempty"`
+	TunnelPort               uint16                  `json:"tunnel_port"`
+	TunnelHosts              []string                `json:"tunnel_hosts"`
+	TunnelEndpoints          []NativeInboundEndpoint `json:"tunnel_endpoints,omitempty"`
+	SwapEnabled              bool                    `json:"swap_enabled"`
+	SwapSourceNodeID         string                  `json:"swap_source_node_id"`
+	SwapSourceInstallationID string                  `json:"swap_source_installation_id"`
+	SwapSourceListenIP       string                  `json:"swap_source_listen_ip"`
+	SwapSourcePort           uint16                  `json:"swap_source_port"`
+	SwapEntryAddress         string                  `json:"swap_entry_address"`
+	SwapEntryPort            uint16                  `json:"swap_entry_port"`
+	SwapDestinationPort      uint16                  `json:"swap_destination_port"`
 }
 
 type NativeInboundPlanInput struct {
@@ -55,6 +59,7 @@ type NativeInboundPlanInput struct {
 	Nodes                   []NativeInboundPlanNode `json:"nodes"`
 	Reason                  string                  `json:"reason"`
 	profileOptionsPresence  inboundOptionPresence
+	endpointOptionsPresence map[string]nativeEndpointPresence
 }
 
 type NativeInboundPlan struct {
@@ -73,10 +78,11 @@ type NativeInboundPlan struct {
 }
 
 type NativeInboundPlanSummary struct {
-	InboundID       uint64 `json:"inbound_id"`
-	PlanRevision    uint64 `json:"plan_revision"`
-	InboundRevision uint64 `json:"inbound_revision"`
-	Status          string `json:"status"`
+	InboundID       uint64   `json:"inbound_id"`
+	PlanRevision    uint64   `json:"plan_revision"`
+	InboundRevision uint64   `json:"inbound_revision"`
+	Status          string   `json:"status"`
+	NodeIDs         []string `json:"node_ids"`
 }
 
 type NativeInboundPlanReceipt struct {
@@ -91,28 +97,51 @@ type NativeInboundPlanReceipt struct {
 }
 
 type NativeInboundPlanPreview struct {
-	Valid                  bool                        `json:"valid"`
-	Plan                   NativeInboundPlan           `json:"plan"`
-	RuntimeChanged         bool                        `json:"runtime_changed"`
-	TopologyValidated      bool                        `json:"topology_validated"`
-	TopologyValidationOnly bool                        `json:"topology_validation_only"`
-	TopologyKeyScope       string                      `json:"topology_key_scope"`
-	Topology               xrayconfig.CreationTopology `json:"topology"`
+	Valid                  bool                           `json:"valid"`
+	Plan                   NativeInboundPlan              `json:"plan"`
+	RuntimeChanged         bool                           `json:"runtime_changed"`
+	TopologyValidated      bool                           `json:"topology_validated"`
+	TopologyValidationOnly bool                           `json:"topology_validation_only"`
+	TopologyKeyScope       string                         `json:"topology_key_scope"`
+	Topology               xrayconfig.CreationTopology    `json:"topology"`
+	Endpoints              []NativeInboundEndpointPreview `json:"endpoints"`
 }
 
-// Field-level failures contain only fixed codes and the submitted node ID, no
-// configuration, keys, credentials or underlying SQLite messages.
+// Field-level failures contain only fixed codes and submitted listener identity,
+// never another Inbound's configuration, keys or underlying SQLite messages.
 type NativeInboundPlanError struct {
-	NodeID string `json:"node_id,omitempty"`
-	Field  string `json:"field"`
-	Code   string `json:"code"`
-	kind   error
+	NodeID            string `json:"node_id,omitempty"`
+	DestinationNodeID string `json:"destination_node_id,omitempty"`
+	Path              string `json:"path,omitempty"`
+	Port              uint16 `json:"port,omitempty"`
+	Field             string `json:"field"`
+	Code              string `json:"code"`
+	kind              error
 }
 
 func (e *NativeInboundPlanError) Error() string { return e.Code }
 func (e *NativeInboundPlanError) Unwrap() error { return e.kind }
 func planError(node, field, code string, kind error) error {
 	return &NativeInboundPlanError{NodeID: node, Field: field, Code: code, kind: kind}
+}
+
+// A relay listener belongs to the destination row that requested it. Preserve
+// that owner while validating the physical Node so multi-destination errors do
+// not point at an unrelated listener or at the first relay using the same Node.
+type planListenerOwner struct {
+	destination string
+	path        string
+	portField   string
+	listenField string
+}
+
+func (o planListenerOwner) problem(node string, port uint16, code string, binding bool) error {
+	field := o.portField
+	if binding {
+		field = o.listenField
+	}
+	return &NativeInboundPlanError{NodeID: node, DestinationNodeID: o.destination,
+		Path: o.path, Port: port, Field: field, Code: code, kind: ErrConflict}
 }
 
 func ensureNativeInboundPlans(db *sql.DB) error {
@@ -197,6 +226,17 @@ func sealPlanValue(key []byte, aad string, value any) ([]byte, error) {
 	if _, err = rand.Read(nonce); err != nil {
 		return nil, err
 	}
+	extended := false
+	switch v := value.(type) {
+	case NativeInboundPlan:
+		extended = planNeedsExtendedEnvelope(v)
+	case NativeInboundPlanReceipt:
+		extended = planNeedsExtendedEnvelope(v.Plan)
+	}
+	if extended {
+		sealed := a.Seal(nonce, nonce, raw, []byte("DARK-PRO-CREATION-v2:"+aad))
+		return append([]byte("DXPPLN2\x00"), sealed...), nil
+	}
 	return a.Seal(nonce, nonce, raw, []byte(aad)), nil
 }
 func openPlanValue(key []byte, aad string, encrypted []byte, value any) error {
@@ -204,12 +244,34 @@ func openPlanValue(key []byte, aad string, encrypted []byte, value any) error {
 	if err != nil {
 		return err
 	}
+	original := encrypted
+	extended := bytes.HasPrefix(encrypted, []byte("DXPPLN2\x00"))
+	binding := aad
+	if extended {
+		encrypted = encrypted[len("DXPPLN2\x00"):]
+		binding = "DARK-PRO-CREATION-v2:" + aad
+	}
 	n := a.NonceSize()
 	if len(encrypted) < n+a.Overhead() {
 		return ErrUnavailable
 	}
-	raw, err := a.Open(nil, encrypted[:n], encrypted[n:], []byte(aad))
-	if err != nil || json.Unmarshal(raw, value) != nil {
+	raw, err := a.Open(nil, encrypted[:n], encrypted[n:], []byte(binding))
+	if err != nil && extended && len(original) >= n+a.Overhead() {
+		// A legacy nonce can coincidentally start with the version marker.
+		raw, err = a.Open(nil, original[:n], original[n:], []byte(aad))
+		extended = false
+	}
+	if err != nil || usagewire.Decode(raw, value) != nil {
+		return ErrUnavailable
+	}
+	needsExtended := false
+	switch v := value.(type) {
+	case *NativeInboundPlan:
+		needsExtended = planNeedsExtendedEnvelope(*v)
+	case *NativeInboundPlanReceipt:
+		needsExtended = planNeedsExtendedEnvelope(v.Plan)
+	}
+	if needsExtended != extended {
 		return ErrUnavailable
 	}
 	return nil
@@ -234,13 +296,17 @@ func planListenerPort(p uint16) bool { return p >= 1024 && p != 2087 && p != 844
 
 func normalizeNativeInboundPlan(in NativeInboundPlanInput) (NativeInboundPlanInput, error) {
 	in.profileOptionsPresence = in.profileOptionsPresence.include(in.Profile.Options)
+	captureEndpointPresence(&in)
 	in.Reason = strings.TrimSpace(in.Reason)
 	in.Profile.Name = strings.TrimSpace(in.Profile.Name)
 	if !eventRE.MatchString(in.EventID) {
 		return in, planError("", "event_id", "event_id_invalid", ErrInvalid)
 	}
-	if in.Profile.ID == 0 || in.Profile.ID > 1<<53-1 || !validName(in.Profile.Name, 128) {
-		return in, planError("", "profile", "profile_invalid", ErrInvalid)
+	if in.Profile.ID == 0 || in.Profile.ID > 1<<53-1 {
+		return in, planError("", "profile.id", "profile_invalid", ErrInvalid)
+	}
+	if !validName(in.Profile.Name, 128) {
+		return in, planError("", "profile.name", "name_invalid", ErrInvalid)
 	}
 	if in.ExpectedPlanRevision >= 1<<53-1 || in.ExpectedInboundRevision >= 1<<53-1 ||
 		(in.ExpectedPlanRevision == 0) != (in.ExpectedInboundRevision == 0) {
@@ -257,6 +323,10 @@ func normalizeNativeInboundPlan(in NativeInboundPlanInput) (NativeInboundPlanInp
 	in.Profile.ShortIDs = append([]string(nil), in.Profile.ShortIDs...)
 	options, optionsErr := xrayconfig.NormalizeProfileOptions(in.Profile.Transport, in.Profile.Options)
 	if optionsErr != nil {
+		var networkDetail *xrayconfig.ProfileValidationError
+		if errors.As(optionsErr, &networkDetail) {
+			return in, planError("", "profile."+networkDetail.Field, networkDetail.Code, ErrInvalid)
+		}
 		var detail *xrayconfig.ProfileOptionError
 		if errors.As(optionsErr, &detail) {
 			return in, planError("", "profile.options."+detail.Field, detail.Code, ErrInvalid)
@@ -291,6 +361,15 @@ func normalizeNativeInboundPlan(in NativeInboundPlanInput) (NativeInboundPlanInp
 		}
 		if !ok || len(hostUnion) > maxRouteHosts {
 			return in, planError(n.NodeID, "tunnel_hosts", "host_limit_or_invalid", ErrInvalid)
+		}
+		var endpointErr error
+		n.DirectEndpoints, endpointErr = normalizePlanEndpoints(in.Profile, n.NodeID, "direct", n.DirectPort, n.DirectHosts, n.DirectEndpoints)
+		if endpointErr != nil {
+			return in, endpointErr
+		}
+		n.TunnelEndpoints, endpointErr = normalizePlanEndpoints(in.Profile, n.NodeID, "tunnel", n.TunnelPort, n.TunnelHosts, n.TunnelEndpoints)
+		if endpointErr != nil {
+			return in, endpointErr
 		}
 		if n.DirectPort == 0 && len(n.DirectHosts) != 0 || n.TunnelPort == 0 && len(n.TunnelHosts) != 0 {
 			return in, planError(n.NodeID, "hosts", "disabled_path_has_hosts", ErrInvalid)
@@ -358,46 +437,47 @@ func planEntryMappings(nodes []NativeInboundPlanNode) (map[string]planEntryMappi
 type planNodeListeners struct {
 	installation string
 	listenIP     string
-	ports        map[uint16]bool
+	binding      planListenerOwner
+	ports        map[uint16]planListenerOwner
 }
 
 // Includes relay-only source nodes, not merely the selected destination rows.
 func planListeners(nodes []NativeInboundPlanNode) (map[string]*planNodeListeners, error) {
 	out := map[string]*planNodeListeners{}
-	add := func(node, installation, ip string, port uint16) error {
+	add := func(node, installation, ip string, port uint16, owner planListenerOwner) error {
 		state, exists := out[node]
 		if !exists {
-			state = &planNodeListeners{installation: installation, listenIP: ip, ports: map[uint16]bool{}}
+			state = &planNodeListeners{installation: installation, listenIP: ip, binding: owner, ports: map[uint16]planListenerOwner{}}
 			out[node] = state
 		}
 		if state.installation != installation || state.listenIP != ip {
-			return planError(node, "listen_ip", "node_binding_conflict", ErrConflict)
+			return owner.problem(node, port, "node_binding_conflict", true)
 		}
 		if port == 0 {
 			return nil
 		}
-		if state.ports[port] {
-			return planError(node, "ports", "listener_port_collision", ErrConflict)
+		if _, exists := state.ports[port]; exists {
+			return owner.problem(node, port, "listener_port_collision", false)
 		}
-		state.ports[port] = true
+		state.ports[port] = owner
 		return nil
 	}
 	edges := map[string][]string{}
 	for _, n := range nodes {
-		if err := add(n.NodeID, n.InstallationID, n.ListenIP, n.DirectPort); err != nil {
+		if err := add(n.NodeID, n.InstallationID, n.ListenIP, n.DirectPort, planListenerOwner{n.NodeID, "direct", "direct_port", "listen_ip"}); err != nil {
 			return nil, err
 		}
-		if err := add(n.NodeID, n.InstallationID, n.ListenIP, n.TunnelPort); err != nil {
+		if err := add(n.NodeID, n.InstallationID, n.ListenIP, n.TunnelPort, planListenerOwner{n.NodeID, "tunnel", "tunnel_port", "listen_ip"}); err != nil {
 			return nil, err
 		}
 		if n.SwapEnabled {
 			// Reuse of the destination's ordinary Tunnel termination is explicit.
 			if n.SwapDestinationPort != n.TunnelPort {
-				if err := add(n.NodeID, n.InstallationID, n.ListenIP, n.SwapDestinationPort); err != nil {
+				if err := add(n.NodeID, n.InstallationID, n.ListenIP, n.SwapDestinationPort, planListenerOwner{n.NodeID, "swap_destination", "swap_destination_port", "listen_ip"}); err != nil {
 					return nil, err
 				}
 			}
-			if err := add(n.SwapSourceNodeID, n.SwapSourceInstallationID, n.SwapSourceListenIP, n.SwapSourcePort); err != nil {
+			if err := add(n.SwapSourceNodeID, n.SwapSourceInstallationID, n.SwapSourceListenIP, n.SwapSourcePort, planListenerOwner{n.NodeID, "swap_source", "swap_source_port", "swap_source_listen_ip"}); err != nil {
 				return nil, err
 			}
 			edges[n.SwapSourceNodeID] = append(edges[n.SwapSourceNodeID], n.NodeID)
@@ -444,6 +524,13 @@ func plannedProfile(in InboundInput, privateKey string) xrayconfig.Profile {
 		Options: in.Options, RealityPrivateKey: privateKey, Users: []xrayconfig.User{}}
 }
 func validatePlannedProfile(p xrayconfig.Profile) error {
+	if err := xrayconfig.ValidateProfile(p); err != nil {
+		var detail *xrayconfig.ProfileValidationError
+		if errors.As(err, &detail) {
+			return planError("", "profile."+detail.Field, detail.Code, ErrInvalid)
+		}
+		return planError("", "profile", "profile_invalid", ErrInvalid)
+	}
 	_, err := xrayconfig.RenderAssigned("profile-validation", "00000000000000000000000000000000", "127.0.0.1", []xrayconfig.Assignment{{Profile: p, DirectPort: 10443}})
 	if err != nil {
 		return planError("", "profile", "profile_invalid", ErrInvalid)
@@ -485,8 +572,11 @@ func readNativeInboundPlan(ctx context.Context, q inboundReader, key []byte, id 
 	return out, nil
 }
 
-func (s *Store) ListNativeInboundPlans(ctx context.Context) ([]NativeInboundPlanSummary, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT inbound_id,revision,inbound_revision,status FROM native_inbound_plans ORDER BY inbound_id LIMIT 257`)
+func (s *Store) ListNativeInboundPlans(ctx context.Context, key []byte) ([]NativeInboundPlanSummary, error) {
+	if len(key) != 32 {
+		return nil, ErrUnavailable
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT inbound_id,revision,inbound_revision,status,payload_enc FROM native_inbound_plans ORDER BY inbound_id LIMIT 257`)
 	if err != nil {
 		return nil, err
 	}
@@ -494,9 +584,36 @@ func (s *Store) ListNativeInboundPlans(ctx context.Context) ([]NativeInboundPlan
 	out := make([]NativeInboundPlanSummary, 0)
 	for rows.Next() {
 		var p NativeInboundPlanSummary
-		if err = rows.Scan(&p.InboundID, &p.PlanRevision, &p.InboundRevision, &p.Status); err != nil {
+		var enc []byte
+		if err = rows.Scan(&p.InboundID, &p.PlanRevision, &p.InboundRevision, &p.Status, &enc); err != nil {
 			return nil, err
 		}
+		var plan NativeInboundPlan
+		if err = openPlanValue(key, planAAD(p.InboundID, p.PlanRevision), enc, &plan); err != nil {
+			return nil, err
+		}
+		if plan.Profile.ID != p.InboundID || plan.PlanRevision != p.PlanRevision || plan.InboundRevision != p.InboundRevision ||
+			plan.Profile.Revision != p.InboundRevision || plan.Status != p.Status || plan.Profile.Enabled || plan.Profile.Archived ||
+			plan.Profile.BoundClients != 0 || plan.RuntimeApply || !plan.Editable || len(plan.Nodes) == 0 || len(plan.Nodes) > MaxNativeInboundPlanNodes {
+			return nil, ErrUnavailable
+		}
+		// Include relay-only participants, but expose no addresses, keys or
+		// materialized assignments. These IDs describe an authenticated plan.
+		ids := map[string]bool{}
+		for _, node := range plan.Nodes {
+			if !idRE.MatchString(node.NodeID) || node.SwapEnabled && !idRE.MatchString(node.SwapSourceNodeID) {
+				return nil, ErrUnavailable
+			}
+			ids[node.NodeID] = true
+			if node.SwapEnabled {
+				ids[node.SwapSourceNodeID] = true
+			}
+		}
+		p.NodeIDs = make([]string, 0, len(ids))
+		for id := range ids {
+			p.NodeIDs = append(p.NodeIDs, id)
+		}
+		sort.Strings(p.NodeIDs)
 		out = append(out, p)
 	}
 	if len(out) > 256 {
@@ -572,11 +689,11 @@ func verifyPlanCollisions(ctx context.Context, tx *sql.Tx, key []byte, in Native
 			return nil
 		}
 		if p.installation != installation || p.listenIP != ip {
-			return planError(node, "listen_ip", "existing_node_binding_conflict", ErrConflict)
+			return p.binding.problem(node, 0, "existing_node_binding_conflict", true)
 		}
 		for _, port := range ports {
-			if port != 0 && p.ports[port] {
-				return planError(node, "ports", "existing_listener_port_collision", ErrConflict)
+			if owner, exists := p.ports[port]; port != 0 && exists {
+				return owner.problem(node, port, "existing_listener_port_collision", false)
 			}
 		}
 		return nil
@@ -745,6 +862,9 @@ func validateNativeInboundPlanTx(ctx context.Context, tx *sql.Tx, key []byte, in
 		if field, code := in.profileOptionsPresence.missing(existing.Options); code != "" {
 			return plan, private, topology, planError("", field, code, ErrConflict)
 		}
+		if err := checkEndpointPresence(in, old); err != nil {
+			return plan, private, topology, err
+		}
 		plan.CreatedUnix = old.CreatedUnix
 		plan.Profile = existing
 		if !reflect.DeepEqual(existing.InboundInput, in.Profile) {
@@ -784,7 +904,7 @@ func (s *Store) PreviewNativeInboundPlan(ctx context.Context, key []byte, input 
 		scope = "preview_only"
 	}
 	return NativeInboundPlanPreview{Valid: true, Plan: plan, TopologyValidated: true,
-		TopologyValidationOnly: true, TopologyKeyScope: scope, Topology: topology}, nil
+		TopologyValidationOnly: true, TopologyKeyScope: scope, Topology: topology, Endpoints: previewPlanEndpoints(plan)}, nil
 }
 
 func readNativePlanReplay(ctx context.Context, tx *sql.Tx, key []byte, in NativeInboundPlanInput, kind, hash string) (NativeInboundPlanReceipt, bool, error) {

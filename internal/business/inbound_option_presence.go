@@ -9,12 +9,20 @@ func hasInboundTrafficOptions(options *xrayconfig.ProfileOptions) bool {
 	return options != nil && (options.Sniffing != nil || len(options.Fallbacks) != 0)
 }
 
+// New network/client sections belong to the complete creation-plan editor.
+// Existing metered delivery has an independently enforced, narrower grammar.
+func hasInboundNetworkOptions(transport string, options *xrayconfig.ProfileOptions) bool {
+	return transport == "xhttp" || options != nil && (options.XHTTP != nil || options.Client != nil)
+}
+
 // Presence is captured before normalization. A browser that only understands
 // older scalar options must not erase a newer section by omitting it.
 type inboundOptionPresence struct {
 	Options   bool
 	Sniffing  bool
 	Fallbacks bool
+	XHTTP     bool
+	Client    bool
 }
 
 func (p inboundOptionPresence) include(options *xrayconfig.ProfileOptions) inboundOptionPresence {
@@ -22,6 +30,8 @@ func (p inboundOptionPresence) include(options *xrayconfig.ProfileOptions) inbou
 		p.Options = true
 		p.Sniffing = p.Sniffing || options.Sniffing != nil
 		p.Fallbacks = p.Fallbacks || options.Fallbacks != nil
+		p.XHTTP = p.XHTTP || options.XHTTP != nil
+		p.Client = p.Client || options.Client != nil
 	}
 	return p
 }
@@ -38,6 +48,12 @@ func (p inboundOptionPresence) missing(existing *xrayconfig.ProfileOptions) (fie
 	}
 	if len(existing.Fallbacks) != 0 && !p.Fallbacks {
 		return "profile.options.fallbacks", "profile_fallbacks_required"
+	}
+	if existing.XHTTP != nil && !p.XHTTP {
+		return "profile.options.xhttp", "profile_xhttp_required"
+	}
+	if existing.Client != nil && !p.Client {
+		return "profile.options.client", "profile_client_options_required"
 	}
 	return "", ""
 }

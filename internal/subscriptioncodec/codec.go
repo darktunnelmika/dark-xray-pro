@@ -4,6 +4,7 @@ package subscriptioncodec
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"net"
 	"net/netip"
@@ -45,17 +46,21 @@ var (
 // Kind is the native listener kind: direct, swap or shared. InboundID and Kind
 // are used only for validation; they are not added to the share URI or its label.
 type Route struct {
-	InboundID   uint64 `json:"inbound_id"`
-	Kind        string `json:"kind"`
-	Host        string `json:"host"`
-	Port        uint16 `json:"port"`
-	Label       string `json:"label"`
-	UUID        string `json:"uuid"`
-	Transport   string `json:"transport"`
-	GRPCService string `json:"grpc_service,omitempty"`
-	ServerName  string `json:"server_name"`
-	PublicKey   string `json:"public_key"`
-	ShortID     string `json:"short_id"`
+	InboundID     uint64         `json:"inbound_id"`
+	Kind          string         `json:"kind"`
+	Host          string         `json:"host"`
+	Port          uint16         `json:"port"`
+	Label         string         `json:"label"`
+	UUID          string         `json:"uuid"`
+	Transport     string         `json:"transport"`
+	GRPCService   string         `json:"grpc_service,omitempty"`
+	GRPCAuthority string         `json:"grpc_authority,omitempty"`
+	GRPCMultiMode bool           `json:"grpc_multi_mode,omitempty"`
+	XHTTP         *XHTTPOptions  `json:"xhttp,omitempty"`
+	Client        *ClientOptions `json:"client,omitempty"`
+	ServerName    string         `json:"server_name"`
+	PublicKey     string         `json:"public_key"`
+	ShortID       string         `json:"short_id"`
 }
 
 // Render returns one URI per line, sorted by its complete canonical URI, with a
@@ -65,7 +70,8 @@ type Route struct {
 //
 // The supported URI fields follow the XTLS share-link proposal:
 // https://github.com/XTLS/Xray-core/discussions/716 . TCP uses Vision; gRPC uses
-// the native renderer's default gun mode and never inherits a Vision flow.
+// the selected gun/multi mode and never inherits a Vision flow. XHTTP extra is
+// constructed only from its typed padding setting, not untrusted JSON.
 func Render(routes []Route, format Format) ([]byte, error) {
 	if format != FormatRaw && format != FormatBase64 {
 		return nil, ErrFormat
@@ -87,11 +93,47 @@ func Render(routes []Route, format Format) ([]byte, error) {
 			"security": "reality", "sid": r.ShortID, "sni": r.ServerName,
 			"type": r.Transport,
 		}
+		if r.Client != nil {
+			if r.Client.Fingerprint != "" {
+				query["fp"] = r.Client.Fingerprint
+			}
+			if r.Client.SpiderX != "" {
+				query["spx"] = r.Client.SpiderX
+			}
+		}
 		if r.Transport == "tcp" {
 			query["flow"] = "xtls-rprx-vision"
-		} else {
+		} else if r.Transport == "grpc" {
 			query["mode"] = "gun"
+			if r.GRPCMultiMode {
+				query["mode"] = "multi"
+			}
 			query["serviceName"] = r.GRPCService
+			if r.GRPCAuthority != "" {
+				query["authority"] = r.GRPCAuthority
+			}
+		} else {
+			query["mode"], query["path"] = "auto", "/"
+			if r.XHTTP != nil {
+				if r.XHTTP.Path != "" {
+					query["path"] = r.XHTTP.Path
+				}
+				if r.XHTTP.Host != "" {
+					query["host"] = r.XHTTP.Host
+				}
+				if r.XHTTP.Mode != "" {
+					query["mode"] = r.XHTTP.Mode
+				}
+				if r.XHTTP.XPaddingBytes != "" {
+					extra, err := json.Marshal(struct {
+						XPaddingBytes string `json:"xPaddingBytes"`
+					}{r.XHTTP.XPaddingBytes})
+					if err != nil {
+						return nil, ErrInvalid
+					}
+					query["extra"] = string(extra)
+				}
+			}
 		}
 		keys := make([]string, 0, len(query))
 		for key := range query {
@@ -133,11 +175,25 @@ func normalize(r Route) (Route, bool) {
 		!shortIDRE.MatchString(r.ShortID) || len(r.ShortID)%2 != 0 {
 		return Route{}, false
 	}
-	if r.Transport == "tcp" {
-		if r.GRPCService != "" {
+	var err error
+	r.XHTTP, err = NormalizeXHTTPOptions(r.XHTTP)
+	if err != nil {
+		return Route{}, false
+	}
+	r.Client, err = NormalizeClientOptions(r.Client)
+	if err != nil {
+		return Route{}, false
+	}
+	if r.Transport != "grpc" && (r.GRPCService != "" || r.GRPCAuthority != "" || r.GRPCMultiMode) || r.Transport != "xhttp" && r.XHTTP != nil {
+		return Route{}, false
+	}
+	switch r.Transport {
+	case "tcp", "xhttp":
+	case "grpc":
+		if !serviceRE.MatchString(r.GRPCService) || r.GRPCAuthority != "" && !ValidAuthority(r.GRPCAuthority) {
 			return Route{}, false
 		}
-	} else if r.Transport != "grpc" || !serviceRE.MatchString(r.GRPCService) {
+	default:
 		return Route{}, false
 	}
 	key, err := base64.RawURLEncoding.Strict().DecodeString(r.PublicKey)

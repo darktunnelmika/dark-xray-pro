@@ -51,14 +51,17 @@ func (s *Server) attachNativeInboundPlans(mux *http.ServeMux) {
 			respond(w, http.StatusOK, map[string]any{"available": false, "version": 1, "runtime_apply": false})
 			return
 		}
-		plans, err := s.business.ListNativeInboundPlans(r.Context())
+		plans, err := s.business.ListNativeInboundPlans(r.Context(), s.inboundKey)
 		if err != nil {
 			nativeInboundPlanError(w, err)
 			return
 		}
-		respond(w, http.StatusOK, map[string]any{"available": true, "version": 1,
+		respond(w, http.StatusOK, map[string]any{"available": true, "version": 2,
 			"max_nodes": business.MaxNativeInboundPlanNodes, "max_hosts_per_node": 64,
-			"protocols": []string{"vless"}, "securities": []string{"reality"}, "transports": []string{"tcp", "grpc"},
+			"protocols": []string{"vless"}, "securities": []string{"reality"}, "transports": []string{"tcp", "grpc", "xhttp"},
+			"profile_xhttp": true, "profile_client_options": true, "profile_network_options_scope": "creation_plan",
+			"endpoint_options": true, "max_endpoints_per_path": business.MaxNativeInboundEndpointsPerPath,
+			"listener_port_min": 1024, "listener_port_max": 65535, "reserved_listener_ports": []uint16{2087, 8443, 24443},
 			"profile_options": true, "profile_sniffing": true, "profile_fallbacks": true,
 			"profile_traffic_options_scope": "creation_plan",
 			"runtime_apply":                 false, "plans": plans})

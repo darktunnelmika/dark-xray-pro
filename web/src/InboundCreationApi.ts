@@ -22,10 +22,25 @@ export async function creationAPI<T>(path: string, options: RequestInit, onUnaut
         const body = await response.json();
         if (typeof body?.error === "string" && /^[a-z_]{3,80}$/.test(body.error)) message = body.error;
         const problem = body?.issue;
-        if (problem && typeof problem.field === "string" && /^[a-z_.]{1,80}$/.test(problem.field) && typeof problem.code === "string" && /^[a-z_]{3,80}$/.test(problem.code) &&
-          (problem.node_id === undefined || typeof problem.node_id === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(problem.node_id))) {
-          const fields: Record<string, string> = { listen_ip: "listenIP", direct_hosts: "directHosts", tunnel_hosts: "tunnelHosts", direct_port: "directPort", tunnel_port: "tunnelPort", swap_source_node_id: "sourceNode", swap_source_listen_ip: "sourceListenIP", swap_source_port: "sourcePort", swap_entry_address: "entryHost", swap_entry_port: "entryPort", swap_destination_port: "swapPort", swap_ports: "sourcePort", profile: "name", "profile.options": "realityMaxTimeDiff", "profile.options.sniffing": "sniffing.domainsExcluded", "profile.options.fallbacks": "fallbacks" };
-          issue = { nodeID: problem.node_id, field: fields[problem.field] ?? problem.field, code: problem.code };
+        const validNodeID = (value: unknown) => value === undefined || typeof value === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(value);
+        if (problem && typeof problem.field === "string" && /^[a-z_0-9.]{1,80}$/.test(problem.field) && typeof problem.code === "string" && /^[a-z_]{3,80}$/.test(problem.code) &&
+          validNodeID(problem.node_id) && validNodeID(problem.destination_node_id) &&
+          (problem.path === undefined || ["direct", "tunnel", "swap_source", "swap_destination"].includes(problem.path)) &&
+          (problem.port === undefined || Number.isSafeInteger(problem.port) && problem.port >= 1 && problem.port <= 65535)) {
+          const fields: Record<string, string> = {
+            listen_ip: "listenIP", direct_hosts: "directHosts", tunnel_hosts: "tunnelHosts", direct_port: "directPort", tunnel_port: "tunnelPort",
+            direct_endpoints: "directEndpoints", tunnel_endpoints: "tunnelEndpoints",
+            swap_source_node_id: "sourceNode", swap_source_listen_ip: "sourceListenIP", swap_source_port: "sourcePort", swap_entry_address: "entryHost",
+            swap_entry_port: "entryPort", swap_destination_port: "swapPort", swap_ports: "sourcePort", profile: "name", "profile.id": "name", "profile.name": "name",
+            "profile.transport": "transport", "profile.grpc_service": "grpcService", "profile.reality_target": "realityTarget", "profile.server_names": "serverNames", "profile.short_ids": "shortIDs",
+            "profile.options": "realityMaxTimeDiff", "profile.options.sniffing": "sniffing.domainsExcluded", "profile.options.fallbacks": "fallbacks",
+            "profile.options.xhttp": "xhttpPath", "profile.options.xhttp.path": "xhttpPath", "profile.options.xhttp.host": "xhttpHost",
+            "profile.options.xhttp.mode": "xhttpMode", "profile.options.xhttp.x_padding_bytes": "xhttpPadding",
+            "profile.options.client": "clientFingerprint", "profile.options.client.fingerprint": "clientFingerprint", "profile.options.client.spider_x": "clientSpiderX",
+          };
+          const endpoint = problem.field.match(/^(direct|tunnel)_endpoints\.(\d{1,2})\.(address|port|label|enabled|sni|fingerprint|spider_x)$/);
+          const field = endpoint ? `${endpoint[1]}Endpoints.${endpoint[2]}.${endpoint[3] === "spider_x" ? "spiderX" : endpoint[3]}` : fields[problem.field] ?? problem.field;
+          issue = { nodeID: problem.node_id, destinationNodeID: problem.destination_node_id, path: problem.path, port: problem.port, field, code: problem.code };
         }
       } catch { /* Responses outside the structured contract are not surfaced. */ }
       throw new CreationApiError(response.status, message, issue);

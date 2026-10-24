@@ -1,9 +1,10 @@
 package xrayconfig
 
 import (
-	"net"
 	"strconv"
 	"strings"
+
+	"github.com/darktunnelmika/dark-xray-pro/internal/subscriptioncodec"
 )
 
 // ProfileOptions contains the explicitly supported advanced transport settings.
@@ -19,6 +20,8 @@ type ProfileOptions struct {
 	RealityShow         bool             `json:"reality_show,omitempty"`
 	Sniffing            *SniffingOptions `json:"sniffing,omitempty"`
 	Fallbacks           []Fallback       `json:"fallbacks,omitempty"`
+	XHTTP               *XHTTPOptions    `json:"xhttp,omitempty"`
+	Client              *ClientOptions   `json:"client,omitempty"`
 }
 
 // The pinned core converts milliseconds to time.Duration (signed nanoseconds).
@@ -33,7 +36,7 @@ func NormalizeProfileOptions(transport string, options *ProfileOptions) (*Profil
 		return nil, nil
 	}
 	o := *options
-	if (transport != "tcp" && transport != "grpc") ||
+	if (transport != "tcp" && transport != "grpc" && transport != "xhttp") ||
 		o.RealityXver < 0 || o.RealityXver > 2 ||
 		o.RealityMaxTimeDiff < 0 || o.RealityMaxTimeDiff > MaxRealityTimeDiffMilliseconds ||
 		(transport != "grpc" && (o.GRPCAuthority != "" || o.GRPCMultiMode)) ||
@@ -52,8 +55,17 @@ func NormalizeProfileOptions(transport string, options *ProfileOptions) (*Profil
 	if o.Fallbacks, err = normalizeFallbacks(transport, o.Fallbacks); err != nil {
 		return nil, err
 	}
+	if o.XHTTP, err = NormalizeXHTTPOptions(o.XHTTP); err != nil {
+		return nil, err
+	}
+	if transport != "xhttp" && o.XHTTP != nil {
+		return nil, &ProfileValidationError{Field: "options.xhttp", Code: "xhttp_invalid"}
+	}
+	if o.Client, err = NormalizeClientOptions(o.Client); err != nil {
+		return nil, err
+	}
 	if o.GRPCAuthority == "" && !o.GRPCMultiMode && o.RealityXver == 0 && o.RealityMaxTimeDiff == 0 &&
-		o.RealityMinClientVer == "" && o.RealityMaxClientVer == "" && !o.RealityShow && o.Sniffing == nil && len(o.Fallbacks) == 0 {
+		o.RealityMinClientVer == "" && o.RealityMaxClientVer == "" && !o.RealityShow && o.Sniffing == nil && len(o.Fallbacks) == 0 && o.XHTTP == nil && o.Client == nil {
 		return nil, nil
 	}
 	return &o, nil
@@ -79,46 +91,7 @@ func realityClientVersion(value string) (uint32, bool) {
 }
 
 func validGRPCAuthority(value string) bool {
-	if len(value) == 0 || len(value) > 259 || strings.ContainsAny(value, " /\\@%?#\t\r\n") {
-		return false
-	}
-	for _, r := range value {
-		if r < 33 || r > 126 {
-			return false
-		}
-	}
-	host := value
-	if strings.HasPrefix(value, "[") && strings.HasSuffix(value, "]") {
-		ip := net.ParseIP(value[1 : len(value)-1])
-		return ip != nil && strings.Contains(value, ":")
-	}
-	if strings.Contains(value, ":") {
-		var port string
-		var err error
-		host, port, err = net.SplitHostPort(value)
-		if err != nil {
-			return false
-		}
-		n, err := strconv.ParseUint(port, 10, 16)
-		if err != nil || n == 0 || strconv.FormatUint(n, 10) != port {
-			return false
-		}
-		if strings.HasPrefix(value, "[") && (net.ParseIP(host) == nil || !strings.Contains(host, ":")) {
-			return false
-		}
-	}
-	if net.ParseIP(host) != nil {
-		return true
-	}
-	if host == "" || len(host) > 253 {
-		return false
-	}
-	for _, label := range strings.Split(host, ".") {
-		if !dnsLabel.MatchString(label) {
-			return false
-		}
-	}
-	return true
+	return subscriptioncodec.ValidAuthority(value)
 }
 
 type grpcSettings struct {
@@ -135,6 +108,9 @@ func profileStream(p Profile) stream {
 	if p.Transport == "grpc" {
 		s.GRPC = &grpcSettings{ServiceName: p.GRPCService}
 	}
+	if p.Transport == "xhttp" {
+		s.XHTTP = &xhttpSettings{}
+	}
 	if o := p.Options; o != nil {
 		s.Reality.Xver = o.RealityXver
 		s.Reality.MaxTimeDiff = o.RealityMaxTimeDiff
@@ -144,6 +120,9 @@ func profileStream(p Profile) stream {
 		if s.GRPC != nil {
 			s.GRPC.Authority = o.GRPCAuthority
 			s.GRPC.MultiMode = o.GRPCMultiMode
+		}
+		if s.XHTTP != nil && o.XHTTP != nil {
+			s.XHTTP = &xhttpSettings{Path: o.XHTTP.Path, Host: o.XHTTP.Host, Mode: o.XHTTP.Mode, XPaddingBytes: o.XHTTP.XPaddingBytes}
 		}
 	}
 	return s
@@ -158,6 +137,9 @@ func optionsFromStream(s stream) *ProfileOptions {
 	if s.GRPC != nil {
 		o.GRPCAuthority = s.GRPC.Authority
 		o.GRPCMultiMode = s.GRPC.MultiMode
+	}
+	if s.XHTTP != nil {
+		o.XHTTP = &XHTTPOptions{Path: s.XHTTP.Path, Host: s.XHTTP.Host, Mode: s.XHTTP.Mode, XPaddingBytes: s.XHTTP.XPaddingBytes}
 	}
 	return o
 }

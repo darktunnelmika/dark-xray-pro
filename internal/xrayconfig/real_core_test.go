@@ -39,4 +39,5 @@ func TestRealPinnedXrayCoreOptIn(t *testing.T) {
 	}
 	t.Run("advanced-loopback", func(t *testing.T) { exerciseRealProfileOptions(t, bin, pin) })
 	t.Run("inbound-options-loopback", func(t *testing.T) { exerciseRealInboundOptions(t, bin, pin) })
+	t.Run("network-options-loopback", func(t *testing.T) { exerciseRealNetworkOptions(t, bin, pin) })
 }

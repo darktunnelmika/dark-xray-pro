@@ -1,8 +1,11 @@
 import type { Inbound, InboundNode } from "./inboundTypes";
 import type { InboundProfileValue } from "./InboundProfileForm";
 import { canonicalProfileOptions, profileOptionIssues, profileOptionsDraft, profileOptionsPayload } from "./inboundProfileOptions";
+import { canonicalEndpointAddress, endpointAddresses, endpointDraft, endpointIssues, endpointPayload, validEndpointAddress, type EndpointDraft, type InboundEndpoint } from "./inboundEndpointOptions";
+import { validUTF8 } from "./inboundNetworkOptions";
+import type { CreationEndpointPreview } from "./inboundEndpointPreview";
 
-export type CreationPath = { enabled: boolean; port: string; hosts: string };
+export type CreationPath = { enabled: boolean; port: string; hosts: string; endpoints?: EndpointDraft[]; endpointsPresent?: boolean };
 export type CreationNode = {
   nodeID: string;
   installationID: string;
@@ -19,10 +22,11 @@ export type CreationState = {
   shortIDs: string;
   profileOptionsPresent: boolean;
 };
-export type CreationIssue = { nodeID?: string; field: string; code: string };
+export type CreationIssue = { nodeID?: string; field: string; code: string; destinationNodeID?: string; path?: "direct" | "tunnel" | "swap_source" | "swap_destination"; port?: number };
 export type CreationPlanNode = {
   node_id: string; installation_id: string; listen_ip: string;
   direct_port: number; direct_hosts: string[]; tunnel_port: number; tunnel_hosts: string[];
+  direct_endpoints?: InboundEndpoint[]; tunnel_endpoints?: InboundEndpoint[];
   swap_enabled: boolean; swap_source_node_id: string; swap_source_installation_id: string;
   swap_source_listen_ip: string; swap_source_port: number; swap_entry_address: string; swap_entry_port: number; swap_destination_port: number;
 };
@@ -38,14 +42,17 @@ export type CreationCapabilities = {
   profile_sniffing?: boolean;
   profile_fallbacks?: boolean;
   profile_traffic_options_scope?: "creation_plan";
-  plans: Array<{ inbound_id: number; plan_revision: number; inbound_revision: number; status: string }>;
+  profile_xhttp?: boolean; profile_client_options?: boolean; profile_network_options_scope?: "creation_plan";
+  endpoint_options?: boolean; max_endpoints_per_path?: number;
+  listener_port_min?: number; listener_port_max?: number; reserved_listener_ports?: number[];
+  plans: Array<{ inbound_id: number; plan_revision: number; inbound_revision: number; status: string; node_ids?: string[] }>;
 };
 export type CreationPayload = {
   event_id: string; expected_plan_revision: number; expected_inbound_revision: number;
   profile: Pick<Inbound, "id" | "name" | "transport" | "grpc_service" | "reality_target" | "server_names" | "short_ids" | "options">;
   nodes: CreationPlanNode[]; reason: string;
 };
-export type CreationPreview = { valid: true; plan: CreationPlan; runtime_changed: false; topology_validated: true; topology_validation_only: true; topology_key_scope: "preview_only" | "saved_profile" };
+export type CreationPreview = { valid: true; plan: CreationPlan; runtime_changed: false; topology_validated: true; topology_validation_only: true; topology_key_scope: "preview_only" | "saved_profile"; endpoints?: CreationEndpointPreview[] };
 export type CreationReceipt = { plan: CreationPlan; event_id: string; replayed: boolean; runtime_changed: false; clients_deleted: false;
   credit_changed: false; usage_reset: false; subscription_published: false };
 export type CreationPlanResponse = { plan: CreationPlan; references_current: boolean };
@@ -54,8 +61,8 @@ export function stateFromCreationPlan(plan: CreationPlan): CreationState {
   const state = emptyCreation(plan.profile);
   state.reason = plan.reason; state.selected = plan.nodes.map(row => row.node_id);
   for (const row of plan.nodes) state.nodes[row.node_id] = { nodeID: row.node_id, installationID: row.installation_id, listenIP: row.listen_ip,
-    direct: { enabled: row.direct_port > 0, port: row.direct_port ? String(row.direct_port) : "", hosts: row.direct_hosts.join("\n") },
-    tunnel: { enabled: row.tunnel_port > 0, port: row.tunnel_port ? String(row.tunnel_port) : "", hosts: row.tunnel_hosts.join("\n") },
+    direct: { enabled: row.direct_port > 0, port: row.direct_port ? String(row.direct_port) : "", hosts: row.direct_hosts.join("\n"), endpoints: row.direct_endpoints?.length ? row.direct_endpoints.map(endpointDraft) : undefined, endpointsPresent: !!row.direct_endpoints?.length },
+    tunnel: { enabled: row.tunnel_port > 0, port: row.tunnel_port ? String(row.tunnel_port) : "", hosts: row.tunnel_hosts.join("\n"), endpoints: row.tunnel_endpoints?.length ? row.tunnel_endpoints.map(endpointDraft) : undefined, endpointsPresent: !!row.tunnel_endpoints?.length },
     swap: { enabled: row.swap_enabled, sourceNodeID: row.swap_source_node_id, sourceInstallationID: row.swap_source_installation_id,
       sourceListenIP: row.swap_source_listen_ip, sourcePort: row.swap_source_port ? String(row.swap_source_port) : "", entryHost: row.swap_entry_address,
       entryPort: row.swap_entry_port ? String(row.swap_entry_port) : "", destinationPort: row.swap_destination_port ? String(row.swap_destination_port) : "" } };
@@ -68,18 +75,20 @@ export function creationPayload(state: CreationState, inboundID: number, planRev
       server_names: state.profile.serverNames.split(/[\s,]+/).filter(Boolean), short_ids: creationShortIDs(state.shortIDs),
       options: profileOptionsPayload(state.profile.options, state.profile.transport) ?? (planRevision > 0 && state.profileOptionsPresent ? {} : undefined) },
     nodes: selectedCreationNodes(state).map(row => ({ node_id: row.nodeID, installation_id: row.installationID, listen_ip: row.listenIP,
-      direct_port: row.direct.enabled ? creationPort(row.direct.port) : 0, direct_hosts: row.direct.enabled ? creationHosts(row.direct.hosts) : [],
-      tunnel_port: row.tunnel.enabled ? creationPort(row.tunnel.port) : 0, tunnel_hosts: row.tunnel.enabled ? creationHosts(row.tunnel.hosts) : [],
+      direct_port: row.direct.enabled ? creationPort(row.direct.port) : 0, direct_hosts: row.direct.enabled ? creationPathHosts(row.direct) : [],
+      tunnel_port: row.tunnel.enabled ? creationPort(row.tunnel.port) : 0, tunnel_hosts: row.tunnel.enabled ? creationPathHosts(row.tunnel) : [],
+      ...(row.direct.endpoints !== undefined || row.direct.endpointsPresent ? { direct_endpoints: row.direct.enabled ? row.direct.endpoints?.map(endpointPayload) ?? [] : [] } : {}),
+      ...(row.tunnel.endpoints !== undefined || row.tunnel.endpointsPresent ? { tunnel_endpoints: row.tunnel.enabled ? row.tunnel.endpoints?.map(endpointPayload) ?? [] : [] } : {}),
       swap_enabled: row.swap.enabled, swap_source_node_id: row.swap.enabled ? row.swap.sourceNodeID : "",
       swap_source_installation_id: row.swap.enabled ? row.swap.sourceInstallationID : "",
       swap_source_listen_ip: row.swap.enabled ? row.swap.sourceListenIP : "",
       swap_source_port: row.swap.enabled ? creationPort(row.swap.sourcePort) : 0,
-      swap_entry_address: row.swap.enabled ? row.swap.entryHost.trim().toLowerCase() : "",
+      swap_entry_address: row.swap.enabled ? canonicalEndpointAddress(row.swap.entryHost) : "",
       swap_entry_port: row.swap.enabled ? creationEntryPort(row.swap.entryPort) : 0,
       swap_destination_port: row.swap.enabled ? creationPort(row.swap.destinationPort) : 0 })), reason: state.reason.trim() };
 }
 export function creationWaitingHosts(row: CreationNode): boolean {
-  return row.direct.enabled && !creationHosts(row.direct.hosts).length || row.tunnel.enabled && !creationHosts(row.tunnel.hosts).length || row.swap.enabled && !row.swap.entryHost.trim();
+  return row.direct.enabled && !creationPathHosts(row.direct).length || row.tunnel.enabled && !creationPathHosts(row.tunnel).length || row.swap.enabled && !row.swap.entryHost.trim();
 }
 
 export function emptyCreation(source?: Inbound): CreationState {
@@ -94,7 +103,8 @@ export function newCreationNode(node: InboundNode): CreationNode {
     direct: { enabled: true, port: "", hosts: "" }, tunnel: { enabled: false, port: "", hosts: "" },
     swap: { enabled: false, sourceNodeID: "", sourceInstallationID: "", sourceListenIP: "", sourcePort: "", entryHost: "", entryPort: "", destinationPort: "" } };
 }
-export function creationHosts(raw: string): string[] { return raw.split(/[,\n\r]+/).map(value => value.trim().toLowerCase()).filter(Boolean); }
+export function creationHosts(raw: string): string[] { return raw.split(/[,\n\r]+/).map(canonicalEndpointAddress).filter(Boolean); }
+export function creationPathHosts(path: CreationPath): string[] { return path.endpoints !== undefined ? endpointAddresses(path.endpoints) : creationHosts(path.hosts); }
 /** Match Go's net.ParseIP(...).String() when comparing valid, server-normalized bind IPs. */
 export function canonicalCreationIP(value: string): string {
   const ip = value.trim();
@@ -117,15 +127,26 @@ export function creationNodeName(nodes: InboundNode[], id: string): string {
 }
 export function selectedCreationNodes(state: CreationState): CreationNode[] { return state.selected.map(id => state.nodes[id]).filter((node): node is CreationNode => !!node); }
 
+function validCreationServerName(value: string): boolean {
+  const labels = value.split(".");
+  const ip = /^(?:0|[1-9][0-9]{0,2})(?:\.(?:0|[1-9][0-9]{0,2})){3}$/.test(value) && labels.every(label => Number(label) <= 255);
+  if (!value || value.length > 253 || labels.length < 2 || ip || value.includes(":")) return false;
+  return labels.every(label => /^[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$/.test(label));
+}
+
 /** Editing checks are advisory; the atomic server preview/save repeats validation. */
 export function creationIssues(state: CreationState, available: InboundNode[]): CreationIssue[] {
   const issues: CreationIssue[] = [];
   const profile = state.profile;
   if (!profile.name.trim()) issues.push({ field: "name", code: "name_required" });
+  else if (!validUTF8(profile.name) || Array.from(profile.name).length > 128 || /[\u0000-\u001f\u007f-\u009f]/.test(profile.name)) issues.push({ field: "name", code: "name_invalid" });
+  if (!["tcp", "grpc", "xhttp"].includes(profile.transport)) issues.push({ field: "transport", code: "transport_invalid" });
   if (profile.transport === "grpc" && !/^[A-Za-z0-9_-]{1,64}$/.test(profile.grpcService)) issues.push({ field: "grpcService", code: "grpc_service_invalid" });
   const target = profile.realityTarget.match(/^(?:\[[0-9a-fA-F:.]+\]|[^:\s/\\@%\[\]]+):([0-9]+)$/);
   if (!target || Number(target[1]) < 1 || Number(target[1]) > 65535) issues.push({ field: "realityTarget", code: "target_invalid" });
-  if (!profile.serverNames.split(/[\s,]+/).filter(Boolean).length) issues.push({ field: "serverNames", code: "server_names_required" });
+  const serverNames = profile.serverNames.split(/[\s,]+/).filter(Boolean);
+  if (!serverNames.length) issues.push({ field: "serverNames", code: "server_names_required" });
+  else if (serverNames.length > 16 || serverNames.some(name => !validCreationServerName(name))) issues.push({ field: "serverNames", code: "server_names_invalid" });
   issues.push(...profileOptionIssues(profile.options, profile.transport));
   const shortIDs = creationShortIDs(state.shortIDs);
   if (!shortIDs.length || shortIDs.length > 16 || new Set(shortIDs).size !== shortIDs.length || shortIDs.some(id => !/^[0-9a-f]{2,16}$/.test(id) || id.length % 2 !== 0)) issues.push({ field: "shortIDs", code: "short_ids_invalid" });
@@ -141,9 +162,14 @@ export function creationIssues(state: CreationState, available: InboundNode[]): 
       const path = row[key]; if (!path.enabled) continue;
       const port = creationPort(path.port);
       if (!port) add(key + "Port", "port_invalid"); else ports.push(port);
-      const hosts = creationHosts(path.hosts);
-      if (hosts.some(host => /[\s/:@%?#\\]/.test(host))) add(key + "Hosts", "host_invalid");
-      if (new Set(hosts).size !== hosts.length) add(key + "Hosts", "host_duplicate");
+      const hosts = creationPathHosts(path);
+      if (path.endpoints !== undefined) {
+        const defaults = { serverNames, fingerprint: profile.options?.clientFingerprint ?? "", spiderX: profile.options?.clientSpiderX ?? "" };
+        issues.push(...endpointIssues(path.endpoints, path.port, defaults, key + "Endpoints").map(issue => ({ ...issue, nodeID: row.nodeID })));
+      } else {
+        if (hosts.some(host => !validEndpointAddress(host))) add(key + "Hosts", "host_invalid");
+        if (new Set(hosts).size !== hosts.length) add(key + "Hosts", "host_duplicate");
+      }
       allHosts.push(...hosts);
     }
     if (new Set(allHosts).size > 64) add("hosts", "host_limit");
@@ -158,7 +184,7 @@ export function creationIssues(state: CreationState, available: InboundNode[]): 
       if (sourceRow && sourceRow.listenIP.trim() && row.swap.sourceListenIP.trim() && canonicalCreationIP(sourceRow.listenIP) !== canonicalCreationIP(row.swap.sourceListenIP)) add("sourceListenIP", "source_listen_ip_conflict");
       if (!creationPort(row.swap.sourcePort)) add("sourcePort", "port_invalid");
       if (!creationEntryPort(row.swap.entryPort)) add("entryPort", "entry_port_invalid");
-      if (row.swap.entryHost.trim() && /[\s/:@%?#\\]/.test(row.swap.entryHost.trim())) add("entryHost", "host_invalid");
+      if (row.swap.entryHost.trim() && !validEndpointAddress(row.swap.entryHost)) add("entryHost", "host_invalid");
       if ([2087, 8443, 24443].includes(creationPort(row.swap.sourcePort))) add("sourcePort", "port_reserved");
     }
     if (ports.some(port => [2087, 8443, 24443].includes(port))) add("ports", "port_reserved");

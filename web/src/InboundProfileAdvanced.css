@@ -10,6 +10,10 @@
 .inbound-option-hint { margin: 0; padding: 0 14px 12px; }
 .inbound-options-grid .inbound-option-check { display: flex; flex-direction: row; align-items: center; align-self: start; gap: 10px; min-width: 0; min-height: 44px; font-size: 12px; line-height: 1.8; cursor: pointer; }
 .inbound-options-grid .inbound-option-check input { width: 17px; height: 17px; min-height: 17px; padding: 0; flex-shrink: 0; accent-color: var(--accent); }
+.inbound-network-options { min-width: 0; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-2); }
+.inbound-network-options > .inbound-options-grid { padding-top: 16px; }
+.inbound-network-actions { padding: 0 14px 14px; }
+.inbound-network-actions > button { min-height: 44px; padding: 8px 10px; font-size: 11px; color: var(--sub); }
 @media(max-width:620px) {
  .inbound-options-grid { grid-template-columns: minmax(0,1fr); }
  .inbound-option-field input,.inbound-option-field select { font-size: 16px; }

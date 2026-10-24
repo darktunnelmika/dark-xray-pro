@@ -162,7 +162,7 @@ func TestRealPinnedCreationTopologyOffline(t *testing.T) {
 	}
 	exercisePinnedInboundOptionsOffline(t)
 	for _, advanced := range []bool{false, true} {
-		for _, transport := range []string{"tcp", "grpc"} {
+		for _, transport := range []string{"tcp", "grpc", "xhttp"} {
 			for _, reuse := range []bool{false, true} {
 				p := testProfile(7)
 				p.Transport = transport
@@ -171,6 +171,10 @@ func TestRealPinnedCreationTopologyOffline(t *testing.T) {
 				}
 				if advanced {
 					p.Options = fullProfileOptions(transport)
+					if transport == "xhttp" {
+						p.Options.XHTTP = &XHTTPOptions{Path: "/typed-network", Host: "one.example.org", Mode: "stream-up", XPaddingBytes: "256-512"}
+						p.Options.Client = &ClientOptions{Fingerprint: "firefox", SpiderX: "/client?source=plan"}
+					}
 				}
 				nodes, swaps := creationFixture()
 				if reuse {
