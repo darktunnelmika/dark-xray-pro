@@ -141,7 +141,12 @@ func UsageBootstrap(c Candidate) (Candidate, []byte, string, error) {
 		if in.Protocol != "vless" || in.Tag == "" || in.Tag == UsageAPITag || tags[in.Tag] != 0 || ports[in.Port] || in.Port < 1024 || in.Port == port || in.Settings.Decryption != "none" || in.Stream.Security != "reality" || (in.Stream.Network != "tcp" && in.Stream.Network != "grpc") {
 			return fail()
 		}
-		if _, err := NormalizeProfileOptions(in.Stream.Network, optionsFromStream(in.Stream)); err != nil {
+		// VLESS fallback uses its own direct dialer rather than the admitted
+		// outbound. It must not bypass the pretraffic block in finalRules.
+		if len(in.Settings.Fallbacks) != 0 {
+			return fail()
+		}
+		if _, err := NormalizeProfileOptions(in.Stream.Network, optionsFromInbound(in)); err != nil {
 			return fail()
 		}
 		tags[in.Tag] = in.Port

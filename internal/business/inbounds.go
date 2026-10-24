@@ -95,7 +95,7 @@ func openProfile(key, encrypted []byte, id uint64) (xrayconfig.Profile, error) {
 func (s *Store) CreateInbound(ctx context.Context, key []byte, in InboundInput) (NativeInbound, error) {
 	var optionsErr error
 	in.Options, optionsErr = xrayconfig.NormalizeProfileOptions(in.Transport, in.Options)
-	if optionsErr != nil {
+	if optionsErr != nil || hasInboundTrafficOptions(in.Options) {
 		return NativeInbound{}, ErrInvalid
 	}
 	old, found, replayErr := s.replayInbound(ctx, key, in)

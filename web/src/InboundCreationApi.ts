@@ -24,7 +24,7 @@ export async function creationAPI<T>(path: string, options: RequestInit, onUnaut
         const problem = body?.issue;
         if (problem && typeof problem.field === "string" && /^[a-z_.]{1,80}$/.test(problem.field) && typeof problem.code === "string" && /^[a-z_]{3,80}$/.test(problem.code) &&
           (problem.node_id === undefined || typeof problem.node_id === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(problem.node_id))) {
-          const fields: Record<string, string> = { listen_ip: "listenIP", direct_hosts: "directHosts", tunnel_hosts: "tunnelHosts", direct_port: "directPort", tunnel_port: "tunnelPort", swap_source_node_id: "sourceNode", swap_source_listen_ip: "sourceListenIP", swap_source_port: "sourcePort", swap_entry_address: "entryHost", swap_entry_port: "entryPort", swap_destination_port: "swapPort", swap_ports: "sourcePort", profile: "name", "profile.options": "realityMaxTimeDiff" };
+          const fields: Record<string, string> = { listen_ip: "listenIP", direct_hosts: "directHosts", tunnel_hosts: "tunnelHosts", direct_port: "directPort", tunnel_port: "tunnelPort", swap_source_node_id: "sourceNode", swap_source_listen_ip: "sourceListenIP", swap_source_port: "sourcePort", swap_entry_address: "entryHost", swap_entry_port: "entryPort", swap_destination_port: "swapPort", swap_ports: "sourcePort", profile: "name", "profile.options": "realityMaxTimeDiff", "profile.options.sniffing": "sniffing.domainsExcluded", "profile.options.fallbacks": "fallbacks" };
           issue = { nodeID: problem.node_id, field: fields[problem.field] ?? problem.field, code: problem.code };
         }
       } catch { /* Responses outside the structured contract are not surfaced. */ }

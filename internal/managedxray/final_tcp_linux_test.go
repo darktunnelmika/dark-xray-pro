@@ -15,7 +15,7 @@ func TestFinalTCPScopeRejectsDetachedOutboundAndAmbiguousPolicy(t *testing.T) {
 	if !finalTCPScope([]byte(base)) {
 		t.Fatal("native direct scope rejected")
 	}
-	for _, mode := range []string{"mux", "outbound-transport", "proxy-chain", "redirect", "fragment", "noise", "extra-level", "online", "grpc", "extra-grpc", "sniffing", "duplicate", "case-duplicate"} {
+	for _, mode := range []string{"mux", "outbound-transport", "proxy-chain", "redirect", "fragment", "noise", "extra-level", "online", "grpc", "extra-grpc", "sniffing", "sniffing-disabled", "sniffing-route-only", "fallback", "fallback-empty", "fallback-null", "duplicate", "case-duplicate"} {
 		t.Run(mode, func(t *testing.T) {
 			var doc map[string]any
 			if json.Unmarshal([]byte(base), &doc) != nil {
@@ -47,6 +47,16 @@ func TestFinalTCPScopeRejectsDetachedOutboundAndAmbiguousPolicy(t *testing.T) {
 				in["streamSettings"].(map[string]any)["grpcSettings"] = map[string]any{"serviceName": "hidden"}
 			case "sniffing":
 				in["sniffing"] = map[string]any{"enabled": true}
+			case "sniffing-disabled":
+				in["sniffing"] = map[string]any{"enabled": false, "destOverride": []string{"http", "tls"}}
+			case "sniffing-route-only":
+				in["sniffing"] = map[string]any{"enabled": true, "routeOnly": true, "destOverride": []string{"http"}}
+			case "fallback":
+				in["settings"].(map[string]any)["fallbacks"] = []any{map[string]any{"dest": "127.0.0.1:8080"}}
+			case "fallback-empty":
+				in["settings"].(map[string]any)["fallbacks"] = []any{}
+			case "fallback-null":
+				in["settings"].(map[string]any)["fallbacks"] = nil
 			}
 			raw, _ := json.Marshal(doc)
 			if mode == "duplicate" {

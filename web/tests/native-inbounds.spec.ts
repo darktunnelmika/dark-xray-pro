@@ -833,6 +833,8 @@ test("legacy profile edit and copy retain advanced settings even when capability
  const control = page.getByRole("region", { name: "Inbound lifecycle" });
  await control.getByRole("button", { name: "Edit profile", exact: true }).click();
  const editor = page.getByRole("form", { name: "Edit Inbound profile" });
+ await expect(editor.getByRole("checkbox", { name: "Enable Sniffing", exact: true })).toHaveCount(0);
+ await expect(editor.getByRole("button", { name: "Add fallback", exact: true })).toHaveCount(0);
  await editor.getByLabel("Name", { exact: true }).fill("Retained advanced profile");
  await editor.getByLabel("Reason for change", { exact: true }).fill("Rename without clearing settings");
  page.once("dialog", prompt => prompt.accept()); await editor.getByRole("button", { name: "Save profile changes", exact: true }).click();

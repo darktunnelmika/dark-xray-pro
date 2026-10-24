@@ -54,7 +54,7 @@ type NativeInboundPlanInput struct {
 	Profile                 InboundInput            `json:"profile"`
 	Nodes                   []NativeInboundPlanNode `json:"nodes"`
 	Reason                  string                  `json:"reason"`
-	profileOptionsProvided  bool
+	profileOptionsPresence  inboundOptionPresence
 }
 
 type NativeInboundPlan struct {
@@ -233,7 +233,7 @@ func canonicalPlanIP(raw string) string {
 func planListenerPort(p uint16) bool { return p >= 1024 && p != 2087 && p != 8443 && p != 24443 }
 
 func normalizeNativeInboundPlan(in NativeInboundPlanInput) (NativeInboundPlanInput, error) {
-	in.profileOptionsProvided = in.profileOptionsProvided || in.Profile.Options != nil
+	in.profileOptionsPresence = in.profileOptionsPresence.include(in.Profile.Options)
 	in.Reason = strings.TrimSpace(in.Reason)
 	in.Profile.Name = strings.TrimSpace(in.Profile.Name)
 	if !eventRE.MatchString(in.EventID) {
@@ -257,6 +257,10 @@ func normalizeNativeInboundPlan(in NativeInboundPlanInput) (NativeInboundPlanInp
 	in.Profile.ShortIDs = append([]string(nil), in.Profile.ShortIDs...)
 	options, optionsErr := xrayconfig.NormalizeProfileOptions(in.Profile.Transport, in.Profile.Options)
 	if optionsErr != nil {
+		var detail *xrayconfig.ProfileOptionError
+		if errors.As(optionsErr, &detail) {
+			return in, planError("", "profile.options."+detail.Field, detail.Code, ErrInvalid)
+		}
 		return in, planError("", "profile.options", "profile_options_invalid", ErrInvalid)
 	}
 	in.Profile.Options = options
@@ -735,11 +739,11 @@ func validateNativeInboundPlanTx(ctx context.Context, tx *sql.Tx, key []byte, in
 		if err != nil {
 			return plan, private, topology, err
 		}
-		// An older open browser does not know about Options. Require explicit
-		// options (including an empty object for clearing) before replacing a
-		// profile that already has extended settings.
-		if existing.Options != nil && !in.profileOptionsProvided {
-			return plan, private, topology, planError("", "profile.options", "profile_options_required", ErrConflict)
+		// Each saved extension requires explicit intent, including its own
+		// empty object/array when clearing it. Older scalar-only editors must
+		// not silently remove sections that they cannot display.
+		if field, code := in.profileOptionsPresence.missing(existing.Options); code != "" {
+			return plan, private, topology, planError("", field, code, ErrConflict)
 		}
 		plan.CreatedUnix = old.CreatedUnix
 		plan.Profile = existing

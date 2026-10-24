@@ -1,17 +1,17 @@
 # DARK XRAY PRO — Inbound Workspace V3
 
-## Scope of this increment (24 October 2026)
+## Initial workspace layout (24 October 2026)
 
 - Added directly reachable Network, Security, Dark Swap, Hosts and Advanced stages while preserving existing Profile, Nodes & routes and Review.
 - Every supported Network/Security/Hosts control edits the **same creation plan state**, including gRPC service, REALITY target/SNI/Short IDs and each Node's Direct/Tunnel host list.
 - Dark Swap receives a dedicated stage *inside* Inbound creation/editing. Each selected destination's relay source, listener ports and external entry remain editable through the existing validated single-plan API, with original per-Node controls still available.
 - A clear unavailable-feature catalog shows legacy transport/security options that cannot yet be applied, without allowing unsupported saves or claiming runtime success.
 - Stage tabs scroll horizontally on 320 px screens, support keyboard navigation and preserve the footer.
-- Only front-end source, browser tests and documentation change. No registry, node, customer, tunnel, ledger or live Xray state is touched.
+- The initial layout changed front-end source, browser tests and documentation. Follow-up functional increments are described below; existing Node, customer, tunnel and ledger state remains outside the authoring flow.
 
 ## Important non-completions
 
-This is **not** full functional legacy parity. The current backend supports only VLESS/REALITY with TCP/Vision or gRPC; existing plan saves are disabled and do not start listeners. VMess/Trojan/Shadowsocks, WS/XHTTP/HTTPUpgrade, None/TLS, Sniffing/Fallback/advanced JSON, advanced per-Host metadata, target scanning, local HUB execution, and live Dark Swap apply/ack/diagnostics must be developed end-to-end (validator, renderer, metering, health, subscription and regression tests) before enabling their controls.
+This is **not** full functional legacy parity. The current backend supports only VLESS/REALITY with TCP/Vision or gRPC; saved plans are paused and do not start listeners. VMess/Trojan/Shadowsocks, WS/XHTTP/HTTPUpgrade, None/TLS, advanced JSON, advanced per-Host metadata, target scanning, local HUB execution, and live Dark Swap apply/ack/diagnostics still need end-to-end development. Sniffing and Fallbacks now have validated creation-plan authoring and rendering; their runtime/accounting gates remain separate as documented below.
 
 ## ادامهٔ اجرایی — ۲۴ اکتبر ۲۰۲۶
 
@@ -65,6 +65,14 @@ This is **not** full functional legacy parity. The current backend supports only
 مرجع قالب‌های Core: [REALITY](https://xtls.github.io/config/transports/reality.html)،
 [gRPC](https://xtls.github.io/config/transports/grpc.html)، و سورس ثابت
 [تنظیمات امنیت](https://github.com/XTLS/Xray-core/blob/52a412d9e2f5c2a5142b1b4e2ab3771dacb8b120/infra/conf/transport_security.go).
+
+## تنظیمات ترافیک در بخش پیشرفته
+
+ادامهٔ این مرحله Sniffing و Fallbackها را به تب «پیشرفته»، ذخیرهٔ رمزگذاری‌شده
+نسخهٔ ۳ و تولید کانفیگ مقصد متصل می‌کند. تنظیمات فقط در طرح‌های ساختِ متوقف
+قابل ویرایش‌اند؛ مسیر ساخت/ویرایش generic اینباند فعال آن‌ها را قبول نمی‌کند.
+فهرست دقیق گزینه‌ها، رفتار خاموش/بازنشانی، حفاظت مرورگر قدیمی، آزمون‌ها و
+مرز حسابداری در [سند تنظیمات ترافیک](inbound-traffic-options.fa.md) آمده است.
 
 ## Acceptance
 

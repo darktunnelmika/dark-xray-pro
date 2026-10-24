@@ -6,6 +6,7 @@ import WorkspaceDialog from "./WorkspaceDialog";
 import type { Inbound, InboundNode, InboundTarget } from "./inboundTypes";
 import InboundCreationNodes, { creationIssueMessage } from "./InboundCreationNodes";
 import InboundProfileAdvanced from "./InboundProfileAdvanced";
+import InboundTrafficOptions from "./InboundTrafficOptions";
 import { canonicalProfileOptions, profileOptionSection, profileOptionsPayload } from "./inboundProfileOptions";
 import { canonicalCreationIP, creationHosts, creationIssues, creationNodeName, creationPayload, creationShortIDs, creationWaitingHosts, emptyCreation, freshCreationShortID, selectedCreationNodes, stateFromCreationPlan,
   type CreationCapabilities, type CreationIssue, type CreationPayload, type CreationPlan, type CreationPlanNode, type CreationPlanResponse, type CreationPreview, type CreationReceipt, type CreationState } from "./InboundCreationModel";
@@ -109,6 +110,8 @@ export default function InboundCreation({ language, nodes, targets, capabilities
   const dirty = JSON.stringify(state) !== initial.current;
   const editing = revisions.plan > 0;
   const locked = busy || uncertain || readOnly;
+  const sniffingSupported = capabilities.profile_sniffing === true && capabilities.profile_traffic_options_scope === "creation_plan";
+  const fallbacksSupported = capabilities.profile_fallbacks === true && capabilities.profile_traffic_options_scope === "creation_plan";
   useEffect(() => { const controller = new AbortController(); lifetime.current = controller; return () => controller.abort(); }, []);
   useEffect(() => { onDirtyChange(dirty); }, [dirty, onDirtyChange]);
   useEffect(() => () => onDirtyChange(false), [onDirtyChange]);
@@ -121,7 +124,7 @@ export default function InboundCreation({ language, nodes, targets, capabilities
     if (!focusRequest) return;
     const scope = focusRequest.nodeID ? surface.current?.querySelector<HTMLElement>(`[data-node-id="${CSS.escape(focusRequest.nodeID)}"]`) : surface.current;
     const control = scope?.querySelector<HTMLElement>(`[data-creation-field="${CSS.escape(focusRequest.field)}"]`) ?? Array.from(scope?.querySelectorAll<HTMLElement>("input, select, textarea") ?? []).find(element => element.getClientRects().length > 0 && !element.matches(":disabled"));
-    const disclosure = control?.closest("details"); if (disclosure) disclosure.open = true;
+    for (let ancestor = control?.parentElement; ancestor; ancestor = ancestor.parentElement) if (ancestor instanceof HTMLDetailsElement) ancestor.open = true;
     control?.focus({ preventScroll: true }); control?.scrollIntoView({ block: "nearest" });
   }, [focusRequest]);
 
@@ -136,7 +139,12 @@ export default function InboundCreation({ language, nodes, targets, capabilities
   }
   function validate(): boolean {
     const next = creationIssues(state, nodes);
-    if (!next.length && capabilities.profile_options !== true && profileOptionsPayload(state.profile.options, state.profile.transport)) next.push({ field: "profileOptions", code: "profile_options_unavailable" });
+    if (!next.length) {
+      const options = profileOptionsPayload(state.profile.options, state.profile.transport);
+      if (capabilities.profile_options !== true && options) next.push({ field: "profileOptions", code: "profile_options_unavailable" });
+      if (!sniffingSupported && options?.sniffing !== undefined) next.push({ field: "sniffing.enabled", code: "profile_sniffing_unavailable" });
+      if (!fallbacksSupported && options?.fallbacks !== undefined) next.push({ field: "fallbacks", code: "profile_fallbacks_unavailable" });
+    }
     setIssues(next);
     if (!next.length) return true;
     const first = next[0];
@@ -169,7 +177,7 @@ export default function InboundCreation({ language, nodes, targets, capabilities
     setFocusRequest({ ...issue });
   }
   function needsReload(error: unknown): boolean {
-    return error instanceof ApiError && error.status === 409 && (!(error instanceof CreationApiError) || !error.issue || ["plan_revision_conflict", "profile_changed_or_materialized", "inbound_id_exists", "profile_options_required"].includes(error.issue.code));
+    return error instanceof ApiError && error.status === 409 && (!(error instanceof CreationApiError) || !error.issue || ["plan_revision_conflict", "profile_changed_or_materialized", "inbound_id_exists", "profile_options_required", "profile_sniffing_required", "profile_fallbacks_required"].includes(error.issue.code));
   }
   async function check() {
     if (busy || blocked || uncertain || readOnly || !csrf || !validate()) return;
@@ -267,9 +275,10 @@ export default function InboundCreation({ language, nodes, targets, capabilities
           <div className="creation-legacy-features"><strong>{language === "fa" ? "تنظیمات پیشرفتهٔ Host در انتظار توسعه" : "Advanced Host controls pending"}</strong><p>{language === "fa" ? "SNI Override، ALPN، Fingerprint، Path، FinalMask، Mihomo و حذف از قالب‌های اشتراک هنوز در plan فعلی ذخیره نمی‌شوند." : "SNI overrides, ALPN, fingerprint, path, FinalMask, Mihomo and per-format exclusion are not yet persisted by creation plans."}</p></div>
         </section>
         <section id="creation-panel-advanced" role="tabpanel" aria-labelledby="creation-tab-advanced" hidden={section !== "advanced"} className="creation-profile">
-          <header className="creation-section-heading"><div><h3>{language === "fa" ? "ابزارهای پیشرفتهٔ پنل قدیمی" : "Legacy advanced inbound tools"}</h3><p>{language === "fa" ? "این بخش وضعیت واقعی امکانات را نشان می‌دهد، نه ورودی‌های نمایشی قابل ذخیره." : "This section reports actual capability gaps instead of displaying nonfunctional form inputs."}</p></div></header>
-          <div className="creation-legacy-features"><div className="creation-legacy-grid">{["Sniffing · destOverride / routeOnly", "Fallbacks · ALPN / Path / Dest", "Advanced JSON · streamSettings / sniffing", "TLS managed certificates", "VMess / Trojan / Shadowsocks / SOCKS / HTTP", "Local HUB target", "Dark Swap · live Apply / ACK / Diagnostics"].map(name => <span key={name} className="creation-legacy-option">{name}<small>{language === "fa" ? "نیازمند backend و تست واقعی" : "Requires backend and acceptance tests"}</small></span>)}</div></div>
-          <p className="creation-help">{language === "fa" ? "برای حفظ مشتری‌ها و حسابداری، هیچ پروتکل جدیدی فقط با یک dropdown فعال نمی‌شود. فرم‌های موجود بدون تغییر در runtime ذخیره می‌شوند." : "For customer and accounting safety, new protocols cannot be enabled with UI-only selectors. Saved plans do not alter runtime traffic."}</p>
+          <header className="creation-section-heading"><div><h3>{language === "fa" ? "تنظیمات پیشرفتهٔ ترافیک" : "Advanced traffic settings"}</h3><p>{language === "fa" ? "Sniffing و Fallback فقط در طرح خاموش ذخیره می‌شوند. فعال‌سازی و انتشار اشتراک برای این تنظیمات هنوز در دسترس نیست." : "Sniffing and fallbacks are saved only in paused setup plans. Activation and subscription publishing for these settings remain unavailable."}</p></div></header>
+          <InboundTrafficOptions language={language} value={state.profile.options} transport={state.profile.transport} onChange={options => update({ ...state, profile: { ...state.profile, options } })} sniffingSupported={sniffingSupported} fallbacksSupported={fallbacksSupported} disabled={locked} invalidFields={issues.map(issue => issue.field)}/>
+          {issues.filter(issue => profileOptionSection(issue.field) === "advanced").map((issue, index) => <p key={index} className="creation-issues" role="alert">{creationIssueMessage(issue, language)}</p>)}
+          <details className="inbound-traffic-disclosure"><summary>{language === "fa" ? "امکانات در انتظار پشتیبانی" : "Features pending support"}</summary><div className="creation-legacy-features"><div className="creation-legacy-grid">{["Advanced JSON · streamSettings", "TLS managed certificates", "VMess / Trojan / Shadowsocks / SOCKS / HTTP", "Local HUB target", "Dark Swap · live Apply / ACK / Diagnostics"].map(name => <span key={name} className="creation-legacy-option">{name}<small>{language === "fa" ? "هنوز در دسترس نیست" : "Not available"}</small></span>)}</div></div></details>
         </section>
         <section id="creation-panel-nodes" role="tabpanel" aria-labelledby="creation-tab-nodes" hidden={section !== "nodes"}>
           {section === "nodes" && <InboundCreationNodes language={language} state={state} nodes={nodes} targets={targets} disabled={locked} expanded={expanded} onExpanded={setExpanded} onChange={update} issues={issues}/>}

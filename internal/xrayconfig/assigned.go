@@ -59,6 +59,7 @@ func RenderAssigned(nodeID, installationID, listenIP string, assignments []Assig
 				}
 				x.Settings.Clients = append(x.Settings.Clients, c)
 			}
+			applyInboundOptions(&x, p.Options)
 			scope := "distinct"
 			if kind == "shared" {
 				scope = "ambiguous_shared_port"

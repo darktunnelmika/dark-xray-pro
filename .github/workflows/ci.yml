@@ -313,7 +313,7 @@ jobs:
           printf 'DARK_PRO_TEST_XRAY_BINARY=%s\n' "$RUNNER_TEMP/dark-pro-isolated-xray/bin/xray" >> "$GITHUB_ENV"
           printf 'DARK_PRO_TEST_XRAY_SHA256=%s\n' \
             "$(sha256sum "$RUNNER_TEMP/dark-pro-isolated-xray/bin/xray" | cut -d' ' -f1)" >> "$GITHUB_ENV"
-      - name: Prove advanced REALITY options with actual traffic and version rejection
+      - name: Prove advanced REALITY, Sniffing and Fallback behavior with actual traffic
         env:
           DARK_PRO_LAB_MODE: "1"
         shell: bash
@@ -325,11 +325,18 @@ jobs:
           events=[json.loads(line) for line in open(sys.argv[1])]
           name='TestRealPinnedXrayCoreOptIn'
           required={name,name+'/advanced-loopback',name+'/advanced-loopback/accepted-version',name+'/advanced-loopback/rejected-version'}
+          traffic=name+'/inbound-options-loopback'
+          required|={traffic,traffic+'/sniffing',traffic+'/fallbacks'}
+          required|={traffic+'/sniffing/'+case for case in ('disabled','http-override','route-only','metadata-only','excluded-domain','excluded-original-ip','different-excluded-ip')}
+          required|={traffic+'/fallbacks/'+case for case in ('http1-target','http2-target')}
           passed={e.get('Test') for e in events if e.get('Action')=='pass'}
           assert required<=passed, required-passed
           assert not any(e.get('Action') in ('skip','fail') for e in events)
           assert sum('ADVANCED_REALITY_TRAFFIC_PASS:' in e.get('Output','') for e in events)==1
           assert sum('ADVANCED_REALITY_VERSION_REJECT_PASS' in e.get('Output','') for e in events)==1
+          assert sum('SNIFFING_TRAFFIC_PASS' in e.get('Output','') for e in events)==1
+          assert sum('FALLBACK_TRAFFIC_PASS' in e.get('Output','') for e in events)==1
+          assert sum('REALITY_FALLBACK_ALPN_UNSUPPORTED_PASS' in e.get('Output','') for e in events)==1
           for e in events:
               if e.get('Output'): print(e['Output'],end='')
           PYOPTIONS

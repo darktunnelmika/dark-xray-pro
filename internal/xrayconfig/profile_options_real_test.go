@@ -191,6 +191,10 @@ func exerciseRealProfileOptions(t *testing.T, binary, pin string) {
 }
 
 func advancedRealityTarget(t *testing.T) *httptest.Server {
+	return advancedRealityTargetProtocol(t, true)
+}
+
+func advancedRealityTargetProtocol(t *testing.T, http2 bool) *httptest.Server {
 	t.Helper()
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
@@ -211,7 +215,7 @@ func advancedRealityTarget(t *testing.T) *httptest.Server {
 	}
 	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) }))
 	server.Config.ErrorLog = log.New(io.Discard, "", 0)
-	server.EnableHTTP2 = true
+	server.EnableHTTP2 = http2
 	server.TLS = &tls.Config{Certificates: []tls.Certificate{pair}, MinVersion: tls.VersionTLS13, MaxVersion: tls.VersionTLS13}
 	server.StartTLS()
 	t.Cleanup(server.Close)

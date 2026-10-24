@@ -13,16 +13,29 @@ const nodes = [
 type Call = { path: string; method: string; body: CreationPayload; raw: string; csrf: string };
 type FixtureOptions = { failSaveOnce?: boolean; tamperPreview?: (plan: CreationPlan) => void; normalizeMappedIPs?: boolean;
   previewError?: { status: number; issue: { node_id?: string; field: string; code: string } }; savedPlan?: CreationPlan;
-  language?: "en" | "fa"; theme?: "light" | "dark"; profileOptions?: boolean };
+  language?: "en" | "fa"; theme?: "light" | "dark"; profileOptions?: boolean; profileSniffing?: boolean; profileFallbacks?: boolean; trafficScope?: boolean };
 
 async function fixture(page: Page, options: FixtureOptions = {}) {
   const calls: Call[] = [];
   const receipts = new Map<string, { raw: string; receipt: CreationReceipt }>();
   let saved = options.savedPlan ? structuredClone(options.savedPlan) : undefined;
   let failSave = options.failSaveOnce === true;
+  // The real API omits zero fields and empty sections, and returns enabled:false
+  // for disabled-but-configured Sniffing. Model that wire contract independently.
+  function persistedOptions(input: CreationPayload["profile"]["options"]) {
+    if (!input) return undefined;
+    const result = structuredClone(input);
+    if (result.sniffing) {
+      const entries = Object.entries(result.sniffing).filter(([, value]) => Array.isArray(value) ? value.length > 0 : value === true);
+      if (entries.length) result.sniffing = { enabled: result.sniffing.enabled === true, ...Object.fromEntries(entries) };
+      else delete result.sniffing;
+    }
+    if (result.fallbacks?.length === 0) delete result.fallbacks;
+    return Object.keys(result).length ? result : undefined;
+  }
   const profileInput = (profile: CreationPayload["profile"]) => JSON.stringify({ id: profile.id, name: profile.name,
     transport: profile.transport, grpc_service: profile.grpc_service, reality_target: profile.reality_target,
-    server_names: profile.server_names, short_ids: profile.short_ids, options: profile.options && Object.keys(profile.options).length ? profile.options : undefined });
+    server_names: profile.server_names, short_ids: profile.short_ids, options: persistedOptions(profile.options) });
   function planFor(body: CreationPayload, saving = false): CreationPlan {
     const revision = body.expected_inbound_revision === 0 ? 1 : body.expected_inbound_revision +
       (saved && profileInput(saved.profile) === profileInput(body.profile) ? 0 : 1);
@@ -34,7 +47,7 @@ async function fixture(page: Page, options: FixtureOptions = {}) {
       row.swap_source_listen_ip = row.swap_source_listen_ip.replace(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/i, "$1");
     }
     return { profile: { ...structuredClone(body.profile), name: body.profile.name.trim(), enabled: false, archived: false,
-      bound_clients: 0, revision, options: body.profile.options && Object.keys(body.profile.options).length ? structuredClone(body.profile.options) : undefined, public_key: saved?.profile.public_key ?? (saving ? "SYNTHETIC_PUBLIC_KEY" : "") },
+      bound_clients: 0, revision, options: persistedOptions(body.profile.options), public_key: saved?.profile.public_key ?? (saving ? "SYNTHETIC_PUBLIC_KEY" : "") },
       nodes: rows,
       plan_revision: body.expected_plan_revision + 1, inbound_revision: revision,
       status: waiting ? "WAITING_HOST" : "SAVED_DISABLED", last_event_id: body.event_id, reason: body.reason,
@@ -78,6 +91,7 @@ async function fixture(page: Page, options: FixtureOptions = {}) {
     }
     if (path === api + "/capabilities") return route.fulfill({ json: { available: true, version: 1, max_nodes: 64,
       max_hosts_per_node: 64, profile_options: options.profileOptions !== false, protocols: ["vless"], securities: ["reality"], transports: ["tcp", "grpc"], runtime_apply: false,
+      profile_sniffing: options.profileSniffing !== false, profile_fallbacks: options.profileFallbacks !== false, profile_traffic_options_scope: options.trafficScope === false ? undefined : "creation_plan",
       plans: saved ? [{ inbound_id: saved.profile.id, plan_revision: saved.plan_revision, inbound_revision: saved.inbound_revision, status: saved.status }] : [] } });
     if (saved && path === api + "/" + saved.profile.id) return route.fulfill({ json: { plan: saved, references_current: true } });
     if (path.endsWith("/native-inbounds-state")) return route.fulfill({ json: {
@@ -414,7 +428,8 @@ test("expanded Inbound editor keeps Network, Security, Dark Swap and Hosts chang
   await dialog.getByRole("tab", { name: "Hosts", exact: true }).click();
   await dialog.getByLabel("direct hosts — de").fill("de.example.org");
   await dialog.getByRole("tab", { name: "Advanced", exact: true }).click();
-  await expect(dialog.getByText("Fallbacks · ALPN / Path / Dest")).toBeVisible();
+  await expect(dialog.getByRole("heading", { name: "TCP fallbacks 0", exact: true })).toBeVisible();
+  await expect(dialog.getByRole("button", { name: "Add fallback", exact: true })).toBeDisabled();
   await review(dialog, "Editor stages retain every route");
   await check(dialog);
   const payload = f.calls.find(call => call.path === api + "/preview")?.body;
@@ -561,4 +576,215 @@ for (const language of ["en", "fa"] as const) test(`320px ${language} footer nav
   const widths = await dialog.evaluate(element => ({ client: element.clientWidth, scroll: element.scrollWidth }));
   expect(widths.scroll).toBeLessThanOrEqual(widths.client + 1);
   await page.screenshot({ path: testInfo.outputPath(`advanced-reality-${language}-320.png`), fullPage: true });
+});
+
+async function traffic(dialog: Locator) {
+  await dialog.getByRole("tab", { name: "Advanced", exact: true }).click();
+  return dialog.getByRole("region", { name: "Sniffing", exact: true });
+}
+async function sniffingDetails(dialog: Locator) {
+  const card = await traffic(dialog), details = card.locator("details").first();
+  if (await details.getAttribute("open") === null) await details.locator(":scope > summary").click();
+  return card;
+}
+async function exclusions(dialog: Locator) {
+  const card = await sniffingDetails(dialog), details = card.locator(".inbound-traffic-exclusions");
+  if (await details.getAttribute("open") === null) await details.locator("summary").click();
+}
+async function fallbackRow(dialog: Locator, index: number) {
+  await traffic(dialog); const row = dialog.locator(".inbound-fallback-row").nth(index);
+  if (await row.getAttribute("open") === null) await row.locator("summary").click();
+  return row;
+}
+
+test("Sniffing and TCP fallbacks survive exact retry, reopen, disabled edits, copy and explicit reset", async ({ page }, testInfo) => {
+  test.setTimeout(30000);
+  const f = await fixture(page, { failSaveOnce: true }), dialog = await openCreation(page);
+  await profile(dialog, "Traffic authoring"); await destination(dialog, "de", "203.0.113.10", "10443", "de.example.org");
+  await traffic(dialog); await dialog.getByRole("checkbox", { name: "Enable Sniffing", exact: true }).check();
+  await dialog.getByRole("checkbox", { name: "QUIC", exact: true }).check();
+  await dialog.getByRole("checkbox", { name: "FakeDNS", exact: true }).check();
+  await dialog.getByRole("checkbox", { name: "Read metadata only", exact: true }).check();
+  await exclusions(dialog);
+  await dialog.getByLabel("Excluded domains", { exact: true }).fill("domain:Example.NET\nregexp:(?i)^internal\\.\nkeyword:keep this");
+  await dialog.getByLabel("Excluded IPs or CIDRs", { exact: true }).fill("192.0.2.129/24\n2001:0db8:0000::1");
+  await dialog.getByRole("button", { name: "Add fallback", exact: true }).click();
+  await expect(dialog.getByLabel("Fallback 1 Destination", { exact: true })).toBeFocused();
+  await dialog.getByLabel("Fallback 1 Destination", { exact: true }).fill("127.0.0.1:8080");
+  await dialog.getByLabel("Fallback 1 Path", { exact: true }).fill("/health");
+  await expect(dialog.getByLabel("Fallback 1 ALPN", { exact: true })).toHaveCount(0);
+  await dialog.getByLabel("Fallback 1 PROXY protocol", { exact: true }).selectOption("2");
+  await page.screenshot({ path: testInfo.outputPath("traffic-options-en-desktop.png"), fullPage: true });
+  await review(dialog); await check(dialog);
+  const sniffing = { enabled: true, metadata_only: true, route_only: true, dest_override: ["http", "tls", "quic", "fakedns"],
+    domains_excluded: ["domain:Example.NET", "regexp:(?i)^internal\\.", "keyword:keep this"], ips_excluded: ["192.0.2.129/24", "2001:0db8:0000::1"] };
+  const fallbacks = [{ dest: "127.0.0.1:8080", path: "/health", xver: 2 }];
+  expect(f.calls[0].body.profile.options).toEqual({ sniffing, fallbacks });
+  await dialog.getByRole("button", { name: "Save paused setup", exact: true }).click();
+  await expect(dialog.getByRole("button", { name: "Retry the same save", exact: true })).toBeEnabled();
+  await dialog.getByRole("button", { name: "Retry the same save", exact: true }).click(); await expect(dialog).toBeHidden();
+  expect(f.calls[2].raw).toBe(f.calls[1].raw);
+  const identity = f.getSaved()!.profile.id, publicKey = f.getSaved()!.profile.public_key;
+  await page.getByRole("button", { name: "Open saved setup", exact: true }).click();
+  const edit = page.getByRole("dialog", { name: "Edit Inbound setup", exact: true });
+  await exclusions(edit);
+  await expect(edit.getByLabel("Excluded domains", { exact: true })).toHaveValue(sniffing.domains_excluded.join("\n"));
+  await expect(edit.getByLabel("Excluded IPs or CIDRs", { exact: true })).toHaveValue(sniffing.ips_excluded.join("\n"));
+  await edit.getByRole("checkbox", { name: "Enable Sniffing", exact: true }).uncheck();
+  await expect(edit.getByText("Sniffing is off. Its configured settings are retained.", { exact: true })).toBeVisible();
+  await fallbackRow(edit, 0); await expect(edit.getByLabel("Fallback 1 Path", { exact: true })).toHaveValue("/health");
+  await review(edit, "Retain settings while Sniffing is disabled"); await check(edit); await save(edit);
+  expect(f.getSaved()?.profile.options).toEqual({ sniffing: { ...sniffing, enabled: false }, fallbacks });
+  expect(f.getSaved()).toMatchObject({ plan_revision: 2, inbound_revision: 2, profile: { id: identity, public_key: publicKey, enabled: false } });
+
+  await page.getByRole("button", { name: "Copy settings", exact: true }).click();
+  const copy = page.getByRole("dialog", { name: "Create Inbound", exact: true });
+  await exclusions(copy); await expect(copy.getByRole("checkbox", { name: "Enable Sniffing", exact: true })).not.toBeChecked();
+  await expect(copy.getByRole("checkbox", { name: "QUIC", exact: true })).toBeChecked();
+  await expect(copy.getByLabel("Excluded domains", { exact: true })).toHaveValue(sniffing.domains_excluded.join("\n"));
+  await fallbackRow(copy, 0); await expect(copy.getByLabel("Fallback 1 Destination", { exact: true })).toHaveValue("127.0.0.1:8080");
+  await copy.getByRole("button", { name: "Cancel", exact: true }).click();
+
+  await page.getByRole("button", { name: "Open saved setup", exact: true }).click();
+  await sniffingDetails(edit); await edit.getByRole("button", { name: "Reset Sniffing", exact: true }).click();
+  await fallbackRow(edit, 0); await edit.getByRole("button", { name: "Remove fallback 1", exact: true }).click();
+  await expect(edit.getByRole("button", { name: "Add fallback", exact: true })).toBeFocused();
+  await review(edit, "Clear traffic settings explicitly"); await check(edit); await save(edit);
+  expect(f.calls[5].body.profile.options).toEqual({ sniffing: {}, fallbacks: [] });
+  expect(f.calls[6].body.profile.options).toEqual({ sniffing: {}, fallbacks: [] });
+  expect(f.getSaved()?.profile.options).toBeUndefined();
+  expect(f.getSaved()).toMatchObject({ plan_revision: 3, inbound_revision: 3, runtime_apply: false });
+  expect(f.calls.every(call => call.path === api || call.path === api + "/preview" || call.path === api + "/" + identity)).toBe(true);
+});
+
+test("switching to gRPC retains fallback rows, blocks preview and allows explicit removal", async ({ page }) => {
+  const f = await fixture(page), dialog = await openCreation(page); await profile(dialog);
+  await destination(dialog, "de", "203.0.113.10", "10443", "de.example.org");
+  await traffic(dialog); await dialog.getByRole("button", { name: "Add fallback", exact: true }).click();
+  await dialog.getByLabel("Fallback 1 Destination", { exact: true }).fill("[2001:db8::1]:8443");
+  await dialog.getByRole("tab", { name: "Network", exact: true }).click();
+  await dialog.getByRole("radio", { name: "gRPC / REALITY — network", exact: true }).check();
+  await dialog.getByLabel("gRPC service — network", { exact: true }).fill("grpc-service");
+  await review(dialog); await dialog.getByRole("button", { name: "Check complete setup", exact: true }).click();
+  await expect(dialog.getByRole("tab", { name: "Advanced", exact: true })).toHaveAttribute("aria-selected", "true");
+  await expect(dialog.getByLabel("Fallback 1 Destination", { exact: true })).toBeFocused();
+  await expect(dialog.getByLabel("Fallback 1 Destination", { exact: true })).toHaveValue("[2001:db8::1]:8443");
+  expect(f.calls).toHaveLength(0);
+  await expect(dialog.getByRole("button", { name: "Add fallback", exact: true })).toBeDisabled();
+  await dialog.getByRole("button", { name: "Remove fallback 1", exact: true }).click();
+  await review(dialog); await check(dialog); await save(dialog);
+  expect(f.calls[0].body.profile.options).toEqual({ fallbacks: [] });
+  expect(f.getSaved()?.profile.options).toBeUndefined();
+});
+
+test("traffic validation reveals nested exclusions and rejects oversized or duplicate fallback paths without a request", async ({ page }) => {
+  const f = await fixture(page), dialog = await openCreation(page); await profile(dialog);
+  await destination(dialog, "de", "203.0.113.10", "10443", "de.example.org");
+  await exclusions(dialog); await dialog.getByLabel("Excluded IPs or CIDRs", { exact: true }).fill("geoip:private");
+  await dialog.locator(".inbound-traffic-exclusions > summary").click();
+  await dialog.getByText("Sniffing settings", { exact: true }).click();
+  await review(dialog); await dialog.getByRole("button", { name: "Check complete setup", exact: true }).click();
+  await expect(dialog.getByLabel("Excluded IPs or CIDRs", { exact: true })).toBeFocused();
+  await expect(dialog.getByLabel("Excluded IPs or CIDRs", { exact: true })).toBeVisible();
+  expect(f.calls).toHaveLength(0);
+  await dialog.getByLabel("Excluded IPs or CIDRs", { exact: true }).fill("::ffff:192.0.2.0/120");
+  await review(dialog); await dialog.getByRole("button", { name: "Check complete setup", exact: true }).click();
+  await expect(dialog.getByLabel("Excluded IPs or CIDRs", { exact: true })).toBeFocused();
+  expect(f.calls).toHaveLength(0);
+  await dialog.getByLabel("Excluded IPs or CIDRs", { exact: true }).fill("192.0.2.1/24");
+  await dialog.getByRole("button", { name: "Add fallback", exact: true }).click();
+  await dialog.getByLabel("Fallback 1 Destination", { exact: true }).fill("8080");
+  await dialog.getByLabel("Fallback 1 Path", { exact: true }).fill("/" + "é".repeat(28));
+  await review(dialog); await dialog.getByRole("button", { name: "Check complete setup", exact: true }).click();
+  await expect(dialog.getByLabel("Fallback 1 Path", { exact: true })).toBeFocused();
+  await expect(dialog.getByRole("alert")).toContainText("at most 55 bytes");
+  expect(f.calls).toHaveLength(0);
+  await dialog.getByLabel("Fallback 1 Path", { exact: true }).fill("/same");
+  await dialog.getByRole("button", { name: "Add fallback", exact: true }).click();
+  await dialog.getByLabel("Fallback 2 Destination", { exact: true }).fill("8081");
+  await dialog.getByLabel("Fallback 2 Path", { exact: true }).fill("/same");
+  await review(dialog); await dialog.getByRole("button", { name: "Check complete setup", exact: true }).click();
+  await expect(dialog.getByLabel("Fallback 2 Path", { exact: true })).toBeFocused();
+  await expect(dialog.getByRole("alert")).toContainText("unique Path");
+  expect(f.calls).toHaveLength(0);
+});
+
+for (const change of ["missing sniffing", "changed fallback", "unknown nested field", "invalid nested type"] as const) test(`a preview with ${change} cannot authorize a traffic options save`, async ({ page }) => {
+  const f = await fixture(page, { tamperPreview: plan => {
+    if (change === "missing sniffing") delete plan.profile.options!.sniffing;
+    else if (change === "changed fallback") plan.profile.options!.fallbacks![0].dest = "9090";
+    else if (change === "unknown nested field") Object.assign(plan.profile.options!.sniffing!, { extra: true });
+    else Object.assign(plan.profile.options!.sniffing!, { dest_override: "http" });
+  } });
+  const dialog = await openCreation(page); await profile(dialog); await destination(dialog, "de", "203.0.113.10", "10443", "de.example.org");
+  await traffic(dialog); await dialog.getByRole("checkbox", { name: "Enable Sniffing", exact: true }).check();
+  await dialog.getByRole("button", { name: "Add fallback", exact: true }).click();
+  await dialog.getByLabel("Fallback 1 Destination", { exact: true }).fill("8080");
+  await review(dialog); await dialog.getByRole("button", { name: "Check complete setup", exact: true }).click();
+  await expect(dialog.getByRole("alert")).toContainText("could not validate this setup");
+  await expect(dialog.getByRole("button", { name: "Save paused setup", exact: true })).toBeDisabled();
+  expect(f.calls).toHaveLength(1); expect(f.getSaved()).toBeUndefined();
+});
+
+for (const missing of ["capabilities", "plan scope"] as const) test(`traffic options require ${missing} while untouched defaults remain compatible`, async ({ page }) => {
+  const f = await fixture(page, missing === "capabilities" ? { profileSniffing: false, profileFallbacks: false } : { trafficScope: false });
+  const dialog = await openCreation(page); await profile(dialog); await traffic(dialog);
+  await expect(dialog.getByRole("checkbox", { name: "Enable Sniffing", exact: true })).toBeDisabled();
+  await expect(dialog.getByRole("button", { name: "Add fallback", exact: true })).toBeDisabled();
+  await destination(dialog, "de", "203.0.113.10", "10443", "de.example.org"); await review(dialog); await check(dialog); await save(dialog);
+  expect(f.calls[0].body.profile).not.toHaveProperty("options");
+});
+
+test("a server RE2 validation error reveals Sniffing exclusions in Advanced", async ({ page }) => {
+  const f = await fixture(page, { previewError: { status: 400, issue: { field: "profile.options.sniffing", code: "sniffing_invalid" } } });
+  const dialog = await openCreation(page); await profile(dialog); await destination(dialog, "de", "203.0.113.10", "10443", "de.example.org");
+  await exclusions(dialog); await dialog.getByLabel("Excluded domains", { exact: true }).fill("regexp:(?=unsupported)");
+  await dialog.locator(".inbound-traffic-exclusions > summary").click(); await dialog.getByText("Sniffing settings", { exact: true }).click();
+  await review(dialog); await dialog.getByRole("button", { name: "Check complete setup", exact: true }).click();
+  await expect(dialog.getByRole("tab", { name: "Advanced", exact: true })).toHaveAttribute("aria-selected", "true");
+  await expect(dialog.getByLabel("Excluded domains", { exact: true })).toBeFocused();
+  await expect(dialog.getByLabel("Excluded domains", { exact: true })).toHaveValue("regexp:(?=unsupported)");
+  expect(f.calls).toHaveLength(1); expect(f.getSaved()).toBeUndefined();
+});
+
+test("an unexpected saved fallback ALPN is retained and requires explicit clearing", async ({ page }) => {
+  const f = await fixture(page), dialog = await openCreation(page); await profile(dialog);
+  await destination(dialog, "de", "203.0.113.10", "10443", "de.example.org"); await traffic(dialog);
+  await dialog.getByRole("button", { name: "Add fallback", exact: true }).click();
+  await dialog.getByLabel("Fallback 1 Destination", { exact: true }).fill("8080");
+  await review(dialog); await check(dialog); await save(dialog);
+  // Simulate a response from an incompatible server; never silently drop its value.
+  f.getSaved()!.profile.options!.fallbacks![0].alpn = "h2";
+  await page.getByRole("button", { name: "Open saved setup", exact: true }).click();
+  const edit = page.getByRole("dialog", { name: "Edit Inbound setup", exact: true });
+  await review(edit); await edit.getByRole("button", { name: "Check complete setup", exact: true }).click();
+  const clear = edit.getByRole("button", { name: "Clear unsupported ALPN", exact: true });
+  await expect(clear).toBeFocused();
+  await expect(edit.getByRole("alert")).toContainText("Clear the unsupported ALPN explicitly");
+  expect(f.calls).toHaveLength(2);
+  await clear.click(); await expect(edit.getByLabel("Fallback 1 Destination", { exact: true })).toBeFocused();
+  await review(edit); await check(edit); await save(edit);
+  expect(f.calls[2].body.profile.options).toEqual({ fallbacks: [{ dest: "8080" }] });
+});
+
+for (const language of ["en", "fa"] as const) test(`traffic controls and fallback rows fit 320px ${language} with visible focused controls`, async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 320, height: 760 }); await fixture(page, { language });
+  const dialog = await openCreation(page, language), fa = language === "fa";
+  await dialog.getByRole("tab", { name: fa ? "پیشرفته" : "Advanced", exact: true }).click();
+  await dialog.getByRole("checkbox", { name: fa ? "فعال‌کردن Sniffing" : "Enable Sniffing", exact: true }).check();
+  const exclusionsToggle = dialog.locator(".inbound-traffic-exclusions > summary"); await exclusionsToggle.click();
+  await dialog.getByLabel(fa ? "دامنه‌های مستثنا" : "Excluded domains", { exact: true }).fill("domain:example.org");
+  await dialog.getByRole("button", { name: fa ? "افزودن Fallback" : "Add fallback", exact: true }).click();
+  const dest = dialog.getByLabel(fa ? "Fallback 1 مقصد" : "Fallback 1 Destination", { exact: true });
+  await expect(dest).toBeFocused(); await expect(dest).toBeInViewport({ ratio: 1 }); await dest.fill("127.0.0.1:8080");
+  const widths = await dialog.evaluate(element => ({ width: element.clientWidth, scroll: element.scrollWidth }));
+  expect(widths.scroll).toBeLessThanOrEqual(widths.width + 1);
+  await expect.poll(() => dialog.locator('.creation-tabs [aria-selected="true"]').evaluate(element => {
+    const tab = element.getBoundingClientRect(), viewport = element.parentElement!.getBoundingClientRect(); return tab.left >= viewport.left - 1 && tab.right <= viewport.right + 1;
+  })).toBe(true);
+  await dest.evaluate(element => element.scrollIntoView({ block: "center" }));
+  await expect(dest).toBeInViewport({ ratio: 1 });
+  await page.screenshot({ path: testInfo.outputPath(`traffic-options-${language}-320.png`) });
+  await dialog.getByRole("button", { name: fa ? "حذف Fallback 1" : "Remove fallback 1", exact: true }).click();
+  await expect(dialog.getByRole("button", { name: fa ? "افزودن Fallback" : "Add fallback", exact: true })).toBeFocused();
 });
