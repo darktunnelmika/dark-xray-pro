@@ -243,7 +243,7 @@ export default function InboundCreation({ language, nodes, targets, capabilities
         </section>
         <section id="creation-panel-swap" role="tabpanel" aria-labelledby="creation-tab-swap" hidden={section !== "swap"}>
           <header className="creation-section-heading creation-extra-heading"><div><h3><ArrowRightLeft size={16}/> {t.swapTab}</h3><p>{language === "fa" ? "برای هر نود مقصد، واسط، پورت رله، ورودی ایران و پورت مقصد را همین‌جا تنظیم کن. ذخیره فقط طرح خاموش است و اتصال عملیاتی هنوز فعال نمی‌شود." : "Configure relay Node, relay port, Iranian entry and destination port per destination. Saving preserves an inactive plan; it does not apply live traffic."}</p></div></header>
-          <InboundCreationNodes view="swap" language={language} state={state} nodes={nodes} targets={targets} disabled={locked} expanded={expanded} onExpanded={setExpanded} onChange={update} issues={issues}/>
+          {section === "swap" && <InboundCreationNodes view="swap" language={language} state={state} nodes={nodes} targets={targets} disabled={locked} expanded={expanded} onExpanded={setExpanded} onChange={update} issues={issues}/>}
         </section>
         <section id="creation-panel-hosts" role="tabpanel" aria-labelledby="creation-tab-hosts" hidden={section !== "hosts"} className="creation-profile">
           <header className="creation-section-heading"><div><h3>{language === "fa" ? "هاست‌ها و خروجی اتصال" : "Hosts and public endpoints"}</h3><p>{language === "fa" ? "آدرس‌های Direct و Tunnel با پورت‌های تعریف‌شدهٔ همان نود ذخیره می‌شوند. انتشار لینک نیاز به فعال‌سازی جداگانه دارد." : "Direct and Tunnel addresses are saved with their Node ports. Publishing customer links remains a separate operation."}</p></div></header>
@@ -257,7 +257,7 @@ export default function InboundCreation({ language, nodes, targets, capabilities
           <p className="creation-help">{language === "fa" ? "برای حفظ مشتری‌ها و حسابداری، هیچ پروتکل جدیدی فقط با یک dropdown فعال نمی‌شود. فرم‌های موجود بدون تغییر در runtime ذخیره می‌شوند." : "For customer and accounting safety, new protocols cannot be enabled with UI-only selectors. Saved plans do not alter runtime traffic."}</p>
         </section>
         <section id="creation-panel-nodes" role="tabpanel" aria-labelledby="creation-tab-nodes" hidden={section !== "nodes"}>
-          <InboundCreationNodes language={language} state={state} nodes={nodes} targets={targets} disabled={locked} expanded={expanded} onExpanded={setExpanded} onChange={update} issues={issues}/>
+          {section === "nodes" && <InboundCreationNodes language={language} state={state} nodes={nodes} targets={targets} disabled={locked} expanded={expanded} onExpanded={setExpanded} onChange={update} issues={issues}/>}
           {issues.filter(issue => issue.field === "nodes").map((issue, index) => <p key={index} className="creation-issues" role="alert">{creationIssueMessage(issue, language)}</p>)}
         </section>
         <section id="creation-panel-review" role="tabpanel" aria-labelledby="creation-tab-review" hidden={section !== "review"} className="creation-review">
