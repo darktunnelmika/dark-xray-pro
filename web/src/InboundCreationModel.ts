@@ -4,6 +4,7 @@ import { canonicalProfileOptions, profileOptionIssues, profileOptionsDraft, prof
 import { canonicalEndpointAddress, endpointAddresses, endpointDraft, endpointIssues, endpointPayload, validEndpointAddress, type EndpointDraft, type InboundEndpoint } from "./inboundEndpointOptions";
 import { validUTF8 } from "./inboundNetworkOptions";
 import type { CreationEndpointPreview } from "./inboundEndpointPreview";
+import { assertPublicInboundData, canonicalTLSMetadata, profileSecurity, tlsCredentialIssues, type InboundSecurity, type TLSCredentials, type TLSMetadata } from "./inboundTLS";
 
 export type CreationPath = { enabled: boolean; port: string; hosts: string; endpoints?: EndpointDraft[]; endpointsPresent?: boolean };
 export type CreationNode = {
@@ -15,12 +16,15 @@ export type CreationNode = {
   swap: { enabled: boolean; sourceNodeID: string; sourceInstallationID: string; sourceListenIP: string; sourcePort: string; entryHost: string; entryPort: string; destinationPort: string };
 };
 export type CreationState = {
-  profile: InboundProfileValue;
+  profile: InboundProfileValue & { security: InboundSecurity };
   selected: string[];
   nodes: Record<string, CreationNode>;
   reason: string;
   shortIDs: string;
   profileOptionsPresent: boolean;
+  tlsMetadata?: TLSMetadata;
+  tlsCredentials: TLSCredentials;
+  replaceTLS: boolean;
 };
 export type CreationIssue = { nodeID?: string; field: string; code: string; destinationNodeID?: string; path?: "direct" | "tunnel" | "swap_source" | "swap_destination"; port?: number };
 export type CreationPlanNode = {
@@ -43,14 +47,16 @@ export type CreationCapabilities = {
   profile_fallbacks?: boolean;
   profile_traffic_options_scope?: "creation_plan";
   profile_xhttp?: boolean; profile_client_options?: boolean; profile_network_options_scope?: "creation_plan";
+  profile_tls?: boolean; profile_tls_scope?: "creation_plan"; profile_websocket?: boolean; profile_http_upgrade?: boolean;
   endpoint_options?: boolean; max_endpoints_per_path?: number;
   listener_port_min?: number; listener_port_max?: number; reserved_listener_ports?: number[];
   plans: Array<{ inbound_id: number; plan_revision: number; inbound_revision: number; status: string; node_ids?: string[] }>;
 };
 export type CreationPayload = {
   event_id: string; expected_plan_revision: number; expected_inbound_revision: number;
-  profile: Pick<Inbound, "id" | "name" | "transport" | "grpc_service" | "reality_target" | "server_names" | "short_ids" | "options">;
+  profile: Pick<Inbound, "id" | "name" | "transport" | "grpc_service" | "server_names" | "options" | "security"> & Partial<Pick<Inbound, "reality_target" | "short_ids">>;
   nodes: CreationPlanNode[]; reason: string;
+  tls_credentials?: TLSCredentials;
 };
 export type CreationPreview = { valid: true; plan: CreationPlan; runtime_changed: false; topology_validated: true; topology_validation_only: true; topology_key_scope: "preview_only" | "saved_profile"; endpoints?: CreationEndpointPreview[] };
 export type CreationReceipt = { plan: CreationPlan; event_id: string; replayed: boolean; runtime_changed: false; clients_deleted: false;
@@ -58,7 +64,11 @@ export type CreationReceipt = { plan: CreationPlan; event_id: string; replayed: 
 export type CreationPlanResponse = { plan: CreationPlan; references_current: boolean };
 
 export function stateFromCreationPlan(plan: CreationPlan): CreationState {
+  assertPublicInboundData(plan);
   const state = emptyCreation(plan.profile);
+  if (state.profile.security === "tls") state.tlsMetadata = canonicalTLSMetadata(plan.profile.tls);
+  else if (plan.profile.tls !== undefined) throw new Error("unexpected_tls_metadata");
+  state.replaceTLS = false;
   state.reason = plan.reason; state.selected = plan.nodes.map(row => row.node_id);
   for (const row of plan.nodes) state.nodes[row.node_id] = { nodeID: row.node_id, installationID: row.installation_id, listenIP: row.listen_ip,
     direct: { enabled: row.direct_port > 0, port: row.direct_port ? String(row.direct_port) : "", hosts: row.direct_hosts.join("\n"), endpoints: row.direct_endpoints?.length ? row.direct_endpoints.map(endpointDraft) : undefined, endpointsPresent: !!row.direct_endpoints?.length },
@@ -70,15 +80,17 @@ export function stateFromCreationPlan(plan: CreationPlan): CreationState {
 }
 export function creationPayload(state: CreationState, inboundID: number, planRevision: number, inboundRevision: number, eventID: string): CreationPayload {
   return { event_id: eventID, expected_plan_revision: planRevision, expected_inbound_revision: inboundRevision,
-    profile: { id: inboundID, name: state.profile.name, transport: state.profile.transport,
-      grpc_service: state.profile.transport === "grpc" ? state.profile.grpcService : "", reality_target: state.profile.realityTarget,
-      server_names: state.profile.serverNames.split(/[\s,]+/).filter(Boolean), short_ids: creationShortIDs(state.shortIDs),
-      options: profileOptionsPayload(state.profile.options, state.profile.transport) ?? (planRevision > 0 && state.profileOptionsPresent ? {} : undefined) },
+    profile: { id: inboundID, name: state.profile.name, transport: state.profile.transport, security: state.profile.security,
+      grpc_service: state.profile.transport === "grpc" ? state.profile.grpcService : "",
+      ...(state.profile.security === "tls" ? {} : { reality_target: state.profile.realityTarget, short_ids: creationShortIDs(state.shortIDs) }),
+      server_names: state.profile.serverNames.split(/[\s,]+/).filter(Boolean),
+      options: profileOptionsPayload(state.profile.options, state.profile.transport, state.profile.security) ?? (planRevision > 0 && state.profileOptionsPresent ? {} : undefined) },
+    ...(state.profile.security === "tls" && (state.replaceTLS || !state.tlsMetadata) ? { tls_credentials: { ...state.tlsCredentials } } : {}),
     nodes: selectedCreationNodes(state).map(row => ({ node_id: row.nodeID, installation_id: row.installationID, listen_ip: row.listenIP,
       direct_port: row.direct.enabled ? creationPort(row.direct.port) : 0, direct_hosts: row.direct.enabled ? creationPathHosts(row.direct) : [],
       tunnel_port: row.tunnel.enabled ? creationPort(row.tunnel.port) : 0, tunnel_hosts: row.tunnel.enabled ? creationPathHosts(row.tunnel) : [],
-      ...(row.direct.endpoints !== undefined || row.direct.endpointsPresent ? { direct_endpoints: row.direct.enabled ? row.direct.endpoints?.map(endpointPayload) ?? [] : [] } : {}),
-      ...(row.tunnel.endpoints !== undefined || row.tunnel.endpointsPresent ? { tunnel_endpoints: row.tunnel.enabled ? row.tunnel.endpoints?.map(endpointPayload) ?? [] : [] } : {}),
+      ...(row.direct.endpoints !== undefined || row.direct.endpointsPresent ? { direct_endpoints: row.direct.enabled ? row.direct.endpoints?.map(endpoint => endpointPayload(endpoint, state.profile.security)) ?? [] : [] } : {}),
+      ...(row.tunnel.endpoints !== undefined || row.tunnel.endpointsPresent ? { tunnel_endpoints: row.tunnel.enabled ? row.tunnel.endpoints?.map(endpoint => endpointPayload(endpoint, state.profile.security)) ?? [] : [] } : {}),
       swap_enabled: row.swap.enabled, swap_source_node_id: row.swap.enabled ? row.swap.sourceNodeID : "",
       swap_source_installation_id: row.swap.enabled ? row.swap.sourceInstallationID : "",
       swap_source_listen_ip: row.swap.enabled ? row.swap.sourceListenIP : "",
@@ -92,10 +104,12 @@ export function creationWaitingHosts(row: CreationNode): boolean {
 }
 
 export function emptyCreation(source?: Inbound): CreationState {
+  assertPublicInboundData(source);
   return {
-    profile: { name: source?.name ?? "", transport: source?.transport ?? "tcp", grpcService: source?.grpc_service ?? "",
+    profile: { name: source?.name ?? "", transport: source?.transport ?? "tcp", grpcService: source?.grpc_service ?? "", security: profileSecurity(source?.security),
       realityTarget: source?.reality_target ?? "", serverNames: source?.server_names.join(", ") ?? "", options: profileOptionsDraft(source?.options) },
-    selected: [], nodes: {}, reason: "", profileOptionsPresent: !!canonicalProfileOptions(source?.options), shortIDs: source?.short_ids.join(", ") ?? freshCreationShortID(),
+    selected: [], nodes: {}, reason: "", profileOptionsPresent: !!canonicalProfileOptions(source?.options), shortIDs: source?.short_ids?.join(", ") ?? freshCreationShortID(),
+    tlsCredentials: { certificate_pem: "", private_key_pem: "" }, replaceTLS: false,
   };
 }
 export function newCreationNode(node: InboundNode): CreationNode {
@@ -140,16 +154,18 @@ export function creationIssues(state: CreationState, available: InboundNode[]): 
   const profile = state.profile;
   if (!profile.name.trim()) issues.push({ field: "name", code: "name_required" });
   else if (!validUTF8(profile.name) || Array.from(profile.name).length > 128 || /[\u0000-\u001f\u007f-\u009f]/.test(profile.name)) issues.push({ field: "name", code: "name_invalid" });
-  if (!["tcp", "grpc", "xhttp"].includes(profile.transport)) issues.push({ field: "transport", code: "transport_invalid" });
+  const tls = profile.security === "tls";
+  if (!(tls ? ["tcp", "grpc", "xhttp", "ws", "httpupgrade"] : ["tcp", "grpc", "xhttp"]).includes(profile.transport)) issues.push({ field: "transport", code: "transport_invalid" });
   if (profile.transport === "grpc" && !/^[A-Za-z0-9_-]{1,64}$/.test(profile.grpcService)) issues.push({ field: "grpcService", code: "grpc_service_invalid" });
   const target = profile.realityTarget.match(/^(?:\[[0-9a-fA-F:.]+\]|[^:\s/\\@%\[\]]+):([0-9]+)$/);
-  if (!target || Number(target[1]) < 1 || Number(target[1]) > 65535) issues.push({ field: "realityTarget", code: "target_invalid" });
+  if (!tls && (!target || Number(target[1]) < 1 || Number(target[1]) > 65535)) issues.push({ field: "realityTarget", code: "target_invalid" });
   const serverNames = profile.serverNames.split(/[\s,]+/).filter(Boolean);
   if (!serverNames.length) issues.push({ field: "serverNames", code: "server_names_required" });
   else if (serverNames.length > 16 || serverNames.some(name => !validCreationServerName(name))) issues.push({ field: "serverNames", code: "server_names_invalid" });
-  issues.push(...profileOptionIssues(profile.options, profile.transport));
+  issues.push(...profileOptionIssues(profile.options, profile.transport, profile.security));
+  if (tls && (state.replaceTLS || !state.tlsMetadata)) issues.push(...tlsCredentialIssues(state.tlsCredentials));
   const shortIDs = creationShortIDs(state.shortIDs);
-  if (!shortIDs.length || shortIDs.length > 16 || new Set(shortIDs).size !== shortIDs.length || shortIDs.some(id => !/^[0-9a-f]{2,16}$/.test(id) || id.length % 2 !== 0)) issues.push({ field: "shortIDs", code: "short_ids_invalid" });
+  if (!tls && (!shortIDs.length || shortIDs.length > 16 || new Set(shortIDs).size !== shortIDs.length || shortIDs.some(id => !/^[0-9a-f]{2,16}$/.test(id) || id.length % 2 !== 0))) issues.push({ field: "shortIDs", code: "short_ids_invalid" });
   if (!state.selected.length) issues.push({ field: "nodes", code: "node_required" });
   for (const row of selectedCreationNodes(state)) {
     const add = (field: string, code: string) => issues.push({ nodeID: row.nodeID, field, code });
@@ -164,7 +180,7 @@ export function creationIssues(state: CreationState, available: InboundNode[]): 
       if (!port) add(key + "Port", "port_invalid"); else ports.push(port);
       const hosts = creationPathHosts(path);
       if (path.endpoints !== undefined) {
-        const defaults = { serverNames, fingerprint: profile.options?.clientFingerprint ?? "", spiderX: profile.options?.clientSpiderX ?? "" };
+        const defaults = { serverNames, fingerprint: profile.options?.clientFingerprint ?? "", spiderX: tls ? "" : profile.options?.clientSpiderX ?? "", security: profile.security };
         issues.push(...endpointIssues(path.endpoints, path.port, defaults, key + "Endpoints").map(issue => ({ ...issue, nodeID: row.nodeID })));
       } else {
         if (hosts.some(host => !validEndpointAddress(host))) add(key + "Hosts", "host_invalid");

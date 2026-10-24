@@ -247,7 +247,8 @@ try {
   const capabilities = await capabilityHTTP.json(); publicOnly(capabilities);
   expect(capabilities).toMatchObject({ available: true, runtime_apply: false, profile_options: true, profile_sniffing: true, profile_fallbacks: true,
     profile_traffic_options_scope: 'creation_plan', profile_xhttp: true, profile_client_options: true, endpoint_options: true,
-    protocols: ['vless'], securities: ['reality'], transports: ['tcp', 'grpc', 'xhttp'] });
+    profile_tls: true, profile_tls_scope: 'creation_plan', profile_websocket: true, profile_http_upgrade: true,
+    protocols: ['vless'], securities: ['reality', 'tls'], transports: ['tcp', 'grpc', 'xhttp', 'ws', 'httpupgrade'] });
   const add = page.getByRole('button', { name: 'Add Inbound', exact: true }); await expect(add).toBeEnabled(); await add.click();
   const dialog = page.getByRole('dialog', { name: 'Create Inbound', exact: true }); await expect(dialog).toBeVisible();
   await expect(dialog.getByRole('tab')).toHaveText(['Connection', 'Dark Swap', 'Advanced', 'Review']);

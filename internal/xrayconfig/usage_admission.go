@@ -138,7 +138,7 @@ func UsageBootstrap(c Candidate) (Candidate, []byte, string, error) {
 	ports := map[uint16]bool{}
 	users := 0
 	for _, in := range ins {
-		if in.Protocol != "vless" || in.Tag == "" || in.Tag == UsageAPITag || tags[in.Tag] != 0 || ports[in.Port] || in.Port < 1024 || in.Port == port || in.Settings.Decryption != "none" || in.Stream.Security != "reality" || (in.Stream.Network != "tcp" && in.Stream.Network != "grpc") || in.Stream.XHTTP != nil {
+		if in.Protocol != "vless" || in.Tag == "" || in.Tag == UsageAPITag || tags[in.Tag] != 0 || ports[in.Port] || in.Port < 1024 || in.Port == port || in.Settings.Decryption != "none" || in.Stream.Security != "reality" || (in.Stream.Network != "tcp" && in.Stream.Network != "grpc") || in.Stream.XHTTP != nil || in.Stream.TLS != nil || in.Stream.Reality == nil || in.Stream.WebSocket != nil || in.Stream.HTTPUpgrade != nil {
 			return fail()
 		}
 		// VLESS fallback uses its own direct dialer rather than the admitted

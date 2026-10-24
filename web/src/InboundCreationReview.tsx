@@ -6,6 +6,9 @@ import { profileOptionsDraft } from "./inboundProfileOptions";
 import { trafficLines } from "./inboundTrafficOptions";
 import { effectiveEndpoint } from "./inboundEndpointOptions";
 import type { CreationEndpointPreview } from "./inboundEndpointPreview";
+import { transportLabel } from "./inboundNetworkOptions";
+import type { TLSMetadata } from "./inboundTLS";
+import { TLSCertificateSummary } from "./InboundTLSCredentials";
 
 const words = {
   en: {
@@ -38,16 +41,17 @@ function Value({ label, value, field, option }: { label: string; value: ReactNod
   return <div data-review-field={field} data-review-option={option}><dt>{label}</dt><dd><bdi>{value || "—"}</bdi></dd></div>;
 }
 
-export default function InboundCreationReview({ language, state, nodes, disabled, onEdit, publicKey, checkedEndpoints }: {
+export default function InboundCreationReview({ language, state, nodes, disabled, onEdit, publicKey, checkedEndpoints, tlsMetadata }: {
   language: "en" | "fa"; state: CreationState; nodes: InboundNode[]; disabled: boolean; onEdit: (section: "connection" | "swap" | "advanced") => void;
-  publicKey?: string; checkedEndpoints?: CreationEndpointPreview[];
+  publicKey?: string; checkedEndpoints?: CreationEndpointPreview[]; tlsMetadata?: TLSMetadata;
 }) {
   const t = words[language], profile = state.profile, options = profile.options ?? profileOptionsDraft(), rows = selectedCreationNodes(state);
+  const tls = profile.security === "tls";
   const domains = trafficLines(options.sniffing.domainsExcluded), ips = trafficLines(options.sniffing.ipsExcluded);
   const sniffingConfigured = (options.sniffingPresent || options.sniffing.enabled) && (options.sniffing.enabled || options.sniffing.destOverride.length > 0 || options.sniffing.routeOnly || options.sniffing.metadataOnly || domains.length > 0 || ips.length > 0);
   const sniffingRetained = sniffingConfigured && !options.sniffing.enabled;
   const hostCount = new Set(rows.flatMap(row => [...(row.direct.enabled ? creationPathHosts(row.direct) : []), ...(row.tunnel.enabled ? creationPathHosts(row.tunnel) : [])])).size;
-  const defaults = { serverNames: profile.serverNames.split(/[\s,]+/).filter(Boolean), fingerprint: options.clientFingerprint, spiderX: options.clientSpiderX };
+  const defaults = { serverNames: profile.serverNames.split(/[\s,]+/).filter(Boolean), fingerprint: options.clientFingerprint, spiderX: options.clientSpiderX, security: profile.security };
   const [copyState, setCopyState] = useState("");
   const proxy = (value: string) => value === "0" ? `${t.off} (0)` : value === "1" ? "PROXY v1 (1)" : value === "2" ? "PROXY v2 (2)" : value || "—";
   const nondefaultNumber = (value: string) => value.trim() !== "" && Number(value) !== 0;
@@ -63,7 +67,7 @@ export default function InboundCreationReview({ language, state, nodes, disabled
         const effective = effectiveEndpoint(endpoint, row[path].port, defaults);
         return <div className="creation-review-endpoint" key={endpoint.key} data-review-endpoint={index} data-endpoint-enabled={endpoint.enabled}>
           <h6>{endpoint.label || `${t.endpoint} ${index + 1}`}<span>{endpoint.enabled ? t.on : t.endpointOff}</span></h6>
-          <dl className="creation-review-values"><Value label={t.addresses} value={effective.address}/><Value label={t.publicPort} value={effective.port || "—"}/><Value label={t.sni} value={effective.sni}/><Value label={t.fingerprint} value={effective.fingerprint}/><Value label={t.spider} value={effective.spiderX}/></dl>
+          <dl className="creation-review-values"><Value label={t.addresses} value={effective.address}/><Value label={t.publicPort} value={effective.port || "—"}/><Value label={t.sni} value={effective.sni}/><Value label={t.fingerprint} value={effective.fingerprint}/>{!tls && <Value label={t.spider} value={effective.spiderX}/>}</dl>
         </div>;
       })}
     </>;
@@ -73,22 +77,24 @@ export default function InboundCreationReview({ language, state, nodes, disabled
       <header><h4>{t.connection}</h4>{edit("connection", t.editConnection)}</header>
       <dl className="creation-review-values">
         <Value label={t.name} value={profile.name} field="name"/><Value label={t.protocol} value="VLESS" field="protocol"/>
-        <Value label={t.transport} value={`${profile.transport.toUpperCase()} / REALITY${profile.transport === "tcp" ? " · Vision" : ""}`} field="transport"/>
+        <Value label={t.transport} value={`${transportLabel(profile.transport)} / ${tls ? "TLS" : "REALITY"}${profile.transport === "tcp" ? " · Vision" : ""}`} field="transport"/>
         {profile.transport === "grpc" && <Value label={t.service} value={profile.grpcService} field="grpcService"/>}
         {profile.transport === "xhttp" && <><Value label={t.xhttpPath} value={options.xhttpPath || "/"} option="xhttpPath"/><Value label={t.xhttpHost} value={options.xhttpHost || t.default} option="xhttpHost"/><Value label={t.xhttpMode} value={options.xhttpMode || "auto"} option="xhttpMode"/><Value label={t.xhttpPadding} value={options.xhttpPadding || "100-1000"} option="xhttpPadding"/></>}
-        <Value label={t.target} value={profile.realityTarget} field="realityTarget"/>
+        {tls && (profile.transport === "ws" || profile.transport === "httpupgrade") && <><Value label={`${transportLabel(profile.transport)} Path`} value={(profile.transport === "ws" ? options.websocketPath : options.httpUpgradePath) || "/"}/><Value label={`${transportLabel(profile.transport)} Host`} value={(profile.transport === "ws" ? options.websocketHost : options.httpUpgradeHost) || t.default}/></>}
+        {!tls && <Value label={t.target} value={profile.realityTarget} field="realityTarget"/>}
         <Value label={t.serverNames} value={profile.serverNames.split(/[\s,]+/).filter(Boolean).join("\n")} field="serverNames"/>
-        <Value label={t.shortIDs} value={creationShortIDs(state.shortIDs).join(", ")} field="shortIDs"/>
+        {!tls && <Value label={t.shortIDs} value={creationShortIDs(state.shortIDs).join(", ")} field="shortIDs"/>}
         {profile.transport === "grpc" && options.grpcAuthority && <Value label={t.authority} value={options.grpcAuthority} option="grpcAuthority"/>}
         {profile.transport === "grpc" && options.grpcMultiMode && <Value label={t.multiMode} value={t.on} option="grpcMultiMode"/>}
-        {nondefaultNumber(options.realityXver) && <Value label={t.xver} value={proxy(options.realityXver)} option="realityXver"/>}
-        {nondefaultNumber(options.realityMaxTimeDiff) && <Value label={t.time} value={options.realityMaxTimeDiff} option="realityMaxTimeDiff"/>}
-        {options.realityMinClientVer && <Value label={t.minVersion} value={options.realityMinClientVer} option="realityMinClientVer"/>}
-        {options.realityMaxClientVer && <Value label={t.maxVersion} value={options.realityMaxClientVer} option="realityMaxClientVer"/>}
-        {options.realityShow && <Value label={t.show} value={t.on} option="realityShow"/>}
-        {(options.clientPresent || options.clientFingerprint || options.clientSpiderX) && <><Value label={t.fingerprint} value={options.clientFingerprint || "chrome"} option="clientFingerprint"/><Value label={t.spider} value={options.clientSpiderX || "/"} option="clientSpiderX"/></>}
+        {!tls && <>{nondefaultNumber(options.realityXver) && <Value label={t.xver} value={proxy(options.realityXver)} option="realityXver"/>}
+          {nondefaultNumber(options.realityMaxTimeDiff) && <Value label={t.time} value={options.realityMaxTimeDiff} option="realityMaxTimeDiff"/>}
+          {options.realityMinClientVer && <Value label={t.minVersion} value={options.realityMinClientVer} option="realityMinClientVer"/>}
+          {options.realityMaxClientVer && <Value label={t.maxVersion} value={options.realityMaxClientVer} option="realityMaxClientVer"/>}
+          {options.realityShow && <Value label={t.show} value={t.on} option="realityShow"/>}</>}
+        {(options.clientPresent || options.clientFingerprint || options.clientSpiderX) && <><Value label={t.fingerprint} value={options.clientFingerprint || "chrome"} option="clientFingerprint"/>{!tls && <Value label={t.spider} value={options.clientSpiderX || "/"} option="clientSpiderX"/>}</>}
         {publicKey && <Value label={t.publicKey} value={publicKey} field="publicKey"/>}
       </dl>
+      {tls && (tlsMetadata ? <TLSCertificateSummary metadata={tlsMetadata} language={language}/> : <p className="creation-help">{language === "fa" ? "پس از بررسی کامل، مشخصات عمومی گواهی اینجا نمایش داده می‌شود." : "Check the complete setup to review the certificate’s public metadata."}</p>)}
       {publicKey && <div className="creation-review-key"><button type="button" disabled={disabled} onClick={() => { if (!navigator.clipboard) { setCopyState(t.copyFailed); return; } void navigator.clipboard.writeText(publicKey).then(() => setCopyState(t.copied), () => setCopyState(t.copyFailed)); }}><Copy size={14}/>{t.copyKey}</button><span role="status">{copyState}</span></div>}
     </section>
     <section className="creation-review-card" data-review-section="routes">
@@ -108,7 +114,7 @@ export default function InboundCreationReview({ language, state, nodes, disabled
           </div>;
         })}
       </article>)}</div>
-      {checkedEndpoints && <details className="creation-review-disclosure" data-checked-endpoints><summary>{t.checkedEndpoints} <bdi>{checkedEndpoints.length}</bdi></summary><div className="creation-checked-endpoints"><p className="creation-help">{t.checkedHint}</p>{checkedEndpoints.map((endpoint, index) => <div className="creation-review-endpoint" key={index} data-checked-endpoint={index}><h6>{endpoint.label}<span>{endpoint.enabled ? t.on : t.endpointOff}</span></h6><dl className="creation-review-values"><Value label={t.nodes} value={creationNodeName(nodes, endpoint.node_id)}/><Value label={t.path} value={t[endpoint.path]}/><Value label={t.addresses} value={endpoint.address}/><Value label={t.publicPort} value={endpoint.port}/><Value label={t.port} value={endpoint.listen_port}/><Value label={t.sni} value={endpoint.server_name}/><Value label={t.transport} value={`${endpoint.transport.toUpperCase()} / REALITY`}/><Value label={t.fingerprint} value={endpoint.fingerprint}/><Value label={t.spider} value={endpoint.spider_x}/>{endpoint.grpc_service && <Value label={t.service} value={endpoint.grpc_service}/ >}{endpoint.grpc_authority && <Value label={t.authority} value={endpoint.grpc_authority}/ >}{endpoint.grpc_multi_mode && <Value label={t.multiMode} value={t.on}/ >}{endpoint.transport === "xhttp" && <><Value label={t.xhttpPath} value={endpoint.xhttp?.path || "/"}/><Value label={t.xhttpHost} value={endpoint.xhttp?.host || t.default}/><Value label={t.xhttpMode} value={endpoint.xhttp?.mode || "auto"}/><Value label={t.xhttpPadding} value={endpoint.xhttp?.x_padding_bytes || "100-1000"}/></>}</dl></div>)}</div></details>}
+      {checkedEndpoints && <details className="creation-review-disclosure" data-checked-endpoints><summary>{t.checkedEndpoints} <bdi>{checkedEndpoints.length}</bdi></summary><div className="creation-checked-endpoints"><p className="creation-help">{t.checkedHint}</p>{checkedEndpoints.map((endpoint, index) => <div className="creation-review-endpoint" key={index} data-checked-endpoint={index}><h6>{endpoint.label}<span>{endpoint.enabled ? t.on : t.endpointOff}</span></h6><dl className="creation-review-values"><Value label={t.nodes} value={creationNodeName(nodes, endpoint.node_id)}/><Value label={t.path} value={t[endpoint.path]}/><Value label={t.addresses} value={endpoint.address}/><Value label={t.publicPort} value={endpoint.port}/><Value label={t.port} value={endpoint.listen_port}/><Value label={t.sni} value={endpoint.server_name}/><Value label={t.transport} value={`${transportLabel(endpoint.transport)} / ${endpoint.security === "tls" ? "TLS" : "REALITY"}`}/><Value label={t.fingerprint} value={endpoint.fingerprint}/>{endpoint.security !== "tls" && <Value label={t.spider} value={endpoint.spider_x}/>}{endpoint.grpc_service && <Value label={t.service} value={endpoint.grpc_service}/ >}{endpoint.grpc_authority && <Value label={t.authority} value={endpoint.grpc_authority}/ >}{endpoint.grpc_multi_mode && <Value label={t.multiMode} value={t.on}/ >}{endpoint.transport === "xhttp" && <><Value label={t.xhttpPath} value={endpoint.xhttp?.path || "/"}/><Value label={t.xhttpHost} value={endpoint.xhttp?.host || t.default}/><Value label={t.xhttpMode} value={endpoint.xhttp?.mode || "auto"}/><Value label={t.xhttpPadding} value={endpoint.xhttp?.x_padding_bytes || "100-1000"}/></>}{(endpoint.transport === "ws" || endpoint.transport === "httpupgrade") && <><Value label={`${transportLabel(endpoint.transport)} Path`} value={(endpoint.transport === "ws" ? endpoint.websocket?.path : endpoint.http_upgrade?.path) || "/"}/><Value label={`${transportLabel(endpoint.transport)} Host`} value={(endpoint.transport === "ws" ? endpoint.websocket?.host : endpoint.http_upgrade?.host) || t.default}/></>}</dl></div>)}</div></details>}
     </section>
     <section className="creation-review-card" data-review-section="advanced">
       <header><h4>{t.advanced}</h4>{edit("advanced", t.editAdvanced)}</header>
@@ -119,12 +125,12 @@ export default function InboundCreationReview({ language, state, nodes, disabled
           {([[t.domains, domains], [t.ips, ips]] as Array<[string, string[]]>).map(([label, rules]) => <details key={label} className="creation-review-disclosure"><summary>{label} <bdi>{rules.length}</bdi></summary><p dir="ltr">{rules.join("\n") || t.none}</p></details>)}
         </> : <p className="creation-help">{t.noSniffing}</p>}
       </div>
-      <div className="creation-review-option" data-review-option="fallbacks">
+      {!tls && <div className="creation-review-option" data-review-option="fallbacks">
         <h5>{t.fallbacks}<bdi>{options.fallbacks.length}</bdi></h5>
         {!options.fallbacks.length && <p className="creation-help">{t.noFallbacks}</p>}
         {options.fallbacks.length > 0 && profile.transport !== "tcp" && <p className="creation-help creation-waiting">{t.tcp}</p>}
         {options.fallbacks.map((row, index) => <div key={row.key} className="creation-review-fallback" data-review-fallback={index}><h6><bdi dir="ltr">{t.fallback} {index + 1}</bdi></h6><dl className="creation-review-values"><Value label={t.destination} value={row.dest}/><Value label={t.path} value={row.path || t.default}/><Value label={t.proxy} value={proxy(row.xver)}/>{row.alpn && <Value label="ALPN" value={row.alpn}/>}</dl></div>)}
-      </div>
+      </div>}
     </section>
   </div>;
 }

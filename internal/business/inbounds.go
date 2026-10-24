@@ -22,6 +22,7 @@ type InboundInput struct {
 	ID            uint64                     `json:"id"`
 	Name          string                     `json:"name"`
 	Transport     string                     `json:"transport"`
+	Security      string                     `json:"security,omitempty"`
 	GRPCService   string                     `json:"grpc_service"`
 	RealityTarget string                     `json:"reality_target"`
 	ServerNames   []string                   `json:"server_names"`
@@ -30,11 +31,12 @@ type InboundInput struct {
 }
 type NativeInbound struct {
 	InboundInput
-	PublicKey    string `json:"public_key"`
-	BoundClients int    `json:"bound_clients"`
-	Enabled      bool   `json:"enabled"`
-	Archived     bool   `json:"archived"`
-	Revision     uint64 `json:"revision"`
+	TLS          *xrayconfig.TLSCertificateMetadata `json:"tls,omitempty"`
+	PublicKey    string                             `json:"public_key"`
+	BoundClients int                                `json:"bound_clients"`
+	Enabled      bool                               `json:"enabled"`
+	Archived     bool                               `json:"archived"`
+	Revision     uint64                             `json:"revision"`
 }
 type InboundTarget struct {
 	InboundID      uint64 `json:"inbound_id"`
@@ -93,6 +95,11 @@ func openProfile(key, encrypted []byte, id uint64) (xrayconfig.Profile, error) {
 	return openInboundProfile(key, encrypted, id)
 }
 func (s *Store) CreateInbound(ctx context.Context, key []byte, in InboundInput) (NativeInbound, error) {
+	security, securityErr := xrayconfig.NormalizeProfileSecurity(in.Security)
+	if securityErr != nil || security == "tls" {
+		return NativeInbound{}, ErrInvalid
+	}
+	in.Security = security
 	var optionsErr error
 	in.Options, optionsErr = xrayconfig.NormalizeProfileOptions(in.Transport, in.Options)
 	if optionsErr != nil || hasInboundTrafficOptions(in.Options) || hasInboundNetworkOptions(in.Transport, in.Options) {
@@ -153,12 +160,9 @@ func (s *Store) ListInbounds(ctx context.Context, key []byte) ([]NativeInbound, 
 		if e != nil {
 			return nil, e
 		}
-		in.Transport = p.Transport
-		in.GRPCService = p.GRPCService
-		in.RealityTarget = p.RealityTarget
-		in.ServerNames = p.ServerNames
-		in.ShortIDs = p.ShortIDs
-		in.Options = p.Options
+		if err = publicInboundProfile(&in, p); err != nil {
+			return nil, err
+		}
 		result = append(result, in)
 	}
 	if len(result) > 256 {

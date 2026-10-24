@@ -10,6 +10,8 @@ import (
 // Client options remain metadata: profileStream never emits them to a server.
 type XHTTPOptions = subscriptioncodec.XHTTPOptions
 type ClientOptions = subscriptioncodec.ClientOptions
+type WebSocketOptions = subscriptioncodec.WebSocketOptions
+type HTTPUpgradeOptions = subscriptioncodec.HTTPUpgradeOptions
 
 const MaxConnectionPathBytes = subscriptioncodec.MaxConnectionPathBytes
 const MaxXHTTPPaddingBytes = subscriptioncodec.MaxXHTTPPaddingBytes
@@ -44,6 +46,22 @@ func NormalizeClientOptions(options *ClientOptions) (*ClientOptions, error) {
 	o, err := subscriptioncodec.NormalizeClientOptions(options)
 	if err != nil {
 		return nil, connectionOptionError("client", err)
+	}
+	return o, nil
+}
+
+func NormalizeWebSocketOptions(options *WebSocketOptions) (*WebSocketOptions, error) {
+	o, err := subscriptioncodec.NormalizeWebSocketOptions(options)
+	if err != nil {
+		return nil, connectionOptionError("websocket", err)
+	}
+	return o, nil
+}
+
+func NormalizeHTTPUpgradeOptions(options *HTTPUpgradeOptions) (*HTTPUpgradeOptions, error) {
+	o, err := subscriptioncodec.NormalizeHTTPUpgradeOptions(options)
+	if err != nil {
+		return nil, connectionOptionError("http_upgrade", err)
 	}
 	return o, nil
 }

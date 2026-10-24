@@ -9,6 +9,9 @@ import NativeMeteredRouteTransactions from "./NativeMeteredRouteTransactions";
 import InboundDirectory from "./InboundDirectory";
 import WorkspaceDialog from "./WorkspaceDialog";
 import { profileOptionsDraft, profileOptionsPayload, type ProfileOptionsDraft } from "./inboundProfileOptions";
+import { assertPublicInboundData, canonicalTLSMetadata, profileSecurity } from "./inboundTLS";
+import { transportLabel } from "./inboundNetworkOptions";
+import { TLSCertificateSummary } from "./InboundTLSCredentials";
 import InboundProfileForm, { type InboundProfileFormHandle, type InboundProfileValue } from "./InboundProfileForm";
 import InboundCreation from "./InboundCreation";
 import { creationNodeName, type CreationCapabilities, type CreationPlan, type CreationPlanResponse } from "./InboundCreationModel";
@@ -159,6 +162,8 @@ export default function NativeInbounds({ language, fallback, workspace = "inboun
     const overview = await request<Overview>("/api/v1/workspace/native-inbounds-state", controller.signal);
     if (controller.signal.aborted) return;
     if (![overview.inbounds, overview.nodes, overview.targets, overview.runtime].every(Array.isArray)) throw new Error("Invalid native response");
+    assertPublicInboundData(overview);
+    for (const profile of overview.inbounds) { if (profileSecurity(profile.security) === "tls") canonicalTLSMetadata(profile.tls); else if (profile.tls !== undefined) throw new Error("unexpected_tls_metadata"); }
     setData(overview); setFailure(false); setDisabled(false); lastSuccess.current = Date.now();
    } catch (e) {
     if (controller.signal.aborted) return;
@@ -174,7 +179,8 @@ export default function NativeInbounds({ language, fallback, workspace = "inboun
   void request<CreationCapabilities | { available: false; runtime_apply: false }>("/api/v1/workspace/native-inbound-plans/capabilities", controller.signal).then(result => {
    if (controller.signal.aborted) return;
    if (result?.available === false && result.runtime_apply === false) { setSetupCapabilities(null); setSetupPhase("legacy"); setSetupSnapshot(inboundFingerprint); return; }
-   if (!result || result.available !== true || ![1, 2].includes(result.version) || result.runtime_apply !== false || !Array.isArray(result.plans) || !Array.isArray(result.transports) || !result.transports.includes("tcp") || !result.protocols?.includes("vless") || !result.securities?.includes("reality")) throw new Error("invalid_setup_capability");
+   if (!result || result.available !== true || ![1, 2, 3].includes(result.version) || result.runtime_apply !== false || !Array.isArray(result.plans) || !Array.isArray(result.transports) || !result.transports.includes("tcp") || !result.protocols?.includes("vless") || !result.securities?.includes("reality")) throw new Error("invalid_setup_capability");
+   assertPublicInboundData(result);
    if (result.plans.some(plan => plan.node_ids !== undefined && (!Array.isArray(plan.node_ids) || !plan.node_ids.length || plan.node_ids.length > 128 || new Set(plan.node_ids).size !== plan.node_ids.length || plan.node_ids.some(id => typeof id !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(id))))) throw new Error("invalid_setup_nodes");
    setSetupCapabilities(result); setSetupPhase("available"); setSetupSnapshot(inboundFingerprint);
   }).catch(error => {
@@ -237,6 +243,7 @@ export default function NativeInbounds({ language, fallback, workspace = "inboun
   if (setupPhase === "available" && setupCapabilities) {
    setCreating(false); setNotice(""); setSetupEditor({ source: source ? { ...source, name: source.name.slice(0, 128 - suffix.length) + suffix } : undefined }); return;
   }
+  if (source?.security === "tls") { setNotice(u.setupUnavailable); return; }
   createIdentity.current = null; setCopying(!!source); setName(source ? source.name.slice(0, 128 - suffix.length) + suffix : "");
   setTransport(source?.transport ?? "tcp"); setTarget(source?.reality_target ?? ""); setSni(source?.server_names.join(", ") ?? ""); setService(source?.grpc_service ?? ""); setProfileOptions(profileOptionsDraft(source?.options)); setCreating(true);
   createInitial.current = JSON.stringify({ name: source ? source.name.slice(0, 128 - suffix.length) + suffix : "", transport: source?.transport ?? "tcp", grpcService: source?.grpc_service ?? "", realityTarget: source?.reality_target ?? "", serverNames: source?.server_names.join(", ") ?? "", options: profileOptionsDraft(source?.options) });
@@ -250,7 +257,10 @@ export default function NativeInbounds({ language, fallback, workspace = "inboun
   setBusy(true); setNotice("");
   try {
    const result = await request<CreationPlanResponse>("/api/v1/workspace/native-inbound-plans/" + id, controller.signal);
+   assertPublicInboundData(result);
    if (!result?.plan || result.plan.profile?.id !== id || result.plan.runtime_apply !== false || !Array.isArray(result.plan.nodes) || typeof result.plan.editable !== "boolean" || typeof result.references_current !== "boolean") throw new Error("invalid_setup_plan");
+   if (profileSecurity(result.plan.profile.security) === "tls") canonicalTLSMetadata(result.plan.profile.tls);
+   else if (result.plan.profile.tls !== undefined) throw new Error("unexpected_tls_metadata");
    if (!controller.signal.aborted && generation === setupLoad.current) { setProfileDirty(false); setRouteDirty(false); setEditorEpoch(value => value + 1); setSetupEditor({ plan: result.plan, referencesCurrent: result.references_current }); }
   } catch (error) { if (!controller.signal.aborted && generation === setupLoad.current) { setNotice(t.error); if (error instanceof Fault && error.status === 401) expire(); } }
   finally { if (!controller.signal.aborted) setBusy(false); }
@@ -260,7 +270,7 @@ export default function NativeInbounds({ language, fallback, workspace = "inboun
   setData(previous => previous ? { ...previous, inbounds: [...previous.inbounds.filter(item => item.id !== plan.profile.id), plan.profile] } : previous);
   const plannedNodeIDs = [...new Set(plan.nodes.flatMap(node => [node.node_id, ...(node.swap_enabled ? [node.swap_source_node_id] : [])]))].sort();
   setSetupCapabilities(previous => previous ? { ...previous, plans: [...previous.plans.filter(item => item.inbound_id !== plan.profile.id), { inbound_id: plan.profile.id, plan_revision: plan.plan_revision, inbound_revision: plan.inbound_revision, status: plan.status, node_ids: plannedNodeIDs }] } : previous);
-  skipNavigationGuard.current = true; navigateDetail(plan.profile.id, "routes"); skipNavigationGuard.current = false;
+  skipNavigationGuard.current = true; navigateDetail(plan.profile.id, "overview"); skipNavigationGuard.current = false;
   setNotice(u.setupSaved); setRefresh(value => value + 1);
  }
  function changeCreate(value: InboundProfileValue) { setName(value.name); setTransport(value.transport); setService(value.grpcService); setTarget(value.realityTarget); setSni(value.serverNames); setProfileOptions(value.options ?? profileOptionsDraft()); setFormChecked(false); }
@@ -320,7 +330,8 @@ export default function NativeInbounds({ language, fallback, workspace = "inboun
      <section hidden={tab !== "overview"} role="tabpanel" id="inbound-panel-overview" aria-labelledby="inbound-tab-overview" className="inbound-detail-panel">
       {visited.includes("overview") && <>
        <div className="inbound-summary"><div data-node-summary><span>{setupSummary ? u.plannedNodes : u.nodeCount}</span><strong>{setupSummary ? setupSummary.node_ids?.length ?? "—" : assigned.length}</strong>{setupSummary && <small>{u.nodeCount}: {assigned.length}</small>}</div><div><span>{u.clientCount}</span><strong>{current.bound_clients}</strong></div><div><span>{u.profile}</span><strong>{current.archived ? t.archivedLabel : current.enabled ? t.enabledLabel : t.disabledLabel}</strong></div></div>
-       <dl className="inbound-profile-facts"><div><dt>{t.transport}</dt><dd><bdi dir="ltr">{current.transport === "grpc" ? "gRPC" : current.transport.toUpperCase()} / REALITY</bdi></dd></div><div><dt>{t.dest}</dt><dd><bdi dir="ltr">{current.reality_target}</bdi></dd></div><div><dt>{t.sni}</dt><dd><bdi dir="ltr">{current.server_names.join(", ")}</bdi></dd></div></dl>
+       <dl className="inbound-profile-facts"><div><dt>{t.transport}</dt><dd><bdi dir="ltr">{transportLabel(current.transport)} / {current.security === "tls" ? "TLS" : "REALITY"}</bdi></dd></div>{current.security !== "tls" && <div><dt>{t.dest}</dt><dd><bdi dir="ltr">{current.reality_target}</bdi></dd></div>}<div><dt>{t.sni}</dt><dd><bdi dir="ltr">{current.server_names.join(", ")}</bdi></dd></div></dl>
+       {current.security === "tls" && current.tls && <details className="native-card"><summary>{language === "fa" ? "گواهی TLS ذخیره‌شده" : "Saved TLS certificate"}</summary><TLSCertificateSummary language={language} metadata={current.tls}/></details>}
        <InboundLifecycle key={chosen + ":" + editorEpoch + ":" + !!setupSummary} inbound={current} language={language} csrf={session.csrf_token ?? ""} blocked={busy || stale || !setupStatusReady} mode="controls" profileOptionsSupported={setupCapabilities?.profile_options === true} setupOnly={!!setupSummary} onDirtyChange={setProfileDirty} onChanged={() => setRefresh(n => n + 1)}/>
       </>}
      </section>

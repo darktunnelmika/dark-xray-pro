@@ -161,6 +161,7 @@ func TestRealPinnedCreationTopologyOffline(t *testing.T) {
 		t.Fatal("explicit LAB mode, absolute pinned binary and SHA256 are required")
 	}
 	exercisePinnedInboundOptionsOffline(t)
+	exercisePinnedTLSTopologyOffline(t, bin, pin)
 	for _, advanced := range []bool{false, true} {
 		for _, transport := range []string{"tcp", "grpc", "xhttp"} {
 			for _, reuse := range []bool{false, true} {

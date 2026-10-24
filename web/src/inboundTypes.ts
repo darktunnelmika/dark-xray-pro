@@ -1,11 +1,13 @@
 import type { NativePreflight } from "./NativeReadiness";
 import type { InboundProfileOptions } from "./inboundProfileOptions";
+import type { TLSMetadata } from "./inboundTLS";
 
 export type Inbound = {
   revision: number; enabled: boolean; archived: boolean; id: number; name: string;
   transport: string; grpc_service: string; reality_target: string; server_names: string[];
   short_ids: string[]; public_key: string; bound_clients: number;
   options?: InboundProfileOptions;
+  security?: "reality" | "tls"; tls?: TLSMetadata;
 };
 export type InboundTarget = {
   inbound_id: number; node_id: string; installation_id: string;

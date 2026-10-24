@@ -73,12 +73,9 @@ func readNativeInbound(ctx context.Context, q inboundReader, key []byte, id uint
 	if err != nil {
 		return in, p, err
 	}
-	in.Transport = p.Transport
-	in.GRPCService = p.GRPCService
-	in.RealityTarget = p.RealityTarget
-	in.ServerNames = p.ServerNames
-	in.ShortIDs = p.ShortIDs
-	in.Options = p.Options
+	if err = publicInboundProfile(&in, p); err != nil {
+		return in, p, err
+	}
 	in.Enabled = enabled == 1
 	in.Archived = archived == 1
 	return in, p, nil
@@ -104,6 +101,11 @@ func (s *Store) MutateInbound(ctx context.Context, key []byte, id uint64, m Inbo
 	if m.Profile != nil {
 		optionsPresence = optionsPresence.include(m.Profile.Options)
 		copyProfile := *m.Profile
+		security, securityErr := xrayconfig.NormalizeProfileSecurity(copyProfile.Security)
+		if securityErr != nil || security == "tls" {
+			return NativeInbound{}, ErrInvalid
+		}
+		copyProfile.Security = security
 		options, err := xrayconfig.NormalizeProfileOptions(copyProfile.Transport, copyProfile.Options)
 		if err != nil || hasInboundTrafficOptions(options) || hasInboundNetworkOptions(copyProfile.Transport, options) {
 			return NativeInbound{}, ErrInvalid
@@ -136,6 +138,9 @@ func (s *Store) MutateInbound(ctx context.Context, key []byte, id uint64, m Inbo
 		return NativeInbound{}, err
 	}
 	if m.Action == "enable" || m.Action == "edit" {
+		if profile.Security == "tls" || hasInboundTLSAuthoring(profile.Transport, profile.Options) {
+			return NativeInbound{}, ErrInvalid
+		}
 		if err = rejectNativePlanMaterialization(ctx, tx, id); err != nil {
 			return NativeInbound{}, err
 		}
@@ -156,6 +161,7 @@ func (s *Store) MutateInbound(ctx context.Context, key []byte, id uint64, m Inbo
 		// Preserve the exact private key, public key, short IDs unless explicitly
 		// edited, and every client binding. No rotate-on-edit fallback exists.
 		profile.Transport = p.Transport
+		profile.Security = p.Security
 		profile.GRPCService = p.GRPCService
 		profile.RealityTarget = p.RealityTarget
 		profile.ServerNames = append([]string(nil), p.ServerNames...)

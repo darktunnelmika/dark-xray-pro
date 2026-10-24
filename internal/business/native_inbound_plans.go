@@ -56,10 +56,12 @@ type NativeInboundPlanInput struct {
 	ExpectedPlanRevision    uint64                  `json:"expected_plan_revision"`
 	ExpectedInboundRevision uint64                  `json:"expected_inbound_revision"`
 	Profile                 InboundInput            `json:"profile"`
+	TLSCredentials          *TLSCredentials         `json:"tls_credentials,omitempty"`
 	Nodes                   []NativeInboundPlanNode `json:"nodes"`
 	Reason                  string                  `json:"reason"`
 	profileOptionsPresence  inboundOptionPresence
 	endpointOptionsPresence map[string]nativeEndpointPresence
+	tlsCredentialsNull      bool
 }
 
 type NativeInboundPlan struct {
@@ -226,16 +228,16 @@ func sealPlanValue(key []byte, aad string, value any) ([]byte, error) {
 	if _, err = rand.Read(nonce); err != nil {
 		return nil, err
 	}
-	extended := false
+	version := 1
 	switch v := value.(type) {
 	case NativeInboundPlan:
-		extended = planNeedsExtendedEnvelope(v)
+		version = planEnvelopeVersion(v)
 	case NativeInboundPlanReceipt:
-		extended = planNeedsExtendedEnvelope(v.Plan)
+		version = planEnvelopeVersion(v.Plan)
 	}
-	if extended {
-		sealed := a.Seal(nonce, nonce, raw, []byte("DARK-PRO-CREATION-v2:"+aad))
-		return append([]byte("DXPPLN2\x00"), sealed...), nil
+	if version != 1 {
+		sealed := a.Seal(nonce, nonce, raw, []byte(fmt.Sprintf("DARK-PRO-CREATION-v%d:%s", version, aad)))
+		return append([]byte(fmt.Sprintf("DXPPLN%d\x00", version)), sealed...), nil
 	}
 	return a.Seal(nonce, nonce, raw, []byte(aad)), nil
 }
@@ -245,33 +247,41 @@ func openPlanValue(key []byte, aad string, encrypted []byte, value any) error {
 		return err
 	}
 	original := encrypted
-	extended := bytes.HasPrefix(encrypted, []byte("DXPPLN2\x00"))
+	version := 1
 	binding := aad
-	if extended {
-		encrypted = encrypted[len("DXPPLN2\x00"):]
-		binding = "DARK-PRO-CREATION-v2:" + aad
+	for _, candidate := range []int{3, 2} {
+		prefix := []byte(fmt.Sprintf("DXPPLN%d\x00", candidate))
+		if bytes.HasPrefix(encrypted, prefix) {
+			version = candidate
+			encrypted = encrypted[len(prefix):]
+			binding = fmt.Sprintf("DARK-PRO-CREATION-v%d:%s", version, aad)
+			break
+		}
 	}
 	n := a.NonceSize()
-	if len(encrypted) < n+a.Overhead() {
-		return ErrUnavailable
+	open := func(value []byte, aad string) ([]byte, error) {
+		if len(value) < n+a.Overhead() {
+			return nil, ErrUnavailable
+		}
+		return a.Open(nil, value[:n], value[n:], []byte(aad))
 	}
-	raw, err := a.Open(nil, encrypted[:n], encrypted[n:], []byte(binding))
-	if err != nil && extended && len(original) >= n+a.Overhead() {
+	raw, err := open(encrypted, binding)
+	if err != nil && version != 1 {
 		// A legacy nonce can coincidentally start with the version marker.
-		raw, err = a.Open(nil, original[:n], original[n:], []byte(aad))
-		extended = false
+		raw, err = open(original, aad)
+		version = 1
 	}
 	if err != nil || usagewire.Decode(raw, value) != nil {
 		return ErrUnavailable
 	}
-	needsExtended := false
+	expectedVersion := 1
 	switch v := value.(type) {
 	case *NativeInboundPlan:
-		needsExtended = planNeedsExtendedEnvelope(*v)
+		expectedVersion = planEnvelopeVersion(*v)
 	case *NativeInboundPlanReceipt:
-		needsExtended = planNeedsExtendedEnvelope(v.Plan)
+		expectedVersion = planEnvelopeVersion(v.Plan)
 	}
-	if needsExtended != extended {
+	if expectedVersion != version {
 		return ErrUnavailable
 	}
 	return nil
@@ -295,6 +305,9 @@ func canonicalPlanIP(raw string) string {
 func planListenerPort(p uint16) bool { return p >= 1024 && p != 2087 && p != 8443 && p != 24443 }
 
 func normalizeNativeInboundPlan(in NativeInboundPlanInput) (NativeInboundPlanInput, error) {
+	if err := normalizePlanTLS(&in); err != nil {
+		return in, err
+	}
 	in.profileOptionsPresence = in.profileOptionsPresence.include(in.Profile.Options)
 	captureEndpointPresence(&in)
 	in.Reason = strings.TrimSpace(in.Reason)
@@ -519,17 +532,13 @@ func nativePlanStatus(nodes []NativeInboundPlanNode) string {
 }
 
 func plannedProfile(in InboundInput, privateKey string) xrayconfig.Profile {
-	return xrayconfig.Profile{InboundID: in.ID, Transport: in.Transport, GRPCService: in.GRPCService,
+	return xrayconfig.Profile{InboundID: in.ID, Transport: in.Transport, Security: in.Security, GRPCService: in.GRPCService,
 		RealityTarget: in.RealityTarget, ServerNames: in.ServerNames, ShortIDs: in.ShortIDs,
 		Options: in.Options, RealityPrivateKey: privateKey, Users: []xrayconfig.User{}}
 }
 func validatePlannedProfile(p xrayconfig.Profile) error {
 	if err := xrayconfig.ValidateProfile(p); err != nil {
-		var detail *xrayconfig.ProfileValidationError
-		if errors.As(err, &detail) {
-			return planError("", "profile."+detail.Field, detail.Code, ErrInvalid)
-		}
-		return planError("", "profile", "profile_invalid", ErrInvalid)
+		return planProfileError(err)
 	}
 	_, err := xrayconfig.RenderAssigned("profile-validation", "00000000000000000000000000000000", "127.0.0.1", []xrayconfig.Assignment{{Profile: p, DirectPort: 10443}})
 	if err != nil {
@@ -655,7 +664,7 @@ func editablePlanProfile(ctx context.Context, tx *sql.Tx, key []byte, plan Nativ
 		return in, p, err
 	}
 	if in.Enabled || in.Archived || in.BoundClients != 0 || targets != 0 || in.Revision != plan.InboundRevision ||
-		!reflect.DeepEqual(in.InboundInput, plan.Profile.InboundInput) || in.PublicKey != plan.Profile.PublicKey {
+		!reflect.DeepEqual(in.InboundInput, plan.Profile.InboundInput) || in.PublicKey != plan.Profile.PublicKey || !reflect.DeepEqual(in.TLS, plan.Profile.TLS) {
 		return in, p, planError("", "profile", "profile_changed_or_materialized", ErrConflict)
 	}
 	return in, p, nil
@@ -843,7 +852,12 @@ func validateNativeInboundPlanTx(ctx context.Context, tx *sql.Tx, key []byte, in
 		plan.Profile = NativeInbound{InboundInput: in.Profile, Revision: 1}
 		// A new preview creates neither a private key nor an identity. This key
 		// validates shape only; its hashes are explicitly preview-only.
-		private = plannedProfile(in.Profile, base64.RawURLEncoding.EncodeToString([]byte(strings.Repeat("\x01", 32))))
+		if in.Profile.Security == "tls" {
+			private = plannedProfile(in.Profile, "")
+			private.TLS = planTLSMaterial(in.TLSCredentials)
+		} else {
+			private = plannedProfile(in.Profile, base64.RawURLEncoding.EncodeToString([]byte(strings.Repeat("\x01", 32))))
+		}
 	} else {
 		old, err := readNativeInboundPlan(ctx, tx, key, in.Profile.ID)
 		if err != nil {
@@ -856,6 +870,11 @@ func validateNativeInboundPlanTx(ctx context.Context, tx *sql.Tx, key []byte, in
 		if err != nil {
 			return plan, private, topology, err
 		}
+		// Security is immutable for a saved plan. In particular, an older
+		// editor's omitted field must never turn TLS back into REALITY.
+		if existing.Security != in.Profile.Security {
+			return plan, private, topology, planError("", "profile.security", "security_immutable", ErrConflict)
+		}
 		// Each saved extension requires explicit intent, including its own
 		// empty object/array when clearing it. Older scalar-only editors must
 		// not silently remove sections that they cannot display.
@@ -867,15 +886,30 @@ func validateNativeInboundPlanTx(ctx context.Context, tx *sql.Tx, key []byte, in
 		}
 		plan.CreatedUnix = old.CreatedUnix
 		plan.Profile = existing
-		if !reflect.DeepEqual(existing.InboundInput, in.Profile) {
+		if !reflect.DeepEqual(existing.InboundInput, in.Profile) || in.TLSCredentials != nil {
 			plan.Profile.Revision++
 		}
 		plan.Profile.InboundInput = in.Profile
 		private = plannedProfile(in.Profile, original.RealityPrivateKey)
+		private.TLS = original.TLS
+		if in.TLSCredentials != nil {
+			private.TLS = planTLSMaterial(in.TLSCredentials)
+		}
 	}
 	plan.InboundRevision = plan.Profile.Revision
 	if err := validatePlannedProfile(private); err != nil {
 		return plan, private, topology, err
+	}
+	if private.Security == "tls" {
+		material, metadata, err := xrayconfig.NormalizeTLSMaterial(private.TLS)
+		if err != nil {
+			return plan, private, topology, planProfileError(err)
+		}
+		if err = xrayconfig.ValidateTLSCertificateTime(material, time.Now()); err != nil {
+			return plan, private, topology, planProfileError(err)
+		}
+		private.TLS, plan.Profile.TLS = material, metadata
+		plan.Profile.PublicKey = ""
 	}
 	if err := verifyPlanCollisions(ctx, tx, key, in); err != nil {
 		return plan, private, topology, err
@@ -983,13 +1017,15 @@ func (s *Store) SaveNativeInboundPlan(ctx context.Context, key []byte, input Nat
 		return out, err
 	}
 	if kind == "create" {
-		priv, e := ecdh.X25519().GenerateKey(rand.Reader)
-		if e != nil {
-			return out, e
+		if private.Security != "tls" {
+			priv, e := ecdh.X25519().GenerateKey(rand.Reader)
+			if e != nil {
+				return out, e
+			}
+			private.RealityPrivateKey = base64.RawURLEncoding.EncodeToString(priv.Bytes())
+			plan.Profile.PublicKey = base64.RawURLEncoding.EncodeToString(priv.PublicKey().Bytes())
 		}
-		private.RealityPrivateKey = base64.RawURLEncoding.EncodeToString(priv.Bytes())
-		plan.Profile.PublicKey = base64.RawURLEncoding.EncodeToString(priv.PublicKey().Bytes())
-		if _, e = compileNativeInboundPlan(private, in.Nodes); e != nil {
+		if _, e := compileNativeInboundPlan(private, in.Nodes); e != nil {
 			return out, e
 		}
 		enc, e := sealPlannedProfile(key, private)

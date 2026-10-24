@@ -66,6 +66,9 @@ func effectiveEndpointClient(profile InboundInput, endpoint NativeInboundEndpoin
 		sni = profile.ServerNames[0]
 	}
 	fingerprint, spider = "chrome", "/"
+	if profile.Security == "tls" {
+		spider = ""
+	}
 	if profile.Options != nil && profile.Options.Client != nil {
 		if profile.Options.Client.Fingerprint != "" {
 			fingerprint = profile.Options.Client.Fingerprint
@@ -131,6 +134,9 @@ func normalizePlanEndpoints(profile InboundInput, node, path string, port uint16
 			}
 			return fail("spider_x", "client_spider_x_invalid")
 		}
+		if profile.Security == "tls" && e.SpiderX != "" {
+			return fail("spider_x", "tls_spider_x_invalid")
+		}
 		publicPort := e.Port
 		if publicPort == 0 {
 			publicPort = port
@@ -157,21 +163,26 @@ func normalizePlanEndpoints(profile InboundInput, node, path string, port uint16
 // Safe, credential-free server-derived output for Review. It is connection
 // metadata only: no claim of reachability, installed forwarding or publication.
 type NativeInboundEndpointPreview struct {
-	NodeID        string                   `json:"node_id"`
-	Path          string                   `json:"path"`
-	Address       string                   `json:"address"`
-	Port          uint16                   `json:"port"`
-	ListenPort    uint16                   `json:"listen_port"`
-	Label         string                   `json:"label"`
-	Enabled       bool                     `json:"enabled"`
-	ServerName    string                   `json:"server_name"`
-	Transport     string                   `json:"transport"`
-	Fingerprint   string                   `json:"fingerprint"`
-	SpiderX       string                   `json:"spider_x"`
-	GRPCService   string                   `json:"grpc_service,omitempty"`
-	GRPCAuthority string                   `json:"grpc_authority,omitempty"`
-	GRPCMultiMode bool                     `json:"grpc_multi_mode,omitempty"`
-	XHTTP         *xrayconfig.XHTTPOptions `json:"xhttp,omitempty"`
+	NodeID             string                         `json:"node_id"`
+	Path               string                         `json:"path"`
+	Address            string                         `json:"address"`
+	Port               uint16                         `json:"port"`
+	ListenPort         uint16                         `json:"listen_port"`
+	Label              string                         `json:"label"`
+	Enabled            bool                           `json:"enabled"`
+	ServerName         string                         `json:"server_name"`
+	Transport          string                         `json:"transport"`
+	Security           string                         `json:"security,omitempty"`
+	TLSSHA256          string                         `json:"tls_sha256,omitempty"`
+	TLSPublicKeySHA256 string                         `json:"tls_public_key_sha256,omitempty"`
+	Fingerprint        string                         `json:"fingerprint"`
+	SpiderX            string                         `json:"spider_x"`
+	GRPCService        string                         `json:"grpc_service,omitempty"`
+	GRPCAuthority      string                         `json:"grpc_authority,omitempty"`
+	GRPCMultiMode      bool                           `json:"grpc_multi_mode,omitempty"`
+	XHTTP              *xrayconfig.XHTTPOptions       `json:"xhttp,omitempty"`
+	WebSocket          *xrayconfig.WebSocketOptions   `json:"websocket,omitempty"`
+	HTTPUpgrade        *xrayconfig.HTTPUpgradeOptions `json:"http_upgrade,omitempty"`
 }
 
 func previewPlanEndpoints(plan NativeInboundPlan) []NativeInboundEndpointPreview {
@@ -187,7 +198,10 @@ func previewPlanEndpoints(plan NativeInboundPlan) []NativeInboundEndpointPreview
 		}
 		sni, fp, spider := effectiveEndpointClient(plan.Profile.InboundInput, e)
 		v := NativeInboundEndpointPreview{NodeID: node, Path: path, Address: e.Address, Port: port, ListenPort: listener,
-			Label: label, Enabled: e.Enabled, ServerName: sni, Transport: plan.Profile.Transport, Fingerprint: fp, SpiderX: spider}
+			Label: label, Enabled: e.Enabled, ServerName: sni, Transport: plan.Profile.Transport, Security: plan.Profile.Security, Fingerprint: fp, SpiderX: spider}
+		if plan.Profile.TLS != nil {
+			v.TLSSHA256, v.TLSPublicKeySHA256 = plan.Profile.TLS.SHA256, plan.Profile.TLS.PublicKeySHA256
+		}
 		if plan.Profile.Transport == "grpc" {
 			v.GRPCService = plan.Profile.GRPCService
 		}
@@ -198,6 +212,14 @@ func previewPlanEndpoints(plan NativeInboundPlan) []NativeInboundEndpointPreview
 			if o.XHTTP != nil {
 				copy := *o.XHTTP
 				v.XHTTP = &copy
+			}
+			if o.WebSocket != nil {
+				copy := *o.WebSocket
+				v.WebSocket = &copy
+			}
+			if o.HTTPUpgrade != nil {
+				copy := *o.HTTPUpgrade
+				v.HTTPUpgrade = &copy
 			}
 		}
 		out = append(out, v)

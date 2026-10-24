@@ -3,6 +3,7 @@ import { ArrowUpRight, Copy, ListFilter, Plus, Search } from "lucide-react";
 import type { Inbound, InboundOverview } from "./inboundTypes";
 import { creationNodeName, type CreationCapabilities } from "./InboundCreationModel";
 import { navigateURL } from "./navigation";
+import { transportLabel } from "./inboundNetworkOptions";
 
 const words = {
   en: {
@@ -72,7 +73,7 @@ export default function InboundDirectory({ data, plans, language, blocked, swapW
     {swapWorkspace && <p className="inbound-directory-help">{t.swap}</p>}
     <div className="inbound-filter-bar"><div className="inbound-directory-filters" id="inbound-directory-filters" data-expanded={filtersOpen}>
       <label>{t.status}<select aria-label={t.status} value={status} onChange={event => { setStatus(event.target.value); setPage(1); }}><option value="all">{t.all}</option><option value="enabled">{t.enabled}</option><option value="disabled">{t.disabled}</option><option value="planned">{t.planned}</option><option value="waiting_host">{t.waitingHost}</option><option value="archived">{t.archived}</option></select></label>
-      <label>{t.transport}<select aria-label={t.transport} value={transport} onChange={event => { setTransport(event.target.value); setPage(1); }}><option value="all">{t.all}</option><option value="tcp">TCP / REALITY</option><option value="grpc">gRPC / REALITY</option><option value="xhttp">XHTTP / REALITY</option></select></label>
+      <label>{t.transport}<select aria-label={t.transport} value={transport} onChange={event => { setTransport(event.target.value); setPage(1); }}><option value="all">{t.all}</option>{["tcp", "grpc", "xhttp", "ws", "httpupgrade"].map(transport => <option key={transport} value={transport}>{transportLabel(transport)}</option>)}</select></label>
       <label>{t.node}<select aria-label={t.node} value={node} onChange={event => { setNode(event.target.value); setPage(1); }}><option value="all">{t.all}</option>{data.nodes.map(item => <option key={item.node_id} value={item.node_id}>{creationNodeName(data.nodes, item.node_id)}</option>)}</select></label>
       {(query || status !== "all" || transport !== "all" || node !== "all") && <button type="button" className="native-text-action" onClick={reset}>{t.clear}</button>}
     </div><span className="inbound-result-count" role="status">{filtered.length.toLocaleString(language === "fa" ? "fa-IR" : "en-US")} {t.results}</span>
@@ -86,7 +87,7 @@ export default function InboundDirectory({ data, plans, language, blocked, swapW
         const pausedPlan = !!plan && state === "disabled";
         return <tr key={item.id}>
           <th scope="row" data-label={t.name}><button type="button" className="inbound-name" aria-label={item.name} onClick={() => onOpen(item)}><strong>{item.name}</strong><bdi dir="ltr">#{item.id}</bdi></button></th>
-          <td data-label={t.transport}><bdi dir="ltr">{item.transport === "grpc" ? "gRPC" : item.transport.toUpperCase()} / REALITY</bdi></td>
+          <td data-label={t.transport}><bdi dir="ltr">{transportLabel(item.transport)} / {item.security === "tls" ? "TLS" : "REALITY"}</bdi></td>
           <td data-label={t.nodes}>{plan && <div className="inbound-node-names" data-planned-nodes><strong>{t.plannedNodes}: </strong>{plan.node_ids ? plan.node_ids.map(id => creationNodeName(data.nodes, id)).join(" · ") : t.unknownPlanNodes}</div>}
             {(!plan || attached.length > 0) && <div className="inbound-node-names" data-assigned-nodes>{plan && <strong>{t.assignedNodes}: </strong>}{attached.length ? attached.map(target => creationNodeName(data.nodes, target.node_id)).join(" · ") : t.unattached}</div>}</td>
           <td data-label={t.clients}>{item.bound_clients.toLocaleString(language === "fa" ? "fa-IR" : "en-US")}</td>

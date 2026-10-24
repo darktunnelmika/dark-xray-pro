@@ -26,9 +26,9 @@ const words = {
   },
 };
 
-export default function InboundNetworkOptions({ language, section, value, onChange, supported, disabled, invalidFields = [] }: {
+export default function InboundNetworkOptions({ language, section, value, onChange, supported, disabled, invalidFields = [], security = "reality" }: {
   language: "fa" | "en"; section: "xhttp" | "client"; value?: ProfileOptionsDraft;
-  onChange: (value: ProfileOptionsDraft) => void; supported: boolean; disabled: boolean; invalidFields?: string[];
+  onChange: (value: ProfileOptionsDraft) => void; supported: boolean; disabled: boolean; invalidFields?: string[]; security?: string;
 }) {
   const t = words[language], current = value ?? profileOptionsDraft(), disclosure = useRef<HTMLDetailsElement>(null);
   const fields = section === "xhttp" ? ["xhttpPath", "xhttpHost", "xhttpMode", "xhttpPadding"] : ["clientFingerprint", "clientSpiderX"];
@@ -47,10 +47,23 @@ export default function InboundNetworkOptions({ language, section, value, onChan
         <label className="inbound-option-field"><span>{t.padding}</span><input data-creation-field="xhttpPadding" aria-label={t.padding} aria-invalid={invalidFields.includes("xhttpPadding")} dir="ltr" disabled={inactive} value={current.xhttpPadding} onChange={event => change("xhttpPadding", event.target.value)} placeholder="100-1000" autoComplete="off"/><small>{t.paddingHint}</small></label>
       </> : <>
         <label className="inbound-option-field"><span>{t.fingerprint}</span><select data-creation-field="clientFingerprint" aria-label={t.fingerprint} aria-invalid={invalidFields.includes("clientFingerprint")} dir="ltr" disabled={inactive} value={current.clientFingerprint} onChange={event => change("clientFingerprint", event.target.value)}><option value="">{t.defaultFingerprint}</option>{clientFingerprints.map(fingerprint => <option key={fingerprint} value={fingerprint}>{fingerprint}</option>)}</select></label>
-        <label className="inbound-option-field"><span>{t.spider}</span><input data-creation-field="clientSpiderX" aria-label={t.spider} aria-invalid={invalidFields.includes("clientSpiderX")} dir="ltr" disabled={inactive} value={current.clientSpiderX} onChange={event => change("clientSpiderX", event.target.value)} placeholder="/" spellCheck={false} autoComplete="off"/><small>{t.spiderHint}</small></label>
+        {security !== "tls" && <label className="inbound-option-field"><span>{t.spider}</span><input data-creation-field="clientSpiderX" aria-label={t.spider} aria-invalid={invalidFields.includes("clientSpiderX")} dir="ltr" disabled={inactive} value={current.clientSpiderX} onChange={event => change("clientSpiderX", event.target.value)} placeholder="/" spellCheck={false} autoComplete="off"/><small>{t.spiderHint}</small></label>}
       </>}
     </div>
     <div className="inbound-network-actions"><button type="button" disabled={inactive} onClick={() => onChange(section === "xhttp" ? { ...current, xhttpPresent: true, xhttpPath: "", xhttpHost: "", xhttpMode: "", xhttpPadding: "" } : { ...current, clientPresent: true, clientFingerprint: "", clientSpiderX: "" })}>{t.reset}</button></div>
   </>;
   return section === "client" ? <details ref={disclosure} className="inbound-profile-advanced" data-client-options><summary data-creation-field="clientOptions">{t.client}</summary>{content}</details> : <section className="inbound-network-options" aria-label={t.xhttp}>{content}</section>;
+}
+
+export function InboundHTTPTransportOptions({ language, section, value, onChange, disabled, invalidFields = [] }: {
+  language: "en" | "fa"; section: "websocket" | "httpUpgrade"; value?: ProfileOptionsDraft;
+  onChange: (value: ProfileOptionsDraft) => void; disabled: boolean; invalidFields?: string[];
+}) {
+  const current = value ?? profileOptionsDraft(), title = section === "websocket" ? "WebSocket" : "HTTPUpgrade";
+  const pathField = `${section}Path` as const, hostField = `${section}Host` as const, presentField = `${section}Present` as const;
+  const path = language === "fa" ? `Path در ${title}` : `${title} Path`, host = language === "fa" ? `Host در ${title}` : `${title} Host`;
+  return <section className="inbound-network-options" aria-label={`${title} settings`}><div className="inbound-options-grid">
+    <label className="inbound-option-field"><span>{path}</span><input data-creation-field={pathField} aria-label={path} aria-invalid={invalidFields.includes(pathField)} dir="ltr" disabled={disabled} value={current[pathField]} onChange={event => onChange({ ...current, [presentField]: true, [pathField]: event.target.value })} maxLength={2048} placeholder="/" spellCheck={false} autoComplete="off"/><small>{language === "fa" ? "مسیر اختیاری با حروف ASCII و شروع /؛ خالی یعنی /. فاصله، Query، Fragment و درصدگذاری پشتیبانی نمی‌شوند." : "Optional ASCII /path. Blank uses /. Spaces, queries, fragments and percent escapes are not supported."}</small></label>
+    <label className="inbound-option-field"><span>{host}</span><input data-creation-field={hostField} aria-label={host} aria-invalid={invalidFields.includes(hostField)} dir="ltr" disabled={disabled} value={current[hostField]} onChange={event => onChange({ ...current, [presentField]: true, [hostField]: event.target.value })} maxLength={253} spellCheck={false} autoComplete="off"/><small>{words[language].hostHint}</small></label>
+  </div><div className="inbound-network-actions"><button type="button" disabled={disabled} onClick={() => onChange({ ...current, [presentField]: true, [pathField]: "", [hostField]: "" })}>{words[language].reset}</button></div></section>;
 }

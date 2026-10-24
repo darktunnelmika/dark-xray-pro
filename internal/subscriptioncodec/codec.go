@@ -46,21 +46,24 @@ var (
 // Kind is the native listener kind: direct, swap or shared. InboundID and Kind
 // are used only for validation; they are not added to the share URI or its label.
 type Route struct {
-	InboundID     uint64         `json:"inbound_id"`
-	Kind          string         `json:"kind"`
-	Host          string         `json:"host"`
-	Port          uint16         `json:"port"`
-	Label         string         `json:"label"`
-	UUID          string         `json:"uuid"`
-	Transport     string         `json:"transport"`
-	GRPCService   string         `json:"grpc_service,omitempty"`
-	GRPCAuthority string         `json:"grpc_authority,omitempty"`
-	GRPCMultiMode bool           `json:"grpc_multi_mode,omitempty"`
-	XHTTP         *XHTTPOptions  `json:"xhttp,omitempty"`
-	Client        *ClientOptions `json:"client,omitempty"`
-	ServerName    string         `json:"server_name"`
-	PublicKey     string         `json:"public_key"`
-	ShortID       string         `json:"short_id"`
+	InboundID     uint64              `json:"inbound_id"`
+	Kind          string              `json:"kind"`
+	Host          string              `json:"host"`
+	Port          uint16              `json:"port"`
+	Label         string              `json:"label"`
+	UUID          string              `json:"uuid"`
+	Transport     string              `json:"transport"`
+	Security      string              `json:"security,omitempty"`
+	GRPCService   string              `json:"grpc_service,omitempty"`
+	GRPCAuthority string              `json:"grpc_authority,omitempty"`
+	GRPCMultiMode bool                `json:"grpc_multi_mode,omitempty"`
+	XHTTP         *XHTTPOptions       `json:"xhttp,omitempty"`
+	WebSocket     *WebSocketOptions   `json:"websocket,omitempty"`
+	HTTPUpgrade   *HTTPUpgradeOptions `json:"http_upgrade,omitempty"`
+	Client        *ClientOptions      `json:"client,omitempty"`
+	ServerName    string              `json:"server_name"`
+	PublicKey     string              `json:"public_key"`
+	ShortID       string              `json:"short_id"`
 }
 
 // Render returns one URI per line, sorted by its complete canonical URI, with a
@@ -93,6 +96,19 @@ func Render(routes []Route, format Format) ([]byte, error) {
 			"security": "reality", "sid": r.ShortID, "sni": r.ServerName,
 			"type": r.Transport,
 		}
+		if r.Security == "tls" {
+			query["security"] = "tls"
+			delete(query, "pbk")
+			delete(query, "sid")
+			switch r.Transport {
+			case "grpc", "xhttp":
+				query["alpn"] = "h2"
+			case "ws", "httpupgrade":
+				query["alpn"] = "http/1.1"
+			case "tcp":
+				query["alpn"] = "h2,http/1.1"
+			}
+		}
 		if r.Client != nil {
 			if r.Client.Fingerprint != "" {
 				query["fp"] = r.Client.Fingerprint
@@ -112,7 +128,7 @@ func Render(routes []Route, format Format) ([]byte, error) {
 			if r.GRPCAuthority != "" {
 				query["authority"] = r.GRPCAuthority
 			}
-		} else {
+		} else if r.Transport == "xhttp" {
 			query["mode"], query["path"] = "auto", "/"
 			if r.XHTTP != nil {
 				if r.XHTTP.Path != "" {
@@ -133,6 +149,21 @@ func Render(routes []Route, format Format) ([]byte, error) {
 					}
 					query["extra"] = string(extra)
 				}
+			}
+		} else {
+			path, host := "", ""
+			if r.WebSocket != nil {
+				path, host = r.WebSocket.Path, r.WebSocket.Host
+			}
+			if r.HTTPUpgrade != nil {
+				path, host = r.HTTPUpgrade.Path, r.HTTPUpgrade.Host
+			}
+			if path == "" {
+				path = "/"
+			}
+			query["path"] = path
+			if host != "" {
+				query["host"] = host
 			}
 		}
 		keys := make([]string, 0, len(query))
@@ -176,7 +207,19 @@ func normalize(r Route) (Route, bool) {
 		return Route{}, false
 	}
 	var err error
+	r.Security, err = NormalizeSecurity(r.Security)
+	if err != nil {
+		return Route{}, false
+	}
 	r.XHTTP, err = NormalizeXHTTPOptions(r.XHTTP)
+	if err != nil {
+		return Route{}, false
+	}
+	r.WebSocket, err = NormalizeWebSocketOptions(r.WebSocket)
+	if err != nil {
+		return Route{}, false
+	}
+	r.HTTPUpgrade, err = NormalizeHTTPUpgradeOptions(r.HTTPUpgrade)
 	if err != nil {
 		return Route{}, false
 	}
@@ -184,11 +227,17 @@ func normalize(r Route) (Route, bool) {
 	if err != nil {
 		return Route{}, false
 	}
-	if r.Transport != "grpc" && (r.GRPCService != "" || r.GRPCAuthority != "" || r.GRPCMultiMode) || r.Transport != "xhttp" && r.XHTTP != nil {
+	if r.Transport != "grpc" && (r.GRPCService != "" || r.GRPCAuthority != "" || r.GRPCMultiMode) ||
+		r.Transport != "xhttp" && r.XHTTP != nil || r.Transport != "ws" && r.WebSocket != nil ||
+		r.Transport != "httpupgrade" && r.HTTPUpgrade != nil {
 		return Route{}, false
 	}
 	switch r.Transport {
 	case "tcp", "xhttp":
+	case "ws", "httpupgrade":
+		if r.Security != "tls" {
+			return Route{}, false
+		}
 	case "grpc":
 		if !serviceRE.MatchString(r.GRPCService) || r.GRPCAuthority != "" && !ValidAuthority(r.GRPCAuthority) {
 			return Route{}, false
@@ -196,16 +245,22 @@ func normalize(r Route) (Route, bool) {
 	default:
 		return Route{}, false
 	}
-	key, err := base64.RawURLEncoding.Strict().DecodeString(r.PublicKey)
-	if err != nil || len(key) != 32 || base64.RawURLEncoding.EncodeToString(key) != r.PublicKey {
-		return Route{}, false
-	}
-	var nonzero byte
-	for _, b := range key {
-		nonzero |= b
-	}
-	if nonzero == 0 {
-		return Route{}, false
+	if r.Security == "tls" {
+		if r.PublicKey != "" || r.ShortID != "" || r.Client != nil && r.Client.SpiderX != "" {
+			return Route{}, false
+		}
+	} else {
+		key, err := base64.RawURLEncoding.Strict().DecodeString(r.PublicKey)
+		if err != nil || len(key) != 32 || base64.RawURLEncoding.EncodeToString(key) != r.PublicKey {
+			return Route{}, false
+		}
+		var nonzero byte
+		for _, b := range key {
+			nonzero |= b
+		}
+		if nonzero == 0 {
+			return Route{}, false
+		}
 	}
 	if ip, err := netip.ParseAddr(r.Host); err == nil {
 		if ip.Zone() != "" || ip.IsUnspecified() || ip.IsMulticast() {

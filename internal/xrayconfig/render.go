@@ -41,6 +41,8 @@ type User struct {
 type Profile struct {
 	InboundID         uint64          `json:"inbound_id"`
 	Transport         string          `json:"transport"`
+	Security          string          `json:"security,omitempty"`
+	TLS               *TLSMaterial    `json:"tls,omitempty"`
 	GRPCService       string          `json:"grpc_service,omitempty"`
 	RealityTarget     string          `json:"reality_target"`
 	ServerNames       []string        `json:"server_names"`
@@ -106,7 +108,14 @@ func validProfile(p Profile) error { return ValidateProfile(p) }
 // authoring API. Public field failures are typed; secret/user failures stay
 // generic so callers cannot accidentally expose their values.
 func ValidateProfile(p Profile) error {
-	if p.Transport != "tcp" && p.Transport != "grpc" && p.Transport != "xhttp" {
+	security, err := NormalizeProfileSecurity(p.Security)
+	if err != nil {
+		return err
+	}
+	if p.Transport != "tcp" && p.Transport != "grpc" && p.Transport != "xhttp" && p.Transport != "ws" && p.Transport != "httpupgrade" {
+		return &ProfileValidationError{Field: "transport", Code: "transport_invalid"}
+	}
+	if security != "tls" && (p.Transport == "ws" || p.Transport == "httpupgrade") {
 		return &ProfileValidationError{Field: "transport", Code: "transport_invalid"}
 	}
 	if _, err := NormalizeProfileOptions(p.Transport, p.Options); err != nil {
@@ -115,7 +124,7 @@ func ValidateProfile(p Profile) error {
 	if p.InboundID == 0 || len(p.Users) > 20000 {
 		return ErrInvalid
 	}
-	if !validTarget(p.RealityTarget) {
+	if security != "tls" && !validTarget(p.RealityTarget) {
 		return &ProfileValidationError{Field: "reality_target", Code: "target_invalid"}
 	}
 	if p.Transport != "grpc" && p.GRPCService != "" || p.Transport == "grpc" && !serviceRE.MatchString(p.GRPCService) {
@@ -124,13 +133,45 @@ func ValidateProfile(p Profile) error {
 	if len(p.ServerNames) == 0 || len(p.ServerNames) > 16 {
 		return &ProfileValidationError{Field: "server_names", Code: "server_names_invalid"}
 	}
-	if len(p.ShortIDs) == 0 || len(p.ShortIDs) > 16 {
+	if security != "tls" && (len(p.ShortIDs) == 0 || len(p.ShortIDs) > 16) {
 		return &ProfileValidationError{Field: "short_ids", Code: "short_ids_invalid"}
 	}
 	for _, name := range p.ServerNames {
 		if !validDNS(name) {
 			return &ProfileValidationError{Field: "server_names", Code: "server_names_invalid"}
 		}
+	}
+	if security == "tls" {
+		if err := validateProfileTLS(p); err != nil {
+			return err
+		}
+	} else if err := validateProfileRealityKey(p); err != nil {
+		return err
+	}
+	server := map[string]bool{}
+	for _, name := range p.ServerNames {
+		lower := strings.ToLower(name)
+		if server[lower] {
+			return &ProfileValidationError{Field: "server_names", Code: "server_names_invalid"}
+		}
+		server[lower] = true
+	}
+	users := map[string]bool{}
+	uuids := map[string]bool{}
+	for _, u := range p.Users {
+		key := strings.ToLower(u.Email)
+		if !uuidRE.MatchString(u.UUID) || !emailRE.MatchString(u.Email) || strings.Contains(u.Email, "..") || users[key] || uuids[strings.ToLower(u.UUID)] {
+			return ErrInvalid
+		}
+		users[key] = true
+		uuids[strings.ToLower(u.UUID)] = true
+	}
+	return nil
+}
+
+func validateProfileRealityKey(p Profile) error {
+	if p.TLS != nil {
+		return &ProfileValidationError{Field: "security", Code: "reality_tls_fields_invalid"}
 	}
 	decoded, err := base64.RawURLEncoding.DecodeString(p.RealityPrivateKey)
 	if err != nil || len(decoded) != 32 {
@@ -156,24 +197,6 @@ func ValidateProfile(p Profile) error {
 		}
 		ids[id] = true
 	}
-	server := map[string]bool{}
-	for _, name := range p.ServerNames {
-		lower := strings.ToLower(name)
-		if server[lower] {
-			return &ProfileValidationError{Field: "server_names", Code: "server_names_invalid"}
-		}
-		server[lower] = true
-	}
-	users := map[string]bool{}
-	uuids := map[string]bool{}
-	for _, u := range p.Users {
-		key := strings.ToLower(u.Email)
-		if !uuidRE.MatchString(u.UUID) || !emailRE.MatchString(u.Email) || strings.Contains(u.Email, "..") || users[key] || uuids[strings.ToLower(u.UUID)] {
-			return ErrInvalid
-		}
-		users[key] = true
-		uuids[strings.ToLower(u.UUID)] = true
-	}
 	return nil
 }
 
@@ -195,11 +218,14 @@ type reality struct {
 	Show         bool     `json:"show,omitempty"`
 }
 type stream struct {
-	Network  string         `json:"network"`
-	Security string         `json:"security"`
-	Reality  reality        `json:"realitySettings"`
-	GRPC     *grpcSettings  `json:"grpcSettings,omitempty"`
-	XHTTP    *xhttpSettings `json:"xhttpSettings,omitempty"`
+	Network     string              `json:"network"`
+	Security    string              `json:"security"`
+	Reality     *reality            `json:"realitySettings,omitempty"`
+	TLS         *tlsSettings        `json:"tlsSettings,omitempty"`
+	GRPC        *grpcSettings       `json:"grpcSettings,omitempty"`
+	XHTTP       *xhttpSettings      `json:"xhttpSettings,omitempty"`
+	WebSocket   *WebSocketOptions   `json:"wsSettings,omitempty"`
+	HTTPUpgrade *HTTPUpgradeOptions `json:"httpupgradeSettings,omitempty"`
 }
 type inbound struct {
 	Listen   string `json:"listen"`

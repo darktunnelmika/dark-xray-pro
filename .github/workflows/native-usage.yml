@@ -48,6 +48,25 @@ jobs:
           for e in events:
               if e.get('Output'): print(e['Output'],end='')
           PYCREATE
+      - name: Author TLS WebSocket and HTTPUpgrade, retain and replace credentials through the real UI
+        env:
+          DARK_PRO_TEST_CREATION_BROWSER: '1'
+          DARK_PRO_TEST_WEB_DIST: ${{ github.workspace }}/web/dist
+          DARK_PRO_TEST_TLS_BROWSER_SCRIPT: ${{ github.workspace }}/web/tests/live-inbound-tls.mjs
+        shell: bash
+        run: |
+          set -euo pipefail
+          go test ./internal/api -run '^TestRealBrowserInboundTLSCreationPlan$' -count=1 -json -timeout=150s > "$RUNNER_TEMP/live-inbound-tls.jsonl" || { cat "$RUNNER_TEMP/live-inbound-tls.jsonl"; exit 1; }
+          python3 - "$RUNNER_TEMP/live-inbound-tls.jsonl" <<'PYTLS'
+          import json,sys
+          events=[json.loads(line) for line in open(sys.argv[1])]
+          name='TestRealBrowserInboundTLSCreationPlan'
+          assert sum(e.get('Test')==name and e.get('Action')=='pass' for e in events)==1
+          assert not any(e.get('Action') in ('skip','fail') for e in events)
+          assert sum('TLS_BROWSER_LIFECYCLE_PASS:' in e.get('Output','') for e in events)==1
+          for e in events:
+              if e.get('Output'): print(e['Output'],end='')
+          PYTLS
       - name: Verify the same real Xray release as Foundation CI
         shell: bash
         run: |
@@ -71,6 +90,9 @@ jobs:
           import json,sys
           events=[json.loads(line) for line in open(sys.argv[1])]
           assert any(e.get('Test')=='TestRealPinnedCreationTopologyOffline' and e.get('Action')=='pass' for e in events)
+          required={'TestRealPinnedCreationTopologyOffline/tls-'+transport for transport in ('tcp','grpc','xhttp','ws','httpupgrade')}
+          passed={e.get('Test') for e in events if e.get('Action')=='pass'}
+          assert required<=passed, required-passed
           assert not any(e.get('Action') in ('skip','fail') for e in events)
           assert sum('INBOUND_OPTIONS_OFFLINE_PASS' in e.get('Output','') for e in events)==1
           for e in events:

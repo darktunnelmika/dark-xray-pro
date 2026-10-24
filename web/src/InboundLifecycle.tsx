@@ -4,7 +4,7 @@ import { profileOptionsDraft, profileOptionsPayload, type InboundProfileOptions 
 import InboundProfileForm, { type InboundProfileFormHandle, type InboundProfileValue } from "./InboundProfileForm";
 
 type Lang = "en" | "fa";
-export type LifecycleInbound = { id: number; name: string; transport: string; grpc_service: string; reality_target: string; server_names: string[]; short_ids: string[]; public_key: string; revision: number; enabled: boolean; archived: boolean; options?: InboundProfileOptions };
+export type LifecycleInbound = { id: number; name: string; transport: string; grpc_service: string; reality_target: string; server_names: string[]; short_ids: string[]; public_key: string; revision: number; enabled: boolean; archived: boolean; options?: InboundProfileOptions; security?: string };
 type Operation = { event_id: string; action: string; reason: string; from_revision: number; to_revision: number; created_unix: number };
 type Profile = Pick<LifecycleInbound, "id" | "name" | "transport" | "grpc_service" | "reality_target" | "server_names" | "short_ids" | "options">;
 type Intent = { action: "edit" | "enable" | "disable" | "archive"; reason: string; profile?: Profile };
@@ -33,6 +33,7 @@ const words = {
  },
 };
 export default function InboundLifecycle({ inbound, language, csrf, blocked, mode = "all", setupOnly = false, profileOptionsSupported = false, onChanged, onDirtyChange }: { inbound: LifecycleInbound; language: Lang; csrf: string; blocked: boolean; mode?: "all" | "controls" | "history"; setupOnly?: boolean; profileOptionsSupported?: boolean; onChanged: () => void; onDirtyChange?: (dirty: boolean) => void }) {
+ setupOnly ||= inbound.security === "tls";
  const t=words[language];const [editing,setEditing]=useState(false);const [base,setBase]=useState(inbound.revision);
  const [name,setName]=useState(inbound.name);const [transport,setTransport]=useState(inbound.transport);const [service,setService]=useState(inbound.grpc_service);const [dest,setDest]=useState(inbound.reality_target);const [sni,setSni]=useState(inbound.server_names.join(", "));const [shortIDs,setShortIDs]=useState(inbound.short_ids);
  const [profileOptions,setProfileOptions]=useState(() => profileOptionsDraft(inbound.options));

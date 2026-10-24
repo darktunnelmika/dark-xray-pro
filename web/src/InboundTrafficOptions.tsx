@@ -33,9 +33,9 @@ const words = {
   },
 };
 
-export default function InboundTrafficOptions({ language, value, transport, onChange, sniffingSupported, fallbacksSupported, disabled, invalidFields = [] }: {
+export default function InboundTrafficOptions({ language, value, transport, onChange, sniffingSupported, fallbacksSupported, disabled, invalidFields = [], security = "reality" }: {
   language: "en" | "fa"; value?: ProfileOptionsDraft; transport: string; onChange: (value: ProfileOptionsDraft) => void;
-  sniffingSupported: boolean; fallbacksSupported: boolean; disabled: boolean; invalidFields?: string[];
+  sniffingSupported: boolean; fallbacksSupported: boolean; disabled: boolean; invalidFields?: string[]; security?: string;
 }) {
   const t = words[language], current = value ?? profileOptionsDraft();
   const surface = useRef<HTMLDivElement>(null), sniffingSettings = useRef<HTMLDetailsElement>(null), addButton = useRef<HTMLButtonElement>(null), fallbackHeading = useRef<HTMLHeadingElement>(null);
@@ -95,7 +95,7 @@ export default function InboundTrafficOptions({ language, value, transport, onCh
         </div>
       </details>
     </section>
-    <section className="inbound-traffic-card" aria-label={t.fallbacks}>
+    {security !== "tls" && <section className="inbound-traffic-card" aria-label={t.fallbacks}>
       <header><div><h4 ref={fallbackHeading} tabIndex={-1}>{t.fallbacks}<bdi>{current.fallbacks.length}</bdi></h4><p>{t.fallbackHint}</p></div></header>
       <p className="inbound-traffic-note">{t.alpnUnavailable}</p>
       {!fallbacksSupported && <p className="inbound-traffic-notice" role="status">{t.unavailable}</p>}
@@ -114,6 +114,6 @@ export default function InboundTrafficOptions({ language, value, transport, onCh
       </details>)}</div>
       <button ref={addButton} type="button" data-creation-field="fallbacks" className="inbound-fallback-add" disabled={fallbackInactive || transport !== "tcp" || current.fallbacks.length >= maxFallbacks} onClick={addFallback}><Plus size={16}/>{t.add}</button>
       <p className="inbound-traffic-note">{t.limit}</p>
-    </section>
+    </section>}
   </div>;
 }
