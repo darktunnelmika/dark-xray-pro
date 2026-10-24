@@ -142,6 +142,22 @@ jobs:
           for e in events:
               if e.get('Output'): print(e['Output'],end='')
           PYHEALTH
+      - name: Prove promoted first Apply, protocol health and exact subscription traffic
+        run: |
+          bash scripts/test-hub-active-traffic.sh --initial-health || { cat "$RUNNER_TEMP/hub-initial-health.jsonl" 2>/dev/null || true; exit 1; }
+          python3 - "$RUNNER_TEMP/hub-initial-health.jsonl" <<'PYINITIAL'
+          import collections,json,sys
+          events=[json.loads(line) for line in open(sys.argv[1])]
+          name='TestRealPinnedInitialApplyProtocolHealth'
+          required={name}|{name+'/'+s for s in ('verified-subscription','lost-receipt-before','lost-receipt-after','drain-during-probe','reject-wrong-verifier','expired-restart')}
+          passed=collections.Counter(e.get('Test') for e in events if e.get('Action')=='pass')
+          assert all(passed[n]==3 for n in required),dict(passed)
+          assert sum('INITIAL_APPLY_SUBSCRIPTION_REAL_PASS:' in e.get('Output','') for e in events)==3
+          assert not any(e.get('Action') in ('skip','fail') for e in events)
+          assert not any('WARNING: DATA RACE' in e.get('Output','') for e in events)
+          for e in events:
+              if e.get('Output'): print(e['Output'],end='')
+          PYINITIAL
       - name: Repeat unknown-tail accounting fence with isolated customer ports
         run: |
           bash scripts/test-hub-active-traffic.sh --unknown-tail-stress || { cat "$RUNNER_TEMP/hub-active-traffic-unknown-tail.jsonl" 2>/dev/null || true; exit 1; }
@@ -194,6 +210,8 @@ jobs:
         run: go test -race ./internal/business ./internal/usageledger -run '^TestMeteredHealth' -count=10 -timeout=600s -v
       - name: Owner full-round boundaries and encrypted Agent replay
         run: go test -race ./internal/api ./internal/managedxray -run '^(TestMeteredHealth(Owner|Round)|TestProtocolHealth(Transport|Journal))' -count=10 -timeout=240s -v
+      - name: First Apply proof, preparation, delivery authority and version boundaries
+        run: go test -race ./internal/business ./internal/usageledger ./internal/api ./internal/managedxray -run '^TestInitialApply' -count=3 -timeout=360s -v
       - name: Repeat node name receipt and concurrency contracts
         run: go test -race ./internal/noderegistry ./internal/api -run 'TestRename|TestOwnerNodeRename' -count=5 -timeout=120s -v
       - name: Repeat read-only node dependency contracts

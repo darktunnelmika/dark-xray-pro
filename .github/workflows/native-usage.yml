@@ -75,7 +75,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          go test -race ./internal/api -run '^TestRealBrowserInboundPlanPromotion$' -count=1 -json -timeout=150s > "$RUNNER_TEMP/live-inbound-promotion.jsonl" || { cat "$RUNNER_TEMP/live-inbound-promotion.jsonl"; exit 1; }
+          go test -race ./internal/api -run '^TestRealBrowserInbound(PlanPromotion|InitialHealthPreparation)$' -count=1 -json -timeout=300s > "$RUNNER_TEMP/live-inbound-promotion.jsonl" || { cat "$RUNNER_TEMP/live-inbound-promotion.jsonl"; exit 1; }
           python3 - "$RUNNER_TEMP/live-inbound-promotion.jsonl" <<'PYPROMOTION'
           import json,sys
           events=[json.loads(line) for line in open(sys.argv[1])]
@@ -83,6 +83,8 @@ jobs:
           assert sum(e.get('Test')==name and e.get('Action')=='pass' for e in events)==1
           assert not any(e.get('Action') in ('skip','fail') for e in events)
           assert sum('PLAN_PROMOTION_BROWSER_PASS:' in e.get('Output','') for e in events)==1
+          assert sum(e.get('Action')=='pass' and e.get('Test')=='TestRealBrowserInboundInitialHealthPreparation' for e in events)==1
+          assert sum('INITIAL_APPLY_PREPARATION_BROWSER_PASS:' in e.get('Output','') for e in events)==1
           for e in events:
               if e.get('Output'): print(e['Output'],end='')
           PYPROMOTION

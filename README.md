@@ -21,6 +21,11 @@ The [source-linked feature audit](docs/release/feature-scope-and-status.fa.md)
 is the current cross-module reference, audited at `c740c48` after [N17 / PR #96](https://github.com/darktunnelmika/dark-xray-pro/pull/96)
 and extended by [N18 native LAB subscription delivery](docs/native-lab-subscriptions-n18.fa.md)
 and [N19 explicit consumer endpoint manifests](docs/consumer-endpoint-manifests-n19.fa.md).
+The [saved-plan first-Apply health extension](docs/inbound-initial-apply-health.fa.md)
+adds an independent one-Node v4 proof after explicit pre-Stage system-probe
+preparation. Its loopback LAB subscription is bound to the exact promoted Apply
+and original proof deadline; one typed delivery journal prevents fallback to
+an older snapshot across handover and initial-Apply scopes.
 It distinguishes implemented source, bounded LAB acceptance and remaining
 product work. Native customer/representative management, credit and usage
 ledgers, Node enrollment/metrics, Inbound lifecycle and isolated metered

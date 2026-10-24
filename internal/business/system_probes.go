@@ -2,6 +2,7 @@ package business
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"strings"
 
@@ -31,9 +32,20 @@ func (s *Store) ProvisionMeteredProbe(ctx context.Context, key []byte, node, ins
 		return empty, err
 	}
 	defer tx.Rollback()
+	p, err := s.provisionMeteredProbeTx(ctx, tx, key, node, installation, inbound)
+	if err != nil {
+		return empty, err
+	}
+	return p, tx.Commit()
+}
+
+// The caller owns the writer transaction. Preparation and probe identity must
+// commit together, so a failed reviewed preparation cannot leave a credential.
+func (s *Store) provisionMeteredProbeTx(ctx context.Context, tx *sql.Tx, key []byte, node, installation string, inbound uint64) (usageledger.ProbeIdentity, error) {
+	var empty usageledger.ProbeIdentity
 	prior, err := usageledger.ProbeIdentityTx(ctx, tx, node, installation, inbound)
 	if err == nil {
-		return prior, tx.Commit()
+		return prior, nil
 	}
 	if !errors.Is(err, usageledger.ErrMissing) {
 		return empty, err
@@ -76,5 +88,5 @@ func (s *Store) ProvisionMeteredProbe(ctx context.Context, key []byte, node, ins
 	if err = s.usage.CreateProbeIdentityTx(ctx, tx, p); err != nil {
 		return empty, err
 	}
-	return p, tx.Commit()
+	return p, nil
 }

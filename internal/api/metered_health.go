@@ -34,7 +34,7 @@ func (s *Server) EnableMeteredHealth(endpoint mx.ProtocolHealthEndpoint) error {
 // pinned transport must be configured first; a browser cannot migrate storage
 // or choose the destination members, verifier, or validity window.
 func (s *Server) EnableMeteredHealthRounds() error {
-	if s.business == nil || s.healthEndpoint == nil || s.healthRoundsEnabled {
+	if s.business == nil || s.healthEndpoint == nil || s.healthRoundsEnabled || s.initialApplyHealthEnabled {
 		return errors.New("health rounds require the approved pinned health transport")
 	}
 	if err := s.business.EnableMeteredHealthRounds(context.Background()); err != nil {
@@ -157,7 +157,12 @@ func (s *Server) handleMeteredHealthAgent(w http.ResponseWriter, r *http.Request
 			businessError(w, business.ErrConflict)
 			return
 		}
-		q, found, err := s.business.PollMeteredHealth(r.Context(), s.inboundKey, token, p.NodeID, p.InstallationID, *s.healthEndpoint)
+		var q mx.ProtocolHealthRequest
+		if s.initialApplyHealthEnabled {
+			q, found, err = s.business.PollInitialApplyHealth(r.Context(), s.inboundKey, token, p.NodeID, p.InstallationID, *s.healthEndpoint)
+		} else {
+			q, found, err = s.business.PollMeteredHealth(r.Context(), s.inboundKey, token, p.NodeID, p.InstallationID, *s.healthEndpoint)
+		}
 		if err != nil {
 			businessError(w, err)
 			return
@@ -166,8 +171,15 @@ func (s *Server) handleMeteredHealthAgent(w http.ResponseWriter, r *http.Request
 			w.WriteHeader(204)
 			return
 		}
-		if _, ok := s.healthOperation(w, r, q.HandoverID); !ok {
-			return
+		if s.initialApplyHealthEnabled {
+			if q.Version != mx.InitialApplyProtocolHealthVersion || q.HandoverID != "" || !s.initialHealthPromotionScope(r.Context(), q.InboundID, q.NodeID, q.InstallationID) {
+				businessError(w, business.ErrConflict)
+				return
+			}
+		} else {
+			if _, ok := s.healthOperation(w, r, q.HandoverID); !ok {
+				return
+			}
 		}
 		respond(w, 200, mx.ProtocolHealthDelivery{Request: q, Endpoint: *s.healthEndpoint})
 		return
@@ -176,6 +188,29 @@ func (s *Server) handleMeteredHealthAgent(w http.ResponseWriter, r *http.Request
 	if decode(w, r, 2048, &in) != nil {
 		businessError(w, business.ErrInvalid)
 		return
+	}
+	if s.initialApplyHealthEnabled {
+		scope, err := s.business.InitialApplyHealthChallengeScope(r.Context(), in.ChallengeID)
+		if err == nil {
+			if _, ok := s.registry.Authenticate(scope.NodeID, scope.InstallationID, string(token)); !ok {
+				respond(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+				return
+			}
+			if !s.initialHealthPromotionScope(r.Context(), scope.InboundID, scope.NodeID, scope.InstallationID) {
+				businessError(w, business.ErrConflict)
+				return
+			}
+			if _, err = s.business.ConsumeInitialApplyHealthProof(r.Context(), s.inboundKey, token, in.ChallengeID, *s.healthEndpoint, in.Receipt); err != nil {
+				businessError(w, err)
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		if !errors.Is(err, business.ErrNotFound) {
+			businessError(w, err)
+			return
+		}
 	}
 	node, install, op, err := s.business.MeteredHealthChallengeScope(r.Context(), in.ChallengeID)
 	if err != nil {

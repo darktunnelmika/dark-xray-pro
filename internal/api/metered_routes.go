@@ -83,6 +83,7 @@ func (s *Server) attachMeteredRouteTransactions(mux *http.ServeMux) {
 		out := map[string]any{"enabled": false, "scope": "metered_tcp_loopback_lab"}
 		out["health_enabled"] = s.healthEndpoint != nil
 		out["health_rounds_enabled"] = s.healthRoundsEnabled
+		out["initial_apply_health_enabled"] = s.initialApplyHealthEnabled
 		out["lab_subscriptions_enabled"] = s.labSubscriptionsEnabled
 		out["consumer_manifests_enabled"] = s.consumerManifestsEnabled
 		nodes := make([]map[string]string, 0, len(s.meteredRouteNodes))

@@ -29,6 +29,14 @@ import (
 // core processes are created by this preparation-only acceptance. The separate
 // isolated-network core test proves Stage/Apply and actual accounted traffic.
 func TestRealBrowserInboundPlanPromotion(t *testing.T) {
+	testRealBrowserInboundPlanPromotion(t, false)
+}
+
+func TestRealBrowserInboundInitialHealthPreparation(t *testing.T) {
+	testRealBrowserInboundPlanPromotion(t, true)
+}
+
+func testRealBrowserInboundPlanPromotion(t *testing.T, initialHealth bool) {
 	if os.Getenv("DARK_PRO_TEST_PROMOTION_BROWSER") != "1" {
 		t.Skip("explicit real-browser plan promotion acceptance only")
 	}
@@ -44,6 +52,14 @@ func TestRealBrowserInboundPlanPromotion(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
 	f := newPromotionAPIFixture(t, true)
+	if initialHealth {
+		if err := f.s.EnableInboundInitialHealth(roundEndpoint()); err != nil {
+			t.Fatal(err)
+		}
+		if err := f.s.EnableLabSubscriptions(); err != nil {
+			t.Fatal(err)
+		}
+	}
 	const otherID = uint64(8124)
 	otherClient, err := f.s.business.CreateClient(ctx, business.NewClient{ClientID: "promotion-unrelated-client", EventID: "promotion-browser-other-client", RepresentativeID: "owner", Name: "Preserved unrelated customer", DurationDays: 30, VolumeBytes: 1 << 20})
 	if err != nil {
@@ -129,7 +145,7 @@ func TestRealBrowserInboundPlanPromotion(t *testing.T) {
 	defer stopPolling()
 	private := t.TempDir()
 	resultPath, controlPath := filepath.Join(private, "promotion-result.json"), filepath.Join(private, "browser-control.json")
-	control, err := json.Marshal(map[string]any{"username": ownerUsername, "password": ownerPassword, "result_path": resultPath, "inbound_id": 8123})
+	control, err := json.Marshal(map[string]any{"username": ownerUsername, "password": ownerPassword, "result_path": resultPath, "inbound_id": 8123, "initial_health": initialHealth})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -147,9 +163,12 @@ func TestRealBrowserInboundPlanPromotion(t *testing.T) {
 		t.Fatalf("real promotion browser failed: %v\n%s", err, output)
 	}
 	var result struct {
-		Pass      bool   `json:"pass"`
-		InboundID uint64 `json:"inbound_id"`
-		EventID   string `json:"event_id"`
+		Pass               bool   `json:"pass"`
+		InboundID          uint64 `json:"inbound_id"`
+		EventID            string `json:"event_id"`
+		PreparationEventID string `json:"preparation_event_id"`
+		ClientID           string `json:"client_id"`
+		TokenGeneration    uint64 `json:"token_generation"`
 	}
 	raw, err := os.ReadFile(resultPath)
 	if err != nil || json.Unmarshal(raw, &result) != nil || !result.Pass || result.InboundID != 8123 || result.EventID == "" {
@@ -170,6 +189,25 @@ func TestRealBrowserInboundPlanPromotion(t *testing.T) {
 	channel, err := f.s.business.MeteredRouteChannel(ctx, f.key, f.node.NodeID)
 	if err != nil || len(channel.Commands) != 0 || channel.Status.Observed.ProcessReady {
 		t.Fatal("browser preparation crossed execution boundary", err)
+	}
+	if initialHealth {
+		ownerID := ""
+		if session, e := f.s.business.VerifySession(ctx, f.cookie.Value); e == nil {
+			ownerID = session.User.ID
+		} else {
+			t.Fatal(e)
+		}
+		proofState, e := f.s.business.InitialApplyHealth(ctx, f.key, ownerID, 8123, roundEndpoint())
+		if e != nil || !proofState.Prepared || proofState.Preparation == nil || proofState.Preparation.EventID != result.PreparationEventID || proofState.Eligible || proofState.InitialApplySHA != "" || proofState.LatestRound != nil || proofState.PromotionEventID != state.Receipt.EventID {
+			t.Fatal("browser preparation did not retain exact nonactivating authority", e)
+		}
+		if result.ClientID != f.clients[0].ID || result.TokenGeneration != 1 {
+			t.Fatal("browser chose foreign client or implicit token generation")
+		}
+		tokenState, e := f.s.business.LabSubscription(ctx, f.key, ownerID, result.ClientID, roundEndpoint())
+		if e != nil || tokenState.State != "active" || tokenState.Generation != 1 || tokenState.Snapshot != nil {
+			t.Fatal("browser token preparation implied subscription publication", e)
+		}
 	}
 	afterClients, err := f.s.business.ListClients(ctx, "", 200, 0)
 	if err != nil || !reflect.DeepEqual(beforeClients, afterClients) {
@@ -197,9 +235,22 @@ func TestRealBrowserInboundPlanPromotion(t *testing.T) {
 		t.Fatal("browser did not perform one reviewed promotion", requests)
 	}
 	for request, count := range requests {
+		if initialHealth && (request == "POST "+initialHealthBase()+"/prepare" || request == "POST /api/v1/workspace/clients/"+f.clients[0].ID+"/subscription/issue") {
+			if count != 1 {
+				t.Fatal("browser repeated preparation mutation", request, count)
+			}
+			continue
+		}
 		if strings.HasPrefix(request, "POST ") && request != "POST /api/v1/session/login" && request != "POST "+f.base() && request != "POST "+f.base()+"/preview" {
 			t.Fatal("browser made unrelated mutation", request, count)
 		}
+	}
+	if initialHealth {
+		if requests["POST "+initialHealthBase()+"/prepare"] != 1 || requests["POST /api/v1/workspace/clients/"+f.clients[0].ID+"/subscription/issue"] != 1 {
+			t.Fatal("browser skipped explicit preparation/token action")
+		}
+		t.Log("INITIAL_APPLY_PREPARATION_BROWSER_PASS: exact saved-plan preparation and client token; no runtime or health command; persisted metadata only")
+		return
 	}
 	t.Log("PLAN_PROMOTION_BROWSER_PASS: authenticated compiled UI; exact atomic preparation; preserved profile and customers; no runtime command")
 }

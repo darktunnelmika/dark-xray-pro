@@ -431,6 +431,11 @@ func (s *Store) QueueMeteredRouteCommand(ctx context.Context, key []byte, node s
 		return MeteredRouteCommandView{}, err
 	}
 	defer tx.Rollback()
+	if in.Action == "stage" && s.initialApplyHealthEnabled {
+		if err = requireInitialPreparationForStage(ctx, tx, key, node); err != nil {
+			return MeteredRouteCommandView{}, err
+		}
+	}
 	view, err := queueMeteredRouteCommand(ctx, tx, key, node, in, "")
 	if err != nil {
 		return MeteredRouteCommandView{}, err

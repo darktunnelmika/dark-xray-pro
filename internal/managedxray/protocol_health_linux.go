@@ -28,8 +28,9 @@ import (
 var ErrProtocolHealth = errors.New("protocol health proof unavailable or stale")
 
 const (
-	ProtocolHealthVersion         = 2
-	ConsumerProtocolHealthVersion = 3
+	ProtocolHealthVersion             = 2
+	ConsumerProtocolHealthVersion     = 3
+	InitialApplyProtocolHealthVersion = 4
 )
 
 // ProtocolHealthEndpoint is operator-approved verifier configuration, never an
@@ -93,23 +94,38 @@ type ProtocolHealthRequest struct {
 	// These flat optional fields preserve the exact legacy v2 JSON and MAC.
 	// Version 3 binds the complete immutable consumer manifest and the exact
 	// ingress tuple independently of Port, the applied loopback origin port.
-	ConsumerManifestSHA string           `json:"consumer_manifest_sha,omitempty"`
-	ConsumerAddress     string           `json:"consumer_address,omitempty"`
-	ConsumerPort        uint16           `json:"consumer_port,omitempty"`
-	Expected            RuntimeCondition `json:"expected"`
-	Usage               MeteredCondition `json:"usage"`
-	Issued              int64            `json:"issued_unix_nano"`
-	Expires             int64            `json:"expires_unix_nano"`
-	Signature           string           `json:"signature"`
+	ConsumerManifestSHA string `json:"consumer_manifest_sha,omitempty"`
+	ConsumerAddress     string `json:"consumer_address,omitempty"`
+	ConsumerPort        uint16 `json:"consumer_port,omitempty"`
+	// Version 4 binds the HUB's immutable promotion and initial Apply authority.
+	// It has no handover or consumer-ingress authority. Omitting the field for
+	// v2/v3 preserves their exact signed JSON and durable receipt replay.
+	InitialApplySHA string           `json:"initial_apply_sha,omitempty"`
+	Expected        RuntimeCondition `json:"expected"`
+	Usage           MeteredCondition `json:"usage"`
+	Issued          int64            `json:"issued_unix_nano"`
+	Expires         int64            `json:"expires_unix_nano"`
+	Signature       string           `json:"signature"`
 }
 
 func validProtocolHealthRequest(q ProtocolHealthRequest) bool {
-	return validProtocolHealthConsumer(q) && transactionNode.MatchString(q.SystemProbeID) && transactionID.MatchString(q.ID) && transactionID.MatchString(q.HandoverID) && transactionNode.MatchString(q.NodeID) && transactionID.MatchString(q.InstallationID) && transactionID.MatchString(q.RuntimeInstance) && transactionID.MatchString(q.StageID) && transactionID.MatchString(q.ApplyCommandID) && q.InboundID > 0 && q.Port >= 1024 && transactionHash.MatchString(q.CredentialSHA) && transactionHash.MatchString(q.EndpointSHA) && q.Expected.ProcessReady && q.Expected.ActiveSequence > 0 && transactionHash.MatchString(q.Expected.ActiveSHA) && validMeteredCondition(q.Usage) && q.Usage.EpochID != "" && q.Usage.Settlement == (uc.Receipt{}) && q.Issued > 0 && q.Expires > q.Issued && q.Expires-q.Issued <= int64(8*time.Second)
+	return validProtocolHealthScope(q) && validProtocolHealthConsumer(q) && transactionNode.MatchString(q.SystemProbeID) && transactionID.MatchString(q.ID) && transactionNode.MatchString(q.NodeID) && transactionID.MatchString(q.InstallationID) && transactionID.MatchString(q.RuntimeInstance) && transactionID.MatchString(q.StageID) && transactionID.MatchString(q.ApplyCommandID) && q.InboundID > 0 && q.Port >= 1024 && transactionHash.MatchString(q.CredentialSHA) && transactionHash.MatchString(q.EndpointSHA) && q.Expected.ProcessReady && q.Expected.ActiveSequence > 0 && transactionHash.MatchString(q.Expected.ActiveSHA) && validMeteredCondition(q.Usage) && q.Usage.EpochID != "" && q.Usage.Settlement == (uc.Receipt{}) && q.Issued > 0 && q.Expires > q.Issued && q.Expires-q.Issued <= int64(8*time.Second)
+}
+
+func validProtocolHealthScope(q ProtocolHealthRequest) bool {
+	switch q.Version {
+	case ProtocolHealthVersion, ConsumerProtocolHealthVersion:
+		return transactionID.MatchString(q.HandoverID) && q.InitialApplySHA == ""
+	case InitialApplyProtocolHealthVersion:
+		return q.HandoverID == "" && transactionHash.MatchString(q.InitialApplySHA) && q.InitialApplySHA != strings.Repeat("0", 64)
+	default:
+		return false
+	}
 }
 
 func validProtocolHealthConsumer(q ProtocolHealthRequest) bool {
 	switch q.Version {
-	case ProtocolHealthVersion:
+	case ProtocolHealthVersion, InitialApplyProtocolHealthVersion:
 		return q.ConsumerManifestSHA == "" && q.ConsumerAddress == "" && q.ConsumerPort == 0
 	case ConsumerProtocolHealthVersion:
 		return transactionHash.MatchString(q.ConsumerManifestSHA) && q.ConsumerManifestSHA != strings.Repeat("0", 64) && ValidateConsumerProtocolEndpoint(q.ConsumerAddress, q.ConsumerPort)
@@ -204,7 +220,7 @@ func (t *TransactionRuntime) protocolHealthCurrent(q ProtocolHealthRequest) (xra
 
 // ProbeMeteredProtocol runs a short-lived, pinned Vision client for this exact
 // active Direct listener. Version 3 traverses the independently approved ingress
-// tuple; version 2 uses the loopback origin. The primitive never changes the
+// tuple; versions 2 and 4 use the loopback origin. The primitive never changes the
 // server lease or journal, enables a server listener, renews authority, or sets
 // DataPlaneVerified/CanPublish. Agent transport persists each attempt separately.
 func (t *TransactionRuntime) ProbeMeteredProtocol(ctx context.Context, q ProtocolHealthRequest, endpoint ProtocolHealthEndpoint) (ProtocolHealthReceipt, error) {

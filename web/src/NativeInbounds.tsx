@@ -15,6 +15,7 @@ import { TLSCertificateSummary } from "./InboundTLSCredentials";
 import InboundProfileForm, { type InboundProfileFormHandle, type InboundProfileValue } from "./InboundProfileForm";
 import InboundCreation from "./InboundCreation";
 import InboundPlanExecution from "./InboundPlanExecution";
+import InboundInitialApplyHealth from "./InboundInitialApplyHealth";
 import { readPromotionReceipt, type PromotionReceipt, type PromotionIssue } from "./inboundPlanExecution";
 import { creationNodeName, type CreationCapabilities, type CreationPlan, type CreationPlanResponse, type CreationIssue } from "./InboundCreationModel";
 import { navigateURL, registerNavigationGuard } from "./navigation";
@@ -366,6 +367,7 @@ export default function NativeInbounds({ language, fallback, workspace = "inboun
        {current.security === "tls" && current.tls && <details className="native-card"><summary>{language === "fa" ? "گواهی TLS ذخیره‌شده" : "Saved TLS certificate"}</summary><TLSCertificateSummary language={language} metadata={current.tls}/></details>}
        {setupSummary && !current.archived && <InboundPlanExecution key={chosen} language={language} summary={setupSummary} nodes={data.nodes} blocked={busy || setupBusy || stale || !setupStatusReady} onPromoted={preparedSetup} onOpenSetup={issue => void openSetupPlan(issue)} onDirtyChange={setExecutionDirty} onBusyChange={setExecutionBusy}/>}
        {promotion && <NativeMeteredRouteTransactions key={"plan:" + chosen} language={language} context={{ nodeID: promotion.node_id, installationID: promotion.installation_id, inboundID: chosen, inboundRevision: promotion.inbound_revision, draftRevision: promotion.draft_revision }}/>}
+       {promotion && <InboundInitialApplyHealth key={"initial-health:" + chosen} language={language} promotion={promotion} active={tab === "overview"}/>}
        {!promotion && <InboundLifecycle key={chosen + ":" + editorEpoch + ":" + !!setupSummary} inbound={current} language={language} csrf={session.csrf_token ?? ""} blocked={busy || executionBusy || stale || !setupStatusReady} mode="controls" profileOptionsSupported={setupCapabilities?.profile_options === true} setupOnly={!!setupSummary} onDirtyChange={setProfileDirty} onChanged={() => setRefresh(n => n + 1)}/>}
       </>}
      </section>

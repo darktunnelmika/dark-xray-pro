@@ -90,6 +90,14 @@ func (s *Store) MeteredRouteControlChannel(ctx context.Context, key []byte, node
 		}
 	}
 	out.Controls.Stage = out.DraftsValid && out.HandoverID == ""
+	if out.Controls.Stage && s.initialApplyHealthEnabled {
+		if e = requireInitialPreparationForStage(ctx, tx, key, node); e != nil {
+			if !routeReviewBlocked(e) {
+				return out, e
+			}
+			out.Controls.Stage = false
+		}
+	}
 	if out.Status.InterruptedCommandSHA != "" {
 		return out, tx.Commit() // Recovery requires an explicit new Stage.
 	}

@@ -291,6 +291,9 @@ func (s *Store) queueHealthRound(ctx context.Context, key []byte, id, op, consum
 		return empty, err
 	}
 	defer tx.Rollback()
+	if err = healthIDNotInitial(ctx, tx, id); err != nil {
+		return empty, err
+	}
 	var version int
 	if err = tx.QueryRowContext(ctx, `PRAGMA user_version`).Scan(&version); err != nil {
 		return empty, err
@@ -353,6 +356,9 @@ func (s *Store) queueHealthRound(ctx context.Context, key []byte, id, op, consum
 			return empty, err
 		}
 		intent := hex.EncodeToString(nonce[:])
+		if err = healthIDNotInitial(ctx, tx, intent); err != nil {
+			return empty, err
+		}
 		if _, err = tx.ExecContext(ctx, `INSERT INTO pro_health_intents(id,handover_id,node_id,installation_id,inbound_id,endpoint_sha,binding,expires,created) VALUES(?,?,?,?,?,?,?,?,?)`, intent, op, v.NodeID, v.InstallationID, b.InboundID, v.EndpointSHA, b.Binding, expires, now); err != nil {
 			return empty, err
 		}

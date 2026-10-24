@@ -211,9 +211,15 @@ func TestConsumerProtocolHealthClientDialsApprovedIngressAndRetainsOriginBinding
 	}
 	legacy := q
 	legacy.Version, legacy.ConsumerManifestSHA, legacy.ConsumerAddress, legacy.ConsumerPort = ProtocolHealthVersion, "", "", 0
-	address, port, _ = readClient(legacy)
+	address, port, legacyDigest := readClient(legacy)
 	if address != "127.0.0.1" || port != q.Port {
 		t.Fatal("legacy local proof route changed")
+	}
+	initial := legacy
+	initial.Version, initial.HandoverID, initial.InitialApplySHA = InitialApplyProtocolHealthVersion, "", strings.Repeat("a", 64)
+	address, port, initialDigest := readClient(initial)
+	if address != "127.0.0.1" || port != q.Port || initialDigest != legacyDigest || ValidateProtocolHealthSupport(candidate, initial, endpoint) != nil {
+		t.Fatal("initial Apply proof changed the restricted loopback client route")
 	}
 }
 

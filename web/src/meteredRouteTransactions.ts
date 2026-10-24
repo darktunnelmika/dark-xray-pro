@@ -15,7 +15,7 @@ export type Command = {
  created_unix_nano: number;
  receipt?: { version: 2; metered: MeteredEvidence; command_id: string; serial: number; action: Action; stage_id: string; node_id: string; installation_id: string; runtime_instance: string; outcome: string; observed_unix_nano: number; observed: Observation; signature: string };
 };
-export type Scope = { enabled: boolean; health_enabled?: boolean; health_rounds_enabled?: boolean; lab_subscriptions_enabled?: boolean; consumer_manifests_enabled?: boolean; scope: "metered_tcp_loopback_lab"; node_id?: string; installation_id?: string; nodes?: {node_id:string;installation_id:string}[] };
+export type Scope = { enabled: boolean; health_enabled?: boolean; health_rounds_enabled?: boolean; initial_apply_health_enabled?: boolean; lab_subscriptions_enabled?: boolean; consumer_manifests_enabled?: boolean; scope: "metered_tcp_loopback_lab"; node_id?: string; installation_id?: string; nodes?: {node_id:string;installation_id:string}[] };
 export type Target = { stage_id: string; ports: number[]; expires_unix_milli?: number };
 export type Channel = {
 
@@ -47,7 +47,8 @@ function refs(v: unknown): v is DraftRef[] {
 }
 export function readScope(v: unknown): Scope {
  if(object(v)&&((v.consumer_manifests_enabled!==undefined&&typeof v.consumer_manifests_enabled!=="boolean")||(v.consumer_manifests_enabled===true&&v.lab_subscriptions_enabled!==true)))throw Error("invalid_consumer_manifests_scope");
- if(object(v)&&((v.lab_subscriptions_enabled!==undefined&&typeof v.lab_subscriptions_enabled!=="boolean")||(v.lab_subscriptions_enabled===true&&v.health_rounds_enabled!==true)))throw Error("invalid_lab_subscriptions_scope");
+ if(object(v)&&((v.lab_subscriptions_enabled!==undefined&&typeof v.lab_subscriptions_enabled!=="boolean")||(v.lab_subscriptions_enabled===true&&v.health_rounds_enabled!==true&&v.initial_apply_health_enabled!==true)))throw Error("invalid_lab_subscriptions_scope");
+ if(object(v)&&((v.initial_apply_health_enabled!==undefined&&typeof v.initial_apply_health_enabled!=="boolean")||(v.initial_apply_health_enabled===true&&v.health_enabled!==true)))throw Error("invalid_initial_apply_health_scope");
  if(object(v)&&v.health_enabled!==undefined&&typeof v.health_enabled!=="boolean")throw Error("invalid_health_scope");
  if(object(v)&&((v.health_rounds_enabled!==undefined&&typeof v.health_rounds_enabled!=="boolean")||(v.health_rounds_enabled===true&&v.health_enabled!==true)))throw Error("invalid_health_rounds_scope");
  if (!object(v) || typeof v.enabled !== "boolean" || v.scope !== "metered_tcp_loopback_lab" || (v.enabled &&
@@ -58,6 +59,7 @@ export function readScope(v: unknown): Scope {
    new Set(v.nodes.map(n=>n.node_id)).size!==v.nodes.length||
    (v.enabled&&!v.nodes.some(n=>n.node_id===v.node_id&&n.installation_id===v.installation_id)))throw Error("invalid_route_scopes");
  }
+ if(v.initial_apply_health_enabled===true&&(!v.enabled||(Array.isArray(v.nodes)?v.nodes.length:1)!==1||v.health_rounds_enabled===true||v.consumer_manifests_enabled===true))throw Error("invalid_initial_apply_node_scope");
  return v as Scope;
 }
 export function readCommand(v: unknown, scope: Scope): Command {

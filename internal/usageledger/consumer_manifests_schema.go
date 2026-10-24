@@ -6,7 +6,9 @@ import "context"
 // must reject this database rather than fall back to an origin-only proof.
 const ConsumerManifestsBusinessSchemaVersion = 14
 
-func HasConsumerManifestsSchema(v int) bool { return v == ConsumerManifestsBusinessSchemaVersion }
+func HasConsumerManifestsSchema(v int) bool {
+	return v == ConsumerManifestsBusinessSchemaVersion || HasInitialApplyHealthSchema(v)
+}
 
 var consumerManifestsSchema = []string{
 	`CREATE TABLE pro_consumer_meta(id INTEGER PRIMARY KEY CHECK(id=1),version INTEGER NOT NULL CHECK(version=1))`,

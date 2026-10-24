@@ -25,6 +25,7 @@ import (
 type Server struct {
 	healthEndpoint              *managedxray.ProtocolHealthEndpoint
 	healthRoundsEnabled         bool // startup-only; requires the pinned health transport
+	initialApplyHealthEnabled   bool // startup-only; one promoted first Apply, no handover authority
 	labSubscriptionsEnabled     bool // startup-only; bounded N17-backed consumer delivery
 	consumerManifestsEnabled    bool // startup-only; exact approved consumer endpoint proofs
 	meteredRouteNode            string
@@ -137,6 +138,7 @@ func (s *Server) Handler() http.Handler {
 	s.attachNativeInbounds(mux)
 	s.attachNativeInboundPlans(mux)
 	s.attachNativeInboundPlanPromotions(mux)
+	s.attachInboundInitialHealth(mux)
 	s.attachNativeRouteDrafts(mux)
 	s.attachRouteReadinessP0G(mux)
 	s.attachRouteTransactions(mux)

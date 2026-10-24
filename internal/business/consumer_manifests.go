@@ -211,6 +211,9 @@ func consumerManifestExists(ctx context.Context, tx *sql.Tx, opID string) (bool,
 }
 
 func consumerEventUnused(ctx context.Context, tx *sql.Tx, eventID string) error {
+	if err := initialEventNotUsed(ctx, tx, eventID); err != nil {
+		return err
+	}
 	enabled, err := consumerSchema(ctx, tx)
 	if err != nil || !enabled {
 		return err
@@ -376,6 +379,9 @@ func (s *Store) MutateMeteredConsumerManifest(ctx context.Context, key []byte, a
 	}
 	if head.Revision != in.ExpectedRevision || (in.Action == "revoke" && (headErr != nil || head.State != "active")) {
 		return out, ErrConflict
+	}
+	if err = initialEventNotUsed(ctx, tx, in.EventID); err != nil {
+		return out, err
 	}
 	var used int
 	if err = tx.QueryRowContext(ctx, `SELECT (SELECT COUNT(*) FROM pro_subscription_token_events WHERE event_id=?)+(SELECT COUNT(*) FROM pro_subscription_snapshots WHERE event_id=?)`, in.EventID, in.EventID).Scan(&used); err != nil {
