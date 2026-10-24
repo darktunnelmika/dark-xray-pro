@@ -323,7 +323,8 @@ test("Persian 320px editor keeps RTL tab navigation, visible footer and containe
   await expect(dialog.getByLabel("نام اینباند", { exact: true })).toBeFocused();
   await dialog.getByLabel("نام اینباند", { exact: true }).fill("پروفایل یکپارچهٔ دارک");
   const profileTab = dialog.getByRole("tab", { name: "پروفایل", exact: true }); await profileTab.focus(); await profileTab.press("ArrowLeft");
-  await expect(dialog.getByRole("tab", { name: "نودها و مسیرها", exact: true })).toBeFocused();
+  await expect(dialog.getByRole("tab", { name: "شبکه", exact: true })).toBeFocused();
+  await dialog.getByRole("tab", { name: "نودها و مسیرها", exact: true }).click();
   await dialog.getByRole("checkbox", { name: "انتخاب مقصد: Germany", exact: true }).check();
   await dialog.getByRole("checkbox", { name: "تونل: de", exact: true }).check();
   await dialog.getByRole("checkbox", { name: "دارک‌سواپ: de", exact: true }).check();
@@ -389,4 +390,40 @@ test("delayed capabilities keep direct-detail mutations blocked until the saved 
     await expect(page.getByText("This setup is paused. Client delivery follows separate activation.", { exact: true })).toBeVisible();
     expect(f.calls).toHaveLength(0);
   } finally { releaseCapabilities(); }
+});
+
+test("expanded Inbound editor keeps Network, Security, Dark Swap and Hosts changes in one atomic plan", async ({ page }) => {
+  const f = await fixture(page), dialog = await openCreation(page);
+  const tabs = ["Profile", "Network", "Security", "Nodes & routes", "Dark Swap", "Hosts", "Advanced", "Review"];
+  for (const name of tabs) await expect(dialog.getByRole("tab", { name, exact: true })).toBeVisible();
+  await profile(dialog, "One editor, every supported setting");
+  await dialog.getByRole("tab", { name: "Network", exact: true }).click();
+  await dialog.getByRole("radio", { name: "gRPC / REALITY — network" }).check();
+  await dialog.getByLabel("gRPC service — network").fill("completepro");
+  await expect(dialog.getByText("XHTTP · Mode / Padding")).toBeVisible();
+  await dialog.getByRole("tab", { name: "Security", exact: true }).click();
+  await dialog.getByLabel("REALITY target (host:port) — security").fill("example.net:443");
+  await dialog.getByLabel("Short IDs — security").fill("aabbccdd");
+  await dialog.getByRole("tab", { name: "Nodes & routes", exact: true }).click();
+  await dialog.getByRole("checkbox", { name: "Select destination: Germany", exact: true }).check();
+  await dialog.getByLabel("Destination listening IP: de").fill("203.0.113.10");
+  await dialog.getByLabel("Direct port: de").fill("10443");
+  await dialog.getByRole("tab", { name: "Dark Swap", exact: true }).click();
+  await expect(dialog.getByRole("checkbox", { name: "Select destination: Germany", exact: true })).toBeDisabled();
+  await swap(dialog);
+  await dialog.getByRole("tab", { name: "Hosts", exact: true }).click();
+  await dialog.getByLabel("direct hosts — de").fill("de.example.org");
+  await dialog.getByRole("tab", { name: "Advanced", exact: true }).click();
+  await expect(dialog.getByText("Fallbacks · ALPN / Path / Dest")).toBeVisible();
+  await review(dialog, "Editor stages retain every route");
+  await check(dialog);
+  const payload = f.calls.find(call => call.path === api + "/preview")?.body;
+  expect(payload?.profile.transport).toBe("grpc");
+  expect(payload?.profile.grpc_service).toBe("completepro");
+  expect(payload?.profile.reality_target).toBe("example.net:443");
+  expect(payload?.profile.short_ids).toEqual(["aabbccdd"]);
+  expect(payload?.nodes[0].direct_hosts).toEqual(["de.example.org"]);
+  expect(payload?.nodes[0].swap_enabled).toBe(true);
+  await save(dialog);
+  expect(f.getSaved()?.status).toBe("SAVED_DISABLED");
 });
