@@ -49,7 +49,7 @@ func TestRealPinnedMeteredRouteActiveTraffic(t *testing.T) {
 	if err != nil || len(interfaces) != 1 || interfaces[0].Name != "lo" {
 		t.Fatal("traffic acceptance requires a dedicated loopback-only network namespace", err)
 	}
-	for _, mode := range []string{"replace-rollback", "lost-ack-before", "lost-ack-after", "lost-final-receipt", "lost-seal", "revoked-after-final", "unknown-tail", "interrupted", "drain"} {
+	for _, mode := range []string{"replace-rollback", "lost-ack-before", "lost-ack-after", "lost-final-receipt", "lost-seal", "revoked-after-final", "unknown-tail", "interrupted", "drain", "creation-plan-promotion"} {
 		t.Run(mode, func(t *testing.T) { testMeteredRouteActiveTraffic(t, binary, pin, mode) })
 	}
 }
@@ -81,6 +81,7 @@ func (s *routeTrafficStream) stopped(t *testing.T, ctx context.Context) {
 func testMeteredRouteActiveTraffic(t *testing.T, binary, pin, mode string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 55*time.Second)
 	defer cancel()
+	promotionMode := mode == "creation-plan-promotion"
 	target := liveUsageRealityAt(t, net.JoinHostPort(meteredTrafficAddress, "0"))
 	origin := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/octet-stream")
@@ -139,10 +140,19 @@ func testMeteredRouteActiveTraffic(t *testing.T, binary, pin, mode string) {
 	if _, e = s.registry.Claim(ticket.PairCode, "route-qa", installID, nodeToken); e != nil {
 		t.Fatal(e)
 	}
-	profile, e := s.business.CreateInbound(ctx, key, business.InboundInput{ID: 7612, Name: "Disposable active route", Transport: "tcp", RealityTarget: target.Listener.Addr().String(), ServerNames: []string{"one.example.org"}, ShortIDs: []string{"aa11"}})
-	if e != nil {
-		t.Fatal(e)
+	profileInput := business.InboundInput{ID: 7612, Name: "Disposable active route", Transport: "tcp", RealityTarget: target.Listener.Addr().String(), ServerNames: []string{"one.example.org"}, ShortIDs: []string{"aa11"}}
+	var profile business.NativeInbound
+	var savedPlan business.NativeInboundPlanReceipt
+	if promotionMode {
+		savedPlan = saveMeteredTrafficCreationPlan(t, s, profileInput, portA)
+		profile = savedPlan.Plan.Profile
+	} else {
+		profile, e = s.business.CreateInbound(ctx, key, profileInput)
+		if e != nil {
+			t.Fatal(e)
+		}
 	}
+	inboundRevision := profile.Revision
 	var customers []business.Client
 	for _, id := range []string{"metered-route-qa", "metered-route-idle"} {
 		c, e := s.business.CreateClient(ctx, business.NewClient{ClientID: id, EventID: "active-hub-create-" + id, RepresentativeID: "owner", Name: id, DurationDays: 30, VolumeBytes: 128 << 20})
@@ -151,15 +161,22 @@ func testMeteredRouteActiveTraffic(t *testing.T, binary, pin, mode string) {
 		}
 		customers = append(customers, c)
 	}
-	if e = s.business.BindInboundClients(ctx, 7612, []string{customers[0].ID, customers[1].ID}, true); e != nil {
-		t.Fatal(e)
-	}
-	if e = s.business.PutInboundTarget(ctx, business.InboundTarget{InboundID: 7612, NodeID: "route-qa", InstallationID: installID, ListenIP: "127.0.0.1", DirectPort: portA}); e != nil {
-		t.Fatal(e)
-	}
-	meteredRouteAPIDraft(t, s, key, 0, portA)
-	if e = s.EnableMeteredRouteTransactions("route-qa", installID, pin); e != nil {
-		t.Fatal(e)
+	if promotionMode {
+		if e = s.EnableMeteredRouteNodesForPlanPromotion([]business.MeteredRouteNode{{NodeID: "route-qa", InstallationID: installID, BinarySHA: pin}}); e != nil {
+			t.Fatal("reserve empty promotion channel", e)
+		}
+		assertClosed()
+	} else {
+		if e = s.business.BindInboundClients(ctx, 7612, []string{customers[0].ID, customers[1].ID}, true); e != nil {
+			t.Fatal(e)
+		}
+		if e = s.business.PutInboundTarget(ctx, business.InboundTarget{InboundID: 7612, NodeID: "route-qa", InstallationID: installID, ListenIP: "127.0.0.1", DirectPort: portA}); e != nil {
+			t.Fatal(e)
+		}
+		meteredRouteAPIDraft(t, s, key, 0, portA)
+		if e = s.EnableMeteredRouteTransactions("route-qa", installID, pin); e != nil {
+			t.Fatal(e)
+		}
 	}
 	principal := usageledger.Principal{NodeID: "route-qa", InstallationID: installID}
 	var mu sync.Mutex
@@ -312,11 +329,29 @@ func testMeteredRouteActiveTraffic(t *testing.T, binary, pin, mode string) {
 		}
 	}
 	cookie, csrf := browserLogin(t, s, ownerUsername, ownerPassword)
+	if promotionMode {
+		// Promotion consumes a genuine signed Agent observation from a fresh
+		// runtime. Saving the plan or reserving a channel cannot invent it.
+		syncNow()
+		status := runtime.Status()
+		if status.Usage == nil || *status.Usage != (mx.MeteredCondition{}) || status.Observed.ProcessReady || births.Load() != 0 {
+			t.Fatal("promotion did not begin from an authenticated empty runtime")
+		}
+		inboundRevision = promoteMeteredTrafficCreationPlan(t, s, savedPlan, customers, cookie, csrf)
+		assertClosed()
+		if runtime.Status().Observed.ProcessReady || births.Load() != 0 {
+			t.Fatal("promotion opened a listener before Stage and Apply")
+		}
+	}
 	base := "/api/v1/workspace/native-nodes/route-qa/metered-route-transactions"
 	enqueue := func(n int, action, stage string, revision uint64) business.MeteredRouteCommandView {
 		t.Helper()
 		syncNow()
-		w := browserRequest(t, s.Handler(), "POST", base, meteredRouteOwnerRequest(runtime.Status(), n, action, stage, revision), cookie, csrf, "https://"+browserHost)
+		request := meteredRouteOwnerRequest(runtime.Status(), n, action, stage, revision)
+		for i := range request.Drafts {
+			request.Drafts[i].InboundRevision = inboundRevision
+		}
+		w := browserRequest(t, s.Handler(), "POST", base, request, cookie, csrf, "https://"+browserHost)
 		if w.Code != 202 {
 			t.Fatalf("owner %s HTTP %d: %s", action, w.Code, w.Body.String())
 		}
@@ -415,9 +450,9 @@ func testMeteredRouteActiveTraffic(t *testing.T, binary, pin, mode string) {
 	assertClosed()
 	apply1 := enqueue(2, "apply", stage1.ID, 0)
 	loseBefore.Store(mode == "lost-ack-before")
-	loseAfter.Store(mode == "lost-ack-after")
+	loseAfter.Store(mode == "lost-ack-after" || promotionMode)
 	e = runtime.SyncMeteredTransaction(ctx, client, endpoint)
-	if (mode == "lost-ack-before" || mode == "lost-ack-after") != (e != nil) {
+	if (mode == "lost-ack-before" || mode == "lost-ack-after" || promotionMode) != (e != nil) {
 		t.Fatal("initial Apply response-loss contract", e)
 	}
 	epoch1 := runtime.Status().Usage.EpochID
@@ -431,9 +466,11 @@ func testMeteredRouteActiveTraffic(t *testing.T, binary, pin, mode string) {
 		t.Fatal("lost ACK replay restarted or registered again")
 	}
 	stream1.flowing(t)
-	if mode == "drain" {
-		if _, err := s.business.SetClientState(ctx, business.SetClientState{EventID: "revoke-before-owner-drain", ClientID: customers[0].ID, Action: "disable", Reason: "Stop must still settle a revoked user's real traffic"}); err != nil {
-			t.Fatal(err)
+	if mode == "drain" || promotionMode {
+		if !promotionMode {
+			if _, err := s.business.SetClientState(ctx, business.SetClientState{EventID: "revoke-before-owner-drain", ClientID: customers[0].ID, Action: "disable", Reason: "Stop must still settle a revoked user's real traffic"}); err != nil {
+				t.Fatal(err)
+			}
 		}
 		drain := enqueue(3, "drain", stage1.ID, 0)
 		loseAfter.Store(true)
@@ -462,6 +499,12 @@ func testMeteredRouteActiveTraffic(t *testing.T, binary, pin, mode string) {
 			t.Fatal("drain replay after restart changed receipt or resumed traffic")
 		}
 		assertAccounting(epoch1)
+		if promotionMode {
+			if ack.Observed.DataPlaneVerified || ack.Observed.SubscriptionPublished {
+				t.Fatal("promotion execution claimed health or subscription publication")
+			}
+			t.Log("PLAN_PROMOTION_ACTIVE_PASS: saved owner plan and reviewed promotion; zero receipt before listener; real customer traffic and idle zero; exact final settlement; Apply and Drain ACK replay without a duplicate birth, debit or resumed listener")
+		}
 		return
 	}
 	if mode == "interrupted" {

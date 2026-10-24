@@ -65,26 +65,28 @@ type NativeInboundPlanInput struct {
 }
 
 type NativeInboundPlan struct {
-	Profile         NativeInbound           `json:"profile"`
-	Nodes           []NativeInboundPlanNode `json:"nodes"`
-	PlanRevision    uint64                  `json:"plan_revision"`
-	InboundRevision uint64                  `json:"inbound_revision"`
-	Status          string                  `json:"status"`
-	LastEventID     string                  `json:"last_event_id"`
-	Reason          string                  `json:"reason"`
-	CreatedUnix     int64                   `json:"created_unix"`
-	UpdatedUnix     int64                   `json:"updated_unix"`
-	RuntimeApply    bool                    `json:"runtime_apply"`
-	Editable        bool                    `json:"editable"`
-	EditBlocker     string                  `json:"edit_blocker,omitempty"`
+	Profile         NativeInbound                      `json:"profile"`
+	Nodes           []NativeInboundPlanNode            `json:"nodes"`
+	PlanRevision    uint64                             `json:"plan_revision"`
+	InboundRevision uint64                             `json:"inbound_revision"`
+	Status          string                             `json:"status"`
+	LastEventID     string                             `json:"last_event_id"`
+	Reason          string                             `json:"reason"`
+	CreatedUnix     int64                              `json:"created_unix"`
+	UpdatedUnix     int64                              `json:"updated_unix"`
+	RuntimeApply    bool                               `json:"runtime_apply"`
+	Editable        bool                               `json:"editable"`
+	EditBlocker     string                             `json:"edit_blocker,omitempty"`
+	Promotion       *NativeInboundPlanPromotionReceipt `json:"promotion,omitempty"`
 }
 
 type NativeInboundPlanSummary struct {
-	InboundID       uint64   `json:"inbound_id"`
-	PlanRevision    uint64   `json:"plan_revision"`
-	InboundRevision uint64   `json:"inbound_revision"`
-	Status          string   `json:"status"`
-	NodeIDs         []string `json:"node_ids"`
+	InboundID       uint64                             `json:"inbound_id"`
+	PlanRevision    uint64                             `json:"plan_revision"`
+	InboundRevision uint64                             `json:"inbound_revision"`
+	Status          string                             `json:"status"`
+	NodeIDs         []string                           `json:"node_ids"`
+	Promotion       *NativeInboundPlanPromotionReceipt `json:"promotion,omitempty"`
 }
 
 type NativeInboundPlanReceipt struct {
@@ -575,7 +577,7 @@ func readNativeInboundPlan(ctx context.Context, q inboundReader, key []byte, id 
 	}
 	if out.Profile.ID != id || out.PlanRevision != revision || out.InboundRevision != inboundRevision || out.Profile.Revision != inboundRevision ||
 		out.Status != status || out.LastEventID != event || out.CreatedUnix != created || out.UpdatedUnix != updated ||
-		out.Profile.Enabled || out.Profile.Archived || out.Profile.BoundClients != 0 || out.RuntimeApply || !out.Editable {
+		out.Profile.Enabled || out.Profile.Archived || out.Profile.BoundClients != 0 || out.RuntimeApply || !out.Editable || out.Promotion != nil {
 		return NativeInboundPlan{}, ErrUnavailable
 	}
 	return out, nil
@@ -585,7 +587,12 @@ func (s *Store) ListNativeInboundPlans(ctx context.Context, key []byte) ([]Nativ
 	if len(key) != 32 {
 		return nil, ErrUnavailable
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT inbound_id,revision,inbound_revision,status,payload_enc FROM native_inbound_plans ORDER BY inbound_id LIMIT 257`)
+	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	rows, err := tx.QueryContext(ctx, `SELECT inbound_id,revision,inbound_revision,status,payload_enc FROM native_inbound_plans ORDER BY inbound_id LIMIT 257`)
 	if err != nil {
 		return nil, err
 	}
@@ -603,7 +610,7 @@ func (s *Store) ListNativeInboundPlans(ctx context.Context, key []byte) ([]Nativ
 		}
 		if plan.Profile.ID != p.InboundID || plan.PlanRevision != p.PlanRevision || plan.InboundRevision != p.InboundRevision ||
 			plan.Profile.Revision != p.InboundRevision || plan.Status != p.Status || plan.Profile.Enabled || plan.Profile.Archived ||
-			plan.Profile.BoundClients != 0 || plan.RuntimeApply || !plan.Editable || len(plan.Nodes) == 0 || len(plan.Nodes) > MaxNativeInboundPlanNodes {
+			plan.Profile.BoundClients != 0 || plan.RuntimeApply || !plan.Editable || plan.Promotion != nil || len(plan.Nodes) == 0 || len(plan.Nodes) > MaxNativeInboundPlanNodes {
 			return nil, ErrUnavailable
 		}
 		// Include relay-only participants, but expose no addresses, keys or
@@ -628,7 +635,19 @@ func (s *Store) ListNativeInboundPlans(ctx context.Context, key []byte) ([]Nativ
 	if len(out) > 256 {
 		return nil, ErrInvalid
 	}
-	return out, rows.Err()
+	if err = rows.Err(); err != nil {
+		return nil, err
+	}
+	if err = rows.Close(); err != nil {
+		return nil, err
+	}
+	for i := range out {
+		out[i].Promotion, _, err = readNativeInboundPromotion(ctx, tx, key, out[i].InboundID)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
 }
 
 func (s *Store) NativeInboundPlan(ctx context.Context, key []byte, id uint64) (NativeInboundPlan, error) {
@@ -643,6 +662,12 @@ func (s *Store) NativeInboundPlan(ctx context.Context, key []byte, id uint64) (N
 	p, err := readNativeInboundPlan(ctx, tx, key, id)
 	if err != nil {
 		return p, err
+	}
+	if receipt, _, e := readNativeInboundPromotion(ctx, tx, key, id); e != nil {
+		return p, e
+	} else if receipt != nil {
+		p.Promotion, p.Editable, p.EditBlocker = receipt, false, "plan_promoted"
+		return p, nil
 	}
 	if _, _, err = editablePlanProfile(ctx, tx, key, p); err != nil {
 		if !errors.Is(err, ErrConflict) {

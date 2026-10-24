@@ -14,7 +14,9 @@ import { transportLabel } from "./inboundNetworkOptions";
 import { TLSCertificateSummary } from "./InboundTLSCredentials";
 import InboundProfileForm, { type InboundProfileFormHandle, type InboundProfileValue } from "./InboundProfileForm";
 import InboundCreation from "./InboundCreation";
-import { creationNodeName, type CreationCapabilities, type CreationPlan, type CreationPlanResponse } from "./InboundCreationModel";
+import InboundPlanExecution from "./InboundPlanExecution";
+import { readPromotionReceipt, type PromotionReceipt, type PromotionIssue } from "./inboundPlanExecution";
+import { creationNodeName, type CreationCapabilities, type CreationPlan, type CreationPlanResponse, type CreationIssue } from "./InboundCreationModel";
 import { navigateURL, registerNavigationGuard } from "./navigation";
 import type { Inbound, InboundOverview as Overview, InboundStatus as Status } from "./inboundTypes";
 import { useEffect, useRef, useState, type FormEvent, type ReactNode, type KeyboardEvent } from "react";
@@ -62,6 +64,7 @@ const workspaceWords = {
   nextSetup: "After saving, continue to Node and route setup. No listener is activated by creating the profile.", directEnabled: "Direct listener", swapEnabled: "Dark Swap destination listener", listenerHelp: "Choose the connections this Node should receive.", portRange: "Use separate ports from 1024 to 65535. Panel and Agent ports are reserved.", reservedPort: "2087, 8443 and 24443 are reserved. Choose another port.",
   unavailableTitle: "Inbound management is unavailable on this server version", unavailableHelp: "The server did not provide the Inbound management API. Update the PRO installation to use this editor.", legacyPreview: "Open the older route preview (experimental)",
   setupTitle: "Saved Inbound setup", setupHelp: "The complete profile and Node routes are saved and awaiting separate activation.", setupChanged: "The profile or assignments changed after this setup was saved. Open it to review the recorded configuration.", setupOpen: "Open saved setup", setupSaved: "The complete Inbound setup was saved paused. No listener or subscription was activated.", setupWaiting: "Some paths are waiting for Hosts.", setupUnavailable: "Setup capabilities could not be verified. Refresh before creating an Inbound.", setupClients: "This setup is paused. Client delivery follows separate activation.",
+  prepared: "Prepared for LAB", preparedHelp: "The saved plan was prepared for metered LAB execution. Its original configuration remains read-only; current execution evidence is shown in Overview.", preparedClients: "These clients were bound by the reviewed preparation. Runtime execution and subscription delivery remain separate.", preparedBindings: "Prepared client bindings",
  },
  fa: {
   overview: "خلاصه", routes: "مسیرها", clients: "کلاینت‌ها", activity: "تاریخچه", diagnostics: "عیب‌یابی", back: "بازگشت به اینباندها", cancel: "انصراف", close: "بستن",
@@ -76,6 +79,7 @@ const workspaceWords = {
   nextSetup: "پس از ذخیره، وارد تنظیم نود و مسیر می‌شوی. ساخت پروفایل به‌تنهایی پورتی را فعال نمی‌کند.", directEnabled: "اتصال مستقیم", swapEnabled: "دریافت دارک‌سواپ", listenerHelp: "مشخص کن این نود کدام اتصال‌ها را دریافت کند.", portRange: "پورت‌های جدا از ۱۰۲۴ تا ۶۵۵۳۵ انتخاب کن؛ پورت پنل و Agent رزرو است.", reservedPort: "پورت‌های ۲۰۸۷، ۸۴۴۳ و ۲۴۴۴۳ رزرو هستند. پورت دیگری انتخاب کن.",
   unavailableTitle: "مدیریت اینباند در این نسخهٔ سرور در دسترس نیست", unavailableHelp: "سرور، رابط مدیریت اینباند را ارائه نکرد. برای استفاده از این ویرایشگر، نسخهٔ نصب‌شدهٔ PRO باید به‌روز شود.", legacyPreview: "بازکردن پیش‌نمایش قدیمی مسیر (آزمایشی)",
   setupTitle: "تنظیمات ذخیره‌شدهٔ اینباند", setupHelp: "پروفایل کامل و مسیرهای نودها ذخیره شده و منتظر فعال‌سازی جداگانه است.", setupChanged: "پروفایل یا اختصاص نودها پس از ذخیرهٔ این تنظیمات تغییر کرده؛ برای بازبینی پیکربندی ثبت‌شده آن را باز کن.", setupOpen: "بازکردن تنظیمات ذخیره‌شده", setupSaved: "تنظیمات کامل اینباند به‌صورت غیرفعال ذخیره شد؛ پورت یا اشتراکی فعال نشد.", setupWaiting: "بعضی مسیرها در انتظار هاست هستند.", setupUnavailable: "قابلیت ساخت یکپارچه تأیید نشد؛ پیش از ساخت اینباند دوباره به‌روزرسانی کن.", setupClients: "این تنظیمات غیرفعال است؛ تحویل سرویس به کلاینت پس از فعال‌سازی جداگانه انجام می‌شود.",
+  prepared: "آماده‌شده برای LAB", preparedHelp: "طرح ذخیره‌شده برای اجرای متری LAB آماده شده است. پیکربندی اصلی فقط‌خواندنی می‌ماند؛ شواهد اجرای فعلی را در خلاصه ببین.", preparedClients: "این کلاینت‌ها در آماده‌سازی بررسی‌شده متصل شده‌اند. اجرای فرآیند و تحویل اشتراک جداگانه است.", preparedBindings: "اتصال‌های آماده‌شدهٔ کلاینت",
  },
 } as const;
 type DetailTab = "overview" | "routes" | "clients" | "activity";
@@ -109,13 +113,14 @@ export default function NativeInbounds({ language, fallback, workspace = "inboun
  const [setupCapabilities, setSetupCapabilities] = useState<CreationCapabilities | null>(null);
  const [setupPhase, setSetupPhase] = useState<"loading" | "available" | "legacy" | "error">("loading");
  const [setupSnapshot, setSetupSnapshot] = useState<string | null>(null);
- const [setupEditor, setSetupEditor] = useState<{ source?: Inbound; plan?: CreationPlan; referencesCurrent?: boolean } | null>(null);
+ const [setupEditor, setSetupEditor] = useState<{ source?: Inbound; plan?: CreationPlan; initialIssue?: CreationIssue; referencesCurrent?: boolean } | null>(null);
  const [setupDirty, setSetupDirty] = useState(false); const [setupBusy, setSetupBusy] = useState(false);
+ const [executionDirty, setExecutionDirty] = useState(false); const [executionBusy, setExecutionBusy] = useState(false);
  const setupLoad = useRef(0);
  const lifetime = useRef<AbortController | null>(null); const tabElements = useRef<(HTMLButtonElement | null)[]>([]);
  const createValue: InboundProfileValue = { name, transport, grpcService: service, realityTarget: target, serverNames: sni, options: profileOptions };
  const createDirty = creating && JSON.stringify(createValue) !== createInitial.current;
- const dirty = profileDirty || routeDirty || createDirty || setupDirty;
+ const dirty = profileDirty || routeDirty || createDirty || setupDirty || executionDirty;
  const inboundFingerprint = data?.inbounds.map(inbound => inbound.id + ":" + inbound.revision).sort().join("|") ?? "";
  const setupStatusReady = setupPhase === "legacy" || setupPhase === "available" && setupSnapshot === inboundFingerprint;
  useEffect(() => { const c = new AbortController(); lifetime.current = c; const timer = setInterval(() => setTick(Date.now()), 1000); return () => { c.abort(); clearInterval(timer); }; }, []);
@@ -127,11 +132,11 @@ export default function NativeInbounds({ language, fallback, workspace = "inboun
  useEffect(() => registerNavigationGuard(destination => {
   const destinationID = Number(destination.searchParams.get("inbound"));
   const sameDetail = destination.pathname === "/" + workspace && destinationID === chosen;
-  return skipNavigationGuard.current || !setupBusy && (!dirty || (sameDetail && !createDirty && !setupDirty) || window.confirm(u.unsaved));
- }), [dirty, createDirty, setupDirty, setupBusy, chosen, workspace, u.unsaved]);
+  return skipNavigationGuard.current || !setupBusy && !executionBusy && (!dirty || (sameDetail && !createDirty && !setupDirty) || window.confirm(u.unsaved));
+ }), [dirty, createDirty, setupDirty, setupBusy, executionBusy, chosen, workspace, u.unsaved]);
  function applyView(id: number, nextTab: DetailTab) {
   if (id !== chosen) {
-   setProfileDirty(false); setRouteDirty(false); setVisited([nextTab]); setChecked([]); setBound([]); setClientsReady(false);
+   setProfileDirty(false); setRouteDirty(false); setExecutionDirty(false); setVisited([nextTab]); setChecked([]); setBound([]); setClientsReady(false);
    setOffset(0); setSearch(""); setNotice(""); setCreating(false); setTargetOpen(false); setSetupEditor(null); setSetupDirty(false); setupLoad.current++;
   } else setVisited(old => old.includes(nextTab) ? old : [...old, nextTab]);
   setChosen(id); setTab(nextTab);
@@ -182,6 +187,10 @@ export default function NativeInbounds({ language, fallback, workspace = "inboun
    if (!result || result.available !== true || ![1, 2, 3].includes(result.version) || result.runtime_apply !== false || !Array.isArray(result.plans) || !Array.isArray(result.transports) || !result.transports.includes("tcp") || !result.protocols?.includes("vless") || !result.securities?.includes("reality")) throw new Error("invalid_setup_capability");
    assertPublicInboundData(result);
    if (result.plans.some(plan => plan.node_ids !== undefined && (!Array.isArray(plan.node_ids) || !plan.node_ids.length || plan.node_ids.length > 128 || new Set(plan.node_ids).size !== plan.node_ids.length || plan.node_ids.some(id => typeof id !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(id))))) throw new Error("invalid_setup_nodes");
+   for (const plan of result.plans) {
+    if (plan.promotion) { const receipt = readPromotionReceipt(plan.promotion, plan.inbound_id); if (receipt.plan_revision !== plan.plan_revision || receipt.source_inbound_revision !== plan.inbound_revision || !plan.node_ids?.includes(receipt.node_id)) throw new Error("invalid_setup_promotion"); }
+    else if (plan.status === "PROMOTED") throw new Error("missing_setup_promotion");
+   }
    setSetupCapabilities(result); setSetupPhase("available"); setSetupSnapshot(inboundFingerprint);
   }).catch(error => {
    if (controller.signal.aborted) return;
@@ -234,6 +243,7 @@ export default function NativeInbounds({ language, fallback, workspace = "inboun
   finally { if (!controller.signal.aborted) setBusy(false); }
  }
  function openCreate(source?: Inbound) {
+  if (executionBusy) return;
   if (!setupStatusReady) { setNotice(u.setupUnavailable); return; }
   if (dirty) {
    if (!window.confirm(u.unsaved)) return;
@@ -249,8 +259,8 @@ export default function NativeInbounds({ language, fallback, workspace = "inboun
   createInitial.current = JSON.stringify({ name: source ? source.name.slice(0, 128 - suffix.length) + suffix : "", transport: source?.transport ?? "tcp", grpcService: source?.grpc_service ?? "", realityTarget: source?.reality_target ?? "", serverNames: source?.server_names.join(", ") ?? "", options: profileOptionsDraft(source?.options) });
   setFormChecked(false); setNotice("");
  }
- async function openSetupPlan() {
-  if (!chosen || busy || setupBusy) return;
+ async function openSetupPlan(issue?: PromotionIssue) {
+  if (!chosen || busy || setupBusy || executionBusy) return;
   if ((profileDirty || routeDirty) && !window.confirm(u.unsaved)) return;
   const controller = lifetime.current; if (!controller || controller.signal.aborted) return;
   const generation = ++setupLoad.current, id = chosen;
@@ -261,7 +271,23 @@ export default function NativeInbounds({ language, fallback, workspace = "inboun
    if (!result?.plan || result.plan.profile?.id !== id || result.plan.runtime_apply !== false || !Array.isArray(result.plan.nodes) || typeof result.plan.editable !== "boolean" || typeof result.references_current !== "boolean") throw new Error("invalid_setup_plan");
    if (profileSecurity(result.plan.profile.security) === "tls") canonicalTLSMetadata(result.plan.profile.tls);
    else if (result.plan.profile.tls !== undefined) throw new Error("unexpected_tls_metadata");
-   if (!controller.signal.aborted && generation === setupLoad.current) { setProfileDirty(false); setRouteDirty(false); setEditorEpoch(value => value + 1); setSetupEditor({ plan: result.plan, referencesCurrent: result.references_current }); }
+   if (result.plan.promotion) {
+    const promotion = readPromotionReceipt(result.plan.promotion, id);
+    if (result.plan.editable || promotion.plan_revision !== result.plan.plan_revision || promotion.source_inbound_revision !== result.plan.inbound_revision) throw new Error("invalid_promoted_plan");
+   }
+   let initialIssue: CreationIssue | undefined;
+   if (issue && result.plan.editable) {
+    const fields: Record<string, string> = { "profile.transport": "transport", "profile.security": "security", nodes: "nodes", listen_ip: "listenIP", direct_port: "directPort", direct_hosts: "directHosts", direct_endpoints: "directEndpoints", tunnel_endpoints: "tunnelEndpoints", tunnel_port: "tunnelEnabled" };
+    let field = fields[issue.field];
+    if (issue.field === "profile.options") {
+     const options = result.plan.profile.options;
+     field = options?.sniffing ? "sniffing.enabled" : options?.fallbacks?.length ? "fallbacks" : options?.client ? "clientFingerprint" : "realityMaxTimeDiff";
+    }
+    const nodeID = issue.node_id ?? (field && !issue.field.startsWith("profile") && issue.field !== "nodes" ? result.plan.nodes[0]?.node_id : undefined);
+    if (issue.code === "promotion_direct_only" && !result.plan.nodes.find(node => node.node_id === nodeID)?.tunnel_port) field = "swapEnabled";
+    if (field) initialIssue = { field, nodeID, code: issue.code };
+   }
+   if (!controller.signal.aborted && generation === setupLoad.current) { setProfileDirty(false); setRouteDirty(false); setEditorEpoch(value => value + 1); setSetupEditor({ plan: result.plan, initialIssue, referencesCurrent: result.references_current }); }
   } catch (error) { if (!controller.signal.aborted && generation === setupLoad.current) { setNotice(t.error); if (error instanceof Fault && error.status === 401) expire(); } }
   finally { if (!controller.signal.aborted) setBusy(false); }
  }
@@ -272,6 +298,11 @@ export default function NativeInbounds({ language, fallback, workspace = "inboun
   setSetupCapabilities(previous => previous ? { ...previous, plans: [...previous.plans.filter(item => item.inbound_id !== plan.profile.id), { inbound_id: plan.profile.id, plan_revision: plan.plan_revision, inbound_revision: plan.inbound_revision, status: plan.status, node_ids: plannedNodeIDs }] } : previous);
   skipNavigationGuard.current = true; navigateDetail(plan.profile.id, "overview"); skipNavigationGuard.current = false;
   setNotice(u.setupSaved); setRefresh(value => value + 1);
+ }
+ function preparedSetup(receipt: PromotionReceipt) {
+  setExecutionDirty(false);
+  setSetupCapabilities(previous => previous ? { ...previous, plans: previous.plans.map(plan => plan.inbound_id === receipt.inbound_id ? { ...plan, promotion: receipt } : plan) } : previous);
+  setRefresh(value => value + 1);
  }
  function changeCreate(value: InboundProfileValue) { setName(value.name); setTransport(value.transport); setService(value.grpcService); setTarget(value.realityTarget); setSni(value.serverNames); setProfileOptions(value.options ?? profileOptionsDraft()); setFormChecked(false); }
  function closeCreate() { if (!busy && (!createDirty || window.confirm(u.unsaved))) setCreating(false); }
@@ -306,6 +337,7 @@ export default function NativeInbounds({ language, fallback, workspace = "inboun
  }
  const current = data?.inbounds.find(i => i.id === chosen); const assigned = data?.targets.filter(item => item.inbound_id === chosen) ?? [];
  const setupSummary = setupCapabilities?.plans.find(plan => plan.inbound_id === chosen);
+ const promotion = setupSummary?.promotion;
  const setupUnchanged = !!setupSummary && !!current && !current.enabled && !current.archived && current.bound_clients === 0 && assigned.length === 0 && current.revision === setupSummary.inbound_revision;
  if (disabled) return <section className="native-workspace inbound-capability-missing"><div className="native-card"><Server size={24}/><h2>{u.unavailableTitle}</h2><p>{u.unavailableHelp}</p><button type="button" onClick={() => setRefresh(n => n + 1)}><RefreshCw size={16}/>{t.retry}</button></div><details><summary>{u.legacyPreview}</summary>{fallback}</details></section>;
  return <section className="native-workspace" aria-label="Native Inbounds">
@@ -322,17 +354,19 @@ export default function NativeInbounds({ language, fallback, workspace = "inboun
     onOpen={item => navigateDetail(item.id, swapWorkspace ? "routes" : "overview")} onCreate={openCreate}/></div>
    {chosen > 0 && <>
     <div className="inbound-detail-heading"><button type="button" className="inbound-back" onClick={() => navigateDetail(0, "overview")}><ChevronLeft size={17}/>{u.back}</button>
-     {current && <div><div><h2 tabIndex={-1} data-workspace-focus>{current.name}</h2><bdi dir="ltr">#{current.id}</bdi></div><button type="button" disabled={busy || stale || !setupStatusReady} onClick={() => openCreate(current)}><Copy size={16}/>{u.copy}</button></div>}
+     {current && <div><div><h2 tabIndex={-1} data-workspace-focus>{current.name}</h2><bdi dir="ltr">#{current.id}</bdi></div><button type="button" disabled={busy || executionBusy || stale || !setupStatusReady} onClick={() => openCreate(current)}><Copy size={16}/>{u.copy}</button></div>}
     </div>
     {!current ? <p className="native-warning">{u.missing}</p> : <>
      <nav className="inbound-detail-tabs" role="tablist" aria-label="Inbound sections">{tabs.map((item, index) => <button key={item} ref={element => { tabElements.current[index] = element; }} role="tab" id={"inbound-tab-" + item} aria-controls={"inbound-panel-" + item} aria-selected={tab === item} tabIndex={tab === item ? 0 : -1} onKeyDown={event => tabKey(event, index)} onClick={() => switchTab(item)}>{u[item]}</button>)}</nav>
-     {setupSummary && (tab === "overview" || tab === "routes") && <section className="native-card creation-saved-plan"><ShieldCheck size={21}/><div><h3>{u.setupTitle}</h3><p>{setupUnchanged ? u.setupHelp : u.setupChanged}</p>{setupSummary.node_ids && <p data-planned-nodes>{u.plannedNodes}: {setupSummary.node_ids.map(id => creationNodeName(data.nodes, id)).join(" · ")}</p>}{setupSummary.status === "WAITING_HOST" && <p className="creation-waiting">{u.setupWaiting}</p>}</div><button type="button" disabled={busy || setupBusy} onClick={() => void openSetupPlan()}>{u.setupOpen}</button></section>}
+     {setupSummary && (tab === "overview" || tab === "routes") && <section className="native-card creation-saved-plan"><ShieldCheck size={21}/><div><h3>{u.setupTitle}</h3><p>{promotion ? u.preparedHelp : setupUnchanged ? u.setupHelp : u.setupChanged}</p>{setupSummary.node_ids && <p data-planned-nodes>{u.plannedNodes}: {setupSummary.node_ids.map(id => creationNodeName(data.nodes, id)).join(" · ")}</p>}{!promotion && setupSummary.status === "WAITING_HOST" && <p className="creation-waiting">{u.setupWaiting}</p>}</div><button type="button" disabled={busy || setupBusy || executionBusy} onClick={() => void openSetupPlan()}>{u.setupOpen}</button></section>}
      <section hidden={tab !== "overview"} role="tabpanel" id="inbound-panel-overview" aria-labelledby="inbound-tab-overview" className="inbound-detail-panel">
       {visited.includes("overview") && <>
-       <div className="inbound-summary"><div data-node-summary><span>{setupSummary ? u.plannedNodes : u.nodeCount}</span><strong>{setupSummary ? setupSummary.node_ids?.length ?? "—" : assigned.length}</strong>{setupSummary && <small>{u.nodeCount}: {assigned.length}</small>}</div><div><span>{u.clientCount}</span><strong>{current.bound_clients}</strong></div><div><span>{u.profile}</span><strong>{current.archived ? t.archivedLabel : current.enabled ? t.enabledLabel : t.disabledLabel}</strong></div></div>
+       <div className="inbound-summary"><div data-node-summary><span>{setupSummary ? u.plannedNodes : u.nodeCount}</span><strong>{setupSummary ? setupSummary.node_ids?.length ?? "—" : assigned.length}</strong>{setupSummary && <small>{u.nodeCount}: {assigned.length}</small>}</div><div><span>{u.clientCount}</span><strong>{current.bound_clients}</strong></div><div><span>{u.profile}</span><strong>{current.archived ? t.archivedLabel : promotion ? u.prepared : current.enabled ? t.enabledLabel : t.disabledLabel}</strong></div></div>
        <dl className="inbound-profile-facts"><div><dt>{t.transport}</dt><dd><bdi dir="ltr">{transportLabel(current.transport)} / {current.security === "tls" ? "TLS" : "REALITY"}</bdi></dd></div>{current.security !== "tls" && <div><dt>{t.dest}</dt><dd><bdi dir="ltr">{current.reality_target}</bdi></dd></div>}<div><dt>{t.sni}</dt><dd><bdi dir="ltr">{current.server_names.join(", ")}</bdi></dd></div></dl>
        {current.security === "tls" && current.tls && <details className="native-card"><summary>{language === "fa" ? "گواهی TLS ذخیره‌شده" : "Saved TLS certificate"}</summary><TLSCertificateSummary language={language} metadata={current.tls}/></details>}
-       <InboundLifecycle key={chosen + ":" + editorEpoch + ":" + !!setupSummary} inbound={current} language={language} csrf={session.csrf_token ?? ""} blocked={busy || stale || !setupStatusReady} mode="controls" profileOptionsSupported={setupCapabilities?.profile_options === true} setupOnly={!!setupSummary} onDirtyChange={setProfileDirty} onChanged={() => setRefresh(n => n + 1)}/>
+       {setupSummary && !current.archived && <InboundPlanExecution key={chosen} language={language} summary={setupSummary} nodes={data.nodes} blocked={busy || setupBusy || stale || !setupStatusReady} onPromoted={preparedSetup} onOpenSetup={issue => void openSetupPlan(issue)} onDirtyChange={setExecutionDirty} onBusyChange={setExecutionBusy}/>}
+       {promotion && <NativeMeteredRouteTransactions key={"plan:" + chosen} language={language} context={{ nodeID: promotion.node_id, installationID: promotion.installation_id, inboundID: chosen, inboundRevision: promotion.inbound_revision, draftRevision: promotion.draft_revision }}/>}
+       {!promotion && <InboundLifecycle key={chosen + ":" + editorEpoch + ":" + !!setupSummary} inbound={current} language={language} csrf={session.csrf_token ?? ""} blocked={busy || executionBusy || stale || !setupStatusReady} mode="controls" profileOptionsSupported={setupCapabilities?.profile_options === true} setupOnly={!!setupSummary} onDirtyChange={setProfileDirty} onChanged={() => setRefresh(n => n + 1)}/>}
       </>}
      </section>
      <section hidden={tab !== "routes"} role="tabpanel" id="inbound-panel-routes" aria-labelledby="inbound-tab-routes" className="inbound-detail-panel">
@@ -345,7 +379,7 @@ export default function NativeInbounds({ language, fallback, workspace = "inboun
       </>}
      </section>
      <section hidden={tab !== "clients"} role="tabpanel" id="inbound-panel-clients" aria-labelledby="inbound-tab-clients" className="inbound-detail-panel">
-      {visited.includes("clients") && (setupSummary ? <div className="native-card"><h3><Users size={19}/>{t.members}</h3><p>{setupUnchanged ? u.setupClients : u.setupChanged}</p></div> : <div className="native-card"><h3><Users size={19}/>{t.members}</h3><p>{t.bindingHelp}</p><span className="inbound-result-count">{u.boundCount}: {clientsReady ? bound.length : "—"}</span>
+      {visited.includes("clients") && (setupSummary ? <div className="native-card"><h3><Users size={19}/>{promotion ? u.preparedBindings : t.members}</h3><p>{promotion ? u.preparedClients : setupUnchanged ? u.setupClients : u.setupChanged}</p>{promotion && <ul>{promotion.client_ids.map(id => <li key={id}><bdi>{id}</bdi></li>)}</ul>}</div> : <div className="native-card"><h3><Users size={19}/>{t.members}</h3><p>{t.bindingHelp}</p><span className="inbound-result-count">{u.boundCount}: {clientsReady ? bound.length : "—"}</span>
        <label>{u.searchClients}<input value={search} onChange={event => { setSearch(event.target.value); setOffset(0); setChecked([]); }}/></label>
        {clientsFailure && <p className="native-warning" role="alert">{u.clientsFailed}</p>}
        {!clientsReady && !clientsFailure && <p role="status">{u.loading}</p>}
@@ -360,11 +394,11 @@ export default function NativeInbounds({ language, fallback, workspace = "inboun
    <section id="inbound-diagnostics" hidden={!diagnostics} className="inbound-diagnostics" aria-label="Inbound diagnostics">
     {diagnosticsVisited && <><header><h2>{u.lab}</h2><p>{u.labHelp}</p></header><NativeReadiness preflight={data.preflight} stale={stale} language={language}/>
      <NativeCanary language={language} hasUSA={data.nodes.some(n => n.node_id === "usa-pro-01")} staged={data.inbounds.some(i => i.id === 901617) && data.targets.some(target => target.inbound_id === 901617 && target.node_id === "usa-pro-01") && canaryClientPresent === true} unavailable={busy || stale || canaryClientPresent === null} busy={busy} onStage={() => void mutate("/api/v1/workspace/native-canary/stage", { confirmation: "USA_PRO_LOOPBACK_QA_ONLY" }, () => navigateDetail(901617, "overview"))}/>
-     <NativeRouteTransactions language={language}/><NativeMeteredRouteTransactions language={language}/>
+     <NativeRouteTransactions language={language}/>{!promotion && <NativeMeteredRouteTransactions language={language}/>}
      <div className="native-card"><h3><ArrowRightLeft size={19}/>{t.status}</h3><p>{t.evidence}</p><div className="native-report-list">{data.runtime.map(report => <article key={report.node_id + report.installation_id} className="native-report"><h4>{data.nodes.find(n => n.node_id === report.node_id)?.name ?? report.node_id}</h4><strong className={matching(report) ? "native-confirmed" : "native-pending"}>{statusLabel(report)}</strong><div><span>{t.desired}: {report.desired_sequence || "—"}</span><span>{t.observed}: {report.reported_sequence || "—"}</span></div><p>{t.phase}: {report.phase || "—"}</p><p>{t.last}: {report.reported_at ? new Date(report.reported_at).toLocaleTimeString(language === "fa" ? "fa-IR" : "en-GB") : "—"}</p></article>)}</div></div>
     </>}
    </section>
-   {setupEditor && setupCapabilities && <InboundCreation language={language} nodes={data.nodes} targets={data.targets} capabilities={setupCapabilities} csrf={session.csrf_token ?? ""} blocked={stale || !setupStatusReady} source={setupEditor.source} initialPlan={setupEditor.plan} referencesCurrent={setupEditor.referencesCurrent} onClose={() => setSetupEditor(null)} onSaved={savedSetup} onDirtyChange={setSetupDirty} onBusyChange={setSetupBusy} onUnauthorized={expire}/>}
+   {setupEditor && setupCapabilities && <InboundCreation language={language} nodes={data.nodes} targets={data.targets} capabilities={setupCapabilities} csrf={session.csrf_token ?? ""} blocked={stale || !setupStatusReady} source={setupEditor.source} initialPlan={setupEditor.plan} initialIssue={setupEditor.initialIssue} referencesCurrent={setupEditor.referencesCurrent} onClose={() => setSetupEditor(null)} onSaved={savedSetup} onDirtyChange={setSetupDirty} onBusyChange={setSetupBusy} onUnauthorized={expire}/>}
    <WorkspaceDialog open={creating} title={t.create} subtitle={u.editorLead} variant="inbound-editor" closeLabel={u.close} busy={busy} onClose={closeCreate}><form onSubmit={create} noValidate className="inbound-editor-form">
     <div className="inbound-editor-scroll">
      {copying && <p className="inbound-dialog-note inbound-copy-note">{u.copyHint}</p>}

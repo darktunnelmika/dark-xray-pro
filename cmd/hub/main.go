@@ -229,6 +229,13 @@ func main() {
 	} else if os.Getenv("DARK_PRO_ROUTE_NODE_ID") != "" || os.Getenv("DARK_PRO_ROUTE_INSTALLATION_ID") != "" || os.Getenv("DARK_PRO_ROUTE_XRAY_SHA256") != "" {
 		log.Fatal("route transaction scope supplied without explicit enable switch")
 	}
+	planPromotion := os.Getenv("DARK_PRO_ENABLE_INBOUND_PLAN_PROMOTION")
+	if planPromotion != "" && planPromotion != "0" && planPromotion != "1" {
+		log.Fatal("inbound plan promotion switch must be 0 or 1")
+	}
+	if planPromotion == "1" && os.Getenv("DARK_PRO_ENABLE_METERED_ROUTE_TRANSACTIONS") != "1" {
+		log.Fatal("inbound plan promotion requires explicitly approved metered LAB channels")
+	}
 	if os.Getenv("DARK_PRO_ENABLE_METERED_ROUTE_TRANSACTIONS") == "1" {
 		if os.Getenv("DARK_PRO_LAB_MODE") != "1" || os.Getenv("DARK_PRO_ENABLE_USAGE_LEDGER") != "1" || os.Getenv("DARK_PRO_ENABLE_NATIVE_INBOUNDS") != "1" || *agentListen == "" || os.Getenv("DARK_PRO_ENABLE_REMOTE_AGENT") != "1" {
 			log.Fatal("metered route transactions require isolated PRO LAB, usage ledger and dedicated Agent TLS")
@@ -237,7 +244,12 @@ func main() {
 		if err != nil {
 			log.Fatal("metered route allowlist refused: ", err)
 		}
-		if err := service.EnableMeteredRouteNodes(nodes); err != nil {
+		if planPromotion == "1" {
+			err = service.EnableMeteredRouteNodesForPlanPromotion(nodes)
+		} else {
+			err = service.EnableMeteredRouteNodes(nodes)
+		}
+		if err != nil {
 			log.Fatal("independent metered loopback channel refused: ", err)
 		}
 	} else if os.Getenv("DARK_PRO_METERED_ROUTE_NODE_ID") != "" || os.Getenv("DARK_PRO_METERED_ROUTE_INSTALLATION_ID") != "" || os.Getenv("DARK_PRO_METERED_ROUTE_XRAY_SHA256") != "" || os.Getenv("DARK_PRO_METERED_ROUTE_NODES_JSON") != "" {

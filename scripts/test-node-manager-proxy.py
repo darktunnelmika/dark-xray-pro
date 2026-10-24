@@ -88,8 +88,11 @@ location / {{ return 403; }}
                         assert status == (401 if method == allowed else 403), (path, method, status)
                         assert len(Backend.seen) == before + (method == allowed)
                 metered = "/api/v1/workspace/native-nodes/lab-test_01/metered-route-transactions"
+                promotion = "/api/v1/workspace/native-inbound-plans/8123/promotion"
                 handovers = "/api/v1/workspace/metered-handovers"
-                for path, allowed in (("/api/v1/workspace/metered-route-transactions", {"GET"}),
+                for path, allowed in ((promotion, {"GET", "POST"}),
+                                      (promotion + "/preview", {"POST"}),
+                                      ("/api/v1/workspace/metered-route-transactions", {"GET"}),
                                       (metered, {"GET", "POST"}),
                                       (handovers, {"GET", "POST"}),
                                       (handovers + "/" + "a" * 32, {"GET"}),
@@ -121,6 +124,13 @@ location / {{ return 403; }}
                              "/api/v1/workspace/nodes/a/replacements/" + "a" * 32 + "/activate",
                              "/api/v1/workspace/nodes/a/replacements/" + "a" * 32 + "/cancel/extra",
                              "/api/v1/workspace/metered-route-transactions/enable",
+                             promotion + "/enable", promotion + "/preview/extra",
+                             promotion + "/activate", promotion + "/extra",
+                             "/api/v1/workspace/native-inbound-plans/0/promotion",
+                             "/api/v1/workspace/native-inbound-plans/08123/promotion",
+                             "/api/v1/workspace/native-inbound-plans/-1/promotion",
+                             "/api/v1/workspace/native-inbound-plans/1e3/promotion",
+                             "/api/v1/workspace/native-inbound-plans/10000000000000000/promotion",
                              metered + "/apply", metered + "/abc/abandon",
                              handovers + "/enable", handovers + "/abc/commands",
                              handovers + "/" + "a" * 32 + "/apply",

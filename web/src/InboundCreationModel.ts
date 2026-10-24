@@ -4,6 +4,7 @@ import { canonicalProfileOptions, profileOptionIssues, profileOptionsDraft, prof
 import { canonicalEndpointAddress, endpointAddresses, endpointDraft, endpointIssues, endpointPayload, validEndpointAddress, type EndpointDraft, type InboundEndpoint } from "./inboundEndpointOptions";
 import { validUTF8 } from "./inboundNetworkOptions";
 import type { CreationEndpointPreview } from "./inboundEndpointPreview";
+import type { PromotionReceipt } from "./inboundPlanExecution";
 import { assertPublicInboundData, canonicalTLSMetadata, profileSecurity, tlsCredentialIssues, type InboundSecurity, type TLSCredentials, type TLSMetadata } from "./inboundTLS";
 
 export type CreationPath = { enabled: boolean; port: string; hosts: string; endpoints?: EndpointDraft[]; endpointsPresent?: boolean };
@@ -36,8 +37,9 @@ export type CreationPlanNode = {
 };
 export type CreationPlan = {
   profile: Inbound; nodes: CreationPlanNode[]; plan_revision: number; inbound_revision: number;
-  status: "SAVED_DISABLED" | "WAITING_HOST"; created_unix: number; updated_unix: number; reason: string; runtime_apply: false;
+  status: "SAVED_DISABLED" | "WAITING_HOST" | "PROMOTED"; created_unix: number; updated_unix: number; reason: string; runtime_apply: false;
   last_event_id: string; editable: boolean; edit_blocker?: string;
+  promotion?: PromotionReceipt;
 };
 export type CreationCapabilities = {
   available: true; version: number; max_nodes: number; max_hosts_per_node: number;
@@ -50,7 +52,7 @@ export type CreationCapabilities = {
   profile_tls?: boolean; profile_tls_scope?: "creation_plan"; profile_websocket?: boolean; profile_http_upgrade?: boolean;
   endpoint_options?: boolean; max_endpoints_per_path?: number;
   listener_port_min?: number; listener_port_max?: number; reserved_listener_ports?: number[];
-  plans: Array<{ inbound_id: number; plan_revision: number; inbound_revision: number; status: string; node_ids?: string[] }>;
+  plans: Array<{ inbound_id: number; plan_revision: number; inbound_revision: number; status: string; node_ids?: string[]; promotion?: PromotionReceipt }>;
 };
 export type CreationPayload = {
   event_id: string; expected_plan_revision: number; expected_inbound_revision: number;

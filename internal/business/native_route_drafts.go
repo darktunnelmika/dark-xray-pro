@@ -502,6 +502,9 @@ func (s *Store) SaveNativeRouteDraft(ctx context.Context, master []byte, input N
 	if !errors.Is(err, sql.ErrNoRows) {
 		return empty, err
 	}
+	if err = rejectPromotedInboundMutation(ctx, tx, in.InboundID); err != nil {
+		return empty, err
+	}
 	// Route event IDs also cannot collide with client/credit/representative,
 	// product, lifecycle or other audited operations.
 	for _, table := range []string{"events", "client_operations", "client_profile_edits",

@@ -82,6 +82,7 @@ func TestNativeV6ToV7MigrationPreservesProfileAndBusiness(t *testing.T){
  ctx:=context.Background();s,path:=opened(t);key:=bytes.Repeat([]byte{7},32)
  in,e:=s.CreateInbound(ctx,key,nativeInput());if e!=nil{t.Fatal(e)}
  newRep(t,s,"v7-rep");grant(t,s,"v7-rep","migration-native-v7-1",200,50)
+ removePromotionSchemaForHistoricalFixture(t,s)
  for _,q:=range []string{"DROP TRIGGER native_dirty_profile_update","DROP TRIGGER native_plan_block_enable","DROP TABLE native_inbound_operations","ALTER TABLE native_inbounds DROP COLUMN revision","ALTER TABLE native_inbounds DROP COLUMN archived","ALTER TABLE native_inbounds DROP COLUMN enabled","PRAGMA user_version=6"}{if _,e=s.db.Exec(q);e!=nil{t.Fatal(e)}}
  s.Close();s,e=Open(path);if e!=nil{t.Fatal(e)};defer s.Close()
  kept,e:=s.NativeInbound(ctx,key,10);if e!=nil||kept.PublicKey!=in.PublicKey||!kept.Enabled||kept.Archived||kept.Revision!=1{t.Fatal("migration changed profile",e)}

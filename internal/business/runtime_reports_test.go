@@ -63,6 +63,7 @@ func TestRuntimeReportsRequireActualDeliveryAndBoundEvidence(t *testing.T){
 func TestRuntimeReportV5MigrationPreservesBusinessIdentity(t *testing.T){
  s,path:=opened(t);ctx:=context.Background();newRep(t,s,"report-rep");grant(t,s,"report-rep","grant-report-upgrade1",1000,50)
  c,e:=s.CreateClient(ctx,NewClient{EventID:"new-before-report-v6",ClientID:"before-report",RepresentativeID:"report-rep",Name:"Preserved",DurationDays:30,VolumeBytes:100});if e!=nil{t.Fatal(e)}
+ removePromotionSchemaForHistoricalFixture(t,s)
  rows,e:=s.db.Query("SELECT name FROM sqlite_master WHERE type='trigger' AND name LIKE 'native_dirty_%'");if e!=nil{t.Fatal(e)}
  names:=[]string{};for rows.Next(){var name string;if e=rows.Scan(&name);e!=nil{rows.Close();t.Fatal(e)};names=append(names,name)}
  e=rows.Err();rows.Close();if e!=nil{t.Fatal(e)}

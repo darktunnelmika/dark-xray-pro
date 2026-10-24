@@ -137,6 +137,9 @@ func (s *Store) MutateInbound(ctx context.Context, key []byte, id uint64, m Inbo
 	if !errors.Is(err, sql.ErrNoRows) {
 		return NativeInbound{}, err
 	}
+	if err = rejectPromotedInboundMutation(ctx, tx, id); err != nil {
+		return NativeInbound{}, err
+	}
 	if m.Action == "enable" || m.Action == "edit" {
 		if profile.Security == "tls" || hasInboundTLSAuthoring(profile.Transport, profile.Options) {
 			return NativeInbound{}, ErrInvalid
