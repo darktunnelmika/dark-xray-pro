@@ -1,6 +1,6 @@
 /* One compact, retained setup surface. Colors follow the active Midnight theme. */
 .inbound-creation { display: flex; flex-direction: column; flex: 1; min-height: 0; min-width: 0; overflow: hidden; }
-.inbound-creation .creation-tabs { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 5px; padding: 14px 26px; border-block-end: 1px solid var(--border); flex-shrink: 0; }
+.inbound-creation .creation-tabs { display: grid; grid-template-columns: repeat(8,minmax(110px,1fr)); gap: 5px; padding: 12px 26px; overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: thin; border-block-end: 1px solid var(--border); flex-shrink: 0; }
 .inbound-creation .creation-tabs button { min-height: 43px; min-width: 0; padding: 8px; background: transparent; border-color: transparent; color: var(--sub); gap: 7px; }
 .inbound-creation .creation-tabs button[aria-selected=true] { color: var(--accent); background: var(--accent-wash); border-color: var(--border); font-weight: 650; }
 .creation-tabs button small { margin-inline-start: auto; opacity: .6; font-size: 10px; }
@@ -146,3 +146,20 @@ ul.creation-issues { padding-inline-start: 29px; }
   .creation-saved-plan>button { margin-inline-start: 32px; }
 }
 @media(prefers-reduced-motion:reduce) { .creation-spinner { animation: none; } }
+
+/* Full inbound authoring workspace: stages are horizontally scrollable on phones. */
+.creation-extra-heading { padding: 0 0 15px; }
+.creation-extra-heading h3 { display: flex; align-items: center; gap: 8px; }
+.creation-legacy-features { display: grid; gap: 12px; padding: 16px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-2); min-width: 0; }
+.creation-legacy-features strong { font-size: 12px; }
+.creation-legacy-features p { margin: 0; color: var(--sub); font-size: 11px; line-height: 1.9; }
+.creation-legacy-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 8px; }
+.creation-legacy-option { display: flex; flex-direction: column; gap: 6px; padding: 12px; border: 1px dashed var(--border); border-radius: 10px; color: var(--sub); font-size: 12px; overflow-wrap: anywhere; }
+.creation-legacy-option small { font-size: 10px; opacity: .9; }
+.creation-host-card { display: grid; gap: 12px; border: 1px solid var(--border); padding: 14px; border-radius: 12px; }
+.creation-host-card h4 { margin: 0; font-size: 13px; }
+@media(max-width:620px) {
+ .inbound-creation .creation-tabs { display: flex; gap: 6px; padding: 10px 12px; }
+ .inbound-creation .creation-tabs button { flex: 0 0 auto; min-width: 104px; }
+ .creation-legacy-grid { grid-template-columns: minmax(0,1fr); }
+}
