@@ -112,7 +112,28 @@ task_binary=$(realpath -- "$1") task_pin=$2
 task_repo=$(cd -- "$(dirname -- "$task_script")/../.." && pwd)
 task_go=${DXP_TEST_GO:-go}
 task_directory=$(mktemp -d "${TMPDIR:-/tmp}/darkpro-tun-dns.XXXXXXXX")
-trap 'rm -rf -- "$task_directory"' EXIT
+# The disposable namespace creates root-owned files under this private 0700
+# fixture directory. Cleanup must use the same privilege as the namespace,
+# without changing any host resolver or broadening the removal target.
+task_outer_cleanup() {
+  task_status=$?
+  trap - EXIT
+  case "$task_directory" in
+    "${TMPDIR:-/tmp}/darkpro-tun-dns."*) ;;
+    *) echo 'refusing unexpected TUN/DNS fixture cleanup path' >&2; exit 1 ;;
+  esac
+  if [[ -L $task_directory ]]; then
+    echo 'refusing symlink TUN/DNS fixture cleanup' >&2
+    exit 1
+  fi
+  if [[ $(id -u) == 0 ]]; then
+    rm -rf -- "$task_directory" || task_status=1
+  else
+    sudo --non-interactive rm -rf -- "$task_directory" || task_status=1
+  fi
+  exit "$task_status"
+}
+trap task_outer_cleanup EXIT
 mkdir -p "$task_directory/tools"
 task_resolved=
 for task_candidate in /usr/lib/systemd/systemd-resolved /lib/systemd/systemd-resolved; do
