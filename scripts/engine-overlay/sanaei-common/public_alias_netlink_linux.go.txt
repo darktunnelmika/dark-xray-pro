@@ -1,0 +1,177 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+package darkproadapter
+
+import (
+	"encoding/binary"
+	"errors"
+	"net/netip"
+	"sync/atomic"
+	"syscall"
+	"time"
+
+	"golang.org/x/sys/unix"
+)
+
+// IFA_PROTO is Linux's one-byte address origin attribute (if_addr.h). The
+// dependency's high-level AddrList omits it and IFA_CACHEINFO.cstamp, so retain
+// those exact birth attributes in this bounded, read-only RTM_GETADDR dump.
+const ifaProtocol = 11
+
+type IPv6AliasObservation struct {
+	PrefixLength                     uint8
+	Protocol                         uint8
+	ProtocolPresent, CachePresent    bool
+	Flags                            uint32
+	CreatedTicks                     uint32
+	PreferredLifetime, ValidLifetime uint32
+}
+
+var aliasReadSequence atomic.Uint32
+
+func ReadIPv6Aliases(index uint32) (map[string]IPv6AliasObservation, error) {
+	if index == 0 {
+		return nil, errIPv6Authority
+	}
+	fd, e := unix.Socket(unix.AF_NETLINK, unix.SOCK_RAW|unix.SOCK_CLOEXEC, unix.NETLINK_ROUTE)
+	if e != nil {
+		return nil, e
+	}
+	defer unix.Close(fd)
+	if e = unix.SetsockoptTimeval(fd, unix.SOL_SOCKET, unix.SO_RCVTIMEO, &unix.Timeval{Sec: 1}); e != nil {
+		return nil, e
+	}
+	if e = unix.Bind(fd, &unix.SockaddrNetlink{Family: unix.AF_NETLINK}); e != nil {
+		return nil, e
+	}
+	local, e := unix.Getsockname(fd)
+	if e != nil {
+		return nil, e
+	}
+	bound, ok := local.(*unix.SockaddrNetlink)
+	if !ok {
+		return nil, errIPv6Authority
+	}
+	sequence := aliasReadSequence.Add(1)
+	request := make([]byte, unix.NLMSG_HDRLEN+8)
+	binary.NativeEndian.PutUint32(request, uint32(len(request)))
+	binary.NativeEndian.PutUint16(request[4:], unix.RTM_GETADDR)
+	binary.NativeEndian.PutUint16(request[6:], unix.NLM_F_REQUEST|unix.NLM_F_DUMP)
+	binary.NativeEndian.PutUint32(request[8:], sequence)
+	request[unix.NLMSG_HDRLEN] = unix.AF_INET6
+	binary.NativeEndian.PutUint32(request[unix.NLMSG_HDRLEN+4:], index)
+	if e = unix.Sendto(fd, request, 0, &unix.SockaddrNetlink{Family: unix.AF_NETLINK}); e != nil {
+		return nil, e
+	}
+	out := map[string]IPv6AliasObservation{}
+	buffer := make([]byte, 64<<10)
+	deadline, total := time.Now().Add(time.Second), 0
+	for {
+		if time.Now().After(deadline) || total > 16<<20 {
+			return nil, errors.New("alias dump exceeded bounds")
+		}
+		n, _, flags, from, e := unix.Recvmsg(fd, buffer, nil, 0)
+		if e != nil {
+			return nil, e
+		}
+		sender, ok := from.(*unix.SockaddrNetlink)
+		if !ok || sender.Pid != 0 || flags&unix.MSG_TRUNC != 0 || n < unix.NLMSG_HDRLEN {
+			return nil, errIPv6Authority
+		}
+		total += n
+		messages, e := syscall.ParseNetlinkMessage(buffer[:n])
+		if e != nil {
+			return nil, e
+		}
+		for _, m := range messages {
+			if m.Header.Seq != sequence || m.Header.Pid != bound.Pid || m.Header.Flags&unix.NLM_F_DUMP_INTR != 0 {
+				return nil, errIPv6Authority
+			}
+			if m.Header.Type == unix.NLMSG_DONE {
+				if len(m.Data) >= 4 && binary.NativeEndian.Uint32(m.Data) != 0 {
+					return nil, errIPv6Authority
+				}
+				return out, nil
+			}
+			if m.Header.Type == unix.NLMSG_ERROR {
+				return nil, errIPv6Authority
+			}
+			if m.Header.Type != unix.RTM_NEWADDR {
+				continue
+			}
+			address, observation, matched, e := decodeIPv6Alias(m.Data, index)
+			if e != nil {
+				return nil, e
+			}
+			if matched {
+				if _, exists := out[address]; exists {
+					return nil, errors.New("ambiguous host alias")
+				}
+				out[address] = observation
+			}
+		}
+	}
+}
+
+func decodeIPv6Alias(data []byte, index uint32) (string, IPv6AliasObservation, bool, error) {
+	v := IPv6AliasObservation{}
+	if len(data) < 8 {
+		return "", v, false, errIPv6Authority
+	}
+	if data[0] != unix.AF_INET6 || binary.NativeEndian.Uint32(data[4:8]) != index {
+		return "", v, false, nil
+	}
+	v.PrefixLength, v.Flags = data[1], uint32(data[2])
+	address, local := netip.Addr{}, netip.Addr{}
+	seen := map[uint16]bool{}
+	for raw := data[8:]; len(raw) != 0; {
+		if len(raw) < 4 {
+			return "", v, false, errIPv6Authority
+		}
+		length, kind := int(binary.NativeEndian.Uint16(raw)), binary.NativeEndian.Uint16(raw[2:])&0x3fff
+		aligned := (length + 3) &^ 3
+		if length < 4 || aligned > len(raw) || seen[kind] {
+			return "", v, false, errIPv6Authority
+		}
+		seen[kind] = true
+		value := raw[4:length]
+		switch kind {
+		case unix.IFA_ADDRESS, unix.IFA_LOCAL:
+			ip, ok := netip.AddrFromSlice(value)
+			if !ok || !ip.Is6() {
+				return "", v, false, errIPv6Authority
+			}
+			if kind == unix.IFA_ADDRESS {
+				address = ip
+			} else {
+				local = ip
+			}
+		case unix.IFA_FLAGS:
+			if len(value) != 4 {
+				return "", v, false, errIPv6Authority
+			}
+			v.Flags = binary.NativeEndian.Uint32(value)
+		case unix.IFA_CACHEINFO:
+			if len(value) != 16 {
+				return "", v, false, errIPv6Authority
+			}
+			v.CachePresent = true
+			v.PreferredLifetime, v.ValidLifetime, v.CreatedTicks = binary.NativeEndian.Uint32(value), binary.NativeEndian.Uint32(value[4:]), binary.NativeEndian.Uint32(value[8:])
+		case ifaProtocol:
+			if len(value) != 1 {
+				return "", v, false, errIPv6Authority
+			}
+			v.ProtocolPresent, v.Protocol = true, value[0]
+		}
+		raw = raw[aligned:]
+	}
+	if local.IsValid() {
+		if address.IsValid() && address != local {
+			return "", v, false, errIPv6Authority
+		}
+		address = local
+	}
+	if !address.IsValid() {
+		return "", v, false, errIPv6Authority
+	}
+	return address.String(), v, true, nil
+}

@@ -40,6 +40,9 @@ func Open(ctx context.Context, db *sql.DB) (*Ledger, error) {
 		if e := c.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); e != nil {
 			return e
 		}
+		var schemaErr error
+		version,schemaErr=underlyingBusinessSchema(ctx,c,version)
+		if schemaErr!=nil{return schemaErr}
 		if version != 7 && version != 8 && !HasProbeSchema(version) {
 			return ErrSchema
 		}

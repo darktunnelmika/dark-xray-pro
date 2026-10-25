@@ -1,4 +1,5 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
+import { defaultSpec, specIssues } from "../src/inboundAuthoringSpec";
 
 // Entirely synthetic owner/API fixtures. No control plane, nodes or public
 // targets are contacted by these browser tests.
@@ -6,6 +7,104 @@ const api = "/api/v1/workspace/native-inbound-plans", securityAPI = "/api/v1/wor
 const protocols = ["vmess", "vless", "trojan", "shadowsocks", "wireguard", "hysteria", "http", "mixed", "tunnel", "tun", "mtproto", "amneziawg", "tuic", "masque"];
 const networks = ["tcp", "kcp", "ws", "grpc", "httpupgrade", "xhttp", "xdrive"];
 const csrf = "a".repeat(64);
+
+test("external protocol settings identify unsupported TLS and host-alias combinations precisely", () => {
+  const tuic = defaultSpec("tuic"); tuic.tls = { minVersion: "1.2", maxVersion: "1.2", cipherSuites: "TLS_AES_128_GCM_SHA256" };
+  expect(specIssues(tuic)).toEqual(expect.arrayContaining([
+    { field: "spec.tls.minVersion", code: "tuic_requires_tls13" }, { field: "spec.tls.maxVersion", code: "tuic_requires_tls13" },
+    { field: "spec.tls.cipherSuites", code: "tuic_cipher_suites_unsupported" },
+  ]));
+  const awg = defaultSpec("amneziawg"); awg.settings.server = { externalInterface: "eth0", ipv6ExternalInterface: "eth0", ipv6Enabled: true, ipv6Subnet: "fd42::/128", mtu: 1200 };
+  expect(specIssues(awg)).toEqual(expect.arrayContaining([
+    { field: "spec.settings.server.externalInterface", code: "amneziawg_host_alias_unsupported" },
+    { field: "spec.settings.server.ipv6ExternalInterface", code: "amneziawg_host_alias_unsupported" },
+    { field: "spec.settings.server.ipv6Subnet", code: "amneziawg_ipv6_prefix_too_small" },
+    { field: "spec.settings.server.mtu", code: "amneziawg_mtu_range" },
+  ]));
+  awg.settings.server = { ipv6Enabled: true, ipv6Subnet: "fd42::/64", mtu: 1420 };
+  expect(specIssues(awg)).toEqual([]);
+  const tun = defaultSpec("tun"); tun.settings.autoSystemDnsToGateway = true;
+  expect(specIssues(tun)).toEqual([{ field: "spec.settings.autoSystemDnsToGateway", code: "tun_host_dns_takeover_unsupported" }]);
+  tun.settings.autoSystemDnsToGateway = false; expect(specIssues(tun)).toEqual([]);
+  tun.settings.name = "a".repeat(16);
+  expect(specIssues(tun)).toEqual([{ field: "spec.settings.name", code: "interface_name_invalid" }]);
+  tun.settings.name = "tun-" + "a".repeat(11); expect(specIssues(tun)).toEqual([]);
+});
+
+test("automatic TUN DNS takeover remains explicit and can be cleared without removing ordinary routes", async ({ page }) => {
+  const f = await fixture(page), dialog = await open(page);
+  await dialog.getByLabel("Protocol", { exact: true }).selectOption("tun");
+  await expect(dialog.getByLabel("Interface name", { exact: true })).toHaveAttribute("maxlength", "15");
+  const takeover = dialog.locator('[data-creation-field="spec.settings.autoSystemDnsToGateway"]');
+  await expect(takeover).toBeDisabled();
+  await dialog.getByRole("tab", { name: "Advanced", exact: true }).click();
+  await dialog.getByText("Advanced JSON", { exact: true }).click();
+  const json = dialog.getByLabel("Advanced specification JSON", { exact: true });
+  const spec = JSON.parse(await json.inputValue());
+  spec.settings = { name: "qa-tun", gateway: ["10.90.0.1/24"], autoSystemRoutingTable: ["0.0.0.0/0"], autoSystemDnsToGateway: true };
+  await json.fill(JSON.stringify(spec)); await dialog.getByRole("button", { name: "Apply JSON", exact: true }).click();
+  await dialog.getByRole("tab", { name: "Connection", exact: true }).click();
+  await expect(takeover).toBeChecked(); await expect(takeover).toBeEnabled();
+  await expect(dialog.getByText("Automatic host DNS takeover is unavailable. Keep the host resolver unchanged; ordinary TUN routing remains available with the required host permissions.", { exact: true })).toBeVisible();
+  await takeover.uncheck(); await expect(takeover).toBeDisabled();
+  await dialog.getByRole("tab", { name: "Advanced", exact: true }).click();
+  const preserved = JSON.parse(await json.inputValue()).settings;
+  expect(preserved).toEqual({ ...spec.settings, autoSystemDnsToGateway: false });
+  expect(f.calls.filter(call => call.path === api + "/preview")).toHaveLength(0);
+});
+
+test("TUIC exposes TLS1.3 and lets an imported unsupported cipher override be explicitly cleared", async ({ page }) => {
+  const f = await fixture(page), dialog = await open(page);
+  await dialog.getByLabel("Inbound name", { exact: true }).fill("TUIC compatibility");
+  await dialog.getByLabel("Protocol", { exact: true }).selectOption("tuic");
+  await expect(dialog.locator('[data-creation-field="spec.tls.maxVersion"] option')).toHaveText(["Default", "1.3"]);
+  await dialog.getByText("Advanced TLS settings", { exact: true }).click();
+  await expect(dialog.locator('[data-creation-field="spec.tls.cipherSuites"]')).toBeDisabled();
+  await hub(dialog);
+  await dialog.getByRole("tab", { name: "Advanced", exact: true }).click();
+  await dialog.getByText("Advanced JSON", { exact: true }).click();
+  const json = dialog.getByLabel("Advanced specification JSON", { exact: true });
+  const spec = JSON.parse(await json.inputValue()); spec.tls.maxVersion = "1.2"; spec.tls.cipherSuites = "TLS_AES_128_GCM_SHA256";
+  await json.fill(JSON.stringify(spec)); await dialog.getByRole("button", { name: "Apply JSON", exact: true }).click();
+  await dialog.getByRole("tab", { name: "Review", exact: true }).click();
+  await dialog.getByLabel("Change note", { exact: true }).fill("Explicitly review external protocol compatibility.");
+  await dialog.getByRole("button", { name: "Check complete setup", exact: true }).click();
+  await expect(dialog.getByText("TUIC requires TLS 1.3. Set both TLS version limits to 1.3 or leave them at the default.", { exact: true }).first()).toBeVisible();
+  expect(f.calls.filter(call => call.path === api + "/preview")).toHaveLength(0);
+  await dialog.locator('[data-creation-field="spec.tls.maxVersion"]').selectOption("1.3");
+  const advanced = dialog.getByText("Advanced TLS settings", { exact: true });
+  if (await advanced.locator("..").getAttribute("open") === null) await advanced.click();
+  const suites = dialog.locator('[data-creation-field="spec.tls.cipherSuites"]');
+  await expect(suites).toHaveValue("TLS_AES_128_GCM_SHA256"); await suites.fill(""); await expect(suites).toBeDisabled();
+  await review(dialog);
+  const submitted = f.calls.filter(call => call.path === api + "/preview").at(-1)!.body.profile.spec;
+  expect(submitted.tls.maxVersion).toBe("1.3"); expect(submitted.tls.cipherSuites).toBeUndefined();
+});
+
+test("AWG exposes IPv6 tunnel controls while blocking host aliases before preview", async ({ page }) => {
+  const f = await fixture(page), dialog = await open(page);
+  await dialog.getByLabel("Inbound name", { exact: true }).fill("AWG compatibility");
+  await dialog.getByLabel("Protocol", { exact: true }).selectOption("amneziawg");
+  await expect(dialog.locator('[data-creation-field="spec.settings.server.externalInterface"]')).toBeDisabled();
+  await expect(dialog.locator('[data-creation-field="spec.settings.server.ipv6ExternalInterface"]')).toBeDisabled();
+  await hub(dialog);
+  await dialog.getByRole("tab", { name: "Advanced", exact: true }).click();
+  await dialog.getByText("Advanced JSON", { exact: true }).click();
+  const json = dialog.getByLabel("Advanced specification JSON", { exact: true });
+  const spec = JSON.parse(await json.inputValue()); spec.settings.server = { externalInterface: "eth0", ipv6Enabled: true, ipv6Subnet: "fd42::/64", mtu: 1420 };
+  await json.fill(JSON.stringify(spec)); await dialog.getByRole("button", { name: "Apply JSON", exact: true }).click();
+  await dialog.getByRole("tab", { name: "Review", exact: true }).click();
+  await dialog.getByLabel("Change note", { exact: true }).fill("Explicitly review tunnel IPv6 without host aliases.");
+  await dialog.getByRole("button", { name: "Check complete setup", exact: true }).click();
+  await expect(dialog.getByText("AmneziaWG cannot manage host interfaces or public IPv6 source aliases here. Remove the interface name; IPv6 tunnel addresses remain supported.", { exact: true }).first()).toBeVisible();
+  expect(f.calls.filter(call => call.path === api + "/preview")).toHaveLength(0);
+  const iface = dialog.locator('[data-creation-field="spec.settings.server.externalInterface"]');
+  await expect(iface).toHaveValue("eth0"); await iface.fill(""); await expect(iface).toBeDisabled();
+  await expect(dialog.locator('[data-creation-field="spec.settings.server.ipv6Enabled"]')).toBeChecked();
+  await review(dialog);
+  const server = f.calls.filter(call => call.path === api + "/preview").at(-1)!.body.profile.spec.settings.server;
+  expect(server).toEqual({ ipv6Enabled: true, ipv6Subnet: "fd42::/64", mtu: 1420 });
+});
 const nodes = [{ node_id: "hub-local", installation_id: "1".repeat(32), name: "HUB — this server", kind: "hub" }, { node_id: "de", installation_id: "2".repeat(32), name: "Germany", kind: "node" }];
 type Body = Record<string, any>;
 async function fixture(page: Page, options: { language?: "en" | "fa"; theme?: "dark" | "light" } = {}) {

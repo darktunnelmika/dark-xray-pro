@@ -1,0 +1,126 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+package darkproadapter
+
+import (
+	"context"
+	"errors"
+	"net"
+	"net/netip"
+	"reflect"
+	"testing"
+	"time"
+
+	"golang.org/x/sys/unix"
+)
+
+type fixedSourceResolver []netip.Addr
+
+func (f fixedSourceResolver) LookupNetIP(_ context.Context, network, _ string) ([]netip.Addr, error) {
+	if network != "ip" {
+		return nil, errors.New("unexpected DNS family query")
+	}
+	return append([]netip.Addr(nil), f...), nil
+}
+
+func TestIPv6SourceIdentityIsImmutableAndNeverFallsBackAfterFailure(t *testing.T) {
+	sources := map[string]netip.Addr{"alice": netip.MustParseAddr("fd42::2"), "bob": netip.MustParseAddr("fd42::3")}
+	p, e := NewIPv6Egress("edge0", 17, sources, func(string) error { return nil })
+	if e != nil {
+		t.Fatal(e)
+	}
+	sources["alice"] = netip.MustParseAddr("fd42::99")
+	p.resolver = fixedSourceResolver{netip.MustParseAddr("192.0.2.8"), netip.MustParseAddr("fd43::8"), netip.MustParseAddr("fd43::9")}
+	for _, network := range []string{"tcp", "udp"} {
+		for _, user := range []string{"alice", "bob"} {
+			calls := []string{}
+			p.connect = func(_ context.Context, family, target string, d *net.Dialer) (net.Conn, error) {
+				calls = append(calls, family+" "+target)
+				want := "[fd42::2]:0"
+				if user == "bob" {
+					want = "[fd42::3]:0"
+				}
+				if family != network+"6" || d.LocalAddr == nil || d.LocalAddr.String() != want || d.Control == nil {
+					t.Fatalf("peer source/interface authority was bypassed: %s %v", family, d.LocalAddr)
+				}
+				return nil, errors.New("selected IPv6 path unavailable")
+			}
+			if _, e = p.dial(t.Context(), user, network, "dual.example:443", time.Second); e == nil {
+				t.Fatal("expected selected IPv6 family failure")
+			}
+			want := []string{network + "6 [fd43::8]:443", network + "6 [fd43::9]:443"}
+			if !reflect.DeepEqual(calls, want) {
+				t.Fatalf("IPv6 failed over to another family: %v", calls)
+			}
+		}
+	}
+}
+
+func TestIPv4OnlyDestinationsPreserveDirectBehaviorWithoutInventingIPv6Source(t *testing.T) {
+	p, e := NewIPv6Egress("edge0", 17, map[string]netip.Addr{"alice": netip.MustParseAddr("fd42::2")}, func(string) error { return nil })
+	if e != nil {
+		t.Fatal(e)
+	}
+	p.resolver = fixedSourceResolver{netip.MustParseAddr("192.0.2.8")}
+	for _, target := range []string{"v4.example:53", "192.0.2.8:53", "[::ffff:192.0.2.8]:53"} {
+		called := false
+		p.connect = func(_ context.Context, family, destination string, d *net.Dialer) (net.Conn, error) {
+			called = true
+			if family != "udp4" || destination != "192.0.2.8:53" || d.LocalAddr != nil || d.Control != nil {
+				t.Fatalf("IPv4 direct behavior changed: %s %s %v", family, destination, d.LocalAddr)
+			}
+			return nil, errors.New("fixture stop")
+		}
+		_, _ = p.dial(t.Context(), "alice", "udp", target, time.Second)
+		if !called {
+			t.Fatal("IPv4-only destination was not attempted")
+		}
+	}
+}
+
+func TestIPv6SourceAuthorityCannotBeBypassedByUnknownPeerOrStaleAlias(t *testing.T) {
+	valid := true
+	p, e := NewIPv6Egress("edge0", 17, map[string]netip.Addr{"alice": netip.MustParseAddr("fd42::2")}, func(string) error {
+		if !valid {
+			return errors.New("alias replaced")
+		}
+		return nil
+	})
+	if e != nil {
+		t.Fatal(e)
+	}
+	p.connect = func(context.Context, string, string, *net.Dialer) (net.Conn, error) {
+		t.Fatal("unverified identity reached outbound connect")
+		return nil, nil
+	}
+	if _, e := p.dial(t.Context(), "intruder", "tcp", "[fd43::8]:443", time.Second); !errors.Is(e, errIPv6Authority) {
+		t.Fatal("unknown peer was not rejected")
+	}
+	valid = false
+	if _, e := p.dial(t.Context(), "alice", "udp", "[fd43::8]:53", time.Second); !errors.Is(e, errIPv6Authority) {
+		t.Fatal("stale host authority was not rejected")
+	}
+}
+
+func TestIPv6SourceSocketBindsExactInterfaceIndex(t *testing.T) {
+	iface, e := net.InterfaceByName("lo")
+	if e != nil {
+		t.Fatal(e)
+	}
+	fd, e := unix.Socket(unix.AF_INET6, unix.SOCK_DGRAM|unix.SOCK_CLOEXEC, 0)
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer unix.Close(fd)
+	p := &IPv6Egress{name: iface.Name, index: iface.Index}
+	if e := p.bind(fd); e != nil {
+		t.Fatalf("kernel cannot enforce immutable interface binding: %v", e)
+	}
+	bound, e := unix.GetsockoptInt(fd, unix.SOL_SOCKET, unix.SO_BINDTOIFINDEX)
+	if e != nil || bound != iface.Index {
+		t.Fatalf("socket bound to different interface: %d %v", bound, e)
+	}
+	p.name = "wrong-interface"
+	if p.bind(fd) == nil {
+		t.Fatal("renamed/replaced interface authority admitted")
+	}
+}

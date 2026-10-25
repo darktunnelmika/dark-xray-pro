@@ -1,0 +1,135 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+package main
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"io"
+	"net"
+	"net/netip"
+	"os"
+	"path/filepath"
+	"strings"
+	"syscall"
+	"testing"
+	"time"
+
+	"github.com/mhsanaei/3x-ui/v3/internal/darkproadapter"
+	dt "github.com/mhsanaei/3x-ui/v3/internal/darkprotest"
+)
+
+// This helper is only compiled into the standalone acceptance test binary. The
+// owning Agent test supplies its actual component configuration and peer keys
+// through a private file; the helper performs no host network mutation.
+func TestManagedAmneziaWGIPv6AgentClient(t *testing.T) {
+	path := os.Getenv("DXP_AWG_AGENT_CLIENT_CONTROL")
+	if path == "" {
+		t.Skip("requires private Agent acceptance control file")
+	}
+	fd, e := syscall.Open(path, syscall.O_RDONLY|syscall.O_CLOEXEC|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
+	if e != nil {
+		t.Fatal("private Agent client control unavailable")
+	}
+	f := os.NewFile(uintptr(fd), "private AWG client control")
+	info, e := f.Stat()
+	if e != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0077 != 0 {
+		f.Close()
+		t.Fatal("Agent client control must be a private regular file")
+	}
+	raw, e := io.ReadAll(io.LimitReader(f, (1<<20)+1))
+	f.Close()
+	if e != nil || len(raw) > 1<<20 {
+		t.Fatal("invalid Agent client control size")
+	}
+	var control struct {
+		Server config `json:"server_config"`
+		Clients []struct {
+			Email string `json:"email"`
+			PrivateKey string `json:"private_key"`
+			Addresses []string `json:"addresses"`
+			PresharedKey string `json:"preshared_key,omitempty"`
+		} `json:"clients"`
+		TCP string `json:"tcp_target"`
+		UDP string `json:"udp_target"`
+		ResultPath string `json:"result_path"`
+		ExpectDenied bool `json:"expect_denied,omitempty"`
+	}
+	if darkproadapter.Decode(raw, &control) != nil || len(control.Clients) == 0 || len(control.Clients) > 16 || control.ResultPath == "" {
+		t.Fatal("invalid Agent client control")
+	}
+	for _, target := range []string{control.TCP, control.UDP} {
+		host, _, e := net.SplitHostPort(target)
+		ip, parse := netip.ParseAddr(host)
+		if e != nil || parse != nil || !ip.Is6() || ip.Is4In6() || !ip.IsGlobalUnicast() {
+			t.Fatal("Agent IPv6 acceptance requires literal IPv6 targets")
+		}
+	}
+	inputPath, e := filepath.Abs(path)
+	if e != nil { t.Fatal(e) }
+	outputPath, e := filepath.Abs(control.ResultPath)
+	if e != nil || filepath.Dir(outputPath) != filepath.Dir(inputPath) || outputPath == inputPath {
+		t.Fatal("result must stay in the private control directory")
+	}
+	type resultClient struct {
+		Email string `json:"email"`
+		Upload uint64 `json:"upload,string"`
+		Download uint64 `json:"download,string"`
+	}
+	result := struct {
+		Verified bool `json:"verified"`
+		Denied bool `json:"denied"`
+		Clients []resultClient `json:"clients"`
+	}{Verified: true, Denied: control.ExpectDenied, Clients: []resultClient{}}
+	for _, configured := range control.Clients {
+		if configured.Email == "" || len(configured.Email) > 255 || len(configured.Addresses) == 0 || len(configured.Addresses) > 2 {
+			t.Fatal("invalid Agent test peer")
+		}
+		for _, address := range configured.Addresses {
+			if _, e := netip.ParseAddr(address); e != nil { t.Fatal("invalid Agent test peer address") }
+		}
+		network, stop := clientDevice(t, control.Server, configured.PrivateKey, strings.Join(configured.Addresses, ","), configured.PresharedKey)
+		one := resultClient{Email: configured.Email}
+		for _, target := range []struct{ network, address string }{{"tcp6", control.TCP}, {"udp6", control.UDP}} {
+			payload := []byte("managed-awg-ipv6:"+configured.Email+":"+target.network)
+			timeout := 8*time.Second
+			if control.ExpectDenied { timeout = time.Second }
+			ctx, cancel := context.WithTimeout(t.Context(), timeout)
+			c, e := network.DialContext(ctx, target.network, target.address)
+			cancel()
+			if control.ExpectDenied {
+				if e == nil {
+					_ = c.SetDeadline(time.Now().Add(time.Second))
+					_, write := c.Write(payload)
+					reply := make([]byte, len(payload))
+					_, read := io.ReadFull(c, reply)
+					c.Close()
+					if write == nil && read == nil && bytes.Equal(payload, reply) { t.Fatal("denied peer delivered payload") }
+				}
+				continue
+			}
+			if e != nil { t.Fatal("actual Agent AWG connection failed") }
+			dt.Payload(t, c, payload)
+			c.Close()
+			one.Upload += uint64(len(payload)); one.Download += uint64(len(payload))
+		}
+		stop()
+		result.Clients = append(result.Clients, one)
+	}
+	encoded, e := json.Marshal(result)
+	if e != nil { t.Fatal(e) }
+	temporary, e := os.CreateTemp(filepath.Dir(outputPath), ".awg-client-result-")
+	if e != nil { t.Fatal(e) }
+	temporaryPath := temporary.Name()
+	defer os.Remove(temporaryPath)
+	if e = temporary.Chmod(0600); e == nil { _, e = temporary.Write(encoded) }
+	if e == nil { e = temporary.Sync() }
+	closeError := temporary.Close()
+	if e != nil || closeError != nil { t.Fatal("private result could not be persisted") }
+	if e = os.Rename(temporaryPath, outputPath); e != nil { t.Fatal(e) }
+	directory, e := os.Open(filepath.Dir(outputPath))
+	if e != nil { t.Fatal(e) }
+	e = directory.Sync(); directory.Close()
+	if e != nil { t.Fatal(e) }
+	t.Log("MANAGED_AMNEZIAWG_AGENT_CLIENT_VERIFIED")
+}

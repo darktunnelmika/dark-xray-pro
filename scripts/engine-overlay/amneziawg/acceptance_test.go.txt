@@ -1,0 +1,193 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+package main
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"net"
+	"net/netip"
+	"strconv"
+	"strings"
+	"testing"
+	"time"
+
+	awgconn "github.com/amnezia-vpn/amneziawg-go/v3/conn"
+	"github.com/amnezia-vpn/amneziawg-go/v3/device"
+	"github.com/amnezia-vpn/amneziawg-go/v3/tun/netstack"
+	"github.com/mhsanaei/3x-ui/v3/internal/amneziawg"
+	"github.com/mhsanaei/3x-ui/v3/internal/darkproadapter"
+	dt "github.com/mhsanaei/3x-ui/v3/internal/darkprotest"
+	"github.com/mhsanaei/3x-ui/v3/internal/util/wireguard"
+)
+
+func keypair(t *testing.T) (string, string) {
+	t.Helper()
+	private, public, e := wireguard.GenerateWireguardKeypair()
+	if e != nil {
+		t.Fatal(e)
+	}
+	return private, public
+}
+func awgInput(t *testing.T, cfg config) darkproadapter.Input {
+	t.Helper()
+	raw, _ := json.Marshal(cfg)
+	in := darkproadapter.Input{Version: 1, Engine: "amneziawg", Config: raw}
+	for i, p := range cfg.Peers {
+		role := "client"
+		if i == 1 {
+			role = "health"
+		}
+		keyHash := sha256.Sum256([]byte(p.PublicKey))
+		in.Principals = append(in.Principals, darkproadapter.Principal{ID: p.Email, Engine: "amneziawg", Role: role, Counter: "user>>>" + p.Email + ">>>traffic", CredentialSHA: hex.EncodeToString(keyHash[:]), InboundID: 1})
+	}
+	return in
+}
+func startAWG(t *testing.T, in darkproadapter.Input) *darkproadapter.Worker {
+	t.Helper()
+	plan, e := prepare(in)
+	if e != nil {
+		t.Fatal(e)
+	}
+	w := dt.Worker(t, in, plan)
+	var cfg config
+	_ = json.Unmarshal(in.Config, &cfg)
+	dt.AssertUDPClosed(t, net.JoinHostPort(cfg.Listen, strconv.Itoa(cfg.Port)))
+	dt.Command(t, w, "activate", dt.ActivateNonce)
+	return w
+}
+func client(t *testing.T, cfg config, private, address, psk string) *netstack.Net {
+	network, _ := clientDevice(t, cfg, private, address, psk)
+	return network
+}
+func clientDevice(t *testing.T, cfg config, private, address, psk string) (*netstack.Net, func()) {
+	t.Helper()
+	addresses := []netip.Addr{}
+	for _, ip := range strings.Split(address, ",") {
+		addresses = append(addresses, netip.MustParseAddr(ip))
+	}
+	tun, network, e := netstack.CreateNetTUN(addresses, nil, 1420)
+	if e != nil {
+		t.Fatal(e)
+	}
+	dev := device.NewDevice(tun, awgconn.NewDefaultBind(), device.NewLogger(device.LogLevelSilent, ""))
+	t.Cleanup(dev.Close)
+	priv, _ := wireguard.KeyToHex(private)
+	pub, _ := wireguard.KeyToHex(cfg.Server.PublicKey)
+	hp, _ := wireguard.KeyToHex(cfg.Server.HeaderProtectionKey)
+	if hp == "" {
+		hp = strings.Repeat("0", 64)
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "private_key=%s\njc=%d\njmin=%d\njmax=%d\ns1=%d\ns2=%d\ns3=%d\ns4=%d\nheader_protection_key=%s\nrandom_trailers=%t\ndisable_cookies=%t\n", priv, cfg.Server.Jc, cfg.Server.Jmin, cfg.Server.Jmax, cfg.Server.S1, cfg.Server.S2, cfg.Server.S3, cfg.Server.S4, hp, cfg.Server.RandomTrailers, cfg.Server.DisableCookies)
+	for k, v := range map[string]string{"h1": cfg.Server.H1, "h2": cfg.Server.H2, "h3": cfg.Server.H3, "h4": cfg.Server.H4, "i1": cfg.Server.I1, "i2": cfg.Server.I2, "i3": cfg.Server.I3, "i4": cfg.Server.I4, "i5": cfg.Server.I5, "content_padding_addition": cfg.Server.ContentPaddingAddition, "rekey_after_time": cfg.Server.RekeyAfterTime, "rekey_timeout": cfg.Server.RekeyTimeout, "reject_after_time": cfg.Server.RejectAfterTime, "keepalive_timeout": cfg.Server.KeepaliveTimeout, "max_handshake_attempts": cfg.Server.MaxHandshakeAttempts} {
+		if v != "" {
+			fmt.Fprintf(&b, "%s=%s\n", k, v)
+		}
+	}
+	fmt.Fprintf(&b, "public_key=%s\nendpoint=%s\nallowed_ip=0.0.0.0/0\nallowed_ip=::/0\n", pub, net.JoinHostPort("127.0.0.1", strconv.Itoa(cfg.Port)))
+	if psk != "" {
+		hex, _ := wireguard.KeyToHex(psk)
+		fmt.Fprintf(&b, "preshared_key=%s\n", hex)
+	}
+	if e = dev.IpcSet(b.String()); e != nil {
+		t.Fatalf("real AWG client configure: %v", e)
+	}
+	if e = dev.Up(); e != nil {
+		t.Fatal(e)
+	}
+	return network, dev.Close
+}
+func TestManagedAmneziaWG31ActualTCPUDPAccountingAndRevoke(t *testing.T) {
+	host := dt.NonLoopback(t)
+	tcpTarget, udpTarget := dt.Echo(t, host)
+	serverPriv, serverPub := keypair(t)
+	alicePriv, alicePub := keypair(t)
+	probePriv, probePub := keypair(t)
+	hp, e := wireguard.GenerateWireguardPSK()
+	if e != nil {
+		t.Fatal(e)
+	}
+	psk, e := wireguard.GenerateWireguardPSK()
+	if e != nil {
+		t.Fatal(e)
+	}
+	cfg := config{Listen: "127.0.0.1", Port: dt.Port(t), Address: []string{"10.233.41.1/24"}, Server: amneziawg.ServerSettings{PrivateKey: serverPriv, PublicKey: serverPub, MTU: 1420, Jc: 4, Jmin: 40, Jmax: 70, S1: 20, S2: 30, S3: 20, S4: 20, HeaderProtectionKey: hp, ContentPaddingAddition: "0-8", RekeyAfterTime: "120", RekeyTimeout: "5", RejectAfterTime: "180", KeepaliveTimeout: "10", MaxHandshakeAttempts: "18", RandomTrailers: true, DisableCookies: true}, Peers: []peer{{PublicKey: alicePub, Email: "alice", AllowedIPs: []string{"10.233.41.2/32"}, PresharedKey: psk}, {PublicKey: probePub, Email: "probe", AllowedIPs: []string{"10.233.41.3/32"}}}}
+	w := startAWG(t, awgInput(t, cfg))
+	alice := client(t, cfg, alicePriv, "10.233.41.2", psk)
+	ctx, cancel := context.WithTimeout(t.Context(), 8*time.Second)
+	defer cancel()
+	tcp, e := alice.DialContext(ctx, "tcp", tcpTarget)
+	if e != nil {
+		t.Fatalf("real AWG TCP dial: %v", e)
+	}
+	defer tcp.Close()
+	tcpPayload := []byte("actual AmneziaWG 3.1 payload")
+	dt.Payload(t, tcp, tcpPayload)
+	udp, e := alice.DialContext(ctx, "udp", udpTarget)
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer udp.Close()
+	udpPayload := []byte("actual AmneziaWG datagram")
+	dt.Payload(t, udp, udpPayload)
+	health := client(t, cfg, probePriv, "10.233.41.3", "")
+	healthConn, e := health.DialContext(ctx, "tcp", tcpTarget)
+	if e != nil {
+		t.Fatal(e)
+	}
+	healthPayload := []byte("nonbillable AWG probe")
+	dt.Payload(t, healthConn, healthPayload)
+	healthConn.Close()
+	want := []darkproadapter.Counter{{ID: "alice", Upload: uint64(len(tcpPayload) + len(udpPayload)), Download: uint64(len(tcpPayload) + len(udpPayload))}, {ID: "probe", Upload: uint64(len(healthPayload)), Download: uint64(len(healthPayload))}}
+	dt.Counters(t, w, want)
+	wrong, _ := keypair(t)
+	intruder := client(t, cfg, wrong, "10.233.41.2", psk)
+	wrongCtx, wrongCancel := context.WithTimeout(t.Context(), time.Second)
+	defer wrongCancel()
+	if c, e := intruder.DialContext(wrongCtx, "tcp", tcpTarget); e == nil {
+		c.Close()
+		t.Fatal("unknown AWG peer admitted")
+	}
+	dt.Counters(t, w, want)
+	join := dt.InFlight(t, tcp)
+	final := dt.Final(t, w)
+	join()
+	dt.Counters(t, w, final.Counters)
+	cfg.Peers = cfg.Peers[1:]
+	replacement := startAWG(t, awgInput(t, cfg))
+	revoked := client(t, cfg, alicePriv, "10.233.41.2", psk)
+	revokeCtx, revokeCancel := context.WithTimeout(t.Context(), time.Second)
+	defer revokeCancel()
+	if c, e := revoked.DialContext(revokeCtx, "tcp", tcpTarget); e == nil {
+		c.Close()
+		t.Fatal("revoked AWG peer admitted")
+	}
+	fresh := client(t, cfg, probePriv, "10.233.41.3", "")
+	freshCtx, freshCancel := context.WithTimeout(t.Context(), 8*time.Second)
+	defer freshCancel()
+	c, e := fresh.DialContext(freshCtx, "tcp", tcpTarget)
+	if e != nil {
+		t.Fatal(e)
+	}
+	dt.Payload(t, c, healthPayload)
+	c.Close()
+	dt.Counters(t, replacement, []darkproadapter.Counter{{ID: "probe", Upload: uint64(len(healthPayload)), Download: uint64(len(healthPayload))}})
+	dt.Counters(t, w, final.Counters)
+}
+func TestAmneziaWGPreparationRejectsAmbiguousPeerOwnership(t *testing.T) {
+	priv, pub := keypair(t)
+	_, one := keypair(t)
+	_, two := keypair(t)
+	cfg := config{Listen: "127.0.0.1", Port: dt.Port(t), Address: []string{"10.233.41.1/24"}, Server: amneziawg.ServerSettings{PrivateKey: priv, PublicKey: pub}, Peers: []peer{{PublicKey: one, Email: "alice", AllowedIPs: []string{"10.233.41.2/32"}}, {PublicKey: two, Email: "bob", AllowedIPs: []string{"10.233.41.2/32"}}}}
+	if _, e := prepare(awgInput(t, cfg)); e == nil {
+		t.Fatal("ambiguous AWG peer ownership admitted")
+	}
+	cfg.Peers = cfg.Peers[:1]
+	cfg.Peers[0].PublicKey = ""
+	if _, e := prepare(awgInput(t, cfg)); e == nil {
+		t.Fatal("empty AWG peer public key admitted")
+	}
+}

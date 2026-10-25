@@ -1,0 +1,174 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+package darkproadapter
+
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"net"
+	"net/netip"
+	"os"
+	"strings"
+	"syscall"
+
+	"golang.org/x/sys/unix"
+)
+
+const PublicAliasProtocol = 215
+
+type PublicAliasInterface struct {
+	Name  string `json:"name"`
+	Index uint32 `json:"index"`
+	MAC   string `json:"mac"`
+}
+type PublicAliasBinding struct {
+	PrincipalID      string  `json:"principal_id"`
+	Email            string  `json:"email"`
+	PeerPublicKeySHA string  `json:"peer_public_key_sha"`
+	Address          string  `json:"address"`
+	PrefixLength     uint8   `json:"prefix_length"`
+	Protocol         uint8   `json:"protocol"`
+	CreatedTicks     *uint32 `json:"created_ticks"`
+}
+
+// These wire structs implement the public_alias_authority v1 control contract.
+// They are independently compiled in this GPL executable, never linked into
+// the control plane. Every field remains in its process configuration digest.
+type PublicAliasAuthority struct {
+	Version                 int                  `json:"version"`
+	IntentID                string               `json:"intent_id"`
+	NodeID                  string               `json:"node_id"`
+	InstallationID          string               `json:"installation_id"`
+	Generation              uint64               `json:"generation"`
+	ConfigSHA               string               `json:"config_sha"`
+	ManifestSHA             string               `json:"manifest_sha"`
+	ComponentTag            string               `json:"component_tag"`
+	ComponentConfigSHA      string               `json:"component_config_sha"`
+	BootID                  string               `json:"boot_id"`
+	NetworkNamespace        uint64               `json:"network_namespace,string"`
+	Interface               PublicAliasInterface `json:"interface"`
+	InitialLeaseExpiresNano int64                `json:"initial_lease_expires_unix_nano"`
+	Aliases                 []PublicAliasBinding `json:"aliases"`
+}
+
+// ExpectedPublicAlias is derived from the actual configured peer and its
+// immutable principal. Values from the authority are never used to invent a
+// new peer, customer assignment or source address.
+type ExpectedPublicAlias struct {
+	PrincipalID, Email, PeerPublicKeySHA string
+	Address                              netip.Addr
+}
+
+func validHex(s string, size int) bool {
+	if len(s) != size || s != strings.ToLower(s) {
+		return false
+	}
+	_, e := hex.DecodeString(s)
+	return e == nil
+}
+
+func validBootID(s string) bool {
+	return len(s) == 36 && s[8] == '-' && s[13] == '-' && s[18] == '-' && s[23] == '-' && validHex(strings.ReplaceAll(s, "-", ""), 32)
+}
+
+// NewPublicAliasEgress validates only the supplied authority/configuration and
+// freezes a private copy. Its read-only kernel verifier runs at activation and
+// during delivery. The normal --check path does not call this constructor and
+// needs neither host aliases nor a lease or host network privileges.
+func NewPublicAliasEgress(in Input, name string, expected []ExpectedPublicAlias) (*IPv6Egress, error) {
+	if in.Engine != "amneziawg" || in.PublicAliasAuthority == nil || len(expected) == 0 || len(expected) > 20000 {
+		return nil, errIPv6Authority
+	}
+	// Copy the complete authority so mutations to decoded caller memory cannot
+	// alter a running generation's peer or kernel birth identity.
+	raw, e := json.Marshal(in.PublicAliasAuthority)
+	if e != nil {
+		return nil, errIPv6Authority
+	}
+	var a PublicAliasAuthority
+	if Decode(raw, &a) != nil || a.Version != 1 || !validHex(a.IntentID, 32) || a.NodeID == "" || len(a.NodeID) > 128 || !validHex(a.InstallationID, 32) || a.Generation == 0 || !validHex(a.ConfigSHA, 64) || !validHex(a.ManifestSHA, 64) || !validHex(a.ComponentConfigSHA, 64) || !validBootID(a.BootID) || a.NetworkNamespace == 0 || a.InitialLeaseExpiresNano <= 0 || a.Interface.Name != name || a.Interface.Index == 0 || len(a.Aliases) != len(expected) {
+		return nil, errIPv6Authority
+	}
+	if a.Interface.MAC != "" {
+		mac, e := net.ParseMAC(a.Interface.MAC)
+		if e != nil || mac.String() != a.Interface.MAC {
+			return nil, errIPv6Authority
+		}
+	}
+	digest := sha256.Sum256(in.Config)
+	if a.ComponentConfigSHA != hex.EncodeToString(digest[:]) {
+		return nil, errIPv6Authority
+	}
+	var manifest struct {
+		Tag, Engine, Protocol string
+	}
+	if json.Unmarshal(in.Manifest, &manifest) != nil || manifest.Tag == "" || a.ComponentTag != manifest.Tag || manifest.Engine != "amneziawg" || manifest.Protocol != "amneziawg" {
+		return nil, errIPv6Authority
+	}
+	principals := map[string]Principal{}
+	for _, p := range in.Principals {
+		if p.ComponentTag != "" && p.ComponentTag != a.ComponentTag || p.Engine != "amneziawg" || p.ID == "" || principals[p.ID].ID != "" {
+			return nil, errIPv6Authority
+		}
+		principals[p.ID] = p
+	}
+	bound := make(map[string]ExpectedPublicAlias, len(expected))
+	sources := make(map[string]netip.Addr, len(expected))
+	for _, binding := range expected {
+		p, ok := principals[binding.PrincipalID]
+		if !ok || bound[binding.Email].Email != "" || binding.Email == "" || !validHex(binding.PeerPublicKeySHA, 64) {
+			return nil, errIPv6Authority
+		}
+		aggregate := len(principals) == 1 && p.Role == "owner_aggregate" && strings.HasPrefix(p.Counter, "inbound>>>")
+		if !aggregate && (p.Counter != "user>>>"+binding.Email+">>>traffic" || p.CredentialSHA != binding.PeerPublicKeySHA) {
+			return nil, errIPv6Authority
+		}
+		bound[binding.Email] = binding
+		sources[binding.Email] = binding.Address
+	}
+	aliases := make(map[string]PublicAliasBinding, len(a.Aliases))
+	for _, alias := range a.Aliases {
+		binding, ok := bound[alias.Email]
+		address, e := netip.ParseAddr(alias.Address)
+		if !ok || aliases[alias.Email].Email != "" || alias.PrincipalID != binding.PrincipalID || alias.PeerPublicKeySHA != binding.PeerPublicKeySHA || e != nil || address.String() != alias.Address || address != binding.Address || alias.PrefixLength != 128 || alias.Protocol != PublicAliasProtocol || alias.CreatedTicks == nil {
+			return nil, errIPv6Authority
+		}
+		aliases[alias.Email] = alias
+	}
+	verify := func(email string) error {
+		boot, e := os.ReadFile("/proc/sys/kernel/random/boot_id")
+		if e != nil || strings.TrimSpace(string(boot)) != a.BootID {
+			return errIPv6Authority
+		}
+		var namespace syscall.Stat_t
+		if syscall.Stat("/proc/self/ns/net", &namespace) != nil || namespace.Ino != a.NetworkNamespace {
+			return errIPv6Authority
+		}
+		iface, e := net.InterfaceByIndex(int(a.Interface.Index))
+		if e != nil || iface.Name != a.Interface.Name || iface.HardwareAddr.String() != a.Interface.MAC || iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
+			return errIPv6Authority
+		}
+		observed, e := ReadIPv6Aliases(a.Interface.Index)
+		if e != nil {
+			return errIPv6Authority
+		}
+		check := func(alias PublicAliasBinding) bool {
+			v, ok := observed[alias.Address]
+			return ok && v.PrefixLength == 128 && v.ProtocolPresent && v.Protocol == PublicAliasProtocol && v.CachePresent && v.CreatedTicks == *alias.CreatedTicks && v.PreferredLifetime > 0 && v.PreferredLifetime <= 31 && v.ValidLifetime > 0 && v.ValidLifetime <= 31 && v.PreferredLifetime <= v.ValidLifetime && v.Flags&(unix.IFA_F_TENTATIVE|unix.IFA_F_DADFAILED|unix.IFA_F_DEPRECATED|unix.IFA_F_OPTIMISTIC|unix.IFA_F_NODAD) == 0
+		}
+		if email != "" {
+			alias, ok := aliases[email]
+			if !ok || !check(alias) {
+				return errIPv6Authority
+			}
+			return nil
+		}
+		for _, alias := range aliases {
+			if !check(alias) {
+				return errIPv6Authority
+			}
+		}
+		return nil
+	}
+	return NewIPv6Egress(name, int(a.Interface.Index), sources, verify)
+}

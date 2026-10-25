@@ -2,6 +2,7 @@ import type { NativePreflight } from "./NativeReadiness";
 import type { InboundProfileOptions } from "./inboundProfileOptions";
 import type { TLSMetadata } from "./inboundTLS";
 import type { AuthoringSpec } from "./inboundAuthoringSpec";
+import type { ExecutionState } from "./inboundExecution";
 
 export type Inbound = {
   revision: number; enabled: boolean; archived: boolean; id: number; name: string;
@@ -24,4 +25,6 @@ export type InboundStatus = {
 export type InboundOverview = {
   inbounds: Inbound[]; nodes: InboundNode[]; targets: InboundTarget[];
   runtime: InboundStatus[]; preflight?: NativePreflight;
+  executions?: ExecutionState[];
+  execution_enabled?: boolean;
 };

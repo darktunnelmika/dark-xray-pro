@@ -1,0 +1,61 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+package darkproadapter
+
+import (
+	"encoding/binary"
+	"net"
+	"net/netip"
+	"testing"
+
+	"golang.org/x/sys/unix"
+)
+
+func aliasAttribute(kind uint16, value []byte) []byte {
+	size := 4 + len(value)
+	raw := make([]byte, (size+3)&^3)
+	binary.NativeEndian.PutUint16(raw, uint16(size))
+	binary.NativeEndian.PutUint16(raw[2:], kind)
+	copy(raw[4:], value)
+	return raw
+}
+
+func TestIPv6AliasObservationRetainsZeroBirthAndOrigin(t *testing.T) {
+	raw := make([]byte, 8)
+	raw[0], raw[1] = unix.AF_INET6, 128
+	binary.NativeEndian.PutUint32(raw[4:], 7)
+	raw = append(raw, aliasAttribute(unix.IFA_ADDRESS, netip.MustParseAddr("fd42::2").AsSlice())...)
+	cache := make([]byte, 16)
+	binary.NativeEndian.PutUint32(cache, 29)
+	binary.NativeEndian.PutUint32(cache[4:], 30)
+	raw = append(raw, aliasAttribute(unix.IFA_CACHEINFO, cache)...)
+	raw = append(raw, aliasAttribute(ifaProtocol, []byte{PublicAliasProtocol})...)
+	name, observed, ok, e := decodeIPv6Alias(raw, 7)
+	if e != nil || !ok || name != "fd42::2" || !observed.CachePresent || observed.CreatedTicks != 0 || !observed.ProtocolPresent || observed.Protocol != PublicAliasProtocol || observed.PrefixLength != 128 || observed.ValidLifetime != 30 || observed.PreferredLifetime != 29 {
+		t.Fatalf("kernel birth attributes were lost: %s %+v %v", name, observed, e)
+	}
+	if _, _, ok, e := decodeIPv6Alias(raw, 8); e != nil || ok {
+		t.Fatal("address from another interface was adopted")
+	}
+	bad := append(append([]byte(nil), raw...), aliasAttribute(ifaProtocol, []byte{PublicAliasProtocol})...)
+	if _, _, _, e := decodeIPv6Alias(bad, 7); e == nil {
+		t.Fatal("ambiguous origin attributes accepted")
+	}
+	if _, _, _, e := decodeIPv6Alias(raw[:len(raw)-1], 7); e == nil {
+		t.Fatal("truncated origin accepted")
+	}
+}
+
+func TestIPv6AliasObservationReadsActualKernelWithoutMutation(t *testing.T) {
+	iface, e := net.InterfaceByName("lo")
+	if e != nil {
+		t.Fatal(e)
+	}
+	values, e := ReadIPv6Aliases(uint32(iface.Index))
+	if e != nil {
+		t.Fatalf("read-only kernel alias query: %v", e)
+	}
+	loopback, ok := values["::1"]
+	if !ok || loopback.PrefixLength != 128 || !loopback.CachePresent {
+		t.Fatalf("actual loopback address missing from dump: %+v", values)
+	}
+}

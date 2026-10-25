@@ -109,10 +109,11 @@ func wireguardSubnet(s Spec) (netip.Prefix, error) {
 		m = obj(m, "server")
 	}
 	a, e := netip.ParseAddr(str(m, "subnetIp"))
-	if e != nil {
+	bits := num(m, "subnetCidr")
+	if e != nil || !a.Is4() || bits < 1 || bits > 30 {
 		return netip.Prefix{}, ErrInvalid
 	}
-	return netip.PrefixFrom(a, int(num(m, "subnetCidr"))).Masked(), nil
+	return netip.PrefixFrom(a, int(bits)).Masked(), nil
 }
 
 // WireGuardAddresses produces a stable peer address. Explicit allocations take
@@ -136,6 +137,22 @@ func WireGuardAddresses(s Spec, u User) ([]string, error) {
 	if capacity == 0 {
 		return nil, invalid("settings.subnetCidr", "subnet_has_no_client_addresses")
 	}
+	var ipv6 netip.Prefix
+	if s.Protocol == "amneziawg" && boolean(obj(s.Settings, "server"), "ipv6Enabled") {
+		ipv6, e = netip.ParsePrefix(str(obj(s.Settings, "server"), "ipv6Subnet"))
+		if e != nil || !ipv6.Addr().Is6() || ipv6.Addr().Is4In6() || ipv6.Bits() > 126 {
+			return nil, invalid("settings.server.ipv6Subnet", "ipv6_subnet_too_small")
+		}
+		ipv6 = ipv6.Masked()
+		if hostBits := uint(128 - ipv6.Bits()); hostBits < 64 {
+			// Reserve the subnet address and the server at base+1. IPv6 has
+			// no broadcast address, so a /126 has two usable peer addresses.
+			v6Capacity := (uint64(1) << hostBits) - 2
+			if v6Capacity < capacity {
+				capacity = v6Capacity
+			}
+		}
+	}
 	id := u.ID
 	if id == 0 {
 		h := sha256.Sum256([]byte(strings.ToLower(u.UUID)))
@@ -148,14 +165,20 @@ func WireGuardAddresses(s Spec, u User) ([]string, error) {
 	base := binary.BigEndian.Uint32(a[:])
 	binary.BigEndian.PutUint32(a[:], base+uint32(id)+1)
 	out := []string{netip.AddrFrom4(a).String() + "/32"}
-	if s.Protocol == "amneziawg" && boolean(obj(s.Settings, "server"), "ipv6Enabled") {
-		v, e := netip.ParsePrefix(str(obj(s.Settings, "server"), "ipv6Subnet"))
-		if e != nil || v.Bits() > 64 {
-			return nil, invalid("settings.server.ipv6Subnet", "ipv6_subnet_too_small")
+	if ipv6.IsValid() {
+		b := ipv6.Addr().As16()
+		// Add to the masked base instead of replacing its low 64 bits: a
+		// /65…/126 prefix may already own bits in that half of the address.
+		offset := id + 1
+		for i := len(b) - 1; i >= 0 && offset != 0; i-- {
+			n := uint64(b[i]) + offset
+			b[i], offset = byte(n), n>>8
 		}
-		b := v.Masked().Addr().As16()
-		binary.BigEndian.PutUint64(b[8:], id+1)
-		out = append(out, netip.AddrFrom16(b).String()+"/128")
+		peer := netip.AddrFrom16(b)
+		if offset != 0 || !ipv6.Contains(peer) {
+			return nil, invalid("users.id", "subnet_capacity_exceeded")
+		}
+		out = append(out, peer.String()+"/128")
 	}
 	return out, nil
 }
@@ -198,10 +221,11 @@ func Render(input Spec, listen string, port uint16, tag string, users []User) (R
 		return Rendered{}, e
 	}
 	info, _ := protocolInfo(s.Protocol)
-	if info.ListenerOnly && len(users) > 0 {
+	noAccounts := info.ListenerOnly || s.Protocol == "mixed" && str(s.Settings, "auth") == "noauth"
+	if noAccounts && len(users) > 0 {
 		return Rendered{}, invalid("users", "listener_has_no_accounts")
 	}
-	if !info.ListenerOnly && len(users) == 0 {
+	if !noAccounts && len(users) == 0 {
 		return Rendered{}, invalid("users", "bound_user_required")
 	}
 	sorted := append([]User(nil), users...)
@@ -287,8 +311,8 @@ func Render(input Spec, listen string, port uint16, tag string, users []User) (R
 				clients = append(clients, map[string]any{"user": u.Email, "pass": PasswordFor(s, u)})
 			}
 			settings["accounts"] = clients
+			manifest["user_attribution"] = true
 		}
-		manifest["user_attribution"] = false
 	case "wireguard":
 		peers, e := wireguardPeers(s, users)
 		if e != nil {

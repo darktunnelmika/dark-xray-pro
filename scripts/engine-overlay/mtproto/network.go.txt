@@ -1,0 +1,24 @@
+package main
+
+import (
+	"errors"
+	"net"
+	"net/url"
+	"strconv"
+)
+
+// The only adapter egress proxy is the authenticated supervisor-owned loopback
+// bridge. No caller-selected URL can send account secrets to a remote service.
+func parseLocalProxy(raw string) (*url.URL, error) {
+	u, e := url.Parse(raw)
+	if e != nil || u.Scheme != "socks5" || u.User == nil || u.Path != "" || u.RawQuery != "" || u.Fragment != "" {
+		return nil, errors.New("invalid bridge")
+	}
+	host, port, e := net.SplitHostPort(u.Host)
+	password, hasPassword := u.User.Password()
+	portNumber, portErr := strconv.ParseUint(port, 10, 16)
+	if e != nil || host != "127.0.0.1" || portErr != nil || portNumber == 0 || u.User.Username() == "" || !hasPassword || password == "" {
+		return nil, errors.New("invalid bridge")
+	}
+	return u, nil
+}

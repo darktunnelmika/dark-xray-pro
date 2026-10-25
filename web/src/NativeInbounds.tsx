@@ -17,6 +17,8 @@ import InboundProfileForm, { type InboundProfileFormHandle, type InboundProfileV
 import InboundCreation from "./InboundCreation";
 import InboundPlanExecution from "./InboundPlanExecution";
 import InboundInitialApplyHealth from "./InboundInitialApplyHealth";
+import InboundExecution from "./InboundExecution";
+import { readExecutionState, type ExecutionState } from "./inboundExecution";
 import { readPromotionReceipt, type PromotionReceipt, type PromotionIssue } from "./inboundPlanExecution";
 import { creationNodeName, type CreationCapabilities, type CreationPlan, type CreationPlanResponse, type CreationIssue } from "./InboundCreationModel";
 import { navigateURL, registerNavigationGuard } from "./navigation";
@@ -56,7 +58,7 @@ const workspaceWords = {
  en: {
   overview: "Overview", routes: "Routes", clients: "Clients", activity: "Activity", diagnostics: "Diagnostics", back: "Back to Inbounds", cancel: "Cancel", close: "Close",
   listLead: "Manage profiles, assigned Nodes and client access.", loading: "Loading Inbounds…", missing: "This Inbound is no longer available.",
-  boundary: "Route execution and customer delivery have separate verification states.", swapBoundary: "Saved Dark Swap drafts are available. Live forwarding and customer delivery are not yet enabled.",
+  boundary: "Route execution and customer delivery have separate verification states.", swapBoundary: "Manage saved Direct, Tunnel and Dark Swap paths, then review their execution state.",
   copy: "Copy settings", copyHint: "Copy the public profile into a new Inbound. New keys are generated; clients and Node assignments are not copied.",
   nodeCount: "Assigned Nodes", plannedNodes: "Planned Nodes", clientCount: "Bound clients", profile: "Profile", targetAdd: "Add Node target", targetEdit: "Edit target", assigned: "Assigned Nodes and ports",
   directPort: "Direct", swapPort: "Destination listener", none: "No Node is assigned to this Inbound yet.", routeHelp: "Assign the destination Node first, then review and save its route draft below.",
@@ -71,7 +73,7 @@ const workspaceWords = {
  fa: {
   overview: "خلاصه", routes: "مسیرها", clients: "کلاینت‌ها", activity: "تاریخچه", diagnostics: "عیب‌یابی", back: "بازگشت به اینباندها", cancel: "انصراف", close: "بستن",
   listLead: "پروفایل‌ها، نودهای مقصد و دسترسی کلاینت‌ها را مدیریت کن.", loading: "در حال دریافت اینباندها…", missing: "این اینباند دیگر در دسترس نیست.",
-  boundary: "اجرای مسیر و تحویل سرویس به مشتری، وضعیت تأیید جداگانه دارند.", swapBoundary: "ذخیره و بررسی پیش‌نویس دارک سواپ در دسترس است. عبور عملیاتی ترافیک و تحویل سرویس هنوز فعال نیست.",
+  boundary: "اجرای مسیر و تحویل سرویس به مشتری، وضعیت تأیید جداگانه دارند.", swapBoundary: "مسیرهای مستقیم، تانل و دارک سواپ را مدیریت کن و وضعیت اجرای آن‌ها را بررسی کن.",
   copy: "کپی تنظیمات", copyHint: "پروفایل عمومی در یک اینباند تازه کپی می‌شود؛ کلیدها تازه‌اند و کلاینت‌ها و نودهای مقصد کپی نمی‌شوند.",
   nodeCount: "نودهای اختصاص‌یافته", plannedNodes: "نودهای طرح", clientCount: "کلاینت متصل", profile: "پروفایل", targetAdd: "افزودن نود مقصد", targetEdit: "ویرایش مقصد", assigned: "نودها و پورت‌های مقصد",
   directPort: "مستقیم", swapPort: "پورت مقصد", none: "هنوز نودی به این اینباند اختصاص داده نشده است.", routeHelp: "ابتدا نود مقصد را مشخص کن؛ سپس پیش‌نویس مسیرش را در پایین بررسی و ذخیره کن.",
@@ -118,6 +120,7 @@ export default function NativeInbounds({ language, fallback, workspace = "inboun
  const [setupEditor, setSetupEditor] = useState<{ source?: Inbound; plan?: CreationPlan; initialIssue?: CreationIssue; referencesCurrent?: boolean } | null>(null);
  const [setupDirty, setSetupDirty] = useState(false); const [setupBusy, setSetupBusy] = useState(false);
  const [executionDirty, setExecutionDirty] = useState(false); const [executionBusy, setExecutionBusy] = useState(false);
+ const [executions, setExecutions] = useState<Record<number, { state: ExecutionState; observedAt: number }>>({});
  const setupLoad = useRef(0);
  const lifetime = useRef<AbortController | null>(null); const tabElements = useRef<(HTMLButtonElement | null)[]>([]);
  const createValue: InboundProfileValue = { name, transport, grpcService: service, realityTarget: target, serverNames: sni, options: profileOptions };
@@ -170,7 +173,20 @@ export default function NativeInbounds({ language, fallback, workspace = "inboun
     if (controller.signal.aborted) return;
     if (![overview.inbounds, overview.nodes, overview.targets, overview.runtime].every(Array.isArray)) throw new Error("Invalid native response");
     assertPublicInboundData(overview);
+    if (overview.execution_enabled !== undefined && typeof overview.execution_enabled !== "boolean") throw new Error("invalid_execution_capability");
     for (const profile of overview.inbounds) { if (profile.spec) continue; if (profileSecurity(profile.security) === "tls") canonicalTLSMetadata(profile.tls); else if (profile.tls !== undefined) throw new Error("unexpected_tls_metadata"); }
+    if (overview.executions !== undefined) {
+     if (!Array.isArray(overview.executions) || overview.executions.length > 10000 || new Set(overview.executions.map(item => item?.inbound_id)).size !== overview.executions.length) throw new Error("invalid_execution_overview");
+     const reports = overview.executions.map(item => {
+      if (!overview.inbounds.some(inbound => inbound.id === item?.inbound_id && inbound.spec)) throw new Error("unknown_execution_inbound");
+      return readExecutionState(item, item.inbound_id);
+     });
+     setExecutions(previous => {
+      const next = { ...previous };
+      for (const state of reports) if ((state.server_time_unix_milli ?? 0) >= (next[state.inbound_id]?.state.server_time_unix_milli ?? 0)) next[state.inbound_id] = { state, observedAt: Date.now() };
+      return next;
+     });
+    }
     setData(overview); setFailure(false); setDisabled(false); lastSuccess.current = Date.now();
    } catch (e) {
     if (controller.signal.aborted) return;
@@ -202,7 +218,7 @@ export default function NativeInbounds({ language, fallback, workspace = "inboun
   return () => controller.abort();
  }, [session, refresh, expire, inboundFingerprint]);
  useEffect(() => {
-  if (!session?.authenticated || session.user?.role !== "owner" || !chosen || tab !== "clients") return;
+  if (!session?.authenticated || session.user?.role !== "owner" || !chosen || tab !== "clients" || !data || data.inbounds.find(inbound => inbound.id === chosen)?.spec) return;
   const controller = new AbortController(); let timer: ReturnType<typeof setTimeout>; setClientsReady(false); setClientsFailure(false);
   async function poll() {
    try {
@@ -221,7 +237,7 @@ export default function NativeInbounds({ language, fallback, workspace = "inboun
    } finally { if (!controller.signal.aborted) timer = setTimeout(() => { void poll(); }, 5000); }
   }
   void poll(); return () => { controller.abort(); clearTimeout(timer); };
- }, [session, chosen, offset, search, tab, refresh, expire]);
+ }, [session, chosen, offset, search, tab, refresh, expire, !!data, !!data?.inbounds.find(inbound => inbound.id === chosen)?.spec]);
  useEffect(() => {
   if (!session?.authenticated || session.user?.role !== "owner" || !diagnostics) return;
   const controller = new AbortController(); let timer: ReturnType<typeof setTimeout>; setCanaryClientPresent(null);
@@ -341,6 +357,7 @@ export default function NativeInbounds({ language, fallback, workspace = "inboun
  const current = data?.inbounds.find(i => i.id === chosen); const assigned = data?.targets.filter(item => item.inbound_id === chosen) ?? [];
  const setupSummary = setupCapabilities?.plans.find(plan => plan.inbound_id === chosen);
  const promotion = setupSummary?.promotion;
+ const managed = !!current?.spec && !promotion;
  const setupUnchanged = !!setupSummary && !!current && !current.enabled && !current.archived && current.bound_clients === 0 && assigned.length === 0 && current.revision === setupSummary.inbound_revision;
  if (disabled) return <section className="native-workspace inbound-capability-missing"><div className="native-card"><Server size={24}/><h2>{u.unavailableTitle}</h2><p>{u.unavailableHelp}</p><button type="button" onClick={() => setRefresh(n => n + 1)}><RefreshCw size={16}/>{t.retry}</button></div><details><summary>{u.legacyPreview}</summary>{fallback}</details></section>;
  return <section className="native-workspace" aria-label="Native Inbounds">
@@ -353,7 +370,7 @@ export default function NativeInbounds({ language, fallback, workspace = "inboun
   {!data && !failure && <p role="status">{u.loading}</p>}
   {session?.authenticated && session.user?.role !== "owner" && <p className="native-warning">{t.ownerOnly}</p>}
   {session?.authenticated && session.user?.role === "owner" && data && <>
-   <div hidden={chosen > 0}><InboundDirectory data={data} plans={setupCapabilities?.plans} language={language} blocked={busy || stale || !setupStatusReady} swapWorkspace={swapWorkspace}
+   <div hidden={chosen > 0}><InboundDirectory data={data} plans={setupCapabilities?.plans} executions={executions} language={language} blocked={busy || stale || !setupStatusReady} swapWorkspace={swapWorkspace}
     onOpen={item => navigateDetail(item.id, swapWorkspace ? "routes" : "overview")} onCreate={openCreate}/></div>
    {chosen > 0 && <>
     <div className="inbound-detail-heading"><button type="button" className="inbound-back" onClick={() => navigateDetail(0, "overview")}><ChevronLeft size={17}/>{u.back}</button>
@@ -361,7 +378,11 @@ export default function NativeInbounds({ language, fallback, workspace = "inboun
     </div>
     {!current ? <p className="native-warning">{u.missing}</p> : <>
      <nav className="inbound-detail-tabs" role="tablist" aria-label="Inbound sections">{tabs.map((item, index) => <button key={item} ref={element => { tabElements.current[index] = element; }} role="tab" id={"inbound-tab-" + item} aria-controls={"inbound-panel-" + item} aria-selected={tab === item} tabIndex={tab === item ? 0 : -1} onKeyDown={event => tabKey(event, index)} onClick={() => switchTab(item)}>{u[item]}</button>)}</nav>
-     {setupSummary && (tab === "overview" || tab === "routes") && <section className="native-card creation-saved-plan"><ShieldCheck size={21}/><div><h3>{u.setupTitle}</h3><p>{promotion ? u.preparedHelp : setupUnchanged ? u.setupHelp : u.setupChanged}</p>{setupSummary.node_ids && <p data-planned-nodes>{u.plannedNodes}: {setupSummary.node_ids.map(id => creationNodeName(data.nodes, id)).join(" · ")}</p>}{!promotion && setupSummary.status === "WAITING_HOST" && <p className="creation-waiting">{u.setupWaiting}</p>}</div><button type="button" disabled={busy || setupBusy || executionBusy} onClick={() => void openSetupPlan()}>{u.setupOpen}</button></section>}
+     {setupSummary && (!managed || executions[chosen]?.state.enabled !== true) && (tab === "overview" || tab === "routes") && <section className="native-card creation-saved-plan"><ShieldCheck size={21}/><div><h3>{u.setupTitle}</h3><p>{promotion ? u.preparedHelp : setupUnchanged ? u.setupHelp : u.setupChanged}</p>{setupSummary.node_ids && <p data-planned-nodes>{u.plannedNodes}: {setupSummary.node_ids.map(id => creationNodeName(data.nodes, id)).join(" · ")}</p>}{!promotion && setupSummary.status === "WAITING_HOST" && <p className="creation-waiting">{u.setupWaiting}</p>}</div><button type="button" disabled={busy || setupBusy || executionBusy || executionDirty} onClick={() => void openSetupPlan()}>{u.setupOpen}</button></section>}
+     {managed ? <InboundExecution key={chosen} inbound={current} nodes={data.nodes} language={language} tab={tab} refreshKey={refresh} swapWorkspace={swapWorkspace}
+       blocked={busy || setupBusy || stale || !setupStatusReady} onOpenSetup={() => void openSetupPlan()} onSelectTab={switchTab}
+       onDirtyChange={setExecutionDirty} onBusyChange={setExecutionBusy} onChanged={() => setRefresh(value => value + 1)}
+       onStateChange={(state, observedAt) => setExecutions(previous => ({ ...previous, [state.inbound_id]: { state, observedAt } }))}/> : <>
      <section hidden={tab !== "overview"} role="tabpanel" id="inbound-panel-overview" aria-labelledby="inbound-tab-overview" className="inbound-detail-panel">
       {visited.includes("overview") && <>
        <div className="inbound-summary"><div data-node-summary><span>{setupSummary ? u.plannedNodes : u.nodeCount}</span><strong>{setupSummary ? setupSummary.node_ids?.length ?? "—" : assigned.length}</strong>{setupSummary && <small>{u.nodeCount}: {assigned.length}</small>}</div><div><span>{u.clientCount}</span><strong>{current.bound_clients}</strong></div><div><span>{u.profile}</span><strong>{current.archived ? t.archivedLabel : promotion ? u.prepared : current.enabled ? t.enabledLabel : t.disabledLabel}</strong></div></div>
@@ -393,10 +414,11 @@ export default function NativeInbounds({ language, fallback, workspace = "inboun
       </div>)}
      </section>
      <section hidden={tab !== "activity"} role="tabpanel" id="inbound-panel-activity" aria-labelledby="inbound-tab-activity" className="inbound-detail-panel">{visited.includes("activity") && <InboundLifecycle key={chosen} inbound={current} language={language} csrf={session.csrf_token ?? ""} blocked={busy || stale} mode="history" onChanged={() => setRefresh(n => n + 1)}/>}</section>
+     </>}
     </>}
    </>}
    <section id="inbound-diagnostics" hidden={!diagnostics} className="inbound-diagnostics" aria-label="Inbound diagnostics">
-    {diagnosticsVisited && <><header><h2>{u.lab}</h2><p>{u.labHelp}</p></header><NativeReadiness preflight={data.preflight} stale={stale} language={language}/>
+    {diagnosticsVisited && <><header><h2>{u.lab}</h2><p>{u.labHelp}</p></header>{data.execution_enabled !== true && <NativeReadiness preflight={data.preflight} stale={stale} language={language}/>}
      <NativeCanary language={language} hasUSA={data.nodes.some(n => n.node_id === "usa-pro-01")} staged={data.inbounds.some(i => i.id === 901617) && data.targets.some(target => target.inbound_id === 901617 && target.node_id === "usa-pro-01") && canaryClientPresent === true} unavailable={busy || stale || canaryClientPresent === null} busy={busy} onStage={() => void mutate("/api/v1/workspace/native-canary/stage", { confirmation: "USA_PRO_LOOPBACK_QA_ONLY" }, () => navigateDetail(901617, "overview"))}/>
      <NativeRouteTransactions language={language}/>{!promotion && <NativeMeteredRouteTransactions language={language}/>}
      <div className="native-card"><h3><ArrowRightLeft size={19}/>{t.status}</h3><p>{t.evidence}</p><div className="native-report-list">{data.runtime.map(report => <article key={report.node_id + report.installation_id} className="native-report"><h4>{data.nodes.find(n => n.node_id === report.node_id)?.name ?? report.node_id}</h4><strong className={matching(report) ? "native-confirmed" : "native-pending"}>{statusLabel(report)}</strong><div><span>{t.desired}: {report.desired_sequence || "—"}</span><span>{t.observed}: {report.reported_sequence || "—"}</span></div><p>{t.phase}: {report.phase || "—"}</p><p>{t.last}: {report.reported_at ? new Date(report.reported_at).toLocaleTimeString(language === "fa" ? "fa-IR" : "en-GB") : "—"}</p></article>)}</div></div>

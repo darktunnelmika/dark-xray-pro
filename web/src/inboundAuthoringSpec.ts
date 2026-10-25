@@ -10,7 +10,7 @@ export type SpecField = {
   path: string; label: string; fa?: string;
   kind?: "text" | "number" | "numbers" | "boolean" | "select" | "lines" | "pem" | "pemText" | "packet" | "pairs" | "rows" | "json";
   options?: string[]; fields?: SpecField[]; required?: boolean; secret?: boolean; wide?: boolean;
-  min?: number; max?: number; placeholder?: string; hint?: string; faHint?: string;
+  min?: number; max?: number; maxLength?: number; placeholder?: string; hint?: string; faHint?: string;
   disabled?: boolean;
   initial?: SpecValue; generate?: "password" | "hex";
 };
@@ -39,7 +39,7 @@ export const protocolFields: Record<string, SpecField[]> = {
   http: [bool("settings.allowTransparent", "Transparent HTTP")],
   mixed: [select("settings.auth", "Authentication", ["password", "noauth"]), bool("settings.udp", "UDP"), f("settings.ip", "UDP bind IP", { placeholder: "127.0.0.1" })],
   tunnel: [f("settings.rewriteAddress", "Destination address", { fa: "آدرس مقصد" }), num("settings.rewritePort", "Destination port", { min: 1, max: 65535 }), select("settings.allowedNetwork", "Allowed traffic", ["tcp,udp", "tcp", "udp"]), bool("settings.followRedirect", "Follow redirect"), f("settings.portMap", "Port mappings", { kind: "pairs", wide: true, hint: "One source-port = destination-host:port mapping per line.", faHint: "در هر خط پورت مبدأ = هاست:پورت مقصد وارد کن." })],
-  tun: [f("settings.name", "Interface name", { placeholder: "xray0" }), f("settings.desc", "Description"), num("settings.mtu", "MTU", { max: 65535 }), list("settings.gateway", "Gateway CIDRs"), list("settings.dns", "DNS servers"), num("settings.userLevel", "User level"), list("settings.autoSystemRoutingTable", "System route CIDRs"), f("settings.autoOutboundsInterface", "Outbound interface"), bool("settings.autoSystemDnsToGateway", "System DNS to gateway"), list("settings.autoSystemWfpBlockLeak", "WFP leak protection", { placeholder: "dns\nmisconfigtun" })],
+  tun: [f("settings.name", "Interface name", { placeholder: "xray0", maxLength: 15, hint: "Up to 15 ASCII letters, digits, underscores, dots or hyphens.", faHint: "حداکثر ۱۵ حرف انگلیسی، رقم، زیرخط، نقطه یا خط تیره." }), f("settings.desc", "Description"), num("settings.mtu", "MTU", { max: 65535 }), list("settings.gateway", "Gateway CIDRs"), list("settings.dns", "DNS servers"), num("settings.userLevel", "User level"), list("settings.autoSystemRoutingTable", "System route CIDRs"), f("settings.autoOutboundsInterface", "Outbound interface"), bool("settings.autoSystemDnsToGateway", "System DNS to gateway"), list("settings.autoSystemWfpBlockLeak", "WFP leak protection", { placeholder: "dns\nmisconfigtun" })],
   mtproto: [f("settings.fakeTlsDomain", "Fake TLS domain", { placeholder: "www.cloudflare.com" }), secret("settings.secret", "Secret"), bool("settings.proxyProtocolListener", "PROXY protocol listener"), select("settings.preferIp", "Preferred IP", ["prefer-ipv6", "prefer-ipv4", "only-ipv6", "only-ipv4"]), bool("settings.debug", "Debug"), f("settings.domainFronting.ip", "Domain-fronting IP"), num("settings.domainFronting.port", "Domain-fronting port", { min: 1, max: 65535 }), bool("settings.domainFronting.proxyProtocol", "Domain-fronting PROXY protocol"), num("settings.throttleMaxConnections", "Maximum connections"), num("settings.pendingHandshakesMaxPerIp", "Pending handshakes per IP"), bool("settings.routeThroughXray", "Route through Xray"), f("settings.outboundTag", "Outbound tag"), f("settings.publicIpv4", "Public IPv4"), f("settings.publicIpv6", "Public IPv6")],
   amneziawg: [secret("settings.server.privateKey", "Private key"), f("settings.server.publicKey", "Public key"), f("settings.server.subnetIp", "Subnet IP"), num("settings.server.subnetCidr", "Subnet prefix", { max: 128 }), num("settings.server.mtu", "MTU", { min: 576, max: 9000 }), f("settings.server.primaryDns", "Primary DNS"), f("settings.server.secondaryDns", "Secondary DNS"), f("settings.server.externalInterface", "External interface"), bool("settings.server.ipv6Enabled", "IPv6"), f("settings.server.ipv6Subnet", "IPv6 subnet"), f("settings.server.ipv6ExternalInterface", "IPv6 external interface"), ...["jc", "jmin", "jmax", "s1", "s2", "s3", "s4"].map(key => num(`settings.server.${key}`, key.toUpperCase())), ...["h1", "h2", "h3", "h4"].map(key => f(`settings.server.${key}`, key.toUpperCase())), ...["i1", "i2", "i3", "i4", "i5"].map(key => f(`settings.server.${key}`, key.toUpperCase())), secret("settings.server.headerProtectionKey", "Header protection key"), ...["contentPaddingAddition", "rekeyAfterTime", "rekeyTimeout", "rejectAfterTime", "keepaliveTimeout", "maxHandshakeAttempts"].map(key => f(`settings.server.${key}`, key.replace(/[A-Z]/g, letter => ` ${letter.toLowerCase()}`))), bool("settings.server.randomTrailers", "Random trailers"), bool("settings.server.disableCookies", "Disable cookies")],
   tuic: [secret("settings.server.certificate", "Certificate file path", { placeholder: "/etc/ssl/certs/server.pem" }), secret("settings.server.private_key", "Private key file path", { placeholder: "/etc/ssl/private/server.key" }), select("settings.server.congestion_control", "Congestion control", ["bbr", "cubic", "new_reno"]), list("settings.server.alpn", "ALPN"), select("settings.server.udp_relay_mode", "UDP relay mode", ["native", "quic"]), bool("settings.server.zero_rtt_handshake", "0-RTT handshake"), select("settings.server.log_level", "Log level", ["warn", "info", "error", "debug"]), num("settings.server.max_idle_time", "Maximum idle time (seconds)", { min: 1, max: 86400 }), num("settings.server.authentication_timeout", "Authentication timeout (seconds)", { min: 1, max: 600 }), num("settings.server.max_udp_relay_packet_size", "Maximum UDP packet size"), f("settings.server.sni", "SNI")],
@@ -194,12 +194,56 @@ export function specIssues(spec: AuthoringSpec, retained: string[] = []): Array<
     if (field.kind === "rows" && Array.isArray(value)) value.forEach((_, index) => field.fields?.forEach(child => check(child, `${path}.${index}.`)));
   }
   fields.forEach(field => check(field));
+  if (spec.protocol === "tun" && spec.settings.autoSystemDnsToGateway === true) add("settings.autoSystemDnsToGateway", "tun_host_dns_takeover_unsupported");
+  if (spec.protocol === "tun" && spec.settings.name !== undefined && spec.settings.name !== "" && (typeof spec.settings.name !== "string" || !/^[A-Za-z0-9_-][A-Za-z0-9_.-]{0,14}$/.test(spec.settings.name))) add("settings.name", "interface_name_invalid");
+  if (spec.protocol === "tuic" && spec.security === "tls") {
+    for (const path of ["tls.minVersion", "tls.maxVersion"]) {
+      const value = readSpecPath(spec, path);
+      if (value !== undefined && value !== "" && value !== "1.3") add(path, "tuic_requires_tls13");
+    }
+    if (spec.tls.cipherSuites) add("tls.cipherSuites", "tuic_cipher_suites_unsupported");
+  }
+  if (spec.protocol === "amneziawg") {
+    for (const path of ["settings.server.externalInterface", "settings.server.ipv6ExternalInterface"]) if (readSpecPath(spec, path)) add(path, "amneziawg_host_alias_unsupported");
+    const mtu = readSpecPath(spec, "settings.server.mtu");
+    if (typeof mtu === "number" && mtu !== 0 && (mtu < 1280 || mtu > 9000)) add("settings.server.mtu", "amneziawg_mtu_range");
+    const prefix = readSpecPath(spec, "settings.server.ipv6Subnet");
+    if (readSpecPath(spec, "settings.server.ipv6Enabled") === true && typeof prefix === "string" && /\/(127|128)$/.test(prefix)) add("settings.server.ipv6Subnet", "amneziawg_ipv6_prefix_too_small");
+  }
   if (spec.security === "reality") {
     if (typeof spec.reality.target !== "string" || !/^(?:\[[^\]]+\]|[^\s:/]+):\d{1,5}$/.test(spec.reality.target)) add("reality.target");
     if (Array.isArray(spec.reality.shortIds) && spec.reality.shortIds.some(id => typeof id !== "string" || !/^(?:[a-f0-9]{2}){1,8}$/.test(id))) add("reality.shortIds");
   }
   if (["clients", "accounts", "users", "peers"].some(key => Object.hasOwn(spec.settings, key))) add("settings", "spec_clients_managed");
   return issues;
+}
+
+// Unavailable controls stay visible with an explanation. An imported value
+// remains editable so its removal is explicit and the preview can reject it.
+export function compatibleAuthoringFields(spec: AuthoringSpec, fields: SpecField[]): SpecField[] {
+  return fields.map(field => {
+    const value = readSpecPath(spec, field.path);
+    if (spec.protocol === "tun" && field.path === "settings.autoSystemDnsToGateway") return {
+      ...field, disabled: true, hint: "Automatic host DNS takeover is unavailable. Keep the host resolver unchanged; ordinary TUN routing remains available with the required host permissions.",
+      faHint: "تغییر خودکار DNS میزبان در این اجرا پشتیبانی نمی‌شود. DNS میزبان را حفظ کنید؛ مسیریابی عادی TUN با مجوزهای لازم میزبان قابل استفاده است.",
+    };
+    if (spec.protocol === "tuic" && ["tls.minVersion", "tls.maxVersion"].includes(field.path)) return {
+      ...field, options: ["1.3", ...(typeof value === "string" && value !== "" && value !== "1.3" ? [value] : [])],
+      hint: "TUIC requires TLS 1.3. The default is 1.3; an older saved value must be corrected.",
+      faHint: "TUIC فقط با TLS 1.3 اجرا می‌شود. پیش‌فرض ۱.۳ است؛ مقدار قدیمی ذخیره‌شده را اصلاح کنید.",
+    };
+    if (spec.protocol === "tuic" && field.path === "tls.cipherSuites") return {
+      ...field, disabled: !value, hint: "TLS 1.3 cipher suites are selected by the TLS engine. Custom suites are unsupported; clear any saved override.",
+      faHint: "مجموعه‌رمزهای TLS 1.3 را موتور TLS انتخاب می‌کند. انتخاب دستی پشتیبانی نمی‌شود؛ مقدار ذخیره‌شده را پاک کنید.",
+    };
+    if (spec.protocol === "amneziawg" && ["settings.server.externalInterface", "settings.server.ipv6ExternalInterface"].includes(field.path)) return {
+      ...field, disabled: !value, hint: "Host interface binding and public IPv6 source aliases are unavailable. Remove any saved interface; IPv6 inside the tunnel remains supported.",
+      faHint: "اتصال به رابط میزبان و آدرس مبدأ عمومی IPv6 پشتیبانی نمی‌شود. نام رابط ذخیره‌شده را پاک کنید؛ IPv6 داخل تانل قابل استفاده است.",
+    };
+    if (spec.protocol === "amneziawg" && field.path === "settings.server.mtu") return { ...field, min: 1280, max: 9000, hint: "Supported range: 1280–9000 bytes.", faHint: "بازهٔ پشتیبانی‌شده: ۱۲۸۰ تا ۹۰۰۰ بایت." };
+    if (spec.protocol === "amneziawg" && field.path === "settings.server.ipv6Subnet") return { ...field, hint: "IPv6 tunnel subnet, with prefix length at most 126 (for example fd42::/64).", faHint: "ساب‌نت IPv6 داخل تانل با طول پیشوند حداکثر ۱۲۶؛ مانند fd42::/64." };
+    return field;
+  });
 }
 export function specPublicMatches(expected: AuthoringSpec, actual: AuthoringSpec, retained: string[] = []): boolean {
   if (!validAuthoringSpec(actual)) return false;

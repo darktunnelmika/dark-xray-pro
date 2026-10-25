@@ -1,0 +1,87 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+package main
+
+import (
+	"encoding/json"
+	"strings"
+	"testing"
+
+	"github.com/mhsanaei/3x-ui/v3/internal/amneziawg"
+	"github.com/mhsanaei/3x-ui/v3/internal/darkproadapter"
+)
+
+func publicSourceConfig(t *testing.T) config {
+	priv, pub := keypair(t)
+	_, alice := keypair(t)
+	_, bob := keypair(t)
+	return config{Listen: "127.0.0.1", Port: 18473, Address: []string{"10.233.41.1/24"}, Server: amneziawg.ServerSettings{PrivateKey: priv, PublicKey: pub, IPv6Enabled: true, IPv6Subnet: "fd42:eed::/64", IPv6ExternalInterface: "edge0", MTU: 1420}, Peers: []peer{{PublicKey: alice, Email: "alice", AllowedIPs: []string{"10.233.41.2/32", "fd42:eed::2/128"}}, {PublicKey: bob, Email: "bob", AllowedIPs: []string{"10.233.41.3/32", "fd42:eed::3/128"}}}}
+}
+
+func TestPublicIPv6PreparationIsOfflineButRuntimeRequiresAuthority(t *testing.T) {
+	cfg := publicSourceConfig(t)
+	in := awgInput(t, cfg)
+	plan, e := prepare(in)
+	if e != nil {
+		t.Fatalf("offline check unexpectedly needed host aliases: %v", e)
+	}
+	if w, e := darkproadapter.NewWorker(in, plan); e == nil {
+		_ = w
+		t.Fatal("source aliases admitted without immutable Agent authority")
+	}
+	intent, e := preparePublicIPv6(cfg, in)
+	if e != nil || len(intent.bindings) != 2 || intent.bindings[0].PrincipalID != "alice" || intent.bindings[0].Address.String() != "fd42:eed::2" {
+		t.Fatalf("peer source was not derived from immutable assignment: %+v %v", intent, e)
+	}
+	// externalInterface is only the documented IPv6 interface fallback. This
+	// feature makes no promise to bind ordinary IPv4 egress to a chosen device.
+	cfg.Server.ExternalInterface = cfg.Server.IPv6ExternalInterface
+	cfg.Server.IPv6ExternalInterface = ""
+	if _, e = preparePublicIPv6(cfg, awgInput(t, cfg)); e != nil {
+		t.Fatal(e)
+	}
+	cfg.Server.IPv6Enabled = false
+	if _, e = preparePublicIPv6(cfg, awgInput(t, cfg)); e == nil {
+		t.Fatal("unimplemented IPv4 external-interface policy silently accepted")
+	}
+}
+
+func TestPublicIPv6RejectsPeerKeyPrincipalAndSourceAmbiguity(t *testing.T) {
+	for _, name := range []string{"no-v6", "outside-prefix", "two-v6", "server-address", "another-peer", "mapped-v4", "wrong-principal", "noncanonical-key"} {
+		t.Run(name, func(t *testing.T) {
+			cfg := publicSourceConfig(t)
+			in := awgInput(t, cfg)
+			switch name {
+			case "no-v6":
+				cfg.Peers[0].AllowedIPs = cfg.Peers[0].AllowedIPs[:1]
+			case "outside-prefix":
+				cfg.Peers[0].AllowedIPs[1] = "fd43::2/128"
+			case "two-v6":
+				cfg.Peers[0].AllowedIPs = []string{"fd42:eed::2/128", "fd42:eed::4/128"}
+			case "server-address":
+				cfg.Peers[0].AllowedIPs[1] = "fd42:eed::1/128"
+			case "another-peer":
+				cfg.Peers[0].AllowedIPs[1] = "fd42:eed::3/128"
+			case "mapped-v4":
+				cfg.Peers[0].AllowedIPs[1] = "::ffff:192.0.2.8/128"
+			case "wrong-principal":
+				in.Principals[0].CredentialSHA = strings.Repeat("a", 64)
+			case "noncanonical-key":
+				cfg.Peers[0].PublicKey += "\n"
+			}
+			in.Config, _ = json.Marshal(cfg)
+			if _, e := prepare(in); e == nil {
+				t.Fatal("ambiguous public source authority accepted")
+			}
+		})
+	}
+}
+
+func TestPublicIPv6OwnerAggregateRetainsExactPeerKeyBindings(t *testing.T) {
+	cfg := publicSourceConfig(t)
+	in := awgInput(t, cfg)
+	in.Principals = []darkproadapter.Principal{{ID: "owner", Engine: "amneziawg", Role: "owner_aggregate", Counter: "inbound>>>awg>>>traffic", InboundID: 1}}
+	intent, e := preparePublicIPv6(cfg, in)
+	if e != nil || len(intent.bindings) != 2 || intent.bindings[0].PrincipalID != "owner" || intent.bindings[1].PrincipalID != "owner" || intent.bindings[0].PeerPublicKeySHA == intent.bindings[1].PeerPublicKeySHA {
+		t.Fatalf("aggregate accounting invented customer or peer mapping: %+v %v", intent, e)
+	}
+}

@@ -1,0 +1,464 @@
+// This standalone process links the MIT-licensed mtg-multi engine. Its source
+// and reproducible overlay are distributed with the PRO engine release.
+package main
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"flag"
+	"io"
+	"net"
+	"net/http"
+	"os"
+	"os/signal"
+	"sort"
+	"strings"
+	"sync"
+	"syscall"
+	"time"
+
+	"github.com/mhsanaei/mtg-multi/antireplay"
+	"github.com/mhsanaei/mtg-multi/essentials"
+	"github.com/mhsanaei/mtg-multi/events"
+	"github.com/mhsanaei/mtg-multi/internal/config"
+	"github.com/mhsanaei/mtg-multi/internal/proxyprotocol"
+	"github.com/mhsanaei/mtg-multi/ipblocklist"
+	"github.com/mhsanaei/mtg-multi/logger"
+	"github.com/mhsanaei/mtg-multi/mtglib"
+	network "github.com/mhsanaei/mtg-multi/network/v2"
+	"github.com/pelletier/go-toml/v2"
+	"github.com/pires/go-proxyproto"
+)
+
+type principal struct {
+	ID            string `json:"id"`
+	Engine        string `json:"engine"`
+	ComponentTag  string `json:"component_tag,omitempty"`
+	ClientID      string `json:"client_id,omitempty"`
+	Role          string `json:"role"`
+	Counter       string `json:"counter"`
+	CredentialSHA string `json:"credential_sha,omitempty"`
+	InboundID     uint64 `json:"inbound_id"`
+	Billable      bool   `json:"billable"`
+}
+type counter struct {
+	ID       string `json:"principal_id"`
+	Upload   uint64 `json:"upload,string"`
+	Download uint64 `json:"download,string"`
+}
+type input struct {
+	Version    int            `json:"version"`
+	Engine     string         `json:"engine"`
+	Config     map[string]any `json:"config"`
+	Manifest   map[string]any `json:"manifest"`
+	Principals []principal    `json:"principals"`
+}
+type response struct {
+	Version  int       `json:"version"`
+	Engine   string    `json:"engine"`
+	Ready    bool      `json:"ready"`
+	Open     bool      `json:"admission_open"`
+	Final    bool      `json:"final"`
+	Nonce    string    `json:"nonce,omitempty"`
+	Counters []counter `json:"counters"`
+}
+
+type worker struct {
+	mu                   sync.Mutex
+	proxy                *mtglib.Proxy
+	listener             net.Listener
+	open, closing, final bool
+	activate, nonce      string
+	ready                bool
+	conns                map[net.Conn]bool
+	wg                   sync.WaitGroup
+	accepted             chan struct{}
+	sealed               chan struct{}
+	principals           []principal
+	userNames            []string
+	values               []counter
+}
+
+func validNonce(s string) bool {
+	if len(s) != 64 || strings.ToLower(s) != s {
+		return false
+	}
+	_, e := hex.DecodeString(s)
+	return e == nil
+}
+func (w *worker) snapshot() ([]counter, error) {
+	stats := w.proxy.DarkProSnapshot()
+	if aggregateBinding(w.principals) {
+		value := counter{ID: w.principals[0].ID}
+		if len(stats.Users) != len(w.userNames) {
+			return nil, errors.New("incomplete aggregate counters")
+		}
+		for _, name := range w.userNames {
+			one, ok := stats.Users[name]
+			if !ok || one.BytesIn < 0 || one.BytesOut < 0 {
+				return nil, errors.New("incomplete aggregate counters")
+			}
+			up, down := uint64(one.BytesIn), uint64(one.BytesOut)
+			if ^uint64(0)-value.Upload < up || ^uint64(0)-value.Download < down {
+				return nil, errors.New("aggregate counter overflow")
+			}
+			value.Upload += up
+			value.Download += down
+		}
+		return []counter{value}, nil
+	}
+	out := make([]counter, 0, len(w.principals))
+	for _, p := range w.principals {
+		parts := strings.Split(p.Counter, ">>>")
+		if len(parts) != 3 || parts[0] != "user" || parts[2] != "traffic" {
+			return nil, errors.New("invalid counter binding")
+		}
+		v, ok := stats.Users[parts[1]]
+		if !ok || v.BytesIn < 0 || v.BytesOut < 0 {
+			return nil, errors.New("incomplete counters")
+		}
+		out = append(out, counter{ID: p.ID, Upload: uint64(v.BytesIn), Download: uint64(v.BytesOut)})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out, nil
+}
+
+func aggregateBinding(principals []principal) bool {
+	if len(principals) != 1 {
+		return false
+	}
+	p := principals[0]
+	parts := strings.Split(p.Counter, ">>>")
+	return p.Engine == "mtproto" && p.ID != "" && p.InboundID > 0 && p.Role == "owner_aggregate" && !p.Billable && p.ClientID == "" && p.CredentialSHA == "" && len(parts) == 3 && parts[0] == "inbound" && parts[1] != "" && parts[1] == p.ComponentTag && parts[2] == "traffic"
+}
+func (w *worker) serve() {
+	defer close(w.accepted)
+	for {
+		conn, err := w.listener.Accept()
+		if err != nil {
+			return
+		}
+		w.mu.Lock()
+		if !w.open || w.closing {
+			w.mu.Unlock()
+			_ = conn.Close()
+			continue
+		}
+		w.conns[conn] = true
+		w.wg.Add(1)
+		w.mu.Unlock()
+		// Add happens before launch under the same lock that fences admission.
+		go func() {
+			defer w.wg.Done()
+			defer func() { w.mu.Lock(); delete(w.conns, conn); w.mu.Unlock(); _ = conn.Close() }()
+			w.proxy.ServeConn(essentials.WrapNetConn(conn))
+		}()
+	}
+}
+func (w *worker) beginFinal(nonce string) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.closing {
+		if w.nonce != nonce {
+			return errors.New("nonce conflict")
+		}
+		return nil
+	}
+	w.closing = true
+	w.open = false
+	w.nonce = nonce
+	go func() {
+		_ = w.listener.Close()
+		<-w.accepted
+		w.mu.Lock()
+		conns := make([]net.Conn, 0, len(w.conns))
+		for c := range w.conns {
+			conns = append(conns, c)
+		}
+		w.mu.Unlock()
+		w.proxy.DarkProCancel()
+		for _, c := range conns {
+			_ = c.Close()
+		}
+		w.wg.Wait()
+		w.proxy.Shutdown()
+		values, err := w.snapshot()
+		w.mu.Lock()
+		defer w.mu.Unlock()
+		if err == nil {
+			w.values = values
+			w.final = true
+		}
+		close(w.sealed)
+	}()
+	return nil
+}
+func (w *worker) handle(rw http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		http.Error(rw, "method", 405)
+		return
+	}
+	r.Body = http.MaxBytesReader(rw, r.Body, 4096)
+	defer r.Body.Close()
+	var in struct {
+		Nonce string `json:"nonce,omitempty"`
+	}
+	d := json.NewDecoder(r.Body)
+	d.DisallowUnknownFields()
+	if d.Decode(&in) != nil {
+		http.Error(rw, "request", 422)
+		return
+	}
+	var extra any
+	if d.Decode(&extra) != io.EOF {
+		http.Error(rw, "request", 422)
+		return
+	}
+	op := strings.TrimPrefix(r.URL.Path, "/")
+	if op == "final" {
+		if !validNonce(in.Nonce) || w.beginFinal(in.Nonce) != nil {
+			http.Error(rw, "nonce", 409)
+			return
+		}
+		select {
+		case <-r.Context().Done():
+			return
+		case <-w.sealed:
+		}
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	switch op {
+	case "activate":
+		if !validNonce(in.Nonce) || w.closing || w.activate != "" && w.activate != in.Nonce {
+			http.Error(rw, "closed", 409)
+			return
+		}
+		w.activate = in.Nonce
+		w.open = true
+	case "status", "snapshot", "final":
+	default:
+		http.NotFound(rw, r)
+		return
+	}
+	values := w.values
+	if !w.final {
+		var err error
+		values, err = w.snapshot()
+		if err != nil {
+			http.Error(rw, "counters", 503)
+			return
+		}
+	}
+	nonce := ""
+	if op == "activate" {
+		nonce = w.activate
+	}
+	if op == "final" {
+		nonce = w.nonce
+		if !w.final {
+			http.Error(rw, "proof", 503)
+			return
+		}
+	}
+	rw.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(rw).Encode(response{Version: 1, Engine: "mtproto", Ready: w.ready, Open: w.open, Final: w.final, Nonce: nonce, Counters: values})
+}
+
+func makeProxy(in input, start bool) (*mtglib.Proxy, *config.Config, error) {
+	return makeProxyWithNetwork(in, start, nil)
+}
+
+// Network injection is internal to this package and used by acceptance tests.
+// Neither the worker configuration nor the control API exposes it.
+func makeProxyWithNetwork(in input, start bool, injected mtglib.Network) (*mtglib.Proxy, *config.Config, error) {
+	if in.Version != 1 || in.Engine != "mtproto" || len(in.Principals) == 0 {
+		return nil, nil, errors.New("invalid adapter")
+	}
+	raw, err := toml.Marshal(in.Config)
+	if err != nil {
+		return nil, nil, err
+	}
+	conf, err := config.Parse(raw)
+	if err != nil {
+		return nil, nil, err
+	}
+	secrets := conf.GetSecrets()
+	aggregate := aggregateBinding(in.Principals)
+	if len(secrets) == 0 || !aggregate && len(secrets) != len(in.Principals) {
+		return nil, nil, errors.New("binding count")
+	}
+	if len(conf.GetBindAddrs()) != 1 {
+		return nil, nil, errors.New("exactly one listener required")
+	}
+	seen := map[string]bool{}
+	names := map[string]bool{}
+	keys := map[[mtglib.SecretKeyLength]byte]bool{}
+	configured, ok := in.Config["secrets"].(map[string]any)
+	if !ok || len(configured) != len(secrets) {
+		return nil, nil, errors.New("named secrets required")
+	}
+	for name, secret := range secrets {
+		if name == "" || !secret.Valid() || keys[secret.Key] {
+			return nil, nil, errors.New("binding secret")
+		}
+		keys[secret.Key] = true
+		if _, ok := configured[name].(string); !ok {
+			return nil, nil, errors.New("binding credential")
+		}
+	}
+	for _, p := range in.Principals {
+		if aggregate {
+			continue
+		}
+		parts := strings.Split(p.Counter, ">>>")
+		if p.Engine != "mtproto" || p.ID == "" || seen[p.ID] || len(parts) != 3 || parts[0] != "user" || parts[1] == "" || parts[2] != "traffic" || names[parts[1]] {
+			return nil, nil, errors.New("binding identity")
+		}
+		seen[p.ID] = true
+		names[parts[1]] = true
+		secret, ok := secrets[parts[1]]
+		if !ok || !secret.Valid() {
+			return nil, nil, errors.New("binding secret")
+		}
+		// The signed binding hashes the rendered ee-secret, not its alternate base64
+		// spelling. Comparing the exact input prevents a correct user name from
+		// silently binding a different credential at the execution boundary.
+		configured, ok := in.Config["secrets"].(map[string]any)
+		if !ok {
+			return nil, nil, errors.New("named secrets required")
+		}
+		value, ok := configured[parts[1]].(string)
+		if !ok {
+			return nil, nil, errors.New("binding credential")
+		}
+		digest := sha256.Sum256([]byte(value))
+		if !validNonce(p.CredentialSHA) || p.CredentialSHA != hex.EncodeToString(digest[:]) {
+			return nil, nil, errors.New("binding credential")
+		}
+	}
+	resolver, err := network.GetDNS(conf.GetDNS())
+	if err != nil {
+		return nil, nil, err
+	}
+	var ntw mtglib.Network = network.New(resolver, "dark-pro-mtg", 5*time.Second, 8*time.Second, 30*time.Second, net.KeepAliveConfig{Enable: true}, 0)
+	if required, _ := in.Manifest["requires_socks_bridge"].(bool); required {
+		endpoint, _ := in.Manifest["socks_bridge_url"].(string)
+		if endpoint == "" {
+			return nil, nil, errors.New("socks bridge required")
+		}
+		parsed, err := parseLocalProxy(endpoint)
+		if err != nil {
+			return nil, nil, err
+		}
+		ntw, err = network.NewProxyNetwork(ntw, parsed)
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+	if injected != nil {
+		ntw = injected
+	}
+	opts := mtglib.ProxyOpts{Logger: logger.NewNoopLogger(), Network: ntw, AntiReplayCache: antireplay.NewStableBloomFilter(1<<20, 0.001), IPBlocklist: ipblocklist.NewNoop(), IPAllowlist: ipblocklist.NewNoop(), EventStream: events.NewNoopStream(), Secrets: secrets, Concurrency: conf.GetConcurrency(mtglib.DefaultConcurrency), DomainFrontingPort: conf.GetDomainFrontingPort(mtglib.DefaultDomainFrontingPort), DomainFrontingHost: conf.GetDomainFrontingHost(), DomainFrontingProxyProtocol: conf.GetDomainFrontingProxyProtocol(false), PreferIP: conf.PreferIP.Get(mtglib.DefaultPreferIP), HandshakeTimeout: 8 * time.Second, IdleTimeout: 60 * time.Second, GlobalAdTag: conf.GetAdTag(), SecretAdTags: conf.GetSecretAdTags(), PublicIPv4: conf.PublicIPv4.Get(nil), PublicIPv6: conf.PublicIPv6.Get(nil), AdvertisedPort: int(conf.GetFirstBindPort()), ThrottleMaxConnections: conf.Throttle.MaxConnections.Get(0), ThrottleCheckInterval: conf.Throttle.CheckInterval.Get(5 * time.Second), PendingHandshakesPerIP: conf.Defense.PendingHandshakes.MaxPerIP.Get(0)}
+	if !start {
+		return nil, conf, mtglib.DarkProValidateOptions(opts)
+	}
+	proxy, err := mtglib.NewProxy(opts)
+	return proxy, conf, err
+}
+
+func startWorker(proxy *mtglib.Proxy, conf *config.Config, principals []principal) (*worker, error) {
+	addresses := conf.GetBindAddrs()
+	if len(addresses) != 1 {
+		return nil, errors.New("exactly one listener required")
+	}
+	l, err := net.Listen("tcp", addresses[0])
+	if err != nil {
+		return nil, err
+	}
+	if conf.ProxyProtocolListener.Get(false) {
+		l = &proxyprotocol.ListenerAdapter{Listener: proxyproto.Listener{Listener: l, ReadHeaderTimeout: 5 * time.Second}}
+	}
+	w := &worker{proxy: proxy, listener: l, conns: map[net.Conn]bool{}, accepted: make(chan struct{}), sealed: make(chan struct{}), principals: principals, ready: true}
+	for name := range conf.GetSecrets() {
+		w.userNames = append(w.userNames, name)
+	}
+	go w.serve()
+	return w, nil
+}
+
+func run(args []string) error {
+	flags := flag.NewFlagSet("dark-pro-mtg", flag.ContinueOnError)
+	flags.SetOutput(io.Discard)
+	path := flags.String("config", "", "private adapter configuration")
+	control := flags.String("control", "", "owned unix control socket")
+	check := flags.Bool("check", false, "validate without listening")
+	if flags.Parse(args) != nil || flags.NArg() != 0 || *path == "" {
+		return errors.New("configuration required")
+	}
+	f, err := os.Open(*path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	var in input
+	d := json.NewDecoder(io.LimitReader(f, (32<<20)+1))
+	d.DisallowUnknownFields()
+	if d.Decode(&in) != nil {
+		return errors.New("invalid private configuration")
+	}
+	var extra any
+	if d.Decode(&extra) != io.EOF {
+		return errors.New("invalid private configuration")
+	}
+	proxy, conf, err := makeProxy(in, !*check)
+	if err != nil {
+		return err
+	}
+	if *check {
+		return nil
+	}
+	if *control == "" {
+		return errors.New("control required")
+	}
+	w, err := startWorker(proxy, conf, in.Principals)
+	if err != nil {
+		proxy.Shutdown()
+		return err
+	}
+	defer w.listener.Close()
+	socket, err := net.Listen("unix", *control)
+	if err != nil {
+		return err
+	}
+	defer socket.Close()
+	if err = os.Chmod(*control, 0600); err != nil {
+		return err
+	}
+	service := &http.Server{Handler: http.HandlerFunc(w.handle), ReadHeaderTimeout: 2 * time.Second, ReadTimeout: 4 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 5 * time.Second}
+	errs := make(chan error, 1)
+	go func() { errs <- service.Serve(socket) }()
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+	select {
+	case <-ctx.Done():
+	case <-errs:
+	}
+	digest := sha256.Sum256([]byte("managed-mtg-shutdown"))
+	_ = w.beginFinal(hex.EncodeToString(digest[:]))
+	select {
+	case <-w.sealed:
+	case <-time.After(6 * time.Second):
+	}
+	_ = service.Close()
+	return nil
+}
+func main() {
+	if err := run(os.Args[1:]); err != nil {
+		os.Stderr.WriteString("managed MTProto worker unavailable\n")
+		os.Exit(1)
+	}
+}

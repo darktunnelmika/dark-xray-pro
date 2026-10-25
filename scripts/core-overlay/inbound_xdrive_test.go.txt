@@ -1,0 +1,76 @@
+package xdrive
+
+import (
+	"context"
+	"errors"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+)
+
+type darkProProbeStorage struct {
+	data map[string][]byte
+	failure string
+	deleted int
+	deadlineMissing bool
+}
+
+func (s *darkProProbeStorage) Put(ctx context.Context, name string, data []byte) error {
+	deadline, ok := ctx.Deadline()
+	if !ok || time.Until(deadline) > 3*time.Second { s.deadlineMissing = true }
+	if !strings.HasPrefix(name, "darkpro-probe-") || strings.Contains(name, "/") { return errors.New("not owned") }
+	s.data[name] = append([]byte(nil), data...)
+	if s.failure == "put" { return errors.New("partial put failure") }
+	if s.failure == "timeout" { <-ctx.Done(); return ctx.Err() }
+	return nil
+}
+func (s *darkProProbeStorage) Get(ctx context.Context, name string) ([]byte, error) {
+	if _, ok := ctx.Deadline(); !ok { s.deadlineMissing = true }
+	if s.failure == "get" { return nil, errors.New("get failure") }
+	if s.failure == "mismatch" { return []byte("wrong data"), nil }
+	return s.data[name], nil
+}
+func (s *darkProProbeStorage) Delete(ctx context.Context, name string) error {
+	if _, ok := ctx.Deadline(); !ok { s.deadlineMissing = true }
+	s.deleted++
+	if s.failure == "delete" { return errors.New("delete failure") }
+	delete(s.data, name)
+	return nil
+}
+func (*darkProProbeStorage) List(context.Context, string) ([]Entry,error) { return nil,nil }
+func (*darkProProbeStorage) Close() error { return nil }
+
+func TestDarkProStorageProbeRequiresCompleteRoundTrip(t *testing.T) {
+	for _,failure:=range []string{"","put","get","mismatch","delete"} {
+		t.Run(failure,func(t *testing.T){
+			s:=&darkProProbeStorage{data:map[string][]byte{"unrelated":[]byte("preserve")},failure:failure}
+			err:=darkProStorageProbe(context.Background(),s)
+			if (err!=nil)!=(failure!="") {t.Fatalf("failure %s: %v",failure,err)}
+			if s.deadlineMissing || s.deleted!=1 {t.Fatal("probe is not bounded or cleanup skipped")}
+			if string(s.data["unrelated"])!="preserve" {t.Fatal("unrelated object changed")}
+			if failure!="delete" && len(s.data)!=1 {t.Fatal("probe object leaked")}
+		})
+	}
+}
+
+func TestDarkProStorageProbeHonorsParentDeadline(t *testing.T) {
+	s:=&darkProProbeStorage{data:map[string][]byte{},failure:"timeout"}
+	ctx,cancel:=context.WithTimeout(context.Background(),25*time.Millisecond)
+	defer cancel()
+	start:=time.Now()
+	if darkProStorageProbe(ctx,s)==nil || time.Since(start)>time.Second {t.Fatal("probe ignored parent deadline")}
+	if s.deleted!=1 {t.Fatal("partial write cleanup not attempted")}
+}
+
+func TestDarkProStorageProbeLocalLeavesOnlyExistingFiles(t *testing.T) {
+	dir:=t.TempDir()
+	keep:=filepath.Join(dir,"existing.txt")
+	if err:=os.WriteFile(keep,[]byte("keep"),0600);err!=nil{t.Fatal(err)}
+	s,err:=newLocalStorage(dir);if err!=nil{t.Fatal(err)}
+	defer s.Close()
+	if err:=darkProStorageProbe(context.Background(),s);err!=nil{t.Fatal(err)}
+	entries,err:=os.ReadDir(dir);if err!=nil{t.Fatal(err)}
+	if len(entries)!=1 || entries[0].Name()!="existing.txt" {t.Fatal("probe changed unrelated data or left a sentinel")}
+}

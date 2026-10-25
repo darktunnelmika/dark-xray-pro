@@ -670,6 +670,7 @@ func (s *Store) NativeInboundPlan(ctx context.Context, key []byte, id uint64) (N
 		p.Promotion, p.Editable, p.EditBlocker = receipt, false, "plan_promoted"
 		return p, nil
 	}
+	if e:=rejectManagedPlanEdit(ctx,tx,id);e!=nil{if !errors.Is(e,ErrConflict){return p,e};p.Editable=false;p.EditBlocker="managed_execution_busy_or_archived";return p,nil}
 	if _, _, err = editablePlanProfile(ctx, tx, key, p); err != nil {
 		if !errors.Is(err, ErrConflict) {
 			return p, err
@@ -1054,6 +1055,7 @@ func (s *Store) SaveNativeInboundPlan(ctx context.Context, key []byte, input Nat
 	if replay, found, e := readNativePlanReplay(ctx, tx, key, in, kind, hash); e != nil || found {
 		return replay, e
 	}
+	if err=rejectManagedPlanEdit(ctx,tx,in.Profile.ID);err!=nil{return out,err}
 	plan, private, _, err := validateNativeInboundPlanTx(ctx, tx, key, in)
 	if err != nil {
 		return out, err

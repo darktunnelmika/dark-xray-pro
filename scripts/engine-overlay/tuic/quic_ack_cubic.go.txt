@@ -1,0 +1,11 @@
+// SPDX-License-Identifier: MIT
+package ackhandler
+
+import "github.com/apernet/quic-go/internal/congestion"
+
+func (h *sentPacketHandler) DarkProUseCubic() {
+	h.congestionMutex.Lock()
+	defer h.congestionMutex.Unlock()
+	h.darkProCubic = true
+	h.congestion = congestion.NewCubicSender(congestion.DefaultClock{}, h.rttStats, h.connStats, h.maxDatagramSize, false, h.qlogger)
+}

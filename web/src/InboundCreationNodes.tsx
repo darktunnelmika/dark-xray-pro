@@ -6,6 +6,14 @@ import InboundCreationEndpoints from "./InboundCreationEndpoints";
 type Language = "en" | "fa";
 const messages: Record<Language, Record<string, string>> = {
   en: {
+    tun_host_dns_takeover_unsupported: "Automatic TUN takeover of the host resolver is unavailable. Turn off System DNS to gateway; ordinary TUN routing remains supported.",
+    interface_name_invalid: "The TUN interface name must be 1–15 ASCII letters, digits, underscores, dots or hyphens, and cannot begin with a dot.",
+    tuic_requires_tls13: "TUIC requires TLS 1.3. Set both TLS version limits to 1.3 or leave them at the default.",
+    tuic_cipher_suites_unsupported: "TUIC uses TLS 1.3 cipher suites selected by the TLS engine. Remove the custom cipher-suite value.",
+    quic_requires_tls13: "This QUIC transport requires TLS 1.3. Change the maximum TLS version to 1.3.",
+    amneziawg_host_alias_unsupported: "AmneziaWG cannot manage host interfaces or public IPv6 source aliases here. Remove the interface name; IPv6 tunnel addresses remain supported.",
+    amneziawg_mtu_range: "AmneziaWG MTU must be between 1280 and 9000 bytes.",
+    amneziawg_ipv6_prefix_too_small: "Use an AmneziaWG IPv6 subnet with prefix length at most 126, with room for the server and clients.",
     security_invalid: "Choose a supported security mode.", security_immutable: "Security cannot change on a saved setup. Reload it or create a new setup.",
     profile_tls_unavailable: "This server cannot save TLS setup plans.", profile_websocket_unavailable: "This server cannot save WebSocket settings.", profile_http_upgrade_unavailable: "This server cannot save HTTPUpgrade settings.",
     tls_certificate_required: "Enter the TLS certificate chain.", tls_private_key_required: "Enter the matching TLS private key.",
@@ -65,6 +73,14 @@ const messages: Record<Language, Record<string, string>> = {
     inbound_id_exists: "This Inbound identity already exists. Reload to check the saved setup.", inbound_limit: "The server’s Inbound limit has been reached.", reason_invalid: "Enter a change note of up to 200 characters.",
   },
   fa: {
+    tun_host_dns_takeover_unsupported: "تغییر خودکار DNS میزبان توسط TUN پشتیبانی نمی‌شود. گزینهٔ System DNS to gateway را خاموش کنید؛ مسیریابی عادی TUN پشتیبانی می‌شود.",
+    interface_name_invalid: "نام رابط TUN باید ۱ تا ۱۵ حرف انگلیسی، رقم، زیرخط، نقطه یا خط تیره باشد و با نقطه شروع نشود.",
+    tuic_requires_tls13: "TUIC به TLS 1.3 نیاز دارد. حداقل و حداکثر نسخه را روی ۱.۳ یا پیش‌فرض قرار دهید.",
+    tuic_cipher_suites_unsupported: "مجموعه‌رمزهای TLS 1.3 در TUIC توسط موتور TLS انتخاب می‌شوند. مقدار انتخاب دستی را پاک کنید.",
+    quic_requires_tls13: "این انتقال QUIC به TLS 1.3 نیاز دارد. حداکثر نسخهٔ TLS را روی ۱.۳ قرار دهید.",
+    amneziawg_host_alias_unsupported: "در این اجرا، AmneziaWG مدیریت رابط میزبان یا آدرس مبدأ عمومی IPv6 را ندارد. نام رابط را پاک کنید؛ IPv6 داخل تانل پشتیبانی می‌شود.",
+    amneziawg_mtu_range: "MTU در AmneziaWG باید بین ۱۲۸۰ و ۹۰۰۰ بایت باشد.",
+    amneziawg_ipv6_prefix_too_small: "برای AmneziaWG پیشوند IPv6 حداکثر ۱۲۶ انتخاب کنید تا برای سرور و کلاینت‌ها آدرس کافی وجود داشته باشد.",
     security_invalid: "نوع امنیت پشتیبانی‌شده را انتخاب کن.", security_immutable: "نوع امنیت تنظیمات ذخیره‌شده قابل تغییر نیست؛ دوباره بارگذاری کن یا تنظیمات تازه بساز.",
     profile_tls_unavailable: "این سرور طرح TLS را ذخیره نمی‌کند.", profile_websocket_unavailable: "این سرور تنظیمات WebSocket را ذخیره نمی‌کند.", profile_http_upgrade_unavailable: "این سرور تنظیمات HTTPUpgrade را ذخیره نمی‌کند.",
     tls_certificate_required: "زنجیرهٔ گواهی TLS را وارد کن.", tls_private_key_required: "کلید خصوصی متناظر TLS را وارد کن.",

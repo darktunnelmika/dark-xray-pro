@@ -1,0 +1,61 @@
+// Copied into the pinned Xray proxy package. MPL-2.0.
+package proxy
+
+import (
+	"bytes"
+	"context"
+	"errors"
+	"runtime"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/xtls/xray-core/common/buf"
+)
+
+type darkProVisionReader func() (buf.MultiBuffer,error)
+func(f darkProVisionReader)ReadMultiBuffer()(buf.MultiBuffer,error){return f()}
+type darkProVisionWriter func(buf.MultiBuffer)error
+func(f darkProVisionWriter)WriteMultiBuffer(b buf.MultiBuffer)error{return f(b)}
+
+func darkProVisionPayload()buf.MultiBuffer{
+	b:=buf.New();_,_=b.Write([]byte("opaque-payload"));return buf.MultiBuffer{b}
+}
+
+// Uses the real public reader/writer concurrently on one connection's shared
+// TLS recognition state. The unpatched upstream reports a race and loses
+// packet decrements; locking only the filter function leaves reader checks
+// outside the synchronization and still fails this test under -race.
+func TestDarkProVisionConcurrentTrafficState(t *testing.T){
+	t.Setenv("DARK_PRO_INBOUND_V2","")
+	state:=NewTrafficState(make([]byte,16))
+	state.NumberOfPacketToFilter=8000
+	state.Inbound.IsPadding=false
+	reader:=NewVisionReader(darkProVisionReader(func()(buf.MultiBuffer,error){return darkProVisionPayload(),nil}),state,true,context.Background(),nil,&bytes.Reader{},&bytes.Buffer{},nil)
+	writer:=NewVisionWriter(darkProVisionWriter(func(b buf.MultiBuffer)error{buf.ReleaseMulti(b);return nil}),state,false,context.Background(),nil,nil,nil)
+	start:=make(chan struct{})
+	var workers sync.WaitGroup
+	workers.Add(2)
+	go func(){defer workers.Done();<-start;for i:=0;i<2000;i++{b,err:=reader.ReadMultiBuffer();if err!=nil{t.Error(err);return};buf.ReleaseMulti(b);runtime.Gosched()}}()
+	go func(){defer workers.Done();<-start;for i:=0;i<2000;i++{if err:=writer.WriteMultiBuffer(darkProVisionPayload());err!=nil{t.Error(err);return};runtime.Gosched()}}()
+	close(start);workers.Wait()
+	if state.NumberOfPacketToFilter!=4000{t.Fatal("concurrent TLS recognition lost packet state",state.NumberOfPacketToFilter)}
+}
+
+// A stalled downstream write must not hold the shared recognition lock. The
+// opposite-direction read has to finish before this writer can proceed.
+func TestDarkProVisionStateLockExcludesNetworkIO(t *testing.T){
+	t.Setenv("DARK_PRO_INBOUND_V2","")
+	state:=NewTrafficState(make([]byte,16));state.Inbound.IsPadding=false
+	writing,readDone:=make(chan struct{}),make(chan struct{})
+	reader:=NewVisionReader(darkProVisionReader(func()(buf.MultiBuffer,error){<-writing;return darkProVisionPayload(),nil}),state,true,context.Background(),nil,&bytes.Reader{},&bytes.Buffer{},nil)
+	writer:=NewVisionWriter(darkProVisionWriter(func(b buf.MultiBuffer)error{
+		defer buf.ReleaseMulti(b);close(writing)
+		select{case <-readDone:return nil;case <-time.After(time.Second):return errors.New("network write held the shared Vision state lock")}
+	}),state,false,context.Background(),nil,nil,nil)
+	result:=make(chan error,1)
+	go func(){result<-writer.WriteMultiBuffer(darkProVisionPayload())}()
+	b,err:=reader.ReadMultiBuffer();buf.ReleaseMulti(b);close(readDone)
+	if err!=nil{t.Fatal(err)}
+	if err:=<-result;err!=nil{t.Fatal(err)}
+}

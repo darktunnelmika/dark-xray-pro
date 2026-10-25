@@ -4,7 +4,7 @@ import type { InboundNode } from "./inboundTypes";
 import InboundSpecFields from "./InboundSpecFields";
 import InboundSecurityTools from "./InboundSecurityTools";
 import InboundFinalMask, { ECHSocketFields, sniffingFields } from "./InboundFinalMask";
-import { allowedSpecSecurity, canonicalAuthoringSpec, clientFields, defaultSpec, generalTransportProtocols, inboundProtocols, inboundTransports, muxFields, networkNames, protocolClientFields, protocolFields, protocolNames, readSpecPath, realityAdvancedFields, realityFields, redactSpec, socketFields, specPayload, tlsAdvancedFields, tlsFields, transportGroups, validAuthoringSpec, writeSpecPath, type AuthoringSpec, type SpecField, type SpecValue } from "./inboundAuthoringSpec";
+import { allowedSpecSecurity, canonicalAuthoringSpec, clientFields, compatibleAuthoringFields, defaultSpec, generalTransportProtocols, inboundProtocols, inboundTransports, muxFields, networkNames, protocolClientFields, protocolFields, protocolNames, readSpecPath, realityAdvancedFields, realityFields, redactSpec, socketFields, specPayload, tlsAdvancedFields, tlsFields, transportGroups, validAuthoringSpec, writeSpecPath, type AuthoringSpec, type SpecField, type SpecValue } from "./inboundAuthoringSpec";
 import "./InboundAuthoring.css";
 
 export type AuthoringSectionProps = { section: "protocol" | "transport" | "security" | "advanced"; language: "fa" | "en"; spec: AuthoringSpec; secretPaths: string[]; nodes: InboundNode[]; csrf: string; disabled: boolean; invalidFields: string[]; onChange: (value: AuthoringSpec) => void; onInvalid: (path: string, invalid: boolean) => void; onUnauthorized: () => void };
@@ -42,7 +42,7 @@ function AdvancedJSON({ spec, secretPaths, disabled, language, onChange, onInval
 export default function InboundAuthoringSection(props: AuthoringSectionProps) {
   const { section, language, spec, onChange, disabled, secretPaths } = props;
   const protocolDrafts = useRef<Record<string, AuthoringSpec>>({});
-  const fields = (items: SpecField[]) => <InboundSpecFields {...props} fields={items}/>;
+  const fields = (items: SpecField[]) => <InboundSpecFields {...props} fields={compatibleAuthoringFields(spec, items)}/>;
   const fa = language === "fa";
   if (section === "protocol") return <div className="spec-section" data-authoring-section="protocol">
     <label className="creation-field"><span>{fa ? "پروتکل" : "Protocol"}</span><select aria-label={fa ? "پروتکل" : "Protocol"} data-creation-field="spec.protocol" dir="ltr" disabled={disabled} value={spec.protocol} onChange={event => { protocolDrafts.current[spec.protocol] = structuredClone(spec); onChange(protocolDrafts.current[event.target.value] ?? defaultSpec(event.target.value)); }}>

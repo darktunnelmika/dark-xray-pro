@@ -1,0 +1,90 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+package amneziawgnet
+
+import (
+	"gvisor.dev/gvisor/pkg/tcpip/stack"
+	"net/netip"
+	"sync"
+	"time"
+)
+
+// Same payload relay as the pinned engine, with an explicit closed fence and
+// joined reply pumps. No asynchronous callback survives the final snapshot.
+type darkProUDP struct {
+	relay    SocksRelay
+	stack    *stack.Stack
+	mu       sync.Mutex
+	closed   bool
+	sessions map[netip.AddrPort]*socks5UDPSession
+	wg       sync.WaitGroup
+}
+
+func newDarkProUDP(r SocksRelay, s *stack.Stack) *darkProUDP {
+	return &darkProUDP{relay: r, stack: s, sessions: map[netip.AddrPort]*socks5UDPSession{}}
+}
+func (u *darkProUDP) Handle(src, dst netip.AddrPort, email string, payload []byte) {
+	u.mu.Lock()
+	if u.closed {
+		u.mu.Unlock()
+		return
+	}
+	sess := u.sessions[src]
+	u.mu.Unlock()
+	if sess == nil {
+		fresh, e := newSocks5UDPSession(u.relay.Addr, email, u.relay.Password)
+		if e != nil {
+			return
+		}
+		u.mu.Lock()
+		if u.closed {
+			u.mu.Unlock()
+			fresh.Close()
+			return
+		}
+		if existing := u.sessions[src]; existing != nil {
+			sess = existing
+			u.mu.Unlock()
+			fresh.Close()
+		} else {
+			sess = fresh
+			u.sessions[src] = fresh
+			u.wg.Add(1)
+			u.mu.Unlock()
+			go u.pump(src, fresh)
+		}
+	}
+	_ = sess.sendTo(dst, payload)
+}
+func (u *darkProUDP) pump(src netip.AddrPort, sess *socks5UDPSession) {
+	defer u.wg.Done()
+	defer func() {
+		u.mu.Lock()
+		if u.sessions[src] == sess {
+			delete(u.sessions, src)
+		}
+		u.mu.Unlock()
+		sess.Close()
+	}()
+	buf := make([]byte, 65535)
+	for {
+		_ = sess.udpConn.SetReadDeadline(time.Now().Add(2 * time.Minute))
+		from, payload, e := sess.receive(buf)
+		if e != nil {
+			return
+		}
+		_ = WriteUDPReply(u.stack, from, src, payload)
+	}
+}
+func (u *darkProUDP) Close() {
+	u.mu.Lock()
+	u.closed = true
+	all := make([]*socks5UDPSession, 0, len(u.sessions))
+	for _, s := range u.sessions {
+		all = append(all, s)
+	}
+	u.mu.Unlock()
+	for _, s := range all {
+		s.Close()
+	}
+	u.wg.Wait()
+}

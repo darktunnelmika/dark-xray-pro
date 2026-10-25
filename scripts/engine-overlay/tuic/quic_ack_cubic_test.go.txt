@@ -1,0 +1,26 @@
+// SPDX-License-Identifier: MIT
+package ackhandler
+
+import (
+	"github.com/apernet/quic-go/internal/monotime"
+	"github.com/apernet/quic-go/internal/protocol"
+	"github.com/apernet/quic-go/internal/utils"
+	"reflect"
+	"testing"
+)
+
+func TestDarkProRealCubicSurvivesMigration(t *testing.T) {
+	h := NewSentPacketHandler(0, 1200, utils.NewRTTStats(), &utils.ConnectionStats{}, false, false, nil, protocol.PerspectiveServer, false, nil, utils.DefaultLogger).(*sentPacketHandler)
+	isReno := func() bool { return reflect.ValueOf(h.getCongestionControl()).Elem().FieldByName("reno").Bool() }
+	if !isReno() {
+		t.Fatal("unexpected upstream baseline")
+	}
+	h.DarkProUseCubic()
+	if isReno() {
+		t.Fatal("CUBIC selection silently uses Reno")
+	}
+	h.MigratedPath(monotime.Now(), 1200)
+	if isReno() {
+		t.Fatal("CUBIC lost on QUIC path migration")
+	}
+}

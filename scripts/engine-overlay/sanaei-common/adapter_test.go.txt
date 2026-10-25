@@ -1,0 +1,101 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+package darkproadapter_test
+
+import (
+	"net"
+	"os"
+	"path/filepath"
+	"sync/atomic"
+	"syscall"
+	"testing"
+	"time"
+
+	"github.com/mhsanaei/3x-ui/v3/internal/darkproadapter"
+	dt "github.com/mhsanaei/3x-ui/v3/internal/darkprotest"
+	"golang.org/x/net/proxy"
+)
+
+type idleDriver struct{ ready atomic.Bool }
+
+func (d *idleDriver) Start() error { d.ready.Store(true); return nil }
+func (d *idleDriver) Fence()       { d.ready.Store(false) }
+func (d *idleDriver) Join()        {}
+func (d *idleDriver) Ready() bool  { return d.ready.Load() }
+func TestPrivateBridgeAuthenticationPayloadAndFinal(t *testing.T) {
+	target, _ := dt.Echo(t, "127.0.0.1")
+	var bridge *darkproadapter.Bridge
+	in := darkproadapter.Input{Version: 1, Engine: "tuic", Principals: []darkproadapter.Principal{{ID: "a", Engine: "tuic", Role: "client", Counter: "user>>>alice>>>traffic", InboundID: 1}, {ID: "b", Engine: "tuic", Role: "health", Counter: "user>>>probe>>>traffic", InboundID: 1}}}
+	w := dt.Worker(t, in, darkproadapter.Plan{Users: []string{"alice", "probe"}, New: func(b *darkproadapter.Bridge) (darkproadapter.Driver, error) { bridge = b; return &idleDriver{}, nil }})
+	raw, e := net.Dial("tcp", bridge.Addr)
+	if e != nil {
+		t.Fatal(e)
+	}
+	_ = raw.SetDeadline(time.Now().Add(time.Second))
+	_, _ = raw.Write([]byte{5, 1, 0})
+	one := make([]byte, 2)
+	if _, e = raw.Read(one); e == nil {
+		t.Fatal("preactivation bridge admitted handshake")
+	}
+	raw.Close()
+	dt.Command(t, w, "activate", dt.ActivateNonce)
+	for _, auth := range []*proxy.Auth{nil, {User: "alice", Password: "wrong"}, {User: "unknown", Password: bridge.Password}} {
+		d, e := proxy.SOCKS5("tcp", bridge.Addr, auth, proxy.Direct)
+		if e != nil {
+			t.Fatal(e)
+		}
+		c, e := d.Dial("tcp", target)
+		if e == nil {
+			c.Close()
+			t.Fatal("private bridge accepted wrong credentials")
+		}
+	}
+	d, _ := proxy.SOCKS5("tcp", bridge.Addr, &proxy.Auth{User: "alice", Password: bridge.Password}, proxy.Direct)
+	c, e := d.Dial("tcp", target)
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer c.Close()
+	payload := []byte("owned payload only")
+	dt.Payload(t, c, payload)
+	dt.Counters(t, w, []darkproadapter.Counter{{ID: "a", Upload: uint64(len(payload)), Download: uint64(len(payload))}, {ID: "b"}})
+	final := dt.Final(t, w)
+	if final.Counters[0].Upload != uint64(len(payload)) {
+		t.Fatal("final lost upload")
+	}
+	dt.Counters(t, w, final.Counters)
+}
+
+func TestMaterialRejectsNonRegularAndWritableSources(t *testing.T) {
+	dir := t.TempDir()
+	fifo := filepath.Join(dir, "material.pipe")
+	if e := syscall.Mkfifo(fifo, 0600); e != nil {
+		t.Fatal(e)
+	}
+	done := make(chan error, 1)
+	go func() { _, e := darkproadapter.Material(fifo); done <- e }()
+	select {
+	case e := <-done:
+		if e == nil {
+			t.Fatal("accepted FIFO material")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("blocked opening FIFO material")
+	}
+	regular := filepath.Join(dir, "cert.pem")
+	if e := os.WriteFile(regular, []byte("frozen material"), 0600); e != nil {
+		t.Fatal(e)
+	}
+	link := filepath.Join(dir, "acme.pem")
+	if e := os.Symlink(regular, link); e != nil {
+		t.Fatal(e)
+	}
+	if value, e := darkproadapter.Material(link); e != nil || value != "frozen material" {
+		t.Fatal("regular ACME symlink rejected")
+	}
+	if e := os.Chmod(regular, 0666); e != nil {
+		t.Fatal(e)
+	}
+	if _, e := darkproadapter.Material(regular); e == nil {
+		t.Fatal("accepted writable material")
+	}
+}

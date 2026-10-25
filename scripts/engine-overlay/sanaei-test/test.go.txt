@@ -1,0 +1,222 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Package darkprotest is imported only by standalone-worker acceptance tests.
+package darkprotest
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"io"
+	"net"
+	"net/http/httptest"
+	"reflect"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/mhsanaei/3x-ui/v3/internal/darkproadapter"
+)
+
+const ActivateNonce = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+const FinalNonce = "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+
+func Raw(w *darkproadapter.Worker, path, nonce string) *httptest.ResponseRecorder {
+	body := []byte("{}")
+	if nonce != "" {
+		body, _ = json.Marshal(map[string]string{"nonce": nonce})
+	}
+	out := httptest.NewRecorder()
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+	defer cancel()
+	w.Handle(out, httptest.NewRequest("POST", "/"+path, bytes.NewReader(body)).WithContext(ctx))
+	return out
+}
+func Command(t *testing.T, w *darkproadapter.Worker, path, nonce string) darkproadapter.Reply {
+	t.Helper()
+	out := Raw(w, path, nonce)
+	if out.Code != 200 {
+		t.Fatalf("%s: HTTP %d: %s", path, out.Code, out.Body.String())
+	}
+	var r darkproadapter.Reply
+	if e := json.Unmarshal(out.Body.Bytes(), &r); e != nil {
+		t.Fatal(e)
+	}
+	return r
+}
+func Worker(t *testing.T, in darkproadapter.Input, p darkproadapter.Plan) *darkproadapter.Worker {
+	t.Helper()
+	w, e := darkproadapter.NewWorker(in, p)
+	if e != nil {
+		t.Fatal(e)
+	}
+	t.Cleanup(func() { Command(t, w, "final", FinalNonce) })
+	r := Command(t, w, "status", "")
+	if !r.Ready || r.Open || r.Final {
+		t.Fatalf("invalid prepared receipt: %+v", r)
+	}
+	for _, v := range r.Counters {
+		if v.Upload != 0 || v.Download != 0 {
+			t.Fatal("preactivation traffic")
+		}
+	}
+	return w
+}
+func Echo(t *testing.T, host string) (string, string) {
+	t.Helper()
+	tcp, e := net.Listen("tcp", net.JoinHostPort(host, "0"))
+	if e != nil {
+		t.Fatal(e)
+	}
+	udp, e := net.ListenPacket("udp", net.JoinHostPort(host, "0"))
+	if e != nil {
+		tcp.Close()
+		t.Fatal(e)
+	}
+	t.Cleanup(func() { tcp.Close(); udp.Close() })
+	go func() {
+		for {
+			c, e := tcp.Accept()
+			if e != nil {
+				return
+			}
+			go func() { defer c.Close(); _, _ = io.Copy(c, c) }()
+		}
+	}()
+	go func() {
+		buf := make([]byte, 65535)
+		for {
+			n, a, e := udp.ReadFrom(buf)
+			if e != nil {
+				return
+			}
+			_, _ = udp.WriteTo(buf[:n], a)
+		}
+	}()
+	return tcp.Addr().String(), udp.LocalAddr().String()
+}
+func Port(t *testing.T) int {
+	t.Helper()
+	c, e := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
+	if e != nil {
+		t.Fatal(e)
+	}
+	port := c.LocalAddr().(*net.UDPAddr).Port
+	c.Close()
+	return port
+}
+func NonLoopback(t *testing.T) string {
+	t.Helper()
+	addrs, e := net.InterfaceAddrs()
+	if e != nil {
+		t.Fatal(e)
+	}
+	for _, a := range addrs {
+		if ip, ok := a.(*net.IPNet); ok && !ip.IP.IsLoopback() && ip.IP.To4() != nil {
+			return ip.IP.String()
+		}
+	}
+	t.Fatal("real AWG acceptance requires a local non-loopback IPv4 address")
+	return ""
+}
+func Payload(t *testing.T, c net.Conn, p []byte) {
+	t.Helper()
+	_ = c.SetDeadline(time.Now().Add(5 * time.Second))
+	if _, e := c.Write(p); e != nil {
+		t.Fatal(e)
+	}
+	got := make([]byte, len(p))
+	if _, e := io.ReadFull(c, got); e != nil {
+		t.Fatal(e)
+	}
+	if !bytes.Equal(p, got) {
+		t.Fatal("echo payload mismatch")
+	}
+}
+
+func AssertUDPClosed(t *testing.T, address string) {
+	t.Helper()
+	c, e := net.ListenPacket("udp", address)
+	if e != nil {
+		t.Fatal("public UDP socket opened before activation")
+	}
+	c.Close()
+}
+
+// InFlight keeps verified payload moving while the control final fence runs.
+// The returned join proves that attempted late traffic cannot mutate final.
+func InFlight(t *testing.T, stream interface {
+	io.Reader
+	io.Writer
+	SetDeadline(time.Time) error
+}) func() {
+	t.Helper()
+	_ = stream.SetDeadline(time.Now().Add(1500 * time.Millisecond))
+	started, done := make(chan struct{}), make(chan struct{})
+	go func() {
+		defer close(done)
+		payload, reply := bytes.Repeat([]byte{0x5a}, 2048), make([]byte, 2048)
+		first := true
+		for {
+			if _, e := stream.Write(payload); e != nil {
+				return
+			}
+			if _, e := io.ReadFull(stream, reply); e != nil {
+				return
+			}
+			if !bytes.Equal(payload, reply) {
+				return
+			}
+			if first {
+				close(started)
+				first = false
+			}
+		}
+	}()
+	select {
+	case <-started:
+	case <-done:
+		t.Fatal("in-flight payload did not reach echo target")
+	case <-time.After(2 * time.Second):
+		t.Fatal("in-flight payload stalled")
+	}
+	return func() {
+		t.Helper()
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+			t.Fatal("client traffic did not stop after final")
+		}
+	}
+}
+func Counters(t *testing.T, w *darkproadapter.Worker, want []darkproadapter.Counter) {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		got := Command(t, w, "snapshot", "")
+		if reflect.DeepEqual(got.Counters, want) {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("payload counters: got %+v; want %+v", got.Counters, want)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+func Final(t *testing.T, w *darkproadapter.Worker) darkproadapter.Reply {
+	t.Helper()
+	r := Command(t, w, "final", FinalNonce)
+	if !r.Final || r.Open || r.Nonce != FinalNonce {
+		t.Fatalf("invalid final: %+v", r)
+	}
+	again := Command(t, w, "final", FinalNonce)
+	if !reflect.DeepEqual(r, again) {
+		t.Fatal("final not immutable")
+	}
+	if out := Raw(w, "activate", ActivateNonce); out.Code != 409 {
+		t.Fatal("reactivated sealed generation")
+	}
+	if out := Raw(w, "final", strings.Repeat("b", 64)); out.Code != 409 {
+		t.Fatal("final nonce changed")
+	}
+	return r
+}

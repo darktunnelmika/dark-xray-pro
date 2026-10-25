@@ -12,6 +12,7 @@ import (
 	"github.com/darktunnelmika/dark-xray-pro/internal/agentidentity"
 	"github.com/darktunnelmika/dark-xray-pro/internal/agenttransport"
 	"github.com/darktunnelmika/dark-xray-pro/internal/hostmetrics"
+	"github.com/darktunnelmika/dark-xray-pro/internal/inboundruntime"
 	"github.com/darktunnelmika/dark-xray-pro/internal/managedxray"
 	"github.com/darktunnelmika/dark-xray-pro/internal/telemetry"
 	uc "github.com/darktunnelmika/dark-xray-pro/internal/usagecheckpoint"
@@ -245,6 +246,27 @@ func main() {
 		}
 		log.Printf("PRO isolated Agent paired; exiting before any native runtime or telemetry service")
 		return
+	}
+	var managedInboundDone chan struct{}
+	if os.Getenv("DARK_PRO_ENABLE_INBOUND_EXECUTION") == "1" {
+		if routeEnabled || meteredRouteEnabled || os.Getenv("DARK_PRO_ENABLE_NATIVE_RUNTIME") == "1" || os.Getenv("DARK_PRO_ENABLE_NATIVE_METERED_ADMISSION") == "1" {
+			log.Fatal("managed inbound execution requires exclusive new PRO process ownership")
+		}
+		engines, e := inboundruntime.ParseExternalBinaries(os.Getenv("DARK_PRO_INBOUND_ENGINES_JSON"))
+		if e != nil {
+			log.Fatal("invalid managed inbound engine configuration")
+		}
+		worker, e := inboundruntime.Open(inboundruntime.Config{Directory: os.Getenv("DARK_PRO_INBOUND_RUNTIME_DIR"), NodeID: identity.NodeID, InstallationID: identity.InstallationID, Key: []byte(identity.AgentToken), Native: inboundruntime.BinaryConfig{Path: os.Getenv("DARK_PRO_INBOUND_CORE_PATH"), SHA256: os.Getenv("DARK_PRO_INBOUND_CORE_SHA256")}, External: engines})
+		if e != nil {
+			log.Fatal("managed inbound execution unavailable: ", e)
+		}
+		exchange, e := inboundruntime.NewHTTPExchange(client, endpoint, identity.AgentToken, identity.NodeID, identity.InstallationID)
+		if e != nil {
+			worker.Close()
+			log.Fatal("managed inbound HUB transport invalid")
+		}
+		managedInboundDone = make(chan struct{})
+		go func() { defer close(managedInboundDone); worker.Run(ctx, exchange) }()
 	}
 	var nativeRuntime *managedxray.Runtime
 	var transactionRuntime *managedxray.TransactionRuntime
@@ -517,6 +539,9 @@ func main() {
 		select {
 		case <-ctx.Done():
 			workers.Wait()
+			if managedInboundDone != nil {
+				<-managedInboundDone
+			}
 			return
 		case <-ticker.C:
 			now, err := hostmetrics.Read()

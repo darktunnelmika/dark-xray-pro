@@ -3,6 +3,7 @@ package api
 import (
 	"crypto/tls"
 	"github.com/darktunnelmika/dark-xray-pro/internal/business"
+	"github.com/darktunnelmika/dark-xray-pro/internal/inboundexec"
 	"github.com/darktunnelmika/dark-xray-pro/internal/managedxray"
 	"net/http"
 	"strconv"
@@ -61,7 +62,15 @@ func (s *Server) attachRuntimeReports(mux *http.ServeMux) {
 			}
 			states = append(states, state)
 		}
-		respond(w, 200, map[string]any{"inbounds": inbounds, "targets": targets, "nodes": s.inboundDestinations(), "runtime": states, "evidence": "authenticated_agent_report", "data_plane_verified": false, "subscription_publication": false, "preflight": s.nativeReadiness(inbounds, targets, nodes)})
+		executions := []inboundexec.State{}
+		if s.inboundExecution != nil {
+			executions, e = s.business.ListInboundExecutionStates(r.Context(), s.inboundKey)
+			if e != nil {
+				businessError(w, e)
+				return
+			}
+		}
+		respond(w, 200, map[string]any{"inbounds": inbounds, "targets": targets, "nodes": s.inboundDestinations(), "runtime": states, "executions": executions, "execution_enabled": s.inboundExecution != nil, "evidence": "authenticated_agent_report", "data_plane_verified": false, "subscription_publication": false, "preflight": s.nativeReadiness(inbounds, targets, nodes)})
 	})
 	mux.HandleFunc("GET /api/v1/workspace/native-inbounds/{id}/clients", func(w http.ResponseWriter, r *http.Request) {
 		if _, ok := s.authorizeBrowser(w, r, false, true); !ok {
