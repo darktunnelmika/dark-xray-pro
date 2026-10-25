@@ -9,12 +9,15 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"math/big"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -28,6 +31,8 @@ import (
 	"time"
 
 	"github.com/darktunnelmika/dark-xray-pro/internal/business"
+	"github.com/darktunnelmika/dark-xray-pro/internal/inboundsecurity"
+	"github.com/darktunnelmika/dark-xray-pro/internal/inboundspec"
 	"github.com/darktunnelmika/dark-xray-pro/internal/webui"
 )
 
@@ -52,6 +57,12 @@ func TestRealBrowserInboundTLSCreationPlan(t *testing.T) {
 	s := enabledOwner(t)
 	key := bytes.Repeat([]byte{0xd5}, 32)
 	if err := s.EnableNativeInbounds(key); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.EnableInboundSecurity(inboundsecurity.Config{DefaultTargets: []inboundsecurity.Target{},
+		DialContext: func(context.Context, string, string) (net.Conn, error) {
+			return nil, errors.New("network probe is outside certificate browser acceptance")
+		}}); err != nil {
 		t.Fatal(err)
 	}
 	ticket, err := s.registry.Issue("de", "Germany")
@@ -101,14 +112,38 @@ func TestRealBrowserInboundTLSCreationPlan(t *testing.T) {
 	var mu sync.Mutex
 	requests := map[string]int{}
 	privateResponse := false
+	apiPath := "/api/v1/workspace/native-inbound-plans"
+	certificateObservations := map[uint64]string{}
+	var observationError error
 	mux := http.NewServeMux()
 	mux.Handle("/api/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Observe actual handler bytes without substituting an application response.
 		recorder := &tlsBrowserResponse{ResponseWriter: w}
 		owner.ServeHTTP(recorder, r)
+		var revision uint64
+		var persistedSHA string
+		var persistedErr error
+		if recorder.status >= 200 && recorder.status < 300 &&
+			(r.Method == http.MethodPost && r.URL.Path == apiPath || r.Method == http.MethodPut && strings.HasPrefix(r.URL.Path, apiPath+"/")) {
+			var receipt business.NativeInboundPlanReceipt
+			if json.Unmarshal(recorder.body.Bytes(), &receipt) != nil || receipt.Plan.Profile.Spec == nil {
+				persistedErr = errors.New("saved TLS response omitted the authoring specification")
+			} else {
+				revision = receipt.Plan.PlanRevision
+				persistedSHA, persistedErr = tlsBrowserStoredCertificateSHA(ctx, s.business, key, receipt.Plan)
+			}
+		}
 		mu.Lock()
 		defer mu.Unlock()
 		requests[r.Method+" "+r.URL.Path]++
+		if persistedErr != nil {
+			observationError = persistedErr
+		} else if revision != 0 {
+			if _, exists := certificateObservations[revision]; exists {
+				observationError = errors.New("duplicate persisted TLS revision observed")
+			}
+			certificateObservations[revision] = persistedSHA
+		}
 		for _, forbidden := range []string{"-----BEGIN", first["private_key_pem"], renewed["private_key_pem"], "\"tls_credentials\"", "\"private_key_pem\""} {
 			if bytes.Contains(recorder.body.Bytes(), []byte(forbidden)) {
 				privateResponse = true
@@ -156,12 +191,18 @@ func TestRealBrowserInboundTLSCreationPlan(t *testing.T) {
 		t.Fatal("TLS plan was not persisted", err)
 	}
 	if plan.PlanRevision != 3 || plan.InboundRevision != 3 || plan.Profile.Revision != 3 || plan.LastEventID != proof.EventID ||
-		plan.Profile.Security != "tls" || plan.Profile.Transport != "httpupgrade" || plan.Profile.TLS == nil || plan.Profile.TLS.SHA256 != renewedSHA ||
+		plan.Profile.Security != "tls" || plan.Profile.Transport != "httpupgrade" || plan.Profile.Spec == nil || plan.Profile.TLS != nil || plan.Profile.Options != nil ||
 		plan.Profile.PublicKey != "" || plan.Profile.RealityTarget != "" || len(plan.Profile.ShortIDs) != 0 ||
 		plan.Profile.Enabled || plan.Profile.Archived || plan.Profile.BoundClients != 0 || plan.RuntimeApply || !plan.Editable || plan.Status != "SAVED_DISABLED" {
 		t.Fatal("TLS creation, retained-key edit or certificate replacement lost its invariants")
 	}
-	if plan.Profile.Options == nil || plan.Profile.Options.HTTPUpgrade == nil || plan.Profile.Options.HTTPUpgrade.Path != "/upgrade" || plan.Profile.Options.HTTPUpgrade.Host != "edge.example.org" {
+	transport, _ := plan.Profile.Spec.Stream["httpupgradeSettings"].(map[string]any)
+	pinsJSON, _ := json.Marshal(plan.Profile.Spec.Client["pinnedPeerCertSha256"])
+	wantPinsJSON, _ := json.Marshal([]string{renewedSHA})
+	if plan.Profile.Spec.Version != 1 || plan.Profile.Spec.Protocol != "vless" || plan.Profile.Spec.Network != "httpupgrade" || plan.Profile.Spec.Security != "tls" ||
+		transport["path"] != "/upgrade" || transport["host"] != "edge.example.org" || !bytes.Equal(pinsJSON, wantPinsJSON) ||
+		plan.Profile.Spec.TLS["serverName"] != "edge.example.org" || len(inboundspec.SecretPaths(*plan.Profile.Spec)) != 0 ||
+		!reflect.DeepEqual(plan.Profile.SpecSecretPaths, []string{"settings.decryption", "tls.certificates.0.certificate", "tls.certificates.0.key"}) {
 		t.Fatal("TLS transport settings did not survive real UI/API persistence")
 	}
 	if len(plan.Nodes) != 1 || plan.Nodes[0].NodeID != "de" || plan.Nodes[0].DirectPort != 10443 || plan.Nodes[0].TunnelPort != 1185 ||
@@ -195,8 +236,11 @@ func TestRealBrowserInboundTLSCreationPlan(t *testing.T) {
 	if privateResponse {
 		t.Fatal("a real API response exposed certificate credentials")
 	}
-	apiPath := "/api/v1/workspace/native-inbound-plans"
+	if observationError != nil || !reflect.DeepEqual(certificateObservations, map[uint64]string{1: firstSHA, 2: firstSHA, 3: renewedSHA}) {
+		t.Fatal("stored TLS certificate/key lifecycle diverged from the inspected browser material", observationError)
+	}
 	want := map[string]int{"POST /api/v1/session/login": 1, "POST " + apiPath + "/preview": 4, "POST " + apiPath: 1,
+		"POST /api/v1/workspace/inbound-security/certificates/inspect":   2,
 		"PUT " + apiPath + "/" + strconv.FormatUint(proof.InboundID, 10): 2}
 	for request, count := range requests {
 		if strings.HasPrefix(request, "GET ") || strings.HasPrefix(request, "HEAD ") {
@@ -216,12 +260,79 @@ func TestRealBrowserInboundTLSCreationPlan(t *testing.T) {
 
 type tlsBrowserResponse struct {
 	http.ResponseWriter
-	body bytes.Buffer
+	body   bytes.Buffer
+	status int
+}
+
+func (w *tlsBrowserResponse) WriteHeader(status int) {
+	if w.status == 0 {
+		w.status = status
+	}
+	w.ResponseWriter.WriteHeader(status)
 }
 
 func (w *tlsBrowserResponse) Write(raw []byte) (int, error) {
+	if w.status == 0 {
+		w.status = http.StatusOK
+	}
 	_, _ = w.body.Write(raw)
 	return w.ResponseWriter.Write(raw)
+}
+
+// Resolve a saved public edit through the real encrypted profile and compiler.
+// This read-only preview proves the material stored at each committed revision;
+// a matching public pin alone would not prove that the server certificate changed.
+func tlsBrowserStoredCertificateSHA(ctx context.Context, store *business.Store, key []byte, plan business.NativeInboundPlan) (string, error) {
+	preview, err := store.PreviewNativeInboundPlan(ctx, key, business.NativeInboundPlanInput{
+		EventID: "tls-browser-readback-" + strconv.FormatUint(plan.PlanRevision, 10), Reason: "Verify saved certificate without applying",
+		ExpectedPlanRevision: plan.PlanRevision, ExpectedInboundRevision: plan.InboundRevision, Profile: plan.Profile.InboundInput, Nodes: plan.Nodes,
+	})
+	if err != nil || !preview.Valid || !preview.TopologyValidationOnly {
+		return "", errors.New("cannot re-render saved TLS authoring material")
+	}
+	var fingerprint string
+	count := 0
+	for _, node := range preview.Topology.Nodes {
+		var config struct {
+			Inbounds []struct {
+				Protocol string `json:"protocol"`
+				Stream   struct {
+					Network  string `json:"network"`
+					Security string `json:"security"`
+					TLS      struct {
+						Certificates []struct {
+							Certificate []string `json:"certificate"`
+							Key         []string `json:"key"`
+						} `json:"certificates"`
+					} `json:"tlsSettings"`
+				} `json:"streamSettings"`
+			} `json:"inbounds"`
+		}
+		if json.Unmarshal(node.Candidate.Config, &config) != nil {
+			return "", errors.New("stored TLS configuration did not decode")
+		}
+		for _, inbound := range config.Inbounds {
+			if inbound.Protocol != "vless" || inbound.Stream.Security != "tls" || inbound.Stream.Network != plan.Profile.Transport || len(inbound.Stream.TLS.Certificates) != 1 {
+				return "", errors.New("stored TLS listener diverged from the saved specification")
+			}
+			certificate := inbound.Stream.TLS.Certificates[0]
+			pair, err := tls.X509KeyPair([]byte(strings.Join(certificate.Certificate, "\n")), []byte(strings.Join(certificate.Key, "\n")))
+			if err != nil || len(pair.Certificate) == 0 {
+				return "", errors.New("stored TLS certificate no longer matches its private key")
+			}
+			digest := sha256.Sum256(pair.Certificate[0])
+			sha := hex.EncodeToString(digest[:])
+			if fingerprint != "" && fingerprint != sha {
+				return "", errors.New("Direct and Tunnel listeners have different certificates")
+			}
+			fingerprint = sha
+			count++
+		}
+	}
+	if count != 2 {
+		return "", errors.New("expected independent Direct and Tunnel TLS listeners")
+	}
+	return fingerprint, nil
 }
 
 func browserTLSFixture(t *testing.T, serial int64) (map[string]string, string) {

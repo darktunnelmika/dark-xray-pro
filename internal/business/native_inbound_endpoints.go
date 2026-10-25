@@ -78,10 +78,39 @@ func effectiveEndpointClient(profile InboundInput, endpoint NativeInboundEndpoin
 		}
 	}
 	if profile.Spec != nil {
-		if value := specString(profile.Spec.Client, "serverName"); value != "" {
-			sni = value
+		spec := profile.Spec
+		sni, fingerprint, spider = "", "", ""
+		if spec.Security == "tls" || spec.Security == "reality" {
+			sni = specString(spec.Client, "serverName")
+			if sni == "" {
+				sni = specString(spec.TLS, "serverName")
+			}
+			if sni == "" && spec.Protocol == "tuic" {
+				server, _ := spec.Settings["server"].(map[string]any)
+				sni = specString(server, "sni")
+			}
+			if sni == "" && spec.Security == "reality" {
+				for _, name := range specStrings(spec.Reality, "serverNames") {
+					if name != "" && !strings.HasPrefix(name, "*.") {
+						sni = name
+						break
+					}
+				}
+			}
+			if sni == "" {
+				sni = endpoint.Address
+			}
+			fingerprint = specString(spec.Client, "fingerprint")
 		}
-		fingerprint, spider = specString(profile.Spec.Client, "fingerprint"), specString(profile.Spec.Client, "spiderX")
+		if spec.Security == "reality" {
+			if fingerprint == "" {
+				fingerprint = "chrome"
+			}
+			spider = specString(spec.Client, "spiderX")
+			if spider == "" {
+				spider = "/"
+			}
+		}
 	}
 	if endpoint.SNI != "" {
 		sni = endpoint.SNI
@@ -233,6 +262,26 @@ func previewPlanEndpoints(plan NativeInboundPlan) []NativeInboundEndpointPreview
 			if o.HTTPUpgrade != nil {
 				copy := *o.HTTPUpgrade
 				v.HTTPUpgrade = &copy
+			}
+		}
+		if spec := plan.Profile.Spec; spec != nil {
+			// Review exposes only connection metadata. Header values, templates,
+			// certificates and other write-only settings never enter this view.
+			settings, _ := spec.Stream[spec.Network+"Settings"].(map[string]any)
+			switch spec.Network {
+			case "grpc":
+				v.GRPCService = specString(settings, "serviceName")
+				v.GRPCAuthority = specString(settings, "authority")
+				v.GRPCMultiMode, _ = settings["multiMode"].(bool)
+			case "xhttp":
+				v.XHTTP = &xrayconfig.XHTTPOptions{Path: specString(settings, "path"), Host: specString(settings, "host"), Mode: specString(settings, "mode")}
+				if padding, ok := settings["xPaddingBytes"]; ok {
+					v.XHTTP.XPaddingBytes = fmt.Sprint(padding)
+				}
+			case "ws":
+				v.WebSocket = &xrayconfig.WebSocketOptions{Path: specString(settings, "path"), Host: specString(settings, "host")}
+			case "httpupgrade":
+				v.HTTPUpgrade = &xrayconfig.HTTPUpgradeOptions{Path: specString(settings, "path"), Host: specString(settings, "host")}
 			}
 		}
 		out = append(out, v)

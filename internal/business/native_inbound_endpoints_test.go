@@ -8,7 +8,9 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/darktunnelmika/dark-xray-pro/internal/inboundspec"
 	"github.com/darktunnelmika/dark-xray-pro/internal/xrayconfig"
 )
 
@@ -217,5 +219,130 @@ func TestCreationEndpointEnvelopeRejectsRollbackAndAuthenticatedDowngrade(t *tes
 	out = NativeInboundPlan{}
 	if err = openPlanValue(key, planAAD(in.Profile.ID, 1), legacy, &out); err != nil || !reflect.DeepEqual(out, legacyPlan) {
 		t.Fatal("legacy random nonce mistaken for a new plan envelope", err)
+	}
+}
+
+func TestAuthoringEndpointReviewPreservesTransportAndClientDefaultsAfterReopen(t *testing.T) {
+	for _, network := range []string{"grpc", "xhttp", "ws", "httpupgrade"} {
+		t.Run(network, func(t *testing.T) {
+			s, key, in := authoringPlanFixture(t)
+			in.Nodes = in.Nodes[:1]
+			in.Nodes[0].TunnelPort, in.Nodes[0].TunnelHosts = 0, nil
+			in.Nodes[0].DirectHosts = []string{"edge.example.org", "other.example.org"}
+			in.Nodes[0].DirectEndpoints = []NativeInboundEndpoint{
+				{Address: "edge.example.org", Enabled: true, Port: 443},
+				{Address: "other.example.org", Enabled: true, Port: 8443, Fingerprint: "safari"},
+			}
+			spec := in.Profile.Spec
+			spec.Network = network
+			spec.Client = map[string]any{"fingerprint": "firefox", "spiderX": "/profile"}
+			settings := map[string]any{"path": "/saved-path", "host": "transport.example.org", "headers": map[string]any{"Authorization": "synthetic-private-header"}}
+			if network == "grpc" {
+				settings = map[string]any{"serviceName": "saved-service", "authority": "transport.example.org", "multiMode": true}
+			}
+			if network == "xhttp" {
+				settings["mode"], settings["xPaddingBytes"] = "stream-up", "100-200"
+			}
+			if network == "ws" || network == "httpupgrade" {
+				cert := businessTLSCredentials(t, time.Now().Add(-time.Hour), time.Now().Add(time.Hour))
+				spec.Security, spec.Reality = "tls", nil
+				spec.TLS = map[string]any{"serverName": "www.example.org", "certificates": []any{map[string]any{"certificate": strings.Split(strings.TrimSpace(cert.CertificatePEM), "\n"), "key": strings.Split(strings.TrimSpace(cert.PrivateKeyPEM), "\n")}}}
+				delete(spec.Client, "spiderX")
+			}
+			spec.Stream = map[string]any{network + "Settings": settings}
+			created, err := s.SaveNativeInboundPlan(context.Background(), key, in)
+			if err != nil {
+				t.Fatal(err)
+			}
+			loaded, err := s.NativeInboundPlan(context.Background(), key, in.Profile.ID)
+			if err != nil || loaded.Profile.Options != nil {
+				t.Fatal("spec plan lost authoring identity", err)
+			}
+			edit := copiedPlan(in)
+			edit.Profile = loaded.Profile.InboundInput
+			edit.ExpectedPlanRevision, edit.ExpectedInboundRevision = created.Plan.PlanRevision, created.Plan.InboundRevision
+			edit.EventID = "authoring-endpoint-review-" + network
+			preview, err := s.PreviewNativeInboundPlan(context.Background(), key, edit)
+			if err != nil || len(preview.Endpoints) != 2 {
+				t.Fatal("reopened endpoint review failed", err)
+			}
+			inherited, overridden := preview.Endpoints[0], preview.Endpoints[1]
+			spider := "/profile"
+			if spec.Security == "tls" {
+				spider = ""
+			}
+			if inherited.Transport != network || inherited.Port != 443 || inherited.ServerName != "www.example.org" || inherited.Fingerprint != "firefox" || inherited.SpiderX != spider || overridden.Fingerprint != "safari" || overridden.Port != 8443 {
+				t.Fatal("review lost saved spec or per-endpoint client settings", inherited, overridden)
+			}
+			switch network {
+			case "grpc":
+				if inherited.GRPCService != "saved-service" || inherited.GRPCAuthority != "transport.example.org" || !inherited.GRPCMultiMode {
+					t.Fatal("gRPC review lost saved settings", inherited)
+				}
+			case "xhttp":
+				if inherited.XHTTP == nil || *inherited.XHTTP != (xrayconfig.XHTTPOptions{Path: "/saved-path", Host: "transport.example.org", Mode: "stream-up", XPaddingBytes: "100-200"}) {
+					t.Fatal("XHTTP review lost saved settings", inherited)
+				}
+			case "ws":
+				if inherited.WebSocket == nil || inherited.WebSocket.Path != "/saved-path" || inherited.WebSocket.Host != "transport.example.org" {
+					t.Fatal("WebSocket review lost saved settings", inherited)
+				}
+			case "httpupgrade":
+				if inherited.HTTPUpgrade == nil || inherited.HTTPUpgrade.Path != "/saved-path" || inherited.HTTPUpgrade.Host != "transport.example.org" {
+					t.Fatal("HTTPUpgrade review lost saved settings", inherited)
+				}
+			}
+			raw, err := json.Marshal(preview.Endpoints)
+			if err != nil || bytes.Contains(raw, []byte("synthetic-private-header")) || bytes.Contains(raw, []byte("-----BEGIN")) || bytes.Contains(raw, []byte("privateKey")) {
+				t.Fatal("endpoint review exposed private authoring material", err)
+			}
+		})
+	}
+}
+
+func TestAuthoringEndpointDefaultsMatchExportSecurity(t *testing.T) {
+	for _, security := range []string{"reality", "tls", "none"} {
+		t.Run(security, func(t *testing.T) {
+			s, key, in := authoringPlanFixture(t)
+			in.Nodes = in.Nodes[:1]
+			in.Nodes[0].TunnelPort, in.Nodes[0].TunnelHosts = 0, nil
+			in.Nodes[0].DirectHosts = []string{"www.example.org"}
+			spec := in.Profile.Spec
+			spec.Security = security
+			if security != "reality" {
+				spec.Reality = nil
+			}
+			if security == "tls" {
+				cert := businessTLSCredentials(t, time.Now().Add(-time.Hour), time.Now().Add(time.Hour))
+				spec.TLS = map[string]any{"certificates": []any{map[string]any{"certificate": strings.Split(strings.TrimSpace(cert.CertificatePEM), "\n"), "key": strings.Split(strings.TrimSpace(cert.PrivateKeyPEM), "\n")}}}
+			}
+			result, err := s.SaveNativeInboundPlan(context.Background(), key, in)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var ciphertext []byte
+			if err = s.db.QueryRow(`SELECT profile_enc FROM native_inbounds WHERE id=?`, in.Profile.ID).Scan(&ciphertext); err != nil {
+				t.Fatal(err)
+			}
+			private, err := openInboundProfile(key, ciphertext, in.Profile.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			client, err := inboundspec.ExportClient(*private.Spec, "json", inboundspec.User{UUID: "8d5f5d49-923b-45c9-b53f-0c455dd516b4", Email: "synthetic@example.org"}, inboundspec.Endpoint{Address: "www.example.org", Port: 443})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var generic map[string]any
+			if json.Unmarshal(client, &generic) != nil {
+				t.Fatal("invalid client export")
+			}
+			outbound := generic["outbounds"].([]any)[0].(map[string]any)
+			stream := outbound["streamSettings"].(map[string]any)
+			settings, _ := stream[security+"Settings"].(map[string]any)
+			endpoint := previewPlanEndpoints(result.Plan)[0]
+			if endpoint.ServerName != specString(settings, "serverName") || endpoint.Fingerprint != specString(settings, "fingerprint") || endpoint.SpiderX != specString(settings, "spiderX") {
+				t.Fatal("review advertises different defaults from the actual client export", endpoint)
+			}
+		})
 	}
 }

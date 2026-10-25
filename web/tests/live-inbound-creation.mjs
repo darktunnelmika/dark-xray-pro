@@ -4,6 +4,7 @@ import { chromium, expect } from '@playwright/test';
 import { readFile, writeFile } from 'node:fs/promises';
 import { createServer, request as httpRequest } from 'node:http';
 import { isAbsolute } from 'node:path';
+import { assertCapabilities, assertNewSelectors, assertSpecOnly, field, input, publicOnly, reveal, section } from './live-inbound-authoring.mjs';
 
 const base = new URL(process.env.DARK_PRO_QA_UI_URL || '');
 if (base.protocol !== 'http:' || base.hostname !== '127.0.0.1' || !base.port || base.username || base.password) throw new Error('QA loopback only');
@@ -35,14 +36,6 @@ denyProxy.on('connect', (_request, socket) => { socket.end('HTTP/1.1 403 Forbidd
 await new Promise((resolve, reject) => { denyProxy.once('error', reject); denyProxy.listen(0, '127.0.0.1', resolve); });
 let browser, page;
 
-function publicOnly(value, path = 'response') {
-  if (!value || typeof value !== 'object') return;
-  for (const [key, nested] of Object.entries(value)) {
-    const normalized = key.replace(/[_-]/g, '').toLowerCase();
-    if (['privatekey', 'realityprivatekey', 'config'].includes(normalized)) throw new Error('Private configuration field exposed at ' + path + '.' + key);
-    publicOnly(nested, path + '.' + key);
-  }
-}
 function receiptSafe(receipt, planRevision, inboundRevision) {
   publicOnly(receipt);
   expect(receipt).toMatchObject({ runtime_changed: false, clients_deleted: false, credit_changed: false,
@@ -52,14 +45,22 @@ function receiptSafe(receipt, planRevision, inboundRevision) {
   expect(receipt.event_id).toMatch(/^[A-Za-z0-9][A-Za-z0-9_.:-]{15,127}$/);
   expect(receipt.plan.last_event_id).toBe(receipt.event_id);
 }
-const expectedOptions = edited => ({
-  ...(edited ? { grpc_authority: 'edge.example.org:8443', grpc_multi_mode: true } : {}),
-  reality_xver: 2, reality_max_time_diff: edited ? 120000 : 60000,
-  reality_min_client_ver: '1.8.0', reality_max_client_ver: '25.9.11',
-  sniffing: { enabled: !edited, dest_override: ['http', 'tls', 'quic'], route_only: true,
-    domains_excluded: edited ? ['domain:example.net', 'full:keep.example.org'] : ['domain:example.net'], ips_excluded: ['192.0.2.0/24'] },
-  ...(edited ? {} : { fallbacks: [{ dest: '127.0.0.1:8080', path: '/health', xver: 2 }] }),
+const expectedSpec = edited => ({
+  version: 1, protocol: 'vless', network: edited ? 'grpc' : 'tcp', security: 'reality',
+  stream: edited ? { grpcSettings: { serviceName: 'dark-grpc', authority: 'edge.example.org:8443', multiMode: true } } : {},
+  reality: { target: 'example.org:443', serverNames: ['example.org'], shortIds: edited ? ['aabb', 'ccdd', 'eeff'] : ['aabb', 'ccdd'],
+    xver: 2, maxTimediff: edited ? 120000 : 60000, minClientVer: '1.8.0', maxClientVer: '25.9.11' },
+  settings: { sniffing: { enabled: !edited, destOverride: ['http', 'tls', 'quic'], routeOnly: true,
+    domainsExcluded: edited ? ['domain:example.net', 'full:keep.example.org'] : ['domain:example.net'], ipsExcluded: ['192.0.2.0/24'] } },
 });
+function checkSpec(profile, edited, expected = expectedSpec(edited)) {
+  assertSpecOnly(profile);
+  expect(profile.spec).toMatchObject(expected);
+  expect(profile.spec.settings.sniffing).toEqual(expected.settings.sniffing);
+  expect(profile.spec.settings.fallbacks ?? []).toEqual([]);
+  expect(profile.spec_secret_paths).toEqual(expect.arrayContaining(['reality.privateKey']));
+  expect(profile.spec.client.publicKey).toBe(profile.public_key);
+}
 const expectedNodes = edited => [
   { node_id: 'de', installation_id: 'a'.repeat(32), listen_ip: '198.51.100.10', direct_port: 10443,
     direct_hosts: ['de.example.org', 'shared.example.org'], tunnel_port: 1185, tunnel_hosts: ['tunnel.example.org'],
@@ -108,12 +109,10 @@ try {
     await dialog.getByLabel('Tunnel Hosts: ' + id, { exact: true }).fill(tunnelHosts);
   }
   async function checkSetup(dialog, edited) {
-    const connection = dialog.locator('[data-review-section="connection"]');
-    await expect(connection.locator('[data-review-field="realityTarget"]')).toContainText('example.org:443');
-    await expect(connection.locator('[data-review-field="shortIDs"]')).toContainText(edited ? 'eeff' : 'ccdd');
-    await expect(dialog.locator('[data-review-option="realityMaxTimeDiff"]')).toContainText(edited ? '120000' : '60000');
-    await expect(dialog.locator('[data-review-option="sniffing"]')).toHaveAttribute('data-sniffing-enabled', String(!edited));
-    await expect(dialog.locator('[data-review-option="sniffing"]')).toHaveAttribute('data-sniffing-retained', String(edited));
+    const reviewSpec = JSON.parse(await dialog.locator('[data-review-section="spec"] .spec-public-json').textContent());
+    publicOnly(reviewSpec); expect(reviewSpec).toMatchObject(expectedSpec(edited));
+    expect(reviewSpec.settings.sniffing.enabled).toBe(!edited);
+    expect(reviewSpec.settings.sniffing.destOverride).toEqual(['http', 'tls', 'quic']);
     for (const row of expectedNodes(edited)) {
       const summary = dialog.locator(`[data-review-node="${row.node_id}"]`);
       for (const [path, port] of [['direct', row.direct_port], ['tunnel', row.tunnel_port]]) {
@@ -129,7 +128,8 @@ try {
     expect(preview).toMatchObject({ valid: true, runtime_changed: false, topology_validated: true,
       topology_validation_only: true, topology_key_scope: edited ? 'saved_profile' : 'preview_only' });
     expect(preview.plan.nodes).toEqual(expectedNodes(edited));
-    expect(preview.plan.profile.options).toEqual(expectedOptions(edited));
+    checkSpec(preview.plan.profile, edited);
+    expect(response.request().postDataJSON().profile.options).toBeUndefined();
     expect(preview.plan.profile.enabled).toBe(false); expect(preview.plan.runtime_apply).toBe(false);
     expect(preview.topology.nodes.map(node => node.node_id).sort()).toEqual(edited ? ['de', 'fr', 'nl'] : ['de', 'fr']);
     for (const node of preview.topology.nodes) expect(node.candidate).toMatchObject({ can_activate: false,
@@ -149,7 +149,7 @@ try {
     await dialog.getByRole('button', { name: 'Save paused setup', exact: true }).click();
     const response = await pending; expect(response.status()).toBe(edited ? 200 : 201);
     const receipt = await response.json(); receiptSafe(receipt, edited ? 2 : 1, edited ? 2 : 1);
-    expect(receipt.plan.profile.options).toEqual(expectedOptions(edited));
+    checkSpec(receipt.plan.profile, edited);
     await expect(dialog).toBeHidden();
     return { receipt, body: response.request().postDataJSON() };
   }
@@ -163,59 +163,43 @@ try {
     const dialog = page.getByRole('dialog', { name: 'Edit Inbound setup', exact: true }); await expect(dialog).toBeVisible();
     return { dialog, plan: saved.plan };
   }
-  async function advanced(dialog, section) {
-    await dialog.getByRole('tab', { name: 'Connection', exact: true }).click();
-    const group = dialog.locator(`[data-connection-group="${section}"]`);
-    if (await group.getAttribute('open') === null) await group.locator(':scope > summary').click();
-    const details = group.locator('.inbound-profile-advanced').filter({ hasText: section === 'network' ? 'Advanced gRPC settings' : 'Advanced REALITY settings' });
-    if (await details.getAttribute('open') === null) await details.locator('summary').click();
-  }
   async function traffic(dialog) {
-    await dialog.getByRole('tab', { name: 'Advanced', exact: true }).click();
-    const settings = dialog.getByRole('region', { name: 'Sniffing', exact: true }).locator('details').first();
-    if (await settings.getAttribute('open') === null) await settings.locator(':scope > summary').click();
-    const exclusions = dialog.locator('.inbound-traffic-exclusions');
-    if (await exclusions.getAttribute('open') === null) await exclusions.locator('summary').click();
+    await input(dialog, 'settings.sniffing.enabled', 'Advanced');
   }
   async function verifyProfile(dialog, edited) {
     await expect(dialog.getByRole('tab')).toHaveText(['Connection', 'Dark Swap', 'Advanced', 'Review']);
-    for (const label of [/^Inbound name/, /^REALITY target/, /^Server names/, /^Short IDs/]) await expect(dialog.getByLabel(label)).toHaveCount(1);
+    for (const path of ['protocol', 'network', 'security', 'reality.target', 'reality.serverNames', 'reality.shortIds']) await expect(field(dialog, path)).toHaveCount(1);
     await expect(dialog.getByLabel('Inbound name', { exact: true })).toHaveValue(edited ? 'Real browser creation edited' : 'Real browser creation');
-    await expect(dialog.getByRole('radio', { name: edited ? 'gRPC / REALITY' : 'TCP / REALITY', exact: true })).toBeChecked();
-    if (edited) await expect(dialog.getByLabel('gRPC service', { exact: true })).toHaveValue('dark-grpc');
-    await expect(dialog.getByLabel('REALITY target (host:port)', { exact: true })).toHaveValue('example.org:443');
-    await expect(dialog.getByLabel('Server names (comma-separated)', { exact: true })).toHaveValue('example.org');
-    await expect(dialog.getByLabel('Short IDs', { exact: true })).toHaveValue(edited ? 'aabb, ccdd, eeff' : 'aabb, ccdd');
-    await advanced(dialog, 'security');
-    await expect(dialog.getByLabel('REALITY Xver', { exact: true })).toHaveValue('2');
-    await expect(dialog.getByLabel('Maximum time difference (ms)', { exact: true })).toHaveValue(edited ? '120000' : '60000');
-    await expect(dialog.getByLabel('Minimum client version', { exact: true })).toHaveValue('1.8.0');
-    await expect(dialog.getByLabel('Maximum client version', { exact: true })).toHaveValue('25.9.11');
+    await expect(field(dialog, 'network')).toHaveValue(edited ? 'grpc' : 'tcp');
+    await expect(field(dialog, 'security')).toHaveValue('reality');
+    if (edited) await expect(field(dialog, 'stream.grpcSettings.serviceName')).toHaveValue('dark-grpc');
+    await expect(field(dialog, 'reality.target')).toHaveValue('example.org:443');
+    await expect(field(dialog, 'reality.serverNames')).toHaveValue('example.org');
+    await expect(field(dialog, 'reality.shortIds')).toHaveValue(edited ? 'aabb\nccdd\neeff' : 'aabb\nccdd');
+    await expect(field(dialog, 'reality.privateKey')).toHaveValue('');
+    await expect(field(dialog, 'reality.xver')).toHaveValue('2');
+    await expect(field(dialog, 'reality.maxTimediff')).toHaveValue(edited ? '120000' : '60000');
+    await expect(field(dialog, 'reality.minClientVer')).toHaveValue('1.8.0');
+    await expect(field(dialog, 'reality.maxClientVer')).toHaveValue('25.9.11');
     if (edited) {
-      await advanced(dialog, 'network');
-      await expect(dialog.getByLabel('gRPC Authority', { exact: true })).toHaveValue('edge.example.org:8443');
-      await expect(dialog.getByRole('checkbox', { name: 'gRPC MultiMode', exact: true })).toBeChecked();
+      await expect(field(dialog, 'stream.grpcSettings.authority')).toHaveValue('edge.example.org:8443');
+      await expect(field(dialog, 'stream.grpcSettings.multiMode')).toBeChecked();
     }
     await traffic(dialog);
     await expect(dialog.getByRole('checkbox', { name: 'Enable Sniffing', exact: true })).toBeChecked({ checked: !edited });
-    for (const protocol of ['HTTP', 'TLS', 'QUIC']) await expect(dialog.getByRole('checkbox', { name: protocol, exact: true })).toBeChecked();
-    await expect(dialog.getByRole('checkbox', { name: 'Use the detected domain for routing only', exact: true })).toBeChecked();
-    await expect(dialog.getByLabel('Excluded domains', { exact: true })).toHaveValue(expectedOptions(edited).sniffing.domains_excluded.join('\n'));
-    await expect(dialog.getByLabel('Excluded IPs or CIDRs', { exact: true })).toHaveValue('192.0.2.0/24');
-    await expect(dialog.locator('.inbound-fallback-row')).toHaveCount(edited ? 0 : 1);
-    if (!edited) {
-      const row = dialog.locator('.inbound-fallback-row'); await row.locator('summary').click();
-      await expect(dialog.getByLabel('Fallback 1 Destination', { exact: true })).toHaveValue('127.0.0.1:8080');
-      await expect(dialog.getByLabel('Fallback 1 Path', { exact: true })).toHaveValue('/health');
-      await expect(dialog.getByLabel('Fallback 1 ALPN', { exact: true })).toHaveCount(0);
-      await expect(dialog.getByLabel('Fallback 1 PROXY protocol', { exact: true })).toHaveValue('2');
-    }
+    await expect(field(dialog, 'settings.sniffing.destOverride')).toHaveValue('http\ntls\nquic');
+    await expect(field(dialog, 'settings.sniffing.routeOnly')).toBeChecked();
+    await expect(field(dialog, 'settings.sniffing.domainsExcluded')).toHaveValue(expectedSpec(edited).settings.sniffing.domainsExcluded.join('\n'));
+    await expect(field(dialog, 'settings.sniffing.ipsExcluded')).toHaveValue('192.0.2.0/24');
+    await section(dialog, 'Connection');
+    await expect(dialog.locator('[data-spec-rows="settings.fallbacks"] [data-spec-row]')).toHaveCount(0);
   }
   async function verifyNodes(dialog, edited) {
     await dialog.getByRole('tab', { name: 'Dark Swap', exact: true }).click();
     await expect(dialog.getByRole('checkbox', { name: 'Select destination: Germany', exact: true })).toBeChecked();
     await expect(dialog.getByRole('checkbox', { name: 'Select destination: France', exact: true })).toBeChecked();
     await expect(dialog.getByRole('checkbox', { name: 'Select destination: Netherlands', exact: true })).not.toBeChecked();
+    await expect(dialog.getByRole('checkbox', { name: 'Select destination: HUB — this server', exact: true })).not.toBeChecked();
     for (const row of expectedNodes(edited)) {
       const id = row.node_id; await expand(dialog, id === 'de' ? 'Germany' : 'France');
       await expect(dialog.getByLabel('Destination listening IP: ' + id, { exact: true })).toHaveValue(row.listen_ip);
@@ -245,33 +229,35 @@ try {
   await page.getByRole('button', { name: 'Sign in', exact: true }).click();
   const capabilityHTTP = await capabilitiesResponse; expect(capabilityHTTP.status()).toBe(200);
   const capabilities = await capabilityHTTP.json(); publicOnly(capabilities);
-  expect(capabilities).toMatchObject({ available: true, runtime_apply: false, profile_options: true, profile_sniffing: true, profile_fallbacks: true,
-    profile_traffic_options_scope: 'creation_plan', profile_xhttp: true, profile_client_options: true, endpoint_options: true,
-    profile_tls: true, profile_tls_scope: 'creation_plan', profile_websocket: true, profile_http_upgrade: true,
-    protocols: ['vless'], securities: ['reality', 'tls'], transports: ['tcp', 'grpc', 'xhttp', 'ws', 'httpupgrade'] });
+  assertCapabilities(capabilities);
+  expect(capabilities).toMatchObject({ profile_options: true, profile_sniffing: true, profile_fallbacks: true,
+    profile_traffic_options_scope: 'creation_plan', profile_xhttp: true, profile_client_options: true, profile_tls_scope: 'creation_plan' });
   const add = page.getByRole('button', { name: 'Add Inbound', exact: true }); await expect(add).toBeEnabled(); await add.click();
   const dialog = page.getByRole('dialog', { name: 'Create Inbound', exact: true }); await expect(dialog).toBeVisible();
   await expect(dialog.getByRole('tab')).toHaveText(['Connection', 'Dark Swap', 'Advanced', 'Review']);
-  for (const label of [/^Inbound name/, /^REALITY target/, /^Server names/, /^Short IDs/]) await expect(dialog.getByLabel(label)).toHaveCount(1);
+  await assertNewSelectors(dialog);
+  for (const path of ['protocol', 'network', 'security', 'reality.target', 'reality.serverNames', 'reality.shortIds']) await expect(field(dialog, path)).toHaveCount(1);
   stage = 'complete creation form';
   await dialog.getByLabel('Inbound name', { exact: true }).fill('Real browser creation');
-  await dialog.getByLabel('REALITY target (host:port)', { exact: true }).fill('example.org:443');
-  await dialog.getByLabel('Server names (comma-separated)', { exact: true }).fill('example.org');
-  await dialog.getByLabel('Short IDs', { exact: true }).fill('aabb, ccdd');
-  await advanced(dialog, 'security');
-  await dialog.getByLabel('REALITY Xver', { exact: true }).selectOption('2');
-  await dialog.getByLabel('Maximum time difference (ms)', { exact: true }).fill('60000');
-  await dialog.getByLabel('Minimum client version', { exact: true }).fill('1.8.0');
-  await dialog.getByLabel('Maximum client version', { exact: true }).fill('25.9.11');
+  await (await input(dialog, 'reality.target')).fill('example.org:443');
+  await field(dialog, 'reality.serverNames').fill('example.org');
+  await field(dialog, 'reality.shortIds').fill('aabb\nccdd');
+  await (await input(dialog, 'reality.xver')).fill('2');
+  await field(dialog, 'reality.maxTimediff').fill('60000');
+  await field(dialog, 'reality.minClientVer').fill('1.8.0');
+  await field(dialog, 'reality.maxClientVer').fill('25.9.11');
   await traffic(dialog);
   await dialog.getByRole('checkbox', { name: 'Enable Sniffing', exact: true }).check();
-  await dialog.getByRole('checkbox', { name: 'QUIC', exact: true }).check();
-  await dialog.getByLabel('Excluded domains', { exact: true }).fill('domain:example.net');
-  await dialog.getByLabel('Excluded IPs or CIDRs', { exact: true }).fill('192.0.2.0/24');
-  await dialog.getByRole('button', { name: 'Add fallback', exact: true }).click();
-  await dialog.getByLabel('Fallback 1 Destination', { exact: true }).fill('127.0.0.1:8080');
-  await dialog.getByLabel('Fallback 1 Path', { exact: true }).fill('/health');
-  await dialog.getByLabel('Fallback 1 PROXY protocol', { exact: true }).selectOption('2');
+  await field(dialog, 'settings.sniffing.destOverride').fill('http\ntls\nquic');
+  await field(dialog, 'settings.sniffing.routeOnly').check();
+  await field(dialog, 'settings.sniffing.domainsExcluded').fill('domain:example.net');
+  await field(dialog, 'settings.sniffing.ipsExcluded').fill('192.0.2.0/24');
+  await section(dialog, 'Connection');
+  const fallbacks = dialog.locator('[data-spec-rows="settings.fallbacks"]');
+  await reveal(fallbacks); await fallbacks.getByRole('button', { name: 'Add', exact: true }).click();
+  await field(dialog, 'settings.fallbacks.0.dest').fill('127.0.0.1:8080');
+  await field(dialog, 'settings.fallbacks.0.path').fill('/health');
+  await field(dialog, 'settings.fallbacks.0.xver').fill('2');
   await dialog.getByRole('tab', { name: 'Dark Swap', exact: true }).click();
   await fillDestination(dialog, 'de', 'Germany', '198.51.100.10', '10443', 'de.example.org\nshared.example.org', '1185', 'tunnel.example.org');
   await expect(dialog.getByRole('checkbox', { name: 'Dark Swap: de', exact: true })).not.toBeChecked();
@@ -292,6 +278,18 @@ try {
   await fillDestination(dialog, 'fr', 'France', '198.51.100.20', '11443', 'fr.example.org', '1285', 'fr-tunnel.example.org');
   await dialog.getByRole('tab', { name: 'Review', exact: true }).click();
   await dialog.getByLabel('Change note', { exact: true }).fill('Real browser complete setup');
+  stage = 'incompatible REALITY fallback rejection';
+  const rejectedPending = observe('POST', api + '/preview');
+  await dialog.getByRole('button', { name: 'Check complete setup', exact: true }).click();
+  const rejectedResponse = await rejectedPending; expect(rejectedResponse.status()).toBe(422);
+  const rejected = await rejectedResponse.json(); publicOnly(rejected);
+  expect(rejected.issue).toMatchObject({ field: 'profile.spec.settings.fallbacks', code: 'fallback_requires_tcp_tls' });
+  await section(dialog, 'Review');
+  await expect(dialog.getByRole('button', { name: 'Save paused setup', exact: true })).toBeDisabled();
+  await section(dialog, 'Connection');
+  await reveal(fallbacks); await fallbacks.getByRole('button', { name: 'Remove Fallbacks 1', exact: true }).click();
+  await expect(fallbacks.locator('[data-spec-row]')).toHaveCount(0);
+  await section(dialog, 'Review');
   stage = 'real creation preview and transaction';
   const creationPreviewBody = await checkSetup(dialog, false);
   const created = await persist(dialog, false); inboundID = created.receipt.plan.profile.id;
@@ -309,19 +307,15 @@ try {
   stage = 'complete persisted setup edit';
   await traffic(reopened.dialog);
   await reopened.dialog.getByRole('checkbox', { name: 'Enable Sniffing', exact: true }).uncheck();
-  await reopened.dialog.getByLabel('Excluded domains', { exact: true }).fill('domain:example.net\nfull:keep.example.org');
-  await reopened.dialog.getByRole('button', { name: 'Remove fallback 1', exact: true }).click();
-  await expect(reopened.dialog.locator('.inbound-fallback-row')).toHaveCount(0);
+  await field(reopened.dialog, 'settings.sniffing.domainsExcluded').fill('domain:example.net\nfull:keep.example.org');
   await reopened.dialog.getByRole('tab', { name: 'Connection', exact: true }).click();
   await reopened.dialog.getByLabel('Inbound name', { exact: true }).fill('Real browser creation edited');
-  await reopened.dialog.getByRole('radio', { name: 'gRPC / REALITY', exact: true }).check();
-  await reopened.dialog.getByLabel('gRPC service', { exact: true }).fill('dark-grpc');
-  await reopened.dialog.getByLabel('Short IDs', { exact: true }).fill('aabb, ccdd, eeff');
-  await advanced(reopened.dialog, 'security');
-  await reopened.dialog.getByLabel('Maximum time difference (ms)', { exact: true }).fill('120000');
-  await advanced(reopened.dialog, 'network');
-  await reopened.dialog.getByLabel('gRPC Authority', { exact: true }).fill('edge.example.org:8443');
-  await reopened.dialog.getByRole('checkbox', { name: 'gRPC MultiMode', exact: true }).check();
+  await (await input(reopened.dialog, 'network')).selectOption('grpc');
+  await field(reopened.dialog, 'stream.grpcSettings.serviceName').fill('dark-grpc');
+  await field(reopened.dialog, 'stream.grpcSettings.authority').fill('edge.example.org:8443');
+  await field(reopened.dialog, 'stream.grpcSettings.multiMode').check();
+  await (await input(reopened.dialog, 'reality.shortIds')).fill('aabb\nccdd\neeff');
+  await (await input(reopened.dialog, 'reality.maxTimediff')).fill('120000');
   await reopened.dialog.getByRole('tab', { name: 'Dark Swap', exact: true }).click();
   await expand(reopened.dialog, 'Germany');
   await reopened.dialog.getByRole('checkbox', { name: 'Dark Swap: de', exact: true }).check();
@@ -338,7 +332,8 @@ try {
   stage = 'real update preview and transaction';
   const updatePreviewBody = await checkSetup(reopened.dialog, true), updated = await persist(reopened.dialog, true);
   expect(updated.body).toEqual(updatePreviewBody);
-  expect(updated.body.profile.options.fallbacks).toEqual([]);
+  expect(updated.body.profile.options).toBeUndefined();
+  expect(updated.body.profile.spec.settings.fallbacks ?? []).toEqual([]);
   expect(updated.body).toMatchObject({ expected_plan_revision: 1, expected_inbound_revision: 1, reason: 'Real browser edited setup' });
   expect(updated.receipt.plan.profile).toMatchObject({ id: inboundID, name: 'Real browser creation edited', transport: 'grpc', grpc_service: 'dark-grpc',
     short_ids: ['aabb', 'ccdd', 'eeff'], public_key: createdPublicKey });
@@ -352,15 +347,13 @@ try {
   stage = 'XHTTP and public endpoint edit';
   const network = final.dialog;
   await network.getByRole('tab', { name: 'Connection', exact: true }).click();
-  await network.getByRole('radio', { name: 'XHTTP / REALITY', exact: true }).check();
-  await network.locator('[data-creation-field="xhttpPath"]').fill('/xhttp');
-  await network.locator('[data-creation-field="xhttpHost"]').fill('cdn.example.org');
-  await network.locator('[data-creation-field="xhttpMode"]').selectOption('packet-up');
-  await network.locator('[data-creation-field="xhttpPadding"]').fill('200-400');
-  const clientOptions = network.locator('details[data-client-options]');
-  if (await clientOptions.getAttribute('open') === null) await clientOptions.locator(':scope > summary').click();
-  await network.locator('[data-creation-field="clientFingerprint"]').selectOption('firefox');
-  await network.locator('[data-creation-field="clientSpiderX"]').fill('/news');
+  await (await input(network, 'network')).selectOption('xhttp');
+  await field(network, 'stream.xhttpSettings.path').fill('/xhttp');
+  await field(network, 'stream.xhttpSettings.host').fill('cdn.example.org');
+  await field(network, 'stream.xhttpSettings.mode').selectOption('packet-up');
+  await (await input(network, 'stream.xhttpSettings.xPaddingBytes')).fill('200-400');
+  await (await input(network, 'client.fingerprint')).selectOption('firefox');
+  await field(network, 'client.spiderX').fill('/news');
   await network.getByRole('tab', { name: 'Dark Swap', exact: true }).click();
   await expand(network, 'Germany');
   await network.getByRole('button', { name: 'Endpoint settings: Direct: de', exact: true }).click();
@@ -375,10 +368,10 @@ try {
   await network.locator('[data-creation-field="directEndpoints.1.enabled"]').uncheck();
   await network.getByRole('tab', { name: 'Review', exact: true }).click();
   await network.getByLabel('Change note', { exact: true }).fill('Real browser network and endpoints');
-  const expectedNetworkOptions = expectedOptions(true);
-  delete expectedNetworkOptions.grpc_authority; delete expectedNetworkOptions.grpc_multi_mode;
-  expectedNetworkOptions.xhttp = { path: '/xhttp', host: 'cdn.example.org', mode: 'packet-up', x_padding_bytes: '200-400' };
-  expectedNetworkOptions.client = { fingerprint: 'firefox', spider_x: '/news' };
+  const expectedNetworkSpec = expectedSpec(true);
+  expectedNetworkSpec.network = 'xhttp';
+  expectedNetworkSpec.stream = { xhttpSettings: { path: '/xhttp', host: 'cdn.example.org', mode: 'packet-up', xPaddingBytes: '200-400' } };
+  expectedNetworkSpec.client = { fingerprint: 'firefox', spiderX: '/news' };
   const expectedNetworkNodes = expectedNodes(true);
   expectedNetworkNodes[0].direct_hosts = ['2001:db8::10'];
   expectedNetworkNodes[0].direct_endpoints = [
@@ -391,10 +384,11 @@ try {
   expect(networkPreviewResponse.status()).toBe(200);
   const networkPreview = await networkPreviewResponse.json(); publicOnly(networkPreview);
   expect(networkPreview.plan.nodes).toEqual(expectedNetworkNodes);
-  expect(networkPreview.plan.profile.options).toEqual(expectedNetworkOptions);
+  checkSpec(networkPreview.plan.profile, true, expectedNetworkSpec);
+  expect(networkPreview.plan.profile.spec.stream.grpcSettings).toBeUndefined();
   expect(networkPreview.plan.profile).toMatchObject({ transport: 'xhttp', grpc_service: '' });
   expect(networkPreview.endpoints.find(row => row.node_id === 'de' && row.path === 'direct' && row.address === '2001:db8::10')).toMatchObject({
-    port: 443, listen_port: 10443, enabled: true, server_name: 'example.org', fingerprint: 'safari', spider_x: '/endpoint', transport: 'xhttp', xhttp: expectedNetworkOptions.xhttp,
+    port: 443, listen_port: 10443, enabled: true, server_name: 'example.org', fingerprint: 'safari', spider_x: '/endpoint', transport: 'xhttp', xhttp: { path: '/xhttp', host: 'cdn.example.org', mode: 'packet-up', x_padding_bytes: '200-400' },
   });
   expect(networkPreview.endpoints.find(row => row.address === 'shared.example.org')).toMatchObject({ enabled: false, fingerprint: 'firefox', spider_x: '/news' });
   await expect(network.getByRole('button', { name: 'Save paused setup', exact: true })).toBeEnabled();
@@ -404,20 +398,20 @@ try {
   const networkReceipt = await networkSaveResponse.json(); receiptSafe(networkReceipt, 3, 3);
   expect(networkSaveResponse.request().postDataJSON()).toEqual(networkPreviewResponse.request().postDataJSON());
   expect(networkReceipt.plan.profile.public_key).toBe(createdPublicKey);
-  expect(networkReceipt.plan.profile.options).toEqual(expectedNetworkOptions);
+  checkSpec(networkReceipt.plan.profile, true, expectedNetworkSpec);
   expect(networkReceipt.plan.nodes).toEqual(expectedNetworkNodes);
   await expect(network).toBeHidden();
   stage = 'reloaded XHTTP and endpoint persistence';
   const networkReloaded = await reopen(); expect(networkReloaded.plan).toEqual(networkReceipt.plan);
-  await expect(networkReloaded.dialog.getByRole('radio', { name: 'XHTTP / REALITY', exact: true })).toBeChecked();
-  await expect(networkReloaded.dialog.locator('[data-creation-field="xhttpPath"]')).toHaveValue('/xhttp');
+  await expect(field(networkReloaded.dialog, 'network')).toHaveValue('xhttp');
+  await expect(field(networkReloaded.dialog, 'stream.xhttpSettings.path')).toHaveValue('/xhttp');
   await networkReloaded.dialog.getByRole('tab', { name: 'Dark Swap', exact: true }).click();
   await expand(networkReloaded.dialog, 'Germany');
   await expect(networkReloaded.dialog.locator('[data-creation-field="directEndpoints.0.address"]')).toHaveValue('2001:db8::10');
   await expect(networkReloaded.dialog.locator('[data-creation-field="directEndpoints.0.port"]')).toHaveValue('443');
   await expect(networkReloaded.dialog.locator('[data-creation-field="directEndpoints.1.enabled"]')).not.toBeChecked();
   await expect(networkReloaded.dialog.getByLabel('Direct port: de', { exact: true })).toHaveValue('10443');
-  expect(mutations).toEqual([{ method: 'POST', path: '/api/v1/session/login' }, { method: 'POST', path: api + '/preview' },
+  expect(mutations).toEqual([{ method: 'POST', path: '/api/v1/session/login' }, { method: 'POST', path: api + '/preview' }, { method: 'POST', path: api + '/preview' },
     { method: 'POST', path: api }, { method: 'POST', path: api + '/preview' }, { method: 'PUT', path: api + '/' + inboundID },
     { method: 'POST', path: api + '/preview' }, { method: 'PUT', path: api + '/' + inboundID }]);
   if (diagnostics.length) throw new Error(diagnostics.join('; '));

@@ -19,8 +19,8 @@ import (
 	"time"
 
 	"github.com/darktunnelmika/dark-xray-pro/internal/business"
+	"github.com/darktunnelmika/dark-xray-pro/internal/inboundspec"
 	"github.com/darktunnelmika/dark-xray-pro/internal/webui"
-	"github.com/darktunnelmika/dark-xray-pro/internal/xrayconfig"
 )
 
 // A real browser signs in and authors the complete plan through the compiled UI
@@ -160,15 +160,23 @@ func TestRealBrowserInboundCreationPlan(t *testing.T) {
 		plan.LastEventID != proof.UpdatedEventID || plan.Reason != "Real browser network and endpoints" {
 		t.Fatal("UI edit lost disabled state, identity, revision or event semantics")
 	}
-	wantProfile := business.InboundInput{ID: proof.InboundID, Name: "Real browser creation edited", Transport: "xhttp",
+	wantProfile := business.InboundInput{ID: proof.InboundID, Name: "Real browser creation edited", Transport: "xhttp", Security: "reality",
 		RealityTarget: "example.org:443", ServerNames: []string{"example.org"}, ShortIDs: []string{"aabb", "ccdd", "eeff"},
-		Options: &xrayconfig.ProfileOptions{XHTTP: &xrayconfig.XHTTPOptions{Path: "/xhttp", Host: "cdn.example.org", Mode: "packet-up", XPaddingBytes: "200-400"},
-			Client:      &xrayconfig.ClientOptions{Fingerprint: "firefox", SpiderX: "/news"},
-			RealityXver: 2, RealityMaxTimeDiff: 120000, RealityMinClientVer: "1.8.0", RealityMaxClientVer: "25.9.11",
-			Sniffing: &xrayconfig.SniffingOptions{Enabled: false, DestOverride: []string{"http", "tls", "quic"}, RouteOnly: true,
-				DomainsExcluded: []string{"domain:example.net", "full:keep.example.org"}, IPsExcluded: []string{"192.0.2.0/24"}}}}
-	if !reflect.DeepEqual(plan.Profile.InboundInput, wantProfile) {
+		Spec: &inboundspec.Spec{Version: 1, Protocol: "vless", Network: "xhttp", Security: "reality",
+			Settings: map[string]any{"fallbacks": []any{}, "sniffing": map[string]any{"enabled": false, "destOverride": []string{"http", "tls", "quic"}, "routeOnly": true,
+				"domainsExcluded": []string{"domain:example.net", "full:keep.example.org"}, "ipsExcluded": []string{"192.0.2.0/24"}}},
+			Stream: map[string]any{"xhttpSettings": map[string]any{"path": "/xhttp", "host": "cdn.example.org", "mode": "packet-up", "xPaddingBytes": "200-400"}},
+			Reality: map[string]any{"target": "example.org:443", "serverNames": []string{"example.org"}, "shortIds": []string{"aabb", "ccdd", "eeff"},
+				"xver": 2, "maxTimediff": 120000, "minClientVer": "1.8.0", "maxClientVer": "25.9.11"},
+			Client: map[string]any{"fingerprint": "firefox", "spiderX": "/news", "publicKey": proof.CreatedPublicKey}}}
+	actualProfileJSON, actualErr := json.Marshal(plan.Profile.InboundInput)
+	wantProfileJSON, wantErr := json.Marshal(wantProfile)
+	if actualErr != nil || wantErr != nil || !bytes.Equal(actualProfileJSON, wantProfileJSON) {
 		t.Fatal("stored profile differs from the browser's complete edit")
+	}
+	if plan.Profile.TLS != nil || plan.Profile.Options != nil || len(inboundspec.SecretPaths(*plan.Profile.Spec)) != 0 ||
+		!reflect.DeepEqual(plan.Profile.SpecSecretPaths, []string{"reality.privateKey", "settings.decryption"}) {
+		t.Fatal("Spec persistence lost its write-only contract or mixed legacy fields")
 	}
 	wantNodes := []business.NativeInboundPlanNode{
 		{NodeID: "de", InstallationID: strings.Repeat("a", 32), ListenIP: "198.51.100.10",
@@ -191,9 +199,22 @@ func TestRealBrowserInboundCreationPlan(t *testing.T) {
 	if err != nil || len(profiles) != len(beforeProfiles)+1 {
 		t.Fatal("UI created duplicate profiles or removed an existing profile", err)
 	}
+	savedProfileJSON, err := json.Marshal(plan.Profile)
+	if err != nil {
+		t.Fatal("saved public profile did not serialize")
+	}
 	for _, profile := range profiles {
-		if profile.ID == existingID && !reflect.DeepEqual(profile, beforeProfiles[0]) || profile.ID == proof.InboundID && !reflect.DeepEqual(profile, plan.Profile) {
+		if profile.ID == existingID && !reflect.DeepEqual(profile, beforeProfiles[0]) {
 			t.Fatal("native profile differs from the saved plan or existing fixture")
+		}
+		if profile.ID == proof.InboundID {
+			// The encrypted plan and public profile use distinct JSON decode
+			// paths. Compare every serialized field, allowing only the Go
+			// numeric representation (json.Number versus float64) to differ.
+			listedJSON, err := json.Marshal(profile)
+			if err != nil || !bytes.Equal(listedJSON, savedProfileJSON) {
+				t.Fatal("native public profile differs from the complete saved plan")
+			}
 		}
 	}
 	targets, err := s.business.ListInboundTargets(ctx)
@@ -230,7 +251,7 @@ func TestRealBrowserInboundCreationPlan(t *testing.T) {
 	requestsMu.Lock()
 	defer requestsMu.Unlock()
 	planPath := "/api/v1/workspace/native-inbound-plans"
-	wantMutations := map[string]int{"POST /api/v1/session/login": 1, "POST " + planPath + "/preview": 3, "POST " + planPath: 1,
+	wantMutations := map[string]int{"POST /api/v1/session/login": 1, "POST " + planPath + "/preview": 4, "POST " + planPath: 1,
 		"PUT " + planPath + "/" + strconv.FormatUint(proof.InboundID, 10): 2}
 	for request, count := range requests {
 		if strings.HasPrefix(request, "GET ") || strings.HasPrefix(request, "HEAD ") {
