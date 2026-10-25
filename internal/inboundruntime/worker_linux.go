@@ -28,16 +28,17 @@ type Config struct {
 }
 
 type Worker struct {
-	mu            sync.Mutex
-	cfg           Config
-	journal       *privateJournal
-	state         journal
-	native        *Binary
-	external      map[string]*Binary
-	process       ownedProcess
-	deadline      time.Time
-	closed        bool
-	persistFailed bool
+	mu                sync.Mutex
+	cfg               Config
+	journal           *privateJournal
+	state             journal
+	native            *Binary
+	external          map[string]*Binary
+	process           ownedProcess
+	deadline          time.Time
+	closed            bool
+	persistFailed     bool
+	publicAliasKernel publicAliasKernel
 }
 
 // Only processes created by this worker implement this interface in
@@ -110,7 +111,8 @@ func (w *Worker) Capabilities() Capabilities {
 	for k, b := range w.external {
 		m[k] = b.SHA256
 	}
-	return Capabilities{Version: 1, Binaries: m}
+	host := DetectHostCapabilities(w.native)
+	return Capabilities{Version: 1, Binaries: m, Host: &host}
 }
 
 func (w *Worker) save() error {
@@ -236,6 +238,10 @@ func (w *Worker) Step(ctx context.Context, x Exchange) error {
 			w.process.Stop()
 			w.process = nil
 		}
+		if err := w.cleanupPublicAliases(ctx); err != nil {
+			_ = w.observe(ctx, x, "blocked", "host_resource_cleanup_pending", false)
+			return err
+		}
 		w.state.Epoch = nil
 		w.state.Phase = "idle"
 		w.state.Pending = nil
@@ -243,6 +249,12 @@ func (w *Worker) Step(ctx context.Context, x Exchange) error {
 		w.state.LastCounters = nil
 		if e := w.save(); e != nil {
 			return e
+		}
+	}
+	if w.process == nil && w.state.Epoch == nil {
+		if err := w.cleanupPublicAliases(ctx); err != nil {
+			_ = w.observe(ctx, x, "blocked", "host_resource_cleanup_pending", false)
+			return err
 		}
 	}
 	if w.process != nil && (w.state.Phase == "prepared" || w.state.Phase == "registered" || w.state.Phase == "zero_pending" || w.state.Phase == "activation_intent") {
@@ -273,7 +285,11 @@ func (w *Worker) Step(ctx context.Context, x Exchange) error {
 			return e
 		}
 	}
-	delivery, e := x.Poll(ctx, PollInput{NodeID: w.cfg.NodeID, InstallationID: w.cfg.InstallationID, Capabilities: w.Capabilities()})
+	poll := PollInput{NodeID: w.cfg.NodeID, InstallationID: w.cfg.InstallationID, Capabilities: w.Capabilities()}
+	if w.state.Resolution != nil {
+		poll.ReconciledEpochID = w.state.Resolution.Epoch.EpochID
+	}
+	delivery, e := x.Poll(ctx, poll)
 	if e != nil {
 		w.maybeDrain(ctx)
 		return e
@@ -299,7 +315,15 @@ func (w *Worker) Step(ctx context.Context, x Exchange) error {
 		return errors.New("inbound_generation_conflict")
 	}
 	deadline := time.Unix(0, delivery.Lease.Expires)
+	if resolution := w.state.Resolution; resolution != nil && (len(bundle.Listeners) > 0 || len(bundle.Components) > 0) {
+		if delivery.Lease.ResumeEpochID != resolution.Epoch.EpochID || delivery.Lease.ResumeEpochSHA != inboundexec.Digest(resolution.Epoch) || delivery.Lease.ResumeOperationID == "" {
+			return ErrProof
+		}
+	}
 	if w.process != nil && bundle.Generation == w.state.Generation && w.state.Phase == "active" {
+		if e = w.renewPublicAliases(ctx, deadline); e != nil {
+			return w.fencePublicAliases(ctx, e)
+		}
 		if !w.process.Renew(deadline) {
 			return ErrLease
 		}
@@ -322,7 +346,7 @@ func (w *Worker) Step(ctx context.Context, x Exchange) error {
 		return nil
 	}
 	if len(bundle.Listeners) == 0 && len(bundle.Components) == 0 {
-		w.state = journal{Version: 1, NodeID: w.cfg.NodeID, InstallationID: w.cfg.InstallationID, Generation: bundle.Generation, Bundle: &bundle, Phase: "idle", FinalAccepted: true}
+		w.state = journal{Version: 1, NodeID: w.cfg.NodeID, InstallationID: w.cfg.InstallationID, Generation: bundle.Generation, Bundle: &bundle, Phase: "idle", FinalAccepted: true, Resolution: w.state.Resolution}
 		w.deadline = deadline
 		if e = w.save(); e != nil {
 			return e
@@ -343,7 +367,12 @@ func (w *Worker) Step(ctx context.Context, x Exchange) error {
 	if e = w.save(); e != nil {
 		return e
 	}
-	group, e := startGroup(ctx, w.cfg.Directory, w.native, w.external, bundle, deadline)
+	authorities, e := w.preparePublicAliases(ctx, bundle, deadline)
+	if e != nil {
+		_ = w.observe(ctx, x, "failed", "host_resource_prepare_failed", false)
+		return e
+	}
+	group, e := startGroup(ctx, w.cfg.Directory, w.native, w.external, bundle, deadline, authorities)
 	if e != nil {
 		_ = w.observe(ctx, x, "failed", "engine_start_failed", false)
 		return e
@@ -438,6 +467,9 @@ func (w *Worker) admit(ctx context.Context, x Exchange) error {
 		return w.drain(ctx, x)
 	}
 	deadline := time.Unix(0, delivery.Lease.Expires)
+	if e = w.renewPublicAliases(ctx, deadline); e != nil {
+		return w.fencePublicAliases(ctx, e)
+	}
 	if time.Until(deadline) < 12*time.Second || !w.process.Renew(deadline) {
 		return w.drain(ctx, x)
 	}
@@ -525,7 +557,10 @@ func (w *Worker) resolveUncertain(ctx context.Context, x Exchange) error {
 		w.process.Stop()
 		w.process = nil
 	}
-	w.state.Resolution = &journalResolution{Epoch: *w.state.Epoch, Clearance: c}
+	if err = w.cleanupPublicAliases(ctx); err != nil {
+		return err
+	}
+	w.state.Resolution = &journalResolution{Epoch: *w.state.Epoch, Clearance: c, Bundle: cloneBundle(*w.state.Bundle)}
 	w.state.Epoch = nil
 	w.state.Phase = "idle"
 	w.state.Sequence = 0
@@ -553,6 +588,9 @@ func (w *Worker) drain(ctx context.Context, x Exchange) error {
 		if w.process != nil {
 			w.process.Stop()
 			w.process = nil
+		}
+		if e := w.cleanupPublicAliases(ctx); e != nil {
+			return e
 		}
 		w.state.Epoch = nil
 		w.state.Phase = "idle"
@@ -592,6 +630,9 @@ func (w *Worker) drain(ctx context.Context, x Exchange) error {
 	}
 	w.process.Stop()
 	w.process = nil
+	if e = w.cleanupPublicAliases(ctx); e != nil {
+		return e
+	}
 	w.state.Epoch = nil
 	w.state.Phase = "idle"
 	return w.save()

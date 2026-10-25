@@ -296,7 +296,7 @@ func validateSettings(s *Spec) error {
 		}
 		putDefault(m, "name", "xray0")
 		putDefault(m, "mtu", 1500)
-		if !namePattern.MatchString(str(m, "name")) {
+		if len(str(m, "name")) > 15 || !namePattern.MatchString(str(m, "name")) {
 			return invalid("settings.name", "interface_name_invalid")
 		}
 		for _, g := range texts(m["gateway"]) {

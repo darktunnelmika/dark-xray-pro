@@ -310,6 +310,58 @@ func TestManagedInboundRealOwnerToAgentAccountingSiblingsAndStop(t *testing.T) {
 	if public.Code != 200 || !strings.Contains(public.Body.String(), "127.0.0.1") || public.Header().Get("Cache-Control") != "no-store, private" {
 		t.Fatal("current subscription unavailable or cacheable", public.Code)
 	}
+	// Losing an actual active process has an unknown tail. Owner loss keeps
+	// its known measured bytes and clears only that epoch; the old agent must
+	// receive this clearance even after the approved binary pin is upgraded.
+	interruptedUsername := username(501)
+	worker.Close()
+	worker, e = inboundruntime.Open(nodeConfig)
+	if e != nil {
+		t.Fatal("reopen interrupted process journal", e)
+	}
+	defer worker.Close()
+	if e = worker.Step(ctx, exchange); e == nil {
+		t.Fatal("lost active incarnation silently resumed")
+	}
+	request("GET", "/api/v1/workspace/native-inbounds/501/execution", nil, &state, 200)
+	if len(state.Reconciliations) != 1 || !state.Reconciliations[0].HasMeasuredUsage || state.Reconciliations[0].State != "uncertain" {
+		t.Fatal("real interrupted process lacks scoped measured reconciliation", state.Reconciliations)
+	}
+	rc := state.Reconciliations[0]
+	ri := ix.ReconciliationInput{EventID: "managed-real-owner-loss-0001", EpochID: rc.EpochID, ExpectedRevision: rc.Revision, Action: "accept_owner_loss", Reason: "Explicit disposable fixture owner accepts only the unknown tail"}
+	var rp ix.ReconciliationPreview
+	reconcilePath := "/api/v1/workspace/native-inbounds/501/execution/reconciliations"
+	request("POST", reconcilePath+"/preview", ri, &rp, 200)
+	if !rp.Valid {
+		t.Fatal("scoped owner-loss review rejected", rp.Blockers)
+	}
+	ri.ReviewSHA = rp.ReviewSHA
+	var rr ix.ReconciliationReceipt
+	request("POST", reconcilePath, ri, &rr, 200)
+	request("POST", reconcilePath, ri, &rr, 200)
+	if !rr.Replayed || rr.UnknownUsagePolicy != "owner_loss" || !rr.HasMeasuredUsage {
+		t.Fatal("owner-loss event did not preserve the exact reviewed accounting decision")
+	}
+	s.inboundExecution.config.Native.SHA256 = strings.Repeat("f", 64)
+	if e = worker.Step(ctx, exchange); e != nil {
+		t.Fatal("historical agent could not obtain exact settlement-only clearance", e)
+	}
+	if e = worker.Step(ctx, exchange); e == nil {
+		t.Fatal("settlement-only clearance bypassed current executable pins")
+	}
+	s.inboundExecution.config.Native = core
+	_ = worker.Step(ctx, exchange)
+	if e = managedHTTP(port1, interruptedUsername, client.UUID, target, payload); e == nil {
+		t.Fatal("owner-loss reconciliation automatically reopened traffic without a reviewed restart")
+	}
+	usage, e = s.business.ClientUsage(ctx, client.ID)
+	if e != nil || usage.Total != int64(len(payload)*2) {
+		t.Fatal("owner-loss reconciliation altered known measured usage", usage.Total, e)
+	}
+	command(501, "restart", "managed-real-reviewed-restart-0001")
+	if e = worker.Step(ctx, exchange); e != nil {
+		t.Fatal("explicit reviewed recovery restart", e)
+	}
 	create(502, port2)
 	command(502, "activate", "managed-real-activate-0002")
 	if e = worker.Step(ctx, exchange); e != nil {

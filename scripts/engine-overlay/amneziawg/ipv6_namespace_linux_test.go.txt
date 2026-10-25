@@ -1,0 +1,593 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+package main
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/binary"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net"
+	"os"
+	"os/exec"
+	"runtime"
+	"strings"
+	"sync"
+	"syscall"
+	"testing"
+	"time"
+
+	"github.com/mhsanaei/3x-ui/v3/internal/amneziawg"
+	"github.com/mhsanaei/3x-ui/v3/internal/darkproadapter"
+	dt "github.com/mhsanaei/3x-ui/v3/internal/darkprotest"
+	"github.com/vishvananda/netlink"
+	"github.com/vishvananda/netns"
+	"golang.org/x/sys/unix"
+)
+
+const aliasFixtureInterface = "dxp-v6-egress"
+const aliasFixturePrefix = "fd42:eed::/64"
+const aliasFixtureRemote = "fd42:eed::ffff"
+
+func requireIsolatedAliasNamespace(t *testing.T) {
+	t.Helper()
+	if os.Getenv("DXP_AMNEZIAWG_IPV6_NAMESPACE") != "1" {
+		t.Skip("requires scripts/ci/test-amneziawg-ipv6.sh disposable privileged namespaces")
+	}
+	for _, pair := range [][2]string{{"/proc/self/ns/net", "DXP_AWG_OUTER_NETNS"}, {"/proc/self/ns/mnt", "DXP_AWG_OUTER_MNTNS"}} {
+		current, e := os.Readlink(pair[0])
+		outer := os.Getenv(pair[1])
+		if e != nil || outer == "" || current == outer || os.Geteuid() != 0 {
+			t.Fatal("refusing host network mutation outside disposable namespaces")
+		}
+	}
+}
+
+// Run only socket creation on a locked thread in the supplied namespace. A
+// returned socket retains its network namespace even when ordinary Go I/O
+// goroutines run on other threads. Failed restoration never releases that OS
+// thread back into the runtime pool.
+func inAliasNamespace(ns netns.NsHandle, fn func() error) error {
+	done := make(chan error, 1)
+	go func() {
+		runtime.LockOSThread()
+		parent, e := netns.Get()
+		if e != nil {
+			runtime.UnlockOSThread()
+			done <- e
+			return
+		}
+		if e = netns.Set(ns); e == nil {
+			e = fn()
+		}
+		restore := netns.Set(parent)
+		_ = parent.Close()
+		if restore == nil {
+			runtime.UnlockOSThread()
+		} else {
+			e = restore
+		}
+		done <- e
+	}()
+	return <-done
+}
+
+func createAliasNamespace(t *testing.T) netns.NsHandle {
+	t.Helper()
+	type result struct {
+		ns  netns.NsHandle
+		err error
+	}
+	done := make(chan result, 1)
+	go func() {
+		runtime.LockOSThread()
+		parent, e := netns.Get()
+		if e != nil {
+			runtime.UnlockOSThread()
+			done <- result{err: e}
+			return
+		}
+		child, e := netns.New()
+		restore := netns.Set(parent)
+		_ = parent.Close()
+		if restore == nil {
+			runtime.UnlockOSThread()
+		} else {
+			e = restore
+		}
+		done <- result{child, e}
+	}()
+	r := <-done
+	if r.err != nil {
+		t.Fatal(r.err)
+	}
+	t.Cleanup(func() { _ = r.ns.Close() })
+	return r.ns
+}
+
+func fixtureAliasCommand(t *testing.T, args ...string) {
+	t.Helper()
+	requireIsolatedAliasNamespace(t)
+	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+	defer cancel()
+	if out, e := exec.CommandContext(ctx, "ip", args...).CombinedOutput(); e != nil {
+		t.Fatalf("isolated address fixture: %v: %s", e, out)
+	}
+}
+
+// Use the kernel attribute directly. The Ubuntu runner can have an iproute2
+// release predating `ip address ... proto`, despite a supporting kernel.
+// This helper is fixture-only and refuses to run outside the disposable netns.
+func fixtureAliasAdd(t *testing.T, index int, address string) {
+	t.Helper()
+	requireIsolatedAliasNamespace(t)
+	ip := net.ParseIP(address).To16()
+	if ip == nil || index < 1 {
+		t.Fatal("invalid isolated alias fixture")
+	}
+	fd, e := unix.Socket(unix.AF_NETLINK, unix.SOCK_RAW|unix.SOCK_CLOEXEC, unix.NETLINK_ROUTE)
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer unix.Close(fd)
+	if e = unix.Bind(fd, &unix.SockaddrNetlink{Family: unix.AF_NETLINK}); e != nil {
+		t.Fatal(e)
+	}
+	if e = unix.SetsockoptTimeval(fd, unix.SOL_SOCKET, unix.SO_RCVTIMEO, &unix.Timeval{Sec: 2}); e != nil {
+		t.Fatal(e)
+	}
+	local, e := unix.Getsockname(fd)
+	if e != nil {
+		t.Fatal(e)
+	}
+	bound, ok := local.(*unix.SockaddrNetlink)
+	if !ok {
+		t.Fatal("isolated alias fixture socket identity")
+	}
+	request := make([]byte, unix.NLMSG_HDRLEN+8)
+	binary.NativeEndian.PutUint16(request[4:], unix.RTM_NEWADDR)
+	binary.NativeEndian.PutUint16(request[6:], unix.NLM_F_REQUEST|unix.NLM_F_ACK|unix.NLM_F_CREATE|unix.NLM_F_EXCL)
+	binary.NativeEndian.PutUint32(request[8:], 1)
+	request[unix.NLMSG_HDRLEN], request[unix.NLMSG_HDRLEN+1] = unix.AF_INET6, 128
+	binary.NativeEndian.PutUint32(request[unix.NLMSG_HDRLEN+4:], uint32(index))
+	attribute := func(kind uint16, value []byte) {
+		length := len(value) + 4
+		encoded := make([]byte, (length+3)&^3)
+		binary.NativeEndian.PutUint16(encoded, uint16(length))
+		binary.NativeEndian.PutUint16(encoded[2:], kind)
+		copy(encoded[4:], value)
+		request = append(request, encoded...)
+	}
+	attribute(unix.IFA_ADDRESS, ip)
+	attribute(11, []byte{darkproadapter.PublicAliasProtocol}) // IFA_PROTO
+	cache := make([]byte, 16)
+	binary.NativeEndian.PutUint32(cache, 30)
+	binary.NativeEndian.PutUint32(cache[4:], 30)
+	attribute(unix.IFA_CACHEINFO, cache)
+	binary.NativeEndian.PutUint32(request, uint32(len(request)))
+	if e = unix.Sendto(fd, request, 0, &unix.SockaddrNetlink{Family: unix.AF_NETLINK}); e != nil {
+		t.Fatal(e)
+	}
+	buffer := make([]byte, 4096)
+	n, _, flags, from, e := unix.Recvmsg(fd, buffer, nil, 0)
+	if e != nil {
+		t.Fatal(e)
+	}
+	sender, ok := from.(*unix.SockaddrNetlink)
+	if !ok || sender.Pid != 0 || flags&unix.MSG_TRUNC != 0 {
+		t.Fatal("invalid isolated alias ACK source")
+	}
+	messages, e := syscall.ParseNetlinkMessage(buffer[:n])
+	if e != nil || len(messages) != 1 || messages[0].Header.Seq != 1 || messages[0].Header.Pid != bound.Pid || messages[0].Header.Type != unix.NLMSG_ERROR || len(messages[0].Data) < 4 {
+		t.Fatal("invalid isolated alias ACK")
+	}
+	if errno := int32(binary.NativeEndian.Uint32(messages[0].Data)); errno != 0 {
+		t.Fatal("isolated alias exclusive add:", syscall.Errno(-errno))
+	}
+}
+
+type sourceObservation struct{ network, source string }
+type aliasEcho struct {
+	tcp4, udp4, tcp6, udp6 string
+	observed               chan sourceObservation
+	stop                   func()
+}
+
+func aliasNetworkFixture(t *testing.T) (net.Interface, aliasEcho) {
+	t.Helper()
+	requireIsolatedAliasNamespace(t)
+	child := createAliasNamespace(t)
+	host, e := netlink.NewHandle(unix.NETLINK_ROUTE)
+	if e != nil {
+		t.Fatal(e)
+	}
+	t.Cleanup(host.Close)
+	other, e := netlink.NewHandleAt(child, unix.NETLINK_ROUTE)
+	if e != nil {
+		t.Fatal(e)
+	}
+	t.Cleanup(other.Close)
+	link := &netlink.Veth{LinkAttrs: netlink.LinkAttrs{Name: aliasFixtureInterface, MTU: 1500}, PeerName: "dxp-v6-peer"}
+	if e = host.LinkAdd(link); e != nil {
+		t.Fatal(e)
+	}
+	created, e := host.LinkByName(aliasFixtureInterface)
+	if e != nil {
+		t.Fatal(e)
+	}
+	ownedIndex := created.Attrs().Index
+	t.Cleanup(func() {
+		if current, e := host.LinkByIndex(ownedIndex); e == nil && current.Attrs().Name == aliasFixtureInterface {
+			_ = host.LinkDel(current)
+		}
+	})
+	peer, e := host.LinkByName("dxp-v6-peer")
+	if e != nil {
+		t.Fatal(e)
+	}
+	if e = host.LinkSetNsFd(peer, int(child)); e != nil {
+		t.Fatal(e)
+	}
+	peer, e = other.LinkByName("dxp-v6-peer")
+	if e != nil {
+		t.Fatal(e)
+	}
+	loopback, e := other.LinkByName("lo")
+	if e != nil {
+		t.Fatal(e)
+	}
+	for _, step := range []struct {
+		h *netlink.Handle
+		l netlink.Link
+	}{{host, created}, {other, peer}, {other, loopback}} {
+		if e = step.h.LinkSetUp(step.l); e != nil {
+			t.Fatal(e)
+		}
+	}
+	for _, entry := range []struct {
+		h       *netlink.Handle
+		l       netlink.Link
+		address string
+	}{{host, created, "10.250.61.1/24"}, {host, created, "fd42:eed::1/64"}, {other, peer, "10.250.61.2/24"}, {other, peer, aliasFixtureRemote + "/64"}} {
+		address, e := netlink.ParseAddr(entry.address)
+		if e != nil {
+			t.Fatal(e)
+		}
+		if e = entry.h.AddrAdd(entry.l, address); e != nil {
+			t.Fatal(e)
+		}
+	}
+	// A more specific route on another device would capture an unbound IPv6
+	// dial. Successful traffic therefore proves that the selected ifindex is
+	// enforced in addition to merely setting LocalAddr.
+	wrong := &netlink.Dummy{LinkAttrs: netlink.LinkAttrs{Name: "dxp-v6-wrong"}}
+	if e = host.LinkAdd(wrong); e != nil {
+		t.Fatal(e)
+	}
+	t.Cleanup(func() { _ = host.LinkDel(wrong) })
+	if e = host.LinkSetUp(wrong); e != nil {
+		t.Fatal(e)
+	}
+	wrongAddress, _ := netlink.ParseAddr("fd43:eed::1/64")
+	if e = host.AddrAdd(wrong, wrongAddress); e != nil {
+		t.Fatal(e)
+	}
+	if e = host.RouteAdd(&netlink.Route{LinkIndex: wrong.Attrs().Index, Dst: &net.IPNet{IP: net.ParseIP(aliasFixtureRemote), Mask: net.CIDRMask(128, 128)}, Scope: netlink.SCOPE_LINK}); e != nil {
+		t.Fatal(e)
+	}
+	for _, ip := range []string{"fd42:eed::2", "fd42:eed::3"} {
+		fixtureAliasAdd(t, created.Attrs().Index, ip)
+	}
+	deadline := time.Now().Add(6 * time.Second)
+	for {
+		ready := true
+		for _, entry := range []struct {
+			h *netlink.Handle
+			l netlink.Link
+		}{{host, created}, {other, peer}} {
+			addresses, e := entry.h.AddrList(entry.l, unix.AF_INET6)
+			if e != nil {
+				t.Fatal(e)
+			}
+			for _, address := range addresses {
+				if address.Flags&unix.IFA_F_DADFAILED != 0 {
+					t.Fatal("isolated IPv6 DAD failed")
+				}
+				if address.Flags&unix.IFA_F_TENTATIVE != 0 {
+					ready = false
+				}
+			}
+		}
+		if ready {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("isolated IPv6 DAD did not complete")
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	var tcp4, tcp6 net.Listener
+	var udp4, udp6 *net.UDPConn
+	e = inAliasNamespace(child, func() error {
+		var e error
+		if tcp4, e = net.Listen("tcp4", "10.250.61.2:0"); e != nil {
+			return e
+		}
+		if tcp6, e = net.Listen("tcp6", "["+aliasFixtureRemote+"]:0"); e != nil {
+			return e
+		}
+		if udp4, e = net.ListenUDP("udp4", &net.UDPAddr{IP: net.ParseIP("10.250.61.2")}); e != nil {
+			return e
+		}
+		udp6, e = net.ListenUDP("udp6", &net.UDPAddr{IP: net.ParseIP(aliasFixtureRemote)})
+		return e
+	})
+	if e != nil {
+		t.Fatal(e)
+	}
+	observed := make(chan sourceObservation, 64)
+	var mu sync.Mutex
+	connections := map[net.Conn]bool{}
+	record := func(network, source string) {
+		select {
+		case observed <- sourceObservation{network, source}:
+		default:
+		}
+	}
+	for _, entry := range []struct {
+		network  string
+		listener net.Listener
+	}{{"tcp4", tcp4}, {"tcp6", tcp6}} {
+		go func() {
+			for {
+				c, e := entry.listener.Accept()
+				if e != nil {
+					return
+				}
+				mu.Lock()
+				connections[c] = true
+				mu.Unlock()
+				record(entry.network, c.RemoteAddr().(*net.TCPAddr).IP.String())
+				go func() {
+					defer func() { c.Close(); mu.Lock(); delete(connections, c); mu.Unlock() }()
+					_, _ = io.Copy(c, c)
+				}()
+			}
+		}()
+	}
+	for _, entry := range []struct {
+		network string
+		conn    *net.UDPConn
+	}{{"udp4", udp4}, {"udp6", udp6}} {
+		go func() {
+			buffer := make([]byte, 65535)
+			for {
+				n, source, e := entry.conn.ReadFromUDP(buffer)
+				if e != nil {
+					return
+				}
+				record(entry.network, source.IP.String())
+				_, _ = entry.conn.WriteToUDP(buffer[:n], source)
+			}
+		}()
+	}
+	stop := func() {
+		tcp4.Close()
+		tcp6.Close()
+		udp4.Close()
+		udp6.Close()
+		mu.Lock()
+		for c := range connections {
+			c.Close()
+		}
+		mu.Unlock()
+	}
+	t.Cleanup(stop)
+	iface, e := net.InterfaceByIndex(ownedIndex)
+	if e != nil {
+		t.Fatal(e)
+	}
+	return *iface, aliasEcho{tcp4.Addr().String(), udp4.LocalAddr().String(), tcp6.Addr().String(), udp6.LocalAddr().String(), observed, stop}
+}
+
+func observeAliasSource(t *testing.T, echo aliasEcho, network, source string) {
+	t.Helper()
+	select {
+	case got := <-echo.observed:
+		if got.network != network || got.source != source {
+			t.Fatalf("wrong egress source: got %+v want %s %s", got, network, source)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("remote namespace did not observe actual payload")
+	}
+}
+
+func aliasAuthorityInput(t *testing.T, cfg config, iface net.Interface) darkproadapter.Input {
+	t.Helper()
+	in := awgInput(t, cfg)
+	const tag = "isolated-amneziawg-source"
+	in.Manifest, _ = json.Marshal(map[string]any{"tag": tag, "engine": "amneziawg", "protocol": "amneziawg"})
+	boot, e := os.ReadFile("/proc/sys/kernel/random/boot_id")
+	if e != nil {
+		t.Fatal(e)
+	}
+	var namespace syscall.Stat_t
+	if e = syscall.Stat("/proc/self/ns/net", &namespace); e != nil {
+		t.Fatal(e)
+	}
+	configSHA, manifestSHA := sha256.Sum256(in.Config), sha256.Sum256(in.Manifest)
+	a := &darkproadapter.PublicAliasAuthority{Version: 1, IntentID: strings.Repeat("a", 32), NodeID: "isolated-node", InstallationID: strings.Repeat("b", 32), Generation: 1, ConfigSHA: hex.EncodeToString(configSHA[:]), ManifestSHA: hex.EncodeToString(manifestSHA[:]), ComponentTag: tag, ComponentConfigSHA: hex.EncodeToString(configSHA[:]), BootID: strings.TrimSpace(string(boot)), NetworkNamespace: namespace.Ino, Interface: darkproadapter.PublicAliasInterface{Name: iface.Name, Index: uint32(iface.Index), MAC: iface.HardwareAddr.String()}, InitialLeaseExpiresNano: time.Now().Add(30 * time.Second).UnixNano()}
+	observed, e := darkproadapter.ReadIPv6Aliases(uint32(iface.Index))
+	if e != nil {
+		t.Fatal(e)
+	}
+	intent, e := preparePublicIPv6(cfg, in)
+	if e != nil {
+		t.Fatal(e)
+	}
+	for _, binding := range intent.bindings {
+		value, ok := observed[binding.Address.String()]
+		if !ok || !value.CachePresent || !value.ProtocolPresent || value.Protocol != darkproadapter.PublicAliasProtocol {
+			t.Fatal("fixture alias lacks kernel birth evidence")
+		}
+		created := value.CreatedTicks
+		a.Aliases = append(a.Aliases, darkproadapter.PublicAliasBinding{PrincipalID: binding.PrincipalID, Email: binding.Email, PeerPublicKeySHA: binding.PeerPublicKeySHA, Address: binding.Address.String(), PrefixLength: 128, Protocol: darkproadapter.PublicAliasProtocol, CreatedTicks: &created})
+	}
+	in.PublicAliasAuthority = a
+	for i := range in.Principals {
+		in.Principals[i].ComponentTag = tag
+	}
+	return in
+}
+
+func TestManagedAmneziaWGPublicIPv6NamespaceTrafficAndFinal(t *testing.T) {
+	requireIsolatedAliasNamespace(t)
+	iface, echo := aliasNetworkFixture(t)
+	serverPriv, serverPub := keypair(t)
+	alicePriv, alicePub := keypair(t)
+	bobPriv, bobPub := keypair(t)
+	cfg := config{Listen: "127.0.0.1", Port: dt.Port(t), Address: []string{"10.233.41.1/24"}, Server: amneziawg.ServerSettings{PrivateKey: serverPriv, PublicKey: serverPub, IPv6Enabled: true, IPv6Subnet: aliasFixturePrefix, IPv6ExternalInterface: iface.Name, MTU: 1420}, Peers: []peer{{PublicKey: alicePub, Email: "alice", AllowedIPs: []string{"10.233.41.2/32", "fd42:eed::2/128"}}, {PublicKey: bobPub, Email: "bob", AllowedIPs: []string{"10.233.41.3/32", "fd42:eed::3/128"}}}}
+	in := aliasAuthorityInput(t, cfg, iface)
+	before, e := darkproadapter.ReadIPv6Aliases(uint32(iface.Index))
+	if e != nil {
+		t.Fatal(e)
+	}
+	// A changed interface identity must be rejected before opening AWG ingress.
+	badRaw, _ := json.Marshal(in)
+	var bad darkproadapter.Input
+	if e = json.Unmarshal(badRaw, &bad); e != nil {
+		t.Fatal(e)
+	}
+	bad.PublicAliasAuthority.Interface.Index++
+	badPlan, e := prepare(bad)
+	if e != nil {
+		t.Fatal(e)
+	}
+	badWorker := dt.Worker(t, bad, badPlan)
+	if response := dt.Raw(badWorker, "activate", dt.ActivateNonce); response.Code != 503 {
+		t.Fatal("foreign interface authority activated")
+	}
+	dt.AssertUDPClosed(t, net.JoinHostPort(cfg.Listen, fmt.Sprint(cfg.Port)))
+	dt.Final(t, badWorker)
+	w := startAWG(t, in)
+	want := []darkproadapter.Counter{{ID: "alice"}, {ID: "bob"}}
+	var aliveTCP, aliveUDP net.Conn
+	for index, user := range []struct{ email, private, addresses, source string }{{"alice", alicePriv, "10.233.41.2,fd42:eed::2", "fd42:eed::2"}, {"bob", bobPriv, "10.233.41.3,fd42:eed::3", "fd42:eed::3"}} {
+		client := client(t, cfg, user.private, user.addresses, "")
+		for _, route := range []struct{ network, target string }{{"tcp6", echo.tcp6}, {"udp6", echo.udp6}} {
+			ctx, cancel := context.WithTimeout(t.Context(), 8*time.Second)
+			c, e := client.DialContext(ctx, route.network, route.target)
+			cancel()
+			if e != nil {
+				t.Fatalf("actual IPv6 AWG dial: %v", e)
+			}
+			t.Cleanup(func() { c.Close() })
+			payload := []byte(user.email + " actual " + route.network)
+			dt.Payload(t, c, payload)
+			observeAliasSource(t, echo, route.network, user.source)
+			want[index].Upload += uint64(len(payload))
+			want[index].Download += uint64(len(payload))
+			if index == 0 && route.network == "tcp6" {
+				aliveTCP = c
+			}
+			if index == 0 && route.network == "udp6" {
+				aliveUDP = c
+			}
+		}
+		if index == 0 {
+			for _, route := range []struct{ network, target string }{{"tcp4", echo.tcp4}, {"udp4", echo.udp4}} {
+				ctx, cancel := context.WithTimeout(t.Context(), 8*time.Second)
+				c, e := client.DialContext(ctx, route.network, route.target)
+				cancel()
+				if e != nil {
+					t.Fatal(e)
+				}
+				payload := []byte("existing " + route.network + " path")
+				dt.Payload(t, c, payload)
+				c.Close()
+				observeAliasSource(t, echo, route.network, "10.250.61.1")
+				want[0].Upload += uint64(len(payload))
+				want[0].Download += uint64(len(payload))
+			}
+		}
+	}
+	dt.Counters(t, w, want)
+	wrong, _ := keypair(t)
+	unauthenticated := client(t, cfg, wrong, "fd42:eed::2", "")
+	denied, cancel := context.WithTimeout(t.Context(), time.Second)
+	if c, e := unauthenticated.DialContext(denied, "tcp6", echo.tcp6); e == nil {
+		c.Close()
+		t.Fatal("unknown peer obtained public IPv6 source")
+	}
+	cancel()
+	dt.Counters(t, w, want)
+	spoofed, stopSpoof := clientDevice(t, cfg, bobPriv, "fd42:eed::2", "")
+	spoof, cancel := context.WithTimeout(t.Context(), time.Second)
+	if c, e := spoofed.DialContext(spoof, "tcp6", echo.tcp6); e == nil {
+		c.Close()
+		t.Fatal("authenticated peer spoofed another peer's source identity")
+	}
+	cancel()
+	stopSpoof()
+	dt.Counters(t, w, want)
+	joinTCP, joinUDP := dt.InFlight(t, aliveTCP), dt.InFlight(t, aliveUDP)
+	final := dt.Final(t, w)
+	joinTCP()
+	joinUDP()
+	dt.Counters(t, w, final.Counters)
+	after, e := darkproadapter.ReadIPv6Aliases(uint32(iface.Index))
+	if e != nil {
+		t.Fatal(e)
+	}
+	for _, ip := range []string{"fd42:eed::2", "fd42:eed::3"} {
+		if after[ip].CreatedTicks != before[ip].CreatedTicks || after[ip].Protocol != before[ip].Protocol || after[ip].ValidLifetime == 0 {
+			t.Fatal("worker changed or removed an Agent-owned host alias")
+		}
+	}
+	// Replacement generation retains Bob, while Alice's old cryptographic
+	// credential must no longer enter the plaintext bridge or its counters.
+	cfg.Peers = cfg.Peers[1:]
+	replacement := startAWG(t, aliasAuthorityInput(t, cfg, iface))
+	revoked := client(t, cfg, alicePriv, "fd42:eed::2", "")
+	revoke, cancel := context.WithTimeout(t.Context(), time.Second)
+	if c, e := revoked.DialContext(revoke, "tcp6", echo.tcp6); e == nil {
+		c.Close()
+		t.Fatal("revoked peer retained public IPv6 source")
+	}
+	cancel()
+	fresh := client(t, cfg, bobPriv, "10.233.41.3,fd42:eed::3", "")
+	ctx, cancel := context.WithTimeout(t.Context(), 8*time.Second)
+	c, e := fresh.DialContext(ctx, "tcp6", echo.tcp6)
+	cancel()
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer c.Close()
+	payload := []byte("replacement source remains Bob")
+	dt.Payload(t, c, payload)
+	dt.Counters(t, replacement, []darkproadapter.Counter{{ID: "bob", Upload: uint64(len(payload)), Download: uint64(len(payload))}})
+	// Only the fixture/Agent mutates the host. Losing that exact alias must
+	// fence every relay; measured counters remain valid for final settlement.
+	fixtureAliasCommand(t, "-6", "addr", "del", "fd42:eed::3/128", "dev", iface.Name)
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		status := dt.Command(t, replacement, "status", "")
+		if !status.Open && !status.Ready {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("alias authority loss did not fence delivery")
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	lostFinal := dt.Final(t, replacement)
+	dt.Counters(t, replacement, lostFinal.Counters)
+	dt.Counters(t, w, final.Counters)
+	remaining, e := darkproadapter.ReadIPv6Aliases(uint32(iface.Index))
+	if e != nil || remaining["fd42:eed::2"].CreatedTicks != before["fd42:eed::2"].CreatedTicks {
+		t.Fatal("worker removed another owned alias")
+	}
+	t.Log("MANAGED_AMNEZIAWG_IPV6_SOURCE_VERIFIED")
+}

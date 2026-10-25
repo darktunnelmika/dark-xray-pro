@@ -65,7 +65,7 @@ export default function InboundSpecFields(props: Props) {
       const path = prefix + field.path, value = readSpecPath(spec, path), retained = secretPaths.some(saved => saved === path || path.startsWith(saved + ".")), label = language === "fa" ? field.fa ?? field.label : field.label;
       const invalid = invalidFields.includes(`spec.${path}`), inputID = `${id}-${path}`;
       const set = (next: SpecValue | undefined) => { onChange(writeSpecPath(spec, path, next)); onInvalid(path, false); };
-      const common = { id: inputID, "data-creation-field": `spec.${path}`, "aria-label": label, "aria-invalid": invalid, disabled: disabled || field.disabled && value !== true, dir: "ltr" as const, autoComplete: "off", spellCheck: false };
+      const common = { id: inputID, "data-creation-field": `spec.${path}`, "aria-label": label, "aria-invalid": invalid, disabled: disabled || field.disabled && value !== true, dir: "ltr" as const, autoComplete: "off", spellCheck: false, maxLength: field.maxLength };
       const hint = language === "fa" ? field.faHint ?? field.hint : field.hint;
       if (field.kind === "rows") {
         const rows = Array.isArray(value) ? value : [];

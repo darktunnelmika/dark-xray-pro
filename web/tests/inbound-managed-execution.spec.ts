@@ -106,6 +106,23 @@ async function review(page: Page, action = "Activate") {
   await expect(dialog.getByRole("button", { name: "Confirm and continue", exact: true })).toBeEnabled(); return dialog;
 }
 
+test("owner loss keeps runtime stopped until a fresh reviewed command even when the prior operation was queued", async ({ page }) => {
+  const f = await fixture(page); f.makeActive();
+  f.state.observed_state = "blocked"; f.state.allowed_actions = ["apply", "restart", "stop"];
+  f.state.blockers = [{ code: "owner_resume_required" }];
+  f.state.latest_operation = { id: "old-queued-event-0001", event_id: "old-queued-event-0001", inbound_id: id, action: "activate", revision: f.state.revision, state: "queued", created_unix_nano: Date.now() * 1e6, updated_unix_nano: Date.now() * 1e6, targets: [], blockers: [], replayed: false };
+  await open(page);
+  await expect(region(page).getByText("The previous runtime was reconciled as owner loss and remains stopped. Review and confirm a new activation, apply or restart before service can resume.", { exact: true })).toBeVisible();
+  await expect(region(page).getByRole("button", { name: "Restart", exact: true })).toBeEnabled();
+  await expect(region(page).getByRole("button", { name: "Apply changes", exact: true })).toBeEnabled();
+  expect(f.writes).toHaveLength(0);
+  const dialog = await review(page, "Restart");
+  expect(f.writes.filter(write => write.path.endsWith("/commands"))).toHaveLength(0);
+  await dialog.getByRole("button", { name: "Confirm and continue", exact: true }).click();
+  await expect.poll(() => f.writes.filter(write => write.path.endsWith("/commands")).length).toBe(1);
+  expect(f.writes.find(write => write.path.endsWith("/commands"))!.body.action).toBe("restart");
+});
+
 test("admission stays queued until exact target evidence is observed; HUB is explicit and legacy controls stay hidden", async ({ page }) => {
   const f = await fixture(page); await open(page);
   await expect(region(page).locator('[data-execution-target="hub-local"]')).toHaveCount(1);

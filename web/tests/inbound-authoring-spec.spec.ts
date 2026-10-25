@@ -26,11 +26,15 @@ test("external protocol settings identify unsupported TLS and host-alias combina
   const tun = defaultSpec("tun"); tun.settings.autoSystemDnsToGateway = true;
   expect(specIssues(tun)).toEqual([{ field: "spec.settings.autoSystemDnsToGateway", code: "tun_host_dns_takeover_unsupported" }]);
   tun.settings.autoSystemDnsToGateway = false; expect(specIssues(tun)).toEqual([]);
+  tun.settings.name = "a".repeat(16);
+  expect(specIssues(tun)).toEqual([{ field: "spec.settings.name", code: "interface_name_invalid" }]);
+  tun.settings.name = "tun-" + "a".repeat(11); expect(specIssues(tun)).toEqual([]);
 });
 
 test("automatic TUN DNS takeover remains explicit and can be cleared without removing ordinary routes", async ({ page }) => {
   const f = await fixture(page), dialog = await open(page);
   await dialog.getByLabel("Protocol", { exact: true }).selectOption("tun");
+  await expect(dialog.getByLabel("Interface name", { exact: true })).toHaveAttribute("maxlength", "15");
   const takeover = dialog.locator('[data-creation-field="spec.settings.autoSystemDnsToGateway"]');
   await expect(takeover).toBeDisabled();
   await dialog.getByRole("tab", { name: "Advanced", exact: true }).click();

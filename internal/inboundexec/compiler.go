@@ -138,6 +138,7 @@ func Compile(ctx context.Context, r CompileRequest) (Bundle, error) {
 	inbounds := []json.RawMessage{}
 	outbounds := []json.RawMessage{}
 	rules := []json.RawMessage{}
+	dnsPolicies := []json.RawMessage{}
 	outTags := map[string]string{}
 	tags := map[string]bool{}
 	principalIDs := map[string]string{}
@@ -166,6 +167,7 @@ func Compile(ctx context.Context, r CompileRequest) (Bundle, error) {
 			var doc struct {
 				Inbounds  []json.RawMessage `json:"inbounds"`
 				Outbounds []json.RawMessage `json:"outbounds"`
+				DNS       json.RawMessage   `json:"dns"`
 				Routing   struct {
 					Rules []json.RawMessage `json:"rules"`
 				} `json:"routing"`
@@ -175,6 +177,9 @@ func Compile(ctx context.Context, r CompileRequest) (Bundle, error) {
 			}
 			inbounds = append(inbounds, doc.Inbounds...)
 			rules = append(rules, doc.Routing.Rules...)
+			if len(doc.DNS) > 0 {
+				dnsPolicies = append(dnsPolicies, doc.DNS)
+			}
 			for _, raw := range doc.Outbounds {
 				var o struct {
 					Tag string `json:"tag"`
@@ -204,6 +209,7 @@ func Compile(ctx context.Context, r CompileRequest) (Bundle, error) {
 				v := Listener{InboundID: l.InboundID, Tag: l.Tag, Engine: "xray", Protocol: "vless", Transport: item.Profile.Transport, Security: "reality", Kind: l.Kind, Listen: n.ListenIP, Port: l.NodePort, Network: socketNetwork(item.Profile.Spec), ResourceKind: "socket", AccountingMode: item.AccountingMode}
 				if s := item.Profile.Spec; s != nil {
 					v.Protocol, v.Transport, v.Security = s.Protocol, s.Network, s.Security
+					v.HostRequirements = HostRequirementsForSpec(s)
 					for _, p := range inboundspec.Catalog() {
 						if p.Protocol == s.Protocol {
 							v.Engine = p.Engine
@@ -220,6 +226,7 @@ func Compile(ctx context.Context, r CompileRequest) (Bundle, error) {
 					}
 				}
 				if l.Kind == "swap_relay" {
+					v.HostRequirements = nil
 					v.Engine = "xray"
 					v.Protocol = "dokodemo-door"
 					v.Security = "none"
@@ -280,10 +287,17 @@ func Compile(ctx context.Context, r CompileRequest) (Bundle, error) {
 	if len(outbounds) == 0 {
 		outbounds = []json.RawMessage{json.RawMessage(`{"tag":"direct","protocol":"freedom"}`)}
 	}
+	dns, outbounds, rules, err := compileTUNDNS(inbounds, outbounds, rules, dnsPolicies)
+	if err != nil {
+		return b, err
+	}
 	if err := validateDirectComponentRoutes(b.Components, outbounds, rules); err != nil {
 		return b, err
 	}
 	doc := map[string]any{"log": map[string]string{"loglevel": "none"}, "stats": map[string]any{}, "policy": map[string]any{"levels": map[string]any{"0": map[string]bool{"statsUserUplink": true, "statsUserDownlink": true}}, "system": map[string]bool{"statsInboundUplink": true, "statsInboundDownlink": true}}, "inbounds": inbounds, "outbounds": outbounds}
+	if len(dns) > 0 {
+		doc["dns"] = dns
+	}
 	if len(rules) > 0 {
 		doc["routing"] = map[string]any{"domainStrategy": "AsIs", "rules": rules}
 	}

@@ -1,0 +1,196 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+package darkproadapter
+
+import (
+	"context"
+	"errors"
+	"net"
+	"net/netip"
+	"strconv"
+	"strings"
+	"syscall"
+	"time"
+
+	"golang.org/x/sys/unix"
+)
+
+var errIPv6Authority = errors.New("IPv6 source authority unavailable")
+
+type sourceResolver interface {
+	LookupNetIP(context.Context, string, string) ([]netip.Addr, error)
+}
+
+// IPv6Egress is the immutable association between an authenticated peer and its
+// host-owned IPv6 source. It never installs an address, route or interface. The
+// verifier checks the Agent's per-birth authority against current kernel state.
+// The empty email requests a check of every alias before admission or health.
+type IPv6Egress struct {
+	name     string
+	index    int
+	sources  map[string]netip.Addr
+	verify   func(email string) error
+	resolver sourceResolver
+	connect  func(context.Context, string, string, *net.Dialer) (net.Conn, error)
+}
+
+func NewIPv6Egress(name string, index int, sources map[string]netip.Addr, verify func(email string) error) (*IPv6Egress, error) {
+	if name == "" || len(name) > 15 || strings.ContainsAny(name, "\x00\r\n /:") || index < 1 || len(sources) == 0 || len(sources) > 20000 || verify == nil {
+		return nil, errIPv6Authority
+	}
+	p := &IPv6Egress{name: name, index: index, sources: make(map[string]netip.Addr, len(sources)), verify: verify, resolver: net.DefaultResolver}
+	seen := map[netip.Addr]bool{}
+	for email, address := range sources {
+		if email == "" || len(email) > 255 || !address.Is6() || address.Is4In6() || address.Zone() != "" || !address.IsGlobalUnicast() || seen[address] {
+			return nil, errIPv6Authority
+		}
+		seen[address] = true
+		p.sources[email] = address
+	}
+	p.connect = func(ctx context.Context, network, target string, d *net.Dialer) (net.Conn, error) {
+		return d.DialContext(ctx, network, target)
+	}
+	return p, nil
+}
+
+func (p *IPv6Egress) ready() error {
+	if e := p.verify(""); e != nil {
+		return errIPv6Authority
+	}
+	// Probe the actual socket option before opening protocol ingress. A host
+	// that cannot enforce the selected interface must fail closed, never use
+	// its default route as a substitute for explicit interface authority.
+	fd, e := unix.Socket(unix.AF_INET6, unix.SOCK_DGRAM|unix.SOCK_CLOEXEC, 0)
+	if e != nil {
+		return errIPv6Authority
+	}
+	defer unix.Close(fd)
+	return p.bind(fd)
+}
+
+func (p *IPv6Egress) bind(fd int) error {
+	iface, e := net.InterfaceByIndex(p.index)
+	if e != nil || iface.Name != p.name {
+		return errIPv6Authority
+	}
+	e = unix.SetsockoptInt(fd, unix.SOL_SOCKET, unix.SO_BINDTOIFINDEX, p.index)
+	if errors.Is(e, unix.ENOPROTOOPT) || errors.Is(e, unix.EOPNOTSUPP) {
+		// Older kernels expose only the name-based operation. Check the name's
+		// index on both sides of the operation and read the bound name back.
+		if e = unix.SetsockoptString(fd, unix.SOL_SOCKET, unix.SO_BINDTODEVICE, p.name); e != nil {
+			return errIPv6Authority
+		}
+		name, readErr := unix.GetsockoptString(fd, unix.SOL_SOCKET, unix.SO_BINDTODEVICE)
+		if readErr != nil || name != p.name {
+			return errIPv6Authority
+		}
+	} else {
+		if e != nil {
+			return errIPv6Authority
+		}
+		index, readErr := unix.GetsockoptInt(fd, unix.SOL_SOCKET, unix.SO_BINDTOIFINDEX)
+		if readErr != nil || index != p.index {
+			return errIPv6Authority
+		}
+	}
+	iface, e = net.InterfaceByName(p.name)
+	if e != nil || iface.Index != p.index {
+		return errIPv6Authority
+	}
+	return nil
+}
+
+func (p *IPv6Egress) control(_ string, _ string, raw syscall.RawConn) error {
+	var binding error
+	if e := raw.Control(func(fd uintptr) { binding = p.bind(int(fd)) }); e != nil {
+		return errIPv6Authority
+	}
+	return binding
+}
+
+// destinations selects one address family before connecting. If a name has
+// AAAA records, every attempt stays IPv6 with the same peer source and pinned
+// interface. A failed IPv6 attempt never retries using a different identity on
+// IPv4. IPv4-only names and literal IPv4 retain the existing direct behavior.
+func (p *IPv6Egress) destinations(ctx context.Context, target string) ([]netip.Addr, string, error) {
+	host, port, e := net.SplitHostPort(target)
+	if e != nil || host == "" {
+		return nil, "", errors.New("invalid destination")
+	}
+	n, e := strconv.Atoi(port)
+	if e != nil || n < 1 || n > 65535 {
+		return nil, "", errors.New("invalid destination")
+	}
+	addresses := []netip.Addr{}
+	if ip, e := netip.ParseAddr(host); e == nil {
+		addresses = append(addresses, ip)
+	} else {
+		addresses, e = p.resolver.LookupNetIP(ctx, "ip", host)
+		if e != nil {
+			return nil, "", e
+		}
+	}
+	v4, v6 := []netip.Addr{}, []netip.Addr{}
+	seen := map[netip.Addr]bool{}
+	for _, address := range addresses {
+		address = address.Unmap()
+		if !address.IsValid() || address.Zone() != "" || address.IsUnspecified() || address.IsMulticast() || seen[address] {
+			continue
+		}
+		seen[address] = true
+		if address.Is6() && len(v6) < 16 {
+			v6 = append(v6, address)
+		} else if address.Is4() && len(v4) < 16 {
+			v4 = append(v4, address)
+		}
+	}
+	if len(v6) > 0 {
+		return v6, port, nil
+	}
+	if len(v4) > 0 {
+		return v4, port, nil
+	}
+	return nil, "", errors.New("destination has no usable address")
+}
+
+func (p *IPv6Egress) dial(ctx context.Context, user, network, target string, timeout time.Duration) (net.Conn, error) {
+	source, ok := p.sources[user]
+	if !ok || network != "tcp" && network != "udp" {
+		return nil, errIPv6Authority
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	addresses, port, e := p.destinations(ctx, target)
+	if e != nil {
+		return nil, e
+	}
+	var last error
+	for _, address := range addresses {
+		d := &net.Dialer{}
+		family := "4"
+		if address.Is6() {
+			if e := p.verify(user); e != nil {
+				return nil, errIPv6Authority
+			}
+			family = "6"
+			ip := net.IP(source.AsSlice())
+			if network == "tcp" {
+				d.LocalAddr = &net.TCPAddr{IP: ip}
+			} else {
+				d.LocalAddr = &net.UDPAddr{IP: ip}
+			}
+			d.Control = p.control
+		}
+		c, err := p.connect(ctx, network+family, net.JoinHostPort(address.String(), port), d)
+		if err == nil {
+			return c, nil
+		}
+		if errors.Is(err, errIPv6Authority) {
+			return nil, errIPv6Authority
+		}
+		last = err
+		if ctx.Err() != nil {
+			break
+		}
+	}
+	return nil, last
+}

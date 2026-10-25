@@ -1,0 +1,59 @@
+//go:build linux && !android
+
+// Copied into the pinned Xray proxy/tun package. Modified upstream source
+// remains under Xray's MPL-2.0 license.
+package tun
+
+import (
+	"context"
+	"os/exec"
+	"time"
+
+	darkpro "github.com/xtls/xray-core/common/darkprov2"
+	"github.com/xtls/xray-core/common/errors"
+)
+
+// Separate from upstream's legacy seam: managed host mutations always have a
+// deadline, including rollback after an RPC timeout or a partial D-Bus reply.
+var darkProResolvectl = func(ctx context.Context, name string, args ...string) ([]byte, error) {
+	cmd := exec.CommandContext(ctx, name, args...)
+	cmd.WaitDelay = 100 * time.Millisecond
+	return cmd.CombinedOutput()
+}
+
+func runResolvectlWithContext(parent context.Context, action, iface string, extra ...string) error {
+	if !darkpro.Enabled() {
+		return runResolvectl(action, iface, extra...)
+	}
+	ctx, cancel := context.WithTimeout(parent, time.Second)
+	defer cancel()
+	if _, err := darkProResolvectl(ctx, "resolvectl", buildResolvectlArgs(action, iface, extra...)...); err != nil {
+		return errors.New("bounded resolvectl ", action, " failed").Base(err)
+	}
+	return nil
+}
+
+// RestoreSystemDNS is paired with the gate's activation hook. Finalization
+// waits for activation rollback before closing this exclusively owned link.
+// A failed revert is retained and retried by Close; it cannot yield a success
+// receipt merely because the subprocess has stopped accepting connections.
+func (t *LinuxTun) RestoreSystemDNS(ctx context.Context) error {
+	t.systemDNSMu.Lock()
+	defer t.systemDNSMu.Unlock()
+	return t.restoreSystemDNS(ctx)
+}
+
+func (t *LinuxTun) restoreSystemDNS(ctx context.Context) error {
+	if !t.systemDNSSet && !t.systemDNSDirty {
+		return nil
+	}
+	if t.ifaceName() == "" {
+		return errors.New("owned DNS link identity is unavailable")
+	}
+	err := runResolvectlWithContext(ctx, "revert", t.ifaceName())
+	t.systemDNSDirty = err != nil
+	if err == nil {
+		t.systemDNSSet = false
+	}
+	return err
+}

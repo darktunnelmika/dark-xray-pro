@@ -38,6 +38,8 @@ type Bridge struct {
 	accepted            chan struct{}
 	done                chan struct{}
 	once                sync.Once
+	ipv6                *IPv6Egress
+	sourceDone          chan struct{}
 }
 
 func NewBridge(users []string) (*Bridge, error) {
@@ -58,12 +60,78 @@ func NewBridge(users []string) (*Bridge, error) {
 	go b.accept()
 	return b, nil
 }
-func (b *Bridge) Activate() {
+
+// SetIPv6Egress is only valid during closed preparation. The policy has already
+// copied the authenticated peer bindings and cannot be edited after activation.
+func (b *Bridge) SetIPv6Egress(policy *IPv6Egress) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if !b.closed {
-		b.open = true
+	if b.open || b.closed || b.ipv6 != nil || policy == nil || len(policy.sources) != len(b.users) {
+		return errIPv6Authority
 	}
+	for user := range b.users {
+		if _, ok := policy.sources[user]; !ok {
+			return errIPv6Authority
+		}
+	}
+	b.ipv6 = policy
+	return nil
+}
+
+func (b *Bridge) Activate() error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.closed {
+		return errors.New("bridge closed")
+	}
+	if b.open {
+		return nil
+	}
+	if b.ipv6 != nil {
+		if e := b.ipv6.ready(); e != nil {
+			return e
+		}
+		b.sourceDone = make(chan struct{})
+		go b.monitorSources()
+	}
+	b.open = true
+	return nil
+}
+
+func (b *Bridge) monitorSources() {
+	defer close(b.sourceDone)
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-b.ctx.Done():
+			return
+		case <-ticker.C:
+			if b.ipv6.verify("") != nil {
+				// Loss of host authority fences delivery, but does not invalidate
+				// the measured counters or prevent an immutable final receipt.
+				go b.Close()
+				return
+			}
+		}
+	}
+}
+
+func (b *Bridge) AdmissionOpen() bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.open && !b.closed && !b.fault
+}
+
+func (b *Bridge) dial(ctx context.Context, user, network, target string, timeout time.Duration) (net.Conn, error) {
+	if b.ipv6 == nil {
+		return (&net.Dialer{Timeout: timeout}).DialContext(ctx, network, target)
+	}
+	c, e := b.ipv6.dial(ctx, user, network, target, timeout)
+	if errors.Is(e, errIPv6Authority) {
+		go b.Close()
+	}
+	return c, e
 }
 func (b *Bridge) track(c io.Closer) bool {
 	b.mu.Lock()
@@ -141,6 +209,7 @@ func (b *Bridge) Close() {
 		b.closed = true
 		b.open = false
 		b.cancel()
+		sourceDone := b.sourceDone
 		all := make([]io.Closer, 0, len(b.sockets))
 		for c := range b.sockets {
 			all = append(all, c)
@@ -152,6 +221,9 @@ func (b *Bridge) Close() {
 		}
 		<-b.accepted
 		b.wg.Wait()
+		if sourceDone != nil {
+			<-sourceDone
+		}
 		close(b.done)
 	})
 	<-b.done
@@ -287,7 +359,7 @@ func (b *Bridge) handle(c net.Conn) {
 	}
 }
 func (b *Bridge) tcp(c net.Conn, user, target string) {
-	upstream, e := (&net.Dialer{Timeout: 10 * time.Second}).DialContext(b.ctx, "tcp", target)
+	upstream, e := b.dial(b.ctx, user, "tcp", target, 10*time.Second)
 	if e != nil {
 		_ = reply(c, 5, nil)
 		return
@@ -405,7 +477,7 @@ func (b *Bridge) udp(control net.Conn, user string) {
 			if len(destinations) >= 256 {
 				continue
 			}
-			dialed, e := (&net.Dialer{Timeout: 5 * time.Second}).DialContext(ctx, "udp", target)
+			dialed, e := b.dial(ctx, user, "udp", target, 5*time.Second)
 			if e != nil {
 				continue
 			}

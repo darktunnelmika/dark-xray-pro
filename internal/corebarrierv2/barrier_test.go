@@ -45,6 +45,130 @@ func TestStartsClosedAndRequiresReadyNonce(t *testing.T) {
 	}
 }
 
+func TestActivationJoinsHooksAndReplaysAfterLostReply(t *testing.T) {
+	g := newGate()
+	entered, release := make(chan struct{}), make(chan struct{})
+	var applies, rollbacks atomic.Int64
+	if err := g.registerActivation("tun", func(ctx context.Context) error {
+		applies.Add(1)
+		close(entered)
+		select {
+		case <-release:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}, func(context.Context) error { rollbacks.Add(1); return nil }); err != nil {
+		t.Fatal(err)
+	}
+	g.ready = true
+	ctx, cancel := context.WithCancel(context.Background())
+	result := make(chan error, 1)
+	nonce := strings.Repeat("a", 64)
+	go func() { result <- g.activateContext(ctx, nonce) }()
+	<-entered
+	if _, _, admitted := g.enter(context.Background(), nil); admitted {
+		t.Fatal("admission preceded host activation hook")
+	}
+	cancel()
+	if !errors.Is(<-result, context.Canceled) {
+		t.Fatal("lost RPC did not return cancellation")
+	}
+	if g.activate(strings.Repeat("b", 64)) == nil {
+		t.Fatal("foreign nonce replaced in-flight activation")
+	}
+	close(release)
+	if err := g.activate(nonce); err != nil {
+		t.Fatal("same-nonce activation replay", err)
+	}
+	if applies.Load() != 1 || rollbacks.Load() != 0 {
+		t.Fatal("activation was not applied exactly once")
+	}
+	if _, finish, admitted := g.enter(context.Background(), nil); !admitted {
+		t.Fatal("successful hook did not open admission")
+	} else {
+		finish()
+	}
+}
+
+func TestFailedActivationRollsBackEveryAttemptAndStaysClosed(t *testing.T) {
+	g := newGate()
+	var order []string
+	for _, tag := range []string{"a", "b", "c"} {
+		tag := tag
+		if err := g.registerActivation(tag, func(context.Context) error {
+			order = append(order, "apply:"+tag)
+			if tag == "b" {
+				return errors.New("external mutation was only partly acknowledged")
+			}
+			return nil
+		}, func(context.Context) error { order = append(order, "rollback:"+tag); return nil }); err != nil {
+			t.Fatal(err)
+		}
+	}
+	g.ready = true
+	nonce := strings.Repeat("a", 64)
+	if g.activate(nonce) == nil || g.activate(nonce) == nil {
+		t.Fatal("failed activation admitted or replayed as success")
+	}
+	if got := strings.Join(order, ","); got != "apply:a,apply:b,rollback:b,rollback:a" {
+		t.Fatal("partial mutation was not rolled back in reverse order", got)
+	}
+	if _, _, admitted := g.enter(context.Background(), nil); admitted {
+		t.Fatal("failed activation opened admission")
+	}
+}
+
+func TestFinalCancelsActivationAndJoinsRollbackBeforeResourceClose(t *testing.T) {
+	g := newGate()
+	entered, rollbackEntered, releaseRollback := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	var cleaned atomic.Bool
+	if err := g.registerActivation("tun", func(ctx context.Context) error {
+		close(entered)
+		<-ctx.Done()
+		return ctx.Err()
+	}, func(ctx context.Context) error {
+		close(rollbackEntered)
+		select {
+		case <-releaseRollback:
+			cleaned.Store(true)
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	g.resources["tun"] = func() error {
+		if !cleaned.Load() {
+			return errors.New("resource close raced activation rollback")
+		}
+		return nil
+	}
+	g.ready = true
+	activation := make(chan error, 1)
+	go func() { activation <- g.activate(strings.Repeat("a", 64)) }()
+	<-entered
+	final := make(chan error, 1)
+	go func() {
+		_, err := g.snapshot(context.Background(), strings.Repeat("b", 64), func() map[string]int64 { return map[string]int64{} })
+		final <- err
+	}()
+	<-rollbackEntered
+	select {
+	case <-final:
+		t.Fatal("final receipt preceded host cleanup")
+	default:
+	}
+	close(releaseRollback)
+	if <-activation == nil {
+		t.Fatal("activation succeeded after final fence")
+	}
+	if err := <-final; err != nil {
+		t.Fatal("final failed after joined rollback", err)
+	}
+}
+
 func TestFinalJoinsLateUDPAndRetainsParentInterrupter(t *testing.T) {
 	g := activatedGate(t)
 	interrupted := make(chan struct{})

@@ -62,7 +62,7 @@ jobs:
           mkdir -p "$RUNNER_TEMP/inbound-artifact/overlay/scripts/ci" "$RUNNER_TEMP/inbound-artifact/overlay/scripts/core-overlay" "$RUNNER_TEMP/inbound-artifact/overlay/internal/corebarrierv2"
           cp scripts/prepare-inbound-core.py "$RUNNER_TEMP/inbound-artifact/overlay/scripts/"
           cp scripts/ci/build-inbound-core.sh "$RUNNER_TEMP/inbound-artifact/overlay/scripts/ci/"
-          cp scripts/core-overlay/inbound_stats.go.txt scripts/core-overlay/inbound_xdrive_test.go.txt "$RUNNER_TEMP/inbound-artifact/overlay/scripts/core-overlay/"
+          cp scripts/core-overlay/inbound_stats.go.txt scripts/core-overlay/inbound_xdrive_test.go.txt scripts/core-overlay/inbound_tun_dns.go.txt scripts/core-overlay/inbound_tun_dns_test.go.txt scripts/core-overlay/inbound_vision_test.go.txt "$RUNNER_TEMP/inbound-artifact/overlay/scripts/core-overlay/"
           cp internal/corebarrierv2/barrier.go internal/corebarrierv2/barrier_test.go internal/corebarrierv2/README.md "$RUNNER_TEMP/inbound-artifact/overlay/internal/corebarrierv2/"
       - name: Build a separate race/checkptr instrumented test core
         working-directory: .inbound-core-v2
@@ -94,6 +94,16 @@ jobs:
             --require TestPinnedNativeInboundTrafficAndFinalReceipt/vless_mux_xudp \
             --require TestPinnedNativeInboundTrafficAndFinalReceipt/reality_tcp \
             --require TestPinnedNativeInboundTrafficAndFinalReceipt/reality_tcp_vision_tls
+      - name: Prove DNS TCP/UDP payload, asynchronous descendants and immutable final counters
+        shell: bash
+        run: |
+          set -euo pipefail
+          go test -race ./internal/corebarrierv2 -run '^TestPinnedNativeDNSQueriesAndFinalReceipt$' -count=1 -json -timeout=90s > "$RUNNER_TEMP/native-dns.jsonl" || { cat "$RUNNER_TEMP/native-dns.jsonl"; exit 1; }
+          python3 scripts/ci/assert-inbound-acceptance.py "$RUNNER_TEMP/native-dns.jsonl" --require TestPinnedNativeDNSQueriesAndFinalReceipt
+          export DXP_INBOUND_CORE_V2_BINARY="$RUNNER_TEMP/xray-inbound-v2-race"
+          export DXP_INBOUND_CORE_V2_SHA256=$(sha256sum "$DXP_INBOUND_CORE_V2_BINARY" | cut -d' ' -f1)
+          go test -race ./internal/corebarrierv2 -run '^TestPinnedNativeDNSQueriesAndFinalReceipt$' -count=1 -json -timeout=90s > "$RUNNER_TEMP/native-dns-race.jsonl" || { cat "$RUNNER_TEMP/native-dns-race.jsonl"; exit 1; }
+          python3 scripts/ci/assert-inbound-acceptance.py "$RUNNER_TEMP/native-dns-race.jsonl" --require TestPinnedNativeDNSQueriesAndFinalReceipt
       - name: Prove owner API, SQLite, TLS Agent, zero receipt, accounting and stop
         shell: bash
         run: |
@@ -114,6 +124,13 @@ jobs:
           bash scripts/ci/test-inbound-tun.sh "$DXP_INBOUND_CORE_V2_BINARY" "$DXP_INBOUND_CORE_V2_SHA256" | tee "$RUNNER_TEMP/kernel-tun.log"
           grep -q KERNEL_TUN_TCP_UDP_ACCOUNTING_FINAL_PASS "$RUNNER_TEMP/kernel-tun.log"
           ! grep -q -- '--- SKIP:' "$RUNNER_TEMP/kernel-tun.log"
+      - name: Prove activation, final and crash DNS cleanup with private D-Bus and systemd-resolved
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash scripts/ci/test-inbound-tun-dns.sh "$DXP_INBOUND_CORE_V2_BINARY" "$DXP_INBOUND_CORE_V2_SHA256" | tee "$RUNNER_TEMP/kernel-tun-dns.log"
+          grep -q KERNEL_TUN_PRIVATE_RESOLVED_ACTIVATION_FINAL_CRASH_PASS "$RUNNER_TEMP/kernel-tun-dns.log"
+          ! grep -q -- '--- SKIP:' "$RUNNER_TEMP/kernel-tun-dns.log"
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
@@ -155,10 +172,13 @@ jobs:
           path: |
             ${{ runner.temp }}/native-matrix.jsonl
             ${{ runner.temp }}/native-race.jsonl
+            ${{ runner.temp }}/native-dns.jsonl
+            ${{ runner.temp }}/native-dns-race.jsonl
             ${{ runner.temp }}/native-private-control.jsonl
             ${{ runner.temp }}/managed-owner-agent.jsonl
             ${{ runner.temp }}/managed-browser.jsonl
             ${{ runner.temp }}/kernel-tun.log
+            ${{ runner.temp }}/kernel-tun-dns.log
           if-no-files-found: warn
           retention-days: 14
 
@@ -214,6 +234,14 @@ jobs:
           go mod vendor
           CGO_ENABLED=0 go build -mod=vendor -buildvcs=false -trimpath -o "$RUNNER_TEMP/standalone-artifact/bin/darkpro-tuic" ./cmd/darkpro-tuic
           CGO_ENABLED=0 go build -mod=vendor -buildvcs=false -trimpath -o "$RUNNER_TEMP/standalone-artifact/bin/darkpro-amneziawg" ./cmd/darkpro-amneziawg
+      - name: Prove actual per-peer IPv6 sources, authority loss and final counters in disposable namespaces
+        shell: bash
+        run: |
+          set -euo pipefail
+          export DARK_PRO_AWG_IPV6_CLIENT_OUTPUT="$RUNNER_TEMP/standalone-artifact/acceptance/amneziawg-ipv6-client.test"
+          bash scripts/ci/test-amneziawg-ipv6.sh "$RUNNER_TEMP/sanaei-workers" | tee "$RUNNER_TEMP/amneziawg-ipv6-namespace.log"
+          grep -q MANAGED_AMNEZIAWG_IPV6_SOURCE_VERIFIED "$RUNNER_TEMP/amneziawg-ipv6-namespace.log"
+          ! grep -q -- '--- SKIP:' "$RUNNER_TEMP/amneziawg-ipv6-namespace.log"
       - name: Prove real FakeTLS, named-user isolation, revocation, bridge and final MTProto receipts
         working-directory: .mtproto-engine
         shell: bash
@@ -240,8 +268,9 @@ jobs:
           cp "$RUNNER_TEMP/sanaei-workers/LICENSE" "$RUNNER_TEMP/standalone-artifact/Sanaei-LICENSE"
           cp .mtproto-engine/LICENSE "$RUNNER_TEMP/standalone-artifact/MTProto-LICENSE"
           cp "$RUNNER_TEMP/sanaei-workers/darkpro-sanaei-provenance.json" .mtproto-engine/darkpro-mtproto-provenance.json "$RUNNER_TEMP/standalone-artifact/"
-          mkdir -p "$RUNNER_TEMP/standalone-artifact/build-scripts/scripts"
+          mkdir -p "$RUNNER_TEMP/standalone-artifact/build-scripts/scripts/ci"
           cp scripts/prepare-sanaei-engines.py scripts/prepare-mtproto-engine.py "$RUNNER_TEMP/standalone-artifact/build-scripts/scripts/"
+          cp scripts/ci/test-amneziawg-ipv6.sh scripts/ci/assert-inbound-acceptance.py "$RUNNER_TEMP/standalone-artifact/build-scripts/scripts/ci/"
           cp -R scripts/engine-overlay "$RUNNER_TEMP/standalone-artifact/build-scripts/scripts/"
           python3 - "$RUNNER_TEMP/standalone-artifact" "$GITHUB_SHA" <<'PY'
           import hashlib,json,pathlib,sys
@@ -264,6 +293,7 @@ jobs:
           path: |
             ${{ runner.temp }}/standalone-traffic.jsonl
             ${{ runner.temp }}/mtproto-traffic.jsonl
+            ${{ runner.temp }}/amneziawg-ipv6-namespace.log
           if-no-files-found: warn
           retention-days: 14
 

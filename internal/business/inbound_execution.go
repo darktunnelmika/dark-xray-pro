@@ -634,6 +634,28 @@ func inboundExecutionState(ctx context.Context, tx *sql.Tx, key []byte, id uint6
 			v.Targets = append(v.Targets, ix.TargetState{NodeID: n.NodeID, InstallationID: n.InstallationID, State: "saved", Listeners: []ix.Listener{}, Blockers: []ix.Blocker{}, HealthState: "unknown", AccountingState: "pending"})
 		}
 	}
+	for i := range v.Targets {
+		t := &v.Targets[i]
+		required, err := executionResumeRequired(ctx, tx, t.NodeID, t.InstallationID)
+		if err != nil {
+			return v, err
+		}
+		if required {
+			v.OwnerResumeRequired = true
+			t.State, t.ProcessReady = "blocked", false
+			blocker := ix.Blocker{Code: "owner_resume_required", NodeID: t.NodeID, InboundID: id}
+			t.Blockers = append(t.Blockers, blocker)
+			v.Blockers = append(v.Blockers, blocker)
+		}
+	}
+	if v.OwnerResumeRequired {
+		v.ObservedState = "blocked"
+		if h.Pending != "" && h.DesiredState == "active" {
+			v.AllowedActions = []string{"apply", "restart", "stop"}
+		} else if h.Pending != "" && h.DesiredState == "stopped" {
+			v.AllowedActions = []string{"activate", "stop"}
+		}
+	}
 	if h.ActiveRevision > 0 && h.ActiveRevision == h.DesiredRevision && h.DesiredState == "active" {
 		ready, verified := len(v.Targets) > 0, true
 		for _, target := range v.Targets {
@@ -911,7 +933,8 @@ func assessInboundExecution(ctx context.Context, tx *sql.Tx, key []byte, actor s
 	if h.Revision != in.ExpectedRevision || state.PlanRevision != in.ExpectedPlanRevision || state.InboundRevision != in.ExpectedInboundRevision {
 		return a, ErrConflict
 	}
-	if h.DesiredState == "archived" || h.Pending != "" && in.Action != "stop" {
+	resumeAction := state.OwnerResumeRequired && (in.Action == "activate" || in.Action == "apply" || in.Action == "restart")
+	if h.DesiredState == "archived" || h.Pending != "" && in.Action != "stop" && !resumeAction {
 		return a, ErrConflict
 	}
 	if in.Action == "activate" && h.DesiredState == "active" || (in.Action == "apply" || in.Action == "restart") && h.DesiredState != "active" {
@@ -979,7 +1002,18 @@ func assessInboundExecution(ctx context.Context, tx *sql.Tx, key []byte, actor s
 	}
 	bundles, err := executionBundles(ctx, tx, key, snap, in.EventID)
 	if err != nil {
-		return a, err
+		var field *inboundspec.FieldError
+		switch {
+		case errors.As(err, &field):
+			a.preview.Blockers = append(a.preview.Blockers, ix.Blocker{Code: field.Code, Field: field.Path, InboundID: id})
+		case errors.Is(err, ix.ErrConflict):
+			a.preview.Blockers = append(a.preview.Blockers, ix.Blocker{Code: "execution_resource_conflict", InboundID: id})
+		case errors.Is(err, ix.ErrInvalid):
+			a.preview.Blockers = append(a.preview.Blockers, ix.Blocker{Code: "execution_configuration_invalid", InboundID: id})
+		default:
+			return a, err
+		}
+		return a, nil
 	}
 	a.bundles = bundles
 	for _, b := range bundles {
@@ -1061,6 +1095,11 @@ func (s *Store) QueueInboundExecution(ctx context.Context, key []byte, actor str
 	v, err := commitExecutionAssessment(ctx, tx, key, actor, id, in, a, fp)
 	if err != nil {
 		return v, err
+	}
+	if in.Action == "activate" || in.Action == "apply" || in.Action == "restart" {
+		if err = resolveExecutionResume(ctx, tx, in.EventID, a.bundles); err != nil {
+			return ix.Operation{}, err
+		}
 	}
 	return v, tx.Commit()
 }

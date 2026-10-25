@@ -63,8 +63,50 @@ func TestWorkerOwnerLossWaitsForKnownReceiptAndPersistsExactClearance(t *testing
 	if err = reopened.Step(context.Background(), x); err != nil {
 		t.Fatal(err)
 	}
-	if reopened.state.Generation != 2 || reopened.state.Resolution != nil || reopened.process != nil {
-		t.Fatal("a separate stopped generation did not supersede cleared local state")
+	if reopened.state.Generation != 2 || reopened.state.Resolution == nil || reopened.process != nil {
+		t.Fatal("a stopped generation discarded the explicit-resume barrier")
+	}
+}
+
+func TestWorkerReconciledJournalRequiresExactReviewedResumeLease(t *testing.T) {
+	w, p, x := fixtureWorker(t, "active")
+	active := cloneBundle(x.delivery.Bundle)
+	c := fixtureClearance(t, w)
+	x.delivery, p.dead = &Delivery{Clearance: &c}, true
+	if err := w.Step(context.Background(), x); err != nil {
+		t.Fatal(err)
+	}
+	for _, generation := range []uint64{1, 2, 3} {
+		active.Generation = generation
+		x.delivery = fixtureDelivery(t, w.cfg.Key, active)
+		if err := w.Step(context.Background(), x); !errors.Is(err, ErrProof) {
+			t.Fatal("a newer eligibility generation bypassed owner resume", err)
+		}
+		if w.state.Resolution == nil || w.state.Epoch != nil || w.process != nil || x.pollInputs[len(x.pollInputs)-1].ReconciledEpochID != c.EpochID {
+			t.Fatal("unreviewed delivery replaced the reconciliation journal")
+		}
+	}
+	x.delivery = stoppedDelivery(t, w)
+	if err := w.Step(context.Background(), x); err != nil {
+		t.Fatal(err)
+	}
+	cfg := w.cfg
+	w.Close()
+	reopened, err := Open(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	active.Generation = 3
+	x.delivery = fixtureDelivery(t, cfg.Key, active)
+	x.delivery.Lease.ResumeEpochID, x.delivery.Lease.ResumeOperationID = c.EpochID, "reviewed-owner-resume"
+	x.delivery.Lease.ResumeEpochSHA = strings.Repeat("d", 64)
+	x.delivery.Lease, err = SignLease(cfg.Key, x.delivery.Lease)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = reopened.Step(context.Background(), x); !errors.Is(err, ErrProof) {
+		t.Fatal("validly signed resume for a foreign incarnation was accepted", err)
 	}
 }
 

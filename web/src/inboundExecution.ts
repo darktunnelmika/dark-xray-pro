@@ -11,12 +11,15 @@ export type ExecutionListener = {
   inbound_id: number; tag: string; engine: string; protocol: string; transport: string; security: string;
   kind: string; listen: string; port: number; network: string; resource_kind: string; accounting_mode: AccountingMode;
   dependency_node_id?: string;
+  host_requirements?: Array<"tun" | "tun_system_dns" | "ipv6_alias">;
 };
+export type ExecutionHost = { version: 1; network_admin: boolean; child_network_admin: boolean; tun_device: boolean; ipv6: boolean; system_dns_control: boolean; tun_dns_activation: boolean };
 export type ExecutionTarget = {
   node_id: string; installation_id: string; desired_generation: number; observed_generation: number; state: string;
   config_sha?: string; manifest_sha?: string; listeners: ExecutionListener[]; blockers: ExecutionBlocker[];
   reported_at_unix_nano?: number; lease_expires_unix_nano?: number; process_ready?: boolean;
   health_state?: string; accounting_state?: string;
+  host?: ExecutionHost; host_reported_at_unix_nano?: number;
 };
 export type ExecutionOperation = {
   id: string; event_id: string; inbound_id: number; action: ExecutionAction; revision: number; state: string;
@@ -30,6 +33,7 @@ export type ExecutionState = {
   latest_operation?: ExecutionOperation; server_time_unix_milli?: number; allowed_accounting_modes?: AccountingMode[];
   publication_state?: string; pending_changes?: boolean; active_plan_revision?: number; active_inbound_revision?: number;
   reconciliations?: ExecutionReconciliation[];
+  owner_resume_required?: boolean;
 };
 export type ExecutionKnownUsage = { principal_id: string; inbound_id: number; client_id: string; role: string; upload: string; download: string; held: boolean };
 export type ExecutionReconciliation = {
@@ -106,11 +110,15 @@ function readTargets(v: unknown): ExecutionTarget[] {
     if (!object(target) || !identifier(target.node_id) || typeof target.installation_id !== "string" || !/^[a-f0-9]{32}$/.test(target.installation_id) ||
       !natural(target.desired_generation) || !natural(target.observed_generation) || !code(target.state) || !optional(target.config_sha, v => v === "" || sha(v)) || !optional(target.manifest_sha, v => v === "" || sha(v)) ||
       !optional(target.reported_at_unix_nano, nano) || !optional(target.lease_expires_unix_nano, nano) || !optional(target.process_ready, v => typeof v === "boolean") ||
-      !optional(target.health_state, v => v === "" || code(v)) || !optional(target.accounting_state, v => v === "" || code(v)) || !Array.isArray(target.listeners) || target.listeners.length > 8192) throw Error("invalid_execution_target");
+      !optional(target.health_state, v => v === "" || code(v)) || !optional(target.accounting_state, v => v === "" || code(v)) || !optional(target.host_reported_at_unix_nano, nano) || !Array.isArray(target.listeners) || target.listeners.length > 8192) throw Error("invalid_execution_target");
+    const host = target.host;
+    if (host !== undefined && (!object(host) || host.version !== 1 ||
+      ["network_admin", "child_network_admin", "tun_device", "ipv6", "system_dns_control", "tun_dns_activation"].some(key => typeof host[key] !== "boolean") || !nano(target.host_reported_at_unix_nano) || target.host_reported_at_unix_nano <= 0)) throw Error("invalid_execution_host");
     readBlockers(target.blockers);
     for (const listener of target.listeners) {
       if (!object(listener) || !positive(listener.inbound_id) || !text(listener.tag, 256) || !text(listener.engine, 64) || !text(listener.protocol, 64) || !text(listener.transport, 64) || !text(listener.security, 64) ||
-        !text(listener.kind, 64) || !text(listener.listen, 255) || !natural(listener.port) || listener.port > 65535 || !text(listener.network, 64) || !text(listener.resource_kind, 64) || !accounting(listener.accounting_mode) || !optional(listener.dependency_node_id, identifier)) throw Error("invalid_execution_listener");
+        !text(listener.kind, 64) || !text(listener.listen, 255) || !natural(listener.port) || listener.port > 65535 || !text(listener.network, 64) || !text(listener.resource_kind, 64) || !accounting(listener.accounting_mode) || !optional(listener.dependency_node_id, identifier) ||
+        !optional(listener.host_requirements, values => Array.isArray(values) && values.length <= 3 && values.every(value => ["tun", "tun_system_dns", "ipv6_alias"].includes(value)) && unique(values))) throw Error("invalid_execution_listener");
     }
   }
   if (!unique(v.map(target => target.node_id))) throw Error("duplicate_execution_target");
@@ -130,7 +138,7 @@ export function readExecutionState(v: unknown, inboundID: number): ExecutionStat
     !natural(v.desired_revision) || !natural(v.active_revision) || !code(v.desired_state) || !code(v.observed_state) || !accounting(v.accounting_mode) || !clients(v.client_ids) || !clients(v.effective_client_ids) ||
     !Array.isArray(v.allowed_actions) || !v.allowed_actions.every(action) || !unique(v.allowed_actions) || !optional(v.server_time_unix_milli, positive) ||
     !optional(v.allowed_accounting_modes, v => Array.isArray(v) && v.length <= 2 && v.every(accounting) && unique(v)) || !optional(v.publication_state, code) ||
-    !optional(v.pending_changes, v => typeof v === "boolean") || !optional(v.active_plan_revision, natural) || !optional(v.active_inbound_revision, natural)) throw Error("invalid_execution_state");
+    !optional(v.pending_changes, v => typeof v === "boolean") || !optional(v.owner_resume_required, v => typeof v === "boolean") || !optional(v.active_plan_revision, natural) || !optional(v.active_inbound_revision, natural)) throw Error("invalid_execution_state");
   readTargets(v.targets); readBlockers(v.blockers);
   if (v.latest_operation !== undefined) readExecutionOperation(v.latest_operation, inboundID);
   if (v.reconciliations !== undefined) {

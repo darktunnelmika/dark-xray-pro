@@ -41,8 +41,12 @@ with tempfile.TemporaryFile() as archive:
         tree.extractall(output, filter="data")
 quic_output = output / "_darkpro/quic-go"
 shutil.copytree(quic["Dir"], quic_output)
-for file in quic_output.rglob("*"):
-    if file.is_file():
+# Module-cache directories are read-only too. Make only this private copy
+# writable; otherwise an unprivileged CI runner cannot add the overlay files.
+for file in [quic_output, *quic_output.rglob("*")]:
+    if file.is_dir():
+        file.chmod(0o755)
+    elif file.is_file():
         file.chmod(0o644)
 
 overlay = repo / "scripts/engine-overlay"

@@ -80,6 +80,15 @@ func startCore(t *testing.T, bin string, config map[string]any, controlled bool)
 	}
 	cmd := exec.Command(bin, "run", "-config", path)
 	cmd.Env = []string{"PATH=/usr/bin:/bin", "HOME=" + dir, "GORACE=halt_on_error=1 atexit_sleep_ms=0"}
+	if os.Getenv("DXP_TUN_DNS_NAMESPACE") == "1" {
+		// Only the isolated DNS harness supplies these tools. Its private /run
+		// contains the test's own system bus, never the host resolver socket.
+		tools := os.Getenv("DXP_TUN_DNS_TOOLS")
+		if !filepath.IsAbs(tools) {
+			t.Fatal("isolated DNS tools path missing")
+		}
+		cmd.Env[0] = "PATH=" + tools + ":/usr/bin:/bin"
+	}
 	if controlled {
 		cmd.Env = append(cmd.Env, "DARK_PRO_INBOUND_V2=1")
 	}

@@ -33,11 +33,13 @@ type journal struct {
 	DrainNonce     string                   `json:"drain_nonce,omitempty"`
 	FinalAccepted  bool                     `json:"final_accepted"`
 	Resolution     *journalResolution       `json:"resolution,omitempty"`
+	PublicAliases  *publicAliasJournal      `json:"public_aliases,omitempty"`
 }
 
 type journalResolution struct {
 	Epoch     inboundexec.EpochInput     `json:"epoch"`
 	Clearance inboundexec.EpochClearance `json:"clearance"`
+	Bundle    inboundexec.Bundle         `json:"bundle"`
 }
 
 type privateJournal struct {
@@ -138,6 +140,9 @@ func openJournal(dir string, key []byte, node, installation string) (*privateJou
 
 func validateJournal(key []byte, s journal) error {
 	bad := errors.New("inbound_journal_state_mismatch")
+	if validatePublicAliasJournal(s) != nil {
+		return bad
+	}
 	switch s.Phase {
 	case "idle", "preparing", "prepared", "registered", "zero_pending", "activation_intent", "active", "draining", "sealed_waiting_receipt", "final_pending", "final_accepted", "uncertain":
 	default:
@@ -155,7 +160,7 @@ func validateJournal(key []byte, s journal) error {
 	}
 	if r := s.Resolution; r != nil {
 		c := r.Clearance
-		if inboundexec.VerifyClearance(key, c) != nil || c.NodeID != s.NodeID || c.InstallationID != s.InstallationID || c.Generation != r.Epoch.Generation || c.EpochID != r.Epoch.EpochID || c.EpochSHA != inboundexec.Digest(r.Epoch) || inboundexec.ValidateEpochIdentity(*b, r.Epoch) != nil || s.Epoch != nil || s.Phase != "idle" {
+		if inboundexec.VerifyClearance(key, c) != nil || c.NodeID != s.NodeID || c.InstallationID != s.InstallationID || r.Epoch.NodeID != s.NodeID || r.Epoch.InstallationID != s.InstallationID || c.Generation != r.Epoch.Generation || c.EpochID != r.Epoch.EpochID || c.EpochSHA != inboundexec.Digest(r.Epoch) || inboundexec.VerifyBundle(key, r.Bundle) != nil || inboundexec.ValidateEpochIdentity(r.Bundle, r.Epoch) != nil || s.Epoch != nil || s.Phase != "idle" {
 			return bad
 		}
 	}

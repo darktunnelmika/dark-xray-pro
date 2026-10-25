@@ -39,11 +39,12 @@ type Counter struct {
 	Download uint64 `json:"download,string"`
 }
 type Input struct {
-	Version    int             `json:"version"`
-	Engine     string          `json:"engine"`
-	Config     json.RawMessage `json:"config"`
-	Manifest   json.RawMessage `json:"manifest"`
-	Principals []Principal     `json:"principals"`
+	Version              int                   `json:"version"`
+	Engine               string                `json:"engine"`
+	Config               json.RawMessage       `json:"config"`
+	Manifest             json.RawMessage       `json:"manifest"`
+	Principals           []Principal           `json:"principals"`
+	PublicAliasAuthority *PublicAliasAuthority `json:"public_alias_authority,omitempty"`
 }
 type Reply struct {
 	Version  int       `json:"version"`
@@ -133,6 +134,9 @@ func Material(value string) (string, error) {
 	return string(b), nil
 }
 func ValidatePrincipals(in Input, users []string) error {
+	if in.PublicAliasAuthority != nil && in.Engine != "amneziawg" {
+		return errors.New("unexpected public IPv6 authority")
+	}
 	if len(users) == 0 || len(users) > 20000 || len(in.Principals) == 0 || len(in.Principals) > 20000 {
 		return errors.New("accounting bindings required")
 	}
@@ -268,8 +272,11 @@ func (w *Worker) Handle(rw http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if !w.open {
-			w.bridge.Activate()
-			if e = w.driver.Start(); e != nil {
+			e = w.bridge.Activate()
+			if e == nil {
+				e = w.driver.Start()
+			}
+			if e != nil {
 				w.fault = true
 				w.mu.Unlock()
 				w.bridge.Close()
@@ -308,8 +315,9 @@ func (w *Worker) Handle(rw http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	ready := !w.fault && !w.closing && (!w.open || w.driver.Ready())
-	out := Reply{Version: 1, Engine: w.input.Engine, Ready: ready, Open: w.open, Final: w.final, Counters: values}
+	open := w.open && w.bridge.AdmissionOpen()
+	ready := !w.fault && !w.closing && (!w.open || open && w.driver.Ready())
+	out := Reply{Version: 1, Engine: w.input.Engine, Ready: ready, Open: open, Final: w.final, Counters: values}
 	if op == "activate" {
 		out.Nonce = w.activation
 	}

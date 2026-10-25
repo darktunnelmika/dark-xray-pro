@@ -3,6 +3,8 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -38,7 +40,8 @@ func awgInput(t *testing.T, cfg config) darkproadapter.Input {
 		if i == 1 {
 			role = "health"
 		}
-		in.Principals = append(in.Principals, darkproadapter.Principal{ID: p.Email, Engine: "amneziawg", Role: role, Counter: "user>>>" + p.Email + ">>>traffic", InboundID: 1})
+		keyHash := sha256.Sum256([]byte(p.PublicKey))
+		in.Principals = append(in.Principals, darkproadapter.Principal{ID: p.Email, Engine: "amneziawg", Role: role, Counter: "user>>>" + p.Email + ">>>traffic", CredentialSHA: hex.EncodeToString(keyHash[:]), InboundID: 1})
 	}
 	return in
 }
@@ -56,8 +59,16 @@ func startAWG(t *testing.T, in darkproadapter.Input) *darkproadapter.Worker {
 	return w
 }
 func client(t *testing.T, cfg config, private, address, psk string) *netstack.Net {
+	network, _ := clientDevice(t, cfg, private, address, psk)
+	return network
+}
+func clientDevice(t *testing.T, cfg config, private, address, psk string) (*netstack.Net, func()) {
 	t.Helper()
-	tun, network, e := netstack.CreateNetTUN([]netip.Addr{netip.MustParseAddr(address)}, nil, 1420)
+	addresses := []netip.Addr{}
+	for _, ip := range strings.Split(address, ",") {
+		addresses = append(addresses, netip.MustParseAddr(ip))
+	}
+	tun, network, e := netstack.CreateNetTUN(addresses, nil, 1420)
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -76,7 +87,7 @@ func client(t *testing.T, cfg config, private, address, psk string) *netstack.Ne
 			fmt.Fprintf(&b, "%s=%s\n", k, v)
 		}
 	}
-	fmt.Fprintf(&b, "public_key=%s\nendpoint=%s\nallowed_ip=0.0.0.0/0\n", pub, net.JoinHostPort("127.0.0.1", strconv.Itoa(cfg.Port)))
+	fmt.Fprintf(&b, "public_key=%s\nendpoint=%s\nallowed_ip=0.0.0.0/0\nallowed_ip=::/0\n", pub, net.JoinHostPort("127.0.0.1", strconv.Itoa(cfg.Port)))
 	if psk != "" {
 		hex, _ := wireguard.KeyToHex(psk)
 		fmt.Fprintf(&b, "preshared_key=%s\n", hex)
@@ -87,7 +98,7 @@ func client(t *testing.T, cfg config, private, address, psk string) *netstack.Ne
 	if e = dev.Up(); e != nil {
 		t.Fatal(e)
 	}
-	return network
+	return network, dev.Close
 }
 func TestManagedAmneziaWG31ActualTCPUDPAccountingAndRevoke(t *testing.T) {
 	host := dt.NonLoopback(t)

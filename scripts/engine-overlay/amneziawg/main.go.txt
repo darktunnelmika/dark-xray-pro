@@ -48,11 +48,6 @@ func prepare(in darkproadapter.Input) (darkproadapter.Plan, error) {
 	if cfg.Server.MTU != 0 && (cfg.Server.MTU < 1280 || cfg.Server.MTU > 9000) {
 		return darkproadapter.Plan{}, errors.New("amneziawg mtu")
 	}
-	// Public per-peer source aliases require a host-owned address lifecycle.
-	// This userspace worker cannot promise that host mutation silently.
-	if cfg.Server.IPv6ExternalInterface != "" || cfg.Server.IPv6Enabled && cfg.Server.ExternalInterface != "" {
-		return darkproadapter.Plan{}, errors.New("public ipv6 alias requires managed host routing")
-	}
 	addresses := append([]string(nil), cfg.Address...)
 	if cfg.Server.IPv6Enabled {
 		prefix, e := netip.ParsePrefix(cfg.Server.IPv6Subnet)
@@ -110,7 +105,20 @@ func prepare(in darkproadapter.Input) (darkproadapter.Plan, error) {
 	if e = amneziawgnet.DarkProValidate(inst, opts); e != nil {
 		return darkproadapter.Plan{}, e
 	}
+	aliases, e := preparePublicIPv6(cfg, in)
+	if e != nil {
+		return darkproadapter.Plan{}, e
+	}
 	return darkproadapter.Plan{Users: users, New: func(b *darkproadapter.Bridge) (darkproadapter.Driver, error) {
+		if aliases != nil {
+			policy, e := darkproadapter.NewPublicAliasEgress(in, aliases.interfaceName, aliases.bindings)
+			if e != nil {
+				return nil, e
+			}
+			if e = b.SetIPv6Egress(policy); e != nil {
+				return nil, e
+			}
+		}
 		return amneziawgnet.NewDarkProServer(inst, opts, Socks(b), keepAlive), nil
 	}}, nil
 }

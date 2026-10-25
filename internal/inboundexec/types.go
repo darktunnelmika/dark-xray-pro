@@ -55,6 +55,7 @@ type State struct {
 	ActivePlanRevision     uint64                `json:"active_plan_revision"`
 	ActiveInboundRevision  uint64                `json:"active_inbound_revision"`
 	PendingChanges         bool                  `json:"pending_changes"`
+	OwnerResumeRequired    bool                  `json:"owner_resume_required"`
 	DesiredState           string                `json:"desired_state"`
 	ObservedState          string                `json:"observed_state"`
 	AccountingMode         string                `json:"accounting_mode"`
@@ -71,20 +72,22 @@ type State struct {
 }
 
 type TargetState struct {
-	NodeID             string     `json:"node_id"`
-	InstallationID     string     `json:"installation_id"`
-	DesiredGeneration  uint64     `json:"desired_generation"`
-	ObservedGeneration uint64     `json:"observed_generation"`
-	State              string     `json:"state"`
-	ConfigSHA          string     `json:"config_sha,omitempty"`
-	ManifestSHA        string     `json:"manifest_sha,omitempty"`
-	Listeners          []Listener `json:"listeners"`
-	Blockers           []Blocker  `json:"blockers"`
-	ReportedAt         int64      `json:"reported_at_unix_nano"`
-	LeaseExpires       int64      `json:"lease_expires_unix_nano"`
-	ProcessReady       bool       `json:"process_ready"`
-	HealthState        string     `json:"health_state"`
-	AccountingState    string     `json:"accounting_state"`
+	NodeID             string            `json:"node_id"`
+	InstallationID     string            `json:"installation_id"`
+	DesiredGeneration  uint64            `json:"desired_generation"`
+	ObservedGeneration uint64            `json:"observed_generation"`
+	State              string            `json:"state"`
+	ConfigSHA          string            `json:"config_sha,omitempty"`
+	ManifestSHA        string            `json:"manifest_sha,omitempty"`
+	Listeners          []Listener        `json:"listeners"`
+	Blockers           []Blocker         `json:"blockers"`
+	ReportedAt         int64             `json:"reported_at_unix_nano"`
+	LeaseExpires       int64             `json:"lease_expires_unix_nano"`
+	ProcessReady       bool              `json:"process_ready"`
+	HealthState        string            `json:"health_state"`
+	AccountingState    string            `json:"accounting_state"`
+	Host               *HostCapabilities `json:"host,omitempty"`
+	HostReportedAt     int64             `json:"host_reported_at_unix_nano,omitempty"`
 }
 
 type Preview struct {
@@ -125,19 +128,20 @@ type Principal struct {
 }
 
 type Listener struct {
-	InboundID        uint64 `json:"inbound_id"`
-	Tag              string `json:"tag"`
-	Engine           string `json:"engine"`
-	Protocol         string `json:"protocol"`
-	Transport        string `json:"transport"`
-	Security         string `json:"security"`
-	Kind             string `json:"kind"`
-	Listen           string `json:"listen"`
-	Port             uint16 `json:"port"`
-	Network          string `json:"network"`
-	ResourceKind     string `json:"resource_kind"`
-	AccountingMode   string `json:"accounting_mode"`
-	DependencyNodeID string `json:"dependency_node_id,omitempty"`
+	InboundID        uint64   `json:"inbound_id"`
+	Tag              string   `json:"tag"`
+	Engine           string   `json:"engine"`
+	Protocol         string   `json:"protocol"`
+	Transport        string   `json:"transport"`
+	Security         string   `json:"security"`
+	Kind             string   `json:"kind"`
+	Listen           string   `json:"listen"`
+	Port             uint16   `json:"port"`
+	Network          string   `json:"network"`
+	ResourceKind     string   `json:"resource_kind"`
+	AccountingMode   string   `json:"accounting_mode"`
+	DependencyNodeID string   `json:"dependency_node_id,omitempty"`
+	HostRequirements []string `json:"host_requirements,omitempty"`
 }
 
 type Component struct {

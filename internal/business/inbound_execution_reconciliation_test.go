@@ -155,8 +155,12 @@ func TestManagedInboundOwnerLossReconciliationPreservesMeasuredUsageAndLateRepor
 	if err != nil || len(state.Reconciliations) != 0 || state.PublicationState != "withheld" {
 		t.Fatal("reconciled stopped incarnation became live evidence", state, err)
 	}
-	if _, err = f.s.RegisterInboundExecutionEpoch(ctx, f.key, executionEpoch(b, "epoch-after-reconciliation-0001")); err != nil {
-		t.Fatal("explicit resolution did not release the old incarnation fence", err)
+	if _, err = f.s.RegisterInboundExecutionEpoch(ctx, f.key, executionEpoch(b, "epoch-after-reconciliation-0001")); !errors.Is(err, ErrConflict) {
+		t.Fatal("accounting reconciliation automatically reopened admission", err)
+	}
+	f.command(t, "execution-owner-reviewed-resume-0001", "restart")
+	if _, err = f.s.RegisterInboundExecutionEpoch(ctx, f.key, executionEpoch(f.bundle(t), "epoch-after-reviewed-resume-0001")); err != nil {
+		t.Fatal("explicit reviewed resume did not authorize a new incarnation", err)
 	}
 }
 

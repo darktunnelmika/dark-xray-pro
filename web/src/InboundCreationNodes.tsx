@@ -7,6 +7,7 @@ type Language = "en" | "fa";
 const messages: Record<Language, Record<string, string>> = {
   en: {
     tun_host_dns_takeover_unsupported: "Automatic TUN takeover of the host resolver is unavailable. Turn off System DNS to gateway; ordinary TUN routing remains supported.",
+    interface_name_invalid: "The TUN interface name must be 1–15 ASCII letters, digits, underscores, dots or hyphens, and cannot begin with a dot.",
     tuic_requires_tls13: "TUIC requires TLS 1.3. Set both TLS version limits to 1.3 or leave them at the default.",
     tuic_cipher_suites_unsupported: "TUIC uses TLS 1.3 cipher suites selected by the TLS engine. Remove the custom cipher-suite value.",
     quic_requires_tls13: "This QUIC transport requires TLS 1.3. Change the maximum TLS version to 1.3.",
@@ -73,6 +74,7 @@ const messages: Record<Language, Record<string, string>> = {
   },
   fa: {
     tun_host_dns_takeover_unsupported: "تغییر خودکار DNS میزبان توسط TUN پشتیبانی نمی‌شود. گزینهٔ System DNS to gateway را خاموش کنید؛ مسیریابی عادی TUN پشتیبانی می‌شود.",
+    interface_name_invalid: "نام رابط TUN باید ۱ تا ۱۵ حرف انگلیسی، رقم، زیرخط، نقطه یا خط تیره باشد و با نقطه شروع نشود.",
     tuic_requires_tls13: "TUIC به TLS 1.3 نیاز دارد. حداقل و حداکثر نسخه را روی ۱.۳ یا پیش‌فرض قرار دهید.",
     tuic_cipher_suites_unsupported: "مجموعه‌رمزهای TLS 1.3 در TUIC توسط موتور TLS انتخاب می‌شوند. مقدار انتخاب دستی را پاک کنید.",
     quic_requires_tls13: "این انتقال QUIC به TLS 1.3 نیاز دارد. حداکثر نسخهٔ TLS را روی ۱.۳ قرار دهید.",

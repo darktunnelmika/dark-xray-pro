@@ -19,6 +19,15 @@ func executionBundleAuthority(ctx context.Context, tx *sql.Tx, key []byte, b ix.
 	if install != b.InstallationID || generation != b.Generation {
 		return ErrConflict
 	}
+	if len(b.Listeners) > 0 || len(b.Components) > 0 {
+		required, err := executionResumeRequired(ctx, tx, b.NodeID, b.InstallationID)
+		if err != nil {
+			return err
+		}
+		if required {
+			return ErrConflict
+		}
+	}
 	for _, p := range b.Principals {
 		if p.ClientID == "" {
 			continue

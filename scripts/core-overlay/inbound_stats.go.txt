@@ -30,7 +30,7 @@ func (s *statsServer) darkProInboundStats(ctx context.Context, r *QueryStatsRequ
 		}}, nil
 	}
 	if nonce, ok := strings.CutPrefix(r.Pattern, darkpro.Protocol+"activate/"); ok {
-		if err := darkpro.Activate(nonce); err != nil { return nil, status.Error(codes.FailedPrecondition, "DARK PRO activation rejected") }
+		if err := darkpro.ActivateContext(ctx, nonce); err != nil { return nil, status.Error(codes.FailedPrecondition, "DARK PRO activation rejected") }
 		return marker("activated/"+nonce), nil
 	}
 	nonce, ok := strings.CutPrefix(r.Pattern, darkpro.Protocol+"final/")

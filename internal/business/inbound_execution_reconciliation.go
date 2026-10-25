@@ -227,6 +227,9 @@ func (s *Store) ReconcileInboundExecution(ctx context.Context, key []byte, actor
 	if _, err = tx.ExecContext(ctx, `INSERT INTO inbound_execution_reconciliations(event_id,epoch_id,inbound_id,actor_id,revision,fingerprint,review_sha,payload_enc,clearance_enc,created) VALUES(?,?,?,?,?,?,?,?,?,?)`, in.EventID, in.EpochID, inbound, actor, in.ExpectedRevision, fp, in.ReviewSHA, enc, clearanceEnc, now); err != nil {
 		return none, err
 	}
+	if err = blockExecutionResume(ctx, tx, key, v.Epoch, now); err != nil {
+		return none, err
+	}
 	for _, client := range v.State.AffectedClientIDs {
 		if _, err = tx.ExecContext(ctx, `INSERT INTO inbound_execution_usage_hold_resolutions(epoch_id,client_id,event_id,created) VALUES(?,?,?,?)`, in.EpochID, client, in.EventID, now); err != nil {
 			return none, err

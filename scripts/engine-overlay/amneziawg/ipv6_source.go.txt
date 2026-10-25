@@ -1,0 +1,97 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+package main
+
+import (
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
+	"errors"
+	"net/netip"
+	"strings"
+
+	"github.com/mhsanaei/3x-ui/v3/internal/darkproadapter"
+)
+
+type publicIPv6Plan struct {
+	interfaceName string
+	bindings      []darkproadapter.ExpectedPublicAlias
+}
+
+// The source address and accounting identity are derived from this immutable
+// AWG peer configuration. The Agent authority can certify these exact values;
+// it cannot assign a different address, key or principal to an email.
+func preparePublicIPv6(cfg config, in darkproadapter.Input) (*publicIPv6Plan, error) {
+	name := cfg.Server.IPv6ExternalInterface
+	if name == "" {
+		name = cfg.Server.ExternalInterface
+	}
+	if name == "" {
+		if in.PublicAliasAuthority != nil {
+			return nil, errors.New("unexpected public IPv6 authority")
+		}
+		return nil, nil
+	}
+	if !cfg.Server.IPv6Enabled || len(name) > 15 || strings.ContainsAny(name, "\x00\r\n /:") {
+		return nil, errors.New("public IPv6 interface configuration")
+	}
+	prefix, e := netip.ParsePrefix(cfg.Server.IPv6Subnet)
+	if e != nil || !prefix.Addr().Is6() || prefix.Addr().Is4In6() || prefix.Bits() > 126 {
+		return nil, errors.New("public IPv6 subnet")
+	}
+	prefix = prefix.Masked()
+	users := make([]string, 0, len(cfg.Peers))
+	for _, p := range cfg.Peers {
+		users = append(users, p.Email)
+	}
+	if e := darkproadapter.ValidatePrincipals(in, users); e != nil {
+		return nil, e
+	}
+	principals := map[string]darkproadapter.Principal{}
+	var aggregate *darkproadapter.Principal
+	for _, p := range in.Principals {
+		if len(in.Principals) == 1 && p.Role == "owner_aggregate" && strings.HasPrefix(p.Counter, "inbound>>>") {
+			copy := p
+			aggregate = &copy
+		} else {
+			principals[strings.Split(p.Counter, ">>>")[1]] = p
+		}
+	}
+	plan := &publicIPv6Plan{interfaceName: name}
+	seen := map[netip.Addr]bool{}
+	for _, peer := range cfg.Peers {
+		key, e := base64.StdEncoding.DecodeString(peer.PublicKey)
+		if e != nil || len(key) != 32 || base64.StdEncoding.EncodeToString(key) != peer.PublicKey {
+			return nil, errors.New("noncanonical public IPv6 peer key")
+		}
+		hash := sha256.Sum256([]byte(peer.PublicKey))
+		keySHA := hex.EncodeToString(hash[:])
+		principal, ok := principals[peer.Email]
+		if aggregate != nil {
+			principal, ok = *aggregate, true
+		}
+		if !ok || aggregate == nil && principal.CredentialSHA != keySHA {
+			return nil, errors.New("public IPv6 peer principal mismatch")
+		}
+		address := netip.Addr{}
+		for _, raw := range peer.AllowedIPs {
+			allowed, e := netip.ParsePrefix(raw)
+			if e != nil {
+				return nil, errors.New("public IPv6 peer address")
+			}
+			if !allowed.Addr().Is6() {
+				continue
+			}
+			ip := allowed.Addr()
+			if address.IsValid() || allowed.Bits() != 128 || ip.Is4In6() || !ip.IsGlobalUnicast() || !prefix.Contains(ip) || ip == prefix.Addr() || ip == prefix.Addr().Next() || seen[ip] {
+				return nil, errors.New("ambiguous public IPv6 peer address")
+			}
+			address = ip
+		}
+		if !address.IsValid() {
+			return nil, errors.New("public IPv6 source missing for peer")
+		}
+		seen[address] = true
+		plan.bindings = append(plan.bindings, darkproadapter.ExpectedPublicAlias{PrincipalID: principal.ID, Email: peer.Email, PeerPublicKeySHA: keySHA, Address: address})
+	}
+	return plan, nil
+}

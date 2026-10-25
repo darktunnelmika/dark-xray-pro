@@ -30,7 +30,7 @@ type inboundExecutionService struct {
 	local        *inboundruntime.Worker
 	localKey     []byte
 	mu           sync.Mutex
-	capabilities map[string]inboundruntime.Capabilities
+	capabilities map[string]executionCapabilityReport
 	started      bool
 	done         chan struct{}
 }
@@ -52,7 +52,7 @@ func (s *Server) EnableInboundExecution(cfg InboundExecutionConfig) error {
 		worker.Close()
 		return e
 	}
-	s.inboundExecution = &inboundExecutionService{config: cfg, local: worker, localKey: key, capabilities: map[string]inboundruntime.Capabilities{}, done: make(chan struct{})}
+	s.inboundExecution = &inboundExecutionService{config: cfg, local: worker, localKey: key, capabilities: map[string]executionCapabilityReport{}, done: make(chan struct{})}
 	return nil
 }
 
@@ -133,7 +133,7 @@ func (s *Server) attachInboundExecution(mux *http.ServeMux) {
 			businessError(w, e)
 			return
 		}
-		respond(w, 200, state)
+		respond(w, 200, s.executionHostState(state))
 	})
 	for _, op := range []string{"preview", "commands"} {
 		op := op
@@ -174,8 +174,27 @@ func (s *Server) attachInboundExecution(mux *http.ServeMux) {
 					businessError(w, e)
 					return
 				}
-				respond(w, 200, p)
+				respond(w, 200, s.executionHostPreview(p))
 				return
+			}
+			if input.Action != "stop" && input.Action != "archive" {
+				// An exact previously accepted command remains replayable even
+				// if host capabilities changed after acceptance.
+				_, previous := s.business.InboundExecutionOperation(r.Context(), s.inboundKey, id, input.EventID)
+				if errors.Is(previous, business.ErrNotFound) {
+					preview, err := s.business.PreviewInboundExecution(r.Context(), s.inboundKey, session.User.ID, id, input)
+					if err != nil {
+						businessError(w, err)
+						return
+					}
+					if !s.executionHostPreview(preview).Valid {
+						businessError(w, business.ErrConflict)
+						return
+					}
+				} else if previous != nil {
+					businessError(w, previous)
+					return
+				}
 			}
 			result, e := s.business.QueueInboundExecution(r.Context(), s.inboundKey, session.User.ID, id, input)
 			if e != nil {
@@ -346,9 +365,7 @@ func (s *Server) executionDelivery(ctx context.Context, input inboundruntime.Pol
 	if !s.executionCapabilities(input.Capabilities) {
 		return nil, business.ErrConflict
 	}
-	s.inboundExecution.mu.Lock()
-	s.inboundExecution.capabilities[input.NodeID+"/"+input.InstallationID] = input.Capabilities
-	s.inboundExecution.mu.Unlock()
+	s.recordExecutionCapabilities(input.NodeID, input.InstallationID, input.Capabilities)
 	if _, e := s.business.RefreshInboundExecutionEligibility(ctx, s.inboundKey, input.NodeID, input.InstallationID); e != nil {
 		return nil, e
 	}
@@ -358,6 +375,10 @@ func (s *Server) executionDelivery(ctx context.Context, input inboundruntime.Pol
 	}
 	if e = s.business.InboundExecutionAuthority(ctx, s.inboundKey, input.NodeID, input.InstallationID, bundle.Generation); e != nil {
 		return nil, e
+	}
+	requirements, e := inboundexec.BundleHostRequirements(bundle)
+	if e != nil || len(inboundexec.HostRequirementBlockers(requirements, input.Capabilities.Host, true)) != 0 {
+		return nil, business.ErrUnavailable
 	}
 	for _, c := range bundle.Components {
 		if input.Capabilities.Binaries[c.Engine] == "" {
@@ -379,7 +400,24 @@ func (s *Server) executionDelivery(ctx context.Context, input inboundruntime.Pol
 		return nil, e
 	}
 	now := time.Now()
-	lease, e := inboundruntime.SignLease(key, inboundruntime.Lease{Version: 1, NodeID: bundle.NodeID, InstallationID: bundle.InstallationID, Generation: bundle.Generation, ConfigSHA: bundle.ConfigSHA, ManifestSHA: bundle.ManifestSHA, Issued: now.UnixNano(), Expires: now.Add(30 * time.Second).UnixNano()})
+	lease := inboundruntime.Lease{Version: 1, NodeID: bundle.NodeID, InstallationID: bundle.InstallationID, Generation: bundle.Generation, ConfigSHA: bundle.ConfigSHA, ManifestSHA: bundle.ManifestSHA, Issued: now.UnixNano(), Expires: now.Add(30 * time.Second).UnixNano()}
+	if input.ReconciledEpochID != "" {
+		operation, approved, err := s.business.InboundExecutionResume(ctx, s.inboundKey, input.NodeID, input.InstallationID, input.ReconciledEpochID, bundle.Generation)
+		if err != nil {
+			return nil, err
+		}
+		if approved {
+			clearance, found, err := s.business.InboundExecutionClearance(ctx, s.inboundKey, input.NodeID, input.InstallationID, input.ReconciledEpochID)
+			if err != nil {
+				return nil, err
+			}
+			if !found {
+				return nil, business.ErrUnavailable
+			}
+			lease.ResumeEpochID, lease.ResumeEpochSHA, lease.ResumeOperationID = clearance.EpochID, clearance.EpochSHA, operation
+		}
+	}
+	lease, e = inboundruntime.SignLease(key, lease)
 	if e != nil {
 		return nil, e
 	}

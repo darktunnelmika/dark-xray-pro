@@ -1,0 +1,104 @@
+//go:build linux && !android
+
+// Copied into the pinned Xray proxy/tun package. MPL-2.0.
+package tun
+
+import (
+	"context"
+	"errors"
+	"strings"
+	"testing"
+	"time"
+)
+
+func managedDNSFixture(t *testing.T) *LinuxTun {
+	t.Helper()
+	t.Setenv("DARK_PRO_INBOUND_V2", "1")
+	stubDNSRouting(t, nil)
+	original := darkProResolvectl
+	t.Cleanup(func() { darkProResolvectl = original })
+	tun := optedInTun()
+	tun.ownsTun = true
+	return tun
+}
+
+func TestDarkProDNSRollbackAfterAmbiguousFirstMutation(t *testing.T) {
+	tun := managedDNSFixture(t)
+	var calls []string
+	darkProResolvectl = func(_ context.Context, name string, args ...string) ([]byte, error) {
+		calls = append(calls, strings.Join(args, " "))
+		if args[0] == "dns" {
+			return nil, errors.New("D-Bus reply lost after applying DNS")
+		}
+		return nil, nil
+	}
+	if tun.ConfigureSystemDNS(context.Background(), "customer-tun") == nil {
+		t.Fatal("ambiguous mutation reported success")
+	}
+	if strings.Join(calls, ",") != "dns xray_tun 192.168.100.2,revert xray_tun" || tun.systemDNSSet || tun.systemDNSDirty {
+		t.Fatal("first-command failure was not rolled back", calls)
+	}
+}
+
+func TestDarkProDNSApplyHonorsActivationCancellation(t *testing.T) {
+	tun := managedDNSFixture(t)
+	var reverted bool
+	darkProResolvectl = func(ctx context.Context, _ string, args ...string) ([]byte, error) {
+		if args[0] == "revert" {
+			reverted = true
+			return nil, nil
+		}
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	if tun.ConfigureSystemDNS(ctx, "customer-tun") == nil || !reverted || time.Since(start) > time.Second {
+		t.Fatal("activation cancellation did not bound and roll back DNS apply")
+	}
+}
+
+func TestDarkProDNSRestorePreservesFailureForFinal(t *testing.T) {
+	tun := managedDNSFixture(t)
+	fail := false
+	darkProResolvectl = func(context.Context, string, ...string) ([]byte, error) {
+		if fail {
+			return nil, errors.New("resolver unavailable")
+		}
+		return nil, nil
+	}
+	if err := tun.ConfigureSystemDNS(context.Background(), "customer-tun"); err != nil {
+		t.Fatal(err)
+	}
+	fail = true
+	if tun.RestoreSystemDNS(context.Background()) == nil || !tun.systemDNSDirty || !tun.systemDNSSet {
+		t.Fatal("failed rollback was discarded")
+	}
+	fail = false
+	if err := tun.RestoreSystemDNS(context.Background()); err != nil || tun.systemDNSDirty || tun.systemDNSSet {
+		t.Fatal("failed rollback cannot be retried by final resource close", err)
+	}
+}
+
+func TestDarkProDNSRejectsInheritedDevice(t *testing.T) {
+	tun := managedDNSFixture(t)
+	tun.ownsTun = false
+	darkProResolvectl = func(context.Context, string, ...string) ([]byte, error) {
+		t.Fatal("modified DNS for a device not owned by this birth")
+		return nil, nil
+	}
+	if tun.ConfigureSystemDNS(context.Background(), "customer-tun") == nil {
+		t.Fatal("inherited device accepted for host DNS takeover")
+	}
+}
+
+func TestDarkProResolvectlRealCommandDeadline(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	_, err := darkProResolvectl(ctx, "/bin/sh", "-c", "exec sleep 10")
+	if err == nil || time.Since(start) > time.Second {
+		t.Fatal("owned subprocess ignored the command deadline", err)
+	}
+}

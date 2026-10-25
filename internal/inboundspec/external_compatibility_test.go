@@ -2,8 +2,26 @@ package inboundspec
 
 import (
 	"errors"
+	"strings"
 	"testing"
 )
+
+func TestTUNNameFitsManagedLinuxInterface(t *testing.T) {
+	for _, name := range []string{strings.Repeat("a", 16), strings.Repeat("a", 64), ".reserved", "رابط"} {
+		s := fixture(t, "tun")
+		s.Settings["name"] = name
+		_, err := Normalize(s)
+		var field *FieldError
+		if !errors.As(err, &field) || field.Path != "settings.name" || field.Code != "interface_name_invalid" {
+			t.Fatalf("invalid kernel interface name was accepted: %q %v", name, err)
+		}
+	}
+	s := fixture(t, "tun")
+	s.Settings["name"] = "tun-" + strings.Repeat("a", 11)
+	if _, err := Normalize(s); err != nil {
+		t.Fatalf("15-byte interface name rejected: %v", err)
+	}
+}
 
 func TestTUICOnlyAdmitsImplementedTLS13Settings(t *testing.T) {
 	for _, tc := range []struct{ field, value, code string }{

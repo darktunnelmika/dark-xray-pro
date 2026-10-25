@@ -15,25 +15,30 @@ import (
 // The installed release supplies this capability set. The HUB compares hashes
 // with its approved release before issuing any execution lease.
 type Capabilities struct {
-	Version  int               `json:"version"`
-	Binaries map[string]string `json:"binaries"`
+	Version  int                           `json:"version"`
+	Binaries map[string]string             `json:"binaries"`
+	Host     *inboundexec.HostCapabilities `json:"host,omitempty"`
 }
 type PollInput struct {
-	NodeID           string       `json:"node_id"`
-	InstallationID   string       `json:"installation_id"`
-	Capabilities     Capabilities `json:"capabilities"`
-	UncertainEpochID string       `json:"uncertain_epoch_id,omitempty"`
+	NodeID            string       `json:"node_id"`
+	InstallationID    string       `json:"installation_id"`
+	Capabilities      Capabilities `json:"capabilities"`
+	UncertainEpochID  string       `json:"uncertain_epoch_id,omitempty"`
+	ReconciledEpochID string       `json:"reconciled_epoch_id,omitempty"`
 }
 type Lease struct {
-	Version        int    `json:"version"`
-	NodeID         string `json:"node_id"`
-	InstallationID string `json:"installation_id"`
-	Generation     uint64 `json:"generation"`
-	ConfigSHA      string `json:"config_sha"`
-	ManifestSHA    string `json:"manifest_sha"`
-	Issued         int64  `json:"issued_unix_nano"`
-	Expires        int64  `json:"expires_unix_nano"`
-	Signature      string `json:"signature"`
+	Version           int    `json:"version"`
+	NodeID            string `json:"node_id"`
+	InstallationID    string `json:"installation_id"`
+	Generation        uint64 `json:"generation"`
+	ConfigSHA         string `json:"config_sha"`
+	ManifestSHA       string `json:"manifest_sha"`
+	Issued            int64  `json:"issued_unix_nano"`
+	Expires           int64  `json:"expires_unix_nano"`
+	Signature         string `json:"signature"`
+	ResumeEpochID     string `json:"resume_epoch_id,omitempty"`
+	ResumeEpochSHA    string `json:"resume_epoch_sha,omitempty"`
+	ResumeOperationID string `json:"resume_operation_id,omitempty"`
 }
 type Delivery struct {
 	Bundle    inboundexec.Bundle          `json:"bundle"`
@@ -56,6 +61,11 @@ type Exchange interface {
 func SignLease(key []byte, l Lease) (Lease, error) {
 	if len(key) < 32 || l.Version != 1 || l.NodeID == "" || len(l.InstallationID) != 32 || l.Generation == 0 || len(l.ConfigSHA) != 64 || len(l.ManifestSHA) != 64 || l.Issued <= 0 || l.Expires <= l.Issued || l.Expires-l.Issued > int64(30*time.Second) {
 		return Lease{}, errors.New("invalid_inbound_lease")
+	}
+	if l.ResumeEpochID != "" || l.ResumeEpochSHA != "" || l.ResumeOperationID != "" {
+		if l.ResumeEpochID == "" || len(l.ResumeEpochSHA) != 64 || l.ResumeOperationID == "" {
+			return Lease{}, errors.New("invalid_inbound_resume_lease")
+		}
 	}
 	l.Signature = ""
 	b, e := json.Marshal(l)

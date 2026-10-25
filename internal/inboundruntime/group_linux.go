@@ -35,11 +35,12 @@ type adapterResponse struct {
 }
 
 type adapterConfig struct {
-	Version    int                     `json:"version"`
-	Engine     string                  `json:"engine"`
-	Config     json.RawMessage         `json:"config"`
-	Manifest   json.RawMessage         `json:"manifest"`
-	Principals []inboundexec.Principal `json:"principals"`
+	Version              int                               `json:"version"`
+	Engine               string                            `json:"engine"`
+	Config               json.RawMessage                   `json:"config"`
+	Manifest             json.RawMessage                   `json:"manifest"`
+	Principals           []inboundexec.Principal           `json:"principals"`
+	PublicAliasAuthority *inboundexec.PublicAliasAuthority `json:"public_alias_authority,omitempty"`
 }
 type externalProcess struct {
 	child      *Native
@@ -81,7 +82,7 @@ func (e *externalProcess) call(ctx context.Context, op, nonce string) (adapterRe
 	return out, nil
 }
 
-func startExternal(ctx context.Context, dir string, binary *Binary, c inboundexec.Component, principals []inboundexec.Principal, deadline time.Time) (*externalProcess, error) {
+func startExternal(ctx context.Context, dir string, binary *Binary, c inboundexec.Component, principals []inboundexec.Principal, deadline time.Time, authorities ...*inboundexec.PublicAliasAuthority) (*externalProcess, error) {
 	if binary == nil {
 		return nil, ErrRuntime
 	}
@@ -96,6 +97,9 @@ func startExternal(ctx context.Context, dir string, binary *Binary, c inboundexe
 		}
 	}()
 	config := adapterConfig{Version: 1, Engine: c.Engine, Config: c.Config, Manifest: c.Manifest, Principals: principals}
+	if len(authorities) > 0 {
+		config.PublicAliasAuthority = authorities[0]
+	}
 	raw, err := json.Marshal(config)
 	if err != nil {
 		return nil, err
@@ -198,6 +202,9 @@ type engineGroup struct {
 }
 
 func validateGroup(ctx context.Context, b *Binary, external map[string]*Binary, bundle inboundexec.Bundle) error {
+	if err := guardTUNDNSActivation(ctx, b, bundle); err != nil {
+		return err
+	}
 	var err error
 	bundle, err = runtimeBundle(bundle)
 	if err != nil {
@@ -252,7 +259,7 @@ func componentPrincipals(principals []inboundexec.Principal, engine, tag string)
 	return out
 }
 
-func startGroup(ctx context.Context, dir string, b *Binary, external map[string]*Binary, bundle inboundexec.Bundle, deadline time.Time) (*engineGroup, error) {
+func startGroup(ctx context.Context, dir string, b *Binary, external map[string]*Binary, bundle inboundexec.Bundle, deadline time.Time, authorities ...map[string]inboundexec.PublicAliasAuthority) (*engineGroup, error) {
 	var err error
 	bundle, err = runtimeBundle(bundle)
 	if err != nil {
@@ -273,7 +280,13 @@ func startGroup(ctx context.Context, dir string, b *Binary, external map[string]
 		g.native = n
 	}
 	for _, c := range bundle.Components {
-		p, e := startExternal(ctx, dir, external[c.Engine], c, componentPrincipals(bundle.Principals, c.Engine, c.Tag), deadline)
+		var authority *inboundexec.PublicAliasAuthority
+		if len(authorities) > 0 {
+			if value, ok := authorities[0][c.Tag]; ok {
+				authority = &value
+			}
+		}
+		p, e := startExternal(ctx, dir, external[c.Engine], c, componentPrincipals(bundle.Principals, c.Engine, c.Tag), deadline, authority)
 		if e != nil {
 			return nil, e
 		}

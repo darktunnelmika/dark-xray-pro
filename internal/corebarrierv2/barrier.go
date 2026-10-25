@@ -10,12 +10,16 @@ import (
 	"context"
 	"errors"
 	"os"
+	"sort"
 	"sync"
+	"time"
 )
 
 const (
-	Protocol   = "darkpro-inbound-v2/"
-	ControlTag = "dark-pro-usage-api"
+	Protocol         = "darkpro-inbound-v2/"
+	ControlTag       = "dark-pro-usage-api"
+	DNSTag           = "dark-pro-inbound-dns-upstream"
+	TUNDNSCapability = Protocol + "tun-dns-activation-v1"
 )
 
 var ErrBarrier = errors.New("inbound counter barrier is unavailable or conflicting")
@@ -27,26 +31,35 @@ type lifetime struct {
 	refs int
 }
 
+type activationHook struct {
+	apply    func(context.Context) error
+	rollback func(context.Context) error
+}
+
 type gate struct {
-	mu         sync.Mutex
-	ready      bool
-	active     bool
-	closing    bool
-	activation string
-	nonce      string
-	next       uint64
-	count      int
-	roots      map[uint64]func()
-	resources  map[string]func() error
-	changed    chan struct{}
-	zero       chan struct{}
-	finished   chan struct{}
-	values     map[string]int64
-	err        error
+	mu             sync.Mutex
+	ready          bool
+	active         bool
+	closing        bool
+	activation     string
+	activators     map[string]activationHook
+	activateDone   chan struct{}
+	activateCancel context.CancelFunc
+	activateErr    error
+	nonce          string
+	next           uint64
+	count          int
+	roots          map[uint64]func()
+	resources      map[string]func() error
+	changed        chan struct{}
+	zero           chan struct{}
+	finished       chan struct{}
+	values         map[string]int64
+	err            error
 }
 
 func newGate() *gate {
-	return &gate{roots: make(map[uint64]func()), resources: make(map[string]func() error), changed: make(chan struct{}), zero: make(chan struct{})}
+	return &gate{roots: make(map[uint64]func()), resources: make(map[string]func() error), activators: make(map[string]activationHook), changed: make(chan struct{}), zero: make(chan struct{})}
 }
 
 var processGate = newGate()
@@ -75,23 +88,121 @@ func Health() (ready, active, sealed bool) {
 }
 
 func Activate(nonce string) error {
+	return ActivateContext(context.Background(), nonce)
+}
+
+// ActivateContext opens admission only after each bounded host-resource hook
+// succeeds. The nonce-bound operation survives a lost RPC response. Final can
+// cancel it, waits for rollback, and never races resource closure against apply.
+func ActivateContext(ctx context.Context, nonce string) error {
 	if !Enabled() {
 		return ErrBarrier
 	}
-	return processGate.activate(nonce)
+	return processGate.activateContext(ctx, nonce)
 }
 
 func (g *gate) activate(nonce string) error {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	if !validNonce(nonce) || !g.ready || g.closing || (g.activation != "" && g.activation != nonce) {
+	return g.activateContext(context.Background(), nonce)
+}
+
+func (g *gate) activateContext(ctx context.Context, nonce string) error {
+	if ctx == nil || ctx.Err() != nil {
 		return ErrBarrier
 	}
-	if !g.active {
-		g.activation, g.active = nonce, true
+	g.mu.Lock()
+	if !validNonce(nonce) || !g.ready || g.closing || (g.activation != "" && g.activation != nonce) {
+		g.mu.Unlock()
+		return ErrBarrier
+	}
+	if g.activateDone == nil {
+		g.activation = nonce
+		g.activateDone = make(chan struct{})
+		applyCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		g.activateCancel = cancel
+		tags := make([]string, 0, len(g.activators))
+		for tag := range g.activators {
+			tags = append(tags, tag)
+		}
+		sort.Strings(tags)
+		hooks := make([]activationHook, 0, len(tags))
+		for _, tag := range tags {
+			hooks = append(hooks, g.activators[tag])
+		}
+		go g.runActivation(applyCtx, cancel, hooks)
+	}
+	done := g.activateDone
+	g.mu.Unlock()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-done:
+		g.mu.Lock()
+		defer g.mu.Unlock()
+		if !g.active || g.closing || g.activateErr != nil {
+			return ErrBarrier
+		}
+		return nil
+	}
+}
+
+func (g *gate) runActivation(ctx context.Context, cancel context.CancelFunc, hooks []activationHook) {
+	defer cancel()
+	var failure error
+	attempted := 0
+	for _, hook := range hooks {
+		if ctx.Err() != nil {
+			failure = ErrBarrier
+			break
+		}
+		attempted++
+		if err := hook.apply(ctx); err != nil {
+			failure = ErrBarrier
+			break
+		}
+	}
+	g.mu.Lock()
+	if failure == nil && ctx.Err() == nil && !g.closing {
+		g.active = true
 		close(g.changed)
 		g.changed = make(chan struct{})
+		close(g.activateDone)
+		g.mu.Unlock()
+		return
 	}
+	g.mu.Unlock()
+	// Every attempted hook is rolled back, including one whose apply timed out
+	// after an external service may have accepted its mutation.
+	rollbackCtx, stop := context.WithTimeout(context.Background(), 2*time.Second)
+	defer stop()
+	for i := attempted - 1; i >= 0; i-- {
+		_ = hooks[i].rollback(rollbackCtx)
+	}
+	g.mu.Lock()
+	g.activateErr = ErrBarrier
+	close(g.activateDone)
+	g.mu.Unlock()
+}
+
+// RegisterActivation is only available during initial construction. Hooks
+// must honor their bounded context; the paired resource closer must retry any
+// cleanup failure before an immutable final receipt can be produced.
+func RegisterActivation(tag string, apply, rollback func(context.Context) error) error {
+	if !Enabled() {
+		return ErrBarrier
+	}
+	return processGate.registerActivation(tag, apply, rollback)
+}
+
+func (g *gate) registerActivation(tag string, apply, rollback func(context.Context) error) error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if tag == "" || tag == ControlTag || apply == nil || rollback == nil || g.ready || g.closing || g.activation != "" {
+		return ErrBarrier
+	}
+	if _, exists := g.activators[tag]; exists {
+		return ErrBarrier
+	}
+	g.activators[tag] = activationHook{apply: apply, rollback: rollback}
 	return nil
 }
 
@@ -245,6 +356,7 @@ func (g *gate) snapshot(ctx context.Context, nonce string, read func() map[strin
 		close(g.changed)
 		g.changed = make(chan struct{})
 		g.finished = make(chan struct{})
+		activationDone, activationCancel := g.activateDone, g.activateCancel
 		stops := make([]func(), 0, len(g.roots))
 		for _, stop := range g.roots {
 			if stop != nil {
@@ -261,6 +373,12 @@ func (g *gate) snapshot(ctx context.Context, nonce string, read func() map[strin
 		// The operation survives an RPC timeout. No retry can reopen the gate,
 		// replace its nonce, or cause a second counter read.
 		go func() {
+			if activationCancel != nil {
+				activationCancel()
+			}
+			if activationDone != nil {
+				<-activationDone
+			}
 			var closes sync.WaitGroup
 			var errorsMu sync.Mutex
 			var closeErr error

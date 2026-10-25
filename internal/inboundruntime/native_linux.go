@@ -46,8 +46,11 @@ var (
 // Binary pins an open descriptor, so a path replacement cannot change the
 // executable between validation, configuration checks and process creation.
 type Binary struct {
-	file   *os.File
-	SHA256 string
+	file             *os.File
+	SHA256           string
+	featureMu        sync.Mutex
+	featuresChecked  bool
+	tunDNSActivation bool
 }
 
 func OpenBinary(path, digest string) (*Binary, error) {
@@ -249,6 +252,9 @@ func ValidateNative(ctx context.Context, b *Binary, raw []byte) error {
 func StartNative(ctx context.Context, dir string, b *Binary, bundle inboundexec.Bundle, deadline time.Time) (*Native, error) {
 	if b == nil || !deadline.After(time.Now()) || deadline.After(time.Now().Add(31*time.Second)) {
 		return nil, ErrLease
+	}
+	if err := guardTUNDNSActivation(ctx, b, bundle); err != nil {
+		return nil, err
 	}
 	childDir, e := os.MkdirTemp(dir, "birth-")
 	if e != nil {

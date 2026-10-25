@@ -13,6 +13,12 @@ import sys
 
 PIN = "701af60772cda123492f86e383e1fdba066614a9"
 HASHES = {
+    "main/version.go": "3274dae3d37a56c8f5c296832c0ef63a50a15343cd4663d89970da209667dbef",
+    "proxy/tun/tun_linux.go": "08f722bc0f8cedc40fce97652cb5b2e5f47e66b3d5f657461b55f85d203b459c",
+    "app/dns/nameserver.go": "ed7a8438714e9e3a2f84e164aa5719e6ab948afe01a49ce71e8767b71ed2ee68",
+    "app/dns/nameserver_cached.go": "f4bf3daa663494e9194c888afdf95de0df6236d9d6cb4451c8aadcbebf50fb74",
+    "app/dns/dnscommon.go": "4ce03d62549f48d42f7c0b3c7a569e7bece05cb830cae6084ce3886770e4cef5",
+    "proxy/dns/dns.go": "f7c129a446b72cb350c852dac25bf84be2bbb479e253f831a029bee99f2617df",
     "transport/internet/xdrive/xdrive.go": "b81a0b502bdeb8baf732467f1a714b1039e3ee16fd9969211c2c986bd05864cc",
     "app/dispatcher/default.go": "29100330a020d75b5f4b77b8eec20779960a8768e765c99c1003e2b1475746fb",
     "app/dispatcher/stats.go": "e768aeb68b100eb980c7ea22a4cfbce474b250ed3026bf13d133948d0a910e46",
@@ -85,6 +91,7 @@ for name in HASHES:
 # The API can start before other features. Activation requires all starts to
 # have completed, not merely a successful StatsService RPC.
 after("core/xray.go", '\terrors.LogWarning(s.ctx, "Xray ", Version(), " started")', '\n\tdarkpro.MarkReady()')
+after("main/version.go", 'func executeVersion(cmd *base.Command, args []string) {\n\tprintVersion()', '\n\tfmt.Println(darkpro.TUNDNSCapability)')
 
 command = "app/stats/command/command.go"
 for method, req, resp in (("GetStats", "GetStatsRequest", "GetStatsResponse"), ("GetUsersStats", "GetUsersStatsRequest", "GetUsersStatsResponse"), ("QueryStats", "QueryStatsRequest", "QueryStatsResponse")):
@@ -144,6 +151,117 @@ for name, receiver in (("proxy/wireguard/server.go", "s"), ("proxy/tun/handler.g
     defer finish()
     ctx = tracked
 ''')
+
+# System DNS must remain untouched during the zero-receipt preparation phase.
+# The activation operation owns bounded apply/rollback; final joins it before
+# closing the exclusively created, nonpersistent TUN and its resolver state.
+tun = "proxy/tun/handler.go"
+replace(tun, '\t\tif err := c.ConfigureSystemDNS(t.ctx, t.tag); err != nil {', '''
+        applyDNS := func(activation context.Context) error {
+            ctx, cancel := context.WithCancel(t.ctx)
+            stop := context.AfterFunc(activation, cancel)
+            defer stop()
+            defer cancel()
+            return c.ConfigureSystemDNS(ctx, t.tag)
+        }
+        var err error
+        if darkpro.Enabled() && t.config.AutoSystemDnsToGateway {
+            restore, ok := tunInterface.(interface { RestoreSystemDNS(context.Context) error })
+            if !ok { err = errors.New("managed DNS cleanup unavailable") } else {
+                err = darkpro.RegisterActivation(t.tag, applyDNS, restore.RestoreSystemDNS)
+            }
+        } else { err = c.ConfigureSystemDNS(t.ctx, t.tag) }
+        if err != nil {''')
+linux_tun = "proxy/tun/tun_linux.go"
+replace(linux_tun, '\tsystemDNSSet   bool', '\tcloseOnce sync.Once\n\tcloseErr error\n\tsystemDNSMu sync.Mutex\n\tsystemDNSSet   bool')
+after(linux_tun, 'func runResolvectl(action, iface string, extra ...string) error {', '''
+    if darkpro.Enabled() { return runResolvectlWithContext(context.Background(), action, iface, extra...) }
+''')
+after(linux_tun, 'func (t *LinuxTun) ConfigureSystemDNS(ctx context.Context, inboundTag string) error {', '''
+    t.systemDNSMu.Lock()
+    defer t.systemDNSMu.Unlock()
+    if darkpro.Enabled() && t.options.AutoSystemDnsToGateway && !t.ownsTun {
+        return errors.New("managed DNS requires an exclusively owned ephemeral TUN")
+    }
+''')
+replace(linux_tun, '\t\tif err := t.revertSystemDNS(); err != nil {', '\t\tif err := t.restoreSystemDNS(ctx); err != nil {')
+replace(linux_tun, '\tif err := runResolvectl("dns", iface, address.String()); err != nil {\n\t\treturn errors.New("resolvectl dns failed").Base(err)\n\t}', '''
+    t.systemDNSDirty = true
+    if err := runResolvectlWithContext(ctx, "dns", iface, address.String()); err != nil {
+        return t.rollbackSystemDNS(iface, errors.New("resolvectl dns failed").Base(err))
+    }''')
+for action, value in (("domain", '"~."'), ("default-route", '"true"')):
+    replace(linux_tun, f'runResolvectl("{action}", iface, {value})', f'runResolvectlWithContext(ctx, "{action}", iface, {value})')
+replace(linux_tun, '\tt.systemDNSSet = true', '\tt.systemDNSSet = true\n\tt.systemDNSDirty = false')
+replace(linux_tun, '\treturn cause\n}', '\tt.systemDNSSet = false\n\tt.systemDNSDirty = false\n\treturn cause\n}')
+after(linux_tun, 'func NewTun(options *Config) (Tun, error) {', '''
+    if darkpro.Enabled() && platform.NewEnvFlag(platform.TunFdKey).GetValue(func() string { return "" }) != "" {
+        return nil, errors.New("managed TUN requires a new exclusive device, not an inherited descriptor")
+    }
+''')
+replace(linux_tun, 'unix.Open("/dev/net/tun", unix.O_RDWR, 0)', 'unix.Open("/dev/net/tun", unix.O_RDWR|unix.O_CLOEXEC, 0)')
+after(linux_tun, '\tflags := unix.IFF_TUN | unix.IFF_NO_PI', '\n\tif darkpro.Enabled() { flags |= unix.IFF_TUN_EXCL }')
+replace(linux_tun, '''func (t *LinuxTun) Close() error {
+	t.routeMonitorOnce.Do(func() {
+		if t.routeMonitorStop != nil {
+			close(t.routeMonitorStop)
+		}
+	})
+
+	t.unsetSystemDNS()
+	_ = t.unsetSystemRoutes()
+	_ = t.unsetInterfaceAddresses()
+
+	if t.ownsTun {
+		_ = netlink.LinkSetDown(t.tunLink)
+	}
+	_ = unix.Close(t.tunFd)
+
+	return nil
+}''', '''func (t *LinuxTun) Close() error {
+    t.closeOnce.Do(func() {
+        t.routeMonitorOnce.Do(func() {
+            if t.routeMonitorStop != nil { close(t.routeMonitorStop) }
+        })
+        if darkpro.Enabled() {
+            // Keep every cleanup result. No successful final proof can hide
+            // failure to release this birth's resolver, routes or device.
+            errs := []error{t.RestoreSystemDNS(context.Background()), t.unsetSystemRoutes(), t.unsetInterfaceAddresses()}
+            if t.ownsTun { errs = append(errs, netlink.LinkSetDown(t.tunLink)) }
+            errs = append(errs, unix.Close(t.tunFd))
+            t.closeErr = errors.Combine(errs...)
+        } else {
+            t.unsetSystemDNS()
+            _ = t.unsetSystemRoutes()
+            _ = t.unsetInterfaceAddresses()
+            if t.ownsTun { _ = netlink.LinkSetDown(t.tunLink) }
+            _ = unix.Close(t.tunFd)
+        }
+    })
+    return t.closeErr
+}''')
+
+# DNS.Client deliberately stores its own base context. Explicit managed UDP
+# resolvers therefore create their own gated roots. They are not exempt from
+# admission, and no extra customer counters are registered for this tag.
+dns_client = "app/dns/nameserver.go"
+after(dns_client, 'func (c *Client) QueryIP(ctx context.Context, domain string, option dns.IPOption) ([]net.IP, uint32, error) {', '''
+    if darkpro.Enabled() {
+        if c.tag != darkpro.DNSTag { return nil, 0, darkpro.ErrBarrier }
+        if _, ok := c.server.(*ClassicNameServer); !ok { return nil, 0, darkpro.ErrBarrier }
+        child, cancel := context.WithCancel(ctx)
+        tracked, finish, admitted := darkpro.Enter(child, c.tag, cancel)
+        if !admitted { cancel(); return nil, 0, darkpro.ErrBarrier }
+        defer finish()
+        defer cancel()
+        ctx = tracked
+    }
+''')
+replace("app/dns/nameserver_cached.go", '\t\t\t\t\tgo pull(ctx, s, fqdn, option)', '\t\t\t\t\tdarkpro.Go(ctx, func(){ pull(ctx, s, fqdn, option) })')
+replace("app/dns/dnscommon.go", '\tdnsCtx := core.ToBackgroundDetachedContext(ctx)', '\tdnsCtx := darkpro.Preserve(ctx, core.ToBackgroundDetachedContext(ctx))')
+dns_proxy = "proxy/dns/dns.go"
+replace(dns_proxy, '\t\tctx = context.Background()', '\t\tctx = darkpro.Preserve(ctx, context.Background())')
+replace(dns_proxy, '\t\t\t\t\tgo h.handleIPQuery(id, qType, domain, writer, timer)', '\t\t\t\t\tdarkpro.Go(ctx, func(){ h.handleIPQuery(id, qType, domain, writer, timer) })')
 
 # All task.Run children are registered before they can run, including tasks
 # that return after their parent has already returned a cancellation/error.
@@ -325,6 +443,29 @@ after(wgclient, "func (c *PacketCounterConnection) WriteTo(p []byte, addr net.Ad
 ''')
 proxy = "proxy/proxy.go"
 replace(proxy, '"github.com/xtls/xray-core/common/buf"', '"github.com/xtls/xray-core/common"\n\t"github.com/xtls/xray-core/common/buf"')
+# Vision's reader and writer share TLS recognition state. Protect that state
+# across both directions, while keeping actual network reads/writes outside
+# the lock so TLS handshakes and duplex backpressure cannot deadlock.
+replace(proxy, '"runtime"', '"runtime"\n\t"sync"')
+after(proxy, 'type TrafficState struct {', '\n\tmu sync.Mutex')
+after(proxy, '''\tbuffer, err := w.Reader.ReadMultiBuffer()
+\tif buffer.IsEmpty() {
+\t\treturn buffer, err
+\t}''', '''
+    w.trafficState.mu.Lock()
+    defer w.trafficState.mu.Unlock()
+''')
+after(proxy, 'func (w *VisionWriter) WriteMultiBuffer(mb buf.MultiBuffer) error {', '\n\tw.trafficState.mu.Lock()')
+replace(proxy, '\tif err := w.Writer.WriteMultiBuffer(mb); err != nil {', '\tw.trafficState.mu.Unlock()\n\tif err := w.Writer.WriteMultiBuffer(mb); err != nil {')
+replace(proxy, 'XtlsFilterTls(buffer, w.trafficState, w.ctx)', 'xtlsFilterTLSLocked(buffer, w.trafficState, w.ctx)')
+replace(proxy, 'XtlsFilterTls(mb, w.trafficState, w.ctx)', 'xtlsFilterTLSLocked(mb, w.trafficState, w.ctx)')
+replace(proxy, 'func XtlsFilterTls(buffer buf.MultiBuffer, trafficState *TrafficState, ctx context.Context) {', '''func XtlsFilterTls(buffer buf.MultiBuffer, trafficState *TrafficState, ctx context.Context) {
+    trafficState.mu.Lock()
+    defer trafficState.mu.Unlock()
+    xtlsFilterTLSLocked(buffer, trafficState, ctx)
+}
+
+func xtlsFilterTLSLocked(buffer buf.MultiBuffer, trafficState *TrafficState, ctx context.Context) {''')
 # Kernel splice updates usage only when the long-lived copy exits. The managed
 # v2 path uses the same buffered copy path as non-Linux Xray so quota samples
 # remain current while a connection stays active.
@@ -359,17 +500,20 @@ for name in ("barrier.go", "barrier_test.go"):
     shutil.copyfile(repo / "internal/corebarrierv2" / name, target / name)
 shutil.copyfile(repo / "scripts/core-overlay/inbound_stats.go.txt", source / "app/stats/command/darkprov2.go")
 shutil.copyfile(repo / "scripts/core-overlay/inbound_xdrive_test.go.txt", source / "transport/internet/xdrive/darkprov2_test.go")
+shutil.copyfile(repo / "scripts/core-overlay/inbound_tun_dns.go.txt", source / "proxy/tun/darkprov2_dns_linux.go")
+shutil.copyfile(repo / "scripts/core-overlay/inbound_tun_dns_test.go.txt", source / "proxy/tun/darkprov2_dns_linux_test.go")
+shutil.copyfile(repo / "scripts/core-overlay/inbound_vision_test.go.txt", source / "proxy/darkprov2_vision_test.go")
 provenance = {
     "upstream_commit": PIN,
     "protocol": "darkpro-inbound-v2/",
     "upstream_source_sha256": HASHES,
     "overlay_sha256": {
         str(p.relative_to(repo)): hashlib.sha256(p.read_bytes()).hexdigest()
-        for p in (Path(__file__).resolve(), repo / "internal/corebarrierv2/barrier.go", repo / "scripts/core-overlay/inbound_stats.go.txt", repo / "scripts/core-overlay/inbound_xdrive_test.go.txt")
+        for p in (Path(__file__).resolve(), repo / "internal/corebarrierv2/barrier.go", repo / "scripts/core-overlay/inbound_stats.go.txt", repo / "scripts/core-overlay/inbound_xdrive_test.go.txt", repo / "scripts/core-overlay/inbound_tun_dns.go.txt", repo / "scripts/core-overlay/inbound_tun_dns_test.go.txt", repo / "scripts/core-overlay/inbound_vision_test.go.txt")
     },
     "patched_source_sha256": {
         name: hashlib.sha256((source / name).read_bytes()).hexdigest()
-        for name in sorted(list(HASHES) + ["common/darkprov2/barrier.go", "common/darkprov2/barrier_test.go", "app/stats/command/darkprov2.go", "transport/internet/xdrive/darkprov2_test.go"])
+        for name in sorted(list(HASHES) + ["common/darkprov2/barrier.go", "common/darkprov2/barrier_test.go", "app/stats/command/darkprov2.go", "transport/internet/xdrive/darkprov2_test.go", "proxy/tun/darkprov2_dns_linux.go", "proxy/tun/darkprov2_dns_linux_test.go", "proxy/darkprov2_vision_test.go"])
     },
 }
 (source / "darkpro-inbound-provenance.json").write_text(json.dumps(provenance, sort_keys=True, indent=2) + "\n")
