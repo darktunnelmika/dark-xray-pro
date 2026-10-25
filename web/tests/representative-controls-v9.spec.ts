@@ -130,6 +130,7 @@ test("V9 owner edits name, suspends login and restricts abilities only after con
   login_suspended:true,reason:"Approved representative sales limits",
   permissions:{create_clients:false,view_finance:false,view_clients:true,renew_clients:true},
  });
+ await page.getByRole("button",{name:"Back to directory"}).click();
  await expect(directory.getByText("Manual representative name")).toBeVisible();
 });
 
