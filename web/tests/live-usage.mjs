@@ -22,7 +22,7 @@ try {
   // Keep all existing real SQLite/Core/credit and usage assertions below.
   await page.getByRole('button', { name: 'Create representative', exact: true }).click();
   const createRep = page.getByRole('dialog', { name: 'Create representative' });
-  await createRep.getByLabel('Representative ID', { exact: true }).fill('live-usage-rep');
+  await createRep.getByLabel('Representative ID').fill('live-usage-rep');
   await createRep.getByLabel('Display name', { exact: true }).fill('Live acceptance representative');
   await createRep.getByRole('button', { name: 'Create account', exact: true }).click();
   await expect(createRep).toHaveCount(0);
