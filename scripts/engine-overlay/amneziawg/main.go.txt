@@ -1,0 +1,119 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+package main
+
+import (
+	"errors"
+	"net"
+	"net/netip"
+	"strconv"
+
+	"github.com/mhsanaei/3x-ui/v3/internal/amneziawg"
+	"github.com/mhsanaei/3x-ui/v3/internal/amneziawgnet"
+	"github.com/mhsanaei/3x-ui/v3/internal/darkproadapter"
+	"github.com/mhsanaei/3x-ui/v3/internal/util/wireguard"
+)
+
+type peer struct {
+	PublicKey    string   `json:"publicKey"`
+	AllowedIPs   []string `json:"allowedIPs"`
+	Email        string   `json:"email"`
+	Level        int      `json:"level"`
+	PresharedKey string   `json:"preSharedKey,omitempty"`
+	KeepAlive    int      `json:"keepAlive,omitempty"`
+}
+type config struct {
+	Listen  string                   `json:"listen"`
+	Port    int                      `json:"listenPort"`
+	Address []string                 `json:"address"`
+	Server  amneziawg.ServerSettings `json:"server"`
+	Peers   []peer                   `json:"peers"`
+}
+
+func main() { darkproadapter.Main("amneziawg", prepare) }
+func prepare(in darkproadapter.Input) (darkproadapter.Plan, error) {
+	var cfg config
+	if darkproadapter.Decode(in.Config, &cfg) != nil {
+		return darkproadapter.Plan{}, errors.New("amneziawg configuration")
+	}
+	if net.ParseIP(cfg.Listen) == nil || cfg.Port < 1 || cfg.Port > 65535 || len(cfg.Address) == 0 || len(cfg.Address) > 2 {
+		return darkproadapter.Plan{}, errors.New("amneziawg listener")
+	}
+	pub, e := wireguard.PublicKeyFromPrivate(cfg.Server.PrivateKey)
+	if e != nil || cfg.Server.PublicKey != "" && pub != cfg.Server.PublicKey {
+		return darkproadapter.Plan{}, errors.New("amneziawg server key")
+	}
+	if e = amneziawg.ValidateServerObfuscation(cfg.Server.Obfuscation()); e != nil {
+		return darkproadapter.Plan{}, e
+	}
+	if cfg.Server.MTU != 0 && (cfg.Server.MTU < 1280 || cfg.Server.MTU > 9000) {
+		return darkproadapter.Plan{}, errors.New("amneziawg mtu")
+	}
+	// Public per-peer source aliases require a host-owned address lifecycle.
+	// This userspace worker cannot promise that host mutation silently.
+	if cfg.Server.IPv6ExternalInterface != "" || cfg.Server.IPv6Enabled && cfg.Server.ExternalInterface != "" {
+		return darkproadapter.Plan{}, errors.New("public ipv6 alias requires managed host routing")
+	}
+	addresses := append([]string(nil), cfg.Address...)
+	if cfg.Server.IPv6Enabled {
+		prefix, e := netip.ParsePrefix(cfg.Server.IPv6Subnet)
+		if e != nil || !prefix.Addr().Is6() || prefix.Bits() > 126 {
+			return darkproadapter.Plan{}, errors.New("amneziawg ipv6 subnet")
+		}
+		server := prefix.Masked().Addr().Next()
+		hasV6 := false
+		for _, a := range addresses {
+			p, e := netip.ParsePrefix(a)
+			if e == nil && p.Addr().Is6() {
+				hasV6 = true
+			}
+		}
+		if !hasV6 {
+			addresses = append(addresses, server.String()+"/"+strconv.Itoa(prefix.Bits()))
+		}
+	}
+	own := map[netip.Addr]bool{}
+	for _, a := range addresses {
+		p, e := netip.ParsePrefix(a)
+		if e != nil || p.Addr().IsUnspecified() || p.Addr().IsMulticast() {
+			return darkproadapter.Plan{}, errors.New("amneziawg interface address")
+		}
+		own[p.Addr()] = true
+	}
+	inst := amneziawg.Instance{Id: 1, Tag: "dark-pro-amneziawg", InterfaceName: "dark-pro-awg", Listen: cfg.Listen, ListenPort: cfg.Port, PrivateKey: cfg.Server.PrivateKey, PublicKey: pub, Address: addresses, MTU: cfg.Server.MTU, Obfuscation: cfg.Server.Obfuscation()}
+	users := make([]string, 0, len(cfg.Peers))
+	keys := map[string]bool{}
+	ips := map[netip.Addr]bool{}
+	keepAlive := map[string]int{}
+	for _, p := range cfg.Peers {
+		canonical, e := wireguard.KeyToHex(p.PublicKey)
+		if e != nil || canonical == "" || keys[canonical] || p.PublicKey == pub || len(p.AllowedIPs) == 0 || len(p.AllowedIPs) > 2 || p.KeepAlive < 0 || p.KeepAlive > 65535 {
+			return darkproadapter.Plan{}, errors.New("amneziawg peer")
+		}
+		keys[canonical] = true
+		if p.PresharedKey != "" {
+			if _, e = wireguard.KeyToHex(p.PresharedKey); e != nil {
+				return darkproadapter.Plan{}, errors.New("amneziawg preshared key")
+			}
+		}
+		for _, a := range p.AllowedIPs {
+			prefix, e := netip.ParsePrefix(a)
+			if e != nil || prefix.Bits() != prefix.Addr().BitLen() || prefix.Addr().IsUnspecified() || prefix.Addr().IsMulticast() || own[prefix.Addr()] || ips[prefix.Addr()] {
+				return darkproadapter.Plan{}, errors.New("ambiguous amneziawg peer address")
+			}
+			ips[prefix.Addr()] = true
+		}
+		inst.Peers = append(inst.Peers, amneziawg.Peer{Email: p.Email, PublicKey: p.PublicKey, PresharedKey: p.PresharedKey, AllowedIPs: append([]string(nil), p.AllowedIPs...)})
+		users = append(users, p.Email)
+		keepAlive[canonical] = p.KeepAlive
+	}
+	opts := amneziawgnet.DarkProOptions(inst.Obfuscation)
+	if e = amneziawgnet.DarkProValidate(inst, opts); e != nil {
+		return darkproadapter.Plan{}, e
+	}
+	return darkproadapter.Plan{Users: users, New: func(b *darkproadapter.Bridge) (darkproadapter.Driver, error) {
+		return amneziawgnet.NewDarkProServer(inst, opts, Socks(b), keepAlive), nil
+	}}, nil
+}
+func Socks(b *darkproadapter.Bridge) amneziawgnet.SocksRelay {
+	return amneziawgnet.SocksRelay{Addr: b.Addr, Password: b.Password}
+}

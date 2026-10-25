@@ -1,0 +1,23 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+package tuic
+
+import "crypto/tls"
+
+// DarkProTLS is used before Start. The worker validates and freezes the full
+// certificate set in its own generation, instead of rereading mutable files.
+func (s *Server) DarkProTLS(c *tls.Config) { s.tlsConfig = c.Clone() }
+
+// Separate fencing and joining lets the supervisor cancel pending private
+// relay handshakes before waiting for TUIC stream/datagram handlers to finish.
+func (s *Server) DarkProFence() {
+	s.running.Store(false)
+	s.cancel()
+	if s.quicListener != nil {
+		_ = s.quicListener.Close()
+	}
+	if s.packetConn != nil {
+		_ = s.packetConn.Close()
+	}
+	s.closeAllConns()
+}
+func (s *Server) DarkProJoin() { s.wg.Wait(); s.closed.Store(true) }

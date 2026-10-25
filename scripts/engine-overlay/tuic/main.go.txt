@@ -1,0 +1,84 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+package main
+
+import (
+	"encoding/json"
+	"errors"
+	"net"
+	"strconv"
+
+	"github.com/mhsanaei/3x-ui/v3/internal/darkproadapter"
+	"github.com/mhsanaei/3x-ui/v3/internal/tuic"
+)
+
+type config struct {
+	Listen  string                     `json:"listen"`
+	Server  tuic.TuicServerSettings    `json:"server"`
+	Clients []tuic.TuicClientSettings  `json:"clients"`
+	TLS     map[string]json.RawMessage `json:"tls"`
+}
+type driver struct {
+	server   *tuic.Server
+	closeTLS func()
+}
+
+func (d *driver) Start() error { return d.server.Start() }
+func (d *driver) Fence()       { d.server.DarkProFence() }
+func (d *driver) Join() {
+	d.server.DarkProJoin()
+	if d.closeTLS != nil {
+		d.closeTLS()
+	}
+}
+func (d *driver) Ready() bool { return d.server.IsRunning() }
+func main()                   { darkproadapter.Main("tuic", prepare) }
+
+func prepare(in darkproadapter.Input) (darkproadapter.Plan, error) {
+	var cfg config
+	if darkproadapter.Decode(in.Config, &cfg) != nil {
+		return darkproadapter.Plan{}, errors.New("tuic configuration")
+	}
+	host, portText, e := net.SplitHostPort(cfg.Listen)
+	port, pe := strconv.Atoi(portText)
+	if e != nil || pe != nil || net.ParseIP(host) == nil || port < 1 || port > 65535 {
+		return darkproadapter.Plan{}, errors.New("tuic listener")
+	}
+	if e = tuic.ValidateClients(cfg.Clients); e != nil {
+		return darkproadapter.Plan{}, e
+	}
+	controller, e := tuic.NormalizeCongestionControl(cfg.Server.CongestionControl)
+	if e != nil {
+		return darkproadapter.Plan{}, e
+	}
+	tlsConfig, certificate, key, e := tlsFor(cfg)
+	if e != nil {
+		return darkproadapter.Plan{}, e
+	}
+	inst := tuic.Instance{Id: 1, Tag: "dark-pro-tuic", Listen: host, Port: port, Certificate: certificate, PrivateKey: key, CongestionControl: controller, ALPN: tlsConfig.NextProtos, UDPRelayMode: cfg.Server.UDPRelayMode, ZeroRTTHandshake: cfg.Server.ZeroRTTHandshake, LogLevel: cfg.Server.LogLevel, MaxIdleTime: cfg.Server.MaxIdleTime, AuthenticationTimeout: cfg.Server.AuthenticationTimeout, MaxUdpRelayPacketSize: cfg.Server.MaxUdpRelayPacketSize, SNI: cfg.Server.SNI, Clients: cfg.Clients}
+	// Constructor validates keys, client identities and packet-size settings but
+	// opens no public socket; --check therefore never exposes a listener.
+	if _, e = tuic.NewServer(inst, &tuic.SocksRelay{}); e != nil {
+		return darkproadapter.Plan{}, e
+	}
+	users := make([]string, 0, len(inst.Clients))
+	for _, c := range inst.Clients {
+		users = append(users, c.Email)
+	}
+	return darkproadapter.Plan{Users: users, New: func(bridge *darkproadapter.Bridge) (darkproadapter.Driver, error) {
+		s, e := tuic.NewServer(inst, &tuic.SocksRelay{Addr: bridge.Addr, Password: bridge.Password})
+		if e != nil {
+			return nil, e
+		}
+		if log, ok := tlsConfig.KeyLogWriter.(interface{ Open() error }); ok {
+			if e = log.Open(); e != nil {
+				return nil, e
+			}
+		}
+		s.DarkProTLS(tlsConfig)
+		return &driver{server: s, closeTLS: func() {
+			if closer, ok := tlsConfig.KeyLogWriter.(interface{ Close() error }); ok {
+				_ = closer.Close()
+			}
+		}}, nil
+	}}, nil
+}

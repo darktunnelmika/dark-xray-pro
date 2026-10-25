@@ -1,0 +1,12 @@
+package mtglib
+
+// DarkProSnapshot reads cumulative counters without exposing or resetting any
+// secret. The owner wrapper calls this after its admission fence and joins.
+func (p *Proxy) DarkProSnapshot() StatsResponse { return p.stats.buildResponse() }
+
+// DarkProCancel lets the owner interrupt all current stream contexts before
+// waiting for its own synchronously registered ServeConn workers. Shutdown is
+// called only after those workers finish, avoiding Add/Wait admission races.
+func (p *Proxy) DarkProCancel() { p.ctxCancel() }
+
+func DarkProValidateOptions(opts ProxyOpts) error { return opts.valid() }

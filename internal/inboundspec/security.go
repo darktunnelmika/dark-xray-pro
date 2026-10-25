@@ -143,6 +143,16 @@ func validateSecurity(s *Spec) error {
 		if e := checkObject(s.TLS, fields, "tls"); e != nil {
 			return e
 		}
+		if s.Protocol == "tuic" {
+			for _, field := range []string{"minVersion", "maxVersion"} {
+				if version := str(s.TLS, field); version != "" && version != "1.3" {
+					return invalid("tls."+field, "tuic_requires_tls13")
+				}
+			}
+			if str(s.TLS, "cipherSuites") != "" {
+				return invalid("tls.cipherSuites", "tuic_cipher_suites_unsupported")
+			}
+		}
 		putDefault(s.TLS, "minVersion", "1.2")
 		putDefault(s.TLS, "maxVersion", "1.3")
 		if min, max := str(s.TLS, "minVersion"), str(s.TLS, "maxVersion"); min != "" && max != "" && min > max {

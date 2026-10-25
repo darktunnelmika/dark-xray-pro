@@ -194,12 +194,55 @@ export function specIssues(spec: AuthoringSpec, retained: string[] = []): Array<
     if (field.kind === "rows" && Array.isArray(value)) value.forEach((_, index) => field.fields?.forEach(child => check(child, `${path}.${index}.`)));
   }
   fields.forEach(field => check(field));
+  if (spec.protocol === "tun" && spec.settings.autoSystemDnsToGateway === true) add("settings.autoSystemDnsToGateway", "tun_host_dns_takeover_unsupported");
+  if (spec.protocol === "tuic" && spec.security === "tls") {
+    for (const path of ["tls.minVersion", "tls.maxVersion"]) {
+      const value = readSpecPath(spec, path);
+      if (value !== undefined && value !== "" && value !== "1.3") add(path, "tuic_requires_tls13");
+    }
+    if (spec.tls.cipherSuites) add("tls.cipherSuites", "tuic_cipher_suites_unsupported");
+  }
+  if (spec.protocol === "amneziawg") {
+    for (const path of ["settings.server.externalInterface", "settings.server.ipv6ExternalInterface"]) if (readSpecPath(spec, path)) add(path, "amneziawg_host_alias_unsupported");
+    const mtu = readSpecPath(spec, "settings.server.mtu");
+    if (typeof mtu === "number" && mtu !== 0 && (mtu < 1280 || mtu > 9000)) add("settings.server.mtu", "amneziawg_mtu_range");
+    const prefix = readSpecPath(spec, "settings.server.ipv6Subnet");
+    if (readSpecPath(spec, "settings.server.ipv6Enabled") === true && typeof prefix === "string" && /\/(127|128)$/.test(prefix)) add("settings.server.ipv6Subnet", "amneziawg_ipv6_prefix_too_small");
+  }
   if (spec.security === "reality") {
     if (typeof spec.reality.target !== "string" || !/^(?:\[[^\]]+\]|[^\s:/]+):\d{1,5}$/.test(spec.reality.target)) add("reality.target");
     if (Array.isArray(spec.reality.shortIds) && spec.reality.shortIds.some(id => typeof id !== "string" || !/^(?:[a-f0-9]{2}){1,8}$/.test(id))) add("reality.shortIds");
   }
   if (["clients", "accounts", "users", "peers"].some(key => Object.hasOwn(spec.settings, key))) add("settings", "spec_clients_managed");
   return issues;
+}
+
+// Unavailable controls stay visible with an explanation. An imported value
+// remains editable so its removal is explicit and the preview can reject it.
+export function compatibleAuthoringFields(spec: AuthoringSpec, fields: SpecField[]): SpecField[] {
+  return fields.map(field => {
+    const value = readSpecPath(spec, field.path);
+    if (spec.protocol === "tun" && field.path === "settings.autoSystemDnsToGateway") return {
+      ...field, disabled: true, hint: "Automatic host DNS takeover is unavailable. Keep the host resolver unchanged; ordinary TUN routing remains available with the required host permissions.",
+      faHint: "تغییر خودکار DNS میزبان در این اجرا پشتیبانی نمی‌شود. DNS میزبان را حفظ کنید؛ مسیریابی عادی TUN با مجوزهای لازم میزبان قابل استفاده است.",
+    };
+    if (spec.protocol === "tuic" && ["tls.minVersion", "tls.maxVersion"].includes(field.path)) return {
+      ...field, options: ["1.3", ...(typeof value === "string" && value !== "" && value !== "1.3" ? [value] : [])],
+      hint: "TUIC requires TLS 1.3. The default is 1.3; an older saved value must be corrected.",
+      faHint: "TUIC فقط با TLS 1.3 اجرا می‌شود. پیش‌فرض ۱.۳ است؛ مقدار قدیمی ذخیره‌شده را اصلاح کنید.",
+    };
+    if (spec.protocol === "tuic" && field.path === "tls.cipherSuites") return {
+      ...field, disabled: !value, hint: "TLS 1.3 cipher suites are selected by the TLS engine. Custom suites are unsupported; clear any saved override.",
+      faHint: "مجموعه‌رمزهای TLS 1.3 را موتور TLS انتخاب می‌کند. انتخاب دستی پشتیبانی نمی‌شود؛ مقدار ذخیره‌شده را پاک کنید.",
+    };
+    if (spec.protocol === "amneziawg" && ["settings.server.externalInterface", "settings.server.ipv6ExternalInterface"].includes(field.path)) return {
+      ...field, disabled: !value, hint: "Host interface binding and public IPv6 source aliases are unavailable. Remove any saved interface; IPv6 inside the tunnel remains supported.",
+      faHint: "اتصال به رابط میزبان و آدرس مبدأ عمومی IPv6 پشتیبانی نمی‌شود. نام رابط ذخیره‌شده را پاک کنید؛ IPv6 داخل تانل قابل استفاده است.",
+    };
+    if (spec.protocol === "amneziawg" && field.path === "settings.server.mtu") return { ...field, min: 1280, max: 9000, hint: "Supported range: 1280–9000 bytes.", faHint: "بازهٔ پشتیبانی‌شده: ۱۲۸۰ تا ۹۰۰۰ بایت." };
+    if (spec.protocol === "amneziawg" && field.path === "settings.server.ipv6Subnet") return { ...field, hint: "IPv6 tunnel subnet, with prefix length at most 126 (for example fd42::/64).", faHint: "ساب‌نت IPv6 داخل تانل با طول پیشوند حداکثر ۱۲۶؛ مانند fd42::/64." };
+    return field;
+  });
 }
 export function specPublicMatches(expected: AuthoringSpec, actual: AuthoringSpec, retained: string[] = []): boolean {
   if (!validAuthoringSpec(actual)) return false;

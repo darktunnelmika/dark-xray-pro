@@ -1,0 +1,403 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// This overlay is compiled only inside the pinned Sanaei source distribution.
+// It is a separate executable; the PRO control plane does not link it.
+package darkproadapter
+
+import (
+	"bytes"
+	"crypto/rand"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"flag"
+	"io"
+	"net"
+	"net/http"
+	"os"
+	"os/signal"
+	"sort"
+	"strings"
+	"sync"
+	"syscall"
+	"time"
+)
+
+type Principal struct {
+	ID            string `json:"id"`
+	Engine        string `json:"engine"`
+	ComponentTag  string `json:"component_tag,omitempty"`
+	ClientID      string `json:"client_id,omitempty"`
+	Role          string `json:"role"`
+	Counter       string `json:"counter"`
+	CredentialSHA string `json:"credential_sha,omitempty"`
+	InboundID     uint64 `json:"inbound_id"`
+	Billable      bool   `json:"billable"`
+}
+type Counter struct {
+	ID       string `json:"principal_id"`
+	Upload   uint64 `json:"upload,string"`
+	Download uint64 `json:"download,string"`
+}
+type Input struct {
+	Version    int             `json:"version"`
+	Engine     string          `json:"engine"`
+	Config     json.RawMessage `json:"config"`
+	Manifest   json.RawMessage `json:"manifest"`
+	Principals []Principal     `json:"principals"`
+}
+type Reply struct {
+	Version  int       `json:"version"`
+	Engine   string    `json:"engine"`
+	Ready    bool      `json:"ready"`
+	Open     bool      `json:"admission_open"`
+	Final    bool      `json:"final"`
+	Nonce    string    `json:"nonce,omitempty"`
+	Counters []Counter `json:"counters"`
+}
+type Driver interface {
+	Start() error
+	Fence()
+	Join()
+	Ready() bool
+}
+type Plan struct {
+	Users []string
+	New   func(*Bridge) (Driver, error)
+}
+type Factory func(Input) (Plan, error)
+type Worker struct {
+	mu                          sync.Mutex
+	input                       Input
+	driver                      Driver
+	bridge                      *Bridge
+	open, closing, final, fault bool
+	activation, nonce           string
+	sealed                      chan struct{}
+	finalValues                 []Counter
+}
+
+// NewWorker creates a private, closed-admission generation. No protocol
+// listener is opened until its first authenticated control activation.
+func NewWorker(in Input, plan Plan) (*Worker, error) {
+	if e := ValidatePrincipals(in, plan.Users); e != nil {
+		return nil, e
+	}
+	bridge, e := NewBridge(plan.Users)
+	if e != nil {
+		return nil, e
+	}
+	driver, e := plan.New(bridge)
+	if e != nil {
+		bridge.Close()
+		return nil, e
+	}
+	return &Worker{input: in, driver: driver, bridge: bridge, sealed: make(chan struct{})}, nil
+}
+
+func Decode(raw []byte, value any) error {
+	d := json.NewDecoder(bytes.NewReader(raw))
+	d.DisallowUnknownFields()
+	if err := d.Decode(value); err != nil {
+		return errors.New("invalid adapter configuration")
+	}
+	var extra any
+	if d.Decode(&extra) != io.EOF {
+		return errors.New("trailing adapter configuration")
+	}
+	return nil
+}
+func Material(value string) (string, error) {
+	if strings.Contains(value, "-----BEGIN ") {
+		if len(value) > 1<<20 {
+			return "", errors.New("material too large")
+		}
+		return value, nil
+	}
+	if value == "" {
+		return "", errors.New("material required")
+	}
+	fd, e := syscall.Open(value, syscall.O_RDONLY|syscall.O_NONBLOCK|syscall.O_CLOEXEC, 0)
+	if e != nil {
+		return "", errors.New("material unavailable")
+	}
+	f := os.NewFile(uintptr(fd), "private TLS material")
+	defer f.Close()
+	info, e := f.Stat()
+	if e != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0022 != 0 {
+		return "", errors.New("material unavailable")
+	}
+	b, e := io.ReadAll(io.LimitReader(f, (1<<20)+1))
+	if e != nil || len(b) > 1<<20 {
+		return "", errors.New("material unavailable")
+	}
+	return string(b), nil
+}
+func ValidatePrincipals(in Input, users []string) error {
+	if len(users) == 0 || len(users) > 20000 || len(in.Principals) == 0 || len(in.Principals) > 20000 {
+		return errors.New("accounting bindings required")
+	}
+	names := map[string]bool{}
+	for _, u := range users {
+		if len(u) == 0 || len(u) > 255 || strings.ContainsAny(u, "\x00\r\n") || names[u] {
+			return errors.New("invalid user binding")
+		}
+		names[u] = true
+	}
+	seen := map[string]bool{}
+	bound := map[string]bool{}
+	aggregate := false
+	for _, p := range in.Principals {
+		if p.ID == "" || seen[p.ID] || p.Engine != in.Engine || p.InboundID == 0 {
+			return errors.New("invalid principal")
+		}
+		seen[p.ID] = true
+		parts := strings.Split(p.Counter, ">>>")
+		if len(parts) != 3 || parts[2] != "traffic" {
+			return errors.New("invalid counter binding")
+		}
+		if parts[0] == "inbound" && p.Role == "owner_aggregate" && len(in.Principals) == 1 {
+			aggregate = true
+			continue
+		}
+		if parts[0] != "user" || !names[parts[1]] || bound[parts[1]] {
+			return errors.New("invalid user counter")
+		}
+		bound[parts[1]] = true
+	}
+	if !aggregate && len(bound) != len(names) {
+		return errors.New("incomplete principal bindings")
+	}
+	return nil
+}
+func validNonce(s string) bool {
+	if len(s) != 64 || strings.ToLower(s) != s {
+		return false
+	}
+	_, e := hex.DecodeString(s)
+	return e == nil
+}
+func (w *Worker) snapshot() ([]Counter, error) {
+	values, e := w.bridge.Snapshot()
+	if e != nil {
+		return nil, e
+	}
+	out := make([]Counter, 0, len(w.input.Principals))
+	for _, p := range w.input.Principals {
+		parts := strings.Split(p.Counter, ">>>")
+		v := Traffic{}
+		if parts[0] == "inbound" {
+			for _, one := range values {
+				if ^uint64(0)-v.Upload < one.Upload || ^uint64(0)-v.Download < one.Download {
+					return nil, errors.New("counter overflow")
+				}
+				v.Upload += one.Upload
+				v.Download += one.Download
+			}
+		} else {
+			var ok bool
+			v, ok = values[parts[1]]
+			if !ok {
+				return nil, errors.New("counter binding missing")
+			}
+		}
+		out = append(out, Counter{ID: p.ID, Upload: v.Upload, Download: v.Download})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out, nil
+}
+func (w *Worker) beginFinal(nonce string) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.closing {
+		if w.nonce != nonce {
+			return errors.New("nonce conflict")
+		}
+		return nil
+	}
+	w.closing = true
+	w.open = false
+	w.nonce = nonce
+	go func() {
+		// Fence public protocol ingress first; then interrupt and join every owned
+		// plaintext relay. Only the joined snapshot may be labeled final.
+		w.driver.Fence()
+		w.bridge.Close()
+		w.driver.Join()
+		values, e := w.snapshot()
+		w.mu.Lock()
+		if e == nil {
+			w.finalValues = values
+			w.final = true
+		} else {
+			w.fault = true
+		}
+		w.mu.Unlock()
+		close(w.sealed)
+	}()
+	return nil
+}
+func (w *Worker) Handle(rw http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		http.Error(rw, "method", 405)
+		return
+	}
+	r.Body = http.MaxBytesReader(rw, r.Body, 4096)
+	defer r.Body.Close()
+	raw, e := io.ReadAll(r.Body)
+	var body struct {
+		Nonce string `json:"nonce,omitempty"`
+	}
+	if e != nil || Decode(raw, &body) != nil {
+		http.Error(rw, "request", 422)
+		return
+	}
+	op := strings.TrimPrefix(r.URL.Path, "/")
+	if op != "status" && op != "snapshot" && op != "activate" && op != "final" {
+		http.NotFound(rw, r)
+		return
+	}
+	if op == "activate" {
+		if !validNonce(body.Nonce) {
+			http.Error(rw, "nonce", 422)
+			return
+		}
+		w.mu.Lock()
+		if w.closing || w.fault || w.activation != "" && w.activation != body.Nonce {
+			w.mu.Unlock()
+			http.Error(rw, "state", 409)
+			return
+		}
+		if !w.open {
+			w.bridge.Activate()
+			if e = w.driver.Start(); e != nil {
+				w.fault = true
+				w.mu.Unlock()
+				w.bridge.Close()
+				w.driver.Fence()
+				w.driver.Join()
+				http.Error(rw, "engine start", 503)
+				return
+			}
+			w.activation = body.Nonce
+			w.open = true
+		}
+		w.mu.Unlock()
+	}
+	if op == "final" {
+		if !validNonce(body.Nonce) {
+			http.Error(rw, "nonce", 422)
+			return
+		}
+		if w.beginFinal(body.Nonce) != nil {
+			http.Error(rw, "state", 409)
+			return
+		}
+		select {
+		case <-w.sealed:
+		case <-r.Context().Done():
+			return
+		}
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	values := w.finalValues
+	if !w.final {
+		values, e = w.snapshot()
+		if e != nil {
+			http.Error(rw, "accounting", 503)
+			return
+		}
+	}
+	ready := !w.fault && !w.closing && (!w.open || w.driver.Ready())
+	out := Reply{Version: 1, Engine: w.input.Engine, Ready: ready, Open: w.open, Final: w.final, Counters: values}
+	if op == "activate" {
+		out.Nonce = w.activation
+	}
+	if op == "final" {
+		out.Nonce = w.nonce
+	}
+	rw.Header().Set("Content-Type", "application/json")
+	rw.Header().Set("Cache-Control", "no-store")
+	_ = json.NewEncoder(rw).Encode(out)
+}
+func Main(engine string, factory Factory) {
+	if run(engine, factory) != nil {
+		os.Exit(1)
+	}
+}
+func run(engine string, factory Factory) error {
+	configPath := flag.String("config", "", "private adapter input")
+	control := flag.String("control", "", "private Unix socket")
+	check := flag.Bool("check", false, "validate without listeners")
+	flag.Parse()
+	f, e := os.Open(*configPath)
+	if e != nil {
+		return e
+	}
+	raw, e := io.ReadAll(io.LimitReader(f, (16<<20)+1))
+	_ = f.Close()
+	if e != nil || len(raw) > 16<<20 {
+		return errors.New("input size")
+	}
+	var in Input
+	if Decode(raw, &in) != nil || in.Version != 1 || in.Engine != engine {
+		return errors.New("input identity")
+	}
+	plan, e := factory(in)
+	if e != nil {
+		return e
+	}
+	if e = ValidatePrincipals(in, plan.Users); e != nil {
+		return e
+	}
+	if *check {
+		return nil
+	}
+	if *control == "" || len(*control) > 100 {
+		return errors.New("control path")
+	}
+	if _, e = os.Lstat(*control); !os.IsNotExist(e) {
+		return errors.New("control path occupied")
+	}
+	w, e := NewWorker(in, plan)
+	if e != nil {
+		return e
+	}
+	defer w.bridge.Close()
+	driver := w.driver
+	listener, e := net.Listen("unix", *control)
+	if e != nil {
+		driver.Fence()
+		driver.Join()
+		return e
+	}
+	defer listener.Close()
+	defer os.Remove(*control)
+	if e = os.Chmod(*control, 0600); e != nil {
+		return e
+	}
+	srv := &http.Server{Handler: http.HandlerFunc(w.Handle), ReadHeaderTimeout: 3 * time.Second, ReadTimeout: 5 * time.Second, IdleTimeout: 10 * time.Second}
+	done := make(chan error, 1)
+	go func() { done <- srv.Serve(listener) }()
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
+	defer signal.Stop(sig)
+	select {
+	case <-sig:
+	case <-done:
+	}
+	w.mu.Lock()
+	nonce := w.nonce
+	w.mu.Unlock()
+	if nonce == "" {
+		var b [32]byte
+		if _, e = rand.Read(b[:]); e != nil {
+			return e
+		}
+		nonce = hex.EncodeToString(b[:])
+	}
+	_ = w.beginFinal(nonce)
+	<-w.sealed
+	_ = srv.Close()
+	return nil
+}

@@ -5,7 +5,7 @@ import ClientPlanWorkbench from "./ClientPlanWorkbench";
 import ClientListExplorer from "./ClientListExplorer";
 import ClientUsage from "../ClientUsage";
 import ClientProfileEditor from "./ClientProfileEditor";
-import ClientSubscription from "./ClientSubscription";
+import ClientInboundSubscription from "./ClientInboundSubscription";
 import { businessGranted } from "./permissionsV9";
 export default function Clients({ model }: { model: BusinessModel }) {
   const { t, session, language, actionBusy, refreshKey, reps, clients, clientOps, clientOpsOffset, setClientOpsOffset, clientId, setClientId, clientName, setClientName, clientRep, setClientRep, clientKind, setClientKind, clientDuration, setClientDuration, clientIPs, setClientIPs, clientVolume, setClientVolume, lifeClientID, setLifeClientID, lifeDays, setLifeDays, lifeVolumeGB, setLifeVolumeGB, lifeReason, setLifeReason, lifeAction, setLifeAction, lifeStateReason, setLifeStateReason, createClient, extendExistingClient, changeExistingClientState } = model;
@@ -47,7 +47,7 @@ export default function Clients({ model }: { model: BusinessModel }) {
         <p className="business-warning">{t.safeLifecycle}</p>
       </div>
       {lifeClientID && <ClientUsage key={session.user.id + ":" + lifeClientID} clientID={lifeClientID} language={language} refresh={refreshKey} />}
-      {lifeClientID && <ClientSubscription key={session.user.id + ":" + lifeClientID} clientID={lifeClientID} language={language} session={session} canManage={canManage} refresh={refreshKey}/>}
+      {lifeClientID && <ClientInboundSubscription key={session.user.id + ":" + lifeClientID} clientID={lifeClientID} language={language} session={session} canManage={canManage} refresh={refreshKey}/>}
       {canEdit && lifeClientID && <ClientProfileEditor key={session.user.id + ":" + lifeClientID} clientID={lifeClientID} model={model}/>}
       <div className="business-form-grid">
         {canRenew && <form className="business-panel" onSubmit={(e) => { void extendExistingClient(e); }}>

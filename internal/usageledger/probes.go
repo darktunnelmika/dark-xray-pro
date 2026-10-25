@@ -77,6 +77,9 @@ func probeAccountingEnabled(ctx context.Context, c sqlWriter) (bool, error) {
 	if err := c.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); err != nil {
 		return false, err
 	}
+	var err error
+	version,err=underlyingBusinessSchema(ctx,c,version)
+	if err!=nil{return false,err}
 	return HasProbeSchema(version), nil
 }
 

@@ -1,0 +1,14 @@
+// SPDX-License-Identifier: MIT
+// Compiled in the separately pinned apernet/quic-go module, never in PRO.
+package quic
+
+// DarkProUseCubic selects the actual native CUBIC implementation. The fork's
+// default constructor passes reno=true, so merely naming "cubic" is insufficient.
+func (c *Conn) DarkProUseCubic() bool {
+	h, ok := c.sentPacketHandler.(interface{ DarkProUseCubic() })
+	if !ok {
+		return false
+	}
+	h.DarkProUseCubic()
+	return true
+}

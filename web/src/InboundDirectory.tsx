@@ -5,6 +5,8 @@ import { creationNodeName, type CreationCapabilities } from "./InboundCreationMo
 import { navigateURL } from "./navigation";
 import { transportLabel } from "./inboundNetworkOptions";
 import { inboundTransports, networkNames, protocolNames } from "./inboundAuthoringSpec";
+import { executionDisplayState, type ExecutionState } from "./inboundExecution";
+import { executionStateLabel } from "./inboundExecutionWords";
 
 const words = {
   en: {
@@ -21,9 +23,10 @@ const words = {
   },
 } as const;
 
-export default function InboundDirectory({ data, plans, language, blocked, swapWorkspace, onOpen, onCreate }: {
+export default function InboundDirectory({ data, plans, executions, language, blocked, swapWorkspace, onOpen, onCreate }: {
   data: InboundOverview; language: "fa" | "en"; blocked: boolean; swapWorkspace: boolean;
   plans?: CreationCapabilities["plans"];
+  executions?: Record<number, { state: ExecutionState; observedAt: number }>;
   onOpen: (inbound: Inbound) => void; onCreate: (source?: Inbound) => void;
 }) {
   const t = words[language];
@@ -38,14 +41,22 @@ export default function InboundDirectory({ data, plans, language, blocked, swapW
   const activeFilters = [status, transport, node].filter(value => value !== "all").length;
   useEffect(() => { if (activeFilters) setFiltersOpen(true); }, [status, transport, node]);
   const size = 20;
+  const now = Math.floor(Date.now() / 1000) * 1000;
+  function itemState(item: Inbound, promoted: boolean): string {
+    if (item.archived) return "archived";
+    if (promoted) return "promoted";
+    if (!item.spec) return item.enabled ? "enabled" : "disabled";
+    const reported = executions?.[item.id];
+    return reported ? executionDisplayState(reported.state, (reported.state.server_time_unix_milli ?? reported.observedAt) + now - reported.observedAt, now - reported.observedAt > 15000) : "unknown";
+  }
   const filtered = useMemo(() => data.inbounds.filter(item => {
     const plan = plans?.find(plan => plan.inbound_id === item.id);
-    const state = item.archived ? "archived" : plan?.promotion ? "promoted" : item.enabled ? "enabled" : "disabled";
-    const pausedPlan = !!plan && !plan.promotion && !item.archived && !item.enabled;
+    const state = itemState(item, !!plan?.promotion);
+    const pausedPlan = !!plan && !plan.promotion && !item.archived && (!item.spec && !item.enabled || state === "saved");
     return (item.name + " " + item.id).toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()) &&
       (status === "all" || status === state || status === "planned" && pausedPlan || status === "waiting_host" && pausedPlan && plan?.status === "WAITING_HOST") && (transport === "all" || transport === item.transport) &&
       (node === "all" || data.targets.some(target => target.inbound_id === item.id && target.node_id === node) || !!plan?.node_ids?.includes(node));
-  }).sort((a, b) => b.id - a.id), [data.inbounds, data.targets, plans, query, status, transport, node]);
+  }).sort((a, b) => b.id - a.id), [data.inbounds, data.targets, plans, executions, query, status, transport, node, now]);
   const pages = Math.max(1, Math.ceil(filtered.length / size));
   const current = Math.min(page, pages);
   useEffect(() => { if (page !== current) setPage(current); }, [page, current]);
@@ -75,7 +86,7 @@ export default function InboundDirectory({ data, plans, language, blocked, swapW
     </div>
     {swapWorkspace && <p className="inbound-directory-help">{t.swap}</p>}
     <div className="inbound-filter-bar"><div className="inbound-directory-filters" id="inbound-directory-filters" data-expanded={filtersOpen}>
-      <label>{t.status}<select aria-label={t.status} value={status} onChange={event => { setStatus(event.target.value); setPage(1); }}><option value="all">{t.all}</option><option value="enabled">{t.enabled}</option><option value="disabled">{t.disabled}</option><option value="planned">{t.planned}</option><option value="promoted">{t.promoted}</option><option value="waiting_host">{t.waitingHost}</option><option value="archived">{t.archived}</option></select></label>
+      <label>{t.status}<select aria-label={t.status} value={status} onChange={event => { setStatus(event.target.value); setPage(1); }}><option value="all">{t.all}</option>{specificationRows && ["active", "running", "queued", "applying", "stopped", "failed", "blocked", "verifying", "stale", "unknown"].map(state => <option key={state} value={state}>{executionStateLabel(state, language)}</option>)}<option value="enabled">{t.enabled}</option><option value="disabled">{t.disabled}</option><option value="planned">{t.planned}</option><option value="promoted">{t.promoted}</option><option value="waiting_host">{t.waitingHost}</option><option value="archived">{t.archived}</option></select></label>
       <label>{t.transport}<select aria-label={t.transport} value={transport} onChange={event => { setTransport(event.target.value); setPage(1); }}><option value="all">{t.all}</option>{transports.map(transport => <option key={transport} value={transport}>{specificationRows ? networkNames[transport] ?? transportLabel(transport) : transportLabel(transport)}</option>)}</select></label>
       <label>{t.node}<select aria-label={t.node} value={node} onChange={event => { setNode(event.target.value); setPage(1); }}><option value="all">{t.all}</option>{data.nodes.map(item => <option key={item.node_id} value={item.node_id}>{creationNodeName(data.nodes, item.node_id)}</option>)}</select></label>
       {(query || status !== "all" || transport !== "all" || node !== "all") && <button type="button" className="native-text-action" onClick={reset}>{t.clear}</button>}
@@ -86,15 +97,15 @@ export default function InboundDirectory({ data, plans, language, blocked, swapW
       <tbody>{filtered.slice((current - 1) * size, current * size).map(item => {
         const attached = data.targets.filter(target => target.inbound_id === item.id);
         const plan = plans?.find(plan => plan.inbound_id === item.id);
-        const state = item.archived ? "archived" : plan?.promotion ? "promoted" : item.enabled ? "enabled" : "disabled";
-        const pausedPlan = !!plan && !plan.promotion && state === "disabled";
+        const state = itemState(item, !!plan?.promotion);
+        const pausedPlan = !!plan && !plan.promotion && (state === "disabled" || state === "saved");
         return <tr key={item.id}>
           <th scope="row" data-label={t.name}><button type="button" className="inbound-name" aria-label={item.name} onClick={() => onOpen(item)}><strong>{item.name}</strong><bdi dir="ltr">#{item.id}</bdi></button></th>
           <td data-label={t.transport}><bdi dir="ltr">{item.spec ? `${protocolNames[item.spec.protocol]} · ${networkNames[item.spec.network] ?? item.spec.network} / ${item.spec.security.toUpperCase()}` : `${transportLabel(item.transport)} / ${item.security === "tls" ? "TLS" : "REALITY"}`}</bdi></td>
           <td data-label={t.nodes}>{plan && <div className="inbound-node-names" data-planned-nodes><strong>{t.plannedNodes}: </strong>{plan.node_ids ? plan.node_ids.map(id => creationNodeName(data.nodes, id)).join(" · ") : t.unknownPlanNodes}</div>}
             {(!plan || attached.length > 0) && <div className="inbound-node-names" data-assigned-nodes>{plan && <strong>{t.assignedNodes}: </strong>}{attached.length ? attached.map(target => creationNodeName(data.nodes, target.node_id)).join(" · ") : t.unattached}</div>}</td>
-          <td data-label={t.clients}>{item.bound_clients.toLocaleString(language === "fa" ? "fa-IR" : "en-US")}</td>
-          <td data-label={t.status}><span className={"inbound-state inbound-state-" + state} data-plan-state={pausedPlan || undefined}>{pausedPlan ? plan.status === "WAITING_HOST" ? t.waitingHost : t.planned : t[state]}</span></td>
+          <td data-label={t.clients}>{item.spec ? executions?.[item.id] ? executions[item.id].state.effective_client_ids.length.toLocaleString(language === "fa" ? "fa-IR" : "en-US") : "—" : item.bound_clients.toLocaleString(language === "fa" ? "fa-IR" : "en-US")}</td>
+          <td data-label={t.status}><span className={"inbound-state inbound-state-" + state} data-plan-state={pausedPlan || undefined}>{pausedPlan ? plan.status === "WAITING_HOST" ? t.waitingHost : t.planned : (t as Record<string, string>)[state] ?? executionStateLabel(state, language)}</span></td>
           <td data-label={t.actions}><div className="inbound-row-actions"><button type="button" onClick={() => onOpen(item)} aria-label={t.open + " " + item.name}><ArrowUpRight size={16}/><span>{t.open}</span></button><button type="button" disabled={blocked} onClick={() => onCreate(item)} aria-label={t.copy + " " + item.name}><Copy size={16}/></button></div></td>
         </tr>;
       })}</tbody>

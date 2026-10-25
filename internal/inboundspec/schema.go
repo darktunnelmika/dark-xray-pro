@@ -291,6 +291,9 @@ func validateSettings(s *Spec) error {
 			}
 		}
 	case "tun":
+		if boolean(m, "autoSystemDnsToGateway") {
+			return invalid("settings.autoSystemDnsToGateway", "tun_host_dns_takeover_unsupported")
+		}
 		putDefault(m, "name", "xray0")
 		putDefault(m, "mtu", 1500)
 		if !namePattern.MatchString(str(m, "name")) {
@@ -322,6 +325,17 @@ func validateSettings(s *Spec) error {
 		if !validWGKey(str(a, "privateKey")) {
 			return invalid("settings.server.privateKey", "private_key_required")
 		}
+		// The owned userspace adapter has no host address/interface lifecycle.
+		// Accepting these Sanaei options would promise a source alias or device
+		// binding that the running worker cannot provide.
+		for _, field := range []string{"externalInterface", "ipv6ExternalInterface"} {
+			if str(a, field) != "" {
+				return invalid("settings.server."+field, "amneziawg_host_alias_unsupported")
+			}
+		}
+		if mtu := num(a, "mtu"); mtu != 0 && (mtu < 1280 || mtu > 9000) {
+			return invalid("settings.server.mtu", "amneziawg_mtu_range")
+		}
 		putDefault(a, "subnetIp", "10.8.0.0")
 		putDefault(a, "subnetCidr", 16)
 		if err := validateSubnet(str(a, "subnetIp"), num(a, "subnetCidr"), "settings.server"); err != nil {
@@ -334,6 +348,9 @@ func validateSettings(s *Spec) error {
 			p, e := netip.ParsePrefix(str(a, "ipv6Subnet"))
 			if e != nil || !p.Addr().Is6() {
 				return invalid("settings.server.ipv6Subnet", "ipv6_prefix_required")
+			}
+			if p.Bits() > 126 {
+				return invalid("settings.server.ipv6Subnet", "amneziawg_ipv6_prefix_too_small")
 			}
 		}
 	case "tuic":

@@ -24,6 +24,7 @@ import (
 )
 
 type Server struct {
+	inboundExecution            *inboundExecutionService
 	inboundSecurity             *inboundsecurity.Service
 	inboundProbeJobs            inboundProbeQueue
 	healthEndpoint              *managedxray.ProtocolHealthEndpoint
@@ -120,7 +121,11 @@ func (s *Server) snapshot() telemetry.Fleet {
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/v1/health", func(w http.ResponseWriter, _ *http.Request) {
-		respond(w, http.StatusOK, map[string]string{"status": "ok", "mode": "isolated-lab", "data_plane": "not_enabled"})
+		dataPlane := "not_enabled"
+		if s.inboundExecution != nil {
+			dataPlane = "managed_inbounds_enabled"
+		}
+		respond(w, http.StatusOK, map[string]string{"status": "ok", "mode": "isolated-lab", "data_plane": dataPlane})
 	})
 	mux.HandleFunc("GET /api/v1/fleet", func(w http.ResponseWriter, _ *http.Request) { respond(w, http.StatusOK, s.snapshot()) })
 	s.attachEnrollment(mux)
@@ -140,6 +145,8 @@ func (s *Server) Handler() http.Handler {
 	s.attachClientProfileEdits(mux)
 	s.attachNativeInbounds(mux)
 	s.attachNativeInboundPlans(mux)
+	s.attachInboundExecution(mux)
+	s.attachInboundExecutionSubscriptions(mux)
 	s.attachInboundSecurity(mux)
 	s.attachNativeInboundPlanPromotions(mux)
 	s.attachInboundInitialHealth(mux)
@@ -180,6 +187,10 @@ func (s *Server) AgentHandler() http.Handler {
 			s.handleInboundProbeAgent(w, r)
 			return
 		}
+		if r.Method == http.MethodPost && (r.URL.Path == "/api/v1/agent/inbound-execution/poll" || r.URL.Path == "/api/v1/agent/inbound-execution/register" || r.URL.Path == "/api/v1/agent/inbound-execution/usage" || r.URL.Path == "/api/v1/agent/inbound-execution/observation") {
+			s.handleInboundExecutionAgent(w, r)
+			return
+		}
 		if r.Method == http.MethodPost && (r.URL.Path == "/api/v1/agent/metered-health/poll" || r.URL.Path == "/api/v1/agent/metered-health/receipt") {
 			s.handleMeteredHealthAgent(w, r)
 			return
@@ -202,7 +213,11 @@ func (s *Server) AgentHandler() http.Handler {
 			return
 		}
 		if r.Method == http.MethodGet && r.URL.Path == "/api/v1/agent/health" {
-			respond(w, http.StatusOK, map[string]string{"status": "ok", "mode": "new-node-lab", "data_plane": "disabled"})
+			dataPlane := "disabled"
+			if s.inboundExecution != nil {
+				dataPlane = "managed_inbounds_enabled"
+			}
+			respond(w, http.StatusOK, map[string]string{"status": "ok", "mode": "new-node-lab", "data_plane": dataPlane})
 			return
 		}
 		if !((r.Method == http.MethodPost && (r.URL.Path == "/api/v1/agent/enroll" || r.URL.Path == "/api/v1/agent/config-stage-report" || r.URL.Path == "/api/v1/agent/native-runtime-report" || r.URL.Path == "/api/v1/agent/pulse" || r.URL.Path == "/api/v1/agent/heartbeat" || r.URL.Path == "/api/v1/agent/replacement-report")) || (r.Method == http.MethodGet && (r.URL.Path == "/api/v1/agent/replacement-task" || r.URL.Path == "/api/v1/agent/config-stage" || r.URL.Path == "/api/v1/agent/native-runtime"))) {

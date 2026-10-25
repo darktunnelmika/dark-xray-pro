@@ -1,0 +1,58 @@
+// Copied into the pinned Xray app/stats/command package by prepare-inbound-core.py.
+// Modified upstream source remains under Xray's MPL-2.0 license.
+package command
+
+import (
+	"context"
+	"sort"
+	"strings"
+
+	darkpro "github.com/xtls/xray-core/common/darkprov2"
+	feature_stats "github.com/xtls/xray-core/features/stats"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+)
+
+func (s *statsServer) darkProInboundStats(ctx context.Context, r *QueryStatsRequest) (*QueryStatsResponse, error) {
+	if !darkpro.Enabled() || r.Reset_ {
+		return nil, status.Error(codes.FailedPrecondition, "DARK PRO inbound v2 is not enabled")
+	}
+	marker := func(name string) *QueryStatsResponse { return &QueryStatsResponse{Stat: []*Stat{{Name: darkpro.Protocol + name, Value: 1}}} }
+	if r.Pattern == darkpro.Protocol+"capabilities" { return marker("scope/native-inbounds-v2"), nil }
+	if r.Pattern == darkpro.Protocol+"health" {
+		ready, active, sealed := darkpro.Health()
+		bit := func(v bool) int64 { if v { return 1 }; return 0 }
+		return &QueryStatsResponse{Stat: []*Stat{
+			{Name: darkpro.Protocol+"api-ready", Value: 1},
+			{Name: darkpro.Protocol+"engine-ready", Value: bit(ready)},
+			{Name: darkpro.Protocol+"admission-open", Value: bit(active)},
+			{Name: darkpro.Protocol+"final-sealed", Value: bit(sealed)},
+		}}, nil
+	}
+	if nonce, ok := strings.CutPrefix(r.Pattern, darkpro.Protocol+"activate/"); ok {
+		if err := darkpro.Activate(nonce); err != nil { return nil, status.Error(codes.FailedPrecondition, "DARK PRO activation rejected") }
+		return marker("activated/"+nonce), nil
+	}
+	nonce, ok := strings.CutPrefix(r.Pattern, darkpro.Protocol+"final/")
+	if !ok { return nil, status.Error(codes.InvalidArgument, "unknown DARK PRO inbound request") }
+	values, err := darkpro.Snapshot(ctx, nonce, func() map[string]int64 {
+		values := map[string]int64{}
+		s.stats.VisitCounters(func(name string, c feature_stats.Counter) bool {
+			// The private API is deliberately outside customer accounting.
+			if strings.HasPrefix(name, "inbound>>>"+darkpro.ControlTag+">>>") { return true }
+			if (strings.HasPrefix(name, "user>>>") || strings.HasPrefix(name, "inbound>>>")) &&
+				(strings.HasSuffix(name, ">>>traffic>>>uplink") || strings.HasSuffix(name, ">>>traffic>>>downlink")) {
+				values[name] = c.Value()
+			}
+			return true
+		})
+		return values
+	})
+	if err != nil { return nil, status.Error(codes.FailedPrecondition, "DARK PRO final snapshot did not complete") }
+	names := make([]string, 0, len(values))
+	for name := range values { names = append(names, name) }
+	sort.Strings(names)
+	response := marker("final/"+nonce)
+	for _, name := range names { response.Stat = append(response.Stat, &Stat{Name: name, Value: values[name]}) }
+	return response, nil
+}

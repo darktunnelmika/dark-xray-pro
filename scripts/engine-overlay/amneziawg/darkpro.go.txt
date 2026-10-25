@@ -1,0 +1,167 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+package amneziawgnet
+
+import (
+	"fmt"
+	"net/netip"
+	"sort"
+	"strings"
+	"sync"
+	"sync/atomic"
+
+	"github.com/mhsanaei/3x-ui/v3/internal/amneziawg"
+	"gvisor.dev/gvisor/pkg/tcpip/adapters/gonet"
+)
+
+func DarkProOptions(o amneziawg.Obfuscation31) DeviceOptions {
+	return DeviceOptions{HeaderProtectionKey: o.HeaderProtectionKey, ContentPaddingAddition: o.ContentPaddingAddition, RekeyAfterTime: o.RekeyAfterTime, RekeyTimeout: o.RekeyTimeout, RejectAfterTime: o.RejectAfterTime, KeepaliveTimeout: o.KeepaliveTimeout, MaxHandshakeAttempts: o.MaxHandshakeAttempts, RandomTrailers: o.RandomTrailers, DisableCookies: o.DisableCookies}
+}
+func DarkProValidate(inst amneziawg.Instance, opts DeviceOptions) error {
+	_, e := hostAddresses(inst.Address)
+	if e != nil {
+		return e
+	}
+	_, e = buildUAPIConfig(inst, opts)
+	return e
+}
+
+// The unconfigured constructor creates no public UDP listener. All handler
+// registration precedes Configure, which is the first operation admitting a
+// peer. The supervisor may therefore collect a true zero-admission receipt.
+type DarkProServer struct {
+	inst        amneziawg.Instance
+	opts        DeviceOptions
+	relay       SocksRelay
+	keepAlive   map[string]int
+	dev         *Device
+	udp         *darkProUDP
+	peers       *PeerIndex
+	mu          sync.Mutex
+	open        bool
+	connections map[*gonet.TCPConn]bool
+	handlers    sync.WaitGroup
+	ready       atomic.Bool
+	once        sync.Once
+	fenced      chan struct{}
+}
+
+func NewDarkProServer(inst amneziawg.Instance, opts DeviceOptions, relay SocksRelay, keepAlive map[string]int) *DarkProServer {
+	values := map[string]int{}
+	for k, v := range keepAlive {
+		values[k] = v
+	}
+	return &DarkProServer{inst: inst, opts: opts, relay: relay, keepAlive: values, peers: NewPeerIndex(inst.Peers), connections: map[*gonet.TCPConn]bool{}, fenced: make(chan struct{})}
+}
+func (s *DarkProServer) Start() error {
+	dev, e := newUnconfiguredDevice(s.inst, s.opts)
+	if e != nil {
+		return e
+	}
+	s.dev = dev
+	s.udp = newDarkProUDP(s.relay, dev.Stack)
+	AttachTCPForwarder(dev.Stack, func(c *gonet.TCPConn, dst netip.AddrPort) {
+		s.mu.Lock()
+		if !s.open {
+			s.mu.Unlock()
+			_ = c.Close()
+			return
+		}
+		s.connections[c] = true
+		s.handlers.Add(1)
+		s.mu.Unlock()
+		defer func() { _ = c.Close(); s.mu.Lock(); delete(s.connections, c); s.mu.Unlock(); s.handlers.Done() }()
+		src, e := netip.ParseAddrPort(c.RemoteAddr().String())
+		if e != nil {
+			return
+		}
+		p, ok := s.peers.Lookup(src.Addr().Unmap())
+		if !ok {
+			return
+		}
+		s.relay.RelayTCP(c, p.Email, dst)
+	})
+	AttachUDPHandler(dev.Stack, func(src, dst netip.AddrPort, payload []byte) {
+		s.mu.Lock()
+		if !s.open {
+			s.mu.Unlock()
+			return
+		}
+		s.handlers.Add(1)
+		s.mu.Unlock()
+		defer s.handlers.Done()
+		p, ok := s.peers.Lookup(src.Addr().Unmap())
+		if ok {
+			s.udp.Handle(src, dst, p.Email, payload)
+		}
+	})
+	s.mu.Lock()
+	s.open = true
+	s.mu.Unlock()
+	conf, e := buildUAPIConfig(s.inst, s.opts)
+	if e == nil {
+		var extra strings.Builder
+		keys := make([]string, 0, len(s.keepAlive))
+		for k := range s.keepAlive {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, key := range keys {
+			fmt.Fprintf(&extra, "public_key=%s\npersistent_keepalive_interval=%d\n", key, s.keepAlive[key])
+		}
+		e = dev.IpcSet(conf + extra.String())
+	}
+	if e == nil {
+		e = dev.Up()
+	}
+	if e != nil {
+		s.mu.Lock()
+		s.open = false
+		s.mu.Unlock()
+		dev.Close()
+		return e
+	}
+	s.ready.Store(true)
+	return nil
+}
+func (s *DarkProServer) Ready() bool {
+	if !s.ready.Load() || s.dev == nil {
+		return false
+	}
+	select {
+	case <-s.dev.Wait():
+		return false
+	default:
+		return true
+	}
+}
+func (s *DarkProServer) Fence() {
+	s.once.Do(func() {
+		s.ready.Store(false)
+		s.mu.Lock()
+		s.open = false
+		conns := make([]*gonet.TCPConn, 0, len(s.connections))
+		for c := range s.connections {
+			conns = append(conns, c)
+		}
+		s.mu.Unlock()
+		for _, c := range conns {
+			_ = c.Close()
+		}
+		go func() {
+			if s.dev != nil {
+				s.dev.Close()
+			}
+			close(s.fenced)
+		}()
+	})
+}
+
+// The private bridge is closed between Fence and Join. That interrupts all
+// pending relay handshakes/dials before waiting on decapsulation callbacks.
+func (s *DarkProServer) Join() {
+	<-s.fenced
+	s.handlers.Wait()
+	if s.udp != nil {
+		s.udp.Close()
+	}
+}

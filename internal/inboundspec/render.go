@@ -198,10 +198,11 @@ func Render(input Spec, listen string, port uint16, tag string, users []User) (R
 		return Rendered{}, e
 	}
 	info, _ := protocolInfo(s.Protocol)
-	if info.ListenerOnly && len(users) > 0 {
+	noAccounts := info.ListenerOnly || s.Protocol == "mixed" && str(s.Settings, "auth") == "noauth"
+	if noAccounts && len(users) > 0 {
 		return Rendered{}, invalid("users", "listener_has_no_accounts")
 	}
-	if !info.ListenerOnly && len(users) == 0 {
+	if !noAccounts && len(users) == 0 {
 		return Rendered{}, invalid("users", "bound_user_required")
 	}
 	sorted := append([]User(nil), users...)
@@ -287,8 +288,8 @@ func Render(input Spec, listen string, port uint16, tag string, users []User) (R
 				clients = append(clients, map[string]any{"user": u.Email, "pass": PasswordFor(s, u)})
 			}
 			settings["accounts"] = clients
+			manifest["user_attribution"] = true
 		}
-		manifest["user_attribution"] = false
 	case "wireguard":
 		peers, e := wireguardPeers(s, users)
 		if e != nil {

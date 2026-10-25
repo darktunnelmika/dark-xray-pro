@@ -1,0 +1,457 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+package darkproadapter
+
+import (
+	"bytes"
+	"context"
+	"crypto/rand"
+	"crypto/subtle"
+	"encoding/binary"
+	"encoding/hex"
+	"errors"
+	"io"
+	"net"
+	"strconv"
+	"sync"
+	"time"
+)
+
+type Traffic struct{ Upload, Download uint64 }
+type udpFlow struct {
+	conn *net.UDPConn
+	done chan struct{}
+}
+
+// Bridge is reachable only on an ephemeral loopback endpoint. Protocol workers
+// authenticate every association using their verified user identity and this
+// process's fresh random password. It never exposes unauthenticated egress.
+type Bridge struct {
+	mu                  sync.Mutex
+	ctx                 context.Context
+	cancel              context.CancelFunc
+	listener            net.Listener
+	Addr, Password      string
+	open, closed, fault bool
+	users               map[string]Traffic
+	sockets             map[io.Closer]bool
+	wg                  sync.WaitGroup
+	accepted            chan struct{}
+	done                chan struct{}
+	once                sync.Once
+}
+
+func NewBridge(users []string) (*Bridge, error) {
+	ln, e := net.Listen("tcp4", "127.0.0.1:0")
+	if e != nil {
+		return nil, e
+	}
+	var secret [32]byte
+	if _, e = rand.Read(secret[:]); e != nil {
+		ln.Close()
+		return nil, e
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	b := &Bridge{ctx: ctx, cancel: cancel, listener: ln, Addr: ln.Addr().String(), Password: hex.EncodeToString(secret[:]), users: map[string]Traffic{}, sockets: map[io.Closer]bool{}, accepted: make(chan struct{}), done: make(chan struct{})}
+	for _, u := range users {
+		b.users[u] = Traffic{}
+	}
+	go b.accept()
+	return b, nil
+}
+func (b *Bridge) Activate() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if !b.closed {
+		b.open = true
+	}
+}
+func (b *Bridge) track(c io.Closer) bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.closed || !b.open {
+		_ = c.Close()
+		return false
+	}
+	b.sockets[c] = true
+	return true
+}
+func (b *Bridge) untrack(c io.Closer) {
+	_ = c.Close()
+	b.mu.Lock()
+	delete(b.sockets, c)
+	b.mu.Unlock()
+}
+func (b *Bridge) accept() {
+	defer close(b.accepted)
+	for {
+		c, e := b.listener.Accept()
+		if e != nil {
+			return
+		}
+		b.mu.Lock()
+		if b.closed || !b.open {
+			b.mu.Unlock()
+			c.Close()
+			continue
+		}
+		b.sockets[c] = true
+		b.wg.Add(1)
+		b.mu.Unlock()
+		go func() { defer b.wg.Done(); defer b.untrack(c); b.handle(c) }()
+	}
+}
+func (b *Bridge) count(user string, up bool, n int) bool {
+	if n < 0 {
+		return false
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	v, ok := b.users[user]
+	if !ok || b.fault {
+		return false
+	}
+	dst := &v.Download
+	if up {
+		dst = &v.Upload
+	}
+	if ^uint64(0)-*dst < uint64(n) {
+		b.fault = true
+		go b.Close()
+		return false
+	}
+	*dst += uint64(n)
+	b.users[user] = v
+	return true
+}
+func (b *Bridge) Snapshot() (map[string]Traffic, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.fault {
+		return nil, errors.New("invalid counters")
+	}
+	out := map[string]Traffic{}
+	for k, v := range b.users {
+		out[k] = v
+	}
+	return out, nil
+}
+func (b *Bridge) Close() {
+	b.once.Do(func() {
+		b.mu.Lock()
+		b.closed = true
+		b.open = false
+		b.cancel()
+		all := make([]io.Closer, 0, len(b.sockets))
+		for c := range b.sockets {
+			all = append(all, c)
+		}
+		b.mu.Unlock()
+		_ = b.listener.Close()
+		for _, c := range all {
+			_ = c.Close()
+		}
+		<-b.accepted
+		b.wg.Wait()
+		close(b.done)
+	})
+	<-b.done
+}
+func readBytes(r io.Reader, n int) ([]byte, error) {
+	out := make([]byte, n)
+	_, e := io.ReadFull(r, out)
+	return out, e
+}
+func readAddress(r io.Reader) (string, error) {
+	h, e := readBytes(r, 1)
+	if e != nil {
+		return "", e
+	}
+	host := ""
+	switch h[0] {
+	case 1:
+		v, e := readBytes(r, 4)
+		if e != nil {
+			return "", e
+		}
+		host = net.IP(v).String()
+	case 4:
+		v, e := readBytes(r, 16)
+		if e != nil {
+			return "", e
+		}
+		host = net.IP(v).String()
+	case 3:
+		n, e := readBytes(r, 1)
+		if e != nil || n[0] == 0 {
+			return "", errors.New("address")
+		}
+		v, e := readBytes(r, int(n[0]))
+		if e != nil {
+			return "", e
+		}
+		host = string(v)
+	default:
+		return "", errors.New("address")
+	}
+	p, e := readBytes(r, 2)
+	if e != nil {
+		return "", e
+	}
+	return net.JoinHostPort(host, strconv.Itoa(int(binary.BigEndian.Uint16(p)))), nil
+}
+func encodeAddress(a *net.UDPAddr) []byte {
+	ip := a.IP.To4()
+	kind := byte(1)
+	if ip == nil {
+		ip = a.IP.To16()
+		kind = 4
+	}
+	if ip == nil {
+		return nil
+	}
+	out := append([]byte{kind}, ip...)
+	return binary.BigEndian.AppendUint16(out, uint16(a.Port))
+}
+func reply(c net.Conn, code byte, addr *net.UDPAddr) error {
+	if addr == nil {
+		addr = &net.UDPAddr{IP: net.IPv4zero}
+	}
+	raw := append([]byte{5, code, 0}, encodeAddress(addr)...)
+	_, e := c.Write(raw)
+	return e
+}
+func (b *Bridge) auth(c net.Conn) (string, error) {
+	h, e := readBytes(c, 2)
+	if e != nil || h[0] != 5 || h[1] == 0 {
+		return "", errors.New("greeting")
+	}
+	methods, e := readBytes(c, int(h[1]))
+	if e != nil {
+		return "", e
+	}
+	if !bytes.Contains(methods, []byte{2}) {
+		_, _ = c.Write([]byte{5, 255})
+		return "", errors.New("authentication required")
+	}
+	if _, e = c.Write([]byte{5, 2}); e != nil {
+		return "", e
+	}
+	h, e = readBytes(c, 2)
+	if e != nil || h[0] != 1 || h[1] == 0 {
+		return "", errors.New("authentication")
+	}
+	user, e := readBytes(c, int(h[1]))
+	if e != nil {
+		return "", e
+	}
+	p, e := readBytes(c, 1)
+	if e != nil {
+		return "", e
+	}
+	password, e := readBytes(c, int(p[0]))
+	if e != nil {
+		return "", e
+	}
+	b.mu.Lock()
+	_, ok := b.users[string(user)]
+	allowed := b.open && !b.closed
+	b.mu.Unlock()
+	if !ok || !allowed || subtle.ConstantTimeCompare(password, []byte(b.Password)) != 1 {
+		_, _ = c.Write([]byte{1, 1})
+		return "", errors.New("authentication")
+	}
+	_, e = c.Write([]byte{1, 0})
+	return string(user), e
+}
+func (b *Bridge) handle(c net.Conn) {
+	_ = c.SetDeadline(time.Now().Add(10 * time.Second))
+	user, e := b.auth(c)
+	if e != nil {
+		return
+	}
+	h, e := readBytes(c, 3)
+	if e != nil || h[0] != 5 || h[2] != 0 {
+		return
+	}
+	target, e := readAddress(c)
+	if e != nil {
+		return
+	}
+	switch h[1] {
+	case 1:
+		b.tcp(c, user, target)
+	case 3:
+		b.udp(c, user)
+	default:
+		_ = reply(c, 7, nil)
+	}
+}
+func (b *Bridge) tcp(c net.Conn, user, target string) {
+	upstream, e := (&net.Dialer{Timeout: 10 * time.Second}).DialContext(b.ctx, "tcp", target)
+	if e != nil {
+		_ = reply(c, 5, nil)
+		return
+	}
+	if !b.track(upstream) {
+		return
+	}
+	defer b.untrack(upstream)
+	if reply(c, 0, nil) != nil {
+		return
+	}
+	_ = c.SetDeadline(time.Time{})
+	done := make(chan struct{})
+	copyPayload := func(dst, src net.Conn, up bool) {
+		buf := make([]byte, 32<<10)
+		for {
+			n, e := src.Read(buf)
+			if n > 0 {
+				w, writeErr := dst.Write(buf[:n])
+				if w > 0 && !b.count(user, up, w) {
+					return
+				}
+				if writeErr != nil || w != n {
+					return
+				}
+			}
+			if e != nil {
+				return
+			}
+		}
+	}
+	go func() {
+		defer close(done)
+		copyPayload(upstream, c, true)
+		if half, ok := upstream.(interface{ CloseWrite() error }); ok {
+			_ = half.CloseWrite()
+		}
+		_ = upstream.SetReadDeadline(time.Now().Add(2 * time.Minute))
+	}()
+	copyPayload(c, upstream, false)
+	if half, ok := c.(interface{ CloseWrite() error }); ok {
+		_ = half.CloseWrite()
+	}
+	_ = upstream.SetReadDeadline(time.Now().Add(2 * time.Minute))
+	_ = c.SetReadDeadline(time.Now().Add(2 * time.Minute))
+	<-done
+}
+func (b *Bridge) udp(control net.Conn, user string) {
+	ingress, e := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
+	if e != nil {
+		_ = reply(control, 1, nil)
+		return
+	}
+	if !b.track(ingress) {
+		return
+	}
+	defer b.untrack(ingress)
+	if reply(control, 0, ingress.LocalAddr().(*net.UDPAddr)) != nil {
+		return
+	}
+	_ = control.SetDeadline(time.Time{})
+	ctx, cancel := context.WithCancel(b.ctx)
+	defer cancel()
+	controlDone := make(chan struct{})
+	go func() { defer close(controlDone); _, _ = io.Copy(io.Discard, control); cancel(); _ = ingress.Close() }()
+	var client *net.UDPAddr
+	var pumps sync.WaitGroup
+	destinations := map[string]*udpFlow{}
+	defer func() {
+		cancel()
+		for _, flow := range destinations {
+			b.untrack(flow.conn)
+		}
+		_ = control.Close()
+		<-controlDone
+		pumps.Wait()
+	}()
+	buf := make([]byte, 65535)
+	for {
+		n, from, e := ingress.ReadFromUDP(buf)
+		if e != nil {
+			return
+		}
+		if !from.IP.IsLoopback() {
+			continue
+		}
+		if client == nil {
+			client = from
+		}
+		if from.String() != client.String() || n < 4 || buf[0] != 0 || buf[1] != 0 || buf[2] != 0 {
+			continue
+		}
+		reader := bytes.NewReader(buf[3:n])
+		target, e := readAddress(reader)
+		if e != nil {
+			continue
+		}
+		payload := buf[n-reader.Len() : n]
+		if len(payload) > 65507 {
+			continue
+		}
+		for name, flow := range destinations {
+			select {
+			case <-flow.done:
+				delete(destinations, name)
+			default:
+			}
+		}
+		flow := destinations[target]
+		var conn *net.UDPConn
+		if flow != nil {
+			conn = flow.conn
+		}
+		if conn == nil {
+			if len(destinations) >= 256 {
+				continue
+			}
+			dialed, e := (&net.Dialer{Timeout: 5 * time.Second}).DialContext(ctx, "udp", target)
+			if e != nil {
+				continue
+			}
+			var ok bool
+			conn, ok = dialed.(*net.UDPConn)
+			if !ok {
+				dialed.Close()
+				continue
+			}
+			if !b.track(conn) {
+				return
+			}
+			flow = &udpFlow{conn: conn, done: make(chan struct{})}
+			destinations[target] = flow
+			pumps.Add(1)
+			to := *client
+			go func(upstream *net.UDPConn, done chan struct{}) {
+				defer pumps.Done()
+				defer close(done)
+				defer b.untrack(upstream)
+				replyBuf := make([]byte, 65535)
+				for {
+					_ = upstream.SetReadDeadline(time.Now().Add(2 * time.Minute))
+					size, e := upstream.Read(replyBuf)
+					if e != nil {
+						return
+					}
+					header := append([]byte{0, 0, 0}, encodeAddress(upstream.RemoteAddr().(*net.UDPAddr))...)
+					packet := append(header, replyBuf[:size]...)
+					if len(packet) > 65507 {
+						continue
+					}
+					written, e := ingress.WriteToUDP(packet, &to)
+					if e != nil {
+						return
+					}
+					if written == len(packet) && !b.count(user, false, size) {
+						return
+					}
+				}
+			}(conn, flow.done)
+		}
+		if written, e := conn.Write(payload); written > 0 && e == nil {
+			if !b.count(user, true, written) {
+				return
+			}
+		}
+	}
+}

@@ -13,6 +13,7 @@ import (
 	"github.com/darktunnelmika/dark-xray-pro/internal/business"
 	"github.com/darktunnelmika/dark-xray-pro/internal/configstage"
 	"github.com/darktunnelmika/dark-xray-pro/internal/hubmonitor"
+	"github.com/darktunnelmika/dark-xray-pro/internal/inboundruntime"
 	"github.com/darktunnelmika/dark-xray-pro/internal/inboundsecurity"
 	"github.com/darktunnelmika/dark-xray-pro/internal/labrevision"
 	"github.com/darktunnelmika/dark-xray-pro/internal/managedxray"
@@ -214,6 +215,15 @@ func main() {
 	if os.Getenv("DARK_PRO_ENABLE_NATIVE_INBOUNDS") == "1" && os.Getenv("DARK_PRO_ENABLE_BUSINESS_CORE") != "1" {
 		log.Fatal("native inbounds require explicit new PRO business database")
 	}
+	if os.Getenv("DARK_PRO_ENABLE_INBOUND_EXECUTION") == "1" {
+		engines, e := inboundruntime.ParseExternalBinaries(os.Getenv("DARK_PRO_INBOUND_ENGINES_JSON"))
+		if e != nil {
+			log.Fatal("managed inbound engine configuration invalid")
+		}
+		if e = service.EnableInboundExecution(api.InboundExecutionConfig{Directory: os.Getenv("DARK_PRO_INBOUND_RUNTIME_DIR"), Native: inboundruntime.BinaryConfig{Path: os.Getenv("DARK_PRO_INBOUND_CORE_PATH"), SHA256: os.Getenv("DARK_PRO_INBOUND_CORE_SHA256")}, External: engines}); e != nil {
+			log.Fatal("managed inbound execution unavailable: ", e)
+		}
+	}
 	if os.Getenv("DARK_PRO_ENABLE_REMOTE_METERED_ADMISSION") == "1" {
 		if os.Getenv("DARK_PRO_LAB_MODE") != "1" || os.Getenv("DARK_PRO_ENABLE_USAGE_LEDGER") != "1" ||
 			os.Getenv("DARK_PRO_ENABLE_NATIVE_INBOUNDS") != "1" {
@@ -371,12 +381,16 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	go hubMonitor.Run(ctx)
+	go service.RunInboundExecution(ctx)
 	errs := make(chan error, 2)
 	go func() { errs <- admin.ListenAndServe() }()
 	if agentTLS != nil {
 		go func() { errs <- agentTLS.ListenAndServeTLS(*agentCert, *agentKey) }()
 	}
-	log.Printf("DARK XRAY PRO LAB owner UI: %s (loopback; no customer data plane)", *address)
+	log.Printf("DARK XRAY PRO LAB owner UI: %s (loopback)", *address)
+	if os.Getenv("DARK_PRO_ENABLE_INBOUND_EXECUTION") == "1" {
+		log.Printf("Managed inbound execution enabled; listeners require explicit reviewed target assignments")
+	}
 	if agentTLS != nil {
 		log.Printf("DARK XRAY PRO isolated HTTPS Agent transport enabled on %s (no owner API)", *agentListen)
 	}
@@ -388,12 +402,14 @@ func main() {
 			unexpected = nil
 		}
 	}
+	stop()
 	graceful, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	_ = admin.Shutdown(graceful)
 	if agentTLS != nil {
 		_ = agentTLS.Shutdown(graceful)
 	}
+	service.WaitInboundExecution(graceful)
 	if unexpected != nil {
 		log.Fatal(fmt.Errorf("LAB listener terminated: %w", unexpected))
 	}

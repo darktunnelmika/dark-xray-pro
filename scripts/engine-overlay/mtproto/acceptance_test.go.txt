@@ -1,0 +1,1003 @@
+package main
+
+import (
+	"bytes"
+	"context"
+	"crypto/hmac"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/binary"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"io"
+	"net"
+	"net/http"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"reflect"
+	"strconv"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"syscall"
+	"testing"
+	"time"
+
+	"github.com/mhsanaei/mtg-multi/essentials"
+	"github.com/mhsanaei/mtg-multi/mtglib"
+	"github.com/mhsanaei/mtg-multi/mtglib/obfuscation"
+)
+
+const activationNonce = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+const finalNonce = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+
+// mockDCNetwork redirects only the pinned engine's known DC2 addresses to an
+// owned loopback DC. All cover-site, HTTP, DNS and scout escape paths are
+// refused. No positive acceptance test contacts Telegram or the public Internet.
+type mockDCNetwork struct {
+	address string
+	dials   atomic.Uint64
+}
+
+func (n *mockDCNetwork) Dial(network, address string) (essentials.Conn, error) {
+	return n.DialContext(context.Background(), network, address)
+}
+
+func (n *mockDCNetwork) DialContext(ctx context.Context, network, address string) (essentials.Conn, error) {
+	allowed := false
+	for _, candidate := range essentials.TelegramCoreAddresses[2] {
+		allowed = allowed || address == candidate
+	}
+	if !allowed || network != "tcp4" {
+		return nil, errors.New("fixture blocks non-DC network access")
+	}
+	n.dials.Add(1)
+	c, err := (&net.Dialer{Timeout: time.Second}).DialContext(ctx, "tcp4", n.address)
+	if err != nil {
+		return nil, err
+	}
+	return essentials.WrapNetConn(c), nil
+}
+
+type blockedHTTP struct{}
+
+func (blockedHTTP) RoundTrip(*http.Request) (*http.Response, error) {
+	return nil, errors.New("fixture blocks HTTP network access")
+}
+func (*mockDCNetwork) MakeHTTPClient(func(context.Context, string, string) (essentials.Conn, error)) *http.Client {
+	return &http.Client{Transport: blockedHTTP{}}
+}
+func (*mockDCNetwork) NativeDialer() *net.Dialer {
+	return &net.Dialer{Control: func(string, string, syscall.RawConn) error {
+		return errors.New("fixture blocks native network access")
+	}}
+}
+
+func newMockDC(t *testing.T) *mockDCNetwork {
+	t.Helper()
+	l, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := &mockDCNetwork{address: l.Addr().String()}
+	var mu sync.Mutex
+	conns := map[net.Conn]bool{}
+	var wg sync.WaitGroup
+	accepted := make(chan struct{})
+	go func() {
+		defer close(accepted)
+		for {
+			c, err := l.Accept()
+			if err != nil {
+				return
+			}
+			mu.Lock()
+			conns[c] = true
+			wg.Add(1)
+			mu.Unlock()
+			go func() {
+				defer wg.Done()
+				defer func() { _ = c.Close(); mu.Lock(); delete(conns, c); mu.Unlock() }()
+				_ = c.SetDeadline(time.Now().Add(20 * time.Second))
+				dc, stream, err := (obfuscation.Obfuscator{}).ReadHandshake(essentials.WrapNetConn(c))
+				if err != nil {
+					return
+				}
+				if dc != 2 {
+					t.Errorf("mock DC received data-center %d, want 2", dc)
+					return
+				}
+				// The real server-side obfuscated transport decrypts before this
+				// echo and encrypts the response with its independent send key.
+				_, _ = io.Copy(stream, stream)
+			}()
+		}
+	}()
+	t.Cleanup(func() {
+		_ = l.Close()
+		<-accepted
+		mu.Lock()
+		for c := range conns {
+			_ = c.Close()
+		}
+		mu.Unlock()
+		wg.Wait()
+	})
+	return n
+}
+
+func fixtureInput(t *testing.T, names ...string) (input, map[string]mtglib.Secret) {
+	t.Helper()
+	in := input{Version: 1, Engine: "mtproto", Config: map[string]any{"bind-to": "127.0.0.1:23111", "prefer-ip": "only-ipv4"}, Manifest: map[string]any{}}
+	secrets := map[string]mtglib.Secret{}
+	configured := map[string]any{}
+	for _, name := range names {
+		s := mtglib.GenerateSecret("fixture.example.test")
+		secrets[name] = s
+		configured[name] = s.Hex()
+		h := sha256.Sum256([]byte(s.Hex()))
+		in.Principals = append(in.Principals, principal{ID: "principal-" + name, Engine: "mtproto", Role: "customer", Counter: "user>>>" + name + ">>>traffic", CredentialSHA: hex.EncodeToString(h[:]), Billable: true, InboundID: 37})
+	}
+	in.Config["secrets"] = configured
+	return in, secrets
+}
+
+type fixtureWorker struct {
+	w      *worker
+	client *http.Client
+	socket string
+}
+
+func newFixtureWorker(t *testing.T, in input, network mtglib.Network) *fixtureWorker {
+	t.Helper()
+	if in.Config["bind-to"] == "127.0.0.1:23111" {
+		reserved, err := net.Listen("tcp4", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		in.Config["bind-to"] = reserved.Addr().String()
+		_ = reserved.Close()
+	}
+	p, conf, err := makeProxyWithNetwork(in, true, network)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w, err := startWorker(p, conf, in.Principals)
+	if err != nil {
+		p.Shutdown()
+		t.Fatal(err)
+	}
+	// Match the deployed control boundary: 0700 birth directory, 0600 Unix
+	// socket. There is no loopback TCP endpoint capable of activating the gate.
+	dir, err := os.MkdirTemp("", "dxp-mtg-control-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "control.sock")
+	l, err := net.Listen("unix", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = os.Chmod(path, 0600); err != nil {
+		t.Fatal(err)
+	}
+	s := &http.Server{Handler: http.HandlerFunc(w.handle)}
+	served := make(chan struct{})
+	go func() { defer close(served); _ = s.Serve(l) }()
+	transport := &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+		return (&net.Dialer{}).DialContext(ctx, "unix", path)
+	}}
+	f := &fixtureWorker{w: w, client: &http.Client{Transport: transport, Timeout: 10 * time.Second}, socket: path}
+	t.Cleanup(func() {
+		w.mu.Lock()
+		nonce := w.nonce
+		w.mu.Unlock()
+		if nonce == "" {
+			nonce = finalNonce
+		}
+		_ = w.beginFinal(nonce)
+		select {
+		case <-w.sealed:
+		case <-time.After(10 * time.Second):
+			t.Error("worker final barrier did not join")
+		}
+		transport.CloseIdleConnections()
+		_ = s.Close()
+		<-served
+		_ = os.RemoveAll(dir)
+	})
+	return f
+}
+
+func (f *fixtureWorker) request(t *testing.T, op, nonce string, code int) response {
+	t.Helper()
+	body, _ := json.Marshal(map[string]string{"nonce": nonce})
+	r, err := f.client.Post("http://worker/"+op, "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Body.Close()
+	if r.StatusCode != code {
+		b, _ := io.ReadAll(r.Body)
+		t.Fatalf("%s status %d, want %d: %s", op, r.StatusCode, code, b)
+	}
+	var out response
+	if code == 200 {
+		if err = json.NewDecoder(r.Body).Decode(&out); err != nil {
+			t.Fatal(err)
+		}
+		if out.Version != 1 || out.Engine != "mtproto" || !out.Ready {
+			t.Fatalf("invalid receipt: %+v", out)
+		}
+	}
+	return out
+}
+
+func assertZero(t *testing.T, r response, count int) {
+	t.Helper()
+	if r.Open || r.Final || len(r.Counters) != count {
+		t.Fatalf("invalid zero receipt: %+v", r)
+	}
+	for _, c := range r.Counters {
+		if c.Upload != 0 || c.Download != 0 {
+			t.Fatalf("nonzero birth: %+v", c)
+		}
+	}
+}
+func findCounter(t *testing.T, r response, id string) counter {
+	t.Helper()
+	for _, c := range r.Counters {
+		if c.ID == "principal-"+id {
+			return c
+		}
+	}
+	t.Fatalf("missing principal %s", id)
+	return counter{}
+}
+
+func readTLSRecord(r io.Reader) ([]byte, error) {
+	header := make([]byte, 5)
+	if _, err := io.ReadFull(r, header); err != nil {
+		return nil, err
+	}
+	n := int(binary.BigEndian.Uint16(header[3:]))
+	if n > 18432 {
+		return nil, errors.New("oversized TLS record")
+	}
+	out := append(header, make([]byte, n)...)
+	_, err := io.ReadFull(r, out[5:])
+	return out, err
+}
+
+// fakeTLSRecords implements only the independent test client's record layer.
+// Authentication is an actual HMAC ClientHello / verified ServerHello, followed
+// by mtg's public AES-CTR obfuscation client and the real engine server.
+type fakeTLSRecords struct {
+	net.Conn
+	pending []byte
+}
+
+func (c *fakeTLSRecords) Read(p []byte) (int, error) {
+	for len(c.pending) == 0 {
+		record, err := readTLSRecord(c.Conn)
+		if err != nil {
+			return 0, err
+		}
+		if record[0] != 0x17 || record[1] != 3 || record[2] != 3 {
+			return 0, errors.New("unexpected FakeTLS data record")
+		}
+		c.pending = record[5:]
+	}
+	n := copy(p, c.pending)
+	c.pending = c.pending[n:]
+	return n, nil
+}
+func (c *fakeTLSRecords) Write(p []byte) (int, error) {
+	total := 0
+	for len(p) > 0 {
+		n := min(len(p), 16384)
+		record := make([]byte, 5+n)
+		copy(record, []byte{0x17, 3, 3})
+		binary.BigEndian.PutUint16(record[3:5], uint16(n))
+		copy(record[5:], p[:n])
+		if err := writeAll(c.Conn, record); err != nil {
+			return total, err
+		}
+		total += n
+		p = p[n:]
+	}
+	return total, nil
+}
+func writeAll(w io.Writer, p []byte) error {
+	for len(p) > 0 {
+		n, err := w.Write(p)
+		if err != nil {
+			return err
+		}
+		if n == 0 {
+			return io.ErrShortWrite
+		}
+		p = p[n:]
+	}
+	return nil
+}
+
+func fakeTLSClient(address string, secret mtglib.Secret) (essentials.Conn, error) {
+	c, err := net.DialTimeout("tcp4", address, time.Second)
+	if err != nil {
+		return nil, err
+	}
+	success := false
+	defer func() {
+		if !success {
+			_ = c.Close()
+		}
+	}()
+	_ = c.SetDeadline(time.Now().Add(5 * time.Second))
+	// ClientHello body: TLS1.2 legacy version, random, unique session, AES128
+	// TLS1.3 cipher, null compression, and an actual SNI extension.
+	body := append([]byte{3, 3}, make([]byte, 32)...)
+	session := make([]byte, 32)
+	if _, err = rand.Read(session); err != nil {
+		return nil, err
+	}
+	body = append(body, 32)
+	body = append(body, session...)
+	body = append(body, 0, 2, 0x13, 1, 1, 0)
+	sni := make([]byte, 5+len(secret.Host))
+	binary.BigEndian.PutUint16(sni[:2], uint16(3+len(secret.Host)))
+	binary.BigEndian.PutUint16(sni[3:5], uint16(len(secret.Host)))
+	copy(sni[5:], secret.Host)
+	ext := make([]byte, 4+len(sni))
+	binary.BigEndian.PutUint16(ext[2:4], uint16(len(sni)))
+	copy(ext[4:], sni)
+	body = binary.BigEndian.AppendUint16(body, uint16(len(ext)))
+	body = append(body, ext...)
+	hello := []byte{0x16, 3, 1, 0, 0, 1, 0, 0, 0}
+	binary.BigEndian.PutUint16(hello[3:5], uint16(len(body)+4))
+	hello[6] = byte(len(body) >> 16)
+	hello[7] = byte(len(body) >> 8)
+	hello[8] = byte(len(body))
+	hello = append(hello, body...)
+	h := hmac.New(sha256.New, secret.Key[:])
+	_, _ = h.Write(hello)
+	clientRandom := h.Sum(nil)
+	stamp := make([]byte, 4)
+	binary.LittleEndian.PutUint32(stamp, uint32(time.Now().Unix()))
+	for i := range stamp {
+		clientRandom[28+i] ^= stamp[i]
+	}
+	copy(hello[11:43], clientRandom)
+	if err = writeAll(c, hello); err != nil {
+		return nil, err
+	}
+	var reply []byte
+	for _, typ := range []byte{0x16, 0x14, 0x17} {
+		record, e := readTLSRecord(c)
+		if e != nil {
+			return nil, e
+		}
+		if record[0] != typ {
+			return nil, errors.New("unexpected FakeTLS handshake record")
+		}
+		reply = append(reply, record...)
+	}
+	if len(reply) < 43 {
+		return nil, errors.New("short FakeTLS ServerHello")
+	}
+	serverRandom := append([]byte(nil), reply[11:43]...)
+	clear(reply[11:43])
+	h = hmac.New(sha256.New, secret.Key[:])
+	_, _ = h.Write(clientRandom)
+	_, _ = h.Write(reply)
+	if !hmac.Equal(serverRandom, h.Sum(nil)) {
+		return nil, errors.New("invalid FakeTLS server authentication")
+	}
+	stream, err := (obfuscation.Obfuscator{Secret: secret.Key[:]}).SendHandshake(essentials.WrapNetConn(&fakeTLSRecords{Conn: c}), 2)
+	if err != nil {
+		return nil, err
+	}
+	success = true
+	return stream, nil
+}
+
+func exchange(c net.Conn, payload []byte) error {
+	if err := c.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
+		return err
+	}
+	// The upstream obfuscator intentionally encrypts its input in place.
+	if err := writeAll(c, append([]byte(nil), payload...)); err != nil {
+		return err
+	}
+	reply := make([]byte, len(payload))
+	if _, err := io.ReadFull(c, reply); err != nil {
+		return err
+	}
+	if !bytes.Equal(reply, payload) {
+		return errors.New("encrypted payload mismatch")
+	}
+	return nil
+}
+
+func TestManagedMTProtoFakeTLSPayloadAccountingIsolationAndFinal(t *testing.T) {
+	network := newMockDC(t)
+	in, secrets := fixtureInput(t, "alice", "bob")
+	f := newFixtureWorker(t, in, network)
+	assertZero(t, f.request(t, "status", "", 200), 2)
+	if c, err := fakeTLSClient(f.w.listener.Addr().String(), secrets["alice"]); err == nil {
+		_ = c.Close()
+		t.Fatal("traffic admitted before activation")
+	}
+	if network.dials.Load() != 0 {
+		t.Fatal("closed gate reached a DC")
+	}
+	active := f.request(t, "activate", activationNonce, 200)
+	if !active.Open || active.Nonce != activationNonce {
+		t.Fatal("no activation receipt")
+	}
+	f.request(t, "activate", activationNonce, 200)
+	f.request(t, "activate", finalNonce, 409)
+	address := f.w.listener.Addr().String()
+	alice, err := fakeTLSClient(address, secrets["alice"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer alice.Close()
+	payload := bytes.Repeat([]byte("MTProto encrypted owned fixture\x00\xff"), 1024)
+	if err = exchange(alice, payload); err != nil {
+		t.Fatal(err)
+	}
+	a := f.request(t, "snapshot", "", 200)
+	a1 := findCounter(t, a, "alice")
+	b0 := findCounter(t, a, "bob")
+	if a1.Upload != uint64(len(payload)) || a1.Download != uint64(len(payload)) || b0.Upload != 0 || b0.Download != 0 {
+		t.Fatalf("unexpected first-user accounting: %+v", a.Counters)
+	}
+	bob, err := fakeTLSClient(address, secrets["bob"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer bob.Close()
+	if err = exchange(bob, payload[:11237]); err != nil {
+		t.Fatal(err)
+	}
+	b := f.request(t, "snapshot", "", 200)
+	b1 := findCounter(t, b, "bob")
+	if findCounter(t, b, "alice") != a1 || b1.Upload != 11237 || b1.Download != 11237 {
+		t.Fatalf("cross-user counter contamination: %+v", b.Counters)
+	}
+	wrong := mtglib.GenerateSecret(secrets["alice"].Host)
+	if c, err := fakeTLSClient(address, wrong); err == nil {
+		_ = c.Close()
+		t.Fatal("incorrect credential authenticated")
+	}
+	if now := f.request(t, "snapshot", "", 200); !reflect.DeepEqual(now.Counters, b.Counters) {
+		t.Fatal("unauthenticated request changed billable counters")
+	}
+	// Keep a producer repeatedly transmitting as the final request fences the
+	// gate. The receipt must join both engine relay directions and all accepted
+	// wrapper roots, including doppelganger buffered writes.
+	done := make(chan error, 1)
+	var rounds atomic.Uint64
+	go func() {
+		for {
+			if err := exchange(alice, payload); err != nil {
+				done <- err
+				return
+			}
+			rounds.Add(1)
+		}
+	}()
+	deadline := time.Now().Add(5 * time.Second)
+	for rounds.Load() < 4 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if rounds.Load() < 4 {
+		t.Fatal("no in-flight encrypted traffic")
+	}
+	final := f.request(t, "final", finalNonce, 200)
+	if !final.Final || final.Open || final.Nonce != finalNonce {
+		t.Fatalf("invalid final: %+v", final)
+	}
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("final returned with a live payload producer")
+	}
+	finalAlice := findCounter(t, final, "alice")
+	if finalAlice.Upload <= a1.Upload || finalAlice.Download <= a1.Download {
+		t.Fatal("final omitted admitted payload")
+	}
+	f.w.mu.Lock()
+	roots := len(f.w.conns)
+	f.w.mu.Unlock()
+	if roots != 0 {
+		t.Fatalf("%d roots remain after final", roots)
+	}
+	if c, err := fakeTLSClient(address, secrets["bob"]); err == nil {
+		_ = c.Close()
+		t.Fatal("listener accepts after final")
+	}
+	for range 4 {
+		now := f.request(t, "snapshot", "", 200)
+		replay := f.request(t, "final", finalNonce, 200)
+		if !reflect.DeepEqual(now.Counters, final.Counters) || !reflect.DeepEqual(replay, final) {
+			t.Fatal("final receipt is mutable")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	stats, err := f.w.snapshot()
+	if err != nil || !reflect.DeepEqual(stats, final.Counters) {
+		t.Fatal("engine counters continued after sealed snapshot")
+	}
+	f.request(t, "activate", activationNonce, 409)
+	f.request(t, "final", activationNonce, 409)
+	if network.dials.Load() != 2 {
+		t.Fatalf("unexpected DC dials %d", network.dials.Load())
+	}
+}
+
+func TestManagedMTProtoRemovedCredentialCannotReturn(t *testing.T) {
+	network := newMockDC(t)
+	in, secrets := fixtureInput(t, "alice", "bob")
+	first := newFixtureWorker(t, in, network)
+	first.request(t, "activate", activationNonce, 200)
+	old, err := fakeTLSClient(first.w.listener.Addr().String(), secrets["alice"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer old.Close()
+	if err = exchange(old, []byte("before revocation")); err != nil {
+		t.Fatal(err)
+	}
+	final := first.request(t, "final", finalNonce, 200)
+	// Runtime revocation uses an immutable successor birth, not mutation of
+	// an already journaled credential set. The removed credential is absent.
+	in.Config["bind-to"] = first.w.listener.Addr().String()
+	delete(in.Config["secrets"].(map[string]any), "alice")
+	in.Principals = in.Principals[1:]
+	next := newFixtureWorker(t, in, network)
+	assertZero(t, next.request(t, "snapshot", "", 200), 1)
+	next.request(t, "activate", activationNonce, 200)
+	if err = exchange(old, []byte("revoked stream")); err == nil {
+		t.Fatal("old admitted credential survived final")
+	}
+	if c, err := fakeTLSClient(next.w.listener.Addr().String(), secrets["alice"]); err == nil {
+		_ = c.Close()
+		t.Fatal("removed credential authenticated in successor")
+	}
+	bob, err := fakeTLSClient(next.w.listener.Addr().String(), secrets["bob"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer bob.Close()
+	payload := []byte("retained user survives successor birth")
+	if err = exchange(bob, payload); err != nil {
+		t.Fatal(err)
+	}
+	now := next.request(t, "snapshot", "", 200)
+	c := findCounter(t, now, "bob")
+	if len(now.Counters) != 1 || c.Upload != uint64(len(payload)) || c.Download != uint64(len(payload)) {
+		t.Fatalf("successor accounting %+v", now)
+	}
+	if replay := first.request(t, "final", finalNonce, 200); !reflect.DeepEqual(replay, final) {
+		t.Fatal("revocation changed old final")
+	}
+}
+
+func TestManagedMTProtoOwnerAggregatePayloadAndFinal(t *testing.T) {
+	in, secrets := fixtureInput(t, "alice", "bob")
+	in.Principals = []principal{{ID: "aggregate-owner", Engine: "mtproto", ComponentTag: "owned-mtg", Role: "owner_aggregate", Counter: "inbound>>>owned-mtg>>>traffic", InboundID: 37}}
+	f := newFixtureWorker(t, in, newMockDC(t))
+	assertZero(t, f.request(t, "snapshot", "", 200), 1)
+	f.request(t, "activate", activationNonce, 200)
+	var expected uint64
+	for _, name := range []string{"alice", "bob"} {
+		c, err := fakeTLSClient(f.w.listener.Addr().String(), secrets[name])
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer c.Close()
+		payload := bytes.Repeat([]byte("aggregate payload for "+name), 97)
+		if err = exchange(c, payload); err != nil {
+			t.Fatal(err)
+		}
+		expected += uint64(len(payload))
+		r := f.request(t, "snapshot", "", 200)
+		if len(r.Counters) != 1 || r.Counters[0] != (counter{ID: "aggregate-owner", Upload: expected, Download: expected}) {
+			t.Fatalf("aggregate lost or duplicated a user's payload: %+v", r.Counters)
+		}
+	}
+	final := f.request(t, "final", finalNonce, 200)
+	if !final.Final || final.Open || len(final.Counters) != 1 || final.Counters[0] != (counter{ID: "aggregate-owner", Upload: expected, Download: expected}) {
+		t.Fatalf("aggregate final %+v", final)
+	}
+	if replay := f.request(t, "final", finalNonce, 200); !reflect.DeepEqual(replay, final) {
+		t.Fatal("aggregate final changed")
+	}
+	for _, name := range []string{"alice", "bob"} {
+		if c, err := fakeTLSClient(f.w.listener.Addr().String(), secrets[name]); err == nil {
+			_ = c.Close()
+			t.Fatal("aggregate listener still accepts")
+		}
+	}
+}
+
+func newPrivateSOCKSFixture(t *testing.T, dc *mockDCNetwork) (string, *atomic.Uint64) {
+	t.Helper()
+	l, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var authenticated atomic.Uint64
+	var mu sync.Mutex
+	conns := map[net.Conn]bool{}
+	var wg sync.WaitGroup
+	accepted := make(chan struct{})
+	go func() {
+		defer close(accepted)
+		for {
+			c, err := l.Accept()
+			if err != nil {
+				return
+			}
+			mu.Lock()
+			conns[c] = true
+			wg.Add(1)
+			mu.Unlock()
+			go func() {
+				defer wg.Done()
+				defer func() { _ = c.Close(); mu.Lock(); delete(conns, c); mu.Unlock() }()
+				_ = c.SetDeadline(time.Now().Add(10 * time.Second))
+				var header [2]byte
+				if _, err := io.ReadFull(c, header[:]); err != nil {
+					return
+				}
+				methods := make([]byte, int(header[1]))
+				if _, err := io.ReadFull(c, methods); err != nil || header[0] != 5 || !bytes.Contains(methods, []byte{2}) {
+					return
+				}
+				if writeAll(c, []byte{5, 2}) != nil {
+					return
+				}
+				if _, err := io.ReadFull(c, header[:]); err != nil || header[0] != 1 {
+					return
+				}
+				user := make([]byte, int(header[1]))
+				if _, err := io.ReadFull(c, user); err != nil {
+					return
+				}
+				if _, err := io.ReadFull(c, header[:1]); err != nil {
+					return
+				}
+				password := make([]byte, int(header[0]))
+				if _, err := io.ReadFull(c, password); err != nil {
+					return
+				}
+				if string(user) != "owned-user" || string(password) != "owned-password" {
+					_ = writeAll(c, []byte{1, 1})
+					return
+				}
+				if writeAll(c, []byte{1, 0}) != nil {
+					return
+				}
+				var request [4]byte
+				if _, err := io.ReadFull(c, request[:]); err != nil || request[0] != 5 || request[1] != 1 || request[2] != 0 {
+					return
+				}
+				var host string
+				switch request[3] {
+				case 1:
+					b := make([]byte, 4)
+					if _, err := io.ReadFull(c, b); err != nil {
+						return
+					}
+					host = net.IP(b).String()
+				case 4:
+					b := make([]byte, 16)
+					if _, err := io.ReadFull(c, b); err != nil {
+						return
+					}
+					host = net.IP(b).String()
+				case 3:
+					if _, err := io.ReadFull(c, header[:1]); err != nil {
+						return
+					}
+					b := make([]byte, int(header[0]))
+					if _, err := io.ReadFull(c, b); err != nil {
+						return
+					}
+					host = string(b)
+				default:
+					return
+				}
+				if _, err := io.ReadFull(c, header[:]); err != nil {
+					return
+				}
+				destination := net.JoinHostPort(host, strconv.Itoa(int(binary.BigEndian.Uint16(header[:]))))
+				allowed := false
+				for _, value := range essentials.TelegramCoreAddresses[2] {
+					allowed = allowed || value == destination
+				}
+				if !allowed {
+					return
+				}
+				upstream, err := net.DialTimeout("tcp4", dc.address, time.Second)
+				if err != nil {
+					return
+				}
+				defer upstream.Close()
+				authenticated.Add(1)
+				if writeAll(c, []byte{5, 0, 0, 1, 127, 0, 0, 1, 0, 0}) != nil {
+					return
+				}
+				done := make(chan struct{})
+				go func() { defer close(done); _, _ = io.Copy(c, upstream); _ = c.Close() }()
+				_, _ = io.Copy(upstream, c)
+				_ = upstream.Close()
+				<-done
+			}()
+		}
+	}()
+	t.Cleanup(func() {
+		_ = l.Close()
+		<-accepted
+		mu.Lock()
+		for c := range conns {
+			_ = c.Close()
+		}
+		mu.Unlock()
+		wg.Wait()
+	})
+	return "socks5://owned-user:owned-password@" + l.Addr().String(), &authenticated
+}
+
+func TestManagedMTProtoAuthenticatedSOCKSBridge(t *testing.T) {
+	dc := newMockDC(t)
+	endpoint, authenticated := newPrivateSOCKSFixture(t, dc)
+	in, secrets := fixtureInput(t, "alice")
+	in.Manifest["requires_socks_bridge"] = true
+	in.Manifest["socks_bridge_url"] = endpoint
+	// Use the production network.NewProxyNetwork path, with no injected engine
+	// network. Its authenticated SOCKS peer only forwards the known DC2 target
+	// to our local fixture and cannot reach the public network.
+	f := newFixtureWorker(t, in, nil)
+	assertZero(t, f.request(t, "status", "", 200), 1)
+	if authenticated.Load() != 0 {
+		t.Fatal("bridge used before admission")
+	}
+	f.request(t, "activate", activationNonce, 200)
+	c, err := fakeTLSClient(f.w.listener.Addr().String(), secrets["alice"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	payload := bytes.Repeat([]byte("owned SOCKS-routed MTProto payload"), 1024)
+	if err = exchange(c, payload); err != nil {
+		t.Fatal(err)
+	}
+	r := f.request(t, "snapshot", "", 200)
+	value := findCounter(t, r, "alice")
+	if authenticated.Load() != 1 || value.Upload != uint64(len(payload)) || value.Download != uint64(len(payload)) {
+		t.Fatalf("bridge/counters mismatch: authenticated=%d counters=%+v", authenticated.Load(), value)
+	}
+	final := f.request(t, "final", finalNonce, 200)
+	if !final.Final || final.Open {
+		t.Fatal("bridge final missing")
+	}
+	if next := f.request(t, "final", finalNonce, 200); !reflect.DeepEqual(final, next) {
+		t.Fatal("bridge final changed")
+	}
+}
+
+func TestMTProtoBindingsRejectAliases(t *testing.T) {
+	tests := map[string]func(*input){
+		"duplicate_counter": func(in *input) { in.Principals[1].Counter = in.Principals[0].Counter },
+		"duplicate_id":      func(in *input) { in.Principals[1].ID = in.Principals[0].ID },
+		"shared_secret_key": func(in *input) {
+			values := in.Config["secrets"].(map[string]any)
+			values["bob"] = values["alice"]
+			in.Principals[1].CredentialSHA = in.Principals[0].CredentialSHA
+		},
+		"shared_key_different_host": func(in *input) {
+			values := in.Config["secrets"].(map[string]any)
+			s, _ := mtglib.ParseSecret(values["alice"].(string))
+			s.Host = "second.example.test"
+			values["bob"] = s.Hex()
+			h := sha256.Sum256([]byte(s.Hex()))
+			in.Principals[1].CredentialSHA = hex.EncodeToString(h[:])
+		},
+		"wrong_credential_hash": func(in *input) { in.Principals[0].CredentialSHA = strings.Repeat("0", 64) },
+		"missing_hash":          func(in *input) { in.Principals[0].CredentialSHA = "" },
+		"foreign_counter":       func(in *input) { in.Principals[0].Counter = "user>>>mallory>>>traffic" },
+		"extra_listener":        func(in *input) { in.Config["bind-to"] = []string{"127.0.0.1:23111", "127.0.0.1:23112"} },
+		"missing_bridge":        func(in *input) { in.Manifest["requires_socks_bridge"] = true },
+		"remote_bridge": func(in *input) {
+			in.Manifest["requires_socks_bridge"] = true
+			in.Manifest["socks_bridge_url"] = "socks5://u:p@example.test:1080"
+		},
+		"unauthenticated_bridge": func(in *input) {
+			in.Manifest["requires_socks_bridge"] = true
+			in.Manifest["socks_bridge_url"] = "socks5://user@127.0.0.1:1080"
+		},
+		"invalid_bridge_port": func(in *input) {
+			in.Manifest["requires_socks_bridge"] = true
+			in.Manifest["socks_bridge_url"] = "socks5://user:password@127.0.0.1:65536"
+		},
+	}
+	for name, mutate := range tests {
+		t.Run(name, func(t *testing.T) {
+			in, _ := fixtureInput(t, "alice", "bob")
+			mutate(&in)
+			p, _, err := makeProxy(in, false)
+			if err == nil || p != nil {
+				t.Fatal("invalid identity/configuration accepted")
+			}
+		})
+	}
+	in, _ := fixtureInput(t, "alice", "bob")
+	if p, _, err := makeProxy(in, false); err != nil || p != nil {
+		t.Fatalf("valid config check: %v", err)
+	}
+	for _, change := range []func(*principal){func(p *principal) { p.Billable = true }, func(p *principal) { p.ClientID = "alice" }, func(p *principal) { p.ComponentTag = "foreign" }, func(p *principal) { p.Role = "customer" }} {
+		aggregate, _ := fixtureInput(t, "alice", "bob")
+		p := principal{ID: "aggregate-owner", Engine: "mtproto", ComponentTag: "owned-mtg", Role: "owner_aggregate", Counter: "inbound>>>owned-mtg>>>traffic", InboundID: 37}
+		change(&p)
+		aggregate.Principals = []principal{p}
+		if _, _, err := makeProxy(aggregate, false); err == nil {
+			t.Fatal("invalid owner aggregate binding accepted")
+		}
+	}
+}
+
+func TestMTProtoControlNonceAndStrictRequests(t *testing.T) {
+	in, _ := fixtureInput(t, "alice")
+	f := newFixtureWorker(t, in, newMockDC(t))
+	info, err := os.Stat(f.socket)
+	if err != nil || info.Mode().Perm() != 0600 {
+		t.Fatal("control socket is not private")
+	}
+	for _, tc := range []struct {
+		method, path, body string
+		want               int
+	}{
+		{"GET", "status", "{}", 405}, {"POST", "activate", `{"nonce":"short"}`, 409},
+		{"POST", "activate", `{"nonce":"` + strings.Repeat("A", 64) + `"}`, 409},
+		{"POST", "status", `{"other":1}`, 422}, {"POST", "status", "{}{}", 422},
+		{"POST", "status", "{", 422}, {"POST", "unknown", "{}", 404},
+	} {
+		r, _ := http.NewRequest(tc.method, "http://worker/"+tc.path, strings.NewReader(tc.body))
+		response, err := f.client.Do(r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, _ = io.Copy(io.Discard, response.Body)
+		_ = response.Body.Close()
+		if response.StatusCode != tc.want {
+			t.Fatalf("%s %s got %d", tc.method, tc.path, response.StatusCode)
+		}
+	}
+	assertZero(t, f.request(t, "snapshot", "", 200), 1)
+	final := f.request(t, "final", finalNonce, 200)
+	if !final.Final || final.Open || len(final.Counters) != 1 || final.Counters[0].Upload != 0 || final.Counters[0].Download != 0 {
+		t.Fatal("closed birth did not finalize zero")
+	}
+	f.request(t, "activate", activationNonce, 409)
+}
+
+// Run the exact production entry point in a separate process so --check and
+// SIGTERM/control lifecycle are tested without replacing process-global flags
+// or signal handlers in another test.
+func TestMTProtoWorkerProcess(t *testing.T) {
+	if os.Getenv("DARKPRO_MTG_TEST_PROCESS") != "1" {
+		return
+	}
+	for i, arg := range os.Args {
+		if arg == "--" {
+			if run(os.Args[i+1:]) != nil {
+				os.Exit(3)
+			}
+			os.Exit(0)
+		}
+	}
+	os.Exit(4)
+}
+func workerProcess(t *testing.T, args ...string) *exec.Cmd {
+	t.Helper()
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(executable, append([]string{"-test.run=^TestMTProtoWorkerProcess$", "--"}, args...)...)
+	cmd.Env = append(os.Environ(), "DARKPRO_MTG_TEST_PROCESS=1")
+	return cmd
+}
+
+func TestMTProtoCheckAndPrivateProcessLifecycle(t *testing.T) {
+	in, _ := fixtureInput(t, "alice")
+	// An occupied listener and absent control socket prove --check does not
+	// start the engine or bind a customer socket, even with a valid config.
+	occupied, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer occupied.Close()
+	in.Config["bind-to"] = occupied.Addr().String()
+	dir, err := os.MkdirTemp("", "dxp-mtg-process-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+	path := filepath.Join(dir, "config.json")
+	raw, _ := json.Marshal(in)
+	if err = os.WriteFile(path, raw, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := workerProcess(t, "--config", path, "--check").CombinedOutput(); err != nil {
+		t.Fatalf("side-effect-free check: %v %s", err, out)
+	}
+	if err = os.WriteFile(path, append(append([]byte(nil), raw...), []byte(" {}")...), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := workerProcess(t, "--config", path, "--check").CombinedOutput(); err == nil {
+		t.Fatalf("trailing config accepted: %s", out)
+	}
+	_ = occupied.Close()
+	if err = os.WriteFile(path, raw, 0600); err != nil {
+		t.Fatal(err)
+	}
+	socket := filepath.Join(dir, "control.sock")
+	cmd := workerProcess(t, "--config", path, "--control", socket)
+	var output bytes.Buffer
+	cmd.Stdout = &output
+	cmd.Stderr = &output
+	if err = cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+	defer func() { _ = cmd.Process.Kill() }()
+	transport := &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+		return (&net.Dialer{}).DialContext(ctx, "unix", socket)
+	}}
+	defer transport.CloseIdleConnections()
+	f := &fixtureWorker{client: &http.Client{Transport: transport, Timeout: 5 * time.Second}, socket: socket}
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		if info, e := os.Stat(socket); e == nil {
+			if info.Mode().Perm() != 0600 {
+				t.Fatal("process socket permission")
+			}
+			break
+		}
+		select {
+		case err := <-done:
+			t.Fatalf("early process exit: %v %s", err, output.String())
+		default:
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("control readiness timeout")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	assertZero(t, f.request(t, "status", "", 200), 1)
+	f.request(t, "activate", activationNonce, 200)
+	final := f.request(t, "final", finalNonce, 200)
+	if !final.Final || final.Open {
+		t.Fatal("missing process final")
+	}
+	f.request(t, "activate", activationNonce, 409)
+	if err = cmd.Process.Signal(syscall.SIGTERM); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err = <-done:
+		if err != nil {
+			t.Fatalf("process shutdown: %v %s", err, output.String())
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("SIGTERM did not join worker")
+	}
+}
