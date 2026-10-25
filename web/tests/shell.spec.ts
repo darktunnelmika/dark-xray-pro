@@ -42,7 +42,7 @@ test("shared session survives page changes, browser history and reload without d
   await page.getByRole("button", { name: "Groups", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Create group", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Representatives", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "Create representative", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Create representative", exact: true })).toBeVisible();
   await page.goBack(); await expect(page).toHaveURL(/\/groups$/);
   await page.reload(); await expect(page.getByRole("heading", { name: "Create group", exact: true })).toBeVisible();
   expect(f.seen.filter(path => path === "POST /api/v1/session/login")).toHaveLength(1);
