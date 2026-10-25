@@ -61,13 +61,13 @@ func (s *Store) EnableSellerQuotaV2(ctx context.Context) error {
  ddl:=[]string{
  `CREATE TABLE IF NOT EXISTS seller_quota_v2_meta(id INTEGER PRIMARY KEY CHECK(id=1),version INTEGER NOT NULL CHECK(version=1))`,
  `CREATE TABLE IF NOT EXISTS representative_sellers_v2(
-   id TEXT PRIMARY KEY, representative_id TEXT NOT NULL REFERENCES representatives(id),
+   id TEXT NOT NULL, representative_id TEXT NOT NULL REFERENCES representatives(id),
    name TEXT NOT NULL, telegram_user_id INTEGER NOT NULL CHECK(telegram_user_id>0),
    enabled INTEGER NOT NULL CHECK(enabled IN (0,1)),
    reserved_bytes INTEGER NOT NULL DEFAULT 0 CHECK(reserved_bytes>=0 AND reserved_bytes<=1000000000000000000),
    reserved_units INTEGER NOT NULL DEFAULT 0 CHECK(reserved_units>=0 AND reserved_units<=1000000000),
    created_unix INTEGER NOT NULL,
-   UNIQUE(representative_id,telegram_user_id))`,
+   PRIMARY KEY(representative_id,id), UNIQUE(representative_id,telegram_user_id))`,
  `CREATE INDEX IF NOT EXISTS seller_v2_parent_idx ON representative_sellers_v2(representative_id,id)`,
  `CREATE TABLE IF NOT EXISTS seller_quota_events_v2(
    event_id TEXT PRIMARY KEY, fingerprint TEXT NOT NULL,
