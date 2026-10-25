@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/darktunnelmika/dark-xray-pro/internal/inboundspec"
 	mx "github.com/darktunnelmika/dark-xray-pro/internal/managedxray"
 	"github.com/darktunnelmika/dark-xray-pro/internal/xrayconfig"
 )
@@ -470,6 +471,48 @@ func TestInboundPlanPromotionUnsupportedWholePlansRemainEditable(t *testing.T) {
 				t.Fatal("partial subset was materialized")
 			}
 		})
+	}
+}
+
+func TestInboundPlanPromotionExplicitlyRejectsAuthoringSpec(t *testing.T) {
+	f := newPromotionFixture(t, func(in *NativeInboundPlanInput) {
+		// This is otherwise the narrow legacy protocol, security, Node and
+		// listener shape. A Spec document must still have a distinct gate.
+		in.Profile.Spec = &inboundspec.Spec{Version: 1, Protocol: "vless", Network: "tcp", Security: "reality",
+			Settings: map[string]any{"decryption": "none"}, Reality: map[string]any{"target": "www.example.org:443", "serverNames": []string{"www.example.org"}, "shortIds": []string{"ab12"}}}
+	})
+	ctx := context.Background()
+	before := promotionCiphertexts(t, f)
+	generation := planGeneration(t, f.s)
+	preview, err := f.s.PreviewNativeInboundPlanPromotion(ctx, f.key, 501, f.input)
+	if err != nil || preview.Eligible || preview.ReviewSHA256 != "" {
+		t.Fatal("an authoring Spec acquired legacy metered promotion authority", err)
+	}
+	found := false
+	for _, issue := range preview.Blockers {
+		found = found || issue.Field == "profile.spec" && issue.Code == "promotion_options_unsupported"
+	}
+	if !found {
+		t.Fatal("missing explicit authoring Spec boundary")
+	}
+	attempt := f.input
+	attempt.ReviewSHA256 = strings.Repeat("a", 64)
+	_, err = f.s.PromoteNativeInboundPlan(ctx, f.key, 501, attempt)
+	var detail *NativeInboundPlanError
+	if !errors.Is(err, ErrConflict) || !errors.As(err, &detail) || detail.Field != "profile.spec" || detail.Code != "promotion_options_unsupported" {
+		t.Fatal("direct commit bypassed the Spec promotion boundary", err)
+	}
+	for _, table := range []string{"native_inbound_plan_promotions", "native_inbound_targets", "native_inbound_clients", "native_route_drafts", "native_metered_route_commands", "pro_usage_epochs"} {
+		if planCount(t, f.s, table) != 0 {
+			t.Fatal("rejected Spec materialized operational state", table)
+		}
+	}
+	plan, err := f.s.NativeInboundPlan(ctx, f.key, 501)
+	if err != nil || !plan.Editable || plan.Promotion != nil || plan.Profile.Enabled || plan.Profile.BoundClients != 0 || plan.PlanRevision != 1 || plan.InboundRevision != 1 {
+		t.Fatal("rejected Spec was frozen or activated", err)
+	}
+	if planGeneration(t, f.s) != generation || !reflect.DeepEqual(before, promotionCiphertexts(t, f)) {
+		t.Fatal("rejected Spec changed the source profile or generation")
 	}
 }
 

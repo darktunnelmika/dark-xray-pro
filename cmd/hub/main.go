@@ -13,6 +13,7 @@ import (
 	"github.com/darktunnelmika/dark-xray-pro/internal/business"
 	"github.com/darktunnelmika/dark-xray-pro/internal/configstage"
 	"github.com/darktunnelmika/dark-xray-pro/internal/hubmonitor"
+	"github.com/darktunnelmika/dark-xray-pro/internal/inboundsecurity"
 	"github.com/darktunnelmika/dark-xray-pro/internal/labrevision"
 	"github.com/darktunnelmika/dark-xray-pro/internal/managedxray"
 	"github.com/darktunnelmika/dark-xray-pro/internal/nodebootstrap"
@@ -197,6 +198,11 @@ func main() {
 			}
 			if err := service.EnableNativeInbounds(inboundKey); err != nil {
 				log.Fatal(err)
+			}
+			if err := service.EnableInboundSecurity(inboundsecurity.Config{
+				CorePath: os.Getenv("DARK_PRO_AUTHORING_CORE_PATH"), CoreSHA256: os.Getenv("DARK_PRO_AUTHORING_CORE_SHA256"), NodeProbe: service.ProbeSelectedNode,
+			}); err != nil {
+				log.Fatal("inbound security tools unavailable: ", err)
 			}
 		}
 	} else if *businessPath != "" {

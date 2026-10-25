@@ -8,6 +8,7 @@ import (
 	"github.com/darktunnelmika/dark-xray-pro/internal/business"
 	"github.com/darktunnelmika/dark-xray-pro/internal/configstage"
 	"github.com/darktunnelmika/dark-xray-pro/internal/hubmonitor"
+	"github.com/darktunnelmika/dark-xray-pro/internal/inboundsecurity"
 	"github.com/darktunnelmika/dark-xray-pro/internal/labrevision"
 	"github.com/darktunnelmika/dark-xray-pro/internal/managedxray"
 	"github.com/darktunnelmika/dark-xray-pro/internal/nodebootstrap"
@@ -23,6 +24,8 @@ import (
 )
 
 type Server struct {
+	inboundSecurity             *inboundsecurity.Service
+	inboundProbeJobs            inboundProbeQueue
 	healthEndpoint              *managedxray.ProtocolHealthEndpoint
 	healthRoundsEnabled         bool // startup-only; requires the pinned health transport
 	initialApplyHealthEnabled   bool // startup-only; one promoted first Apply, no handover authority
@@ -137,6 +140,7 @@ func (s *Server) Handler() http.Handler {
 	s.attachClientProfileEdits(mux)
 	s.attachNativeInbounds(mux)
 	s.attachNativeInboundPlans(mux)
+	s.attachInboundSecurity(mux)
 	s.attachNativeInboundPlanPromotions(mux)
 	s.attachInboundInitialHealth(mux)
 	s.attachNativeRouteDrafts(mux)
@@ -170,6 +174,10 @@ func (s *Server) AgentHandler() http.Handler {
 		}
 		if r.Method == http.MethodPost && (r.URL.Path == "/api/v1/agent/route-transactions/poll" || r.URL.Path == "/api/v1/agent/route-transactions/receipt") {
 			s.handleRouteTransactionAgent(w, r)
+			return
+		}
+		if r.Method == http.MethodPost && (r.URL.Path == "/api/v1/agent/inbound-security/poll" || r.URL.Path == "/api/v1/agent/inbound-security/result") {
+			s.handleInboundProbeAgent(w, r)
 			return
 		}
 		if r.Method == http.MethodPost && (r.URL.Path == "/api/v1/agent/metered-health/poll" || r.URL.Path == "/api/v1/agent/metered-health/receipt") {

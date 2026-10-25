@@ -693,6 +693,8 @@ async function endpointSettings(dialog: Locator, index = 0) {
 }
 
 test("XHTTP, client defaults and rich Hosts survive exact retry, reopen, copy, independent public ports and explicit clear", async ({ page }, testInfo) => {
+	// This scenario spans create/retry/copy and several complete edit transactions.
+	test.setTimeout(30_000);
   const f = await fixture(page, { failSaveOnce: true }), dialog = await openCreation(page);
   await profile(dialog, "XHTTP endpoint setup");
   await dialog.getByLabel("Server names (comma-separated)", { exact: true }).fill("example.org, Alternate.example.org");

@@ -24,7 +24,7 @@ export async function creationAPI<T>(path: string, options: RequestInit, onUnaut
         if (typeof body?.error === "string" && /^[a-z_]{3,80}$/.test(body.error)) message = body.error;
         const problem = body?.issue;
         const validNodeID = (value: unknown) => value === undefined || typeof value === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(value);
-        if (problem && typeof problem.field === "string" && /^[a-z_0-9.]{1,80}$/.test(problem.field) && typeof problem.code === "string" && /^[a-z_]{3,80}$/.test(problem.code) &&
+        if (problem && typeof problem.field === "string" && /^[A-Za-z_0-9.]{1,256}$/.test(problem.field) && typeof problem.code === "string" && /^[a-z_]{3,100}$/.test(problem.code) &&
           validNodeID(problem.node_id) && validNodeID(problem.destination_node_id) &&
           (problem.path === undefined || ["direct", "tunnel", "swap_source", "swap_destination"].includes(problem.path)) &&
           (problem.port === undefined || Number.isSafeInteger(problem.port) && problem.port >= 1 && problem.port <= 65535)) {
@@ -43,7 +43,7 @@ export async function creationAPI<T>(path: string, options: RequestInit, onUnaut
             "profile.options.http_upgrade": "httpUpgradePath", "profile.options.http_upgrade.path": "httpUpgradePath", "profile.options.http_upgrade.host": "httpUpgradeHost",
           };
           const endpoint = problem.field.match(/^(direct|tunnel)_endpoints\.(\d{1,2})\.(address|port|label|enabled|sni|fingerprint|spider_x)$/);
-          const field = endpoint ? `${endpoint[1]}Endpoints.${endpoint[2]}.${endpoint[3] === "spider_x" ? "spiderX" : endpoint[3]}` : fields[problem.field] ?? problem.field;
+          const field = endpoint ? `${endpoint[1]}Endpoints.${endpoint[2]}.${endpoint[3] === "spider_x" ? "spiderX" : endpoint[3]}` : problem.field.startsWith("profile.spec.") ? problem.field.slice("profile.".length) : fields[problem.field] ?? problem.field;
           issue = { nodeID: problem.node_id, destinationNodeID: problem.destination_node_id, path: problem.path, port: problem.port, field, code: problem.code };
         }
       } catch { /* Responses outside the structured contract are not surfaced. */ }

@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
+	"github.com/darktunnelmika/dark-xray-pro/internal/inboundspec"
 
 	"github.com/darktunnelmika/dark-xray-pro/internal/usagewire"
 	"github.com/darktunnelmika/dark-xray-pro/internal/xrayconfig"
@@ -20,6 +21,7 @@ var extendedProfilePrefix = []byte("DXPPRF2\x00")
 var profileV3Prefix = []byte("DXPPRF3\x00")
 var profileV4Prefix = []byte("DXPPRF4\x00")
 var profileV5Prefix = []byte("DXPPRF5\x00")
+var profileV6Prefix = []byte("DXPPRF6\x00")
 
 func extendedProfileAAD(id uint64) []byte {
 	return []byte(fmt.Sprintf("DARK-PRO-NATIVE-INBOUND-v2:%d", id))
@@ -33,6 +35,9 @@ func profileV4AAD(id uint64) []byte {
 }
 func profileV5AAD(id uint64) []byte {
 	return []byte(fmt.Sprintf("DARK-PRO-NATIVE-INBOUND-v5:%d", id))
+}
+func profileV6AAD(id uint64) []byte {
+	return []byte(fmt.Sprintf("DARK-PRO-NATIVE-INBOUND-v6:%d", id))
 }
 
 // options must already be normalized so an empty object does not force a new
@@ -54,6 +59,9 @@ func profileEnvelopeVersion(transport string, options *xrayconfig.ProfileOptions
 }
 
 func privateProfileEnvelopeVersion(p xrayconfig.Profile) int {
+	if p.Spec != nil {
+		return 6
+	}
 	if p.Security == "tls" || p.TLS != nil {
 		return 5
 	}
@@ -61,6 +69,17 @@ func privateProfileEnvelopeVersion(p xrayconfig.Profile) int {
 }
 
 func normalizePrivateProfile(p xrayconfig.Profile) (xrayconfig.Profile, error) {
+	if p.Spec != nil {
+		spec, err := inboundspec.Normalize(*p.Spec)
+		if err != nil || p.Options != nil || p.TLS != nil || p.RealityPrivateKey != "" {
+			return xrayconfig.Profile{}, ErrInvalid
+		}
+		p.Spec, p.Transport, p.Security = &spec, spec.Network, spec.Security
+		if err := xrayconfig.ValidateProfile(p); err != nil {
+			return xrayconfig.Profile{}, ErrInvalid
+		}
+		return p, nil
+	}
 	security, err := xrayconfig.NormalizeProfileSecurity(p.Security)
 	if err != nil {
 		return xrayconfig.Profile{}, ErrInvalid
@@ -111,6 +130,9 @@ func sealInboundProfile(key []byte, p xrayconfig.Profile) ([]byte, error) {
 	aad := profileAAD(p.InboundID)
 	var prefix []byte
 	switch privateProfileEnvelopeVersion(p) {
+	case 6:
+		aad = profileV6AAD(p.InboundID)
+		prefix = profileV6Prefix
 	case 2:
 		aad = extendedProfileAAD(p.InboundID)
 		prefix = extendedProfilePrefix
@@ -141,6 +163,10 @@ func openInboundProfile(key, encrypted []byte, id uint64) (xrayconfig.Profile, e
 	aad := profileAAD(id)
 	version := 1
 	switch {
+	case bytes.HasPrefix(encrypted, profileV6Prefix):
+		encrypted = encrypted[len(profileV6Prefix):]
+		aad = profileV6AAD(id)
+		version = 6
 	case bytes.HasPrefix(encrypted, profileV5Prefix):
 		encrypted = encrypted[len(profileV5Prefix):]
 		aad = profileV5AAD(id)

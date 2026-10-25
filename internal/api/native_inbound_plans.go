@@ -6,6 +6,7 @@ import (
 	"strconv"
 
 	"github.com/darktunnelmika/dark-xray-pro/internal/business"
+	"github.com/darktunnelmika/dark-xray-pro/internal/inboundspec"
 )
 
 func nativeInboundPlanError(w http.ResponseWriter, err error) {
@@ -25,7 +26,7 @@ func nativeInboundPlanError(w http.ResponseWriter, err error) {
 
 func (s *Server) nativePlanReferences(nodes []business.NativeInboundPlanNode) error {
 	paired := map[string]string{}
-	for _, n := range s.registry.List() {
+	for _, n := range s.inboundDestinations() {
 		paired[n.NodeID] = n.InstallationID
 	}
 	for _, n := range nodes {
@@ -56,9 +57,14 @@ func (s *Server) attachNativeInboundPlans(mux *http.ServeMux) {
 			nativeInboundPlanError(w, err)
 			return
 		}
-		respond(w, http.StatusOK, map[string]any{"available": true, "version": 3,
+		protocols := []string{}
+		for _, info := range inboundspec.Catalog() {
+			protocols = append(protocols, info.Protocol)
+		}
+		respond(w, http.StatusOK, map[string]any{"available": true, "version": 4,
+			"authoring_spec": true, "protocol_catalog": inboundspec.Catalog(), "explicit_hub_destination": true,
 			"max_nodes": business.MaxNativeInboundPlanNodes, "max_hosts_per_node": 64,
-			"protocols": []string{"vless"}, "securities": []string{"reality", "tls"}, "transports": []string{"tcp", "grpc", "xhttp", "ws", "httpupgrade"},
+			"protocols": protocols, "securities": []string{"none", "reality", "tls"}, "transports": []string{"tcp", "kcp", "ws", "grpc", "httpupgrade", "xhttp", "xdrive"},
 			"profile_tls": true, "profile_tls_scope": "creation_plan", "profile_websocket": true, "profile_http_upgrade": true,
 			"profile_xhttp": true, "profile_client_options": true, "profile_network_options_scope": "creation_plan",
 			"endpoint_options": true, "max_endpoints_per_path": business.MaxNativeInboundEndpointsPerPath,

@@ -22,6 +22,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/darktunnelmika/dark-xray-pro/internal/inboundspec"
 	"github.com/darktunnelmika/dark-xray-pro/internal/usagewire"
 	"github.com/darktunnelmika/dark-xray-pro/internal/xrayconfig"
 )
@@ -251,7 +252,7 @@ func openPlanValue(key []byte, aad string, encrypted []byte, value any) error {
 	original := encrypted
 	version := 1
 	binding := aad
-	for _, candidate := range []int{3, 2} {
+	for _, candidate := range []int{4, 3, 2} {
 		prefix := []byte(fmt.Sprintf("DXPPLN%d\x00", candidate))
 		if bytes.HasPrefix(encrypted, prefix) {
 			version = candidate
@@ -689,7 +690,7 @@ func editablePlanProfile(ctx context.Context, tx *sql.Tx, key []byte, plan Nativ
 		return in, p, err
 	}
 	if in.Enabled || in.Archived || in.BoundClients != 0 || targets != 0 || in.Revision != plan.InboundRevision ||
-		!reflect.DeepEqual(in.InboundInput, plan.Profile.InboundInput) || in.PublicKey != plan.Profile.PublicKey || !reflect.DeepEqual(in.TLS, plan.Profile.TLS) {
+		!inboundInputEqual(in.InboundInput, plan.Profile.InboundInput) || in.PublicKey != plan.Profile.PublicKey || !reflect.DeepEqual(in.TLS, plan.Profile.TLS) || strings.Join(in.SpecSecretPaths, "\x00") != strings.Join(plan.Profile.SpecSecretPaths, "\x00") {
 		return in, p, planError("", "profile", "profile_changed_or_materialized", ErrConflict)
 	}
 	return in, p, nil
@@ -832,6 +833,16 @@ func verifyPlanCollisions(ctx context.Context, tx *sql.Tx, key []byte, in Native
 }
 
 func compileNativeInboundPlan(p xrayconfig.Profile, nodes []NativeInboundPlanNode) (xrayconfig.CreationTopology, error) {
+	// Rich protocols that require an account are checked with an isolated
+	// schema-validation identity. This local copy is never stored or delivered;
+	// the plan still has zero client bindings and cannot activate a runtime.
+	if p.Spec != nil && len(p.Users) == 0 {
+		for _, info := range inboundspec.Catalog() {
+			if info.Protocol == p.Spec.Protocol && info.UserBinding {
+				p.Users = []xrayconfig.User{{ID: 1, UUID: "01010101-0101-4101-8101-010101010101", Email: "authoring-preview@invalid.example"}}
+			}
+		}
+	}
 	destinations := make([]xrayconfig.CreationNode, 0, len(nodes))
 	swaps := make([]xrayconfig.CreationSwap, 0)
 	for _, n := range nodes {
@@ -851,6 +862,9 @@ func compileNativeInboundPlan(p xrayconfig.Profile, nodes []NativeInboundPlanNod
 }
 
 func validateNativeInboundPlanTx(ctx context.Context, tx *sql.Tx, key []byte, in NativeInboundPlanInput) (NativeInboundPlan, xrayconfig.Profile, xrayconfig.CreationTopology, error) {
+	if in.Profile.Spec != nil {
+		return validateAuthoringPlanTx(ctx, tx, key, in)
+	}
 	var plan NativeInboundPlan
 	var private xrayconfig.Profile
 	var topology xrayconfig.CreationTopology
@@ -894,6 +908,9 @@ func validateNativeInboundPlanTx(ctx context.Context, tx *sql.Tx, key []byte, in
 		existing, original, err := editablePlanProfile(ctx, tx, key, old)
 		if err != nil {
 			return plan, private, topology, err
+		}
+		if original.Spec != nil {
+			return plan, private, topology, planError("", "profile.spec", "authoring_spec_required", ErrConflict)
 		}
 		// Security is immutable for a saved plan. In particular, an older
 		// editor's omitted field must never turn TLS back into REALITY.
@@ -1042,7 +1059,11 @@ func (s *Store) SaveNativeInboundPlan(ctx context.Context, key []byte, input Nat
 		return out, err
 	}
 	if kind == "create" {
-		if private.Security != "tls" {
+		if private.Spec != nil {
+			if err := materializeAuthoringProfile(&private, &plan.Profile, *in.Profile.Spec); err != nil {
+				return out, err
+			}
+		} else if private.Security != "tls" {
 			priv, e := ecdh.X25519().GenerateKey(rand.Reader)
 			if e != nil {
 				return out, e
@@ -1066,8 +1087,8 @@ func (s *Store) SaveNativeInboundPlan(ctx context.Context, key []byte, input Nat
 		if e != nil {
 			return out, e
 		}
-		result, e := tx.ExecContext(ctx, `UPDATE native_inbounds SET name=?,profile_enc=?,revision=?
- WHERE id=? AND revision=? AND enabled=0 AND archived=0`, in.Profile.Name, enc, plan.InboundRevision, in.Profile.ID, in.ExpectedInboundRevision)
+		result, e := tx.ExecContext(ctx, `UPDATE native_inbounds SET name=?,profile_enc=?,revision=?,public_key=?
+ WHERE id=? AND revision=? AND enabled=0 AND archived=0`, in.Profile.Name, enc, plan.InboundRevision, plan.Profile.PublicKey, in.Profile.ID, in.ExpectedInboundRevision)
 		if e != nil {
 			return out, e
 		}

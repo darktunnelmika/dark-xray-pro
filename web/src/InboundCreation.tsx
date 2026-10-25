@@ -11,10 +11,12 @@ import InboundTLSCredentials from "./InboundTLSCredentials";
 import { assertPublicInboundData, canonicalTLSMetadata, profileSecurity, sameTLSMetadata, tlsLeafSHA256, type TLSMetadata } from "./inboundTLS";
 import InboundTrafficOptions from "./InboundTrafficOptions";
 import InboundCreationReview from "./InboundCreationReview";
+import InboundAuthoringSection, { InboundSpecReview } from "./InboundAuthoringSection";
+import { canonicalAuthoringSpec, protocolNames, redactSpec, specFromInbound, specPublicMatches, type AuthoringSpec } from "./inboundAuthoringSpec";
 import { canonicalProfileOptions, profileOptionSection, profileOptionsPayload } from "./inboundProfileOptions";
 import { canonicalEndpointAddress, canonicalEndpoints } from "./inboundEndpointOptions";
 import { validEndpointPreviews } from "./inboundEndpointPreview";
-import { canonicalCreationIP, creationIssues, creationPayload, creationPort, creationShortIDs, emptyCreation, freshCreationShortID, selectedCreationNodes, stateFromCreationPlan,
+import { canonicalCreationIP, creationIssues, creationPayload, creationPort, creationShortIDs, emptyCreation, freshCreationShortID, selectedCreationNodes, stateFromCreationPlan, withCreationSpec,
   type CreationCapabilities, type CreationIssue, type CreationPayload, type CreationPlan, type CreationPlanNode, type CreationPlanResponse, type CreationPreview, type CreationReceipt, type CreationState } from "./InboundCreationModel";
 import "./InboundCreation.css";
 
@@ -26,9 +28,12 @@ const sections: Section[] = ["connection", "swap", "advanced", "review"];
 function issueSection(issue: CreationIssue): Section {
   if (issue.nodeID || issue.field === "nodes") return "swap";
   if (issue.field === "reason") return "review";
+  if (issue.field === "spec.json" || issue.field.startsWith("spec.stream.finalmask") || issue.field.startsWith("spec.client.mux") || issue.field.startsWith("spec.settings.sniffing")) return "advanced";
   return profileOptionSection(issue.field) === "advanced" ? "advanced" : "connection";
 }
 function connectionGroup(field: string): ConnectionGroup {
+  if (field === "spec.network" || field.startsWith("spec.stream.")) return "network";
+  if (field === "spec.security" || field.startsWith("spec.tls.") || field.startsWith("spec.reality.") || field.startsWith("spec.client.")) return "security";
   if (field === "transport" || field === "grpcService" || profileOptionSection(field) === "network") return "network";
   if (["security", "realityTarget", "serverNames", "shortIDs", "profileOptions"].includes(field) || field.startsWith("tls") || profileOptionSection(field) === "security") return "security";
   return "general";
@@ -96,6 +101,7 @@ const words = {
 };
 
 function normalizedProfile(profile: CreationPayload["profile"]): string {
+  if (profile.spec) return JSON.stringify({ id: profile.id, name: profile.name.trim(), spec: redactSpec(canonicalAuthoringSpec(profile.spec)) });
   return JSON.stringify({ id: profile.id, name: profile.name.trim(), transport: profile.transport, grpc_service: profile.grpc_service,
     security: profileSecurity(profile.security), reality_target: profile.reality_target ?? "", server_names: profile.server_names, short_ids: profile.short_ids ?? [], options: canonicalProfileOptions(profile.options) });
 }
@@ -107,18 +113,20 @@ function normalizedNode(node: CreationPlanNode): string {
     swap_source_listen_ip: canonicalCreationIP(node.swap_source_listen_ip), swap_source_port: node.swap_source_port,
     swap_entry_address: canonicalEndpointAddress(node.swap_entry_address), swap_entry_port: node.swap_entry_port, swap_destination_port: node.swap_destination_port });
 }
-function validPlan(plan: CreationPlan | undefined, body: CreationPayload, expectedInboundRevision: number, tlsProof?: string | TLSMetadata): plan is CreationPlan {
+function validPlan(plan: CreationPlan | undefined, body: CreationPayload, expectedInboundRevision: number | readonly number[], tlsProof?: string | TLSMetadata): plan is CreationPlan {
   try {
     assertPublicInboundData(plan);
-    if (profileSecurity(body.profile.security) === "tls") {
+    if (body.profile.spec) {
+      if (!plan?.profile.spec || !specPublicMatches(body.profile.spec, plan.profile.spec, plan.profile.spec_secret_paths)) return false;
+    } else if (profileSecurity(body.profile.security) === "tls") {
       const metadata = canonicalTLSMetadata(plan?.profile?.tls);
       if (!tlsProof || (typeof tlsProof === "string" ? metadata.sha256 !== tlsProof : !sameTLSMetadata(metadata, tlsProof)) || plan?.profile.public_key !== "") return false;
     } else if (plan?.profile?.tls !== undefined) return false;
     const waiting = body.nodes.some(row => row.direct_port > 0 && !row.direct_hosts.length || row.tunnel_port > 0 && !row.tunnel_hosts.length || row.swap_enabled && !row.swap_entry_address);
     return !!plan && plan.runtime_apply === false && plan.editable === true && plan.profile?.enabled === false && plan.profile.archived === false && plan.profile.bound_clients === 0 &&
-      plan.plan_revision === body.expected_plan_revision + 1 && plan.inbound_revision === expectedInboundRevision && plan.profile.revision === expectedInboundRevision &&
+      plan.plan_revision === body.expected_plan_revision + 1 && (typeof expectedInboundRevision === "number" ? plan.inbound_revision === expectedInboundRevision : expectedInboundRevision.includes(plan.inbound_revision)) && plan.profile.revision === plan.inbound_revision &&
       plan.last_event_id === body.event_id && plan.reason === body.reason.trim() && plan.status === (waiting ? "WAITING_HOST" : "SAVED_DISABLED") &&
-      normalizedProfile(plan.profile) === normalizedProfile(body.profile) && Array.isArray(plan.nodes) && plan.nodes.length === body.nodes.length &&
+      (body.profile.spec ? plan.profile.id === body.profile.id && plan.profile.name === body.profile.name.trim() : normalizedProfile(plan.profile) === normalizedProfile(body.profile)) && Array.isArray(plan.nodes) && plan.nodes.length === body.nodes.length &&
       body.nodes.every(node => plan.nodes.some(row => row.node_id === node.node_id && normalizedNode(row) === normalizedNode(node)));
   } catch { return false; }
 }
@@ -129,10 +137,17 @@ export default function InboundCreation({ language, nodes, targets, capabilities
   onDirtyChange: (dirty: boolean) => void; onBusyChange: (busy: boolean) => void;
 }) {
   const t = words[language];
+  const authoring = capabilities.version >= 4 && capabilities.authoring_spec === true && ((!initialPlan && !source) || !!initialPlan?.profile.spec || !!source?.spec);
   const shortIDInputID = useId();
   const [state, setState] = useState<CreationState>(() => {
     if (initialPlan) return stateFromCreationPlan(initialPlan);
-    const value = emptyCreation(source); value.shortIDs = freshCreationShortID(); return value;
+    const value = emptyCreation(source); value.shortIDs = freshCreationShortID();
+    if (authoring) {
+      const spec = specFromInbound(source);
+      if (source) { delete spec.client.publicKey; delete spec.client.mldsa65Verify; if (spec.settings.server && typeof spec.settings.server === "object" && !Array.isArray(spec.settings.server)) delete spec.settings.server.publicKey; }
+      return withCreationSpec({ ...value, specSecretPaths: [] }, spec);
+    }
+    return value;
   });
   const initial = useRef(JSON.stringify(state));
   const inboundID = useRef(initialPlan?.profile.id ?? (crypto.getRandomValues(new Uint32Array(1))[0] || 1));
@@ -183,7 +198,15 @@ export default function InboundCreation({ language, nodes, targets, capabilities
 
   function update(value: CreationState) { setState(value); setPreview(null); setIssues([]); setMessage(""); setConflict(false); }
   function profile(field: Exclude<keyof CreationState["profile"], "options">, value: string) { update({ ...state, profile: { ...state.profile, [field]: value } }); }
-  function clearSecrets() { pending.current = null; setState(value => ({ ...value, tlsCredentials: { certificate_pem: "", private_key_pem: "" } })); }
+  function clearSecrets() { pending.current = null; setState(value => ({ ...value, ...(value.spec ? { spec: redactSpec(value.spec, value.specSecretPaths) } : {}), tlsCredentials: { certificate_pem: "", private_key_pem: "" } })); }
+  function changeSpec(spec: AuthoringSpec) {
+    const protocolChanged = state.spec?.protocol !== spec.protocol;
+    update(withCreationSpec({ ...state, ...(protocolChanged ? { specSecretPaths: [], specDraftErrors: [] } : {}) }, spec));
+  }
+  function specInvalid(path: string, invalid: boolean) {
+    pending.current = null; setPreview(null);
+    setState(value => ({ ...value, specDraftErrors: [...(value.specDraftErrors ?? []).filter(item => item !== path), ...(invalid ? [path] : [])] }));
+  }
   function close() { if (!busy && (!(dirty || uncertain) || window.confirm(t.unsaved))) { clearSecrets(); onClose(); } }
   function changeSecurity(security: "reality" | "tls") {
     if (editing || locked) return;
@@ -199,7 +222,7 @@ export default function InboundCreation({ language, nodes, targets, capabilities
   }
   function validate(): boolean {
     const next = creationIssues(state, nodes);
-    if (!next.length) {
+    if (!next.length && !state.spec) {
       const options = profileOptionsPayload(state.profile.options, state.profile.transport, state.profile.security);
       if (tls && !tlsSupported) next.push({ field: "security", code: "profile_tls_unavailable" });
       if (capabilities.profile_options !== true && options) next.push({ field: "profileOptions", code: "profile_options_unavailable" });
@@ -227,7 +250,12 @@ export default function InboundCreation({ language, nodes, targets, capabilities
     if (!pending.current || pending.current.fingerprint !== fingerprint) pending.current = { fingerprint, body: { ...value, event_id: crypto.randomUUID() } };
     return pending.current.body;
   }
-  function expectedInboundRevision(payload: CreationPayload): number {
+  function expectedInboundRevision(payload: CreationPayload): number | readonly number[] {
+    if (payload.profile.spec) {
+      // Only the server can compare retained secrets and normalized values.
+      // A spec edit may be a no-op; a successful save must match its preview.
+      return revisions.inbound === 0 ? 1 : [revisions.inbound, revisions.inbound + 1];
+    }
     return revisions.inbound === 0 ? 1 : revisions.inbound + (payload.tls_credentials || !savedProfile.current || normalizedProfile(savedProfile.current) !== normalizedProfile(payload.profile) ? 1 : 0);
   }
   function serverIssue(error: unknown) {
@@ -263,7 +291,7 @@ export default function InboundCreation({ language, nodes, targets, capabilities
       const result = await creationAPI<CreationPreview>("/api/v1/workspace/native-inbound-plans/preview", { method: "POST", signal: controller.signal,
         headers: { "Content-Type": "application/json", "X-CSRF-Token": csrf }, body: JSON.stringify(payload) }, onUnauthorized);
       if (!result || result.valid !== true || result.runtime_changed !== false || result.topology_validated !== true || result.topology_validation_only !== true ||
-        result.topology_key_scope !== (editing ? "saved_profile" : "preview_only") || !validPlan(result.plan, payload, expectedInboundRevision(payload), proof) || capabilities.endpoint_options === true && !validEndpointPreviews(result.endpoints, payload, result.plan.profile.tls)) throw new Error("invalid_setup_preview");
+        result.topology_key_scope !== (editing ? "saved_profile" : "preview_only") || !validPlan(result.plan, payload, expectedInboundRevision(payload), proof) || !state.spec && capabilities.endpoint_options === true && !validEndpointPreviews(result.endpoints, payload, result.plan.profile.tls)) throw new Error("invalid_setup_preview");
       if (!controller.signal.aborted) { setPreview(result); setSection("review"); setReferencesValid(true); setMessage(""); }
     } catch (error) { if (!controller.signal.aborted) { const changed = needsReload(error); setConflict(changed); setMessage(changed ? editing ? t.conflict : t.createConflict : t.error); serverIssue(error); } }
     finally { if (!controller.signal.aborted) setBusy(false); }
@@ -276,7 +304,7 @@ export default function InboundCreation({ language, nodes, targets, capabilities
     try {
       const result = await creationAPI<CreationReceipt>("/api/v1/workspace/native-inbound-plans" + (editing ? "/" + inboundID.current : ""), {
         method: editing ? "PUT" : "POST", signal: controller.signal, headers: { "Content-Type": "application/json", "X-CSRF-Token": csrf }, body: JSON.stringify(payload) }, onUnauthorized);
-      if (!result || result.event_id !== payload.event_id || !validPlan(result.plan, payload, expectedInboundRevision(payload), preview.plan.profile.tls) || result.runtime_changed !== false || result.clients_deleted !== false || result.credit_changed !== false || result.usage_reset !== false || result.subscription_published !== false) throw new Error("invalid_setup_receipt");
+      if (!result || result.event_id !== payload.event_id || !validPlan(result.plan, payload, payload.profile.spec ? preview.plan.inbound_revision : expectedInboundRevision(payload), preview.plan.profile.tls) || result.runtime_changed !== false || result.clients_deleted !== false || result.credit_changed !== false || result.usage_reset !== false || result.subscription_published !== false) throw new Error("invalid_setup_receipt");
       if (!controller.signal.aborted) { const clean = { ...state, tlsCredentials: { certificate_pem: "", private_key_pem: "" } }; initial.current = JSON.stringify(clean); clearSecrets(); onDirtyChange(false); onSaved(result.plan); }
     } catch (error) {
       if (!controller.signal.aborted) {
@@ -303,6 +331,7 @@ export default function InboundCreation({ language, nodes, targets, capabilities
     return items.length > 0 && <ul className="creation-issues" role="alert">{items.map((issue, index) => <li key={index}>{creationIssueMessage(issue, language)}</li>)}</ul>;
   }
   const invalid = (field: string) => issues.some(issue => !issue.nodeID && issue.field === field);
+  const authoringSection = (value: "protocol" | "transport" | "security" | "advanced") => state.spec && <InboundAuthoringSection section={value} language={language} spec={state.spec} secretPaths={state.specSecretPaths ?? []} nodes={nodes} csrf={csrf} disabled={locked} invalidFields={issues.map(issue => issue.field)} onChange={changeSpec} onInvalid={specInvalid} onUnauthorized={onUnauthorized}/>;
   return <WorkspaceDialog open title={editing ? t.edit : t.create} subtitle={t.lead} variant="inbound-editor" closeLabel={t.close} busy={busy} onClose={close}>
     <div className="inbound-creation" dir={language === "fa" ? "rtl" : "ltr"} ref={surface}>
       <nav className="creation-tabs" role="tablist" aria-label={t.sections}>
@@ -312,29 +341,33 @@ export default function InboundCreation({ language, nodes, targets, capabilities
         {readOnly && <p className="creation-message" role="status">{initialPlan?.promotion ? language === "fa" ? "این طرح برای اجرای LAB آماده شده است. پیکربندی اصلی برای بازبینی به‌صورت فقط‌خواندنی حفظ می‌شود؛ وضعیت اجرا را در خلاصه ببین." : "This plan was prepared for LAB execution. Its original configuration is retained read-only; review execution status in Overview." : t.readOnly}</p>}
         {!referencesValid && <p className="creation-message" role="status">{t.staleReferences}</p>}
         <section id="creation-panel-connection" role="tabpanel" aria-labelledby="creation-tab-connection" hidden={section !== "connection"} className="creation-profile">
-          <header className="creation-section-heading"><div><h3>{t.profileTitle}</h3><p>{t.profileHelp}</p></div><span className="creation-protocol"><ShieldCheck size={14}/><bdi>VLESS / {tls ? "TLS" : "REALITY"}</bdi></span></header>
+          <header className="creation-section-heading"><div><h3>{t.profileTitle}</h3><p>{t.profileHelp}</p></div><span className="creation-protocol"><ShieldCheck size={14}/><bdi>{state.spec ? `${protocolNames[state.spec.protocol]} / ${state.spec.security.toUpperCase()}` : `VLESS / ${tls ? "TLS" : "REALITY"}`}</bdi></span></header>
           {source && !editing && !tls && <p className="creation-help">{t.copy}</p>}
           <details className="creation-connection-group" data-connection-group="general" open>
             <summary><SlidersHorizontal size={16} aria-hidden="true"/><span>{t.general}</span></summary>
             <div className="creation-connection-fields">
               <label className="creation-field"><span>{t.name}</span><input data-initial-focus data-creation-field="name" aria-label={t.name} aria-invalid={invalid("name")} maxLength={128} value={state.profile.name} disabled={locked} onChange={event => profile("name", event.target.value)} autoComplete="off"/></label>
+              {authoringSection("protocol")}
               {groupIssues("general")}
             </div>
           </details>
           <details className="creation-connection-group" data-connection-group="network" open>
-            <summary><Link2 size={16} aria-hidden="true"/><span>{t.network}</span></summary>
+            <summary><Link2 size={16} aria-hidden="true"/><span>{state.spec ? language === "fa" ? "انتقال" : "Transport" : t.network}</span></summary>
             <div className="creation-connection-fields">
+              {state.spec ? authoringSection("transport") : <>
               <fieldset className="creation-presets" disabled={locked}><legend>{t.preset}</legend>{["tcp", "grpc", ...(xhttpSupported ? ["xhttp"] : []), ...(tls && websocketSupported ? ["ws"] : []), ...(tls && httpUpgradeSupported ? ["httpupgrade"] : [])].filter(transport => capabilities.transports.includes(transport)).map(transport => { const network = { tcp: "TCP", grpc: "gRPC", xhttp: "XHTTP", ws: "WebSocket", httpupgrade: "HTTPUpgrade" }[transport], title = `${network} / ${tls ? "TLS" : "REALITY"}`; return <label key={transport} data-selected={state.profile.transport === transport}><input type="radio" name="creation-transport" data-creation-field={transport === "tcp" ? "transport" : undefined} aria-label={title} checked={state.profile.transport === transport} onChange={() => profile("transport", transport)}/><span><bdi>{title}</bdi><small>{transport === "tcp" ? "Vision" : network}</small></span></label>; })}</fieldset>
               {state.profile.transport === "grpc" && <label className="creation-field"><span>{t.service}</span><input aria-label={t.service} data-creation-field="grpcService" aria-invalid={invalid("grpcService")} dir="ltr" maxLength={64} value={state.profile.grpcService} disabled={locked} onChange={event => profile("grpcService", event.target.value)} autoComplete="off"/><small>{t.serviceHelp}</small></label>}
               {state.profile.transport === "grpc" && <InboundProfileAdvanced language={language} section="network" value={state.profile.options} onChange={options => update({ ...state, profile: { ...state.profile, options } })} supported={capabilities.profile_options === true} disabled={locked} invalidFields={issues.map(issue => issue.field)}/>}
               {state.profile.transport === "xhttp" && <InboundNetworkOptions language={language} section="xhttp" value={state.profile.options} onChange={options => update({ ...state, profile: { ...state.profile, options } })} supported={xhttpSupported} disabled={locked} invalidFields={issues.map(issue => issue.field)}/>}
               {tls && (state.profile.transport === "ws" || state.profile.transport === "httpupgrade") && <InboundHTTPTransportOptions language={language} section={state.profile.transport === "ws" ? "websocket" : "httpUpgrade"} value={state.profile.options} onChange={options => update({ ...state, profile: { ...state.profile, options } })} disabled={locked} invalidFields={issues.map(issue => issue.field)}/>}
+              </>}
               {groupIssues("network")}
             </div>
           </details>
           <details className="creation-connection-group" data-connection-group="security" open>
             <summary data-creation-field="profileOptions"><ShieldCheck size={16} aria-hidden="true"/><span>{t.security}</span></summary>
             <div className="creation-connection-fields">
+              {state.spec ? authoringSection("security") : <>
               <fieldset className="creation-presets creation-security-options" disabled={locked || editing}><legend>{t.securityMode}</legend>{(["reality", ...(tlsSupported || tls ? ["tls"] : [])] as Array<"reality" | "tls">).map(security => <label key={security} data-selected={state.profile.security === security}><input type="radio" name="creation-security" data-creation-field={security === state.profile.security ? "security" : undefined} aria-label={security === "tls" ? "TLS" : "REALITY"} checked={state.profile.security === security} onChange={() => changeSecurity(security)}/><span><bdi>{security === "tls" ? "TLS" : "REALITY"}</bdi></span></label>)}</fieldset>
               {editing && <p className="creation-help" data-security-immutable>{t.securityFixed}</p>}
               <div className="creation-field-grid">{!tls && <label className="creation-field"><span>{t.target}</span><input aria-label={t.target} data-creation-field="realityTarget" aria-invalid={invalid("realityTarget")} dir="ltr" value={state.profile.realityTarget} disabled={locked} onChange={event => profile("realityTarget", event.target.value)} placeholder="example.org:443" autoComplete="off"/></label>}
@@ -345,6 +378,7 @@ export default function InboundCreation({ language, nodes, targets, capabilities
                 <InboundProfileAdvanced language={language} section="security" value={state.profile.options} onChange={options => update({ ...state, profile: { ...state.profile, options } })} supported={capabilities.profile_options === true} disabled={locked} invalidFields={issues.map(issue => issue.field)}/>
               </>}
               {(clientOptionsSupported || state.profile.options?.clientPresent) && <InboundNetworkOptions language={language} section="client" security={state.profile.security} value={state.profile.options} onChange={options => update({ ...state, profile: { ...state.profile, options } })} supported={clientOptionsSupported} disabled={locked} invalidFields={issues.map(issue => issue.field)}/>}
+              </>}
               {groupIssues("security")}
             </div>
           </details>
@@ -354,6 +388,7 @@ export default function InboundCreation({ language, nodes, targets, capabilities
           {issues.filter(issue => issue.field === "nodes").map((issue, index) => <p key={index} className="creation-issues" role="alert">{creationIssueMessage(issue, language)}</p>)}
         </section>
         <section id="creation-panel-advanced" role="tabpanel" aria-labelledby="creation-tab-advanced" hidden={section !== "advanced"} className="creation-profile">
+          {state.spec ? authoringSection("advanced") : <>
           <header className="creation-section-heading"><div><h3>{language === "fa" ? "تنظیمات پیشرفتهٔ ترافیک" : "Advanced traffic settings"}</h3><p>{language === "fa" ? "این بخش اختیاری است. Sniffing و Fallback فقط در طرح خاموش ذخیره می‌شوند؛ فعال‌سازی و انتشار اشتراک برای آن‌ها هنوز در دسترس نیست." : "This section is optional. Sniffing and fallbacks are saved only in paused setup plans; activation and subscription publishing remain unavailable."}</p></div></header>
           <InboundTrafficOptions language={language} value={state.profile.options} transport={state.profile.transport} security={state.profile.security} onChange={options => update({ ...state, profile: { ...state.profile, options } })} sniffingSupported={sniffingSupported} fallbacksSupported={fallbacksSupported} disabled={locked} invalidFields={issues.map(issue => issue.field)}/>
           {issues.filter(issue => issueSection(issue) === "advanced").map((issue, index) => <p key={index} className="creation-issues" role="alert">{creationIssueMessage(issue, language)}</p>)}
@@ -363,10 +398,13 @@ export default function InboundCreation({ language, nodes, targets, capabilities
             <div><dt>{language === "fa" ? "تنظیمات Host" : "Host settings"}</dt><dd>{capabilities.endpoint_options !== true && "SNI Override · Fingerprint / SpiderX · "}ALPN · Path · FinalMask · Mihomo · {language === "fa" ? "حذف از قالب‌های اشتراک" : "per-format exclusion"}</dd></div>
             <div><dt>{language === "fa" ? "سایر امکانات" : "Other features"}</dt><dd>Advanced JSON · VMess / Trojan / Shadowsocks / SOCKS / HTTP · Local HUB · Dark Swap Apply / ACK / Diagnostics</dd></div>
           </dl></details>
+          </>}
+          {state.spec && issues.filter(issue => issueSection(issue) === "advanced").map((issue, index) => <p key={index} className="creation-issues" role="alert">{creationIssueMessage(issue, language)}</p>)}
         </section>
         <section id="creation-panel-review" role="tabpanel" aria-labelledby="creation-tab-review" hidden={section !== "review"} className="creation-review">
           <header className="creation-section-heading"><div><h3>{t.reviewTitle}</h3><p>{t.paused}</p></div></header>
-          <InboundCreationReview language={language} state={state} nodes={nodes} disabled={busy} onEdit={editSection} publicKey={tls ? undefined : savedProfile.current?.public_key} checkedEndpoints={preview?.endpoints} tlsMetadata={tls ? preview?.plan.profile.tls ?? (!state.replaceTLS ? state.tlsMetadata : undefined) : undefined}/>
+          {state.spec && <InboundSpecReview spec={state.spec} secretPaths={state.specSecretPaths ?? []} language={language}/>}
+          <InboundCreationReview language={language} state={state} nodes={nodes} disabled={busy} onEdit={editSection} publicKey={tls ? undefined : savedProfile.current?.public_key} checkedEndpoints={state.spec ? undefined : preview?.endpoints} tlsMetadata={!state.spec && tls ? preview?.plan.profile.tls ?? (!state.replaceTLS ? state.tlsMetadata : undefined) : undefined}/>
           <label className="creation-field"><span>{t.note}</span><input aria-label={t.note} data-creation-field="reason" maxLength={200} value={state.reason} disabled={locked} onChange={event => update({ ...state, reason: event.target.value })} placeholder={t.notePlaceholder}/></label>
           {issues.filter(issue => issue.field === "reason").map((issue, index) => <p key={index} className="creation-issues" role="alert">{creationIssueMessage(issue, language)}</p>)}
           <div className="creation-preview-status" data-checked={!!preview} role="status"><ShieldCheck size={18}/><span>{preview ? t.checked : t.checkFirst}</span></div>

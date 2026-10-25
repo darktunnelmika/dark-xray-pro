@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/darktunnelmika/dark-xray-pro/internal/inboundspec"
 	"github.com/darktunnelmika/dark-xray-pro/internal/routeplan"
 	"net"
 	"regexp"
@@ -33,23 +34,27 @@ var (
 
 // Native Xray counter email is not itself a financial ledger.
 type User struct {
-	UUID  string `json:"uuid"`
-	Email string `json:"email"`
+	UUID      string   `json:"uuid"`
+	Email     string   `json:"email"`
+	ID        uint64   `json:"id,omitempty"`
+	Password  string   `json:"password,omitempty"`
+	Addresses []string `json:"addresses,omitempty"`
 }
 
 // Profile contains PRIVATE key material and must not be returned to browsers.
 type Profile struct {
-	InboundID         uint64          `json:"inbound_id"`
-	Transport         string          `json:"transport"`
-	Security          string          `json:"security,omitempty"`
-	TLS               *TLSMaterial    `json:"tls,omitempty"`
-	GRPCService       string          `json:"grpc_service,omitempty"`
-	RealityTarget     string          `json:"reality_target"`
-	ServerNames       []string        `json:"server_names"`
-	RealityPrivateKey string          `json:"reality_private_key"`
-	ShortIDs          []string        `json:"short_ids"`
-	Users             []User          `json:"users"`
-	Options           *ProfileOptions `json:"options,omitempty"`
+	Spec              *inboundspec.Spec `json:"spec,omitempty"`
+	InboundID         uint64            `json:"inbound_id"`
+	Transport         string            `json:"transport"`
+	Security          string            `json:"security,omitempty"`
+	TLS               *TLSMaterial      `json:"tls,omitempty"`
+	GRPCService       string            `json:"grpc_service,omitempty"`
+	RealityTarget     string            `json:"reality_target"`
+	ServerNames       []string          `json:"server_names"`
+	RealityPrivateKey string            `json:"reality_private_key"`
+	ShortIDs          []string          `json:"short_ids"`
+	Users             []User            `json:"users"`
+	Options           *ProfileOptions   `json:"options,omitempty"`
 }
 type Listener struct {
 	InboundID   uint64 `json:"inbound_id"`
@@ -59,15 +64,16 @@ type Listener struct {
 	Attribution string `json:"attribution"`
 }
 type Candidate struct {
-	Config                     []byte     `json:"-"`
-	NoListeners                bool       `json:"no_listeners,omitempty"`
-	SHA256                     string     `json:"sha256"`
-	ManifestSHA256             string     `json:"manifest_sha256"`
-	Listeners                  []Listener `json:"listeners"`
-	CanActivate                bool       `json:"can_activate"`
-	RequiresXrayTest           bool       `json:"requires_xray_test"`
-	RequiresDataPlaneProof     bool       `json:"requires_data_plane_proof"`
-	RequiresSubscriptionCommit bool       `json:"requires_subscription_commit"`
+	EngineConfigs              []EngineCandidate `json:"engine_configs,omitempty"`
+	Config                     []byte            `json:"-"`
+	NoListeners                bool              `json:"no_listeners,omitempty"`
+	SHA256                     string            `json:"sha256"`
+	ManifestSHA256             string            `json:"manifest_sha256"`
+	Listeners                  []Listener        `json:"listeners"`
+	CanActivate                bool              `json:"can_activate"`
+	RequiresXrayTest           bool              `json:"requires_xray_test"`
+	RequiresDataPlaneProof     bool              `json:"requires_data_plane_proof"`
+	RequiresSubscriptionCommit bool              `json:"requires_subscription_commit"`
 }
 
 func validDNS(name string) bool {
@@ -108,6 +114,9 @@ func validProfile(p Profile) error { return ValidateProfile(p) }
 // authoring API. Public field failures are typed; secret/user failures stay
 // generic so callers cannot accidentally expose their values.
 func ValidateProfile(p Profile) error {
+	if p.Spec != nil {
+		return validateAuthoringProfile(p)
+	}
 	security, err := NormalizeProfileSecurity(p.Security)
 	if err != nil {
 		return err

@@ -3,14 +3,16 @@ import { chromium, expect } from '@playwright/test';
 import { readFile, writeFile } from 'node:fs/promises';
 import { createServer, request as httpRequest } from 'node:http';
 import { isAbsolute } from 'node:path';
+import { assertCapabilities, assertNewSelectors, assertSpecOnly, field, input, publicOnly, reveal } from './live-inbound-authoring.mjs';
 
 const base = new URL(process.env.DARK_PRO_QA_UI_URL || '');
 if (base.protocol !== 'http:' || base.hostname !== '127.0.0.1' || !base.port || base.username || base.password) throw new Error('QA loopback only');
 const control = JSON.parse(await readFile(process.env.DARK_PRO_QA_CONTROL, 'utf8'));
 if (!control.username || !control.password || !isAbsolute(control.result_path || '') || !control.first?.private_key_pem || !control.renewed?.private_key_pem) throw new Error('Invalid TLS QA control');
 const api = '/api/v1/workspace/native-inbound-plans';
+const inspectAPI = '/api/v1/workspace/inbound-security/certificates/inspect';
 const diagnostics = [];
-let stage = 'launch', inboundID = 0, browser, page;
+let stage = 'launch', inboundID = 0, certificateID = '', browser, page;
 
 const proxy = createServer((request, response) => {
   let target;
@@ -28,27 +30,23 @@ const proxy = createServer((request, response) => {
 proxy.on('connect', (_request, socket) => { socket.end('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n'); });
 await new Promise((resolve, reject) => { proxy.once('error', reject); proxy.listen(0, '127.0.0.1', resolve); });
 
-function publicOnly(value) {
-  if (typeof value === 'string') {
-    if (value.includes('-----BEGIN') || value.includes(control.first.private_key_pem) || value.includes(control.renewed.private_key_pem)) throw new Error('Public response contains PEM credentials');
-    return;
-  }
-  if (!value || typeof value !== 'object') return;
-  for (const [key, nested] of Object.entries(value)) {
-    if (['tlscredentials', 'certificatepem', 'privatekeypem', 'privatekey', 'realityprivatekey', 'config'].includes(key.replace(/[_-]/g, '').toLowerCase())) throw new Error('Private field in public TLS response');
-    publicOnly(nested);
-  }
-}
 function safePlan(plan, revision, sha, transport) {
   publicOnly(plan);
+  assertSpecOnly(plan.profile);
   expect(plan).toMatchObject({ plan_revision: revision, inbound_revision: revision, runtime_apply: false, editable: true, status: 'SAVED_DISABLED',
     profile: { security: 'tls', transport, revision, public_key: '', enabled: false, archived: false, bound_clients: 0,
-      server_names: ['edge.example.org'], tls: { sha256: sha, dns_names: ['edge.example.org', 'tunnel.example.org'] } } });
+      server_names: ['edge.example.org'], spec: { security: 'tls', network: transport,
+        tls: { serverName: 'edge.example.org', minVersion: '1.2', maxVersion: '1.3', alpn: ['http/1.1'], certificates: [{ usage: 'encipherment', id: expect.stringMatching(/^[0-9a-f]{32}$/) }] },
+        client: { pinnedPeerCertSha256: [sha] } } } });
   expect(plan.profile.reality_target || '').toBe('');
   expect(plan.profile.short_ids || []).toEqual([]);
-  expect(plan.profile.tls.public_key_sha256).toMatch(/^[0-9a-f]{64}$/);
-  expect(plan.profile.tls.not_before_unix).toBeLessThan(Date.now() / 1000);
-  expect(plan.profile.tls.not_after_unix).toBeGreaterThan(Date.now() / 1000);
+  expect(plan.profile.spec.reality ?? {}).toEqual({});
+  expect(plan.profile.spec_secret_paths).toEqual(expect.arrayContaining(['tls.certificates.0.certificate', 'tls.certificates.0.key']));
+  expect(plan.profile.spec.tls.certificates[0].certificate).toBeUndefined();
+  expect(plan.profile.spec.tls.certificates[0].key).toBeUndefined();
+  if (certificateID) expect(plan.profile.spec.tls.certificates[0].id).toBe(certificateID);
+  expect(plan.profile.spec.stream[transport + 'Settings']).toMatchObject({ path: transport === 'ws' ? '/socket' : '/upgrade', host: 'edge.example.org' });
+  expect(plan.profile.spec.stream[transport === 'ws' ? 'httpupgradeSettings' : 'wsSettings']).toBeUndefined();
 }
 
 try {
@@ -61,7 +59,7 @@ try {
     const url = new URL(request.url());
     if (url.origin !== base.origin) diagnostics.push('Unexpected external request');
     if (!['GET', 'HEAD', 'OPTIONS'].includes(request.method())) {
-      const allowed = request.method() === 'POST' && ['/api/v1/session/login', api, api + '/preview'].includes(url.pathname) ||
+      const allowed = request.method() === 'POST' && ['/api/v1/session/login', api, api + '/preview', inspectAPI].includes(url.pathname) ||
         request.method() === 'PUT' && inboundID > 0 && url.pathname === api + '/' + inboundID;
       if (!allowed) diagnostics.push('Unexpected mutation ' + request.method() + ' ' + url.pathname);
     }
@@ -74,8 +72,29 @@ try {
   }
   async function credentials(dialog, value) {
     await connectionGroup(dialog, 'security');
-    await dialog.getByLabel('TLS certificate (PEM)', { exact: true }).fill(value.certificate_pem);
-    await dialog.getByLabel('TLS private key (PEM)', { exact: true }).fill(value.private_key_pem);
+    const certificates = dialog.locator('[data-spec-rows="tls.certificates"]');
+    if (await certificates.locator('[data-spec-row]').count() === 0) await certificates.getByRole('button', { name: 'Add', exact: true }).click();
+    await (await input(dialog, 'tls.certificates.0.certificate')).fill(value.certificate_pem);
+    await field(dialog, 'tls.certificates.0.key').fill(value.private_key_pem);
+  }
+  async function inspectCertificate(dialog, sha) {
+    const button = dialog.getByRole('button', { name: 'Inspect entered certificate', exact: true, includeHidden: true });
+    await reveal(button); await expect(button).toBeEnabled();
+    const pending = observe('POST', inspectAPI); await button.click();
+    const response = await pending; expect(response.status()).toBe(200);
+    const inspected = await response.json(); publicOnly(inspected);
+    expect(inspected.certificates).toHaveLength(1);
+    const cert = inspected.certificates[0];
+    expect(cert.sha256_hex).toBe(sha);
+    expect(cert.spki_sha256_hex).toMatch(/^[0-9a-f]{64}$/);
+    expect(cert.dns_names).toEqual(['edge.example.org', 'tunnel.example.org']);
+    expect(Date.parse(cert.not_before)).toBeLessThan(Date.now());
+    expect(Date.parse(cert.not_after)).toBeGreaterThan(Date.now());
+    expect(inspected).toMatchObject({ hostname_valid: true, time_valid: true, server_name: 'edge.example.org' });
+    await expect(dialog.locator('.spec-tool-details')).toContainText(cert.sha256_hex);
+    await dialog.getByRole('button', { name: 'Use certificate pin for clients', exact: true }).click();
+    await expect(field(dialog, 'client.pinnedPeerCertSha256')).toHaveValue(sha);
+    return cert;
   }
   async function preview(dialog, revision, sha, transport, status = 200) {
     await dialog.getByRole('tab', { name: 'Review', exact: true }).click();
@@ -99,7 +118,9 @@ try {
     expect(receipt).toMatchObject({ runtime_changed: false, clients_deleted: false, credit_changed: false, usage_reset: false, subscription_published: false });
     safePlan(receipt.plan, revision, sha, transport);
     if (JSON.stringify(response.request().postDataJSON()) !== JSON.stringify(checked.body)) throw new Error('Preview/save request mismatch');
-    expect(receipt.plan.profile.tls).toEqual(checked.value.plan.profile.tls);
+    // A new row receives its permanent identity on save; later edits preserve it.
+    const publicSpec = value => ({ ...value, tls: { ...value.tls, certificates: value.tls.certificates.map(({ id, ...cert }) => cert) } });
+    expect(publicSpec(receipt.plan.profile.spec)).toEqual(publicSpec(checked.value.plan.profile.spec));
     await expect(dialog).toBeHidden();
     return receipt;
   }
@@ -113,9 +134,10 @@ try {
     const dialog = page.getByRole('dialog', { name: 'Edit Inbound setup', exact: true });
     await expect(dialog).toBeVisible();
     await connectionGroup(dialog, 'security');
-    await expect(dialog.getByRole('radio', { name: 'TLS', exact: true })).toBeDisabled();
-    await expect(dialog.getByLabel('TLS private key (PEM)', { exact: true })).toHaveCount(0);
-    await expect(dialog.getByRole('button', { name: 'Replace certificate and key', exact: true })).toBeVisible();
+    await expect(field(dialog, 'security')).toHaveValue('tls');
+    await expect(field(dialog, 'tls.certificates.0.certificate')).toHaveValue('');
+    await expect(field(dialog, 'tls.certificates.0.key')).toHaveValue('');
+    await expect(field(dialog, 'tls.certificates.0.key')).toHaveAttribute('placeholder', 'Blank keeps saved material');
     return dialog;
   }
   async function noBrowserStorageSecrets() {
@@ -131,22 +153,25 @@ try {
   await page.getByRole('button', { name: 'Sign in', exact: true }).click();
   const response = await caps; expect(response.status()).toBe(200);
   const capabilities = await response.json(); publicOnly(capabilities);
-  expect(capabilities).toMatchObject({ version: 3, profile_tls: true, profile_websocket: true, profile_http_upgrade: true, runtime_apply: false });
+  assertCapabilities(capabilities);
   await page.getByRole('button', { name: 'Add Inbound', exact: true }).click();
   const created = page.getByRole('dialog', { name: 'Create Inbound', exact: true });
   await expect(created.getByRole('tab')).toHaveText(['Connection', 'Dark Swap', 'Advanced', 'Review']);
+  await assertNewSelectors(created);
   stage = 'TLS WebSocket creation';
   await created.getByLabel('Inbound name', { exact: true }).fill('Real browser TLS');
   await connectionGroup(created, 'security');
-  await created.getByRole('radio', { name: 'TLS', exact: true }).check();
-  await created.getByLabel('Server names (comma-separated)', { exact: true }).fill('edge.example.org');
+  await field(created, 'security').selectOption('tls');
+  await field(created, 'tls.serverName').fill('edge.example.org');
+  await field(created, 'tls.alpn').fill('http/1.1');
   await credentials(created, control.first);
+  const firstCertificate = await inspectCertificate(created, control.first_sha256);
   await connectionGroup(created, 'network');
-  await created.getByRole('radio', { name: 'WebSocket / TLS', exact: true }).check();
-  await created.getByLabel('WebSocket Path', { exact: true }).fill('/socket');
-  await created.getByLabel('WebSocket Host', { exact: true }).fill('edge.example.org');
-  await expect(created.getByLabel('REALITY target (host:port)', { exact: true })).toHaveCount(0);
-  await expect(created.getByLabel('Short IDs', { exact: true })).toHaveCount(0);
+  await field(created, 'network').selectOption('ws');
+  await field(created, 'stream.wsSettings.path').fill('/socket');
+  await field(created, 'stream.wsSettings.host').fill('edge.example.org');
+  await expect(field(created, 'reality.target')).toHaveCount(0);
+  await expect(field(created, 'reality.shortIds')).toHaveCount(0);
   await created.getByRole('tab', { name: 'Dark Swap', exact: true }).click();
   await created.getByRole('checkbox', { name: 'Select destination: Germany', exact: true }).check();
   await created.getByLabel('Destination listening IP: de', { exact: true }).fill('198.51.100.10');
@@ -160,39 +185,43 @@ try {
   const initialPreview = await preview(created, 1, control.first_sha256, 'ws');
   const firstReceipt = await save(created, 1, control.first_sha256, 'ws', initialPreview);
   inboundID = firstReceipt.plan.profile.id;
+  certificateID = firstReceipt.plan.profile.spec.tls.certificates[0].id;
   await noBrowserStorageSecrets();
 
   stage = 'retained TLS key across transport edit';
   const edited = await reopen(1, control.first_sha256, 'ws');
   await connectionGroup(edited, 'network');
-  await edited.getByRole('radio', { name: 'HTTPUpgrade / TLS', exact: true }).check();
-  await edited.getByLabel('HTTPUpgrade Path', { exact: true }).fill('/upgrade');
-  await edited.getByLabel('HTTPUpgrade Host', { exact: true }).fill('edge.example.org');
+  await field(edited, 'network').selectOption('httpupgrade');
+  await field(edited, 'stream.httpupgradeSettings.path').fill('/upgrade');
+  await field(edited, 'stream.httpupgradeSettings.host').fill('edge.example.org');
   await edited.getByRole('tab', { name: 'Review', exact: true }).click();
   await edited.getByLabel('Change note', { exact: true }).fill('Retained certificate HTTPUpgrade');
   const retainedPreview = await preview(edited, 2, control.first_sha256, 'httpupgrade');
   expect(Object.hasOwn(retainedPreview.body, 'tls_credentials')).toBe(false);
+  expect(retainedPreview.body.profile.spec.tls.certificates[0]).toEqual({ id: certificateID, usage: 'encipherment' });
+  expect(retainedPreview.body.profile.options).toBeUndefined();
   await save(edited, 2, control.first_sha256, 'httpupgrade', retainedPreview);
 
   stage = 'certificate/key mismatch is rejected by actual API';
   const renewal = await reopen(2, control.first_sha256, 'httpupgrade');
-  await renewal.getByRole('button', { name: 'Replace certificate and key', exact: true }).click();
   await credentials(renewal, { certificate_pem: control.renewed.certificate_pem, private_key_pem: control.first.private_key_pem });
+  const renewedCertificate = await inspectCertificate(renewal, control.renewed_sha256);
   await renewal.getByRole('tab', { name: 'Review', exact: true }).click();
   await renewal.getByLabel('Change note', { exact: true }).fill('Renewed TLS certificate');
   const invalid = await preview(renewal, 3, control.renewed_sha256, 'httpupgrade', 422);
-  expect(invalid.issue).toMatchObject({ field: 'tls_credentials.private_key_pem', code: 'tls_private_key_mismatch' });
+  expect(invalid.issue).toMatchObject({ field: 'profile.spec.tls.certificates.0.key', code: 'certificate_key_mismatch' });
   await connectionGroup(renewal, 'security');
-  await renewal.getByLabel('TLS private key (PEM)', { exact: true }).fill(control.renewed.private_key_pem);
+  await (await input(renewal, 'tls.certificates.0.key')).fill(control.renewed.private_key_pem);
   stage = 'explicit certificate and key replacement';
   const renewalPreview = await preview(renewal, 3, control.renewed_sha256, 'httpupgrade');
   const last = await save(renewal, 3, control.renewed_sha256, 'httpupgrade', renewalPreview);
-  expect(last.plan.profile.tls.public_key_sha256).not.toBe(firstReceipt.plan.profile.tls.public_key_sha256);
+  expect(renewedCertificate.spki_sha256_hex).not.toBe(firstCertificate.spki_sha256_hex);
+  expect(last.plan.profile.spec.client.pinnedPeerCertSha256).toEqual([renewedCertificate.sha256_hex]);
   await reopen(3, control.renewed_sha256, 'httpupgrade');
   await noBrowserStorageSecrets();
   if (diagnostics.length) throw new Error(diagnostics.join('; '));
   await writeFile(control.result_path, JSON.stringify({ inbound_id: inboundID, event_id: last.event_id,
-    original_sha256: firstReceipt.plan.profile.tls.sha256, renewed_sha256: last.plan.profile.tls.sha256 }), { mode: 0o600 });
+    original_sha256: firstCertificate.sha256_hex, renewed_sha256: renewedCertificate.sha256_hex }), { mode: 0o600 });
   console.log('NATIVE_UI_TLS_CERTIFICATE_LIFECYCLE_VERIFIED');
 } catch (error) {
   // Do not dump assertion objects or page HTML: the test has write-only PEM fields.

@@ -267,6 +267,12 @@ func (s *Store) assessNativeInboundPromotion(ctx context.Context, tx *sql.Tx, ke
 		return a, err
 	}
 	a.profile = profile
+	// The accepted metered path is the minimal legacy TCP/REALITY profile.
+	// Rich authoring specs require their own runtime/accounting acceptance and
+	// must not inherit that authority merely by choosing the same protocol.
+	if profile.Spec != nil {
+		a.block("", "profile.spec", "promotion_options_unsupported")
+	}
 	if profile.Security != "" || profile.Transport != "tcp" || profile.TLS != nil {
 		a.block("", "profile.transport", "promotion_transport_unsupported")
 	}

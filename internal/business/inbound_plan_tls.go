@@ -3,6 +3,7 @@ package business
 import (
 	"encoding/json"
 	"errors"
+	"github.com/darktunnelmika/dark-xray-pro/internal/inboundspec"
 	"strings"
 
 	"github.com/darktunnelmika/dark-xray-pro/internal/usagewire"
@@ -39,6 +40,10 @@ func (in *NativeInboundPlanInput) UnmarshalJSON(raw []byte) error {
 }
 
 func planProfileError(err error) error {
+	var specDetail *inboundspec.FieldError
+	if errors.As(err, &specDetail) {
+		return planError("", "profile.spec."+specDetail.Path, specDetail.Code, ErrInvalid)
+	}
 	var detail *xrayconfig.ProfileValidationError
 	if errors.As(err, &detail) {
 		field := detail.Field
@@ -51,6 +56,12 @@ func planProfileError(err error) error {
 }
 
 func normalizePlanTLS(in *NativeInboundPlanInput) error {
+	if in.Profile.Spec != nil {
+		if in.TLSCredentials != nil || in.tlsCredentialsNull {
+			return planError("", "tls_credentials", "spec_credentials_must_be_nested", ErrInvalid)
+		}
+		return normalizePlanSpecInput(in)
+	}
 	security, err := xrayconfig.NormalizeProfileSecurity(in.Profile.Security)
 	if err != nil {
 		return planProfileError(err)
@@ -90,6 +101,9 @@ func planTLSMaterial(input *TLSCredentials) *xrayconfig.TLSMaterial {
 // Populate public fields from authenticated private storage. No certificate
 // PEM or private-key representation is copied to the public DTO.
 func publicInboundProfile(in *NativeInbound, profile xrayconfig.Profile) error {
+	if profile.Spec != nil {
+		return publicAuthoringProfile(in, profile)
+	}
 	in.Transport, in.Security = profile.Transport, profile.Security
 	in.GRPCService, in.RealityTarget = profile.GRPCService, profile.RealityTarget
 	in.ServerNames, in.ShortIDs, in.Options = profile.ServerNames, profile.ShortIDs, profile.Options
@@ -109,6 +123,9 @@ func hasInboundTLSAuthoring(transport string, options *xrayconfig.ProfileOptions
 }
 
 func planEnvelopeVersion(plan NativeInboundPlan) int {
+	if plan.Profile.Spec != nil {
+		return 4
+	}
 	if plan.Profile.Security == "tls" || plan.Profile.TLS != nil || hasInboundTLSAuthoring(plan.Profile.Transport, plan.Profile.Options) {
 		return 3
 	}

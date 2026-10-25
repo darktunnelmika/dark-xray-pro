@@ -4,7 +4,7 @@
 // requested initial-health mode prepares a probe and issues one synthetic token.
 import { chromium, expect } from '@playwright/test';
 import { readFile, writeFile } from 'node:fs/promises';
-import { createServer, request as httpRequest } from 'node:http';
+import { Agent, createServer, request as httpRequest } from 'node:http';
 import { isAbsolute } from 'node:path';
 
 const base = new URL(process.env.DARK_PRO_QA_UI_URL || '');
@@ -15,17 +15,43 @@ const inboundID = control.inbound_id, planPath = '/api/v1/workspace/native-inbou
 const initialHealth = control.initial_health === true, initialPath = planPath + '/initial-health', selectedClient = 'promotion-client-0';
 const diagnostics = [], mutations = [];
 let stage = 'launch', browser, page, initialResult = {};
+const proxySockets = new Set(), upstreamRequests = new Set(), upstreamResponses = new Set();
+const proxyAgent = new Agent({ keepAlive: false });
+let stopping = false;
+function transportFailure(message) {
+  diagnostics.push(message);
+  // A real error racing with the final asynchronous proof write must still
+  // fail the child process, even after the earlier diagnostics assertion.
+  process.exitCode = 1;
+}
 const proxy = createServer((request, response) => {
+  if (stopping) { response.writeHead(503).end(); return; }
   let target;
   try { target = new URL(request.url); } catch { response.writeHead(403).end(); return; }
   if (target.origin !== base.origin || target.username || target.password) { response.writeHead(403).end(); return; }
   const headers = { ...request.headers, host: base.host };
   delete headers['proxy-connection']; delete headers['proxy-authorization'];
-  const upstream = httpRequest({ hostname: '127.0.0.1', port: base.port, method: request.method, path: target.pathname + target.search, headers }, incoming => {
+  let clientCancelled = false;
+  const upstream = httpRequest({ hostname: '127.0.0.1', port: base.port, method: request.method, path: target.pathname + target.search, headers, agent: proxyAgent }, incoming => {
+    upstreamResponses.add(incoming);
+    incoming.once('close', () => upstreamResponses.delete(incoming));
+    incoming.on('error', () => { if (!stopping && !clientCancelled) transportFailure('Harness upstream response failed'); response.destroy(); });
+    if (stopping || response.destroyed) { incoming.destroy(); return; }
     response.writeHead(incoming.statusCode, incoming.headers); incoming.pipe(response);
   });
-  upstream.on('error', () => { diagnostics.push('Harness transport failure'); response.writeHead(502).end(); });
-  request.on('aborted', () => upstream.destroy()); request.pipe(upstream);
+  upstreamRequests.add(upstream);
+  upstream.once('close', () => upstreamRequests.delete(upstream));
+  upstream.on('error', () => {
+    if (!stopping && !clientCancelled) transportFailure('Harness transport failure');
+    if (!response.destroyed) { if (!response.headersSent) response.writeHead(502); response.end(); }
+  });
+  const cancelUpstream = () => { clientCancelled = true; upstream.destroy(); };
+  response.on('close', () => { if (!response.writableFinished) cancelUpstream(); });
+  request.on('aborted', cancelUpstream); request.pipe(upstream);
+});
+proxy.on('connection', socket => {
+  proxySockets.add(socket); socket.once('close', () => proxySockets.delete(socket));
+  if (stopping) socket.destroy();
 });
 proxy.on('connect', (_request, socket) => socket.end('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n'));
 await new Promise((resolve, reject) => { proxy.once('error', reject); proxy.listen(0, '127.0.0.1', resolve); });
@@ -155,5 +181,36 @@ try {
   console.error('Promotion QA failed at ' + stage + ': ' + String(error?.message || error).replace(/-----BEGIN[\s\S]*?-----END[^-]*-----/g, '[fixture PEM]'));
   process.exitCode = 1;
 } finally {
-  await browser?.close(); await new Promise(resolve => proxy.close(resolve));
+  // The browser can have a request in flight while its page is closing. Close
+  // both sides of this owned proxy before awaiting browser shutdown, so neither
+  // side waits for the other to finish a response or a rejected CONNECT socket.
+  stopping = true;
+  let teardownStage = 'stop proxy admission';
+  const deadline = setTimeout(() => {
+    console.error(`Promotion QA teardown exceeded 8000ms during ${teardownStage}; sockets=${proxySockets.size}, requests=${upstreamRequests.size}, responses=${upstreamResponses.size}`);
+    // A printed proof marker never overrides an unsuccessful child exit. The
+    // Go harness must still observe exit 0 before checking the stored evidence.
+    process.exit(1);
+  }, 8000);
+  try {
+    console.log(`PROMOTION_QA_TEARDOWN_BEGIN sockets=${proxySockets.size} requests=${upstreamRequests.size} responses=${upstreamResponses.size}`);
+    const proxyClosed = new Promise((resolve, reject) => proxy.close(error => error ? reject(error) : resolve()));
+    // Attach a handler immediately; browser.close may take time before the
+    // proxy completion is awaited below.
+    proxyClosed.catch(() => {});
+    for (const incoming of upstreamResponses) incoming.destroy();
+    for (const outgoing of upstreamRequests) outgoing.destroy();
+    for (const socket of proxySockets) socket.destroy();
+    proxyAgent.destroy();
+    teardownStage = 'close browser';
+    await browser?.close();
+    teardownStage = 'complete proxy close';
+    await proxyClosed;
+    console.log('PROMOTION_QA_TEARDOWN_COMPLETE');
+  } catch {
+    console.error(`Promotion QA teardown failed during ${teardownStage}`);
+    process.exit(1);
+  } finally {
+    clearTimeout(deadline);
+  }
 }
