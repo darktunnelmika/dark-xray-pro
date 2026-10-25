@@ -98,9 +98,21 @@ func (s *Store) loadMeteredHealthSnapshot(ctx context.Context, tx *sql.Tx, key [
 	if op.Phase != "target_applied_health_required" {
 		return out, ErrConflict
 	}
-	apply, err := readMeteredRouteCommand(ctx, tx, key, op.ApplyCommandID)
+	out, err = s.loadAppliedHealthSnapshot(ctx, tx, key, op.TargetNode, op.TargetInstallation, op.TargetStageID, op.ApplyCommandID, now)
+	out.base.HandoverID = opID
+	return out, err
+}
+
+// Authorization of an operation is supplied by the caller. Both branches use
+// the same exact applied candidate, fresh observation, lease and epoch checks.
+func (s *Store) loadAppliedHealthSnapshot(ctx context.Context, tx *sql.Tx, key []byte, node, installation, stageID, applyID string, now int64) (meteredHealthSnapshot, error) {
+	var out meteredHealthSnapshot
+	apply, err := readMeteredRouteCommand(ctx, tx, key, applyID)
 	if err != nil {
 		return out, err
+	}
+	if apply.view.NodeID != node || apply.view.InstallationID != installation || apply.view.StageID != stageID || apply.view.Action != "apply" || apply.view.State != "acknowledged" || apply.view.Receipt == nil || apply.view.Receipt.Outcome != "applied" {
+		return out, ErrConflict
 	}
 	if err = meteredRouteStillCurrent(ctx, tx, key, apply); err != nil {
 		return out, err
@@ -113,16 +125,16 @@ func (s *Store) loadMeteredHealthSnapshot(ctx context.Context, tx *sql.Tx, key [
 	if mx.TransactionPayloadSHA(apply.payload.Candidate) != apply.payload.Command.PayloadSHA {
 		return out, ErrUnavailable
 	}
-	ch, err := handoverIdleChannel(ctx, tx, op.TargetNode)
+	ch, err := handoverIdleChannel(ctx, tx, node)
 	if err != nil {
 		return out, err
 	}
 	c, ack := apply.payload.Command, apply.view.Receipt
 	o := ch.Status.Observed
-	if ch.InstallationID != op.TargetInstallation || ch.Status.Instance != c.RuntimeInstance || ch.Status.Serial != c.Serial || ch.Status.CurrentStageID != op.TargetStageID || ch.Status.StagedID != "" || ack == nil || ack.Metered == nil || ch.ReportedAt < ack.ObservedAt || !o.ProcessReady || o.ActiveSequence != c.RuntimeSequence || o.ActiveSHA != c.Lease.ConfigSHA || o.LeaseExpires != c.Lease.Expires || o.LeaseExpires <= now || o.Usage == nil || !o.Usage.Running || o.Usage.Settled || o.Usage.Failure != "" || *ch.Status.Usage != ack.Metered.After || ch.Status.Usage.Settlement != (uc.Receipt{}) {
+	if ch.InstallationID != installation || ch.Status.Instance != c.RuntimeInstance || ch.Status.Serial != c.Serial || ch.Status.CurrentStageID != stageID || ch.Status.StagedID != "" || ack == nil || ack.Metered == nil || ch.ReportedAt < ack.ObservedAt || !o.ProcessReady || o.ActiveSequence != c.RuntimeSequence || o.ActiveSHA != c.Lease.ConfigSHA || o.LeaseExpires != c.Lease.Expires || o.LeaseExpires <= now || o.Usage == nil || !o.Usage.Running || o.Usage.Settled || o.Usage.Failure != "" || *ch.Status.Usage != ack.Metered.After || ch.Status.Usage.Settlement != (uc.Receipt{}) {
 		return out, ErrConflict
 	}
-	epoch, err := meteredEpoch(ctx, tx, op.TargetNode, op.TargetInstallation, *ch.Status.Usage)
+	epoch, err := meteredEpoch(ctx, tx, node, installation, *ch.Status.Usage)
 	if err != nil {
 		return out, err
 	}
@@ -133,7 +145,7 @@ func (s *Store) loadMeteredHealthSnapshot(ctx context.Context, tx *sql.Tx, key [
 	if state != "open" || epoch.ConfigSHA != o.ActiveSHA || apply.view.RegisteredEpochID != epoch.ID {
 		return out, ErrConflict
 	}
-	out.base = mx.ProtocolHealthRequest{Version: mx.ProtocolHealthVersion, HandoverID: opID, NodeID: op.TargetNode, InstallationID: op.TargetInstallation, RuntimeInstance: ch.Status.Instance, StageID: op.TargetStageID, ApplyCommandID: op.ApplyCommandID, Expected: mx.Condition(o), Usage: *ch.Status.Usage, Expires: o.LeaseExpires}
+	out.base = mx.ProtocolHealthRequest{Version: mx.ProtocolHealthVersion, NodeID: node, InstallationID: installation, RuntimeInstance: ch.Status.Instance, StageID: stageID, ApplyCommandID: applyID, Expected: mx.Condition(o), Usage: *ch.Status.Usage, Expires: o.LeaseExpires}
 	out.apply, out.epoch = apply, epoch
 	return out, nil
 }
@@ -193,6 +205,9 @@ func (s *Store) issueMeteredHealthChallenge(ctx context.Context, key, token []by
 		return q, err
 	}
 	defer tx.Rollback()
+	if err = healthIDNotInitial(ctx, tx, intent); err != nil {
+		return q, err
+	}
 	fp := fingerprint("metered-health-intent-v1", struct {
 		Op       string
 		Inbound  uint64
@@ -275,6 +290,9 @@ func (s *Store) issueMeteredHealthChallenge(ctx context.Context, key, token []by
 		return mx.ProtocolHealthRequest{}, err
 	}
 	q.ID, q.EndpointSHA, q.Issued = hex.EncodeToString(nonce[:]), endpoint.SHA(), now
+	if err = healthIDNotInitial(ctx, tx, q.ID); err != nil {
+		return mx.ProtocolHealthRequest{}, err
+	}
 	if max := now + int64(8*time.Second); q.Expires > max {
 		q.Expires = max
 	}

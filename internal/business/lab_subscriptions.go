@@ -20,10 +20,14 @@ import (
 )
 
 type LabSubscriptionView struct {
-	ClientID   string                   `json:"client_id"`
-	Generation uint64                   `json:"generation"`
-	State      string                   `json:"state"`
-	Snapshot   *LabSubscriptionSnapshot `json:"snapshot,omitempty"`
+	ClientID             string                   `json:"client_id"`
+	Generation           uint64                   `json:"generation"`
+	State                string                   `json:"state"`
+	Snapshot             *LabSubscriptionSnapshot `json:"snapshot,omitempty"`
+	DeliveryRevision     uint64                   `json:"delivery_revision"`
+	DeliveryScope        string                   `json:"delivery_scope"`
+	InitialApplyRevision uint64                   `json:"initial_apply_revision"`
+	HandoverRevision     uint64                   `json:"handover_revision"`
 }
 type SubscriptionTokenMutation struct {
 	EventID            string `json:"event_id"`
@@ -44,12 +48,13 @@ type SubscriptionSecret struct {
 	Token      string `json:"token"`
 }
 type LabSubscriptionMaterialization struct {
-	EventID                  string `json:"event_id"`
-	ClientID                 string `json:"client_id"`
-	RoundID                  string `json:"round_id"`
-	ExpectedRevision         uint64 `json:"expected_revision"`
-	ConsumerManifestID       string `json:"consumer_manifest_id,omitempty"`
-	ConsumerManifestRevision uint64 `json:"consumer_manifest_revision,omitempty"`
+	EventID                  string  `json:"event_id"`
+	ClientID                 string  `json:"client_id"`
+	RoundID                  string  `json:"round_id"`
+	ExpectedRevision         uint64  `json:"expected_revision"`
+	ConsumerManifestID       string  `json:"consumer_manifest_id,omitempty"`
+	ConsumerManifestRevision uint64  `json:"consumer_manifest_revision,omitempty"`
+	ExpectedDeliveryRevision *uint64 `json:"expected_delivery_revision,omitempty"`
 }
 
 // One complete experimental LAB snapshot replaces the previous snapshot for
@@ -71,6 +76,11 @@ type LabSubscriptionSnapshot struct {
 	RouteCount               int    `json:"route_count"`
 	Current                  bool   `json:"current"`
 	Replayed                 bool   `json:"replayed,omitempty"`
+	Scope                    string `json:"scope,omitempty"`
+	DeliveryRevision         uint64 `json:"delivery_revision,omitempty"`
+	InboundID                uint64 `json:"inbound_id,omitempty"`
+	PromotionEventID         string `json:"promotion_event_id,omitempty"`
+	InitialApplySHA          string `json:"initial_apply_sha,omitempty"`
 }
 type LabSubscriptionContent struct {
 	Raw                  []byte                  `json:"-"`
@@ -433,17 +443,51 @@ func (s *Store) LabSubscription(ctx context.Context, key []byte, actorID, client
 		return out, err
 	}
 	out = LabSubscriptionView{ClientID: clientID, Generation: h.Generation, State: h.State}
-	row, err := readSubscriptionSnapshotHead(ctx, tx, clientID)
-	if err != nil && !errors.Is(err, ErrNotFound) {
+	delivery, err := readSubscriptionDelivery(ctx, tx, clientID)
+	if err != nil {
 		return out, err
 	}
-	if err == nil {
-		if _, err = openSubscriptionSnapshot(key, row); err != nil {
+	out.DeliveryRevision, out.DeliveryScope = delivery.Revision, delivery.Scope
+	old, oldErr := readSubscriptionSnapshotHead(ctx, tx, clientID)
+	if oldErr != nil && !errors.Is(oldErr, ErrNotFound) {
+		return out, oldErr
+	}
+	out.HandoverRevision = old.Revision
+	var initial subscriptionSnapshotRow
+	if delivery.Enabled {
+		var e error
+		initial, e = readInitialSubscriptionHead(ctx, tx, clientID)
+		if e != nil && !errors.Is(e, ErrNotFound) {
+			return out, e
+		}
+		out.InitialApplyRevision = initial.Revision
+	}
+	if delivery.Enabled && delivery.Scope == InitialApplyHealthScope {
+		if initial.ID != delivery.SnapshotID {
+			return out, ErrUnavailable
+		}
+		if _, err = openInitialSubscriptionSnapshot(key, initial); err != nil {
 			return out, err
 		}
-		_, proofErr := s.currentSubscriptionSnapshot(ctx, tx, key, row, &endpoint, time.Now().UnixNano())
-		row.Current = proofErr == nil
-		out.Snapshot = &row.LabSubscriptionSnapshot
+		_, proofErr := s.currentInitialSubscriptionSnapshot(ctx, tx, key, initial, &endpoint, time.Now().UnixNano())
+		initial.Current = proofErr == nil
+		if err = snapshotDeliveryMetadata(ctx, tx, delivery, InitialApplyHealthScope, &initial.LabSubscriptionSnapshot); err != nil {
+			return out, err
+		}
+		out.Snapshot = &initial.LabSubscriptionSnapshot
+	} else if oldErr == nil && (!delivery.Enabled || delivery.Scope == HandoverSubscriptionScope) {
+		if delivery.Enabled && old.ID != delivery.SnapshotID {
+			return out, ErrUnavailable
+		}
+		if _, err = openSubscriptionSnapshot(key, old); err != nil {
+			return out, err
+		}
+		_, proofErr := s.currentSubscriptionSnapshot(ctx, tx, key, old, &endpoint, time.Now().UnixNano())
+		old.Current = proofErr == nil
+		if err = snapshotDeliveryMetadata(ctx, tx, delivery, HandoverSubscriptionScope, &old.LabSubscriptionSnapshot); err != nil {
+			return out, err
+		}
+		out.Snapshot = &old.LabSubscriptionSnapshot
 	}
 	if err = tx.Commit(); err != nil {
 		return LabSubscriptionView{}, err

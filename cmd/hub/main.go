@@ -255,7 +255,14 @@ func main() {
 	} else if os.Getenv("DARK_PRO_METERED_ROUTE_NODE_ID") != "" || os.Getenv("DARK_PRO_METERED_ROUTE_INSTALLATION_ID") != "" || os.Getenv("DARK_PRO_METERED_ROUTE_XRAY_SHA256") != "" || os.Getenv("DARK_PRO_METERED_ROUTE_NODES_JSON") != "" {
 		log.Fatal("metered route scope supplied without explicit opt-in")
 	}
-	if os.Getenv("DARK_PRO_ENABLE_METERED_HEALTH") == "1" {
+	initialHealth := os.Getenv("DARK_PRO_ENABLE_INITIAL_APPLY_HEALTH")
+	if initialHealth != "" && initialHealth != "0" && initialHealth != "1" {
+		log.Fatal("initial Apply health switch must be 0 or 1")
+	}
+	if initialHealth == "1" && (planPromotion != "1" || os.Getenv("DARK_PRO_ENABLE_METERED_HEALTH") == "1") {
+		log.Fatal("initial Apply health requires saved-plan promotion and its separate one-Node health scope")
+	}
+	if os.Getenv("DARK_PRO_ENABLE_METERED_HEALTH") == "1" || initialHealth == "1" {
 		if os.Getenv("DARK_PRO_ENABLE_METERED_ROUTE_TRANSACTIONS") != "1" {
 			log.Fatal("health requires approved LAB metered channels")
 		}
@@ -270,8 +277,14 @@ func main() {
 		if decoder.Decode(&verifier) != nil || decoder.Decode(&extra) != io.EOF {
 			log.Fatal("invalid health verifier configuration")
 		}
-		if err := service.EnableMeteredHealth(verifier); err != nil {
-			log.Fatal("health configuration refused: ", err)
+		var healthErr error
+		if initialHealth == "1" {
+			healthErr = service.EnableInboundInitialHealth(verifier)
+		} else {
+			healthErr = service.EnableMeteredHealth(verifier)
+		}
+		if healthErr != nil {
+			log.Fatal("health configuration refused: ", healthErr)
 		}
 	} else if os.Getenv("DARK_PRO_HEALTH_VERIFIER_JSON") != "" {
 		log.Fatal("health verifier supplied without explicit enable switch")
@@ -285,7 +298,7 @@ func main() {
 		}
 	}
 	if os.Getenv("DARK_PRO_ENABLE_LAB_SUBSCRIPTIONS") == "1" {
-		if os.Getenv("DARK_PRO_ENABLE_METERED_HEALTH_ROUNDS") != "1" {
+		if os.Getenv("DARK_PRO_ENABLE_METERED_HEALTH_ROUNDS") != "1" && initialHealth != "1" {
 			log.Fatal("LAB subscriptions require explicitly enabled complete health rounds")
 		}
 		if err := service.EnableLabSubscriptions(); err != nil {

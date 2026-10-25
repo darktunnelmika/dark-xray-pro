@@ -1,6 +1,7 @@
 // Real compiled UI → authenticated API → SQLite promotion acceptance.
 // The Go harness owns the disposable saved plan and signed empty Agent observations.
-// This browser performs no Stage, Apply, renewal, runtime start or subscription operation.
+// This browser performs no Stage, Apply, renewal or runtime start. The separately
+// requested initial-health mode prepares a probe and issues one synthetic token.
 import { chromium, expect } from '@playwright/test';
 import { readFile, writeFile } from 'node:fs/promises';
 import { createServer, request as httpRequest } from 'node:http';
@@ -11,8 +12,9 @@ if (base.protocol !== 'http:' || base.hostname !== '127.0.0.1' || !base.port || 
 const control = JSON.parse(await readFile(process.env.DARK_PRO_QA_CONTROL, 'utf8'));
 if (typeof control.username !== 'string' || !control.username || typeof control.password !== 'string' || !control.password || !isAbsolute(control.result_path || '') || !Number.isSafeInteger(control.inbound_id) || control.inbound_id <= 0) throw new Error('Invalid promotion QA control');
 const inboundID = control.inbound_id, planPath = '/api/v1/workspace/native-inbound-plans/' + inboundID, promotionPath = planPath + '/promotion';
+const initialHealth = control.initial_health === true, initialPath = planPath + '/initial-health', selectedClient = 'promotion-client-0';
 const diagnostics = [], mutations = [];
-let stage = 'launch', browser, page;
+let stage = 'launch', browser, page, initialResult = {};
 const proxy = createServer((request, response) => {
   let target;
   try { target = new URL(request.url); } catch { response.writeHead(403).end(); return; }
@@ -31,7 +33,7 @@ function publicOnly(value) {
   if (typeof value === 'string') { if (/-----BEGIN\s+[^-]+-----/i.test(value)) throw new Error('PEM material in public response'); return; }
   if (!value || typeof value !== 'object') return;
   for (const [key, nested] of Object.entries(value)) {
-    if (['tlscredentials', 'certificatepem', 'privatekeypem', 'privatekey', 'realityprivatekey', 'config', 'uuid'].includes(key.replace(/[_-]/g, '').toLowerCase())) throw new Error('Private configuration in public promotion response');
+    if (['tlscredentials', 'certificatepem', 'privatekeypem', 'privatekey', 'realityprivatekey', 'config', 'uuid', 'token', 'agenttoken', 'password', 'signature'].includes(key.replace(/[_-]/g, '').toLowerCase())) throw new Error('Private configuration in public promotion response');
     publicOnly(nested);
   }
 }
@@ -44,7 +46,9 @@ try {
     const url = new URL(request.url()); if (url.origin !== base.origin) diagnostics.push('Unexpected external request');
     if (!['GET', 'HEAD', 'OPTIONS'].includes(request.method())) {
       mutations.push({ method: request.method(), path: url.pathname });
-      if (request.method() !== 'POST' || !['/api/v1/session/login', promotionPath, promotionPath + '/preview'].includes(url.pathname)) diagnostics.push('Unexpected mutation ' + request.method() + ' ' + url.pathname);
+      const allowed = ['/api/v1/session/login', promotionPath, promotionPath + '/preview'];
+      if (initialHealth) allowed.push(initialPath + '/prepare', '/api/v1/workspace/clients/' + selectedClient + '/subscription/issue');
+      if (request.method() !== 'POST' || !allowed.includes(url.pathname)) diagnostics.push('Unexpected mutation ' + request.method() + ' ' + url.pathname);
     }
   });
   const observe = (method, path) => page.waitForResponse(response => new URL(response.url()).origin === base.origin && new URL(response.url()).pathname === path && response.request().method() === method);
@@ -78,8 +82,48 @@ try {
   await expect(panel().locator('[data-promotion-state="prepared"]')).toBeVisible();
   await expect(page.locator('#inbound-panel-overview .inbound-summary').getByText('Prepared for LAB', { exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Archive saved setup', exact: true })).toHaveCount(0); await expect(page.getByRole('button', { name: 'Enable Inbound', exact: true })).toHaveCount(0); await expect(page.getByRole('button', { name: 'Edit profile', exact: true })).toHaveCount(0);
+  if (initialHealth) {
+    const health = page.getByRole('region', { name: 'First-Apply health and LAB delivery', exact: true });
+    const runtime = page.getByRole('region', { name: 'Metered TCP LAB transactions', exact: true });
+    stage = 'explicit initial-health preparation before Stage';
+    await expect(health.getByRole('button', { name: 'Prepare the protocol probe', exact: true })).toBeEnabled();
+    await expect(runtime.getByRole('button', { name: 'Review and Stage', exact: true })).toBeDisabled();
+    await expect(health.getByRole('button', { name: 'Review and test the connection', exact: true })).toBeDisabled();
+    const preparationResponse = observe('POST', initialPath + '/prepare');
+    page.once('dialog', dialog => dialog.accept()); await health.getByRole('button', { name: 'Prepare the protocol probe', exact: true }).click();
+    const prepared = await preparationResponse; expect([200, 201]).toContain(prepared.status());
+    const preparation = await prepared.json(); publicOnly(preparation);
+    const preparationRequest = prepared.request().postDataJSON(); publicOnly(preparationRequest);
+    expect(preparationRequest).toEqual({ event_id: preparation.event_id, promotion_event_id: receipt.event_id, confirmed: true });
+    expect(preparation).toMatchObject({ promotion_event_id: receipt.event_id, inbound_id: inboundID, node_id: receipt.node_id, installation_id: receipt.installation_id, prepared: true, replayed: false });
+    expect(preparation.event_id).toMatch(/^[a-f0-9]{32}$/);
+    await expect(health.getByText('Protocol-test identity prepared', { exact: true })).toBeVisible();
+    await expect(runtime.getByRole('button', { name: 'Review and Stage', exact: true })).toBeEnabled();
+    stage = 'explicit bound-client token preparation';
+    await health.getByLabel('First-Apply subscription client', { exact: true }).selectOption(selectedClient);
+    const tokenResponse = observe('POST', '/api/v1/workspace/clients/' + selectedClient + '/subscription/issue');
+    page.once('dialog', dialog => dialog.accept()); await health.getByRole('button', { name: 'Issue subscription token', exact: true }).click();
+    const issued = await tokenResponse; expect([200, 201]).toContain(issued.status()); const tokenReceipt = await issued.json(); publicOnly(tokenReceipt);
+    expect(tokenReceipt).toMatchObject({ client_id: selectedClient, generation: 1, state: 'active', replayed: false });
+    expect(issued.request().postDataJSON()).toMatchObject({ event_id: tokenReceipt.event_id, expected_generation: 0 });
+    await expect(health.getByText('Subscription token active', { exact: true })).toBeVisible();
+    await expect(health.getByRole('button', { name: 'Review and test the connection', exact: true })).toBeDisabled();
+    await expect(health.getByRole('button', { name: "Record this client's LAB output", exact: true })).toBeDisabled();
+    initialResult = { preparation_event_id: preparation.event_id, client_id: selectedClient, token_generation: tokenReceipt.generation };
+  }
   stage = 'read-only retained plan after reload';
+  const restoredHealth = initialHealth ? observe('GET', initialPath) : null;
   await page.reload({ waitUntil: 'domcontentloaded' }); await expect(panel().locator('[data-promotion-state="prepared"]')).toBeVisible();
+  if (initialHealth) {
+    const restored = await restoredHealth; expect(restored.status()).toBe(200); const state = await restored.json(); publicOnly(state);
+    expect(state).toMatchObject({ enabled: true, available: true, scope: 'lab_initial_apply', inbound_id: inboundID, promotion_event_id: receipt.event_id, prepared: true, can_prepare: false, eligible: false, preparation: { event_id: initialResult.preparation_event_id } });
+    const health = page.getByRole('region', { name: 'First-Apply health and LAB delivery', exact: true });
+    await expect(health.getByText('Protocol-test identity prepared', { exact: true })).toBeVisible();
+    await expect(health.getByRole('button', { name: 'Prepare the protocol probe', exact: true })).toHaveCount(0);
+    await expect(health.getByText('Subscription token active', { exact: true })).toBeVisible();
+    await expect(health.getByRole('button', { name: 'Review and test the connection', exact: true })).toBeDisabled();
+    await expect(health.getByRole('button', { name: "Record this client's LAB output", exact: true })).toBeDisabled();
+  }
   const readResponse = observe('GET', planPath); await page.getByRole('button', { name: 'Open saved setup', exact: true }).click();
   const read = await readResponse; expect(read.status()).toBe(200); const saved = await read.json(); publicOnly(saved);
   expect(saved.plan).toMatchObject({ plan_revision: 1, inbound_revision: 1, editable: false, edit_blocker: 'plan_promoted', runtime_apply: false, promotion: { ...receipt, replayed: false } });
@@ -88,11 +132,25 @@ try {
   await page.getByRole('tab', { name: 'Routes', exact: true }).click(); await expect(page.getByRole('button', { name: 'Add Node target', exact: true })).toHaveCount(0); await expect(page.getByRole('button', { name: 'Edit target', exact: true })).toHaveCount(0);
   await page.getByRole('tab', { name: 'Clients', exact: true }).click(); await expect(page.getByRole('heading', { name: 'Prepared client bindings', exact: true })).toBeVisible(); await expect(page.getByRole('button', { name: 'Attach selected', exact: true })).toHaveCount(0); await expect(page.getByRole('button', { name: 'Detach selected', exact: true })).toHaveCount(0);
   expect(mutations.filter(mutation => mutation.path === promotionPath + '/preview')).toHaveLength(1); expect(mutations.filter(mutation => mutation.path === promotionPath)).toHaveLength(1);
+  if (initialHealth) {
+    expect(mutations.filter(mutation => mutation.path === initialPath + '/prepare')).toHaveLength(1);
+    expect(mutations.filter(mutation => mutation.path === '/api/v1/workspace/clients/' + selectedClient + '/subscription/issue')).toHaveLength(1);
+    expect(mutations).toHaveLength(5);
+  }
   const storage = await page.evaluate(() => JSON.stringify({ local: { ...localStorage }, session: { ...sessionStorage } }));
-  if (/-----BEGIN|private_key|tls_credentials/.test(storage)) throw new Error('Private material in browser storage');
+  if (/-----BEGIN|private_key|tls_credentials|\/api\/v1\/subscriptions\//.test(storage)) throw new Error('Private material in browser storage');
+  if (initialHealth) await page.evaluate(() => {
+    const scan = item => { if (!item || typeof item !== 'object') return; for (const [key, nested] of Object.entries(item)) { if (['token', 'uuid', 'private_key', 'signature'].includes(key)) throw new Error('Private material in retained first-Apply operation'); scan(nested); } };
+    for (const [key, value] of Object.entries(sessionStorage)) {
+      let parsed;
+      try { parsed = JSON.parse(value); }
+      catch { if (key.startsWith('dark-pro-initial-health:')) throw new Error('Malformed retained first-Apply operation'); continue; }
+      scan(parsed);
+    }
+  });
   if (diagnostics.length) throw new Error(diagnostics.join('; '));
-  await writeFile(control.result_path, JSON.stringify({ pass: true, marker: 'PLAN_PROMOTION_BROWSER_PASS', inbound_id: inboundID, event_id: receipt.event_id, plan_revision: receipt.plan_revision, source_inbound_revision: receipt.source_inbound_revision, inbound_revision: receipt.inbound_revision, node_id: receipt.node_id, installation_id: receipt.installation_id, draft_revision: receipt.draft_revision, client_ids: receipt.client_ids, review_sha256: receipt.review_sha256 }), { mode: 0o600 });
-  console.log('PLAN_PROMOTION_BROWSER_PASS');
+  await writeFile(control.result_path, JSON.stringify({ pass: true, marker: initialHealth ? 'INITIAL_APPLY_PREPARATION_BROWSER_PASS' : 'PLAN_PROMOTION_BROWSER_PASS', inbound_id: inboundID, event_id: receipt.event_id, plan_revision: receipt.plan_revision, source_inbound_revision: receipt.source_inbound_revision, inbound_revision: receipt.inbound_revision, node_id: receipt.node_id, installation_id: receipt.installation_id, draft_revision: receipt.draft_revision, client_ids: receipt.client_ids, review_sha256: receipt.review_sha256, ...initialResult }), { mode: 0o600 });
+  console.log(initialHealth ? 'INITIAL_APPLY_PREPARATION_BROWSER_PASS' : 'PLAN_PROMOTION_BROWSER_PASS');
 } catch (error) {
   console.error('Promotion QA failed at ' + stage + ': ' + String(error?.message || error).replace(/-----BEGIN[\s\S]*?-----END[^-]*-----/g, '[fixture PEM]'));
   process.exitCode = 1;

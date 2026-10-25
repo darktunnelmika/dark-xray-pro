@@ -56,6 +56,9 @@ func (s *Store) QueueMeteredHealth(ctx context.Context, key []byte, id, op strin
 		return empty, err
 	}
 	defer tx.Rollback()
+	if err = healthIDNotInitial(ctx, tx, id); err != nil {
+		return empty, err
+	}
 	var version int
 	if err = tx.QueryRowContext(ctx, `PRAGMA user_version`).Scan(&version); err != nil {
 		return empty, err

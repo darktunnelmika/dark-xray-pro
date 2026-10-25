@@ -92,6 +92,9 @@ func openSubscriptionSnapshot(key []byte, row subscriptionSnapshotRow) ([]byte, 
 	// Current/Replayed are assessments, not persisted authority or mutable AAD.
 	binding := row.subscriptionSnapshotBinding
 	binding.Current, binding.Replayed = false, false
+	// v15 response metadata is not part of any pre-v15 ciphertext AAD.
+	binding.Scope, binding.DeliveryRevision = "", 0
+	binding.InboundID, binding.PromotionEventID, binding.InitialApplySHA = 0, "", ""
 	raw, err := openSubscription(key, "snapshot", binding, row.Payload)
 	if err != nil {
 		return nil, err
@@ -143,93 +146,9 @@ func (s *Store) currentSubscriptionProof(ctx context.Context, tx *sql.Tx, key []
 	if round.NodeID != state.base.NodeID || round.InstallationID != state.base.InstallationID || state.apply.payload.Candidate.SHA256 != state.apply.payload.Command.Lease.ConfigSHA || state.apply.payload.Candidate.ManifestSHA256 != state.apply.payload.Command.Lease.ManifestSHA {
 		return out, ErrConflict
 	}
-	c, err := readClient(ctx, tx, clientID)
+	c, raw, routeCount, err := subscriptionAppliedClientRoutes(ctx, tx, clientID, state, manifest, now)
 	if err != nil {
 		return out, err
-	}
-	if c.Archived || c.DeploymentState == "disabled" || c.ExpiresUnix <= now/int64(time.Second) || c.ExpiresUnix > math.MaxInt64/int64(time.Second) {
-		return out, ErrConflict
-	}
-	var eligible int
-	if err = tx.QueryRowContext(ctx, `SELECT eligible FROM pro_usage_eligibility WHERE client_id=?`, clientID).Scan(&eligible); err != nil {
-		return out, err
-	}
-	if eligible != 1 {
-		return out, ErrConflict
-	}
-	email, err := uc.CounterEmail(clientID)
-	if err != nil {
-		return out, ErrConflict
-	}
-	found := 0
-	for _, b := range state.epoch.Bindings {
-		if b.ClientID == clientID {
-			if !b.Billable || b.Role != "" || b.Email != email {
-				return out, ErrConflict
-			}
-			found++
-		}
-	}
-	if found != 1 {
-		return out, ErrConflict
-	}
-	labels := make(map[uint64]string, len(manifest.Members))
-	for _, member := range manifest.Members {
-		labels[member.InboundID] = fmt.Sprintf("LAB direct %d", member.InboundID)
-	}
-	routes, err := xrayconfig.LabSubscriptionRoutes(state.apply.payload.Candidate, c.UUID, labels)
-	if err != nil || len(routes) == 0 || len(routes) > maxMeteredHealthMembers {
-		return out, ErrConflict
-	}
-	if manifest.ConsumerManifestID != "" {
-		for i := range routes {
-			matched := false
-			for _, member := range manifest.Members {
-				if member.InboundID == routes[i].InboundID && member.Port == routes[i].Port && mx.ValidateConsumerProtocolEndpoint(member.ConsumerAddress, member.ConsumerPort) {
-					routes[i].Host, routes[i].Port = member.ConsumerAddress, member.ConsumerPort
-					routes[i].Label = fmt.Sprintf("LAB consumer %d", member.InboundID)
-					matched = true
-					break
-				}
-			}
-			if !matched {
-				return out, ErrConflict
-			}
-		}
-	}
-	// Bind the UUID selected by the codec to the exact registered accounting
-	// email in every applied listener. Membership and billability must describe
-	// the same identity, not merely two separately well-formed candidate users.
-	var config struct {
-		Inbounds []struct {
-			Settings struct {
-				Clients []struct {
-					ID    string `json:"id"`
-					Email string `json:"email"`
-				} `json:"clients"`
-			} `json:"settings"`
-		} `json:"inbounds"`
-	}
-	if json.Unmarshal(state.apply.payload.Candidate.Config, &config) != nil {
-		return out, ErrConflict
-	}
-	matched := 0
-	for _, inbound := range config.Inbounds {
-		for _, user := range inbound.Settings.Clients {
-			if strings.EqualFold(user.ID, c.UUID) {
-				if user.Email != email {
-					return out, ErrConflict
-				}
-				matched++
-			}
-		}
-	}
-	if matched != len(routes) {
-		return out, ErrConflict
-	}
-	raw, err := subscriptioncodec.Render(routes, subscriptioncodec.FormatRaw)
-	if err != nil {
-		return out, ErrConflict
 	}
 	op, _, err := readMeteredHandover(ctx, tx, handoverID)
 	if err != nil {
@@ -252,7 +171,100 @@ func (s *Store) currentSubscriptionProof(ctx context.Context, tx *sql.Tx, key []
 		ConfigSHA, ManifestSHA, ClientID, ClientUUID, RepresentativeID string
 		ClientExpiry                                                   int64
 	}{op, state.base, state.apply.payload.Generation, state.apply.payload.Candidate.SHA256, state.apply.payload.Candidate.ManifestSHA256, c.ID, c.UUID, c.RepresentativeID, c.ExpiresUnix})
-	return subscriptionProof{Raw: raw, Round: round, State: state, Handover: op, BindingSHA: binding, Expires: expires, RouteCount: len(routes)}, nil
+	return subscriptionProof{Raw: raw, Round: round, State: state, Handover: op, BindingSHA: binding, Expires: expires, RouteCount: routeCount}, nil
+}
+
+// Shared customer/epoch/rendering checks for both proof origins.
+func subscriptionAppliedClientRoutes(ctx context.Context, tx *sql.Tx, clientID string, state meteredHealthSnapshot, manifest healthRoundManifest, now int64) (Client, []byte, int, error) {
+	c, err := readClient(ctx, tx, clientID)
+	if err != nil {
+		return Client{}, nil, 0, err
+	}
+	if c.Archived || c.DeploymentState == "disabled" || c.ExpiresUnix <= now/int64(time.Second) || c.ExpiresUnix > math.MaxInt64/int64(time.Second) {
+		return Client{}, nil, 0, ErrConflict
+	}
+	var eligible int
+	if err = tx.QueryRowContext(ctx, `SELECT eligible FROM pro_usage_eligibility WHERE client_id=?`, clientID).Scan(&eligible); err != nil {
+		return Client{}, nil, 0, err
+	}
+	if eligible != 1 {
+		return Client{}, nil, 0, ErrConflict
+	}
+	email, err := uc.CounterEmail(clientID)
+	if err != nil {
+		return Client{}, nil, 0, ErrConflict
+	}
+	found := 0
+	for _, b := range state.epoch.Bindings {
+		if b.ClientID == clientID {
+			if !b.Billable || b.Role != "" || b.Email != email {
+				return Client{}, nil, 0, ErrConflict
+			}
+			found++
+		}
+	}
+	if found != 1 {
+		return Client{}, nil, 0, ErrConflict
+	}
+	labels := make(map[uint64]string, len(manifest.Members))
+	for _, member := range manifest.Members {
+		labels[member.InboundID] = fmt.Sprintf("LAB direct %d", member.InboundID)
+	}
+	routes, err := xrayconfig.LabSubscriptionRoutes(state.apply.payload.Candidate, c.UUID, labels)
+	if err != nil || len(routes) == 0 || len(routes) > maxMeteredHealthMembers {
+		return Client{}, nil, 0, ErrConflict
+	}
+	if manifest.ConsumerManifestID != "" {
+		for i := range routes {
+			matched := false
+			for _, member := range manifest.Members {
+				if member.InboundID == routes[i].InboundID && member.Port == routes[i].Port && mx.ValidateConsumerProtocolEndpoint(member.ConsumerAddress, member.ConsumerPort) {
+					routes[i].Host, routes[i].Port = member.ConsumerAddress, member.ConsumerPort
+					routes[i].Label = fmt.Sprintf("LAB consumer %d", member.InboundID)
+					matched = true
+					break
+				}
+			}
+			if !matched {
+				return Client{}, nil, 0, ErrConflict
+			}
+		}
+	}
+	// Bind the UUID selected by the codec to the exact registered accounting
+	// email in every applied listener. Membership and billability must describe
+	// the same identity, not merely two separately well-formed candidate users.
+	var config struct {
+		Inbounds []struct {
+			Settings struct {
+				Clients []struct {
+					ID    string `json:"id"`
+					Email string `json:"email"`
+				} `json:"clients"`
+			} `json:"settings"`
+		} `json:"inbounds"`
+	}
+	if json.Unmarshal(state.apply.payload.Candidate.Config, &config) != nil {
+		return Client{}, nil, 0, ErrConflict
+	}
+	matched := 0
+	for _, inbound := range config.Inbounds {
+		for _, user := range inbound.Settings.Clients {
+			if strings.EqualFold(user.ID, c.UUID) {
+				if user.Email != email {
+					return Client{}, nil, 0, ErrConflict
+				}
+				matched++
+			}
+		}
+	}
+	if matched != len(routes) {
+		return Client{}, nil, 0, ErrConflict
+	}
+	raw, err := subscriptioncodec.Render(routes, subscriptioncodec.FormatRaw)
+	if err != nil {
+		return Client{}, nil, 0, ErrConflict
+	}
+	return c, raw, len(routes), nil
 }
 
 func (s *Store) currentSubscriptionSnapshot(ctx context.Context, tx *sql.Tx, key []byte, row subscriptionSnapshotRow, endpoint *mx.ProtocolHealthEndpoint, now int64) (subscriptionProof, error) {
@@ -271,6 +283,9 @@ func (s *Store) currentSubscriptionSnapshot(ctx context.Context, tx *sql.Tx, key
 
 func (s *Store) MaterializeLabSubscription(ctx context.Context, key []byte, actorID, handoverID string, in LabSubscriptionMaterialization, endpoint mx.ProtocolHealthEndpoint) (LabSubscriptionSnapshot, error) {
 	var out LabSubscriptionSnapshot
+	if in.ExpectedDeliveryRevision != nil && *in.ExpectedDeliveryRevision >= routeMax-1 {
+		return out, ErrInvalid
+	}
 	if !eventRE.MatchString(in.EventID) || !idRE.MatchString(in.ClientID) || !routeID.MatchString(in.RoundID) || !routeID.MatchString(handoverID) || in.ExpectedRevision >= routeMax-1 || !endpoint.Valid() || (in.ConsumerManifestID == "" && in.ConsumerManifestRevision != 0) || (in.ConsumerManifestID != "" && (!routeID.MatchString(in.ConsumerManifestID) || in.ConsumerManifestRevision == 0 || in.ConsumerManifestRevision >= routeMax)) {
 		return out, ErrInvalid
 	}
@@ -286,6 +301,10 @@ func (s *Store) MaterializeLabSubscription(ctx context.Context, key []byte, acto
 		ActorID, HandoverID, EndpointSHA string
 		Input                            LabSubscriptionMaterialization
 	}{actorID, handoverID, endpoint.SHA(), in})
+	delivery, err := readSubscriptionDelivery(ctx, tx, in.ClientID)
+	if err != nil {
+		return out, err
+	}
 	head, headErr := readSubscriptionSnapshotHead(ctx, tx, in.ClientID)
 	if headErr != nil && !errors.Is(headErr, ErrNotFound) {
 		return out, headErr
@@ -303,6 +322,9 @@ func (s *Store) MaterializeLabSubscription(ctx context.Context, key []byte, acto
 			prior.Current = e == nil
 		}
 		prior.Replayed = true
+		if err = snapshotDeliveryMetadata(ctx, tx, delivery, HandoverSubscriptionScope, &prior.LabSubscriptionSnapshot); err != nil {
+			return out, err
+		}
 		return prior.LabSubscriptionSnapshot, tx.Commit()
 	}
 	if !errors.Is(err, ErrNotFound) {
@@ -317,6 +339,13 @@ func (s *Store) MaterializeLabSubscription(ctx context.Context, key []byte, acto
 	}
 	if used != 0 || in.ExpectedRevision != head.Revision {
 		return out, ErrConflict
+	}
+	if in.ExpectedDeliveryRevision != nil {
+		if *in.ExpectedDeliveryRevision != delivery.Revision {
+			return out, ErrConflict
+		}
+	} else if delivery.Enabled && delivery.Scope == InitialApplyHealthScope {
+		return out, ErrConflict // Old clients cannot overwrite a foreign origin.
 	}
 	now := time.Now().UnixNano()
 	proof, err := s.currentSubscriptionProof(ctx, tx, key, in.ClientID, handoverID, in.RoundID, &endpoint, now)
@@ -355,6 +384,13 @@ func (s *Store) MaterializeLabSubscription(ctx context.Context, key []byte, acto
 	}
 	if err != nil {
 		return out, err
+	}
+	row.DeliveryRevision, err = appendSubscriptionDelivery(ctx, tx, delivery, HandoverSubscriptionScope, row.LabSubscriptionSnapshot)
+	if err != nil {
+		return out, err
+	}
+	if delivery.Enabled {
+		row.Scope = HandoverSubscriptionScope
 	}
 	if end := time.Now().UnixNano(); end < now || end >= row.ExpiresUnixNano {
 		return out, ErrConflict
@@ -404,9 +440,27 @@ func (s *Store) ReadLabSubscription(ctx context.Context, key []byte, token strin
 	if subtle.ConstantTimeCompare([]byte(token), []byte(currentToken)) != 1 {
 		return out, ErrNotFound
 	}
+	delivery, err := readSubscriptionDelivery(ctx, tx, clientID)
+	if err != nil {
+		return out, err
+	}
+	if delivery.Enabled {
+		if delivery.Revision == 0 {
+			return out, ErrNotFound
+		}
+		if delivery.Scope == InitialApplyHealthScope {
+			return s.readInitialSubscriptionDelivery(ctx, tx, key, delivery, endpoint, h.Generation)
+		}
+		if delivery.Scope != HandoverSubscriptionScope {
+			return out, ErrUnavailable
+		}
+	}
 	row, err := readSubscriptionSnapshotHead(ctx, tx, clientID)
 	if err != nil {
 		return out, err
+	}
+	if delivery.Enabled && (row.ID != delivery.SnapshotID || row.Revision != delivery.SnapshotRevision) {
+		return out, ErrUnavailable
 	}
 	raw, err := openSubscriptionSnapshot(key, row)
 	if err != nil {
@@ -422,6 +476,10 @@ func (s *Store) ReadLabSubscription(ctx context.Context, key []byte, token strin
 	}
 	if end := time.Now().UnixNano(); end < now || end >= row.ExpiresUnixNano {
 		return out, ErrConflict
+	}
+	row.Current = true
+	if err = snapshotDeliveryMetadata(ctx, tx, delivery, HandoverSubscriptionScope, &row.LabSubscriptionSnapshot); err != nil {
+		return out, err
 	}
 	if err = tx.Commit(); err != nil {
 		return out, err

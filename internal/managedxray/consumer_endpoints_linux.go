@@ -87,7 +87,7 @@ func ParseConsumerEndpointApprovalsJSON(raw string) ([]ConsumerEndpointApproval,
 }
 
 func (t *TransactionRuntime) consumerProtocolApproved(q ProtocolHealthRequest) bool {
-	if q.Version == ProtocolHealthVersion {
+	if q.Version == ProtocolHealthVersion || q.Version == InitialApplyProtocolHealthVersion {
 		return validProtocolHealthConsumer(q)
 	}
 	if q.Version != ConsumerProtocolHealthVersion || !validProtocolHealthConsumer(q) || t.metered == nil {

@@ -16,7 +16,7 @@ import (
 // It does not queue health work, start a runtime, renew a lease or publish a
 // public endpoint. The normal HUB remains default-off.
 func (s *Server) EnableLabSubscriptions() error {
-	if s.business == nil || len(s.inboundKey) != 32 || !s.healthRoundsEnabled || s.healthEndpoint == nil || s.labSubscriptionsEnabled {
+	if s.business == nil || len(s.inboundKey) != 32 || (!s.healthRoundsEnabled && !s.initialApplyHealthEnabled) || s.healthEndpoint == nil || s.labSubscriptionsEnabled {
 		return errors.New("LAB subscriptions require explicitly enabled N17 health rounds")
 	}
 	if err := s.business.EnableLabSubscriptions(context.Background()); err != nil {
@@ -38,8 +38,12 @@ func (s *Server) attachLabSubscriptions(mux *http.ServeMux) {
 			businessError(w, business.ErrInvalid)
 			return
 		}
+		scope := business.HandoverSubscriptionScope
+		if s.initialApplyHealthEnabled {
+			scope = business.InitialApplyHealthScope
+		}
 		if !s.labSubscriptionsEnabled {
-			respond(w, http.StatusOK, map[string]any{"enabled": false, "scope": "lab_single_handover", "client_id": r.PathValue("id")})
+			respond(w, http.StatusOK, map[string]any{"enabled": false, "scope": scope, "client_id": r.PathValue("id")})
 			return
 		}
 		s.replacementLifecycle.Lock()
@@ -50,8 +54,7 @@ func (s *Server) attachLabSubscriptions(mux *http.ServeMux) {
 			return
 		}
 		if v.Snapshot != nil && v.Snapshot.Current {
-			op, e := s.business.MeteredHandover(r.Context(), v.Snapshot.HandoverID)
-			if e != nil || !s.handoverScope(op.SourceNode, op.TargetNode, op.SourceInstallation, op.TargetInstallation) {
+			if !s.subscriptionSnapshotInScope(r.Context(), *v.Snapshot) {
 				v.Snapshot.Current = false
 			}
 		}
@@ -60,7 +63,7 @@ func (s *Server) attachLabSubscriptions(mux *http.ServeMux) {
 			Enabled    bool   `json:"enabled"`
 			Scope      string `json:"scope"`
 			ServerTime int64  `json:"server_time_unix_milli"`
-		}{v, true, "lab_single_handover", time.Now().UnixMilli()})
+		}{v, true, scope, time.Now().UnixMilli()})
 	})
 	for _, action := range []string{"issue", "rotate", "revoke", "reveal"} {
 		action := action
@@ -206,13 +209,18 @@ func (s *Server) serveLabSubscription(w http.ResponseWriter, r *http.Request) {
 	}
 	var body []byte
 	var expires int64
+	var scope string
 	err = func() error {
 		defer s.replacementLifecycle.Unlock()
 		v, readErr := s.business.ReadLabSubscription(ctx, s.inboundKey, token, *s.healthEndpoint)
-		if readErr != nil || !s.handoverScope(v.SourceNodeID, v.Snapshot.NodeID, v.SourceInstallationID, v.Snapshot.InstallationID) || !v.Snapshot.Current || time.Now().UnixNano() >= v.Snapshot.ExpiresUnixNano || len(v.Raw) == 0 || len(v.Raw) > 2<<20 {
+		if readErr != nil || !s.subscriptionSnapshotInScope(ctx, v.Snapshot) || !v.Snapshot.Current || time.Now().UnixNano() >= v.Snapshot.ExpiresUnixNano || len(v.Raw) == 0 || len(v.Raw) > 2<<20 {
 			return business.ErrUnavailable
 		}
 		body, expires = v.Raw, v.Snapshot.ExpiresUnixNano
+		scope = v.Snapshot.Scope
+		if scope == "" {
+			scope = business.HandoverSubscriptionScope
+		}
 		if format == "base64" {
 			body = []byte(base64.StdEncoding.EncodeToString(body))
 		}
@@ -226,9 +234,25 @@ func (s *Server) serveLabSubscription(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.Header().Set("Content-Length", strconv.Itoa(len(body)))
-	w.Header().Set("X-Dark-Pro-Scope", "lab_single_handover")
+	w.Header().Set("X-Dark-Pro-Scope", scope)
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(body)
+}
+
+func (s *Server) subscriptionSnapshotInScope(ctx context.Context, v business.LabSubscriptionSnapshot) bool {
+	if v.Scope == business.InitialApplyHealthScope {
+		return v.HandoverID == "" && v.InboundID != 0 && v.InitialApplySHA != "" &&
+			s.initialHealthPromotionScope(ctx, v.InboundID, v.NodeID, v.InstallationID)
+	}
+	if v.Scope != "" && v.Scope != business.HandoverSubscriptionScope {
+		return false
+	}
+	if v.InboundID != 0 || v.InitialApplySHA != "" || v.PromotionEventID != "" {
+		return false
+	}
+	op, err := s.business.MeteredHandover(ctx, v.HandoverID)
+	return err == nil && op.TargetNode == v.NodeID && op.TargetInstallation == v.InstallationID &&
+		s.handoverScope(op.SourceNode, op.TargetNode, op.SourceInstallation, op.TargetInstallation)
 }
 
 func subscriptionQuery(raw string) (string, error) {

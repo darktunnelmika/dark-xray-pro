@@ -89,9 +89,13 @@ location / {{ return 403; }}
                         assert len(Backend.seen) == before + (method == allowed)
                 metered = "/api/v1/workspace/native-nodes/lab-test_01/metered-route-transactions"
                 promotion = "/api/v1/workspace/native-inbound-plans/8123/promotion"
+                initial = "/api/v1/workspace/native-inbound-plans/8123/initial-health"
                 handovers = "/api/v1/workspace/metered-handovers"
                 for path, allowed in ((promotion, {"GET", "POST"}),
                                       (promotion + "/preview", {"POST"}),
+                                      (initial, {"GET"}),
+                                      *((initial + "/" + action, {"POST"}) for action in ("prepare", "rounds", "snapshot")),
+                                      (initial + "/rounds/" + "a" * 32, {"GET"}),
                                       ("/api/v1/workspace/metered-route-transactions", {"GET"}),
                                       (metered, {"GET", "POST"}),
                                       (handovers, {"GET", "POST"}),
@@ -126,6 +130,12 @@ location / {{ return 403; }}
                              "/api/v1/workspace/metered-route-transactions/enable",
                              promotion + "/enable", promotion + "/preview/extra",
                              promotion + "/activate", promotion + "/extra",
+                             initial + "/enable", initial + "/apply", initial + "/prepare/extra",
+                             initial + "/snapshot/extra", initial + "/rounds/" + "A" * 32,
+                             initial + "/rounds/abc", initial + "/rounds/" + "a" * 32 + "/retry",
+                             "/api/v1/workspace/native-inbound-plans/0/initial-health",
+                             "/api/v1/workspace/native-inbound-plans/08123/initial-health",
+                             "/api/v1/workspace/native-inbound-plans/-1/initial-health",
                              "/api/v1/workspace/native-inbound-plans/0/promotion",
                              "/api/v1/workspace/native-inbound-plans/08123/promotion",
                              "/api/v1/workspace/native-inbound-plans/-1/promotion",

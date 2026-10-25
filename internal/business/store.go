@@ -40,7 +40,7 @@ var (
  idRE = regexp.MustCompile("^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
  eventRE = regexp.MustCompile("^[A-Za-z0-9][A-Za-z0-9_.:-]{15,127}$")
 )
-type Store struct{ db *sql.DB;usage *usageledger.Ledger;consumerPolicy *consumerManifestPolicy }
+type Store struct{ db *sql.DB;usage *usageledger.Ledger;consumerPolicy *consumerManifestPolicy; initialApplyHealthEnabled bool }
 type Representative struct {
  ID string `json:"id"`
  DisplayName string `json:"display_name"`
