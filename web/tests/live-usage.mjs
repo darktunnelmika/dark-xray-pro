@@ -18,16 +18,21 @@ try {
   await page.getByRole('button', { name: 'Sign in', exact: true }).click();
   await expect(page.getByText('Owner-only operations', { exact: true })).toBeVisible();
 
-  const createRep = page.getByRole('heading', { name: 'Create representative', exact: true }).locator('..');
+  // V2 requires opening the single creation dialog, then the profile.
+  // Keep all existing real SQLite/Core/credit and usage assertions below.
+  await page.getByRole('button', { name: 'Create representative', exact: true }).click();
+  const createRep = page.getByRole('dialog', { name: 'Create representative' });
   await createRep.getByLabel('Representative ID', { exact: true }).fill('live-usage-rep');
   await createRep.getByLabel('Display name', { exact: true }).fill('Live acceptance representative');
-  await createRep.getByRole('button', { name: 'Create representative', exact: true }).click();
-  // The directory now renders verified name and ID in the same owner-only row.
-  await expect(page.locator('.rep-dir-row').filter({hasText: 'live-usage-rep'})
+  await createRep.getByRole('button', { name: 'Create account', exact: true }).click();
+  await expect(createRep).toHaveCount(0);
+  await page.getByRole('button', { name: 'Back to directory', exact: true }).click();
+  await expect(page.locator('.rep-dir-row').filter({ hasText: 'live-usage-rep' })
     .getByText('Live acceptance representative', { exact: true })).toBeVisible();
-
-  const grant = page.getByRole('heading', { name: 'Adjust representative credit', exact: true }).locator('..');
-  await grant.getByLabel('Representative ID', { exact: true }).fill('live-usage-rep');
+  await page.locator('.rep-dir-row').filter({ hasText: 'live-usage-rep' })
+    .getByRole('button', { name: 'Manage account', exact: true }).click();
+  await page.getByRole('button', { name: 'Credit', exact: true }).click();
+  const grant = page.locator('.rep-v2-detail-form');
   await grant.getByLabel('Volume delta (GB, +/-)', { exact: true }).fill('0.05');
   await grant.getByLabel('Reason', { exact: true }).fill('Disposable real-browser acceptance');
   await grant.getByRole('button', { name: 'Record credit transaction', exact: true }).click();
