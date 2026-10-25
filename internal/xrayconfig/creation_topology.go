@@ -50,6 +50,7 @@ type CreationTopology struct {
 }
 
 type creationNodeBuild struct {
+	engines   []EngineCandidate
 	node      CreationNode
 	inbounds  []any
 	listeners []Listener
@@ -116,6 +117,21 @@ func RenderCreationTopology(profile Profile, nodes []CreationNode, swaps []Creat
 			return ErrConflict
 		}
 		b.ports[port] = true
+		if profile.Spec != nil {
+			tag := fmt.Sprintf("dxp-in-%d-%s", profile.InboundID, kind)
+			x, engine, err := renderAuthoringInbound(profile, b.node.ListenIP, port, tag)
+			if err != nil {
+				return err
+			}
+			if x != nil {
+				b.inbounds = append(b.inbounds, x)
+			}
+			if engine != nil {
+				b.engines = append(b.engines, *engine)
+			}
+			b.listeners = append(b.listeners, Listener{InboundID: profile.InboundID, NodePort: port, Kind: kind, Tag: tag, Attribution: "distinct"})
+			return nil
+		}
 		x := creationCustomerInbound(profile, b.node.ListenIP, port, kind)
 		b.inbounds = append(b.inbounds, x)
 		b.listeners = append(b.listeners, Listener{InboundID: profile.InboundID, NodePort: port, Kind: kind, Tag: x.Tag, Attribution: "distinct"})
@@ -184,7 +200,7 @@ func RenderCreationTopology(profile Profile, nodes []CreationNode, swaps []Creat
 		outTag := tag + "-out"
 		source.inbounds = append(source.inbounds, map[string]any{
 			"listen": source.node.ListenIP, "port": swap.SourcePort, "tag": tag, "protocol": "dokodemo-door",
-			"settings":       map[string]any{"address": destination.node.ListenIP, "port": swap.DestinationPort, "network": "tcp", "followRedirect": false},
+			"settings":       map[string]any{"address": destination.node.ListenIP, "port": swap.DestinationPort, "network": authoringRelayNetwork(profile), "followRedirect": false},
 			"streamSettings": map[string]string{"network": "tcp", "security": "none"},
 		})
 		source.listeners = append(source.listeners, Listener{InboundID: profile.InboundID, NodePort: swap.SourcePort, Kind: "swap_relay", Tag: tag, Attribution: "transit_not_billable"})
@@ -226,7 +242,7 @@ func RenderCreationTopology(profile Profile, nodes []CreationNode, swaps []Creat
 	result := CreationTopology{Nodes: make([]CreationNodeCandidate, 0, len(nodeIDs))}
 	for _, id := range nodeIDs {
 		b := byNode[id]
-		if len(b.inbounds) == 0 {
+		if len(b.inbounds) == 0 && len(b.engines) == 0 {
 			return empty, ErrInvalid
 		}
 		doc := map[string]any{
@@ -245,19 +261,20 @@ func RenderCreationTopology(profile Profile, nodes []CreationNode, swaps []Creat
 		digest := sha256.Sum256(config)
 		sort.Slice(b.listeners, func(i, j int) bool { return b.listeners[i].Tag < b.listeners[j].Tag })
 		manifest, err := json.Marshal(struct {
-			Purpose      string     `json:"purpose"`
-			Node         string     `json:"node"`
-			Installation string     `json:"installation"`
-			ConfigSHA    string     `json:"config_sha"`
-			Listeners    []Listener `json:"listeners"`
-		}{"creation-topology-offline-v1", id, b.node.InstallationID, hex.EncodeToString(digest[:]), b.listeners})
+			Purpose      string            `json:"purpose"`
+			Node         string            `json:"node"`
+			Installation string            `json:"installation"`
+			ConfigSHA    string            `json:"config_sha"`
+			Listeners    []Listener        `json:"listeners"`
+			Engines      []EngineCandidate `json:"engines,omitempty"`
+		}{"creation-topology-offline-v1", id, b.node.InstallationID, hex.EncodeToString(digest[:]), b.listeners, b.engines})
 		if err != nil {
 			return empty, ErrInvalid
 		}
 		manifestDigest := sha256.Sum256(manifest)
 		result.Nodes = append(result.Nodes, CreationNodeCandidate{NodeID: id, InstallationID: b.node.InstallationID, ListenIP: b.node.ListenIP,
 			Candidate: Candidate{Config: config, SHA256: hex.EncodeToString(digest[:]), ManifestSHA256: hex.EncodeToString(manifestDigest[:]),
-				Listeners: b.listeners, RequiresXrayTest: true, RequiresDataPlaneProof: true, RequiresSubscriptionCommit: true}})
+				Listeners: b.listeners, EngineConfigs: b.engines, RequiresXrayTest: len(b.inbounds) > 0, RequiresDataPlaneProof: true, RequiresSubscriptionCommit: true}})
 	}
 	manifest, err := json.Marshal(result.Nodes)
 	if err != nil {

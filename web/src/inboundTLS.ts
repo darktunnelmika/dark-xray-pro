@@ -1,4 +1,5 @@
-export type InboundSecurity = "reality" | "tls";
+import { assertPublicSpec } from "./inboundAuthoringSpec";
+export type InboundSecurity = "reality" | "tls" | "none";
 export type TLSMetadata = {
   sha256: string; public_key_sha256: string; dns_names: string[];
   not_before_unix: number; not_after_unix: number; key_type: string;
@@ -15,6 +16,7 @@ function certificateDNSName(value: unknown): value is string {
 export function profileSecurity(value?: string): InboundSecurity {
   if (value === undefined || value === "" || value === "reality") return "reality";
   if (value === "tls") return "tls";
+  if (value === "none") return "none";
   throw new Error("invalid_profile_security");
 }
 
@@ -27,6 +29,7 @@ export function assertPublicInboundData(value: unknown): void {
   if (!value || typeof value !== "object") return;
   if (Array.isArray(value)) { value.forEach(assertPublicInboundData); return; }
   for (const [key, item] of Object.entries(value)) {
+    if (key === "spec") { assertPublicSpec(item); continue; }
     const canonical = key.replace(/[_-]/g, "").toLowerCase();
     if (["tlscredentials", "certificatepem", "privatekeypem", "privatekey", "realityprivatekey", "tlsprivatekey"].includes(canonical)) throw new Error("unexpected_private_material");
     assertPublicInboundData(item);

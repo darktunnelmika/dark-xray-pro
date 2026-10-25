@@ -92,6 +92,9 @@ location / {{ return 403; }}
                 initial = "/api/v1/workspace/native-inbound-plans/8123/initial-health"
                 handovers = "/api/v1/workspace/metered-handovers"
                 for path, allowed in ((promotion, {"GET", "POST"}),
+                                      ("/api/v1/workspace/inbound-security/capabilities", {"GET"}),
+                                      *(("/api/v1/workspace/inbound-security/" + action, {"POST"})
+                                        for action in ("keys/x25519", "keys/mldsa65", "keys/ech", "certificates/inspect", "certificates/generate", "certificates/remote", "reality/scan", "reality/find")),
                                       (promotion + "/preview", {"POST"}),
                                       (initial, {"GET"}),
                                       *((initial + "/" + action, {"POST"}) for action in ("prepare", "rounds", "snapshot")),
@@ -122,6 +125,10 @@ location / {{ return 403; }}
                     assert request(port, consumer + "?format=raw", method) == (401 if method == "GET" else 405)
                     assert len(Backend.seen) == before + (method == "GET")
                 for path in ("/api/v1/agent/config", "/api/v1/admin/nodes", "/api/v1/workspace/nodes/a/delete",
+                             "/api/v1/agent/inbound-security/poll", "/api/v1/agent/inbound-security/result",
+                             "/api/v1/workspace/inbound-security/reality/find/extra",
+                             "/api/v1/workspace/inbound-security/keys/execute",
+                             "/api/v1/workspace/inbound-security/certificates/read-file",
                              "/api/v1/workspace/nodes/a/name/extra", "/api/v1/workspace/nodes/a.b/name",
                              "/api/v1/workspace/nodes/a/b/dependencies",
                              "/api/v1/workspace/nodes/a/replacements/abc/cancel",

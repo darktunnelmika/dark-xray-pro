@@ -73,7 +73,7 @@ export default function InboundCreationReview({ language, state, nodes, disabled
     </>;
   }
   return <div className="creation-review-sections">
-    <section className="creation-review-card" data-review-section="connection">
+    {!state.spec && <section className="creation-review-card" data-review-section="connection">
       <header><h4>{t.connection}</h4>{edit("connection", t.editConnection)}</header>
       <dl className="creation-review-values">
         <Value label={t.name} value={profile.name} field="name"/><Value label={t.protocol} value="VLESS" field="protocol"/>
@@ -96,7 +96,7 @@ export default function InboundCreationReview({ language, state, nodes, disabled
       </dl>
       {tls && (tlsMetadata ? <TLSCertificateSummary metadata={tlsMetadata} language={language}/> : <p className="creation-help">{language === "fa" ? "پس از بررسی کامل، مشخصات عمومی گواهی اینجا نمایش داده می‌شود." : "Check the complete setup to review the certificate’s public metadata."}</p>)}
       {publicKey && <div className="creation-review-key"><button type="button" disabled={disabled} onClick={() => { if (!navigator.clipboard) { setCopyState(t.copyFailed); return; } void navigator.clipboard.writeText(publicKey).then(() => setCopyState(t.copied), () => setCopyState(t.copyFailed)); }}><Copy size={14}/>{t.copyKey}</button><span role="status">{copyState}</span></div>}
-    </section>
+    </section>}
     <section className="creation-review-card" data-review-section="routes">
       <header><h4>{t.routes}</h4>{edit("swap", t.editRoutes)}</header>
       <p className="creation-review-meta">{t.nodes}: <bdi>{rows.length}</bdi> · {t.hosts}: <bdi>{hostCount}</bdi></p>
@@ -116,7 +116,7 @@ export default function InboundCreationReview({ language, state, nodes, disabled
       </article>)}</div>
       {checkedEndpoints && <details className="creation-review-disclosure" data-checked-endpoints><summary>{t.checkedEndpoints} <bdi>{checkedEndpoints.length}</bdi></summary><div className="creation-checked-endpoints"><p className="creation-help">{t.checkedHint}</p>{checkedEndpoints.map((endpoint, index) => <div className="creation-review-endpoint" key={index} data-checked-endpoint={index}><h6>{endpoint.label}<span>{endpoint.enabled ? t.on : t.endpointOff}</span></h6><dl className="creation-review-values"><Value label={t.nodes} value={creationNodeName(nodes, endpoint.node_id)}/><Value label={t.path} value={t[endpoint.path]}/><Value label={t.addresses} value={endpoint.address}/><Value label={t.publicPort} value={endpoint.port}/><Value label={t.port} value={endpoint.listen_port}/><Value label={t.sni} value={endpoint.server_name}/><Value label={t.transport} value={`${transportLabel(endpoint.transport)} / ${endpoint.security === "tls" ? "TLS" : "REALITY"}`}/><Value label={t.fingerprint} value={endpoint.fingerprint}/>{endpoint.security !== "tls" && <Value label={t.spider} value={endpoint.spider_x}/>}{endpoint.grpc_service && <Value label={t.service} value={endpoint.grpc_service}/ >}{endpoint.grpc_authority && <Value label={t.authority} value={endpoint.grpc_authority}/ >}{endpoint.grpc_multi_mode && <Value label={t.multiMode} value={t.on}/ >}{endpoint.transport === "xhttp" && <><Value label={t.xhttpPath} value={endpoint.xhttp?.path || "/"}/><Value label={t.xhttpHost} value={endpoint.xhttp?.host || t.default}/><Value label={t.xhttpMode} value={endpoint.xhttp?.mode || "auto"}/><Value label={t.xhttpPadding} value={endpoint.xhttp?.x_padding_bytes || "100-1000"}/></>}{(endpoint.transport === "ws" || endpoint.transport === "httpupgrade") && <><Value label={`${transportLabel(endpoint.transport)} Path`} value={(endpoint.transport === "ws" ? endpoint.websocket?.path : endpoint.http_upgrade?.path) || "/"}/><Value label={`${transportLabel(endpoint.transport)} Host`} value={(endpoint.transport === "ws" ? endpoint.websocket?.host : endpoint.http_upgrade?.host) || t.default}/></>}</dl></div>)}</div></details>}
     </section>
-    <section className="creation-review-card" data-review-section="advanced">
+    {!state.spec && <section className="creation-review-card" data-review-section="advanced">
       <header><h4>{t.advanced}</h4>{edit("advanced", t.editAdvanced)}</header>
       <div className="creation-review-option" data-review-option="sniffing" data-sniffing-enabled={options.sniffing.enabled} data-sniffing-retained={sniffingRetained}>
         <h5>{t.sniffing}<span>{options.sniffing.enabled ? t.on : sniffingRetained ? t.retained : t.off}</span></h5>
@@ -131,6 +131,6 @@ export default function InboundCreationReview({ language, state, nodes, disabled
         {options.fallbacks.length > 0 && profile.transport !== "tcp" && <p className="creation-help creation-waiting">{t.tcp}</p>}
         {options.fallbacks.map((row, index) => <div key={row.key} className="creation-review-fallback" data-review-fallback={index}><h6><bdi dir="ltr">{t.fallback} {index + 1}</bdi></h6><dl className="creation-review-values"><Value label={t.destination} value={row.dest}/><Value label={t.path} value={row.path || t.default}/><Value label={t.proxy} value={proxy(row.xver)}/>{row.alpn && <Value label="ALPN" value={row.alpn}/>}</dl></div>)}
       </div>}
-    </section>
+    </section>}
   </div>;
 }

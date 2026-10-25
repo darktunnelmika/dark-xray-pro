@@ -171,7 +171,7 @@ export default function InboundCreationNodes({ language, state, nodes, targets =
     if (checked) onExpanded(node.node_id);
     else if (expanded === node.node_id) onExpanded(state.selected.find(id => id !== node.node_id) ?? "");
   }
-  const visibleNodes = [...nodes, ...state.selected.filter(id => !nodes.some(node => node.node_id === id)).map(id => ({ node_id: id, name: id, installation_id: state.nodes[id].installationID }))];
+  const visibleNodes: InboundNode[] = [...nodes, ...state.selected.filter(id => !nodes.some(node => node.node_id === id)).map(id => ({ node_id: id, name: id, installation_id: state.nodes[id].installationID }))];
   return <section className="creation-nodes" aria-label={t.title}>
     <header className="creation-section-heading"><div><h3>{t.title}</h3><p>{t.help}</p></div><span className="creation-count"><bdi>{state.selected.length}</bdi> {t.selected}</span></header>
     {!nodes.length && <p className="creation-empty"><Server size={22}/>{t.none}</p>}
@@ -184,7 +184,7 @@ export default function InboundCreationNodes({ language, state, nodes, targets =
         return <article key={id} className="creation-node" data-selected={selected} data-open={open} data-node-id={id}>
           <div className="creation-node-heading">
             <label className="creation-node-select"><input aria-label={`${t.select}: ${creationNodeName(visibleNodes, id)}`} data-creation-field="node" type="checkbox" checked={selected}
-              disabled={disabled || !selected && state.selected.length >= 64} onChange={event => select(node, event.target.checked)}/><Server size={17}/><span>{creationNodeName(visibleNodes, id)}</span></label>
+              disabled={disabled || !selected && state.selected.length >= 64} onChange={event => select(node, event.target.checked)}/><Server size={17}/><span>{creationNodeName(visibleNodes, id)}</span>{node.kind === "hub" && <span className="creation-node-kind">{language === "fa" ? "HUB · همین سرور" : "HUB · this server"}</span>}</label>
             {selected && row && <><div className="creation-node-paths" aria-label={t.paths}>
               {row.direct.enabled && <span title={t.direct}><Globe2 size={12}/><bdi>{row.direct.port || "—"}</bdi></span>}
               {row.tunnel.enabled && <span title={t.tunnel}><Link2 size={12}/><bdi>{row.tunnel.port || "—"}</bdi></span>}

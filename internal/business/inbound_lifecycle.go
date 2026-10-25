@@ -101,6 +101,9 @@ func (s *Store) MutateInbound(ctx context.Context, key []byte, id uint64, m Inbo
 	if m.Profile != nil {
 		optionsPresence = optionsPresence.include(m.Profile.Options)
 		copyProfile := *m.Profile
+		if copyProfile.Spec != nil {
+			return NativeInbound{}, ErrInvalid
+		}
 		security, securityErr := xrayconfig.NormalizeProfileSecurity(copyProfile.Security)
 		if securityErr != nil || security == "tls" {
 			return NativeInbound{}, ErrInvalid

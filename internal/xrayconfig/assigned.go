@@ -26,6 +26,11 @@ func RenderAssigned(nodeID, installationID, listenIP string, assignments []Assig
 	if _, err := hex.DecodeString(installationID); err != nil {
 		return Candidate{}, ErrInvalid
 	}
+	for _, row := range assignments {
+		if row.Profile.Spec != nil {
+			return renderAuthoringAssigned(nodeID, installationID, listenIP, assignments)
+		}
+	}
 	rows := append([]Assignment(nil), assignments...)
 	sort.Slice(rows, func(i, j int) bool { return rows[i].Profile.InboundID < rows[j].Profile.InboundID })
 	seenID := map[uint64]bool{}

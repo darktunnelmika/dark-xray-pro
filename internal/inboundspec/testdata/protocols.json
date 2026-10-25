@@ -1,0 +1,277 @@
+[
+  {
+    "version": 1,
+    "protocol": "vless",
+    "network": "tcp",
+    "security": "none",
+    "settings": {
+      "decryption": "none"
+    },
+    "stream": {},
+    "client": {}
+  },
+  {
+    "version": 1,
+    "protocol": "vmess",
+    "network": "tcp",
+    "security": "none",
+    "settings": {},
+    "stream": {},
+    "client": {}
+  },
+  {
+    "version": 1,
+    "protocol": "trojan",
+    "network": "tcp",
+    "security": "tls",
+    "settings": {},
+    "stream": {},
+    "client": {},
+    "tls": {
+      "serverName": "fixture.example.test",
+      "certificates": [
+        {
+          "certificate": [
+            "-----BEGIN CERTIFICATE-----",
+            "MIIBUTCB+aADAgECAgR4w97lMAoGCCqGSM49BAMCMB8xHTAbBgNVBAMMFGZpeHR1",
+            "cmUuZXhhbXBsZS50ZXN0MB4XDTI1MDEwMTAwMDAwMFoXDTM1MDEwMTAwMDAwMFow",
+            "HzEdMBsGA1UEAwwUZml4dHVyZS5leGFtcGxlLnRlc3QwWTATBgcqhkjOPQIBBggq",
+            "hkjOPQMBBwNCAAQHmYKQQEk9Qh+Gd6o7KnPyYezTl7kb1un9MrE/BL9ZWRqJkGIe",
+            "gAmhzxaoQCWROxVxa4SIej3H+eRXkpLz3yeQoyMwITAfBgNVHREEGDAWghRmaXh0",
+            "dXJlLmV4YW1wbGUudGVzdDAKBggqhkjOPQQDAgNHADBEAiANNh0wKlv+4q+Iuous",
+            "tQ95iXk64CJLvRH7WPe8pRvUIAIgGOgumTCgonOmpTVEBLwUW/2U6piOtOM8H7qV",
+            "3x0DytU=",
+            "-----END CERTIFICATE-----"
+          ],
+          "key": [
+            "-----BEGIN PRIVATE KEY-----",
+            "MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgEsUpCGy98kfMuHT8",
+            "GTBG8Nn98qczrU22EAeJygEAezOhRANCAAQHmYKQQEk9Qh+Gd6o7KnPyYezTl7kb",
+            "1un9MrE/BL9ZWRqJkGIegAmhzxaoQCWROxVxa4SIej3H+eRXkpLz3yeQ",
+            "-----END PRIVATE KEY-----"
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "version": 1,
+    "protocol": "shadowsocks",
+    "network": "tcp",
+    "security": "none",
+    "settings": {
+      "method": "2022-blake3-aes-256-gcm",
+      "password": "AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA="
+    },
+    "stream": {},
+    "client": {}
+  },
+  {
+    "version": 1,
+    "protocol": "wireguard",
+    "network": "wireguard",
+    "security": "none",
+    "settings": {
+      "secretKey": "AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA=",
+      "subnetIp": "10.66.0.0",
+      "subnetCidr": 16
+    },
+    "stream": {},
+    "client": {}
+  },
+  {
+    "version": 1,
+    "protocol": "hysteria",
+    "network": "hysteria",
+    "security": "tls",
+    "settings": {},
+    "stream": {},
+    "client": {},
+    "tls": {
+      "serverName": "fixture.example.test",
+      "certificates": [
+        {
+          "certificate": [
+            "-----BEGIN CERTIFICATE-----",
+            "MIIBUTCB+aADAgECAgR4w97lMAoGCCqGSM49BAMCMB8xHTAbBgNVBAMMFGZpeHR1",
+            "cmUuZXhhbXBsZS50ZXN0MB4XDTI1MDEwMTAwMDAwMFoXDTM1MDEwMTAwMDAwMFow",
+            "HzEdMBsGA1UEAwwUZml4dHVyZS5leGFtcGxlLnRlc3QwWTATBgcqhkjOPQIBBggq",
+            "hkjOPQMBBwNCAAQHmYKQQEk9Qh+Gd6o7KnPyYezTl7kb1un9MrE/BL9ZWRqJkGIe",
+            "gAmhzxaoQCWROxVxa4SIej3H+eRXkpLz3yeQoyMwITAfBgNVHREEGDAWghRmaXh0",
+            "dXJlLmV4YW1wbGUudGVzdDAKBggqhkjOPQQDAgNHADBEAiANNh0wKlv+4q+Iuous",
+            "tQ95iXk64CJLvRH7WPe8pRvUIAIgGOgumTCgonOmpTVEBLwUW/2U6piOtOM8H7qV",
+            "3x0DytU=",
+            "-----END CERTIFICATE-----"
+          ],
+          "key": [
+            "-----BEGIN PRIVATE KEY-----",
+            "MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgEsUpCGy98kfMuHT8",
+            "GTBG8Nn98qczrU22EAeJygEAezOhRANCAAQHmYKQQEk9Qh+Gd6o7KnPyYezTl7kb",
+            "1un9MrE/BL9ZWRqJkGIegAmhzxaoQCWROxVxa4SIej3H+eRXkpLz3yeQ",
+            "-----END PRIVATE KEY-----"
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "version": 1,
+    "protocol": "http",
+    "network": "tcp",
+    "security": "none",
+    "settings": {},
+    "stream": {},
+    "client": {}
+  },
+  {
+    "version": 1,
+    "protocol": "mixed",
+    "network": "tcp",
+    "security": "none",
+    "settings": {
+      "auth": "password",
+      "udp": true,
+      "ip": "127.0.0.1"
+    },
+    "stream": {},
+    "client": {}
+  },
+  {
+    "version": 1,
+    "protocol": "tunnel",
+    "network": "tcp",
+    "security": "none",
+    "settings": {
+      "rewriteAddress": "127.0.0.1",
+      "rewritePort": 443
+    },
+    "stream": {},
+    "client": {}
+  },
+  {
+    "version": 1,
+    "protocol": "tun",
+    "network": "tun",
+    "security": "none",
+    "settings": {
+      "name": "protest0",
+      "mtu": 1500,
+      "gateway": [
+        "10.90.0.1/24"
+      ],
+      "dns": [
+        "1.1.1.1"
+      ]
+    },
+    "stream": {},
+    "client": {}
+  },
+  {
+    "version": 1,
+    "protocol": "mtproto",
+    "network": "mtproto",
+    "security": "none",
+    "settings": {
+      "fakeTlsDomain": "fixture.example.test",
+      "secret": "synthetic-fixture-only-do-not-deploy"
+    },
+    "stream": {},
+    "client": {}
+  },
+  {
+    "version": 1,
+    "protocol": "amneziawg",
+    "network": "amneziawg",
+    "security": "none",
+    "settings": {
+      "server": {
+        "privateKey": "AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA=",
+        "subnetIp": "10.8.0.0",
+        "subnetCidr": 16,
+        "jc": 5,
+        "jmin": 10,
+        "jmax": 50,
+        "s1": 30,
+        "s2": 45,
+        "s3": 10,
+        "s4": 5,
+        "h1": "1",
+        "h2": "2",
+        "h3": "3",
+        "h4": "4"
+      }
+    },
+    "stream": {},
+    "client": {}
+  },
+  {
+    "version": 1,
+    "protocol": "tuic",
+    "network": "tuic",
+    "security": "tls",
+    "settings": {},
+    "stream": {},
+    "client": {},
+    "tls": {
+      "serverName": "fixture.example.test",
+      "certificates": [
+        {
+          "certificate": [
+            "-----BEGIN CERTIFICATE-----",
+            "MIIBUTCB+aADAgECAgR4w97lMAoGCCqGSM49BAMCMB8xHTAbBgNVBAMMFGZpeHR1",
+            "cmUuZXhhbXBsZS50ZXN0MB4XDTI1MDEwMTAwMDAwMFoXDTM1MDEwMTAwMDAwMFow",
+            "HzEdMBsGA1UEAwwUZml4dHVyZS5leGFtcGxlLnRlc3QwWTATBgcqhkjOPQIBBggq",
+            "hkjOPQMBBwNCAAQHmYKQQEk9Qh+Gd6o7KnPyYezTl7kb1un9MrE/BL9ZWRqJkGIe",
+            "gAmhzxaoQCWROxVxa4SIej3H+eRXkpLz3yeQoyMwITAfBgNVHREEGDAWghRmaXh0",
+            "dXJlLmV4YW1wbGUudGVzdDAKBggqhkjOPQQDAgNHADBEAiANNh0wKlv+4q+Iuous",
+            "tQ95iXk64CJLvRH7WPe8pRvUIAIgGOgumTCgonOmpTVEBLwUW/2U6piOtOM8H7qV",
+            "3x0DytU=",
+            "-----END CERTIFICATE-----"
+          ],
+          "key": [
+            "-----BEGIN PRIVATE KEY-----",
+            "MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgEsUpCGy98kfMuHT8",
+            "GTBG8Nn98qczrU22EAeJygEAezOhRANCAAQHmYKQQEk9Qh+Gd6o7KnPyYezTl7kb",
+            "1un9MrE/BL9ZWRqJkGIegAmhzxaoQCWROxVxa4SIej3H+eRXkpLz3yeQ",
+            "-----END PRIVATE KEY-----"
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "version": 1,
+    "protocol": "masque",
+    "network": "masque",
+    "security": "tls",
+    "settings": {},
+    "stream": {},
+    "client": {},
+    "tls": {
+      "serverName": "fixture.example.test",
+      "certificates": [
+        {
+          "certificate": [
+            "-----BEGIN CERTIFICATE-----",
+            "MIIBUTCB+aADAgECAgR4w97lMAoGCCqGSM49BAMCMB8xHTAbBgNVBAMMFGZpeHR1",
+            "cmUuZXhhbXBsZS50ZXN0MB4XDTI1MDEwMTAwMDAwMFoXDTM1MDEwMTAwMDAwMFow",
+            "HzEdMBsGA1UEAwwUZml4dHVyZS5leGFtcGxlLnRlc3QwWTATBgcqhkjOPQIBBggq",
+            "hkjOPQMBBwNCAAQHmYKQQEk9Qh+Gd6o7KnPyYezTl7kb1un9MrE/BL9ZWRqJkGIe",
+            "gAmhzxaoQCWROxVxa4SIej3H+eRXkpLz3yeQoyMwITAfBgNVHREEGDAWghRmaXh0",
+            "dXJlLmV4YW1wbGUudGVzdDAKBggqhkjOPQQDAgNHADBEAiANNh0wKlv+4q+Iuous",
+            "tQ95iXk64CJLvRH7WPe8pRvUIAIgGOgumTCgonOmpTVEBLwUW/2U6piOtOM8H7qV",
+            "3x0DytU=",
+            "-----END CERTIFICATE-----"
+          ],
+          "key": [
+            "-----BEGIN PRIVATE KEY-----",
+            "MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgEsUpCGy98kfMuHT8",
+            "GTBG8Nn98qczrU22EAeJygEAezOhRANCAAQHmYKQQEk9Qh+Gd6o7KnPyYezTl7kb",
+            "1un9MrE/BL9ZWRqJkGIegAmhzxaoQCWROxVxa4SIej3H+eRXkpLz3yeQ",
+            "-----END PRIVATE KEY-----"
+          ]
+        }
+      ]
+    }
+  }
+]

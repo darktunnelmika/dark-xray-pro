@@ -1,0 +1,41 @@
+.spec-section { display: grid; gap: 14px; min-width: 0; }
+.spec-fields { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 12px 14px; min-width: 0; }
+.spec-field { min-width: 0; }
+.spec-field > span { display: flex; gap: 8px; align-items: center; justify-content: space-between; }
+.spec-field textarea,.spec-object-draft textarea,.spec-json { width: 100%; box-sizing: border-box; resize: vertical; min-height: 78px; color: var(--text); background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 10px; font: 12px/1.7 ui-monospace,SFMono-Regular,Consolas,monospace; }
+.spec-wide,.spec-repeater { grid-column: 1 / -1; }
+.spec-required { color: var(--accent); }
+.spec-check { display: flex; gap: 8px; align-items: center; min-height: 42px; font-size: 12px; color: var(--text); min-width: 0; }
+.spec-check input { flex: 0 0 auto; width: 17px; height: 17px; accent-color: var(--accent); }
+.spec-check span { overflow-wrap: anywhere; }
+.spec-group { display: grid; gap: 10px; }
+.spec-group h5,.spec-repeater h5 { margin: 0; font-size: 12px; color: var(--text); }
+.spec-disclosure,.spec-row { border: 1px solid var(--border); border-radius: 10px; min-width: 0; background: var(--surface); }
+.spec-disclosure > summary,.spec-row > summary { min-height: 42px; padding: 11px 12px; box-sizing: border-box; cursor: pointer; font-size: 12px; color: var(--text); line-height: 1.6; }
+.spec-disclosure > summary > svg { vertical-align: middle; margin-inline-end: 6px; }
+.spec-disclosure:not([open]) > :not(summary),.spec-row:not([open]) > :not(summary) { display: none; }
+.spec-group-body,.spec-row-body { display: grid; gap: 12px; padding: 0 12px 12px; min-width: 0; }
+.spec-repeater { display: grid; gap: 10px; min-width: 0; }
+.spec-repeater > header,.spec-repeater h5 { display: flex; align-items: center; justify-content: space-between; gap: 9px; }
+.spec-repeater h5 bdi { padding: 1px 6px; background: var(--accent-wash); border-radius: 5px; color: var(--accent); }
+.spec-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.inbound-creation .spec-actions button,.inbound-creation .spec-repeater > header button,.inbound-creation .spec-remove,.inbound-creation .spec-generate,.inbound-creation .spec-object-draft button { min-height: 34px; width: fit-content; padding: 6px 10px; font-size: 11px; }
+.spec-retained { color: var(--accent); white-space: nowrap; font-size: 10px; }
+.spec-intrinsic { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; margin: 0; padding: 10px 12px; border-radius: 8px; background: var(--accent-wash); color: var(--text); font-size: 12px; }
+.spec-intrinsic > span { color: var(--sub); font-size: 11px; }
+.spec-object-draft { display: grid; gap: 6px; }
+.spec-json { min-height: 220px; }
+.spec-public-json { white-space: pre-wrap; overflow-wrap: anywhere; padding: 0 12px 12px; margin: 0; font: 11px/1.65 ui-monospace,SFMono-Regular,Consolas,monospace; color: var(--sub); max-height: 420px; overflow: auto; }
+.spec-tools { display: grid; gap: 12px; }
+.spec-tool-state { margin: 0; font-size: 11px; color: var(--sub); line-height: 1.7; }
+.spec-scan-results { display: grid; gap: 9px; padding: 0; margin: 0; list-style: none; }
+.spec-scan-results > li { display: grid; gap: 7px; border: 1px solid var(--border); border-radius: 8px; padding: 10px; min-width: 0; }
+.spec-scan-results > li > header { display: flex; align-items: center; flex-wrap: wrap; justify-content: space-between; gap: 8px; font-size: 12px; }
+.spec-scan-results small { color: var(--sub); overflow-wrap: anywhere; }
+.spec-scan-results [data-suitable=true] { color: var(--accent); }
+.creation-node-kind { border: 1px solid var(--border); border-radius: 5px; padding: 2px 6px; color: var(--accent); background: var(--accent-wash); font-size: 10px; white-space: nowrap; }
+.spec-tool-details { margin: 0; display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 7px; }
+.spec-tool-details > div { min-width: 0; }
+.spec-tool-details dt { font-size: 10px; color: var(--sub); }
+.spec-tool-details dd { margin: 3px 0 0; font-size: 11px; color: var(--text); overflow-wrap: anywhere; }
+@media (max-width: 600px) { .spec-fields { grid-template-columns: minmax(0,1fr); gap: 10px; } .spec-group-body,.spec-row-body { padding-inline: 10px; } .spec-intrinsic { align-items: flex-start; flex-direction: column; } .spec-tool-details { grid-template-columns: minmax(0,1fr); } }

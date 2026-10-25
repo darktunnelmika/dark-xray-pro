@@ -11,6 +11,7 @@ import WorkspaceDialog from "./WorkspaceDialog";
 import { profileOptionsDraft, profileOptionsPayload, type ProfileOptionsDraft } from "./inboundProfileOptions";
 import { assertPublicInboundData, canonicalTLSMetadata, profileSecurity } from "./inboundTLS";
 import { transportLabel } from "./inboundNetworkOptions";
+import { protocolNames, networkNames } from "./inboundAuthoringSpec";
 import { TLSCertificateSummary } from "./InboundTLSCredentials";
 import InboundProfileForm, { type InboundProfileFormHandle, type InboundProfileValue } from "./InboundProfileForm";
 import InboundCreation from "./InboundCreation";
@@ -169,7 +170,7 @@ export default function NativeInbounds({ language, fallback, workspace = "inboun
     if (controller.signal.aborted) return;
     if (![overview.inbounds, overview.nodes, overview.targets, overview.runtime].every(Array.isArray)) throw new Error("Invalid native response");
     assertPublicInboundData(overview);
-    for (const profile of overview.inbounds) { if (profileSecurity(profile.security) === "tls") canonicalTLSMetadata(profile.tls); else if (profile.tls !== undefined) throw new Error("unexpected_tls_metadata"); }
+    for (const profile of overview.inbounds) { if (profile.spec) continue; if (profileSecurity(profile.security) === "tls") canonicalTLSMetadata(profile.tls); else if (profile.tls !== undefined) throw new Error("unexpected_tls_metadata"); }
     setData(overview); setFailure(false); setDisabled(false); lastSuccess.current = Date.now();
    } catch (e) {
     if (controller.signal.aborted) return;
@@ -185,7 +186,7 @@ export default function NativeInbounds({ language, fallback, workspace = "inboun
   void request<CreationCapabilities | { available: false; runtime_apply: false }>("/api/v1/workspace/native-inbound-plans/capabilities", controller.signal).then(result => {
    if (controller.signal.aborted) return;
    if (result?.available === false && result.runtime_apply === false) { setSetupCapabilities(null); setSetupPhase("legacy"); setSetupSnapshot(inboundFingerprint); return; }
-   if (!result || result.available !== true || ![1, 2, 3].includes(result.version) || result.runtime_apply !== false || !Array.isArray(result.plans) || !Array.isArray(result.transports) || !result.transports.includes("tcp") || !result.protocols?.includes("vless") || !result.securities?.includes("reality")) throw new Error("invalid_setup_capability");
+   if (!result || result.available !== true || !Number.isInteger(result.version) || result.version < 1 || result.version > 3 && result.authoring_spec !== true || result.runtime_apply !== false || !Array.isArray(result.plans) || !Array.isArray(result.transports) || !result.transports.includes("tcp") || !result.protocols?.includes("vless") || !result.securities?.includes("reality")) throw new Error("invalid_setup_capability");
    assertPublicInboundData(result);
    if (result.plans.some(plan => plan.node_ids !== undefined && (!Array.isArray(plan.node_ids) || !plan.node_ids.length || plan.node_ids.length > 128 || new Set(plan.node_ids).size !== plan.node_ids.length || plan.node_ids.some(id => typeof id !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(id))))) throw new Error("invalid_setup_nodes");
    for (const plan of result.plans) {
@@ -270,7 +271,8 @@ export default function NativeInbounds({ language, fallback, workspace = "inboun
    const result = await request<CreationPlanResponse>("/api/v1/workspace/native-inbound-plans/" + id, controller.signal);
    assertPublicInboundData(result);
    if (!result?.plan || result.plan.profile?.id !== id || result.plan.runtime_apply !== false || !Array.isArray(result.plan.nodes) || typeof result.plan.editable !== "boolean" || typeof result.references_current !== "boolean") throw new Error("invalid_setup_plan");
-   if (profileSecurity(result.plan.profile.security) === "tls") canonicalTLSMetadata(result.plan.profile.tls);
+   if (result.plan.profile.spec) { /* Public specification was checked above; it has independent TLS material. */ }
+   else if (profileSecurity(result.plan.profile.security) === "tls") canonicalTLSMetadata(result.plan.profile.tls);
    else if (result.plan.profile.tls !== undefined) throw new Error("unexpected_tls_metadata");
    if (result.plan.promotion) {
     const promotion = readPromotionReceipt(result.plan.promotion, id);
@@ -363,7 +365,7 @@ export default function NativeInbounds({ language, fallback, workspace = "inboun
      <section hidden={tab !== "overview"} role="tabpanel" id="inbound-panel-overview" aria-labelledby="inbound-tab-overview" className="inbound-detail-panel">
       {visited.includes("overview") && <>
        <div className="inbound-summary"><div data-node-summary><span>{setupSummary ? u.plannedNodes : u.nodeCount}</span><strong>{setupSummary ? setupSummary.node_ids?.length ?? "—" : assigned.length}</strong>{setupSummary && <small>{u.nodeCount}: {assigned.length}</small>}</div><div><span>{u.clientCount}</span><strong>{current.bound_clients}</strong></div><div><span>{u.profile}</span><strong>{current.archived ? t.archivedLabel : promotion ? u.prepared : current.enabled ? t.enabledLabel : t.disabledLabel}</strong></div></div>
-       <dl className="inbound-profile-facts"><div><dt>{t.transport}</dt><dd><bdi dir="ltr">{transportLabel(current.transport)} / {current.security === "tls" ? "TLS" : "REALITY"}</bdi></dd></div>{current.security !== "tls" && <div><dt>{t.dest}</dt><dd><bdi dir="ltr">{current.reality_target}</bdi></dd></div>}<div><dt>{t.sni}</dt><dd><bdi dir="ltr">{current.server_names.join(", ")}</bdi></dd></div></dl>
+       <dl className="inbound-profile-facts"><div><dt>{t.transport}</dt><dd><bdi dir="ltr">{current.spec ? `${protocolNames[current.spec.protocol]} · ${networkNames[current.spec.network] ?? current.spec.network} / ${current.spec.security.toUpperCase()}` : `${transportLabel(current.transport)} / ${current.security === "tls" ? "TLS" : "REALITY"}`}</bdi></dd></div>{current.security !== "tls" && current.security !== "none" && <div><dt>{t.dest}</dt><dd><bdi dir="ltr">{current.reality_target}</bdi></dd></div>}<div><dt>{t.sni}</dt><dd><bdi dir="ltr">{current.server_names.join(", ")}</bdi></dd></div></dl>
        {current.security === "tls" && current.tls && <details className="native-card"><summary>{language === "fa" ? "گواهی TLS ذخیره‌شده" : "Saved TLS certificate"}</summary><TLSCertificateSummary language={language} metadata={current.tls}/></details>}
        {setupSummary && !current.archived && <InboundPlanExecution key={chosen} language={language} summary={setupSummary} nodes={data.nodes} blocked={busy || setupBusy || stale || !setupStatusReady} onPromoted={preparedSetup} onOpenSetup={issue => void openSetupPlan(issue)} onDirtyChange={setExecutionDirty} onBusyChange={setExecutionBusy}/>}
        {promotion && <NativeMeteredRouteTransactions key={"plan:" + chosen} language={language} context={{ nodeID: promotion.node_id, installationID: promotion.installation_id, inboundID: chosen, inboundRevision: promotion.inbound_revision, draftRevision: promotion.draft_revision }}/>}

@@ -12,6 +12,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"github.com/darktunnelmika/dark-xray-pro/internal/inboundspec"
 	"github.com/darktunnelmika/dark-xray-pro/internal/xrayconfig"
 	"net"
 	"strings"
@@ -19,6 +20,7 @@ import (
 )
 
 type InboundInput struct {
+	Spec          *inboundspec.Spec          `json:"spec,omitempty"`
 	ID            uint64                     `json:"id"`
 	Name          string                     `json:"name"`
 	Transport     string                     `json:"transport"`
@@ -31,12 +33,13 @@ type InboundInput struct {
 }
 type NativeInbound struct {
 	InboundInput
-	TLS          *xrayconfig.TLSCertificateMetadata `json:"tls,omitempty"`
-	PublicKey    string                             `json:"public_key"`
-	BoundClients int                                `json:"bound_clients"`
-	Enabled      bool                               `json:"enabled"`
-	Archived     bool                               `json:"archived"`
-	Revision     uint64                             `json:"revision"`
+	SpecSecretPaths []string                           `json:"spec_secret_paths,omitempty"`
+	TLS             *xrayconfig.TLSCertificateMetadata `json:"tls,omitempty"`
+	PublicKey       string                             `json:"public_key"`
+	BoundClients    int                                `json:"bound_clients"`
+	Enabled         bool                               `json:"enabled"`
+	Archived        bool                               `json:"archived"`
+	Revision        uint64                             `json:"revision"`
 }
 type InboundTarget struct {
 	InboundID      uint64 `json:"inbound_id"`
@@ -95,6 +98,10 @@ func openProfile(key, encrypted []byte, id uint64) (xrayconfig.Profile, error) {
 	return openInboundProfile(key, encrypted, id)
 }
 func (s *Store) CreateInbound(ctx context.Context, key []byte, in InboundInput) (NativeInbound, error) {
+	// Rich authoring must use the transactional plan API, with explicit destinations.
+	if in.Spec != nil {
+		return NativeInbound{}, ErrInvalid
+	}
 	security, securityErr := xrayconfig.NormalizeProfileSecurity(in.Security)
 	if securityErr != nil || security == "tls" {
 		return NativeInbound{}, ErrInvalid

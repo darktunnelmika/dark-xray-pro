@@ -321,6 +321,12 @@ func main() {
 	}
 	// Liveness is independent of resource sampling, staging and runtime Apply.
 	var workers sync.WaitGroup
+	if remote && identity.Paired {
+		for i := 0; i < 4; i++ {
+			workers.Add(1)
+			go func() { defer workers.Done(); runInboundSecurityWorker(ctx, client, endpoint, identity) }()
+		}
+	}
 	workers.Add(1)
 	go func() {
 		defer workers.Done()

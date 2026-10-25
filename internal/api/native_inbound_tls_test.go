@@ -89,7 +89,7 @@ func TestCreationTLSAPIWriteOnlyPreviewReadbackRetentionRenewalAndReplay(t *test
 		ProfileNetworkOptionsScope string   `json:"profile_network_options_scope"`
 		RuntimeApply               bool     `json:"runtime_apply"`
 	}
-	if err := json.Unmarshal(capability.Body.Bytes(), &caps); err != nil || caps.Version != 3 || !caps.ProfileTLS || caps.ProfileTLSScope != "creation_plan" || !caps.ProfileWebSocket || !caps.ProfileHTTPUpgrade || caps.ProfileNetworkOptionsScope != "creation_plan" || caps.RuntimeApply || !reflect.DeepEqual(caps.Securities, []string{"reality", "tls"}) || !reflect.DeepEqual(caps.Transports, []string{"tcp", "grpc", "xhttp", "ws", "httpupgrade"}) {
+	if err := json.Unmarshal(capability.Body.Bytes(), &caps); err != nil || caps.Version != 4 || !caps.ProfileTLS || caps.ProfileTLSScope != "creation_plan" || !caps.ProfileWebSocket || !caps.ProfileHTTPUpgrade || caps.ProfileNetworkOptionsScope != "creation_plan" || caps.RuntimeApply || !reflect.DeepEqual(caps.Securities, []string{"none", "reality", "tls"}) || !reflect.DeepEqual(caps.Transports, []string{"tcp", "kcp", "ws", "grpc", "httpupgrade", "xhttp", "xdrive"}) {
 		t.Fatal("TLS capability did not advertise the authoring-only contract", err)
 	}
 	previewHTTP := request("POST", base+"/preview", in, http.StatusOK)

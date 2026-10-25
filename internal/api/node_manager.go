@@ -125,6 +125,10 @@ func (s *Server) attachNodeManager(mux *http.ServeMux) {
 			respond(w, http.StatusBadRequest, map[string]string{"error": "invalid_request"})
 			return
 		}
+		if input.NodeID == localHubNodeID {
+			respond(w, http.StatusUnprocessableEntity, map[string]string{"error": "reserved_hub_identity"})
+			return
+		}
 		ticket, err := s.registry.Issue(input.NodeID, input.Name)
 		switch {
 		case err == nil:

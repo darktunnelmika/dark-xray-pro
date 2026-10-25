@@ -6,6 +6,7 @@ import { validUTF8 } from "./inboundNetworkOptions";
 import type { CreationEndpointPreview } from "./inboundEndpointPreview";
 import type { PromotionReceipt } from "./inboundPlanExecution";
 import { assertPublicInboundData, canonicalTLSMetadata, profileSecurity, tlsCredentialIssues, type InboundSecurity, type TLSCredentials, type TLSMetadata } from "./inboundTLS";
+import { readSpecPath, specFromInbound, specIssues, specPayload, type AuthoringSpec } from "./inboundAuthoringSpec";
 
 export type CreationPath = { enabled: boolean; port: string; hosts: string; endpoints?: EndpointDraft[]; endpointsPresent?: boolean };
 export type CreationNode = {
@@ -26,6 +27,9 @@ export type CreationState = {
   tlsMetadata?: TLSMetadata;
   tlsCredentials: TLSCredentials;
   replaceTLS: boolean;
+  spec?: AuthoringSpec;
+  specSecretPaths?: string[];
+  specDraftErrors?: string[];
 };
 export type CreationIssue = { nodeID?: string; field: string; code: string; destinationNodeID?: string; path?: "direct" | "tunnel" | "swap_source" | "swap_destination"; port?: number };
 export type CreationPlanNode = {
@@ -43,6 +47,7 @@ export type CreationPlan = {
 };
 export type CreationCapabilities = {
   available: true; version: number; max_nodes: number; max_hosts_per_node: number;
+  authoring_spec?: boolean;
   protocols: string[]; securities: string[]; transports: string[]; runtime_apply: false;
   profile_options?: boolean;
   profile_sniffing?: boolean;
@@ -56,7 +61,7 @@ export type CreationCapabilities = {
 };
 export type CreationPayload = {
   event_id: string; expected_plan_revision: number; expected_inbound_revision: number;
-  profile: Pick<Inbound, "id" | "name" | "transport" | "grpc_service" | "server_names" | "options" | "security"> & Partial<Pick<Inbound, "reality_target" | "short_ids">>;
+  profile: Pick<Inbound, "id" | "name" | "transport" | "grpc_service" | "server_names" | "options" | "security"> & Partial<Pick<Inbound, "reality_target" | "short_ids" | "spec">>;
   nodes: CreationPlanNode[]; reason: string;
   tls_credentials?: TLSCredentials;
 };
@@ -68,7 +73,8 @@ export type CreationPlanResponse = { plan: CreationPlan; references_current: boo
 export function stateFromCreationPlan(plan: CreationPlan): CreationState {
   assertPublicInboundData(plan);
   const state = emptyCreation(plan.profile);
-  if (state.profile.security === "tls") state.tlsMetadata = canonicalTLSMetadata(plan.profile.tls);
+  if (state.spec) { state.specSecretPaths = plan.profile.spec_secret_paths ?? []; }
+  else if (state.profile.security === "tls") state.tlsMetadata = canonicalTLSMetadata(plan.profile.tls);
   else if (plan.profile.tls !== undefined) throw new Error("unexpected_tls_metadata");
   state.replaceTLS = false;
   state.reason = plan.reason; state.selected = plan.nodes.map(row => row.node_id);
@@ -81,13 +87,14 @@ export function stateFromCreationPlan(plan: CreationPlan): CreationState {
   return state;
 }
 export function creationPayload(state: CreationState, inboundID: number, planRevision: number, inboundRevision: number, eventID: string): CreationPayload {
+  const spec = state.spec ? specPayload(state.spec, state.specSecretPaths) : undefined;
   return { event_id: eventID, expected_plan_revision: planRevision, expected_inbound_revision: inboundRevision,
     profile: { id: inboundID, name: state.profile.name, transport: state.profile.transport, security: state.profile.security,
       grpc_service: state.profile.transport === "grpc" ? state.profile.grpcService : "",
       ...(state.profile.security === "tls" ? {} : { reality_target: state.profile.realityTarget, short_ids: creationShortIDs(state.shortIDs) }),
       server_names: state.profile.serverNames.split(/[\s,]+/).filter(Boolean),
-      options: profileOptionsPayload(state.profile.options, state.profile.transport, state.profile.security) ?? (planRevision > 0 && state.profileOptionsPresent ? {} : undefined) },
-    ...(state.profile.security === "tls" && (state.replaceTLS || !state.tlsMetadata) ? { tls_credentials: { ...state.tlsCredentials } } : {}),
+      ...(spec ? { spec } : { options: profileOptionsPayload(state.profile.options, state.profile.transport, state.profile.security) ?? (planRevision > 0 && state.profileOptionsPresent ? {} : undefined) }) },
+    ...(!spec && state.profile.security === "tls" && (state.replaceTLS || !state.tlsMetadata) ? { tls_credentials: { ...state.tlsCredentials } } : {}),
     nodes: selectedCreationNodes(state).map(row => ({ node_id: row.nodeID, installation_id: row.installationID, listen_ip: row.listenIP,
       direct_port: row.direct.enabled ? creationPort(row.direct.port) : 0, direct_hosts: row.direct.enabled ? creationPathHosts(row.direct) : [],
       tunnel_port: row.tunnel.enabled ? creationPort(row.tunnel.port) : 0, tunnel_hosts: row.tunnel.enabled ? creationPathHosts(row.tunnel) : [],
@@ -107,12 +114,17 @@ export function creationWaitingHosts(row: CreationNode): boolean {
 
 export function emptyCreation(source?: Inbound): CreationState {
   assertPublicInboundData(source);
-  return {
+  const value: CreationState = {
     profile: { name: source?.name ?? "", transport: source?.transport ?? "tcp", grpcService: source?.grpc_service ?? "", security: profileSecurity(source?.security),
       realityTarget: source?.reality_target ?? "", serverNames: source?.server_names.join(", ") ?? "", options: profileOptionsDraft(source?.options) },
     selected: [], nodes: {}, reason: "", profileOptionsPresent: !!canonicalProfileOptions(source?.options), shortIDs: source?.short_ids?.join(", ") ?? freshCreationShortID(),
     tlsCredentials: { certificate_pem: "", private_key_pem: "" }, replaceTLS: false,
   };
+  return source?.spec ? withCreationSpec({ ...value, specSecretPaths: source.spec_secret_paths ?? [] }, specFromInbound(source)) : value;
+}
+export function withCreationSpec(state: CreationState, spec: AuthoringSpec): CreationState {
+  const names = spec.security === "reality" && Array.isArray(spec.reality.serverNames) ? spec.reality.serverNames.map(String) : [spec.client.serverName || spec.tls.serverName].filter((name): name is string => typeof name === "string" && !!name);
+  return { ...state, spec, profile: { ...state.profile, security: spec.security, transport: spec.network, grpcService: String(readSpecPath(spec, "stream.grpcSettings.serviceName") ?? ""), realityTarget: String(spec.reality.target ?? ""), serverNames: names.join(", ") }, shortIDs: Array.isArray(spec.reality.shortIds) ? spec.reality.shortIds.map(String).join(", ") : "" };
 }
 export function newCreationNode(node: InboundNode): CreationNode {
   return { nodeID: node.node_id, installationID: node.installation_id, listenIP: "",
@@ -157,6 +169,10 @@ export function creationIssues(state: CreationState, available: InboundNode[]): 
   if (!profile.name.trim()) issues.push({ field: "name", code: "name_required" });
   else if (!validUTF8(profile.name) || Array.from(profile.name).length > 128 || /[\u0000-\u001f\u007f-\u009f]/.test(profile.name)) issues.push({ field: "name", code: "name_invalid" });
   const tls = profile.security === "tls";
+  if (state.spec) {
+    issues.push(...specIssues(state.spec, state.specSecretPaths));
+    issues.push(...(state.specDraftErrors ?? []).map(path => ({ field: `spec.${path}`, code: "spec_draft_unapplied" })));
+  } else {
   if (!(tls ? ["tcp", "grpc", "xhttp", "ws", "httpupgrade"] : ["tcp", "grpc", "xhttp"]).includes(profile.transport)) issues.push({ field: "transport", code: "transport_invalid" });
   if (profile.transport === "grpc" && !/^[A-Za-z0-9_-]{1,64}$/.test(profile.grpcService)) issues.push({ field: "grpcService", code: "grpc_service_invalid" });
   const target = profile.realityTarget.match(/^(?:\[[0-9a-fA-F:.]+\]|[^:\s/\\@%\[\]]+):([0-9]+)$/);
@@ -168,6 +184,8 @@ export function creationIssues(state: CreationState, available: InboundNode[]): 
   if (tls && (state.replaceTLS || !state.tlsMetadata)) issues.push(...tlsCredentialIssues(state.tlsCredentials));
   const shortIDs = creationShortIDs(state.shortIDs);
   if (!tls && (!shortIDs.length || shortIDs.length > 16 || new Set(shortIDs).size !== shortIDs.length || shortIDs.some(id => !/^[0-9a-f]{2,16}$/.test(id) || id.length % 2 !== 0))) issues.push({ field: "shortIDs", code: "short_ids_invalid" });
+  }
+  const serverNames = profile.serverNames.split(/[\s,]+/).filter(Boolean);
   if (!state.selected.length) issues.push({ field: "nodes", code: "node_required" });
   for (const row of selectedCreationNodes(state)) {
     const add = (field: string, code: string) => issues.push({ nodeID: row.nodeID, field, code });

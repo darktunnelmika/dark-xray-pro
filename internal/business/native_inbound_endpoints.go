@@ -77,6 +77,12 @@ func effectiveEndpointClient(profile InboundInput, endpoint NativeInboundEndpoin
 			spider = profile.Options.Client.SpiderX
 		}
 	}
+	if profile.Spec != nil {
+		if value := specString(profile.Spec.Client, "serverName"); value != "" {
+			sni = value
+		}
+		fingerprint, spider = specString(profile.Spec.Client, "fingerprint"), specString(profile.Spec.Client, "spiderX")
+	}
 	if endpoint.SNI != "" {
 		sni = endpoint.SNI
 	}
@@ -116,7 +122,14 @@ func normalizePlanEndpoints(profile InboundInput, node, path string, port uint16
 		if utf8.RuneCountInString(e.Label) > 128 || !utf8.ValidString(e.Label) || strings.IndexFunc(e.Label, unicode.IsControl) >= 0 {
 			return fail("label", "endpoint_label_invalid")
 		}
-		if e.SNI != "" {
+		if profile.Spec != nil && profile.Security != "reality" && e.SNI != "" {
+			name := canonicalRouteHost(e.SNI)
+			if name == "" {
+				return fail("sni", "endpoint_sni_invalid")
+			}
+			e.SNI = name
+		}
+		if e.SNI != "" && (profile.Spec == nil || profile.Security == "reality") {
 			allowed := false
 			for _, name := range profile.ServerNames {
 				if e.SNI == name {
