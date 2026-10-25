@@ -216,7 +216,162 @@ jobs:
         run: |
           set -euo pipefail
           go mod verify
-          go test -race -buildvcs=false ./internal/darkproadapter ./cmd/darkpro-tuic ./cmd/darkpro-amneziawg -count=1 -json -timeout=240s > "$RUNNER_TEMP/standalone-traffic.jsonl" || { cat "$RUNNER_TEMP/standalone-traffic.jsonl"; exit 1; }
+          # Two opt-in IPv6 cases cannot succeed in this unprivileged suite:
+          # one requires a private Agent control file and the other a real
+          # isolated network namespace. Exclude only these two here; the
+          # subsequent privileged namespace gate must prove real IPv6 traffic.
+          go test -race -buildvcs=false ./internal/darkproadapter ./cmd/darkpro-tuic ./cmd/darkpro-amneziawg \
+            -skip='^TestManagedAmneziaWG(IPv6AgentClient|PublicIPv6NamespaceTrafficAndFinal)
+          python3 "$GITHUB_WORKSPACE/scripts/ci/assert-inbound-acceptance.py" "$RUNNER_TEMP/standalone-traffic.jsonl" \
+            --require TestPrivateBridgeAuthenticationPayloadAndFinal \
+            --require TestManagedTUICActualTCPUDPAccountingAndRevoke/bbr \
+            --require TestManagedTUICActualTCPUDPAccountingAndRevoke/cubic \
+            --require TestManagedTUICActualTCPUDPAccountingAndRevoke/new_reno \
+            --require TestManagedAmneziaWG31ActualTCPUDPAccountingAndRevoke \
+            --require TestMaterialRejectsNonRegularAndWritableSources \
+            --require TestTUICRealECHAndSNIRejection \
+            --require TestTUICCertificateSnapshotAndPrivateKeyLog \
+            --require TestTUICRealOCSPStaplingAndInvalidResponse \
+            --require TestTUICRealCertificateIssuanceAndChain
+          (cd _darkpro/quic-go && go test -buildvcs=false -race ./internal/ackhandler -run '^TestDarkPro' -count=1 -v)
+          # Keep all linked dependency sources and license notices with the
+          # separately distributed GPL workers, then build from that tree.
+          go mod vendor
+          CGO_ENABLED=0 go build -mod=vendor -buildvcs=false -trimpath -o "$RUNNER_TEMP/standalone-artifact/bin/darkpro-tuic" ./cmd/darkpro-tuic
+          CGO_ENABLED=0 go build -mod=vendor -buildvcs=false -trimpath -o "$RUNNER_TEMP/standalone-artifact/bin/darkpro-amneziawg" ./cmd/darkpro-amneziawg
+      - name: Prove actual per-peer IPv6 sources, authority loss and final counters in disposable namespaces
+        shell: bash
+        run: |
+          set -euo pipefail
+          export DARK_PRO_AWG_IPV6_CLIENT_OUTPUT="$RUNNER_TEMP/standalone-artifact/acceptance/amneziawg-ipv6-client.test"
+          bash scripts/ci/test-amneziawg-ipv6.sh "$RUNNER_TEMP/sanaei-workers" | tee "$RUNNER_TEMP/amneziawg-ipv6-namespace.log"
+          grep -q MANAGED_AMNEZIAWG_IPV6_SOURCE_VERIFIED "$RUNNER_TEMP/amneziawg-ipv6-namespace.log"
+          ! grep -q -- '--- SKIP:' "$RUNNER_TEMP/amneziawg-ipv6-namespace.log"
+      - name: Prove real FakeTLS, named-user isolation, revocation, bridge and final MTProto receipts
+        working-directory: .mtproto-engine
+        shell: bash
+        run: |
+          set -euo pipefail
+          go mod verify
+          go test -race -buildvcs=false ./cmd/dark-pro-mtg ./mtglib -count=1 -json -timeout=180s > "$RUNNER_TEMP/mtproto-traffic.jsonl" || { cat "$RUNNER_TEMP/mtproto-traffic.jsonl"; exit 1; }
+          python3 "$GITHUB_WORKSPACE/scripts/ci/assert-inbound-acceptance.py" "$RUNNER_TEMP/mtproto-traffic.jsonl" \
+            --require TestManagedMTProtoFakeTLSPayloadAccountingIsolationAndFinal \
+            --require TestManagedMTProtoRemovedCredentialCannotReturn \
+            --require TestManagedMTProtoOwnerAggregatePayloadAndFinal \
+            --require TestManagedMTProtoAuthenticatedSOCKSBridge \
+            --require TestMTProtoBindingsRejectAliases \
+            --require TestMTProtoControlNonceAndStrictRequests \
+            --require TestMTProtoCheckAndPrivateProcessLifecycle
+          go mod vendor
+          CGO_ENABLED=0 go build -mod=vendor -buildvcs=false -trimpath -o "$RUNNER_TEMP/standalone-artifact/bin/dark-pro-mtg" ./cmd/dark-pro-mtg
+      - name: Include all corresponding standalone sources, licenses and provenance
+        shell: bash
+        run: |
+          set -euo pipefail
+          tar --exclude=.git -czf "$RUNNER_TEMP/standalone-artifact/sanaei-workers-source.tar.gz" -C "$RUNNER_TEMP/sanaei-workers" .
+          tar --exclude=.git -czf "$RUNNER_TEMP/standalone-artifact/mtproto-worker-source.tar.gz" -C .mtproto-engine .
+          cp "$RUNNER_TEMP/sanaei-workers/LICENSE" "$RUNNER_TEMP/standalone-artifact/Sanaei-LICENSE"
+          cp .mtproto-engine/LICENSE "$RUNNER_TEMP/standalone-artifact/MTProto-LICENSE"
+          cp "$RUNNER_TEMP/sanaei-workers/darkpro-sanaei-provenance.json" .mtproto-engine/darkpro-mtproto-provenance.json "$RUNNER_TEMP/standalone-artifact/"
+          mkdir -p "$RUNNER_TEMP/standalone-artifact/build-scripts/scripts/ci"
+          cp scripts/prepare-sanaei-engines.py scripts/prepare-mtproto-engine.py "$RUNNER_TEMP/standalone-artifact/build-scripts/scripts/"
+          cp scripts/ci/test-amneziawg-ipv6.sh scripts/ci/assert-inbound-acceptance.py "$RUNNER_TEMP/standalone-artifact/build-scripts/scripts/ci/"
+          cp -R scripts/engine-overlay "$RUNNER_TEMP/standalone-artifact/build-scripts/scripts/"
+          python3 - "$RUNNER_TEMP/standalone-artifact" "$GITHUB_SHA" <<'PY'
+          import hashlib,json,pathlib,sys
+          root=pathlib.Path(sys.argv[1])
+          hashes={str(p.relative_to(root)):hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(root.rglob('*')) if p.is_file()}
+          (root/'bundle-provenance.json').write_text(json.dumps({'application_commit':sys.argv[2], 'go':'1.27.3', 'files':hashes},indent=2)+'\n')
+          PY
+      - name: Publish separately linked standalone engines with corresponding source
+        uses: actions/upload-artifact@v4
+        with:
+          name: inbound-execution-standalone-linux-amd64-${{ github.sha }}
+          path: ${{ runner.temp }}/standalone-artifact
+          if-no-files-found: error
+          retention-days: 14
+      - name: Preserve standalone traffic evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: inbound-execution-standalone-evidence-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/standalone-traffic.jsonl
+            ${{ runner.temp }}/mtproto-traffic.jsonl
+            ${{ runner.temp }}/amneziawg-ipv6-namespace.log
+          if-no-files-found: warn
+          retention-days: 14
+
+  compiled-engine-integration:
+    name: Authored profiles through real owner, Agent and pinned standalone workers
+    needs: [native-runtime, standalone-engines]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: inbound-execution-native-linux-amd64-${{ github.sha }}
+          path: ${{ runner.temp }}/tested-native
+      - uses: actions/download-artifact@v4
+        with:
+          name: inbound-execution-standalone-linux-amd64-${{ github.sha }}
+          path: ${{ runner.temp }}/tested-standalone
+      - name: Verify matching application commit, source pins and every downloaded file hash
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - "$RUNNER_TEMP/tested-native" "$RUNNER_TEMP/tested-standalone" "$GITHUB_SHA" <<'PY'
+          import hashlib,json,pathlib,sys
+          native,standalone=map(pathlib.Path,sys.argv[1:3])
+          for root in (native,standalone):
+              bundle=json.loads((root/'bundle-provenance.json').read_text())
+              assert bundle['application_commit']==sys.argv[3], 'application artifact revision mismatch'
+              assert bundle['files'], 'missing artifact hashes'
+              for name,digest in bundle['files'].items():
+                  relative=pathlib.Path(name)
+                  assert not relative.is_absolute() and '..' not in relative.parts, 'unsafe manifest path'
+                  assert hashlib.sha256((root/relative).read_bytes()).hexdigest()==digest, f'changed artifact: {name}'
+          core=json.loads((native/'native/xray-inbound-v2.provenance.json').read_text())
+          assert core['upstream_commit']=='701af60772cda123492f86e383e1fdba066614a9'
+          assert core['binary_sha256']==hashlib.sha256((native/'native/xray-inbound-v2').read_bytes()).hexdigest()
+          sanaei=json.loads((standalone/'darkpro-sanaei-provenance.json').read_text())
+          assert sanaei['commit']=='608ef4e4010bf83e2e78328e08f77efc051ad4d7'
+          mtg=json.loads((standalone/'darkpro-mtproto-provenance.json').read_text())
+          assert mtg['commit']=='a45ebefed80e16949426381ef53fb5f1c1e4958d'
+          print('Verified matching application revision, source pins and artifact checksums')
+          PY
+          # Artifact download intentionally normalizes permissions; restore
+          # execute bits only after the bytes and pins have been verified.
+          chmod 0755 "$RUNNER_TEMP/tested-native/native/xray-inbound-v2" "$RUNNER_TEMP/tested-standalone/bin/darkpro-tuic" "$RUNNER_TEMP/tested-standalone/bin/darkpro-amneziawg" "$RUNNER_TEMP/tested-standalone/bin/dark-pro-mtg"
+          echo "DARK_PRO_TEST_INBOUND_CORE=$RUNNER_TEMP/tested-native/native/xray-inbound-v2" >> "$GITHUB_ENV"
+          echo "DARK_PRO_TEST_ENGINE_TUIC=$RUNNER_TEMP/tested-standalone/bin/darkpro-tuic" >> "$GITHUB_ENV"
+          echo "DARK_PRO_TEST_ENGINE_AMNEZIAWG=$RUNNER_TEMP/tested-standalone/bin/darkpro-amneziawg" >> "$GITHUB_ENV"
+          echo "DARK_PRO_TEST_ENGINE_MTPROTO=$RUNNER_TEMP/tested-standalone/bin/dark-pro-mtg" >> "$GITHUB_ENV"
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Prove actual compiler, TLS Agent, worker zero and activation, and complete group finalization
+        shell: bash
+        run: |
+          set -euo pipefail
+          go test -race ./internal/api -run '^TestManagedInboundRealExternalCompilerAgentLifecycle$' -count=1 -json -timeout=240s > "$RUNNER_TEMP/compiled-engine-integration.jsonl" || { cat "$RUNNER_TEMP/compiled-engine-integration.jsonl"; exit 1; }
+          python3 scripts/ci/assert-inbound-acceptance.py "$RUNNER_TEMP/compiled-engine-integration.jsonl" \
+            --require TestManagedInboundRealExternalCompilerAgentLifecycle \
+            --require TestManagedInboundRealExternalCompilerAgentLifecycle/tuic \
+            --require TestManagedInboundRealExternalCompilerAgentLifecycle/amneziawg \
+            --require TestManagedInboundRealExternalCompilerAgentLifecycle/mtproto
+      - name: Preserve compiled engine integration evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: inbound-execution-compiled-integration-${{ github.sha }}
+          path: ${{ runner.temp }}/compiled-engine-integration.jsonl
+          if-no-files-found: warn
+          retention-days: 14
+ \
+            -count=1 -json -timeout=240s > "$RUNNER_TEMP/standalone-traffic.jsonl" || { cat "$RUNNER_TEMP/standalone-traffic.jsonl"; exit 1; }
           python3 "$GITHUB_WORKSPACE/scripts/ci/assert-inbound-acceptance.py" "$RUNNER_TEMP/standalone-traffic.jsonl" \
             --require TestPrivateBridgeAuthenticationPayloadAndFinal \
             --require TestManagedTUICActualTCPUDPAccountingAndRevoke/bbr \
