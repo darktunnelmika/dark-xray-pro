@@ -66,9 +66,11 @@ async function fixture(page:Page){
 test("ambiguous credit retry uses SAME event; editing amount creates NEW event without auto-debit",async({page})=>{
  const m=await fixture(page);
  await page.goto("/representatives");
- const credit=page.getByRole("heading",{name:"Adjust representative credit"}).locator("..");
- await page.getByRole("button",{name:"Select for credit"}).click();
- await expect(credit.getByLabel("Representative ID")).toHaveValue("rep-a");
+ await page.getByRole("region",{name:"Representative directory"})
+  .getByRole("button",{name:"Manage account"}).click();
+ await page.getByRole("button",{name:"Credit",exact:true}).click();
+ const credit=page.locator(".rep-v2-detail-form");
+ await expect(credit.getByRole("heading",{name:"Credit",exact:true})).toBeVisible();
  await credit.getByLabel("Volume delta (GB, +/-)").fill("1.0");
  await credit.getByLabel("Unlimited-unit delta (+/-)").fill("0");
  await credit.getByLabel("Reason").fill("Independent QA grant");
