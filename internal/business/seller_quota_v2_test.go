@@ -29,8 +29,14 @@ func TestSellerV2NoIndependentCreditOrAccountLeak(t *testing.T){
  alice,err:=s.SellerV2(ctx,"repSellerA","sellerAlice")
  if err!=nil||alice.ReservedUnits!=0||alice.ReservedBytes!=0||alice.RepresentativeID!="repSellerA"{t.Fatal(alice,err)}
  if _,err=s.SellerV2(ctx,"repSellerB","sellerAlice");!errors.Is(err,ErrNotFound){t.Fatal("cross-account read",err)}
+ // Two representatives may independently use the same local seller label.
+ _,err=s.CreateSellerV2(ctx,CreateSellerV2{EventID:"seller-create-bob-sameid-0001",
+  RepresentativeID:"repSellerB",SellerID:"sellerAlice",Name:"Other owned seller",TelegramUserID:654321})
+ if err!=nil{t.Fatal("scoped seller ID collision across representatives",err)}
+ otherSeller,err:=s.SellerV2(ctx,"repSellerB","sellerAlice")
+ if err!=nil||otherSeller.TelegramUserID!=654321{t.Fatal("cross-scope seller wrong",otherSeller,err)}
  if _,err=s.TransferSellerQuotaV2(ctx,SellerQuotaTransferV2{EventID:"seller-cross-account-0001",RepresentativeID:"repSellerB",
-  SellerID:"sellerAlice",Action:"allocate",Units:2,Reason:"Foreign seller"});!errors.Is(err,ErrNotFound){t.Fatal("cross-account transfer",err)}
+  SellerID:"nonexistentSeller",Action:"allocate",Units:2,Reason:"Foreign seller"});!errors.Is(err,ErrNotFound){t.Fatal("cross-account transfer",err)}
  other,err:=s.Representative(ctx,"repSellerB")
  if err!=nil||other.UnlimitedCreditUnits!=50{t.Fatal("other rep mutated",other,err)}
 }
