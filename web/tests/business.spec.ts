@@ -129,6 +129,11 @@ async function mockBusiness(page: Page, user: typeof rep, seedClientCount=0, see
           expires_unix: 1800000000,
         });
       }
+      if (path === "/api/v1/workspace/representatives" && request.method() === "POST") {
+        const account = body as {id:string;name:string};
+        return route.fulfill({status:201,json:{id:account.id,display_name:account.name,
+          kind:"representative",enabled:true,volume_credit_bytes:0,unlimited_credit_units:0}});
+      }
       await route.fulfill({ status: request.method() === "POST" ? 201 : 200,
         contentType: "application/json", body: JSON.stringify(body) });
       return;
@@ -275,31 +280,33 @@ test("representative only sees own scoped business tools and submits CSRF-bound 
   expect(overflow).toBe(false);
 });
 
-test("owner gets real scoped representative forms in Persian without sending owner token to browser", async ({ page }) => {
-  await mockBase(page);
-  const requests = await mockBusiness(page, owner);
-  await page.goto("/representatives");
-  await page.getByLabel("Username").fill("proowner");
-  await page.getByLabel("Password").fill("test-private-password-for-lab");
-  await page.getByRole("button", { name: "Sign in" }).click();
-  await expect(page.getByRole("heading", { name: "Create representative" })).toBeVisible();
-  await page.getByRole("button", { name: "Switch language" }).click();
-  await expect(page.getByRole("heading", { name: "ساخت نماینده" })).toBeVisible();
-  await expect(page.locator("html")).toHaveAttribute("dir", "rtl");
-  const form = page.getByRole("heading", { name: "ساخت نماینده" }).locator("..");
-  await form.getByLabel("شناسه نماینده").fill("rep-new");
-  await form.getByLabel("نام نمایشی").fill("نماینده جدید");
-  await form.getByRole("button", { name: "ساخت نماینده" }).click();
-  expect(requests).toHaveLength(1);
-  expect(requests[0].csrf).toBe("a".repeat(64));
-  const body = requests[0].body as Record<string, unknown>;
-  expect(body.id).toBe("rep-new");
-  expect(body.name).toBe("نماینده جدید");
-  const leaked = await page.evaluate(() => JSON.stringify(localStorage));
-  expect(leaked).not.toContain("csrf_token");
-  expect(leaked).not.toContain("test-private-password-for-lab");
+test("V2 owner creates representative in one RTL dialog without exposing three large forms", async({page})=>{
+ await mockBase(page);
+ const requests=await mockBusiness(page,owner);
+ await page.goto("/representatives");
+ await page.getByLabel("Username").fill("proowner");
+ await page.getByLabel("Password").fill("test-private-password-for-lab");
+ await page.getByRole("button",{name:"Sign in"}).click();
+ await expect(page.getByRole("heading",{name:"Create representative"})).toHaveCount(0);
+ await expect(page.locator(".business-form-grid")).toHaveCount(0);
+ await page.getByRole("button",{name:"Switch language"}).click();
+ await expect(page.locator("html")).toHaveAttribute("dir","rtl");
+ await page.getByRole("button",{name:"ایجاد نماینده"}).click();
+ const dialog=page.getByRole("dialog",{name:"ایجاد نماینده جدید"});
+ await dialog.getByLabel("شناسه نماینده").fill("rep-new");
+ await dialog.getByLabel("نام نماینده").fill("نماینده جدید");
+ await dialog.getByRole("button",{name:"ثبت نماینده"}).click();
+ await expect(dialog).toHaveCount(0);
+ expect(requests).toHaveLength(1);
+ expect(requests[0].csrf).toBe("a".repeat(64));
+ expect(requests[0].path).toBe("/api/v1/workspace/representatives");
+ expect(requests[0].body).toEqual({id:"rep-new",name:"نماینده جدید"});
+ await expect(page.getByText("rep-new",{exact:true})).toBeVisible();
+ await expect(page.getByRole("button",{name:"اطلاعات ورود"})).toBeVisible();
+ const leaked=await page.evaluate(()=>JSON.stringify(localStorage));
+ expect(leaked).not.toContain("csrf_token");
+ expect(leaked).not.toContain("test-private-password-for-lab");
 });
-
 
 test("owner can create and bulk-edit a real group in Persian then delete group without deleting clients", async ({ page }) => {
   await mockBase(page);
@@ -493,26 +500,26 @@ test("group picker fails closed when membership lookup fails and sends no mutati
  expect(requests).toHaveLength(1);
 });
 
-// Selecting a representative is a local form action only; it must not
-// grant quota, create a session or leak a password until owner submits.
-test("owner representative cards prefill credit and login targets without creating credit transactions",async({page})=>{
+// Selecting a representative must not create a session or financial transaction.
+test("V2 opens credentials and credit only within its profile",async({page})=>{
  await mockBase(page);
  const requests=await mockBusiness(page,owner);
  await page.goto("/representatives");
  await page.getByLabel("Username").fill("proowner");
  await page.getByLabel("Password").fill("test-private-password-for-lab");
  await page.getByRole("button",{name:"Sign in"}).click();
- const credits=page.getByRole("heading",{name:"Adjust representative credit"}).locator("..");
- const login=page.getByRole("heading",{name:"Set representative login"}).locator("..");
- await page.getByRole("button",{name:"Select for credit"}).click();
- await expect(credits.getByLabel("Representative ID")).toHaveValue("rep-a");
- await page.getByRole("button",{name:"Select for login"}).click();
- await expect(login.getByLabel("Representative ID")).toHaveValue("rep-a");
+ const directory=page.getByRole("region",{name:"Representative directory"});
+ await expect(page.getByRole("heading",{name:"Adjust representative credit"})).toHaveCount(0);
+ await expect(page.getByRole("heading",{name:"Set representative login"})).toHaveCount(0);
+ await directory.getByRole("button",{name:"Manage account"}).click();
+ await page.getByRole("button",{name:"Credit",exact:true}).click();
+ await expect(page.getByRole("heading",{name:"Credit",exact:true})).toBeVisible();
+ await page.getByRole("button",{name:"Login credentials"}).click();
+ await expect(page.getByRole("heading",{name:"Login credentials"})).toBeVisible();
  expect(requests).toHaveLength(0);
  await page.getByRole("button",{name:"Switch language"}).click();
- await page.getByRole("button",{name:"انتخاب برای اعتبار"}).click();
- await expect(page.getByRole("heading",{name:"تغییر اعتبار نماینده"}).locator("..")
-  .getByLabel("شناسه نماینده")).toHaveValue("rep-a");
+ await page.getByRole("button",{name:"اعتبار",exact:true}).click();
+ await expect(page.getByRole("heading",{name:"اعتبار",exact:true})).toBeVisible();
  expect(requests).toHaveLength(0);
 });
 
@@ -863,9 +870,10 @@ test("owner representative global search goes beyond 50 without mutations", asyn
  await expect(directory.getByText("rep-074",{exact:true})).toBeVisible();
  await directory.getByLabel("Search name or account ID").fill("rep-074");
  await expect(directory.getByText("Results: 1")).toBeVisible();
- await directory.getByRole("button",{name:"Select for credit"}).click();
- await expect(page.getByRole("heading",{name:"Adjust representative credit"}).locator("..")
-  .getByLabel("Representative ID")).toHaveValue("rep-074");
+ await directory.getByRole("button",{name:"Manage account"}).click();
+ await page.getByRole("button",{name:"Credit",exact:true}).click();
+ await expect(page.getByRole("heading",{name:"Credit",exact:true})).toBeVisible();
+ await page.getByRole("button",{name:"Back to directory"}).click();
  await directory.getByLabel("Search name or account ID").fill("");
  await directory.getByLabel("Representative status").selectOption("disabled");
  await expect(directory.getByText("Results: 1")).toBeVisible();
@@ -886,7 +894,7 @@ test("owner 320px Persian directory fails closed on malformed results", async ({
  await page.getByRole("button",{name:"Sign in"}).click();
  await page.getByRole("button",{name:"Switch language"}).click();
  const directory=page.getByRole("region",{name:"Representative directory"});
- await expect(directory.getByRole("button",{name:"انتخاب برای اعتبار"})).toBeVisible();
+ await expect(directory.getByRole("button",{name:"مدیریت حساب"})).toBeVisible();
  await page.route("**/api/v1/workspace/representatives?*",route=>route.fulfill({
    status:200,json:{representatives:[{id:"rep-b",display_name:"foreign",kind:"representative",
      enabled:true,client_count:-1,archived_count:0,volume_credit_bytes:0,unlimited_credit_units:0}],
@@ -894,6 +902,6 @@ test("owner 320px Persian directory fails closed on malformed results", async ({
  }));
  await directory.getByLabel("جست‌وجوی نام یا شناسه نماینده").fill("bad");
  await expect(directory.getByRole("alert")).toBeVisible();
- await expect(directory.getByRole("button",{name:"انتخاب برای اعتبار"})).toHaveCount(0);
+ await expect(directory.getByRole("button",{name:"مدیریت حساب"})).toHaveCount(0);
  expect(writes).toHaveLength(0);
 });

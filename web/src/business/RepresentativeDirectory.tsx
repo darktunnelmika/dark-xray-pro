@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Search, Users, CreditCard, KeyRound, UserCog } from "lucide-react";
+import { Search, Users, UserCog } from "lucide-react";
 import { api } from "../session";
 import { useAccountPageOffset } from "./useAccountPageOffset";
 import { gb, type Representative } from "./shared";
@@ -17,7 +17,7 @@ const terms = {
     search:"Search name or account ID", all:"All accounts", active:"Enabled", disabled:"Disabled",
     newest:"Newest", id:"Account ID", name:"Name", volume:"Most volume credit",
     units:"Most unlimited credit", records:"Saved clients", archived:"Archived",
-    balance:"Available credit", selectCredit:"Select for credit", selectLogin:"Select for login",
+    balance:"Available credit",
     manage:"Manage account", noData:"No matching accounts", unavailable:"Directory is unavailable or unverified; actions are blocked.",
     previous:"Previous", next:"Next", page:"Results", owner:"Primary owner",
   },
@@ -26,7 +26,7 @@ const terms = {
     search:"جست‌وجوی نام یا شناسه نماینده", all:"همه حساب‌ها", active:"فعال", disabled:"غیرفعال",
     newest:"جدیدترین", id:"شناسه حساب", name:"نام", volume:"بیشترین اعتبار حجمی",
     units:"بیشترین اعتبار نامحدود", records:"کلاینت ثبت‌شده", archived:"آرشیوشده",
-    balance:"اعتبار موجود", selectCredit:"انتخاب برای اعتبار", selectLogin:"انتخاب برای ورود",
+    balance:"اعتبار موجود",
     manage:"مدیریت حساب", noData:"نماینده‌ای پیدا نشد", unavailable:"فهرست نمایندگان قابل تأیید نیست؛ عملیات غیرفعال است.",
     previous:"قبلی", next:"بعدی", page:"نتایج", owner:"مالک اصلی",
   },
@@ -50,7 +50,7 @@ function validPage(raw: Page, q: string, state: string, sort: string, offset: nu
 }
 
 export default function RepresentativeDirectory({model,onManage}: {model:BusinessModel;onManage?:(id:string)=>void}) {
-  const { language, session, actionBusy, refreshKey, setCreditRep, setLoginRep } = model;
+  const { language, session, actionBusy, refreshKey } = model;
   const t=terms[language];
   const [draft,setDraft]=useState("");
   const [query,setQuery]=useState("");
@@ -119,8 +119,6 @@ export default function RepresentativeDirectory({model,onManage}: {model:Busines
             <span>{t.balance}: <b>{gb(r.volume_credit_bytes)}</b> · <b>{r.unlimited_credit_units.toLocaleString()}</b> {t.units}</span>
           </div>
           {r.kind==="representative" && <div className="business-rep-select">
-            <button type="button" disabled={actionBusy} onClick={()=>setCreditRep(r.id)}><CreditCard size={14}/>{t.selectCredit}</button>
-            <button type="button" disabled={actionBusy} onClick={()=>setLoginRep(r.id)}><KeyRound size={14}/>{t.selectLogin}</button>
             {onManage && <button type="button" disabled={actionBusy} onClick={()=>onManage(r.id)}><UserCog size={14}/>{t.manage}</button>}
           </div>}
         </article>)}
