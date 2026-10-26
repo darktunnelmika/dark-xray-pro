@@ -40,7 +40,7 @@ func bytesGiB(s string)(string,error){
  whole:=new(big.Int).Div(b,unitBytes)
  rest:=new(big.Int).Mod(b,unitBytes)
  frac:=new(big.Int).Div(new(big.Int).Mul(rest,big.NewInt(100)),unitBytes)
- return fmt.Sprintf("%s.%02s",whole.String(),frac.String()),nil
+ return fmt.Sprintf("%s.%02d",whole.String(),frac.Int64()),nil
 }
 
 // FormatOwnerRepresentativeFA produces an escaped, size-bounded, read-only
