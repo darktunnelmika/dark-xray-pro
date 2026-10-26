@@ -72,9 +72,11 @@ func (s *Store) EnableSellerQuotaV2(ctx context.Context) error {
  `CREATE TABLE IF NOT EXISTS seller_quota_events_v2(
    event_id TEXT PRIMARY KEY, fingerprint TEXT NOT NULL,
    representative_id TEXT NOT NULL REFERENCES representatives(id),
-   seller_id TEXT NOT NULL REFERENCES representative_sellers_v2(id),
+   seller_id TEXT NOT NULL,
    action TEXT NOT NULL CHECK(action IN ('create','allocate','reclaim')),
-   receipt_json TEXT NOT NULL, reason TEXT NOT NULL, created_unix INTEGER NOT NULL)`,
+   receipt_json TEXT NOT NULL, reason TEXT NOT NULL, created_unix INTEGER NOT NULL,
+   FOREIGN KEY(representative_id,seller_id)
+     REFERENCES representative_sellers_v2(representative_id,id))`,
  `CREATE TRIGGER IF NOT EXISTS seller_v2_events_no_update BEFORE UPDATE ON seller_quota_events_v2
    BEGIN SELECT RAISE(ABORT,'seller quota audit immutable'); END`,
  `CREATE TRIGGER IF NOT EXISTS seller_v2_events_no_delete BEFORE DELETE ON seller_quota_events_v2
