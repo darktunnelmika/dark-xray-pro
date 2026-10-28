@@ -16,7 +16,7 @@ concurrency:
 
 jobs:
   foundation:
-    name: Go 1.23 contracts, accounting and race checks
+    name: Go 1.27 contracts, accounting and race checks
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -143,27 +143,38 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Build the matching HUB, Agent and embedded owner UI from this commit
+      - name: Build the matching HUB, Agent and embedded owner UI in a clean worktree
         shell: bash
         run: |
           set -euo pipefail
-          DARK_PRO_PINNED_COMMIT="$GITHUB_SHA" bash scripts/build-lab-bundle.sh
-          DARK_PRO_REQUIRE_EMBEDDED_UI=1 go test ./internal/webui -run '^TestReleaseContainsCompiledUI$' -count=1 -v
-          cp -a release "$RUNNER_TEMP/inbound-artifact/application"
+          # The separately pinned core checkout and its overlay belong to the
+          # engine acceptance above. Build the application from an exact, clean
+          # worktree so those independent sources cannot dirty its VCS stamp.
+          app_tree="$RUNNER_TEMP/native-application-worktree"
+          test ! -e "$app_tree" && test ! -L "$app_tree"
+          git worktree add --detach "$app_tree" "$GITHUB_SHA"
+          (
+            cd "$app_tree"
+            DARK_PRO_PINNED_COMMIT="$GITHUB_SHA" bash scripts/build-lab-bundle.sh
+            DARK_PRO_REQUIRE_EMBEDDED_UI=1 go test ./internal/webui -run '^TestReleaseContainsCompiledUI$' -count=1 -v
+          )
+          printf 'DXP_MATCHING_APP_TREE=%s\n' "$app_tree" >> "$GITHUB_ENV"
+          cp -a "$app_tree/release" "$RUNNER_TEMP/inbound-artifact/application"
           python3 - "$RUNNER_TEMP/inbound-artifact" "$GITHUB_SHA" <<'PY'
           import hashlib,json,pathlib,sys
           root=pathlib.Path(sys.argv[1])
           hashes={str(p.relative_to(root)):hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(root.rglob('*')) if p.is_file()}
-          (root/'bundle-provenance.json').write_text(json.dumps({'application_commit':sys.argv[2], 'native_commit':'701af60772cda123492f86e383e1fdba066614a9', 'application_go':'1.23', 'native_go':'1.27.3', 'files':hashes},indent=2)+'\n')
+          (root/'bundle-provenance.json').write_text(json.dumps({'application_commit':sys.argv[2], 'native_commit':'701af60772cda123492f86e383e1fdba066614a9', 'application_go':'1.27.3', 'native_go':'1.27.3', 'files':hashes},indent=2)+'\n')
           PY
       - name: Prove the compiled subscription UI against the running native worker and TLS Agent
         shell: bash
         run: |
           set -euo pipefail
+          cd "$DXP_MATCHING_APP_TREE"
           (cd web && npx playwright install --with-deps chromium)
           export DARK_PRO_TEST_MANAGED_BROWSER=1
-          export DARK_PRO_TEST_WEB_DIST="$GITHUB_WORKSPACE/web/dist"
-          export DARK_PRO_TEST_MANAGED_BROWSER_SCRIPT="$GITHUB_WORKSPACE/web/tests/live-inbound-subscription.mjs"
+          export DARK_PRO_TEST_WEB_DIST="$DXP_MATCHING_APP_TREE/web/dist"
+          export DARK_PRO_TEST_MANAGED_BROWSER_SCRIPT="$DXP_MATCHING_APP_TREE/web/tests/live-inbound-subscription.mjs"
           go test -race ./internal/api -run '^TestManagedInboundRealBrowserSubscriptionLifecycle$' -count=1 -json -timeout=180s > "$RUNNER_TEMP/managed-browser.jsonl" || { cat "$RUNNER_TEMP/managed-browser.jsonl"; exit 1; }
           python3 scripts/ci/assert-inbound-acceptance.py "$RUNNER_TEMP/managed-browser.jsonl" --require TestManagedInboundRealBrowserSubscriptionLifecycle
       - name: Publish the tested matching LAB artifacts and corresponding native source

@@ -202,6 +202,10 @@ jobs:
           test ! -e backend/dark_policy.py || { echo "Legacy HUB files must not be imported into PRO"; exit 1; }
       - name: Go unit/race tests
         run: go test -race ./...
+      - name: Native encrypted backup above 3 GiB, bounded RAM and interrupted restore retry
+        env:
+          DARK_PRO_BACKUP_LARGE_ACCEPTANCE: "1"
+        run: go test ./internal/probackup -run '^TestNativeBackupLargeStreamingAcceptance$' -count=1 -timeout=300s -v
       - name: Repeat two-Node handover accounting barrier contracts
         run: go test -race ./internal/business ./internal/usageledger ./internal/api -run '^(TestMeteredHandover|TestReviewedBusinessSchemaVersions)' -count=10 -timeout=240s -v
       - name: Repeat protocol health identity, expiry, TLS and SOCKS boundaries
@@ -498,6 +502,7 @@ jobs:
           test -s release/bin/dark-pro-hub
           test -s release/bin/dark-pro-agent
           test -s release/bin/dark-pro-owner-setup
+          test -s release/bin/dark-pro-backup
       - name: Create verifiable LAB-only archive
         shell: bash
         run: |

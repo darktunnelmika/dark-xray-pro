@@ -15,6 +15,7 @@ import (
  "syscall"
 
  "github.com/darktunnelmika/dark-xray-pro/internal/business"
+ "github.com/darktunnelmika/dark-xray-pro/internal/hubstate"
 )
 
 func validateDatabasePath(path string)error{
@@ -53,6 +54,11 @@ func main(){
   log.Fatal("setup requires explicit isolated LAB mode and an unprivileged service user")
  }
  if err:=validateDatabasePath(dbPath);err!=nil{log.Fatal(err)}
+ if err:=hubstate.CheckQuarantine(dbPath);err!=nil{log.Fatal("owner setup refuses quarantined recovery state")}
+ stateLock,err:=hubstate.Acquire(hubstate.ProductionRoot)
+ if err!=nil{log.Fatal("owner setup requires offline unowned HUB state")}
+ defer stateLock.Close()
+ if err=hubstate.InvalidateInventory(stateLock);err!=nil{log.Fatal("owner setup cannot invalidate stale backup inventory")}
  password,err:=readPrivatePassword(passwordFile)
  if err!=nil{log.Fatal(err)}
  store,err:=business.Open(dbPath)

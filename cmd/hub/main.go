@@ -13,6 +13,7 @@ import (
 	"github.com/darktunnelmika/dark-xray-pro/internal/business"
 	"github.com/darktunnelmika/dark-xray-pro/internal/configstage"
 	"github.com/darktunnelmika/dark-xray-pro/internal/hubmonitor"
+	"github.com/darktunnelmika/dark-xray-pro/internal/hubstate"
 	"github.com/darktunnelmika/dark-xray-pro/internal/inboundruntime"
 	"github.com/darktunnelmika/dark-xray-pro/internal/inboundsecurity"
 	"github.com/darktunnelmika/dark-xray-pro/internal/labrevision"
@@ -116,6 +117,11 @@ func main() {
 	if ownerReportFlag == "1" && os.Getenv("DARK_PRO_ENABLE_BUSINESS_CORE") != "1" {
 		log.Fatal("owner report bot requires the private PRO business store")
 	}
+	stateLock, backupInventory, stateErr := prepareOfflineState(offlineOptions(*registryPath, *replacementsPath, *stagingPath, *businessPath, *labRevisionsPath, *nodeHistoryPath, *agentCert, *agentKey, *ownerReportConfig, *address, *agentListen, *static))
+	if stateErr != nil {
+		log.Fatal("offline HUB state fence refused: ", stateErr)
+	}
+	hubStateProcessLock = stateLock // Kernel release only, after every goroutine exits with the process.
 	var agentTLS *http.Server
 	if *agentListen != "" {
 		if os.Getenv("DARK_PRO_ENABLE_REMOTE_AGENT") != "1" {
@@ -416,6 +422,11 @@ func main() {
 	}
 	if ownerReportBot != nil {
 		defer ownerReportBot.Close()
+	}
+	if backupInventory != nil {
+		if err := hubstate.WriteInventory(stateLock, *backupInventory); err != nil {
+			log.Fatal("offline backup inventory is incomplete: ", err)
+		}
 	}
 	apiHandler := service.BrowserHandler()
 	ui := webui.Embedded()
