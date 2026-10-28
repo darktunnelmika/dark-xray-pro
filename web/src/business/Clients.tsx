@@ -7,6 +7,7 @@ import ClientUsage from "../ClientUsage";
 import ClientProfileEditor from "./ClientProfileEditor";
 import ClientInboundSubscription from "./ClientInboundSubscription";
 import { businessGranted } from "./permissionsV9";
+import { ClientVolumeRefund } from "./VolumeRefunds";
 export default function Clients({ model }: { model: BusinessModel }) {
   const { t, session, language, actionBusy, refreshKey, reps, clients, clientOps, clientOpsOffset, setClientOpsOffset, clientId, setClientId, clientName, setClientName, clientRep, setClientRep, clientKind, setClientKind, clientDuration, setClientDuration, clientIPs, setClientIPs, clientVolume, setClientVolume, lifeClientID, setLifeClientID, lifeDays, setLifeDays, lifeVolumeGB, setLifeVolumeGB, lifeReason, setLifeReason, lifeAction, setLifeAction, lifeStateReason, setLifeStateReason, createClient, extendExistingClient, changeExistingClientState } = model;
   const canCreate=businessGranted(session.user,"create_clients");
@@ -47,6 +48,7 @@ export default function Clients({ model }: { model: BusinessModel }) {
         <p className="business-warning">{t.safeLifecycle}</p>
       </div>
       {lifeClientID && <ClientUsage key={session.user.id + ":" + lifeClientID} clientID={lifeClientID} language={language} refresh={refreshKey} />}
+      {canViewFinance && lifeClientID && <ClientVolumeRefund key={session.user.id + ":" + lifeClientID} clientID={lifeClientID} model={model}/>}
       {lifeClientID && <ClientInboundSubscription key={session.user.id + ":" + lifeClientID} clientID={lifeClientID} language={language} session={session} canManage={canManage} refresh={refreshKey}/>}
       {canEdit && lifeClientID && <ClientProfileEditor key={session.user.id + ":" + lifeClientID} clientID={lifeClientID} model={model}/>}
       <div className="business-form-grid">

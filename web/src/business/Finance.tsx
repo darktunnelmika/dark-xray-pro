@@ -3,6 +3,7 @@ import { CreditCard } from "lucide-react";
 import { gb } from "./shared";
 import { businessGranted } from "./permissionsV9";
 import RepresentativeSelfActivityV9 from "./RepresentativeSelfActivityV9";
+import VolumeRefundHistory from "./VolumeRefunds";
 export default function Finance({ model }: { model: BusinessModel }) {
   const { t, events, eventOffset, setEventOffset } = model;
   if(!businessGranted(model.session.user,"view_finance")){
@@ -11,6 +12,7 @@ export default function Finance({ model }: { model: BusinessModel }) {
       "Financial reports are disabled for this representative account."}</section>;
   }
   return <>
+      <VolumeRefundHistory key={model.session.user.id} model={model}/>
       {model.session.user.role==="representative"&&<RepresentativeSelfActivityV9 model={model}/>}
       <div className="business-panel">
         <h3><CreditCard size={17}/>{t.history}</h3>
