@@ -142,6 +142,9 @@ for (const language of ["en", "fa"] as const) {
     expect(await page.evaluate(() => document.body.style.overflow)).toBe("");
 
     await opener.click();
+    await dialog.getByRole("button", { name: language === "fa" ? "زیرساخت" : "Infrastructure", exact: true }).click();
+    await expect(dialog.getByRole("button", { name: language === "fa" ? "اینباندها" : "Inbounds", exact: true })).toBeVisible();
+    await expect(dialog.getByRole("button", { name: language === "fa" ? "دارک سواپ" : "Dark Swap", exact: true, includeHidden: true })).toHaveCount(0);
     await dialog.getByRole("button", { name: language === "fa" ? "مشتری و فروش" : "Customer & sales", exact: true }).click();
     await dialog.getByRole("button", { name: language === "fa" ? "گروه‌ها" : "Groups", exact: true }).click();
     await expect(page).toHaveURL(/\/groups$/);
@@ -204,6 +207,16 @@ test("navigation disclosures keep the active section visible and follow browser 
   await expect(page).toHaveURL(/\/settings$/);
   await expect(account).toHaveAttribute("aria-expanded", "true");
   await expect(customers).toHaveAttribute("aria-expanded", "false");
+  await page.goto("/dark-swap");
+  await expect(page).toHaveURL(/\/dark-swap$/);
+  await expect(nav.getByRole("button", { name: "Infrastructure", exact: true })).toHaveAttribute("aria-expanded", "true");
+  await expect(nav.getByRole("button", { name: "Dark Swap", exact: true, includeHidden: true })).toHaveCount(0);
+  await nav.getByRole("button", { name: "Inbounds", exact: true }).click();
+  await expect(page).toHaveURL(/\/inbounds$/);
+  await page.goBack();
+  await expect(page).toHaveURL(/\/dark-swap$/);
+  await page.reload();
+  await expect(nav.getByRole("button", { name: "Inbounds", exact: true })).toBeVisible();
 });
 
 
