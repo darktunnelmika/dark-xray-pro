@@ -26,9 +26,9 @@ class Backend(http.server.BaseHTTPRequestHandler):
         pass
 
 
-def request(port, path, method):
+def request(port, path, method, body=None):
     req = urllib.request.Request(f"http://127.0.0.1:{port}{path}", method=method,
-                                 headers={"Host": "lab-proxy.example"})
+                                 headers={"Host": "lab-proxy.example"}, data=body)
     try:
         with urllib.request.urlopen(req, timeout=2) as response:
             return response.status
@@ -75,7 +75,7 @@ location / {{ return 403; }}
 """)
             process = subprocess.Popen([nginx, "-p", directory + "/", "-c", str(conf)])
             try:
-                for _ in range(50):
+                for _ in range(200):
                     try:
                         assert request(port, "/", "GET") == 403
                         break
@@ -84,7 +84,7 @@ location / {{ return 403; }}
                             raise RuntimeError((tmp / "error.log").read_text())
                         time.sleep(.05)
                 else:
-                    raise RuntimeError("nginx did not start")
+                    raise RuntimeError("nginx did not start: " + (tmp / "error.log").read_text()[-4096:])
 
                 methods = ("GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS")
                 def check(path, allowed):
@@ -103,25 +103,37 @@ location / {{ return 403; }}
                           (seller, {"GET", "HEAD"}),
                           (seller + "/quota", {"POST"}),
                           (seller + "/state", {"POST"}),
+                          (seller + "/clients", {"POST"}),
+                          (seller + "/clients/Client.test_01-2/extend", {"POST"}),
                           ("/api/v1/workspace/clients/Client.test_01-2/volume-refund", {"GET", "HEAD"}),
                           ("/api/v1/workspace/volume-refunds", {"GET", "HEAD"}))
                 for path, allowed in routes:
                     check(path, allowed)
                     check(path + "/extra/unknown", set())
                     check(path + "/", set())
+                for path in (seller + "/clients", seller + "/clients/a/extend"):
+                    before = len(Backend.seen)
+                    assert request(port, path, "POST", b"x" * 4097) == 413
+                    assert len(Backend.seen) == before, "oversized order reached backend"
                 check(rep + "/sellers?limit=25&offset=0", {"GET", "HEAD", "POST"})
                 check("/api/v1/workspace/volume-refunds?limit=25&offset=0", {"GET", "HEAD"})
                 check("/api/v1/workspace/clients/" + "a" * 64 + "/volume-refund", {"GET", "HEAD"})
                 check("/api/v1/workspace/representatives/" + "a" * 64 + "/sellers/" + "b" * 64,
                       {"GET", "HEAD"})
+                check("/api/v1/workspace/representatives/" + "a" * 64 + "/sellers/" + "b" * 64 +
+                      "/clients/" + "c" * 64 + "/extend", {"POST"})
                 for bad in ("_a", "-a", ".a", "a!b", "a+b", "a;b", "a" * 65, "a%2Fb"):
                     check("/api/v1/workspace/representatives/" + bad + "/seller-permission", set())
                     check(rep + "/sellers/" + bad + "/quota", set())
+                    check(rep + "/sellers/" + bad + "/clients", set())
+                    check(seller + "/clients/" + bad + "/extend", set())
+                    check("/api/v1/workspace/representatives/" + bad + "/sellers/a/clients", set())
                     check("/api/v1/workspace/clients/" + bad + "/volume-refund", set())
                 for path in ("/api/v1/admin/nodes", "/api/v1/agent/config",
                              "/api/v1/agent/volume-refunds", "/api/v1/admin/volume-refunds",
                              "/api/v1/workspace/volume-refund", "/api/v1/workspace/volume-refunds/enable",
                              rep + "/seller-permissions", seller + "/delete", seller + "/quota/execute",
+                             seller + "/clients/a", seller + "/clients/a/archive", seller + "/clients/a/delete",
                              "/api/v1/workspace/clients/a/volume-refunds"):
                     check(path, set())
                 print("BUSINESS_MANAGEMENT_PROXY_PASS: exact routes, methods, IDs, Host and private-route denial")
