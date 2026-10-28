@@ -21,6 +21,7 @@ import (
 	"github.com/darktunnelmika/dark-xray-pro/internal/nodehistory"
 	"github.com/darktunnelmika/dark-xray-pro/internal/noderegistry"
 	"github.com/darktunnelmika/dark-xray-pro/internal/replacement"
+	"github.com/darktunnelmika/dark-xray-pro/internal/telegramhub"
 	"github.com/darktunnelmika/dark-xray-pro/internal/telemetry"
 	"github.com/darktunnelmika/dark-xray-pro/internal/webui"
 	"io"
@@ -76,6 +77,7 @@ func main() {
 	replacementsPath := flag.String("replacements", "./lab-state/replacements.json", "private nonactivating replacement journal")
 	stagingPath := flag.String("staging", "./lab-state/private-staging/configs.json", "optional encrypted Reality candidate journal")
 	businessPath := flag.String("business-db", "", "optional private PRO-only business SQLite path (explicit opt-in)")
+	ownerReportConfig := flag.String("owner-report-bot-config", "", "private independent PRO LAB owner report bot config (explicit opt-in)")
 	labRevisionsPath := flag.String("lab-revisions", "./lab-state/private-staging/lab-revisions.json", "optional LAB-only encrypted revision selection and rollback journal")
 	nodeHistoryPath := flag.String("node-history-db", "", "optional NEW PRO-only bounded monitoring SQLite path (requires explicit opt-in)")
 	agentListen := flag.String("agent-tls-listen", "", "optional dedicated HTTPS LAB Node listener (disabled by default)")
@@ -106,6 +108,13 @@ func main() {
 	sellerOrders, scopeErr := sellerOrdersLabEnabled(os.Getenv)
 	if scopeErr != nil {
 		log.Fatal(scopeErr)
+	}
+	ownerReportFlag := os.Getenv(telegramhub.OwnerReportLABEnableEnv)
+	if ownerReportFlag != "" && ownerReportFlag != "0" && ownerReportFlag != "1" {
+		log.Fatal("DARK_PRO_ENABLE_OWNER_REPORT_BOT_V1 must be 0 or 1")
+	}
+	if ownerReportFlag == "1" && os.Getenv("DARK_PRO_ENABLE_BUSINESS_CORE") != "1" {
+		log.Fatal("owner report bot requires the private PRO business store")
 	}
 	var agentTLS *http.Server
 	if *agentListen != "" {
@@ -189,6 +198,7 @@ func main() {
 		log.Fatal(err)
 	}
 	// Only explicit NEW PRO business storage may be opened; never legacy paths.
+	var ownerReportReporter telegramhub.RepresentativeReporter
 	if os.Getenv("DARK_PRO_ENABLE_BUSINESS_CORE") == "1" {
 		clean := filepath.Clean(*businessPath)
 		relative, pathErr := filepath.Rel("/var/lib/dark-xray-pro-lab", clean)
@@ -200,6 +210,7 @@ func main() {
 			log.Fatal("PRO business database initialization failed: ", err)
 		}
 		defer biz.Close()
+		ownerReportReporter = biz
 		if os.Getenv("DARK_PRO_ENABLE_USAGE_LEDGER") == "1" {
 			if err := biz.EnableUsageLedger(context.Background()); err != nil {
 				log.Fatal("private usage ledger unavailable: ", err)
@@ -396,6 +407,16 @@ func main() {
 			}
 		}
 	}
+	ownerReportBot, botErr := telegramhub.OpenLABOwnerReportBot(telegramhub.LABOwnerReportBotOptions{
+		EnableFlag: ownerReportFlag, LABMode: os.Getenv("DARK_PRO_LAB_MODE") == "1",
+		BusinessEnabled: os.Getenv("DARK_PRO_ENABLE_BUSINESS_CORE") == "1", ConfigPath: *ownerReportConfig,
+	}, ownerReportReporter)
+	if botErr != nil {
+		log.Fatal("private owner report bot initialization failed: ", botErr)
+	}
+	if ownerReportBot != nil {
+		defer ownerReportBot.Close()
+	}
 	apiHandler := service.BrowserHandler()
 	ui := webui.Embedded()
 	if *static != "" {
@@ -418,6 +439,20 @@ func main() {
 	go service.RunInboundExecution(ctx)
 	go service.RunVolumeRefunds(ctx)
 	errs := make(chan error, 2)
+	if ownerReportBot != nil {
+		go func() {
+			err := ownerReportBot.Run(ctx)
+			if ctx.Err() != nil {
+				return
+			}
+			if err == nil {
+				err = errors.New("owner report bot worker stopped unexpectedly")
+			}
+			// Reporting is independent of the financial/API listener. A bot
+			// credential or polling failure is visible without stopping HUB.
+			log.Print("owner report bot worker stopped: ", err)
+		}()
+	}
 	go func() { errs <- admin.ListenAndServe() }()
 	if agentTLS != nil {
 		go func() { errs <- agentTLS.ListenAndServeTLS(*agentCert, *agentKey) }()
@@ -446,7 +481,12 @@ func main() {
 	}
 	service.WaitInboundExecution(graceful)
 	service.WaitVolumeRefunds(graceful)
+	if ownerReportBot != nil {
+		if err := ownerReportBot.Wait(graceful); errors.Is(err, context.DeadlineExceeded) {
+			log.Print("owner report bot shutdown did not complete within the grace period")
+		}
+	}
 	if unexpected != nil {
-		log.Fatal(fmt.Errorf("LAB listener terminated: %w", unexpected))
+		log.Fatal(fmt.Errorf("LAB service stopped: %w", unexpected))
 	}
 }

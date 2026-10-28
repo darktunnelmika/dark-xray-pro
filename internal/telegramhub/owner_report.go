@@ -1,5 +1,5 @@
 // Package telegramhub adapts authenticated HUB bot input to the native PRO
-// ledger. It does not receive network updates, load credentials or send messages.
+// ledger and provides an explicitly enabled private LAB delivery worker.
 package telegramhub
 
 import (
@@ -34,7 +34,7 @@ type OwnerReportConfig struct {
 	BotUsername string
 }
 
-// OwnerReportMessage is a normalized ordinary text-message update. A future
+// OwnerReportMessage is a normalized ordinary text-message update. Its
 // receiver MUST authenticate its source and populate all origin flags. These
 // fields alone are not proof of Telegram identity and must never be accepted
 // from an unauthenticated public request. Edited/forwarded/on-behalf-of messages
@@ -63,7 +63,7 @@ var _ RepresentativeReporter = (*business.Store)(nil)
 
 // PreparedOwnerReply is a delivery proposal for an authorized private chat.
 // It is NOT a delivery receipt, an outbox entry or proof that a message was sent.
-// The caller owns durable replay/dispatch policy and must revalidate the current
+// The worker owns durable replay/dispatch policy and must revalidate the current
 // owner/chat binding before any delayed send. No transport is invoked here.
 type PreparedOwnerReply struct {
 	OwnerUserID      int64
@@ -91,7 +91,7 @@ func NewOwnerReportHandler(config OwnerReportConfig, reports RepresentativeRepor
 // Prepare authenticates the configured principal before parsing or reading any
 // representative data. Errors contain no report, SQL error or untrusted text.
 // Repeated calls make fresh read-only reports; there is deliberately no in-memory
-// claim of exactly-once delivery. A future inbox/outbox owns duplicate updates
+// claim of exactly-once delivery. The worker journal owns duplicate updates
 // and ambiguous transport outcomes across process restarts.
 func (h *OwnerReportHandler) Prepare(ctx context.Context, message OwnerReportMessage) (PreparedOwnerReply, error) {
 	var empty PreparedOwnerReply
