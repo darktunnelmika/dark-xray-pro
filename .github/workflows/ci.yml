@@ -460,13 +460,14 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-      - name: Verify owner Node Manager HTTPS allowlist with real nginx
+      - name: Verify owner Node Manager and business HTTPS allowlists with real nginx
         run: |
           if ! test -x /usr/sbin/nginx; then
             sudo apt-get update -qq
             sudo apt-get install -y nginx
           fi
           python3 scripts/test-node-manager-proxy.py
+          python3 scripts/test-business-management-proxy.py
       - name: Validate installer shell syntax and strict safety guards
         run: |
           bash -n scripts/install-lab.sh
