@@ -20,10 +20,14 @@ type RepresentativePermissions struct {
 	ManageClients bool `json:"manage_clients"`
 	ManageGroups  bool `json:"manage_groups"`
 	ViewFinance   bool `json:"view_finance"`
+	// Seller administration is an independent opt-in permission. Omitting a
+	// false value preserves the historical seven-key V9 event fingerprints.
+	ManageSellers bool `json:"manage_sellers,omitempty"`
 }
 
 func DefaultRepresentativePermissions() RepresentativePermissions {
-	return RepresentativePermissions{true, true, true, true, true, true, true}
+	return RepresentativePermissions{ViewClients: true, CreateClients: true, RenewClients: true,
+		EditClients: true, ManageClients: true, ManageGroups: true, ViewFinance: true}
 }
 func (p RepresentativePermissions) AllEnabled() bool {
 	return p.ViewClients && p.CreateClients && p.RenewClients && p.EditClients && p.ManageClients && p.ManageGroups && p.ViewFinance
@@ -194,17 +198,18 @@ func (s *Store) RepresentativePermissions(ctx context.Context, id string) (Repre
   FROM representative_controls WHERE representative_id=?`, id).Scan(
 		&flags[0], &flags[1], &flags[2], &flags[3], &flags[4], &flags[5], &flags[6])
 	if errors.Is(err, sql.ErrNoRows) {
-		return DefaultRepresentativePermissions(), nil
-	}
-	if err != nil {
+		p = DefaultRepresentativePermissions()
+	} else if err != nil {
 		return p, err
+	} else {
+		p = RepresentativePermissions{
+			ViewClients: flags[0] == 1, CreateClients: flags[1] == 1, RenewClients: flags[2] == 1,
+			EditClients: flags[3] == 1, ManageClients: flags[4] == 1, ManageGroups: flags[5] == 1,
+			ViewFinance: flags[6] == 1,
+		}
 	}
-	p = RepresentativePermissions{
-		ViewClients: flags[0] == 1, CreateClients: flags[1] == 1, RenewClients: flags[2] == 1,
-		EditClients: flags[3] == 1, ManageClients: flags[4] == 1, ManageGroups: flags[5] == 1,
-		ViewFinance: flags[6] == 1,
-	}
-	return p, nil
+	p.ManageSellers, err = sessionSellerPermissionV2(ctx, s.db, id)
+	return p, err
 }
 func (s *Store) UpdateRepresentativeControl(ctx context.Context, input RepresentativeControlChange) (RepresentativeControlReceipt, error) {
 	var out RepresentativeControlReceipt
@@ -212,7 +217,7 @@ func (s *Store) UpdateRepresentativeControl(ctx context.Context, input Represent
 	input.Reason = normalizeRepresentativeDisplayName(input.Reason)
 	if !eventRE.MatchString(input.EventID) || !idRE.MatchString(input.RepresentativeID) ||
 		input.RepresentativeID == "owner" || input.ExpectedRevision < 0 || input.ExpectedRevision > 1_000_000_000 ||
-		!validName(input.DisplayName, 128) || !validName(input.Reason, 200) {
+		!validName(input.DisplayName, 128) || !validName(input.Reason, 200) || input.Permissions.ManageSellers {
 		return out, ErrInvalid
 	}
 	normalized := input
@@ -242,7 +247,7 @@ func (s *Store) UpdateRepresentativeControl(ctx context.Context, input Represent
 	if !errors.Is(err, sql.ErrNoRows) {
 		return out, err
 	}
-	for _, table := range []string{"events", "client_operations", "client_profile_edits", "catalog_events","catalog_policy_events"} {
+	for _, table := range []string{"events", "client_operations", "client_profile_edits", "catalog_events", "catalog_policy_events"} {
 		var found int
 		if err = tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM "+table+" WHERE event_id=?", input.EventID).Scan(&found); err != nil {
 			return out, err

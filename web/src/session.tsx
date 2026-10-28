@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 
-export type BusinessPermission = "view_clients"|"create_clients"|"renew_clients"|"edit_clients"|"manage_clients"|"manage_groups"|"view_finance";
+export type BusinessPermission = "view_clients"|"create_clients"|"renew_clients"|"edit_clients"|"manage_clients"|"manage_groups"|"view_finance"|"manage_sellers";
 export type AppUser = { id: string; username: string; role: "owner" | "representative"; representative_id: string; permissions?: Partial<Record<BusinessPermission,boolean>> };
 export type Session = { authenticated: true; user: AppUser; csrf_token: string; expires_unix: number };
 export type Language = "en" | "fa";

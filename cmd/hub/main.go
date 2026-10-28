@@ -88,6 +88,13 @@ func main() {
 	if !loopbackAddr(*address) {
 		log.Fatal("lab HUB refuses non-loopback owner listeners; use an SSH tunnel")
 	}
+	sellerManagement := os.Getenv("DARK_PRO_ENABLE_SELLER_MANAGEMENT_V2")
+	if sellerManagement != "" && sellerManagement != "0" && sellerManagement != "1" {
+		log.Fatal("DARK_PRO_ENABLE_SELLER_MANAGEMENT_V2 must be 0 or 1")
+	}
+	if sellerManagement == "1" && os.Getenv("DARK_PRO_ENABLE_BUSINESS_CORE") != "1" {
+		log.Fatal("seller management requires the explicit private PRO business store")
+	}
 	var agentTLS *http.Server
 	if *agentListen != "" {
 		if os.Getenv("DARK_PRO_ENABLE_REMOTE_AGENT") != "1" {
@@ -188,6 +195,11 @@ func main() {
 		}
 		if err := service.EnableBusinessLab(biz); err != nil {
 			log.Fatal(err)
+		}
+		if sellerManagement == "1" {
+			if err := service.EnableSellerQuotaV2Lab(context.Background()); err != nil {
+				log.Fatal("private seller management initialization failed: ", err)
+			}
 		}
 		if os.Getenv("DARK_PRO_ENABLE_NATIVE_INBOUNDS") == "1" {
 			if *agentListen == "" {
