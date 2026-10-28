@@ -122,6 +122,10 @@ func processLog(p *coreProcess) string {
 	return string(data)
 }
 
+// Probe sockets close before the fixture cores bind. Remember every returned
+// port for this test process so another fixture endpoint cannot select it again.
+var allocatedFixturePorts sync.Map
+
 func freePort(t *testing.T) uint16 {
 	t.Helper()
 	for i := 0; i < 20; i++ {
@@ -131,13 +135,18 @@ func freePort(t *testing.T) uint16 {
 		}
 		p := ln.Addr().(*net.TCPAddr).Port
 		udp, err := net.ListenPacket("udp4", net.JoinHostPort("127.0.0.1", strconv.Itoa(p)))
-		_ = ln.Close()
 		if err == nil {
+			_, alreadyAllocated := allocatedFixturePorts.LoadOrStore(uint16(p), struct{}{})
 			_ = udp.Close()
-			return uint16(p)
+			_ = ln.Close()
+			if !alreadyAllocated {
+				return uint16(p)
+			}
+		} else {
+			_ = ln.Close()
 		}
 	}
-	t.Fatal("cannot allocate TCP/UDP fixture port")
+	t.Fatal("cannot allocate a distinct TCP/UDP fixture port")
 	return 0
 }
 
