@@ -103,6 +103,10 @@ func main() {
 		os.Getenv("DARK_PRO_ENABLE_USAGE_LEDGER") != "1" || os.Getenv("DARK_PRO_ENABLE_NATIVE_INBOUNDS") != "1") {
 		log.Fatal("volume refunds require the private PRO business store, authoritative usage ledger and native inbound identity")
 	}
+	sellerOrders, scopeErr := sellerOrdersLabEnabled(os.Getenv)
+	if scopeErr != nil {
+		log.Fatal(scopeErr)
+	}
 	var agentTLS *http.Server
 	if *agentListen != "" {
 		if os.Getenv("DARK_PRO_ENABLE_REMOTE_AGENT") != "1" {
@@ -247,6 +251,11 @@ func main() {
 	if volumeRefunds == "1" {
 		if err := service.EnableVolumeRefunds(context.Background()); err != nil {
 			log.Fatal("private volume refund accounting unavailable: ", err)
+		}
+	}
+	if sellerOrders {
+		if err := service.EnableSellerOrdersV1Lab(context.Background()); err != nil {
+			log.Fatal("private seller order accounting unavailable: ", err)
 		}
 	}
 	if os.Getenv("DARK_PRO_ENABLE_REMOTE_METERED_ADMISSION") == "1" {
