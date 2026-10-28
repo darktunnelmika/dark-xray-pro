@@ -5,6 +5,9 @@ import type { BusinessModel } from "./useBusinessWorkspace";
 import { uid } from "./shared";
 import { exactText, gibText, quotaInput, sellerID, validQuotaReceipt, validSeller, validSellerPage,
   validSellerPermission, type Seller, type SellerPage, type SellerPermission, type SellerQuotaReceipt } from "./sellerManagement";
+import SellerClientOrdersV1 from "./SellerClientOrdersV1";
+import { sellerOrderAccess, sellerOrderPath, validSellerOrderRequest, validSellerOrderReceipt,
+  type SellerOrderAccess, type SellerOrderKind, type SellerOrderReceipt } from "./sellerOrdersV1";
 import "./SellersV2.css";
 
 const copy = {
@@ -43,7 +46,7 @@ const copy = {
     invalid: "شناسه، نام، مقدار صحیح و دلیل معتبر وارد کنید.", back: "بازگشت به فروشندگان", selected: "جزئیات فروشنده",
   },
 } as const;
-type Pending = { path: string; body: Record<string, unknown>; kind: "permission" | "create" | "quota" | "state" };
+type Pending = { path: string; body: Record<string, unknown>; kind: "permission" | "create" | "quota" | "state" | SellerOrderKind };
 function savedRequest(value: unknown, base: string, representative: string): Pending | null {
   if (!value || typeof value !== "object") return null;
   const request = value as Pending, body = request.body;
@@ -54,6 +57,9 @@ function savedRequest(value: unknown, base: string, representative: string): Pen
   if (request.kind === "permission") return request.path === base + "/seller-permission" &&
     typeof body.manage_sellers === "boolean" && reason && revision ? request : null;
   if (typeof body.seller_id !== "string" || !sellerID.test(body.seller_id)) return null;
+  if (request.kind === "client_create" || request.kind === "client_extend") return (
+    validSellerOrderRequest(body, request.kind, representative) &&
+    request.path === sellerOrderPath(representative, body.seller_id, request.kind === "client_extend" ? String(body.client_id) : undefined) ? request : null);
   if (request.kind === "create") return request.path === base + "/sellers" &&
     typeof body.name === "string" && [...body.name].length > 0 && [...body.name].length <= 128 &&
     Number.isSafeInteger(body.telegram_user_id) && Number(body.telegram_user_id) > 0 ? request : null;
@@ -81,18 +87,24 @@ export default function SellersV2({ model, representativeID }: { model: Business
   const [reason, setReason] = useState(""), [stateReason, setStateReason] = useState("");
   const [busy, setBusy] = useState(false), [notice, setNotice] = useState("");
   const [uncertain, setUncertain] = useState(false);
+  const [orderAccess, setOrderAccess] = useState<SellerOrderAccess | null>(null);
+  const [orderReceipt, setOrderReceipt] = useState<SellerOrderReceipt | null>(null);
   const pending = useRef<Pending | null>(null);
   const inFlight = useRef(false);
   const identity = model.session.user.id + ":" + representativeID;
+  const currentIdentity = useRef(identity);
+  currentIdentity.current = identity;
   const pendingKey = "dark-pro-seller-request-v2:" + identity;
   const [loadedIdentity, setLoadedIdentity] = useState("");
   const locked = busy || uncertain || model.actionBusy;
   const ready = status === "ready" && loadedIdentity === identity;
   const chosen = ready ? sellers?.find(s => s.id === selected) : undefined;
+  const pendingOrder = pending.current?.kind === "client_create" || pending.current?.kind === "client_extend";
+  const orderRetryAllowed = !pendingOrder || ready && (pending.current?.kind === "client_create" ? orderAccess?.create : orderAccess?.renew) === true;
 
   useEffect(() => {
     setSelected(""); setCreating(false); setOffset(0); setNotice("");
-    pending.current = null; setUncertain(false);
+    pending.current = null; setUncertain(false); setOrderReceipt(null);
     // The journal contains no cookie, CSRF or bot token. Preserve the exact
     // request nonce across a reload after a lost response; never mint a new
     // transfer nonce merely because this component was remounted.
@@ -108,7 +120,7 @@ export default function SellersV2({ model, representativeID }: { model: Business
   useEffect(() => {
     const controller = new AbortController();
     let accessVerified = false;
-    setStatus("loading"); setPermission(null); setSellers(null); setLoadedIdentity("");
+    setStatus("loading"); setPermission(null); setSellers(null); setLoadedIdentity(""); setOrderAccess(null);
     void (async () => {
       const access = await api<SellerPermission>(base + "/seller-permission", { signal: controller.signal });
       if (!validSellerPermission(access, representativeID)) throw new Error("unverified_seller_permission");
@@ -116,13 +128,17 @@ export default function SellersV2({ model, representativeID }: { model: Business
       if (controller.signal.aborted) return;
       setPermission(access); setPermissionValue(access.manage_sellers); setPermissionReason("");
       if (!owner && !access.manage_sellers) { setStatus("denied"); return; }
-      const page = await api<SellerPage>(base + "/sellers?limit=25&offset=" + offset, { signal: controller.signal });
+      const [page, account] = await Promise.all([
+        api<SellerPage>(base + "/sellers?limit=25&offset=" + offset, { signal: controller.signal }),
+        api<unknown>("/api/v1/workspace/me", { signal: controller.signal }).catch(() => null),
+      ]);
       if (!validSellerPage(page, representativeID, offset)) throw new Error("unverified_seller_page");
       if (controller.signal.aborted) return;
       setSellers(page.sellers); setLoadedIdentity(identity); setStatus("ready");
+      setOrderAccess(sellerOrderAccess(account, model.session.user, representativeID, access.manage_sellers));
     })().catch((error: unknown) => {
       if (controller.signal.aborted) return;
-      setPermission(null); setSellers(null); setLoadedIdentity("");
+      setPermission(null); setSellers(null); setLoadedIdentity(""); setOrderAccess(null);
       setStatus(error instanceof ApiError && error.status === 404 && !accessVerified ? "off" : error instanceof ApiError && error.status === 403 ? "denied" : "unavailable");
     });
     return () => controller.abort();
@@ -131,6 +147,9 @@ export default function SellersV2({ model, representativeID }: { model: Business
   async function execute(request: Pending) {
     if (inFlight.current || busy || model.actionBusy) return;
     const alreadyUncertain = uncertain || pending.current !== null;
+    const requestIdentity = identity;
+    const order = request.kind === "client_create" || request.kind === "client_extend";
+    if (order && (!ready || (request.kind === "client_create" ? orderAccess?.create : orderAccess?.renew) !== true)) return;
     try {
       const serialized = JSON.stringify(request);
       sessionStorage.setItem(pendingKey, serialized);
@@ -147,6 +166,7 @@ export default function SellersV2({ model, representativeID }: { model: Business
     }
     inFlight.current = true;
     setBusy(true); model.setActionBusy(true); setNotice(""); pending.current = request;
+    if (order) setOrderReceipt(null);
     const clearJournal = () => {
       try {
         const raw = sessionStorage.getItem(pendingKey);
@@ -155,6 +175,7 @@ export default function SellersV2({ model, representativeID }: { model: Business
     };
     try {
       const value = await mutation<unknown>(request.path, request.body, model.session.csrf_token);
+      if (currentIdentity.current !== requestIdentity) return;
       if (request.kind === "permission") {
         const v = value as SellerPermission & { replayed: boolean; sessions_revoked: boolean };
         if (!validSellerPermission(v, representativeID) || v.manage_sellers !== request.body.manage_sellers ||
@@ -166,6 +187,9 @@ export default function SellersV2({ model, representativeID }: { model: Business
       } else if (request.kind === "quota") {
         if (!validQuotaReceipt(value as SellerQuotaReceipt, representativeID, String(request.body.seller_id), String(request.body.event_id), String(request.body.action))) throw new Error("unverified_receipt");
         setVolume("0"); setUnits("0"); setReason("");
+      } else if (request.kind === "client_create" || request.kind === "client_extend") {
+        if (!validSellerOrderReceipt(value, request.body, request.kind, model.session.user.id)) throw new Error("unverified_receipt");
+        setOrderReceipt(value);
       } else {
         const v = value as { seller: Seller; replayed: boolean };
         if (!v || !validSeller(v.seller, representativeID) || v.seller.id !== request.body.seller_id ||
@@ -175,6 +199,7 @@ export default function SellersV2({ model, representativeID }: { model: Business
       clearJournal(); pending.current = null; setUncertain(false); setNotice(t.saved);
       setRefresh(n => n + 1); model.reload();
     } catch (error: unknown) {
+      if (currentIdentity.current !== requestIdentity) return;
       // A rejected retry says nothing about whether the original request
       // committed before its response was lost, including after revocation.
       const rejected = !alreadyUncertain && error instanceof ApiError && error.status >= 400 && error.status < 500;
@@ -205,7 +230,7 @@ export default function SellersV2({ model, representativeID }: { model: Business
     <header className="sellers-heading"><div><h3><Users size={18}/>{t.title}</h3><p>{t.lead}</p></div>
       <button type="button" onClick={() => setRefresh(n => n + 1)} disabled={busy}><RefreshCw size={15}/>{t.refresh}</button></header>
     {notice && <div role={uncertain ? "alert" : "status"} className="sellers-notice">{notice}
-      {uncertain && <button type="button" disabled={busy} onClick={() => pending.current && void execute(pending.current)}>{t.retry}</button>}</div>}
+      {uncertain && <button type="button" disabled={busy || !orderRetryAllowed} onClick={() => pending.current && void execute(pending.current)}>{t.retry}</button>}</div>}
     {!ready ? <p role="status">{t[status === "ready" ? "loading" : status]}</p> : <>
       {owner && permission && <form className="seller-permission" onSubmit={e => {
         e.preventDefault();
@@ -246,6 +271,11 @@ export default function SellersV2({ model, representativeID }: { model: Business
         <section className="seller-detail" aria-label="Seller details"><header><div><h4>{chosen.name}</h4><small dir="ltr">{chosen.id} · {chosen.telegram_user_id}</small></div><span>{chosen.enabled ? t.active : t.disabled}</span></header>
           <div className="seller-balances"><div><span>{t.balance} · {t.volume}</span><strong dir="ltr">{gibText(chosen.reserved_bytes)} GiB</strong>
             <small>{t.approx} · <bdi>{exactText(chosen.reserved_bytes)}</bdi> {t.bytes}</small></div><div><span>{t.unlimited}</span><strong>{exactText(chosen.reserved_units)}</strong></div></div>
+          <SellerClientOrdersV1 key={identity + ":" + chosen.id} seller={chosen} access={orderAccess} blocked={locked} language={model.language}
+            receipt={orderReceipt?.seller_id === chosen.id ? orderReceipt : null} onSubmit={(kind, body) => {
+              if (!chosen.enabled || (kind === "client_create" ? orderAccess?.create : orderAccess?.renew) !== true) return;
+              submit(kind, sellerOrderPath(representativeID, chosen.id, kind === "client_extend" ? String(body.client_id) : undefined), body);
+            }}/>
           <form className="seller-transfer" onSubmit={transfer}><h4>{action === "allocate" ? <ArrowDownLeft size={16}/> : <ArrowUpRight size={16}/>} {t.balance}</h4>
             <label><select aria-label="Quota action" value={action} disabled={locked} onChange={e => setAction(e.target.value as "allocate" | "reclaim")}>
               <option value="allocate" disabled={!chosen.enabled}>{t.allocate}</option><option value="reclaim">{t.reclaim}</option></select></label>

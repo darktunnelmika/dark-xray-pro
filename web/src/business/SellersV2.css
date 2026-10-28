@@ -20,4 +20,11 @@
 .seller-balances span{color:var(--sub);font-size:.8rem}.seller-balances strong{font-size:1.3rem;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}.seller-balances small{font-size:.73rem;overflow-wrap:anywhere}
 .sellers-notice{display:flex;flex-direction:column;align-items:flex-start;gap:10px;padding:12px;border-radius:10px;border:1px solid var(--border);font-size:.84rem;line-height:1.6}
 .seller-transfer>button,.seller-create>button{align-self:flex-start;background:var(--accent);color:var(--accent-contrast);border-color:var(--accent)}
+.seller-client-orders{display:flex;flex-direction:column;gap:12px;padding:16px;border:1px solid var(--border);border-radius:13px;background:var(--surface-2);min-width:0}
+.seller-order-tabs{display:flex;flex-wrap:wrap;gap:8px}.seller-order-tabs button[aria-pressed=true]{border-color:var(--accent);color:var(--accent)}
+.seller-client-orders fieldset{display:flex;flex-direction:column;gap:12px;min-width:0;padding:0;margin:0;border:0}.seller-client-orders fieldset>button{align-self:flex-start;background:var(--accent);color:var(--accent-contrast)}
+.seller-client-orders fieldset:disabled input,.seller-client-orders fieldset:disabled select,.seller-client-orders fieldset:disabled button{opacity:.48;cursor:default}
+.seller-order-receipt{display:flex;flex-direction:column;gap:10px;border-block-start:1px solid var(--border);padding-block-start:14px;min-width:0}
+.seller-order-receipt dl{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin:0}.seller-order-receipt dl>div{min-width:0}.seller-order-receipt dt{font-size:.76rem;color:var(--sub)}.seller-order-receipt dd{margin:5px 0 0;font-size:.85rem;overflow-wrap:anywhere;font-variant-numeric:tabular-nums}
+@media(max-width:640px){.seller-client-orders{padding:12px}.seller-order-receipt dl{grid-template-columns:1fr}}
 @media(max-width:640px){.sellers-heading{align-items:flex-start;flex-wrap:wrap}.seller-form-grid{grid-template-columns:1fr}.seller-form-row{align-items:stretch;flex-direction:column}.seller-balances{grid-template-columns:1fr}.sellers-v2 .seller-row{flex-wrap:wrap}.seller-row-balance{margin-inline-start:0}.seller-row>span:first-child{flex-basis:100%}.seller-permission,.seller-create,.seller-transfer,.seller-state{padding:12px}}

@@ -180,7 +180,9 @@ jobs:
   go:
     name: Go unit, race and vet
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    # Keep all accounting/protocol repeats plus vet and compile gates; the
+    # expanded suite can finish its tests close to the previous 25-minute cap.
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5

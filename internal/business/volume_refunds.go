@@ -204,8 +204,23 @@ func refundableFunding(ctx context.Context, tx *sql.Tx, c Client) (funded, prior
 	err = tx.QueryRowContext(ctx, `SELECT COUNT(*),COALESCE(SUM(-volume_delta_bytes),0) FROM events
  WHERE kind='client_created' AND object_id=? AND representative_id=? AND volume_delta_bytes<0
  AND unlimited_delta_units=0`, c.ID, c.RepresentativeID).Scan(&initialCount, &initial)
-	if err != nil || initialCount != 1 || initial <= 0 {
+	if err != nil {
 		return 0, 0, false, err
+	}
+	sellerFunding, sellerIssued, err := sellerClientFundingV1(ctx, tx, c)
+	if err != nil {
+		return 0, 0, false, err
+	}
+	if sellerIssued {
+		// The seller reserve was funded from this representative. Its sale
+		// marker has zero free-credit debit; count only the verified reserve
+		// receipt. A second representative-funded creation is ambiguous.
+		if initialCount != 0 || sellerFunding.initialBytes <= 0 {
+			return 0, 0, false, nil
+		}
+		initial = sellerFunding.initialBytes
+	} else if initialCount != 1 || initial <= 0 {
+		return 0, 0, false, nil
 	}
 	var renewals, edits int64
 	if err = tx.QueryRowContext(ctx, `SELECT COALESCE(SUM(volume_credit_debit),0) FROM client_operations
@@ -217,6 +232,10 @@ func refundableFunding(ctx context.Context, tx *sql.Tx, c Client) (funded, prior
 		return 0, 0, false, err
 	}
 	funded, ok := safeAdd(initial, renewals, MaxVolumeCredit)
+	if !ok {
+		return 0, 0, false, ErrUnavailable
+	}
+	funded, ok = safeAdd(funded, sellerFunding.renewalBytes, MaxVolumeCredit)
 	if !ok {
 		return 0, 0, false, ErrUnavailable
 	}

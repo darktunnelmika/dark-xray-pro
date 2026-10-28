@@ -48,6 +48,7 @@ func migrateClientLifecycle(db *sql.DB)error{
  return tx.Commit()
 }
 func checkClientOp(ctx context.Context,tx *sql.Tx,eventID,fp,kind string)(bool,error){
+  if err:=rejectSellerOrderEventV1(ctx,tx,eventID);err!=nil{return false,err}
  var hash,oldKind string
  err:=tx.QueryRowContext(ctx,"SELECT fingerprint,kind FROM client_operations WHERE event_id=?",eventID).Scan(&hash,&oldKind)
  switch{

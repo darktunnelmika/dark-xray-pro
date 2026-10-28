@@ -22,6 +22,14 @@ func sellerRepresentativePermissionV2(r *http.Request) (string, bool) {
 	if len(parts) < 2 || parts[1] != "sellers" {
 		return "", false
 	}
+	// The handler additionally requires manage_sellers and the same tenant;
+	// the Store rechecks both grants within the order's write transaction.
+	if r.Method == http.MethodPost && len(parts) == 4 && parts[0] != "" && parts[2] != "" && parts[3] == "clients" {
+		return "create_clients", true
+	}
+	if r.Method == http.MethodPost && len(parts) == 6 && parts[0] != "" && parts[2] != "" && parts[3] == "clients" && parts[4] != "" && parts[5] == "extend" {
+		return "renew_clients", true
+	}
 	if len(parts) == 2 && (r.Method == http.MethodGet || r.Method == http.MethodPost) ||
 		len(parts) == 3 && r.Method == http.MethodGet ||
 		len(parts) == 4 && r.Method == http.MethodPost && (parts[3] == "quota" || parts[3] == "state") {

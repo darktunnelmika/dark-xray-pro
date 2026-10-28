@@ -219,6 +219,9 @@ func (s *Store) SellerPermissionV2(ctx context.Context, token, representativeID 
 }
 
 func sellerManagementEventConflictV2(ctx context.Context, tx *sql.Tx, eventID, ownTable string) error {
+	if err := rejectSellerOrderEventV1(ctx, tx, eventID); err != nil {
+		return err
+	}
 	for _, table := range []string{"seller_quota_events_v2", "representative_seller_permission_events_v2", "seller_state_events_v2"} {
 		if table == ownTable {
 			continue
