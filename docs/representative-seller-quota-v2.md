@@ -4,11 +4,11 @@ This package extends **`internal/business.Store`**, not the standalone experimen
 
 ## State
 
-- The SQL objects are created only after an explicit call to `Store.EnableSellerQuotaV2(ctx)`, which is **not invoked by the current HUB startup or API**. Default-off, no implicit schema migration.
+- The SQL objects require an explicit call to `Store.EnableSellerQuotaV2(ctx)`; `Store.Open` still performs no implicit seller migration. The later [seller-management increment](representative-seller-management-v2.md) wires this through the HUB's `DARK_PRO_ENABLE_SELLER_MANAGEMENT_V2=1` startup gate, with the business core enabled. Its owner/representative API and independent `manage_sellers` permission are now implemented; Telegram identity and seller-order spending remain separate integrations.
 - `CreateSellerV2` records one bounded seller identity scoped to exactly one representative and a Telegram user ID. It does **not** issue login or Telegram permission.
 - `TransferSellerQuotaV2` performs `allocate` and `reclaim` as an **atomic transfer** between the current `representatives` row (free balance) and an escrowed seller reserve. The same event ID is idempotent, conflicting event replays are rejected; immutable audit triggers stop UPDATE and DELETE.
 - Owner credits already consumed by another client are unavailable to allocate. Seller reserves are not spendable by the current `CreateClient` API. A future seller purchase must debit the seller reserve **and create the real client** in a single transaction; never move seller reserve back to the representative first and double charge.
-- Every `SellerV2` read filters `representative_id`. A future API must enforce this scope from verified browser or Telegram principal, **never from a request body**.
+- Every `SellerV2` read filters `representative_id`. The management API enforces scope from its verified browser principal, **never from a request body**. A future Telegram integration must independently authenticate its sender before applying the same scope.
 
 ## Acceptance before enabling live
 
