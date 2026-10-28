@@ -88,6 +88,21 @@ func main() {
 	if !loopbackAddr(*address) {
 		log.Fatal("lab HUB refuses non-loopback owner listeners; use an SSH tunnel")
 	}
+	sellerManagement := os.Getenv("DARK_PRO_ENABLE_SELLER_MANAGEMENT_V2")
+	if sellerManagement != "" && sellerManagement != "0" && sellerManagement != "1" {
+		log.Fatal("DARK_PRO_ENABLE_SELLER_MANAGEMENT_V2 must be 0 or 1")
+	}
+	if sellerManagement == "1" && os.Getenv("DARK_PRO_ENABLE_BUSINESS_CORE") != "1" {
+		log.Fatal("seller management requires the explicit private PRO business store")
+	}
+	volumeRefunds := os.Getenv("DARK_PRO_ENABLE_VOLUME_REFUNDS_V1")
+	if volumeRefunds != "" && volumeRefunds != "0" && volumeRefunds != "1" {
+		log.Fatal("DARK_PRO_ENABLE_VOLUME_REFUNDS_V1 must be 0 or 1")
+	}
+	if volumeRefunds == "1" && (os.Getenv("DARK_PRO_ENABLE_BUSINESS_CORE") != "1" ||
+		os.Getenv("DARK_PRO_ENABLE_USAGE_LEDGER") != "1" || os.Getenv("DARK_PRO_ENABLE_NATIVE_INBOUNDS") != "1") {
+		log.Fatal("volume refunds require the private PRO business store, authoritative usage ledger and native inbound identity")
+	}
 	var agentTLS *http.Server
 	if *agentListen != "" {
 		if os.Getenv("DARK_PRO_ENABLE_REMOTE_AGENT") != "1" {
@@ -189,6 +204,11 @@ func main() {
 		if err := service.EnableBusinessLab(biz); err != nil {
 			log.Fatal(err)
 		}
+		if sellerManagement == "1" {
+			if err := service.EnableSellerQuotaV2Lab(context.Background()); err != nil {
+				log.Fatal("private seller management initialization failed: ", err)
+			}
+		}
 		if os.Getenv("DARK_PRO_ENABLE_NATIVE_INBOUNDS") == "1" {
 			if *agentListen == "" {
 				log.Fatal("native runtime requires a separate verified TLS Agent listener")
@@ -222,6 +242,11 @@ func main() {
 		}
 		if e = service.EnableInboundExecution(api.InboundExecutionConfig{Directory: os.Getenv("DARK_PRO_INBOUND_RUNTIME_DIR"), Native: inboundruntime.BinaryConfig{Path: os.Getenv("DARK_PRO_INBOUND_CORE_PATH"), SHA256: os.Getenv("DARK_PRO_INBOUND_CORE_SHA256")}, External: engines}); e != nil {
 			log.Fatal("managed inbound execution unavailable: ", e)
+		}
+	}
+	if volumeRefunds == "1" {
+		if err := service.EnableVolumeRefunds(context.Background()); err != nil {
+			log.Fatal("private volume refund accounting unavailable: ", err)
 		}
 	}
 	if os.Getenv("DARK_PRO_ENABLE_REMOTE_METERED_ADMISSION") == "1" {
@@ -382,6 +407,7 @@ func main() {
 	defer stop()
 	go hubMonitor.Run(ctx)
 	go service.RunInboundExecution(ctx)
+	go service.RunVolumeRefunds(ctx)
 	errs := make(chan error, 2)
 	go func() { errs <- admin.ListenAndServe() }()
 	if agentTLS != nil {
@@ -410,6 +436,7 @@ func main() {
 		_ = agentTLS.Shutdown(graceful)
 	}
 	service.WaitInboundExecution(graceful)
+	service.WaitVolumeRefunds(graceful)
 	if unexpected != nil {
 		log.Fatal(fmt.Errorf("LAB listener terminated: %w", unexpected))
 	}

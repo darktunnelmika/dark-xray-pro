@@ -4,6 +4,7 @@ import { mutation } from "../session";
 import type { BusinessModel } from "./useBusinessWorkspace";
 import RepresentativeDirectory from "./RepresentativeDirectory";
 import RepresentativeControlsV9 from "./RepresentativeControlsV9";
+import SellersV2 from "./SellersV2";
 import "./RepresentativesV2.css";
 
 // The existing business Ledger remains the only source of credit. The V2
@@ -216,11 +217,7 @@ export default function Representatives({ model }: { model: BusinessModel }) {
               <CreditCard size={16}/>{model.t.applyCredit}
             </button>
           </form>}
-        {tab === "sellers" &&
-          <section className="business-panel rep-v2-detail-form">
-            <h3><Users size={18}/>{t.sellers}</h3>
-            <p role="status">{t.sellerNote}</p>
-          </section>}
+        {tab === "sellers" && <SellersV2 key={activeID} model={model} representativeID={activeID}/>}
       </section>}
 
     {showCreate && <div className="rep-v2-backdrop">
