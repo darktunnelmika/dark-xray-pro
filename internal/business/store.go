@@ -217,6 +217,7 @@ func(s *Store)CreateRepresentative(ctx context.Context,id,name string)(Represent
  r,err=readRep(ctx,tx,id);if err!=nil{return Representative{},err};if err=tx.Commit();err!=nil{return Representative{},err};return r,nil
 }
 func checkEvent(ctx context.Context,tx *sql.Tx,id,hash,kind string)(bool,error){
+ if err:=rejectSellerOrderEventV1(ctx,tx,id);err!=nil{return false,err}
  var existingHash,existingKind string;err:=tx.QueryRowContext(ctx,"SELECT fingerprint,kind FROM events WHERE event_id=?",id).Scan(&existingHash,&existingKind)
  switch{case err==nil:if existingHash==hash&&existingKind==kind{return true,nil};return false,ErrConflict
  case errors.Is(err,sql.ErrNoRows):
