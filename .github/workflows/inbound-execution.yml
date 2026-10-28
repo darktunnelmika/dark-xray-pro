@@ -16,7 +16,7 @@ concurrency:
 
 jobs:
   foundation:
-    name: Go 1.23 contracts, accounting and race checks
+    name: Go 1.27 contracts, accounting and race checks
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -154,7 +154,7 @@ jobs:
           import hashlib,json,pathlib,sys
           root=pathlib.Path(sys.argv[1])
           hashes={str(p.relative_to(root)):hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(root.rglob('*')) if p.is_file()}
-          (root/'bundle-provenance.json').write_text(json.dumps({'application_commit':sys.argv[2], 'native_commit':'701af60772cda123492f86e383e1fdba066614a9', 'application_go':'1.23', 'native_go':'1.27.3', 'files':hashes},indent=2)+'\n')
+          (root/'bundle-provenance.json').write_text(json.dumps({'application_commit':sys.argv[2], 'native_commit':'701af60772cda123492f86e383e1fdba066614a9', 'application_go':'1.27.3', 'native_go':'1.27.3', 'files':hashes},indent=2)+'\n')
           PY
       - name: Prove the compiled subscription UI against the running native worker and TLS Agent
         shell: bash

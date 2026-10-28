@@ -40,6 +40,8 @@ CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags='-s -w' \
   -o release/bin/dark-pro-agent ./cmd/node-agent
 CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags='-s -w' \
   -o release/bin/dark-pro-owner-setup ./cmd/owner-setup
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags='-s -w' \
+  -o release/bin/dark-pro-backup ./cmd/pro-backup
 
 install -m 0755 scripts/install-lab.sh release/scripts/install-lab.sh
 install -m 0755 internal/nodebootstrap/install-new-pro-node.sh release/scripts/install-new-pro-node.sh
