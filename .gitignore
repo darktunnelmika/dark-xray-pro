@@ -22,6 +22,9 @@ web/test-results/
 web/playwright-report/
 lab-state/
 
+# Fixed output of the isolated LAB bundle builder, never source input.
+/release/
+
 # Build-only UI embedding: no generated assets in Git.
 /internal/webui/dist/*
 !/internal/webui/dist/README.txt
