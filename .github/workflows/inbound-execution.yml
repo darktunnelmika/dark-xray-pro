@@ -110,6 +110,15 @@ jobs:
           set -euo pipefail
           go test -race ./internal/api -run '^TestManagedInboundRealOwnerToAgentAccountingSiblingsAndStop$' -count=1 -json -timeout=180s > "$RUNNER_TEMP/managed-owner-agent.jsonl" || { cat "$RUNNER_TEMP/managed-owner-agent.jsonl"; exit 1; }
           python3 scripts/ci/assert-inbound-acceptance.py "$RUNNER_TEMP/managed-owner-agent.jsonl" --require TestManagedInboundRealOwnerToAgentAccountingSiblingsAndStop
+      - name: Prove exact representative refunds after real partial traffic and final-tail settlement
+        shell: bash
+        run: |
+          set -euo pipefail
+          go test -race ./internal/api -run '^TestManagedInboundRealVolumeRefundAfterPartialTraffic$' -count=1 -json -timeout=180s > "$RUNNER_TEMP/managed-volume-refunds.jsonl" || { cat "$RUNNER_TEMP/managed-volume-refunds.jsonl"; exit 1; }
+          python3 scripts/ci/assert-inbound-acceptance.py "$RUNNER_TEMP/managed-volume-refunds.jsonl" \
+            --require TestManagedInboundRealVolumeRefundAfterPartialTraffic \
+            --require TestManagedInboundRealVolumeRefundAfterPartialTraffic/manual_archive \
+            --require TestManagedInboundRealVolumeRefundAfterPartialTraffic/expiry
       - name: Prove private native Unix control denies another host UID
         shell: bash
         run: |
@@ -176,6 +185,7 @@ jobs:
             ${{ runner.temp }}/native-dns-race.jsonl
             ${{ runner.temp }}/native-private-control.jsonl
             ${{ runner.temp }}/managed-owner-agent.jsonl
+            ${{ runner.temp }}/managed-volume-refunds.jsonl
             ${{ runner.temp }}/managed-browser.jsonl
             ${{ runner.temp }}/kernel-tun.log
             ${{ runner.temp }}/kernel-tun-dns.log
