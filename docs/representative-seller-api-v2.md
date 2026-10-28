@@ -1,5 +1,10 @@
 # DARK Representatives V2 — seller API gate
 
+The initial owner-only boundary below describes PR #116. The next increment adds
+an explicit startup opt-in, independent representative grants and the panel:
+[scoped seller management](representative-seller-management-v2.md). Ordinary
+startup still leaves the seller feature disabled.
+
 ## Scope
 
 This PR uses **the native PRO business Store** and the existing owner-cookie authentication mechanism. It does not import the separate offline Phase 2 wallet.

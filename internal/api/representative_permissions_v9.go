@@ -10,6 +10,9 @@ import (
 // The API is authoritative. These permissions affect native PRO business
 // actions only, never Node credentials, backup data or Xray accounting.
 func requiredRepresentativePermission(r *http.Request) (string, bool) {
+	if key, reviewed := sellerRepresentativePermissionV2(r); reviewed {
+		return key, true
+	}
 	path := r.URL.Path
 	method := r.Method
 	switch {
@@ -51,6 +54,9 @@ func requiredRepresentativePermission(r *http.Request) (string, bool) {
 			return "renew_clients", true
 		}
 	case strings.HasPrefix(path, "/api/v1/workspace/clients/"):
+		if method == "GET" && strings.HasSuffix(path, "/volume-refund") {
+			return "view_finance", true
+		}
 		if method == "POST" {
 			if strings.Contains(path, "/subscription/") {
 				return "manage_clients", true
@@ -74,6 +80,8 @@ func requiredRepresentativePermission(r *http.Request) (string, bool) {
 			}
 		}
 	case path == "/api/v1/workspace/client-operations" && method == "GET":
+		return "view_finance", true
+	case path == "/api/v1/workspace/volume-refunds" && method == "GET":
 		return "view_finance", true
 	case path == "/api/v1/workspace/events" && method == "GET":
 		return "view_finance", true
@@ -113,6 +121,8 @@ func repPermissionAllowed(p business.RepresentativePermissions, key string) bool
 		return p.ManageGroups
 	case "view_finance":
 		return p.ViewFinance
+	case "manage_sellers":
+		return p.ManageSellers
 	default:
 		return false
 	}
