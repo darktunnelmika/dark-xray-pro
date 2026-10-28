@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import {
-  ArchiveRestore, ArrowLeftRight, Bot, CheckCircle2, ChevronDown, ChevronRight, DatabaseBackup,
+  ArchiveRestore, Bot, CheckCircle2, ChevronDown, ChevronRight, DatabaseBackup,
   CircleHelp, CreditCard, Globe2, HardDrive, LayoutDashboard,
   Menu, Moon, Network, Server, Settings2, ShieldCheck, Users, FolderOpen, UserRound, LogOut,
   Sun, Waypoints, ShoppingBag, X,
@@ -117,7 +117,6 @@ const nav: { id: Page; Icon: typeof LayoutDashboard }[] = [
   { id: "overview", Icon: LayoutDashboard },
   { id: "nodes", Icon: Server },
   { id: "inbounds", Icon: Waypoints },
-  { id: "dark-swap", Icon: ArrowLeftRight },
   { id: "clients", Icon: Users },
   { id: "groups", Icon: FolderOpen },
   { id: "representatives", Icon: UserRound },
@@ -132,6 +131,7 @@ const nav: { id: Page; Icon: typeof LayoutDashboard }[] = [
 
 type NavGroup = "infrastructure" | "management" | "recovery" | "workspaceGroup";
 const navGroups: { id: NavGroup; pages: Page[] }[] = [
+  // Keep legacy Dark Swap links in this group without a separate menu entry.
   { id: "infrastructure", pages: ["overview", "nodes", "inbounds", "dark-swap"] },
   { id: "management", pages: ["clients", "groups", "representatives", "marketplace", "finance", "telegram"] },
   { id: "recovery", pages: ["backups", "dark-restore"] },
