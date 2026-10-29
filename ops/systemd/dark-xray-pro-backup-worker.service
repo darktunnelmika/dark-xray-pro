@@ -1,0 +1,44 @@
+[Unit]
+Description=DARK XRAY PRO isolated offline backup coordinator
+After=local-fs.target
+ConditionPathExists=/etc/dark-xray-pro-backup-worker/config.json
+
+[Service]
+Type=simple
+User=root
+Group=root
+UMask=0077
+ExecStart=/opt/dark-xray-pro-lab/bin/dark-pro-backup-worker run
+ExecStopPost=/opt/dark-xray-pro-lab/bin/dark-pro-backup-worker recover
+Restart=on-failure
+RestartSec=5
+KillMode=control-group
+TimeoutStopSec=240
+StateDirectory=dark-xray-pro-backup-worker
+StateDirectoryMode=0700
+RuntimeDirectory=dark-xray-pro-backup-worker
+RuntimeDirectoryMode=0755
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+IPAddressDeny=any
+IPAddressAllow=localhost
+ReadOnlyPaths=/var/lib/dark-xray-pro-lab
+ReadWritePaths=/var/lib/dark-xray-pro-backup-worker /var/backups/dark-xray-pro-native /run/dark-xray-pro-backup-worker /var/lib/dark-xray-pro-lab/hub-state.lock
+# systemctl communicates with systemd over its local Unix socket. The worker
+# never receives a user-selected unit, shell command, path, or private key.
+CapabilityBoundingSet=CAP_CHOWN CAP_DAC_OVERRIDE CAP_DAC_READ_SEARCH CAP_FOWNER CAP_SETUID CAP_SETGID CAP_KILL CAP_SYS_PTRACE
+AmbientCapabilities=
+LimitNOFILE=1024
+TasksMax=64
+
+[Install]
+WantedBy=multi-user.target

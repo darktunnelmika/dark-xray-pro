@@ -25,7 +25,7 @@ for tool in git go node npm sha256sum find sort xargs install grep; do
   command -v "$tool" >/dev/null || fail "required builder tool not found: $tool"
 done
 [[ ! -e release ]] || fail "release directory already exists; use a fresh checkout"
-mkdir -p release/bin release/scripts
+mkdir -p release/bin release/scripts release/ops/systemd release/ops/nginx
 
 # A release is built in CI, never by the installed server. Build frontend FIRST
 # so one binary contains exactly this source revision's compiled UI.
@@ -39,7 +39,7 @@ cp -a -- web/dist/. internal/webui/dist/
 [[ -s internal/webui/dist/index.html ]] || fail "compiled UI is missing"
 verify_clean_source
 
-echo "Building isolated HUB + Agent from pinned source $(git rev-parse --short HEAD)..."
+echo "Building isolated HUB, Agent and native backup tools from pinned source $(git rev-parse --short HEAD)..."
 CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -mod=readonly -buildvcs=true -trimpath -ldflags='-s -w' \
   -o release/bin/dark-pro-hub ./cmd/hub
 CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -mod=readonly -buildvcs=true -trimpath -ldflags='-s -w' \
@@ -48,14 +48,18 @@ CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -mod=readonly -buildvcs=true -tri
   -o release/bin/dark-pro-owner-setup ./cmd/owner-setup
 CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -mod=readonly -buildvcs=true -trimpath -ldflags='-s -w' \
   -o release/bin/dark-pro-backup ./cmd/pro-backup
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -mod=readonly -buildvcs=true -trimpath -ldflags='-s -w' \
+  -o release/bin/dark-pro-backup-worker ./cmd/pro-backup-worker
 
 install -m 0755 scripts/install-lab.sh release/scripts/install-lab.sh
 install -m 0755 internal/nodebootstrap/install-new-pro-node.sh release/scripts/install-new-pro-node.sh
+install -m 0644 ops/systemd/dark-xray-pro-backup-worker.service release/ops/systemd/dark-xray-pro-backup-worker.service
+install -m 0644 ops/nginx/native-backups.conf release/ops/nginx/native-backups.conf
 
 # Generated UI and the fixed release directory are explicitly ignored. Any
 # other source change (including an untracked lockfile) must refuse the bundle.
 verify_clean_source
-for binary in release/bin/dark-pro-{hub,agent,owner-setup,backup}; do
+for binary in release/bin/dark-pro-{hub,agent,owner-setup,backup,backup-worker}; do
   build_info="$(go version -m "$binary")" || fail "cannot read binary build metadata"
   printf '%s\n' "$build_info" | grep -Fxq $'\tbuild\tvcs.revision='"$DARK_PRO_PINNED_COMMIT" ||
     fail "binary revision does not match the pinned source"
@@ -63,8 +67,9 @@ for binary in release/bin/dark-pro-{hub,agent,owner-setup,backup}; do
     fail "binary was built from modified sources"
 done
 
-(cd release && find bin scripts -type f -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS)
+(cd release && find bin scripts ops -type f -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS)
 (cd release && sha256sum -c SHA256SUMS)
 echo "Build verified from pinned commit: $DARK_PRO_PINNED_COMMIT"
 echo "Bundle directory: $ROOT/release"
-echo "Next: review scripts/install-lab.sh and run ONLY on the explicitly identified new LAB VPS."
+echo "Fresh installation only: review scripts/install-lab.sh for the explicitly identified empty LAB VPS."
+echo "Existing LAB upgrades require versioned releases and financial-state verification; do not rerun the fresh installer."

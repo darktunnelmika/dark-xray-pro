@@ -19,7 +19,7 @@ func(s *Server) attachWorkspace(mux *http.ServeMux){
   respond(w,http.StatusOK,map[string]any{
    "user":session.User,"balance":rep,
    "data_plane":"not_activated",
-   "capabilities":map[string]bool{"seller_orders_v1":s.sellerOrdersV1Enabled},
+   "capabilities":map[string]bool{"seller_orders_v1":s.sellerOrdersV1Enabled,"backup_control_v1":s.backupControl!=nil&&session.User.Role=="owner"},
   })
  })
  mux.HandleFunc("GET /api/v1/workspace/representatives",func(w http.ResponseWriter,r *http.Request){
