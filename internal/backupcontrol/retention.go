@@ -87,7 +87,9 @@ func (s *Store) ActiveDownloads(ctx context.Context) (int, error) {
 	if e := s.healthy(ctx); e != nil {
 		return 0, e
 	}
-	n := 0
+	// This legacy method name also includes upload/inbox-download leases.
+	// The coordinator drains all owner transfers before stopping HUB.
+	n := s.transfers
 	for _, v := range s.pins {
 		n += v
 	}
@@ -133,7 +135,7 @@ func (s *Store) OpenDownload(ctx context.Context, id string, open func(context.C
 		s.mu.Unlock()
 		return nil, Archive{}, ErrBusy
 	}
-	active := 0
+	active := s.transfers
 	for _, count := range s.pins {
 		active += count
 	}

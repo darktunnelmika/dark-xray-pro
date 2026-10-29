@@ -138,6 +138,7 @@ type ReadSeekCloser interface {
 type HandlerOptions struct {
 	RunnerStatus func() string
 	OpenArchive  func(context.Context, Archive) (ReadSeekCloser, error)
+	Uploads      UploadStore
 }
 
 func DefaultSettings() Settings {

@@ -27,7 +27,7 @@ export type BackupArchive = {
 };
 export type BackupStatus = {
   enabled: boolean; runner_status: typeof runners[number]; recipient_fingerprint: string;
-  capabilities: { create: boolean; download: boolean; cancel: boolean; schedules: boolean; retention: boolean; upload: false; restore: false };
+  capabilities: { create: boolean; download: boolean; cancel: boolean; schedules: boolean; retention: boolean; upload: boolean; restore: false };
   settings: BackupSettings; next_run_unix: number; jobs: BackupJob[]; archives: BackupArchive[];
 };
 export type SettingsBody = { event_id: string; expected_revision: number; schedule: BackupSchedule; retention: BackupRetention };
@@ -83,7 +83,7 @@ export function readBackupStatus(v: unknown): BackupStatus {
   if (!object(v) || typeof v.enabled !== "boolean" || !runners.includes(v.runner_status as BackupStatus["runner_status"]) ||
       typeof v.recipient_fingerprint !== "string" || (v.recipient_fingerprint !== "" && !hash.test(v.recipient_fingerprint)) ||
       !object(v.capabilities) || !["create", "download", "cancel", "schedules", "retention"].every(k => typeof (v.capabilities as Record<string, unknown>)[k] === "boolean") ||
-      v.capabilities.upload !== false || v.capabilities.restore !== false || !validSettings(v.settings) ||
+      typeof v.capabilities.upload !== "boolean" || v.capabilities.restore !== false || !validSettings(v.settings) ||
       !timestamp(v.next_run_unix) || !Array.isArray(v.jobs) || v.jobs.length > 4096 || !v.jobs.every(validBackupJob) ||
       !Array.isArray(v.archives) || v.archives.length > 4096 || !v.archives.every(validBackupArchive) ||
       new Set(v.jobs.map(j => j.id)).size !== v.jobs.length || new Set(v.archives.map(a => a.id)).size !== v.archives.length) {

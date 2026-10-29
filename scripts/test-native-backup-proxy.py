@@ -100,18 +100,28 @@ location / {{ return 403; }}
                 base = "/api/v1/workspace/owner/backups"
                 job = base + "/jobs/" + "a" * 32
                 archive = base + "/archives/" + "b" * 32
+                upload = base + "/uploads/" + "c" * 32
                 for path, allowed in ((base, {"GET", "HEAD"}),
                                       (base + "/jobs", {"POST"}),
                                       (base + "/settings", {"PUT"}),
                                       (job, {"GET", "HEAD"}),
                                       (job + "/cancel", {"POST"}),
-                                      (archive + "/download", {"GET", "HEAD"})):
+                                      (archive + "/download", {"GET", "HEAD"}),
+                                      (base + "/uploads", {"GET", "HEAD", "POST"}),
+                                      (upload, {"GET", "HEAD"}),
+                                      (upload + "/content", {"PUT"}),
+                                      (upload + "/cancel", {"POST"}),
+                                      (upload + "/remove", {"POST"}),
+                                      (upload + "/download", {"GET", "HEAD"})):
                     check(path, allowed)
                     check(path + "/", set())
                     check(path + "/extra", set())
                 for path, method in ((base + "/jobs", "POST"),
                                      (base + "/settings", "PUT"),
-                                     (job + "/cancel", "POST")):
+                                     (job + "/cancel", "POST"),
+                                     (base + "/uploads", "POST"),
+                                     (upload + "/cancel", "POST"),
+                                     (upload + "/remove", "POST")):
                     before = len(Backend.seen)
                     assert request(port, path, method, b"x" * 4097) == 413
                     assert len(Backend.seen) == before, "oversized backup request reached backend"
@@ -120,6 +130,9 @@ location / {{ return 403; }}
                     check(base + "/jobs/" + bad, set())
                     check(base + "/jobs/" + bad + "/cancel", set())
                     check(base + "/archives/" + bad + "/download", set())
+                    check(base + "/uploads/" + bad, set())
+                    for action in ("content", "cancel", "remove", "download"):
+                        check(base + "/uploads/" + bad + "/" + action, set())
                 for path in (base + "/upload", base + "/restore", base + "/verify",
                              base + "/archives", archive, archive + "/delete",
                              job + "/retry", job + "/execute", "/v1/status",
@@ -127,7 +140,23 @@ location / {{ return 403; }}
                              "/api/v1/agent/backups", "/api/v1/workspace/backups",
                              "/api/v1/workspace/representative/backups"):
                     check(path, set())
-                print("NATIVE_BACKUP_PROXY_PASS: exact routes, methods, IDs, body limits, Host and private-route denial")
+                # Send only headers for a large upload. Authentication must
+                # reach HUB and return before nginx reads/spools the body.
+                # A buffered location would hang here waiting for all bytes.
+                for size, expected in ((3 << 30, 401), ((66 << 30) + 1, 413)):
+                    before = len(Backend.seen)
+                    with socket.create_connection(("127.0.0.1", port), timeout=2) as peer:
+                        peer.settimeout(2)
+                        peer.sendall((f"PUT {upload}/content HTTP/1.1\r\n"
+                                      "Host: lab-proxy.example\r\n"
+                                      "Content-Type: application/octet-stream\r\n"
+                                      f"Content-Length: {size}\r\n"
+                                      "Connection: close\r\n\r\n").encode())
+                        header = peer.recv(4096)
+                        assert int(header.split(b" ", 2)[1]) == expected, header
+                    assert len(Backend.seen) == before + (expected == 401)
+                assert not list((tmp / "client-body").glob("**/*")), "upload body was spooled before authentication"
+                print("NATIVE_BACKUP_PROXY_PASS: exact routes, methods, IDs, limits, Host, private-route denial and unbuffered upload authentication")
             finally:
                 process.terminate()
                 process.wait(timeout=5)

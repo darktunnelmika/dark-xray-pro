@@ -59,6 +59,7 @@ type Store struct {
 	recipient string
 	clock     func() time.Time
 	pins      map[string]int
+	transfers int
 	closed    bool
 	broken    bool
 	dirInfo   os.FileInfo
