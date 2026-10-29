@@ -145,7 +145,9 @@ func TestUploadSocketStreamsAndPinsUntilHubClosesReceipt(t *testing.T) {
 	if err != nil || !status.Capabilities.Upload || status.Capabilities.Restore {
 		t.Fatal("capability split", status, err)
 	}
-	result, err := client.Upload(context.Background(), inbox.entry.ID, "owner-1", int64(len(data)), inbox.entry.SHA256, bytes.NewReader(data))
+	// The delayed receive must outlive both short metadata budgets; ordinary
+	// metadata and later durable operations use the normal test client.
+	result, err := streamDeadlineClient(t, client).Upload(context.Background(), inbox.entry.ID, "owner-1", int64(len(data)), inbox.entry.SHA256, bytes.NewReader(data))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -89,7 +89,25 @@ func startUnixForTest(t *testing.T, handler http.Handler) (*Client, context.Canc
 			t.Error("Unix shutdown blocked")
 		}
 	})
-	return newClient(path, 50*time.Millisecond), cancel, stopped
+	// Metadata mutations fsync their durable journal. Use the production
+	// budget here; a busy race-test runner must not turn a stream assertion
+	// into an unrelated 50 ms filesystem/scheduling deadline assertion.
+	return newClient(path, 8*time.Second), cancel, stopped
+}
+
+// streamDeadlineClient isolates the deliberately tiny metadata budgets to
+// delayed streaming probes, without shortening unrelated durable mutations.
+func streamDeadlineClient(t *testing.T, client *Client) *Client {
+	t.Helper()
+	streamClient := *client
+	streamMetadata := *client.metadata
+	streamTransport := client.metadata.Transport.(*http.Transport).Clone()
+	streamTransport.ResponseHeaderTimeout = 50 * time.Millisecond
+	streamMetadata.Transport = streamTransport
+	streamMetadata.Timeout = 50 * time.Millisecond
+	streamClient.metadata = &streamMetadata
+	t.Cleanup(streamTransport.CloseIdleConnections)
+	return &streamClient
 }
 
 func TestUnixClientRoundTripAndStreamingHasNoMetadataDeadline(t *testing.T) {
@@ -112,7 +130,10 @@ func TestUnixClientRoundTripAndStreamingHasNoMetadataDeadline(t *testing.T) {
 	if e != nil || len(status.Archives) != 1 || status.Capabilities.Restore || status.Capabilities.Upload {
 		t.Fatalf("status: %+v %v", status, e)
 	}
-	download, e := client.Download(ctx, a.ID)
+	// Only the delayed stream probe gets the deliberately tiny metadata
+	// deadlines. Its 100 ms server delay must outlive both 50 ms budgets,
+	// while ordinary durable metadata calls retain the production budget.
+	download, e := streamDeadlineClient(t, client).Download(ctx, a.ID)
 	if e != nil {
 		t.Fatal(e)
 	}
