@@ -24,6 +24,7 @@ import (
 )
 
 type Server struct {
+	backupControl               backupControlClient
 	inboundExecution            *inboundExecutionService
 	inboundSecurity             *inboundsecurity.Service
 	inboundProbeJobs            inboundProbeQueue
@@ -139,6 +140,7 @@ func (s *Server) Handler() http.Handler {
 	s.attachLabRevisions(mux)
 	s.attachBusiness(mux)
 	s.attachBrowserAuth(mux)
+	s.attachBackupControl(mux)
 	s.attachWorkspace(mux)
 	s.attachRepresentativeControls(mux)
 	s.attachSellerQuotaV2(mux)

@@ -110,6 +110,10 @@ func main() {
 	if scopeErr != nil {
 		log.Fatal(scopeErr)
 	}
+	backupControls, backupControlErr := backupControlEnabled(os.Getenv)
+	if backupControlErr != nil {
+		log.Fatal(backupControlErr)
+	}
 	ownerReportFlag := os.Getenv(telegramhub.OwnerReportLABEnableEnv)
 	if ownerReportFlag != "" && ownerReportFlag != "0" && ownerReportFlag != "1" {
 		log.Fatal("DARK_PRO_ENABLE_OWNER_REPORT_BOT_V1 must be 0 or 1")
@@ -427,6 +431,9 @@ func main() {
 		if err := hubstate.WriteInventory(stateLock, *backupInventory); err != nil {
 			log.Fatal("offline backup inventory is incomplete: ", err)
 		}
+	}
+	if err := configureBackupControl(service, backupControls); err != nil {
+		log.Fatal("native backup controls unavailable: ", err)
 	}
 	apiHandler := service.BrowserHandler()
 	ui := webui.Embedded()

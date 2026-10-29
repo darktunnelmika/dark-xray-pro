@@ -12,6 +12,7 @@ import NodeHistory from "./NodeHistory";
 import DashboardOverview from "./DashboardOverview";
 import BusinessWorkspace from "./BusinessWorkspace";
 import ModuleStatus from "./ModuleStatus";
+import NativeBackups from "./NativeBackups";
 import { useSession } from "./session";
 import { allowed, useNavigation, type Page } from "./navigation";
 import LoginPage from "./LoginPage";
@@ -476,7 +477,8 @@ export default function App() {
 
           {page === "inbounds" && <InboundPlanner nodes={fleet?.nodes ?? []} language={language} />}
           {page === "dark-swap" && <InboundPlanner nodes={fleet?.nodes ?? []} language={language} workspace="dark-swap" />}
-          {(page === "dark-restore" || page === "telegram" || page === "backups") &&
+          {page === "backups" && <NativeBackups key={auth.session.user.id} language={language}/>}
+          {(page === "dark-restore" || page === "telegram") &&
             <ModuleStatus page={page} language={language} onNavigate={setPage}/>}
           {(["clients", "groups", "representatives", "marketplace", "finance", "account"] as Page[]).includes(page) && <BusinessWorkspace key={auth.session.user.id + ":" + page} language={language} section={page as "clients" | "groups" | "representatives" | "marketplace" | "finance" | "account"} />}
 

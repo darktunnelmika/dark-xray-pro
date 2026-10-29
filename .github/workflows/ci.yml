@@ -466,7 +466,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-      - name: Verify owner Node Manager and business HTTPS allowlists with real nginx
+      - name: Verify owner Node Manager, business and backup HTTPS allowlists with real nginx
         run: |
           if ! test -x /usr/sbin/nginx; then
             sudo apt-get update -qq
@@ -474,6 +474,7 @@ jobs:
           fi
           python3 scripts/test-node-manager-proxy.py
           python3 scripts/test-business-management-proxy.py
+          python3 scripts/test-native-backup-proxy.py
       - name: Validate installer shell syntax and strict safety guards
         run: |
           bash -n scripts/install-lab.sh
@@ -503,12 +504,15 @@ jobs:
           test -s release/bin/dark-pro-agent
           test -s release/bin/dark-pro-owner-setup
           test -s release/bin/dark-pro-backup
+          test -s release/bin/dark-pro-backup-worker
+          test -s release/ops/systemd/dark-xray-pro-backup-worker.service
+          test -s release/ops/nginx/native-backups.conf
       - name: Create verifiable LAB-only archive
         shell: bash
         run: |
           set -euo pipefail
           cd release
-          find bin scripts -type f -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS
+          find bin scripts ops -type f -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS
           sha256sum -c SHA256SUMS
           cd ..
           tar -czf dark-xray-pro-lab-linux-amd64.tar.gz -C release .
