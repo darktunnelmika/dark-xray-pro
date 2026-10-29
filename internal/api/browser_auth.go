@@ -52,6 +52,11 @@ func (g *loginGate) admit(username string)bool{
 func (g *loginGate)release(){<-g.parallel}
 
 func sameOriginMutation(r *http.Request) bool {
+ return sameOriginMutationMedia(r,"application/json")
+}
+// The binary upload route opts into its own exact media type. Every existing
+// browser mutation continues to use the JSON-only wrapper above.
+func sameOriginMutationMedia(r *http.Request,requiredMedia string) bool {
  origin:=r.Header.Get("Origin")
  if origin==""||origin=="null"{return false}
  u,err:=url.Parse(origin)
@@ -67,7 +72,7 @@ func sameOriginMutation(r *http.Request) bool {
  if u.Scheme!=scheme && !(scheme=="http"&&u.Scheme=="https"){return false}
  if site:=r.Header.Get("Sec-Fetch-Site");site!=""&&site!="same-origin"&&site!="none" {return false}
  media,_,err:=mime.ParseMediaType(r.Header.Get("Content-Type"))
- return err==nil&&media=="application/json"
+ return err==nil&&media==requiredMedia
 }
 func sessionCookie(token string, expiry time.Time)*http.Cookie{
  return &http.Cookie{
@@ -94,6 +99,9 @@ func(s *Server) signedSession(r *http.Request)(business.LoginSession,bool){
  return state,err==nil
 }
 func(s *Server) authorizeBrowser(w http.ResponseWriter,r *http.Request,mutate,ownerOnly bool)(business.LoginSession,bool){
+ return s.authorizeBrowserMedia(w,r,mutate,ownerOnly,"application/json")
+}
+func(s *Server) authorizeBrowserMedia(w http.ResponseWriter,r *http.Request,mutate,ownerOnly bool,requiredMedia string)(business.LoginSession,bool){
  session,ok:=s.signedSession(r)
  if !ok{
   respond(w,http.StatusUnauthorized,map[string]string{"error":"session_required"})
@@ -111,8 +119,10 @@ func(s *Server) authorizeBrowser(w http.ResponseWriter,r *http.Request,mutate,ow
   }
  }
  if mutate{
-  if !sameOriginMutation(r){
-   respond(w,http.StatusForbidden,map[string]string{"error":"same_origin_json_required"})
+  if !sameOriginMutationMedia(r,requiredMedia){
+   code:="same_origin_json_required"
+   if requiredMedia!="application/json"{code="same_origin_upload_required"}
+   respond(w,http.StatusForbidden,map[string]string{"error":code})
    return business.LoginSession{},false
   }
   got:=r.Header.Get("X-CSRF-Token")

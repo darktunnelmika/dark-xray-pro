@@ -225,6 +225,27 @@ jobs:
         env:
           DARK_PRO_BACKUP_LARGE_ACCEPTANCE: "1"
         run: go test ./internal/probackup -run '^TestNativeBackupLargeStreamingAcceptance$' -count=1 -timeout=300s -v
+      - name: Uploaded ciphertext above 3 GiB with bounded process memory
+        shell: bash
+        run: |
+          set -euo pipefail
+          go test -c -o "$RUNNER_TEMP/backup-upload-large.test" ./internal/backupimport
+          DARK_PRO_RUN_LARGE_UPLOAD=1 /usr/bin/time -f '%M' -o "$RUNNER_TEMP/backup-upload-rss.txt" \
+            "$RUNNER_TEMP/backup-upload-large.test" -test.run='^TestLargeUploadInboxStreamingRoundTrip$' -test.v -test.timeout=300s \
+            | go tool test2json -p github.com/darktunnelmika/dark-xray-pro/internal/backupimport -t \
+            > "$RUNNER_TEMP/backup-upload-large.jsonl"
+          python3 - "$RUNNER_TEMP/backup-upload-large.jsonl" "$RUNNER_TEMP/backup-upload-rss.txt" <<'PYUPLOAD'
+          import json,sys
+          events=[json.loads(line) for line in open(sys.argv[1])]
+          for event in events:
+              if event.get('Output'): print(event['Output'],end='')
+          name='TestLargeUploadInboxStreamingRoundTrip'
+          assert sum(e.get('Action')=='pass' and e.get('Test')==name for e in events)==1
+          assert not any(e.get('Action') in ('skip','fail') for e in events)
+          rss=int(open(sys.argv[2]).read().strip())
+          assert 0<rss<=131072,('upload process peak RSS KiB',rss)
+          print('UPLOAD_PROCESS_PEAK_RSS_KIB='+str(rss))
+          PYUPLOAD
       - name: Repeat two-Node handover accounting barrier contracts
         run: go test -race ./internal/business ./internal/usageledger ./internal/api -run '^(TestMeteredHandover|TestReviewedBusinessSchemaVersions)' -count=10 -timeout=240s -v
       - name: Repeat protocol health identity, expiry, TLS and SOCKS boundaries

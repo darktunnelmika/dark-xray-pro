@@ -130,6 +130,7 @@ func NewHandler(store *Store, options HandlerOptions) http.Handler {
 			sendError(w, e)
 			return
 		}
+		value.Capabilities.Upload = options.Uploads != nil
 		if options.RunnerStatus != nil {
 			switch v := options.RunnerStatus(); v {
 			case "ready", "busy", "recovery_required", "unavailable":
@@ -219,6 +220,7 @@ func NewHandler(store *Store, options HandlerOptions) http.Handler {
 		// pinned until that close (or process death), with no timed lease expiry.
 		<-r.Context().Done()
 	})
+	attachUploadHandlers(mux, store, options.Uploads)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
 		w.Header().Set("X-Content-Type-Options", "nosniff")

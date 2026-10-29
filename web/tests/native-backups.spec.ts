@@ -279,7 +279,7 @@ test("an active download ends the attempt and a later explicit creation uses a n
   f.current.jobs[0] = { ...f.current.jobs[0], state: "failed", phase: "complete", error_code: "download_busy", finished_unix: now(), revision: 2 };
   f.current.runner_status = "ready"; f.current.capabilities.create = true;
   await refreshButton(page).click();
-  await expect(page.getByText(/After the download finishes, choose Create backup to start a new attempt/)).toBeVisible();
+  await expect(page.getByText(/After the transfer finishes, choose Create backup to start a new attempt/)).toBeVisible();
   expect(f.writes).toHaveLength(1);
   await expect(createButton(page)).toBeEnabled(); await createButton(page).click();
   await expect(page.getByText("Waiting to start", { exact: true })).toBeVisible();

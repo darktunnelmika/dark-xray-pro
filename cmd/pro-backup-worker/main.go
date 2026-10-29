@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/darktunnelmika/dark-xray-pro/internal/backupcontrol"
+	"github.com/darktunnelmika/dark-xray-pro/internal/backupimport"
 	"github.com/darktunnelmika/dark-xray-pro/internal/backupworker"
 )
 
@@ -57,7 +58,17 @@ func run(args []string) int {
 	worker = backupworker.New(store, runtime, runtime, config)
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
-	handler := backupcontrol.NewHandler(store, backupcontrol.HandlerOptions{RunnerStatus: worker.Status, OpenArchive: runtime.OpenArchive})
+	options := backupcontrol.HandlerOptions{RunnerStatus: worker.Status, OpenArchive: runtime.OpenArchive}
+	// An unavailable upload inbox must never prevent service recovery or
+	// disable the existing create/download control plane.
+	inbox, inboxErr := backupimport.OpenStore(backupimport.Directory)
+	if inboxErr == nil {
+		defer inbox.Close()
+		options.Uploads = inbox
+	} else {
+		fmt.Fprintln(os.Stderr, "backup upload inbox unavailable; existing backup controls remain available")
+	}
+	handler := backupcontrol.NewHandler(store, options)
 	serverDone := make(chan error, 1)
 	go func() { serverDone <- backupcontrol.ServeUnix(ctx, backupcontrol.SocketPath, runtime.UID(), handler) }()
 	// Establish the local command/status surface before a queued job can stop

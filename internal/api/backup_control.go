@@ -238,6 +238,7 @@ func (s *Server) attachBackupControl(mux *http.ServeMux) {
 		respond(w, http.StatusOK, result)
 	})
 	mux.HandleFunc("GET "+backupBrowserBase+"/archives/{id}/download", s.downloadBackupArchive)
+	s.attachBackupUploads(mux)
 }
 
 type backupDownloadWriter struct {

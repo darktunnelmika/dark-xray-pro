@@ -7,6 +7,7 @@ import {
   type BackupArchive, type BackupDraft, type BackupJob, type BackupSettings, type BackupStatus, type PendingBackupRequest,
 } from "./nativeBackups";
 import "./NativeBackups.css";
+import { NativeBackupUploads } from "./NativeBackupUploads";
 
 const words = {
   en: {
@@ -25,7 +26,7 @@ const words = {
     cancelNote: "Cancellation can be received while the panel is connected. The service finishes any necessary recovery before stopping the operation.",
     recovery: "The panel service needs recovery. A new backup cannot start until this is resolved.",
     failed: "The backup did not finish. Review the service status before trying again.",
-    downloadBusy: "An archive download was still active, so this attempt ended before the panel went offline. After the download finishes, choose Create backup to start a new attempt.",
+    downloadBusy: "A file upload or download was still active, so this attempt ended before the panel went offline. After the transfer finishes, choose Create backup to start a new attempt.",
     publicationUnknown: "The service could not confirm the saved archive. A file may exist, but the outcome of this attempt is uncertain. Have this operation checked before relying on it.",
     retentionIncomplete: "The new archive was recorded, but removal of older copies did not finish. More copies may remain than your retention settings allow.",
     cancelledTooLate: "Cancellation arrived after the archive was created. The completed archive was kept.",
@@ -51,7 +52,7 @@ const words = {
     encryptedSize: "Encrypted size", payload: "Contents", protected: "Protected", checksum: "Checksum verified",
     restoreVerified: "Restore verified", checksumDetail: "The stored file checksum is verified. Decryption and recovery compatibility have not been verified for this copy.",
     restoreDetail: "Recovery verification is recorded for this copy.", fingerprint: "Encryption recipient fingerprint",
-    noActivation: "Uploading or restoring an archive is not available from this page yet.",
+    noActivation: "Restoring or activating an archive is not available from this page yet.",
     details: "Archive details", sha: "SHA-256", source: "Source version", schema: "Schema",
     states: { queued: "Queued", running: "In progress", cancelling: "Cancelling safely", succeeded: "Completed", failed: "Failed", cancelled: "Cancelled", recovery_required: "Recovery required" },
     phases: { queued: "Waiting to start", preflight: "Checking readiness", stopping_hub: "Preparing the offline copy", creating_offline: "Creating the encrypted copy", restarting_hub: "Bringing the panel back", checking_archive: "Checking the stored archive", retention: "Applying retention", complete: "Finished" },
@@ -73,7 +74,7 @@ const words = {
     cancelNote: "درخواست لغو هنگام اتصال پنل دریافت می‌شود. سرویس پیش از توقف عملیات، بازیابی لازم را کامل می‌کند.",
     recovery: "سرویس پنل به بازیابی نیاز دارد. تا رفع این وضعیت، پشتیبان تازه‌ای آغاز نمی‌شود.",
     failed: "ساخت پشتیبان کامل نشد. پیش از تلاش دوباره، وضعیت سرویس را بررسی کن.",
-    downloadBusy: "دریافت یک آرشیو هنوز ادامه داشت؛ این تلاش پیش از آفلاین‌شدن پنل پایان یافت. پس از پایان دریافت، با «ساخت پشتیبان» تلاش تازه‌ای آغاز کن.",
+    downloadBusy: "ارسال یا دریافت یک فایل هنوز ادامه داشت؛ این تلاش پیش از آفلاین‌شدن پنل پایان یافت. پس از پایان انتقال فایل، با «ساخت پشتیبان» تلاش تازه‌ای آغاز کن.",
     publicationUnknown: "سرویس نتوانست ذخیرهٔ نهایی آرشیو را تأیید کند. ممکن است فایلی ساخته شده باشد، اما نتیجهٔ این تلاش نامشخص است. پیش از اتکا به آن، وضعیت عملیات باید بررسی شود.",
     retentionIncomplete: "آرشیو تازه ثبت شد، اما پاک‌سازی نسخه‌های قدیمی کامل نشد. ممکن است نسخه‌های بیشتری از حد تنظیم‌شده باقی مانده باشد.",
     cancelledTooLate: "درخواست لغو پس از ساخته‌شدن آرشیو رسید. آرشیو کامل‌شده نگه داشته شد.",
@@ -99,7 +100,7 @@ const words = {
     encryptedSize: "حجم رمزگذاری‌شده", payload: "محتوا", protected: "محافظت‌شده", checksum: "صحت فایل بررسی شده",
     restoreVerified: "بازیابی بررسی شده", checksumDetail: "چک‌سام فایل ذخیره‌شده بررسی شده است. رمزگشایی و سازگاری بازیابی این نسخه هنوز بررسی نشده‌اند.",
     restoreDetail: "بررسی بازیابی برای این نسخه ثبت شده است.", fingerprint: "اثر انگشت گیرندهٔ رمزگذاری",
-    noActivation: "بارگذاری یا بازیابی آرشیو از این صفحه هنوز در دسترس نیست.",
+    noActivation: "بازیابی یا فعال‌سازی آرشیو از این صفحه هنوز در دسترس نیست.",
     details: "جزئیات آرشیو", sha: "SHA-256", source: "نسخهٔ منبع", schema: "ساختار داده",
     states: { queued: "در صف", running: "در حال اجرا", cancelling: "در حال لغو ایمن", succeeded: "کامل‌شده", failed: "ناموفق", cancelled: "لغوشده", recovery_required: "نیازمند بازیابی" },
     phases: { queued: "در انتظار شروع", preflight: "بررسی آمادگی", stopping_hub: "آماده‌سازی نسخهٔ آفلاین", creating_offline: "ساخت نسخهٔ رمزگذاری‌شده", restarting_hub: "بازگرداندن پنل", checking_archive: "بررسی آرشیو ذخیره‌شده", retention: "اعمال قواعد نگهداری", complete: "پایان‌یافته" },
@@ -405,6 +406,7 @@ export default function NativeBackups({ language }: { language: Language }) {
           <div className="backup-archive-list">{archives.map(archive => <ArchiveCard key={archive.id} archive={archive} language={language} timezone={zone}
             downloadable={enabled && connected && snapshot.capabilities.download && archive.downloadable} />)}</div>}
       </section>
+      {enabled && snapshot.capabilities.upload && <NativeBackupUploads key={actor} language={language} timezone={zone} />}
       <footer className="backup-footnote">
         {snapshot.recipient_fingerprint && <p>{t.fingerprint}: <bdi>{snapshot.recipient_fingerprint}</bdi></p>}
         <p>{t.noActivation}</p>
