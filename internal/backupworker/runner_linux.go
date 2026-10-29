@@ -14,7 +14,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/darktunnelmika/dark-xray-pro/internal/backupcontrol"
@@ -171,10 +170,7 @@ func (r *LinuxRuntime) Create(ctx context.Context, j backupcontrol.Job) (Receipt
 	}
 	defer f.Close()
 	out := &limitedFileWriter{f: f, remaining: 256 << 10}
-	cmd := exec.Command(r.config.BackupBinary, "create", "--recipient", j.Recipient, "--out", p, "--max-bytes", strconv.FormatInt(r.config.MaxPayloadBytes, 10))
-	cmd.Env = []string{"PATH=/usr/bin:/bin", "LANG=C", "DARK_PRO_LAB_MODE=1"}
-	cmd.Dir = dir
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true, Credential: &syscall.Credential{Uid: r.uid, Gid: r.gid, Groups: []uint32{}}}
+	cmd := r.backupCommand(dir, "create", "--recipient", j.Recipient, "--out", p, "--max-bytes", strconv.FormatInt(r.config.MaxPayloadBytes, 10))
 	cmd.Stdout = out
 	cmd.Stderr = io.Discard
 	if e = cmd.Start(); e != nil {

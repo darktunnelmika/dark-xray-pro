@@ -5,7 +5,9 @@ ConditionPathExists=/etc/dark-xray-pro-backup-worker/config.json
 
 [Service]
 Type=simple
-User=root
+# System services default to UID 0; the worker also verifies EUID 0.
+# Leave User= unset: explicit User=root with seccomp and NoNewPrivileges can
+# discard CAP_SETUID before exec despite the bounding set, breaking UID drop.
 Group=root
 UMask=0077
 ExecStart=/opt/dark-xray-pro-lab/bin/dark-pro-backup-worker run
