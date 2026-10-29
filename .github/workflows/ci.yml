@@ -202,6 +202,25 @@ jobs:
           test ! -e backend/dark_policy.py || { echo "Legacy HUB files must not be imported into PRO"; exit 1; }
       - name: Go unit/race tests
         run: go test -race ./...
+      - name: Prove backup credential failure is detected before stopping HUB
+        shell: bash
+        run: |
+          set -euo pipefail
+          go test -race -c -o "$RUNNER_TEMP/backupworker-credentials.test" ./internal/backupworker
+          sudo --non-interactive "$RUNNER_TEMP/backupworker-credentials.test" \
+            -test.run='^TestCredentialLaunchRejectsMissingSetuidBeforeStop$' -test.v -test.timeout=30s \
+            | go tool test2json -p github.com/darktunnelmika/dark-xray-pro/internal/backupworker -t \
+            > "$RUNNER_TEMP/backupworker-credentials.jsonl"
+          python3 - "$RUNNER_TEMP/backupworker-credentials.jsonl" <<'PYCREDENTIALS'
+          import json,sys
+          events=[json.loads(line) for line in open(sys.argv[1])]
+          name='TestCredentialLaunchRejectsMissingSetuidBeforeStop'
+          for event in events:
+              if event.get('Output'): print(event['Output'],end='')
+          assert sum(e.get('Action')=='pass' and e.get('Test')==name for e in events)==1
+          assert not any(e.get('Action') in ('skip','fail') for e in events)
+          assert not any('WARNING: DATA RACE' in e.get('Output','') for e in events)
+          PYCREDENTIALS
       - name: Native encrypted backup above 3 GiB, bounded RAM and interrupted restore retry
         env:
           DARK_PRO_BACKUP_LARGE_ACCEPTANCE: "1"

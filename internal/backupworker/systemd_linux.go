@@ -194,6 +194,9 @@ func (r *LinuxRuntime) Preflight(ctx context.Context) error {
 	if e := r.verifyExecutables(); e != nil {
 		return e
 	}
+	if e := r.checkCredentialLaunch(ctx); e != nil {
+		return e
+	}
 	if !labAddressPresent() {
 		return ErrPreflight
 	}
