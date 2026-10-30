@@ -16,6 +16,9 @@ func (s *Store) AcquireTransfer(ctx context.Context) (func(), error) {
 	if err := s.healthy(ctx); err != nil {
 		return nil, err
 	}
+	if activeRestore(s.data) {
+		return nil, ErrBusy
+	}
 	for _, job := range s.data.Jobs {
 		if job.State == "running" || job.State == "cancelling" || job.State == "recovery_required" {
 			return nil, ErrBusy

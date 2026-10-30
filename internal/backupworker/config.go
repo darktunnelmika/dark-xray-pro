@@ -45,6 +45,7 @@ var (
 // Only the root-owned configuration selects executable identities and limits.
 // No field accepts a service name, command, arbitrary destination or private key.
 type Config struct {
+	RestoreEnabled       bool   `json:"restore_enabled,omitempty"`
 	Version              int    `json:"version"`
 	HubBinary            string `json:"hub_binary"`
 	HubSHA256            string `json:"hub_sha256"`

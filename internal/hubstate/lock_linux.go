@@ -37,6 +37,11 @@ func CheckQuarantine(paths ...string) error {
 			} else if !errors.Is(e, os.ErrNotExist) && !errors.Is(e, syscall.ENOTDIR) {
 				return ErrUnsafe
 			}
+			if _, e := os.Lstat(filepath.Join(p, RestoreGuardName)); e == nil {
+				return ErrQuarantined
+			} else if !errors.Is(e, os.ErrNotExist) && !errors.Is(e, syscall.ENOTDIR) {
+				return ErrUnsafe
+			}
 			if p == filepath.Dir(p) {
 				break
 			}

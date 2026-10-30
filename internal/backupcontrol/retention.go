@@ -50,6 +50,9 @@ func (s *Store) PruneArchives(ctx context.Context, now time.Time, remove func(Ar
 	if e := s.healthy(ctx); e != nil {
 		return nil, e
 	}
+	if activeRestore(s.data) {
+		return nil, ErrBusy
+	}
 	if remove == nil {
 		return nil, ErrInvalid
 	}
@@ -115,6 +118,10 @@ func (s *Store) OpenDownload(ctx context.Context, id string, open func(context.C
 	if e := s.healthy(ctx); e != nil {
 		s.mu.Unlock()
 		return nil, Archive{}, e
+	}
+	if activeRestore(s.data) {
+		s.mu.Unlock()
+		return nil, Archive{}, ErrBusy
 	}
 	if !ValidID(id) || open == nil {
 		s.mu.Unlock()

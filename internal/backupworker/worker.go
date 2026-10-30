@@ -34,6 +34,7 @@ type Runner interface {
 }
 
 type Worker struct {
+	restores                   *RestoreCoordinator
 	store                      Journal
 	host                       Controller
 	runner                     Runner
@@ -47,6 +48,7 @@ func New(store Journal, host Controller, runner Runner, c Config) *Worker {
 	w.status.Store("starting")
 	return w
 }
+func (w *Worker) SetRestoreCoordinator(c *RestoreCoordinator) { w.restores = c }
 func (w *Worker) Status() string {
 	switch s := w.status.Load().(string); s {
 	case "idle":
@@ -182,6 +184,11 @@ func (w *Worker) Recover(ctx context.Context) error {
 // RecoverService is the bounded ExecStopPost path: restore service availability
 // first, leaving archive hashing and reconciliation for the next normal start.
 func (w *Worker) RecoverService(ctx context.Context) error {
+	if w.restores != nil {
+		if e := w.restores.Recover(ctx); e != nil {
+			return e
+		}
+	}
 	jobs, e := w.store.RecoverableJobs(ctx)
 	if e != nil {
 		return e
@@ -358,6 +365,11 @@ func (w *Worker) execute(ctx context.Context, id string) error {
 
 // Run owns the execution loop. HTTP requests only append durable intents.
 func (w *Worker) Run(ctx context.Context) error {
+	if w.restores != nil {
+		if e := w.restores.Recover(ctx); e != nil {
+			return e
+		}
+	}
 	if e := w.Recover(ctx); e != nil {
 		return e
 	}
@@ -366,6 +378,17 @@ func (w *Worker) Run(ctx context.Context) error {
 	for {
 		if ctx.Err() != nil {
 			return nil
+		}
+		if w.restores != nil {
+			w.setStatus("running")
+			worked, e := w.restores.RunOne(ctx)
+			if e != nil {
+				return e
+			}
+			if worked {
+				w.setStatus("idle")
+				continue
+			}
 		}
 		// Capacity is an expected, visible control-plane limit. Keep status,
 		// existing downloads/settings and already queued work available.

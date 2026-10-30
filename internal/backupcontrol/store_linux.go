@@ -42,13 +42,14 @@ type receipt struct {
 	Settings *Settings `json:"settings,omitempty"`
 }
 type journal struct {
-	Version             int                `json:"version"`
-	Settings            Settings           `json:"settings"`
-	ScheduleChangedUnix int64              `json:"schedule_changed_unix"`
-	Jobs                map[string]Job     `json:"jobs"`
-	Archives            map[string]Archive `json:"archives"`
-	Receipts            map[string]receipt `json:"receipts"`
-	Deleting            map[string]bool    `json:"deleting"`
+	Restores            map[string]RestoreJob `json:"restores,omitempty"`
+	Version             int                   `json:"version"`
+	Settings            Settings              `json:"settings"`
+	ScheduleChangedUnix int64                 `json:"schedule_changed_unix"`
+	Jobs                map[string]Job        `json:"jobs"`
+	Archives            map[string]Archive    `json:"archives"`
+	Receipts            map[string]receipt    `json:"receipts"`
+	Deleting            map[string]bool       `json:"deleting"`
 }
 type Store struct {
 	mu        sync.Mutex
@@ -190,6 +191,10 @@ func (s *Store) Close() error {
 }
 func cloneJournal(d journal) journal {
 	x := d
+	x.Restores = make(map[string]RestoreJob, len(d.Restores))
+	for k, v := range d.Restores {
+		x.Restores[k] = v
+	}
 	x.Jobs = make(map[string]Job, len(d.Jobs))
 	for k, v := range d.Jobs {
 		x.Jobs[k] = v
@@ -266,7 +271,18 @@ func validateJournal(d journal) error {
 	if d.Version != 1 || ValidateSettings(d.Settings) != nil || d.ScheduleChangedUnix <= 0 || d.Jobs == nil || d.Archives == nil || d.Receipts == nil || d.Deleting == nil || len(d.Jobs) > MaxJobs || len(d.Archives) > MaxArchives || len(d.Receipts) > MaxReceipts {
 		return ErrUnsafe
 	}
+	if len(d.Restores) > MaxRestores {
+		return ErrUnsafe
+	}
 	active := 0
+	for id, j := range d.Restores {
+		if id != j.ID || validateRestoreJob(j) != nil {
+			return ErrUnsafe
+		}
+		if !Terminal(j.State) {
+			active++
+		}
+	}
 	for id, j := range d.Jobs {
 		if id != j.ID || validateJob(j) != nil {
 			return ErrUnsafe
@@ -293,6 +309,10 @@ func validateJournal(d journal) error {
 		switch r.Kind {
 		case "create", "cancel", "schedule":
 			if _, ok := d.Jobs[r.JobID]; !ok || r.Settings != nil {
+				return ErrUnsafe
+			}
+		case "restore":
+			if _, ok := d.Restores[r.JobID]; !ok || r.Settings != nil {
 				return ErrUnsafe
 			}
 		case "settings":
@@ -366,6 +386,9 @@ func validActorEvent(actor, event string) bool {
 	return actorPattern.MatchString(actor) && eventPattern.MatchString(event) && !strings.HasPrefix(event, "schedule:")
 }
 func activeJobs(d journal) bool {
+	if activeRestore(d) {
+		return true
+	}
 	for _, j := range d.Jobs {
 		if !Terminal(j.State) {
 			return true
@@ -493,6 +516,9 @@ func (s *Store) UpdateSettings(ctx context.Context, r SettingsRequest) (Settings
 			return SettingsResponse{}, ErrConflict
 		}
 		return SettingsResponse{Settings: *old.Settings, Replayed: true}, nil
+	}
+	if activeRestore(s.data) {
+		return SettingsResponse{}, ErrBusy
 	}
 	if r.ExpectedRevision != s.data.Settings.Revision {
 		return SettingsResponse{}, ErrConflict
@@ -687,6 +713,14 @@ func (s *Store) Status(ctx context.Context) (Status, error) {
 	}
 	hash := sha256.Sum256([]byte(s.recipient))
 	out := Status{Enabled: true, RunnerStatus: "ready", RecipientFingerprint: hex.EncodeToString(hash[:]), Capabilities: Capabilities{Create: true, Download: true, Cancel: true, Schedules: true, Retention: true}, Settings: s.data.Settings, Jobs: []Job{}, Archives: archiveViews(s.data)}
+	for _, j := range s.data.Restores {
+		if !Terminal(j.State) {
+			out.RunnerStatus = "busy"
+		}
+		if j.State == "recovery_required" {
+			out.RunnerStatus = "recovery_required"
+		}
+	}
 	for _, j := range s.data.Jobs {
 		out.Jobs = append(out.Jobs, j)
 		if !Terminal(j.State) {

@@ -38,9 +38,11 @@ func run(args []string) int {
 		return 3
 	}
 	worker := backupworker.New(store, runtime, runtime, config)
+	restoreTimeout := time.Duration(config.BackupTimeoutSeconds+config.StopTimeoutSeconds+config.ResumeTimeoutSeconds) * time.Second
+	worker.SetRestoreCoordinator(backupworker.NewRestoreCoordinator(store, runtime, backupworker.NewLinuxRestoreRunner(runtime, store, nil), restoreTimeout))
 	// Fulfil an existing resume duty before validating the optional writer,
 	// archive filesystem, or starting the control socket.
-	recoverCtx, recoverCancel := context.WithTimeout(context.Background(), time.Duration(config.ResumeTimeoutSeconds+10)*time.Second)
+	recoverCtx, recoverCancel := context.WithTimeout(context.Background(), time.Duration(config.BackupTimeoutSeconds+config.StopTimeoutSeconds+config.ResumeTimeoutSeconds+10)*time.Second)
 	recoverErr := worker.RecoverService(recoverCtx)
 	recoverCancel()
 	if recoverErr != nil {
@@ -68,6 +70,9 @@ func run(args []string) int {
 	} else {
 		fmt.Fprintln(os.Stderr, "backup upload inbox unavailable; existing backup controls remain available")
 	}
+	restores := backupworker.NewRestoreCoordinator(store, runtime, backupworker.NewLinuxRestoreRunner(runtime, store, options.Uploads), restoreTimeout)
+	worker.SetRestoreCoordinator(restores)
+	options.Restores = restores
 	handler := backupcontrol.NewHandler(store, options)
 	serverDone := make(chan error, 1)
 	go func() { serverDone <- backupcontrol.ServeUnix(ctx, backupcontrol.SocketPath, runtime.UID(), handler) }()
@@ -121,7 +126,7 @@ func run(args []string) int {
 		serverFailed = <-serverDone != nil
 	}
 	// Normal cancellation also gets a final independent recovery attempt.
-	recovery, cancelRecovery := context.WithTimeout(context.Background(), time.Duration(config.ResumeTimeoutSeconds+10)*time.Second)
+	recovery, cancelRecovery := context.WithTimeout(context.Background(), time.Duration(config.BackupTimeoutSeconds+config.StopTimeoutSeconds+config.ResumeTimeoutSeconds+10)*time.Second)
 	recoveryErr := worker.RecoverService(recovery)
 	cancelRecovery()
 	if workerErr != nil || recoveryErr != nil || serverFailed {
