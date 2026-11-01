@@ -100,7 +100,9 @@ function markReceived(record: BackupUpload) {
 
 test("upload capability accepts true without enabling restoration and upload DTO never invents native verification", () => {
   expect(readBackupStatus(status()).capabilities.upload).toBe(true);
-  expect(() => readBackupStatus({ ...status(), capabilities: { ...status().capabilities, restore: true } })).toThrow();
+  expect(readBackupStatus(status()).capabilities.restore).toBe(false);
+  expect(readBackupStatus({ ...status(), capabilities: { ...status().capabilities, restore: true } }).capabilities.restore).toBe(true);
+  expect(() => readBackupStatus({ ...status(), capabilities: { ...status().capabilities, restore: "true" } })).toThrow();
   const value = upload(); expect(validBackupUpload(value)).toBe(true);
   expect(validBackupUpload({ ...value, state: "received", verification: "ciphertext_checksum_verified" })).toBe(false);
   expect(validBackupUpload({ ...value, verification: "restore_verified" })).toBe(false);
@@ -140,7 +142,11 @@ test("bounded worker hashing binds one streamed File upload to the exact ciphert
   const large = Buffer.alloc((3 << 20) + 17, 71); large[1024] = 29;
   await page.goto("/backups"); await select(page, large); await expect(start(page)).toBeEnabled(); await start(page).click();
   await expect(section(page).getByRole("link", { name: "Download uploaded copy" })).toBeVisible();
-  expect(f.writes).toHaveLength(2); expect(f.writes[1].bytes).toEqual(large);
+  expect(f.writes).toHaveLength(2);
+  // Buffer.equals compares every byte without the generic matcher's multi-MiB
+  // object traversal. Keep the existing 15-second browser budget unchanged.
+  expect(Buffer.isBuffer(f.writes[1].bytes)).toBe(true);
+  expect(f.writes[1].bytes?.equals(large)).toBe(true);
   expect(f.current.uploads[0].sha256).toBe(digest(large));
   await expect(section(page).getByText("Native contents have not been decrypted or validated.", { exact: true })).toBeVisible();
   expect(await page.evaluate(key => sessionStorage.getItem(key), uploadPendingKey("owner"))).toBeNull();
