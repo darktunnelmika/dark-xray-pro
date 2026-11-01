@@ -3,16 +3,13 @@ name: Publish reviewed restore source only — 20261101
 on:
   push:
     branches: [publish/native-panel-restore-20261101]
-  pull_request:
-    branches: [main]
-    paths: [.github/workflows/publish-native-restore-20261101.yml]
 
 permissions:
   contents: read
 
 jobs:
   publish-code-only:
-    if: github.repository == 'darktunnelmika/dark-xray-pro' && (github.ref == 'refs/heads/publish/native-panel-restore-20261101' || (github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'publish/native-panel-restore-20261101'))
+    if: github.repository == 'darktunnelmika/dark-xray-pro' && github.ref == 'refs/heads/publish/native-panel-restore-20261101'
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
@@ -22,7 +19,7 @@ jobs:
         with:
           ref: 59e69e22119bd7e18e098a72e2799e12e893f37c
           fetch-depth: 0
-      - name: Fetch only the code bundle over pinned TLS and verify exact identities
+      - name: Fetch pinned code; keep all workflow files unchanged
         shell: bash
         run: |
           set -euo pipefail
@@ -56,11 +53,21 @@ jobs:
           echo "125cd343c9a1441f6772d86dc10cfce79ba036a70e3d6304128efee211fbfa82  $RUNNER_TEMP/reviewed-source.bundle" | sha256sum --check --strict
           git bundle verify "$RUNNER_TEMP/reviewed-source.bundle"
           git -c core.hooksPath=/dev/null fetch --no-tags "$RUNNER_TEMP/reviewed-source.bundle" refs/heads/feat/native-panel-restore-v1:refs/remotes/review/restore
-          target=23a765e085744f3311b977c20a0f0e64a243898c
-          test "$(git rev-parse refs/remotes/review/restore)" = "$target"
-          test "$(git rev-parse "$target^{tree}")" = add6afa051a675963a97965b8c60b53e98eea4af
-          git merge-base --is-ancestor 59e69e22119bd7e18e098a72e2799e12e893f37c "$target"
-          test "$(git rev-list --count 59e69e22119bd7e18e098a72e2799e12e893f37c.."$target")" = 2
+          test "$(git rev-parse refs/remotes/review/restore)" = 23a765e085744f3311b977c20a0f0e64a243898c
+          test "$(git rev-parse 'refs/remotes/review/restore^{tree}')" = add6afa051a675963a97965b8c60b53e98eea4af
+          # Actions' token is not authorized to write workflows. Publish only
+          # code here. The authorized connector adds the separate CI workflow.
+          export GIT_INDEX_FILE="$RUNNER_TEMP/code-only-index"
+          git read-tree 'refs/remotes/review/restore^{tree}'
+          git update-index --cacheinfo 100644,0217c133f33fb6071c2ffd20430595e3dd9d3d5e,.github/workflows/ci.yml
+          tree=$(git write-tree)
+          test "$tree" = 458f0e3e692efb8da4f8c39959f62668fda5d57f
+          export GIT_AUTHOR_NAME=darktunnelmika GIT_COMMITTER_NAME=darktunnelmika
+          export GIT_AUTHOR_EMAIL=mikakhadmi@gmail.com GIT_COMMITTER_EMAIL=mikakhadmi@gmail.com
+          export GIT_AUTHOR_DATE=2026-11-01T11:20:00Z GIT_COMMITTER_DATE=2026-11-01T11:20:00Z
+          target=$(printf '%s\n' 'test: harden restore space checks and add disposable systemd acceptance source' | git -c commit.gpgsign=false commit-tree "$tree" -p 3279b15f4f842175a168bdc24be40da1c3f6f610)
+          test "$target" = 16b9de83702e5561f8c3a664b06e031466027755
+          git diff --exit-code 59e69e22119bd7e18e098a72e2799e12e893f37c "$target" -- .github/workflows
           git diff --check 59e69e22119bd7e18e098a72e2799e12e893f37c "$target"
           existing=$(git ls-remote --heads origin refs/heads/feat/native-panel-restore-v1 | cut -f1)
           if [ -n "$existing" ]; then
@@ -70,4 +77,4 @@ jobs:
             git -c core.hooksPath=/dev/null push origin "$target:refs/heads/feat/native-panel-restore-v1"
           fi
           test "$(git ls-remote --heads origin refs/heads/feat/native-panel-restore-v1 | cut -f1)" = "$target"
-          echo 'Exact source published. No merge, deployment, server command, or financial data operation.'
+          echo 'Code published only. No workflow update, merge, deployment or database operation.'
