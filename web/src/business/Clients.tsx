@@ -38,7 +38,6 @@ export default function Clients({ model }: { model: BusinessModel }) {
         <button type="submit" disabled={actionBusy}>{t.saveClient}</button>
       </form>}
       <ClientListExplorer model={model}/>
-      {session.user.role === "owner" && <DarkRestoreReview model={model}/>}
       <div className="business-panel">
         <h3>{t.clientLifecycle}</h3>
         <label>{t.chooseClient}
@@ -85,5 +84,6 @@ export default function Clients({ model }: { model: BusinessModel }) {
           <button disabled={!clientOps || clientOps.length < 50} onClick={() => setClientOpsOffset((x) => x + 50)}>{t.next}</button>
         </div>
       </div>}
+      {session.user.role === "owner" && <DarkRestoreReview model={model}/>}
   </>;
 }
