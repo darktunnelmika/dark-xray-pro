@@ -1,0 +1,73 @@
+name: Publish reviewed restore source only — 20261101
+
+on:
+  push:
+    branches: [publish/native-panel-restore-20261101]
+  pull_request:
+    branches: [main]
+    paths: [.github/workflows/publish-native-restore-20261101.yml]
+
+permissions:
+  contents: read
+
+jobs:
+  publish-code-only:
+    if: github.repository == 'darktunnelmika/dark-xray-pro' && (github.ref == 'refs/heads/publish/native-panel-restore-20261101' || (github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'publish/native-panel-restore-20261101'))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 59e69e22119bd7e18e098a72e2799e12e893f37c
+          fetch-depth: 0
+      - name: Fetch only the code bundle over pinned TLS and verify exact identities
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > "$RUNNER_TEMP/code-transfer-ca.pem" <<'CERT'
+          -----BEGIN CERTIFICATE-----
+          MIIDJDCCAgygAwIBAgIUb9cUMFkGQto5PUmKo75Y2YPXE74wDQYJKoZIhvcNAQEL
+          BQAwGTEXMBUGA1UEAwwOODAuMjUzLjI1NS4xODEwHhcNMjYxMTAxMTExODQ1WhcN
+          MjYxMTAyMTExODQ1WjAZMRcwFQYDVQQDDA44MC4yNTMuMjU1LjE4MTCCASIwDQYJ
+          KoZIhvcNAQEBBQADggEPADCCAQoCggEBAMqNj1VZkmFeO6gkkonsVMOfwZzYpW4i
+          FVShxB6Y3p/i8lxSHlkljG1tmmn7t3Aavwhzmk1VHsIqEEzm1fGCO64qhUdIwwJi
+          vq4HAlcYn3JQzkMBa7jACmFsrST2A8nQnUhTUskGl7hCSfv2BW/HE+fteMWxymJR
+          N1Bu7qez7QzLDlqIkfCOyYTG4LVhiTdNZnmaJ6L/kAvjng4jvy3JDZ5OcxlZbI0n
+          KlrWZLWhOJKNvc5XOz7URqAFrpGGlNFVjQ+MS3KJbgKar/Pwh2IfBfKPkG+oJHHc
+          s2Bzy9Cp4TQ0e5GAm2qpAIy72N1DbNcLPXKgU3DLfUdo20+N/0l0l0ECAwEAAaNk
+          MGIwHQYDVR0OBBYEFBzql5vZ7fejQEi6loRVimSzM/qUMB8GA1UdIwQYMBaAFBzq
+          l5vZ7fejQEi6loRVimSzM/qUMA8GA1UdEwEB/wQFMAMBAf8wDwYDVR0RBAgwBocE
+          UP3/tTANBgkqhkiG9w0BAQsFAAOCAQEAxAwgEZsnXBfdkQq6m5/LpjvUXp8BNOBk
+          joe7QjYJ4egZCLldnNv5A1mOXV+0SZcpdG4MulMEgH6xsIryYD/3Bz5MB4nnQVmb
+          tTAT84EI2oQEl3t8GxtEgDFdktUAWehGPglID2p66O0VvXI2q11IR7/WOx6ZYfy4
+          d91eY6FiiO+kBn64XX33Qw9WsHVFxqnoqyHj9KrVERYLWi6AHvVoxy9E7tEb2i4O
+          wh4ZCy3Whuf5Aqv6DWbxmnOhBjkd3PP9nTzYlZowz1NLRa6Bfsy+XKHa80rR5ZQ9
+          DAdbPDT4SM8iuKQxB1mkF7P/nqnL3JGDSkFERdpi25jUpxLeCSkuYA==
+          -----END CERTIFICATE-----
+          CERT
+          curl --fail --silent --show-error --proto '=https' --tlsv1.2 \
+            --cacert "$RUNNER_TEMP/code-transfer-ca.pem" --connect-timeout 10 --max-time 60 \
+            --max-filesize 47387 \
+            'https://80.253.255.181:28444/code-only/fa7abac82ce122e961272cf838755211dc146a385519f07a.bundle' \
+            --output "$RUNNER_TEMP/reviewed-source.bundle"
+          test "$(stat -c %s "$RUNNER_TEMP/reviewed-source.bundle")" = 47387
+          echo "125cd343c9a1441f6772d86dc10cfce79ba036a70e3d6304128efee211fbfa82  $RUNNER_TEMP/reviewed-source.bundle" | sha256sum --check --strict
+          git bundle verify "$RUNNER_TEMP/reviewed-source.bundle"
+          git -c core.hooksPath=/dev/null fetch --no-tags "$RUNNER_TEMP/reviewed-source.bundle" refs/heads/feat/native-panel-restore-v1:refs/remotes/review/restore
+          target=23a765e085744f3311b977c20a0f0e64a243898c
+          test "$(git rev-parse refs/remotes/review/restore)" = "$target"
+          test "$(git rev-parse "$target^{tree}")" = add6afa051a675963a97965b8c60b53e98eea4af
+          git merge-base --is-ancestor 59e69e22119bd7e18e098a72e2799e12e893f37c "$target"
+          test "$(git rev-list --count 59e69e22119bd7e18e098a72e2799e12e893f37c.."$target")" = 2
+          git diff --check 59e69e22119bd7e18e098a72e2799e12e893f37c "$target"
+          existing=$(git ls-remote --heads origin refs/heads/feat/native-panel-restore-v1 | cut -f1)
+          if [ -n "$existing" ]; then
+            test "$existing" = "$target"
+            echo 'Exact reviewed branch already published; no mutation.'
+          else
+            git -c core.hooksPath=/dev/null push origin "$target:refs/heads/feat/native-panel-restore-v1"
+          fi
+          test "$(git ls-remote --heads origin refs/heads/feat/native-panel-restore-v1 | cut -f1)" = "$target"
+          echo 'Exact source published. No merge, deployment, server command, or financial data operation.'
