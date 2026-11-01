@@ -352,6 +352,27 @@ jobs:
           DARK_PRO_TEST_VOLUME_REFUND_BROWSER: "1"
           DARK_PRO_TEST_VOLUME_REFUND_BROWSER_SCRIPT: ${{ github.workspace }}/web/tests/live-volume-refunds.mjs
         run: go test -race ./internal/api -run '^TestRealBrowser(SellerManagementV2|VolumeRefunds)$' -count=1 -v -timeout=180s
+      - name: Prove owner assignments and representative isolation through real SQLite
+        working-directory: ${{ github.workspace }}
+        env:
+          DARK_PRO_TEST_OWNERSHIP_BROWSER: "1"
+          DARK_PRO_TEST_WEB_DIST: ${{ github.workspace }}/web/dist
+          DARK_PRO_TEST_OWNERSHIP_BROWSER_SCRIPT: ${{ github.workspace }}/web/tests/live-client-ownership.mjs
+        shell: bash
+        run: |
+          set -euo pipefail
+          go test -race ./internal/api -run '^TestRealBrowserClientOwnership$' -count=1 -json -timeout=180s > "$RUNNER_TEMP/ownership-browser.jsonl" || { cat "$RUNNER_TEMP/ownership-browser.jsonl"; exit 1; }
+          python3 - "$RUNNER_TEMP/ownership-browser.jsonl" <<'PYOWNERSHIP'
+          import json,sys
+          events=[json.loads(line) for line in open(sys.argv[1])]
+          for event in events:
+              if event.get('Output'): print(event['Output'],end='')
+          name='TestRealBrowserClientOwnership'
+          assert sum(e.get('Action')=='pass' and e.get('Test')==name for e in events)==1
+          assert not any(e.get('Action') in ('skip','fail') for e in events)
+          assert sum('REAL_CLIENT_OWNERSHIP_BROWSER_PASS' in e.get('Output','') for e in events)==1
+          assert not any('WARNING: DATA RACE' in e.get('Output','') for e in events)
+          PYOWNERSHIP
       - name: Upload failure evidence
         if: failure()
         uses: actions/upload-artifact@v4

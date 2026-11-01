@@ -6,6 +6,8 @@ import { dateTime, gb, uid, type Client } from "./shared";
 import "./ClientSales.css";
 import ClientBulkExtend from "./ClientBulkExtend";
 import { businessGranted } from "./permissionsV9";
+import ClientOwnershipTransfer from "./ClientOwnershipTransfer";
+import { loadOwnershipPending } from "./clientOwnership";
 
 type Filter = "all" | "pending" | "disabled" | "expired" | "archived" | "other";
 const words = {
@@ -25,7 +27,7 @@ const words = {
     matches:"Matches", loadingFilter:"Checking server filters…",
     bulkTitle:"Bulk client action",selectClient:"Select client",selectVisible:"Select up to 50 visible",clear:"Clear",
     selectedCount:"selected",action:"Action",disableAction:"Disable",enableAction:"Enable",
-    archiveAction:"Archive (keep history)",extendAction:"Renew / top up",
+    archiveAction:"Archive (keep history)",extendAction:"Renew / top up",transferAction:"Assign to representative",transferNote:"Assignment changes current management, not the original payer. Select up to 50 here, or a complete group of up to 500 in the assignment form.",
     reason:"Required audit reason",
     execute:"Apply to selected",confirm:"Apply this action to the selected clients? All records are checked together; financial usage is never deleted.",
     archiveConfirm:"Archive selected clients? Client IDs, UUIDs and ALL historical usage/credits stay intact. This does not remove any Xray process.",
@@ -49,7 +51,7 @@ const words = {
     matches:"تعداد کل",loadingFilter:"در حال دریافت فیلترهای سرور…",
     bulkTitle:"مدیریت گروهی کلاینت‌ها",selectClient:"انتخاب کلاینت",selectVisible:"انتخاب حداکثر ۵۰ مورد نمایان",clear:"پاک‌کردن انتخاب",
     selectedCount:"انتخاب‌شده",action:"عملیات",disableAction:"غیرفعال",enableAction:"فعال‌سازی منطقی",
-    archiveAction:"آرشیو (با حفظ سوابق)",extendAction:"تمدید / افزایش حجم",
+    archiveAction:"آرشیو (با حفظ سوابق)",extendAction:"تمدید / افزایش حجم",transferAction:"واگذاری به نماینده",transferNote:"واگذاری، مدیر فعلی را تغییر می‌دهد نه پرداخت‌کنندهٔ قبلی را. اینجا تا ۵۰ کاربر انتخاب کن یا از فرم واگذاری، یک گروه کامل تا ۵۰۰ عضو را انتخاب کن.",
     reason:"دلیل ضروری برای حسابرسی",
     execute:"اعمال به انتخاب‌شده‌ها",confirm:"این عملیات روی کلاینت‌های انتخاب‌شده اعمال شود؟ همه هم‌زمان بررسی می‌شوند و هیچ مصرف مالی حذف نمی‌شود.",
     archiveConfirm:"کلاینت‌ها آرشیو شوند؟ شناسه‌ها، UUID و تمام مصرف و اعتبار تاریخی می‌مانند؛ هیچ پردازش Xray مستقیم حذف نمی‌شود.",
@@ -75,9 +77,10 @@ export default function ClientListExplorer({model}: {model:BusinessModel}) {
   const copy=words[language];
   const canManageBulk=businessGranted(session.user,"manage_clients");
   const canRenewBulk=businessGranted(session.user,"renew_clients");
+  const canTransfer=session.user.role==="owner" && model.me?.capabilities?.client_ownership_v1===true;
   const [selected,setSelected]=useState<string[]>([]);
-  const [bulkAction,setBulkAction]=useState<"disable"|"enable"|"archive"|"extend">(
-    canManageBulk?"disable":"extend");
+  const [bulkAction,setBulkAction]=useState<"disable"|"enable"|"archive"|"extend"|"transfer">(
+    session.user.role==="owner"&&loadOwnershipPending(session.user.id)?"transfer":canManageBulk?"disable":"extend");
   const [bulkReason,setBulkReason]=useState("");
   const pendingBulk=useRef<{key:string;id:string}|null>(null);
   useEffect(()=>{
@@ -94,7 +97,8 @@ export default function ClientListExplorer({model}: {model:BusinessModel}) {
   const matches=valid?safe:[];
   const more=clientHasMore===null?(valid&&matches.length===clientLimit):clientHasMore;
   const total=valid&&clientTotal!==null?clientTotal.toLocaleString("en-US"):"—";
-  const allowedSelected=selected.filter(id=>valid&&matches.some(c=>c.id===id&&!c.archived));
+  const transferMode=bulkAction==="transfer" && canTransfer;
+  const allowedSelected=selected.filter(id=>valid&&matches.some(c=>c.id===id&&(!c.archived||transferMode)));
   const canSelect=valid&&!actionBusy&&(canManageBulk||canRenewBulk);
   function toggle(id:string,checked:boolean){
     if(!canSelect)return;
@@ -106,7 +110,7 @@ export default function ClientListExplorer({model}: {model:BusinessModel}) {
     });
   }
   async function executeBulk(){
-    if(bulkAction==="extend"||!canSelect||allowedSelected.length<1||allowedSelected.length>50||
+    if(bulkAction==="extend"||bulkAction==="transfer"||!canSelect||allowedSelected.length<1||allowedSelected.length>50||
       bulkReason.trim().length<1||bulkReason.trim().length>200){
       setNotice(copy.missingReason);return;
     }
@@ -167,8 +171,8 @@ export default function ClientListExplorer({model}: {model:BusinessModel}) {
       </div>
       {allowedSelected.length>=50 && <p role="status">{copy.tooMany}</p>}
       <div className="clients-bulk-quick">
-        <button type="button" disabled={!canSelect||!matches.some(c=>!c.archived)}
-          onClick={()=>setSelected(matches.filter(c=>!c.archived).slice(0,50).map(c=>c.id))}>
+        <button type="button" disabled={!canSelect||!matches.some(c=>!c.archived||transferMode)}
+          onClick={()=>setSelected(matches.filter(c=>!c.archived||transferMode).slice(0,50).map(c=>c.id))}>
           <CheckSquare size={14}/>{copy.selectVisible}</button>
         <button type="button" disabled={!canSelect||allowedSelected.length===0}
           onClick={()=>setSelected([])}>{copy.clear}</button>
@@ -180,19 +184,22 @@ export default function ClientListExplorer({model}: {model:BusinessModel}) {
           {canManageBulk&&<option value="enable">{copy.enableAction}</option>}
           {canManageBulk&&<option value="archive">{copy.archiveAction}</option>}
           {canRenewBulk&&<option value="extend">{copy.extendAction}</option>}
+          {canTransfer&&<option value="transfer">{copy.transferAction}</option>}
         </select></label>
         <label>{copy.reason}<input type="text" value={bulkReason} maxLength={200}
           disabled={!canSelect} onChange={e=>setBulkReason(e.target.value)}
           placeholder={copy.reason}/></label>
       </div>
-      {bulkAction==="extend"
+      {bulkAction==="transfer"
+        ? <ClientOwnershipTransfer key={session.user.id} model={model} selected={allowedSelected} reason={bulkReason} onCommitted={()=>{setSelected([]);setBulkReason("");}}/>
+        : bulkAction==="extend"
         ? <ClientBulkExtend model={model} selected={allowedSelected} reason={bulkReason}
             onCommitted={()=>{setSelected([]);setBulkReason("");}}/>
         : <button type="button" className="clients-bulk-submit"
             disabled={!canSelect||!allowedSelected.length||!bulkReason.trim()}
             onClick={()=>void executeBulk()}>
             <Archive size={14}/>{copy.execute}</button>}
-      <p><AlertTriangle size={14}/>{copy.bulkNote}</p>
+      <p><AlertTriangle size={14}/>{bulkAction==="transfer"?copy.transferNote:copy.bulkNote}</p>
     </div>}
     <div className="clients-explorer-list">
       {valid&&matches.map(c=>{
@@ -206,7 +213,7 @@ export default function ClientListExplorer({model}: {model:BusinessModel}) {
             <label className="clients-bulk-checkbox">
               <input type="checkbox" aria-label={copy.selectClient+" "+c.id}
                 checked={allowedSelected.includes(c.id)}
-                disabled={!canSelect||c.archived||
+                disabled={!canSelect||(c.archived&&!transferMode)||
                   (allowedSelected.length>=50&&!allowedSelected.includes(c.id))}
                 onChange={e=>toggle(c.id,e.target.checked)}/>
             </label>

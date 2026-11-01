@@ -1,0 +1,34 @@
+
+.ownership-transfer { display: grid; gap: 13px; padding: 16px; margin-top: 12px; border: 1px solid var(--border); border-radius: 16px; background: var(--surface); min-width: 0; }
+.ownership-transfer header { display: flex; gap: 10px; align-items: flex-start; }
+.ownership-transfer header > svg { color: var(--accent); flex: 0 0 auto; margin-top: 3px; }
+.ownership-transfer h4, .ownership-transfer p { margin: 0; }
+.ownership-transfer h4 { font-size: 14px; }
+.ownership-transfer p, .ownership-transfer summary, .ownership-transfer small { font-size: 12px; line-height: 1.85; color: var(--sub); }
+.ownership-safe { display: flex; gap: 8px; padding: 12px; border-radius: 12px; background: var(--accent-wash); }
+.ownership-safe svg { flex: 0 0 auto; margin-top: 4px; }
+.ownership-funding summary { cursor: pointer; }
+.ownership-funding p { padding: 8px 0; }
+.ownership-fields, .ownership-picker { display: grid; gap: 10px; min-width: 0; }
+.ownership-transfer label { display: grid; gap: 7px; font-size: 12px; }
+.ownership-transfer input, .ownership-transfer select { box-sizing: border-box; width: 100%; max-width: 100%; min-width: 0; border: 1px solid var(--border); border-radius: 10px; color: var(--text); background: var(--surface-2); padding: 10px; font: inherit; }
+.ownership-search { display: flex; align-items: center; gap: 8px; }
+.ownership-search input { flex: 1; }
+.ownership-picker-options { display: grid; grid-template-columns: repeat(auto-fit,minmax(min(100%,190px),1fr)); gap: 8px; max-height: 230px; overflow-y: auto; }
+.ownership-transfer button { border: 1px solid var(--border); border-radius: 10px; padding: 9px 12px; background: var(--surface-2); color: var(--text); font: inherit; font-size: 12px; cursor: pointer; min-height: 38px; white-space: normal; overflow-wrap: anywhere; }
+.ownership-transfer button:disabled { opacity: .5; cursor: not-allowed; }
+.ownership-picker-options button { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 3px 8px; text-align: start; }
+.ownership-picker-options button > small { grid-row: 2; overflow-wrap: anywhere; }
+.ownership-picker-options button[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-wash); }
+.ownership-chosen strong, .ownership-transfer code, .ownership-transfer bdi { overflow-wrap: anywhere; }
+.ownership-transfer code { font-size: 11px; display: block; }
+.ownership-pages, .ownership-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.ownership-transfer .ownership-primary { display: inline-flex; align-items: center; justify-content: center; gap: 8px; color: var(--accent-contrast); background: var(--accent); border-color: var(--accent); }
+.ownership-preview, .ownership-pending, .ownership-receipt { display: grid; gap: 12px; padding: 13px; border: 1px solid var(--border); border-radius: 12px; min-width: 0; }
+.ownership-members { display: grid; grid-template-columns: repeat(auto-fit,minmax(min(100%,220px),1fr)); gap: 8px; max-height: 400px; overflow: auto; }
+.ownership-members article { display: grid; gap: 4px; background: var(--surface-2); border-radius: 10px; padding: 10px; font-size: 12px; min-width: 0; overflow-wrap: anywhere; }
+.ownership-transfer .ownership-consent { display: flex; align-items: flex-start; gap: 9px; line-height: 1.9; }
+.ownership-consent input { width: 17px; height: 17px; flex: 0 0 auto; margin-top: 4px; }
+.ownership-warning { background: var(--amber-bg); color: var(--amber) !important; padding: 10px; border-radius: 10px; }
+.ownership-receipt strong { display: flex; gap: 8px; align-items: center; color: var(--accent); }
+@media(max-width:480px) { .ownership-transfer { padding: 11px; } .ownership-actions > button { flex: 1 1 130px; } }

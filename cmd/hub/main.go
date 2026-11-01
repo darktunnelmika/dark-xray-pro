@@ -106,6 +106,10 @@ func main() {
 		os.Getenv("DARK_PRO_ENABLE_USAGE_LEDGER") != "1" || os.Getenv("DARK_PRO_ENABLE_NATIVE_INBOUNDS") != "1") {
 		log.Fatal("volume refunds require the private PRO business store, authoritative usage ledger and native inbound identity")
 	}
+	clientOwnership, ownershipErr := clientOwnershipLabEnabled(os.Getenv)
+	if ownershipErr != nil {
+		log.Fatal(ownershipErr)
+	}
 	sellerOrders, scopeErr := sellerOrdersLabEnabled(os.Getenv)
 	if scopeErr != nil {
 		log.Fatal(scopeErr)
@@ -272,6 +276,11 @@ func main() {
 	if volumeRefunds == "1" {
 		if err := service.EnableVolumeRefunds(context.Background()); err != nil {
 			log.Fatal("private volume refund accounting unavailable: ", err)
+		}
+	}
+	if clientOwnership {
+		if err := service.EnableClientOwnershipV1Lab(context.Background()); err != nil {
+			log.Fatal("client ownership initialization failed: ", err)
 		}
 	}
 	if sellerOrders {

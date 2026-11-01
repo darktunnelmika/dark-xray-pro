@@ -262,21 +262,31 @@ type volumeRefundEvaluation struct {
 }
 
 func (s *Store) evaluateVolumeRefund(ctx context.Context, tx *sql.Tx, key []byte, c Client, now int64) (volumeRefundEvaluation, error) {
+	origin, ownershipRevision, identityErr := ownershipOrigin(ctx, tx, c)
+	if identityErr != nil {
+		return volumeRefundEvaluation{}, identityErr
+	}
+	fundingClient := c
+	fundingClient.RepresentativeID = origin
 	v := volumeRefundEvaluation{client: c, status: VolumeExpiryRefundStatus{
-		Request: refundRequestFor(c), RepresentativeID: c.RepresentativeID, Generation: volumeRefundGeneration(c),
+		Request: refundRequestFor(c), RepresentativeID: origin, Generation: volumeRefundGeneration(fundingClient),
 		VolumeBytes: c.VolumeBytes, State: "not_due",
 	}}
 	if c.PlanKind != "volume" {
 		v.status.State = "not_volume"
 		return v, nil
 	}
-	rep, err := readRep(ctx, tx, c.RepresentativeID)
+	rep, err := readRep(ctx, tx, origin)
 	if err != nil {
 		return v, err
 	}
 	v.rep = rep
 	if rep.Kind != "representative" || rep.ID == "owner" {
 		v.status.State = "owner_exempt"
+		if ownershipRevision > 0 {
+			v.status.State = "funding_unproven"
+			v.status.Reason = "transferred_owner_capacity_requires_review"
+		}
 		return v, nil
 	}
 	old, err := readVolumeRefundReceipt(ctx, tx, v.status.Request)
@@ -296,12 +306,15 @@ func (s *Store) evaluateVolumeRefund(ctx context.Context, tx *sql.Tx, key []byte
 	} else {
 		return v, nil
 	}
-	funded, prior, proven, err := refundableFunding(ctx, tx, c)
+	funded, prior, proven, err := refundableFunding(ctx, tx, fundingClient)
 	if err != nil {
 		return v, err
 	}
 	if !proven {
 		v.status.State, v.status.Reason = "funding_unproven", "immutable_representative_debits_incomplete"
+		if ownershipRevision > 0 {
+			v.status.Reason = "transferred_mixed_or_unproven_funding_requires_review"
+		}
 		return v, nil
 	}
 	v.prior = prior
@@ -362,6 +375,12 @@ func (s *Store) evaluateVolumeRefund(ctx context.Context, tx *sql.Tx, key []byte
 }
 
 func (s *Store) VolumeExpiryRefundStatus(ctx context.Context, key []byte, clientID string) (VolumeExpiryRefundStatus, error) {
+	return s.VolumeExpiryRefundStatusScoped(ctx, key, clientID, "")
+}
+func (s *Store) VolumeExpiryRefundStatusScoped(ctx context.Context, key []byte, clientID, scope string) (VolumeExpiryRefundStatus, error) {
+	if scope != "" && !idRE.MatchString(scope) {
+		return VolumeExpiryRefundStatus{}, ErrInvalid
+	}
 	if !idRE.MatchString(clientID) {
 		return VolumeExpiryRefundStatus{}, ErrInvalid
 	}
@@ -382,6 +401,9 @@ func (s *Store) VolumeExpiryRefundStatus(ctx context.Context, key []byte, client
 	}
 	if err != nil {
 		return VolumeExpiryRefundStatus{}, err
+	}
+	if scope != "" && c.RepresentativeID != scope {
+		return VolumeExpiryRefundStatus{}, ErrOwnershipDenied
 	}
 	v, err := s.evaluateVolumeRefund(ctx, tx, key, c, time.Now().UTC().Unix())
 	return v.status, err
@@ -439,14 +461,14 @@ func (s *Store) RefundExpiredVolume(ctx context.Context, key []byte, req VolumeE
 	if !ok {
 		return out, ErrConflict
 	}
-	receipt := VolumeExpiryRefundReceipt{Generation: v.status.Generation, ClientID: c.ID, RepresentativeID: c.RepresentativeID,
+	receipt := VolumeExpiryRefundReceipt{Generation: v.status.Generation, ClientID: c.ID, RepresentativeID: v.rep.ID,
 		Trigger: v.status.Trigger, ExpiresUnix: c.ExpiresUnix, ChargedVolumeBytes: c.ChargeVolumeBytes,
 		FundedBytes: *v.status.FundedBytes, PreviouslyRefunded: v.prior, UsedBytes: *v.status.UsedBytes,
 		RefundedBytes: refund, VolumeBefore: c.VolumeBytes, VolumeAfter: c.VolumeBytes - refund,
 		RepresentativeBefore: v.rep.VolumeCreditBytes, RepresentativeAfter: after, Proofs: v.proofs, CreatedUnix: time.Now().UTC().Unix()}
 	// Only volume changes. Existing triggers invalidate runtime generations;
 	// cumulative usage, UUID, paid-history counters and all token fields stay.
-	if _, err = tx.ExecContext(ctx, `UPDATE representatives SET volume_credit_bytes=? WHERE id=?`, after, c.RepresentativeID); err != nil {
+	if _, err = tx.ExecContext(ctx, `UPDATE representatives SET volume_credit_bytes=? WHERE id=?`, after, v.rep.ID); err != nil {
 		return out, err
 	}
 	if _, err = tx.ExecContext(ctx, `UPDATE clients SET volume_bytes=? WHERE id=?`, receipt.VolumeAfter, c.ID); err != nil {
@@ -458,7 +480,7 @@ func (s *Store) RefundExpiredVolume(ctx context.Context, key []byte, req VolumeE
 	}
 	if _, err = tx.ExecContext(ctx, `INSERT INTO volume_refund_receipts
  (generation,client_id,representative_id,client_uuid,expires_unix,charged_volume_bytes,trigger_kind,refunded_bytes,receipt_json,created_unix)
- VALUES(?,?,?,?,?,?,?,?,?,?)`, receipt.Generation, c.ID, c.RepresentativeID, c.UUID, c.ExpiresUnix, c.ChargeVolumeBytes,
+ VALUES(?,?,?,?,?,?,?,?,?,?)`, receipt.Generation, c.ID, v.rep.ID, c.UUID, c.ExpiresUnix, c.ChargeVolumeBytes,
 		receipt.Trigger, refund, raw, receipt.CreatedUnix); err != nil {
 		return out, err
 	}
@@ -482,8 +504,15 @@ func (s *Store) ListVolumeExpiryRefundCandidates(ctx context.Context, afterClien
 	if err := volumeRefundConfigured(ctx, s.db); err != nil {
 		return nil, err
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT c.id,c.expires_unix,c.charged_volume_bytes FROM clients c
- JOIN representatives r ON r.id=c.representative_id WHERE c.id>? AND c.plan_kind='volume'
+	payerJoin := "JOIN representatives r ON r.id=c.representative_id"
+	present, schemaErr := ownershipSchemaState(ctx, s.db)
+	if schemaErr != nil {
+		return nil, schemaErr
+	}
+	if present {
+		payerJoin = "LEFT JOIN client_ownership_origins_v1 o ON o.client_id=c.id JOIN representatives r ON r.id=COALESCE(o.representative_id,c.representative_id)"
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT c.id,c.expires_unix,c.charged_volume_bytes FROM clients c `+payerJoin+` WHERE c.id>? AND c.plan_kind='volume'
  AND r.kind='representative' AND (c.expires_unix<=? OR c.archived=1)
  AND NOT EXISTS(SELECT 1 FROM volume_refund_receipts f WHERE f.client_id=c.id AND f.expires_unix=c.expires_unix
  AND f.charged_volume_bytes=c.charged_volume_bytes) ORDER BY c.id LIMIT ?`, afterClientID, time.Now().UTC().Unix(), limit)

@@ -154,7 +154,11 @@ func (s *Server) attachVolumeRefunds(mux *http.ServeMux) {
 			respond(w, http.StatusForbidden, map[string]string{"error": "representative_scope_denied"})
 			return
 		}
-		status, err := s.business.VolumeExpiryRefundStatus(r.Context(), s.inboundKey, client.ID)
+		scope := ""
+		if session.User.Role != "owner" {
+			scope = session.User.RepresentativeID
+		}
+		status, err := s.business.VolumeExpiryRefundStatusScoped(r.Context(), s.inboundKey, client.ID, scope)
 		if err != nil {
 			businessError(w, err)
 			return

@@ -155,6 +155,9 @@ func readCatalog(ctx context.Context, tx *sql.Tx, id string) (CatalogProduct, er
 	return catalogScan(tx.QueryRowContext(ctx, "SELECT "+catalogColumns+" FROM catalog_products WHERE id=?", id))
 }
 func catalogEventReplayed(ctx context.Context, tx *sql.Tx, id, fp, action string) (bool, error) {
+	if err := rejectOwnershipEvent(ctx, tx, id); err != nil {
+		return false, err
+	}
 	var existingFP, existingAction string
 	err := tx.QueryRowContext(ctx, "SELECT fingerprint,action FROM catalog_events WHERE event_id=?", id).Scan(&existingFP, &existingAction)
 	if err == nil {

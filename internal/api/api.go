@@ -48,6 +48,7 @@ type Server struct {
 	labRevisions                *labrevision.Store
 	business                    *business.Store
 	sellerQuotaV2Enabled        bool // opt-in separate authorization and private migration gate
+	clientOwnershipV1Enabled    bool // startup-only owner reassignment gate
 	sellerOrdersV1Enabled       bool // startup-only, requires seller management and refund supervision
 	volumeRefunds               *volumeRefundService
 	loginGate                   *loginGate
@@ -151,6 +152,7 @@ func (s *Server) Handler() http.Handler {
 	s.attachCatalogPolicy(mux)
 	s.attachGroups(mux)
 	s.attachClientLifecycle(mux)
+	s.attachClientOwnership(mux)
 	s.attachClientProfileEdits(mux)
 	s.attachNativeInbounds(mux)
 	s.attachNativeInboundPlans(mux)

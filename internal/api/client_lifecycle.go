@@ -163,7 +163,15 @@ func (s *Server) attachClientLifecycle(mux *http.ServeMux) {
 			businessError(w, business.ErrInvalid)
 			return
 		}
-		result, err := s.business.ExtendClient(r.Context(), input)
+		session, authorized := s.authorizeBrowser(w, r, true, false)
+		if !authorized {
+			return
+		}
+		scope := ""
+		if session.User.Role != "owner" {
+			scope = session.User.RepresentativeID
+		}
+		result, err := s.business.ExtendClientScoped(r.Context(), input, scope)
 		if err != nil {
 			businessError(w, err)
 			return
@@ -187,7 +195,15 @@ func (s *Server) attachClientLifecycle(mux *http.ServeMux) {
 			businessError(w, business.ErrInvalid)
 			return
 		}
-		result, err := s.business.SetClientState(r.Context(), input)
+		session, authorized := s.authorizeBrowser(w, r, true, false)
+		if !authorized {
+			return
+		}
+		scope := ""
+		if session.User.Role != "owner" {
+			scope = session.User.RepresentativeID
+		}
+		result, err := s.business.SetClientStateScoped(r.Context(), input, scope)
 		if err != nil {
 			businessError(w, err)
 			return

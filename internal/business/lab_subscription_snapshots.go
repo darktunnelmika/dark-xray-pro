@@ -164,13 +164,17 @@ func (s *Store) currentSubscriptionProof(ctx context.Context, tx *sql.Tx, key []
 	if end := time.Now().UnixNano(); end < now || end >= expires {
 		return out, ErrConflict
 	}
+	stableRepresentative, _, identityErr := ownershipOrigin(ctx, tx, c)
+	if identityErr != nil {
+		return out, identityErr
+	}
 	binding := fingerprint("lab-subscription-applied-binding-v1", struct {
 		Handover                                                       MeteredHandoverView
 		Runtime                                                        mx.ProtocolHealthRequest
 		Generation                                                     uint64
 		ConfigSHA, ManifestSHA, ClientID, ClientUUID, RepresentativeID string
 		ClientExpiry                                                   int64
-	}{op, state.base, state.apply.payload.Generation, state.apply.payload.Candidate.SHA256, state.apply.payload.Candidate.ManifestSHA256, c.ID, c.UUID, c.RepresentativeID, c.ExpiresUnix})
+	}{op, state.base, state.apply.payload.Generation, state.apply.payload.Candidate.SHA256, state.apply.payload.Candidate.ManifestSHA256, c.ID, c.UUID, stableRepresentative, c.ExpiresUnix})
 	return subscriptionProof{Raw: raw, Round: round, State: state, Handover: op, BindingSHA: binding, Expires: expires, RouteCount: routeCount}, nil
 }
 

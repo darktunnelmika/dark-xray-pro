@@ -40,6 +40,8 @@ type backupSchemaObject [4]string
 
 func backupSchemaGroup(name string) string {
 	switch {
+	case strings.HasPrefix(name, "client_ownership_"):
+		return "ownership"
 	case strings.HasPrefix(name, "seller_order_"):
 		return "orders"
 	case strings.HasPrefix(name, "volume_refund_"):
@@ -180,6 +182,12 @@ func validateOfflineBackupDB(ctx context.Context, db *sql.DB) (BackupValidation,
 	}
 	if len(groups["sellers"]) > 0 {
 		if backupSchemaDigest(groups["sellers"]) != backupSellerSchemaFingerprint || sellerManagementConfiguredV2(ctx, db) != nil {
+			return result, ErrOfflineBackupInvalid
+		}
+	}
+	if len(groups["ownership"]) > 0 {
+		present, err := ownershipSchemaState(ctx, db)
+		if err != nil || !present || len(groups["usage"]) == 0 || validateOwnershipData(ctx, db) != nil {
 			return result, ErrOfflineBackupInvalid
 		}
 	}
