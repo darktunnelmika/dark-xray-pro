@@ -331,6 +331,9 @@ func (r *LinuxRestoreRunner) PrepareRestore(ctx context.Context, j backupcontrol
 	if e != nil {
 		return 0, e
 	}
+	if e = restoreapply.CheckSpace(HubStateDirectory, filepath.Join(dir, "transaction"), replacements, int(r.runtime.uid)); e != nil {
+		return 0, ErrPreflight
+	}
 	// Check the actual writable mount and UID transition before stopping HUB.
 	// This never opens a financial file and temporary names are not inventoried.
 	seen := map[string]bool{}

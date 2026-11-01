@@ -313,6 +313,9 @@ func (t *Transaction) Prepare(ctx context.Context, replacements []Replacement) e
 	if t.plan != nil || t.intent("start-restored.json") || t.intent("start-original.json") || len(replacements) == 0 || len(replacements) > 128 {
 		return ErrUnsafe
 	}
+	if e := CheckSpace(t.root, t.dir, replacements, t.uid); e != nil {
+		return e
+	}
 	if e := t.guard(); e != nil {
 		return e
 	}

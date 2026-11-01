@@ -103,6 +103,7 @@ location / {{ return 403; }}
                 upload = base + "/uploads/" + "c" * 32
                 for path, allowed in ((base, {"GET", "HEAD"}),
                                       (base + "/jobs", {"POST"}),
+                                      (base + "/restores", {"GET", "HEAD", "POST"}),
                                       (base + "/settings", {"PUT"}),
                                       (job, {"GET", "HEAD"}),
                                       (job + "/cancel", {"POST"}),
@@ -117,6 +118,7 @@ location / {{ return 403; }}
                     check(path + "/", set())
                     check(path + "/extra", set())
                 for path, method in ((base + "/jobs", "POST"),
+                                     (base + "/restores", "POST"),
                                      (base + "/settings", "PUT"),
                                      (job + "/cancel", "POST"),
                                      (base + "/uploads", "POST"),
