@@ -547,6 +547,15 @@ jobs:
           test -s release/bin/dark-pro-backup-worker
           test -s release/ops/systemd/dark-xray-pro-backup-worker.service
           test -s release/ops/nginx/native-backups.conf
+      - name: Real owner HTTPS and systemd restore on disposable runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          go test -c -o "$RUNNER_TEMP/panel-restore-fixture.test" ./internal/backupacceptance
+          sudo --non-interactive env GITHUB_ACTIONS=true RUNNER_ENVIRONMENT=github-hosted \
+            DARK_PRO_DISPOSABLE_RESTORE_ACCEPTANCE=1 GITHUB_SHA="$GITHUB_SHA" \
+            python3 scripts/ci/test-panel-restore-systemd.py --bundle "$PWD/release" \
+            --fixture "$RUNNER_TEMP/panel-restore-fixture.test"
       - name: Create verifiable LAB-only archive
         shell: bash
         run: |
