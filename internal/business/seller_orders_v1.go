@@ -209,6 +209,9 @@ func sellerOrderSchemaStateV1(ctx context.Context, q sellerQueryV2) (bool, error
 // Old paths retain their behavior when no seller-order schema exists. With it,
 // a claimed order nonce cannot become a separate credit or seller mutation.
 func rejectSellerOrderEventV1(ctx context.Context, tx *sql.Tx, eventID string) error {
+	if err := rejectOwnershipEvent(ctx, tx, eventID); err != nil {
+		return err
+	}
 	present, err := sellerOrderSchemaStateV1(ctx, tx)
 	if err != nil || !present {
 		return err
@@ -224,6 +227,9 @@ func rejectSellerOrderEventV1(ctx context.Context, tx *sql.Tx, eventID string) e
 }
 
 func newSellerOrderEventV1(ctx context.Context, tx *sql.Tx, eventID string) error {
+	if err := rejectOwnershipEvent(ctx, tx, eventID); err != nil {
+		return err
+	}
 	for _, table := range []string{"events", "client_operations", "client_profile_edits", "representative_control_events", "catalog_events", "catalog_policy_events", "seller_quota_events_v2", "representative_seller_permission_events_v2", "seller_state_events_v2"} {
 		var n int
 		if err := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM "+table+" WHERE event_id=?", eventID).Scan(&n); err != nil {

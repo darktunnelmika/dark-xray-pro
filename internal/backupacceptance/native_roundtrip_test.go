@@ -29,19 +29,22 @@ import (
 )
 
 type economicFixture struct {
-	root, path string
-	lock       *hubstate.Lock
-	inventory  hubstate.Inventory
-	token      string
-	creates    []business.SellerClientCreateV1
-	extends    []business.SellerClientExtendV1
-	orders     []business.SellerOrderReceiptV1
-	refund     business.VolumeExpiryRefundRequest
-	refunded   business.VolumeExpiryRefundReceipt
-	principal  usageledger.Principal
-	report     uc.Report
-	usage      uc.Receipt
-	state      economicState
+	root, path  string
+	lock        *hubstate.Lock
+	inventory   hubstate.Inventory
+	token       string
+	creates     []business.SellerClientCreateV1
+	extends     []business.SellerClientExtendV1
+	orders      []business.SellerOrderReceiptV1
+	refund      business.VolumeExpiryRefundRequest
+	refunded    business.VolumeExpiryRefundReceipt
+	principal   usageledger.Principal
+	report      uc.Report
+	usage       uc.Receipt
+	ownerToken  string
+	ownership   business.ClientOwnershipCommit
+	transferred business.ClientOwnershipReceipt
+	state       economicState
 }
 
 type economicState struct {
@@ -113,7 +116,7 @@ func newEconomicFixture(t *testing.T) economicFixture {
 	// after backup; restoring an absent meter as known zero would be unsafe.
 	_, err = s.CreateClient(ctx, business.NewClient{EventID: "backup-unknown-create-0001", ClientID: "backup-unknown", RepresentativeID: "backup-rep-b", Name: "Unmeasured historical customer", DurationDays: 30, IPCount: 1, VolumeBytes: 17})
 	require(t, err)
-	for _, enable := range []func(context.Context) error{s.EnableUsageLedger, s.EnableSellerQuotaV2, s.EnableVolumeExpiryRefunds, s.EnableSellerOrdersV1, s.EnableInboundExecution} {
+	for _, enable := range []func(context.Context) error{s.EnableUsageLedger, s.EnableSellerQuotaV2, s.EnableVolumeExpiryRefunds, s.EnableSellerOrdersV1, s.EnableInboundExecution, s.EnableClientOwnershipV1} {
 		require(t, enable(ctx))
 	}
 	_, err = s.ProvisionRepresentativeLogin(ctx, "backup-rep-a", "backup-representative", password)
@@ -180,6 +183,29 @@ func newEconomicFixture(t *testing.T) economicFixture {
 		t.Fatal("fixture refund did not return exactly the unused volume to the funding representative")
 	}
 	f.refunded = *returned.Receipt
+	// Preserve both a live unlimited customer and an archived/refunded volume
+	// customer through a group reassignment, encryption, restore and restart.
+	// Their original seller's immutable order receipts must still replay, while
+	// the current manager and active group membership belong to the destination.
+	f.ownerToken = owner.Token
+	for _, group := range []business.NewGroup{
+		{ID: "backup-source-group", RepresentativeID: "backup-rep-a", Name: "Original group"},
+		{ID: "backup-target-group", RepresentativeID: "backup-rep-b", Name: "Destination group"},
+	} {
+		_, err = s.CreateGroup(ctx, group)
+		require(t, err)
+	}
+	_, err = s.AssignGroupMembers(ctx, "backup-source-group", "backup-rep-a", []string{"backup-volume", "backup-unlimited"})
+	require(t, err)
+	intent := business.ClientOwnershipIntent{SourceGroupID: "backup-source-group", RepresentativeID: "backup-rep-b", GroupID: "backup-target-group", Reason: "Synthetic native restore ownership acceptance"}
+	quote, err := s.QuoteClientOwnership(ctx, owner.Token, intent)
+	require(t, err)
+	f.ownership = business.ClientOwnershipCommit{ClientOwnershipIntent: intent, EventID: "backup-ownership-transfer-0001", QuoteHash: quote.QuoteHash, QuoteUnix: quote.QuoteUnix}
+	f.transferred, err = s.CommitClientOwnership(ctx, owner.Token, f.ownership)
+	require(t, err)
+	if f.transferred.Count != 2 || f.transferred.BalanceChanged || f.transferred.UsageReset || f.transferred.CredentialsChanged {
+		t.Fatal("ownership transfer changed economic state or credentials")
+	}
 	f.state = captureEconomicState(t, s)
 	if f.state.Representatives[0].VolumeCreditBytes != 110 || f.state.Representatives[0].UnlimitedCreditUnits != 0 ||
 		f.state.Sellers[0].ReservedBytes != 850 || f.state.Sellers[0].ReservedUnits != 91 ||
@@ -192,7 +218,7 @@ func newEconomicFixture(t *testing.T) economicFixture {
 	f.inventory, err = hubstate.BuildInventory(hubstate.Options{Root: f.root, Registry: filepath.Join(f.root, "registry.json"),
 		Replacements: filepath.Join(f.root, "replacements.json"), BusinessDB: f.path, Listen: "127.0.0.1:2087", SourceRevision: strings.Repeat("a", 40),
 		Environment: []string{"DARK_PRO_LAB_MODE=1", "DARK_PRO_ENABLE_BUSINESS_CORE=1", hubstate.EnableEnv + "=1", "DARK_PRO_LAB_TOKEN=" + strings.Repeat("b", 64),
-			"DARK_PRO_ENABLE_USAGE_LEDGER=1", "DARK_PRO_ENABLE_SELLER_MANAGEMENT_V2=1", "DARK_PRO_ENABLE_VOLUME_REFUNDS_V1=1"}})
+			"DARK_PRO_ENABLE_USAGE_LEDGER=1", "DARK_PRO_ENABLE_SELLER_MANAGEMENT_V2=1", "DARK_PRO_ENABLE_VOLUME_REFUNDS_V1=1", "DARK_PRO_ENABLE_CLIENT_OWNERSHIP_V1=1"}})
 	require(t, err)
 	require(t, hubstate.WriteInventory(f.lock, f.inventory))
 	f.inventory, err = hubstate.LoadInventory(f.lock)
@@ -306,7 +332,7 @@ func TestNativeSnapshotEncryptedRestorePreservesFullEconomicStateAndReplay(t *te
 	require(t, err)
 	var encrypted bytes.Buffer
 	metadata := probackup.Metadata{BackupID: "native-economic-acceptance-v1", CreatedUnix: time.Now().Unix(), SourceRevision: f.inventory.SourceRevision,
-		BusinessSchemaVersion: int64(validation.SchemaVersion), FeatureVersions: map[string]int{"seller_quota": 2, "seller_orders": 1, "volume_refunds": 1, "usage_ledger": 1}}
+		BusinessSchemaVersion: int64(validation.SchemaVersion), FeatureVersions: map[string]int{"seller_quota": 2, "seller_orders": 1, "volume_refunds": 1, "usage_ledger": 1, "client_ownership": 1}}
 	manifest, err := probackup.Write(ctx, &encrypted, identity.Recipient().String(), metadata, files, probackup.DefaultLimits())
 	require(t, err)
 	verified, err := probackup.Verify(ctx, bytes.NewReader(encrypted.Bytes()), identity.String(), probackup.DefaultLimits())
@@ -361,6 +387,20 @@ func TestNativeSnapshotEncryptedRestorePreservesFullEconomicStateAndReplay(t *te
 		if !reflect.DeepEqual(f.state, captureEconomicState(t, s)) {
 			t.Fatal("UUID, expiry, limits, usage or balances changed on restored reopen")
 		}
+		transferred, err := s.CommitClientOwnership(ctx, f.ownerToken, f.ownership)
+		require(t, err)
+		if !transferred.Replayed {
+			t.Fatal("restored ownership request did not replay its original receipt")
+		}
+		transferred.Replayed = false
+		if !reflect.DeepEqual(transferred, f.transferred) {
+			t.Fatal("restored ownership history or captured usage changed")
+		}
+		members, err := s.ListGroupMembers(ctx, "backup-target-group", "backup-rep-b", 10, 0)
+		require(t, err)
+		if !reflect.DeepEqual(members, []string{"backup-unlimited", "backup-volume"}) {
+			t.Fatal("restored destination group lost transferred members")
+		}
 		var replayed []business.SellerOrderReceiptV1
 		for _, input := range f.creates {
 			r, err := s.CreateSellerClientV1(ctx, f.token, input)
@@ -406,7 +446,7 @@ func TestNativeSnapshotEncryptedRestorePreservesFullEconomicStateAndReplay(t *te
 	u := url.URL{Scheme: "file", Path: restoredDB}
 	db, err := sql.Open("sqlite", u.String())
 	require(t, err)
-	for _, table := range []string{"seller_order_receipts_v1", "volume_refund_receipts", "events", "client_operations", "seller_quota_events_v2", "pro_usage_receipts"} {
+	for _, table := range []string{"seller_order_receipts_v1", "volume_refund_receipts", "events", "client_operations", "seller_quota_events_v2", "pro_usage_receipts", "client_ownership_origins_v1", "client_ownership_entries_v1", "client_ownership_receipts_v1"} {
 		if _, err := db.Exec(`DELETE FROM "` + table + `"`); err == nil {
 			t.Fatal("restored immutable audit accepted deletion:", table)
 		}

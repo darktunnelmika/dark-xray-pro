@@ -179,6 +179,9 @@ func policyPermitsProduct(p CatalogPolicy, spec CatalogSpec, publish bool) bool 
 			(spec.PlanKind == "unlimited" && p.AllowUnlimited && spec.VolumeBytes == 0))
 }
 func catalogPolicyNonceTx(ctx context.Context, tx *sql.Tx, id, fingerprint string) (bool, error) {
+	if err := rejectOwnershipEvent(ctx, tx, id); err != nil {
+		return false, err
+	}
 	var previous string
 	err := tx.QueryRowContext(ctx, `SELECT fingerprint FROM catalog_policy_events WHERE event_id=?`, id).Scan(&previous)
 	if err == nil {

@@ -127,13 +127,17 @@ func (s *Store) currentInitialSubscriptionProof(ctx context.Context, tx *sql.Tx,
 	if end := time.Now().UnixNano(); end < now || end >= expires {
 		return out, ErrConflict
 	}
+	stableRepresentative, _, identityErr := ownershipOrigin(ctx, tx, c)
+	if identityErr != nil {
+		return out, identityErr
+	}
 	binding := fingerprint("initial-subscription-applied-binding-v1", struct {
 		InitialApplySHA                                                string
 		Runtime                                                        mx.ProtocolHealthRequest
 		Generation                                                     uint64
 		ConfigSHA, ManifestSHA, ClientID, ClientUUID, RepresentativeID string
 		ClientExpiry                                                   int64
-	}{initialSHA, state.base, state.apply.payload.Generation, state.apply.payload.Candidate.SHA256, state.apply.payload.Candidate.ManifestSHA256, c.ID, c.UUID, c.RepresentativeID, c.ExpiresUnix})
+	}{initialSHA, state.base, state.apply.payload.Generation, state.apply.payload.Candidate.SHA256, state.apply.payload.Candidate.ManifestSHA256, c.ID, c.UUID, stableRepresentative, c.ExpiresUnix})
 	return initialSubscriptionProof{Raw: raw, Round: round, State: state, BindingSHA: binding, Expires: expires}, nil
 }
 

@@ -228,6 +228,9 @@ func (s *Store) UpdateRepresentativeControl(ctx context.Context, input Represent
 	}
 	defer tx.Rollback()
 	// Same event nonce across credit, client/renewal, profile and control tables.
+	if err = rejectOwnershipEvent(ctx, tx, input.EventID); err != nil {
+		return out, err
+	}
 	var knownFP string
 	err = tx.QueryRowContext(ctx, `SELECT fingerprint FROM representative_control_events
   WHERE event_id=?`, input.EventID).Scan(&knownFP)

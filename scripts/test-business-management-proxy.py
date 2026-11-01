@@ -106,7 +106,10 @@ location / {{ return 403; }}
                           (seller + "/clients", {"POST"}),
                           (seller + "/clients/Client.test_01-2/extend", {"POST"}),
                           ("/api/v1/workspace/clients/Client.test_01-2/volume-refund", {"GET", "HEAD"}),
-                          ("/api/v1/workspace/volume-refunds", {"GET", "HEAD"}))
+                          ("/api/v1/workspace/volume-refunds", {"GET", "HEAD"}),
+                          ("/api/v1/workspace/clients/ownership/quote", {"POST"}),
+                          ("/api/v1/workspace/clients/ownership/commit", {"POST"}),
+                          ("/api/v1/workspace/clients/ownership/receipts/ownership-request-0001", {"GET", "HEAD"}))
                 for path, allowed in routes:
                     check(path, allowed)
                     check(path + "/extra/unknown", set())
@@ -136,6 +139,11 @@ location / {{ return 403; }}
                              seller + "/clients/a", seller + "/clients/a/archive", seller + "/clients/a/delete",
                              "/api/v1/workspace/clients/a/volume-refunds"):
                     check(path, set())
+                check("/api/v1/workspace/clients/ownership/receipts/short", set())
+                check("/api/v1/workspace/clients/ownership/receipts/" + "a" * 129, set())
+                before = len(Backend.seen)
+                assert request(port, "/api/v1/workspace/clients/ownership/commit", "POST", b"x" * (65536 + 1)) == 413
+                assert len(Backend.seen) == before, "oversized ownership request reached backend"
                 print("BUSINESS_MANAGEMENT_PROXY_PASS: exact routes, methods, IDs, Host and private-route denial")
             finally:
                 process.terminate()

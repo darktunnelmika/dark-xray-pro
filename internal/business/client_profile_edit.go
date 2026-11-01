@@ -253,6 +253,9 @@ func (s *Store) CommitClientProfileEdit(ctx context.Context, input ClientProfile
 		return out, err
 	}
 	defer tx.Rollback()
+	if err = rejectOwnershipEvent(ctx, tx, input.EventID); err != nil {
+		return out, err
+	}
 	var priorFP string
 	existing := tx.QueryRowContext(ctx, `SELECT fingerprint FROM client_profile_edits WHERE event_id=?`, input.EventID).Scan(&priorFP)
 	switch {
@@ -276,7 +279,7 @@ func (s *Store) CommitClientProfileEdit(ctx context.Context, input ClientProfile
 	}
 	// Shared event ID namespace: old credit and lifecycle requests cannot be
 	// reused for a profile edit (or vice versa).
-	for _, table := range []string{"events", "client_operations", "representative_control_events", "catalog_events","catalog_policy_events"} {
+	for _, table := range []string{"events", "client_operations", "representative_control_events", "catalog_events", "catalog_policy_events"} {
 		var existingID string
 		e := tx.QueryRowContext(ctx, "SELECT event_id FROM "+table+" WHERE event_id=?", input.EventID).Scan(&existingID)
 		if e == nil {
@@ -354,14 +357,19 @@ func (s *Store) ClientProfileEditHistory(ctx context.Context, id, scope string, 
 		limit < 1 || limit > 50 || offset < 0 || offset > 1_000_000 {
 		return nil, ErrInvalid
 	}
-	c, err := s.Client(ctx, id)
+	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	c, err := readClient(ctx, tx, id)
 	if err != nil {
 		return nil, err
 	}
 	if scope != "" && c.RepresentativeID != scope {
 		return nil, ErrConflict
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT event_id,client_id,representative_id,
+	rows, err := tx.QueryContext(ctx, `SELECT event_id,client_id,representative_id,
   previous_name,new_name,plan_kind,previous_ip_count,new_ip_count,added_days,
   added_volume_bytes,volume_credit_debit_bytes,unlimited_credit_debit_units,
   previous_expires_unix,new_expires_unix,reason,created_unix

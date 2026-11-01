@@ -49,6 +49,10 @@ func (s *Server) attachUsageRead(mux *http.ServeMux) {
 			businessError(w, err)
 			return
 		}
+		if session.User.Role != "owner" && account.RepresentativeID != session.User.RepresentativeID {
+			respond(w, http.StatusForbidden, map[string]string{"error": "representative_scope_denied"})
+			return
+		}
 		respond(w, http.StatusOK, map[string]any{"usage": account, "scope": "committed_user_counters", "live_collection_enabled": false, "distributed_hard_limit_verified": false})
 	})
 }

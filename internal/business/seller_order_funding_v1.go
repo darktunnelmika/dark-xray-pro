@@ -122,6 +122,11 @@ func verifiedSellerOrderV1(ctx context.Context, tx *sql.Tx, record sellerOrderRe
 	if err != nil {
 		return r, ErrUnavailable
 	}
+	origin, _, identityErr := ownershipOrigin(ctx, tx, c)
+	if identityErr != nil {
+		return r, identityErr
+	}
+	c.RepresentativeID = origin
 	if c.RepresentativeID != r.RepresentativeID || c.UUID != r.Client.UUID || c.PlanKind != r.Client.PlanKind {
 		return r, ErrUnavailable
 	}
@@ -162,6 +167,11 @@ type sellerFundingV1 struct{ initialBytes, renewalBytes int64 }
 // never creates a balance. A seller origin is valid exactly once per identity.
 func sellerClientFundingV1(ctx context.Context, tx *sql.Tx, c Client) (sellerFundingV1, bool, error) {
 	var total sellerFundingV1
+	origin, _, identityErr := ownershipOrigin(ctx, tx, c)
+	if identityErr != nil {
+		return total, false, identityErr
+	}
+	c.RepresentativeID = origin
 	present, err := sellerOrderSchemaStateV1(ctx, tx)
 	if err != nil || !present {
 		return total, false, err
