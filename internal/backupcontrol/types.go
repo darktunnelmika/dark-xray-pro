@@ -139,6 +139,7 @@ type HandlerOptions struct {
 	RunnerStatus func() string
 	OpenArchive  func(context.Context, Archive) (ReadSeekCloser, error)
 	Uploads      UploadStore
+	Restores     RestoreControl
 }
 
 func DefaultSettings() Settings {

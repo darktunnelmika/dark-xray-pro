@@ -17,6 +17,9 @@ const ProductionRoot = "/var/lib/dark-xray-pro-lab"
 const LockName = "hub-state.lock"
 const InventoryName = "backup-inventory.json"
 const QuarantineName = "restore-quarantine.json"
+
+// RestoreGuardName fences all writers while an explicit replacement is incomplete.
+const RestoreGuardName = "panel-restore-in-progress.json"
 const EnableEnv = "DARK_PRO_ENABLE_OFFLINE_BACKUP_V1"
 
 // Reserve room for the private inventory and archive framing within the

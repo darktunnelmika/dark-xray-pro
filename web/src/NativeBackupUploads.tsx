@@ -68,7 +68,7 @@ function bytes(value: number, language: Language): string {
   return new Intl.NumberFormat(language === "fa" ? "fa-IR" : "en", { maximumFractionDigits: 2 }).format(value / unit) + " " + label;
 }
 
-export function NativeBackupUploads({ language, timezone }: { language: Language; timezone: string }) {
+export function NativeBackupUploads({ language, timezone, onRestore }: { language: Language; timezone: string; onRestore?: (source: import("./NativeBackupRestore").RestoreSource) => void }) {
   const { session } = useSession();
   const actor = session?.user.id ?? "";
   const t = words[language];
@@ -317,6 +317,7 @@ export function NativeBackupUploads({ language, timezone }: { language: Language
         <details><summary>{t.details}</summary><dl><div><dt>{t.requestID}</dt><dd><bdi>{upload.event_id}</bdi></dd></div><div><dt>{t.hash}</dt><dd><bdi>{upload.sha256}</bdi></dd></div>
           <div><dt>{t.bytes}</dt><dd><bdi>{bytes(upload.received_bytes, language)}</bdi></dd></div><div><dt>{t.attempts}</dt><dd>{upload.attempts.toLocaleString(language === "fa" ? "fa-IR" : "en")}</dd></div></dl></details>
         <div className="backup-upload-actions">
+          {onRestore && upload.state === "received" && upload.downloadable && <button type="button" className="backup-button backup-secondary" disabled={!available || busy || !!pending} onClick={() => onRestore({ source_kind: "upload", source_id: upload.id, sha256: upload.sha256 })}>{language === "fa" ? "بازیابی این فایل" : "Restore this file"}</button>}
           {upload.downloadable && available && <a className="backup-download" href={uploadDownloadURL(upload)} download referrerPolicy="no-referrer"><Download size={15} />{t.download}</a>}
           {upload.actor_id === actor && retryableUpload(upload) && <button type="button" className="backup-button backup-secondary" disabled={!available || busy || !!pending} onClick={() => adopt(upload)}>{t.retry}</button>}
           {upload.actor_id === actor && ["awaiting_upload", "receiving", "checking", "interrupted", "rejected"].includes(upload.state) && <button type="button" className="backup-button backup-secondary" disabled={!available || busy || !!pending}

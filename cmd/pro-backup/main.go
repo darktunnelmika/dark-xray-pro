@@ -495,6 +495,12 @@ func readArchive(ctx context.Context, o options) (map[string]any, error) {
 		status = "compatible_archive_verified"
 	}
 	report := archiveReport(status, manifest)
+	manifestJSON, e := json.Marshal(manifest)
+	if e != nil {
+		return nil, errRefused
+	}
+	manifestHash := sha256.Sum256(manifestJSON)
+	report["manifest_sha256"] = hex.EncodeToString(manifestHash[:])
 	report["database_compatibility_checked"] = true
 	report["schema_fingerprint"] = check.Fingerprint
 	report["table_counts"] = check.TableCounts

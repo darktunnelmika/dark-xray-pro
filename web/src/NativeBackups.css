@@ -136,3 +136,13 @@
   .backup-archive dl > div { grid-template-columns: 1fr; gap: 3px; }
 }
 @media (prefers-reduced-motion: reduce) { .backup-spin { animation: none; } }
+
+.backup-restore-dialog { width: min(520px, calc(100vw - 40px)); box-sizing: border-box; max-height: calc(100dvh - 40px); overflow: auto; border: 1px solid var(--border, #656575); border-radius: 18px; padding: 24px; color: var(--text, #eaeaf0); background: var(--surface, #20202a); }
+.backup-restore-dialog::backdrop { background: rgb(0 0 0 / 65%); }
+.backup-restore-dialog h3 { display: flex; align-items: center; gap: 8px; }
+.backup-restore-dialog p { line-height: 1.7; margin-block: 12px; }
+.backup-restore-dialog bdi, .backup-restore bdi { overflow-wrap: anywhere; }
+.backup-restore-dialog dd { margin-inline-start: 0; font-size: .85rem; }
+.backup-restore-dialog label { display: grid; gap: 8px; margin-block: 16px; }
+.backup-restore-dialog input { box-sizing: border-box; width: 100%; min-height: 44px; padding: 10px; border-radius: 10px; font-size: 16px; }
+.backup-restore-dialog .backup-upload-actions { flex-wrap: wrap; }

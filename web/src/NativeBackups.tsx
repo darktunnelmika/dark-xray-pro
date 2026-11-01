@@ -8,6 +8,7 @@ import {
 } from "./nativeBackups";
 import "./NativeBackups.css";
 import { NativeBackupUploads } from "./NativeBackupUploads";
+import { NativeBackupRestore, type RestoreSource } from "./NativeBackupRestore";
 
 const words = {
   en: {
@@ -151,6 +152,7 @@ export default function NativeBackups({ language }: { language: Language }) {
   const alive = useRef(true);
   const readGeneration = useRef(0);
   const [refresh, setRefresh] = useState(0);
+  const [restoreSource, setRestoreSource] = useState<RestoreSource | null>(null);
   const retryRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
@@ -404,18 +406,20 @@ export default function NativeBackups({ language }: { language: Language }) {
         <header><div><h3>{t.archivesTitle}</h3><p>{t.archivesIntro}</p></div><span className="backup-count">{archives.length.toLocaleString(language === "fa" ? "fa-IR" : "en")}</span></header>
         {archives.length === 0 ? <div className="backup-empty"><Archive size={30} aria-hidden="true" /><p>{t.empty}</p></div> :
           <div className="backup-archive-list">{archives.map(archive => <ArchiveCard key={archive.id} archive={archive} language={language} timezone={zone}
-            downloadable={enabled && connected && snapshot.capabilities.download && archive.downloadable} />)}</div>}
+            downloadable={enabled && connected && snapshot.capabilities.download && archive.downloadable}
+            onRestore={snapshot.capabilities.restore && archive.downloadable ? () => setRestoreSource({ source_kind: "archive", source_id: archive.id, sha256: archive.sha256 }) : undefined} />)}</div>}
       </section>
-      {enabled && snapshot.capabilities.upload && <NativeBackupUploads key={actor} language={language} timezone={zone} />}
+      {enabled && snapshot.capabilities.upload && <NativeBackupUploads key={actor} language={language} timezone={zone} onRestore={snapshot.capabilities.restore ? setRestoreSource : undefined} />}
+      <NativeBackupRestore key={actor} language={language} source={restoreSource} onClose={() => setRestoreSource(null)} />
       <footer className="backup-footnote">
         {snapshot.recipient_fingerprint && <p>{t.fingerprint}: <bdi>{snapshot.recipient_fingerprint}</bdi></p>}
-        <p>{t.noActivation}</p>
+        {!snapshot.capabilities.restore && <p>{t.noActivation}</p>}
       </footer>
     </>}
   </section>;
 }
 
-function ArchiveCard({ archive, language, timezone, downloadable }: { archive: BackupArchive; language: Language; timezone: string; downloadable: boolean }) {
+function ArchiveCard({ archive, language, timezone, downloadable, onRestore }: { archive: BackupArchive; language: Language; timezone: string; downloadable: boolean; onRestore?: () => void }) {
   const t = words[language];
   return <article className="backup-archive">
     <div className="backup-archive-heading"><div><strong>{dateLabel(archive.created_unix, language, timezone)}</strong>
@@ -423,6 +427,7 @@ function ArchiveCard({ archive, language, timezone, downloadable }: { archive: B
       {downloadable ? <a className="backup-download" href={archiveDownloadURL(archive)} download referrerPolicy="no-referrer">
         <Download size={16} aria-hidden="true" />{t.download}</a> : <span className="backup-download backup-download-disabled">{t.downloadUnavailable}</span>}
     </div>
+    {onRestore && <button type="button" className="backup-button backup-secondary" disabled={!downloadable} onClick={onRestore}>{language === "fa" ? "بازیابی این پشتیبان" : "Restore this backup"}</button>}
     <div className="backup-archive-badges"><span><ShieldCheck size={14} aria-hidden="true" />{archive.verification === "restore_verified" ? t.restoreVerified : t.checksum}</span>
       {archive.protected && <span>{t.protected}</span>}</div>
     <p className="backup-verification">{archive.verification === "restore_verified" ? t.restoreDetail : t.checksumDetail}</p>
