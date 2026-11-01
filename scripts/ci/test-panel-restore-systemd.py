@@ -187,7 +187,7 @@ def main():
         require(state == 'not-found', 'existing_unit_refused')
     addresses = json.loads(command('ip', '-j', '-4', 'address', 'show').stdout)
     require(not any(a.get('local') == LAB_IP for n in addresses for a in n.get('addr_info', [])), 'real_lab_address_refused')
-    for port in (2087, 28443):
+    for port in (2087, 2088, 28443):
         with socket.socket() as sock:
             sock.bind(('127.0.0.1', port))
     try:
@@ -211,6 +211,14 @@ def main():
     os.chown(ROOT / 'business.sqlite', account.pw_uid, account.pw_gid)
     write(ROOT / 'hub-state.lock', '')
     os.chown(ROOT / 'hub-state.lock', account.pw_uid, account.pw_gid)
+    # Native inbound identity keeps its real TLS prerequisite. This listener
+    # is loopback-only and the registry has no customer nodes.
+    command('openssl', 'req', '-x509', '-newkey', 'rsa:2048', '-nodes',
+            '-keyout', str(ROOT / 'agent-key.pem'), '-out', str(ROOT / 'agent-cert.pem'),
+            '-days', '1', '-subj', '/CN=127.0.0.1', '-addext', 'subjectAltName=IP:127.0.0.1')
+    for name in ('agent-key.pem', 'agent-cert.pem'):
+        os.chmod(ROOT / name, 0o600)
+        os.chown(ROOT / name, account.pw_uid, account.pw_gid)
     names = ('dark-pro-hub', 'dark-pro-backup', 'dark-pro-backup-worker')
     binaries = {}
     for name in names:
@@ -221,6 +229,7 @@ def main():
         binaries[name] = str(dst)
     write(CONFIG / 'fixture.env', '\n'.join([
         'DARK_PRO_LAB_MODE=1', 'DARK_PRO_ENABLE_BUSINESS_CORE=1', 'DARK_PRO_ENABLE_USAGE_LEDGER=1',
+        'DARK_PRO_ENABLE_REMOTE_AGENT=1',
         'DARK_PRO_ENABLE_NATIVE_INBOUNDS=1', 'DARK_PRO_NATIVE_INBOUND_KEY_HEX=' + secrets.token_hex(32),
         'DARK_PRO_ENABLE_SELLER_MANAGEMENT_V2=1', 'DARK_PRO_ENABLE_VOLUME_REFUNDS_V1=1',
         'DARK_PRO_ENABLE_SELLER_ORDERS_V1=1', 'DARK_PRO_ENABLE_OFFLINE_BACKUP_V1=1',
@@ -246,7 +255,7 @@ Group=darkprolab
 UMask=0077
 EnvironmentFile={CONFIG}/fixture.env
 WorkingDirectory={ROOT}
-ExecStart={binaries['dark-pro-hub']} -listen 127.0.0.1:2087 -business-db {ROOT}/business.sqlite -registry {ROOT}/registry.json -replacements {ROOT}/replacements.json -staging {ROOT}/configs.json -lab-revisions {ROOT}/lab-revisions.json
+ExecStart={binaries['dark-pro-hub']} -listen 127.0.0.1:2087 -business-db {ROOT}/business.sqlite -registry {ROOT}/registry.json -replacements {ROOT}/replacements.json -staging {ROOT}/configs.json -lab-revisions {ROOT}/lab-revisions.json -agent-tls-listen 127.0.0.1:2088 -agent-tls-cert {ROOT}/agent-cert.pem -agent-tls-key {ROOT}/agent-key.pem
 KillMode=control-group
 TimeoutStopSec=30
 Restart=no
@@ -357,6 +366,20 @@ location / {{ return 403; }}
             'corrupt_archive_refused_before_stop': True, 'worker_restart_preserved_receipts': True,
             'economic_fingerprint': digest(json.dumps(baseline, sort_keys=True).encode()),
             'synthetic_only': True, 'production_touched': False}), flush=True)
+    except Exception:
+        # Only reached after the fresh-host guards and fixture creation. Keep
+        # diagnostics bounded and never print environment values or private keys.
+        for unit in (HUB, WORKER):
+            state = subprocess.run(['/usr/bin/systemctl', 'show', unit,
+                '--property=ActiveState,SubState,ExecMainCode,ExecMainStatus,Result', '--no-pager'],
+                text=True, capture_output=True, timeout=10).stdout[:4096]
+            journal = subprocess.run(['journalctl', '--unit', unit, '--no-pager',
+                '--output=cat', '--lines=16'], text=True, capture_output=True, timeout=10).stdout[-8192:]
+            for value in env.values():
+                if len(value) >= 16:
+                    journal = journal.replace(value, '[redacted fixture value]')
+            print(json.dumps({'fixture_service': unit, 'state': state, 'journal': journal}), flush=True)
+        raise
     finally:
         if nginx is not None:
             nginx.terminate()
