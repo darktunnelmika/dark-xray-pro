@@ -269,7 +269,14 @@ Restart=no
     command('ip', 'address', 'add', LAB_IP + '/32', 'dev', 'lo')
     command('/usr/bin/systemctl', 'daemon-reload')
     nginx = None
+    opt = Path('/opt')
+    require(opt.is_dir() and not opt.is_symlink() and opt.stat().st_uid == 0, 'unsafe_disposable_opt')
+    original_opt_mode = opt.stat().st_mode & 0o7777
     try:
+        # Hosted runners expose /opt as 0777 for tool installation. The real
+        # worker correctly refuses writable executable ancestors. Tighten this
+        # disposable host only, after all empty-host guards, not the validator.
+        os.chmod(opt, original_opt_mode & ~0o022)
         systemctl('start', HUB)
         wait_health()
         systemctl('start', WORKER)
@@ -311,6 +318,7 @@ location / {{ return 403; }}
         create_event = 'ci-create-' + uuid.uuid4().hex
         browser.record(BASE + '/jobs', {'event_id': create_event, 'action': 'create'})
         backup = browser.wait('create', create_event)
+        print(json.dumps({'fixture_backup': {k: backup.get(k) for k in ('state', 'phase', 'error_code', 'warning_code')}}), flush=True)
         require(backup['state'] == 'succeeded', 'real_backup_failed')
         require(fingerprint() == baseline, 'backup_changed_economic_data')
         code, status = browser.request('GET', BASE)
@@ -336,6 +344,7 @@ location / {{ return 403; }}
             request = dict(source, event_id=event, confirmation='RESTORE')
             browser.record(BASE + '/restores', request)
             result = browser.wait('restore', event)
+            print(json.dumps({'fixture_restore': dict(source_kind=source['source_kind'], **{k: result.get(k) for k in ('state', 'phase', 'error_code', 'table_count', 'data_restored')})}), flush=True)
             require(result['state'] == 'succeeded' and result['data_restored'] and result['table_count'] == len(baseline), 'full_systemd_restore_failed')
             require(fingerprint() == baseline, 'restored_economic_rows_differ')
             before = pid(HUB)
@@ -387,6 +396,7 @@ location / {{ return 403; }}
         for unit in (WORKER, HUB):
             subprocess.run(['/usr/bin/systemctl', 'stop', unit], capture_output=True, timeout=120)
         subprocess.run(['ip', 'address', 'del', LAB_IP + '/32', 'dev', 'lo'], capture_output=True, timeout=10)
+        os.chmod(opt, original_opt_mode)
 
 
 if __name__ == '__main__':
