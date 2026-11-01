@@ -3,6 +3,7 @@ import { Users } from "lucide-react";
 import { uid, gb } from "./shared";
 import ClientPlanWorkbench from "./ClientPlanWorkbench";
 import ClientListExplorer from "./ClientListExplorer";
+import DarkRestoreReview from "./DarkRestoreReview";
 import ClientUsage from "../ClientUsage";
 import ClientProfileEditor from "./ClientProfileEditor";
 import ClientInboundSubscription from "./ClientInboundSubscription";
@@ -37,6 +38,7 @@ export default function Clients({ model }: { model: BusinessModel }) {
         <button type="submit" disabled={actionBusy}>{t.saveClient}</button>
       </form>}
       <ClientListExplorer model={model}/>
+      {session.user.role === "owner" && <DarkRestoreReview model={model}/>}
       <div className="business-panel">
         <h3>{t.clientLifecycle}</h3>
         <label>{t.chooseClient}

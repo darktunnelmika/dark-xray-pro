@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import {
-  ArchiveRestore, Bot, CheckCircle2, ChevronDown, ChevronRight, DatabaseBackup,
+  Bot, CheckCircle2, ChevronDown, ChevronRight, DatabaseBackup,
   CircleHelp, CreditCard, Globe2, HardDrive, LayoutDashboard,
   Menu, Moon, Network, Server, Settings2, ShieldCheck, Users, FolderOpen, UserRound, LogOut,
   Sun, Waypoints, ShoppingBag, X,
@@ -125,7 +125,6 @@ const nav: { id: Page; Icon: typeof LayoutDashboard }[] = [
   { id: "finance", Icon: CreditCard },
   { id: "telegram", Icon: Bot },
   { id: "backups", Icon: DatabaseBackup },
-  { id: "dark-restore", Icon: ArchiveRestore },
   { id: "account", Icon: UserRound },
   { id: "settings", Icon: Settings2 },
 ];
@@ -135,7 +134,7 @@ const navGroups: { id: NavGroup; pages: Page[] }[] = [
   // Keep legacy Dark Swap links in this group without a separate menu entry.
   { id: "infrastructure", pages: ["overview", "nodes", "inbounds", "dark-swap"] },
   { id: "management", pages: ["clients", "groups", "representatives", "marketplace", "finance", "telegram"] },
-  { id: "recovery", pages: ["backups", "dark-restore"] },
+  { id: "recovery", pages: ["backups"] },
   { id: "workspaceGroup", pages: ["account", "settings"] },
 ];
 
@@ -478,8 +477,7 @@ export default function App() {
           {page === "inbounds" && <InboundPlanner nodes={fleet?.nodes ?? []} language={language} />}
           {page === "dark-swap" && <InboundPlanner nodes={fleet?.nodes ?? []} language={language} workspace="dark-swap" />}
           {page === "backups" && <NativeBackups key={auth.session.user.id} language={language}/>}
-          {(page === "dark-restore" || page === "telegram") &&
-            <ModuleStatus page={page} language={language} onNavigate={setPage}/>}
+          {page === "telegram" && <ModuleStatus page={page} language={language} onNavigate={setPage}/>}
           {(["clients", "groups", "representatives", "marketplace", "finance", "account"] as Page[]).includes(page) && <BusinessWorkspace key={auth.session.user.id + ":" + page} language={language} section={page as "clients" | "groups" | "representatives" | "marketplace" | "finance" | "account"} />}
 
           {page === "settings" && (

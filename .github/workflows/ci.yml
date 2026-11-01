@@ -285,6 +285,8 @@ jobs:
           test "$(id -u)" -ne 0
           go test -race ./internal/usagecheckpoint ./internal/usageledger ./internal/managedxray ./internal/api ./cmd/node-agent \
             -run '^Test(UsageSettlement|AgentReplayGate)' -count=3 -timeout=120s -v
+      - name: Offline Dark Restore private-review refuses imports and protects original data
+        run: python3 scripts/test-darkrestore-review.py
       - name: Go vet
         run: go vet ./...
       - name: Compile HUB and Node Agent
