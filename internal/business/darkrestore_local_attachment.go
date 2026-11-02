@@ -116,7 +116,9 @@ func readDarkRestoreLocalAttachment(ctx context.Context, q sellerQueryV2, id str
 		return nil, err
 	}
 	var raw []byte
-	err = q.QueryRowContext(ctx, "SELECT receipt_json FROM darkrestore_local_settlements_v1 WHERE client_id=?", id).Scan(&raw)
+	var sourceSHA, sourceID, epochID string
+	err = q.QueryRowContext(ctx, "SELECT receipt_json,source_sha256,source_id,terminal_epoch_id FROM darkrestore_local_settlements_v1 WHERE client_id=?", id).
+		Scan(&raw, &sourceSHA, &sourceID, &epochID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -124,7 +126,15 @@ func readDarkRestoreLocalAttachment(ctx context.Context, q sellerQueryV2, id str
 		return nil, err
 	}
 	var receipt DarkRestoreLocalAttachmentReceiptV1
-	if decodeDarkRestoreLocalAttachment(raw, &receipt) != nil || receipt.ClientID != id {
+	if decodeDarkRestoreLocalAttachment(raw, &receipt) != nil || receipt.ClientID != id ||
+		receipt.Settlement.SourceSHA != sourceSHA || receipt.Settlement.SourceID != sourceID ||
+		receipt.Settlement.Terminal.EpochID != epochID {
+		return nil, ErrUnavailable
+	}
+	var originalEvent, historical string
+	if err = q.QueryRowContext(ctx, "SELECT event_id,historical_bytes FROM darkrestore_import_entries_v1 WHERE client_id=? AND source_sha256=? AND source_id=?", id, sourceSHA, sourceID).
+		Scan(&originalEvent, &historical); err != nil || receipt.OriginalEventID != originalEvent ||
+		historical != strconv.FormatInt(receipt.Settlement.PriorBytes, 10) {
 		return nil, ErrUnavailable
 	}
 	return &receipt, nil
