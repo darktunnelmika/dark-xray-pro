@@ -3,6 +3,7 @@ import { Users } from "lucide-react";
 import { uid, gb } from "./shared";
 import ClientPlanWorkbench from "./ClientPlanWorkbench";
 import ClientListExplorer from "./ClientListExplorer";
+import DarkRestoreReview from "./DarkRestoreReview";
 import ClientUsage from "../ClientUsage";
 import ClientProfileEditor from "./ClientProfileEditor";
 import ClientInboundSubscription from "./ClientInboundSubscription";
@@ -83,5 +84,6 @@ export default function Clients({ model }: { model: BusinessModel }) {
           <button disabled={!clientOps || clientOps.length < 50} onClick={() => setClientOpsOffset((x) => x + 50)}>{t.next}</button>
         </div>
       </div>}
+      {session.user.role === "owner" && <DarkRestoreReview model={model}/>}
   </>;
 }

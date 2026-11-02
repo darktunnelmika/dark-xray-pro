@@ -17,7 +17,7 @@ const words = {
 const object = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
 type Pick = { id: string; name: string };
 
-function RepresentativePicker({ language, value, disabled, onChange }: { language: Language; value: Pick | null; disabled: boolean; onChange: (v: Pick) => void }) {
+export function RepresentativePicker({ language, value, disabled, onChange }: { language: Language; value: Pick | null; disabled: boolean; onChange: (v: Pick) => void }) {
   const t = words[language]; const [draft, setDraft] = useState(""); const [query, setQuery] = useState(""); const [offset, setOffset] = useState(0);
   const [page, setPage] = useState<{ rows: Pick[]; more: boolean } | null>(null); const [failed, setFailed] = useState(false);
   useEffect(() => { const timer = window.setTimeout(() => { setQuery(draft.trim()); setOffset(0); }, 250); return () => window.clearTimeout(timer); }, [draft]);
