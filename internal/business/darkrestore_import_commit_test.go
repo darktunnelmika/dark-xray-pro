@@ -412,3 +412,41 @@ func TestDarkRestoreImportPreservesExistingSubscriptionProof(t *testing.T) {
 	}
 
 }
+
+func TestDarkRestoreArchivedGroupHistorySurvivesRenameAndAssignment(t *testing.T) {
+	f := importSetup(t)
+	ctx := context.Background()
+	intent := syntheticImportIntent(1)
+	intent.Review.Clients[0].Status = "archive_history_only"
+	intent.Review.Clients[0].ReviewReasons = []string{"archived_history_must_not_be_recreated_active"}
+	intent.Review.Groups[0].Archived = 1
+	req := importRequest(t, f, intent, "darkrestore-archived-group-history-0001")
+	original, err := f.s.commitVerifiedDarkRestore(ctx, f.owner.Token, req)
+	if err != nil || original.Count != 1 || original.Archived != 1 || original.Groups[0].HistoricalBytes != "7" {
+		t.Fatal("archived import changed source history", original, err)
+	}
+	id := darkRestoreClientID(intent.Review.SourceSHA256, intent.Review.Clients[0].SourceID)
+	group := original.Groups[0]
+	if _, err := f.s.UpdateGroup(ctx, group.TargetGroupID, "rep-target", "Renamed imported group", "#123ABC"); err != nil {
+		t.Fatal("imported group cannot be renamed", err)
+	}
+	ownershipMove(t, f, "darkrestore-archived-history-move-0001",
+		ClientOwnershipIntent{ClientIDs: []string{id}, RepresentativeID: "rep-third", Reason: "Synthetic archived ownership transfer"})
+	var historical string
+	if err := f.s.db.QueryRowContext(ctx,
+		"SELECT historical_bytes FROM darkrestore_group_history_v1 WHERE source_sha256=? AND source_group_id=?",
+		intent.Review.SourceSHA256, group.SourceGroupID).Scan(&historical); err != nil || historical != "7" {
+		t.Fatal("historical group total changed after rename or assignment", historical, err)
+	}
+	usage, err := f.s.DarkRestoreUsageV1(ctx, id)
+	if err != nil || usage.HistoricalBytes != "7" || usage.PostMigrationBytes != "0" || usage.TotalBytes != "7" || usage.CutoverVerified {
+		t.Fatal("archived client usage changed", usage, err)
+	}
+	receipt, err := f.s.DarkRestoreImportReceiptV1(ctx, f.owner.Token, original.EventID)
+	if err != nil || receipt.Groups[0].HistoricalBytes != "7" {
+		t.Fatal("source history receipt changed", receipt, err)
+	}
+	if err := validateDarkRestoreImportData(ctx, f.s.db); err != nil {
+		t.Fatal("renamed or assigned imported client fails offline validation", err)
+	}
+}
