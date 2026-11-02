@@ -40,6 +40,8 @@ type backupSchemaObject [4]string
 
 func backupSchemaGroup(name string) string {
 	switch {
+	case strings.HasPrefix(name, "darkrestore_"):
+		return "darkrestore"
 	case strings.HasPrefix(name, "client_ownership_"):
 		return "ownership"
 	case strings.HasPrefix(name, "seller_order_"):
@@ -182,6 +184,12 @@ func validateOfflineBackupDB(ctx context.Context, db *sql.DB) (BackupValidation,
 	}
 	if len(groups["sellers"]) > 0 {
 		if backupSchemaDigest(groups["sellers"]) != backupSellerSchemaFingerprint || sellerManagementConfiguredV2(ctx, db) != nil {
+			return result, ErrOfflineBackupInvalid
+		}
+	}
+	if len(groups["darkrestore"]) > 0 {
+		present, err := darkRestoreSchemaState(ctx, db)
+		if err != nil || !present || len(groups["ownership"]) == 0 || len(groups["usage"]) == 0 || validateDarkRestoreImportData(ctx, db) != nil {
 			return result, ErrOfflineBackupInvalid
 		}
 	}

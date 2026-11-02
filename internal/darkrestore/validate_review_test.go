@@ -67,3 +67,21 @@ func TestImportReviewFingerprintStableAndSensitiveToIdentity(t *testing.T) {
 		t.Fatal("review change unbound", err)
 	}
 }
+
+func TestImportSourceVerificationRejectsConsistentButForgedReview(t *testing.T) {
+	path, _ := sourceFixture(t, 3)
+	r, err := BuildReview(context.Background(), path, fixtureSHA(t, path), time.Unix(1780000000, 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = VerifyImportReview(context.Background(), path, r); err != nil {
+		t.Fatal(err)
+	}
+	r.Clients[1].Label = "Forged label"
+	if err = ValidatePrivateReview(r); err != nil {
+		t.Fatal("fixture must remain structurally valid", err)
+	}
+	if err = VerifyImportReview(context.Background(), path, r); err == nil {
+		t.Fatal("forged browser review trusted")
+	}
+}

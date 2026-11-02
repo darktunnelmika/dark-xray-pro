@@ -115,6 +115,9 @@ func ownershipOriginKnown(ctx context.Context, q sellerQueryV2, c Client) (strin
 }
 
 func rejectOwnershipEvent(ctx context.Context, tx *sql.Tx, event string) error {
+	if err := rejectDarkRestoreEvent(ctx, tx, event); err != nil {
+		return err
+	}
 	present, e := ownershipSchemaState(ctx, tx)
 	if e != nil || !present {
 		return e
