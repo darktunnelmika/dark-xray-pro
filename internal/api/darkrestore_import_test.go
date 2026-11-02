@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	restorefixture "github.com/darktunnelmika/dark-xray-pro/testdata/darkrestore"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -36,11 +37,8 @@ func stagedRestoreAPI(t *testing.T) ownershipAPI {
 	if err != nil {
 		t.Fatal(err)
 	}
-	data, err := os.ReadFile("../../testdata/darkrestore/single-customer.sql")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err = db.Exec(string(data)); err != nil {
+
+	if _, err = db.Exec(restorefixture.SQL); err != nil {
 		t.Fatal(err)
 	}
 	if err = db.Close(); err != nil {

@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	restorefixture "github.com/darktunnelmika/dark-xray-pro/testdata/darkrestore"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -67,11 +68,8 @@ func TestDarkRestoreProcessInterrupted(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			fixture, err := os.ReadFile("../../testdata/darkrestore/single-customer.sql")
-			if err != nil {
-				t.Fatal(err)
-			}
-			if _, err = db.Exec(string(fixture)); err != nil {
+
+			if _, err = db.Exec(restorefixture.SQL); err != nil {
 				t.Fatal(err)
 			}
 			if err = db.Close(); err != nil {

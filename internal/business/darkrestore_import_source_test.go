@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"github.com/darktunnelmika/dark-xray-pro/internal/darkrestore"
+	restorefixture "github.com/darktunnelmika/dark-xray-pro/testdata/darkrestore"
 	"os"
 	"path/filepath"
 	"testing"
@@ -22,11 +23,8 @@ func TestDarkRestoreRealOfflineSnapshotToClients(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fixture, err := os.ReadFile("../../testdata/darkrestore/single-customer.sql")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err = db.Exec(string(fixture)); err != nil {
+
+	if _, err = db.Exec(restorefixture.SQL); err != nil {
 		t.Fatal(err)
 	}
 	if err = db.Close(); err != nil {

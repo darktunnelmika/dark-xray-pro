@@ -10,6 +10,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	restorefixture "github.com/darktunnelmika/dark-xray-pro/testdata/darkrestore"
 	"io"
 	"net/url"
 	"os"
@@ -90,6 +91,9 @@ func captureEconomicState(t *testing.T, s *business.Store) economicState {
 }
 
 func newEconomicFixture(t *testing.T) economicFixture {
+	return newEconomicFixtureWithKey(t, bytes.Repeat([]byte{0x58}, 32))
+}
+func newEconomicFixtureWithKey(t *testing.T, historyKey []byte) economicFixture {
 	t.Helper()
 	ctx := context.Background()
 	f := economicFixture{root: t.TempDir()}
@@ -212,9 +216,8 @@ func newEconomicFixture(t *testing.T) economicFixture {
 	f.legacySource = filepath.Join(t.TempDir(), "legacy.sqlite")
 	legacy, err := sql.Open("sqlite", f.legacySource)
 	require(t, err)
-	fixture, err := os.ReadFile("../../testdata/darkrestore/single-customer.sql")
-	require(t, err)
-	_, err = legacy.Exec(string(fixture))
+
+	_, err = legacy.Exec(restorefixture.SQL)
 	require(t, err)
 	require(t, legacy.Close())
 	require(t, os.Chmod(f.legacySource, 0600))
@@ -228,7 +231,7 @@ func newEconomicFixture(t *testing.T) economicFixture {
 	preview, err := s.QuoteDarkRestoreImportV1(ctx, owner.Token, mapping)
 	require(t, err)
 	f.legacyRequest = business.DarkRestoreImportCommitV1{DarkRestoreImportIntentV1: mapping, QuoteHash: preview.QuoteHash, QuoteUnix: preview.QuoteUnix, EventID: "backup-restored-import-0001"}
-	imported, err := s.CommitDarkRestoreImportV1(ctx, owner.Token, f.legacySource, bytes.Repeat([]byte{0x58}, 32), f.legacyRequest)
+	imported, err := s.CommitDarkRestoreImportV1(ctx, owner.Token, f.legacySource, historyKey, f.legacyRequest)
 	require(t, err)
 	if imported.Count != 1 || imported.LegacyEvents != 1 {
 		t.Fatal("fixture import incomplete")
@@ -245,7 +248,7 @@ func newEconomicFixture(t *testing.T) economicFixture {
 	f.inventory, err = hubstate.BuildInventory(hubstate.Options{Root: f.root, Registry: filepath.Join(f.root, "registry.json"),
 		Replacements: filepath.Join(f.root, "replacements.json"), BusinessDB: f.path, Listen: "127.0.0.1:2087", SourceRevision: strings.Repeat("a", 40),
 		Environment: []string{"DARK_PRO_LAB_MODE=1", "DARK_PRO_ENABLE_BUSINESS_CORE=1", hubstate.EnableEnv + "=1", "DARK_PRO_LAB_TOKEN=" + strings.Repeat("b", 64),
-			"DARK_PRO_NATIVE_INBOUND_KEY_HEX=" + strings.Repeat("58", 32), "DARK_PRO_ENABLE_USAGE_LEDGER=1", "DARK_PRO_ENABLE_SELLER_MANAGEMENT_V2=1", "DARK_PRO_ENABLE_VOLUME_REFUNDS_V1=1", "DARK_PRO_ENABLE_CLIENT_OWNERSHIP_V1=1"}})
+			"DARK_PRO_NATIVE_INBOUND_KEY_HEX=" + hex.EncodeToString(historyKey), "DARK_PRO_ENABLE_USAGE_LEDGER=1", "DARK_PRO_ENABLE_SELLER_MANAGEMENT_V2=1", "DARK_PRO_ENABLE_VOLUME_REFUNDS_V1=1", "DARK_PRO_ENABLE_CLIENT_OWNERSHIP_V1=1"}})
 	require(t, err)
 	require(t, hubstate.WriteInventory(f.lock, f.inventory))
 	f.inventory, err = hubstate.LoadInventory(f.lock)

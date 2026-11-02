@@ -207,7 +207,9 @@ def main():
     for p in (RELEASES.parent, RELEASES, RELEASES / revision):
         os.chmod(p, 0o755)
     write(Path('/run/dark-pro-disposable-restore-acceptance'), revision)
-    command(str(fixture), '-test.run=^TestExportDisposablePanelRestoreFixture$', '-test.v', timeout=90)
+    history_key = secrets.token_hex(32)
+    command(str(fixture), '-test.run=^TestExportDisposablePanelRestoreFixture$', '-test.v', timeout=90,
+            env={**os.environ, 'DARK_PRO_TEST_FIXTURE_HISTORY_KEY': history_key})
     os.chown(ROOT / 'business.sqlite', account.pw_uid, account.pw_gid)
     write(ROOT / 'hub-state.lock', '')
     os.chown(ROOT / 'hub-state.lock', account.pw_uid, account.pw_gid)
@@ -230,7 +232,7 @@ def main():
     write(CONFIG / 'fixture.env', '\n'.join([
         'DARK_PRO_LAB_MODE=1', 'DARK_PRO_ENABLE_BUSINESS_CORE=1', 'DARK_PRO_ENABLE_USAGE_LEDGER=1',
         'DARK_PRO_ENABLE_REMOTE_AGENT=1',
-        'DARK_PRO_ENABLE_NATIVE_INBOUNDS=1', 'DARK_PRO_NATIVE_INBOUND_KEY_HEX=' + secrets.token_hex(32),
+        'DARK_PRO_ENABLE_NATIVE_INBOUNDS=1', 'DARK_PRO_NATIVE_INBOUND_KEY_HEX=' + history_key,
         'DARK_PRO_ENABLE_SELLER_MANAGEMENT_V2=1', 'DARK_PRO_ENABLE_VOLUME_REFUNDS_V1=1',
         'DARK_PRO_ENABLE_SELLER_ORDERS_V1=1', 'DARK_PRO_ENABLE_OFFLINE_BACKUP_V1=1',
         'DARK_PRO_ENABLE_BACKUP_CONTROL_V1=1', 'DARK_PRO_ENABLE_OWNER_REPORT_BOT_V1=0',
