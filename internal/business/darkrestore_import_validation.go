@@ -259,6 +259,9 @@ func (s *Store) DarkRestoreUsageForAccount(ctx context.Context, account usageled
 	}
 	out.PostMigrationBytes = strconv.FormatInt(account.Total, 10)
 	out.TotalBytes = new(big.Int).Add(big.NewInt(historical), big.NewInt(account.Total)).String()
-	out.CutoverVerified = account.Known
+	// A complete native baseline alone does not prove exclusive source retirement
+	// or subscription delivery for an imported identity. A future cutover receipt
+	// must authorize this field explicitly.
+	out.CutoverVerified = false
 	return &out, nil
 }

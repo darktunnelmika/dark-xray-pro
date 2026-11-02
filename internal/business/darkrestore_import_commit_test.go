@@ -132,6 +132,14 @@ func TestDarkRestoreImportedOwnershipRenewalAndHistoryProjection(t *testing.T) {
 	if err != nil || history.HistoricalBytes != "7" || history.PostMigrationBytes != "0" || history.TotalBytes != "7" || history.CutoverVerified {
 		t.Fatal("history projection inaccurate", history, err)
 	}
+	account, err := f.s.ClientUsage(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	account.Known = true // A native baseline is not a source-retirement receipt.
+	if projection, err := f.s.DarkRestoreUsageForAccount(ctx, account); err != nil || projection.CutoverVerified {
+		t.Fatal("native baseline incorrectly asserted cutover", projection, err)
+	}
 	move := ClientOwnershipIntent{ClientIDs: []string{id}, RepresentativeID: "rep-third", Reason: "Synthetic imported customer assignment"}
 	before := ownershipBalances(t, f.s)
 	ownershipMove(t, f, "darkrestore-move-test-0001", move)
