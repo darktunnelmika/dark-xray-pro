@@ -14,6 +14,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/darktunnelmika/dark-xray-pro/internal/usagewire"
 )
 
 const ReviewVersion = 1
@@ -78,11 +80,15 @@ func parseCoreUUID(body sql.NullString) string {
 		return ""
 	}
 	var obj map[string]json.RawMessage
-	if json.Unmarshal([]byte(body.String), &obj) != nil {
+	if usagewire.Decode([]byte(body.String), &obj) != nil {
 		return ""
 	}
+	return coreUUID(obj["id"])
+}
+
+func coreUUID(raw json.RawMessage) string {
 	var id string
-	if json.Unmarshal(obj["id"], &id) != nil {
+	if json.Unmarshal(raw, &id) != nil {
 		return ""
 	}
 	id = strings.ToLower(id)
@@ -225,6 +231,13 @@ func BuildReview(ctx context.Context, path, expectedSHA string, asOf time.Time) 
 		return result, ErrInspection
 	}
 	columns.Close()
+	var archivedUUIDs map[string]string
+	if report.Archived > 0 {
+		archivedUUIDs, e = archivedIdentities(ctx, tx, asOf.Unix())
+		if e != nil {
+			return result, ErrInspection
+		}
+	}
 	bodyExpr := "NULL"
 	if bodyExists == 1 {
 		bodyExpr = "c.body"
@@ -282,6 +295,9 @@ func BuildReview(ctx context.Context, path, expectedSHA string, asOf time.Time) 
 			reasons = append(reasons, "source_verification_not_proven")
 		}
 		uuid := parseCoreUUID(body)
+		if deleted > 0 && promoted == 0 && archivedUUIDs != nil {
+			uuid = archivedUUIDs[id]
+		}
 		if uuid == "" {
 			reasons = append(reasons, "uuid_not_verified")
 		}

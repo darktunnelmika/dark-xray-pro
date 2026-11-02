@@ -9,6 +9,7 @@ This branch remains a draft. It must not be merged or installed as a completed M
 - Stage an independent snapshot at HUB startup with `-darkrestore-snapshot`, `-darkrestore-sha256` and `-darkrestore-as-of` on an explicitly ownership-enabled LAB. The copy and its parent directory must be private. Requests carry the review hash and mappings.
 - Rebuild the review from the private SHA-pinned source snapshot before import; internally consistent browser JSON is insufficient.
 - Preserve verified UUID, exact expiry, quota, archive flag, source review and historical group totals, including promoted and blocked records.
+- For snapshots containing legacy core tombstones, a manually archived identity requires a matching subscription, deletion record, archive event and per-user owner audit. The deletion must fall between the recorded start and completion. A repeated, aggregate-only or conflicting operation leaves the identity unverified. The archived row retains its historical bytes in the review.
 - Keep imported identities disabled with incomplete native usage baseline until independently verified traffic cutover.
 - Store historical bytes separately from post-import native counters; expose a read-only historical/current/combined projection with an explicit cutover-verification flag.
 - Preserve exact legacy event IDs, timestamps and details in a sealed archive bound to the receipt and snapshot. The owner can page through the history from the receipt. LAB staging requires the existing native encryption key.
@@ -30,6 +31,7 @@ This branch remains a draft. It must not be merged or installed as a completed M
 - Source authenticity, tampered accounting, uncertain UUID and group mapping rejection.
 - Eight writers across two stores converge on one receipt. Native encrypted backup and restore preserves the imported client and decryptable legacy history, and rejects missing or wrong archive keys.
 - Corruption rejection on reopen and backup validation.
+- The staged artifact survived two SIGKILLs on a 3,200-row synthetic request. The first interrupted a transaction with uncommitted SQLite WAL frames. The second interrupted delivery of the response after commit. Recovery preserved one receipt and 3,041 distinct imported clients and usage seeds.
 
 These tests use isolated synthetic databases. They are not installed LAB acceptance or production migration.
 
