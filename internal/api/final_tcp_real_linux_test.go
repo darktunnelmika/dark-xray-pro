@@ -59,7 +59,7 @@ func activeTCPClient(t *testing.T, ctx context.Context, binary, uuid, key string
 	return &http.Client{Transport: transport, Timeout: 20 * time.Second}
 }
 
-func testActiveTCPOutcome(t *testing.T, ctx context.Context, s *Server, r *managedxray.Runtime, o managedxray.Options, cfg business.NodeConfig, epoch uc.Epoch, sender *uc.Sender, mode string, birth uc.ProcessToken, customers []business.Client, key string, port uint16, origin *httptest.Server, finalReport *atomic.Pointer[uc.Report], assertClosed func()) {
+func testActiveTCPOutcome(t *testing.T, ctx context.Context, s *Server, r *managedxray.Runtime, o managedxray.Options, cfg business.NodeConfig, epoch uc.Epoch, sender *uc.Sender, mode string, birth uc.ProcessToken, customers []business.Client, key string, port uint16, origin *httptest.Server, finalReport *atomic.Pointer[uc.Report], assertClosed func(), restore *localSettlementFixture) {
 	t.Helper()
 	client := activeTCPClient(t, ctx, o.Binary, customers[0].UUID, key, port, origin)
 	response, err := client.Get(origin.URL)
@@ -175,9 +175,12 @@ func testActiveTCPOutcome(t *testing.T, ctx context.Context, s *Server, r *manag
 		if u.ClientID == customers[0].ID && (u.Downlink < 64<<10 || u.Uplink == 0) {
 			t.Fatal("active TLS bytes lost", u)
 		}
-		if u.ClientID == customers[1].ID && a.Total != 0 {
+		if len(customers) > 1 && u.ClientID == customers[1].ID && a.Total != 0 {
 			t.Fatal("idle user charged", a)
 		}
+	}
+	if restore != nil {
+		restore.check(t, ctx, o, epoch, *final)
 	}
 	if mode == "active-replacement" {
 		next := cfg

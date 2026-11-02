@@ -73,6 +73,15 @@ jobs:
           for e in events:
               if e.get('Output'): print(e['Output'],end='')
           PYFINAL
+      - name: Reconcile a Dark Restore snapshot against an exited source and its authenticated final receipt
+        env:
+          DARK_PRO_TEST_FINAL_TCP: '1'
+        run: |
+          set -euo pipefail
+          export DARK_PRO_TEST_SETTLEMENT_CLI="$RUNNER_TEMP/darkrestore-local-settlement"
+          go build -o "$DARK_PRO_TEST_SETTLEMENT_CLI" ./cmd/darkrestore-local-settlement
+          go test -race ./internal/api -run '^TestRealPinnedDarkRestoreLocalSettlement$' -count=3 -v -timeout=180s | tee "$RUNNER_TEMP/darkrestore-local-settlement.log"
+          test "$(grep -c DARKRESTORE_LOCAL_SETTLEMENT_PASS "$RUNNER_TEMP/darkrestore-local-settlement.log")" = 3
       - name: Active stream diagnostics
         if: failure()
         run: |
@@ -596,6 +605,7 @@ jobs:
           test -s release/bin/dark-pro-owner-setup
           test -s release/bin/dark-pro-backup
           test -s release/bin/dark-pro-backup-worker
+          test -x release/bin/dark-pro-darkrestore-local-settlement
           test -s release/ops/systemd/dark-xray-pro-backup-worker.service
           test -s release/ops/nginx/native-backups.conf
       - name: Real owner HTTPS and systemd restore on disposable runner

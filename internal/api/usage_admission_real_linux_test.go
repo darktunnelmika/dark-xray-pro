@@ -116,7 +116,13 @@ func testRealPinnedPretrafficUsageAdmission(t *testing.T, modes []string) {
 					}
 				})
 			}
-			s := enabledOwner(t)
+			var s *Server
+			var restore *localSettlementFixture
+			if mode == "active-restore-cutover" {
+				s, restore = newLocalSettlementFixture(t)
+			} else {
+				s = enabledOwner(t)
+			}
 			if err := s.business.EnableUsageLedger(ctx); err != nil {
 				t.Fatal(err)
 			}
@@ -124,15 +130,22 @@ func testRealPinnedPretrafficUsageAdmission(t *testing.T, modes []string) {
 			if err := s.EnableNativeInbounds(key); err != nil {
 				t.Fatal(err)
 			}
-			customers := make([]business.Client, 2)
+			ids := []string{"admission-a", "admission-b"}
+			if restore != nil {
+				ids = []string{restore.id}
+			}
+			customers := make([]business.Client, len(ids))
 			volume := int64(1 << 20)
 			if activeMode {
 				volume = 128 << 20
 			}
-			for i, id := range []string{"admission-a", "admission-b"} {
+			for i, id := range ids {
 				c, err := s.business.CreateClient(ctx, business.NewClient{EventID: "new-pretraffic-client-" + id, ClientID: id, RepresentativeID: "owner", Name: id, DurationDays: 30, VolumeBytes: volume})
 				if err != nil {
 					t.Fatal(err)
+				}
+				if restore != nil {
+					restore.provisionSourceUUID(t, &c)
 				}
 				customers[i] = c
 			}
@@ -273,7 +286,7 @@ func testRealPinnedPretrafficUsageAdmission(t *testing.T, modes []string) {
 			if _, err = s.business.CreateInbound(ctx, key, business.InboundInput{ID: 889, Name: "Pretraffic", Transport: "tcp", RealityTarget: "one.example.org:443", ServerNames: []string{"one.example.org"}, ShortIDs: []string{"aa11"}}); err != nil {
 				t.Fatal(err)
 			}
-			if err = s.business.BindInboundClients(ctx, 889, []string{customers[0].ID, customers[1].ID}, true); err != nil {
+			if err = s.business.BindInboundClients(ctx, 889, ids, true); err != nil {
 				t.Fatal(err)
 			}
 			if err = s.business.PutInboundTarget(ctx, business.InboundTarget{InboundID: 889, NodeID: "admission-node", InstallationID: installID, ListenIP: "127.0.0.1", DirectPort: port}); err != nil {
@@ -451,7 +464,7 @@ func testRealPinnedPretrafficUsageAdmission(t *testing.T, modes []string) {
 				t.Fatal(err)
 			}
 			if activeMode {
-				testActiveTCPOutcome(t, ctx, s, r, options, cfg, epoch, sender, mode, birth, customers, profiles[0].PublicKey, port, origin, &finalReport, assertClosed)
+				testActiveTCPOutcome(t, ctx, s, r, options, cfg, epoch, sender, mode, birth, customers, profiles[0].PublicKey, port, origin, &finalReport, assertClosed, restore)
 				return
 			}
 			for i, c := range customers {

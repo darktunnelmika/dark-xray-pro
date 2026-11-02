@@ -46,3 +46,23 @@ These tests use isolated synthetic databases. They are not installed LAB accepta
 - Telegram Bot and Store integration only after these gates, using the panel's existing wallet/order/usage logic.
 
 No production HUB, users, representatives, bots, DNS or Nodes are modified by this work.
+
+## M4 local source accounting rehearsal
+
+The Linux LAB bundle includes `dark-pro-darkrestore-local-settlement`. It reads an independently pinned pre-admission legacy SQLite copy, an offline copy of the dedicated source HUB accounting database, and the source Agent's encrypted final runtime journal. It produces a private, read-only accounting result for one source epoch. The command has no destination-write or subscription-activation mode.
+
+The supported replica is a single finite-volume Restore identity, one local VLESS Reality/TCP inbound, and one registered source process. The replica must bind the same UUID and the source client ID derived by `darkrestore.LocalSourceID(snapshotSHA, restoreID)` before admitting traffic. The rehearsal provisions this identity in a disposable source. Existing stock Xray deployments do not emit the required evidence.
+
+Run the verifier as the owner of the private source-journal copy on the same boot of the source host. Place the private SQLite copies in owner-only directories. Provide each digest from the approved checkpoint. The state key is supplied as a private raw 32-byte file.
+
+    dark-pro-darkrestore-local-settlement \
+      -source /private/pre-admission.sqlite -source-sha256 "$SOURCE_SHA" \
+      -authority /private/source-authority.sqlite -authority-sha256 "$AUTHORITY_SHA" \
+      -journal /private/runtime.enc -journal-sha256 "$JOURNAL_SHA" \
+      -state-key-file /private/source-state.key -source-listen-ip "$SOURCE_LISTEN_IP" \
+      -node "$SOURCE_NODE" -installation "$SOURCE_INSTALLATION" \
+      -source-id "$RESTORE_ID" -as-of-unix "$SNAPSHOT_TIME"
+
+A successful result ties the historical bytes to the snapshot, the epoch's uplink and downlink to the source's initial zero and terminal receipt, and the exact UUID to the credential served by the exited process. The finite quota remaining is floored at zero. Replaying the same inputs yields the same result. An uncertain epoch, second registration, missing receipt, changed credential, wrong key, or unmatched journal blocks the calculation.
+
+This proves accounting for that closed epoch. Exclusive retirement of every source that could serve the credential, durable application at the destination, compatible subscription delivery, and persistent LAB acceptance remain open.
