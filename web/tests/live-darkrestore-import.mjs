@@ -2,16 +2,24 @@ import { chromium, expect } from "@playwright/test";
 const url=new URL(process.env.DARK_PRO_QA_UI_URL);
 if(url.hostname!=="127.0.0.1"||url.protocol!=="http:")throw Error("loopback test only");
 const browser=await chromium.launch({headless:true,args:["--no-zygote","--disable-gpu"]});
+const page=await browser.newPage({viewport:{width:390,height:844}});
+const supportReads=new Map();
+page.on("response",r=>{const path=new URL(r.url()).pathname;if(["/api/v1/session/status","/api/v1/workspace/me","/api/v1/workspace/clients","/api/v1/workspace/client-operations","/api/v1/workspace/dark-restore/stage"].includes(path))supportReads.set(path,r.status());});
+const panel=page.getByRole("region",{name:"Dark Restore — import review"});
+async function openFromClients() {
+ const head=panel.locator("button.darkrestore-review-head");
+ await expect(head).toBeVisible();
+ if(await head.getAttribute("aria-expanded")==="false")await head.click();
+ await expect(head).toHaveAttribute("aria-expanded","true");
+}
 try{
- const page=await browser.newPage({viewport:{width:390,height:844}});
  await page.route("**/*",r=>new URL(r.request().url()).origin===url.origin?r.continue():r.abort());
  await page.goto(new URL("/clients",url).href);
  await page.getByLabel("Username",{exact:true}).fill(process.env.DARK_PRO_TEST_OWNER);
  await page.getByLabel("Password",{exact:true}).fill(process.env.DARK_PRO_TEST_PASSWORD);
  await page.getByRole("button",{name:"Sign in",exact:true}).click();
  await expect(page.getByRole("heading",{name:"Client directory",exact:true})).toBeVisible({timeout:12000});
- await page.goto(new URL("/clients?view=restore",url).href);
- const panel=page.getByRole("region",{name:"Dark Restore — import review"});
+ await openFromClients();
  await panel.getByRole("button",{name:"Open approved server snapshot"}).click();
  await panel.getByRole("button",{name:/transfer-target/i}).click();
  await panel.getByRole("button",{name:"Map all groups to this account"}).click();
@@ -33,14 +41,20 @@ try{
  await expect(usage.locator("div").filter({has:page.getByText("Before migration",{exact:true})}).last()).toContainText("310 bytes");
  await expect(usage.getByText("Combined recorded usage",{exact:true})).toBeVisible();
  await page.reload();
+ await openFromClients();
  await panel.getByRole("button",{name:"Open approved server snapshot"}).click();
  await panel.getByRole("button",{name:"Check recorded receipt"}).click();
  await expect(panel.getByText("Import recorded",{exact:true})).toBeVisible();
  await page.evaluate(()=>sessionStorage.clear());
  await page.reload();
+ await openFromClients();
  const receipts=panel.getByRole("region",{name:"Import receipts"});
  await receipts.getByRole("button",{name:"Import receipts"}).click();
  await receipts.getByRole("button",{name:/restore-[a-f0-9-]{36}/}).click();
  await receipts.getByRole("button",{name:/Show legacy history/}).click();
  await expect(receipts.getByText(/synthetic-source · group.changed/)).toBeVisible();
+}catch(error){
+ const caps=await page.evaluate(async()=>{try{const r=await fetch("/api/v1/workspace/me");const m=await r.json();return {status:r.status,owner:m.user?.role==="owner",stage:m.capabilities?.darkrestore_import_v1===true};}catch{return {status:0};}}).catch(()=>({status:0}));
+ console.error(JSON.stringify({path:new URL(page.url()).pathname,reads:Object.fromEntries(supportReads),caps,expanded:await panel.locator("button.darkrestore-review-head").getAttribute("aria-expanded",{timeout:500}).catch(()=>null)}));
+ throw error;
 }finally{await browser.close();}

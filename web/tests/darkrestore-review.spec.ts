@@ -99,3 +99,17 @@ for(const theme of ["light","dark"] as const){
   expect(calls.some(x=>x.startsWith("POST "))).toBe(false);
  });
 }
+
+test("owner sees staged import even when client operation history is unavailable",async({page})=>{
+ await setup(page);
+ await page.route("**/api/v1/workspace/me",route=>route.fulfill({json:{
+   user:{id:"owner",role:"owner",representative_id:"owner",username:"review-test"},
+   balance:{id:"owner",kind:"owner",display_name:"Owner",enabled:true,volume_credit_bytes:0,unlimited_credit_units:0},
+   data_plane:"not_activated",capabilities:{darkrestore_import_v1:true}
+ }}));
+ await page.route("**/api/v1/workspace/client-operations**",route=>route.fulfill({status:503,json:{error:"unavailable"}}));
+ await page.goto("/clients");
+ const panel=page.getByRole("region",{name:"Dark Restore — import review"});
+ await panel.locator("button.darkrestore-review-head").click();
+ await expect(panel.getByRole("button",{name:"Open approved server snapshot"})).toBeVisible();
+});

@@ -129,8 +129,11 @@ export function useBusinessWorkspace(language: Language, section: Section) {
     });
     if(session.user.role==="owner" && clientRepFilter)clientQ.set("representative_id",clientRepFilter);
     const fetchData = async () => {
-      const [account, ownClients, ownEvents, ownerReps, ownGroups, lifecycle] = await Promise.all([
-        api<Workspace>("/api/v1/workspace/me", { signal: controller.signal }),
+      const [, ownClients, ownEvents, ownerReps, ownGroups, lifecycle] = await Promise.all([
+        api<Workspace>("/api/v1/workspace/me", { signal: controller.signal }).then(account=>{
+          // Session capabilities are independent of client search and pagination.
+          if (!controller.signal.aborted) setMe(account);
+        }),
         section === "clients" ? api<ClientPageResponse>("/api/v1/workspace/clients?"+clientQ.toString(), { signal: controller.signal })
           : Promise.resolve<ClientPageResponse>({ clients: [] }),
         section === "finance" ? api<{ events: LedgerEvent[] }>("/api/v1/workspace/events" + p + eventOffset, { signal: controller.signal }) : Promise.resolve({ events: [] as LedgerEvent[] }),
@@ -179,7 +182,7 @@ export function useBusinessWorkspace(language: Language, section: Section) {
         setClientHasMore(ownClients.has_more??null);
         setClientLoadedKey(clientRequestKey);
       }
-      setMe(account); setClients(ownClients.clients); setEvents(ownEvents.events);
+      setClients(ownClients.clients); setEvents(ownEvents.events);
       // A successful authenticated data refresh must NOT erase the last
       // user-visible mutation receipt. The next explicit action or tab
       // change clears it, not the data read following a committed write.
