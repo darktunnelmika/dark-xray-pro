@@ -7,6 +7,7 @@ import "./DarkRestoreReview.css";
 import { api } from "../session";
 import RestoreReceipts from "./RestoreReceipts";
 import DarkRestoreImport, { restoreAPI } from "./DarkRestoreImport";
+import DarkRestoreHandoff from "./DarkRestoreHandoff";
 
 const words = {
  en: {
@@ -49,6 +50,7 @@ export default function DarkRestoreReview({model}:{model:BusinessModel}){
  const [review,setReview]=useState<RestoreReview|null>(null);
  const [digest,setDigest]=useState("");
  const canImport=model.me?.capabilities?.darkrestore_import_v1===true;
+ const canHandoff=model.me?.capabilities?.darkrestore_signed_handoff_v1===true;
  const [fileError,setFileError]=useState(false);
  const [busy,setBusy]=useState(false);
  const [selection,setSelection]=useState<string>("");
@@ -113,11 +115,11 @@ export default function DarkRestoreReview({model}:{model:BusinessModel}){
  if(session.user.role!=="owner")return null;
  return <section className="darkrestore-review business-panel" aria-label={t.title}>
   <button className="darkrestore-review-head" type="button" aria-expanded={opened} onClick={()=>setOpened(v=>!v)}>
-   <ArchiveRestore size={21}/><span><strong>{t.title}</strong><small>{canImport?(language==="fa"?"بررسی نسخهٔ آفلاین و واردسازی کاربران به کلاینت‌ها":"Review offline data and import clients from an approved snapshot."):t.intro}</small></span><span aria-hidden="true">{opened?"−":"+"}</span>
+   <ArchiveRestore size={21}/><span><strong>{t.title}</strong><small>{canImport?(language==="fa"?"بررسی نسخهٔ آفلاین و واردسازی کاربران به کلاینت‌ها":"Review offline data and import clients from an approved snapshot."):canHandoff?(language==="fa"?"اتصال مصرف منبع امضاشده به کلاینت واردشده":"Attach signed source usage to an imported client"):t.intro}</small></span><span aria-hidden="true">{opened?"−":"+"}</span>
   </button>
   {opened && <div className="darkrestore-review-body">
    {canImport&&<button type="button" disabled={busy} onClick={()=>void openStage()}>{language==="fa"?"بازکردن نسخهٔ تأییدشدهٔ سرور":"Open approved server snapshot"}</button>}
-   {!digest&&<p className="darkrestore-warning" role="status"><FileWarning size={17}/>{canImport?(language==="fa"?"برای واردسازی، نسخهٔ تأییدشدهٔ سرور را باز کن.":"Open the approved server snapshot to import clients."):t.warning}</p>}
+   {!digest&&<p className="darkrestore-warning" role="status"><FileWarning size={17}/>{canImport?(language==="fa"?"برای واردسازی، نسخهٔ تأییدشدهٔ سرور را باز کن.":"Open the approved server snapshot to import clients."):canHandoff?(language==="fa"?"واردسازی snapshot در این راه‌اندازی staged نشده است؛ تحویل امضاشده را پایین بررسی کن.":"Snapshot import is not staged on this startup. Review the signed handoff below."):t.warning}</p>}
    <label className="darkrestore-file"><FileJson2 size={17}/>{t.file}
     <input type="file" accept=".json,application/json" disabled={busy} onChange={e=>{void load(e.target.files?.[0]);e.target.value="";}}/>
    </label>
@@ -125,6 +127,7 @@ export default function DarkRestoreReview({model}:{model:BusinessModel}){
    {fileError && <p role="alert">{t.unsafe}</p>}
    {busy && <p role="status">…</p>}
    {model.me?.capabilities?.darkrestore_receipts_v1===true&&<RestoreReceipts model={model}/>}
+   {model.me?.capabilities?.darkrestore_signed_handoff_v1===true&&<DarkRestoreHandoff model={model}/>}
    {!review && !busy && !fileError && <p>{t.noFile}</p>}
    {review && <section className="darkrestore-summary">
     <p role="status"><FileCheck2 size={16}/>{digest?(language==="fa"?"نسخهٔ تأییدشده برای نگاشت آماده است":"Approved snapshot ready for mapping"):t.ready}</p>
