@@ -177,6 +177,19 @@ jobs:
           DARK_PRO_TEST_FINAL_TCP: '1'
         run: go test -race ./internal/api -run '^TestRealPinnedActiveTCPSettlement/active-interrupted$' -count=20 -timeout=240s -v
 
+  business-race:
+    name: Business SQLite and accounting race suite
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Run the entire business package on its own runner
+        run: go test -race ./internal/business -count=1 -timeout=10m
+
   go:
     name: Go unit, race and vet
     runs-on: ubuntu-24.04
@@ -200,8 +213,17 @@ jobs:
             test -s "$path" || { echo "MISSING expected Go module: $path"; exit 1; }
           done
           test ! -e backend/dark_policy.py || { echo "Legacy HUB files must not be imported into PRO"; exit 1; }
-      - name: Go unit/race tests
-        run: go test -race ./...
+      - name: Go unit/race tests for all remaining packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          go list ./... > "$RUNNER_TEMP/all-packages.txt"
+          business=$(go list ./internal/business)
+          test "$(grep -Fxc -- "$business" "$RUNNER_TEMP/all-packages.txt")" -eq 1
+          grep -Fxv -- "$business" "$RUNNER_TEMP/all-packages.txt" > "$RUNNER_TEMP/remaining-packages.txt"
+          mapfile -t packages < "$RUNNER_TEMP/remaining-packages.txt"
+          test "${#packages[@]}" -gt 0
+          go test -race -timeout=10m "${packages[@]}"
       - name: Prove backup credential failure is detected before stopping HUB
         shell: bash
         run: |
