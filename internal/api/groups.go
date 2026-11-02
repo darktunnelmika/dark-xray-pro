@@ -38,6 +38,16 @@ func(s *Server) attachGroups(mux *http.ServeMux){
   if err!=nil{businessError(w,err);return}
   respond(w,http.StatusOK,map[string]any{"groups":groups,"limit":limit,"offset":offset,"billable_usage_scope":"separate_ledger"})
  })
+ mux.HandleFunc("GET /api/v1/workspace/groups/{id}/history",func(w http.ResponseWriter,r *http.Request){
+  session,ok:=scope(w,r,false);if !ok{return}
+  if session.User.Role!="owner" {respond(w,http.StatusForbidden,map[string]string{"error":"owner_only"});return}
+  if r.URL.RawQuery!="" || r.URL.ForceQuery {businessError(w,business.ErrInvalid);return}
+  if _,ok=allowedGroup(w,r,session);!ok{return}
+  histories,err:=s.business.GroupHistory(r.Context(),r.PathValue("id"))
+  if err!=nil{businessError(w,err);return}
+  w.Header().Set("Cache-Control","private, no-store")
+  respond(w,http.StatusOK,map[string]any{"histories":histories,"scope":"immutable_source_group"})
+ })
  mux.HandleFunc("POST /api/v1/workspace/groups",func(w http.ResponseWriter,r *http.Request){
   session,ok:=scope(w,r,true);if !ok{return}
   var input business.NewGroup

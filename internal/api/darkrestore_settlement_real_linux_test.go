@@ -489,6 +489,11 @@ func (f *localSettlementFixture) attachToEarlierImport(t *testing.T, ctx context
 	if err != nil || projection.HistoricalBytes != want || projection.TotalBytes != want || projection.PostMigrationBytes != "0" || !projection.SourceEpochSettled || projection.CutoverVerified {
 		t.Fatal("late epoch omitted, double counted, or activated", projection, err)
 	}
+	histories, err := dst.s.business.GroupHistory(ctx, original.Groups[0].TargetGroupID)
+	if err != nil || len(histories) != 1 || histories[0].SnapshotBytes != "310" ||
+		histories[0].ClosedEpochBytes != strconv.FormatInt(proof.Historical-proof.PriorBytes, 10) || histories[0].HistoricalBytes != want {
+		t.Fatal("source group final epoch history inaccurate", histories, err)
+	}
 	after, err := dst.s.business.Representative(ctx, "transfer-target")
 	if err != nil || after.VolumeCreditBytes != balance.VolumeCreditBytes || after.UnlimitedCreditUnits != balance.UnlimitedCreditUnits {
 		t.Fatal("attachment charged credit", err)

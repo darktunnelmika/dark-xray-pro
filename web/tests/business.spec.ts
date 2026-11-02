@@ -414,6 +414,13 @@ test("owner moves only same-representative clients through safe picker then remo
  await create.getByLabel("Representative ID").selectOption("rep-a");
  await create.getByRole("button",{name:"Create pending client"}).click();
  await expect(page.locator(".clients-explorer-row").filter({hasText:"rep-isolated"}).getByText("Rep selected")).toBeVisible();
+ await page.route("**/api/v1/workspace/groups/rep-group-v2/history",route=>route.fulfill({
+  status:200,contentType:"application/json",body:JSON.stringify({scope:"immutable_source_group",histories:[{
+   source_sha256:"a".repeat(64),source_group_id:"legacy-archived",source_name:"Old archive",
+   source_count:1,archived_count:1,promoted_count:0,
+   snapshot_bytes:"7",closed_epoch_bytes:"11",historical_bytes:"18",
+  }]})
+ }));
  await page.goto("/groups");
  const groupForm=page.getByRole("heading",{name:"Create group"}).locator("..");
  await groupForm.getByLabel("Group ID").fill("rep-group-v2");
@@ -423,6 +430,9 @@ test("owner moves only same-representative clients through safe picker then remo
  await expect(page.getByText("Rep group (rep-group-v2)")).toBeVisible();
  await page.getByRole("button",{name:"Manage members"}).click();
  const m=page.getByRole("region",{name:"Group membership manager"});
+ const history=page.getByRole("region",{name:"Source group history"});
+ await expect(history.getByText("Old archive · legacy-archived")).toBeVisible();
+ await expect(history.getByText("Historical total: 18 B")).toBeVisible();
  await expect(m.getByRole("heading",{name:"Group members: Rep group"})).toBeVisible();
  await expect(m.getByText("Rep selected")).toBeVisible();
  await expect(m.getByText("Owner only")).toHaveCount(0);

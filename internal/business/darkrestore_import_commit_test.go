@@ -450,6 +450,10 @@ func TestDarkRestoreArchivedGroupHistorySurvivesRenameAndAssignment(t *testing.T
 	if err != nil || usage.HistoricalBytes != "7" || usage.PostMigrationBytes != "0" || usage.TotalBytes != "7" || usage.CutoverVerified {
 		t.Fatal("archived client usage changed", usage, err)
 	}
+	groups, err := f.s.GroupHistory(ctx, group.TargetGroupID)
+	if err != nil || len(groups) != 1 || groups[0].SnapshotBytes != "7" || groups[0].ClosedEpochBytes != "0" || groups[0].HistoricalBytes != "7" || groups[0].ArchivedCount != 1 {
+		t.Fatal("persisted source group history changed", groups, err)
+	}
 	receipt, err := f.s.DarkRestoreImportReceiptV1(ctx, f.owner.Token, original.EventID)
 	if err != nil || receipt.Groups[0].HistoricalBytes != "7" {
 		t.Fatal("source history receipt changed", receipt, err)

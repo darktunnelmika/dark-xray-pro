@@ -51,6 +51,12 @@ func TestGroupBrowserScopeAndDeletionNeverDestroysClientsOrCredits(t *testing.T)
  if w:=req("POST","/api/v1/workspace/groups",business.NewGroup{
   ID:"cross-group",RepresentativeID:"rep-beta",Name:"Unauthorized",
  },repCookie,repCSRF);w.Code!=403{t.Fatalf("rep created another tenant's group: %+v",w)}
+ if w:=req("GET","/api/v1/workspace/groups/alpha-private/history",nil,repCookie,"");w.Code!=403{
+  t.Fatalf("representative read owner-only restore group history: %+v",w)
+ }
+ if w:=req("GET","/api/v1/workspace/groups/alpha-private/history",nil,ownerCookie,"");w.Code!=200||!strings.Contains(w.Body,`"histories":[]`){
+  t.Fatalf("owner group history without import failed closed: %+v",w)
+ }
  if w:=req("GET","/api/v1/workspace/groups?representative_id=rep-beta",nil,repCookie,"");w.Code!=403{
   t.Fatalf("rep saw other tenant's groups: %+v",w)
  }
