@@ -113,3 +113,45 @@ test("owner sees staged import even when client operation history is unavailable
  await panel.locator("button.darkrestore-review-head").click();
  await expect(panel.getByRole("button",{name:"Open approved server snapshot"})).toBeVisible();
 });
+
+test("owner attaches a pinned signed handoff in Clients at 320px without a browser file",async({page})=>{
+ await page.setViewportSize({width:320,height:780});
+ await page.addInitScript(()=>{localStorage.setItem("dark-pro-lang","fa");localStorage.setItem("dark-pro-theme","dark");});
+ const calls=await setup(page);
+ const source={
+  scope:"single_local_source_epoch",source_id:"legacy-a",source_sha256:sha,
+  pre_epoch_bytes:"310",epoch_uplink_bytes:"1696",epoch_downlink_bytes:"1639327",
+  settled_historical_bytes:"1641333",finite_quota_remaining_bytes:"132576395"
+ };
+ const evidence="b".repeat(64),publicKey="c".repeat(64);
+ await page.route("**/api/v1/workspace/me",route=>route.fulfill({json:{
+  user:{id:"owner",role:"owner",representative_id:"owner",username:"review-test"},
+  balance:{id:"owner",kind:"owner",display_name:"Owner",enabled:true,volume_credit_bytes:1000,unlimited_credit_units:100},
+  data_plane:"not_activated",capabilities:{darkrestore_receipts_v1:true,darkrestore_signed_handoff_v1:true}
+ }}));
+ await page.route("**/api/v1/workspace/dark-restore/handoff",route=>route.fulfill({json:{
+  handoff_sha256:evidence,source_settlement:source
+ }}));
+ let attached=0;
+ await page.route("**/api/v1/workspace/dark-restore/handoff/attach",route=>{
+  expect(route.request().postDataJSON()).toEqual({handoff_sha256:evidence});
+  expect(route.request().headers()["x-csrf-token"]).toBe("c".repeat(64));
+  attached++;
+  return route.fulfill({json:{
+   client_id:"dr-"+sha.slice(0,20),original_import_event_id:"restore-original-0001",actor_user_id:"owner",
+   source_settlement:source,handoff_sha256:evidence,handoff_public_key_sha256:publicKey,replayed:attached>1
+  }});
+ });
+ await page.goto("/dark-restore");
+ const panel=page.getByRole("region",{name:"دارک ریستور — بررسی واردسازی"});
+ await panel.getByRole("button",{name:"بررسی تحویل تأییدشدهٔ سرور"}).click();
+ await expect(panel.getByText("legacy-a")).toBeVisible();
+ await expect(panel.getByText(evidence)).toBeVisible();
+ expect(calls.some(x=>x.startsWith("POST "))).toBe(false);
+ await panel.getByRole("button",{name:"ثبت یا بازیابی رسید اتصال"}).click();
+ await expect(panel.getByText("اتصال ثبت شد",{exact:false})).toBeVisible();
+ await panel.getByRole("button",{name:"ثبت یا بازیابی رسید اتصال"}).click();
+ await expect(panel.getByText("رسید پیشین بازیابی شد",{exact:false})).toBeVisible();
+ expect(attached).toBe(2);
+ expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth+2)).toBe(true);
+});
