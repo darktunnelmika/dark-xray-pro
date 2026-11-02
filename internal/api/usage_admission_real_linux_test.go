@@ -89,7 +89,11 @@ func testRealPinnedPretrafficUsageAdmission(t *testing.T, modes []string) {
 		t.Run(mode, func(t *testing.T) {
 			transactionMode := strings.HasPrefix(mode, "transaction-")
 			activeMode := strings.HasPrefix(mode, "active-") || transactionMode
-			ctx, cancel := context.WithTimeout(context.Background(), 35*time.Second)
+			deadline := 35 * time.Second
+			if mode == "active-restore-cutover" {
+				deadline = 85 * time.Second
+			} // Includes expiry of the real 40-second source lease.
+			ctx, cancel := context.WithTimeout(context.Background(), deadline)
 			defer cancel()
 			// Record only timing/status, never credentials or private payloads.
 			// An unexpected recovery transport failure must be diagnosable without

@@ -180,7 +180,7 @@ func testActiveTCPOutcome(t *testing.T, ctx context.Context, s *Server, r *manag
 		}
 	}
 	if restore != nil {
-		restore.check(t, ctx, o, epoch, *final)
+		restore.check(t, ctx, s, cfg, o, epoch, *final)
 	}
 	if mode == "active-replacement" {
 		next := cfg

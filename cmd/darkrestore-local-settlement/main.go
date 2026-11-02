@@ -28,6 +28,7 @@ func main() {
 	journalSHA := flag.String("journal-sha256", "", "approved final journal SHA-256")
 	key := flag.String("state-key-file", "", "source journal key file")
 	listen := flag.String("source-listen-ip", "", "expected source supervisor listen IP")
+	output := flag.String("export-copy", "", "optional new private M2 SQLite input for one identity")
 	flag.Parse()
 	if flag.NArg() != 0 || *at <= 0 {
 		fmt.Fprintln(os.Stderr, "invalid inputs")
@@ -40,7 +41,13 @@ func main() {
 		fmt.Fprintln(os.Stderr, "source process exit or final receipt unverified")
 		os.Exit(1)
 	}
-	result, err := darkrestore.InspectLocalSettlement(ctx, *source, *sha, *authority, *pin, *id, *node, *install, time.Unix(*at, 0), seal)
+	inputs := darkrestore.LocalInputs{Source: *source, SourceSHA: *sha, Authority: *authority, AuthoritySHA: *pin, ID: *id, Node: *node, Installation: *install, AsOf: time.Unix(*at, 0)}
+	var result any
+	if *output == "" {
+		result, err = darkrestore.InspectLocalSettlement(ctx, inputs, seal)
+	} else {
+		result, err = darkrestore.ExportLocalImportCopy(ctx, inputs, seal, *output)
+	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "local source accounting unverified")
 		os.Exit(1)

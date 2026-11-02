@@ -49,7 +49,7 @@ No production HUB, users, representatives, bots, DNS or Nodes are modified by th
 
 ## M4 local source accounting rehearsal
 
-The Linux LAB bundle includes `dark-pro-darkrestore-local-settlement`. It reads an independently pinned pre-admission legacy SQLite copy, an offline copy of the dedicated source HUB accounting database, and the source Agent's encrypted final runtime journal. It produces a private, read-only accounting result for one source epoch. The command has no destination-write or subscription-activation mode.
+The Linux LAB bundle includes `dark-pro-darkrestore-local-settlement`. It reads an independently pinned pre-admission legacy SQLite copy, an offline copy of the dedicated source HUB accounting database, and the source Agent's encrypted final runtime journal. The default output is a private accounting result for one source epoch. With an explicit export path, it can also prepare a new SQLite input for M2.
 
 The supported replica is a single finite-volume Restore identity, one local VLESS Reality/TCP inbound, and one registered source process. The replica must bind the same UUID and the source client ID derived by `darkrestore.LocalSourceID(snapshotSHA, restoreID)` before admitting traffic. The rehearsal provisions this identity in a disposable source. Existing stock Xray deployments do not emit the required evidence.
 
@@ -63,6 +63,10 @@ Run the verifier as the owner of the private source-journal copy on the same boo
       -node "$SOURCE_NODE" -installation "$SOURCE_INSTALLATION" \
       -source-id "$RESTORE_ID" -as-of-unix "$SNAPSHOT_TIME"
 
-A successful result ties the historical bytes to the snapshot, the epoch's uplink and downlink to the source's initial zero and terminal receipt, and the exact UUID to the credential served by the exited process. The finite quota remaining is floored at zero. Replaying the same inputs yields the same result. An uncertain epoch, second registration, missing receipt, changed credential, wrong key, or unmatched journal blocks the calculation.
+The dedicated source identity must already be archived through its normal lifecycle API. The verifier checks the zero-debit archive operation, invalidation of the last delivered configuration, and expiration of its signed lease. A successful result ties the historical bytes to the snapshot, the epoch's uplink and downlink to the source's initial zero and terminal receipt, and the exact UUID to the credential served by the exited process. The finite quota remaining is floored at zero. Replaying the same inputs yields the same result. An uncertain epoch, second registration, missing receipt, changed credential, wrong key, or unmatched journal blocks the calculation.
 
-This proves accounting for that closed epoch. Exclusive retirement of every source that could serve the credential, durable application at the destination, compatible subscription delivery, and persistent LAB acceptance remain open.
+For a first destination import, pass `-export-copy /private/settled-import.sqlite` to the same command. The export accepts just one legacy identity and one group. It adds the closed epoch as its own historical usage row in a new copy and records the original snapshot, authority and journal digests. Stage the returned `import_sha256` and copy with the existing M2 flow. Repeating the export verifies the existing file. An unrelated destination file is preserved. A destination that already imported that UUID requires separate reconciliation.
+
+The isolated acceptance imports this copy with an owner session into a separate PRO database. Replaying the request recovers the original receipt. The client retains its UUID and expiry, and the source's final bytes are displayed as historical while the destination starts with zero post-migration usage.
+
+This proves accounting for that closed epoch. Exclusive retirement of every source that could serve the credential, settlement attachment for an already-imported client, compatible subscription delivery, and persistent LAB acceptance remain open.

@@ -65,7 +65,9 @@ func checkPrivateCopy(path, pin string) error {
 // InspectLocalSettlement reconciles one pre-traffic legacy snapshot and one
 // independently approved, offline, dedicated source accounting database. It
 // returns a scope-specific result and never grants destination admission.
-func InspectLocalSettlement(ctx context.Context, source, sourceSHA, authority, authoritySHA, id, node, installation string, at time.Time, seal managedxray.LocalTCPSeal) (LocalSourceSettlement, error) {
+func InspectLocalSettlement(ctx context.Context, in LocalInputs, seal managedxray.LocalTCPSeal) (LocalSourceSettlement, error) {
+	source, sourceSHA, authority, authoritySHA := in.Source, in.SourceSHA, in.Authority, in.AuthoritySHA
+	id, node, installation, at := in.ID, in.Node, in.Installation, in.AsOf
 	var zero LocalSourceSettlement
 	if ctx == nil || source == authority || id == "" || node == "" || installation == "" || at.Unix() <= 0 || at.After(time.Now()) {
 		return zero, ErrLocalSettlement
@@ -136,6 +138,20 @@ func InspectLocalSettlement(ctx context.Context, source, sourceSHA, authority, a
 	err = tx.QueryRowContext(ctx, `SELECT e.epoch_json,e.cursor_json,e.binding_sha,e.state,e.node_id,e.installation_id,e.epoch_id,e.config_sha,e.kernel_boot_id,e.pid,e.start_ticks,c.uuid,a.uplink,a.downlink,a.baseline_complete,a.holds,s.body_json
  FROM pro_usage_epochs e,clients c JOIN pro_usage_accounts a ON a.client_id=c.id JOIN pro_usage_seeds s ON s.client_id=c.id WHERE c.id=?`, target).Scan(&epochRaw, &cursorRaw, &binding, &state, &principal, &install, &storedEpoch, &config, &boot, &pid, &ticks, &uuid, &up, &down, &baseline, &holds, &seedRaw)
 	if err != nil || state != "sealed" || principal != node || install != installation || uuid != client.UUID || baseline != 1 || holds != 0 {
+		return zero, ErrLocalSettlement
+	}
+	// The final process receipt covers its lifetime. Independently require
+	// retirement of the source account and expiry of its last signed lease.
+	var retired int
+	err = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM clients c
+	JOIN client_operations op ON op.client_id=c.id AND op.kind='archive'
+	JOIN native_runtime_delivery d ON d.node_id=? AND d.installation_id=? AND d.sha=?
+	JOIN native_config_generation g ON g.id=1
+	WHERE c.id=? AND c.archived=1 AND c.deployment_state='disabled'
+	AND op.volume_credit_debit=0 AND op.unlimited_credit_debit=0
+	AND d.issued>0 AND d.issued<d.expires AND d.expires<=? AND d.generation<g.value
+	AND (SELECT COUNT(*) FROM native_runtime_delivery)=1`, node, installation, config, target, time.Now().UnixNano()).Scan(&retired)
+	if err != nil || retired != 1 {
 		return zero, ErrLocalSettlement
 	}
 	var e uc.Epoch

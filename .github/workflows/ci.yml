@@ -17,7 +17,7 @@ jobs:
   final-tcp-core:
     name: Experimental pinned core final TCP counters
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 23  # Includes three actual 40-second source lease expirations.
     steps:
       - uses: actions/checkout@v4
       - uses: actions/checkout@v4
@@ -80,8 +80,9 @@ jobs:
           set -euo pipefail
           export DARK_PRO_TEST_SETTLEMENT_CLI="$RUNNER_TEMP/darkrestore-local-settlement"
           go build -o "$DARK_PRO_TEST_SETTLEMENT_CLI" ./cmd/darkrestore-local-settlement
-          go test -race ./internal/api -run '^TestRealPinnedDarkRestoreLocalSettlement$' -count=3 -v -timeout=180s | tee "$RUNNER_TEMP/darkrestore-local-settlement.log"
+          go test -race ./internal/api -run '^TestRealPinnedDarkRestoreLocalSettlement$' -count=3 -v -timeout=300s | tee "$RUNNER_TEMP/darkrestore-local-settlement.log"
           test "$(grep -c DARKRESTORE_LOCAL_SETTLEMENT_PASS "$RUNNER_TEMP/darkrestore-local-settlement.log")" = 3
+          test "$(grep -c DARKRESTORE_SETTLED_IMPORT_PASS "$RUNNER_TEMP/darkrestore-local-settlement.log")" = 3
       - name: Active stream diagnostics
         if: failure()
         run: |

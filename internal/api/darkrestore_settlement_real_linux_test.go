@@ -8,10 +8,12 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -89,7 +91,7 @@ func (f *localSettlementFixture) provisionSourceUUID(t *testing.T, client *busin
 	}
 	client.UUID = f.uuid
 }
-func (f *localSettlementFixture) check(t *testing.T, ctx context.Context, o managedxray.Options, epoch uc.Epoch, final uc.Report) {
+func (f *localSettlementFixture) check(t *testing.T, ctx context.Context, server *Server, cfg business.NodeConfig, o managedxray.Options, epoch uc.Epoch, final uc.Report) {
 	t.Helper()
 	journal := filepath.Join(o.Directory, "runtime.enc")
 	jSHA := settlementHash(t, journal)
@@ -106,6 +108,26 @@ func (f *localSettlementFixture) check(t *testing.T, ctx context.Context, o mana
 		t.Fatal(err)
 	}
 	defer db.Close()
+	// Archive only this disposable source identity through the installed API contract.
+	cookie, csrf := browserLogin(t, server, ownerUsername, ownerPassword)
+	lifecycle := func(action, event string) int {
+		return browserRequest(t, server.Handler(), "POST", "/api/v1/workspace/clients/"+f.id+"/state",
+			business.SetClientState{ClientID: f.id, Action: action, EventID: event, Reason: "Local migration source retirement"}, cookie, csrf, "https://"+browserHost).Code
+	}
+	if lifecycle("archive", "retire-synthetic-restore-source") != 200 || lifecycle("archive", "retire-synthetic-restore-source") != 200 || lifecycle("enable", "reject-synthetic-source-reenable") != 409 {
+		t.Fatal("local source retirement or replay failed")
+	}
+	var expires int64
+	if err = db.QueryRow("SELECT expires FROM native_runtime_delivery WHERE node_id=? AND installation_id=?", epoch.NodeID, epoch.InstallationID).Scan(&expires); err != nil {
+		t.Fatal(err)
+	}
+	if expires <= time.Now().UnixNano() {
+		t.Fatal("fixture lease expired before testing stale registration")
+	}
+	_, err = server.business.RegisterNativeUsageEpoch(ctx, cfg, business.UsageBirth{EpochID: strings.Repeat("f", 32), KernelBootID: epoch.KernelBootID, PID: epoch.PID, StartTicks: epoch.ProcessStartTicks + 1})
+	if !errors.Is(err, business.ErrConflict) {
+		t.Fatal("retired source accepted prior delivery", err)
+	}
 	authority := filepath.Join(f.dir, "authority.sqlite")
 	if _, err = db.Exec("VACUUM INTO ?", authority); err != nil {
 		t.Fatal(err)
@@ -114,8 +136,20 @@ func (f *localSettlementFixture) check(t *testing.T, ctx context.Context, o mana
 		t.Fatal(err)
 	}
 	pin := settlementHash(t, authority)
+	inputs := darkrestore.LocalInputs{Source: f.source, SourceSHA: f.sha, Authority: authority, AuthoritySHA: pin, ID: "synthetic-source", Node: epoch.NodeID, Installation: epoch.InstallationID, AsOf: f.at}
 	inspect := func(seal managedxray.LocalTCPSeal, sha, node string) (darkrestore.LocalSourceSettlement, error) {
-		return darkrestore.InspectLocalSettlement(ctx, f.source, sha, authority, pin, "synthetic-source", node, epoch.InstallationID, f.at, seal)
+		v := inputs
+		v.SourceSHA = sha
+		v.Node = node
+		return darkrestore.InspectLocalSettlement(ctx, v, seal)
+	}
+	if _, err = inspect(seal, f.sha, epoch.NodeID); err == nil {
+		t.Fatal("unexpired source lease accepted")
+	}
+	select {
+	case <-time.After(time.Until(time.Unix(0, expires)) + time.Millisecond):
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
 	}
 	result, err := inspect(seal, f.sha, epoch.NodeID)
 	if err != nil {
@@ -141,6 +175,27 @@ func (f *localSettlementFixture) check(t *testing.T, ctx context.Context, o mana
 	if settlementHash(t, f.source) != f.sha || settlementHash(t, authority) != pin {
 		t.Fatal("offline input changed")
 	}
+	exportPath := filepath.Join(f.dir, "sealed-import.sqlite")
+	exported, err := darkrestore.ExportLocalImportCopy(ctx, inputs, seal, exportPath)
+	if err != nil || exported.Settlement != result {
+		t.Fatal("settled export", err)
+	}
+	same, err := darkrestore.ExportLocalImportCopy(ctx, inputs, seal, exportPath)
+	if err != nil || same != exported {
+		t.Fatal("export replay", err)
+	}
+	if settlementHash(t, exportPath) != exported.SHA || settlementHash(t, f.source) != f.sha {
+		t.Fatal("export digest mismatch")
+	}
+	foreign := filepath.Join(f.dir, "unrelated-output")
+	if err = os.WriteFile(foreign, []byte("existing file"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	before := settlementHash(t, foreign)
+	if _, err = darkrestore.ExportLocalImportCopy(ctx, inputs, seal, foreign); err == nil || settlementHash(t, foreign) != before {
+		t.Fatal("unrelated output replaced")
+	}
+	f.importAtDestination(t, ctx, exportPath, exported)
 	// Exercise the packaged command with the same independently pinned copies.
 	if cli := os.Getenv("DARK_PRO_TEST_SETTLEMENT_CLI"); cli != "" {
 		args := []string{"-source", f.source, "-source-sha256", f.sha, "-authority", authority, "-authority-sha256", pin, "-source-id", "synthetic-source", "-node", epoch.NodeID, "-installation", epoch.InstallationID, "-as-of-unix", strconv.FormatInt(f.at.Unix(), 10), "-journal", journal, "-journal-sha256", jSHA, "-state-key-file", key, "-source-listen-ip", o.ListenIP}
@@ -148,6 +203,12 @@ func (f *localSettlementFixture) check(t *testing.T, ctx context.Context, o mana
 		var viaCLI darkrestore.LocalSourceSettlement
 		if err != nil || json.Unmarshal(raw, &viaCLI) != nil || viaCLI != result {
 			t.Fatal("packaged CLI mismatch", err)
+		}
+		handoffArgs := append(append([]string(nil), args...), "-export-copy", exportPath)
+		raw, err = exec.CommandContext(ctx, cli, handoffArgs...).Output()
+		var handoff darkrestore.LocalImportCopy
+		if err != nil || json.Unmarshal(raw, &handoff) != nil || handoff != exported {
+			t.Fatal("CLI export replay failed", err)
 		}
 		badKey := filepath.Join(f.dir, "wrong.key")
 		if err = os.WriteFile(badKey, make([]byte, 32), 0600); err != nil {
@@ -165,6 +226,7 @@ func (f *localSettlementFixture) check(t *testing.T, ctx context.Context, o mana
 	}
 	for _, entry := range []struct{ name, sql string }{
 		{"unknown-tail", "UPDATE pro_usage_epochs SET state='uncertain'"},
+		{"unretired-account", "UPDATE clients SET archived=0"},
 		{"held", "UPDATE pro_usage_accounts SET holds=1"},
 		{"quota-account-drift", "UPDATE pro_usage_accounts SET uplink=uplink+1"},
 		{"different-uuid", "UPDATE clients SET uuid='22345678-1234-4234-8234-123456789abc'"},
@@ -187,10 +249,65 @@ func (f *localSettlementFixture) check(t *testing.T, ctx context.Context, o mana
 		if err != nil || e != nil {
 			t.Fatal("mutation fixture failed", entry.name, err, e)
 		}
-		_, err = darkrestore.InspectLocalSettlement(ctx, f.source, f.sha, copyPath, settlementHash(t, copyPath), "synthetic-source", epoch.NodeID, epoch.InstallationID, f.at, seal)
+		v := inputs
+		v.Authority = copyPath
+		v.AuthoritySHA = settlementHash(t, copyPath)
+		_, err = darkrestore.InspectLocalSettlement(ctx, v, seal)
 		if err == nil {
 			t.Fatal("contradictory source proof accepted", entry.name)
 		}
 	}
 	t.Logf("DARKRESTORE_LOCAL_SETTLEMENT_PASS prior=%d up=%d down=%d historical=%d remaining=%d", result.PriorBytes, result.Up, result.Down, result.Historical, result.Remaining)
+}
+
+func (f *localSettlementFixture) importAtDestination(t *testing.T, ctx context.Context, path string, handoff darkrestore.LocalImportCopy) {
+	t.Helper()
+	dst := newOwnershipAPI(t)
+	before, err := dst.s.business.Representative(ctx, "transfer-target")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := dst.s.EnableNativeInbounds(make([]byte, 32)); err != nil {
+		t.Fatal(err)
+	}
+	if err := dst.s.StageDarkRestoreImport(ctx, path, handoff.SHA, f.at.Unix()); err != nil {
+		t.Fatal("stage settled import copy", err)
+	}
+	dst.h = dst.s.BrowserHandler()
+	req := restoreQuoteRequest{ReviewSHA: dst.s.darkRestoreStage.digest, Mappings: []business.DarkRestoreGroupMappingV1{{SourceGroupID: "synthetic-group", RepresentativeID: "transfer-target"}}}
+	origin := "https://" + browserHost
+	w := browserRequest(t, dst.h, "POST", restoreBase+"/quote", req, dst.owner, dst.ownerCSRF, origin)
+	var q business.DarkRestoreImportQuoteV1
+	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &q) != nil || q.Importable != 1 || q.Blocked != 0 {
+		t.Fatal("destination quote", w.Code)
+	}
+	commit := restoreCommitRequest{restoreQuoteRequest: req, QuoteHash: q.QuoteHash, QuoteUnix: q.QuoteUnix, EventID: "restore-final-local-epoch-0001"}
+	for i := 0; i < 2; i++ {
+		w = browserRequest(t, dst.h, "POST", restoreBase+"/commit", commit, dst.owner, dst.ownerCSRF, origin)
+		var receipt business.DarkRestoreImportReceiptV1
+		if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &receipt) != nil || receipt.Count != 1 || receipt.Replayed != (i == 1) || receipt.CreditChanged {
+			t.Fatal("destination receipt/replay", w.Code)
+		}
+	}
+	clients, err := dst.s.business.ListClients(ctx, "transfer-target", 10, 0)
+	if err != nil || len(clients) != 1 || clients[0].UUID != f.uuid || clients[0].ExpiresUnix != 1893456000 || clients[0].DeploymentState != "disabled" {
+		t.Fatal("destination identity or quarantine", err)
+	}
+	projection, err := dst.s.business.DarkRestoreUsageV1(ctx, clients[0].ID)
+	total := strconv.FormatInt(handoff.Settlement.Historical, 10)
+	if err != nil || projection.HistoricalBytes != total || projection.TotalBytes != total || projection.PostMigrationBytes != "0" || projection.CutoverVerified {
+		t.Fatal("destination double-counted, lost history or released hold", err)
+	}
+	after, err := dst.s.business.Representative(ctx, "transfer-target")
+	if err != nil || before.VolumeCreditBytes != after.VolumeCreditBytes || before.UnlimitedCreditUnits != after.UnlimitedCreditUnits {
+		t.Fatal("destination charged on import")
+	}
+	w = browserRequest(t, dst.h, "GET", "/api/v1/workspace/clients/"+clients[0].ID+"/usage", nil, dst.target, "", origin)
+	var visible struct {
+		Restore *business.DarkRestoreUsageV1 `json:"dark_restore"`
+	}
+	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &visible) != nil || visible.Restore == nil || *visible.Restore != projection {
+		t.Fatal("assigned representative cannot see exact migration totals", w.Code)
+	}
+	t.Log("DARKRESTORE_SETTLED_IMPORT_PASS one receipt after replay; same UUID and expiry; closed source bytes historical; zero post-migration usage")
 }
