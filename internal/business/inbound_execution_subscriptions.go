@@ -79,6 +79,11 @@ func (s *Store) MutateInboundExecutionSubscription(ctx context.Context, key []by
 	if err != nil {
 		return out, err
 	}
+	if in.Action != "revoke" {
+		if err = requireDarkRestoreCutover(ctx, tx, c.ID); err != nil {
+			return out, err
+		}
+	}
 	h, err := readExecutionSubscriptionHead(ctx, tx, client)
 	if err != nil {
 		return out, err

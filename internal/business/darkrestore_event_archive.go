@@ -114,3 +114,31 @@ func (s *Store) RecentDarkRestoreImports(ctx context.Context, token string) ([]R
 	}
 	return out, rows.Err()
 }
+
+// Reject backup publication or restore if the inventory key cannot recover all
+// private history, even when the schema and ciphertext checksums are intact.
+func validateDarkRestoreArchiveKeys(ctx context.Context, db *sql.DB, key []byte) error {
+	present, err := darkRestoreSchemaState(ctx, db)
+	if err != nil || !present {
+		return err
+	}
+	rows, err := db.QueryContext(ctx, "SELECT a.event_id,a.source_sha256,r.review_sha256,a.record_count,CASE WHEN length(a.sealed_history) BETWEEN 28 AND 33554460 THEN a.sealed_history END FROM darkrestore_event_archives_v1 a LEFT JOIN darkrestore_import_receipts_v1 r ON r.event_id=a.event_id ORDER BY a.event_id")
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var event, source, review string
+		var n int64
+		var sealed []byte
+		if rows.Scan(&event, &source, &review, &n, &sealed) != nil || n <= 0 || n > 100000 {
+			return ErrUnavailable
+		}
+		plain, err := openSubscription(key, "darkrestore-event-history", []string{event, source, review}, sealed)
+		var events []darkrestore.LegacyEvent
+		if err != nil || json.Unmarshal(plain, &events) != nil || int64(len(events)) != n {
+			return ErrUnavailable
+		}
+	}
+	return rows.Err()
+}

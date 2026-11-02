@@ -99,6 +99,9 @@ func validateOfflineBackupAssetsDB(ctx context.Context, db *sql.DB, key []byte) 
 	if len(key) != 0 && len(key) != 32 {
 		return ErrOfflineBackupAssets
 	}
+	if err := validateDarkRestoreArchiveKeys(ctx, db, key); err != nil {
+		return ErrOfflineBackupAssets
+	}
 	if err := backupPayloadRows(ctx, db, backupPayloadQuery("native_inbounds", "profile_enc", "CAST(id AS TEXT)"), func(id string, raw []byte) error {
 		n, err := strconv.ParseUint(id, 10, 64)
 		if err != nil {

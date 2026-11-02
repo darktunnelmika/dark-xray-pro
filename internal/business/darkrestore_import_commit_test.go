@@ -318,3 +318,44 @@ func TestDarkRestoreIndependentWritersShareOneImport(t *testing.T) {
 		t.Fatal("ownership accepted import nonce", err)
 	}
 }
+
+func TestDarkRestoreQuarantineBlocksEnableAndSubscriptions(t *testing.T) {
+	f := importSetup(t)
+	ctx := context.Background()
+	req := importRequest(t, f, syntheticImportIntent(1), "restore-hold-test-0001")
+	if _, err := f.s.commitVerifiedDarkRestore(ctx, f.owner.Token, req); err != nil {
+		t.Fatal(err)
+	}
+	id := darkRestoreClientID(req.Review.SourceSHA256, req.Review.Clients[0].SourceID)
+	if _, err := f.s.SetClientStateScoped(ctx, SetClientState{EventID: "restore-hold-enable-0001", ClientID: id, Action: "enable", Reason: "Synthetic attempt"}, "rep-target"); !errors.Is(err, ErrDarkRestoreCutover) {
+		t.Fatal("single enable", err)
+	}
+	if _, err := f.s.BulkSetClientState(ctx, BulkClientState{EventID: "restore-hold-bulk-00001", ClientIDs: []string{id}, Action: "enable", Reason: "Synthetic attempt"}, "rep-target"); !errors.Is(err, ErrDarkRestoreCutover) {
+		t.Fatal("bulk enable", err)
+	}
+	if _, err := f.s.db.Exec("UPDATE clients SET deployment_state='pending_node_apply' WHERE id=?", id); err == nil {
+		t.Fatal("quarantine bypassed")
+	}
+	for _, enable := range []func(context.Context) error{f.s.EnableSystemProbeAccounting, f.s.EnableMeteredHealthChallenges, f.s.EnableMeteredHealthQueue, f.s.EnableMeteredHealthRounds, f.s.EnableLabSubscriptions} {
+		if err := enable(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mutation := SubscriptionTokenMutation{EventID: "restore-hold-token-0001", Action: "issue"}
+	if _, err := f.s.MutateLabSubscription(ctx, make([]byte, 32), "owner", id, mutation); !errors.Is(err, ErrDarkRestoreCutover) {
+		t.Fatal("legacy subscription issue", err)
+	}
+	// Managed inbound subscriptions start from the native v8 family. The
+	// legacy health/subscription database has a separate schema lineage.
+	managed := importSetup(t)
+	if err := managed.s.EnableInboundExecution(ctx); err != nil {
+		t.Fatal(err)
+	}
+	request := importRequest(t, managed, syntheticImportIntent(1), "restore-managed-hold-0001")
+	if _, err := managed.s.commitVerifiedDarkRestore(ctx, managed.owner.Token, request); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := managed.s.MutateInboundExecutionSubscription(ctx, make([]byte, 32), "owner", id, mutation); !errors.Is(err, ErrDarkRestoreCutover) {
+		t.Fatal("managed subscription issue", err)
+	}
+}

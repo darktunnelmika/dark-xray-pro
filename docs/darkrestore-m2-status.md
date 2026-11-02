@@ -15,6 +15,7 @@ This branch remains a draft. It must not be merged or installed as a completed M
 - Atomically persist immutable receipts, source identities, groups, skips and usage seeds.
 - Replay the same event without duplication; reject changed requests, reimport of a consumed source, and UUID collisions across source snapshots.
 - Import and assignment do not debit representative credit. Existing ownership transfer enforces current management scope; later renewal charges the current representative.
+- Quarantine rejects individual/bulk enable and both subscription token issuers.
 - Reopen and native offline backup validation reject missing or contradictory import schema/history.
 
 ## Verified by automated tests
@@ -27,6 +28,7 @@ This branch remains a draft. It must not be merged or installed as a completed M
 - Archived/promoted/blocked historical totals and safe subset import.
 - Ownership transfer, previous-manager rejection, current-manager renewal charging.
 - Source authenticity, tampered accounting, uncertain UUID and group mapping rejection.
+- Eight writers across two stores converge on one receipt. Native encrypted backup and restore preserves the imported client and decryptable legacy history, and rejects missing or wrong archive keys.
 - Corruption rejection on reopen and backup validation.
 
 These tests use isolated synthetic databases. They are not installed LAB acceptance or production migration.
@@ -37,7 +39,7 @@ These tests use isolated synthetic databases. They are not installed LAB accepta
 - Verified cutover/checkpoint design, remaining-quota policy, and native/subscription activation acceptance. No incomplete baseline may be marked complete by an API request.
 - Approved legacy-unlimited plan policy; uncertain unlimited records currently remain blocked.
 - Operator acceptance on representative production-scale offline fixtures. Staging refuses unknown event layouts, more than 100,000 legacy events or event input above 16 MiB.
-- M3–M5: concurrent writers, final accounting, subscription and installed LAB acceptance.
+- M4/M5: authoritative final counter settlement, positive subscription delivery after settlement, and installed M2 acceptance.
 - Full CI and independent scope review before merge; versioned LAB installation afterward.
 - Telegram Bot and Store integration only after these gates, using the panel's existing wallet/order/usage logic.
 

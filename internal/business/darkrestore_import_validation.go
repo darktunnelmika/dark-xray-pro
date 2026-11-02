@@ -154,7 +154,7 @@ func validateRestoreReceipt(ctx context.Context, tx *sql.Tx, event string) error
 			return ErrUnavailable
 		}
 		var currentUUID string
-		if e = tx.QueryRowContext(ctx, "SELECT c.uuid FROM clients c JOIN pro_usage_seeds s ON s.client_id=c.id AND s.event_id=? JOIN pro_usage_accounts a ON a.client_id=c.id WHERE c.id=?", "darkrestore-seed-"+id, id).Scan(&currentUUID); e != nil || currentUUID != uuid {
+		if e = tx.QueryRowContext(ctx, "SELECT c.uuid FROM clients c JOIN pro_usage_seeds s ON s.client_id=c.id AND s.event_id=? JOIN pro_usage_accounts a ON a.client_id=c.id WHERE c.id=? AND c.deployment_state='disabled' AND a.baseline_complete=0 AND a.uplink=0 AND a.downlink=0", "darkrestore-seed-"+id, id).Scan(&currentUUID); e != nil || currentUUID != uuid {
 			return ErrUnavailable
 		}
 		count++

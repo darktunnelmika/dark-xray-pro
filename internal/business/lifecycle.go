@@ -280,6 +280,9 @@ func (s *Store) SetClientStateScoped(ctx context.Context, req SetClientState, sc
 		}
 		newStatus = "disabled"
 	case "enable":
+		if err = requireDarkRestoreCutover(ctx, tx, c.ID); err != nil {
+			return Client{}, err
+		}
 		if c.DeploymentState != "disabled" {
 			return Client{}, ErrConflict
 		}
