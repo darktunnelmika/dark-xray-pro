@@ -61,7 +61,7 @@ func validateDarkRestoreImportData(ctx context.Context, db *sql.DB) error {
 			return ErrUnavailable
 		}
 	}
-	return nil
+	return validateDarkRestoreLocalAttachments(ctx, tx)
 }
 
 func validateRestoreReceipt(ctx context.Context, tx *sql.Tx, event string) error {
@@ -205,6 +205,7 @@ type DarkRestoreUsageV1 struct {
 	HistoricalBytes    string `json:"historical_bytes"`
 	PostMigrationBytes string `json:"post_migration_bytes"`
 	TotalBytes         string `json:"total_bytes"`
+	SourceEpochSettled bool   `json:"source_epoch_settled"`
 	CutoverVerified    bool   `json:"cutover_verified"`
 }
 
@@ -243,6 +244,18 @@ func (s *Store) DarkRestoreUsageForAccount(ctx context.Context, account usageled
 	historical, err := strconv.ParseInt(out.HistoricalBytes, 10, 64)
 	if err != nil || historical < 0 {
 		return nil, ErrUnavailable
+	}
+	settled, err := readDarkRestoreLocalAttachment(ctx, s.db, account.ClientID)
+	if err != nil {
+		return nil, err
+	}
+	if settled != nil {
+		if settled.Settlement.PriorBytes != historical {
+			return nil, ErrUnavailable
+		}
+		historical = settled.Settlement.Historical
+		out.HistoricalBytes = strconv.FormatInt(historical, 10)
+		out.SourceEpochSettled = true
 	}
 	out.PostMigrationBytes = strconv.FormatInt(account.Total, 10)
 	out.TotalBytes = new(big.Int).Add(big.NewInt(historical), big.NewInt(account.Total)).String()

@@ -48,10 +48,20 @@ func darkRestoreSchemaState(ctx context.Context, q sellerQueryV2) (bool, error) 
 	if err := q.QueryRowContext(ctx, "SELECT COUNT(*) FROM sqlite_master WHERE name GLOB 'darkrestore_*'").Scan(&n); err != nil {
 		return false, ErrUnavailable
 	}
+	var app int
+	if err := q.QueryRowContext(ctx, "PRAGMA application_id").Scan(&app); err != nil {
+		return false, ErrUnavailable
+	}
 	if n == 0 {
+		if app != 0 {
+			return false, ErrUnavailable
+		}
 		return false, nil
 	}
-	if n != len(darkRestoreImportSchemaV1) {
+	if n != len(darkRestoreImportSchemaV1) && n != len(darkRestoreImportSchemaV1)+len(darkRestoreLocalAttachmentSchemaV1) {
+		return false, ErrUnavailable
+	}
+	if n == len(darkRestoreImportSchemaV1) && app != 0 || n > len(darkRestoreImportSchemaV1) && app != darkRestoreLocalAttachmentApplicationID {
 		return false, ErrUnavailable
 	}
 	var version int
@@ -73,6 +83,12 @@ func darkRestoreSchemaState(ctx context.Context, q sellerQueryV2) (bool, error) 
 	}
 	if err := verifyClientInsertTrigger(ctx, q, quarantinedClientInsertTrigger); err != nil {
 		return false, err
+	}
+	if n > len(darkRestoreImportSchemaV1) {
+		present, err := darkRestoreLocalAttachmentSchemaState(ctx, q)
+		if err != nil || !present {
+			return false, ErrUnavailable
+		}
 	}
 	return true, nil
 }
@@ -112,6 +128,9 @@ func (s *Store) EnableDarkRestoreImportV1(ctx context.Context) error {
 		if _, err = tx.ExecContext(ctx, "INSERT INTO darkrestore_import_meta_v1(id,version) VALUES(1,1)"); err != nil {
 			return err
 		}
+	}
+	if err = ensureDarkRestoreLocalAttachmentSchema(ctx, tx); err != nil {
+		return err
 	}
 	return tx.Commit()
 }

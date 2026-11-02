@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
@@ -196,6 +197,7 @@ func (f *localSettlementFixture) check(t *testing.T, ctx context.Context, server
 		t.Fatal("unrelated output replaced")
 	}
 	f.importAtDestination(t, ctx, exportPath, exported)
+	f.attachToEarlierImport(t, ctx, inputs, seal, result, exportPath, exported.SHA)
 	// Exercise the packaged command with the same independently pinned copies.
 	if cli := os.Getenv("DARK_PRO_TEST_SETTLEMENT_CLI"); cli != "" {
 		args := []string{"-source", f.source, "-source-sha256", f.sha, "-authority", authority, "-authority-sha256", pin, "-source-id", "synthetic-source", "-node", epoch.NodeID, "-installation", epoch.InstallationID, "-as-of-unix", strconv.FormatInt(f.at.Unix(), 10), "-journal", journal, "-journal-sha256", jSHA, "-state-key-file", key, "-source-listen-ip", o.ListenIP}
@@ -310,4 +312,118 @@ func (f *localSettlementFixture) importAtDestination(t *testing.T, ctx context.C
 		t.Fatal("assigned representative cannot see exact migration totals", w.Code)
 	}
 	t.Log("DARKRESTORE_SETTLED_IMPORT_PASS one receipt after replay; same UUID and expiry; closed source bytes historical; zero post-migration usage")
+}
+
+func (f *localSettlementFixture) attachToEarlierImport(t *testing.T, ctx context.Context, inputs darkrestore.LocalInputs, seal managedxray.LocalTCPSeal, proof darkrestore.LocalSourceSettlement, exportPath, exportSHA string) {
+	t.Helper()
+	destinationPath := filepath.Join(t.TempDir(), "private", "destination.sqlite")
+	server := businessLabAt(t, destinationPath)
+	if _, err := server.business.BootstrapOwner(ctx, ownerUsername, ownerPassword); err != nil {
+		t.Fatal(err)
+	}
+	dst := newOwnershipAPIWithServer(t, server)
+	if err := dst.s.EnableNativeInbounds(make([]byte, 32)); err != nil {
+		t.Fatal(err)
+	}
+	if err := dst.s.StageDarkRestoreImport(ctx, f.source, f.sha, f.at.Unix()); err != nil {
+		t.Fatal("stage original pre-epoch copy", err)
+	}
+	dst.h = dst.s.BrowserHandler()
+	origin := "https://" + browserHost
+	request := restoreQuoteRequest{ReviewSHA: dst.s.darkRestoreStage.digest, Mappings: []business.DarkRestoreGroupMappingV1{{SourceGroupID: "synthetic-group", RepresentativeID: "transfer-target"}}}
+	w := browserRequest(t, dst.h, "POST", restoreBase+"/quote", request, dst.owner, dst.ownerCSRF, origin)
+	var q business.DarkRestoreImportQuoteV1
+	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &q) != nil || q.Importable != 1 {
+		t.Fatal("first original quote", w.Code)
+	}
+	commit := restoreCommitRequest{restoreQuoteRequest: request, QuoteHash: q.QuoteHash, QuoteUnix: q.QuoteUnix, EventID: "restore-pre-epoch-0001"}
+	w = browserRequest(t, dst.h, "POST", restoreBase+"/commit", commit, dst.owner, dst.ownerCSRF, origin)
+	var original business.DarkRestoreImportReceiptV1
+	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &original) != nil || original.Count != 1 {
+		t.Fatal("original import", w.Code)
+	}
+	clients, err := dst.s.business.ListClients(ctx, "transfer-target", 10, 0)
+	if err != nil || len(clients) != 1 || clients[0].UUID != f.uuid {
+		t.Fatal("first UUID", err)
+	}
+	id := clients[0].ID
+	initial, err := dst.s.business.DarkRestoreUsageV1(ctx, id)
+	if err != nil || initial.HistoricalBytes != "310" || initial.SourceEpochSettled || initial.CutoverVerified {
+		t.Fatal("pre-epoch view", initial, err)
+	}
+	owner, err := dst.s.business.Login(ctx, ownerUsername, ownerPassword)
+	if err != nil {
+		t.Fatal(err)
+	}
+	balance, err := dst.s.business.Representative(ctx, "transfer-target")
+	if err != nil {
+		t.Fatal(err)
+	}
+	attached, err := dst.s.business.AttachVerifiedLocalSettlementV1(ctx, owner.Token, inputs, seal)
+	if err != nil || attached.ClientID != id || attached.OriginalEventID != original.EventID || attached.Replayed || attached.Settlement != proof {
+		t.Fatal("attach verified source", err)
+	}
+	replay, err := dst.s.business.AttachVerifiedLocalSettlementV1(ctx, owner.Token, inputs, seal)
+	if err != nil || !replay.Replayed || replay.Settlement != proof {
+		t.Fatal("attach replay", err)
+	}
+	projection, err := dst.s.business.DarkRestoreUsageV1(ctx, id)
+	want := strconv.FormatInt(proof.Historical, 10)
+	if err != nil || projection.HistoricalBytes != want || projection.TotalBytes != want || projection.PostMigrationBytes != "0" || !projection.SourceEpochSettled || projection.CutoverVerified {
+		t.Fatal("late epoch omitted, double counted, or activated", projection, err)
+	}
+	after, err := dst.s.business.Representative(ctx, "transfer-target")
+	if err != nil || after.VolumeCreditBytes != balance.VolumeCreditBytes || after.UnlimitedCreditUnits != balance.UnlimitedCreditUnits {
+		t.Fatal("attachment charged credit", err)
+	}
+	if _, err = dst.s.business.ExtendClientScoped(ctx, business.ExtendClient{EventID: "restore-after-settlement-renew-0001", ClientID: id, AdditionalVolumeBytes: 61, Reason: "Current representative renews settled imported identity"}, "transfer-target"); err != nil {
+		t.Fatal("later renewal rejected", err)
+	}
+	charged, err := dst.s.business.Representative(ctx, "transfer-target")
+	if err != nil || charged.VolumeCreditBytes != balance.VolumeCreditBytes-61 {
+		t.Fatal("later renewal did not debit current representative", err)
+	}
+	recovered, err := dst.s.business.DarkRestoreImportReceiptV1(ctx, owner.Token, original.EventID)
+	if err != nil || !reflect.DeepEqual(recovered, original) {
+		t.Fatal("original immutable receipt changed", err)
+	}
+	clients, err = dst.s.business.ListClients(ctx, "transfer-target", 10, 0)
+	if err != nil || len(clients) != 1 || clients[0].ID != id || clients[0].UUID != f.uuid || clients[0].DeploymentState != "disabled" {
+		t.Fatal("attachment changed identity or quarantine", err)
+	}
+	exported, err := darkrestore.BuildReview(ctx, exportPath, exportSHA, f.at)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = dst.s.business.QuoteDarkRestoreImportV1(ctx, owner.Token, business.DarkRestoreImportIntentV1{Review: exported, Mappings: request.Mappings}); !errors.Is(err, business.ErrConflict) {
+		t.Fatal("settled export produced duplicate identity", err)
+	}
+	if err = dst.s.business.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = business.ValidateOfflineBackup(ctx, destinationPath); err != nil {
+		t.Fatal("backup rejected attached epoch", err)
+	}
+	reopened, err := business.Open(destinationPath)
+	if err != nil {
+		t.Fatal("restart rejected attached epoch", err)
+	}
+	defer reopened.Close()
+	recoveredOwner, err := reopened.Login(ctx, ownerUsername, ownerPassword)
+	if err != nil {
+		t.Fatal(err)
+	}
+	replayed, err := reopened.AttachVerifiedLocalSettlementV1(ctx, recoveredOwner.Token, inputs, seal)
+	if err != nil || !replayed.Replayed || replayed.ClientID != id {
+		t.Fatal("restart duplicated attachment", err)
+	}
+	again, err := reopened.DarkRestoreUsageV1(ctx, id)
+	if err != nil || again != projection {
+		t.Fatal("history changed across restart", err)
+	}
+	payer, err := reopened.Representative(ctx, "transfer-target")
+	if err != nil || payer.VolumeCreditBytes != charged.VolumeCreditBytes {
+		t.Fatal("renewal payer changed across restart", err)
+	}
+	t.Log("DARKRESTORE_ATTACH_EARLIER_PASS original receipt stable; one UUID; late closed traffic historical; zero import debit; later renewal charged current representative; hold, backup and restart preserved")
 }

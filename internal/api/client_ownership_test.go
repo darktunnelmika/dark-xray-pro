@@ -19,8 +19,10 @@ type ownershipAPI struct {
 }
 
 func newOwnershipAPI(t *testing.T) ownershipAPI {
+	return newOwnershipAPIWithServer(t, enabledOwner(t))
+}
+func newOwnershipAPIWithServer(t *testing.T, s *Server) ownershipAPI {
 	t.Helper()
-	s := enabledOwner(t)
 	ctx := context.Background()
 	if e := s.business.EnableUsageLedger(ctx); e != nil {
 		t.Fatal(e)
