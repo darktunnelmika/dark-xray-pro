@@ -32,3 +32,5 @@
 .darkrestore-commit dl {display:grid;grid-template-columns:repeat(auto-fit,minmax(7rem,1fr));gap:.5rem}
 .darkrestore-commit dd {margin:0;font-weight:700}
 .darkrestore-commit code {overflow-wrap:anywhere}
+
+.darkrestore-commit pre {white-space:pre-wrap;overflow-wrap:anywhere;max-height:12rem;overflow:auto}

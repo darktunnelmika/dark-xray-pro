@@ -3,6 +3,7 @@ package business
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
@@ -16,11 +17,15 @@ import (
 // CommitDarkRestoreImportV1 is an offline operator entry point. sourcePath must
 // be an independently checkpointed private legacy snapshot, never the live HUB.
 // It intentionally has no HTTP route accepting a filesystem path.
-func (s *Store) CommitDarkRestoreImportV1(ctx context.Context, token, sourcePath string, input DarkRestoreImportCommitV1) (DarkRestoreImportReceiptV1, error) {
+func (s *Store) CommitDarkRestoreImportV1(ctx context.Context, token, sourcePath string, historyKey []byte, input DarkRestoreImportCommitV1) (DarkRestoreImportReceiptV1, error) {
 	if err := darkrestore.VerifyImportReview(ctx, sourcePath, input.Review); err != nil {
 		return DarkRestoreImportReceiptV1{}, ErrInvalid
 	}
-	return s.commitVerifiedDarkRestore(ctx, token, input)
+	events, err := darkrestore.ReadEventHistory(ctx, sourcePath, input.Review)
+	if err != nil || len(historyKey) != 32 {
+		return DarkRestoreImportReceiptV1{}, ErrInvalid
+	}
+	return s.commitDarkRestoreTx(ctx, token, input, historyKey, events)
 }
 
 func darkRestoreRequestFingerprint(actor string, req DarkRestoreImportCommitV1) string {
@@ -29,7 +34,7 @@ func darkRestoreRequestFingerprint(actor string, req DarkRestoreImportCommitV1) 
 		Request DarkRestoreImportCommitV1
 	}{actor, req})
 }
-func (s *Store) commitVerifiedDarkRestore(ctx context.Context, token string, input DarkRestoreImportCommitV1) (DarkRestoreImportReceiptV1, error) {
+func (s *Store) commitDarkRestoreTx(ctx context.Context, token string, input DarkRestoreImportCommitV1, key []byte, events []darkrestore.LegacyEvent) (DarkRestoreImportReceiptV1, error) {
 	var out DarkRestoreImportReceiptV1
 	intent, reviewSHA, err := canonicalDarkRestoreIntent(input.DarkRestoreImportIntentV1)
 	if err != nil || !eventRE.MatchString(input.EventID) || len(input.QuoteHash) != 64 {
@@ -54,6 +59,9 @@ func (s *Store) commitVerifiedDarkRestore(ctx context.Context, token string, inp
 	}
 	requestRaw, err := json.Marshal(input)
 	if err != nil {
+		return out, ErrInvalid
+	}
+	if len(requestRaw) > 64<<20 {
 		return out, ErrInvalid
 	}
 	fp := darkRestoreRequestFingerprint(actor, input)
@@ -93,12 +101,37 @@ func (s *Store) commitVerifiedDarkRestore(ctx context.Context, token string, inp
 	out = DarkRestoreImportReceiptV1{EventID: input.EventID, ActorUserID: actor, SourceSHA256: intent.Review.SourceSHA256, ReviewSHA256: reviewSHA,
 		Count: quote.Importable, Archived: quote.Archived, Disabled: quote.Importable, SkippedPromoted: quote.SkippedPromoted,
 		Blocked: quote.Blocked, BlockedReasons: quote.BlockedReasons, Groups: quote.Groups, CreatedUnix: now, UsageBaselineMade: true}
+	if int64(len(events)) != intent.Review.Summary.Events {
+		return DarkRestoreImportReceiptV1{}, ErrInvalid
+	}
+	var sealed []byte
+	if len(events) > 0 {
+		plain, e := json.Marshal(events)
+		if e != nil || len(plain) > 32<<20 {
+			return DarkRestoreImportReceiptV1{}, ErrInvalid
+		}
+		sealed, e = sealSubscription(key, "darkrestore-event-history", []string{out.EventID, out.SourceSHA256, out.ReviewSHA256}, plain)
+		if e != nil {
+			return DarkRestoreImportReceiptV1{}, e
+		}
+		h := sha256.Sum256(sealed)
+		out.HistorySHA = hex.EncodeToString(h[:])
+		out.LegacyEvents = int64(len(events))
+	}
 	raw, err = json.Marshal(out)
 	if err != nil {
 		return DarkRestoreImportReceiptV1{}, err
 	}
+	if len(raw) > 16<<20 {
+		return DarkRestoreImportReceiptV1{}, ErrInvalid
+	}
 	if _, err = tx.ExecContext(ctx, "INSERT INTO darkrestore_import_receipts_v1(event_id,fingerprint,actor_user_id,source_sha256,review_sha256,request_json,receipt_json,created_unix) VALUES(?,?,?,?,?,?,?,?)", input.EventID, fp, actor, out.SourceSHA256, reviewSHA, requestRaw, raw, now); err != nil {
 		return DarkRestoreImportReceiptV1{}, err
+	}
+	if len(sealed) > 0 {
+		if _, err = tx.ExecContext(ctx, "INSERT INTO darkrestore_event_archives_v1(event_id,source_sha256,record_count,sealed_history) VALUES(?,?,?,?)", out.EventID, out.SourceSHA256, out.LegacyEvents, sealed); err != nil {
+			return DarkRestoreImportReceiptV1{}, err
+		}
 	}
 	sourceGroups := make(map[string]darkrestore.ReviewGroup, len(intent.Review.Groups))
 	for _, g := range intent.Review.Groups {

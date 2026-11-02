@@ -44,7 +44,7 @@ export function parseRestoreReview(v: unknown): RestoreReview {
     previousClient=c.source_id;
     const g=groupCounts.get(c.source_group_id)!;
     g.count++;
-    if(c.status==="archive_history_only")g.archived++;
+    if(c.status==="archive_history_only"||(c.status==="skip_already_promoted"&&c.review_reasons.includes("archived_history_must_not_be_recreated_active")))g.archived++;
     if(c.status==="skip_already_promoted")g.promoted++;
     g.used+=BigInt(c.historical_bytes);
   }

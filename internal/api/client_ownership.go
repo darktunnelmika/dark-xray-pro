@@ -20,6 +20,11 @@ func (s *Server) EnableClientOwnershipV1Lab(ctx context.Context) error {
 	if e := s.business.EnableClientOwnershipV1(ctx); e != nil {
 		return e
 	}
+	installed, err := s.business.DarkRestoreHistoryAvailable(ctx)
+	if err != nil {
+		return err
+	}
+	s.darkRestoreReceipts = installed
 	s.clientOwnershipV1Enabled = true
 	return nil
 }

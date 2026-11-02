@@ -22,6 +22,11 @@ import (
 func stagedRestoreAPI(t *testing.T) ownershipAPI {
 	t.Helper()
 	f := newOwnershipAPI(t)
+	if len(f.s.inboundKey) == 0 {
+		if err := f.s.EnableNativeInbounds(make([]byte, 32)); err != nil {
+			t.Fatal(err)
+		}
+	}
 	directory := t.TempDir()
 	if err := os.Chmod(directory, 0700); err != nil {
 		t.Fatal(err)

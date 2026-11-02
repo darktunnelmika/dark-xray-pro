@@ -68,6 +68,8 @@ type DarkRestoreImportQuoteV1 struct {
 	ImportedUsageMode string                     `json:"imported_usage_mode"`
 }
 type DarkRestoreImportReceiptV1 struct {
+	LegacyEvents      int64                      `json:"legacy_event_count"`
+	HistorySHA        string                     `json:"sealed_event_history_sha256,omitempty"`
 	EventID           string                     `json:"event_id"`
 	ActorUserID       string                     `json:"actor_user_id"`
 	SourceSHA256      string                     `json:"source_sha256"`
@@ -204,6 +206,20 @@ func darkRestoreHasReason(c darkrestore.ReviewClient, reason string) bool {
 	return i < len(c.ReviewReasons) && c.ReviewReasons[i] == reason
 }
 
+func classifyDarkRestoreRow(row *darkRestorePlanRowV1, at int64, duplicateUUID bool) {
+	c := row.Client
+	row.Promoted = c.Status == "skip_already_promoted"
+	row.Archived = c.Status == "archive_history_only"
+	row.Disabled = row.Archived || c.ExpiryUnix <= at || darkRestoreHasReason(c, "source_disabled_do_not_reactivate")
+	quota, qErr := strconv.ParseInt(c.QuotaBytes, 10, 64)
+	row.Quota = quota
+	historical, hErr := strconv.ParseInt(c.HistoricalBytes, 10, 64)
+	row.Historical = historical
+	duration, durationOK := darkRestoreDuration(c, at)
+	row.Duration = duration
+	row.Blocked = darkRestoreBlockingReasons(c, row.Quota, qErr == nil, durationOK, hErr == nil, duplicateUUID)
+}
+
 func quotedDarkRestoreTx(ctx context.Context, tx *sql.Tx, actor string, input DarkRestoreImportIntentV1, reviewSHA string, at int64) (DarkRestoreImportQuoteV1, []darkRestorePlanRowV1, error) {
 	out := DarkRestoreImportQuoteV1{
 		SourceSHA256: input.Review.SourceSHA256, ReviewSHA256: reviewSHA, QuoteUnix: at,
@@ -306,16 +322,7 @@ func quotedDarkRestoreTx(ctx context.Context, tx *sql.Tx, actor string, input Da
 			return out, nil, ErrConflict
 		}
 		plannedClients[row.ClientID] = true
-		row.Promoted = c.Status == "skip_already_promoted"
-		row.Archived = c.Status == "archive_history_only"
-		row.Disabled = row.Archived || c.ExpiryUnix <= at || darkRestoreHasReason(c, "source_disabled_do_not_reactivate")
-		quota, qErr := strconv.ParseInt(c.QuotaBytes, 10, 64)
-		row.Quota = quota
-		historical, hErr := strconv.ParseInt(c.HistoricalBytes, 10, 64)
-		row.Historical = historical
-		duration, durationOK := darkRestoreDuration(c, at)
-		row.Duration = duration
-		row.Blocked = darkRestoreBlockingReasons(c, row.Quota, qErr == nil, durationOK, hErr == nil, c.UUID != "" && reviewUUIDs[c.UUID] > 1)
+		classifyDarkRestoreRow(&row, at, c.UUID != "" && reviewUUIDs[c.UUID] > 1)
 		if row.Promoted {
 			out.SkippedPromoted++
 			g.SkippedPromoted++

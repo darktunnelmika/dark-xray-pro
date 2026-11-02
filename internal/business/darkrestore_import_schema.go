@@ -13,13 +13,15 @@ var darkRestoreImportSchemaV1 = []string{
 	"CREATE TABLE darkrestore_import_entries_v1(source_sha256 TEXT NOT NULL CHECK(length(source_sha256)=64),source_id TEXT NOT NULL,client_id TEXT NOT NULL UNIQUE REFERENCES clients(id),client_uuid TEXT NOT NULL UNIQUE,source_group_id TEXT NOT NULL,target_group_id TEXT NOT NULL REFERENCES client_groups(id),representative_id TEXT NOT NULL REFERENCES representatives(id),historical_bytes TEXT NOT NULL,source_status TEXT NOT NULL CHECK(source_status IN('requires_manual_review','archive_history_only')),event_id TEXT NOT NULL REFERENCES darkrestore_import_receipts_v1(event_id),created_unix INTEGER NOT NULL,PRIMARY KEY(source_sha256,source_id))",
 	"CREATE TABLE darkrestore_group_history_v1(source_sha256 TEXT NOT NULL CHECK(length(source_sha256)=64),source_group_id TEXT NOT NULL,source_name TEXT NOT NULL,target_group_id TEXT NOT NULL REFERENCES client_groups(id),representative_id TEXT NOT NULL REFERENCES representatives(id),source_count INTEGER NOT NULL CHECK(source_count>=0),archived_count INTEGER NOT NULL CHECK(archived_count>=0),promoted_count INTEGER NOT NULL CHECK(promoted_count>=0),historical_bytes TEXT NOT NULL,event_id TEXT NOT NULL REFERENCES darkrestore_import_receipts_v1(event_id),created_unix INTEGER NOT NULL,PRIMARY KEY(source_sha256,source_group_id))",
 	"CREATE TABLE darkrestore_import_skips_v1(source_sha256 TEXT NOT NULL CHECK(length(source_sha256)=64),source_id TEXT NOT NULL,source_group_id TEXT NOT NULL,reason TEXT NOT NULL,event_id TEXT NOT NULL REFERENCES darkrestore_import_receipts_v1(event_id),created_unix INTEGER NOT NULL,PRIMARY KEY(source_sha256,source_id,reason))",
+	"CREATE TABLE darkrestore_event_archives_v1(event_id TEXT PRIMARY KEY REFERENCES darkrestore_import_receipts_v1(event_id),source_sha256 TEXT NOT NULL UNIQUE,record_count INTEGER NOT NULL CHECK(record_count>0),sealed_history BLOB NOT NULL)",
+	"CREATE INDEX darkrestore_import_recent_v1 ON darkrestore_import_receipts_v1(created_unix DESC,event_id DESC)",
 	"CREATE INDEX darkrestore_import_entries_rep_v1 ON darkrestore_import_entries_v1(representative_id,client_id)",
 	"CREATE INDEX darkrestore_import_entries_group_v1 ON darkrestore_import_entries_v1(target_group_id,client_id)",
 	"CREATE INDEX darkrestore_import_skips_event_v1 ON darkrestore_import_skips_v1(event_id,source_id)",
 }
 
 func init() {
-	for _, table := range []string{"darkrestore_import_meta_v1", "darkrestore_import_receipts_v1", "darkrestore_import_entries_v1", "darkrestore_group_history_v1", "darkrestore_import_skips_v1"} {
+	for _, table := range []string{"darkrestore_import_meta_v1", "darkrestore_import_receipts_v1", "darkrestore_import_entries_v1", "darkrestore_group_history_v1", "darkrestore_import_skips_v1", "darkrestore_event_archives_v1"} {
 		for _, action := range []string{"UPDATE", "DELETE"} {
 			darkRestoreImportSchemaV1 = append(darkRestoreImportSchemaV1,
 				"CREATE TRIGGER "+table+"_no_"+strings.ToLower(action)+" BEFORE "+action+" ON "+table+" BEGIN SELECT RAISE(ABORT,'dark restore import history immutable'); END")

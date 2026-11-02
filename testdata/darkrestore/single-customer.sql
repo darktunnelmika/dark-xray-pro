@@ -12,7 +12,7 @@ CREATE TABLE restore_subscriptions(
  );
  CREATE TABLE restore_groups(id TEXT PRIMARY KEY,name TEXT,name_key TEXT);
  CREATE TABLE restore_usage(restore_id TEXT,scope TEXT,up INTEGER,down INTEGER,PRIMARY KEY(restore_id,scope));
- CREATE TABLE restore_events(restore_id TEXT,event TEXT,at REAL);
+ CREATE TABLE restore_events(id INTEGER PRIMARY KEY AUTOINCREMENT, restore_id TEXT NOT NULL,event TEXT NOT NULL,detail TEXT NOT NULL DEFAULT '',at REAL NOT NULL);
  CREATE TABLE restore_domains(domain TEXT);
  CREATE TABLE restore_safety(restore_id TEXT PRIMARY KEY,metadata_state TEXT,external_disabled INTEGER NOT NULL DEFAULT 0,expected_enable INTEGER NOT NULL DEFAULT 1);
  CREATE TABLE restore_group_targets(group_id TEXT PRIMARY KEY,body TEXT);
@@ -24,4 +24,4 @@ INSERT INTO core_clients VALUES('synthetic-core','{"id":"01234567-89ab-4cde-8fab
 INSERT INTO restore_subscriptions VALUES('synthetic-source','synthetic-token','https://example.invalid/sub','example.invalid','/sub','','synthetic-core','[1]','[]',100,200,5000,1893456000,'verified',1,0,0,'synthetic-group',0,'',0,'','selected',1);
 INSERT INTO restore_safety(restore_id,metadata_state) VALUES('synthetic-source','verified');
 INSERT INTO restore_usage VALUES('synthetic-source','local',3,7);
-INSERT INTO restore_events VALUES('synthetic-source','synthetic-created',1720000000);
+INSERT INTO restore_events VALUES(9,'synthetic-source','group.changed','{"from":"synthetic-old-group","to":"synthetic-group"}',1720000000.125);

@@ -93,6 +93,9 @@ func ValidatePrivateReview(p Review) error {
 			agg.archived++
 		case "skip_already_promoted":
 			agg.promoted++
+			if containsReviewReason(c.ReviewReasons, "archived_history_must_not_be_recreated_active") {
+				agg.archived++
+			}
 		default:
 			return ErrInspection
 		}

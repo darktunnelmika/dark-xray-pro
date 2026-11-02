@@ -21,6 +21,10 @@ try{
  await expect(confirm).toBeEnabled();
  await confirm.click();
  await expect(panel.getByText("Import recorded",{exact:true})).toBeVisible();
+ await panel.getByRole("button",{name:/Show legacy history/}).click();
+ await expect(panel.getByText(/synthetic-source · group.changed/)).toBeVisible();
+ await panel.getByText("Details",{exact:true}).click();
+ await expect(panel.locator("pre")).toContainText("synthetic-old-group");
  const selector=page.getByRole("combobox",{name:/^Choose an existing client/});
  const imported=selector.locator("option").filter({hasText:"synthetic-source"});
  await expect(imported).toHaveCount(1);
@@ -32,4 +36,11 @@ try{
  await panel.getByRole("button",{name:"Open approved server snapshot"}).click();
  await panel.getByRole("button",{name:"Check recorded receipt"}).click();
  await expect(panel.getByText("Import recorded",{exact:true})).toBeVisible();
+ await page.evaluate(()=>sessionStorage.clear());
+ await page.reload();
+ const receipts=panel.getByRole("region",{name:"Import receipts"});
+ await receipts.getByRole("button",{name:"Import receipts"}).click();
+ await receipts.getByRole("button",{name:/restore-[a-f0-9-]{36}/}).click();
+ await receipts.getByRole("button",{name:/Show legacy history/}).click();
+ await expect(receipts.getByText(/synthetic-source · group.changed/)).toBeVisible();
 }finally{await browser.close();}

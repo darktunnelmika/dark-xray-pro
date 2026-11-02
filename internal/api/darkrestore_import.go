@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"time"
 
 	"github.com/darktunnelmika/dark-xray-pro/internal/business"
@@ -25,7 +26,7 @@ type restoreStage struct {
 // Called once, before the browser listener starts. Only this local configuration
 // selects a snapshot. HTTP callers may reference it by its canonical review hash.
 func (s *Server) StageDarkRestoreImport(ctx context.Context, path, sha string, asOf int64) error {
-	if s.darkRestoreStage != nil || !s.clientOwnershipV1Enabled || s.business == nil || asOf <= 0 || asOf > time.Now().Unix() {
+	if s.darkRestoreStage != nil || len(s.inboundKey) != 32 || !s.clientOwnershipV1Enabled || s.business == nil || asOf <= 0 || asOf > time.Now().Unix() {
 		return errors.New("invalid restore staging configuration")
 	}
 	info, err := os.Lstat(path)
@@ -44,9 +45,13 @@ func (s *Server) StageDarkRestoreImport(ctx context.Context, path, sha string, a
 	if err != nil {
 		return err
 	}
+	if _, err = darkrestore.ReadEventHistory(ctx, path, review); err != nil {
+		return err
+	}
 	if err = s.business.EnableDarkRestoreImportV1(ctx); err != nil {
 		return err
 	}
+	s.darkRestoreReceipts = true
 	s.darkRestoreStage = &restoreStage{path, review, digest}
 	return nil
 }
@@ -64,7 +69,7 @@ type restoreCommitRequest struct {
 
 func (s *Server) attachDarkRestoreImport(mux *http.ServeMux) {
 	stage := s.darkRestoreStage
-	if stage == nil {
+	if !s.darkRestoreReceipts {
 		return
 	}
 	handle := func(pattern string, write bool, run func(http.ResponseWriter, *http.Request, string)) {
@@ -80,6 +85,38 @@ func (s *Server) attachDarkRestoreImport(mux *http.ServeMux) {
 			w.Header().Set("Cache-Control", "private, no-store")
 			run(w, r, session.Token)
 		})
+	}
+	handle("GET "+restoreBase+"/recent", false, func(w http.ResponseWriter, r *http.Request, token string) {
+		recent, err := s.business.RecentDarkRestoreImports(r.Context(), token)
+		if err != nil {
+			businessError(w, err)
+			return
+		}
+		respond(w, 200, map[string]any{"imports": recent})
+	})
+	handle("GET "+restoreBase+"/receipts/{event}/history/{offset}", false, func(w http.ResponseWriter, r *http.Request, token string) {
+		offset, err := strconv.Atoi(r.PathValue("offset"))
+		if err != nil || strconv.Itoa(offset) != r.PathValue("offset") {
+			businessError(w, business.ErrInvalid)
+			return
+		}
+		page, err := s.business.DarkRestoreEventHistory(r.Context(), token, r.PathValue("event"), s.inboundKey, offset, 20)
+		if err != nil {
+			businessError(w, err)
+			return
+		}
+		respond(w, 200, page)
+	})
+	handle("GET "+restoreBase+"/receipts/{event}", false, func(w http.ResponseWriter, r *http.Request, token string) {
+		result, err := s.business.DarkRestoreImportReceiptV1(r.Context(), token, r.PathValue("event"))
+		if err != nil {
+			businessError(w, err)
+			return
+		}
+		respond(w, 200, result)
+	})
+	if stage == nil {
+		return
 	}
 	handle("GET "+restoreBase+"/stage", false, func(w http.ResponseWriter, r *http.Request, token string) {
 		respond(w, 200, map[string]any{"review_sha256": stage.digest, "review": stage.review})
@@ -125,19 +162,20 @@ func (s *Server) attachDarkRestoreImport(mux *http.ServeMux) {
 			businessError(w, err)
 			return
 		}
-		result, err := s.business.CommitDarkRestoreImportV1(r.Context(), token, stage.path, business.DarkRestoreImportCommitV1{DarkRestoreImportIntentV1: in, EventID: req.EventID, QuoteHash: req.QuoteHash, QuoteUnix: req.QuoteUnix})
+		// Full offline source verification can exceed the ordinary UI deadline.
+		const budget = 3 * time.Minute
+		if err = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(budget + 3*time.Second)); err != nil && !errors.Is(err, http.ErrNotSupported) {
+			businessError(w, business.ErrUnavailable)
+			return
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), budget)
+		defer cancel()
+		result, err := s.business.CommitDarkRestoreImportV1(ctx, token, stage.path, s.inboundKey, business.DarkRestoreImportCommitV1{DarkRestoreImportIntentV1: in, EventID: req.EventID, QuoteHash: req.QuoteHash, QuoteUnix: req.QuoteUnix})
 		if err != nil {
 			businessError(w, err)
 			return
 		}
 		respond(w, 200, result)
 	})
-	handle("GET "+restoreBase+"/receipts/{event}", false, func(w http.ResponseWriter, r *http.Request, token string) {
-		result, err := s.business.DarkRestoreImportReceiptV1(r.Context(), token, r.PathValue("event"))
-		if err != nil {
-			businessError(w, err)
-			return
-		}
-		respond(w, 200, result)
-	})
+
 }

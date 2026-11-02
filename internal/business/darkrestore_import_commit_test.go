@@ -5,6 +5,7 @@ import (
 	"errors"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -107,7 +108,7 @@ func TestDarkRestoreCommitRejectsUnverifiedSourceAndUnsafeBatch(t *testing.T) {
 	ctx := context.Background()
 	intent := syntheticImportIntent(1)
 	req := importRequest(t, f, intent, "darkrestore-source-test-0001")
-	if _, err := f.s.CommitDarkRestoreImportV1(ctx, f.owner.Token, "/nonexistent-private-snapshot", req); !errors.Is(err, ErrInvalid) {
+	if _, err := f.s.CommitDarkRestoreImportV1(ctx, f.owner.Token, "/nonexistent-private-snapshot", make([]byte, 32), req); !errors.Is(err, ErrInvalid) {
 		t.Fatal("unverified snapshot accepted", err)
 	}
 	intent.Review.Clients[0].UUID = ""
@@ -253,5 +254,67 @@ func TestDarkRestoreCorruptedHistoryFailsClosedOnReopen(t *testing.T) {
 	}
 	if _, err := ValidateOfflineBackup(ctx, f.path); err == nil {
 		t.Fatal("corrupt import backup accepted")
+	}
+}
+
+// Synthetic tests exercise the database transaction directly. The public
+// operator path always rebuilds the review and reads actual source events.
+func (s *Store) commitVerifiedDarkRestore(ctx context.Context, token string, req DarkRestoreImportCommitV1) (DarkRestoreImportReceiptV1, error) {
+	return s.commitDarkRestoreTx(ctx, token, req, nil, nil)
+}
+
+func TestDarkRestoreIndependentWritersShareOneImport(t *testing.T) {
+	f := importSetup(t)
+	ctx := context.Background()
+	req := importRequest(t, f, syntheticImportIntent(2), "restore-multistore-event-0001")
+	other, err := Open(f.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer other.Close()
+	type result struct {
+		receipt DarkRestoreImportReceiptV1
+		err     error
+	}
+	results := make(chan result, 8)
+	start := make(chan struct{})
+	var writers sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		s := f.s
+		if i%2 == 1 {
+			s = other
+		}
+		writers.Add(1)
+		go func(s *Store) {
+			defer writers.Done()
+			<-start
+			var r DarkRestoreImportReceiptV1
+			err := refundRetrySQLiteBusy(func() error { var e error; r, e = s.commitVerifiedDarkRestore(ctx, f.owner.Token, req); return e })
+			results <- result{r, err}
+		}(s)
+	}
+	close(start)
+	writers.Wait()
+	close(results)
+	applied := 0
+	for res := range results {
+		if res.err != nil || res.receipt.Count != 2 {
+			t.Fatal("writer failed", res.err)
+		}
+		if !res.receipt.Replayed {
+			applied++
+		}
+	}
+	if applied != 1 {
+		t.Fatal("wrong number of original receipts", applied)
+	}
+	if err = validateDarkRestoreImportData(ctx, other.db); err != nil {
+		t.Fatal(err)
+	}
+	id := darkRestoreClientID(req.Review.SourceSHA256, req.Review.Clients[0].SourceID)
+	intent := ClientOwnershipIntent{ClientIDs: []string{id}, RepresentativeID: "rep-third", Reason: "reused import event must conflict"}
+	collision := ownershipRequest(t, f.s, f.owner.Token, req.EventID, intent)
+	if _, err = f.s.CommitClientOwnership(ctx, f.owner.Token, collision); !errors.Is(err, ErrConflict) {
+		t.Fatal("ownership accepted import nonce", err)
 	}
 }

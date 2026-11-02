@@ -11,6 +11,7 @@ This branch remains a draft. It must not be merged or installed as a completed M
 - Preserve verified UUID, exact expiry, quota, archive flag, source review and historical group totals, including promoted and blocked records.
 - Keep imported identities disabled with incomplete native usage baseline until independently verified traffic cutover.
 - Store historical bytes separately from post-import native counters; expose a read-only historical/current/combined projection with an explicit cutover-verification flag.
+- Preserve exact legacy event IDs, timestamps and details in a sealed archive bound to the receipt and snapshot. The owner can page through the history from the receipt. LAB staging requires the existing native encryption key.
 - Atomically persist immutable receipts, source identities, groups, skips and usage seeds.
 - Replay the same event without duplication; reject changed requests, reimport of a consumed source, and UUID collisions across source snapshots.
 - Import and assignment do not debit representative credit. Existing ownership transfer enforces current management scope; later renewal charges the current representative.
@@ -22,7 +23,7 @@ This branch remains a draft. It must not be merged or installed as a completed M
 - Authenticated Chromium login, group mapping, preview, commit and receipt recovery after reload against a disposable Go server and SQLite.
 - Atomic rollback on injected write failure; successful retry after rollback.
 - Same-request replay and receipt lookup; receipt privacy.
-- Reopen recovery and native offline backup validation.
+- Abrupt process exit mid-transaction and immediately after commit, recovery through the same request, reopen and native offline backup validation.
 - Archived/promoted/blocked historical totals and safe subset import.
 - Ownership transfer, previous-manager rejection, current-manager renewal charging.
 - Source authenticity, tampered accounting, uncertain UUID and group mapping rejection.
@@ -32,11 +33,11 @@ These tests use isolated synthetic databases. They are not installed LAB accepta
 
 ## Remaining gates
 
-- Separate source event-history retention beyond the M1 review aggregates.
+
 - Verified cutover/checkpoint design, remaining-quota policy, and native/subscription activation acceptance. No incomplete baseline may be marked complete by an API request.
 - Approved legacy-unlimited plan policy; uncertain unlimited records currently remain blocked.
-- Complete receipt/entry/skip semantic validation and pagination for large recovery sets.
-- M3–M5: real process interruption, concurrent/restart recovery, accounting, subscription and installed LAB acceptance.
+- Operator acceptance on representative production-scale offline fixtures. Staging refuses unknown event layouts, more than 100,000 legacy events or event input above 16 MiB.
+- M3–M5: concurrent writers, final accounting, subscription and installed LAB acceptance.
 - Full CI and independent scope review before merge; versioned LAB installation afterward.
 - Telegram Bot and Store integration only after these gates, using the panel's existing wallet/order/usage logic.
 

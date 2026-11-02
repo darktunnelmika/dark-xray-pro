@@ -5,6 +5,7 @@ import { RepresentativePicker } from "./ClientOwnershipTransfer";
 import { createReviewMapping, parseRestoreReview, type RestoreReview, type RestoreClient } from "./darkrestoreReview";
 import "./DarkRestoreReview.css";
 import { api } from "../session";
+import RestoreReceipts from "./RestoreReceipts";
 import DarkRestoreImport, { restoreAPI } from "./DarkRestoreImport";
 
 const words = {
@@ -123,13 +124,14 @@ export default function DarkRestoreReview({model}:{model:BusinessModel}){
    <p className="darkrestore-hint">{t.fileHint}</p>
    {fileError && <p role="alert">{t.unsafe}</p>}
    {busy && <p role="status">…</p>}
+   {model.me?.capabilities?.darkrestore_receipts_v1===true&&<RestoreReceipts model={model}/>}
    {!review && !busy && !fileError && <p>{t.noFile}</p>}
    {review && <section className="darkrestore-summary">
     <p role="status"><FileCheck2 size={16}/>{digest?(language==="fa"?"نسخهٔ تأییدشده برای نگاشت آماده است":"Approved snapshot ready for mapping"):t.ready}</p>
     <div className="darkrestore-stat-row">
      <span><small>{t.clients}</small><strong>{fmt(review.clients.length,language)}</strong></span>
      <span><small>{t.groups}</small><strong>{fmt(review.groups.length,language)}</strong></span>
-     <span><small>{t.archived}</small><strong>{fmt(review.clients.filter(c=>c.status==="archive_history_only").length,language)}</strong></span>
+     <span><small>{t.archived}</small><strong>{fmt(review.groups.reduce((sum,g)=>sum+g.archived,0),language)}</strong></span>
      <span><small>{t.promoted}</small><strong>{fmt(review.clients.filter(c=>c.status==="skip_already_promoted").length,language)}</strong></span>
     </div>
     <p>{t.used}: <strong>{shortBytes(review.summary.total_consumed_bytes,language)}</strong></p>

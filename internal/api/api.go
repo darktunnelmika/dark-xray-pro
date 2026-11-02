@@ -48,6 +48,7 @@ type Server struct {
 	labRevisions                *labrevision.Store
 	business                    *business.Store
 	sellerQuotaV2Enabled        bool // opt-in separate authorization and private migration gate
+	darkRestoreReceipts         bool
 	darkRestoreStage            *restoreStage
 	clientOwnershipV1Enabled    bool // startup-only owner reassignment gate
 	sellerOrdersV1Enabled       bool // startup-only, requires seller management and refund supervision
