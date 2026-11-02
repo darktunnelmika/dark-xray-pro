@@ -176,7 +176,7 @@ func (s *Store) commitDarkRestoreTx(ctx context.Context, token string, input Dar
 			out.SourceSHA256, row.Client.SourceID, row.ClientID, row.Client.UUID, row.Client.SourceGroupID, row.GroupID, row.Mapping.RepresentativeID, row.Client.HistoricalBytes, row.Client.Status, input.EventID, now); err != nil {
 			return DarkRestoreImportReceiptV1{}, err
 		}
-		if err = s.usage.InitializeAccountTx(ctx, tx, usageledger.Seed{ClientID: row.ClientID, EventID: "darkrestore-seed-" + row.ClientID, Uplink: 0, Downlink: 0, Complete: false, Reason: "Legacy history retained separately; verified traffic cutover required"}); err != nil {
+		if err = s.usage.InitializeQuarantinedAccountTx(ctx, tx, usageledger.Seed{ClientID: row.ClientID, EventID: "darkrestore-seed-" + row.ClientID, Uplink: 0, Downlink: 0, Complete: false, Reason: "Legacy history retained separately; verified traffic cutover required"}); err != nil {
 			return DarkRestoreImportReceiptV1{}, err
 		}
 	}

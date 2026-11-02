@@ -359,3 +359,56 @@ func TestDarkRestoreQuarantineBlocksEnableAndSubscriptions(t *testing.T) {
 		t.Fatal("managed subscription issue", err)
 	}
 }
+
+func TestDarkRestoreImportPreservesExistingSubscriptionProof(t *testing.T) {
+	ctx := context.Background()
+	f, round, secret := labSubscriptionFixture(t, true)
+	if err := f.s.EnableClientOwnershipV1(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.s.EnableDarkRestoreImportV1(ctx); err != nil {
+		t.Fatal(err)
+	}
+	owner, err := f.s.Login(ctx, "owner-lab", "synthetic-subscription-password")
+	if err != nil {
+		t.Fatal(err)
+	}
+	materializeSubscription(t, f, round)
+	before, err := f.s.ReadLabSubscription(ctx, f.key, secret.Token, healthEndpoint())
+	if err != nil {
+		t.Fatal(err)
+	}
+	generation := func() int64 {
+		t.Helper()
+		var n int64
+		if err := f.s.db.QueryRow("SELECT value FROM native_config_generation WHERE id=1").Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	start := generation()
+	intent := syntheticImportIntent(2)
+	for i := range intent.Mappings {
+		intent.Mappings[i].RepresentativeID = f.client.RepresentativeID
+	}
+	q, err := f.s.QuoteDarkRestoreImportV1(ctx, owner.Token, intent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := DarkRestoreImportCommitV1{DarkRestoreImportIntentV1: intent, QuoteHash: q.QuoteHash, QuoteUnix: q.QuoteUnix, EventID: "restore-preserve-proof-0001"}
+	if _, err = f.s.commitVerifiedDarkRestore(ctx, owner.Token, req); err != nil {
+		t.Fatal(err)
+	}
+	if start != generation() {
+		t.Fatal("quarantined import invalidated live generation")
+	}
+	after, err := f.s.ReadLabSubscription(ctx, f.key, secret.Token, healthEndpoint())
+	if err != nil || !after.Snapshot.Current || after.Snapshot.ID != before.Snapshot.ID || string(after.Raw) != string(before.Raw) {
+		t.Fatal("existing subscription lost its accepted proof", err)
+	}
+	_, err = f.s.CreateClient(ctx, NewClient{EventID: "restore-native-after-0001", ClientID: "new-native-after", RepresentativeID: "owner", Name: "Native client", VolumeBytes: 100, DurationDays: 30})
+	if err != nil || generation() <= start {
+		t.Fatal("ordinary creation no longer invalidates native delivery", err)
+	}
+
+}

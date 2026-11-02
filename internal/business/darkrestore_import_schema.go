@@ -7,6 +7,19 @@ import (
 	"strings"
 )
 
+// Only a committed opt-in to the import schema changes the insert trigger.
+// Enabling any client later still goes through native_dirty_clients_config.
+const originalClientInsertTrigger = "CREATE TRIGGER native_dirty_clients_new AFTER INSERT ON clients BEGIN UPDATE native_config_generation SET value=value+1 WHERE id=1; END"
+const quarantinedClientInsertTrigger = "CREATE TRIGGER native_dirty_clients_new AFTER INSERT ON clients WHEN NEW.deployment_state!='disabled' BEGIN UPDATE native_config_generation SET value=value+1 WHERE id=1; END"
+
+func verifyClientInsertTrigger(ctx context.Context, q sellerQueryV2, want string) error {
+	var actual string
+	if err := q.QueryRowContext(ctx, "SELECT sql FROM sqlite_master WHERE type='trigger' AND name='native_dirty_clients_new' AND tbl_name='clients'").Scan(&actual); err != nil || actual != want {
+		return ErrUnavailable
+	}
+	return nil
+}
+
 var darkRestoreImportSchemaV1 = []string{
 	"CREATE TABLE darkrestore_import_meta_v1(id INTEGER PRIMARY KEY CHECK(id=1),version INTEGER NOT NULL CHECK(version=1))",
 	"CREATE TABLE darkrestore_import_receipts_v1(event_id TEXT PRIMARY KEY,fingerprint TEXT NOT NULL CHECK(length(fingerprint)=64),actor_user_id TEXT NOT NULL REFERENCES auth_users(id),source_sha256 TEXT NOT NULL CHECK(length(source_sha256)=64),review_sha256 TEXT NOT NULL CHECK(length(review_sha256)=64),request_json BLOB NOT NULL,receipt_json BLOB NOT NULL,created_unix INTEGER NOT NULL)",
@@ -58,6 +71,9 @@ func darkRestoreSchemaState(ctx context.Context, q sellerQueryV2) (bool, error) 
 			return false, ErrUnavailable
 		}
 	}
+	if err := verifyClientInsertTrigger(ctx, q, quarantinedClientInsertTrigger); err != nil {
+		return false, err
+	}
 	return true, nil
 }
 
@@ -79,6 +95,15 @@ func (s *Store) EnableDarkRestoreImportV1(ctx context.Context) error {
 		return err
 	}
 	if !present {
+		if err = verifyClientInsertTrigger(ctx, tx, originalClientInsertTrigger); err != nil {
+			return err
+		}
+		if _, err = tx.ExecContext(ctx, "DROP TRIGGER native_dirty_clients_new"); err != nil {
+			return err
+		}
+		if _, err = tx.ExecContext(ctx, quarantinedClientInsertTrigger); err != nil {
+			return err
+		}
 		for _, ddl := range darkRestoreImportSchemaV1 {
 			if _, err = tx.ExecContext(ctx, ddl); err != nil {
 				return err

@@ -78,42 +78,67 @@ func (l *Ledger) InitializeAccountTx(ctx context.Context, tx *sql.Tx, s Seed) er
 	}
 	return initializeAccount(ctx, tx, s)
 }
-func initializeAccount(ctx context.Context, c sqlWriter, s Seed) error {
-	if !idRE.MatchString(s.ClientID) || !eventRE.MatchString(s.EventID) || !validReason(s.Reason) {
+
+// A new disabled identity with an incomplete, zero post-migration seed cannot
+// become eligible. Preserve existing route generations and subscription proofs.
+func (l *Ledger) InitializeQuarantinedAccountTx(ctx context.Context, tx *sql.Tx, s Seed) error {
+	if tx == nil || s.Complete || s.Uplink != 0 || s.Downlink != 0 {
 		return uc.ErrInvalid
 	}
+	var state string
+	if err := tx.QueryRowContext(ctx, "SELECT deployment_state FROM clients WHERE id=?", s.ClientID).Scan(&state); err != nil {
+		return err
+	}
+	if state != "disabled" {
+		return ErrConflict
+	}
+	_, err := insertSeed(ctx, tx, s)
+	return err
+}
+func initializeAccount(ctx context.Context, c sqlWriter, s Seed) error {
+	inserted, err := insertSeed(ctx, c, s)
+	if err != nil || !inserted {
+		return err
+	}
+	return invalidate(ctx, c)
+}
+
+func insertSeed(ctx context.Context, c sqlWriter, s Seed) (bool, error) {
+	if !idRE.MatchString(s.ClientID) || !eventRE.MatchString(s.EventID) || !validReason(s.Reason) {
+		return false, uc.ErrInvalid
+	}
 	if _, e := checkedAdd(s.Uplink, s.Downlink); e != nil {
-		return e
+		return false, e
 	}
 	body, err := json.Marshal(s)
 	if err != nil {
-		return err
+		return false, err
 	}
 	var existing []byte
 	e := c.QueryRowContext(ctx, "SELECT body_json FROM pro_usage_seeds WHERE client_id=? OR event_id=?", s.ClientID, s.EventID).Scan(&existing)
 	if e == nil {
 		if bytes.Equal(body, existing) {
-			return nil
+			return false, nil
 		}
-		return ErrConflict
+		return false, ErrConflict
 	}
 	if !errors.Is(e, sql.ErrNoRows) {
-		return e
+		return false, e
 	}
 	var n int
 	if e = c.QueryRowContext(ctx, "SELECT COUNT(*) FROM clients WHERE id=?", s.ClientID).Scan(&n); e != nil {
-		return e
+		return false, e
 	}
 	if n != 1 {
-		return ErrMissing
+		return false, ErrMissing
 	}
 	if _, e = c.ExecContext(ctx, "INSERT INTO pro_usage_accounts(client_id,uplink,downlink,baseline_complete) VALUES(?,?,?,?)", s.ClientID, s.Uplink, s.Downlink, s.Complete); e != nil {
-		return e
+		return false, e
 	}
 	if _, e = c.ExecContext(ctx, "INSERT INTO pro_usage_seeds(client_id,event_id,body_json,created_unix) VALUES(?,?,?,?)", s.ClientID, s.EventID, body, time.Now().Unix()); e != nil {
-		return e
+		return false, e
 	}
-	return invalidate(ctx, c)
+	return true, nil
 }
 
 // Epoch registration is INTERNAL, before admitting traffic, with server-derived

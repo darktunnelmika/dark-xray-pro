@@ -179,7 +179,13 @@ func validateOfflineBackupDB(ctx context.Context, db *sql.DB) (BackupValidation,
 		groups[group] = append(groups[group], object)
 	}
 	err, closeErr := rows.Err(), rows.Close()
-	if err != nil || closeErr != nil || backupSchemaDigest(groups["base"]) != backupBaseSchemaFingerprint {
+	expectedBase := backupBaseSchemaFingerprint
+	if len(groups["darkrestore"]) > 0 {
+		// Same reviewed base with native_dirty_clients_new restricted to clients
+		// inserted in a deployable state. Its exact DDL is checked again below.
+		expectedBase = "e080a31f181117e3b3b90c3e522196001ea985285e3765e450fd2fb0ca65652e"
+	}
+	if err != nil || closeErr != nil || backupSchemaDigest(groups["base"]) != expectedBase {
 		return result, ErrOfflineBackupInvalid
 	}
 	if len(groups["sellers"]) > 0 {
