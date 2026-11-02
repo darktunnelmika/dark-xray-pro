@@ -15,6 +15,18 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  business-race:
+    name: Complete business accounting race checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+      - run: go test -race ./internal/business -count=1 -timeout=600s
+
   foundation:
     name: Go 1.27 contracts, accounting and race checks
     runs-on: ubuntu-24.04
@@ -30,12 +42,21 @@ jobs:
           go mod verify
           go mod tidy -diff
           go vet ./...
-      - name: Exercise the application and durable accounting under the race detector
-        run: go test -race ./... -count=1 -timeout=600s
+      - name: Exercise all other application packages under the race detector
+        shell: bash
+        run: |
+          set -euo pipefail
+          go list ./... > "$RUNNER_TEMP/all-packages.txt"
+          business=$(go list ./internal/business)
+          test "$(grep -Fxc -- "$business" "$RUNNER_TEMP/all-packages.txt")" -eq 1
+          grep -Fxv -- "$business" "$RUNNER_TEMP/all-packages.txt" > "$RUNNER_TEMP/remaining-packages.txt"
+          mapfile -t packages < "$RUNNER_TEMP/remaining-packages.txt"
+          test "${#packages[@]}" -gt 0
+          go test -race -count=1 -timeout=600s "${packages[@]}"
 
   native-runtime:
     name: Pinned native core, real traffic and isolated kernel TUN
-    needs: foundation
+    needs: [foundation, business-race]
     runs-on: ubuntu-24.04
     timeout-minutes: 35
     steps:
@@ -205,7 +226,7 @@ jobs:
 
   standalone-engines:
     name: Standalone TUIC, AmneziaWG and MTProto engines
-    needs: foundation
+    needs: [foundation, business-race]
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
