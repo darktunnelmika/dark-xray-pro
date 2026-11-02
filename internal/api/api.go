@@ -50,6 +50,7 @@ type Server struct {
 	sellerQuotaV2Enabled        bool // opt-in separate authorization and private migration gate
 	darkRestoreReceipts         bool
 	darkRestoreStage            *restoreStage
+	darkRestoreHandoff          *restoreHandoffStage
 	clientOwnershipV1Enabled    bool // startup-only owner reassignment gate
 	sellerOrdersV1Enabled       bool // startup-only, requires seller management and refund supervision
 	volumeRefunds               *volumeRefundService

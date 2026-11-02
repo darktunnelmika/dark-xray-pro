@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"math"
@@ -18,6 +19,8 @@ type DarkRestoreLocalAttachmentReceiptV1 struct {
 	OriginalEventID string                            `json:"original_import_event_id"`
 	ActorUserID     string                            `json:"actor_user_id"`
 	Settlement      darkrestore.LocalSourceSettlement `json:"source_settlement"`
+	HandoffSHA      string                            `json:"handoff_sha256,omitempty"`
+	SignerPublicSHA string                            `json:"handoff_public_key_sha256,omitempty"`
 	CreatedUnix     int64                             `json:"created_unix"`
 	Replayed        bool                              `json:"replayed"`
 }
@@ -127,11 +130,25 @@ func readDarkRestoreLocalAttachment(ctx context.Context, q sellerQueryV2, id str
 	return &receipt, nil
 }
 
+func validLocalHandoffEvidence(handoff, public string) bool {
+	if handoff == "" && public == "" {
+		return true
+	}
+	for _, value := range []string{handoff, public} {
+		raw, err := hex.DecodeString(value)
+		if err != nil || len(raw) != 32 || hex.EncodeToString(raw) != value {
+			return false
+		}
+	}
+	return true
+}
+
 // The stored receipt is checked again during backup validation and on read.
 func decodeDarkRestoreLocalAttachment(raw []byte, out *DarkRestoreLocalAttachmentReceiptV1) error {
 	if len(raw) > 16<<10 || json.Unmarshal(raw, out) != nil || out.Replayed ||
 		out.ClientID == "" || out.OriginalEventID == "" || out.ActorUserID == "" ||
-		out.CreatedUnix <= 0 || out.Settlement.Scope != "single_local_source_epoch" ||
+		out.CreatedUnix <= 0 || !validLocalHandoffEvidence(out.HandoffSHA, out.SignerPublicSHA) ||
+		out.Settlement.Scope != "single_local_source_epoch" ||
 		!uc.ValidReceipt(out.Settlement.Terminal) || out.Settlement.PriorBytes < 0 ||
 		out.Settlement.Up < 0 || out.Settlement.Down < 0 ||
 		out.Settlement.PriorBytes > math.MaxInt64-out.Settlement.Up ||

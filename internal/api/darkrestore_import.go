@@ -22,6 +22,11 @@ type restoreStage struct {
 	review darkrestore.Review
 	digest string
 }
+type restoreHandoffStage struct {
+	path   string
+	digest string
+	public []byte
+}
 
 // Called once, before the browser listener starts. Only this local configuration
 // selects a snapshot. HTTP callers may reference it by its canonical review hash.
@@ -115,6 +120,42 @@ func (s *Server) attachDarkRestoreImport(mux *http.ServeMux) {
 		}
 		respond(w, 200, result)
 	})
+	if handoff := s.darkRestoreHandoff; handoff != nil {
+		handle("GET "+restoreBase+"/handoff", false, func(w http.ResponseWriter, r *http.Request, token string) {
+			verified, err := darkrestore.VerifySignedLocalHandoff(handoff.path, handoff.digest, handoff.public)
+			if err != nil {
+				businessError(w, business.ErrUnavailable)
+				return
+			}
+			proof, err := verified.Settlement()
+			if err != nil {
+				businessError(w, business.ErrUnavailable)
+				return
+			}
+			respond(w, 200, map[string]any{"handoff_sha256": handoff.digest, "source_settlement": proof})
+		})
+		handle("POST "+restoreBase+"/handoff/attach", true, func(w http.ResponseWriter, r *http.Request, token string) {
+			var req struct {
+				HandoffSHA string `json:"handoff_sha256"`
+			}
+			var raw json.RawMessage
+			if decode(w, r, 4096, &raw) != nil || usagewire.Decode(raw, &req) != nil || req.HandoffSHA != handoff.digest {
+				businessError(w, business.ErrInvalid)
+				return
+			}
+			verified, err := darkrestore.VerifySignedLocalHandoff(handoff.path, handoff.digest, handoff.public)
+			if err != nil {
+				businessError(w, business.ErrUnavailable)
+				return
+			}
+			receipt, err := s.business.AttachSignedLocalSettlementV1(r.Context(), token, verified)
+			if err != nil {
+				businessError(w, err)
+				return
+			}
+			respond(w, 200, receipt)
+		})
+	}
 	if stage == nil {
 		return
 	}

@@ -4,11 +4,14 @@ package api
 
 import (
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -197,7 +200,34 @@ func (f *localSettlementFixture) check(t *testing.T, ctx context.Context, server
 		t.Fatal("unrelated output replaced")
 	}
 	f.importAtDestination(t, ctx, exportPath, exported)
-	f.attachToEarlierImport(t, ctx, inputs, seal, result, exportPath, exported.SHA)
+	public, private, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	privatePath, publicPath := filepath.Join(f.dir, "handoff.key"), filepath.Join(f.dir, "handoff.pub")
+	if err = os.WriteFile(privatePath, private, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(publicPath, public, 0600); err != nil {
+		t.Fatal(err)
+	}
+	publicSum := settlementHash(t, publicPath)
+	handoffPath := filepath.Join(f.dir, "signed-handoff.json")
+	signed, err := darkrestore.WriteSignedLocalHandoff(ctx, inputs, seal, privatePath, handoffPath)
+	if err != nil || signed.Settlement != result || signed.PublicKeySHA != publicSum || settlementHash(t, handoffPath) != signed.SHA {
+		t.Fatal("source signed handoff", err)
+	}
+	signedAgain, err := darkrestore.WriteSignedLocalHandoff(ctx, inputs, seal, privatePath, handoffPath)
+	if err != nil || signedAgain != signed {
+		t.Fatal("signed handoff retry changed bytes", err)
+	}
+	if _, err = darkrestore.VerifySignedLocalHandoff(handoffPath, signed.SHA, make([]byte, 32)); err == nil {
+		t.Fatal("wrong public key accepted")
+	}
+	if _, err = darkrestore.VerifySignedLocalHandoff(handoffPath, strings.Repeat("f", 64), public); err == nil {
+		t.Fatal("wrong file digest accepted")
+	}
+	f.attachToEarlierImport(t, ctx, inputs, seal, result, exportPath, exported.SHA, handoffPath, signed.SHA, publicPath, publicSum)
 	// Exercise the packaged command with the same independently pinned copies.
 	if cli := os.Getenv("DARK_PRO_TEST_SETTLEMENT_CLI"); cli != "" {
 		args := []string{"-source", f.source, "-source-sha256", f.sha, "-authority", authority, "-authority-sha256", pin, "-source-id", "synthetic-source", "-node", epoch.NodeID, "-installation", epoch.InstallationID, "-as-of-unix", strconv.FormatInt(f.at.Unix(), 10), "-journal", journal, "-journal-sha256", jSHA, "-state-key-file", key, "-source-listen-ip", o.ListenIP}
@@ -211,6 +241,12 @@ func (f *localSettlementFixture) check(t *testing.T, ctx context.Context, server
 		var handoff darkrestore.LocalImportCopy
 		if err != nil || json.Unmarshal(raw, &handoff) != nil || handoff != exported {
 			t.Fatal("CLI export replay failed", err)
+		}
+		signedArgs := append(append([]string(nil), args...), "-signed-handoff-output", handoffPath, "-handoff-signing-key-file", privatePath)
+		raw, err = exec.CommandContext(ctx, cli, signedArgs...).Output()
+		var viaSigned darkrestore.LocalHandoffFileV1
+		if err != nil || json.Unmarshal(raw, &viaSigned) != nil || viaSigned != signed {
+			t.Fatal("CLI signed handoff replay failed", err)
 		}
 		badKey := filepath.Join(f.dir, "wrong.key")
 		if err = os.WriteFile(badKey, make([]byte, 32), 0600); err != nil {
@@ -314,7 +350,7 @@ func (f *localSettlementFixture) importAtDestination(t *testing.T, ctx context.C
 	t.Log("DARKRESTORE_SETTLED_IMPORT_PASS one receipt after replay; same UUID and expiry; closed source bytes historical; zero post-migration usage")
 }
 
-func (f *localSettlementFixture) attachToEarlierImport(t *testing.T, ctx context.Context, inputs darkrestore.LocalInputs, seal managedxray.LocalTCPSeal, proof darkrestore.LocalSourceSettlement, exportPath, exportSHA string) {
+func (f *localSettlementFixture) attachToEarlierImport(t *testing.T, ctx context.Context, inputs darkrestore.LocalInputs, seal managedxray.LocalTCPSeal, proof darkrestore.LocalSourceSettlement, exportPath, exportSHA, handoffPath, handoffSHA, publicPath, publicSHA string) {
 	t.Helper()
 	destinationPath := filepath.Join(t.TempDir(), "private", "destination.sqlite")
 	server := businessLabAt(t, destinationPath)
@@ -351,6 +387,52 @@ func (f *localSettlementFixture) attachToEarlierImport(t *testing.T, ctx context
 	if err != nil || initial.HistoricalBytes != "310" || initial.SourceEpochSettled || initial.CutoverVerified {
 		t.Fatal("pre-epoch view", initial, err)
 	}
+	// Only the public key and signed result cross the source/destination boundary.
+	// The source journal key and the signing private key remain on the source.
+	handoffDir := filepath.Join(t.TempDir(), "private")
+	if err := os.MkdirAll(handoffDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	copyPrivate := func(from, to string) {
+		t.Helper()
+		raw, err := os.ReadFile(from)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err = os.WriteFile(to, raw, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	stagedHandoff, stagedPublic := filepath.Join(handoffDir, "handoff.json"), filepath.Join(handoffDir, "public.key")
+	copyPrivate(handoffPath, stagedHandoff)
+	copyPrivate(publicPath, stagedPublic)
+	if err := dst.s.StageDarkRestoreLocalHandoff(ctx, stagedHandoff, handoffSHA, stagedPublic, strings.Repeat("f", 64)); err == nil {
+		t.Fatal("wrong public key pin accepted")
+	}
+	if err := dst.s.StageDarkRestoreLocalHandoff(ctx, stagedHandoff, strings.Repeat("f", 64), stagedPublic, publicSHA); err == nil {
+		t.Fatal("wrong signed result pin accepted")
+	}
+	var tampered darkrestore.SignedLocalHandoffV1
+	originalBytes, err := os.ReadFile(stagedHandoff)
+	if err != nil || json.Unmarshal(originalBytes, &tampered) != nil {
+		t.Fatal("read signed handoff", err)
+	}
+	tampered.Signature[0] ^= 1
+	badBytes, err := json.Marshal(tampered)
+	if err != nil {
+		t.Fatal(err)
+	}
+	badPath := filepath.Join(handoffDir, "tampered.json")
+	if err = os.WriteFile(badPath, append(badBytes, '\n'), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err = dst.s.StageDarkRestoreLocalHandoff(ctx, badPath, settlementHash(t, badPath), stagedPublic, publicSHA); err == nil {
+		t.Fatal("tampered signature with matching file hash accepted")
+	}
+	if err := dst.s.StageDarkRestoreLocalHandoff(ctx, stagedHandoff, handoffSHA, stagedPublic, publicSHA); err != nil {
+		t.Fatal("stage signed cross-host result", err)
+	}
+	dst.h = dst.s.BrowserHandler()
 	owner, err := dst.s.business.Login(ctx, ownerUsername, ownerPassword)
 	if err != nil {
 		t.Fatal(err)
@@ -359,13 +441,48 @@ func (f *localSettlementFixture) attachToEarlierImport(t *testing.T, ctx context
 	if err != nil {
 		t.Fatal(err)
 	}
-	attached, err := dst.s.business.AttachVerifiedLocalSettlementV1(ctx, owner.Token, inputs, seal)
-	if err != nil || attached.ClientID != id || attached.OriginalEventID != original.EventID || attached.Replayed || attached.Settlement != proof {
-		t.Fatal("attach verified source", err)
+	ref := map[string]string{"handoff_sha256": handoffSHA}
+	for _, bad := range []struct {
+		cookie *http.Cookie
+		csrf   string
+	}{{dst.target, dst.targetCSRF}, {dst.owner, ""}} {
+		if w := browserRequest(t, dst.h, "POST", restoreBase+"/handoff/attach", ref, bad.cookie, bad.csrf, origin); w.Code != 403 {
+			t.Fatal("representative or missing CSRF attached source", w.Code)
+		}
 	}
-	replay, err := dst.s.business.AttachVerifiedLocalSettlementV1(ctx, owner.Token, inputs, seal)
-	if err != nil || !replay.Replayed || replay.Settlement != proof {
-		t.Fatal("attach replay", err)
+	if w := browserRequest(t, dst.h, "POST", restoreBase+"/handoff/attach", map[string]string{"handoff_sha256": handoffSHA, "path": f.source}, dst.owner, dst.ownerCSRF, origin); w.Code != 422 {
+		t.Fatal("browser-supplied source path accepted", w.Code)
+	}
+	if w := browserRequest(t, dst.h, "POST", restoreBase+"/handoff/attach", map[string]string{"handoff_sha256": strings.Repeat("f", 64)}, dst.owner, dst.ownerCSRF, origin); w.Code != 422 {
+		t.Fatal("wrong signed result reference accepted", w.Code)
+	}
+	if err := os.WriteFile(stagedHandoff, append(badBytes, '\n'), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if w := browserRequest(t, dst.h, "POST", restoreBase+"/handoff/attach", ref, dst.owner, dst.ownerCSRF, origin); w.Code != 503 {
+		t.Fatal("modified signed file after startup accepted", w.Code)
+	}
+	if w := browserRequest(t, dst.h, "GET", restoreBase+"/handoff", nil, dst.owner, "", origin); w.Code != 503 {
+		t.Fatal("modified signed file remained visible", w.Code)
+	}
+	if err := os.WriteFile(stagedHandoff, originalBytes, 0600); err != nil {
+		t.Fatal(err)
+	}
+	w = browserRequest(t, dst.h, "POST", restoreBase+"/handoff/attach", ref, dst.owner, dst.ownerCSRF, origin)
+	var attached business.DarkRestoreLocalAttachmentReceiptV1
+	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &attached) != nil || attached.ClientID != id || attached.OriginalEventID != original.EventID || attached.Replayed || attached.Settlement != proof || attached.HandoffSHA != handoffSHA || attached.SignerPublicSHA != publicSHA {
+		t.Fatal("attach signed source", w.Code, w.Body.String())
+	}
+	w = browserRequest(t, dst.h, "POST", restoreBase+"/handoff/attach", ref, dst.owner, dst.ownerCSRF, origin)
+	var replay business.DarkRestoreLocalAttachmentReceiptV1
+	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &replay) != nil || !replay.Replayed || replay.Settlement != proof || replay.HandoffSHA != handoffSHA || replay.SignerPublicSHA != publicSHA {
+		t.Fatal("signed attach replay", w.Code, w.Body.String())
+	}
+	if w := browserRequest(t, dst.h, "GET", restoreBase+"/handoff", nil, dst.target, "", origin); w.Code != 403 {
+		t.Fatal("representative read private handoff", w.Code)
+	}
+	if w := browserRequest(t, dst.h, "GET", restoreBase+"/handoff", nil, dst.owner, "", origin); w.Code != 200 || !strings.Contains(w.Body.String(), handoffSHA) {
+		t.Fatal("owner handoff view", w.Code)
 	}
 	projection, err := dst.s.business.DarkRestoreUsageV1(ctx, id)
 	want := strconv.FormatInt(proof.Historical, 10)
@@ -409,13 +526,32 @@ func (f *localSettlementFixture) attachToEarlierImport(t *testing.T, ctx context
 		t.Fatal("restart rejected attached epoch", err)
 	}
 	defer reopened.Close()
-	recoveredOwner, err := reopened.Login(ctx, ownerUsername, ownerPassword)
-	if err != nil {
+	// Restart with no source snapshot staged: the signed result can still be
+	// recovered and replayed through the owner API without a source journal key.
+	restarted, _, _, _ := newLab(t)
+	if err := restarted.EnableBusinessLab(reopened); err != nil {
 		t.Fatal(err)
 	}
-	replayed, err := reopened.AttachVerifiedLocalSettlementV1(ctx, recoveredOwner.Token, inputs, seal)
-	if err != nil || !replayed.Replayed || replayed.ClientID != id {
-		t.Fatal("restart duplicated attachment", err)
+	if err := reopened.EnableUsageLedger(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := restarted.EnableClientOwnershipV1Lab(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := restarted.EnableNativeInbounds(make([]byte, 32)); err != nil {
+		t.Fatal(err)
+	}
+	if err := restarted.StageDarkRestoreLocalHandoff(ctx, stagedHandoff, handoffSHA, stagedPublic, publicSHA); err != nil {
+		t.Fatal("restart handoff stage", err)
+	}
+	if restarted.darkRestoreStage != nil {
+		t.Fatal("source snapshot incorrectly restaged")
+	}
+	restartedCookie, restartedCSRF := browserLogin(t, restarted, ownerUsername, ownerPassword)
+	w = browserRequest(t, restarted.BrowserHandler(), "POST", restoreBase+"/handoff/attach", ref, restartedCookie, restartedCSRF, origin)
+	var replayed business.DarkRestoreLocalAttachmentReceiptV1
+	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &replayed) != nil || !replayed.Replayed || replayed.ClientID != id || replayed.HandoffSHA != handoffSHA || replayed.SignerPublicSHA != publicSHA {
+		t.Fatal("restart duplicated attachment", w.Code, w.Body.String())
 	}
 	again, err := reopened.DarkRestoreUsageV1(ctx, id)
 	if err != nil || again != projection {
@@ -426,4 +562,5 @@ func (f *localSettlementFixture) attachToEarlierImport(t *testing.T, ctx context
 		t.Fatal("renewal payer changed across restart", err)
 	}
 	t.Log("DARKRESTORE_ATTACH_EARLIER_PASS original receipt stable; one UUID; late closed traffic historical; zero import debit; later renewal charged current representative; hold, backup and restart preserved")
+	t.Log("DARKRESTORE_SIGNED_HANDOFF_PASS cross-host public-key pin and signature; owner CSRF; path rejection; replay and offline backup")
 }

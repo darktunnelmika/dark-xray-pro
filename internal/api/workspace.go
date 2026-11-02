@@ -27,7 +27,7 @@ func (s *Server) attachWorkspace(mux *http.ServeMux) {
 		respond(w, http.StatusOK, map[string]any{
 			"user": session.User, "balance": rep,
 			"data_plane":   "not_activated",
-			"capabilities": map[string]bool{"darkrestore_receipts_v1": s.darkRestoreReceipts && session.User.Role == "owner", "darkrestore_import_v1": s.darkRestoreStage != nil && session.User.Role == "owner", "client_ownership_v1": s.clientOwnershipV1Enabled && session.User.Role == "owner", "seller_orders_v1": s.sellerOrdersV1Enabled, "backup_control_v1": s.backupControl != nil && session.User.Role == "owner"},
+			"capabilities": map[string]bool{"darkrestore_receipts_v1": s.darkRestoreReceipts && session.User.Role == "owner", "darkrestore_import_v1": s.darkRestoreStage != nil && session.User.Role == "owner", "darkrestore_signed_handoff_v1": s.darkRestoreHandoff != nil && session.User.Role == "owner", "client_ownership_v1": s.clientOwnershipV1Enabled && session.User.Role == "owner", "seller_orders_v1": s.sellerOrdersV1Enabled, "backup_control_v1": s.backupControl != nil && session.User.Role == "owner"},
 		})
 	})
 	mux.HandleFunc("GET /api/v1/workspace/representatives", func(w http.ResponseWriter, r *http.Request) {

@@ -87,6 +87,10 @@ func main() {
 	snapshot := flag.String("darkrestore-snapshot", "", "private offline SQLite copy approved for LAB import")
 	snapshotSHA := flag.String("darkrestore-sha256", "", "approved snapshot SHA-256")
 	snapshotTime := flag.Int64("darkrestore-as-of", 0, "approved snapshot review Unix time")
+	handoff := flag.String("darkrestore-signed-handoff", "", "private signed one-source settlement file")
+	handoffSHA := flag.String("darkrestore-handoff-sha256", "", "approved signed handoff SHA-256")
+	handoffPub := flag.String("darkrestore-handoff-public-key", "", "private pinned Ed25519 public key file")
+	handoffPubSHA := flag.String("darkrestore-handoff-public-key-sha256", "", "approved Ed25519 public key SHA-256")
 	flag.Parse()
 	if os.Getenv("DARK_PRO_LAB_MODE") != "1" {
 		log.Fatal("DARK XRAY PRO is not production-ready; set DARK_PRO_LAB_MODE=1 for isolated testing only")
@@ -292,6 +296,14 @@ func main() {
 		}
 		if err := service.StageDarkRestoreImport(context.Background(), *snapshot, *snapshotSHA, *snapshotTime); err != nil {
 			log.Fatal("Dark Restore LAB snapshot could not be staged")
+		}
+	}
+	if *handoff != "" || *handoffSHA != "" || *handoffPub != "" || *handoffPubSHA != "" {
+		if !clientOwnership || *handoff == "" || *handoffSHA == "" || *handoffPub == "" || *handoffPubSHA == "" {
+			log.Fatal("Dark Restore handoff requires all pinned inputs and LAB client ownership")
+		}
+		if err := service.StageDarkRestoreLocalHandoff(context.Background(), *handoff, *handoffSHA, *handoffPub, *handoffPubSHA); err != nil {
+			log.Fatal("Dark Restore signed handoff could not be staged")
 		}
 	}
 	if sellerOrders {

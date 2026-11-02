@@ -23,6 +23,24 @@ func (s *Store) AttachVerifiedLocalSettlementV1(ctx context.Context, token strin
 	if err != nil {
 		return DarkRestoreLocalAttachmentReceiptV1{}, err
 	}
+	return s.attachProvenLocalSettlement(ctx, token, proof, "", "")
+}
+
+// The source host signs a scope-specific result. The destination only accepts
+// the opaque value returned by signature verification with its pinned key.
+func (s *Store) AttachSignedLocalSettlementV1(ctx context.Context, token string, handoff darkrestore.VerifiedLocalHandoff) (DarkRestoreLocalAttachmentReceiptV1, error) {
+	proof, err := handoff.Settlement()
+	if err != nil {
+		return DarkRestoreLocalAttachmentReceiptV1{}, ErrInvalid
+	}
+	handoffSHA, publicSHA, err := handoff.Evidence()
+	if err != nil {
+		return DarkRestoreLocalAttachmentReceiptV1{}, ErrInvalid
+	}
+	return s.attachProvenLocalSettlement(ctx, token, proof, handoffSHA, publicSHA)
+}
+
+func (s *Store) attachProvenLocalSettlement(ctx context.Context, token string, proof darkrestore.LocalSourceSettlement, handoffSHA, publicSHA string) (DarkRestoreLocalAttachmentReceiptV1, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return DarkRestoreLocalAttachmentReceiptV1{}, err
@@ -93,7 +111,8 @@ func (s *Store) AttachVerifiedLocalSettlementV1(ctx context.Context, token strin
 		var prior DarkRestoreLocalAttachmentReceiptV1
 		if decodeDarkRestoreLocalAttachment(saved, &prior) != nil ||
 			prior.ClientID != id || prior.OriginalEventID != originalEvent ||
-			prior.ActorUserID != actor || prior.Settlement != proof {
+			prior.ActorUserID != actor || prior.Settlement != proof ||
+			prior.HandoffSHA != handoffSHA || prior.SignerPublicSHA != publicSHA {
 			return DarkRestoreLocalAttachmentReceiptV1{}, ErrConflict
 		}
 		prior.Replayed = true
@@ -114,7 +133,7 @@ func (s *Store) AttachVerifiedLocalSettlementV1(ctx context.Context, token strin
         (SELECT count(*) FROM pro_usage_epochs WHERE epoch_json LIKE ?)`, id, id, "%"+id+"%").Scan(&activity); err != nil || activity != 0 {
 		return DarkRestoreLocalAttachmentReceiptV1{}, ErrConflict
 	}
-	out := DarkRestoreLocalAttachmentReceiptV1{ClientID: id, OriginalEventID: originalEvent, ActorUserID: actor, Settlement: proof, CreatedUnix: time.Now().Unix()}
+	out := DarkRestoreLocalAttachmentReceiptV1{ClientID: id, OriginalEventID: originalEvent, ActorUserID: actor, Settlement: proof, HandoffSHA: handoffSHA, SignerPublicSHA: publicSHA, CreatedUnix: time.Now().Unix()}
 	raw, err := json.Marshal(out)
 	if err != nil {
 		return DarkRestoreLocalAttachmentReceiptV1{}, err

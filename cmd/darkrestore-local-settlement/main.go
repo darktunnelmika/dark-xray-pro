@@ -29,8 +29,10 @@ func main() {
 	key := flag.String("state-key-file", "", "source journal key file")
 	listen := flag.String("source-listen-ip", "", "expected source supervisor listen IP")
 	output := flag.String("export-copy", "", "optional new private M2 SQLite input for one identity")
+	handoff := flag.String("signed-handoff-output", "", "optional private signed result for a previously imported identity")
+	signingKey := flag.String("handoff-signing-key-file", "", "private raw 64-byte Ed25519 key on the source host")
 	flag.Parse()
-	if flag.NArg() != 0 || *at <= 0 {
+	if flag.NArg() != 0 || *at <= 0 || (*output != "" && *handoff != "") || (*handoff == "") != (*signingKey == "") {
 		fmt.Fprintln(os.Stderr, "invalid inputs")
 		os.Exit(2)
 	}
@@ -43,10 +45,12 @@ func main() {
 	}
 	inputs := darkrestore.LocalInputs{Source: *source, SourceSHA: *sha, Authority: *authority, AuthoritySHA: *pin, ID: *id, Node: *node, Installation: *install, AsOf: time.Unix(*at, 0)}
 	var result any
-	if *output == "" {
-		result, err = darkrestore.InspectLocalSettlement(ctx, inputs, seal)
-	} else {
+	if *handoff != "" {
+		result, err = darkrestore.WriteSignedLocalHandoff(ctx, inputs, seal, *signingKey, *handoff)
+	} else if *output != "" {
 		result, err = darkrestore.ExportLocalImportCopy(ctx, inputs, seal, *output)
+	} else {
+		result, err = darkrestore.InspectLocalSettlement(ctx, inputs, seal)
 	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "local source accounting unverified")
