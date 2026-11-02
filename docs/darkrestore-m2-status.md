@@ -5,7 +5,8 @@ This branch remains a draft. It must not be merged or installed as a completed M
 ## Implemented
 
 - Owner-only read-only quotes with group mapping and exact historical aggregates.
-- Actual transactional creation of PRO Clients through an internal offline operator entry point.
+- Clients can load a server-approved snapshot, map groups, preview the import, commit it and look up the resulting receipt as the owner. Local JSON remains a private preview.
+- Stage an independent snapshot at HUB startup with `-darkrestore-snapshot`, `-darkrestore-sha256` and `-darkrestore-as-of` on an explicitly ownership-enabled LAB. The copy and its parent directory must be private. Requests carry the review hash and mappings.
 - Rebuild the review from the private SHA-pinned source snapshot before import; internally consistent browser JSON is insufficient.
 - Preserve verified UUID, exact expiry, quota, archive flag, source review and historical group totals, including promoted and blocked records.
 - Keep imported identities disabled with incomplete native usage baseline until independently verified traffic cutover.
@@ -18,6 +19,7 @@ This branch remains a draft. It must not be merged or installed as a completed M
 ## Verified by automated tests
 
 - Verified synthetic legacy SQLite snapshot to actual PRO Clients, preserving source bytes.
+- Authenticated Chromium login, group mapping, preview, commit and receipt recovery after reload against a disposable Go server and SQLite.
 - Atomic rollback on injected write failure; successful retry after rollback.
 - Same-request replay and receipt lookup; receipt privacy.
 - Reopen recovery and native offline backup validation.
@@ -30,7 +32,6 @@ These tests use isolated synthetic databases. They are not installed LAB accepta
 
 ## Remaining gates
 
-- Owner Clients UI and authenticated API for a server-approved staged snapshot; never accept an arbitrary filesystem path from HTTP.
 - Separate source event-history retention beyond the M1 review aggregates.
 - Verified cutover/checkpoint design, remaining-quota policy, and native/subscription activation acceptance. No incomplete baseline may be marked complete by an API request.
 - Approved legacy-unlimited plan policy; uncertain unlimited records currently remain blocked.

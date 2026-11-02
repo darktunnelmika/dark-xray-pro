@@ -4,6 +4,8 @@ import type { BusinessModel } from "./useBusinessWorkspace";
 import { RepresentativePicker } from "./ClientOwnershipTransfer";
 import { createReviewMapping, parseRestoreReview, type RestoreReview, type RestoreClient } from "./darkrestoreReview";
 import "./DarkRestoreReview.css";
+import { api } from "../session";
+import DarkRestoreImport, { restoreAPI } from "./DarkRestoreImport";
 
 const words = {
  en: {
@@ -44,6 +46,8 @@ export default function DarkRestoreReview({model}:{model:BusinessModel}){
  const {language,session}=model;
  const t=words[language];
  const [review,setReview]=useState<RestoreReview|null>(null);
+ const [digest,setDigest]=useState("");
+ const canImport=model.me?.capabilities?.darkrestore_import_v1===true;
  const [fileError,setFileError]=useState(false);
  const [busy,setBusy]=useState(false);
  const [selection,setSelection]=useState<string>("");
@@ -65,7 +69,7 @@ export default function DarkRestoreReview({model}:{model:BusinessModel}){
    (!key || c.label.toLocaleLowerCase().includes(key) || c.source_id.toLocaleLowerCase().includes(key)));
  },[review,groupFilter,query]);
  async function load(file:File|undefined){
-  setReview(null);setFileError(false);setMapping({});setApprovedTargets([]);setSelection("");setGroupFilter("");setQuery("");setOffset(0);setExportError(false);
+  setDigest("");setReview(null);setFileError(false);setMapping({});setApprovedTargets([]);setSelection("");setGroupFilter("");setQuery("");setOffset(0);setExportError(false);
   if(!file)return;
   if(file.size===0 || file.size>32*1024*1024){setFileError(true);return;}
   setBusy(true);
@@ -76,6 +80,15 @@ export default function DarkRestoreReview({model}:{model:BusinessModel}){
    setReview(r);setSelection(r.groups[0]?.source_group_id??"");
   }catch{setReview(null);setFileError(true);}
   finally{setBusy(false);}
+ }
+ async function openStage(){
+  setBusy(true);setReview(null);setDigest("");setMapping({});setApprovedTargets([]);setRepresentative(null);setSelection("");setGroupFilter("");setQuery("");setOffset(0);setExportError(false);setFileError(false);
+  try{
+   const data=await api<{review_sha256:string;review:unknown}>(restoreAPI+"/stage");
+   if(!/^[a-f0-9]{64}$/.test(data.review_sha256))throw Error("stage");
+   const verified=parseRestoreReview(data.review);
+   setReview(verified);setSelection(verified.groups[0]?.source_group_id??"");setDigest(data.review_sha256);
+  }catch{setFileError(true);}finally{setBusy(false);}
  }
  function apply(all:boolean){
   if(!review || !representative || (!all && !selection))return;
@@ -99,10 +112,11 @@ export default function DarkRestoreReview({model}:{model:BusinessModel}){
  if(session.user.role!=="owner")return null;
  return <section className="darkrestore-review business-panel" aria-label={t.title}>
   <button className="darkrestore-review-head" type="button" aria-expanded={opened} onClick={()=>setOpened(v=>!v)}>
-   <ArchiveRestore size={21}/><span><strong>{t.title}</strong><small>{t.intro}</small></span><span aria-hidden="true">{opened?"−":"+"}</span>
+   <ArchiveRestore size={21}/><span><strong>{t.title}</strong><small>{canImport?(language==="fa"?"بررسی نسخهٔ آفلاین و واردسازی کاربران به کلاینت‌ها":"Review offline data and import clients from an approved snapshot."):t.intro}</small></span><span aria-hidden="true">{opened?"−":"+"}</span>
   </button>
   {opened && <div className="darkrestore-review-body">
-   <p className="darkrestore-warning" role="status"><FileWarning size={17}/>{t.warning}</p>
+   {canImport&&<button type="button" disabled={busy} onClick={()=>void openStage()}>{language==="fa"?"بازکردن نسخهٔ تأییدشدهٔ سرور":"Open approved server snapshot"}</button>}
+   {!digest&&<p className="darkrestore-warning" role="status"><FileWarning size={17}/>{canImport?(language==="fa"?"برای واردسازی، نسخهٔ تأییدشدهٔ سرور را باز کن.":"Open the approved server snapshot to import clients."):t.warning}</p>}
    <label className="darkrestore-file"><FileJson2 size={17}/>{t.file}
     <input type="file" accept=".json,application/json" disabled={busy} onChange={e=>{void load(e.target.files?.[0]);e.target.value="";}}/>
    </label>
@@ -111,7 +125,7 @@ export default function DarkRestoreReview({model}:{model:BusinessModel}){
    {busy && <p role="status">…</p>}
    {!review && !busy && !fileError && <p>{t.noFile}</p>}
    {review && <section className="darkrestore-summary">
-    <p role="status"><FileCheck2 size={16}/>{t.ready}</p>
+    <p role="status"><FileCheck2 size={16}/>{digest?(language==="fa"?"نسخهٔ تأییدشده برای نگاشت آماده است":"Approved snapshot ready for mapping"):t.ready}</p>
     <div className="darkrestore-stat-row">
      <span><small>{t.clients}</small><strong>{fmt(review.clients.length,language)}</strong></span>
      <span><small>{t.groups}</small><strong>{fmt(review.groups.length,language)}</strong></span>
@@ -126,11 +140,11 @@ export default function DarkRestoreReview({model}:{model:BusinessModel}){
       <strong>{g.name}</strong><small>{g.source_group_id}</small>
       <span>{fmt(g.count,language)} {t.clients} · {fmt(g.archived,language)} {t.archived} · {fmt(g.promoted,language)} {t.promoted}</span>
       <small>{t.used}: {shortBytes(g.historical_bytes,language)}</small>
-      <span>{t.target}: <strong>{mapping[g.source_group_id]||"—"}</strong></span>
+      <span>{digest?(language==="fa"?"نمایندهٔ مقصد":"Destination account"):t.target}: <strong>{mapping[g.source_group_id]||"—"}</strong></span>
      </article>)}
     </div>
     <div className="darkrestore-mapping">
-     <h4>{t.target}</h4>
+     <h4>{digest?(language==="fa"?"نمایندهٔ مقصد":"Destination account"):t.target}</h4>
      <label>{t.group}<select value={selection} onChange={e=>setSelection(e.target.value)}>
       {review.groups.map(g=><option key={g.source_group_id} value={g.source_group_id}>{g.name}</option>)}
      </select></label>
@@ -144,7 +158,8 @@ export default function DarkRestoreReview({model}:{model:BusinessModel}){
      <button type="button" disabled={review.groups.length===0||Object.keys(mapping).length!==review.groups.length} onClick={exportMapping}>
       <Download size={15}/>{t.export}
      </button>
-     <p className="darkrestore-hint"><ShieldCheck size={15}/>{t.notActive}</p>
+     {digest&&canImport&&<DarkRestoreImport key={JSON.stringify([session.user.id,digest,mapping])} model={model} review={review} digest={digest} mapping={mapping}/>}
+     {!digest&&<p className="darkrestore-hint"><ShieldCheck size={15}/>{t.notActive}</p>}
     </div>
     <h4>{t.clients}</h4>
     <div className="darkrestore-filters">
@@ -171,7 +186,7 @@ export default function DarkRestoreReview({model}:{model:BusinessModel}){
      <span>{fmt(offset+1,language)}–{fmt(Math.min(filtered.length,offset+perPage),language)} / {fmt(filtered.length,language)}</span>
      <button type="button" disabled={offset+perPage>=filtered.length} onClick={()=>setOffset(o=>o+perPage)}>{t.next}</button>
     </div>
-    <p className="darkrestore-warning"><ShieldCheck size={17}/>{t.only}</p>
+    {!digest&&<p className="darkrestore-warning"><ShieldCheck size={17}/>{t.only}</p>}
    </section>}
   </div>}
  </section>;

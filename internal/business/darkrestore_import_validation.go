@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"github.com/darktunnelmika/dark-xray-pro/internal/usageledger"
 	"math/big"
 	"strconv"
 )
@@ -137,26 +138,41 @@ type DarkRestoreUsageV1 struct {
 // This projection never adds history to the native counters or writes a ledger.
 // Unknown cutover remains explicit even when current observed bytes equal zero.
 func (s *Store) DarkRestoreUsageV1(ctx context.Context, id string) (DarkRestoreUsageV1, error) {
-	out := DarkRestoreUsageV1{ClientID: id}
-	present, err := darkRestoreSchemaState(ctx, s.db)
-	if err != nil || !present {
-		return out, ErrUnavailable
-	}
-	if err = s.db.QueryRowContext(ctx, "SELECT historical_bytes FROM darkrestore_import_entries_v1 WHERE client_id=?", id).Scan(&out.HistoricalBytes); err == sql.ErrNoRows {
-		return out, ErrNotFound
-	} else if err != nil {
-		return out, err
-	}
 	account, err := s.ClientUsage(ctx, id)
 	if err != nil {
-		return out, err
+		return DarkRestoreUsageV1{}, err
+	}
+	projection, err := s.DarkRestoreUsageForAccount(ctx, account)
+	if err != nil {
+		return DarkRestoreUsageV1{}, err
+	}
+	if projection == nil {
+		return DarkRestoreUsageV1{}, ErrNotFound
+	}
+	return *projection, nil
+}
+
+// Use the same native account snapshot already checked against the caller's
+// representative scope. The legacy count is immutable across reassignment.
+func (s *Store) DarkRestoreUsageForAccount(ctx context.Context, account usageledger.Account) (*DarkRestoreUsageV1, error) {
+	present, err := darkRestoreSchemaState(ctx, s.db)
+	if err != nil || !present {
+		return nil, err
+	}
+	out := DarkRestoreUsageV1{ClientID: account.ClientID}
+	err = s.db.QueryRowContext(ctx, "SELECT historical_bytes FROM darkrestore_import_entries_v1 WHERE client_id=?", account.ClientID).Scan(&out.HistoricalBytes)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
 	}
 	historical, err := strconv.ParseInt(out.HistoricalBytes, 10, 64)
 	if err != nil || historical < 0 {
-		return out, ErrUnavailable
+		return nil, ErrUnavailable
 	}
 	out.PostMigrationBytes = strconv.FormatInt(account.Total, 10)
 	out.TotalBytes = new(big.Int).Add(big.NewInt(historical), big.NewInt(account.Total)).String()
 	out.CutoverVerified = account.Known
-	return out, nil
+	return &out, nil
 }

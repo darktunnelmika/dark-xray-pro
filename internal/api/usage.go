@@ -53,6 +53,15 @@ func (s *Server) attachUsageRead(mux *http.ServeMux) {
 			respond(w, http.StatusForbidden, map[string]string{"error": "representative_scope_denied"})
 			return
 		}
-		respond(w, http.StatusOK, map[string]any{"usage": account, "scope": "committed_user_counters", "live_collection_enabled": false, "distributed_hard_limit_verified": false})
+		result := map[string]any{"usage": account, "scope": "committed_user_counters", "live_collection_enabled": false, "distributed_hard_limit_verified": false}
+		history, err := s.business.DarkRestoreUsageForAccount(r.Context(), account)
+		if err != nil {
+			businessError(w, err)
+			return
+		}
+		if history != nil {
+			result["dark_restore"] = history
+		}
+		respond(w, http.StatusOK, result)
 	})
 }

@@ -4,7 +4,7 @@ export type Client = { id: string; representative_id: string; name: string; plan
 export type ClientOperation = { event_id: string; client_id: string; representative_id: string; kind: string; reason: string; added_days: number; added_volume_bytes: number; volume_credit_debit: number; unlimited_credit_debit: number; created_unix: number };
 export type ClientGroup = { id: string; representative_id: string; name: string; color: string; member_count: number; created_unix: number; updated_unix: number };
 export type LedgerEvent = { event_id: string; kind: string; representative_id: string; object_id: string; reason: string; volume_delta_bytes: number; unlimited_delta_units: number };
-export type Workspace = { user: User; balance: Representative; data_plane: "not_activated"; capabilities?: { client_ownership_v1?: boolean; seller_orders_v1?: boolean; backup_control_v1?: boolean } };
+export type Workspace = { user: User; balance: Representative; data_plane: "not_activated"; capabilities?: { darkrestore_import_v1?: boolean; client_ownership_v1?: boolean; seller_orders_v1?: boolean; backup_control_v1?: boolean } };
 
 export type Section = "clients" | "groups" | "representatives" | "marketplace" | "finance" | "account";
 export function uid(): string { return "pro-" + crypto.randomUUID().slice(0, 18); }

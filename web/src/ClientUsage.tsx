@@ -8,7 +8,7 @@ type Usage = {
  total_bytes: string; limit_bytes: string; plan_kind: "volume" | "unlimited";
  known: boolean; reconciliation_holds: number; exhausted: boolean; eligible: boolean;
 };
-type Result = { usage: Usage; scope: string; live_collection_enabled: boolean; distributed_hard_limit_verified: boolean };
+type Result = { dark_restore?: {client_id:string;historical_bytes:string;post_migration_bytes:string;total_bytes:string;cutover_verified:boolean}; usage: Usage; scope: string; live_collection_enabled: boolean; distributed_hard_limit_verified: boolean };
 type State = "loading" | "ready" | "disabled" | "denied" | "failed";
 const text = {
  en: {
@@ -42,6 +42,10 @@ function validate(result: Result, id: string): boolean {
   ![u.known,u.exhausted,u.eligible].every(v=>typeof v === "boolean") ||
   !Number.isSafeInteger(u.reconciliation_holds) || u.reconciliation_holds < 0 ||
   (u.plan_kind !== "volume" && u.plan_kind !== "unlimited")) return false;
+ const h=result.dark_restore;
+ if(h!==undefined&&(!h||h.client_id!==id||!validBytes(h.historical_bytes)||h.post_migration_bytes!==u.total_bytes||
+   h.cutover_verified!==u.known||typeof h.total_bytes!=="string"||!/^(0|[1-9][0-9]{0,19})$/.test(h.total_bytes)||
+   BigInt(h.historical_bytes)+BigInt(u.total_bytes)!==BigInt(h.total_bytes)))return false;
  if (BigInt(u.uplink_bytes)+BigInt(u.downlink_bytes)!==BigInt(u.total_bytes)) return false;
  if (u.eligible && (!u.known || u.exhausted || u.reconciliation_holds !== 0)) return false;
  return true;
@@ -80,7 +84,7 @@ export default function ClientUsage({ clientID, language, refresh }: { clientID:
    <p className="client-usage-state" role="status">{!known?usage.reconciliation_holds>0?t.held:t.unknown:usage.exhausted?t.exhausted:usage.eligible?t.eligible:t.blocked}</p>
    {!known&&<p>{t.knownPartial}</p>}
    <dl className="client-usage-values">
-    {[[t.total,display(usage.total_bytes,language,t.bytes)],[t.uplink,display(usage.uplink_bytes,language,t.bytes)],[t.downlink,display(usage.downlink_bytes,language,t.bytes)],[t.limit,usage.plan_kind==="unlimited"?t.unlimited:display(usage.limit_bytes,language,t.bytes)],[t.remaining,remaining]].map(([label,value])=><div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}
+    {[...(result?.dark_restore?[[language==="fa"?"پیش از مهاجرت":"Before migration",display(result.dark_restore.historical_bytes,language,t.bytes)],[language==="fa"?"پس از مهاجرت":"Since migration",display(usage.total_bytes,language,t.bytes)],[language==="fa"?"مجموع مصرف ثبت‌شده":"Combined recorded usage",display(result.dark_restore.total_bytes,language,t.bytes)]]:[[t.total,display(usage.total_bytes,language,t.bytes)]]),[t.uplink,display(usage.uplink_bytes,language,t.bytes)],[t.downlink,display(usage.downlink_bytes,language,t.bytes)],[t.limit,usage.plan_kind==="unlimited"?t.unlimited:display(usage.limit_bytes,language,t.bytes)],[t.remaining,remaining]].map(([label,value])=><div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}
    </dl>
   </>}
   <p className="client-usage-boundary"><ShieldAlert size={16}/>{t.caveat}</p>

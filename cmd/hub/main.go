@@ -84,6 +84,9 @@ func main() {
 	agentListen := flag.String("agent-tls-listen", "", "optional dedicated HTTPS LAB Node listener (disabled by default)")
 	agentCert := flag.String("agent-tls-cert", "", "certificate with valid IP/DNS SAN for new LAB Node listener")
 	agentKey := flag.String("agent-tls-key", "", "private key for dedicated LAB Node listener")
+	snapshot := flag.String("darkrestore-snapshot", "", "private offline SQLite copy approved for LAB import")
+	snapshotSHA := flag.String("darkrestore-sha256", "", "approved snapshot SHA-256")
+	snapshotTime := flag.Int64("darkrestore-as-of", 0, "approved snapshot review Unix time")
 	flag.Parse()
 	if os.Getenv("DARK_PRO_LAB_MODE") != "1" {
 		log.Fatal("DARK XRAY PRO is not production-ready; set DARK_PRO_LAB_MODE=1 for isolated testing only")
@@ -281,6 +284,14 @@ func main() {
 	if clientOwnership {
 		if err := service.EnableClientOwnershipV1Lab(context.Background()); err != nil {
 			log.Fatal("client ownership initialization failed: ", err)
+		}
+	}
+	if *snapshot != "" || *snapshotSHA != "" || *snapshotTime != 0 {
+		if !clientOwnership {
+			log.Fatal("Dark Restore import requires LAB client ownership")
+		}
+		if err := service.StageDarkRestoreImport(context.Background(), *snapshot, *snapshotSHA, *snapshotTime); err != nil {
+			log.Fatal("Dark Restore LAB snapshot could not be staged")
 		}
 	}
 	if sellerOrders {

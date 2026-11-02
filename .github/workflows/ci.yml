@@ -375,6 +375,12 @@ jobs:
           assert sum('REAL_CLIENT_OWNERSHIP_BROWSER_PASS' in e.get('Output','') for e in events)==1
           assert not any('WARNING: DATA RACE' in e.get('Output','') for e in events)
           PYOWNERSHIP
+      - name: Import a staged offline snapshot through Clients and recover its receipt
+        working-directory: ${{ github.workspace }}
+        env:
+          DARK_PRO_TEST_DARKRESTORE_BROWSER: "1"
+          DARK_PRO_TEST_WEB_DIST: ${{ github.workspace }}/web/dist
+        run: go test -race ./internal/api -run '^TestDarkRestoreLiveBrowser$' -count=1 -v -timeout=150s
       - name: Upload failure evidence
         if: failure()
         uses: actions/upload-artifact@v4

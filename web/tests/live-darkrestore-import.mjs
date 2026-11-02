@@ -1,0 +1,35 @@
+import { chromium, expect } from "@playwright/test";
+const url=new URL(process.env.DARK_PRO_QA_UI_URL);
+if(url.hostname!=="127.0.0.1"||url.protocol!=="http:")throw Error("loopback test only");
+const browser=await chromium.launch({headless:true,args:["--no-zygote","--disable-gpu"]});
+try{
+ const page=await browser.newPage({viewport:{width:390,height:844}});
+ await page.route("**/*",r=>new URL(r.request().url()).origin===url.origin?r.continue():r.abort());
+ await page.goto(new URL("/clients",url).href);
+ await page.getByLabel("Username",{exact:true}).fill(process.env.DARK_PRO_TEST_OWNER);
+ await page.getByLabel("Password",{exact:true}).fill(process.env.DARK_PRO_TEST_PASSWORD);
+ await page.getByRole("button",{name:"Sign in",exact:true}).click();
+ await expect(page.getByRole("heading",{name:"Client directory",exact:true})).toBeVisible({timeout:12000});
+ await page.goto(new URL("/clients?view=restore",url).href);
+ const panel=page.getByRole("region",{name:"Dark Restore — import review"});
+ await panel.getByRole("button",{name:"Open approved server snapshot"}).click();
+ await panel.getByRole("button",{name:/transfer-target/i}).click();
+ await panel.getByRole("button",{name:"Map all groups to this account"}).click();
+ const preview=panel.getByRole("button",{name:"Preview import",exact:true});
+ await preview.click();
+ const confirm=panel.getByRole("button",{name:"Confirm import",exact:true});
+ await expect(confirm).toBeEnabled();
+ await confirm.click();
+ await expect(panel.getByText("Import recorded",{exact:true})).toBeVisible();
+ const selector=page.getByRole("combobox",{name:/^Choose an existing client/});
+ const imported=selector.locator("option").filter({hasText:"synthetic-source"});
+ await expect(imported).toHaveCount(1);
+ await selector.selectOption(await imported.getAttribute("value"));
+ const usage=page.getByRole("region",{name:"Recorded client usage"});
+ await expect(usage.locator("div").filter({has:page.getByText("Before migration",{exact:true})}).last()).toContainText("310 bytes");
+ await expect(usage.getByText("Combined recorded usage",{exact:true})).toBeVisible();
+ await page.reload();
+ await panel.getByRole("button",{name:"Open approved server snapshot"}).click();
+ await panel.getByRole("button",{name:"Check recorded receipt"}).click();
+ await expect(panel.getByText("Import recorded",{exact:true})).toBeVisible();
+}finally{await browser.close();}
