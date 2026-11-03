@@ -35,16 +35,15 @@ This branch remains a draft. It must not be merged or installed as a completed M
 - Corruption rejection on reopen and backup validation.
 - The staged artifact survived two SIGKILLs on a 3,200-row synthetic request. The first interrupted a transaction with uncommitted SQLite WAL frames. The second interrupted delivery of the response after commit. Recovery preserved one receipt and 3,041 distinct imported clients and usage seeds.
 
-These tests use isolated synthetic databases. They are not installed LAB acceptance or production migration.
+These automated tests use isolated synthetic databases. Installed synthetic LAB evidence is recorded separately below; neither is a production migration.
 
 ## Remaining gates
-
 
 - Verified cutover/checkpoint design, remaining-quota policy, and native/subscription activation acceptance. No incomplete baseline may be marked complete by an API request.
 - Approved legacy-unlimited plan policy; uncertain unlimited records currently remain blocked.
 - Operator acceptance on representative production-scale offline fixtures. Staging refuses unknown event layouts, more than 100,000 legacy events or event input above 16 MiB.
-- M4/M5: authoritative final counter settlement, positive subscription delivery after settlement, and installed M2 acceptance.
-- Full CI and independent scope review before merge; versioned LAB installation afterward.
+- M4/M5: authoritative final counter settlement, positive subscription delivery after settlement, and full installed acceptance with evidence-backed source identities.
+- Final-head CI and independent scope review before merge. The verified draft binary is installed only on the isolated LAB.
 - Telegram Bot and Store integration only after these gates, using the panel's existing wallet/order/usage logic.
 
 No production HUB, users, representatives, bots, DNS or Nodes are modified by this work.
@@ -134,3 +133,96 @@ not representative production data or operator acceptance. It does not establish
 a legacy-unlimited policy, final counter custody proof, positive imported
 subscription delivery, or persistent LAB installation. The source-local signed
 handoff and the imported-client quarantine are unchanged.
+
+## Installed synthetic M2 import and rollback acceptance — 2026-11-03
+
+The exact verified PR artifact remained installed only on the isolated PRO LAB as
+HUB/backup revision `8468374354d8300958cde036cefb1a320baecc30`. Before this
+acceptance, backup `a388f1601e7db4838d7d2dce624f85c6` (archive SHA-256
+`142136594f35eb60feaa5c89fb7ec6fcac9673870abb86ee8ba0300f8fcbe040`)
+was already compatibility-inspected and retained as the clean rollback point.
+
+The deployed Nginx allowlist initially rejected the new owner routes even though
+the staged HUB capability was healthy. The installed business-management snippet
+was the pre-M2 version. The exact reviewed repository delta added only the five
+method-restricted Dark Restore route families. The resulting installed snippet
+matched repository SHA-256
+`04c2c9f82ad93b972fdf13475db89f36ab2d48439640efcb5d24d5adcd335055`;
+`nginx -t` passed and a reload left both services at `NRestarts=0`.
+
+A private, finite-volume, single-customer synthetic SQLite fixture was staged
+with source SHA-256
+`cf985298acf4896f6e1296615fa7a8b267a8c352c28559ce672e0111078a1f5d`
+and canonical review SHA-256
+`8ac27cdf50c3b7c5975bd909b76ef9472bde081ba1a1565af15fb74878f12a5b`.
+The server review preserved UUID
+`01234567-89ab-4cde-8fab-0123456789ab`, expiry `1893456000`, a
+5,000-byte entitlement and 310 historical bytes. The source hash was unchanged
+before and after import.
+
+Installed owner API acceptance then proved:
+
+- Quote reported one importable row, zero blocked rows and no credit, usage-reset
+  or Xray change. Commit receipt
+  `restore-7e0d4d0e-5a36-4efc-8e44-202611030001` created exactly one
+  disabled client and sealed one legacy event.
+- Repeating the same request returned the same receipt with `replayed=true`.
+  A different event for the consumed source returned HTTP 409. Directory totals
+  became exactly seven native and one Dark Restore client; no representative
+  balance changed during import.
+- Two disposable LAB representatives exercised two successive owner assignments.
+  Both assignments reported `balance_changed=false`,
+  `usage_reset=false` and `credentials_changed=false`. After the final
+  assignment, the previous representative received HTTP 403 and the current
+  representative received HTTP 200 for the imported client.
+- A 512-byte renewal by the previous representative was refused. The current
+  representative's renewal succeeded, increased only the entitlement from 5,000
+  to 5,512 bytes and reduced only that representative's synthetic allowance from
+  4,096 to 3,584 bytes. Original representative balances remained 9,900 and
+  9,975 bytes. UUID and expiry were unchanged; subscription and customer traffic
+  remained unchanged.
+- The installed usage response kept historical bytes `310`, post-migration
+  bytes `0` and combined bytes `310` separate. It kept
+  `source_epoch_settled=false`, `cutover_verified=false`, live collection
+  disabled and the imported client ineligible.
+- A real HUB restart preserved one receipt and one imported identity. Receipt
+  lookup and replay after restart succeeded without a duplicate.
+- A real 320px Chromium session opened `/clients?view=restore`, loaded the
+  approved server snapshot, displayed the customer and historical usage in
+  English and Persian, produced no workspace mutation or page error and had no
+  horizontal overflow.
+
+Post-import backup job `12d4974fecdcad1f7506aba3e3032453` succeeded. Its
+archive SHA-256 is
+`86a0c6a843e7ba5883febbf5f067550ed31c9309556c9c125d57816851d32053`.
+Compatibility inspection recorded eight clients, seven representatives, one
+import receipt, one import entry, one sealed event archive and one historical
+group row.
+
+The Stage flags were then removed before recovery. Official restore job
+`d801ee2d1fc5efcf5a10f768a1f95440` restored the retained clean archive and
+reported `state=succeeded`, `phase=complete`, 64 verified tables and
+`data_restored=true`. The installed new binary stayed active. The synthetic
+client and disposable representatives disappeared; the owner API again returned
+exactly five representatives, seven native archived/disabled clients and zero
+Dark Restore clients with the original balances.
+
+A fresh post-restore backup job `7ca540d9cd04f486bf2de40327b27fa2`
+succeeded. Its archive SHA-256 is
+`5fb0c74330081d12738c94adc4dc0f173fecb26b8ae49b6fa9b4d2f9802bdf94`.
+Inspection recorded schema version 8, fingerprint
+`7631320fa57eaa06758d3c013aa0bae2aff90c178c1e2c41695cc415f756b401`,
+five auth users, five representatives, seven clients, two groups, three
+memberships, eleven events, seven usage accounts/seeds, two ownership receipts
+and three ownership entries. Import receipt/entry counts were zero. Both HUB and
+backup worker remained active with `NRestarts=0`; health remained isolated with
+the data plane disabled.
+
+This closes installed synthetic finite-volume import, idempotency, assignment,
+current-payer renewal, restart, backup and planned rollback acceptance for the
+reviewed draft artifact. It is not operator acceptance of real legacy data.
+Exclusive source inventory/retirement and custody proof, the legacy-unlimited
+policy, authoritative final counter settlement, positive imported subscription
+delivery after settlement, representative production-data acceptance and
+independent scope review remain open. Stage is inactive after rollback. No
+production HUB, users, representatives, bots, DNS or Nodes were touched.
