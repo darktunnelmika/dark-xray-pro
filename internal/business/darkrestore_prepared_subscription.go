@@ -6,10 +6,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"reflect"
 	"time"
 
 	ix "github.com/darktunnelmika/dark-xray-pro/internal/inboundexec"
 	"github.com/darktunnelmika/dark-xray-pro/internal/inboundspec"
+	"github.com/darktunnelmika/dark-xray-pro/internal/subscriptioncodec"
 	uc "github.com/darktunnelmika/dark-xray-pro/internal/usagecheckpoint"
 )
 
@@ -80,6 +82,28 @@ func verifyPreparedPlanReceipt(ctx context.Context, q sellerQueryV2, receipt *Da
 	return nil
 }
 
+// Use the initial-Apply codec for the single loopback profile accepted by
+// metered promotion. Every extra endpoint or authoring option needs its own
+// correspondence proof before a prepared export can describe that profile.
+func renderPreparedLoopbackReality(plan NativeInboundPlan, c Client, format string) (ix.Subscription, error) {
+	p := plan.Profile
+	if format != "uri" || p.Transport != "tcp" || p.Security != "" || p.Options != nil || p.TLS != nil || len(p.ServerNames) == 0 || len(p.ShortIDs) == 0 || len(plan.Nodes) != 1 {
+		return ix.Subscription{}, ErrDarkRestoreCutover
+	}
+	n := plan.Nodes[0]
+	expected := NativeInboundPlanNode{NodeID: n.NodeID, InstallationID: n.InstallationID, ListenIP: "127.0.0.1", DirectPort: n.DirectPort, DirectHosts: []string{"127.0.0.1"}, TunnelHosts: n.TunnelHosts, DirectEndpoints: n.DirectEndpoints, TunnelEndpoints: n.TunnelEndpoints}
+	if !planListenerPort(n.DirectPort) || len(n.TunnelHosts)+len(n.DirectEndpoints)+len(n.TunnelEndpoints) != 0 || !reflect.DeepEqual(n, expected) {
+		return ix.Subscription{}, ErrDarkRestoreCutover
+	}
+	label := fmt.Sprintf("LAB direct %d", p.ID)
+	route := subscriptioncodec.Route{InboundID: p.ID, Kind: "direct", Host: n.ListenIP, Port: n.DirectPort, Label: label, UUID: c.UUID, Transport: "tcp", ServerName: p.ServerNames[0], ShortID: p.ShortIDs[0], PublicKey: p.PublicKey}
+	raw, err := subscriptioncodec.Render([]subscriptioncodec.Route{route}, subscriptioncodec.FormatRaw)
+	if err != nil {
+		return ix.Subscription{}, err
+	}
+	return ix.Subscription{Version: ix.Version, ClientID: c.ID, Format: format, ContentType: "text/plain; charset=utf-8", Content: raw, SHA256: ix.BytesSHA(raw), ExpiresUnixNano: c.ExpiresUnix * int64(time.Second), Routes: []ix.SubscriptionRoute{{InboundID: p.ID, Revision: plan.InboundRevision, NodeID: n.NodeID, Path: "direct", Protocol: "vless", Name: label}}}, nil
+}
+
 func renderPreparedSubscription(ctx context.Context, tx *sql.Tx, key []byte, client string, binding DarkRestorePreparedBindingV1) (ix.Subscription, error) {
 	c, err := readClient(ctx, tx, client)
 	if err != nil {
@@ -92,8 +116,11 @@ func renderPreparedSubscription(ctx context.Context, tx *sql.Tx, key []byte, cli
 	if err != nil {
 		return ix.Subscription{}, err
 	}
-	if plan.PlanRevision != binding.PlanRevision || plan.InboundRevision != binding.InboundRevision || plan.Profile.Spec == nil || plan.Status != "SAVED_DISABLED" {
+	if plan.PlanRevision != binding.PlanRevision || plan.InboundRevision != binding.InboundRevision || plan.Status != "SAVED_DISABLED" {
 		return ix.Subscription{}, ErrConflict
+	}
+	if plan.Profile.Spec == nil {
+		return renderPreparedLoopbackReality(plan, c, binding.Format)
 	}
 	_, email, err := executionClientBinding(binding.InboundID, client)
 	if err != nil {
