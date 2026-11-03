@@ -706,7 +706,11 @@ func validateDarkRestoreCutovers(ctx context.Context, tx *sql.Tx) error {
 				return ErrUnavailable
 			}
 		}
-		if deployment == "disabled" && len(evidence.NativeDocument) > 0 {
+		admitted, admissionErr := hasDarkRestoreNativeAdmission(ctx, tx, id)
+		if admissionErr != nil {
+			return ErrUnavailable
+		}
+		if deployment == "disabled" && len(evidence.NativeDocument) > 0 && !admitted {
 			if _, _, e = cutoverSnapshotMatchesEvidence(ctx, tx, evidence); e != nil {
 				return ErrUnavailable
 			}

@@ -40,7 +40,38 @@ backup/reopen after serving.
 
 The Store owner operation is exposed through the owner/CSRF-protected
 handoff/quarantine/admission endpoint. Real Agent offline quarantine transport
-has separate pinned HTTPS acceptance. Installed consumer serving and the
-long-lived Agent admission supervisor still require integrated LAB acceptance.
+has separate pinned HTTPS acceptance. The paired Agent runtime endpoint and the long-lived Agent supervisor now
+have real pinned TLS acceptance, including renewed leases, owner revocation,
+authority outage, a replacement HUB API instance, full outage with saved final
+receipt recovery, lost birth replies and owner logout. Installed-binary
+acceptance remains a separate gate.
 Synthetic tests do not establish production inventory completeness or source
 retirement.
+
+## Agent supervisor opt-in
+
+The owner approves the exact prepared plan, node installation, core SHA and
+signer public key with NativeRuntime enabled on the quarantine approval route.
+After the Agent registers its real API-only birth, the owner admits that exact
+plan through the CSRF-protected quarantine/admission route.
+
+The Agent uses DARK_PRO_ENABLE_DARKRESTORE_RUNTIME=1 and
+DARK_PRO_ENABLE_FINAL_TCP=1, with the existing pinned HTTPS HUB transport,
+independent DARK_PRO_QUARANTINE_PLAN_SHA, private
+DARK_PRO_QUARANTINE_SIGNER_FILE and DARK_PRO_NATIVE_RUNTIME_KEY_HEX.
+The managed-runtime-dir must be new private PRO state, and managed-listen-ip
+is restricted to 127.0.0.1 for this accepted scope. Other native executors are
+mutually exclusive with this supervisor.
+
+The supervisor obtains a signed startup lease, registers the real signed birth
+including its pinned core SHA, waits for owner admission, and acknowledges the
+initial zero report before installing customer inbounds. Later leases retain
+the same process epoch and check current ownership, entitlement, history,
+holds, profile and remaining budget. Renewals follow the durable owner grant
+and the paired node, independently of the owner's browser session.
+
+Revocation or unavailable authority stops renewal and triggers final TCP
+settlement. A saved exact final receipt can be recovered after Agent restart
+without a new listener or epoch. An unproven tail remains held and closed.
+An owner approval must be staged again after HUB restart. Automatic service
+reactivation after recovery is outside this acceptance.

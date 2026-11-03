@@ -11,10 +11,11 @@ test "$(sha256sum "$DARK_PRO_TEST_XRAY_BINARY" | cut -d' ' -f1)" = "$DARK_PRO_TE
 
 task_run='^(TestImportedLoopbackRealityStaysQuarantined|TestQuarantineRealAgentTLS)$'
 if test "${DARK_PRO_TEST_QUARANTINE_ADMISSION:-}" = 1; then
- task_run='^(TestImportedLoopbackRealityStaysQuarantined|TestQuarantineRealAgentTLS|TestRealImportedQuarantineAdmissionAndTraffic)$'
+ task_run='^(TestImportedLoopbackRealityStaysQuarantined|TestQuarantineRealAgentTLS|TestRealImportedQuarantineAdmissionAndTraffic|TestRealImportedAgentSupervisorTLS)$'
 fi
 task_output='quarantine.jsonl'
 task_count=1
+trap 'task_failure_status=$?; echo "quarantine acceptance failed at line $LINENO"; if test -f "$RUNNER_TEMP/$task_output"; then cat "$RUNNER_TEMP/$task_output"; fi; exit "$task_failure_status"' ERR
 # Compile before entering a network that has no route to module proxies or DNS.
 go test -c ./internal/business -o "$RUNNER_TEMP/h7-api.test"
 go test -c ./cmd/node-agent -o "$RUNNER_TEMP/quarantine-worker.test"
@@ -53,7 +54,7 @@ python3 - "$RUNNER_TEMP/$task_output" <<'PYCHECK'
 import json,sys,os
 events=[json.loads(line) for line in open(sys.argv[1])]
 required={"TestImportedLoopbackRealityStaysQuarantined","TestQuarantineRealAgentTLS"}
-if os.getenv("DARK_PRO_TEST_QUARANTINE_ADMISSION")=="1": required.add("TestRealImportedQuarantineAdmissionAndTraffic")
+if os.getenv("DARK_PRO_TEST_QUARANTINE_ADMISSION")=="1": required.update({"TestRealImportedQuarantineAdmissionAndTraffic","TestRealImportedAgentSupervisorTLS"})
 assert required <= {e.get("Test") for e in events if e.get("Action")=="pass"}
 assert not any(e.get("Action") in ("fail","skip") for e in events)
 for e in events:

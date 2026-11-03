@@ -4,11 +4,14 @@ import (
 	"crypto/ed25519"
 	"encoding/hex"
 	"github.com/darktunnelmika/dark-xray-pro/internal/business"
+	mx "github.com/darktunnelmika/dark-xray-pro/internal/managedxray"
 	"net/http"
 	"sync"
 )
 
 type quarantineTransport struct {
+	runtime bool
+	lease   *mx.Lease
 	mu      sync.Mutex
 	token   string
 	client  string
@@ -22,8 +25,9 @@ type quarantineTransport struct {
 // durable on the node and the exact same plan can recover its receipt.
 func (s *Server) approveQuarantine(w http.ResponseWriter, r *http.Request, token, client string) {
 	var req struct {
-		CoreSHA   string
-		PublicKey string
+		NativeRuntime bool
+		CoreSHA       string
+		PublicKey     string
 	}
 	if decode(w, r, 2048, &req) != nil {
 		businessError(w, business.ErrInvalid)
@@ -55,7 +59,16 @@ func (s *Server) approveQuarantine(w http.ResponseWriter, r *http.Request, token
 		businessError(w, business.ErrConflict)
 		return
 	}
-	s.quarantine = &quarantineTransport{token: token, client: client, planSHA: sha, coreSHA: req.CoreSHA, public: pub, plan: p}
+	if s.quarantine == nil {
+		s.quarantine = &quarantineTransport{runtime: req.NativeRuntime, token: token, client: client, planSHA: sha, coreSHA: req.CoreSHA, public: pub, plan: p}
+	} else if !s.quarantine.runtime && req.NativeRuntime && s.quarantine.lease == nil {
+		s.quarantine.runtime = true
+		s.quarantine.token = token
+	} else if s.quarantine.runtime != req.NativeRuntime {
+		businessError(w, business.ErrConflict)
+		return
+	}
+	s.quarantine.token = token
 	respond(w, 200, map[string]any{"plan_sha256": sha, "node_id": p.NodeID, "installation_id": p.InstallationID, "runtime_changed": false})
 }
 func (s *Server) quarantineAgent(w http.ResponseWriter, r *http.Request) {

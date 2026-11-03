@@ -248,3 +248,23 @@ func BrowserPreparedQuarantineFixture(t *testing.T) (*Store, string, []byte, Pre
 	}
 	return f.s, ev.ClientID, key, files, ownershipPassword
 }
+
+// Construct only synthetic import/coverage claims. Actual core execution and
+// traffic use the separately pinned worker in the external TLS acceptance.
+func BrowserPreparedRuntimeFixture(t *testing.T, target string, port uint16) (*Store, string, []byte, PreparedHandoffFiles, string, string, string) {
+	t.Helper()
+	var files PreparedHandoffFiles
+	f, ev, key, _ := preparedCutoverWithFiles(t, &files)
+	input := NativeInboundPlanInput{EventID: "supervisor-plan-create-0001", Profile: nativeInput(), Reason: "Disposable Agent supervisor", Nodes: []NativeInboundPlanNode{{NodeID: "quarantine-node", InstallationID: strings.Repeat("a", 32), ListenIP: "127.0.0.1", DirectPort: port, DirectHosts: []string{"127.0.0.1"}}}}
+	input.Profile.ID = 505
+	input.Profile.RealityTarget = target
+	input.Profile.ServerNames = []string{"example.com"}
+	if _, err := f.s.SaveNativeInboundPlan(context.Background(), key, input); err != nil {
+		t.Fatal(err)
+	}
+	delivery, err := f.s.DeliverPreparedDarkRestoreSubscriptionV1(context.Background(), key, f.owner.Token, ev.ClientID, DarkRestorePreparedDeliveryInputV1{EventID: "supervisor-link-delivery-0001", InboundID: 505, ExpectedPlanRevision: 1, ExpectedInboundRevision: 1, Format: "uri"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return f.s, ev.ClientID, key, files, ownershipPassword, string(delivery.Subscription.Content), f.path
+}

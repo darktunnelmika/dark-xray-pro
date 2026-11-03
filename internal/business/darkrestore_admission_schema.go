@@ -31,3 +31,13 @@ func admissionSchema(ctx context.Context, q sellerQueryV2) (bool, error) {
 	}
 	return true, nil
 }
+
+func hasDarkRestoreNativeAdmission(ctx context.Context, q sellerQueryV2, client string) (bool, error) {
+	present, err := admissionSchema(ctx, q)
+	if err != nil || !present {
+		return false, err
+	}
+	var found bool
+	err = q.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM darkrestore_native_admission_v1 a JOIN darkrestore_native_birth_v1 b ON b.plan_sha=a.plan_sha WHERE b.client_id=?)", client).Scan(&found)
+	return found, err
+}

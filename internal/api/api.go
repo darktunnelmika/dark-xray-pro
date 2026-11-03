@@ -196,6 +196,10 @@ func (s *Server) AgentHandler() http.Handler {
 			respond(w, http.StatusUpgradeRequired, map[string]string{"error": "tls13_required"})
 			return
 		}
+		if r.Method == http.MethodPost && r.URL.Path == "/api/v1/agent/darkrestore-runtime" {
+			s.darkRestoreRuntimeAgent(w, r)
+			return
+		}
 		if r.Method == http.MethodPost && r.URL.Path == "/api/v1/agent/darkrestore-quarantine" {
 			s.quarantineAgent(w, r)
 			return

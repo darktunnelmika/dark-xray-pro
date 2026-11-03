@@ -15,6 +15,7 @@ import (
 // A process birth proves only the API-only bootstrap phase. Admission and
 // customer traffic remain controlled by the separate metered runtime.
 type DarkRestoreQuarantineBirth struct {
+	CoreSHA          string `json:"core_sha256,omitempty"`
 	PlanSHA          string
 	Lease            mx.Lease
 	Process          uc.ProcessToken
@@ -28,7 +29,7 @@ func (b DarkRestoreQuarantineBirth) signingBytes() []byte {
 	return append([]byte("DARK-PRO-QUARANTINE-API-BIRTH-v1\x00"), raw...)
 }
 func (b DarkRestoreQuarantineBirth) Verify(pub ed25519.PublicKey, pin string, lease mx.Lease, now int64) bool {
-	return routeSHA.MatchString(pin) && b.PlanSHA == pin && b.Lease == lease &&
+	return routeSHA.MatchString(pin) && (b.CoreSHA == "" || routeSHA.MatchString(b.CoreSHA)) && b.PlanSHA == pin && b.Lease == lease &&
 		len(pub) == ed25519.PublicKeySize && b.ObservedUnixNano >= lease.Issued && b.ObservedUnixNano < lease.Expires && now >= b.ObservedUnixNano && now < lease.Expires &&
 		b.Process.PID > 0 && b.Process.StartTicks > 0 && b.Process.BootID != "" &&
 		ed25519.Verify(pub, b.signingBytes(), b.Signature)
@@ -49,7 +50,7 @@ func (p DarkRestoreQuarantinePlan) PrepareRuntime(ctx context.Context, r *mx.Run
 		r.Close()
 		return zero, ErrDarkRestoreCutover
 	}
-	receipt := DarkRestoreQuarantineBirth{PlanSHA: pin, Lease: lease, Process: birth, ObservedUnixNano: time.Now().UnixNano()}
+	receipt := DarkRestoreQuarantineBirth{CoreSHA: r.BinarySHA256(), PlanSHA: pin, Lease: lease, Process: birth, ObservedUnixNano: time.Now().UnixNano()}
 	receipt.Signature = ed25519.Sign(signer, receipt.signingBytes())
 	if !receipt.Verify(signer.Public().(ed25519.PublicKey), pin, lease, time.Now().UnixNano()) {
 		r.Close()

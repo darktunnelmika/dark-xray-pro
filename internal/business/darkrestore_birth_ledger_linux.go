@@ -11,6 +11,7 @@ import (
 	"errors"
 	mx "github.com/darktunnelmika/dark-xray-pro/internal/managedxray"
 	uc "github.com/darktunnelmika/dark-xray-pro/internal/usagecheckpoint"
+	"github.com/darktunnelmika/dark-xray-pro/internal/xrayconfig"
 	"time"
 )
 
@@ -33,6 +34,34 @@ func (s *Store) RegisterDarkRestoreBirth(ctx context.Context, key []byte, token,
 	actor, err := ownershipOwner(ctx, tx, token)
 	if err != nil {
 		return zero, err
+	}
+
+	presentBefore, err := birthSchema(ctx, tx)
+	if err != nil {
+		return zero, err
+	}
+	if presentBefore {
+		var priorRaw []byte
+		e := tx.QueryRowContext(ctx, "SELECT receipt_json FROM darkrestore_native_birth_v1 WHERE plan_sha=?", planSHA).Scan(&priorRaw)
+		if e == nil {
+			var prior DarkRestoreRegisteredBirth
+			if json.Unmarshal(priorRaw, &prior) != nil || prior.Plan.ClientID != client || prior.Birth.Lease != lease || !bytes.Equal(prior.Signer, pub) {
+				return zero, ErrConflict
+			}
+			expected, _ := json.Marshal(birth)
+			stored, _ := json.Marshal(prior.Birth)
+			sha, e := prior.Plan.Digest()
+			if e != nil || sha != planSHA || !bytes.Equal(expected, stored) {
+				return zero, ErrConflict
+			}
+			if err = s.usage.RegisterEpochTx(ctx, tx, prior.Epoch); err != nil {
+				return zero, err
+			}
+			return prior, tx.Commit()
+		}
+		if !errors.Is(e, sql.ErrNoRows) {
+			return zero, e
+		}
 	}
 	plan, err := quarantinePlanTx(ctx, tx, key, actor, client)
 	if err != nil {
@@ -66,6 +95,9 @@ func (s *Store) RegisterDarkRestoreBirth(ctx context.Context, key []byte, token,
 		return zero, err
 	}
 	out := DarkRestoreRegisteredBirth{Plan: plan, Birth: birth, Signer: append([]byte(nil), pub...), Epoch: epoch}
+	// Registration carries the public immutable plan contract consistently on
+	// first acceptance and replay.
+	out.Plan.candidate = xrayconfig.Candidate{}
 	raw, err := json.Marshal(out)
 	if err != nil {
 		return zero, err

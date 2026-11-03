@@ -247,6 +247,9 @@ func main() {
 		log.Printf("PRO isolated Agent paired; exiting before any native runtime or telemetry service")
 		return
 	}
+	if os.Getenv("DARK_PRO_ENABLE_DARKRESTORE_RUNTIME") == "1" && (routeEnabled || meteredRouteEnabled || os.Getenv("DARK_PRO_ENABLE_NATIVE_RUNTIME") == "1" || os.Getenv("DARK_PRO_ENABLE_NATIVE_METERED_ADMISSION") == "1" || os.Getenv("DARK_PRO_ENABLE_INBOUND_EXECUTION") == "1") {
+		log.Fatal("imported runtime requires exclusive process ownership")
+	}
 	var managedInboundDone chan struct{}
 	if os.Getenv("DARK_PRO_ENABLE_INBOUND_EXECUTION") == "1" {
 		if routeEnabled || meteredRouteEnabled || os.Getenv("DARK_PRO_ENABLE_NATIVE_RUNTIME") == "1" || os.Getenv("DARK_PRO_ENABLE_NATIVE_METERED_ADMISSION") == "1" {
@@ -338,7 +341,7 @@ func main() {
 			log.Fatal("private usage recovery transport refused")
 		}
 		defer usageSender.Close()
-	} else if !routeEnabled && !meteredRouteEnabled && (*runtimeDir != "" || *runtimeIP != "") {
+	} else if !routeEnabled && !meteredRouteEnabled && os.Getenv("DARK_PRO_ENABLE_DARKRESTORE_RUNTIME") != "1" && (*runtimeDir != "" || *runtimeIP != "") {
 		log.Fatal("native runtime flags supplied without explicit opt-in")
 	}
 	// Liveness is independent of resource sampling, staging and runtime Apply.
@@ -515,12 +518,12 @@ func main() {
 			}
 		}()
 	}
-	if os.Getenv("DARK_PRO_ENABLE_DARKRESTORE_QUARANTINE") == "1" {
-		pin := os.Getenv("DARK_PRO_QUARANTINE_PLAN_SHA")
+	if os.Getenv("DARK_PRO_ENABLE_DARKRESTORE_QUARANTINE") == "1" || os.Getenv("DARK_PRO_ENABLE_DARKRESTORE_RUNTIME") == "1" {
+		planPin := os.Getenv("DARK_PRO_QUARANTINE_PLAN_SHA")
 		path := os.Getenv("DARK_PRO_QUARANTINE_SIGNER_FILE")
 		dir := os.Getenv("DARK_PRO_QUARANTINE_RECEIPTS_DIR")
 		st, err := os.Lstat(path)
-		if !remote || !identity.Paired || len(pin) != 64 || *stageXrayBinary == "" || len(*stageXraySHA) != 64 || dir == "" || err != nil || !st.Mode().IsRegular() || st.Mode().Perm()&0077 != 0 || st.Size() != 128 {
+		if !remote || !identity.Paired || len(planPin) != 64 || *stageXrayBinary == "" || len(*stageXraySHA) != 64 || (os.Getenv("DARK_PRO_ENABLE_DARKRESTORE_RUNTIME") != "1" && dir == "") || err != nil || !st.Mode().IsRegular() || st.Mode().Perm()&0077 != 0 || st.Size() != 128 {
 			log.Fatal("invalid private quarantine worker policy")
 		}
 		raw, err := os.ReadFile(path)
@@ -531,24 +534,44 @@ func main() {
 		if err != nil {
 			log.Fatal(err)
 		}
-		workers.Add(1)
-		go func() {
-			defer workers.Done()
-			timer := time.NewTicker(15 * time.Second)
-			defer timer.Stop()
-			for {
-				select {
-				case <-ctx.Done():
-					return
-				case <-timer.C:
-					if err := pollDarkRestoreQuarantine(ctx, client, endpoint, *nodeID, identity.InstallationID, identity.AgentToken, pin, *stageXrayBinary, *stageXraySHA, dir, signer); err != nil && ctx.Err() == nil {
-						log.Print("quarantine registration unavailable")
+		if os.Getenv("DARK_PRO_ENABLE_DARKRESTORE_RUNTIME") == "1" {
+			if routeEnabled || meteredRouteEnabled || nativeRuntime != nil || os.Getenv("DARK_PRO_ENABLE_FINAL_TCP") != "1" || *runtimeDir == "" || *runtimeIP != "127.0.0.1" {
+				log.Fatal("dedicated isolated metered runtime required")
+			}
+			stateKey, keyErr := hex.DecodeString(os.Getenv("DARK_PRO_NATIVE_RUNTIME_KEY_HEX"))
+			if keyErr != nil || len(stateKey) != 32 {
+				log.Fatal("private runtime state key required")
+			}
+			options := darkRestoreSupervisorOptions{Client: client, Endpoint: endpoint, Token: identity.AgentToken, PlanSHA: planPin, TLSPin: *pin, Signer: signer, Runtime: managedxray.Options{Directory: *runtimeDir, StateKey: stateKey, LeaseKey: []byte(identity.AgentToken), NodeID: *nodeID, InstallationID: identity.InstallationID, ListenIP: *runtimeIP, Binary: *stageXrayBinary, BinarySHA: *stageXraySHA, ReservedPorts: []uint16{2087, 8443, 24443}, ExperimentalFinalTCP: true}}
+			workers.Add(1)
+			go func() {
+				defer workers.Done()
+				if err := runDarkRestoreSupervisor(ctx, options); err != nil {
+					log.Print("imported runtime stopped with preserved accounting state")
+				} else {
+					log.Print("imported runtime supervisor completed accounting settlement")
+				}
+			}()
+		} else {
+			workers.Add(1)
+			go func() {
+				defer workers.Done()
+				timer := time.NewTicker(15 * time.Second)
+				defer timer.Stop()
+				for {
+					select {
+					case <-ctx.Done():
+						return
+					case <-timer.C:
+						if err := pollDarkRestoreQuarantine(ctx, client, endpoint, *nodeID, identity.InstallationID, identity.AgentToken, planPin, *stageXrayBinary, *stageXraySHA, dir, signer); err != nil && ctx.Err() == nil {
+							log.Print("quarantine registration unavailable")
+						}
 					}
 				}
-			}
-		}()
-	}
+			}()
+		}
 
+	}
 	initial, err := hostmetrics.Read()
 	hasInitial := err == nil
 	if err != nil {
@@ -558,7 +581,9 @@ func main() {
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 	var metricSeq uint64
-	if transactionRuntime != nil {
+	if os.Getenv("DARK_PRO_ENABLE_DARKRESTORE_RUNTIME") == "1" {
+		log.Printf("imported metered runtime supervisor enabled for %s", *nodeID)
+	} else if transactionRuntime != nil {
 		if meteredRouteEnabled {
 			log.Printf("NEW independent metered TCP loopback executor enabled for %s; no migration or subscription publication", *nodeID)
 		} else {
