@@ -265,3 +265,67 @@ workflow-command assertions and `git diff --check` pass locally. A new head must
 complete both race jobs and all other current-head checks before its artifact can
 be considered for LAB installation; this correction is not yet CI evidence or
 an installed change.
+
+
+## M5 durable evidence, budget and subscription transition — integrated code checkpoint
+
+The integration based on PR #137 foundation head
+`9fa5c1912244086991cce85d2eba168148a1d4a0` adds the transaction-bound M5
+business gate without weakening the existing pure contract. This section records
+code and local-test evidence only. It is not, by itself, current-head CI,
+artifact verification, merge, LAB installation or operational acceptance.
+
+The evidence contract requires an independently pinned inventory, one
+signature-verified handoff for every declared source, and a second canonical
+document signed by a separately pinned coverage authority. The approval also
+binds the exact destination-state snapshot, native-baseline snapshot, immutable
+import receipt, configured destination authority and independent
+billing-attribution digest. Verification records the assertion but cannot prove
+that an undeclared production source does not exist.
+`global_source_custody_verified` therefore remains false.
+
+Finite-volume budget semantics are overflow-checked: current entitlement minus
+the imported historical baseline, all declared attributable source-epoch
+deltas, and native destination usage. Measured zero is distinct from unknown.
+Baseline completion is a separate owner-only transaction and accepts only a
+disabled finite imported identity with a signed settlement, an existing zero
+native account, zero holds and no native activity. Later paid renewal changes
+only current entitlement; it does not rewrite history or the prior payer's
+ledger. Legacy unlimited remains blocked until valid entitlement evidence
+exists. New unlimited orders retain the agreed `months × user_count` policy.
+
+The owner-only `DRM5` schema stores immutable evidence and final receipts.
+Opening a transition transactionally re-reads every destination pin and writes a
+domain-separated transition hash. The issuer guard rejects assignment,
+entitlement, expiry, archive/state, receipt or counter drift after approval.
+Finalization re-reads the same snapshot and binds the exact authoritative
+handover delivery revision, scope, snapshot ID, event ID, snapshot revision and
+nanosecond timestamp to that transition. Activation rechecks the exact tuple.
+Import, attachment, baseline, evidence and finalization do not debit
+representative credit.
+
+Synthetic positive coverage includes baseline completion, evidence replay, 14
+settled historical bytes, 1,000,000-byte entitlement, 999,986-byte remaining
+budget, controlled issue, rejection before delivery, post-boundary delivery,
+finalization, activation, history/post-migration separation and backup/reopen
+validation. Negative coverage includes wrong pins/signers, missing/extra/
+duplicate/unverified handoffs, incomplete assertions, stale destination/native
+snapshots, state drift after approval, unknown baseline, holds, archive, expiry,
+exhausted budget, legacy unlimited and stale/simultaneous delivery. The
+synthetic delivery row is not proof of a real route, production subscription,
+inventory completeness or physical source retirement.
+
+The exact integrated non-race worktree passed:
+
+- `./internal/darkrestore` in 5.237s
+- `./internal/business` in 197.000s, including the 5,000-client suite
+- `./internal/backupacceptance` in 3.565s
+
+The combined log is
+`/var/tmp/darkrestore-m5-integrated-tests-20261103.log`, SHA-256
+`5fd069dabee5eb2e0d9f08b7ee9431967928db2e159bd06615668c960cb56d96`.
+This host has no C compiler, so race authority belongs to CI for the exact
+published head. CI from any predecessor must not be attributed to this
+integration. PRO LAB remains on revision
+`6af62c09f4d2d6fcb089a7d90ec0b5687bb986ba`; no LAB or production resource
+was changed.

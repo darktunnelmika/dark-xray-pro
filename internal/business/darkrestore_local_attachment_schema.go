@@ -29,7 +29,7 @@ func darkRestoreLocalAttachmentSchemaState(ctx context.Context, q sellerQueryV2)
 		return false, ErrUnavailable
 	}
 	var app int
-	if err := q.QueryRowContext(ctx, "PRAGMA application_id").Scan(&app); err != nil || app != darkRestoreLocalAttachmentApplicationID {
+	if err := q.QueryRowContext(ctx, "PRAGMA application_id").Scan(&app); err != nil || (app != darkRestoreLocalAttachmentApplicationID && app != darkRestoreCutoverApplicationID) {
 		return false, ErrUnavailable
 	}
 	for _, ddl := range darkRestoreLocalAttachmentSchemaV1 {

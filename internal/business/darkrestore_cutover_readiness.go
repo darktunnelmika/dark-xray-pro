@@ -5,25 +5,29 @@ import (
 	"database/sql"
 	"errors"
 	"math/big"
+	"strconv"
 	"time"
 )
 
 type DarkRestoreCutoverReadinessV1 struct {
-	ClientID                    string   `json:"client_id"`
-	SourceSHA256                string   `json:"source_sha256"`
-	SourceID                    string   `json:"source_id"`
-	SourceScope                 string   `json:"source_scope"`
-	SourceEpochSettled          bool     `json:"source_epoch_settled"`
-	GlobalSourceCustodyVerified bool     `json:"global_source_custody_verified"`
-	NativeBaselineComplete      bool     `json:"native_baseline_complete"`
-	SubscriptionDelivered       bool     `json:"subscription_delivered"`
-	ClientArchived              bool     `json:"client_archived"`
-	ClientExpired               bool     `json:"client_expired"`
-	FiniteQuotaRemainingBytes   string   `json:"finite_quota_remaining_bytes"`
-	ActivationAllowed           bool     `json:"activation_allowed"`
-	CutoverVerified             bool     `json:"cutover_verified"`
-	ActivationBlockers          []string `json:"activation_blockers"`
-	VerificationBlockers        []string `json:"verification_blockers"`
+	ClientID                             string   `json:"client_id"`
+	SourceSHA256                         string   `json:"source_sha256"`
+	SourceID                             string   `json:"source_id"`
+	SourceScope                          string   `json:"source_scope"`
+	SourceEpochSettled                   bool     `json:"source_epoch_settled"`
+	DeclaredInventoryCoverageVerified    bool     `json:"declared_inventory_coverage_verified"`
+	IndependentCoverageAssertionVerified bool     `json:"independent_coverage_assertion_verified"`
+	GlobalSourceCustodyVerified          bool     `json:"global_source_custody_verified"`
+	NativeBaselineComplete               bool     `json:"native_baseline_complete"`
+	SubscriptionDelivered                bool     `json:"subscription_delivered"`
+	CutoverReceiptRecorded               bool     `json:"cutover_receipt_recorded"`
+	ClientArchived                       bool     `json:"client_archived"`
+	ClientExpired                        bool     `json:"client_expired"`
+	FiniteQuotaRemainingBytes            string   `json:"finite_quota_remaining_bytes"`
+	ActivationAllowed                    bool     `json:"activation_allowed"`
+	CutoverVerified                      bool     `json:"cutover_verified"`
+	ActivationBlockers                   []string `json:"activation_blockers"`
+	VerificationBlockers                 []string `json:"verification_blockers"`
 }
 
 func darkRestoreSubscriptionDeliveredAfterSettlement(attachment *DarkRestoreLocalAttachmentReceiptV1, delivery subscriptionDeliveryHead) bool {
@@ -35,7 +39,9 @@ func darkRestoreSubscriptionDeliveredAfterSettlement(attachment *DarkRestoreLoca
 }
 
 // DarkRestoreCutoverReadinessV1 is evidence only. It never activates a client,
-// completes a baseline, publishes a subscription or edits representative credit.
+// publishes a subscription or edits representative credit. Global custody stays
+// false because even a valid completeness assertion is not mathematical proof
+// that an undeclared production source does not exist.
 func (s *Store) DarkRestoreCutoverReadinessV1(ctx context.Context, sourceSHA, sourceID string) (DarkRestoreCutoverReadinessV1, error) {
 	out := DarkRestoreCutoverReadinessV1{
 		SourceSHA256: sourceSHA, SourceID: sourceID,
@@ -70,18 +76,40 @@ func (s *Store) DarkRestoreCutoverReadinessV1(ctx context.Context, sourceSHA, so
 		return out, err
 	}
 	out.NativeBaselineComplete = account.Known
+
 	attachment, err := readDarkRestoreLocalAttachment(ctx, s.db, out.ClientID)
 	if err != nil {
 		return out, err
 	}
 	if attachment != nil {
-		if attachment.Settlement.SourceSHA != sourceSHA || attachment.Settlement.SourceID != sourceID ||
+		if attachment.Settlement.SourceSHA != sourceSHA ||
+			attachment.Settlement.SourceID != sourceID ||
 			attachment.Settlement.Remaining < 0 {
 			return out, ErrUnavailable
 		}
 		out.SourceEpochSettled = true
-		out.FiniteQuotaRemainingBytes = big.NewInt(attachment.Settlement.Remaining).String()
+		out.FiniteQuotaRemainingBytes = strconv.FormatInt(attachment.Settlement.Remaining, 10)
 	}
+	evidence, err := readCutoverEvidence(ctx, s.db, out.ClientID)
+	if err != nil {
+		return out, err
+	}
+	if evidence != nil {
+		out.SourceScope = "pinned_inventory_plus_independent_coverage_assertion"
+		out.SourceEpochSettled = true
+		out.DeclaredInventoryCoverageVerified = true
+		out.IndependentCoverageAssertionVerified = true
+		remaining, budgetErr := cutoverRemaining(client.VolumeBytes, evidence.SettledHistoricalBytes, account.Uplink, account.Downlink)
+		if budgetErr == nil {
+			out.FiniteQuotaRemainingBytes = strconv.FormatInt(remaining, 10)
+		}
+	}
+	final, err := readCutoverReceipt(ctx, s.db, out.ClientID)
+	if err != nil {
+		return out, err
+	}
+	out.CutoverReceiptRecorded = final != nil
+
 	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
 		return out, err
@@ -91,13 +119,22 @@ func (s *Store) DarkRestoreCutoverReadinessV1(ctx context.Context, sourceSHA, so
 	if err != nil {
 		return out, err
 	}
-	out.SubscriptionDelivered = darkRestoreSubscriptionDeliveredAfterSettlement(attachment, delivery)
+	if evidence != nil {
+		out.SubscriptionDelivered = delivery.Enabled && delivery.Revision > 0 &&
+			delivery.Created > evidence.TransitionOpenedUnixNano
+	} else {
+		out.SubscriptionDelivered = darkRestoreSubscriptionDeliveredAfterSettlement(attachment, delivery)
+	}
+
 	if !out.SourceEpochSettled {
 		out.ActivationBlockers = append(out.ActivationBlockers, "source_epoch_not_settled")
 	}
-	// A signed local handoff proves one epoch only. No current receipt proves
-	// that every other installation able to serve this UUID has retired.
-	out.ActivationBlockers = append(out.ActivationBlockers, "global_source_custody_not_proven")
+	if !out.DeclaredInventoryCoverageVerified {
+		out.ActivationBlockers = append(out.ActivationBlockers, "declared_inventory_coverage_not_verified")
+	}
+	if !out.IndependentCoverageAssertionVerified {
+		out.ActivationBlockers = append(out.ActivationBlockers, "independent_coverage_assertion_not_verified")
+	}
 	if out.ClientArchived {
 		out.ActivationBlockers = append(out.ActivationBlockers, "client_archived")
 	}
@@ -105,7 +142,7 @@ func (s *Store) DarkRestoreCutoverReadinessV1(ctx context.Context, sourceSHA, so
 		out.ActivationBlockers = append(out.ActivationBlockers, "client_expired")
 	}
 	remaining, ok := new(big.Int).SetString(out.FiniteQuotaRemainingBytes, 10)
-	if !ok || remaining.Sign() <= 0 {
+	if client.PlanKind != "volume" || !ok || remaining.Sign() <= 0 {
 		out.ActivationBlockers = append(out.ActivationBlockers, "finite_quota_exhausted")
 	}
 	if !out.NativeBaselineComplete {
@@ -114,7 +151,10 @@ func (s *Store) DarkRestoreCutoverReadinessV1(ctx context.Context, sourceSHA, so
 	if !out.SubscriptionDelivered {
 		out.VerificationBlockers = append(out.VerificationBlockers, "subscription_not_delivered")
 	}
-	out.ActivationAllowed = len(out.ActivationBlockers) == 0
-	out.CutoverVerified = out.ActivationAllowed && len(out.VerificationBlockers) == 0
+	if !out.CutoverReceiptRecorded {
+		out.VerificationBlockers = append(out.VerificationBlockers, "cutover_receipt_not_recorded")
+	}
+	out.ActivationAllowed = len(out.ActivationBlockers) == 0 && len(out.VerificationBlockers) == 0
+	out.CutoverVerified = out.ActivationAllowed
 	return out, nil
 }

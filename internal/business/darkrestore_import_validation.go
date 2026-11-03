@@ -61,7 +61,17 @@ func validateDarkRestoreImportData(ctx context.Context, db *sql.DB) error {
 			return ErrUnavailable
 		}
 	}
-	return validateDarkRestoreLocalAttachments(ctx, tx)
+	if err = validateDarkRestoreLocalAttachments(ctx, tx); err != nil {
+		return err
+	}
+	cutoverPresent, err := darkRestoreCutoverSchemaState(ctx, tx)
+	if err != nil {
+		return err
+	}
+	if cutoverPresent {
+		return validateDarkRestoreCutovers(ctx, tx)
+	}
+	return nil
 }
 
 func validateRestoreReceipt(ctx context.Context, tx *sql.Tx, event string) error {
@@ -153,8 +163,21 @@ func validateRestoreReceipt(ctx context.Context, tx *sql.Tx, event string) error
 		if mappings[c.SourceGroupID] != rep {
 			return ErrUnavailable
 		}
-		var currentUUID string
-		if e = tx.QueryRowContext(ctx, "SELECT c.uuid FROM clients c JOIN pro_usage_seeds s ON s.client_id=c.id AND s.event_id=? JOIN pro_usage_accounts a ON a.client_id=c.id WHERE c.id=? AND c.deployment_state='disabled' AND a.baseline_complete=0 AND a.uplink=0 AND a.downlink=0", "darkrestore-seed-"+id, id).Scan(&currentUUID); e != nil || currentUUID != uuid {
+		var currentUUID, deployment string
+		var baseline int
+		var currentUp, currentDown int64
+		if e = tx.QueryRowContext(ctx, "SELECT c.uuid,c.deployment_state,a.baseline_complete,a.uplink,a.downlink FROM clients c JOIN pro_usage_seeds s ON s.client_id=c.id AND s.event_id=? JOIN pro_usage_accounts a ON a.client_id=c.id WHERE c.id=?", "darkrestore-seed-"+id, id).Scan(&currentUUID, &deployment, &baseline, &currentUp, &currentDown); e != nil || currentUUID != uuid {
+			return ErrUnavailable
+		}
+		evidence, evidenceErr := readCutoverEvidence(ctx, tx, id)
+		if evidenceErr != nil {
+			return ErrUnavailable
+		}
+		if evidence == nil {
+			if deployment != "disabled" || baseline != 0 || currentUp != 0 || currentDown != 0 {
+				return ErrUnavailable
+			}
+		} else if baseline != 1 {
 			return ErrUnavailable
 		}
 		count++
@@ -245,23 +268,34 @@ func (s *Store) DarkRestoreUsageForAccount(ctx context.Context, account usageled
 	if err != nil || historical < 0 {
 		return nil, ErrUnavailable
 	}
-	settled, err := readDarkRestoreLocalAttachment(ctx, s.db, account.ClientID)
+	evidence, err := readCutoverEvidence(ctx, s.db, account.ClientID)
 	if err != nil {
 		return nil, err
 	}
-	if settled != nil {
-		if settled.Settlement.PriorBytes != historical {
-			return nil, ErrUnavailable
-		}
-		historical = settled.Settlement.Historical
+	if evidence != nil {
+		historical = evidence.SettledHistoricalBytes
 		out.HistoricalBytes = strconv.FormatInt(historical, 10)
 		out.SourceEpochSettled = true
+	} else {
+		settled, readErr := readDarkRestoreLocalAttachment(ctx, s.db, account.ClientID)
+		if readErr != nil {
+			return nil, readErr
+		}
+		if settled != nil {
+			if settled.Settlement.PriorBytes != historical {
+				return nil, ErrUnavailable
+			}
+			historical = settled.Settlement.Historical
+			out.HistoricalBytes = strconv.FormatInt(historical, 10)
+			out.SourceEpochSettled = true
+		}
 	}
 	out.PostMigrationBytes = strconv.FormatInt(account.Total, 10)
 	out.TotalBytes = new(big.Int).Add(big.NewInt(historical), big.NewInt(account.Total)).String()
-	// A complete native baseline alone does not prove exclusive source retirement
-	// or subscription delivery for an imported identity. A future cutover receipt
-	// must authorize this field explicitly.
-	out.CutoverVerified = false
+	final, err := readCutoverReceipt(ctx, s.db, account.ClientID)
+	if err != nil {
+		return nil, err
+	}
+	out.CutoverVerified = final != nil
 	return &out, nil
 }

@@ -84,10 +84,21 @@ func validateDarkRestoreLocalAttachments(ctx context.Context, tx *sql.Tx) error 
 			v.id, v.sha, v.source).Scan(&originalEvent, &history, &uuid, &status, &original, &plan, &deployment, &expiry, &quota, &archived, &up, &down, &baseline, &holds)
 		if err != nil || receipt.OriginalEventID != originalEvent ||
 			history != strconv.FormatInt(receipt.Settlement.PriorBytes, 10) ||
-			status != "requires_manual_review" ||
-			plan != "volume" || deployment != "disabled" ||
-			baseline != 0 || up != 0 || down != 0 || holds != 0 ||
+			status != "requires_manual_review" || plan != "volume" || holds != 0 ||
 			receipt.Settlement.Historical < 0 || receipt.Settlement.Historical > math.MaxInt64 {
+			return ErrUnavailable
+		}
+		evidence, evidenceErr := readCutoverEvidence(ctx, tx, v.id)
+		if evidenceErr != nil {
+			return ErrUnavailable
+		}
+		if evidence == nil {
+			if deployment != "disabled" || baseline != 0 || up != 0 || down != 0 {
+				return ErrUnavailable
+			}
+		} else if baseline != 1 || evidence.SourceSHA256 != v.sha ||
+			evidence.SourceID != v.source ||
+			!localAttachmentCoveredByInventory(&receipt, evidence.Inventory) {
 			return ErrUnavailable
 		}
 		var req DarkRestoreImportCommitV1

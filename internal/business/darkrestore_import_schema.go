@@ -58,10 +58,15 @@ func darkRestoreSchemaState(ctx context.Context, q sellerQueryV2) (bool, error) 
 		}
 		return false, nil
 	}
-	if n != len(darkRestoreImportSchemaV1) && n != len(darkRestoreImportSchemaV1)+len(darkRestoreLocalAttachmentSchemaV1) {
+	baseCount := len(darkRestoreImportSchemaV1)
+	localCount := baseCount + len(darkRestoreLocalAttachmentSchemaV1)
+	cutoverCount := localCount + len(darkRestoreCutoverSchemaV1)
+	if n != baseCount && n != localCount && n != cutoverCount {
 		return false, ErrUnavailable
 	}
-	if n == len(darkRestoreImportSchemaV1) && app != 0 || n > len(darkRestoreImportSchemaV1) && app != darkRestoreLocalAttachmentApplicationID {
+	if n == baseCount && app != 0 ||
+		n == localCount && app != darkRestoreLocalAttachmentApplicationID ||
+		n == cutoverCount && app != darkRestoreCutoverApplicationID {
 		return false, ErrUnavailable
 	}
 	var version int
@@ -75,17 +80,27 @@ func darkRestoreSchemaState(ctx context.Context, q sellerQueryV2) (bool, error) 
 			at = 3
 		}
 		name := strings.SplitN(fields[at], "(", 2)[0]
+		want := ddl
+		if name == "darkrestore_hold_activation_v1" && n == cutoverCount {
+			want = darkRestoreCutoverActivationTrigger
+		}
 		var actual string
 		if err := q.QueryRowContext(ctx, "SELECT sql FROM sqlite_master WHERE name=?", name).Scan(&actual); err != nil ||
-			strings.Join(strings.Fields(actual), " ") != strings.Join(strings.Fields(ddl), " ") {
+			strings.Join(strings.Fields(actual), " ") != strings.Join(strings.Fields(want), " ") {
 			return false, ErrUnavailable
 		}
 	}
 	if err := verifyClientInsertTrigger(ctx, q, quarantinedClientInsertTrigger); err != nil {
 		return false, err
 	}
-	if n > len(darkRestoreImportSchemaV1) {
+	if n >= localCount {
 		present, err := darkRestoreLocalAttachmentSchemaState(ctx, q)
+		if err != nil || !present {
+			return false, ErrUnavailable
+		}
+	}
+	if n == cutoverCount {
+		present, err := darkRestoreCutoverSchemaState(ctx, q)
 		if err != nil || !present {
 			return false, ErrUnavailable
 		}
@@ -186,7 +201,7 @@ func requireDarkRestoreCutover(ctx context.Context, tx *sql.Tx, id string) error
 		return ErrUnavailable
 	}
 	if imported {
-		return ErrDarkRestoreCutover
+		return requireDarkRestoreFinalCutover(ctx, tx, id)
 	}
 	return nil
 }

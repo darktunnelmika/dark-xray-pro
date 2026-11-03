@@ -80,7 +80,7 @@ func (s *Store) MutateInboundExecutionSubscription(ctx context.Context, key []by
 		return out, err
 	}
 	if in.Action != "revoke" {
-		if err = requireDarkRestoreCutover(ctx, tx, c.ID); err != nil {
+		if err = requireDarkRestoreSubscriptionTransition(ctx, tx, c.ID); err != nil {
 			return out, err
 		}
 	}

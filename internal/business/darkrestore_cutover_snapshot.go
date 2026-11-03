@@ -49,24 +49,19 @@ func cutoverSnapshotDigest(domain string, value any) (string, error) {
 // DarkRestoreCutoverSnapshotV1 reads destination state only. It neither invents
 // destination coverage nor persists an approval. A future transition must re-read
 // and compare this state in its write transaction before issuing a receipt.
-func (s *Store) DarkRestoreCutoverSnapshotV1(ctx context.Context, sourceSHA, sourceID string) (DarkRestoreCutoverSnapshotV1, error) {
+func readDarkRestoreCutoverSnapshotV1(ctx context.Context, q sellerQueryV2, sourceSHA, sourceID string) (DarkRestoreCutoverSnapshotV1, error) {
 	out := DarkRestoreCutoverSnapshotV1{SourceSHA: sourceSHA, SourceID: sourceID}
 	sha, err := hex.DecodeString(sourceSHA)
 	if err != nil || len(sha) != 32 || hex.EncodeToString(sha) != sourceSHA || !validName(sourceID, 256) {
 		return out, ErrInvalid
 	}
-	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
-	if err != nil {
-		return out, err
-	}
-	defer tx.Rollback()
-	present, err := darkRestoreSchemaState(ctx, tx)
+	present, err := darkRestoreSchemaState(ctx, q)
 	if err != nil || !present {
 		return out, ErrUnavailable
 	}
 	var receipt []byte
 	var up, down, baseline, holds sql.NullInt64
-	err = tx.QueryRowContext(ctx, `SELECT c.id,c.uuid,c.representative_id,e.event_id,r.receipt_json,
+	err = q.QueryRowContext(ctx, `SELECT c.id,c.uuid,c.representative_id,e.event_id,r.receipt_json,
  e.historical_bytes,c.plan_kind,c.volume_bytes,c.expires_unix,c.archived,c.deployment_state,
  a.uplink,a.downlink,a.baseline_complete,a.holds
  FROM darkrestore_import_entries_v1 e
@@ -116,4 +111,13 @@ func (s *Store) DarkRestoreCutoverSnapshotV1(ctx context.Context, sourceSHA, sou
 	}
 	out.StateSHA, err = cutoverSnapshotDigest("DARK-PRO-CUTOVER-STATE-v1", out)
 	return out, err
+}
+
+func (s *Store) DarkRestoreCutoverSnapshotV1(ctx context.Context, sourceSHA, sourceID string) (DarkRestoreCutoverSnapshotV1, error) {
+	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return DarkRestoreCutoverSnapshotV1{}, err
+	}
+	defer tx.Rollback()
+	return readDarkRestoreCutoverSnapshotV1(ctx, tx, sourceSHA, sourceID)
 }

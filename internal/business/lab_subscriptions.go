@@ -298,7 +298,7 @@ func (s *Store) MutateLabSubscription(ctx context.Context, key []byte, actorID, 
 		return out, err
 	}
 	if in.Action != "revoke" {
-		if err = requireDarkRestoreCutover(ctx, tx, c.ID); err != nil {
+		if err = requireDarkRestoreSubscriptionTransition(ctx, tx, c.ID); err != nil {
 			return out, err
 		}
 	}
