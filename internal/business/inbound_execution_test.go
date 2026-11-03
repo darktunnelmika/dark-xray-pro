@@ -39,6 +39,55 @@ func newExecutionFixture(t *testing.T) *executionFixture {
 	}
 	return f
 }
+
+func TestInboundExecutionV15EmptyOverlayMigrationAndReopen(t *testing.T) {
+	f := initialPromoted(t)
+	s, path := f.s, f.path
+	ctx := context.Background()
+	if err := s.EnableInitialApplyHealth(ctx); err != nil {
+		t.Fatal("enable exact v15 predecessor", err)
+	}
+	if err := s.EnableInboundExecution(ctx); err != nil {
+		t.Fatal("migrate empty exact v15 predecessor", err)
+	}
+	var outer, managed, base int
+	if err := s.db.QueryRow(`PRAGMA user_version`).Scan(&outer); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.db.QueryRow(`SELECT version,base_schema FROM inbound_execution_meta WHERE id=1`).Scan(&managed, &base); err != nil || outer != 16 || managed != 1 || base != 15 {
+		t.Fatal("managed overlay lost exact predecessor pin", outer, managed, base, err)
+	}
+	if err := s.EnableInitialApplyHealth(ctx); err != nil {
+		t.Fatal("v16 overlay did not retain explicit health capability", err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := Open(path)
+	if err != nil {
+		t.Fatal("v16 base-v15 overlay failed reopen", err)
+	}
+	defer reopened.Close()
+	if err = reopened.EnableInitialApplyHealth(ctx); err != nil {
+		t.Fatal("reopen did not restore explicit health capability", err)
+	}
+}
+
+func TestInboundExecutionV15RefusesInFlightInitialApply(t *testing.T) {
+	f := initialPromoted(t)
+	defer f.s.Close()
+	initialPrepare(t, f)
+	if err := f.s.EnableInboundExecution(context.Background()); !errors.Is(err, ErrUnavailable) {
+		t.Fatal("in-flight initial apply crossed managed schema fence", err)
+	}
+	var version, managedObjects int
+	if err := f.s.db.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.s.db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE name GLOB 'inbound_execution_*'`).Scan(&managedObjects); err != nil || version != 15 || managedObjects != 0 {
+		t.Fatal("refused migration changed schema", version, managedObjects, err)
+	}
+}
 func (f *executionFixture) command(t *testing.T, event, action string) ix.Operation {
 	t.Helper()
 	ctx := context.Background()

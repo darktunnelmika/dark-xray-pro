@@ -445,6 +445,22 @@ func (s *Store) PromoteNativeInboundPlan(ctx context.Context, key []byte, id uin
 		return empty, err
 	}
 	defer tx.Rollback()
+	out, err := s.promoteNativeInboundPlanTx(ctx, tx, key, id, in, nil)
+	if err != nil {
+		return empty, err
+	}
+	if err = tx.Commit(); err != nil {
+		return empty, err
+	}
+	return out, nil
+}
+
+// promoteNativeInboundPlanTx is shared with the owner-only prepared Dark
+// Restore transition. The caller owns the transaction so a verified quarantine
+// state change and the native promotion can be committed or rolled back as one.
+func (s *Store) promoteNativeInboundPlanTx(ctx context.Context, tx *sql.Tx, key []byte, id uint64, in NativeInboundPlanPromotionInput, reviewed *promotionAssessment) (NativeInboundPlanPromotionReceipt, error) {
+	var empty NativeInboundPlanPromotionReceipt
+	var err error
 	fp := promotionFingerprint(id, in)
 	var priorID uint64
 	err = tx.QueryRowContext(ctx, `SELECT inbound_id FROM native_inbound_plan_promotions WHERE event_id=?`, in.EventID).Scan(&priorID)
@@ -462,9 +478,14 @@ func (s *Store) PromoteNativeInboundPlan(ctx context.Context, key []byte, id uin
 	if !errors.Is(err, sql.ErrNoRows) {
 		return empty, err
 	}
-	a, err := s.assessNativeInboundPromotion(ctx, tx, key, id, &in)
-	if err != nil {
-		return empty, err
+	var a promotionAssessment
+	if reviewed == nil {
+		a, err = s.assessNativeInboundPromotion(ctx, tx, key, id, &in)
+		if err != nil {
+			return empty, err
+		}
+	} else {
+		a = *reviewed
 	}
 	if !a.preview.Eligible || len(a.preview.Blockers) != 0 {
 		if len(a.preview.Blockers) != 0 {
@@ -553,9 +574,6 @@ func (s *Store) PromoteNativeInboundPlan(ctx context.Context, key []byte, id uin
 	// Verify the same ordinary metered compiler and references that Stage will
 	// use, inside the writer transaction, before any prepared rows become visible.
 	if _, err = meteredRouteCandidate(ctx, tx, key, node.NodeID, node.InstallationID, []RouteDraftRef{{InboundID: id, InboundRevision: out.InboundRevision, DraftRevision: 1}}); err != nil {
-		return empty, err
-	}
-	if err = tx.Commit(); err != nil {
 		return empty, err
 	}
 	return out, nil

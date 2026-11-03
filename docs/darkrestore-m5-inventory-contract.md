@@ -372,3 +372,48 @@ A probe-enabled plan binds:
 The initial report must contain both identities with zero counters. Customer and probe deltas remain separate; the probe ledger cannot charge customer credit. Birth, listener, admission and serving-health validation recheck the probe account, zero delta, epoch digest, admission digest and request credential. Pure protocol-health support is validated against the real rendered candidate.
 
 The managed-execution metadata row remains immutable. Probe accounting uses an exact additive overlay whose marker causes the effective underlying schema to become probe-aware only after complete DDL verification. Partial overlays, holds, stale identity, second probes and post-birth provisioning fail closed. This contract still grants no emitter truth, activation, publication, inventory completeness or retirement authority.
+
+## Atomic prepared promotion and native-Apply projection
+
+The isolated M5 candidate adds one owner-only transition from a disabled,
+finite imported identity with a completed prepared export to
+`pending_node_apply`. It revalidates the current immutable import, source
+settlement, native lifetime measurement, historical-budget reservation,
+entitlement, payer, UUID, expiry and exact prepared plan in one writer
+transaction. The same transaction performs the ordinary reviewed native plan
+promotion and records a canonical append-only transition receipt. Failure to
+insert either receipt rolls back both the client state and promotion.
+
+The transition preserves UUID, expiry, ownership, historical usage, native
+counters and representative balances. It does not queue Apply, create an epoch,
+record health, issue credentials, publish a subscription or authorize another
+mutation. Preview always rolls back its temporary eligibility projection. The
+stored receipt and update/delete guards are immutable; exact replay returns the
+same receipt.
+
+The read-only native-Apply Store adapter then re-derives, from one SQLite
+snapshot, the prepared content and encrypted authority, atomic promotion
+receipt and nanosecond timestamp, actual acknowledged first Apply, accepted
+health receipt, current payer/entitlement and complete historical reservation.
+The promotion pin is the digest of the immutable promotion receipt, not the
+request fingerprint. Independent pins must match every source. Payer,
+entitlement, identity, counter, hold, receipt, profile, revision or timing drift
+fails closed. A valid projection still has `authorizes_mutation=false`.
+
+Managed schema v16 can retain the exact v15 Apply/health feature chain only
+through an explicit base-schema pin. The forward migration is allowed before
+any initial-Apply or delivery protocol row exists; an in-flight preparation,
+round, challenge, receipt, snapshot or delivery refuses migration without
+creating v16 objects. Business readers resolve the immutable v16 base pin on
+every use. Reopen and offline validation therefore see the same v15 feature
+chain without downgrading `user_version` or guessing capabilities.
+
+Synthetic positive coverage performs the real prepared render, atomic
+promotion, metered Stage/Apply, registered usage epoch and zero receipt, signed
+health round, exact projection, replay, restart and official offline-backup
+validation. Stale entitlement and payer, unauthorized review, receipt insertion
+failure, mutation/deletion and incomplete prepared-only or native-only chains
+are negative. Normal credential issuance and subscription publication remain
+closed after the projection. No fixture claims real inventory completeness,
+source retirement, production health or permission to activate an imported
+identity. Legacy unlimited remains blocked.

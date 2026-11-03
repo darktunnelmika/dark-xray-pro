@@ -81,15 +81,23 @@ func (s *Store) EnableInboundExecution(ctx context.Context) error {
 		}
 		return tx.Commit()
 	}
-	// This release does not migrate legacy health/subscription generations or
-	// old production installations. Their gates must retain their exact schema
-	// contract until a separately reviewed forward migration exists.
-	if version != 8 {
+	// A v15 database may opt in only before any initial-apply or delivery
+	// protocol state exists. This retains the exact, already-verified v15
+	// accounting schema under v16 without interpreting an in-flight legacy
+	// handover or subscription delivery as managed execution authority.
+	if version != 8 && version != 15 {
 		return ErrUnavailable
 	}
 	var n int
 	if err = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master WHERE name GLOB 'inbound_execution_*'`).Scan(&n); err != nil || n != 0 {
 		return ErrUnavailable
+	}
+	if version == 15 {
+		for _, table := range []string{"pro_initial_preparations", "pro_initial_rounds", "pro_initial_challenges", "pro_initial_receipts", "pro_initial_snapshots", "pro_initial_snapshot_heads", "pro_delivery_events", "pro_delivery_heads"} {
+			if err = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM `+table).Scan(&n); err != nil || n != 0 {
+				return ErrUnavailable
+			}
+		}
 	}
 	for _, q := range inboundExecutionSchema {
 		if _, err = tx.ExecContext(ctx, q); err != nil {

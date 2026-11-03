@@ -131,8 +131,8 @@ func (s *Store) consumerTx(ctx context.Context, key []byte) (*sql.Tx, error) {
 	if err != nil {
 		return nil, err
 	}
-	var version int
-	if err = tx.QueryRowContext(ctx, `PRAGMA user_version`).Scan(&version); err != nil || !usageledger.HasConsumerManifestsSchema(version) {
+	version, schemaErr := usageFeatureSchemaVersion(ctx, tx)
+	if schemaErr != nil || !usageledger.HasConsumerManifestsSchema(version) {
 		tx.Rollback()
 		return nil, ErrUnavailable
 	}
@@ -193,8 +193,7 @@ func readConsumerManifestHead(ctx context.Context, tx *sql.Tx, opID string) (con
 }
 
 func consumerSchema(ctx context.Context, tx *sql.Tx) (bool, error) {
-	var version int
-	err := tx.QueryRowContext(ctx, `PRAGMA user_version`).Scan(&version)
+	version, err := usageFeatureSchemaVersion(ctx, tx)
 	return usageledger.HasConsumerManifestsSchema(version), err
 }
 

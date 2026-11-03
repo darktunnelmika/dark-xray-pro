@@ -105,9 +105,12 @@ func (s *Store) subscriptionTx(ctx context.Context, key []byte) (*sql.Tx, error)
 	if err != nil {
 		return nil, err
 	}
-	var version, n int
-	if err = tx.QueryRowContext(ctx, `PRAGMA user_version`).Scan(&version); err == nil && usageledger.HasLabSubscriptionsSchema(version) {
+	var n int
+	version, schemaErr := usageFeatureSchemaVersion(ctx, tx)
+	if schemaErr == nil && usageledger.HasLabSubscriptionsSchema(version) {
 		err = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM pro_subscription_meta WHERE id=1 AND version=1`).Scan(&n)
+	} else if schemaErr != nil {
+		err = schemaErr
 	}
 	if err != nil || !usageledger.HasLabSubscriptionsSchema(version) || n != 1 {
 		tx.Rollback()

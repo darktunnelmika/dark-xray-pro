@@ -22,8 +22,16 @@ func validateDarkRestoreAdmissions(ctx context.Context, tx *sql.Tx) error {
 		if cutover == 0 {
 			return nil
 		}
+		promotionPresent, promotionErr := darkRestorePreparedPromotionSchema(ctx, tx)
+		if promotionErr != nil {
+			return promotionErr
+		}
+		promotionClause := ""
+		if promotionPresent {
+			promotionClause = " AND NOT EXISTS(SELECT 1 FROM darkrestore_prepared_promotions_v1 p WHERE p.client_id=c.id)"
+		}
 		var n int
-		if err := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM clients c JOIN darkrestore_cutover_receipts_v1 r ON r.client_id=c.id WHERE c.deployment_state!='disabled' AND json_extract(r.receipt_json,'$.subscription_delivery_scope')='darkrestore_prepared_not_applied_v1'").Scan(&n); err != nil || n != 0 {
+		if err := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM clients c JOIN darkrestore_cutover_receipts_v1 r ON r.client_id=c.id WHERE c.deployment_state!='disabled' AND json_extract(r.receipt_json,'$.subscription_delivery_scope')='darkrestore_prepared_not_applied_v1'"+promotionClause).Scan(&n); err != nil || n != 0 {
 			return ErrUnavailable
 		}
 		return nil
@@ -76,8 +84,16 @@ func validateDarkRestoreAdmissions(ctx context.Context, tx *sql.Tx) error {
 			return ErrUnavailable
 		}
 	}
+	promotionPresent, promotionErr := darkRestorePreparedPromotionSchema(ctx, tx)
+	if promotionErr != nil {
+		return promotionErr
+	}
+	promotionClause := ""
+	if promotionPresent {
+		promotionClause = " AND NOT EXISTS(SELECT 1 FROM darkrestore_prepared_promotions_v1 p WHERE p.client_id=c.id)"
+	}
 	var unbound int
-	if err := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM clients c JOIN darkrestore_cutover_receipts_v1 r ON r.client_id=c.id WHERE c.deployment_state!='disabled' AND json_extract(r.receipt_json,'$.subscription_delivery_scope')='darkrestore_prepared_not_applied_v1' AND NOT EXISTS(SELECT 1 FROM darkrestore_native_admission_v1 a JOIN darkrestore_native_birth_v1 b ON b.plan_sha=a.plan_sha WHERE b.client_id=c.id)").Scan(&unbound); err != nil || unbound != 0 {
+	if err := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM clients c JOIN darkrestore_cutover_receipts_v1 r ON r.client_id=c.id WHERE c.deployment_state!='disabled' AND json_extract(r.receipt_json,'$.subscription_delivery_scope')='darkrestore_prepared_not_applied_v1' AND NOT EXISTS(SELECT 1 FROM darkrestore_native_admission_v1 a JOIN darkrestore_native_birth_v1 b ON b.plan_sha=a.plan_sha WHERE b.client_id=c.id)"+promotionClause).Scan(&unbound); err != nil || unbound != 0 {
 		return ErrUnavailable
 	}
 

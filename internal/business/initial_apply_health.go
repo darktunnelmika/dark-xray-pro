@@ -18,6 +18,14 @@ func (s *Store) EnableInitialApplyHealth(ctx context.Context) error {
 	if s.usage == nil {
 		return ErrUnavailable
 	}
+	present, err := initialApplyHealthSchemaPresent(ctx, s.db)
+	if err != nil {
+		return err
+	}
+	if present {
+		s.initialApplyHealthEnabled = true
+		return nil
+	}
 	for _, enable := range []func(context.Context) error{
 		s.EnableSystemProbeAccounting, s.EnableMeteredHealthChallenges,
 		s.EnableMeteredHealthQueue, s.EnableMeteredHealthRounds, s.EnableLabSubscriptions,
@@ -31,6 +39,18 @@ func (s *Store) EnableInitialApplyHealth(ctx context.Context) error {
 	return nil
 }
 
+type initialApplySchemaReader interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}
+
+func initialApplyHealthSchemaPresent(ctx context.Context, q initialApplySchemaReader) (bool, error) {
+	version, err := usageFeatureSchemaVersion(ctx, q)
+	if err != nil {
+		return false, err
+	}
+	return usageledger.HasInitialApplyHealthSchema(version), nil
+}
+
 func (s *Store) initialHealthTx(ctx context.Context, key []byte) (*sql.Tx, error) {
 	if !s.initialApplyHealthEnabled {
 		return nil, ErrUnavailable
@@ -39,9 +59,12 @@ func (s *Store) initialHealthTx(ctx context.Context, key []byte) (*sql.Tx, error
 	if err != nil {
 		return nil, err
 	}
-	var version int
-	if err = tx.QueryRowContext(ctx, `PRAGMA user_version`).Scan(&version); err != nil || !usageledger.HasInitialApplyHealthSchema(version) {
+	present, schemaErr := initialApplyHealthSchemaPresent(ctx, tx)
+	if schemaErr != nil || !present {
 		tx.Rollback()
+		if schemaErr != nil {
+			return nil, schemaErr
+		}
 		return nil, ErrUnavailable
 	}
 	return tx, nil

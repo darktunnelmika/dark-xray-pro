@@ -10,7 +10,6 @@ import (
 	"time"
 
 	mx "github.com/darktunnelmika/dark-xray-pro/internal/managedxray"
-	"github.com/darktunnelmika/dark-xray-pro/internal/usageledger"
 )
 
 type initialHealthManifest struct {
@@ -49,11 +48,11 @@ func initialHealthIDUnused(ctx context.Context, tx *sql.Tx, id string) error {
 // Called by the old path when v15 is present. A persisted untyped Agent lookup
 // must never be ambiguous between an old challenge and the new proof scope.
 func healthIDNotInitial(ctx context.Context, tx *sql.Tx, id string) error {
-	var version int
-	if err := tx.QueryRowContext(ctx, `PRAGMA user_version`).Scan(&version); err != nil {
+	present, err := initialApplyHealthSchemaPresent(ctx, tx)
+	if err != nil {
 		return err
 	}
-	if !usageledger.HasInitialApplyHealthSchema(version) {
+	if !present {
 		return nil
 	}
 	for _, pair := range [][2]string{{"pro_initial_rounds", "id"}, {"pro_initial_challenges", "id"}, {"pro_initial_preparations", "event_id"}, {"pro_initial_snapshots", "event_id"}} {

@@ -294,8 +294,8 @@ func (s *Store) queueHealthRound(ctx context.Context, key []byte, id, op, consum
 	if err = healthIDNotInitial(ctx, tx, id); err != nil {
 		return empty, err
 	}
-	var version int
-	if err = tx.QueryRowContext(ctx, `PRAGMA user_version`).Scan(&version); err != nil {
+	version, err := usageFeatureSchemaVersion(ctx, tx)
+	if err != nil {
 		return empty, err
 	}
 	if !usageledger.HasHealthRoundsSchema(version) {
@@ -375,15 +375,15 @@ func (s *Store) queueHealthRound(ctx context.Context, key []byte, id, op, consum
 
 // Look up membership from the immutable intent, never from an Agent field.
 func healthIntentRound(ctx context.Context, tx *sql.Tx, intent string) (string, error) {
-	var version int
-	if err := tx.QueryRowContext(ctx, `PRAGMA user_version`).Scan(&version); err != nil {
+	version, err := usageFeatureSchemaVersion(ctx, tx)
+	if err != nil {
 		return "", err
 	}
 	if !usageledger.HasHealthRoundsSchema(version) {
 		return "", nil
 	}
 	var id string
-	err := tx.QueryRowContext(ctx, `SELECT round_id FROM pro_health_round_members WHERE intent_id=?`, intent).Scan(&id)
+	err = tx.QueryRowContext(ctx, `SELECT round_id FROM pro_health_round_members WHERE intent_id=?`, intent).Scan(&id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", nil
 	}
@@ -399,8 +399,8 @@ func legacyHealthAllowed(ctx context.Context, tx *sql.Tx, op string) error {
 		}
 		return ErrConflict
 	}
-	var version int
-	if err := tx.QueryRowContext(ctx, `PRAGMA user_version`).Scan(&version); err != nil {
+	version, err := usageFeatureSchemaVersion(ctx, tx)
+	if err != nil {
 		return err
 	}
 	if !usageledger.HasHealthRoundsSchema(version) {

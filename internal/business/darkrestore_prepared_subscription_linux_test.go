@@ -31,14 +31,27 @@ func BrowserPreparedFixture(t *testing.T) (*Store, string, []byte, PreparedHando
 }
 
 func preparedCutoverWithFiles(t *testing.T, files *PreparedHandoffFiles) (ownershipFixture, DarkRestoreCutoverEvidenceReceiptV1, []byte, NativeInboundPlanInput) {
+	return preparedCutoverWithFilesAndInitialApply(t, files, false)
+}
+
+func preparedCutoverWithFilesAndInitialApply(t *testing.T, files *PreparedHandoffFiles, initialApply bool) (ownershipFixture, DarkRestoreCutoverEvidenceReceiptV1, []byte, NativeInboundPlanInput) {
 	t.Helper()
 	f := importSetup(t)
 	ctx := context.Background()
+	// Initial apply/health is a predecessor schema. Tests that exercise the
+	// real promoted runtime must install it before inbound execution's v16
+	// extension; v16
+	// intentionally never rewinds PRAGMA user_version to add an older feature.
+	if initialApply {
+		if err := f.s.EnableInitialApplyHealth(ctx); err != nil {
+			t.Fatal("enable predecessor initial apply", err)
+		}
+	}
 	if err := f.s.EnableInboundExecution(ctx); err != nil {
-		t.Fatal(err)
+		t.Fatal("enable inbound execution", err)
 	}
 	if err := f.s.EnableDarkRestoreCutoverV1(ctx, f.owner.Token); err != nil {
-		t.Fatal(err)
+		t.Fatal("enable M5 cutover", err)
 	}
 	key := bytes.Repeat([]byte{0x61}, 32)
 	plan := NativeInboundPlanInput{EventID: "m5-prepared-profile-0001", Profile: InboundInput{ID: 801, Name: "M5 prepared export", Spec: &inboundspec.Spec{Version: 1, Protocol: "vless", Network: "tcp", Security: "none", Settings: map[string]any{"decryption": "none"}}},

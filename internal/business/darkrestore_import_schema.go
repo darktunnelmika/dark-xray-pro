@@ -100,6 +100,13 @@ func darkRestoreSchemaState(ctx context.Context, q sellerQueryV2) (bool, error) 
 	if probePresent {
 		n -= len(darkRestoreSystemProbeRoundDDL)
 	}
+	promotionPresent, promotionErr := darkRestorePreparedPromotionSchema(ctx, q)
+	if promotionErr != nil {
+		return false, promotionErr
+	}
+	if promotionPresent {
+		n -= len(darkRestorePreparedPromotionDDL)
+	}
 	baseCount := len(darkRestoreImportSchemaV1)
 	localCount := baseCount + len(darkRestoreLocalAttachmentSchemaV1)
 	cutoverCount := localCount + len(darkRestoreCutoverSchemaV1)

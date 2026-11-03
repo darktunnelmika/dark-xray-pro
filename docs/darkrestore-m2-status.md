@@ -761,3 +761,26 @@ credit, proves inventory completeness/source retirement, or authorizes imported
 activation. The Store adapter that coherently binds this timestamp to the
 prepared receipt, actual first Apply and accepted health receipt remains a
 separate subsequent gate. Legacy unlimited remains blocked.
+
+## M5 atomic prepared-to-native transition candidate
+
+Current isolated development adds a transactionally bound prepared promotion
+receipt plus a read-only Store projection of the actual promotion, first Apply
+and accepted health chain. The transition changes only the imported client's
+deployment state from disabled to pending native Apply and records the ordinary
+native promotion in the same transaction. It preserves financial history,
+identity, expiry, payer and representative balances. Apply, credential issuance,
+subscription publication and activation remain separate and closed.
+
+The candidate also supplies a conservative v15-to-v16 schema overlay path. It
+requires exact predecessor schemas and refuses any in-flight initial-Apply or
+delivery rows. This is required to exercise the supported v16 managed profile
+and the existing first-Apply/health protocol together; it is not a production
+migration claim.
+
+Synthetic tests cover positive Apply/health projection, immutable replay,
+restart, offline backup, stale payer/entitlement, unauthorized access, rollback,
+unknown/incomplete evidence and migration refusal. They do not establish real
+source inventory, retirement, legacy-unlimited entitlement or production
+delivery. PR publication, CI, installation and LAB acceptance remain distinct
+steps and must not be inferred from this local candidate.

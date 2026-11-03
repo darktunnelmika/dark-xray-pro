@@ -48,8 +48,8 @@ func (s *Store) MeteredHandoverAudit(ctx context.Context, key []byte, id string)
 		}
 		*step.dest = &row.view
 	}
-	var version int
-	if err = tx.QueryRowContext(ctx, `PRAGMA user_version`).Scan(&version); err != nil {
+	version, err := usageFeatureSchemaVersion(ctx, tx)
+	if err != nil {
 		return out, err
 	}
 	if usageledger.HasHealthSchema(version) {

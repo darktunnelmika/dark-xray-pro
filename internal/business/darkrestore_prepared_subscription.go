@@ -77,6 +77,50 @@ func preparedPlanAuthorityAtRevision(ctx context.Context, q sellerQueryV2, id, p
 	}{id, b.PlanRevision, b.InboundRevision, ix.BytesSHA(planEnc), ix.BytesSHA(profileEnc)})
 	return b, err
 }
+
+// preparedPlanAuthorityAtPromotion re-derives the exact encrypted authoring
+// authority after its one permitted native promotion. Promotion advances only
+// the materialized inbound revision; the reviewed source plan/profile bytes and
+// their source revision remain immutable. It is intentionally separate from
+// preparedPlanAuthority, whose pre-promotion delivery check must stay closed as
+// soon as the current revision moves.
+func preparedPlanAuthorityAtPromotion(ctx context.Context, q sellerQueryV2, id uint64, promotion *NativeInboundPlanPromotionReceipt) (DarkRestorePreparedBindingV1, error) {
+	b := DarkRestorePreparedBindingV1{InboundID: id}
+	if promotion == nil || promotion.InboundID != id || promotion.InboundRevision != promotion.SourceInboundRevision+1 {
+		return b, ErrDarkRestoreCutover
+	}
+	var planEnc, profileEnc []byte
+	var current uint64
+	var archived bool
+	var status string
+	err := q.QueryRowContext(ctx, `SELECT p.revision,p.inbound_revision,p.status,p.payload_enc,i.revision,i.profile_enc,i.archived FROM native_inbound_plans p JOIN native_inbounds i ON i.id=p.inbound_id WHERE p.inbound_id=?`, id).Scan(&b.PlanRevision, &b.InboundRevision, &status, &planEnc, &current, &profileEnc, &archived)
+	if err != nil {
+		return b, err
+	}
+	if archived || status != "SAVED_DISABLED" || b.PlanRevision != promotion.PlanRevision ||
+		b.InboundRevision != promotion.SourceInboundRevision || current != promotion.InboundRevision ||
+		len(planEnc) == 0 || len(profileEnc) == 0 {
+		return b, ErrDarkRestoreCutover
+	}
+	b.AuthoritySHA, err = cutoverSnapshotDigest("DARK-PRO-PREPARED-PLAN-AUTHORITY-v1", struct {
+		InboundID, PlanRevision, InboundRevision uint64
+		PlanSHA, ProfileSHA                      string
+	}{id, b.PlanRevision, b.InboundRevision, ix.BytesSHA(planEnc), ix.BytesSHA(profileEnc)})
+	return b, err
+}
+
+func verifyPreparedPlanReceiptAtPromotion(ctx context.Context, q sellerQueryV2, receipt *DarkRestoreCutoverReceiptV1, promotion *NativeInboundPlanPromotionReceipt) error {
+	if receipt == nil || promotion == nil || receipt.SubscriptionDeliveryScope != DarkRestorePreparedDeliveryScopeV1 || !validPreparedBinding(receipt.Prepared) {
+		return ErrDarkRestoreCutover
+	}
+	current, err := preparedPlanAuthorityAtPromotion(ctx, q, receipt.Prepared.InboundID, promotion)
+	if err != nil || current.PlanRevision != receipt.Prepared.PlanRevision || current.InboundRevision != receipt.Prepared.InboundRevision ||
+		current.AuthoritySHA != receipt.Prepared.AuthoritySHA || receipt.SubscriptionSnapshotRevision != current.PlanRevision ||
+		promotion.PlanRevision != current.PlanRevision || promotion.SourceInboundRevision != current.InboundRevision {
+		return ErrDarkRestoreCutover
+	}
+	return nil
+}
 func validPreparedBinding(b DarkRestorePreparedBindingV1) bool {
 	format := b.Format == "uri" || b.Format == "json" || b.Format == "xray" || b.Format == "wireguard"
 	return b.InboundID > 0 && b.InboundID < routeMax && b.PlanRevision > 0 && b.PlanRevision < routeMax && b.InboundRevision > 0 && b.InboundRevision < routeMax && routeSHA.MatchString(b.AuthoritySHA) && routeSHA.MatchString(b.ContentSHA) && format
