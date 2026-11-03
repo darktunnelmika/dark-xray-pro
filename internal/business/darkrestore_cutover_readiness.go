@@ -143,7 +143,11 @@ func (s *Store) DarkRestoreCutoverReadinessV1(ctx context.Context, sourceSHA, so
 		if readErr != nil {
 			return out, readErr
 		}
-		if current.StateSHA != evidence.DestinationStateSHA {
+		effectiveStateSHA, stateErr := effectiveCutoverStateSHA(ctx, s.db, evidence)
+		if stateErr != nil {
+			return out, stateErr
+		}
+		if current.StateSHA != effectiveStateSHA {
 			out.ActivationBlockers = append(out.ActivationBlockers, "approved_destination_state_changed")
 		}
 	}

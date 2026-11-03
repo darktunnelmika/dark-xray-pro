@@ -546,7 +546,7 @@ func (s *Store) FinalizeDarkRestoreCutoverV1(ctx context.Context, token, clientI
 	return out, nil
 }
 
-func cutoverSnapshotMatchesEvidence(ctx context.Context, q sellerQueryV2, evidence *DarkRestoreCutoverEvidenceReceiptV1) (DarkRestoreCutoverSnapshotV1, int64, error) {
+func cutoverSnapshotMatchesEvidence(ctx context.Context, q cutoverRefreshQuery, evidence *DarkRestoreCutoverEvidenceReceiptV1) (DarkRestoreCutoverSnapshotV1, int64, error) {
 	var zero DarkRestoreCutoverSnapshotV1
 	if evidence == nil || len(evidence.NativeDocument) == 0 {
 		return zero, 0, ErrDarkRestoreCutover
@@ -559,8 +559,12 @@ func cutoverSnapshotMatchesEvidence(ctx context.Context, q sellerQueryV2, eviden
 	if err != nil {
 		return zero, 0, err
 	}
+	effectiveStateSHA, err := effectiveCutoverStateSHA(ctx, q, evidence)
+	if err != nil {
+		return zero, 0, err
+	}
 	if snapshot.ClientID != evidence.ClientID ||
-		snapshot.StateSHA != evidence.DestinationStateSHA ||
+		snapshot.StateSHA != effectiveStateSHA ||
 		snapshot.NativeBaselineSHA != evidence.NativeBaselineSHA ||
 		snapshot.ImportReceiptSHA != evidence.ImportReceiptSHA ||
 		!snapshot.NativeAccountPresent || !snapshot.NativeBaselineComplete ||
@@ -676,6 +680,9 @@ func validateDarkRestoreCutovers(ctx context.Context, tx *sql.Tx) error {
 		}
 		attachment, e := readDarkRestoreLocalAttachment(ctx, tx, id)
 		if e != nil || !localAttachmentCoveredByInventory(attachment, evidence.Inventory) {
+			return ErrUnavailable
+		}
+		if _, e = readCutoverRefreshChain(ctx, tx, evidence); e != nil {
 			return ErrUnavailable
 		}
 		enabled, budgetErr := usageledger.HistoricalBudgetsEnabled(ctx, tx)

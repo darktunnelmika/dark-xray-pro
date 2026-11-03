@@ -448,3 +448,17 @@ retry boundary only for that exact decoded response, with a five-consecutive
 response ceiling. Authentication failures, stale/conflicting observations,
 unexpected command delivery and every other status still fail closed. Metering,
 promotion, accounting and runtime-admission product logic are unchanged.
+
+
+## M5 audited post-opening refresh (isolated source)
+
+A new optional exact-DDL refresh journal preserves the original inventory,
+coverage approval, native evidence and historical-budget reservation while
+allowing one-at-a-time, already-committed renewal or ownership changes to be
+attributed before the first prepared delivery. It never mutates business state.
+Synthetic positive fixtures cover current-payer renewal and owner assignment;
+negative fixtures cover unknown cause, representative scope, combined drift,
+failed INSERT rollback, replay and attempts after final delivery. Prepared
+content remains not applied/path-unverified and survives v16 offline backup and
+reopen. This is isolated source validation, not installed acceptance or real
+inventory/retirement evidence.

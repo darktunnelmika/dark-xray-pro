@@ -182,12 +182,21 @@ func (s *Store) DeliverPreparedDarkRestoreSubscriptionV1(ctx context.Context, ke
 			return zero, err
 		}
 		current, err := readDarkRestoreCutoverSnapshotV1(ctx, tx, evidence.SourceSHA256, evidence.SourceID)
-		if err != nil {
-			return zero, err
+		if err != nil || current.DeploymentState != "disabled" && current.DeploymentState != "pending_node_apply" ||
+			current.Archived || current.ExpiresUnix <= time.Now().Unix() ||
+			!current.NativeAccountPresent || !current.NativeBaselineComplete ||
+			current.NativeUplink == nil || current.NativeDownlink == nil || current.NativeHolds == nil || *current.NativeHolds != 0 ||
+			current.NativeBaselineSHA != evidence.NativeBaselineSHA || current.ImportReceiptSHA != evidence.ImportReceiptSHA {
+			return zero, ErrConflict
 		}
 		current.DeploymentState = "disabled"
 		current, err = hashDarkRestoreCutoverSnapshotV1(current)
-		if err != nil || current.StateSHA != evidence.DestinationStateSHA {
+		effectiveStateSHA, stateErr := effectiveCutoverStateSHA(ctx, tx, evidence)
+		remaining, budgetErr := cutoverRemaining(current.CurrentEntitlement, evidence.SettledHistoricalBytes, *current.NativeUplink, *current.NativeDownlink)
+		if err != nil || stateErr != nil || budgetErr != nil || current.StateSHA != effectiveStateSHA ||
+			prior.CurrentFiniteEntitlement != current.CurrentEntitlement ||
+			prior.NativePostMigrationBytes != *current.NativeUplink+*current.NativeDownlink ||
+			prior.RemainingBudgetBytes != remaining {
 			return zero, ErrConflict
 		}
 		content, err := renderPreparedSubscription(ctx, tx, key, client, prior.Prepared)

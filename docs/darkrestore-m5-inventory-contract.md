@@ -277,3 +277,28 @@ idempotent retry, stale profile, current-payer identity and paid-quota
 invalidation, separate activation, official offline backup validation and
 recovery. No direct insertion of a fake subscription journal is used for this
 new positive path.
+
+
+## Post-opening destination refresh
+
+A legitimate renewal or owner assignment after opening changes destination state,
+so the original approval hash must not be edited or silently reinterpreted.
+`RefreshDarkRestoreCutoverV1` appends a separate immutable receipt only before
+the first subscription-delivery receipt. The caller supplies the previous
+snapshot preimage; the Store canonicalizes it and requires its hash to equal the
+original approval or the immediately preceding refresh.
+
+Each refresh is bound to exactly one existing append-only cause:
+
+- a client extension must reproduce the exact entitlement and expiry transition
+  and names the representative that paid it;
+- an ownership receipt must reproduce the exact previous/current payer while
+  proving balance, usage and credentials were unchanged.
+
+UUID, import receipt, historical bytes, finite plan, native baseline/counters,
+zero holds, disabled state and archive state must remain identical. Unknown
+causes, combined drift, counter drift, stale preimages and reused causes fail
+closed. The refresh changes no client, balance, evidence, reservation, runtime
+or subscription and has `authorizes_mutation=false`. An existing delivery
+receipt closes this V1 refresh path; supporting a later re-delivery requires a
+separately versioned append-only delivery chain.
