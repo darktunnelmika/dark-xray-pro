@@ -250,6 +250,35 @@ func TestInstalledSupervisorCLIProbe(t *testing.T) {
 	if !admitted {
 		t.Fatal("actual Agent birth/admission missing", base)
 	}
+	// Admission grants permission; the receipt confirms completion of the
+	// asynchronous zero-acknowledgment/AddInbound pipeline before traffic starts.
+	appliedReady := false
+	deadline = time.Now().Add(12 * time.Second)
+	for time.Now().Before(deadline) {
+		r, e := http.NewRequest("GET", origin+"/api/v1/workspace/dark-restore/handoff/quarantine/admission/evidence", nil)
+		if e != nil {
+			t.Fatal(e)
+		}
+		r.AddCookie(cookie)
+		r.Header.Set("Origin", origin)
+		r.Header.Set("Sec-Fetch-Site", "same-origin")
+		response, e := client.Do(r)
+		if e == nil {
+			var evidence DarkRestoreNativeAdmissionEvidenceV1
+			e = json.NewDecoder(response.Body).Decode(&evidence)
+			response.Body.Close()
+			if response.StatusCode == 200 && e == nil && evidence.ClientID == id && evidence.PlanSHA == approval.SHA &&
+				evidence.InitialZeroReceiptRecorded && evidence.ListenerApplyRecorded && len(evidence.ListenerApplyReceiptSHA) == 64 &&
+				!evidence.NativeApplyRecorded && !evidence.ServingHealthRecorded && !evidence.AuthorizesMutation {
+				appliedReady = true
+				break
+			}
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !appliedReady {
+		t.Fatal("actual Agent listener apply receipt missing", base)
+	}
 	parsed, err := url.Parse(strings.TrimSpace(delivery.Content))
 	if err != nil {
 		t.Fatal(err)
