@@ -537,3 +537,38 @@ darkrestore (3.953s), complete business (225.441s), backupacceptance (3.121s),
 vet and diff checks. This is source/test evidence only until publication,
 current-head CI, artifact verification and installed acceptance are separately
 completed.
+
+
+## M5 imported serving-health evidence boundary (isolated source)
+
+The published listener receipt remains historical installation evidence only.
+The next pure validator binds one exact externally challenged initial-apply
+request and its paired-Agent receipt to the imported client, transition,
+quarantine plan, current config, native epoch, admission projection, listener
+receipt, verifier endpoint and authoritative record time. Request and receipt
+digests plus the complete document digest must be independently pinned.
+
+Historical verification uses the receipt completion time and never extends an
+expired challenge. A valid result sets only `serving_health_recorded=true`;
+it keeps `native_apply_recorded=false` and `authorizes_mutation=false`.
+The HMAC proves possession of the paired Agent key, not emitter truth,
+inventory completeness, source retirement, subscription publication or
+continuing health. The real emitter and immutable Store adapter are still
+required before an imported identity can leave quarantine.
+
+The synthetic positive fixture and fifteen negative cases cover foreign
+transition/listener/config/epoch/endpoint, invalid time order, future recording,
+invented mutation/apply flags, wrong Agent key and stale independent pins.
+The admission fixture now performs the unauthorised-zero refusal once in an
+independent subtest so a loaded host cannot consume a later scenario's bounded
+lease before its authorization assertion. Five focused repeats passed
+(22.323s). Exact local non-race validation passed: complete business (281.214s),
+darkrestore (3.132s), backupacceptance (3.238s), vet and diff checks.
+
+The complete business race jobs remain intact. A predecessor run reached its
+fifteen-minute Go deadline while the 5,000-customer import/reopen fixture was
+still executing; there was no assertion or race report. Both duplicate
+complete-package gates now retain every test in one invocation with a bounded
+nineteen-minute Go deadline inside a twenty-four-minute job. Current-head CI is
+still authoritative; this source evidence is not Merge, installation or LAB
+acceptance.

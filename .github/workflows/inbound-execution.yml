@@ -18,7 +18,7 @@ jobs:
   business-race:
     name: Complete business accounting race checks
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 24
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -26,9 +26,9 @@ jobs:
           go-version-file: go.mod
           cache: false
       # The 5,000-customer import/reopen fixture runs last and the complete
-      # package exceeded ten minutes under the race detector on a hosted runner.
-      # Keep one complete-package invocation and give it a bounded 15 minutes.
-      - run: go test -race ./internal/business -count=1 -timeout=15m
+      # M5 evidence suite can cross fifteen minutes under the race detector on
+      # a hosted runner. Keep one invocation and a bounded nineteen-minute cap.
+      - run: go test -race ./internal/business -count=1 -timeout=19m
 
   foundation:
     name: Go 1.27 contracts, accounting and race checks

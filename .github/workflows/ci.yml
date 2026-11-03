@@ -195,7 +195,7 @@ jobs:
   business-race:
     name: Business SQLite and accounting race suite
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 24
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -204,8 +204,9 @@ jobs:
           cache: false
       - name: Run the entire business package on its own runner
         # The production-scale import/reopen fixture intentionally runs last.
-        # Race instrumentation can push the complete package past ten minutes.
-        run: go test -race ./internal/business -count=1 -timeout=15m
+        # Race instrumentation and the complete M5 evidence suite can cross
+        # fifteen minutes on a hosted runner; retain one bounded invocation.
+        run: go test -race ./internal/business -count=1 -timeout=19m
 
   go:
     name: Go unit, race and vet

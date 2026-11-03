@@ -42,7 +42,10 @@ func syntheticAdmissionSignedFixture(t *testing.T) (ownershipFixture, DarkRestor
 	sha, _ := p.Digest()
 	pub, signer, _ := ed25519.GenerateKey(nil)
 	now := time.Now()
-	lease, err := mx.SignLease(bytes.Repeat([]byte{3}, 64), mx.Lease{NodeID: p.NodeID, InstallationID: p.InstallationID, Sequence: 1, ConfigSHA: p.ConfigSHA, ManifestSHA: p.ManifestSHA, Issued: now.Add(-time.Second).UnixNano(), Expires: now.Add(30 * time.Second).UnixNano()})
+	// Use the product's maximum bounded lease so complete-package CPU/race load
+	// cannot consume the fixture's authority before the admission assertion.
+	// The admission itself still validates every installation and revision pin.
+	lease, err := mx.SignLease(bytes.Repeat([]byte{3}, 64), mx.Lease{NodeID: p.NodeID, InstallationID: p.InstallationID, Sequence: 1, ConfigSHA: p.ConfigSHA, ManifestSHA: p.ManifestSHA, Issued: now.Add(-time.Second).UnixNano(), Expires: now.Add(44 * time.Second).UnixNano()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,33 +60,36 @@ func syntheticAdmissionSignedFixture(t *testing.T) (ownershipFixture, DarkRestor
 func TestDarkRestoreAdmissionAuthorizationAndRollback(t *testing.T) {
 	ctx := context.Background()
 	key := bytes.Repeat([]byte{0x61}, 32)
+	t.Run("unapproved zero denied", func(t *testing.T) {
+		f, p, epoch, _ := syntheticAdmissionFixture(t)
+		principal := usageledger.Principal{NodeID: epoch.NodeID, InstallationID: epoch.InstallationID}
+		box, err := uc.Open(uc.Options{Directory: t.TempDir() + "/outbox", Key: bytes.Repeat([]byte{9}, 32), Epoch: epoch, Create: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer box.Close()
+		report, err := box.Observe([]uc.Usage{{ClientID: p.ClientID}}, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err = f.s.usage.AcceptChecked(ctx, principal, report, f.s.CheckDarkRestoreAdmission); err == nil {
+			t.Fatal("unapproved zero received authority")
+		}
+	})
 	for _, mode := range []string{"success", "rollback", "changed quota", "representative denied"} {
 		t.Run(mode, func(t *testing.T) {
 			f, p, epoch, sha := syntheticAdmissionFixture(t)
-			principal := usageledger.Principal{NodeID: epoch.NodeID, InstallationID: epoch.InstallationID}
-			box, err := uc.Open(uc.Options{Directory: t.TempDir() + "/outbox", Key: bytes.Repeat([]byte{9}, 32), Epoch: epoch, Create: true})
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer box.Close()
-			report, err := box.Observe([]uc.Usage{{ClientID: p.ClientID}}, false)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if _, err = f.s.usage.AcceptChecked(ctx, principal, report, f.s.CheckDarkRestoreAdmission); err == nil {
-				t.Fatal("unapproved zero received authority")
-			}
 			if mode == "representative denied" {
-				if _, err = f.s.AuthorizeDarkRestoreAdmission(ctx, key, f.rep.Token, p.ClientID, sha, "negative-admit-rep-0001"); err == nil {
+				if _, err := f.s.AuthorizeDarkRestoreAdmission(ctx, key, f.rep.Token, p.ClientID, sha, "negative-admit-rep-0001"); err == nil {
 					t.Fatal("representative authorized traffic")
 				}
 				return
 			}
 			if mode == "rollback" {
-				if _, err = f.s.db.Exec("CREATE TEMP TRIGGER synthetic_admit_failure BEFORE UPDATE OF deployment_state ON clients BEGIN SELECT RAISE(ABORT,'synthetic admission failure'); END"); err != nil {
+				if _, err := f.s.db.Exec("CREATE TEMP TRIGGER synthetic_admit_failure BEFORE UPDATE OF deployment_state ON clients BEGIN SELECT RAISE(ABORT,'synthetic admission failure'); END"); err != nil {
 					t.Fatal(err)
 				}
-				if _, err = f.s.AuthorizeDarkRestoreAdmission(ctx, key, f.owner.Token, p.ClientID, sha, "negative-admit-fail-0001"); err == nil {
+				if _, err := f.s.AuthorizeDarkRestoreAdmission(ctx, key, f.owner.Token, p.ClientID, sha, "negative-admit-fail-0001"); err == nil {
 					t.Fatal("failed state update admitted")
 				}
 				c, err := f.s.Client(ctx, p.ClientID)
@@ -103,6 +109,16 @@ func TestDarkRestoreAdmissionAuthorizationAndRollback(t *testing.T) {
 			replay, err := f.s.AuthorizeDarkRestoreAdmission(ctx, key, f.owner.Token, p.ClientID, sha, "negative-admit-owner-0001")
 			if err != nil || a.Registered.Epoch.ID != replay.Registered.Epoch.ID {
 				t.Fatal("lost-reply replay", err)
+			}
+			principal := usageledger.Principal{NodeID: epoch.NodeID, InstallationID: epoch.InstallationID}
+			box, err := uc.Open(uc.Options{Directory: t.TempDir() + "/outbox", Key: bytes.Repeat([]byte{9}, 32), Epoch: epoch, Create: true})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer box.Close()
+			report, err := box.Observe([]uc.Usage{{ClientID: p.ClientID}}, false)
+			if err != nil {
+				t.Fatal(err)
 			}
 			if mode == "changed quota" {
 				if _, err = f.s.ExtendClientScoped(ctx, ExtendClient{EventID: "negative-admit-renew-0001", ClientID: p.ClientID, AdditionalVolumeBytes: 20, Reason: "Invalidate initial admission"}, f.repIDForTest(t, p.ClientID)); err != nil {

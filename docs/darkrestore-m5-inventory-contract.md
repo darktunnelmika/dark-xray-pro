@@ -325,3 +325,21 @@ closed. The refresh changes no client, balance, evidence, reservation, runtime
 or subscription and has `authorizes_mutation=false`. An existing delivery
 receipt closes this V1 refresh path; supporting a later re-delivery requires a
 separately versioned append-only delivery chain.
+
+
+## Imported serving-health evidence boundary
+
+`DarkRestoreServingHealthEvidenceV1` is a historical, read-only contract for one exact
+external protocol challenge after the signed listener-installation receipt. The
+document and independent pins bind the import transition, client, quarantine plan,
+current config and epoch, admission projection, listener receipt, approved verifier
+endpoint, complete signed request, complete signed response and authoritative record
+time. Validation uses the paired Agent HMAC at the response completion time so an
+expired challenge is never extended or reissued.
+
+A valid document sets only `serving_health_recorded=true`. It keeps
+`native_apply_recorded=false` and `authorizes_mutation=false`. The signature proves
+possession of the paired Agent key, not the operational truth of the emitter, complete
+inventory, retirement of other sources, subscription publication or continuing
+health. Until a reviewed real-probe emitter and immutable Store adapter produce this
+document, imported activation and delivery remain closed.
