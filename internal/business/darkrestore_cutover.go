@@ -46,24 +46,25 @@ type DarkRestoreCutoverEvidenceReceiptV1 struct {
 }
 
 type DarkRestoreCutoverReceiptV1 struct {
-	ClientID                     string `json:"client_id"`
-	ActorUserID                  string `json:"actor_user_id"`
-	EvidenceInventorySHA256      string `json:"evidence_inventory_sha256"`
-	EvidenceApprovalSHA256       string `json:"evidence_approval_sha256"`
-	SettledHistoricalBytes       int64  `json:"settled_historical_bytes"`
-	NativePostMigrationBytes     int64  `json:"native_post_migration_bytes"`
-	CurrentFiniteEntitlement     int64  `json:"current_finite_entitlement_bytes"`
-	RemainingBudgetBytes         int64  `json:"remaining_budget_bytes"`
-	SubscriptionRevision         uint64 `json:"subscription_revision"`
-	SubscriptionDeliveryScope    string `json:"subscription_delivery_scope"`
-	SubscriptionSnapshotID       string `json:"subscription_snapshot_id"`
-	SubscriptionEventID          string `json:"subscription_event_id"`
-	SubscriptionSnapshotRevision uint64 `json:"subscription_snapshot_revision"`
-	SubscriptionDeliveredNano    int64  `json:"subscription_delivered_unix_nano,string"`
-	TransitionOpenedUnixNano     int64  `json:"transition_opened_unix_nano,string"`
-	TransitionSHA                string `json:"transition_sha256"`
-	CreatedUnix                  int64  `json:"created_unix"`
-	Replayed                     bool   `json:"replayed"`
+	Prepared                     DarkRestorePreparedBindingV1 `json:"prepared,omitzero"`
+	ClientID                     string                       `json:"client_id"`
+	ActorUserID                  string                       `json:"actor_user_id"`
+	EvidenceInventorySHA256      string                       `json:"evidence_inventory_sha256"`
+	EvidenceApprovalSHA256       string                       `json:"evidence_approval_sha256"`
+	SettledHistoricalBytes       int64                        `json:"settled_historical_bytes"`
+	NativePostMigrationBytes     int64                        `json:"native_post_migration_bytes"`
+	CurrentFiniteEntitlement     int64                        `json:"current_finite_entitlement_bytes"`
+	RemainingBudgetBytes         int64                        `json:"remaining_budget_bytes"`
+	SubscriptionRevision         uint64                       `json:"subscription_revision"`
+	SubscriptionDeliveryScope    string                       `json:"subscription_delivery_scope"`
+	SubscriptionSnapshotID       string                       `json:"subscription_snapshot_id"`
+	SubscriptionEventID          string                       `json:"subscription_event_id"`
+	SubscriptionSnapshotRevision uint64                       `json:"subscription_snapshot_revision"`
+	SubscriptionDeliveredNano    int64                        `json:"subscription_delivered_unix_nano,string"`
+	TransitionOpenedUnixNano     int64                        `json:"transition_opened_unix_nano,string"`
+	TransitionSHA                string                       `json:"transition_sha256"`
+	CreatedUnix                  int64                        `json:"created_unix"`
+	Replayed                     bool                         `json:"replayed"`
 }
 
 func cutoverRemaining(entitlement, settled, up, down int64) (int64, error) {
@@ -237,11 +238,18 @@ func decodeCutoverReceipt(raw []byte, out *DarkRestoreCutoverReceiptV1) error {
 		out.EvidenceInventorySHA256 == "" || out.EvidenceApprovalSHA256 == "" ||
 		out.SettledHistoricalBytes < 0 || out.NativePostMigrationBytes < 0 ||
 		out.CurrentFiniteEntitlement <= 0 || out.RemainingBudgetBytes <= 0 ||
-		out.SubscriptionRevision == 0 || out.SubscriptionDeliveryScope != HandoverSubscriptionScope ||
+		out.SubscriptionRevision == 0 || (out.SubscriptionDeliveryScope != HandoverSubscriptionScope && out.SubscriptionDeliveryScope != DarkRestorePreparedDeliveryScopeV1) ||
 		!routeID.MatchString(out.SubscriptionSnapshotID) || !eventRE.MatchString(out.SubscriptionEventID) ||
 		out.SubscriptionSnapshotRevision == 0 || out.SubscriptionSnapshotRevision >= routeMax ||
 		out.SubscriptionDeliveredNano <= out.TransitionOpenedUnixNano ||
 		out.TransitionOpenedUnixNano <= 0 || !routeSHA.MatchString(out.TransitionSHA) || out.CreatedUnix <= 0 {
+		return ErrUnavailable
+	}
+	if out.SubscriptionDeliveryScope == DarkRestorePreparedDeliveryScopeV1 {
+		if !validPreparedBinding(out.Prepared) || out.SubscriptionSnapshotRevision != out.Prepared.PlanRevision || out.SubscriptionSnapshotID != out.Prepared.ContentSHA[:32] {
+			return ErrUnavailable
+		}
+	} else if out.Prepared != (DarkRestorePreparedBindingV1{}) {
 		return ErrUnavailable
 	}
 	canonical, err := json.Marshal(out)
@@ -612,6 +620,10 @@ func requireDarkRestoreFinalCutover(ctx context.Context, tx *sql.Tx, id string) 
 		receipt.RemainingBudgetBytes != remaining {
 		return ErrDarkRestoreCutover
 	}
+	if receipt.SubscriptionDeliveryScope == DarkRestorePreparedDeliveryScopeV1 {
+		return verifyPreparedPlanReceipt(ctx, tx, receipt)
+	}
+
 	delivery, err := readSubscriptionDelivery(ctx, tx, id)
 	if err != nil || !delivery.Enabled ||
 		delivery.Revision != receipt.SubscriptionRevision ||

@@ -235,3 +235,45 @@ remaining budget uses a value plus known bit internally, with exact string JSON
 when known and an absent field when unknown. This preserves financial before/after
 checks without comparing pointer addresses. Round-trip tests include measured
 zero and values beyond JavaScript's exact integer range.
+
+## Canonical pre-enable configuration delivery
+
+`DeliverPreparedDarkRestoreSubscriptionV1` is an owner-only Store operation with
+scope `darkrestore_prepared_not_applied_v1`. It requires the full accepted source,
+native-baseline and historical-budget chain. It authenticates a saved, versioned
+managed inbound plan using the existing inbound key, requires exact expected
+plan/inbound revisions and complete endpoint metadata, and uses the same
+`inboundspec.ExportClient` renderer and deterministic execution identity as normal
+managed subscriptions. It accepts no browser-provided credentials, configuration
+bytes, evidence flags or trust pins.
+
+This records a preparation/delivery boundary when the Store returns the real
+canonical content to its authorized caller. It is not a recipient network ACK,
+proof of an applied route, health/path verification or an active subscription
+service endpoint. No public HTTP route or installed acceptance is claimed by this
+Store change. The result always reports `applied=false` and `path_verified=false`.
+The ordinary applied-route renderer still rejects the disabled identity.
+
+The immutable final receipt binds content hash, output format, current encrypted
+plan/profile authority hash, exact revisions, client/financial transition and
+current remaining budget. No plaintext configuration or new private key is
+stored in the receipt. Failed receipt insertion/commit returns no content.
+An exact authorized replay regenerates the same content only while its plan and
+financial authority match. Profile, entitlement, payer, identity or expiry drift
+blocks reuse/activation rather than rewriting the original receipt.
+
+Preparing a configuration never binds or enables the client, queues a runtime,
+changes generation, alters native eligibility or debits representative credit.
+Separate owner activation may enter `pending_node_apply` only after this receipt
+and the full M5 evidence are rechecked. Actual binding/apply, current native leases,
+accounting and path health remain the existing data-plane gates. Preparation is
+never labeled healthy/applied merely to close the pre-enable delivery cycle.
+
+The real renderer fixture uses supported schema v16 and synthetic evidence. It
+checks canonical VLESS content with the preserved UUID, explicit prepared scope,
+unchanged disabled state/generation/balances, ordinary-renderer quarantine,
+unauthorized/stale/unsupported refusals, insertion rollback with no content,
+idempotent retry, stale profile, current-payer identity and paid-quota
+invalidation, separate activation, official offline backup validation and
+recovery. No direct insertion of a fake subscription journal is used for this
+new positive path.

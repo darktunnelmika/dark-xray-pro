@@ -113,6 +113,7 @@ func testRealBrowserInboundPlanPromotion(t *testing.T, initialHealth bool) {
 	go func() {
 		ticker := time.NewTicker(time.Second)
 		defer ticker.Stop()
+		consecutiveStoreUnavailable := 0
 		for {
 			select {
 			case <-pollContext.Done():
@@ -132,14 +133,27 @@ func testRealBrowserInboundPlanPromotion(t *testing.T, initialHealth bool) {
 			r.Header.Set("Content-Type", "application/json")
 			w := httptest.NewRecorder()
 			agent.ServeHTTP(w, r)
-			if w.Code != 204 {
-				if pollContext.Err() != nil {
-					pollDone <- nil
-				} else {
-					pollDone <- fmt.Errorf("signed empty poll status %d", w.Code)
-				}
-				return
+			if w.Code == http.StatusNoContent {
+				consecutiveStoreUnavailable = 0
+				continue
 			}
+			// The real Agent transport retries a temporarily unavailable Store.
+			// Under -race the browser transaction can hold SQLite just long
+			// enough for this independent observation to see that exact error.
+			// Retry only that bounded, explicit response: authentication,
+			// conflicts and unexpected command deliveries remain fatal.
+			if w.Code == http.StatusServiceUnavailable {
+				consecutiveStoreUnavailable++
+				if retryablePromotionPollStoreUnavailable(w.Code, w.Body.Bytes(), consecutiveStoreUnavailable) {
+					continue
+				}
+			}
+			if pollContext.Err() != nil {
+				pollDone <- nil
+			} else {
+				pollDone <- fmt.Errorf("signed empty poll status %d: %s", w.Code, strings.TrimSpace(w.Body.String()))
+			}
+			return
 		}
 	}()
 	defer stopPolling()
@@ -253,4 +267,38 @@ func testRealBrowserInboundPlanPromotion(t *testing.T, initialHealth bool) {
 		return
 	}
 	t.Log("PLAN_PROMOTION_BROWSER_PASS: authenticated compiled UI; exact atomic preparation; preserved profile and customers; no runtime command")
+}
+
+func retryablePromotionPollStoreUnavailable(status int, body []byte, consecutive int) bool {
+	if status != http.StatusServiceUnavailable || consecutive < 1 || consecutive > 5 {
+		return false
+	}
+	var response struct {
+		Error string `json:"error"`
+	}
+	return json.Unmarshal(body, &response) == nil && response.Error == "business_store_unavailable"
+}
+
+func TestPromotionPollRetriesOnlyBoundedStoreUnavailable(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		name        string
+		status      int
+		body        string
+		consecutive int
+		want        bool
+	}{
+		{"first exact response", http.StatusServiceUnavailable, `{"error":"business_store_unavailable"}`, 1, true},
+		{"fifth exact response", http.StatusServiceUnavailable, `{"error":"business_store_unavailable"}`, 5, true},
+		{"sixth exact response", http.StatusServiceUnavailable, `{"error":"business_store_unavailable"}`, 6, false},
+		{"conflict stays fatal", http.StatusConflict, `{"error":"business_store_unavailable"}`, 1, false},
+		{"other unavailable stays fatal", http.StatusServiceUnavailable, `{"error":"metered_runtime_admission_pending"}`, 1, false},
+		{"malformed response stays fatal", http.StatusServiceUnavailable, `business_store_unavailable`, 1, false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if got := retryablePromotionPollStoreUnavailable(test.status, []byte(test.body), test.consecutive); got != test.want {
+				t.Fatalf("retryable=%v want %v", got, test.want)
+			}
+		})
+	}
 }

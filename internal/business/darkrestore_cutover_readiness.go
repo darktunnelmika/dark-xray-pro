@@ -10,6 +10,7 @@ import (
 )
 
 type DarkRestoreCutoverReadinessV1 struct {
+	SubscriptionDeliveryScope            string   `json:"subscription_delivery_scope,omitempty"`
 	SettledHistoryBudgetReserved         bool     `json:"settled_history_budget_reserved"`
 	ClientID                             string   `json:"client_id"`
 	SourceSHA256                         string   `json:"source_sha256"`
@@ -131,6 +132,21 @@ func (s *Store) DarkRestoreCutoverReadinessV1(ctx context.Context, sourceSHA, so
 		out.SubscriptionDelivered = darkRestoreSubscriptionDeliveredAfterSettlement(attachment, delivery)
 	}
 
+	if final != nil {
+		out.SubscriptionDeliveryScope = final.SubscriptionDeliveryScope
+		if final.SubscriptionDeliveryScope == DarkRestorePreparedDeliveryScopeV1 {
+			out.SubscriptionDelivered = evidence != nil && final.TransitionSHA == evidence.TransitionSHA && verifyPreparedPlanReceipt(ctx, s.db, final) == nil
+		}
+	}
+	if evidence != nil && client.DeploymentState == "disabled" {
+		current, readErr := s.DarkRestoreCutoverSnapshotV1(ctx, sourceSHA, sourceID)
+		if readErr != nil {
+			return out, readErr
+		}
+		if current.StateSHA != evidence.DestinationStateSHA {
+			out.ActivationBlockers = append(out.ActivationBlockers, "approved_destination_state_changed")
+		}
+	}
 	if !out.SourceEpochSettled {
 		out.ActivationBlockers = append(out.ActivationBlockers, "source_epoch_not_settled")
 	}

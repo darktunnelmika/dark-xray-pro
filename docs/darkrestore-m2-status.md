@@ -395,7 +395,6 @@ remaining budget accurately in JSON. The original assertion was not weakened.
 Synthetic delivery-journal insertion remains a model test, not real prepared
 subscription rendering or installed delivery acceptance; that integration is next.
 
-
 ## Exact-head CI fixture stabilization (source/test checkpoint)
 
 PR137 head `7d36c2bdf2868f2f1d7bd41eec5a432ff28e3905`, tree
@@ -418,3 +417,34 @@ test stabilization only, not Merge, installation, cutover, subscription delivery
 inventory completeness or production evidence. PRO LAB remains on the accepted
 closed predecessor revision
 `174af74c18d33d4366f4ae212060ddbbc84daa3c`.
+
+## Canonical prepared delivery (isolated source checkpoint)
+
+The prepared-not-applied Store path now renders actual configuration content
+from an authenticated versioned managed plan. Its receipt binds the canonical
+content hash, revisions/profile authority, UUID/financial state and M5 transition.
+It preserves the native renderer's runtime eligibility gates; preparing never
+enables a client, binds a runtime or claims a verified traffic path. Source and
+native facts in tests are explicitly synthetic; no physical retirement or
+undeclared-source absence is inferred.
+
+The new v16 positive/negative fixture passes genuine rendering, owner scope,
+rollback, unchanged balances/generation, separate pending activation and official
+offline backup/reopen. Profile, current-payer identity or paid-quota drift blocks
+stale preparation and activation without changing representative balances. The
+preliminary full run rejected one existing health fixture after 31s under
+concurrent browser/build load; its unchanged bounded test then passed
+three isolated runs in 0.35/0.39/0.34s. No lease or assertion was weakened; the
+final candidate receives an exclusive complete regression run below.
+
+## Exact-head browser poll contention correction
+
+Native Metering CI for public head
+`0ad749e064a1f82b1b9820fa115b0591e3dbb631` exposed a fixture defect:
+the background signed Agent poll treated a transient
+`503 business_store_unavailable` during a concurrent browser/SQLite write as
+a terminal protocol failure. The fixture now mirrors the production transport
+retry boundary only for that exact decoded response, with a five-consecutive
+response ceiling. Authentication failures, stale/conflicting observations,
+unexpected command delivery and every other status still fail closed. Metering,
+promotion, accounting and runtime-admission product logic are unchanged.
