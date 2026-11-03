@@ -575,6 +575,12 @@ func (f *localSettlementFixture) attachToEarlierImport(t *testing.T, ctx context
 	if err != nil || again != projection {
 		t.Fatal("history changed across restart", err)
 	}
+	w = browserRequest(t, restarted.BrowserHandler(), "GET", restoreBase+"/handoff/readiness", nil, restartedCookie, "", origin)
+	var recoveredReadiness business.DarkRestoreCutoverReadinessV1
+	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &recoveredReadiness) != nil ||
+		!reflect.DeepEqual(recoveredReadiness, readiness) {
+		t.Fatal("restart changed or guessed cutover readiness", w.Code, recoveredReadiness)
+	}
 	payer, err := reopened.Representative(ctx, "transfer-target")
 	if err != nil || payer.VolumeCreditBytes != charged.VolumeCreditBytes {
 		t.Fatal("renewal payer changed across restart", err)
