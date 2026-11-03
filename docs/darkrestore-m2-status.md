@@ -510,3 +510,30 @@ settlement. It verifies a sealed epoch, native usage and unchanged representativ
 credit. This synthetic binary acceptance is also required in the final-core CI
 quarantine script. It does not install the candidate on persistent LAB or close
 production migration acceptance.
+
+
+## M5 closed native cycle evidence (isolated source checkpoint)
+
+A new owner-only read-only projection binds one already-sealed imported-client
+epoch to the prior admission evidence, transition, prepared content/profile
+authority, plan, terminal report and exact per-epoch native byte deltas.
+Projection requires a unique quiesced terminal receipt, a matching sealed ledger
+cursor, one exact client binding and nonzero observed traffic. An open,
+uncertain, zero-traffic, foreign-client or tampered epoch remains fail-closed.
+
+Independent pins cover the complete evidence document, admission evidence,
+transition, prepared profile, epoch, final sequence/report/receipt time and both
+cycle counters. Replays are byte-stable. The result deliberately keeps
+`native_apply_recorded=false`, `serving_health_recorded=false` and
+`authorizes_mutation=false`: a completed past cycle is not authority for a
+future apply, subscription publication, activation, inventory-completeness
+claim or source-retirement claim.
+
+Synthetic tests cover a positive 5-byte uplink/7-byte downlink sealed cycle,
+pre-final refusal, owner scope, exact replay, wrong terminal pin, attempted
+self-authorization, state tampering and a separately sealed zero-traffic cycle.
+Exact local non-race validation passed: focused closed-cycle tests (1.954s),
+darkrestore (3.953s), complete business (225.441s), backupacceptance (3.121s),
+vet and diff checks. This is source/test evidence only until publication,
+current-head CI, artifact verification and installed acceptance are separately
+completed.
