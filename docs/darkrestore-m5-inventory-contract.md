@@ -250,9 +250,10 @@ bytes, evidence flags or trust pins.
 This records a preparation/delivery boundary when the Store returns the real
 canonical content to its authorized caller. It is not a recipient network ACK,
 proof of an applied route, health/path verification or an active subscription
-service endpoint. No public HTTP route or installed acceptance is claimed by this
-Store change. The result always reports `applied=false` and `path_verified=false`.
-The ordinary applied-route renderer still rejects the disabled identity.
+service endpoint. The owner/CSRF-protected download route exposes only this same
+bounded operation. Its result always reports `applied=false` and
+`path_verified=false`. The ordinary applied-route renderer still rejects the
+disabled identity.
 
 The immutable final receipt binds content hash, output format, current encrypted
 plan/profile authority hash, exact revisions, client/financial transition and
@@ -264,19 +265,22 @@ blocks reuse/activation rather than rewriting the original receipt.
 
 Preparing a configuration never binds or enables the client, queues a runtime,
 changes generation, alters native eligibility or debits representative credit.
-Separate owner activation may enter `pending_node_apply` only after this receipt
-and the full M5 evidence are rechecked. Actual binding/apply, current native leases,
-accounting and path health remain the existing data-plane gates. Preparation is
-never labeled healthy/applied merely to close the pre-enable delivery cycle.
+It therefore cannot authorize even the logical `pending_node_apply` transition:
+readiness reports the explicit `native_apply_not_recorded` blocker, and the
+enable transaction fails closed after revalidating the prepared receipt. A later
+append-only receipt must bind the exact promoted plan/client association and
+native apply before that blocker can be removed. Current leases, accounting and
+path health remain independent data-plane gates. Preparation is never labeled
+healthy/applied merely to close the pre-enable delivery cycle.
 
 The real renderer fixture uses supported schema v16 and synthetic evidence. It
 checks canonical VLESS content with the preserved UUID, explicit prepared scope,
 unchanged disabled state/generation/balances, ordinary-renderer quarantine,
 unauthorized/stale/unsupported refusals, insertion rollback with no content,
 idempotent retry, stale profile, current-payer identity and paid-quota
-invalidation, separate activation, official offline backup validation and
-recovery. No direct insertion of a fake subscription journal is used for this
-new positive path.
+invalidation, refused pre-apply activation, official offline backup validation
+and recovery. No direct insertion of a fake subscription journal is used for
+this new positive path.
 
 
 ## Post-opening destination refresh

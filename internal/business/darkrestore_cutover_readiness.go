@@ -132,10 +132,12 @@ func (s *Store) DarkRestoreCutoverReadinessV1(ctx context.Context, sourceSHA, so
 		out.SubscriptionDelivered = darkRestoreSubscriptionDeliveredAfterSettlement(attachment, delivery)
 	}
 
+	preparedAwaitingNativeApply := false
 	if final != nil {
 		out.SubscriptionDeliveryScope = final.SubscriptionDeliveryScope
 		if final.SubscriptionDeliveryScope == DarkRestorePreparedDeliveryScopeV1 {
 			out.SubscriptionDelivered = evidence != nil && final.TransitionSHA == evidence.TransitionSHA && verifyPreparedPlanReceipt(ctx, s.db, final) == nil
+			preparedAwaitingNativeApply = out.SubscriptionDelivered
 		}
 	}
 	if evidence != nil && client.DeploymentState == "disabled" {
@@ -150,6 +152,11 @@ func (s *Store) DarkRestoreCutoverReadinessV1(ctx context.Context, sourceSHA, so
 		if current.StateSHA != effectiveStateSHA {
 			out.ActivationBlockers = append(out.ActivationBlockers, "approved_destination_state_changed")
 		}
+	}
+	if preparedAwaitingNativeApply {
+		// A canonical prepared export proves what the owner downloaded; it does
+		// not prove that the exact plan/client binding was promoted or applied.
+		out.ActivationBlockers = append(out.ActivationBlockers, "native_apply_not_recorded")
 	}
 	if !out.SourceEpochSettled {
 		out.ActivationBlockers = append(out.ActivationBlockers, "source_epoch_not_settled")

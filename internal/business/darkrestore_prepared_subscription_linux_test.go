@@ -204,12 +204,16 @@ func TestDarkRestorePreparedCanonicalDeliveryAndV16Recovery(t *testing.T) {
 				return
 			}
 			readiness, err := f.s.DarkRestoreCutoverReadinessV1(ctx, evidence.SourceSHA256, evidence.SourceID)
-			if err != nil || !readiness.ActivationAllowed || !readiness.SubscriptionDelivered || readiness.SubscriptionDeliveryScope != DarkRestorePreparedDeliveryScopeV1 || readiness.GlobalSourceCustodyVerified {
-				t.Fatal("preparation readiness misrepresented scope", readiness, err)
+			if err != nil || readiness.ActivationAllowed || !readiness.SubscriptionDelivered || readiness.SubscriptionDeliveryScope != DarkRestorePreparedDeliveryScopeV1 || readiness.GlobalSourceCustodyVerified ||
+				!strings.Contains(strings.Join(readiness.ActivationBlockers, ","), "native_apply_not_recorded") {
+				t.Fatal("preparation readiness misrepresented apply boundary", readiness, err)
 			}
-			enabled, err := f.s.SetClientStateScoped(ctx, SetClientState{EventID: "m5-prepared-enable-0001", ClientID: client.ID, Action: "enable", Reason: "Synthetic prepared cutover approval"}, client.RepresentativeID)
-			if err != nil || enabled.DeploymentState != "pending_node_apply" {
-				t.Fatal("controlled prepared activation failed", enabled, err)
+			if _, err = f.s.SetClientStateScoped(ctx, SetClientState{EventID: "m5-prepared-enable-0001", ClientID: client.ID, Action: "enable", Reason: "Synthetic prepared cutover approval"}, client.RepresentativeID); !errors.Is(err, ErrDarkRestoreCutover) {
+				t.Fatal("prepared delivery activated before native apply", err)
+			}
+			kept, err := f.s.Client(ctx, client.ID)
+			if err != nil || kept.DeploymentState != "disabled" {
+				t.Fatal("failed activation changed quarantine", kept, err)
 			}
 			if err = f.s.Close(); err != nil {
 				t.Fatal(err)

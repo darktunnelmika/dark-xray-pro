@@ -625,7 +625,13 @@ func requireDarkRestoreFinalCutover(ctx context.Context, tx *sql.Tx, id string) 
 		return ErrDarkRestoreCutover
 	}
 	if receipt.SubscriptionDeliveryScope == DarkRestorePreparedDeliveryScopeV1 {
-		return verifyPreparedPlanReceipt(ctx, tx, receipt)
+		if err = verifyPreparedPlanReceipt(ctx, tx, receipt); err != nil {
+			return err
+		}
+		// Preparation is a real, immutable delivery boundary, but it neither
+		// promotes the plan/client binding nor proves a native apply. Keep the
+		// logical enable path closed until a later receipt binds that operation.
+		return ErrDarkRestoreCutover
 	}
 
 	delivery, err := readSubscriptionDelivery(ctx, tx, id)
