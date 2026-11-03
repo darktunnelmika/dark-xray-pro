@@ -55,6 +55,7 @@ func completeCoverageFixture(t *testing.T) (LocalHandoffInventoryV1, string, []V
 		t.Fatal(err)
 	}
 	approval := HandoffCoverageApprovalV1{
+		DestinationStateSHA: strings.Repeat("4", 64), NativeBaselineSHA: strings.Repeat("1", 64),
 		Version: 1, InventorySHA: pin, SourceSHA: inventory.SourceSHA,
 		SourceID: inventory.SourceID, Scope: HandoffCoverageScopeV1,
 		Statement: HandoffCoverageStatementV1, DeclaredSources: 2,
@@ -137,7 +138,7 @@ func TestSignedHandoffCoverageApprovalFailsClosed(t *testing.T) {
 
 func TestLocalHandoffCutoverBudgetAndTransition(t *testing.T) {
 	inventory, pin, handoffs, _, approval := completeCoverageFixture(t)
-	base := LocalCutoverInputV1{
+	base := LocalCutoverInputV1{DestinationStateSHA: strings.Repeat("4", 64),
 		DestinationSHA: strings.Repeat("c", 64), ImportReceiptSHA: strings.Repeat("b", 64),
 		BillingAttributionSHA: strings.Repeat("f", 64), NativeBaselineSHA: strings.Repeat("1", 64),
 		ExpectedNativeBaselineSHA: strings.Repeat("1", 64), TransitionSHA: strings.Repeat("2", 64),
@@ -174,7 +175,7 @@ func TestLocalHandoffCutoverBudgetAndTransition(t *testing.T) {
 		blocker string
 	}{
 		{"legacy unlimited", func(v *LocalCutoverInputV1) { v.PlanKind = "unlimited" }, "finite_entitlement_required"},
-		{"baseline snapshot mismatch", func(v *LocalCutoverInputV1) { v.NativeBaselineSHA = strings.Repeat("3", 64) }, "native_baseline_incomplete"},
+		{"baseline expected snapshot mismatch", func(v *LocalCutoverInputV1) { v.ExpectedNativeBaselineSHA = strings.Repeat("3", 64) }, "native_baseline_incomplete"},
 		{"future transition", func(v *LocalCutoverInputV1) { v.TransitionOpenedUnixNano = v.NowUnixNano + 1 }, "transition_not_opened_after_approval"},
 		{"simultaneous approval", func(v *LocalCutoverInputV1) { v.TransitionOpenedUnixNano = 1000_000_000_000 }, "transition_not_opened_after_approval"},
 		{"clock mismatch", func(v *LocalCutoverInputV1) { v.NowUnixNano++; v.NowUnix++ }, "transition_not_opened_after_approval"},
@@ -211,7 +212,7 @@ func TestLocalHandoffCutoverBudgetAndTransition(t *testing.T) {
 
 func TestLocalHandoffCutoverRejectsCoverageMismatch(t *testing.T) {
 	inventory, pin, handoffs, approval, verified := completeCoverageFixture(t)
-	input := LocalCutoverInputV1{
+	input := LocalCutoverInputV1{DestinationStateSHA: strings.Repeat("4", 64),
 		DestinationSHA: strings.Repeat("c", 64), ImportReceiptSHA: strings.Repeat("b", 64),
 		BillingAttributionSHA: strings.Repeat("f", 64), NativeBaselineSHA: strings.Repeat("1", 64),
 		ExpectedNativeBaselineSHA: strings.Repeat("1", 64), TransitionSHA: strings.Repeat("2", 64),
@@ -274,11 +275,15 @@ func TestCoverageApprovalEvidenceIsImmutable(t *testing.T) {
 
 func TestCutoverRejectsDestinationReceiptAndAttributionReplay(t *testing.T) {
 	inventory, pin, handoffs, _, approval := completeCoverageFixture(t)
-	base := LocalCutoverInputV1{DestinationSHA: strings.Repeat("c", 64), ImportReceiptSHA: strings.Repeat("b", 64), BillingAttributionSHA: strings.Repeat("f", 64)}
-	for _, name := range []string{"destination", "import receipt", "attribution"} {
+	base := LocalCutoverInputV1{DestinationStateSHA: strings.Repeat("4", 64), NativeBaselineSHA: strings.Repeat("1", 64), DestinationSHA: strings.Repeat("c", 64), ImportReceiptSHA: strings.Repeat("b", 64), BillingAttributionSHA: strings.Repeat("f", 64)}
+	for _, name := range []string{"destination", "import receipt", "attribution", "destination state", "native snapshot"} {
 		t.Run(name, func(t *testing.T) {
 			in := base
 			switch name {
+			case "destination state":
+				in.DestinationStateSHA = strings.Repeat("e", 64)
+			case "native snapshot":
+				in.NativeBaselineSHA = strings.Repeat("e", 64)
 			case "destination":
 				in.DestinationSHA = strings.Repeat("e", 64)
 			case "import receipt":

@@ -19,6 +19,8 @@ const (
 )
 
 type HandoffCoverageApprovalV1 struct {
+	DestinationStateSHA       string   `json:"destination_state_sha256"`
+	NativeBaselineSHA         string   `json:"native_baseline_sha256"`
 	Version                   int      `json:"version"`
 	InventorySHA              string   `json:"inventory_sha256"`
 	SourceSHA                 string   `json:"source_sha256"`
@@ -66,6 +68,7 @@ func canonicalCoverageApprovalV1(in HandoffCoverageApprovalV1) (HandoffCoverageA
 		in.DeclaredSources < 1 || in.DeclaredSources > 256 ||
 		len(in.EpochIDs) != in.DeclaredSources || in.ApprovedUnixNano <= 0 ||
 		!inventoryDigestValid(in.DestinationSHA) || !inventoryDigestValid(in.ImportReceiptSHA) ||
+		!inventoryDigestValid(in.DestinationStateSHA) || !inventoryDigestValid(in.NativeBaselineSHA) ||
 		!inventoryDigestValid(in.BillingAttributionSHA) || in.BillingAttribution != "disjoint_source_epoch_deltas" {
 		return HandoffCoverageApprovalV1{}, ErrHandoffInventory
 	}
@@ -136,6 +139,7 @@ func (v VerifiedHandoffCoverageApprovalV1) Evidence() (HandoffCoverageApprovalV1
 // Destination/receipt/attribution pins must be independently loaded from trusted
 // destination state. Baseline counters must come from one authoritative snapshot.
 type LocalCutoverInputV1 struct {
+	DestinationStateSHA       string
 	DestinationSHA            string
 	ImportReceiptSHA          string
 	BillingAttributionSHA     string
@@ -219,6 +223,8 @@ func EvaluateLocalHandoffCutoverV1(inventory LocalHandoffInventoryV1, inventoryP
 		assertion.DeclaredSources != coverage.MatchedSources ||
 		!equalStrings(assertion.EpochIDs, coverage.EpochIDs) ||
 		assertion.DestinationSHA != in.DestinationSHA ||
+		assertion.DestinationStateSHA != in.DestinationStateSHA ||
+		assertion.NativeBaselineSHA != in.NativeBaselineSHA ||
 		assertion.ImportReceiptSHA != in.ImportReceiptSHA ||
 		assertion.BillingAttributionSHA != in.BillingAttributionSHA {
 		return out, ErrHandoffInventory
