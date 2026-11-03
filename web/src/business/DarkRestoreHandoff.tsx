@@ -75,7 +75,7 @@ export default function DarkRestoreHandoff({model}:{model:BusinessModel}) {
    if(!result||result.client_id!==receipt.client_id||
       result.source_sha256!==staged.source_settlement.source_sha256||
       result.source_id!==staged.source_settlement.source_id||
-      result.source_scope!=="single_local_source_epoch"||
+      !["single_local_source_epoch","pinned_inventory_plus_independent_coverage_assertion"].includes(result.source_scope)||
       ![result.source_epoch_settled,result.global_source_custody_verified,result.native_baseline_complete,
         result.subscription_delivered,result.client_archived,result.client_expired,
         result.activation_allowed,result.cutover_verified].every(x=>typeof x==="boolean")||
@@ -119,6 +119,25 @@ export default function DarkRestoreHandoff({model}:{model:BusinessModel}) {
     {" · "}{fa?"حجم باقی‌مانده":"Remaining quota"}: {fmt(readiness.finite_quota_remaining_bytes)}</p>
    <p><strong>{readiness.activation_allowed?(fa?"آمادهٔ فعال‌سازی":"Activation ready"):(fa?"فعال‌سازی مسدود است":"Activation blocked")}</strong>
     {" · "}{readiness.cutover_verified?(fa?"مهاجرت تأیید شد":"Cutover verified"):(fa?"پذیرش نهایی نشده":"Cutover not verified")}</p>
+   {staged && receipt && readiness.native_baseline_complete && <form onSubmit={async e=>{
+    e.preventDefault();
+    const form=new FormData(e.currentTarget);
+    const ids=["inbound_id","plan_revision","inbound_revision"].map(k=>Number(form.get(k)));
+    if(ids.some(v=>!Number.isSafeInteger(v)||v<1)) {setError(true);return;}
+    setBusy(true);setError(false);
+    try {
+     const result=await mutation<{scope:string;client_id:string;content:string;applied:boolean;path_verified:boolean}>(restoreAPI+"/handoff/prepare",
+      {handoff_sha256:staged.handoff_sha256,event_id:"prepare-"+staged.handoff_sha256,inbound_id:ids[0],plan_revision:ids[1],inbound_revision:ids[2]},model.session.csrf_token);
+     if(result.scope!=="darkrestore_prepared_not_applied_v1"||result.client_id!==receipt.client_id||result.applied!==false||result.path_verified!==false||!result.content) throw Error("invalid preparation");
+     const url=URL.createObjectURL(new Blob([result.content],{type:"text/plain"}));
+     const a=document.createElement("a");a.href=url;a.download="prepared-subscription.txt";a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+    } catch {setError(true);} finally {setBusy(false);}
+   }}>
+    <label>{fa?"شناسه اینباند":"Inbound ID"}<input required name="inbound_id" type="number" min="1"/></label>
+    <label>{fa?"نسخه طرح":"Plan revision"}<input required name="plan_revision" type="number" min="1"/></label>
+    <label>{fa?"نسخه اینباند":"Inbound revision"}<input required name="inbound_revision" type="number" min="1"/></label>
+    <button disabled={busy}>{fa?"دانلود اشتراک پیش از فعال‌سازی":"Download prepared subscription"}</button>
+   </form>}
    {[...readiness.activation_blockers,...readiness.verification_blockers].length>0&&<ul>
     {[...readiness.activation_blockers,...readiness.verification_blockers].map(x=><li key={x}><code>{x}</code></li>)}
    </ul>}

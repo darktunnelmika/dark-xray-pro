@@ -446,6 +446,9 @@ func (f *localSettlementFixture) attachToEarlierImport(t *testing.T, ctx context
 		cookie *http.Cookie
 		csrf   string
 	}{{dst.target, dst.targetCSRF}, {dst.owner, ""}} {
+		if w := browserRequest(t, dst.h, "POST", restoreBase+"/handoff/prepare", ref, bad.cookie, bad.csrf, origin); w.Code != 403 {
+			t.Fatal("representative or missing CSRF reached preparation", w.Code)
+		}
 		if w := browserRequest(t, dst.h, "POST", restoreBase+"/handoff/attach", ref, bad.cookie, bad.csrf, origin); w.Code != 403 {
 			t.Fatal("representative or missing CSRF attached source", w.Code)
 		}
@@ -499,6 +502,15 @@ func (f *localSettlementFixture) attachToEarlierImport(t *testing.T, ctx context
 		strings.Join(readiness.ActivationBlockers, ",") != "declared_inventory_coverage_not_verified,independent_coverage_assertion_not_verified" ||
 		strings.Join(readiness.VerificationBlockers, ",") != "native_baseline_incomplete,subscription_not_delivered,cutover_receipt_not_recorded" {
 		t.Fatal("cutover readiness guessed missing evidence", w.Code, readiness)
+	}
+	prepare := map[string]any{"handoff_sha256": handoffSHA, "event_id": "prepare-" + handoffSHA, "inbound_id": 1, "plan_revision": 1, "inbound_revision": 1}
+	w = browserRequest(t, dst.h, "POST", restoreBase+"/handoff/prepare", prepare, dst.owner, dst.ownerCSRF, origin)
+	if w.Code < 400 || strings.Contains(w.Body.String(), "\"content\"") {
+		t.Fatal("single handoff without complete evidence returned preparation", w.Code)
+	}
+	prepare["native_baseline_complete"] = true
+	if w := browserRequest(t, dst.h, "POST", restoreBase+"/handoff/prepare", prepare, dst.owner, dst.ownerCSRF, origin); w.Code != 422 {
+		t.Fatal("browser supplied baseline accepted", w.Code)
 	}
 	projection, err := dst.s.business.DarkRestoreUsageV1(ctx, id)
 	want := strconv.FormatInt(proof.Historical, 10)

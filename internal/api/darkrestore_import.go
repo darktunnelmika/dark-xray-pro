@@ -150,11 +150,48 @@ func (s *Server) attachDarkRestoreImport(mux *http.ServeMux) {
 				businessError(w, err)
 				return
 			}
-			if readiness.SourceEpochSettled && readiness.FiniteQuotaRemainingBytes != strconv.FormatInt(proof.Remaining, 10) {
+			if readiness.SourceScope == "single_local_source_epoch" && readiness.SourceEpochSettled && readiness.FiniteQuotaRemainingBytes != strconv.FormatInt(proof.Remaining, 10) {
 				businessError(w, business.ErrUnavailable)
 				return
 			}
 			respond(w, 200, readiness)
+		})
+		handle("POST "+restoreBase+"/handoff/prepare", true, func(w http.ResponseWriter, r *http.Request, token string) {
+			var req struct {
+				HandoffSHA      string `json:"handoff_sha256"`
+				EventID         string `json:"event_id"`
+				InboundID       uint64 `json:"inbound_id"`
+				PlanRevision    uint64 `json:"plan_revision"`
+				InboundRevision uint64 `json:"inbound_revision"`
+			}
+			var raw json.RawMessage
+			if decode(w, r, 4096, &raw) != nil || usagewire.Decode(raw, &req) != nil || req.HandoffSHA != handoff.digest {
+				businessError(w, business.ErrInvalid)
+				return
+			}
+			verified, err := darkrestore.VerifySignedLocalHandoff(handoff.path, handoff.digest, handoff.public)
+			if err != nil {
+				businessError(w, business.ErrUnavailable)
+				return
+			}
+			proof, err := verified.Settlement()
+			if err != nil {
+				businessError(w, business.ErrUnavailable)
+				return
+			}
+			state, err := s.business.DarkRestoreCutoverReadinessV1(r.Context(), proof.SourceSHA, proof.SourceID)
+			if err != nil {
+				businessError(w, err)
+				return
+			}
+			result, err := s.business.DeliverPreparedDarkRestoreSubscriptionV1(r.Context(), s.inboundKey, token, state.ClientID, business.DarkRestorePreparedDeliveryInputV1{
+				EventID: req.EventID, InboundID: req.InboundID, ExpectedPlanRevision: req.PlanRevision, ExpectedInboundRevision: req.InboundRevision, Format: "uri",
+			})
+			if err != nil {
+				businessError(w, err)
+				return
+			}
+			respond(w, 200, map[string]any{"scope": result.Scope, "client_id": state.ClientID, "content": string(result.Subscription.Content), "applied": result.Applied, "path_verified": result.Subscription.PathVerified})
 		})
 		handle("POST "+restoreBase+"/handoff/attach", true, func(w http.ResponseWriter, r *http.Request, token string) {
 			var req struct {
