@@ -8,6 +8,8 @@ import (
 	"crypto/ed25519"
 	"encoding/json"
 	"errors"
+	mx "github.com/darktunnelmika/dark-xray-pro/internal/managedxray"
+	"net"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -120,6 +122,42 @@ func TestImportedLoopbackRealityStaysQuarantined(t *testing.T) {
 		if _, err = f.s.ReviewDarkRestoreQuarantineRegistration(ctx, key, f.owner.Token, client.ID, pub, strings.Repeat("0", 64), receipt); !errors.Is(err, ErrDarkRestoreCutover) {
 			t.Fatal("wrong core receipt accepted", err)
 		}
+
+		runtimeDir := filepath.Join(t.TempDir(), "runtime")
+		options := mx.Options{Directory: runtimeDir, StateKey: bytes.Repeat([]byte{2}, 32), LeaseKey: bytes.Repeat([]byte{3}, 64), NodeID: stage.NodeID, InstallationID: stage.InstallationID, ListenIP: "127.0.0.1", Binary: binary, BinarySHA: core, ExperimentalFinalTCP: true}
+		runtime, err := mx.Open(options)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer runtime.Close()
+		now := time.Now()
+		lease, err := mx.SignLease(options.LeaseKey, mx.Lease{NodeID: stage.NodeID, InstallationID: stage.InstallationID, Sequence: 1, ConfigSHA: stage.ConfigSHA, ManifestSHA: stage.ManifestSHA, Issued: now.UnixNano(), Expires: now.Add(15 * time.Second).UnixNano()})
+		if err != nil {
+			t.Fatal(err)
+		}
+		birth, err := stage.PrepareRuntime(ctx, runtime, pin, lease, signer)
+		if err != nil || !birth.Verify(pub, pin, lease, time.Now().UnixNano()) {
+			t.Fatal("real pretraffic process birth", err)
+		}
+
+		altered := birth
+		altered.Process.PID++
+		if altered.Verify(pub, pin, lease, time.Now().UnixNano()) {
+			t.Fatal("modified process accepted")
+		}
+		if birth.Verify(pub, strings.Repeat("0", 64), lease, time.Now().UnixNano()) || birth.Verify(pub, pin, lease, lease.Expires) {
+			t.Fatal("wrong plan or expired birth accepted")
+		}
+		conn, err := net.DialTimeout("tcp", "127.0.0.1:29181", time.Second)
+		if err == nil {
+			conn.Close()
+			t.Fatal("customer listener opened before native admission")
+		}
+		if _, err = stage.PrepareRuntime(ctx, runtime, pin, lease, signer); err == nil {
+			t.Fatal("process birth replay restarted runtime")
+		}
+		t.Log("real Xray API-only birth signed, customer listener closed")
+		runtime.Close()
 		path := filepath.Join(dir, pin+".json")
 		raw, err := os.ReadFile(path)
 		var persisted DarkRestoreQuarantineRegistration
