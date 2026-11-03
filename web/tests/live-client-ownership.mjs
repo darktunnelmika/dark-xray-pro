@@ -144,7 +144,12 @@ try {
   }
   expect(await ok(target, '/api/v1/workspace/clients/' + mainID)).toEqual(current);
   const usageAfter = (await ok(target, '/api/v1/workspace/clients/' + mainID + '/usage')).usage;
-  expect(usageAfter).toEqual({ ...usageBefore, representative_id: targetID, limit_bytes: String(Number(usageBefore.limit_bytes) + 1048576) });
+  expect(usageAfter).toEqual({
+    ...usageBefore,
+    representative_id: targetID,
+    limit_bytes: String(BigInt(usageBefore.limit_bytes) + 1048576n),
+    remaining_native_budget_bytes: String(BigInt(usageBefore.remaining_native_budget_bytes) + 1048576n),
+  });
   if (pageErrors.length) throw new Error('Browser page errors: ' + pageErrors.join('; '));
   console.log('REAL_CLIENT_OWNERSHIP_BROWSER_PASS');
 } catch (error) {
