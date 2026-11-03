@@ -7,6 +7,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/hmac"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -203,7 +204,12 @@ func (r *Runtime) CheckCustomerConnection(ctx context.Context, q CustomerConnect
 	// Reuse the audited TCP/REALITY client compiler with the exact customer's
 	// credential and counter email. No nonbillable identity is invented.
 	wire := ProtocolHealthRequest{Version: InitialApplyProtocolHealthVersion, InboundID: q.InboundID, Port: q.Port, SystemProbeID: q.ClientID, CredentialSHA: q.CredentialSHA, EndpointSHA: q.EndpointSHA}
-	clientCandidate, err := protocolHealthClient(c, wire, port, e)
+	secret := make([]byte, 32)
+	if _, err = rand.Read(secret); err != nil {
+		return zero, err
+	}
+	password := hex.EncodeToString(secret)
+	clientCandidate, err := customerConnectionClient(c, wire, port, e, password)
 	if err != nil {
 		return zero, err
 	}
@@ -223,7 +229,7 @@ func (r *Runtime) CheckCustomerConnection(ctx context.Context, q CustomerConnect
 			if address != e.Address || !child.bound(clientCandidate.Listeners) {
 				return nil, ErrProtocolHealth
 			}
-			return protocolHealthSOCKS(c, socks, e.Address)
+			return dialProtocolHealthSOCKS(c, socks, e.Address, "customer-connection", password)
 		}}
 	defer transport.CloseIdleConnections()
 	client := &http.Client{Transport: transport, CheckRedirect: func(*http.Request, []*http.Request) error { return ErrProtocolHealth }}
@@ -274,4 +280,40 @@ func cloneCustomerConnectionReceipt(r CustomerConnectionReceipt) CustomerConnect
 	r.Signature = append([]byte(nil), r.Signature...)
 	r.Challenge.Signer = append([]byte(nil), r.Challenge.Signer...)
 	return r
+}
+
+// The paid customer's temporary loopback proxy is private to this attempt.
+// Generic nonbillable health keeps its existing compiler and wire behavior.
+func customerConnectionClient(c xrayconfig.Candidate, q ProtocolHealthRequest, port uint16, e ProtocolHealthEndpoint, password string) (xrayconfig.Candidate, error) {
+	if !transactionHash.MatchString(password) {
+		return xrayconfig.Candidate{}, ErrProtocolHealth
+	}
+	out, err := protocolHealthClient(c, q, port, e)
+	if err != nil {
+		return xrayconfig.Candidate{}, err
+	}
+	var doc map[string]json.RawMessage
+	if json.Unmarshal(out.Config, &doc) != nil {
+		return xrayconfig.Candidate{}, ErrProtocolHealth
+	}
+	var inbounds []map[string]json.RawMessage
+	if json.Unmarshal(doc["inbounds"], &inbounds) != nil || len(inbounds) != 1 {
+		return xrayconfig.Candidate{}, ErrProtocolHealth
+	}
+	settings := map[string]any{"auth": "password", "udp": false, "accounts": []map[string]string{{"user": "customer-connection", "pass": password}}}
+	inbounds[0]["settings"], err = json.Marshal(settings)
+	if err != nil {
+		return xrayconfig.Candidate{}, err
+	}
+	doc["inbounds"], err = json.Marshal(inbounds)
+	if err != nil {
+		return xrayconfig.Candidate{}, err
+	}
+	out.Config, err = json.Marshal(doc)
+	if err != nil {
+		return xrayconfig.Candidate{}, err
+	}
+	digest := sha256.Sum256(out.Config)
+	out.SHA256 = hex.EncodeToString(digest[:])
+	return out, nil
 }
