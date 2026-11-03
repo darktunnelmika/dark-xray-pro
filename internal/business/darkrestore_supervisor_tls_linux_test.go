@@ -119,6 +119,9 @@ func realImportedAgentSupervisorTLS(t *testing.T, mode string) {
 		if mode == "connection-bad-pin" {
 			verifier.CertificateSHA = strings.Repeat("f", 64)
 		}
+		if err = srv.EnableDarkRestoreSystemProbeChecks(verifier); err != nil {
+			t.Fatal(err)
+		}
 		if err = srv.EnableDarkRestoreCustomerConnectionChecks(verifier); err != nil {
 			t.Fatal(err)
 		}
@@ -160,9 +163,12 @@ func realImportedAgentSupervisorTLS(t *testing.T, mode string) {
 	var outage atomic.Bool
 	var fullOutage atomic.Bool
 	var connectionPosts atomic.Int64
+	var systemProbePosts atomic.Int64
 	var lostConnection atomic.Bool
+	var lostSystemProbe atomic.Bool
 	if mode == "connection-lost-reply" {
 		lostConnection.Store(true)
+		lostSystemProbe.Store(true)
 	}
 	var lostApply atomic.Bool
 	if mode == "lost-apply-reply" {
@@ -190,6 +196,18 @@ func realImportedAgentSupervisorTLS(t *testing.T, mode string) {
 			json.Unmarshal(raw, &phase)
 			if phase.Phase == "connection-result" {
 				connectionPosts.Add(1)
+			}
+			if phase.Phase == "system-probe-result" {
+				systemProbePosts.Add(1)
+			}
+			if phase.Phase == "system-probe-result" && lostSystemProbe.Swap(false) {
+				recorder := httptest.NewRecorder()
+				active.Load().AgentHandler().ServeHTTP(recorder, r)
+				if recorder.Code != 200 {
+					t.Errorf("system probe result never committed: %d %s", recorder.Code, recorder.Body.String())
+				}
+				w.WriteHeader(503)
+				return
 			}
 			if phase.Phase == "connection-result" && lostConnection.Swap(false) {
 				recorder := httptest.NewRecorder()
@@ -431,14 +449,23 @@ func realImportedAgentSupervisorTLS(t *testing.T, mode string) {
 		if !want && lastStatus.State != "expired_unknown" {
 			t.Fatal("failed probe never reached an expired issued attempt", lastStatus)
 		}
-		if mode == "connection-bad-nonce" && verifierRequests.Load() != 1 {
-			t.Fatal("nonce failure was not exercised exactly once", verifierRequests.Load())
+		if mode == "connection-bad-nonce" && verifierRequests.Load() != 2 {
+			t.Fatal("system and customer nonce failures were not each exercised once", verifierRequests.Load())
 		}
 		if mode == "connection-bad-pin" && verifierRequests.Load() != 0 {
 			t.Fatal("untrusted TLS pin reached verifier HTTP", verifierRequests.Load())
 		}
-		if want && verifierRequests.Load() != 1 {
-			t.Fatal("test traffic repeated", verifierRequests.Load())
+		if want && verifierRequests.Load() != 2 {
+			t.Fatal("system and customer test traffic did not each run exactly once", verifierRequests.Load())
+		}
+		get := httptest.NewRequest("GET", "https://pro.example/api/v1/workspace/dark-restore/handoff/quarantine/admission/evidence", nil)
+		get.AddCookie(cookie)
+		evidenceResponse := httptest.NewRecorder()
+		browser.ServeHTTP(evidenceResponse, get)
+		var evidence business.DarkRestoreNativeAdmissionEvidenceV1
+		if evidenceResponse.Code != 200 || json.Unmarshal(evidenceResponse.Body.Bytes(), &evidence) != nil ||
+			evidence.ServingHealthRecorded != want || evidence.NativeApplyRecorded || evidence.AuthorizesMutation {
+			t.Fatal("system probe evidence boundary", evidenceResponse.Code, evidenceResponse.Body.String())
 		}
 	}
 	if mode == "owner-logout" {
@@ -490,10 +517,13 @@ func realImportedAgentSupervisorTLS(t *testing.T, mode string) {
 		}
 	}
 	if mode == "connection-lost-reply" && connectionPosts.Load() != 4 {
-		t.Fatal("lost acknowledgment and restart did not replay one saved proof", connectionPosts.Load())
+		t.Fatal("lost acknowledgment and restart did not replay one saved customer proof", connectionPosts.Load())
 	}
-	if connectionMode && (mode == "connection" || mode == "connection-lost-reply") && verifierRequests.Load() != 1 {
-		t.Fatal("later polling repeated a connection", verifierRequests.Load())
+	if mode == "connection-lost-reply" && systemProbePosts.Load() < 2 {
+		t.Fatal("lost system-probe acknowledgment did not replay saved proof", systemProbePosts.Load())
+	}
+	if connectionMode && (mode == "connection" || mode == "connection-lost-reply") && verifierRequests.Load() != 2 {
+		t.Fatal("later polling repeated system or customer network traffic", verifierRequests.Load())
 	}
 	account, err := store.ClientUsage(ctx, id)
 	if err != nil || account.Total < int64(len(payload)) || !account.RemainingNativeBudgetKnown || account.RemainingNativeBudgetBytes != 999986-account.Total {

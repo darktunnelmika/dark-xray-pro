@@ -653,3 +653,55 @@ Managed schema 16 retains its immutable base-schema row. The exact probe DDL is 
 This remains preparation, not a real probe emitter or activation. The independent owner-consented customer connection test above continues to use the billable customer identity and does not satisfy generic system-probe health. No generic challenge issuer, Agent system-probe network call, subscription publication, native activation, inventory-completeness claim or source-retirement claim is opened. Legacy unlimited remains blocked.
 
 Exact local non-race validation for the integrated candidate passed: usageledger 13.138s, darkrestore 3.333s, complete business 231.166s, backupacceptance 3.281s, focused real-renderer/Store/provisioning 11.479s, plus vet and diff checks. Local race is not claimed; exact-head CI remains authoritative.
+
+
+## M5 persisted system-probe issuer and Agent round
+
+This source supersedes only the final “no emitter” limitation in the preceding
+quarantine-probe section. After the signed listener receipt is committed, the
+HUB may queue one owner-bound challenge only when the separate
+`DARK_PRO_ENABLE_IMPORTED_SYSTEM_PROBE_CHECK=1` startup gate and the
+startup-trusted `DARK_PRO_IMPORTED_VERIFIER_JSON` endpoint are both configured.
+The customer connection gate remains independent; enabling either one does not
+enable the other. The queue re-derives the private candidate from the
+immutable prepared binding, admitted UUID, authoritative inbound plan and
+nonbillable probe identity, then matches every config, manifest, credential and
+prepared-admission digest against the registered birth. It does not rebuild
+authority from the browser or from the later deployment-state projection.
+
+The intent is immutable and is committed before delivery. Polling binds the
+current process-ready revision, exact saved/active sequence, current lease,
+canonical epoch and prepared admission, signs one maximum-eight-second request
+with the paired node key and commits the request before returning it. Foreign
+node, installation, endpoint, payer/profile-derived plan, runtime condition,
+epoch or lease state fails closed.
+
+The Agent stores the exact request in its encrypted runtime journal before any
+network I/O. It renders the ordinary pinned protocol-health client from the
+registered candidate and uses the nonbillable system-probe credential through
+the real TCP/REALITY listener. A successful HMAC receipt is persisted before
+the HUB acknowledgment. Restart and lost-response recovery replay the saved
+receipt; an interrupted unknown attempt is not executed again. The customer
+connection attempt remains a separate billable path and separate receipt.
+
+Registration verifies the persisted request, node key, endpoint and current
+immutable parents, then commits the existing serving-health evidence document
+in the same SQLite transaction. Intent/request tables are append-only, and
+reopen/offline-backup validation re-derives them. The round changes no wallet,
+customer UUID, entitlement, expiry, historical usage, native usage counter,
+assignment, deployment eligibility or activation state.
+
+The real pinned-core supervisor fixture now expects exactly one generic
+nonbillable probe and one separately consented customer connection in successful
+connection modes. It also injects lost acknowledgments for both receipts and
+requires receipt replay without repeated network traffic. Bad nonce and bad TLS
+pin cases remain negative. That real-core fixture is CI-only on hosts with the
+pinned experimental core; local non-race tests cover Store rollback/replay,
+immutable schema, runtime journal binding, alias safety, reopen and offline
+backup.
+
+This evidence is still point-in-time serving health. It does not prove complete
+inventory, absence or retirement of undeclared legacy sources, continuing
+health, native apply, subscription publication or activation authority. Legacy
+unlimited remains blocked, and imported issuance/activation stays closed until
+the complete independent evidence chain is accepted.

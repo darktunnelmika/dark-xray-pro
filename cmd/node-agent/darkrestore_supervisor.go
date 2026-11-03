@@ -33,6 +33,8 @@ func runDarkRestoreSupervisor(ctx context.Context, o darkRestoreSupervisorOption
 	var listenerApply *business.DarkRestoreListenerApply
 	var connectionState *mx.CustomerConnectionState
 	var connectionReceipt *mx.CustomerConnectionReceipt
+	var systemProbeState *mx.DarkRestoreSystemProbeState
+	var systemProbeReceipt *mx.ProtocolHealthReceipt
 	call := func(phase string, birth *business.DarkRestoreQuarantineBirth, out any) (int, error) {
 		raw, err := json.Marshal(struct {
 			NodeID, InstallationID, PlanSHA, Phase string
@@ -40,12 +42,14 @@ func runDarkRestoreSupervisor(ctx context.Context, o darkRestoreSupervisorOption
 			ListenerApply                          *business.DarkRestoreListenerApply
 			ConnectionState                        *mx.CustomerConnectionState
 			ConnectionReceipt                      *mx.CustomerConnectionReceipt
+			SystemProbeState                       *mx.DarkRestoreSystemProbeState
+			SystemProbeReceipt                     *mx.ProtocolHealthReceipt
 		}{o.Runtime.NodeID, o.Runtime.InstallationID, o.PlanSHA, phase, birth, func() *business.DarkRestoreListenerApply {
 			if phase == "applied" {
 				return listenerApply
 			}
 			return nil
-		}(), connectionState, connectionReceipt})
+		}(), connectionState, connectionReceipt, systemProbeState, systemProbeReceipt})
 		if err != nil {
 			return 0, err
 		}
@@ -89,6 +93,14 @@ func runDarkRestoreSupervisor(ctx context.Context, o darkRestoreSupervisorOption
 	if runtime.Snapshot().Usage != nil {
 		// Replay saved proof before settlement. A failed acknowledgment may be
 		// retried on the next recovery; it never repeats network traffic.
+		if saved := runtime.SavedDarkRestoreSystemProbeReceipt(); saved != nil {
+			systemProbeReceipt = saved
+			var ack struct {
+				SHA string `json:"receipt_sha256"`
+			}
+			call("system-probe-result", nil, &ack)
+			systemProbeReceipt = nil
+		}
 		if saved := runtime.SavedCustomerConnectionReceipt(); saved != nil {
 			connectionReceipt = saved
 			var ack struct {
@@ -215,6 +227,41 @@ func runDarkRestoreSupervisor(ctx context.Context, o darkRestoreSupervisorOption
 
 	// A successful receipt is retained until HUB acknowledges its exact hash.
 	// Failure or expiry never creates another attempt for this epoch.
+	var deliveredSystemProbe string
+	checkSystemProbe := func() {
+		if systemProbeReceipt != nil {
+			var ack struct {
+				SHA string `json:"receipt_sha256"`
+			}
+			if _, e := call("system-probe-result", nil, &ack); e == nil && ack.SHA == businessProtocolHealthDigest(*systemProbeReceipt) {
+				systemProbeReceipt = nil
+			}
+			return
+		}
+		state := runtime.DarkRestoreSystemProbeState()
+		systemProbeState = &state
+		var work struct {
+			Work      bool                      `json:"work"`
+			Challenge mx.ProtocolHealthRequest  `json:"challenge"`
+			Endpoint  mx.ProtocolHealthEndpoint `json:"endpoint"`
+		}
+		_, e := call("system-probe-poll", nil, &work)
+		systemProbeState = nil
+		if e != nil || !work.Work || work.Challenge.ID == deliveredSystemProbe {
+			return
+		}
+		deliveredSystemProbe = work.Challenge.ID
+		receipt, e := runtime.CheckDarkRestoreSystemProbe(ctx, work.Challenge, work.Endpoint)
+		if e == nil {
+			systemProbeReceipt = &receipt
+			var ack struct {
+				SHA string `json:"receipt_sha256"`
+			}
+			if _, e = call("system-probe-result", nil, &ack); e == nil && ack.SHA == businessProtocolHealthDigest(receipt) {
+				systemProbeReceipt = nil
+			}
+		}
+	}
 	var deliveredConnection string
 	checkConnection := func() {
 		if connectionReceipt != nil {
@@ -284,12 +331,19 @@ func runDarkRestoreSupervisor(ctx context.Context, o darkRestoreSupervisorOption
 			if _, err = runtime.Refresh(renewal.Lease); err != nil {
 				return err
 			}
+			checkSystemProbe()
 			checkConnection()
 		}
 	}
 }
 
 func businessConnectionDigest(v mx.CustomerConnectionReceipt) string {
+	raw, _ := json.Marshal(v)
+	h := sha256.Sum256(raw)
+	return hex.EncodeToString(h[:])
+}
+
+func businessProtocolHealthDigest(v mx.ProtocolHealthReceipt) string {
 	raw, _ := json.Marshal(v)
 	h := sha256.Sum256(raw)
 	return hex.EncodeToString(h[:])

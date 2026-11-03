@@ -135,6 +135,72 @@ func quarantinePlanTx(ctx context.Context, tx *sql.Tx, key []byte, actor, client
 	return DarkRestoreQuarantinePlan{ClientID: client, NodeID: node.NodeID, InstallationID: node.InstallationID, TransitionSHA: receipt.TransitionSHA, StateSHA: snap.StateSHA, Prepared: b, RemainingBytes: remaining, ConfigSHA: candidate.SHA256, ManifestSHA: candidate.ManifestSHA256, SystemProbeID: probeID, SystemProbeCredentialSHA: probeCredentialSHA, PreparedAdmissionSHA: admissionSHA, candidate: candidate}, nil
 }
 
+// registeredQuarantineCandidateTx rederives the exact candidate that was
+// admitted at birth without treating later deployment-state changes as a new
+// cutover approval. The immutable prepared binding, client UUID, probe identity
+// and every config digest must still match the registered plan.
+func registeredQuarantineCandidateTx(ctx context.Context, tx *sql.Tx, key []byte, client, admittedUUID string, registered DarkRestoreQuarantinePlan) (xrayconfig.Candidate, error) {
+	var zero xrayconfig.Candidate
+	b := registered.Prepared
+	plan, err := readNativeInboundPlan(ctx, tx, key, b.InboundID)
+	if err != nil || plan.Profile.Spec != nil || len(plan.Nodes) != 1 {
+		return zero, ErrDarkRestoreCutover
+	}
+	c, err := readClient(ctx, tx, client)
+	if err != nil || c.UUID != admittedUUID {
+		return zero, ErrDarkRestoreCutover
+	}
+	original, err := renderPreparedLoopbackReality(plan, c, b.Format)
+	if err != nil || original.SHA256 != b.ContentSHA {
+		return zero, ErrDarkRestoreCutover
+	}
+	_, profile, err := editablePlanProfile(ctx, tx, key, plan)
+	if err != nil {
+		return zero, err
+	}
+	email, err := uc.CounterEmail(client)
+	if err != nil {
+		return zero, err
+	}
+	profile.Users = []xrayconfig.User{{UUID: admittedUUID, Email: email}}
+	node := plan.Nodes[0]
+	probe, err := usageledger.ProbeIdentityTx(ctx, tx, node.NodeID, node.InstallationID, b.InboundID)
+	if err != nil {
+		return zero, ErrDarkRestoreCutover
+	}
+	probeEmail, err := uc.CounterEmail(probe.ID)
+	if err != nil {
+		return zero, err
+	}
+	profile.Users = append(profile.Users, xrayconfig.User{UUID: probe.UUID, Email: probeEmail})
+	credential := sha256.Sum256([]byte(probe.UUID))
+	candidate, err := xrayconfig.RenderAssigned(node.NodeID, node.InstallationID, node.ListenIP, []xrayconfig.Assignment{{Profile: profile, DirectPort: node.DirectPort}})
+	if err != nil {
+		return zero, err
+	}
+	routes, err := xrayconfig.LabSubscriptionRoutes(candidate, admittedUUID, map[uint64]string{b.InboundID: fmt.Sprintf("LAB direct %d", b.InboundID)})
+	if err != nil {
+		return zero, err
+	}
+	raw, err := subscriptioncodec.Render(routes, subscriptioncodec.FormatRaw)
+	if err != nil || ix.BytesSHA(raw) != b.ContentSHA {
+		return zero, ErrDarkRestoreCutover
+	}
+	candidate, err = xrayconfig.WithUsageAPI(candidate, mx.MeteredStatsEndpoint)
+	if err != nil {
+		return zero, err
+	}
+	admissionSHA, err := mx.PreparedUsageAdmissionSHA(candidate, true)
+	if err != nil || registered.ClientID != client || registered.NodeID != node.NodeID ||
+		registered.InstallationID != node.InstallationID || registered.ConfigSHA != candidate.SHA256 ||
+		registered.ManifestSHA != candidate.ManifestSHA256 || registered.SystemProbeID != probe.ID ||
+		registered.SystemProbeCredentialSHA != hex.EncodeToString(credential[:]) ||
+		registered.PreparedAdmissionSHA != admissionSHA {
+		return zero, ErrDarkRestoreCutover
+	}
+	return candidate, nil
+}
+
 // Check the frozen candidate against independently selected node, installation,
 // plan and core pins. Only Xray's offline test mode is used.
 func (p DarkRestoreQuarantinePlan) ValidateOffline(ctx context.Context, node, installation, planSHA, binary, binarySHA string) (xrayconfig.Validation, error) {

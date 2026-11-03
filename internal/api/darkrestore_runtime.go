@@ -1,6 +1,9 @@
 package api
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"github.com/darktunnelmika/dark-xray-pro/internal/business"
 	mx "github.com/darktunnelmika/dark-xray-pro/internal/managedxray"
 	"net/http"
@@ -18,6 +21,8 @@ func (s *Server) darkRestoreRuntimeAgent(w http.ResponseWriter, r *http.Request)
 		ListenerApply                          *business.DarkRestoreListenerApply
 		ConnectionState                        *mx.CustomerConnectionState
 		ConnectionReceipt                      *mx.CustomerConnectionReceipt
+		SystemProbeState                       *mx.DarkRestoreSystemProbeState
+		SystemProbeReceipt                     *mx.ProtocolHealthReceipt
 	}
 	if decode(w, r, 16384, &req) != nil {
 		businessError(w, business.ErrInvalid)
@@ -27,8 +32,23 @@ func (s *Server) darkRestoreRuntimeAgent(w http.ResponseWriter, r *http.Request)
 		respond(w, 401, map[string]string{"error": "unauthorized"})
 		return
 	}
+	if req.Phase == "system-probe-result" {
+		if s.darkRestoreProbeEndpoint == nil || req.SystemProbeReceipt == nil || req.SystemProbeState != nil || req.ConnectionReceipt != nil || req.ConnectionState != nil || req.Birth != nil || req.ListenerApply != nil {
+			businessError(w, business.ErrInvalid)
+			return
+		}
+		evidence, err := s.business.RegisterDarkRestoreSystemProbeV1(r.Context(), []byte(bearer(r)), req.NodeID, req.InstallationID, req.PlanSHA, *s.darkRestoreProbeEndpoint, *req.SystemProbeReceipt)
+		if err != nil {
+			businessError(w, err)
+			return
+		}
+		raw, _ := json.Marshal(evidence.Receipt)
+		digest := sha256.Sum256(raw)
+		respond(w, 200, map[string]any{"receipt_sha256": hex.EncodeToString(digest[:]), "serving_health_recorded": true})
+		return
+	}
 	if req.Phase == "connection-result" {
-		if req.ConnectionReceipt == nil || req.Birth != nil || req.ListenerApply != nil || req.ConnectionState != nil {
+		if req.ConnectionReceipt == nil || req.SystemProbeReceipt != nil || req.SystemProbeState != nil || req.Birth != nil || req.ListenerApply != nil || req.ConnectionState != nil {
 			businessError(w, business.ErrInvalid)
 			return
 		}
@@ -41,7 +61,8 @@ func (s *Server) darkRestoreRuntimeAgent(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	if req.Phase == "applied" {
-		if req.ListenerApply == nil || req.Birth != nil {
+		if req.ListenerApply == nil || req.Birth != nil || req.SystemProbeReceipt != nil || req.SystemProbeState != nil ||
+			req.ConnectionReceipt != nil || req.ConnectionState != nil {
 			businessError(w, business.ErrInvalid)
 			return
 		}
@@ -50,10 +71,37 @@ func (s *Server) darkRestoreRuntimeAgent(w http.ResponseWriter, r *http.Request)
 			businessError(w, err)
 			return
 		}
+		if s.darkRestoreProbeEndpoint != nil {
+			s.quarantineMu.Lock()
+			q := s.quarantine
+			s.quarantineMu.Unlock()
+			if q == nil {
+				businessError(w, business.ErrDarkRestoreCutover)
+				return
+			}
+			q.mu.Lock()
+			if !q.runtime || q.planSHA != req.PlanSHA || q.plan.NodeID != req.NodeID || q.plan.InstallationID != req.InstallationID {
+				q.mu.Unlock()
+				businessError(w, business.ErrOwnershipDenied)
+				return
+			}
+			eventID := "darkrestore-probe-" + req.PlanSHA[:24]
+			_, err = s.business.QueueDarkRestoreSystemProbeV1(r.Context(), s.inboundKey, q.token, q.client, business.DarkRestoreSystemProbeInputV1{EventID: eventID, PlanSHA: req.PlanSHA}, *s.darkRestoreProbeEndpoint)
+			q.mu.Unlock()
+			if err != nil {
+				businessError(w, err)
+				return
+			}
+		}
 		respond(w, 200, map[string]any{"receipt_sha256": sha})
 		return
 	}
 	if req.Phase == "recovery" {
+		if req.Birth != nil || req.ListenerApply != nil || req.ConnectionState != nil || req.ConnectionReceipt != nil ||
+			req.SystemProbeState != nil || req.SystemProbeReceipt != nil {
+			businessError(w, business.ErrInvalid)
+			return
+		}
 		epoch, err := s.business.DarkRestoreRegisteredEpochForNode(r.Context(), req.NodeID, req.InstallationID, req.PlanSHA)
 		if err != nil {
 			businessError(w, err)
@@ -76,12 +124,32 @@ func (s *Server) darkRestoreRuntimeAgent(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	switch req.Phase {
+	case "system-probe-poll":
+		if s.darkRestoreProbeEndpoint == nil {
+			respond(w, 200, map[string]any{"work": false})
+			return
+		}
+		if req.SystemProbeState == nil || req.SystemProbeReceipt != nil || req.ConnectionState != nil || req.ConnectionReceipt != nil || req.Birth != nil || req.ListenerApply != nil {
+			businessError(w, business.ErrInvalid)
+			return
+		}
+		challenge, found, err := s.business.PollDarkRestoreSystemProbeV1(r.Context(), s.inboundKey, []byte(bearer(r)), req.NodeID, req.InstallationID, req.PlanSHA, *req.SystemProbeState, *s.darkRestoreProbeEndpoint)
+		if err != nil {
+			businessError(w, err)
+			return
+		}
+		if !found {
+			respond(w, 200, map[string]any{"work": false})
+			return
+		}
+		respond(w, 200, map[string]any{"work": true, "challenge": challenge, "endpoint": *s.darkRestoreProbeEndpoint})
 	case "connection-poll":
 		if s.customerConnectionEndpoint == nil {
 			respond(w, 200, map[string]any{"work": false})
 			return
 		}
-		if req.ConnectionState == nil || req.ConnectionReceipt != nil || req.Birth != nil || req.ListenerApply != nil {
+		if req.ConnectionState == nil || req.ConnectionReceipt != nil || req.Birth != nil || req.ListenerApply != nil ||
+			req.SystemProbeState != nil || req.SystemProbeReceipt != nil {
 			businessError(w, business.ErrInvalid)
 			return
 		}
@@ -100,6 +168,11 @@ func (s *Server) darkRestoreRuntimeAgent(w http.ResponseWriter, r *http.Request)
 		}
 		respond(w, 200, map[string]any{"work": true, "challenge": challenge, "endpoint": *s.customerConnectionEndpoint})
 	case "prepare":
+		if req.Birth != nil || req.ListenerApply != nil || req.ConnectionState != nil || req.ConnectionReceipt != nil ||
+			req.SystemProbeState != nil || req.SystemProbeReceipt != nil {
+			businessError(w, business.ErrInvalid)
+			return
+		}
 		p, err := s.business.DarkRestoreQuarantinePlan(r.Context(), s.inboundKey, q.token, q.client)
 		if err != nil {
 			businessError(w, err)
@@ -121,7 +194,9 @@ func (s *Server) darkRestoreRuntimeAgent(w http.ResponseWriter, r *http.Request)
 		}
 		respond(w, 200, map[string]any{"delivery": p.PrivateDelivery(), "lease": q.lease})
 	case "birth":
-		if req.Birth == nil || q.lease == nil || req.Birth.Lease != *q.lease || req.Birth.CoreSHA != q.coreSHA {
+		if req.Birth == nil || req.ListenerApply != nil || req.ConnectionState != nil || req.ConnectionReceipt != nil ||
+			req.SystemProbeState != nil || req.SystemProbeReceipt != nil ||
+			q.lease == nil || req.Birth.Lease != *q.lease || req.Birth.CoreSHA != q.coreSHA {
 			businessError(w, business.ErrDarkRestoreCutover)
 			return
 		}
@@ -132,6 +207,11 @@ func (s *Server) darkRestoreRuntimeAgent(w http.ResponseWriter, r *http.Request)
 		}
 		respond(w, 200, map[string]any{"epoch": registered.Epoch})
 	case "admit", "renew":
+		if req.Birth != nil || req.ListenerApply != nil || req.ConnectionState != nil || req.ConnectionReceipt != nil ||
+			req.SystemProbeState != nil || req.SystemProbeReceipt != nil {
+			businessError(w, business.ErrInvalid)
+			return
+		}
 		epoch, err := s.business.DarkRestoreAdmissionEpochForNode(r.Context(), s.inboundKey, req.NodeID, req.InstallationID, q.client, q.planSHA, req.Phase == "renew")
 		if err != nil {
 			businessError(w, err)
