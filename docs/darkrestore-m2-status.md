@@ -342,3 +342,34 @@ and the focused test command pass; exact follow-up CI remains authoritative.
 PRO LAB remains on revision
 `6af62c09f4d2d6fcb089a7d90ec0b5687bb986ba`; no LAB or production resource
 was changed.
+
+
+## Independent native baseline strengthening (source/test checkpoint)
+
+Fresh inspection found PR137 at `11830a42376e5abdc234f351a0d6752b02c3dc42`
+with 19/19 checks green, Draft/open/unmerged. LAB HUB and worker are active on
+`174af74c18d33d4366f4ae212060ddbbc84daa3c`, `vcs.modified=false`, zero restarts.
+That install and its closed gate are predecessor acceptance, not validation of
+this new change.
+
+The zero-activity baseline completion shortcut is closed. A separately pinned
+native-supervisor lifetime measurement/fence receipt now supplies the explicit
+native evidence contract. Preparation is read-only; receipt persistence and the
+baseline flag commit atomically with source coverage and the signed approval.
+Signatures establish claimant identity, not operational truth or absence of
+undeclared runtimes. Only synthetic authorities/measurement/fence anchors are
+used in tests. No real native evidence or production fact has been asserted.
+
+Tests exercise zero and nonzero signed measurements, independent pin mismatch,
+tampering/canonicalization, unknown coverage, overflow, expired/future fence,
+foreign/stale identity/state, holds, legacy unlimited, unauthorized preparation,
+rollback, immutable replay, reopen and supported v16 offline backup validation.
+The v15 handover fixture is outside the offline backup allowlist by design;
+its initial offline rejection was isolated to that fixture version and the
+allowlist remains unchanged. Existing financial rows/history are retained.
+No related installed binary or physical restore has been changed by this work.
+
+Final local candidate checks passed on the unchanged Go source: darkrestore
+5.544s, complete business 204.018s and backupacceptance 2.819s, plus vet for
+business/darkrestore and diff checks. Local race is not claimed; CI is the race
+authority. Publication, CI, installation and installed acceptance are separate.

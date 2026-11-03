@@ -18,6 +18,7 @@ type DarkRestoreCutoverSnapshotV1 struct {
 	SourceID                string `json:"source_id"`
 	ClientID                string `json:"client_id"`
 	ClientUUID              string `json:"client_uuid"`
+	ClientCreatedUnix       int64  `json:"client_created_unix,string"`
 	RepresentativeID        string `json:"representative_id"`
 	ImportEventID           string `json:"import_event_id"`
 	ImportReceiptSHA        string `json:"import_receipt_sha256"`
@@ -61,7 +62,7 @@ func readDarkRestoreCutoverSnapshotV1(ctx context.Context, q sellerQueryV2, sour
 	}
 	var receipt []byte
 	var up, down, baseline, holds sql.NullInt64
-	err = q.QueryRowContext(ctx, `SELECT c.id,c.uuid,c.representative_id,e.event_id,r.receipt_json,
+	err = q.QueryRowContext(ctx, `SELECT c.id,c.uuid,c.created_unix,c.representative_id,e.event_id,r.receipt_json,
  e.historical_bytes,c.plan_kind,c.volume_bytes,c.expires_unix,c.archived,c.deployment_state,
  a.uplink,a.downlink,a.baseline_complete,a.holds
  FROM darkrestore_import_entries_v1 e
@@ -69,7 +70,7 @@ func readDarkRestoreCutoverSnapshotV1(ctx context.Context, q sellerQueryV2, sour
  JOIN clients c ON c.id=e.client_id AND c.uuid=e.client_uuid
  LEFT JOIN pro_usage_accounts a ON a.client_id=c.id
  WHERE e.source_sha256=? AND e.source_id=?`, sourceSHA, sourceID).Scan(
-		&out.ClientID, &out.ClientUUID, &out.RepresentativeID, &out.ImportEventID, &receipt,
+		&out.ClientID, &out.ClientUUID, &out.ClientCreatedUnix, &out.RepresentativeID, &out.ImportEventID, &receipt,
 		&out.ImportedHistoricalBytes, &out.PlanKind, &out.CurrentEntitlement, &out.ExpiresUnix,
 		&out.Archived, &out.DeploymentState, &up, &down, &baseline, &holds)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -96,6 +97,12 @@ func readDarkRestoreCutoverSnapshotV1(ctx context.Context, q sellerQueryV2, sour
 		out.NativeDownlink = &down.Int64
 		out.NativeHolds = &holds.Int64
 	}
+	return hashDarkRestoreCutoverSnapshotV1(out)
+}
+
+func hashDarkRestoreCutoverSnapshotV1(out DarkRestoreCutoverSnapshotV1) (DarkRestoreCutoverSnapshotV1, error) {
+	out.StateSHA = ""
+	var err error
 	native := struct {
 		ClientID   string
 		ClientUUID string

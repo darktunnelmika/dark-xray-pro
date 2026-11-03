@@ -31,6 +31,9 @@ type DarkRestoreCutoverEvidenceReceiptV1 struct {
 	NativeBaselineSHA        string                                `json:"native_baseline_sha256"`
 	BillingAttributionSHA    string                                `json:"billing_attribution_sha256"`
 	TransitionSHA            string                                `json:"transition_sha256"`
+	NativeDocument           []byte                                `json:"native_document,omitempty"`
+	NativePublicKey          []byte                                `json:"native_public_key,omitempty"`
+	NativePins               darkrestore.NativeBaselinePinsV1      `json:"native_pins,omitzero"`
 	SettledHistoricalBytes   int64                                 `json:"settled_historical_bytes"`
 	CurrentFiniteEntitlement int64                                 `json:"current_finite_entitlement_bytes"`
 	NativeBaselineUplink     int64                                 `json:"native_baseline_uplink"`
@@ -108,6 +111,24 @@ func decodeCutoverEvidence(raw []byte, out *DarkRestoreCutoverEvidenceReceiptV1)
 		out.CreatedUnix <= 0 || out.TransitionOpenedUnixNano/1_000_000_000 != out.CreatedUnix {
 		return ErrUnavailable
 	}
+	if len(out.NativeDocument) > 0 {
+		native, nativeErr := darkrestore.VerifySignedNativeBaselineV1(out.NativeDocument, out.NativePublicKey, out.NativePins)
+		if nativeErr != nil || out.NativePins.DestinationSHA != out.DestinationSHA {
+			return ErrUnavailable
+		}
+		nativeValue, _, _, _, nativeErr := native.Evidence()
+		if nativeErr != nil || nativeValue.SourceSHA != out.SourceSHA256 || nativeValue.SourceID != out.SourceID ||
+			nativeValue.ClientID != out.ClientID || nativeValue.ImportReceiptSHA != out.ImportReceiptSHA ||
+			nativeValue.Uplink != out.NativeBaselineUplink || nativeValue.Downlink != out.NativeBaselineDownlink ||
+			out.CoverageApproval.ApprovedUnixNano < nativeValue.MeasuredThroughNano ||
+			nativeValue.FenceUntilNano <= out.TransitionOpenedUnixNano || nativeValue.MeasuredThroughNano > out.TransitionOpenedUnixNano ||
+			nativeValue.FenceUntilNano-nativeValue.MeasuredThroughNano > int64(5*time.Minute) {
+			return ErrUnavailable
+		}
+	} else if len(out.NativePublicKey) > 0 || out.NativePins != (darkrestore.NativeBaselinePinsV1{}) {
+		return ErrUnavailable
+	}
+
 	canonical, err := json.Marshal(out)
 	if err != nil || !bytes.Equal(canonical, raw) {
 		return ErrUnavailable
@@ -141,7 +162,7 @@ func decodeCutoverEvidence(raw []byte, out *DarkRestoreCutoverEvidenceReceiptV1)
 	}
 	transitionSHA, err := darkRestoreTransitionSHA(
 		out.ClientID, out.InventorySHA256, out.CoverageApprovalSHA256,
-		out.DestinationStateSHA, out.NativeBaselineSHA, out.TransitionOpenedUnixNano,
+		out.DestinationStateSHA, out.NativeBaselineSHA, out.NativePins.DocumentSHA, out.TransitionOpenedUnixNano,
 	)
 	if err != nil || transitionSHA != out.TransitionSHA {
 		return ErrUnavailable
@@ -178,6 +199,32 @@ func readCutoverEvidence(ctx context.Context, q sellerQueryV2, id string) (*Dark
 		out.CoverageAuthoritySHA256 != authoritySHA ||
 		strconv.FormatInt(out.SettledHistoricalBytes, 10) != settled ||
 		out.TransitionOpenedUnixNano != opened || out.CreatedUnix != created {
+		return nil, ErrUnavailable
+	}
+	if len(out.NativeDocument) == 0 {
+		return &out, nil
+	}
+	var uuid string
+	var clientCreated int64
+	if err = q.QueryRowContext(ctx, `SELECT uuid,created_unix FROM clients WHERE id=?`, id).Scan(&uuid, &clientCreated); err != nil || clientCreated <= 0 || clientCreated > 9223372036854775807/1_000_000_000 {
+		return nil, ErrUnavailable
+	}
+	verified, e := darkrestore.VerifySignedNativeBaselineV1(out.NativeDocument, out.NativePublicKey, out.NativePins)
+	if e != nil {
+		return nil, ErrUnavailable
+	}
+	native, _, _, _, e := verified.Evidence()
+	if e != nil || native.ClientUUID != uuid || native.CoverageFromNano > clientCreated*1_000_000_000 || native.MeasuredThroughNano < clientCreated*1_000_000_000 {
+		return nil, ErrUnavailable
+	}
+	holds := int64(0)
+	before, e := hashDarkRestoreCutoverSnapshotV1(DarkRestoreCutoverSnapshotV1{ClientID: id, ClientUUID: uuid, NativeAccountPresent: true, NativeUplink: &native.Uplink, NativeDownlink: &native.Downlink, NativeHolds: &holds})
+	if e != nil || before.NativeBaselineSHA != native.BeforeNativeSHA {
+		return nil, ErrUnavailable
+	}
+	before.NativeBaselineComplete = true
+	after, e := hashDarkRestoreCutoverSnapshotV1(before)
+	if e != nil || after.NativeBaselineSHA != out.NativeBaselineSHA {
 		return nil, ErrUnavailable
 	}
 	return &out, nil
@@ -237,81 +284,30 @@ func readCutoverReceipt(ctx context.Context, q sellerQueryV2, id string) (*DarkR
 	return &out, nil
 }
 
-// CompleteDarkRestoreZeroBaselineV1 establishes only the destination usage
-// baseline. It requires a disabled imported identity, a signed local settlement,
-// zero counters, zero holds and no native activity. It does not issue or deliver
-// a subscription, authorize activation, or change financial state.
+// CompleteDarkRestoreZeroBaselineV1 cannot establish lifetime coverage from
+// recorded zero counters or absent activity. Retained only as a closed legacy API.
 func (s *Store) CompleteDarkRestoreZeroBaselineV1(ctx context.Context, token, sourceSHA, sourceID string) (DarkRestoreCutoverSnapshotV1, error) {
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return DarkRestoreCutoverSnapshotV1{}, err
-	}
-	defer tx.Rollback()
-	if _, err = ownershipOwner(ctx, tx, token); err != nil {
-		return DarkRestoreCutoverSnapshotV1{}, err
-	}
-	present, err := darkRestoreCutoverSchemaState(ctx, tx)
-	if err != nil || !present {
-		return DarkRestoreCutoverSnapshotV1{}, ErrUnavailable
-	}
-	snapshot, err := readDarkRestoreCutoverSnapshotV1(ctx, tx, sourceSHA, sourceID)
-	if err != nil {
-		return DarkRestoreCutoverSnapshotV1{}, err
-	}
-	if !snapshot.NativeAccountPresent || snapshot.PlanKind != "volume" ||
-		snapshot.DeploymentState != "disabled" || snapshot.Archived ||
-		snapshot.NativeUplink == nil || snapshot.NativeDownlink == nil || snapshot.NativeHolds == nil {
-		return DarkRestoreCutoverSnapshotV1{}, ErrDarkRestoreCutover
-	}
-	attachment, err := readDarkRestoreLocalAttachment(ctx, tx, snapshot.ClientID)
-	if err != nil || attachment == nil || attachment.HandoffSHA == "" || attachment.SignerPublicSHA == "" {
-		return DarkRestoreCutoverSnapshotV1{}, ErrDarkRestoreCutover
-	}
-	if snapshot.NativeBaselineComplete {
-		if *snapshot.NativeUplink != 0 || *snapshot.NativeDownlink != 0 || *snapshot.NativeHolds != 0 {
-			return DarkRestoreCutoverSnapshotV1{}, ErrDarkRestoreCutover
-		}
-		return snapshot, tx.Commit()
-	}
-	if *snapshot.NativeUplink != 0 || *snapshot.NativeDownlink != 0 || *snapshot.NativeHolds != 0 {
-		return DarkRestoreCutoverSnapshotV1{}, ErrDarkRestoreCutover
-	}
-	var activity int
-	if err = tx.QueryRowContext(ctx, `SELECT
-		(SELECT count(*) FROM pro_usage_deltas WHERE client_id=?)+
-		(SELECT count(*) FROM pro_usage_holds WHERE client_id=?)+
-		(SELECT count(*) FROM pro_usage_epochs WHERE epoch_json LIKE ?)`,
-		snapshot.ClientID, snapshot.ClientID, "%"+snapshot.ClientID+"%").Scan(&activity); err != nil || activity != 0 {
-		return DarkRestoreCutoverSnapshotV1{}, ErrDarkRestoreCutover
-	}
-	result, err := tx.ExecContext(ctx, `UPDATE pro_usage_accounts SET baseline_complete=1 WHERE client_id=? AND baseline_complete=0 AND uplink=0 AND downlink=0 AND holds=0`, snapshot.ClientID)
-	if err != nil {
-		return DarkRestoreCutoverSnapshotV1{}, err
-	}
-	if n, e := result.RowsAffected(); e != nil || n != 1 {
-		return DarkRestoreCutoverSnapshotV1{}, ErrConflict
-	}
-	snapshot, err = readDarkRestoreCutoverSnapshotV1(ctx, tx, sourceSHA, sourceID)
-	if err != nil || !snapshot.NativeBaselineComplete {
-		return DarkRestoreCutoverSnapshotV1{}, ErrUnavailable
-	}
-	if err = tx.Commit(); err != nil {
-		return DarkRestoreCutoverSnapshotV1{}, err
-	}
-	return snapshot, nil
+	return DarkRestoreCutoverSnapshotV1{}, ErrDarkRestoreCutover
 }
 
-func darkRestoreTransitionSHA(clientID, inventorySHA, approvalSHA, stateSHA, nativeSHA string, opened int64) (string, error) {
+func darkRestoreTransitionSHA(clientID, inventorySHA, approvalSHA, stateSHA, nativeSHA, nativeDocumentSHA string, opened int64) (string, error) {
+	if nativeDocumentSHA == "" {
+		return cutoverSnapshotDigest("DARK-PRO-CUTOVER-TRANSITION-v1", struct {
+			ClientID, InventorySHA, ApprovalSHA, StateSHA, NativeSHA string
+			OpenedUnixNano                                           int64
+		}{clientID, inventorySHA, approvalSHA, stateSHA, nativeSHA, opened})
+	}
+
 	return cutoverSnapshotDigest("DARK-PRO-CUTOVER-TRANSITION-v1", struct {
-		ClientID, InventorySHA, ApprovalSHA, StateSHA, NativeSHA string
-		OpenedUnixNano                                           int64
-	}{clientID, inventorySHA, approvalSHA, stateSHA, nativeSHA, opened})
+		ClientID, InventorySHA, ApprovalSHA, StateSHA, NativeSHA, NativeDocumentSHA string
+		OpenedUnixNano                                                              int64
+	}{clientID, inventorySHA, approvalSHA, stateSHA, nativeSHA, nativeDocumentSHA, opened})
 }
 
 // OpenDarkRestoreCutoverV1 records an immutable evidence boundary from a
 // transactionally re-read destination snapshot. destinationSHA and
 // billingAttributionSHA are local operator pins, never browser-selected values.
-func (s *Store) OpenDarkRestoreCutoverV1(ctx context.Context, token string, inventory darkrestore.LocalHandoffInventoryV1, inventoryPin string, handoffs []darkrestore.VerifiedLocalHandoff, approval darkrestore.VerifiedHandoffCoverageApprovalV1, destinationSHA, billingAttributionSHA string) (DarkRestoreCutoverEvidenceReceiptV1, error) {
+func (s *Store) OpenDarkRestoreCutoverV1(ctx context.Context, token string, inventory darkrestore.LocalHandoffInventoryV1, inventoryPin string, handoffs []darkrestore.VerifiedLocalHandoff, approval darkrestore.VerifiedHandoffCoverageApprovalV1, destinationSHA, billingAttributionSHA string, native darkrestore.VerifiedNativeBaselineV1, nativePins darkrestore.NativeBaselinePinsV1) (DarkRestoreCutoverEvidenceReceiptV1, error) {
 	var zero DarkRestoreCutoverEvidenceReceiptV1
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -328,29 +324,41 @@ func (s *Store) OpenDarkRestoreCutoverV1(ctx context.Context, token string, inve
 	if err != nil || !present || !routeSHA.MatchString(destinationSHA) || !routeSHA.MatchString(billingAttributionSHA) {
 		return zero, ErrUnavailable
 	}
+	if _, e := darkrestore.CheckLocalHandoffCoverageV1(inventory, inventoryPin, handoffs); e != nil {
+		return zero, ErrDarkRestoreCutover
+	}
 	snapshot, err := readDarkRestoreCutoverSnapshotV1(ctx, tx, inventory.SourceSHA, inventory.SourceID)
 	if err != nil {
 		return zero, err
 	}
 	id, originalEvent := snapshot.ClientID, snapshot.ImportEventID
+	nativeValue, nativeRaw, nativePublic, verifiedPins, nativeErr := native.Evidence()
+	if nativeErr != nil || verifiedPins != nativePins || nativePins.DestinationSHA != destinationSHA {
+		return zero, ErrDarkRestoreCutover
+	}
 	if saved, readErr := readCutoverEvidence(ctx, tx, id); readErr != nil {
 		return zero, readErr
 	} else if saved != nil {
 		approvalValue, approvalSHA, authoritySHA, evidenceErr := approval.Evidence()
-		if evidenceErr != nil || saved.ActorUserID != actor ||
+		if evidenceErr != nil || saved.ActorUserID != actor || saved.NativePins != nativePins ||
+			!bytes.Equal(saved.NativeDocument, nativeRaw) || !bytes.Equal(saved.NativePublicKey, nativePublic) ||
 			saved.InventorySHA256 != inventoryPin ||
 			saved.CoverageApprovalSHA256 != approvalSHA ||
 			saved.CoverageAuthoritySHA256 != authoritySHA ||
 			saved.DestinationSHA != destinationSHA ||
-			saved.DestinationStateSHA != snapshot.StateSHA ||
 			saved.ImportReceiptSHA != snapshot.ImportReceiptSHA ||
-			saved.NativeBaselineSHA != snapshot.NativeBaselineSHA ||
 			saved.BillingAttributionSHA != billingAttributionSHA ||
 			!reflect.DeepEqual(saved.CoverageApproval, approvalValue) {
 			return zero, ErrConflict
 		}
 		saved.Replayed = true
 		return *saved, tx.Commit()
+	}
+	beforeSnapshot := snapshot
+	now := time.Now()
+	snapshot, err = projectAttestedNativeBaselineV1(snapshot, native, nativePins, now.UnixNano())
+	if err != nil {
+		return zero, err
 	}
 	if !snapshot.NativeAccountPresent || !snapshot.NativeBaselineComplete ||
 		snapshot.NativeUplink == nil || snapshot.NativeDownlink == nil || snapshot.NativeHolds == nil ||
@@ -366,12 +374,11 @@ func (s *Store) OpenDarkRestoreCutoverV1(ctx context.Context, token string, inve
 		return zero, ErrDarkRestoreCutover
 	}
 	approvalValue, approvalSHA, authoritySHA, err := approval.Evidence()
-	if err != nil {
+	if err != nil || approvalValue.ApprovedUnixNano < nativeValue.MeasuredThroughNano {
 		return zero, ErrDarkRestoreCutover
 	}
-	now := time.Now()
 	opened := now.UnixNano()
-	transitionSHA, err := darkRestoreTransitionSHA(id, inventoryPin, approvalSHA, snapshot.StateSHA, snapshot.NativeBaselineSHA, opened)
+	transitionSHA, err := darkRestoreTransitionSHA(id, inventoryPin, approvalSHA, snapshot.StateSHA, snapshot.NativeBaselineSHA, nativePins.DocumentSHA, opened)
 	if err != nil {
 		return zero, err
 	}
@@ -399,6 +406,7 @@ func (s *Store) OpenDarkRestoreCutoverV1(ctx context.Context, token string, inve
 		DestinationSHA:          destinationSHA, DestinationStateSHA: snapshot.StateSHA,
 		ImportReceiptSHA: snapshot.ImportReceiptSHA, NativeBaselineSHA: snapshot.NativeBaselineSHA,
 		BillingAttributionSHA: billingAttributionSHA, TransitionSHA: transitionSHA,
+		NativeDocument: nativeRaw, NativePublicKey: nativePublic, NativePins: nativePins,
 		SettledHistoricalBytes:   decision.SettledHistoricalBytes,
 		CurrentFiniteEntitlement: snapshot.CurrentEntitlement,
 		NativeBaselineUplink:     *snapshot.NativeUplink, NativeBaselineDownlink: *snapshot.NativeDownlink,
@@ -412,6 +420,16 @@ func (s *Store) OpenDarkRestoreCutoverV1(ctx context.Context, token string, inve
 	if _, err = tx.ExecContext(ctx, `INSERT INTO darkrestore_cutover_evidence_v1(client_id,inventory_sha256,coverage_approval_sha256,coverage_authority_sha256,settled_historical_bytes,transition_opened_unix_nano,receipt_json,created_unix) VALUES(?,?,?,?,?,?,?,?)`,
 		id, inventoryPin, approvalSHA, authoritySHA, strconv.FormatInt(out.SettledHistoricalBytes, 10), opened, raw, out.CreatedUnix); err != nil {
 		return zero, err
+	}
+	result, e := tx.ExecContext(ctx, `UPDATE pro_usage_accounts SET baseline_complete=1 WHERE client_id=? AND baseline_complete=0 AND uplink=? AND downlink=? AND holds=0`, id, *beforeSnapshot.NativeUplink, *beforeSnapshot.NativeDownlink)
+	if e != nil {
+		return zero, e
+	}
+	if n, e := result.RowsAffected(); e != nil || n != 1 {
+		return zero, ErrConflict
+	}
+	if nativeValue.FenceUntilNano <= time.Now().UnixNano() {
+		return zero, ErrDarkRestoreCutover
 	}
 	if err = tx.Commit(); err != nil {
 		return zero, err
@@ -472,7 +490,7 @@ func (s *Store) FinalizeDarkRestoreCutoverV1(ctx context.Context, token, clientI
 	delivery, err := readSubscriptionDelivery(ctx, tx, clientID)
 	if err != nil || !delivery.Enabled || delivery.Revision == 0 ||
 		delivery.Scope != HandoverSubscriptionScope ||
-		delivery.Created <= evidence.TransitionOpenedUnixNano {
+		delivery.Created <= evidence.TransitionOpenedUnixNano || delivery.Created > time.Now().UnixNano() {
 		return zero, ErrDarkRestoreCutover
 	}
 	now := time.Now()
@@ -511,7 +529,7 @@ func (s *Store) FinalizeDarkRestoreCutoverV1(ctx context.Context, token, clientI
 
 func cutoverSnapshotMatchesEvidence(ctx context.Context, q sellerQueryV2, evidence *DarkRestoreCutoverEvidenceReceiptV1) (DarkRestoreCutoverSnapshotV1, int64, error) {
 	var zero DarkRestoreCutoverSnapshotV1
-	if evidence == nil {
+	if evidence == nil || len(evidence.NativeDocument) == 0 {
 		return zero, 0, ErrDarkRestoreCutover
 	}
 	snapshot, err := readDarkRestoreCutoverSnapshotV1(ctx, q, evidence.SourceSHA256, evidence.SourceID)
@@ -587,7 +605,7 @@ func requireDarkRestoreFinalCutover(ctx context.Context, tx *sql.Tx, id string) 
 		delivery.EventID != receipt.SubscriptionEventID ||
 		delivery.SnapshotRevision != receipt.SubscriptionSnapshotRevision ||
 		delivery.Created != receipt.SubscriptionDeliveredNano ||
-		receipt.SubscriptionDeliveredNano <= evidence.TransitionOpenedUnixNano {
+		receipt.SubscriptionDeliveredNano <= evidence.TransitionOpenedUnixNano || receipt.SubscriptionDeliveredNano > time.Now().UnixNano() {
 		return ErrDarkRestoreCutover
 	}
 	return nil
@@ -633,7 +651,7 @@ func validateDarkRestoreCutovers(ctx context.Context, tx *sql.Tx) error {
 		if e != nil || !localAttachmentCoveredByInventory(attachment, evidence.Inventory) {
 			return ErrUnavailable
 		}
-		if deployment == "disabled" {
+		if deployment == "disabled" && len(evidence.NativeDocument) > 0 {
 			if _, _, e = cutoverSnapshotMatchesEvidence(ctx, tx, evidence); e != nil {
 				return ErrUnavailable
 			}

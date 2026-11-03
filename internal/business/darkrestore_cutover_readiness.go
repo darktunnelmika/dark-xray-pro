@@ -95,6 +95,9 @@ func (s *Store) DarkRestoreCutoverReadinessV1(ctx context.Context, sourceSHA, so
 		return out, err
 	}
 	if evidence != nil {
+		if len(evidence.NativeDocument) == 0 {
+			out.NativeBaselineComplete = false
+		}
 		out.SourceScope = "pinned_inventory_plus_independent_coverage_assertion"
 		out.SourceEpochSettled = true
 		out.DeclaredInventoryCoverageVerified = true
