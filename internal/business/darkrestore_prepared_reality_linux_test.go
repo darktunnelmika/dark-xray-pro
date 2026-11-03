@@ -148,6 +148,54 @@ func TestImportedLoopbackRealityStaysQuarantined(t *testing.T) {
 		if birth.Verify(pub, strings.Repeat("0", 64), lease, time.Now().UnixNano()) || birth.Verify(pub, pin, lease, lease.Expires) {
 			t.Fatal("wrong plan or expired birth accepted")
 		}
+
+		// Fault injection checks both schema creation and epoch registration rollback.
+		if _, err = f.s.db.Exec("CREATE TRIGGER fail_native_birth BEFORE INSERT ON pro_usage_epochs BEGIN SELECT RAISE(ABORT,'synthetic registration failure'); END"); err != nil {
+			t.Fatal(err)
+		}
+		if _, err = f.s.RegisterDarkRestoreBirth(ctx, key, f.owner.Token, client.ID, pin, pub, lease, birth); err == nil {
+			t.Fatal("failed ledger registration succeeded")
+		}
+		var leftover int
+		if err = f.s.db.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE name GLOB 'darkrestore_native_birth_v1*'").Scan(&leftover); err != nil || leftover != 0 {
+			t.Fatal("partial birth schema committed", err)
+		}
+		if _, err = f.s.db.Exec("DROP TRIGGER fail_native_birth"); err != nil {
+			t.Fatal(err)
+		}
+
+		for _, ddl := range darkRestoreBirthDDL {
+			if _, err = f.s.db.Exec(ddl); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if _, err = f.s.db.Exec("CREATE TEMP TRIGGER fail_birth_receipt BEFORE INSERT ON darkrestore_native_birth_v1 BEGIN SELECT RAISE(ABORT,'synthetic receipt failure'); END"); err != nil {
+			t.Fatal(err)
+		}
+		if _, err = f.s.RegisterDarkRestoreBirth(ctx, key, f.owner.Token, client.ID, pin, pub, lease, birth); err == nil {
+			t.Fatal("receipt failure ignored")
+		}
+		if err = f.s.db.QueryRow("SELECT COUNT(*) FROM pro_usage_epochs").Scan(&leftover); err != nil || leftover != 0 {
+			t.Fatal("receipt failure committed orphan epoch", err)
+		}
+		if _, err = f.s.db.Exec("DROP TRIGGER fail_birth_receipt"); err != nil {
+			t.Fatal(err)
+		}
+		registered, err := f.s.RegisterDarkRestoreBirth(ctx, key, f.owner.Token, client.ID, pin, pub, lease, birth)
+		if err != nil {
+			t.Fatal("atomic birth registration", err)
+		}
+		replayed, err := f.s.RegisterDarkRestoreBirth(ctx, key, f.owner.Token, client.ID, pin, pub, lease, birth)
+		if err != nil || !reflect.DeepEqual(registered, replayed) {
+			t.Fatal("birth receipt replay", err)
+		}
+		if err = f.s.db.QueryRow("SELECT COUNT(*) FROM pro_usage_epochs").Scan(&leftover); err != nil || leftover != 1 {
+			t.Fatal("duplicate accounting epoch", err, leftover)
+		}
+		if _, err = f.s.db.Exec("DELETE FROM darkrestore_native_birth_v1"); err == nil {
+			t.Fatal("birth receipt mutable")
+		}
+		t.Log("birth receipt and billable epoch committed once with rollback on failure")
 		conn, err := net.DialTimeout("tcp", "127.0.0.1:29181", time.Second)
 		if err == nil {
 			conn.Close()
@@ -173,6 +221,9 @@ func TestImportedLoopbackRealityStaysQuarantined(t *testing.T) {
 
 		if err = f.s.Close(); err != nil {
 			t.Fatal(err)
+		}
+		if _, err = ValidateOfflineBackup(ctx, f.path); err != nil {
+			t.Fatal("registered birth backup", err)
 		}
 		reopened, err := Open(f.path)
 		if err != nil {

@@ -649,6 +649,9 @@ func requireDarkRestoreFinalCutover(ctx context.Context, tx *sql.Tx, id string) 
 }
 
 func validateDarkRestoreCutovers(ctx context.Context, tx *sql.Tx) error {
+	if err := validateDarkRestoreBirths(ctx, tx); err != nil {
+		return err
+	}
 	present, err := darkRestoreCutoverSchemaState(ctx, tx)
 	if err != nil || !present {
 		return err

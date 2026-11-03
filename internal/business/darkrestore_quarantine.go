@@ -3,6 +3,7 @@ package business
 import (
 	"context"
 	"crypto/ed25519"
+	"database/sql"
 	"fmt"
 
 	ix "github.com/darktunnelmika/dark-xray-pro/internal/inboundexec"
@@ -42,6 +43,11 @@ func (s *Store) DarkRestoreQuarantinePlan(ctx context.Context, key []byte, token
 	if err != nil {
 		return zero, err
 	}
+	return quarantinePlanTx(ctx, tx, key, actor, client)
+}
+
+func quarantinePlanTx(ctx context.Context, tx *sql.Tx, key []byte, actor, client string) (DarkRestoreQuarantinePlan, error) {
+	var zero DarkRestoreQuarantinePlan
 	receipt, err := readCutoverReceipt(ctx, tx, client)
 	if err != nil || receipt == nil || receipt.ActorUserID != actor {
 		return zero, ErrDarkRestoreCutover

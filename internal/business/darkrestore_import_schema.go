@@ -58,6 +58,13 @@ func darkRestoreSchemaState(ctx context.Context, q sellerQueryV2) (bool, error) 
 		}
 		return false, nil
 	}
+	birthPresent, birthErr := birthSchema(ctx, q)
+	if birthErr != nil {
+		return false, birthErr
+	}
+	if birthPresent {
+		n -= len(darkRestoreBirthDDL)
+	}
 	baseCount := len(darkRestoreImportSchemaV1)
 	localCount := baseCount + len(darkRestoreLocalAttachmentSchemaV1)
 	cutoverCount := localCount + len(darkRestoreCutoverSchemaV1)
