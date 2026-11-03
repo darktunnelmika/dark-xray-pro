@@ -207,5 +207,3 @@ func TestDarkRestore5000OfflineCustomersImportReplayAndRecovery(t *testing.T) {
 	}
 	t.Logf("5000 synthetic private offline rows, 20 groups, 3 representatives; import=%s; idempotent replay, quarantine, accounting split and restart recovery verified", importDuration)
 }
-
-[executed on device: localhost (dadd182a-9777-46c4-a468-6d389b3617e9)]

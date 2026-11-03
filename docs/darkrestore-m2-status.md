@@ -134,5 +134,3 @@ not representative production data or operator acceptance. It does not establish
 a legacy-unlimited policy, final counter custody proof, positive imported
 subscription delivery, or persistent LAB installation. The source-local signed
 handoff and the imported-client quarantine are unchanged.
-
-[executed on device: localhost (dadd182a-9777-46c4-a468-6d389b3617e9)]
