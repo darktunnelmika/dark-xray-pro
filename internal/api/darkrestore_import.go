@@ -156,6 +156,37 @@ func (s *Server) attachDarkRestoreImport(mux *http.ServeMux) {
 			}
 			respond(w, 200, readiness)
 		})
+		handle("POST "+restoreBase+"/handoff/quarantine/admission", true, func(w http.ResponseWriter, r *http.Request, token string) {
+			var input struct {
+				PlanSHA string `json:"plan_sha256"`
+				EventID string `json:"event_id"`
+			}
+			if decode(w, r, 2048, &input) != nil {
+				businessError(w, business.ErrInvalid)
+				return
+			}
+			verified, err := darkrestore.VerifySignedLocalHandoff(handoff.path, handoff.digest, handoff.public)
+			if err != nil {
+				businessError(w, business.ErrUnavailable)
+				return
+			}
+			proof, err := verified.Settlement()
+			if err != nil {
+				businessError(w, business.ErrUnavailable)
+				return
+			}
+			state, err := s.business.DarkRestoreCutoverReadinessV1(r.Context(), proof.SourceSHA, proof.SourceID)
+			if err != nil {
+				businessError(w, err)
+				return
+			}
+			result, err := s.business.AuthorizeDarkRestoreAdmission(r.Context(), s.inboundKey, token, state.ClientID, input.PlanSHA, input.EventID)
+			if err != nil {
+				businessError(w, err)
+				return
+			}
+			respond(w, 200, map[string]any{"event_id": result.EventID, "epoch_id": result.Registered.Epoch.ID, "expires_unix_nano": result.Registered.Birth.Lease.Expires, "scope": "metered_zero_receipt_admission", "runtime_applied": false})
+		})
 		handle("POST "+restoreBase+"/handoff/quarantine", true, func(w http.ResponseWriter, r *http.Request, token string) {
 			verified, err := darkrestore.VerifySignedLocalHandoff(handoff.path, handoff.digest, handoff.public)
 			if err != nil {

@@ -6,8 +6,9 @@ const MaxReportBytes=8<<20
 var nodeRE=regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$`)
 var installationRE=regexp.MustCompile(`^[0-9a-f]{32}$`)
 type Authenticate func(context.Context,string,string,string)(usageledger.Principal,bool)
-type Handler struct{ledger *usageledger.Ledger;authenticate Authenticate;inflight chan struct{}}
+type Handler struct{ledger *usageledger.Ledger;authenticate Authenticate;inflight chan struct{};gate usageledger.AdmissionGate}
 func New(ledger *usageledger.Ledger,authenticate Authenticate)(*Handler,error){if ledger==nil||authenticate==nil{return nil,errors.New("usage ledger and registry authentication are required")};return &Handler{ledger:ledger,authenticate:authenticate,inflight:make(chan struct{},4)},nil}
+func NewWithAdmissionGate(ledger *usageledger.Ledger,auth Authenticate,gate usageledger.AdmissionGate)(*Handler,error){h,err:=New(ledger,auth);if err==nil{h.gate=gate};return h,err}
 func respond(w http.ResponseWriter,status int,value any){w.Header().Set("Content-Type","application/json");w.WriteHeader(status);_=json.NewEncoder(w).Encode(value)}
 func fail(w http.ResponseWriter,status int,code string){respond(w,status,map[string]string{"error":code})}
 func(h *Handler)ServeHTTP(w http.ResponseWriter,r *http.Request){
@@ -26,7 +27,7 @@ func(h *Handler)ServeHTTP(w http.ResponseWriter,r *http.Request){
  if r.URL.Path==InterruptionPath{h.interrupted(ctx,w,p,raw);return}
  if r.URL.Path==SettlementPath{h.settled(ctx,w,p,raw);return}
  var report uc.Report;if usagewire.Decode(raw,&report)!=nil{fail(w,400,"invalid_usage_json");return}
- receipt,err:=h.ledger.Accept(ctx,p,report)
+ receipt,err:=h.ledger.AcceptChecked(ctx,p,report,h.gate)
  if err!=nil{switch{
  case errors.Is(err,usageledger.ErrMissing):fail(w,404,"unregistered_usage_epoch")
  case errors.Is(err,usageledger.ErrAuthority):fail(w,403,"usage_scope_denied")

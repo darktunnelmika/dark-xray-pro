@@ -17,7 +17,7 @@ jobs:
   final-tcp-core:
     name: Experimental pinned core final TCP counters
     runs-on: ubuntu-24.04
-    timeout-minutes: 23  # Includes three actual 40-second source lease expirations.
+    timeout-minutes: 26  # Includes source lease expirations and isolated imported admission.
     steps:
       - uses: actions/checkout@v4
       - uses: actions/checkout@v4
@@ -73,6 +73,10 @@ jobs:
           for e in events:
               if e.get('Output'): print(e['Output'],end='')
           PYFINAL
+      - name: Prove actual imported-client admission and exactly-once final accounting
+        env:
+          DARK_PRO_TEST_QUARANTINE_ADMISSION: '1'
+        run: bash scripts/test-darkrestore-quarantine.sh
       - name: Reconcile a Dark Restore snapshot against an exited source and its authenticated final receipt
         env:
           DARK_PRO_TEST_FINAL_TCP: '1'

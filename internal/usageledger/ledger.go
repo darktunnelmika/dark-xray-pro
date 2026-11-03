@@ -230,9 +230,24 @@ func registerEpoch(ctx context.Context, c sqlWriter, authority uc.Epoch) error {
 	_, err = c.ExecContext(ctx, `INSERT INTO pro_usage_epochs(epoch_id,node_id,installation_id,kernel_boot_id,pid,start_ticks,config_sha,binding_sha,epoch_json,cursor_json,state,created_unix) VALUES(?,?,?,?,?,?,?,?,?,?,'open',?)`, e.ID, e.NodeID, e.InstallationID, e.KernelBootID, e.PID, strconv.FormatUint(e.ProcessStartTicks, 10), e.ConfigSHA, sha, raw, []byte(`{}`), time.Now().Unix())
 	return err
 }
+
+type AdmissionQuery interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+}
+type AdmissionGate func(context.Context, AdmissionQuery, Principal, uc.Report) error
+
 func (l *Ledger) Accept(ctx context.Context, principal Principal, r uc.Report) (uc.Receipt, error) {
+	return l.AcceptChecked(ctx, principal, r, nil)
+}
+func (l *Ledger) AcceptChecked(ctx context.Context, principal Principal, r uc.Report, gate AdmissionGate) (uc.Receipt, error) {
 	var receipt uc.Receipt
 	err := l.write(ctx, func(c *ledgerConn) error {
+		if gate != nil {
+			if err := gate(ctx, c, principal, r); err != nil {
+				return err
+			}
+		}
 		var epochJSON, cursorJSON []byte
 		var node, installation, binding, state string
 		e := c.QueryRowContext(ctx, "SELECT node_id,installation_id,binding_sha,epoch_json,cursor_json,state FROM pro_usage_epochs WHERE epoch_id=?", r.EpochID).Scan(&node, &installation, &binding, &epochJSON, &cursorJSON, &state)

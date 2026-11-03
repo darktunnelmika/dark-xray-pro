@@ -10,6 +10,9 @@ test -x "$DARK_PRO_TEST_XRAY_BINARY"
 test "$(sha256sum "$DARK_PRO_TEST_XRAY_BINARY" | cut -d' ' -f1)" = "$DARK_PRO_TEST_XRAY_SHA256"
 
 task_run='^(TestImportedLoopbackRealityStaysQuarantined|TestQuarantineRealAgentTLS)$'
+if test "${DARK_PRO_TEST_QUARANTINE_ADMISSION:-}" = 1; then
+ task_run='^(TestImportedLoopbackRealityStaysQuarantined|TestQuarantineRealAgentTLS|TestRealImportedQuarantineAdmissionAndTraffic)$'
+fi
 task_output='quarantine.jsonl'
 task_count=1
 # Compile before entering a network that has no route to module proxies or DNS.
@@ -37,6 +40,7 @@ test -z "$(sudo ip -n "$task_ns" -6 route show default)"
 test "$(sudo ip -n "$task_ns" -o link show | wc -l)" -eq 1
 
 sudo ip netns exec "$task_ns" runuser -u "$task_user" -- env \
+  DARK_PRO_TEST_FINAL_TCP="${DARK_PRO_TEST_QUARANTINE_ADMISSION:-0}" \
   DARK_PRO_TEST_QUARANTINE_WORKER="$RUNNER_TEMP/quarantine-worker.test" \
   DARK_PRO_TEST_XRAY_BINARY="$DARK_PRO_TEST_XRAY_BINARY" \
   DARK_PRO_TEST_XRAY_SHA256="$DARK_PRO_TEST_XRAY_SHA256" \
@@ -46,9 +50,10 @@ sudo ip netns exec "$task_ns" runuser -u "$task_user" -- env \
   > "$RUNNER_TEMP/$task_output"
 
 python3 - "$RUNNER_TEMP/$task_output" <<'PYCHECK'
-import json,sys
+import json,sys,os
 events=[json.loads(line) for line in open(sys.argv[1])]
 required={"TestImportedLoopbackRealityStaysQuarantined","TestQuarantineRealAgentTLS"}
+if os.getenv("DARK_PRO_TEST_QUARANTINE_ADMISSION")=="1": required.add("TestRealImportedQuarantineAdmissionAndTraffic")
 assert required <= {e.get("Test") for e in events if e.get("Action")=="pass"}
 assert not any(e.get("Action") in ("fail","skip") for e in events)
 for e in events:

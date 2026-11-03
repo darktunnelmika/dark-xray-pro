@@ -12,7 +12,7 @@ func (s *Server) nativeUsageHandler() http.Handler {
 	if s.business == nil || s.business.UsageLedger() == nil {
 		return nil
 	}
-	handler, err := usageingest.New(s.business.UsageLedger(), func(ctx context.Context, node, installation, token string) (usageledger.Principal, bool) {
+	handler, err := usageingest.NewWithAdmissionGate(s.business.UsageLedger(), func(ctx context.Context, node, installation, token string) (usageledger.Principal, bool) {
 		if ctx.Err() != nil {
 			return usageledger.Principal{}, false
 		}
@@ -20,7 +20,7 @@ func (s *Server) nativeUsageHandler() http.Handler {
 			return usageledger.Principal{}, false
 		}
 		return usageledger.Principal{NodeID: node, InstallationID: installation}, true
-	})
+	}, s.business.CheckDarkRestoreAdmission)
 	if err != nil {
 		return nil
 	}
