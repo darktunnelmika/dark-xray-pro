@@ -78,9 +78,10 @@ func TestDarkRestoreUsageRejectsMismatchedLocalAttachmentAtRead(t *testing.T) {
 		Terminal:   uc.Receipt{EpochID: strings.Repeat("c", 32), Sequence: 1, SHA: strings.Repeat("d", 64)},
 		PriorBytes: 7, Up: 3, Down: 4, Historical: 14, Remaining: 999986,
 	}
+	now := time.Now()
 	receipt := DarkRestoreLocalAttachmentReceiptV1{
 		ClientID: id, OriginalEventID: req.EventID, ActorUserID: "test-owner",
-		Settlement: proof, CreatedUnix: time.Now().Unix(),
+		Settlement: proof, CreatedUnix: now.Unix(), CreatedUnixNano: now.UnixNano(),
 	}
 	encode := func(value DarkRestoreLocalAttachmentReceiptV1) []byte {
 		t.Helper()
@@ -102,6 +103,7 @@ func TestDarkRestoreUsageRejectsMismatchedLocalAttachmentAtRead(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, mutate := range []func(*DarkRestoreLocalAttachmentReceiptV1){
+		func(r *DarkRestoreLocalAttachmentReceiptV1) { r.CreatedUnixNano += int64(time.Second) },
 		func(r *DarkRestoreLocalAttachmentReceiptV1) { r.Settlement.SourceID = "other-source" },
 		func(r *DarkRestoreLocalAttachmentReceiptV1) { r.OriginalEventID = "other-import-event" },
 		func(r *DarkRestoreLocalAttachmentReceiptV1) {

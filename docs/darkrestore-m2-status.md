@@ -17,6 +17,7 @@ This branch remains a draft. It must not be merged or installed as a completed M
 - Replay the same event without duplication; reject changed requests, reimport of a consumed source, and UUID collisions across source snapshots.
 - Import and assignment do not debit representative credit. Existing ownership transfer enforces current management scope; later renewal charges the current representative.
 - Quarantine rejects individual/bulk enable and both subscription token issuers.
+- Read-only cutover readiness counts subscription delivery only when the authoritative delivery journal entry is strictly newer than the signed local-settlement receipt. The attachment keeps a canonical nanosecond timestamp so an earlier or simultaneous delivery cannot satisfy M4/M5.
 - Reopen and native offline backup validation reject missing or contradictory import schema/history.
 
 ## Verified by automated tests
@@ -28,6 +29,7 @@ This branch remains a draft. It must not be merged or installed as a completed M
 - Abrupt process exit mid-transaction and immediately after commit, recovery through the same request, reopen and native offline backup validation.
 - Archived/promoted/blocked historical totals and safe subset import.
 - Ownership transfer, previous-manager rejection, current-manager renewal charging.
+- Subscription readiness rejects missing settlement, disabled delivery schema, zero revision, and delivery before or simultaneous with settlement; only a later authoritative journal entry passes that single gate.
 - Source authenticity, tampered accounting, uncertain UUID and group mapping rejection.
 - Eight writers across two stores converge on one receipt. Native encrypted backup and restore preserves the imported client and decryptable legacy history, and rejects missing or wrong archive keys.
 - Corruption rejection on reopen and backup validation.

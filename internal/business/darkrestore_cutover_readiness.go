@@ -26,6 +26,14 @@ type DarkRestoreCutoverReadinessV1 struct {
 	VerificationBlockers        []string `json:"verification_blockers"`
 }
 
+func darkRestoreSubscriptionDeliveredAfterSettlement(attachment *DarkRestoreLocalAttachmentReceiptV1, delivery subscriptionDeliveryHead) bool {
+	// Delivery timestamps are recorded by the authoritative snapshot journal in
+	// Unix nanoseconds. A pre-settlement or simultaneous record is not evidence
+	// that the destination configuration was delivered after the source closed.
+	return attachment != nil && delivery.Enabled && delivery.Revision > 0 &&
+		delivery.Created > attachment.CreatedUnixNano
+}
+
 // DarkRestoreCutoverReadinessV1 is evidence only. It never activates a client,
 // completes a baseline, publishes a subscription or edits representative credit.
 func (s *Store) DarkRestoreCutoverReadinessV1(ctx context.Context, sourceSHA, sourceID string) (DarkRestoreCutoverReadinessV1, error) {
@@ -83,7 +91,7 @@ func (s *Store) DarkRestoreCutoverReadinessV1(ctx context.Context, sourceSHA, so
 	if err != nil {
 		return out, err
 	}
-	out.SubscriptionDelivered = delivery.Enabled && delivery.Revision > 0
+	out.SubscriptionDelivered = darkRestoreSubscriptionDeliveredAfterSettlement(attachment, delivery)
 	if !out.SourceEpochSettled {
 		out.ActivationBlockers = append(out.ActivationBlockers, "source_epoch_not_settled")
 	}

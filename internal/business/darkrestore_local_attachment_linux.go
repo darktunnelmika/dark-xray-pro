@@ -133,7 +133,8 @@ func (s *Store) attachProvenLocalSettlement(ctx context.Context, token string, p
         (SELECT count(*) FROM pro_usage_epochs WHERE epoch_json LIKE ?)`, id, id, "%"+id+"%").Scan(&activity); err != nil || activity != 0 {
 		return DarkRestoreLocalAttachmentReceiptV1{}, ErrConflict
 	}
-	out := DarkRestoreLocalAttachmentReceiptV1{ClientID: id, OriginalEventID: originalEvent, ActorUserID: actor, Settlement: proof, HandoffSHA: handoffSHA, SignerPublicSHA: publicSHA, CreatedUnix: time.Now().Unix()}
+	now := time.Now()
+	out := DarkRestoreLocalAttachmentReceiptV1{ClientID: id, OriginalEventID: originalEvent, ActorUserID: actor, Settlement: proof, HandoffSHA: handoffSHA, SignerPublicSHA: publicSHA, CreatedUnix: now.Unix(), CreatedUnixNano: now.UnixNano()}
 	raw, err := json.Marshal(out)
 	if err != nil {
 		return DarkRestoreLocalAttachmentReceiptV1{}, err
