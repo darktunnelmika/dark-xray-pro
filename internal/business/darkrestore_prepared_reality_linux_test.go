@@ -5,7 +5,11 @@ package business
 import (
 	"bytes"
 	"context"
+	"crypto/ed25519"
+	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -75,6 +79,52 @@ func TestImportedLoopbackRealityStaysQuarantined(t *testing.T) {
 	replay, err := f.s.DeliverPreparedDarkRestoreSubscriptionV1(ctx, key, f.owner.Token, ev.ClientID, input)
 	if err != nil || !replay.Receipt.Replayed || !bytes.Equal(delivered.Subscription.Content, replay.Subscription.Content) || !reflect.DeepEqual(balances, ownershipBalances(t, f.s)) {
 		t.Fatal("replay or balance mismatch", err)
+	}
+	stage, err := f.s.DarkRestoreQuarantinePlan(ctx, key, f.owner.Token, client.ID)
+	if err != nil || stage.RemainingBytes != 999986 || stage.Prepared.ContentSHA != delivered.Subscription.SHA256 {
+		t.Fatal("quarantine plan", err)
+	}
+	pin, err := stage.Digest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = stage.ValidateOffline(ctx, "wrong-node", stage.InstallationID, pin, "", ""); !errors.Is(err, ErrDarkRestoreCutover) {
+		t.Fatal("wrong node passed")
+	}
+	if _, err = f.s.DarkRestoreQuarantinePlan(ctx, key, f.rep.Token, client.ID); err == nil {
+		t.Fatal("representative staged a quarantined plan")
+	}
+	if binary := os.Getenv("DARK_PRO_TEST_XRAY_BINARY"); binary != "" {
+		pub, signer, err := ed25519.GenerateKey(nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		dir := t.TempDir()
+		if err = os.Chmod(dir, 0700); err != nil {
+			t.Fatal(err)
+		}
+		core := os.Getenv("DARK_PRO_TEST_XRAY_SHA256")
+		receipt, err := stage.RegisterOffline(ctx, stage.NodeID, stage.InstallationID, pin, binary, core, dir, signer)
+		if err != nil || !receipt.Verify(pub, pin, core) {
+			t.Fatal("real offline registration", err)
+		}
+		replay, err := stage.RegisterOffline(ctx, stage.NodeID, stage.InstallationID, pin, binary, core, dir, signer)
+		if err != nil || !reflect.DeepEqual(replay, receipt) {
+			t.Fatal("registration replay", err)
+		}
+		path := filepath.Join(dir, pin+".json")
+		raw, err := os.ReadFile(path)
+		var persisted DarkRestoreQuarantineRegistration
+		if err != nil || json.Unmarshal(raw, &persisted) != nil || !persisted.Verify(pub, pin, core) || persisted.Verify(pub, strings.Repeat("0", 64), core) {
+			t.Fatal("persisted registration binding", err)
+		}
+		if err = os.WriteFile(path, []byte("corrupt"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err = stage.RegisterOffline(ctx, stage.NodeID, stage.InstallationID, pin, binary, core, dir, signer); !errors.Is(err, ErrConflict) {
+			t.Fatal("corrupt receipt overwritten", err)
+		}
+		t.Log("pinned core accepted quarantined imported identity")
 	}
 	if _, err = f.s.SetClientStateScoped(ctx, SetClientState{EventID: "prepared-loopback-enable-0001", ClientID: client.ID, Action: "enable", Reason: "Verify imported client guard"}, client.RepresentativeID); !errors.Is(err, ErrDarkRestoreCutover) {
 		t.Fatal("missing apply evidence", err)
