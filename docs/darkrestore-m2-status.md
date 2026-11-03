@@ -104,6 +104,15 @@ Verified locally on the isolated test host with Go 1.27.3:
   375 imported clients each. A complete 125-client group then moved to a third
   representative without a credit debit, while its original historical total
   remained unchanged.
+- A separate private, SHA-pinned offline fixture processed 5,000 finite-volume
+  rows, 20 source groups and 5,000 encrypted legacy events across three
+  representatives. Exact pagination verified every preserved UUID and expiry and
+  every imported identity remained disabled. Import, same-request replay, receipt
+  and sealed-event recovery, offline backup validation and reopen/replay preserved
+  one client per source identity, the historical/post-migration split and all
+  representative balances. The source hash remained unchanged. On the isolated
+  host the import itself completed in about 3.67 seconds and the focused test in
+  about 10.9 seconds.
 - Current scope, UUID, expiry, quarantine, exact pagination and origin survived
   reopen and offline backup validation. An identical import recovered the same
   receipt. A 4096-byte renewal charged only the new representative, once across
@@ -120,7 +129,10 @@ Verified locally on the isolated test host with Go 1.27.3:
   belongs to CI for the final published head; older green CI is not evidence for
   these newly added files.
 
-The 750-row fixture is synthetic and finite-volume. It is not representative
-production data, a legacy-unlimited policy, a final counter custody proof,
-positive imported subscription delivery, or persistent LAB installation.
-The source-local signed handoff and the imported-client quarantine are unchanged.
+The 5,000-row fixture adds representative-scale synthetic coverage, but it is
+not representative production data or operator acceptance. It does not establish
+a legacy-unlimited policy, final counter custody proof, positive imported
+subscription delivery, or persistent LAB installation. The source-local signed
+handoff and the imported-client quarantine are unchanged.
+
+[executed on device: localhost (dadd182a-9777-46c4-a468-6d389b3617e9)]
