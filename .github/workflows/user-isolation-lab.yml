@@ -1,0 +1,103 @@
+name: Native per-user isolation — LAB core conformance
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  user-isolation:
+    name: User isolation (${{ matrix.profile }}) — existing streams and live counters
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        profile: [stock, patched]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify overlay input and non-overwrite guards
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python3 -m unittest discover -s tools/core-lab -p "test_*.py" -v
+      - uses: actions/setup-go@v5
+        if: matrix.profile == 'patched'
+        with:
+          go-version: '1.27.2'
+          cache: false
+      - name: Build reviewed source-only experimental core (never deploy)
+        if: matrix.profile == 'patched'
+        shell: bash
+        env:
+          GOTOOLCHAIN: local
+        run: |
+          set -euo pipefail
+          test "$(id -u)" != 0
+          git clone --quiet --depth=1 --branch v26.9.9 https://github.com/XTLS/Xray-core.git "$RUNNER_TEMP/user-close-core"
+          test "$(git -C "$RUNNER_TEMP/user-close-core" rev-parse HEAD)" = 52a412d9e2f5c2a5142b1b4e2ab3771dacb8b120
+          python3 tools/core-lab/apply_vless_sessions.py --source "$RUNNER_TEMP/user-close-core" --lab-only
+          cd "$RUNNER_TEMP/user-close-core"
+          gofmt -w proxy/vless/inbound/inbound.go proxy/vless/inbound/pro_vless_sessions*.go proxy/proxy.go proxy/pro_metered_splice*.go
+          go mod download
+          go mod verify
+          go test -race ./proxy/vless/inbound ./proxy -run '^TestPRO' -count=3 -json -timeout=180s > "$RUNNER_TEMP/core-session-unit.jsonl"
+          python3 - "$RUNNER_TEMP/core-session-unit.jsonl" <<'PY'
+          import json,sys
+          events=[json.loads(line) for line in open(sys.argv[1])]
+          expected={'TestPROUserRemovalClosesAllOwnStreamsOnly','TestPROReaddCannotAdmitOldHandshakeOrLoseNewSession','TestPROSameEmailOnAnotherInboundIsIndependent','TestPROBlockedCloseDoesNotHoldAdmissionLock','TestPROConcurrentAdmissionRemovalAndShutdown','TestPROMeteredRawBatchesAndExactTail','TestPROMeteredRawRetainsPartialWriteOnFailure','TestPROMeteredRawCancellationDoesNotConsumeNextBatch'}
+          for name in expected:
+              assert sum(e.get('Test')==name and e.get('Action')=='pass' for e in events)==3,name
+          assert not any(e.get('Action') in ('skip','fail') for e in events)
+          print('All eight lifecycle/raw-copy tests passed three times with Race')
+          PY
+          CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o "$RUNNER_TEMP/xray-user-close-lab" ./main
+          git diff --exit-code -- go.mod go.sum
+          echo "DARK_PRO_TEST_XRAY_BINARY=$RUNNER_TEMP/xray-user-close-lab" >> "$GITHUB_ENV"
+          echo "DARK_PRO_TEST_XRAY_SHA256=$(sha256sum "$RUNNER_TEMP/xray-user-close-lab" | cut -d' ' -f1)" >> "$GITHUB_ENV"
+      - name: Retrieve the unchanged official core for negative controls
+        if: matrix.profile == 'stock'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir "$RUNNER_TEMP/stock-user-close"
+          cd "$RUNNER_TEMP/stock-user-close"
+          curl -fLSs --retry 3 --connect-timeout 10 --max-time 120 https://github.com/XTLS/Xray-core/releases/download/v26.9.9/Xray-linux-64.zip -o core.zip
+          echo '1eb9175d0f0a8f8149c9230a7fc5ae66ce332ed20a53155ce61fe62e3f58b7df  core.zip' | sha256sum -c -
+          unzip -j core.zip xray -d bin
+          chmod 0700 bin/xray
+          echo "DARK_PRO_TEST_XRAY_BINARY=$PWD/bin/xray" >> "$GITHUB_ENV"
+          echo "DARK_PRO_TEST_XRAY_SHA256=$(sha256sum bin/xray | cut -d' ' -f1)" >> "$GITHUB_ENV"
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.12'
+          cache: false
+      - name: Real Store and Registry plus three persistent connections
+        shell: bash
+        env:
+          DARK_PRO_TEST_USER_CLOSE_MODE: ${{ matrix.profile }}
+          GOTOOLCHAIN: local
+        run: |
+          set -euo pipefail
+          go mod verify
+          go mod tidy -diff
+          go test ./internal/api -run '^TestRealCoreUserIsolationContract$' -count=1 -json -timeout=150s > "$RUNNER_TEMP/user-close-conformance.jsonl"
+          python3 - "$RUNNER_TEMP/user-close-conformance.jsonl" <<'PY'
+          import json,sys
+          events=[json.loads(line) for line in open(sys.argv[1])]
+          root='TestRealCoreUserIsolationContract'
+          expected={root,*(root+'/'+name for name in ['REALITY_Vision_TLS_payload','REALITY_TCP','REALITY_gRPC'])}
+          passed={e.get('Test') for e in events if e.get('Action')=='pass'}
+          assert expected<=passed,(expected-passed)
+          assert not any(e.get('Action') in ('skip','fail') for e in events)
+          for e in events:
+              if e.get('Output'): print(e['Output'],end='')
+          PY
+          git diff --exit-code -- go.mod go.sum
+      - name: Preserve diagnostic text in the job log on failure
+        if: failure()
+        shell: bash
+        run: |
+          for log in "$RUNNER_TEMP/core-session-unit.jsonl" "$RUNNER_TEMP/user-close-conformance.jsonl"; do
+            if test -f "$log"; then tail -100 "$log"; fi
+          done
+      # No executable, generated config, credential, database or deployment is uploaded.
