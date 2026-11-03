@@ -117,6 +117,29 @@ func (s *Store) currentInitialSubscriptionProof(ctx context.Context, tx *sql.Tx,
 	if count != 1 {
 		return out, ErrConflict
 	}
+	final, err := readCutoverReceipt(ctx, tx, client)
+	if err != nil {
+		return out, err
+	}
+	if final != nil && final.SubscriptionDeliveryScope == DarkRestorePreparedDeliveryScopeV1 {
+		evidence, err := readCutoverEvidence(ctx, tx, client)
+		if err != nil {
+			return out, err
+		}
+		if evidence == nil || len(evidence.NativeDocument) == 0 || evidence.TransitionSHA != final.TransitionSHA ||
+			evidence.InventorySHA256 != final.EvidenceInventorySHA256 ||
+			evidence.CoverageApprovalSHA256 != final.EvidenceApprovalSHA256 ||
+			evidence.SettledHistoricalBytes != final.SettledHistoricalBytes ||
+			evidence.TransitionOpenedUnixNano != final.TransitionOpenedUnixNano {
+			return out, ErrDarkRestoreCutover
+		}
+		if err = verifyCutoverHistoricalBudget(ctx, tx, evidence); err != nil {
+			return out, err
+		}
+		if err = verifyPreparedInitialDelivery(ctx, tx, *final, state, round, raw); err != nil {
+			return out, err
+		}
+	}
 	expires := round.Expires
 	if state.base.Expires < expires {
 		expires = state.base.Expires
@@ -139,6 +162,36 @@ func (s *Store) currentInitialSubscriptionProof(ctx context.Context, tx *sql.Tx,
 		ClientExpiry                                                   int64
 	}{initialSHA, state.base, state.apply.payload.Generation, state.apply.payload.Candidate.SHA256, state.apply.payload.Candidate.ManifestSHA256, c.ID, c.UUID, stableRepresentative, c.ExpiresUnix})
 	return initialSubscriptionProof{Raw: raw, Round: round, State: state, BindingSHA: binding, Expires: expires}, nil
+}
+
+// The caller has already authenticated the applied plan, accounting identity
+// and accepted health round in this transaction. Match the owner's prior export
+// against that exact route before creating or serving any subscription bytes.
+func verifyPreparedInitialDelivery(ctx context.Context, tx *sql.Tx, final DarkRestoreCutoverReceiptV1, state initialApplySnapshot, round initialHealthRoundRow, raw []byte) error {
+	promotion := state.promotion
+	binding := final.Prepared
+	if binding.Format != "uri" || binding.InboundID != promotion.InboundID ||
+		binding.PlanRevision != promotion.PlanRevision || binding.InboundRevision != promotion.SourceInboundRevision ||
+		subscriptionBodySHA(raw) != binding.ContentSHA {
+		return ErrDarkRestoreCutover
+	}
+	authority, err := preparedPlanAuthorityAtRevision(ctx, tx, binding.InboundID, promotion.InboundRevision)
+	if err != nil {
+		return err
+	}
+	if authority.AuthoritySHA != binding.AuthoritySHA {
+		return ErrDarkRestoreCutover
+	}
+	promotedAt, err := readNativeInboundPromotionUnixNano(ctx, tx, binding.InboundID, promotion.EventID, promotion.CreatedUnix)
+	if err != nil {
+		return err
+	}
+	ack := state.apply.view.Receipt
+	if ack == nil || round.receipt == nil || len(round.Members) != 1 || final.SubscriptionDeliveredNano >= promotedAt ||
+		promotedAt >= ack.ObservedAt || ack.ObservedAt >= round.Members[0].Accepted {
+		return ErrDarkRestoreCutover
+	}
+	return nil
 }
 
 func (s *Store) currentInitialSubscriptionSnapshot(ctx context.Context, tx *sql.Tx, key []byte, row subscriptionSnapshotRow, endpoint *mx.ProtocolHealthEndpoint, now int64) (initialSubscriptionProof, error) {

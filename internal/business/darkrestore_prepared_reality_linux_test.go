@@ -36,6 +36,9 @@ func TestPreparedLoopbackRealityMatchesAppliedIdentity(t *testing.T) {
 	if err != nil || prepared.PathVerified {
 		t.Fatal("prepared export", err)
 	}
+	binding.ContentSHA = prepared.SHA256
+	final := DarkRestoreCutoverReceiptV1{ClientID: c.ID, Prepared: binding,
+		SubscriptionDeliveryScope: DarkRestorePreparedDeliveryScopeV1, SubscriptionDeliveredNano: time.Now().UnixNano()}
 	if _, err = f.s.BootstrapOwner(ctx, "initial-owner", "synthetic-initial-health-password"); err != nil {
 		t.Fatal(err)
 	}
@@ -57,6 +60,23 @@ func TestPreparedLoopbackRealityMatchesAppliedIdentity(t *testing.T) {
 	proof, err := f.s.currentInitialSubscriptionProof(ctx, tx, f.key, c.ID, 501, round.ID, round.InitialApplySHA, &endpoint, time.Now().UnixNano())
 	if err != nil || !bytes.Equal(prepared.Content, proof.Raw) {
 		t.Fatal("prepared and applied routes differ", err)
+	}
+	if err = verifyPreparedInitialDelivery(ctx, tx, final, proof.State, proof.Round, proof.Raw); err != nil {
+		t.Fatal("matching prepared delivery, promotion, apply and health", err)
+	}
+	for _, change := range []func(*DarkRestoreCutoverReceiptV1){
+		func(r *DarkRestoreCutoverReceiptV1) { r.Prepared.ContentSHA = strings.Repeat("f", 64) },
+		func(r *DarkRestoreCutoverReceiptV1) { r.Prepared.AuthoritySHA = strings.Repeat("f", 64) },
+		func(r *DarkRestoreCutoverReceiptV1) { r.Prepared.InboundID++ },
+		func(r *DarkRestoreCutoverReceiptV1) { r.Prepared.PlanRevision++ },
+		func(r *DarkRestoreCutoverReceiptV1) { r.Prepared.InboundRevision++ },
+		func(r *DarkRestoreCutoverReceiptV1) { r.SubscriptionDeliveredNano = proof.Round.Created },
+	} {
+		stale := final
+		change(&stale)
+		if err = verifyPreparedInitialDelivery(ctx, tx, stale, proof.State, proof.Round, proof.Raw); !errors.Is(err, ErrDarkRestoreCutover) {
+			t.Fatal("accepted an unrelated or late export", err)
+		}
 	}
 }
 

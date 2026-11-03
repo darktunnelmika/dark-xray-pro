@@ -46,6 +46,12 @@ func executionClientBinding(inbound uint64, client string) (string, string, erro
 }
 
 func preparedPlanAuthority(ctx context.Context, q sellerQueryV2, id uint64) (DarkRestorePreparedBindingV1, error) {
+	return preparedPlanAuthorityAtRevision(ctx, q, id, 0)
+}
+
+// Promotion increments the live inbound revision but preserves both encrypted
+// source payloads. Only its authenticated receipt may select that successor.
+func preparedPlanAuthorityAtRevision(ctx context.Context, q sellerQueryV2, id, promotedRevision uint64) (DarkRestorePreparedBindingV1, error) {
 	b := DarkRestorePreparedBindingV1{InboundID: id}
 	var planEnc, profileEnc []byte
 	var current uint64
@@ -55,7 +61,14 @@ func preparedPlanAuthority(ctx context.Context, q sellerQueryV2, id uint64) (Dar
 	if err != nil {
 		return b, err
 	}
-	if archived || status != "SAVED_DISABLED" || current != b.InboundRevision || b.PlanRevision == 0 || b.PlanRevision >= routeMax || b.InboundRevision == 0 || b.InboundRevision >= routeMax || len(planEnc) == 0 || len(profileEnc) == 0 {
+	expected := b.InboundRevision
+	if promotedRevision != 0 {
+		if promotedRevision != b.InboundRevision+1 {
+			return b, ErrDarkRestoreCutover
+		}
+		expected = promotedRevision
+	}
+	if archived || status != "SAVED_DISABLED" || current != expected || b.PlanRevision == 0 || b.PlanRevision >= routeMax || b.InboundRevision == 0 || b.InboundRevision >= routeMax || len(planEnc) == 0 || len(profileEnc) == 0 {
 		return b, ErrDarkRestoreCutover
 	}
 	b.AuthoritySHA, err = cutoverSnapshotDigest("DARK-PRO-PREPARED-PLAN-AUTHORITY-v1", struct {
