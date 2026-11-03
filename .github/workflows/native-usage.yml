@@ -204,6 +204,7 @@ jobs:
       - name: Print diagnostic log on failure (no customer secrets)
         if: failure()
         run: |
+          if test -f "$RUNNER_TEMP/quarantine.jsonl"; then cat "$RUNNER_TEMP/quarantine.jsonl"; fi
           if test -f "$RUNNER_TEMP/live-native-usage.jsonl"; then cat "$RUNNER_TEMP/live-native-usage.jsonl"; fi
           if test -f "$RUNNER_TEMP/live-inbound-creation.jsonl"; then cat "$RUNNER_TEMP/live-inbound-creation.jsonl"; fi
           if test -f "$RUNNER_TEMP/continuous-observer.jsonl"; then cat "$RUNNER_TEMP/continuous-observer.jsonl"; fi
