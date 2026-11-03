@@ -462,10 +462,15 @@ func realImportedAgentSupervisorTLS(t *testing.T, mode string) {
 		get.AddCookie(cookie)
 		evidenceResponse := httptest.NewRecorder()
 		browser.ServeHTTP(evidenceResponse, get)
-		var evidence business.DarkRestoreNativeAdmissionEvidenceV1
+		var evidence struct {
+			business.DarkRestoreNativeAdmissionEvidenceV1
+			SystemProbe *business.DarkRestoreSystemProbeStatusV1 `json:"system_probe"`
+		}
 		if evidenceResponse.Code != 200 || json.Unmarshal(evidenceResponse.Body.Bytes(), &evidence) != nil ||
-			evidence.ServingHealthRecorded != want || evidence.NativeApplyRecorded || evidence.AuthorizesMutation {
-			t.Fatal("system probe evidence boundary", evidenceResponse.Code, evidenceResponse.Body.String())
+			evidence.ServingHealthRecorded || evidence.NativeApplyRecorded || evidence.AuthorizesMutation ||
+			evidence.SystemProbe == nil || evidence.SystemProbe.ServingHealth != want ||
+			evidence.SystemProbe.AuthorizesMutation || evidence.SystemProbe.PlanSHA != approval.SHA {
+			t.Fatal("separate admission/system-probe evidence boundary", evidenceResponse.Code, evidenceResponse.Body.String())
 		}
 	}
 	if mode == "owner-logout" {

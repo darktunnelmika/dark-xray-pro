@@ -43,7 +43,12 @@ func (s *Server) approveQuarantine(w http.ResponseWriter, r *http.Request, token
 		businessError(w, business.ErrInvalid)
 		return
 	}
-	p, err := s.business.DarkRestoreQuarantinePlan(r.Context(), s.inboundKey, token, client)
+	var p business.DarkRestoreQuarantinePlan
+	if req.NativeRuntime && s.darkRestoreProbeEndpoint != nil {
+		p, err = s.business.ProvisionDarkRestoreQuarantineProbeV1(r.Context(), s.inboundKey, token, client)
+	} else {
+		p, err = s.business.DarkRestoreQuarantinePlan(r.Context(), s.inboundKey, token, client)
+	}
 	if err != nil {
 		businessError(w, err)
 		return

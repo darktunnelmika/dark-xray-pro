@@ -36,7 +36,7 @@ func runDarkRestoreSupervisor(ctx context.Context, o darkRestoreSupervisorOption
 	var systemProbeState *mx.DarkRestoreSystemProbeState
 	var systemProbeReceipt *mx.ProtocolHealthReceipt
 	call := func(phase string, birth *business.DarkRestoreQuarantineBirth, out any) (int, error) {
-		raw, err := json.Marshal(struct {
+		payload := struct {
 			NodeID, InstallationID, PlanSHA, Phase string
 			Birth                                  *business.DarkRestoreQuarantineBirth
 			ListenerApply                          *business.DarkRestoreListenerApply
@@ -44,12 +44,25 @@ func runDarkRestoreSupervisor(ctx context.Context, o darkRestoreSupervisorOption
 			ConnectionReceipt                      *mx.CustomerConnectionReceipt
 			SystemProbeState                       *mx.DarkRestoreSystemProbeState
 			SystemProbeReceipt                     *mx.ProtocolHealthReceipt
-		}{o.Runtime.NodeID, o.Runtime.InstallationID, o.PlanSHA, phase, birth, func() *business.DarkRestoreListenerApply {
-			if phase == "applied" {
-				return listenerApply
-			}
-			return nil
-		}(), connectionState, connectionReceipt, systemProbeState, systemProbeReceipt})
+		}{
+			NodeID: o.Runtime.NodeID, InstallationID: o.Runtime.InstallationID,
+			PlanSHA: o.PlanSHA, Phase: phase,
+		}
+		switch phase {
+		case "birth":
+			payload.Birth = birth
+		case "applied":
+			payload.ListenerApply = listenerApply
+		case "connection-poll":
+			payload.ConnectionState = connectionState
+		case "connection-result":
+			payload.ConnectionReceipt = connectionReceipt
+		case "system-probe-poll":
+			payload.SystemProbeState = systemProbeState
+		case "system-probe-result":
+			payload.SystemProbeReceipt = systemProbeReceipt
+		}
+		raw, err := json.Marshal(payload)
 		if err != nil {
 			return 0, err
 		}
@@ -96,7 +109,8 @@ func runDarkRestoreSupervisor(ctx context.Context, o darkRestoreSupervisorOption
 		if saved := runtime.SavedDarkRestoreSystemProbeReceipt(); saved != nil {
 			systemProbeReceipt = saved
 			var ack struct {
-				SHA string `json:"receipt_sha256"`
+				SHA                   string `json:"receipt_sha256"`
+				ServingHealthRecorded bool   `json:"serving_health_recorded"`
 			}
 			call("system-probe-result", nil, &ack)
 			systemProbeReceipt = nil
@@ -231,9 +245,10 @@ func runDarkRestoreSupervisor(ctx context.Context, o darkRestoreSupervisorOption
 	checkSystemProbe := func() {
 		if systemProbeReceipt != nil {
 			var ack struct {
-				SHA string `json:"receipt_sha256"`
+				SHA                   string `json:"receipt_sha256"`
+				ServingHealthRecorded bool   `json:"serving_health_recorded"`
 			}
-			if _, e := call("system-probe-result", nil, &ack); e == nil && ack.SHA == businessProtocolHealthDigest(*systemProbeReceipt) {
+			if _, e := call("system-probe-result", nil, &ack); e == nil && ack.ServingHealthRecorded && ack.SHA == businessProtocolHealthDigest(*systemProbeReceipt) {
 				systemProbeReceipt = nil
 			}
 			return
@@ -255,9 +270,10 @@ func runDarkRestoreSupervisor(ctx context.Context, o darkRestoreSupervisorOption
 		if e == nil {
 			systemProbeReceipt = &receipt
 			var ack struct {
-				SHA string `json:"receipt_sha256"`
+				SHA                   string `json:"receipt_sha256"`
+				ServingHealthRecorded bool   `json:"serving_health_recorded"`
 			}
-			if _, e = call("system-probe-result", nil, &ack); e == nil && ack.SHA == businessProtocolHealthDigest(receipt) {
+			if _, e = call("system-probe-result", nil, &ack); e == nil && ack.ServingHealthRecorded && ack.SHA == businessProtocolHealthDigest(receipt) {
 				systemProbeReceipt = nil
 			}
 		}

@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"errors"
 	mx "github.com/darktunnelmika/dark-xray-pro/internal/managedxray"
 )
@@ -9,6 +10,9 @@ import (
 func (s *Server) EnableDarkRestoreSystemProbeChecks(e mx.ProtocolHealthEndpoint) error {
 	if s.business == nil || len(s.inboundKey) != 32 || s.darkRestoreProbeEndpoint != nil || !e.Valid() {
 		return errors.New("invalid imported system-probe verifier")
+	}
+	if err := s.business.EnableSystemProbeAccounting(context.Background()); err != nil {
+		return err
 	}
 	e.CABundle = append([]byte(nil), e.CABundle...)
 	s.darkRestoreProbeEndpoint = &e

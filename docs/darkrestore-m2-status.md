@@ -705,3 +705,36 @@ inventory, absence or retirement of undeclared legacy sources, continuing
 health, native apply, subscription publication or activation authority. Legacy
 unlimited remains blocked, and imported issuance/activation stays closed until
 the complete independent evidence chain is accepted.
+
+## M5 system-probe startup and evidence separation correction
+
+Public head `c7eea5cb654c7398a2ae09ec7a8973fa25c42eb6` is not a green
+checkpoint. Its Native Metering and Managed Inbound workflows completed
+successfully, but Foundation run `41714904204` failed the exact pinned-core
+final-counter job: all four successful connection modes reached the queue before
+the optional probe-accounting schema and identity had been enabled, so the HUB
+returned `409 darkrestore_cutover_required`. No artifact from that head is
+eligible for installation.
+
+The candidate enables the optional accounting extension during startup and
+provisions the exact quarantine probe identity before the immutable birth/plan
+digest is committed. Agent request JSON is phase-scoped so birth, listener,
+customer-connection and system-probe receipts cannot leak into another phase.
+The system-probe acknowledgment must explicitly record serving health before a
+saved receipt can be cleared.
+
+Admission and system-probe evidence are now separate projections. The immutable
+admission document remains `serving_health_recorded=false` and grants no
+mutation authority. The owner-only system-probe projection reports the current
+intent/request/receipt state independently and remains non-authorizing.
+Representative access is denied. This avoids retroactively changing admission
+evidence while retaining a coherent read of the real probe result.
+
+The exact real pinned-core supervisor matrix passed all 13 modes, including
+normal, revocation, authority/HUB/full outage, lost birth/apply/connection
+acknowledgments, apply refusal, owner logout, customer connection, bad nonce and
+bad TLS pin. Final settlement succeeded with one nonbillable system-probe round
+and the separate billable customer connection. These are synthetic isolated
+fixtures, not production inventory, source retirement, continuous health or
+permission to issue, deliver or activate an imported subscription. Legacy
+unlimited remains blocked.

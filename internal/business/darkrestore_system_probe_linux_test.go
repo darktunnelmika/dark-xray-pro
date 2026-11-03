@@ -96,6 +96,14 @@ func TestDarkRestoreSystemProbeRoundIsDurableAndReadOnly(t *testing.T) {
 	if err != nil || queued.State != "pending" || queued.ServingHealth || queued.AuthorizesMutation {
 		t.Fatal("queue", queued, err)
 	}
+	if _, err = f.s.ProjectDarkRestoreSystemProbeV1(ctx, f.rep.Token, plan.ClientID, planSHA); !errors.Is(err, ErrOwnershipDenied) {
+		t.Fatal("representative projected owner probe", err)
+	}
+	projected, err := f.s.ProjectDarkRestoreSystemProbeV1(ctx, f.owner.Token, plan.ClientID, planSHA)
+	if err != nil || projected.State != "pending" || projected.ServingHealth || projected.AuthorizesMutation ||
+		projected.ChallengeID != queued.ChallengeID {
+		t.Fatal("pending projection", projected, err)
+	}
 	replay, err := f.s.QueueDarkRestoreSystemProbeV1(ctx, key, f.owner.Token, plan.ClientID, input, endpoint)
 	if err != nil || !reflect.DeepEqual(queued, replay) {
 		t.Fatal("intent replay", replay, err)
@@ -169,6 +177,10 @@ func TestDarkRestoreSystemProbeRoundIsDurableAndReadOnly(t *testing.T) {
 	recorded, err := f.s.QueueDarkRestoreSystemProbeV1(ctx, key, f.owner.Token, plan.ClientID, input, endpoint)
 	if err != nil || recorded.State != "recorded" || !recorded.ServingHealth || recorded.AuthorizesMutation {
 		t.Fatal("recorded status", recorded, err)
+	}
+	projected, err = f.s.ProjectDarkRestoreSystemProbeV1(ctx, f.owner.Token, plan.ClientID, planSHA)
+	if err != nil || projected.State != "recorded" || !projected.ServingHealth || projected.AuthorizesMutation {
+		t.Fatal("recorded projection", projected, err)
 	}
 	evidenceReplay, err := f.s.RegisterDarkRestoreSystemProbeV1(ctx, nodeKey, plan.NodeID, plan.InstallationID, planSHA, endpoint, receipt)
 	if err != nil || !reflect.DeepEqual(evidence, evidenceReplay) {

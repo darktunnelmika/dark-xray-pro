@@ -226,6 +226,57 @@ func (s *Store) QueueDarkRestoreSystemProbeV1(ctx context.Context, key []byte, t
 	return out, tx.Commit()
 }
 
+// ProjectDarkRestoreSystemProbeV1 reports the independently persisted probe
+// round without changing its intent, request, receipt, client or runtime.
+func (s *Store) ProjectDarkRestoreSystemProbeV1(ctx context.Context, token, client, plan string) (DarkRestoreSystemProbeStatusV1, error) {
+	out := DarkRestoreSystemProbeStatusV1{Scope: DarkRestoreSystemProbeRoundScopeV1, ClientID: client, PlanSHA: plan, State: "pending"}
+	if !idRE.MatchString(client) || !routeSHA.MatchString(plan) {
+		return out, ErrInvalid
+	}
+	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return out, err
+	}
+	defer tx.Rollback()
+	owner, err := ownershipOwner(ctx, tx, token)
+	if err != nil {
+		return out, err
+	}
+	intent, found, err := readDarkRestoreSystemProbeIntentTx(ctx, tx, plan)
+	if err != nil {
+		return out, err
+	}
+	if !found {
+		return out, ErrNotFound
+	}
+	if intent.OwnerID != owner || intent.ClientID != client {
+		return out, ErrOwnershipDenied
+	}
+	out.ChallengeID = intent.ID
+	if _, requested, readErr := readDarkRestoreSystemProbeRequestTx(ctx, tx, intent); readErr != nil {
+		return out, readErr
+	} else if requested {
+		out.State = "issued"
+	}
+	evidence, readErr := readDarkRestoreServingHealthTx(ctx, tx, client)
+	if readErr == nil {
+		if evidence.PlanSHA != plan {
+			return out, ErrDarkRestoreCutover
+		}
+		if _, pinErr := servingHealthPins(evidence); pinErr != nil {
+			return out, pinErr
+		}
+		out.State = "recorded"
+		out.ServingHealth = true
+	} else if !errors.Is(readErr, ErrNotFound) && !errors.Is(readErr, ErrDarkRestoreCutover) {
+		return out, readErr
+	}
+	if err = tx.Commit(); err != nil {
+		return out, err
+	}
+	return out, nil
+}
+
 func (s *Store) PollDarkRestoreSystemProbeV1(ctx context.Context, key, nodeKey []byte, node, installation, plan string, state mx.DarkRestoreSystemProbeState, endpoint mx.ProtocolHealthEndpoint) (mx.ProtocolHealthRequest, bool, error) {
 	var zero mx.ProtocolHealthRequest
 	tx, err := executionTx(s, ctx, key)

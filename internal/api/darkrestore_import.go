@@ -177,7 +177,19 @@ func (s *Server) attachDarkRestoreImport(mux *http.ServeMux) {
 				businessError(w, err)
 				return
 			}
-			respond(w, 200, evidence)
+			response := struct {
+				business.DarkRestoreNativeAdmissionEvidenceV1
+				SystemProbe *business.DarkRestoreSystemProbeStatusV1 `json:"system_probe,omitempty"`
+			}{DarkRestoreNativeAdmissionEvidenceV1: evidence}
+			if s.darkRestoreProbeEndpoint != nil {
+				status, statusErr := s.business.ProjectDarkRestoreSystemProbeV1(r.Context(), token, state.ClientID, evidence.PlanSHA)
+				if statusErr != nil {
+					businessError(w, statusErr)
+					return
+				}
+				response.SystemProbe = &status
+			}
+			respond(w, 200, response)
 		})
 		for _, method := range []string{"GET", "POST"} {
 			handle(method+" "+restoreBase+"/handoff/quarantine/connection-check", method == "POST", func(w http.ResponseWriter, r *http.Request, token string) {
