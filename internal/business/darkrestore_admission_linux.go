@@ -5,11 +5,14 @@ package business
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	uc "github.com/darktunnelmika/dark-xray-pro/internal/usagecheckpoint"
 	"github.com/darktunnelmika/dark-xray-pro/internal/usageledger"
+	"reflect"
 	"time"
 )
 
@@ -166,4 +169,188 @@ func (s *Store) CheckDarkRestoreAdmission(ctx context.Context, q usageledger.Adm
 		return usageledger.ErrAuthority
 	}
 	return nil
+}
+
+const DarkRestoreNativeAdmissionEvidenceScopeV1 = "darkrestore_native_admission_evidence_v1"
+
+// This read-only projection binds the exact prepared delivery, signed process
+// birth, owner grant and accepted zero checkpoint. It neither proves long-lived
+// serving health nor grants state-transition authority.
+type DarkRestoreNativeAdmissionEvidenceV1 struct {
+	Scope                      string `json:"scope"`
+	ClientID                   string `json:"client_id"`
+	TransitionSHA              string `json:"transition_sha256"`
+	PreparedContentSHA         string `json:"prepared_content_sha256"`
+	PreparedAuthoritySHA       string `json:"prepared_authority_sha256"`
+	PlanSHA                    string `json:"plan_sha256"`
+	BirthReceiptSHA            string `json:"birth_receipt_sha256"`
+	AdmissionEventID           string `json:"admission_event_id"`
+	AdmissionReceiptSHA        string `json:"admission_receipt_sha256"`
+	EpochID                    string `json:"epoch_id"`
+	InitialReportSHA           string `json:"initial_report_sha256"`
+	InitialReceiptReceivedUnix int64  `json:"initial_receipt_received_unix"`
+	InitialZeroReceiptRecorded bool   `json:"initial_zero_receipt_recorded"`
+	NativeApplyRecorded        bool   `json:"native_apply_recorded"`
+	ServingHealthRecorded      bool   `json:"serving_health_recorded"`
+	AuthorizesMutation         bool   `json:"authorizes_mutation"`
+}
+
+type DarkRestoreNativeAdmissionPinsV1 struct {
+	ClientID             string
+	TransitionSHA        string
+	PreparedContentSHA   string
+	PreparedAuthoritySHA string
+	PlanSHA              string
+	BirthReceiptSHA      string
+	AdmissionEventID     string
+	AdmissionReceiptSHA  string
+	EpochID              string
+	InitialReportSHA     string
+	DocumentSHA          string
+}
+
+type DarkRestoreNativeAdmissionValidationV1 struct {
+	Scope                      string `json:"scope"`
+	EvidenceSHA                string `json:"evidence_sha256"`
+	InitialZeroReceiptRecorded bool   `json:"initial_zero_receipt_recorded"`
+	NativeApplyRecorded        bool   `json:"native_apply_recorded"`
+	ServingHealthRecorded      bool   `json:"serving_health_recorded"`
+	AuthorizesMutation         bool   `json:"authorizes_mutation"`
+}
+
+func admissionBytesSHA(raw []byte) string {
+	sum := sha256.Sum256(raw)
+	return hex.EncodeToString(sum[:])
+}
+
+func initialAdmissionReportSHA(epoch uc.Epoch) (string, error) {
+	canonical, binding, err := uc.CanonicalEpoch(epoch)
+	if err != nil || len(canonical.Bindings) != 1 || !canonical.Bindings[0].Billable {
+		return "", ErrDarkRestoreCutover
+	}
+	report := uc.Report{
+		Version: 1, EpochID: canonical.ID, BindingSHA: binding, Sequence: 1,
+		Users: []uc.Usage{{ClientID: canonical.Bindings[0].ClientID}},
+	}
+	raw, err := json.Marshal(report)
+	if err != nil {
+		return "", err
+	}
+	return admissionBytesSHA(raw), nil
+}
+
+func ValidateDarkRestoreNativeAdmissionEvidenceV1(e DarkRestoreNativeAdmissionEvidenceV1, p DarkRestoreNativeAdmissionPinsV1) (DarkRestoreNativeAdmissionValidationV1, error) {
+	var zero DarkRestoreNativeAdmissionValidationV1
+	if e.Scope != DarkRestoreNativeAdmissionEvidenceScopeV1 || !idRE.MatchString(e.ClientID) ||
+		!routeSHA.MatchString(e.TransitionSHA) || !routeSHA.MatchString(e.PreparedContentSHA) ||
+		!routeSHA.MatchString(e.PreparedAuthoritySHA) || !routeSHA.MatchString(e.PlanSHA) ||
+		!routeSHA.MatchString(e.BirthReceiptSHA) || !eventRE.MatchString(e.AdmissionEventID) ||
+		!routeSHA.MatchString(e.AdmissionReceiptSHA) || !routeID.MatchString(e.EpochID) ||
+		!routeSHA.MatchString(e.InitialReportSHA) || e.InitialReceiptReceivedUnix <= 0 ||
+		!e.InitialZeroReceiptRecorded || e.NativeApplyRecorded || e.ServingHealthRecorded ||
+		e.AuthorizesMutation || p.ClientID != e.ClientID || p.TransitionSHA != e.TransitionSHA ||
+		p.PreparedContentSHA != e.PreparedContentSHA || p.PreparedAuthoritySHA != e.PreparedAuthoritySHA ||
+		p.PlanSHA != e.PlanSHA || p.BirthReceiptSHA != e.BirthReceiptSHA ||
+		p.AdmissionEventID != e.AdmissionEventID || p.AdmissionReceiptSHA != e.AdmissionReceiptSHA ||
+		p.EpochID != e.EpochID || p.InitialReportSHA != e.InitialReportSHA ||
+		!routeSHA.MatchString(p.DocumentSHA) {
+		return zero, ErrDarkRestoreCutover
+	}
+	sha, err := cutoverSnapshotDigest("DARK-PRO-NATIVE-ADMISSION-EVIDENCE-v1", e)
+	if err != nil || sha != p.DocumentSHA {
+		return zero, ErrDarkRestoreCutover
+	}
+	return DarkRestoreNativeAdmissionValidationV1{
+		Scope: DarkRestoreNativeAdmissionEvidenceScopeV1, EvidenceSHA: sha,
+		InitialZeroReceiptRecorded: true,
+	}, nil
+}
+
+// Projection and validation are deliberately separate: the database proves
+// consistency of declared local receipts, while independent pins decide which
+// exact receipt set an operator intended to review.
+func (s *Store) ProjectDarkRestoreNativeAdmissionEvidenceV1(ctx context.Context, token, client string) (DarkRestoreNativeAdmissionEvidenceV1, error) {
+	var zero DarkRestoreNativeAdmissionEvidenceV1
+	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return zero, err
+	}
+	defer tx.Rollback()
+	if _, err = ownershipOwner(ctx, tx, token); err != nil {
+		return zero, err
+	}
+	present, err := admissionSchema(ctx, tx)
+	if err != nil || !present {
+		return zero, ErrDarkRestoreCutover
+	}
+	var count int
+	if err = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM darkrestore_native_admission_v1 a JOIN darkrestore_native_birth_v1 b ON b.plan_sha=a.plan_sha AND b.epoch_id=a.epoch_id WHERE b.client_id=?`, client).Scan(&count); err != nil || count != 1 {
+		return zero, ErrDarkRestoreCutover
+	}
+	var event, planSHA string
+	var admissionRaw, birthRaw []byte
+	if err = tx.QueryRowContext(ctx, `SELECT a.event_id,a.plan_sha,a.receipt_json,b.receipt_json FROM darkrestore_native_admission_v1 a JOIN darkrestore_native_birth_v1 b ON b.plan_sha=a.plan_sha AND b.epoch_id=a.epoch_id WHERE b.client_id=?`, client).Scan(&event, &planSHA, &admissionRaw, &birthRaw); err != nil {
+		return zero, err
+	}
+	var permit DarkRestoreAdmission
+	var registered DarkRestoreRegisteredBirth
+	if len(admissionRaw) == 0 || len(admissionRaw) > 131072 || json.Unmarshal(admissionRaw, &permit) != nil ||
+		len(birthRaw) == 0 || len(birthRaw) > 131072 || json.Unmarshal(birthRaw, &registered) != nil ||
+		permit.EventID != event || permit.Registered.Epoch.ID != registered.Epoch.ID ||
+		permit.Snapshot.ClientID != client || registered.Plan.ClientID != client {
+		return zero, ErrDarkRestoreCutover
+	}
+	canonicalAdmission, err := json.Marshal(permit)
+	if err != nil || !bytes.Equal(canonicalAdmission, admissionRaw) {
+		return zero, ErrDarkRestoreCutover
+	}
+	canonicalBirth, err := json.Marshal(registered)
+	if err != nil || !bytes.Equal(canonicalBirth, birthRaw) {
+		return zero, ErrDarkRestoreCutover
+	}
+	computedPlanSHA, err := registered.Plan.Digest()
+	if err != nil || computedPlanSHA != planSHA ||
+		!reflect.DeepEqual(permit.Registered, registered) ||
+		permit.Snapshot.StateSHA != registered.Plan.StateSHA {
+		return zero, ErrDarkRestoreCutover
+	}
+	final, err := readCutoverReceipt(ctx, tx, client)
+	if err != nil || final == nil || final.SubscriptionDeliveryScope != DarkRestorePreparedDeliveryScopeV1 ||
+		verifyPreparedPlanReceipt(ctx, tx, final) != nil {
+		return zero, ErrDarkRestoreCutover
+	}
+	evidence, err := readCutoverEvidence(ctx, tx, client)
+	if err != nil || evidence == nil || evidence.TransitionSHA != final.TransitionSHA ||
+		evidence.ClientID != client || final.ClientID != client {
+		return zero, ErrDarkRestoreCutover
+	}
+	expectedReportSHA, err := initialAdmissionReportSHA(registered.Epoch)
+	if err != nil {
+		return zero, err
+	}
+	var reportSHA string
+	var quiesced int
+	var received int64
+	if err = tx.QueryRowContext(ctx, `SELECT sha256,quiesced,received_unix FROM pro_usage_receipts WHERE epoch_id=? AND sequence='1'`, registered.Epoch.ID).Scan(&reportSHA, &quiesced, &received); err != nil ||
+		reportSHA != expectedReportSHA || quiesced != 0 || received <= 0 {
+		return zero, ErrDarkRestoreCutover
+	}
+	var deltas, uplink, downlink int64
+	if err = tx.QueryRowContext(ctx, `SELECT COUNT(*),COALESCE(SUM(uplink),0),COALESCE(SUM(downlink),0) FROM pro_usage_deltas WHERE epoch_id=? AND sequence='1' AND client_id=?`, registered.Epoch.ID, client).Scan(&deltas, &uplink, &downlink); err != nil ||
+		deltas != 1 || uplink != 0 || downlink != 0 {
+		return zero, ErrDarkRestoreCutover
+	}
+	out := DarkRestoreNativeAdmissionEvidenceV1{
+		Scope: DarkRestoreNativeAdmissionEvidenceScopeV1, ClientID: client,
+		TransitionSHA: final.TransitionSHA, PreparedContentSHA: final.Prepared.ContentSHA,
+		PreparedAuthoritySHA: final.Prepared.AuthoritySHA, PlanSHA: planSHA,
+		BirthReceiptSHA: admissionBytesSHA(birthRaw), AdmissionEventID: event,
+		AdmissionReceiptSHA: admissionBytesSHA(admissionRaw), EpochID: registered.Epoch.ID,
+		InitialReportSHA: reportSHA, InitialReceiptReceivedUnix: received,
+		InitialZeroReceiptRecorded: true,
+	}
+	if err = tx.Commit(); err != nil {
+		return zero, err
+	}
+	return out, nil
 }

@@ -462,3 +462,28 @@ failed INSERT rollback, replay and attempts after final delivery. Prepared
 content remains not applied/path-unverified and survives v16 offline backup and
 reopen. This is isolated source validation, not installed acceptance or real
 inventory/retirement evidence.
+
+## M5 native admission evidence boundary (isolated source)
+
+The imported-client execution path is deliberately distinct from the general
+plan-promotion path. A new owner-only, read-only projection now binds the exact
+prepared content/profile authority, transition, signed process birth, owner
+admission grant, registered process epoch and the first accepted zero usage
+checkpoint. The zero checkpoint is reconstructed from the canonical epoch and
+must match the immutable sequence-1 receipt plus its zero delta.
+
+Projection and independent validation are separate. The trusted pin set includes
+client, transition, prepared content and authority, plan, birth/admission
+receipt digests, epoch and initial report, plus the complete evidence-document
+digest. Missing receipt, foreign owner, changed pin or repinned partial document
+fails closed. Admission evidence always reports `native_apply_recorded=false`,
+`serving_health_recorded=false` and `authorizes_mutation=false`. It cannot clear
+the native-apply readiness blocker, enable an imported client, publish a
+subscription or claim long-lived Agent supervision.
+
+Synthetic tests cover pre-admission/pre-receipt refusal, owner scope, exact
+replay, positive independent validation, foreign report pin and attempted
+self-promotion to native apply. The complete non-race business package and
+backup-acceptance package pass on the isolated candidate. These local receipts
+say nothing about undeclared sources, real inventory completeness, source
+retirement or production-serving health.

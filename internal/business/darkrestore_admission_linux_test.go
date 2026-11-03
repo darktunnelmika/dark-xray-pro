@@ -6,9 +6,11 @@ import (
 	"bytes"
 	"context"
 	"crypto/ed25519"
+	"errors"
 	mx "github.com/darktunnelmika/dark-xray-pro/internal/managedxray"
 	uc "github.com/darktunnelmika/dark-xray-pro/internal/usagecheckpoint"
 	"github.com/darktunnelmika/dark-xray-pro/internal/usageledger"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -125,4 +127,73 @@ func (f ownershipFixture) repIDForTest(t *testing.T, id string) string {
 		t.Fatal(err)
 	}
 	return c.RepresentativeID
+}
+
+func TestDarkRestoreNativeAdmissionEvidenceProjectionV1(t *testing.T) {
+	ctx := context.Background()
+	key := bytes.Repeat([]byte{0x61}, 32)
+	f, plan, epoch, planSHA := syntheticAdmissionFixture(t)
+	if _, err := f.s.ProjectDarkRestoreNativeAdmissionEvidenceV1(ctx, f.owner.Token, plan.ClientID); !errors.Is(err, ErrDarkRestoreCutover) {
+		t.Fatal("birth alone projected admission evidence", err)
+	}
+	if _, err := f.s.AuthorizeDarkRestoreAdmission(ctx, key, f.owner.Token, plan.ClientID, planSHA, "evidence-admit-owner-0001"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.s.ProjectDarkRestoreNativeAdmissionEvidenceV1(ctx, f.owner.Token, plan.ClientID); !errors.Is(err, ErrDarkRestoreCutover) {
+		t.Fatal("owner grant without accepted zero projected evidence", err)
+	}
+	box, err := uc.Open(uc.Options{Directory: t.TempDir() + "/outbox", Key: bytes.Repeat([]byte{9}, 32), Epoch: epoch, Create: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer box.Close()
+	report, err := box.Observe([]uc.Usage{{ClientID: plan.ClientID}}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	principal := usageledger.Principal{NodeID: epoch.NodeID, InstallationID: epoch.InstallationID}
+	if _, err = f.s.usage.AcceptChecked(ctx, principal, report, f.s.CheckDarkRestoreAdmission); err != nil {
+		t.Fatal(err)
+	}
+	evidence, err := f.s.ProjectDarkRestoreNativeAdmissionEvidenceV1(ctx, f.owner.Token, plan.ClientID)
+	if err != nil || !evidence.InitialZeroReceiptRecorded || evidence.NativeApplyRecorded ||
+		evidence.ServingHealthRecorded || evidence.AuthorizesMutation {
+		t.Fatal("conservative evidence projection", evidence, err)
+	}
+	replay, err := f.s.ProjectDarkRestoreNativeAdmissionEvidenceV1(ctx, f.owner.Token, plan.ClientID)
+	if err != nil || !reflect.DeepEqual(evidence, replay) {
+		t.Fatal("projection replay changed", err)
+	}
+	if _, err = f.s.ProjectDarkRestoreNativeAdmissionEvidenceV1(ctx, f.rep.Token, plan.ClientID); !errors.Is(err, ErrOwnershipDenied) {
+		t.Fatal("representative projected owner evidence", err)
+	}
+	pins := DarkRestoreNativeAdmissionPinsV1{
+		ClientID: evidence.ClientID, TransitionSHA: evidence.TransitionSHA,
+		PreparedContentSHA: evidence.PreparedContentSHA, PreparedAuthoritySHA: evidence.PreparedAuthoritySHA,
+		PlanSHA: evidence.PlanSHA, BirthReceiptSHA: evidence.BirthReceiptSHA,
+		AdmissionEventID: evidence.AdmissionEventID, AdmissionReceiptSHA: evidence.AdmissionReceiptSHA,
+		EpochID: evidence.EpochID, InitialReportSHA: evidence.InitialReportSHA,
+	}
+	pins.DocumentSHA, err = cutoverSnapshotDigest("DARK-PRO-NATIVE-ADMISSION-EVIDENCE-v1", evidence)
+	if err != nil {
+		t.Fatal(err)
+	}
+	validation, err := ValidateDarkRestoreNativeAdmissionEvidenceV1(evidence, pins)
+	if err != nil || !validation.InitialZeroReceiptRecorded || validation.NativeApplyRecorded ||
+		validation.ServingHealthRecorded || validation.AuthorizesMutation ||
+		validation.EvidenceSHA != pins.DocumentSHA {
+		t.Fatal("independent validation", validation, err)
+	}
+	badPins := pins
+	badPins.InitialReportSHA = strings.Repeat("0", 64)
+	if _, err = ValidateDarkRestoreNativeAdmissionEvidenceV1(evidence, badPins); !errors.Is(err, ErrDarkRestoreCutover) {
+		t.Fatal("foreign report pin accepted", err)
+	}
+	badEvidence := evidence
+	badEvidence.NativeApplyRecorded = true
+	badPins = pins
+	badPins.DocumentSHA, _ = cutoverSnapshotDigest("DARK-PRO-NATIVE-ADMISSION-EVIDENCE-v1", badEvidence)
+	if _, err = ValidateDarkRestoreNativeAdmissionEvidenceV1(badEvidence, badPins); !errors.Is(err, ErrDarkRestoreCutover) {
+		t.Fatal("admission evidence promoted itself to native apply", err)
+	}
 }
