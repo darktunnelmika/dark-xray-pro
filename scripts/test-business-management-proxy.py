@@ -109,7 +109,16 @@ location / {{ return 403; }}
                           ("/api/v1/workspace/volume-refunds", {"GET", "HEAD"}),
                           ("/api/v1/workspace/clients/ownership/quote", {"POST"}),
                           ("/api/v1/workspace/clients/ownership/commit", {"POST"}),
-                          ("/api/v1/workspace/clients/ownership/receipts/ownership-request-0001", {"GET", "HEAD"}))
+                          ("/api/v1/workspace/clients/ownership/receipts/ownership-request-0001", {"GET", "HEAD"}),
+                          ("/api/v1/workspace/dark-restore/stage", {"GET", "HEAD"}),
+                          ("/api/v1/workspace/dark-restore/quote", {"POST"}),
+                          ("/api/v1/workspace/dark-restore/commit", {"POST"}),
+                          ("/api/v1/workspace/dark-restore/receipts/restore-request-0001", {"GET", "HEAD"}),
+                          ("/api/v1/workspace/dark-restore/receipts/restore-request-0001/history/0", {"GET", "HEAD"}),
+                          ("/api/v1/workspace/dark-restore/recent", {"GET", "HEAD"}),
+                          ("/api/v1/workspace/dark-restore/handoff", {"GET", "HEAD"}),
+                          ("/api/v1/workspace/dark-restore/handoff/readiness", {"GET", "HEAD"}),
+                          ("/api/v1/workspace/dark-restore/handoff/attach", {"POST"}))
                 for path, allowed in routes:
                     check(path, allowed)
                     check(path + "/extra/unknown", set())
@@ -141,10 +150,18 @@ location / {{ return 403; }}
                     check(path, set())
                 check("/api/v1/workspace/clients/ownership/receipts/short", set())
                 check("/api/v1/workspace/clients/ownership/receipts/" + "a" * 129, set())
+                check("/api/v1/workspace/dark-restore/receipts/short", set())
+                check("/api/v1/workspace/dark-restore/receipts/" + "a" * 129, set())
+                check("/api/v1/workspace/dark-restore/receipts/restore-request-0001/history/00", set())
+                check("/api/v1/workspace/dark-restore/receipts/restore-request-0001/history/-1", set())
+                check("/api/v1/workspace/dark-restore/handoff/unknown", set())
                 before = len(Backend.seen)
                 assert request(port, "/api/v1/workspace/clients/ownership/commit", "POST", b"x" * (65536 + 1)) == 413
                 assert len(Backend.seen) == before, "oversized ownership request reached backend"
-                print("BUSINESS_MANAGEMENT_PROXY_PASS: exact routes, methods, IDs, Host and private-route denial")
+                before = len(Backend.seen)
+                assert request(port, "/api/v1/workspace/dark-restore/handoff/attach", "POST", b"x" * 4097) == 413
+                assert len(Backend.seen) == before, "oversized handoff request reached backend"
+                print("BUSINESS_MANAGEMENT_PROXY_PASS: exact routes, methods, IDs, Host, Dark Restore and private-route denial")
             finally:
                 process.terminate()
                 process.wait(timeout=5)

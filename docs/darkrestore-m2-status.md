@@ -226,3 +226,24 @@ policy, authoritative final counter settlement, positive imported subscription
 delivery after settlement, representative production-data acceptance and
 independent scope review remain open. Stage is inactive after rollback. No
 production HUB, users, representatives, bots, DNS or Nodes were touched.
+
+## M4/M5 deployment allowlist correction — code checkpoint
+
+Installed acceptance exposed that the LAB bundle did not carry
+`ops/nginx/business-management.conf`; the operator therefore had to copy the
+reviewed Stage/Import allowlist independently. The same shipped snippet also
+omitted the signed-handoff, readiness and attach routes even though HUB and UI
+implemented them.
+
+The bundle builder now includes the business-management snippet and CI requires
+the packaged file to exist. The snippet adds only exact owner HTTPS routes:
+GET/HEAD for `handoff` and `handoff/readiness`, and POST for
+`handoff/attach` with a 4 KiB body limit. The real disposable-Nginx acceptance
+now covers every Dark Restore Stage, quote, commit, receipt, history, recent and
+handoff route, rejects wrong methods, suffixes, malformed receipt/history IDs and
+oversized attachment bodies, and verifies the original Host reaches the backend.
+
+The local real-Nginx proxy test, Python compilation, bundle shell syntax and
+packaging assertions pass. This is code and local-test evidence only. It is not
+yet a green final-head CI result, a new artifact, an installed handoff route or
+positive signed-settlement/subscription acceptance.
