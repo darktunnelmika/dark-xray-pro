@@ -142,6 +142,14 @@ test("owner attaches a pinned signed handoff in Clients at 320px without a brows
    source_settlement:source,handoff_sha256:evidence,handoff_public_key_sha256:publicKey,replayed:attached>1
   }});
  });
+ await page.route("**/api/v1/workspace/dark-restore/handoff/readiness",route=>route.fulfill({json:{
+  client_id:"dr-"+sha.slice(0,20),source_sha256:sha,source_id:"legacy-a",source_scope:"single_local_source_epoch",
+  source_epoch_settled:true,global_source_custody_verified:false,native_baseline_complete:false,
+  subscription_delivered:false,client_archived:false,client_expired:false,
+  finite_quota_remaining_bytes:"132576395",activation_allowed:false,cutover_verified:false,
+  activation_blockers:["global_source_custody_not_proven"],
+  verification_blockers:["native_baseline_incomplete","subscription_not_delivered"]
+ }}));
  await page.goto("/dark-restore");
  const panel=page.getByRole("region",{name:"دارک ریستور — بررسی واردسازی"});
  await panel.getByRole("button",{name:"بررسی تحویل تأییدشدهٔ سرور"}).click();
@@ -150,6 +158,12 @@ test("owner attaches a pinned signed handoff in Clients at 320px without a brows
  expect(calls.some(x=>x.startsWith("POST "))).toBe(false);
  await panel.getByRole("button",{name:"ثبت یا بازیابی رسید اتصال"}).click();
  await expect(panel.getByText("اتصال ثبت شد",{exact:false})).toBeVisible();
+ await panel.getByRole("button",{name:"بررسی آمادگی فعال‌سازی"}).click();
+ const readiness=panel.getByLabel("آمادگی مهاجرت");
+ await expect(readiness.getByText("فعال‌سازی مسدود است")).toBeVisible();
+ await expect(readiness.getByText("global_source_custody_not_proven")).toBeVisible();
+ await expect(readiness.getByText("native_baseline_incomplete")).toBeVisible();
+ await expect(readiness.getByText("subscription_not_delivered")).toBeVisible();
  await panel.getByRole("button",{name:"ثبت یا بازیابی رسید اتصال"}).click();
  await expect(panel.getByText("رسید پیشین بازیابی شد",{exact:false})).toBeVisible();
  expect(attached).toBe(2);

@@ -335,6 +335,14 @@ func TestDarkRestoreQuarantineBlocksEnableAndSubscriptions(t *testing.T) {
 		t.Fatal(err)
 	}
 	id := darkRestoreClientID(req.Review.SourceSHA256, req.Review.Clients[0].SourceID)
+	readiness, err := f.s.DarkRestoreCutoverReadinessV1(ctx, req.Review.SourceSHA256, req.Review.Clients[0].SourceID)
+	if err != nil || readiness.ClientID != id || readiness.SourceEpochSettled || readiness.GlobalSourceCustodyVerified ||
+		readiness.NativeBaselineComplete || readiness.SubscriptionDelivered || readiness.ActivationAllowed || readiness.CutoverVerified ||
+		readiness.FiniteQuotaRemainingBytes != "0" ||
+		strings.Join(readiness.ActivationBlockers, ",") != "source_epoch_not_settled,global_source_custody_not_proven,finite_quota_exhausted" ||
+		strings.Join(readiness.VerificationBlockers, ",") != "native_baseline_incomplete,subscription_not_delivered" {
+		t.Fatal("unverified import reported cutover readiness", readiness, err)
+	}
 	if _, err := f.s.SetClientStateScoped(ctx, SetClientState{EventID: "restore-hold-enable-0001", ClientID: id, Action: "enable", Reason: "Synthetic attempt"}, "rep-target"); !errors.Is(err, ErrDarkRestoreCutover) {
 		t.Fatal("single enable", err)
 	}

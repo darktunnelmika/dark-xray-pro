@@ -484,6 +484,19 @@ func (f *localSettlementFixture) attachToEarlierImport(t *testing.T, ctx context
 	if w := browserRequest(t, dst.h, "GET", restoreBase+"/handoff", nil, dst.owner, "", origin); w.Code != 200 || !strings.Contains(w.Body.String(), handoffSHA) {
 		t.Fatal("owner handoff view", w.Code)
 	}
+	if w := browserRequest(t, dst.h, "GET", restoreBase+"/handoff/readiness", nil, dst.target, "", origin); w.Code != 403 {
+		t.Fatal("representative read private cutover readiness", w.Code)
+	}
+	w = browserRequest(t, dst.h, "GET", restoreBase+"/handoff/readiness", nil, dst.owner, "", origin)
+	var readiness business.DarkRestoreCutoverReadinessV1
+	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &readiness) != nil ||
+		readiness.ClientID != id || !readiness.SourceEpochSettled || readiness.GlobalSourceCustodyVerified ||
+		readiness.NativeBaselineComplete || readiness.SubscriptionDelivered || readiness.ActivationAllowed || readiness.CutoverVerified ||
+		readiness.FiniteQuotaRemainingBytes != strconv.FormatInt(proof.Remaining, 10) ||
+		strings.Join(readiness.ActivationBlockers, ",") != "global_source_custody_not_proven" ||
+		strings.Join(readiness.VerificationBlockers, ",") != "native_baseline_incomplete,subscription_not_delivered" {
+		t.Fatal("cutover readiness guessed missing evidence", w.Code, readiness)
+	}
 	projection, err := dst.s.business.DarkRestoreUsageV1(ctx, id)
 	want := strconv.FormatInt(proof.Historical, 10)
 	if err != nil || projection.HistoricalBytes != want || projection.TotalBytes != want || projection.PostMigrationBytes != "0" || !projection.SourceEpochSettled || projection.CutoverVerified {
