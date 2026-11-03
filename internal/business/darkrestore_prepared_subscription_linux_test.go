@@ -139,6 +139,10 @@ func TestDarkRestorePreparedCanonicalDeliveryAndV16Recovery(t *testing.T) {
 			if err != nil || account.Eligible {
 				t.Fatal("preparation changed native eligibility", err)
 			}
+			usage, err := f.s.DarkRestoreUsageForAccount(ctx, account)
+			if err != nil || usage == nil || usage.CutoverVerified || !usage.SourceEpochSettled || usage.HistoricalBytes != "14" {
+				t.Fatal("prepared download misreported the customer's migration", usage, err)
+			}
 			var afterGeneration int64
 			if err = f.s.db.QueryRow(`SELECT value FROM native_config_generation WHERE id=1`).Scan(&afterGeneration); err != nil || afterGeneration != generation {
 				t.Fatal("preparation queued runtime", err)

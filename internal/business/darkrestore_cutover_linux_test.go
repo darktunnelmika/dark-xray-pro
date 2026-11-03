@@ -204,7 +204,7 @@ func TestDarkRestoreM5ControlledSubscriptionCutover(t *testing.T) {
 			EpochID: strings.Repeat("d", 32), Sequence: 1,
 			SHA: strings.Repeat("e", 64),
 		},
-		PriorBytes: 7, Up: 3, Down: 4, Historical: 14, Remaining: 999986,
+		PriorBytes: 7, Up: 1, Down: 2, Historical: 10, Remaining: 999990,
 	}
 	handoff, sourcePin := businessSignedHandoff(t, proof)
 	if _, err = f.s.AttachSignedLocalSettlementV1(ctx, owner.Token, handoff); err != nil {
@@ -230,9 +230,15 @@ func TestDarkRestoreM5ControlledSubscriptionCutover(t *testing.T) {
 		t.Fatal("preparation changed baseline", err)
 	}
 
+	other := proof
+	other.AuthoritySHA, other.JournalSHA = strings.Repeat("8", 64), strings.Repeat("9", 64)
+	other.Terminal = uc.Receipt{EpochID: strings.Repeat("f", 32), Sequence: 1, SHA: strings.Repeat("a", 64)}
+	other.Up, other.Down, other.Historical, other.Remaining = 2, 2, 11, 999989
+	second, secondPin := businessSignedHandoff(t, other)
+	handoffs := []darkrestore.VerifiedLocalHandoff{handoff, second}
 	inventory := darkrestore.LocalHandoffInventoryV1{
 		Version: 1, SourceSHA: intent.Review.SourceSHA256,
-		SourceID: source.SourceID, Sources: []darkrestore.LocalHandoffSourcePinV1{sourcePin},
+		SourceID: source.SourceID, Sources: []darkrestore.LocalHandoffSourcePinV1{sourcePin, secondPin},
 	}
 	inventoryPin, err := darkrestore.DigestLocalHandoffInventoryV1(inventory)
 	if err != nil {
@@ -244,8 +250,8 @@ func TestDarkRestoreM5ControlledSubscriptionCutover(t *testing.T) {
 		NativeBaselineSHA:   baselineSnapshot.NativeBaselineSHA,
 		Version:             1, InventorySHA: inventoryPin, SourceSHA: inventory.SourceSHA,
 		SourceID: inventory.SourceID, Scope: darkrestore.HandoffCoverageScopeV1,
-		Statement: darkrestore.HandoffCoverageStatementV1, DeclaredSources: 1,
-		EpochIDs:                  []string{sourcePin.EpochID},
+		Statement: darkrestore.HandoffCoverageStatementV1, DeclaredSources: 2,
+		EpochIDs:                  []string{sourcePin.EpochID, secondPin.EpochID},
 		InventoryCompleteAsserted: true, DeclaredSourcesRetired: true,
 		ApprovedUnixNano:      time.Now().UnixNano(),
 		DestinationSHA:        destinationSHA,
@@ -258,7 +264,7 @@ func TestDarkRestoreM5ControlledSubscriptionCutover(t *testing.T) {
 	staleApproval := businessSignedCoverage(t, staleApprovalValue)
 	if _, err = f.s.OpenDarkRestoreCutoverV1(
 		ctx, owner.Token, inventory, inventoryPin,
-		[]darkrestore.VerifiedLocalHandoff{handoff}, staleApproval,
+		handoffs, staleApproval,
 		destinationSHA, billingAttributionSHA, native, nativePins,
 	); !errors.Is(err, ErrDarkRestoreCutover) {
 		t.Fatal("stale native baseline approval was accepted", err)
@@ -270,7 +276,7 @@ func TestDarkRestoreM5ControlledSubscriptionCutover(t *testing.T) {
 	prematureValue := approvalValue
 	prematureValue.ApprovedUnixNano = nativeClaim.MeasuredThroughNano - 1
 	premature := businessSignedCoverage(t, prematureValue)
-	if _, err = f.s.OpenDarkRestoreCutoverV1(ctx, owner.Token, inventory, inventoryPin, []darkrestore.VerifiedLocalHandoff{handoff}, premature, destinationSHA, billingAttributionSHA, native, nativePins); !errors.Is(err, ErrDarkRestoreCutover) {
+	if _, err = f.s.OpenDarkRestoreCutoverV1(ctx, owner.Token, inventory, inventoryPin, handoffs, premature, destinationSHA, billingAttributionSHA, native, nativePins); !errors.Is(err, ErrDarkRestoreCutover) {
 		t.Fatal("approval before measurement accepted", err)
 	}
 	approval := businessSignedCoverage(t, approvalValue)
@@ -278,7 +284,7 @@ func TestDarkRestoreM5ControlledSubscriptionCutover(t *testing.T) {
 	if _, err = f.s.db.Exec(`CREATE TRIGGER synthetic_m5_baseline_failure BEFORE UPDATE OF baseline_complete ON pro_usage_accounts BEGIN SELECT RAISE(ABORT,'synthetic baseline failure'); END`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = f.s.OpenDarkRestoreCutoverV1(ctx, owner.Token, inventory, inventoryPin, []darkrestore.VerifiedLocalHandoff{handoff}, approval, destinationSHA, billingAttributionSHA, native, nativePins); err == nil {
+	if _, err = f.s.OpenDarkRestoreCutoverV1(ctx, owner.Token, inventory, inventoryPin, handoffs, approval, destinationSHA, billingAttributionSHA, native, nativePins); err == nil {
 		t.Fatal("injected baseline failure ignored")
 	}
 	var evidenceCount int
@@ -298,7 +304,7 @@ func TestDarkRestoreM5ControlledSubscriptionCutover(t *testing.T) {
 	}
 	evidence, err := f.s.OpenDarkRestoreCutoverV1(
 		ctx, owner.Token, inventory, inventoryPin,
-		[]darkrestore.VerifiedLocalHandoff{handoff}, approval,
+		handoffs, approval,
 		destinationSHA, billingAttributionSHA, native, nativePins,
 	)
 	if err != nil || evidence.SettledHistoricalBytes != 14 ||
@@ -308,6 +314,11 @@ func TestDarkRestoreM5ControlledSubscriptionCutover(t *testing.T) {
 		evidence.ImportReceiptSHA != baselineSnapshot.ImportReceiptSHA {
 		t.Fatal("M5 evidence boundary failed", evidence, err)
 	}
+	groupHistory, err := f.s.GroupHistory(ctx, quote.Groups[0].TargetGroupID)
+	if err != nil || len(groupHistory) != 1 || groupHistory[0].SnapshotBytes != "7" ||
+		groupHistory[0].ClosedEpochBytes != "7" || groupHistory[0].HistoricalBytes != "14" {
+		t.Fatal("source group must include both disjoint epochs and the original snapshot once", groupHistory, err)
+	}
 	changedBudgetEvidence := evidence
 	changedBudgetEvidence.SettledHistoricalBytes++
 	if err = verifyCutoverHistoricalBudget(ctx, f.s.db, &changedBudgetEvidence); !errors.Is(err, ErrDarkRestoreCutover) {
@@ -315,7 +326,7 @@ func TestDarkRestoreM5ControlledSubscriptionCutover(t *testing.T) {
 	}
 	replay, err := f.s.OpenDarkRestoreCutoverV1(
 		ctx, owner.Token, inventory, inventoryPin,
-		[]darkrestore.VerifiedLocalHandoff{handoff}, approval,
+		handoffs, approval,
 		destinationSHA, billingAttributionSHA, native, nativePins,
 	)
 	if err != nil || !replay.Replayed ||
@@ -406,9 +417,13 @@ func TestDarkRestoreM5ControlledSubscriptionCutover(t *testing.T) {
 		t.Fatal("native attestation reopen failed", err)
 	}
 	defer reopened.Close()
-	recovered, err := reopened.OpenDarkRestoreCutoverV1(ctx, owner.Token, inventory, inventoryPin, []darkrestore.VerifiedLocalHandoff{handoff}, approval, destinationSHA, billingAttributionSHA, native, nativePins)
+	recovered, err := reopened.OpenDarkRestoreCutoverV1(ctx, owner.Token, inventory, inventoryPin, handoffs, approval, destinationSHA, billingAttributionSHA, native, nativePins)
 	if err != nil || !recovered.Replayed || recovered.TransitionSHA != evidence.TransitionSHA || !reflect.DeepEqual(recovered.NativeDocument, evidence.NativeDocument) {
 		t.Fatal("late replay lost immutable native proof", err)
+	}
+	recoveredGroup, err := reopened.GroupHistory(ctx, quote.Groups[0].TargetGroupID)
+	if err != nil || !reflect.DeepEqual(groupHistory, recoveredGroup) {
+		t.Fatal("group accounting changed on reopen or replay", recoveredGroup, err)
 	}
 	// Historical pre-attestation receipts remain decodable, never authoritative.
 	legacy := evidence

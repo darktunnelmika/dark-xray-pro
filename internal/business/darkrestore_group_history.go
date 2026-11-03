@@ -2,6 +2,7 @@ package business
 
 import (
 	"context"
+	"database/sql"
 	"math/big"
 )
 
@@ -22,7 +23,12 @@ type DarkRestoreGroupHistory struct {
 // GroupHistory is an owner-only API read. It does not infer history from current
 // members: archived users, promoted users and later assignments cannot reduce it.
 func (s *Store) GroupHistory(ctx context.Context, groupID string) ([]DarkRestoreGroupHistory, error) {
-	present, err := darkRestoreSchemaState(ctx, s.db)
+	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	present, err := darkRestoreSchemaState(ctx, tx)
 	if err != nil {
 		return nil, err
 	}
@@ -30,7 +36,7 @@ func (s *Store) GroupHistory(ctx context.Context, groupID string) ([]DarkRestore
 	if !present {
 		return result, nil
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT source_sha256,source_group_id,source_name,source_count,archived_count,promoted_count,historical_bytes FROM darkrestore_group_history_v1 WHERE target_group_id=? ORDER BY source_sha256,source_group_id`, groupID)
+	rows, err := tx.QueryContext(ctx, `SELECT source_sha256,source_group_id,source_name,source_count,archived_count,promoted_count,historical_bytes FROM darkrestore_group_history_v1 WHERE target_group_id=? ORDER BY source_sha256,source_group_id`, groupID)
 	if err != nil {
 		return nil, err
 	}
@@ -48,7 +54,7 @@ func (s *Store) GroupHistory(ctx context.Context, groupID string) ([]DarkRestore
 	if err != nil {
 		return nil, err
 	}
-	attached, err := darkRestoreLocalAttachmentSchemaState(ctx, s.db)
+	attached, err := darkRestoreLocalAttachmentSchemaState(ctx, tx)
 	if err != nil {
 		return nil, err
 	}
@@ -64,7 +70,7 @@ func (s *Store) GroupHistory(ctx context.Context, groupID string) ([]DarkRestore
 			continue
 		}
 		ids := []string{}
-		entries, e := s.db.QueryContext(ctx, `SELECT a.client_id FROM darkrestore_local_settlements_v1 a JOIN darkrestore_import_entries_v1 e ON e.client_id=a.client_id WHERE e.source_sha256=? AND e.source_group_id=? ORDER BY a.client_id`, h.SourceSHA256, h.SourceGroupID)
+		entries, e := tx.QueryContext(ctx, `SELECT a.client_id FROM darkrestore_local_settlements_v1 a JOIN darkrestore_import_entries_v1 e ON e.client_id=a.client_id WHERE e.source_sha256=? AND e.source_group_id=? ORDER BY a.client_id`, h.SourceSHA256, h.SourceGroupID)
 		if e != nil {
 			return nil, e
 		}
@@ -84,23 +90,33 @@ func (s *Store) GroupHistory(ctx context.Context, groupID string) ([]DarkRestore
 		}
 		closed := new(big.Int)
 		for _, id := range ids {
-			attachment, e := readDarkRestoreLocalAttachment(ctx, s.db, id)
+			attachment, e := readDarkRestoreLocalAttachment(ctx, tx, id)
 			if e != nil {
 				return nil, e
 			}
 			if attachment == nil {
 				return nil, ErrUnavailable
 			}
-			{
-				delta := attachment.Settlement.Historical - attachment.Settlement.PriorBytes
-				if delta < 0 {
+			settled := attachment.Settlement.Historical
+			evidence, e := readCutoverEvidence(ctx, tx, id)
+			if e != nil {
+				return nil, e
+			}
+			if evidence != nil {
+				if !localAttachmentCoveredByInventory(attachment, evidence.Inventory) ||
+					evidence.SettledHistoricalBytes < settled {
 					return nil, ErrUnavailable
 				}
-				closed.Add(closed, big.NewInt(delta))
+				settled = evidence.SettledHistoricalBytes
 			}
+			delta := settled - attachment.Settlement.PriorBytes
+			if delta < 0 {
+				return nil, ErrUnavailable
+			}
+			closed.Add(closed, big.NewInt(delta))
 		}
 		h.ClosedEpochBytes = closed.String()
 		h.HistoricalBytes = new(big.Int).Add(snapshot, closed).String()
 	}
-	return result, nil
+	return result, tx.Commit()
 }

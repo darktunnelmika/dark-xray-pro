@@ -296,6 +296,7 @@ func (s *Store) DarkRestoreUsageForAccount(ctx context.Context, account usageled
 	if err != nil {
 		return nil, err
 	}
-	out.CutoverVerified = final != nil
+	// Prepared exports have their own receipt before any usable subscription is delivered.
+	out.CutoverVerified = final != nil && final.SubscriptionDeliveryScope == HandoverSubscriptionScope
 	return &out, nil
 }
