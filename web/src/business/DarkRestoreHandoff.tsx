@@ -149,7 +149,7 @@ export default function DarkRestoreHandoff({model}:{model:BusinessModel}) {
      <p>{fa?"راه‌اندازی سرویس در نود":"Service startup on the node"}: <strong>
       {execution.listener_apply_recorded?(fa?"رسید Agent ثبت شده":"Agent receipt recorded"):(fa?"در انتظار رسید Agent":"Waiting for Agent receipt")}
      </strong></p>
-     <p>{fa?"سلامت اتصال هنوز تأیید نشده است. ثبت راه‌اندازی به‌تنهایی به معنی پایان مهاجرت نیست.":"Connection health is awaiting verification. A startup receipt does not complete migration."}</p>
+     <p>{fa?"ثبت راه‌اندازی به‌تنهایی به معنی پایان مهاجرت نیست.":"A startup receipt does not complete migration."}</p>
      {execution.listener_apply_recorded&&digest(execution.plan_sha256??"")&&<DarkRestoreConnectionCheck model={model} clientID={execution.client_id} planSHA={execution.plan_sha256!}/>}
     </div>}
     {executionError&&<p role="status">{fa?"رسید کامل و مطابق این کاربر در دسترس نیست؛ دوباره بررسی کن.":"A complete matching receipt is unavailable. Check again."}</p>}
