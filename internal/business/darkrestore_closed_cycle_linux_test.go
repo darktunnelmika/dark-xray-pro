@@ -112,6 +112,57 @@ func TestDarkRestoreNativeClosedCycleEvidenceV1(t *testing.T) {
 	}
 }
 
+func TestDarkRestoreClosedCycleSeparatesCustomerAndProbe(t *testing.T) {
+	ctx := context.Background()
+	f, plan, registered, _, planSHA := syntheticAdmissionSignedProbeFixture(t)
+	if _, err := f.s.AuthorizeDarkRestoreAdmission(ctx, bytes.Repeat([]byte{0x61}, 32), f.owner.Token, plan.ClientID, planSHA, "closed-dual-round-0001"); err != nil {
+		t.Fatal(err)
+	}
+	epoch := registered.Epoch
+	initial, err := initialAdmissionReport(epoch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	box, err := uc.Open(uc.Options{Directory: t.TempDir() + "/outbox", Key: bytes.Repeat([]byte{9}, 32), Epoch: epoch, Create: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer box.Close()
+	for _, final := range []bool{false, true} {
+		users := append([]uc.Usage(nil), initial.Users...)
+		if final {
+			for i := range users {
+				if users[i].ClientID == plan.ClientID {
+					users[i].Uplink, users[i].Downlink = 5, 7
+				} else {
+					users[i].Uplink, users[i].Downlink = 101, 203
+				}
+			}
+		}
+		report, err := box.Observe(users, final)
+		if err != nil {
+			t.Fatal(err)
+		}
+		receipt, err := f.s.usage.AcceptChecked(ctx, usageledger.Principal{NodeID: epoch.NodeID, InstallationID: epoch.InstallationID}, report, f.s.CheckDarkRestoreAdmission)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err = box.Acknowledge(receipt); err != nil {
+			t.Fatal(err)
+		}
+	}
+	v, err := f.s.ProjectDarkRestoreNativeClosedCycleEvidenceV1(ctx, f.owner.Token, plan.ClientID)
+	if err != nil || !v.SealedCycleRecorded || v.CycleUplink != 5 || v.CycleDownlink != 7 || v.AuthorizesMutation {
+		t.Fatal("customer settlement with separate nonbillable traffic", v, err)
+	}
+	if _, err = f.s.db.Exec("UPDATE pro_usage_epochs SET cursor_json=json_set(CAST(cursor_json AS TEXT),'$.Users[0].uplink_bytes','6') WHERE epoch_id=?", epoch.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = f.s.ProjectDarkRestoreNativeClosedCycleEvidenceV1(ctx, f.owner.Token, plan.ClientID); !errors.Is(err, ErrDarkRestoreCutover) {
+		t.Fatal("altered terminal counters accepted", err)
+	}
+}
+
 func TestDarkRestoreNativeClosedCycleRequiresObservedTrafficV1(t *testing.T) {
 	ctx := context.Background()
 	key := bytes.Repeat([]byte{0x61}, 32)

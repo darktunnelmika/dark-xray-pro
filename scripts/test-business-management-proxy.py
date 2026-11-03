@@ -119,6 +119,7 @@ location / {{ return 403; }}
                           ("/api/v1/workspace/dark-restore/handoff", {"GET", "HEAD"}),
                           ("/api/v1/workspace/dark-restore/handoff/readiness", {"GET", "HEAD"}),
                           ("/api/v1/workspace/dark-restore/handoff/quarantine/admission/evidence", {"GET", "HEAD"}),
+                          ("/api/v1/workspace/dark-restore/handoff/quarantine/settlement", {"GET", "HEAD"}),
                           ("/api/v1/workspace/dark-restore/handoff/quarantine/connection-check", {"GET", "HEAD", "POST"}),
                           ("/api/v1/workspace/dark-restore/handoff/quarantine", {"POST"}),
                           ("/api/v1/workspace/dark-restore/handoff/quarantine/admission", {"POST"}),

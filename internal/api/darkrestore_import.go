@@ -156,23 +156,41 @@ func (s *Server) attachDarkRestoreImport(mux *http.ServeMux) {
 			}
 			respond(w, 200, readiness)
 		})
-		handle("GET "+restoreBase+"/handoff/quarantine/admission/evidence", false, func(w http.ResponseWriter, r *http.Request, token string) {
+		stagedClient := func(ctx context.Context) (string, error) {
 			verified, err := darkrestore.VerifySignedLocalHandoff(handoff.path, handoff.digest, handoff.public)
 			if err != nil {
-				businessError(w, business.ErrUnavailable)
-				return
+				return "", business.ErrUnavailable
 			}
 			proof, err := verified.Settlement()
 			if err != nil {
-				businessError(w, business.ErrUnavailable)
-				return
+				return "", business.ErrUnavailable
 			}
-			state, err := s.business.DarkRestoreCutoverReadinessV1(r.Context(), proof.SourceSHA, proof.SourceID)
+			state, err := s.business.DarkRestoreCutoverReadinessV1(ctx, proof.SourceSHA, proof.SourceID)
+			return state.ClientID, err
+		}
+		handle("GET "+restoreBase+"/handoff/quarantine/settlement", false, func(w http.ResponseWriter, r *http.Request, token string) {
+			client, err := stagedClient(r.Context())
 			if err != nil {
 				businessError(w, err)
 				return
 			}
-			evidence, err := s.business.ProjectDarkRestoreNativeAdmissionEvidenceV1(r.Context(), token, state.ClientID)
+			e, err := s.business.ProjectDarkRestoreNativeClosedCycleEvidenceV1(r.Context(), token, client)
+			if err != nil {
+				businessError(w, err)
+				return
+			}
+			respond(w, 200, map[string]any{"scope": e.Scope, "client_id": e.ClientID, "plan_sha256": e.PlanSHA,
+				"final_report_sha256": e.FinalReportSHA, "sealed_cycle_recorded": e.SealedCycleRecorded,
+				"customer_uplink_bytes": strconv.FormatInt(e.CycleUplink, 10), "customer_downlink_bytes": strconv.FormatInt(e.CycleDownlink, 10),
+				"authorizes_mutation": e.AuthorizesMutation})
+		})
+		handle("GET "+restoreBase+"/handoff/quarantine/admission/evidence", false, func(w http.ResponseWriter, r *http.Request, token string) {
+			client, err := stagedClient(r.Context())
+			if err != nil {
+				businessError(w, err)
+				return
+			}
+			evidence, err := s.business.ProjectDarkRestoreNativeAdmissionEvidenceV1(r.Context(), token, client)
 			if err != nil {
 				businessError(w, err)
 				return
@@ -182,7 +200,7 @@ func (s *Server) attachDarkRestoreImport(mux *http.ServeMux) {
 				SystemProbe *business.DarkRestoreSystemProbeStatusV1 `json:"system_probe,omitempty"`
 			}{DarkRestoreNativeAdmissionEvidenceV1: evidence}
 			if s.darkRestoreProbeEndpoint != nil {
-				status, statusErr := s.business.ProjectDarkRestoreSystemProbeV1(r.Context(), token, state.ClientID, evidence.PlanSHA)
+				status, statusErr := s.business.ProjectDarkRestoreSystemProbeV1(r.Context(), token, client, evidence.PlanSHA)
 				if statusErr != nil {
 					businessError(w, statusErr)
 					return

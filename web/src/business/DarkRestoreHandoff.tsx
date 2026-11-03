@@ -72,6 +72,8 @@ export default function DarkRestoreHandoff({model}:{model:BusinessModel}) {
  const [readiness,setReadiness]=useState<Readiness|null>(null);
  const [execution,setExecution]=useState<Execution|null>(null);
  const [executionError,setExecutionError]=useState(false);
+ const [settlement,setSettlement]=useState<{up:string;down:string}|null>(null);
+ const [settlementError,setSettlementError]=useState(false);
  const [busy,setBusy]=useState(false);
  const [error,setError]=useState(false);
  const fmt=(value:string)=>{try{return BigInt(value).toLocaleString(fa?"fa-IR":"en-US")+" B";}catch{return "—";}};
@@ -118,7 +120,21 @@ export default function DarkRestoreHandoff({model}:{model:BusinessModel}) {
    setReadiness(result);
   } catch { setError(true); } finally { setBusy(false); }
  }
+ async function inspectSettlement() {
+  if(!execution)return;
+  setBusy(true);setSettlement(null);setSettlementError(false);
+  try {
+   const v=await api<{scope:string;client_id:string;plan_sha256:string;final_report_sha256:string;sealed_cycle_recorded:boolean;
+    customer_uplink_bytes:string;customer_downlink_bytes:string;authorizes_mutation:boolean}>(restoreAPI+"/handoff/quarantine/settlement");
+   if(v.scope!=="darkrestore_native_closed_cycle_evidence_v1"||v.client_id!==execution.client_id||v.plan_sha256!==execution.plan_sha256||
+    !digest(v.final_report_sha256)||v.sealed_cycle_recorded!==true||v.authorizes_mutation!==false||
+    typeof v.customer_uplink_bytes!=="string"||typeof v.customer_downlink_bytes!=="string"||
+    !bytes(v.customer_uplink_bytes)||!bytes(v.customer_downlink_bytes))throw Error("invalid settlement");
+   setSettlement({up:v.customer_uplink_bytes,down:v.customer_downlink_bytes});
+  } catch {setSettlementError(true);} finally {setBusy(false);}
+ }
  async function inspectExecution() {
+  setSettlement(null);setSettlementError(false);
   if(!receipt)return;
   setBusy(true);setExecution(null);setExecutionError(false);
   try {
@@ -179,6 +195,11 @@ export default function DarkRestoreHandoff({model}:{model:BusinessModel}) {
       {probeLabels[execution.system_probe.state][fa?"fa":"en"]}
      </strong></p>}
      <p>{fa?"ثبت راه‌اندازی به‌تنهایی به معنی پایان مهاجرت نیست.":"A startup receipt does not complete migration."}</p>
+     {execution.listener_apply_recorded&&digest(execution.plan_sha256??"")&&<>
+      <button type="button" disabled={busy} onClick={()=>void inspectSettlement()}>{fa?"بررسی تسویهٔ مصرف مشتری":"Check settled customer traffic"}</button>
+      {settlement&&<p role="status">{fa?"مصرف مشتری در دورهٔ بسته‌شده":"Customer traffic in the closed session"} · {fa?"آپلود":"Upload"} {fmt(settlement.up)} · {fa?"دانلود":"Download"} {fmt(settlement.down)}</p>}
+      {settlementError&&<p role="status">{fa?"رسید نهایی مصرف این مشتری قابل تأیید نیست.":"A final traffic receipt for this customer could not be verified."}</p>}
+     </>}
      {execution.listener_apply_recorded&&digest(execution.plan_sha256??"")&&<DarkRestoreConnectionCheck model={model} clientID={execution.client_id} planSHA={execution.plan_sha256!}/>}
     </div>}
     {executionError&&<p role="status">{fa?"رسید کامل و مطابق این کاربر در دسترس نیست؛ دوباره بررسی کن.":"A complete matching receipt is unavailable. Check again."}</p>}

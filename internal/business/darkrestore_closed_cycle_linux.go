@@ -113,19 +113,9 @@ func ValidateDarkRestoreNativeClosedCycleEvidenceV1(e DarkRestoreNativeClosedCyc
 }
 
 // ProjectDarkRestoreNativeClosedCycleEvidenceV1 is a read-only projection. The
-// admission/birth/prepare rows and the sealed ledger epoch are immutable; the
-// second read transaction deliberately re-authorizes the owner and validates
-// the terminal cursor against the exact final receipt and all epoch deltas.
+// owner, admission, sealed cursor and both ledgers are checked in one snapshot.
 func (s *Store) ProjectDarkRestoreNativeClosedCycleEvidenceV1(ctx context.Context, token, client string) (DarkRestoreNativeClosedCycleEvidenceV1, error) {
 	var zero DarkRestoreNativeClosedCycleEvidenceV1
-	admission, err := s.ProjectDarkRestoreNativeAdmissionEvidenceV1(ctx, token, client)
-	if err != nil {
-		return zero, err
-	}
-	admissionSHA, err := cutoverSnapshotDigest("DARK-PRO-NATIVE-ADMISSION-EVIDENCE-v1", admission)
-	if err != nil {
-		return zero, err
-	}
 	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
 		return zero, err
@@ -134,17 +124,52 @@ func (s *Store) ProjectDarkRestoreNativeClosedCycleEvidenceV1(ctx context.Contex
 	if _, err = ownershipOwner(ctx, tx, token); err != nil {
 		return zero, err
 	}
+	admission, err := projectDarkRestoreNativeAdmissionEvidenceTx(ctx, tx, client)
+	if err != nil {
+		return zero, err
+	}
+	admissionSHA, err := cutoverSnapshotDigest("DARK-PRO-NATIVE-ADMISSION-EVIDENCE-v1", admission)
+	if err != nil {
+		return zero, err
+	}
 	var state string
-	var cursorRaw []byte
-	if err = tx.QueryRowContext(ctx, "SELECT state,cursor_json FROM pro_usage_epochs WHERE epoch_id=?", admission.EpochID).Scan(&state, &cursorRaw); err != nil || state != "sealed" {
+	var epochRaw, cursorRaw []byte
+	if err = tx.QueryRowContext(ctx, "SELECT state,epoch_json,cursor_json FROM pro_usage_epochs WHERE epoch_id=?", admission.EpochID).Scan(&state, &epochRaw, &cursorRaw); err != nil || state != "sealed" {
 		return zero, ErrDarkRestoreCutover
 	}
+	var epoch uc.Epoch
 	var cursor uc.Cursor
-	if len(cursorRaw) == 0 || len(cursorRaw) > 131072 || json.Unmarshal(cursorRaw, &cursor) != nil ||
-		cursor.EpochID != admission.EpochID || cursor.Sequence <= 1 || !cursor.Quiesced ||
-		!routeSHA.MatchString(cursor.ReportSHA) || len(cursor.Users) != 1 ||
-		cursor.Users[0].ClientID != client {
+	if len(epochRaw) > 131072 || json.Unmarshal(epochRaw, &epoch) != nil || epoch.ID != admission.EpochID ||
+		len(cursorRaw) > 131072 || json.Unmarshal(cursorRaw, &cursor) != nil ||
+		cursor.EpochID != admission.EpochID || cursor.Sequence <= 1 || !cursor.Quiesced {
 		return zero, ErrDarkRestoreCutover
+	}
+	report, err := initialAdmissionReport(epoch)
+	if err != nil || report.SHA != admission.InitialReportSHA {
+		return zero, ErrDarkRestoreCutover
+	}
+	report.Sequence, report.Quiesced, report.Users, report.SHA = cursor.Sequence, true, cursor.Users, cursor.ReportSHA
+	if uc.VerifyReport(epoch, report) != nil {
+		return zero, ErrDarkRestoreCutover
+	}
+	var customer uc.Usage
+	for i, binding := range epoch.Bindings {
+		user := cursor.Users[i]
+		if binding.ClientID != user.ClientID {
+			return zero, ErrDarkRestoreCutover
+		}
+		if binding.Billable {
+			if binding.ClientID != client {
+				return zero, ErrDarkRestoreCutover
+			}
+			customer = user
+			continue
+		}
+		var total, matching, up, down int64
+		if err = tx.QueryRowContext(ctx, `SELECT COUNT(*),COUNT(CASE WHEN probe_id=? THEN 1 END),COALESCE(SUM(uplink),0),COALESCE(SUM(downlink),0) FROM pro_probe_deltas WHERE epoch_id=?`, binding.ClientID, epoch.ID).Scan(&total, &matching, &up, &down); err != nil ||
+			total == 0 || total != matching || up != user.Uplink || down != user.Downlink {
+			return zero, ErrDarkRestoreCutover
+		}
 	}
 	var finalSHA string
 	var quiesced int
@@ -161,7 +186,8 @@ func (s *Store) ProjectDarkRestoreNativeClosedCycleEvidenceV1(ctx context.Contex
 	var onlyClient string
 	var uplink, downlink int64
 	if err = tx.QueryRowContext(ctx, `SELECT COUNT(*),COUNT(DISTINCT client_id),COALESCE(MIN(client_id),''),COALESCE(SUM(uplink),0),COALESCE(SUM(downlink),0) FROM pro_usage_deltas WHERE epoch_id=?`, admission.EpochID).Scan(&rows, &clients, &onlyClient, &uplink, &downlink); err != nil ||
-		rows < 2 || clients != 1 || onlyClient != client ||
+		rows < 2 || clients != 1 || onlyClient != client || customer.ClientID != client ||
+		uplink != customer.Uplink || downlink != customer.Downlink ||
 		uplink < 0 || downlink < 0 || (uplink == 0 && downlink == 0) ||
 		uplink > math.MaxInt64-downlink {
 		return zero, ErrDarkRestoreCutover

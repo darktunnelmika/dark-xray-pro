@@ -196,6 +196,20 @@ test("owner attaches a pinned signed handoff in Clients at 320px without a brows
  await expect(panel.getByLabel("وضعیت اجرای سرویس").getByText("رسید Agent ثبت شده",{exact:true})).toBeVisible();
  await expect(panel.getByText("فعال‌سازی مسدود است",{exact:true})).toBeVisible();
  await expect(readiness.locator("p").filter({hasText:"اشتراک پیش از فعال‌سازی"}).getByText("رسید تأیید شد",{exact:true})).toBeVisible();
+ let settlementClient="dr-"+sha.slice(0,20);
+ await page.route("**/api/v1/workspace/dark-restore/handoff/quarantine/settlement",route=>{
+  expect(route.request().method()).toBe("GET");
+  return route.fulfill({json:{scope:"darkrestore_native_closed_cycle_evidence_v1",client_id:settlementClient,
+   plan_sha256:"c".repeat(64),final_report_sha256:"e".repeat(64),sealed_cycle_recorded:true,
+   customer_uplink_bytes:"1859",customer_downlink_bytes:"17924",authorizes_mutation:false}});
+ });
+ const settled=panel.getByRole("button",{name:"بررسی تسویهٔ مصرف مشتری"});
+ await settled.click();
+ await expect(panel.getByText(/مصرف مشتری در دورهٔ بسته‌شده/)).toContainText(BigInt(17924).toLocaleString("fa-IR"));
+ settlementClient="another-client";
+ await settled.click();
+ await expect(panel.getByText("رسید نهایی مصرف این مشتری قابل تأیید نیست.")).toBeVisible();
+ await expect(panel.getByText(/مصرف مشتری در دورهٔ بسته‌شده/)).toHaveCount(0);
  let connectionState="not_requested", connectionPosts=0;
  await page.route("**/api/v1/workspace/dark-restore/handoff/quarantine/connection-check",route=>{
   if(route.request().method()==="POST"){

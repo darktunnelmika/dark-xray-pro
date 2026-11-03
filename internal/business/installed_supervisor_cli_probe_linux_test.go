@@ -160,7 +160,7 @@ func TestInstalledSupervisorCLIProbe(t *testing.T) {
 	verifierHash := sha256.Sum256(verifierCert.Raw)
 	verifier := mx.ProtocolHealthEndpoint{Address: plainTarget.Listener.Addr().String(), ServerName: "example.com", CertificateSHA: hex.EncodeToString(verifierHash[:]), CABundle: pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: verifierCert.Raw})}
 	verifierRaw, _ := json.Marshal(verifier)
-	hub.Env = append(hub.Env, "DARK_PRO_ENABLE_IMPORTED_CONNECTION_CHECK=1", "DARK_PRO_IMPORTED_VERIFIER_JSON="+string(verifierRaw))
+	hub.Env = append(hub.Env, "DARK_PRO_ENABLE_IMPORTED_CONNECTION_CHECK=1", "DARK_PRO_ENABLE_IMPORTED_SYSTEM_PROBE_CHECK=1", "DARK_PRO_IMPORTED_VERIFIER_JSON="+string(verifierRaw))
 	hub.Stdout = hubLog
 	hub.Stderr = hubLog
 	if err = hub.Start(); err != nil {
@@ -279,12 +279,19 @@ func TestInstalledSupervisorCLIProbe(t *testing.T) {
 		r.Header.Set("Sec-Fetch-Site", "same-origin")
 		response, e := client.Do(r)
 		if e == nil {
-			var evidence DarkRestoreNativeAdmissionEvidenceV1
+			var evidence struct {
+				DarkRestoreNativeAdmissionEvidenceV1
+				Probe *DarkRestoreSystemProbeStatusV1 `json:"system_probe"`
+			}
 			e = json.NewDecoder(response.Body).Decode(&evidence)
 			response.Body.Close()
 			if response.StatusCode == 200 && e == nil && evidence.ClientID == id && evidence.PlanSHA == approval.SHA &&
 				evidence.InitialZeroReceiptRecorded && evidence.ListenerApplyRecorded && len(evidence.ListenerApplyReceiptSHA) == 64 &&
-				!evidence.NativeApplyRecorded && !evidence.ServingHealthRecorded && !evidence.AuthorizesMutation {
+				!evidence.NativeApplyRecorded && !evidence.ServingHealthRecorded && !evidence.AuthorizesMutation &&
+				evidence.Probe != nil && evidence.Probe.Scope == DarkRestoreSystemProbeRoundScopeV1 &&
+				evidence.Probe.ClientID == id && evidence.Probe.PlanSHA == approval.SHA &&
+				evidence.Probe.State == "recorded" && evidence.Probe.ServingHealth && !evidence.Probe.AuthorizesMutation &&
+				len(evidence.Probe.ChallengeID) == 32 && verifierRequests.Load() == 1 {
 				appliedReady = true
 				break
 			}
@@ -292,7 +299,7 @@ func TestInstalledSupervisorCLIProbe(t *testing.T) {
 		time.Sleep(50 * time.Millisecond)
 	}
 	if !appliedReady {
-		t.Fatal("actual Agent listener apply receipt missing", base)
+		t.Fatal("packaged Agent listener or automatic probe receipt missing", base)
 	}
 	status, raw = request("/api/v1/workspace/dark-restore/handoff/quarantine/connection-check", map[string]any{"plan_sha256": approval.SHA, "event_id": "installed-customer-connection-0001", "acknowledge_usage": true})
 	if status != 200 {
@@ -315,7 +322,7 @@ func TestInstalledSupervisorCLIProbe(t *testing.T) {
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
-	if !verified || verifierRequests.Load() != 1 {
+	if !verified || verifierRequests.Load() != 2 {
 		t.Fatal("actual CLI connection proof", verified, verifierRequests.Load(), base)
 	}
 	parsed, err := url.Parse(strings.TrimSpace(delivery.Content))
@@ -396,8 +403,34 @@ func TestInstalledSupervisorCLIProbe(t *testing.T) {
 		t.Fatal("actual CLI listener apply receipt", appliedCount, err)
 	}
 	var connectionCount int
-	if err = db.QueryRow("SELECT COUNT(*) FROM darkrestore_connection_v1_receipt").Scan(&connectionCount); err != nil || connectionCount != 1 || verifierRequests.Load() != 1 {
+	if err = db.QueryRow("SELECT COUNT(*) FROM darkrestore_connection_v1_receipt").Scan(&connectionCount); err != nil || connectionCount != 1 || verifierRequests.Load() != 2 {
 		t.Fatal("actual CLI duplicate or missing connection proof", connectionCount, verifierRequests.Load(), err)
+	}
+	get, err := http.NewRequest("GET", origin+"/api/v1/workspace/dark-restore/handoff/quarantine/settlement", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	get.AddCookie(cookie)
+	res, err := client.Do(get)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	var settled struct {
+		Scope              string `json:"scope"`
+		Client             string `json:"client_id"`
+		Plan               string `json:"plan_sha256"`
+		FinalSHA           string `json:"final_report_sha256"`
+		Up                 string `json:"customer_uplink_bytes"`
+		Down               string `json:"customer_downlink_bytes"`
+		Sealed             bool   `json:"sealed_cycle_recorded"`
+		AuthorizesMutation bool   `json:"authorizes_mutation"`
+	}
+	if err = json.NewDecoder(res.Body).Decode(&settled); err != nil || res.StatusCode != 200 ||
+		settled.Scope != DarkRestoreNativeClosedCycleEvidenceScopeV1 || settled.Client != id || settled.Plan != approval.SHA ||
+		!routeSHA.MatchString(settled.FinalSHA) || !settled.Sealed || settled.AuthorizesMutation ||
+		settled.Up != strconv.FormatInt(up, 10) || settled.Down != strconv.FormatInt(down, 10) {
+		t.Fatal("owner could not verify exact customer-only settlement", res.StatusCode, settled, err)
 	}
 	// Compare all representative financial values directly from the actual HUB database.
 	for _, before := range balances {
@@ -406,5 +439,5 @@ func TestInstalledSupervisorCLIProbe(t *testing.T) {
 			t.Fatal("artifact wallet changed", err)
 		}
 	}
-	t.Logf("INSTALLED_CLI_SUPERVISOR_PASS native=%d historical=14 remaining=%d; actual HUB and Agent binaries, owner API, one pinned customer connection receipt, URI traffic, renewal and SIGTERM settlement", up+down, 999986-up-down)
+	t.Logf("INSTALLED_CLI_SUPERVISOR_PASS native=%d historical=14 remaining=%d; actual HUB and Agent binaries, owner API, one automatic nonbillable probe then one consented customer connection receipt, URI traffic, renewal and SIGTERM settlement", up+down, 999986-up-down)
 }
