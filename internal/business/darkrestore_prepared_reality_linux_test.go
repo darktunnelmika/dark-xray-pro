@@ -112,6 +112,14 @@ func TestImportedLoopbackRealityStaysQuarantined(t *testing.T) {
 		if err != nil || !reflect.DeepEqual(replay, receipt) {
 			t.Fatal("registration replay", err)
 		}
+
+		reviewed, err := f.s.ReviewDarkRestoreQuarantineRegistration(ctx, key, f.owner.Token, client.ID, pub, core, receipt)
+		if err != nil || reviewed.StateSHA != stage.StateSHA {
+			t.Fatal("HUB rejected current node registration", err)
+		}
+		if _, err = f.s.ReviewDarkRestoreQuarantineRegistration(ctx, key, f.owner.Token, client.ID, pub, strings.Repeat("0", 64), receipt); !errors.Is(err, ErrDarkRestoreCutover) {
+			t.Fatal("wrong core receipt accepted", err)
+		}
 		path := filepath.Join(dir, pin+".json")
 		raw, err := os.ReadFile(path)
 		var persisted DarkRestoreQuarantineRegistration
@@ -124,6 +132,31 @@ func TestImportedLoopbackRealityStaysQuarantined(t *testing.T) {
 		if _, err = stage.RegisterOffline(ctx, stage.NodeID, stage.InstallationID, pin, binary, core, dir, signer); !errors.Is(err, ErrConflict) {
 			t.Fatal("corrupt receipt overwritten", err)
 		}
+
+		if err = f.s.Close(); err != nil {
+			t.Fatal(err)
+		}
+		reopened, err := Open(f.path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer reopened.Close()
+		if err = reopened.EnableInboundExecution(ctx); err != nil {
+			t.Fatal(err)
+		}
+		if err = reopened.EnableUsageLedger(ctx); err != nil {
+			t.Fatal(err)
+		}
+		if _, err = reopened.ReviewDarkRestoreQuarantineRegistration(ctx, key, f.owner.Token, client.ID, pub, core, receipt); err != nil {
+			t.Fatal("HUB reopen rejected unchanged receipt", err)
+		}
+		if _, err = reopened.ExtendClientScoped(ctx, ExtendClient{EventID: "quarantine-renew-stale-0001", ClientID: client.ID, AdditionalVolumeBytes: 20, Reason: "Invalidate old staged entitlement"}, client.RepresentativeID); err != nil {
+			t.Fatal(err)
+		}
+		if _, err = reopened.ReviewDarkRestoreQuarantineRegistration(ctx, key, f.owner.Token, client.ID, pub, core, receipt); err == nil {
+			t.Fatal("renewal reused obsolete registration")
+		}
+		f.s = reopened
 		t.Log("pinned core accepted quarantined imported identity")
 	}
 	if _, err = f.s.SetClientStateScoped(ctx, SetClientState{EventID: "prepared-loopback-enable-0001", ClientID: client.ID, Action: "enable", Reason: "Verify imported client guard"}, client.RepresentativeID); !errors.Is(err, ErrDarkRestoreCutover) {

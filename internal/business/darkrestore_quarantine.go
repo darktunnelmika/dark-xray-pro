@@ -2,6 +2,7 @@ package business
 
 import (
 	"context"
+	"crypto/ed25519"
 	"fmt"
 
 	ix "github.com/darktunnelmika/dark-xray-pro/internal/inboundexec"
@@ -109,4 +110,20 @@ func (p DarkRestoreQuarantinePlan) ValidateOffline(ctx context.Context, node, in
 		return xrayconfig.Validation{}, ErrDarkRestoreCutover
 	}
 	return xrayconfig.ValidateOffline(ctx, p.candidate, binary, binarySHA)
+}
+
+// ReviewDarkRestoreQuarantineRegistration rederives the current owner-approved
+// plan before reviewing a node's durable offline registration. The independent
+// signer and binary pins are trusted local operator inputs.
+func (s *Store) ReviewDarkRestoreQuarantineRegistration(ctx context.Context, key []byte, token, client string, pub ed25519.PublicKey, coreSHA string, receipt DarkRestoreQuarantineRegistration) (DarkRestoreQuarantinePlan, error) {
+	var zero DarkRestoreQuarantinePlan
+	plan, err := s.DarkRestoreQuarantinePlan(ctx, key, token, client)
+	if err != nil {
+		return zero, err
+	}
+	sha, err := plan.Digest()
+	if err != nil || !receipt.Verify(pub, sha, coreSHA) {
+		return zero, ErrDarkRestoreCutover
+	}
+	return plan, nil
 }
