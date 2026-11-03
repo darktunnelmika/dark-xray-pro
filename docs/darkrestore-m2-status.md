@@ -394,3 +394,27 @@ rollback assertion; Account now keeps value equality while representing unknown
 remaining budget accurately in JSON. The original assertion was not weakened.
 Synthetic delivery-journal insertion remains a model test, not real prepared
 subscription rendering or installed delivery acceptance; that integration is next.
+
+
+## Exact-head CI fixture stabilization (source/test checkpoint)
+
+PR137 head `7d36c2bdf2868f2f1d7bd41eec5a432ff28e3905`, tree
+`cd869bf44baa6a908de69b25f4f4d7dd3774be55`, fixed the installed-browser
+ownership expectation after a 1 MiB renewal. Its real Chromium ownership job
+`125909188956` passed. The separate Foundation business race job
+`125909188923` then exposed a second-boundary ambiguity in an older volume
+refund safety fixture: the synthetic native delivery sampled the client's
+second-resolution creation timestamp instead of the immutable usage seed's
+timestamp. Under a boundary crossing, the row could precede the very authority
+whose later issuance the fixture intended to model.
+
+The fixture now reads the immutable seed timestamp and places the already-expired
+synthetic issuance strictly after it. Product refund policy is unchanged:
+missing final usage remains fail-closed, lease expiry is not zero usage, and no
+credit is issued from an unknown tail. Both the original and corrected focused
+test passed 100 consecutive non-race runs on the isolated host; the corrected
+full business package and exact-head CI remain the publication gates. This is
+test stabilization only, not Merge, installation, cutover, subscription delivery,
+inventory completeness or production evidence. PRO LAB remains on the accepted
+closed predecessor revision
+`174af74c18d33d4366f4ae212060ddbbc84daa3c`.

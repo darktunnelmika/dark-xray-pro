@@ -21,10 +21,19 @@ func TestVolumeRefundNeverIssuedRequiresPositiveSeedAndNoRuntimeAuthority(t *tes
 	if err := s.PutInboundTarget(ctx, InboundTarget{InboundID: 10, NodeID: "issued-node", InstallationID: strings.Repeat("a", 32), ListenIP: "127.0.0.1", DirectPort: 19897}); err != nil {
 		t.Fatal(err)
 	}
-	// The latest issued lease is intentionally long expired. Time alone must
-	// not turn potentially unobserved traffic into an unused-volume credit.
+	// The latest issued lease is intentionally long expired. Bind the
+	// issuance to a point strictly after the immutable fresh-identity seed:
+	// client and seed timestamps use seconds, and sampling the client time can
+	// otherwise put the synthetic issuance just before a second-boundary seed.
+	// Time alone must not turn potentially unobserved traffic into an
+	// unused-volume credit.
+	var seedCreated int64
+	if err := s.db.QueryRow(`SELECT created_unix FROM pro_usage_seeds WHERE client_id=?`, c.ID).Scan(&seedCreated); err != nil {
+		t.Fatal(err)
+	}
+	issued := seedCreated*int64(time.Second) + 1
 	if _, err := s.db.Exec(`INSERT INTO native_runtime_delivery(node_id,installation_id,issued,expires,sequence,sha,manifest,generation) VALUES(?,?,?,?,1,?,?,1)`,
-		"issued-node", strings.Repeat("a", 32), c.CreatedUnix*int64(time.Second), c.CreatedUnix*int64(time.Second)+1, strings.Repeat("b", 64), strings.Repeat("c", 64)); err != nil {
+		"issued-node", strings.Repeat("a", 32), issued, issued+1, strings.Repeat("b", 64), strings.Repeat("c", 64)); err != nil {
 		t.Fatal(err)
 	}
 	res, err := s.RefundExpiredVolume(ctx, nil, refundRequestFor(c))
