@@ -38,7 +38,11 @@ func TestQuarantineRealAgentTLS(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	reg, err := noderegistry.Open(filepath.Join(t.TempDir(), "registry.json"), time.Now)
+	registryDir := t.TempDir()
+	if err := os.Chmod(registryDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	reg, err := noderegistry.Open(filepath.Join(registryDir, "registry.json"), time.Now)
 	if err != nil {
 		t.Fatal(err)
 	}
