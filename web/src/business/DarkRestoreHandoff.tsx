@@ -18,18 +18,42 @@ type Attachment = {
 type Readiness = {
  client_id:string; source_sha256:string; source_id:string; source_scope:string;
  source_epoch_settled:boolean; global_source_custody_verified:boolean;
- native_baseline_complete:boolean; subscription_delivered:boolean;
+ native_baseline_complete:boolean; subscription_delivered:boolean; subscription_delivery_scope?:string;
  client_archived:boolean; client_expired:boolean; finite_quota_remaining_bytes:string;
  activation_allowed:boolean; cutover_verified:boolean;
  activation_blockers:string[]; verification_blockers:string[];
 };
+const probeLabels = {
+ not_requested: {fa:"درخواستی ثبت نشده است.",en:"No probe has been requested."},
+ pending: {fa:"درخواست ثبت شده و در انتظار نود است.",en:"Queued for the node."},
+ issued: {fa:"درخواست برای نود صادر شده و هنوز رسیدی ثبت نشده است.",en:"Issued to the node. No receipt has been recorded."},
+ expired: {fa:"مهلت آزمون گذشته و هنوز رسیدی ثبت نشده است.",en:"The probe window has expired. No receipt has been recorded."},
+ recorded: {fa:"رسید آزمون خودکار این نود ثبت شد.",en:"The node’s automatic probe receipt was recorded."},
+};
+type SystemProbe = {
+ scope:string; client_id:string; plan_sha256:string; challenge_id?:string;
+ state:keyof typeof probeLabels; serving_health_recorded:boolean; authorizes_mutation:boolean;
+};
 type Execution = {
+ system_probe?:SystemProbe;
  scope:string;client_id:string;plan_sha256?:string;initial_zero_receipt_recorded:boolean;
  listener_apply_recorded:boolean;listener_apply_receipt_sha256?:string;
  native_apply_recorded:boolean;serving_health_recorded:boolean;authorizes_mutation:boolean;
 };
 const digest = (v: string) => /^[a-f0-9]{64}$/.test(v);
 const bytes = (v: string) => /^(0|[1-9][0-9]{0,18})$/.test(v);
+function validSystemProbe(execution: Execution): boolean {
+ const probe=execution.system_probe;
+ if (probe===undefined) return true;
+ if (!probe || probe.scope!=="darkrestore_system_probe_round_v1" ||
+     probe.client_id!==execution.client_id || !digest(execution.plan_sha256??"") ||
+     probe.plan_sha256!==execution.plan_sha256 || probe.authorizes_mutation!==false ||
+     !Object.prototype.hasOwnProperty.call(probeLabels,probe.state) ||
+     probe.serving_health_recorded!==(probe.state==="recorded")) return false;
+ if (probe.state==="not_requested") return probe.challenge_id===undefined;
+ return execution.listener_apply_recorded && typeof probe.challenge_id==="string" &&
+     /^[a-f0-9]{32}$/.test(probe.challenge_id);
+}
 function validHandoff(v: Handoff): boolean {
  const s=v?.source_settlement;
  if (!v || !digest(v.handoff_sha256) || !s || s.scope!=="single_local_source_epoch" ||
@@ -102,7 +126,7 @@ export default function DarkRestoreHandoff({model}:{model:BusinessModel}) {
    if(result?.scope!=="darkrestore_native_admission_evidence_v1"||result.client_id!==receipt.client_id||
     result.initial_zero_receipt_recorded!==true||typeof result.listener_apply_recorded!=="boolean"||
     (result.listener_apply_recorded?!digest(result.listener_apply_receipt_sha256??""):!!result.listener_apply_receipt_sha256)||
-    result.native_apply_recorded!==false||result.serving_health_recorded!==false||result.authorizes_mutation!==false)
+    result.native_apply_recorded!==false||result.serving_health_recorded!==false||result.authorizes_mutation!==false||!validSystemProbe(result))
      throw Error("execution evidence mismatch");
    setExecution(result);
   }catch{setExecutionError(true);}finally{setBusy(false);}
@@ -136,7 +160,9 @@ export default function DarkRestoreHandoff({model}:{model:BusinessModel}) {
    <p>{fa?"تسویهٔ دورهٔ منبع":"Source epoch settled"}: <strong>{readiness.source_epoch_settled?(fa?"بله":"yes"):(fa?"خیر":"no")}</strong>
     {" · "}{fa?"انحصار همهٔ منابع":"All-source custody"}: <strong>{readiness.global_source_custody_verified?(fa?"تأیید":"verified"):(fa?"تأیید نشده":"not verified")}</strong></p>
    <p>{fa?"baseline مصرف جدید":"Native usage baseline"}: <strong>{readiness.native_baseline_complete?(fa?"کامل":"complete"):(fa?"ناقص":"incomplete")}</strong>
-    {" · "}{fa?"تحویل اشتراک":"Subscription delivery"}: <strong>{readiness.subscription_delivered?(fa?"تأیید":"verified"):(fa?"انجام نشده":"not delivered")}</strong>
+    {" · "}{readiness.subscription_delivery_scope==="darkrestore_prepared_not_applied_v1"
+     ?(fa?"اشتراک پیش از فعال‌سازی":"Pre-activation subscription export")
+     :(fa?"تحویل اشتراک":"Subscription delivery")}: <strong>{readiness.subscription_delivered?(fa?"رسید تأیید شد":"receipt verified"):(fa?"تأیید نشده":"unverified")}</strong>
     {" · "}{fa?"حجم باقی‌مانده":"Remaining quota"}: {fmt(readiness.finite_quota_remaining_bytes)}</p>
    <p><strong>{readiness.activation_allowed?(fa?"آمادهٔ فعال‌سازی":"Activation ready"):(fa?"فعال‌سازی مسدود است":"Activation blocked")}</strong>
     {" · "}{readiness.cutover_verified?(fa?"مهاجرت تأیید شد":"Cutover verified"):(fa?"پذیرش نهایی نشده":"Cutover not verified")}</p>
@@ -149,6 +175,9 @@ export default function DarkRestoreHandoff({model}:{model:BusinessModel}) {
      <p>{fa?"راه‌اندازی سرویس در نود":"Service startup on the node"}: <strong>
       {execution.listener_apply_recorded?(fa?"رسید Agent ثبت شده":"Agent receipt recorded"):(fa?"در انتظار رسید Agent":"Waiting for Agent receipt")}
      </strong></p>
+     {execution.system_probe&&<p>{fa?"آزمون خودکار نود (بدون کسر حجم)":"Automatic node probe (no customer usage)"}: <strong>
+      {probeLabels[execution.system_probe.state][fa?"fa":"en"]}
+     </strong></p>}
      <p>{fa?"ثبت راه‌اندازی به‌تنهایی به معنی پایان مهاجرت نیست.":"A startup receipt does not complete migration."}</p>
      {execution.listener_apply_recorded&&digest(execution.plan_sha256??"")&&<DarkRestoreConnectionCheck model={model} clientID={execution.client_id} planSHA={execution.plan_sha256!}/>}
     </div>}

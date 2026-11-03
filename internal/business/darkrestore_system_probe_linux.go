@@ -152,16 +152,9 @@ func (s *Store) QueueDarkRestoreSystemProbeV1(ctx context.Context, key []byte, t
 		if prior.EventID != in.EventID || prior.OwnerID != owner || prior.ClientID != client || prior.Binding.EndpointSHA != endpoint.SHA() {
 			return out, ErrConflict
 		}
-		out.PlanSHA, out.ChallengeID = in.PlanSHA, prior.ID
-		if _, requested, e := readDarkRestoreSystemProbeRequestTx(ctx, tx, prior); e != nil {
-			return out, e
-		} else if requested {
-			out.State = "issued"
-		}
-		if _, e := readDarkRestoreServingHealthTx(ctx, tx, client); e == nil {
-			out.State, out.ServingHealth = "recorded", true
-		} else if !errors.Is(e, ErrNotFound) && !errors.Is(e, ErrDarkRestoreCutover) {
-			return out, e
+		out, err = darkRestoreSystemProbeStatusTx(ctx, tx, prior, in.PlanSHA, time.Now().UnixNano())
+		if err != nil {
+			return out, err
 		}
 		return out, tx.Commit()
 	}
@@ -226,6 +219,35 @@ func (s *Store) QueueDarkRestoreSystemProbeV1(ctx context.Context, key []byte, t
 	return out, tx.Commit()
 }
 
+func darkRestoreSystemProbeStatusTx(ctx context.Context, tx *sql.Tx, intent darkRestoreSystemProbeIntentV1, plan string, now int64) (DarkRestoreSystemProbeStatusV1, error) {
+	out := DarkRestoreSystemProbeStatusV1{Scope: DarkRestoreSystemProbeRoundScopeV1, ClientID: intent.ClientID,
+		PlanSHA: plan, ChallengeID: intent.ID, State: "pending"}
+	request, issued, err := readDarkRestoreSystemProbeRequestTx(ctx, tx, intent)
+	if err != nil {
+		return out, err
+	}
+	deadline := intent.Expires
+	if issued {
+		out.State = "issued"
+		deadline = request.Expires
+	}
+	if now >= deadline {
+		out.State = "expired"
+	}
+	evidence, err := readDarkRestoreServingHealthTx(ctx, tx, intent.ClientID)
+	if errors.Is(err, ErrNotFound) || errors.Is(err, ErrDarkRestoreCutover) {
+		return out, nil
+	}
+	if err != nil {
+		return out, err
+	}
+	if !issued || evidence.PlanSHA != plan || evidence.Request != request {
+		return out, ErrDarkRestoreCutover
+	}
+	out.State, out.ServingHealth = "recorded", true
+	return out, nil
+}
+
 // ProjectDarkRestoreSystemProbeV1 reports the independently persisted probe
 // round without changing its intent, request, receipt, client or runtime.
 func (s *Store) ProjectDarkRestoreSystemProbeV1(ctx context.Context, token, client, plan string) (DarkRestoreSystemProbeStatusV1, error) {
@@ -247,29 +269,22 @@ func (s *Store) ProjectDarkRestoreSystemProbeV1(ctx context.Context, token, clie
 		return out, err
 	}
 	if !found {
-		return out, ErrNotFound
+		admission, err := projectDarkRestoreNativeAdmissionEvidenceTx(ctx, tx, client)
+		if err != nil {
+			return out, err
+		}
+		if admission.PlanSHA != plan {
+			return out, ErrDarkRestoreCutover
+		}
+		out.State = "not_requested"
+		return out, tx.Commit()
 	}
 	if intent.OwnerID != owner || intent.ClientID != client {
 		return out, ErrOwnershipDenied
 	}
-	out.ChallengeID = intent.ID
-	if _, requested, readErr := readDarkRestoreSystemProbeRequestTx(ctx, tx, intent); readErr != nil {
-		return out, readErr
-	} else if requested {
-		out.State = "issued"
-	}
-	evidence, readErr := readDarkRestoreServingHealthTx(ctx, tx, client)
-	if readErr == nil {
-		if evidence.PlanSHA != plan {
-			return out, ErrDarkRestoreCutover
-		}
-		if _, pinErr := servingHealthPins(evidence); pinErr != nil {
-			return out, pinErr
-		}
-		out.State = "recorded"
-		out.ServingHealth = true
-	} else if !errors.Is(readErr, ErrNotFound) && !errors.Is(readErr, ErrDarkRestoreCutover) {
-		return out, readErr
+	out, err = darkRestoreSystemProbeStatusTx(ctx, tx, intent, plan, time.Now().UnixNano())
+	if err != nil {
+		return out, err
 	}
 	if err = tx.Commit(); err != nil {
 		return out, err

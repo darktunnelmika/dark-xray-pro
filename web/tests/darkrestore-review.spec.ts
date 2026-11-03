@@ -167,11 +167,17 @@ test("owner attaches a pinned signed handoff in Clients at 320px without a brows
  await page.route("**/api/v1/workspace/dark-restore/handoff/readiness",route=>route.fulfill({json:{
   client_id:"dr-"+sha.slice(0,20),source_sha256:sha,source_id:"legacy-a",source_scope:"single_local_source_epoch",
   source_epoch_settled:true,global_source_custody_verified:false,native_baseline_complete:true,
-  subscription_delivered:true,client_archived:false,client_expired:false,
+  subscription_delivered:true,subscription_delivery_scope:"darkrestore_prepared_not_applied_v1",client_archived:false,client_expired:false,
   finite_quota_remaining_bytes:"132576395",activation_allowed:false,cutover_verified:false,
   activation_blockers:["native_apply_not_recorded"],verification_blockers:["global_source_custody_not_proven"]
  }}));
  let executionState="pending";
+ let probe:Record<string,unknown>|undefined;
+ const probeFor=(state:string)=>({
+  scope:"darkrestore_system_probe_round_v1",client_id:"dr-"+sha.slice(0,20),plan_sha256:"c".repeat(64),
+  challenge_id:state==="not_requested"?undefined:"d".repeat(32),state,
+  serving_health_recorded:state==="recorded",authorizes_mutation:false
+ });
  await page.route("**/api/v1/workspace/dark-restore/handoff/quarantine/admission/evidence",route=>{
   expect(route.request().method()).toBe("GET");
   return route.fulfill({json:{
@@ -179,7 +185,7 @@ test("owner attaches a pinned signed handoff in Clients at 320px without a brows
    client_id:executionState==="foreign"?"another-client":"dr-"+sha.slice(0,20),
    initial_zero_receipt_recorded:true,listener_apply_recorded:executionState!=="pending",
    listener_apply_receipt_sha256:executionState==="pending"?undefined:"e".repeat(64),
-   native_apply_recorded:false,serving_health_recorded:false,authorizes_mutation:false
+   native_apply_recorded:false,serving_health_recorded:false,authorizes_mutation:false,system_probe:probe
   }});
  });
  await panel.getByRole("button",{name:"بررسی آمادگی فعال‌سازی"}).click();
@@ -189,6 +195,7 @@ test("owner attaches a pinned signed handoff in Clients at 320px without a brows
  await panel.getByRole("button",{name:"بررسی وضعیت اجرای سرویس"}).click();
  await expect(panel.getByLabel("وضعیت اجرای سرویس").getByText("رسید Agent ثبت شده",{exact:true})).toBeVisible();
  await expect(panel.getByText("فعال‌سازی مسدود است",{exact:true})).toBeVisible();
+ await expect(readiness.locator("p").filter({hasText:"اشتراک پیش از فعال‌سازی"}).getByText("رسید تأیید شد",{exact:true})).toBeVisible();
  let connectionState="not_requested", connectionPosts=0;
  await page.route("**/api/v1/workspace/dark-restore/handoff/quarantine/connection-check",route=>{
   if(route.request().method()==="POST"){
@@ -201,6 +208,29 @@ test("owner attaches a pinned signed handoff in Clients at 320px without a brows
    state:connectionState,customer_connection_verified:connectionState==="verified",authorizes_mutation:false,
    receipt_sha256:connectionState==="verified"?"e".repeat(64):undefined,completed_unix_nano:connectionState==="verified"?1700000000000000000:undefined}});
  });
+ const refresh=panel.getByRole("button",{name:"بررسی وضعیت اجرای سرویس"});
+ for(const [state,message] of [
+  ["not_requested","درخواستی ثبت نشده است."],
+  ["pending","درخواست ثبت شده و در انتظار نود است."],
+  ["issued","درخواست برای نود صادر شده و هنوز رسیدی ثبت نشده است."],
+  ["expired","مهلت آزمون گذشته و هنوز رسیدی ثبت نشده است."],
+  ["recorded","رسید آزمون خودکار این نود ثبت شد."]
+ ]){
+  probe=probeFor(state);
+  await refresh.click();
+  await expect(panel.getByText(message,{exact:true})).toBeVisible();
+  await expect(panel.getByText("فعال‌سازی مسدود است",{exact:true})).toBeVisible();
+ }
+ for(const mismatch of [{client_id:"another-client"},{plan_sha256:"e".repeat(64)},
+   {serving_health_recorded:false},{authorizes_mutation:true},{challenge_id:""}]){
+  probe={...probeFor("recorded"),...mismatch};
+  await refresh.click();
+  await expect(panel.getByLabel("وضعیت اجرای سرویس")).toHaveCount(0);
+  await expect(panel.getByText("رسید کامل و مطابق این کاربر در دسترس نیست؛ دوباره بررسی کن.")).toBeVisible();
+ }
+ expect(connectionPosts).toBe(0);
+ probe=probeFor("recorded");
+ await refresh.click();
  const connection=panel.getByLabel("آزمون اتصال کاربر",{exact:true});
  await connection.getByRole("button",{name:"بررسی نتیجهٔ آزمون اتصال"}).click();
  const run=connection.getByRole("button",{name:"اجرای یک‌بارهٔ آزمون اتصال"});

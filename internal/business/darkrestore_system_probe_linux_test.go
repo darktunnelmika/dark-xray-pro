@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/ed25519"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"reflect"
@@ -48,6 +49,13 @@ func TestDarkRestoreSystemProbeRoundIsDurableAndReadOnly(t *testing.T) {
 		NodeID: registered.Epoch.NodeID, InstallationID: registered.Epoch.InstallationID,
 	}, report, f.s.CheckDarkRestoreAdmission); err != nil {
 		t.Fatal(err)
+	}
+	unqueued, err := f.s.ProjectDarkRestoreSystemProbeV1(ctx, f.owner.Token, plan.ClientID, planSHA)
+	if err != nil || unqueued.State != "not_requested" || unqueued.ChallengeID != "" || unqueued.ServingHealth || unqueued.AuthorizesMutation {
+		t.Fatal("before listener and automatic queue", unqueued, err)
+	}
+	if _, err = f.s.ProjectDarkRestoreSystemProbeV1(ctx, f.owner.Token, plan.ClientID, strings.Repeat("f", 64)); err == nil {
+		t.Fatal("a different plan looked unrequested")
 	}
 	initial, err := initialAdmissionReportSHA(registered.Epoch)
 	if err != nil {
@@ -96,6 +104,27 @@ func TestDarkRestoreSystemProbeRoundIsDurableAndReadOnly(t *testing.T) {
 	if err != nil || queued.State != "pending" || queued.ServingHealth || queued.AuthorizesMutation {
 		t.Fatal("queue", queued, err)
 	}
+	checkStatusAt := func(at int64, want string) {
+		t.Helper()
+		tx, err := f.s.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer tx.Rollback()
+		intent, found, err := readDarkRestoreSystemProbeIntentTx(ctx, tx, planSHA)
+		if err != nil || !found {
+			t.Fatal("probe intent", found, err)
+		}
+		if at == 0 {
+			at = intent.Expires
+		}
+		status, err := darkRestoreSystemProbeStatusTx(ctx, tx, intent, planSHA, at)
+		if err != nil || status.State != want || status.ServingHealth != (want == "recorded") ||
+			status.ChallengeID != queued.ChallengeID || status.AuthorizesMutation {
+			t.Fatalf("at %d: want %s, got %+v, %v", at, want, status, err)
+		}
+	}
+	checkStatusAt(0, "expired")
 	if _, err = f.s.ProjectDarkRestoreSystemProbeV1(ctx, f.rep.Token, plan.ClientID, planSHA); !errors.Is(err, ErrOwnershipDenied) {
 		t.Fatal("representative projected owner probe", err)
 	}
@@ -153,6 +182,8 @@ func TestDarkRestoreSystemProbeRoundIsDurableAndReadOnly(t *testing.T) {
 		request.Expires <= time.Now().UnixNano() {
 		t.Fatal("issue", found, err)
 	}
+	checkStatusAt(request.Issued, "issued")
+	checkStatusAt(request.Expires, "expired")
 	requestReplay, found, err := f.s.PollDarkRestoreSystemProbeV1(ctx, key, nodeKey, plan.NodeID, plan.InstallationID, planSHA, state, endpoint)
 	if err != nil || !found || !bytes.Equal(systemProbeJSON(request), systemProbeJSON(requestReplay)) {
 		t.Fatal("request replay changed", found, err)
@@ -182,6 +213,7 @@ func TestDarkRestoreSystemProbeRoundIsDurableAndReadOnly(t *testing.T) {
 	if err != nil || projected.State != "recorded" || !projected.ServingHealth || projected.AuthorizesMutation {
 		t.Fatal("recorded projection", projected, err)
 	}
+	checkStatusAt(request.Expires+1, "recorded")
 	evidenceReplay, err := f.s.RegisterDarkRestoreSystemProbeV1(ctx, nodeKey, plan.NodeID, plan.InstallationID, planSHA, endpoint, receipt)
 	if err != nil || !reflect.DeepEqual(evidence, evidenceReplay) {
 		t.Fatal("receipt replay", err)
