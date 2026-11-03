@@ -341,5 +341,18 @@ A valid document sets only `serving_health_recorded=true`. It keeps
 `native_apply_recorded=false` and `authorizes_mutation=false`. The signature proves
 possession of the paired Agent key, not the operational truth of the emitter, complete
 inventory, retirement of other sources, subscription publication or continuing
-health. Until a reviewed real-probe emitter and immutable Store adapter produce this
-document, imported activation and delivery remain closed.
+health.
+
+The optional Store adapter records one canonical document only after owner
+authorization, current admission/listener re-derivation, an exact independently
+selected verifier-endpoint hash, paired-Agent receipt verification and the
+listener-to-request-to-receipt-to-record time order. Its table and triggers are
+append-only; replay returns the original bytes and a conflicting replay fails.
+Reopen and offline-backup validation re-derive every source relationship without
+claiming that an HMAC key is recoverable from the database.
+
+The adapter does not manufacture the request. A reviewed Agent/HUB emitter must
+still derive the system-probe credential, epoch/admission hashes and live runtime
+identity from the exact quarantine candidate and persist the challenge before
+execution. Until that real path and native apply evidence are complete, imported
+activation and delivery remain closed.

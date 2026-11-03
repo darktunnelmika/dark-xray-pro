@@ -572,3 +572,35 @@ complete-package gates now retain every test in one invocation with a bounded
 nineteen-minute Go deadline inside a twenty-four-minute job. Current-head CI is
 still authoritative; this source evidence is not Merge, installation or LAB
 acceptance.
+
+
+## M5 serving-health immutable Store adapter (isolated source)
+
+The next isolated source adds an opt-in immutable
+`darkrestore_serving_health_v1` receipt. Owner-only registration re-derives the
+prepared delivery, transition, admission projection, signed birth, accepted
+zero receipt and listener-installation receipt in one writer transaction. It
+binds the exact client, plan, config, epoch, independently selected verifier
+endpoint, complete Agent-signed request/receipt and authoritative Store time.
+The request must target the registered node, installation, prepared inbound,
+lease sequence/config and epoch, begin after listener installation and expire
+within the original lease.
+
+Insertion failure leaves no evidence row. Exact replay returns the original
+document; changed request/receipt, foreign node, wrong key, stale independent
+pins and unauthorised owner scope fail closed. Exact DDL, immutable triggers,
+reopen and offline-backup validation are covered. Wallet, UUID, expiry,
+deployment state, native eligibility and publication state remain unchanged.
+
+This adapter still accepts only a completed request produced elsewhere. It does
+not yet provision the required non-billable system-probe binding into the
+quarantine candidate or persist/deliver a challenge to the real Agent. Therefore
+it is not real serving-health acceptance, native apply, inventory completeness,
+source retirement, subscription publication or activation authority. No public
+route or LAB-positive cutover is opened.
+
+Exact local non-race validation passed on this adapter tree: focused Store and
+pure-contract tests (1.313s), complete business (213.344s), darkrestore
+(3.105s), backupacceptance (3.243s), vet and diff checks. Race authority remains
+current-head CI after publication; these local results are not Merge,
+installation, real Agent-probe acceptance or LAB-positive cutover.

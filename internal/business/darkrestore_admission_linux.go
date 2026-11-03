@@ -290,6 +290,18 @@ func (s *Store) ProjectDarkRestoreNativeAdmissionEvidenceV1(ctx context.Context,
 	if _, err = ownershipOwner(ctx, tx, token); err != nil {
 		return zero, err
 	}
+	out, err := projectDarkRestoreNativeAdmissionEvidenceTx(ctx, tx, client)
+	if err != nil {
+		return zero, err
+	}
+	if err = tx.Commit(); err != nil {
+		return zero, err
+	}
+	return out, nil
+}
+
+func projectDarkRestoreNativeAdmissionEvidenceTx(ctx context.Context, tx *sql.Tx, client string) (DarkRestoreNativeAdmissionEvidenceV1, error) {
+	var zero DarkRestoreNativeAdmissionEvidenceV1
 	present, err := admissionSchema(ctx, tx)
 	if err != nil || !present {
 		return zero, ErrDarkRestoreCutover
@@ -381,9 +393,6 @@ func (s *Store) ProjectDarkRestoreNativeAdmissionEvidenceV1(ctx context.Context,
 		} else if !errors.Is(e, sql.ErrNoRows) {
 			return zero, e
 		}
-	}
-	if err = tx.Commit(); err != nil {
-		return zero, err
 	}
 	return out, nil
 }
