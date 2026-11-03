@@ -45,7 +45,7 @@ func signedServingHealthReceipt(t *testing.T, key []byte, q mx.ProtocolHealthReq
 
 func TestDarkRestoreServingHealthStoreIsImmutableAndReadOnly(t *testing.T) {
 	ctx := context.Background()
-	f, plan, registered, listenerSigner, planSHA := syntheticAdmissionSignedFixture(t)
+	f, plan, registered, listenerSigner, planSHA := syntheticAdmissionSignedProbeFixture(t)
 	beforeBalances := ownershipBalances(t, f.s)
 	beforeClient, err := f.s.Client(ctx, plan.ClientID)
 	if err != nil {
@@ -63,7 +63,11 @@ func TestDarkRestoreServingHealthStoreIsImmutableAndReadOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer box.Close()
-	report, err := box.Observe([]uc.Usage{{ClientID: plan.ClientID}}, false)
+	expectedInitial, err := initialAdmissionReport(registered.Epoch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	report, err := box.Observe(expectedInitial.Users, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -99,26 +103,33 @@ func TestDarkRestoreServingHealthStoreIsImmutableAndReadOnly(t *testing.T) {
 	if expires > registered.Birth.Lease.Expires {
 		t.Fatal("synthetic lease too short")
 	}
+	epochSHA, err := mx.MeteredEpochSHA(registered.Epoch)
+	if err != nil {
+		t.Fatal(err)
+	}
 	q, err := mx.SignProtocolHealthRequest(agentKey, mx.ProtocolHealthRequest{
 		Version: mx.InitialApplyProtocolHealthVersion, ID: strings.Repeat("1", 32),
 		NodeID: plan.NodeID, InstallationID: plan.InstallationID,
 		RuntimeInstance: strings.Repeat("2", 32), StageID: strings.Repeat("3", 32),
 		ApplyCommandID: strings.Repeat("4", 32), InboundID: plan.Prepared.InboundID,
-		Port: 24503, CredentialSHA: strings.Repeat("5", 64),
-		SystemProbeID: "darkrestore-system-probe", EndpointSHA: endpoint.SHA(),
+		Port: 29283, CredentialSHA: plan.SystemProbeCredentialSHA,
+		SystemProbeID: plan.SystemProbeID, EndpointSHA: endpoint.SHA(),
 		InitialApplySHA: listenerSHA,
 		Expected: mx.RuntimeCondition{
 			ProcessReady: true, ActiveSequence: registered.Birth.Lease.Sequence,
 			ActiveSHA: plan.ConfigSHA,
 		},
 		Usage: mx.MeteredCondition{
-			EpochID: registered.Epoch.ID, EpochSHA: strings.Repeat("7", 64),
-			AdmissionSHA: strings.Repeat("8", 64),
+			EpochID: registered.Epoch.ID, EpochSHA: epochSHA,
+			AdmissionSHA: plan.PreparedAdmissionSHA,
 		},
 		Issued: issued, Expires: expires,
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+	if err = mx.ValidateProtocolHealthSupport(plan.candidate, q, endpoint); err != nil {
+		t.Fatal("probe candidate is not protocol-health capable", err)
 	}
 	receipt := signedServingHealthReceipt(t, agentKey, q, completed)
 	clock := func() time.Time { return time.Unix(0, recorded) }
@@ -152,6 +163,16 @@ func TestDarkRestoreServingHealthStoreIsImmutableAndReadOnly(t *testing.T) {
 	foreignReceipt := signedServingHealthReceipt(t, agentKey, foreign, completed)
 	if _, err = f.s.recordDarkRestoreServingHealthV1(ctx, f.owner.Token, plan.ClientID, agentKey, endpoint, foreign, foreignReceipt, clock); !errors.Is(err, ErrDarkRestoreCutover) {
 		t.Fatal("foreign node accepted", err)
+	}
+	wrongProbe := q
+	wrongProbe.CredentialSHA = strings.Repeat("0", 64)
+	wrongProbe, err = mx.SignProtocolHealthRequest(agentKey, wrongProbe)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wrongProbeReceipt := signedServingHealthReceipt(t, agentKey, wrongProbe, completed)
+	if _, err = f.s.recordDarkRestoreServingHealthV1(ctx, f.owner.Token, plan.ClientID, agentKey, endpoint, wrongProbe, wrongProbeReceipt, clock); !errors.Is(err, ErrDarkRestoreCutover) {
+		t.Fatal("foreign probe credential accepted", err)
 	}
 	evidence, err := f.s.recordDarkRestoreServingHealthV1(ctx, f.owner.Token, plan.ClientID, agentKey, endpoint, q, receipt, clock)
 	if err != nil {
@@ -234,5 +255,41 @@ func TestDarkRestoreServingHealthStoreIsImmutableAndReadOnly(t *testing.T) {
 	replayed, err = reopened.RecordDarkRestoreServingHealthV1(ctx, f.owner.Token, plan.ClientID, agentKey, endpoint, q, receipt)
 	if err != nil || !reflect.DeepEqual(replayed, evidence) {
 		t.Fatal("durable replay", err)
+	}
+}
+
+func TestDarkRestoreQuarantineProbeProvisioningIsPinned(t *testing.T) {
+	ctx := context.Background()
+	f, plan, registered, _, _ := syntheticAdmissionSignedProbeFixture(t)
+	replayed, err := f.s.ProvisionDarkRestoreQuarantineProbeV1(ctx, bytes.Repeat([]byte{0x61}, 32), f.owner.Token, plan.ClientID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantSHA, _ := plan.Digest()
+	gotSHA, _ := replayed.Digest()
+	if gotSHA != wantSHA || replayed.SystemProbeID != plan.SystemProbeID ||
+		replayed.SystemProbeCredentialSHA != plan.SystemProbeCredentialSHA ||
+		replayed.PreparedAdmissionSHA != plan.PreparedAdmissionSHA {
+		t.Fatal("probe provisioning replay drifted")
+	}
+	if _, err = f.s.ProvisionDarkRestoreQuarantineProbeV1(ctx, bytes.Repeat([]byte{0x61}, 32), f.rep.Token, plan.ClientID); err == nil {
+		t.Fatal("representative provisioned quarantine probe")
+	}
+	var accounts int
+	if err = f.s.db.QueryRow("SELECT COUNT(*) FROM pro_probe_accounts WHERE probe_id=?", plan.SystemProbeID).Scan(&accounts); err != nil || accounts != 1 {
+		t.Fatal("probe identity count", accounts, err)
+	}
+	probes := 0
+	for _, binding := range registered.Epoch.Bindings {
+		if binding.ClientID == plan.SystemProbeID && !binding.Billable && binding.Role == uc.SystemProbeRole {
+			probes++
+		}
+	}
+	if probes != 1 || len(registered.Epoch.Bindings) != 2 {
+		t.Fatal("probe binding missing", registered.Epoch.Bindings)
+	}
+	account, err := f.s.usage.ProbeUsage(ctx, plan.SystemProbeID)
+	if err != nil || account.Total != 0 || account.Holds != 0 {
+		t.Fatal("probe accounting changed", account, err)
 	}
 }

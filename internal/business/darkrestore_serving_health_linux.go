@@ -64,8 +64,12 @@ func servingHealthSourcesTx(ctx context.Context, tx *sql.Tx, client string) (Dar
 
 func servingHealthMatchesSources(e DarkRestoreServingHealthEvidenceV1, admission DarkRestoreNativeAdmissionEvidenceV1, registered DarkRestoreRegisteredBirth, listener DarkRestoreListenerApply) bool {
 	admissionSHA, err := cutoverSnapshotDigest("DARK-PRO-NATIVE-ADMISSION-EVIDENCE-v1", admission)
+	epochSHA, epochErr := mx.MeteredEpochSHA(registered.Epoch)
 	q := e.Request
-	return err == nil &&
+	expectedUsage := mx.MeteredCondition{EpochID: registered.Epoch.ID, EpochSHA: epochSHA, AdmissionSHA: registered.Plan.PreparedAdmissionSHA}
+	return err == nil && epochErr == nil && registered.Plan.SystemProbeID != "" &&
+		routeSHA.MatchString(registered.Plan.SystemProbeCredentialSHA) &&
+		routeSHA.MatchString(registered.Plan.PreparedAdmissionSHA) &&
 		e.ClientID == admission.ClientID && e.TransitionSHA == admission.TransitionSHA &&
 		e.PlanSHA == admission.PlanSHA && e.ConfigSHA == registered.Plan.ConfigSHA &&
 		e.EpochID == admission.EpochID && e.AdmissionEvidenceSHA == admissionSHA &&
@@ -73,10 +77,12 @@ func servingHealthMatchesSources(e DarkRestoreServingHealthEvidenceV1, admission
 		e.ListenerAppliedUnixNano == listener.AppliedUnixNano &&
 		q.NodeID == registered.Plan.NodeID && q.InstallationID == registered.Plan.InstallationID &&
 		q.InboundID == registered.Plan.Prepared.InboundID &&
+		q.SystemProbeID == registered.Plan.SystemProbeID &&
+		q.CredentialSHA == registered.Plan.SystemProbeCredentialSHA &&
 		q.InitialApplySHA == admission.ListenerApplyReceiptSHA &&
 		q.Expected.ActiveSHA == registered.Plan.ConfigSHA &&
 		q.Expected.ActiveSequence == registered.Birth.Lease.Sequence &&
-		q.Usage.EpochID == registered.Epoch.ID &&
+		q.Usage == expectedUsage &&
 		q.Issued > listener.AppliedUnixNano && q.Expires <= registered.Birth.Lease.Expires
 }
 

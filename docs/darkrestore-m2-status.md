@@ -640,3 +640,16 @@ health, cutover, source custody, publication and mutation authority unchanged.
 This proves one point-in-time customer connection, not continuing health or
 exclusive retirement of all legacy sources. Actual test bytes remain in
 native usage; historical usage and representative wallets are unchanged.
+
+
+## M5 quarantine system-probe binding
+
+This isolated candidate provisions one immutable nonbillable system-probe identity before a Dark Restore process birth. The probe is derived only after the owner-only prepared delivery and authoritative inbound plan are revalidated. Its UUID is never serialized; the public plan binds only the probe identity and credential digest. The exact probe user is rendered into the same quarantine candidate as the imported client and is registered in the same canonical epoch with role `system_probe`.
+
+The initial zero checkpoint requires one billable imported binding and, when present, exactly one nonbillable probe binding. Probe deltas are stored in the separate probe ledger and must be exactly zero; they never debit the representative or alter customer usage. Listener, admission, Store receipt, reopen and offline-backup validators recheck the immutable probe account, credential digest, epoch hash and post-zero admission hash. A synthetic protocol-health request must pass the real renderer's pure support validation against that exact candidate.
+
+Managed schema 16 retains its immutable base-schema row. The exact probe DDL is an additive fail-closed overlay detected through its required marker and fully reverified on reopen; incomplete or foreign objects are rejected, and older binaries refuse the overlay instead of treating probe counters as customers.
+
+This remains preparation, not a real probe emitter or activation. The independent owner-consented customer connection test above continues to use the billable customer identity and does not satisfy generic system-probe health. No generic challenge issuer, Agent system-probe network call, subscription publication, native activation, inventory-completeness claim or source-retirement claim is opened. Legacy unlimited remains blocked.
+
+Exact local non-race validation for the integrated candidate passed: usageledger 13.138s, darkrestore 3.333s, complete business 231.166s, backupacceptance 3.281s, focused real-renderer/Store/provisioning 11.479s, plus vet and diff checks. Local race is not claimed; exact-head CI remains authoritative.

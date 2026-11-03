@@ -111,7 +111,7 @@ func verifyListenerApplyTx(ctx context.Context, q sellerQueryV2, a DarkRestoreLi
 	if err := q.QueryRowContext(ctx, "SELECT COUNT(*),COALESCE(SUM(uplink),0),COALESCE(SUM(downlink),0) FROM pro_usage_deltas WHERE epoch_id=? AND sequence='1' AND client_id=?", a.EpochID, r.Plan.ClientID).Scan(&n, &up, &down); err != nil || n != 1 || up != 0 || down != 0 {
 		return ErrDarkRestoreCutover
 	}
-	return nil
+	return verifyDarkRestoreInitialProbeDelta(ctx, q, r)
 }
 
 // No client, wallet, lease or publication state is changed by this receipt.

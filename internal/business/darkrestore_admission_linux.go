@@ -144,7 +144,11 @@ func (s *Store) CheckDarkRestoreAdmission(ctx context.Context, q usageledger.Adm
 		return usageledger.ErrAuthority
 	}
 	var permit DarkRestoreAdmission
-	if json.Unmarshal(raw, &permit) != nil || permit.Registered.Epoch.ID != report.EpochID || permit.Registered.Epoch.NodeID != principal.NodeID || permit.Registered.Epoch.InstallationID != principal.InstallationID || time.Now().UnixNano() >= permit.Registered.Birth.Lease.Expires || report.Quiesced || len(report.Users) != 1 || report.Users[0].ClientID != client || report.Users[0].Uplink != 0 || report.Users[0].Downlink != 0 {
+	if json.Unmarshal(raw, &permit) != nil || permit.Registered.Epoch.ID != report.EpochID || permit.Registered.Epoch.NodeID != principal.NodeID || permit.Registered.Epoch.InstallationID != principal.InstallationID || time.Now().UnixNano() >= permit.Registered.Birth.Lease.Expires {
+		return usageledger.ErrAuthority
+	}
+	expected, err := initialAdmissionReport(permit.Registered.Epoch)
+	if err != nil || !reflect.DeepEqual(report, expected) {
 		return usageledger.ErrAuthority
 	}
 	snap, err := readDarkRestoreCutoverSnapshotV1(ctx, q, permit.Snapshot.SourceSHA, permit.Snapshot.SourceID)
@@ -229,20 +233,74 @@ func admissionBytesSHA(raw []byte) string {
 	return hex.EncodeToString(sum[:])
 }
 
-func initialAdmissionReportSHA(epoch uc.Epoch) (string, error) {
+func initialAdmissionReport(epoch uc.Epoch) (uc.Report, error) {
 	canonical, binding, err := uc.CanonicalEpoch(epoch)
-	if err != nil || len(canonical.Bindings) != 1 || !canonical.Bindings[0].Billable {
-		return "", ErrDarkRestoreCutover
+	if err != nil || len(canonical.Bindings) < 1 || len(canonical.Bindings) > 2 {
+		return uc.Report{}, ErrDarkRestoreCutover
 	}
-	report := uc.Report{
-		Version: 1, EpochID: canonical.ID, BindingSHA: binding, Sequence: 1,
-		Users: []uc.Usage{{ClientID: canonical.Bindings[0].ClientID}},
+	billable, probes := 0, 0
+	users := make([]uc.Usage, len(canonical.Bindings))
+	for i, b := range canonical.Bindings {
+		users[i].ClientID = b.ClientID
+		switch {
+		case b.Billable && b.Role == "":
+			billable++
+		case !b.Billable && b.Role == uc.SystemProbeRole:
+			probes++
+		default:
+			return uc.Report{}, ErrDarkRestoreCutover
+		}
 	}
+	if billable != 1 || probes > 1 || len(canonical.Bindings) != billable+probes {
+		return uc.Report{}, ErrDarkRestoreCutover
+	}
+	report := uc.Report{Version: 1, EpochID: canonical.ID, BindingSHA: binding, Sequence: 1, Users: users}
 	raw, err := json.Marshal(report)
 	if err != nil {
-		return "", err
+		return uc.Report{}, err
 	}
-	return admissionBytesSHA(raw), nil
+	report.SHA = admissionBytesSHA(raw)
+	return report, nil
+}
+
+func initialAdmissionReportSHA(epoch uc.Epoch) (string, error) {
+	report, err := initialAdmissionReport(epoch)
+	return report.SHA, err
+}
+
+func verifyDarkRestoreInitialProbeDelta(ctx context.Context, q sellerQueryV2, registered DarkRestoreRegisteredBirth) error {
+	p := registered.Plan
+	if p.SystemProbeID == "" {
+		if p.SystemProbeCredentialSHA != "" || p.PreparedAdmissionSHA != "" {
+			return ErrDarkRestoreCutover
+		}
+		return nil
+	}
+	if !routeSHA.MatchString(p.SystemProbeCredentialSHA) || !routeSHA.MatchString(p.PreparedAdmissionSHA) {
+		return ErrDarkRestoreCutover
+	}
+	found := 0
+	for _, b := range registered.Epoch.Bindings {
+		if b.ClientID == p.SystemProbeID && !b.Billable && b.Role == uc.SystemProbeRole {
+			found++
+		}
+	}
+	if found != 1 {
+		return ErrDarkRestoreCutover
+	}
+	var uuid string
+	var holds, n, up, down int64
+	if err := q.QueryRowContext(ctx, "SELECT uuid,holds FROM pro_probe_accounts WHERE probe_id=? AND node_id=? AND installation_id=? AND inbound_id=?", p.SystemProbeID, p.NodeID, p.InstallationID, p.Prepared.InboundID).Scan(&uuid, &holds); err != nil || holds != 0 {
+		return ErrDarkRestoreCutover
+	}
+	h := sha256.Sum256([]byte(uuid))
+	if hex.EncodeToString(h[:]) != p.SystemProbeCredentialSHA {
+		return ErrDarkRestoreCutover
+	}
+	if err := q.QueryRowContext(ctx, "SELECT COUNT(*),COALESCE(SUM(uplink),0),COALESCE(SUM(downlink),0) FROM pro_probe_deltas WHERE epoch_id=? AND sequence='1' AND probe_id=?", registered.Epoch.ID, p.SystemProbeID).Scan(&n, &up, &down); err != nil || n != 1 || up != 0 || down != 0 {
+		return ErrDarkRestoreCutover
+	}
+	return nil
 }
 
 func ValidateDarkRestoreNativeAdmissionEvidenceV1(e DarkRestoreNativeAdmissionEvidenceV1, p DarkRestoreNativeAdmissionPinsV1) (DarkRestoreNativeAdmissionValidationV1, error) {
@@ -362,6 +420,9 @@ func projectDarkRestoreNativeAdmissionEvidenceTx(ctx context.Context, tx *sql.Tx
 	if err = tx.QueryRowContext(ctx, `SELECT COUNT(*),COALESCE(SUM(uplink),0),COALESCE(SUM(downlink),0) FROM pro_usage_deltas WHERE epoch_id=? AND sequence='1' AND client_id=?`, registered.Epoch.ID, client).Scan(&deltas, &uplink, &downlink); err != nil ||
 		deltas != 1 || uplink != 0 || downlink != 0 {
 		return zero, ErrDarkRestoreCutover
+	}
+	if err = verifyDarkRestoreInitialProbeDelta(ctx, tx, registered); err != nil {
+		return zero, err
 	}
 	out := DarkRestoreNativeAdmissionEvidenceV1{
 		Scope: DarkRestoreNativeAdmissionEvidenceScopeV1, ClientID: client,

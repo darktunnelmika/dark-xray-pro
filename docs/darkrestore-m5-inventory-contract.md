@@ -356,3 +356,19 @@ still derive the system-probe credential, epoch/admission hashes and live runtim
 identity from the exact quarantine candidate and persist the challenge before
 execution. Until that real path and native apply evidence are complete, imported
 activation and delivery remain closed.
+
+
+## Quarantine system-probe contract
+
+An imported serving-health proof is structurally impossible unless the exact quarantine candidate and epoch contain a separately provisioned nonbillable system probe. Provisioning is owner-only, idempotent, pre-birth and bound to the authoritative node, installation and inbound. It creates no listener, epoch, wallet event, customer eligibility, challenge or subscription.
+
+A probe-enabled plan binds:
+
+- the probe ID and one-way credential digest;
+- the candidate/config and manifest produced with both imported and probe users;
+- the exact post-zero usage-admission digest;
+- a canonical epoch with exactly one billable imported binding and one `system_probe` binding.
+
+The initial report must contain both identities with zero counters. Customer and probe deltas remain separate; the probe ledger cannot charge customer credit. Birth, listener, admission and serving-health validation recheck the probe account, zero delta, epoch digest, admission digest and request credential. Pure protocol-health support is validated against the real rendered candidate.
+
+The managed-execution metadata row remains immutable. Probe accounting uses an exact additive overlay whose marker causes the effective underlying schema to become probe-aware only after complete DDL verification. Partial overlays, holds, stale identity, second probes and post-birth provisioning fail closed. This contract still grants no emitter truth, activation, publication, inventory completeness or retirement authority.

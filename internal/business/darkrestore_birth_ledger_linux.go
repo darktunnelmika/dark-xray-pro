@@ -90,8 +90,20 @@ func (s *Store) RegisterDarkRestoreBirth(ctx context.Context, key []byte, token,
 	if err != nil {
 		return zero, err
 	}
-	epoch := uc.Epoch{ID: hash[:32], NodeID: plan.NodeID, InstallationID: plan.InstallationID, ConfigSHA: plan.ConfigSHA, KernelBootID: birth.Process.BootID, PID: birth.Process.PID, ProcessStartTicks: birth.Process.StartTicks, Bindings: []uc.Binding{{ClientID: client, Email: email, Billable: true}}}
-	if _, _, err = uc.CanonicalEpoch(epoch); err != nil {
+	bindings := []uc.Binding{{ClientID: client, Email: email, Billable: true}}
+	if plan.SystemProbeID != "" {
+		if !routeSHA.MatchString(plan.SystemProbeCredentialSHA) || !routeSHA.MatchString(plan.PreparedAdmissionSHA) {
+			return zero, ErrDarkRestoreCutover
+		}
+		probeEmail, e := uc.CounterEmail(plan.SystemProbeID)
+		if e != nil {
+			return zero, e
+		}
+		bindings = append(bindings, uc.Binding{ClientID: plan.SystemProbeID, Email: probeEmail, Billable: false, Role: uc.SystemProbeRole})
+	}
+	epoch := uc.Epoch{ID: hash[:32], NodeID: plan.NodeID, InstallationID: plan.InstallationID, ConfigSHA: plan.ConfigSHA, KernelBootID: birth.Process.BootID, PID: birth.Process.PID, ProcessStartTicks: birth.Process.StartTicks, Bindings: bindings}
+	epoch, _, err = uc.CanonicalEpoch(epoch)
+	if err != nil {
 		return zero, err
 	}
 	out := DarkRestoreRegisteredBirth{Plan: plan, Birth: birth, Signer: append([]byte(nil), pub...), Epoch: epoch}

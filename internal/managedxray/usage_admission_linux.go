@@ -27,6 +27,34 @@ type usageAdmission struct {
 	BootstrapSHA         string      `json:"bootstrap_sha"`
 }
 
+// PreparedUsageAdmissionSHA derives the exact post-zero-receipt admission
+// condition from an authoritative candidate. It performs no I/O and grants no
+// execution authority.
+func PreparedUsageAdmissionSHA(c xrayconfig.Candidate, finalTCP bool) (string, error) {
+	bootstrap, _, endpoint, err := xrayconfig.UsageBootstrap(c)
+	if err != nil {
+		return "", err
+	}
+	a := usageAdmission{StatsEndpoint: endpoint, BootstrapSHA: bootstrap.SHA256, TrafficBarrier: pretrafficActivationPossible}
+	if finalTCP {
+		if !finalTCPScope(c.Config) {
+			return "", ErrInvalid
+		}
+		a.FinalCounterProtocol = uc.FinalTCPProtocol
+	}
+	return hashJSON(a), nil
+}
+
+// MeteredEpochSHA canonicalizes the complete trusted billing bindings before
+// deriving the condition used by protocol-health challenges.
+func MeteredEpochSHA(e uc.Epoch) (string, error) {
+	canonical, _, err := uc.CanonicalEpoch(e)
+	if err != nil {
+		return "", err
+	}
+	return hashJSON(canonical), nil
+}
+
 // PrepareUsageAdmission is a two-phase start on a fresh runtime or a proven
 // settled pretraffic birth with a NEW monotonic signed revision. The signed
 // revision is validated, but Xray starts with NO customer inbounds. Only its

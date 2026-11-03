@@ -24,6 +24,14 @@ func syntheticAdmissionFixture(t *testing.T) (ownershipFixture, DarkRestoreQuara
 	return f, p, r.Epoch, sha
 }
 func syntheticAdmissionSignedFixture(t *testing.T) (ownershipFixture, DarkRestoreQuarantinePlan, DarkRestoreRegisteredBirth, ed25519.PrivateKey, string) {
+	return syntheticAdmissionSignedFixtureMode(t, false)
+}
+
+func syntheticAdmissionSignedProbeFixture(t *testing.T) (ownershipFixture, DarkRestoreQuarantinePlan, DarkRestoreRegisteredBirth, ed25519.PrivateKey, string) {
+	return syntheticAdmissionSignedFixtureMode(t, true)
+}
+
+func syntheticAdmissionSignedFixtureMode(t *testing.T, withProbe bool) (ownershipFixture, DarkRestoreQuarantinePlan, DarkRestoreRegisteredBirth, ed25519.PrivateKey, string) {
 	t.Helper()
 	ctx := context.Background()
 	f, ev, key, _ := preparedCutoverFixture(t)
@@ -35,7 +43,16 @@ func syntheticAdmissionSignedFixture(t *testing.T) (ownershipFixture, DarkRestor
 	if _, err := f.s.DeliverPreparedDarkRestoreSubscriptionV1(ctx, key, f.owner.Token, ev.ClientID, DarkRestorePreparedDeliveryInputV1{EventID: "admission-negative-link-0001", InboundID: 504, ExpectedPlanRevision: 1, ExpectedInboundRevision: 1, Format: "uri"}); err != nil {
 		t.Fatal(err)
 	}
-	p, err := f.s.DarkRestoreQuarantinePlan(ctx, key, f.owner.Token, ev.ClientID)
+	var p DarkRestoreQuarantinePlan
+	var err error
+	if withProbe {
+		if err = f.s.EnableSystemProbeAccounting(ctx); err != nil {
+			t.Fatal(err)
+		}
+		p, err = f.s.ProvisionDarkRestoreQuarantineProbeV1(ctx, key, f.owner.Token, ev.ClientID)
+	} else {
+		p, err = f.s.DarkRestoreQuarantinePlan(ctx, key, f.owner.Token, ev.ClientID)
+	}
 	if err != nil {
 		t.Fatal(err)
 	}
