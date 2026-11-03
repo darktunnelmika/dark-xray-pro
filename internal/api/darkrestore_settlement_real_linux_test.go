@@ -490,11 +490,14 @@ func (f *localSettlementFixture) attachToEarlierImport(t *testing.T, ctx context
 	w = browserRequest(t, dst.h, "GET", restoreBase+"/handoff/readiness", nil, dst.owner, "", origin)
 	var readiness business.DarkRestoreCutoverReadinessV1
 	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &readiness) != nil ||
-		readiness.ClientID != id || !readiness.SourceEpochSettled || readiness.GlobalSourceCustodyVerified ||
-		readiness.NativeBaselineComplete || readiness.SubscriptionDelivered || readiness.ActivationAllowed || readiness.CutoverVerified ||
+		readiness.ClientID != id || !readiness.SourceEpochSettled ||
+		readiness.DeclaredInventoryCoverageVerified || readiness.IndependentCoverageAssertionVerified ||
+		readiness.GlobalSourceCustodyVerified || readiness.NativeBaselineComplete ||
+		readiness.SubscriptionDelivered || readiness.CutoverReceiptRecorded ||
+		readiness.ActivationAllowed || readiness.CutoverVerified ||
 		readiness.FiniteQuotaRemainingBytes != strconv.FormatInt(proof.Remaining, 10) ||
-		strings.Join(readiness.ActivationBlockers, ",") != "global_source_custody_not_proven" ||
-		strings.Join(readiness.VerificationBlockers, ",") != "native_baseline_incomplete,subscription_not_delivered" {
+		strings.Join(readiness.ActivationBlockers, ",") != "declared_inventory_coverage_not_verified,independent_coverage_assertion_not_verified" ||
+		strings.Join(readiness.VerificationBlockers, ",") != "native_baseline_incomplete,subscription_not_delivered,cutover_receipt_not_recorded" {
 		t.Fatal("cutover readiness guessed missing evidence", w.Code, readiness)
 	}
 	projection, err := dst.s.business.DarkRestoreUsageV1(ctx, id)

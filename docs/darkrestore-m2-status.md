@@ -326,6 +326,19 @@ The combined log is
 `5fd069dabee5eb2e0d9f08b7ee9431967928db2e159bd06615668c960cb56d96`.
 This host has no C compiler, so race authority belongs to CI for the exact
 published head. CI from any predecessor must not be attributed to this
-integration. PRO LAB remains on revision
+integration.
+
+The first published integration head
+`353c76b8a0f147d53ba3298ac4ff722c07c91a6d` exposed one real current-head CI
+failure in Foundation job `125768941821`. All three repeated real-settlement
+runs returned the new fail-closed readiness state correctly: declared inventory
+coverage and independent assertion were absent, the native baseline was
+incomplete, delivery was absent and no final receipt existed. The older test
+still expected the removed single `global_source_custody_not_proven` label and
+omitted the new final-receipt blocker. The follow-up changes only that assertion
+to require every explicit blocker and false evidence flag. Local API compilation
+and the focused test command pass; exact follow-up CI remains authoritative.
+
+PRO LAB remains on revision
 `6af62c09f4d2d6fcb089a7d90ec0b5687bb986ba`; no LAB or production resource
 was changed.
