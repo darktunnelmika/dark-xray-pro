@@ -481,6 +481,14 @@ fails closed. Admission evidence always reports `native_apply_recorded=false`,
 the native-apply readiness blocker, enable an imported client, publish a
 subscription or claim long-lived Agent supervision.
 
+The owner browser surface exposes this projection only through exact GET/HEAD
+`/api/v1/workspace/dark-restore/handoff/quarantine/admission/evidence`. It
+re-verifies the pinned handoff before resolving the imported identity and never
+accepts pins or authority booleans from the browser. The production Nginx
+snippet now explicitly permits this read-only path and the two existing bounded
+POST quarantine/admission paths; every suffix, wrong method and body over 4 KiB
+is denied before the HUB.
+
 Synthetic tests cover pre-admission/pre-receipt refusal, owner scope, exact
 replay, positive independent validation, foreign report pin and attempted
 self-promotion to native apply. The complete non-race business package and

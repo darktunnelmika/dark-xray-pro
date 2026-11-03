@@ -156,6 +156,29 @@ func (s *Server) attachDarkRestoreImport(mux *http.ServeMux) {
 			}
 			respond(w, 200, readiness)
 		})
+		handle("GET "+restoreBase+"/handoff/quarantine/admission/evidence", false, func(w http.ResponseWriter, r *http.Request, token string) {
+			verified, err := darkrestore.VerifySignedLocalHandoff(handoff.path, handoff.digest, handoff.public)
+			if err != nil {
+				businessError(w, business.ErrUnavailable)
+				return
+			}
+			proof, err := verified.Settlement()
+			if err != nil {
+				businessError(w, business.ErrUnavailable)
+				return
+			}
+			state, err := s.business.DarkRestoreCutoverReadinessV1(r.Context(), proof.SourceSHA, proof.SourceID)
+			if err != nil {
+				businessError(w, err)
+				return
+			}
+			evidence, err := s.business.ProjectDarkRestoreNativeAdmissionEvidenceV1(r.Context(), token, state.ClientID)
+			if err != nil {
+				businessError(w, err)
+				return
+			}
+			respond(w, 200, evidence)
+		})
 		handle("POST "+restoreBase+"/handoff/quarantine/admission", true, func(w http.ResponseWriter, r *http.Request, token string) {
 			var input struct {
 				PlanSHA string `json:"plan_sha256"`

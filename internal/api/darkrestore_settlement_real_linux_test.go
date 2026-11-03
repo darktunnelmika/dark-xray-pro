@@ -503,6 +503,13 @@ func (f *localSettlementFixture) attachToEarlierImport(t *testing.T, ctx context
 		strings.Join(readiness.VerificationBlockers, ",") != "native_baseline_incomplete,subscription_not_delivered,cutover_receipt_not_recorded" {
 		t.Fatal("cutover readiness guessed missing evidence", w.Code, readiness)
 	}
+	evidencePath := restoreBase + "/handoff/quarantine/admission/evidence"
+	if w := browserRequest(t, dst.h, "GET", evidencePath, nil, dst.target, "", origin); w.Code != 403 {
+		t.Fatal("representative read private admission evidence", w.Code)
+	}
+	if w := browserRequest(t, dst.h, "GET", evidencePath, nil, dst.owner, "", origin); w.Code != 409 || !strings.Contains(w.Body.String(), "darkrestore_cutover_required") {
+		t.Fatal("admission evidence guessed missing native receipts", w.Code, w.Body.String())
+	}
 	prepare := map[string]any{"handoff_sha256": handoffSHA, "event_id": "prepare-" + handoffSHA, "inbound_id": 1, "plan_revision": 1, "inbound_revision": 1}
 	w = browserRequest(t, dst.h, "POST", restoreBase+"/handoff/prepare", prepare, dst.owner, dst.ownerCSRF, origin)
 	if w.Code < 400 || strings.Contains(w.Body.String(), "\"content\"") {
