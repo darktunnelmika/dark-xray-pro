@@ -139,6 +139,7 @@ func (s *Server) attachWorkspace(mux *http.ServeMux) {
 			"total": page.Total, "has_more": page.HasMore,
 			"q": options.Query, "state": options.State, "plan": options.Plan,
 			"sort": options.Sort, "representative_id": options.RepresentativeID,
+			"group_id": options.GroupID, "origin": options.Origin,
 			"activation": "pending_real_node_and_inbound_apply",
 		})
 	})

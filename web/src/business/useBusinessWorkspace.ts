@@ -5,7 +5,7 @@ import { businessGranted } from "./permissionsV9";
 import { words, uid, bytesFromGB, type Section, type Workspace, type Representative, type Client, type ClientOperation, type ClientGroup, type LedgerEvent } from "./shared";
 type ClientPageResponse = {clients:Client[];total?:number;has_more?:boolean;
   limit?:number;offset?:number;q?:string;state?:string;plan?:string;
-  sort?:string;representative_id?:string};
+  sort?:string;representative_id?:string;group_id?:string;origin?:string};
 export function useBusinessWorkspace(language: Language, section: Section) {
   const t = words[language];
   const { session, expire } = useSession();
@@ -36,6 +36,8 @@ export function useBusinessWorkspace(language: Language, section: Section) {
   const [clientPlanFilter,setClientPlanFilter] = useState("all");
   const [clientSort,setClientSort] = useState("newest");
   const [clientRepFilter,setClientRepFilter] = useState("");
+  const [clientGroupFilter,setClientGroupFilter] = useState("");
+  const [clientOriginFilter,setClientOriginFilter] = useState("all");
   const [clientTotal,setClientTotal] = useState<number|null>(null);
   const [clientHasMore,setClientHasMore] = useState<boolean|null>(null);
   const [clientLoadedKey,setClientLoadedKey] = useState("");
@@ -53,18 +55,22 @@ export function useBusinessWorkspace(language: Language, section: Section) {
     return ()=>window.clearTimeout(timer);
   },[clientSearchDraft]);
   const clientRequestKey=JSON.stringify([session.user.id,clientLimit,clientOffset,
-    clientSearch,clientStateFilter,clientPlanFilter,clientSort,
+    clientSearch,clientStateFilter,clientPlanFilter,clientSort,clientGroupFilter,clientOriginFilter,
     session.user.role==="owner"?clientRepFilter:""]);
   const visibleClients=clientLoadedKey===clientRequestKey?clients:null;
   function changeClientLimit(n:25|50|100|200){
     if (![25,50,100,200].includes(n))return;
     setClientLimit(n);setClientOffset(0);setLifeClientID("");
   }
-  function changeClientFilters(kind:"state"|"plan"|"sort"|"rep",value:string){
+  function changeClientFilters(kind:"state"|"plan"|"sort"|"rep"|"group"|"origin",value:string){
     if(kind==="state" && ["all","pending","disabled","expired","archived","other"].includes(value)) setClientStateFilter(value);
     if(kind==="plan" && ["all","volume","unlimited"].includes(value)) setClientPlanFilter(value);
     if(kind==="sort" && ["newest","oldest","name","expiry_soon","expiry_late"].includes(value)) setClientSort(value);
-    if(kind==="rep" && session?.user.role==="owner" && value.length<=64) setClientRepFilter(value);
+    if(kind==="rep" && session?.user.role==="owner" && value.length<=64) {
+      setClientRepFilter(value);setClientGroupFilter("");
+    }
+    if(kind==="group" && (value==="" || /^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/.test(value))) setClientGroupFilter(value);
+    if(kind==="origin" && ["all","native","dark_restore"].includes(value)) setClientOriginFilter(value);
     setClientOffset(0);setLifeClientID("");
   }
   const [eventOffset, setEventOffset] = useAccountPageOffset(session.user.id, "finance");
@@ -128,6 +134,8 @@ export function useBusinessWorkspace(language: Language, section: Section) {
       state:clientStateFilter,plan:clientPlanFilter,sort:clientSort,
     });
     if(session.user.role==="owner" && clientRepFilter)clientQ.set("representative_id",clientRepFilter);
+    if(clientGroupFilter)clientQ.set("group_id",clientGroupFilter);
+    if(clientOriginFilter!=="all")clientQ.set("origin",clientOriginFilter);
     const fetchData = async () => {
       const [, ownClients, ownEvents, ownerReps, ownGroups, lifecycle] = await Promise.all([
         api<Workspace>("/api/v1/workspace/me", { signal: controller.signal }).then(account=>{
@@ -160,6 +168,10 @@ export function useBusinessWorkspace(language: Language, section: Section) {
         (ownClients.state!==undefined && ownClients.state!==clientStateFilter) ||
         (ownClients.plan!==undefined && ownClients.plan!==clientPlanFilter) ||
         (ownClients.sort!==undefined && ownClients.sort!==clientSort) ||
+        (ownClients.group_id!==undefined && ownClients.group_id!==clientGroupFilter) ||
+        (ownClients.origin!==undefined && ownClients.origin!==clientOriginFilter) ||
+        (clientGroupFilter!=="" && ownClients.group_id!==clientGroupFilter) ||
+        (clientOriginFilter!=="all" && ownClients.origin!==clientOriginFilter) ||
         (ownClients.representative_id!==undefined &&
           ownClients.representative_id!==(session.user.role==="owner"?clientRepFilter:session.user.representative_id)) ||
         (ownClients.total!==undefined && (!Number.isSafeInteger(ownClients.total) ||
@@ -205,7 +217,7 @@ export function useBusinessWorkspace(language: Language, section: Section) {
     });
     return () => controller.abort();
   }, [session, refreshKey, clientRequestKey, clientLimit, clientOffset, clientSearch,
-    clientStateFilter, clientPlanFilter, clientSort, clientRepFilter,
+    clientStateFilter, clientPlanFilter, clientSort, clientRepFilter, clientGroupFilter, clientOriginFilter,
     eventOffset, repOffset, groupOffset, clientOpsOffset, language, section, expire]);
 
   async function runAction(fn: () => Promise<void>, silent = false) {
@@ -381,7 +393,7 @@ export function useBusinessWorkspace(language: Language, section: Section) {
 
   return {clientLimit,changeClientLimit,clientTotal,clientHasMore,
     clientSearchDraft,setClientSearchDraft,clientSearch,clientStateFilter,clientPlanFilter,
-    clientSort,clientRepFilter,changeClientFilters,
+    clientSort,clientRepFilter,clientGroupFilter,clientOriginFilter,changeClientFilters,
     t, session, language, reload, oldPassword, setOldPassword, newPassword, setNewPassword, actionBusy, setActionBusy, notice, setNotice, refreshKey, setRefreshKey, me, setMe, reps, setReps, clients:visibleClients, setClients, events, setEvents, groups, setGroups, clientOps, setClientOps, repOffset, setRepOffset, clientOffset, setClientOffset, eventOffset, setEventOffset, groupOffset, setGroupOffset, clientOpsOffset, setClientOpsOffset, repId, setRepId, repName, setRepName, loginRep, setLoginRep, repUser, setRepUser, repPass, setRepPass, creditRep, setCreditRep, creditVolume, setCreditVolume, creditUnits, setCreditUnits, creditReason, setCreditReason, clientId, setClientId, clientName, setClientName, clientRep, setClientRep, clientKind, setClientKind, clientDuration, setClientDuration, clientIPs, setClientIPs, clientVolume, setClientVolume, groupID, setGroupID, groupName, setGroupName, groupColor, setGroupColor, groupRep, setGroupRep, groupTarget, setGroupTarget, memberIDs, setMemberIDs, groupEditID, setGroupEditID, groupEditName, setGroupEditName, groupEditColor, setGroupEditColor, unassignID, setUnassignID, lifeClientID, setLifeClientID, lifeDays, setLifeDays, lifeVolumeGB, setLifeVolumeGB, lifeReason, setLifeReason, lifeAction, setLifeAction, lifeStateReason, setLifeStateReason, runAction, changePassword, createRepresentative, createRepLogin, adjustCredit, createClient, extendExistingClient, changeExistingClientState, addGroup, assignGroup, editGroup, deleteGroup, unassignMember };
 }
 export type BusinessModel = ReturnType<typeof useBusinessWorkspace>;

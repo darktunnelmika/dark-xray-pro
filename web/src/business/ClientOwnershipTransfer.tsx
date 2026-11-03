@@ -42,7 +42,7 @@ export function RepresentativePicker({ language, value, disabled, onChange }: { 
     </> : <span role="status"><LoaderCircle size={16} /></span>}
   </div>;
 }
-function GroupPicker({ language, representative, label, value, disabled, optional, onChange }: { language: Language; representative?: string; label: string; value: string; disabled: boolean; optional: boolean; onChange: (id: string) => void }) {
+export function GroupPicker({ language, representative, label, value, disabled, optional, emptyLabel, previousLabel, nextLabel, onChange }: { language: Language; representative?: string; label: string; value: string; disabled: boolean; optional: boolean; emptyLabel?: string; previousLabel?: string; nextLabel?: string; onChange: (id: string) => void }) {
   const t = words[language]; const [offset, setOffset] = useState(0); const [rows, setRows] = useState<Pick[] | null>(null); const [failed, setFailed] = useState(false);
   useEffect(() => {
     const abort = new AbortController(); setRows(null); setFailed(false);
@@ -56,11 +56,11 @@ function GroupPicker({ language, representative, label, value, disabled, optiona
     return () => abort.abort();
   }, [representative, offset]);
   return <div className="ownership-picker"><label>{label}<select aria-label={label} value={value} disabled={disabled || !rows || failed} onChange={e => onChange(e.target.value)}>
-    <option value="">{optional ? t.none : t.pick}</option>
+    <option value="">{emptyLabel ?? (optional ? t.none : t.pick)}</option>
     {value && !rows?.some(r => r.id === value) && <option value={value}>{value}</option>}
     {rows?.map(r => <option key={r.id} value={r.id}>{r.name} ({r.id})</option>)}
   </select></label>{failed && <p role="alert">{t.unavailable}</p>}
-    <div className="ownership-pages"><button type="button" disabled={disabled || !rows || offset === 0} onClick={() => setOffset(n => Math.max(0, n - 50))}>{t.previous}</button><button type="button" disabled={disabled || !rows || rows.length < 50 || offset >= 999950} onClick={() => setOffset(n => n + 50)}>{t.next}</button></div>
+    <div className="ownership-pages"><button type="button" disabled={disabled || !rows || offset === 0} onClick={() => setOffset(n => Math.max(0, n - 50))}>{previousLabel ?? t.previous}</button><button type="button" disabled={disabled || !rows || rows.length < 50 || offset >= 999950} onClick={() => setOffset(n => n + 50)}>{nextLabel ?? t.next}</button></div>
   </div>;
 }
 function Counter({ item, language }: { item: OwnershipItem; language: Language }) {

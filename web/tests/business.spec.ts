@@ -915,3 +915,85 @@ test("owner 320px Persian directory fails closed on malformed results", async ({
  await expect(directory.getByRole("button",{name:"مدیریت حساب"})).toHaveCount(0);
  expect(writes).toHaveLength(0);
 });
+
+
+for (const user of [owner,rep]) {
+ test(user.role+" directory filters imported origin and a paged group without stale selections",async({page})=>{
+  await mockBase(page);
+  const writes=await mockBusiness(page,user,120);
+  const reads:URL[]=[];
+  const rows=Array.from({length:120},(_,i)=>({
+   id:"filter-client-"+String(i).padStart(3,"0"),name:"Filter member "+String(i).padStart(3,"0"),
+   representative_id:user.representative_id,archived:false,deployment_state:"disabled",plan_kind:"volume",
+   duration_days:30,volume_bytes:1073741824,ip_count:1,expires_unix:1893456000,
+  }));
+  await page.route("**/api/v1/workspace/groups?*",route=>route.fulfill({json:{
+   limit:50,offset:Number(new URL(route.request().url()).searchParams.get("offset")||0),
+   groups:[{id:"filter-imported",name:"Imported customers",representative_id:user.representative_id},
+     {id:"filter-native",name:"Native customers",representative_id:user.representative_id}],
+  }}));
+  await page.route("**/api/v1/workspace/clients?*",route=>{
+   const url=new URL(route.request().url());reads.push(url);const q=url.searchParams;
+   const origin=q.get("origin")||"all",group=q.get("group_id")||"";
+   const limit=Number(q.get("limit")||50),offset=Number(q.get("offset")||0);
+   const filtered=rows.filter((_,i)=>(origin==="all"||origin==="dark_restore"&&i<60||origin==="native"&&i>=60)&&
+    (!group||group==="filter-imported"&&i<60||group==="filter-native"&&i>=60));
+   return route.fulfill({json:{clients:filtered.slice(offset,offset+limit),total:filtered.length,
+    has_more:offset+limit<filtered.length,limit,offset,q:q.get("q")||"",state:q.get("state")||"all",
+    plan:q.get("plan")||"all",sort:q.get("sort")||"newest",
+    representative_id:user.role==="owner"?"":user.representative_id,group_id:group,origin}});
+  });
+  await page.goto("/clients");
+  await page.getByLabel("Username").fill(user.username);
+  await page.getByLabel("Password").fill("test-private-password-for-lab");
+  await page.getByRole("button",{name:"Sign in"}).click();
+  const directory=page.getByRole("region",{name:"Client directory"});
+  await expect(directory.locator(".clients-explorer-row")).toHaveCount(50);
+  await directory.getByRole("button",{name:"Next",exact:true}).click();
+  await expect(directory.getByText("Page: 2")).toBeVisible();
+  await directory.locator(".clients-explorer-row").first().getByRole("checkbox").check();
+  await expect(directory.locator(".clients-bulk-header span")).toHaveText("1 selected");
+  await directory.locator("summary").filter({hasText:"Group and origin"}).click();
+  await directory.getByLabel("Client origin",{exact:true}).selectOption("dark_restore");
+  await expect(directory.getByText("Page: 1")).toBeVisible();
+  await expect(directory.getByText("Matches: 60")).toBeVisible();
+  await expect(directory.locator(".clients-bulk-header span")).toHaveText("0 selected");
+  await directory.getByLabel("Client group",{exact:true}).selectOption("filter-native");
+  await expect(directory.getByText("Matches: 0")).toBeVisible();
+  await directory.getByLabel("Client group",{exact:true}).selectOption("filter-imported");
+  await expect(directory.getByText("Matches: 60")).toBeVisible();
+  await directory.getByRole("button",{name:"Next",exact:true}).click();
+  await expect(directory.locator(".clients-explorer-row")).toHaveCount(10);
+  await expect(directory.getByText("Filter member 059",{exact:true})).toBeVisible();
+  expect(reads.some(url=>url.searchParams.get("group_id")==="filter-imported"&&url.searchParams.get("origin")==="dark_restore"&&url.searchParams.get("offset")==="50")).toBe(true);
+  if(user.role==="representative"){
+   await page.setViewportSize({width:320,height:770});
+   await page.getByRole("button",{name:"Switch language"}).click();
+   await expect(directory.getByLabel("منبع کلاینت",{exact:true})).toHaveValue("dark_restore");
+   await expect(directory.getByLabel("گروه کلاینت",{exact:true})).toHaveValue("filter-imported");
+   expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+2)).toBe(true);
+  }
+  expect(writes).toHaveLength(0);
+ });
+}
+
+test("directory refuses an origin filter ignored by an older or mismatched server",async({page})=>{
+ await mockBase(page);const writes=await mockBusiness(page,rep,3);
+ let ignoreOrigin=false;
+ await page.route("**/api/v1/workspace/clients?*",route=>{
+  if(!ignoreOrigin)return route.fallback();
+  return route.fulfill({json:{clients:[{id:"ignored-origin",name:"MUST STAY HIDDEN",representative_id:rep.representative_id,
+   archived:false,deployment_state:"disabled",plan_kind:"volume",duration_days:30,volume_bytes:100,ip_count:1,expires_unix:1893456000}],
+   total:1,limit:50,offset:0,has_more:false}});
+ });
+ await page.goto("/clients");await page.getByLabel("Username").fill(rep.username);
+ await page.getByLabel("Password").fill("test-private-password-for-lab");await page.getByRole("button",{name:"Sign in"}).click();
+ const directory=page.getByRole("region",{name:"Client directory"});
+ await expect(directory.locator(".clients-explorer-row")).toHaveCount(3);
+ await directory.locator("summary").filter({hasText:"Group and origin"}).click();ignoreOrigin=true;
+ await directory.getByLabel("Client origin",{exact:true}).selectOption("dark_restore");
+ await expect(directory.locator(".clients-explorer-row")).toHaveCount(0);
+ await expect(directory.getByText("MUST STAY HIDDEN")).toHaveCount(0);
+ await expect(directory.getByRole("button",{name:"Apply to selected",exact:true})).toBeDisabled();
+ expect(writes).toHaveLength(0);
+});

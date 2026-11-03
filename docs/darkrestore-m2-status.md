@@ -78,3 +78,47 @@ The destination matches the original source ID, SHA, UUID, expiry, finite quota 
 The optional attachment schema upgrades an earlier M2 database in place. A header marker prevents an attached database with a missing attachment table from being mistaken for the older schema. Native offline backup validation checks each receipt against the immutable original import. The usage projection adds the closed epoch once to historical bytes, retains zero post-migration traffic, and exposes `source_epoch_settled` while `cutover_verified` remains false. A local in-process verifier also exists for source-host tests; browser JSON alone cannot construct the verified proof.
 
 The signed handoff covers only the specified, fully closed local source epoch. It does not establish exclusive retirement of every other source that could serve the credential. Existing stock Xray has no matching final receipt. Compatible positive subscription delivery, representative-scale legacy fixtures, and persistent LAB acceptance remain open. No production resource is touched.
+
+## Independent client directory and scale acceptance — 2026-11-03
+
+The main Clients directory now filters current group membership and origin
+(created here or imported with Dark Restore) in the same SQLite read transaction
+as the count and page. Origin follows the immutable import entry after
+reassignment. Current group membership remains separate from historical source
+group accounting. Representative scope intersects both filters; a guessed foreign
+group returns no foreign rows. An invalid or damaged import schema is refused
+rather than silently reclassifying its users as native. Before import opt-in, the
+imported result is empty and ordinary native clients remain searchable.
+
+The English/Persian directory puts these controls in a compact expandable area.
+Changing either filter clears the page and previous bulk selection. An active
+filter requires an exact server echo before any returned client becomes
+actionable. The existing scoped, paged group picker is reused.
+
+Verified locally on the isolated test host with Go 1.27.3:
+
+- The public SHA-pinned legacy SQLite import processed 750 finite-volume rows,
+  six source groups, and 750 encrypted legacy events. Two representatives received
+  375 imported clients each. A complete 125-client group then moved to a third
+  representative without a credit debit, while its original historical total
+  remained unchanged.
+- Current scope, UUID, expiry, quarantine, exact pagination and origin survived
+  reopen and offline backup validation. An identical import recovered the same
+  receipt. A 4096-byte renewal charged only the new representative, once across
+  replay; the previous representative was refused. The private source file hash
+  was unchanged.
+- Authenticated API tests rejected cross-representative group/origin enumeration,
+  duplicate parameters and invalid values. Normal global client search also passed.
+- Production TypeScript/Vite build passed. Three Chromium tests passed for owner
+  and representative filters, stale-selection removal, ignored-filter refusal,
+  and 320px Persian layout. The host required a temporary single-process Chromium
+  launch because its default zygote/GPU launch failed before page creation; this
+  temporary runner configuration is not part of the product.
+- This host has no C compiler, so local Go race could not start. Race verification
+  belongs to CI for the final published head; older green CI is not evidence for
+  these newly added files.
+
+The 750-row fixture is synthetic and finite-volume. It is not representative
+production data, a legacy-unlimited policy, a final counter custody proof,
+positive imported subscription delivery, or persistent LAB installation.
+The source-local signed handoff and the imported-client quarantine are unchanged.
