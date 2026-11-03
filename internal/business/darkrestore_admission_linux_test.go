@@ -20,6 +20,11 @@ import (
 // network evidence are covered by TestRealImportedQuarantineAdmissionAndTraffic.
 func syntheticAdmissionFixture(t *testing.T) (ownershipFixture, DarkRestoreQuarantinePlan, uc.Epoch, string) {
 	t.Helper()
+	f, p, r, _, sha := syntheticAdmissionSignedFixture(t)
+	return f, p, r.Epoch, sha
+}
+func syntheticAdmissionSignedFixture(t *testing.T) (ownershipFixture, DarkRestoreQuarantinePlan, DarkRestoreRegisteredBirth, ed25519.PrivateKey, string) {
+	t.Helper()
 	ctx := context.Background()
 	f, ev, key, _ := preparedCutoverFixture(t)
 	input := NativeInboundPlanInput{EventID: "admission-negative-profile-0001", Profile: nativeInput(), Reason: "Synthetic admission guard", Nodes: []NativeInboundPlanNode{{NodeID: "negative-node", InstallationID: strings.Repeat("a", 32), ListenIP: "127.0.0.1", DirectPort: 29283, DirectHosts: []string{"127.0.0.1"}}}}
@@ -41,13 +46,13 @@ func syntheticAdmissionFixture(t *testing.T) (ownershipFixture, DarkRestoreQuara
 	if err != nil {
 		t.Fatal(err)
 	}
-	birth := DarkRestoreQuarantineBirth{PlanSHA: sha, Lease: lease, Process: uc.ProcessToken{BootID: "11111111-1111-1111-1111-111111111111", PID: 1234, StartTicks: 4567}, ObservedUnixNano: now.UnixNano()}
+	birth := DarkRestoreQuarantineBirth{CoreSHA: strings.Repeat("c", 64), PlanSHA: sha, Lease: lease, Process: uc.ProcessToken{BootID: "11111111-1111-1111-1111-111111111111", PID: 1234, StartTicks: 4567}, ObservedUnixNano: now.UnixNano()}
 	birth.Signature = ed25519.Sign(signer, birth.signingBytes())
 	registered, err := f.s.RegisterDarkRestoreBirth(ctx, key, f.owner.Token, ev.ClientID, sha, pub, lease, birth)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return f, p, registered.Epoch, sha
+	return f, p, registered, signer, sha
 }
 func TestDarkRestoreAdmissionAuthorizationAndRollback(t *testing.T) {
 	ctx := context.Background()

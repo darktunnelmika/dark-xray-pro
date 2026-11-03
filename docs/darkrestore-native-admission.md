@@ -75,3 +75,27 @@ settlement. A saved exact final receipt can be recovered after Agent restart
 without a new listener or epoch. An unproven tail remains held and closed.
 An owner approval must be staged again after HUB restart. Automatic service
 reactivation after recovery is outside this acceptance.
+
+## Durable local listener application receipt
+
+After the zero acknowledgment, the actual Agent observes the bound customer
+listeners and its healthy usage observer in the exact registered process.
+Only then does it sign a domain-separated listener-application receipt.
+The receipt binds the plan, accounting epoch, pinned core, process identity,
+initial zero-report hash and observation time within the original startup
+lease. API-only birth cannot produce this receipt.
+
+The paired Agent posts the same immutable receipt through runtime phase
+applied. HUB checks the stored birth, admission and accepted zero checkpoint
+in one transaction. Retries recover the same digest; a conflicting replay is
+refused. Lost acknowledgments retry the same signed bytes. Registration failure
+stops the supervisor with final settlement rather than dropping accounting.
+The receipt survives backup validation and reopen, including after the epoch
+has closed; it reports a historical installation, never current serving health.
+
+The owner admission evidence and Clients handoff panel distinguish the accepted
+initial accounting checkpoint from the signed Agent installation receipt.
+Foreign-client responses are refused by the UI. Neither receipt changes client
+eligibility, credit, publication, native_apply_recorded, serving_health_recorded
+or final migration verification. Independent accepted protocol-health evidence
+and complete source-retirement evidence remain separate work.

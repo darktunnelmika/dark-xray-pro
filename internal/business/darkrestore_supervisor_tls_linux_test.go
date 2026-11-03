@@ -8,6 +8,7 @@ import (
 	"crypto/ed25519"
 	"crypto/sha256"
 	"crypto/tls"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
@@ -36,7 +37,7 @@ func TestRealImportedAgentSupervisorTLS(t *testing.T) {
 	if os.Getenv("DARK_PRO_TEST_FINAL_TCP") != "1" {
 		t.Skip("requires isolated final TCP core")
 	}
-	for _, mode := range []string{"normal", "revoked", "authority-outage", "hub-restart", "full-outage", "lost-birth-reply", "owner-logout"} {
+	for _, mode := range []string{"normal", "revoked", "authority-outage", "hub-restart", "full-outage", "lost-birth-reply", "lost-apply-reply", "apply-refused", "owner-logout"} {
 		t.Run(mode, func(t *testing.T) { realImportedAgentSupervisorTLS(t, mode) })
 	}
 }
@@ -133,6 +134,10 @@ func realImportedAgentSupervisorTLS(t *testing.T, mode string) {
 	var renewals atomic.Int64
 	var outage atomic.Bool
 	var fullOutage atomic.Bool
+	var lostApply atomic.Bool
+	if mode == "lost-apply-reply" {
+		lostApply.Store(true)
+	}
 	var lostBirth atomic.Bool
 	var active atomic.Pointer[api.Server]
 	active.Store(srv)
@@ -162,6 +167,19 @@ func realImportedAgentSupervisorTLS(t *testing.T, mode string) {
 				w.WriteHeader(503)
 				return
 			}
+			if phase.Phase == "applied" && mode == "apply-refused" {
+				w.WriteHeader(403)
+				return
+			}
+			if phase.Phase == "applied" && lostApply.Swap(false) {
+				recorder := httptest.NewRecorder()
+				active.Load().AgentHandler().ServeHTTP(recorder, r)
+				if recorder.Code != 200 {
+					t.Errorf("lost apply never committed: %d", recorder.Code)
+				}
+				w.WriteHeader(503)
+				return
+			}
 			if phase.Phase == "renew" {
 				renewals.Add(1)
 			}
@@ -175,7 +193,7 @@ func realImportedAgentSupervisorTLS(t *testing.T, mode string) {
 	digest := sha256.Sum256(cert.Raw)
 	command := exec.Command(worker, "-test.run=^TestDarkRestoreSupervisorPinnedTLS$", "-test.v")
 	command.Env = append(os.Environ(), "DARK_PRO_QUARANTINE_SUPERVISOR_TEST=1", "QUARANTINE_TEST_URL="+remote.URL, "QUARANTINE_TEST_TLS_PIN="+hex.EncodeToString(digest[:]), "QUARANTINE_TEST_CA="+string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: cert.Raw})), "QUARANTINE_TEST_KEY="+hex.EncodeToString(signer), "QUARANTINE_TEST_INSTALL="+install, "QUARANTINE_TEST_TOKEN="+token, "QUARANTINE_TEST_PLAN="+approval.SHA, "QUARANTINE_TEST_DIR="+filepath.Join(t.TempDir(), "runtime"))
-	if mode != "normal" && mode != "lost-birth-reply" && mode != "owner-logout" {
+	if mode != "normal" && mode != "lost-birth-reply" && mode != "lost-apply-reply" && mode != "owner-logout" {
 		command.Env = append(command.Env, "QUARANTINE_TEST_EXPECT_STOP=1")
 	}
 	var output bytes.Buffer
@@ -202,7 +220,48 @@ func realImportedAgentSupervisorTLS(t *testing.T, mode string) {
 		time.Sleep(100 * time.Millisecond)
 	}
 	if !admitted {
-		t.Fatal("node birth did not reach owner admission")
+		command.Process.Kill()
+		command.Wait()
+		done = true
+		t.Fatalf("node birth did not reach owner admission: %s", output.String())
+	}
+	if mode == "apply-refused" {
+		err = command.Wait()
+		done = true
+		if err != nil {
+			t.Fatalf("receipt refusal did not stop cleanly: %v %s", err, output.String())
+		}
+		account, e := store.ClientUsage(ctx, id)
+		if e != nil || account.Total != 0 || !account.RemainingNativeBudgetKnown || account.RemainingNativeBudgetBytes != 999986 {
+			t.Fatal("refused receipt accounting", e)
+		}
+		db, e := sql.Open("sqlite", "file:"+dbPath+"?mode=ro")
+		if e != nil {
+			t.Fatal(e)
+		}
+		var sealed int
+		e = db.QueryRow("SELECT COUNT(*) FROM pro_usage_epochs WHERE state='sealed'").Scan(&sealed)
+		db.Close()
+		if e != nil || sealed != 1 {
+			t.Fatal("receipt failure did not seal final usage", sealed, e)
+		}
+		c, e := net.DialTimeout("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(int(port))), 100*time.Millisecond)
+		if e == nil {
+			c.Close()
+			t.Fatal("unacknowledged process still listening")
+		}
+		after, e := store.ListRepresentatives(ctx, 100, 0)
+		if e != nil || !reflect.DeepEqual(before, after) {
+			t.Fatal("receipt refusal wallet change", e)
+		}
+		if e = store.Close(); e != nil {
+			t.Fatal(e)
+		}
+		if _, e = business.ValidateOfflineBackup(ctx, dbPath); e != nil {
+			t.Fatal("refusal backup", e)
+		}
+		t.Log("APPLY_REFUSAL_STOP_SETTLED: no unacknowledged listener, exact zero final, no wallet change")
+		return
 	}
 	address := net.JoinHostPort("127.0.0.1", strconv.Itoa(int(port)))
 	for time.Now().Before(deadline) {
@@ -265,6 +324,23 @@ func realImportedAgentSupervisorTLS(t *testing.T, mode string) {
 	response.Body.Close()
 	if err != nil || string(body) != payload {
 		t.Fatal("actual payload", err)
+	}
+	applyDeadline := time.Now().Add(3 * time.Second)
+	applyRecorded := false
+	for time.Now().Before(applyDeadline) {
+		get := httptest.NewRequest("GET", "https://pro.example/api/v1/workspace/dark-restore/handoff/quarantine/admission/evidence", nil)
+		get.AddCookie(cookie)
+		w := httptest.NewRecorder()
+		browser.ServeHTTP(w, get)
+		var e business.DarkRestoreNativeAdmissionEvidenceV1
+		if w.Code == 200 && json.Unmarshal(w.Body.Bytes(), &e) == nil && e.ListenerApplyRecorded && len(e.ListenerApplyReceiptSHA) == 64 && !e.NativeApplyRecorded && !e.ServingHealthRecorded && !e.AuthorizesMutation {
+			applyRecorded = true
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !applyRecorded {
+		t.Fatal("real Agent listener apply receipt missing")
 	}
 	if mode == "owner-logout" {
 		w := request("/api/v1/session/logout", map[string]any{}, cookie, session.CSRF)

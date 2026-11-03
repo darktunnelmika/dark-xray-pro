@@ -15,6 +15,7 @@ func (s *Server) darkRestoreRuntimeAgent(w http.ResponseWriter, r *http.Request)
 	var req struct {
 		NodeID, InstallationID, PlanSHA, Phase string
 		Birth                                  *business.DarkRestoreQuarantineBirth
+		ListenerApply                          *business.DarkRestoreListenerApply
 	}
 	if decode(w, r, 16384, &req) != nil {
 		businessError(w, business.ErrInvalid)
@@ -22,6 +23,19 @@ func (s *Server) darkRestoreRuntimeAgent(w http.ResponseWriter, r *http.Request)
 	}
 	if _, ok := s.registry.Authenticate(req.NodeID, req.InstallationID, bearer(r)); !ok {
 		respond(w, 401, map[string]string{"error": "unauthorized"})
+		return
+	}
+	if req.Phase == "applied" {
+		if req.ListenerApply == nil || req.Birth != nil {
+			businessError(w, business.ErrInvalid)
+			return
+		}
+		sha, err := s.business.RegisterDarkRestoreListenerApply(r.Context(), req.NodeID, req.InstallationID, req.PlanSHA, *req.ListenerApply)
+		if err != nil {
+			businessError(w, err)
+			return
+		}
+		respond(w, 200, map[string]any{"receipt_sha256": sha})
 		return
 	}
 	if req.Phase == "recovery" {

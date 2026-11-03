@@ -190,26 +190,32 @@ type DarkRestoreNativeAdmissionEvidenceV1 struct {
 	InitialReportSHA           string `json:"initial_report_sha256"`
 	InitialReceiptReceivedUnix int64  `json:"initial_receipt_received_unix"`
 	InitialZeroReceiptRecorded bool   `json:"initial_zero_receipt_recorded"`
+	ListenerApplyRecorded      bool   `json:"listener_apply_recorded"`
+	ListenerApplyReceiptSHA    string `json:"listener_apply_receipt_sha256,omitempty"`
 	NativeApplyRecorded        bool   `json:"native_apply_recorded"`
 	ServingHealthRecorded      bool   `json:"serving_health_recorded"`
 	AuthorizesMutation         bool   `json:"authorizes_mutation"`
 }
 
 type DarkRestoreNativeAdmissionPinsV1 struct {
-	ClientID             string
-	TransitionSHA        string
-	PreparedContentSHA   string
-	PreparedAuthoritySHA string
-	PlanSHA              string
-	BirthReceiptSHA      string
-	AdmissionEventID     string
-	AdmissionReceiptSHA  string
-	EpochID              string
-	InitialReportSHA     string
-	DocumentSHA          string
+	ListenerApplyRecorded   bool
+	ListenerApplyReceiptSHA string
+	ClientID                string
+	TransitionSHA           string
+	PreparedContentSHA      string
+	PreparedAuthoritySHA    string
+	PlanSHA                 string
+	BirthReceiptSHA         string
+	AdmissionEventID        string
+	AdmissionReceiptSHA     string
+	EpochID                 string
+	InitialReportSHA        string
+	DocumentSHA             string
 }
 
 type DarkRestoreNativeAdmissionValidationV1 struct {
+	ListenerApplyRecorded      bool   `json:"listener_apply_recorded"`
+	ListenerApplyReceiptSHA    string `json:"listener_apply_receipt_sha256,omitempty"`
 	Scope                      string `json:"scope"`
 	EvidenceSHA                string `json:"evidence_sha256"`
 	InitialZeroReceiptRecorded bool   `json:"initial_zero_receipt_recorded"`
@@ -256,12 +262,17 @@ func ValidateDarkRestoreNativeAdmissionEvidenceV1(e DarkRestoreNativeAdmissionEv
 		!routeSHA.MatchString(p.DocumentSHA) {
 		return zero, ErrDarkRestoreCutover
 	}
+	if e.ListenerApplyRecorded != p.ListenerApplyRecorded || e.ListenerApplyReceiptSHA != p.ListenerApplyReceiptSHA ||
+		e.ListenerApplyRecorded != (e.ListenerApplyReceiptSHA != "") ||
+		(e.ListenerApplyRecorded && !routeSHA.MatchString(e.ListenerApplyReceiptSHA)) {
+		return zero, ErrDarkRestoreCutover
+	}
 	sha, err := cutoverSnapshotDigest("DARK-PRO-NATIVE-ADMISSION-EVIDENCE-v1", e)
 	if err != nil || sha != p.DocumentSHA {
 		return zero, ErrDarkRestoreCutover
 	}
 	return DarkRestoreNativeAdmissionValidationV1{
-		Scope: DarkRestoreNativeAdmissionEvidenceScopeV1, EvidenceSHA: sha,
+		Scope: DarkRestoreNativeAdmissionEvidenceScopeV1, EvidenceSHA: sha, ListenerApplyRecorded: e.ListenerApplyRecorded, ListenerApplyReceiptSHA: e.ListenerApplyReceiptSHA,
 		InitialZeroReceiptRecorded: true,
 	}, nil
 }
@@ -348,6 +359,28 @@ func (s *Store) ProjectDarkRestoreNativeAdmissionEvidenceV1(ctx context.Context,
 		AdmissionReceiptSHA: admissionBytesSHA(admissionRaw), EpochID: registered.Epoch.ID,
 		InitialReportSHA: reportSHA, InitialReceiptReceivedUnix: received,
 		InitialZeroReceiptRecorded: true,
+	}
+	present, err = listenerApplySchema(ctx, tx)
+	if err != nil {
+		return zero, err
+	}
+	if present {
+		var raw []byte
+		e := tx.QueryRowContext(ctx, "SELECT receipt_json FROM darkrestore_listener_apply_v1 WHERE plan_sha=?", planSHA).Scan(&raw)
+		if e == nil {
+			var a DarkRestoreListenerApply
+			if len(raw) > 16384 || json.Unmarshal(raw, &a) != nil || a.PlanSHA != planSHA || verifyListenerApplyTx(ctx, tx, a) != nil {
+				return zero, ErrDarkRestoreCutover
+			}
+			canonical, _ := json.Marshal(a)
+			if !bytes.Equal(canonical, raw) {
+				return zero, ErrDarkRestoreCutover
+			}
+			out.ListenerApplyRecorded = true
+			out.ListenerApplyReceiptSHA = admissionBytesSHA(raw)
+		} else if !errors.Is(e, sql.ErrNoRows) {
+			return zero, e
+		}
 	}
 	if err = tx.Commit(); err != nil {
 		return zero, err

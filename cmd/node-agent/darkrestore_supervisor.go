@@ -28,11 +28,18 @@ func runDarkRestoreSupervisor(ctx context.Context, o darkRestoreSupervisorOption
 	if o.Client == nil || !strings.HasPrefix(o.Endpoint, "https://") || o.Runtime.ListenIP != "127.0.0.1" || !o.Runtime.ExperimentalFinalTCP || len(o.PlanSHA) != 64 {
 		return errors.New("invalid metered quarantine supervisor policy")
 	}
+	var listenerApply *business.DarkRestoreListenerApply
 	call := func(phase string, birth *business.DarkRestoreQuarantineBirth, out any) (int, error) {
 		raw, err := json.Marshal(struct {
 			NodeID, InstallationID, PlanSHA, Phase string
 			Birth                                  *business.DarkRestoreQuarantineBirth
-		}{o.Runtime.NodeID, o.Runtime.InstallationID, o.PlanSHA, phase, birth})
+			ListenerApply                          *business.DarkRestoreListenerApply
+		}{o.Runtime.NodeID, o.Runtime.InstallationID, o.PlanSHA, phase, birth, func() *business.DarkRestoreListenerApply {
+			if phase == "applied" {
+				return listenerApply
+			}
+			return nil
+		}()})
 		if err != nil {
 			return 0, err
 		}
@@ -155,6 +162,41 @@ func runDarkRestoreSupervisor(ctx context.Context, o darkRestoreSupervisorOption
 	if _, err = runtime.ActivateUsageAdmission(ctx, mx.UsageObservation{Epoch: registered.Epoch, StatsEndpoint: mx.MeteredStatsEndpoint, Sender: sender, Interval: time.Second, MaxSampleGap: 5 * time.Second, MaxPendingAge: 8 * time.Second}); err != nil {
 		return err
 	}
+
+	registration := business.DarkRestoreRegisteredBirth{Plan: plan, Birth: birth, Epoch: registered.Epoch, Signer: o.Signer.Public().(ed25519.PublicKey)}
+	applied, err := registration.ObserveListenerApply(ctx, runtime, o.Signer)
+	if err != nil {
+		cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 8*time.Second)
+		_, sealErr := runtime.SettleActiveTCP(cleanup, sender)
+		cancel()
+		settled = sealErr == nil
+		return err
+	}
+	listenerApply = &applied
+	for attempt := 0; ; attempt++ {
+		var ack struct {
+			SHA string `json:"receipt_sha256"`
+		}
+		status, e := call("applied", nil, &ack)
+		if e == nil && ack.SHA == applied.Digest() {
+			break
+		}
+		if e == nil {
+			e = errors.New("listener apply receipt acknowledgment mismatch")
+		}
+		if attempt >= 2 || (status != 0 && status != 503 && status != 504) || ctx.Err() != nil {
+			cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 8*time.Second)
+			_, sealErr := runtime.SettleActiveTCP(cleanup, sender)
+			cancel()
+			settled = sealErr == nil
+			return e
+		}
+		select {
+		case <-ctx.Done():
+		case <-time.After(250 * time.Millisecond):
+		}
+	}
+
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 	for {

@@ -72,6 +72,13 @@ func darkRestoreSchemaState(ctx context.Context, q sellerQueryV2) (bool, error) 
 	if admissionPresent {
 		n -= len(darkRestoreAdmissionDDL)
 	}
+	listenerPresent, listenerErr := listenerApplySchema(ctx, q)
+	if listenerErr != nil {
+		return false, listenerErr
+	}
+	if listenerPresent {
+		n -= len(darkRestoreListenerDDL)
+	}
 	baseCount := len(darkRestoreImportSchemaV1)
 	localCount := baseCount + len(darkRestoreLocalAttachmentSchemaV1)
 	cutoverCount := localCount + len(darkRestoreCutoverSchemaV1)

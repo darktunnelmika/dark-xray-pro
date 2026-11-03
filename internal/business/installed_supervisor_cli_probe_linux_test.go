@@ -323,6 +323,10 @@ func TestInstalledSupervisorCLIProbe(t *testing.T) {
 	if err = db.QueryRow("SELECT COUNT(*) FROM pro_usage_epochs WHERE state='sealed'").Scan(&sealed); err != nil || sealed != 1 {
 		t.Fatal("artifact final epoch", err, sealed, base)
 	}
+	var appliedCount int
+	if err = db.QueryRow("SELECT COUNT(*) FROM darkrestore_listener_apply_v1").Scan(&appliedCount); err != nil || appliedCount != 1 {
+		t.Fatal("actual CLI listener apply receipt", appliedCount, err)
+	}
 	// Compare all representative financial values directly from the actual HUB database.
 	for _, before := range balances {
 		var volume, unlimited int64

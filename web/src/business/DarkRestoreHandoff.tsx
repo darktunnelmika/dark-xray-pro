@@ -22,6 +22,11 @@ type Readiness = {
  activation_allowed:boolean; cutover_verified:boolean;
  activation_blockers:string[]; verification_blockers:string[];
 };
+type Execution = {
+ scope:string;client_id:string;initial_zero_receipt_recorded:boolean;
+ listener_apply_recorded:boolean;listener_apply_receipt_sha256?:string;
+ native_apply_recorded:boolean;serving_health_recorded:boolean;authorizes_mutation:boolean;
+};
 const digest = (v: string) => /^[a-f0-9]{64}$/.test(v);
 const bytes = (v: string) => /^(0|[1-9][0-9]{0,18})$/.test(v);
 function validHandoff(v: Handoff): boolean {
@@ -40,11 +45,13 @@ export default function DarkRestoreHandoff({model}:{model:BusinessModel}) {
  const [staged,setStaged]=useState<Handoff|null>(null);
  const [receipt,setReceipt]=useState<Attachment|null>(null);
  const [readiness,setReadiness]=useState<Readiness|null>(null);
+ const [execution,setExecution]=useState<Execution|null>(null);
+ const [executionError,setExecutionError]=useState(false);
  const [busy,setBusy]=useState(false);
  const [error,setError]=useState(false);
  const fmt=(value:string)=>{try{return BigInt(value).toLocaleString(fa?"fa-IR":"en-US")+" B";}catch{return "—";}};
  async function inspect() {
-  setBusy(true);setError(false);setStaged(null);setReceipt(null);setReadiness(null);
+  setBusy(true);setError(false);setStaged(null);setReceipt(null);setReadiness(null);setExecution(null);setExecutionError(false);
   try {
    const result=await api<Handoff>(restoreAPI+"/handoff");
    if (!validHandoff(result)) throw Error("unverified handoff");
@@ -63,12 +70,12 @@ export default function DarkRestoreHandoff({model}:{model:BusinessModel}) {
     result.source_settlement?.source_id!==staged.source_settlement.source_id ||
     result.source_settlement?.settled_historical_bytes!==staged.source_settlement.settled_historical_bytes)
      throw Error("unverified attachment receipt");
-   setReceipt(result);setReadiness(null);model.reload();
+   setReceipt(result);setReadiness(null);setExecution(null);setExecutionError(false);model.reload();
   } catch { setError(true); } finally { setBusy(false); }
  }
  async function inspectReadiness() {
   if(!receipt||!staged)return;
-  setBusy(true);setError(false);setReadiness(null);
+  setBusy(true);setError(false);setReadiness(null);setExecution(null);setExecutionError(false);
   try {
    const result=await api<Readiness>(restoreAPI+"/handoff/readiness");
    const lists=[result.activation_blockers,result.verification_blockers];
@@ -85,6 +92,19 @@ export default function DarkRestoreHandoff({model}:{model:BusinessModel}) {
     throw Error("invalid readiness");
    setReadiness(result);
   } catch { setError(true); } finally { setBusy(false); }
+ }
+ async function inspectExecution() {
+  if(!receipt)return;
+  setBusy(true);setExecution(null);setExecutionError(false);
+  try {
+   const result=await api<Execution>(restoreAPI+"/handoff/quarantine/admission/evidence");
+   if(result?.scope!=="darkrestore_native_admission_evidence_v1"||result.client_id!==receipt.client_id||
+    result.initial_zero_receipt_recorded!==true||typeof result.listener_apply_recorded!=="boolean"||
+    (result.listener_apply_recorded?!digest(result.listener_apply_receipt_sha256??""):!!result.listener_apply_receipt_sha256)||
+    result.native_apply_recorded!==false||result.serving_health_recorded!==false||result.authorizes_mutation!==false)
+     throw Error("execution evidence mismatch");
+   setExecution(result);
+  }catch{setExecutionError(true);}finally{setBusy(false);}
  }
  return <section className="darkrestore-commit" aria-label={fa?"تحویل امضاشدهٔ مصرف منبع":"Signed source usage handoff"}>
   <h4>{fa?"تحویل امضاشدهٔ مصرف منبع":"Signed source usage handoff"}</h4>
@@ -119,6 +139,19 @@ export default function DarkRestoreHandoff({model}:{model:BusinessModel}) {
     {" · "}{fa?"حجم باقی‌مانده":"Remaining quota"}: {fmt(readiness.finite_quota_remaining_bytes)}</p>
    <p><strong>{readiness.activation_allowed?(fa?"آمادهٔ فعال‌سازی":"Activation ready"):(fa?"فعال‌سازی مسدود است":"Activation blocked")}</strong>
     {" · "}{readiness.cutover_verified?(fa?"مهاجرت تأیید شد":"Cutover verified"):(fa?"پذیرش نهایی نشده":"Cutover not verified")}</p>
+   {receipt && readiness.native_baseline_complete && readiness.subscription_delivered && <div>
+    <button type="button" disabled={busy} onClick={()=>void inspectExecution()}>
+     {fa?"بررسی وضعیت اجرای سرویس":"Check service startup"}
+    </button>
+    {execution&&<div aria-label={fa?"وضعیت اجرای سرویس":"Service startup status"}>
+     <p>{fa?"ثبت اولیهٔ حسابداری تأیید شده است.":"Initial accounting acknowledgment recorded."}</p>
+     <p>{fa?"راه‌اندازی سرویس در نود":"Service startup on the node"}: <strong>
+      {execution.listener_apply_recorded?(fa?"رسید Agent ثبت شده":"Agent receipt recorded"):(fa?"در انتظار رسید Agent":"Waiting for Agent receipt")}
+     </strong></p>
+     <p>{fa?"سلامت اتصال هنوز تأیید نشده است. ثبت راه‌اندازی به‌تنهایی به معنی پایان مهاجرت نیست.":"Connection health is awaiting verification. A startup receipt does not complete migration."}</p>
+    </div>}
+    {executionError&&<p role="status">{fa?"رسید کامل و مطابق این کاربر در دسترس نیست؛ دوباره بررسی کن.":"A complete matching receipt is unavailable. Check again."}</p>}
+   </div>}
    {staged && receipt && readiness.native_baseline_complete && <form onSubmit={async e=>{
     e.preventDefault();
     const form=new FormData(e.currentTarget);
