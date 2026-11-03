@@ -25,7 +25,10 @@ jobs:
         with:
           go-version-file: go.mod
           cache: false
-      - run: go test -race ./internal/business -count=1 -timeout=600s
+      # The 5,000-customer import/reopen fixture runs last and the complete
+      # package exceeded ten minutes under the race detector on a hosted runner.
+      # Keep one complete-package invocation and give it a bounded 15 minutes.
+      - run: go test -race ./internal/business -count=1 -timeout=15m
 
   foundation:
     name: Go 1.27 contracts, accounting and race checks

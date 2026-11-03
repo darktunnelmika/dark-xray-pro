@@ -199,7 +199,9 @@ jobs:
           go-version-file: go.mod
           cache: false
       - name: Run the entire business package on its own runner
-        run: go test -race ./internal/business -count=1 -timeout=10m
+        # The production-scale import/reopen fixture intentionally runs last.
+        # Race instrumentation can push the complete package past ten minutes.
+        run: go test -race ./internal/business -count=1 -timeout=15m
 
   go:
     name: Go unit, race and vet

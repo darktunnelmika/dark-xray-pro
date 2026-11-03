@@ -247,3 +247,21 @@ The local real-Nginx proxy test, Python compilation, bundle shell syntax and
 packaging assertions pass. This is code and local-test evidence only. It is not
 yet a green final-head CI result, a new artifact, an installed handoff route or
 positive signed-settlement/subscription acceptance.
+
+## Current-head race timeout correction — code checkpoint
+
+Managed Inbound run `41567644254`, job `125693072970`, reached the explicit
+ten-minute Go test deadline while
+`TestDarkRestore5000OfflineCustomersImportReplayAndRecovery` was still running.
+The log contains neither a failed assertion nor a race report; the complete
+business package had already consumed the bounded 600 seconds under race
+instrumentation. This is a real failed current-head check and the artifact from
+that head is not eligible for installation.
+
+Both independent complete-business race invocations now retain their existing
+20-minute job limits but give the Go test process a bounded 15-minute deadline.
+No test, fixture, assertion or package is removed or split. YAML parsing,
+workflow-command assertions and `git diff --check` pass locally. A new head must
+complete both race jobs and all other current-head checks before its artifact can
+be considered for LAB installation; this correction is not yet CI evidence or
+an installed change.
