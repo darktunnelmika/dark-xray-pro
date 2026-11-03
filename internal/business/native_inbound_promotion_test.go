@@ -121,12 +121,22 @@ func TestInboundPlanPromotionAtomicHistoryBindingsAndMeteredStage(t *testing.T) 
 			t.Fatal("preview mutation", table)
 		}
 	}
+	if planCount(t, f.s, "native_inbound_plan_promotion_times_v1") != 0 {
+		t.Fatal("preview wrote precise promotion time")
+	}
+	if _, err = readNativeInboundPromotionUnixNano(ctx, f.s.db, 501, request.EventID, time.Now().Unix()); !errors.Is(err, ErrDarkRestoreCutover) {
+		t.Fatal("missing precise promotion time did not fail closed", err)
+	}
 	if planGeneration(t, f.s) != generation {
 		t.Fatal("preview changed generation")
 	}
 	result, err := f.s.PromoteNativeInboundPlan(ctx, f.key, 501, request)
 	if err != nil || !result.Promoted || result.Replayed || result.PlanRevision != 1 || result.SourceInboundRevision != 1 || result.InboundRevision != 2 || result.DraftRevision != 1 || result.RuntimeChanged || result.SubscriptionPublished || result.ReviewSHA256 != request.ReviewSHA256 {
 		t.Fatal("promotion result", result, err)
+	}
+	promotedUnixNano, err := readNativeInboundPromotionUnixNano(ctx, f.s.db, 501, result.EventID, result.CreatedUnix)
+	if err != nil || promotedUnixNano <= 0 || promotedUnixNano/1e9 != result.CreatedUnix {
+		t.Fatal("precise promotion time missing or inconsistent", promotedUnixNano, err)
 	}
 	if !reflect.DeepEqual(before, promotionCiphertexts(t, f)) {
 		t.Fatal("promotion rewrote source identity or history")
@@ -309,6 +319,8 @@ func TestInboundPlanPromotionPermanentOldReaderAndGenericMutationFences(t *testi
 		`DELETE FROM native_inbound_plan_promotion_clients WHERE inbound_id=501`,
 		`UPDATE native_inbound_plan_promotion_clients SET client_id='other' WHERE inbound_id=501`,
 		`INSERT INTO native_inbound_plan_promotion_clients VALUES(501,'additional')`,
+		`UPDATE native_inbound_plan_promotion_times_v1 SET created_unix_nano=created_unix_nano+1 WHERE inbound_id=501`,
+		`DELETE FROM native_inbound_plan_promotion_times_v1 WHERE inbound_id=501`,
 		`DELETE FROM native_inbound_plan_promotion_nodes`,
 		`UPDATE native_inbound_plan_promotion_nodes SET binary_sha='forged'`,
 	} {
@@ -336,7 +348,7 @@ func TestInboundPlanPromotionLateFailureRollsBackCompleteMaterialization(t *test
 	if !reflect.DeepEqual(before, promotionCiphertexts(t, f)) || planGeneration(t, f.s) != generation {
 		t.Fatal("failed promotion changed source/generation")
 	}
-	for _, table := range []string{"native_inbound_plan_promotions", "native_inbound_plan_promotion_clients", "native_inbound_targets", "native_inbound_clients", "native_route_drafts", "native_route_draft_events"} {
+	for _, table := range []string{"native_inbound_plan_promotions", "native_inbound_plan_promotion_times_v1", "native_inbound_plan_promotion_clients", "native_inbound_targets", "native_inbound_clients", "native_route_drafts", "native_route_draft_events"} {
 		if planCount(t, f.s, table) != 0 {
 			t.Fatal("partial promotion remained", table)
 		}

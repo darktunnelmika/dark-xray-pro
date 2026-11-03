@@ -33,6 +33,7 @@ type BackupValidation struct {
 // number alone. Independently versioned feature families are verified below.
 const backupBaseSchemaFingerprint = "369badcdf1e5396b6bc0910cf2d545290002cbc66968059ecbd8f766680a966f"
 const backupSellerSchemaFingerprint = "d8c1b17e3de0bb5bbef143eed3b946fbd0cfcb43541e0f38fbe7cfb863169548"
+const backupPromotionTimeSchemaFingerprint = "015f64ca304f96a1ff55bf0fd6a112a44084aa9277f9e8cf2f54588732efa4b2"
 
 var backupObjectName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]{0,127}$`)
 
@@ -40,6 +41,8 @@ type backupSchemaObject [4]string
 
 func backupSchemaGroup(name string) string {
 	switch {
+	case name == "native_inbound_plan_promotion_times_v1" || strings.HasPrefix(name, "native_promotion_time_"):
+		return "promotion_time"
 	case strings.HasPrefix(name, "darkrestore_"):
 		return "darkrestore"
 	case strings.HasPrefix(name, "client_ownership_"):
@@ -186,6 +189,9 @@ func validateOfflineBackupDB(ctx context.Context, db *sql.DB) (BackupValidation,
 		expectedBase = "e080a31f181117e3b3b90c3e522196001ea985285e3765e450fd2fb0ca65652e"
 	}
 	if err != nil || closeErr != nil || backupSchemaDigest(groups["base"]) != expectedBase {
+		return result, ErrOfflineBackupInvalid
+	}
+	if len(groups["promotion_time"]) > 0 && backupSchemaDigest(groups["promotion_time"]) != backupPromotionTimeSchemaFingerprint {
 		return result, ErrOfflineBackupInvalid
 	}
 	if len(groups["sellers"]) > 0 {

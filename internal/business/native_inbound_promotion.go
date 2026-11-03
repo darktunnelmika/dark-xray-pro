@@ -185,6 +185,27 @@ func readNativeInboundPromotion(ctx context.Context, q planReader, key []byte, i
 	return &receipt, hash, nil
 }
 
+// readNativeInboundPromotionUnixNano returns the authoritative promotion time
+// captured in the same transaction as the immutable promotion receipt. The
+// older second-precision receipt remains stable for API compatibility; callers
+// that need strict evidence ordering must use this separately pinned value and
+// fail closed when it is absent or inconsistent.
+func readNativeInboundPromotionUnixNano(ctx context.Context, q planReader, id uint64, event string, createdUnix int64) (int64, error) {
+	var storedEvent string
+	var createdUnixNano int64
+	err := q.QueryRowContext(ctx, `SELECT event_id,created_unix_nano FROM native_inbound_plan_promotion_times_v1 WHERE inbound_id=?`, id).Scan(&storedEvent, &createdUnixNano)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, ErrDarkRestoreCutover
+	}
+	if err != nil {
+		return 0, err
+	}
+	if storedEvent != event || createdUnixNano <= 0 || createdUnixNano/1e9 != createdUnix {
+		return 0, ErrUnavailable
+	}
+	return createdUnixNano, nil
+}
+
 func promotionFingerprint(id uint64, input NativeInboundPlanPromotionInput) string {
 	return fingerprint("native-plan-promotion-input-v1", struct {
 		ID    uint64
@@ -465,7 +486,8 @@ func (s *Store) PromoteNativeInboundPlan(ctx context.Context, key []byte, id uin
 		}
 	}
 	node := a.plan.Nodes[0]
-	now := time.Now().Unix()
+	promotedAt := time.Now()
+	now := promotedAt.Unix()
 	out := NativeInboundPlanPromotionReceipt{EventID: in.EventID, InboundID: id, PlanRevision: a.plan.PlanRevision,
 		SourceInboundRevision: a.plan.InboundRevision, InboundRevision: a.plan.InboundRevision + 1, NodeID: node.NodeID,
 		InstallationID: node.InstallationID, DraftRevision: 1, ClientIDs: append([]string(nil), in.ClientIDs...),
@@ -481,6 +503,9 @@ func (s *Store) PromoteNativeInboundPlan(ctx context.Context, key []byte, id uin
 	draftEvent := promotionDraftEvent(in.EventID, id)
 	if _, err = tx.ExecContext(ctx, `INSERT INTO native_inbound_plan_promotions(inbound_id,event_id,fingerprint,plan_revision,source_inbound_revision,inbound_revision,node_id,installation_id,direct_port,draft_event_id,created_unix,input_enc,receipt_enc) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		id, in.EventID, fp, out.PlanRevision, out.SourceInboundRevision, out.InboundRevision, node.NodeID, node.InstallationID, node.DirectPort, draftEvent, now, inputEnc, enc); err != nil {
+		return empty, err
+	}
+	if _, err = tx.ExecContext(ctx, `INSERT INTO native_inbound_plan_promotion_times_v1(inbound_id,event_id,created_unix_nano) VALUES(?,?,?)`, id, in.EventID, promotedAt.UnixNano()); err != nil {
 		return empty, err
 	}
 	for _, client := range in.ClientIDs {

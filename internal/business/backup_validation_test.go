@@ -111,6 +111,7 @@ func TestOfflineBackupValidationRejectsSameVersionDamagedPolicyAndForeignKeys(t 
 		"seller-order-policy":            {`DROP TRIGGER seller_order_receipts_no_update_v1`},
 		"refund-policy":                  {`DROP TRIGGER volume_refund_receipts_no_update`},
 		"managed-policy":                 {`DROP TRIGGER inbound_execution_events_no_update`},
+		"promotion-time-policy":          {`DROP TRIGGER native_promotion_time_no_update`},
 		"foreign-key":                    {`INSERT INTO auth_sessions(token_sha256,user_id,created_unix,expires_unix) VALUES('orphan','absent',1,2)`},
 	}
 	for name, statements := range cases {

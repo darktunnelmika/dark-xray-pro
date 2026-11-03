@@ -738,3 +738,26 @@ and the separate billable customer connection. These are synthetic isolated
 fixtures, not production inventory, source retirement, continuous health or
 permission to issue, deliver or activate an imported subscription. Legacy
 unlimited remains blocked.
+
+## M5 precise native-promotion timeline foundation
+
+The next isolated source records a nanosecond promotion timestamp in the same
+SQLite transaction as the immutable native plan-promotion receipt. The existing
+second-precision API receipt is unchanged. Evidence adapters that require the
+strict prepared → promoted → applied → health-accepted ordering must read the
+new append-only timestamp and fail closed when it is absent, belongs to another
+event, or does not agree with the original receipt second.
+
+The additive table and its update/delete guards are independently fingerprinted
+by offline-backup validation so the reviewed base-schema digest remains stable.
+Historical migration fixtures remove this empty optional overlay before
+reconstructing older releases. Preview performs no write, late promotion failure
+rolls the timestamp back with the rest of materialization, and direct update or
+delete is rejected.
+
+This is timestamp provenance only. It neither performs Apply nor records an
+accepted health round, creates a subscription, changes usage or representative
+credit, proves inventory completeness/source retirement, or authorizes imported
+activation. The Store adapter that coherently binds this timestamp to the
+prepared receipt, actual first Apply and accepted health receipt remains a
+separate subsequent gate. Legacy unlimited remains blocked.

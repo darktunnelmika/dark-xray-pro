@@ -16,7 +16,7 @@ func removePromotionSchemaForHistoricalFixture(t *testing.T, s *Store) {
 		t.Fatal(err)
 	}
 	defer tx.Rollback()
-	tables := []string{"native_inbound_plan_promotion_clients", "native_inbound_plan_promotions", "native_inbound_plan_promotion_nodes"}
+	tables := []string{"native_inbound_plan_promotion_times_v1", "native_inbound_plan_promotion_clients", "native_inbound_plan_promotions", "native_inbound_plan_promotion_nodes"}
 	for _, table := range tables {
 		var count int
 		if err = tx.QueryRow("SELECT COUNT(*) FROM " + table).Scan(&count); err != nil {
