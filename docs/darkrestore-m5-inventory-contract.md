@@ -283,6 +283,25 @@ and recovery. No direct insertion of a fake subscription journal is used for
 this new positive path.
 
 
+## Native promotion/apply evidence contract
+
+`ValidateDarkRestoreNativeApplyEvidenceV1` is a pure fail-closed boundary for
+the next Store integration. It accepts no browser completion flag and performs
+no database or runtime mutation. Independently supplied pins must match the
+original transition, prepared content and profile authority, exact inbound and
+plan revisions, immutable promotion event/receipt, initial-apply digest, apply
+command, stage, health round and accepted health receipt.
+
+Revision and time order are structural: promotion advances the prepared inbound
+revision exactly once, then prepare < promotion < apply < accepted health. A
+future acceptance timestamp, a repinned document with a foreign client, or a
+mismatch in any source receipt fails closed. A valid projection reports recorded
+apply and accepted health only within the pinned document scope and always
+returns `authorizes_mutation=false`. It is not an emitter, operational truth,
+proof of undeclared-source absence or permission to clear
+`native_apply_not_recorded`; the Store must later derive it from its own
+immutable promotion/apply/health rows in one coherent read.
+
 ## Post-opening destination refresh
 
 A legitimate renewal or owner assignment after opening changes destination state,
