@@ -515,6 +515,40 @@ func main() {
 			}
 		}()
 	}
+	if os.Getenv("DARK_PRO_ENABLE_DARKRESTORE_QUARANTINE") == "1" {
+		pin := os.Getenv("DARK_PRO_QUARANTINE_PLAN_SHA")
+		path := os.Getenv("DARK_PRO_QUARANTINE_SIGNER_FILE")
+		dir := os.Getenv("DARK_PRO_QUARANTINE_RECEIPTS_DIR")
+		st, err := os.Lstat(path)
+		if !remote || !identity.Paired || len(pin) != 64 || *stageXrayBinary == "" || len(*stageXraySHA) != 64 || dir == "" || err != nil || !st.Mode().IsRegular() || st.Mode().Perm()&0077 != 0 || st.Size() != 128 {
+			log.Fatal("invalid private quarantine worker policy")
+		}
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			log.Fatal("quarantine signer unavailable")
+		}
+		signer, err := quarantineSigner(string(raw))
+		if err != nil {
+			log.Fatal(err)
+		}
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			timer := time.NewTicker(15 * time.Second)
+			defer timer.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-timer.C:
+					if err := pollDarkRestoreQuarantine(ctx, client, endpoint, *nodeID, identity.InstallationID, identity.AgentToken, pin, *stageXrayBinary, *stageXraySHA, dir, signer); err != nil && ctx.Err() == nil {
+						log.Print("quarantine registration unavailable")
+					}
+				}
+			}
+		}()
+	}
+
 	initial, err := hostmetrics.Read()
 	hasInitial := err == nil
 	if err != nil {

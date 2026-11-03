@@ -233,3 +233,18 @@ func TestDarkRestorePreparedCanonicalDeliveryAndV16Recovery(t *testing.T) {
 		})
 	}
 }
+
+func BrowserPreparedQuarantineFixture(t *testing.T) (*Store, string, []byte, PreparedHandoffFiles, string) {
+	t.Helper()
+	var files PreparedHandoffFiles
+	f, ev, key, _ := preparedCutoverWithFiles(t, &files)
+	plan := NativeInboundPlanInput{EventID: "quarantine-transport-plan-0001", Profile: nativeInput(), Reason: "Disposable TLS quarantine", Nodes: []NativeInboundPlanNode{{NodeID: "quarantine-node", InstallationID: strings.Repeat("a", 32), ListenIP: "127.0.0.1", DirectPort: 29181, DirectHosts: []string{"127.0.0.1"}}}}
+	plan.Profile.ID = 502
+	if _, err := f.s.SaveNativeInboundPlan(context.Background(), key, plan); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.s.DeliverPreparedDarkRestoreSubscriptionV1(context.Background(), key, f.owner.Token, ev.ClientID, DarkRestorePreparedDeliveryInputV1{EventID: "quarantine-transport-delivery-0001", InboundID: 502, ExpectedPlanRevision: 1, ExpectedInboundRevision: 1, Format: "uri"}); err != nil {
+		t.Fatal(err)
+	}
+	return f.s, ev.ClientID, key, files, ownershipPassword
+}

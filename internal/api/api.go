@@ -24,6 +24,8 @@ import (
 )
 
 type Server struct {
+	quarantineMu                sync.Mutex
+	quarantine                  *quarantineTransport
 	backupControl               backupControlClient
 	inboundExecution            *inboundExecutionService
 	inboundSecurity             *inboundsecurity.Service
@@ -192,6 +194,10 @@ func (s *Server) AgentHandler() http.Handler {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		if r.TLS == nil || r.TLS.Version < tls.VersionTLS13 {
 			respond(w, http.StatusUpgradeRequired, map[string]string{"error": "tls13_required"})
+			return
+		}
+		if r.Method == http.MethodPost && r.URL.Path == "/api/v1/agent/darkrestore-quarantine" {
+			s.quarantineAgent(w, r)
 			return
 		}
 		if r.Method == http.MethodPost && (r.URL.Path == "/api/v1/agent/route-transactions/poll" || r.URL.Path == "/api/v1/agent/route-transactions/receipt") {
