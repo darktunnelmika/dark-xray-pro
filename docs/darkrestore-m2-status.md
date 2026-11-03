@@ -604,3 +604,39 @@ pure-contract tests (1.313s), complete business (213.344s), darkrestore
 (3.105s), backupacceptance (3.243s), vet and diff checks. Race authority remains
 current-head CI after publication; these local results are not Merge,
 installation, real Agent-probe acceptance or LAB-positive cutover.
+
+## One owner-consented customer connection (isolated source)
+
+The imported single-client runtime now has a separate, real customer-credential
+connection check. It uses the original UUID and the existing billable epoch;
+it does not introduce a nonbillable identity or relax the generic system-probe,
+initial-apply or native-promotion guards. The UI states the quota consequence
+and requires explicit consent for one attempt.
+
+Startup opt-in is `DARK_PRO_ENABLE_IMPORTED_CONNECTION_CHECK=1` with
+`DARK_PRO_IMPORTED_VERIFIER_JSON`, using the same strict literal IPv4,
+TLS name, CA and certificate-pin endpoint contract as protocol health.
+The browser cannot choose a URL. The default is disabled.
+
+An owner/CSRF request queues one immutable intent for the selected signed
+handoff's admitted client. The paired Agent receives one HMAC-bound challenge
+for the exact plan, listener receipt, core, live process, UUID digest, config,
+epoch, runtime condition and verifier. Its maximum eight-second window stays
+within the current lease. A pinned TCP/REALITY client connects through that
+customer's actual listener and requires the exact TLS nonce response.
+The Agent signs the result with its approved birth key.
+
+The Agent persists an attempt before any network I/O and persists the signed
+receipt before returning it. Lost HUB responses and Agent recovery replay the
+same saved receipt; ambiguous or expired attempts do not run again. The Store
+keeps immutable intent/request/receipt rows, verifies canonical parent bindings
+on reopen and offline backup, and verifies HMAC plus Ed25519 on live receipt
+registration. Offline verification uses the persisted approved public key;
+the node bearer secret is never added to the business backup.
+
+The owner projection explicitly reports only
+`customer_connection_verified=true`. It leaves native apply, generic serving
+health, cutover, source custody, publication and mutation authority unchanged.
+This proves one point-in-time customer connection, not continuing health or
+exclusive retirement of all legacy sources. Actual test bytes remain in
+native usage; historical usage and representative wallets are unchanged.

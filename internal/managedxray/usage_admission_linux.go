@@ -78,6 +78,7 @@ func (r *Runtime) PrepareUsageAdmission(ctx context.Context, v Revision, l Lease
 	next.Version = 4
 	next.Previous = next.Good
 	next.Usage = nil
+ next.CustomerConnection=nil
 	next.Highwater = saved.Sequence
 	next.DesiredSHA = saved.SHA
 	next.DesiredManifest = saved.Manifest

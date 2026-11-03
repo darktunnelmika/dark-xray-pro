@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"crypto/ed25519"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -29,17 +31,21 @@ func runDarkRestoreSupervisor(ctx context.Context, o darkRestoreSupervisorOption
 		return errors.New("invalid metered quarantine supervisor policy")
 	}
 	var listenerApply *business.DarkRestoreListenerApply
+	var connectionState *mx.CustomerConnectionState
+	var connectionReceipt *mx.CustomerConnectionReceipt
 	call := func(phase string, birth *business.DarkRestoreQuarantineBirth, out any) (int, error) {
 		raw, err := json.Marshal(struct {
 			NodeID, InstallationID, PlanSHA, Phase string
 			Birth                                  *business.DarkRestoreQuarantineBirth
 			ListenerApply                          *business.DarkRestoreListenerApply
+			ConnectionState                        *mx.CustomerConnectionState
+			ConnectionReceipt                      *mx.CustomerConnectionReceipt
 		}{o.Runtime.NodeID, o.Runtime.InstallationID, o.PlanSHA, phase, birth, func() *business.DarkRestoreListenerApply {
 			if phase == "applied" {
 				return listenerApply
 			}
 			return nil
-		}()})
+		}(), connectionState, connectionReceipt})
 		if err != nil {
 			return 0, err
 		}
@@ -81,6 +87,16 @@ func runDarkRestoreSupervisor(ctx context.Context, o darkRestoreSupervisorOption
 	defer sender.Close()
 
 	if runtime.Snapshot().Usage != nil {
+		// Replay saved proof before settlement. A failed acknowledgment may be
+		// retried on the next recovery; it never repeats network traffic.
+		if saved := runtime.SavedCustomerConnectionReceipt(); saved != nil {
+			connectionReceipt = saved
+			var ack struct {
+				SHA string `json:"receipt_sha256"`
+			}
+			call("connection-result", nil, &ack)
+			connectionReceipt = nil
+		}
 		var recovery struct {
 			Epoch uc.Epoch `json:"epoch"`
 		}
@@ -197,6 +213,43 @@ func runDarkRestoreSupervisor(ctx context.Context, o darkRestoreSupervisorOption
 		}
 	}
 
+	// A successful receipt is retained until HUB acknowledges its exact hash.
+	// Failure or expiry never creates another attempt for this epoch.
+	var deliveredConnection string
+	checkConnection := func() {
+		if connectionReceipt != nil {
+			var ack struct {
+				SHA string `json:"receipt_sha256"`
+			}
+			if _, e := call("connection-result", nil, &ack); e == nil && ack.SHA == businessConnectionDigest(*connectionReceipt) {
+				connectionReceipt = nil
+			}
+			return
+		}
+		state := runtime.CustomerConnectionState()
+		connectionState = &state
+		var work struct {
+			Work      bool                           `json:"work"`
+			Challenge mx.CustomerConnectionChallenge `json:"challenge"`
+			Endpoint  mx.ProtocolHealthEndpoint      `json:"endpoint"`
+		}
+		_, e := call("connection-poll", nil, &work)
+		connectionState = nil
+		if e != nil || !work.Work || work.Challenge.ID == deliveredConnection {
+			return
+		}
+		deliveredConnection = work.Challenge.ID
+		receipt, e := runtime.CheckCustomerConnection(ctx, work.Challenge, work.Endpoint, o.Signer)
+		if e == nil {
+			connectionReceipt = &receipt
+			var ack struct {
+				SHA string `json:"receipt_sha256"`
+			}
+			if _, e = call("connection-result", nil, &ack); e == nil && ack.SHA == businessConnectionDigest(receipt) {
+				connectionReceipt = nil
+			}
+		}
+	}
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 	for {
@@ -231,6 +284,13 @@ func runDarkRestoreSupervisor(ctx context.Context, o darkRestoreSupervisorOption
 			if _, err = runtime.Refresh(renewal.Lease); err != nil {
 				return err
 			}
+			checkConnection()
 		}
 	}
+}
+
+func businessConnectionDigest(v mx.CustomerConnectionReceipt) string {
+	raw, _ := json.Marshal(v)
+	h := sha256.Sum256(raw)
+	return hex.EncodeToString(h[:])
 }

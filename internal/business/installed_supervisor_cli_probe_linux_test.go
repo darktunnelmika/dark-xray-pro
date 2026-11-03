@@ -23,11 +23,13 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
 
 	"github.com/darktunnelmika/dark-xray-pro/internal/agentidentity"
+	mx "github.com/darktunnelmika/dark-xray-pro/internal/managedxray"
 	"github.com/darktunnelmika/dark-xray-pro/internal/noderegistry"
 )
 
@@ -42,7 +44,15 @@ func TestInstalledSupervisorCLIProbe(t *testing.T) {
 	if err != nil || len(interfaces) != 1 || interfaces[0].Name != "lo" {
 		t.Fatal("isolated loopback namespace required")
 	}
-	plainTarget := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(204) }))
+	var verifierRequests atomic.Int64
+	plainTarget := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/dark-pro/protocol-health/v1/") {
+			verifierRequests.Add(1)
+			io.WriteString(w, "DARK-PRO-PROTOCOL-HEALTH-v1\n"+strings.TrimPrefix(r.URL.Path, "/dark-pro/protocol-health/v1/")+"\n")
+			return
+		}
+		w.WriteHeader(204)
+	}))
 	plainTarget.Listener.Close()
 	plainTarget.Listener, err = net.Listen("tcp4", "11.0.0.1:0")
 	if err != nil {
@@ -146,6 +156,11 @@ func TestInstalledSupervisorCLIProbe(t *testing.T) {
 	hub.Dir = "/"
 	hub.SysProcAttr = &syscall.SysProcAttr{Chroot: root, Credential: &syscall.Credential{Uid: uint32(uid), Gid: uint32(gid)}, Pdeathsig: syscall.SIGKILL}
 	hub.Env = []string{"DARK_PRO_LAB_MODE=1", "DARK_PRO_ENABLE_REMOTE_AGENT=1", "DARK_PRO_ENABLE_BUSINESS_CORE=1", "DARK_PRO_ENABLE_USAGE_LEDGER=1", "DARK_PRO_ENABLE_NATIVE_INBOUNDS=1", "DARK_PRO_ENABLE_CLIENT_OWNERSHIP_V1=1", "DARK_PRO_LAB_TOKEN=" + strings.Repeat("h", 32), "DARK_PRO_NATIVE_INBOUND_KEY_HEX=" + hex.EncodeToString(key)}
+	verifierCert := plainTarget.Certificate()
+	verifierHash := sha256.Sum256(verifierCert.Raw)
+	verifier := mx.ProtocolHealthEndpoint{Address: plainTarget.Listener.Addr().String(), ServerName: "example.com", CertificateSHA: hex.EncodeToString(verifierHash[:]), CABundle: pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: verifierCert.Raw})}
+	verifierRaw, _ := json.Marshal(verifier)
+	hub.Env = append(hub.Env, "DARK_PRO_ENABLE_IMPORTED_CONNECTION_CHECK=1", "DARK_PRO_IMPORTED_VERIFIER_JSON="+string(verifierRaw))
 	hub.Stdout = hubLog
 	hub.Stderr = hubLog
 	if err = hub.Start(); err != nil {
@@ -279,6 +294,30 @@ func TestInstalledSupervisorCLIProbe(t *testing.T) {
 	if !appliedReady {
 		t.Fatal("actual Agent listener apply receipt missing", base)
 	}
+	status, raw = request("/api/v1/workspace/dark-restore/handoff/quarantine/connection-check", map[string]any{"plan_sha256": approval.SHA, "event_id": "installed-customer-connection-0001", "acknowledge_usage": true})
+	if status != 200 {
+		t.Fatal("actual CLI connection queue", status, string(raw))
+	}
+	verified := false
+	deadline = time.Now().Add(15 * time.Second)
+	for time.Now().Before(deadline) {
+		req, _ := http.NewRequest("GET", origin+"/api/v1/workspace/dark-restore/handoff/quarantine/connection-check", nil)
+		req.AddCookie(cookie)
+		response, e := client.Do(req)
+		if e == nil {
+			var evidence DarkRestoreConnectionStatus
+			e = json.NewDecoder(response.Body).Decode(&evidence)
+			response.Body.Close()
+			if response.StatusCode == 200 && e == nil && evidence.ClientID == id && evidence.PlanSHA == approval.SHA && evidence.CustomerConnectionVerified && evidence.State == "verified" && !evidence.AuthorizesMutation && len(evidence.ReceiptSHA) == 64 {
+				verified = true
+				break
+			}
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if !verified || verifierRequests.Load() != 1 {
+		t.Fatal("actual CLI connection proof", verified, verifierRequests.Load(), base)
+	}
 	parsed, err := url.Parse(strings.TrimSpace(delivery.Content))
 	if err != nil {
 		t.Fatal(err)
@@ -356,6 +395,10 @@ func TestInstalledSupervisorCLIProbe(t *testing.T) {
 	if err = db.QueryRow("SELECT COUNT(*) FROM darkrestore_listener_apply_v1").Scan(&appliedCount); err != nil || appliedCount != 1 {
 		t.Fatal("actual CLI listener apply receipt", appliedCount, err)
 	}
+	var connectionCount int
+	if err = db.QueryRow("SELECT COUNT(*) FROM darkrestore_connection_v1_receipt").Scan(&connectionCount); err != nil || connectionCount != 1 || verifierRequests.Load() != 1 {
+		t.Fatal("actual CLI duplicate or missing connection proof", connectionCount, verifierRequests.Load(), err)
+	}
 	// Compare all representative financial values directly from the actual HUB database.
 	for _, before := range balances {
 		var volume, unlimited int64
@@ -363,5 +406,5 @@ func TestInstalledSupervisorCLIProbe(t *testing.T) {
 			t.Fatal("artifact wallet changed", err)
 		}
 	}
-	t.Logf("INSTALLED_CLI_SUPERVISOR_PASS native=%d historical=14 remaining=%d; actual HUB and Agent binaries, owner API, URI traffic, renewal and SIGTERM settlement", up+down, 999986-up-down)
+	t.Logf("INSTALLED_CLI_SUPERVISOR_PASS native=%d historical=14 remaining=%d; actual HUB and Agent binaries, owner API, one pinned customer connection receipt, URI traffic, renewal and SIGTERM settlement", up+down, 999986-up-down)
 }

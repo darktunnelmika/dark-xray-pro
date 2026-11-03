@@ -175,7 +175,7 @@ test("owner attaches a pinned signed handoff in Clients at 320px without a brows
  await page.route("**/api/v1/workspace/dark-restore/handoff/quarantine/admission/evidence",route=>{
   expect(route.request().method()).toBe("GET");
   return route.fulfill({json:{
-   scope:"darkrestore_native_admission_evidence_v1",
+   scope:"darkrestore_native_admission_evidence_v1",plan_sha256:"c".repeat(64),
    client_id:executionState==="foreign"?"another-client":"dr-"+sha.slice(0,20),
    initial_zero_receipt_recorded:true,listener_apply_recorded:executionState!=="pending",
    listener_apply_receipt_sha256:executionState==="pending"?undefined:"e".repeat(64),
@@ -189,6 +189,37 @@ test("owner attaches a pinned signed handoff in Clients at 320px without a brows
  await panel.getByRole("button",{name:"بررسی وضعیت اجرای سرویس"}).click();
  await expect(panel.getByLabel("وضعیت اجرای سرویس").getByText("رسید Agent ثبت شده",{exact:true})).toBeVisible();
  await expect(panel.getByText("فعال‌سازی مسدود است",{exact:true})).toBeVisible();
+ let connectionState="not_requested", connectionPosts=0;
+ await page.route("**/api/v1/workspace/dark-restore/handoff/quarantine/connection-check",route=>{
+  if(route.request().method()==="POST"){
+   connectionPosts++;
+   expect(route.request().postDataJSON()).toEqual({event_id:"connection-"+"c".repeat(64),plan_sha256:"c".repeat(64),acknowledge_usage:true});
+   connectionState="pending";
+  }
+  return route.fulfill({json:{enabled:true,scope:"darkrestore_customer_connection_v1",client_id:connectionState==="foreign"?"foreign-client":"dr-"+sha.slice(0,20),
+   plan_sha256:connectionState==="not_requested"?undefined:"c".repeat(64),id:connectionState==="not_requested"?undefined:"d".repeat(32),
+   state:connectionState,customer_connection_verified:connectionState==="verified",authorizes_mutation:false,
+   receipt_sha256:connectionState==="verified"?"e".repeat(64):undefined,completed_unix_nano:connectionState==="verified"?1700000000000000000:undefined}});
+ });
+ const connection=panel.getByLabel("آزمون اتصال کاربر",{exact:true});
+ await connection.getByRole("button",{name:"بررسی نتیجهٔ آزمون اتصال"}).click();
+ const run=connection.getByRole("button",{name:"اجرای یک‌بارهٔ آزمون اتصال"});
+ await expect(run).toBeDisabled();
+ expect(connectionPosts).toBe(0);
+ await connection.getByRole("checkbox").check();
+ await run.click();
+ await expect(connection.getByText("در انتظار Agent؛ درخواست ثبت شده است.")).toBeVisible();
+ await expect(run).toHaveCount(0);
+ expect(connectionPosts).toBe(1);
+ connectionState="verified";
+ await connection.getByRole("button",{name:"بررسی نتیجهٔ آزمون اتصال"}).click();
+ await expect(connection.getByText("رسید اتصال این کاربر تأیید و ثبت شد.")).toBeVisible();
+ await expect(panel.getByText("فعال‌سازی مسدود است",{exact:true})).toBeVisible();
+ connectionState="foreign";
+ await connection.getByRole("button",{name:"بررسی نتیجهٔ آزمون اتصال"}).click();
+ await expect(connection.getByRole("alert")).toBeVisible();
+ await expect(connection.getByText("رسید اتصال این کاربر تأیید و ثبت شد.")).toHaveCount(0);
+ expect(connectionPosts).toBe(1);
  executionState="foreign";
  await panel.getByRole("button",{name:"بررسی وضعیت اجرای سرویس"}).click();
  await expect(panel.getByLabel("وضعیت اجرای سرویس")).toHaveCount(0);

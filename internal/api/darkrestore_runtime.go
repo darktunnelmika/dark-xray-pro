@@ -16,6 +16,8 @@ func (s *Server) darkRestoreRuntimeAgent(w http.ResponseWriter, r *http.Request)
 		NodeID, InstallationID, PlanSHA, Phase string
 		Birth                                  *business.DarkRestoreQuarantineBirth
 		ListenerApply                          *business.DarkRestoreListenerApply
+		ConnectionState                        *mx.CustomerConnectionState
+		ConnectionReceipt                      *mx.CustomerConnectionReceipt
 	}
 	if decode(w, r, 16384, &req) != nil {
 		businessError(w, business.ErrInvalid)
@@ -23,6 +25,19 @@ func (s *Server) darkRestoreRuntimeAgent(w http.ResponseWriter, r *http.Request)
 	}
 	if _, ok := s.registry.Authenticate(req.NodeID, req.InstallationID, bearer(r)); !ok {
 		respond(w, 401, map[string]string{"error": "unauthorized"})
+		return
+	}
+	if req.Phase == "connection-result" {
+		if req.ConnectionReceipt == nil || req.Birth != nil || req.ListenerApply != nil || req.ConnectionState != nil {
+			businessError(w, business.ErrInvalid)
+			return
+		}
+		sha, err := s.business.RegisterDarkRestoreConnection(r.Context(), []byte(bearer(r)), req.NodeID, req.InstallationID, req.PlanSHA, *req.ConnectionReceipt)
+		if err != nil {
+			businessError(w, err)
+			return
+		}
+		respond(w, 200, map[string]string{"receipt_sha256": sha})
 		return
 	}
 	if req.Phase == "applied" {
@@ -61,6 +76,29 @@ func (s *Server) darkRestoreRuntimeAgent(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	switch req.Phase {
+	case "connection-poll":
+		if s.customerConnectionEndpoint == nil {
+			respond(w, 200, map[string]any{"work": false})
+			return
+		}
+		if req.ConnectionState == nil || req.ConnectionReceipt != nil || req.Birth != nil || req.ListenerApply != nil {
+			businessError(w, business.ErrInvalid)
+			return
+		}
+		if _, err := s.business.DarkRestoreAdmissionEpochForNode(r.Context(), s.inboundKey, req.NodeID, req.InstallationID, q.client, q.planSHA, true); err != nil {
+			businessError(w, err)
+			return
+		}
+		challenge, found, err := s.business.PollDarkRestoreConnection(r.Context(), s.inboundKey, []byte(bearer(r)), req.NodeID, req.InstallationID, req.PlanSHA, *req.ConnectionState, *s.customerConnectionEndpoint)
+		if err != nil {
+			businessError(w, err)
+			return
+		}
+		if !found {
+			respond(w, 200, map[string]any{"work": false})
+			return
+		}
+		respond(w, 200, map[string]any{"work": true, "challenge": challenge, "endpoint": *s.customerConnectionEndpoint})
 	case "prepare":
 		p, err := s.business.DarkRestoreQuarantinePlan(r.Context(), s.inboundKey, q.token, q.client)
 		if err != nil {

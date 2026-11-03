@@ -38,6 +38,7 @@ func(r *savedRevision)candidate()xrayconfig.Candidate{
  return xrayconfig.Candidate{NoListeners:r.NoListeners,Config:append([]byte(nil),r.Raw...),SHA256:r.SHA,ManifestSHA256:r.Manifest,Listeners:append([]xrayconfig.Listener(nil),r.Listeners...),RequiresXrayTest:true,RequiresDataPlaneProof:true,RequiresSubscriptionCommit:true}
 }
 type journal struct{
+ CustomerConnection *customerConnectionAttempt `json:"customer_connection,omitempty"`
  Admission *usageAdmission `json:"usage_admission,omitempty"`
  Usage *observedUsage `json:"usage,omitempty"`
  DesiredSHA string `json:"desired_sha"`;DesiredManifest string `json:"desired_manifest"`
@@ -81,7 +82,7 @@ func(d *disk)decode(raw []byte)(journal,error){
  if json.Unmarshal(plain,&j)!=nil||(j.Version!=1&&j.Version!=2&&j.Version!=3&&j.Version!=4&&j.Version!=5)||j.Good!=nil&&j.Good.Sequence>j.Highwater{return journal{},ErrCorrupt}
  if (j.Version==1&&(j.Usage!=nil||j.Admission!=nil))||(j.Version==2&&(j.Usage==nil||j.Admission!=nil))||((j.Version==3||j.Version==4||j.Version==5)&&!validPersistedAdmission(j)){return journal{},ErrCorrupt}
  if j.Usage!=nil{e,_,err:=uc.CanonicalEpoch(j.Usage.Epoch);if err!=nil||j.Good==nil||e.ConfigSHA!=j.Good.SHA{return journal{},ErrCorrupt};if _,err=uc.StatsArguments(j.Usage.StatsEndpoint);err!=nil{return journal{},ErrCorrupt}}
- return j,nil
+ if !validCustomerConnectionJournal(j){return journal{},ErrCorrupt};return j,nil
 }
 func(d *disk)save(j journal)error{
  raw,err:=json.Marshal(j);if err!=nil||len(raw)>20<<20{return ErrInvalid}

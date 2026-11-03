@@ -179,6 +179,48 @@ func (s *Server) attachDarkRestoreImport(mux *http.ServeMux) {
 			}
 			respond(w, 200, evidence)
 		})
+		for _, method := range []string{"GET", "POST"} {
+			handle(method+" "+restoreBase+"/handoff/quarantine/connection-check", method == "POST", func(w http.ResponseWriter, r *http.Request, token string) {
+				if s.customerConnectionEndpoint == nil {
+					respond(w, 200, map[string]any{"enabled": false})
+					return
+				}
+				verified, err := darkrestore.VerifySignedLocalHandoff(handoff.path, handoff.digest, handoff.public)
+				if err != nil {
+					businessError(w, business.ErrUnavailable)
+					return
+				}
+				proof, err := verified.Settlement()
+				if err != nil {
+					businessError(w, business.ErrUnavailable)
+					return
+				}
+				state, err := s.business.DarkRestoreCutoverReadinessV1(r.Context(), proof.SourceSHA, proof.SourceID)
+				if err != nil {
+					businessError(w, err)
+					return
+				}
+				var result business.DarkRestoreConnectionStatus
+				if r.Method != http.MethodPost {
+					result, err = s.business.DarkRestoreConnectionStatus(r.Context(), token, state.ClientID)
+				} else {
+					var input business.DarkRestoreConnectionInput
+					if decode(w, r, 2048, &input) != nil {
+						businessError(w, business.ErrInvalid)
+						return
+					}
+					result, err = s.business.QueueDarkRestoreConnection(r.Context(), s.inboundKey, token, state.ClientID, input, *s.customerConnectionEndpoint)
+				}
+				if err != nil {
+					businessError(w, err)
+					return
+				}
+				respond(w, 200, struct {
+					Enabled bool `json:"enabled"`
+					business.DarkRestoreConnectionStatus
+				}{true, result})
+			})
+		}
 		handle("POST "+restoreBase+"/handoff/quarantine/admission", true, func(w http.ResponseWriter, r *http.Request, token string) {
 			var input struct {
 				PlanSHA string `json:"plan_sha256"`

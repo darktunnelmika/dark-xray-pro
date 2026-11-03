@@ -15,6 +15,7 @@ import (
 	"errors"
 	"github.com/darktunnelmika/dark-xray-pro/internal/api"
 	"github.com/darktunnelmika/dark-xray-pro/internal/business"
+	mx "github.com/darktunnelmika/dark-xray-pro/internal/managedxray"
 	"github.com/darktunnelmika/dark-xray-pro/internal/noderegistry"
 	"github.com/darktunnelmika/dark-xray-pro/internal/telemetry"
 	"io"
@@ -37,7 +38,7 @@ func TestRealImportedAgentSupervisorTLS(t *testing.T) {
 	if os.Getenv("DARK_PRO_TEST_FINAL_TCP") != "1" {
 		t.Skip("requires isolated final TCP core")
 	}
-	for _, mode := range []string{"normal", "revoked", "authority-outage", "hub-restart", "full-outage", "lost-birth-reply", "lost-apply-reply", "apply-refused", "owner-logout"} {
+	for _, mode := range []string{"normal", "revoked", "authority-outage", "hub-restart", "full-outage", "lost-birth-reply", "lost-apply-reply", "apply-refused", "owner-logout", "connection", "connection-lost-reply", "connection-bad-nonce", "connection-bad-pin"} {
 		t.Run(mode, func(t *testing.T) { realImportedAgentSupervisorTLS(t, mode) })
 	}
 }
@@ -47,7 +48,20 @@ func realImportedAgentSupervisorTLS(t *testing.T, mode string) {
 		t.Fatal("real Agent worker and pinned core required")
 	}
 	ctx := context.Background()
-	target := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(204) }))
+	connectionMode := strings.HasPrefix(mode, "connection")
+	var verifierRequests atomic.Int64
+	target := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/dark-pro/protocol-health/v1/") {
+			verifierRequests.Add(1)
+			if mode == "connection-bad-nonce" {
+				io.WriteString(w, "foreign response")
+				return
+			}
+			io.WriteString(w, "DARK-PRO-PROTOCOL-HEALTH-v1\n"+strings.TrimPrefix(r.URL.Path, "/dark-pro/protocol-health/v1/")+"\n")
+			return
+		}
+		w.WriteHeader(204)
+	}))
 	target.Listener.Close()
 	listener, err := net.Listen("tcp4", "11.0.0.1:0")
 	if err != nil {
@@ -98,6 +112,17 @@ func realImportedAgentSupervisorTLS(t *testing.T, mode string) {
 			t.Fatal(err)
 		}
 	}
+	if connectionMode {
+		cert := target.Certificate()
+		h := sha256.Sum256(cert.Raw)
+		verifier := mx.ProtocolHealthEndpoint{Address: target.Listener.Addr().String(), ServerName: "example.com", CertificateSHA: hex.EncodeToString(h[:]), CABundle: pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: cert.Raw})}
+		if mode == "connection-bad-pin" {
+			verifier.CertificateSHA = strings.Repeat("f", 64)
+		}
+		if err = srv.EnableDarkRestoreCustomerConnectionChecks(verifier); err != nil {
+			t.Fatal(err)
+		}
+	}
 	browser := srv.BrowserHandler()
 	request := func(path string, body any, cookie *http.Cookie, csrf string) *httptest.ResponseRecorder {
 		raw, _ := json.Marshal(body)
@@ -134,6 +159,11 @@ func realImportedAgentSupervisorTLS(t *testing.T, mode string) {
 	var renewals atomic.Int64
 	var outage atomic.Bool
 	var fullOutage atomic.Bool
+	var connectionPosts atomic.Int64
+	var lostConnection atomic.Bool
+	if mode == "connection-lost-reply" {
+		lostConnection.Store(true)
+	}
 	var lostApply atomic.Bool
 	if mode == "lost-apply-reply" {
 		lostApply.Store(true)
@@ -158,6 +188,18 @@ func realImportedAgentSupervisorTLS(t *testing.T, mode string) {
 			r.Body = io.NopCloser(bytes.NewReader(raw))
 			var phase struct{ Phase string }
 			json.Unmarshal(raw, &phase)
+			if phase.Phase == "connection-result" {
+				connectionPosts.Add(1)
+			}
+			if phase.Phase == "connection-result" && lostConnection.Swap(false) {
+				recorder := httptest.NewRecorder()
+				active.Load().AgentHandler().ServeHTTP(recorder, r)
+				if recorder.Code != 200 {
+					t.Errorf("connection result never committed: %d %s", recorder.Code, recorder.Body.String())
+				}
+				w.WriteHeader(503)
+				return
+			}
 			if phase.Phase == "birth" && lostBirth.Swap(false) {
 				recorder := httptest.NewRecorder()
 				active.Load().AgentHandler().ServeHTTP(recorder, r)
@@ -193,7 +235,7 @@ func realImportedAgentSupervisorTLS(t *testing.T, mode string) {
 	digest := sha256.Sum256(cert.Raw)
 	command := exec.Command(worker, "-test.run=^TestDarkRestoreSupervisorPinnedTLS$", "-test.v")
 	command.Env = append(os.Environ(), "DARK_PRO_QUARANTINE_SUPERVISOR_TEST=1", "QUARANTINE_TEST_URL="+remote.URL, "QUARANTINE_TEST_TLS_PIN="+hex.EncodeToString(digest[:]), "QUARANTINE_TEST_CA="+string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: cert.Raw})), "QUARANTINE_TEST_KEY="+hex.EncodeToString(signer), "QUARANTINE_TEST_INSTALL="+install, "QUARANTINE_TEST_TOKEN="+token, "QUARANTINE_TEST_PLAN="+approval.SHA, "QUARANTINE_TEST_DIR="+filepath.Join(t.TempDir(), "runtime"))
-	if mode != "normal" && mode != "lost-birth-reply" && mode != "lost-apply-reply" && mode != "owner-logout" {
+	if !connectionMode && mode != "normal" && mode != "lost-birth-reply" && mode != "lost-apply-reply" && mode != "owner-logout" {
 		command.Env = append(command.Env, "QUARANTINE_TEST_EXPECT_STOP=1")
 	}
 	var output bytes.Buffer
@@ -342,6 +384,63 @@ func realImportedAgentSupervisorTLS(t *testing.T, mode string) {
 	if !applyRecorded {
 		t.Fatal("real Agent listener apply receipt missing")
 	}
+	if connectionMode {
+		input := map[string]any{"plan_sha256": approval.SHA, "event_id": "customer-connection-test-0001", "acknowledge_usage": false}
+		denied := request("/api/v1/workspace/dark-restore/handoff/quarantine/connection-check", input, cookie, session.CSRF)
+		if denied.Code != 422 {
+			t.Fatal("missing consent", denied.Code, denied.Body.String())
+		}
+		input["acknowledge_usage"] = true
+		queued := request("/api/v1/workspace/dark-restore/handoff/quarantine/connection-check", input, cookie, session.CSRF)
+		if queued.Code != 200 {
+			t.Fatal("connection queue", queued.Code, queued.Body.String())
+		}
+		replay := request("/api/v1/workspace/dark-restore/handoff/quarantine/connection-check", input, cookie, session.CSRF)
+		if replay.Code != 200 || !bytes.Equal(replay.Body.Bytes(), queued.Body.Bytes()) {
+			t.Fatal("intent replay", replay.Code)
+		}
+		verified := false
+		var lastStatus business.DarkRestoreConnectionStatus
+		checkDeadline := time.Now().Add(16 * time.Second)
+		for time.Now().Before(checkDeadline) {
+			get := httptest.NewRequest("GET", "https://pro.example/api/v1/workspace/dark-restore/handoff/quarantine/connection-check", nil)
+			get.AddCookie(cookie)
+			w := httptest.NewRecorder()
+			browser.ServeHTTP(w, get)
+			var status business.DarkRestoreConnectionStatus
+			if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &status) != nil {
+				t.Fatal("connection status", w.Code, w.Body.String())
+			}
+			lastStatus = status
+			if status.CustomerConnectionVerified {
+				if status.State != "verified" || status.PlanSHA != approval.SHA || status.ClientID != id || status.AuthorizesMutation || len(status.ReceiptSHA) != 64 {
+					t.Fatal("connection proof scope", w.Body.String())
+				}
+				verified = true
+				break
+			}
+			if status.State == "expired_unknown" {
+				break
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+		want := mode == "connection" || mode == "connection-lost-reply"
+		if verified != want {
+			t.Fatalf("connection receipt verified=%v want=%v; verifier=%d worker=%s", verified, want, verifierRequests.Load(), output.String())
+		}
+		if !want && lastStatus.State != "expired_unknown" {
+			t.Fatal("failed probe never reached an expired issued attempt", lastStatus)
+		}
+		if mode == "connection-bad-nonce" && verifierRequests.Load() != 1 {
+			t.Fatal("nonce failure was not exercised exactly once", verifierRequests.Load())
+		}
+		if mode == "connection-bad-pin" && verifierRequests.Load() != 0 {
+			t.Fatal("untrusted TLS pin reached verifier HTTP", verifierRequests.Load())
+		}
+		if want && verifierRequests.Load() != 1 {
+			t.Fatal("test traffic repeated", verifierRequests.Load())
+		}
+	}
 	if mode == "owner-logout" {
 		w := request("/api/v1/session/logout", map[string]any{}, cookie, session.CSRF)
 		if w.Code != 200 && w.Code != 204 {
@@ -375,7 +474,7 @@ func realImportedAgentSupervisorTLS(t *testing.T, mode string) {
 		t.Fatalf("Agent supervisor failed: %v %s", err, output.String())
 	}
 
-	if mode == "full-outage" {
+	if mode == "full-outage" || mode == "connection-lost-reply" {
 		fullOutage.Store(false)
 		for attempt := 0; attempt < 2; attempt++ {
 			recovery := exec.Command(worker, "-test.run=^TestDarkRestoreSupervisorPinnedTLS$", "-test.v")
@@ -389,6 +488,12 @@ func realImportedAgentSupervisorTLS(t *testing.T, mode string) {
 				t.Fatalf("saved final receipt recovery: %v %s", e, out)
 			}
 		}
+	}
+	if mode == "connection-lost-reply" && connectionPosts.Load() != 4 {
+		t.Fatal("lost acknowledgment and restart did not replay one saved proof", connectionPosts.Load())
+	}
+	if connectionMode && (mode == "connection" || mode == "connection-lost-reply") && verifierRequests.Load() != 1 {
+		t.Fatal("later polling repeated a connection", verifierRequests.Load())
 	}
 	account, err := store.ClientUsage(ctx, id)
 	if err != nil || account.Total < int64(len(payload)) || !account.RemainingNativeBudgetKnown || account.RemainingNativeBudgetBytes != 999986-account.Total {

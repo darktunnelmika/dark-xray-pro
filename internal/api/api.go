@@ -31,6 +31,7 @@ type Server struct {
 	inboundSecurity             *inboundsecurity.Service
 	inboundProbeJobs            inboundProbeQueue
 	healthEndpoint              *managedxray.ProtocolHealthEndpoint
+	customerConnectionEndpoint  *managedxray.ProtocolHealthEndpoint
 	healthRoundsEnabled         bool // startup-only; requires the pinned health transport
 	initialApplyHealthEnabled   bool // startup-only; one promoted first Apply, no handover authority
 	labSubscriptionsEnabled     bool // startup-only; bounded N17-backed consumer delivery

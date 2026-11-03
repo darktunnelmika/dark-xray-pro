@@ -1,4 +1,5 @@
 import { useState } from "react";
+import DarkRestoreConnectionCheck from "./DarkRestoreConnectionCheck";
 import { api, mutation } from "../session";
 import type { BusinessModel } from "./useBusinessWorkspace";
 import { restoreAPI } from "./DarkRestoreImport";
@@ -23,7 +24,7 @@ type Readiness = {
  activation_blockers:string[]; verification_blockers:string[];
 };
 type Execution = {
- scope:string;client_id:string;initial_zero_receipt_recorded:boolean;
+ scope:string;client_id:string;plan_sha256?:string;initial_zero_receipt_recorded:boolean;
  listener_apply_recorded:boolean;listener_apply_receipt_sha256?:string;
  native_apply_recorded:boolean;serving_health_recorded:boolean;authorizes_mutation:boolean;
 };
@@ -149,6 +150,7 @@ export default function DarkRestoreHandoff({model}:{model:BusinessModel}) {
       {execution.listener_apply_recorded?(fa?"رسید Agent ثبت شده":"Agent receipt recorded"):(fa?"در انتظار رسید Agent":"Waiting for Agent receipt")}
      </strong></p>
      <p>{fa?"سلامت اتصال هنوز تأیید نشده است. ثبت راه‌اندازی به‌تنهایی به معنی پایان مهاجرت نیست.":"Connection health is awaiting verification. A startup receipt does not complete migration."}</p>
+     {execution.listener_apply_recorded&&digest(execution.plan_sha256??"")&&<DarkRestoreConnectionCheck model={model} clientID={execution.client_id} planSHA={execution.plan_sha256!}/>}
     </div>}
     {executionError&&<p role="status">{fa?"رسید کامل و مطابق این کاربر در دسترس نیست؛ دوباره بررسی کن.":"A complete matching receipt is unavailable. Check again."}</p>}
    </div>}

@@ -358,6 +358,28 @@ func main() {
 	} else if os.Getenv("DARK_PRO_METERED_ROUTE_NODE_ID") != "" || os.Getenv("DARK_PRO_METERED_ROUTE_INSTALLATION_ID") != "" || os.Getenv("DARK_PRO_METERED_ROUTE_XRAY_SHA256") != "" || os.Getenv("DARK_PRO_METERED_ROUTE_NODES_JSON") != "" {
 		log.Fatal("metered route scope supplied without explicit opt-in")
 	}
+	connectionCheck := os.Getenv("DARK_PRO_ENABLE_IMPORTED_CONNECTION_CHECK")
+	if connectionCheck != "" && connectionCheck != "0" && connectionCheck != "1" {
+		log.Fatal("imported connection check switch must be 0 or 1")
+	}
+	if connectionCheck == "1" {
+		raw := os.Getenv("DARK_PRO_IMPORTED_VERIFIER_JSON")
+		if len(raw) > 100000 {
+			log.Fatal("imported verifier configuration too large")
+		}
+		var verifier managedxray.ProtocolHealthEndpoint
+		var extra any
+		decoder := json.NewDecoder(strings.NewReader(raw))
+		decoder.DisallowUnknownFields()
+		if decoder.Decode(&verifier) != nil || decoder.Decode(&extra) != io.EOF {
+			log.Fatal("invalid imported verifier configuration")
+		}
+		if err := service.EnableDarkRestoreCustomerConnectionChecks(verifier); err != nil {
+			log.Fatal("imported verifier refused: ", err)
+		}
+	} else if os.Getenv("DARK_PRO_IMPORTED_VERIFIER_JSON") != "" {
+		log.Fatal("imported verifier supplied without explicit enable switch")
+	}
 	initialHealth := os.Getenv("DARK_PRO_ENABLE_INITIAL_APPLY_HEALTH")
 	if initialHealth != "" && initialHealth != "0" && initialHealth != "1" {
 		log.Fatal("initial Apply health switch must be 0 or 1")

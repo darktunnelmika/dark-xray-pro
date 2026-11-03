@@ -86,6 +86,13 @@ func darkRestoreSchemaState(ctx context.Context, q sellerQueryV2) (bool, error) 
 	if servingPresent {
 		n -= len(darkRestoreServingHealthDDL)
 	}
+	connectionPresent, connectionErr := connectionSchema(ctx, q)
+	if connectionErr != nil {
+		return false, connectionErr
+	}
+	if connectionPresent {
+		n -= len(darkRestoreConnectionDDL)
+	}
 	baseCount := len(darkRestoreImportSchemaV1)
 	localCount := baseCount + len(darkRestoreLocalAttachmentSchemaV1)
 	cutoverCount := localCount + len(darkRestoreCutoverSchemaV1)
