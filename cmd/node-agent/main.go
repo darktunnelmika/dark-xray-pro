@@ -303,7 +303,7 @@ func main() {
 			log.Fatal("metered route executor refused private state: ", err)
 		}
 		defer transactionRuntime.Close()
-	} else if os.Getenv("DARK_PRO_ENABLE_FINAL_TCP") == "1" {
+	} else if os.Getenv("DARK_PRO_ENABLE_FINAL_TCP") == "1" && os.Getenv("DARK_PRO_ENABLE_DARKRESTORE_RUNTIME") != "1" {
 		log.Fatal("final TCP core flag requires the separate metered route executor")
 	}
 	if routeEnabled {

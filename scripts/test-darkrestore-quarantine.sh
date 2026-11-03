@@ -15,10 +15,14 @@ if test "${DARK_PRO_TEST_QUARANTINE_ADMISSION:-}" = 1; then
 fi
 task_output='quarantine.jsonl'
 task_count=1
-trap 'task_failure_status=$?; echo "quarantine acceptance failed at line $LINENO"; if test -f "$RUNNER_TEMP/$task_output"; then cat "$RUNNER_TEMP/$task_output"; fi; exit "$task_failure_status"' ERR
+trap 'task_failure_status=$?; echo "quarantine acceptance failed at line $LINENO"; if test -f "$RUNNER_TEMP/$task_output"; then cat "$RUNNER_TEMP/$task_output"; fi; if test -f "$RUNNER_TEMP/quarantine-cli.jsonl"; then cat "$RUNNER_TEMP/quarantine-cli.jsonl"; fi; exit "$task_failure_status"' ERR
 # Compile before entering a network that has no route to module proxies or DNS.
 go test -c ./internal/business -o "$RUNNER_TEMP/h7-api.test"
 go test -c ./cmd/node-agent -o "$RUNNER_TEMP/quarantine-worker.test"
+if test "${DARK_PRO_TEST_QUARANTINE_ADMISSION:-}" = 1; then
+  CGO_ENABLED=0 go build -trimpath -o "$RUNNER_TEMP/quarantine-hub" ./cmd/hub
+  CGO_ENABLED=0 go build -trimpath -o "$RUNNER_TEMP/quarantine-agent" ./cmd/node-agent
+fi
 task_ns="dark-pro-h7-${GITHUB_RUN_ID:?}-${GITHUB_RUN_ATTEMPT:?}"
 task_user="$(id -un)"
 created=0
@@ -60,3 +64,26 @@ assert not any(e.get("Action") in ("fail","skip") for e in events)
 for e in events:
  if e.get("Output"): print(e["Output"],end="")
 PYCHECK
+
+# Exercise the real CLI entry points, including their runtime flag guards.
+# Root only bootstraps a disposable chroot; HUB and Agent drop to nobody.
+if test "${DARK_PRO_TEST_QUARANTINE_ADMISSION:-}" = 1; then
+  sudo ip netns exec "$task_ns" env \
+    DARK_PRO_INSTALLED_SUPERVISOR_PROBE=1 \
+    DARK_PRO_TEST_HUB_BINARY="$RUNNER_TEMP/quarantine-hub" \
+    DARK_PRO_TEST_AGENT_BINARY="$RUNNER_TEMP/quarantine-agent" \
+    DARK_PRO_TEST_XRAY_BINARY="$DARK_PRO_TEST_XRAY_BINARY" \
+    DARK_PRO_TEST_XRAY_SHA256="$DARK_PRO_TEST_XRAY_SHA256" \
+    "$RUNNER_TEMP/h7-api.test" -test.run='^TestInstalledSupervisorCLIProbe$' \
+    -test.count=1 -test.timeout=90s -test.v 2>&1 \
+    | go tool test2json -t -p github.com/darktunnelmika/dark-xray-pro/internal/business \
+    > "$RUNNER_TEMP/quarantine-cli.jsonl"
+  python3 - "$RUNNER_TEMP/quarantine-cli.jsonl" <<'PYCHECK'
+import json,sys
+events=[json.loads(line) for line in open(sys.argv[1])]
+assert any(e.get("Test")=="TestInstalledSupervisorCLIProbe" and e.get("Action")=="pass" for e in events)
+assert not any(e.get("Action") in ("fail","skip") for e in events)
+for e in events:
+ if e.get("Output"): print(e["Output"],end="")
+PYCHECK
+fi

@@ -495,3 +495,18 @@ self-promotion to native apply. The complete non-race business package and
 backup-acceptance package pass on the isolated candidate. These local receipts
 say nothing about undeclared sources, real inventory completeness, source
 retirement or production-serving health.
+
+### Agent CLI startup regression acceptance
+
+The real Agent entry point had an older Final TCP guard that rejected the new
+exclusive Dark Restore supervisor before it started. The guard now permits the
+explicit Dark Restore runtime; existing runtime exclusivity checks still apply.
+
+The isolated CLI probe starts actual HUB and Agent executables, drops both to
+UID/GID 65534, uses a private HUB chroot and a loopback-only network namespace,
+then exercises owner login, prepared URI delivery, quarantine approval, Agent
+birth, owner admission, actual imported-URI traffic, lease renewal and SIGTERM
+settlement. It verifies a sealed epoch, native usage and unchanged representative
+credit. This synthetic binary acceptance is also required in the final-core CI
+quarantine script. It does not install the candidate on persistent LAB or close
+production migration acceptance.
