@@ -118,7 +118,8 @@ location / {{ return 403; }}
                           ("/api/v1/workspace/dark-restore/recent", {"GET", "HEAD"}),
                           ("/api/v1/workspace/dark-restore/handoff", {"GET", "HEAD"}),
                           ("/api/v1/workspace/dark-restore/handoff/readiness", {"GET", "HEAD"}),
-                          ("/api/v1/workspace/dark-restore/handoff/attach", {"POST"}))
+                          ("/api/v1/workspace/dark-restore/handoff/attach", {"POST"}),
+                          ("/api/v1/workspace/dark-restore/handoff/prepare", {"POST"}))
                 for path, allowed in routes:
                     check(path, allowed)
                     check(path + "/extra/unknown", set())
@@ -159,6 +160,7 @@ location / {{ return 403; }}
                 assert request(port, "/api/v1/workspace/clients/ownership/commit", "POST", b"x" * (65536 + 1)) == 413
                 assert len(Backend.seen) == before, "oversized ownership request reached backend"
                 before = len(Backend.seen)
+                assert request(port, "/api/v1/workspace/dark-restore/handoff/prepare", "POST", b"x" * 4097) == 413
                 assert request(port, "/api/v1/workspace/dark-restore/handoff/attach", "POST", b"x" * 4097) == 413
                 assert len(Backend.seen) == before, "oversized handoff request reached backend"
                 print("BUSINESS_MANAGEMENT_PROXY_PASS: exact routes, methods, IDs, Host, Dark Restore and private-route denial")

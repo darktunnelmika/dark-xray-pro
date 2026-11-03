@@ -18,6 +18,20 @@ import (
 
 func preparedCutoverFixture(t *testing.T) (ownershipFixture, DarkRestoreCutoverEvidenceReceiptV1, []byte, NativeInboundPlanInput) {
 	t.Helper()
+	return preparedCutoverWithFiles(t, nil)
+}
+
+type PreparedHandoffFiles struct{ Path, SHA, PublicPath, PublicSHA string }
+
+func BrowserPreparedFixture(t *testing.T) (*Store, string, []byte, PreparedHandoffFiles, string) {
+	t.Helper()
+	var files PreparedHandoffFiles
+	f, ev, key, _ := preparedCutoverWithFiles(t, &files)
+	return f.s, ev.ClientID, key, files, ownershipPassword
+}
+
+func preparedCutoverWithFiles(t *testing.T, files *PreparedHandoffFiles) (ownershipFixture, DarkRestoreCutoverEvidenceReceiptV1, []byte, NativeInboundPlanInput) {
+	t.Helper()
 	f := importSetup(t)
 	ctx := context.Background()
 	if err := f.s.EnableInboundExecution(ctx); err != nil {
@@ -40,7 +54,7 @@ func preparedCutoverFixture(t *testing.T) (ownershipFixture, DarkRestoreCutoverE
 	sha, source := intent.Review.SourceSHA256, intent.Review.Clients[0].SourceID
 	proof := darkrestore.LocalSourceSettlement{Scope: "single_local_source_epoch", SourceSHA: sha, SourceID: source, AuthoritySHA: strings.Repeat("b", 64), JournalSHA: strings.Repeat("c", 64),
 		Terminal: uc.Receipt{EpochID: strings.Repeat("d", 32), Sequence: 1, SHA: strings.Repeat("e", 64)}, PriorBytes: 7, Up: 3, Down: 4, Historical: 14, Remaining: 999986}
-	handoff, pin := businessSignedHandoff(t, proof)
+	handoff, pin := signFixtureHandoff(t, proof, files)
 	if _, err := f.s.AttachSignedLocalSettlementV1(ctx, f.owner.Token, handoff); err != nil {
 		t.Fatal(err)
 	}

@@ -23,6 +23,11 @@ import (
 
 func businessSignedHandoff(t *testing.T, proof darkrestore.LocalSourceSettlement) (darkrestore.VerifiedLocalHandoff, darkrestore.LocalHandoffSourcePinV1) {
 	t.Helper()
+	return signFixtureHandoff(t, proof, nil)
+}
+
+func signFixtureHandoff(t *testing.T, proof darkrestore.LocalSourceSettlement, files *PreparedHandoffFiles) (darkrestore.VerifiedLocalHandoff, darkrestore.LocalHandoffSourcePinV1) {
+	t.Helper()
 	public, private, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		t.Fatal(err)
@@ -52,6 +57,13 @@ func businessSignedHandoff(t *testing.T, proof darkrestore.LocalSourceSettlement
 	publicSum := sha256.Sum256(public)
 	filePin := hex.EncodeToString(fileSum[:])
 	publicPin := hex.EncodeToString(publicSum[:])
+	if files != nil {
+		pubPath := filepath.Join(dir, "handoff.pub")
+		if err := os.WriteFile(pubPath, public, 0600); err != nil {
+			t.Fatal(err)
+		}
+		*files = PreparedHandoffFiles{path, filePin, pubPath, publicPin}
+	}
 	verified, err := darkrestore.VerifySignedLocalHandoff(path, filePin, public)
 	if err != nil {
 		t.Fatal(err)
