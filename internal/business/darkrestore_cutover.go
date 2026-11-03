@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/darktunnelmika/dark-xray-pro/internal/darkrestore"
+	"github.com/darktunnelmika/dark-xray-pro/internal/usageledger"
 )
 
 type DarkRestoreCutoverEvidenceReceiptV1 struct {
@@ -421,6 +422,16 @@ func (s *Store) OpenDarkRestoreCutoverV1(ctx context.Context, token string, inve
 		id, inventoryPin, approvalSHA, authoritySHA, strconv.FormatInt(out.SettledHistoricalBytes, 10), opened, raw, out.CreatedUnix); err != nil {
 		return zero, err
 	}
+	bindingSHA, e := cutoverHistoricalBudgetSHA(out)
+	if e != nil {
+		return zero, e
+	}
+	if s.usage == nil {
+		return zero, ErrUnavailable
+	}
+	if e = s.usage.ReserveHistoricalBudgetTx(ctx, tx, usageledger.HistoricalBudget{ClientID: id, HistoricalBytes: out.SettledHistoricalBytes, ReceiptSHA: bindingSHA}); e != nil {
+		return zero, e
+	}
 	result, e := tx.ExecContext(ctx, `UPDATE pro_usage_accounts SET baseline_complete=1 WHERE client_id=? AND baseline_complete=0 AND uplink=? AND downlink=? AND holds=0`, id, *beforeSnapshot.NativeUplink, *beforeSnapshot.NativeDownlink)
 	if e != nil {
 		return zero, e
@@ -532,6 +543,10 @@ func cutoverSnapshotMatchesEvidence(ctx context.Context, q sellerQueryV2, eviden
 	if evidence == nil || len(evidence.NativeDocument) == 0 {
 		return zero, 0, ErrDarkRestoreCutover
 	}
+	if err := verifyCutoverHistoricalBudget(ctx, q, evidence); err != nil {
+		return zero, 0, err
+	}
+
 	snapshot, err := readDarkRestoreCutoverSnapshotV1(ctx, q, evidence.SourceSHA256, evidence.SourceID)
 	if err != nil {
 		return zero, 0, err
@@ -651,6 +666,15 @@ func validateDarkRestoreCutovers(ctx context.Context, tx *sql.Tx) error {
 		if e != nil || !localAttachmentCoveredByInventory(attachment, evidence.Inventory) {
 			return ErrUnavailable
 		}
+		enabled, budgetErr := usageledger.HistoricalBudgetsEnabled(ctx, tx)
+		if budgetErr != nil {
+			return ErrUnavailable
+		}
+		if enabled && len(evidence.NativeDocument) > 0 {
+			if verifyCutoverHistoricalBudget(ctx, tx, evidence) != nil {
+				return ErrUnavailable
+			}
+		}
 		if deployment == "disabled" && len(evidence.NativeDocument) > 0 {
 			if _, _, e = cutoverSnapshotMatchesEvidence(ctx, tx, evidence); e != nil {
 				return ErrUnavailable
@@ -690,6 +714,25 @@ func validateDarkRestoreCutovers(ctx context.Context, tx *sql.Tx) error {
 	var invalid int
 	if err = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM darkrestore_import_entries_v1 e JOIN clients c ON c.id=e.client_id LEFT JOIN darkrestore_cutover_receipts_v1 r ON r.client_id=e.client_id WHERE c.deployment_state!='disabled' AND r.client_id IS NULL`).Scan(&invalid); err != nil || invalid != 0 {
 		return ErrUnavailable
+	}
+	return nil
+}
+
+func cutoverHistoricalBudgetSHA(evidence DarkRestoreCutoverEvidenceReceiptV1) (string, error) {
+	evidence.Replayed = false
+	return cutoverSnapshotDigest("DARK-PRO-CUTOVER-HISTORICAL-BUDGET-v1", evidence)
+}
+func verifyCutoverHistoricalBudget(ctx context.Context, q sellerQueryV2, evidence *DarkRestoreCutoverEvidenceReceiptV1) error {
+	if evidence == nil {
+		return ErrDarkRestoreCutover
+	}
+	reservation, err := usageledger.ReadHistoricalBudget(ctx, q, evidence.ClientID)
+	if err != nil {
+		return ErrDarkRestoreCutover
+	}
+	binding, err := cutoverHistoricalBudgetSHA(*evidence)
+	if err != nil || reservation.HistoricalBytes != evidence.SettledHistoricalBytes || reservation.ReceiptSHA != binding {
+		return ErrDarkRestoreCutover
 	}
 	return nil
 }

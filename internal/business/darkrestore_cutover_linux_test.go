@@ -176,6 +176,10 @@ func TestDarkRestoreM5ControlledSubscriptionCutover(t *testing.T) {
 	if _, err = f.s.MutateLabSubscription(ctx, f.key, "owner", clientID, mutation); !errors.Is(err, ErrDarkRestoreCutover) {
 		t.Fatal("subscription escaped quarantine before M5 evidence", err)
 	}
+	var predecessorView string
+	if err = f.s.db.QueryRow(`SELECT sql FROM sqlite_master WHERE name='pro_usage_eligibility'`).Scan(&predecessorView); err != nil {
+		t.Fatal(err)
+	}
 	if err = f.s.EnableDarkRestoreCutoverV1(ctx, owner.Token); err != nil {
 		t.Fatal(err)
 	}
@@ -273,6 +277,10 @@ func TestDarkRestoreM5ControlledSubscriptionCutover(t *testing.T) {
 	if err != nil || afterFailure.NativeBaselineComplete || afterFailure.StateSHA != beforeNative.StateSHA {
 		t.Fatal("failed transaction changed baseline", err)
 	}
+	var reservationCount int
+	if err = f.s.db.QueryRow(`SELECT COUNT(*) FROM pro_usage_historical_budgets`).Scan(&reservationCount); err != nil || reservationCount != 0 {
+		t.Fatal("partial budget reservation survived rollback", err)
+	}
 	if _, err = f.s.db.Exec(`DROP TRIGGER synthetic_m5_baseline_failure`); err != nil {
 		t.Fatal(err)
 	}
@@ -287,6 +295,11 @@ func TestDarkRestoreM5ControlledSubscriptionCutover(t *testing.T) {
 		evidence.NativeBaselineSHA != baselineSnapshot.NativeBaselineSHA ||
 		evidence.ImportReceiptSHA != baselineSnapshot.ImportReceiptSHA {
 		t.Fatal("M5 evidence boundary failed", evidence, err)
+	}
+	changedBudgetEvidence := evidence
+	changedBudgetEvidence.SettledHistoricalBytes++
+	if err = verifyCutoverHistoricalBudget(ctx, f.s.db, &changedBudgetEvidence); !errors.Is(err, ErrDarkRestoreCutover) {
+		t.Fatal("budget reservation accepted foreign receipt history", err)
 	}
 	replay, err := f.s.OpenDarkRestoreCutoverV1(
 		ctx, owner.Token, inventory, inventoryPin,
@@ -343,8 +356,12 @@ func TestDarkRestoreM5ControlledSubscriptionCutover(t *testing.T) {
 	if err != nil || enabled.DeploymentState != "pending_node_apply" {
 		t.Fatal("accepted cutover remained blocked", enabled, err)
 	}
+	account, err := f.s.ClientUsage(ctx, clientID)
+	if err != nil || account.ReservedHistoricalBytes != 14 || account.Total != 0 || account.Limit != 1000000 || !account.RemainingNativeBudgetKnown || account.RemainingNativeBudgetBytes != 999986 {
+		t.Fatal("actual native budget ignored settled history", account, err)
+	}
 	readiness, err := f.s.DarkRestoreCutoverReadinessV1(ctx, inventory.SourceSHA, inventory.SourceID)
-	if err != nil || !readiness.DeclaredInventoryCoverageVerified ||
+	if err != nil || !readiness.SettledHistoryBudgetReserved || !readiness.DeclaredInventoryCoverageVerified ||
 		!readiness.IndependentCoverageAssertionVerified ||
 		readiness.GlobalSourceCustodyVerified ||
 		!readiness.NativeBaselineComplete || !readiness.SubscriptionDelivered ||
@@ -403,6 +420,43 @@ func TestDarkRestoreM5ControlledSubscriptionCutover(t *testing.T) {
 	}
 	if _, _, err = cutoverSnapshotMatchesEvidence(ctx, reopened.db, &legacyDecoded); !errors.Is(err, ErrDarkRestoreCutover) {
 		t.Fatal("legacy receipt authorized a mutation", err)
+	}
+	// Simulate a predecessor schema only inside this disposable fixture. A serving
+	// startup must refuse it, while the immutable M5 financial evidence is retained.
+	var historicalReceipt []byte
+	if err = reopened.db.QueryRow(`SELECT receipt_json FROM darkrestore_cutover_evidence_v1 WHERE client_id=?`, clientID).Scan(&historicalReceipt); err != nil {
+		t.Fatal(err)
+	}
+	tx, err := reopened.db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, ddl := range []string{`DROP VIEW pro_usage_eligibility`, `DROP TABLE pro_usage_historical_budgets`, predecessorView} {
+		if _, err = tx.ExecContext(ctx, ddl); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err = tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	if err = reopened.EnableDarkRestoreCutoverV1(ctx, owner.Token); !errors.Is(err, ErrConflict) {
+		t.Fatal("predecessor evidence was silently migrated", err)
+	}
+	var unchangedReceipt []byte
+	if err = reopened.db.QueryRow(`SELECT receipt_json FROM darkrestore_cutover_evidence_v1 WHERE client_id=?`, clientID).Scan(&unchangedReceipt); err != nil || !reflect.DeepEqual(historicalReceipt, unchangedReceipt) {
+		t.Fatal("refused upgrade changed history", err)
+	}
+	if err = validateDarkRestoreImportData(ctx, reopened.db); err != nil {
+		t.Fatal("historical evidence was lost", err)
+	}
+	if err = reopened.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if unsafe, e := Open(f.path); !errors.Is(e, ErrUnavailable) {
+		if unsafe != nil {
+			unsafe.Close()
+		}
+		t.Fatal("active predecessor reopened without historical budget enforcement", e)
 	}
 
 }

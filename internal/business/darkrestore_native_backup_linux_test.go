@@ -87,6 +87,10 @@ func TestDarkRestoreNativeAttestationOfflineBackupAndRecovery(t *testing.T) {
 	if !reflect.DeepEqual(balances, ownershipBalances(t, reopened)) {
 		t.Fatal("recovery changed representative balances")
 	}
+	restoredAccount, err := reopened.ClientUsage(ctx, evidence.ClientID)
+	if err != nil || restoredAccount.ReservedHistoricalBytes != 14 || restoredAccount.Total != 0 || !restoredAccount.RemainingNativeBudgetKnown || restoredAccount.RemainingNativeBudgetBytes != 999986 {
+		t.Fatal("backup lost enforced native budget", restoredAccount, err)
+	}
 	readiness, err := reopened.DarkRestoreCutoverReadinessV1(ctx, sha, source)
 	if err != nil || readiness.ActivationAllowed || readiness.SubscriptionDelivered || !readiness.NativeBaselineComplete {
 		t.Fatal("backup/reopen fabricated delivery", readiness, err)

@@ -31,17 +31,20 @@ type Seed struct {
 	Reason   string `json:"reason"`
 }
 type Account struct {
-	ClientID         string `json:"client_id"`
-	RepresentativeID string `json:"representative_id"`
-	Uplink           int64  `json:"uplink_bytes,string"`
-	Downlink         int64  `json:"downlink_bytes,string"`
-	Total            int64  `json:"total_bytes,string"`
-	Limit            int64  `json:"limit_bytes,string"`
-	Plan             string `json:"plan_kind"`
-	Known            bool   `json:"known"`
-	Holds            int64  `json:"reconciliation_holds"`
-	Exhausted        bool   `json:"exhausted"`
-	Eligible         bool   `json:"eligible"`
+	ReservedHistoricalBytes    int64  `json:"reserved_historical_bytes,string"`
+	RemainingNativeBudgetBytes int64  `json:"-"`
+	RemainingNativeBudgetKnown bool   `json:"-"`
+	ClientID                   string `json:"client_id"`
+	RepresentativeID           string `json:"representative_id"`
+	Uplink                     int64  `json:"uplink_bytes,string"`
+	Downlink                   int64  `json:"downlink_bytes,string"`
+	Total                      int64  `json:"total_bytes,string"`
+	Limit                      int64  `json:"limit_bytes,string"`
+	Plan                       string `json:"plan_kind"`
+	Known                      bool   `json:"known"`
+	Holds                      int64  `json:"reconciliation_holds"`
+	Exhausted                  bool   `json:"exhausted"`
+	Eligible                   bool   `json:"eligible"`
 }
 
 func validReason(reason string) bool {
@@ -414,8 +417,24 @@ func (l *Ledger) MarkEpochUncertain(ctx context.Context, principal Principal, ep
 func (l *Ledger) Account(ctx context.Context, clientID string) (Account, error) {
 	var a Account
 	var complete, allowed int
-	err := l.read(ctx, func(c *ledgerConn) error {
-		return c.QueryRowContext(ctx, `SELECT a.client_id,c.representative_id,a.uplink,a.downlink,a.baseline_complete,a.holds,c.plan_kind,c.volume_bytes,v.eligible FROM pro_usage_accounts a JOIN clients c ON c.id=a.client_id JOIN pro_usage_eligibility v ON v.client_id=a.client_id WHERE a.client_id=?`, clientID).Scan(&a.ClientID, &a.RepresentativeID, &a.Uplink, &a.Downlink, &complete, &a.Holds, &a.Plan, &a.Limit, &allowed)
+	err := l.readSnapshot(ctx, func(c *ledgerConn) error {
+		if err := c.QueryRowContext(ctx, `SELECT a.client_id,c.representative_id,a.uplink,a.downlink,a.baseline_complete,a.holds,c.plan_kind,c.volume_bytes,v.eligible FROM pro_usage_accounts a JOIN clients c ON c.id=a.client_id JOIN pro_usage_eligibility v ON v.client_id=a.client_id WHERE a.client_id=?`, clientID).Scan(&a.ClientID, &a.RepresentativeID, &a.Uplink, &a.Downlink, &complete, &a.Holds, &a.Plan, &a.Limit, &allowed); err != nil {
+			return err
+		}
+		present, err := historicalBudgetsPresent(ctx, c)
+		if err != nil {
+			return err
+		}
+		if present {
+			b, err := ReadHistoricalBudget(ctx, c, clientID)
+			if err != nil && !errors.Is(err, sql.ErrNoRows) {
+				return err
+			}
+			if err == nil {
+				a.ReservedHistoricalBytes = b.HistoricalBytes
+			}
+		}
+		return nil
 	})
 	if errors.Is(err, sql.ErrNoRows) {
 		return a, ErrMissing
@@ -429,6 +448,15 @@ func (l *Ledger) Account(ctx context.Context, clientID string) (Account, error) 
 	}
 	a.Known = complete == 1 && a.Holds == 0
 	a.Eligible = allowed == 1
-	a.Exhausted = a.Plan == "volume" && a.Total >= a.Limit
+	available := a.Limit - a.ReservedHistoricalBytes
+	a.Exhausted = a.Plan == "volume" && a.Total >= available
+	if a.Known && a.Plan == "volume" {
+		remaining := int64(0)
+		if available > 0 && a.Total < available {
+			remaining = available - a.Total
+		}
+		a.RemainingNativeBudgetBytes = remaining
+		a.RemainingNativeBudgetKnown = true
+	}
 	return a, nil
 }

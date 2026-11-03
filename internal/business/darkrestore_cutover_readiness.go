@@ -10,6 +10,7 @@ import (
 )
 
 type DarkRestoreCutoverReadinessV1 struct {
+	SettledHistoryBudgetReserved         bool     `json:"settled_history_budget_reserved"`
 	ClientID                             string   `json:"client_id"`
 	SourceSHA256                         string   `json:"source_sha256"`
 	SourceID                             string   `json:"source_id"`
@@ -95,6 +96,7 @@ func (s *Store) DarkRestoreCutoverReadinessV1(ctx context.Context, sourceSHA, so
 		return out, err
 	}
 	if evidence != nil {
+		out.SettledHistoryBudgetReserved = verifyCutoverHistoricalBudget(ctx, s.db, evidence) == nil
 		if len(evidence.NativeDocument) == 0 {
 			out.NativeBaselineComplete = false
 		}
@@ -137,6 +139,9 @@ func (s *Store) DarkRestoreCutoverReadinessV1(ctx context.Context, sourceSHA, so
 	}
 	if !out.IndependentCoverageAssertionVerified {
 		out.ActivationBlockers = append(out.ActivationBlockers, "independent_coverage_assertion_not_verified")
+	}
+	if evidence != nil && !out.SettledHistoryBudgetReserved {
+		out.ActivationBlockers = append(out.ActivationBlockers, "settled_history_budget_not_reserved")
 	}
 	if out.ClientArchived {
 		out.ActivationBlockers = append(out.ActivationBlockers, "client_archived")

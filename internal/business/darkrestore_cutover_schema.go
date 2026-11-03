@@ -3,6 +3,7 @@ package business
 import (
 	"context"
 	"database/sql"
+	"github.com/darktunnelmika/dark-xray-pro/internal/usageledger"
 	"strings"
 )
 
@@ -90,7 +91,26 @@ func (s *Store) EnableDarkRestoreCutoverV1(ctx context.Context, token string) er
 	if err != nil || !present {
 		return ErrUnavailable
 	}
+	if s.usage == nil {
+		return ErrUnavailable
+	}
 	if err = ensureDarkRestoreCutoverSchema(ctx, tx); err != nil {
+		return err
+	}
+	enabled, e := usageledger.HistoricalBudgetsEnabled(ctx, tx)
+	if e != nil {
+		return e
+	}
+	if !enabled {
+		var oldEvidence int
+		if e = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM darkrestore_cutover_evidence_v1`).Scan(&oldEvidence); e != nil {
+			return e
+		}
+		if oldEvidence != 0 {
+			return ErrConflict
+		}
+	}
+	if err = s.usage.EnableHistoricalBudgetsTx(ctx, tx); err != nil {
 		return err
 	}
 	return tx.Commit()

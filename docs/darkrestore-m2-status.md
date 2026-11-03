@@ -373,3 +373,24 @@ Final local candidate checks passed on the unchanged Go source: darkrestore
 5.544s, complete business 204.018s and backupacceptance 2.819s, plus vet for
 business/darkrestore and diff checks. Local race is not claimed; CI is the race
 authority. Publication, CI, installation and installed acceptance are separate.
+
+
+## Native eligibility budget enforcement (isolated source checkpoint)
+
+An optional exact-DDL native-ledger extension reserves settled source history
+against current entitlement while preserving separate native counters and wallet
+history. M5 opt-in enables it and opening commits its immutable receipt binding
+with the signed native proof and baseline flag. Actual native eligibility now
+closes at the remaining budget; quota renewal does not charge history twice.
+The real ledger boundary fixture and supported v16 backup/reopen fixture pass.
+Predecessor M5 datasets with evidence but no reservation require a separate
+reviewed migration; this change refuses to fabricate/backfill their history.
+This is source/test work, not Merge, installed acceptance or production evidence.
+
+Final exact-source local checks passed: usageledger 15.708s, darkrestore 5.204s,
+complete business 251.351s and backupacceptance 2.978s, plus vet and diff checks.
+An initial full run found pointer-identity inequality in an existing financial
+rollback assertion; Account now keeps value equality while representing unknown
+remaining budget accurately in JSON. The original assertion was not weakened.
+Synthetic delivery-journal insertion remains a model test, not real prepared
+subscription rendering or installed delivery acceptance; that integration is next.

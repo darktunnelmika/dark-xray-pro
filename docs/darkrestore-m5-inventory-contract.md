@@ -181,3 +181,57 @@ signing authority and creates no assertion about currently unknown data. New
 unlimited pricing remains months times users; unknown legacy entitlement remains
 blocked. Post-opening state drift currently closes V1; a future controlled refresh
 must preserve all prior receipts and financial history rather than replacing them.
+
+
+## Enforced native budget reservation
+
+The explicit M5 schema opt-in also enables the exact-DDL optional usage-ledger
+historical-budget extension. One immutable per-client reservation binds settled
+historical bytes to the complete canonical M5 evidence receipt. Opening records
+that reservation, the native receipt and the baseline flag in the same write
+transaction. Any failure rolls back all three. The reservation never alters
+native counters or representative credit. No generation is changed merely for a
+quarantined client's reservation; the ordinary activation path changes runtime
+generation.
+
+Actual `pro_usage_eligibility` now compares measured native consumption against
+`current entitlement - reserved settled history`. It therefore closes at the
+remaining budget rather than granting historical bytes a second time. Arithmetic
+uses subtraction before comparison, avoiding addition overflow. Native overshoot
+is retained. Renewals raise current entitlement once and retain the same immutable
+historical reservation. Native unlimited clients without reservations retain their
+existing behavior; adding a reservation to unlimited entitlement is refused.
+
+`Account.Total` remains native consumption and `Account.Limit` remains current
+entitlement. Separate reserved-history and remaining-native-budget fields expose
+the distinction; remaining is absent for unknown/held accounts or unlimited plans.
+All account/budget reads use one WAL snapshot. Exact DDL verification detects a
+missing immutable trigger, partial feature or altered eligibility view at startup
+and official offline validation. Old binaries reject the extra feature objects
+rather than silently ignoring the reservation.
+
+M5 guards and readiness require the exact reservation/receipt binding. Offline
+validation checks it whenever this extension is enabled. Upgrading a predecessor
+M5 database that already has evidence but no reservations is refused transactionally;
+its history is not backfilled or rewritten by guessing. No such rows exist on the
+last observed installed LAB. A separate evidence-preserving forward migration
+would be required for such an older opted-in dataset.
+
+Tests use a real native ledger: 700 settled bytes against 1000 entitlement leave
+300 native bytes; 299 stays eligible and 300 closes eligibility. Renewal to 1200
+leaves 200 after that native consumption. Replay/reopen retain the reservation and
+native counters; invalid/unlimited reservations, changed receipt bindings, schema
+tampering and transaction rollback fail closed. The v16 backup fixture preserves
+the enforced 14/0/999986 historical/native/remaining split without issuing delivery.
+
+Serving startup is stricter than historical export: an active imported identity
+without a valid native attestation and historical-budget reservation is refused.
+A synthetic predecessor-schema test verifies that upgrade refusal preserves the
+original receipt bytes and that runtime startup stays closed. No reservation or
+financial history is backfilled from absent data.
+
+Account remains value-comparable for financial rollback snapshots. Optional
+remaining budget uses a value plus known bit internally, with exact string JSON
+when known and an absent field when unknown. This preserves financial before/after
+checks without comparing pointer addresses. Round-trip tests include measured
+zero and values beyond JavaScript's exact integer range.
