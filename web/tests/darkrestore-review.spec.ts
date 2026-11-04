@@ -297,6 +297,9 @@ test("owner attaches a pinned signed handoff in Clients at 320px without a brows
   {...progress,initial_apply_subscription_delivered:false},
   {...progress,native_activation_authorized:false},
   {...progress,native_apply_recorded:undefined},
+  {...progress,subscription_delivery_scope:"unrecognized_delivery_scope"},
+  {...progress,subscription_delivery_scope:"lab_single_handover"},
+  {...progress,subscription_delivered:false},
   {...progress,source_scope:"unrecognized_source"},
   {...progress,client_id:"foreign-client"},
  ]) {

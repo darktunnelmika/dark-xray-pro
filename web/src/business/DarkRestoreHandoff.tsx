@@ -120,6 +120,8 @@ export default function DarkRestoreHandoff({model}:{model:BusinessModel}) {
       lists.some(v=>!Array.isArray(v)||v.some(x=>typeof x!=="string"||!/^[a-z0-9_]+$/.test(x)))||
       result.initial_apply_subscription_delivered&&!result.native_apply_recorded||
       result.native_activation_authorized&&!result.initial_apply_subscription_delivered||
+      result.subscription_delivery_scope!==undefined&&!["lab_single_handover","darkrestore_prepared_not_applied_v1"].includes(result.subscription_delivery_scope)||
+      result.native_apply_recorded&&(result.subscription_delivery_scope!=="darkrestore_prepared_not_applied_v1"||!result.subscription_delivered)||
       result.subscription_delivery_scope==="darkrestore_prepared_not_applied_v1"&&result.activation_allowed&&!result.native_activation_authorized||
       result.cutover_verified&&(!result.activation_allowed||!result.native_baseline_complete||!result.subscription_delivered))
     throw Error("invalid readiness");
