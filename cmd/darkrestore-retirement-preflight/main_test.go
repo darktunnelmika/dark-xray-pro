@@ -141,4 +141,58 @@ func TestRetirementPreflightCLIReadsCompletePinnedManifest(t *testing.T) {
 	if code := run(nil, &bytes.Buffer{}, &bytes.Buffer{}); code != 2 {
 		t.Fatal("missing inputs accepted", code)
 	}
+
+	manifestReport, err := darkrestore.VerifySourceRetirementManifestFileV1(manifestPath, manifestSHA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	approvalPublic, approvalPrivate, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	approval := darkrestore.HandoffCoverageApprovalV1{
+		Version: 1, InventorySHA: inventorySHA, SourceSHA: sourceSHA, SourceID: inventory.SourceID,
+		Scope: darkrestore.HandoffCoverageScopeV1, Statement: darkrestore.HandoffCoverageStatementV1,
+		DeclaredSources: 1, EpochIDs: []string{epoch},
+		InventoryCompleteAsserted: true, DeclaredSourcesRetired: true,
+		RetirementBundleSHA: manifestReport.Coverage.BundleSHA, ApprovedUnixNano: 12_001,
+		DestinationSHA: destinationSHA, DestinationStateSHA: strings.Repeat("2", 64),
+		NativeBaselineSHA: strings.Repeat("3", 64), ImportReceiptSHA: strings.Repeat("4", 64),
+		BillingAttributionSHA: strings.Repeat("5", 64), BillingAttribution: "disjoint_source_epoch_deltas",
+	}
+	approvalValue, err := json.Marshal(approval)
+	if err != nil {
+		t.Fatal(err)
+	}
+	approvalMessage := append([]byte("DARK-PRO-DARKRESTORE-HANDOFF-COVERAGE-v1\x00"), approvalValue...)
+	approvalRaw, err := json.Marshal(darkrestore.SignedHandoffCoverageApprovalV1{
+		Version: 1, Approval: approval, Signature: ed25519.Sign(approvalPrivate, approvalMessage),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	approvalRaw = append(approvalRaw, '\n')
+	approvalPath := write("coverage-approval.json", approvalRaw)
+	approvalPublicPath := write("coverage-approval.pub", approvalPublic)
+	approvalArgs := append(append([]string(nil), args...),
+		"-coverage-approval", approvalPath,
+		"-coverage-approval-sha256", preflightDigest(approvalRaw),
+		"-coverage-approval-public-key", approvalPublicPath,
+		"-coverage-approval-public-key-sha256", preflightDigest(approvalPublic),
+	)
+	stdout.Reset()
+	stderr.Reset()
+	if code := run(approvalArgs, &stdout, &stderr); code != 0 || stderr.Len() != 0 {
+		t.Fatal("approval preflight CLI failed", code, stderr.String())
+	}
+	var approvalReport darkrestore.SourceRetirementApprovalReportV1
+	if json.Unmarshal(stdout.Bytes(), &approvalReport) != nil || approvalReport.AuthorizesActivation ||
+		approvalReport.CoverageApprovalSHA != preflightDigest(approvalRaw) ||
+		approvalReport.Manifest.Coverage.BundleSHA != manifestReport.Coverage.BundleSHA {
+		t.Fatal("approval preflight report changed authority", stdout.String())
+	}
+	partialArgs := append(append([]string(nil), args...), "-coverage-approval", approvalPath)
+	if code := run(partialArgs, &bytes.Buffer{}, &bytes.Buffer{}); code != 2 {
+		t.Fatal("partial approval inputs accepted", code)
+	}
 }

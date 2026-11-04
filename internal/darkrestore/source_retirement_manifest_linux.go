@@ -40,31 +40,37 @@ type SourceRetirementManifestReportV1 struct {
 // independently pinned manifest and verifies every referenced source/witness
 // file. It is a read-only preflight and never manufactures pins or authority.
 func VerifySourceRetirementManifestFileV1(path, manifestSHA string) (SourceRetirementManifestReportV1, error) {
+	_, report, err := loadSourceRetirementManifestFileV1(path, manifestSHA)
+	return report, err
+}
+
+func loadSourceRetirementManifestFileV1(path, manifestSHA string) (SourceRetirementManifestV1, SourceRetirementManifestReportV1, error) {
+	var manifestZero SourceRetirementManifestV1
 	var zero SourceRetirementManifestReportV1
 	if !inventoryDigestValid(manifestSHA) {
-		return zero, ErrHandoffInventory
+		return manifestZero, zero, ErrHandoffInventory
 	}
 	raw, err := privateHandoffBytes(path, 256<<10)
 	if err != nil || !bytes.HasSuffix(raw, []byte("\n")) {
-		return zero, ErrHandoffInventory
+		return manifestZero, zero, ErrHandoffInventory
 	}
 	sum := sha256.Sum256(raw)
 	if hex.EncodeToString(sum[:]) != manifestSHA {
-		return zero, ErrHandoffInventory
+		return manifestZero, zero, ErrHandoffInventory
 	}
 	var manifest SourceRetirementManifestV1
 	if json.Unmarshal(raw, &manifest) != nil || manifest.Version != 1 || len(manifest.Sources) == 0 || len(manifest.Sources) > 256 {
-		return zero, ErrHandoffInventory
+		return manifestZero, zero, ErrHandoffInventory
 	}
 	canonical, err := json.Marshal(manifest)
 	if err != nil || !bytes.Equal(raw, append(canonical, '\n')) {
-		return zero, ErrHandoffInventory
+		return manifestZero, zero, ErrHandoffInventory
 	}
 	files := make([]SourceRetirementFilesV1, 0, len(manifest.Sources))
 	for _, source := range manifest.Sources {
 		if source.RetirementDocumentPath == "" || source.SourcePublicKeyPath == "" ||
 			source.WitnessDocumentPath == "" || source.WitnessPublicKeyPath == "" {
-			return zero, ErrHandoffInventory
+			return manifestZero, zero, ErrHandoffInventory
 		}
 		files = append(files, SourceRetirementFilesV1{
 			RetirementDocumentPath: source.RetirementDocumentPath,
@@ -79,9 +85,9 @@ func VerifySourceRetirementManifestFileV1(path, manifestSHA string) (SourceRetir
 		DestinationSHA: manifest.DestinationSHA, Sources: files,
 	})
 	if err != nil || coverage.AuthorizesActivation {
-		return zero, ErrHandoffInventory
+		return manifestZero, zero, ErrHandoffInventory
 	}
-	return SourceRetirementManifestReportV1{
+	return manifest, SourceRetirementManifestReportV1{
 		ManifestSHA: manifestSHA, Coverage: coverage, AuthorizesActivation: false,
 	}, nil
 }

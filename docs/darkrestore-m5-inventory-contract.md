@@ -578,6 +578,17 @@ and always reports `authorizes_activation=false`. Pinning one manifest still
 does not discover undeclared installations or prove its declared inventory is
 complete.
 
+An optional all-or-nothing approval mode additionally loads one canonical
+owner-private signed coverage approval and its Ed25519 public key against
+independently supplied document and key hashes. The approval must name the
+same inventory, source, destination, declared epochs and deterministic
+retirement bundle, and its timestamp must be strictly later than every
+witness. Partial approval inputs, an equal-time approval, unsafe files or any
+binding drift fail closed. This remains a read-only assertion check with
+`authorizes_activation=false`; it does not issue an approval, validate the
+approval's destination-state/native/billing claims against live systems, or
+grant Store mutation.
+
 The Store cutover boundary now requires this bundle in addition to the signed
 coverage approval. It persists the exact canonical source/witness documents,
 their public keys and independent pins, re-verifies them on every read/restart
