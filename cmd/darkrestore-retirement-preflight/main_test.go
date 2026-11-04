@@ -10,6 +10,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -20,6 +21,23 @@ import (
 func preflightDigest(raw []byte) string {
 	sum := sha256.Sum256(raw)
 	return hex.EncodeToString(sum[:])
+}
+
+func invokeRetirementPreflight(args []string, stdout, stderr *bytes.Buffer) int {
+	binary := os.Getenv("DARK_PRO_TEST_RETIREMENT_PREFLIGHT_BINARY")
+	if binary == "" {
+		return run(args, stdout, stderr)
+	}
+	cmd := exec.Command(binary, args...)
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
+	if err := cmd.Run(); err != nil {
+		if exit, ok := err.(*exec.ExitError); ok {
+			return exit.ExitCode()
+		}
+		return -1
+	}
+	return 0
 }
 
 func TestRetirementPreflightCLIReadsCompletePinnedManifest(t *testing.T) {
@@ -126,7 +144,7 @@ func TestRetirementPreflightCLIReadsCompletePinnedManifest(t *testing.T) {
 	manifestSHA := preflightDigest(manifestRaw)
 	args := []string{"-manifest", manifestPath, "-manifest-sha256", manifestSHA}
 	var stdout, stderr bytes.Buffer
-	if code := run(args, &stdout, &stderr); code != 0 || stderr.Len() != 0 {
+	if code := invokeRetirementPreflight(args, &stdout, &stderr); code != 0 || stderr.Len() != 0 {
 		t.Fatal("preflight CLI failed", code, stderr.String())
 	}
 	var report darkrestore.SourceRetirementManifestReportV1
@@ -134,11 +152,11 @@ func TestRetirementPreflightCLIReadsCompletePinnedManifest(t *testing.T) {
 		report.Coverage.DeclaredSources != 1 || report.Coverage.AuthorizesActivation || report.AuthorizesActivation {
 		t.Fatal("preflight report changed authority", stdout.String())
 	}
-	if code := run([]string{"-manifest", manifestPath, "-manifest-sha256", strings.Repeat("2", 64)},
+	if code := invokeRetirementPreflight([]string{"-manifest", manifestPath, "-manifest-sha256", strings.Repeat("2", 64)},
 		&bytes.Buffer{}, &bytes.Buffer{}); code != 1 {
 		t.Fatal("foreign manifest pin accepted", code)
 	}
-	if code := run(nil, &bytes.Buffer{}, &bytes.Buffer{}); code != 2 {
+	if code := invokeRetirementPreflight(nil, &bytes.Buffer{}, &bytes.Buffer{}); code != 2 {
 		t.Fatal("missing inputs accepted", code)
 	}
 
@@ -182,7 +200,7 @@ func TestRetirementPreflightCLIReadsCompletePinnedManifest(t *testing.T) {
 	)
 	stdout.Reset()
 	stderr.Reset()
-	if code := run(approvalArgs, &stdout, &stderr); code != 0 || stderr.Len() != 0 {
+	if code := invokeRetirementPreflight(approvalArgs, &stdout, &stderr); code != 0 || stderr.Len() != 0 {
 		t.Fatal("approval preflight CLI failed", code, stderr.String())
 	}
 	var approvalReport darkrestore.SourceRetirementApprovalReportV1
@@ -192,7 +210,7 @@ func TestRetirementPreflightCLIReadsCompletePinnedManifest(t *testing.T) {
 		t.Fatal("approval preflight report changed authority", stdout.String())
 	}
 	partialArgs := append(append([]string(nil), args...), "-coverage-approval", approvalPath)
-	if code := run(partialArgs, &bytes.Buffer{}, &bytes.Buffer{}); code != 2 {
+	if code := invokeRetirementPreflight(partialArgs, &bytes.Buffer{}, &bytes.Buffer{}); code != 2 {
 		t.Fatal("partial approval inputs accepted", code)
 	}
 }

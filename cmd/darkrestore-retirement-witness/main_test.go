@@ -10,6 +10,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -21,6 +22,23 @@ import (
 func cliDigest(raw []byte) string {
 	sum := sha256.Sum256(raw)
 	return hex.EncodeToString(sum[:])
+}
+
+func invokeRetirementWitness(args []string, stdout, stderr *bytes.Buffer) int {
+	binary := os.Getenv("DARK_PRO_TEST_RETIREMENT_WITNESS_BINARY")
+	if binary == "" {
+		return run(args, stdout, stderr)
+	}
+	cmd := exec.Command(binary, args...)
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
+	if err := cmd.Run(); err != nil {
+		if exit, ok := err.(*exec.ExitError); ok {
+			return exit.ExitCode()
+		}
+		return -1
+	}
+	return 0
 }
 
 func TestWitnessCLIEmitsVerifierCompatibleReceipt(t *testing.T) {
@@ -88,7 +106,7 @@ func TestWitnessCLIEmitsVerifierCompatibleReceipt(t *testing.T) {
 		"-witnessed-unix-nano", strconv.FormatInt(12_000, 10),
 	}
 	var stdout, stderr bytes.Buffer
-	if code := run(args, &stdout, &stderr); code != 0 || stderr.Len() != 0 {
+	if code := invokeRetirementWitness(args, &stdout, &stderr); code != 0 || stderr.Len() != 0 {
 		t.Fatal("witness CLI failed", code, stderr.String())
 	}
 	var result darkrestore.SourceRetirementWitnessFileV1
@@ -108,7 +126,7 @@ func TestWitnessCLIEmitsVerifierCompatibleReceipt(t *testing.T) {
 		t.Fatal("CLI receipt is not verifier-compatible", err)
 	}
 	var replay bytes.Buffer
-	if code := run(args, &replay, &stderr); code != 0 || replay.String() != stdout.String() {
+	if code := invokeRetirementWitness(args, &replay, &stderr); code != 0 || replay.String() != stdout.String() {
 		t.Fatal("CLI exact replay failed", code, stderr.String())
 	}
 
@@ -121,10 +139,10 @@ func TestWitnessCLIEmitsVerifierCompatibleReceipt(t *testing.T) {
 	if err = os.WriteFile(filepath.Join(dir, "source.key"), sourcePrivate, 0600); err != nil {
 		t.Fatal(err)
 	}
-	if code := run(unsafeArgs, &bytes.Buffer{}, &bytes.Buffer{}); code != 1 {
+	if code := invokeRetirementWitness(unsafeArgs, &bytes.Buffer{}, &bytes.Buffer{}); code != 1 {
 		t.Fatal("same-key witness accepted", code)
 	}
-	if code := run(nil, &bytes.Buffer{}, &bytes.Buffer{}); code != 2 {
+	if code := invokeRetirementWitness(nil, &bytes.Buffer{}, &bytes.Buffer{}); code != 2 {
 		t.Fatal("missing CLI inputs accepted", code)
 	}
 }
