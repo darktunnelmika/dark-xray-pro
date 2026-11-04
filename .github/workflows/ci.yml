@@ -16,6 +16,7 @@ permissions:
 jobs:
   final-tcp-core:
     name: Experimental pinned core final TCP counters
+    needs: isolated-lab-bundle
     runs-on: ubuntu-24.04
     timeout-minutes: 26  # Includes source lease expirations and isolated imported admission.
     steps:
@@ -44,6 +45,23 @@ jobs:
         with:
           go-version-file: go.mod
           cache: false
+      - name: Select the exact same-run bundled source-settlement executable
+        uses: actions/download-artifact@v4
+        with:
+          name: dark-xray-pro-lab-linux-amd64
+          path: ${{ runner.temp }}/dark-pro-lab-bundle
+      - name: Verify and extract the bundled source-settlement executable
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/dark-pro-lab-bundle"
+          sha256sum -c dark-xray-pro-lab-linux-amd64.tar.gz.sha256
+          mkdir -p "$RUNNER_TEMP/dark-pro-settlement-bundle"
+          tar --no-same-owner -xzf dark-xray-pro-lab-linux-amd64.tar.gz \
+            -C "$RUNNER_TEMP/dark-pro-settlement-bundle" \
+            ./bin/dark-pro-darkrestore-local-settlement
+          test -x "$RUNNER_TEMP/dark-pro-settlement-bundle/bin/dark-pro-darkrestore-local-settlement"
+          echo "DARK_PRO_TEST_SETTLEMENT_CLI=$RUNNER_TEMP/dark-pro-settlement-bundle/bin/dark-pro-darkrestore-local-settlement" >> "$GITHUB_ENV"
       - name: Prove active Vision streams, exact final receipts and restart replay
         env:
           DARK_PRO_TEST_FINAL_TCP: '1'
@@ -82,12 +100,11 @@ jobs:
           DARK_PRO_TEST_FINAL_TCP: '1'
         run: |
           set -euo pipefail
-          export DARK_PRO_TEST_SETTLEMENT_CLI="$RUNNER_TEMP/darkrestore-local-settlement"
-          go build -o "$DARK_PRO_TEST_SETTLEMENT_CLI" ./cmd/darkrestore-local-settlement
           go test -race ./internal/api -run '^TestRealPinnedDarkRestoreLocalSettlement$' -count=3 -v -timeout=300s | tee "$RUNNER_TEMP/darkrestore-local-settlement.log"
           test "$(grep -c DARKRESTORE_LOCAL_SETTLEMENT_PASS "$RUNNER_TEMP/darkrestore-local-settlement.log")" = 3
           test "$(grep -c DARKRESTORE_SETTLED_IMPORT_PASS "$RUNNER_TEMP/darkrestore-local-settlement.log")" = 3
           test "$(grep -c DARKRESTORE_SIGNED_HANDOFF_PASS "$RUNNER_TEMP/darkrestore-local-settlement.log")" = 3
+          test "$(grep -c DARKRESTORE_SOURCE_RETIREMENT_PASS "$RUNNER_TEMP/darkrestore-local-settlement.log")" = 3
       - name: Active stream diagnostics
         if: failure()
         run: |

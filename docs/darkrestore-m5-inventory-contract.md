@@ -595,6 +595,14 @@ their public keys and independent pins, re-verifies them on every read/restart
 and includes the deterministic bundle digest in both the signed coverage
 approval and the transition hash. The coverage approval must be strictly later
 than every independent witness.
+
+Foundation acceptance verifies and extracts the same-run release archive, then
+runs the real exited-source settlement fixture against that exact bundled
+source-settlement executable, including signed-handoff replay,
+source-retirement emission and a negative fence-pin check. The bundle job also
+executes the exact witness and preflight binaries; these synthetic checks grant
+no operational retirement or inventory-completeness authority.
+
 Missing, tampered, foreign, duplicate or replay-conflicting documents keep the
 transition closed; an insert failure rolls back both evidence and financial
 reservation. Historical pre-attestation receipts remain readable but cannot
