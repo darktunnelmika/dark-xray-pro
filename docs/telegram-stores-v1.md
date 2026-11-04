@@ -309,6 +309,56 @@ session. Those remain separate acceptance evidence. Keep the running LAB owned
 by the panel workstream on its accepted revision until the combined build is
 reviewed; rerunning the fresh installer is not an upgrade procedure.
 
+### Offline private-config check
+
+The HUB now provides a separate `check-telegram-config` command for checking the
+real private file before the worker is activated. It uses the runtime's exact
+config parser and private-file reader. This complements the metadata preflight:
+it opens the credential file locally, but never prints its contents, bot IDs,
+tokens or token hashes. The original metadata-only script still does not open
+credentials.
+
+Use a checksum-verified **new build containing this command**. In particular,
+the previously staged `d94a955b878ef8d1c16a979e8377a0e9d286f23e` release does not
+contain it. Do not invoke this subcommand on that release or another older HUB:
+older flag handling may treat a positional command as a normal HUB startup.
+The new entrypoint rejects unknown or misplaced positional arguments before
+startup, including a mistyped command or arguments following normal HUB flags.
+
+Set `REVIEWED_CONFIG_CHECK_HUB` to the absolute path of that verified new HUB
+binary. In a local Linux session already running as `darkprolab` with its real
+primary group, execute:
+
+```sh
+DARK_PRO_LAB_MODE=1 "$REVIEWED_CONFIG_CHECK_HUB" check-telegram-config
+```
+
+The command accepts no additional arguments or path overrides. It requires
+explicit LAB mode and checks the effective UID/GID against the system account,
+not environment username hints. Root, a different account or primary group,
+and invalid invocation are rejected before reading the config. The config path
+remains `/etc/dark-xray-pro-lab/telegram-bots/config.json`; it must already contain
+real dedicated LAB credentials with the private ownership/modes described above.
+The command neither creates nor replaces it. Token values belong in that file,
+not shell arguments or chat messages.
+
+On success the JSON report includes `scope: private_config_only`,
+`code: private_config_valid` and the configured bot count. All reports include
+`activation: not_performed`; live identity, exclusive Telegram transport, runtime
+feature flags, store bindings, native delivery and Stars acceptance remain
+`unknown`. Valid syntax cannot establish that a token belongs to its expected
+bot or that the bot is unused elsewhere. That still requires the reviewed worker
+startup and dedicated live rehearsal.
+
+Exit 0 means only that the observed private file and parsed config passed.
+Exit 1 means the file/config was refused; exit 2 means invalid invocation,
+environment/identity or unavailable output. Errors use fixed codes and do not
+echo account, filesystem or parser error details. A path/file identity or
+metadata change detected while reading causes refusal. The check initializes
+no HUB state, business store, journal, lock, network listener or Telegram worker;
+normal runtime flags do not need to be enabled to run it. It does not replace the
+coordinated HUB/backup CLI/backup-worker activation or its financial baseline.
+
 ## 5. Metadata registration is not runtime activation
 
 The panel's Telegram page uses `GET /api/v1/workspace/telegram`. The owner sees

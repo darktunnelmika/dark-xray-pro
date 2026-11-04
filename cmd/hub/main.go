@@ -74,6 +74,11 @@ func privateTLSKey(path string) error {
 	return nil
 }
 func main() {
+	// This command must return before normal HUB flag parsing, feature gates,
+	// state locks, stores, listeners or workers are initialized.
+	if len(os.Args) > 1 && os.Args[1] == "check-telegram-config" {
+		os.Exit(runTelegramConfigCheck(os.Args[2:], os.Stdout, telegramConfigCheckRuntime()))
+	}
 	address := flag.String("listen", "127.0.0.1:2087", "loopback-only LAB owner UI listener")
 	static := flag.String("static", "", "optional development UI override; release uses its embedded UI")
 	registryPath := flag.String("registry", "./lab-state/registry.json", "private durable LAB node enrollment")
@@ -88,6 +93,9 @@ func main() {
 	agentCert := flag.String("agent-tls-cert", "", "certificate with valid IP/DNS SAN for new LAB Node listener")
 	agentKey := flag.String("agent-tls-key", "", "private key for dedicated LAB Node listener")
 	flag.Parse()
+	if flag.NArg() != 0 {
+		log.Fatal("unexpected positional arguments; no HUB startup performed")
+	}
 	if err := retiredfeatures.Check(os.Getenv); err != nil {
 		log.Fatal(err)
 	}

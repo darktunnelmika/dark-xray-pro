@@ -46,6 +46,29 @@ func parseConfig(raw []byte) (fileConfig, error) {
 	return c, nil
 }
 
+// CheckLABConfig validates only the fixed private LAB configuration and returns
+// its bot count. It does not open a worker, journal or lock, or perform network
+// I/O. The caller is responsible for enforcing the LAB mode and service user.
+func CheckLABConfig() (int, error) {
+	return checkLABConfig(LABConfigPath)
+}
+
+func checkLABConfig(path string) (int, error) {
+	raw, err := readPrivate(path, 16<<10)
+	if err != nil {
+		return 0, ErrConfig
+	}
+	// Best effort: JSON decoding may also allocate strings containing secrets.
+	defer clear(raw)
+	config, err := parseConfig(raw)
+	if err != nil {
+		return 0, ErrConfig
+	}
+	count := len(config.Bots)
+	clear(config.Bots)
+	return count, nil
+}
+
 // Open performs no network I/O. A disabled worker returns before inspecting
 // files, credentials or the backend. Tokens never enter business state/journal.
 func Open(options Options, backend Backend) (*Worker, error) {
@@ -158,20 +181,46 @@ func openPrivate(path string, create bool) (*os.File, bool, error) {
 	return f, created, nil
 }
 func readPrivate(path string, limit int64) ([]byte, error) {
+	return readPrivateWith(path, limit, io.ReadAll)
+}
+
+// The reader argument permits deterministic tests of changes during a read;
+// production always uses io.ReadAll. These checks compare observed snapshots,
+// rather than excluding a concurrent privileged or same-user writer.
+func readPrivateWith(path string, limit int64, read func(io.Reader) ([]byte, error)) ([]byte, error) {
 	f, _, err := openPrivate(path, false)
 	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-	info, err := f.Stat()
-	if err != nil || info.Size() < 1 || info.Size() > limit {
 		return nil, ErrConfig
 	}
-	data, err := io.ReadAll(io.LimitReader(f, limit+1))
-	if err != nil || len(data) == 0 || int64(len(data)) > limit {
+	defer f.Close()
+	before, err := f.Stat()
+	if err != nil || !privateRegular(before) || before.Size() < 1 || before.Size() > limit {
+		return nil, ErrConfig
+	}
+	data, err := read(io.LimitReader(f, limit+1))
+	if err != nil || int64(len(data)) != before.Size() || int64(len(data)) > limit {
+		clear(data)
+		return nil, ErrConfig
+	}
+	after, fdErr := f.Stat()
+	current, pathErr := os.Lstat(path)
+	if fdErr != nil || pathErr != nil || !samePrivateFileState(before, after) || !samePrivateFileState(after, current) || privateParent(path) != nil {
+		clear(data)
 		return nil, ErrConfig
 	}
 	return data, nil
+}
+
+func samePrivateFileState(a, b os.FileInfo) bool {
+	if !privateRegular(a) || !privateRegular(b) {
+		return false
+	}
+	x, xok := a.Sys().(*syscall.Stat_t)
+	y, yok := b.Sys().(*syscall.Stat_t)
+	return xok && yok && x.Dev == y.Dev && x.Ino == y.Ino &&
+		x.Uid == y.Uid && x.Gid == y.Gid && x.Mode == y.Mode &&
+		x.Nlink == y.Nlink && x.Size == y.Size &&
+		x.Mtim == y.Mtim && x.Ctim == y.Ctim
 }
 
 // ValidateOfflineBackup inspects only a retained private snapshot, never the

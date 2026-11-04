@@ -8,6 +8,8 @@ import "context"
 // filesystem locks are supported only in the explicitly enabled Linux LAB.
 type Worker struct{}
 
+func CheckLABConfig() (int, error) { return 0, ErrConfig }
+
 func Open(options Options, _ Backend) (*Worker, error) {
 	if options.EnableFlag == "" || options.EnableFlag == "0" {
 		return nil, nil

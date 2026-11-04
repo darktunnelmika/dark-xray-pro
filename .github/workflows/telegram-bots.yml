@@ -9,6 +9,7 @@ on:
       - "internal/telegrambot/**"
       - "internal/business/telegram*"
       - "internal/api/telegram*"
+      - "cmd/hub/**"
       - "third_party/go-qrcode/**"
       - "go.mod"
       - "go.sum"
