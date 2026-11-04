@@ -126,6 +126,20 @@ jobs:
           for e in events:
               if e.get('Output'): print(e['Output'],end='')
           PYHANDOVER
+      - name: Stress lost drain ACK target handover with failure diagnostics
+        run: |
+          bash scripts/test-hub-active-traffic.sh --handover-ack-stress || { cat "$RUNNER_TEMP/hub-handover-ack-stress.jsonl" 2>/dev/null || true; exit 1; }
+          python3 - "$RUNNER_TEMP/hub-handover-ack-stress.jsonl" <<'PYACKSTRESS'
+          import collections,json,sys
+          events=[json.loads(line) for line in open(sys.argv[1])]
+          name='TestRealPinnedMeteredHandoverActiveTraffic'
+          passed=collections.Counter(e.get('Test') for e in events if e.get('Action')=='pass')
+          assert passed[name]==30 and passed[name+'/lost-drain-ack-after']==30,dict(passed)
+          assert not any(e.get('Action') in ('skip','fail') for e in events)
+          assert not any('WARNING: DATA RACE' in e.get('Output','') for e in events)
+          for e in events:
+              if e.get('Output'): print(e['Output'],end='')
+          PYACKSTRESS
       - name: Prove actual destination protocol health and concurrent emergency stop
         run: |
           bash scripts/test-hub-active-traffic.sh --handover-health || { cat "$RUNNER_TEMP/hub-handover-health.jsonl" 2>/dev/null || true; exit 1; }
@@ -177,6 +191,17 @@ jobs:
         env:
           DARK_PRO_TEST_FINAL_TCP: '1'
         run: go test -race ./internal/api -run '^TestRealPinnedActiveTCPSettlement/active-interrupted$' -count=20 -timeout=240s -v
+      - name: Preserve synthetic final TCP and handover evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: final-tcp-handover-evidence
+          path: |
+            ${{ runner.temp }}/hub-*.jsonl
+            ${{ runner.temp }}/core-protocol.jsonl
+            ${{ runner.temp }}/active-tcp-settlement.jsonl
+          if-no-files-found: ignore
+          retention-days: 7
 
   business-race-shards:
     name: Business SQLite race partition (${{ matrix.shard }}/2)
