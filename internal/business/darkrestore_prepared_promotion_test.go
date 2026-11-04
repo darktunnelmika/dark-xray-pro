@@ -254,6 +254,44 @@ func completePreparedNativeApply(t *testing.T, f *preparedPromotionFixture) prep
 	return preparedApplyResult{state: state, round: round, proof: proof, apply: applyAck}
 }
 
+func preparedNativeApplyEvidence(t *testing.T, f *preparedPromotionFixture, transition DarkRestorePreparedPromotionReceiptV1, result preparedApplyResult) (DarkRestoreNativeApplyEvidenceV1, DarkRestoreNativeApplyPinsV1) {
+	t.Helper()
+	ctx := context.Background()
+	final, err := readCutoverReceipt(ctx, f.s.db, f.evidence.ClientID)
+	if err != nil || final == nil {
+		t.Fatal(err)
+	}
+	current, err := f.s.DarkRestoreCutoverSnapshotV1(ctx, f.evidence.SourceSHA256, f.evidence.SourceID)
+	if err != nil || current.NativeUplink == nil || current.NativeDownlink == nil {
+		t.Fatal(err)
+	}
+	expected := DarkRestoreNativeApplyEvidenceV1{
+		Scope: DarkRestoreNativeApplyEvidenceScopeV1, ClientID: f.evidence.ClientID, TransitionSHA: final.TransitionSHA,
+		PreparedContentSHA: final.Prepared.ContentSHA, PreparedAuthoritySHA: final.Prepared.AuthoritySHA, InboundID: 802,
+		PlanRevision: transition.PlanRevision, PreparedInboundRevision: transition.PreparedInboundRevision, PromotedInboundRevision: transition.PromotedInboundRevision,
+		PromotionEventID: transition.PromotionEventID, PromotionReceiptSHA: transition.PromotionReceiptSHA,
+		InitialApplySHA: result.state.InitialApplySHA, ApplyCommandID: result.state.ApplyCommandID, StageID: result.state.StageID,
+		HealthRoundID: result.round.ID, HealthReceiptSHA: meteredHash(result.proof), PreparedUnixNano: final.SubscriptionDeliveredNano,
+		RepresentativeID: current.RepresentativeID, ImportReceiptSHA: current.ImportReceiptSHA, NativeBaselineSHA: current.NativeBaselineSHA,
+		CurrentFiniteEntitlement: current.CurrentEntitlement, SettledHistoricalBytes: f.evidence.SettledHistoricalBytes,
+		NativePostMigrationBytes: *current.NativeUplink + *current.NativeDownlink, RemainingBudgetBytes: final.RemainingBudgetBytes,
+		PromotedUnixNano: transition.CreatedUnixNano, AppliedUnixNano: result.apply.ObservedAt, HealthAcceptedUnixNano: result.round.Members[0].Accepted,
+	}
+	pins := DarkRestoreNativeApplyPinsV1{ClientID: expected.ClientID, TransitionSHA: expected.TransitionSHA, PreparedContentSHA: expected.PreparedContentSHA,
+		PreparedAuthoritySHA: expected.PreparedAuthoritySHA, InboundID: expected.InboundID, PlanRevision: expected.PlanRevision,
+		PreparedInboundRevision: expected.PreparedInboundRevision, PromotionEventID: expected.PromotionEventID, PromotionReceiptSHA: expected.PromotionReceiptSHA,
+		InitialApplySHA: expected.InitialApplySHA, ApplyCommandID: expected.ApplyCommandID, StageID: expected.StageID,
+		HealthRoundID: expected.HealthRoundID, HealthReceiptSHA: expected.HealthReceiptSHA, RepresentativeID: expected.RepresentativeID,
+		ImportReceiptSHA: expected.ImportReceiptSHA, NativeBaselineSHA: expected.NativeBaselineSHA,
+		CurrentFiniteEntitlement: expected.CurrentFiniteEntitlement, SettledHistoricalBytes: expected.SettledHistoricalBytes,
+		NativePostMigrationBytes: expected.NativePostMigrationBytes, RemainingBudgetBytes: expected.RemainingBudgetBytes}
+	pins.DocumentSHA, err = cutoverSnapshotDigest("DARK-PRO-NATIVE-APPLY-EVIDENCE-v1", expected)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return expected, pins
+}
+
 func TestDarkRestoreNativeApplyStoreAdapterPositiveExactChainAndStalePayer(t *testing.T) {
 	ctx := context.Background()
 	f := newPreparedPromotionFixture(t)
@@ -264,28 +302,7 @@ func TestDarkRestoreNativeApplyStoreAdapterPositiveExactChainAndStalePayer(t *te
 		t.Fatal(err)
 	}
 	result := completePreparedNativeApply(t, &f)
-	final, err := readCutoverReceipt(ctx, f.s.db, f.evidence.ClientID)
-	if err != nil || final == nil {
-		t.Fatal(err)
-	}
-	expected := DarkRestoreNativeApplyEvidenceV1{
-		Scope: DarkRestoreNativeApplyEvidenceScopeV1, ClientID: f.evidence.ClientID, TransitionSHA: final.TransitionSHA,
-		PreparedContentSHA: final.Prepared.ContentSHA, PreparedAuthoritySHA: final.Prepared.AuthoritySHA, InboundID: 802,
-		PlanRevision: transition.PlanRevision, PreparedInboundRevision: transition.PreparedInboundRevision, PromotedInboundRevision: transition.PromotedInboundRevision,
-		PromotionEventID: transition.PromotionEventID, PromotionReceiptSHA: transition.PromotionReceiptSHA,
-		InitialApplySHA: result.state.InitialApplySHA, ApplyCommandID: result.state.ApplyCommandID, StageID: result.state.StageID,
-		HealthRoundID: result.round.ID, HealthReceiptSHA: meteredHash(result.proof), PreparedUnixNano: final.SubscriptionDeliveredNano,
-		PromotedUnixNano: transition.CreatedUnixNano, AppliedUnixNano: result.apply.ObservedAt, HealthAcceptedUnixNano: result.round.Members[0].Accepted,
-	}
-	pins := DarkRestoreNativeApplyPinsV1{ClientID: expected.ClientID, TransitionSHA: expected.TransitionSHA, PreparedContentSHA: expected.PreparedContentSHA,
-		PreparedAuthoritySHA: expected.PreparedAuthoritySHA, InboundID: expected.InboundID, PlanRevision: expected.PlanRevision,
-		PreparedInboundRevision: expected.PreparedInboundRevision, PromotionEventID: expected.PromotionEventID, PromotionReceiptSHA: expected.PromotionReceiptSHA,
-		InitialApplySHA: expected.InitialApplySHA, ApplyCommandID: expected.ApplyCommandID, StageID: expected.StageID,
-		HealthRoundID: expected.HealthRoundID, HealthReceiptSHA: expected.HealthReceiptSHA}
-	pins.DocumentSHA, err = cutoverSnapshotDigest("DARK-PRO-NATIVE-APPLY-EVIDENCE-v1", expected)
-	if err != nil {
-		t.Fatal(err)
-	}
+	expected, pins := preparedNativeApplyEvidence(t, &f, transition, result)
 	projected, err := f.s.ProjectDarkRestoreNativeApplyEvidenceV1(ctx, f.key, f.owner.Token, f.evidence.ClientID, 802, result.round.ID, pins)
 	if err != nil || !reflect.DeepEqual(projected, expected) {
 		t.Fatal("actual prepared promotion/apply/health chain not projected", projected, err)

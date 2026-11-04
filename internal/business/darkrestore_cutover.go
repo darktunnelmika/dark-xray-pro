@@ -649,6 +649,9 @@ func requireDarkRestoreFinalCutover(ctx context.Context, tx *sql.Tx, id string) 
 }
 
 func validateDarkRestoreCutovers(ctx context.Context, tx *sql.Tx) error {
+	if err := validateDarkRestoreNativeApplyAcceptances(ctx, tx); err != nil {
+		return err
+	}
 	if err := validateDarkRestorePreparedPromotions(ctx, tx); err != nil {
 		return err
 	}

@@ -21,6 +21,8 @@ type DarkRestoreCutoverReadinessV1 struct {
 	IndependentCoverageAssertionVerified bool     `json:"independent_coverage_assertion_verified"`
 	GlobalSourceCustodyVerified          bool     `json:"global_source_custody_verified"`
 	NativeBaselineComplete               bool     `json:"native_baseline_complete"`
+	NativeApplyRecorded                  bool     `json:"native_apply_recorded"`
+	InitialApplySubscriptionDelivered    bool     `json:"initial_apply_subscription_delivered"`
 	SubscriptionDelivered                bool     `json:"subscription_delivered"`
 	CutoverReceiptRecorded               bool     `json:"cutover_receipt_recorded"`
 	ClientArchived                       bool     `json:"client_archived"`
@@ -121,8 +123,8 @@ func (s *Store) DarkRestoreCutoverReadinessV1(ctx context.Context, sourceSHA, so
 		return out, err
 	}
 	delivery, err := readSubscriptionDelivery(ctx, tx, out.ClientID)
-	tx.Rollback()
 	if err != nil {
+		tx.Rollback()
 		return out, err
 	}
 	if evidence != nil {
@@ -133,13 +135,45 @@ func (s *Store) DarkRestoreCutoverReadinessV1(ctx context.Context, sourceSHA, so
 	}
 
 	preparedAwaitingNativeApply := false
+	preparedAwaitingInitialDelivery := false
 	if final != nil {
 		out.SubscriptionDeliveryScope = final.SubscriptionDeliveryScope
 		if final.SubscriptionDeliveryScope == DarkRestorePreparedDeliveryScopeV1 {
-			out.SubscriptionDelivered = evidence != nil && final.TransitionSHA == evidence.TransitionSHA && verifyPreparedPlanReceipt(ctx, s.db, final) == nil
-			preparedAwaitingNativeApply = out.SubscriptionDelivered
+			preparedValid := evidence != nil && final.TransitionSHA == evidence.TransitionSHA
+			if preparedValid && client.DeploymentState == "disabled" {
+				preparedValid = verifyPreparedPlanReceipt(ctx, tx, final) == nil
+			} else if preparedValid {
+				// The pre-promotion authority is intentionally no longer current.
+				// Require the immutable reviewed promotion that replaced it.
+				promotion, promotionErr := readDarkRestorePreparedPromotion(ctx, tx, out.ClientID)
+				if promotionErr != nil {
+					tx.Rollback()
+					return out, promotionErr
+				}
+				preparedValid = promotion != nil && promotion.TransitionSHA == final.TransitionSHA &&
+					promotion.PreparedAuthoritySHA == final.Prepared.AuthoritySHA && promotion.PreparedContentSHA == final.Prepared.ContentSHA
+			}
+			if preparedValid {
+				acceptance, acceptanceErr := currentDarkRestoreNativeApplyAcceptance(ctx, tx, out.ClientID)
+				if acceptanceErr != nil {
+					tx.Rollback()
+					return out, acceptanceErr
+				}
+				out.NativeApplyRecorded = acceptance != nil
+				if acceptance != nil {
+					_, _, deliveryErr := readDarkRestoreInitialDeliveryAfterAcceptance(ctx, tx, out.ClientID, acceptance)
+					out.InitialApplySubscriptionDelivered = deliveryErr == nil
+				}
+			}
+			// Preserve the existing meaning: the immutable owner-prepared export
+			// was delivered. The separate field records whether a real post-Apply
+			// subscription was subsequently materialized.
+			out.SubscriptionDelivered = preparedValid
+			preparedAwaitingNativeApply = preparedValid && !out.NativeApplyRecorded
+			preparedAwaitingInitialDelivery = out.NativeApplyRecorded && !out.InitialApplySubscriptionDelivered
 		}
 	}
+	tx.Rollback()
 	if evidence != nil && client.DeploymentState == "disabled" {
 		current, readErr := s.DarkRestoreCutoverSnapshotV1(ctx, sourceSHA, sourceID)
 		if readErr != nil {
@@ -157,6 +191,14 @@ func (s *Store) DarkRestoreCutoverReadinessV1(ctx context.Context, sourceSHA, so
 		// A canonical prepared export proves what the owner downloaded; it does
 		// not prove that the exact plan/client binding was promoted or applied.
 		out.ActivationBlockers = append(out.ActivationBlockers, "native_apply_not_recorded")
+	}
+	if preparedAwaitingInitialDelivery {
+		out.ActivationBlockers = append(out.ActivationBlockers, "initial_apply_subscription_not_delivered")
+	}
+	if out.InitialApplySubscriptionDelivered {
+		// Delivery is real and bound to the accepted Apply, but activation is a
+		// separate owner-controlled transition that is not authorized here.
+		out.ActivationBlockers = append(out.ActivationBlockers, "native_activation_not_authorized")
 	}
 	if !out.SourceEpochSettled {
 		out.ActivationBlockers = append(out.ActivationBlockers, "source_epoch_not_settled")

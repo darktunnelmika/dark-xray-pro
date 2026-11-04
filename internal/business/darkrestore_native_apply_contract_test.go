@@ -17,6 +17,9 @@ func nativeApplyEvidenceFixture(t *testing.T) (DarkRestoreNativeApplyEvidenceV1,
 		InitialApplySHA: strings.Repeat("e", 64), ApplyCommandID: strings.Repeat("1", 32),
 		StageID: strings.Repeat("2", 32), HealthRoundID: strings.Repeat("3", 32),
 		HealthReceiptSHA: strings.Repeat("f", 64), PreparedUnixNano: 100,
+		RepresentativeID: "rep-native-apply", ImportReceiptSHA: strings.Repeat("4", 64),
+		NativeBaselineSHA: strings.Repeat("5", 64), CurrentFiniteEntitlement: 1000,
+		SettledHistoricalBytes: 100, NativePostMigrationBytes: 300, RemainingBudgetBytes: 600,
 		PromotedUnixNano: 200, AppliedUnixNano: 300, HealthAcceptedUnixNano: 400,
 	}
 	p := DarkRestoreNativeApplyPinsV1{
@@ -25,7 +28,10 @@ func nativeApplyEvidenceFixture(t *testing.T) (DarkRestoreNativeApplyEvidenceV1,
 		PlanRevision: e.PlanRevision, PreparedInboundRevision: e.PreparedInboundRevision,
 		PromotionEventID: e.PromotionEventID, PromotionReceiptSHA: e.PromotionReceiptSHA,
 		InitialApplySHA: e.InitialApplySHA, ApplyCommandID: e.ApplyCommandID, StageID: e.StageID,
-		HealthRoundID: e.HealthRoundID, HealthReceiptSHA: e.HealthReceiptSHA,
+		HealthRoundID: e.HealthRoundID, HealthReceiptSHA: e.HealthReceiptSHA, RepresentativeID: e.RepresentativeID,
+		ImportReceiptSHA: e.ImportReceiptSHA, NativeBaselineSHA: e.NativeBaselineSHA,
+		CurrentFiniteEntitlement: e.CurrentFiniteEntitlement, SettledHistoricalBytes: e.SettledHistoricalBytes,
+		NativePostMigrationBytes: e.NativePostMigrationBytes, RemainingBudgetBytes: e.RemainingBudgetBytes,
 	}
 	var err error
 	p.DocumentSHA, err = cutoverSnapshotDigest("DARK-PRO-NATIVE-APPLY-EVIDENCE-v1", e)
@@ -80,6 +86,15 @@ func TestDarkRestoreNativeApplyEvidenceContractV1(t *testing.T) {
 		}, 500},
 		{"foreign health receipt", func(e *DarkRestoreNativeApplyEvidenceV1, _ *DarkRestoreNativeApplyPinsV1) {
 			e.HealthReceiptSHA = strings.Repeat("0", 64)
+		}, 500},
+		{"repinned foreign payer", func(e *DarkRestoreNativeApplyEvidenceV1, p *DarkRestoreNativeApplyPinsV1) {
+			e.RepresentativeID = "rep-native-apply-foreign"
+			p.DocumentSHA, _ = cutoverSnapshotDigest("DARK-PRO-NATIVE-APPLY-EVIDENCE-v1", *e)
+		}, 500},
+		{"repinned entitlement math", func(e *DarkRestoreNativeApplyEvidenceV1, p *DarkRestoreNativeApplyPinsV1) {
+			e.RemainingBudgetBytes++
+			p.RemainingBudgetBytes++
+			p.DocumentSHA, _ = cutoverSnapshotDigest("DARK-PRO-NATIVE-APPLY-EVIDENCE-v1", *e)
 		}, 500},
 		{"promotion before prepare", func(e *DarkRestoreNativeApplyEvidenceV1, p *DarkRestoreNativeApplyPinsV1) {
 			e.PromotedUnixNano = e.PreparedUnixNano

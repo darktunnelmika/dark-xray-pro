@@ -23,7 +23,18 @@ func (s *Store) ProjectDarkRestoreNativeApplyEvidenceV1(ctx context.Context, key
 	if _, err = ownershipOwner(ctx, tx, token); err != nil {
 		return zero, err
 	}
+	out, err := s.projectDarkRestoreNativeApplyEvidenceV1(ctx, tx, key, client, inbound, roundID, pins, time.Now().UnixNano())
+	if err != nil {
+		return zero, err
+	}
+	if err = tx.Commit(); err != nil {
+		return zero, err
+	}
+	return out, nil
+}
 
+func (s *Store) projectDarkRestoreNativeApplyEvidenceV1(ctx context.Context, tx *sql.Tx, key []byte, client string, inbound uint64, roundID string, pins DarkRestoreNativeApplyPinsV1, now int64) (DarkRestoreNativeApplyEvidenceV1, error) {
+	var zero DarkRestoreNativeApplyEvidenceV1
 	final, err := readCutoverReceipt(ctx, tx, client)
 	if err != nil || final == nil || final.Prepared.InboundID != inbound {
 		return zero, ErrDarkRestoreCutover
@@ -76,7 +87,6 @@ func (s *Store) ProjectDarkRestoreNativeApplyEvidenceV1(ctx context.Context, key
 		return zero, ErrDarkRestoreCutover
 	}
 
-	now := time.Now().UnixNano()
 	state, err := s.loadInitialApplySnapshot(ctx, tx, key, inbound, now)
 	if err != nil || state.promotion.EventID != promotion.EventID || state.promotion.InboundRevision != promotion.InboundRevision ||
 		state.base.ApplyCommandID == "" || state.base.StageID == "" || state.apply.view.Receipt == nil {
@@ -99,13 +109,14 @@ func (s *Store) ProjectDarkRestoreNativeApplyEvidenceV1(ctx context.Context, key
 		PromotedInboundRevision: promotion.InboundRevision, InitialApplySHA: state.base.InitialApplySHA,
 		ApplyCommandID: state.base.ApplyCommandID, StageID: state.base.StageID,
 		HealthRoundID: round.ID, HealthReceiptSHA: meteredHash(*round.receipt),
+		RepresentativeID: current.RepresentativeID, ImportReceiptSHA: current.ImportReceiptSHA,
+		NativeBaselineSHA: current.NativeBaselineSHA, CurrentFiniteEntitlement: current.CurrentEntitlement,
+		SettledHistoricalBytes:   evidence.SettledHistoricalBytes,
+		NativePostMigrationBytes: *current.NativeUplink + *current.NativeDownlink, RemainingBudgetBytes: remaining,
 		PreparedUnixNano: final.SubscriptionDeliveredNano, PromotedUnixNano: promotedAt,
 		AppliedUnixNano: state.apply.view.Receipt.ObservedAt, HealthAcceptedUnixNano: round.Members[0].Accepted,
 	}
 	if _, err = ValidateDarkRestoreNativeApplyEvidenceV1(out, pins, now); err != nil {
-		return zero, err
-	}
-	if err = tx.Commit(); err != nil {
 		return zero, err
 	}
 	return out, nil

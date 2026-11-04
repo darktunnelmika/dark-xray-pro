@@ -784,3 +784,11 @@ unknown/incomplete evidence and migration refusal. They do not establish real
 source inventory, retirement, legacy-unlimited entitlement or production
 delivery. PR publication, CI, installation and LAB acceptance remain distinct
 steps and must not be inferred from this local candidate.
+
+## 2026-11-04 — isolated native-Apply acceptance candidate
+
+- Development is based on public PR head `7b01b958a26fc7537bf5c7bd9a474a94cc1bb08f` in a separate worktree. It is not yet a published PR head, Merge, installation or LAB acceptance.
+- A new optional exact-DDL append-only receipt records the coherently re-derived prepared/promotion/Apply/health chain and independently pinned payer, import receipt, native baseline, entitlement, historical reservation, native counters and remaining budget.
+- Exact replay is idempotent. Conflicting replay, unauthorized access, stale payer/entitlement, altered pins and injected insertion failure remain closed and leave no partial journal state.
+- Only after that acceptance may the existing first-Apply renderer create a genuine `lab_initial_apply` snapshot matching the prepared content. Readiness keeps preparation, Apply and delivery separate and still reports `native_activation_not_authorized`; final cutover and both imported issuers remain closed.
+- Synthetic tests cover positive bytes, negative drift, rollback, replay, reopen and official offline-backup validation. They do not establish real inventory completeness, retirement, production delivery or legacy-unlimited entitlement.

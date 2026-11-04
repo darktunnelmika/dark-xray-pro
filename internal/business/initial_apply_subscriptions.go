@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"reflect"
 	"sort"
 	"time"
 
@@ -138,6 +139,15 @@ func (s *Store) currentInitialSubscriptionProof(ctx context.Context, tx *sql.Tx,
 		}
 		if err = verifyPreparedInitialDelivery(ctx, tx, *final, state, round, raw); err != nil {
 			return out, err
+		}
+		acceptance, err := currentDarkRestoreNativeApplyAcceptance(ctx, tx, client)
+		if err != nil || acceptance == nil || acceptance.InboundID != inbound || acceptance.Evidence.HealthRoundID != roundID ||
+			acceptance.Evidence.InitialApplySHA != initialSHA || acceptance.Evidence.PromotionEventID != state.promotion.EventID {
+			return out, ErrDarkRestoreCutover
+		}
+		current, err := s.projectDarkRestoreNativeApplyEvidenceV1(ctx, tx, key, client, inbound, roundID, nativeApplyPinsFromEvidence(acceptance.Evidence, acceptance.EvidenceSHA), now)
+		if err != nil || !reflect.DeepEqual(current, acceptance.Evidence) {
+			return out, ErrDarkRestoreCutover
 		}
 	}
 	expires := round.Expires

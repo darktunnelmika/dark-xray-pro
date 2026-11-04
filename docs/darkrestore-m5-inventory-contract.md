@@ -417,3 +417,33 @@ are negative. Normal credential issuance and subscription publication remain
 closed after the projection. No fixture claims real inventory completeness,
 source retirement, production health or permission to activate an imported
 identity. Legacy unlimited remains blocked.
+
+## Append-only native-Apply acceptance and bounded initial delivery
+
+The next isolated M5 layer persists the exact Store-derived native-Apply
+projection only after an owner submits independent pins for every runtime
+receipt and for the current payer, import receipt, native baseline, finite
+entitlement, settled history, native counters and remaining budget. The Store
+re-derives the whole projection in the same writer transaction that appends the
+receipt. The receipt and its schema are immutable; exact replay returns the
+original bytes, while a conflicting event, payer, entitlement, profile,
+counter, health receipt or document pin fails closed. Insert failure leaves no
+partial acceptance.
+
+Acceptance is not delivery or activation. It only permits the existing
+first-Apply renderer to materialize one real `lab_initial_apply` snapshot from
+the already applied profile and exact client binding. That snapshot must retain
+the prepared content hash and match the same transition, promotion, Apply,
+health round, payer and entitlement. Renewal or assignment drift before
+materialization blocks the operation without a journal row. Readiness exposes
+prepared export, native Apply acceptance and real initial delivery as separate
+facts and retains the explicit `native_activation_not_authorized` blocker even
+after delivery.
+
+Synthetic coverage includes positive render-to-delivery bytes, independent
+pin mismatch, unauthorized recorder, idempotent replay, immutable triggers,
+transaction rollback, stale payer/entitlement, restart, official offline
+backup and unchanged financial/identity state. The ordinary imported issuer
+and final activation guard remain closed. This receipt does not prove inventory
+completeness, retirement of undeclared sources, continuing health, production
+delivery or valid legacy-unlimited entitlement.
