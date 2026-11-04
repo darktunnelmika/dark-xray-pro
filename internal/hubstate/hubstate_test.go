@@ -445,3 +445,81 @@ func TestStoppedProofRejectsSelfAndUnreadableEvidence(t *testing.T) {
 		t.Fatal("different incarnation rejected")
 	}
 }
+
+func TestManagedRuntimeSnapshotRetainsSchemaAndJournal(t *testing.T) {
+	for _, enabled := range []string{"1", "0"} {
+		t.Run("execution-"+enabled, func(t *testing.T) {
+			lock, _ := fixture(t)
+			o := fixtureOptions(lock.root)
+			db, err := business.Open(o.BusinessDB)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err = db.EnableInboundExecution(context.Background()); err != nil {
+				db.Close()
+				t.Fatal(err)
+			}
+			if err = db.Close(); err != nil {
+				t.Fatal(err)
+			}
+			dir := filepath.Join(lock.root, "inbound-execution")
+			key := strings.Repeat("d", 64)
+			makeIdleRuntime(t, dir, key)
+			o.Environment = append(o.Environment,
+				"DARK_PRO_ENABLE_NATIVE_INBOUNDS=1", "DARK_PRO_ENABLE_USAGE_LEDGER=1",
+				"DARK_PRO_ENABLE_INBOUND_EXECUTION="+enabled,
+				"DARK_PRO_NATIVE_INBOUND_KEY_HEX="+key,
+				"DARK_PRO_INBOUND_RUNTIME_DIR="+dir)
+			inv, err := BuildInventory(o)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err = WriteInventory(lock, inv); err != nil {
+				t.Fatal(err)
+			}
+			inv, err = LoadInventory(lock)
+			if err != nil {
+				t.Fatal(err)
+			}
+			journal := filepath.Join(dir, "state.enc")
+			originalDB, originalJournal := fingerprintFile(t, o.BusinessDB), fingerprintFile(t, journal)
+			fence, err := holdRuntimeStopped(context.Background(), inv)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err = Snapshot(context.Background(), lock, inv, privateTemp(t)); !errors.Is(err, ErrBusy) {
+				fence()
+				t.Fatalf("live writer fence not honored: %v", err)
+			}
+			fence()
+			dest := privateTemp(t)
+			sources, err := Snapshot(context.Background(), lock, inv, dest)
+			if err != nil {
+				t.Fatal(err)
+			}
+			found := false
+			for _, source := range sources {
+				if source.Role == "inbound_runtime" {
+					found = true
+					if fingerprintFile(t, filepath.Join(dest, source.Name)) != originalJournal {
+						t.Fatal("journal changed")
+					}
+				}
+			}
+			if !found {
+				t.Fatal("managed journal omitted")
+			}
+			var archived Inventory
+			raw, err := os.ReadFile(filepath.Join(dest, "inventory.json"))
+			if err != nil || json.Unmarshal(raw, &archived) != nil {
+				t.Fatal("inventory unreadable", err)
+			}
+			if err = ValidateSnapshot(context.Background(), dest, archived); err != nil {
+				t.Fatal(err)
+			}
+			if fingerprintFile(t, o.BusinessDB) != originalDB || fingerprintFile(t, journal) != originalJournal {
+				t.Fatal("source state changed")
+			}
+		})
+	}
+}
