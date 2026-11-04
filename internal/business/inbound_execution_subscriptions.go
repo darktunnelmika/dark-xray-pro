@@ -174,6 +174,10 @@ func (s *Store) RevealInboundExecutionSubscription(ctx context.Context, key []by
 	if c.Archived {
 		return SubscriptionSecret{}, ErrNotFound
 	}
+	if err = requireDarkRestoreSubscriptionTransition(ctx, tx, client); err != nil {
+		return SubscriptionSecret{}, err
+	}
+
 	h, err := readExecutionSubscriptionHead(ctx, tx, client)
 	if err != nil {
 		return SubscriptionSecret{}, err

@@ -416,6 +416,10 @@ func (s *Store) RevealLabSubscription(ctx context.Context, key []byte, actorID, 
 	if c.Archived {
 		return out, ErrNotFound
 	}
+	if err = requireDarkRestoreSubscriptionTransition(ctx, tx, clientID); err != nil {
+		return out, err
+	}
+
 	h, err := readSubscriptionHead(ctx, tx, clientID)
 	if err != nil {
 		return out, err
