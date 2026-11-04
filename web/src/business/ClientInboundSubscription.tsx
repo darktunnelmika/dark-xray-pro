@@ -1,3 +1,4 @@
+import SubscriptionQRCode from "./SubscriptionQRCode";
 import { useEffect, useRef, useState } from "react";
 import { api, ApiError, type Language, type Session } from "../session";
 import { readInboundSubscriptionAttempt, readInboundSubscriptionReceipt, readInboundSubscriptionSecret, readInboundSubscriptionView, subscriptionRequestRejected, type InboundSubscriptionAttempt as Attempt, type InboundSubscriptionView as View } from "../inboundSubscriptions";
@@ -128,7 +129,7 @@ export default function ClientInboundSubscription(props: Props) {
     {attempt && <div role="status"><p>{rejected ? t.rejected : t.unknown}</p>{rejected ? <button type="button" disabled={busy} onClick={discard}>{t.discard}</button> : <button type="button" disabled={busy || storageFailed || !canManage} onClick={() => void send(attempt)}>{t.retry}</button>}</div>}
     {notice && !attempt && <p role="status">{notice}</p>}
     {storageFailed && <div role="status"><p>{t.storage}</p>{!attempt && <button type="button" disabled={busy} onClick={discard}>{t.reset}</button>}</div>}
-    {visibleSecret && <div className="lab-subscription-secret"><p>{t.secret}</p><label>{t.reveal}<input aria-label="Inbound subscription URL" dir="ltr" readOnly autoComplete="off" value={url}/></label><div className="lab-subscription-actions"><button type="button" onClick={() => {
+    {visibleSecret && <div className="lab-subscription-secret"><p>{t.secret}</p><SubscriptionQRCode url={url} language={language} /><label>{t.reveal}<input aria-label="Inbound subscription URL" dir="ltr" readOnly autoComplete="off" value={url}/></label><div className="lab-subscription-actions"><button type="button" onClick={() => {
       const serial = secretSerial.current, c = lifetime.current;
       void navigator.clipboard.writeText(url).then(() => { if (c && authorized(c) && serial === secretSerial.current) setCopied(true); }).catch(() => { if (c && authorized(c)) setNotice(t.unavailable); });
     }}>{copied ? t.copied : t.copy}</button><button type="button" onClick={clearSecret}>{t.hide}</button></div></div>}

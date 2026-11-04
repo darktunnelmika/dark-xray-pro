@@ -1,3 +1,4 @@
+import SubscriptionQRCode from "./SubscriptionQRCode";
 import { useEffect, useRef, useState } from "react";
 import { api, ApiError, type Language, type Session } from "../session";
 import { readSubscription, readSubscriptionSecret, readTokenReceipt, readTokenAttempt, subscriptionEventID, subscriptionPath, type SubscriptionView, type TokenAction, type TokenAttempt } from "../labSubscriptions";
@@ -75,7 +76,7 @@ export default function ClientSubscription({clientID,language,session,canManage,
   </>}
   {attempt&&<div role="status"><p>{t.unknown}</p><div className="lab-subscription-actions"><button type="button" disabled={!allowed} onClick={()=>void send(attempt)}>{t.retry}</button><button type="button" disabled={busy} onClick={()=>{if(remember(null)){setNotice("");setReload(n=>n+1);}}}>{t.discard}</button></div></div>}
   {notice&&!attempt&&<p role="status">{notice}</p>}
-  {secret&&canManage&&<div className="lab-subscription-secret"><p>{t.secret}</p><label>{t.format}<select value={format} onChange={e=>{setFormat(e.target.value);setCopied(false);}}><option value="base64">Base64</option><option value="raw">VLESS URI</option></select></label><label>{t.url}<input aria-label="Subscription URL" value={url} readOnly autoComplete="off" spellCheck={false} dir="ltr"/></label><div className="lab-subscription-actions"><button type="button" onClick={()=>{void navigator.clipboard.writeText(url).then(()=>{if(!lifetime.current?.signal.aborted)setCopied(true);}).catch(()=>setNotice(t.failed));}}>{copied?t.copied:t.copy}</button><button type="button" onClick={()=>{setSecret("");setCopied(false);}}>{t.hide}</button></div></div>}
+  {secret&&canManage&&<div className="lab-subscription-secret"><p>{t.secret}</p><SubscriptionQRCode url={url} language={language} /><label>{t.format}<select value={format} onChange={e=>{setFormat(e.target.value);setCopied(false);}}><option value="base64">Base64</option><option value="raw">VLESS URI</option></select></label><label>{t.url}<input aria-label="Subscription URL" value={url} readOnly autoComplete="off" spellCheck={false} dir="ltr"/></label><div className="lab-subscription-actions"><button type="button" onClick={()=>{void navigator.clipboard.writeText(url).then(()=>{if(!lifetime.current?.signal.aborted)setCopied(true);}).catch(()=>setNotice(t.failed));}}>{copied?t.copied:t.copy}</button><button type="button" onClick={()=>{setSecret("");setCopied(false);}}>{t.hide}</button></div></div>}
   <p className="business-warning">{scopeText}</p><p>{t.boundary}</p>
  </section>;
 }
