@@ -24,7 +24,8 @@ CGO_ENABLED=0 go build -buildvcs=false -trimpath -o ./bin/darkpro-amneziawg ./cm
 
 `GO` may name an absolute Go executable. Standard Go cache variables work as
 usual. The generated `darkpro-sanaei-provenance.json` records the upstream
-revision, toolchain, overlay SHA-256 values, and the exact QUIC module checksum.
+revision, toolchain, overlay SHA-256 values, and the exact QUIC/AWG module
+checksums. Preparation refuses a changed AWG module checksum or timer source.
 
 The modified QUIC module is included at `_darkpro/quic-go`, with a relative
 `replace` in the generated module. Its source version is
@@ -37,8 +38,25 @@ cd /path/to/worker-source/_darkpro/quic-go
 go test -buildvcs=false ./internal/ackhandler -run TestDarkPro -count=1
 ```
 
+The modified AmneziaWG module is included at `_darkpro/amneziawg-go`, with a
+relative `replace`. It retains `github.com/amnezia-vpn/amneziawg-go/v3` version
+`v3.1.20260828`. The only production change moves the timer expiration's state
+reset inside its existing mutex; the callback stays outside that mutex. This
+fixes a race between expiration and cancellation during ordinary peer shutdown.
+An exact source SHA-256 and replacement anchor prevent applying the change to a
+different timer implementation. Provenance records both original and modified
+timer source hashes, and the private module preserves its MIT license.
+
+The timer concurrency and joined-callback regression tests run with the race
+detector, alongside the existing real-traffic and namespace acceptance tests:
+
+```sh
+cd /path/to/worker-source/_darkpro/amneziawg-go
+go test -buildvcs=false -race ./device -run '^TestDarkProTimer' -count=1 -timeout=60s
+```
+
 Release packaging must include the full generated source tree, its upstream
-LICENSE, the modified QUIC source and MIT LICENSE, provenance, dependency
+LICENSE, the modified QUIC/AWG sources and MIT licenses, provenance, dependency
 sources/licenses, and binary checksums. The execution CI vendors dependencies
 and builds release binaries with `-mod=vendor` before archiving that source tree.
 Copying only the executables is not this packaging workflow.

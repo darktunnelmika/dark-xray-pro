@@ -298,6 +298,7 @@ jobs:
             --require TestTUICRealOCSPStaplingAndInvalidResponse \
             --require TestTUICRealCertificateIssuanceAndChain
           (cd _darkpro/quic-go && go test -buildvcs=false -race ./internal/ackhandler -run '^TestDarkPro' -count=1 -v)
+          (cd _darkpro/amneziawg-go && go test -buildvcs=false -race ./device -run '^TestDarkProTimer' -count=1 -timeout=60s -v)
           # Keep all linked dependency sources and license notices with the
           # separately distributed GPL workers, then build from that tree.
           go mod vendor
