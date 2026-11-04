@@ -589,6 +589,15 @@ binding drift fail closed. This remains a read-only assertion check with
 approval's destination-state/native/billing claims against live systems, or
 grant Store mutation.
 
+A further all-or-nothing read-only mode requires the exact owner-private
+opaque destination-state, native-baseline, import-receipt and billing-
+attribution documents named by that approval. Each file must match both its
+independently supplied pin and the corresponding digest inside the signed
+approval. Partial inputs, unsafe paths, changed bytes or a foreign pin fail
+closed. This check proves only byte availability and binding: the documents
+remain opaque, their operational semantics are not inferred, and the report
+still returns `authorizes_activation=false`.
+
 The Store cutover boundary now requires this bundle in addition to the signed
 coverage approval. It persists the exact canonical source/witness documents,
 their public keys and independent pins, re-verifies them on every read/restart
@@ -620,6 +629,12 @@ approval arguments, a foreign authority pin and a non-later approval, and still
 requires every report layer to deny activation. The signed assertion identifies
 its synthetic claimant; it does not turn the asserted inventory or retirement
 into operational fact.
+
+The fixture now also supplies four distinct opaque destination documents to
+the exact packaged preflight executable, verifies deterministic replay and a
+foreign evidence pin, and requires a separate pass marker while activation
+stays false. These synthetic bytes do not claim a real destination state,
+native baseline, import receipt or billing attribution.
 
 Missing, tampered, foreign, duplicate or replay-conflicting documents keep the
 transition closed; an insert failure rolls back both evidence and financial

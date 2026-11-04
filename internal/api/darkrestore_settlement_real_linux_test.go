@@ -391,15 +391,26 @@ func (f *localSettlementFixture) check(t *testing.T, ctx context.Context, server
 					t.Fatal(err)
 				}
 			}
+			writeOpaque := func(name, content string) (string, string) {
+				path := filepath.Join(f.dir, name)
+				if writeErr := os.WriteFile(path, []byte(content), 0600); writeErr != nil {
+					t.Fatal(writeErr)
+				}
+				return path, settlementHash(t, path)
+			}
+			destinationStatePath, destinationStateSHA := writeOpaque("destination-state.json", "opaque synthetic destination state\n")
+			nativeBaselinePath, nativeBaselineSHA := writeOpaque("native-baseline.json", "opaque synthetic native baseline\n")
+			importReceiptPath, importReceiptSHA := writeOpaque("import-receipt.json", "opaque synthetic import receipt\n")
+			billingAttributionPath, billingAttributionSHA := writeOpaque("billing-attribution.json", "opaque synthetic billing attribution\n")
 			approval := darkrestore.HandoffCoverageApprovalV1{
 				Version: 1, InventorySHA: inventorySHA, SourceSHA: result.SourceSHA, SourceID: result.SourceID,
 				Scope: darkrestore.HandoffCoverageScopeV1, Statement: darkrestore.HandoffCoverageStatementV1,
 				DeclaredSources: report.Coverage.DeclaredSources, EpochIDs: append([]string(nil), report.Coverage.EpochIDs...),
 				InventoryCompleteAsserted: true, DeclaredSourcesRetired: true,
 				RetirementBundleSHA: report.Coverage.BundleSHA, ApprovedUnixNano: 12001,
-				DestinationSHA: destinationSHA, DestinationStateSHA: strings.Repeat("4", 64),
-				NativeBaselineSHA: strings.Repeat("5", 64), ImportReceiptSHA: strings.Repeat("6", 64),
-				BillingAttributionSHA: strings.Repeat("7", 64), BillingAttribution: "disjoint_source_epoch_deltas",
+				DestinationSHA: destinationSHA, DestinationStateSHA: destinationStateSHA,
+				NativeBaselineSHA: nativeBaselineSHA, ImportReceiptSHA: importReceiptSHA,
+				BillingAttributionSHA: billingAttributionSHA, BillingAttribution: "disjoint_source_epoch_deltas",
 			}
 			writeApproval := func(value darkrestore.HandoffCoverageApprovalV1) string {
 				approvalValue, marshalErr := json.Marshal(value)
@@ -438,6 +449,30 @@ func (f *localSettlementFixture) check(t *testing.T, ctx context.Context, server
 			if approvalReplayErr != nil || !reflect.DeepEqual(raw, approvalReplay) {
 				t.Fatal("packaged approval preflight replay changed bytes", approvalReplayErr)
 			}
+			evidenceArgs := append(append([]string(nil), approvalArgs...),
+				"-destination-state", destinationStatePath, "-destination-state-sha256", destinationStateSHA,
+				"-native-baseline", nativeBaselinePath, "-native-baseline-sha256", nativeBaselineSHA,
+				"-import-receipt", importReceiptPath, "-import-receipt-sha256", importReceiptSHA,
+				"-billing-attribution", billingAttributionPath, "-billing-attribution-sha256", billingAttributionSHA,
+			)
+			raw, err = exec.CommandContext(ctx, preflightCLI, evidenceArgs...).Output()
+			var evidenceReport darkrestore.SourceRetirementApprovalEvidenceReportV1
+			if err != nil || json.Unmarshal(raw, &evidenceReport) != nil || evidenceReport.AuthorizesActivation ||
+				evidenceReport.Approval.AuthorizesActivation || evidenceReport.DestinationStateSHA != destinationStateSHA ||
+				evidenceReport.NativeBaselineSHA != nativeBaselineSHA || evidenceReport.ImportReceiptSHA != importReceiptSHA ||
+				evidenceReport.BillingAttributionSHA != billingAttributionSHA {
+				t.Fatal("packaged approval evidence preflight changed authority", err)
+			}
+			evidenceReplay, evidenceReplayErr := exec.CommandContext(ctx, preflightCLI, evidenceArgs...).Output()
+			if evidenceReplayErr != nil || !reflect.DeepEqual(raw, evidenceReplay) {
+				t.Fatal("packaged approval evidence replay changed bytes", evidenceReplayErr)
+			}
+			foreignEvidenceArgs := append([]string(nil), evidenceArgs...)
+			foreignEvidenceArgs[len(foreignEvidenceArgs)-1] = strings.Repeat("8", 64)
+			if raw, err = exec.CommandContext(ctx, preflightCLI, foreignEvidenceArgs...).Output(); err == nil || len(raw) != 0 {
+				t.Fatal("packaged preflight accepted a foreign opaque evidence pin")
+			}
+			t.Log("DARKRESTORE_PACKAGED_RETIREMENT_EVIDENCE_PASS exact opaque destination documents bound; activation false")
 			partialApprovalArgs := append(append([]string(nil), preflightArgs...), "-coverage-approval", approvalPath)
 			if raw, err = exec.CommandContext(ctx, preflightCLI, partialApprovalArgs...).Output(); err == nil || len(raw) != 0 {
 				t.Fatal("packaged preflight accepted partial approval inputs")

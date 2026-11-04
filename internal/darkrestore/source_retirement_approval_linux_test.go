@@ -160,3 +160,47 @@ func TestVerifySourceRetirementApprovalFilesV1FailsClosed(t *testing.T) {
 		})
 	}
 }
+
+func TestVerifySourceRetirementApprovalEvidenceFilesV1BindsOpaqueDocuments(t *testing.T) {
+	f := newRetirementApprovalFixture(t)
+	dir := filepath.Dir(f.approvalPath)
+	write := func(name string, raw []byte) string {
+		t.Helper()
+		path := filepath.Join(dir, name)
+		if err := os.WriteFile(path, raw, 0600); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	destination := []byte("synthetic destination state")
+	baseline := []byte("synthetic native baseline")
+	importReceipt := []byte("synthetic import receipt")
+	attribution := []byte("synthetic billing attribution")
+	paths := []string{
+		write("destination-state.json", destination), write("native-baseline.json", baseline),
+		write("import-receipt.json", importReceipt), write("billing-attribution.json", attribution),
+	}
+	report, err := VerifySourceRetirementApprovalEvidenceFilesV1(
+		f.manifest.path, f.manifest.sha, f.approvalPath, f.approvalSHA, f.publicPath, f.publicSHA,
+		paths[0], retirementSHA(destination), paths[1], retirementSHA(baseline),
+		paths[2], retirementSHA(importReceipt), paths[3], retirementSHA(attribution),
+	)
+	if err != nil || report.AuthorizesActivation || report.Approval.AuthorizesActivation ||
+		report.DestinationStateSHA != f.approval.DestinationStateSHA ||
+		report.NativeBaselineSHA != f.approval.NativeBaselineSHA ||
+		report.ImportReceiptSHA != f.approval.ImportReceiptSHA ||
+		report.BillingAttributionSHA != f.approval.BillingAttributionSHA {
+		t.Fatal("opaque approval evidence rejected or granted authority", report, err)
+	}
+
+	if err = os.WriteFile(paths[1], []byte("drifted baseline"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = VerifySourceRetirementApprovalEvidenceFilesV1(
+		f.manifest.path, f.manifest.sha, f.approvalPath, f.approvalSHA, f.publicPath, f.publicSHA,
+		paths[0], retirementSHA(destination), paths[1], retirementSHA(baseline),
+		paths[2], retirementSHA(importReceipt), paths[3], retirementSHA(attribution),
+	); err == nil {
+		t.Fatal("drifted opaque baseline accepted")
+	}
+}

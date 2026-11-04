@@ -168,15 +168,19 @@ func TestRetirementPreflightCLIReadsCompletePinnedManifest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	destinationState := []byte("synthetic destination state")
+	nativeBaseline := []byte("synthetic native baseline")
+	importReceipt := []byte("synthetic import receipt")
+	billingAttribution := []byte("synthetic billing attribution")
 	approval := darkrestore.HandoffCoverageApprovalV1{
 		Version: 1, InventorySHA: inventorySHA, SourceSHA: sourceSHA, SourceID: inventory.SourceID,
 		Scope: darkrestore.HandoffCoverageScopeV1, Statement: darkrestore.HandoffCoverageStatementV1,
 		DeclaredSources: 1, EpochIDs: []string{epoch},
 		InventoryCompleteAsserted: true, DeclaredSourcesRetired: true,
 		RetirementBundleSHA: manifestReport.Coverage.BundleSHA, ApprovedUnixNano: 12_001,
-		DestinationSHA: destinationSHA, DestinationStateSHA: strings.Repeat("2", 64),
-		NativeBaselineSHA: strings.Repeat("3", 64), ImportReceiptSHA: strings.Repeat("4", 64),
-		BillingAttributionSHA: strings.Repeat("5", 64), BillingAttribution: "disjoint_source_epoch_deltas",
+		DestinationSHA: destinationSHA, DestinationStateSHA: preflightDigest(destinationState),
+		NativeBaselineSHA: preflightDigest(nativeBaseline), ImportReceiptSHA: preflightDigest(importReceipt),
+		BillingAttributionSHA: preflightDigest(billingAttribution), BillingAttribution: "disjoint_source_epoch_deltas",
 	}
 	approvalValue, err := json.Marshal(approval)
 	if err != nil {
@@ -212,5 +216,29 @@ func TestRetirementPreflightCLIReadsCompletePinnedManifest(t *testing.T) {
 	partialArgs := append(append([]string(nil), args...), "-coverage-approval", approvalPath)
 	if code := invokeRetirementPreflight(partialArgs, &bytes.Buffer{}, &bytes.Buffer{}); code != 2 {
 		t.Fatal("partial approval inputs accepted", code)
+	}
+	evidenceArgs := append(append([]string(nil), approvalArgs...),
+		"-destination-state", write("destination-state.json", destinationState),
+		"-destination-state-sha256", preflightDigest(destinationState),
+		"-native-baseline", write("native-baseline.json", nativeBaseline),
+		"-native-baseline-sha256", preflightDigest(nativeBaseline),
+		"-import-receipt", write("import-receipt.json", importReceipt),
+		"-import-receipt-sha256", preflightDigest(importReceipt),
+		"-billing-attribution", write("billing-attribution.json", billingAttribution),
+		"-billing-attribution-sha256", preflightDigest(billingAttribution),
+	)
+	stdout.Reset()
+	stderr.Reset()
+	if code := invokeRetirementPreflight(evidenceArgs, &stdout, &stderr); code != 0 || stderr.Len() != 0 {
+		t.Fatal("approval evidence preflight CLI failed", code, stderr.String())
+	}
+	var evidenceReport darkrestore.SourceRetirementApprovalEvidenceReportV1
+	if json.Unmarshal(stdout.Bytes(), &evidenceReport) != nil || evidenceReport.AuthorizesActivation ||
+		evidenceReport.Approval.AuthorizesActivation || evidenceReport.NativeBaselineSHA != approval.NativeBaselineSHA {
+		t.Fatal("approval evidence preflight changed authority", stdout.String())
+	}
+	partialEvidence := append(append([]string(nil), approvalArgs...), "-native-baseline", evidenceArgs[len(evidenceArgs)-11])
+	if code := invokeRetirementPreflight(partialEvidence, &bytes.Buffer{}, &bytes.Buffer{}); code != 2 {
+		t.Fatal("partial opaque evidence accepted", code)
 	}
 }
