@@ -16,6 +16,14 @@ type DarkRestoreNativeActivationEvidenceV1 struct {
 	ClientID                 string `json:"client_id"`
 	TransitionSHA            string `json:"transition_sha256"`
 	NativeApplyEvidenceSHA   string `json:"native_apply_evidence_sha256"`
+	InventorySHA             string `json:"inventory_sha256"`
+	CoverageApprovalSHA      string `json:"coverage_approval_sha256"`
+	DestinationSHA           string `json:"destination_sha256"`
+	DestinationStateSHA      string `json:"destination_state_sha256"`
+	BillingAttributionSHA    string `json:"billing_attribution_sha256"`
+	ImportReceiptSHA         string `json:"import_receipt_sha256"`
+	NativeBaselineSHA        string `json:"native_baseline_sha256"`
+	PreparedAuthoritySHA     string `json:"prepared_authority_sha256"`
 	RepresentativeID         string `json:"representative_id"`
 	CurrentFiniteEntitlement int64  `json:"current_finite_entitlement,string"`
 	SettledHistoricalBytes   int64  `json:"settled_historical_bytes,string"`
@@ -70,6 +78,10 @@ func projectDarkRestoreNativeActivation(ctx context.Context, tx *sql.Tx, client 
 
 func projectDarkRestoreNativeActivationFromAcceptance(ctx context.Context, tx *sql.Tx, client string, acceptance *DarkRestoreNativeApplyAcceptanceReceiptV1, now int64) (DarkRestoreNativeActivationEvidenceV1, error) {
 	var zero DarkRestoreNativeActivationEvidenceV1
+	cutover, err := readCutoverEvidence(ctx, tx, client)
+	if err != nil || cutover == nil || cutover.TransitionSHA != acceptance.TransitionSHA {
+		return zero, ErrDarkRestoreCutover
+	}
 	delivery, row, err := readDarkRestoreInitialDeliveryAfterAcceptanceAt(ctx, tx, client, acceptance, now)
 	if err != nil {
 		return zero, err
@@ -77,7 +89,11 @@ func projectDarkRestoreNativeActivationFromAcceptance(ctx context.Context, tx *s
 	e := acceptance.Evidence
 	return DarkRestoreNativeActivationEvidenceV1{
 		Scope: DarkRestoreNativeActivationScopeV1, ClientID: client, TransitionSHA: e.TransitionSHA,
-		NativeApplyEvidenceSHA: acceptance.EvidenceSHA, RepresentativeID: e.RepresentativeID,
+		NativeApplyEvidenceSHA: acceptance.EvidenceSHA, InventorySHA: cutover.InventorySHA256,
+		CoverageApprovalSHA: cutover.CoverageApprovalSHA256, DestinationSHA: cutover.DestinationSHA,
+		DestinationStateSHA: cutover.DestinationStateSHA, BillingAttributionSHA: cutover.BillingAttributionSHA,
+		ImportReceiptSHA: e.ImportReceiptSHA, NativeBaselineSHA: e.NativeBaselineSHA,
+		PreparedAuthoritySHA: e.PreparedAuthoritySHA, RepresentativeID: e.RepresentativeID,
 		CurrentFiniteEntitlement: e.CurrentFiniteEntitlement, SettledHistoricalBytes: e.SettledHistoricalBytes,
 		NativePostMigrationBytes: e.NativePostMigrationBytes, RemainingBudgetBytes: e.RemainingBudgetBytes,
 		InboundID: e.InboundID, InitialApplySHA: e.InitialApplySHA, HealthRoundID: e.HealthRoundID,
@@ -89,7 +105,16 @@ func projectDarkRestoreNativeActivationFromAcceptance(ctx context.Context, tx *s
 
 func validateDarkRestoreNativeActivationEvidence(e DarkRestoreNativeActivationEvidenceV1, pins DarkRestoreNativeActivationPinsV1, now int64) (string, error) {
 	remaining, remainingErr := cutoverRemaining(e.CurrentFiniteEntitlement, e.SettledHistoricalBytes, e.NativePostMigrationBytes, 0)
-	if e.Scope != DarkRestoreNativeActivationScopeV1 || !idRE.MatchString(e.ClientID) || !routeSHA.MatchString(e.TransitionSHA) || !routeSHA.MatchString(e.NativeApplyEvidenceSHA) || !idRE.MatchString(e.RepresentativeID) || remainingErr != nil || e.RemainingBudgetBytes != remaining || e.InboundID == 0 || !routeSHA.MatchString(e.InitialApplySHA) || !routeID.MatchString(e.HealthRoundID) || e.DeliveryRevision == 0 || !routeID.MatchString(e.SnapshotID) || !eventRE.MatchString(e.SnapshotEventID) || e.SnapshotRevision == 0 || !routeSHA.MatchString(e.ContentSHA) || e.DeliveredUnixNano <= 0 || e.ExpiresUnixNano <= now {
+	if e.Scope != DarkRestoreNativeActivationScopeV1 || !idRE.MatchString(e.ClientID) ||
+		!routeSHA.MatchString(e.TransitionSHA) || !routeSHA.MatchString(e.NativeApplyEvidenceSHA) ||
+		!routeSHA.MatchString(e.InventorySHA) || !routeSHA.MatchString(e.CoverageApprovalSHA) ||
+		!routeSHA.MatchString(e.DestinationSHA) || !routeSHA.MatchString(e.DestinationStateSHA) ||
+		!routeSHA.MatchString(e.BillingAttributionSHA) || !routeSHA.MatchString(e.ImportReceiptSHA) ||
+		!routeSHA.MatchString(e.NativeBaselineSHA) || !routeSHA.MatchString(e.PreparedAuthoritySHA) ||
+		!idRE.MatchString(e.RepresentativeID) || remainingErr != nil || e.RemainingBudgetBytes != remaining ||
+		e.InboundID == 0 || !routeSHA.MatchString(e.InitialApplySHA) || !routeID.MatchString(e.HealthRoundID) ||
+		e.DeliveryRevision == 0 || !routeID.MatchString(e.SnapshotID) || !eventRE.MatchString(e.SnapshotEventID) ||
+		e.SnapshotRevision == 0 || !routeSHA.MatchString(e.ContentSHA) || e.DeliveredUnixNano <= 0 || e.ExpiresUnixNano <= now {
 		return "", ErrDarkRestoreCutover
 	}
 	if !reflect.DeepEqual(DarkRestoreNativeActivationEvidenceV1(pins), e) {

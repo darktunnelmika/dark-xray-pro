@@ -453,11 +453,13 @@ delivery or valid legacy-unlimited entitlement.
 The isolated final M5 gate adds a separate owner-only, append-only activation
 receipt. It can be recorded only after the Store re-derives the current native
 Apply acceptance and the genuine first-Apply subscription snapshot in the same
-transaction. Independent pins bind the transition, accepted Apply evidence,
-current payer, finite entitlement, settled history, native counters, remaining
-budget, inbound, health round, delivery revision, snapshot identity, rendered
-content hash and delivery expiry. Stale payer, entitlement, counters, delivery,
-profile or content fails closed.
+transaction. Independent pins explicitly bind the inventory, coverage approval,
+destination document and state, billing attribution, import receipt, native
+baseline and prepared authority in addition to the transition, accepted Apply
+evidence, current payer, finite entitlement, settled history, native counters,
+remaining budget, inbound, health round, delivery revision, snapshot identity,
+rendered content hash and delivery expiry. Stale payer, entitlement, counters,
+delivery, profile or content fails closed.
 
 Recording this receipt does not change the client, runtime, wallet, usage,
 ownership or subscription snapshot. It authorizes the existing final-cutover

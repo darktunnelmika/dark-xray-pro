@@ -148,9 +148,9 @@ func TestDarkRestoreNativeActivationRollbackStalePinsAndState(t *testing.T) {
 	}
 	bad := in
 	bad.EventID = "m5-native-activation-stale-pin-0001"
-	bad.Pins.ContentSHA = strings.Repeat("0", 64)
+	bad.Pins.BillingAttributionSHA = strings.Repeat("0", 64)
 	if _, err = f.s.RecordDarkRestoreNativeActivationV1(ctx, f.owner.Token, bad); !errors.Is(err, ErrDarkRestoreCutover) {
-		t.Fatal("stale delivery pin accepted", err)
+		t.Fatal("stale billing-attribution pin accepted", err)
 	}
 	client, err := f.s.Client(ctx, in.ClientID)
 	if err != nil {
