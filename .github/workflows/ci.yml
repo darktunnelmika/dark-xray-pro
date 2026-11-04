@@ -59,9 +59,15 @@ jobs:
           mkdir -p "$RUNNER_TEMP/dark-pro-settlement-bundle"
           tar --no-same-owner -xzf dark-xray-pro-lab-linux-amd64.tar.gz \
             -C "$RUNNER_TEMP/dark-pro-settlement-bundle" \
-            ./bin/dark-pro-darkrestore-local-settlement
+            ./bin/dark-pro-darkrestore-local-settlement \
+            ./bin/dark-pro-darkrestore-retirement-witness \
+            ./bin/dark-pro-darkrestore-retirement-preflight
           test -x "$RUNNER_TEMP/dark-pro-settlement-bundle/bin/dark-pro-darkrestore-local-settlement"
+          test -x "$RUNNER_TEMP/dark-pro-settlement-bundle/bin/dark-pro-darkrestore-retirement-witness"
+          test -x "$RUNNER_TEMP/dark-pro-settlement-bundle/bin/dark-pro-darkrestore-retirement-preflight"
           echo "DARK_PRO_TEST_SETTLEMENT_CLI=$RUNNER_TEMP/dark-pro-settlement-bundle/bin/dark-pro-darkrestore-local-settlement" >> "$GITHUB_ENV"
+          echo "DARK_PRO_TEST_RETIREMENT_WITNESS_BINARY=$RUNNER_TEMP/dark-pro-settlement-bundle/bin/dark-pro-darkrestore-retirement-witness" >> "$GITHUB_ENV"
+          echo "DARK_PRO_TEST_RETIREMENT_PREFLIGHT_BINARY=$RUNNER_TEMP/dark-pro-settlement-bundle/bin/dark-pro-darkrestore-retirement-preflight" >> "$GITHUB_ENV"
       - name: Prove active Vision streams, exact final receipts and restart replay
         env:
           DARK_PRO_TEST_FINAL_TCP: '1'
@@ -105,6 +111,7 @@ jobs:
           test "$(grep -c DARKRESTORE_SETTLED_IMPORT_PASS "$RUNNER_TEMP/darkrestore-local-settlement.log")" = 3
           test "$(grep -c DARKRESTORE_SIGNED_HANDOFF_PASS "$RUNNER_TEMP/darkrestore-local-settlement.log")" = 3
           test "$(grep -c DARKRESTORE_SOURCE_RETIREMENT_PASS "$RUNNER_TEMP/darkrestore-local-settlement.log")" = 3
+          test "$(grep -c DARKRESTORE_PACKAGED_RETIREMENT_CHAIN_PASS "$RUNNER_TEMP/darkrestore-local-settlement.log")" = 3
       - name: Active stream diagnostics
         if: failure()
         run: |

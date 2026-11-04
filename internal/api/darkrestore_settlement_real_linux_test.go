@@ -248,6 +248,20 @@ func (f *localSettlementFixture) check(t *testing.T, ctx context.Context, server
 		if err != nil || json.Unmarshal(raw, &viaSigned) != nil || viaSigned != signed {
 			t.Fatal("CLI signed handoff replay failed", err)
 		}
+		inventory := darkrestore.LocalHandoffInventoryV1{
+			Version: 1, SourceSHA: result.SourceSHA, SourceID: result.SourceID,
+			Sources: []darkrestore.LocalHandoffSourcePinV1{{
+				EpochID: result.Terminal.EpochID, Sequence: result.Terminal.Sequence,
+				ReceiptSHA: result.Terminal.SHA, AuthoritySHA: result.AuthoritySHA,
+				JournalSHA: result.JournalSHA, HandoffSHA: signed.SHA,
+				SignerPublicSHA: publicSum,
+			}},
+		}
+		inventorySHA, err := darkrestore.DigestLocalHandoffInventoryV1(inventory)
+		if err != nil {
+			t.Fatal("synthetic declared inventory", err)
+		}
+		destinationSHA := strings.Repeat("2", 64)
 		fencePath := filepath.Join(f.dir, "synthetic-active-fence.json")
 		if err = os.WriteFile(fencePath, []byte("{\"synthetic\":true,\"authorizes_activation\":false}\n"), 0600); err != nil {
 			t.Fatal(err)
@@ -258,8 +272,8 @@ func (f *localSettlementFixture) check(t *testing.T, ctx context.Context, server
 			"-signed-handoff-input", handoffPath,
 			"-signed-handoff-sha256", signed.SHA,
 			"-handoff-signing-key-file", privatePath,
-			"-inventory-sha256", strings.Repeat("1", 64),
-			"-destination-sha256", strings.Repeat("2", 64),
+			"-inventory-sha256", inventorySHA,
+			"-destination-sha256", destinationSHA,
 			"-active-fence-document", fencePath,
 			"-active-fence-document-sha256", settlementHash(t, fencePath),
 			"-retired-unix-nano", "10000",
@@ -268,7 +282,7 @@ func (f *localSettlementFixture) check(t *testing.T, ctx context.Context, server
 		var retirement darkrestore.SourceRetirementFileV1
 		if err != nil || json.Unmarshal(raw, &retirement) != nil || retirement.AuthorizesActivation ||
 			retirement.Statement.HandoffSHA != signed.SHA || retirement.Statement.TerminalReceiptSHA != result.Terminal.SHA ||
-			retirement.Statement.InventorySHA != strings.Repeat("1", 64) || retirement.Statement.DestinationSHA != strings.Repeat("2", 64) {
+			retirement.Statement.InventorySHA != inventorySHA || retirement.Statement.DestinationSHA != destinationSHA {
 			t.Fatal("CLI source retirement mismatch", err)
 		}
 		raw, err = exec.CommandContext(ctx, cli, retirementArgs...).Output()
@@ -287,6 +301,85 @@ func (f *localSettlementFixture) check(t *testing.T, ctx context.Context, server
 			t.Fatal("incorrect active-fence pin produced a retirement")
 		}
 		t.Log("DARKRESTORE_SOURCE_RETIREMENT_PASS source handoff, final settlement and opaque fence bound; activation false")
+		witnessCLI, preflightCLI := os.Getenv("DARK_PRO_TEST_RETIREMENT_WITNESS_BINARY"), os.Getenv("DARK_PRO_TEST_RETIREMENT_PREFLIGHT_BINARY")
+		if (witnessCLI == "") != (preflightCLI == "") {
+			t.Fatal("partial packaged retirement chain configured")
+		}
+		if witnessCLI != "" {
+			witnessPublic, witnessPrivate, keyErr := ed25519.GenerateKey(rand.Reader)
+			if keyErr != nil {
+				t.Fatal(keyErr)
+			}
+			witnessKeyPath := filepath.Join(f.dir, "witness.key")
+			witnessPublicPath := filepath.Join(f.dir, "witness.pub")
+			witnessPath := filepath.Join(f.dir, "source-retirement-witness.json")
+			for path, content := range map[string][]byte{witnessKeyPath: witnessPrivate, witnessPublicPath: witnessPublic} {
+				if err = os.WriteFile(path, content, 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			witnessArgs := []string{
+				"-retirement-document", retirementPath,
+				"-retirement-document-sha256", retirement.SHA,
+				"-source-public-key", publicPath,
+				"-source-public-key-sha256", publicSum,
+				"-active-fence-document", fencePath,
+				"-active-fence-document-sha256", settlementHash(t, fencePath),
+				"-inventory-sha256", inventorySHA,
+				"-destination-sha256", destinationSHA,
+				"-witness-key-file", witnessKeyPath,
+				"-witness-output", witnessPath,
+				"-witnessed-unix-nano", "12000",
+			}
+			raw, err = exec.CommandContext(ctx, witnessCLI, witnessArgs...).Output()
+			var witness darkrestore.SourceRetirementWitnessFileV1
+			if err != nil || json.Unmarshal(raw, &witness) != nil || witness.AuthorizesActivation ||
+				witness.Witness.RetirementDocumentSHA != retirement.SHA || witness.Witness.InventorySHA != inventorySHA ||
+				witness.Witness.DestinationSHA != destinationSHA {
+				t.Fatal("packaged witness did not bind emitted retirement", err)
+			}
+			replayRaw, replayErr := exec.CommandContext(ctx, witnessCLI, witnessArgs...).Output()
+			if replayErr != nil || !reflect.DeepEqual(raw, replayRaw) {
+				t.Fatal("packaged witness replay changed bytes", replayErr)
+			}
+			manifest := darkrestore.SourceRetirementManifestV1{
+				Version: 1, Inventory: inventory, InventorySHA: inventorySHA, DestinationSHA: destinationSHA,
+				Sources: []darkrestore.SourceRetirementManifestSourceV1{{
+					RetirementDocumentPath: retirementPath, SourcePublicKeyPath: publicPath,
+					WitnessDocumentPath: witnessPath, WitnessPublicKeyPath: witnessPublicPath,
+					Pins: darkrestore.SourceRetirementPinsV1{
+						RetirementDocumentSHA: retirement.SHA, SourcePublicKeySHA: publicSum,
+						WitnessDocumentSHA: witness.SHA, WitnessPublicKeySHA: witness.PublicKeySHA,
+						FenceDocumentSHA: settlementHash(t, fencePath), InventorySHA: inventorySHA,
+						DestinationSHA: destinationSHA,
+					},
+				}},
+			}
+			manifestRaw, manifestErr := json.Marshal(manifest)
+			if manifestErr != nil {
+				t.Fatal(manifestErr)
+			}
+			manifestRaw = append(manifestRaw, '\n')
+			manifestPath := filepath.Join(f.dir, "source-retirement-manifest.json")
+			if err = os.WriteFile(manifestPath, manifestRaw, 0600); err != nil {
+				t.Fatal(err)
+			}
+			manifestSHA := settlementHash(t, manifestPath)
+			preflightArgs := []string{"-manifest", manifestPath, "-manifest-sha256", manifestSHA}
+			raw, err = exec.CommandContext(ctx, preflightCLI, preflightArgs...).Output()
+			var report darkrestore.SourceRetirementManifestReportV1
+			if err != nil || json.Unmarshal(raw, &report) != nil || report.AuthorizesActivation ||
+				report.ManifestSHA != manifestSHA || report.Coverage.InventorySHA != inventorySHA ||
+				report.Coverage.DeclaredSources != 1 || report.Coverage.LatestWitnessedUnixNano != 12000 {
+				t.Fatal("packaged preflight did not verify emitted chain", err)
+			}
+			badPreflightArgs := append([]string(nil), preflightArgs...)
+			badPreflightArgs[len(badPreflightArgs)-1] = strings.Repeat("3", 64)
+			if raw, err = exec.CommandContext(ctx, preflightCLI, badPreflightArgs...).Output(); err == nil || len(raw) != 0 {
+				t.Fatal("packaged preflight accepted a foreign manifest pin")
+			}
+			t.Log("DARKRESTORE_PACKAGED_RETIREMENT_CHAIN_PASS exact emitter, independent witness and complete preflight; activation false")
+		}
 		badKey := filepath.Join(f.dir, "wrong.key")
 		if err = os.WriteFile(badKey, make([]byte, 32), 0600); err != nil {
 			t.Fatal(err)

@@ -603,6 +603,15 @@ source-retirement emission and a negative fence-pin check. The bundle job also
 executes the exact witness and preflight binaries; these synthetic checks grant
 no operational retirement or inventory-completeness authority.
 
+The same real-core fixture now carries one internally consistent synthetic
+declared inventory through all three exact bundled executables: the source
+emitter produces the canonical retirement document, a distinct generated key
+witnesses that exact document, and preflight verifies a manifest containing the
+same inventory, destination, files and independent pins. Exact witness replay,
+a foreign manifest pin and every `authorizes_activation` result are checked.
+This is package-chain evidence only; it does not establish the truth or
+completeness of any real operator inventory.
+
 Missing, tampered, foreign, duplicate or replay-conflicting documents keep the
 transition closed; an insert failure rolls back both evidence and financial
 reservation. Historical pre-attestation receipts remain readable but cannot
