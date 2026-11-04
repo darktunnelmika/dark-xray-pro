@@ -262,3 +262,48 @@ test("removed Dark Restore has no owner UI, bookmark entry or background API cal
  await expect(page.getByRole("navigation").getByRole("button",{name:"Backups",exact:true,includeHidden:true})).toHaveCount(1);
  expect(f.seen.some(p=>p.includes("/dark-restore/"))).toBe(false);
 });
+
+test("heavy page chunks load only after authentication and on the selected page", async ({ page }) => {
+  await setup(page);
+  const chunks: string[] = [];
+  page.on("request", request => { if (/\/assets\/(InboundPlanner|BusinessWorkspace|NativeBackups|NodeManager)-.*\.js/.test(request.url())) chunks.push(request.url()); });
+  await page.goto("/overview");
+  await expect(page.getByRole("heading", { name: "Sign in", exact: true })).toBeVisible();
+  expect(chunks).toEqual([]);
+  await login(page);
+  await expect(page.locator(".dashboard-v2")).toBeVisible();
+  expect(chunks).toEqual([]);
+  await page.getByRole("button", { name: "Inbounds", exact: true }).click();
+  await expect.poll(() => chunks.filter(url => url.includes("/InboundPlanner-")).length).toBe(1);
+  await expect(page.getByText("Loading this page…", { exact: true })).toHaveCount(0);
+  expect(chunks.some(url => /\/(BusinessWorkspace|NativeBackups|NodeManager)-/.test(url))).toBe(false);
+});
+
+test("slow page chunk leaves navigation usable and cannot replace a newer page", async ({ page }) => {
+  await setup(page);
+  let release = () => {};
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  await page.route("**/assets/InboundPlanner-*.js", async route => { await gate; await route.continue().catch(() => {}); });
+  await page.goto("/inbounds"); await login(page);
+  await expect(page.getByText("Loading this page…", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Overview", exact: true }).click();
+  await expect(page.locator(".dashboard-v2")).toBeVisible();
+  const chunkResponse = page.waitForResponse(response => /\/assets\/InboundPlanner-.*\.js/.test(response.url()));
+  release();
+  await (await chunkResponse).finished();
+  await expect(page).toHaveURL(/\/dashboard$/);
+  await expect(page.locator(".dashboard-v2")).toBeVisible();
+  await expect(page.getByText("Loading this page…", { exact: true })).toHaveCount(0);
+});
+
+test("failed page chunk keeps the shell usable and offers an explicit reload", async ({ page }) => {
+  await setup(page);
+  await page.route("**/assets/InboundPlanner-*.js", route => route.abort("failed"));
+  await page.goto("/inbounds"); await login(page);
+  await expect(page.getByRole("alert").filter({ hasText: "This page could not load." })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Reload page", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Sign out", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Overview", exact: true }).click();
+  await expect(page.locator(".dashboard-v2")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Reload page", exact: true })).toHaveCount(0);
+});
