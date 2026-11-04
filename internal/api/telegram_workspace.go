@@ -101,18 +101,19 @@ func (s *Server) SetTelegramBotManager(manager telegramBotManager) {
 
 type telegramWorkspaceStore struct {
 	business.TelegramStore
-	ConnectionState      string `json:"connection_state"`
-	CredentialConfigured bool   `json:"credential_configured"`
-	BotUsername          string `json:"bot_username"`
-	ConnectionProblem    string `json:"connection_problem"`
-	LastPollUnix         int64  `json:"last_poll_unix"`
-	QueueStatusAvailable bool   `json:"queue_status_available"`
-	InboxPending         int64  `json:"inbox_pending"`
-	FinancialRetry       int64  `json:"financial_retry"`
-	ReviewPending        int64  `json:"review_pending"`
-	OutboxPending        int64  `json:"outbox_pending"`
-	OutboxUnknown        int64  `json:"outbox_unknown"`
-	DeliveryReview       int64  `json:"delivery_review"`
+	Setup                business.TelegramStoreSetup `json:"setup"`
+	ConnectionState      string                      `json:"connection_state"`
+	CredentialConfigured bool                        `json:"credential_configured"`
+	BotUsername          string                      `json:"bot_username"`
+	ConnectionProblem    string                      `json:"connection_problem"`
+	LastPollUnix         int64                       `json:"last_poll_unix"`
+	QueueStatusAvailable bool                        `json:"queue_status_available"`
+	InboxPending         int64                       `json:"inbox_pending"`
+	FinancialRetry       int64                       `json:"financial_retry"`
+	ReviewPending        int64                       `json:"review_pending"`
+	OutboxPending        int64                       `json:"outbox_pending"`
+	OutboxUnknown        int64                       `json:"outbox_unknown"`
+	DeliveryReview       int64                       `json:"delivery_review"`
 }
 
 func (s *Server) attachTelegramWorkspace(mux *http.ServeMux) {
@@ -132,7 +133,7 @@ func (s *Server) attachTelegramWorkspace(mux *http.ServeMux) {
 			respond(w, http.StatusOK, map[string]any{"enabled": false, "stores": []telegramWorkspaceStore{}, "can_configure": false, "can_manage_connections": false, "runtime_revision": 0})
 			return
 		}
-		stores, err := s.business.ListTelegramStoresAs(r.Context(), session.Token)
+		stores, err := s.business.ListTelegramStoreSetupAs(r.Context(), session.Token)
 		if err != nil {
 			businessError(w, err)
 			return
@@ -159,7 +160,7 @@ func (s *Server) attachTelegramWorkspace(mux *http.ServeMux) {
 		}
 		out := make([]telegramWorkspaceStore, 0, len(stores))
 		for _, store := range stores {
-			item := telegramWorkspaceStore{TelegramStore: store, ConnectionState: "not_configured"}
+			item := telegramWorkspaceStore{TelegramStore: store.TelegramStore, Setup: store.Setup, ConnectionState: "not_configured"}
 			if status, ok := statuses[store.BotID]; ok {
 				item.ConnectionState = telegramPublicState(status.State)
 				if status.LastError != "" {
