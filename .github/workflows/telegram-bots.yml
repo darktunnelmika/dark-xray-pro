@@ -4,7 +4,7 @@ on:
   push:
     branches: ["feat/telegram-*"]
   pull_request:
-    branches: [main, "feat/darkrestore-import-m2"]
+    branches: [main, "feat/darkrestore-import-m2", "fix/managed-runtime-backup"]
     paths:
       - "internal/telegrambot/**"
       - "internal/business/telegram*"
@@ -14,8 +14,13 @@ on:
       - "go.sum"
       - "scripts/ci/run_business_race.py"
       - "scripts/ci/test_run_business_race.py"
+      - "scripts/telegram-lab-preflight.py"
+      - "scripts/ci/test_telegram_lab_preflight.py"
       - "web/src/Telegram*"
+      - "web/src/App.tsx"
+      - "web/src/PageLoadBoundary.tsx"
       - "web/tests/telegram*"
+      - "web/tests/shell.spec.ts"
       - ".github/workflows/telegram-bots.yml"
 
 permissions:
@@ -55,6 +60,8 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+      - name: Verify read-only LAB preflight boundaries
+        run: python3 -m unittest discover -s scripts/ci -p test_telegram_lab_preflight.py
       - name: Verify transport, API, delivery, isolation and offline backup
         run: go test -race ./internal/telegrambot ./internal/telegramhub ./internal/telegramreport ./internal/api ./internal/hubstate ./internal/probackup ./internal/backupworker ./cmd/hub ./cmd/pro-backup -count=1 -timeout=18m
       - name: Check packages
@@ -73,8 +80,8 @@ jobs:
         working-directory: web
       - run: npx playwright install --with-deps chromium
         working-directory: web
-      - name: Verify owner, representative, disabled, error and mobile Persian flows
-        run: npx playwright test tests/telegram-stores.spec.ts
+      - name: Verify Telegram roles, mobile Persian and lazy page navigation
+        run: npx playwright test tests/telegram-stores.spec.ts tests/shell.spec.ts
         working-directory: web
       - uses: actions/upload-artifact@v4
         if: failure()

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { lazy, useEffect, useRef, useState } from "react";
 import {
   Bot, CheckCircle2, ChevronDown, ChevronRight, DatabaseBackup,
   CircleHelp, CreditCard, Globe2, HardDrive, LayoutDashboard,
@@ -6,16 +6,18 @@ import {
   Sun, Waypoints, ShoppingBag, X,
 } from "lucide-react";
 import { getFleet, type FleetSnapshot, type NodeSnapshot } from "./api";
-import InboundPlanner from "./InboundPlanner";
-import NodeManager from "./NodeManager";
-import NodeHistory from "./NodeHistory";
+const InboundPlanner = lazy(() => import("./InboundPlanner"));
+const NodeManager = lazy(() => import("./NodeManager"));
+const NodeHistory = lazy(() => import("./NodeHistory"));
 import DashboardOverview from "./DashboardOverview";
-import BusinessWorkspace from "./BusinessWorkspace";
+const BusinessWorkspace = lazy(() => import("./BusinessWorkspace"));
 import TelegramWorkspace from "./TelegramWorkspace";
-import NativeBackups from "./NativeBackups";
+const NativeBackups = lazy(() => import("./NativeBackups"));
 import { useSession } from "./session";
 import { allowed, useNavigation, type Page } from "./navigation";
 import LoginPage from "./LoginPage";
+
+import PageLoadBoundary from "./PageLoadBoundary";
 
 type Theme = "light" | "dark" | "system";
 type Language = "en" | "fa";
@@ -441,6 +443,7 @@ export default function App() {
 
           {infrastructureVisible && problem && <div className="error-banner" role="alert"><CircleHelp size={20} /><div><strong>{t.errorTitle}</strong><p>{t.errorLead} <span className="technical">{problem}</span></p></div></div>}
 
+          <PageLoadBoundary key={auth.session.user.id + ":" + page} language={language}>
           {page === "overview" && (
             <>
               <DashboardOverview fleet={fleet} history={history} language={language}
@@ -497,6 +500,7 @@ export default function App() {
               <section className="settings-row"><div><h2><ShieldCheck size={19}/>{t.boundary}</h2><p>{t.boundaryText}</p></div><span className="stable-chip"><CheckCircle2 size={16} />Local only</span></section>
             </div>
           )}
+          </PageLoadBoundary>
         </main>
         <footer className="footer"><span><ShieldCheck size={14} />{t.developing}</span><span>DARK XRAY PRO</span></footer>
       </div>

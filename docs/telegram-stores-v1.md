@@ -250,6 +250,13 @@ and hard-linked credential files are rejected. Tokens belong only in this privat
 config, never in metadata requests, the browser UI, environment examples, logs,
 or the business database.
 
+The running HUB user must also be able to traverse **every ancestor directory**.
+Checking only the immediate private directory as root is insufficient. In
+particular, the fresh installer creates `/etc/dark-xray-pro-lab` as root-owned
+mode 0700; a separate non-root HUB cannot read a child config through that parent
+without a reviewed access arrangement. Do not make the credential files public
+to solve a directory-access failure.
+
 `Open` performs local validation only. Starting the worker performs network I/O
 against the fixed `https://api.telegram.org` origin, verifies `getMe` against each
 expected bot ID, and refuses an existing webhook. It does not delete a webhook.
@@ -266,6 +273,41 @@ Telegram flag does not provision a node or satisfy them. Follow the
 [native inbound lifecycle](native-inbound-lifecycle.md) and
 [managed execution](managed-inbound-execution-v1.md) runbooks separately. Without
 the verified delivery bridge, payment/native registration can remain pending.
+
+### Read-only host preflight
+
+Before coordinating a LAB activation, run the bundled
+[`telegram-lab-preflight.py`](../scripts/telegram-lab-preflight.py) on the LAB
+host. Set `REVIEWED_BOT_COMMIT` to the full 40-character source revision of the
+reviewed combined panel-and-bot build, then run:
+
+```sh
+python3 scripts/telegram-lab-preflight.py --expected-revision "$REVIEWED_BOT_COMMIT"
+```
+
+The script inspects the fixed `dark-xray-pro-lab.service`, its running executable
+under the versioned LAB release directory, the effective process identity, and
+filesystem metadata for the fixed config/journal paths and their ancestors.
+It does not open credential or database contents, read process environment or
+command-line values, contact Telegram, write a file, install a release, or restart
+the service. Missing files, a different running revision, and unsafe ownership,
+permissions or paths must not be reported as ready. Unavailable observations stay
+unknown. It also checks that the observed process did not change while collecting
+the report.
+
+Exit 0 means only the POSIX metadata checks passed; exit 1 means blocked, and
+exit 2 means unavailable evidence or invalid arguments. JSON always labels the
+scope `host_metadata_only`. A missing journal is missing startup evidence; let
+the worker create its journal during the reviewed activation rather than making
+an empty file to satisfy this check. File contents, ACL/LSM access and binary
+build provenance are not verified by this metadata inspection.
+
+This is a host-metadata check. Even a successful metadata result does not verify
+bot identities, metadata registration, feature flags, published offers, native
+credit, connection readiness, real Stars settlement, or a mobile Telegram
+session. Those remain separate acceptance evidence. Keep the running LAB owned
+by the panel workstream on its accepted revision until the combined build is
+reviewed; rerunning the fresh installer is not an upgrade procedure.
 
 ## 5. Metadata registration is not runtime activation
 
@@ -387,7 +429,7 @@ For panel review, run from `web/`:
 npm ci
 npm run build
 npx playwright install --with-deps chromium
-npx playwright test tests/telegram-stores.spec.ts
+npx playwright test tests/telegram-stores.spec.ts tests/shell.spec.ts
 ```
 
 Record the tested revision and each result separately. Review scenarios include
@@ -398,6 +440,34 @@ renewal, bonus reservation competition and cancellation, late-payment bonus debt
 refund conservation, QR image substitution and exact decoded URI, consent
 revocation, and backup schema/data tampering. The workflow is
 [PRO Telegram stores](../.github/workflows/telegram-bots.yml).
+
+### Dedicated two-store live rehearsal
+
+The live rehearsal uses two new LAB bot identities, one store bound to native
+`owner`, one store bound to an enabled test representative, and two controlled
+customer identities. Bot IDs and manager/customer IDs must come from those actual
+accounts; the illustrative IDs above are not a seed. Publish a native LAB offer,
+set its explicit positive Stars price, and fund the test representative through
+the existing native ledger. Enable trial, referral and bonus policies only for
+the cases that require them. Confirm the combined panel-and-bot revision and
+native delivery prerequisites before activating the fixed private allowlist.
+
+| Case | Evidence required before recording a live pass |
+|---|---|
+| Store and role boundaries | Each bot resolves to its reviewed store; one Telegram customer remains separately scoped in both stores; revoked admin actions are rejected. |
+| Purchase and repeated callbacks | An actual successful Telegram payment is captured; one native client and one representative debit exist; retries reuse that paid order. |
+| Readiness and QR delivery | The native route/apply proof is current; Telegram returns a definite message receipt; the received QR decodes to the complete intended URI. A pending order or received QR does not prove a first connection. |
+| Renewal | The owned client is renewed once; recorded usage is retained; cumulative native units and the new terms-bound delivery are verified. |
+| Trial | One claim per customer/store, native volume charged once, and expiry exactly 24 hours from issuance. |
+| Bonus and refunds | Reservation, cancellation/expiry, an exact late capture and an authenticated full refund preserve the ledger. A refund is not initiated by this adapter; never fabricate a successful payment/refund flag. |
+| Support and mobile UX | The two accounts exercise help, reopen, supporter claim/return, and Persian mobile purchase/renewal screens in the actual Telegram client. |
+| Restart and encrypted backup | Controlled restart preserves orders, balances and inbox/outbox evidence. Stopped-writer backup includes business/config/journal together; quarantine validation succeeds without starting restored polling or replaying unknown sends. |
+
+Keep live transaction and customer identifiers in the private LAB evidence, not
+in this source document. Record the build revision and the actual outcome of
+each case. CI fixture results can substantiate code behavior, but cannot fill
+these live-evidence rows. A missing dedicated token, incompatible running build,
+or missing native delivery proof is an explicit pending prerequisite.
 
 The managed development environment has pre-existing process-epoch failures in
 two native business tests and four API usage tests. The business tests are

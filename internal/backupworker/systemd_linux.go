@@ -179,15 +179,53 @@ func (r *LinuxRuntime) checkRunning(ctx context.Context) error {
 			env[k] = v
 		}
 	}
-	if env["DARK_PRO_LAB_MODE"] != "1" || env[hubstate.EnableEnv] != "1" || env["DARK_PRO_ENABLE_OWNER_REPORT_BOT_V1"] != "0" || env["DARK_PRO_INBOUND_RUNTIME_DIR"] != "" {
+	if env["DARK_PRO_LAB_MODE"] != "1" || env[hubstate.EnableEnv] != "1" || env["DARK_PRO_ENABLE_OWNER_REPORT_BOT_V1"] != "0" {
 		return ErrPreflight
 	}
-	for _, key := range []string{"DARK_PRO_ENABLE_INBOUND_EXECUTION", "DARK_PRO_ENABLE_REMOTE_METERED_ADMISSION", "DARK_PRO_ENABLE_ROUTE_TRANSACTIONS", "DARK_PRO_ENABLE_METERED_ROUTE_TRANSACTIONS"} {
+	for _, key := range []string{"DARK_PRO_ENABLE_REMOTE_METERED_ADMISSION", "DARK_PRO_ENABLE_ROUTE_TRANSACTIONS", "DARK_PRO_ENABLE_METERED_ROUTE_TRANSACTIONS"} {
 		if env[key] != "" && env[key] != "0" {
 			return ErrPreflight
 		}
 	}
+	dir, e := managedRuntimeDirectory(env, HubStateDirectory)
+	if e != nil {
+		return e
+	}
+	return r.checkManagedRuntimeDirectory(dir)
+}
+
+func (r *LinuxRuntime) checkManagedRuntimeDirectory(dir string) error {
+	if dir == "" {
+		return nil
+	}
+	st, err := os.Lstat(dir)
+	if err != nil || canonical(dir) != nil || !st.IsDir() || !owner(st, r.uid) || st.Mode().Perm()&0077 != 0 {
+		return ErrPreflight
+	}
 	return nil
+}
+
+// Admission only allows the fixed private managed journal. The offline CLI
+// still acquires the journal writer lock and proves all recorded processes
+// stopped before copying it. This check grants no bypass of that proof.
+func managedRuntimeDirectory(env map[string]string, root string) (string, error) {
+	flag, dir := env["DARK_PRO_ENABLE_INBOUND_EXECUTION"], env["DARK_PRO_INBOUND_RUNTIME_DIR"]
+	if flag != "" && flag != "0" && flag != "1" {
+		return "", ErrPreflight
+	}
+	if dir == "" {
+		if flag == "1" {
+			return "", ErrPreflight
+		}
+		return "", nil
+	}
+	if dir != filepath.Join(root, "inbound-execution") {
+		return "", ErrPreflight
+	}
+	if flag == "1" && (env["DARK_PRO_ENABLE_NATIVE_INBOUNDS"] != "1" || env["DARK_PRO_ENABLE_USAGE_LEDGER"] != "1") {
+		return "", ErrPreflight
+	}
+	return dir, nil
 }
 
 func (r *LinuxRuntime) Preflight(ctx context.Context) error {

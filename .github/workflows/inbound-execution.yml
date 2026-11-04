@@ -64,6 +64,8 @@ jobs:
           go mod verify
           go mod tidy -diff
           go vet ./...
+      - name: Verify read-only LAB preflight boundaries
+        run: python3 -m unittest discover -s scripts/ci -p test_telegram_lab_preflight.py
       - name: Exercise all other application packages under the race detector
         shell: bash
         run: |
