@@ -226,6 +226,63 @@ test("owner attaches a pinned signed handoff in Clients at 320px without a brows
  await transfer.getByRole("button",{name:"بازیابی رسید آماده‌سازی",exact:true}).click();
  await expect(transfer.getByRole("status")).toContainText("رسید آماده‌سازی ثبت شد");
  expect(recoveries).toBe(2);
+ const execution=transfer.getByRole("region",{name:"اجرای طرح انتقال‌یافته"});
+ let foreignExecution=true;
+ const nativeReceipt={event_id:promotionBody.promotion_event_id,inbound_id:802,plan_revision:1,source_inbound_revision:1,inbound_revision:2,node_id:"synthetic-node",installation_id:"a".repeat(32),draft_revision:1,client_ids:["dr-"+sha.slice(0,20)],review_sha256:"e".repeat(64),promoted:true,runtime_changed:false,subscription_published:false,created_unix:1,replayed:false};
+ await page.route("**/api/v1/workspace/native-inbound-plans/802/promotion",route=>route.fulfill({json:{available:true,scope:"single_direct_tcp_reality_loopback",promoted:true,blockers:[],receipt:{...nativeReceipt,client_ids:foreignExecution?["foreign"]:nativeReceipt.client_ids}}}));
+ await execution.getByRole("button",{name:"بررسی و بازکردن کنترل‌های اجرا",exact:true}).click();
+ await expect(execution.getByRole("alert")).toBeVisible();
+ await expect(execution.getByRole("region",{name:"سلامت اجرای مشتری واردشده"})).toHaveCount(0);
+ foreignExecution=false;
+ await page.route("**/api/v1/workspace/metered-route-transactions",route=>route.fulfill({json:{enabled:false,scope:"metered_tcp_loopback_lab"}}));
+ let preparation:Record<string,unknown>|undefined,healthRound:Record<string,unknown>|undefined,applied=false,prepares=0,rounds=0;
+ const binding={initial_apply_sha:"1".repeat(64),apply_command_id:"2".repeat(32),stage_id:"3".repeat(32),epoch_id:"4".repeat(32)};
+ const identity={inbound_id:802,promotion_event_id:nativeReceipt.event_id,node_id:nativeReceipt.node_id,installation_id:nativeReceipt.installation_id};
+ await page.route("**/api/v1/workspace/native-inbound-plans/802/initial-health",route=>route.fulfill({json:{
+  enabled:true,available:true,scope:"lab_initial_apply",...identity,direct_port:21186,inbound_revision:2,draft_revision:1,prepared:!!preparation,can_prepare:!preparation,eligible:applied,blockers:[],preparation,client_ids:nativeReceipt.client_ids,server_time_unix_milli:Date.now(),...(applied?binding:{}),latest_round:healthRound
+ }}));
+ await page.route("**/api/v1/workspace/native-inbound-plans/802/initial-health/prepare",route=>{
+  const b=route.request().postDataJSON();expect(b.confirmed).toBe(true);expect(b.promotion_event_id).toBe(nativeReceipt.event_id);
+  prepares++;preparation={...identity,event_id:b.event_id,prepared:true,created_unix_nano:Date.now()*1e6,replayed:prepares>1,server_time_unix_milli:Date.now()};
+  return route.abort("failed");
+ });
+ await page.route("**/api/v1/workspace/native-inbound-plans/802/initial-health/rounds",route=>{
+  const b=route.request().postDataJSON();expect(b.initial_apply_sha).toBe(binding.initial_apply_sha);expect(b.confirmed).toBe(true);rounds++;
+  const created=Date.now()*1e6;
+  healthRound={...identity,...binding,id:b.id,scope:"lab_initial_apply",endpoint_sha:"5".repeat(64),manifest_sha:"6".repeat(64),created_unix_nano:created,expires_unix_nano:created+7e9,members:[{inbound_id:802,intent_id:"7".repeat(32),port:21186,state:"accepted",challenge_id:"8".repeat(32),accepted_unix_nano:created+1e6}],state:"complete",current:true,replayed:false,server_time_unix_milli:Date.now()};
+  return route.fulfill({json:healthRound});
+ });
+ const subscriptionWrites:string[]=[];
+ page.on("request",r=>{if(r.method()==="POST"&&/subscription/.test(r.url()))subscriptionWrites.push(r.url());});
+ await execution.getByRole("button",{name:"بررسی و بازکردن کنترل‌های اجرا",exact:true}).click();
+ const health=execution.getByRole("region",{name:"سلامت اجرای مشتری واردشده"});
+ await expect(health.getByRole("button",{name:"آماده‌سازی آزمون بدون کسر حجم",exact:true})).toBeEnabled();
+ await expect(health.getByRole("button",{name:"آزمون اتصال اجرای فعلی",exact:true})).toBeDisabled();
+ page.once("dialog",d=>d.accept());
+ await health.getByRole("button",{name:"آماده‌سازی آزمون بدون کسر حجم",exact:true}).click();
+ await health.getByRole("button",{name:"به‌روزرسانی سلامت اجرا",exact:true}).click();
+ await expect(health.getByRole("button",{name:"تکرار همان درخواست سلامت",exact:true})).toHaveCount(0);
+ expect(prepares).toBe(1);
+ applied=true;
+ await health.getByRole("button",{name:"به‌روزرسانی سلامت اجرا",exact:true}).click();
+ await expect(health.getByRole("button",{name:"آزمون اتصال اجرای فعلی",exact:true})).toBeEnabled();
+ page.once("dialog",d=>d.accept());
+ await health.getByRole("button",{name:"آزمون اتصال اجرای فعلی",exact:true}).click();
+ await expect(health.getByRole("status")).toContainText("اتصال همین اجرا در مهلت اثبات تأیید شد");
+ expect(rounds).toBe(1);expect(subscriptionWrites).toEqual([]);
+
+ // An expired valid receipt is history, never current health or an auto-renewal.
+ const past=Date.now()*1e6-9e9;
+ healthRound={...healthRound,created_unix_nano:past,expires_unix_nano:past+7e9,current:false,state:"expired",members:[{inbound_id:802,intent_id:"7".repeat(32),port:21186,state:"accepted",challenge_id:"8".repeat(32),accepted_unix_nano:past+1e6}]};
+ await health.getByRole("button",{name:"به‌روزرسانی سلامت اجرا",exact:true}).click();
+ await expect(health.getByRole("status")).toHaveText("سلامت فعلی تأیید نشده است.");
+ expect(rounds).toBe(1);
+ // A mismatched latest proof clears the prior success, even if marked current.
+ healthRound={...healthRound,client_id:"foreign"};
+ await health.getByRole("button",{name:"به‌روزرسانی سلامت اجرا",exact:true}).click();
+ await expect(health.getByRole("alert")).toBeVisible();
+ await expect(health.getByText("اتصال همین اجرا در مهلت اثبات تأیید شد",{exact:false})).toHaveCount(0);
+
 
  let executionState="pending";
  let probe:Record<string,unknown>|undefined;

@@ -17,6 +17,7 @@ import (
 
 	"github.com/darktunnelmika/dark-xray-pro/internal/api"
 	"github.com/darktunnelmika/dark-xray-pro/internal/business"
+	mx "github.com/darktunnelmika/dark-xray-pro/internal/managedxray"
 	"github.com/darktunnelmika/dark-xray-pro/internal/noderegistry"
 	"github.com/darktunnelmika/dark-xray-pro/internal/telemetry"
 )
@@ -52,6 +53,9 @@ func TestPreparedPromotionThroughOwnerHTTP(t *testing.T) {
 			return srv.StageDarkRestoreLocalHandoff(ctx, pins.Path, pins.SHA, pins.PublicPath, pins.PublicSHA)
 		},
 		func() error { return srv.EnableMeteredRouteNodesForPlanPromotion([]business.MeteredRouteNode{node}) },
+		func() error {
+			return srv.EnableInboundInitialHealth(mx.ProtocolHealthEndpoint{Address: "11.0.0.1:443", ServerName: "verifier.example.com", CertificateSHA: strings.Repeat("a", 64)})
+		},
 	} {
 		if err := setup(); err != nil {
 			t.Fatal(err)
@@ -135,5 +139,42 @@ func TestPreparedPromotionThroughOwnerHTTP(t *testing.T) {
 	channel, err := store.MeteredRouteChannel(ctx, key, node.NodeID)
 	if err != nil || len(channel.Commands) != 0 || channel.Status.Observed.ProcessReady {
 		t.Fatal("promotion started execution", err)
+	}
+
+	healthPath := "/api/v1/workspace/native-inbound-plans/802/initial-health"
+	w = request("GET", healthPath, nil)
+	var health struct {
+		business.InitialApplyHealthState
+		Enabled   bool `json:"enabled"`
+		Available bool `json:"available"`
+	}
+	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &health) != nil || !health.Enabled || !health.Available || !health.CanPrepare || health.Eligible {
+		t.Fatal("imported health without token", w.Code, w.Body.String())
+	}
+	prepare := map[string]any{"event_id": strings.Repeat("b", 32), "promotion_event_id": receipt.PromotionEventID, "confirmed": true}
+	w = request("POST", healthPath+"/prepare", prepare)
+	var probe business.InitialApplyHealthPreparation
+	if w.Code != 201 || json.Unmarshal(w.Body.Bytes(), &probe) != nil || !probe.Prepared || probe.Replayed {
+		t.Fatal("nonbillable preparation", w.Code, w.Body.String())
+	}
+	w = request("POST", healthPath+"/prepare", prepare)
+	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &probe) != nil || !probe.Replayed {
+		t.Fatal("preparation replay", w.Code, w.Body.String())
+	}
+	w = request("GET", healthPath, nil)
+	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &health) != nil || !health.Prepared || health.CanPrepare || health.Eligible {
+		t.Fatal("preparation guessed Apply", w.Code, w.Body.String())
+	}
+	w = request("POST", healthPath+"/rounds", map[string]any{"id": strings.Repeat("c", 32), "initial_apply_sha": strings.Repeat("d", 64), "confirmed": true})
+	if w.Code < 400 {
+		t.Fatal("health accepted before Apply", w.Code, w.Body.String())
+	}
+	current, _ := store.Client(ctx, id)
+	if current.DeploymentState != "pending_node_apply" {
+		t.Fatal("health preparation activated client")
+	}
+	finalBalances, _ := store.ListRepresentatives(ctx, 100, 0)
+	if !reflect.DeepEqual(balances, finalBalances) {
+		t.Fatal("health preparation changed balances")
 	}
 }
