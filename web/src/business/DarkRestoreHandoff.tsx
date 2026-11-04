@@ -1,4 +1,5 @@
 import { useState } from "react";
+import DarkRestorePreparedPromotion from "./DarkRestorePreparedPromotion";
 import DarkRestoreConnectionCheck from "./DarkRestoreConnectionCheck";
 import { api, mutation } from "../session";
 import type { BusinessModel } from "./useBusinessWorkspace";
@@ -75,11 +76,12 @@ export default function DarkRestoreHandoff({model}:{model:BusinessModel}) {
  const [executionError,setExecutionError]=useState(false);
  const [settlement,setSettlement]=useState<{up:string;down:string}|null>(null);
  const [settlementError,setSettlementError]=useState(false);
+ const [prepared,setPrepared]=useState<{inbound_id:number;plan_revision:number;inbound_revision:number}|null>(null);
  const [busy,setBusy]=useState(false);
  const [error,setError]=useState(false);
  const fmt=(value:string)=>{try{return BigInt(value).toLocaleString(fa?"fa-IR":"en-US")+" B";}catch{return "—";}};
  async function inspect() {
-  setBusy(true);setError(false);setStaged(null);setReceipt(null);setReadiness(null);setExecution(null);setExecutionError(false);
+  setBusy(true);setError(false);setStaged(null);setReceipt(null);setPrepared(null);setReadiness(null);setExecution(null);setExecutionError(false);
   try {
    const result=await api<Handoff>(restoreAPI+"/handoff");
    if (!validHandoff(result)) throw Error("unverified handoff");
@@ -98,7 +100,7 @@ export default function DarkRestoreHandoff({model}:{model:BusinessModel}) {
     result.source_settlement?.source_id!==staged.source_settlement.source_id ||
     result.source_settlement?.settled_historical_bytes!==staged.source_settlement.settled_historical_bytes)
      throw Error("unverified attachment receipt");
-   setReceipt(result);setReadiness(null);setExecution(null);setExecutionError(false);model.reload();
+   setReceipt(result);setPrepared(null);setReadiness(null);setExecution(null);setExecutionError(false);model.reload();
   } catch { setError(true); } finally { setBusy(false); }
  }
  async function inspectReadiness() {
@@ -228,6 +230,7 @@ export default function DarkRestoreHandoff({model}:{model:BusinessModel}) {
      const result=await mutation<{scope:string;client_id:string;content:string;applied:boolean;path_verified:boolean}>(restoreAPI+"/handoff/prepare",
       {handoff_sha256:staged.handoff_sha256,event_id:"prepare-"+staged.handoff_sha256,inbound_id:ids[0],plan_revision:ids[1],inbound_revision:ids[2]},model.session.csrf_token);
      if(result.scope!=="darkrestore_prepared_not_applied_v1"||result.client_id!==receipt.client_id||result.applied!==false||result.path_verified!==false||!result.content) throw Error("invalid preparation");
+     setPrepared({inbound_id:ids[0],plan_revision:ids[1],inbound_revision:ids[2]});
      const url=URL.createObjectURL(new Blob([result.content],{type:"text/plain"}));
      const a=document.createElement("a");a.href=url;a.download="prepared-subscription.txt";a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
     } catch {setError(true);} finally {setBusy(false);}
@@ -236,9 +239,17 @@ export default function DarkRestoreHandoff({model}:{model:BusinessModel}) {
     <label>{fa?"نسخه طرح":"Plan revision"}<input required name="plan_revision" type="number" min="1"/></label>
     <label>{fa?"نسخه اینباند":"Inbound revision"}<input required name="inbound_revision" type="number" min="1"/></label>
     <button disabled={busy}>{fa?"دانلود اشتراک پیش از فعال‌سازی":"Download prepared subscription"}</button>
+    <button type="button" disabled={busy} onClick={e=>{
+     const form=e.currentTarget.form;if(!form)return;
+     const values=new FormData(form);
+     const ids=["inbound_id","plan_revision","inbound_revision"].map(k=>Number(values.get(k)));
+     if(ids.some(v=>!Number.isSafeInteger(v)||v<1)){setError(true);return;}
+     setError(false);setPrepared({inbound_id:ids[0],plan_revision:ids[1],inbound_revision:ids[2]});
+    }}>{fa?"بررسی انتقال این طرح":"Review this setup's transfer"}</button>
    </form>}
+   {prepared&&staged&&receipt&&<DarkRestorePreparedPromotion key={`${model.session.csrf_token}:${receipt.client_id}:${staged.handoff_sha256}:${prepared.inbound_id}:${prepared.plan_revision}:${prepared.inbound_revision}`} model={model} client={receipt.client_id} handoff={staged.handoff_sha256} target={prepared} disabled={busy} onBusyChange={setBusy}/>}
    {[...readiness.activation_blockers,...readiness.verification_blockers].length>0&&<ul>
-    {[...readiness.activation_blockers,...readiness.verification_blockers].map(x=><li key={x}><code>{x}</code></li>)}
+   {[...readiness.activation_blockers,...readiness.verification_blockers].map(x=><li key={x}><code>{x}</code></li>)}
    </ul>}
   </div>}
   {error&&<p role="alert">{fa?"شواهد یا رسید قابل تأیید نبود. پس از بررسی، دوباره رسید را بازیابی کن.":"Handoff or receipt could not be verified. Recheck and recover the receipt."}</p>}

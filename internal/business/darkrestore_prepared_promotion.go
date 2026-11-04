@@ -302,3 +302,28 @@ func promotionClientIDs(ctx context.Context, q *sql.Tx, inbound uint64) []string
 	}
 	return out
 }
+
+// DarkRestorePreparedPromotionReceipt reads the owner-scoped immutable result
+// after a lost response. It does not infer Apply, delivery or activation.
+func (s *Store) DarkRestorePreparedPromotionReceipt(ctx context.Context, token, client string) (DarkRestorePreparedPromotionReceiptV1, error) {
+	var zero DarkRestorePreparedPromotionReceiptV1
+	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return zero, err
+	}
+	defer tx.Rollback()
+	if _, err = ownershipOwner(ctx, tx, token); err != nil {
+		return zero, err
+	}
+	if !idRE.MatchString(client) {
+		return zero, ErrInvalid
+	}
+	receipt, err := readDarkRestorePreparedPromotion(ctx, tx, client)
+	if err != nil {
+		return zero, err
+	}
+	if receipt == nil {
+		return zero, ErrNotFound
+	}
+	return *receipt, nil
+}

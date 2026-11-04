@@ -124,12 +124,15 @@ location / {{ return 403; }}
                           ("/api/v1/workspace/dark-restore/handoff/quarantine", {"POST"}),
                           ("/api/v1/workspace/dark-restore/handoff/quarantine/admission", {"POST"}),
                           ("/api/v1/workspace/dark-restore/handoff/attach", {"POST"}),
-                          ("/api/v1/workspace/dark-restore/handoff/prepare", {"POST"}))
+                          ("/api/v1/workspace/dark-restore/handoff/prepare", {"POST"}),
+                          ("/api/v1/workspace/dark-restore/handoff/promotion", {"GET", "HEAD", "POST"}),
+                          ("/api/v1/workspace/dark-restore/handoff/promotion/preview", {"POST"}))
                 for path, allowed in routes:
                     check(path, allowed)
                     check(path + "/extra/unknown", set())
                     check(path + "/", set())
-                for path in (seller + "/clients", seller + "/clients/a/extend", "/api/v1/workspace/dark-restore/handoff/quarantine/connection-check"):
+                for path in (seller + "/clients", seller + "/clients/a/extend", "/api/v1/workspace/dark-restore/handoff/quarantine/connection-check",
+                             "/api/v1/workspace/dark-restore/handoff/promotion", "/api/v1/workspace/dark-restore/handoff/promotion/preview"):
                     before = len(Backend.seen)
                     assert request(port, path, "POST", b"x" * 4097) == 413
                     assert len(Backend.seen) == before, "oversized order reached backend"

@@ -24,7 +24,18 @@ type preparedPromotionFixture struct {
 
 func newPreparedPromotionFixture(t *testing.T) preparedPromotionFixture {
 	t.Helper()
-	f, evidence, key, _ := preparedCutoverWithFilesAndInitialApply(t, nil, true)
+	return preparedPromotionWithFiles(t, nil)
+}
+
+func PreparedPromotionHTTPFixture(t *testing.T) (*Store, string, []byte, PreparedHandoffFiles, MeteredRouteNode, string) {
+	var files PreparedHandoffFiles
+	f := preparedPromotionWithFiles(t, &files)
+	return f.s, f.evidence.ClientID, f.key, files, f.node, ownershipPassword
+}
+
+func preparedPromotionWithFiles(t *testing.T, files *PreparedHandoffFiles) preparedPromotionFixture {
+	t.Helper()
+	f, evidence, key, _ := preparedCutoverWithFilesAndInitialApply(t, files, true)
 	ctx := context.Background()
 	node := MeteredRouteNode{NodeID: "m5-prepared-promotion-node", InstallationID: strings.Repeat("8", 32), BinarySHA: strings.Repeat("9", 64)}
 	profile := nativeInput()
@@ -336,5 +347,29 @@ func TestDarkRestoreNativeApplyStoreAdapterPositiveExactChainAndStalePayer(t *te
 	ownershipMove(t, f.ownershipFixture, "m5-prepared-post-apply-payer-change-0001", ClientOwnershipIntent{ClientIDs: []string{f.evidence.ClientID}, RepresentativeID: "rep-third", Reason: "Synthetic current payer drift after native apply"})
 	if _, err = f.s.ProjectDarkRestoreNativeApplyEvidenceV1(ctx, f.key, f.owner.Token, f.evidence.ClientID, 802, result.round.ID, pins); !errors.Is(err, ErrDarkRestoreCutover) {
 		t.Fatal("stale payer reused native apply evidence", err)
+	}
+}
+
+func TestPreparedDarkRestorePromotionReceiptOwnerRecovery(t *testing.T) {
+	ctx := context.Background()
+	f := newPreparedPromotionFixture(t)
+	defer f.s.Close()
+	if _, err := f.s.DarkRestorePreparedPromotionReceipt(ctx, f.owner.Token, f.evidence.ClientID); !errors.Is(err, ErrNotFound) {
+		t.Fatal("missing receipt", err)
+	}
+	preview, in := f.reviewed(t)
+	committed, err := f.s.CommitDarkRestorePreparedPromotionV1(ctx, f.key, f.owner.Token, preview.ReviewSHA256, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := f.s.DarkRestorePreparedPromotionReceipt(ctx, f.owner.Token, in.ClientID)
+	if err != nil || !reflect.DeepEqual(got, committed) {
+		t.Fatal("recovery changed receipt", err)
+	}
+	if _, err = f.s.DarkRestorePreparedPromotionReceipt(ctx, f.rep.Token, in.ClientID); !errors.Is(err, ErrOwnershipDenied) {
+		t.Fatal("representative read owner receipt", err)
+	}
+	if got.NativeApplyRecorded || got.SubscriptionActivated || got.AuthorizesFurtherMutation {
+		t.Fatal("recovery granted further authority")
 	}
 }

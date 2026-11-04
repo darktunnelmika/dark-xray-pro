@@ -173,6 +173,60 @@ test("owner attaches a pinned signed handoff in Clients at 320px without a brows
   native_apply_recorded:false,initial_apply_subscription_delivered:false,native_activation_authorized:false,
   activation_blockers:["native_apply_not_recorded"],verification_blockers:["global_source_custody_not_proven"]
  }}));
+ await panel.getByRole("button",{name:"بررسی آمادگی فعال‌سازی"}).click();
+ await page.route("**/api/v1/workspace/dark-restore/handoff/prepare",route=>route.fulfill({json:{
+  scope:"darkrestore_prepared_not_applied_v1",client_id:"dr-"+sha.slice(0,20),content:"synthetic-prepared-subscription",applied:false,path_verified:false
+ }}));
+ await panel.getByLabel("شناسه اینباند",{exact:true}).fill("802");
+ await panel.getByLabel("نسخه طرح",{exact:true}).fill("1");
+ await panel.getByLabel("نسخه اینباند",{exact:true}).fill("1");
+ await panel.getByRole("button",{name:"دانلود اشتراک پیش از فعال‌سازی"}).click();
+ const transfer=panel.getByRole("region",{name:"آماده‌سازی انتقال مشتری"});
+ await expect(transfer).toHaveCount(1);
+ const promotionBody={handoff_sha256:evidence,event_id:`drp-${evidence}-802-1-1`,promotion_event_id:`drn-${evidence}-802-1-1`,inbound_id:802,plan_revision:1,inbound_revision:1,reason:"Owner-reviewed prepared Dark Restore promotion"};
+ let previews=0,commits=0,recoveries=0,foreign=true;
+ await page.route("**/api/v1/workspace/dark-restore/handoff/promotion/preview",route=>{
+  previews++;expect(route.request().postDataJSON()).toEqual(promotionBody);
+  return route.fulfill({json:{scope:"darkrestore_prepared_native_promotion_v1",client_id:foreign?"foreign":"dr-"+sha.slice(0,20),inbound_id:802,authorizes_mutation:false,eligible:true,blockers:[],review_sha256:"d".repeat(64),transition_sha256:sha,pre_state_sha256:sha,post_state_sha256:sha,promotion:{inbound_id:802,plan_revision:1,inbound_revision:1,eligible:true,client_ids:["dr-"+sha.slice(0,20)],runtime_changed:false,subscription_published:false,review_sha256:"e".repeat(64),node_id:"synthetic-node"}}});
+ });
+ await page.route("**/api/v1/workspace/dark-restore/handoff/promotion",route=>{
+  if(route.request().method()==="POST"){
+   commits++;expect(route.request().postDataJSON()).toEqual({...promotionBody,confirmed:true,review_sha256:"d".repeat(64),promotion_review_sha256:"e".repeat(64)});
+   return route.abort("failed");
+  }
+  recoveries++;return route.fulfill({json:{scope:"darkrestore_prepared_native_promotion_v1",...promotionBody,client_id:"dr-"+sha.slice(0,20),prepared_inbound_revision:1,native_promotion_recorded:true,native_apply_recorded:false,subscription_activated:false,authorizes_further_mutation:false,transition_sha256:sha,prepared_content_sha256:sha}});
+ });
+ await transfer.getByRole("button",{name:"پیش‌نمایش انتقال",exact:true}).click();
+ await expect(transfer.getByRole("alert")).toBeVisible();
+ await expect(transfer.getByRole("button",{name:"تأیید آماده‌سازی انتقال",exact:true})).toHaveCount(0);
+ foreign=false;
+ await transfer.getByRole("button",{name:"پیش‌نمایش انتقال",exact:true}).click();
+ await expect(transfer.getByText("synthetic-node",{exact:true})).toBeVisible();
+ expect(commits).toBe(0);
+ page.once("dialog",d=>d.dismiss());
+ await transfer.getByRole("button",{name:"تأیید آماده‌سازی انتقال",exact:true}).click();
+ expect(commits).toBe(0);
+ page.once("dialog",d=>d.accept());
+ await transfer.getByRole("button",{name:"تأیید آماده‌سازی انتقال",exact:true}).click();
+ await expect(transfer.getByRole("button",{name:"تکرار همان تأیید",exact:true})).toBeEnabled();
+ await expect(transfer.getByRole("button",{name:"پیش‌نمایش انتقال",exact:true})).toBeDisabled();
+ await transfer.getByRole("button",{name:"بازیابی رسید آماده‌سازی",exact:true}).click();
+ await expect(transfer.getByRole("status")).toContainText("رسید آماده‌سازی ثبت شد");
+ expect({previews,commits,recoveries}).toEqual({previews:2,commits:1,recoveries:1});
+ // Recover after reload without re-delivering a now-promoted subscription.
+ await page.reload();
+ await panel.getByRole("button",{name:"بررسی تحویل تأییدشدهٔ سرور"}).click();
+ await panel.getByRole("button",{name:"ثبت یا بازیابی رسید اتصال"}).click();
+ await panel.getByRole("button",{name:"بررسی آمادگی فعال‌سازی"}).click();
+ await panel.getByLabel("شناسه اینباند",{exact:true}).fill("802");
+ await panel.getByLabel("نسخه طرح",{exact:true}).fill("1");
+ await panel.getByLabel("نسخه اینباند",{exact:true}).fill("1");
+ await panel.getByRole("button",{name:"بررسی انتقال این طرح",exact:true}).click();
+ await expect(transfer.getByRole("button",{name:"بازیابی رسید آماده‌سازی",exact:true})).toBeVisible();
+ await transfer.getByRole("button",{name:"بازیابی رسید آماده‌سازی",exact:true}).click();
+ await expect(transfer.getByRole("status")).toContainText("رسید آماده‌سازی ثبت شد");
+ expect(recoveries).toBe(2);
+
  let executionState="pending";
  let probe:Record<string,unknown>|undefined;
  const probeFor=(state:string)=>({
@@ -272,7 +326,7 @@ test("owner attaches a pinned signed handoff in Clients at 320px without a brows
  await expect(panel.getByText("رسید کامل و مطابق این کاربر در دسترس نیست؛ دوباره بررسی کن.")).toBeVisible();
  await panel.getByRole("button",{name:"ثبت یا بازیابی رسید اتصال"}).click();
  await expect(panel.getByText("رسید پیشین بازیابی شد",{exact:false})).toBeVisible();
- expect(attached).toBe(2);
+ expect(attached).toBe(3);
  const progressBase={client_id:"dr-"+sha.slice(0,20),source_sha256:sha,source_id:"legacy-a",
   source_scope:"pinned_inventory_plus_independent_coverage_and_retirement_receipts",
   source_epoch_settled:true,global_source_custody_verified:false,native_baseline_complete:true,

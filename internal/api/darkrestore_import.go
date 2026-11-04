@@ -168,6 +168,33 @@ func (s *Server) attachDarkRestoreImport(mux *http.ServeMux) {
 			state, err := s.business.DarkRestoreCutoverReadinessV1(ctx, proof.SourceSHA, proof.SourceID)
 			return state.ClientID, err
 		}
+		handle("GET "+restoreBase+"/handoff/promotion", false, func(w http.ResponseWriter, r *http.Request, token string) {
+			client, err := stagedClient(r.Context())
+			if err != nil {
+				businessError(w, err)
+				return
+			}
+			receipt, err := s.business.DarkRestorePreparedPromotionReceipt(r.Context(), token, client)
+			if err != nil {
+				businessError(w, err)
+				return
+			}
+			respond(w, http.StatusOK, receipt)
+		})
+		for _, route := range []struct {
+			suffix  string
+			preview bool
+		}{{"/promotion/preview", true}, {"/promotion", false}} {
+			preview := route.preview
+			handle("POST "+restoreBase+"/handoff"+route.suffix, true, func(w http.ResponseWriter, r *http.Request, token string) {
+				client, err := stagedClient(r.Context())
+				if err != nil {
+					businessError(w, err)
+					return
+				}
+				s.prepareDarkRestorePromotion(w, r, token, client, handoff.digest, preview)
+			})
+		}
 		handle("GET "+restoreBase+"/handoff/quarantine/settlement", false, func(w http.ResponseWriter, r *http.Request, token string) {
 			client, err := stagedClient(r.Context())
 			if err != nil {
