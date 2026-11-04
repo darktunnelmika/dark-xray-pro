@@ -1,6 +1,7 @@
 package darkrestore
 
 import (
+	"bytes"
 	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/sha256"
@@ -147,6 +148,21 @@ func TestLocalHandoffRetirementCoverageV1(t *testing.T) {
 	}
 	if _, _, _, mutation, err := f.retirements[0].Evidence(); err != nil || mutation {
 		t.Fatal("verified receipt granted mutation", mutation, err)
+	}
+	durable, err := CheckDeclaredSourceRetirementsV1(f.inventory, f.inventorySH, f.retirements, retirementTestDestination)
+	if err != nil || durable.BundleSHA != out.BundleSHA {
+		t.Fatal("durable revalidation changed coverage", durable, err)
+	}
+	retirementRaw, sourcePublic, witnessRaw, witnessPublic, pins, err := f.retirements[0].Documents()
+	if err != nil || !bytes.Equal(retirementRaw, f.raw[0]) || !bytes.Equal(sourcePublic, f.sourceKeys[0]) ||
+		!bytes.Equal(witnessRaw, f.witnessRaw[0]) || !bytes.Equal(witnessPublic, f.witnessKeys[0]) || pins != f.pins[0] {
+		t.Fatal("verified documents changed", err)
+	}
+	retirementRaw[0], sourcePublic[0], witnessRaw[0], witnessPublic[0] = 0, 0, 0, 0
+	again, againSource, againWitness, againWitnessKey, _, err := f.retirements[0].Documents()
+	if err != nil || !bytes.Equal(again, f.raw[0]) || !bytes.Equal(againSource, f.sourceKeys[0]) ||
+		!bytes.Equal(againWitness, f.witnessRaw[0]) || !bytes.Equal(againWitnessKey, f.witnessKeys[0]) {
+		t.Fatal("document accessor leaked mutable storage", err)
 	}
 }
 

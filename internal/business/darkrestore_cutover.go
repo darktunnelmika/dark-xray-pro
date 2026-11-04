@@ -16,33 +16,47 @@ import (
 )
 
 type DarkRestoreCutoverEvidenceReceiptV1 struct {
-	ClientID                 string                                `json:"client_id"`
-	OriginalEventID          string                                `json:"original_import_event_id"`
-	ActorUserID              string                                `json:"actor_user_id"`
-	SourceSHA256             string                                `json:"source_sha256"`
-	SourceID                 string                                `json:"source_id"`
-	Inventory                darkrestore.LocalHandoffInventoryV1   `json:"inventory"`
-	InventorySHA256          string                                `json:"inventory_sha256"`
-	CoverageApproval         darkrestore.HandoffCoverageApprovalV1 `json:"coverage_approval"`
-	CoverageApprovalSHA256   string                                `json:"coverage_approval_sha256"`
-	CoverageAuthoritySHA256  string                                `json:"coverage_authority_public_key_sha256"`
-	DestinationSHA           string                                `json:"destination_sha256"`
-	DestinationStateSHA      string                                `json:"destination_state_sha256"`
-	ImportReceiptSHA         string                                `json:"import_receipt_sha256"`
-	NativeBaselineSHA        string                                `json:"native_baseline_sha256"`
-	BillingAttributionSHA    string                                `json:"billing_attribution_sha256"`
-	TransitionSHA            string                                `json:"transition_sha256"`
-	NativeDocument           []byte                                `json:"native_document,omitempty"`
-	NativePublicKey          []byte                                `json:"native_public_key,omitempty"`
-	NativePins               darkrestore.NativeBaselinePinsV1      `json:"native_pins,omitzero"`
-	SettledHistoricalBytes   int64                                 `json:"settled_historical_bytes"`
-	CurrentFiniteEntitlement int64                                 `json:"current_finite_entitlement_bytes"`
-	NativeBaselineUplink     int64                                 `json:"native_baseline_uplink"`
-	NativeBaselineDownlink   int64                                 `json:"native_baseline_downlink"`
-	RemainingBudgetBytes     int64                                 `json:"remaining_budget_bytes"`
-	TransitionOpenedUnixNano int64                                 `json:"transition_opened_unix_nano,string"`
-	CreatedUnix              int64                                 `json:"created_unix"`
-	Replayed                 bool                                  `json:"replayed"`
+	ClientID                 string                                       `json:"client_id"`
+	OriginalEventID          string                                       `json:"original_import_event_id"`
+	ActorUserID              string                                       `json:"actor_user_id"`
+	SourceSHA256             string                                       `json:"source_sha256"`
+	SourceID                 string                                       `json:"source_id"`
+	Inventory                darkrestore.LocalHandoffInventoryV1          `json:"inventory"`
+	InventorySHA256          string                                       `json:"inventory_sha256"`
+	CoverageApproval         darkrestore.HandoffCoverageApprovalV1        `json:"coverage_approval"`
+	CoverageApprovalSHA256   string                                       `json:"coverage_approval_sha256"`
+	CoverageAuthoritySHA256  string                                       `json:"coverage_authority_public_key_sha256"`
+	RetirementBundleSHA256   string                                       `json:"retirement_bundle_sha256,omitempty"`
+	RetirementCoverage       darkrestore.LocalHandoffRetirementCoverageV1 `json:"retirement_coverage,omitzero"`
+	SourceRetirements        []DarkRestoreSourceRetirementV1              `json:"source_retirements,omitempty"`
+	DestinationSHA           string                                       `json:"destination_sha256"`
+	DestinationStateSHA      string                                       `json:"destination_state_sha256"`
+	ImportReceiptSHA         string                                       `json:"import_receipt_sha256"`
+	NativeBaselineSHA        string                                       `json:"native_baseline_sha256"`
+	BillingAttributionSHA    string                                       `json:"billing_attribution_sha256"`
+	TransitionSHA            string                                       `json:"transition_sha256"`
+	NativeDocument           []byte                                       `json:"native_document,omitempty"`
+	NativePublicKey          []byte                                       `json:"native_public_key,omitempty"`
+	NativePins               darkrestore.NativeBaselinePinsV1             `json:"native_pins,omitzero"`
+	SettledHistoricalBytes   int64                                        `json:"settled_historical_bytes"`
+	CurrentFiniteEntitlement int64                                        `json:"current_finite_entitlement_bytes"`
+	NativeBaselineUplink     int64                                        `json:"native_baseline_uplink"`
+	NativeBaselineDownlink   int64                                        `json:"native_baseline_downlink"`
+	RemainingBudgetBytes     int64                                        `json:"remaining_budget_bytes"`
+	TransitionOpenedUnixNano int64                                        `json:"transition_opened_unix_nano,string"`
+	CreatedUnix              int64                                        `json:"created_unix"`
+	Replayed                 bool                                         `json:"replayed"`
+}
+
+// DarkRestoreSourceRetirementV1 preserves the exact canonical source and
+// independent-witness documents. It is evidence for one declared inventory
+// entry only and does not assert the absence of undeclared installations.
+type DarkRestoreSourceRetirementV1 struct {
+	RetirementDocument []byte                             `json:"retirement_document"`
+	SourcePublicKey    []byte                             `json:"source_public_key"`
+	WitnessDocument    []byte                             `json:"witness_document"`
+	WitnessPublicKey   []byte                             `json:"witness_public_key"`
+	Pins               darkrestore.SourceRetirementPinsV1 `json:"pins"`
 }
 
 type DarkRestoreCutoverReceiptV1 struct {
@@ -98,8 +112,59 @@ func localAttachmentCoveredByInventory(attachment *DarkRestoreLocalAttachmentRec
 	return false
 }
 
+func durableSourceRetirements(retirements []darkrestore.VerifiedSourceRetirementV1) ([]DarkRestoreSourceRetirementV1, error) {
+	type item struct {
+		epoch string
+		row   DarkRestoreSourceRetirementV1
+	}
+	items := make([]item, 0, len(retirements))
+	for _, verified := range retirements {
+		statement, _, _, mutation, err := verified.Evidence()
+		retirementRaw, sourcePublic, witnessRaw, witnessPublic, pins, documentErr := verified.Documents()
+		if err != nil || documentErr != nil || mutation || statement.EpochID == "" {
+			return nil, ErrDarkRestoreCutover
+		}
+		items = append(items, item{epoch: statement.EpochID, row: DarkRestoreSourceRetirementV1{
+			RetirementDocument: retirementRaw, SourcePublicKey: sourcePublic,
+			WitnessDocument: witnessRaw, WitnessPublicKey: witnessPublic, Pins: pins,
+		}})
+	}
+	sort.Slice(items, func(i, j int) bool { return items[i].epoch < items[j].epoch })
+	out := make([]DarkRestoreSourceRetirementV1, len(items))
+	for i := range items {
+		if i > 0 && items[i-1].epoch == items[i].epoch {
+			return nil, ErrDarkRestoreCutover
+		}
+		out[i] = items[i].row
+	}
+	return out, nil
+}
+
+func verifyDurableSourceRetirements(inventory darkrestore.LocalHandoffInventoryV1, inventorySHA, destinationSHA string, rows []DarkRestoreSourceRetirementV1) (darkrestore.LocalHandoffRetirementCoverageV1, error) {
+	verified := make([]darkrestore.VerifiedSourceRetirementV1, 0, len(rows))
+	previousEpoch := ""
+	for _, row := range rows {
+		v, err := darkrestore.VerifySignedSourceRetirementV1(
+			row.RetirementDocument, row.SourcePublicKey, row.WitnessDocument, row.WitnessPublicKey, row.Pins,
+		)
+		statement, _, _, mutation, evidenceErr := v.Evidence()
+		if err != nil || evidenceErr != nil || mutation || statement.EpochID <= previousEpoch {
+			return darkrestore.LocalHandoffRetirementCoverageV1{}, ErrDarkRestoreCutover
+		}
+		previousEpoch = statement.EpochID
+		verified = append(verified, v)
+	}
+	coverage, err := darkrestore.CheckDeclaredSourceRetirementsV1(inventory, inventorySHA, verified, destinationSHA)
+	if err != nil || coverage.AuthorizesActivation {
+		return darkrestore.LocalHandoffRetirementCoverageV1{}, ErrDarkRestoreCutover
+	}
+	return coverage, nil
+}
+
 func decodeCutoverEvidence(raw []byte, out *DarkRestoreCutoverEvidenceReceiptV1) error {
-	if len(raw) == 0 || len(raw) > 128<<10 || json.Unmarshal(raw, out) != nil || out.Replayed ||
+	// Inventory v1 permits up to 256 epochs. Each retirement and witness
+	// document is independently capped at 16 KiB before JSON/base64 expansion.
+	if len(raw) == 0 || len(raw) > 12<<20 || json.Unmarshal(raw, out) != nil || out.Replayed ||
 		out.ClientID == "" || out.OriginalEventID == "" || out.ActorUserID == "" ||
 		out.SourceSHA256 == "" || out.SourceID == "" ||
 		out.InventorySHA256 == "" || out.CoverageApprovalSHA256 == "" ||
@@ -114,6 +179,11 @@ func decodeCutoverEvidence(raw []byte, out *DarkRestoreCutoverEvidenceReceiptV1)
 		return ErrUnavailable
 	}
 	if len(out.NativeDocument) > 0 {
+		coverage, retirementErr := verifyDurableSourceRetirements(out.Inventory, out.InventorySHA256, out.DestinationSHA, out.SourceRetirements)
+		if retirementErr != nil || out.RetirementBundleSHA256 == "" || coverage.BundleSHA != out.RetirementBundleSHA256 ||
+			!reflect.DeepEqual(coverage, out.RetirementCoverage) || out.CoverageApproval.ApprovedUnixNano <= coverage.LatestWitnessedUnixNano {
+			return ErrUnavailable
+		}
 		native, nativeErr := darkrestore.VerifySignedNativeBaselineV1(out.NativeDocument, out.NativePublicKey, out.NativePins)
 		if nativeErr != nil || out.NativePins.DestinationSHA != out.DestinationSHA {
 			return ErrUnavailable
@@ -122,12 +192,14 @@ func decodeCutoverEvidence(raw []byte, out *DarkRestoreCutoverEvidenceReceiptV1)
 		if nativeErr != nil || nativeValue.SourceSHA != out.SourceSHA256 || nativeValue.SourceID != out.SourceID ||
 			nativeValue.ClientID != out.ClientID || nativeValue.ImportReceiptSHA != out.ImportReceiptSHA ||
 			nativeValue.Uplink != out.NativeBaselineUplink || nativeValue.Downlink != out.NativeBaselineDownlink ||
-			out.CoverageApproval.ApprovedUnixNano < nativeValue.MeasuredThroughNano ||
+			out.CoverageApproval.ApprovedUnixNano <= nativeValue.MeasuredThroughNano ||
 			nativeValue.FenceUntilNano <= out.TransitionOpenedUnixNano || nativeValue.MeasuredThroughNano > out.TransitionOpenedUnixNano ||
 			nativeValue.FenceUntilNano-nativeValue.MeasuredThroughNano > int64(5*time.Minute) {
 			return ErrUnavailable
 		}
-	} else if len(out.NativePublicKey) > 0 || out.NativePins != (darkrestore.NativeBaselinePinsV1{}) {
+	} else if len(out.NativePublicKey) > 0 || out.NativePins != (darkrestore.NativeBaselinePinsV1{}) ||
+		out.RetirementBundleSHA256 != "" || len(out.SourceRetirements) != 0 ||
+		!reflect.DeepEqual(out.RetirementCoverage, darkrestore.LocalHandoffRetirementCoverageV1{}) {
 		return ErrUnavailable
 	}
 
@@ -154,6 +226,7 @@ func decodeCutoverEvidence(raw []byte, out *DarkRestoreCutoverEvidenceReceiptV1)
 		!out.CoverageApproval.InventoryCompleteAsserted ||
 		!out.CoverageApproval.DeclaredSourcesRetired ||
 		out.CoverageApproval.DeclaredSources != len(out.Inventory.Sources) ||
+		out.CoverageApproval.RetirementBundleSHA != out.RetirementBundleSHA256 ||
 		len(out.CoverageApproval.EpochIDs) != len(out.Inventory.Sources) {
 		return ErrUnavailable
 	}
@@ -164,7 +237,7 @@ func decodeCutoverEvidence(raw []byte, out *DarkRestoreCutoverEvidenceReceiptV1)
 	}
 	transitionSHA, err := darkRestoreTransitionSHA(
 		out.ClientID, out.InventorySHA256, out.CoverageApprovalSHA256,
-		out.DestinationStateSHA, out.NativeBaselineSHA, out.NativePins.DocumentSHA, out.TransitionOpenedUnixNano,
+		out.DestinationStateSHA, out.NativeBaselineSHA, out.NativePins.DocumentSHA, out.RetirementBundleSHA256, out.TransitionOpenedUnixNano,
 	)
 	if err != nil || transitionSHA != out.TransitionSHA {
 		return ErrUnavailable
@@ -299,24 +372,29 @@ func (s *Store) CompleteDarkRestoreZeroBaselineV1(ctx context.Context, token, so
 	return DarkRestoreCutoverSnapshotV1{}, ErrDarkRestoreCutover
 }
 
-func darkRestoreTransitionSHA(clientID, inventorySHA, approvalSHA, stateSHA, nativeSHA, nativeDocumentSHA string, opened int64) (string, error) {
+func darkRestoreTransitionSHA(clientID, inventorySHA, approvalSHA, stateSHA, nativeSHA, nativeDocumentSHA, retirementBundleSHA string, opened int64) (string, error) {
 	if nativeDocumentSHA == "" {
 		return cutoverSnapshotDigest("DARK-PRO-CUTOVER-TRANSITION-v1", struct {
 			ClientID, InventorySHA, ApprovalSHA, StateSHA, NativeSHA string
 			OpenedUnixNano                                           int64
 		}{clientID, inventorySHA, approvalSHA, stateSHA, nativeSHA, opened})
 	}
+	if !routeSHA.MatchString(retirementBundleSHA) {
+		return "", ErrDarkRestoreCutover
+	}
 
 	return cutoverSnapshotDigest("DARK-PRO-CUTOVER-TRANSITION-v1", struct {
-		ClientID, InventorySHA, ApprovalSHA, StateSHA, NativeSHA, NativeDocumentSHA string
-		OpenedUnixNano                                                              int64
-	}{clientID, inventorySHA, approvalSHA, stateSHA, nativeSHA, nativeDocumentSHA, opened})
+		ClientID, InventorySHA, ApprovalSHA, StateSHA, NativeSHA, NativeDocumentSHA, RetirementBundleSHA string
+		OpenedUnixNano                                                                                   int64
+	}{clientID, inventorySHA, approvalSHA, stateSHA, nativeSHA, nativeDocumentSHA, retirementBundleSHA, opened})
 }
 
 // OpenDarkRestoreCutoverV1 records an immutable evidence boundary from a
 // transactionally re-read destination snapshot. destinationSHA and
 // billingAttributionSHA are local operator pins, never browser-selected values.
-func (s *Store) OpenDarkRestoreCutoverV1(ctx context.Context, token string, inventory darkrestore.LocalHandoffInventoryV1, inventoryPin string, handoffs []darkrestore.VerifiedLocalHandoff, approval darkrestore.VerifiedHandoffCoverageApprovalV1, destinationSHA, billingAttributionSHA string, native darkrestore.VerifiedNativeBaselineV1, nativePins darkrestore.NativeBaselinePinsV1) (DarkRestoreCutoverEvidenceReceiptV1, error) {
+// retirements must already be opaque values verified from independently pinned
+// operator configuration; the Store persists and re-verifies their documents.
+func (s *Store) OpenDarkRestoreCutoverV1(ctx context.Context, token string, inventory darkrestore.LocalHandoffInventoryV1, inventoryPin string, handoffs []darkrestore.VerifiedLocalHandoff, retirements []darkrestore.VerifiedSourceRetirementV1, approval darkrestore.VerifiedHandoffCoverageApprovalV1, destinationSHA, billingAttributionSHA string, native darkrestore.VerifiedNativeBaselineV1, nativePins darkrestore.NativeBaselinePinsV1) (DarkRestoreCutoverEvidenceReceiptV1, error) {
 	var zero DarkRestoreCutoverEvidenceReceiptV1
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -333,8 +411,13 @@ func (s *Store) OpenDarkRestoreCutoverV1(ctx context.Context, token string, inve
 	if err != nil || !present || !routeSHA.MatchString(destinationSHA) || !routeSHA.MatchString(billingAttributionSHA) {
 		return zero, ErrUnavailable
 	}
-	if _, e := darkrestore.CheckLocalHandoffCoverageV1(inventory, inventoryPin, handoffs); e != nil {
+	retirementCoverage, e := darkrestore.CheckLocalHandoffRetirementsV1(inventory, inventoryPin, handoffs, retirements, destinationSHA)
+	if e != nil || retirementCoverage.AuthorizesActivation {
 		return zero, ErrDarkRestoreCutover
+	}
+	durableRetirements, e := durableSourceRetirements(retirements)
+	if e != nil {
+		return zero, e
 	}
 	snapshot, err := readDarkRestoreCutoverSnapshotV1(ctx, tx, inventory.SourceSHA, inventory.SourceID)
 	if err != nil {
@@ -349,7 +432,10 @@ func (s *Store) OpenDarkRestoreCutoverV1(ctx context.Context, token string, inve
 		return zero, readErr
 	} else if saved != nil {
 		approvalValue, approvalSHA, authoritySHA, evidenceErr := approval.Evidence()
+		persistedCoverage, retirementErr := verifyDurableSourceRetirements(inventory, inventoryPin, destinationSHA, durableRetirements)
 		if evidenceErr != nil || saved.ActorUserID != actor || saved.NativePins != nativePins ||
+			retirementErr != nil || persistedCoverage.BundleSHA != saved.RetirementBundleSHA256 ||
+			!reflect.DeepEqual(saved.SourceRetirements, durableRetirements) ||
 			!bytes.Equal(saved.NativeDocument, nativeRaw) || !bytes.Equal(saved.NativePublicKey, nativePublic) ||
 			saved.InventorySHA256 != inventoryPin ||
 			saved.CoverageApprovalSHA256 != approvalSHA ||
@@ -383,11 +469,13 @@ func (s *Store) OpenDarkRestoreCutoverV1(ctx context.Context, token string, inve
 		return zero, ErrDarkRestoreCutover
 	}
 	approvalValue, approvalSHA, authoritySHA, err := approval.Evidence()
-	if err != nil || approvalValue.ApprovedUnixNano < nativeValue.MeasuredThroughNano {
+	if err != nil || approvalValue.RetirementBundleSHA != retirementCoverage.BundleSHA ||
+		approvalValue.ApprovedUnixNano <= nativeValue.MeasuredThroughNano ||
+		approvalValue.ApprovedUnixNano <= retirementCoverage.LatestWitnessedUnixNano {
 		return zero, ErrDarkRestoreCutover
 	}
 	opened := now.UnixNano()
-	transitionSHA, err := darkRestoreTransitionSHA(id, inventoryPin, approvalSHA, snapshot.StateSHA, snapshot.NativeBaselineSHA, nativePins.DocumentSHA, opened)
+	transitionSHA, err := darkRestoreTransitionSHA(id, inventoryPin, approvalSHA, snapshot.StateSHA, snapshot.NativeBaselineSHA, nativePins.DocumentSHA, retirementCoverage.BundleSHA, opened)
 	if err != nil {
 		return zero, err
 	}
@@ -412,7 +500,9 @@ func (s *Store) OpenDarkRestoreCutoverV1(ctx context.Context, token string, inve
 		Inventory: inventory, InventorySHA256: inventoryPin,
 		CoverageApproval: approvalValue, CoverageApprovalSHA256: approvalSHA,
 		CoverageAuthoritySHA256: authoritySHA,
-		DestinationSHA:          destinationSHA, DestinationStateSHA: snapshot.StateSHA,
+		RetirementBundleSHA256:  retirementCoverage.BundleSHA,
+		RetirementCoverage:      retirementCoverage, SourceRetirements: durableRetirements,
+		DestinationSHA: destinationSHA, DestinationStateSHA: snapshot.StateSHA,
 		ImportReceiptSHA: snapshot.ImportReceiptSHA, NativeBaselineSHA: snapshot.NativeBaselineSHA,
 		BillingAttributionSHA: billingAttributionSHA, TransitionSHA: transitionSHA,
 		NativeDocument: nativeRaw, NativePublicKey: nativePublic, NativePins: nativePins,

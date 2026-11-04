@@ -107,6 +107,7 @@ func TestSignedHandoffCoverageApprovalFailsClosed(t *testing.T) {
 		{"missing import receipt", func(a *HandoffCoverageApprovalV1) { a.ImportReceiptSHA = "" }},
 		{"unknown attribution", func(a *HandoffCoverageApprovalV1) { a.BillingAttribution = "unknown" }},
 		{"missing attribution evidence", func(a *HandoffCoverageApprovalV1) { a.BillingAttributionSHA = "" }},
+		{"invalid retirement bundle", func(a *HandoffCoverageApprovalV1) { a.RetirementBundleSHA = "not-a-digest" }},
 		{"not complete", func(a *HandoffCoverageApprovalV1) { a.InventoryCompleteAsserted = false }},
 		{"not retired", func(a *HandoffCoverageApprovalV1) { a.DeclaredSourcesRetired = false }},
 		{"wrong scope", func(a *HandoffCoverageApprovalV1) { a.Scope = "declared_sources_only" }},

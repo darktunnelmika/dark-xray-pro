@@ -78,10 +78,14 @@ type SourceRetirementPinsV1 struct {
 }
 
 type VerifiedSourceRetirementV1 struct {
-	statement SourceRetirementStatementV1
-	witness   SourceRetirementWitnessV1
-	pins      SourceRetirementPinsV1
-	valid     bool
+	statement     SourceRetirementStatementV1
+	witness       SourceRetirementWitnessV1
+	pins          SourceRetirementPinsV1
+	retirementRaw []byte
+	sourcePublic  []byte
+	witnessRaw    []byte
+	witnessPublic []byte
+	valid         bool
 }
 
 type LocalHandoffRetirementCoverageV1 struct {
@@ -196,7 +200,11 @@ func VerifySignedSourceRetirementV1(retirementRaw, sourcePublic, witnessRaw, wit
 	if err != nil || !ed25519.Verify(ed25519.PublicKey(witnessPublic), message, signedWitness.Signature) {
 		return zero, ErrHandoffInventory
 	}
-	return VerifiedSourceRetirementV1{statement: signed.Statement, witness: signedWitness.Witness, pins: pins, valid: true}, nil
+	return VerifiedSourceRetirementV1{
+		statement: signed.Statement, witness: signedWitness.Witness, pins: pins,
+		retirementRaw: append([]byte(nil), retirementRaw...), sourcePublic: append([]byte(nil), sourcePublic...),
+		witnessRaw: append([]byte(nil), witnessRaw...), witnessPublic: append([]byte(nil), witnessPublic...), valid: true,
+	}, nil
 }
 
 func (v VerifiedSourceRetirementV1) Evidence() (SourceRetirementStatementV1, SourceRetirementWitnessV1, SourceRetirementPinsV1, bool, error) {
@@ -204,6 +212,19 @@ func (v VerifiedSourceRetirementV1) Evidence() (SourceRetirementStatementV1, Sou
 		return SourceRetirementStatementV1{}, SourceRetirementWitnessV1{}, SourceRetirementPinsV1{}, false, ErrHandoffInventory
 	}
 	return v.statement, v.witness, v.pins, false, nil
+}
+
+// Documents returns defensive copies of the exact canonical documents and
+// authorities which were checked against the independent pins. Persisting
+// these bytes lets a destination re-verify the evidence after restart instead
+// of retaining only a boolean approval.
+func (v VerifiedSourceRetirementV1) Documents() ([]byte, []byte, []byte, []byte, SourceRetirementPinsV1, error) {
+	if !v.valid || len(v.retirementRaw) == 0 || len(v.sourcePublic) != ed25519.PublicKeySize ||
+		len(v.witnessRaw) == 0 || len(v.witnessPublic) != ed25519.PublicKeySize {
+		return nil, nil, nil, nil, SourceRetirementPinsV1{}, ErrHandoffInventory
+	}
+	return append([]byte(nil), v.retirementRaw...), append([]byte(nil), v.sourcePublic...),
+		append([]byte(nil), v.witnessRaw...), append([]byte(nil), v.witnessPublic...), v.pins, nil
 }
 
 func retirementCoverageDigestV1(v LocalHandoffRetirementCoverageV1) (string, error) {
@@ -222,9 +243,22 @@ func retirementCoverageDigestV1(v LocalHandoffRetirementCoverageV1) (string, err
 // that no undeclared installation exists.
 func CheckLocalHandoffRetirementsV1(inventory LocalHandoffInventoryV1, inventoryPin string, handoffs []VerifiedLocalHandoff, retirements []VerifiedSourceRetirementV1, destinationSHA string) (LocalHandoffRetirementCoverageV1, error) {
 	var zero LocalHandoffRetirementCoverageV1
-	coverage, err := CheckLocalHandoffCoverageV1(inventory, inventoryPin, handoffs)
+	if _, err := CheckLocalHandoffCoverageV1(inventory, inventoryPin, handoffs); err != nil {
+		return zero, ErrHandoffInventory
+	}
+	return CheckDeclaredSourceRetirementsV1(inventory, inventoryPin, retirements, destinationSHA)
+}
+
+// CheckDeclaredSourceRetirementsV1 re-verifies exact per-source retirement
+// evidence against a pinned inventory. It intentionally proves coverage only
+// for entries declared by that inventory; it cannot discover undeclared
+// installations. Store recovery uses this after re-verifying the persisted
+// canonical documents.
+func CheckDeclaredSourceRetirementsV1(inventory LocalHandoffInventoryV1, inventoryPin string, retirements []VerifiedSourceRetirementV1, destinationSHA string) (LocalHandoffRetirementCoverageV1, error) {
+	var zero LocalHandoffRetirementCoverageV1
 	canonical, canonicalErr := canonicalHandoffInventory(inventory)
-	if err != nil || canonicalErr != nil || !inventoryDigestValid(destinationSHA) || len(retirements) != len(canonical.Sources) {
+	digest, digestErr := DigestLocalHandoffInventoryV1(canonical)
+	if canonicalErr != nil || digestErr != nil || digest != inventoryPin || !inventoryDigestValid(destinationSHA) || len(retirements) != len(canonical.Sources) {
 		return zero, ErrHandoffInventory
 	}
 	expected := make(map[string]LocalHandoffSourcePinV1, len(canonical.Sources))
@@ -232,7 +266,7 @@ func CheckLocalHandoffRetirementsV1(inventory LocalHandoffInventoryV1, inventory
 		expected[source.EpochID] = source
 	}
 	out := LocalHandoffRetirementCoverageV1{
-		Scope: "pinned_declared_sources_only", InventorySHA: coverage.InventorySHA,
+		Scope: "pinned_declared_sources_only", InventorySHA: inventoryPin,
 		DestinationSHA: destinationSHA, DeclaredSources: len(canonical.Sources),
 		EpochIDs:               make([]string, 0, len(canonical.Sources)),
 		RetirementDocumentSHAs: make([]string, 0, len(canonical.Sources)),
@@ -243,11 +277,11 @@ func CheckLocalHandoffRetirementsV1(inventory LocalHandoffInventoryV1, inventory
 		statement, witness, pins, mutation, e := verified.Evidence()
 		source, ok := expected[statement.EpochID]
 		if e != nil || mutation || !ok || statement.SourceSHA != canonical.SourceSHA || statement.SourceID != canonical.SourceID ||
-			statement.InventorySHA != coverage.InventorySHA || statement.DestinationSHA != destinationSHA ||
+			statement.InventorySHA != inventoryPin || statement.DestinationSHA != destinationSHA ||
 			statement.Sequence != source.Sequence || statement.TerminalReceiptSHA != source.ReceiptSHA ||
 			statement.AuthoritySHA != source.AuthoritySHA || statement.JournalSHA != source.JournalSHA ||
 			statement.HandoffSHA != source.HandoffSHA || statement.SourceSignerPublicSHA != source.SignerPublicSHA ||
-			witness.InventorySHA != coverage.InventorySHA || witness.DestinationSHA != destinationSHA ||
+			witness.InventorySHA != inventoryPin || witness.DestinationSHA != destinationSHA ||
 			pins.SourcePublicKeySHA != source.SignerPublicSHA {
 			return zero, ErrHandoffInventory
 		}
@@ -271,6 +305,7 @@ func CheckLocalHandoffRetirementsV1(inventory LocalHandoffInventoryV1, inventory
 	if !sort.StringsAreSorted(out.EpochIDs) {
 		return zero, ErrHandoffInventory
 	}
+	var err error
 	out.BundleSHA, err = retirementCoverageDigestV1(out)
 	if err != nil {
 		return zero, err

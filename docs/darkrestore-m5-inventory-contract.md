@@ -535,6 +535,21 @@ every source and witness document pin.
 This coverage is intentionally limited to the independently pinned declared
 inventory. Two valid signatures identify two claimants; they do not prove the
 truth of an operational fence or the absence of undeclared installations. The
-result always returns `authorizes_activation=false`. Store activation remains
-closed until a later transaction binds this receipt bundle to current state and
-the independently approved inventory-completeness decision.
+result always returns `authorizes_activation=false`.
+
+The Store cutover boundary now requires this bundle in addition to the signed
+coverage approval. It persists the exact canonical source/witness documents,
+their public keys and independent pins, re-verifies them on every read/restart
+and includes the deterministic bundle digest in both the signed coverage
+approval and the transition hash. The coverage approval must be strictly later
+than every independent witness.
+Missing, tampered, foreign, duplicate or replay-conflicting documents keep the
+transition closed; an insert failure rolls back both evidence and financial
+reservation. Historical pre-attestation receipts remain readable but cannot
+authorize mutation.
+
+This Store binding still covers only the declared inventory. It does not turn a
+source or witness signature into verified operational truth, discover an
+undeclared installation, enable an imported client, or establish an unknown
+legacy entitlement. Native Apply, delivery and activation remain separate
+append-only gates over the same transition and current financial state.

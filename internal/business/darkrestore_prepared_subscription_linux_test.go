@@ -67,7 +67,7 @@ func preparedCutoverWithFilesAndInitialApply(t *testing.T, files *PreparedHandof
 	sha, source := intent.Review.SourceSHA256, intent.Review.Clients[0].SourceID
 	proof := darkrestore.LocalSourceSettlement{Scope: "single_local_source_epoch", SourceSHA: sha, SourceID: source, AuthoritySHA: strings.Repeat("b", 64), JournalSHA: strings.Repeat("c", 64),
 		Terminal: uc.Receipt{EpochID: strings.Repeat("d", 32), Sequence: 1, SHA: strings.Repeat("e", 64)}, PriorBytes: 7, Up: 3, Down: 4, Historical: 14, Remaining: 999986}
-	handoff, pin := signFixtureHandoff(t, proof, files)
+	handoff, pin, sourceKey := signFixtureHandoffWithKey(t, proof, files)
 	if _, err := f.s.AttachSignedLocalSettlementV1(ctx, f.owner.Token, handoff); err != nil {
 		t.Fatal(err)
 	}
@@ -87,10 +87,17 @@ func preparedCutoverWithFilesAndInitialApply(t *testing.T, files *PreparedHandof
 	if err != nil {
 		t.Fatal(err)
 	}
+	retiredAt := time.Now().UnixNano()
+	retirements := []darkrestore.VerifiedSourceRetirementV1{businessSignedRetirement(t, inventory, inventorySHA, destination, pin, sourceKey, retiredAt)}
+	retirementCoverage, err := darkrestore.CheckLocalHandoffRetirementsV1(inventory, inventorySHA, []darkrestore.VerifiedLocalHandoff{handoff}, retirements, destination)
+	if err != nil {
+		t.Fatal(err)
+	}
 	approval := businessSignedCoverage(t, darkrestore.HandoffCoverageApprovalV1{Version: 1, Scope: darkrestore.HandoffCoverageScopeV1, Statement: darkrestore.HandoffCoverageStatementV1,
 		InventorySHA: inventorySHA, SourceSHA: sha, SourceID: source, DestinationSHA: destination, ImportReceiptSHA: before.ImportReceiptSHA, DestinationStateSHA: projected.StateSHA, NativeBaselineSHA: projected.NativeBaselineSHA,
-		BillingAttributionSHA: attribution, BillingAttribution: "disjoint_source_epoch_deltas", DeclaredSources: 1, EpochIDs: []string{pin.EpochID}, InventoryCompleteAsserted: true, DeclaredSourcesRetired: true, ApprovedUnixNano: time.Now().UnixNano()})
-	evidence, err := f.s.OpenDarkRestoreCutoverV1(ctx, f.owner.Token, inventory, inventorySHA, []darkrestore.VerifiedLocalHandoff{handoff}, approval, destination, attribution, native, nativePins)
+		BillingAttributionSHA: attribution, BillingAttribution: "disjoint_source_epoch_deltas", DeclaredSources: 1, EpochIDs: []string{pin.EpochID}, InventoryCompleteAsserted: true, DeclaredSourcesRetired: true,
+		RetirementBundleSHA: retirementCoverage.BundleSHA, ApprovedUnixNano: retiredAt + 3})
+	evidence, err := f.s.OpenDarkRestoreCutoverV1(ctx, f.owner.Token, inventory, inventorySHA, []darkrestore.VerifiedLocalHandoff{handoff}, retirements, approval, destination, attribution, native, nativePins)
 	if err != nil {
 		t.Fatal(err)
 	}

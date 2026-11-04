@@ -31,6 +31,7 @@ type HandoffCoverageApprovalV1 struct {
 	EpochIDs                  []string `json:"epoch_ids"`
 	InventoryCompleteAsserted bool     `json:"inventory_complete_asserted"`
 	DeclaredSourcesRetired    bool     `json:"declared_sources_retired"`
+	RetirementBundleSHA       string   `json:"retirement_bundle_sha256,omitempty"`
 	ApprovedUnixNano          int64    `json:"approved_unix_nano,string"`
 	DestinationSHA            string   `json:"destination_sha256"`
 	ImportReceiptSHA          string   `json:"import_receipt_sha256"`
@@ -69,7 +70,8 @@ func canonicalCoverageApprovalV1(in HandoffCoverageApprovalV1) (HandoffCoverageA
 		len(in.EpochIDs) != in.DeclaredSources || in.ApprovedUnixNano <= 0 ||
 		!inventoryDigestValid(in.DestinationSHA) || !inventoryDigestValid(in.ImportReceiptSHA) ||
 		!inventoryDigestValid(in.DestinationStateSHA) || !inventoryDigestValid(in.NativeBaselineSHA) ||
-		!inventoryDigestValid(in.BillingAttributionSHA) || in.BillingAttribution != "disjoint_source_epoch_deltas" {
+		!inventoryDigestValid(in.BillingAttributionSHA) || in.BillingAttribution != "disjoint_source_epoch_deltas" ||
+		(in.RetirementBundleSHA != "" && !inventoryDigestValid(in.RetirementBundleSHA)) {
 		return HandoffCoverageApprovalV1{}, ErrHandoffInventory
 	}
 	in.EpochIDs = append([]string(nil), in.EpochIDs...)

@@ -19,6 +19,7 @@ type DarkRestoreCutoverReadinessV1 struct {
 	SourceEpochSettled                   bool     `json:"source_epoch_settled"`
 	DeclaredInventoryCoverageVerified    bool     `json:"declared_inventory_coverage_verified"`
 	IndependentCoverageAssertionVerified bool     `json:"independent_coverage_assertion_verified"`
+	DeclaredSourceRetirementsVerified    bool     `json:"declared_source_retirements_verified"`
 	GlobalSourceCustodyVerified          bool     `json:"global_source_custody_verified"`
 	NativeBaselineComplete               bool     `json:"native_baseline_complete"`
 	NativeApplyRecorded                  bool     `json:"native_apply_recorded"`
@@ -104,10 +105,11 @@ func (s *Store) DarkRestoreCutoverReadinessV1(ctx context.Context, sourceSHA, so
 		if len(evidence.NativeDocument) == 0 {
 			out.NativeBaselineComplete = false
 		}
-		out.SourceScope = "pinned_inventory_plus_independent_coverage_assertion"
+		out.SourceScope = "pinned_inventory_plus_independent_coverage_and_retirement_receipts"
 		out.SourceEpochSettled = true
 		out.DeclaredInventoryCoverageVerified = true
 		out.IndependentCoverageAssertionVerified = true
+		out.DeclaredSourceRetirementsVerified = evidence.RetirementBundleSHA256 != "" && len(evidence.SourceRetirements) == len(evidence.Inventory.Sources)
 		remaining, budgetErr := cutoverRemaining(client.VolumeBytes, evidence.SettledHistoricalBytes, account.Uplink, account.Downlink)
 		if budgetErr == nil {
 			out.FiniteQuotaRemainingBytes = strconv.FormatInt(remaining, 10)
@@ -219,6 +221,9 @@ func (s *Store) DarkRestoreCutoverReadinessV1(ctx context.Context, sourceSHA, so
 	}
 	if !out.IndependentCoverageAssertionVerified {
 		out.ActivationBlockers = append(out.ActivationBlockers, "independent_coverage_assertion_not_verified")
+	}
+	if !out.DeclaredSourceRetirementsVerified {
+		out.ActivationBlockers = append(out.ActivationBlockers, "declared_source_retirements_not_verified")
 	}
 	if evidence != nil && !out.SettledHistoryBudgetReserved {
 		out.ActivationBlockers = append(out.ActivationBlockers, "settled_history_budget_not_reserved")

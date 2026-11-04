@@ -27,6 +27,11 @@ func businessSignedHandoff(t *testing.T, proof darkrestore.LocalSourceSettlement
 }
 
 func signFixtureHandoff(t *testing.T, proof darkrestore.LocalSourceSettlement, files *PreparedHandoffFiles) (darkrestore.VerifiedLocalHandoff, darkrestore.LocalHandoffSourcePinV1) {
+	verified, pin, _ := signFixtureHandoffWithKey(t, proof, files)
+	return verified, pin
+}
+
+func signFixtureHandoffWithKey(t *testing.T, proof darkrestore.LocalSourceSettlement, files *PreparedHandoffFiles) (darkrestore.VerifiedLocalHandoff, darkrestore.LocalHandoffSourcePinV1, ed25519.PrivateKey) {
 	t.Helper()
 	public, private, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
@@ -73,7 +78,62 @@ func signFixtureHandoff(t *testing.T, proof darkrestore.LocalSourceSettlement, f
 		ReceiptSHA: proof.Terminal.SHA, AuthoritySHA: proof.AuthoritySHA,
 		JournalSHA: proof.JournalSHA, HandoffSHA: filePin,
 		SignerPublicSHA: publicPin,
+	}, private
+}
+
+func businessSignedRetirement(t *testing.T, inventory darkrestore.LocalHandoffInventoryV1, inventorySHA, destinationSHA string, pin darkrestore.LocalHandoffSourcePinV1, sourcePrivate ed25519.PrivateKey, retired int64) darkrestore.VerifiedSourceRetirementV1 {
+	t.Helper()
+	public := sourcePrivate.Public().(ed25519.PublicKey)
+	fenceSeed := sha256.Sum256([]byte("synthetic-retirement-fence:" + pin.EpochID))
+	statement := darkrestore.SourceRetirementStatementV1{
+		Version: 1, Scope: darkrestore.SourceRetirementScopeV1,
+		SourceSHA: inventory.SourceSHA, SourceID: inventory.SourceID,
+		InventorySHA: inventorySHA, DestinationSHA: destinationSHA,
+		EpochID: pin.EpochID, Sequence: pin.Sequence, TerminalReceiptSHA: pin.ReceiptSHA,
+		AuthoritySHA: pin.AuthoritySHA, JournalSHA: pin.JournalSHA, HandoffSHA: pin.HandoffSHA,
+		SourceSignerPublicSHA: pin.SignerPublicSHA, RetiredUnixNano: retired,
+		FenceDocumentSHA: hex.EncodeToString(fenceSeed[:]), FenceObservedUnixNano: retired + 1,
 	}
+	message, err := darkrestore.SourceRetirementSigningMessageV1(statement)
+	if err != nil {
+		t.Fatal(err)
+	}
+	signed := darkrestore.SignedSourceRetirementV1{Version: 1, Statement: statement, Signature: ed25519.Sign(sourcePrivate, message)}
+	retirementRaw, err := json.Marshal(signed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	retirementRaw = append(retirementRaw, '\n')
+	retirementSum, sourceSum := sha256.Sum256(retirementRaw), sha256.Sum256(public)
+	witnessPublic, witnessPrivate, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	witness := darkrestore.SourceRetirementWitnessV1{
+		Version: 1, Scope: darkrestore.SourceRetirementWitnessScopeV1,
+		RetirementDocumentSHA: hex.EncodeToString(retirementSum[:]), SourcePublicKeySHA: hex.EncodeToString(sourceSum[:]),
+		InventorySHA: inventorySHA, DestinationSHA: destinationSHA, WitnessedUnixNano: retired + 2,
+	}
+	witnessMessage, err := darkrestore.SourceRetirementWitnessSigningMessageV1(witness)
+	if err != nil {
+		t.Fatal(err)
+	}
+	signedWitness := darkrestore.SignedSourceRetirementWitnessV1{Version: 1, Witness: witness, Signature: ed25519.Sign(witnessPrivate, witnessMessage)}
+	witnessRaw, err := json.Marshal(signedWitness)
+	if err != nil {
+		t.Fatal(err)
+	}
+	witnessRaw = append(witnessRaw, '\n')
+	witnessSum, witnessKeySum := sha256.Sum256(witnessRaw), sha256.Sum256(witnessPublic)
+	verified, err := darkrestore.VerifySignedSourceRetirementV1(retirementRaw, public, witnessRaw, witnessPublic, darkrestore.SourceRetirementPinsV1{
+		RetirementDocumentSHA: hex.EncodeToString(retirementSum[:]), SourcePublicKeySHA: hex.EncodeToString(sourceSum[:]),
+		WitnessDocumentSHA: hex.EncodeToString(witnessSum[:]), WitnessPublicKeySHA: hex.EncodeToString(witnessKeySum[:]),
+		FenceDocumentSHA: statement.FenceDocumentSHA, InventorySHA: inventorySHA, DestinationSHA: destinationSHA,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return verified
 }
 
 func businessSignedCoverage(t *testing.T, approval darkrestore.HandoffCoverageApprovalV1) darkrestore.VerifiedHandoffCoverageApprovalV1 {
@@ -206,7 +266,7 @@ func TestDarkRestoreM5ControlledSubscriptionCutover(t *testing.T) {
 		},
 		PriorBytes: 7, Up: 1, Down: 2, Historical: 10, Remaining: 999990,
 	}
-	handoff, sourcePin := businessSignedHandoff(t, proof)
+	handoff, sourcePin, sourceKey := signFixtureHandoffWithKey(t, proof, nil)
 	if _, err = f.s.AttachSignedLocalSettlementV1(ctx, owner.Token, handoff); err != nil {
 		t.Fatal(err)
 	}
@@ -234,7 +294,7 @@ func TestDarkRestoreM5ControlledSubscriptionCutover(t *testing.T) {
 	other.AuthoritySHA, other.JournalSHA = strings.Repeat("8", 64), strings.Repeat("9", 64)
 	other.Terminal = uc.Receipt{EpochID: strings.Repeat("f", 32), Sequence: 1, SHA: strings.Repeat("a", 64)}
 	other.Up, other.Down, other.Historical, other.Remaining = 2, 2, 11, 999989
-	second, secondPin := businessSignedHandoff(t, other)
+	second, secondPin, secondKey := signFixtureHandoffWithKey(t, other, nil)
 	handoffs := []darkrestore.VerifiedLocalHandoff{handoff, second}
 	inventory := darkrestore.LocalHandoffInventoryV1{
 		Version: 1, SourceSHA: intent.Review.SourceSHA256,
@@ -245,6 +305,15 @@ func TestDarkRestoreM5ControlledSubscriptionCutover(t *testing.T) {
 		t.Fatal(err)
 	}
 	billingAttributionSHA := strings.Repeat("2", 64)
+	retiredAt := time.Now().UnixNano()
+	retirements := []darkrestore.VerifiedSourceRetirementV1{
+		businessSignedRetirement(t, inventory, inventoryPin, destinationSHA, sourcePin, sourceKey, retiredAt),
+		businessSignedRetirement(t, inventory, inventoryPin, destinationSHA, secondPin, secondKey, retiredAt+10),
+	}
+	retirementCoverage, err := darkrestore.CheckLocalHandoffRetirementsV1(inventory, inventoryPin, handoffs, retirements, destinationSHA)
+	if err != nil {
+		t.Fatal(err)
+	}
 	approvalValue := darkrestore.HandoffCoverageApprovalV1{
 		DestinationStateSHA: baselineSnapshot.StateSHA,
 		NativeBaselineSHA:   baselineSnapshot.NativeBaselineSHA,
@@ -253,7 +322,8 @@ func TestDarkRestoreM5ControlledSubscriptionCutover(t *testing.T) {
 		Statement: darkrestore.HandoffCoverageStatementV1, DeclaredSources: 2,
 		EpochIDs:                  []string{sourcePin.EpochID, secondPin.EpochID},
 		InventoryCompleteAsserted: true, DeclaredSourcesRetired: true,
-		ApprovedUnixNano:      time.Now().UnixNano(),
+		RetirementBundleSHA:   retirementCoverage.BundleSHA,
+		ApprovedUnixNano:      retiredAt + 20,
 		DestinationSHA:        destinationSHA,
 		ImportReceiptSHA:      baselineSnapshot.ImportReceiptSHA,
 		BillingAttributionSHA: billingAttributionSHA,
@@ -264,7 +334,7 @@ func TestDarkRestoreM5ControlledSubscriptionCutover(t *testing.T) {
 	staleApproval := businessSignedCoverage(t, staleApprovalValue)
 	if _, err = f.s.OpenDarkRestoreCutoverV1(
 		ctx, owner.Token, inventory, inventoryPin,
-		handoffs, staleApproval,
+		handoffs, retirements, staleApproval,
 		destinationSHA, billingAttributionSHA, native, nativePins,
 	); !errors.Is(err, ErrDarkRestoreCutover) {
 		t.Fatal("stale native baseline approval was accepted", err)
@@ -274,17 +344,32 @@ func TestDarkRestoreM5ControlledSubscriptionCutover(t *testing.T) {
 		t.Fatal(err)
 	}
 	prematureValue := approvalValue
-	prematureValue.ApprovedUnixNano = nativeClaim.MeasuredThroughNano - 1
+	prematureValue.ApprovedUnixNano = nativeClaim.MeasuredThroughNano
 	premature := businessSignedCoverage(t, prematureValue)
-	if _, err = f.s.OpenDarkRestoreCutoverV1(ctx, owner.Token, inventory, inventoryPin, handoffs, premature, destinationSHA, billingAttributionSHA, native, nativePins); !errors.Is(err, ErrDarkRestoreCutover) {
-		t.Fatal("approval before measurement accepted", err)
+	if _, err = f.s.OpenDarkRestoreCutoverV1(ctx, owner.Token, inventory, inventoryPin, handoffs, retirements, premature, destinationSHA, billingAttributionSHA, native, nativePins); !errors.Is(err, ErrDarkRestoreCutover) {
+		t.Fatal("approval not later than measurement accepted", err)
 	}
 	approval := businessSignedCoverage(t, approvalValue)
+	if _, err = f.s.OpenDarkRestoreCutoverV1(ctx, owner.Token, inventory, inventoryPin, handoffs, nil, approval, destinationSHA, billingAttributionSHA, native, nativePins); !errors.Is(err, ErrDarkRestoreCutover) {
+		t.Fatal("coverage approval without per-source retirement receipts was accepted", err)
+	}
+	foreignBundleValue := approvalValue
+	foreignBundleValue.RetirementBundleSHA = strings.Repeat("7", 64)
+	foreignBundle := businessSignedCoverage(t, foreignBundleValue)
+	if _, err = f.s.OpenDarkRestoreCutoverV1(ctx, owner.Token, inventory, inventoryPin, handoffs, retirements, foreignBundle, destinationSHA, billingAttributionSHA, native, nativePins); !errors.Is(err, ErrDarkRestoreCutover) {
+		t.Fatal("coverage approval for a foreign retirement bundle was accepted", err)
+	}
+	preWitnessValue := approvalValue
+	preWitnessValue.ApprovedUnixNano = retiredAt + 12 // equal to the latest independent witness
+	preWitness := businessSignedCoverage(t, preWitnessValue)
+	if _, err = f.s.OpenDarkRestoreCutoverV1(ctx, owner.Token, inventory, inventoryPin, handoffs, retirements, preWitness, destinationSHA, billingAttributionSHA, native, nativePins); !errors.Is(err, ErrDarkRestoreCutover) {
+		t.Fatal("approval not later than the latest retirement witness was accepted", err)
+	}
 	// Inject a failure between receipt insertion and baseline completion.
 	if _, err = f.s.db.Exec(`CREATE TRIGGER synthetic_m5_baseline_failure BEFORE UPDATE OF baseline_complete ON pro_usage_accounts BEGIN SELECT RAISE(ABORT,'synthetic baseline failure'); END`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = f.s.OpenDarkRestoreCutoverV1(ctx, owner.Token, inventory, inventoryPin, handoffs, approval, destinationSHA, billingAttributionSHA, native, nativePins); err == nil {
+	if _, err = f.s.OpenDarkRestoreCutoverV1(ctx, owner.Token, inventory, inventoryPin, handoffs, retirements, approval, destinationSHA, billingAttributionSHA, native, nativePins); err == nil {
 		t.Fatal("injected baseline failure ignored")
 	}
 	var evidenceCount int
@@ -304,7 +389,7 @@ func TestDarkRestoreM5ControlledSubscriptionCutover(t *testing.T) {
 	}
 	evidence, err := f.s.OpenDarkRestoreCutoverV1(
 		ctx, owner.Token, inventory, inventoryPin,
-		handoffs, approval,
+		handoffs, retirements, approval,
 		destinationSHA, billingAttributionSHA, native, nativePins,
 	)
 	if err != nil || evidence.SettledHistoricalBytes != 14 ||
@@ -313,6 +398,29 @@ func TestDarkRestoreM5ControlledSubscriptionCutover(t *testing.T) {
 		evidence.NativeBaselineSHA != baselineSnapshot.NativeBaselineSHA ||
 		evidence.ImportReceiptSHA != baselineSnapshot.ImportReceiptSHA {
 		t.Fatal("M5 evidence boundary failed", evidence, err)
+	}
+	tamperedEvidence := evidence
+	tamperedEvidence.SourceRetirements = append([]DarkRestoreSourceRetirementV1(nil), evidence.SourceRetirements...)
+	tamperedEvidence.SourceRetirements[0].WitnessDocument = append([]byte(nil), tamperedEvidence.SourceRetirements[0].WitnessDocument...)
+	tamperedEvidence.SourceRetirements[0].WitnessDocument[0] ^= 1
+	tamperedRaw, err := json.Marshal(tamperedEvidence)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var tamperedDecoded DarkRestoreCutoverEvidenceReceiptV1
+	if err = decodeCutoverEvidence(tamperedRaw, &tamperedDecoded); err == nil {
+		t.Fatal("tampered durable retirement witness was accepted")
+	}
+	reorderedEvidence := evidence
+	reorderedEvidence.SourceRetirements = append([]DarkRestoreSourceRetirementV1(nil), evidence.SourceRetirements...)
+	reorderedEvidence.SourceRetirements[0], reorderedEvidence.SourceRetirements[1] = reorderedEvidence.SourceRetirements[1], reorderedEvidence.SourceRetirements[0]
+	reorderedRaw, err := json.Marshal(reorderedEvidence)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var reorderedDecoded DarkRestoreCutoverEvidenceReceiptV1
+	if err = decodeCutoverEvidence(reorderedRaw, &reorderedDecoded); err == nil {
+		t.Fatal("noncanonical retirement document order was accepted")
 	}
 	groupHistory, err := f.s.GroupHistory(ctx, quote.Groups[0].TargetGroupID)
 	if err != nil || len(groupHistory) != 1 || groupHistory[0].SnapshotBytes != "7" ||
@@ -326,7 +434,7 @@ func TestDarkRestoreM5ControlledSubscriptionCutover(t *testing.T) {
 	}
 	replay, err := f.s.OpenDarkRestoreCutoverV1(
 		ctx, owner.Token, inventory, inventoryPin,
-		handoffs, approval,
+		handoffs, retirements, approval,
 		destinationSHA, billingAttributionSHA, native, nativePins,
 	)
 	if err != nil || !replay.Replayed ||
@@ -386,6 +494,7 @@ func TestDarkRestoreM5ControlledSubscriptionCutover(t *testing.T) {
 	readiness, err := f.s.DarkRestoreCutoverReadinessV1(ctx, inventory.SourceSHA, inventory.SourceID)
 	if err != nil || !readiness.SettledHistoryBudgetReserved || !readiness.DeclaredInventoryCoverageVerified ||
 		!readiness.IndependentCoverageAssertionVerified ||
+		!readiness.DeclaredSourceRetirementsVerified ||
 		readiness.GlobalSourceCustodyVerified ||
 		!readiness.NativeBaselineComplete || !readiness.SubscriptionDelivered ||
 		!readiness.CutoverReceiptRecorded || !readiness.ActivationAllowed ||
@@ -417,7 +526,7 @@ func TestDarkRestoreM5ControlledSubscriptionCutover(t *testing.T) {
 		t.Fatal("native attestation reopen failed", err)
 	}
 	defer reopened.Close()
-	recovered, err := reopened.OpenDarkRestoreCutoverV1(ctx, owner.Token, inventory, inventoryPin, handoffs, approval, destinationSHA, billingAttributionSHA, native, nativePins)
+	recovered, err := reopened.OpenDarkRestoreCutoverV1(ctx, owner.Token, inventory, inventoryPin, handoffs, retirements, approval, destinationSHA, billingAttributionSHA, native, nativePins)
 	if err != nil || !recovered.Replayed || recovered.TransitionSHA != evidence.TransitionSHA || !reflect.DeepEqual(recovered.NativeDocument, evidence.NativeDocument) {
 		t.Fatal("late replay lost immutable native proof", err)
 	}
@@ -430,7 +539,11 @@ func TestDarkRestoreM5ControlledSubscriptionCutover(t *testing.T) {
 	legacy.NativeDocument = nil
 	legacy.NativePublicKey = nil
 	legacy.NativePins = darkrestore.NativeBaselinePinsV1{}
-	legacy.TransitionSHA, err = darkRestoreTransitionSHA(legacy.ClientID, legacy.InventorySHA256, legacy.CoverageApprovalSHA256, legacy.DestinationStateSHA, legacy.NativeBaselineSHA, "", legacy.TransitionOpenedUnixNano)
+	legacy.RetirementBundleSHA256 = ""
+	legacy.RetirementCoverage = darkrestore.LocalHandoffRetirementCoverageV1{}
+	legacy.SourceRetirements = nil
+	legacy.CoverageApproval.RetirementBundleSHA = ""
+	legacy.TransitionSHA, err = darkRestoreTransitionSHA(legacy.ClientID, legacy.InventorySHA256, legacy.CoverageApprovalSHA256, legacy.DestinationStateSHA, legacy.NativeBaselineSHA, "", "", legacy.TransitionOpenedUnixNano)
 	if err != nil {
 		t.Fatal(err)
 	}

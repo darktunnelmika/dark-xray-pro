@@ -337,10 +337,10 @@ func TestDarkRestoreQuarantineBlocksEnableAndSubscriptions(t *testing.T) {
 	id := darkRestoreClientID(req.Review.SourceSHA256, req.Review.Clients[0].SourceID)
 	readiness, err := f.s.DarkRestoreCutoverReadinessV1(ctx, req.Review.SourceSHA256, req.Review.Clients[0].SourceID)
 	if err != nil || readiness.ClientID != id || readiness.SourceEpochSettled || readiness.DeclaredInventoryCoverageVerified ||
-		readiness.IndependentCoverageAssertionVerified || readiness.GlobalSourceCustodyVerified ||
+		readiness.IndependentCoverageAssertionVerified || readiness.DeclaredSourceRetirementsVerified || readiness.GlobalSourceCustodyVerified ||
 		readiness.NativeBaselineComplete || readiness.SubscriptionDelivered || readiness.CutoverReceiptRecorded || readiness.ActivationAllowed || readiness.CutoverVerified ||
 		readiness.FiniteQuotaRemainingBytes != "0" ||
-		strings.Join(readiness.ActivationBlockers, ",") != "source_epoch_not_settled,declared_inventory_coverage_not_verified,independent_coverage_assertion_not_verified,finite_quota_exhausted" ||
+		strings.Join(readiness.ActivationBlockers, ",") != "source_epoch_not_settled,declared_inventory_coverage_not_verified,independent_coverage_assertion_not_verified,declared_source_retirements_not_verified,finite_quota_exhausted" ||
 		strings.Join(readiness.VerificationBlockers, ",") != "native_baseline_incomplete,subscription_not_delivered,cutover_receipt_not_recorded" {
 		t.Fatal("unverified import reported cutover readiness", readiness, err)
 	}
