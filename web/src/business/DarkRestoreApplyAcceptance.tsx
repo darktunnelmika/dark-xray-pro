@@ -3,6 +3,7 @@ import { api } from "../session";
 import type { BusinessModel } from "./useBusinessWorkspace";
 import type { PromotionReceipt } from "../inboundPlanExecution";
 import type { InitialHealthRound } from "../inboundInitialApplyHealth";
+import DarkRestorePostApplyDelivery, { type AcceptedApply } from "./DarkRestorePostApplyDelivery";
 import { restoreAPI } from "./DarkRestoreImport";
 
 const object=(v:unknown):v is Record<string,unknown>=>!!v&&typeof v==="object"&&!Array.isArray(v);
@@ -12,7 +13,7 @@ export default function DarkRestoreApplyAcceptance({model,promotion,round,handof
  const fa=model.language==="fa",path=restoreAPI+"/handoff/apply-acceptance";
  const event="accept-apply-"+round.id;
  const request={handoff_sha256:handoff,event_id:event,inbound_id:promotion.inbound_id,round_id:round.id,review_sha256:"",confirmed:false};
- const [review,setReview]=useState<Review|null>(null),[busy,setBusy]=useState(false),[failed,setFailed]=useState(false),[uncertain,setUncertain]=useState(false),[recorded,setRecorded]=useState(false);
+ const [review,setReview]=useState<Review|null>(null),[busy,setBusy]=useState(false),[failed,setFailed]=useState(false),[uncertain,setUncertain]=useState(false),[recorded,setRecorded]=useState<AcceptedApply|null>(null);
  const life=useRef<AbortController|null>(null),sending=useRef(false);
  useEffect(()=>{const c=new AbortController();life.current=c;return()=>c.abort();},[]);
  function evidence(v:unknown,recovered=false):asserts v is Record<string,unknown>{
@@ -36,7 +37,8 @@ export default function DarkRestoreApplyAcceptance({model,promotion,round,handof
     setReview(v as unknown as Review);
    }else{
     if(v.scope!=="darkrestore_native_apply_acceptance_v1"||v.client_id!==promotion.client_ids[0]||v.inbound_id!==promotion.inbound_id||v.event_id!==(action==="recover"?"accept-apply-"+String(v.evidence.health_round_id):event)||v.native_apply_recorded!==true||v.subscription_delivered!==false||v.subscription_activated!==false||v.authorizes_further_mutation!==false||!sha(v.evidence_sha256)||v.transition_sha256!==v.evidence.transition_sha256||action==="commit"&&(v.evidence_sha256!==review!.evidence_sha256||JSON.stringify(v.evidence)!==JSON.stringify(review!.evidence)))throw Error("unmatched acceptance");
-    setRecorded(true);setReview(null);setUncertain(false);
+    if(typeof v.recorded_unix_nano!=="number"||!Number.isInteger(v.recorded_unix_nano)||v.recorded_unix_nano<=0)throw Error("invalid acceptance time");
+    setRecorded({roundID:String(v.evidence.health_round_id),applySHA:String(v.evidence.initial_apply_sha256),recorded:v.recorded_unix_nano});setReview(null);setUncertain(false);
    }
   }catch{if(!c.signal.aborted){setFailed(true);if(action==="commit")setUncertain(true);}}
   finally{if(!c.signal.aborted){sending.current=false;setBusy(false);}}
@@ -47,6 +49,7 @@ export default function DarkRestoreApplyAcceptance({model,promotion,round,handof
    {review&&<><p>{fa?"حجم باقی‌مانده (بایت)":"Remaining quota (bytes)"}: <bdi>{String(review.evidence.remaining_budget_bytes)}</bdi></p><button type="button" disabled={busy||!current} onClick={()=>void run("commit")}>{uncertain?(fa?"تکرار همان پذیرش":"Retry exact acceptance"):(fa?"تأیید پذیرش اجرا":"Confirm execution acceptance")}</button></>}
    <button type="button" disabled={busy} onClick={()=>void run("recover")}>{fa?"بازیابی رسید پذیرش اجرا":"Recover execution acceptance"}</button>
   </>}
+  {recorded&&<DarkRestorePostApplyDelivery model={model} promotion={promotion} round={round} accepted={recorded} current={current}/>}
   {failed&&<p role="alert">{fa?"پاسخ با اجرای بررسی‌شده تطبیق نکرد؛ رسید را بازیابی کن.":"The response did not match the reviewed execution. Recover its receipt."}</p>}
  </section>;
 }

@@ -276,13 +276,28 @@ test("owner attaches a pinned signed handoff in Clients at 320px without a brows
  const applyEvidence={scope:"darkrestore_native_apply_evidence_v1",client_id:nativeReceipt.client_ids[0],inbound_id:802,plan_revision:1,prepared_inbound_revision:1,promoted_inbound_revision:2,promotion_event_id:nativeReceipt.event_id,health_round_id:healthRound!.id,initial_apply_sha256:binding.initial_apply_sha,apply_command_id:binding.apply_command_id,stage_id:binding.stage_id,transition_sha256:sha,prepared_content_sha256:sha,prepared_authority_sha256:sha,promotion_receipt_sha256:sha,health_receipt_sha256:sha,import_receipt_sha256:sha,native_baseline_sha256:sha,current_finite_entitlement:"1000",settled_historical_bytes:"14",native_post_migration_bytes:"0",remaining_budget_bytes:"986"};
  const acceptanceEvent="accept-apply-"+String(healthRound!.id);
  let acceptancePosts=0,acceptanceGets=0;
+ const acceptedAt=Date.now()*1e6;
+ let deliverySnapshot:Record<string,unknown>|undefined,deliveryBody:Record<string,unknown>|undefined,deliveryPosts=0;
+ await page.route("**/api/v1/workspace/clients/"+nativeReceipt.client_ids[0]+"/subscription",route=>route.fulfill({json:{
+  enabled:true,scope:"lab_initial_apply",client_id:nativeReceipt.client_ids[0],generation:0,state:"absent",server_time_unix_milli:Date.now(),
+  initial_apply_revision:deliverySnapshot?1:0,delivery_revision:deliverySnapshot?1:0,handover_revision:0,delivery_scope:deliverySnapshot?"lab_initial_apply":"",snapshot:deliverySnapshot
+ }}));
+ await page.route("**/api/v1/workspace/native-inbound-plans/802/initial-health/snapshot",route=>{
+  const b=route.request().postDataJSON();deliveryPosts++;
+  expect(b.client_id).toBe(nativeReceipt.client_ids[0]);expect(b.round_id).toBe(applyEvidence.health_round_id);expect(b.initial_apply_sha).toBe(binding.initial_apply_sha);
+  expect(b.expected_revision).toBe(0);expect(b.expected_delivery_revision).toBe(0);expect(b.confirmed).toBe(true);
+  if(deliveryBody)expect(b).toEqual(deliveryBody);else deliveryBody=b;
+  deliverySnapshot={id:"c".repeat(32),event_id:b.event_id,client_id:b.client_id,handover_id:"",round_id:b.round_id,...identity,scope:"lab_initial_apply",initial_apply_sha:b.initial_apply_sha,
+   revision:1,delivery_revision:1,created_unix_nano:Date.now()*1e6,expires_unix_nano:healthRound!.expires_unix_nano,route_count:1,current:true,replayed:deliveryPosts>1};
+  return deliveryPosts===1?route.abort("failed"):route.fulfill({json:deliverySnapshot});
+ });
  await page.route("**/api/v1/workspace/dark-restore/handoff/apply-acceptance/preview",route=>{
   expect(route.request().postDataJSON()).toEqual({handoff_sha256:evidence,event_id:acceptanceEvent,inbound_id:802,round_id:healthRound!.id,review_sha256:"",confirmed:false});
   return route.fulfill({json:{scope:"darkrestore_owner_apply_review_v1",event_id:acceptanceEvent,review_sha256:"9".repeat(64),evidence_sha256:"a".repeat(64),evidence:applyEvidence,authorizes_mutation:false}});
  });
  await page.route("**/api/v1/workspace/dark-restore/handoff/apply-acceptance",route=>{
   if(route.request().method()==="POST"){acceptancePosts++;expect(route.request().postDataJSON().review_sha256).toBe("9".repeat(64));expect(route.request().postDataJSON().confirmed).toBe(true);return route.abort("failed");}
-  acceptanceGets++;return route.fulfill({json:{scope:"darkrestore_native_apply_acceptance_v1",event_id:acceptanceEvent,client_id:nativeReceipt.client_ids[0],inbound_id:802,transition_sha256:sha,evidence_sha256:"a".repeat(64),evidence:applyEvidence,native_apply_recorded:true,subscription_delivered:false,subscription_activated:false,authorizes_further_mutation:false}});
+  acceptanceGets++;return route.fulfill({json:{scope:"darkrestore_native_apply_acceptance_v1",event_id:acceptanceEvent,client_id:nativeReceipt.client_ids[0],inbound_id:802,transition_sha256:sha,evidence_sha256:"a".repeat(64),evidence:applyEvidence,recorded_unix_nano:acceptedAt,native_apply_recorded:true,subscription_delivered:false,subscription_activated:false,authorizes_further_mutation:false}});
  });
  await acceptance.getByRole("button",{name:"پیش‌نمایش پذیرش اجرا",exact:true}).click();
  await expect(acceptance.getByText("986",{exact:true})).toBeVisible();
@@ -293,6 +308,16 @@ test("owner attaches a pinned signed handoff in Clients at 320px without a brows
  await acceptance.getByRole("button",{name:"بازیابی رسید پذیرش اجرا",exact:true}).click();
  await expect(acceptance.getByRole("status")).toContainText("پذیرش Apply و سلامت ثبت شد");
  expect({acceptancePosts,acceptanceGets}).toEqual({acceptancePosts:1,acceptanceGets:1});
+
+ const delivery=acceptance.getByRole("region",{name:"ثبت نسخهٔ اشتراک پس از Apply"});
+ await expect(delivery.getByRole("button",{name:"ثبت نسخهٔ اشتراک",exact:true})).toBeEnabled();
+ expect(deliveryPosts).toBe(0);
+ page.once("dialog",d=>d.accept());
+ await delivery.getByRole("button",{name:"ثبت نسخهٔ اشتراک",exact:true}).click();
+ await expect(delivery.getByRole("alert")).toBeVisible();
+ await delivery.getByRole("button",{name:"تکرار همان ثبت نسخه",exact:true}).click();
+ await expect(delivery.getByText("رسید ثبت نسخه بازیابی شد؛ فعال‌سازی تأیید نشده است.",{exact:true})).toBeVisible();
+ expect(deliveryPosts).toBe(2);expect(subscriptionWrites).toEqual([]);
  // An expired valid receipt is history, never current health or an auto-renewal.
  const past=Date.now()*1e6-9e9;
  healthRound={...healthRound,created_unix_nano:past,expires_unix_nano:past+7e9,current:false,state:"expired",members:[{inbound_id:802,intent_id:"7".repeat(32),port:21186,state:"accepted",challenge_id:"8".repeat(32),accepted_unix_nano:past+1e6}]};
@@ -307,6 +332,8 @@ test("owner attaches a pinned signed handoff in Clients at 320px without a brows
  await acceptance.getByRole("button",{name:"بازیابی رسید پذیرش اجرا",exact:true}).click();
  await expect(acceptance.getByRole("status")).toContainText("پذیرش Apply و سلامت ثبت شد");
  expect(acceptanceGets).toBe(2);
+ await expect(delivery.getByText("سلامتِ همان پذیرش دیگر معتبر نیست؛ ثبت جدید مسدود است. آزمون جدید این رسید را تمدید نمی‌کند.",{exact:true})).toBeVisible();
+ expect(deliveryPosts).toBe(2);expect(subscriptionWrites).toEqual([]);
  // A mismatched latest proof clears the prior success, even if marked current.
  healthRound={...healthRound,client_id:"foreign"};
  await health.getByRole("button",{name:"به‌روزرسانی سلامت اجرا",exact:true}).click();
