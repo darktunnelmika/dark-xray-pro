@@ -612,6 +612,15 @@ a foreign manifest pin and every `authorizes_activation` result are checked.
 This is package-chain evidence only; it does not establish the truth or
 completeness of any real operator inventory.
 
+That real-core package-chain fixture also constructs a separate synthetic
+coverage assertion with a distinct generated authority key and sends the exact
+manifest, approval, key and pins through the packaged preflight executable. It
+requires the approval to follow the witness, checks byte-stable replay, partial
+approval arguments, a foreign authority pin and a non-later approval, and still
+requires every report layer to deny activation. The signed assertion identifies
+its synthetic claimant; it does not turn the asserted inventory or retirement
+into operational fact.
+
 Missing, tampered, foreign, duplicate or replay-conflicting documents keep the
 transition closed; an insert failure rolls back both evidence and financial
 reservation. Historical pre-attestation receipts remain readable but cannot

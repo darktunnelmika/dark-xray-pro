@@ -112,6 +112,7 @@ jobs:
           test "$(grep -c DARKRESTORE_SIGNED_HANDOFF_PASS "$RUNNER_TEMP/darkrestore-local-settlement.log")" = 3
           test "$(grep -c DARKRESTORE_SOURCE_RETIREMENT_PASS "$RUNNER_TEMP/darkrestore-local-settlement.log")" = 3
           test "$(grep -c DARKRESTORE_PACKAGED_RETIREMENT_CHAIN_PASS "$RUNNER_TEMP/darkrestore-local-settlement.log")" = 3
+          test "$(grep -c DARKRESTORE_PACKAGED_RETIREMENT_APPROVAL_PASS "$RUNNER_TEMP/darkrestore-local-settlement.log")" = 3
       - name: Active stream diagnostics
         if: failure()
         run: |

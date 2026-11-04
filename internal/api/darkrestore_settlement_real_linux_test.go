@@ -379,6 +379,88 @@ func (f *localSettlementFixture) check(t *testing.T, ctx context.Context, server
 				t.Fatal("packaged preflight accepted a foreign manifest pin")
 			}
 			t.Log("DARKRESTORE_PACKAGED_RETIREMENT_CHAIN_PASS exact emitter, independent witness and complete preflight; activation false")
+			approvalPublic, approvalPrivate, approvalKeyErr := ed25519.GenerateKey(rand.Reader)
+			if approvalKeyErr != nil {
+				t.Fatal(approvalKeyErr)
+			}
+			approvalKeyPath := filepath.Join(f.dir, "coverage-approval.key")
+			approvalPublicPath := filepath.Join(f.dir, "coverage-approval.pub")
+			approvalPath := filepath.Join(f.dir, "coverage-approval.json")
+			for path, content := range map[string][]byte{approvalKeyPath: approvalPrivate, approvalPublicPath: approvalPublic} {
+				if err = os.WriteFile(path, content, 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			approval := darkrestore.HandoffCoverageApprovalV1{
+				Version: 1, InventorySHA: inventorySHA, SourceSHA: result.SourceSHA, SourceID: result.SourceID,
+				Scope: darkrestore.HandoffCoverageScopeV1, Statement: darkrestore.HandoffCoverageStatementV1,
+				DeclaredSources: report.Coverage.DeclaredSources, EpochIDs: append([]string(nil), report.Coverage.EpochIDs...),
+				InventoryCompleteAsserted: true, DeclaredSourcesRetired: true,
+				RetirementBundleSHA: report.Coverage.BundleSHA, ApprovedUnixNano: 12001,
+				DestinationSHA: destinationSHA, DestinationStateSHA: strings.Repeat("4", 64),
+				NativeBaselineSHA: strings.Repeat("5", 64), ImportReceiptSHA: strings.Repeat("6", 64),
+				BillingAttributionSHA: strings.Repeat("7", 64), BillingAttribution: "disjoint_source_epoch_deltas",
+			}
+			writeApproval := func(value darkrestore.HandoffCoverageApprovalV1) string {
+				approvalValue, marshalErr := json.Marshal(value)
+				if marshalErr != nil {
+					t.Fatal(marshalErr)
+				}
+				message := append([]byte("DARK-PRO-DARKRESTORE-HANDOFF-COVERAGE-v1\x00"), approvalValue...)
+				rawApproval, marshalErr := json.Marshal(darkrestore.SignedHandoffCoverageApprovalV1{
+					Version: 1, Approval: value, Signature: ed25519.Sign(approvalPrivate, message),
+				})
+				if marshalErr != nil {
+					t.Fatal(marshalErr)
+				}
+				rawApproval = append(rawApproval, '\n')
+				if writeErr := os.WriteFile(approvalPath, rawApproval, 0600); writeErr != nil {
+					t.Fatal(writeErr)
+				}
+				return settlementHash(t, approvalPath)
+			}
+			approvalSHA := writeApproval(approval)
+			approvalArgs := append(append([]string(nil), preflightArgs...),
+				"-coverage-approval", approvalPath,
+				"-coverage-approval-sha256", approvalSHA,
+				"-coverage-approval-public-key", approvalPublicPath,
+				"-coverage-approval-public-key-sha256", settlementHash(t, approvalPublicPath),
+			)
+			raw, err = exec.CommandContext(ctx, preflightCLI, approvalArgs...).Output()
+			var approvalReport darkrestore.SourceRetirementApprovalReportV1
+			if err != nil || json.Unmarshal(raw, &approvalReport) != nil || approvalReport.AuthorizesActivation ||
+				approvalReport.Manifest.AuthorizesActivation || approvalReport.Manifest.Coverage.AuthorizesActivation ||
+				approvalReport.CoverageApprovalSHA != approvalSHA || approvalReport.ApprovedUnixNano != 12001 ||
+				approvalReport.Manifest.Coverage.BundleSHA != report.Coverage.BundleSHA {
+				t.Fatal("packaged approval preflight changed authority", err)
+			}
+			approvalReplay, approvalReplayErr := exec.CommandContext(ctx, preflightCLI, approvalArgs...).Output()
+			if approvalReplayErr != nil || !reflect.DeepEqual(raw, approvalReplay) {
+				t.Fatal("packaged approval preflight replay changed bytes", approvalReplayErr)
+			}
+			partialApprovalArgs := append(append([]string(nil), preflightArgs...), "-coverage-approval", approvalPath)
+			if raw, err = exec.CommandContext(ctx, preflightCLI, partialApprovalArgs...).Output(); err == nil || len(raw) != 0 {
+				t.Fatal("packaged preflight accepted partial approval inputs")
+			}
+			foreignAuthorityArgs := append([]string(nil), approvalArgs...)
+			foreignAuthorityArgs[len(foreignAuthorityArgs)-1] = strings.Repeat("8", 64)
+			if raw, err = exec.CommandContext(ctx, preflightCLI, foreignAuthorityArgs...).Output(); err == nil || len(raw) != 0 {
+				t.Fatal("packaged preflight accepted a foreign approval authority pin")
+			}
+			staleApproval := approval
+			staleApproval.ApprovedUnixNano = 12000
+			staleApprovalSHA := writeApproval(staleApproval)
+			staleApprovalArgs := append([]string(nil), approvalArgs...)
+			for i, flag := range staleApprovalArgs {
+				if flag == "-coverage-approval-sha256" {
+					staleApprovalArgs[i+1] = staleApprovalSHA
+					break
+				}
+			}
+			if raw, err = exec.CommandContext(ctx, preflightCLI, staleApprovalArgs...).Output(); err == nil || len(raw) != 0 {
+				t.Fatal("packaged preflight accepted approval not later than the witness")
+			}
+			t.Log("DARKRESTORE_PACKAGED_RETIREMENT_APPROVAL_PASS exact manifest and later independent assertion bound; activation false")
 		}
 		badKey := filepath.Join(f.dir, "wrong.key")
 		if err = os.WriteFile(badKey, make([]byte, 32), 0600); err != nil {
