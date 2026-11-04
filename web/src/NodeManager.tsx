@@ -14,6 +14,12 @@ type Registration = {
   status: "online" | "offline";
   metrics_current: boolean;
   last_seen: string | null;
+  transport_state: string;
+  metrics_state: string;
+  core_state: string;
+  accounting_state: string;
+  execution_current: boolean;
+  execution_reported_at: string | null;
 };
 type TransportScope = "disabled" | "loopback_only" | "external_tls_unverified";
 type Roster = { nodes: Registration[]; mode: "new_pro_lab_only";
@@ -32,6 +38,7 @@ const words = {
     boundary: "PRO LAB only · no old Nodes · no deletion · pairing never activates Xray or subscriptions automatically",
     roster: "Registered NEW PRO Nodes", empty: "No freshly paired PRO Nodes yet.",
     online: "Online", offline: "Offline", delayed: "Metrics delayed", lastSeen: "Last heartbeat",
+    transport: "Transport", core: "Core", metrics: "Metrics", accounting: "Accounting", staleExecution: "stale observation",
     refreshing: "Checking registrations", retry: "Refresh list", registryIssue: "Cannot load registered Nodes.",
     codeLost: "After refresh or leaving this page the code cannot be viewed again. Cancel a pending invitation by its ID, or wait for expiry.",
     codeCancelled: "Pending Pair Code revoked. No Node or client was changed.",
@@ -59,6 +66,7 @@ const words = {
     boundary: "فقط PRO آزمایشی · بدون دست‌زدن به نودهای قدیمی · بدون حذف · اتصال نود، Xray یا اشتراک را خودکار فعال نمی‌کند",
     roster: "نودهای تازهٔ ثبت‌شده در PRO", empty: "هنوز نود تازه‌ای Pair نشده است.",
     online: "آنلاین", offline: "آفلاین", delayed: "آمار با تأخیر", lastSeen: "آخرین Heartbeat",
+    transport: "ارتباط", core: "هسته", metrics: "متریک", accounting: "حسابداری", staleExecution: "گزارش قدیمی",
     refreshing: "در حال دریافت لیست نودها", retry: "بازخوانی", registryIssue: "فهرست نودها قابل دریافت نیست.",
     codeLost: "بعد از رفرش یا خروج از این بخش، کد دوباره قابل نمایش نیست؛ می‌توانی دعوت در انتظار را با شناسه لغو کنی یا تا انقضا صبر کنی.",
     codeCancelled: "کد در انتظار باطل شد؛ هیچ نود یا کلاینتی تغییر نکرد.",
@@ -299,6 +307,10 @@ export default function NodeManager({ language }: { language: Language }) {
             <span className={"pro-node-roster-status " + (node.status === "online" ? "is-online" : "is-offline")}>
               {node.status === "online" ? t.online : t.offline}{node.status === "online" && !node.metrics_current ? " · "+t.delayed : ""}
             </span>
+            <small>
+              {t.transport}: {node.transport_state} · {t.core}: {node.core_state}{node.execution_reported_at && !node.execution_current ? " ("+t.staleExecution+")" : ""}
+              {" · "}{t.metrics}: {node.metrics_state} · {t.accounting}: {node.accounting_state}
+            </small>
             <NodeNameEditor key={session?.user.id + ":" + node.node_id} nodeID={node.node_id} language={language} onSaved={() => { void load().catch(() => setRosterFailed(true)); }} />
             <NodeDependencies key={session?.user.id + ":dependencies:" + node.node_id} nodeID={node.node_id} language={language} />
             <NodeReplacements key={session?.user.id + ":replacements:" + node.node_id} nodeID={node.node_id} language={language} />
