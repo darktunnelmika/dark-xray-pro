@@ -43,7 +43,7 @@ export default function DarkRestorePreparedPromotion({model,client,handoff,targe
    {review&&<><p>{fa?"نود بررسی‌شده":"Reviewed node"}: <bdi>{review.node}</bdi></p><p>{review.eligible?(fa?"آمادهٔ تأیید انتقال به مرحلهٔ اعمال":"Ready to confirm preparation for Apply"):(fa?"پیش‌شرط‌های انتقال کامل نیست؛ طرح و وضعیت نود را بررسی کن.":"Transfer prerequisites are incomplete. Review the setup and node state.")}</p><button type="button" disabled={busy||disabled||!review.eligible} onClick={()=>void run("commit")}>{uncertain?(fa?"تکرار همان تأیید":"Retry exact confirmation"):(fa?"تأیید آماده‌سازی انتقال":"Confirm transfer preparation")}</button></>}
    <button type="button" disabled={busy||disabled} onClick={()=>void run("recover")}>{fa?"بازیابی رسید آماده‌سازی":"Recover preparation receipt"}</button>
   </>}
-  {recorded&&<DarkRestoreExecution model={model} client={client} inbound={target.inbound_id} planRevision={target.plan_revision} sourceRevision={target.inbound_revision} promotionEvent={request.promotion_event_id}/>}
+  {recorded&&<DarkRestoreExecution handoff={handoff} model={model} client={client} inbound={target.inbound_id} planRevision={target.plan_revision} sourceRevision={target.inbound_revision} promotionEvent={request.promotion_event_id}/>}
   {failed&&<p role="alert">{uncertain?(fa?"پاسخ تأیید نشد؛ رسید را بازیابی کن یا همان درخواست را تکرار کن.":"The response was not confirmed. Recover the receipt or retry the exact request."):(fa?"وضعیت مطابق این مشتری و طرح تأیید نشد.":"The state could not be verified for this client and setup.")}</p>}
  </section>;
 }

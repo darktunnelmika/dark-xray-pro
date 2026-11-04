@@ -5,7 +5,7 @@ import NativeMeteredRouteTransactions from "../NativeMeteredRouteTransactions";
 import { promotionPath, readPromotionDiscovery, type PromotionReceipt } from "../inboundPlanExecution";
 import DarkRestoreProtocolHealth from "./DarkRestoreProtocolHealth";
 
-export default function DarkRestoreExecution({model,client,inbound,planRevision,sourceRevision,promotionEvent}:{model:BusinessModel;client:string;inbound:number;planRevision:number;sourceRevision:number;promotionEvent:string}) {
+export default function DarkRestoreExecution({model,client,inbound,planRevision,sourceRevision,promotionEvent,handoff}:{model:BusinessModel;client:string;inbound:number;planRevision:number;sourceRevision:number;promotionEvent:string;handoff:string}) {
  const fa=model.language==="fa", [promotion,setPromotion]=useState<PromotionReceipt|null>(null),[busy,setBusy]=useState(false),[failed,setFailed]=useState(false);
  const life=useRef<AbortController|null>(null);
  useEffect(()=>{const c=new AbortController();life.current=c;return()=>c.abort();},[]);
@@ -23,7 +23,7 @@ export default function DarkRestoreExecution({model,client,inbound,planRevision,
   <button type="button" disabled={busy} onClick={()=>void open()}>{fa?"بررسی و بازکردن کنترل‌های اجرا":"Review and open execution controls"}</button>
   {failed&&<p role="alert">{fa?"رسید اجرا با همین مشتری و طرح تطبیق نکرد؛ کنترل‌ها بسته ماندند.":"The execution receipt did not match this client and setup. Controls remain closed."}</p>}
   {promotion&&<>
-   <DarkRestoreProtocolHealth model={model} promotion={promotion}/>
+   <DarkRestoreProtocolHealth handoff={handoff} model={model} promotion={promotion}/>
    <NativeMeteredRouteTransactions language={model.language} context={{nodeID:promotion.node_id,installationID:promotion.installation_id,inboundID:inbound,inboundRevision:promotion.inbound_revision,draftRevision:promotion.draft_revision}}/>
   </>}
  </section>;

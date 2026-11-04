@@ -271,12 +271,42 @@ test("owner attaches a pinned signed handoff in Clients at 320px without a brows
  await expect(health.getByRole("status")).toContainText("اتصال همین اجرا در مهلت اثبات تأیید شد");
  expect(rounds).toBe(1);expect(subscriptionWrites).toEqual([]);
 
+
+ const acceptance=health.getByRole("region",{name:"پذیرش Apply و سلامت"});
+ const applyEvidence={scope:"darkrestore_native_apply_evidence_v1",client_id:nativeReceipt.client_ids[0],inbound_id:802,plan_revision:1,prepared_inbound_revision:1,promoted_inbound_revision:2,promotion_event_id:nativeReceipt.event_id,health_round_id:healthRound!.id,initial_apply_sha256:binding.initial_apply_sha,apply_command_id:binding.apply_command_id,stage_id:binding.stage_id,transition_sha256:sha,prepared_content_sha256:sha,prepared_authority_sha256:sha,promotion_receipt_sha256:sha,health_receipt_sha256:sha,import_receipt_sha256:sha,native_baseline_sha256:sha,current_finite_entitlement:"1000",settled_historical_bytes:"14",native_post_migration_bytes:"0",remaining_budget_bytes:"986"};
+ const acceptanceEvent="accept-apply-"+String(healthRound!.id);
+ let acceptancePosts=0,acceptanceGets=0;
+ await page.route("**/api/v1/workspace/dark-restore/handoff/apply-acceptance/preview",route=>{
+  expect(route.request().postDataJSON()).toEqual({handoff_sha256:evidence,event_id:acceptanceEvent,inbound_id:802,round_id:healthRound!.id,review_sha256:"",confirmed:false});
+  return route.fulfill({json:{scope:"darkrestore_owner_apply_review_v1",event_id:acceptanceEvent,review_sha256:"9".repeat(64),evidence_sha256:"a".repeat(64),evidence:applyEvidence,authorizes_mutation:false}});
+ });
+ await page.route("**/api/v1/workspace/dark-restore/handoff/apply-acceptance",route=>{
+  if(route.request().method()==="POST"){acceptancePosts++;expect(route.request().postDataJSON().review_sha256).toBe("9".repeat(64));expect(route.request().postDataJSON().confirmed).toBe(true);return route.abort("failed");}
+  acceptanceGets++;return route.fulfill({json:{scope:"darkrestore_native_apply_acceptance_v1",event_id:acceptanceEvent,client_id:nativeReceipt.client_ids[0],inbound_id:802,transition_sha256:sha,evidence_sha256:"a".repeat(64),evidence:applyEvidence,native_apply_recorded:true,subscription_delivered:false,subscription_activated:false,authorizes_further_mutation:false}});
+ });
+ await acceptance.getByRole("button",{name:"پیش‌نمایش پذیرش اجرا",exact:true}).click();
+ await expect(acceptance.getByText("986",{exact:true})).toBeVisible();
+ expect(acceptancePosts).toBe(0);
+ page.once("dialog",d=>d.accept());
+ await acceptance.getByRole("button",{name:"تأیید پذیرش اجرا",exact:true}).click();
+ await expect(acceptance.getByRole("alert")).toBeVisible();
+ await acceptance.getByRole("button",{name:"بازیابی رسید پذیرش اجرا",exact:true}).click();
+ await expect(acceptance.getByRole("status")).toContainText("پذیرش Apply و سلامت ثبت شد");
+ expect({acceptancePosts,acceptanceGets}).toEqual({acceptancePosts:1,acceptanceGets:1});
  // An expired valid receipt is history, never current health or an auto-renewal.
  const past=Date.now()*1e6-9e9;
  healthRound={...healthRound,created_unix_nano:past,expires_unix_nano:past+7e9,current:false,state:"expired",members:[{inbound_id:802,intent_id:"7".repeat(32),port:21186,state:"accepted",challenge_id:"8".repeat(32),accepted_unix_nano:past+1e6}]};
  await health.getByRole("button",{name:"به‌روزرسانی سلامت اجرا",exact:true}).click();
- await expect(health.getByRole("status")).toHaveText("سلامت فعلی تأیید نشده است.");
+ await expect(health.locator(':scope > p[role="status"]')).toHaveText("سلامت فعلی تأیید نشده است.");
  expect(rounds).toBe(1);
+
+ // A later health round must not hide this client's immutable earlier acceptance.
+ healthRound={...healthRound,id:"f".repeat(32)};
+ await health.getByRole("button",{name:"به‌روزرسانی سلامت اجرا",exact:true}).click();
+ await expect(acceptance.getByRole("button",{name:"بازیابی رسید پذیرش اجرا",exact:true})).toBeVisible();
+ await acceptance.getByRole("button",{name:"بازیابی رسید پذیرش اجرا",exact:true}).click();
+ await expect(acceptance.getByRole("status")).toContainText("پذیرش Apply و سلامت ثبت شد");
+ expect(acceptanceGets).toBe(2);
  // A mismatched latest proof clears the prior success, even if marked current.
  healthRound={...healthRound,client_id:"foreign"};
  await health.getByRole("button",{name:"به‌روزرسانی سلامت اجرا",exact:true}).click();

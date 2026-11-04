@@ -34,6 +34,18 @@ func (s *Store) ProjectDarkRestoreNativeApplyEvidenceV1(ctx context.Context, key
 }
 
 func (s *Store) projectDarkRestoreNativeApplyEvidenceV1(ctx context.Context, tx *sql.Tx, key []byte, client string, inbound uint64, roundID string, pins DarkRestoreNativeApplyPinsV1, now int64) (DarkRestoreNativeApplyEvidenceV1, error) {
+	out, err := s.deriveDarkRestoreNativeApplyEvidenceV1(ctx, tx, key, client, inbound, roundID, now)
+	if err != nil {
+		return DarkRestoreNativeApplyEvidenceV1{}, err
+	}
+	if _, err = ValidateDarkRestoreNativeApplyEvidenceV1(out, pins, now); err != nil {
+		return DarkRestoreNativeApplyEvidenceV1{}, err
+	}
+	return out, nil
+}
+
+func (s *Store) deriveDarkRestoreNativeApplyEvidenceV1(ctx context.Context, tx *sql.Tx, key []byte, client string, inbound uint64, roundID string, now int64) (DarkRestoreNativeApplyEvidenceV1, error) {
+
 	var zero DarkRestoreNativeApplyEvidenceV1
 	final, err := readCutoverReceipt(ctx, tx, client)
 	if err != nil || final == nil || final.Prepared.InboundID != inbound {
@@ -115,9 +127,6 @@ func (s *Store) projectDarkRestoreNativeApplyEvidenceV1(ctx context.Context, tx 
 		NativePostMigrationBytes: *current.NativeUplink + *current.NativeDownlink, RemainingBudgetBytes: remaining,
 		PreparedUnixNano: final.SubscriptionDeliveredNano, PromotedUnixNano: promotedAt,
 		AppliedUnixNano: state.apply.view.Receipt.ObservedAt, HealthAcceptedUnixNano: round.Members[0].Accepted,
-	}
-	if _, err = ValidateDarkRestoreNativeApplyEvidenceV1(out, pins, now); err != nil {
-		return zero, err
 	}
 	return out, nil
 }

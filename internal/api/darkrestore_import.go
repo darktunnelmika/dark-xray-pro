@@ -168,6 +168,34 @@ func (s *Server) attachDarkRestoreImport(mux *http.ServeMux) {
 			state, err := s.business.DarkRestoreCutoverReadinessV1(ctx, proof.SourceSHA, proof.SourceID)
 			return state.ClientID, err
 		}
+
+		handle("GET "+restoreBase+"/handoff/apply-acceptance", false, func(w http.ResponseWriter, r *http.Request, token string) {
+			client, err := stagedClient(r.Context())
+			if err != nil {
+				businessError(w, err)
+				return
+			}
+			out, err := s.business.DarkRestoreNativeApplyAcceptanceReceipt(r.Context(), token, client)
+			if err != nil {
+				businessError(w, err)
+				return
+			}
+			respond(w, http.StatusOK, out)
+		})
+		for _, route := range []struct {
+			suffix  string
+			preview bool
+		}{{"/apply-acceptance/preview", true}, {"/apply-acceptance", false}} {
+			preview := route.preview
+			handle("POST "+restoreBase+"/handoff"+route.suffix, true, func(w http.ResponseWriter, r *http.Request, token string) {
+				client, err := stagedClient(r.Context())
+				if err != nil {
+					businessError(w, err)
+					return
+				}
+				s.reviewDarkRestoreApply(w, r, token, client, handoff.digest, preview)
+			})
+		}
 		handle("GET "+restoreBase+"/handoff/promotion", false, func(w http.ResponseWriter, r *http.Request, token string) {
 			client, err := stagedClient(r.Context())
 			if err != nil {

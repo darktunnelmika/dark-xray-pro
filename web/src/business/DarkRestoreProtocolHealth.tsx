@@ -1,3 +1,4 @@
+import DarkRestoreApplyAcceptance from "./DarkRestoreApplyAcceptance";
 import { useEffect, useRef, useState } from "react";
 import { api } from "../session";
 import type { BusinessModel } from "./useBusinessWorkspace";
@@ -16,7 +17,7 @@ function readAttempt(raw:string|null,p:PromotionReceipt):Attempt|null {
  if(a.action==="rounds"&&Object.keys(a).sort().join(",")==="action,binding,body"&&Object.keys(b).sort().join(",")==="confirmed,id,initial_apply_sha"&&hex(b.id,32)&&hex(b.initial_apply_sha,64)&&a.binding&&Object.keys(a.binding).sort().join(",")==="apply_command_id,epoch_id,initial_apply_sha,stage_id"&&initialHealthBinding(a.binding)&&b.initial_apply_sha===a.binding.initial_apply_sha)return a;
  throw Error("invalid retry");
 }
-export default function DarkRestoreProtocolHealth({model,promotion}:{model:BusinessModel;promotion:PromotionReceipt}) {
+export default function DarkRestoreProtocolHealth({model,promotion,handoff}:{model:BusinessModel;promotion:PromotionReceipt;handoff:string}) {
  const fa=model.language==="fa",base=initialHealthPath(promotion.inbound_id),key="dark-pro-import-health:"+model.session.user.id+":"+promotion.event_id;
  const [checked,setChecked]=useState<Checked|null>(null),[ready,setReady]=useState(false),[busy,setBusy]=useState(false),[failed,setFailed]=useState(false),[storageError,setStorageError]=useState(false),[attempt,setAttempt]=useState<Attempt|null>(null),[refresh,setRefresh]=useState(0),[,tick]=useState(0);
  const life=useRef<AbortController|null>(null),sending=useRef(false),retained=useRef<Attempt|null>(null),current=useRef<Checked|null>(null);
@@ -79,6 +80,7 @@ export default function DarkRestoreProtocolHealth({model,promotion}:{model:Busin
    <p role="status">{verified?(fa?"اتصال همین اجرا در مهلت اثبات تأیید شد؛ فعال‌سازی هنوز انجام نشده است.":"This execution's connection is verified within the proof window; activation is still pending."):(fa?"سلامت فعلی تأیید نشده است.":"Current health is not verified.")}</p>
    {state.blockers.length>0&&<ul>{state.blockers.map((b,i)=><li key={i}><bdi>{b.field}: {b.code}</bdi></li>)}</ul>}
   </>}
+  {round&&<DarkRestoreApplyAcceptance key={round.id} model={model} promotion={promotion} round={round} handoff={handoff} current={verified}/>}
   {attempt&&<p><button type="button" disabled={busy||storageError||!live} onClick={()=>{if(window.confirm(fa?"همان درخواست ذخیره‌شده تکرار شود؟":"Retry the exact retained request?"))void send(attempt);}}>{fa?"تکرار همان درخواست سلامت":"Retry exact health request"}</button></p>}
   {(attempt||storageError)&&<button type="button" disabled={busy} onClick={()=>{if(window.confirm(fa?"فقط درخواست محلی کنار گذاشته شود؟ عملیات ثبت‌شده در سرور لغو نمی‌شود.":"Discard only the local request? This does not undo a recorded server operation."))remember(null);}}>{fa?"کنارگذاشتن درخواست محلی":"Discard local request"}</button>}
   {(failed||storageError)&&<p role="alert">{storageError?(fa?"ذخیرهٔ درخواست ممکن نیست؛ درخواست جدیدی ارسال نشده است.":"The request could not be retained; no new write was sent."):(fa?"پاسخ قابل تأیید نبود؛ وضعیت را تازه کن یا همان درخواست را بازیابی کن.":"The response could not be verified. Refresh or recover the exact request.")}</p>}
