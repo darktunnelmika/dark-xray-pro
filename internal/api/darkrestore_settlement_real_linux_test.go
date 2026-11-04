@@ -495,11 +495,12 @@ func (f *localSettlementFixture) attachToEarlierImport(t *testing.T, ctx context
 	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &readiness) != nil ||
 		readiness.ClientID != id || !readiness.SourceEpochSettled ||
 		readiness.DeclaredInventoryCoverageVerified || readiness.IndependentCoverageAssertionVerified ||
+		readiness.DeclaredSourceRetirementsVerified ||
 		readiness.GlobalSourceCustodyVerified || readiness.NativeBaselineComplete ||
 		readiness.SubscriptionDelivered || readiness.CutoverReceiptRecorded ||
 		readiness.ActivationAllowed || readiness.CutoverVerified ||
 		readiness.FiniteQuotaRemainingBytes != strconv.FormatInt(proof.Remaining, 10) ||
-		strings.Join(readiness.ActivationBlockers, ",") != "declared_inventory_coverage_not_verified,independent_coverage_assertion_not_verified" ||
+		strings.Join(readiness.ActivationBlockers, ",") != "declared_inventory_coverage_not_verified,independent_coverage_assertion_not_verified,declared_source_retirements_not_verified" ||
 		strings.Join(readiness.VerificationBlockers, ",") != "native_baseline_incomplete,subscription_not_delivered,cutover_receipt_not_recorded" {
 		t.Fatal("cutover readiness guessed missing evidence", w.Code, readiness)
 	}
