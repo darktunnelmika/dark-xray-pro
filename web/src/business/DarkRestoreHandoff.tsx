@@ -21,6 +21,7 @@ type Readiness = {
  native_baseline_complete:boolean; subscription_delivered:boolean; subscription_delivery_scope?:string;
  client_archived:boolean; client_expired:boolean; finite_quota_remaining_bytes:string;
  activation_allowed:boolean; cutover_verified:boolean;
+ native_apply_recorded:boolean; initial_apply_subscription_delivered:boolean; native_activation_authorized:boolean;
  activation_blockers:string[]; verification_blockers:string[];
 };
 const probeLabels = {
@@ -105,16 +106,21 @@ export default function DarkRestoreHandoff({model}:{model:BusinessModel}) {
   setBusy(true);setError(false);setReadiness(null);setExecution(null);setExecutionError(false);
   try {
    const result=await api<Readiness>(restoreAPI+"/handoff/readiness");
+   if(!result) throw Error("missing readiness");
    const lists=[result.activation_blockers,result.verification_blockers];
    if(!result||result.client_id!==receipt.client_id||
       result.source_sha256!==staged.source_settlement.source_sha256||
       result.source_id!==staged.source_settlement.source_id||
-      !["single_local_source_epoch","pinned_inventory_plus_independent_coverage_assertion"].includes(result.source_scope)||
+      !["single_local_source_epoch","pinned_inventory_plus_independent_coverage_assertion","pinned_inventory_plus_independent_coverage_and_retirement_receipts"].includes(result.source_scope)||
       ![result.source_epoch_settled,result.global_source_custody_verified,result.native_baseline_complete,
         result.subscription_delivered,result.client_archived,result.client_expired,
-        result.activation_allowed,result.cutover_verified].every(x=>typeof x==="boolean")||
+        result.activation_allowed,result.cutover_verified,result.native_apply_recorded,
+        result.initial_apply_subscription_delivered,result.native_activation_authorized].every(x=>typeof x==="boolean")||
       !bytes(result.finite_quota_remaining_bytes)||
       lists.some(v=>!Array.isArray(v)||v.some(x=>typeof x!=="string"||!/^[a-z0-9_]+$/.test(x)))||
+      result.initial_apply_subscription_delivered&&!result.native_apply_recorded||
+      result.native_activation_authorized&&!result.initial_apply_subscription_delivered||
+      result.subscription_delivery_scope==="darkrestore_prepared_not_applied_v1"&&result.activation_allowed&&!result.native_activation_authorized||
       result.cutover_verified&&(!result.activation_allowed||!result.native_baseline_complete||!result.subscription_delivered))
     throw Error("invalid readiness");
    setReadiness(result);
@@ -180,6 +186,12 @@ export default function DarkRestoreHandoff({model}:{model:BusinessModel}) {
      ?(fa?"اشتراک پیش از فعال‌سازی":"Pre-activation subscription export")
      :(fa?"تحویل اشتراک":"Subscription delivery")}: <strong>{readiness.subscription_delivered?(fa?"رسید تأیید شد":"receipt verified"):(fa?"تأیید نشده":"unverified")}</strong>
     {" · "}{fa?"حجم باقی‌مانده":"Remaining quota"}: {fmt(readiness.finite_quota_remaining_bytes)}</p>
+   {readiness.subscription_delivery_scope==="darkrestore_prepared_not_applied_v1"&&<div aria-label={fa?"مراحل تحویل اشتراک":"Subscription delivery stages"}>
+    <p>{fa?"اعمال تنظیمات و بررسی سلامت":"Settings applied and health checked"}: <strong>{readiness.native_apply_recorded?(fa?"تأیید شد":"Confirmed"):(fa?"در انتظار تأیید":"Awaiting confirmation")}</strong></p>
+    <p>{fa?"تحویل اشتراک پس از اعمال تنظیمات":"Subscription delivered after settings were applied"}: <strong>{readiness.initial_apply_subscription_delivered?(fa?"تأیید شد":"Confirmed"):(fa?"در انتظار تأیید":"Awaiting confirmation")}</strong></p>
+    <p>{fa?"مجوز نهایی فعال‌سازی":"Final activation authorization"}: <strong>{readiness.native_activation_authorized?(fa?"تأیید شد":"Confirmed"):(fa?"در انتظار تأیید":"Awaiting confirmation")}</strong></p>
+    <p>{fa?"آماده‌شدن فایل اشتراک به‌تنهایی به معنی فعال‌شدن سرویس نیست.":"Preparing a subscription file alone does not activate service."}</p>
+   </div>}
    <p><strong>{readiness.activation_allowed?(fa?"آمادهٔ فعال‌سازی":"Activation ready"):(fa?"فعال‌سازی مسدود است":"Activation blocked")}</strong>
     {" · "}{readiness.cutover_verified?(fa?"مهاجرت تأیید شد":"Cutover verified"):(fa?"پذیرش نهایی نشده":"Cutover not verified")}</p>
    {receipt && readiness.native_baseline_complete && readiness.subscription_delivered && <div>

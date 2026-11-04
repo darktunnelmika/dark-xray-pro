@@ -147,6 +147,7 @@ test("owner attaches a pinned signed handoff in Clients at 320px without a brows
   source_epoch_settled:true,global_source_custody_verified:false,native_baseline_complete:false,
   subscription_delivered:false,client_archived:false,client_expired:false,
   finite_quota_remaining_bytes:"132576395",activation_allowed:false,cutover_verified:false,
+  native_apply_recorded:false,initial_apply_subscription_delivered:false,native_activation_authorized:false,
   activation_blockers:["global_source_custody_not_proven"],
   verification_blockers:["native_baseline_incomplete","subscription_not_delivered"]
  }}));
@@ -169,6 +170,7 @@ test("owner attaches a pinned signed handoff in Clients at 320px without a brows
   source_epoch_settled:true,global_source_custody_verified:false,native_baseline_complete:true,
   subscription_delivered:true,subscription_delivery_scope:"darkrestore_prepared_not_applied_v1",client_archived:false,client_expired:false,
   finite_quota_remaining_bytes:"132576395",activation_allowed:false,cutover_verified:false,
+  native_apply_recorded:false,initial_apply_subscription_delivered:false,native_activation_authorized:false,
   activation_blockers:["native_apply_not_recorded"],verification_blockers:["global_source_custody_not_proven"]
  }}));
  let executionState="pending";
@@ -271,5 +273,38 @@ test("owner attaches a pinned signed handoff in Clients at 320px without a brows
  await panel.getByRole("button",{name:"ثبت یا بازیابی رسید اتصال"}).click();
  await expect(panel.getByText("رسید پیشین بازیابی شد",{exact:false})).toBeVisible();
  expect(attached).toBe(2);
+ const progressBase={client_id:"dr-"+sha.slice(0,20),source_sha256:sha,source_id:"legacy-a",
+  source_scope:"pinned_inventory_plus_independent_coverage_and_retirement_receipts",
+  source_epoch_settled:true,global_source_custody_verified:false,native_baseline_complete:true,
+  subscription_delivered:true,subscription_delivery_scope:"darkrestore_prepared_not_applied_v1",
+  client_archived:false,client_expired:false,finite_quota_remaining_bytes:"132576395",
+  native_apply_recorded:true,initial_apply_subscription_delivered:true,native_activation_authorized:false,
+  activation_allowed:false,cutover_verified:false,activation_blockers:["native_activation_not_authorized"],verification_blockers:[]};
+ let progress:Record<string,unknown>={...progressBase};
+ await page.route("**/api/v1/workspace/dark-restore/handoff/readiness",route=>route.fulfill({json:progress}));
+ const check=panel.getByRole("button",{name:"بررسی آمادگی فعال‌سازی"});
+ await check.click();
+ const stages=panel.getByLabel("مراحل تحویل اشتراک");
+ await expect(stages.getByText("تأیید شد",{exact:true})).toHaveCount(2);
+ await expect(stages.getByText("در انتظار تأیید",{exact:true})).toHaveCount(1);
+ progress={...progressBase,native_activation_authorized:true,activation_allowed:true,cutover_verified:true,activation_blockers:[]};
+ await check.click();
+ await expect(stages.getByText("تأیید شد",{exact:true})).toHaveCount(3);
+ await expect(readiness.locator("p").filter({hasText:"مهاجرت تأیید شد"})).toBeVisible();
+ expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth+2)).toBe(true);
+ for(const invalid of [
+  {...progress,native_apply_recorded:false},
+  {...progress,initial_apply_subscription_delivered:false},
+  {...progress,native_activation_authorized:false},
+  {...progress,native_apply_recorded:undefined},
+  {...progress,source_scope:"unrecognized_source"},
+  {...progress,client_id:"foreign-client"},
+ ]) {
+  progress=invalid;
+  await check.click();
+  await expect(panel.getByLabel("آمادگی مهاجرت")).toHaveCount(0);
+  await expect(panel.getByRole("alert")).toBeVisible();
+ }
+
  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth+2)).toBe(true);
 });
