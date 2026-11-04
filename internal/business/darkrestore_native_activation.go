@@ -7,6 +7,8 @@ import (
 	"errors"
 	"reflect"
 	"time"
+
+	dr "github.com/darktunnelmika/dark-xray-pro/internal/darkrestore"
 )
 
 const DarkRestoreNativeActivationScopeV1 = "darkrestore_native_activation_v1"
@@ -58,13 +60,20 @@ type DarkRestoreNativeActivationReceiptV1 struct {
 	ActivationSHA          string                                `json:"activation_sha256"`
 	RequestSHA             string                                `json:"request_sha256"`
 	Evidence               DarkRestoreNativeActivationEvidenceV1 `json:"evidence"`
+	OperatorApproval       dr.NativeActivationApprovalV1         `json:"operator_approval"`
+	OperatorApprovalRaw    []byte                                `json:"operator_approval_raw"`
+	OperatorApprovalPublic []byte                                `json:"operator_approval_public_key"`
+	OperatorApprovalPins   dr.NativeActivationApprovalPinsV1     `json:"operator_approval_pins"`
 	RecordedUnixNano       int64                                 `json:"recorded_unix_nano"`
 	AuthorizesFinalCutover bool                                  `json:"authorizes_final_cutover"`
 	Replayed               bool                                  `json:"replayed"`
 }
 
-func nativeActivationRequestSHA(in DarkRestoreNativeActivationInputV1) string {
-	return fingerprint("darkrestore-native-activation-request-v1", in)
+func nativeActivationRequestSHA(in DarkRestoreNativeActivationInputV1, approvalDocumentSHA string) string {
+	return fingerprint("darkrestore-native-activation-request-v1", struct {
+		Input               DarkRestoreNativeActivationInputV1 `json:"input"`
+		ApprovalDocumentSHA string                             `json:"approval_document_sha256"`
+	}{in, approvalDocumentSHA})
 }
 
 func projectDarkRestoreNativeActivation(ctx context.Context, tx *sql.Tx, client string) (DarkRestoreNativeActivationEvidenceV1, error) {
@@ -127,6 +136,42 @@ func validateDarkRestoreNativeActivationEvidence(e DarkRestoreNativeActivationEv
 	return sha, nil
 }
 
+func bindDarkRestoreNativeActivationApproval(e DarkRestoreNativeActivationEvidenceV1, activationSHA string, verified dr.VerifiedNativeActivationApprovalV1) (dr.NativeActivationApprovalV1, []byte, []byte, dr.NativeActivationApprovalPinsV1, error) {
+	approval, raw, public, pins, mutation, err := verified.Evidence()
+	if err != nil || mutation || approval.ActivationEvidenceSHA != activationSHA ||
+		approval.DestinationSHA != e.DestinationSHA || approval.DestinationStateSHA != e.DestinationStateSHA ||
+		approval.InventorySHA != e.InventorySHA || approval.CoverageApprovalSHA != e.CoverageApprovalSHA ||
+		approval.BillingAttributionSHA != e.BillingAttributionSHA || approval.ImportReceiptSHA != e.ImportReceiptSHA ||
+		approval.NativeBaselineSHA != e.NativeBaselineSHA || approval.PreparedAuthoritySHA != e.PreparedAuthoritySHA ||
+		approval.TransitionSHA != e.TransitionSHA || approval.NativeApplyEvidenceSHA != e.NativeApplyEvidenceSHA ||
+		approval.RepresentativeID != e.RepresentativeID || approval.CurrentFiniteEntitlement != e.CurrentFiniteEntitlement ||
+		approval.SettledHistoricalBytes != e.SettledHistoricalBytes || approval.NativePostMigrationBytes != e.NativePostMigrationBytes ||
+		approval.RemainingBudgetBytes != e.RemainingBudgetBytes || approval.InboundID != e.InboundID ||
+		approval.InitialApplySHA != e.InitialApplySHA || approval.HealthRoundID != e.HealthRoundID ||
+		approval.DeliveryRevision != e.DeliveryRevision || approval.SnapshotID != e.SnapshotID ||
+		approval.SnapshotEventID != e.SnapshotEventID || approval.SnapshotRevision != e.SnapshotRevision ||
+		approval.ContentSHA != e.ContentSHA || approval.DeliveredUnixNano != e.DeliveredUnixNano ||
+		approval.SubscriptionExpiresUnixNano != e.ExpiresUnixNano {
+		return dr.NativeActivationApprovalV1{}, nil, nil, dr.NativeActivationApprovalPinsV1{}, ErrDarkRestoreCutover
+	}
+	return approval, raw, public, pins, nil
+}
+
+func validateStoredDarkRestoreNativeActivationApproval(r *DarkRestoreNativeActivationReceiptV1) error {
+	verified, err := dr.VerifySignedNativeActivationApprovalV1(r.OperatorApprovalRaw, r.OperatorApprovalPublic, r.OperatorApprovalPins, r.RecordedUnixNano)
+	if err != nil {
+		return ErrDarkRestoreCutover
+	}
+	approval, _, _, pins, mutation, err := verified.Evidence()
+	if err != nil || mutation || !reflect.DeepEqual(approval, r.OperatorApproval) || pins != r.OperatorApprovalPins {
+		return ErrDarkRestoreCutover
+	}
+	if _, _, _, _, err = bindDarkRestoreNativeActivationApproval(r.Evidence, r.ActivationSHA, verified); err != nil {
+		return ErrDarkRestoreCutover
+	}
+	return nil
+}
+
 func readDarkRestoreNativeActivation(ctx context.Context, q sellerQueryV2, client string) (*DarkRestoreNativeActivationReceiptV1, error) {
 	present, err := darkRestoreNativeActivationSchema(ctx, q)
 	if err != nil || !present {
@@ -153,10 +198,14 @@ func readDarkRestoreNativeActivation(ctx context.Context, q sellerQueryV2, clien
 	return &out, nil
 }
 
-func (s *Store) RecordDarkRestoreNativeActivationV1(ctx context.Context, token string, in DarkRestoreNativeActivationInputV1) (DarkRestoreNativeActivationReceiptV1, error) {
+func (s *Store) RecordDarkRestoreNativeActivationV1(ctx context.Context, token string, in DarkRestoreNativeActivationInputV1, verified dr.VerifiedNativeActivationApprovalV1) (DarkRestoreNativeActivationReceiptV1, error) {
 	var zero DarkRestoreNativeActivationReceiptV1
 	if !eventRE.MatchString(in.EventID) || !idRE.MatchString(in.ClientID) {
 		return zero, ErrInvalid
+	}
+	approval, approvalRaw, approvalPublic, approvalPins, mutation, err := verified.Evidence()
+	if err != nil || mutation {
+		return zero, ErrDarkRestoreCutover
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -167,7 +216,7 @@ func (s *Store) RecordDarkRestoreNativeActivationV1(ctx context.Context, token s
 	if err != nil {
 		return zero, err
 	}
-	request := nativeActivationRequestSHA(in)
+	request := nativeActivationRequestSHA(in, approvalPins.DocumentSHA)
 	if prior, e := readDarkRestoreNativeActivation(ctx, tx, in.ClientID); e != nil {
 		return zero, e
 	} else if prior != nil {
@@ -185,7 +234,11 @@ func (s *Store) RecordDarkRestoreNativeActivationV1(ctx context.Context, token s
 	if err != nil {
 		return zero, err
 	}
-	out := DarkRestoreNativeActivationReceiptV1{Scope: DarkRestoreNativeActivationScopeV1, EventID: in.EventID, ActorUserID: actor, ClientID: in.ClientID, TransitionSHA: evidence.TransitionSHA, ActivationSHA: activation, RequestSHA: request, Evidence: evidence, RecordedUnixNano: time.Now().UnixNano(), AuthorizesFinalCutover: true}
+	approval, approvalRaw, approvalPublic, approvalPins, err = bindDarkRestoreNativeActivationApproval(evidence, activation, verified)
+	if err != nil {
+		return zero, err
+	}
+	out := DarkRestoreNativeActivationReceiptV1{Scope: DarkRestoreNativeActivationScopeV1, EventID: in.EventID, ActorUserID: actor, ClientID: in.ClientID, TransitionSHA: evidence.TransitionSHA, ActivationSHA: activation, RequestSHA: request, Evidence: evidence, OperatorApproval: approval, OperatorApprovalRaw: approvalRaw, OperatorApprovalPublic: approvalPublic, OperatorApprovalPins: approvalPins, RecordedUnixNano: time.Now().UnixNano(), AuthorizesFinalCutover: true}
 	if out.RecordedUnixNano <= evidence.DeliveredUnixNano {
 		return zero, ErrDarkRestoreCutover
 	}
@@ -215,7 +268,7 @@ func currentDarkRestoreNativeActivation(ctx context.Context, tx *sql.Tx, client 
 		return nil, err
 	}
 	sha, err := validateDarkRestoreNativeActivationEvidence(current, DarkRestoreNativeActivationPinsV1(r.Evidence), time.Now().UnixNano())
-	if err != nil || sha != r.ActivationSHA || !reflect.DeepEqual(current, r.Evidence) || !r.AuthorizesFinalCutover || r.Replayed {
+	if err != nil || sha != r.ActivationSHA || !reflect.DeepEqual(current, r.Evidence) || !r.AuthorizesFinalCutover || r.Replayed || validateStoredDarkRestoreNativeActivationApproval(r) != nil {
 		return nil, ErrDarkRestoreCutover
 	}
 	return r, nil
@@ -249,7 +302,7 @@ func validateDarkRestoreNativeActivations(ctx context.Context, tx *sql.Tx) error
 			return ErrUnavailable
 		}
 		sha, e := validateDarkRestoreNativeActivationEvidence(r.Evidence, DarkRestoreNativeActivationPinsV1(r.Evidence), r.RecordedUnixNano)
-		if e != nil || sha != r.ActivationSHA || r.RecordedUnixNano <= r.Evidence.DeliveredUnixNano {
+		if e != nil || sha != r.ActivationSHA || r.RecordedUnixNano <= r.Evidence.DeliveredUnixNano || validateStoredDarkRestoreNativeActivationApproval(r) != nil {
 			return ErrUnavailable
 		}
 	}

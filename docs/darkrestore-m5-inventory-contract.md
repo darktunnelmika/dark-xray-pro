@@ -476,3 +476,40 @@ restart and offline backup. They do not establish a real production inventory,
 retirement of undeclared sources, continuing health, operational approval or a
 legacy-unlimited entitlement. No public activation route is added, and no
 installed or production identity is activated by this source change.
+
+## Independently pinned activation approval envelope
+
+`VerifySignedNativeActivationApprovalV1` defines the next fail-closed operator
+boundary without exposing an activation route. A canonical Ed25519 envelope is
+bound to an independently pinned document digest, public-key digest, authority
+document, activation-evidence digest, destination and declared inventory. The
+incoming envelope cannot choose or replace those pins.
+
+The signed body repeats the complete current financial and prepared-delivery
+state: transition, native Apply, coverage, destination state, billing
+attribution, import receipt, native baseline, prepared authority, current payer,
+finite entitlement, settled history, native counters, remaining budget, inbound,
+health round, delivery revision, snapshot, content and subscription expiry. This
+prevents an operator approval for a loose client identity from being replayed
+after payer, quota, history, profile or delivery drift.
+
+Approval is valid only for a precise authoritative clock inside a maximum
+five-minute lease and strictly after the prepared delivery. Finite-budget
+arithmetic is recomputed from entitlement minus settled history minus native
+post-migration use. Unknown legacy entitlement, incomplete claimed inventory,
+unretired declared sources, expired delivery, stale approval and contradictory
+remaining budget are refused.
+
+The verifier deliberately returns `authorizes_mutation=false`. A signature proves
+only which key made the claims. It does not prove there are no undeclared serving
+sources, that a declared source actually stopped serving, or that an unknown
+legacy unlimited identity has a valid entitlement. A future trusted Store adapter
+must obtain the pins outside browser input and re-read the same current state in
+one transaction before any mutation. No such adapter, HTTP route, issuer or
+positive installed activation is introduced by this contract.
+
+Synthetic tests cover a positive finite-budget envelope, copy isolation, every
+independent-pin mismatch, unknown inventory/retirement/entitlement, stale and
+future clocks, excessive/reversed leases, financial contradictions, canonical
+encoding and re-pinned tampering. These fixtures are not production inventory or
+retirement evidence.

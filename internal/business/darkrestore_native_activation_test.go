@@ -2,11 +2,19 @@ package business
 
 import (
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"reflect"
 	"strings"
 	"testing"
+	"time"
+
+	dr "github.com/darktunnelmika/dark-xray-pro/internal/darkrestore"
 )
 
 type preparedNativeActivationFixture struct {
@@ -15,6 +23,56 @@ type preparedNativeActivationFixture struct {
 	snapshot           LabSubscriptionSnapshot
 	activationEvidence DarkRestoreNativeActivationEvidenceV1
 	pins               DarkRestoreNativeActivationPinsV1
+	approval           dr.VerifiedNativeActivationApprovalV1
+}
+
+func verifiedNativeActivationApproval(t *testing.T, e DarkRestoreNativeActivationEvidenceV1, change func(*dr.NativeActivationApprovalV1)) dr.VerifiedNativeActivationApprovalV1 {
+	t.Helper()
+	activationSHA, err := validateDarkRestoreNativeActivationEvidence(e, DarkRestoreNativeActivationPinsV1(e), time.Now().UnixNano())
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UnixNano()
+	approval := dr.NativeActivationApprovalV1{
+		Version: 1, Scope: "darkrestore_native_activation_operator_approval_v1",
+		ApprovalID: "synthetic-native-activation-approval-0001", OperatorID: "synthetic-offline-operator",
+		AuthoritySHA: strings.Repeat("f", 64), ApprovedUnixNano: now, ExpiresUnixNano: now + int64(time.Minute),
+		ActivationEvidenceSHA: activationSHA, DestinationSHA: e.DestinationSHA, DestinationStateSHA: e.DestinationStateSHA,
+		InventorySHA: e.InventorySHA, CoverageApprovalSHA: e.CoverageApprovalSHA,
+		BillingAttributionSHA: e.BillingAttributionSHA, ImportReceiptSHA: e.ImportReceiptSHA,
+		NativeBaselineSHA: e.NativeBaselineSHA, PreparedAuthoritySHA: e.PreparedAuthoritySHA,
+		TransitionSHA: e.TransitionSHA, NativeApplyEvidenceSHA: e.NativeApplyEvidenceSHA,
+		RepresentativeID: e.RepresentativeID, CurrentFiniteEntitlement: e.CurrentFiniteEntitlement,
+		SettledHistoricalBytes: e.SettledHistoricalBytes, NativePostMigrationBytes: e.NativePostMigrationBytes,
+		RemainingBudgetBytes: e.RemainingBudgetBytes, InboundID: e.InboundID, InitialApplySHA: e.InitialApplySHA,
+		HealthRoundID: e.HealthRoundID, DeliveryRevision: e.DeliveryRevision, SnapshotID: e.SnapshotID,
+		SnapshotEventID: e.SnapshotEventID, SnapshotRevision: e.SnapshotRevision, ContentSHA: e.ContentSHA,
+		DeliveredUnixNano: e.DeliveredUnixNano, SubscriptionExpiresUnixNano: e.ExpiresUnixNano,
+		InventoryComplete: true, DeclaredSourcesRetired: true, LegacyEntitlementResolved: true,
+	}
+	if change != nil {
+		change(&approval)
+	}
+	public, private, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	message, err := dr.NativeActivationApprovalSigningMessageV1(approval)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := json.Marshal(dr.SignedNativeActivationApprovalV1{Version: 1, Approval: approval, Signature: ed25519.Sign(private, message)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw = append(raw, '\n')
+	document, key := sha256.Sum256(raw), sha256.Sum256(public)
+	pins := dr.NativeActivationApprovalPinsV1{DocumentSHA: hex.EncodeToString(document[:]), PublicKeySHA: hex.EncodeToString(key[:]), AuthoritySHA: approval.AuthoritySHA, ActivationEvidenceSHA: approval.ActivationEvidenceSHA, DestinationSHA: approval.DestinationSHA, InventorySHA: approval.InventorySHA}
+	verified, err := dr.VerifySignedNativeActivationApprovalV1(raw, public, pins, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return verified
 }
 
 func newPreparedNativeActivationFixture(t *testing.T) preparedNativeActivationFixture {
@@ -48,7 +106,7 @@ func newPreparedNativeActivationFixture(t *testing.T) preparedNativeActivationFi
 	}
 	return preparedNativeActivationFixture{
 		preparedPromotionFixture: f, acceptance: acceptance, snapshot: snapshot,
-		activationEvidence: evidence, pins: DarkRestoreNativeActivationPinsV1(evidence),
+		activationEvidence: evidence, pins: DarkRestoreNativeActivationPinsV1(evidence), approval: verifiedNativeActivationApproval(t, evidence, nil),
 	}
 }
 
@@ -62,20 +120,20 @@ func TestDarkRestoreNativeActivationRecordReplayReopenAndFinalGate(t *testing.T)
 		t.Fatal("initial delivery opened final gate", err)
 	}
 	in := DarkRestoreNativeActivationInputV1{EventID: "m5-native-activation-0001", ClientID: f.preparedPromotionFixture.evidence.ClientID, Pins: f.pins}
-	receipt, err := f.s.RecordDarkRestoreNativeActivationV1(ctx, f.owner.Token, in)
-	if err != nil || receipt.Replayed || !receipt.AuthorizesFinalCutover || receipt.ActivationSHA == "" || !reflect.DeepEqual(receipt.Evidence, f.activationEvidence) {
+	receipt, err := f.s.RecordDarkRestoreNativeActivationV1(ctx, f.owner.Token, in, f.approval)
+	if err != nil || receipt.Replayed || !receipt.AuthorizesFinalCutover || receipt.ActivationSHA == "" || !reflect.DeepEqual(receipt.Evidence, f.activationEvidence) || receipt.OperatorApproval.ActivationEvidenceSHA != receipt.ActivationSHA || len(receipt.OperatorApprovalRaw) == 0 || len(receipt.OperatorApprovalPublic) != ed25519.PublicKeySize {
 		t.Fatal("record exact activation", receipt, err)
 	}
-	replay, err := f.s.RecordDarkRestoreNativeActivationV1(ctx, f.owner.Token, in)
+	replay, err := f.s.RecordDarkRestoreNativeActivationV1(ctx, f.owner.Token, in, f.approval)
 	if err != nil || !replay.Replayed {
 		t.Fatal("idempotent activation replay", replay, err)
 	}
 	conflict := in
 	conflict.EventID = "m5-native-activation-conflict-0001"
-	if _, err = f.s.RecordDarkRestoreNativeActivationV1(ctx, f.owner.Token, conflict); !errors.Is(err, ErrConflict) {
+	if _, err = f.s.RecordDarkRestoreNativeActivationV1(ctx, f.owner.Token, conflict, f.approval); !errors.Is(err, ErrConflict) {
 		t.Fatal("conflicting activation replay accepted", err)
 	}
-	if _, err = f.s.RecordDarkRestoreNativeActivationV1(ctx, f.rep.Token, in); !errors.Is(err, ErrOwnershipDenied) {
+	if _, err = f.s.RecordDarkRestoreNativeActivationV1(ctx, f.rep.Token, in, f.approval); !errors.Is(err, ErrOwnershipDenied) {
 		t.Fatal("representative recorded owner activation", err)
 	}
 	if err = requireDarkRestoreFinalCutoverTx(ctx, f.s.db, f.preparedPromotionFixture.evidence.ClientID); err != nil {
@@ -117,7 +175,7 @@ func TestDarkRestoreNativeActivationRecordReplayReopenAndFinalGate(t *testing.T)
 		t.Fatal("reopen rejected activation", err)
 	}
 	recovered, err := readDarkRestoreNativeActivation(ctx, f.s.db, in.ClientID)
-	if err != nil || recovered == nil || recovered.Replayed || recovered.ActivationSHA != receipt.ActivationSHA || !reflect.DeepEqual(recovered.Evidence, receipt.Evidence) {
+	if err != nil || recovered == nil || recovered.Replayed || recovered.ActivationSHA != receipt.ActivationSHA || !reflect.DeepEqual(recovered.Evidence, receipt.Evidence) || !reflect.DeepEqual(recovered.OperatorApproval, receipt.OperatorApproval) {
 		t.Fatal("reopen changed activation", recovered, err)
 	}
 }
@@ -137,7 +195,16 @@ func TestDarkRestoreNativeActivationRollbackStalePinsAndState(t *testing.T) {
 		t.Fatal(err)
 	}
 	in := DarkRestoreNativeActivationInputV1{EventID: "m5-native-activation-rollback-0001", ClientID: f.preparedPromotionFixture.evidence.ClientID, Pins: f.pins}
-	if _, err = f.s.RecordDarkRestoreNativeActivationV1(ctx, f.owner.Token, in); err == nil {
+	if _, err = f.s.RecordDarkRestoreNativeActivationV1(ctx, f.owner.Token, in, dr.VerifiedNativeActivationApprovalV1{}); !errors.Is(err, ErrDarkRestoreCutover) {
+		t.Fatal("unverified operator approval accepted", err)
+	}
+	foreign := verifiedNativeActivationApproval(t, f.activationEvidence, func(v *dr.NativeActivationApprovalV1) {
+		v.BillingAttributionSHA = strings.Repeat("0", 64)
+	})
+	if _, err = f.s.RecordDarkRestoreNativeActivationV1(ctx, f.owner.Token, in, foreign); !errors.Is(err, ErrDarkRestoreCutover) {
+		t.Fatal("signed approval for foreign billing attribution accepted", err)
+	}
+	if _, err = f.s.RecordDarkRestoreNativeActivationV1(ctx, f.owner.Token, in, f.approval); err == nil {
 		t.Fatal("synthetic insert failure committed activation")
 	}
 	if planCount(t, f.s, "darkrestore_native_activations_v1") != 0 {
@@ -149,7 +216,7 @@ func TestDarkRestoreNativeActivationRollbackStalePinsAndState(t *testing.T) {
 	bad := in
 	bad.EventID = "m5-native-activation-stale-pin-0001"
 	bad.Pins.BillingAttributionSHA = strings.Repeat("0", 64)
-	if _, err = f.s.RecordDarkRestoreNativeActivationV1(ctx, f.owner.Token, bad); !errors.Is(err, ErrDarkRestoreCutover) {
+	if _, err = f.s.RecordDarkRestoreNativeActivationV1(ctx, f.owner.Token, bad, f.approval); !errors.Is(err, ErrDarkRestoreCutover) {
 		t.Fatal("stale billing-attribution pin accepted", err)
 	}
 	client, err := f.s.Client(ctx, in.ClientID)
@@ -160,7 +227,7 @@ func TestDarkRestoreNativeActivationRollbackStalePinsAndState(t *testing.T) {
 		t.Fatal(err)
 	}
 	in.EventID = "m5-native-activation-stale-state-0001"
-	if _, err = f.s.RecordDarkRestoreNativeActivationV1(ctx, f.owner.Token, in); !errors.Is(err, ErrDarkRestoreCutover) {
+	if _, err = f.s.RecordDarkRestoreNativeActivationV1(ctx, f.owner.Token, in, f.approval); !errors.Is(err, ErrDarkRestoreCutover) {
 		t.Fatal("stale entitlement accepted", err)
 	}
 	if planCount(t, f.s, "darkrestore_native_activations_v1") != 0 || requireDarkRestoreFinalCutoverTx(ctx, f.s.db, in.ClientID) == nil {
