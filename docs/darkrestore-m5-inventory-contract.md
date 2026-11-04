@@ -566,6 +566,18 @@ or conflicting-output attempts fail closed. This command still does not inspect
 the fence semantics, establish actual source retirement, discover undeclared
 resources, certify inventory completeness or authorize activation.
 
+The read-only `dark-pro-darkrestore-retirement-preflight` command accepts only
+one canonical owner-private manifest plus its independently approved SHA-256.
+That manifest pins the entire declared inventory, destination and exact private
+source/witness document and key selection; every referenced file and both
+signatures are re-verified before a deterministic coverage report is emitted.
+Missing or duplicate epochs, a stale inventory, foreign destination, unsafe
+path, noncanonical manifest or any document/key/pin drift fails closed. The
+preflight never derives pins from the supplied files, never mutates Store state
+and always reports `authorizes_activation=false`. Pinning one manifest still
+does not discover undeclared installations or prove its declared inventory is
+complete.
+
 The Store cutover boundary now requires this bundle in addition to the signed
 coverage approval. It persists the exact canonical source/witness documents,
 their public keys and independent pins, re-verifies them on every read/restart

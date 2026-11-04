@@ -616,6 +616,7 @@ jobs:
           test -s release/bin/dark-pro-backup-worker
           test -x release/bin/dark-pro-darkrestore-local-settlement
           test -x release/bin/dark-pro-darkrestore-retirement-witness
+          test -x release/bin/dark-pro-darkrestore-retirement-preflight
           test -s release/ops/systemd/dark-xray-pro-backup-worker.service
           test -s release/ops/nginx/business-management.conf
           test -s release/ops/nginx/native-backups.conf
