@@ -503,13 +503,38 @@ remaining budget are refused.
 The verifier deliberately returns `authorizes_mutation=false`. A signature proves
 only which key made the claims. It does not prove there are no undeclared serving
 sources, that a declared source actually stopped serving, or that an unknown
-legacy unlimited identity has a valid entitlement. A future trusted Store adapter
-must obtain the pins outside browser input and re-read the same current state in
-one transaction before any mutation. No such adapter, HTTP route, issuer or
-positive installed activation is introduced by this contract.
+legacy unlimited identity has a valid entitlement. The trusted Store adapter
+obtains the opaque verified value outside browser input, re-reads the same
+current state in one transaction and persists the canonical envelope with its
+immutable activation receipt. No HTTP activation route or positive installed
+activation is introduced by this contract.
 
 Synthetic tests cover a positive finite-budget envelope, copy isolation, every
 independent-pin mismatch, unknown inventory/retirement/entitlement, stale and
 future clocks, excessive/reversed leases, financial contradictions, canonical
 encoding and re-pinned tampering. These fixtures are not production inventory or
 retirement evidence.
+
+## Declared-source retirement receipts
+
+Inventory coverage and the coverage authority's boolean retirement assertion
+are not operational retirement evidence. Each declared inventory entry may now
+be paired with two canonical, independently pinned Ed25519 documents:
+
+1. the source statement binds the exact source/inventory/destination, terminal
+   epoch receipt, authority, journal, signed handoff, source key, retirement
+   time and an opaque active-fence document; and
+2. a separate witness binds that exact source document and source key to the
+   same inventory and destination within a bounded five-minute review window.
+
+`CheckLocalHandoffRetirementsV1` requires exactly one verified pair for every
+declared inventory epoch and rejects missing, duplicate, foreign-destination,
+foreign-key or stale-fence evidence. Its digest is deterministic and includes
+every source and witness document pin.
+
+This coverage is intentionally limited to the independently pinned declared
+inventory. Two valid signatures identify two claimants; they do not prove the
+truth of an operational fence or the absence of undeclared installations. The
+result always returns `authorizes_activation=false`. Store activation remains
+closed until a later transaction binds this receipt bundle to current state and
+the independently approved inventory-completeness decision.
