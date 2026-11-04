@@ -12,6 +12,8 @@ on:
       - "third_party/go-qrcode/**"
       - "go.mod"
       - "go.sum"
+      - "scripts/ci/run_business_race.py"
+      - "scripts/ci/test_run_business_race.py"
       - "web/src/Telegram*"
       - "web/tests/telegram*"
       - ".github/workflows/telegram-bots.yml"
@@ -20,17 +22,41 @@ permissions:
   contents: read
 
 jobs:
-  native-telegram:
+  business-race:
+    name: Telegram business race partition (${{ matrix.shard }}/2)
     runs-on: ubuntu-24.04
     timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
           cache: true
-      - name: Verify native accounting, delivery, isolation and offline backup
-        run: go test -race ./internal/telegrambot ./internal/telegramhub ./internal/telegramreport ./internal/business ./internal/api ./internal/hubstate ./internal/probackup ./internal/backupworker ./cmd/hub ./cmd/pro-backup -count=1 -timeout=18m
+      - name: Verify exhaustive test partitioning
+        run: python3 -m unittest discover -s scripts/ci -p test_run_business_race.py
+      - name: Verify this complete business partition under the race detector
+        run: python3 scripts/ci/run_business_race.py --shard ${{ matrix.shard }} --shards 2
+  native-telegram:
+    needs: [business-race]
+    if: ${{ always() }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Require every business partition to succeed
+        env:
+          BUSINESS_RESULT: ${{ needs.business-race.result }}
+        run: test "$BUSINESS_RESULT" = success
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Verify transport, API, delivery, isolation and offline backup
+        run: go test -race ./internal/telegrambot ./internal/telegramhub ./internal/telegramreport ./internal/api ./internal/hubstate ./internal/probackup ./internal/backupworker ./cmd/hub ./cmd/pro-backup -count=1 -timeout=18m
       - name: Check packages
         run: go vet ./internal/telegrambot ./internal/business ./internal/api ./internal/hubstate ./cmd/hub
   telegram-panel:

@@ -355,11 +355,29 @@ The following commands exercise synthetic fixtures and injected transports;
 they are not instructions to start the HUB or supply a live token. Listing a
 command here is not a claim that it passed on a particular revision.
 
+CI runs the complete business suite in two deterministic, nonoverlapping
+partitions to avoid exhausting one package-wide deadline on slower runners.
+The helper discovers every current top-level test, example and fuzz test;
+ordinary benchmarks are excluded because an unqualified `go test` does not run
+them. Each discovered runnable name belongs to exactly one partition, including
+historical compatibility fixtures. Both partitions retain `-race`, `-count=1`
+and a bounded 18-minute test timeout. The existing native/complete-business
+checks require every partition to succeed; failed, skipped or cancelled work
+cannot produce a successful aggregate check.
+
+To reproduce the two CI business partitions from the repository root:
+
+```sh
+python3 -m unittest discover -s scripts/ci -p test_run_business_race.py
+python3 scripts/ci/run_business_race.py --shard 1 --shards 2
+python3 scripts/ci/run_business_race.py --shard 2 --shards 2
+```
+
 ```sh
 go test -race ./internal/business -run '^TestTelegram' -count=1
 go test -race ./internal/telegrambot -count=1
 go test ./internal/api ./internal/hubstate ./cmd/hub -run 'Telegram' -count=1
-go test -race ./internal/telegrambot ./internal/telegramhub ./internal/telegramreport ./internal/business ./internal/api ./internal/hubstate ./internal/probackup ./internal/backupworker ./cmd/hub ./cmd/pro-backup -count=1 -timeout=18m
+go test -race ./internal/telegrambot ./internal/telegramhub ./internal/telegramreport ./internal/api ./internal/hubstate ./internal/probackup ./internal/backupworker ./cmd/hub ./cmd/pro-backup -count=1 -timeout=18m
 go vet ./internal/telegrambot ./internal/business ./internal/api ./internal/hubstate ./cmd/hub
 ```
 

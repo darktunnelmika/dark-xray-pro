@@ -15,20 +15,39 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  business-race:
-    name: Complete business accounting race checks
+  business-race-shards:
+    name: Business accounting race partition (${{ matrix.shard }}/2)
     runs-on: ubuntu-24.04
     timeout-minutes: 24
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
           cache: false
-      # The 5,000-customer import/reopen fixture runs last and the complete
-      # M5 evidence suite can cross fifteen minutes under the race detector on
-      # a hosted runner. Keep one invocation and a bounded nineteen-minute cap.
-      - run: go test -race ./internal/business -count=1 -timeout=19m
+      # Preserve all tests, examples and fuzz seeds, including expensive
+      # historical compatibility fixtures. Each discovered name belongs to
+      # exactly one partition; no test is dropped to satisfy a package deadline.
+      - name: Verify exhaustive test partitioning
+        run: python3 -m unittest discover -s scripts/ci -p test_run_business_race.py
+      - name: Run the complete assigned business partition under the race detector
+        run: python3 scripts/ci/run_business_race.py --shard ${{ matrix.shard }} --shards 2
+
+  business-race:
+    name: Complete business accounting race checks
+    needs: [business-race-shards]
+    if: ${{ always() }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    steps:
+      - name: Require every business partition to succeed
+        env:
+          BUSINESS_RESULT: ${{ needs.business-race-shards.result }}
+        run: test "$BUSINESS_RESULT" = success
 
   foundation:
     name: Go 1.27 contracts, accounting and race checks
