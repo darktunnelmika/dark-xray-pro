@@ -556,6 +556,16 @@ existing different output fail closed. The command does not emit the independent
 witness or trusted pins, interpret the fence, discover inventory, or authorize
 mutation. Positive fixtures remain synthetic claims, not real retirement.
 
+The separate `dark-pro-darkrestore-retirement-witness` command consumes that
+canonical source document, its source public key and the same opaque fence only
+from owner-private canonical files. It verifies independently supplied hashes
+for the source document, key, fence, inventory and destination before a distinct
+Ed25519 key may sign the bounded witness statement. The output is immutable,
+byte-identical retries replay and same-key, stale-window, unsafe-file, pin-drift
+or conflicting-output attempts fail closed. This command still does not inspect
+the fence semantics, establish actual source retirement, discover undeclared
+resources, certify inventory completeness or authorize activation.
+
 The Store cutover boundary now requires this bundle in addition to the signed
 coverage approval. It persists the exact canonical source/witness documents,
 their public keys and independent pins, re-verifies them on every read/restart

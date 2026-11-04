@@ -77,6 +77,17 @@ type SourceRetirementPinsV1 struct {
 	DestinationSHA        string `json:"destination_sha256"`
 }
 
+// SourceRetirementStatementPinsV1 is the independently supplied subset needed
+// to validate the source document before an independent witness signs its own
+// assertion. It cannot satisfy destination retirement coverage by itself.
+type SourceRetirementStatementPinsV1 struct {
+	RetirementDocumentSHA string `json:"retirement_document_sha256"`
+	SourcePublicKeySHA    string `json:"source_public_key_sha256"`
+	FenceDocumentSHA      string `json:"active_fence_document_sha256"`
+	InventorySHA          string `json:"inventory_sha256"`
+	DestinationSHA        string `json:"destination_sha256"`
+}
+
 // SourceRetirementFilesV1 is startup-only operator configuration. Paths and
 // pins must be supplied by trusted local configuration, never a browser or
 // imported payload.
@@ -107,6 +118,12 @@ type VerifiedSourceRetirementV1 struct {
 	witnessRaw    []byte
 	witnessPublic []byte
 	valid         bool
+}
+
+type VerifiedSourceRetirementStatementV1 struct {
+	statement SourceRetirementStatementV1
+	pins      SourceRetirementStatementPinsV1
+	valid     bool
 }
 
 type LocalHandoffRetirementCoverageV1 struct {
@@ -173,6 +190,51 @@ func validSourceRetirementWitnessV1(v SourceRetirementWitnessV1, statement Sourc
 		v.WitnessedUnixNano-statement.FenceObservedUnixNano <= maxRetirementWitnessDelayNano
 }
 
+// VerifySignedSourceRetirementStatementV1 authenticates only the canonical
+// source statement against independently supplied pins. It intentionally
+// provides no retirement coverage, witness or mutation authority.
+func VerifySignedSourceRetirementStatementV1(retirementRaw, sourcePublic []byte, pins SourceRetirementStatementPinsV1) (VerifiedSourceRetirementStatementV1, error) {
+	var zero VerifiedSourceRetirementStatementV1
+	for _, digest := range []string{pins.RetirementDocumentSHA, pins.SourcePublicKeySHA, pins.FenceDocumentSHA, pins.InventorySHA, pins.DestinationSHA} {
+		if !inventoryDigestValid(digest) {
+			return zero, ErrHandoffInventory
+		}
+	}
+	if len(retirementRaw) == 0 || len(retirementRaw) > 16<<10 || len(sourcePublic) != ed25519.PublicKeySize ||
+		!bytes.HasSuffix(retirementRaw, []byte("\n")) {
+		return zero, ErrHandoffInventory
+	}
+	retirementSum, sourceSum := sha256.Sum256(retirementRaw), sha256.Sum256(sourcePublic)
+	if hex.EncodeToString(retirementSum[:]) != pins.RetirementDocumentSHA || hex.EncodeToString(sourceSum[:]) != pins.SourcePublicKeySHA {
+		return zero, ErrHandoffInventory
+	}
+	var signed SignedSourceRetirementV1
+	if json.Unmarshal(retirementRaw, &signed) != nil || signed.Version != 1 || len(signed.Signature) != ed25519.SignatureSize ||
+		!validSourceRetirementStatementV1(signed.Statement) {
+		return zero, ErrHandoffInventory
+	}
+	canonical, err := json.Marshal(signed)
+	if err != nil || !bytes.Equal(retirementRaw, append(canonical, '\n')) ||
+		signed.Statement.SourceSignerPublicSHA != pins.SourcePublicKeySHA || signed.Statement.FenceDocumentSHA != pins.FenceDocumentSHA ||
+		signed.Statement.InventorySHA != pins.InventorySHA || signed.Statement.DestinationSHA != pins.DestinationSHA {
+		return zero, ErrHandoffInventory
+	}
+	message, err := retirementMessageV1(signed.Statement)
+	if err != nil || !ed25519.Verify(ed25519.PublicKey(sourcePublic), message, signed.Signature) {
+		return zero, ErrHandoffInventory
+	}
+	return VerifiedSourceRetirementStatementV1{
+		statement: signed.Statement, pins: pins, valid: true,
+	}, nil
+}
+
+func (v VerifiedSourceRetirementStatementV1) Evidence() (SourceRetirementStatementV1, SourceRetirementStatementPinsV1, bool, error) {
+	if !v.valid {
+		return SourceRetirementStatementV1{}, SourceRetirementStatementPinsV1{}, false, ErrHandoffInventory
+	}
+	return v.statement, v.pins, false, nil
+}
+
 // VerifySignedSourceRetirementV1 requires two canonical documents and two
 // independently pinned Ed25519 authorities. It proves only that the two
 // identified signers made matching assertions about one declared source.
@@ -183,46 +245,36 @@ func VerifySignedSourceRetirementV1(retirementRaw, sourcePublic, witnessRaw, wit
 			return zero, ErrHandoffInventory
 		}
 	}
-	if len(retirementRaw) == 0 || len(retirementRaw) > 16<<10 || len(witnessRaw) == 0 || len(witnessRaw) > 16<<10 ||
-		len(sourcePublic) != ed25519.PublicKeySize || len(witnessPublic) != ed25519.PublicKeySize || bytes.Equal(sourcePublic, witnessPublic) ||
-		!bytes.HasSuffix(retirementRaw, []byte("\n")) || !bytes.HasSuffix(witnessRaw, []byte("\n")) {
+	if len(witnessRaw) == 0 || len(witnessRaw) > 16<<10 || len(witnessPublic) != ed25519.PublicKeySize ||
+		bytes.Equal(sourcePublic, witnessPublic) || !bytes.HasSuffix(witnessRaw, []byte("\n")) {
 		return zero, ErrHandoffInventory
 	}
-	retirementSum, sourceSum := sha256.Sum256(retirementRaw), sha256.Sum256(sourcePublic)
 	witnessSum, witnessKeySum := sha256.Sum256(witnessRaw), sha256.Sum256(witnessPublic)
-	if hex.EncodeToString(retirementSum[:]) != pins.RetirementDocumentSHA || hex.EncodeToString(sourceSum[:]) != pins.SourcePublicKeySHA ||
-		hex.EncodeToString(witnessSum[:]) != pins.WitnessDocumentSHA || hex.EncodeToString(witnessKeySum[:]) != pins.WitnessPublicKeySHA {
+	if hex.EncodeToString(witnessSum[:]) != pins.WitnessDocumentSHA || hex.EncodeToString(witnessKeySum[:]) != pins.WitnessPublicKeySHA {
 		return zero, ErrHandoffInventory
 	}
-	var signed SignedSourceRetirementV1
-	if json.Unmarshal(retirementRaw, &signed) != nil || signed.Version != 1 || len(signed.Signature) != ed25519.SignatureSize || !validSourceRetirementStatementV1(signed.Statement) {
-		return zero, ErrHandoffInventory
-	}
-	canonical, err := json.Marshal(signed)
-	if err != nil || !bytes.Equal(retirementRaw, append(canonical, '\n')) || signed.Statement.SourceSignerPublicSHA != pins.SourcePublicKeySHA ||
-		signed.Statement.FenceDocumentSHA != pins.FenceDocumentSHA ||
-		signed.Statement.InventorySHA != pins.InventorySHA || signed.Statement.DestinationSHA != pins.DestinationSHA {
-		return zero, ErrHandoffInventory
-	}
-	message, err := retirementMessageV1(signed.Statement)
-	if err != nil || !ed25519.Verify(ed25519.PublicKey(sourcePublic), message, signed.Signature) {
+	source, err := VerifySignedSourceRetirementStatementV1(retirementRaw, sourcePublic, SourceRetirementStatementPinsV1{
+		RetirementDocumentSHA: pins.RetirementDocumentSHA, SourcePublicKeySHA: pins.SourcePublicKeySHA,
+		FenceDocumentSHA: pins.FenceDocumentSHA, InventorySHA: pins.InventorySHA, DestinationSHA: pins.DestinationSHA,
+	})
+	if err != nil {
 		return zero, ErrHandoffInventory
 	}
 	var signedWitness SignedSourceRetirementWitnessV1
 	if json.Unmarshal(witnessRaw, &signedWitness) != nil || signedWitness.Version != 1 || len(signedWitness.Signature) != ed25519.SignatureSize ||
-		!validSourceRetirementWitnessV1(signedWitness.Witness, signed.Statement, pins) {
+		!validSourceRetirementWitnessV1(signedWitness.Witness, source.statement, pins) {
 		return zero, ErrHandoffInventory
 	}
-	canonical, err = json.Marshal(signedWitness)
+	canonical, err := json.Marshal(signedWitness)
 	if err != nil || !bytes.Equal(witnessRaw, append(canonical, '\n')) {
 		return zero, ErrHandoffInventory
 	}
-	message, err = retirementWitnessMessageV1(signedWitness.Witness)
+	message, err := retirementWitnessMessageV1(signedWitness.Witness)
 	if err != nil || !ed25519.Verify(ed25519.PublicKey(witnessPublic), message, signedWitness.Signature) {
 		return zero, ErrHandoffInventory
 	}
 	return VerifiedSourceRetirementV1{
-		statement: signed.Statement, witness: signedWitness.Witness, pins: pins,
+		statement: source.statement, witness: signedWitness.Witness, pins: pins,
 		retirementRaw: append([]byte(nil), retirementRaw...), sourcePublic: append([]byte(nil), sourcePublic...),
 		witnessRaw: append([]byte(nil), witnessRaw...), witnessPublic: append([]byte(nil), witnessPublic...), valid: true,
 	}, nil

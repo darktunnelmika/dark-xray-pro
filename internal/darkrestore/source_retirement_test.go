@@ -211,6 +211,55 @@ func TestVerifySignedSourceRetirementV1RefusesTampering(t *testing.T) {
 	}
 }
 
+func TestVerifySignedSourceRetirementStatementV1IsSourceOnly(t *testing.T) {
+	f := newRetirementFixture(t)
+	pins := SourceRetirementStatementPinsV1{
+		RetirementDocumentSHA: f.pins[0].RetirementDocumentSHA,
+		SourcePublicKeySHA:    f.pins[0].SourcePublicKeySHA,
+		FenceDocumentSHA:      f.pins[0].FenceDocumentSHA,
+		InventorySHA:          f.pins[0].InventorySHA,
+		DestinationSHA:        f.pins[0].DestinationSHA,
+	}
+	verified, err := VerifySignedSourceRetirementStatementV1(f.raw[0], f.sourceKeys[0], pins)
+	if err != nil {
+		t.Fatal("source statement rejected", err)
+	}
+	statement, gotPins, mutation, err := verified.Evidence()
+	if err != nil || mutation || statement != f.retirements[0].statement || gotPins != pins {
+		t.Fatal("source-only evidence changed or granted mutation", mutation, err)
+	}
+	if _, _, mutation, err := (VerifiedSourceRetirementStatementV1{}).Evidence(); err == nil || mutation {
+		t.Fatal("zero source evidence admitted")
+	}
+
+	cases := []struct {
+		name   string
+		raw    []byte
+		public []byte
+		pins   SourceRetirementStatementPinsV1
+	}{
+		{"foreign document", f.raw[1], f.sourceKeys[0], pins},
+		{"foreign source key", f.raw[0], f.sourceKeys[1], pins},
+		{"noncanonical document", append([]byte(" "), f.raw[0]...), f.sourceKeys[0], pins},
+		{"missing newline", bytes.TrimSuffix(f.raw[0], []byte("\n")), f.sourceKeys[0], pins},
+	}
+	badFence := pins
+	badFence.FenceDocumentSHA = retirementSHA([]byte("foreign fence"))
+	cases = append(cases, struct {
+		name   string
+		raw    []byte
+		public []byte
+		pins   SourceRetirementStatementPinsV1
+	}{"foreign fence pin", f.raw[0], f.sourceKeys[0], badFence})
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := VerifySignedSourceRetirementStatementV1(tc.raw, tc.public, tc.pins); err == nil {
+				t.Fatal("invalid source-only statement admitted")
+			}
+		})
+	}
+}
+
 func TestVerifySignedSourceRetirementV1RefusesOverlongFence(t *testing.T) {
 	f := newRetirementFixture(t)
 	source, witness := retirementKey(t), retirementKey(t)

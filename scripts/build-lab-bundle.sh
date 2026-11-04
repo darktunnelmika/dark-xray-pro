@@ -52,6 +52,8 @@ CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -mod=readonly -buildvcs=true -tri
   -o release/bin/dark-pro-backup-worker ./cmd/pro-backup-worker
 CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -mod=readonly -buildvcs=true -trimpath -ldflags='-s -w' \
   -o release/bin/dark-pro-darkrestore-local-settlement ./cmd/darkrestore-local-settlement
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -mod=readonly -buildvcs=true -trimpath -ldflags='-s -w' \
+  -o release/bin/dark-pro-darkrestore-retirement-witness ./cmd/darkrestore-retirement-witness
 
 install -m 0755 scripts/install-lab.sh release/scripts/install-lab.sh
 install -m 0755 internal/nodebootstrap/install-new-pro-node.sh release/scripts/install-new-pro-node.sh
@@ -62,7 +64,7 @@ install -m 0644 ops/nginx/native-backups.conf release/ops/nginx/native-backups.c
 # Generated UI and the fixed release directory are explicitly ignored. Any
 # other source change (including an untracked lockfile) must refuse the bundle.
 verify_clean_source
-for binary in release/bin/dark-pro-{hub,agent,owner-setup,backup,backup-worker,darkrestore-local-settlement}; do
+for binary in release/bin/dark-pro-{hub,agent,owner-setup,backup,backup-worker,darkrestore-local-settlement,darkrestore-retirement-witness}; do
   build_info="$(go version -m "$binary")" || fail "cannot read binary build metadata"
   printf '%s\n' "$build_info" | grep -Fxq $'\tbuild\tvcs.revision='"$DARK_PRO_PINNED_COMMIT" ||
     fail "binary revision does not match the pinned source"
