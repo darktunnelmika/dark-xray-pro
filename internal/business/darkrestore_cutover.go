@@ -599,6 +599,17 @@ func requireDarkRestoreSubscriptionTransition(ctx context.Context, tx *sql.Tx, i
 	if err != nil || evidence == nil {
 		return ErrDarkRestoreCutover
 	}
+	receipt, err := readCutoverReceipt(ctx, tx, id)
+	if err != nil {
+		return err
+	}
+	if receipt != nil && receipt.SubscriptionDeliveryScope == DarkRestorePreparedDeliveryScopeV1 {
+		activation, activationErr := currentDarkRestoreNativeActivation(ctx, tx, id)
+		if activationErr != nil || activation == nil || activation.TransitionSHA != evidence.TransitionSHA || activation.TransitionSHA != receipt.TransitionSHA {
+			return ErrDarkRestoreCutover
+		}
+		return nil
+	}
 	_, _, err = cutoverSnapshotMatchesEvidence(ctx, tx, evidence)
 	return err
 }
@@ -617,6 +628,13 @@ func requireDarkRestoreFinalCutover(ctx context.Context, tx *sql.Tx, id string) 
 		receipt.TransitionSHA != evidence.TransitionSHA {
 		return ErrDarkRestoreCutover
 	}
+	if receipt.SubscriptionDeliveryScope == DarkRestorePreparedDeliveryScopeV1 {
+		activation, activationErr := currentDarkRestoreNativeActivation(ctx, tx, id)
+		if activationErr != nil || activation == nil || activation.TransitionSHA != receipt.TransitionSHA {
+			return ErrDarkRestoreCutover
+		}
+		return nil
+	}
 	snapshot, remaining, err := cutoverSnapshotMatchesEvidence(ctx, tx, evidence)
 	if err != nil ||
 		receipt.CurrentFiniteEntitlement != snapshot.CurrentEntitlement ||
@@ -624,16 +642,6 @@ func requireDarkRestoreFinalCutover(ctx context.Context, tx *sql.Tx, id string) 
 		receipt.RemainingBudgetBytes != remaining {
 		return ErrDarkRestoreCutover
 	}
-	if receipt.SubscriptionDeliveryScope == DarkRestorePreparedDeliveryScopeV1 {
-		if err = verifyPreparedPlanReceipt(ctx, tx, receipt); err != nil {
-			return err
-		}
-		// Preparation is a real, immutable delivery boundary, but it neither
-		// promotes the plan/client binding nor proves a native apply. Keep the
-		// logical enable path closed until a later receipt binds that operation.
-		return ErrDarkRestoreCutover
-	}
-
 	delivery, err := readSubscriptionDelivery(ctx, tx, id)
 	if err != nil || !delivery.Enabled ||
 		delivery.Revision != receipt.SubscriptionRevision ||
@@ -649,6 +657,9 @@ func requireDarkRestoreFinalCutover(ctx context.Context, tx *sql.Tx, id string) 
 }
 
 func validateDarkRestoreCutovers(ctx context.Context, tx *sql.Tx) error {
+	if err := validateDarkRestoreNativeActivations(ctx, tx); err != nil {
+		return err
+	}
 	if err := validateDarkRestoreNativeApplyAcceptances(ctx, tx); err != nil {
 		return err
 	}

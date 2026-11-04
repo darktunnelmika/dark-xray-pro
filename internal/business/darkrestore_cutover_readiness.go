@@ -23,6 +23,7 @@ type DarkRestoreCutoverReadinessV1 struct {
 	NativeBaselineComplete               bool     `json:"native_baseline_complete"`
 	NativeApplyRecorded                  bool     `json:"native_apply_recorded"`
 	InitialApplySubscriptionDelivered    bool     `json:"initial_apply_subscription_delivered"`
+	NativeActivationAuthorized           bool     `json:"native_activation_authorized"`
 	SubscriptionDelivered                bool     `json:"subscription_delivered"`
 	CutoverReceiptRecorded               bool     `json:"cutover_receipt_recorded"`
 	ClientArchived                       bool     `json:"client_archived"`
@@ -136,6 +137,7 @@ func (s *Store) DarkRestoreCutoverReadinessV1(ctx context.Context, sourceSHA, so
 
 	preparedAwaitingNativeApply := false
 	preparedAwaitingInitialDelivery := false
+	preparedAwaitingNativeActivation := false
 	if final != nil {
 		out.SubscriptionDeliveryScope = final.SubscriptionDeliveryScope
 		if final.SubscriptionDeliveryScope == DarkRestorePreparedDeliveryScopeV1 {
@@ -163,6 +165,14 @@ func (s *Store) DarkRestoreCutoverReadinessV1(ctx context.Context, sourceSHA, so
 				if acceptance != nil {
 					_, _, deliveryErr := readDarkRestoreInitialDeliveryAfterAcceptance(ctx, tx, out.ClientID, acceptance)
 					out.InitialApplySubscriptionDelivered = deliveryErr == nil
+					if deliveryErr == nil {
+						activation, activationErr := currentDarkRestoreNativeActivation(ctx, tx, out.ClientID)
+						if activationErr != nil {
+							tx.Rollback()
+							return out, activationErr
+						}
+						out.NativeActivationAuthorized = activation != nil
+					}
 				}
 			}
 			// Preserve the existing meaning: the immutable owner-prepared export
@@ -171,6 +181,7 @@ func (s *Store) DarkRestoreCutoverReadinessV1(ctx context.Context, sourceSHA, so
 			out.SubscriptionDelivered = preparedValid
 			preparedAwaitingNativeApply = preparedValid && !out.NativeApplyRecorded
 			preparedAwaitingInitialDelivery = out.NativeApplyRecorded && !out.InitialApplySubscriptionDelivered
+			preparedAwaitingNativeActivation = out.InitialApplySubscriptionDelivered && !out.NativeActivationAuthorized
 		}
 	}
 	tx.Rollback()
@@ -195,7 +206,7 @@ func (s *Store) DarkRestoreCutoverReadinessV1(ctx context.Context, sourceSHA, so
 	if preparedAwaitingInitialDelivery {
 		out.ActivationBlockers = append(out.ActivationBlockers, "initial_apply_subscription_not_delivered")
 	}
-	if out.InitialApplySubscriptionDelivered {
+	if preparedAwaitingNativeActivation {
 		// Delivery is real and bound to the accepted Apply, but activation is a
 		// separate owner-controlled transition that is not authorized here.
 		out.ActivationBlockers = append(out.ActivationBlockers, "native_activation_not_authorized")

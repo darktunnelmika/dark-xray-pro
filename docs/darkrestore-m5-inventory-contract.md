@@ -447,3 +447,30 @@ backup and unchanged financial/identity state. The ordinary imported issuer
 and final activation guard remain closed. This receipt does not prove inventory
 completeness, retirement of undeclared sources, continuing health, production
 delivery or valid legacy-unlimited entitlement.
+
+## Controlled native activation after accepted Apply delivery
+
+The isolated final M5 gate adds a separate owner-only, append-only activation
+receipt. It can be recorded only after the Store re-derives the current native
+Apply acceptance and the genuine first-Apply subscription snapshot in the same
+transaction. Independent pins bind the transition, accepted Apply evidence,
+current payer, finite entitlement, settled history, native counters, remaining
+budget, inbound, health round, delivery revision, snapshot identity, rendered
+content hash and delivery expiry. Stale payer, entitlement, counters, delivery,
+profile or content fails closed.
+
+Recording this receipt does not change the client, runtime, wallet, usage,
+ownership or subscription snapshot. It authorizes the existing final-cutover
+guard and existing credential issuer only for that exact current chain. Exact
+replay is idempotent; conflicting replay, representative access, schema
+mutation and insertion failure are rejected. Startup and offline-backup
+validation rebind the receipt to the immutable Apply acceptance and delivery
+rows without treating later expiry as corruption; current issuance still
+requires a nonexpired, unchanged chain.
+
+Synthetic fixtures cover positive authorization, real credential issuance,
+negative pin and entitlement drift, replay, rollback, immutable triggers,
+restart and offline backup. They do not establish a real production inventory,
+retirement of undeclared sources, continuing health, operational approval or a
+legacy-unlimited entitlement. No public activation route is added, and no
+installed or production identity is activated by this source change.

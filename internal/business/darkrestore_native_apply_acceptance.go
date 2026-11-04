@@ -215,6 +215,10 @@ func currentDarkRestoreNativeApplyAcceptance(ctx context.Context, q sellerQueryV
 }
 
 func readDarkRestoreInitialDeliveryAfterAcceptance(ctx context.Context, tx *sql.Tx, client string, acceptance *DarkRestoreNativeApplyAcceptanceReceiptV1) (subscriptionDeliveryHead, subscriptionSnapshotRow, error) {
+	return readDarkRestoreInitialDeliveryAfterAcceptanceAt(ctx, tx, client, acceptance, time.Now().UnixNano())
+}
+
+func readDarkRestoreInitialDeliveryAfterAcceptanceAt(ctx context.Context, tx *sql.Tx, client string, acceptance *DarkRestoreNativeApplyAcceptanceReceiptV1, now int64) (subscriptionDeliveryHead, subscriptionSnapshotRow, error) {
 	var empty subscriptionSnapshotRow
 	if acceptance == nil || acceptance.ClientID != client || !acceptance.NativeApplyRecorded || acceptance.SubscriptionDelivered || acceptance.SubscriptionActivated || acceptance.AuthorizesFurtherMutation {
 		return subscriptionDeliveryHead{}, empty, ErrDarkRestoreCutover
@@ -227,7 +231,7 @@ func readDarkRestoreInitialDeliveryAfterAcceptance(ctx context.Context, tx *sql.
 	if err != nil || row.ClientID != client || row.InboundID != acceptance.InboundID || row.RoundID != acceptance.Evidence.HealthRoundID ||
 		row.InitialApplySHA != acceptance.Evidence.InitialApplySHA || row.PromotionEventID != acceptance.Evidence.PromotionEventID ||
 		row.BodySHA != acceptance.Evidence.PreparedContentSHA || row.EventID != delivery.EventID || row.Revision != delivery.SnapshotRevision ||
-		row.CreatedUnixNano != delivery.Created || row.CreatedUnixNano <= acceptance.RecordedUnixNano || row.ExpiresUnixNano <= time.Now().UnixNano() {
+		row.CreatedUnixNano != delivery.Created || row.CreatedUnixNano <= acceptance.RecordedUnixNano || row.ExpiresUnixNano <= now {
 		return delivery, empty, ErrDarkRestoreCutover
 	}
 	return delivery, row, nil

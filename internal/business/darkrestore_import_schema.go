@@ -114,6 +114,13 @@ func darkRestoreSchemaState(ctx context.Context, q sellerQueryV2) (bool, error) 
 	if applyAcceptancePresent {
 		n -= len(darkRestoreNativeApplyAcceptanceDDL)
 	}
+	activationPresent, activationErr := darkRestoreNativeActivationSchema(ctx, q)
+	if activationErr != nil {
+		return false, activationErr
+	}
+	if activationPresent {
+		n -= len(darkRestoreNativeActivationDDL)
+	}
 	baseCount := len(darkRestoreImportSchemaV1)
 	localCount := baseCount + len(darkRestoreLocalAttachmentSchemaV1)
 	cutoverCount := localCount + len(darkRestoreCutoverSchemaV1)
