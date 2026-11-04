@@ -349,3 +349,68 @@ test("fresh Node installer instructions and command do not overflow 320px Persia
   await expect(page.getByRole("region",{name:"فقط داخل VPS جدید اجرا کن"})).toBeVisible();
   expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+2)).toBe(true);
 });
+
+test("node health separates evidence and invalidates a failed refresh without deleting nodes", async ({page}) => {
+  await setup(page);
+  let failed = false;
+  await page.route("**/api/v1/workspace/nodes", route => failed
+    ? route.fulfill({status:503,json:{error:"unavailable"}})
+    : route.fulfill({json:{mode:"new_pro_lab_only",nodes:[{node_id:"health-node",name:"Health node",status:"online",metrics_current:false,last_seen:new Date().toISOString(),paired_at:new Date().toISOString()}]}}));
+  await page.goto("/nodes");await login(page);
+  await expect(page.locator('[data-node-health="transport"] dd')).toHaveText("Online");
+  await expect(page.locator('[data-node-health="metrics"] dd')).toHaveText("Delayed");
+  await expect(page.locator('[data-node-health="core"] dd')).toHaveText("Not measured here");
+  await expect(page.locator('[data-node-health="accounting"] dd')).toHaveText("Not measured here");
+  failed=true;
+  await page.getByRole("button",{name:"Refresh list",exact:true}).click();
+  await expect(page.locator('[data-node-health="transport"] dd')).toHaveText("Unknown");
+  await expect(page.locator('[data-node-health="metrics"] dd')).toHaveText("Unknown");
+  await expect(page.getByText("Health node",{exact:true})).toBeVisible();
+  failed=false;
+  await page.getByRole("button",{name:"Refresh list",exact:true}).click();
+  await expect(page.locator('[data-node-health="transport"] dd')).toHaveText("Online");
+  await page.setViewportSize({width:320,height:760});
+  await page.getByRole("button",{name:"Switch language"}).click();
+  await expect(page.locator('[data-node-health="core"] dd')).toHaveText("اینجا سنجیده نشده");
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+2)).toBe(true);
+});
+
+test("node health shows durable execution evidence without inferring it from transport and marks stale evidence", async ({page}) => {
+  await page.clock.install();
+  await setup(page);
+  let reads=0;
+  await page.route("**/api/v1/workspace/nodes", async route => {
+    if (++reads > 1) return;
+    return route.fulfill({json:{mode:"new_pro_lab_only",nodes:[{
+      node_id:"health-evidence",name:"Evidence node",status:"online",metrics_current:true,
+      last_seen:new Date().toISOString(),paired_at:new Date().toISOString(),
+      transport_state:"online",metrics_state:"current",core_state:"running",accounting_state:"settled",
+      execution_current:true,execution_reported_at:new Date().toISOString(),
+    }]}});
+  });
+  await page.goto("/nodes");await login(page);
+  await expect(page.locator('[data-node-health="transport"] dd')).toHaveText("Online");
+  await expect(page.locator('[data-node-health="metrics"] dd')).toHaveText("Current");
+  await expect(page.locator('[data-node-health="core"] dd')).toHaveText("running");
+  await expect(page.locator('[data-node-health="accounting"] dd')).toHaveText("settled");
+  await page.clock.fastForward(31000);
+  await expect(page.locator('[data-node-health="transport"] dd')).toHaveText("Unknown");
+  await expect(page.locator('[data-node-health="core"] dd')).toHaveText("running · Stale observation");
+  await expect(page.locator('[data-node-health="accounting"] dd')).toHaveText("settled · Stale observation");
+});
+
+test("node health expires an unanswered snapshot and does not infer metrics from an offline node", async ({page}) => {
+  await page.clock.install();
+  await setup(page);
+  let reads=0;
+  await page.route("**/api/v1/workspace/nodes", async route => {
+    if (++reads > 1) return;
+    return route.fulfill({json:{mode:"new_pro_lab_only",nodes:[{node_id:"health-expiry",name:"Retained node",status:"offline",metrics_current:true,last_seen:null,paired_at:new Date().toISOString()}]}});
+  });
+  await page.goto("/nodes");await login(page);
+  await expect(page.locator('[data-node-health="transport"] dd')).toHaveText("Offline");
+  await expect(page.locator('[data-node-health="metrics"] dd')).toHaveText("Unknown");
+  await page.clock.fastForward(31000);
+  await expect(page.locator('[data-node-health="transport"] dd')).toHaveText("Unknown");
+  await expect(page.getByText("Retained node",{exact:true})).toBeVisible();
+});

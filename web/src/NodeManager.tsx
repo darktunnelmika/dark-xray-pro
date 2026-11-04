@@ -1,7 +1,8 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useState, useRef, type FormEvent } from "react";
 import { Check, ClipboardCopy, Download, KeyRound, Link2, RefreshCw, ShieldCheck, ShieldPlus, Terminal, XCircle } from "lucide-react";
 import { api, mutation, ApiError, useSession, type Language } from "./session";
 import "./NodeManager.css";
+import NodeHealth from "./NodeHealth";
 import NodeNameEditor from "./NodeNameEditor";
 import NodeDependencies from "./NodeDependencies";
 import NodeReplacements from "./NodeReplacements";
@@ -14,6 +15,12 @@ type Registration = {
   status: "online" | "offline";
   metrics_current: boolean;
   last_seen: string | null;
+  transport_state: string;
+  metrics_state: string;
+  core_state: string;
+  accounting_state: string;
+  execution_current: boolean;
+  execution_reported_at: string | null;
 };
 type TransportScope = "disabled" | "loopback_only" | "external_tls_unverified";
 type Roster = { nodes: Registration[]; mode: "new_pro_lab_only";
@@ -32,6 +39,7 @@ const words = {
     boundary: "PRO LAB only · no old Nodes · no deletion · pairing never activates Xray or subscriptions automatically",
     roster: "Registered NEW PRO Nodes", empty: "No freshly paired PRO Nodes yet.",
     online: "Online", offline: "Offline", delayed: "Metrics delayed", lastSeen: "Last heartbeat",
+    transport: "Transport", core: "Core", metrics: "Metrics", accounting: "Accounting", staleExecution: "stale observation",
     refreshing: "Checking registrations", retry: "Refresh list", registryIssue: "Cannot load registered Nodes.",
     codeLost: "After refresh or leaving this page the code cannot be viewed again. Cancel a pending invitation by its ID, or wait for expiry.",
     codeCancelled: "Pending Pair Code revoked. No Node or client was changed.",
@@ -59,6 +67,7 @@ const words = {
     boundary: "فقط PRO آزمایشی · بدون دست‌زدن به نودهای قدیمی · بدون حذف · اتصال نود، Xray یا اشتراک را خودکار فعال نمی‌کند",
     roster: "نودهای تازهٔ ثبت‌شده در PRO", empty: "هنوز نود تازه‌ای Pair نشده است.",
     online: "آنلاین", offline: "آفلاین", delayed: "آمار با تأخیر", lastSeen: "آخرین Heartbeat",
+    transport: "ارتباط", core: "هسته", metrics: "متریک", accounting: "حسابداری", staleExecution: "گزارش قدیمی",
     refreshing: "در حال دریافت لیست نودها", retry: "بازخوانی", registryIssue: "فهرست نودها قابل دریافت نیست.",
     codeLost: "بعد از رفرش یا خروج از این بخش، کد دوباره قابل نمایش نیست؛ می‌توانی دعوت در انتظار را با شناسه لغو کنی یا تا انقضا صبر کنی.",
     codeCancelled: "کد در انتظار باطل شد؛ هیچ نود یا کلاینتی تغییر نکرد.",
@@ -88,6 +97,8 @@ export default function NodeManager({ language }: { language: Language }) {
   const t = words[language];
   const [roster, setRoster] = useState<Registration[] | null>(null);
   const [rosterFailed, setRosterFailed] = useState(false);
+  const [rosterAt, setRosterAt] = useState(0);
+  const rosterRequest = useRef(0);
   const [bundleAvailable, setBundleAvailable] = useState(false);
   const [transportScope, setTransportScope] = useState<TransportScope>("disabled");
   const [downloadBusy, setDownloadBusy] = useState(false);
@@ -102,8 +113,15 @@ export default function NodeManager({ language }: { language: Language }) {
   const [clock, setClock] = useState(Date.now());
 
   const load = async (signal?: AbortSignal) => {
-    const result = await api<Roster>("/api/v1/workspace/nodes", { signal });
+    const request = ++rosterRequest.current;
+    const result = await api<Roster>("/api/v1/workspace/nodes", { signal }).catch(error => {
+      if (request !== rosterRequest.current || signal?.aborted) return null;
+      throw error;
+    });
+    if (!result) return;
     if (result.mode !== "new_pro_lab_only" || !Array.isArray(result.nodes)) throw new Error("invalid_node_roster");
+    if (request !== rosterRequest.current || signal?.aborted) return;
+    setRosterAt(Date.now());
     setRoster(result.nodes);
     // Once the server reports an actually bound installation, the one-use
     // Pair Code is invalid: remove it from tab memory immediately.
@@ -296,9 +314,11 @@ export default function NodeManager({ language }: { language: Language }) {
         {roster?.map(node => (
           <div className="pro-node-roster-row" key={node.node_id}>
             <div><strong>{node.name}</strong><small>{node.node_id} · {t.lastSeen}: {readableTime(node.last_seen, language)}</small></div>
-            <span className={"pro-node-roster-status " + (node.status === "online" ? "is-online" : "is-offline")}>
-              {node.status === "online" ? t.online : t.offline}{node.status === "online" && !node.metrics_current ? " · "+t.delayed : ""}
-            </span>
+            <NodeHealth language={language} status={node.status} metricsCurrent={node.metrics_current}
+              fresh={!rosterFailed && clock - rosterAt < 30000}
+              transportState={node.transport_state} metricsState={node.metrics_state}
+              coreState={node.core_state} accountingState={node.accounting_state}
+              executionCurrent={node.execution_current} executionReportedAt={node.execution_reported_at} />
             <NodeNameEditor key={session?.user.id + ":" + node.node_id} nodeID={node.node_id} language={language} onSaved={() => { void load().catch(() => setRosterFailed(true)); }} />
             <NodeDependencies key={session?.user.id + ":dependencies:" + node.node_id} nodeID={node.node_id} language={language} />
             <NodeReplacements key={session?.user.id + ":replacements:" + node.node_id} nodeID={node.node_id} language={language} />
