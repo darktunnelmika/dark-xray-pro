@@ -123,6 +123,53 @@ func (s *Server) attachSellerOrdersV1(mux *http.ServeMux) {
 		}
 		respond(w, http.StatusCreated, receipt)
 	})
+	// This is an authenticated seller accounting order, not a customer
+	// checkout. The immutable receipt always states that no payment was applied.
+	mux.HandleFunc("POST /api/v1/workspace/representatives/{id}/sellers/{seller}/catalog/{product}/clients", func(w http.ResponseWriter, r *http.Request) {
+		session, ok := s.authorizeSellerBrowserV2(w, r, true, false)
+		if !ok {
+			return
+		}
+		if r.URL.RawQuery != "" || r.URL.ForceQuery {
+			businessError(w, business.ErrInvalid)
+			return
+		}
+		var input struct {
+			EventID                 string `json:"event_id"`
+			RepresentativeID        string `json:"representative_id"`
+			SellerID                string `json:"seller_id"`
+			ProductID               string `json:"product_id"`
+			ExpectedProductRevision int64  `json:"expected_product_revision"`
+			ExpectedPriceToman      int64  `json:"expected_price_toman"`
+			ExpectedDurationDays    int64  `json:"expected_duration_days"`
+			ExpectedUserCount       int64  `json:"expected_user_count"`
+			ClientID                string `json:"client_id"`
+			Name                    string `json:"name"`
+			Reason                  string `json:"reason"`
+		}
+		if !decodeSellerOrderV1(w, r, &input, "event_id", "representative_id", "seller_id", "product_id",
+			"expected_product_revision", "expected_price_toman", "expected_duration_days",
+			"expected_user_count", "client_id", "name", "reason") {
+			return
+		}
+		if input.RepresentativeID != r.PathValue("id") || input.SellerID != r.PathValue("seller") ||
+			input.ProductID != r.PathValue("product") {
+			businessError(w, business.ErrInvalid)
+			return
+		}
+		receipt, err := s.business.CreateSellerClientFromCatalogV1(r.Context(), session.Token, business.SellerCatalogClientCreateV1{
+			EventID: input.EventID, RepresentativeID: input.RepresentativeID, SellerID: input.SellerID,
+			ProductID: input.ProductID, ExpectedProductRevision: input.ExpectedProductRevision,
+			ExpectedPriceToman: input.ExpectedPriceToman, ExpectedDurationDays: input.ExpectedDurationDays,
+			ExpectedUserCount: input.ExpectedUserCount, ClientID: input.ClientID, Name: input.Name,
+			Reason: input.Reason,
+		})
+		if err != nil {
+			sellerQuotaErrorV2(w, err)
+			return
+		}
+		respond(w, http.StatusCreated, receipt)
+	})
 	mux.HandleFunc("POST /api/v1/workspace/representatives/{id}/sellers/{seller}/clients/{client}/extend", func(w http.ResponseWriter, r *http.Request) {
 		session, ok := s.authorizeSellerBrowserV2(w, r, true, false)
 		if !ok {
