@@ -52,6 +52,8 @@ type Server struct {
 	sellerOrdersV1Enabled       bool // startup-only, requires seller management and refund supervision
 	telegramBotsV1Enabled       bool // startup-only, independent native commerce opt-in
 	telegramBotsStatus          telegramBotStatusSource
+	telegramBotsManager         telegramBotManager // startup-only private credential/lifecycle adapter
+	telegramConnectionGate      telegramConnectionGate
 	volumeRefunds               *volumeRefundService
 	loginGate                   *loginGate
 	inboundKey                  []byte

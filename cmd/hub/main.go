@@ -471,13 +471,13 @@ func main() {
 			}
 		}
 	}
-	commerceBot, commerceErr := telegrambot.Open(telegrambot.Options{EnableFlag: os.Getenv(telegrambot.EnableEnv), LABMode: os.Getenv("DARK_PRO_LAB_MODE") == "1", ConfigPath: *telegramBotsConfig}, commerceBackend)
+	commerceBot, commerceErr := telegrambot.OpenManager(telegrambot.Options{EnableFlag: os.Getenv(telegrambot.EnableEnv), LABMode: os.Getenv("DARK_PRO_LAB_MODE") == "1", ConfigPath: *telegramBotsConfig}, commerceBackend)
 	if commerceErr != nil {
 		log.Fatal("private Telegram bot initialization failed: ", commerceErr)
 	}
 	if commerceBot != nil {
 		defer commerceBot.Close()
-		service.SetTelegramBotStatusSource(commerceBot)
+		service.SetTelegramBotManager(commerceBot)
 	}
 	ownerReportBot, botErr := telegramhub.OpenLABOwnerReportBot(telegramhub.LABOwnerReportBotOptions{
 		EnableFlag: ownerReportFlag, LABMode: os.Getenv("DARK_PRO_LAB_MODE") == "1",

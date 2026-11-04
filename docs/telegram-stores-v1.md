@@ -17,7 +17,7 @@ Implementation entry points: [HUB gating](../cmd/hub/telegram_bots.go),
 
 | Actor | Implemented capabilities and scope |
 |---|---|
-| Browser owner | Register or update store metadata, assign its Telegram manager, enable/disable it, and list all stores. Native catalog and representative administration remain available through the existing panel. |
+| Browser owner | Verify a dedicated bot token, register a HUB/representative store, activate or reconnect it, replace its token, check its connection, assign its Telegram manager and pause/resume its storefront from the panel. Native catalog and representative administration remain available through the existing panel. |
 | Browser representative | Read only stores belonging to the current representative. Cannot register a bot or change store ownership. |
 | Owner of the HUB Telegram store | List/create representatives, inspect their native credit, and confirm native credit adjustments. Also has the management capabilities of its own store. The store must be bound to native `representative_id: "owner"`. |
 | Representative store manager | Inspect permitted native finance, price published products in Stars, invite/revoke store administrators, configure trials, referral terms and optional bonus discounts, handle support, and prepare/approve permitted broadcasts. Current native grants still apply. |
@@ -38,7 +38,9 @@ customer/client bindings, wallet entries, support, referral attribution, and
 campaign audiences are store-scoped. Multiple brands may share one native
 representative: they then share that representative's native catalog and credit
 ledger, while each store selects offers through its own Stars prices. There is
-no duplicated representative balance. The runtime allowlist supports 1–16 bots;
+no duplicated representative balance. The runtime allowlist supports up to 16 bots;
+an initialized panel can have zero bots while waiting for owner setup. Legacy
+version-1 private configuration still requires at least one bot.
 there is no special four-brand bypass or global customer lookup.
 
 ## 2. Native accounting and checkout invariants
@@ -228,7 +230,15 @@ campaign, rewards and bonus schema families; it does not grant rewards, enable
 bonus discounts or enable trial policies. Disabling the feature does not delete
 existing financial history.
 
-Private config shape, shown with a deliberately non-executable token placeholder:
+The owner configures credentials from the panel. A missing configuration is
+initialized by the enabled manager as a real version-2 empty configuration and
+a real managed journal, before the required backup inventory is published. No
+synthetic bot identity or token is inserted. This permits the first panel login
+to configure the first bot while preserving the required config/journal backup
+pair. Version-2 configuration has an explicit revision for concurrent changes;
+version-1 files remain readable and migrate on a successful credential change.
+
+Legacy private config shape, shown with a deliberately non-executable placeholder:
 
 ```json
 {
@@ -246,9 +256,11 @@ Private config shape, shown with a deliberately non-executable token placeholder
 Each bot ID must be positive and unique. Config is limited to 16 KiB. Use
 mode-0700 immediate parent directories and mode-0600 regular files, owned by the
 HUB's effective user. Symlinked paths, shared/non-private files, executable files,
-and hard-linked credential files are rejected. Tokens belong only in this private
-config, never in metadata requests, the browser UI, environment examples, logs,
-or the business database.
+and hard-linked credential files are rejected. Tokens are entered into a
+write-only password input and sent only in a bounded, same-origin authenticated
+POST. They are stored in this private config, never in metadata responses,
+browser persistence, URLs, environment examples, logs or the business database.
+The UI does not retrieve or prefill a saved token.
 
 The running HUB user must also be able to traverse **every ancestor directory**.
 Checking only the immediate private directory as root is insufficient. In
@@ -257,7 +269,12 @@ mode 0700; a separate non-root HUB cannot read a child config through that paren
 without a reviewed access arrangement. Do not make the credential files public
 to solve a directory-access failure.
 
-`Open` performs local validation only. Starting the worker performs network I/O
+`OpenManager` performs local initialization/validation only. The independent
+`Verify` and saved-credential check contact Telegram without consuming updates
+or sending a message. Connecting verifies again before a revision-checked,
+atomic private-file publication and starts the bot's polling loop. Replacing or
+reconnecting one bot joins its previous loop first and preserves its journal
+history. Other bots retain their independent loops. Starting a worker performs network I/O
 against the fixed `https://api.telegram.org` origin, verifies `getMe` against each
 expected bot ID, and refuses an existing webhook. It does not delete a webhook.
 There is no configurable API origin or redirect-following fallback. Use a
@@ -337,13 +354,15 @@ The command accepts no additional arguments or path overrides. It requires
 explicit LAB mode and checks the effective UID/GID against the system account,
 not environment username hints. Root, a different account or primary group,
 and invalid invocation are rejected before reading the config. The config path
-remains `/etc/dark-xray-pro-lab/telegram-bots/config.json`; it must already contain
-real dedicated LAB credentials with the private ownership/modes described above.
+remains `/etc/dark-xray-pro-lab/telegram-bots/config.json`; it must already be a
+valid private configuration, either initialized with zero bots or containing
+real dedicated LAB credentials, with the ownership/modes described above.
 The command neither creates nor replaces it. Token values belong in that file,
 not shell arguments or chat messages.
 
 On success the JSON report includes `scope: private_config_only`,
-`code: private_config_valid` and the configured bot count. All reports include
+`code: private_config_valid` and the configured bot count, including zero for
+initialized version-2 onboarding. All reports include
 `activation: not_performed`; live identity, exclusive Telegram transport, runtime
 feature flags, store bindings, native delivery and Stars acceptance remain
 `unknown`. Valid syntax cannot establish that a token belongs to its expected
@@ -359,12 +378,45 @@ no HUB state, business store, journal, lock, network listener or Telegram worker
 normal runtime flags do not need to be enabled to run it. It does not replace the
 coordinated HUB/backup CLI/backup-worker activation or its financial baseline.
 
-## 5. Metadata registration is not runtime activation
+## 5. Panel onboarding and connection management
 
 The panel's Telegram page uses `GET /api/v1/workspace/telegram`. The owner sees
 all stores; an enabled, unsuspended representative sees only its own stores. It
 returns feature availability, store metadata, connection state, and last poll
 time without credentials. `polling` means update reception, not service readiness.
+The owner also receives `can_manage_connections`, a runtime configuration
+revision and per-store credential-presence/username/problem metadata. These
+fields contain no token or token fingerprint. Representatives retain a scoped
+read-only view and cannot call credential endpoints.
+
+The panel flow is: enter dedicated LAB token, verify its Telegram identity,
+choose HUB or representative, enter the store name and manager's numeric ID,
+then save and activate. The verified response supplies the bot ID. After setup,
+the card provides saved-credential connection checks, reconnect/retry, token
+replacement and storefront pause/resume. Partial metadata success followed by
+a failed connection remains visible for retry; it is not displayed as polling.
+
+| Owner endpoint | Exact JSON fields | Result |
+|---|---|---|
+| `POST /api/v1/workspace/telegram/verify` | `token` | Verified `bot_id` and `username`; no saved credential or polling |
+| `POST /api/v1/workspace/telegram/stores/{id}/connection` | `token`, `expected_revision` | Verify, durably save and activate; empty token reuses the saved credential for reconnect |
+| `POST /api/v1/workspace/telegram/stores/{id}/check` | Empty object | Verify the saved credential without a test message |
+
+Each operation requires the existing signed owner browser session, Origin and
+CSRF checks. Query strings, unknown/duplicate/missing keys, oversized input and
+unregistered stores are refused. The server resolves the bot ID from the
+registered store. Connection publication rechecks current owner authority and
+store binding after the bounded Telegram verification. Revision conflicts need
+a fresh workspace read; errors are fixed redacted codes. Credentials never
+enter the metadata mutation's event fingerprint.
+
+The secret-operation body limit is 1 KiB. Install the exact owner HTTPS routes
+from [`telegram-stores.conf`](../ops/nginx/telegram-stores.conf), preserving
+Host forwarding and the general API deny fallback. Credential requests are not
+spooled before authentication or retried by the proxy. With `ProtectSystem=strict`,
+the HUB also needs the narrowly scoped write allowance in
+[`telegram-panel-write.conf`](../ops/systemd/telegram-panel-write.conf).
+That allowance covers only the prepared private bot-config directory.
 
 Only an authenticated browser owner with the existing CSRF-protected mutation
 flow can call `POST /api/v1/workspace/telegram/stores`. All eight fields are
@@ -388,17 +440,23 @@ The bot/representative binding is immutable after registration. Name, manager,
 and enabled state use revision-checked updates; replacing a manager revokes the
 old manager membership. No browser session is fabricated from a Telegram user.
 
-For a separately approved LAB rehearsal: establish the native owner/representative
-and published catalog, register reviewed metadata, and independently provision
-the private runtime allowlist. An allowed bot without an enabled store binding
+For the isolated LAB rehearsal: establish the native owner/representative and
+published catalog, then register and connect the dedicated bot from the panel.
+An allowed bot without an enabled store binding
 cannot grant customer access. A registered store whose bot is absent from the
-runtime allowlist remains `not_configured`; registration does not add a token,
-launch a new worker, or contact Telegram. The current worker loads its allowlist
-at startup; metadata changes are checked dynamically.
+runtime allowlist remains `not_configured`; the metadata endpoint itself does
+not add a token, launch a worker or contact Telegram. The separate connection
+operation does that without restarting HUB. Metadata is checked dynamically.
 
-At restart, new allowlisted bot IDs receive durable cursors. Removing a bot from
-the active allowlist stops its worker without deleting its retained cursor or
-history; validation accepts this historical superset. There are at most 16
+Pausing the storefront denies new ordinary store actions. Its configured
+transport continues recording already-bound payment/refund facts so pausing a
+store cannot erase money that Telegram has already settled. A connection check
+does not prove another polling process is absent; webhook detection refuses an
+existing webhook and never deletes it. Use only dedicated LAB bots.
+
+At restart, configured bot IDs retain their durable cursors. Panel operations
+do not remove bots or discard retained cursor/history; validation accepts this
+historical superset. There are at most 16
 active configured bots and 256 retained bot identities. Do not reset the journal
 to change the allowlist or discard pending financial records.
 
@@ -433,6 +491,25 @@ omitting the bot journal is not equivalent. Retained bot state remains part of
 inventory even when the feature has subsequently been disabled. Offline
 validation checks configured bot identities, journal structure, integrity and
 scope without calling Telegram or dispatching queued work.
+
+Panel-managed configurations use version 2 with a monotonic revision. Managed
+journals use SQLite `user_version=2`; their existing SQL schema and `bot_meta`
+version remain 1. A zero-bot onboarding pair is valid only when its exact
+schema, application ID, empty binding, integrity and foreign keys validate,
+and every transport data table is empty. An empty legacy version-1 config or
+journal is still rejected. A missing journal beside a version-2 config is an
+error, never an invitation to recreate financial history. Existing nonempty
+version-1 state remains readable and is upgraded by the managed runtime.
+
+Credential replacement stops and joins only that bot's old loop before it
+publishes the new private file. Processing resumes from the durable inbox;
+an interrupted outgoing dispatch stays unknown for review. A new bot's config
+is published before its cursor is added. If the cursor transaction fails, the
+panel reports a connection error and a retry or restart can complete that
+never-polled binding; it does not report a successful activation. The ordinary
+offline validator rejects an incomplete pair until that recovery succeeds.
+HUB, backup CLI and backup worker must therefore be upgraded together to
+read both the bot resource roles and managed version-2 state.
 
 Restore publishes validated files into quarantine. It does not start polling,
 send retained messages, or authorize production activation. Preserve the

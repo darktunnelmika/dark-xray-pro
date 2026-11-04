@@ -55,8 +55,10 @@ install -m 0755 scripts/install-lab.sh release/scripts/install-lab.sh
 install -m 0755 scripts/telegram-lab-preflight.py release/scripts/telegram-lab-preflight.py
 install -m 0755 internal/nodebootstrap/install-new-pro-node.sh release/scripts/install-new-pro-node.sh
 install -m 0644 ops/systemd/dark-xray-pro-backup-worker.service release/ops/systemd/dark-xray-pro-backup-worker.service
+install -m 0644 ops/systemd/telegram-panel-write.conf release/ops/systemd/telegram-panel-write.conf
 install -m 0644 ops/nginx/business-management.conf release/ops/nginx/business-management.conf
 install -m 0644 ops/nginx/native-backups.conf release/ops/nginx/native-backups.conf
+install -m 0644 ops/nginx/telegram-stores.conf release/ops/nginx/telegram-stores.conf
 install -m 0644 third_party/go-qrcode/LICENSE release/ops/licenses/go-qrcode-LICENSE
 
 # Generated UI and the fixed release directory are explicitly ignored. Any

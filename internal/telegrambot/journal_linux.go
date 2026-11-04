@@ -49,7 +49,7 @@ type journal struct {
 }
 
 func bindingDigest(ids []int64) string {
-	copyIDs := append([]int64(nil), ids...)
+	copyIDs := append([]int64{}, ids...)
 	sort.Slice(copyIDs, func(i, j int) bool { return copyIDs[i] < copyIDs[j] })
 	data, _ := json.Marshal(copyIDs)
 	sum := sha256.Sum256(data)
@@ -57,7 +57,15 @@ func bindingDigest(ids []int64) string {
 }
 
 func openJournal(path string, ids []int64) (*journal, error) {
-	if !filepath.IsAbs(path) || filepath.Clean(path) != path || privateParent(path) != nil || len(ids) == 0 || len(ids) > maxBots {
+	return openJournalMode(path, ids, false)
+}
+
+func openManagedJournal(path string, ids []int64) (*journal, error) {
+	return openJournalMode(path, ids, true)
+}
+
+func openJournalMode(path string, ids []int64, managed bool) (*journal, error) {
+	if !filepath.IsAbs(path) || filepath.Clean(path) != path || privateParent(path) != nil || (!managed && len(ids) == 0) || len(ids) > maxBots {
 		return nil, ErrConfig
 	}
 	seen := map[int64]bool{}
@@ -131,7 +139,11 @@ func openJournal(path string, ids []int64) (*journal, error) {
 		if _, err = tx.ExecContext(ctx, "PRAGMA application_id=1146115138"); err != nil {
 			return nil, ErrJournal
 		}
-		if _, err = tx.ExecContext(ctx, "PRAGMA user_version=1"); err != nil {
+		versionSQL := "PRAGMA user_version=1"
+		if managed {
+			versionSQL = "PRAGMA user_version=2"
+		}
+		if _, err = tx.ExecContext(ctx, versionSQL); err != nil {
 			return nil, ErrJournal
 		}
 		if _, err = tx.ExecContext(ctx, "INSERT INTO bot_meta VALUES(1,1,?)", j.binding); err != nil {
@@ -152,6 +164,11 @@ func openJournal(path string, ids []int64) (*journal, error) {
 		known, err := knownBotIDs(ctx, j.db)
 		if err != nil {
 			return nil, err
+		}
+		// An empty managed configuration is an onboarding state, not an
+		// instruction to discard credentials for historical bot activity.
+		if managed && len(ids) == 0 && len(known) != 0 {
+			return nil, ErrConflict
 		}
 		present := map[int64]bool{}
 		for _, id := range known {
@@ -188,6 +205,11 @@ func openJournal(path string, ids []int64) (*journal, error) {
 		} else {
 			j.binding = bindingDigest(known)
 		}
+		if managed {
+			if _, err = j.db.ExecContext(ctx, "PRAGMA user_version=2"); err != nil {
+				return nil, ErrJournal
+			}
+		}
 	}
 	current, err := os.Lstat(path)
 	if err != nil || !os.SameFile(info, current) || !privateRegular(current) {
@@ -223,12 +245,15 @@ func openJournal(path string, ids []int64) (*journal, error) {
 func validateJournal(ctx context.Context, db *sql.DB, ids []int64) error {
 	var app, version int
 	var binding string
-	if db.QueryRowContext(ctx, "PRAGMA application_id").Scan(&app) != nil || app != journalApplicationID || db.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version) != nil || version != 1 {
+	if db.QueryRowContext(ctx, "PRAGMA application_id").Scan(&app) != nil || app != journalApplicationID || db.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version) != nil || (version != 1 && version != 2) {
 		return ErrJournal
 	}
 	known, err := knownBotIDs(ctx, db)
 	if err != nil {
 		return err
+	}
+	if len(known) == 0 && version != 2 {
+		return ErrJournal
 	}
 	if db.QueryRowContext(ctx, "SELECT binding FROM bot_meta WHERE id=1 AND version=1").Scan(&binding) != nil || binding != bindingDigest(known) {
 		return ErrConflict
@@ -263,6 +288,14 @@ func validateJournal(ctx context.Context, db *sql.DB, ids []int64) error {
 	if e != nil || len(want) != 0 {
 		return ErrJournal
 	}
+	if len(known) == 0 {
+		for _, table := range []string{"bot_inbox", "bot_outbox", "bot_callbacks", "bot_preferences", "bot_delivery_proofs", "bot_conversations"} {
+			var count int64
+			if db.QueryRowContext(ctx, "SELECT COUNT(*) FROM "+table).Scan(&count) != nil || count != 0 {
+				return ErrJournal
+			}
+		}
+	}
 	for _, id := range known {
 		var cursor int64
 		if db.QueryRowContext(ctx, "SELECT cursor FROM bot_cursors WHERE bot_id=?", id).Scan(&cursor) != nil || cursor < 0 {
@@ -290,7 +323,7 @@ func knownBotIDs(ctx context.Context, db *sql.DB) ([]int64, error) {
 		}
 		ids = append(ids, id)
 	}
-	if rows.Err() != nil || len(ids) == 0 {
+	if rows.Err() != nil {
 		return nil, ErrJournal
 	}
 	return ids, nil

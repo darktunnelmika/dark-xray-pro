@@ -17,19 +17,33 @@ import (
 )
 
 type botConfig struct {
-	BotID int64  `json:"expected_bot_id"`
-	Token string `json:"token"`
+	BotID    int64  `json:"expected_bot_id"`
+	Token    string `json:"token"`
+	Username string `json:"username,omitempty"`
 }
 type fileConfig struct {
-	Version int         `json:"version"`
-	Purpose string      `json:"purpose"`
-	Bots    []botConfig `json:"bots"`
+	Version  int         `json:"version"`
+	Purpose  string      `json:"purpose"`
+	Revision int64       `json:"revision,omitempty"`
+	Bots     []botConfig `json:"bots"`
 }
 
 func parseConfig(raw []byte) (fileConfig, error) {
 	var c fileConfig
 	var fields map[string]json.RawMessage
-	if len(raw) > 16<<10 || decodeJSON(raw, &fields) != nil || len(fields) != 3 || required(fields, "version", &c.Version) != nil || c.Version != 1 || required(fields, "purpose", &c.Purpose) != nil || c.Purpose != ConfigPurpose || required(fields, "bots", &c.Bots) != nil || len(c.Bots) < 1 || len(c.Bots) > maxBots {
+	if len(raw) > 16<<10 || decodeJSON(raw, &fields) != nil || required(fields, "version", &c.Version) != nil || required(fields, "purpose", &c.Purpose) != nil || c.Purpose != ConfigPurpose || required(fields, "bots", &c.Bots) != nil || c.Bots == nil || len(c.Bots) > maxBots {
+		return fileConfig{}, ErrConfig
+	}
+	switch c.Version {
+	case 1:
+		if len(fields) != 3 || len(c.Bots) == 0 {
+			return fileConfig{}, ErrConfig
+		}
+	case 2:
+		if len(fields) != 4 || required(fields, "revision", &c.Revision) != nil || c.Revision < 1 || c.Revision > maxManagedInteger {
+			return fileConfig{}, ErrConfig
+		}
+	default:
 		return fileConfig{}, ErrConfig
 	}
 	var entries []map[string]json.RawMessage
@@ -38,8 +52,25 @@ func parseConfig(raw []byte) (fileConfig, error) {
 	}
 	seen := map[int64]bool{}
 	for i, b := range c.Bots {
-		if len(entries[i]) != 2 || b.BotID <= 0 || seen[b.BotID] || !tokenPattern.MatchString(b.Token) {
+		if b.BotID <= 0 || seen[b.BotID] || !tokenPattern.MatchString(b.Token) {
 			return fileConfig{}, ErrConfig
+		}
+		if c.Version == 1 {
+			if len(entries[i]) != 2 {
+				return fileConfig{}, ErrConfig
+			}
+		} else {
+			if b.BotID > maxManagedInteger || len(entries[i]) < 2 || len(entries[i]) > 3 {
+				return fileConfig{}, ErrConfig
+			}
+			for key := range entries[i] {
+				if key != "expected_bot_id" && key != "token" && key != "username" {
+					return fileConfig{}, ErrConfig
+				}
+			}
+			if _, present := entries[i]["username"]; present && (required(entries[i], "username", &c.Bots[i].Username) != nil || !botUsernamePattern.MatchString(c.Bots[i].Username)) {
+				return fileConfig{}, ErrConfig
+			}
 		}
 		seen[b.BotID] = true
 	}
@@ -238,6 +269,9 @@ func ValidateOfflineBackup(ctx context.Context, journalPath string, configRaw []
 		return err
 	}
 	if journalPath == "" {
+		if config.Version == 2 {
+			return ErrJournal
+		}
 		return nil
 	}
 	if privateParent(journalPath) != nil {
@@ -270,6 +304,12 @@ func ValidateOfflineBackup(ctx context.Context, journalPath string, configRaw []
 	}
 	if err = validateJournal(ctx, db, ids); err != nil {
 		return err
+	}
+	if len(config.Bots) == 0 {
+		known, err := knownBotIDs(ctx, db)
+		if err != nil || len(known) != 0 {
+			return ErrJournal
+		}
 	}
 	var integrity string
 	if db.QueryRowContext(ctx, "PRAGMA integrity_check(1)").Scan(&integrity) != nil || integrity != "ok" {

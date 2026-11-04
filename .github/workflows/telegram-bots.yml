@@ -17,6 +17,9 @@ on:
       - "scripts/ci/test_run_business_race.py"
       - "scripts/telegram-lab-preflight.py"
       - "scripts/ci/test_telegram_lab_preflight.py"
+      - "scripts/test-telegram-proxy.py"
+      - "ops/nginx/telegram-stores.conf"
+      - "ops/systemd/telegram-panel-write.conf"
       - "web/src/Telegram*"
       - "web/src/App.tsx"
       - "web/src/PageLoadBoundary.tsx"
@@ -28,6 +31,16 @@ permissions:
   contents: read
 
 jobs:
+  telegram-proxy:
+    name: Telegram panel proxy boundaries
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install disposable proxy runtime
+        run: sudo apt-get update && sudo apt-get install -y nginx
+      - name: Verify exact Telegram routes and credential request handling
+        run: python3 scripts/test-telegram-proxy.py
   business-race:
     name: Telegram business race partition (${{ matrix.shard }}/2)
     runs-on: ubuntu-24.04

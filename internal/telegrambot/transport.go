@@ -26,6 +26,7 @@ import (
 const apiOrigin = "https://api.telegram.org"
 
 var tokenPattern = regexp.MustCompile(`^[1-9][0-9]{0,19}:[A-Za-z0-9_-]{20,200}$`)
+var botUsernamePattern = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_]{0,31}$`)
 
 type api struct {
 	botID    int64
@@ -140,7 +141,7 @@ func (a *api) verify(ctx context.Context) error {
 		return ErrProtocol
 	}
 	if value, ok := user["username"]; ok {
-		if json.Unmarshal(value, &a.username) != nil || !regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_]{0,31}$`).MatchString(a.username) {
+		if json.Unmarshal(value, &a.username) != nil || !botUsernamePattern.MatchString(a.username) {
 			return ErrProtocol
 		}
 	}

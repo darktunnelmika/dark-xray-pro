@@ -32,7 +32,7 @@ type telegramConfigCheckReport struct {
 	Scope          string            `json:"scope"`
 	Status         string            `json:"status"`
 	Code           string            `json:"code"`
-	ConfiguredBots int               `json:"configured_bots,omitempty"`
+	ConfiguredBots *int              `json:"configured_bots,omitempty"`
 	Activation     string            `json:"activation"`
 	Acceptance     map[string]string `json:"acceptance"`
 }
@@ -78,10 +78,10 @@ func runTelegramConfigCheck(args []string, output io.Writer, hooks telegramConfi
 		return finish("service_identity_required", 2)
 	}
 	count, err := hooks.check()
-	if err != nil || count < 1 || count > 16 {
+	if err != nil || count < 0 || count > 16 {
 		return finish("private_config_refused", 1)
 	}
 	report.Status = "passed"
-	report.ConfiguredBots = count
+	report.ConfiguredBots = &count
 	return finish("private_config_valid", 0)
 }

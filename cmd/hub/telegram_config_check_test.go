@@ -40,7 +40,7 @@ func TestTelegramConfigCheckIdentityAndRedaction(t *testing.T) {
 		{name: "wrong primary group", lab: "1", uid: 999, gid: 988, account: &user.User{Username: "darkprolab", Uid: "999", Gid: "999"}, want: "service_identity_required", exit: 2},
 		{name: "invalid account id", lab: "1", uid: 999, gid: 988, account: &user.User{Username: "darkprolab", Uid: secret, Gid: "988"}, want: "service_identity_required", exit: 2},
 		{name: "config refused", lab: "1", uid: 999, gid: 988, account: &user.User{Username: "darkprolab", Uid: "999", Gid: "988"}, err: errors.New(secret), want: "private_config_refused", exit: 1, checks: 1},
-		{name: "empty count refused", lab: "1", uid: 999, gid: 988, account: &user.User{Username: "darkprolab", Uid: "999", Gid: "988"}, want: "private_config_refused", exit: 1, checks: 1},
+		{name: "initialized empty panel config", lab: "1", uid: 999, gid: 988, account: &user.User{Username: "darkprolab", Uid: "999", Gid: "988"}, want: "private_config_valid", checks: 1},
 		{name: "oversized count refused", lab: "1", uid: 999, gid: 988, account: &user.User{Username: "darkprolab", Uid: "999", Gid: "988"}, count: 17, want: "private_config_refused", exit: 1, checks: 1},
 		{name: "valid two store config", lab: "1", uid: 999, gid: 988, account: &user.User{Username: "darkprolab", Uid: "999", Gid: "988"}, count: 2, want: "private_config_valid", checks: 1},
 	} {
@@ -85,10 +85,10 @@ func TestTelegramConfigCheckIdentityAndRedaction(t *testing.T) {
 				}
 			}
 			if tc.exit == 0 {
-				if report.Status != "passed" || report.ConfiguredBots != 2 {
+				if report.Status != "passed" || report.ConfiguredBots == nil || *report.ConfiguredBots != tc.count {
 					t.Fatal("missing bounded config result")
 				}
-			} else if report.Status != "blocked" || report.ConfiguredBots != 0 {
+			} else if report.Status != "blocked" || report.ConfiguredBots != nil {
 				t.Fatal("failed check reported configuration evidence")
 			}
 		})
