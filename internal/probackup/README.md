@@ -51,7 +51,9 @@ The role byte mapping is fixed for v1: 1 business, 2 registry, 3 replacements,
 4 config_stage, 5 lab_revisions, 6 node_history, 7 owner_report_db,
 8 owner_report_config, 9 owner_report_token, 10 owner_report_runtime,
 11 inbound_runtime, 12 runtime_config, 13 agent_tls_cert, 14 agent_tls_key,
-15 inventory. Role-to-name and required-file policy belongs to the caller's
+15 inventory, 16 telegram_bot_config, 17 telegram_bot_db. Existing role bytes
+are unchanged; older readers reject archives containing the new roles.
+Role-to-name and required-file policy belongs to the caller's
 validator; the codec does not infer service layout or enable a feature.
 
 The manifest is the exact output of Go `encoding/json.Marshal` for the exported

@@ -157,13 +157,16 @@ func TestValidateSnapshotTLSPairAndNoOriginalAssetReads(t *testing.T) {
 }
 
 func TestOptionalMissingRuntimeOrBotJournalRejectsRetainedArtifacts(t *testing.T) {
-	for _, role := range []string{"inbound_runtime", "owner_report_db"} {
+	for _, role := range []string{"inbound_runtime", "owner_report_db", "telegram_bot_db"} {
 		for _, artifact := range []string{"writer.lock", "birth-abandoned", "inbox.sqlite-wal"} {
 			t.Run(role+"/"+artifact, func(t *testing.T) {
 				dir := privateTemp(t)
 				name := "state.enc"
 				if role == "owner_report_db" {
 					name = "inbox.sqlite"
+				}
+				if role == "telegram_bot_db" {
+					name = "journal.sqlite"
 				}
 				inv := Inventory{Resources: []Resource{{Role: role, Path: filepath.Join(dir, name)}}}
 				if err := os.WriteFile(filepath.Join(dir, artifact), nil, 0600); err != nil {

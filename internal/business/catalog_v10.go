@@ -120,7 +120,7 @@ func ensureCatalog(db *sql.DB) error {
 func validateCatalogSpec(s CatalogSpec) (CatalogSpec, error) {
 	s.Name = strings.TrimSpace(s.Name)
 	if !idRE.MatchString(s.ID) || !idRE.MatchString(s.RepresentativeID) ||
-		s.RepresentativeID == "owner" || !validName(s.Name, 128) ||
+		!validName(s.Name, 128) ||
 		s.DurationDays < 1 || s.DurationDays > MaxDays ||
 		s.IPCount < 0 || s.IPCount > MaxIPLimit ||
 		s.PriceToman < 0 || s.PriceToman > MaxCatalogPriceToman ||
@@ -246,7 +246,7 @@ func (s *Store) createCatalogProduct(ctx context.Context, req CatalogCreate, sco
 	if err != nil {
 		return out, err
 	}
-	if rep.Kind != "representative" {
+	if rep.Kind != "representative" && !(scope == "" && rep.ID == "owner" && rep.Kind == "owner") {
 		return out, ErrConflict
 	}
 	if _, err = readCatalog(ctx, tx, spec.ID); err == nil {
@@ -360,7 +360,7 @@ func (s *Store) updateCatalogProduct(ctx context.Context, req CatalogUpdate, sco
 	if err != nil {
 		return out, err
 	}
-	if rep.Kind != "representative" || (req.Status == "published" && !rep.Enabled) {
+	if (rep.Kind != "representative" && !(scope == "" && rep.ID == "owner" && rep.Kind == "owner")) || (req.Status == "published" && !rep.Enabled) {
 		return out, ErrConflict
 	}
 	now := time.Now().UTC().Unix()

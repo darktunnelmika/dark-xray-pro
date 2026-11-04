@@ -325,6 +325,9 @@ func Open(path string) (*Store, error) {
 	if err = s.restoreUsageLedger(context.Background()); err != nil {
 		return fail(err)
 	}
+	if err = s.VerifyTelegramBonusV1(context.Background()); err != nil {
+		return fail(err)
+	}
 	return s, nil
 }
 func bootstrap(db *sql.DB) error {
@@ -405,6 +408,21 @@ func (s *Store) CreateRepresentative(ctx context.Context, id, name string) (Repr
 		return Representative{}, err
 	}
 	defer tx.Rollback()
+	representative, err := s.createRepresentativeTx(ctx, tx, id, name)
+	if err != nil {
+		return Representative{}, err
+	}
+	if err = tx.Commit(); err != nil {
+		return Representative{}, err
+	}
+	return representative, nil
+}
+
+// createRepresentativeTx keeps native state and audit in the caller's transaction.
+func (s *Store) createRepresentativeTx(ctx context.Context, tx *sql.Tx, id, name string) (Representative, error) {
+	if !idRE.MatchString(id) || id == "owner" || !validName(name, 128) {
+		return Representative{}, ErrInvalid
+	}
 	r, err := readRep(ctx, tx, id)
 	if err == nil {
 		if r.Kind != "representative" || r.DisplayName != name {
@@ -422,9 +440,6 @@ func (s *Store) CreateRepresentative(ctx context.Context, id, name string) (Repr
 	}
 	r, err = readRep(ctx, tx, id)
 	if err != nil {
-		return Representative{}, err
-	}
-	if err = tx.Commit(); err != nil {
 		return Representative{}, err
 	}
 	return r, nil
@@ -476,12 +491,27 @@ func (s *Store) AdjustCredits(ctx context.Context, c CreditChange) (Representati
 	if !eventRE.MatchString(c.EventID) || !idRE.MatchString(c.RepresentativeID) || c.RepresentativeID == "owner" || !validName(c.Reason, 200) || !safeDelta(c.VolumeDeltaBytes, MaxVolumeCredit) || !safeDelta(c.UnlimitedDeltaUnits, MaxUnlimitedCredit) || (c.VolumeDeltaBytes == 0 && c.UnlimitedDeltaUnits == 0) {
 		return Representative{}, ErrInvalid
 	}
-	hash := fingerprint("credit_adjustment", c)
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return Representative{}, err
 	}
 	defer tx.Rollback()
+	representative, err := s.adjustCreditsTx(ctx, tx, c)
+	if err != nil {
+		return Representative{}, err
+	}
+	if err = tx.Commit(); err != nil {
+		return Representative{}, err
+	}
+	return representative, nil
+}
+
+// adjustCreditsTx keeps native state and audit in the caller's transaction.
+func (s *Store) adjustCreditsTx(ctx context.Context, tx *sql.Tx, c CreditChange) (Representative, error) {
+	if !eventRE.MatchString(c.EventID) || !idRE.MatchString(c.RepresentativeID) || c.RepresentativeID == "owner" || !validName(c.Reason, 200) || !safeDelta(c.VolumeDeltaBytes, MaxVolumeCredit) || !safeDelta(c.UnlimitedDeltaUnits, MaxUnlimitedCredit) || (c.VolumeDeltaBytes == 0 && c.UnlimitedDeltaUnits == 0) {
+		return Representative{}, ErrInvalid
+	}
+	hash := fingerprint("credit_adjustment", c)
 	replay, err := checkEvent(ctx, tx, c.EventID, hash, "credit_adjustment")
 	if err != nil {
 		return Representative{}, err
@@ -512,9 +542,6 @@ func (s *Store) AdjustCredits(ctx context.Context, c CreditChange) (Representati
 	}
 	_, err = tx.ExecContext(ctx, "INSERT INTO events(event_id,fingerprint,kind,representative_id,object_id,reason,volume_delta_bytes,unlimited_delta_units,created_unix) VALUES(?,?,'credit_adjustment',?,'',?,?,?,?)", c.EventID, hash, c.RepresentativeID, c.Reason, c.VolumeDeltaBytes, c.UnlimitedDeltaUnits, time.Now().UTC().Unix())
 	if err != nil {
-		return Representative{}, err
-	}
-	if err = tx.Commit(); err != nil {
 		return Representative{}, err
 	}
 	r.VolumeCreditBytes = volume
@@ -589,6 +616,30 @@ func (s *Store) CreateClientScoped(ctx context.Context, n NewClient, scope strin
 	if !validClient(n) {
 		return Client{}, ErrInvalid
 	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return Client{}, err
+	}
+	defer tx.Rollback()
+	client, err := s.createClientTx(ctx, tx, n, scope)
+	if err != nil {
+		return Client{}, err
+	}
+	if err = tx.Commit(); err != nil {
+		return Client{}, err
+	}
+	return client, nil
+}
+
+// createClientTx is the shared native issuance transaction. Callers authenticate
+// their own principal before invoking it and commit their receipt in this TX.
+func (s *Store) createClientTx(ctx context.Context, tx *sql.Tx, n NewClient, scope string) (Client, error) {
+	if scope != "" && (!idRE.MatchString(scope) || n.RepresentativeID != scope) {
+		return Client{}, ErrOwnershipDenied
+	}
+	if !validClient(n) {
+		return Client{}, ErrInvalid
+	}
 	chargeVolume, chargeUnits := int64(0), int64(0)
 	plan := "volume"
 	if n.Unlimited {
@@ -601,11 +652,6 @@ func (s *Store) CreateClientScoped(ctx context.Context, n NewClient, scope strin
 		chargeVolume = n.VolumeBytes
 	}
 	hash := fingerprint("client_created", n)
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return Client{}, err
-	}
-	defer tx.Rollback()
 	replay, err := checkEvent(ctx, tx, n.EventID, hash, "client_created")
 	if err != nil {
 		return Client{}, err
@@ -666,9 +712,6 @@ func (s *Store) CreateClientScoped(ctx context.Context, n NewClient, scope strin
 		return Client{}, err
 	}
 	if err = s.seedNewUsage(ctx, tx, c); err != nil {
-		return Client{}, err
-	}
-	if err = tx.Commit(); err != nil {
 		return Client{}, err
 	}
 	return c, nil

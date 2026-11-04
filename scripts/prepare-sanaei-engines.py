@@ -3,7 +3,7 @@
 
 Usage: prepare-sanaei-engines.py PINNED_SANAEI_CHECKOUT OUTPUT_DIRECTORY
 The input stays clean. OUTPUT_DIRECTORY must not already exist. The resulting
-module is self-contained for the modified QUIC fork and remains GPL-3.0.
+module includes its modified QUIC/AWG dependencies and remains GPL-3.0.
 """
 import hashlib
 import json
@@ -18,6 +18,10 @@ import tempfile
 PIN = "608ef4e4010bf83e2e78328e08f77efc051ad4d7"
 QUIC_MODULE = "github.com/apernet/quic-go"
 QUIC_VERSION = "v0.61.1-0.20260806010916-184d081eef3e"
+AWG_MODULE = "github.com/amnezia-vpn/amneziawg-go/v3"
+AWG_VERSION = "v3.1.20260828"
+AWG_SUM = "h1:D8d8gGvwXcTxUIsE4z6F6vjy4/VZddu95vMNtOygh1c="
+AWG_TIMERS_SHA256 = "4c91e359d7851b24e5b98b2eff00e9b15d49a342aaa3a9027e906e0afc77b2ff"
 
 if len(sys.argv) != 3:
     raise SystemExit(__doc__)
@@ -33,6 +37,11 @@ go = os.environ.get("GO", "go")
 quic = json.loads(subprocess.check_output([go, "mod", "download", "-json", QUIC_MODULE + "@" + QUIC_VERSION], cwd=source, text=True))
 if "Error" in quic or not quic.get("Dir"):
     raise SystemExit("pinned QUIC source unavailable")
+awg = json.loads(subprocess.check_output([go, "mod", "download", "-json", AWG_MODULE + "@" + AWG_VERSION], cwd=source, text=True))
+if "Error" in awg or not awg.get("Dir") or awg.get("Path") != AWG_MODULE or awg.get("Version") != AWG_VERSION or awg.get("Sum") != AWG_SUM:
+    raise SystemExit("pinned AmneziaWG source/checksum unavailable")
+if hashlib.sha256((Path(awg["Dir"]) / "device/timers.go").read_bytes()).hexdigest() != AWG_TIMERS_SHA256:
+    raise SystemExit("pinned AmneziaWG timer source changed")
 output.mkdir(parents=True)
 with tempfile.TemporaryFile() as archive:
     subprocess.run(["git", "-C", str(source), "archive", PIN], stdout=archive, check=True)
@@ -41,13 +50,16 @@ with tempfile.TemporaryFile() as archive:
         tree.extractall(output, filter="data")
 quic_output = output / "_darkpro/quic-go"
 shutil.copytree(quic["Dir"], quic_output)
+awg_output = output / "_darkpro/amneziawg-go"
+shutil.copytree(awg["Dir"], awg_output)
 # Module-cache directories are read-only too. Make only this private copy
 # writable; otherwise an unprivileged CI runner cannot add the overlay files.
-for file in [quic_output, *quic_output.rglob("*")]:
-    if file.is_dir():
-        file.chmod(0o755)
-    elif file.is_file():
-        file.chmod(0o644)
+for module_output in (quic_output, awg_output):
+    for file in [module_output, *module_output.rglob("*")]:
+        if file.is_dir():
+            file.chmod(0o755)
+        elif file.is_file():
+            file.chmod(0o644)
 
 overlay = repo / "scripts/engine-overlay"
 digests = {}
@@ -64,6 +76,7 @@ install("sanaei-common", output / "internal/darkproadapter")
 install("sanaei-test", output / "internal/darkprotest")
 install("tuic", output / "cmd/darkpro-tuic", ("darkpro.go.txt", "quic_cubic.go.txt", "quic_ack_cubic.go.txt", "quic_ack_cubic_test.go.txt"))
 install("amneziawg", output / "cmd/darkpro-amneziawg", ("darkpro.go.txt", "darkpro_udp.go.txt"))
+install("amneziawg-device", awg_output / "device")
 for name, destination in {
     "tuic/darkpro.go.txt": output / "internal/tuic/darkpro.go",
     "tuic/quic_cubic.go.txt": quic_output / "darkpro_cubic.go",
@@ -92,8 +105,14 @@ replace(handler, "\t\tinitialMaxDatagramSize,\n\t\ttrue, // use Reno\n\t\th.qlog
 # Path migration otherwise races the explicit controller setter in the fork.
 replace(handler, "\th.congestion = congestion.NewCubicSender(\n", "\th.congestionMutex.Lock()\n\th.congestion = congestion.NewCubicSender(\n")
 replace(handler, "\th.setLossDetectionTimer(now)\n}\n\nfunc (h *sentPacketHandler) getCongestionControl", "\th.congestionMutex.Unlock()\n\th.setLossDetectionTimer(now)\n}\n\nfunc (h *sentPacketHandler) getCongestionControl")
+# The pinned AWG timer callback wrote duration after releasing its state lock,
+# racing Mod/Del/IsPending and Device.Close. Keep only the state transition
+# inside modifyingLock; expirationFunction must remain outside it.
+timers = awg_output / "device/timers.go"
+replace(timers, "\t\tduration := timer.duration\n\t\ttimer.modifyingLock.Unlock()\n\t\ttimer.duration = 0\n", "\t\tduration := timer.duration\n\t\ttimer.duration = 0\n\t\ttimer.modifyingLock.Unlock()\n")
 subprocess.run([go, "mod", "edit", "-replace=" + QUIC_MODULE + "=./_darkpro/quic-go"], cwd=output, check=True)
-subprocess.run([str(Path(go).parent / "gofmt") if "/" in go else "gofmt", "-w", "cmd/darkpro-tuic", "cmd/darkpro-amneziawg", "internal/darkproadapter", "internal/tuic/darkpro.go", "internal/tuic/server.go", "internal/amneziawgnet/darkpro.go", "internal/amneziawgnet/darkpro_udp.go", "_darkpro/quic-go/darkpro_cubic.go", "_darkpro/quic-go/internal/ackhandler"], cwd=output, check=True)
-provenance = {"engines": ["tuic", "amneziawg"], "upstream": "https://github.com/MHSanaei/3x-ui", "commit": PIN, "license": "GPL-3.0-or-later", "quic_module": QUIC_MODULE, "quic_version": QUIC_VERSION, "quic_sum": quic.get("Sum"), "quic_license": "MIT", "overlay_sha256": digests, "control_protocol": "dark-pro-adapter-v1", "toolchain": subprocess.check_output([go, "version"], text=True).strip()}
+subprocess.run([go, "mod", "edit", "-replace=" + AWG_MODULE + "=./_darkpro/amneziawg-go"], cwd=output, check=True)
+subprocess.run([str(Path(go).parent / "gofmt") if "/" in go else "gofmt", "-w", "cmd/darkpro-tuic", "cmd/darkpro-amneziawg", "internal/darkproadapter", "internal/tuic/darkpro.go", "internal/tuic/server.go", "internal/amneziawgnet/darkpro.go", "internal/amneziawgnet/darkpro_udp.go", "_darkpro/quic-go/darkpro_cubic.go", "_darkpro/quic-go/internal/ackhandler", "_darkpro/amneziawg-go/device/timers.go", "_darkpro/amneziawg-go/device/darkpro_timers_test.go"], cwd=output, check=True)
+provenance = {"engines": ["tuic", "amneziawg"], "upstream": "https://github.com/MHSanaei/3x-ui", "commit": PIN, "license": "GPL-3.0-or-later", "quic_module": QUIC_MODULE, "quic_version": QUIC_VERSION, "quic_sum": quic.get("Sum"), "quic_license": "MIT", "amneziawg_module": AWG_MODULE, "amneziawg_version": AWG_VERSION, "amneziawg_sum": AWG_SUM, "amneziawg_license": "MIT", "amneziawg_timers_source_sha256": AWG_TIMERS_SHA256, "amneziawg_timers_modified_sha256": hashlib.sha256(timers.read_bytes()).hexdigest(), "overlay_sha256": digests, "control_protocol": "dark-pro-adapter-v1", "toolchain": subprocess.check_output([go, "version"], text=True).strip()}
 (output / "darkpro-sanaei-provenance.json").write_text(json.dumps(provenance, indent=2) + "\n")
 print("Prepared isolated TUIC/AWG source tree: " + str(output))

@@ -50,6 +50,10 @@ type Server struct {
 	sellerQuotaV2Enabled        bool // opt-in separate authorization and private migration gate
 	clientOwnershipV1Enabled    bool // startup-only owner reassignment gate
 	sellerOrdersV1Enabled       bool // startup-only, requires seller management and refund supervision
+	telegramBotsV1Enabled       bool // startup-only, independent native commerce opt-in
+	telegramBotsStatus          telegramBotStatusSource
+	telegramBotsManager         telegramBotManager // startup-only private credential/lifecycle adapter
+	telegramConnectionGate      telegramConnectionGate
 	volumeRefunds               *volumeRefundService
 	loginGate                   *loginGate
 	inboundKey                  []byte
@@ -143,6 +147,7 @@ func (s *Server) Handler() http.Handler {
 	s.attachBrowserAuth(mux)
 	s.attachBackupControl(mux)
 	s.attachWorkspace(mux)
+	s.attachTelegramWorkspace(mux)
 	s.attachRepresentativeControls(mux)
 	s.attachSellerQuotaV2(mux)
 	s.attachSellerOrdersV1(mux)

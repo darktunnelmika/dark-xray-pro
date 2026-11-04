@@ -25,6 +25,10 @@ func (s *Server) EnableBusinessLab(store *business.Store) error {
 }
 func businessError(w http.ResponseWriter, err error) {
 	switch {
+	case errors.Is(err, business.ErrTelegramDenied):
+		respond(w, http.StatusForbidden, map[string]string{"error": "telegram_scope_denied"})
+	case errors.Is(err, business.ErrTelegramPayment):
+		respond(w, http.StatusConflict, map[string]string{"error": "telegram_payment_rejected"})
 	case errors.Is(err, business.ErrDarkRestoreCutover):
 		respond(w, http.StatusConflict, map[string]string{"error": "legacy_client_locked"})
 	case errors.Is(err, business.ErrOwnershipDenied):

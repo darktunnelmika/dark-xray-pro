@@ -11,7 +11,7 @@ const NodeManager = lazy(() => import("./NodeManager"));
 const NodeHistory = lazy(() => import("./NodeHistory"));
 import DashboardOverview from "./DashboardOverview";
 const BusinessWorkspace = lazy(() => import("./BusinessWorkspace"));
-import ModuleStatus from "./ModuleStatus";
+import TelegramWorkspace from "./TelegramWorkspace";
 const NativeBackups = lazy(() => import("./NativeBackups"));
 import { useSession } from "./session";
 import { allowed, useNavigation, type Page } from "./navigation";
@@ -37,7 +37,7 @@ const translations = {
     infrastructure: "Infrastructure", management: "Customer & sales", recovery: "Backup & recovery", workspaceGroup: "Account & settings",
     "dark-swap": "Dark Swap", telegram: "Telegram", backups: "Backups",
     "dark-swapTitle": "Dark Swap", "dark-swapLead": "Plan and review saved connection routes between Nodes.",
-    telegramTitle: "Telegram & MiniApp", telegramLead: "Current scope of bot connection, customer service and representative sales.",
+    telegramTitle: "Telegram stores", telegramLead: "Bot connections, store ownership and current delivery status.",
     backupsTitle: "Backups", backupsLead: "Availability of product backup and recovery for the owner.",
     clients: "Clients", groups: "Groups", representatives: "Representatives", marketplace: "Marketplace", finance: "Finance", account: "My account",
     clientsTitle: "Clients", clientsLead: "Create and manage customers in one place.", groupsTitle: "Groups", groupsLead: "Organize customers without changing their financial history.",
@@ -61,7 +61,7 @@ const translations = {
     plan: "Next build milestone", swap: "Dark Swap: tunnel port + node port + tunnel address",
     replacement: "Safe Node Replacement: pair, validate, choose fresh routes, activate",
     colors: "Color mode", system: "System", light: "Light", dark: "Dark",
-    language: "Language", boundary: "Lab boundary", boundaryText: "Localhost-only server. No old Hub, Node Agent, customer database or Telegram credentials are connected.",
+    language: "Language", boundary: "Lab boundary", boundaryText: "Isolated PRO environment. View current bot and Node connections in their own workspaces.",
     developing: "Isolated development build", collecting: "Collecting live samples…",
     retry: "Retry is automatic", selected: "Select an item to view more details",
     health: "Fleet health", notLive: "Live connection interrupted", statsDelayed: "Stats delayed",
@@ -77,7 +77,7 @@ const translations = {
     infrastructure: "زیرساخت", management: "مشتری و فروش", recovery: "پشتیبان و بازیابی", workspaceGroup: "حساب و تنظیمات",
     "dark-swap": "دارک سواپ", telegram: "تلگرام", backups: "پشتیبان‌ها",
     "dark-swapTitle": "دارک سواپ", "dark-swapLead": "طراحی و بررسی مسیرهای ذخیره‌شدهٔ اتصال میان نودها.",
-    telegramTitle: "تلگرام و مینی‌اپ", telegramLead: "وضعیت اتصال ربات، خدمات مشتری و فروش نمایندگان.",
+    telegramTitle: "فروشگاه‌های تلگرام", telegramLead: "اتصال ربات‌ها، مالکیت فروشگاه‌ها و وضعیت دریافت پیام‌ها.",
     backupsTitle: "پشتیبان‌ها", backupsLead: "وضعیت پشتیبان‌گیری و بازیابی محصول با دسترسی مالک.",
     clients: "کلاینت‌ها", groups: "گروه‌ها", representatives: "نمایندگان", marketplace: "فروشگاه پلن‌ها", finance: "مالی", account: "حساب من",
     clientsTitle: "مدیریت کلاینت‌ها", clientsLead: "ساخت، تمدید و مدیریت مشتری در یک بخش مشخص.", groupsTitle: "مدیریت گروه‌ها", groupsLead: "دسته‌بندی مشتری‌ها بدون تغییر سوابق مالی.",
@@ -101,7 +101,7 @@ const translations = {
     plan: "مرحله بعدی توسعه", swap: "دارک سواپ: پورت تونل + پورت نود + آدرس تونل",
     replacement: "جایگزینی ایمن نود: اتصال، بررسی، انتخاب مسیر و فعال‌سازی",
     colors: "حالت پوسته", system: "سیستم", light: "روز", dark: "شب",
-    language: "زبان", boundary: "محدوده آزمایشی", boundaryText: "فقط روی localhost. هیچ HUB یا نود قدیمی، دیتابیس مشتری یا اطلاعات ربات متصل نیست.",
+    language: "زبان", boundary: "محدوده آزمایشی", boundaryText: "محیط مستقل PRO. وضعیت اتصال ربات‌ها و نودها در بخش مربوط به هرکدام نمایش داده می‌شود.",
     developing: "نسخه آزمایشی مستقل", collecting: "در حال جمع‌آوری نمونه واقعی…",
     retry: "تلاش مجدد خودکار است", selected: "برای دیدن جزئیات یک مورد انتخاب کن",
     health: "سلامت ناوگان", notLive: "ارتباط زنده قطع شده", statsDelayed: "تأخیر در آمار",
@@ -478,7 +478,7 @@ export default function App() {
           {page === "inbounds" && <InboundPlanner nodes={fleet?.nodes ?? []} language={language} />}
           {page === "dark-swap" && <InboundPlanner nodes={fleet?.nodes ?? []} language={language} workspace="dark-swap" />}
           {page === "backups" && <NativeBackups key={auth.session.user.id} language={language}/>}
-          {page === "telegram" && <ModuleStatus page={page} language={language} onNavigate={setPage}/>}
+          {page === "telegram" && <TelegramWorkspace language={language} onNavigate={setPage}/>}
           {(["clients", "groups", "representatives", "marketplace", "finance", "account"] as Page[]).includes(page) && <BusinessWorkspace key={auth.session.user.id + ":" + page} language={language} section={page as "clients" | "groups" | "representatives" | "marketplace" | "finance" | "account"} />}
 
           {page === "settings" && (

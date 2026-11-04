@@ -23,6 +23,7 @@ import (
 	"github.com/darktunnelmika/dark-xray-pro/internal/noderegistry"
 	"github.com/darktunnelmika/dark-xray-pro/internal/replacement"
 	"github.com/darktunnelmika/dark-xray-pro/internal/retiredfeatures"
+	"github.com/darktunnelmika/dark-xray-pro/internal/telegrambot"
 	"github.com/darktunnelmika/dark-xray-pro/internal/telegramhub"
 	"github.com/darktunnelmika/dark-xray-pro/internal/telemetry"
 	"github.com/darktunnelmika/dark-xray-pro/internal/webui"
@@ -73,6 +74,11 @@ func privateTLSKey(path string) error {
 	return nil
 }
 func main() {
+	// This command must return before normal HUB flag parsing, feature gates,
+	// state locks, stores, listeners or workers are initialized.
+	if len(os.Args) > 1 && os.Args[1] == "check-telegram-config" {
+		os.Exit(runTelegramConfigCheck(os.Args[2:], os.Stdout, telegramConfigCheckRuntime()))
+	}
 	address := flag.String("listen", "127.0.0.1:2087", "loopback-only LAB owner UI listener")
 	static := flag.String("static", "", "optional development UI override; release uses its embedded UI")
 	registryPath := flag.String("registry", "./lab-state/registry.json", "private durable LAB node enrollment")
@@ -80,12 +86,16 @@ func main() {
 	stagingPath := flag.String("staging", "./lab-state/private-staging/configs.json", "optional encrypted Reality candidate journal")
 	businessPath := flag.String("business-db", "", "optional private PRO-only business SQLite path (explicit opt-in)")
 	ownerReportConfig := flag.String("owner-report-bot-config", "", "private independent PRO LAB owner report bot config (explicit opt-in)")
+	telegramBotsConfig := flag.String("telegram-bots-config", "", "private independent PRO LAB store bot config (explicit opt-in)")
 	labRevisionsPath := flag.String("lab-revisions", "./lab-state/private-staging/lab-revisions.json", "optional LAB-only encrypted revision selection and rollback journal")
 	nodeHistoryPath := flag.String("node-history-db", "", "optional NEW PRO-only bounded monitoring SQLite path (requires explicit opt-in)")
 	agentListen := flag.String("agent-tls-listen", "", "optional dedicated HTTPS LAB Node listener (disabled by default)")
 	agentCert := flag.String("agent-tls-cert", "", "certificate with valid IP/DNS SAN for new LAB Node listener")
 	agentKey := flag.String("agent-tls-key", "", "private key for dedicated LAB Node listener")
 	flag.Parse()
+	if flag.NArg() != 0 {
+		log.Fatal("unexpected positional arguments; no HUB startup performed")
+	}
 	if err := retiredfeatures.Check(os.Getenv); err != nil {
 		log.Fatal(err)
 	}
@@ -129,7 +139,13 @@ func main() {
 	if ownerReportFlag == "1" && os.Getenv("DARK_PRO_ENABLE_BUSINESS_CORE") != "1" {
 		log.Fatal("owner report bot requires the private PRO business store")
 	}
-	stateLock, backupInventory, stateErr := prepareOfflineState(offlineOptions(*registryPath, *replacementsPath, *stagingPath, *businessPath, *labRevisionsPath, *nodeHistoryPath, *agentCert, *agentKey, *ownerReportConfig, *address, *agentListen, *static))
+	telegramEnabled, telegramFlagErr := telegramBotsEnabled(os.Getenv, *telegramBotsConfig)
+	if telegramFlagErr != nil {
+		log.Fatal(telegramFlagErr)
+	}
+	offlineStateOptions := offlineOptions(*registryPath, *replacementsPath, *stagingPath, *businessPath, *labRevisionsPath, *nodeHistoryPath, *agentCert, *agentKey, *ownerReportConfig, *address, *agentListen, *static)
+	offlineStateOptions.TelegramBotsConfig = *telegramBotsConfig
+	stateLock, backupInventory, stateErr := prepareOfflineState(offlineStateOptions)
 	if stateErr != nil {
 		log.Fatal("offline HUB state fence refused: ", stateErr)
 	}
@@ -217,6 +233,7 @@ func main() {
 	}
 	// Only explicit NEW PRO business storage may be opened; never legacy paths.
 	var ownerReportReporter telegramhub.RepresentativeReporter
+	var telegramBusiness *business.Store
 	if os.Getenv("DARK_PRO_ENABLE_BUSINESS_CORE") == "1" {
 		clean := filepath.Clean(*businessPath)
 		relative, pathErr := filepath.Rel("/var/lib/dark-xray-pro-lab", clean)
@@ -229,6 +246,7 @@ func main() {
 		}
 		defer biz.Close()
 		ownerReportReporter = biz
+		telegramBusiness = biz
 		if os.Getenv("DARK_PRO_ENABLE_USAGE_LEDGER") == "1" {
 			if err := biz.EnableUsageLedger(context.Background()); err != nil {
 				log.Fatal("private usage ledger unavailable: ", err)
@@ -430,6 +448,37 @@ func main() {
 			}
 		}
 	}
+	var commerceBackend *telegrambot.BusinessBackend
+	if telegramEnabled {
+		if err := service.EnableTelegramBotsV1(context.Background()); err != nil {
+			log.Fatal("private Telegram store initialization failed")
+		}
+		commerceBackend = telegrambot.NewBusinessBackend(telegramBusiness)
+		commerceBackend.SupportEnabled = true
+		commerceBackend.CampaignsEnabled = true
+		commerceBackend.RewardsEnabled = true
+		commerceBackend.BonusEnabled = true
+		if os.Getenv("DARK_PRO_ENABLE_INBOUND_EXECUTION") == "1" {
+			key, keyErr := hex.DecodeString(os.Getenv("DARK_PRO_NATIVE_INBOUND_KEY_HEX"))
+			if keyErr != nil || len(key) != 32 {
+				log.Fatal("native Telegram delivery key unavailable")
+			}
+			commerceBackend.Delivery = func(ctx context.Context, actor business.TelegramActor, clientID string) (business.TelegramDelivery, error) {
+				return telegramBusiness.TelegramServiceDelivery(ctx, key, actor, clientID, "uri")
+			}
+			commerceBackend.DeliveryAck = func(ctx context.Context, actor business.TelegramActor, proof telegrambot.DeliveryProof, messageID int64) error {
+				return telegramBusiness.TelegramConfirmServiceDelivery(ctx, key, actor, proof.ClientID, proof.SHA256, proof.TermsSHA256, proof.ExpiresUnixNano, messageID)
+			}
+		}
+	}
+	commerceBot, commerceErr := telegrambot.OpenManager(telegrambot.Options{EnableFlag: os.Getenv(telegrambot.EnableEnv), LABMode: os.Getenv("DARK_PRO_LAB_MODE") == "1", ConfigPath: *telegramBotsConfig}, commerceBackend)
+	if commerceErr != nil {
+		log.Fatal("private Telegram bot initialization failed: ", commerceErr)
+	}
+	if commerceBot != nil {
+		defer commerceBot.Close()
+		service.SetTelegramBotManager(commerceBot)
+	}
 	ownerReportBot, botErr := telegramhub.OpenLABOwnerReportBot(telegramhub.LABOwnerReportBotOptions{
 		EnableFlag: ownerReportFlag, LABMode: os.Getenv("DARK_PRO_LAB_MODE") == "1",
 		BusinessEnabled: os.Getenv("DARK_PRO_ENABLE_BUSINESS_CORE") == "1", ConfigPath: *ownerReportConfig,
@@ -470,6 +519,18 @@ func main() {
 	go service.RunInboundExecution(ctx)
 	go service.RunVolumeRefunds(ctx)
 	errs := make(chan error, 2)
+	if commerceBot != nil {
+		go func() {
+			err := commerceBot.Run(ctx)
+			if ctx.Err() != nil {
+				return
+			}
+			if err == nil {
+				err = errors.New("Telegram store worker stopped unexpectedly")
+			}
+			log.Print("Telegram store worker stopped: ", err)
+		}()
+	}
 	if ownerReportBot != nil {
 		go func() {
 			err := ownerReportBot.Run(ctx)
@@ -512,6 +573,11 @@ func main() {
 	}
 	service.WaitInboundExecution(graceful)
 	service.WaitVolumeRefunds(graceful)
+	if commerceBot != nil {
+		if err := commerceBot.Wait(graceful); errors.Is(err, context.DeadlineExceeded) {
+			log.Print("Telegram store worker shutdown did not complete within the grace period")
+		}
+	}
 	if ownerReportBot != nil {
 		if err := ownerReportBot.Wait(graceful); errors.Is(err, context.DeadlineExceeded) {
 			log.Print("owner report bot shutdown did not complete within the grace period")

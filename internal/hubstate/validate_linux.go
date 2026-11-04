@@ -19,6 +19,7 @@ import (
 	"github.com/darktunnelmika/dark-xray-pro/internal/nodehistory"
 	"github.com/darktunnelmika/dark-xray-pro/internal/noderegistry"
 	"github.com/darktunnelmika/dark-xray-pro/internal/replacement"
+	"github.com/darktunnelmika/dark-xray-pro/internal/telegrambot"
 	"github.com/darktunnelmika/dark-xray-pro/internal/telegramhub"
 )
 
@@ -38,8 +39,10 @@ func maxRoleSize(role string) int64 {
 		return nodehistory.MaxHistoryDBSize
 	case "inbound_runtime":
 		return 64 << 20
-	case "owner_report_db":
+	case "owner_report_db", "telegram_bot_db":
 		return maxSnapshotPayload
+	case "telegram_bot_config":
+		return 64 << 10
 	case "owner_report_config":
 		return 4096
 	case "owner_report_token":
@@ -163,6 +166,12 @@ func ValidateSnapshot(ctx context.Context, stage string, inv Inventory) error {
 			return ErrUnsafe
 		}
 		if telegramhub.ValidateOfflineBackup(ctx, paths["owner_report_db"], config, token) != nil {
+			return ErrUnsafe
+		}
+	}
+	if paths["telegram_bot_config"] != "" || paths["telegram_bot_db"] != "" {
+		config, e := read("telegram_bot_config")
+		if e != nil || telegrambot.ValidateOfflineBackup(ctx, paths["telegram_bot_db"], config) != nil {
 			return ErrUnsafe
 		}
 	}

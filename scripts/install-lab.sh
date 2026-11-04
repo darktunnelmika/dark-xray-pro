@@ -33,7 +33,8 @@ command -v find >/dev/null || abort "find is required"
 [[ -f "$BUNDLE/SHA256SUMS" && -s "$BUNDLE/bin/dark-pro-hub" &&
    -s "$BUNDLE/bin/dark-pro-agent" &&
    -s "$BUNDLE/bin/dark-pro-owner-setup" &&
-   -s "$BUNDLE/bin/dark-pro-backup" ]] ||
+   -s "$BUNDLE/bin/dark-pro-backup" &&
+   -s "$BUNDLE/ops/licenses/go-qrcode-LICENSE" ]] ||
   abort "expected checked LAB release bundle is incomplete"
 (cd "$BUNDLE" && sha256sum -c --status SHA256SUMS) ||
   abort "bundle checksum verification failed — no installation performed"
@@ -86,7 +87,7 @@ if ! id darkprolab >/dev/null 2>&1; then
   useradd --system --user-group --no-create-home \
     --home-dir "$STATE" --shell /usr/sbin/nologin darkprolab
 fi
-install -d -o root -g root -m 0755 "$APP" "$APP/bin"
+install -d -o root -g root -m 0755 "$APP" "$APP/bin" "$APP/licenses"
 install -d -o darkprolab -g darkprolab -m 0700 "$STATE"
 install -d -o root -g root -m 0700 "$ENV_DIR"
 
@@ -94,6 +95,7 @@ install -o root -g root -m 0755 "$BUNDLE/bin/dark-pro-hub" "$APP/bin/dark-pro-hu
 install -o root -g root -m 0755 "$BUNDLE/bin/dark-pro-agent" "$APP/bin/dark-pro-agent"
 install -o root -g root -m 0755 "$BUNDLE/bin/dark-pro-owner-setup" "$APP/bin/dark-pro-owner-setup"
 install -o root -g root -m 0755 "$BUNDLE/bin/dark-pro-backup" "$APP/bin/dark-pro-backup"
+install -o root -g root -m 0644 "$BUNDLE/ops/licenses/go-qrcode-LICENSE" "$APP/licenses/go-qrcode-LICENSE"
 chmod -R go-w "$APP"
 chown -R root:root "$APP"
 

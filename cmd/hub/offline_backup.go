@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/darktunnelmika/dark-xray-pro/internal/hubstate"
+	"github.com/darktunnelmika/dark-xray-pro/internal/telegrambot"
 	"github.com/darktunnelmika/dark-xray-pro/internal/telegramhub"
 )
 
@@ -46,9 +47,12 @@ func prepareOfflineState(o hubstate.Options) (*hubstate.Lock, *hubstate.Inventor
 	if flag != "" && flag != "0" && flag != "1" {
 		return nil, nil, hubstate.ErrUnsafe
 	}
-	paths := []string{o.Root, o.Registry, o.Replacements, o.Staging, o.BusinessDB, o.LabRevisions, o.NodeHistoryDB, env["DARK_PRO_INBOUND_RUNTIME_DIR"], o.AgentTLSCert, o.AgentTLSKey, o.OwnerReportConfig}
+	paths := []string{o.Root, o.Registry, o.Replacements, o.Staging, o.BusinessDB, o.LabRevisions, o.NodeHistoryDB, env["DARK_PRO_INBOUND_RUNTIME_DIR"], o.AgentTLSCert, o.AgentTLSKey, o.OwnerReportConfig, o.TelegramBotsConfig}
 	if env[telegramhub.OwnerReportLABEnableEnv] == "1" || o.OwnerReportConfig != "" {
 		paths = append(paths, filepath.Join(o.Root, "owner-report-bot/inbox.sqlite"), telegramhub.OwnerReportLABTokenPath)
+	}
+	if env[telegrambot.EnableEnv] == "1" || o.TelegramBotsConfig != "" {
+		paths = append(paths, filepath.Join(o.Root, "telegram-bots/journal.sqlite"))
 	}
 	if e := hubstate.CheckQuarantine(paths...); e != nil {
 		return nil, nil, e

@@ -1,0 +1,108 @@
+package device
+
+import (
+	"runtime"
+	"sync"
+	"sync/atomic"
+	"testing"
+	"time"
+)
+
+// Exercise expiration against the same cancellation/reset operations used by
+// peer traffic and shutdown. The pinned upstream implementation races on the
+// duration field; this test runs against the real Timer implementation.
+func TestDarkProTimerConcurrentExpirationAndCancellation(t *testing.T) {
+	var peer Peer
+	var expired atomic.Uint64
+	first := make(chan struct{})
+	timer := peer.NewTimer(func(_ *Peer, _ time.Duration) {
+		if expired.Add(1) == 1 {
+			close(first)
+		}
+	})
+	t.Cleanup(timer.DelSync)
+	timer.Mod(time.Nanosecond)
+	select {
+	case <-first:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timer did not expire")
+	}
+
+	var workers sync.WaitGroup
+	start := make(chan struct{})
+	workers.Add(2)
+	go func() {
+		defer workers.Done()
+		<-start
+		for range 4096 {
+			timer.Mod(time.Nanosecond)
+			runtime.Gosched()
+		}
+	}()
+	go func() {
+		defer workers.Done()
+		<-start
+		for range 4096 {
+			timer.IsPending()
+			timer.Del()
+			runtime.Gosched()
+		}
+	}()
+	close(start)
+	workers.Wait()
+	timer.DelSync()
+	if timer.IsPending() {
+		t.Fatal("joined timer retained pending work")
+	}
+	if expired.Load() < 2 {
+		t.Fatal("concurrent timer exercise did not expire")
+	}
+}
+
+func TestDarkProTimerDelSyncJoinsCallbackAndCancelsRearm(t *testing.T) {
+	var peer Peer
+	entered, release := make(chan struct{}), make(chan struct{})
+	var releaseOnce sync.Once
+	timer := peer.NewTimer(func(_ *Peer, _ time.Duration) {
+		close(entered)
+		<-release
+	})
+	defer func() {
+		releaseOnce.Do(func() { close(release) })
+		timer.DelSync()
+	}()
+	timer.Mod(time.Nanosecond)
+	select {
+	case <-entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timer callback did not start")
+	}
+	// A callback is still running while another operation rearms the timer.
+	timer.Mod(time.Hour)
+	joined := make(chan struct{})
+	go func() {
+		timer.DelSync()
+		close(joined)
+	}()
+	deadline := time.Now().Add(5 * time.Second)
+	for timer.IsPending() {
+		if time.Now().After(deadline) {
+			t.Fatal("DelSync did not cancel pending timer")
+		}
+		runtime.Gosched()
+	}
+	select {
+	case <-joined:
+		t.Fatal("DelSync returned while callback was running")
+	default:
+	}
+	releaseOnce.Do(func() { close(release) })
+	select {
+	case <-joined:
+	case <-time.After(5 * time.Second):
+		t.Fatal("DelSync did not join completed callback")
+	}
+	if timer.IsPending() {
+		t.Fatal("joined timer retained its rearm")
+	}
+}

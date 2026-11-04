@@ -1,0 +1,115 @@
+{
+  "repository": "https://github.com/skip2/go-qrcode",
+  "commit": "da1b6568686e89143e94f980a98bc2dbd5537f13",
+  "tree": "5b0da0e9c5674ed08b36574f1a2c74abfd577632",
+  "license": "MIT",
+  "modifications": "none",
+  "omitted": "CLI, executable examples, and external zbar-dependent decoder test",
+  "files": [
+    {
+      "path": "LICENSE",
+      "git_blob_sha1": "342c5e5ab6bb2c780c7fa96a0d0f092b92374252",
+      "bytes": 1055
+    },
+    {
+      "path": "README.md",
+      "git_blob_sha1": "0a800b727b20f4e9acbc9fe6467e822cfad67a5e",
+      "bytes": 3292
+    },
+    {
+      "path": "bitset/bitset.go",
+      "git_blob_sha1": "fba3bf4d18239bdb245fe3f6f0cb0a0363b698d6",
+      "bytes": 6062
+    },
+    {
+      "path": "bitset/bitset_test.go",
+      "git_blob_sha1": "e755a15daea0a064ea8cb2a578bde14bf2d720de",
+      "bytes": 5537
+    },
+    {
+      "path": "encoder.go",
+      "git_blob_sha1": "6a809cfeb202ee54ad04d0bc61f1822d17fbba88",
+      "bytes": 12249
+    },
+    {
+      "path": "encoder_test.go",
+      "git_blob_sha1": "3ae48c99ee8f3c878c5bd0e170ff0490700e4824",
+      "bytes": 8702
+    },
+    {
+      "path": "go.mod",
+      "git_blob_sha1": "a915813d2d2a6b6a967d30d1bf771248498fe645",
+      "bytes": 43
+    },
+    {
+      "path": "qrcode.go",
+      "git_blob_sha1": "d0541bcb9709ac3005438383d5c5189e5b2e1a2b",
+      "bytes": 15680
+    },
+    {
+      "path": "qrcode_test.go",
+      "git_blob_sha1": "dc4887dac333abbab608b63fb554cca306a86e9d",
+      "bytes": 2973
+    },
+    {
+      "path": "reedsolomon/gf2_8.go",
+      "git_blob_sha1": "6a7003f7d96ef7ab3f3b64ff1365491d611d0ed7",
+      "bytes": 23782
+    },
+    {
+      "path": "reedsolomon/gf2_8_test.go",
+      "git_blob_sha1": "ab53d8a0dfa1b3e86ed05e6ce2c596b170f611ec",
+      "bytes": 1624
+    },
+    {
+      "path": "reedsolomon/gf_poly.go",
+      "git_blob_sha1": "962f545468a2b8ae1304c3fffee756a03b2be914",
+      "bytes": 4361
+    },
+    {
+      "path": "reedsolomon/gf_poly_test.go",
+      "git_blob_sha1": "bcf2aab45e73cf5114fc03ae6b0ff23fec8126df",
+      "bytes": 3988
+    },
+    {
+      "path": "reedsolomon/reed_solomon.go",
+      "git_blob_sha1": "561697b4b4755e3cd99da3da0e3406843d17c169",
+      "bytes": 2331
+    },
+    {
+      "path": "reedsolomon/reed_solomon_test.go",
+      "git_blob_sha1": "88948a27839e590f42aded8881c99be5369f0b74",
+      "bytes": 2839
+    },
+    {
+      "path": "regular_symbol.go",
+      "git_blob_sha1": "51eb148d2d5857d738569466ed9222577567166d",
+      "bytes": 6323
+    },
+    {
+      "path": "regular_symbol_test.go",
+      "git_blob_sha1": "936fdc00fd5b150eb3a818c0d8338c57b26998a9",
+      "bytes": 482
+    },
+    {
+      "path": "symbol.go",
+      "git_blob_sha1": "0cb1327c8ac0a9a0dd3c1f4aae4e66d687b0dfb9",
+      "bytes": 6974
+    },
+    {
+      "path": "symbol_test.go",
+      "git_blob_sha1": "59b2b6bbe32afc1ec7a8f9d842261f965e62c903",
+      "bytes": 8916
+    },
+    {
+      "path": "version.go",
+      "git_blob_sha1": "738cf3d36e544834d4001f4bf88fb51fbad03988",
+      "bytes": 30968
+    },
+    {
+      "path": "version_test.go",
+      "git_blob_sha1": "56402269efe297f8d7dbb53ea515dd93b411db46",
+      "bytes": 2118
+    }
+  ]
+}

@@ -41,6 +41,16 @@ type backupSchemaObject [4]string
 
 func backupSchemaGroup(name string) string {
 	switch {
+	case strings.HasPrefix(name, "telegram_bonus_"):
+		return "telegram_bonus"
+	case strings.HasPrefix(name, "telegram_commerce_"):
+		return "telegram_commerce"
+	case strings.HasPrefix(name, "telegram_support_"):
+		return "telegram_support"
+	case strings.HasPrefix(name, "telegram_campaign_"):
+		return "telegram_campaign"
+	case strings.HasPrefix(name, "telegram_rewards_"):
+		return "telegram_rewards"
 	case name == "native_inbound_plan_promotion_times_v1" || strings.HasPrefix(name, "native_promotion_time_"):
 		return "promotion_time"
 	case strings.HasPrefix(name, "darkrestore_"):
@@ -198,6 +208,32 @@ func validateOfflineBackupDB(ctx context.Context, db *sql.DB) (BackupValidation,
 		if backupSchemaDigest(groups["sellers"]) != backupSellerSchemaFingerprint || sellerManagementConfiguredV2(ctx, db) != nil {
 			return result, ErrOfflineBackupInvalid
 		}
+	}
+	if len(groups["telegram_commerce"]) > 0 {
+		present, err := telegramCommerceSchemaState(ctx, db)
+		if err != nil || !present || len(groups["usage"]) == 0 || validateTelegramCommerceData(ctx, db) != nil {
+			return result, ErrOfflineBackupInvalid
+		}
+	}
+	for _, extension := range []struct {
+		group, prefix string
+		ddl           []string
+	}{
+		{"telegram_support", "telegram_support_", telegramSupportSchemaV1},
+		{"telegram_campaign", "telegram_campaign_", telegramCampaignSchemaV1},
+		{"telegram_rewards", "telegram_rewards_", telegramRewardsSchemaV1},
+		{"telegram_bonus", "telegram_bonus_", telegramBonusSchemaV1},
+	} {
+		if len(groups[extension.group]) == 0 {
+			continue
+		}
+		present, err := telegramExtensionState(ctx, db, extension.prefix, extension.ddl)
+		if err != nil || !present || len(groups["telegram_commerce"]) == 0 {
+			return result, ErrOfflineBackupInvalid
+		}
+	}
+	if len(groups["telegram_support"])+len(groups["telegram_campaign"])+len(groups["telegram_rewards"]) > 0 && validateTelegramEngagementData(ctx, db) != nil {
+		return result, ErrOfflineBackupInvalid
 	}
 	if len(groups["darkrestore"]) > 0 {
 		present, err := darkRestoreSchemaState(ctx, db)
