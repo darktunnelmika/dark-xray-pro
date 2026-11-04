@@ -545,6 +545,17 @@ inventory. Two valid signatures identify two claimants; they do not prove the
 truth of an operational fence or the absence of undeclared installations. The
 result always returns `authorizes_activation=false`.
 
+The source-host `dark-pro-darkrestore-local-settlement` command can emit the
+source half of this pair only after it re-verifies the current closed settlement
+and the exact existing signed handoff. It derives the terminal receipt,
+authority, journal, handoff and source-key bindings rather than accepting them
+as free-form retirement input, and hashes an owner-private opaque fence file
+against an explicit pin. Output is immutable and byte-identical retries replay;
+stale settlement, a foreign handoff/key, unsafe fence file, pin drift and an
+existing different output fail closed. The command does not emit the independent
+witness or trusted pins, interpret the fence, discover inventory, or authorize
+mutation. Positive fixtures remain synthetic claims, not real retirement.
+
 The Store cutover boundary now requires this bundle in addition to the signed
 coverage approval. It persists the exact canonical source/witness documents,
 their public keys and independent pins, re-verifies them on every read/restart

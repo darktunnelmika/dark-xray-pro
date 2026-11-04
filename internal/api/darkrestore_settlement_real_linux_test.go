@@ -248,6 +248,45 @@ func (f *localSettlementFixture) check(t *testing.T, ctx context.Context, server
 		if err != nil || json.Unmarshal(raw, &viaSigned) != nil || viaSigned != signed {
 			t.Fatal("CLI signed handoff replay failed", err)
 		}
+		fencePath := filepath.Join(f.dir, "synthetic-active-fence.json")
+		if err = os.WriteFile(fencePath, []byte("{\"synthetic\":true,\"authorizes_activation\":false}\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		retirementPath := filepath.Join(f.dir, "source-retirement.json")
+		retirementArgs := append(append([]string(nil), args...),
+			"-source-retirement-output", retirementPath,
+			"-signed-handoff-input", handoffPath,
+			"-signed-handoff-sha256", signed.SHA,
+			"-handoff-signing-key-file", privatePath,
+			"-inventory-sha256", strings.Repeat("1", 64),
+			"-destination-sha256", strings.Repeat("2", 64),
+			"-active-fence-document", fencePath,
+			"-active-fence-document-sha256", settlementHash(t, fencePath),
+			"-retired-unix-nano", "10000",
+			"-active-fence-observed-unix-nano", "11000")
+		raw, err = exec.CommandContext(ctx, cli, retirementArgs...).Output()
+		var retirement darkrestore.SourceRetirementFileV1
+		if err != nil || json.Unmarshal(raw, &retirement) != nil || retirement.AuthorizesActivation ||
+			retirement.Statement.HandoffSHA != signed.SHA || retirement.Statement.TerminalReceiptSHA != result.Terminal.SHA ||
+			retirement.Statement.InventorySHA != strings.Repeat("1", 64) || retirement.Statement.DestinationSHA != strings.Repeat("2", 64) {
+			t.Fatal("CLI source retirement mismatch", err)
+		}
+		raw, err = exec.CommandContext(ctx, cli, retirementArgs...).Output()
+		var retirementReplay darkrestore.SourceRetirementFileV1
+		if err != nil || json.Unmarshal(raw, &retirementReplay) != nil || retirementReplay != retirement {
+			t.Fatal("CLI source retirement replay changed bytes", err)
+		}
+		badRetirementArgs := append([]string(nil), retirementArgs...)
+		for i, flag := range badRetirementArgs {
+			if flag == "-active-fence-document-sha256" {
+				badRetirementArgs[i+1] = strings.Repeat("3", 64)
+				break
+			}
+		}
+		if raw, err = exec.CommandContext(ctx, cli, badRetirementArgs...).Output(); err == nil || len(raw) != 0 {
+			t.Fatal("incorrect active-fence pin produced a retirement")
+		}
+		t.Log("DARKRESTORE_SOURCE_RETIREMENT_PASS source handoff, final settlement and opaque fence bound; activation false")
 		badKey := filepath.Join(f.dir, "wrong.key")
 		if err = os.WriteFile(badKey, make([]byte, 32), 0600); err != nil {
 			t.Fatal(err)
