@@ -5,6 +5,7 @@ package inboundruntime
 import (
 	"context"
 	"errors"
+	ix "github.com/darktunnelmika/dark-xray-pro/internal/inboundexec"
 	"testing"
 	"time"
 )
@@ -108,5 +109,61 @@ func TestBlockedNodeDoesNotBlockHealthyNodeAndCancelInterruptsRetry(t *testing.T
 		case <-time.After(2 * time.Second):
 			t.Fatal("cancellation blocked by retry wait")
 		}
+	}
+}
+
+// Lose acknowledgements after the receiver committed the report. Exercise Run,
+// not just Step, so retry scheduling and graceful final settlement participate.
+type retryUsageExchange struct {
+	*fixtureExchange
+	reports []ix.UsageReport
+	cancel  context.CancelFunc
+}
+
+func (x *retryUsageExchange) Usage(ctx context.Context, in ix.UsageReport) (ix.UsageReceipt, error) {
+	receipt, err := x.fixtureExchange.Usage(ctx, in)
+	if err != nil {
+		return receipt, err
+	}
+	if !in.Final && in.Sequence == 2 {
+		x.reports = append(x.reports, in)
+		if len(x.reports) < 3 {
+			return ix.UsageReceipt{}, errLostReceipt
+		}
+		x.cancel()
+	}
+	return receipt, nil
+}
+func TestWorkerRunLostUsageACKPreservesReportAndDoesNotReactivate(t *testing.T) {
+	w, p, base := fixtureWorker(t, "active")
+	p.values[0].Upload = 123
+	p.values[0].Download = 456
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	x := &retryUsageExchange{fixtureExchange: base, cancel: cancel}
+	w.Run(ctx, x)
+	if len(x.reports) != 3 {
+		t.Fatalf("expected exact receipt retries, got %d", len(x.reports))
+	}
+	sha := ReportSHA(x.reports[0])
+	for _, report := range x.reports {
+		if ReportSHA(report) != sha || report.Counters[0].Upload != 123 || report.Counters[0].Download != 456 {
+			t.Fatal("retry changed durable usage")
+		}
+	}
+	if p.activations != 0 || x.registerCalls != 0 {
+		t.Fatal("lost usage reply reactivated an existing process")
+	}
+	foundFinal := false
+	for _, report := range x.receipts {
+		if report.Final {
+			foundFinal = true
+			if report.Counters[0].Upload != 123 || report.Counters[0].Download != 456 {
+				t.Fatal("shutdown changed cumulative usage")
+			}
+		}
+	}
+	if !foundFinal {
+		t.Fatal("shutdown did not settle final usage")
 	}
 }
