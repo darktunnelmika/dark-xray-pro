@@ -89,7 +89,8 @@ func testRealPinnedPretrafficUsageAdmission(t *testing.T, modes []string) {
 		t.Run(mode, func(t *testing.T) {
 			transactionMode := strings.HasPrefix(mode, "transaction-")
 			activeMode := strings.HasPrefix(mode, "active-") || transactionMode
-			ctx, cancel := context.WithTimeout(context.Background(), 35*time.Second)
+			deadline := 35 * time.Second
+			ctx, cancel := context.WithTimeout(context.Background(), deadline)
 			defer cancel()
 			// Record only timing/status, never credentials or private payloads.
 			// An unexpected recovery transport failure must be diagnosable without
@@ -124,12 +125,13 @@ func testRealPinnedPretrafficUsageAdmission(t *testing.T, modes []string) {
 			if err := s.EnableNativeInbounds(key); err != nil {
 				t.Fatal(err)
 			}
-			customers := make([]business.Client, 2)
+			ids := []string{"admission-a", "admission-b"}
+			customers := make([]business.Client, len(ids))
 			volume := int64(1 << 20)
 			if activeMode {
 				volume = 128 << 20
 			}
-			for i, id := range []string{"admission-a", "admission-b"} {
+			for i, id := range ids {
 				c, err := s.business.CreateClient(ctx, business.NewClient{EventID: "new-pretraffic-client-" + id, ClientID: id, RepresentativeID: "owner", Name: id, DurationDays: 30, VolumeBytes: volume})
 				if err != nil {
 					t.Fatal(err)
@@ -273,7 +275,7 @@ func testRealPinnedPretrafficUsageAdmission(t *testing.T, modes []string) {
 			if _, err = s.business.CreateInbound(ctx, key, business.InboundInput{ID: 889, Name: "Pretraffic", Transport: "tcp", RealityTarget: "one.example.org:443", ServerNames: []string{"one.example.org"}, ShortIDs: []string{"aa11"}}); err != nil {
 				t.Fatal(err)
 			}
-			if err = s.business.BindInboundClients(ctx, 889, []string{customers[0].ID, customers[1].ID}, true); err != nil {
+			if err = s.business.BindInboundClients(ctx, 889, ids, true); err != nil {
 				t.Fatal(err)
 			}
 			if err = s.business.PutInboundTarget(ctx, business.InboundTarget{InboundID: 889, NodeID: "admission-node", InstallationID: installID, ListenIP: "127.0.0.1", DirectPort: port}); err != nil {

@@ -31,17 +31,20 @@ type Seed struct {
 	Reason   string `json:"reason"`
 }
 type Account struct {
-	ClientID         string `json:"client_id"`
-	RepresentativeID string `json:"representative_id"`
-	Uplink           int64  `json:"uplink_bytes,string"`
-	Downlink         int64  `json:"downlink_bytes,string"`
-	Total            int64  `json:"total_bytes,string"`
-	Limit            int64  `json:"limit_bytes,string"`
-	Plan             string `json:"plan_kind"`
-	Known            bool   `json:"known"`
-	Holds            int64  `json:"reconciliation_holds"`
-	Exhausted        bool   `json:"exhausted"`
-	Eligible         bool   `json:"eligible"`
+	ReservedHistoricalBytes    int64  `json:"reserved_historical_bytes,string"`
+	RemainingNativeBudgetBytes int64  `json:"-"`
+	RemainingNativeBudgetKnown bool   `json:"-"`
+	ClientID                   string `json:"client_id"`
+	RepresentativeID           string `json:"representative_id"`
+	Uplink                     int64  `json:"uplink_bytes,string"`
+	Downlink                   int64  `json:"downlink_bytes,string"`
+	Total                      int64  `json:"total_bytes,string"`
+	Limit                      int64  `json:"limit_bytes,string"`
+	Plan                       string `json:"plan_kind"`
+	Known                      bool   `json:"known"`
+	Holds                      int64  `json:"reconciliation_holds"`
+	Exhausted                  bool   `json:"exhausted"`
+	Eligible                   bool   `json:"eligible"`
 }
 
 func validReason(reason string) bool {
@@ -78,42 +81,67 @@ func (l *Ledger) InitializeAccountTx(ctx context.Context, tx *sql.Tx, s Seed) er
 	}
 	return initializeAccount(ctx, tx, s)
 }
-func initializeAccount(ctx context.Context, c sqlWriter, s Seed) error {
-	if !idRE.MatchString(s.ClientID) || !eventRE.MatchString(s.EventID) || !validReason(s.Reason) {
+
+// A new disabled identity with an incomplete, zero post-migration seed cannot
+// become eligible. Preserve existing route generations and subscription proofs.
+func (l *Ledger) InitializeQuarantinedAccountTx(ctx context.Context, tx *sql.Tx, s Seed) error {
+	if tx == nil || s.Complete || s.Uplink != 0 || s.Downlink != 0 {
 		return uc.ErrInvalid
 	}
+	var state string
+	if err := tx.QueryRowContext(ctx, "SELECT deployment_state FROM clients WHERE id=?", s.ClientID).Scan(&state); err != nil {
+		return err
+	}
+	if state != "disabled" {
+		return ErrConflict
+	}
+	_, err := insertSeed(ctx, tx, s)
+	return err
+}
+func initializeAccount(ctx context.Context, c sqlWriter, s Seed) error {
+	inserted, err := insertSeed(ctx, c, s)
+	if err != nil || !inserted {
+		return err
+	}
+	return invalidate(ctx, c)
+}
+
+func insertSeed(ctx context.Context, c sqlWriter, s Seed) (bool, error) {
+	if !idRE.MatchString(s.ClientID) || !eventRE.MatchString(s.EventID) || !validReason(s.Reason) {
+		return false, uc.ErrInvalid
+	}
 	if _, e := checkedAdd(s.Uplink, s.Downlink); e != nil {
-		return e
+		return false, e
 	}
 	body, err := json.Marshal(s)
 	if err != nil {
-		return err
+		return false, err
 	}
 	var existing []byte
 	e := c.QueryRowContext(ctx, "SELECT body_json FROM pro_usage_seeds WHERE client_id=? OR event_id=?", s.ClientID, s.EventID).Scan(&existing)
 	if e == nil {
 		if bytes.Equal(body, existing) {
-			return nil
+			return false, nil
 		}
-		return ErrConflict
+		return false, ErrConflict
 	}
 	if !errors.Is(e, sql.ErrNoRows) {
-		return e
+		return false, e
 	}
 	var n int
 	if e = c.QueryRowContext(ctx, "SELECT COUNT(*) FROM clients WHERE id=?", s.ClientID).Scan(&n); e != nil {
-		return e
+		return false, e
 	}
 	if n != 1 {
-		return ErrMissing
+		return false, ErrMissing
 	}
 	if _, e = c.ExecContext(ctx, "INSERT INTO pro_usage_accounts(client_id,uplink,downlink,baseline_complete) VALUES(?,?,?,?)", s.ClientID, s.Uplink, s.Downlink, s.Complete); e != nil {
-		return e
+		return false, e
 	}
 	if _, e = c.ExecContext(ctx, "INSERT INTO pro_usage_seeds(client_id,event_id,body_json,created_unix) VALUES(?,?,?,?)", s.ClientID, s.EventID, body, time.Now().Unix()); e != nil {
-		return e
+		return false, e
 	}
-	return invalidate(ctx, c)
+	return true, nil
 }
 
 // Epoch registration is INTERNAL, before admitting traffic, with server-derived
@@ -202,9 +230,24 @@ func registerEpoch(ctx context.Context, c sqlWriter, authority uc.Epoch) error {
 	_, err = c.ExecContext(ctx, `INSERT INTO pro_usage_epochs(epoch_id,node_id,installation_id,kernel_boot_id,pid,start_ticks,config_sha,binding_sha,epoch_json,cursor_json,state,created_unix) VALUES(?,?,?,?,?,?,?,?,?,?,'open',?)`, e.ID, e.NodeID, e.InstallationID, e.KernelBootID, e.PID, strconv.FormatUint(e.ProcessStartTicks, 10), e.ConfigSHA, sha, raw, []byte(`{}`), time.Now().Unix())
 	return err
 }
+
+type AdmissionQuery interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+}
+type AdmissionGate func(context.Context, AdmissionQuery, Principal, uc.Report) error
+
 func (l *Ledger) Accept(ctx context.Context, principal Principal, r uc.Report) (uc.Receipt, error) {
+	return l.AcceptChecked(ctx, principal, r, nil)
+}
+func (l *Ledger) AcceptChecked(ctx context.Context, principal Principal, r uc.Report, gate AdmissionGate) (uc.Receipt, error) {
 	var receipt uc.Receipt
 	err := l.write(ctx, func(c *ledgerConn) error {
+		if gate != nil {
+			if err := gate(ctx, c, principal, r); err != nil {
+				return err
+			}
+		}
 		var epochJSON, cursorJSON []byte
 		var node, installation, binding, state string
 		e := c.QueryRowContext(ctx, "SELECT node_id,installation_id,binding_sha,epoch_json,cursor_json,state FROM pro_usage_epochs WHERE epoch_id=?", r.EpochID).Scan(&node, &installation, &binding, &epochJSON, &cursorJSON, &state)
@@ -389,8 +432,24 @@ func (l *Ledger) MarkEpochUncertain(ctx context.Context, principal Principal, ep
 func (l *Ledger) Account(ctx context.Context, clientID string) (Account, error) {
 	var a Account
 	var complete, allowed int
-	err := l.read(ctx, func(c *ledgerConn) error {
-		return c.QueryRowContext(ctx, `SELECT a.client_id,c.representative_id,a.uplink,a.downlink,a.baseline_complete,a.holds,c.plan_kind,c.volume_bytes,v.eligible FROM pro_usage_accounts a JOIN clients c ON c.id=a.client_id JOIN pro_usage_eligibility v ON v.client_id=a.client_id WHERE a.client_id=?`, clientID).Scan(&a.ClientID, &a.RepresentativeID, &a.Uplink, &a.Downlink, &complete, &a.Holds, &a.Plan, &a.Limit, &allowed)
+	err := l.readSnapshot(ctx, func(c *ledgerConn) error {
+		if err := c.QueryRowContext(ctx, `SELECT a.client_id,c.representative_id,a.uplink,a.downlink,a.baseline_complete,a.holds,c.plan_kind,c.volume_bytes,v.eligible FROM pro_usage_accounts a JOIN clients c ON c.id=a.client_id JOIN pro_usage_eligibility v ON v.client_id=a.client_id WHERE a.client_id=?`, clientID).Scan(&a.ClientID, &a.RepresentativeID, &a.Uplink, &a.Downlink, &complete, &a.Holds, &a.Plan, &a.Limit, &allowed); err != nil {
+			return err
+		}
+		present, err := historicalBudgetsPresent(ctx, c)
+		if err != nil {
+			return err
+		}
+		if present {
+			b, err := ReadHistoricalBudget(ctx, c, clientID)
+			if err != nil && !errors.Is(err, sql.ErrNoRows) {
+				return err
+			}
+			if err == nil {
+				a.ReservedHistoricalBytes = b.HistoricalBytes
+			}
+		}
+		return nil
 	})
 	if errors.Is(err, sql.ErrNoRows) {
 		return a, ErrMissing
@@ -404,6 +463,15 @@ func (l *Ledger) Account(ctx context.Context, clientID string) (Account, error) 
 	}
 	a.Known = complete == 1 && a.Holds == 0
 	a.Eligible = allowed == 1
-	a.Exhausted = a.Plan == "volume" && a.Total >= a.Limit
+	available := a.Limit - a.ReservedHistoricalBytes
+	a.Exhausted = a.Plan == "volume" && a.Total >= available
+	if a.Known && a.Plan == "volume" {
+		remaining := int64(0)
+		if available > 0 && a.Total < available {
+			remaining = available - a.Total
+		}
+		a.RemainingNativeBudgetBytes = remaining
+		a.RemainingNativeBudgetKnown = true
+	}
 	return a, nil
 }

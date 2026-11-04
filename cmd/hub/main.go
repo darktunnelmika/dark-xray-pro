@@ -22,6 +22,7 @@ import (
 	"github.com/darktunnelmika/dark-xray-pro/internal/nodehistory"
 	"github.com/darktunnelmika/dark-xray-pro/internal/noderegistry"
 	"github.com/darktunnelmika/dark-xray-pro/internal/replacement"
+	"github.com/darktunnelmika/dark-xray-pro/internal/retiredfeatures"
 	"github.com/darktunnelmika/dark-xray-pro/internal/telegramhub"
 	"github.com/darktunnelmika/dark-xray-pro/internal/telemetry"
 	"github.com/darktunnelmika/dark-xray-pro/internal/webui"
@@ -85,6 +86,9 @@ func main() {
 	agentCert := flag.String("agent-tls-cert", "", "certificate with valid IP/DNS SAN for new LAB Node listener")
 	agentKey := flag.String("agent-tls-key", "", "private key for dedicated LAB Node listener")
 	flag.Parse()
+	if err := retiredfeatures.Check(os.Getenv); err != nil {
+		log.Fatal(err)
+	}
 	if os.Getenv("DARK_PRO_LAB_MODE") != "1" {
 		log.Fatal("DARK XRAY PRO is not production-ready; set DARK_PRO_LAB_MODE=1 for isolated testing only")
 	}

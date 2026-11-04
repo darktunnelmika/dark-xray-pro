@@ -25,6 +25,7 @@ func ensureNativeInboundPromotions(db *sql.DB) error {
  direct_port INTEGER NOT NULL CHECK(direct_port>=1024 AND direct_port<=65535 AND direct_port NOT IN(2087,8443,24443)),
  draft_event_id TEXT NOT NULL UNIQUE,created_unix INTEGER NOT NULL,input_enc BLOB NOT NULL,receipt_enc BLOB NOT NULL)`,
 		`CREATE TABLE IF NOT EXISTS native_inbound_plan_promotion_clients(inbound_id INTEGER NOT NULL REFERENCES native_inbound_plan_promotions(inbound_id),client_id TEXT NOT NULL REFERENCES clients(id),PRIMARY KEY(inbound_id,client_id))`,
+		`CREATE TABLE IF NOT EXISTS native_inbound_plan_promotion_times_v1(inbound_id INTEGER PRIMARY KEY REFERENCES native_inbound_plan_promotions(inbound_id),event_id TEXT NOT NULL UNIQUE,created_unix_nano INTEGER NOT NULL CHECK(created_unix_nano>0))`,
 		`CREATE TRIGGER IF NOT EXISTS native_promotion_reservation_no_update BEFORE UPDATE ON native_inbound_plan_promotion_nodes BEGIN SELECT RAISE(ABORT,'promotion reservation immutable'); END`,
 		`CREATE TRIGGER IF NOT EXISTS native_promotion_reservation_no_delete BEFORE DELETE ON native_inbound_plan_promotion_nodes BEGIN SELECT RAISE(ABORT,'promotion reservation immutable'); END`,
 		`CREATE TRIGGER IF NOT EXISTS native_promotion_no_update BEFORE UPDATE ON native_inbound_plan_promotions BEGIN SELECT RAISE(ABORT,'promotion receipt immutable'); END`,
@@ -34,6 +35,8 @@ func ensureNativeInboundPromotions(db *sql.DB) error {
 		`CREATE TRIGGER IF NOT EXISTS native_promotion_clients_once BEFORE INSERT ON native_inbound_plan_promotion_clients
  WHEN EXISTS(SELECT 1 FROM native_inbounds WHERE id=NEW.inbound_id AND enabled<>0)
  BEGIN SELECT RAISE(ABORT,'promoted binding intent closed'); END`,
+		`CREATE TRIGGER IF NOT EXISTS native_promotion_time_no_update BEFORE UPDATE ON native_inbound_plan_promotion_times_v1 BEGIN SELECT RAISE(ABORT,'promotion time immutable'); END`,
+		`CREATE TRIGGER IF NOT EXISTS native_promotion_time_no_delete BEFORE DELETE ON native_inbound_plan_promotion_times_v1 BEGIN SELECT RAISE(ABORT,'promotion time immutable'); END`,
 		`CREATE TRIGGER IF NOT EXISTS native_promotion_plan_no_update BEFORE UPDATE ON native_inbound_plans
  WHEN EXISTS(SELECT 1 FROM native_inbound_plan_promotions WHERE inbound_id=OLD.inbound_id OR inbound_id=NEW.inbound_id)
  BEGIN SELECT RAISE(ABORT,'promoted authoring history immutable'); END`,

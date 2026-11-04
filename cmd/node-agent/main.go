@@ -14,6 +14,7 @@ import (
 	"github.com/darktunnelmika/dark-xray-pro/internal/hostmetrics"
 	"github.com/darktunnelmika/dark-xray-pro/internal/inboundruntime"
 	"github.com/darktunnelmika/dark-xray-pro/internal/managedxray"
+	"github.com/darktunnelmika/dark-xray-pro/internal/retiredfeatures"
 	"github.com/darktunnelmika/dark-xray-pro/internal/telemetry"
 	uc "github.com/darktunnelmika/dark-xray-pro/internal/usagecheckpoint"
 	"io"
@@ -153,6 +154,9 @@ func main() {
 	runtimeDir := flag.String("managed-runtime-dir", "", "NEW private PRO-owned runtime directory; never an old Xray directory")
 	runtimeIP := flag.String("managed-listen-ip", "", "explicit assigned local IP for NEW native Xray listeners")
 	flag.Parse()
+	if err := retiredfeatures.Check(os.Getenv); err != nil {
+		log.Fatal(err)
+	}
 	if os.Getenv("DARK_PRO_LAB_MODE") != "1" {
 		log.Fatal("node agent is lab-only; set DARK_PRO_LAB_MODE=1")
 	}

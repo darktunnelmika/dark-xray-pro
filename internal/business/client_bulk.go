@@ -96,6 +96,9 @@ func (s *Store) BulkSetClientState(ctx context.Context, input BulkClientState, s
 				}
 				newState = "disabled"
 			case "enable":
+				if e = requireDarkRestoreCutover(ctx, tx, c.ID); e != nil {
+					return BulkClientResult{}, e
+				}
 				if c.DeploymentState != "disabled" {
 					return BulkClientResult{}, ErrConflict
 				}

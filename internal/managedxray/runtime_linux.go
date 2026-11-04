@@ -158,3 +158,6 @@ func(r *Runtime)watch(){
  }}
 }
 func(r *Runtime)Close(){r.mu.Lock();if r.closed{r.mu.Unlock();return};r.closed=true;close(r.stop);if r.observer!=nil{r.observer.cancel()};r.process.stop();r.process=nil;r.active=nil;r.state.Phase="closed";r.disk.close();r.mu.Unlock();<-r.done;if r.observer!=nil{select{case <-r.observer.done:case <-time.After(3*time.Second):}}}
+
+// BinarySHA256 is the immutable independently pinned executable identity.
+func(r *Runtime)BinarySHA256()string{return r.options.BinarySHA}

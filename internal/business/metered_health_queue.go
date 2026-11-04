@@ -59,8 +59,8 @@ func (s *Store) QueueMeteredHealth(ctx context.Context, key []byte, id, op strin
 	if err = healthIDNotInitial(ctx, tx, id); err != nil {
 		return empty, err
 	}
-	var version int
-	if err = tx.QueryRowContext(ctx, `PRAGMA user_version`).Scan(&version); err != nil {
+	version, err := usageFeatureSchemaVersion(ctx, tx)
+	if err != nil {
 		return empty, err
 	}
 	if !usageledger.HasHealthQueueSchema(version) {
@@ -118,8 +118,8 @@ func (s *Store) PollMeteredHealth(ctx context.Context, key, token []byte, node, 
 	}
 	defer tx.Rollback()
 	var id string
-	var version int
-	if err = tx.QueryRowContext(ctx, `PRAGMA user_version`).Scan(&version); err != nil {
+	version, err := usageFeatureSchemaVersion(ctx, tx)
+	if err != nil {
 		return empty, false, err
 	}
 	if !usageledger.HasHealthQueueSchema(version) {

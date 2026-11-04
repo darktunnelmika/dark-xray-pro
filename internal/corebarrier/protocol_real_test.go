@@ -128,16 +128,40 @@ func TestRealPinnedCoreFinalTCPProtocol(t *testing.T) {
 	if _, err = io.ReadFull(c, response); err != nil || !bytes.Equal(response, []byte{0, 0, 0, 1, 42}) {
 		t.Fatal("TCP echo", response, err)
 	}
-	payload := bytes.Repeat([]byte{9}, 65536)
-	write := make(chan error, 1)
-	go func() { _, e := c.Write(payload); write <- e }()
-	got := make([]byte, len(payload))
-	if _, err = io.ReadFull(c, got); err != nil || !bytes.Equal(payload, got) {
-		t.Fatal("active TCP payload", err)
+	// The legacy ordering sampled here and then let the second exchange through.
+	// Require an exact 32 KiB delta in each direction at the terminal barrier.
+	payload := bytes.Repeat([]byte{9}, 32768)
+	exchange := func() {
+		t.Helper()
+		write := make(chan error, 1)
+		go func() { _, e := c.Write(payload); write <- e }()
+		got := make([]byte, len(payload))
+		if _, e := io.ReadFull(c, got); e != nil || !bytes.Equal(payload, got) {
+			t.Fatal("active TCP payload", e)
+		}
+		if e := <-write; e != nil {
+			t.Fatal(e)
+		}
 	}
-	if err = <-write; err != nil {
-		t.Fatal(err)
+	exchange()
+	sampled, err := query("user>>>", false)
+	var sample struct {
+		Stat []struct {
+			Name  string
+			Value json.RawMessage
+		}
 	}
+	if err != nil || json.Unmarshal(sampled, &sample) != nil || len(sample.Stat) != 2 {
+		t.Fatal("missing intermediate sample", err)
+	}
+	expected := map[string]bool{"user>>>one@pro.invalid>>>traffic>>>uplink": true, "user>>>one@pro.invalid>>>traffic>>>downlink": true}
+	for _, v := range sample.Stat {
+		if !expected[v.Name] || strings.Trim(string(v.Value), `"`) != "32771" {
+			t.Fatal("invalid intermediate counters")
+		}
+		delete(expected, v.Name)
+	}
+	exchange()
 	if _, err = query("user>>>", true); err == nil {
 		t.Fatal("counter reset accepted")
 	}

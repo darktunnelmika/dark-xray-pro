@@ -282,6 +282,12 @@ func Open(path string) (*Store, error) {
 			return fail(err)
 		}
 	}
+	if err = validateDarkRestoreImportData(context.Background(), db); err != nil {
+		return fail(err)
+	}
+	if err = validateDarkRestoreRuntimeBudgets(context.Background(), db); err != nil {
+		return fail(err)
+	}
 	if err = validateOwnershipData(context.Background(), db); err != nil {
 		return fail(err)
 	}

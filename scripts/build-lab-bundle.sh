@@ -54,6 +54,7 @@ CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -mod=readonly -buildvcs=true -tri
 install -m 0755 scripts/install-lab.sh release/scripts/install-lab.sh
 install -m 0755 internal/nodebootstrap/install-new-pro-node.sh release/scripts/install-new-pro-node.sh
 install -m 0644 ops/systemd/dark-xray-pro-backup-worker.service release/ops/systemd/dark-xray-pro-backup-worker.service
+install -m 0644 ops/nginx/business-management.conf release/ops/nginx/business-management.conf
 install -m 0644 ops/nginx/native-backups.conf release/ops/nginx/native-backups.conf
 
 # Generated UI and the fixed release directory are explicitly ignored. Any

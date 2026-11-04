@@ -17,7 +17,7 @@ func clientSearchParams(r *http.Request) (business.ClientSearch, error) {
 			return opt, business.ErrInvalid
 		}
 		switch key {
-		case "limit", "offset", "representative_id", "q", "state", "plan", "sort":
+		case "limit", "offset", "representative_id", "q", "state", "plan", "sort", "group_id", "origin":
 		default:
 			return opt, business.ErrInvalid
 		}
@@ -37,6 +37,20 @@ func clientSearchParams(r *http.Request) (business.ClientSearch, error) {
 		opt.Offset = n
 	}
 	opt.RepresentativeID = q.Get("representative_id")
+	opt.GroupID = q.Get("group_id")
+	// The public product surface uses a neutral compatibility label. The
+	// historical database classification remains private so existing records
+	// are neither renamed nor silently reclassified.
+	switch q.Get("origin") {
+	case "", "all":
+		opt.Origin = "all"
+	case "native":
+		opt.Origin = "native"
+	case "legacy":
+		opt.Origin = "dark_restore"
+	default:
+		return opt, business.ErrInvalid
+	}
 	opt.Query = q.Get("q")
 	opt.State = q.Get("state")
 	opt.Plan = q.Get("plan")

@@ -13,6 +13,8 @@ import (
 // an owner-authorized wider scope. It is never a public user enumeration API.
 type ClientSearch struct {
 	RepresentativeID string
+	GroupID          string
+	Origin           string
 	Query            string
 	State            string
 	Plan             string
@@ -30,6 +32,14 @@ type ClientSearchPage struct {
 
 func validClientSearch(q ClientSearch) bool {
 	if q.RepresentativeID != "" && !idRE.MatchString(q.RepresentativeID) {
+		return false
+	}
+	if q.GroupID != "" && !idRE.MatchString(q.GroupID) {
+		return false
+	}
+	switch q.Origin {
+	case "", "all", "native", "dark_restore":
+	default:
 		return false
 	}
 	if q.Limit < 1 || q.Limit > 200 || q.Offset < 0 || q.Offset > 1_000_000 {
@@ -80,6 +90,25 @@ func (s *Store) SearchClients(ctx context.Context, q ClientSearch) (ClientSearch
 	if q.RepresentativeID != "" {
 		clauses = append(clauses, "representative_id=?")
 		args = append(args, q.RepresentativeID)
+	}
+	if q.GroupID != "" {
+		clauses = append(clauses, "EXISTS (SELECT 1 FROM client_group_members gm WHERE gm.client_id=clients.id AND gm.group_id=?)")
+		args = append(args, q.GroupID)
+	}
+	if q.Origin == "native" || q.Origin == "dark_restore" {
+		present, e := darkRestoreSchemaState(ctx, tx)
+		if e != nil {
+			return ClientSearchPage{}, e
+		}
+		if present {
+			clause := "EXISTS (SELECT 1 FROM darkrestore_import_entries_v1 di WHERE di.client_id=clients.id)"
+			if q.Origin == "native" {
+				clause = "NOT " + clause
+			}
+			clauses = append(clauses, clause)
+		} else if q.Origin == "dark_restore" {
+			clauses = append(clauses, "0=1")
+		}
 	}
 	if q.Query != "" {
 		clauses = append(clauses, "(instr(lower(id),lower(?))>0 OR instr(lower(display_name),lower(?))>0)")

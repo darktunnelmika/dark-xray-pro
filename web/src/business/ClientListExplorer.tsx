@@ -6,7 +6,7 @@ import { dateTime, gb, uid, type Client } from "./shared";
 import "./ClientSales.css";
 import ClientBulkExtend from "./ClientBulkExtend";
 import { businessGranted } from "./permissionsV9";
-import ClientOwnershipTransfer from "./ClientOwnershipTransfer";
+import ClientOwnershipTransfer, { GroupPicker } from "./ClientOwnershipTransfer";
 import { loadOwnershipPending } from "./clientOwnership";
 
 type Filter = "all" | "pending" | "disabled" | "expired" | "archived" | "other";
@@ -25,6 +25,9 @@ const words = {
     byName:"Name", expirySoon:"Expiry first", expiryLate:"Expiry last",
     pageSize:"Per page", repFilter:"Representative ID (owner, optional)",
     matches:"Matches", loadingFilter:"Checking server filters…",
+    moreFilters:"Group and origin",groupFilter:"Client group",allGroups:"All groups",
+    origin:"Client origin",allOrigins:"All origins",nativeOrigin:"Created in this panel",legacyOrigin:"Historical import",
+    previousGroups:"Previous groups",nextGroups:"Next groups",
     bulkTitle:"Bulk client action",selectClient:"Select client",selectVisible:"Select up to 50 visible",clear:"Clear",
     selectedCount:"selected",action:"Action",disableAction:"Disable",enableAction:"Enable",
     archiveAction:"Archive (keep history)",extendAction:"Renew / top up",transferAction:"Assign to representative",transferNote:"Assignment changes current management, not the original payer. Select up to 50 here, or a complete group of up to 500 in the assignment form.",
@@ -49,6 +52,9 @@ const words = {
     byName:"نام",expirySoon:"نزدیک‌ترین انقضا",expiryLate:"دورترین انقضا",
     pageSize:"در هر صفحه",repFilter:"شناسه نماینده (فقط مالک، اختیاری)",
     matches:"تعداد کل",loadingFilter:"در حال دریافت فیلترهای سرور…",
+    moreFilters:"گروه و منبع",groupFilter:"گروه کلاینت",allGroups:"تمام گروه‌ها",
+    origin:"منبع کلاینت",allOrigins:"تمام منابع",nativeOrigin:"ساخته‌شده در این پنل",legacyOrigin:"واردشدهٔ قدیمی",
+    previousGroups:"گروه‌های قبلی",nextGroups:"گروه‌های بعدی",
     bulkTitle:"مدیریت گروهی کلاینت‌ها",selectClient:"انتخاب کلاینت",selectVisible:"انتخاب حداکثر ۵۰ مورد نمایان",clear:"پاک‌کردن انتخاب",
     selectedCount:"انتخاب‌شده",action:"عملیات",disableAction:"غیرفعال",enableAction:"فعال‌سازی منطقی",
     archiveAction:"آرشیو (با حفظ سوابق)",extendAction:"تمدید / افزایش حجم",transferAction:"واگذاری به نماینده",transferNote:"واگذاری، مدیر فعلی را تغییر می‌دهد نه پرداخت‌کنندهٔ قبلی را. اینجا تا ۵۰ کاربر انتخاب کن یا از فرم واگذاری، یک گروه کامل تا ۵۰۰ عضو را انتخاب کن.",
@@ -72,20 +78,21 @@ function clientState(client:Client,now:number): Filter {
 export default function ClientListExplorer({model}: {model:BusinessModel}) {
   const { clients, clientOffset, setClientOffset, lifeClientID, setLifeClientID, language, t, session,
     clientLimit, changeClientLimit, clientTotal, clientHasMore, clientSearchDraft,setClientSearchDraft,
-    clientSearch,clientStateFilter,clientPlanFilter,clientSort,clientRepFilter,changeClientFilters,actionBusy,
+    clientSearch,clientStateFilter,clientPlanFilter,clientSort,clientRepFilter,clientGroupFilter,clientOriginFilter,changeClientFilters,actionBusy,
     runAction,setNotice }=model;
   const copy=words[language];
   const canManageBulk=businessGranted(session.user,"manage_clients");
   const canRenewBulk=businessGranted(session.user,"renew_clients");
   const canTransfer=session.user.role==="owner" && model.me?.capabilities?.client_ownership_v1===true;
   const [selected,setSelected]=useState<string[]>([]);
+  const [extraFiltersOpen,setExtraFiltersOpen]=useState(false);
   const [bulkAction,setBulkAction]=useState<"disable"|"enable"|"archive"|"extend"|"transfer">(
     session.user.role==="owner"&&loadOwnershipPending(session.user.id)?"transfer":canManageBulk?"disable":"extend");
   const [bulkReason,setBulkReason]=useState("");
   const pendingBulk=useRef<{key:string;id:string}|null>(null);
   useEffect(()=>{
     setSelected([]); pendingBulk.current=null;
-  },[session.user.id,clientOffset,clientLimit,clientSearch,clientStateFilter,clientPlanFilter,clientSort,clientRepFilter]);
+  },[session.user.id,clientOffset,clientLimit,clientSearch,clientStateFilter,clientPlanFilter,clientSort,clientRepFilter,clientGroupFilter,clientOriginFilter]);
   const now=Date.now()/1000;
   // The server owns the filtered result set; no client-side partial-page
   // pretending to offer a global search. Debounce hides old matches.
@@ -164,6 +171,21 @@ export default function ClientListExplorer({model}: {model:BusinessModel}) {
           onChange={e=>changeClientFilters("rep",e.target.value.trim())}
           placeholder={copy.repFilter} disabled={actionBusy}/></label>}
     </div>
+    <details className="clients-explorer-extra-filters" onToggle={e=>setExtraFiltersOpen(e.currentTarget.open)}>
+      <summary>{copy.moreFilters}{clientGroupFilter||clientOriginFilter!=="all"?" •":""}</summary>
+      {extraFiltersOpen && <div className="clients-explorer-filters">
+        <label>{copy.origin}<select aria-label={copy.origin} value={clientOriginFilter}
+          disabled={actionBusy} onChange={e=>changeClientFilters("origin",e.target.value)}>
+          <option value="all">{copy.allOrigins}</option><option value="native">{copy.nativeOrigin}</option>
+          <option value="legacy">{copy.legacyOrigin}</option>
+        </select></label>
+        <GroupPicker key={session.user.role==="owner"?clientRepFilter:session.user.representative_id}
+          language={language} representative={session.user.role==="owner"?clientRepFilter||undefined:session.user.representative_id}
+          label={copy.groupFilter} value={clientGroupFilter} disabled={actionBusy} optional
+          emptyLabel={copy.allGroups} previousLabel={copy.previousGroups} nextLabel={copy.nextGroups}
+          onChange={id=>changeClientFilters("group",id)} />
+      </div>}
+    </details>
     {(canManageBulk||canRenewBulk) && <div className="clients-bulk" aria-label="Bulk client actions">
       <div className="clients-bulk-header">
         <strong><CheckSquare size={16}/>{copy.bulkTitle}</strong>

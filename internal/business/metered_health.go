@@ -48,9 +48,9 @@ func (s *Store) healthTx(ctx context.Context) (*sql.Tx, error) {
 	// Acquire the SQLite writer lock BEFORE reading, across independent Store
 	// handles as well as goroutines. This does not change config generation.
 	_, err = tx.ExecContext(ctx, `UPDATE pro_health_meta SET version=version WHERE id=1 AND version=1`)
-	var version int
 	if err == nil {
-		err = tx.QueryRowContext(ctx, `PRAGMA user_version`).Scan(&version)
+		var version int
+		version, err = usageFeatureSchemaVersion(ctx, tx)
 		if err == nil && !usageledger.HasHealthSchema(version) {
 			err = ErrUnavailable
 		}
@@ -265,8 +265,8 @@ func (s *Store) issueMeteredHealthChallenge(ctx context.Context, key, token []by
 	if err != nil {
 		return mx.ProtocolHealthRequest{}, err
 	}
-	var version int
-	if err = tx.QueryRowContext(ctx, `PRAGMA user_version`).Scan(&version); err != nil {
+	version, err := usageFeatureSchemaVersion(ctx, tx)
+	if err != nil {
 		return mx.ProtocolHealthRequest{}, err
 	}
 	if usageledger.HasHealthQueueSchema(version) {

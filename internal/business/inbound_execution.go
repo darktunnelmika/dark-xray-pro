@@ -10,7 +10,6 @@ import (
 
 	ix "github.com/darktunnelmika/dark-xray-pro/internal/inboundexec"
 	"github.com/darktunnelmika/dark-xray-pro/internal/inboundspec"
-	uc "github.com/darktunnelmika/dark-xray-pro/internal/usagecheckpoint"
 	"github.com/darktunnelmika/dark-xray-pro/internal/xrayconfig"
 )
 
@@ -224,8 +223,7 @@ func populateExecutionUsers(ctx context.Context, tx *sql.Tx, s executionSnapshot
 			blockers = append(blockers, ix.Blocker{Code: "client_ineligible", ClientID: id, Field: "client_ids"})
 			continue
 		}
-		bindingID := "exec-" + ix.BytesSHA([]byte(fmt.Sprintf("%d\x00%s", s.Ref.InboundID, id)))[:32]
-		email, e := uc.CounterEmail(bindingID)
+		bindingID, email, e := executionClientBinding(s.Ref.InboundID, id)
 		if e != nil {
 			return s, nil, e
 		}

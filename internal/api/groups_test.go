@@ -51,6 +51,11 @@ func TestGroupBrowserScopeAndDeletionNeverDestroysClientsOrCredits(t *testing.T)
  if w:=req("POST","/api/v1/workspace/groups",business.NewGroup{
   ID:"cross-group",RepresentativeID:"rep-beta",Name:"Unauthorized",
  },repCookie,repCSRF);w.Code!=403{t.Fatalf("rep created another tenant's group: %+v",w)}
+ for _,cookie:=range []*http.Cookie{repCookie,ownerCookie}{
+  if w:=req("GET","/api/v1/workspace/groups/alpha-private/history",nil,cookie,"");w.Code!=404{
+   t.Fatalf("removed legacy-history route remains reachable: %+v",w)
+  }
+ }
  if w:=req("GET","/api/v1/workspace/groups?representative_id=rep-beta",nil,repCookie,"");w.Code!=403{
   t.Fatalf("rep saw other tenant's groups: %+v",w)
  }

@@ -134,11 +134,16 @@ func (s *Server) attachWorkspace(mux *http.ServeMux) {
 			businessError(w, err)
 			return
 		}
+		publicOrigin := options.Origin
+		if publicOrigin == "dark_restore" {
+			publicOrigin = "legacy"
+		}
 		respond(w, http.StatusOK, map[string]any{
 			"clients": page.Clients, "limit": page.Limit, "offset": page.Offset,
 			"total": page.Total, "has_more": page.HasMore,
 			"q": options.Query, "state": options.State, "plan": options.Plan,
 			"sort": options.Sort, "representative_id": options.RepresentativeID,
+			"group_id": options.GroupID, "origin": publicOrigin,
 			"activation": "pending_real_node_and_inbound_apply",
 		})
 	})

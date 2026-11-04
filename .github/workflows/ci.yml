@@ -16,8 +16,9 @@ permissions:
 jobs:
   final-tcp-core:
     name: Experimental pinned core final TCP counters
+    needs: isolated-lab-bundle
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 26  # Includes source lease expirations and isolated imported admission.
     steps:
       - uses: actions/checkout@v4
       - uses: actions/checkout@v4
@@ -177,6 +178,22 @@ jobs:
           DARK_PRO_TEST_FINAL_TCP: '1'
         run: go test -race ./internal/api -run '^TestRealPinnedActiveTCPSettlement/active-interrupted$' -count=20 -timeout=240s -v
 
+  business-race:
+    name: Business SQLite and accounting race suite
+    runs-on: ubuntu-24.04
+    timeout-minutes: 24
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Run the entire business package on its own runner
+        # The production-scale import/reopen fixture intentionally runs last.
+        # Race instrumentation and the complete M5 evidence suite can cross
+        # fifteen minutes on a hosted runner; retain one bounded invocation.
+        run: go test -race ./internal/business -count=1 -timeout=19m
+
   go:
     name: Go unit, race and vet
     runs-on: ubuntu-24.04
@@ -200,8 +217,17 @@ jobs:
             test -s "$path" || { echo "MISSING expected Go module: $path"; exit 1; }
           done
           test ! -e backend/dark_policy.py || { echo "Legacy HUB files must not be imported into PRO"; exit 1; }
-      - name: Go unit/race tests
-        run: go test -race ./...
+      - name: Go unit/race tests for all remaining packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          go list ./... > "$RUNNER_TEMP/all-packages.txt"
+          business=$(go list ./internal/business)
+          test "$(grep -Fxc -- "$business" "$RUNNER_TEMP/all-packages.txt")" -eq 1
+          grep -Fxv -- "$business" "$RUNNER_TEMP/all-packages.txt" > "$RUNNER_TEMP/remaining-packages.txt"
+          mapfile -t packages < "$RUNNER_TEMP/remaining-packages.txt"
+          test "${#packages[@]}" -gt 0
+          go test -race -timeout=10m "${packages[@]}"
       - name: Prove backup credential failure is detected before stopping HUB
         shell: bash
         run: |
@@ -285,8 +311,6 @@ jobs:
           test "$(id -u)" -ne 0
           go test -race ./internal/usagecheckpoint ./internal/usageledger ./internal/managedxray ./internal/api ./cmd/node-agent \
             -run '^Test(UsageSettlement|AgentReplayGate)' -count=3 -timeout=120s -v
-      - name: Offline Dark Restore private-review refuses imports and protects original data
-        run: python3 scripts/test-darkrestore-review.py
       - name: Go vet
         run: go vet ./...
       - name: Compile HUB and Node Agent
@@ -567,8 +591,10 @@ jobs:
           test -s release/bin/dark-pro-agent
           test -s release/bin/dark-pro-owner-setup
           test -s release/bin/dark-pro-backup
+          test -z "$(find release/bin -name '*darkrestore*' -print -quit)"
           test -s release/bin/dark-pro-backup-worker
           test -s release/ops/systemd/dark-xray-pro-backup-worker.service
+          test -s release/ops/nginx/business-management.conf
           test -s release/ops/nginx/native-backups.conf
       - name: Real owner HTTPS and systemd restore on disposable runner
         shell: bash

@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"math"
 	"time"
 
 	ix "github.com/darktunnelmika/dark-xray-pro/internal/inboundexec"
@@ -195,7 +196,7 @@ func volumeRefundNeverIssued(ctx context.Context, tx *sql.Tx, key []byte, c Clie
 		return none, "", err
 	}
 	var seed usageledger.Seed
-	if json.Unmarshal(raw, &seed) != nil || seed != expected || created < c.CreatedUnix {
+	if json.Unmarshal(raw, &seed) != nil || seed != expected || c.CreatedUnix <= 0 || c.CreatedUnix > math.MaxInt64/int64(time.Second) || created < c.CreatedUnix {
 		return none, "fresh_identity_proof_missing", nil
 	}
 	// Native delivery stores the latest issuance per installation without a
@@ -206,11 +207,14 @@ func volumeRefundNeverIssued(ctx context.Context, tx *sql.Tx, key []byte, c Clie
 	if err != nil {
 		return none, "", err
 	}
+	// The seed may be written later than the client in the same slow creation
+	// transaction or a trusted bootstrap. That delay cannot erase potential
+	// issuance in the identity's earlier lifetime. Use the earliest birth boundary.
 	var issued bool
 	if !unexposed {
 		if err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM native_runtime_delivery WHERE issued>=?)
  OR EXISTS(SELECT 1 FROM native_route_commands WHERE created>=?)
- OR EXISTS(SELECT 1 FROM native_metered_route_commands WHERE created>=?)`, created*int64(time.Second), created*int64(time.Second), created*int64(time.Second)).Scan(&issued); err != nil {
+ OR EXISTS(SELECT 1 FROM native_metered_route_commands WHERE created>=?)`, c.CreatedUnix*int64(time.Second), c.CreatedUnix*int64(time.Second), c.CreatedUnix*int64(time.Second)).Scan(&issued); err != nil {
 			return none, "", err
 		}
 	}

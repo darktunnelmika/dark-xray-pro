@@ -12,8 +12,11 @@ import (
 
 func businessLab(t *testing.T)*Server{
  t.Helper()
+ return businessLabAt(t,filepath.Join(t.TempDir(),"private","business.sqlite"))
+}
+func businessLabAt(t *testing.T,path string)*Server{
+ t.Helper()
  s,_,_,_:=newLab(t)
- path:=filepath.Join(t.TempDir(),"private","business.sqlite")
  db,err:=business.Open(path)
  if err!=nil{t.Fatal(err)}
  t.Cleanup(func(){_ =db.Close()})

@@ -79,6 +79,11 @@ func (s *Store) MutateInboundExecutionSubscription(ctx context.Context, key []by
 	if err != nil {
 		return out, err
 	}
+	if in.Action != "revoke" {
+		if err = requireDarkRestoreSubscriptionTransition(ctx, tx, c.ID); err != nil {
+			return out, err
+		}
+	}
 	h, err := readExecutionSubscriptionHead(ctx, tx, client)
 	if err != nil {
 		return out, err
@@ -169,6 +174,10 @@ func (s *Store) RevealInboundExecutionSubscription(ctx context.Context, key []by
 	if c.Archived {
 		return SubscriptionSecret{}, ErrNotFound
 	}
+	if err = requireDarkRestoreSubscriptionTransition(ctx, tx, client); err != nil {
+		return SubscriptionSecret{}, err
+	}
+
 	h, err := readExecutionSubscriptionHead(ctx, tx, client)
 	if err != nil {
 		return SubscriptionSecret{}, err
@@ -362,11 +371,19 @@ func executionSubscriptionFormats(routes []executionSubscriptionRoute) []string 
 }
 
 func projectExecutionSubscription(ctx context.Context, tx *sql.Tx, key []byte, client, format string) (ix.Subscription, error) {
-	out := ix.Subscription{Version: ix.Version, ClientID: client, Format: format, Routes: []ix.SubscriptionRoute{}, PathVerified: true, ContentType: "application/json"}
 	routes, err := executionSubscriptionRoutes(ctx, tx, key, client)
 	if err != nil {
-		return out, err
+		return ix.Subscription{}, err
 	}
+	return renderExecutionSubscription(client, format, routes)
+}
+
+// Rendering is shared by applied subscriptions and explicitly prepared exports.
+// The caller supplies route authority; preparation always marks verified=false.
+func renderExecutionSubscription(client, format string, routes []executionSubscriptionRoute) (ix.Subscription, error) {
+	out := ix.Subscription{Version: ix.Version, ClientID: client, Format: format, Routes: []ix.SubscriptionRoute{}, PathVerified: true, ContentType: "application/json"}
+	var err error
+
 	if format == "" {
 		format = "uri"
 		out.Format = format

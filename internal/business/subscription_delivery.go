@@ -4,8 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-
-	"github.com/darktunnelmika/dark-xray-pro/internal/usageledger"
 )
 
 type subscriptionDeliveryHead struct {
@@ -19,15 +17,15 @@ type subscriptionDeliveryHead struct {
 
 func readSubscriptionDelivery(ctx context.Context, tx *sql.Tx, client string) (subscriptionDeliveryHead, error) {
 	out := subscriptionDeliveryHead{ClientID: client}
-	var version int
-	if err := tx.QueryRowContext(ctx, `PRAGMA user_version`).Scan(&version); err != nil {
+	present, err := initialApplyHealthSchemaPresent(ctx, tx)
+	if err != nil {
 		return out, err
 	}
-	if !usageledger.HasInitialApplyHealthSchema(version) {
+	if !present {
 		return out, nil
 	}
 	out.Enabled = true
-	err := tx.QueryRowContext(ctx, `SELECT h.delivery_revision,h.scope,h.snapshot_id,e.event_id,e.snapshot_revision,e.created FROM pro_delivery_heads h JOIN pro_delivery_events e ON e.client_id=h.client_id AND e.delivery_revision=h.delivery_revision AND e.scope=h.scope AND e.snapshot_id=h.snapshot_id WHERE h.client_id=?`, client).Scan(&out.Revision, &out.Scope, &out.SnapshotID, &out.EventID, &out.SnapshotRevision, &out.Created)
+	err = tx.QueryRowContext(ctx, `SELECT h.delivery_revision,h.scope,h.snapshot_id,e.event_id,e.snapshot_revision,e.created FROM pro_delivery_heads h JOIN pro_delivery_events e ON e.client_id=h.client_id AND e.delivery_revision=h.delivery_revision AND e.scope=h.scope AND e.snapshot_id=h.snapshot_id WHERE h.client_id=?`, client).Scan(&out.Revision, &out.Scope, &out.SnapshotID, &out.EventID, &out.SnapshotRevision, &out.Created)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return out, err
 	}
@@ -119,11 +117,11 @@ func snapshotDeliveryMetadata(ctx context.Context, tx *sql.Tx, head subscription
 }
 
 func initialEventNotUsed(ctx context.Context, tx *sql.Tx, event string) error {
-	var version int
-	if err := tx.QueryRowContext(ctx, `PRAGMA user_version`).Scan(&version); err != nil {
+	present, err := initialApplyHealthSchemaPresent(ctx, tx)
+	if err != nil {
 		return err
 	}
-	if !usageledger.HasInitialApplyHealthSchema(version) {
+	if !present {
 		return nil
 	}
 	for _, table := range []string{"pro_initial_preparations", "pro_initial_snapshots"} {

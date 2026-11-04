@@ -262,7 +262,7 @@ func ownershipRequestFingerprint(actor string, req ClientOwnershipCommit) string
 	}{actor, req})
 }
 func newOwnershipEvent(ctx context.Context, tx *sql.Tx, event string) error {
-	for _, table := range []string{"events", "client_operations", "client_profile_edits", "representative_control_events", "catalog_events", "catalog_policy_events", "seller_quota_events_v2", "representative_seller_permission_events_v2", "seller_state_events_v2", "seller_order_receipts_v1"} {
+	for _, table := range []string{"darkrestore_import_receipts_v1", "events", "client_operations", "client_profile_edits", "representative_control_events", "catalog_events", "catalog_policy_events", "seller_quota_events_v2", "representative_seller_permission_events_v2", "seller_state_events_v2", "seller_order_receipts_v1"} {
 		var present, n int
 		if e := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?`, table).Scan(&present); e != nil {
 			return e

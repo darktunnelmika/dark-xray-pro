@@ -109,7 +109,26 @@ location / {{ return 403; }}
                           ("/api/v1/workspace/volume-refunds", {"GET", "HEAD"}),
                           ("/api/v1/workspace/clients/ownership/quote", {"POST"}),
                           ("/api/v1/workspace/clients/ownership/commit", {"POST"}),
-                          ("/api/v1/workspace/clients/ownership/receipts/ownership-request-0001", {"GET", "HEAD"}))
+                          ("/api/v1/workspace/clients/ownership/receipts/ownership-request-0001", {"GET", "HEAD"}),
+                          ("/api/v1/workspace/dark-restore/stage", set()),
+                          ("/api/v1/workspace/dark-restore/quote", set()),
+                          ("/api/v1/workspace/dark-restore/commit", set()),
+                          ("/api/v1/workspace/dark-restore/receipts/restore-request-0001", set()),
+                          ("/api/v1/workspace/dark-restore/receipts/restore-request-0001/history/0", set()),
+                          ("/api/v1/workspace/dark-restore/recent", set()),
+                          ("/api/v1/workspace/dark-restore/handoff", set()),
+                          ("/api/v1/workspace/dark-restore/handoff/readiness", set()),
+                          ("/api/v1/workspace/dark-restore/handoff/quarantine/admission/evidence", set()),
+                          ("/api/v1/workspace/dark-restore/handoff/quarantine/settlement", set()),
+                          ("/api/v1/workspace/dark-restore/handoff/quarantine/connection-check", set()),
+                          ("/api/v1/workspace/dark-restore/handoff/quarantine", set()),
+                          ("/api/v1/workspace/dark-restore/handoff/quarantine/admission", set()),
+                          ("/api/v1/workspace/dark-restore/handoff/attach", set()),
+                          ("/api/v1/workspace/dark-restore/handoff/prepare", set()),
+                          ("/api/v1/workspace/dark-restore/handoff/promotion", set()),
+                          ("/api/v1/workspace/dark-restore/handoff/apply-acceptance", set()),
+                          ("/api/v1/workspace/dark-restore/handoff/apply-acceptance/preview", set()),
+                          ("/api/v1/workspace/dark-restore/handoff/promotion/preview", set()))
                 for path, allowed in routes:
                     check(path, allowed)
                     check(path + "/extra/unknown", set())
@@ -141,10 +160,21 @@ location / {{ return 403; }}
                     check(path, set())
                 check("/api/v1/workspace/clients/ownership/receipts/short", set())
                 check("/api/v1/workspace/clients/ownership/receipts/" + "a" * 129, set())
+                check("/api/v1/workspace/dark-restore/receipts/short", set())
+                check("/api/v1/workspace/dark-restore/receipts/" + "a" * 129, set())
+                check("/api/v1/workspace/dark-restore/receipts/restore-request-0001/history/00", set())
+                check("/api/v1/workspace/dark-restore/receipts/restore-request-0001/history/-1", set())
+                check("/api/v1/workspace/dark-restore/handoff/unknown", set())
                 before = len(Backend.seen)
                 assert request(port, "/api/v1/workspace/clients/ownership/commit", "POST", b"x" * (65536 + 1)) == 413
                 assert len(Backend.seen) == before, "oversized ownership request reached backend"
-                print("BUSINESS_MANAGEMENT_PROXY_PASS: exact routes, methods, IDs, Host and private-route denial")
+                before = len(Backend.seen)
+                assert request(port, "/api/v1/workspace/dark-restore/handoff/prepare", "POST", b"x" * 4097) == 403
+                assert request(port, "/api/v1/workspace/dark-restore/handoff/attach", "POST", b"x" * 4097) == 403
+                assert request(port, "/api/v1/workspace/dark-restore/handoff/quarantine", "POST", b"x" * 4097) == 403
+                assert request(port, "/api/v1/workspace/dark-restore/handoff/quarantine/admission", "POST", b"x" * 4097) == 403
+                assert len(Backend.seen) == before, "oversized handoff request reached backend"
+                print("BUSINESS_MANAGEMENT_PROXY_PASS: exact routes, methods, IDs, Host, retired Dark Restore route denial and private-route denial")
             finally:
                 process.terminate()
                 process.wait(timeout=5)

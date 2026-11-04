@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"database/sql/driver"
+	"time"
 )
 
 // The pinned modernc driver can lose the rows handle if a context is canceled
@@ -57,4 +58,33 @@ func (c *ledgerConn) QueryRowContext(ctx context.Context, query string, args ...
 		return c.Conn.QueryRowContext(ctx, query, args...)
 	}
 	return c.Conn.QueryRowContext(context.WithoutCancel(ctx), query, args...)
+}
+
+// readSnapshot keeps optional budget metadata and account eligibility in one WAL
+// snapshot while allowing concurrent writers. Never leave an open transaction
+// in the pooled connection after cancellation or a failed COMMIT.
+func (l *Ledger) readSnapshot(ctx context.Context, fn func(*ledgerConn) error) error {
+	return l.read(ctx, func(c *ledgerConn) (err error) {
+		if _, err = c.ExecContext(ctx, "BEGIN"); err != nil {
+			return err
+		}
+		committed := false
+		defer func() {
+			if !committed {
+				cleanup, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+				defer cancel()
+				if _, e := c.ExecContext(cleanup, "ROLLBACK"); e != nil {
+					_ = c.Raw(func(any) error { return driver.ErrBadConn })
+				}
+			}
+		}()
+		if err = fn(c); err != nil {
+			return err
+		}
+		if _, err = c.ExecContext(ctx, "COMMIT"); err != nil {
+			return err
+		}
+		committed = true
+		return nil
+	})
 }

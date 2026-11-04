@@ -2,6 +2,7 @@ package usageledger
 
 import (
 	"context"
+	"database/sql"
 	"strings"
 )
 
@@ -9,10 +10,22 @@ import (
 // an altered eligibility view is not the reviewed schema. Verify the exact
 // versioned DDL at startup, rather than silently adopting damaged policy.
 func verifySchema(ctx context.Context, c *ledgerConn) error {
+	present, err := historicalBudgetsPresent(ctx, c)
+	if err != nil {
+		return err
+	}
+	if present {
+		return verifySchemaObjects(ctx, c, historicalUsageSchema(), "pro_usage_*")
+	}
 	return verifySchemaObjects(ctx, c, schema, "pro_usage_*")
 }
 
-func verifySchemaObjects(ctx context.Context, c *ledgerConn, statements []string, pattern string) error {
+type schemaReader interface {
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}
+
+func verifySchemaObjects(ctx context.Context, c schemaReader, statements []string, pattern string) error {
 	expected := make(map[string]string)
 	kinds := make(map[string]string)
 	canonical := func(raw string) string { return strings.Join(strings.Fields(strings.TrimSpace(raw)), " ") }

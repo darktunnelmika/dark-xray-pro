@@ -8,4 +8,4 @@ All drafts use AES-256-GCM with the private Native key via HMAC domain separatio
 
 Acceptance: real SQLite tests for multi-node isolation, collision, wrong installation, stale revision, bad Host, loop and event replay; owner API security, Go race/vet, 320px Chromium. Release requires Foundation CI and Native Metering success on both PR and main; new isolated HUB only, with consistent private DB/Nginx/systemd backups and previous V10b executable for rollback. OLD HUB, production Nodes, Bot and USA Xray are unchanged.
 
-Pending: full P0-D signed ledger/Node registry bridge; Agent Apply+Rollback, REALITY handshake and accurate Direct/Tunnel/Swap accounting; full Inbounds/Nodes parity and encrypted multi-GB Backup/Dark Restore. Issues #1, #2, #3, #4, #22 and #60 remain blockers.
+Pending: full P0-D signed ledger/Node registry bridge; Agent Apply+Rollback, REALITY handshake and accurate Direct/Tunnel/Swap accounting; full Inbounds/Nodes parity and encrypted multi-GB native Backup/Restore. Issues #1, #2, #3, #4 and #22 remain blockers. Dark Restore was removed from product scope.

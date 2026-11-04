@@ -430,6 +430,13 @@ func protocolHealthClient(c xrayconfig.Candidate, q ProtocolHealthRequest, socks
 }
 
 func protocolHealthSOCKS(ctx context.Context, socks, address string) (net.Conn, error) {
+	return dialProtocolHealthSOCKS(ctx, socks, address, "", "")
+}
+func dialProtocolHealthSOCKS(ctx context.Context, socks, address, username, password string) (net.Conn, error) {
+	if (username == "") != (password == "") || len(username) > 255 || len(password) > 255 {
+		return nil, ErrProtocolHealth
+	}
+
 	c, err := (&net.Dialer{}).DialContext(ctx, "tcp4", socks)
 	if err != nil {
 		return nil, ErrProtocolHealth
@@ -445,12 +452,27 @@ func protocolHealthSOCKS(ctx context.Context, socks, address string) (net.Conn, 
 	}
 	stop := context.AfterFunc(ctx, func() { c.Close() })
 	defer stop()
-	if _, err = c.Write([]byte{5, 1, 0}); err != nil {
+	method := byte(0)
+	if username != "" {
+		method = 2
+	}
+	if _, err = c.Write([]byte{5, 1, method}); err != nil {
 		return nil, ErrProtocolHealth
 	}
 	answer := make([]byte, 2)
-	if _, err = io.ReadFull(c, answer); err != nil || !bytes.Equal(answer, []byte{5, 0}) {
+	if _, err = io.ReadFull(c, answer); err != nil || !bytes.Equal(answer, []byte{5, method}) {
 		return nil, ErrProtocolHealth
+	}
+	if method == 2 {
+		auth := append([]byte{1, byte(len(username))}, []byte(username)...)
+		auth = append(auth, byte(len(password)))
+		auth = append(auth, []byte(password)...)
+		if _, err = c.Write(auth); err != nil {
+			return nil, ErrProtocolHealth
+		}
+		if _, err = io.ReadFull(c, answer); err != nil || !bytes.Equal(answer, []byte{1, 0}) {
+			return nil, ErrProtocolHealth
+		}
 	}
 	host, ps, err := net.SplitHostPort(address)
 	port, pe := strconv.Atoi(ps)

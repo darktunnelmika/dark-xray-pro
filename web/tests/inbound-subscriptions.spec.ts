@@ -1,3 +1,4 @@
+import jsQR from "jsqr";
 import { expect, test, type Locator, type Page } from "@playwright/test";
 import { readInboundSubscriptionSecret } from "../src/inboundSubscriptions";
 
@@ -166,6 +167,7 @@ test("managed subscription issues, reveals, rotates and revokes explicitly witho
   await section.getByRole("button", { name: "Create subscription link", exact: true }).click();
   await expect(section.getByText(/Link active/)).toBeVisible();
   await expect(section.getByLabel("Inbound subscription URL", { exact: true })).toHaveCount(0);
+  await expect(section.getByRole("img", { name: "Subscription QR code", exact: true })).toHaveCount(0);
   const issue = f.calls.find(c => c.path.endsWith("/issue"))!;
   expect(issue.body).toEqual({ event_id: expect.stringMatching(/^managed-sub-[a-z0-9-]{36}$/), expected_generation: 0 });
   expect(issue.csrf).toBe(csrf);
@@ -178,11 +180,13 @@ test("managed subscription issues, reveals, rotates and revokes explicitly witho
   await section.getByRole("button", { name: "Replace link", exact: true }).click();
   await expect.poll(() => f.heads.get(alpha)?.generation).toBe(2);
   await expect(section.getByLabel("Inbound subscription URL", { exact: true })).toHaveCount(0);
+  await expect(section.getByRole("img", { name: "Subscription QR code", exact: true })).toHaveCount(0);
   await section.getByRole("button", { name: "Show link", exact: true }).click();
   await expect(section.getByLabel("Inbound subscription URL", { exact: true })).toHaveValue(new RegExp(tokenFor(alpha, 2)));
   await section.getByRole("button", { name: "Revoke link", exact: true }).click();
   await expect(section.getByText(/Link revoked/)).toBeVisible();
   await expect(section.getByLabel("Inbound subscription URL", { exact: true })).toHaveCount(0);
+  await expect(section.getByRole("img", { name: "Subscription QR code", exact: true })).toHaveCount(0);
   expect(f.heads.get(alpha)).toEqual({ generation: 3, state: "revoked" });
   await expectNoStoredSecret(page, [tokenFor(alpha, 1), tokenFor(alpha, 2)]);
   expect(f.consumers).toHaveLength(0);
@@ -199,6 +203,7 @@ test("managed subscription hides a revealed link when polled generation changes 
   f.releaseReveal();
   await expect(section.getByRole("button", { name: "Replace link", exact: true })).toBeEnabled();
   await expect(section.getByLabel("Inbound subscription URL", { exact: true })).toHaveCount(0);
+  await expect(section.getByRole("img", { name: "Subscription QR code", exact: true })).toHaveCount(0);
   f.heads.set(alpha, { generation: 5, state: "active" });
   await section.getByRole("button", { name: "Refresh", exact: true }).click();
   await section.getByRole("button", { name: "Show link", exact: true }).click();
@@ -215,6 +220,7 @@ test("managed subscription clears secrets on client changes and revoked manage p
   await expect(section.getByLabel("Inbound subscription URL", { exact: true })).toBeVisible();
   section = await selectClient(page, beta);
   await expect(section.getByLabel("Inbound subscription URL", { exact: true })).toHaveCount(0);
+  await expect(section.getByRole("img", { name: "Subscription QR code", exact: true })).toHaveCount(0);
   await section.getByRole("button", { name: "Show link", exact: true }).click();
   await expect(section.getByLabel("Inbound subscription URL", { exact: true })).toBeVisible();
   f.user.permissions.manage_clients = false;
@@ -238,6 +244,7 @@ test("managed subscription workspace refresh invalidates an outstanding reveal",
   f.releaseReveal();
   await expect(section.getByRole("button", { name: "Show link", exact: true })).toBeEnabled();
   await expect(section.getByLabel("Inbound subscription URL", { exact: true })).toHaveCount(0);
+  await expect(section.getByRole("img", { name: "Subscription QR code", exact: true })).toHaveCount(0);
   await expectNoStoredSecret(page, [tokenFor(alpha, 3)]);
 });
 
@@ -307,16 +314,19 @@ test("managed subscription clears secrets on denial, hidden tab and one-minute t
   await expect(section.getByLabel("Inbound subscription URL", { exact: true })).toBeVisible();
   await page.evaluate(() => { Object.defineProperty(document, "hidden", { value: true, configurable: true }); document.dispatchEvent(new Event("visibilitychange")); });
   await expect(section.getByLabel("Inbound subscription URL", { exact: true })).toHaveCount(0);
+  await expect(section.getByRole("img", { name: "Subscription QR code", exact: true })).toHaveCount(0);
   await page.evaluate(() => { Object.defineProperty(document, "hidden", { value: false, configurable: true }); document.dispatchEvent(new Event("visibilitychange")); });
   await section.getByRole("button", { name: "Show link", exact: true }).click();
   await expect(section.getByLabel("Inbound subscription URL", { exact: true })).toBeVisible();
   await page.clock.fastForward(60001);
   await expect(section.getByLabel("Inbound subscription URL", { exact: true })).toHaveCount(0);
+  await expect(section.getByRole("img", { name: "Subscription QR code", exact: true })).toHaveCount(0);
   await section.getByRole("button", { name: "Show link", exact: true }).click();
   await expect(section.getByLabel("Inbound subscription URL", { exact: true })).toBeVisible();
   options.denied = true; await page.clock.fastForward(5001);
   await expect(section.getByText("Subscription state could not be verified. Please refresh.", { exact: true })).toBeVisible();
   await expect(section.getByLabel("Inbound subscription URL", { exact: true })).toHaveCount(0);
+  await expect(section.getByRole("img", { name: "Subscription QR code", exact: true })).toHaveCount(0);
   await expect(page.getByRole("region", { name: "Client LAB subscription" })).toHaveCount(0);
   await expectNoStoredSecret(page, [tokenFor(alpha, 3)]); expect(f.consumers).toHaveLength(0);
 });
@@ -336,4 +346,37 @@ test("managed subscription expires delivery locally and fits Persian light mode 
   await page.clock.fastForward(4001);
   await expect(section.getByRole("link", { name: "دریافت تنظیمات" })).toHaveCount(0);
   await expectNoStoredSecret(page, [tokenFor(alpha, 3)]); expect(f.consumers).toHaveLength(0);
+});
+
+test("subscription QR decodes to the selected link, changes format locally and shares secret expiry", async ({ page }) => {
+  await page.clock.install();
+  const f = await fixture(page, { active: true });
+  const external: string[] = [];
+  page.on("request", request => { if (new URL(request.url()).origin !== new URL(test.info().project.use.baseURL!).origin) external.push(request.url()); });
+  await page.goto("/clients");
+  const section = await selectClient(page);
+  const qr = section.getByRole("img", { name: "Subscription QR code", exact: true });
+  await expect(qr).toHaveCount(0);
+  await section.getByRole("button", { name: "Show link", exact: true }).click();
+  async function decoded() {
+    const pixels = await qr.evaluate((element: HTMLCanvasElement) => {
+      const context = element.getContext("2d")!;
+      return { data: Array.from(context.getImageData(0, 0, element.width, element.height).data), width: element.width, height: element.height };
+    });
+    return jsQR(new Uint8ClampedArray(pixels.data), pixels.width, pixels.height)?.data;
+  }
+  await expect(qr).toBeVisible();
+  expect(await decoded()).toBe(await section.getByLabel("Inbound subscription URL", { exact: true }).inputValue());
+  await section.getByRole("combobox", { name: "Format", exact: true }).selectOption("wireguard");
+  expect(await decoded()).toBe(await section.getByLabel("Inbound subscription URL", { exact: true }).inputValue());
+  expect(await decoded()).toMatch(/\?format=wireguard$/);
+  await section.getByRole("button", { name: "Hide link", exact: true }).click();
+  await expect(qr).toHaveCount(0);
+  await section.getByRole("button", { name: "Show link", exact: true }).click();
+  await expect(qr).toBeVisible();
+  await page.clock.fastForward(60001);
+  await expect(qr).toHaveCount(0);
+  expect(f.consumers).toHaveLength(0);
+  expect(external).toEqual([]);
+  await expectNoStoredSecret(page, [tokenFor(alpha, 3)]);
 });

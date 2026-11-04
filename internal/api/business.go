@@ -25,6 +25,8 @@ func (s *Server) EnableBusinessLab(store *business.Store) error {
 }
 func businessError(w http.ResponseWriter, err error) {
 	switch {
+	case errors.Is(err, business.ErrDarkRestoreCutover):
+		respond(w, http.StatusConflict, map[string]string{"error": "legacy_client_locked"})
 	case errors.Is(err, business.ErrOwnershipDenied):
 		respond(w, http.StatusForbidden, map[string]string{"error": "representative_scope_denied"})
 	case errors.Is(err, business.ErrUnauthenticated):

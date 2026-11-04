@@ -3,6 +3,7 @@
 package backupacceptance_test
 
 import (
+	"encoding/hex"
 	"io"
 	"os"
 	"path/filepath"
@@ -28,7 +29,11 @@ func TestExportDisposablePanelRestoreFixture(t *testing.T) {
 	if _, err := os.Stat("/run/dark-pro-disposable-restore-acceptance"); err != nil {
 		t.Fatal("disposable setup marker missing")
 	}
-	f := newEconomicFixture(t)
+	key, err := hex.DecodeString(os.Getenv("DARK_PRO_TEST_FIXTURE_HISTORY_KEY"))
+	if err != nil || len(key) != 32 {
+		t.Fatal("missing disposable fixture key")
+	}
+	f := newEconomicFixtureWithKey(t, key)
 	in, err := os.Open(f.path)
 	require(t, err)
 	defer in.Close()

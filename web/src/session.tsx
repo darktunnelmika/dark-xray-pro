@@ -10,13 +10,13 @@ const changedKey = "dark-pro-session-change"; // Non-secret event only; never st
 export class ApiError extends Error {
   constructor(public status: number, message: string) { super(message); }
 }
-export async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
+export async function api<T>(path: string, options: RequestInit = {}, timeoutMs=8000): Promise<T> {
   if (!path.startsWith("/api/v1/") || path.startsWith("//")) throw new ApiError(0, "invalid_api_path");
   const controller = new AbortController();
   const abort = () => controller.abort();
   options.signal?.addEventListener("abort", abort, { once: true });
   if (options.signal?.aborted) abort();
-  const timer = window.setTimeout(abort, 8000);
+  const timer = window.setTimeout(abort, timeoutMs);
   try {
     const response = await fetch(path, { ...options, cache: "no-store", credentials: "same-origin", signal: controller.signal,
       headers: { Accept: "application/json", ...(options.headers ?? {}) } });
@@ -32,8 +32,8 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
     options.signal?.removeEventListener("abort", abort);
   }
 }
-export function mutation<T>(path: string, body: unknown, csrf: string): Promise<T> {
-  return api<T>(path, { method: "POST", headers: { "Content-Type": "application/json", "X-CSRF-Token": csrf }, body: JSON.stringify(body) });
+export function mutation<T>(path: string, body: unknown, csrf: string, timeoutMs=8000): Promise<T> {
+  return api<T>(path, { method: "POST", headers: { "Content-Type": "application/json", "X-CSRF-Token": csrf }, body: JSON.stringify(body) },timeoutMs);
 }
 function readSession(value: unknown): Session | null {
   if (!value || typeof value !== "object") throw new Error("invalid_session");

@@ -78,8 +78,10 @@ func probeAccountingEnabled(ctx context.Context, c sqlWriter) (bool, error) {
 		return false, err
 	}
 	var err error
-	version,err=underlyingBusinessSchema(ctx,c,version)
-	if err!=nil{return false,err}
+	version, err = underlyingBusinessSchema(ctx, c, version)
+	if err != nil {
+		return false, err
+	}
 	return HasProbeSchema(version), nil
 }
 
@@ -87,8 +89,12 @@ func probeAccountingEnabled(ctx context.Context, c sqlWriter) (bool, error) {
 // browser action. It creates no identity and activates no runtime.
 func (l *Ledger) EnableProbeAccounting(ctx context.Context) error {
 	return l.write(ctx, func(c *ledgerConn) error {
-		var version int
-		if err := c.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); err != nil {
+		var outer int
+		if err := c.QueryRowContext(ctx, "PRAGMA user_version").Scan(&outer); err != nil {
+			return err
+		}
+		version, err := underlyingBusinessSchema(ctx, c, outer)
+		if err != nil {
 			return err
 		}
 		if HasProbeSchema(version) {
@@ -111,7 +117,13 @@ func (l *Ledger) EnableProbeAccounting(ctx context.Context) error {
 				return err
 			}
 		}
-		_, err := c.ExecContext(ctx, "PRAGMA user_version=9")
+		if outer == 16 {
+			// Managed execution keeps its immutable base-schema pin. The exact
+			// probe marker is interpreted as a fail-closed overlay by
+			// underlyingBusinessSchema and verified on every reopen.
+			return nil
+		}
+		_, err = c.ExecContext(ctx, "PRAGMA user_version=9")
 		return err
 	})
 }
