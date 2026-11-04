@@ -40,6 +40,7 @@ var (
 	ErrCapacity          = errors.New("Telegram commerce journal capacity reached")
 	ErrState             = errors.New("Telegram commerce worker state invalid")
 	ErrFinancialMismatch = errors.New("Telegram financial receipt does not match its immutable order")
+	ErrQRUnavailable     = errors.New("this native configuration cannot be represented by one supported QR code")
 )
 
 type Options struct {
@@ -179,6 +180,12 @@ type Document struct {
 	Name    string `json:"name"`
 	Content []byte `json:"content"`
 	Caption string `json:"caption,omitempty"`
+	// Content is encoded as base64 in the private JSON journal. These optional
+	// fields extend existing text documents without changing their wire shape.
+	ContentType   string `json:"content_type,omitempty"`
+	SourceContent []byte `json:"source_content,omitempty"`
+	SourceSHA256  string `json:"source_sha256,omitempty"`
+	ContentSHA256 string `json:"content_sha256,omitempty"`
 }
 
 // DeliveryProof contains no subscription/configuration material. An optional

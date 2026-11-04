@@ -40,7 +40,7 @@ func businessSetup(t *testing.T) businessFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, enable := range []func(context.Context) error{s.EnableUsageLedger, s.EnableTelegramCommerce, s.EnableTelegramSupportV1, s.EnableTelegramCampaignsV1, s.EnableTelegramRewardsV1} {
+	for _, enable := range []func(context.Context) error{s.EnableUsageLedger, s.EnableTelegramCommerce, s.EnableTelegramSupportV1, s.EnableTelegramCampaignsV1, s.EnableTelegramRewardsV1, s.EnableTelegramBonusV1} {
 		if err = enable(ctx); err != nil {
 			t.Fatal(err)
 		}
@@ -67,6 +67,7 @@ func businessSetup(t *testing.T) businessFixture {
 	b.SupportEnabled = true
 	b.CampaignsEnabled = true
 	b.RewardsEnabled = true
+	b.BonusEnabled = true
 	return businessFixture{s, b, manager, buyer, reg, login.Token, product}
 }
 func (f businessFixture) request(t *testing.T, id Identity, action Action) Request {

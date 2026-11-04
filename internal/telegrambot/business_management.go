@@ -110,7 +110,7 @@ func (b *BusinessBackend) management(ctx context.Context, r Request, name string
 		if r.Access.Role != "owner" || r.Access.RepresentativeID != "owner" {
 			return Result{}, ErrAccess
 		}
-		fields := strings.Fields(r.Incoming.Text)
+		fields := strings.Fields(settingDigits(r.Incoming.Text))
 		if len(fields) != 2 {
 			return Result{}, ErrProtocol
 		}
@@ -156,8 +156,12 @@ func (b *BusinessBackend) management(ctx context.Context, r Request, name string
 		}
 		if name == "prices" {
 			rows := [][]Button{}
-			for _, p := range products[:min(20, len(products))] {
+			offset := min(parsePage(r.Action.Value), len(products))
+			for _, p := range products[offset:min(offset+8, len(products))] {
 				rows = append(rows, []Button{actionButton(clipped(fmt.Sprintf("%s · %d ⭐", p.Product.Name, p.PriceStars), 90), "", "price", p.Product.ID, strconv.FormatInt(p.PriceRevision, 10))})
+			}
+			if nav := pageButtons(lang, "prices", "", offset, len(products)); len(nav) > 0 {
+				rows = append(rows, nav)
 			}
 			rows = append(rows, []Button{back})
 			return oneScreen(tr(lang, "🏷 <b>قیمت محصولات منتشرشده</b>", "🏷 <b>Published product prices</b>"), rows), nil
@@ -168,7 +172,7 @@ func (b *BusinessBackend) management(ctx context.Context, r Request, name string
 			return out, nil
 		}
 		if name == "price_input" {
-			amount, err := strconv.ParseInt(strings.TrimSpace(r.Incoming.Text), 10, 64)
+			amount, err := strconv.ParseInt(strings.TrimSpace(settingDigits(r.Incoming.Text)), 10, 64)
 			if err != nil || amount < 1 || amount > 1_000_000_000 {
 				return Result{}, ErrProtocol
 			}
@@ -225,7 +229,7 @@ func (b *BusinessBackend) admins(ctx context.Context, r Request, name string) (R
 		return out, nil
 	}
 	if name == "invite_input" {
-		id, err := strconv.ParseInt(strings.TrimSpace(r.Incoming.Text), 10, 64)
+		id, err := strconv.ParseInt(strings.TrimSpace(settingDigits(r.Incoming.Text)), 10, 64)
 		if err != nil || id <= 0 {
 			return Result{}, ErrProtocol
 		}

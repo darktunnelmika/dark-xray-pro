@@ -20,9 +20,9 @@ Implementation entry points: [HUB gating](../cmd/hub/telegram_bots.go),
 | Browser owner | Register or update store metadata, assign its Telegram manager, enable/disable it, and list all stores. Native catalog and representative administration remain available through the existing panel. |
 | Browser representative | Read only stores belonging to the current representative. Cannot register a bot or change store ownership. |
 | Owner of the HUB Telegram store | List/create representatives, inspect their native credit, and confirm native credit adjustments. Also has the management capabilities of its own store. The store must be bound to native `representative_id: "owner"`. |
-| Representative store manager | Inspect permitted native finance, price published products in Stars, invite/revoke store administrators, configure trials and referral terms, handle support, and prepare/approve permitted broadcasts. Current native grants still apply. |
+| Representative store manager | Inspect permitted native finance, price published products in Stars, invite/revoke store administrators, configure trials, referral terms and optional bonus discounts, handle support, and prepare/approve permitted broadcasts. Current native grants still apply. |
 | Delegated store administrator | Only the granted subset of store operations. Invitation acceptance is bound to the named numeric Telegram user and the same bot; administrators cannot grant themselves store/administrator management. |
-| Customer | Buy and renew, view owned services and usage availability, retrieve verified connection configuration, inspect orders and retry paid fulfillment, view wallet/reward entries, use support, manage marketing consent, and claim a trial when enabled. Persian and English menus are available. |
+| Customer | Buy and renew, optionally apply available bonus when the store enables it, view owned services and usage availability, retrieve verified connection configuration or a supported QR, inspect orders and retry paid fulfillment, release an unpaid invoice's bonus reservation, view wallet/reward entries, use support, manage marketing consent, and claim a trial when enabled. HUB-store customers can submit a representative application. Persian and English menus are available. |
 
 The authenticated bot ID selects the store. The Telegram user ID is accepted
 only from the transport's normalized private-chat updates. A username, forwarded
@@ -67,6 +67,11 @@ the bound invoice, current authority, publication and native credit conditions.
 It is not a reservation of representative credit; concurrent spending can still
 leave an already-paid order awaiting fulfillment.
 
+Published products and compatible renewal offers are paginated throughout the
+customer and manager menus. Renewal pagination preserves the owned client
+binding. Price, native-credit and administrator-ID inputs accept Persian and
+Arabic decimal digits without floating-point conversion of monetary values.
+
 | Persisted order status | Meaning and operator/customer action |
 |---|---|
 | `quoted` | No successful payment has been captured. Check the quote expiry and normal purchase flow. |
@@ -110,6 +115,27 @@ does not invent an online state, a first-connection timestamp, or zero usage whe
 authoritative usage is unavailable. See the
 [delivery bridge](../internal/business/telegram_delivery_v1.go).
 
+**Connection QR** uses that same bridge and definite-send acknowledgement. The
+HUB encodes one supported `vless`, `vmess`, `trojan`, `ss`, or `hysteria2` URI of
+at most 2,048 bytes locally; it does not send credentials to a QR website. One
+terminal LF is permitted in the original source. Multiple routes, unsupported
+formats, or oversized content are delivered as the complete original `.txt`
+file instead of silently omitting routes. Invalid or expired native proofs are
+rejected, including on this fallback path.
+
+QR images are lossless PNG documents, using medium error correction, a four-module
+quiet zone and five-pixel modules. The encoder is pinned, unmodified MIT source;
+its upstream commit, file hashes and license are retained under
+[`third_party/go-qrcode`](../third_party/go-qrcode/). The LAB bundle also includes
+the license in its checksummed `ops/licenses/` inventory. The private pending outbox
+stores the bounded original source, image, source SHA, image SHA and native
+proof. Validation checks the original source against the native SHA and compares
+every decoded PNG pixel with the deterministic QR symbol. Replacing the PNG with
+another valid QR and its matching image hash is rejected at enqueue, dispatch,
+startup and offline restore validation. Equivalent pixels with different PNG
+compression are accepted. The source is never included in multipart metadata;
+confirmed sends clear the private payload. Legacy text entries remain valid.
+
 Trials are disabled until the manager explicitly saves a policy. A claim creates
 at most one native volume client per customer/store, with one slot and a fixed
 24-hour duration. **Time starts at issuance**, including time spent waiting for
@@ -127,11 +153,48 @@ leave bonus debt that future bonuses offset. Paid money is not silently used to
 cover that debt.
 
 The wallet is a store ledger, not the customer's Telegram account balance.
-**Bonus redemption, wallet-funded checkout, and cash withdrawal are not enabled.**
-The current UI states this limitation and still charges the full quoted Stars
-amount. The rewards view is not a loyalty-tier or permanent-discount system.
+**Bonus discounts are off by default** and require a revision-checked policy
+change by a manager with both store and finance authority. When enabled, the
+product screen offers an explicit choice between the full price and the available
+bonus discount; it does not apply bonus silently. The invoice shows the original
+price, discount and actual Stars payment. Native checkout requires the exact
+selected discount to fit the available bonus and leave at least **1 XTR payable**;
+it rejects an invalid selection instead of silently reducing the discount.
+Disabling this policy prevents new bonus reservations. An existing unexpired,
+reserved quote retains its reviewed terms; it is not retroactively cancelled.
 
-Support is a durable store-scoped ticket/message flow. Broadcasts require
+Bonus reservations use the existing wallet ledger. They do not create another
+representative or customer balance:
+
+| Bonus state | Ledger effect and checkout behavior |
+|---|---|
+| `reserved` | Creating a discounted quote appends one bonus debit. The same event replays the same quote. |
+| `released` | Expiry or explicit customer cancellation appends one compensating bonus credit. This old invoice then fails pre-checkout. Cancellation does not claim to refund Telegram Stars. |
+| `consumed` | An exact successful Telegram payment consumes the reservation without another debit. If its bonus was already released, a payment-bound debit records the agreed discount and can create bonus debt; valid paid money is still captured. |
+| `refunded` | An authenticated full refund restores the consumed discount once, in the same transaction as any referral reward reversal. |
+
+Worker maintenance releases bounded batches of expired unpaid reservations;
+wallet/product refresh and new discounted checkout also clean up this customer's
+expired holds, independently of other customers' backlog. Pre-checkout does not
+pin a reservation forever. After source-reward clawbacks or delayed payment
+capture, future rewards offset any bonus deficit before becoming spendable.
+For new discounted orders, referral calculations use the **net externally paid**
+Stars and cannot exceed that amount. Earlier non-discounted reward grants retain
+their original semantics.
+
+Paid-wallet funding, fully wallet-funded/zero-Star checkout, cash withdrawal,
+loyalty tiers and permanent discounts remain outside this increment. The optional
+`telegram_bonus_*` schema is independently versioned; zero-discount legacy order
+and request JSON retains its original fingerprints.
+
+Support is a durable store-scoped ticket/message flow. Customers can reopen a
+ticket; support staff can claim an unassigned ticket or return their own assigned
+ticket to the queue, using revision checks. One supporter cannot take another
+supporter's assignment through these actions. HUB-store representative
+applications become private support tickets and grant no representative role.
+The help menu includes Android, iOS, desktop, payment and trial instructions.
+
+Broadcasts require
 explicit marketing consent, a reviewed content/audience snapshot, and current
 draft/send permissions; consent and authority are checked again for dispatch.
 The worker persists incoming updates before advancing the polling cursor and
@@ -161,8 +224,9 @@ The feature is off by default. The HUB requires these settings together:
 Supplying `-telegram-bots-config` without the explicit enable switch is rejected.
 The disabled transport returns before reading credential files or contacting
 Telegram. Enabling through the HUB initializes the optional commerce, support,
-campaign, and rewards schema families; it does not grant rewards or enable trial
-policies. Disabling the feature does not delete existing financial history.
+campaign, rewards and bonus schema families; it does not grant rewards, enable
+bonus discounts or enable trial policies. Disabling the feature does not delete
+existing financial history.
 
 Private config shape, shown with a deliberately non-executable token placeholder:
 
@@ -252,6 +316,11 @@ Commerce and engagement tables remain in the native business database and are
 validated as optional schema families, including immutable payments, refunds,
 order/trial receipts, wallet provenance, and historical handoff evidence. A
 later refund does not make a valid historical handoff invalid for backup.
+Bonus validation binds policy versions, quote amounts, reservations, releases,
+payment consumption, refund restoration and ledger events in both directions.
+Orphan bonus-debt entries and cross-store quote transplants are rejected even
+when their SQL foreign keys are otherwise valid. Absence of the optional bonus
+family does not make orphan bonus-specific ledger entries acceptable.
 
 The native backup inventory also includes these fixed resources:
 
@@ -307,7 +376,9 @@ Record the tested revision and each result separately. Review scenarios include
 cross-store access, stale/revoked callbacks, unpriced products, duplicate and
 late payment/refund capture, rollback after receipt failure, paid-order retry,
 cumulative native renewal charges, trial uniqueness, old delivery evidence after
-renewal, consent revocation, and backup schema/data tampering. The workflow is
+renewal, bonus reservation competition and cancellation, late-payment bonus debt,
+refund conservation, QR image substitution and exact decoded URI, consent
+revocation, and backup schema/data tampering. The workflow is
 [PRO Telegram stores](../.github/workflows/telegram-bots.yml).
 
 The managed development environment has pre-existing process-epoch failures in
@@ -323,9 +394,11 @@ full gate on a supported host.
 
 ## 8. Remaining limits
 
-This bot increment does not include a Mini App, a bot QR generation/delivery
-action, loyalty levels/permanent discounts, wallet funding/redemption/withdrawal,
-or a live-token acceptance run. Panel subscription QR functionality is separate.
+This bot increment does not include a Mini App, loyalty levels/permanent
+discounts, paid-wallet funding, fully wallet-funded checkout, cash withdrawal,
+or a live-token acceptance run. Bot QR delivery supports a bounded single URI;
+multi-route configurations keep the complete text-file delivery. Panel
+subscription QR functionality is separate.
 Checkout is Stars-only; native catalog publication remains a panel operation.
 A trial's 24 hours start at issuance, and a paid order may await native
 fulfillment or verified provisioning. Unknown sends and permanent financial

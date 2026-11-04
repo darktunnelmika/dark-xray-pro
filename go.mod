@@ -4,10 +4,14 @@ go 1.27.3
 
 require (
 	filippo.io/age v1.3.2
+	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e
 	golang.org/x/crypto v0.55.0
 	golang.org/x/sys v0.47.0
 	modernc.org/sqlite v1.33.1
 )
+
+// Pinned, unmodified MIT source; provenance is in third_party/go-qrcode/UPSTREAM.json.
+replace github.com/skip2/go-qrcode => ./third_party/go-qrcode
 
 require (
 	filippo.io/hpke v0.4.0 // indirect

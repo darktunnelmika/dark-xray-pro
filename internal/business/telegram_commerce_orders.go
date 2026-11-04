@@ -274,7 +274,7 @@ func telegramSalesAllowedTx(ctx context.Context, tx *sql.Tx, access TelegramAcce
 
 func (s *Store) PrepareTelegramCheckout(ctx context.Context, a TelegramActor, in TelegramCheckoutRequest) (TelegramOrder, error) {
 	var out TelegramOrder
-	if !eventRE.MatchString(in.EventID) || !idRE.MatchString(in.ProductID) || in.ClientID != "" && !idRE.MatchString(in.ClientID) {
+	if !eventRE.MatchString(in.EventID) || !idRE.MatchString(in.ProductID) || in.ClientID != "" && !idRE.MatchString(in.ClientID) || in.BonusStars < 0 || in.BonusStars > 1_000_000_000 {
 		return out, ErrInvalid
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -313,6 +313,11 @@ func (s *Store) PrepareTelegramCheckout(ctx context.Context, a TelegramActor, in
 	if err != nil {
 		return out, err
 	}
+	// This increment deliberately retains a real positive-XTR invoice. The
+	// selected discount is exact: never silently clamp a stale amount.
+	if in.BonusStars >= product.PriceStars {
+		return out, ErrInvalid
+	}
 	id, err := telegramNonce()
 	if err != nil {
 		return out, err
@@ -338,11 +343,14 @@ func (s *Store) PrepareTelegramCheckout(ctx context.Context, a TelegramActor, in
 		intent.ExpectedClientHash = fingerprint("telegram-renewal-client", client)
 	}
 	now := time.Now().UTC().Unix()
-	out = TelegramOrder{ID: id, StoreID: access.Store.ID, CustomerID: access.CustomerID, BotID: a.BotID, UserID: a.UserID, ProductID: in.ProductID, ClientID: clientID, Action: action, Currency: "XTR", AmountStars: product.PriceStars, Status: "quoted", Product: product.Product, ExpiresUnix: now + 900, CreatedUnix: now}
+	out = TelegramOrder{ID: id, StoreID: access.Store.ID, CustomerID: access.CustomerID, BotID: a.BotID, UserID: a.UserID, ProductID: in.ProductID, ClientID: clientID, Action: action, Currency: "XTR", AmountStars: product.PriceStars - in.BonusStars, BonusDiscountStars: in.BonusStars, Status: "quoted", Product: product.Product, ExpiresUnix: now + 900, CreatedUnix: now}
 	terms, _ := json.Marshal(out.Product)
 	raw, _ := json.Marshal(intent)
 	_, err = tx.ExecContext(ctx, "INSERT INTO telegram_commerce_orders(order_id,event_id,store_id,customer_id,telegram_user_id,product_id,client_id,action,currency,amount_stars,status,product_json,intent_json,fingerprint,expires_unix,created_unix) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", id, in.EventID, out.StoreID, out.CustomerID, a.UserID, out.ProductID, clientID, action, "XTR", out.AmountStars, "quoted", terms, raw, fingerprint("telegram-checkout", intent), out.ExpiresUnix, now)
 	if err != nil {
+		return TelegramOrder{}, err
+	}
+	if err = reserveTelegramBonusTx(ctx, tx, access, out); err != nil {
 		return TelegramOrder{}, err
 	}
 	if err = tx.Commit(); err != nil {
@@ -366,15 +374,19 @@ func readTelegramOrderTx(ctx context.Context, tx *sql.Tx, id string) (TelegramOr
 	if err != nil {
 		return out, intent, err
 	}
-	if json.Unmarshal(terms, &out.Product) != nil || json.Unmarshal(raw, &intent) != nil || hash != fingerprint("telegram-checkout", intent) || intent.Request.EventID != event || intent.Actor.BotID != out.BotID || intent.Actor.UserID != out.UserID || intent.Actor.ChatID != out.UserID || intent.StoreID != out.StoreID || intent.CustomerID != out.CustomerID || intent.Product.Product != out.Product || intent.Product.PriceStars != out.AmountStars || out.Currency != "XTR" || out.Product.ID != out.ProductID || out.Product.RepresentativeID != representative || intent.ClientID != out.ClientID {
+	if json.Unmarshal(terms, &out.Product) != nil || json.Unmarshal(raw, &intent) != nil || hash != fingerprint("telegram-checkout", intent) || intent.Request.EventID != event || intent.Actor.BotID != out.BotID || intent.Actor.UserID != out.UserID || intent.Actor.ChatID != out.UserID || intent.StoreID != out.StoreID || intent.CustomerID != out.CustomerID || intent.Product.Product != out.Product || intent.Request.BonusStars < 0 || intent.Request.BonusStars > 1_000_000_000 || intent.Product.PriceStars != out.AmountStars+intent.Request.BonusStars || out.Currency != "XTR" || out.Product.ID != out.ProductID || out.Product.RepresentativeID != representative || intent.ClientID != out.ClientID {
 		return TelegramOrder{}, telegramCheckoutIntent{}, ErrUnavailable
 	}
+	out.BonusDiscountStars = intent.Request.BonusStars
 	action := "create"
 	if intent.Request.ClientID != "" {
 		action = "renew"
 	}
 	if action != out.Action || action == "renew" && intent.Request.ClientID != out.ClientID {
 		return TelegramOrder{}, telegramCheckoutIntent{}, ErrUnavailable
+	}
+	if err = validateTelegramBonusOrderTx(ctx, tx, out, intent); err != nil {
+		return TelegramOrder{}, telegramCheckoutIntent{}, err
 	}
 	return out, intent, nil
 }
@@ -470,6 +482,15 @@ func (s *Store) CheckTelegramPreCheckout(ctx context.Context, a TelegramActor, p
 	if order.StoreID != access.Store.ID || order.CustomerID != access.CustomerID || order.UserID != a.UserID || currency != "XTR" || amount != order.AmountStars || order.Status != "quoted" || order.ExpiresUnix <= time.Now().UTC().Unix() {
 		return TelegramOrder{}, ErrTelegramPayment
 	}
+	if order.BonusDiscountStars > 0 {
+		bonus, e := readTelegramBonusRecordTx(ctx, tx, order.ID)
+		if e != nil {
+			return TelegramOrder{}, e
+		}
+		if bonus.Quote.State != "reserved" {
+			return TelegramOrder{}, ErrTelegramPayment
+		}
+	}
 	if err = telegramSalesAllowedTx(ctx, tx, access, order.Action); err != nil {
 		return TelegramOrder{}, err
 	}
@@ -558,6 +579,9 @@ func (s *Store) RecordTelegramPayment(ctx context.Context, a TelegramActor, in T
 		return out, err
 	}
 	order.Status = "paid_pending_fulfillment"
+	if err = consumeTelegramBonusPaymentTx(ctx, tx, order, in.TelegramChargeID, now); err != nil {
+		return TelegramPaymentReceipt{}, err
+	}
 	out = TelegramPaymentReceipt{Order: order, TelegramChargeID: in.TelegramChargeID, CreatedUnix: now}
 	if err = tx.Commit(); err != nil {
 		return TelegramPaymentReceipt{}, err
@@ -736,6 +760,9 @@ func (s *Store) RecordTelegramRefund(ctx context.Context, a TelegramActor, in Te
 		return TelegramOrder{}, err
 	}
 	if _, err = tx.ExecContext(ctx, "UPDATE telegram_commerce_orders SET status='refunded' WHERE order_id=?", out.ID); err != nil {
+		return TelegramOrder{}, err
+	}
+	if err = restoreTelegramBonusRefundTx(ctx, tx, out); err != nil {
 		return TelegramOrder{}, err
 	}
 	if err = reconcileTelegramReferralRefundTx(ctx, tx, out.ID); err != nil {

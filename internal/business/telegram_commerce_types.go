@@ -75,6 +75,8 @@ type TelegramCheckoutRequest struct {
 	EventID   string `json:"event_id"`
 	ProductID string `json:"product_id"`
 	ClientID  string `json:"client_id"`
+	// Omission preserves the exact JSON/fingerprint of existing full-price quotes.
+	BonusStars int64 `json:"bonus_stars,omitempty"`
 }
 
 // ID is an opaque, server-generated invoice payload. Amount and terms are
@@ -95,6 +97,8 @@ type TelegramOrder struct {
 	ExpiresUnix int64          `json:"expires_unix"`
 	CreatedUnix int64          `json:"created_unix"`
 	Replayed    bool           `json:"replayed"`
+	// AmountStars remains the actual external XTR amount. Gross is their sum.
+	BonusDiscountStars int64 `json:"bonus_discount_stars,omitempty"`
 }
 
 type TelegramPayment struct {
@@ -154,6 +158,7 @@ type TelegramWallet struct {
 	PaidStars           int64  `json:"paid_stars"`
 	BonusStars          int64  `json:"bonus_stars"`
 	AvailableBonusStars int64  `json:"available_bonus_stars"`
+	ReservedBonusStars  int64  `json:"reserved_bonus_stars"`
 	// Ledger net alone is not checkout or withdrawal capability.
 	CheckoutRedemptionEnabled bool `json:"checkout_redemption_enabled"`
 }

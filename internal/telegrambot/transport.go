@@ -10,9 +10,11 @@ import (
 	"errors"
 	"io"
 	"math"
+	"mime"
 	"mime/multipart"
 	"net"
 	"net/http"
+	"net/textproto"
 	"net/url"
 	"regexp"
 	"strconv"
@@ -236,11 +238,20 @@ type wireInvoice struct {
 	Prices        []wirePrice `json:"prices"`
 }
 type wireDocument struct {
-	ChatID  int64  `json:"chat_id"`
-	Name    string `json:"name"`
-	Content []byte `json:"content"`
-	Caption string `json:"caption,omitempty"`
+	ChatID        int64  `json:"chat_id"`
+	Name          string `json:"name"`
+	Content       []byte `json:"content"`
+	Caption       string `json:"caption,omitempty"`
+	ContentType   string `json:"content_type,omitempty"`
+	SourceContent []byte `json:"source_content,omitempty"`
+	SourceSHA256  string `json:"source_sha256,omitempty"`
+	ContentSHA256 string `json:"content_sha256,omitempty"`
 }
+
+func (m wireDocument) document() Document {
+	return Document{Name: m.Name, Content: m.Content, Caption: m.Caption, ContentType: m.ContentType, SourceContent: m.SourceContent, SourceSHA256: m.SourceSHA256, ContentSHA256: m.ContentSHA256}
+}
+
 type wirePhoto struct {
 	ChatID  int64         `json:"chat_id"`
 	Photo   string        `json:"photo"`
@@ -296,7 +307,7 @@ func (a *api) dispatch(ctx context.Context, d delivery) (DeliveryOutcome, error)
 		input = m
 	case "document":
 		var m wireDocument
-		if decodeJSON(d.Payload, &m) != nil || m.ChatID != d.ChatID || !validDocument(Document{Name: m.Name, Content: m.Content, Caption: m.Caption}) {
+		if decodeJSON(d.Payload, &m) != nil || m.ChatID != d.ChatID || !validDocument(m.document()) || (m.ContentType == "image/png" && (d.Proof == nil || m.SourceSHA256 != d.Proof.SHA256 || !hexDigest(d.Proof.TermsSHA256) || d.Proof.ExpiresUnixNano <= time.Now().UnixNano())) {
 			return DeliveryOutcome{State: "failed", Reason: "payload_rejected"}, ErrProtocol
 		}
 		method = "sendDocument"
@@ -374,17 +385,6 @@ func (a *api) dispatch(ctx context.Context, d delivery) (DeliveryOutcome, error)
 	return DeliveryOutcome{State: "sent", MessageID: id}, nil
 }
 
-func validDocument(d Document) bool {
-	if len(d.Name) < 5 || len(d.Name) > 64 || !strings.HasSuffix(d.Name, ".txt") || len(d.Content) < 1 || len(d.Content) > 32768 || !utf8.Valid(d.Content) || (d.Caption != "" && !validText(d.Caption, 1024)) {
-		return false
-	}
-	for _, c := range d.Name {
-		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '_' || c == '-' || c == '.') {
-			return false
-		}
-	}
-	return true
-}
 func (a *api) sendDocument(ctx context.Context, d wireDocument) (json.RawMessage, error) {
 	var body bytes.Buffer
 	form := multipart.NewWriter(&body)
@@ -393,7 +393,19 @@ func (a *api) sendDocument(ctx context.Context, d wireDocument) (json.RawMessage
 			return nil, ErrProtocol
 		}
 	}
-	part, err := form.CreateFormFile("document", d.Name)
+	contentType := d.ContentType
+	if contentType == "" {
+		contentType = "text/plain; charset=utf-8"
+	}
+	if contentType == "image/png" {
+		if err := form.WriteField("disable_content_type_detection", "true"); err != nil {
+			return nil, ErrProtocol
+		}
+	}
+	header := make(textproto.MIMEHeader)
+	header.Set("Content-Disposition", mime.FormatMediaType("form-data", map[string]string{"name": "document", "filename": d.Name}))
+	header.Set("Content-Type", contentType)
+	part, err := form.CreatePart(header)
 	if err != nil {
 		return nil, ErrProtocol
 	}

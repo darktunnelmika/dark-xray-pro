@@ -576,8 +576,11 @@ func (j *journal) complete(ctx context.Context, in Incoming, access Access, resu
 		if !validDocument(*v) {
 			return ErrProtocol
 		}
+		if v.ContentType == "image/png" && (result.Delivery == nil || v.SourceSHA256 != result.Delivery.SHA256) {
+			return ErrProtocol
+		}
 		kind = "document"
-		payload, err = json.Marshal(wireDocument{ChatID: in.Identity.ChatID, Name: v.Name, Content: v.Content, Caption: v.Caption})
+		payload, err = json.Marshal(wireDocument{ChatID: in.Identity.ChatID, Name: v.Name, Content: v.Content, Caption: v.Caption, ContentType: v.ContentType, SourceContent: v.SourceContent, SourceSHA256: v.SourceSHA256, ContentSHA256: v.ContentSHA256})
 	} else if result.Invoice != nil {
 		v := result.Invoice
 		if v.Currency != "XTR" || v.Amount <= 0 || v.Amount > 1_000_000_000 || !validText(v.Title, 32) || !validText(v.Description, 255) || !validOpaque(v.Payload, 128) {
@@ -766,6 +769,15 @@ func (j *journal) nextDelivery(ctx context.Context, botID int64) (delivery, bool
 		d.Proof = &proof
 	} else if !errors.Is(err, sql.ErrNoRows) {
 		return delivery{}, false, ErrJournal
+	}
+	if d.Kind == "document" {
+		var m wireDocument
+		if decodeJSON(d.Payload, &m) != nil || !validDocument(m.document()) {
+			return delivery{}, false, ErrJournal
+		}
+		if m.ContentType == "image/png" && (d.Proof == nil || m.SourceSHA256 != d.Proof.SHA256) {
+			return delivery{}, false, ErrJournal
+		}
 	}
 	return d, true, nil
 }

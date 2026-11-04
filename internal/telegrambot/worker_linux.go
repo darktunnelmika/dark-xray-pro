@@ -125,7 +125,7 @@ func (w *Worker) runBot(parent context.Context, a *api) error {
 			stop()
 			lastMaintenance = time.Now()
 			if err != nil {
-				w.problem(a.botID, "rewards_maintenance_unavailable")
+				w.problem(a.botID, "commerce_maintenance_unavailable")
 			} else {
 				w.problem(a.botID, "")
 			}

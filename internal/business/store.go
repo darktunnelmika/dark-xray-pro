@@ -325,6 +325,9 @@ func Open(path string) (*Store, error) {
 	if err = s.restoreUsageLedger(context.Background()); err != nil {
 		return fail(err)
 	}
+	if err = s.VerifyTelegramBonusV1(context.Background()); err != nil {
+		return fail(err)
+	}
 	return s, nil
 }
 func bootstrap(db *sql.DB) error {

@@ -31,6 +31,9 @@ func (s *Server) EnableTelegramBotsV1(ctx context.Context) error {
 	if err := s.business.EnableTelegramRewardsV1(ctx); err != nil {
 		return err
 	}
+	if err := s.business.EnableTelegramBonusV1(ctx); err != nil {
+		return err
+	}
 	s.telegramBotsV1Enabled = true
 	return nil
 }

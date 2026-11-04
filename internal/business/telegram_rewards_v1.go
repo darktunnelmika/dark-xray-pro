@@ -529,6 +529,12 @@ func telegramSettleReferralRewardTx(ctx context.Context, tx *sql.Tx, o telegramR
 			if amount > p.MaxPerOrderStars {
 				amount = p.MaxPerOrderStars
 			}
+			// A new discounted order cannot mint a fixed reward larger than its
+			// actual external payment. Legacy full-price orders/grants retain
+			// their frozen policy semantics and are never rewritten.
+			if o.Receipt.Order.BonusDiscountStars > 0 && amount > o.AmountStars {
+				amount = o.AmountStars
+			}
 			var committed int64
 			if err = tx.QueryRowContext(ctx, `SELECT COALESCE(SUM(g.amount_stars),0) FROM telegram_rewards_grants g WHERE g.store_id=? AND g.referrer_customer_id=? AND NOT EXISTS(SELECT 1 FROM telegram_rewards_reversals r WHERE r.order_id=g.order_id)`, o.StoreID, attr.ReferrerCustomerID).Scan(&committed); err != nil {
 				return out, err

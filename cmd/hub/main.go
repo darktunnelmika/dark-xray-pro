@@ -449,6 +449,7 @@ func main() {
 		commerceBackend.SupportEnabled = true
 		commerceBackend.CampaignsEnabled = true
 		commerceBackend.RewardsEnabled = true
+		commerceBackend.BonusEnabled = true
 		if os.Getenv("DARK_PRO_ENABLE_INBOUND_EXECUTION") == "1" {
 			key, keyErr := hex.DecodeString(os.Getenv("DARK_PRO_NATIVE_INBOUND_KEY_HEX"))
 			if keyErr != nil || len(key) != 32 {

@@ -41,6 +41,8 @@ type backupSchemaObject [4]string
 
 func backupSchemaGroup(name string) string {
 	switch {
+	case strings.HasPrefix(name, "telegram_bonus_"):
+		return "telegram_bonus"
 	case strings.HasPrefix(name, "telegram_commerce_"):
 		return "telegram_commerce"
 	case strings.HasPrefix(name, "telegram_support_"):
@@ -220,6 +222,7 @@ func validateOfflineBackupDB(ctx context.Context, db *sql.DB) (BackupValidation,
 		{"telegram_support", "telegram_support_", telegramSupportSchemaV1},
 		{"telegram_campaign", "telegram_campaign_", telegramCampaignSchemaV1},
 		{"telegram_rewards", "telegram_rewards_", telegramRewardsSchemaV1},
+		{"telegram_bonus", "telegram_bonus_", telegramBonusSchemaV1},
 	} {
 		if len(groups[extension.group]) == 0 {
 			continue

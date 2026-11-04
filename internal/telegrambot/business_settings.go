@@ -90,14 +90,14 @@ func referralPolicyText(lang string, p business.TelegramReferralPolicyV1) string
 	if p.Mode == "percent_bps" {
 		rate = fmt.Sprintf("%.2f%% / %.2f%%", float64(p.FirstPurchase)/100, float64(p.RepeatPurchase)/100)
 	}
-	return fmt.Sprintf(tr(lang, "🎁 <b>سیاست دعوت</b>\nوضعیت: %s\nخرید اول / خریدهای بعدی: %s\nسقف هر سفارش: %d XTR\nسقف هر معرف: %d XTR\nزمان انتظار: %d ساعت\nمهلت دعوت: %d روز\nپایان طرح: %s\n\nپاداش، اعتبار تبلیغاتی فروشگاه است؛ مصرف آن در پرداخت و برداشت نقدی فعال نیست. شروط دعوت‌های قبلی حفظ می‌شوند.", "🎁 <b>Referral policy</b>\nState: %s\nFirst / repeat purchase: %s\nPer-order cap: %d XTR\nPer-referrer cap: %d XTR\nHold: %d hours\nAttribution window: %d days\nPolicy end: %s\n\nRewards are promotional store credit. Checkout redemption and cash withdrawal are not enabled. Existing invitations retain their original terms."), state, rate, p.MaxPerOrderStars, p.PerReferrerCapStars, p.HoldHours, p.AttributionDays, expiry)
+	return fmt.Sprintf(tr(lang, "🎁 <b>سیاست دعوت</b>\nوضعیت: %s\nخرید اول / خریدهای بعدی: %s\nسقف هر سفارش: %d XTR\nسقف هر معرف: %d XTR\nزمان انتظار: %d ساعت\nمهلت دعوت: %d روز\nپایان طرح: %s\n\nپاداش، اعتبار تبلیغاتی فروشگاه است. استفاده از آن در خرید به تنظیم «تخفیف با پاداش» بستگی دارد؛ برداشت نقدی فعال نیست. شروط دعوت‌های قبلی حفظ می‌شوند.", "🎁 <b>Referral policy</b>\nState: %s\nFirst / repeat purchase: %s\nPer-order cap: %d XTR\nPer-referrer cap: %d XTR\nHold: %d hours\nAttribution window: %d days\nPolicy end: %s\n\nRewards are promotional store credit. Checkout use depends on the Bonus discount policy; cash withdrawal is not enabled. Existing invitations retain their original terms."), state, rate, p.MaxPerOrderStars, p.PerReferrerCapStars, p.HoldHours, p.AttributionDays, expiry)
 }
 
 func (b *BusinessBackend) settings(ctx context.Context, r Request, name string) (Result, error) {
 	if !r.Access.Has("manage_store") {
 		return Result{}, ErrAccess
 	}
-	if strings.HasPrefix(name, "referral_policy") && !r.Access.Has("finance") {
+	if (strings.HasPrefix(name, "referral_policy") || strings.HasPrefix(name, "bonus_policy")) && !r.Access.Has("finance") {
 		return Result{}, ErrAccess
 	}
 	a := actor(r.Access.Identity)
@@ -109,8 +109,38 @@ func (b *BusinessBackend) settings(ctx context.Context, r Request, name string) 
 		if b.RewardsEnabled && r.Access.Has("finance") {
 			rows = append(rows, []Button{actionButton(tr(lang, "🎁 سیاست پاداش دعوت", "🎁 Referral reward policy"), "", "referral_policy", "", "")})
 		}
+		if b.BonusEnabled && r.Access.Has("finance") {
+			rows = append(rows, []Button{actionButton(tr(lang, "💳 تخفیف با پاداش", "💳 Bonus discount policy"), "", "bonus_policy", "", "")})
+		}
 		rows = append(rows, []Button{backButton(lang, "manage", "", "")})
 		return oneScreen(tr(lang, "⚙️ <b>تنظیمات فروشگاه</b>\nتغییرها فقط در همین فروشگاه اعمال می‌شوند.", "⚙️ <b>Store settings</b>\nChanges apply only to this store."), rows), nil
+	case "bonus_policy":
+		if !b.BonusEnabled {
+			return Result{}, ErrAccess
+		}
+		p, err := b.store.GetTelegramBonusPolicyV1(ctx, a)
+		if err != nil {
+			return Result{}, err
+		}
+		label := tr(lang, "فعال‌کردن استفاده از پاداش", "Enable bonus discounts")
+		if p.Enabled {
+			label = tr(lang, "غیرفعال‌کردن استفاده از پاداش", "Disable bonus discounts")
+		}
+		change := business.TelegramBonusPolicyChangeV1{ExpectedRevision: p.Revision, Enabled: !p.Enabled}
+		return oneScreen(bonusPolicyText(lang, p.Enabled), [][]Button{{actionButton(label, "primary", "bonus_policy_preview", "", settingsValue(change))}, {back}}), nil
+	case "bonus_policy_preview", "bonus_policy_confirm":
+		var change business.TelegramBonusPolicyChangeV1
+		if !b.BonusEnabled || len(r.Action.Value) > 1024 || decodeStrictJSON([]byte(r.Action.Value), &change) != nil || change.ExpectedRevision < 0 {
+			return Result{}, ErrProtocol
+		}
+		if name == "bonus_policy_preview" {
+			return oneScreen(bonusPolicyText(lang, change.Enabled)+"\n\n"+tr(lang, "تنظیم جدید را پیش از ذخیره بررسی کنید.", "Review the new setting before saving."), [][]Button{{actionButton(tr(lang, "✅ ذخیرهٔ همین تنظیم", "✅ Save this setting"), "success", "bonus_policy_confirm", "", settingsValue(change))}, {backButton(lang, "bonus_policy", "", "")}}), nil
+		}
+		change.EventID = r.EventID
+		if _, err := b.store.SetTelegramBonusPolicyV1(ctx, a, change); err != nil {
+			return Result{}, err
+		}
+		return Result{Receipt: true, ClearInput: true, Screen: &Screen{Text: tr(lang, "تنظیم تخفیف با پاداش ذخیره شد.", "Bonus discount policy saved."), Buttons: [][]Button{{backButton(lang, "bonus_policy", "", "")}}}}, nil
 	case "trial_policy":
 		p, err := b.store.GetTelegramTrialPolicy(ctx, a)
 		if err != nil {

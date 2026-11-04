@@ -85,5 +85,8 @@ func (s *Store) TelegramWallet(ctx context.Context, a TelegramActor) (TelegramWa
 	if out.BonusStars > 0 {
 		out.AvailableBonusStars = out.BonusStars
 	}
+	if err = telegramBonusWalletTx(ctx, tx, access, &out); err != nil {
+		return TelegramWallet{}, err
+	}
 	return out, nil
 }

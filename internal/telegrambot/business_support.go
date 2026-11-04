@@ -15,7 +15,28 @@ func (b *BusinessBackend) support(ctx context.Context, r Request, name string) (
 	a := actor(r.Access.Identity)
 	lang := r.Language
 	back := backButton(lang, "tickets", "", "")
+	if r.Access.Has("support") {
+		back = backButton(lang, "support_queue", "", "")
+	}
 	switch name {
+	case "representative_apply", "representative_application_input":
+		if r.Access.RepresentativeID != "owner" || r.Access.Role != "customer" {
+			return Result{}, ErrAccess
+		}
+		if name == "representative_apply" {
+			out := oneScreen(tr(lang, "🤝 <b>درخواست نمایندگی</b>\nنام و توضیح کوتاهی دربارهٔ فعالیت و نیاز خود بفرستید. درخواست برای بررسی در پشتیبانی هاب ثبت می‌شود و پاسخ را در همین ربات پیگیری می‌کنید.", "🤝 <b>Representative application</b>\nSend your name and a short description of your business and requirements. HUB support will review your request; follow the reply in this bot."), [][]Button{{homeButton(lang)}})
+			out.Input = &Action{Name: "representative_application_input"}
+			return out, nil
+		}
+		body := strings.TrimSpace(r.Incoming.Text)
+		if r.Incoming.Kind != "message" || !validText(body, 3500) {
+			return Result{}, ErrProtocol
+		}
+		receipt, err := b.store.TelegramCreateTicketV1(ctx, a, business.TelegramTicketCreateV1{EventID: r.EventID, Subject: tr(lang, "درخواست نمایندگی", "Representative application"), Text: body})
+		if err != nil {
+			return Result{}, err
+		}
+		return Result{Receipt: true, ClearInput: true, Screen: &Screen{Text: tr(lang, "✅ درخواست نمایندگی برای بررسی ثبت شد.", "✅ Your representative application was submitted for review."), Buttons: [][]Button{{actionButton(tr(lang, "پیگیری درخواست", "Track application"), "primary", "ticket", receipt.Ticket.ID, "")}, {homeButton(lang)}}}}, nil
 	case "tickets", "support_queue":
 		own := name != "support_queue"
 		if !own && !r.Access.Has("support") {
@@ -28,7 +49,7 @@ func (b *BusinessBackend) support(ctx context.Context, r Request, name string) (
 		}
 		rows := [][]Button{}
 		for _, t := range tickets[:min(8, len(tickets))] {
-			rows = append(rows, []Button{actionButton(clipped(t.Subject, 70)+" · "+t.Status, "", "ticket", t.ID, "")})
+			rows = append(rows, []Button{actionButton(clipped(t.Subject, 70)+" · "+ticketState(lang, t.Status), "", "ticket", t.ID, "")})
 		}
 		if offset > 0 {
 			rows = append(rows, []Button{actionButton(tr(lang, "قبلی", "Previous"), "", name, "", strconv.Itoa(max(0, offset-8)))})
@@ -70,7 +91,7 @@ func (b *BusinessBackend) support(ctx context.Context, r Request, name string) (
 			return Result{}, err
 		}
 		return Result{Receipt: true, ClearInput: true, Screen: &Screen{Text: tr(lang, "✅ پاسخ ثبت شد.", "✅ Reply recorded."), Buttons: [][]Button{{actionButton(tr(lang, "مشاهدهٔ تیکت", "View ticket"), "primary", "ticket", receipt.Ticket.ID, "")}, {back}}}}, nil
-	case "ticket_close":
+	case "ticket_close", "ticket_reopen", "ticket_claim", "ticket_unassign":
 		t, err := b.store.TelegramTicketByIDV1(ctx, a, r.Action.Resource)
 		if err != nil {
 			return Result{}, err
@@ -79,11 +100,32 @@ func (b *BusinessBackend) support(ctx context.Context, r Request, name string) (
 		if err != nil {
 			return Result{}, ErrProtocol
 		}
-		_, err = b.store.TelegramSetTicketStateV1(ctx, a, business.TelegramTicketChangeV1{EventID: r.EventID, TicketID: t.ID, ExpectedRevision: revision, Status: "closed", AssignedTelegramUserID: t.AssignedTelegramUserID})
+		status, assignee := t.Status, t.AssignedTelegramUserID
+		message := tr(lang, "تیکت بسته شد.", "Ticket closed.")
+		switch name {
+		case "ticket_close":
+			status = "closed"
+		case "ticket_reopen":
+			status = "open"
+			message = tr(lang, "تیکت دوباره باز شد؛ می‌توانید گفتگو را ادامه دهید.", "Ticket reopened. You can continue the conversation.")
+		case "ticket_claim":
+			if !r.Access.Has("support") || t.Status == "closed" || assignee != 0 && assignee != r.Access.Identity.UserID {
+				return Result{}, ErrAccess
+			}
+			assignee = r.Access.Identity.UserID
+			message = tr(lang, "پیگیری تیکت به شما سپرده شد.", "You are now assigned to this ticket.")
+		case "ticket_unassign":
+			if !r.Access.Has("support") || assignee != r.Access.Identity.UserID {
+				return Result{}, ErrAccess
+			}
+			assignee = 0
+			message = tr(lang, "تیکت به صف رسیدگی برگشت.", "Ticket returned to the support queue.")
+		}
+		_, err = b.store.TelegramSetTicketStateV1(ctx, a, business.TelegramTicketChangeV1{EventID: r.EventID, TicketID: t.ID, ExpectedRevision: revision, Status: status, AssignedTelegramUserID: assignee})
 		if err != nil {
 			return Result{}, err
 		}
-		return Result{Receipt: true, ClearInput: true, Screen: &Screen{Text: tr(lang, "تیکت بسته شد.", "Ticket closed."), Buttons: [][]Button{{back}}}}, nil
+		return Result{Receipt: true, ClearInput: true, Screen: &Screen{Text: message, Buttons: [][]Button{{actionButton(tr(lang, "مشاهدهٔ تیکت", "View ticket"), "primary", "ticket", t.ID, "")}, {back}}}}, nil
 	case "ticket":
 		t, err := b.store.TelegramTicketByIDV1(ctx, a, r.Action.Resource)
 		if err != nil {
@@ -94,7 +136,10 @@ func (b *BusinessBackend) support(ctx context.Context, r Request, name string) (
 		if err != nil {
 			return Result{}, err
 		}
-		text := "<b>" + escaped(t.Subject) + "</b>\n" + tr(lang, "وضعیت: ", "Status: ") + escaped(t.Status)
+		text := "<b>" + escaped(t.Subject) + "</b>\n" + tr(lang, "وضعیت: ", "Status: ") + escaped(ticketState(lang, t.Status))
+		if r.Access.Has("support") && t.AssignedTelegramUserID > 0 {
+			text += "\n" + tr(lang, "مسئول رسیدگی: ", "Assigned supporter: ") + strconv.FormatInt(t.AssignedTelegramUserID, 10)
+		}
 		rows := [][]Button{}
 		if len(messages) > 0 {
 			m := messages[0]
@@ -129,11 +174,35 @@ func (b *BusinessBackend) support(ctx context.Context, r Request, name string) (
 		rows = append(rows, []Button{actionButton(tr(lang, "تازه‌سازی گفتگو", "Refresh thread"), "", "ticket", t.ID, fmt.Sprintf("%d:%d", offset, part))})
 		if t.Status != "closed" {
 			rows = append(rows, []Button{actionButton(tr(lang, "✍️ پاسخ", "✍️ Reply"), "primary", "ticket_reply", t.ID, ""), actionButton(tr(lang, "بستن تیکت", "Close ticket"), "", "ticket_close", t.ID, strconv.FormatInt(t.Revision, 10))})
+			if r.Access.Has("support") {
+				if t.AssignedTelegramUserID == 0 {
+					rows = append(rows, []Button{actionButton(tr(lang, "🙋 قبول پیگیری", "🙋 Assign to me"), "", "ticket_claim", t.ID, strconv.FormatInt(t.Revision, 10))})
+				} else if t.AssignedTelegramUserID == r.Access.Identity.UserID {
+					rows = append(rows, []Button{actionButton(tr(lang, "بازگرداندن به صف", "Return to queue"), "", "ticket_unassign", t.ID, strconv.FormatInt(t.Revision, 10))})
+				}
+			}
+		} else {
+			rows = append(rows, []Button{actionButton(tr(lang, "🔓 بازگشایی تیکت", "🔓 Reopen ticket"), "primary", "ticket_reopen", t.ID, strconv.FormatInt(t.Revision, 10))})
 		}
 		rows = append(rows, []Button{back})
 		return oneScreen(text, rows), nil
 	}
 	return Result{}, ErrProtocol
+}
+
+func ticketState(lang, state string) string {
+	switch state {
+	case "open":
+		return tr(lang, "باز", "Open")
+	case "waiting_support":
+		return tr(lang, "منتظر پشتیبانی", "Waiting for support")
+	case "waiting_customer":
+		return tr(lang, "منتظر پاسخ شما", "Waiting for customer")
+	case "closed":
+		return tr(lang, "بسته‌شده", "Closed")
+	default:
+		return tr(lang, "نیازمند بررسی", "Requires review")
+	}
 }
 
 func (b *BusinessBackend) campaigns(ctx context.Context, r Request, name string) (Result, error) {
@@ -330,13 +399,15 @@ func (b *BusinessBackend) rewards(ctx context.Context, r Request, name string) (
 		}
 		text := fmt.Sprintf(tr(lang, "🎁 <b>معرفی به دوستان</b>\nدعوت‌شده‌ها: %d\nخرید واجد شرایط: %d\nپاداش در انتظار: %d ⭐\nپاداش آزادشده: %d ⭐\n۳۰ روز اخیر: %d ⭐", "🎁 <b>Invite friends</b>\nInvited customers: %d\nQualifying purchases: %d\nPending rewards: %d ⭐\nReleased rewards: %d ⭐\nLast 30 days: %d ⭐"), s.InvitedCustomers, s.QualifiedPurchases, s.PendingStars, s.ReleasedStars, s.Recent30DayStars)
 		rows := [][]Button{}
-		if s.Policy.Enabled && r.Incoming.BotUsername != "" {
+		if s.Policy.Enabled && (s.Policy.ExpiresUnix == 0 || s.Policy.ExpiresUnix > time.Now().Unix()) && r.Incoming.BotUsername != "" {
 			link := "https://t.me/" + r.Incoming.BotUsername + "?start=" + url.QueryEscape(s.StartPayload)
 			text += "\n\n<code>" + escaped(link) + "</code>\n" + tr(lang, "پاداش پس از پرداخت، آماده‌شدن و تحویل تأییدشدهٔ سرویس و زمان انتظار آزاد می‌شود.", "Rewards release after payment, verified service delivery and the configured hold period.")
 			rows = append(rows, []Button{{Text: tr(lang, "📋 کپی لینک دعوت", "📋 Copy invite link"), CopyText: link}}, []Button{{Text: tr(lang, "↗️ معرفی به دوستان", "↗️ Share with friends"), URL: "https://t.me/share/url?url=" + url.QueryEscape(link)}})
 		} else {
 			text += "\n\n" + tr(lang, "دعوت پاداش‌دار اکنون فعال نیست.", "Rewarded invitations are not currently enabled.")
 		}
+		text += "\n\n" + referralPolicyText(lang, s.Policy)
+		rows = append(rows, []Button{actionButton(tr(lang, "💳 کیف پاداش", "💳 Reward wallet"), "", "wallet", "", "")})
 		rows = append(rows, []Button{homeButton(lang)})
 		return oneScreen(text, rows), nil
 	}
@@ -356,7 +427,7 @@ func (b *BusinessBackend) rewards(ctx context.Context, r Request, name string) (
 	if nav := pageButtons(lang, "rewards", "", offset, offset+len(items)); len(nav) > 0 {
 		rows = append(rows, nav)
 	}
-	rows = append(rows, []Button{homeButton(lang)})
+	rows = append(rows, []Button{actionButton(tr(lang, "💳 کیف پاداش", "💳 Reward wallet"), "", "wallet", "", ""), homeButton(lang)})
 	return oneScreen(text, rows), nil
 }
 

@@ -25,7 +25,7 @@ for tool in git go node npm sha256sum find sort xargs install grep; do
   command -v "$tool" >/dev/null || fail "required builder tool not found: $tool"
 done
 [[ ! -e release ]] || fail "release directory already exists; use a fresh checkout"
-mkdir -p release/bin release/scripts release/ops/systemd release/ops/nginx
+mkdir -p release/bin release/scripts release/ops/systemd release/ops/nginx release/ops/licenses
 
 # A release is built in CI, never by the installed server. Build frontend FIRST
 # so one binary contains exactly this source revision's compiled UI.
@@ -56,6 +56,7 @@ install -m 0755 internal/nodebootstrap/install-new-pro-node.sh release/scripts/i
 install -m 0644 ops/systemd/dark-xray-pro-backup-worker.service release/ops/systemd/dark-xray-pro-backup-worker.service
 install -m 0644 ops/nginx/business-management.conf release/ops/nginx/business-management.conf
 install -m 0644 ops/nginx/native-backups.conf release/ops/nginx/native-backups.conf
+install -m 0644 third_party/go-qrcode/LICENSE release/ops/licenses/go-qrcode-LICENSE
 
 # Generated UI and the fixed release directory are explicitly ignored. Any
 # other source change (including an untracked lockfile) must refuse the bundle.

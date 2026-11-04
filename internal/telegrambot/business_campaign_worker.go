@@ -73,8 +73,12 @@ func (b *BusinessBackend) FinishCampaign(ctx context.Context, task campaignTask,
 }
 
 func (b *BusinessBackend) Maintain(ctx context.Context, botID int64) error {
-	if !b.RewardsEnabled {
-		return nil
+	var bonusErr, rewardErr error
+	if b.BonusEnabled {
+		_, bonusErr = b.store.ReleaseExpiredTelegramBonusQuotesV1(ctx, botID, 25)
 	}
-	return b.store.TelegramSettleDueRewardsV1(ctx, botID, 25)
+	if b.RewardsEnabled {
+		rewardErr = b.store.TelegramSettleDueRewardsV1(ctx, botID, 25)
+	}
+	return errors.Join(bonusErr, rewardErr)
 }

@@ -41,6 +41,9 @@ func homeScreen(a Access, lang string, support, campaigns, rewards bool) *Screen
 	}
 	if support {
 		rows = append(rows, []Button{actionButton(tr(lang, "💬 پشتیبانی", "💬 Support"), "", "tickets", "", "")})
+		if a.Role == "customer" && a.RepresentativeID == "owner" {
+			rows = append(rows, []Button{actionButton(tr(lang, "🤝 درخواست نمایندگی", "🤝 Apply for representation"), "", "representative_apply", "", "")})
+		}
 	}
 	if rewards {
 		rows = append(rows, []Button{actionButton(tr(lang, "🎁 معرفی به دوستان", "🎁 Invite friends"), "", "referral", "", ""), actionButton(tr(lang, "🏅 امتیازهای من", "🏅 My rewards"), "", "rewards", "", "")})

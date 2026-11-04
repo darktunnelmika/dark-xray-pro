@@ -351,6 +351,9 @@ func validateTelegramRewardsRowsV1(ctx context.Context, tx *sql.Tx) error {
 			if ceiling > a.Policy.MaxPerOrderStars {
 				ceiling = a.Policy.MaxPerOrderStars
 			}
+			if o.Receipt.Order.BonusDiscountStars > 0 && ceiling > o.AmountStars {
+				ceiling = o.AmountStars
+			}
 		}
 		if g.AmountStars > ceiling {
 			return ErrUnavailable

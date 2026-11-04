@@ -64,6 +64,7 @@ func validateJournalRows(ctx context.Context, db *sql.DB) error {
 		Anonymous          bool
 	}
 	parents := map[string]outboxIdentity{}
+	qrSources := map[string]string{}
 	rows, err = db.QueryContext(ctx, "SELECT id,bot_id,chat_id,kind,state,payload_json,access_json,anonymous,sent_message_id,attempts,created_unix,expires_unix FROM bot_outbox")
 	if err != nil {
 		return ErrJournal
@@ -93,6 +94,16 @@ func validateJournalRows(ctx context.Context, db *sql.DB) error {
 			if len(payload) == 0 || len(payload) > 64<<10 || validateStoredPayload(o.Kind, o.Chat, payload, o.Anonymous) != nil {
 				rows.Close()
 				return ErrJournal
+			}
+			if o.Kind == "document" {
+				var m wireDocument
+				if decodeJSON(payload, &m) != nil {
+					rows.Close()
+					return ErrJournal
+				}
+				if m.ContentType == "image/png" {
+					qrSources[id] = m.SourceSHA256
+				}
 			}
 		} else if (o.State != "sent" && o.State != "failed" && o.State != "cancelled") || len(payload) != 0 {
 			rows.Close()
@@ -135,6 +146,13 @@ func validateJournalRows(ctx context.Context, db *sql.DB) error {
 			rows.Close()
 			return ErrJournal
 		}
+		if source, present := qrSources[id]; present {
+			if source != sha {
+				rows.Close()
+				return ErrJournal
+			}
+			delete(qrSources, id)
+		}
 		switch state {
 		case "waiting":
 			if (p.State != "pending" && p.State != "dispatching") || message != 0 {
@@ -164,6 +182,9 @@ func validateJournalRows(ctx context.Context, db *sql.DB) error {
 	err = rows.Err()
 	rows.Close()
 	if err != nil {
+		return ErrJournal
+	}
+	if len(qrSources) != 0 {
 		return ErrJournal
 	}
 	rows, err = db.QueryContext(ctx, "SELECT token_hash,bot_id,user_id,chat_id,message_id,access_digest,action_json,outbox_id,expires_unix FROM bot_callbacks")
@@ -253,7 +274,7 @@ func validateStoredPayload(kind string, chat int64, raw []byte, anonymous bool) 
 		}
 	case "document":
 		var m wireDocument
-		if decodeJSON(raw, &m) != nil || m.ChatID != chat || !validDocument(Document{Name: m.Name, Content: m.Content, Caption: m.Caption}) {
+		if decodeJSON(raw, &m) != nil || m.ChatID != chat || !validDocument(m.document()) {
 			return ErrJournal
 		}
 	case "checkout":

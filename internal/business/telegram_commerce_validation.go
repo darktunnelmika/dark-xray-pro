@@ -123,6 +123,9 @@ func validateTelegramCommerceData(ctx context.Context, db *sql.DB) error {
 	if err = validateTelegramDeliveryDataTx(ctx, tx); err != nil {
 		return err
 	}
+	if err = validateTelegramBonusRowsV1(ctx, tx); err != nil {
+		return err
+	}
 	return nil
 }
 

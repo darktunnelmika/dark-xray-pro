@@ -21,6 +21,7 @@ type BusinessBackend struct {
 	SupportEnabled   bool
 	CampaignsEnabled bool
 	RewardsEnabled   bool
+	BonusEnabled     bool
 	Delivery         func(context.Context, business.TelegramActor, string) (business.TelegramDelivery, error)
 	DeliveryAck      func(context.Context, business.TelegramActor, DeliveryProof, int64) error
 }
@@ -138,7 +139,7 @@ func (b *BusinessBackend) Handle(ctx context.Context, r Request) (Result, error)
 		if err != nil || !policy.Enabled {
 			return Result{}, ErrAccess
 		}
-		return oneScreen(fmt.Sprintf(tr(lang, "🧪 تست رایگان: %d بایت · یک اتصال\n۲۴ ساعت از زمان صدور؛ آماده‌شدن اتصال جداگانه بررسی می‌شود.", "🧪 Free trial: %d bytes · one connection\n24 hours from issuance; connection readiness is verified separately."), policy.VolumeBytes), [][]Button{{actionButton(tr(lang, "دریافت تست", "Claim trial"), "success", "trial_claim", "", "")}, {homeButton(lang)}}), nil
+		return oneScreen(fmt.Sprintf(tr(lang, "🧪 تست رایگان: %s · یک اتصال\n۲۴ ساعت از زمان صدور؛ آماده‌شدن اتصال جداگانه بررسی می‌شود.", "🧪 Free trial: %s · one connection\n24 hours from issuance; connection readiness is verified separately."), formatBytes(lang, policy.VolumeBytes)), [][]Button{{actionButton(tr(lang, "دریافت تست", "Claim trial"), "success", "trial_claim", "", "")}, {homeButton(lang)}}), nil
 	case "trial_claim":
 		service, err := b.store.ClaimTelegramTrial(ctx, a, r.EventID)
 		if err != nil {
@@ -150,26 +151,21 @@ func (b *BusinessBackend) Handle(ctx context.Context, r Request) (Result, error)
 			return Result{}, ErrAccess
 		}
 		return Result{ClearInput: true, Screen: managementScreen(current, lang, b.SupportEnabled, b.CampaignsEnabled)}, nil
-	case "settings", "trial_policy", "trial_policy_input", "trial_policy_confirm", "referral_policy", "referral_policy_input", "referral_policy_confirm":
+	case "settings", "trial_policy", "trial_policy_input", "trial_policy_confirm", "referral_policy", "referral_policy_input", "referral_policy_confirm", "bonus_policy", "bonus_policy_preview", "bonus_policy_confirm":
 		return b.settings(ctx, r, name)
-	case "products", "product", "buy", "renew", "renew_list", "services", "service":
+	case "products", "product", "buy", "buy_bonus", "renew", "renew_list", "services", "service":
 		return b.commerceScreen(ctx, r, name)
-	case "orders", "order", "order_retry", "order_fulfill", "order_service":
+	case "orders", "order", "order_retry", "order_fulfill", "order_service", "bonus_cancel_preview", "bonus_cancel":
 		return b.orders(ctx, r, name)
 	case "wallet":
-		wallet, err := b.store.TelegramWallet(ctx, a)
-		if err != nil {
-			return Result{}, err
-		}
-		text := fmt.Sprintf(tr(lang, "💳 <b>دفتر اعتبار فروشگاه</b>\nاعتبار پرداختی ثبت‌شده: %d\nپاداش ثبت‌شده: %d\nواحد محاسبه: XTR\n\nاین اعداد موجودی واقعی Telegram Stars یا وجه قابل برداشت نیستند. استفاده از پاداش در پرداخت هنوز فعال نیست؛ فاکتور مبلغ کامل محصول را دارد.", "💳 <b>Store credit ledger</b>\nRecorded paid credit: %d\nRecorded bonus credit: %d\nAccounting unit: XTR\n\nThese are not your actual Telegram Stars balance or withdrawable cash. Bonus redemption at checkout is not enabled; invoices charge the full product price."), wallet.PaidStars, wallet.BonusStars)
-		return oneScreen(text, [][]Button{{homeButton(lang)}}), nil
-	case "help":
-		return oneScreen(tr(lang, "📚 <b>راهنما</b>\n\nاز «خرید سرویس» محصول را انتخاب و مشخصات و مبلغ نهایی فاکتور را بررسی کنید. برای تمدید، سرویس موجود را انتخاب کنید. وضعیت ثبت سفارش، اعمال روی نود و تحویل تنظیمات جداگانه نمایش داده می‌شود.\n\nپرداخت در این ربات با Telegram Stars است. برای اشکال پرداخت /paysupport و برای بازگشت /start را بزنید.", "📚 <b>Help</b>\n\nChoose a product under Buy service and review the invoice terms and amount. To renew, select an existing service. Order registration, node application and configuration delivery are separate states.\n\nPayments in this bot use Telegram Stars. Use /paysupport for payment help and /start for the main menu."), [][]Button{{homeButton(lang)}}), nil
-	case "delivery":
+		return b.wallet(ctx, r)
+	case "help", "help_device", "help_payment", "help_trial":
+		return b.help(r, name)
+	case "delivery", "delivery_qr":
 		return b.deliver(ctx, r)
 	case "representatives", "representative_new", "representative_input", "representative_create", "credit_prompt", "credit_input", "credit_confirm", "rep_report", "credits", "prices", "price", "price_input", "price_set", "admins", "admin", "admin_invite", "invite_prompt", "invite_input", "admin_disable", "admin_disable_confirm":
 		return b.management(ctx, r, name)
-	case "tickets", "ticket", "ticket_new", "ticket_input", "ticket_reply", "reply_input", "ticket_close", "support_queue":
+	case "tickets", "ticket", "ticket_new", "ticket_input", "ticket_reply", "reply_input", "ticket_close", "ticket_reopen", "ticket_claim", "ticket_unassign", "support_queue", "representative_apply", "representative_application_input":
 		if !b.SupportEnabled {
 			return Result{}, ErrAccess
 		}
@@ -214,6 +210,7 @@ func (b *BusinessBackend) commerceScreen(ctx context.Context, r Request, name st
 					rows := [][]Button{{actionButton(tr(lang, "🔄 تمدید", "🔄 Renew"), "success", "renew", s.Client.ID, "")}}
 					if b.Delivery != nil && b.DeliveryAck != nil {
 						rows = append(rows, []Button{actionButton(tr(lang, "📥 دریافت تنظیمات اتصال", "📥 Get connection settings"), "primary", "delivery", s.Client.ID, "")})
+						rows = append(rows, []Button{actionButton(tr(lang, "🔳 دریافت QR اتصال", "🔳 Get connection QR"), "", "delivery_qr", s.Client.ID, "")})
 					}
 					if b.SupportEnabled {
 						rows = append(rows, []Button{actionButton(tr(lang, "💬 پشتیبانی این سرویس", "💬 Service support"), "", "ticket_new", s.Client.ID, "")})
@@ -247,15 +244,23 @@ func (b *BusinessBackend) commerceScreen(ctx context.Context, r Request, name st
 	if err != nil {
 		return Result{}, err
 	}
-	if name == "buy" {
-		order, err := b.store.PrepareTelegramCheckout(ctx, a, business.TelegramCheckoutRequest{EventID: r.EventID, ProductID: r.Action.Resource, ClientID: r.Action.Value})
+	if name == "buy" || name == "buy_bonus" {
+		request := business.TelegramCheckoutRequest{EventID: r.EventID, ProductID: r.Action.Resource, ClientID: r.Action.Value}
+		if name == "buy_bonus" {
+			var selected bonusPurchase
+			if !b.BonusEnabled || len(r.Action.Value) > 1024 || decodeStrictJSON([]byte(r.Action.Value), &selected) != nil || selected.BonusStars < 1 {
+				return Result{}, ErrProtocol
+			}
+			request.ClientID, request.BonusStars = selected.ClientID, selected.BonusStars
+		}
+		order, err := b.store.PrepareTelegramCheckout(ctx, a, request)
 		if err != nil {
 			return Result{}, err
 		}
 		if order.BotID != a.BotID || order.UserID != a.UserID || order.Currency != "XTR" || order.Status != "quoted" {
 			return Result{}, ErrAccess
 		}
-		return Result{Invoice: &Invoice{Title: clipped(order.Product.Name, 32), Description: clipped(productTerms(lang, business.TelegramProduct{Product: order.Product, PriceStars: order.AmountStars}), 255), Payload: order.ID, Currency: "XTR", Amount: order.AmountStars}, Receipt: true, ClearInput: true}, nil
+		return Result{Invoice: &Invoice{Title: clipped(order.Product.Name, 32), Description: clipped(invoiceTerms(lang, order), 255), Payload: order.ID, Currency: "XTR", Amount: order.AmountStars}, Receipt: true, ClearInput: true}, nil
 	}
 	if name == "product" {
 		if r.Action.Value != "" {
@@ -266,7 +271,14 @@ func (b *BusinessBackend) commerceScreen(ctx context.Context, r Request, name st
 		}
 		for _, p := range products {
 			if p.Product.ID == r.Action.Resource {
-				return oneScreen("<b>"+escaped(p.Product.Name)+"</b>\n\n"+escaped(productTerms(lang, p)), [][]Button{{actionButton(tr(lang, "✅ ادامه به فاکتور", "✅ Continue to invoice"), "success", "buy", p.Product.ID, r.Action.Value)}, {backButton(lang, "products", "", ""), homeButton(lang)}}), nil
+				rows := [][]Button{{actionButton(tr(lang, "✅ ادامه به فاکتور", "✅ Continue to invoice"), "success", "buy", p.Product.ID, r.Action.Value)}}
+				text := "<b>" + escaped(p.Product.Name) + "</b>\n\n" + escaped(productTerms(lang, p))
+				if row, explanation := b.bonusProductChoice(ctx, r, p); len(row) > 0 {
+					rows = append(rows, row)
+					text += "\n\n" + explanation
+				}
+				rows = append(rows, []Button{backButton(lang, "products", "", ""), homeButton(lang)})
+				return oneScreen(text, rows), nil
 			}
 		}
 		return Result{}, ErrAccess
@@ -285,16 +297,15 @@ func (b *BusinessBackend) commerceScreen(ctx context.Context, r Request, name st
 	}
 	rows := [][]Button{}
 	offset := min(parsePage(r.Action.Value), len(products))
-	if name == "renew" {
-		offset = 0
-	}
 	for _, p := range products[offset:min(offset+8, len(products))] {
 		rows = append(rows, []Button{actionButton(clipped(fmt.Sprintf("%s · %d ⭐", p.Product.Name, p.PriceStars), 90), "success", "product", p.Product.ID, client)})
 	}
-	if client == "" {
-		if page := pageButtons(lang, "products", "", offset, len(products)); len(page) > 0 {
-			rows = append(rows, page)
-		}
+	pageAction := "products"
+	if client != "" {
+		pageAction = "renew"
+	}
+	if page := pageButtons(lang, pageAction, client, offset, len(products)); len(page) > 0 {
+		rows = append(rows, page)
 	}
 	rows = append(rows, []Button{homeButton(lang)})
 	return oneScreen(text, rows), nil
@@ -341,6 +352,17 @@ func (b *BusinessBackend) deliver(ctx context.Context, r Request) (Result, error
 	}
 	proof := &DeliveryProof{ClientID: d.ClientID, SHA256: d.SHA256, TermsSHA256: d.TermsSHA256, ExpiresUnixNano: d.ExpiresUnixNano}
 	caption := tr(r.Language, "تنظیمات اختصاصی سرویس شما", "Your private service configuration")
+	if r.Action.Name == "delivery_qr" {
+		document, err := prepareQRDelivery(d.Content, *proof, escaped(caption))
+		if err == nil {
+			return Result{Receipt: true, Delivery: proof, Document: document}, nil
+		}
+		if !errors.Is(err, ErrQRUnavailable) {
+			return Result{}, err
+		}
+		caption = tr(r.Language, "برای این تنظیمات QR تکی در دسترس نیست. فایل اصلی اتصال را در برنامهٔ سازگار وارد کنید.", "A single QR is not available for these settings. Import this original configuration file into a compatible app.")
+		return Result{Receipt: true, Delivery: proof, Document: &Document{Name: "dark-service.txt", Content: []byte(d.Content), Caption: escaped(caption)}}, nil
+	}
 	if len(escaped(d.Content)) < 3000 {
 		rows := [][]Button{}
 		if utf8.RuneCountInString(d.Content) <= 256 {
