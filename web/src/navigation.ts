@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
-export type Page = "overview" | "clients" | "groups" | "representatives" | "marketplace" | "finance" | "nodes" | "inbounds" | "dark-swap" | "dark-restore" | "telegram" | "backups" | "settings" | "account";
+export type Page = "overview" | "clients" | "groups" | "representatives" | "marketplace" | "finance" | "nodes" | "inbounds" | "dark-swap" | "telegram" | "backups" | "settings" | "account";
 export type Role = "owner" | "representative";
-const paths: Record<Page, string> = { overview: "/dashboard", clients: "/clients", groups: "/groups", representatives: "/representatives", marketplace: "/marketplace", finance: "/finance", nodes: "/nodes", inbounds: "/inbounds", "dark-swap": "/dark-swap", "dark-restore": "/dark-restore", telegram: "/telegram", backups: "/backups", settings: "/settings", account: "/account" };
+const paths: Record<Page, string> = { overview: "/dashboard", clients: "/clients", groups: "/groups", representatives: "/representatives", marketplace: "/marketplace", finance: "/finance", nodes: "/nodes", inbounds: "/inbounds", "dark-swap": "/dark-swap", telegram: "/telegram", backups: "/backups", settings: "/settings", account: "/account" };
 export function allowed(page: Page, role: Role): boolean { return role === "owner" || ["clients", "groups", "marketplace", "finance", "telegram", "settings", "account"].includes(page); }
 function pageAtPath(path: string): Page | undefined {
-  if (path === "/business" || path === "/dark-restore") return "clients";
+  if (path === "/business") return "clients";
   return (Object.keys(paths) as Page[]).find(page => paths[page] === path);
 }
 function fromPath(path: string, role: Role): Page {
@@ -20,7 +20,6 @@ function applicationURL(value: string): { page: Page; url: URL } | null {
     const url = new URL(value, location.origin);
     const page = pageAtPath(url.pathname);
     if (url.origin !== location.origin || !page) return null;
-    if (url.pathname === "/dark-restore") url.searchParams.set("view", "restore");
     url.pathname = paths[page];
     url.hash = "";
     return { page, url };

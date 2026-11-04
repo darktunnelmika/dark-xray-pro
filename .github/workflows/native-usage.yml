@@ -119,8 +119,6 @@ jobs:
           for e in events:
               if e.get('Output'): print(e['Output'],end='')
           PYTOPOLOGY
-      - name: Prove imported quarantine birth and real Agent TLS in an isolated namespace
-        run: bash scripts/test-darkrestore-quarantine.sh
       - name: Prove actual counters, quota filtering and same-UUID revocation
         run: go test ./internal/business -run '^TestRealPinnedUsageCountersSQLiteQuotaAndXrayRevocation$' -count=1 -v -timeout=60s
       - name: Prove continuous observation, outage fencing and preserved replay

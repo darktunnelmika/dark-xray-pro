@@ -45,29 +45,6 @@ jobs:
         with:
           go-version-file: go.mod
           cache: false
-      - name: Select the exact same-run bundled source-settlement executable
-        uses: actions/download-artifact@v4
-        with:
-          name: dark-xray-pro-lab-linux-amd64
-          path: ${{ runner.temp }}/dark-pro-lab-bundle
-      - name: Verify and extract the bundled source-settlement executable
-        shell: bash
-        run: |
-          set -euo pipefail
-          cd "$RUNNER_TEMP/dark-pro-lab-bundle"
-          sha256sum -c dark-xray-pro-lab-linux-amd64.tar.gz.sha256
-          mkdir -p "$RUNNER_TEMP/dark-pro-settlement-bundle"
-          tar --no-same-owner -xzf dark-xray-pro-lab-linux-amd64.tar.gz \
-            -C "$RUNNER_TEMP/dark-pro-settlement-bundle" \
-            ./bin/dark-pro-darkrestore-local-settlement \
-            ./bin/dark-pro-darkrestore-retirement-witness \
-            ./bin/dark-pro-darkrestore-retirement-preflight
-          test -x "$RUNNER_TEMP/dark-pro-settlement-bundle/bin/dark-pro-darkrestore-local-settlement"
-          test -x "$RUNNER_TEMP/dark-pro-settlement-bundle/bin/dark-pro-darkrestore-retirement-witness"
-          test -x "$RUNNER_TEMP/dark-pro-settlement-bundle/bin/dark-pro-darkrestore-retirement-preflight"
-          echo "DARK_PRO_TEST_SETTLEMENT_CLI=$RUNNER_TEMP/dark-pro-settlement-bundle/bin/dark-pro-darkrestore-local-settlement" >> "$GITHUB_ENV"
-          echo "DARK_PRO_TEST_RETIREMENT_WITNESS_BINARY=$RUNNER_TEMP/dark-pro-settlement-bundle/bin/dark-pro-darkrestore-retirement-witness" >> "$GITHUB_ENV"
-          echo "DARK_PRO_TEST_RETIREMENT_PREFLIGHT_BINARY=$RUNNER_TEMP/dark-pro-settlement-bundle/bin/dark-pro-darkrestore-retirement-preflight" >> "$GITHUB_ENV"
       - name: Prove active Vision streams, exact final receipts and restart replay
         env:
           DARK_PRO_TEST_FINAL_TCP: '1'
@@ -97,23 +74,6 @@ jobs:
           for e in events:
               if e.get('Output'): print(e['Output'],end='')
           PYFINAL
-      - name: Prove actual imported-client admission and exactly-once final accounting
-        env:
-          DARK_PRO_TEST_QUARANTINE_ADMISSION: '1'
-        run: bash scripts/test-darkrestore-quarantine.sh
-      - name: Reconcile a Dark Restore snapshot against an exited source and its authenticated final receipt
-        env:
-          DARK_PRO_TEST_FINAL_TCP: '1'
-        run: |
-          set -euo pipefail
-          go test -race ./internal/api -run '^TestRealPinnedDarkRestoreLocalSettlement$' -count=3 -v -timeout=300s | tee "$RUNNER_TEMP/darkrestore-local-settlement.log"
-          test "$(grep -c DARKRESTORE_LOCAL_SETTLEMENT_PASS "$RUNNER_TEMP/darkrestore-local-settlement.log")" = 3
-          test "$(grep -c DARKRESTORE_SETTLED_IMPORT_PASS "$RUNNER_TEMP/darkrestore-local-settlement.log")" = 3
-          test "$(grep -c DARKRESTORE_SIGNED_HANDOFF_PASS "$RUNNER_TEMP/darkrestore-local-settlement.log")" = 3
-          test "$(grep -c DARKRESTORE_SOURCE_RETIREMENT_PASS "$RUNNER_TEMP/darkrestore-local-settlement.log")" = 3
-          test "$(grep -c DARKRESTORE_PACKAGED_RETIREMENT_CHAIN_PASS "$RUNNER_TEMP/darkrestore-local-settlement.log")" = 3
-          test "$(grep -c DARKRESTORE_PACKAGED_RETIREMENT_APPROVAL_PASS "$RUNNER_TEMP/darkrestore-local-settlement.log")" = 3
-          test "$(grep -c DARKRESTORE_PACKAGED_RETIREMENT_EVIDENCE_PASS "$RUNNER_TEMP/darkrestore-local-settlement.log")" = 3
       - name: Active stream diagnostics
         if: failure()
         run: |
@@ -351,8 +311,6 @@ jobs:
           test "$(id -u)" -ne 0
           go test -race ./internal/usagecheckpoint ./internal/usageledger ./internal/managedxray ./internal/api ./cmd/node-agent \
             -run '^Test(UsageSettlement|AgentReplayGate)' -count=3 -timeout=120s -v
-      - name: Offline Dark Restore private-review refuses imports and protects original data
-        run: python3 scripts/test-darkrestore-review.py
       - name: Go vet
         run: go vet ./...
       - name: Compile HUB and Node Agent
@@ -441,12 +399,6 @@ jobs:
           assert sum('REAL_CLIENT_OWNERSHIP_BROWSER_PASS' in e.get('Output','') for e in events)==1
           assert not any('WARNING: DATA RACE' in e.get('Output','') for e in events)
           PYOWNERSHIP
-      - name: Import a staged offline snapshot through Clients and recover its receipt
-        working-directory: ${{ github.workspace }}
-        env:
-          DARK_PRO_TEST_DARKRESTORE_BROWSER: "1"
-          DARK_PRO_TEST_WEB_DIST: ${{ github.workspace }}/web/dist
-        run: go test -race ./internal/api -run '^TestDarkRestoreLiveBrowser$' -count=1 -v -timeout=150s
       - name: Upload failure evidence
         if: failure()
         uses: actions/upload-artifact@v4
@@ -639,17 +591,11 @@ jobs:
           test -s release/bin/dark-pro-agent
           test -s release/bin/dark-pro-owner-setup
           test -s release/bin/dark-pro-backup
+          test -z "$(find release/bin -name '*darkrestore*' -print -quit)"
           test -s release/bin/dark-pro-backup-worker
-          test -x release/bin/dark-pro-darkrestore-local-settlement
-          test -x release/bin/dark-pro-darkrestore-retirement-witness
-          test -x release/bin/dark-pro-darkrestore-retirement-preflight
           test -s release/ops/systemd/dark-xray-pro-backup-worker.service
           test -s release/ops/nginx/business-management.conf
           test -s release/ops/nginx/native-backups.conf
-          DARK_PRO_TEST_RETIREMENT_WITNESS_BINARY="$PWD/release/bin/dark-pro-darkrestore-retirement-witness" \
-            go test ./cmd/darkrestore-retirement-witness -run '^TestWitnessCLIEmitsVerifierCompatibleReceipt$' -count=1 -v
-          DARK_PRO_TEST_RETIREMENT_PREFLIGHT_BINARY="$PWD/release/bin/dark-pro-darkrestore-retirement-preflight" \
-            go test ./cmd/darkrestore-retirement-preflight -run '^TestRetirementPreflightCLIReadsCompletePinnedManifest$' -count=1 -v
       - name: Real owner HTTPS and systemd restore on disposable runner
         shell: bash
         run: |

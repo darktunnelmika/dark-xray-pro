@@ -45,7 +45,7 @@ and production publication are not proven.
 Still open: public subscription delivery and atomic route publication; complete
 Node lifecycle and real Tunnel/Dark Swap forwarding; verified IP/HWID and
 first-connection timing; strict shared multi-Node quota and operational recovery;
-Marketplace checkout and Telegram/Mini App; full Backup/Restore and Dark Restore;
+Marketplace checkout and Telegram/Mini App; full Backup/Restore;
 release security, installer, load and disaster-recovery acceptance. WARP and ad
 blocking are excluded requirements, not missing release features.
 
@@ -172,3 +172,7 @@ This is **not** subscription or Telegram production cutover functionality.
 
 Legacy group migration, real Xray Apply, historical usage attribution, Telegram bots
 and full production parity remain pending. No old service or customer is changed.
+
+## Removed product scope
+
+Dark Restore was removed by owner decision on 2026-11-04. Do not resume its import, migration, promotion or activation roadmap. See [the removal boundary](docs/DARK-RESTORE-REMOVED.md). Native Clients, Groups, accounting, Backup/Restore and Dark Swap remain in scope.

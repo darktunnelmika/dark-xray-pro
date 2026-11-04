@@ -245,3 +245,20 @@ test("client pagination survives menu changes and page reload without storing cl
   const offsets = await page.evaluate(() => Object.entries(sessionStorage).filter(([k]) => k.startsWith("dark-pro-offset:")));
   expect(offsets).toEqual([["dark-pro-offset:owner:clients", "50"]]);
 });
+
+test("removed Dark Restore has no owner UI, bookmark entry or background API calls",async({page})=>{
+ const f=await setup(page);
+ await page.setViewportSize({width:320,height:750});
+ await page.goto("/clients?view=restore");await login(page);
+ await expect(page.locator(".business-client-form")).toBeVisible();
+ await expect(page.getByText(/Dark Restore|دارک ریستور/)).toHaveCount(0);
+ await expect(page.locator('[aria-label="Dark Restore review"]')).toHaveCount(0);
+ expect(f.seen.some(p=>p.includes("/dark-restore/"))).toBe(false);
+ await page.goto("/dark-restore");
+ await expect(page.getByText(/Dark Restore|دارک ریستور/)).toHaveCount(0);
+ expect(f.seen.some(p=>p.includes("/dark-restore/"))).toBe(false);
+ await page.goto("/clients");await expect(page.locator(".business-client-form")).toBeVisible();
+ await page.getByRole("button",{name:"Open menu",exact:true}).click();
+ await expect(page.getByRole("navigation").getByRole("button",{name:"Backups",exact:true,includeHidden:true})).toHaveCount(1);
+ expect(f.seen.some(p=>p.includes("/dark-restore/"))).toBe(false);
+});

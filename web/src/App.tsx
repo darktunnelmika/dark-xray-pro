@@ -33,9 +33,8 @@ const translations = {
   en: {
     overview: "Overview", nodes: "Nodes", inbounds: "Inbounds", settings: "Settings",
     infrastructure: "Infrastructure", management: "Customer & sales", recovery: "Backup & recovery", workspaceGroup: "Account & settings",
-    "dark-swap": "Dark Swap", "dark-restore": "Dark Restore", telegram: "Telegram", backups: "Backups",
+    "dark-swap": "Dark Swap", telegram: "Telegram", backups: "Backups",
     "dark-swapTitle": "Dark Swap", "dark-swapLead": "Plan and review saved connection routes between Nodes.",
-    "dark-restoreTitle": "Dark Restore", "dark-restoreLead": "Current scope and remaining work for a separate restore workspace.",
     telegramTitle: "Telegram & MiniApp", telegramLead: "Current scope of bot connection, customer service and representative sales.",
     backupsTitle: "Backups", backupsLead: "Availability of product backup and recovery for the owner.",
     clients: "Clients", groups: "Groups", representatives: "Representatives", marketplace: "Marketplace", finance: "Finance", account: "My account",
@@ -74,9 +73,8 @@ const translations = {
   fa: {
     overview: "داشبورد", nodes: "نودها", inbounds: "اینباندها", settings: "تنظیمات",
     infrastructure: "زیرساخت", management: "مشتری و فروش", recovery: "پشتیبان و بازیابی", workspaceGroup: "حساب و تنظیمات",
-    "dark-swap": "دارک سواپ", "dark-restore": "دارک ریستور", telegram: "تلگرام", backups: "پشتیبان‌ها",
+    "dark-swap": "دارک سواپ", telegram: "تلگرام", backups: "پشتیبان‌ها",
     "dark-swapTitle": "دارک سواپ", "dark-swapLead": "طراحی و بررسی مسیرهای ذخیره‌شدهٔ اتصال میان نودها.",
-    "dark-restoreTitle": "دارک ریستور", "dark-restoreLead": "وضعیت فعلی و بخش‌های باقی‌ماندهٔ فضای مستقل ریستور.",
     telegramTitle: "تلگرام و مینی‌اپ", telegramLead: "وضعیت اتصال ربات، خدمات مشتری و فروش نمایندگان.",
     backupsTitle: "پشتیبان‌ها", backupsLead: "وضعیت پشتیبان‌گیری و بازیابی محصول با دسترسی مالک.",
     clients: "کلاینت‌ها", groups: "گروه‌ها", representatives: "نمایندگان", marketplace: "فروشگاه پلن‌ها", finance: "مالی", account: "حساب من",

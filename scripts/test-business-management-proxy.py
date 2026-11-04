@@ -110,31 +110,30 @@ location / {{ return 403; }}
                           ("/api/v1/workspace/clients/ownership/quote", {"POST"}),
                           ("/api/v1/workspace/clients/ownership/commit", {"POST"}),
                           ("/api/v1/workspace/clients/ownership/receipts/ownership-request-0001", {"GET", "HEAD"}),
-                          ("/api/v1/workspace/dark-restore/stage", {"GET", "HEAD"}),
-                          ("/api/v1/workspace/dark-restore/quote", {"POST"}),
-                          ("/api/v1/workspace/dark-restore/commit", {"POST"}),
-                          ("/api/v1/workspace/dark-restore/receipts/restore-request-0001", {"GET", "HEAD"}),
-                          ("/api/v1/workspace/dark-restore/receipts/restore-request-0001/history/0", {"GET", "HEAD"}),
-                          ("/api/v1/workspace/dark-restore/recent", {"GET", "HEAD"}),
-                          ("/api/v1/workspace/dark-restore/handoff", {"GET", "HEAD"}),
-                          ("/api/v1/workspace/dark-restore/handoff/readiness", {"GET", "HEAD"}),
-                          ("/api/v1/workspace/dark-restore/handoff/quarantine/admission/evidence", {"GET", "HEAD"}),
-                          ("/api/v1/workspace/dark-restore/handoff/quarantine/settlement", {"GET", "HEAD"}),
-                          ("/api/v1/workspace/dark-restore/handoff/quarantine/connection-check", {"GET", "HEAD", "POST"}),
-                          ("/api/v1/workspace/dark-restore/handoff/quarantine", {"POST"}),
-                          ("/api/v1/workspace/dark-restore/handoff/quarantine/admission", {"POST"}),
-                          ("/api/v1/workspace/dark-restore/handoff/attach", {"POST"}),
-                          ("/api/v1/workspace/dark-restore/handoff/prepare", {"POST"}),
-                          ("/api/v1/workspace/dark-restore/handoff/promotion", {"GET", "HEAD", "POST"}),
-                          ("/api/v1/workspace/dark-restore/handoff/apply-acceptance", {"GET", "HEAD", "POST"}),
-                          ("/api/v1/workspace/dark-restore/handoff/apply-acceptance/preview", {"POST"}),
-                          ("/api/v1/workspace/dark-restore/handoff/promotion/preview", {"POST"}))
+                          ("/api/v1/workspace/dark-restore/stage", set()),
+                          ("/api/v1/workspace/dark-restore/quote", set()),
+                          ("/api/v1/workspace/dark-restore/commit", set()),
+                          ("/api/v1/workspace/dark-restore/receipts/restore-request-0001", set()),
+                          ("/api/v1/workspace/dark-restore/receipts/restore-request-0001/history/0", set()),
+                          ("/api/v1/workspace/dark-restore/recent", set()),
+                          ("/api/v1/workspace/dark-restore/handoff", set()),
+                          ("/api/v1/workspace/dark-restore/handoff/readiness", set()),
+                          ("/api/v1/workspace/dark-restore/handoff/quarantine/admission/evidence", set()),
+                          ("/api/v1/workspace/dark-restore/handoff/quarantine/settlement", set()),
+                          ("/api/v1/workspace/dark-restore/handoff/quarantine/connection-check", set()),
+                          ("/api/v1/workspace/dark-restore/handoff/quarantine", set()),
+                          ("/api/v1/workspace/dark-restore/handoff/quarantine/admission", set()),
+                          ("/api/v1/workspace/dark-restore/handoff/attach", set()),
+                          ("/api/v1/workspace/dark-restore/handoff/prepare", set()),
+                          ("/api/v1/workspace/dark-restore/handoff/promotion", set()),
+                          ("/api/v1/workspace/dark-restore/handoff/apply-acceptance", set()),
+                          ("/api/v1/workspace/dark-restore/handoff/apply-acceptance/preview", set()),
+                          ("/api/v1/workspace/dark-restore/handoff/promotion/preview", set()))
                 for path, allowed in routes:
                     check(path, allowed)
                     check(path + "/extra/unknown", set())
                     check(path + "/", set())
-                for path in (seller + "/clients", seller + "/clients/a/extend", "/api/v1/workspace/dark-restore/handoff/quarantine/connection-check",
-                             "/api/v1/workspace/dark-restore/handoff/promotion", "/api/v1/workspace/dark-restore/handoff/promotion/preview", "/api/v1/workspace/dark-restore/handoff/apply-acceptance", "/api/v1/workspace/dark-restore/handoff/apply-acceptance/preview"):
+                for path in (seller + "/clients", seller + "/clients/a/extend"):
                     before = len(Backend.seen)
                     assert request(port, path, "POST", b"x" * 4097) == 413
                     assert len(Backend.seen) == before, "oversized order reached backend"
@@ -170,12 +169,12 @@ location / {{ return 403; }}
                 assert request(port, "/api/v1/workspace/clients/ownership/commit", "POST", b"x" * (65536 + 1)) == 413
                 assert len(Backend.seen) == before, "oversized ownership request reached backend"
                 before = len(Backend.seen)
-                assert request(port, "/api/v1/workspace/dark-restore/handoff/prepare", "POST", b"x" * 4097) == 413
-                assert request(port, "/api/v1/workspace/dark-restore/handoff/attach", "POST", b"x" * 4097) == 413
-                assert request(port, "/api/v1/workspace/dark-restore/handoff/quarantine", "POST", b"x" * 4097) == 413
-                assert request(port, "/api/v1/workspace/dark-restore/handoff/quarantine/admission", "POST", b"x" * 4097) == 413
+                assert request(port, "/api/v1/workspace/dark-restore/handoff/prepare", "POST", b"x" * 4097) == 403
+                assert request(port, "/api/v1/workspace/dark-restore/handoff/attach", "POST", b"x" * 4097) == 403
+                assert request(port, "/api/v1/workspace/dark-restore/handoff/quarantine", "POST", b"x" * 4097) == 403
+                assert request(port, "/api/v1/workspace/dark-restore/handoff/quarantine/admission", "POST", b"x" * 4097) == 403
                 assert len(Backend.seen) == before, "oversized handoff request reached backend"
-                print("BUSINESS_MANAGEMENT_PROXY_PASS: exact routes, methods, IDs, Host, Dark Restore and private-route denial")
+                print("BUSINESS_MANAGEMENT_PROXY_PASS: exact routes, methods, IDs, Host, retired Dark Restore route denial and private-route denial")
             finally:
                 process.terminate()
                 process.wait(timeout=5)

@@ -22,6 +22,7 @@ import (
 	"github.com/darktunnelmika/dark-xray-pro/internal/nodehistory"
 	"github.com/darktunnelmika/dark-xray-pro/internal/noderegistry"
 	"github.com/darktunnelmika/dark-xray-pro/internal/replacement"
+	"github.com/darktunnelmika/dark-xray-pro/internal/retiredfeatures"
 	"github.com/darktunnelmika/dark-xray-pro/internal/telegramhub"
 	"github.com/darktunnelmika/dark-xray-pro/internal/telemetry"
 	"github.com/darktunnelmika/dark-xray-pro/internal/webui"
@@ -84,14 +85,10 @@ func main() {
 	agentListen := flag.String("agent-tls-listen", "", "optional dedicated HTTPS LAB Node listener (disabled by default)")
 	agentCert := flag.String("agent-tls-cert", "", "certificate with valid IP/DNS SAN for new LAB Node listener")
 	agentKey := flag.String("agent-tls-key", "", "private key for dedicated LAB Node listener")
-	snapshot := flag.String("darkrestore-snapshot", "", "private offline SQLite copy approved for LAB import")
-	snapshotSHA := flag.String("darkrestore-sha256", "", "approved snapshot SHA-256")
-	snapshotTime := flag.Int64("darkrestore-as-of", 0, "approved snapshot review Unix time")
-	handoff := flag.String("darkrestore-signed-handoff", "", "private signed one-source settlement file")
-	handoffSHA := flag.String("darkrestore-handoff-sha256", "", "approved signed handoff SHA-256")
-	handoffPub := flag.String("darkrestore-handoff-public-key", "", "private pinned Ed25519 public key file")
-	handoffPubSHA := flag.String("darkrestore-handoff-public-key-sha256", "", "approved Ed25519 public key SHA-256")
 	flag.Parse()
+	if err := retiredfeatures.Check(os.Getenv); err != nil {
+		log.Fatal(err)
+	}
 	if os.Getenv("DARK_PRO_LAB_MODE") != "1" {
 		log.Fatal("DARK XRAY PRO is not production-ready; set DARK_PRO_LAB_MODE=1 for isolated testing only")
 	}
@@ -290,22 +287,6 @@ func main() {
 			log.Fatal("client ownership initialization failed: ", err)
 		}
 	}
-	if *snapshot != "" || *snapshotSHA != "" || *snapshotTime != 0 {
-		if !clientOwnership {
-			log.Fatal("Dark Restore import requires LAB client ownership")
-		}
-		if err := service.StageDarkRestoreImport(context.Background(), *snapshot, *snapshotSHA, *snapshotTime); err != nil {
-			log.Fatal("Dark Restore LAB snapshot could not be staged")
-		}
-	}
-	if *handoff != "" || *handoffSHA != "" || *handoffPub != "" || *handoffPubSHA != "" {
-		if !clientOwnership || *handoff == "" || *handoffSHA == "" || *handoffPub == "" || *handoffPubSHA == "" {
-			log.Fatal("Dark Restore handoff requires all pinned inputs and LAB client ownership")
-		}
-		if err := service.StageDarkRestoreLocalHandoff(context.Background(), *handoff, *handoffSHA, *handoffPub, *handoffPubSHA); err != nil {
-			log.Fatal("Dark Restore signed handoff could not be staged")
-		}
-	}
 	if sellerOrders {
 		if err := service.EnableSellerOrdersV1Lab(context.Background()); err != nil {
 			log.Fatal("private seller order accounting unavailable: ", err)
@@ -357,40 +338,6 @@ func main() {
 		}
 	} else if os.Getenv("DARK_PRO_METERED_ROUTE_NODE_ID") != "" || os.Getenv("DARK_PRO_METERED_ROUTE_INSTALLATION_ID") != "" || os.Getenv("DARK_PRO_METERED_ROUTE_XRAY_SHA256") != "" || os.Getenv("DARK_PRO_METERED_ROUTE_NODES_JSON") != "" {
 		log.Fatal("metered route scope supplied without explicit opt-in")
-	}
-	connectionCheck := os.Getenv("DARK_PRO_ENABLE_IMPORTED_CONNECTION_CHECK")
-	if connectionCheck != "" && connectionCheck != "0" && connectionCheck != "1" {
-		log.Fatal("imported connection check switch must be 0 or 1")
-	}
-	systemProbeCheck := os.Getenv("DARK_PRO_ENABLE_IMPORTED_SYSTEM_PROBE_CHECK")
-	if systemProbeCheck != "" && systemProbeCheck != "0" && systemProbeCheck != "1" {
-		log.Fatal("imported system probe check switch must be 0 or 1")
-	}
-	rawImportedVerifier := os.Getenv("DARK_PRO_IMPORTED_VERIFIER_JSON")
-	if connectionCheck == "1" || systemProbeCheck == "1" {
-		raw := rawImportedVerifier
-		if len(raw) > 100000 {
-			log.Fatal("imported verifier configuration too large")
-		}
-		var verifier managedxray.ProtocolHealthEndpoint
-		var extra any
-		decoder := json.NewDecoder(strings.NewReader(raw))
-		decoder.DisallowUnknownFields()
-		if decoder.Decode(&verifier) != nil || decoder.Decode(&extra) != io.EOF {
-			log.Fatal("invalid imported verifier configuration")
-		}
-		if systemProbeCheck == "1" {
-			if err := service.EnableDarkRestoreSystemProbeChecks(verifier); err != nil {
-				log.Fatal("imported system probe verifier refused: ", err)
-			}
-		}
-		if connectionCheck == "1" {
-			if err := service.EnableDarkRestoreCustomerConnectionChecks(verifier); err != nil {
-				log.Fatal("imported customer connection verifier refused: ", err)
-			}
-		}
-	} else if rawImportedVerifier != "" {
-		log.Fatal("imported verifier supplied without an explicit imported check switch")
 	}
 	initialHealth := os.Getenv("DARK_PRO_ENABLE_INITIAL_APPLY_HEALTH")
 	if initialHealth != "" && initialHealth != "0" && initialHealth != "1" {

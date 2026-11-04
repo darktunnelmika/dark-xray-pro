@@ -24,15 +24,11 @@ import (
 )
 
 type Server struct {
-	quarantineMu                sync.Mutex
-	quarantine                  *quarantineTransport
 	backupControl               backupControlClient
 	inboundExecution            *inboundExecutionService
 	inboundSecurity             *inboundsecurity.Service
 	inboundProbeJobs            inboundProbeQueue
 	healthEndpoint              *managedxray.ProtocolHealthEndpoint
-	darkRestoreProbeEndpoint    *managedxray.ProtocolHealthEndpoint
-	customerConnectionEndpoint  *managedxray.ProtocolHealthEndpoint
 	healthRoundsEnabled         bool // startup-only; requires the pinned health transport
 	initialApplyHealthEnabled   bool // startup-only; one promoted first Apply, no handover authority
 	labSubscriptionsEnabled     bool // startup-only; bounded N17-backed consumer delivery
@@ -52,9 +48,6 @@ type Server struct {
 	labRevisions                *labrevision.Store
 	business                    *business.Store
 	sellerQuotaV2Enabled        bool // opt-in separate authorization and private migration gate
-	darkRestoreReceipts         bool
-	darkRestoreStage            *restoreStage
-	darkRestoreHandoff          *restoreHandoffStage
 	clientOwnershipV1Enabled    bool // startup-only owner reassignment gate
 	sellerOrdersV1Enabled       bool // startup-only, requires seller management and refund supervision
 	volumeRefunds               *volumeRefundService
@@ -160,7 +153,6 @@ func (s *Server) Handler() http.Handler {
 	s.attachGroups(mux)
 	s.attachClientLifecycle(mux)
 	s.attachClientOwnership(mux)
-	s.attachDarkRestoreImport(mux)
 	s.attachClientProfileEdits(mux)
 	s.attachNativeInbounds(mux)
 	s.attachNativeInboundPlans(mux)
@@ -196,14 +188,6 @@ func (s *Server) AgentHandler() http.Handler {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		if r.TLS == nil || r.TLS.Version < tls.VersionTLS13 {
 			respond(w, http.StatusUpgradeRequired, map[string]string{"error": "tls13_required"})
-			return
-		}
-		if r.Method == http.MethodPost && r.URL.Path == "/api/v1/agent/darkrestore-runtime" {
-			s.darkRestoreRuntimeAgent(w, r)
-			return
-		}
-		if r.Method == http.MethodPost && r.URL.Path == "/api/v1/agent/darkrestore-quarantine" {
-			s.quarantineAgent(w, r)
 			return
 		}
 		if r.Method == http.MethodPost && (r.URL.Path == "/api/v1/agent/route-transactions/poll" || r.URL.Path == "/api/v1/agent/route-transactions/receipt") {

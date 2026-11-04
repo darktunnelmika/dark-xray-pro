@@ -90,9 +90,6 @@ func testRealPinnedPretrafficUsageAdmission(t *testing.T, modes []string) {
 			transactionMode := strings.HasPrefix(mode, "transaction-")
 			activeMode := strings.HasPrefix(mode, "active-") || transactionMode
 			deadline := 35 * time.Second
-			if mode == "active-restore-cutover" {
-				deadline = 85 * time.Second
-			} // Includes expiry of the real 40-second source lease.
 			ctx, cancel := context.WithTimeout(context.Background(), deadline)
 			defer cancel()
 			// Record only timing/status, never credentials or private payloads.
@@ -120,13 +117,7 @@ func testRealPinnedPretrafficUsageAdmission(t *testing.T, modes []string) {
 					}
 				})
 			}
-			var s *Server
-			var restore *localSettlementFixture
-			if mode == "active-restore-cutover" {
-				s, restore = newLocalSettlementFixture(t)
-			} else {
-				s = enabledOwner(t)
-			}
+			s := enabledOwner(t)
 			if err := s.business.EnableUsageLedger(ctx); err != nil {
 				t.Fatal(err)
 			}
@@ -135,9 +126,6 @@ func testRealPinnedPretrafficUsageAdmission(t *testing.T, modes []string) {
 				t.Fatal(err)
 			}
 			ids := []string{"admission-a", "admission-b"}
-			if restore != nil {
-				ids = []string{restore.id}
-			}
 			customers := make([]business.Client, len(ids))
 			volume := int64(1 << 20)
 			if activeMode {
@@ -147,9 +135,6 @@ func testRealPinnedPretrafficUsageAdmission(t *testing.T, modes []string) {
 				c, err := s.business.CreateClient(ctx, business.NewClient{EventID: "new-pretraffic-client-" + id, ClientID: id, RepresentativeID: "owner", Name: id, DurationDays: 30, VolumeBytes: volume})
 				if err != nil {
 					t.Fatal(err)
-				}
-				if restore != nil {
-					restore.provisionSourceUUID(t, &c)
 				}
 				customers[i] = c
 			}
@@ -468,7 +453,7 @@ func testRealPinnedPretrafficUsageAdmission(t *testing.T, modes []string) {
 				t.Fatal(err)
 			}
 			if activeMode {
-				testActiveTCPOutcome(t, ctx, s, r, options, cfg, epoch, sender, mode, birth, customers, profiles[0].PublicKey, port, origin, &finalReport, assertClosed, restore)
+				testActiveTCPOutcome(t, ctx, s, r, options, cfg, epoch, sender, mode, birth, customers, profiles[0].PublicKey, port, origin, &finalReport, assertClosed)
 				return
 			}
 			for i, c := range customers {
