@@ -12,12 +12,19 @@ import (
 // Owner-only, session-authenticated Node enrollment. Only NEW PRO Node identities
 // may be paired. This does not execute an installer, apply Xray or move clients.
 type ownerNode struct {
-	NodeID         string     `json:"node_id"`
-	Name           string     `json:"name"`
-	PairedAt       time.Time  `json:"paired_at"`
-	Status         string     `json:"status"`
-	MetricsCurrent bool       `json:"metrics_current"`
-	LastSeen       *time.Time `json:"last_seen"`
+	NodeID                string     `json:"node_id"`
+	Name                  string     `json:"name"`
+	PairedAt              time.Time  `json:"paired_at"`
+	Status                string     `json:"status"`
+	MetricsCurrent        bool       `json:"metrics_current"`
+	LastSeen              *time.Time `json:"last_seen"`
+	TransportState        string     `json:"transport_state"`
+	MetricsState          string     `json:"metrics_state"`
+	CoreState             string     `json:"core_state"`
+	AccountingState       string     `json:"accounting_state"`
+	ExecutionCurrent      bool       `json:"execution_current"`
+	ExecutionReportedAt   *time.Time `json:"execution_reported_at"`
+	ExecutionInstallation string     `json:"-"`
 }
 
 // EnableNodeHistory is an explicit isolated-PRO-only opt-in. Nothing is
@@ -41,22 +48,63 @@ func (s *Server) attachNodeManager(mux *http.ServeMux) {
 		fleet := s.snapshot()
 		current := make(map[string]ownerNode, len(fleet.Nodes))
 		for _, node := range fleet.Nodes {
-			current[node.NodeID] = ownerNode{NodeID: node.NodeID, Name: node.Name, Status: node.Status, MetricsCurrent: node.MetricsCurrent, LastSeen: node.LastSeen}
+			transport, metrics := "offline", "unavailable"
+			if node.Status == "online" {
+				transport, metrics = "connected", "stale"
+				if node.MetricsCurrent {
+					metrics = "current"
+				}
+			}
+			current[node.NodeID] = ownerNode{NodeID: node.NodeID, Name: node.Name, Status: node.Status, MetricsCurrent: node.MetricsCurrent, LastSeen: node.LastSeen, TransportState: transport, MetricsState: metrics}
+		}
+		execution, executionAvailable := map[string]ownerNode{}, false
+		if s.business != nil && len(s.inboundKey) == 32 {
+			if channels, err := s.business.ListInboundExecutionNodeChannels(r.Context(), s.inboundKey); err == nil {
+				executionAvailable = true
+				now := time.Now()
+				for _, channel := range channels {
+					status := ownerNode{
+						NodeID: channel.NodeID, CoreState: channel.HealthState, AccountingState: channel.AccountingState,
+						ExecutionInstallation: channel.InstallationID,
+					}
+					if channel.ReportedAt > 0 {
+						reported := time.Unix(0, channel.ReportedAt).UTC()
+						status.ExecutionCurrent = !reported.After(now.Add(time.Second)) && now.Sub(reported) < 15*time.Second
+						status.ExecutionReportedAt = &reported
+					}
+					execution[channel.NodeID] = status
+				}
+			}
 		}
 		rows := make([]ownerNode, 0)
 		for _, registration := range s.registry.List() {
-			row := ownerNode{NodeID: registration.NodeID, Name: registration.Name, PairedAt: registration.PairedAt, Status: "offline"}
+			row := ownerNode{
+				NodeID: registration.NodeID, Name: registration.Name, PairedAt: registration.PairedAt,
+				Status: "offline", TransportState: "offline", MetricsState: "unavailable",
+				CoreState: "unknown", AccountingState: "unknown",
+			}
 			if sample, found := current[registration.NodeID]; found {
 				row.Status = sample.Status
 				row.MetricsCurrent = sample.MetricsCurrent
 				row.LastSeen = sample.LastSeen
+				row.TransportState = sample.TransportState
+				row.MetricsState = sample.MetricsState
+			}
+			if channel, found := execution[registration.NodeID]; found && channel.ExecutionInstallation == registration.InstallationID {
+				row.CoreState = channel.CoreState
+				row.AccountingState = channel.AccountingState
+				row.ExecutionCurrent = channel.ExecutionCurrent
+				row.ExecutionReportedAt = channel.ExecutionReportedAt
+			} else if executionAvailable {
+				row.CoreState, row.AccountingState = "not_configured", "not_configured"
 			}
 			rows = append(rows, row)
 		}
 		respond(w, http.StatusOK, map[string]any{
 			"nodes": rows, "mode": "new_pro_lab_only",
-			"installer_available":   s.nodeBundle != nil,
-			"agent_transport_scope": s.nodeTransportScope,
+			"installer_available":        s.nodeBundle != nil,
+			"agent_transport_scope":      s.nodeTransportScope,
+			"execution_status_available": executionAvailable,
 		})
 	})
 	// Explicit owner-session-only download. Never serves old Nodes, Xray,
