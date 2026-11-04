@@ -67,6 +67,7 @@ type Inventory struct {
 type Options struct {
 	Root, Registry, Replacements, Staging, BusinessDB, LabRevisions string
 	NodeHistoryDB, AgentTLSCert, AgentTLSKey, OwnerReportConfig     string
+	TelegramBotsConfig                                              string
 	Listen, AgentTLSListen, Static                                  string
 	SourceRevision                                                  string
 	BuildModified                                                   bool
@@ -80,6 +81,7 @@ var resources = map[string]string{
 	"lab_revisions": "data/lab-revisions.json", "node_history": "data/node-history.sqlite",
 	"inbound_runtime": "runtime/state.enc", "owner_report_db": "bot/inbox.sqlite",
 	"owner_report_config": "config/owner-bot.json", "owner_report_token": "config/owner-bot-token",
+	"telegram_bot_config": "config/telegram-bots.json", "telegram_bot_db": "bot/telegram-journal.sqlite",
 	"agent_tls_cert": "config/agent-cert.pem", "agent_tls_key": "config/agent-key.pem",
 }
 
@@ -87,7 +89,7 @@ var knownEnvironment = strings.Fields(`DARK_PRO_LAB_MODE DARK_PRO_LAB_TOKEN
 DARK_PRO_ENABLE_BUSINESS_CORE DARK_PRO_ENABLE_USAGE_LEDGER DARK_PRO_ENABLE_NATIVE_INBOUNDS
 DARK_PRO_NATIVE_INBOUND_KEY_HEX DARK_PRO_AUTHORING_CORE_PATH DARK_PRO_AUTHORING_CORE_SHA256
 DARK_PRO_ENABLE_SELLER_MANAGEMENT_V2 DARK_PRO_ENABLE_VOLUME_REFUNDS_V1 DARK_PRO_ENABLE_SELLER_ORDERS_V1 DARK_PRO_ENABLE_CLIENT_OWNERSHIP_V1
-DARK_PRO_ENABLE_OWNER_REPORT_BOT_V1 DARK_PRO_ENABLE_REMOTE_AGENT DARK_PRO_ENABLE_NODE_HISTORY
+DARK_PRO_ENABLE_OWNER_REPORT_BOT_V1 DARK_PRO_ENABLE_TELEGRAM_BOTS_V1 DARK_PRO_ENABLE_REMOTE_AGENT DARK_PRO_ENABLE_NODE_HISTORY
 DARK_PRO_ENABLE_INBOUND_EXECUTION DARK_PRO_INBOUND_RUNTIME_DIR DARK_PRO_INBOUND_CORE_PATH
 DARK_PRO_INBOUND_CORE_SHA256 DARK_PRO_INBOUND_ENGINES_JSON DARK_PRO_ENABLE_REMOTE_METERED_ADMISSION
 DARK_PRO_NATIVE_METERED_NODE_ID DARK_PRO_ENABLE_ROUTE_TRANSACTIONS DARK_PRO_ROUTE_NODE_ID
@@ -220,6 +222,23 @@ func BuildInventory(o Options) (Inventory, error) {
 			}
 		}
 	}
+	commerceEnabled := inv.Environment["DARK_PRO_ENABLE_TELEGRAM_BOTS_V1"] == "1"
+	commerceConfigured := o.TelegramBotsConfig != ""
+	if _, e := os.Lstat(filepath.Join(o.Root, "telegram-bots")); e == nil {
+		commerceConfigured = true
+	} else if !errors.Is(e, os.ErrNotExist) {
+		return inv, ErrUnsafe
+	}
+	if commerceEnabled || commerceConfigured {
+		if o.TelegramBotsConfig != "" && o.TelegramBotsConfig != "/etc/dark-xray-pro-lab/telegram-bots/config.json" || commerceEnabled && o.TelegramBotsConfig == "" {
+			return inv, ErrUnsafe
+		}
+		for _, r := range []struct{ role, path string }{{"telegram_bot_config", "/etc/dark-xray-pro-lab/telegram-bots/config.json"}, {"telegram_bot_db", filepath.Join(o.Root, "telegram-bots/journal.sqlite")}} {
+			if add(r.role, r.path, commerceEnabled) != nil {
+				return inv, ErrUnsafe
+			}
+		}
+	}
 	sort.Slice(inv.Resources, func(i, j int) bool { return inv.Resources[i].Name < inv.Resources[j].Name })
 	return inv, ValidateArchiveInventory(inv)
 }
@@ -269,7 +288,7 @@ func ValidateArchiveInventory(inv Inventory) error {
 		}
 		roles[r.Role] = r
 		paths[r.Path] = true
-		external := r.Role == "agent_tls_cert" || r.Role == "agent_tls_key" || r.Role == "owner_report_config" || r.Role == "owner_report_token"
+		external := r.Role == "agent_tls_cert" || r.Role == "agent_tls_key" || r.Role == "owner_report_config" || r.Role == "owner_report_token" || r.Role == "telegram_bot_config"
 		if !external && !inside(inv.Root, r.Path) {
 			return ErrUnsafe
 		}
@@ -285,7 +304,7 @@ func ValidateArchiveInventory(inv Inventory) error {
 	for _, r := range []struct {
 		flag, role string
 		required   bool
-	}{{"DARK_PRO_ENABLE_NODE_HISTORY", "node_history", true}, {"DARK_PRO_ENABLE_CONFIG_STAGE", "config_stage", false}, {"DARK_PRO_ENABLE_LAB_REVISION_ROLLBACK", "lab_revisions", false}, {"DARK_PRO_ENABLE_INBOUND_EXECUTION", "inbound_runtime", true}, {"DARK_PRO_ENABLE_OWNER_REPORT_BOT_V1", "owner_report_db", true}, {"DARK_PRO_ENABLE_OWNER_REPORT_BOT_V1", "owner_report_config", true}, {"DARK_PRO_ENABLE_OWNER_REPORT_BOT_V1", "owner_report_token", true}} {
+	}{{"DARK_PRO_ENABLE_NODE_HISTORY", "node_history", true}, {"DARK_PRO_ENABLE_CONFIG_STAGE", "config_stage", false}, {"DARK_PRO_ENABLE_LAB_REVISION_ROLLBACK", "lab_revisions", false}, {"DARK_PRO_ENABLE_INBOUND_EXECUTION", "inbound_runtime", true}, {"DARK_PRO_ENABLE_OWNER_REPORT_BOT_V1", "owner_report_db", true}, {"DARK_PRO_ENABLE_OWNER_REPORT_BOT_V1", "owner_report_config", true}, {"DARK_PRO_ENABLE_OWNER_REPORT_BOT_V1", "owner_report_token", true}, {"DARK_PRO_ENABLE_TELEGRAM_BOTS_V1", "telegram_bot_config", true}, {"DARK_PRO_ENABLE_TELEGRAM_BOTS_V1", "telegram_bot_db", true}} {
 		v, present := roles[r.role]
 		enabled := e[r.flag] == "1"
 		if enabled && !present || present && v.Required != (enabled && r.required) {
@@ -316,6 +335,17 @@ func ValidateArchiveInventory(inv Inventory) error {
 		if roles["owner_report_config"].Path != "/etc/dark-xray-pro-lab/owner-report-bot/config.json" || roles["owner_report_token"].Path != "/etc/dark-xray-pro-lab/owner-report-bot/token" || roles["owner_report_db"].Path != filepath.Join(inv.Root, "owner-report-bot/inbox.sqlite") {
 			return ErrUnsafe
 		}
+	}
+	_, commerceConfig := roles["telegram_bot_config"]
+	_, commerceDB := roles["telegram_bot_db"]
+	if commerceConfig != commerceDB {
+		return ErrUnsafe
+	}
+	if commerceDB && (roles["telegram_bot_config"].Path != "/etc/dark-xray-pro-lab/telegram-bots/config.json" || roles["telegram_bot_db"].Path != filepath.Join(inv.Root, "telegram-bots/journal.sqlite")) {
+		return ErrUnsafe
+	}
+	if e["DARK_PRO_ENABLE_TELEGRAM_BOTS_V1"] == "1" && e["DARK_PRO_ENABLE_USAGE_LEDGER"] != "1" {
+		return ErrUnsafe
 	}
 	validKey := func(name string) bool {
 		v := e[name]
@@ -353,6 +383,9 @@ func ValidateArchiveInventory(inv Inventory) error {
 		}
 		botConfig, botToken, botDB := roles["owner_report_config"].Present, roles["owner_report_token"].Present, roles["owner_report_db"].Present
 		if botConfig != botToken || botDB && !botConfig {
+			return ErrUnsafe
+		}
+		if roles["telegram_bot_db"].Present && !roles["telegram_bot_config"].Present {
 			return ErrUnsafe
 		}
 	}

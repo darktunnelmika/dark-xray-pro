@@ -100,7 +100,7 @@ func Snapshot(ctx context.Context, l *Lock, inv Inventory, tempDir string) (resu
 		if e = os.MkdirAll(filepath.Dir(dest), 0700); e != nil {
 			return nil, e
 		}
-		if s.Role == "business" || s.Role == "node_history" || s.Role == "owner_report_db" {
+		if s.Role == "business" || s.Role == "node_history" || s.Role == "owner_report_db" || s.Role == "telegram_bot_db" {
 			if e = snapshotSQLite(ctx, s.Path, dest, tempDir); e != nil {
 				return nil, e
 			}
@@ -266,28 +266,36 @@ func snapshotSQLite(ctx context.Context, source, dest, stagingRoot string) error
 }
 
 func holdBotStopped(inv Inventory) (func(), error) {
+	var held []*os.File
+	release := func() {
+		for i := len(held) - 1; i >= 0; i-- {
+			_ = syscall.Flock(int(held[i].Fd()), syscall.LOCK_UN)
+			_ = held[i].Close()
+		}
+	}
+	fail := func(err error) (func(), error) { release(); return nil, err }
 	for _, r := range inv.Resources {
-		if r.Role != "owner_report_db" {
+		if r.Role != "owner_report_db" && r.Role != "telegram_bot_db" {
 			continue
 		}
 		if _, e := os.Lstat(r.Path); errors.Is(e, os.ErrNotExist) && !r.Required {
 			entries, de := os.ReadDir(filepath.Dir(r.Path))
 			if errors.Is(de, os.ErrNotExist) || de == nil && len(entries) == 0 {
-				return func() {}, nil
+				continue
 			}
-			return nil, ErrUnsafe
+			return fail(ErrUnsafe)
 		} else if e != nil {
-			return nil, ErrUnsafe
+			return fail(ErrUnsafe)
 		}
 		f, e := openPrivate(r.Path+".lock", syscall.O_RDONLY, 0, true)
 		if e != nil {
-			return nil, ErrUnsafe
+			return fail(ErrUnsafe)
 		}
 		if syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB) != nil {
 			f.Close()
-			return nil, ErrBusy
+			return fail(ErrBusy)
 		}
-		return func() { _ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN); _ = f.Close() }, nil
+		held = append(held, f)
 	}
-	return func() {}, nil
+	return release, nil
 }

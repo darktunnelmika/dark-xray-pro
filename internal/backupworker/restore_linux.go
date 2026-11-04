@@ -393,7 +393,7 @@ func (r *LinuxRestoreRunner) replacements(ctx context.Context, dir string, curre
 			replacement.SHA256 = file.SHA256
 		}
 		out = append(out, replacement)
-		if v.Role == "business" || v.Role == "node_history" || v.Role == "owner_report_db" {
+		if v.Role == "business" || v.Role == "node_history" || v.Role == "owner_report_db" || v.Role == "telegram_bot_db" {
 			for _, suffix := range []string{"-wal", "-journal", "-shm"} {
 				out = append(out, restoreapply.Replacement{Destination: rel + suffix})
 			}

@@ -107,7 +107,7 @@ export default function Marketplace({model}:{model:BusinessModel}){
   (form.status!=="published"||repPolicy.can_publish);
  const valid=canManage&&withinOwnerLimits&&!busy&&!model.actionBusy&&/^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/.test(spec.id)&&
   /^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/.test(spec.representative_id)&&
-  spec.representative_id!=="owner"&&spec.name.length>0&&spec.name.length<=128&&
+  (owner||spec.representative_id!=="owner")&&spec.name.length>0&&spec.name.length<=128&&
   Number.isSafeInteger(days)&&days>=1&&days<=3650&&
   Number.isSafeInteger(ip)&&ip>=0&&ip<=1000&&(kind==="volume"||ip>0)&&
   volume!==null&&(kind==="unlimited"||volume>0)&&
@@ -161,7 +161,7 @@ export default function Marketplace({model}:{model:BusinessModel}){
      onChange={e=>setForm({...form,id:e.target.value})}/></label>
     <label>{t.rep}<input aria-label="Catalog representative" list="catalog-reps" value={owner?form.rep:rep}
      disabled={busy||!!editing||!owner} onChange={e=>setForm({...form,rep:e.target.value})}/>
-     <datalist id="catalog-reps">{model.reps?.filter(r=>r.kind==="representative").map(r=>
+     <datalist id="catalog-reps">{owner&&<option value="owner">{model.language==="fa"?"فروشگاه مالک":"Owner store"}</option>}{model.reps?.filter(r=>r.kind==="representative").map(r=>
       <option key={r.id} value={r.id}>{r.display_name}</option>)}</datalist></label>
     <label>{t.name}<input aria-label="Catalog name" value={form.name} maxLength={128}
      onChange={e=>setForm({...form,name:e.target.value})}/></label>

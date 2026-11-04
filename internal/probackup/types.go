@@ -33,13 +33,16 @@ const (
 	RoleAgentTLSCert       Role = "agent_tls_cert"
 	RoleAgentTLSKey        Role = "agent_tls_key"
 	RoleInventory          Role = "inventory"
+	RoleTelegramBotConfig  Role = "telegram_bot_config"
+	RoleTelegramBotDB      Role = "telegram_bot_db"
 )
 
 // This ordering is part of container version 1, not a Go declaration ordinal.
 var wireRoles = [...]Role{"", RoleBusinessDB, RoleRegistry, RoleReplacements,
 	RoleConfigStage, RoleLabRevisions, RoleNodeHistoryDB, RoleOwnerReportDB,
 	RoleOwnerReportConfig, RoleOwnerReportToken, RoleOwnerReportRuntime,
-	RoleInboundRuntime, RoleRuntimeConfig, RoleAgentTLSCert, RoleAgentTLSKey, RoleInventory}
+	RoleInboundRuntime, RoleRuntimeConfig, RoleAgentTLSCert, RoleAgentTLSKey, RoleInventory,
+	RoleTelegramBotConfig, RoleTelegramBotDB}
 
 type FileSource struct {
 	Name string

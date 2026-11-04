@@ -1,0 +1,54 @@
+name: PRO Telegram stores
+
+on:
+  push:
+    branches: ["feat/telegram-*"]
+  pull_request:
+    branches: [main, "feat/darkrestore-import-m2"]
+    paths:
+      - "internal/telegrambot/**"
+      - "internal/business/telegram*"
+      - "internal/api/telegram*"
+      - "web/src/Telegram*"
+      - "web/tests/telegram*"
+      - ".github/workflows/telegram-bots.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  native-telegram:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Verify native accounting, delivery, isolation and offline backup
+        run: go test -race ./internal/telegrambot ./internal/telegramhub ./internal/telegramreport ./internal/business ./internal/api ./internal/hubstate ./internal/probackup ./internal/backupworker ./cmd/hub ./cmd/pro-backup -count=1 -timeout=18m
+      - name: Check packages
+        run: go vet ./internal/telegrambot ./internal/business ./internal/api ./internal/hubstate ./cmd/hub
+  telegram-panel:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+        working-directory: web
+      - run: npx playwright install --with-deps chromium
+        working-directory: web
+      - name: Verify owner, representative, disabled, error and mobile Persian flows
+        run: npx playwright test tests/telegram-stores.spec.ts
+        working-directory: web
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: telegram-panel-diagnostics
+          path: web/test-results

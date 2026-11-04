@@ -123,12 +123,30 @@ func (s *Store) ExtendClientScoped(ctx context.Context, req ExtendClient, scope 
 	if !positiveAdditional(req) {
 		return Client{}, ErrInvalid
 	}
-	hash := fingerprint("extend", req)
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return Client{}, err
 	}
 	defer tx.Rollback()
+	client, err := s.extendClientTx(ctx, tx, req, scope)
+	if err != nil {
+		return Client{}, err
+	}
+	if err = tx.Commit(); err != nil {
+		return Client{}, err
+	}
+	return client, nil
+}
+
+// extendClientTx preserves the existing cumulative native accounting formula.
+func (s *Store) extendClientTx(ctx context.Context, tx *sql.Tx, req ExtendClient, scope string) (Client, error) {
+	if scope != "" && !idRE.MatchString(scope) {
+		return Client{}, ErrInvalid
+	}
+	if !positiveAdditional(req) {
+		return Client{}, ErrInvalid
+	}
+	hash := fingerprint("extend", req)
 	replay, err := checkClientOp(ctx, tx, req.EventID, hash, "extend")
 	if err != nil {
 		return Client{}, err
@@ -219,9 +237,6 @@ func (s *Store) ExtendClientScoped(ctx context.Context, req ExtendClient, scope 
 		"INSERT INTO client_operations(event_id,fingerprint,client_id,representative_id,kind,reason,added_days,added_volume_bytes,volume_credit_debit,unlimited_credit_debit,created_unix) VALUES(?,?,?,?,'extend',?,?,?,?,?,?)",
 		req.EventID, hash, c.ID, c.RepresentativeID, req.Reason, req.AdditionalDays, req.AdditionalVolumeBytes,
 		volumeCost, unitsCost, now); err != nil {
-		return Client{}, err
-	}
-	if err = tx.Commit(); err != nil {
 		return Client{}, err
 	}
 	c.DurationDays = days

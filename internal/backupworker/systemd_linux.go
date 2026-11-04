@@ -282,7 +282,7 @@ func (r *LinuxRuntime) requiredSpace(resources []hubstate.Resource, metadataByte
 			return 0, ErrPreflight
 		}
 		payload += st.Size()
-		if v.Role == "business" || v.Role == "node_history" || v.Role == "owner_report_db" {
+		if v.Role == "business" || v.Role == "node_history" || v.Role == "owner_report_db" || v.Role == "telegram_bot_db" {
 			sqliteWork += st.Size()
 			for _, suffix := range []string{"-wal", "-journal"} {
 				p := v.Path + suffix
