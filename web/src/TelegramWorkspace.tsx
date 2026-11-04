@@ -4,12 +4,19 @@ import { api, ApiError, useSession, type Language } from "./session";
 import type { Page } from "./navigation";
 import "./TelegramWorkspace.css";
 
+type StoreSetup = {
+  account_enabled: boolean; manager_registered: boolean;
+  can_create_clients: boolean; can_renew_clients: boolean;
+  published_products: number; priced_products: number; catalog_limit: number;
+  trial_enabled: boolean; trial_duration_hours: 24; trial_starts_at: "issuance";
+};
 type BotStore = {
   id: string; bot_id: number; representative_id: string; name: string; manager_user_id: number;
   enabled: boolean; revision: number; connection_state: string; last_poll_unix: number;
   credential_configured?: boolean; bot_username?: string; connection_problem?: string;
   queue_status_available: boolean; inbox_pending: number; financial_retry: number;
   review_pending: number; outbox_pending: number; outbox_unknown: number; delivery_review: number;
+  setup?: StoreSetup;
 };
 type Workspace = {
   enabled: boolean; can_configure: boolean; can_manage_connections?: boolean;
@@ -87,6 +94,15 @@ function readIdentity(value: BotIdentity): BotIdentity {
   if (!value || !positiveID(value.bot_id) || typeof value.username !== "string" || value.username !== "" && !usernamePattern.test(value.username)) throw new Error("invalid_bot_identity");
   return { bot_id: value.bot_id, username: value.username };
 }
+function validStoreSetup(value: unknown): value is StoreSetup {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const setup = value as StoreSetup;
+  return (["account_enabled", "manager_registered", "can_create_clients", "can_renew_clients", "trial_enabled"] as const)
+    .every(key => typeof setup[key] === "boolean") &&
+    Number.isSafeInteger(setup.published_products) && setup.published_products >= 0 &&
+    Number.isSafeInteger(setup.priced_products) && setup.priced_products >= 0 && setup.priced_products <= setup.published_products &&
+    positiveID(setup.catalog_limit) && setup.trial_duration_hours === 24 && setup.trial_starts_at === "issuance";
+}
 function readWorkspace(value: Workspace): Workspace {
   if (!value || typeof value.enabled !== "boolean" || typeof value.can_configure !== "boolean" || !Array.isArray(value.stores) ||
       value.can_manage_connections !== undefined && typeof value.can_manage_connections !== "boolean" ||
@@ -96,6 +112,7 @@ function readWorkspace(value: Workspace): Workspace {
         !idPattern.test(store.representative_id) || typeof store.name !== "string" || typeof store.enabled !== "boolean" ||
         !positiveID(store.revision) || typeof store.connection_state !== "string" || !Number.isSafeInteger(store.last_poll_unix) ||
         value.can_manage_connections && typeof store.credential_configured !== "boolean") throw new Error("invalid_store");
+    if (store.setup !== undefined && !validStoreSetup(store.setup)) throw new Error("invalid_store_setup");
   }
   return value;
 }
@@ -106,6 +123,51 @@ function metadata(form: StoreForm) {
 function fromStore(store: BotStore): StoreForm {
   return { id: store.id, bot: String(store.bot_id), representative: store.representative_id, name: store.name,
     manager: String(store.manager_user_id), enabled: store.enabled, revision: store.revision };
+}
+
+function StoreSetupDetails({ setup, fa, onCatalog, navigationDisabled }: {
+  setup?: StoreSetup; fa: boolean; onCatalog: () => void; navigationDisabled: boolean;
+}) {
+  const tr = (en: string, persian: string) => fa ? persian : en;
+  const count = (value: number) => value.toLocaleString(fa ? "fa-IR" : "en-US");
+  const attention = !!setup && (!setup.account_enabled || !setup.manager_registered || !setup.can_create_clients ||
+    !setup.can_renew_clients || setup.priced_products === 0 || setup.published_products > setup.catalog_limit);
+  const summary = !setup ? tr("Setup details unavailable", "جزئیات آماده‌سازی در دسترس نیست") : setup.published_products === 0
+    ? tr("No published products", "بستهٔ منتشرشده‌ای وجود ندارد")
+    : tr(`${count(setup.priced_products)} of ${count(setup.published_products)} with Stars prices`, `${count(setup.priced_products)} از ${count(setup.published_products)} بسته قیمت Stars دارد`);
+  return <details className={"telegram-setup" + (attention ? " telegram-setup-attention" : "")}>
+    <summary><span>{tr("Store setup", "آماده‌سازی فروشگاه")}</span><small>{summary}</small></summary>
+    {!setup ? <p>{tr("Store setup details could not be checked. Refresh the status to try again.", "جزئیات آماده‌سازی فروشگاه قابل بررسی نیست. وضعیت را دوباره به‌روزرسانی کنید.")}</p> : <>
+      {!setup.account_enabled && <p className="telegram-setup-warning">{tr("This store's account is disabled or suspended. The owner must review its account access before customers can use the store.", "حساب این فروشگاه غیرفعال یا تعلیق شده است. مالک باید دسترسی حساب را بررسی کند تا مشتری‌ها بتوانند از فروشگاه استفاده کنند.")}</p>}
+      {setup.account_enabled && (!setup.can_create_clients || !setup.can_renew_clients) && <p className="telegram-setup-warning">
+        {!setup.can_create_clients && !setup.can_renew_clients
+          ? tr("This account's permissions currently block new purchases and renewals.", "مجوزهای فعلی این حساب، خرید جدید و تمدید را مسدود می‌کنند.")
+          : !setup.can_create_clients ? tr("This account's permissions currently block new purchases.", "مجوزهای فعلی این حساب، خرید جدید را مسدود می‌کنند.")
+            : tr("This account's permissions currently block renewals.", "مجوزهای فعلی این حساب، تمدید را مسدود می‌کنند.")}
+      </p>}
+      <div className="telegram-setup-products">
+        {setup.published_products === 0
+          ? <p>{tr("Publish a product for this store's account in the plan catalog, then have the assigned manager set its Stars price in this bot.", "یک بسته برای حساب همین فروشگاه در کاتالوگ پلن‌ها منتشر کنید؛ سپس مدیر تعیین‌شده قیمت Stars آن را در همین ربات تنظیم کند.")}</p>
+          : setup.priced_products < setup.published_products
+            ? <p>{tr(`${count(setup.published_products - setup.priced_products)} published products still need a Stars price. Customers see published products with a Stars price.`, `${count(setup.published_products - setup.priced_products)} بستهٔ منتشرشده هنوز قیمت Stars ندارد. مشتری بسته‌های منتشرشدهٔ دارای قیمت Stars را می‌بیند.`)}</p>
+            : <p>{tr("The published products have prices in Telegram Stars (XTR).", "بسته‌های منتشرشده با Telegram Stars (XTR) قیمت‌گذاری شده‌اند.")}</p>}
+        {setup.priced_products > setup.catalog_limit
+          ? <p className="telegram-setup-warning">{tr(`The customer catalog exceeds the bot's limit of ${count(setup.catalog_limit)} products. Reduce the published catalog before testing purchases.`, `فهرست خرید مشتری از سقف ${count(setup.catalog_limit)} بستهٔ ربات بیشتر است. پیش از آزمودن خرید، تعداد بسته‌های منتشرشده را کاهش دهید.`)}</p>
+          : setup.published_products > setup.catalog_limit && <p className="telegram-setup-warning">{tr(`The manager's product list exceeds the bot's limit of ${count(setup.catalog_limit)}. Reduce published products before setting prices.`, `فهرست بسته‌های مدیر از سقف ${count(setup.catalog_limit)} بستهٔ ربات بیشتر است. پیش از تنظیم قیمت، تعداد بسته‌های منتشرشده را کاهش دهید.`)}</p>}
+        <button type="button" className="telegram-text-button" onClick={onCatalog} disabled={navigationDisabled}>{tr("Open plan catalog", "مشاهدهٔ کاتالوگ پلن‌ها")}<ChevronLeft size={14}/></button>
+      </div>
+      <dl className="telegram-setup-status">
+        <div><dt>{tr("Assigned manager", "مدیر تعیین‌شده")}</dt><dd>{setup.manager_registered ? tr("Registered with this bot", "در این ربات ثبت شده است") : tr("Waiting for the manager", "در انتظار ورود مدیر")}</dd></div>
+        <div><dt>{tr("24-hour trial · optional", "تست ۲۴ساعته · اختیاری")}</dt><dd>{setup.trial_enabled ? tr("Enabled in store settings", "در تنظیمات فروشگاه فعال است") : tr("Disabled in store settings", "در تنظیمات فروشگاه غیرفعال است")}</dd></div>
+      </dl>
+      {!setup.manager_registered && <p>{tr("The assigned manager should open this bot and send ", "مدیر تعیین‌شده باید همین ربات را باز کند و ")}<bdi>/start</bdi>{tr(".", " بفرستد.")}</p>}
+      <p>{tr("In the bot's Store management menu, Stars prices are under Products and prices, and trials are under Store settings. The assigned manager needs the corresponding permissions.", "در منوی «مدیریت فروشگاه» ربات، قیمت Stars در «محصولات و قیمت‌ها» و تست در «تنظیمات فروشگاه» تنظیم می‌شود. دسترسی مربوط برای مدیر تعیین‌شده لازم است.")}</p>
+      <p className="telegram-setup-note">{setup.trial_enabled
+        ? tr("The trial lasts 24 hours from issuance, including any wait for service delivery.", "زمان تست ۲۴ ساعت از صدور است و زمان انتظار برای تحویل سرویس را هم شامل می‌شود.")
+        : tr("If enabled, the trial lasts 24 hours from issuance, including any wait for service delivery.", "در صورت فعال‌سازی، زمان تست ۲۴ ساعت از صدور است و زمان انتظار برای تحویل سرویس را هم شامل می‌شود.")}</p>
+      <p className="telegram-setup-note">{tr("Each order checks permissions, available credit and service delivery.", "مجوزها، اعتبار موجود و تحویل سرویس برای هر سفارش بررسی می‌شود.")}</p>
+    </>}
+  </details>;
 }
 
 export default function TelegramWorkspace({ language, onNavigate }: { language: Language; onNavigate: (page: Page) => void }) {
@@ -454,6 +516,7 @@ export default function TelegramWorkspace({ language, onNavigate }: { language: 
           {store.connection_problem && store.connection_state !== "polling" && <p className="telegram-input-hint">{tr("The connection needs attention. Check it again or update this bot's token.", "اتصال نیاز به بررسی دارد. آن را دوباره بررسی کنید یا توکن همین ربات را به‌روز کنید.")}</p>}
           {notice?.store === store.id && showNotice(notice.code)}
           {!store.enabled && <p className="telegram-input-hint">{tr("The storefront is paused; payment records continue to be processed.", "فروشگاه متوقف است؛ پردازش سوابق پرداخت ادامه دارد.")}</p>}
+          <StoreSetupDetails setup={store.setup} fa={fa} onCatalog={() => onNavigate("marketplace")} navigationDisabled={loading || !!busy || editing}/>
           {store.queue_status_available && <details className="telegram-queues" open={store.review_pending > 0 || store.outbox_unknown > 0 || store.delivery_review > 0}>
             <summary>{tr("Queues and review", "صف‌ها و موارد نیازمند بررسی")}</summary>
             <dl>{([
