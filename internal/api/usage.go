@@ -60,7 +60,7 @@ func (s *Server) attachUsageRead(mux *http.ServeMux) {
 			return
 		}
 		if history != nil {
-			result["dark_restore"] = history
+			result["historical_usage"] = history
 		}
 		respond(w, http.StatusOK, result)
 	})

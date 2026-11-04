@@ -1,4 +1,8 @@
-# Imported-client native admission
+# بازنشسته — Imported-client native admission
+
+> runtime و startup switchهای این سند حذف شده‌اند. این متن فقط سابقه است و
+> اجرای آن ممنوع است. مرز معتبر فعلی:
+> [DARK-RESTORE-REMOVED.md](DARK-RESTORE-REMOVED.md).
 
 The isolated single-loopback TCP/REALITY path now supports a distinct owner
 admission after an immutable native process birth has registered its billable

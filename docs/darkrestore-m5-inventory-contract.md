@@ -1,4 +1,8 @@
-# Dark Restore M5 evidence and cutover contract
+# بازنشسته — Dark Restore M5 evidence contract
+
+> این قرارداد دیگر بخشی از محصول نیست و فقط برای فهم سوابق تاریخی نگه‌داری
+> می‌شود. هیچ inventory، retirement یا cutover جدیدی نباید از آن ساخته شود.
+> مرز معتبر فعلی: [DARK-RESTORE-REMOVED.md](DARK-RESTORE-REMOVED.md).
 
 Status: the prior Store gate is installed on isolated PRO LAB at revision
 `174af74c18d33d4366f4ae212060ddbbc84daa3c`, with zero cutover records and its

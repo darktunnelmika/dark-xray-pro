@@ -1,4 +1,9 @@
-# Dark Restore M2 — implementation checkpoint
+# بازنشسته — Dark Restore M2/M3/M4/M5
+
+> این checkpoint فقط سابقهٔ فنی است. همهٔ مسیرهای import، migration، prepared
+> promotion، acceptance و activation متوقف و از محصول حذف شده‌اند. هیچ دستور یا
+> نتیجهٔ این سند مجوز نصب دوباره نیست. مرز معتبر فعلی:
+> [DARK-RESTORE-REMOVED.md](DARK-RESTORE-REMOVED.md).
 
 This branch remains a draft. It must not be merged or installed as a completed M2 feature.
 

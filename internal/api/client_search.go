@@ -38,9 +38,18 @@ func clientSearchParams(r *http.Request) (business.ClientSearch, error) {
 	}
 	opt.RepresentativeID = q.Get("representative_id")
 	opt.GroupID = q.Get("group_id")
-	opt.Origin = q.Get("origin")
-	if opt.Origin == "" {
+	// The public product surface uses a neutral compatibility label. The
+	// historical database classification remains private so existing records
+	// are neither renamed nor silently reclassified.
+	switch q.Get("origin") {
+	case "", "all":
 		opt.Origin = "all"
+	case "native":
+		opt.Origin = "native"
+	case "legacy":
+		opt.Origin = "dark_restore"
+	default:
+		return opt, business.ErrInvalid
 	}
 	opt.Query = q.Get("q")
 	opt.State = q.Get("state")

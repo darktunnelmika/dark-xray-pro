@@ -414,13 +414,6 @@ test("owner moves only same-representative clients through safe picker then remo
  await create.getByLabel("Representative ID").selectOption("rep-a");
  await create.getByRole("button",{name:"Create pending client"}).click();
  await expect(page.locator(".clients-explorer-row").filter({hasText:"rep-isolated"}).getByText("Rep selected")).toBeVisible();
- await page.route("**/api/v1/workspace/groups/rep-group-v2/history",route=>route.fulfill({
-  status:200,contentType:"application/json",body:JSON.stringify({scope:"immutable_source_group",histories:[{
-   source_sha256:"a".repeat(64),source_group_id:"legacy-archived",source_name:"Old archive",
-   source_count:1,archived_count:1,promoted_count:0,
-   snapshot_bytes:"7",closed_epoch_bytes:"11",historical_bytes:"18",
-  }]})
- }));
  await page.goto("/groups");
  const groupForm=page.getByRole("heading",{name:"Create group"}).locator("..");
  await groupForm.getByLabel("Group ID").fill("rep-group-v2");
@@ -430,9 +423,6 @@ test("owner moves only same-representative clients through safe picker then remo
  await expect(page.getByText("Rep group (rep-group-v2)")).toBeVisible();
  await page.getByRole("button",{name:"Manage members"}).click();
  const m=page.getByRole("region",{name:"Group membership manager"});
- const history=page.getByRole("region",{name:"Source group history"});
- await expect(history.getByText("Old archive · legacy-archived")).toBeVisible();
- await expect(history.getByText("Historical total: 18 B")).toBeVisible();
  await expect(m.getByRole("heading",{name:"Group members: Rep group"})).toBeVisible();
  await expect(m.getByText("Rep selected")).toBeVisible();
  await expect(m.getByText("Owner only")).toHaveCount(0);
@@ -936,7 +926,7 @@ for (const user of [owner,rep]) {
    const url=new URL(route.request().url());reads.push(url);const q=url.searchParams;
    const origin=q.get("origin")||"all",group=q.get("group_id")||"";
    const limit=Number(q.get("limit")||50),offset=Number(q.get("offset")||0);
-   const filtered=rows.filter((_,i)=>(origin==="all"||origin==="dark_restore"&&i<60||origin==="native"&&i>=60)&&
+   const filtered=rows.filter((_,i)=>(origin==="all"||origin==="legacy"&&i<60||origin==="native"&&i>=60)&&
     (!group||group==="filter-imported"&&i<60||group==="filter-native"&&i>=60));
    return route.fulfill({json:{clients:filtered.slice(offset,offset+limit),total:filtered.length,
     has_more:offset+limit<filtered.length,limit,offset,q:q.get("q")||"",state:q.get("state")||"all",
@@ -954,7 +944,7 @@ for (const user of [owner,rep]) {
   await directory.locator(".clients-explorer-row").first().getByRole("checkbox").check();
   await expect(directory.locator(".clients-bulk-header span")).toHaveText("1 selected");
   await directory.locator("summary").filter({hasText:"Group and origin"}).click();
-  await directory.getByLabel("Client origin",{exact:true}).selectOption("dark_restore");
+  await directory.getByLabel("Client origin",{exact:true}).selectOption("legacy");
   await expect(directory.getByText("Page: 1")).toBeVisible();
   await expect(directory.getByText("Matches: 60")).toBeVisible();
   await expect(directory.locator(".clients-bulk-header span")).toHaveText("0 selected");
@@ -965,11 +955,11 @@ for (const user of [owner,rep]) {
   await directory.getByRole("button",{name:"Next",exact:true}).click();
   await expect(directory.locator(".clients-explorer-row")).toHaveCount(10);
   await expect(directory.getByText("Filter member 059",{exact:true})).toBeVisible();
-  expect(reads.some(url=>url.searchParams.get("group_id")==="filter-imported"&&url.searchParams.get("origin")==="dark_restore"&&url.searchParams.get("offset")==="50")).toBe(true);
+  expect(reads.some(url=>url.searchParams.get("group_id")==="filter-imported"&&url.searchParams.get("origin")==="legacy"&&url.searchParams.get("offset")==="50")).toBe(true);
   if(user.role==="representative"){
    await page.setViewportSize({width:320,height:770});
    await page.getByRole("button",{name:"Switch language"}).click();
-   await expect(directory.getByLabel("منبع کلاینت",{exact:true})).toHaveValue("dark_restore");
+   await expect(directory.getByLabel("منبع کلاینت",{exact:true})).toHaveValue("legacy");
    await expect(directory.getByLabel("گروه کلاینت",{exact:true})).toHaveValue("filter-imported");
    expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+2)).toBe(true);
   }
@@ -991,7 +981,7 @@ test("directory refuses an origin filter ignored by an older or mismatched serve
  const directory=page.getByRole("region",{name:"Client directory"});
  await expect(directory.locator(".clients-explorer-row")).toHaveCount(3);
  await directory.locator("summary").filter({hasText:"Group and origin"}).click();ignoreOrigin=true;
- await directory.getByLabel("Client origin",{exact:true}).selectOption("dark_restore");
+ await directory.getByLabel("Client origin",{exact:true}).selectOption("legacy");
  await expect(directory.locator(".clients-explorer-row")).toHaveCount(0);
  await expect(directory.getByText("MUST STAY HIDDEN")).toHaveCount(0);
  await expect(directory.getByRole("button",{name:"Apply to selected",exact:true})).toBeDisabled();

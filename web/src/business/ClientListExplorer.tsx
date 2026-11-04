@@ -26,7 +26,7 @@ const words = {
     pageSize:"Per page", repFilter:"Representative ID (owner, optional)",
     matches:"Matches", loadingFilter:"Checking server filters…",
     moreFilters:"Group and origin",groupFilter:"Client group",allGroups:"All groups",
-    origin:"Client origin",allOrigins:"All origins",nativeOrigin:"Created in this panel",restoreOrigin:"Historical import",
+    origin:"Client origin",allOrigins:"All origins",nativeOrigin:"Created in this panel",legacyOrigin:"Historical import",
     previousGroups:"Previous groups",nextGroups:"Next groups",
     bulkTitle:"Bulk client action",selectClient:"Select client",selectVisible:"Select up to 50 visible",clear:"Clear",
     selectedCount:"selected",action:"Action",disableAction:"Disable",enableAction:"Enable",
@@ -53,7 +53,7 @@ const words = {
     pageSize:"در هر صفحه",repFilter:"شناسه نماینده (فقط مالک، اختیاری)",
     matches:"تعداد کل",loadingFilter:"در حال دریافت فیلترهای سرور…",
     moreFilters:"گروه و منبع",groupFilter:"گروه کلاینت",allGroups:"تمام گروه‌ها",
-    origin:"منبع کلاینت",allOrigins:"تمام منابع",nativeOrigin:"ساخته‌شده در این پنل",restoreOrigin:"واردشدهٔ قدیمی",
+    origin:"منبع کلاینت",allOrigins:"تمام منابع",nativeOrigin:"ساخته‌شده در این پنل",legacyOrigin:"واردشدهٔ قدیمی",
     previousGroups:"گروه‌های قبلی",nextGroups:"گروه‌های بعدی",
     bulkTitle:"مدیریت گروهی کلاینت‌ها",selectClient:"انتخاب کلاینت",selectVisible:"انتخاب حداکثر ۵۰ مورد نمایان",clear:"پاک‌کردن انتخاب",
     selectedCount:"انتخاب‌شده",action:"عملیات",disableAction:"غیرفعال",enableAction:"فعال‌سازی منطقی",
@@ -177,7 +177,7 @@ export default function ClientListExplorer({model}: {model:BusinessModel}) {
         <label>{copy.origin}<select aria-label={copy.origin} value={clientOriginFilter}
           disabled={actionBusy} onChange={e=>changeClientFilters("origin",e.target.value)}>
           <option value="all">{copy.allOrigins}</option><option value="native">{copy.nativeOrigin}</option>
-          <option value="dark_restore">{copy.restoreOrigin}</option>
+          <option value="legacy">{copy.legacyOrigin}</option>
         </select></label>
         <GroupPicker key={session.user.role==="owner"?clientRepFilter:session.user.representative_id}
           language={language} representative={session.user.role==="owner"?clientRepFilter||undefined:session.user.representative_id}

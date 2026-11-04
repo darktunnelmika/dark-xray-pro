@@ -1,4 +1,7 @@
-# DARK XRAY PRO — Dark Restore M1: بررسی خصوصی داخل Clients
+# بازنشسته — Dark Restore M1
+
+> این سند فقط سابقهٔ فنی است. UI، route و ابزار آن حذف شده‌اند و نباید دوباره
+> نصب یا فعال شوند. مرز معتبر فعلی: [DARK-RESTORE-REMOVED.md](DARK-RESTORE-REMOVED.md).
 
 ## تغییر انجام‌شده در این مرحله
 

@@ -7,6 +7,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/darktunnelmika/dark-xray-pro/internal/business"
 )
 
 func TestRemovedDarkRestoreHasNoOwnerOrAgentRoutes(t *testing.T) {
@@ -43,5 +45,26 @@ func TestRemovedDarkRestoreHasNoOwnerOrAgentRoutes(t *testing.T) {
 	}
 	if !result.Capabilities["client_ownership_v1"] {
 		t.Fatal("native client ownership was removed")
+	}
+	for _, path := range []string{
+		"/api/v1/workspace/groups/missing/history",
+		"/api/v1/workspace/clients?origin=dark_restore",
+	} {
+		w = browserRequest(t, f.h, "GET", path, nil, f.owner, f.ownerCSRF, "https://"+browserHost)
+		if path == "/api/v1/workspace/groups/missing/history" && w.Code != http.StatusNotFound {
+			t.Fatalf("retired group-history route: %d %s", w.Code, w.Body.String())
+		}
+		if strings.Contains(path, "origin=") && w.Code != http.StatusUnprocessableEntity {
+			t.Fatalf("retired public origin value: %d %s", w.Code, w.Body.String())
+		}
+	}
+	w = browserRequest(t, f.h, "GET", "/api/v1/workspace/clients?origin=legacy", nil, f.owner, f.ownerCSRF, "https://"+browserHost)
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"origin":"legacy"`) || strings.Contains(w.Body.String(), `"origin":"dark_restore"`) {
+		t.Fatalf("neutral legacy compatibility filter: %d %s", w.Code, w.Body.String())
+	}
+	errOut := httptest.NewRecorder()
+	businessError(errOut, business.ErrDarkRestoreCutover)
+	if errOut.Code != http.StatusConflict || !strings.Contains(errOut.Body.String(), "legacy_client_locked") || strings.Contains(errOut.Body.String(), "darkrestore") {
+		t.Fatalf("retired feature leaked through public error: %d %s", errOut.Code, errOut.Body.String())
 	}
 }

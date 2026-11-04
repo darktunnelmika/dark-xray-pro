@@ -70,7 +70,7 @@ export function useBusinessWorkspace(language: Language, section: Section) {
       setClientRepFilter(value);setClientGroupFilter("");
     }
     if(kind==="group" && (value==="" || /^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/.test(value))) setClientGroupFilter(value);
-    if(kind==="origin" && ["all","native","dark_restore"].includes(value)) setClientOriginFilter(value);
+    if(kind==="origin" && ["all","native","legacy"].includes(value)) setClientOriginFilter(value);
     setClientOffset(0);setLifeClientID("");
   }
   const [eventOffset, setEventOffset] = useAccountPageOffset(session.user.id, "finance");
