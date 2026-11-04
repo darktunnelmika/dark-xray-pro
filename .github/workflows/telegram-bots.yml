@@ -4,7 +4,7 @@ on:
   push:
     branches: ["feat/telegram-*"]
   pull_request:
-    branches: [main, "feat/darkrestore-import-m2", "fix/managed-runtime-backup"]
+    branches: [main, "feat/darkrestore-import-m2", "fix/managed-runtime-backup", "fix/node-retry-isolation"]
     paths:
       - "internal/telegrambot/**"
       - "internal/business/telegram*"

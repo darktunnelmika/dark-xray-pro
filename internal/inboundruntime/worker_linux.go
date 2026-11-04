@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"math/rand/v2"
 	"os"
 	"path/filepath"
 	"sync"
@@ -159,8 +160,7 @@ func (w *Worker) Close() {
 // Run is independent of browser requests. Its own lease timer stops the child
 // even if polling, usage delivery, or the controller goroutine stalls.
 func (w *Worker) Run(ctx context.Context, x Exchange) {
-	tick := time.NewTicker(time.Second)
-	defer tick.Stop()
+	var retries idleRetry
 	defer w.Close()
 	for {
 		if ctx.Err() != nil {
@@ -177,11 +177,21 @@ func (w *Worker) Run(ctx context.Context, x Exchange) {
 			return
 		}
 		attempt, cancel := context.WithTimeout(ctx, 8*time.Second)
-		_ = w.Step(attempt, x)
+		err := w.Step(attempt, x)
 		cancel()
+		w.mu.Lock()
+		// Never delay admission, lease renewal, an uncertain epoch, or an
+		// unsettled receipt for the sake of idle-node retry throttling.
+		idle := w.process == nil && w.state.Epoch == nil && w.state.Pending == nil && !w.persistFailed
+		w.mu.Unlock()
+		delay := retries.next(err != nil && idle, time.Duration(rand.Int64N(int64(250*time.Millisecond))))
+		// Start after completion: a buffered ticker must not turn a slow
+		// failed request into an immediate second attempt.
+		timer := time.NewTimer(delay)
 		select {
 		case <-ctx.Done():
-		case <-tick.C:
+			timer.Stop()
+		case <-timer.C:
 		}
 	}
 }
@@ -749,4 +759,29 @@ func cloneBundle(b inboundexec.Bundle) inboundexec.Bundle {
 	var c inboundexec.Bundle
 	_ = json.Unmarshal(raw, &c)
 	return c
+}
+
+// idleRetry belongs to one worker. A dead node cannot slow another node or
+// synchronize all reconnects against the HUB. Maximum idle recovery delay is
+// eight seconds; active accounting retains the one-second cadence.
+type idleRetry struct{ delay time.Duration }
+
+func (r *idleRetry) next(failedIdle bool, jitter time.Duration) time.Duration {
+	if !failedIdle {
+		r.delay = 0
+		return time.Second
+	}
+	if r.delay == 0 {
+		r.delay = time.Second
+	} else {
+		r.delay *= 2
+	}
+	if r.delay > 8*time.Second {
+		r.delay = 8 * time.Second
+	}
+	delay := r.delay + jitter
+	if delay > 8*time.Second {
+		delay = 8 * time.Second
+	}
+	return delay
 }
