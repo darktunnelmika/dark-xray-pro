@@ -77,6 +77,27 @@ type SourceRetirementPinsV1 struct {
 	DestinationSHA        string `json:"destination_sha256"`
 }
 
+// SourceRetirementFilesV1 is startup-only operator configuration. Paths and
+// pins must be supplied by trusted local configuration, never a browser or
+// imported payload.
+type SourceRetirementFilesV1 struct {
+	RetirementDocumentPath string
+	SourcePublicKeyPath    string
+	WitnessDocumentPath    string
+	WitnessPublicKeyPath   string
+	Pins                   SourceRetirementPinsV1
+}
+
+// SourceRetirementBundleFilesV1 is the complete trusted startup selection for
+// one declared inventory. The inventory and its digest remain explicit so a
+// caller cannot treat a successfully parsed subset as coverage.
+type SourceRetirementBundleFilesV1 struct {
+	Inventory      LocalHandoffInventoryV1
+	InventorySHA   string
+	DestinationSHA string
+	Sources        []SourceRetirementFilesV1
+}
+
 type VerifiedSourceRetirementV1 struct {
 	statement     SourceRetirementStatementV1
 	witness       SourceRetirementWitnessV1

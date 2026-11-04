@@ -532,6 +532,14 @@ declared inventory epoch and rejects missing, duplicate, foreign-destination,
 foreign-key or stale-fence evidence. Its digest is deterministic and includes
 every source and witness document pin.
 
+Linux startup configuration can load each pair only from canonical absolute,
+owner-private, non-symlink files through `VerifySourceRetirementFilesV1`.
+`VerifySourceRetirementBundleFilesV1` then checks the complete trusted file
+selection against the independently pinned inventory and destination in one
+read-only operation; a parsed subset, duplicate epoch, stale inventory pin or
+foreign destination is rejected. These loaders are not browser/import inputs
+and return no mutation or activation authority.
+
 This coverage is intentionally limited to the independently pinned declared
 inventory. Two valid signatures identify two claimants; they do not prove the
 truth of an operational fence or the absence of undeclared installations. The
