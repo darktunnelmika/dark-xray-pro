@@ -780,8 +780,17 @@ func verifyPlanCollisions(ctx context.Context, tx *sql.Tx, key []byte, in Native
 	if err != nil {
 		return err
 	}
-	rows, err = tx.QueryContext(ctx, `SELECT p.inbound_id FROM native_inbound_plans p JOIN native_inbounds i ON i.id=p.inbound_id
- WHERE p.inbound_id<>? AND i.archived=0 ORDER BY p.inbound_id LIMIT 257`, in.Profile.ID)
+	query := `SELECT p.inbound_id FROM native_inbound_plans p JOIN native_inbounds i ON i.id=p.inbound_id
+ WHERE p.inbound_id<>? AND i.archived=0`
+ managed, err := executionSchemaPresent(ctx, tx)
+ if err != nil { return err }
+ if managed {
+  // A requested archive alone is insufficient: retain reservations until
+  // the runtime acknowledges retirement and clears the pending operation.
+  query += ` AND NOT EXISTS (SELECT 1 FROM inbound_execution_heads h WHERE h.inbound_id=p.inbound_id AND h.desired_state='archived' AND h.observed_state='archived' AND h.pending_operation='' AND h.active_revision=0)`
+ }
+ query += ` ORDER BY p.inbound_id LIMIT 257`
+ rows, err = tx.QueryContext(ctx, query, in.Profile.ID)
 	if err != nil {
 		return err
 	}
