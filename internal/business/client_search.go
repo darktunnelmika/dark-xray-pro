@@ -3,6 +3,7 @@ package business
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"strings"
 	"time"
 	"unicode"
@@ -12,6 +13,7 @@ import (
 // ClientSearch is server-side, private and limited to one representative or
 // an owner-authorized wider scope. It is never a public user enumeration API.
 type ClientSearch struct {
+	InboundID        uint64
 	RepresentativeID string
 	GroupID          string
 	Origin           string
@@ -31,6 +33,9 @@ type ClientSearchPage struct {
 }
 
 func validClientSearch(q ClientSearch) bool {
+	if q.InboundID > 9007199254740991 {
+		return false
+	}
 	if q.RepresentativeID != "" && !idRE.MatchString(q.RepresentativeID) {
 		return false
 	}
@@ -75,6 +80,12 @@ func validClientSearch(q ClientSearch) bool {
 // consistent snapshot. Search is literal substring (instr), not user-supplied
 // SQL LIKE wildcard or a dynamic ORDER BY clause.
 func (s *Store) SearchClients(ctx context.Context, q ClientSearch) (ClientSearchPage, error) {
+	return s.searchClients(ctx, nil, q)
+}
+func (s *Store) SearchClientsWithInbound(ctx context.Context, key []byte, q ClientSearch) (ClientSearchPage, error) {
+	return s.searchClients(ctx, key, q)
+}
+func (s *Store) searchClients(ctx context.Context, key []byte, q ClientSearch) (ClientSearchPage, error) {
 	var result ClientSearchPage
 	if !validClientSearch(q) {
 		return result, ErrInvalid
@@ -90,6 +101,18 @@ func (s *Store) SearchClients(ctx context.Context, q ClientSearch) (ClientSearch
 	if q.RepresentativeID != "" {
 		clauses = append(clauses, "representative_id=?")
 		args = append(args, q.RepresentativeID)
+	}
+	if q.InboundID != 0 {
+		ids, e := clientInboundIDs(ctx, tx, key, q.InboundID)
+		if e != nil {
+			return result, e
+		}
+		data, e := json.Marshal(ids)
+		if e != nil {
+			return result, e
+		}
+		clauses = append(clauses, "clients.id IN (SELECT value FROM json_each(?))")
+		args = append(args, string(data))
 	}
 	if q.GroupID != "" {
 		clauses = append(clauses, "EXISTS (SELECT 1 FROM client_group_members gm WHERE gm.client_id=clients.id AND gm.group_id=?)")
@@ -111,8 +134,12 @@ func (s *Store) SearchClients(ctx context.Context, q ClientSearch) (ClientSearch
 		}
 	}
 	if q.Query != "" {
-		clauses = append(clauses, "(instr(lower(id),lower(?))>0 OR instr(lower(display_name),lower(?))>0)")
-		args = append(args, q.Query, q.Query)
+		contactQuery := strings.TrimPrefix(q.Query, "@")
+		if contactQuery == "" {
+			contactQuery = q.Query
+		}
+		clauses = append(clauses, "(instr(lower(id),lower(?))>0 OR instr(lower(display_name),lower(?))>0 OR instr(lower(COALESCE(cc.telegram_username,'')),lower(?))>0 OR instr(COALESCE(cc.telegram_id,''),?)>0 OR instr(lower(COALESCE(cc.note,'')),lower(?))>0)")
+		args = append(args, q.Query, q.Query, contactQuery, q.Query, q.Query)
 	}
 	if q.Plan != "" && q.Plan != "all" {
 		clauses = append(clauses, "plan_kind=?")
@@ -150,11 +177,11 @@ func (s *Store) SearchClients(ctx context.Context, q ClientSearch) (ClientSearch
 	case "expiry_late":
 		order = "expires_unix DESC,id ASC"
 	}
-	if err = tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM clients"+where, args...).Scan(&result.Total); err != nil {
+	if err = tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM "+clientReadSource+where, args...).Scan(&result.Total); err != nil {
 		return ClientSearchPage{}, err
 	}
 	pageArgs := append(append([]any(nil), args...), q.Limit, q.Offset)
-	rows, err := tx.QueryContext(ctx, "SELECT "+clientColumns+" FROM clients"+where+" ORDER BY "+order+" LIMIT ? OFFSET ?", pageArgs...)
+	rows, err := tx.QueryContext(ctx, "SELECT "+clientReadColumns+" FROM "+clientReadSource+where+" ORDER BY "+order+" LIMIT ? OFFSET ?", pageArgs...)
 	if err != nil {
 		return ClientSearchPage{}, err
 	}

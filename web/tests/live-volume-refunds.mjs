@@ -26,11 +26,13 @@ try {
   async function archive(id) {
     const directory = page.getByRole('region', { name: 'Client directory' });
     await directory.locator('.clients-explorer-row').filter({ hasText: id }).getByRole('button', { name: 'Manage', exact: true }).click();
+    await page.getByRole('button', { name: 'Account state', exact: true }).click();
     const form = page.locator('form').filter({ has: page.getByRole('heading', { name: 'Client action', exact: true }) });
     await form.getByRole('combobox').selectOption('archive');
     await form.getByLabel('Operation reason', { exact: true }).fill('Synthetic representative manual deletion');
     await form.getByRole('button', { name: 'Record state change', exact: true }).click();
     await expect.poll(async () => (await get('/api/v1/workspace/clients/' + id)).archived).toBe(true);
+    await page.getByRole('button', { name: 'Close details', exact: true }).click();
   }
   await archive('refund-volume');
   await expect.poll(async () => {

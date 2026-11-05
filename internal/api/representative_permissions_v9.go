@@ -16,6 +16,8 @@ func requiredRepresentativePermission(r *http.Request) (string, bool) {
 	path := r.URL.Path
 	method := r.Method
 	switch {
+	case path == "/api/v1/workspace/client-inbound-options" && method == "GET":
+		return "view_clients", true
 	case path == "/api/v1/workspace/telegram" && method == "GET":
 		return "view_clients", true
 	case path == "/api/v1/workspace/products" && (method == "GET" || method == "POST"):
@@ -63,7 +65,7 @@ func requiredRepresentativePermission(r *http.Request) (string, bool) {
 			if strings.Contains(path, "/subscription/") {
 				return "manage_clients", true
 			}
-			if strings.HasSuffix(path, "/edit/quote") || strings.HasSuffix(path, "/edit/commit") {
+			if strings.HasSuffix(path, "/contact") || strings.HasSuffix(path, "/edit/quote") || strings.HasSuffix(path, "/edit/commit") {
 				return "edit_clients", true
 			}
 			if strings.HasSuffix(path, "/extend") {

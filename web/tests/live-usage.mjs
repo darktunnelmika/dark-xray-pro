@@ -39,18 +39,24 @@ try {
   await expect(grant.getByLabel('Reason', { exact: true })).toHaveValue('');
 
   await page.getByRole('button', { name: 'Clients', exact: true }).click();
+  await page.getByRole('button', { name: 'Create client', exact: true }).click();
   const form = page.locator('.business-client-form');
   await form.getByText('Advanced identity', { exact: true }).click();
   await form.getByLabel('Client ID (optional)', { exact: true }).fill('live-usage-client');
   await form.getByLabel('UUID (optional)', { exact: true }).fill('12345678-1234-4234-8234-123456789abc');
   await form.getByLabel('Client name', { exact: true }).fill('Live metered customer');
+  await form.getByText('Telegram and note (optional)', { exact: true }).click();
+  await form.getByLabel('Telegram username', { exact: true }).fill('@Live_Customer');
+  await form.getByLabel('Telegram numeric ID', { exact: true }).fill('123456789');
+  await form.getByLabel('Internal note', { exact: true }).fill('Disposable customer contact');
   await form.getByLabel('Account owner', { exact: true }).selectOption('live-usage-rep');
   await form.getByLabel('Plan', { exact: true }).selectOption('volume');
   await form.getByLabel('Volume (GiB)', { exact: true }).fill('0.01');
   // This native metering fixture binds its isolated core below, after the UI save.
-  await form.getByRole('checkbox', { name: 'Create and activate', exact: true }).uncheck();
+  await form.getByLabel("Creation mode",{exact:true}).selectOption("account");
   await form.getByRole('button', { name: 'Create client', exact: true }).click();
   await expect(form.getByText('Account saved; awaiting owner activation.', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Back to client list', exact: true }).click();
   const storedClient = page.locator('.clients-explorer-row').filter({ hasText: 'live-usage-client' });
   await expect(storedClient.getByText('Live metered customer', { exact: true })).toBeVisible();
   await storedClient.getByRole('button', { name: 'Manage', exact: true }).click();
@@ -71,7 +77,9 @@ try {
   await expect(card.locator('dl > div').filter({ hasText: 'Total recorded' }).locator('dd')).toHaveText(BigInt(proof.total).toLocaleString('en-US') + ' bytes');
   await expect(card.locator('dl > div').filter({ hasText: 'Remaining' }).locator('dd')).toHaveText('0 bytes');
   // Check a real server-rendered API response again after changing language.
+  await page.getByRole('button', { name: 'Close details', exact: true }).click();
   await page.getByRole('button', { name: 'Switch language', exact: true }).click();
+  await storedClient.getByRole('button', { name: 'مدیریت', exact: true }).click();
   await expect(card.getByRole('status')).toHaveText('حجم تمام شده');
   await page.setViewportSize({ width: 320, height: 800 });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 2)).toBe(true);

@@ -67,6 +67,8 @@ async function fixture(page:Page,options:{role?:"owner"|"representative";enabled
 }
 async function openTransfer(page:Page,fa=false){
  await page.goto("/clients");
+ const toggle=page.locator(".clients-selection-toggle");
+ if(await toggle.getAttribute("aria-expanded")==="false")await toggle.click();
  const bulk=page.locator(".clients-bulk");
  await bulk.getByRole("combobox",{name:fa?"عملیات":"Action",exact:true}).selectOption("transfer");
  const panel=page.getByRole("region",{name:fa?"واگذاری کاربران به نماینده":"Assign clients to a representative",exact:true});

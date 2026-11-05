@@ -107,6 +107,7 @@ test("V8 volume customer edits name/IP/GB only after quote and confirmation",asy
  await page.goto("/clients");
  const directory=page.getByRole("region",{name:"Client directory"});
  await directory.locator(".clients-explorer-row").filter({hasText:"edit-volume"}).getByRole("button",{name:"Manage"}).click();
+ await page.getByRole("button",{name:"Details & Telegram",exact:true}).click();
  const editor=page.getByRole("region",{name:"Client profile editor"});
  await expect(editor.getByLabel("Edit client name")).toHaveValue("Original volume");
  await editor.getByLabel("Edit client name").fill("Manual editable name");
@@ -137,6 +138,7 @@ test("V8 protects unlimited paid slots and stale reviewed price",async({page})=>
  await page.goto("/clients");
  const directory=page.getByRole("region",{name:"Client directory"});
  await directory.locator(".clients-explorer-row").filter({hasText:"edit-unlimited"}).getByRole("button",{name:"Manage"}).click();
+ await page.getByRole("button",{name:"Details & Telegram",exact:true}).click();
  const editor=page.getByRole("region",{name:"Client profile editor"});
  await expect(editor.getByLabel("Edit client IP slots")).toHaveValue("2");
  await editor.getByLabel("Edit client IP slots").fill("1");
@@ -158,6 +160,7 @@ test("V8 Persian 320px edit quote remains readable without implicit credit debit
  await page.getByRole("button",{name:"Switch language"}).click();
  const directory=page.getByRole("region",{name:"Client directory"});
  await directory.locator(".clients-explorer-row").filter({hasText:"edit-volume"}).getByRole("button",{name:"مدیریت"}).click();
+ await page.getByRole("button",{name:"مشخصات و تلگرام",exact:true}).click();
  const editor=page.getByRole("region",{name:"Client profile editor"});
  await editor.getByLabel("Edit client name").fill("نام کاربر فارسی");
  await editor.getByLabel("Edit client audit reason").fill("تغییر نام با حسابرسی");

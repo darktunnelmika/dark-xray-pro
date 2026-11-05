@@ -12,10 +12,10 @@ const views = { clients: Clients, groups: Groups, representatives: Representativ
 export default function BusinessWorkspace({ language, section }: { language: Language; section: Section }) {
   const model = useBusinessWorkspace(language, section);
   const View = views[section];
-  return <section className="business-workspace" aria-label="Business workspace">
+  return <section className={"business-workspace"+(section==="clients"?" compact-clients-workspace":"")} aria-label="Business workspace">
     <Header model={model}/>
     <View model={model}/>
-    {model.notice && <div className="business-notice" role="status">{model.notice}</div>}
+    {model.notice && !(section==="clients"&&model.lifeClientID) && <div className="business-notice" role="status">{model.notice}</div>}
     <p className="business-footnote">{model.t.unsafe}</p>
   </section>;
 }

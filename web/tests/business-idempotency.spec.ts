@@ -102,8 +102,9 @@ test("ambiguous credit retry uses SAME event; editing amount creates NEW event w
 test("ambiguous client creation locks the payload until identical replay succeeds",async({page})=>{
  const m=await fixture(page);
  await page.goto("/clients");
+ await page.getByRole("button",{name:"Create client",exact:true}).click();
  const form=page.getByRole("heading",{name:"Create client",exact:true}).locator("..");
- await form.getByRole("checkbox",{name:"Create and activate"}).uncheck();
+ await form.getByLabel("Creation mode",{exact:true}).selectOption("account");
  await form.getByText("Advanced identity",{exact:true}).click();
  await form.getByLabel("Client ID (optional)",{exact:true}).fill("qa-safe-client");
  await form.getByLabel("Client name",{exact:true}).fill("Initial customer");

@@ -112,6 +112,26 @@ func (s *Server) attachWorkspace(mux *http.ServeMux) {
 		}
 		respond(w, http.StatusOK, result)
 	})
+	mux.HandleFunc("GET /api/v1/workspace/client-inbound-options", func(w http.ResponseWriter, r *http.Request) {
+		session, ok := s.authorizeBrowser(w, r, false, false)
+		if !ok {
+			return
+		}
+		if len(r.URL.Query()) != 0 {
+			businessError(w, business.ErrInvalid)
+			return
+		}
+		scope := ""
+		if session.User.Role == "representative" {
+			scope = session.User.RepresentativeID
+		}
+		choices, err := s.business.ClientInboundChoices(r.Context(), s.inboundKey, scope)
+		if err != nil {
+			businessError(w, err)
+			return
+		}
+		respond(w, http.StatusOK, map[string]any{"inbounds": choices, "scope": "saved_client_assignments", "representative_id": scope})
+	})
 	mux.HandleFunc("GET /api/v1/workspace/clients", func(w http.ResponseWriter, r *http.Request) {
 		session, ok := s.authorizeBrowser(w, r, false, false)
 		if !ok {
@@ -129,7 +149,7 @@ func (s *Server) attachWorkspace(mux *http.ServeMux) {
 			}
 			options.RepresentativeID = session.User.RepresentativeID
 		}
-		page, err := s.business.SearchClients(r.Context(), options)
+		page, err := s.business.SearchClientsWithInbound(r.Context(), s.inboundKey, options)
 		if err != nil {
 			businessError(w, err)
 			return
@@ -143,7 +163,7 @@ func (s *Server) attachWorkspace(mux *http.ServeMux) {
 			"total": page.Total, "has_more": page.HasMore,
 			"q": options.Query, "state": options.State, "plan": options.Plan,
 			"sort": options.Sort, "representative_id": options.RepresentativeID,
-			"group_id": options.GroupID, "origin": publicOrigin,
+			"group_id": options.GroupID, "origin": publicOrigin, "inbound_id": options.InboundID,
 			"activation": "pending_real_node_and_inbound_apply",
 		})
 	})

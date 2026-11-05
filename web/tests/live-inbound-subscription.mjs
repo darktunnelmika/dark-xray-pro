@@ -62,6 +62,7 @@ try {
   stage = 'client routes';
   const directory = page.getByRole('region', { name: 'Client directory' });
   await directory.locator('.clients-explorer-row').filter({ hasText: control.client_id }).getByRole('button', { name: 'Manage', exact: true }).click();
+  await page.getByRole('button', { name: 'Configuration & QR', exact: true }).click();
   const section = page.getByRole('region', { name: 'Client inbound subscription' });
   await expect(section.getByText(/No link issued/)).toBeVisible();
   await expect(section.getByText('Configuration for the running routes is available.', { exact: true })).toBeVisible();

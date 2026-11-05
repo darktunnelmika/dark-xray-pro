@@ -66,31 +66,33 @@ type CreditChange struct {
 	Reason              string `json:"reason"`
 }
 type NewClient struct {
-	UUID             string `json:"uuid,omitempty"`
-	EventID          string `json:"event_id"`
-	ClientID         string `json:"client_id"`
-	RepresentativeID string `json:"representative_id"`
-	Name             string `json:"name"`
-	DurationDays     int64  `json:"duration_days"`
-	IPCount          int64  `json:"ip_count"`
-	VolumeBytes      int64  `json:"volume_bytes"`
-	Unlimited        bool   `json:"unlimited"`
+	Contact          *ClientContactInput `json:"contact,omitempty"`
+	UUID             string              `json:"uuid,omitempty"`
+	EventID          string              `json:"event_id"`
+	ClientID         string              `json:"client_id"`
+	RepresentativeID string              `json:"representative_id"`
+	Name             string              `json:"name"`
+	DurationDays     int64               `json:"duration_days"`
+	IPCount          int64               `json:"ip_count"`
+	VolumeBytes      int64               `json:"volume_bytes"`
+	Unlimited        bool                `json:"unlimited"`
 }
 type Client struct {
-	ID                   string `json:"id"`
-	RepresentativeID     string `json:"representative_id"`
-	Name                 string `json:"name"`
-	UUID                 string `json:"uuid"`
-	PlanKind             string `json:"plan_kind"`
-	IPCount              int64  `json:"ip_count"`
-	VolumeBytes          int64  `json:"volume_bytes"`
-	DurationDays         int64  `json:"duration_days"`
-	ChargeVolumeBytes    int64  `json:"charged_volume_bytes"`
-	ChargeUnlimitedUnits int64  `json:"charged_unlimited_units"`
-	ExpiresUnix          int64  `json:"expires_unix"`
-	CreatedUnix          int64  `json:"created_unix"`
-	DeploymentState      string `json:"deployment_state"`
-	Archived             bool   `json:"archived"`
+	Contact              *ClientContact `json:"contact,omitempty"`
+	ID                   string         `json:"id"`
+	RepresentativeID     string         `json:"representative_id"`
+	Name                 string         `json:"name"`
+	UUID                 string         `json:"uuid"`
+	PlanKind             string         `json:"plan_kind"`
+	IPCount              int64          `json:"ip_count"`
+	VolumeBytes          int64          `json:"volume_bytes"`
+	DurationDays         int64          `json:"duration_days"`
+	ChargeVolumeBytes    int64          `json:"charged_volume_bytes"`
+	ChargeUnlimitedUnits int64          `json:"charged_unlimited_units"`
+	ExpiresUnix          int64          `json:"expires_unix"`
+	CreatedUnix          int64          `json:"created_unix"`
+	DeploymentState      string         `json:"deployment_state"`
+	Archived             bool           `json:"archived"`
 }
 type Event struct {
 	EventID             string `json:"event_id"`
@@ -282,6 +284,9 @@ func Open(path string) (*Store, error) {
 		if err = migrateInboundLifecycle(db); err != nil {
 			return fail(err)
 		}
+	}
+	if err = ensureClientContacts(db); err != nil {
+		return fail(err)
 	}
 	if err = validateDarkRestoreImportData(context.Background(), db); err != nil {
 		return fail(err)
@@ -552,18 +557,25 @@ func (s *Store) adjustCreditsTx(ctx context.Context, tx *sql.Tx, c CreditChange)
 func clientScan(row interface{ Scan(...any) error }) (Client, error) {
 	var c Client
 	var archived int
-	err := row.Scan(&c.ID, &c.RepresentativeID, &c.Name, &c.UUID, &c.PlanKind, &c.IPCount, &c.VolumeBytes, &c.DurationDays, &c.ChargeVolumeBytes, &c.ChargeUnlimitedUnits, &c.CreatedUnix, &c.ExpiresUnix, &c.DeploymentState, &archived)
+	var contact ClientContact
+	err := row.Scan(&c.ID, &c.RepresentativeID, &c.Name, &c.UUID, &c.PlanKind, &c.IPCount, &c.VolumeBytes, &c.DurationDays, &c.ChargeVolumeBytes, &c.ChargeUnlimitedUnits, &c.CreatedUnix, &c.ExpiresUnix, &c.DeploymentState, &archived, &contact.TelegramUsername, &contact.TelegramID, &contact.Note, &contact.Revision)
 	c.Archived = archived == 1
+	if contact.Revision > 0 {
+		c.Contact = &contact
+	}
 	return c, err
 }
 
 const clientColumns = "id,representative_id,display_name,uuid,plan_kind,ip_count,volume_bytes,duration_days,charged_volume_bytes,charged_unlimited_units,created_unix,expires_unix,deployment_state,archived"
 
+const clientReadColumns = clientColumns + ",COALESCE(cc.telegram_username,''),COALESCE(cc.telegram_id,''),COALESCE(cc.note,''),COALESCE(cc.revision,0)"
+const clientReadSource = "clients LEFT JOIN client_contacts_v1 cc ON cc.client_id=clients.id"
+
 func readClient(ctx context.Context, tx *sql.Tx, id string) (Client, error) {
-	return clientScan(tx.QueryRowContext(ctx, "SELECT "+clientColumns+" FROM clients WHERE id=?", id))
+	return clientScan(tx.QueryRowContext(ctx, "SELECT "+clientReadColumns+" FROM "+clientReadSource+" WHERE id=?", id))
 }
 func (s *Store) Client(ctx context.Context, id string) (Client, error) {
-	c, err := clientScan(s.db.QueryRowContext(ctx, "SELECT "+clientColumns+" FROM clients WHERE id=?", id))
+	c, err := clientScan(s.db.QueryRowContext(ctx, "SELECT "+clientReadColumns+" FROM "+clientReadSource+" WHERE id=?", id))
 	if errors.Is(err, sql.ErrNoRows) {
 		return c, ErrNotFound
 	}
@@ -573,7 +585,7 @@ func (s *Store) ListClients(ctx context.Context, repID string, limit, offset int
 	if (repID != "" && !idRE.MatchString(repID)) || limit < 1 || limit > 200 || offset < 0 || offset > 1_000_000 {
 		return nil, ErrInvalid
 	}
-	statement := "SELECT " + clientColumns + " FROM clients"
+	statement := "SELECT " + clientReadColumns + " FROM " + clientReadSource
 	args := []any{}
 	if repID != "" {
 		statement += " WHERE representative_id=?"
@@ -597,6 +609,11 @@ func (s *Store) ListClients(ctx context.Context, repID string, limit, offset int
 	return result, rows.Err()
 }
 func validClient(n NewClient) bool {
+	if n.Contact != nil {
+		if _, e := normalizeContact(*n.Contact); e != nil {
+			return false
+		}
+	}
 	if n.UUID != "" && !manualClientUUID.MatchString(n.UUID) {
 		return false
 	}
@@ -643,6 +660,13 @@ func (s *Store) createClientTx(ctx context.Context, tx *sql.Tx, n NewClient, sco
 	}
 	if !validClient(n) {
 		return Client{}, ErrInvalid
+	}
+	if n.Contact != nil {
+		v, e := normalizeContact(*n.Contact)
+		if e != nil {
+			return Client{}, e
+		}
+		n.Contact = &v
 	}
 	chargeVolume, chargeUnits := int64(0), int64(0)
 	plan := "volume"
@@ -716,6 +740,10 @@ func (s *Store) createClientTx(ctx context.Context, tx *sql.Tx, n NewClient, sco
 	_, err = tx.ExecContext(ctx, "INSERT INTO clients("+clientColumns+") VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)", c.ID, c.RepresentativeID, c.Name, c.UUID, c.PlanKind, c.IPCount, c.VolumeBytes, c.DurationDays, c.ChargeVolumeBytes, c.ChargeUnlimitedUnits, c.CreatedUnix, c.ExpiresUnix, c.DeploymentState, 0)
 	if err != nil {
 		return Client{}, ErrConflict
+	}
+	c.Contact, err = insertInitialContact(ctx, tx, c.ID, n.Contact)
+	if err != nil {
+		return Client{}, err
 	}
 	volumeDelta, unitDelta := int64(0), int64(0)
 	if r.Kind == "representative" {

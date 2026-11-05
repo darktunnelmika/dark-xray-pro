@@ -77,6 +77,7 @@ async function fixture(page:Page){
 test("V7 quote does not charge, cancel does not charge, explicit commit does",async({page})=>{
  const calls=await fixture(page);
  await page.goto("/clients");
+ await page.locator(".clients-selection-toggle").click();
  const directory=page.getByRole("region",{name:"Client directory"});
  await directory.getByLabel("Select client v7-client-0").check();
  await directory.getByLabel("Select client v7-client-1").check();
@@ -106,6 +107,7 @@ test("V7 quote does not charge, cancel does not charge, explicit commit does",as
 test("V7 changing selected clients, terms or audit reason invalidates quote",async({page})=>{
  const calls=await fixture(page);
  await page.goto("/clients");
+ await page.locator(".clients-selection-toggle").click();
  const directory=page.getByRole("region",{name:"Client directory"});
  await directory.getByLabel("Select client v7-client-0").check();
  await directory.locator(".clients-bulk-fields select").selectOption("extend");
@@ -128,6 +130,7 @@ test("V7 Persian 320px quote is responsive without an implicit debit",async({pag
  await page.setViewportSize({width:320,height:750});
  const calls=await fixture(page);
  await page.goto("/clients");
+ await page.locator(".clients-selection-toggle").click();
  await page.getByRole("button",{name:"Switch language"}).click();
  const directory=page.getByRole("region",{name:"Client directory"});
  await directory.getByLabel("انتخاب کلاینت v7-client-0").check();

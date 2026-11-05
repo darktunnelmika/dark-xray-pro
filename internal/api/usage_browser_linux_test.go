@@ -138,6 +138,9 @@ func TestRealBrowserNativeUsageXraySQLiteAndRevocation(t *testing.T) {
 	if customer.UUID != "12345678-1234-4234-8234-123456789abc" {
 		t.Fatal("manual UUID was not persisted through the real browser/API")
 	}
+	if customer.Contact == nil || customer.Contact.TelegramUsername != "live_customer" || customer.Contact.TelegramID != "123456789" || customer.Contact.Note != "Disposable customer contact" {
+		t.Fatal("manual contact was not persisted through browser/API")
+	}
 	originalUUID := customer.UUID
 	repBefore, e := s.business.Representative(ctx, customer.RepresentativeID)
 	if e != nil {

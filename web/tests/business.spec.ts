@@ -262,6 +262,7 @@ test("representative only sees own scoped business tools and submits CSRF-bound 
   await expect(page.getByText("90", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Create representative" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Record credit transaction" })).toHaveCount(0);
+ await page.getByRole("button",{name:"Create client",exact:true}).click();
  await page.locator(".business-client-form").getByText("Advanced identity",{exact:true}).click();
   await page.locator(".business-client-form").getByLabel("Client ID (optional)",{exact:true}).fill("sample-pro-rep");
   await page.getByLabel("Client name").fill("Private Test User");
@@ -358,6 +359,7 @@ test("representative can extend then archive a client without publishing Xray, a
   await page.getByLabel("Password").fill("test-private-password-for-lab");
   await page.getByRole("button", { name: "Sign in" }).click();
   await expect(page.getByText("Scoped to your representative account.")).toBeVisible();
+  await page.getByRole("button",{name:"Create client",exact:true}).click();
   await page.getByText("Advanced identity",{exact:true}).click();
   await page.getByLabel("Client ID (optional)", { exact: true }).fill("test-lifecycle-user");
   await page.getByLabel("Client name").fill("Lifecycle test");
@@ -365,19 +367,26 @@ test("representative can extend then archive a client without publishing Xray, a
   await page.getByLabel("Duration (days)").fill("30");
   await page.getByLabel("IP limit",{exact:true}).fill("5");
   await page.getByRole("button", { name: "Create client", exact:true }).click();
+  await page.getByRole("button",{name:"Back to client list",exact:true}).click();
   await expect(page.locator(".clients-explorer-row").filter({ hasText: "test-lifecycle-user" }).getByText("Lifecycle test")).toBeVisible();
   await page.getByRole("button", { name: "Manage", exact: true }).click();
+  await page.getByRole("button",{name:"Renew",exact:true}).click();
   await page.getByLabel("Additional days").fill("30");
   await page.getByLabel("Additional volume (GB)").fill("0");
   const renewForm = page.getByRole("heading", { name: "Extend / add volume" }).locator("..");
   await renewForm.getByLabel("Operation reason").fill("Renewing for 30 days");
   await renewForm.getByRole("button", { name: "Extend / add volume" }).click();
+  await page.getByRole("button",{name:"Close details",exact:true}).click();
+  await page.locator(".clients-history > summary").click();
   await expect(page.getByText("Renewing for 30 days", { exact: false })).toBeVisible();
+  await page.getByRole("button",{name:"Manage",exact:true}).click();
+  await page.getByRole("button",{name:"Account state",exact:true}).click();
   const actionForm = page.getByRole("heading", { name: "Client action" }).locator("..");
   await actionForm.getByLabel("Client action").selectOption("archive");
   await actionForm.getByLabel("Operation reason").fill("Archived after expiry");
   page.once("dialog", (dialog) => dialog.accept());
   await actionForm.getByRole("button", { name: "Record state change" }).click();
+  await page.getByRole("button",{name:"Close details",exact:true}).click();
   await expect(page.getByText("Archived after expiry", { exact: false })).toBeVisible();
   expect(requests.map((v) => v.path)).toEqual([
     "/api/v1/workspace/clients",
@@ -406,8 +415,9 @@ test("owner moves only same-representative clients through safe picker then remo
  await page.getByLabel("Password").fill("test-private-password-for-lab");
  await page.getByRole("button",{name:"Sign in"}).click();
 
+ await page.getByRole("button",{name:"Create client",exact:true}).click();
  const create=page.getByRole("heading",{name:"Create client",exact:true}).locator("..");
- await create.getByRole("checkbox",{name:"Create and activate"}).uncheck();
+ await create.getByLabel("Creation mode",{exact:true}).selectOption("account");
  await create.getByText("Advanced identity",{exact:true}).click();
  await create.getByLabel("Client ID (optional)",{exact:true}).fill("owner-isolated");
  await create.getByLabel("Client name").fill("Owner only");
@@ -537,6 +547,7 @@ test("client plan quick presets match HUB debit and never submit until represent
  await page.getByLabel("Username").fill("rep-a");
  await page.getByLabel("Password").fill("test-private-password-for-lab");
  await page.getByRole("button",{name:"Sign in"}).click();
+ await page.getByRole("button",{name:"Create client",exact:true}).click();
  const form=page.getByRole("heading",{name:"Create client",exact:true}).locator("..");
  await form.getByRole("button",{name:"Quick presets"}).click();
  const builder=page.getByRole("region",{name:"Plan builder and credit preview"});
@@ -581,18 +592,18 @@ test("client explorer searches all scoped clients from server, selects client an
  await page.getByRole("button",{name:"Sign in"}).click();
  const list=page.getByRole("region",{name:"Client directory"});
  await expect(list.locator(".clients-explorer-row")).toHaveCount(50);
- await expect(list.getByText("Search, filter and sort across every client",{exact:false})).toBeVisible();
- await list.getByPlaceholder("Search all clients by name or ID").fill("Member 001");
+ await expect(list.getByRole("heading",{name:"Client directory",exact:true})).toBeVisible();
+ await list.getByPlaceholder("Search by name, ID, Telegram or note").fill("Member 001");
  await expect(list.locator(".clients-explorer-row")).toHaveCount(1);
  await expect(list.getByText("Member 001")).toBeVisible();
- await list.getByPlaceholder("Search all clients by name or ID").fill("");
+ await list.getByPlaceholder("Search by name, ID, Telegram or note").fill("");
  await list.getByRole("button",{name:"Next"}).click();
  await expect(list.locator(".clients-explorer-row")).toHaveCount(5);
  await expect(list.getByText("Member 054")).toBeVisible();
  await expect(list.getByText("Member 000")).toHaveCount(0);
  await list.locator(".clients-explorer-row").filter({hasText:"Member 054"})
   .getByRole("button",{name:"Manage"}).click();
- await expect(page.getByLabel("Choose an existing client")).toHaveValue("paged-client-054");
+ await expect(page.getByRole("dialog",{name:"Member 054",exact:true})).toBeVisible();
  await page.reload();
  await expect(list.getByText("Member 054")).toBeVisible();
  await expect(list.locator(".clients-explorer-row")).toHaveCount(5);
@@ -617,7 +628,7 @@ test("representative client directory fails closed on a cross-account or malform
  await expect(list.getByText("DO NOT DISCLOSE")).toHaveCount(0);
  await expect(page.getByText("other-rep-secret")).toHaveCount(0);
  await expect(list.locator(".clients-explorer-row")).toHaveCount(0);
- await expect(page.getByRole("button",{name:"Extend / add volume"})).toBeDisabled();
+ await expect(page.getByRole("button",{name:"Extend / add volume"})).toHaveCount(0);
  expect(requests).toHaveLength(0);
 });
 
@@ -630,10 +641,12 @@ test("320px Persian sale presets and current-page client status filters avoid fa
  await page.getByLabel("Password").fill("test-private-password-for-lab");
  await page.getByRole("button",{name:"Sign in"}).click();
  await page.getByRole("button",{name:"Switch language"}).click();
+ await page.getByRole("button",{name:"ایجاد کلاینت",exact:true}).click();
  await page.getByRole("button",{name:"مقادیر آماده",exact:true}).click();
  const preview=page.getByRole("region",{name:"Plan builder and credit preview"});
  await expect(preview.getByRole("heading",{name:"ساخت سریع پلن"})).toBeVisible();
  await preview.getByRole("button",{name:"90 روز"}).click();
+ await page.getByRole("button",{name:"بازگشت به فهرست",exact:true}).click();
  const list=page.getByRole("region",{name:"Client directory"});
  await expect(list.getByRole("heading",{name:"فهرست کلاینت‌ها"})).toBeVisible();
  await list.getByLabel("وضعیت").selectOption("archived");
@@ -654,13 +667,14 @@ test("global directory searches clients outside loaded page and supports 25/50/1
  await page.getByLabel("Password").fill("test-private-password-for-lab");
  await page.getByRole("button",{name:"Sign in"}).click();
  const list=page.getByRole("region",{name:"Client directory"});
+ await page.locator(".clients-filter-options > summary").click();
  await expect(list.locator(".clients-explorer-row")).toHaveCount(50);
  await expect(list.getByText("Matches: 125")).toBeVisible();
- await list.getByPlaceholder("Search all clients by name or ID").fill("Member 120");
+ await list.getByPlaceholder("Search by name, ID, Telegram or note").fill("Member 120");
  await expect(list.locator(".clients-explorer-row")).toHaveCount(1);
  await expect(list.getByText("Member 120")).toBeVisible();
  await expect(list.getByText("Matches: 1")).toBeVisible();
- await list.getByPlaceholder("Search all clients by name or ID").fill("");
+ await list.getByPlaceholder("Search by name, ID, Telegram or note").fill("");
  await expect(list.locator(".clients-explorer-row")).toHaveCount(50);
  await list.getByLabel("Per page").selectOption("200");
  await expect(list.locator(".clients-explorer-row")).toHaveCount(125);
@@ -688,14 +702,17 @@ test("owner can search/filter across representatives without cross-representativ
  await page.getByLabel("Username").fill("proowner");
  await page.getByLabel("Password").fill("test-private-password-for-lab");
  await page.getByRole("button",{name:"Sign in"}).click();
+ await page.getByRole("button",{name:"Create client",exact:true}).click();
  const form=page.getByRole("heading",{name:"Create client",exact:true}).locator("..");
  await form.getByText("Advanced identity",{exact:true}).click();
  await form.getByLabel("Client ID (optional)",{exact:true}).fill("other-qa-customer");
  await form.getByLabel("Client name").fill("Remote verified customer");
  await form.getByLabel("Account owner").selectOption("rep-a");
- await form.getByRole("checkbox",{name:"Create and activate"}).uncheck();
+ await form.getByLabel("Creation mode",{exact:true}).selectOption("account");
  await form.getByRole("button",{name:"Create client",exact:true}).click();
  const list=page.getByRole("region",{name:"Client directory"});
+ await page.getByRole("button",{name:"Back to client list",exact:true}).click();
+ await page.locator(".clients-filter-options > summary").click();
  await expect(list.getByText("Matches: 59")).toBeVisible();
  await list.getByLabel("Representative ID (owner, optional)").fill("rep-a");
  await expect(list.locator(".clients-explorer-row")).toHaveCount(1);
@@ -739,7 +756,7 @@ test("global directory prevents stale actions when second page is malformed",asy
  await list.getByRole("button",{name:"Next"}).click();
  await expect(list.getByText("PRIVATE OWNER")).toHaveCount(0);
  await expect(list.locator(".clients-explorer-row")).toHaveCount(0);
- await expect(page.getByRole("button",{name:"Extend / add volume"})).toBeDisabled();
+ await expect(page.getByRole("button",{name:"Extend / add volume"})).toHaveCount(0);
  await expect(page.getByText(/Business data unavailable or unverified/)).toBeVisible();
  expect(requests).toHaveLength(0);
 });
@@ -752,6 +769,7 @@ test("representative bulk disable, enable and archive are explicit, scoped and n
  await page.getByLabel("Password").fill("test-private-password-for-lab");
  await page.getByRole("button",{name:"Sign in"}).click();
  const list=page.getByRole("region",{name:"Client directory"});
+ await page.locator(".clients-selection-toggle").click();
  const bulk=page.locator(".clients-bulk");
  await expect(list.locator(".clients-explorer-row")).toHaveCount(4);
  const inputs=list.locator(".clients-bulk-checkbox input");
@@ -793,6 +811,8 @@ test("bulk selection is capped at 50, resets on page changes and never writes on
  await page.getByLabel("Password").fill("test-private-password-for-lab");
  await page.getByRole("button",{name:"Sign in"}).click();
  const list=page.getByRole("region",{name:"Client directory"});
+ await page.locator(".clients-filter-options > summary").click();
+ await page.locator(".clients-selection-toggle").click();
  const bulk=page.locator(".clients-bulk");
  await list.getByLabel("Per page").selectOption("200");
  await expect(list.locator(".clients-explorer-row")).toHaveCount(125);
@@ -826,6 +846,7 @@ test("bulk selection and confirmation work on 320px Persian RTL without exposing
  await page.getByRole("button",{name:"Sign in"}).click();
  await page.getByRole("button",{name:"Switch language"}).click();
  const list=page.getByRole("region",{name:"Client directory"});
+ await page.locator(".clients-selection-toggle").click();
  const bulk=page.locator(".clients-bulk");
  await expect(bulk.getByText("مدیریت گروهی کلاینت‌ها")).toBeVisible();
  await bulk.getByRole("button",{name:"انتخاب حداکثر ۵۰ مورد نمایان"}).click();
@@ -847,6 +868,7 @@ test("ambiguous response reuses bulk event ID only for an identical reviewed sel
  await page.getByLabel("Username").fill("rep-a");
  await page.getByLabel("Password").fill("test-private-password-for-lab");
  await page.getByRole("button",{name:"Sign in"}).click();
+ await page.locator(".clients-selection-toggle").click();
  const bulk=page.locator(".clients-bulk");
  await page.locator(".clients-bulk-checkbox input").first().check();
  await bulk.getByLabel("Required audit reason").fill("First attempted reviewed operation");
@@ -953,6 +975,7 @@ for (const user of [owner,rep]) {
   await expect(directory.locator(".clients-explorer-row")).toHaveCount(50);
   await directory.getByRole("button",{name:"Next",exact:true}).click();
   await expect(directory.getByText("Page: 2")).toBeVisible();
+  await page.locator(".clients-selection-toggle").click();
   await directory.locator(".clients-explorer-row").first().getByRole("checkbox").check();
   await expect(directory.locator(".clients-bulk-header span")).toHaveText("1 selected");
   await directory.locator("summary").filter({hasText:"Group and origin"}).click();
@@ -996,6 +1019,6 @@ test("directory refuses an origin filter ignored by an older or mismatched serve
  await directory.getByLabel("Client origin",{exact:true}).selectOption("legacy");
  await expect(directory.locator(".clients-explorer-row")).toHaveCount(0);
  await expect(directory.getByText("MUST STAY HIDDEN")).toHaveCount(0);
- await expect(directory.getByRole("button",{name:"Apply to selected",exact:true})).toBeDisabled();
+ await expect(directory.locator(".clients-bulk-submit")).toBeDisabled();
  expect(writes).toHaveLength(0);
 });

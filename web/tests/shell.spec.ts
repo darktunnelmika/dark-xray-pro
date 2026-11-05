@@ -31,7 +31,8 @@ test("one root login protects every page and does not poll private fleet before 
   await expect(page.getByRole("navigation")).toHaveCount(0);
   expect(f.seen.every(path => path.includes("/session/"))).toBe(true);
   await login(page); await expect(page).toHaveURL(/\/clients$/);
-  await expect(page.locator(".business-client-form")).toBeVisible();
+  await expect(page.getByRole("region",{name:"Client directory",exact:true})).toBeVisible();
+  await expect(page.locator(".business-client-form")).toBeHidden();
   await expect(page.getByRole("heading", { name: "Create representative" })).toHaveCount(0);
   await expect(page.getByRole("heading", { name: "Create group" })).toHaveCount(0);
   expect(f.seen.some(path => path.endsWith("/events") || path.endsWith("/groups"))).toBe(false);
@@ -250,14 +251,16 @@ test("removed Dark Restore has no owner UI, bookmark entry or background API cal
  const f=await setup(page);
  await page.setViewportSize({width:320,height:750});
  await page.goto("/clients?view=restore");await login(page);
- await expect(page.locator(".business-client-form")).toBeVisible();
+ await expect(page.getByRole("region",{name:"Client directory",exact:true})).toBeVisible();
+  await expect(page.locator(".business-client-form")).toBeHidden();
  await expect(page.getByText(/Dark Restore|دارک ریستور/)).toHaveCount(0);
  await expect(page.locator('[aria-label="Dark Restore review"]')).toHaveCount(0);
  expect(f.seen.some(p=>p.includes("/dark-restore/"))).toBe(false);
  await page.goto("/dark-restore");
  await expect(page.getByText(/Dark Restore|دارک ریستور/)).toHaveCount(0);
  expect(f.seen.some(p=>p.includes("/dark-restore/"))).toBe(false);
- await page.goto("/clients");await expect(page.locator(".business-client-form")).toBeVisible();
+ await page.goto("/clients");await expect(page.getByRole("region",{name:"Client directory",exact:true})).toBeVisible();
+  await expect(page.locator(".business-client-form")).toBeHidden();
  await page.getByRole("button",{name:"Open menu",exact:true}).click();
  await expect(page.getByRole("navigation").getByRole("button",{name:"Backups",exact:true,includeHidden:true})).toHaveCount(1);
  expect(f.seen.some(p=>p.includes("/dark-restore/"))).toBe(false);

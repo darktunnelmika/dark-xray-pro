@@ -1,7 +1,7 @@
 import { api, mutation } from "../session";
 import { readExecutionState, readExecutionPreview, readExecutionOperation, executionPath, type ExecutionCommand, type ExecutionInput } from "../inboundExecution";
 
-export type CreatePayload = {event_id:string;client_id:string;representative_id:string;name:string;duration_days:number;ip_count:number;volume_bytes:number;unlimited:boolean};
+export type CreatePayload = {contact?:import("./ClientContact").ContactInput;event_id:string;client_id:string;representative_id:string;name:string;duration_days:number;ip_count:number;volume_bytes:number;unlimited:boolean};
 export type CreateAttempt = {version:1;owner:string;payload:CreatePayload;inbound_ids:number[];manual_uuid:boolean;creation_sent?:boolean;created:boolean;commands:Record<string,ExecutionCommand>;submitted:number[]};
 export const createStorageKey=(owner:string)=>"darkpro:client-create:v1:"+owner;
 export function readCreateAttempt(raw:string|null,owner:string):CreateAttempt|null {
@@ -17,8 +17,8 @@ export function readCreateAttempt(raw:string|null,owner:string):CreateAttempt|nu
 export async function preflightInbounds(ids:number[]) {
  for (const id of ids) {
   const s=readExecutionState(await api<unknown>(executionPath(id)),id);
-  if(!s.enabled || s.owner_resume_required || s.pending_changes || !["active","stopped"].includes(s.desired_state) ||
-    s.accounting_mode!=="per_client" || !s.allowed_actions.some(x=>x==="activate"||x==="apply"))
+  if(!s.enabled || s.owner_resume_required || s.pending_changes || s.desired_state!=="active" ||
+    s.accounting_mode!=="per_client" || s.observed_state!=="active" || !s.allowed_actions.includes("apply"))
    throw Error("inbound_not_ready");
  }
 }
@@ -29,12 +29,12 @@ export async function deliverCreatedClient(a:CreateAttempt, csrf:string, save:(a
   const path=executionPath(id);
   let s=readExecutionState(await api<unknown>(path),id);
   check();
-  const ready=s.observed_state==="active" && !s.pending_changes && s.effective_client_ids.includes(a.payload.client_id);
+  const ready=s.enabled && s.desired_state==="active" && !s.owner_resume_required && s.accounting_mode==="per_client" && s.observed_state==="active" && !s.pending_changes && s.effective_client_ids.includes(a.payload.client_id);
   if(ready)continue;
   if(!a.commands[id]) {
-   if(s.owner_resume_required || s.pending_changes || !["active","stopped"].includes(s.desired_state) || s.accounting_mode!=="per_client")
+   if(s.owner_resume_required || s.pending_changes || s.desired_state!=="active" || s.observed_state!=="active" || !s.allowed_actions.includes("apply") || s.accounting_mode!=="per_client")
     throw Error("inbound_not_ready");
-   const input:ExecutionInput={event_id:crypto.randomUUID(),action:s.desired_state==="active"?"apply":"activate",
+   const input:ExecutionInput={event_id:crypto.randomUUID(),action:"apply",
     expected_revision:s.revision,expected_plan_revision:s.plan_revision,expected_inbound_revision:s.inbound_revision,
     client_ids:[...new Set([...s.client_ids,a.payload.client_id])].sort(),accounting_mode:"per_client",reason:"Create client and deliver selected inbound"};
    const preview=readExecutionPreview(await mutation<unknown>(path+"/preview",input,csrf),id,input);
@@ -42,6 +42,7 @@ export async function deliverCreatedClient(a:CreateAttempt, csrf:string, save:(a
    if(!preview.valid)throw Error("inbound_activation_blocked");
    a={...a,commands:{...a.commands,[id]:{...input,review_sha:preview.review_sha}}};save(a);
   }
+  if(a.commands[id].action!=="apply")throw Error("inbound_not_ready");
   if(!a.submitted.includes(id)) {
    const cmd=a.commands[id];
    readExecutionOperation(await mutation<unknown>(path+"/commands",cmd,csrf),id,cmd);
@@ -52,7 +53,7 @@ export async function deliverCreatedClient(a:CreateAttempt, csrf:string, save:(a
   let all=true;
   for(const id of a.inbound_ids) {
    check();const s=readExecutionState(await api<unknown>(executionPath(id)),id);check();
-   if(s.observed_state!=="active" || s.pending_changes || !s.effective_client_ids.includes(a.payload.client_id))all=false;
+   if(!s.enabled || s.desired_state!=="active" || s.owner_resume_required || s.accounting_mode!=="per_client" || s.observed_state!=="active" || s.pending_changes || !s.effective_client_ids.includes(a.payload.client_id))all=false;
   }
   if(all)return true;
   if(n<7)await new Promise(r=>setTimeout(r,1500));
