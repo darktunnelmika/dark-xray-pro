@@ -75,6 +75,21 @@ func TestOwnerAndRepresentativeGlobalClientSearchIsolation(t *testing.T) {
 	if code, r := read(repCookie, "/api/v1/workspace/clients?inbound_id=10"); code != 200 || r["inbound_id"] != float64(10) || r["total"] != float64(1) || r["clients"].([]any)[0].(map[string]any)["id"] != "secret-a" {
 		t.Fatalf("scoped filter %d %+v", code, r)
 	}
+	code, summary := read(repCookie, "/api/v1/workspace/clients?summary=1&inbound_id=10")
+	if code != 200 {
+		t.Fatal(code, summary)
+	}
+	raw, _ := json.Marshal(summary)
+	if strings.Contains(string(raw), "secret-b") || strings.Contains(string(raw), "Private B") {
+		t.Fatal("summary leaked another tenant")
+	}
+	own := summary["clients"].([]any)[0].(map[string]any)["directory"].(map[string]any)
+	if own["scope"] != "saved_membership_and_committed_usage" || len(own["inbounds"].([]any)) != 1 {
+		t.Fatal("missing summary", own)
+	}
+	if code, _ := read(repCookie, "/api/v1/workspace/clients?summary=1&representative_id=rep-b"); code != 403 {
+		t.Fatal("summary scope override", code)
+	}
 	if code, _ := read(nil, "/api/v1/workspace/clients?q=private&limit=50"); code != 401 {
 		t.Fatalf("anonymous enumerated clients: %d", code)
 	}

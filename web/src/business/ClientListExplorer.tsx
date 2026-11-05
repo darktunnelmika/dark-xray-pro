@@ -1,3 +1,4 @@
+import ClientDirectorySummary from "./ClientDirectorySummary";
 import ClientInboundFilter from "./ClientInboundFilter";
 import { useEffect, useRef, useState } from "react";
 import { CalendarDays, Search, ShieldCheck, UserRoundCheck, Users, CheckSquare, Archive, AlertTriangle } from "lucide-react";
@@ -255,12 +256,13 @@ export default function ClientListExplorer({model,onCreate}: {model:BusinessMode
             </div>
             <span className={"clients-explorer-status is-"+status}>{copy[status]}</span>
           </div>
-          <div className="clients-explorer-meta">
+          <div className="clients-explorer-details"><div className="clients-explorer-meta">
             <span><strong>{planLabel}</strong> {c.plan_kind==="volume"?gb(c.volume_bytes):""}</span>
             <span>{countLabel}</span>
             <span><CalendarDays size={13}/>{copy.end}: {dateTime(c.expires_unix,language)}</span>
             {session.user.role==="owner" && <span>{copy.rep}: <b>{c.representative_id}</b></span>}
           </div>
+          <ClientDirectorySummary client={c} language={language}/></div>
           <div className="clients-explorer-actions">
             <button type="button" aria-pressed={lifeClientID===c.id}
               onClick={()=>setLifeClientID(c.id)}>{copy.manage}</button>

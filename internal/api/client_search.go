@@ -17,7 +17,7 @@ func clientSearchParams(r *http.Request) (business.ClientSearch, error) {
 			return opt, business.ErrInvalid
 		}
 		switch key {
-		case "limit", "offset", "representative_id", "q", "state", "plan", "sort", "group_id", "origin", "inbound_id":
+		case "limit", "offset", "representative_id", "q", "state", "plan", "sort", "group_id", "origin", "inbound_id", "summary":
 		default:
 			return opt, business.ErrInvalid
 		}
@@ -35,6 +35,12 @@ func clientSearchParams(r *http.Request) (business.ClientSearch, error) {
 			return opt, business.ErrInvalid
 		}
 		opt.Offset = n
+	}
+	if v, ok := q["summary"]; ok {
+		if v[0] != "1" {
+			return opt, business.ErrInvalid
+		}
+		opt.Summary = true
 	}
 	opt.RepresentativeID = q.Get("representative_id")
 	opt.GroupID = q.Get("group_id")

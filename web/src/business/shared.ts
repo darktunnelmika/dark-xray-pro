@@ -1,6 +1,6 @@
 import type { AppUser as User, Language } from "../session";
 export type Representative = { id: string; display_name: string; kind: string; enabled: boolean; volume_credit_bytes: number; unlimited_credit_units: number };
-export type Client = { contact?: import("./ClientContact").Contact; id: string; representative_id: string; name: string; plan_kind: string; ip_count: number; volume_bytes: number; duration_days: number; deployment_state: string; expires_unix: number; archived: boolean };
+export type Client = { directory?: import("./ClientDirectorySummary").DirectorySummary; contact?: import("./ClientContact").Contact; id: string; representative_id: string; name: string; plan_kind: string; ip_count: number; volume_bytes: number; duration_days: number; deployment_state: string; expires_unix: number; archived: boolean };
 export type ClientOperation = { event_id: string; client_id: string; representative_id: string; kind: string; reason: string; added_days: number; added_volume_bytes: number; volume_credit_debit: number; unlimited_credit_debit: number; created_unix: number };
 export type ClientGroup = { id: string; representative_id: string; name: string; color: string; member_count: number; created_unix: number; updated_unix: number };
 export type LedgerEvent = { event_id: string; kind: string; representative_id: string; object_id: string; reason: string; volume_delta_bytes: number; unlimited_delta_units: number };

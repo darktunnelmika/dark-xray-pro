@@ -429,10 +429,25 @@ func (l *Ledger) MarkEpochUncertain(ctx context.Context, principal Principal, ep
 		return nil
 	})
 }
+
+// AccountTx reads counters and historical reservations in the caller's snapshot.
+// It performs no initialization or writes.
+func (l *Ledger) AccountTx(ctx context.Context, tx *sql.Tx, clientID string) (Account, error) {
+	return readAccount(ctx, tx, clientID)
+}
 func (l *Ledger) Account(ctx context.Context, clientID string) (Account, error) {
 	var a Account
-	var complete, allowed int
 	err := l.readSnapshot(ctx, func(c *ledgerConn) error {
+		var err error
+		a, err = readAccount(ctx, c, clientID)
+		return err
+	})
+	return a, err
+}
+func readAccount(ctx context.Context, c budgetReader, clientID string) (Account, error) {
+	var a Account
+	var complete, allowed int
+	err := func() error {
 		if err := c.QueryRowContext(ctx, `SELECT a.client_id,c.representative_id,a.uplink,a.downlink,a.baseline_complete,a.holds,c.plan_kind,c.volume_bytes,v.eligible FROM pro_usage_accounts a JOIN clients c ON c.id=a.client_id JOIN pro_usage_eligibility v ON v.client_id=a.client_id WHERE a.client_id=?`, clientID).Scan(&a.ClientID, &a.RepresentativeID, &a.Uplink, &a.Downlink, &complete, &a.Holds, &a.Plan, &a.Limit, &allowed); err != nil {
 			return err
 		}
@@ -450,7 +465,7 @@ func (l *Ledger) Account(ctx context.Context, clientID string) (Account, error) 
 			}
 		}
 		return nil
-	})
+	}()
 	if errors.Is(err, sql.ErrNoRows) {
 		return a, ErrMissing
 	}

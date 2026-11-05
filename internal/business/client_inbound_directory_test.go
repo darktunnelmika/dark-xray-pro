@@ -61,7 +61,7 @@ func TestClientInboundDirectoryManagedBindingsAndWrongKey(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	p, e := f.s.SearchClientsWithInbound(ctx, f.key, ClientSearch{InboundID: 501, Limit: 50})
+	p, e := f.s.SearchClientsWithInbound(ctx, f.key, ClientSearch{Summary: true, InboundID: 501, Limit: 50})
 	if e != nil || p.Total != 1 || p.Clients[0].ID != f.client.ID {
 		t.Fatalf("managed %+v %v", p, e)
 	}
@@ -69,7 +69,7 @@ func TestClientInboundDirectoryManagedBindingsAndWrongKey(t *testing.T) {
 	if err != nil || len(choices) != 1 || choices[0].ID != 501 || choices[0].Clients != 1 {
 		t.Fatalf("managed options %+v %v", choices, err)
 	}
-	if _, e = f.s.SearchClientsWithInbound(ctx, bytes.Repeat([]byte{99}, 32), ClientSearch{InboundID: 501, Limit: 50}); e == nil {
+	if _, e = f.s.SearchClientsWithInbound(ctx, bytes.Repeat([]byte{99}, 32), ClientSearch{Summary: true, InboundID: 501, Limit: 50}); e == nil {
 		t.Fatal("wrong key accepted")
 	}
 }

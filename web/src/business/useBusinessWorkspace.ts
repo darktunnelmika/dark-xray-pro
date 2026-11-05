@@ -132,7 +132,7 @@ export function useBusinessWorkspace(language: Language, section: Section) {
     const controller = new AbortController();
     const p = "?limit=50&offset=";
     const clientQ = new URLSearchParams({
-      limit:String(clientLimit),offset:String(clientOffset),q:clientSearch,
+      summary:"1",limit:String(clientLimit),offset:String(clientOffset),q:clientSearch,
       state:clientStateFilter,plan:clientPlanFilter,sort:clientSort,
     });
     if(session.user.role==="owner" && clientRepFilter)clientQ.set("representative_id",clientRepFilter);
