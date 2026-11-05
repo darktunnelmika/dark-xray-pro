@@ -33,6 +33,16 @@ func TestManagedArchiveReservationReleasedOnlyAfterAcknowledgement(t *testing.T)
 	if err := f.s.ObserveInboundExecution(ctx, f.key, o); err != nil {
 		t.Fatal(err)
 	}
+	state, err := f.s.InboundExecution(ctx, f.key, 501)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, action := range []string{"stop", "activate", "restart"} {
+		_, err = f.s.PreviewInboundExecution(ctx, f.key, "owner", 501, ix.CommandInput{EventID: "closed-archive-reject-" + action, Action: action, ExpectedRevision: state.Revision, ExpectedPlanRevision: state.PlanRevision, ExpectedInboundRevision: state.InboundRevision, Reason: "Completed archives remain immutable"})
+		if !errors.Is(err, ErrConflict) {
+			t.Fatalf("completed archive accepted %s: %v", action, err)
+		}
+	}
 	if _, err := f.s.SaveNativeInboundPlan(ctx, f.key, replacement); err != nil {
 		t.Fatalf("completed archive retained reservation: %v", err)
 	}
