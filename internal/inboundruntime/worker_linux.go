@@ -279,6 +279,15 @@ func (w *Worker) Step(ctx context.Context, x Exchange) error {
 		}
 		values, e := w.process.Counters(ctx)
 		if e != nil {
+			// A failed sample is not proof that the final counters are lost.
+			// Close admission and persist an authoritative final using a fresh,
+			// bounded context before falling back to an uncertainty hold.
+			finalCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			finalErr := w.captureFinal(finalCtx)
+			cancel()
+			if finalErr == nil {
+				return e
+			}
 			_ = w.markUncertain()
 			_ = w.observe(ctx, x, "failed", "accounting_tail_uncertain", false)
 			return e
