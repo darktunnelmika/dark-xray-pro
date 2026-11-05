@@ -50,9 +50,12 @@ for (const viewFinance of [false, true]) {
   await expect.poll(()=>requests.some(r=>r.path==="/api/v1/workspace/clients"&&r.q==="Directory")).toBe(true);
   await expect(directory.getByText(client.name,{exact:true})).toBeVisible();
 
-  const history=page.getByRole("heading",{name:"Client operation history"});
+  const history=page.locator(".clients-history summary");
   if(viewFinance){
+   await expect(history).toHaveText("Client operation history");
    await expect(history).toBeVisible();
+   await expect(page.getByText(historyReason,{exact:false})).toBeHidden();
+   await history.click();
    await expect(page.getByText(historyReason,{exact:false})).toBeVisible();
    expect(requests.some(r=>r.path==="/api/v1/workspace/client-operations")).toBe(true);
   }else{
