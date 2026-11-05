@@ -31,24 +31,26 @@ import (
 )
 
 type economicFixture struct {
-	root, path    string
-	lock          *hubstate.Lock
-	inventory     hubstate.Inventory
-	token         string
-	creates       []business.SellerClientCreateV1
-	extends       []business.SellerClientExtendV1
-	orders        []business.SellerOrderReceiptV1
-	refund        business.VolumeExpiryRefundRequest
-	refunded      business.VolumeExpiryRefundReceipt
-	principal     usageledger.Principal
-	report        uc.Report
-	usage         uc.Receipt
-	legacySource  string
-	legacyRequest business.DarkRestoreImportCommitV1
-	ownerToken    string
-	ownership     business.ClientOwnershipCommit
-	transferred   business.ClientOwnershipReceipt
-	state         economicState
+	root, path     string
+	lock           *hubstate.Lock
+	inventory      hubstate.Inventory
+	token          string
+	creates        []business.SellerClientCreateV1
+	extends        []business.SellerClientExtendV1
+	orders         []business.SellerOrderReceiptV1
+	refund         business.VolumeExpiryRefundRequest
+	refunded       business.VolumeExpiryRefundReceipt
+	principal      usageledger.Principal
+	report         uc.Report
+	usage          uc.Receipt
+	legacySource   string
+	legacyRequest  business.DarkRestoreImportCommitV1
+	ownerToken     string
+	ownership      business.ClientOwnershipCommit
+	transferred    business.ClientOwnershipReceipt
+	state          economicState
+	catalogRequest business.SellerCatalogClientCreateV1
+	catalogReceipt business.SellerOrderReceiptV1
 }
 
 type economicState struct {
@@ -79,7 +81,7 @@ func captureEconomicState(t *testing.T, s *business.Store) economicState {
 		require(t, err)
 		state.Sellers = append(state.Sellers, r)
 	}
-	for _, id := range []string{"backup-volume", "backup-unlimited", "backup-unknown"} {
+	for _, id := range []string{"backup-volume", "backup-unlimited", "backup-unknown", "backup-catalog-client"} {
 		c, err := s.Client(ctx, id)
 		require(t, err)
 		state.Clients = append(state.Clients, c)
@@ -236,9 +238,10 @@ func newEconomicFixtureWithKey(t *testing.T, historyKey []byte) economicFixture 
 	if imported.Count != 1 || imported.LegacyEvents != 1 {
 		t.Fatal("fixture import incomplete")
 	}
+	seedCatalogRecovery(t, s, &f)
 	f.state = captureEconomicState(t, s)
 	if f.state.Representatives[0].VolumeCreditBytes != 110 || f.state.Representatives[0].UnlimitedCreditUnits != 0 ||
-		f.state.Sellers[0].ReservedBytes != 850 || f.state.Sellers[0].ReservedUnits != 91 ||
+		f.state.Sellers[0].ReservedBytes != 850 || f.state.Sellers[0].ReservedUnits != 85 ||
 		f.state.Sellers[1].ReservedBytes != 0 || f.state.Sellers[1].ReservedUnits != 0 ||
 		f.state.Representatives[1].VolumeCreditBytes != 9007199254740993 ||
 		f.state.Usage[0].Total != 40 || !f.state.Usage[0].Known || f.state.Usage[2].Known || f.state.Usage[2].Eligible {
@@ -472,6 +475,7 @@ func TestNativeSnapshotEncryptedRestorePreservesFullEconomicStateAndReplay(t *te
 				t.Fatal("immutable purchase/renewal receipt changed")
 			}
 		}
+		assertCatalogRecoveryReplay(t, s, f)
 		paid, err := s.RefundExpiredVolume(ctx, nil, f.refund)
 		require(t, err)
 		if paid.Applied || !paid.Replayed || paid.Receipt == nil || !reflect.DeepEqual(*paid.Receipt, f.refunded) {
