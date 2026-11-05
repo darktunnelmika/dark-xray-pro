@@ -8,7 +8,7 @@ const control = JSON.parse(await readFile(process.env.DARK_PRO_QA_CONTROL, 'utf8
 for (const field of ['username', 'password', 'representative_username', 'representative_password']) {
   if (typeof control[field] !== 'string' || !control[field]) throw new Error('Invalid private test identity');
 }
-const browser = await chromium.launch({ headless: true });
+const browser = await chromium.launch({ headless: true, args: ['--no-zygote'] });
 const errors = [];
 let stage = 'launch';
 async function signedIn(username, password, path) {
@@ -49,24 +49,57 @@ try {
   stage = 'representative allocation';
   await rep.getByLabel('Quota volume unit').selectOption('MiB');
   await rep.getByLabel('Quota volume', { exact: true }).fill('10');
-  await rep.getByLabel('Quota unlimited units').fill('2');
+  await rep.getByLabel('Quota unlimited units').fill('10');
   await rep.getByLabel('Quota transfer reason').fill('Allocate real SQLite reserve');
   await rep.getByRole('button', { name: 'Record transfer', exact: true }).click();
-  await expect(rep.getByRole('region', { name: 'Seller details' }).getByText('10,485,760', { exact: true })).toBeVisible();
+  await expect(rep.getByRole('region', { name: 'Seller details' }).locator('.seller-balances').getByText('10,485,760', { exact: true })).toBeVisible();
+
+  stage = 'catalog order commit with lost response';
+  const orders = [];
+  let responseLost = false;
+  await rep.route('**/api/v1/workspace/representatives/browser-seller-rep/sellers/browser-seller/catalog/browser-catalog-product/clients', async route => {
+    orders.push(route.request().postDataJSON());
+    if (!responseLost) {
+      // Forward to the real handler and await the durable response, then
+      // discard only that response. Never fabricate an order or receipt.
+      const response = await route.fetch();
+      if (response.status() !== 201) throw new Error('Real catalog order was rejected: ' + response.status());
+      await response.body();
+      responseLost = true;
+      await route.abort('failed');
+    } else await route.continue();
+  });
+  await rep.getByLabel('Catalog order product').selectOption('browser-catalog-product');
+  await expect(rep.getByLabel('Catalog order terms')).toContainText('250,000');
+  await rep.getByLabel('Catalog client ID').fill('browser-catalog-client');
+  await rep.getByLabel('Catalog client name').fill('Real catalog customer');
+  await rep.getByLabel('Catalog order reason').fill('Real browser catalog accounting acceptance');
+  await rep.getByRole('button', { name: 'Record catalog order', exact: true }).click();
+  await expect(rep.getByRole('button', { name: 'Retry same request', exact: true })).toBeVisible();
+  await rep.reload();
+  await rep.getByRole('button', { name: 'Retry same request', exact: true }).click();
+  await expect(rep.getByText('Recovered existing receipt', { exact: true })).toBeVisible();
+  await expect(rep.getByLabel('Catalog receipt terms')).toContainText('2 × 3 = 6');
+  await expect(rep.getByLabel('Catalog receipt terms')).toContainText('no payment recorded');
+  expect(orders).toHaveLength(2);
+  expect(orders[0]).toEqual(orders[1]);
+  expect(orders[0]).toMatchObject({ product_id: 'browser-catalog-product', expected_product_revision: 2,
+    expected_price_toman: 250000, expected_duration_days: 60, expected_user_count: 3 });
 
   stage = 'disable preserves reserve';
   await rep.getByLabel('Seller state reason').fill('Pause synthetic seller');
   await rep.getByRole('button', { name: 'Disable seller', exact: true }).click();
   await expect(rep.getByRole('button', { name: 'Enable seller', exact: true })).toBeVisible();
-  await expect(rep.getByRole('region', { name: 'Seller details' }).getByText('10,485,760', { exact: true })).toBeVisible();
+  await expect(rep.getByRole('region', { name: 'Seller details' }).locator('.seller-balances').getByText('10,485,760', { exact: true })).toBeVisible();
 
   stage = 'reclaim unused credit';
+  await rep.getByLabel('Quota volume unit').selectOption('MiB');
   await rep.getByLabel('Quota action').selectOption('reclaim');
   await rep.getByLabel('Quota volume', { exact: true }).fill('1');
   await rep.getByLabel('Quota unlimited units').fill('1');
   await rep.getByLabel('Quota transfer reason').fill('Reclaim only unused synthetic reserve');
   await rep.getByRole('button', { name: 'Record transfer', exact: true }).click();
-  await expect(rep.getByRole('region', { name: 'Seller details' }).getByText('9,437,184', { exact: true })).toBeVisible();
+  await expect(rep.getByRole('region', { name: 'Seller details' }).locator('.seller-balances').getByText('9,437,184', { exact: true })).toBeVisible();
 
   stage = 'owner revokes and existing representative session expires';
   const ownerSellers = owner.getByRole('region', { name: 'Seller management' });

@@ -31,6 +31,10 @@ func sellerOrdersAPIPathV1(rep, seller string) string {
 	return "/api/v1/workspace/representatives/" + rep + "/sellers/" + seller + "/clients"
 }
 
+func sellerOrdersAPICatalogPathV1(rep, seller, product string) string {
+	return "/api/v1/workspace/representatives/" + rep + "/sellers/" + seller + "/catalog/" + product + "/clients"
+}
+
 func sellerOrdersAPICreateV1(id string, volume int64) business.SellerClientCreateV1 {
 	return business.SellerClientCreateV1{EventID: "seller-order-api-create-" + id, RepresentativeID: sellerOrdersAPIRepV1,
 		SellerID: "sellerAlice", ClientID: id, Name: "Synthetic " + id, DurationDays: 30, IPCount: 2,
@@ -158,7 +162,7 @@ func TestSellerOrdersAPIGatePrerequisitesAndAgentIsolation(t *testing.T) {
 		if w := browserRequest(t, s.BrowserHandler(), "GET", "/api/v1/workspace/me", nil, nil, "", ""); w.Code != 401 {
 			t.Fatal("workspace capability bypassed session authentication", w.Code, w.Body.String())
 		}
-		for _, path := range []string{base, base + "/anyClient/extend"} {
+		for _, path := range []string{base, base + "/anyClient/extend", sellerOrdersAPICatalogPathV1(sellerOrdersAPIRepV1, "sellerAlice", "plan")} {
 			if w := browserRequest(t, s.BrowserHandler(), "POST", path, map[string]any{}, owner, csrf, "https://"+browserHost); w.Code != 404 {
 				t.Fatal("seller order mounted without successful gate", path, w.Code, w.Body.String())
 			}
@@ -198,7 +202,7 @@ func TestSellerOrdersAPIGatePrerequisitesAndAgentIsolation(t *testing.T) {
 	if err := s.EnableSellerOrdersV1Lab(ctx); err == nil {
 		t.Fatal("repeated API activation accepted")
 	}
-	for _, route := range []struct{ method, path string }{{"POST", base}, {"POST", base + "/anyClient/extend"}, {"GET", "/api/v1/workspace/me"}} {
+	for _, route := range []struct{ method, path string }{{"POST", base}, {"POST", base + "/anyClient/extend"}, {"POST", sellerOrdersAPICatalogPathV1(sellerOrdersAPIRepV1, "sellerAlice", "plan")}, {"GET", "/api/v1/workspace/me"}} {
 		req := httptest.NewRequest(route.method, "https://"+browserHost+route.path, strings.NewReader(`{}`))
 		req.TLS = &tls.ConnectionState{Version: tls.VersionTLS13}
 		req.AddCookie(owner)
@@ -212,7 +216,8 @@ func TestSellerOrdersAPIGatePrerequisitesAndAgentIsolation(t *testing.T) {
 		}
 	}
 	for _, item := range []struct{ method, path, permission string }{
-		{"POST", base, "create_clients"}, {"POST", base + "/anyClient/extend", "renew_clients"},
+		{"POST", base, "create_clients"}, {"POST", sellerOrdersAPICatalogPathV1(sellerOrdersAPIRepV1, "sellerAlice", "plan"), "create_clients"},
+		{"POST", base + "/anyClient/extend", "renew_clients"},
 	} {
 		req := httptest.NewRequest(item.method, item.path, nil)
 		if key, ok := requiredRepresentativePermission(req); !ok || key != item.permission {
@@ -223,7 +228,7 @@ func TestSellerOrdersAPIGatePrerequisitesAndAgentIsolation(t *testing.T) {
 		{"GET", base}, {"POST", base + "/extra"}, {"POST", base + "/anyClient/extend/extra"},
 		{"POST", base + "/anyClient/state"}, {"PATCH", base + "/anyClient/extend"},
 		{"POST", sellerOrdersAPIPathV1("", "sellerAlice")}, {"POST", sellerOrdersAPIPathV1(sellerOrdersAPIRepV1, "")},
-		{"POST", base + "//extend"},
+		{"POST", base + "//extend"}, {"POST", sellerOrdersAPICatalogPathV1(sellerOrdersAPIRepV1, "sellerAlice", "plan") + "/extra"},
 	} {
 		if _, ok := requiredRepresentativePermission(httptest.NewRequest(item.method, item.path, nil)); ok {
 			t.Fatal("unreviewed seller route admitted", item)
@@ -667,4 +672,105 @@ func TestSellerOrdersAPIUnlimitedBillingAndRefundIsolation(t *testing.T) {
 		t.Fatal("unused unlimited token refund introduced", batch, err)
 	}
 	sellerOrdersAPIBalancesV1(t, f, 0, 1000, 91)
+}
+
+func TestSellerOrdersAPICatalogUnlimitedExactSnapshotAndBoundaries(t *testing.T) {
+	ctx := context.Background()
+	f := sellerOrdersAPIFixture(t)
+	spec := business.CatalogSpec{
+		ID: "api-store-unlimited", RepresentativeID: sellerOrdersAPIRepV1,
+		Name: "API unlimited", PlanKind: "unlimited", DurationDays: 60,
+		IPCount: 3, PriceToman: 250000,
+	}
+	draft, err := f.s.business.CreateCatalogProduct(ctx, business.CatalogCreate{
+		CatalogSpec: spec, EventID: "api-store-catalog-create-0001",
+		Reason: "Synthetic Store API product",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	product, err := f.s.business.UpdateCatalogProduct(ctx, business.CatalogUpdate{
+		CatalogSpec: spec, EventID: "api-store-catalog-publish-0001",
+		ExpectedRevision: draft.Revision, Status: "published",
+		Reason: "Publish synthetic Store API product",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := sellerOrdersAPICatalogPathV1(sellerOrdersAPIRepV1, "sellerAlice", product.ID)
+	input := map[string]any{
+		"event_id":                  "api-store-order-exact-0001",
+		"representative_id":         sellerOrdersAPIRepV1,
+		"seller_id":                 "sellerAlice",
+		"product_id":                product.ID,
+		"expected_product_revision": product.Revision,
+		"expected_price_toman":      product.PriceToman,
+		"expected_duration_days":    product.DurationDays,
+		"expected_user_count":       product.IPCount,
+		"client_id":                 "api-store-client",
+		"name":                      "API Store client",
+		"reason":                    "Synthetic exact Store order",
+	}
+	post := func(body any, cookie *http.Cookie, csrf string) *httptest.ResponseRecorder {
+		return browserRequest(t, f.h, "POST", path, body, cookie, csrf, "https://"+browserHost)
+	}
+	sellerOrdersAPIBalancesV1(t, f, 0, 1000, 100)
+	receipt := sellerOrdersAPIReceiptV1(t, post(input, f.rep, f.repCSRF), http.StatusCreated)
+	if receipt.Replayed || receipt.UnlimitedDebitUnits != 6 ||
+		receipt.ReservedUnitsBefore != 100 || receipt.ReservedUnitsAfter != 94 ||
+		receipt.Catalog == nil || receipt.Catalog.ProductID != product.ID ||
+		receipt.Catalog.ProductRevision != product.Revision ||
+		receipt.Catalog.PriceToman != product.PriceToman ||
+		receipt.Catalog.Months != 2 || receipt.Catalog.UserCount != 3 ||
+		receipt.Catalog.CheckoutEnabled || receipt.Catalog.PaymentApplied {
+		t.Fatal("bad Store accounting receipt", receipt)
+	}
+	replay := sellerOrdersAPIReceiptV1(t, post(input, f.rep, f.repCSRF), http.StatusCreated)
+	if !replay.Replayed || replay.UnlimitedDebitUnits != 6 {
+		t.Fatal("exact Store replay failed", replay)
+	}
+	sellerOrdersAPIBalancesV1(t, f, 0, 1000, 94)
+
+	stale := map[string]any{
+		"event_id":                  "api-store-order-stale-0001",
+		"representative_id":         sellerOrdersAPIRepV1,
+		"seller_id":                 "sellerAlice",
+		"product_id":                product.ID,
+		"expected_product_revision": product.Revision,
+		"expected_price_toman":      product.PriceToman + 1,
+		"expected_duration_days":    product.DurationDays,
+		"expected_user_count":       product.IPCount,
+		"client_id":                 "api-store-stale-client",
+		"name":                      "Stale Store client",
+		"reason":                    "Reject stale Store order",
+	}
+	if w := post(stale, f.rep, f.repCSRF); w.Code != http.StatusConflict {
+		t.Fatal("stale Store snapshot accepted", w.Code, w.Body.String())
+	}
+	strict := map[string]any{
+		"event_id":                  "api-store-order-strict-0001",
+		"representative_id":         sellerOrdersAPIRepV1,
+		"seller_id":                 "sellerAlice",
+		"product_id":                product.ID,
+		"expected_product_revision": product.Revision,
+		"expected_price_toman":      product.PriceToman,
+		"expected_duration_days":    product.DurationDays,
+		"expected_user_count":       product.IPCount,
+		"client_id":                 "api-store-strict-client",
+		"name":                      "Strict Store client",
+		"reason":                    "Reject unknown Store field",
+		"payment_confirmed":         true,
+	}
+	if w := post(strict, f.rep, f.repCSRF); w.Code != http.StatusBadRequest {
+		t.Fatal("unknown payment claim accepted", w.Code, w.Body.String())
+	}
+	if w := post(stale, f.other, f.otherCSRF); w.Code != http.StatusForbidden {
+		t.Fatal("foreign representative reached Store order", w.Code, w.Body.String())
+	}
+	for _, id := range []string{"api-store-stale-client", "api-store-strict-client"} {
+		if _, err := f.s.business.Client(ctx, id); !errors.Is(err, business.ErrNotFound) {
+			t.Fatal("failed Store API order leaked client", id, err)
+		}
+	}
+	sellerOrdersAPIBalancesV1(t, f, 0, 1000, 94)
 }
