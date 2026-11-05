@@ -80,6 +80,7 @@ try {
   await expect(source.getByRole('option', { name: 'Assign to representative', exact: true })).toHaveCount(0);
 
   stage = 'owner selected batch through compiled controls';
+  await owner.getByRole('button', { name: 'Select multiple clients', exact: true }).click();
   const bulk = owner.locator('.clients-bulk');
   await bulk.getByRole('combobox', { name: 'Action', exact: true }).selectOption('transfer');
   const panel = owner.getByRole('region', { name: 'Assign clients to a representative', exact: true });
@@ -122,8 +123,8 @@ try {
 
   stage = 'new representative renews through real compiled UI';
   await target.reload();
-  const lifecycle = target.locator('.business-panel').filter({ has: target.getByRole('heading', { name: 'Renew and manage clients', exact: true }) });
-  await lifecycle.getByRole('combobox').selectOption(mainID);
+  await target.locator('.clients-explorer-row').filter({ hasText: mainID }).getByRole('button', { name: 'Manage', exact: true }).click();
+  await target.getByRole('button', { name: 'Renew', exact: true }).click();
   const renewal = target.locator('form').filter({ has: target.getByRole('button', { name: 'Extend / add volume', exact: true }) });
   await renewal.getByLabel('Additional days', { exact: true }).fill('1');
   await renewal.getByLabel('Additional volume (GB)', { exact: true }).fill('0.0009765625');
