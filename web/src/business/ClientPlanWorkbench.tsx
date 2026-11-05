@@ -7,7 +7,7 @@ const words = {
   en: {
     heading: "Quick plan builder",
     intro: "Presets change draft fields only. No client is created and no credits are charged until you explicitly submit.",
-    durations: "Duration presets", days: "days", slots: "User/IP slots",
+    durations: "Duration presets", days: "days", volumes: "Volume presets", gigabytes: "GB", slots: "User/IP slots",
     anyIp: "Unlimited IPs", preview: "Representative credit preview",
     estimated: "Estimated debit", units: "unlimited units", vol: "volume credit",
     owner: "Owner-created accounts do not debit representative credit.",
@@ -19,7 +19,7 @@ const words = {
   fa: {
     heading: "ساخت سریع پلن",
     intro: "دکمه‌های آماده فقط مقادیر فرم را تغییر می‌دهند. تا ثبت نهایی، کلاینت و کسر اعتبار انجام نمی‌شود.",
-    durations: "مدت‌های آماده", days: "روز", slots: "تعداد کاربر / IP",
+    durations: "مدت‌های آماده", days: "روز", volumes: "حجم‌های آماده", gigabytes: "گیگابایت", slots: "تعداد کاربر / IP",
     anyIp: "IP نامحدود", preview: "پیش‌نمایش کسر اعتبار نماینده",
     estimated: "کسر اعتبار تخمینی", units: "واحد نامحدود", vol: "اعتبار حجمی",
     owner: "ساخت مستقیم از حساب مالک، اعتبار نماینده را کم نمی‌کند.",
@@ -32,7 +32,7 @@ const words = {
 
 export default function ClientPlanWorkbench({model}: {model:BusinessModel}) {
   const {language, clientKind, clientDuration, setClientDuration, clientIPs, setClientIPs,
-    clientVolume, session, clientRep, reps, me, actionBusy} = model;
+    clientVolume, setClientVolume, session, clientRep, reps, me, actionBusy} = model;
   const t=words[language];
   const days=Number(clientDuration), slots=Number(clientIPs);
   const validDays=clientDuration.trim()!=="" && Number.isSafeInteger(days) && days>=1 && days<=3650;
@@ -62,7 +62,7 @@ export default function ClientPlanWorkbench({model}: {model:BusinessModel}) {
     <div className="sales-workbench-quick">
       <fieldset disabled={actionBusy} className="sales-workbench-choices">
         <legend><CalendarDays size={14}/>{t.durations}</legend>
-        <div>{[30,60,90].map(n=><button type="button" key={n} aria-pressed={clientDuration===String(n)}
+        <div>{[30,60,90,180,360].map(n=><button type="button" key={n} aria-pressed={clientDuration===String(n)}
           onClick={()=>setClientDuration(String(n))}>{n} {t.days}</button>)}</div>
       </fieldset>
       <fieldset disabled={actionBusy} className="sales-workbench-choices">
@@ -72,6 +72,11 @@ export default function ClientPlanWorkbench({model}: {model:BusinessModel}) {
           {clientKind==="volume" && <button type="button" aria-pressed={clientIPs==="0"}
             onClick={()=>setClientIPs("0")}>{t.anyIp}</button>}</div>
       </fieldset>
+      {clientKind==="volume" && <fieldset disabled={actionBusy} className="sales-workbench-choices">
+        <legend>{t.volumes}</legend>
+        <div>{[10,20,30,40,50,60,70,80,90,100].map(n=><button type="button" key={n}
+          aria-pressed={clientVolume===String(n)} onClick={()=>setClientVolume(String(n))}>{n} {t.gigabytes}</button>)}</div>
+      </fieldset>}
     </div>
     <div className="sales-workbench-cost" aria-live="polite">
       <div className="sales-workbench-total">

@@ -2,25 +2,19 @@ import { useEffect, useState, useRef, type FormEvent } from "react";
 import { Check, ClipboardCopy, Download, KeyRound, Link2, RefreshCw, ShieldCheck, ShieldPlus, Terminal, XCircle } from "lucide-react";
 import { api, mutation, ApiError, useSession, type Language } from "./session";
 import "./NodeManager.css";
-import NodeHealth from "./NodeHealth";
+import NodeHealth, { type NodeHealthEvidence } from "./NodeHealth";
 import NodeNameEditor from "./NodeNameEditor";
 import NodeDependencies from "./NodeDependencies";
 import NodeReplacements from "./NodeReplacements";
 import MeteredHandovers from "./MeteredHandovers";
 
-type Registration = {
+type Registration = NodeHealthEvidence & {
   node_id: string;
   name: string;
   paired_at: string;
   status: "online" | "offline";
   metrics_current: boolean;
   last_seen: string | null;
-  transport_state: string;
-  metrics_state: string;
-  core_state: string;
-  accounting_state: string;
-  execution_current: boolean;
-  execution_reported_at: string | null;
 };
 type TransportScope = "disabled" | "loopback_only" | "external_tls_unverified";
 type Roster = { nodes: Registration[]; mode: "new_pro_lab_only";
@@ -39,7 +33,6 @@ const words = {
     boundary: "PRO LAB only · no old Nodes · no deletion · pairing never activates Xray or subscriptions automatically",
     roster: "Registered NEW PRO Nodes", empty: "No freshly paired PRO Nodes yet.",
     online: "Online", offline: "Offline", delayed: "Metrics delayed", lastSeen: "Last heartbeat",
-    transport: "Transport", core: "Core", metrics: "Metrics", accounting: "Accounting", staleExecution: "stale observation",
     refreshing: "Checking registrations", retry: "Refresh list", registryIssue: "Cannot load registered Nodes.",
     codeLost: "After refresh or leaving this page the code cannot be viewed again. Cancel a pending invitation by its ID, or wait for expiry.",
     codeCancelled: "Pending Pair Code revoked. No Node or client was changed.",
@@ -67,7 +60,6 @@ const words = {
     boundary: "فقط PRO آزمایشی · بدون دست‌زدن به نودهای قدیمی · بدون حذف · اتصال نود، Xray یا اشتراک را خودکار فعال نمی‌کند",
     roster: "نودهای تازهٔ ثبت‌شده در PRO", empty: "هنوز نود تازه‌ای Pair نشده است.",
     online: "آنلاین", offline: "آفلاین", delayed: "آمار با تأخیر", lastSeen: "آخرین Heartbeat",
-    transport: "ارتباط", core: "هسته", metrics: "متریک", accounting: "حسابداری", staleExecution: "گزارش قدیمی",
     refreshing: "در حال دریافت لیست نودها", retry: "بازخوانی", registryIssue: "فهرست نودها قابل دریافت نیست.",
     codeLost: "بعد از رفرش یا خروج از این بخش، کد دوباره قابل نمایش نیست؛ می‌توانی دعوت در انتظار را با شناسه لغو کنی یا تا انقضا صبر کنی.",
     codeCancelled: "کد در انتظار باطل شد؛ هیچ نود یا کلاینتی تغییر نکرد.",
@@ -111,17 +103,18 @@ export default function NodeManager({ language }: { language: Language }) {
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
   const [clock, setClock] = useState(Date.now());
+  const [healthClock, setHealthClock] = useState(performance.now());
 
   const load = async (signal?: AbortSignal) => {
     const request = ++rosterRequest.current;
+    const requestStarted = performance.now();
     const result = await api<Roster>("/api/v1/workspace/nodes", { signal }).catch(error => {
       if (request !== rosterRequest.current || signal?.aborted) return null;
       throw error;
     });
-    if (!result) return;
+    if (!result || request !== rosterRequest.current || signal?.aborted) return;
     if (result.mode !== "new_pro_lab_only" || !Array.isArray(result.nodes)) throw new Error("invalid_node_roster");
-    if (request !== rosterRequest.current || signal?.aborted) return;
-    setRosterAt(Date.now());
+    setRosterAt(requestStarted);
     setRoster(result.nodes);
     // Once the server reports an actually bound installation, the one-use
     // Pair Code is invalid: remove it from tab memory immediately.
@@ -135,13 +128,13 @@ export default function NodeManager({ language }: { language: Language }) {
     const fetchRoster = () => { if (!document.hidden) void load(controller.signal).catch(() => { if (!controller.signal.aborted) setRosterFailed(true); }); };
     fetchRoster();
     const timer = window.setInterval(fetchRoster, 10000);
-    return () => { controller.abort();window.clearInterval(timer); };
+    return () => { ++rosterRequest.current;controller.abort();window.clearInterval(timer); };
     // The backend list has an independent owner authorization check.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session?.user.id]);
 
   useEffect(() => {
-    const timer = window.setInterval(() => setClock(Date.now()), 1000);
+    const timer = window.setInterval(() => { setClock(Date.now());setHealthClock(performance.now()); }, 1000);
     return () => window.clearInterval(timer);
   }, []);
   const remaining = ticket ? Math.max(0, Date.parse(ticket.expires_at) - clock) : 0;
@@ -314,11 +307,9 @@ export default function NodeManager({ language }: { language: Language }) {
         {roster?.map(node => (
           <div className="pro-node-roster-row" key={node.node_id}>
             <div><strong>{node.name}</strong><small>{node.node_id} · {t.lastSeen}: {readableTime(node.last_seen, language)}</small></div>
-            <NodeHealth language={language} status={node.status} metricsCurrent={node.metrics_current}
-              fresh={!rosterFailed && clock - rosterAt < 30000}
-              transportState={node.transport_state} metricsState={node.metrics_state}
-              coreState={node.core_state} accountingState={node.accounting_state}
-              executionCurrent={node.execution_current} executionReportedAt={node.execution_reported_at} />
+            <NodeHealth language={language} node={node}
+              fresh={!rosterFailed && Math.max(0, healthClock - rosterAt) < 30000}
+              elapsedMs={Math.max(0, healthClock - rosterAt)} />
             <NodeNameEditor key={session?.user.id + ":" + node.node_id} nodeID={node.node_id} language={language} onSaved={() => { void load().catch(() => setRosterFailed(true)); }} />
             <NodeDependencies key={session?.user.id + ":dependencies:" + node.node_id} nodeID={node.node_id} language={language} />
             <NodeReplacements key={session?.user.id + ":replacements:" + node.node_id} nodeID={node.node_id} language={language} />

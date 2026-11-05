@@ -460,6 +460,45 @@ historical superset. There are at most 16
 active configured bots and 256 retained bot identities. Do not reset the journal
 to change the allowlist or discard pending financial records.
 
+### Store setup in the panel
+
+Each store returned by `GET /api/v1/workspace/telegram` also includes a
+read-only `setup` snapshot. The panel uses it to explain the next configuration
+step after connecting a bot:
+
+| Field | Meaning |
+|---|---|
+| `account_enabled` | The native account is enabled and is not login-suspended. Store pause and transport state are shown separately. |
+| `manager_registered` | The current manager has a customer registration for this exact store and private Telegram chat. Assigning a manager alone does not establish this. |
+| `can_create_clients`, `can_renew_clients` | Current native create/renew grants, with the native owner account's handling preserved. These are permission facts, not a credit or provisioning check. |
+| `published_products` | Published native catalog products belonging to the store's native account. Draft and archived products are excluded. |
+| `priced_products` | Those published products with a Stars price for this exact store. Another brand's price and the native Toman price do not count. |
+| `catalog_limit` | The existing Telegram menu bound, currently 200. Counts remain complete so an oversized catalog is visible. |
+| `trial_enabled` | Whether a trial policy has explicitly been enabled. An absent policy is disabled. |
+| `trial_duration_hours`, `trial_starts_at` | The existing trial terms: 24 hours from issuance. This does not report a first VPN connection. |
+
+Store identity, native session authorization and setup facts are read in the same
+read-only transaction. Owners can inspect all visible stores; representatives
+receive only their own stores. Session expiry, current account suspension and
+native account enablement are rechecked. The existing maximum of 1,000 visible
+stores remains enforced, and counts are gathered with a bounded number of
+queries rather than one request per store or product. Reading setup creates no
+customer, event, price, policy, financial record or schema, and never invents a
+Telegram actor from a browser session. No credit balances are returned.
+
+The manager opens the configured bot, sends `/start`, and uses the existing
+management menus to set explicit Stars prices or an optional trial policy. The
+panel links to the native plan catalog for publication. It does not silently set
+prices, convert Toman amounts, enable free trials or spend native credit.
+
+Published/priced counts and polling do not establish checkout, payment, native
+service delivery or internet connectivity. Checkout continues to recheck the
+actual order, current grants, credit and renewal ownership. A disabled optional
+trial does not make an otherwise configured shop invalid. When an older API
+response has no setup snapshot, the UI reports unavailable setup information;
+it does not manufacture zero counts or disabled policies. Malformed snapshots
+are rejected instead of being presented as a successful setup.
+
 ## 6. Encrypted backup and restore boundary
 
 Commerce and engagement tables remain in the native business database and are

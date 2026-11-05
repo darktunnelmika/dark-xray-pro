@@ -452,7 +452,7 @@ func testMeteredHandoverTrafficInbounds(t *testing.T, binary, pin, mode string, 
 		c := activeTCPClient(t, ctx, binary, customers[0].UUID, profile.PublicKey, ports[i], origin)
 		response, err := c.Get(origin.URL)
 		if err != nil {
-			t.Fatal("real Vision stream", err)
+			t.Fatalf("real Vision stream node=%d error=%v runtime=%+v usage=%+v", i, err, runtimes[i].Status(), runtimes[i].Status().Usage)
 		}
 		deferOnCleanup := response.Body
 		t.Cleanup(func() { deferOnCleanup.Close() })

@@ -375,30 +375,6 @@ test("node health separates evidence and invalidates a failed refresh without de
   expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+2)).toBe(true);
 });
 
-test("node health shows durable execution evidence without inferring it from transport and marks stale evidence", async ({page}) => {
-  await page.clock.install();
-  await setup(page);
-  let reads=0;
-  await page.route("**/api/v1/workspace/nodes", async route => {
-    if (++reads > 1) return;
-    return route.fulfill({json:{mode:"new_pro_lab_only",nodes:[{
-      node_id:"health-evidence",name:"Evidence node",status:"online",metrics_current:true,
-      last_seen:new Date().toISOString(),paired_at:new Date().toISOString(),
-      transport_state:"online",metrics_state:"current",core_state:"running",accounting_state:"settled",
-      execution_current:true,execution_reported_at:new Date().toISOString(),
-    }]}});
-  });
-  await page.goto("/nodes");await login(page);
-  await expect(page.locator('[data-node-health="transport"] dd')).toHaveText("Online");
-  await expect(page.locator('[data-node-health="metrics"] dd')).toHaveText("Current");
-  await expect(page.locator('[data-node-health="core"] dd')).toHaveText("running");
-  await expect(page.locator('[data-node-health="accounting"] dd')).toHaveText("settled");
-  await page.clock.fastForward(31000);
-  await expect(page.locator('[data-node-health="transport"] dd')).toHaveText("Unknown");
-  await expect(page.locator('[data-node-health="core"] dd')).toHaveText("running · Stale observation");
-  await expect(page.locator('[data-node-health="accounting"] dd')).toHaveText("settled · Stale observation");
-});
-
 test("node health expires an unanswered snapshot and does not infer metrics from an offline node", async ({page}) => {
   await page.clock.install();
   await setup(page);
@@ -413,4 +389,127 @@ test("node health expires an unanswered snapshot and does not infer metrics from
   await page.clock.fastForward(31000);
   await expect(page.locator('[data-node-health="transport"] dd')).toHaveText("Unknown");
   await expect(page.getByText("Retained node",{exact:true})).toBeVisible();
+});
+
+async function setupObservedHealth(page: Page, overrides: Record<string, unknown> = {}) {
+  const probe = await setup(page);
+  const node = { node_id: "observed-health", name: "Observed health",
+    status: "online", transport_state: "connected", metrics_current: true, metrics_state: "current",
+    core_state: "engine_ready", accounting_state: "accepted", execution_current: true,
+    execution_reported_at: "2026-11-05T00:00:00Z", execution_fresh_for_ms: 15000,
+    paired_at: "2026-11-04T00:00:00Z", last_seen: "2026-11-05T00:00:00Z", ...overrides };
+  await page.route("**/api/v1/workspace/nodes", route =>
+    route.fulfill({json:{mode:"new_pro_lab_only",nodes:[node]}}));
+  await page.goto("/nodes");await login(page);
+  await expect(page.getByText("Observed health",{exact:true})).toBeVisible();
+  return {node, probe};
+}
+
+test("node engine and accounting use their independent observations in English and Persian", async ({page}) => {
+  const {probe} = await setupObservedHealth(page, {accounting_state:"uncertain"});
+  await expect(page.locator('[data-node-health="transport"] dd')).toHaveText("Online");
+  await expect(page.locator('[data-node-health="metrics"] dd')).toHaveText("Current");
+  await expect(page.locator('[data-node-health="core"] dd')).toHaveText("Engine ready");
+  await expect(page.locator('[data-node-health="accounting"] dd')).toHaveText("Needs reconciliation");
+  await expect(page.locator(".pro-node-health")).toHaveCount(1);
+  await page.setViewportSize({width:320,height:760});
+  await page.getByRole("button",{name:"Switch language"}).click();
+  await expect(page.locator('[data-node-health="core"] dd')).toHaveText("موتور آماده");
+  await expect(page.locator('[data-node-health="accounting"] dd')).toHaveText("نیازمند تطبیق");
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+2)).toBe(true);
+  expect(probe.paths.filter(p=>p.startsWith("POST ")&&!p.includes("/session/login"))).toEqual([]);
+});
+
+test("node execution evidence expires independently while the transport snapshot is still fresh", async ({page}) => {
+  await page.clock.install();
+  await setupObservedHealth(page,{execution_fresh_for_ms:5000});
+  await expect(page.locator('[data-node-health="core"] dd')).toHaveText("Engine ready");
+  await page.clock.fastForward(6000);
+  await expect(page.locator('[data-node-health="core"] dd')).toHaveText("Stale");
+  await expect(page.locator('[data-node-health="accounting"] dd')).toHaveText("Stale");
+  await expect(page.locator('[data-node-health="transport"] dd')).toHaveText("Online");
+});
+
+test("node evidence does not depend on the browser wall clock", async ({page}) => {
+  await page.clock.install({time:new Date("2028-01-01T00:00:00Z")});
+  await setupObservedHealth(page);
+  await expect(page.locator('[data-node-health="core"] dd')).toHaveText("Engine ready");
+  await expect(page.locator('[data-node-health="accounting"] dd')).toHaveText("Accepted");
+});
+
+test("node execution does not infer state from connectivity and rejects unsupported observation lifetimes", async ({page}) => {
+  const {node} = await setupObservedHealth(page,{status:"offline",transport_state:"offline",core_state:"stopped",accounting_state:"settled"});
+  await expect(page.locator('[data-node-health="transport"] dd')).toHaveText("Offline");
+  await expect(page.locator('[data-node-health="metrics"] dd')).toHaveText("Unknown");
+  await expect(page.locator('[data-node-health="core"] dd')).toHaveText("Stopped");
+  await expect(page.locator('[data-node-health="accounting"] dd')).toHaveText("Settled");
+  node.status="online";node.transport_state="connected";node.execution_fresh_for_ms=60000;
+  await page.getByRole("button",{name:"Refresh list",exact:true}).click();
+  await expect(page.locator('[data-node-health="transport"] dd')).toHaveText("Online");
+  await expect(page.locator('[data-node-health="core"] dd')).toHaveText("Stale");
+  node.execution_fresh_for_ms=15000;node.execution_reported_at="invalid";
+  await page.getByRole("button",{name:"Refresh list",exact:true}).click();
+  await expect(page.locator('[data-node-health="core"] dd')).toHaveText("Unknown");
+});
+
+test("node read failure invalidates observed engine and accounting while preserving the row", async ({page}) => {
+  await setupObservedHealth(page);
+  await expect(page.locator('[data-node-health="core"] dd')).toHaveText("Engine ready");
+  await page.route("**/api/v1/workspace/nodes",route=>route.fulfill({status:503,json:{error:"unavailable"}}));
+  await page.getByRole("button",{name:"Refresh list",exact:true}).click();
+  for (const field of ["transport","metrics","core","accounting"]) {
+    await expect(page.locator('[data-node-health="'+field+'"] dd')).toHaveText("Unknown");
+  }
+  await expect(page.getByText("Observed health",{exact:true})).toBeVisible();
+});
+
+for (const late of ["malformed","failure","older-success"]) {
+  test("node latest snapshot survives a superseded "+late+" response", async ({page}) => {
+    await page.clock.install();
+    const {node}=await setupObservedHealth(page);
+    let reads=0, released=false, responded=false;
+    let release!:()=>void;
+    const gate=new Promise<void>(resolve=>{release=resolve;});
+    await page.route("**/api/v1/workspace/nodes",async route=>{
+      if (++reads===1) {
+        await gate;
+        if(late==="failure") await route.fulfill({status:503,json:{error:"unavailable"}});
+        else await route.fulfill({json:late==="malformed"?{mode:"invalid",nodes:null}:
+          {mode:"new_pro_lab_only",nodes:[{...node,name:"Obsolete node",status:"offline",transport_state:"offline"}]}});
+        responded=true;
+        return;
+      }
+      return route.fulfill({json:{mode:"new_pro_lab_only",nodes:[{...node,name:"Latest node"}]}});
+    });
+    await page.getByRole("button",{name:"Refresh list",exact:true}).click();
+    await expect.poll(()=>reads).toBe(1);
+    await page.getByRole("button",{name:"Refresh list",exact:true}).click();
+    await expect(page.getByText("Latest node",{exact:true})).toBeVisible();
+    release();released=true;
+    await expect.poll(()=>responded).toBe(true);
+    expect(released).toBe(true);
+    await expect(page.getByText("Latest node",{exact:true})).toBeVisible();
+    await expect(page.getByText("Obsolete node",{exact:true})).toHaveCount(0);
+    await expect(page.getByText("Cannot load registered Nodes.",{exact:true})).toHaveCount(0);
+    await expect(page.locator('[data-node-health="core"] dd')).toHaveText("Engine ready");
+  });
+}
+
+test("node transport delay cannot renew the observation lifetime", async ({page}) => {
+  await page.clock.install();
+  const {node}=await setupObservedHealth(page,{execution_fresh_for_ms:5000});
+  let entered=false;
+  let release!:()=>void;
+  const gate=new Promise<void>(resolve=>{release=resolve;});
+  await page.route("**/api/v1/workspace/nodes",async route=>{
+    entered=true;await gate;
+    return route.fulfill({json:{mode:"new_pro_lab_only",nodes:[{...node,name:"Delayed node"}]}});
+  });
+  await page.getByRole("button",{name:"Refresh list",exact:true}).click();
+  await expect.poll(()=>entered).toBe(true);
+  await page.clock.fastForward(6000);
+  release();
+  await expect(page.getByText("Delayed node",{exact:true})).toBeVisible();
+  await expect(page.locator('[data-node-health="core"] dd')).toHaveText("Stale");
+  await expect(page.locator('[data-node-health="transport"] dd')).toHaveText("Online");
 });

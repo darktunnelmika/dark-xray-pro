@@ -86,12 +86,24 @@ test("failed status fetch never displays a connected badge", async ({ page }) =>
 
 // Synthetic credentials only. A real token must never be put in a browser test.
 const labToken = "10003:ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+type StoreSetupFixture = {
+  account_enabled: boolean; manager_registered: boolean;
+  can_create_clients: boolean; can_renew_clients: boolean;
+  published_products: number; priced_products: number; catalog_limit: number;
+  trial_enabled: boolean; trial_duration_hours: 24; trial_starts_at: "issuance";
+};
+const setupFixture = (values: Partial<StoreSetupFixture> = {}): StoreSetupFixture => ({
+  account_enabled: true, manager_registered: false, can_create_clients: true, can_renew_clients: true,
+  published_products: 0, priced_products: 0, catalog_limit: 200,
+  trial_enabled: false, trial_duration_hours: 24, trial_starts_at: "issuance", ...values,
+});
 type ManagedStore = {
   id: string; bot_id: number; representative_id: string; name: string; manager_user_id: number;
   enabled: boolean; revision: number; connection_state: string; last_poll_unix: number;
   credential_configured: boolean; bot_username: string; connection_problem: string;
   queue_status_available: boolean; inbox_pending: number; financial_retry: number; review_pending: number;
   outbox_pending: number; outbox_unknown: number; delivery_review: number;
+  setup?: StoreSetupFixture;
 };
 async function managedFixture(page: Page, role: Role = "owner") {
   const state = {
@@ -375,4 +387,116 @@ test("store pause and resume change metadata without exposing or replacing crede
   await expect(card.locator(".telegram-state")).toHaveText("Receiving updates");
   expect(state.writes[1].body).toMatchObject({ enabled: true, expected_revision: 2 });
   expect(state.writes.every(write => write.path.endsWith("/stores"))).toBe(true);
+});
+
+test("a polling bot with no offers explains store setup without treating connection as sales readiness", async ({ page }) => {
+  const state = await managedFixture(page);
+  state.stores[0].setup = setupFixture();
+  await page.goto("/telegram");
+  const card = page.locator(".telegram-store-card");
+  const setup = card.locator(".telegram-setup");
+  await expect(card.locator(".telegram-state")).toHaveText("Receiving updates");
+  await expect(setup.locator("summary")).toContainText("No published products");
+  await expect(setup).not.toHaveAttribute("open");
+  await setup.locator("summary").click();
+  await expect(setup).toContainText("Publish a product for this store's account in the plan catalog");
+  await expect(setup).toContainText("The assigned manager should open this bot and send /start");
+  await expect(setup.locator(".telegram-setup-status")).toContainText("Disabled in store settings");
+  await expect(setup).toContainText("If enabled, the trial lasts 24 hours from issuance");
+  await expect(setup.locator("summary")).not.toContainText(/ready|complete/i);
+  await setup.getByRole("button", { name: "Open plan catalog", exact: true }).click();
+  await expect(page).toHaveURL(/\/marketplace$/);
+  expect(state.writes).toHaveLength(0);
+});
+
+test("each store keeps its published prices, manager and trial setting distinct", async ({ page }) => {
+  const state = await managedFixture(page);
+  state.stores[0].setup = setupFixture({ published_products: 3, priced_products: 1, manager_registered: true,
+    trial_enabled: true, can_create_clients: false });
+  state.stores.push({ ...state.stores[0], id: "shop-b", bot_id: 10009, manager_user_id: 10010, representative_id: "rep-b",
+    name: "Second store", bot_username: "second_lab_bot", setup: setupFixture({ published_products: 5, priced_products: 5,
+      manager_registered: false, trial_enabled: false }) });
+  await page.goto("/telegram");
+  const first = page.locator(".telegram-store-card").filter({ has: page.getByRole("heading", { name: "Example store", exact: true }) }).locator(".telegram-setup");
+  const second = page.locator(".telegram-store-card").filter({ has: page.getByRole("heading", { name: "Second store", exact: true }) }).locator(".telegram-setup");
+  await expect(first.locator("summary")).toContainText("1 of 3 with Stars prices");
+  await expect(second.locator("summary")).toContainText("5 of 5 with Stars prices");
+  await first.locator("summary").click();
+  await second.locator("summary").click();
+  await expect(first).toContainText("2 published products still need a Stars price");
+  await expect(first).toContainText("permissions currently block new purchases");
+  await expect(first).not.toContainText("permissions currently block renewals");
+  await expect(first.locator(".telegram-setup-status")).toContainText("Registered with this bot");
+  await expect(first.locator(".telegram-setup-status")).toContainText("Enabled in store settings");
+  await expect(first).toContainText("The trial lasts 24 hours from issuance, including any wait for service delivery");
+  await expect(second.locator(".telegram-setup-status")).toContainText("Waiting for the manager");
+  await expect(second.locator(".telegram-setup-status")).toContainText("Disabled in store settings");
+  expect(state.writes).toHaveLength(0);
+});
+
+test("missing setup remains unknown and a malformed refresh removes previously displayed setup", async ({ page }) => {
+  const state = await managedFixture(page);
+  await page.goto("/telegram");
+  const setup = page.locator(".telegram-setup");
+  await expect(setup.locator("summary")).toContainText("Setup details unavailable");
+  await setup.locator("summary").click();
+  await expect(setup.locator(".telegram-setup-status")).toHaveCount(0);
+  await expect(setup).not.toContainText("No published products");
+  await expect(setup).not.toContainText("Disabled in store settings");
+  state.stores[0].setup = setupFixture({ published_products: 2, priced_products: 2, manager_registered: true });
+  await page.getByRole("button", { name: "Refresh", exact: true }).click();
+  await expect(setup.locator("summary")).toContainText("2 of 2 with Stars prices");
+  state.stores[0].setup.priced_products = 3;
+  await page.getByRole("button", { name: "Refresh", exact: true }).click();
+  await expect(page.getByRole("alert")).toContainText("Store status could not be loaded");
+  await expect(page.locator(".telegram-store-card")).toHaveCount(0);
+  expect(state.writes).toHaveLength(0);
+});
+
+test("unsupported trial timing is refused instead of displaying an issuance claim", async ({ page }) => {
+  const state = await managedFixture(page);
+  state.stores[0].setup = { ...setupFixture({ trial_enabled: true }), trial_starts_at: "first_connection" } as unknown as StoreSetupFixture;
+  await page.goto("/telegram");
+  await expect(page.getByRole("alert")).toContainText("Store status could not be loaded");
+  await expect(page.locator(".telegram-store-card")).toHaveCount(0);
+  expect(state.writes).toHaveLength(0);
+});
+
+test("disabled accounts and the two catalog limits remain visible despite polling", async ({ page }) => {
+  const state = await managedFixture(page);
+  state.stores[0].setup = setupFixture({ account_enabled: false, published_products: 201, priced_products: 201, manager_registered: true });
+  await page.goto("/telegram");
+  const setup = page.locator(".telegram-setup");
+  await setup.locator("summary").click();
+  await expect(setup).toContainText("account is disabled or suspended");
+  await expect(setup).toContainText("The customer catalog exceeds the bot's limit of 200 products");
+  await expect(page.locator(".telegram-store-card .telegram-state")).toHaveText("Receiving updates");
+  state.stores[0].setup = setupFixture({ published_products: 201, priced_products: 1, manager_registered: true });
+  await page.getByRole("button", { name: "Refresh", exact: true }).click();
+  await expect(setup).toContainText("The manager's product list exceeds the bot's limit of 200");
+  await expect(setup).not.toContainText("The customer catalog exceeds");
+  await expect(setup).not.toContainText("account is disabled or suspended");
+  expect(state.writes).toHaveLength(0);
+});
+
+test("320px Persian representative setup is scoped, read-only and fits the screen", async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 820 });
+  await page.addInitScript(() => localStorage.setItem("dark-pro-lang", "fa"));
+  const state = await managedFixture(page, "representative");
+  state.stores[0].setup = setupFixture({ published_products: 7, priced_products: 2, manager_registered: false, trial_enabled: true });
+  await page.goto("/telegram");
+  const setup = page.locator(".telegram-setup");
+  await expect(page.locator(".telegram-store-card")).toHaveCount(1);
+  await expect(setup.locator("summary")).toContainText("۲ از ۷ بسته قیمت Stars دارد");
+  await setup.locator("summary").click();
+  await expect(setup).toContainText("۵ بستهٔ منتشرشده هنوز قیمت Stars ندارد");
+  await expect(setup).toContainText("زمان تست ۲۴ ساعت از صدور است");
+  await expect(setup.locator("bdi")).toHaveText("/start");
+  await expect(setup.getByRole("button")).toHaveCount(1);
+  await expect(setup.getByRole("button", { name: "مشاهدهٔ کاتالوگ پلن‌ها", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: /افزودن ربات|مدیریت ربات|بررسی اتصال|اتصال دوباره|توقف فروشگاه/ })).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "بازکردن ربات", exact: true })).toHaveAttribute("href", "https://t.me/existing_lab_bot");
+  expect(await page.evaluate(() => document.documentElement.dir)).toBe("rtl");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
+  expect(state.writes).toHaveLength(0);
 });

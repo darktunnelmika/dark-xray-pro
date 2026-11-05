@@ -23,6 +23,7 @@ type ownerNode struct {
 	CoreState             string     `json:"core_state"`
 	AccountingState       string     `json:"accounting_state"`
 	ExecutionCurrent      bool       `json:"execution_current"`
+	ExecutionFreshForMS   int64      `json:"execution_fresh_for_ms"`
 	ExecutionReportedAt   *time.Time `json:"execution_reported_at"`
 	ExecutionInstallation string     `json:"-"`
 }
@@ -63,15 +64,7 @@ func (s *Server) attachNodeManager(mux *http.ServeMux) {
 				executionAvailable = true
 				now := time.Now()
 				for _, channel := range channels {
-					status := ownerNode{
-						NodeID: channel.NodeID, CoreState: channel.HealthState, AccountingState: channel.AccountingState,
-						ExecutionInstallation: channel.InstallationID,
-					}
-					if channel.ReportedAt > 0 {
-						reported := time.Unix(0, channel.ReportedAt).UTC()
-						status.ExecutionCurrent = !reported.After(now.Add(time.Second)) && now.Sub(reported) < 15*time.Second
-						status.ExecutionReportedAt = &reported
-					}
+					status := observedNodeChannels(channel, now)
 					execution[channel.NodeID] = status
 				}
 			}
@@ -94,6 +87,7 @@ func (s *Server) attachNodeManager(mux *http.ServeMux) {
 				row.CoreState = channel.CoreState
 				row.AccountingState = channel.AccountingState
 				row.ExecutionCurrent = channel.ExecutionCurrent
+				row.ExecutionFreshForMS = channel.ExecutionFreshForMS
 				row.ExecutionReportedAt = channel.ExecutionReportedAt
 			} else if executionAvailable {
 				row.CoreState, row.AccountingState = "not_configured", "not_configured"

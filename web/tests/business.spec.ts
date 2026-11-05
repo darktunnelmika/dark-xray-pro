@@ -538,7 +538,7 @@ test("client plan quick presets match HUB debit and never submit until represent
  await form.getByLabel("Plan type").selectOption("unlimited");
  await expect(builder.getByRole("button",{name:"Unlimited IPs"})).toHaveCount(0);
  await expect(builder.getByText("Enter valid duration, user limit and volume to calculate an estimate.")).toBeVisible();
- await builder.getByRole("button",{name:"60 days"}).click();
+ await builder.getByRole("button",{name:"60 days",exact:true}).click();
  await builder.getByRole("button",{name:"5",exact:true}).click();
  await expect(builder.getByText("10 unlimited units",{exact:true})).toBeVisible();
  await expect(builder.getByText(/Last loaded balance: 90 unlimited units/)).toBeVisible();
@@ -549,7 +549,7 @@ test("client plan quick presets match HUB debit and never submit until represent
  await builder.getByRole("button",{name:"3",exact:true}).click();
  await expect(builder.getByText("5 unlimited units",{exact:true})).toBeVisible();
  expect(requests).toHaveLength(0);
- await builder.getByRole("button",{name:"60 days"}).click();
+ await builder.getByRole("button",{name:"60 days",exact:true}).click();
  await builder.getByRole("button",{name:"5",exact:true}).click();
  await form.getByLabel("Client ID").fill("rep-test-plan-v3");
  await form.getByLabel("Client name").fill("Custom name");
