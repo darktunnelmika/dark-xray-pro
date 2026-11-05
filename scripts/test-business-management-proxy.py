@@ -104,6 +104,7 @@ location / {{ return 403; }}
                           (seller + "/quota", {"POST"}),
                           (seller + "/state", {"POST"}),
                           (seller + "/clients", {"POST"}),
+                          (seller + "/catalog/Product.test_01-2/clients", {"POST"}),
                           (seller + "/clients/Client.test_01-2/extend", {"POST"}),
                           ("/api/v1/workspace/clients/Client.test_01-2/volume-refund", {"GET", "HEAD"}),
                           ("/api/v1/workspace/volume-refunds", {"GET", "HEAD"}),
@@ -133,7 +134,7 @@ location / {{ return 403; }}
                     check(path, allowed)
                     check(path + "/extra/unknown", set())
                     check(path + "/", set())
-                for path in (seller + "/clients", seller + "/clients/a/extend"):
+                for path in (seller + "/clients", seller + "/clients/a/extend", seller + "/catalog/a/clients"):
                     before = len(Backend.seen)
                     assert request(port, path, "POST", b"x" * 4097) == 413
                     assert len(Backend.seen) == before, "oversized order reached backend"
@@ -144,11 +145,15 @@ location / {{ return 403; }}
                       {"GET", "HEAD"})
                 check("/api/v1/workspace/representatives/" + "a" * 64 + "/sellers/" + "b" * 64 +
                       "/clients/" + "c" * 64 + "/extend", {"POST"})
+                check(seller + "/catalog/" + "a" * 64 + "/clients", {"POST"})
                 for bad in ("_a", "-a", ".a", "a!b", "a+b", "a;b", "a" * 65, "a%2Fb"):
                     check("/api/v1/workspace/representatives/" + bad + "/seller-permission", set())
                     check(rep + "/sellers/" + bad + "/quota", set())
                     check(rep + "/sellers/" + bad + "/clients", set())
                     check(seller + "/clients/" + bad + "/extend", set())
+                    check(seller + "/catalog/" + bad + "/clients", set())
+                    check(rep + "/sellers/" + bad + "/catalog/a/clients", set())
+                    check("/api/v1/workspace/representatives/" + bad + "/sellers/a/catalog/a/clients", set())
                     check("/api/v1/workspace/representatives/" + bad + "/sellers/a/clients", set())
                     check("/api/v1/workspace/clients/" + bad + "/volume-refund", set())
                 for path in ("/api/v1/admin/nodes", "/api/v1/agent/config",
