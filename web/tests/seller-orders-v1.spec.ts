@@ -4,7 +4,7 @@ import type { SellerOrderClient, SellerOrderReceipt } from "../src/business/sell
 const csrf = "c".repeat(64), initialBytes = "9007199254741993";
 type Write = { path: string; csrf: string; body: Record<string, unknown> };
 type Options = { owner?: boolean; capability?: unknown; create?: boolean; renew?: boolean; sellerEnabled?: boolean;
-  lose?: "create" | "extend"; denyRetry?: boolean; corrupt?: "actor" | "balance" };
+  catalog?: "ok" | "foreign" | "partial" | "stale" | "corrupt"; lose?: "create" | "extend"; denyRetry?: boolean; corrupt?: "actor" | "balance" };
 
 async function fixture(page: Page, options: Options = {}) {
   const user = { id: options.owner ? "owner" : "rep-a", username: "orders-qa", role: options.owner ? "owner" : "representative",
@@ -30,11 +30,26 @@ async function fixture(page: Page, options: Options = {}) {
       state: url.searchParams.get("state") ?? "", sort: url.searchParams.get("sort") ?? "", has_more: false } });
     if (req.method() === "GET" && path.endsWith("/seller-permission")) return route.fulfill({ json: { representative_id: "rep-a", manage_sellers: true, revision: 1 } });
     if (req.method() === "GET" && path.endsWith("/sellers")) return route.fulfill({ json: { representative_id: "rep-a", sellers: [seller], limit: 25, offset: Number(url.searchParams.get("offset")) } });
+    if (req.method() === "GET" && path === "/api/v1/workspace/products" && options.catalog) return route.fulfill({ json: {
+      products: [{ id: "product-a", representative_id: options.catalog === "foreign" ? "rep-b" : "rep-a", name: "Two month product",
+        status: "published", plan_kind: "unlimited", revision: 2, duration_days: options.catalog === "partial" ? 45 : 60,
+        ip_count: 3, volume_bytes: 0, price_toman: 250000 }],
+      representative_id: "rep-a", state: "published", q: "", limit: 100, offset: 0, total: 1, has_more: false
+    } });
+    const catalogPath = "/api/v1/workspace/representatives/rep-a/sellers/seller-a/catalog/product-a/clients";
+    const isCatalog = path === catalogPath;
     const base = "/api/v1/workspace/representatives/rep-a/sellers/seller-a/clients";
-    if (req.method() !== "POST" || !(path === base || path.startsWith(base + "/") && path.endsWith("/extend"))) return route.fulfill({ status: 404, json: { error: "not_found" } });
-    const body = req.postDataJSON() as Record<string, unknown>, action = path === base ? "create" : "extend";
+    if (req.method() !== "POST" || !(isCatalog || path === base || path.startsWith(base + "/") && path.endsWith("/extend"))) return route.fulfill({ status: 404, json: { error: "not_found" } });
+    let body = req.postDataJSON() as Record<string, unknown>;
+    const action = isCatalog || path === base ? "create" : "extend";
     writes.push({ path, csrf: req.headers()["x-csrf-token"] ?? "", body });
     if (req.headers()["x-csrf-token"] !== csrf || body.representative_id !== "rep-a" || body.seller_id !== "seller-a") return route.fulfill({ status: 403, json: { error: "denied" } });
+    if (isCatalog && options.catalog === "stale") return route.fulfill({ status: 409, json: { error: "conflict" } });
+    const catalog = isCatalog ? { product_id: String(body.product_id), product_revision: Number(body.expected_product_revision),
+      price_toman: Number(body.expected_price_toman), duration_days: Number(body.expected_duration_days),
+      months: Number(body.expected_duration_days) / 30, user_count: Number(body.expected_user_count),
+      checkout_enabled: false as const, payment_applied: false as const } : undefined;
+    if (isCatalog) body = { ...body, duration_days: body.expected_duration_days, ip_count: body.expected_user_count, unlimited: true, volume_bytes: "0" };
     const existing = receipts.get(String(body.event_id));
     if (existing) {
       if (options.denyRetry && !denied) { denied = true; return route.fulfill({ status: 403, json: { error: "permission_revoked" } }); }
@@ -62,12 +77,16 @@ async function fixture(page: Page, options: Options = {}) {
     }
     if (BigInt(seller.reserved_bytes) < bytes || BigInt(seller.reserved_units) < units) return route.fulfill({ status: 409, json: { error: "insufficient_credit" } });
     const receipt: SellerOrderReceipt = { event_id: String(body.event_id), actor_user_id: user.id, representative_id: "rep-a", seller_id: seller.id,
-      action, client, ...(previous ? { previous_client: previous } : {}), volume_debit_bytes: bytes.toString(), unlimited_debit_units: units.toString(),
+      action, client, ...(catalog ? { catalog } : {}), ...(previous ? { previous_client: previous } : {}), volume_debit_bytes: bytes.toString(), unlimited_debit_units: units.toString(),
       reserved_bytes_before: seller.reserved_bytes, reserved_bytes_after: (BigInt(seller.reserved_bytes) - bytes).toString(),
       reserved_units_before: seller.reserved_units, reserved_units_after: (BigInt(seller.reserved_units) - units).toString(), created_unix: now, replayed: false };
     receipts.set(receipt.event_id, receipt); clients.set(id, client);
     seller.reserved_bytes = receipt.reserved_bytes_after; seller.reserved_units = receipt.reserved_units_after;
     if (options.lose === action && !lost) { lost = true; return route.abort("failed"); }
+    if (isCatalog && options.catalog === "corrupt" && !corrupted) {
+      corrupted = true;
+      return route.fulfill({ status: 201, json: { ...receipt, catalog: { ...catalog, payment_applied: true } } });
+    }
     if (options.corrupt && !corrupted) {
       corrupted = true;
       return route.fulfill({ status: action === "create" ? 201 : 200, json: { ...receipt,
@@ -261,4 +280,73 @@ test("Persian order form and verified receipt amounts fit a narrow mobile screen
   await expect(receipt(page)).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(false);
   await page.screenshot({ path: test.info().outputPath("seller-orders-mobile-fa.png"), fullPage: true });
+});
+
+async function createCatalog(page: Page) {
+ await page.getByLabel("Catalog order product").selectOption("product-a");
+ await expect(page.getByLabel("Catalog order terms")).toContainText("250,000");
+ await expect(page.getByLabel("Catalog order terms")).toContainText("6");
+ await page.getByLabel("Catalog client ID").fill("catalog-client-a");
+ await page.getByLabel("Catalog client name").fill("Catalog client");
+ await page.getByLabel("Catalog order reason").fill("Reviewed catalog product");
+ await page.getByRole("button", { name: "Record catalog order", exact: true }).click();
+}
+test("catalog selection submits exact published snapshot and verifies its receipt", async ({ page }) => {
+ const f = await fixture(page, { catalog: "ok" }); await open(page); await createCatalog(page);
+ await expect(page.getByLabel("Catalog receipt terms")).toContainText("2 × 3 = 6");
+ expect(f.writes).toHaveLength(1);
+ expect(f.writes[0].path).toBe("/api/v1/workspace/representatives/rep-a/sellers/seller-a/catalog/product-a/clients");
+ expect(f.writes[0].body).toEqual({ event_id: expect.any(String), representative_id: "rep-a", seller_id: "seller-a",
+  product_id: "product-a", expected_product_revision: 2, expected_price_toman: 250000, expected_duration_days: 60,
+  expected_user_count: 3, client_id: "catalog-client-a", name: "Catalog client", reason: "Reviewed catalog product" });
+ expect(f.writes[0].csrf).toBe(csrf); expect(f.seller.reserved_units).toBe("94");
+});
+test("catalog lost response survives reload and retries the identical order once", async ({ page }) => {
+ const f = await fixture(page, { catalog: "ok", lose: "create" }); await open(page); await createCatalog(page);
+ await expect(page.getByRole("button", { name: "Retry same request", exact: true })).toBeVisible();
+ await page.reload(); await page.getByRole("button", { name: "Retry same request", exact: true }).click();
+ await expect(page.getByLabel("Catalog receipt terms")).toBeVisible();
+ expect(f.writes).toHaveLength(2); expect(f.writes[0]).toEqual(f.writes[1]); expect(f.seller.reserved_units).toBe("94");
+});
+test("catalog payment claim is unverified and retains recovery request", async ({ page }) => {
+ const f = await fixture(page, { catalog: "corrupt" }); await open(page); await createCatalog(page);
+ await expect(receipt(page)).toHaveCount(0);
+ await page.getByRole("button", { name: "Retry same request", exact: true }).click();
+ await expect(page.getByLabel("Catalog receipt terms")).toBeVisible();
+ expect(f.writes[0]).toEqual(f.writes[1]); expect(f.seller.reserved_units).toBe("94");
+});
+for (const catalog of ["foreign", "partial"] as const) test("catalog rejects " + catalog + " product", async ({ page }) => {
+ const f = await fixture(page, { catalog }); await open(page);
+ if (catalog === "foreign") await expect(page.getByText("Products could not be verified. Refresh to try again.")).toBeVisible();
+ else { await expect(page.getByText("No eligible unlimited products on this page.")).toBeVisible(); await expect(page.getByRole("button", { name: "Record catalog order", exact: true })).toBeDisabled(); }
+ expect(f.writes).toHaveLength(0);
+});
+test("stale catalog snapshot is rejected without retrying or debiting", async ({ page }) => {
+ const f = await fixture(page, { catalog: "stale" }); await open(page); await createCatalog(page);
+ await expect(page.getByText("The change was rejected. Refresh the current information and try again.")).toBeVisible();
+ await expect(page.getByRole("button", { name: "Retry same request", exact: true })).toHaveCount(0);
+ expect(f.writes).toHaveLength(1); expect(f.seller.reserved_units).toBe("100");
+});
+
+test("Persian catalog order and receipt fit 320px mobile", async ({ page }) => {
+ await page.setViewportSize({ width: 320, height: 800 });
+ await page.addInitScript(() => localStorage.setItem("dark-pro-lang", "fa"));
+ const f = await fixture(page, { catalog: "ok" }); await open(page);
+ await page.getByLabel("Catalog order product").selectOption("product-a");
+ await page.getByLabel("Catalog client ID").fill("catalog-mobile");
+ await page.getByLabel("Catalog client name").fill("مشتری آزمایشی");
+ await page.getByLabel("Catalog order reason").fill("ثبت محصول آزمایشی");
+ await page.getByRole("button", { name: "ثبت سفارش محصول", exact: true }).click();
+ await expect(page.getByLabel("Catalog receipt terms")).toContainText("پرداخت ثبت نشده");
+ expect(f.seller.reserved_units).toBe("94");
+ expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(false);
+});
+test("refresh failure removes selected catalog authority and blocks writes", async ({ page }) => {
+ const f = await fixture(page, { catalog: "ok" }); await open(page);
+ await page.getByLabel("Catalog order product").selectOption("product-a");
+ await page.route("**/api/v1/workspace/products?**", route => route.abort("failed"));
+ await page.getByRole("button", { name: "Refresh products", exact: true }).click();
+ await expect(page.getByText("Products could not be verified. Refresh to try again.")).toBeVisible();
+ await expect(page.getByRole("button", { name: "Record catalog order", exact: true })).toHaveCount(0);
+ expect(f.writes).toHaveLength(0);
 });

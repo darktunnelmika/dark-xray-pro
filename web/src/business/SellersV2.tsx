@@ -8,6 +8,8 @@ import { exactText, gibText, quotaInput, sellerID, validQuotaReceipt, validSelle
 import SellerClientOrdersV1 from "./SellerClientOrdersV1";
 import { sellerOrderAccess, sellerOrderPath, validSellerOrderRequest, validSellerOrderReceipt,
   type SellerOrderAccess, type SellerOrderKind, type SellerOrderReceipt } from "./sellerOrdersV1";
+import SellerCatalogOrdersV1 from "./SellerCatalogOrdersV1";
+import { catalogOrderPath, validCatalogOrderRequest, validCatalogOrderReceipt } from "./sellerCatalogOrdersV1";
 import "./SellersV2.css";
 
 const copy = {
@@ -46,7 +48,7 @@ const copy = {
     invalid: "شناسه، نام، مقدار صحیح و دلیل معتبر وارد کنید.", back: "بازگشت به فروشندگان", selected: "جزئیات فروشنده",
   },
 } as const;
-type Pending = { path: string; body: Record<string, unknown>; kind: "permission" | "create" | "quota" | "state" | SellerOrderKind };
+type Pending = { path: string; body: Record<string, unknown>; kind: "permission" | "create" | "quota" | "state" | SellerOrderKind | "catalog_create" };
 function savedRequest(value: unknown, base: string, representative: string): Pending | null {
   if (!value || typeof value !== "object") return null;
   const request = value as Pending, body = request.body;
@@ -57,6 +59,8 @@ function savedRequest(value: unknown, base: string, representative: string): Pen
   if (request.kind === "permission") return request.path === base + "/seller-permission" &&
     typeof body.manage_sellers === "boolean" && reason && revision ? request : null;
   if (typeof body.seller_id !== "string" || !sellerID.test(body.seller_id)) return null;
+  if (request.kind === "catalog_create") return validCatalogOrderRequest(body, representative) &&
+    request.path === catalogOrderPath(representative, body.seller_id, String(body.product_id)) ? request : null;
   if (request.kind === "client_create" || request.kind === "client_extend") return (
     validSellerOrderRequest(body, request.kind, representative) &&
     request.path === sellerOrderPath(representative, body.seller_id, request.kind === "client_extend" ? String(body.client_id) : undefined) ? request : null);
@@ -99,8 +103,8 @@ export default function SellersV2({ model, representativeID }: { model: Business
   const locked = busy || uncertain || model.actionBusy;
   const ready = status === "ready" && loadedIdentity === identity;
   const chosen = ready ? sellers?.find(s => s.id === selected) : undefined;
-  const pendingOrder = pending.current?.kind === "client_create" || pending.current?.kind === "client_extend";
-  const orderRetryAllowed = !pendingOrder || ready && (pending.current?.kind === "client_create" ? orderAccess?.create : orderAccess?.renew) === true;
+  const pendingOrder = pending.current?.kind === "catalog_create" || pending.current?.kind === "client_create" || pending.current?.kind === "client_extend";
+  const orderRetryAllowed = !pendingOrder || ready && (pending.current?.kind !== "client_extend" ? orderAccess?.create : orderAccess?.renew) === true;
 
   useEffect(() => {
     setSelected(""); setCreating(false); setOffset(0); setNotice("");
@@ -148,8 +152,8 @@ export default function SellersV2({ model, representativeID }: { model: Business
     if (inFlight.current || busy || model.actionBusy) return;
     const alreadyUncertain = uncertain || pending.current !== null;
     const requestIdentity = identity;
-    const order = request.kind === "client_create" || request.kind === "client_extend";
-    if (order && (!ready || (request.kind === "client_create" ? orderAccess?.create : orderAccess?.renew) !== true)) return;
+    const order = request.kind === "catalog_create" || request.kind === "client_create" || request.kind === "client_extend";
+    if (order && (!ready || (request.kind !== "client_extend" ? orderAccess?.create : orderAccess?.renew) !== true)) return;
     try {
       const serialized = JSON.stringify(request);
       sessionStorage.setItem(pendingKey, serialized);
@@ -187,6 +191,9 @@ export default function SellersV2({ model, representativeID }: { model: Business
       } else if (request.kind === "quota") {
         if (!validQuotaReceipt(value as SellerQuotaReceipt, representativeID, String(request.body.seller_id), String(request.body.event_id), String(request.body.action))) throw new Error("unverified_receipt");
         setVolume("0"); setUnits("0"); setReason("");
+      } else if (request.kind === "catalog_create") {
+        if (!validCatalogOrderReceipt(value, request.body, model.session.user.id)) throw new Error("unverified_catalog_receipt");
+        setOrderReceipt(value);
       } else if (request.kind === "client_create" || request.kind === "client_extend") {
         if (!validSellerOrderReceipt(value, request.body, request.kind, model.session.user.id)) throw new Error("unverified_receipt");
         setOrderReceipt(value);
@@ -275,6 +282,11 @@ export default function SellersV2({ model, representativeID }: { model: Business
             receipt={orderReceipt?.seller_id === chosen.id ? orderReceipt : null} onSubmit={(kind, body) => {
               if (!chosen.enabled || (kind === "client_create" ? orderAccess?.create : orderAccess?.renew) !== true) return;
               submit(kind, sellerOrderPath(representativeID, chosen.id, kind === "client_extend" ? String(body.client_id) : undefined), body);
+            }}/>
+          <SellerCatalogOrdersV1 key={identity + ":catalog:" + chosen.id} seller={chosen} language={model.language} blocked={locked}
+            allowed={chosen.enabled && orderAccess?.create === true} onSubmit={body => {
+              if (!chosen.enabled || orderAccess?.create !== true) return;
+              submit("catalog_create", catalogOrderPath(representativeID, chosen.id, String(body.product_id)), body);
             }}/>
           <form className="seller-transfer" onSubmit={transfer}><h4>{action === "allocate" ? <ArrowDownLeft size={16}/> : <ArrowUpRight size={16}/>} {t.balance}</h4>
             <label><select aria-label="Quota action" value={action} disabled={locked} onChange={e => setAction(e.target.value as "allocate" | "reclaim")}>
