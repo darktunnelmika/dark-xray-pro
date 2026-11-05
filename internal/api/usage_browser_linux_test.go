@@ -135,6 +135,9 @@ func TestRealBrowserNativeUsageXraySQLiteAndRevocation(t *testing.T) {
 	if customer.RepresentativeID != "live-usage-rep" || customer.VolumeBytes != 10737418 {
 		t.Fatalf("UI failed to persist intended native customer: volume=%d", customer.VolumeBytes)
 	}
+	if customer.UUID != "12345678-1234-4234-8234-123456789abc" {
+		t.Fatal("manual UUID was not persisted through the real browser/API")
+	}
 	originalUUID := customer.UUID
 	repBefore, e := s.business.Representative(ctx, customer.RepresentativeID)
 	if e != nil {
