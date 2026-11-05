@@ -98,8 +98,11 @@ func TestOwnerNodeManagerPairInviteAndRevocation(t *testing.T) {
 	if err := json.Unmarshal(list.Body.Bytes(), &roster); err != nil {
 		t.Fatal(err)
 	}
-	if len(roster.Nodes) != 1 || roster.Nodes[0].Name != "NEW PRO QA Node" || roster.Nodes[0].Status != "offline" {
-		t.Fatalf("fabricated live Node: %+v", roster)
+	if len(roster.Nodes) != 1 || roster.Nodes[0].Name != "NEW PRO QA Node" || roster.Nodes[0].Status != "offline" ||
+		roster.Nodes[0].TransportState != "offline" || roster.Nodes[0].MetricsState != "unavailable" ||
+		roster.Nodes[0].CoreState != "unknown" || roster.Nodes[0].AccountingState != "unknown" ||
+		roster.Nodes[0].ExecutionCurrent || roster.Nodes[0].ExecutionReportedAt != nil {
+		t.Fatalf("fabricated live Node channel: %+v", roster)
 	}
 	if got := request("POST", "/api/v1/workspace/nodes/invites/qa-new-01/cancel", map[string]any{}, ownerCookie, csrf, "https://"+browserHost); got.Code != 404 {
 		t.Fatalf("paired Node can be cancelled: %d", got.Code)

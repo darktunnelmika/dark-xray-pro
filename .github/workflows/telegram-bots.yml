@@ -2,9 +2,9 @@ name: PRO Telegram stores
 
 on:
   push:
-    branches: ["feat/telegram-*"]
+    branches: ["feat/telegram-*", "feature/panel-integration-*"]
   pull_request:
-    branches: [main, "feat/darkrestore-import-m2", "fix/managed-runtime-backup", "fix/node-retry-isolation"]
+    branches: [main, "feat/darkrestore-import-m2", "fix/managed-runtime-backup", "fix/node-retry-isolation", "feat/telegram-*", "feature/panel-integration-*"]
     paths:
       - "internal/telegrambot/**"
       - "internal/business/telegram*"

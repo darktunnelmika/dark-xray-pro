@@ -44,6 +44,7 @@ func scanSellerOrderRecordV1(row interface{ Scan(...any) error }) (sellerOrderRe
 	}
 	facts.Client = out.receipt.Client
 	facts.PreviousClient = out.receipt.PreviousClient
+	facts.Catalog = out.receipt.Catalog
 	canonical, err = json.Marshal(facts)
 	if err != nil || !bytes.Equal(canonical, raw) || facts.Client.ID != clientID {
 		return out, ErrUnavailable
@@ -92,6 +93,9 @@ func scanSellerOrderRecordV1(row interface{ Scan(...any) error }) (sellerOrderRe
 		if err != nil || sellerOrderClientSnapshotV1(change.Client) != facts.Client || change.VolumeCost != facts.VolumeDebitBytes || change.UnitsCost != facts.UnlimitedDebitUnits {
 			return out, ErrUnavailable
 		}
+	}
+	if verifySellerCatalogReceiptV1(out.intent, facts) != nil {
+		return out, ErrUnavailable
 	}
 	return out, nil
 }

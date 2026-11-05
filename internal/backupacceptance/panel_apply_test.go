@@ -72,6 +72,7 @@ func TestPanelReplacementRestoresFullEconomicStateNotOnlyQuarantine(t *testing.T
 	if !reflect.DeepEqual(f.state, captureEconomicState(t, s)) {
 		t.Fatal("clients, UUIDs, consumption or exact int64 balances did not return")
 	}
+	assertCatalogRecoveryReplay(t, s, f)
 	paid, e := s.RefundExpiredVolume(ctx, nil, f.refund)
 	require(t, e)
 	if paid.Applied || !paid.Replayed {

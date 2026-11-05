@@ -27,6 +27,10 @@ func sellerRepresentativePermissionV2(r *http.Request) (string, bool) {
 	if r.Method == http.MethodPost && len(parts) == 4 && parts[0] != "" && parts[2] != "" && parts[3] == "clients" {
 		return "create_clients", true
 	}
+	if r.Method == http.MethodPost && len(parts) == 6 && parts[0] != "" && parts[2] != "" &&
+		parts[3] == "catalog" && parts[4] != "" && parts[5] == "clients" {
+		return "create_clients", true
+	}
 	if r.Method == http.MethodPost && len(parts) == 6 && parts[0] != "" && parts[2] != "" && parts[3] == "clients" && parts[4] != "" && parts[5] == "extend" {
 		return "renew_clients", true
 	}

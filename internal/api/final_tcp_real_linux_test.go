@@ -28,7 +28,7 @@ import (
 func activeTCPClient(t *testing.T, ctx context.Context, binary, uuid, key string, port uint16, origin *httptest.Server) *http.Client {
 	t.Helper()
 	socksPort := liveUsagePort(t)
-	doc := map[string]any{"log": map[string]string{"loglevel": "none"}, "inbounds": []any{map[string]any{"listen": "127.0.0.1", "port": socksPort, "protocol": "socks", "settings": map[string]any{"auth": "noauth", "udp": false}}}, "outbounds": []any{map[string]any{"protocol": "vless", "settings": map[string]any{"vnext": []any{map[string]any{"address": "127.0.0.1", "port": port, "users": []any{map[string]any{"id": uuid, "encryption": "none", "flow": "xtls-rprx-vision"}}}}}, "streamSettings": map[string]any{"network": "tcp", "security": "reality", "realitySettings": map[string]any{"serverName": "one.example.org", "fingerprint": "chrome", "publicKey": key, "shortId": "aa11"}}}}}
+	doc := map[string]any{"log": map[string]string{"loglevel": "debug"}, "inbounds": []any{map[string]any{"listen": "127.0.0.1", "port": socksPort, "protocol": "socks", "settings": map[string]any{"auth": "noauth", "udp": false}}}, "outbounds": []any{map[string]any{"protocol": "vless", "settings": map[string]any{"vnext": []any{map[string]any{"address": "127.0.0.1", "port": port, "users": []any{map[string]any{"id": uuid, "encryption": "none", "flow": "xtls-rprx-vision"}}}}}, "streamSettings": map[string]any{"network": "tcp", "security": "reality", "realitySettings": map[string]any{"serverName": "one.example.org", "fingerprint": "chrome", "publicKey": key, "shortId": "aa11"}}}}}
 	raw, _ := json.Marshal(doc)
 	path := filepath.Join(t.TempDir(), "active-client.json")
 	if err := os.WriteFile(path, raw, 0600); err != nil {
@@ -37,13 +37,31 @@ func activeTCPClient(t *testing.T, ctx context.Context, binary, uuid, key string
 	childCtx, cancel := context.WithCancel(ctx)
 	cmd := exec.CommandContext(childCtx, binary, "run", "-config", path)
 	cmd.Env = []string{"PATH=/usr/bin:/bin"} // client is never in server drain mode
-	cmd.Stdout = io.Discard
-	cmd.Stderr = io.Discard
+	// Synthetic test-only diagnostics: preserve the failed Vision handshake without
+	// retrying the stream or changing production core logging.
+	diagnosticPath := filepath.Join(t.TempDir(), "active-client.log")
+	diagnosticFile, diagnosticError := os.OpenFile(diagnosticPath, os.O_CREATE|os.O_WRONLY, 0600)
+	if diagnosticError != nil {
+		t.Fatal(diagnosticError)
+	}
+	cmd.Stdout = diagnosticFile
+	cmd.Stderr = diagnosticFile
 	if err := cmd.Start(); err != nil {
 		cancel()
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { cancel(); _ = cmd.Wait() })
+	t.Cleanup(func() {
+		cancel()
+		_ = cmd.Wait()
+		_ = diagnosticFile.Close()
+		if t.Failed() {
+			raw, _ := os.ReadFile(diagnosticPath)
+			if len(raw) > 16000 {
+				raw = raw[len(raw)-16000:]
+			}
+			t.Logf("synthetic client diagnostics: %s", raw)
+		}
+	})
 	socks := net.JoinHostPort("127.0.0.1", strconv.Itoa(int(socksPort)))
 	liveUsageWait(t, func() bool {
 		c, e := net.DialTimeout("tcp4", socks, 100*time.Millisecond)

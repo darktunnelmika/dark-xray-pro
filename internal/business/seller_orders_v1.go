@@ -54,26 +54,28 @@ type SellerOrderClientV1 struct {
 }
 
 type SellerOrderReceiptV1 struct {
-	EventID             string               `json:"event_id"`
-	ActorUserID         string               `json:"actor_user_id"`
-	RepresentativeID    string               `json:"representative_id"`
-	SellerID            string               `json:"seller_id"`
-	Action              string               `json:"action"`
-	Client              SellerOrderClientV1  `json:"client"`
-	PreviousClient      *SellerOrderClientV1 `json:"previous_client,omitempty"`
-	VolumeDebitBytes    int64                `json:"volume_debit_bytes,string"`
-	UnlimitedDebitUnits int64                `json:"unlimited_debit_units,string"`
-	ReservedBytesBefore int64                `json:"reserved_bytes_before,string"`
-	ReservedBytesAfter  int64                `json:"reserved_bytes_after,string"`
-	ReservedUnitsBefore int64                `json:"reserved_units_before,string"`
-	ReservedUnitsAfter  int64                `json:"reserved_units_after,string"`
-	CreatedUnix         int64                `json:"created_unix"`
-	Replayed            bool                 `json:"replayed"`
+	EventID             string                `json:"event_id"`
+	ActorUserID         string                `json:"actor_user_id"`
+	RepresentativeID    string                `json:"representative_id"`
+	SellerID            string                `json:"seller_id"`
+	Action              string                `json:"action"`
+	Client              SellerOrderClientV1   `json:"client"`
+	PreviousClient      *SellerOrderClientV1  `json:"previous_client,omitempty"`
+	Catalog             *SellerOrderCatalogV1 `json:"catalog,omitempty"`
+	VolumeDebitBytes    int64                 `json:"volume_debit_bytes,string"`
+	UnlimitedDebitUnits int64                 `json:"unlimited_debit_units,string"`
+	ReservedBytesBefore int64                 `json:"reserved_bytes_before,string"`
+	ReservedBytesAfter  int64                 `json:"reserved_bytes_after,string"`
+	ReservedUnitsBefore int64                 `json:"reserved_units_before,string"`
+	ReservedUnitsAfter  int64                 `json:"reserved_units_after,string"`
+	CreatedUnix         int64                 `json:"created_unix"`
+	Replayed            bool                  `json:"replayed"`
 }
 
 type sellerOrderIntentV1 struct {
-	Create *SellerClientCreateV1 `json:"create,omitempty"`
-	Extend *SellerClientExtendV1 `json:"extend,omitempty"`
+	Create  *SellerClientCreateV1   `json:"create,omitempty"`
+	Extend  *SellerClientExtendV1   `json:"extend,omitempty"`
+	Catalog *sellerCatalogBindingV1 `json:"catalog,omitempty"`
 }
 
 type sellerOrderIdentityV1 struct{ event, representative, seller, client, action, reason string }
@@ -329,6 +331,10 @@ func (s *Store) executeSellerOrderV1(ctx context.Context, token string, intent s
 	if err = newSellerOrderEventV1(ctx, tx, k.event); err != nil {
 		return out, err
 	}
+	catalog, err := validateSellerCatalogOrderV1(ctx, tx, intent)
+	if err != nil {
+		return out, err
+	}
 	now := time.Now().UTC().Unix()
 	var c Client
 	var bytes, units int64
@@ -382,7 +388,7 @@ func (s *Store) executeSellerOrderV1(ctx context.Context, token string, intent s
 		return out, ErrInsufficient
 	}
 	out = SellerOrderReceiptV1{EventID: k.event, ActorUserID: actor, RepresentativeID: k.representative, SellerID: k.seller, Action: k.action,
-		Client: sellerOrderClientSnapshotV1(c), PreviousClient: previous, VolumeDebitBytes: bytes, UnlimitedDebitUnits: units,
+		Client: sellerOrderClientSnapshotV1(c), PreviousClient: previous, Catalog: catalog, VolumeDebitBytes: bytes, UnlimitedDebitUnits: units,
 		ReservedBytesBefore: seller.ReservedBytes, ReservedBytesAfter: seller.ReservedBytes - bytes,
 		ReservedUnitsBefore: seller.ReservedUnits, ReservedUnitsAfter: seller.ReservedUnits - units, CreatedUnix: now}
 	if _, err = tx.ExecContext(ctx, `UPDATE representative_sellers_v2 SET reserved_bytes=?,reserved_units=? WHERE representative_id=? AND id=?`,
