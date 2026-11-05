@@ -137,7 +137,11 @@ func TestClientContactOfflineBackupAndReopen(t *testing.T) {
 	if !bytes.Equal(before, after) {
 		t.Fatal("backup validation mutated database")
 	}
-	copyPath := filepath.Join(t.TempDir(), "restored.sqlite")
+	copyDir := filepath.Join(t.TempDir(), "private")
+	if e = os.Mkdir(copyDir, 0700); e != nil {
+		t.Fatal(e)
+	}
+	copyPath := filepath.Join(copyDir, "restored.sqlite")
 	if e = os.WriteFile(copyPath, before, 0600); e != nil {
 		t.Fatal(e)
 	}
