@@ -23,7 +23,7 @@ async function fixture(page:Page){
    if(!["/api/v1/workspace/clients","/api/v1/workspace/representatives/rep-a/credits"].includes(path))
     return r.fulfill({status:403,json:{error:"unauthorized_action_in_test"}});
    const {event_id,...canonical}=body;
-   if(typeof event_id!=="string"||!event_id.startsWith("pro-"))
+   if(typeof event_id!=="string"||!/^[A-Za-z0-9][A-Za-z0-9_.:-]{15,127}$/.test(event_id))
     return r.fulfill({status:422,json:{error:"invalid_event_id"}});
    const fingerprint=JSON.stringify(canonical);
    const previous=fingerprints.get(event_id);
@@ -35,7 +35,7 @@ async function fixture(page:Page){
    // An ambiguous HTTP outage is modeled AFTER the server has recorded the
    // event. Exact retries must reuse the same ID to avoid a second debit.
    return r.fulfill({status:count<=2?503:path.endsWith("/clients")?201:200,
-    json:count<=2?{error:"business_store_unavailable"}:{saved:true}});
+    json:count<=2?{error:"business_store_unavailable"}:path.endsWith("/clients")?{id:body.client_id}:{saved:true}});
   }
   if(path==="/api/v1/workspace/me")return r.fulfill({json:{
    user,balance:{id:"owner",display_name:"Owner",kind:"owner",enabled:true,
@@ -99,34 +99,27 @@ test("ambiguous credit retry uses SAME event; editing amount creates NEW event w
  for(const req of m)expect(req.csrf).toBe(csrf);
  expect(m.every(req=>req.path==="/api/v1/workspace/representatives/rep-a/credits")).toBe(true);
 });
-test("ambiguous client creation keeps identical event but changes ID for edited name/plan",async({page})=>{
+test("ambiguous client creation locks the payload until identical replay succeeds",async({page})=>{
  const m=await fixture(page);
  await page.goto("/clients");
- const form=page.getByRole("heading",{name:"Create client record"}).locator("..");
- await form.getByLabel("Client ID").fill("qa-safe-client");
- await form.getByLabel("Client name").fill("Initial customer");
- await form.getByLabel("Plan type").selectOption("volume");
- await form.getByLabel("IP/User slots (0 = unlimited for volume)").fill("0");
- const button=form.getByRole("button",{name:"Create pending client"});
- await button.click();
- await expect(page.locator(".business-notice")).toContainText("Request failed");
- await button.click();
- await expect(page.locator(".business-notice")).toContainText("Request failed");
- expect(m).toHaveLength(2);
- expect(m[0].body.event_id).toBe(m[1].body.event_id);
- await form.getByLabel("Client name").fill("Reviewed customer");
- await button.click();
- await expect(page.locator(".business-notice")).toContainText("Saved in private PRO database");
- expect(m).toHaveLength(3);
- expect(m[2].body.event_id).not.toBe(m[0].body.event_id);
- expect(m[2].body.client_id).toBe("qa-safe-client");
- expect(m[2].body.name).toBe("Reviewed customer");
- await form.getByLabel("Client ID").fill("another-qa-client");
- await form.getByLabel("Client name").fill("Second reviewed");
- await button.click();
- await expect(page.locator(".business-notice")).toContainText("Saved in private PRO database");
- expect(m).toHaveLength(4);
- expect(m[3].body.event_id).not.toBe(m[2].body.event_id);
+ const form=page.getByRole("heading",{name:"Create client",exact:true}).locator("..");
+ await form.getByRole("checkbox",{name:"Create and activate"}).uncheck();
+ await form.getByText("Advanced identity",{exact:true}).click();
+ await form.getByLabel("Client ID (optional)",{exact:true}).fill("qa-safe-client");
+ await form.getByLabel("Client name",{exact:true}).fill("Initial customer");
+ await form.getByRole("button",{name:"Create client",exact:true}).click();
+ await expect(form.getByRole("button",{name:"Resume same request"})).toBeEnabled();
+ await form.getByRole("button",{name:"Resume same request"}).click();
+ await expect(form.getByRole("button",{name:"Resume same request"})).toBeEnabled();
+ expect(m).toHaveLength(2);expect(m[1].body).toEqual(m[0].body);
+ await expect(form.getByLabel("Client name",{exact:true})).toHaveCount(0);
+ await form.getByRole("button",{name:"Resume same request"}).click();
+ await expect(form.getByText("Account saved; awaiting owner activation.")).toBeVisible();
+ expect(m).toHaveLength(3);expect(m[2].body).toEqual(m[0].body);
+ await form.getByRole("button",{name:"Create another client"}).click();
+ await form.getByLabel("Client name",{exact:true}).fill("Second customer");
+ await form.getByRole("button",{name:"Create client",exact:true}).click();
+ await expect(form.getByText("Account saved; awaiting owner activation.")).toBeVisible();
+ expect(m).toHaveLength(4);expect(m[3].body.event_id).not.toBe(m[2].body.event_id);
  for(const req of m)expect(req.csrf).toBe(csrf);
- expect(m.every(req=>req.path==="/api/v1/workspace/clients")).toBe(true);
 });

@@ -66,6 +66,7 @@ type CreditChange struct {
 	Reason              string `json:"reason"`
 }
 type NewClient struct {
+	UUID             string `json:"uuid,omitempty"`
 	EventID          string `json:"event_id"`
 	ClientID         string `json:"client_id"`
 	RepresentativeID string `json:"representative_id"`
@@ -596,6 +597,9 @@ func (s *Store) ListClients(ctx context.Context, repID string, limit, offset int
 	return result, rows.Err()
 }
 func validClient(n NewClient) bool {
+	if n.UUID != "" && !manualClientUUID.MatchString(n.UUID) {
+		return false
+	}
 	if !eventRE.MatchString(n.EventID) || !idRE.MatchString(n.ClientID) || !idRE.MatchString(n.RepresentativeID) || !validName(n.Name, 128) || n.DurationDays < 1 || n.DurationDays > MaxDays || n.IPCount < 0 || n.IPCount > MaxIPLimit {
 		return false
 	}
@@ -692,9 +696,19 @@ func (s *Store) createClientTx(ctx context.Context, tx *sql.Tx, n NewClient, sco
 	} else if r.Kind != "owner" {
 		return Client{}, ErrConflict
 	}
-	uuid, err := randomUUID()
-	if err != nil {
+	uuid := n.UUID
+	if uuid == "" {
+		uuid, err = randomUUID()
+		if err != nil {
+			return Client{}, err
+		}
+	}
+	var duplicate int
+	if err = tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM clients WHERE uuid=?", uuid).Scan(&duplicate); err != nil {
 		return Client{}, err
+	}
+	if duplicate != 0 {
+		return Client{}, ErrConflict
 	}
 	now := time.Now().UTC().Unix()
 	expires := now + n.DurationDays*86400

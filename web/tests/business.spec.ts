@@ -128,6 +128,7 @@ async function mockBusiness(page: Page, user: typeof rep, seedClientCount=0, see
           charged_unlimited_units: 10, deployment_state: "pending_node_apply", archived: false,
           expires_unix: 1800000000,
         });
+        return route.fulfill({status:201,json:runningClients[runningClients.length-1]});
       }
       if (path === "/api/v1/workspace/representatives" && request.method() === "POST") {
         const account = body as {id:string;name:string};
@@ -261,12 +262,13 @@ test("representative only sees own scoped business tools and submits CSRF-bound 
   await expect(page.getByText("90", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Create representative" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Record credit transaction" })).toHaveCount(0);
-  await page.locator(".business-client-form").getByLabel("Client ID").fill("sample-pro-rep");
+ await page.locator(".business-client-form").getByText("Advanced identity",{exact:true}).click();
+  await page.locator(".business-client-form").getByLabel("Client ID (optional)",{exact:true}).fill("sample-pro-rep");
   await page.getByLabel("Client name").fill("Private Test User");
-  await page.getByLabel("Plan type").selectOption("unlimited");
+  await page.locator(".client-create-flow").getByLabel("Plan",{exact:true}).selectOption("unlimited");
   await page.getByLabel("Duration (days)").fill("60");
-  await page.getByLabel("IP/User slots (0 = unlimited for volume)").fill("5");
-  await page.getByRole("button", { name: "Create pending client" }).click();
+  await page.getByLabel("IP limit",{exact:true}).fill("5");
+  await page.getByRole("button", { name: "Create client", exact:true }).click();
   await expect(page.locator(".clients-explorer-row").filter({ hasText: "sample-pro-rep" }).getByText("Private Test User")).toBeVisible();
   expect(requests).toHaveLength(1);
   expect(requests[0].path).toBe("/api/v1/workspace/clients");
@@ -356,12 +358,13 @@ test("representative can extend then archive a client without publishing Xray, a
   await page.getByLabel("Password").fill("test-private-password-for-lab");
   await page.getByRole("button", { name: "Sign in" }).click();
   await expect(page.getByText("Scoped to your representative account.")).toBeVisible();
-  await page.getByLabel("Client ID", { exact: false }).first().fill("test-lifecycle-user");
+  await page.getByText("Advanced identity",{exact:true}).click();
+  await page.getByLabel("Client ID (optional)", { exact: true }).fill("test-lifecycle-user");
   await page.getByLabel("Client name").fill("Lifecycle test");
-  await page.getByLabel("Plan type").selectOption("unlimited");
+  await page.locator(".client-create-flow").getByLabel("Plan",{exact:true}).selectOption("unlimited");
   await page.getByLabel("Duration (days)").fill("30");
-  await page.getByLabel("IP/User slots (0 = unlimited for volume)").fill("5");
-  await page.getByRole("button", { name: "Create pending client" }).click();
+  await page.getByLabel("IP limit",{exact:true}).fill("5");
+  await page.getByRole("button", { name: "Create client", exact:true }).click();
   await expect(page.locator(".clients-explorer-row").filter({ hasText: "test-lifecycle-user" }).getByText("Lifecycle test")).toBeVisible();
   await page.getByRole("button", { name: "Manage", exact: true }).click();
   await page.getByLabel("Additional days").fill("30");
@@ -403,16 +406,20 @@ test("owner moves only same-representative clients through safe picker then remo
  await page.getByLabel("Password").fill("test-private-password-for-lab");
  await page.getByRole("button",{name:"Sign in"}).click();
 
- const create=page.getByRole("heading",{name:"Create client record"}).locator("..");
- await create.getByLabel("Client ID").fill("owner-isolated");
+ const create=page.getByRole("heading",{name:"Create client",exact:true}).locator("..");
+ await create.getByRole("checkbox",{name:"Create and activate"}).uncheck();
+ await create.getByText("Advanced identity",{exact:true}).click();
+ await create.getByLabel("Client ID (optional)",{exact:true}).fill("owner-isolated");
  await create.getByLabel("Client name").fill("Owner only");
- await create.getByRole("button",{name:"Create pending client"}).click();
+ await create.getByRole("button",{name:"Create client",exact:true}).click();
  await expect(page.locator(".clients-explorer-row").filter({hasText:"owner-isolated"}).getByText("Owner only")).toBeVisible();
 
- await create.getByLabel("Client ID").fill("rep-isolated");
+ await create.getByRole("button",{name:"Create another client"}).click();
+ await create.getByText("Advanced identity",{exact:true}).click();
+ await create.getByLabel("Client ID (optional)",{exact:true}).fill("rep-isolated");
  await create.getByLabel("Client name").fill("Rep selected");
- await create.getByLabel("Representative ID").selectOption("rep-a");
- await create.getByRole("button",{name:"Create pending client"}).click();
+ await create.getByLabel("Account owner").selectOption("rep-a");
+ await create.getByRole("button",{name:"Create client",exact:true}).click();
  await expect(page.locator(".clients-explorer-row").filter({hasText:"rep-isolated"}).getByText("Rep selected")).toBeVisible();
  await page.goto("/groups");
  const groupForm=page.getByRole("heading",{name:"Create group"}).locator("..");
@@ -530,14 +537,15 @@ test("client plan quick presets match HUB debit and never submit until represent
  await page.getByLabel("Username").fill("rep-a");
  await page.getByLabel("Password").fill("test-private-password-for-lab");
  await page.getByRole("button",{name:"Sign in"}).click();
- const form=page.getByRole("heading",{name:"Create client record"}).locator("..");
+ const form=page.getByRole("heading",{name:"Create client",exact:true}).locator("..");
+ await form.getByRole("button",{name:"Quick presets"}).click();
  const builder=page.getByRole("region",{name:"Plan builder and credit preview"});
  await expect(builder.getByText("10 GB volume credit",{exact:true})).toBeVisible();
  await builder.getByRole("button",{name:"Unlimited IPs"}).click();
- await expect(form.getByLabel("IP/User slots (0 = unlimited for volume)")).toHaveValue("0");
- await form.getByLabel("Plan type").selectOption("unlimited");
+ await expect(form.getByLabel("IP limit",{exact:true})).toHaveValue("0");
+ await form.getByLabel("Plan",{exact:true}).selectOption("unlimited");
  await expect(builder.getByRole("button",{name:"Unlimited IPs"})).toHaveCount(0);
- await expect(builder.getByText("Enter valid duration, user limit and volume to calculate an estimate.")).toBeVisible();
+ await expect(form.getByLabel("IP limit",{exact:true})).toHaveValue("1");
  await builder.getByRole("button",{name:"60 days",exact:true}).click();
  await builder.getByRole("button",{name:"5",exact:true}).click();
  await expect(builder.getByText("10 unlimited units",{exact:true})).toBeVisible();
@@ -551,10 +559,11 @@ test("client plan quick presets match HUB debit and never submit until represent
  expect(requests).toHaveLength(0);
  await builder.getByRole("button",{name:"60 days",exact:true}).click();
  await builder.getByRole("button",{name:"5",exact:true}).click();
- await form.getByLabel("Client ID").fill("rep-test-plan-v3");
+ await form.getByText("Advanced identity",{exact:true}).click();
+ await form.getByLabel("Client ID (optional)",{exact:true}).fill("rep-test-plan-v3");
  await form.getByLabel("Client name").fill("Custom name");
- await form.getByRole("button",{name:"Create pending client"}).click();
- await expect(page.getByRole("status").filter({hasText:"Saved in private PRO database"})).toBeVisible();
+ await form.getByRole("button",{name:"Create client",exact:true}).click();
+ await expect(page.getByRole("status").filter({hasText:"Account saved; awaiting owner activation."})).toBeVisible();
  expect(requests).toHaveLength(1);
  const payload=requests[0].body as Record<string,unknown>;
  expect(payload).toMatchObject({client_id:"rep-test-plan-v3",name:"Custom name",
@@ -621,6 +630,7 @@ test("320px Persian sale presets and current-page client status filters avoid fa
  await page.getByLabel("Password").fill("test-private-password-for-lab");
  await page.getByRole("button",{name:"Sign in"}).click();
  await page.getByRole("button",{name:"Switch language"}).click();
+ await page.getByRole("button",{name:"مقادیر آماده",exact:true}).click();
  const preview=page.getByRole("region",{name:"Plan builder and credit preview"});
  await expect(preview.getByRole("heading",{name:"ساخت سریع پلن"})).toBeVisible();
  await preview.getByRole("button",{name:"90 روز"}).click();
@@ -678,11 +688,13 @@ test("owner can search/filter across representatives without cross-representativ
  await page.getByLabel("Username").fill("proowner");
  await page.getByLabel("Password").fill("test-private-password-for-lab");
  await page.getByRole("button",{name:"Sign in"}).click();
- const form=page.getByRole("heading",{name:"Create client record"}).locator("..");
- await form.getByLabel("Client ID").fill("other-qa-customer");
+ const form=page.getByRole("heading",{name:"Create client",exact:true}).locator("..");
+ await form.getByText("Advanced identity",{exact:true}).click();
+ await form.getByLabel("Client ID (optional)",{exact:true}).fill("other-qa-customer");
  await form.getByLabel("Client name").fill("Remote verified customer");
- await form.getByLabel("Representative ID").selectOption("rep-a");
- await form.getByRole("button",{name:"Create pending client"}).click();
+ await form.getByLabel("Account owner").selectOption("rep-a");
+ await form.getByRole("checkbox",{name:"Create and activate"}).uncheck();
+ await form.getByRole("button",{name:"Create client",exact:true}).click();
  const list=page.getByRole("region",{name:"Client directory"});
  await expect(list.getByText("Matches: 59")).toBeVisible();
  await list.getByLabel("Representative ID (owner, optional)").fill("rep-a");

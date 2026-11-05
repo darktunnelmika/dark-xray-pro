@@ -1,7 +1,6 @@
 import type { BusinessModel } from "./useBusinessWorkspace";
-import { Users } from "lucide-react";
-import { uid, gb } from "./shared";
-import ClientPlanWorkbench from "./ClientPlanWorkbench";
+import ClientCreateFlow from "./ClientCreateFlow";
+import { gb } from "./shared";
 import ClientListExplorer from "./ClientListExplorer";
 import ClientUsage from "../ClientUsage";
 import ClientProfileEditor from "./ClientProfileEditor";
@@ -9,33 +8,14 @@ import ClientInboundSubscription from "./ClientInboundSubscription";
 import { businessGranted } from "./permissionsV9";
 import { ClientVolumeRefund } from "./VolumeRefunds";
 export default function Clients({ model }: { model: BusinessModel }) {
-  const { t, session, language, actionBusy, refreshKey, reps, clients, clientOps, clientOpsOffset, setClientOpsOffset, clientId, setClientId, clientName, setClientName, clientRep, setClientRep, clientKind, setClientKind, clientDuration, setClientDuration, clientIPs, setClientIPs, clientVolume, setClientVolume, lifeClientID, setLifeClientID, lifeDays, setLifeDays, lifeVolumeGB, setLifeVolumeGB, lifeReason, setLifeReason, lifeAction, setLifeAction, lifeStateReason, setLifeStateReason, createClient, extendExistingClient, changeExistingClientState } = model;
+  const { t, session, language, actionBusy, refreshKey, clients, clientOps, clientOpsOffset, setClientOpsOffset, lifeClientID, setLifeClientID, lifeDays, setLifeDays, lifeVolumeGB, setLifeVolumeGB, lifeReason, setLifeReason, lifeAction, setLifeAction, lifeStateReason, setLifeStateReason, extendExistingClient, changeExistingClientState } = model;
   const canCreate=businessGranted(session.user,"create_clients");
   const canRenew=businessGranted(session.user,"renew_clients");
   const canManage=businessGranted(session.user,"manage_clients");
   const canEdit=businessGranted(session.user,"edit_clients");
   const canViewFinance=businessGranted(session.user,"view_finance");
   return <>
-      {canCreate && <form className="business-panel business-client-form" onSubmit={(e) => { void createClient(e); }}>
-        <h3><Users size={17}/>{t.createClient}</h3>
-        <div className="business-fields">
-          <label>{t.clientId}<div className="business-inline"><input value={clientId} onChange={(e) => setClientId(e.target.value)} required/>
-            <button type="button" onClick={() => setClientId(uid())}>Random</button></div></label>
-          <label>{t.clientName}<input value={clientName} onChange={(e) => setClientName(e.target.value)} required/></label>
-          {session.user.role === "owner" && <label>{t.repId}<select value={clientRep} onChange={(e) => setClientRep(e.target.value)}>
-            <option value="owner">owner</option>
-            {reps?.filter((r) => r.kind === "representative").map((r) => <option key={r.id} value={r.id}>{r.display_name}</option>)}
-          </select></label>}
-          <label>{t.plan}<select value={clientKind} onChange={(e) => setClientKind(e.target.value as "volume" | "unlimited")}>
-            <option value="volume">{t.volumePlan}</option><option value="unlimited">{t.unlimitedPlan}</option></select></label>
-          <label>{t.duration}<input type="number" min={1} max={3650} step={1} value={clientDuration} onChange={(e) => setClientDuration(e.target.value)} required/></label>
-          <label>{t.slots}<input type="number" min={clientKind === "unlimited" ? 1 : 0} max={1000} step={1} value={clientIPs} onChange={(e) => setClientIPs(e.target.value)} required/></label>
-          {clientKind === "volume" && <label>{t.volumeGB}<input type="number" step="any" min="0.01" value={clientVolume} onChange={(e) => setClientVolume(e.target.value)} required/></label>}
-        </div>
-        <ClientPlanWorkbench model={model}/>
-        <p className="business-warning">{t.pending}</p>
-        <button type="submit" disabled={actionBusy}>{t.saveClient}</button>
-      </form>}
+      {canCreate && <ClientCreateFlow model={model}/>}
       <ClientListExplorer model={model}/>
       <div className="business-panel">
         <h3>{t.clientLifecycle}</h3>
