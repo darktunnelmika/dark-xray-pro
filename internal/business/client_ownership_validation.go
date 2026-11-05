@@ -40,7 +40,11 @@ func validateOwnershipData(ctx context.Context, db *sql.DB) error {
 			return ErrUnavailable
 		}
 		for _, id := range ids {
-			c, e := readClient(ctx, tx, id)
+			// Ownership lineage needs only stable identity fields. Historical
+			// snapshots may predate optional client contact tables; validation
+			// must never join those tables or migrate the archive.
+			var c Client
+			e := tx.QueryRowContext(ctx, `SELECT id,uuid,representative_id FROM clients WHERE id=?`, id).Scan(&c.ID, &c.UUID, &c.RepresentativeID)
 			if e != nil {
 				return ErrUnavailable
 			}

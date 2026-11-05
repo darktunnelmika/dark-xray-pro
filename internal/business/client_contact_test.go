@@ -174,3 +174,31 @@ func TestClientContactBackupReadsPriorSchemaWithoutMigration(t *testing.T) {
 		t.Fatal("old snapshot was migrated")
 	}
 }
+
+// Archived ownership histories predate the optional contact extension.
+func TestClientContactPriorBackupWithOwnershipHistory(t *testing.T) {
+	ctx := context.Background()
+	f := ownershipSetup(t)
+	c := ownershipNew(t, f, "prior-contact-backup", false)
+	ownershipMove(t, f, "prior-contact-ownership-0001", ownershipIntent(c.ID))
+	if e := f.s.Close(); e != nil {
+		t.Fatal(e)
+	}
+	mutateOfflineFixture(t, f.path, "DROP TABLE client_contact_events_v1", "DROP TABLE client_contacts_v1")
+	before, e := os.ReadFile(f.path)
+	if e != nil {
+		t.Fatal(e)
+	}
+	result, e := ValidateOfflineBackup(ctx, f.path)
+	if e != nil || result.TableCounts["client_ownership_origins_v1"] != 1 || result.TableCounts["client_ownership_entries_v1"] != 1 {
+		t.Fatal("prior backup with ownership history rejected", result, e)
+	}
+	after, e := os.ReadFile(f.path)
+	if e != nil || !bytes.Equal(before, after) {
+		t.Fatal("prior backup was modified", e)
+	}
+	mutateOfflineFixture(t, f.path, "UPDATE clients SET representative_id='rep-third' WHERE id='prior-contact-backup'")
+	if _, e = ValidateOfflineBackup(ctx, f.path); !errors.Is(e, ErrOfflineBackupInvalid) {
+		t.Fatal("contradictory legacy ownership accepted", e)
+	}
+}
