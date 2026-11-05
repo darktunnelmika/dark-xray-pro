@@ -144,7 +144,7 @@ func TestManagedInboundSubscriptionProjectionTokensAndWithdrawal(t *testing.T) {
 	}
 }
 
-func TestManagedInboundSubscriptionRejectsStaleHealthAndQuota(t *testing.T) {
+func TestManagedInboundSubscriptionPreservesStaleRoutesAndRejectsQuota(t *testing.T) {
 	f := newExecutionFixture(t)
 	ctx := context.Background()
 	f.command(t, "managed-subscription-health-0001", "activate")
@@ -160,8 +160,8 @@ func TestManagedInboundSubscriptionRejectsStaleHealthAndQuota(t *testing.T) {
 	if _, err = f.s.db.Exec(`UPDATE inbound_execution_nodes SET observation_enc=? WHERE node_id=?`, enc, b.NodeID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = f.s.ProjectInboundExecutionSubscription(ctx, f.key, "owner", f.client.ID, "uri"); !errors.Is(err, ErrConflict) {
-		t.Fatal("stale observation served", err)
+	if doc, err := f.s.ProjectInboundExecutionSubscription(ctx, f.key, "owner", f.client.ID, "uri"); err != nil || doc.PathVerified || !strings.Contains(string(doc.Content), f.client.UUID) {
+		t.Fatal("stale route lost or falsely verified", err)
 	}
 	o = executionObservation(b, e)
 	if err = f.s.ObserveInboundExecution(ctx, f.key, o); err != nil {
