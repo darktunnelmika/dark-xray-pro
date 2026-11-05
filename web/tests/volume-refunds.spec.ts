@@ -34,6 +34,7 @@ async function fixture(page: Page, options: { unlimited?: boolean; state?: strin
 async function openClient(page: Page) {
   await page.goto("/clients");
   await page.getByRole("region", { name: "Client directory" }).locator(".clients-explorer-row").filter({ hasText: "refund-client" }).getByRole("button", { name: "Manage", exact: true }).click();
+  await page.getByRole("button", { name: "Renew", exact: true }).click();
   return page.getByRole("region", { name: "Client volume return" });
 }
 test("final usage waiting becomes verified credit without a browser money mutation", async ({ page }) => {

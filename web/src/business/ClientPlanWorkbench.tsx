@@ -30,7 +30,7 @@ const words = {
   },
 } as const;
 
-export default function ClientPlanWorkbench({model}: {model:BusinessModel}) {
+export default function ClientPlanWorkbench({model,compact=false}: {model:BusinessModel;compact?:boolean}) {
   const {language, clientKind, clientDuration, setClientDuration, clientIPs, setClientIPs,
     clientVolume, setClientVolume, session, clientRep, reps, me, actionBusy} = model;
   const t=words[language];
@@ -54,6 +54,7 @@ export default function ClientPlanWorkbench({model}: {model:BusinessModel}) {
     ?String(costUnits?.toLocaleString("en-US"))+" "+t.units
     :gb(costVolume??NaN)+" "+t.vol;
   return <section className="sales-workbench" aria-label="Plan builder and credit preview">
+    {!compact&&<>
     <div className="sales-workbench-heading">
       <div><span className="sales-workbench-kicker"><ShieldCheck size={14}/>NEW PRO / OWNER & REPRESENTATIVE</span>
       <h4>{t.heading}</h4><p>{t.intro}</p></div>
@@ -78,6 +79,7 @@ export default function ClientPlanWorkbench({model}: {model:BusinessModel}) {
           aria-pressed={clientVolume===String(n)} onClick={()=>setClientVolume(String(n))}>{n} {t.gigabytes}</button>)}</div>
       </fieldset>}
     </div>
+    </>}
     <div className="sales-workbench-cost" aria-live="polite">
       <div className="sales-workbench-total">
         <span>{t.estimated}</span><strong dir="auto">{displayCost}</strong>

@@ -17,7 +17,7 @@ func clientSearchParams(r *http.Request) (business.ClientSearch, error) {
 			return opt, business.ErrInvalid
 		}
 		switch key {
-		case "limit", "offset", "representative_id", "q", "state", "plan", "sort", "group_id", "origin":
+		case "limit", "offset", "representative_id", "q", "state", "plan", "sort", "group_id", "origin", "inbound_id":
 		default:
 			return opt, business.ErrInvalid
 		}
@@ -38,6 +38,13 @@ func clientSearchParams(r *http.Request) (business.ClientSearch, error) {
 	}
 	opt.RepresentativeID = q.Get("representative_id")
 	opt.GroupID = q.Get("group_id")
+	if v, ok := q["inbound_id"]; ok {
+		n, e := strconv.ParseUint(v[0], 10, 53)
+		if e != nil || n == 0 || strconv.FormatUint(n, 10) != v[0] {
+			return opt, business.ErrInvalid
+		}
+		opt.InboundID = n
+	}
 	// The public product surface uses a neutral compatibility label. The
 	// historical database classification remains private so existing records
 	// are neither renamed nor silently reclassified.

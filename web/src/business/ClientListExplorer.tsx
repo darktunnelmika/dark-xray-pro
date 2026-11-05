@@ -1,3 +1,4 @@
+import ClientInboundFilter from "./ClientInboundFilter";
 import { useEffect, useRef, useState } from "react";
 import { CalendarDays, Search, ShieldCheck, UserRoundCheck, Users, CheckSquare, Archive, AlertTriangle } from "lucide-react";
 import { mutation } from "../session";
@@ -13,7 +14,7 @@ type Filter = "all" | "pending" | "disabled" | "expired" | "archived" | "other";
 const words = {
   en: {
     title:"Client directory", subtitle:"Search, filter and sort across every client available to your account. Results are server-scoped and paged.",
-    search:"Search all clients by name or ID", status:"Status", all:"All", pending:"Pending Node Apply",
+    search:"Search by name, ID, Telegram or note", status:"Status", all:"All", pending:"Pending Node Apply",
     disabled:"Disabled", expired:"Expired", archived:"Archived", other:"Other / unknown",
     total:"Loaded", noResults:"No matches on this page", empty:"No clients returned for this page",
     load:"Loading authenticated client records", page:"Page", previous:"Previous",next:"Next",
@@ -40,7 +41,7 @@ const words = {
   },
   fa: {
     title:"فهرست کلاینت‌ها",subtitle:"جست‌وجو، فیلتر و مرتب‌سازی سراسری تمام کلاینت‌های مجاز حساب، با صفحه‌بندی واقعی سمت سرور.",
-    search:"جست‌وجوی سراسری نام یا شناسه",status:"وضعیت",all:"همه",pending:"در انتظار اعمال نود",
+    search:"جست‌وجوی نام، شناسه، تلگرام یا یادداشت",status:"وضعیت",all:"همه",pending:"در انتظار اعمال نود",
     disabled:"غیرفعال",expired:"منقضی",archived:"آرشیوشده",other:"سایر / نامشخص",
     total:"بارگذاری‌شده",noResults:"در این صفحه نتیجه‌ای وجود ندارد",empty:"در این صفحه کلاینتی ثبت نشده",
     load:"در حال دریافت کلاینت‌های معتبر",page:"صفحه",previous:"قبلی",next:"بعدی",
@@ -75,16 +76,18 @@ function clientState(client:Client,now:number): Filter {
   return "other";
 }
 
-export default function ClientListExplorer({model}: {model:BusinessModel}) {
+export default function ClientListExplorer({model,onCreate}: {model:BusinessModel;onCreate?:()=>void}) {
   const { clients, clientOffset, setClientOffset, lifeClientID, setLifeClientID, language, t, session,
     clientLimit, changeClientLimit, clientTotal, clientHasMore, clientSearchDraft,setClientSearchDraft,
-    clientSearch,clientStateFilter,clientPlanFilter,clientSort,clientRepFilter,clientGroupFilter,clientOriginFilter,changeClientFilters,actionBusy,
+    clientSearch,clientStateFilter,clientPlanFilter,clientSort,clientRepFilter,clientGroupFilter,clientOriginFilter,clientInboundFilter,changeClientFilters,actionBusy,
     runAction,setNotice }=model;
   const copy=words[language];
   const canManageBulk=businessGranted(session.user,"manage_clients");
   const canRenewBulk=businessGranted(session.user,"renew_clients");
   const canTransfer=session.user.role==="owner" && model.me?.capabilities?.client_ownership_v1===true;
+  const [bulkMode,setBulkMode]=useState(()=>session.user.role==="owner"&&!!loadOwnershipPending(session.user.id));
   const [selected,setSelected]=useState<string[]>([]);
+  const [filtersOpen,setFiltersOpen]=useState(false);
   const [extraFiltersOpen,setExtraFiltersOpen]=useState(false);
   const [bulkAction,setBulkAction]=useState<"disable"|"enable"|"archive"|"extend"|"transfer">(
     session.user.role==="owner"&&loadOwnershipPending(session.user.id)?"transfer":canManageBulk?"disable":"extend");
@@ -92,7 +95,7 @@ export default function ClientListExplorer({model}: {model:BusinessModel}) {
   const pendingBulk=useRef<{key:string;id:string}|null>(null);
   useEffect(()=>{
     setSelected([]); pendingBulk.current=null;
-  },[session.user.id,clientOffset,clientLimit,clientSearch,clientStateFilter,clientPlanFilter,clientSort,clientRepFilter,clientGroupFilter,clientOriginFilter]);
+  },[session.user.id,clientOffset,clientLimit,clientSearch,clientStateFilter,clientPlanFilter,clientSort,clientRepFilter,clientGroupFilter,clientOriginFilter,clientInboundFilter]);
   const now=Date.now()/1000;
   // The server owns the filtered result set; no client-side partial-page
   // pretending to offer a global search. Debounce hides old matches.
@@ -136,6 +139,7 @@ export default function ClientListExplorer({model}: {model:BusinessModel}) {
     <header className="clients-explorer-heading">
       <span className="clients-explorer-icon"><Users size={19}/></span>
       <div><h3>{copy.title}</h3><p>{copy.subtitle}</p></div>
+      {onCreate&&<button type="button" className="clients-create-button" aria-haspopup="dialog" onClick={onCreate}>{language==="fa"?"ایجاد کلاینت":"Create client"}</button>}
       <span className="clients-explorer-count">{copy.matches}: {total}</span>
     </header>
     <div className="clients-explorer-filters">
@@ -148,6 +152,10 @@ export default function ClientListExplorer({model}: {model:BusinessModel}) {
         {(["all","pending","disabled","expired","archived","other"] as Filter[])
           .map(k=><option key={k} value={k}>{copy[k]}</option>)}
       </select></label>
+    </div>
+    <details className="clients-filter-options" onToggle={e=>setFiltersOpen(e.currentTarget.open)}><summary>{language==="fa"?"فیلترهای بیشتر":"More filters"}{clientInboundFilter?" •":""}</summary>
+    <div className="clients-explorer-filters">
+      {filtersOpen&&<ClientInboundFilter model={model}/>}
       <label>{copy.plan}<select aria-label={copy.plan} value={clientPlanFilter}
         disabled={actionBusy} onChange={e=>changeClientFilters("plan",e.target.value)}>
         <option value="all">{copy.allPlans}</option>
@@ -171,6 +179,7 @@ export default function ClientListExplorer({model}: {model:BusinessModel}) {
           onChange={e=>changeClientFilters("rep",e.target.value.trim())}
           placeholder={copy.repFilter} disabled={actionBusy}/></label>}
     </div>
+    </details>
     <details className="clients-explorer-extra-filters" onToggle={e=>setExtraFiltersOpen(e.currentTarget.open)}>
       <summary>{copy.moreFilters}{clientGroupFilter||clientOriginFilter!=="all"?" •":""}</summary>
       {extraFiltersOpen && <div className="clients-explorer-filters">
@@ -186,7 +195,8 @@ export default function ClientListExplorer({model}: {model:BusinessModel}) {
           onChange={id=>changeClientFilters("group",id)} />
       </div>}
     </details>
-    {(canManageBulk||canRenewBulk) && <div className="clients-bulk" aria-label="Bulk client actions">
+    {(canManageBulk||canRenewBulk) && <button type="button" className="clients-selection-toggle" aria-expanded={bulkMode} disabled={actionBusy} onClick={()=>{setBulkMode(x=>!x);}}>{bulkMode?(language==="fa"?"بستن انتخاب گروهی":"Close selection"):(language==="fa"?"انتخاب چند کلاینت":"Select multiple clients")}{selected.length>0?` · ${selected.length}`:""}</button>}
+    {(canManageBulk||canRenewBulk) && <div hidden={!bulkMode} className="clients-bulk" aria-label="Bulk client actions">
       <div className="clients-bulk-header">
         <strong><CheckSquare size={16}/>{copy.bulkTitle}</strong>
         <span>{allowedSelected.length} {copy.selectedCount}</span>
@@ -232,16 +242,16 @@ export default function ClientListExplorer({model}: {model:BusinessModel}) {
           :c.plan_kind==="volume"?copy.volume:copy.other;
         return <article className={"clients-explorer-row"+(c.id===lifeClientID?" is-selected":"")} key={c.id}>
           <div className="clients-explorer-main">
-            <label className="clients-bulk-checkbox">
+            {bulkMode&&(canManageBulk||canRenewBulk)&&<label className="clients-bulk-checkbox">
               <input type="checkbox" aria-label={copy.selectClient+" "+c.id}
                 checked={allowedSelected.includes(c.id)}
                 disabled={!canSelect||(c.archived&&!transferMode)||
                   (allowedSelected.length>=50&&!allowedSelected.includes(c.id))}
                 onChange={e=>toggle(c.id,e.target.checked)}/>
-            </label>
+            </label>}
             <div className="clients-explorer-identity">
               <span className="clients-explorer-avatar"><UserRoundCheck size={16}/></span>
-              <div><strong>{c.name}</strong><small dir="auto">{c.id}</small></div>
+              <div><strong>{c.name}</strong><small dir="auto">{c.id}</small>{c.contact?.telegram_username&&<small dir="ltr">@{c.contact.telegram_username}</small>}{c.contact?.telegram_id&&<small dir="ltr">TG: {c.contact.telegram_id}</small>}</div>
             </div>
             <span className={"clients-explorer-status is-"+status}>{copy[status]}</span>
           </div>

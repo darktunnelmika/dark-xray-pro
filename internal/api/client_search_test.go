@@ -57,6 +57,24 @@ func TestOwnerAndRepresentativeGlobalClientSearchIsolation(t *testing.T) {
 		}
 		return r.Code, data
 	}
+	if _, err := s.business.CreateInbound(ctx, make([]byte, 32), business.InboundInput{ID: 10, Name: "Directory service", Transport: "tcp", RealityTarget: "www.example.org:443", ServerNames: []string{"www.example.org"}, ShortIDs: []string{"aa11"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.business.BindInboundClients(ctx, 10, []string{"secret-a", "secret-b"}, true); err != nil {
+		t.Fatal(err)
+	}
+	if code, _ := read(nil, "/api/v1/workspace/client-inbound-options"); code != 401 {
+		t.Fatalf("anonymous options %d", code)
+	}
+	if code, r := read(repCookie, "/api/v1/workspace/client-inbound-options"); code != 200 || r["representative_id"] != "rep-a" || len(r["inbounds"].([]any)) != 1 || r["inbounds"].([]any)[0].(map[string]any)["clients"] != float64(1) {
+		t.Fatalf("scoped options %d %+v", code, r)
+	}
+	if code, _ := read(repCookie, "/api/v1/workspace/client-inbound-options?representative_id=rep-b"); code != 422 {
+		t.Fatalf("scope override %d", code)
+	}
+	if code, r := read(repCookie, "/api/v1/workspace/clients?inbound_id=10"); code != 200 || r["inbound_id"] != float64(10) || r["total"] != float64(1) || r["clients"].([]any)[0].(map[string]any)["id"] != "secret-a" {
+		t.Fatalf("scoped filter %d %+v", code, r)
+	}
 	if code, _ := read(nil, "/api/v1/workspace/clients?q=private&limit=50"); code != 401 {
 		t.Fatalf("anonymous enumerated clients: %d", code)
 	}

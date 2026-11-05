@@ -140,8 +140,10 @@ async function fixture(page: Page, options: Options = {}) {
 
 const panel = (page: Page) => page.getByRole("region", { name: "Client inbound subscription" });
 async function selectClient(page: Page, id = alpha, persian = false): Promise<Locator> {
+  const close=page.getByRole("button",{name:persian?"بستن جزئیات":"Close details",exact:true});if(await close.isVisible())await close.click();
   await page.getByRole("region", { name: "Client directory" }).locator(".clients-explorer-row")
     .filter({ hasText: id }).getByRole("button", { name: persian ? "مدیریت" : "Manage", exact: true }).click();
+  await page.getByRole("button",{name:persian?"کانفیگ و QR":"Configuration & QR",exact:true}).click();
   const section = panel(page);
   await expect(section).toBeVisible();
   return section;
@@ -239,7 +241,7 @@ test("managed subscription workspace refresh invalidates an outstanding reveal",
   await section.getByRole("button", { name: "Show link", exact: true }).click();
   await expect.poll(() => f.calls.filter(call => call.path.endsWith("/reveal")).length).toBe(1);
   const reads = f.calls.filter(call => call.method === "GET").length;
-  await page.getByRole("region", { name: "Business workspace" }).locator(".business-topbar-actions").getByRole("button", { name: "Refresh", exact: true }).click();
+  await page.getByRole("button", { name: "Refresh client data", exact: true }).click();
   await expect.poll(() => f.calls.filter(call => call.method === "GET").length).toBeGreaterThan(reads);
   f.releaseReveal();
   await expect(section.getByRole("button", { name: "Show link", exact: true })).toBeEnabled();

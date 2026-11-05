@@ -13,6 +13,7 @@ func (s *Server) attachClientProfileEdits(mux *http.ServeMux) {
 	if s.business == nil {
 		return
 	}
+	s.attachClientContacts(mux)
 	authorizeClient := func(w http.ResponseWriter, r *http.Request, mutate bool) (string, bool) {
 		session, ok := s.authorizeBrowser(w, r, mutate, false)
 		if !ok {

@@ -98,7 +98,8 @@ location / {{ return 403; }}
 
                 rep = "/api/v1/workspace/representatives/Rep.test_01-2"
                 seller = rep + "/sellers/Seller.test_01-2"
-                routes = ((rep + "/seller-permission", {"GET", "HEAD", "POST"}),
+                routes = (("/api/v1/workspace/client-inbound-options", {"GET", "HEAD"}),
+                          (rep + "/seller-permission", {"GET", "HEAD", "POST"}),
                           (rep + "/sellers", {"GET", "HEAD", "POST"}),
                           (seller, {"GET", "HEAD"}),
                           (seller + "/quota", {"POST"}),
@@ -107,6 +108,7 @@ location / {{ return 403; }}
                           (seller + "/catalog/Product.test_01-2/clients", {"POST"}),
                           (seller + "/clients/Client.test_01-2/extend", {"POST"}),
                           ("/api/v1/workspace/clients/Client.test_01-2/volume-refund", {"GET", "HEAD"}),
+                          ("/api/v1/workspace/clients/Client.test_01-2/contact", {"POST"}),
                           ("/api/v1/workspace/volume-refunds", {"GET", "HEAD"}),
                           ("/api/v1/workspace/clients/ownership/quote", {"POST"}),
                           ("/api/v1/workspace/clients/ownership/commit", {"POST"}),
@@ -134,7 +136,7 @@ location / {{ return 403; }}
                     check(path, allowed)
                     check(path + "/extra/unknown", set())
                     check(path + "/", set())
-                for path in (seller + "/clients", seller + "/clients/a/extend", seller + "/catalog/a/clients"):
+                for path in (seller + "/clients", seller + "/clients/a/extend", seller + "/catalog/a/clients", "/api/v1/workspace/clients/a/contact"):
                     before = len(Backend.seen)
                     assert request(port, path, "POST", b"x" * 4097) == 413
                     assert len(Backend.seen) == before, "oversized order reached backend"
@@ -156,6 +158,7 @@ location / {{ return 403; }}
                     check("/api/v1/workspace/representatives/" + bad + "/sellers/a/catalog/a/clients", set())
                     check("/api/v1/workspace/representatives/" + bad + "/sellers/a/clients", set())
                     check("/api/v1/workspace/clients/" + bad + "/volume-refund", set())
+                    check("/api/v1/workspace/clients/" + bad + "/contact", set())
                 for path in ("/api/v1/admin/nodes", "/api/v1/agent/config",
                              "/api/v1/agent/volume-refunds", "/api/v1/admin/volume-refunds",
                              "/api/v1/workspace/volume-refund", "/api/v1/workspace/volume-refunds/enable",

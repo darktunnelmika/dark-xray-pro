@@ -53,7 +53,9 @@ test("string-encoded counters above 2^53 remain exact and fit 320px Persian",asy
  await fixture(page);await page.setViewportSize({width:320,height:780});
  await page.route("**/api/v1/workspace/clients/usage-client/usage",r=>r.fulfill({json:envelope({...known,uplink_bytes:"9007199254740993",downlink_bytes:"1",total_bytes:"9007199254740994",limit_bytes:"10000000000000000",exhausted:false,eligible:true})}));
  const card=await openUsage(page,true);await expect(card.locator("dl")).toContainText("9,007,199,254,740,993 bytes");
+ await page.getByRole("button",{name:"Close details",exact:true}).click();
  await page.getByRole("button",{name:"Switch language"}).click();
+ await page.getByRole("button",{name:"مدیریت",exact:true}).click();
  await expect(card.getByRole("heading",{name:"مصرف ثبت‌شدهٔ کلاینت"})).toBeVisible();
  await expect(card.getByRole("status")).toHaveText("مجاز فقط در دفتر سهمیه");
  expect(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth+2)).toBe(false);

@@ -134,8 +134,10 @@ async function fixture(page: Page, options: Options = {}) {
 
 const panel = (page: Page) => page.getByRole("region", { name: "Client LAB subscription" });
 async function selectClient(page: Page, id = alpha, persian = false): Promise<Locator> {
+  const close=page.getByRole("button",{name:persian?"بستن جزئیات":"Close details",exact:true});if(await close.isVisible())await close.click();
   await page.getByRole("region", { name: "Client directory" }).locator(".clients-explorer-row")
     .filter({ hasText: id }).getByRole("button", { name: persian ? "مدیریت" : "Manage", exact: true }).click();
+  await page.getByRole("button",{name:persian?"کانفیگ و QR":"Configuration & QR",exact:true}).click();
   const section = panel(page);
   await expect(section).toBeVisible();
   return section;
@@ -211,6 +213,7 @@ test("N18 hides secrets on client switch, hidden tab, and component unmount", as
   await page.evaluate(() => { Object.defineProperty(document, "hidden", { configurable: true, get: () => false }); });
   await section.getByRole("button", { name: "Show subscription URL", exact: true }).click();
   await expect(section.getByLabel("Subscription URL", { exact: true })).toBeVisible();
+  await page.getByRole("button",{name:"Close details",exact:true}).click();
   await page.getByRole("region", { name: "Client directory" }).getByRole("searchbox").fill("not-present");
   await expect(panel(page)).toHaveCount(0);
   await expect(page.getByLabel("Subscription URL", { exact: true })).toHaveCount(0);
@@ -239,7 +242,7 @@ test("N18 invalidates an in-flight reveal when the workspace refreshes metadata"
   await section.getByRole("button", { name: "Show subscription URL", exact: true }).click();
   await expect.poll(() => f.calls.filter(c => c.path.endsWith("/reveal")).length).toBe(1);
   const before = f.calls.filter(c => c.method === "GET").length;
-  await page.getByRole("region", { name: "Business workspace" }).getByRole("button", { name: "Refresh", exact: true }).click();
+  await page.getByRole("button", { name: "Refresh client data", exact: true }).click();
   await expect.poll(() => f.calls.filter(c => c.method === "GET").length).toBeGreaterThan(before);
   await expect(section.getByText("Subscription token active", { exact: true })).toBeVisible();
   f.releaseReveal();

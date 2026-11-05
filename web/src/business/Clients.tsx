@@ -1,3 +1,8 @@
+import ClientDialog from "./ClientDialog";
+import {useEffect,useRef,useState} from "react";
+import {createStorageKey,readCreateAttempt} from "./clientCreateDelivery";
+import "./Clients.css";
+import {ClientContactEditor} from "./ClientContact";
 import type { BusinessModel } from "./useBusinessWorkspace";
 import ClientCreateFlow from "./ClientCreateFlow";
 import { gb } from "./shared";
@@ -14,25 +19,32 @@ export default function Clients({ model }: { model: BusinessModel }) {
   const canManage=businessGranted(session.user,"manage_clients");
   const canEdit=businessGranted(session.user,"edit_clients");
   const canViewFinance=businessGranted(session.user,"view_finance");
+  const [creating,setCreating]=useState(()=>{try{return !!readCreateAttempt(sessionStorage.getItem(createStorageKey(session.user.id)),session.user.id);}catch{return false;}});
+  const fa=language==="fa";
+  const nextPanel=useRef<string|null>(null);
+  const [panel,setPanel]=useState("overview");
+  useEffect(()=>{setPanel(nextPanel.current??"overview");nextPanel.current=null;if(lifeClientID)setCreating(false);},[lifeClientID]);
+  const tabs=[['overview',fa?'وضعیت و مصرف':'Overview'],['delivery',fa?'کانفیگ و QR':'Configuration & QR'],['edit',fa?'مشخصات و تلگرام':'Details & Telegram'],...(canRenew?[['renew',fa?'تمدید':'Renew']]:[]),...(canManage?[['state',fa?'وضعیت حساب':'Account state']]:[])];
   return <>
-      {canCreate && <ClientCreateFlow model={model}/>}
-      <ClientListExplorer model={model}/>
-      <div className="business-panel">
-        <h3>{t.clientLifecycle}</h3>
-        <label>{t.chooseClient}
-          <select value={lifeClientID} onChange={(e) => setLifeClientID(e.target.value)}>
-            <option value="">{t.chooseClient}</option>
-            {clients?.map((c) => <option key={c.id} value={c.id} disabled={c.archived}>{c.name} ({c.id})</option>)}
-          </select>
-        </label>
-        <p className="business-warning">{t.safeLifecycle}</p>
-      </div>
+      {canCreate && <ClientDialog open={creating} onClose={()=>setCreating(false)} title={fa?"ایجاد کلاینت":"New client"} closeLabel={fa?"بازگشت به فهرست":"Back to client list"}><ClientCreateFlow model={model} onInspect={id=>{nextPanel.current="delivery";setPanel("delivery");setLifeClientID(id);setCreating(false);}}/></ClientDialog>}
+      <ClientListExplorer model={model} onCreate={canCreate&&!creating?()=>setCreating(true):undefined}/>
+      <ClientDialog onRefresh={model.reload} refreshLabel={fa?"تازه‌سازی اطلاعات":"Refresh client data"} open={!!lifeClientID} onClose={()=>setLifeClientID("")} title={clients?.find(c=>c.id===lifeClientID)?.name || lifeClientID || (fa?"کلاینت":"Client")} closeLabel={fa?"بستن جزئیات":"Close details"}>
+      <nav className="client-detail-tabs" aria-label={fa?"بخش‌های کلاینت":"Client sections"}>{tabs.map(([id,label])=><button type="button" key={id} aria-pressed={panel===id} onClick={()=>setPanel(id)}>{label}</button>)}</nav>
+      <div hidden={panel!=="overview"}>
       {lifeClientID && <ClientUsage key={session.user.id + ":" + lifeClientID} clientID={lifeClientID} language={language} refresh={refreshKey} />}
+      </div>
+      <div hidden={panel!=="renew"}>
       {canViewFinance && lifeClientID && <ClientVolumeRefund key={session.user.id + ":" + lifeClientID} clientID={lifeClientID} model={model}/>}
+      </div>
+      <div hidden={panel!=="delivery"}>
       {lifeClientID && <ClientInboundSubscription key={session.user.id + ":" + lifeClientID} clientID={lifeClientID} language={language} session={session} canManage={canManage} refresh={refreshKey}/>}
+      </div>
+      <div hidden={panel!=="edit"}>
+      {lifeClientID && <ClientContactEditor key={session.user.id+":"+lifeClientID} model={model} clientID={lifeClientID} canEdit={canEdit}/>}
       {canEdit && lifeClientID && <ClientProfileEditor key={session.user.id + ":" + lifeClientID} clientID={lifeClientID} model={model}/>}
-      <div className="business-form-grid">
-        {canRenew && <form className="business-panel" onSubmit={(e) => { void extendExistingClient(e); }}>
+      </div>
+      {lifeClientID && <div>
+        {canRenew && <form hidden={panel!=="renew"} className="business-panel" onSubmit={(e) => { void extendExistingClient(e); }}>
           <h3>{t.renew}</h3>
           <label>{t.extraDays}<input type="number" step="1" min="0" max="3650"
             value={lifeDays} onChange={(e) => setLifeDays(e.target.value)} required/></label>
@@ -41,7 +53,7 @@ export default function Clients({ model }: { model: BusinessModel }) {
           <label>{t.newClientReason}<input value={lifeReason} onChange={(e) => setLifeReason(e.target.value)} required/></label>
           <button type="submit" disabled={actionBusy || !lifeClientID}>{t.renew}</button>
         </form>}
-        {canManage && <form className="business-panel" onSubmit={(e) => { void changeExistingClientState(e); }}>
+        {canManage && <form hidden={panel!=="state"} className="business-panel" onSubmit={(e) => { void changeExistingClientState(e); }}>
           <h3>{t.stateAction}</h3>
           <label>{t.stateAction}<select value={lifeAction} onChange={(e) => setLifeAction(e.target.value as "disable" | "enable" | "archive")}>
             <option value="disable">{t.disable}</option><option value="enable">{t.enable}</option><option value="archive">{t.archive}</option>
@@ -49,9 +61,11 @@ export default function Clients({ model }: { model: BusinessModel }) {
           <label>{t.newClientReason}<input value={lifeStateReason} onChange={(e) => setLifeStateReason(e.target.value)} required/></label>
           <button type="submit" disabled={actionBusy || !lifeClientID}>{t.applyState}</button>
         </form>}
-      </div>
-      {canViewFinance && <div className="business-panel">
-        <h3>{t.clientOps}</h3>
+      </div>}
+      {lifeClientID&&model.notice&&<p className="business-notice" role="status">{model.notice}</p>}
+      </ClientDialog>
+      {canViewFinance && <details className="business-panel clients-history">
+        <summary>{t.clientOps}</summary>
         {clientOps && clientOps.length ? <div className="business-records">
           {clientOps.map((op) => <div key={op.event_id}>
             <strong>{op.kind} · {op.client_id}</strong>
@@ -62,6 +76,6 @@ export default function Clients({ model }: { model: BusinessModel }) {
           <button disabled={clientOpsOffset === 0} onClick={() => setClientOpsOffset((x) => Math.max(0, x - 50))}>{t.previous}</button>
           <button disabled={!clientOps || clientOps.length < 50} onClick={() => setClientOpsOffset((x) => x + 50)}>{t.next}</button>
         </div>
-      </div>}
+      </details>}
   </>;
 }

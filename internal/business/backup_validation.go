@@ -41,6 +41,8 @@ type backupSchemaObject [4]string
 
 func backupSchemaGroup(name string) string {
 	switch {
+	case strings.HasPrefix(name, "client_contact"):
+		return "client_contact"
 	case strings.HasPrefix(name, "telegram_bonus_"):
 		return "telegram_bonus"
 	case strings.HasPrefix(name, "telegram_commerce_"):
@@ -200,6 +202,12 @@ func validateOfflineBackupDB(ctx context.Context, db *sql.DB) (BackupValidation,
 	}
 	if err != nil || closeErr != nil || backupSchemaDigest(groups["base"]) != expectedBase {
 		return result, ErrOfflineBackupInvalid
+	}
+	if len(groups["client_contact"]) > 0 {
+		present, e := clientContactSchemaState(ctx, db)
+		if e != nil || !present || validateClientContacts(ctx, db) != nil {
+			return result, ErrOfflineBackupInvalid
+		}
 	}
 	if len(groups["promotion_time"]) > 0 && backupSchemaDigest(groups["promotion_time"]) != backupPromotionTimeSchemaFingerprint {
 		return result, ErrOfflineBackupInvalid
