@@ -50,10 +50,9 @@ func (s *Server) runVolumeRefunds(ctx context.Context, interval, budget time.Dur
 	x.started = true
 	x.mu.Unlock()
 	defer close(x.done)
-	tick := time.NewTicker(interval)
-	defer tick.Stop()
 	cursor := ""
 	failed := false
+	consecutiveFailures := 0
 	for {
 		if ctx.Err() != nil {
 			return
@@ -70,17 +69,61 @@ func (s *Server) runVolumeRefunds(ctx context.Context, interval, budget time.Dur
 				log.Print("PRO volume refund worker recovered")
 			}
 			failed = false
-		} else if ctx.Err() == nil && !failed {
-			// A failed read/write is never treated as zero usage or a successful
-			// refund. Avoid exposing identities or private accounting in logs.
-			log.Print("PRO volume refund worker could not verify a batch; retained receipts will be retried")
-			failed = true
+			consecutiveFailures = 0
+		} else if ctx.Err() == nil {
+			consecutiveFailures++
+			if !failed {
+				// A failed read/write is never treated as zero usage or a successful
+				// refund. Avoid exposing identities or private accounting in logs.
+				log.Print("PRO volume refund worker could not verify a batch; retained receipts will be retried")
+				failed = true
+			}
 		}
-		select {
-		case <-ctx.Done():
+		if !waitVolumeRefundRetry(ctx, volumeRefundRetryDelay(interval, consecutiveFailures)) {
 			return
-		case <-tick.C:
 		}
+	}
+}
+
+func volumeRefundRetryDelay(interval time.Duration, consecutiveFailures int) time.Duration {
+	if interval <= 0 {
+		return 0
+	}
+	multiplier := time.Duration(1)
+	switch consecutiveFailures {
+	case 1:
+		multiplier = 2
+	case 2:
+		multiplier = 4
+	case 3:
+		multiplier = 8
+	default:
+		if consecutiveFailures >= 4 {
+			multiplier = 12
+		}
+	}
+	const maxDuration = time.Duration(1<<63 - 1)
+	if interval > maxDuration/multiplier {
+		return maxDuration
+	}
+	return interval * multiplier
+}
+
+func waitVolumeRefundRetry(ctx context.Context, delay time.Duration) bool {
+	timer := time.NewTimer(delay)
+	defer func() {
+		if !timer.Stop() {
+			select {
+			case <-timer.C:
+			default:
+			}
+		}
+	}()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return true
 	}
 }
 
