@@ -1,0 +1,3 @@
+.client-services{display:grid;gap:.65rem}.client-services p{margin:0;overflow-wrap:anywhere}.client-services select{max-width:100%;min-width:0}.client-service-review{padding:.8rem;border:1px solid var(--border);border-radius:12px;display:grid;gap:.6rem}.client-directory-summary{display:flex;flex-wrap:wrap;gap:.35rem .9rem;font-size:.8rem;color:var(--sub);margin-top:.35rem}.client-directory-summary span{overflow-wrap:anywhere}
+
+.clients-explorer-details{min-width:0}

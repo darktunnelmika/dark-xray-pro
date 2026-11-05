@@ -1,3 +1,4 @@
+import ClientServices from "./ClientServices";
 import ClientDialog from "./ClientDialog";
 import {useEffect,useRef,useState} from "react";
 import {createStorageKey,readCreateAttempt} from "./clientCreateDelivery";
@@ -24,12 +25,13 @@ export default function Clients({ model }: { model: BusinessModel }) {
   const nextPanel=useRef<string|null>(null);
   const [panel,setPanel]=useState("overview");
   useEffect(()=>{setPanel(nextPanel.current??"overview");nextPanel.current=null;if(lifeClientID)setCreating(false);},[lifeClientID]);
-  const tabs=[['overview',fa?'وضعیت و مصرف':'Overview'],['delivery',fa?'کانفیگ و QR':'Configuration & QR'],['edit',fa?'مشخصات و تلگرام':'Details & Telegram'],...(canRenew?[['renew',fa?'تمدید':'Renew']]:[]),...(canManage?[['state',fa?'وضعیت حساب':'Account state']]:[])];
+  const tabs=[...(session.user.role==="owner"?[["services",fa?"سرویس‌ها":"Services"]]:[]),['overview',fa?'وضعیت و مصرف':'Overview'],['delivery',fa?'کانفیگ و QR':'Configuration & QR'],['edit',fa?'مشخصات و تلگرام':'Details & Telegram'],...(canRenew?[['renew',fa?'تمدید':'Renew']]:[]),...(canManage?[['state',fa?'وضعیت حساب':'Account state']]:[])];
   return <>
       {canCreate && <ClientDialog open={creating} onClose={()=>setCreating(false)} title={fa?"ایجاد کلاینت":"New client"} closeLabel={fa?"بازگشت به فهرست":"Back to client list"}><ClientCreateFlow model={model} onInspect={id=>{nextPanel.current="delivery";setPanel("delivery");setLifeClientID(id);setCreating(false);}}/></ClientDialog>}
       <ClientListExplorer model={model} onCreate={canCreate&&!creating?()=>setCreating(true):undefined}/>
       <ClientDialog onRefresh={model.reload} refreshLabel={fa?"تازه‌سازی اطلاعات":"Refresh client data"} open={!!lifeClientID} onClose={()=>setLifeClientID("")} title={clients?.find(c=>c.id===lifeClientID)?.name || lifeClientID || (fa?"کلاینت":"Client")} closeLabel={fa?"بستن جزئیات":"Close details"}>
       <nav className="client-detail-tabs" aria-label={fa?"بخش‌های کلاینت":"Client sections"}>{tabs.map(([id,label])=><button type="button" key={id} aria-pressed={panel===id} onClick={()=>setPanel(id)}>{label}</button>)}</nav>
+      {lifeClientID&&panel==="services"&&session.user.role==="owner"&&<ClientServices key={session.user.id+":"+lifeClientID} clientID={lifeClientID} session={session} language={language} onChanged={model.reload}/>}
       <div hidden={panel!=="overview"}>
       {lifeClientID && <ClientUsage key={session.user.id + ":" + lifeClientID} clientID={lifeClientID} language={language} refresh={refreshKey} />}
       </div>

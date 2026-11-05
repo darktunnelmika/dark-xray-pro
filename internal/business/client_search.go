@@ -13,6 +13,7 @@ import (
 // ClientSearch is server-side, private and limited to one representative or
 // an owner-authorized wider scope. It is never a public user enumeration API.
 type ClientSearch struct {
+	Summary          bool
 	InboundID        uint64
 	RepresentativeID string
 	GroupID          string
@@ -200,6 +201,11 @@ func (s *Store) searchClients(ctx context.Context, key []byte, q ClientSearch) (
 	}
 	if e := rows.Close(); e != nil {
 		return ClientSearchPage{}, e
+	}
+	if q.Summary {
+		if e := s.enrichClientDirectory(ctx, tx, key, result.Clients); e != nil {
+			return ClientSearchPage{}, e
+		}
 	}
 	if e := tx.Commit(); e != nil {
 		return ClientSearchPage{}, e

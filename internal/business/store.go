@@ -78,21 +78,22 @@ type NewClient struct {
 	Unlimited        bool                `json:"unlimited"`
 }
 type Client struct {
-	Contact              *ClientContact `json:"contact,omitempty"`
-	ID                   string         `json:"id"`
-	RepresentativeID     string         `json:"representative_id"`
-	Name                 string         `json:"name"`
-	UUID                 string         `json:"uuid"`
-	PlanKind             string         `json:"plan_kind"`
-	IPCount              int64          `json:"ip_count"`
-	VolumeBytes          int64          `json:"volume_bytes"`
-	DurationDays         int64          `json:"duration_days"`
-	ChargeVolumeBytes    int64          `json:"charged_volume_bytes"`
-	ChargeUnlimitedUnits int64          `json:"charged_unlimited_units"`
-	ExpiresUnix          int64          `json:"expires_unix"`
-	CreatedUnix          int64          `json:"created_unix"`
-	DeploymentState      string         `json:"deployment_state"`
-	Archived             bool           `json:"archived"`
+	Directory            *ClientDirectoryInfo `json:"directory,omitempty"`
+	Contact              *ClientContact       `json:"contact,omitempty"`
+	ID                   string               `json:"id"`
+	RepresentativeID     string               `json:"representative_id"`
+	Name                 string               `json:"name"`
+	UUID                 string               `json:"uuid"`
+	PlanKind             string               `json:"plan_kind"`
+	IPCount              int64                `json:"ip_count"`
+	VolumeBytes          int64                `json:"volume_bytes"`
+	DurationDays         int64                `json:"duration_days"`
+	ChargeVolumeBytes    int64                `json:"charged_volume_bytes"`
+	ChargeUnlimitedUnits int64                `json:"charged_unlimited_units"`
+	ExpiresUnix          int64                `json:"expires_unix"`
+	CreatedUnix          int64                `json:"created_unix"`
+	DeploymentState      string               `json:"deployment_state"`
+	Archived             bool                 `json:"archived"`
 }
 type Event struct {
 	EventID             string `json:"event_id"`
