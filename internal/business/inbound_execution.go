@@ -932,7 +932,7 @@ func assessInboundExecution(ctx context.Context, tx *sql.Tx, key []byte, actor s
 		return a, ErrConflict
 	}
 	resumeAction := state.OwnerResumeRequired && (in.Action == "activate" || in.Action == "apply" || in.Action == "restart")
-	if h.DesiredState == "archived" || h.Pending != "" && in.Action != "stop" && !resumeAction {
+	if h.DesiredState == "archived" && !(h.Pending != "" && in.Action == "stop") || h.Pending != "" && in.Action != "stop" && !resumeAction {
 		return a, ErrConflict
 	}
 	if in.Action == "activate" && h.DesiredState == "active" || (in.Action == "apply" || in.Action == "restart") && h.DesiredState != "active" {
