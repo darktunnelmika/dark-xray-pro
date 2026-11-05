@@ -268,8 +268,12 @@ func executionSubscriptionRoutes(ctx context.Context, tx *sql.Tx, key []byte, cl
 			if e != nil {
 				return nil, e
 			}
-			if e = executionBundleAuthority(ctx, tx, key, b); e != nil {
-				return nil, e
+			// Exporting applied credentials does not grant a runtime lease.
+			// Preserve explicit reconciliation holds; admission is unchanged.
+			if required, err := executionResumeRequired(ctx, tx, node, install); err != nil {
+				return nil, err
+			} else if required {
+				return nil, ErrConflict
 			}
 			present := false
 			for _, revision := range b.Revisions {
@@ -284,25 +288,18 @@ func executionSubscriptionRoutes(ctx context.Context, tx *sql.Tx, key []byte, cl
 			if openPlanValue(key, executionAAD("observation", node+"/"+install, observed), enc, &observation) != nil {
 				return nil, ErrUnavailable
 			}
-			if observation.Generation != desired || observation.ConfigSHA != b.ConfigSHA || observation.ManifestSHA != b.ManifestSHA || !observation.ProcessReady || (observation.State != "active" && observation.State != "ready") || observation.LeaseExpires <= now || observation.ObservedUnixNano > now || now-observation.ObservedUnixNano > int64(15*time.Second) || observation.AccountingState != "accepted" || (observation.HealthState != "healthy" && observation.HealthState != "engine_ready") {
+			if observation.Generation != desired || observation.ConfigSHA != b.ConfigSHA || observation.ManifestSHA != b.ManifestSHA {
 				return nil, ErrConflict
 			}
-			if observation.HealthState != "healthy" {
-				verified = false
+			// Transient health changes affect verification, not publication.
+			fresh := observation.ProcessReady && (observation.State == "active" || observation.State == "ready") && observation.LeaseExpires > now && observation.ObservedUnixNano <= now && now-observation.ObservedUnixNano <= int64(15*time.Second) && observation.AccountingState == "accepted" && observation.HealthState == "healthy"
+			if _, err := executionAccountingFreshUntil(ctx, tx, node, install, desired, observation.EpochID, now); err != nil {
+				if !errors.Is(err, ErrConflict) {
+					return nil, err
+				}
+				fresh = false
 			}
-			if observation.LeaseExpires < expires {
-				expires = observation.LeaseExpires
-			}
-			if freshUntil := observation.ObservedUnixNano + int64(15*time.Second); freshUntil < expires {
-				expires = freshUntil
-			}
-			accountingUntil, e := executionAccountingFreshUntil(ctx, tx, node, install, desired, observation.EpochID, now)
-			if e != nil {
-				return nil, e
-			}
-			if accountingUntil < expires {
-				expires = accountingUntil
-			}
+			verified = verified && fresh
 		}
 		profile := InboundInput{ID: r.id, Name: snapshot.Name, Spec: snapshot.Profile.Spec, Transport: snapshot.Profile.Spec.Network, Security: snapshot.Profile.Spec.Security}
 		plan := NativeInboundPlan{Profile: NativeInbound{InboundInput: profile}, Nodes: snapshot.Nodes}
