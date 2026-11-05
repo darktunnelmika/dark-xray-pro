@@ -1,3 +1,4 @@
+import type { CatalogReceipt } from "./sellerCatalogOrdersV1";
 import type { AppUser } from "../session";
 import { exactAmount, maxSellerBytes, maxSellerUnits, sellerID } from "./sellerManagement";
 
@@ -12,7 +13,7 @@ export type SellerOrderReceipt = {
   event_id: string; actor_user_id: string; representative_id: string; seller_id: string; action: "create" | "extend";
   client: SellerOrderClient; previous_client?: SellerOrderClient; volume_debit_bytes: string; unlimited_debit_units: string;
   reserved_bytes_before: string; reserved_bytes_after: string; reserved_units_before: string; reserved_units_after: string;
-  created_unix: number; replayed: boolean;
+  created_unix: number; replayed: boolean; catalog?: CatalogReceipt;
 };
 export const sellerOrderEvent = /^[A-Za-z0-9][A-Za-z0-9_.:-]{15,127}$/;
 const text = (v: unknown, max: number): v is string => typeof v === "string" && !!v.trim() && [...v].length <= max && !/[\u0000-\u001f\u007f-\u009f]/u.test(v);

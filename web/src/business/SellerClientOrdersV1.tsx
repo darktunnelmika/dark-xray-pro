@@ -96,6 +96,7 @@ export default function SellerClientOrdersV1({ seller, access, blocked, language
         <div><dt>{t.units}</dt><dd><bdi>{exactText(receipt.unlimited_debit_units)}</bdi></dd></div>
         <div><dt>{t.reserve}</dt><dd><bdi>{exactText(receipt.reserved_bytes_after)}</bdi> {t.bytes}</dd></div>
         <div><dt>{t.reserveUnits}</dt><dd><bdi>{exactText(receipt.reserved_units_after)}</bdi></dd></div></dl>
+      {receipt.catalog && <p aria-label="Catalog receipt terms"><bdi>{receipt.catalog.product_id}</bdi> · {receipt.catalog.months} × {receipt.catalog.user_count} = {receipt.unlimited_debit_units} · {receipt.catalog.price_toman.toLocaleString(language)} {language === "fa" ? "تومان؛ پرداخت ثبت نشده" : "toman; no payment recorded"}</p>}
       <p>{t.historical}</p><p>{t.billing}</p>
     </section>}
   </section>;
