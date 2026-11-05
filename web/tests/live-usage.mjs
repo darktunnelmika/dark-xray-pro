@@ -40,14 +40,17 @@ try {
 
   await page.getByRole('button', { name: 'Clients', exact: true }).click();
   const form = page.locator('.business-client-form');
-  // Scope to the real customer form. Implicit labels include the Random
-  // button or select option text; do not assume an option-free exact name.
-  await form.getByLabel('Client ID').fill('live-usage-client');
+  await form.getByText('Advanced identity', { exact: true }).click();
+  await form.getByLabel('Client ID (optional)', { exact: true }).fill('live-usage-client');
+  await form.getByLabel('UUID (optional)', { exact: true }).fill('12345678-1234-4234-8234-123456789abc');
   await form.getByLabel('Client name', { exact: true }).fill('Live metered customer');
-  await form.getByLabel('Representative ID').selectOption('live-usage-rep');
-  await form.getByLabel('Plan type').selectOption('volume');
-  await form.getByLabel('Plan volume (GB)', { exact: true }).fill('0.01');
-  await form.getByRole('button', { name: 'Create pending client', exact: true }).click();
+  await form.getByLabel('Account owner', { exact: true }).selectOption('live-usage-rep');
+  await form.getByLabel('Plan', { exact: true }).selectOption('volume');
+  await form.getByLabel('Volume (GiB)', { exact: true }).fill('0.01');
+  // This native metering fixture binds its isolated core below, after the UI save.
+  await form.getByRole('checkbox', { name: 'Create and activate', exact: true }).uncheck();
+  await form.getByRole('button', { name: 'Create client', exact: true }).click();
+  await expect(form.getByText('Account saved; awaiting owner activation.', { exact: true })).toBeVisible();
   const storedClient = page.locator('.clients-explorer-row').filter({ hasText: 'live-usage-client' });
   await expect(storedClient.getByText('Live metered customer', { exact: true })).toBeVisible();
   await storedClient.getByRole('button', { name: 'Manage', exact: true }).click();
