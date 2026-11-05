@@ -53,7 +53,27 @@ func TestRealBrowserSellerManagementV2(t *testing.T) {
 	if _, err := s.business.ProvisionRepresentativeLogin(ctx, repID, repUsername, repPassword); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.EnableSellerQuotaV2Lab(ctx); err != nil {
+	for _, enable := range []func() error{
+		func() error { return s.business.EnableUsageLedger(ctx) },
+		func() error { return s.EnableSellerQuotaV2Lab(ctx) },
+		func() error { return s.EnableNativeInbounds(bytes.Repeat([]byte{7}, 32)) },
+		func() error { return s.EnableVolumeRefunds(ctx) },
+		func() error { return s.EnableSellerOrdersV1Lab(ctx) },
+	} {
+		if err := enable(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	spec := business.CatalogSpec{ID: "browser-catalog-product", RepresentativeID: repID,
+		Name: "Browser two month product", PlanKind: "unlimited", DurationDays: 60, IPCount: 3, PriceToman: 250000}
+	draft, err := s.business.CreateCatalogProduct(ctx, business.CatalogCreate{CatalogSpec: spec,
+		EventID: "browser-catalog-create-0001", Reason: "Synthetic real browser catalog"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.business.UpdateCatalogProduct(ctx, business.CatalogUpdate{CatalogSpec: spec,
+		EventID: "browser-catalog-publish-0001", ExpectedRevision: draft.Revision, Status: "published",
+		Reason: "Publish isolated browser product"}); err != nil {
 		t.Fatal(err)
 	}
 	mux := http.NewServeMux()
@@ -83,11 +103,11 @@ func TestRealBrowserSellerManagementV2(t *testing.T) {
 		t.Fatal("browser omitted the complete seller acceptance marker")
 	}
 	rep, err := s.business.Representative(ctx, repID)
-	if err != nil || rep.VolumeCreditBytes != 91*1024*1024 || rep.UnlimitedCreditUnits != 19 {
+	if err != nil || rep.VolumeCreditBytes != 91*1024*1024 || rep.UnlimitedCreditUnits != 11 {
 		t.Fatal("representative free credit did not match real browser transfers", rep, err)
 	}
 	seller, err := s.business.SellerV2(ctx, repID, "browser-seller")
-	if err != nil || seller.Enabled || seller.Revision != 1 || seller.ReservedBytes != 9*1024*1024 || seller.ReservedUnits != 1 || seller.TelegramUserID != 123456789 {
+	if err != nil || seller.Enabled || seller.Revision != 1 || seller.ReservedBytes != 9*1024*1024 || seller.ReservedUnits != 3 || seller.TelegramUserID != 123456789 {
 		t.Fatal("real seller identity, state and reserve were not preserved", seller, err)
 	}
 	owner, err := s.business.Login(ctx, ownerUsername, ownerPassword)
@@ -98,7 +118,17 @@ func TestRealBrowserSellerManagementV2(t *testing.T) {
 	if err != nil || permission.ManageSellers || permission.Revision != 2 {
 		t.Fatal("owner revoke did not persist", permission, err)
 	}
-	if rep.VolumeCreditBytes+seller.ReservedBytes != 100*1024*1024 || rep.UnlimitedCreditUnits+seller.ReservedUnits != 20 {
+	client, err := s.business.Client(ctx, "browser-catalog-client")
+	if err != nil || client.RepresentativeID != repID || client.PlanKind != "unlimited" ||
+		client.DurationDays != 60 || client.IPCount != 3 || client.ChargeUnlimitedUnits != 6 ||
+		client.VolumeBytes != 0 || client.DeploymentState != "pending_node_apply" {
+		t.Fatal("catalog order did not preserve exact paid units and pending activation", client, err)
+	}
+	usage, err := s.business.ClientUsage(ctx, client.ID)
+	if err != nil || !usage.Known || usage.Total != 0 {
+		t.Fatal("catalog usage seed changed", usage, err)
+	}
+	if rep.VolumeCreditBytes+seller.ReservedBytes != 100*1024*1024 || rep.UnlimitedCreditUnits+seller.ReservedUnits+client.ChargeUnlimitedUnits != 20 {
 		t.Fatal("browser workflow changed total credit")
 	}
 	t.Log("REAL_SELLER_MANAGEMENT_BROWSER_PASS")
