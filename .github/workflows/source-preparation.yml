@@ -1,0 +1,49 @@
+name: Prepare reviewed diagnostic source formatting
+
+on:
+  push:
+    branches: ['prep/business-phase-format-20261106']
+
+permissions:
+  contents: read
+
+jobs:
+  format:
+    name: Format exact reviewed Go source
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.3'
+          cache: false
+      - name: Verify toolchain
+        run: go version
+      - name: Verify pinned input and emit formatted ordinary source
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import base64,gzip,hashlib,json,pathlib,subprocess
+          pins={"cmd/hub/business_phase_diagnostics.go":"8ef949cebb11828fdcab31221bed4b1f784002e20c4eac4fbe3a366e1336acc8","cmd/hub/business_phase_diagnostics_test.go":"b8d33851b00cd37f603487fcc3efe863ce5b5e15ec954a326370c90c92d7ae9b","cmd/hub/main.go":"032fa3529132a910f2f8dccec1aefafe580bb42612ae556934ea1d4ebf61ed05","internal/api/browser_auth.go":"2859edde0f2929b39475856636993443e4ba823191a022df7ac1aadee3452b23","internal/api/business_phase_diagnostics_test.go":"7c64c4511d5ad5168ec2fbc93778d2ef681a1ebc205ddb7701d63616796fbed6","internal/api/inbound_execution.go":"5de13489205fe8955a547729d2b9a69e343a1057c7340be7da113d8a36787fe8","internal/api/inbound_execution_subscriptions.go":"c2bf4284c8f0a2626b345c4e8c7484989689a818ededf1e787eb48bc164faf19","internal/business/auth.go":"7953ae68f797dc07db7b61a8e564df53a7f6894c6edb085aaa988e15a6542afc","internal/business/business_phase_integration_test.go":"e5c1144b7fe83533f41eb84a0382183d481c77f1de5e8a9ca2dd24252cf34263","internal/business/inbound_execution.go":"aedd6d45d5b0f12f27857dea3a2da16db33464d444dff1ea59c70fce6683273d","internal/business/inbound_execution_runtime.go":"22484e487e3dc41d1aade4df14e65d269c77f7e2b2b6d7b3698b3f15147166c8","internal/business/inbound_execution_subscriptions.go":"07c798b88bd5371613893e3ab666b6dd77678d438a69b4c83d1fe2c17831887f","internal/business/phase_diagnostics.go":"8037af870873e87b90a001930d4266105013347bfd24d253e21cc291ad0676fb","internal/business/phase_diagnostics_exporter.go":"30386c28742af59488a3d331257417532cf2d4e777d79bbe6ffdd17b535ea3ae","internal/business/phase_diagnostics_linux.go":"de88ce1e100f216550d0dc23004df0fa8715c1fc924cf2ed9bb94a1312d48620","internal/business/phase_diagnostics_linux_test.go":"4259943187d3f34c55496d0dff99b5226497cd04609ea00bfd93f7f4b79d129a","internal/business/phase_diagnostics_other.go":"625c03b640448319bbb1b6d448a13e6d1dcf7bf05d799399b4b20c14fc6ad737","internal/business/phase_diagnostics_test.go":"1fc6e67b0b4c4961b74b77475ea514cf39337b6abc7601baa9bb36ee0315aabe","internal/business/store.go":"33de555113fa3edb3cc93ec6b944fd8f546426c56ae1c380f011b8005f227c67"}
+          root=pathlib.Path.cwd()
+          for path,digest in pins.items():
+              p=root/path
+              assert p.is_file() and not p.is_symlink()
+              assert hashlib.sha256(p.read_bytes()).hexdigest()==digest,path
+          subprocess.run(["gofmt","-w",*sorted(pins)],check=True,timeout=30)
+          files=[]
+          for path,before in sorted(pins.items()):
+              data=(root/path).read_bytes()
+              files.append({"path":path,"before_sha256":before,"sha256":hashlib.sha256(data).hexdigest(),"content":data.decode()})
+          raw=(json.dumps({"schema":1,"base_head":"6b1e3652e7cfbe9f31f837807f352e721b36b4da","operation":"gofmt_only","files":files},sort_keys=True,separators=(",",":"))+"\n").encode()
+          payload=base64.b64encode(gzip.compress(raw,mtime=0)).decode()
+          print("SOURCE_PAYLOAD_SHA256="+hashlib.sha256(raw).hexdigest())
+          print("SOURCE_PAYLOAD_BYTES="+str(len(raw)))
+          for i in range(0,len(payload),3000):
+              print("SOURCE_PAYLOAD_%04d="%(i//3000)+payload[i:i+3000])
+          print("SOURCE_PAYLOAD_END="+str((len(payload)+2999)//3000))
+          print("FORMATTED_FILE_COUNT="+str(sum(f["sha256"]!=f["before_sha256"] for f in files)))
+          PY
