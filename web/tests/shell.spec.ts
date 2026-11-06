@@ -310,3 +310,73 @@ test("failed page chunk keeps the shell usable and offers an explicit reload", a
   await expect(page.locator(".dashboard-v2")).toBeVisible();
   await expect(page.getByRole("button", { name: "Reload page", exact: true })).toHaveCount(0);
 });
+
+
+test("temporary session lookup failure recovers without a second login", async ({ page }) => {
+  const f = await setup(page);
+  await page.goto("/clients"); await login(page);
+  await expect(page.getByRole("region", { name: "Client directory", exact: true })).toBeVisible();
+  let unavailable = true;
+  await page.route("**/api/v1/session/status", route => unavailable
+    ? route.fulfill({ status: 503, headers: { "Retry-After": "5" }, json: { error: "session_unavailable" } })
+    : route.fallback());
+  await page.reload();
+  await expect(page.getByRole("alert")).toContainText("Sign-in service unavailable");
+  await expect(page.getByRole("navigation")).toHaveCount(0);
+  await expect(page.getByLabel("Password", { exact: true })).toHaveCount(0);
+  unavailable = false;
+  await page.getByRole("button", { name: "Retry", exact: true }).click();
+  await expect(page.getByRole("region", { name: "Client directory", exact: true })).toBeVisible();
+  await expect(page).toHaveURL(url => url.pathname === "/clients");
+  expect(f.seen.filter(path => path === "POST /api/v1/session/login")).toHaveLength(1);
+});
+
+for (const status of [503, 401]) {
+  test(`protected request ${status === 503 ? "failure preserves" : "rejection revokes"} the browser session`, async ({ page }) => {
+    const f = await setup(page);
+    await page.goto("/clients"); await login(page);
+    await expect(page.getByRole("region", { name: "Client directory", exact: true })).toBeVisible();
+    await page.route(url => url.pathname === "/api/v1/workspace/groups", route => route.fulfill({
+      status, json: { error: status === 503 ? "session_unavailable" : "session_required" },
+    }));
+    const failed = page.waitForResponse(response =>
+      new URL(response.url()).pathname === "/api/v1/workspace/groups" && response.status() === status);
+    await page.getByRole("button", { name: "Groups", exact: true }).click();
+    await failed;
+    if (status === 503) {
+      await expect(page.getByRole("navigation")).toBeVisible();
+      await expect(page.getByRole("heading", { name: "Sign in", exact: true })).toHaveCount(0);
+      await page.getByRole("button", { name: "Clients", exact: true }).click();
+      await expect(page.getByRole("region", { name: "Client directory", exact: true })).toBeVisible();
+    } else {
+      await expect(page.getByRole("heading", { name: "Sign in", exact: true })).toBeVisible();
+      await expect(page.getByRole("navigation")).toHaveCount(0);
+    }
+    expect(f.seen.filter(path => path === "POST /api/v1/session/login")).toHaveLength(1);
+  });
+}
+
+for (const language of ["en", "fa"] as const) {
+  test(`login distinguishes temporary unavailability, invalid credentials and rate limits (${language})`, async ({ page }) => {
+    await setup(page);
+    let status = 503;
+    await page.route("**/api/v1/session/login", route => route.fulfill({
+      status, json: { error: status === 503 ? "login_unavailable" : status === 401 ? "invalid_credentials" : "login_temporarily_rate_limited" },
+    }));
+    await page.goto("/clients");
+    if (language === "fa") await page.getByRole("button", { name: "Switch language" }).click();
+    await page.getByLabel(language === "fa" ? "نام کاربری" : "Username", { exact: true }).fill("shell-user");
+    await page.getByLabel(language === "fa" ? "رمز عبور" : "Password", { exact: true }).fill("only-a-test-password");
+    const submit = page.getByRole("button", { name: language === "fa" ? "ورود" : "Sign in", exact: true });
+    for (const sample of [
+      { status: 503, message: language === "fa" ? "سرویس ورود موقتاً در دسترس نیست" : "The sign-in service is temporarily unavailable" },
+      { status: 401, message: language === "fa" ? "نام کاربری یا رمز عبور نادرست است" : "The username or password is incorrect" },
+      { status: 429, message: language === "fa" ? "تعداد تلاش‌های ورود زیاد است" : "Too many sign-in attempts" },
+    ]) {
+      status = sample.status;
+      await submit.click();
+      await expect(page.getByRole("alert")).toContainText(sample.message);
+      await expect(page.getByRole("navigation")).toHaveCount(0);
+    }
+  });
+}

@@ -93,6 +93,8 @@ func main() {
 	agentCert := flag.String("agent-tls-cert", "", "certificate with valid IP/DNS SAN for new LAB Node listener")
 	agentKey := flag.String("agent-tls-key", "", "private key for dedicated LAB Node listener")
 	flag.Parse()
+	startup := newStartupProgress()
+	startup.next("preflight")
 	if flag.NArg() != 0 {
 		log.Fatal("unexpected positional arguments; no HUB startup performed")
 	}
@@ -143,6 +145,7 @@ func main() {
 	if telegramFlagErr != nil {
 		log.Fatal(telegramFlagErr)
 	}
+	startup.next("state_fence")
 	offlineStateOptions := offlineOptions(*registryPath, *replacementsPath, *stagingPath, *businessPath, *labRevisionsPath, *nodeHistoryPath, *agentCert, *agentKey, *ownerReportConfig, *address, *agentListen, *static)
 	offlineStateOptions.TelegramBotsConfig = *telegramBotsConfig
 	stateLock, backupInventory, stateErr := prepareOfflineState(offlineStateOptions)
@@ -150,6 +153,7 @@ func main() {
 		log.Fatal("offline HUB state fence refused: ", stateErr)
 	}
 	hubStateProcessLock = stateLock // Kernel release only, after every goroutine exits with the process.
+	startup.next("transport_registry")
 	var agentTLS *http.Server
 	if *agentListen != "" {
 		if os.Getenv("DARK_PRO_ENABLE_REMOTE_AGENT") != "1" {
@@ -185,6 +189,7 @@ func main() {
 	if err := service.EnableHubMonitor(hubMonitor); err != nil {
 		log.Fatal(err)
 	}
+	startup.next("agent_artifact")
 	// Export the matching release Agent only to an authenticated owner.
 	executable, executableErr := os.Executable()
 	if executableErr == nil {
@@ -205,6 +210,7 @@ func main() {
 		// A listener does not prove reachable/verified external transport.
 		service.SetNodeTransportScope("external_tls_unverified")
 	}
+	startup.next("history_replacement")
 	if os.Getenv("DARK_PRO_ENABLE_NODE_HISTORY") == "1" {
 		clean := filepath.Clean(*nodeHistoryPath)
 		base := "/var/lib/dark-xray-pro-lab/telemetry"
@@ -240,11 +246,13 @@ func main() {
 		if pathErr != nil || !filepath.IsAbs(clean) || relative == "." || relative == ".." || strings.HasPrefix(relative, "../") || !strings.HasSuffix(clean, ".sqlite") {
 			log.Fatal("PRO business database must be a NEW private .sqlite file under /var/lib/dark-xray-pro-lab")
 		}
+		startup.next("business_store")
 		biz, err := business.Open(clean)
 		if err != nil {
 			log.Fatal("PRO business database initialization failed: ", err)
 		}
 		defer biz.Close()
+		startup.next("business_features")
 		ownerReportReporter = biz
 		telegramBusiness = biz
 		if os.Getenv("DARK_PRO_ENABLE_USAGE_LEDGER") == "1" {
@@ -286,6 +294,7 @@ func main() {
 	if os.Getenv("DARK_PRO_ENABLE_NATIVE_INBOUNDS") == "1" && os.Getenv("DARK_PRO_ENABLE_BUSINESS_CORE") != "1" {
 		log.Fatal("native inbounds require explicit new PRO business database")
 	}
+	startup.next("inbound_execution")
 	if os.Getenv("DARK_PRO_ENABLE_INBOUND_EXECUTION") == "1" {
 		engines, e := inboundruntime.ParseExternalBinaries(os.Getenv("DARK_PRO_INBOUND_ENGINES_JSON"))
 		if e != nil {
@@ -295,6 +304,7 @@ func main() {
 			log.Fatal("managed inbound execution unavailable: ", e)
 		}
 	}
+	startup.next("business_workflows")
 	if volumeRefunds == "1" {
 		if err := service.EnableVolumeRefunds(context.Background()); err != nil {
 			log.Fatal("private volume refund accounting unavailable: ", err)
@@ -310,6 +320,7 @@ func main() {
 			log.Fatal("private seller order accounting unavailable: ", err)
 		}
 	}
+	startup.next("route_health_staging")
 	if os.Getenv("DARK_PRO_ENABLE_REMOTE_METERED_ADMISSION") == "1" {
 		if os.Getenv("DARK_PRO_LAB_MODE") != "1" || os.Getenv("DARK_PRO_ENABLE_USAGE_LEDGER") != "1" ||
 			os.Getenv("DARK_PRO_ENABLE_NATIVE_INBOUNDS") != "1" {
@@ -448,6 +459,7 @@ func main() {
 			}
 		}
 	}
+	startup.next("optional_workers")
 	var commerceBackend *telegrambot.BusinessBackend
 	if telegramEnabled {
 		if err := service.EnableTelegramBotsV1(context.Background()); err != nil {
@@ -489,6 +501,7 @@ func main() {
 	if ownerReportBot != nil {
 		defer ownerReportBot.Close()
 	}
+	startup.next("backup_inventory_control")
 	if backupInventory != nil {
 		if err := hubstate.WriteInventory(stateLock, *backupInventory); err != nil {
 			log.Fatal("offline backup inventory is incomplete: ", err)
@@ -497,6 +510,7 @@ func main() {
 	if err := configureBackupControl(service, backupControls); err != nil {
 		log.Fatal("native backup controls unavailable: ", err)
 	}
+	startup.next("http_handlers")
 	apiHandler := service.BrowserHandler()
 	ui := webui.Embedded()
 	if *static != "" {
@@ -513,6 +527,7 @@ func main() {
 	if *agentListen != "" {
 		agentTLS = &http.Server{Addr: *agentListen, Handler: service.AgentHandler(), TLSConfig: &tls.Config{MinVersion: tls.VersionTLS13}, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 10 * time.Second, MaxHeaderBytes: 16 * 1024}
 	}
+	startup.complete()
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	go hubMonitor.Run(ctx)
