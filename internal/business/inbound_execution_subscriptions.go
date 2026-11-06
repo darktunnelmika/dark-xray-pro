@@ -488,16 +488,24 @@ func renderExecutionSubscription(client, format string, routes []executionSubscr
 	return out, nil
 }
 
-func (s *Store) InboundExecutionSubscription(ctx context.Context, key []byte, actor, client string) (ix.SubscriptionView, error) {
+func (s *Store) InboundExecutionSubscription(ctx context.Context, key []byte, actor, client string) (diagnosticResult ix.SubscriptionView, diagnosticErr error) {
+	ctx, diagnosticSpan := s.BeginDiagnostic(ctx, DiagnosticOperationMetadata, DiagnosticSourceStore)
+	defer func() { diagnosticSpan.End(diagnosticErr) }()
 	out := ix.SubscriptionView{ClientID: client, State: "absent", Formats: []string{}, Blockers: []ix.Blocker{}}
 	tx, err := executionTx(s, ctx, key)
 	if err != nil {
 		return out, err
 	}
-	defer tx.Rollback()
+	defer func() {
+		diagnosticFinishPhase(ctx, diagnosticErr)
+		s.diagnosticRollback(ctx, tx)
+	}()
+	diagnosticSpan.Enter(DiagnosticPhaseClientScope)
 	if _, err = subscriptionActor(ctx, tx, actor, client, false, false); err != nil {
 		return out, err
 	}
+	diagnosticFinishPhase(ctx, nil)
+	diagnosticSpan.Enter(DiagnosticPhaseProjection)
 	h, err := readExecutionSubscriptionHead(ctx, tx, client)
 	if err != nil {
 		return out, err
@@ -505,9 +513,10 @@ func (s *Store) InboundExecutionSubscription(ctx context.Context, key []byte, ac
 	out.Generation, out.State = h.generation, h.state
 	routes, err := executionSubscriptionRoutes(ctx, tx, key, client)
 	if err != nil {
+		diagnosticFinishPhase(ctx, err)
 		if errors.Is(err, ErrConflict) || errors.Is(err, ErrNotFound) {
 			out.Blockers = append(out.Blockers, ix.Blocker{Code: "current_applied_routes_unavailable", ClientID: client})
-			return out, tx.Commit()
+			return out, s.diagnosticCommit(ctx, tx)
 		}
 		return out, err
 	}
@@ -520,7 +529,8 @@ func (s *Store) InboundExecutionSubscription(ctx context.Context, key []byte, ac
 			out.ExpiresUnixNano = r.expires
 		}
 	}
-	return out, tx.Commit()
+	diagnosticFinishPhase(ctx, nil)
+	return out, s.diagnosticCommit(ctx, tx)
 }
 
 func (s *Store) ProjectInboundExecutionSubscription(ctx context.Context, key []byte, actor, client, format string) (ix.Subscription, error) {

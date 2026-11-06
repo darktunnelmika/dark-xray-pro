@@ -47,30 +47,47 @@ func (s *Server) attachInboundExecutionSubscriptions(mux *http.ServeMux) {
 	}
 	base := "/api/v1/workspace/clients/{id}/inbound-subscription"
 	mux.HandleFunc("GET "+base, func(w http.ResponseWriter, r *http.Request) {
+		ctx, span := s.business.BeginDiagnostic(r.Context(), business.DiagnosticOperationMetadata, business.DiagnosticSourceAPI)
+		var diagnosticErr error
+		defer func() { span.End(diagnosticErr) }()
+		r = r.WithContext(ctx)
+		span.Enter(business.DiagnosticPhaseAuth)
 		session, ok := s.authorizeBrowser(w, r, false, false)
-		if !ok || !s.subscriptionClientScope(w, r, session.User) {
+		if !ok {
 			return
 		}
+		span.Enter(business.DiagnosticPhaseClientScope)
+		if !s.subscriptionClientScope(w, r, session.User) {
+			return
+		}
+		span.Enter(business.DiagnosticPhaseDecode)
 		version := 1
 		if r.URL.RawQuery != "" {
 			query, err := url.ParseQuery(r.URL.RawQuery)
 			if err != nil || len(query) != 1 || len(query["view"]) != 1 || query["view"][0] != "2" {
+				diagnosticErr = err
+				span.Enter(business.DiagnosticPhaseResponse)
 				respond(w, http.StatusBadRequest, map[string]string{"error": "invalid_subscription_view"})
 				return
 			}
 			version = 2
 		}
 		if s.inboundExecution == nil {
+			span.Enter(business.DiagnosticPhaseResponse)
 			respond(w, 200, map[string]any{"enabled": false, "client_id": r.PathValue("id"), "view_version": version})
 			return
 		}
+		span.Enter(business.DiagnosticPhaseWork)
 		v, e := s.business.InboundExecutionSubscription(r.Context(), s.inboundKey, session.User.ID, r.PathValue("id"))
 		if e != nil {
+			diagnosticErr = e
+			span.Enter(business.DiagnosticPhaseResponse)
 			businessError(w, e)
 			return
 		}
 		// An already loaded older browser interprets availability as running.
 		// Only explicitly opted-in clients receive retained-document semantics.
+		span.Enter(business.DiagnosticPhaseProjection)
 		if version == 1 {
 			if !v.RuntimeReady || v.ReadinessExpiresUnixNano <= time.Now().UnixNano() {
 				v.Available, v.RuntimeReady, v.PathVerified = false, false, false
@@ -80,6 +97,7 @@ func (s *Server) attachInboundExecutionSubscriptions(mux *http.ServeMux) {
 				v.ExpiresUnixNano = v.ReadinessExpiresUnixNano
 			}
 		}
+		span.Enter(business.DiagnosticPhaseResponse)
 		respond(w, 200, struct {
 			inboundexec.SubscriptionView
 			Enabled     bool  `json:"enabled"`

@@ -45,6 +45,7 @@ var (
 
 type Store struct {
 	db                        *sql.DB
+	phaseDiagnostics          *phaseDiagnostics // optional, enabled only before serving requests
 	usage                     *usageledger.Ledger
 	consumerPolicy            *consumerManifestPolicy
 	initialApplyHealthEnabled bool

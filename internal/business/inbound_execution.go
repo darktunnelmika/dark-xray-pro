@@ -404,15 +404,18 @@ func executionTx(s *Store, ctx context.Context, key []byte) (*sql.Tx, error) {
 	if len(key) != 32 || s.usage == nil {
 		return nil, ErrUnavailable
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.diagnosticBeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
 	}
+	diagnosticEnter(ctx, DiagnosticPhaseSchema)
 	enabled, err := executionSchemaPresent(ctx, tx)
+	diagnosticFinishPhase(ctx, err)
 	if err != nil || !enabled {
-		tx.Rollback()
+		s.diagnosticRollback(ctx, tx)
 		return nil, ErrUnavailable
 	}
+	diagnosticEnter(ctx, DiagnosticPhaseWork)
 	return tx, nil
 }
 
@@ -478,17 +481,23 @@ func (s *Store) InboundExecutionBundle(ctx context.Context, key []byte, node, in
 	return b, true, tx.Commit()
 }
 
-func (s *Store) InboundExecution(ctx context.Context, key []byte, id uint64) (ix.State, error) {
-	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+func (s *Store) InboundExecution(ctx context.Context, key []byte, id uint64) (diagnosticResult ix.State, diagnosticErr error) {
+	ctx, diagnosticSpan := s.BeginDiagnostic(ctx, DiagnosticOperationRuntime, DiagnosticSourceStore)
+	defer func() { diagnosticSpan.End(diagnosticErr) }()
+	tx, err := s.diagnosticBeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
 		return ix.State{}, err
 	}
-	defer tx.Rollback()
+	defer func() {
+		diagnosticFinishPhase(ctx, diagnosticErr)
+		s.diagnosticRollback(ctx, tx)
+	}()
 	v, err := inboundExecutionState(ctx, tx, key, id)
 	if err != nil {
 		return v, err
 	}
-	return v, tx.Commit()
+	diagnosticFinishPhase(ctx, nil)
+	return v, s.diagnosticCommit(ctx, tx)
 }
 
 func (s *Store) ListInboundExecutionStates(ctx context.Context, key []byte) ([]ix.State, error) {

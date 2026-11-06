@@ -117,23 +117,36 @@ func (s *Server) attachInboundExecution(mux *http.ServeMux) {
 	}
 	base := "/api/v1/workspace/native-inbounds/{id}/execution"
 	mux.HandleFunc("GET "+base, func(w http.ResponseWriter, r *http.Request) {
+		ctx, span := s.business.BeginDiagnostic(r.Context(), business.DiagnosticOperationRuntime, business.DiagnosticSourceAPI)
+		var diagnosticErr error
+		defer func() { span.End(diagnosticErr) }()
+		r = r.WithContext(ctx)
+		span.Enter(business.DiagnosticPhaseAuth)
 		if _, ok := s.authorizeBrowser(w, r, false, true); !ok {
 			return
 		}
+		span.Enter(business.DiagnosticPhaseDecode)
 		id, ok := nativePlanPromotionID(w, r)
 		if !ok {
 			return
 		}
 		if s.inboundExecution == nil {
+			span.Enter(business.DiagnosticPhaseResponse)
 			respond(w, 200, inboundexec.State{Version: 1, Enabled: false, InboundID: id, DesiredState: "disabled", ObservedState: "disabled", AccountingMode: inboundexec.AccountingPerClient, AllowedAccountingModes: []string{}, ServerTimeMillis: time.Now().UnixMilli(), PublicationState: "withheld", ClientIDs: []string{}, EffectiveClientIDs: []string{}, Targets: []inboundexec.TargetState{}, Reconciliations: []inboundexec.ReconciliationState{}, AllowedActions: []string{}, Blockers: []inboundexec.Blocker{{Code: "execution_not_enabled"}}})
 			return
 		}
+		span.Enter(business.DiagnosticPhaseWork)
 		state, e := s.business.InboundExecution(r.Context(), s.inboundKey, id)
 		if e != nil {
+			diagnosticErr = e
+			span.Enter(business.DiagnosticPhaseResponse)
 			businessError(w, e)
 			return
 		}
-		respond(w, 200, s.executionHostState(state))
+		span.Enter(business.DiagnosticPhaseProjection)
+		state = s.executionHostState(state)
+		span.Enter(business.DiagnosticPhaseResponse)
+		respond(w, 200, state)
 	})
 	for _, op := range []string{"preview", "commands"} {
 		op := op
@@ -473,7 +486,12 @@ func (s *Server) executionEpochProvenance(ctx context.Context, in inboundexec.Ep
 }
 
 func (s *Server) acceptExecutionUsage(ctx context.Context, in inboundexec.UsageReport) (inboundexec.UsageReceipt, error) {
+	return s.acceptExecutionUsageDiagnostic(ctx, in, nil)
+}
+
+func (s *Server) acceptExecutionUsageDiagnostic(ctx context.Context, in inboundexec.UsageReport, span *business.DiagnosticSpan) (inboundexec.UsageReceipt, error) {
 	if in.InitialEpoch != nil {
+		span.Enter(business.DiagnosticPhaseEpochProvenance)
 		if in.InitialEpoch.EpochID != in.EpochID || in.InitialEpoch.NodeID != in.NodeID || in.InitialEpoch.InstallationID != in.InstallationID || in.InitialEpoch.Generation != in.Generation || in.InitialEpoch.ProcessIdentity != in.ProcessIdentity {
 			return inboundexec.UsageReceipt{}, business.ErrConflict
 		}
@@ -481,11 +499,17 @@ func (s *Server) acceptExecutionUsage(ctx context.Context, in inboundexec.UsageR
 			return inboundexec.UsageReceipt{}, err
 		}
 	}
+	span.Enter(business.DiagnosticPhaseWork)
 	return s.business.AcceptInboundExecutionUsage(ctx, s.inboundKey, in)
 }
 
 func (s *Server) observeExecution(ctx context.Context, in inboundexec.Observation) error {
+	return s.observeExecutionDiagnostic(ctx, in, nil)
+}
+
+func (s *Server) observeExecutionDiagnostic(ctx context.Context, in inboundexec.Observation, span *business.DiagnosticSpan) error {
 	if in.InitialEpoch != nil {
+		span.Enter(business.DiagnosticPhaseEpochProvenance)
 		if in.InitialEpoch.EpochID != in.EpochID || in.InitialEpoch.NodeID != in.NodeID || in.InitialEpoch.InstallationID != in.InstallationID || in.InitialEpoch.Generation != in.Generation || in.InitialEpoch.ConfigSHA != in.ConfigSHA || in.InitialEpoch.ManifestSHA != in.ManifestSHA {
 			return business.ErrConflict
 		}
@@ -493,20 +517,37 @@ func (s *Server) observeExecution(ctx context.Context, in inboundexec.Observatio
 			return err
 		}
 	}
+	span.Enter(business.DiagnosticPhaseWork)
 	return s.business.ObserveInboundExecution(ctx, s.inboundKey, in)
 }
 
 func (s *Server) handleInboundExecutionAgent(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	var span *business.DiagnosticSpan
+	switch strings.TrimPrefix(r.URL.Path, "/api/v1/agent/inbound-execution/") {
+	case "usage":
+		ctx, span = s.business.BeginDiagnostic(ctx, business.DiagnosticOperationUsage, business.DiagnosticSourceAPI)
+	case "observation":
+		ctx, span = s.business.BeginDiagnostic(ctx, business.DiagnosticOperationObserve, business.DiagnosticSourceAPI)
+	}
+	var diagnosticErr error
+	defer func() { span.End(diagnosticErr) }()
+	r = r.WithContext(ctx)
 	if s.inboundExecution == nil {
+		span.Enter(business.DiagnosticPhaseResponse)
 		http.NotFound(w, r)
 		return
 	}
 	if r.TLS == nil || r.TLS.Version < tls.VersionTLS13 {
+		span.Enter(business.DiagnosticPhaseResponse)
 		respond(w, 426, map[string]string{"error": "tls13_required"})
 		return
 	}
 	var raw json.RawMessage
-	if decode(w, r, 8<<20, &raw) != nil {
+	span.Enter(business.DiagnosticPhaseDecode)
+	if err := decode(w, r, 8<<20, &raw); err != nil {
+		diagnosticErr = err
+		span.Enter(business.DiagnosticPhaseResponse)
 		businessError(w, business.ErrInvalid)
 		return
 	}
@@ -514,12 +555,16 @@ func (s *Server) handleInboundExecutionAgent(w http.ResponseWriter, r *http.Requ
 		NodeID         string `json:"node_id"`
 		InstallationID string `json:"installation_id"`
 	}
-	if json.Unmarshal(raw, &identity) != nil || identity.NodeID == localHubNodeID {
+	if err := json.Unmarshal(raw, &identity); err != nil || identity.NodeID == localHubNodeID {
+		diagnosticErr = err
+		span.Enter(business.DiagnosticPhaseResponse)
 		businessError(w, business.ErrInvalid)
 		return
 	}
 	token := bearer(r)
+	span.Enter(business.DiagnosticPhaseRegistryAuth)
 	if _, ok := s.registry.Authenticate(identity.NodeID, identity.InstallationID, token); !ok {
+		span.Enter(business.DiagnosticPhaseResponse)
 		respond(w, 401, map[string]string{"error": "unauthorized"})
 		return
 	}
@@ -554,11 +599,16 @@ func (s *Server) handleInboundExecutionAgent(w http.ResponseWriter, r *http.Requ
 		respond(w, 200, out)
 	case "usage":
 		var input inboundexec.UsageReport
-		if usagewire.Decode(raw, &input) != nil {
+		span.Enter(business.DiagnosticPhaseDecode)
+		if err := usagewire.Decode(raw, &input); err != nil {
+			diagnosticErr = err
+			span.Enter(business.DiagnosticPhaseResponse)
 			businessError(w, business.ErrInvalid)
 			return
 		}
-		out, e := s.acceptExecutionUsage(r.Context(), input)
+		out, e := s.acceptExecutionUsageDiagnostic(r.Context(), input, span)
+		diagnosticErr = e
+		span.Enter(business.DiagnosticPhaseResponse)
 		if e != nil {
 			businessError(w, e)
 			return
@@ -566,11 +616,17 @@ func (s *Server) handleInboundExecutionAgent(w http.ResponseWriter, r *http.Requ
 		respond(w, 200, out)
 	case "observation":
 		var input inboundexec.Observation
-		if usagewire.Decode(raw, &input) != nil {
+		span.Enter(business.DiagnosticPhaseDecode)
+		if err := usagewire.Decode(raw, &input); err != nil {
+			diagnosticErr = err
+			span.Enter(business.DiagnosticPhaseResponse)
 			businessError(w, business.ErrInvalid)
 			return
 		}
-		if e := s.observeExecution(r.Context(), input); e != nil {
+		e := s.observeExecutionDiagnostic(r.Context(), input, span)
+		diagnosticErr = e
+		span.Enter(business.DiagnosticPhaseResponse)
+		if e != nil {
 			businessError(w, e)
 			return
 		}
@@ -588,9 +644,13 @@ func (x localInboundExchange) Poll(ctx context.Context, p inboundruntime.PollInp
 func (x localInboundExchange) Register(ctx context.Context, p inboundexec.EpochInput) (inboundruntime.EpochReceipt, error) {
 	return x.s.registerExecution(ctx, p)
 }
-func (x localInboundExchange) Usage(ctx context.Context, p inboundexec.UsageReport) (inboundexec.UsageReceipt, error) {
-	return x.s.acceptExecutionUsage(ctx, p)
+func (x localInboundExchange) Usage(ctx context.Context, p inboundexec.UsageReport) (receipt inboundexec.UsageReceipt, diagnosticErr error) {
+	ctx, span := x.s.business.BeginDiagnostic(ctx, business.DiagnosticOperationUsage, business.DiagnosticSourceHubLocal)
+	defer func() { span.End(diagnosticErr) }()
+	return x.s.acceptExecutionUsageDiagnostic(ctx, p, span)
 }
-func (x localInboundExchange) Observe(ctx context.Context, p inboundexec.Observation) error {
-	return x.s.observeExecution(ctx, p)
+func (x localInboundExchange) Observe(ctx context.Context, p inboundexec.Observation) (diagnosticErr error) {
+	ctx, span := x.s.business.BeginDiagnostic(ctx, business.DiagnosticOperationObserve, business.DiagnosticSourceHubLocal)
+	defer func() { span.End(diagnosticErr) }()
+	return x.s.observeExecutionDiagnostic(ctx, p, span)
 }
