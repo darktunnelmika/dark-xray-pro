@@ -10,6 +10,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	restorefixture "github.com/darktunnelmika/dark-xray-pro/testdata/darkrestore"
 	"io"
 	"net/url"
@@ -324,6 +325,20 @@ func assertRows(t *testing.T, want, got map[string]string) {
 func TestNativeSnapshotEncryptedRestorePreservesFullEconomicStateAndReplay(t *testing.T) {
 	ctx := context.Background()
 	f := newEconomicFixture(t)
+	grantStore, err := business.Open(f.path)
+	require(t, err)
+	_, err = grantStore.CreateInbound(ctx, bytes.Repeat([]byte{0x58}, 32), business.InboundInput{ID: 99001, Name: "Grant recovery", Transport: "tcp", RealityTarget: "www.example.org:443", ServerNames: []string{"www.example.org"}, ShortIDs: []string{"aa11"}})
+	require(t, err)
+	for _, rep := range []string{"backup-rep-a", "backup-rep-b"} {
+		for revision := int64(0); revision < 2; revision++ {
+			_, err = grantStore.ChangeRepresentativeServiceGrant(ctx, "owner", business.ServiceGrantChange{EventID: fmt.Sprintf("archive-grant-%s-%d", rep, revision), RepresentativeID: rep, InboundID: 99001, ExpectedRevision: revision, Enabled: revision == 0, Reason: "Synthetic archive grant history"})
+			require(t, err)
+		}
+	}
+	_, err = grantStore.ChangeRepresentativeServiceGrant(ctx, "owner", business.ServiceGrantChange{EventID: "archive-regrant-rep-a-001", RepresentativeID: "backup-rep-a", InboundID: 99001, ExpectedRevision: 2, Enabled: true, Reason: "Grant again with fresh revision"})
+	require(t, err)
+	require(t, grantStore.Close())
+
 	before, err := os.ReadFile(f.path)
 	require(t, err)
 	wantRows := databaseRows(t, f.path)
@@ -426,6 +441,18 @@ func TestNativeSnapshotEncryptedRestorePreservesFullEconomicStateAndReplay(t *te
 	for restart := 0; restart < 2; restart++ {
 		s, err := business.Open(restoredDB)
 		require(t, err)
+		for _, rep := range []string{"backup-rep-a", "backup-rep-b"} {
+			g, e := s.RepresentativeServiceGrant(ctx, rep, 99001)
+			require(t, e)
+			expected := int64(2)
+			if rep == "backup-rep-a" {
+				expected = 3
+			}
+			if g.Revision != expected || g.Enabled != (rep == "backup-rep-a") {
+				t.Fatalf("grant changed on encrypted recovery: %+v", g)
+			}
+		}
+
 		if !reflect.DeepEqual(f.state, captureEconomicState(t, s)) {
 			t.Fatal("UUID, expiry, limits, usage or balances changed on restored reopen")
 		}

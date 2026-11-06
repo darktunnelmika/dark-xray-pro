@@ -914,10 +914,15 @@ type executionAssessment struct {
 }
 
 func assessInboundExecution(ctx context.Context, tx *sql.Tx, key []byte, actor string, id uint64, in ix.CommandInput) (executionAssessment, error) {
-	a := executionAssessment{preview: ix.Preview{Action: in.Action, Targets: []ix.TargetState{}, Blockers: []ix.Blocker{}}}
 	if err := executionActor(ctx, tx, actor); err != nil {
-		return a, err
+		return executionAssessment{}, err
 	}
+	return assessAuthorizedInboundExecution(ctx, tx, key, actor, id, in)
+}
+
+// Callers must authorize the exact command in this transaction before entry.
+func assessAuthorizedInboundExecution(ctx context.Context, tx *sql.Tx, key []byte, actor string, id uint64, in ix.CommandInput) (executionAssessment, error) {
+	a := executionAssessment{preview: ix.Preview{Action: in.Action, Targets: []ix.TargetState{}, Blockers: []ix.Blocker{}}}
 	state, err := inboundExecutionState(ctx, tx, key, id)
 	if err != nil {
 		return a, err
