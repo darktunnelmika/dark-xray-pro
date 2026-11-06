@@ -213,8 +213,18 @@ func newFixtureWorker(t *testing.T, in input, network mtglib.Network) *fixtureWo
 
 func (f *fixtureWorker) request(t *testing.T, op, nonce string, code int) response {
 	t.Helper()
+	return f.requestContext(t, context.Background(), op, nonce, code)
+}
+
+func (f *fixtureWorker) requestContext(t *testing.T, ctx context.Context, op, nonce string, code int) response {
+	t.Helper()
 	body, _ := json.Marshal(map[string]string{"nonce": nonce})
-	r, err := f.client.Post("http://worker/"+op, "application/json", bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://worker/"+op, bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	r, err := f.client.Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -233,6 +243,120 @@ func (f *fixtureWorker) request(t *testing.T, op, nonce string, code int) respon
 		}
 	}
 	return out
+}
+
+// counterProgress permits only monotonic progress toward one exact payload
+// total for every expected principal. Waiting must never hide duplication,
+// cross-user attribution, missing identities or a counter reset.
+func counterProgress(got, previous, want []counter) (bool, error) {
+	if len(want) == 0 || len(got) != len(want) || (len(previous) != 0 && len(previous) != len(want)) {
+		return false, errors.New("counter identity count changed")
+	}
+	expected := make(map[string]counter, len(want))
+	for _, c := range want {
+		if _, duplicate := expected[c.ID]; duplicate || c.ID == "" {
+			return false, errors.New("invalid expected counter identity")
+		}
+		expected[c.ID] = c
+	}
+	prior := make(map[string]counter, len(previous))
+	for _, c := range previous {
+		limit, known := expected[c.ID]
+		if _, duplicate := prior[c.ID]; duplicate || !known || c.Upload > limit.Upload || c.Download > limit.Download {
+			return false, errors.New("invalid previous counter")
+		}
+		prior[c.ID] = c
+	}
+	seen := make(map[string]bool, len(got))
+	exact := true
+	for _, c := range got {
+		limit, known := expected[c.ID]
+		if !known || seen[c.ID] {
+			return false, errors.New("unknown or duplicate counter identity")
+		}
+		seen[c.ID] = true
+		if c.Upload > limit.Upload || c.Download > limit.Download {
+			return false, errors.New("counter exceeded exact payload total")
+		}
+		old := prior[c.ID]
+		if c.Upload < old.Upload || c.Download < old.Download {
+			return false, errors.New("counter regressed")
+		}
+		exact = exact && c.Upload == limit.Upload && c.Download == limit.Download
+	}
+	return exact, nil
+}
+
+// Receiving an echo does not join the server's Write: the pinned upstream adds
+// bytesOut after that Write returns. Intermediate snapshots may therefore lag
+// a completed client exchange. Wait for exact counters under a request deadline;
+// final receipts already join the relays and must still be checked immediately.
+func (f *fixtureWorker) waitCounters(t *testing.T, previous, want []counter) response {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	tick := time.NewTicker(time.Millisecond)
+	defer tick.Stop()
+	for {
+		r := f.requestContext(t, ctx, "snapshot", "", 200)
+		if !r.Open || r.Final {
+			t.Fatalf("payload snapshot is not active: %+v", r)
+		}
+		exact, err := counterProgress(r.Counters, previous, want)
+		if err != nil {
+			t.Fatalf("%v: previous=%+v got=%+v want=%+v", err, previous, r.Counters, want)
+		}
+		if exact {
+			return r
+		}
+		previous = r.Counters
+		select {
+		case <-ctx.Done():
+			t.Fatalf("payload counters did not settle: got=%+v want=%+v", previous, want)
+		case <-tick.C:
+		}
+	}
+}
+
+func TestMTProtoSnapshotCounterProgress(t *testing.T) {
+	previous := []counter{{ID: "alice", Upload: 3, Download: 4}, {ID: "bob"}}
+	want := []counter{{ID: "alice", Upload: 10, Download: 10}, {ID: "bob", Upload: 20, Download: 20}}
+	pending := []counter{{ID: "bob", Upload: 20, Download: 20}, {ID: "alice", Upload: 10, Download: 4}}
+	if exact, err := counterProgress(pending, previous, want); err != nil || exact {
+		t.Fatalf("in-flight accounting rejected or treated as exact: exact=%t err=%v", exact, err)
+	}
+	if exact, err := counterProgress(want, pending, want); err != nil || !exact {
+		t.Fatalf("exact accounting did not complete: exact=%t err=%v", exact, err)
+	}
+	for name, mutate := range map[string]func([]counter) []counter{
+		"missing":            func(c []counter) []counter { return c[:1] },
+		"unknown":            func(c []counter) []counter { c[1].ID = "foreign"; return c },
+		"duplicate":          func(c []counter) []counter { c[1].ID = c[0].ID; return c },
+		"upload_overshoot":   func(c []counter) []counter { c[0].Upload++; return c },
+		"download_overshoot": func(c []counter) []counter { c[0].Download++; return c },
+		"upload_reset":       func(c []counter) []counter { c[0].Upload = 2; return c },
+		"download_reset":     func(c []counter) []counter { c[0].Download = 3; return c },
+	} {
+		t.Run(name, func(t *testing.T) {
+			got := mutate(append([]counter(nil), want...))
+			if _, err := counterProgress(got, previous, want); err == nil {
+				t.Fatalf("invalid accounting accepted: %+v", got)
+			}
+		})
+	}
+	for name, change := range map[string]func([]counter){
+		"unknown_previous":   func(c []counter) { c[0].ID = "foreign" },
+		"duplicate_previous": func(c []counter) { c[1].ID = c[0].ID },
+		"previous_overshoot": func(c []counter) { c[0].Upload = 11 },
+	} {
+		t.Run(name, func(t *testing.T) {
+			old := append([]counter(nil), previous...)
+			change(old)
+			if _, err := counterProgress(want, old, want); err == nil {
+				t.Fatal("invalid previous accounting accepted")
+			}
+		})
+	}
 }
 
 func assertZero(t *testing.T, r response, count int) {
@@ -449,7 +573,7 @@ func TestManagedMTProtoFakeTLSPayloadAccountingIsolationAndFinal(t *testing.T) {
 	if err = exchange(alice, payload); err != nil {
 		t.Fatal(err)
 	}
-	a := f.request(t, "snapshot", "", 200)
+	a := f.waitCounters(t, active.Counters, []counter{{ID: "principal-alice", Upload: uint64(len(payload)), Download: uint64(len(payload))}, {ID: "principal-bob"}})
 	a1 := findCounter(t, a, "alice")
 	b0 := findCounter(t, a, "bob")
 	if a1.Upload != uint64(len(payload)) || a1.Download != uint64(len(payload)) || b0.Upload != 0 || b0.Download != 0 {
@@ -463,7 +587,7 @@ func TestManagedMTProtoFakeTLSPayloadAccountingIsolationAndFinal(t *testing.T) {
 	if err = exchange(bob, payload[:11237]); err != nil {
 		t.Fatal(err)
 	}
-	b := f.request(t, "snapshot", "", 200)
+	b := f.waitCounters(t, a.Counters, []counter{a1, {ID: "principal-bob", Upload: 11237, Download: 11237}})
 	b1 := findCounter(t, b, "bob")
 	if findCounter(t, b, "alice") != a1 || b1.Upload != 11237 || b1.Download != 11237 {
 		t.Fatalf("cross-user counter contamination: %+v", b.Counters)
@@ -577,7 +701,7 @@ func TestManagedMTProtoRemovedCredentialCannotReturn(t *testing.T) {
 	if err = exchange(bob, payload); err != nil {
 		t.Fatal(err)
 	}
-	now := next.request(t, "snapshot", "", 200)
+	now := next.waitCounters(t, nil, []counter{{ID: "principal-bob", Upload: uint64(len(payload)), Download: uint64(len(payload))}})
 	c := findCounter(t, now, "bob")
 	if len(now.Counters) != 1 || c.Upload != uint64(len(payload)) || c.Download != uint64(len(payload)) {
 		t.Fatalf("successor accounting %+v", now)
@@ -592,7 +716,7 @@ func TestManagedMTProtoOwnerAggregatePayloadAndFinal(t *testing.T) {
 	in.Principals = []principal{{ID: "aggregate-owner", Engine: "mtproto", ComponentTag: "owned-mtg", Role: "owner_aggregate", Counter: "inbound>>>owned-mtg>>>traffic", InboundID: 37}}
 	f := newFixtureWorker(t, in, newMockDC(t))
 	assertZero(t, f.request(t, "snapshot", "", 200), 1)
-	f.request(t, "activate", activationNonce, 200)
+	previous := f.request(t, "activate", activationNonce, 200).Counters
 	var expected uint64
 	for _, name := range []string{"alice", "bob"} {
 		c, err := fakeTLSClient(f.w.listener.Addr().String(), secrets[name])
@@ -605,7 +729,8 @@ func TestManagedMTProtoOwnerAggregatePayloadAndFinal(t *testing.T) {
 			t.Fatal(err)
 		}
 		expected += uint64(len(payload))
-		r := f.request(t, "snapshot", "", 200)
+		r := f.waitCounters(t, previous, []counter{{ID: "aggregate-owner", Upload: expected, Download: expected}})
+		previous = r.Counters
 		if len(r.Counters) != 1 || r.Counters[0] != (counter{ID: "aggregate-owner", Upload: expected, Download: expected}) {
 			t.Fatalf("aggregate lost or duplicated a user's payload: %+v", r.Counters)
 		}
@@ -778,7 +903,7 @@ func TestManagedMTProtoAuthenticatedSOCKSBridge(t *testing.T) {
 	if err = exchange(c, payload); err != nil {
 		t.Fatal(err)
 	}
-	r := f.request(t, "snapshot", "", 200)
+	r := f.waitCounters(t, nil, []counter{{ID: "principal-alice", Upload: uint64(len(payload)), Download: uint64(len(payload))}})
 	value := findCounter(t, r, "alice")
 	if authenticated.Load() != 1 || value.Upload != uint64(len(payload)) || value.Download != uint64(len(payload)) {
 		t.Fatalf("bridge/counters mismatch: authenticated=%d counters=%+v", authenticated.Load(), value)

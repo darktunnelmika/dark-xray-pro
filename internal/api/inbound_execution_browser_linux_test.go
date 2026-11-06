@@ -152,19 +152,26 @@ func TestManagedInboundRealBrowserSubscriptionLifecycle(t *testing.T) {
 		t.Fatal("missing positive compiled browser acceptance")
 	}
 	var result struct {
-		Verified           bool   `json:"verified"`
-		ClientID           string `json:"client_id"`
-		InboundID          uint64 `json:"inbound_id"`
-		IssuedGeneration   uint64 `json:"issued_generation"`
-		RevokedGeneration  uint64 `json:"revoked_generation"`
-		DownloadBytes      int64  `json:"download_bytes"`
-		BearerBeforeStatus int    `json:"bearer_before_status"`
-		BearerAfterStatus  int    `json:"bearer_after_status"`
-		TokenStored        bool   `json:"token_stored"`
-		UnexpectedRequests int    `json:"unexpected_requests"`
+		Verified             bool   `json:"verified"`
+		ClientID             string `json:"client_id"`
+		InboundID            uint64 `json:"inbound_id"`
+		IssuedGeneration     uint64 `json:"issued_generation"`
+		RevokedGeneration    uint64 `json:"revoked_generation"`
+		DownloadBytes        int64  `json:"download_bytes"`
+		BearerBeforeStatus   int    `json:"bearer_before_status"`
+		BearerAfterStatus    int    `json:"bearer_after_status"`
+		TokenStored          bool   `json:"token_stored"`
+		UnexpectedRequests   int    `json:"unexpected_requests"`
+		MetadataViewVersion  int    `json:"metadata_view_version"`
+		MetadataV2Requests   int    `json:"metadata_v2_requests"`
+		DocumentAvailable    bool   `json:"document_available"`
+		RuntimeReady         bool   `json:"runtime_ready"`
+		PathVerified         *bool  `json:"path_verified"`
+		IndependentExpiries  bool   `json:"independent_expiries"`
+		LegacyReadinessBound bool   `json:"legacy_readiness_bound"`
 	}
 	raw, err := os.ReadFile(resultPath)
-	if err != nil || json.Unmarshal(raw, &result) != nil || !result.Verified || result.ClientID != client.ID || result.InboundID != 501 || result.IssuedGeneration != 1 || result.RevokedGeneration != 2 || result.DownloadBytes <= 0 || result.BearerBeforeStatus != 200 || result.BearerAfterStatus != 404 || result.TokenStored || result.UnexpectedRequests != 0 {
+	if err != nil || json.Unmarshal(raw, &result) != nil || !result.Verified || result.ClientID != client.ID || result.InboundID != 501 || result.IssuedGeneration != 1 || result.RevokedGeneration != 2 || result.DownloadBytes <= 0 || result.BearerBeforeStatus != 200 || result.BearerAfterStatus != 404 || result.TokenStored || result.UnexpectedRequests != 0 || result.MetadataViewVersion != 2 || result.MetadataV2Requests < 1 || !result.DocumentAvailable || !result.RuntimeReady || result.PathVerified == nil || *result.PathVerified || !result.IndependentExpiries || !result.LegacyReadinessBound {
 		t.Fatal("compiled browser acceptance incomplete", err)
 	}
 	usage, err := s.business.ClientUsage(ctx, client.ID)

@@ -13,6 +13,7 @@ if (typeof control.username !== 'string' || !control.username || typeof control.
   !Number.isSafeInteger(control.inbound_id) || control.inbound_id < 1) throw Error('Invalid QA control file');
 const subscription = '/api/v1/workspace/clients/' + encodeURIComponent(control.client_id) + '/inbound-subscription';
 const diagnostics = [], mutations = [];
+let metadataV2Requests = 0, legacyProbeRequests = 0;
 let stage = 'launch', browser, page, token = '', csrf = '';
 const denyProxy = createServer((request, response) => {
   let target;
@@ -45,6 +46,11 @@ try {
     const url = new URL(request.url());
     if (url.origin !== base.origin) diagnostics.push('Request outside harness origin');
     if (url.pathname.startsWith('/api/v1/inbound-subscriptions/')) diagnostics.push('Browser implicitly fetched bearer URL');
+    if (request.method() === 'GET' && url.pathname === subscription) {
+      if (url.search === '' && request.headers()['x-managed-subscription-legacy-test'] === '1') legacyProbeRequests++;
+      else if (url.search !== '?view=2') diagnostics.push('Browser did not negotiate subscription metadata v2');
+      else metadataV2Requests++;
+    }
     if (!['GET', 'HEAD', 'OPTIONS'].includes(request.method())) {
       mutations.push({ method: request.method(), path: url.pathname });
       if (request.method() !== 'POST' || !['/api/v1/session/login', subscription + '/issue', subscription + '/reveal', subscription + '/revoke'].includes(url.pathname)) diagnostics.push('Unexpected mutation');
@@ -62,10 +68,50 @@ try {
   stage = 'client routes';
   const directory = page.getByRole('region', { name: 'Client directory' });
   await directory.locator('.clients-explorer-row').filter({ hasText: control.client_id }).getByRole('button', { name: 'Manage', exact: true }).click();
+  const loadingMetadata = observe('GET', subscription);
   await page.getByRole('button', { name: 'Configuration & QR', exact: true }).click();
+  const metadataResponse = await loadingMetadata; expect(metadataResponse.status()).toBe(200);
+  expect(new URL(metadataResponse.url()).search).toBe('?view=2');
+  const metadata = await metadataResponse.json();
+  stage = 'v2 metadata marker';
+  expect(metadata.view_version).toBe(2); expect(metadata.enabled).toBe(true);
+  expect(metadata.client_id).toBe(control.client_id); expect(metadata.state).toBe('absent'); expect(metadata.generation).toBe(0);
+  // Real applied credentials and fresh runtime evidence have separate deadlines.
+  // This fixture has sent actual traffic; availability alone is not readiness.
+  stage = 'v2 credential availability';
+  expect(metadata.available, 'applied credential document is available').toBe(true); expect(metadata.route_count).toBe(1); expect(metadata.formats).toContain('uri');
+  stage = 'v2 runtime readiness';
+  expect(metadata.runtime_ready, 'real worker has current readiness evidence').toBe(true);
+  stage = 'v2 path evidence';
+  // The worker reports engine_ready. A separate fixture payload does not
+  // manufacture the healthy path observation required for a stronger claim.
+  expect(metadata.path_verified, 'path verification is not implied by engine readiness').toBe(false);
+  expect(metadata.server_time_unix_milli).toBeGreaterThan(0);
+  expect(metadata.readiness_expires_unix_nano / 1e6).toBeGreaterThan(metadata.server_time_unix_milli);
+  expect(metadata.readiness_expires_unix_nano / 1e6).toBeLessThanOrEqual(metadata.server_time_unix_milli + 15001);
+  expect(metadata.expires_unix_nano).toBeGreaterThan(metadata.readiness_expires_unix_nano);
+  // A loaded old browser still receives its readiness-bounded legacy contract.
+  stage = 'legacy readiness mapping';
+  // Keep this read in Chromium's authenticated same-origin cookie context.
+  // The marked harness-only GET is distinct from the compiled UI's v2 reads.
+  const legacyResponse = await page.evaluate(async path => {
+    const response = await fetch(path, { credentials: 'same-origin', headers: { 'X-Managed-Subscription-Legacy-Test': '1' } });
+    return { status: response.status, body: await response.json() };
+  }, subscription);
+  expect(legacyResponse.status).toBe(200); expect(legacyProbeRequests).toBe(1);
+  const legacy = legacyResponse.body;
+  expect(legacy.view_version).toBe(1); expect(legacy.client_id).toBe(control.client_id);
+  expect(legacy.available, 'legacy availability is readiness-bound').toBe(true); expect(legacy.runtime_ready, 'legacy runtime evidence is current').toBe(true);
+  expect(legacy.expires_unix_nano).toBe(legacy.readiness_expires_unix_nano);
+  expect(legacy.expires_unix_nano / 1e6).toBeGreaterThan(legacy.server_time_unix_milli);
+  stage = 'credential and readiness presentation';
   const section = page.getByRole('region', { name: 'Client inbound subscription' });
   await expect(section.getByText(/No link issued/)).toBeVisible();
-  await expect(section.getByText('Configuration for the running routes is available.', { exact: true })).toBeVisible();
+  await expect(section.getByText("This client's authorized configuration is available.", { exact: true })).toBeVisible();
+  await expect(section.getByText('Current engine readiness is confirmed; the complete connection path has not been tested.', { exact: true })).toBeVisible();
+  await expect(section.getByText('Current engine readiness and connection paths are confirmed.', { exact: true })).toHaveCount(0);
+  await expect(section.getByText('Current readiness of all routes could not be confirmed. Authorized configuration remains available.', { exact: true })).toHaveCount(0);
+  await expect(section.getByRole('link', { name: 'Download configuration', exact: true })).toBeVisible();
   stage = 'issue'; const issuing = observe('POST', subscription + '/issue');
   await section.getByRole('button', { name: 'Create subscription link', exact: true }).click();
   const issueResponse = await issuing; expect(issueResponse.status()).toBe(200);
@@ -103,7 +149,11 @@ try {
   if (diagnostics.length) throw Error('Unexpected browser behavior');
   await writeFile(control.result_path, JSON.stringify({ verified: true, client_id: control.client_id, inbound_id: control.inbound_id,
     issued_generation: issued.generation, revoked_generation: revoked.generation, download_bytes: data.length,
-    bearer_before_status: before.status(), bearer_after_status: after.status(), token_stored: false, unexpected_requests: diagnostics.length }), { mode: 0o600 });
+    bearer_before_status: before.status(), bearer_after_status: after.status(), token_stored: false, unexpected_requests: diagnostics.length,
+    metadata_view_version: metadata.view_version, metadata_v2_requests: metadataV2Requests, document_available: metadata.available,
+    runtime_ready: metadata.runtime_ready, path_verified: metadata.path_verified,
+    independent_expiries: metadata.expires_unix_nano > metadata.readiness_expires_unix_nano,
+    legacy_readiness_bound: legacy.expires_unix_nano === legacy.readiness_expires_unix_nano }), { mode: 0o600 });
   await consumer.close(); console.log('MANAGED_UI_SUBSCRIPTION_VERIFIED');
 } catch (error) {
   let message = String(error?.message ?? 'unknown failure');
