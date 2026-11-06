@@ -279,6 +279,13 @@ func (w *Worker) Step(ctx context.Context, x Exchange) error {
 		}
 		values, e := w.process.Counters(ctx)
 		if e != nil {
+			// Preserve authoritative final counters before declaring an uncertain tail.
+			finalCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			finalErr := w.captureFinal(finalCtx)
+			cancel()
+			if finalErr == nil {
+				return e
+			}
 			_ = w.markUncertain()
 			_ = w.observe(ctx, x, "failed", "accounting_tail_uncertain", false)
 			return e
