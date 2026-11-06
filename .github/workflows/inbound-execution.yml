@@ -155,6 +155,33 @@ jobs:
           set -euo pipefail
           go test -race ./internal/api -run '^TestManagedInboundRealOwnerToAgentAccountingSiblingsAndStop$' -count=1 -json -timeout=180s > "$RUNNER_TEMP/managed-owner-agent.jsonl" || { cat "$RUNNER_TEMP/managed-owner-agent.jsonl"; exit 1; }
           python3 scripts/ci/assert-inbound-acceptance.py "$RUNNER_TEMP/managed-owner-agent.jsonl" --require TestManagedInboundRealOwnerToAgentAccountingSiblingsAndStop
+      - name: Prove real counter timeout recovery and uncertainty fencing in a private namespace
+        shell: bash
+        run: |
+          set -euo pipefail
+          go test -race -c -o "$RUNNER_TEMP/native-counter-recovery.test" ./internal/inboundruntime
+          task_temp="$(mktemp -d /tmp/dxp-counter-XXXXXXXX)"
+          trap 'rm -rf -- "$task_temp"' EXIT
+          task_uid="$(id -u)"
+          task_gid="$(id -g)"
+          test "$task_uid" -ne 0
+          # Keep ValidateNative's private Unix socket under its 100-byte limit.
+          # Namespace creation failure is a failed acceptance, never a skip.
+          sudo --non-interactive unshare --net -- bash -euc '
+            ip link set lo up
+            exec setpriv --reuid="$1" --regid="$2" --clear-groups \
+              --bounding-set=-all --inh-caps=-all --ambient-caps=-all --no-new-privs -- \
+              env -i PATH=/usr/bin:/bin LANG=C TMPDIR="$3" \
+                DARK_PRO_TEST_INBOUND_CORE="$4" DXP_INBOUND_CORE_V2_SHA256="$5" \
+                "$6" -test.run="^TestWorkerRealCounterDeadline(FinalReplay|AndEngineLossFencesTail)$" \
+                  -test.v -test.timeout=90s
+          ' -- "$task_uid" "$task_gid" "$task_temp" "$DARK_PRO_TEST_INBOUND_CORE" \
+            "$DXP_INBOUND_CORE_V2_SHA256" "$RUNNER_TEMP/native-counter-recovery.test" \
+            | go tool test2json -p github.com/darktunnelmika/dark-xray-pro/internal/inboundruntime -t \
+                > "$RUNNER_TEMP/native-counter-recovery.jsonl"
+          python3 scripts/ci/assert-inbound-acceptance.py "$RUNNER_TEMP/native-counter-recovery.jsonl" \
+            --require TestWorkerRealCounterDeadlineFinalReplay \
+            --require TestWorkerRealCounterDeadlineAndEngineLossFencesTail
       - name: Prove exact representative refunds after real partial traffic and final-tail settlement
         shell: bash
         run: |
@@ -240,6 +267,7 @@ jobs:
             ${{ runner.temp }}/native-dns.jsonl
             ${{ runner.temp }}/native-dns-race.jsonl
             ${{ runner.temp }}/native-private-control.jsonl
+            ${{ runner.temp }}/native-counter-recovery.jsonl
             ${{ runner.temp }}/managed-owner-agent.jsonl
             ${{ runner.temp }}/managed-volume-refunds.jsonl
             ${{ runner.temp }}/managed-browser.jsonl
