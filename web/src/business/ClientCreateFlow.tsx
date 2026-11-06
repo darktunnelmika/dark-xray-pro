@@ -6,14 +6,19 @@ import { bytesFromGB, uid } from "./shared";
 import ClientPlanWorkbench from "./ClientPlanWorkbench";
 import { createStorageKey, readCreateAttempt, preflightInbounds, deliverCreatedClient, type CreateAttempt } from "./clientCreateDelivery";
 import "./ClientCreateFlow.css";
+import {businessGranted} from "./permissionsV9";
 
 type Choice={id:number;name:string;archived?:boolean;spec?:{protocol?:string;network?:string;security?:string}};
 const words={
  en:{title:"Create client",manual:"Manual",preset:"Quick presets",name:"Client name",random:"Random name",identity:"Advanced identity",id:"Client ID (optional)",uuid:"UUID (optional)",uuidHelp:"Leave blank to generate securely. A custom UUID must be unique. It is never saved in browser storage.",rep:"Account owner",plan:"Plan",volume:"Volume (GiB)",days:"Duration (days)",ips:"IP limit",unlimited:"Unlimited",volumetric:"Volume",targets:"Select inbounds",search:"Search inbounds",reload:"Refresh inbounds",empty:"No selectable inbounds loaded.",loadError:"Inbound list unavailable. Refresh to continue.",deliver:"Create and activate",draft:"Save account only",draftNote:"This saves the account and charges its credit. An owner must activate it before configuration delivery.",repNote:"Inbound activation currently requires the owner. Your account can be saved for owner activation.",save:"Create client",retry:"Resume same request",busy:"Processing…",created:"Account saved. Activating selected inbounds…",pending:"Account saved; activation is not yet confirmed. Resume without another credit charge.",ready:"Client applied to all selected inbounds. Open the saved client to get its configuration.",saved:"Account saved; awaiting owner activation.",unknown:"Result not confirmed. Resume the same request; do not create another account.",invalid:"Check the name, duration, volume, IP limit and UUID.",storage:"Recovery storage unavailable. No new request was sent.",newClient:"Create another client",recovery:"Unfinished creation recovered",credential:"Re-enter the same custom UUID to retry creation",start:"Duration starts when the account is created.",selected:"selected",inspect:"View saved client"},
  fa:{title:"ایجاد کلاینت",manual:"دستی",preset:"مقادیر آماده",name:"نام کلاینت",random:"نام تصادفی",identity:"شناسه پیشرفته",id:"شناسه کلاینت (اختیاری)",uuid:"UUID (اختیاری)",uuidHelp:"برای تولید خودکار خالی بگذارید. UUID دستی باید یکتا باشد و در حافظهٔ مرورگر ذخیره نمی‌شود.",rep:"مالک حساب",plan:"نوع سرویس",volume:"حجم (گیگابایت)",days:"مدت (روز)",ips:"محدودیت IP",unlimited:"نامحدود",volumetric:"حجمی",targets:"انتخاب اینباندها",search:"جست‌وجوی اینباند",reload:"تازه‌سازی اینباندها",empty:"اینباند قابل انتخابی دریافت نشده است.",loadError:"فهرست اینباندها دریافت نشد؛ دوباره بررسی کنید.",deliver:"ساخت و فعال‌سازی",draft:"فقط ذخیره حساب",draftNote:"حساب ثبت و اعتبار آن کسر می‌شود؛ تحویل کانفیگ به فعال‌سازی توسط مالک نیاز دارد.",repNote:"فعال‌سازی اینباند فعلاً به مالک نیاز دارد. می‌توانید حساب را برای فعال‌سازی مالک ذخیره کنید.",save:"ساخت کلاینت",retry:"ادامه همان درخواست",busy:"در حال انجام…",created:"حساب ثبت شد؛ در حال فعال‌سازی اینباندهای انتخابی…",pending:"حساب ثبت شده؛ فعال‌سازی هنوز تأیید نشده است. ادامهٔ درخواست اعتبار دوباره کم نمی‌کند.",ready:"کلاینت روی همه اینباندهای انتخابی اعمال شد؛ برای دریافت کانفیگ، کلاینت ثبت‌شده را باز کنید.",saved:"حساب ثبت شد؛ منتظر فعال‌سازی مالک است.",unknown:"نتیجه تأیید نشد؛ همان درخواست را ادامه دهید و حساب تازه نسازید.",invalid:"نام، مدت، حجم، محدودیت IP و UUID را بررسی کنید.",storage:"ذخیرهٔ درخواست برای بازیابی ممکن نیست؛ درخواست تازه‌ای ارسال نشد.",newClient:"ایجاد کلاینت دیگر",recovery:"درخواست ناتمام بازیابی شد",credential:"برای تکرار ساخت، همان UUID دستی را دوباره وارد کنید",start:"مدت سرویس از زمان ساخت حساب شروع می‌شود.",selected:"انتخاب شده",inspect:"مشاهده کلاینت ثبت‌شده"}
 } as const;
-export default function ClientCreateFlow({model:m,onInspect}:{model:BusinessModel;onInspect?:(id:string)=>void}) {
+export default function ClientCreateFlow({model:m,onInspect}:{model:BusinessModel;onInspect?:(id:string,target?:"services"|"delivery")=>void}) {
  const t=words[m.language],owner=m.session.user.role==="owner",key=createStorageKey(m.session.user.id);
+ const canChooseService=owner||(m.session.user.role==="representative"&&businessGranted(m.session.user,"manage_clients"));
+ const chooseService=m.language==="fa"?"انتخاب سرویس":"Choose service";
+ const savedForService=m.language==="fa"?"حساب ثبت شد؛ برای فعال‌سازی کلاینت، یک سرویس مجاز انتخاب کنید.":"Account saved. Choose an allowed service to activate this client.";
+ const draftForService=m.language==="fa"?"حساب ثبت و اعتبار آن کسر می‌شود؛ سپس از سرویس‌های مجاز، عضویت کلاینت را تعیین کنید. کانفیگ پس از تأیید اعمال در دسترس قرار می‌گیرد.":"Saving creates the account and charges its credit. Then assign an allowed service. Configuration is available after runtime application is confirmed.";
  const [contact,setContact]=useState<ContactInput>(emptyContact);
  const [mode,setMode]=useState<"manual"|"preset">("manual"),[activate,setActivate]=useState(owner);
  const [choices,setChoices]=useState<Choice[]>([]),[selected,setSelected]=useState<number[]>([]),[query,setQuery]=useState("");
@@ -61,7 +66,7 @@ export default function ClientCreateFlow({model:m,onInspect}:{model:BusinessMode
     const ready=await deliverCreatedClient(a,m.session.csrf_token,remember,()=>live.current);
     if(!live.current)return;
     setDone(ready);setNotice(ready?t.ready:t.pending);
-   } else {setDone(true);setNotice(t.saved);}
+   } else {setDone(true);setNotice(canChooseService?savedForService:t.saved);}
   } catch(e) {
    if(live.current)setNotice(e instanceof Error&&e.message==="inbound_not_ready"?(a.created?t.pending:(a.creation_sent?t.unknown:(m.language==="fa"?"اینباند انتخاب‌شده آماده نیست. ابتدا آن را در بخش اینباندها فعال یا اصلاح کنید؛ حسابی ثبت و اعتباری کسر نشده است.":"Selected inbound is not ready. Activate or resolve it in Inbounds first; no account was saved or credit charged."))):e instanceof Error&&e.message==="manual_uuid_required"?t.credential:a.created?t.pending:t.unknown);
   } finally {
@@ -111,8 +116,8 @@ export default function ClientCreateFlow({model:m,onInspect}:{model:BusinessMode
      {activate&&<><h4>{t.targets} · {selected.length} {t.selected}</h4><input aria-label={t.search} placeholder={t.search} value={query} onChange={e=>setQuery(e.target.value)}/>
       <button type="button" disabled={loading} onClick={()=>void load()}>{t.reload}</button>
       {loadError?<p role="alert">{t.loadError}</p>:<div className="client-create-options">{choices.filter(x=>(x.name+" "+x.id).toLowerCase().includes(query.toLowerCase())).map(x=><label key={x.id}><input type="checkbox" checked={selected.includes(x.id)} disabled={!selected.includes(x.id)&&selected.length>=16} onChange={e=>setSelected(old=>e.target.checked?[...old,x.id]:old.filter(id=>id!==x.id))}/><span>{x.name}<small>#{x.id} · {[x.spec?.protocol,x.spec?.network,x.spec?.security].filter(Boolean).join(" / ")}</small></span></label>)}{!choices.length&&<p>{t.empty}</p>}</div>}</>}
-    </div>:<p>{t.repNote}</p>}
-    {!activate&&<p>{t.draftNote}</p>}
+    </div>:<p>{canChooseService?(m.language==="fa"?"پس از ذخیرهٔ حساب، می‌توانید کلاینت را به سرویس‌هایی که مالک به شما مجوز داده اضافه کنید.":"After saving the account, you can assign this client to services granted by the owner."):t.repNote}</p>}
+    {!activate&&<p>{canChooseService?draftForService:t.draftNote}</p>}
     </section>
     <section className="client-form-section" aria-label="Client plan"><h4>{m.language==="fa"?"۳. حجم و اعتبار":"3. Quota and duration"}</h4>
     <div className="client-create-tabs">
@@ -140,7 +145,7 @@ export default function ClientCreateFlow({model:m,onInspect}:{model:BusinessMode
    {!attempt.created&&attempt.manual_uuid&&<label>{t.credential}<input autoComplete="off" value={uuid} onChange={e=>setUUID(e.target.value.toLowerCase())}/></label>}
    {!done&&<button type="button" disabled={busy||storageError} onClick={()=>void send(attempt)}>{busy?t.busy:t.retry}</button>}
    {!attempt.created&&!attempt.creation_sent&&<button type="button" disabled={busy} onClick={editUnsent}>{m.language==="fa"?"ویرایش درخواست ارسال‌نشده":"Edit unsent request"}</button>}
-   {attempt.created&&<button type="button" onClick={()=>onInspect?onInspect(attempt.payload.client_id):m.setLifeClientID(attempt.payload.client_id)}>{t.inspect}</button>}
+   {attempt.created&&<button type="button" onClick={()=>onInspect?onInspect(attempt.payload.client_id,canChooseService&&!attempt.inbound_ids.length?"services":"delivery"):m.setLifeClientID(attempt.payload.client_id)}>{canChooseService&&!attempt.inbound_ids.length?chooseService:t.inspect}</button>}
    {done&&<button type="button" onClick={reset}>{t.newClient}</button>}
   </div>}
   {storageError&&<p role="alert">{t.storage}</p>}

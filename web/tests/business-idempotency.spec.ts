@@ -115,12 +115,14 @@ test("ambiguous client creation locks the payload until identical replay succeed
  expect(m).toHaveLength(2);expect(m[1].body).toEqual(m[0].body);
  await expect(form.getByLabel("Client name",{exact:true})).toHaveCount(0);
  await form.getByRole("button",{name:"Resume same request"}).click();
- await expect(form.getByText("Account saved; awaiting owner activation.")).toBeVisible();
+ await expect(form.getByText("Account saved. Choose an allowed service to activate this client.")).toBeVisible();
+ await expect(form.getByRole("button",{name:"Choose service",exact:true})).toBeVisible();
  expect(m).toHaveLength(3);expect(m[2].body).toEqual(m[0].body);
  await form.getByRole("button",{name:"Create another client"}).click();
  await form.getByLabel("Client name",{exact:true}).fill("Second customer");
  await form.getByRole("button",{name:"Create client",exact:true}).click();
- await expect(form.getByText("Account saved; awaiting owner activation.")).toBeVisible();
+ await expect(form.getByText("Account saved. Choose an allowed service to activate this client.")).toBeVisible();
+ await expect(form.getByRole("button",{name:"Choose service",exact:true})).toBeVisible();
  expect(m).toHaveLength(4);expect(m[3].body.event_id).not.toBe(m[2].body.event_id);
  for(const req of m)expect(req.csrf).toBe(csrf);
 });

@@ -41,7 +41,8 @@ test('manual creation sends Telegram metadata and shows it in directory',async({
  await form.getByLabel('Internal note',{exact:true}).fill('Customer support note');
  await form.getByLabel("Creation mode",{exact:true}).selectOption("account");
  await form.getByRole('button',{name:'Create client',exact:true}).click();
- await expect(form.getByText('Account saved; awaiting owner activation.')).toBeVisible();
+ await expect(form.getByText('Account saved. Choose an allowed service to activate this client.')).toBeVisible();
+ await expect(form.getByRole("button",{name:"Choose service",exact:true})).toBeVisible();
  expect(f.creates[0].contact).toEqual({telegram_username:'new_client',telegram_id:'987654321',note:'Customer support note'});
  await expect(page.locator('.clients-explorer-row').getByText('@new_client',{exact:true})).toBeVisible();
 });

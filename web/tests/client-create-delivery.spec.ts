@@ -1,7 +1,7 @@
 import {test,expect,type Page} from "@playwright/test";
 const csrf="a".repeat(64);
-async function fixture(page:Page,rep=false,lost=false,blocked=false,stopAfterApply=false) {
- const user={id:rep?"rep-a":"owner",username:"reviewer",role:rep?"representative":"owner",representative_id:rep?"rep-a":"owner"};
+async function fixture(page:Page,rep=false,lost=false,blocked=false,stopAfterApply=false,manage=true) {
+ const user={id:rep?"rep-a":"owner",username:"reviewer",role:rep?"representative":"owner",representative_id:rep?"rep-a":"owner",permissions:{manage_clients:manage}};
  const creates:Record<string,unknown>[]=[],commands:Record<string,unknown>[]=[];
  let client="",dropped=false,active=false,stopped=false;
  const state=()=>({version:1,enabled:true,inbound_id:501,revision:active?2:1,plan_revision:1,inbound_revision:1,desired_revision:1,active_revision:1,
@@ -77,7 +77,10 @@ test("representative creation keeps tenant scope and never calls owner activatio
  await page.setViewportSize({width:320,height:800});
  await page.getByLabel("Client name",{exact:true}).fill("Rep manual");
  await page.getByRole("button",{name:"Create client",exact:true}).click();
- await expect(page.getByText("Account saved; awaiting owner activation.")).toBeVisible();
+ await expect(page.getByText("Account saved. Choose an allowed service to activate this client.")).toBeVisible();
+ await page.getByRole("button",{name:"Choose service",exact:true}).click();
+ await expect(page.getByRole("region",{name:"Representative client services"})).toBeVisible();
+ await expect(page.getByRole("button",{name:"Services",exact:true})).toHaveAttribute("aria-pressed","true");
  expect(f.creates[0].representative_id).toBe("rep-a");expect(f.commands).toHaveLength(0);
  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
 });
@@ -130,4 +133,18 @@ test("a stop requested during membership apply is never presented as ready deliv
  await expect(page.getByText('Account saved; activation is not yet confirmed.',{exact:false})).toBeVisible({timeout:20000});
  await expect(page.getByText('Client applied to all selected inbounds.',{exact:false})).toHaveCount(0);
  expect(f.creates).toHaveLength(1);expect(f.commands).toHaveLength(1);expect(f.commands[0].action).toBe('apply');
+});
+
+test("representative without management rights retains owner handoff",async({page})=>{
+ const f=await fixture(page,true,false,false,false,false);
+ await expect(page.getByText("Inbound activation currently requires the owner.",{exact:false})).toBeVisible();
+ await page.getByLabel("Client name",{exact:true}).fill("Needs owner");await page.getByRole("button",{name:"Create client",exact:true}).click();
+ await expect(page.getByText("Account saved; awaiting owner activation.")).toBeVisible();await expect(page.getByRole("button",{name:"Choose service",exact:true})).toHaveCount(0);
+ await page.getByRole("button",{name:"View saved client"}).click();await expect(page.getByRole("button",{name:"Services",exact:true})).toHaveCount(0);
+ expect(f.creates).toHaveLength(1);expect(f.commands).toHaveLength(0);
+});
+test("owner account-only creation links directly to service membership",async({page})=>{
+ const f=await fixture(page);await page.getByLabel("Creation mode").selectOption("account");await page.getByLabel("Client name",{exact:true}).fill("Assign later");await page.getByRole("button",{name:"Create client",exact:true}).click();
+ await page.getByRole("button",{name:"Choose service",exact:true}).click();await expect(page.getByLabel("Service inbound")).toBeVisible();await expect(page.getByRole("button",{name:"Services",exact:true})).toHaveAttribute("aria-pressed","true");
+ expect(f.creates).toHaveLength(1);expect(f.commands).toHaveLength(0);
 });

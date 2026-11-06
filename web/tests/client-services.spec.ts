@@ -97,3 +97,18 @@ test('failed service refresh removes stale edit choices without claiming no gran
  fail=true;await page.getByRole('button',{name:'Refresh service status'}).click();await expect(page.getByText('Result not verified. Check service state and permission.')).toBeVisible();await expect(page.getByLabel('Service change reason')).toHaveCount(0);await expect(page.getByText('No services have been granted to you. Contact the owner to request access.')).toHaveCount(0);expect(f.previews).toHaveLength(0);expect(f.commands).toHaveLength(0);
  fail=false;await page.getByRole('button',{name:'Refresh service status'}).click();await expect(page.getByLabel('Service change reason')).toBeVisible();
 });
+
+test('representative application status follows runtime evidence and readiness loss',async({page})=>{
+ const f=await setup(page,{rep:true});let applied=false,ready=true;
+ await page.route('**/api/v1/workspace/clients/customer/services',r=>r.fulfill({json:{client_id:'customer',services:[{inbound_id:501,name:'Allowed service',grant_revision:1,execution_revision:2,plan_revision:1,inbound_revision:1,assigned:true,applied,ready}]}}));
+ await page.getByRole('button',{name:'Manage',exact:true}).click();await page.getByRole('button',{name:'Services',exact:true}).click();
+ await page.getByLabel('Allowed service').selectOption('501');
+ await expect(page.getByText('Active application not confirmed',{exact:false})).toBeVisible();
+ applied=true;await page.getByRole('button',{name:'Refresh service status'}).click();
+ await expect(page.getByText('Applied to service',{exact:false})).toBeVisible();
+ ready=false;await page.getByRole('button',{name:'Refresh service status'}).click();
+ await expect(page.getByText('Applied to service',{exact:false})).toHaveCount(0);
+ await expect(page.getByText('Active application not confirmed',{exact:false})).toBeVisible();
+ await expect(page.getByLabel('Service change reason')).toHaveCount(0);
+ expect(f.commands).toHaveLength(0);expect(f.previews).toHaveLength(0);
+});
