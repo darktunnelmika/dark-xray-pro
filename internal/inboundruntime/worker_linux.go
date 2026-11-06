@@ -379,8 +379,10 @@ func (w *Worker) Step(ctx context.Context, x Exchange) (stepErr error) {
 	if len(bundle.Listeners) == 0 && len(bundle.Components) == 0 {
 		w.state = journal{Version: 1, NodeID: w.cfg.NodeID, InstallationID: w.cfg.InstallationID, Generation: bundle.Generation, Bundle: &bundle, Phase: "idle", FinalAccepted: true, Resolution: w.state.Resolution}
 		w.deadline = deadline
-		if e = w.save(); e != nil {
-			return e
+		if !w.journal.matchesPersisted(w.state) {
+			if e = w.save(); e != nil {
+				return e
+			}
 		}
 		return w.observe(ctx, x, "stopped", "", false)
 	}

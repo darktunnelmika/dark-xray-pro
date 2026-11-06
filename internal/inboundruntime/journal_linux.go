@@ -47,6 +47,11 @@ type privateJournal struct {
 	lock *os.File
 	aead cipher.AEAD
 	aad  []byte
+
+	// Only authenticated loads and fully synced writes establish this witness.
+	// A speculative in-memory state is never evidence of persistence.
+	persistedSHA   [sha256.Size]byte
+	persistedKnown bool
 }
 
 func openJournal(dir string, key []byte, node, installation string) (*privateJournal, journal, error) {
@@ -135,6 +140,8 @@ func openJournal(dir string, key []byte, node, installation string) (*privateJou
 		j.close()
 		return nil, empty, err
 	}
+	j.persistedSHA = sha256.Sum256(clear)
+	j.persistedKnown = true
 	return j, state, nil
 }
 
@@ -226,7 +233,21 @@ func validateJournal(key []byte, s journal) error {
 	}
 	return nil
 }
+
+// matchesPersisted compares the complete candidate with authenticated or fully
+// persisted JSON. Only the empty-delivery branch may use this to omit a write;
+// active state, outboxes and final receipts always retain their existing saves.
+func (j *privateJournal) matchesPersisted(state journal) bool {
+	if !j.persistedKnown {
+		return false
+	}
+	raw, err := json.Marshal(state)
+	return err == nil && len(raw) <= 64<<20 && sha256.Sum256(raw) == j.persistedSHA
+}
+
 func (j *privateJournal) save(state journal) error {
+	// A failed write, including a failure after rename, leaves no usable witness.
+	j.persistedKnown = false
 	raw, e := json.Marshal(state)
 	if e != nil || len(raw) > 64<<20 {
 		return errors.New("inbound_journal_too_large")
@@ -260,7 +281,12 @@ func (j *privateJournal) save(state journal) error {
 		return e
 	}
 	defer d.Close()
-	return d.Sync()
+	if e = d.Sync(); e != nil {
+		return e
+	}
+	j.persistedSHA = sha256.Sum256(raw)
+	j.persistedKnown = true
+	return nil
 }
 func (j *privateJournal) close() {
 	if j != nil && j.lock != nil {
