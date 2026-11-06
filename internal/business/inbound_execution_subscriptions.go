@@ -193,20 +193,30 @@ func (s *Store) RevealInboundExecutionSubscription(ctx context.Context, key []by
 }
 
 type executionSubscriptionRoute struct {
-	view     ix.SubscriptionRoute
-	spec     inboundspec.Spec
-	user     inboundspec.User
-	endpoint inboundspec.Endpoint
-	expires  int64
-	verified bool
-	formats  []string
+	view             ix.SubscriptionRoute
+	spec             inboundspec.Spec
+	user             inboundspec.User
+	endpoint         inboundspec.Endpoint
+	expires          int64
+	verified         bool
+	ready            bool
+	readinessExpires int64
+	formats          []string
 }
 
 func executionSubscriptionRoutes(ctx context.Context, tx *sql.Tx, key []byte, client string) ([]executionSubscriptionRoute, error) {
+	return executionSubscriptionRoutesAt(ctx, tx, key, client, time.Now().UnixNano())
+}
+
+func executionSubscriptionRoutesAt(ctx context.Context, tx *sql.Tx, key []byte, client string, now int64) ([]executionSubscriptionRoute, error) {
 	out := []executionSubscriptionRoute{}
 	var eligible int
 	if err := tx.QueryRowContext(ctx, `SELECT eligible FROM pro_usage_eligibility WHERE client_id=?`, client).Scan(&eligible); err != nil || eligible != 1 {
 		return out, ErrConflict
+	}
+	var currentUUID string
+	if err := tx.QueryRowContext(ctx, `SELECT uuid FROM clients WHERE id=?`, client).Scan(&currentUUID); err != nil {
+		return nil, err
 	}
 	rows, err := tx.QueryContext(ctx, `SELECT inbound_id,active_revision,desired_revision FROM inbound_execution_heads WHERE desired_state='active' AND active_revision>0 ORDER BY inbound_id`)
 	if err != nil {
@@ -227,7 +237,6 @@ func executionSubscriptionRoutes(ctx context.Context, tx *sql.Tx, key []byte, cl
 	if err != nil {
 		return nil, err
 	}
-	now := time.Now().UnixNano()
 	for _, r := range refs {
 		snapshot, e := readExecutionSnapshot(ctx, tx, key, r.id, r.active)
 		if e != nil {
@@ -253,8 +262,15 @@ func executionSubscriptionRoutes(ctx context.Context, tx *sql.Tx, key []byte, cl
 		if !found {
 			return nil, ErrUnavailable
 		}
+		if user.UUID != currentUUID {
+			return nil, ErrConflict
+		}
 		expires := snapshot.ExpiresUnix * int64(time.Second)
-		verified := true
+		if expires <= now {
+			return nil, ErrConflict
+		}
+		ready, verified := true, true
+		readinessExpires := expires
 		for node, install := range executionSnapshotNodes(snapshot) {
 			var desired, observed uint64
 			var enc []byte
@@ -268,7 +284,7 @@ func executionSubscriptionRoutes(ctx context.Context, tx *sql.Tx, key []byte, cl
 			if e != nil {
 				return nil, e
 			}
-			if e = executionBundleAuthority(ctx, tx, key, b); e != nil {
+			if e = executionPublicationAuthority(ctx, tx, key, b, r.id, r.active); e != nil {
 				return nil, e
 			}
 			present := false
@@ -284,25 +300,35 @@ func executionSubscriptionRoutes(ctx context.Context, tx *sql.Tx, key []byte, cl
 			if openPlanValue(key, executionAAD("observation", node+"/"+install, observed), enc, &observation) != nil {
 				return nil, ErrUnavailable
 			}
-			if observation.Generation != desired || observation.ConfigSHA != b.ConfigSHA || observation.ManifestSHA != b.ManifestSHA || !observation.ProcessReady || (observation.State != "active" && observation.State != "ready") || observation.LeaseExpires <= now || observation.ObservedUnixNano > now || now-observation.ObservedUnixNano > int64(15*time.Second) || observation.AccountingState != "accepted" || (observation.HealthState != "healthy" && observation.HealthState != "engine_ready") {
+			if observation.NodeID != node || observation.InstallationID != install || observation.Generation != desired || observation.ConfigSHA != b.ConfigSHA || observation.ManifestSHA != b.ManifestSHA {
 				return nil, ErrConflict
 			}
-			if observation.HealthState != "healthy" {
+			// Current readiness is separate from an authorized, previously applied
+			// credential document. Missing readiness never renews an execution lease.
+			nodeReady := observation.ProcessReady && (observation.State == "active" || observation.State == "ready") && observation.LeaseExpires > now && observation.ObservedUnixNano > 0 && observation.ObservedUnixNano <= now && now-observation.ObservedUnixNano <= int64(15*time.Second) && observation.AccountingState == "accepted" && (observation.HealthState == "healthy" || observation.HealthState == "engine_ready")
+			if nodeReady {
+				accountingUntil, e := executionAccountingFreshUntil(ctx, tx, node, install, desired, observation.EpochID, now)
+				if errors.Is(e, ErrConflict) {
+					nodeReady = false
+				} else if e != nil {
+					return nil, e
+				} else {
+					for _, until := range []int64{observation.LeaseExpires, observation.ObservedUnixNano + int64(15*time.Second), accountingUntil} {
+						if until < readinessExpires {
+							readinessExpires = until
+						}
+					}
+				}
+			}
+			if !nodeReady {
+				ready = false
+			}
+			if !nodeReady || observation.HealthState != "healthy" {
 				verified = false
 			}
-			if observation.LeaseExpires < expires {
-				expires = observation.LeaseExpires
-			}
-			if freshUntil := observation.ObservedUnixNano + int64(15*time.Second); freshUntil < expires {
-				expires = freshUntil
-			}
-			accountingUntil, e := executionAccountingFreshUntil(ctx, tx, node, install, desired, observation.EpochID, now)
-			if e != nil {
-				return nil, e
-			}
-			if accountingUntil < expires {
-				expires = accountingUntil
-			}
+		}
+		if !ready {
+			readinessExpires = 0
 		}
 		profile := InboundInput{ID: r.id, Name: snapshot.Name, Spec: snapshot.Profile.Spec, Transport: snapshot.Profile.Spec.Network, Security: snapshot.Profile.Spec.Security}
 		plan := NativeInboundPlan{Profile: NativeInbound{InboundInput: profile}, Nodes: snapshot.Nodes}
@@ -333,7 +359,7 @@ func executionSubscriptionRoutes(ctx context.Context, tx *sql.Tx, key []byte, cl
 			if endpoint.SpiderX != "" {
 				spec.Client["spiderX"] = endpoint.SpiderX
 			}
-			out = append(out, executionSubscriptionRoute{view: ix.SubscriptionRoute{InboundID: r.id, Revision: r.active, NodeID: endpoint.NodeID, Path: endpoint.Path, Protocol: spec.Protocol, Name: endpoint.Label}, spec: spec, user: user, endpoint: inboundspec.Endpoint{Address: endpoint.Address, Port: endpoint.Port, Name: endpoint.Label, SNI: endpoint.ServerName}, expires: expires, verified: verified, formats: formats})
+			out = append(out, executionSubscriptionRoute{view: ix.SubscriptionRoute{InboundID: r.id, Revision: r.active, NodeID: endpoint.NodeID, Path: endpoint.Path, Protocol: spec.Protocol, Name: endpoint.Label}, spec: spec, user: user, endpoint: inboundspec.Endpoint{Address: endpoint.Address, Port: endpoint.Port, Name: endpoint.Label, SNI: endpoint.ServerName}, expires: expires, verified: verified, ready: ready, readinessExpires: readinessExpires, formats: formats})
 		}
 	}
 	if len(out) == 0 {
@@ -370,6 +396,25 @@ func executionSubscriptionFormats(routes []executionSubscriptionRoute) []string 
 	return out
 }
 
+// executionSubscriptionReadiness never extends evidence beyond its original
+// lease, observation or accounting deadline, including during a slow read.
+func executionSubscriptionReadiness(routes []executionSubscriptionRoute, now int64) (bool, bool, int64) {
+	if len(routes) == 0 {
+		return false, false, 0
+	}
+	verified, expires := true, int64(0)
+	for _, route := range routes {
+		if !route.ready || route.readinessExpires <= now {
+			return false, false, 0
+		}
+		verified = verified && route.verified
+		if expires == 0 || route.readinessExpires < expires {
+			expires = route.readinessExpires
+		}
+	}
+	return true, verified, expires
+}
+
 func projectExecutionSubscription(ctx context.Context, tx *sql.Tx, key []byte, client, format string) (ix.Subscription, error) {
 	routes, err := executionSubscriptionRoutes(ctx, tx, key, client)
 	if err != nil {
@@ -381,7 +426,7 @@ func projectExecutionSubscription(ctx context.Context, tx *sql.Tx, key []byte, c
 // Rendering is shared by applied subscriptions and explicitly prepared exports.
 // The caller supplies route authority; preparation always marks verified=false.
 func renderExecutionSubscription(client, format string, routes []executionSubscriptionRoute) (ix.Subscription, error) {
-	out := ix.Subscription{Version: ix.Version, ClientID: client, Format: format, Routes: []ix.SubscriptionRoute{}, PathVerified: true, ContentType: "application/json"}
+	out := ix.Subscription{Version: ix.Version, ClientID: client, Format: format, Routes: []ix.SubscriptionRoute{}, ContentType: "application/json"}
 	var err error
 
 	if format == "" {
@@ -407,7 +452,6 @@ func renderExecutionSubscription(client, format string, routes []executionSubscr
 		if out.ExpiresUnixNano == 0 || r.expires < out.ExpiresUnixNano {
 			out.ExpiresUnixNano = r.expires
 		}
-		out.PathVerified = out.PathVerified && r.verified
 		switch format {
 		case "uri", "wireguard":
 			lines = append(lines, string(raw))
@@ -439,6 +483,7 @@ func renderExecutionSubscription(client, format string, routes []executionSubscr
 	if time.Now().UnixNano() >= out.ExpiresUnixNano {
 		return out, ErrConflict
 	}
+	out.RuntimeReady, out.PathVerified, out.ReadinessExpiresUnixNano = executionSubscriptionReadiness(routes, time.Now().UnixNano())
 	out.SHA256 = ix.BytesSHA(out.Content)
 	return out, nil
 }
@@ -467,14 +512,13 @@ func (s *Store) InboundExecutionSubscription(ctx context.Context, key []byte, ac
 		return out, err
 	}
 	out.Available = true
-	out.PathVerified = true
+	out.RuntimeReady, out.PathVerified, out.ReadinessExpiresUnixNano = executionSubscriptionReadiness(routes, time.Now().UnixNano())
 	out.Formats = executionSubscriptionFormats(routes)
 	out.RouteCount = len(routes)
 	for _, r := range routes {
 		if out.ExpiresUnixNano == 0 || r.expires < out.ExpiresUnixNano {
 			out.ExpiresUnixNano = r.expires
 		}
-		out.PathVerified = out.PathVerified && r.verified
 	}
 	return out, tx.Commit()
 }

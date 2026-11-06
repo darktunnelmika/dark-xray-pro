@@ -259,15 +259,17 @@ type UsageReceipt struct {
 // SubscriptionView contains no credential or client document. Exports are
 // projected from current applied revisions after authorization on every read.
 type SubscriptionView struct {
-	ClientID        string    `json:"client_id"`
-	Generation      uint64    `json:"generation"`
-	State           string    `json:"state"`
-	Available       bool      `json:"available"`
-	Formats         []string  `json:"formats"`
-	RouteCount      int       `json:"route_count"`
-	ExpiresUnixNano int64     `json:"expires_unix_nano"`
-	PathVerified    bool      `json:"path_verified"`
-	Blockers        []Blocker `json:"blockers"`
+	ClientID                 string    `json:"client_id"`
+	Generation               uint64    `json:"generation"`
+	State                    string    `json:"state"`
+	Available                bool      `json:"available"`
+	Formats                  []string  `json:"formats"`
+	RouteCount               int       `json:"route_count"`
+	ExpiresUnixNano          int64     `json:"expires_unix_nano"`
+	PathVerified             bool      `json:"path_verified"`
+	RuntimeReady             bool      `json:"runtime_ready"`
+	ReadinessExpiresUnixNano int64     `json:"readiness_expires_unix_nano"`
+	Blockers                 []Blocker `json:"blockers"`
 }
 
 type SubscriptionRoute struct {
@@ -280,13 +282,15 @@ type SubscriptionRoute struct {
 }
 
 type Subscription struct {
-	Version         int                 `json:"version"`
-	ClientID        string              `json:"client_id"`
-	Format          string              `json:"format"`
-	SHA256          string              `json:"sha256"`
-	ExpiresUnixNano int64               `json:"expires_unix_nano"`
-	PathVerified    bool                `json:"path_verified"`
-	Routes          []SubscriptionRoute `json:"routes"`
-	Content         []byte              `json:"-"`
-	ContentType     string              `json:"content_type"`
+	Version                  int                 `json:"version"`
+	ClientID                 string              `json:"client_id"`
+	Format                   string              `json:"format"`
+	SHA256                   string              `json:"sha256"`
+	ExpiresUnixNano          int64               `json:"expires_unix_nano"`
+	PathVerified             bool                `json:"path_verified"`
+	RuntimeReady             bool                `json:"runtime_ready"`
+	ReadinessExpiresUnixNano int64               `json:"readiness_expires_unix_nano"`
+	Routes                   []SubscriptionRoute `json:"routes"`
+	Content                  []byte              `json:"-"`
+	ContentType              string              `json:"content_type"`
 }

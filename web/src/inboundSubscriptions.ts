@@ -3,8 +3,9 @@ import { assertExecutionPublic } from "./inboundExecution";
 
 export const inboundSubscriptionFormats = ["uri", "json", "xray", "sing-box", "wireguard"] as const;
 export type InboundSubscriptionView = { enabled: false; client_id: string } | {
-  enabled: true; client_id: string; generation: number; state: "absent" | "active" | "revoked";
+  enabled: true; view_version: 2; client_id: string; generation: number; state: "absent" | "active" | "revoked";
   available: boolean; formats: string[]; route_count: number; expires_unix_nano: number;
+  runtime_ready: boolean; readiness_expires_unix_nano: number;
   path_verified: boolean; server_time_unix_milli: number;
 };
 export type InboundSubscriptionAttempt = {
@@ -12,6 +13,7 @@ export type InboundSubscriptionAttempt = {
 };
 const object = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
 const natural = (v: unknown): v is number => Number.isSafeInteger(v) && Number(v) >= 0;
+const nano = (v: unknown): v is number => typeof v === "number" && Number.isInteger(v) && v >= 0 && v <= 9_223_372_036_854_775_000;
 function publicOnly(raw: unknown): void {
   assertExecutionPublic(raw);
   const walk = (v: unknown) => {
@@ -28,10 +30,13 @@ export function readInboundSubscriptionView(raw: unknown, clientID: string): Inb
   publicOnly(raw);
   if (!object(raw) || raw.client_id !== clientID || typeof raw.enabled !== "boolean") throw Error("subscription_scope");
   if (!raw.enabled) return { enabled: false, client_id: clientID };
-  if (!natural(raw.generation) || !["absent", "active", "revoked"].includes(String(raw.state)) || (raw.state === "absent") !== (raw.generation === 0) ||
+  if (raw.view_version !== 2 || !natural(raw.generation) || !["absent", "active", "revoked"].includes(String(raw.state)) || (raw.state === "absent") !== (raw.generation === 0) ||
     typeof raw.available !== "boolean" || typeof raw.path_verified !== "boolean" || !Array.isArray(raw.formats) ||
     raw.formats.some(f => !inboundSubscriptionFormats.includes(f as typeof inboundSubscriptionFormats[number])) || new Set(raw.formats).size !== raw.formats.length ||
-    !natural(raw.route_count) || raw.route_count > 100000 || typeof raw.expires_unix_nano !== "number" || !Number.isInteger(raw.expires_unix_nano) || raw.expires_unix_nano < 0 || raw.expires_unix_nano > 9_223_372_036_854_775_000 ||
+    !natural(raw.route_count) || raw.route_count > 100000 || !nano(raw.expires_unix_nano) ||
+    typeof raw.runtime_ready !== "boolean" || !nano(raw.readiness_expires_unix_nano) ||
+    raw.runtime_ready && (!raw.available || !raw.readiness_expires_unix_nano || raw.readiness_expires_unix_nano > raw.expires_unix_nano) ||
+    !raw.runtime_ready && (raw.readiness_expires_unix_nano !== 0 || raw.path_verified) ||
     !natural(raw.server_time_unix_milli) || !raw.server_time_unix_milli ||
     raw.available && (!raw.route_count || !raw.formats.length || !raw.expires_unix_nano) ||
     !raw.available && (raw.route_count !== 0 || raw.formats.length !== 0 || raw.expires_unix_nano !== 0 || raw.path_verified)) throw Error("subscription_state");

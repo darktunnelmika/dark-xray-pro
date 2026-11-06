@@ -51,6 +51,7 @@ type Binary struct {
 	featureMu        sync.Mutex
 	featuresChecked  bool
 	tunDNSActivation bool
+	diagnostics      *Diagnostics
 }
 
 func OpenBinary(path, digest string) (*Binary, error) {
@@ -404,6 +405,9 @@ func (p *Native) expireLease(serial uint64) {
 	if !p.ending && p.leaseSerial == serial {
 		p.ending = true
 		if p.cmd != nil && p.cmd.Process != nil {
+			if p.binary != nil {
+				p.binary.diagnostics.record(diagnosticNativeStop, diagnosticLeaseExpired)
+			}
 			_ = p.cmd.Process.Kill()
 		}
 	}
@@ -414,6 +418,9 @@ func (p *Native) Stop() {
 		return
 	}
 	p.mu.Lock()
+	if !p.ending && p.cmd != nil && p.cmd.Process != nil && p.binary != nil {
+		p.binary.diagnostics.record(diagnosticNativeStop, diagnosticStopRequested)
+	}
 	p.ending = true
 	if p.timer != nil {
 		p.timer.Stop()

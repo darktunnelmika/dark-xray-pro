@@ -260,7 +260,7 @@ func main() {
 		if e != nil {
 			log.Fatal("invalid managed inbound engine configuration")
 		}
-		worker, e := inboundruntime.Open(inboundruntime.Config{Directory: os.Getenv("DARK_PRO_INBOUND_RUNTIME_DIR"), NodeID: identity.NodeID, InstallationID: identity.InstallationID, Key: []byte(identity.AgentToken), Native: inboundruntime.BinaryConfig{Path: os.Getenv("DARK_PRO_INBOUND_CORE_PATH"), SHA256: os.Getenv("DARK_PRO_INBOUND_CORE_SHA256")}, External: engines})
+		worker, e := inboundruntime.Open(inboundruntime.Config{Directory: os.Getenv("DARK_PRO_INBOUND_RUNTIME_DIR"), NodeID: identity.NodeID, InstallationID: identity.InstallationID, Key: []byte(identity.AgentToken), Native: inboundruntime.BinaryConfig{Path: os.Getenv("DARK_PRO_INBOUND_CORE_PATH"), SHA256: os.Getenv("DARK_PRO_INBOUND_CORE_SHA256")}, External: engines, Diagnostics: &inboundruntime.Diagnostics{}})
 		if e != nil {
 			log.Fatal("managed inbound execution unavailable: ", e)
 		}

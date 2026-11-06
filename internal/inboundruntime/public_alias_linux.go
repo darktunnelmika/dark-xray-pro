@@ -424,7 +424,7 @@ func (w *Worker) fencePublicAliases(ctx context.Context, cause error) error {
 	// Losing source authority closes and joins public relays before any cleanup
 	// decision. A genuine final remains durable/replayable even while an alias
 	// is waiting for its finite kernel lifetime to expire.
-	if err := w.captureFinal(ctx); err != nil {
+	if err := w.captureFinal(ctx, diagnosticAliasFence); err != nil {
 		_ = w.markUncertain()
 		return cause
 	}
