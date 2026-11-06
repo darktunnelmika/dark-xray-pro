@@ -41,6 +41,8 @@ type backupSchemaObject [4]string
 
 func backupSchemaGroup(name string) string {
 	switch {
+	case name == "representative_service_grants" || strings.HasPrefix(name, "service_grants_"):
+		return "service_grants"
 	case strings.HasPrefix(name, "client_contact"):
 		return "client_contact"
 	case strings.HasPrefix(name, "telegram_bonus_"):
@@ -246,6 +248,11 @@ func validateOfflineBackupDB(ctx context.Context, db *sql.DB) (BackupValidation,
 	if len(groups["darkrestore"]) > 0 {
 		present, err := darkRestoreSchemaState(ctx, db)
 		if err != nil || !present || len(groups["ownership"]) == 0 || len(groups["usage"]) == 0 || validateDarkRestoreImportData(ctx, db) != nil {
+			return result, ErrOfflineBackupInvalid
+		}
+	}
+	if len(groups["service_grants"]) > 0 {
+		if validateServiceGrantData(ctx, db) != nil {
 			return result, ErrOfflineBackupInvalid
 		}
 	}

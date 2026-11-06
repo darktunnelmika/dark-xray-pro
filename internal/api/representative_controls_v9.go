@@ -10,6 +10,8 @@ import (
 // preserves the Representative.enabled flag used by billable Xray policy;
 // login suspension is not customer traffic suspension.
 func (s *Server) attachRepresentativeControls(mux *http.ServeMux) {
+	s.attachRepresentativeServiceGrants(mux)
+	s.attachRepresentativeServiceExecution(mux)
 	if s.business == nil {
 		return
 	}

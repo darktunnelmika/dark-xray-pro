@@ -4,6 +4,7 @@ import { api, mutation } from "../session";
 import { uid } from "./shared";
 import type { BusinessModel } from "./useBusinessWorkspace";
 import "./RepresentativeControlsV9.css";
+import RepresentativeServiceGrants from "./RepresentativeServiceGrants";
 
 type PermissionKey = "view_clients" | "create_clients" | "renew_clients" | "edit_clients" |
   "manage_clients" | "manage_groups" | "view_finance";
@@ -244,6 +245,7 @@ export default function RepresentativeControlsV9({model,representativeID,onClose
     </div>
     <p>{t.balance}: {volumeText(activity.available_volume_bytes)} · {integerText(activity.available_unlimited_units)} {t.units}</p>
    </div>
+   <RepresentativeServiceGrants key={representativeID} model={model} representativeID={representativeID}/>
    <div className="rep-admin-history">
     <h4>{t.audits}</h4>
     {events.length?events.map(event=><div key={event.event_id}>

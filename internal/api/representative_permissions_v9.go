@@ -57,6 +57,18 @@ func requiredRepresentativePermission(r *http.Request) (string, bool) {
 		if strings.HasSuffix(path, "/quote") || strings.HasSuffix(path, "/commit") {
 			return "renew_clients", true
 		}
+	case strings.HasPrefix(path, "/api/v1/workspace/clients/") && strings.HasSuffix(path, "/services"):
+		parts := strings.Split(strings.TrimPrefix(path, "/api/v1/workspace/clients/"), "/")
+		if method == "GET" && len(parts) == 2 {
+			return "manage_clients", true
+		}
+		return "", false
+	case strings.HasPrefix(path, "/api/v1/workspace/clients/") && strings.Contains(path, "/services/"):
+		parts := strings.Split(strings.TrimPrefix(path, "/api/v1/workspace/clients/"), "/")
+		if method == "POST" && len(parts) == 4 && parts[1] == "services" && (parts[3] == "preview" || parts[3] == "commands") {
+			return "manage_clients", true
+		}
+		return "", false
 	case strings.HasPrefix(path, "/api/v1/workspace/clients/"):
 		if method == "GET" && strings.HasSuffix(path, "/volume-refund") {
 			return "view_finance", true

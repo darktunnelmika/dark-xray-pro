@@ -44,7 +44,7 @@ test('stopped inbound and representative cannot issue service changes',async({pa
  const f=await setup(page,{stopped:true});await f.open();await page.getByLabel('Change reason').fill('Test');await expect(page.getByRole('button',{name:'Review addition'})).toBeDisabled();expect(f.previews).toHaveLength(0);expect(f.commands).toHaveLength(0);
 });
 test('representative has no owner service editor',async({page})=>{
- const f=await setup(page,{rep:true});await page.getByRole('button',{name:'Manage',exact:true}).click();await expect(page.getByRole('button',{name:'Services',exact:true})).toHaveCount(0);expect(f.commands).toHaveLength(0);
+ const f=await setup(page,{rep:true});await page.getByRole('button',{name:'Manage',exact:true}).click();await page.getByRole('button',{name:'Services',exact:true}).click();await expect(page.getByLabel('Service inbound')).toHaveCount(0);await expect(page.getByRole('region',{name:'Representative client services'})).toBeVisible();expect(f.commands).toHaveLength(0);
 });
 test('accepted command is not presented as applied',async({page})=>{
  const f=await setup(page,{pending:true});await f.open();await review(page);await page.getByRole('button',{name:'Confirm service change'}).click();await expect(page.getByText('Request recorded; awaiting runtime confirmation…')).toBeVisible();await expect(page.getByText('Service change confirmed on the runtime.')).toHaveCount(0);await expect(page.getByText('Runtime application is not yet confirmed. Check the same request again.')).toBeVisible({timeout:15000});expect(f.commands).toHaveLength(1);
@@ -55,4 +55,23 @@ test('concurrent revision rejection requires a new review',async({page})=>{
 test('directory uses reserved-history-aware remaining bytes and stays compact',async({page})=>{
  const f=await setup(page);await page.setViewportSize({width:360,height:800});await expect(page.getByText('Remaining: 7.00 GiB')).toBeVisible();await expect(page.getByText('Recorded here: 2.00 GiB')).toBeVisible();expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
  f.usage.known=false;await page.reload();await expect(page.getByText('Remaining: unknown')).toBeVisible();await expect(page.getByText('Remaining: 7.00 GiB')).toHaveCount(0);
+});
+
+test('representative service editor uses narrow commands and recovers after reload',async({page})=>{
+ await setup(page,{rep:true});const sent:any[]=[];let assigned=false;
+ await page.route('**/api/v1/workspace/clients/customer/services',r=>r.fulfill({json:{client_id:'customer',services:[{inbound_id:501,name:'Allowed service',grant_revision:1,execution_revision:2,plan_revision:1,inbound_revision:1,assigned,applied:false,ready:!assigned}]}}));
+ await page.route('**/api/v1/workspace/clients/customer/services/501/*',async r=>{
+  const b=r.request().postDataJSON();expect(b.client_ids).toBeUndefined();expect(b.action).toBeUndefined();
+  if(r.request().url().endsWith('/preview'))return r.fulfill({json:{client_id:'customer',inbound_id:501,valid:true,review_sha:'b'.repeat(64)}});
+  sent.push(b);expect(r.request().headers()['x-csrf-token']).toBe('a'.repeat(64));assigned=true;
+  if(sent.length===1)return r.abort('failed');
+  return r.fulfill({json:{client_id:'customer',inbound_id:501,valid:true,operation_id:b.event_id,state:'queued'}});
+ });
+ const open=async()=>{await page.getByRole('button',{name:'Manage',exact:true}).click();await page.getByRole('button',{name:'Services',exact:true}).click()};
+ await open();await page.getByLabel('Allowed service').selectOption('501');await page.getByLabel('Service change reason').fill('Customer request');
+ await page.getByRole('button',{name:'Review change',exact:true}).click();expect(sent).toHaveLength(0);
+ await page.getByRole('button',{name:'Confirm change',exact:true}).click();await expect(page.getByRole('button',{name:'Retry same request'})).toBeVisible();
+ await page.reload();await open();await page.getByRole('button',{name:'Retry same request'}).click();
+ await expect(page.getByText('Command recorded. Refresh to check runtime application.')).toBeVisible();expect(sent).toHaveLength(2);expect(sent[1]).toEqual(sent[0]);
+ await expect(page.getByText('Applied to service',{exact:true})).toHaveCount(0);
 });

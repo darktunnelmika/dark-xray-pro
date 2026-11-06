@@ -165,3 +165,28 @@ test("V9 corrupted or unverified control records fail closed without owner mutat
  await expect(manager.getByRole("button",{name:"Review and save account changes"})).toHaveCount(0);
  expect(writes).toHaveLength(0);
 });
+
+test("Owner reviews service grant and retries the exact lost request",async({page})=>{
+ await fixture(page);
+ await page.route("**/api/v1/workspace/native-inbounds-state",r=>r.fulfill({json:{inbounds:[{id:10,name:"Finland"}]}}));
+ let revision=0,enabled=false;const writes:unknown[]=[];
+ await page.route("**/api/v1/workspace/representatives/rep-a/service-grants/10",async r=>{
+  if(r.request().method()==="POST"){
+   const b=r.request().postDataJSON();writes.push(b);expect(r.request().headers()["x-csrf-token"]).toBe(csrf);
+   if(writes.length===1){revision=1;enabled=true;return r.abort("failed")}
+   expect(b).toEqual(writes[0]);
+  }
+  return r.fulfill({json:{representative_id:"rep-a",inbound_id:10,revision,enabled}});
+ });
+ await page.goto("/representatives");
+ await page.getByRole("region",{name:"Representative directory"}).getByRole("button",{name:"Manage account"}).click();
+ const section=page.getByRole("region",{name:"Representative service grants"});
+ await section.getByLabel("Grant inbound").selectOption("10");
+ await expect(section.getByText("Not allowed",{exact:true})).toBeVisible();
+ await section.getByLabel("Grant reason").fill("Allow selected service");
+ await section.getByRole("button",{name:"Review grant",exact:true}).click();expect(writes).toHaveLength(0);
+ await section.getByRole("button",{name:"Confirm",exact:true}).click();
+ await expect(section.getByRole("alert")).toBeVisible();
+ await section.getByRole("button",{name:"Retry same request"}).click();
+ await expect(section.getByText("Allowed",{exact:true})).toBeVisible();expect(writes).toHaveLength(2);
+});

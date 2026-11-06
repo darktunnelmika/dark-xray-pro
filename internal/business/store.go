@@ -301,6 +301,9 @@ func Open(path string) (*Store, error) {
 	if err = ensureClientProfileEdits(db); err != nil {
 		return fail(err)
 	}
+	if err = ensureRepresentativeServiceGrants(db); err != nil {
+		return fail(err)
+	}
 	if err = ensureRepresentativeControls(db); err != nil {
 		return fail(err)
 	}
