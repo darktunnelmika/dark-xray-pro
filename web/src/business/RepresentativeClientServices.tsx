@@ -9,11 +9,17 @@ const integer=(n:unknown)=>Number.isSafeInteger(n)&&Number(n)>=0;
 export default function RepresentativeClientServices({clientID,session,language}:{clientID:string;session:Session;language:"fa"|"en"}){
  const fa=language==="fa",base="/api/v1/workspace/clients/"+encodeURIComponent(clientID)+"/services",key="darkpro:rep-service:v1:"+session.user.id+":"+clientID;
  const [services,setServices]=useState<Service[]>([]),[selected,setSelected]=useState(0),[reason,setReason]=useState(""),[review,setReview]=useState<Attempt|null>(null),[pending,setPending]=useState<Attempt|null>(null),[busy,setBusy]=useState(false),[error,setError]=useState(false),[blocked,setBlocked]=useState(false),[notice,setNotice]=useState("");
+ const [loading,setLoading]=useState(true),[loaded,setLoaded]=useState(false);
  const controller=useRef<AbortController|null>(null),lock=useRef(false);
  async function load(){
-  const d=await api<{client_id:string;services:Service[]}>(base,{signal:controller.current?.signal});
-  if(d.client_id!==clientID||!Array.isArray(d.services)||d.services.length>256||new Set(d.services.map(s=>s.inbound_id)).size!==d.services.length||d.services.some(s=>!integer(s.inbound_id)||s.inbound_id<1||!integer(s.grant_revision)||s.grant_revision<1||![s.execution_revision,s.plan_revision,s.inbound_revision].every(integer)||typeof s.name!=="string"||![s.assigned,s.applied,s.ready].every(v=>typeof v==="boolean")))throw Error();
-  if(!controller.current?.signal.aborted)setServices(d.services);
+  const c=controller.current;
+  setLoading(true);setLoaded(false);
+  try{
+   const d=await api<{client_id:string;services:Service[]}>(base,{signal:c?.signal});
+   if(d.client_id!==clientID||!Array.isArray(d.services)||d.services.length>256||new Set(d.services.map(s=>s.inbound_id)).size!==d.services.length||d.services.some(s=>!integer(s.inbound_id)||s.inbound_id<1||!integer(s.grant_revision)||s.grant_revision<1||![s.execution_revision,s.plan_revision,s.inbound_revision].every(integer)||typeof s.name!=="string"||![s.assigned,s.applied,s.ready].every(v=>typeof v==="boolean")))throw Error();
+   if(!c?.signal.aborted&&controller.current===c){setServices(d.services);setLoaded(true)}
+  }catch(e){if(!c?.signal.aborted&&controller.current===c)setServices([]);throw e}
+  finally{if(!c?.signal.aborted&&controller.current===c)setLoading(false)}
  }
  useEffect(()=>{
   const c=new AbortController();controller.current=c;
@@ -22,7 +28,7 @@ export default function RepresentativeClientServices({clientID,session,language}
  },[key]);
  const service=services.find(s=>s.inbound_id===selected);
  async function preview(){
-  if(lock.current||!service?.ready||!reason.trim()||pending||blocked)return;
+  if(lock.current||loading||!loaded||!service?.ready||!reason.trim()||pending||blocked)return;
   lock.current=true;setBusy(true);setError(false);setNotice("");
   const body:Command={event_id:crypto.randomUUID(),grant_revision:service.grant_revision,execution_revision:service.execution_revision,plan_revision:service.plan_revision,inbound_revision:service.inbound_revision,add:!service.assigned,reason:reason.trim()};
   try{const r=await mutation<Result>(base+"/"+selected+"/preview",body,session.csrf_token);if(r.client_id!==clientID||r.inbound_id!==selected||!r.valid||!r.review_sha||!/^[a-f0-9]{64}$/.test(r.review_sha))throw Error();if(!controller.current?.signal.aborted)setReview({inbound:selected,body:{...body,review_sha:r.review_sha}})}catch{if(!controller.current?.signal.aborted)setError(true)}finally{lock.current=false;if(!controller.current?.signal.aborted)setBusy(false)}
@@ -35,10 +41,14 @@ export default function RepresentativeClientServices({clientID,session,language}
  }
  return <section className="business-panel client-services" aria-label="Representative client services">
  <h3>{fa?"سرویس‌های مجاز کلاینت":"Allowed client services"}</h3>
- <label>{fa?"سرویس":"Service"}<select aria-label="Allowed service" value={selected} disabled={busy||!!pending||!!review} onChange={e=>{setSelected(Number(e.target.value));setNotice("");setError(false)}}><option value={0}>{fa?"انتخاب سرویس":"Choose service"}</option>{services.map(s=><option key={s.inbound_id} value={s.inbound_id}>{s.name}</option>)}</select></label>
- <button type="button" disabled={busy||!!review} onClick={()=>{setError(false);void load().catch(()=>setError(true))}}>{fa?"تازه‌سازی وضعیت":"Refresh service status"}</button>
- {service&&<p>{service.assigned?(fa?"عضویت ثبت‌شده":"Membership saved"):(fa?"بدون عضویت":"Not assigned")} · {service.applied&&service.ready?(fa?"اعمال‌شده روی سرویس":"Applied to service"):(fa?"اعمال فعال تأیید نشده":"Active application not confirmed")}</p>}
- {!pending&&!review&&<><label>{fa?"دلیل تغییر":"Change reason"}<input aria-label="Service change reason" value={reason} maxLength={200} disabled={busy} onChange={e=>setReason(e.target.value)}/></label><button type="button" disabled={busy||blocked||!service?.ready||!reason.trim()} onClick={()=>void preview()}>{fa?"بررسی تغییر":"Review change"}</button></>}
+ <label>{fa?"سرویس":"Service"}<select aria-label="Allowed service" value={selected} disabled={loading||busy||!!pending||!!review} onChange={e=>{setSelected(Number(e.target.value));setNotice("");setError(false)}}><option value={0}>{fa?"انتخاب سرویس":"Choose service"}</option>{services.map(s=><option key={s.inbound_id} value={s.inbound_id}>{s.name}</option>)}</select></label>
+ <button type="button" disabled={loading||busy||!!review} onClick={()=>{setError(false);void load().catch(()=>setError(true))}}>{fa?"تازه‌سازی وضعیت":"Refresh service status"}</button>
+ {loading&&<p role="status">{fa?"در حال دریافت سرویس‌های مجاز…":"Loading allowed services…"}</p>}
+ {loaded&&!loading&&services.length===0&&<p role="status">{fa?"مالک هنوز هیچ سرویس مجازی برای شما تعیین نکرده است؛ برای دریافت دسترسی با مالک تماس بگیرید.":"No services have been granted to you. Contact the owner to request access."}</p>}
+ {loaded&&!loading&&services.length>0&&!service&&<p>{fa?"برای مدیریت عضویت کلاینت، یک سرویس انتخاب کنید.":"Choose a service to manage this client's membership."}</p>}
+ {service&&!loading&&!service.ready&&!pending&&!review&&<p role="status">{fa?"سرویس برای تغییر عضویت آماده نیست؛ وضعیت را تازه‌سازی کنید یا با مالک تماس بگیرید.":"This service is not ready for membership changes. Refresh its status or contact the owner."}</p>}
+ {service&&!loading&&<p>{service.assigned?(fa?"عضویت ثبت‌شده":"Membership saved"):(fa?"بدون عضویت":"Not assigned")} · {service.applied&&service.ready?(fa?"اعمال‌شده روی سرویس":"Applied to service"):(fa?"اعمال فعال تأیید نشده":"Active application not confirmed")}</p>}
+ {service?.ready&&loaded&&!loading&&!pending&&!review&&<><label>{fa?"دلیل تغییر":"Change reason"}<input aria-label="Service change reason" value={reason} maxLength={200} disabled={busy} onChange={e=>setReason(e.target.value)}/></label><button type="button" disabled={busy||blocked||!service?.ready||!reason.trim()} onClick={()=>void preview()}>{fa?"بررسی تغییر":"Review change"}</button></>}
  {review&&<div><p>{review.body.add?(fa?"افزودن به سرویس":"Add to service"):(fa?"حذف از سرویس":"Remove from service")} · {review.body.reason}</p><button type="button" disabled={busy} onClick={()=>void send(review)}>{fa?"تأیید تغییر":"Confirm change"}</button><button type="button" disabled={busy} onClick={()=>setReview(null)}>{fa?"انصراف":"Cancel"}</button></div>}
  {pending&&<button type="button" disabled={busy||blocked} onClick={()=>void send(pending)}>{fa?"پیگیری همان درخواست":"Retry same request"}</button>}
  {blocked&&<p role="alert">{fa?"ذخیره یا بازیابی درخواست ممکن نیست؛ تغییر مسدود است.":"Recovery storage unavailable. Changes blocked."}</p>}
