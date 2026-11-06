@@ -7,6 +7,8 @@ require (
 	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e
 	golang.org/x/crypto v0.55.0
 	golang.org/x/sys v0.47.0
+	google.golang.org/grpc v1.84.0
+	google.golang.org/protobuf v1.36.12
 	modernc.org/sqlite v1.40.1
 )
 

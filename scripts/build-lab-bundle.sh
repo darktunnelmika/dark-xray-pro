@@ -25,7 +25,7 @@ for tool in git go node npm sha256sum find sort xargs install grep; do
   command -v "$tool" >/dev/null || fail "required builder tool not found: $tool"
 done
 [[ ! -e release ]] || fail "release directory already exists; use a fresh checkout"
-mkdir -p release/bin release/scripts release/ops/systemd release/ops/nginx release/ops/licenses
+mkdir -p release/bin release/scripts release/ops/systemd release/ops/nginx release/ops/licenses release/ops/sources/xraystats
 
 # A release is built in CI, never by the installed server. Build frontend FIRST
 # so one binary contains exactly this source revision's compiled UI.
@@ -60,6 +60,12 @@ install -m 0644 ops/nginx/business-management.conf release/ops/nginx/business-ma
 install -m 0644 ops/nginx/native-backups.conf release/ops/nginx/native-backups.conf
 install -m 0644 ops/nginx/telegram-stores.conf release/ops/nginx/telegram-stores.conf
 install -m 0644 third_party/go-qrcode/LICENSE release/ops/licenses/go-qrcode-LICENSE
+install -m 0644 internal/xraystats/LICENSE release/ops/licenses/xray-stats-LICENSE
+# Keep the exact corresponding MPL StatsService source and provenance with
+# every application bundle that includes the private native statistics client.
+for stats_source in command.proto command.pb.go command_grpc.pb.go LICENSE UPSTREAM.json; do
+  install -m 0644 "internal/xraystats/$stats_source" "release/ops/sources/xraystats/$stats_source"
+done
 
 # Generated UI and the fixed release directory are explicitly ignored. Any
 # other source change (including an untracked lockfile) must refuse the bundle.

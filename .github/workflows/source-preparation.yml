@@ -1,0 +1,88 @@
+name: Prepare and test private native statistics client
+
+on:
+  push:
+    branches: ['prep/native-query-client-20261106']
+
+permissions:
+  contents: read
+
+jobs:
+  prepare:
+    name: Prepare pinned native client source and synthetic race tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      GOTOOLCHAIN: local
+      GOMAXPROCS: '2'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.3'
+          cache: false
+      - name: Verify toolchain
+        run: go version
+      - name: Resolve pinned dependencies and format reviewed source
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import base64,gzip,hashlib,json,pathlib,subprocess
+          config={"base_head": "ff3c71cb9735af8139ce67e21398509b39c1dff0", "format_files": ["internal/inboundruntime/native_linux.go", "internal/inboundruntime/native_stats_codec_linux_test.go", "internal/inboundruntime/native_stats_linux.go", "internal/inboundruntime/native_stats_linux_test.go", "internal/inboundruntime/reuse_linux_test.go"], "input_sha256": {"go.mod": "270eb35d2baac71120175cadafcb9cc031ca4be1a336da9bfa6a803e5152055b", "go.sum": "94d497dc4a021949f1efdc5528ca07e55bd7493078f91cc26b43545f5f311ca8", "internal/inboundruntime/native_linux.go": "7ade474420515734fa7a4128a369ad7c9781a2f00634eb0eb1952fa8b1747e9e", "internal/inboundruntime/native_stats_codec_linux_test.go": "c0588e6f0d1e40033c9fb2b1cab2dea1057fd459b9699d5212e416a4bef266d1", "internal/inboundruntime/native_stats_linux.go": "ee37289d95e6cf18725fa2e0bd7139aac679e10ede17f338c52af30e9736e576", "internal/inboundruntime/native_stats_linux_test.go": "5c50778b2d210cad1865bea7d7a560925c80c65616238afa80de864f041ded81", "internal/inboundruntime/reuse_linux_test.go": "593edce983c1c4e0e2deb0f93681a728e9a261e0c935857e95051b6bddf6a7b1", "internal/xraystats/LICENSE": "1f256ecad192880510e84ad60474eab7589218784b9a50bc7ceee34c2b91f1d5", "internal/xraystats/UPSTREAM.json": "cf6b489b1ae2ddf7f67d32dafcc97af548c5abdb871d89c838392b675985bb66", "internal/xraystats/command.pb.go": "267c720f6f0a7a2c11481c86acf54805180f584e00db0ab2c0ed8fba20acc514", "internal/xraystats/command.proto": "aadeb6b30e2bd13782896fa7addba101f522ea99438f9511aa4d8f1d62dcf58a", "internal/xraystats/command_grpc.pb.go": "e32774d184b712365d149f5bd2a5c739bef27e543ae84b86066993da9dfc2c0e", "scripts/build-lab-bundle.sh": "0e825ca86c0229c47e8ffbd29f10cb1b1fa0d4798fdfa3ef4b5bd1e0220fd15a"}, "output_files": ["go.mod", "go.sum", "internal/inboundruntime/native_linux.go", "internal/inboundruntime/native_stats_codec_linux_test.go", "internal/inboundruntime/native_stats_linux.go", "internal/inboundruntime/native_stats_linux_test.go", "internal/inboundruntime/reuse_linux_test.go"], "tests": ["TestNativeStatsCodecMatchesLegacyJSON", "TestNativeStatsCodecPreservesWireAndJSONEnvelopes", "TestNativeStatsCodecRejectsMalformedBeforeDecode", "TestNativeStatsCodecAllowsOnlyResetFreeKnownQueries", "TestNativeStatsReusesOwnedConnectionAndCustomProtocol", "TestNativeStatsCancellationAndReconnectStayWithinBirth", "TestNativeStatsAcceptedControlReplyLossRequiresExplicitReplay", "TestNativeStatsRejectsInvalidCountersAndPostReplyIdentityLoss", "TestNativeStatsTerminalCloseCancelsCallAndPreventsReopen", "TestNativeStatsRejectsForeignSameUIDSocketReplacement", "TestNativeStatsStopAndLeaseExpiryKillOwnedChildDuringRPC", "TestNativeStatsPeerChecksPIDAndUID", "TestWorkerCurrentDeliveryReusesOwnedBirthAcrossHealthFailure", "TestNativeStopKillsOwnedHandleWhenBirthIdentityUnavailable", "TestWorkerSampleTimeoutPersistsRealFinalAcrossRestart", "TestWorkerSampleAndFinalFailureStillFencesUnknownTail", "TestWorkerLostRegistrationReceiptReplaysBeforeAdmission", "TestWorkerLostFinalReceiptReopensExactOutbox", "TestWorkerSealedSampleSurvivesEarlierReceiptLossAndRestart", "TestWorkerRunLostUsageACKPreservesReportAndDoesNotReactivate"], "verbatim_files": ["internal/xraystats/LICENSE", "internal/xraystats/UPSTREAM.json", "internal/xraystats/command.pb.go", "internal/xraystats/command.proto", "internal/xraystats/command_grpc.pb.go"]}
+          root=pathlib.Path.cwd()
+          for path,digest in config["input_sha256"].items():
+              p=root/path
+              assert p.is_file() and not p.is_symlink()
+              assert hashlib.sha256(p.read_bytes()).hexdigest()==digest,path
+          subprocess.run(["go","mod","tidy"],check=True,timeout=180)
+          subprocess.run(["go","mod","verify"],check=True,timeout=120)
+          subprocess.run(["gofmt","-w",*config["format_files"]],check=True,timeout=30)
+          for path in config["verbatim_files"]:
+              assert hashlib.sha256((root/path).read_bytes()).hexdigest()==config["input_sha256"][path],path
+          files=[]
+          for path in sorted(config["output_files"]):
+              data=(root/path).read_bytes()
+              files.append({"path":path,"before_sha256":config["input_sha256"][path],"sha256":hashlib.sha256(data).hexdigest(),"content":data.decode()})
+          raw=(json.dumps({"schema":1,"base_head":config["base_head"],"operation":"pinned_module_tidy_and_gofmt","files":files},sort_keys=True,separators=(",",":"))+"\n").encode()
+          payload=base64.b64encode(gzip.compress(raw,mtime=0)).decode()
+          print("NATIVE_SOURCE_SHA256="+hashlib.sha256(raw).hexdigest())
+          print("NATIVE_SOURCE_BYTES="+str(len(raw)))
+          for i in range(0,len(payload),3000):
+              print("NATIVE_SOURCE_%04d="%(i//3000)+payload[i:i+3000])
+          print("NATIVE_SOURCE_END="+str((len(payload)+2999)//3000))
+          PY
+      - name: Exercise synthetic connection and recovery boundaries
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import collections,json,pathlib,re,subprocess
+          names=["TestNativeStatsCodecMatchesLegacyJSON", "TestNativeStatsCodecPreservesWireAndJSONEnvelopes", "TestNativeStatsCodecRejectsMalformedBeforeDecode", "TestNativeStatsCodecAllowsOnlyResetFreeKnownQueries", "TestNativeStatsReusesOwnedConnectionAndCustomProtocol", "TestNativeStatsCancellationAndReconnectStayWithinBirth", "TestNativeStatsAcceptedControlReplyLossRequiresExplicitReplay", "TestNativeStatsRejectsInvalidCountersAndPostReplyIdentityLoss", "TestNativeStatsTerminalCloseCancelsCallAndPreventsReopen", "TestNativeStatsRejectsForeignSameUIDSocketReplacement", "TestNativeStatsStopAndLeaseExpiryKillOwnedChildDuringRPC", "TestNativeStatsPeerChecksPIDAndUID", "TestWorkerCurrentDeliveryReusesOwnedBirthAcrossHealthFailure", "TestNativeStopKillsOwnedHandleWhenBirthIdentityUnavailable", "TestWorkerSampleTimeoutPersistsRealFinalAcrossRestart", "TestWorkerSampleAndFinalFailureStillFencesUnknownTail", "TestWorkerLostRegistrationReceiptReplaysBeforeAdmission", "TestWorkerLostFinalReceiptReopensExactOutbox", "TestWorkerSealedSampleSurvivesEarlierReceiptLossAndRestart", "TestWorkerRunLostUsageACKPreservesReportAndDoesNotReactivate"]
+          pattern="^("+"|".join(re.escape(n) for n in names)+")$"
+          path=pathlib.Path("native-client-focused.jsonl")
+          with path.open("x") as output:
+              result=subprocess.run(["go","test","-race","-mod=readonly","-p=2","-parallel=2","-count=1","-timeout=120s","-json","-run",pattern,"./internal/inboundruntime"],stdout=output,stderr=subprocess.STDOUT,timeout=300)
+          events=[]
+          invalid_output=False
+          for line in path.read_text().splitlines():
+              if not line.strip():
+                  continue
+              try:
+                  events.append(json.loads(line))
+              except json.JSONDecodeError:
+                  print(line)
+                  invalid_output=True
+          for event in events:
+              if event.get("Output"):
+                  print(event["Output"],end="")
+          counts=collections.Counter(e.get("Test") for e in events if e.get("Action")=="pass")
+          assert result.returncode==0,result.returncode
+          assert not invalid_output,"non-JSON test output"
+          assert all(counts[name]==1 for name in names),dict(counts)
+          assert not any(e.get("Action") in ("fail","skip") for e in events)
+          assert not any("WARNING: DATA RACE" in e.get("Output","") for e in events)
+          print("NATIVE_FOCUSED_TESTS="+json.dumps({"passed":True,"top_level":len(names),"subtests":sum(v for n,v in counts.items() if n and "/" in n),"tests":names},sort_keys=True))
+          PY
+      - name: Compile the actual Agent entry point
+        run: go test -mod=readonly -p=2 -run '^$' ./cmd/node-agent
