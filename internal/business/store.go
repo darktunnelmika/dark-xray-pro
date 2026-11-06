@@ -201,7 +201,9 @@ func Open(path string) (*Store, error) {
 	}
 	// Correct ownership/permissions are enforced before opening SQLite;
 	// no legacy database is opened or auto-migrated.
-	u := url.URL{Scheme: "file", Path: abs, RawQuery: "_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)"}
+	// Every replacement connection must retain the same connection-local
+	// durability and schema protections after cancellation or pool recovery.
+	u := url.URL{Scheme: "file", Path: abs, RawQuery: "_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)&_pragma=synchronous(FULL)&_pragma=trusted_schema(OFF)"}
 	db, err := sql.Open("sqlite", u.String())
 	if err != nil {
 		return nil, err
