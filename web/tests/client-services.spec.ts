@@ -75,3 +75,25 @@ test('representative service editor uses narrow commands and recovers after relo
  await expect(page.getByText('Command recorded. Refresh to check runtime application.')).toBeVisible();expect(sent).toHaveLength(2);expect(sent[1]).toEqual(sent[0]);
  await expect(page.getByText('Applied to service',{exact:true})).toHaveCount(0);
 });
+test('representative sees loading then an actionable empty state without a change form',async({page})=>{
+ const f=await setup(page,{rep:true});let release!:()=>void;const gate=new Promise<void>(resolve=>{release=resolve});
+ await page.route('**/api/v1/workspace/clients/customer/services',async r=>{await gate;await r.fulfill({json:{client_id:'customer',services:[]}})});
+ await page.getByRole('button',{name:'Manage',exact:true}).click();await page.getByRole('button',{name:'Services',exact:true}).click();
+ await expect(page.getByText('Loading allowed services…')).toBeVisible();await expect(page.getByLabel('Allowed service')).toBeDisabled();await expect(page.getByLabel('Service change reason')).toHaveCount(0);
+ release();await expect(page.getByText('No services have been granted to you. Contact the owner to request access.')).toBeVisible();await expect(page.getByLabel('Service change reason')).toHaveCount(0);expect(f.commands).toHaveLength(0);
+});
+test('unready service explains why editing is unavailable and refresh can recover',async({page})=>{
+ await setup(page,{rep:true});let ready=false;
+ await page.route('**/api/v1/workspace/clients/customer/services',r=>r.fulfill({json:{client_id:'customer',services:[{inbound_id:501,name:'Allowed service',grant_revision:1,execution_revision:2,plan_revision:1,inbound_revision:1,assigned:false,applied:false,ready}]}}));
+ await page.getByRole('button',{name:'Manage',exact:true}).click();await page.getByRole('button',{name:'Services',exact:true}).click();
+ await expect(page.getByText("Choose a service to manage this client's membership.")).toBeVisible();await page.getByLabel('Allowed service').selectOption('501');
+ await expect(page.getByText('This service is not ready for membership changes. Refresh its status or contact the owner.')).toBeVisible();await expect(page.getByLabel('Service change reason')).toHaveCount(0);
+ ready=true;await page.getByRole('button',{name:'Refresh service status'}).click();await expect(page.getByLabel('Service change reason')).toBeVisible();
+});
+test('failed service refresh removes stale edit choices without claiming no grants',async({page})=>{
+ const f=await setup(page,{rep:true});let fail=false;
+ await page.route('**/api/v1/workspace/clients/customer/services',r=>fail?r.fulfill({status:503,json:{error:'unavailable'}}):r.fulfill({json:{client_id:'customer',services:[{inbound_id:501,name:'Allowed service',grant_revision:1,execution_revision:2,plan_revision:1,inbound_revision:1,assigned:false,applied:false,ready:true}]}}));
+ await page.getByRole('button',{name:'Manage',exact:true}).click();await page.getByRole('button',{name:'Services',exact:true}).click();await page.getByLabel('Allowed service').selectOption('501');await expect(page.getByLabel('Service change reason')).toBeVisible();
+ fail=true;await page.getByRole('button',{name:'Refresh service status'}).click();await expect(page.getByText('Result not verified. Check service state and permission.')).toBeVisible();await expect(page.getByLabel('Service change reason')).toHaveCount(0);await expect(page.getByText('No services have been granted to you. Contact the owner to request access.')).toHaveCount(0);expect(f.previews).toHaveLength(0);expect(f.commands).toHaveLength(0);
+ fail=false;await page.getByRole('button',{name:'Refresh service status'}).click();await expect(page.getByLabel('Service change reason')).toBeVisible();
+});
