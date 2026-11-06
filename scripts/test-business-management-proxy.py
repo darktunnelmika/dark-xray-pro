@@ -100,6 +100,10 @@ location / {{ return 403; }}
                 seller = rep + "/sellers/Seller.test_01-2"
                 routes = (("/api/v1/workspace/client-inbound-options", {"GET", "HEAD"}),
                           (rep + "/seller-permission", {"GET", "HEAD", "POST"}),
+                          (rep + "/service-grants/910", {"GET", "HEAD", "POST"}),
+                          ("/api/v1/workspace/clients/Client.test_01-2/services", {"GET", "HEAD"}),
+                          ("/api/v1/workspace/clients/Client.test_01-2/services/910/preview", {"POST"}),
+                          ("/api/v1/workspace/clients/Client.test_01-2/services/910/commands", {"POST"}),
                           (rep + "/sellers", {"GET", "HEAD", "POST"}),
                           (seller, {"GET", "HEAD"}),
                           (seller + "/quota", {"POST"}),
@@ -136,7 +140,7 @@ location / {{ return 403; }}
                     check(path, allowed)
                     check(path + "/extra/unknown", set())
                     check(path + "/", set())
-                for path in (seller + "/clients", seller + "/clients/a/extend", seller + "/catalog/a/clients", "/api/v1/workspace/clients/a/contact"):
+                for path in (seller + "/clients", seller + "/clients/a/extend", seller + "/catalog/a/clients", "/api/v1/workspace/clients/a/contact", rep + "/service-grants/910", "/api/v1/workspace/clients/a/services/910/preview", "/api/v1/workspace/clients/a/services/910/commands"):
                     before = len(Backend.seen)
                     assert request(port, path, "POST", b"x" * 4097) == 413
                     assert len(Backend.seen) == before, "oversized order reached backend"
@@ -151,6 +155,9 @@ location / {{ return 403; }}
                 for bad in ("_a", "-a", ".a", "a!b", "a+b", "a;b", "a" * 65, "a%2Fb"):
                     check("/api/v1/workspace/representatives/" + bad + "/seller-permission", set())
                     check(rep + "/sellers/" + bad + "/quota", set())
+                    check("/api/v1/workspace/representatives/" + bad + "/service-grants/910", set())
+                    check("/api/v1/workspace/clients/" + bad + "/services", set())
+                    check("/api/v1/workspace/clients/" + bad + "/services/910/commands", set())
                     check(rep + "/sellers/" + bad + "/clients", set())
                     check(seller + "/clients/" + bad + "/extend", set())
                     check(seller + "/catalog/" + bad + "/clients", set())
@@ -159,6 +166,10 @@ location / {{ return 403; }}
                     check("/api/v1/workspace/representatives/" + bad + "/sellers/a/clients", set())
                     check("/api/v1/workspace/clients/" + bad + "/volume-refund", set())
                     check("/api/v1/workspace/clients/" + bad + "/contact", set())
+                for bad_id in ("0", "01", "-1", "a", "1.0", "1" * 17):
+                    check(rep + "/service-grants/" + bad_id, set())
+                    check("/api/v1/workspace/clients/a/services/" + bad_id + "/commands", set())
+                check("/api/v1/workspace/clients/a/services/910/unknown", set())
                 for path in ("/api/v1/admin/nodes", "/api/v1/agent/config",
                              "/api/v1/agent/volume-refunds", "/api/v1/admin/volume-refunds",
                              "/api/v1/workspace/volume-refund", "/api/v1/workspace/volume-refunds/enable",
