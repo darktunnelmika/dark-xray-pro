@@ -99,16 +99,21 @@ func(s *Store)ProvisionRepresentativeLogin(ctx context.Context,repID,username,pa
  return AuthUser{ID:repID,Username:username,Role:"representative",RepresentativeID:repID},nil
 }
 
-func (s *Store) Login(ctx context.Context,username,password string)(LoginSession,error){
+func (s *Store) Login(ctx context.Context,username,password string)(diagnosticResult LoginSession,diagnosticErr error){
+ ctx,diagnosticSpan:=s.BeginDiagnostic(ctx,DiagnosticOperationSessionLogin,DiagnosticSourceStore)
+ defer func(){diagnosticSpan.End(diagnosticErr)}()
  username=strings.ToLower(username)
  if !validUsername(username)||len(password)>256{return LoginSession{},ErrUnauthenticated}
  var u AuthUser;var salt,expected []byte;var disabled,repEnabled int
+ diagnosticSpan.Enter(DiagnosticPhaseCredentialRead)
  err:=s.db.QueryRowContext(ctx,
   "SELECT a.id,a.username,a.role,a.representative_id,a.password_salt,a.password_hash,CASE WHEN a.role='representative' AND c.representative_id IS NOT NULL THEN c.login_suspended ELSE a.disabled END,r.enabled FROM auth_users a JOIN representatives r ON r.id=a.representative_id LEFT JOIN representative_controls c ON c.representative_id=a.representative_id WHERE a.username=?",
   username).Scan(&u.ID,&u.Username,&u.Role,&u.RepresentativeID,&salt,&expected,&disabled,&repEnabled)
  // A busy, closed or cancelled store cannot establish that credentials failed.
  if err!=nil&&!errors.Is(err,sql.ErrNoRows){return LoginSession{},err}
  if contextErr:=ctx.Err();contextErr!=nil{return LoginSession{},contextErr}
+ diagnosticFinishPhase(ctx,err)
+ diagnosticSpan.Enter(DiagnosticPhasePasswordCheck)
  valid:=err==nil && len(salt)==16 && len(expected)==32 && disabled==0 && repEnabled==1
  // Compute a real Argon2id hash even for missing/disabled users to reduce
  // credential-enumeration timing. A bounded API gate limits parallel load.
@@ -116,13 +121,16 @@ func (s *Store) Login(ctx context.Context,username,password string)(LoginSession
  got:=argon2.IDKey([]byte(password),salt,argonIterations,argonMemoryKiB,argonThreads,argonKeyBytes)
  if contextErr:=ctx.Err();contextErr!=nil{return LoginSession{},contextErr}
  if subtle.ConstantTimeCompare(got,expected)!=1||!valid{return LoginSession{},ErrUnauthenticated}
+ diagnosticFinishPhase(ctx,nil)
+ diagnosticSpan.Enter(DiagnosticPhaseWork)
  tokenBytes:=make([]byte,32)
  if _,err=rand.Read(tokenBytes);err!=nil{return LoginSession{},err}
  token:=hex.EncodeToString(tokenBytes)
  now:=time.Now().UTC().Unix()
  expiry:=now+int64(SessionLifetime/time.Second)
- tx,err:=s.db.BeginTx(ctx,nil);if err!=nil{return LoginSession{},err}
- defer tx.Rollback()
+ diagnosticFinishPhase(ctx,nil)
+ tx,err:=s.diagnosticBeginTx(ctx,nil);if err!=nil{return LoginSession{},err}
+ defer func(){diagnosticFinishPhase(ctx,diagnosticErr);s.diagnosticRollback(ctx,tx)}()
  // Recheck under the write transaction: owner revoke cannot interleave
  // between this test and the new session insert.
  var authorized int
@@ -143,24 +151,31 @@ func (s *Store) Login(ctx context.Context,username,password string)(LoginSession
  if _,err=tx.ExecContext(ctx,`DELETE FROM auth_sessions WHERE user_id=? AND token_sha256 NOT IN (
   SELECT token_sha256 FROM auth_sessions WHERE user_id=? ORDER BY created_unix DESC, rowid DESC LIMIT 20
  )`,u.ID,u.ID);err!=nil{return LoginSession{},err}
- if err=tx.Commit();err!=nil{return LoginSession{},err}
+ diagnosticFinishPhase(ctx,nil)
+ if err=s.diagnosticCommit(ctx,tx);err!=nil{return LoginSession{},err}
+ diagnosticSpan.Enter(DiagnosticPhasePermissionsRead)
  u.Permissions,err=s.RepresentativePermissions(ctx,u.RepresentativeID)
  if err!=nil{return LoginSession{},err}
  return LoginSession{Token:token,User:u,ExpiresUnix:expiry},nil
 }
 
-func (s *Store) VerifySession(ctx context.Context,token string)(LoginSession,error){
+func (s *Store) VerifySession(ctx context.Context,token string)(diagnosticResult LoginSession,diagnosticErr error){
+ ctx,diagnosticSpan:=s.BeginDiagnostic(ctx,DiagnosticOperationSessionVerify,DiagnosticSourceStore)
+ defer func(){diagnosticSpan.End(diagnosticErr)}()
  if len(token)!=64 {return LoginSession{},ErrUnauthenticated}
  for _,c:=range token{if !(c>='0'&&c<='9'||c>='a'&&c<='f'){return LoginSession{},ErrUnauthenticated}}
  var u AuthUser
  var expires int64
  var disabled,repEnabled int
+ diagnosticSpan.Enter(DiagnosticPhaseSessionRead)
  err:=s.db.QueryRowContext(ctx,
   "SELECT a.id,a.username,a.role,a.representative_id,ss.expires_unix,CASE WHEN a.role='representative' AND c.representative_id IS NOT NULL THEN c.login_suspended ELSE a.disabled END,r.enabled FROM auth_sessions ss JOIN auth_users a ON a.id=ss.user_id JOIN representatives r ON r.id=a.representative_id LEFT JOIN representative_controls c ON c.representative_id=a.representative_id WHERE ss.token_sha256=?",
   digestSession(token)).Scan(&u.ID,&u.Username,&u.Role,&u.RepresentativeID,&expires,&disabled,&repEnabled)
  if errors.Is(err,sql.ErrNoRows){return LoginSession{},ErrUnauthenticated}
  if err!=nil{return LoginSession{},err}
  if expires<=time.Now().UTC().Unix()||disabled!=0||repEnabled!=1{return LoginSession{},ErrUnauthenticated}
+ diagnosticFinishPhase(ctx,nil)
+ diagnosticSpan.Enter(DiagnosticPhasePermissionsRead)
  u.Permissions,err=s.RepresentativePermissions(ctx,u.RepresentativeID)
  if err!=nil{return LoginSession{},err}
  return LoginSession{Token:token,User:u,ExpiresUnix:expires},nil

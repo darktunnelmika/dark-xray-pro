@@ -146,7 +146,9 @@ func executionAccountingFreshUntil(ctx context.Context, tx *sql.Tx, node, instal
 // registered from an authenticated bundle. Receipt, deltas, quota totals and
 // cursor commit atomically. Final reports remain admissible after desired
 // generation changes, so revoked traffic is never silently discarded.
-func (s *Store) AcceptInboundExecutionUsage(ctx context.Context, key []byte, in ix.UsageReport) (ix.UsageReceipt, error) {
+func (s *Store) AcceptInboundExecutionUsage(ctx context.Context, key []byte, in ix.UsageReport) (diagnosticResult ix.UsageReceipt, diagnosticErr error) {
+	ctx, diagnosticSpan := s.BeginDiagnostic(ctx, DiagnosticOperationUsage, DiagnosticSourceStore)
+	defer func() { diagnosticSpan.End(diagnosticErr) }()
 	var none ix.UsageReceipt
 	if !idRE.MatchString(in.EpochID) || !idRE.MatchString(in.NodeID) || !routeID.MatchString(in.InstallationID) || in.Generation == 0 || in.Sequence == 0 || in.Sequence >= routeMax || len(in.Counters) == 0 || len(in.Counters) > 50000 || len(in.ProcessIdentity) == 0 || len(in.ProcessIdentity) > 65536 {
 		return none, ErrInvalid
@@ -177,7 +179,10 @@ func (s *Store) AcceptInboundExecutionUsage(ctx context.Context, key []byte, in 
 	if err != nil {
 		return none, err
 	}
-	defer tx.Rollback()
+	defer func() {
+		diagnosticFinishPhase(ctx, diagnosticErr)
+		s.diagnosticRollback(ctx, tx)
+	}()
 	var node, install, process, state, identity string
 	var generation, sequence uint64
 	var epochEnc, cursorEnc []byte
@@ -235,7 +240,8 @@ func (s *Store) AcceptInboundExecutionUsage(ctx context.Context, key []byte, in 
 		if old != hash || final != in.Final {
 			return none, ErrConflict
 		}
-		return ix.UsageReceipt{EpochID: in.EpochID, Sequence: in.Sequence, SHA256: hash, Final: in.Final, Replayed: true}, tx.Commit()
+		diagnosticFinishPhase(ctx, nil)
+		return ix.UsageReceipt{EpochID: in.EpochID, Sequence: in.Sequence, SHA256: hash, Final: in.Final, Replayed: true}, s.diagnosticCommit(ctx, tx)
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
 		return none, err
@@ -353,10 +359,13 @@ func (s *Store) AcceptInboundExecutionUsage(ctx context.Context, key []byte, in 
 	if changed, e := result.RowsAffected(); e != nil || changed != 1 {
 		return none, ErrConflict
 	}
-	return ix.UsageReceipt{EpochID: in.EpochID, Sequence: in.Sequence, SHA256: hash, Final: in.Final}, tx.Commit()
+	diagnosticFinishPhase(ctx, nil)
+	return ix.UsageReceipt{EpochID: in.EpochID, Sequence: in.Sequence, SHA256: hash, Final: in.Final}, s.diagnosticCommit(ctx, tx)
 }
 
-func (s *Store) ObserveInboundExecution(ctx context.Context, key []byte, in ix.Observation) error {
+func (s *Store) ObserveInboundExecution(ctx context.Context, key []byte, in ix.Observation) (diagnosticErr error) {
+	ctx, diagnosticSpan := s.BeginDiagnostic(ctx, DiagnosticOperationObserve, DiagnosticSourceStore)
+	defer func() { diagnosticSpan.End(diagnosticErr) }()
 	if !idRE.MatchString(in.NodeID) || !routeID.MatchString(in.InstallationID) || in.Generation == 0 || in.ObservedUnixNano <= 0 || in.ObservedUnixNano > time.Now().Add(5*time.Second).UnixNano() {
 		return ErrInvalid
 	}
@@ -369,7 +378,10 @@ func (s *Store) ObserveInboundExecution(ctx context.Context, key []byte, in ix.O
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() {
+		diagnosticFinishPhase(ctx, diagnosticErr)
+		s.diagnosticRollback(ctx, tx)
+	}()
 	b, err := readExecutionBundle(ctx, tx, key, in.NodeID, in.InstallationID, in.Generation)
 	if err != nil {
 		return err
@@ -410,7 +422,8 @@ func (s *Store) ObserveInboundExecution(ctx context.Context, key []byte, in ix.O
 	}
 	if desired != in.Generation || observed > in.Generation {
 		if uncertain {
-			return tx.Commit()
+			diagnosticFinishPhase(ctx, nil)
+			return s.diagnosticCommit(ctx, tx)
 		}
 		return ErrConflict
 	}
@@ -480,7 +493,8 @@ func (s *Store) ObserveInboundExecution(ctx context.Context, key []byte, in ix.O
 			return err
 		}
 	}
-	return tx.Commit()
+	diagnosticFinishPhase(ctx, nil)
+	return s.diagnosticCommit(ctx, tx)
 }
 
 func completeExecutionOperation(ctx context.Context, tx *sql.Tx, key []byte, operation string) error {

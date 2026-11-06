@@ -107,6 +107,10 @@ func main() {
 	if !loopbackAddr(*address) {
 		log.Fatal("lab HUB refuses non-loopback owner listeners; use an SSH tunnel")
 	}
+	phaseDiagnosticsEnabled, phaseDiagnosticsErr := businessPhaseDiagnosticsEnabled(os.Getenv)
+	if phaseDiagnosticsErr != nil {
+		log.Fatal(phaseDiagnosticsErr)
+	}
 	sellerManagement := os.Getenv("DARK_PRO_ENABLE_SELLER_MANAGEMENT_V2")
 	if sellerManagement != "" && sellerManagement != "0" && sellerManagement != "1" {
 		log.Fatal("DARK_PRO_ENABLE_SELLER_MANAGEMENT_V2 must be 0 or 1")
@@ -252,6 +256,11 @@ func main() {
 			log.Fatal("PRO business database initialization failed: ", err)
 		}
 		defer biz.Close()
+		if phaseDiagnosticsEnabled {
+			if err := biz.EnablePhaseDiagnostics(); err != nil {
+				log.Fatal("business phase diagnostics initialization refused")
+			}
+		}
 		startup.next("business_features")
 		ownerReportReporter = biz
 		telegramBusiness = biz
@@ -530,6 +539,10 @@ func main() {
 	startup.complete()
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	stopBusinessDiagnostics := func(context.Context) {}
+	if telegramBusiness != nil {
+		stopBusinessDiagnostics = telegramBusiness.StartPhaseDiagnostics()
+	}
 	go hubMonitor.Run(ctx)
 	go service.RunInboundExecution(ctx)
 	go service.RunVolumeRefunds(ctx)
@@ -598,6 +611,7 @@ func main() {
 			log.Print("owner report bot shutdown did not complete within the grace period")
 		}
 	}
+	stopBusinessDiagnostics(graceful)
 	if unexpected != nil {
 		log.Fatal(fmt.Errorf("LAB service stopped: %w", unexpected))
 	}

@@ -111,8 +111,16 @@ func(s *Server) authorizeBrowser(w http.ResponseWriter,r *http.Request,mutate,ow
  return s.authorizeBrowserMedia(w,r,mutate,ownerOnly,"application/json")
 }
 func(s *Server) authorizeBrowserMedia(w http.ResponseWriter,r *http.Request,mutate,ownerOnly bool,requiredMedia string)(business.LoginSession,bool){
- session,err:=s.signedSession(r)
+ ctx,span:=s.business.BeginDiagnostic(r.Context(),business.DiagnosticOperationSessionVerify,business.DiagnosticSourceAPI)
+ var diagnosticErr error
+ defer func(){span.End(diagnosticErr)}()
+ span.Enter(business.DiagnosticPhaseAuth)
+ // The diagnostic context carries only numeric span ancestry. Authentication
+ // still bounds its own child; the caller's downstream request is unchanged.
+ session,err:=s.signedSession(r.WithContext(ctx))
+ diagnosticErr=err
  if err!=nil{
+  span.Enter(business.DiagnosticPhaseResponse)
   if errors.Is(err,business.ErrUnauthenticated){
    respond(w,http.StatusUnauthorized,map[string]string{"error":"session_required"})
   }else{
@@ -121,12 +129,14 @@ func(s *Server) authorizeBrowserMedia(w http.ResponseWriter,r *http.Request,muta
   return business.LoginSession{},false
  }
  if ownerOnly&&session.User.Role!="owner"{
+  span.Enter(business.DiagnosticPhaseResponse)
   respond(w,http.StatusForbidden,map[string]string{"error":"owner_permission_required"})
   return business.LoginSession{},false
  }
  if session.User.Role=="representative"{
   key,allowed:=requiredRepresentativePermission(r)
   if !allowed||!repPermissionAllowed(session.User.Permissions,key){
+   span.Enter(business.DiagnosticPhaseResponse)
    respond(w,http.StatusForbidden,map[string]string{"error":"representative_permission_denied"})
    return business.LoginSession{},false
   }
@@ -135,12 +145,14 @@ func(s *Server) authorizeBrowserMedia(w http.ResponseWriter,r *http.Request,muta
   if !sameOriginMutationMedia(r,requiredMedia){
    code:="same_origin_json_required"
    if requiredMedia!="application/json"{code="same_origin_upload_required"}
+   span.Enter(business.DiagnosticPhaseResponse)
    respond(w,http.StatusForbidden,map[string]string{"error":code})
    return business.LoginSession{},false
   }
   got:=r.Header.Get("X-CSRF-Token")
   expected:=s.csrfValue(session.Token)
   if len(got)!=len(expected)||!hmac.Equal([]byte(got),[]byte(expected)){
+   span.Enter(business.DiagnosticPhaseResponse)
    respond(w,http.StatusForbidden,map[string]string{"error":"invalid_csrf"})
    return business.LoginSession{},false
   }
@@ -152,7 +164,14 @@ func(s *Server) attachBrowserAuth(mux *http.ServeMux){
  if s.loginGate==nil{s.loginGate=newLoginGate()}
 
  mux.HandleFunc("GET /api/v1/session/status",func(w http.ResponseWriter,r *http.Request){
+  ctx,span:=s.business.BeginDiagnostic(r.Context(),business.DiagnosticOperationSessionVerify,business.DiagnosticSourceAPI)
+  var diagnosticErr error
+  defer func(){span.End(diagnosticErr)}()
+  span.Enter(business.DiagnosticPhaseAuth)
+  r=r.WithContext(ctx)
   state,err:=s.signedSession(r)
+  diagnosticErr=err
+  span.Enter(business.DiagnosticPhaseResponse)
   if err!=nil{
    if errors.Is(err,business.ErrUnauthenticated){
     respond(w,http.StatusOK,map[string]any{"enabled":true,"authenticated":false})
@@ -167,7 +186,13 @@ func(s *Server) attachBrowserAuth(mux *http.ServeMux){
   })
  })
  mux.HandleFunc("POST /api/v1/session/login",func(w http.ResponseWriter,r *http.Request){
+  diagnosticContext,span:=s.business.BeginDiagnostic(r.Context(),business.DiagnosticOperationSessionLogin,business.DiagnosticSourceAPI)
+  var diagnosticErr error
+  defer func(){span.End(diagnosticErr)}()
+  r=r.WithContext(diagnosticContext)
+  span.Enter(business.DiagnosticPhaseAuth)
   if !sameOriginMutation(r){
+   span.Enter(business.DiagnosticPhaseResponse)
    respond(w,http.StatusForbidden,map[string]string{"error":"same_origin_json_required"})
    return
   }
@@ -175,19 +200,27 @@ func(s *Server) attachBrowserAuth(mux *http.ServeMux){
    Username string `json:"username"`
    Password string `json:"password"`
   }
+  span.Enter(business.DiagnosticPhaseDecode)
   if err:=decode(w,r,2048,&input);err!=nil{
+   diagnosticErr=err
+   span.Enter(business.DiagnosticPhaseResponse)
    respond(w,http.StatusBadRequest,map[string]string{"error":"invalid_request"})
    return
   }
+  span.Enter(business.DiagnosticPhaseAuth)
   if !s.loginGate.admit(input.Username){
+   span.Enter(business.DiagnosticPhaseResponse)
    w.Header().Set("Retry-After","60")
    respond(w,http.StatusTooManyRequests,map[string]string{"error":"login_temporarily_rate_limited"})
    return
   }
   defer s.loginGate.release()
   ctx,cancel:=context.WithTimeout(r.Context(),browserAuthenticationBudget)
+  span.Enter(business.DiagnosticPhaseWork)
   state,err:=s.business.Login(ctx,input.Username,input.Password)
   cancel()
+  diagnosticErr=err
+  span.Enter(business.DiagnosticPhaseResponse)
   if err!=nil{
    if errors.Is(err,business.ErrUnauthenticated){
     respond(w,http.StatusUnauthorized,map[string]string{"error":"invalid_credentials"})
