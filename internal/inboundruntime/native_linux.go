@@ -117,7 +117,7 @@ type Native struct {
 	dir          string
 	apiDirectory *os.File
 	apiSocket    string
-	endpoint     string
+	stats        *nativeStatsClient
 	identity     usagecheckpoint.ProcessToken
 	configSHA    string
 	principals   []inboundexec.Principal
@@ -291,7 +291,7 @@ func StartNative(ctx context.Context, dir string, b *Binary, bundle inboundexec.
 	cmd.Stdout = io.Discard
 	cmd.Stderr = io.Discard
 	cmd.SysProcAttr = &syscall.SysProcAttr{Pdeathsig: syscall.SIGKILL}
-	p := &Native{binary: b, cmd: cmd, done: make(chan struct{}), dir: childDir, apiDirectory: apiDirectory, apiSocket: apiSocket, endpoint: "unix://" + apiSocket, principals: bundle.Principals, seen: map[string]bool{}, last: map[string]inboundexec.Counter{}}
+	p := &Native{binary: b, cmd: cmd, done: make(chan struct{}), dir: childDir, apiDirectory: apiDirectory, apiSocket: apiSocket, principals: bundle.Principals, seen: map[string]bool{}, last: map[string]inboundexec.Counter{}}
 	start := make(chan error, 1)
 	go func() {
 		runtime.LockOSThread()
@@ -314,6 +314,11 @@ func StartNative(ctx context.Context, dir string, b *Binary, bundle inboundexec.
 	}
 	h := sha256.Sum256(raw)
 	p.configSHA = hex.EncodeToString(h[:])
+	p.stats, e = newNativeStatsClient(p)
+	if e != nil {
+		p.Stop()
+		return nil, ErrRuntime
+	}
 	if !p.Renew(deadline) {
 		p.Stop()
 		return nil, ErrLease
@@ -401,9 +406,11 @@ func (p *Native) Renew(deadline time.Time) bool {
 
 func (p *Native) expireLease(serial uint64) {
 	p.mu.Lock()
-	defer p.mu.Unlock()
+	var stats *nativeStatsClient
 	if !p.ending && p.leaseSerial == serial {
 		p.ending = true
+		stats = p.stats
+		stats.markClosed()
 		if p.cmd != nil && p.cmd.Process != nil {
 			if p.binary != nil {
 				p.binary.diagnostics.record(diagnosticNativeStop, diagnosticLeaseExpired)
@@ -411,6 +418,10 @@ func (p *Native) expireLease(serial uint64) {
 			_ = p.cmd.Process.Kill()
 		}
 	}
+	p.mu.Unlock()
+	// Closing transport must never delay the owned-child lease kill or hold
+	// the renewal mutex while gRPC cancels an in-flight dial or RPC.
+	stats.close()
 }
 
 func (p *Native) Stop() {
@@ -422,6 +433,8 @@ func (p *Native) Stop() {
 		p.binary.diagnostics.record(diagnosticNativeStop, diagnosticStopRequested)
 	}
 	p.ending = true
+	stats := p.stats
+	stats.markClosed()
 	if p.timer != nil {
 		p.timer.Stop()
 	}
@@ -432,6 +445,7 @@ func (p *Native) Stop() {
 		_ = p.cmd.Process.Kill()
 	}
 	p.mu.Unlock()
+	stats.close()
 	if p.done != nil {
 		<-p.done
 	}
@@ -439,65 +453,6 @@ func (p *Native) Stop() {
 		_ = p.apiDirectory.Close()
 	}
 	_ = os.RemoveAll(p.dir)
-}
-
-func (p *Native) query(ctx context.Context, pattern string) (map[string]uint64, error) {
-	if p.checkIdentity() != nil {
-		return nil, ErrIdentity
-	}
-	if !p.ownsUnixControl() {
-		return nil, ErrIdentity
-	}
-	call, cancel := context.WithTimeout(ctx, 4*time.Second)
-	defer cancel()
-	cmd := p.binary.command(call, "api", "statsquery", "--server="+p.endpoint, "--timeout=3", "-pattern="+pattern, "-reset=false")
-	cmd.Env = []string{"PATH=/usr/bin:/bin", "HOME=" + p.dir}
-	var output boundedOutput
-	output.limit = 8 << 20
-	cmd.Stdout = &output
-	cmd.Stderr = io.Discard
-	if cmd.Run() != nil || p.checkIdentity() != nil {
-		return nil, ErrProof
-	}
-	var body struct {
-		Stat []struct {
-			Name  string          `json:"name"`
-			Value json.RawMessage `json:"value"`
-		} `json:"stat"`
-	}
-	d := json.NewDecoder(bytes.NewReader(output.Bytes()))
-	d.DisallowUnknownFields()
-	if d.Decode(&body) != nil {
-		return nil, ErrProof
-	}
-	var extra any
-	if d.Decode(&extra) != io.EOF {
-		return nil, ErrProof
-	}
-	values := map[string]uint64{}
-	for _, entry := range body.Stat {
-		if entry.Name == "" {
-			return nil, ErrProof
-		}
-		if _, ok := values[entry.Name]; ok {
-			return nil, ErrProof
-		}
-		s := string(entry.Value)
-		if s == "" {
-			s = "0"
-		}
-		if strings.HasPrefix(s, "\"") {
-			if json.Unmarshal(entry.Value, &s) != nil {
-				return nil, ErrProof
-			}
-		}
-		v, e := strconv.ParseUint(s, 10, 63)
-		if e != nil {
-			return nil, ErrProof
-		}
-		values[entry.Name] = v
-	}
-	return values, nil
 }
 
 func validNonce(s string) bool {

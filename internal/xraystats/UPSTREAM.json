@@ -1,0 +1,47 @@
+{
+  "files": [
+    {
+      "bytes": 2083,
+      "git_blob_sha1": "c2f7405414ec81eb0fd7804fb52fec9bb71c6efa",
+      "path": "command.proto",
+      "sha256": "aadeb6b30e2bd13782896fa7addba101f522ea99438f9511aa4d8f1d62dcf58a",
+      "unmodified": true,
+      "upstream_path": "app/stats/command/command.proto"
+    },
+    {
+      "bytes": 32718,
+      "git_blob_sha1": "4320ff2295af6927cc52e18a974e8dd00e5084b2",
+      "path": "command.pb.go",
+      "sha256": "267c720f6f0a7a2c11481c86acf54805180f584e00db0ab2c0ed8fba20acc514",
+      "unmodified": true,
+      "upstream_path": "app/stats/command/command.pb.go"
+    },
+    {
+      "bytes": 14613,
+      "git_blob_sha1": "0401d14cea7649504654c8eddd930242bcb708f4",
+      "path": "command_grpc.pb.go",
+      "sha256": "e32774d184b712365d149f5bd2a5c739bef27e543ae84b86066993da9dfc2c0e",
+      "unmodified": true,
+      "upstream_path": "app/stats/command/command_grpc.pb.go"
+    },
+    {
+      "bytes": 16725,
+      "git_blob_sha1": "a612ad9813b006ce81d1ee438dd784da99a54007",
+      "path": "LICENSE",
+      "sha256": "1f256ecad192880510e84ad60474eab7589218784b9a50bc7ceee34c2b91f1d5",
+      "unmodified": true,
+      "upstream_path": "LICENSE"
+    }
+  ],
+  "generation": {
+    "protoc": "6.33.5",
+    "protoc-gen-go": "1.36.11",
+    "protoc-gen-go-grpc": "1.6.0",
+    "source": "existing upstream generated files copied verbatim, not regenerated"
+  },
+  "license": "MPL-2.0",
+  "repository": "https://github.com/XTLS/Xray-core",
+  "revision": "701af60772cda123492f86e383e1fdba066614a9",
+  "scope": "unmodified StatsService schema/generated bindings only; no Xray runtime module",
+  "used_method": "/xray.app.stats.command.StatsService/QueryStats"
+}

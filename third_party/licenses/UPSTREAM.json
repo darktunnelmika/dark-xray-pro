@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "components": [
+    {
+      "module": "google.golang.org/grpc",
+      "version": "v1.84.0",
+      "repository": "https://github.com/grpc/grpc-go",
+      "source_commit": "e84aa5ab15d1d2b29d54f838312ad490cb7551a8",
+      "source_tree": "4e9198e62f764e3548accf27c31d6ac07a6bbfa3",
+      "files": [
+        {
+          "file": "grpc-go-LICENSE",
+          "source_path": "LICENSE",
+          "git_blob_sha": "d645695673349e3947e8e5ae42332d0ac3164cd7"
+        },
+        {
+          "file": "grpc-go-NOTICE.txt",
+          "source_path": "NOTICE.txt",
+          "git_blob_sha": "530197749e9d3826690dfcf08f1bff451695f743"
+        }
+      ]
+    },
+    {
+      "module": "google.golang.org/protobuf",
+      "version": "v1.36.12",
+      "repository": "https://github.com/protocolbuffers/protobuf-go",
+      "source_commit": "cdd4c5f7406e82462949c7a65defa9f3029c162d",
+      "source_tree": "e867352b99a02468136bd1884be4e4da5b2e3cd7",
+      "files": [
+        {
+          "file": "protobuf-go-LICENSE",
+          "source_path": "LICENSE",
+          "git_blob_sha": "49ea0f928825ac4339299665088d332ac9953476"
+        }
+      ]
+    }
+  ]
+}
