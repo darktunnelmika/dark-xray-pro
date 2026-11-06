@@ -26,6 +26,7 @@ type Config struct {
 	Key            []byte
 	Native         BinaryConfig
 	External       map[string]BinaryConfig
+	Diagnostics    *Diagnostics
 }
 
 type Worker struct {
@@ -68,6 +69,7 @@ func Open(cfg Config) (*Worker, error) {
 		j.close()
 		return nil, e
 	}
+	w.native.diagnostics = cfg.Diagnostics
 	for engine, desc := range cfg.External {
 		if engine != "tuic" && engine != "amneziawg" && engine != "mtproto" {
 			w.Close()
@@ -78,6 +80,7 @@ func Open(cfg Config) (*Worker, error) {
 			w.Close()
 			return nil, err
 		}
+		b.diagnostics = cfg.Diagnostics
 		w.external[engine] = b
 	}
 	// A previous process is never adopted. Its incarnation may have produced a
@@ -126,6 +129,7 @@ func (w *Worker) save() error {
 		// traffic after a counter/nonce/receipt durability failure.
 		w.persistFailed = true
 		if w.process != nil {
+			w.cfg.Diagnostics.record(diagnosticWorkerStop, diagnosticPersistence)
 			w.process.Stop()
 			w.process = nil
 		}
@@ -145,6 +149,7 @@ func (w *Worker) Close() {
 	}
 	w.closed = true
 	if w.process != nil {
+		w.cfg.Diagnostics.record(diagnosticWorkerStop, diagnosticWorkerClose)
 		w.process.Stop()
 		w.process = nil
 	}
@@ -161,13 +166,15 @@ func (w *Worker) Close() {
 // even if polling, usage delivery, or the controller goroutine stalls.
 func (w *Worker) Run(ctx context.Context, x Exchange) {
 	var retries idleRetry
+	stopDiagnostics := w.cfg.Diagnostics.startJournal()
+	defer stopDiagnostics()
 	defer w.Close()
 	for {
 		if ctx.Err() != nil {
 			shutdown, cancel := context.WithTimeout(context.Background(), 6*time.Second)
 			w.mu.Lock()
 			if !w.closed && !w.persistFailed {
-				_ = w.captureFinal(shutdown)
+				_ = w.captureFinal(shutdown, diagnosticShutdown)
 				if w.state.Pending != nil && !w.persistFailed {
 					_ = w.sendPending(shutdown, x)
 				}
@@ -199,9 +206,10 @@ func (w *Worker) Run(ctx context.Context, x Exchange) {
 // Step performs one durable reconciliation. All outbound mutations can be
 // repeated verbatim after a lost response; a cursor advances only on its exact
 // receipt. It is exported to exercise real engines without scheduler sleeps.
-func (w *Worker) Step(ctx context.Context, x Exchange) error {
+func (w *Worker) Step(ctx context.Context, x Exchange) (stepErr error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
+	defer func() { w.cfg.Diagnostics.recordError(diagnosticStep, stepErr) }()
 	if w.closed || x == nil {
 		return ErrRuntime
 	}
@@ -210,6 +218,7 @@ func (w *Worker) Step(ctx context.Context, x Exchange) error {
 		return ErrPersistence
 	}
 	if w.process != nil && !w.process.Alive() && !w.state.FinalAccepted && w.state.Phase != "sealed_waiting_receipt" && (w.state.Pending == nil || !w.state.Pending.Final) {
+		w.cfg.Diagnostics.record(diagnosticCoreState, diagnosticProcessLost)
 		if err := w.markUncertain(); err != nil {
 			return err
 		}
@@ -245,6 +254,7 @@ func (w *Worker) Step(ctx context.Context, x Exchange) error {
 	}
 	if w.state.FinalAccepted && w.state.Epoch != nil {
 		if w.process != nil {
+			w.cfg.Diagnostics.record(diagnosticWorkerStop, diagnosticFinalAccepted)
 			w.process.Stop()
 			w.process = nil
 		}
@@ -271,17 +281,18 @@ func (w *Worker) Step(ctx context.Context, x Exchange) error {
 		return w.admit(ctx, x)
 	}
 	if w.process != nil && (w.state.Phase == "draining" || w.state.Phase == "final_pending") {
-		return w.drain(ctx, x)
+		return w.drain(ctx, x, diagnosticRecovery)
 	}
 	if w.process != nil && w.state.Phase == "active" {
 		if time.Until(w.deadline) < 12*time.Second {
-			return w.drain(ctx, x)
+			return w.drain(ctx, x, diagnosticLeaseRunway)
 		}
 		values, e := w.process.Counters(ctx)
+		w.cfg.Diagnostics.recordError(diagnosticCounters, e)
 		if e != nil {
 			// Preserve authoritative final counters before declaring an uncertain tail.
 			finalCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-			finalErr := w.captureFinal(finalCtx)
+			finalErr := w.captureFinal(finalCtx, diagnosticCounterFailure)
 			cancel()
 			if finalErr == nil {
 				return e
@@ -307,17 +318,19 @@ func (w *Worker) Step(ctx context.Context, x Exchange) error {
 		poll.ReconciledEpochID = w.state.Resolution.Epoch.EpochID
 	}
 	delivery, e := x.Poll(ctx, poll)
+	w.cfg.Diagnostics.recordError(diagnosticPoll, e)
 	if e != nil {
 		w.maybeDrain(ctx)
 		return e
 	}
 	if delivery == nil {
 		if w.process != nil {
-			return w.drain(ctx, x)
+			return w.drain(ctx, x, diagnosticDeliveryAbsent)
 		}
 		return nil
 	}
 	if e = VerifyDelivery(w.cfg.Key, *delivery, w.cfg.NodeID, w.cfg.InstallationID, time.Now()); e != nil {
+		w.cfg.Diagnostics.record(diagnosticPoll, diagnosticProof)
 		w.maybeDrain(ctx)
 		return e
 	}
@@ -346,6 +359,7 @@ func (w *Worker) Step(ctx context.Context, x Exchange) error {
 		}
 		w.deadline = deadline
 		if e = w.process.Health(ctx); e != nil {
+			w.cfg.Diagnostics.recordError(diagnosticHealth, e)
 			_ = w.observe(ctx, x, "degraded", "engine_health_failed", false)
 			return e
 		}
@@ -357,7 +371,7 @@ func (w *Worker) Step(ctx context.Context, x Exchange) error {
 		}
 	}
 	if w.process != nil || w.state.Epoch != nil {
-		if e = w.drain(ctx, x); e != nil {
+		if e = w.drain(ctx, x, w.deliveryDrainReason(bundle)); e != nil {
 			return e
 		}
 		return nil
@@ -424,15 +438,17 @@ func (w *Worker) admit(ctx context.Context, x Exchange) error {
 		return ErrRuntime
 	}
 	if time.Until(w.deadline) < 12*time.Second {
-		return w.drain(ctx, x)
+		return w.drain(ctx, x, diagnosticLeaseRunway)
 	}
 	if w.state.Phase == "prepared" {
 		receipt, e := x.Register(ctx, *w.state.Epoch)
+		w.cfg.Diagnostics.recordError(diagnosticRegister, e)
 		if e != nil {
 			w.maybeDrain(ctx)
 			return e
 		}
 		if !receipt.Registered || receipt.EpochID != w.state.Epoch.EpochID || receipt.ProcessIdentity != w.state.Epoch.ProcessIdentity {
+			w.cfg.Diagnostics.record(diagnosticRegister, diagnosticProof)
 			return ErrProof
 		}
 		w.state.Phase = "registered"
@@ -442,6 +458,7 @@ func (w *Worker) admit(ctx context.Context, x Exchange) error {
 	}
 	if w.state.Phase == "registered" {
 		values, e := w.process.Counters(ctx)
+		w.cfg.Diagnostics.recordError(diagnosticCounters, e)
 		if e != nil {
 			return e
 		}
@@ -468,27 +485,32 @@ func (w *Worker) admit(ctx context.Context, x Exchange) error {
 	// Obtain current, short-lived authority again immediately before opening
 	// the gate; an old generation is sealed while it is still closed.
 	delivery, e := x.Poll(ctx, PollInput{NodeID: w.cfg.NodeID, InstallationID: w.cfg.InstallationID, Capabilities: w.Capabilities()})
+	w.cfg.Diagnostics.recordError(diagnosticPoll, e)
 	if e != nil {
 		w.maybeDrain(ctx)
 		return e
 	}
 	if delivery == nil {
-		return w.drain(ctx, x)
+		return w.drain(ctx, x, diagnosticDeliveryAbsent)
 	}
 	if e = VerifyDelivery(w.cfg.Key, *delivery, w.cfg.NodeID, w.cfg.InstallationID, time.Now()); e != nil {
+		w.cfg.Diagnostics.record(diagnosticPoll, diagnosticProof)
 		w.maybeDrain(ctx)
 		return e
 	}
 	b := delivery.Bundle
 	if b.Generation != w.state.Generation || b.ConfigSHA != w.state.Bundle.ConfigSHA || b.ManifestSHA != w.state.Bundle.ManifestSHA {
-		return w.drain(ctx, x)
+		return w.drain(ctx, x, w.deliveryDrainReason(b))
 	}
 	deadline := time.Unix(0, delivery.Lease.Expires)
 	if e = w.renewPublicAliases(ctx, deadline); e != nil {
 		return w.fencePublicAliases(ctx, e)
 	}
-	if time.Until(deadline) < 12*time.Second || !w.process.Renew(deadline) {
-		return w.drain(ctx, x)
+	if time.Until(deadline) < 12*time.Second {
+		return w.drain(ctx, x, diagnosticLeaseRunway)
+	}
+	if !w.process.Renew(deadline) {
+		return w.drain(ctx, x, diagnosticRenewalRefused)
 	}
 	w.deadline = deadline
 	w.state.Phase = "activation_intent"
@@ -528,15 +550,18 @@ func (w *Worker) sendPending(ctx context.Context, x Exchange) error {
 	}
 	r := *w.state.Pending
 	receipt, e := x.Usage(ctx, r)
+	w.cfg.Diagnostics.recordError(diagnosticUsage, e)
 	if e != nil {
 		return e
 	}
 	if receipt.EpochID != r.EpochID || receipt.Sequence != r.Sequence || receipt.SHA256 != ReportSHA(r) || receipt.Final != r.Final {
+		w.cfg.Diagnostics.record(diagnosticUsage, diagnosticProof)
 		return ErrProof
 	}
 	w.state.Pending = nil
 	if r.Final {
 		w.state.FinalAccepted = true
+		w.cfg.Diagnostics.record(diagnosticFinalReceipt, diagnosticSucceeded)
 		w.state.Phase = "final_accepted"
 	}
 	return w.save()
@@ -546,6 +571,7 @@ func (w *Worker) markUncertain() error {
 	w.state.Phase = "uncertain"
 	err := w.save()
 	if w.process != nil {
+		w.cfg.Diagnostics.record(diagnosticWorkerStop, diagnosticUncertain)
 		w.process.Stop()
 		w.process = nil
 	}
@@ -557,6 +583,7 @@ func (w *Worker) resolveUncertain(ctx context.Context, x Exchange) error {
 		return ErrUncertain
 	}
 	delivery, err := x.Poll(ctx, PollInput{NodeID: w.cfg.NodeID, InstallationID: w.cfg.InstallationID, Capabilities: w.Capabilities(), UncertainEpochID: w.state.Epoch.EpochID})
+	w.cfg.Diagnostics.recordError(diagnosticPoll, err)
 	if err != nil {
 		return err
 	}
@@ -591,7 +618,7 @@ func (w *Worker) resolveUncertain(ctx context.Context, x Exchange) error {
 
 // Drain persists its nonce before requesting the irreversible engine barrier.
 // The final counters survive process exit, network loss and supervisor restart.
-func (w *Worker) drain(ctx context.Context, x Exchange) error {
+func (w *Worker) drain(ctx context.Context, x Exchange, reason diagnosticReason) error {
 	if w.state.Pending != nil {
 		if e := w.sendPending(ctx, x); e != nil {
 			w.maybeDrain(ctx)
@@ -603,6 +630,7 @@ func (w *Worker) drain(ctx context.Context, x Exchange) error {
 	}
 	if w.state.FinalAccepted {
 		if w.process != nil {
+			w.cfg.Diagnostics.record(diagnosticWorkerStop, diagnosticFinalAccepted)
 			w.process.Stop()
 			w.process = nil
 		}
@@ -623,15 +651,18 @@ func (w *Worker) drain(ctx context.Context, x Exchange) error {
 		}
 		w.state.DrainNonce = nonce
 		w.state.Phase = "draining"
+		w.cfg.Diagnostics.record(diagnosticDrain, reason)
 		if e = w.save(); e != nil {
 			return e
 		}
 	}
 	values, e := w.process.Final(ctx, w.state.DrainNonce)
+	w.cfg.Diagnostics.recordError(diagnosticFinalCapture, e)
 	if e != nil {
 		return e
 	}
 	if e = w.validateInitialFinal(values); e != nil {
+		w.cfg.Diagnostics.recordError(diagnosticFinalCapture, e)
 		return e
 	}
 	w.state.Sequence++
@@ -639,12 +670,13 @@ func (w *Worker) drain(ctx context.Context, x Exchange) error {
 	w.state.Pending = &r
 	w.state.LastCounters = values
 	w.state.Phase = "final_pending"
-	if e = w.save(); e != nil {
+	if e = w.saveFinalCapture(); e != nil {
 		return e
 	}
 	if e = w.sendPending(ctx, x); e != nil {
 		return e
 	}
+	w.cfg.Diagnostics.record(diagnosticWorkerStop, diagnosticFinalAccepted)
 	w.process.Stop()
 	w.process = nil
 	if e = w.cleanupPublicAliases(ctx); e != nil {
@@ -663,10 +695,10 @@ func (w *Worker) maybeDrain(ctx context.Context) {
 	}
 	drain, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	_ = w.captureFinal(drain)
+	_ = w.captureFinal(drain, diagnosticLeaseRunway)
 }
 
-func (w *Worker) captureFinal(ctx context.Context) error {
+func (w *Worker) captureFinal(ctx context.Context, reason diagnosticReason) error {
 	if w.process == nil || w.state.Epoch == nil {
 		return nil
 	}
@@ -680,15 +712,18 @@ func (w *Worker) captureFinal(ctx context.Context) error {
 			return e
 		}
 		w.state.Phase = "draining"
+		w.cfg.Diagnostics.record(diagnosticDrain, reason)
 		if e = w.save(); e != nil {
 			return e
 		}
 	}
 	values, e := w.process.Final(ctx, w.state.DrainNonce)
+	w.cfg.Diagnostics.recordError(diagnosticFinalCapture, e)
 	if e != nil {
 		return e
 	}
 	if e = w.validateInitialFinal(values); e != nil {
+		w.cfg.Diagnostics.recordError(diagnosticFinalCapture, e)
 		return e
 	}
 	// A pending ordinary report cannot be overwritten. Its exact receipt must
@@ -696,14 +731,14 @@ func (w *Worker) captureFinal(ctx context.Context) error {
 	if w.state.Pending != nil {
 		w.state.LastCounters = values
 		w.state.Phase = "sealed_waiting_receipt"
-		return w.save()
+		return w.saveFinalCapture()
 	}
 	w.state.Sequence++
 	r := w.makeReport(values, true)
 	w.state.Pending = &r
 	w.state.LastCounters = values
 	w.state.Phase = "final_pending"
-	return w.save()
+	return w.saveFinalCapture()
 }
 
 func (w *Worker) validateInitialFinal(values []inboundexec.Counter) error {
@@ -747,7 +782,9 @@ func (w *Worker) observe(ctx context.Context, x Exchange, state, code string, re
 			o.InitialEpoch = &birth
 		}
 	}
-	return x.Observe(ctx, o)
+	err := x.Observe(ctx, o)
+	w.cfg.Diagnostics.recordError(diagnosticObserve, err)
+	return err
 }
 
 // Remove only the owned ephemeral birth directories after all durable recovery
@@ -791,4 +828,25 @@ func (r *idleRetry) next(failedIdle bool, jitter time.Duration) time.Duration {
 		delay = 8 * time.Second
 	}
 	return delay
+}
+
+// Diagnostics classify the triggering decision without changing the delivery.
+func (w *Worker) deliveryDrainReason(b inboundexec.Bundle) diagnosticReason {
+	if len(b.Listeners) == 0 && len(b.Components) == 0 {
+		return diagnosticWithdrawal
+	}
+	if b.Generation != w.state.Generation {
+		return diagnosticGenerationChange
+	}
+	return diagnosticBundleChange
+}
+
+func (w *Worker) saveFinalCapture() error {
+	err := w.save()
+	if err != nil {
+		w.cfg.Diagnostics.recordError(diagnosticFinalCapture, err)
+	} else {
+		w.cfg.Diagnostics.record(diagnosticFinalCapture, diagnosticSucceeded)
+	}
+	return err
 }

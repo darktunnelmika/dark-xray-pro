@@ -144,7 +144,7 @@ func TestManagedInboundSubscriptionProjectionTokensAndWithdrawal(t *testing.T) {
 	}
 }
 
-func TestManagedInboundSubscriptionRejectsStaleHealthAndQuota(t *testing.T) {
+func TestManagedInboundSubscriptionRetainsStaleHealthButRejectsQuota(t *testing.T) {
 	f := newExecutionFixture(t)
 	ctx := context.Background()
 	f.command(t, "managed-subscription-health-0001", "activate")
@@ -160,8 +160,9 @@ func TestManagedInboundSubscriptionRejectsStaleHealthAndQuota(t *testing.T) {
 	if _, err = f.s.db.Exec(`UPDATE inbound_execution_nodes SET observation_enc=? WHERE node_id=?`, enc, b.NodeID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = f.s.ProjectInboundExecutionSubscription(ctx, f.key, "owner", f.client.ID, "uri"); !errors.Is(err, ErrConflict) {
-		t.Fatal("stale observation served", err)
+	retained, err := f.s.ProjectInboundExecutionSubscription(ctx, f.key, "owner", f.client.ID, "uri")
+	if err != nil || len(retained.Routes) != 1 || retained.RuntimeReady || retained.PathVerified || retained.ReadinessExpiresUnixNano != 0 {
+		t.Fatal("stale observation withdrew credentials or claimed readiness", err)
 	}
 	o = executionObservation(b, e)
 	if err = f.s.ObserveInboundExecution(ctx, f.key, o); err != nil {

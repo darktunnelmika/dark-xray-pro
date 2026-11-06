@@ -1,6 +1,6 @@
 import jsQR from "jsqr";
 import { expect, test, type Locator, type Page } from "@playwright/test";
-import { readInboundSubscriptionSecret } from "../src/inboundSubscriptions";
+import { readInboundSubscriptionSecret, readInboundSubscriptionView } from "../src/inboundSubscriptions";
 
 const csrf = "a".repeat(64);
 const alpha = "sub-alpha", beta = "sub-beta";
@@ -22,7 +22,7 @@ type Head = { generation: number; state: TokenState };
 type Call = { path: string; method: string; body: Record<string, unknown>; csrf: string | undefined };
 type Options = {
   enabled?: boolean; denied?: boolean; manage?: boolean; active?: boolean;
-  loseFirstMutation?: boolean; delayReveal?: boolean; mutationStatus?: number;
+  loseFirstMutation?: boolean; delayReveal?: boolean; delayMetadata?: boolean; metadataStatus?: number; mutationStatus?: number;
   metadata?: (body: Record<string, unknown>) => Record<string, unknown>;
   receipt?: (body: Record<string, unknown>) => Record<string, unknown>;
   secret?: (body: Record<string, unknown>) => Record<string, unknown>;
@@ -50,6 +50,8 @@ async function fixture(page: Page, options: Options = {}) {
   let lost = false;
   let releaseReveal = () => {};
   const revealGate = options.delayReveal ? new Promise<void>(resolve => { releaseReveal = resolve; }) : Promise.resolve();
+  let releaseMetadata = () => {};
+  const metadataGate = options.delayMetadata ? new Promise<void>(resolve => { releaseMetadata = resolve; }) : Promise.resolve();
   await page.addInitScript(() => {
     const writes: Array<[string, string]> = [];
     Object.defineProperty(window, "__subscriptionStorageWrites", { value: writes });
@@ -94,9 +96,14 @@ async function fixture(page: Page, options: Options = {}) {
       if (!head) return route.fulfill({ status: 404, json: { error: "client_not_found" } });
       if (options.denied) return route.fulfill({ status: 403, json: { error: "scope_denied" } });
       if (request.method() === "GET" && !action) {
+        if (url.searchParams.getAll("view").length !== 1 || url.searchParams.get("view") !== "2") return route.fulfill({ status: 400, json: { error: "explicit_view_contract_required" } });
         const value: Record<string, unknown> = { enabled: options.enabled !== false, client_id: id };
-        if (options.enabled !== false) Object.assign(value, head, { server_time_unix_milli: Date.now(), available: true, route_count: 2, formats: ["uri", "json", "xray", "sing-box", "wireguard"], expires_unix_nano: (Date.now() + 15000) * 1e6, path_verified: false, blockers: [] });
-        return route.fulfill({ json: options.metadata ? options.metadata(value) : value });
+        if (options.metadataStatus) return route.fulfill({ status: options.metadataStatus, json: { error: "state_unavailable" } });
+        const now = Date.now();
+        if (options.enabled !== false) Object.assign(value, head, { view_version: 2, server_time_unix_milli: now, available: true, route_count: 2, formats: ["uri", "json", "xray", "sing-box", "wireguard"], expires_unix_nano: (now + 300000) * 1e6, runtime_ready: true, readiness_expires_unix_nano: (now + 15000) * 1e6, path_verified: false, blockers: [] });
+        const response = options.metadata ? options.metadata(value) : value;
+        await metadataGate;
+        return route.fulfill({ json: response });
       }
       if (options.enabled === false || options.manage === false || request.method() !== "POST" || request.headers()["x-csrf-token"] !== csrf) {
         return route.fulfill({ status: 403, json: { error: "write_denied" } });
@@ -135,7 +142,7 @@ async function fixture(page: Page, options: Options = {}) {
     if (client) return route.fulfill({ json: client });
     return route.fulfill({ status: 404, json: { error: "not_found" } });
   });
-  return { calls, consumers, heads, releaseReveal, user };
+  return { calls, consumers, heads, releaseReveal, releaseMetadata, user };
 }
 
 const panel = (page: Page) => page.getByRole("region", { name: "Client inbound subscription" });
@@ -178,7 +185,7 @@ test("managed subscription issues, reveals, rotates and revokes explicitly witho
   await section.getByRole("combobox", { name: "Format", exact: true }).selectOption("wireguard");
   await expect(section.getByLabel("Inbound subscription URL", { exact: true })).toHaveValue(/\?format=wireguard$/);
   await expect(section.getByRole("link", { name: "Download configuration" })).toHaveAttribute("href", `/api/v1/workspace/clients/${alpha}/inbound-subscription/export?format=wireguard`);
-  await expect(section.getByText("Engine readiness is recorded; the complete connection path has not been tested.")).toBeVisible();
+  await expect(section.getByText("Current engine readiness is confirmed; the complete connection path has not been tested.")).toBeVisible();
   await section.getByRole("button", { name: "Replace link", exact: true }).click();
   await expect.poll(() => f.heads.get(alpha)?.generation).toBe(2);
   await expect(section.getByLabel("Inbound subscription URL", { exact: true })).toHaveCount(0);
@@ -336,7 +343,7 @@ test("managed subscription clears secrets on denial, hidden tab and one-minute t
 test("managed subscription expires delivery locally and fits Persian light mode at 320px", async ({ page }) => {
   await page.setViewportSize({ width: 320, height: 760 }); await page.clock.install();
   const expires = Date.now() + 4000;
-  const f = await fixture(page, { active: true, metadata: v => ({ ...v, expires_unix_nano: expires * 1e6 }) });
+  const f = await fixture(page, { active: true, metadata: v => ({ ...v, expires_unix_nano: expires * 1e6, readiness_expires_unix_nano: expires * 1e6 }) });
   await page.addInitScript(() => { localStorage.setItem("dark-pro-lang", "fa"); localStorage.setItem("dark-pro-theme", "light"); });
   await page.goto("/clients"); const section = await selectClient(page, alpha, true);
   await expect(section.getByRole("heading", { name: "اشتراک اینباند", exact: true })).toBeVisible();
@@ -381,4 +388,100 @@ test("subscription QR decodes to the selected link, changes format locally and s
   expect(f.consumers).toHaveLength(0);
   expect(external).toEqual([]);
   await expectNoStoredSecret(page, [tokenFor(alpha, 3)]);
+});
+
+
+test("managed subscription validates independent readiness evidence and never accepts impossible confidence", () => {
+  const now = 1800000000000;
+  const valid = {
+    enabled: true, view_version: 2, client_id: alpha, generation: 3, state: "active",
+    available: true, formats: ["uri"], route_count: 2, server_time_unix_milli: now,
+    expires_unix_nano: (now + 300000) * 1e6, runtime_ready: true,
+    readiness_expires_unix_nano: (now + 15000) * 1e6, path_verified: true,
+  };
+  expect(readInboundSubscriptionView(valid, alpha)).toMatchObject({ runtime_ready: true, path_verified: true });
+  expect(readInboundSubscriptionView({ ...valid, runtime_ready: false, readiness_expires_unix_nano: 0, path_verified: false }, alpha))
+    .toMatchObject({ available: true, runtime_ready: false });
+  for (const change of [
+    { view_version: undefined }, { view_version: 1 },
+    { runtime_ready: undefined }, { readiness_expires_unix_nano: undefined },
+    { runtime_ready: false }, { readiness_expires_unix_nano: 0 },
+    { readiness_expires_unix_nano: -1 }, { readiness_expires_unix_nano: (now + 300001) * 1e6 },
+    { available: false }, { runtime_ready: false, readiness_expires_unix_nano: 0, path_verified: true },
+  ]) expect(() => readInboundSubscriptionView({ ...valid, ...change }, alpha)).toThrow();
+});
+
+for (const language of ["en", "fa"]) test("managed subscription retains authorized offline routes without claiming readiness in " + language, async ({ page }) => {
+  const f = await fixture(page, { active: true, metadata: value => ({
+    ...value, runtime_ready: false, readiness_expires_unix_nano: 0, path_verified: false,
+  }) });
+  if (language === "fa") await page.addInitScript(() => localStorage.setItem("dark-pro-lang", "fa"));
+  await page.goto("/clients"); const section = await selectClient(page, alpha, language === "fa");
+  const unknown = language === "fa"
+    ? "آماده‌بودن فعلی همهٔ مسیرها قابل تأیید نیست؛ تنظیمات معتبر همچنان قابل دریافت است."
+    : "Current readiness of all routes could not be confirmed. Authorized configuration remains available.";
+  await expect(section.getByText(unknown, { exact: true })).toBeVisible();
+  await expect(section.getByRole("link", { name: language === "fa" ? "دریافت تنظیمات" : "Download configuration", exact: true })).toBeVisible();
+  await section.getByRole("button", { name: language === "fa" ? "نمایش لینک" : "Show link", exact: true }).click();
+  await expect(section.getByLabel("Inbound subscription URL", { exact: true })).toHaveValue(new RegExp(tokenFor(alpha, 3) + "\\?format=uri$"));
+  await expect(section.getByText(/Current engine readiness is confirmed|Current engine readiness and connection paths are confirmed|آماده‌بودن فعلی موتور/)).toHaveCount(0);
+  expect(f.calls.filter(call => call.method === "POST").map(call => call.path)).toEqual(["/api/v1/workspace/clients/" + alpha + "/inbound-subscription/reveal"]);
+  expect(f.heads.get(alpha)).toEqual({ generation: 3, state: "active" });
+  await expectNoStoredSecret(page, [tokenFor(alpha, 3)]); expect(f.consumers).toHaveLength(0);
+});
+
+test("managed subscription expires runtime and path confidence while retaining an authorized document", async ({ page }) => {
+  await page.clock.install();
+  let snapshot: Record<string, unknown> | undefined;
+  const f = await fixture(page, { active: true, metadata: value => {
+    snapshot ??= { ...value, path_verified: true, readiness_expires_unix_nano: (Number(value.server_time_unix_milli) + 3000) * 1e6 };
+    return snapshot;
+  } });
+  await page.goto("/clients"); const section = await selectClient(page);
+  await expect(section.getByText("Current engine readiness and connection paths are confirmed.", { exact: true })).toBeVisible();
+  await page.clock.fastForward(4001);
+  await expect(section.getByText("Current readiness of all routes could not be confirmed. Authorized configuration remains available.", { exact: true })).toBeVisible();
+  await expect(section.getByText("Current engine readiness and connection paths are confirmed.", { exact: true })).toHaveCount(0);
+  await expect(section.getByRole("link", { name: "Download configuration", exact: true })).toBeVisible();
+  expect(f.calls.filter(call => call.method === "POST")).toHaveLength(0);
+  expect(f.consumers).toHaveLength(0);
+});
+
+test("managed subscription removes confidence on failed refresh and restores only authorized offline delivery", async ({ page }) => {
+  const options: Options = { active: true, metadata: value => ({ ...value, path_verified: true }) };
+  const f = await fixture(page, options);
+  await page.goto("/clients"); const section = await selectClient(page);
+  await expect(section.getByText("Current engine readiness and connection paths are confirmed.", { exact: true })).toBeVisible();
+  await section.getByRole("button", { name: "Show link", exact: true }).click();
+  await expect(section.getByLabel("Inbound subscription URL", { exact: true })).toBeVisible();
+  options.metadataStatus = 503;
+  await section.getByRole("button", { name: "Refresh", exact: true }).click();
+  await expect(section.getByText("Subscription state could not be verified. Please refresh.", { exact: true })).toBeVisible();
+  await expect(section.getByText(/Current engine readiness/)).toHaveCount(0);
+  await expect(section.getByLabel("Inbound subscription URL", { exact: true })).toHaveCount(0);
+  await expect(section.getByRole("link", { name: "Download configuration", exact: true })).toHaveCount(0);
+  options.metadataStatus = undefined;
+  options.metadata = value => ({ ...value, runtime_ready: false, readiness_expires_unix_nano: 0, path_verified: false });
+  await section.getByRole("button", { name: "Refresh", exact: true }).click();
+  await expect(section.getByText("Current readiness of all routes could not be confirmed. Authorized configuration remains available.", { exact: true })).toBeVisible();
+  await expect(section.getByRole("link", { name: "Download configuration", exact: true })).toBeVisible();
+  expect(f.heads.get(alpha)).toEqual({ generation: 3, state: "active" });
+  expect(f.calls.filter(call => call.method === "POST")).toHaveLength(1);
+  await expectNoStoredSecret(page, [tokenFor(alpha, 3)]); expect(f.consumers).toHaveLength(0);
+});
+
+test("managed subscription counts response delay against readiness instead of extending its evidence lifetime", async ({ page }) => {
+  await page.clock.install();
+  const f = await fixture(page, { active: true, delayMetadata: true, metadata: value => ({
+    ...value, path_verified: true, readiness_expires_unix_nano: (Number(value.server_time_unix_milli) + 3000) * 1e6,
+  }) });
+  await page.goto("/clients"); const section = await selectClient(page);
+  await expect.poll(() => f.calls.filter(call => call.method === "GET").length).toBeGreaterThan(0);
+  await page.clock.fastForward(4001);
+  f.releaseMetadata();
+  await expect(section.getByText("Current readiness of all routes could not be confirmed. Authorized configuration remains available.", { exact: true })).toBeVisible();
+  await expect(section.getByText(/Current engine readiness/)).toHaveCount(0);
+  await expect(section.getByRole("link", { name: "Download configuration", exact: true })).toBeVisible();
+  expect(f.calls.filter(call => call.method === "POST")).toHaveLength(0);
+  expect(f.consumers).toHaveLength(0);
 });

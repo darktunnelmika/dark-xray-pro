@@ -44,7 +44,7 @@ func (s *Server) EnableInboundExecution(cfg InboundExecutionConfig) error {
 	h := hmac.New(sha256.New, s.inboundKey)
 	_, _ = h.Write([]byte("DARK-PRO-HUB-LOCAL-EXECUTION-v1"))
 	key := []byte(hex.EncodeToString(h.Sum(nil)))
-	worker, e := inboundruntime.Open(inboundruntime.Config{Directory: cfg.Directory, NodeID: localHubNodeID, InstallationID: s.localHubInstallation(), Key: key, Native: cfg.Native, External: cfg.External})
+	worker, e := inboundruntime.Open(inboundruntime.Config{Directory: cfg.Directory, NodeID: localHubNodeID, InstallationID: s.localHubInstallation(), Key: key, Native: cfg.Native, External: cfg.External, Diagnostics: &inboundruntime.Diagnostics{}})
 	if e != nil {
 		return e
 	}
