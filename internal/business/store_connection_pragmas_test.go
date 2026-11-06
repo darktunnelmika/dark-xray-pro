@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"database/sql/driver"
 	"errors"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -13,7 +14,12 @@ import (
 // Pool replacement must preserve Store.Open's connection-local protections.
 // ErrBadConn exercises database/sql's public discard path without driver hooks.
 func TestStoreReplacementConnectionPreservesPragmas(t *testing.T) {
-	s, err := Open(filepath.Join(t.TempDir(), "replacement-pragmas.sqlite"))
+	dir := t.TempDir()
+	// Store requires a private parent regardless of the caller's umask.
+	if err := os.Chmod(dir, 0700); err != nil {
+		t.Fatal("make temporary store directory private:", err)
+	}
+	s, err := Open(filepath.Join(dir, "replacement-pragmas.sqlite"))
 	if err != nil {
 		t.Fatal("open temporary business store:", err)
 	}
