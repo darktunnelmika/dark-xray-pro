@@ -1,6 +1,7 @@
 package api
 
 import (
+ "context"
  "crypto/hmac"
  "crypto/sha256"
  "encoding/hex"
@@ -17,6 +18,12 @@ import (
 )
 
 const sessionCookieName = "__Host-darkpro_session"
+const browserAuthenticationBudget = 5*time.Second
+
+func browserAuthUnavailable(w http.ResponseWriter,code string){
+ w.Header().Set("Retry-After","5")
+ respond(w,http.StatusServiceUnavailable,map[string]string{"error":code})
+}
 
 // Bounded global login pressure and bounded expensive Argon2 operations.
 // Production will also require edge rate limiting and account lockout policy.
@@ -91,20 +98,26 @@ func(s *Server) csrfValue(token string)string{
  _,_=m.Write([]byte(token))
  return hex.EncodeToString(m.Sum(nil))
 }
-func(s *Server) signedSession(r *http.Request)(business.LoginSession,bool){
- if s.business==nil{return business.LoginSession{},false}
+func(s *Server) signedSession(r *http.Request)(business.LoginSession,error){
+ if s.business==nil{return business.LoginSession{},business.ErrUnavailable}
  c,err:=r.Cookie(sessionCookieName)
- if err!=nil{return business.LoginSession{},false}
- state,err:=s.business.VerifySession(r.Context(),c.Value)
- return state,err==nil
+ if err!=nil{return business.LoginSession{},business.ErrUnauthenticated}
+ // Bound authentication only; authorized handlers keep the original context.
+ ctx,cancel:=context.WithTimeout(r.Context(),browserAuthenticationBudget)
+ defer cancel()
+ return s.business.VerifySession(ctx,c.Value)
 }
 func(s *Server) authorizeBrowser(w http.ResponseWriter,r *http.Request,mutate,ownerOnly bool)(business.LoginSession,bool){
  return s.authorizeBrowserMedia(w,r,mutate,ownerOnly,"application/json")
 }
 func(s *Server) authorizeBrowserMedia(w http.ResponseWriter,r *http.Request,mutate,ownerOnly bool,requiredMedia string)(business.LoginSession,bool){
- session,ok:=s.signedSession(r)
- if !ok{
-  respond(w,http.StatusUnauthorized,map[string]string{"error":"session_required"})
+ session,err:=s.signedSession(r)
+ if err!=nil{
+  if errors.Is(err,business.ErrUnauthenticated){
+   respond(w,http.StatusUnauthorized,map[string]string{"error":"session_required"})
+  }else{
+   browserAuthUnavailable(w,"session_unavailable")
+  }
   return business.LoginSession{},false
  }
  if ownerOnly&&session.User.Role!="owner"{
@@ -139,9 +152,13 @@ func(s *Server) attachBrowserAuth(mux *http.ServeMux){
  if s.loginGate==nil{s.loginGate=newLoginGate()}
 
  mux.HandleFunc("GET /api/v1/session/status",func(w http.ResponseWriter,r *http.Request){
-  state,ok:=s.signedSession(r)
-  if !ok{
-   respond(w,http.StatusOK,map[string]any{"enabled":true,"authenticated":false})
+  state,err:=s.signedSession(r)
+  if err!=nil{
+   if errors.Is(err,business.ErrUnauthenticated){
+    respond(w,http.StatusOK,map[string]any{"enabled":true,"authenticated":false})
+   }else{
+    browserAuthUnavailable(w,"session_unavailable")
+   }
    return
   }
   respond(w,http.StatusOK,map[string]any{
@@ -168,12 +185,14 @@ func(s *Server) attachBrowserAuth(mux *http.ServeMux){
    return
   }
   defer s.loginGate.release()
-  state,err:=s.business.Login(r.Context(),input.Username,input.Password)
+  ctx,cancel:=context.WithTimeout(r.Context(),browserAuthenticationBudget)
+  state,err:=s.business.Login(ctx,input.Username,input.Password)
+  cancel()
   if err!=nil{
    if errors.Is(err,business.ErrUnauthenticated){
     respond(w,http.StatusUnauthorized,map[string]string{"error":"invalid_credentials"})
    }else{
-    respond(w,http.StatusServiceUnavailable,map[string]string{"error":"login_unavailable"})
+    browserAuthUnavailable(w,"login_unavailable")
    }
    return
   }
@@ -207,8 +226,10 @@ func(s *Server) attachBrowserAuth(mux *http.ServeMux){
     respond(w,http.StatusUnauthorized,map[string]string{"error":"current_password_invalid"})
    }else if errors.Is(err,business.ErrInvalid){
     respond(w,http.StatusUnprocessableEntity,map[string]string{"error":"new_password_invalid"})
-   }else{
+   }else if errors.Is(err,business.ErrConflict){
     respond(w,http.StatusConflict,map[string]string{"error":"password_update_failed"})
+   }else{
+    browserAuthUnavailable(w,"password_change_unavailable")
    }
    return
   }

@@ -117,7 +117,7 @@ func TestOwnerNodeDependenciesAuthorizationUnknownAndEmpty(t *testing.T) {
 	}
 	// The closed business store also prevents session validation: fail closed
 	// at authentication, before dependency inspection can expose any counts.
-	if w := browserRequest(t, h, "GET", path, nil, owner, "", ""); w.Code != 401 || strings.Contains(w.Body.String(), "counts") {
+	if w := browserRequest(t, h, "GET", path, nil, owner, "", ""); w.Code != 503 || !strings.Contains(w.Body.String(), `"error":"session_unavailable"`) || strings.Contains(w.Body.String(), "counts") {
 		t.Fatalf("failure fabricated counts: %d %s", w.Code, w.Body.String())
 	}
 }

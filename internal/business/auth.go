@@ -106,11 +106,15 @@ func (s *Store) Login(ctx context.Context,username,password string)(LoginSession
  err:=s.db.QueryRowContext(ctx,
   "SELECT a.id,a.username,a.role,a.representative_id,a.password_salt,a.password_hash,CASE WHEN a.role='representative' AND c.representative_id IS NOT NULL THEN c.login_suspended ELSE a.disabled END,r.enabled FROM auth_users a JOIN representatives r ON r.id=a.representative_id LEFT JOIN representative_controls c ON c.representative_id=a.representative_id WHERE a.username=?",
   username).Scan(&u.ID,&u.Username,&u.Role,&u.RepresentativeID,&salt,&expected,&disabled,&repEnabled)
+ // A busy, closed or cancelled store cannot establish that credentials failed.
+ if err!=nil&&!errors.Is(err,sql.ErrNoRows){return LoginSession{},err}
+ if contextErr:=ctx.Err();contextErr!=nil{return LoginSession{},contextErr}
  valid:=err==nil && len(salt)==16 && len(expected)==32 && disabled==0 && repEnabled==1
  // Compute a real Argon2id hash even for missing/disabled users to reduce
  // credential-enumeration timing. A bounded API gate limits parallel load.
  if !valid{salt=[]byte("privatefake-salt");expected=make([]byte,32)}
  got:=argon2.IDKey([]byte(password),salt,argonIterations,argonMemoryKiB,argonThreads,argonKeyBytes)
+ if contextErr:=ctx.Err();contextErr!=nil{return LoginSession{},contextErr}
  if subtle.ConstantTimeCompare(got,expected)!=1||!valid{return LoginSession{},ErrUnauthenticated}
  tokenBytes:=make([]byte,32)
  if _,err=rand.Read(tokenBytes);err!=nil{return LoginSession{},err}
@@ -129,7 +133,9 @@ func (s *Store) Login(ctx context.Context,username,password string)(LoginSession
   FROM auth_users a JOIN representatives r ON r.id=a.representative_id
   LEFT JOIN representative_controls ctl ON ctl.representative_id=a.representative_id
   WHERE a.id=?`,u.ID).Scan(&authorized)
- if err!=nil||authorized!=1{return LoginSession{},ErrUnauthenticated}
+ if errors.Is(err,sql.ErrNoRows){return LoginSession{},ErrUnauthenticated}
+ if err!=nil{return LoginSession{},err}
+ if authorized!=1{return LoginSession{},ErrUnauthenticated}
  if _,err=tx.ExecContext(ctx,"DELETE FROM auth_sessions WHERE expires_unix<=?",now);err!=nil{return LoginSession{},err}
  if _,err=tx.ExecContext(ctx,"INSERT INTO auth_sessions(token_sha256,user_id,created_unix,expires_unix) VALUES(?,?,?,?)",digestSession(token),u.ID,now,expiry);err!=nil{return LoginSession{},err}
  // Cap live sessions per account without trusting client-side logout. New
@@ -152,7 +158,9 @@ func (s *Store) VerifySession(ctx context.Context,token string)(LoginSession,err
  err:=s.db.QueryRowContext(ctx,
   "SELECT a.id,a.username,a.role,a.representative_id,ss.expires_unix,CASE WHEN a.role='representative' AND c.representative_id IS NOT NULL THEN c.login_suspended ELSE a.disabled END,r.enabled FROM auth_sessions ss JOIN auth_users a ON a.id=ss.user_id JOIN representatives r ON r.id=a.representative_id LEFT JOIN representative_controls c ON c.representative_id=a.representative_id WHERE ss.token_sha256=?",
   digestSession(token)).Scan(&u.ID,&u.Username,&u.Role,&u.RepresentativeID,&expires,&disabled,&repEnabled)
- if err!=nil||expires<=time.Now().UTC().Unix()||disabled!=0||repEnabled!=1{return LoginSession{},ErrUnauthenticated}
+ if errors.Is(err,sql.ErrNoRows){return LoginSession{},ErrUnauthenticated}
+ if err!=nil{return LoginSession{},err}
+ if expires<=time.Now().UTC().Unix()||disabled!=0||repEnabled!=1{return LoginSession{},ErrUnauthenticated}
  u.Permissions,err=s.RepresentativePermissions(ctx,u.RepresentativeID)
  if err!=nil{return LoginSession{},err}
  return LoginSession{Token:token,User:u,ExpiresUnix:expires},nil
@@ -168,8 +176,10 @@ func(s *Store)RotatePassword(ctx context.Context,userID,oldPassword,newPassword 
  if !idRE.MatchString(userID)||!validPassword(newPassword){return ErrInvalid}
  var salt,expected []byte
  err:=s.db.QueryRowContext(ctx,"SELECT password_salt,password_hash FROM auth_users WHERE id=?",userID).Scan(&salt,&expected)
- if err!=nil{return ErrUnauthenticated}
+ if errors.Is(err,sql.ErrNoRows){return ErrUnauthenticated}
+ if err!=nil{return err}
  got:=argon2.IDKey([]byte(oldPassword),salt,argonIterations,argonMemoryKiB,argonThreads,argonKeyBytes)
+ if contextErr:=ctx.Err();contextErr!=nil{return contextErr}
  if subtle.ConstantTimeCompare(got,expected)!=1{return ErrUnauthenticated}
  newSalt,newHash,err:=passwordHash(newPassword);if err!=nil{return err}
  tx,err:=s.db.BeginTx(ctx,nil);if err!=nil{return err}
