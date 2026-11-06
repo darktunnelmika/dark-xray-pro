@@ -574,7 +574,8 @@ test("client plan quick presets match HUB debit and never submit until represent
  await form.getByLabel("Client ID (optional)",{exact:true}).fill("rep-test-plan-v3");
  await form.getByLabel("Client name").fill("Custom name");
  await form.getByRole("button",{name:"Create client",exact:true}).click();
- await expect(page.getByRole("status").filter({hasText:"Account saved; awaiting owner activation."})).toBeVisible();
+ await expect(page.getByRole("status").filter({hasText:"Account saved. Choose an allowed service to activate this client."})).toBeVisible();
+ await expect(form.getByRole("button",{name:"Choose service",exact:true})).toBeVisible();
  expect(requests).toHaveLength(1);
  const payload=requests[0].body as Record<string,unknown>;
  expect(payload).toMatchObject({client_id:"rep-test-plan-v3",name:"Custom name",
