@@ -159,16 +159,19 @@ func TestBusinessPhaseDiagnosticsCapacityMasksParent(t *testing.T) {
 
 type diagnosticHostileError struct{ cause error }
 
-func (diagnosticHostileError) Error() string { panic("Error must not be called by diagnostics") }
+func (diagnosticHostileError) Error() string   { panic("Error must not be called by diagnostics") }
 func (e diagnosticHostileError) Unwrap() error { return e.cause }
 
 type diagnosticPretendSQLiteError struct{}
 
 func (diagnosticPretendSQLiteError) Error() string { panic("Error must not be called by diagnostics") }
-func (diagnosticPretendSQLiteError) Code() int { return 9 }
+func (diagnosticPretendSQLiteError) Code() int     { return 9 }
 
 func TestBusinessPhaseDiagnosticsSafeErrors(t *testing.T) {
-	cases := []struct{ err error; want diagnosticResult }{
+	cases := []struct {
+		err  error
+		want diagnosticResult
+	}{
 		{nil, diagnosticNoErrorObserved}, {context.Canceled, diagnosticContextCanceled},
 		{context.DeadlineExceeded, diagnosticContextDeadline}, {sql.ErrNoRows, diagnosticNoRows},
 		{sql.ErrTxDone, diagnosticTxDone}, {driver.ErrBadConn, diagnosticBadConn},
@@ -180,10 +183,16 @@ func TestBusinessPhaseDiagnosticsSafeErrors(t *testing.T) {
 		}
 	}
 	db, err := sql.Open("sqlite", ":memory:")
-	if err != nil { t.Fatal("synthetic database open failed") }
+	if err != nil {
+		t.Fatal("synthetic database open failed")
+	}
 	defer db.Close()
-	if _, err = db.Exec("CREATE TABLE phase_numeric_error(id INTEGER PRIMARY KEY,n INTEGER UNIQUE)"); err != nil { t.Fatal("synthetic schema failed") }
-	if _, err = db.Exec("INSERT INTO phase_numeric_error(n) VALUES(1)"); err != nil { t.Fatal("synthetic seed failed") }
+	if _, err = db.Exec("CREATE TABLE phase_numeric_error(id INTEGER PRIMARY KEY,n INTEGER UNIQUE)"); err != nil {
+		t.Fatal("synthetic schema failed")
+	}
+	if _, err = db.Exec("INSERT INTO phase_numeric_error(n) VALUES(1)"); err != nil {
+		t.Fatal("synthetic seed failed")
+	}
 	_, err = db.Exec("INSERT INTO phase_numeric_error(n) VALUES(1)")
 	var actual *sqlite.Error
 	if !errors.As(err, &actual) || actual == nil || actual.Code()&255 != 19 {
@@ -204,7 +213,9 @@ func TestBusinessPhaseDiagnosticsSafeErrors(t *testing.T) {
 	}
 	pretend := diagnosticPretendSQLiteError{}
 	record = span.record(diagnosticPhaseEnd, time.Now(), 0, classifyDiagnosticError(pretend), pretend)
-	if record.sqlitePresent { t.Fatal("duck-typed Code was accepted as SQLite") }
+	if record.sqlitePresent {
+		t.Fatal("duck-typed Code was accepted as SQLite")
+	}
 	span.End(nil)
 }
 
@@ -223,7 +234,9 @@ func TestBusinessPhaseDiagnosticsPacketBounds(t *testing.T) {
 		t.Fatal("maximum pool record exceeds its fixed packet bound")
 	}
 	r.operation = diagnosticOperationCount
-	if diagnosticRecordPacket(r) != nil { t.Fatal("unknown operation was serialized") }
+	if diagnosticRecordPacket(r) != nil {
+		t.Fatal("unknown operation was serialized")
+	}
 	typeOf := reflect.TypeOf(diagnosticRecord{})
 	for i := 0; i < typeOf.NumField(); i++ {
 		switch typeOf.Field(i).Type.Kind() {
@@ -236,7 +249,9 @@ func TestBusinessPhaseDiagnosticsPacketBounds(t *testing.T) {
 
 func TestBusinessPhaseDiagnosticsMissingSinkAndShutdownAccounting(t *testing.T) {
 	d := newPhaseDiagnostics(nil)
-	for n := 0; n < diagnosticQueueCapacity; n++ { d.record(diagnosticTestRecord()) }
+	for n := 0; n < diagnosticQueueCapacity; n++ {
+		d.record(diagnosticTestRecord())
+	}
 	d.flushEvents(nil)
 	if d.snapshot().transportDropped != diagnosticBatchLimit || len(d.queue) != diagnosticQueueCapacity-diagnosticBatchLimit {
 		t.Fatal("missing transport was not an explicitly counted bounded batch")
@@ -252,23 +267,31 @@ func TestBusinessPhaseDiagnosticsMissingSinkAndShutdownAccounting(t *testing.T) 
 
 func TestBusinessPhaseDiagnosticsBeginWaitCancellation(t *testing.T) {
 	db, err := sql.Open("sqlite", ":memory:")
-	if err != nil { t.Fatal("synthetic database open failed") }
+	if err != nil {
+		t.Fatal("synthetic database open failed")
+	}
 	defer db.Close()
 	db.SetMaxOpenConns(1)
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	reserved, err := db.Conn(ctx)
-	if err != nil { t.Fatal("synthetic connection reservation failed") }
+	if err != nil {
+		t.Fatal("synthetic connection reservation failed")
+	}
 	defer reserved.Close()
 	s := &Store{db: db}
-	if s.EnablePhaseDiagnostics() != nil { t.Fatal("enable failed") }
+	if s.EnablePhaseDiagnostics() != nil {
+		t.Fatal("enable failed")
+	}
 	request, cancelRequest := context.WithCancel(ctx)
 	defer cancelRequest()
 	result := make(chan error, 1)
 	go func() {
 		traced, span := s.BeginDiagnostic(request, DiagnosticOperationRuntime, DiagnosticSourceStore)
 		tx, err := s.diagnosticBeginTx(traced, &sql.TxOptions{ReadOnly: true})
-		if tx != nil { s.diagnosticRollback(traced, tx) }
+		if tx != nil {
+			s.diagnosticRollback(traced, tx)
+		}
 		span.End(err)
 		result <- err
 	}()
@@ -282,15 +305,21 @@ func TestBusinessPhaseDiagnosticsBeginWaitCancellation(t *testing.T) {
 		}
 	}
 	current := s.phaseDiagnostics.currentRecords(time.Now())
-	if len(current) != 1 || current[0].phase != DiagnosticPhaseBeginTx { t.Fatal("blocked begin was not current") }
+	if len(current) != 1 || current[0].phase != DiagnosticPhaseBeginTx {
+		t.Fatal("blocked begin was not current")
+	}
 	cancelRequest()
 	select {
 	case err := <-result:
-		if !errors.Is(err, context.Canceled) { t.Fatal("original cancellation result changed") }
+		if !errors.Is(err, context.Canceled) {
+			t.Fatal("original cancellation result changed")
+		}
 	case <-ctx.Done():
 		t.Fatal("canceled begin did not return")
 	}
-	if err = reserved.Close(); err != nil { t.Fatal("reserved connection release failed") }
+	if err = reserved.Close(); err != nil {
+		t.Fatal("reserved connection release failed")
+	}
 	var one int
 	if err = db.QueryRowContext(ctx, "SELECT 1").Scan(&one); err != nil || one != 1 || db.Stats().InUse != 0 {
 		t.Fatal("canceled acquisition leaked the connection or prevented recovery")

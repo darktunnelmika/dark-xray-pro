@@ -32,10 +32,10 @@ func fillBusinessDiagnosticQueue(t *testing.T, s *Store) func() {
 }
 
 type businessDiagnosticAccounting struct {
-	uplink, downlink, baseline, holds             int64
-	sequence, receipts, finals, cursorFinal       int64
-	firstSequence, lastSequence                   int64
-	state                                        string
+	uplink, downlink, baseline, holds       int64
+	sequence, receipts, finals, cursorFinal int64
+	firstSequence, lastSequence             int64
+	state                                   string
 }
 
 func readBusinessDiagnosticAccounting(t *testing.T, s *Store, client, epoch string) businessDiagnosticAccounting {
@@ -194,7 +194,10 @@ func TestBusinessPhaseDiagnosticsFullQueuePreservesAuthPoolCancellation(t *testi
 		call func(context.Context) error
 	}{
 		{"verify", func(ctx context.Context) error { _, err := s.VerifySession(ctx, session.Token); return err }},
-		{"login", func(ctx context.Context) error { _, err := s.Login(ctx, authAvailabilityUser, authAvailabilityPassword); return err }},
+		{"login", func(ctx context.Context) error {
+			_, err := s.Login(ctx, authAvailabilityUser, authAvailabilityPassword)
+			return err
+		}},
 	}
 	for _, call := range calls {
 		t.Run(call.name, func(t *testing.T) {

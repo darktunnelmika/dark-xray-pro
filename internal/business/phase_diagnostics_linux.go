@@ -11,9 +11,9 @@ import (
 const phaseDiagnosticJournalPath = "/run/systemd/journal/socket"
 
 type phaseDiagnosticJournal struct {
-	fd int
+	fd      int
 	address unix.Sockaddr
-	closed atomic.Bool
+	closed  atomic.Bool
 }
 
 func openPhaseDiagnosticJournal() *phaseDiagnosticJournal {

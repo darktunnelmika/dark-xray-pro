@@ -7,5 +7,5 @@ package business
 type phaseDiagnosticJournal struct{}
 
 func openPhaseDiagnosticJournal() *phaseDiagnosticJournal { return nil }
-func (*phaseDiagnosticJournal) send([]byte) bool { return false }
-func (*phaseDiagnosticJournal) close() {}
+func (*phaseDiagnosticJournal) send([]byte) bool          { return false }
+func (*phaseDiagnosticJournal) close()                    {}

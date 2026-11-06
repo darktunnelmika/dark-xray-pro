@@ -22,13 +22,21 @@ var phaseDiagnosticTestSocketSequence atomic.Uint64
 func testPhaseDiagnosticJournal(t *testing.T) (int, *phaseDiagnosticJournal) {
 	t.Helper()
 	receiver, err := unix.Socket(unix.AF_UNIX, unix.SOCK_DGRAM|unix.SOCK_NONBLOCK|unix.SOCK_CLOEXEC, 0)
-	if err != nil { t.Fatal("test receiver socket failed") }
+	if err != nil {
+		t.Fatal("test receiver socket failed")
+	}
 	t.Cleanup(func() { _ = unix.Close(receiver) })
 	address := &unix.SockaddrUnix{Name: fmt.Sprintf("@dark-pro-phase-test-%d-%d", os.Getpid(), phaseDiagnosticTestSocketSequence.Add(1))}
-	if unix.Bind(receiver, address) != nil { t.Fatal("test socket bind failed") }
-	if unix.SetsockoptInt(receiver, unix.SOL_SOCKET, unix.SO_RCVBUF, 1024) != nil { t.Fatal("test socket buffer bound failed") }
+	if unix.Bind(receiver, address) != nil {
+		t.Fatal("test socket bind failed")
+	}
+	if unix.SetsockoptInt(receiver, unix.SOL_SOCKET, unix.SO_RCVBUF, 1024) != nil {
+		t.Fatal("test socket buffer bound failed")
+	}
 	sender, err := unix.Socket(unix.AF_UNIX, unix.SOCK_DGRAM|unix.SOCK_NONBLOCK|unix.SOCK_CLOEXEC, 0)
-	if err != nil { t.Fatal("test sender socket failed") }
+	if err != nil {
+		t.Fatal("test sender socket failed")
+	}
 	journal := &phaseDiagnosticJournal{fd: sender, address: address}
 	t.Cleanup(journal.close)
 	return receiver, journal
@@ -39,8 +47,12 @@ func fillPhaseDiagnosticSocket(t *testing.T, journal *phaseDiagnosticJournal) {
 	packet := make([]byte, diagnosticPacketLimit)
 	for n := 0; n < 4096; n++ {
 		err := unix.Sendto(journal.fd, packet, unix.MSG_DONTWAIT|unix.MSG_NOSIGNAL, journal.address)
-		if errors.Is(err, unix.EAGAIN) || errors.Is(err, unix.EWOULDBLOCK) { return }
-		if err != nil { t.Fatal("unexpected test socket send failure") }
+		if errors.Is(err, unix.EAGAIN) || errors.Is(err, unix.EWOULDBLOCK) {
+			return
+		}
+		if err != nil {
+			t.Fatal("unexpected test socket send failure")
+		}
 	}
 	t.Fatal("owned socket did not reach bounded backpressure fixture")
 }
@@ -50,7 +62,9 @@ func TestBusinessPhaseDiagnosticsFullSocketDoesNotBlock(t *testing.T) {
 	fillPhaseDiagnosticSocket(t, journal)
 	s := diagnosticTestStore()
 	d := s.phaseDiagnostics
-	for n := 0; n < diagnosticQueueCapacity; n++ { d.record(diagnosticTestRecord()) }
+	for n := 0; n < diagnosticQueueCapacity; n++ {
+		d.record(diagnosticTestRecord())
+	}
 	completed := make(chan struct{})
 	go func() {
 		_, span := s.BeginDiagnostic(context.Background(), DiagnosticOperationUsage, DiagnosticSourceHubLocal)
@@ -61,7 +75,7 @@ func TestBusinessPhaseDiagnosticsFullSocketDoesNotBlock(t *testing.T) {
 	}()
 	select {
 	case <-completed:
-	case <-time.After(2*time.Second):
+	case <-time.After(2 * time.Second):
 		t.Fatal("recording or nonblocking send waited for the receiver")
 	}
 	stats := d.snapshot()
@@ -74,7 +88,9 @@ func TestBusinessPhaseDiagnosticsExporterCancellation(t *testing.T) {
 	_, journal := testPhaseDiagnosticJournal(t)
 	fillPhaseDiagnosticSocket(t, journal)
 	d := newPhaseDiagnostics(nil)
-	for n := 0; n < diagnosticQueueCapacity; n++ { d.record(diagnosticTestRecord()) }
+	for n := 0; n < diagnosticQueueCapacity; n++ {
+		d.record(diagnosticTestRecord())
+	}
 	if !d.startExporter(journal) || d.startExporter(journal) {
 		t.Fatal("exporter start was not singular")
 	}
@@ -96,7 +112,9 @@ func TestBusinessPhaseDiagnosticsExporterCancellation(t *testing.T) {
 func TestBusinessPhaseDiagnosticsConcurrentShutdownAccounting(t *testing.T) {
 	_, journal := testPhaseDiagnosticJournal(t)
 	d := newPhaseDiagnostics(nil)
-	if !d.startExporter(journal) { t.Fatal("test exporter start failed") }
+	if !d.startExporter(journal) {
+		t.Fatal("test exporter start failed")
+	}
 	var producers sync.WaitGroup
 	start := make(chan struct{})
 	for n := 0; n < 8; n++ {
@@ -104,7 +122,9 @@ func TestBusinessPhaseDiagnosticsConcurrentShutdownAccounting(t *testing.T) {
 		go func() {
 			defer producers.Done()
 			<-start
-			for k := 0; k < 1000; k++ { d.record(diagnosticTestRecord()) }
+			for k := 0; k < 1000; k++ {
+				d.record(diagnosticTestRecord())
+			}
 		}()
 	}
 	close(start)
@@ -130,8 +150,12 @@ func TestBusinessPhaseDiagnosticsCanceledStopIsBounded(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	d.stopExporter(ctx)
-	if !d.closed.Load() || d.snapshot().stopTimeout != 1 { t.Fatal("canceled stop was not explicitly incomplete") }
+	if !d.closed.Load() || d.snapshot().stopTimeout != 1 {
+		t.Fatal("canceled stop was not explicitly incomplete")
+	}
 	close(d.done)
 	d.stopExporter(context.Background())
-	if d.snapshot().stopTimeout != 1 { t.Fatal("completed idempotent stop added a timeout") }
+	if d.snapshot().stopTimeout != 1 {
+		t.Fatal("completed idempotent stop added a timeout")
+	}
 }

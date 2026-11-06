@@ -103,27 +103,27 @@ const (
 var diagnosticContextNames = [...]string{"unknown", "none", "canceled", "deadline"}
 
 const (
-	diagnosticQueueCapacity = 256
-	diagnosticActiveCapacity = 64
-	diagnosticPacketLimit = 512
-	diagnosticBatchLimit = 16
-	diagnosticTick = 250 * time.Millisecond
+	diagnosticQueueCapacity   = 256
+	diagnosticActiveCapacity  = 64
+	diagnosticPacketLimit     = 512
+	diagnosticBatchLimit      = 16
+	diagnosticTick            = 250 * time.Millisecond
 	diagnosticSummaryInterval = time.Second
-	diagnosticStopLimit = 250 * time.Millisecond
+	diagnosticStopLimit       = 250 * time.Millisecond
 )
 
 // Every queued record is a value. In particular, it retains no error, request,
 // context, SQL, address, credential, application identifier or arbitrary string.
 type diagnosticRecord struct {
-	kind diagnosticKind
-	span, parent uint64
-	operation DiagnosticOperation
-	source DiagnosticSource
-	phase DiagnosticPhase
-	at, duration int64
-	result diagnosticResult
-	context diagnosticContext
-	sqlitePresent bool
+	kind                          diagnosticKind
+	span, parent                  uint64
+	operation                     DiagnosticOperation
+	source                        DiagnosticSource
+	phase                         DiagnosticPhase
+	at, duration                  int64
+	result                        diagnosticResult
+	context                       diagnosticContext
+	sqlitePresent                 bool
 	sqlitePrimary, sqliteExtended int32
 }
 
@@ -131,38 +131,38 @@ type diagnosticRecord struct {
 // holder: phase completion and scope exit update the slot independently of I/O.
 type diagnosticCurrent struct {
 	span, parent uint64
-	operation DiagnosticOperation
-	source DiagnosticSource
-	phase DiagnosticPhase
-	entered time.Time
+	operation    DiagnosticOperation
+	source       DiagnosticSource
+	phase        DiagnosticPhase
+	entered      time.Time
 }
 
 type diagnosticCounters struct {
-	attempted atomic.Uint64
-	enqueued atomic.Uint64
-	sent atomic.Uint64
-	queueFull atomic.Uint64
+	attempted        atomic.Uint64
+	enqueued         atomic.Uint64
+	sent             atomic.Uint64
+	queueFull        atomic.Uint64
 	transportDropped atomic.Uint64
-	closedDropped atomic.Uint64
-	formatDropped atomic.Uint64
-	shutdownDropped atomic.Uint64
-	untrackedSpans atomic.Uint64
-	invalid atomic.Uint64
-	auxSendFailed atomic.Uint64
-	stopTimeout atomic.Uint64
-	producers atomic.Int64
+	closedDropped    atomic.Uint64
+	formatDropped    atomic.Uint64
+	shutdownDropped  atomic.Uint64
+	untrackedSpans   atomic.Uint64
+	invalid          atomic.Uint64
+	auxSendFailed    atomic.Uint64
+	stopTimeout      atomic.Uint64
+	producers        atomic.Int64
 }
 
 type phaseDiagnostics struct {
-	db *sql.DB
-	queue chan diagnosticRecord
-	active [diagnosticActiveCapacity]atomic.Pointer[diagnosticCurrent]
+	db       *sql.DB
+	queue    chan diagnosticRecord
+	active   [diagnosticActiveCapacity]atomic.Pointer[diagnosticCurrent]
 	sequence atomic.Uint64
-	closed atomic.Bool
-	started atomic.Bool
+	closed   atomic.Bool
+	started  atomic.Bool
 	stopOnce sync.Once
-	stop chan struct{}
-	done chan struct{}
+	stop     chan struct{}
+	done     chan struct{}
 	counters diagnosticCounters
 }
 
@@ -240,16 +240,16 @@ type diagnosticContextKey struct{}
 // mutated by separate goroutines. Nested calls receive independent spans; only
 // their immutable numeric parent sequence crosses the context boundary.
 type DiagnosticSpan struct {
-	collector *phaseDiagnostics
-	ctx context.Context
-	sequence, parent uint64
-	operation DiagnosticOperation
-	source DiagnosticSource
-	slot int
-	current *diagnosticCurrent
-	phase DiagnosticPhase
+	collector             *phaseDiagnostics
+	ctx                   context.Context
+	sequence, parent      uint64
+	operation             DiagnosticOperation
+	source                DiagnosticSource
+	slot                  int
+	current               *diagnosticCurrent
+	phase                 DiagnosticPhase
 	phaseStarted, started time.Time
-	ended bool
+	ended                 bool
 }
 
 func diagnosticSpanFromContext(ctx context.Context) *DiagnosticSpan {

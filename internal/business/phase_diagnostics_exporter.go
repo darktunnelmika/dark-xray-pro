@@ -10,12 +10,12 @@ import (
 // cumulative; closed means admission has ended, not that output was durable or
 // every previously running request has exited. Pending and active remain visible.
 type diagnosticSnapshot struct {
-	attempted, enqueued, sent uint64
-	queueFull, transportDropped, closedDropped, formatDropped uint64
+	attempted, enqueued, sent                                            uint64
+	queueFull, transportDropped, closedDropped, formatDropped            uint64
 	shutdownDropped, untrackedSpans, invalid, auxSendFailed, stopTimeout uint64
-	pending, active int
-	producers int64
-	closed bool
+	pending, active                                                      int
+	producers                                                            int64
+	closed                                                               bool
 }
 
 func (d *phaseDiagnostics) snapshot() diagnosticSnapshot {
