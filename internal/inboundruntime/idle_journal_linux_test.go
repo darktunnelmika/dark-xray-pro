@@ -75,10 +75,24 @@ func TestWorkerUnchangedEmptyDeliveryKeepsJournalAndRefreshesObservation(t *test
 		t.Fatal(err)
 	}
 	requireIdleJournalUnchanged(t, before, readIdleJournalFile(t, w))
-	if !w.deadline.Equal(wantDeadline) || exchange.polls != polls+1 || len(exchange.observations) != observed+1 {
-		t.Fatal("unchanged persistence skipped fresh polling, deadline renewal or observation")
+	if !w.deadline.Equal(wantDeadline) || exchange.polls != polls+1 || len(exchange.observations) != observed {
+		t.Fatal("unchanged persistence skipped polling/deadline renewal or rewrote a recent stopped observation")
 	}
+	// The successful stopped acknowledgement is coalesced only inside the
+	// refresh interval; it still refreshes without rewriting the journal.
 	last := exchange.observations[len(exchange.observations)-1]
+	refreshAt := time.Unix(0, last.ObservedUnixNano).Add(5 * time.Second)
+	if err := w.observeAt(context.Background(), exchange, "stopped", "", false, refreshAt); err != nil {
+		t.Fatal(err)
+	}
+	requireIdleJournalUnchanged(t, before, readIdleJournalFile(t, w))
+	if len(exchange.observations) != observed+1 {
+		t.Fatal("stopped observation was not refreshed at its deadline")
+	}
+	last = exchange.observations[len(exchange.observations)-1]
+	if last.ObservedUnixNano != refreshAt.UnixNano() || last.LeaseExpires != wantDeadline.UnixNano() {
+		t.Fatal("periodic observation retained old observation or lease timestamps")
+	}
 	if last.State != "stopped" || last.ProcessReady || last.Generation != w.state.Generation || exchange.registerCalls != registered || exchange.usageCalls != usage {
 		t.Fatal("empty reconciliation changed admission or accounting behavior")
 	}

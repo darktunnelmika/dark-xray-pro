@@ -30,17 +30,19 @@ type Config struct {
 }
 
 type Worker struct {
-	mu                sync.Mutex
-	cfg               Config
-	journal           *privateJournal
-	state             journal
-	native            *Binary
-	external          map[string]*Binary
-	process           ownedProcess
-	deadline          time.Time
-	closed            bool
-	persistFailed     bool
-	publicAliasKernel publicAliasKernel
+	mu                    sync.Mutex
+	cfg                   Config
+	journal               *privateJournal
+	state                 journal
+	native                *Binary
+	external              map[string]*Binary
+	process               ownedProcess
+	deadline              time.Time
+	closed                bool
+	persistFailed         bool
+	publicAliasKernel     publicAliasKernel
+	stoppedObservationSHA string
+	stoppedObservationAt  time.Time
 }
 
 // Only processes created by this worker implement this interface in
@@ -760,12 +762,20 @@ func (w *Worker) validateInitialFinal(values []inboundexec.Counter) error {
 	return nil
 }
 
+// Stopped observations are display/operation acknowledgements, not traffic
+// authority. Refresh them periodically even when no configuration changes.
+const stoppedObservationInterval = 5 * time.Second
+
 func (w *Worker) observe(ctx context.Context, x Exchange, state, code string, ready bool) error {
+	return w.observeAt(ctx, x, state, code, ready, time.Now())
+}
+
+func (w *Worker) observeAt(ctx context.Context, x Exchange, state, code string, ready bool, now time.Time) error {
 	b := w.state.Bundle
 	if b == nil {
 		return nil
 	}
-	o := inboundexec.Observation{NodeID: b.NodeID, InstallationID: b.InstallationID, Generation: b.Generation, OperationID: b.OperationID, ConfigSHA: b.ConfigSHA, ManifestSHA: b.ManifestSHA, State: state, ErrorCode: code, ObservedUnixNano: time.Now().UnixNano(), LeaseExpires: w.deadline.UnixNano(), ProcessReady: ready, HealthState: "unknown", AccountingState: "pending"}
+	o := inboundexec.Observation{NodeID: b.NodeID, InstallationID: b.InstallationID, Generation: b.Generation, OperationID: b.OperationID, ConfigSHA: b.ConfigSHA, ManifestSHA: b.ManifestSHA, State: state, ErrorCode: code, ObservedUnixNano: now.UnixNano(), LeaseExpires: w.deadline.UnixNano(), ProcessReady: ready, HealthState: "unknown", AccountingState: "pending"}
 	if w.state.Epoch != nil {
 		o.EpochID = w.state.Epoch.EpochID
 	}
@@ -784,8 +794,35 @@ func (w *Worker) observe(ctx context.Context, x Exchange, state, code string, re
 			o.InitialEpoch = &birth
 		}
 	}
+	// Only an already settled, empty runtime can coalesce the same successful
+	// stopped acknowledgement. Polling and every accounting/active observation
+	// retain their existing cadence. A transition or failed delivery clears it.
+	stopped := state == "stopped" && code == "" && !ready &&
+		w.state.Phase == "idle" && w.state.FinalAccepted &&
+		w.process == nil && w.state.Epoch == nil && w.state.Pending == nil &&
+		len(b.Listeners) == 0 && len(b.Components) == 0 &&
+		!w.persistFailed && !w.closed
+	var fingerprint string
+	if stopped {
+		unchanged := o
+		// Neither timestamp grants authority for an empty, stopped bundle.
+		unchanged.ObservedUnixNano, unchanged.LeaseExpires = 0, 0
+		fingerprint = inboundexec.Digest(unchanged)
+		age := now.Sub(w.stoppedObservationAt)
+		if ctx.Err() == nil && fingerprint == w.stoppedObservationSHA &&
+			age >= 0 && age < stoppedObservationInterval {
+			return nil
+		}
+	}
+	w.stoppedObservationSHA = ""
+	w.stoppedObservationAt = time.Time{}
 	err := x.Observe(ctx, o)
 	w.cfg.Diagnostics.recordError(diagnosticObserve, err)
+	if err == nil && stopped {
+		w.stoppedObservationSHA = fingerprint
+		// Use creation time: a slow acknowledgement must not extend freshness.
+		w.stoppedObservationAt = now
+	}
 	return err
 }
 
