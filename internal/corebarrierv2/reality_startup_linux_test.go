@@ -132,10 +132,11 @@ func TestPinnedNativeRealityStartupReadiness(t *testing.T) {
 				t.Fatal("same nonce could not activate after startup completed", err)
 			}
 			proxyClient(t, bin, spec, user, listen, clientPort, false)
+			firstStarted := time.Now()
 			c, _ := socks(t, clientPort, target, host, 1)
-			// No artificial warmup follows readiness. The first actual payload
-			// must complete inside the original four-second acceptance budget.
-			_ = c.SetDeadline(time.Now().Add(4 * time.Second))
+			// No artificial warmup follows readiness. SOCKS negotiation and the
+			// first payload share the original four-second acceptance budget.
+			_ = c.SetDeadline(firstStarted.Add(4 * time.Second))
 			payload := bytes.Repeat([]byte("ready-first-payload/"), 64)
 			if _, err := c.Write(payload); err != nil {
 				t.Fatal(err)
