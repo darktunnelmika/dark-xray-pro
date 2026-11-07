@@ -260,11 +260,18 @@ func (s *Store) VerifySession(ctx context.Context, token string) (diagnosticResu
 			return LoginSession{}, ErrUnauthenticated
 		}
 	}
+	// One short committed WAL snapshot binds identity, revocation and all
+	// permissions together; no cached authentication or writer bypass.
+	tx, err := s.readSnapshot(ctx)
+	if err != nil {
+		return LoginSession{}, err
+	}
+	defer tx.Rollback()
 	var u AuthUser
 	var expires int64
 	var disabled, repEnabled int
 	diagnosticSpan.Enter(DiagnosticPhaseSessionRead)
-	err := s.db.QueryRowContext(ctx,
+	err = tx.QueryRowContext(ctx,
 		"SELECT a.id,a.username,a.role,a.representative_id,ss.expires_unix,CASE WHEN a.role='representative' AND c.representative_id IS NOT NULL THEN c.login_suspended ELSE a.disabled END,r.enabled FROM auth_sessions ss JOIN auth_users a ON a.id=ss.user_id JOIN representatives r ON r.id=a.representative_id LEFT JOIN representative_controls c ON c.representative_id=a.representative_id WHERE ss.token_sha256=?",
 		digestSession(token)).Scan(&u.ID, &u.Username, &u.Role, &u.RepresentativeID, &expires, &disabled, &repEnabled)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -278,8 +285,11 @@ func (s *Store) VerifySession(ctx context.Context, token string) (diagnosticResu
 	}
 	diagnosticFinishPhase(ctx, nil)
 	diagnosticSpan.Enter(DiagnosticPhasePermissionsRead)
-	u.Permissions, err = s.RepresentativePermissions(ctx, u.RepresentativeID)
+	u.Permissions, err = readRepresentativePermissions(ctx, tx, u.RepresentativeID)
 	if err != nil {
+		return LoginSession{}, err
+	}
+	if err = tx.Commit(); err != nil {
 		return LoginSession{}, err
 	}
 	return LoginSession{Token: token, User: u, ExpiresUnix: expires}, nil

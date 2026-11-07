@@ -48,14 +48,17 @@ func authAvailabilityCalls(s *Store, token string) map[string]func(*testing.T, c
 
 func TestAuthAvailabilityBusyConnectionPreservesCancellationAndSession(t *testing.T) {
 	s, session := authAvailabilityStore(t)
-	// Borrow the real store's only pooled connection. Each authentication
-	// lookup must wait for its context, rather than infer invalid credentials.
+	// Borrow the writer connection. Login and password mutations still wait;
+	// existing session verification uses its separate committed read snapshot.
 	conn, err := s.db.Conn(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer conn.Close()
 	for name, call := range authAvailabilityCalls(s, session.Token) {
+		if name == "session" {
+			continue
+		}
 		t.Run(name, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
 			defer cancel()
@@ -64,6 +67,12 @@ func TestAuthAvailabilityBusyConnectionPreservesCancellationAndSession(t *testin
 				t.Fatalf("blocked %s misclassified its deadline: %v", name, err)
 			}
 		})
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	verifiedWhileBusy, verifyErr := s.VerifySession(ctx, session.Token)
+	cancel()
+	if verifyErr != nil || verifiedWhileBusy.User.ID != "owner" {
+		t.Fatalf("writer contention blocked committed session verification: %v", verifyErr)
 	}
 	if err := conn.Close(); err != nil {
 		t.Fatal(err)
