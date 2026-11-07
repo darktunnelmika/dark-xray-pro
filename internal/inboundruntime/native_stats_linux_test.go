@@ -236,55 +236,76 @@ func TestNativeStatsReusesOwnedConnectionAndCustomProtocol(t *testing.T) {
 }
 
 func TestNativeStatsCancellationAndReconnectStayWithinBirth(t *testing.T) {
-	entered := make(chan struct{})
-	var calls atomic.Int64
-	fixture := newNativeStatsTestFixture(t, func(ctx context.Context, _ *xraystats.QueryStatsRequest) (*xraystats.QueryStatsResponse, error) {
-		if calls.Add(1) == 1 {
-			close(entered)
-			<-ctx.Done()
-			return nil, ctx.Err()
-		}
-		return nativeStatsTestResponse(map[string]int64{"alive": 1}), nil
-	})
-	p := fixture.p
-	p.deadline = time.Now().Add(25 * time.Second)
-	deadline := p.deadline
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	result := make(chan error, 1)
-	go func() { _, err := p.query(ctx, nativeProtocol+"health"); result <- err }()
-	select {
-	case <-entered:
-	case <-time.After(3 * time.Second):
-		t.Fatal("request did not reach owned peer")
-	}
-	cancel()
-	if err := nativeStatsTestWaitError(t, result); !errors.Is(err, ErrProof) {
-		t.Fatal("canceled call was accepted", err)
-	}
-	if values, err := p.query(context.Background(), ""); err != nil || values["alive"] != 1 {
-		t.Fatal("cancellation poisoned connection", err)
-	}
-	if fixture.listener.accepted.Load() != 1 {
-		t.Fatal("cancellation unnecessarily replaced the connection")
-	}
-	fixture.listener.dropConnections()
-	if values, err := p.query(context.Background(), ""); err != nil || values["alive"] != 1 {
-		t.Fatal("bounded ready wait did not reconnect", err)
-	}
-	if fixture.listener.accepted.Load() != 2 {
-		t.Fatalf("unexpected reconnect count: %d", fixture.listener.accepted.Load())
-	}
-	if p.deadline != deadline || p.ending || p.stats.closed.Load() || p.checkIdentity() != nil {
-		t.Fatal("query cancellation changed birth or lease")
-	}
-	canceled, stop := context.WithCancel(context.Background())
-	stop()
-	if conn, err := p.stats.dial(canceled, "ignored"); err == nil || conn != nil {
-		if conn != nil {
-			_ = conn.Close()
-		}
-		t.Fatal("canceled dial connected")
+	for iteration := 0; iteration < 25; iteration++ {
+		t.Run(fmt.Sprintf("iteration_%02d", iteration), func(t *testing.T) {
+			entered := make(chan struct{})
+			var calls atomic.Int64
+			fixture := newNativeStatsTestFixture(t, func(ctx context.Context, _ *xraystats.QueryStatsRequest) (*xraystats.QueryStatsResponse, error) {
+				if calls.Add(1) == 1 {
+					close(entered)
+					<-ctx.Done()
+					return nil, ctx.Err()
+				}
+				return nativeStatsTestResponse(map[string]int64{"alive": 1}), nil
+			})
+			p := fixture.p
+			p.deadline = time.Now().Add(25 * time.Second)
+			deadline := p.deadline
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			result := make(chan error, 1)
+			go func() { _, err := p.query(ctx, nativeProtocol+"health"); result <- err }()
+			select {
+			case <-entered:
+			case <-time.After(3 * time.Second):
+				t.Fatal("request did not reach owned peer")
+			}
+			cancel()
+			if err := nativeStatsTestWaitError(t, result); !errors.Is(err, ErrProof) {
+				t.Fatal("canceled call was accepted", err)
+			}
+			if values, err := p.query(context.Background(), ""); err != nil || values["alive"] != 1 {
+				t.Fatal("cancellation poisoned connection", err)
+			}
+			if fixture.listener.accepted.Load() != 1 {
+				t.Fatal("cancellation unnecessarily replaced the connection")
+			}
+			acceptedBeforeDrop := fixture.listener.accepted.Load()
+			fixture.listener.dropConnections()
+			// Closing the server endpoint does not synchronously invalidate the
+			// client's Ready transport. Wait for observed loss before the one
+			// recovery RPC; an accepted replacement covers a missed state cycle.
+			waitCtx, stopWait := context.WithTimeout(context.Background(), 3*time.Second)
+			t.Cleanup(stopWait)
+			tick := time.NewTicker(time.Millisecond)
+			t.Cleanup(tick.Stop)
+			for p.stats.conn.GetState() == connectivity.Ready && fixture.listener.accepted.Load() == acceptedBeforeDrop {
+				select {
+				case <-tick.C:
+				case <-waitCtx.Done():
+					t.Fatal("client did not observe the closed transport")
+				}
+			}
+			tick.Stop()
+			stopWait()
+			if values, err := p.query(context.Background(), ""); err != nil || values["alive"] != 1 {
+				t.Fatal("bounded ready wait did not reconnect", err)
+			}
+			if fixture.listener.accepted.Load() != 2 {
+				t.Fatalf("unexpected reconnect count: %d", fixture.listener.accepted.Load())
+			}
+			if p.deadline != deadline || p.ending || p.stats.closed.Load() || p.checkIdentity() != nil {
+				t.Fatal("query cancellation changed birth or lease")
+			}
+			canceled, stop := context.WithCancel(context.Background())
+			stop()
+			if conn, err := p.stats.dial(canceled, "ignored"); err == nil || conn != nil {
+				if conn != nil {
+					_ = conn.Close()
+				}
+				t.Fatal("canceled dial connected")
+			}
+		})
 	}
 }
 
