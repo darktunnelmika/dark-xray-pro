@@ -85,6 +85,29 @@ and initialize the requested interface and configured routes. The supervisor
 also verifies process/socket/resource ownership before reporting a deployment
 ready.
 
+REALITY customer inbounds register a startup check during construction, before
+feature startup can publish readiness. It checks the pinned REALITY detector's
+process-local completion entries for every configured SNI and all three ALPN
+variants. Missing or pending entries keep `engine-ready` false and reject
+activation without consuming its nonce. Completion is latched; it grants no
+lease or accounting authority and cannot reopen a finalizing process. The
+existing supervisor startup deadline remains unchanged.
+
+This removes premature readiness during REALITY's initial record-detection
+wait. It is not an end-to-end target health probe: upstream also records an
+empty completed result when detection fails. No detector, TLS verification,
+camouflage record, or customer timeout is modified. Non-REALITY and unmanaged
+cores keep their previous behavior. The side-effect-free version marker
+`darkpro-inbound-v2/reality-startup-readiness-v1` identifies this overlay;
+older core hashes do not acquire the behavior by updating the Agent alone.
+
+`TestPinnedNativeRealityStartupReadiness` uses a trusted, deliberately held
+local TLS target for TCP, gRPC and XHTTP. It requires closed admission and zero
+usage while initialization is pending, immediate first payload within four
+seconds after readiness, and an immutable final receipt. CI runs the regression
+against both the normal and race/checkptr-instrumented cores, with mandatory
+positive subtest markers so a skipped test cannot pass acceptance.
+
 XDrive has no listening socket. Its startup performs a bounded Put/Get/Delete
 round trip in the configured storage using an unpredictable, owned
 `darkpro-probe-<nonce>` object and exact byte comparison. The total deadline

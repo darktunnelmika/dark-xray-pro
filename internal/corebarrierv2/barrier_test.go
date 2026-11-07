@@ -45,6 +45,116 @@ func TestStartsClosedAndRequiresReadyNonce(t *testing.T) {
 	}
 }
 
+func TestStartupChecksGateHealthAndActivationWithoutConsumingNonce(t *testing.T) {
+	g := newGate()
+	var first, second atomic.Bool
+	if err := g.registerStartupCheck("reality-one", first.Load); err != nil {
+		t.Fatal(err)
+	}
+	if err := g.registerStartupCheck("reality-two", second.Load); err != nil {
+		t.Fatal(err)
+	}
+	nonce := strings.Repeat("c", 64)
+	g.ready = true // All features started, but transport initialization is pending.
+	for step := 0; step < 2; step++ {
+		if ready, active, _ := g.health(); ready || active {
+			t.Fatal("partial initialization reported ready or opened admission")
+		}
+		if g.activate(nonce) == nil || g.activation != "" {
+			t.Fatal("pending startup accepted or consumed the activation nonce")
+		}
+		if _, _, admitted := g.enter(context.Background(), nil); admitted {
+			t.Fatal("pending startup admitted customer work")
+		}
+		first.Store(true)
+	}
+	second.Store(true)
+	if ready, active, _ := g.health(); !ready || active {
+		t.Fatal("completed startup did not become ready with admission still closed")
+	}
+	if err := g.activate(nonce); err != nil {
+		t.Fatal(err)
+	}
+	// Readiness is a process-birth condition, not a new liveness authority.
+	first.Store(false)
+	if ready, active, _ := g.health(); !ready || !active {
+		t.Fatal("latched startup completion revoked admitted work")
+	}
+	if err := g.activate(nonce); err != nil {
+		t.Fatal("same-nonce replay changed", err)
+	}
+}
+
+func TestStartupCheckRegistrationClosesAtFeatureStart(t *testing.T) {
+	g := newGate()
+	for _, tag := range []string{"", ControlTag} {
+		if g.registerStartupCheck(tag, func() bool { return true }) == nil {
+			t.Fatal("invalid startup check registered")
+		}
+	}
+	if g.registerStartupCheck("nil", nil) == nil {
+		t.Fatal("nil startup check registered")
+	}
+	if err := g.registerStartupCheck("one", func() bool { return true }); err != nil {
+		t.Fatal(err)
+	}
+	if g.registerStartupCheck("one", func() bool { return true }) == nil {
+		t.Fatal("duplicate startup check replaced its original")
+	}
+	g.ready = true
+	if g.registerStartupCheck("late", func() bool { return true }) == nil {
+		t.Fatal("late startup requirement changed an established process")
+	}
+	g = newGate()
+	g.closing = true
+	if g.registerStartupCheck("closed", func() bool { return true }) == nil {
+		t.Fatal("closing process accepted a startup check")
+	}
+}
+
+func TestPendingStartupFinalizationCannotActivate(t *testing.T) {
+	g := newGate()
+	var complete atomic.Bool
+	if err := g.registerStartupCheck("pending", complete.Load); err != nil {
+		t.Fatal(err)
+	}
+	g.ready = true
+	if _, err := g.snapshot(context.Background(), strings.Repeat("f", 64), func() map[string]int64 {
+		return map[string]int64{"fixture": 0}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	complete.Store(true)
+	if g.activate(strings.Repeat("d", 64)) == nil {
+		t.Fatal("startup completion reopened a closing process")
+	}
+}
+
+func TestStartupChecksAreSafeDuringConcurrentHealthAndActivation(t *testing.T) {
+	g := newGate()
+	var complete atomic.Bool
+	if err := g.registerStartupCheck("pending", complete.Load); err != nil {
+		t.Fatal(err)
+	}
+	g.ready = true
+	var callers sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		callers.Add(1)
+		go func() {
+			defer callers.Done()
+			for j := 0; j < 50; j++ {
+				g.health()
+				_ = g.activate(strings.Repeat("e", 64))
+			}
+		}()
+	}
+	complete.Store(true)
+	callers.Wait()
+	if err := g.activate(strings.Repeat("e", 64)); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestActivationJoinsHooksAndReplaysAfterLostReply(t *testing.T) {
 	g := newGate()
 	entered, release := make(chan struct{}), make(chan struct{})

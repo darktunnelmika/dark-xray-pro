@@ -1,0 +1,55 @@
+package inbound
+
+import (
+	"strconv"
+
+	goreality "github.com/xtls/reality"
+	darkpro "github.com/xtls/xray-core/common/darkprov2"
+	"github.com/xtls/xray-core/transport/internet"
+	"github.com/xtls/xray-core/transport/internet/reality"
+)
+
+// Register while the inbound is constructed, before core.Start can mark its
+// features ready. In particular, gRPC starts its listener asynchronously.
+// Detection itself stays owned by the unmodified REALITY listener startup.
+func darkProRegisterRealityReadiness(tag string, settings *internet.MemoryStreamConfig) error {
+	if !darkpro.Enabled() || darkpro.IsControl(tag) {
+		return nil
+	}
+	config := reality.ConfigFromStreamSettings(settings)
+	if config == nil {
+		return nil
+	}
+	check, err := darkProRealityStartupCheck(config.Dest, config.ServerNames)
+	if err != nil {
+		return err
+	}
+	return darkpro.RegisterStartupCheck(tag, check)
+}
+
+func darkProRealityStartupCheck(target string, names []string) (func() bool, error) {
+	if target == "" || len(names) == 0 {
+		return nil, darkpro.ErrBarrier
+	}
+	// This key format and the bool -> []int completion contract are pinned to
+	// github.com/xtls/reality at 8cdf7bf9c7f0. All configured SNI/ALPN variants
+	// must finish. An empty SNI is valid; missing/bool entries remain pending.
+	keys := make([]string, 0, len(names)*3)
+	for _, name := range names {
+		for alpn := 0; alpn < 3; alpn++ {
+			keys = append(keys, target+" "+name+" "+strconv.Itoa(alpn))
+		}
+	}
+	return func() bool {
+		for _, key := range keys {
+			value, ok := goreality.GlobalPostHandshakeRecordsLens.Load(key)
+			if !ok {
+				return false
+			}
+			if _, completed := value.([]int); !completed {
+				return false
+			}
+		}
+		return true
+	}, nil
+}

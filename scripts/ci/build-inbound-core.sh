@@ -22,6 +22,7 @@ python3 "$task_repo/scripts/prepare-inbound-core.py" "$task_source"
 cd -- "$task_source"
 "$task_go" mod verify
 "$task_go" test -race ./common/darkprov2 ./app/stats/command
+"$task_go" test -race ./app/proxyman/inbound -run '^TestDarkProRealityStartup' -count=1
 "$task_go" test -race ./transport/internet/xdrive -run '^TestDarkProStorageProbe' -count=1
 "$task_go" test -race ./proxy/tun -run '^(TestDarkPro|TestConfigureSystemDNS|TestUnsetSystemDNS)' -count=1
 "$task_go" test -race ./proxy -run '^TestDarkProVision' -count=1

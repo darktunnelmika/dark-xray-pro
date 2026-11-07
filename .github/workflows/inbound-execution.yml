@@ -108,6 +108,7 @@ jobs:
           cp scripts/prepare-inbound-core.py "$RUNNER_TEMP/inbound-artifact/overlay/scripts/"
           cp scripts/ci/build-inbound-core.sh "$RUNNER_TEMP/inbound-artifact/overlay/scripts/ci/"
           cp scripts/core-overlay/inbound_stats.go.txt scripts/core-overlay/inbound_xdrive_test.go.txt scripts/core-overlay/inbound_tun_dns.go.txt scripts/core-overlay/inbound_tun_dns_test.go.txt scripts/core-overlay/inbound_vision_test.go.txt "$RUNNER_TEMP/inbound-artifact/overlay/scripts/core-overlay/"
+          cp scripts/core-overlay/inbound_reality_readiness.go.txt scripts/core-overlay/inbound_reality_readiness_test.go.txt "$RUNNER_TEMP/inbound-artifact/overlay/scripts/core-overlay/"
           cp internal/corebarrierv2/barrier.go internal/corebarrierv2/barrier_test.go internal/corebarrierv2/README.md "$RUNNER_TEMP/inbound-artifact/overlay/internal/corebarrierv2/"
       - name: Build a separate race/checkptr instrumented test core
         working-directory: .inbound-core-v2
@@ -122,6 +123,22 @@ jobs:
           set -euo pipefail
           go test -race ./internal/corebarrierv2 -run '^TestPinnedNativeInboundTrafficAndFinalReceipt$' -count=1 -json -timeout=300s > "$RUNNER_TEMP/native-matrix.jsonl" || { cat "$RUNNER_TEMP/native-matrix.jsonl"; exit 1; }
           python3 scripts/ci/assert-inbound-acceptance.py "$RUNNER_TEMP/native-matrix.jsonl" --matrix
+      - name: Prove REALITY startup gates readiness and the first customer payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          for variant in normal race; do
+            if [[ "$variant" == race ]]; then
+              export DXP_INBOUND_CORE_V2_BINARY="$RUNNER_TEMP/xray-inbound-v2-race"
+              export DXP_INBOUND_CORE_V2_SHA256=$(sha256sum "$DXP_INBOUND_CORE_V2_BINARY" | cut -d' ' -f1)
+            fi
+            evidence="$RUNNER_TEMP/reality-startup-$variant.jsonl"
+            go test -race ./internal/corebarrierv2 -run '^TestPinnedNativeRealityStartupReadiness$' -count=1 -json -timeout=120s > "$evidence" || { cat "$evidence"; exit 1; }
+            python3 scripts/ci/assert-inbound-acceptance.py "$evidence" \
+              --require TestPinnedNativeRealityStartupReadiness/tcp \
+              --require TestPinnedNativeRealityStartupReadiness/grpc \
+              --require TestPinnedNativeRealityStartupReadiness/xhttp
+          done
       - name: Prove asynchronous core paths with the core's own race/checkptr instrumentation
         shell: bash
         run: |
@@ -264,6 +281,8 @@ jobs:
           path: |
             ${{ runner.temp }}/native-matrix.jsonl
             ${{ runner.temp }}/native-race.jsonl
+            ${{ runner.temp }}/reality-startup-normal.jsonl
+            ${{ runner.temp }}/reality-startup-race.jsonl
             ${{ runner.temp }}/native-dns.jsonl
             ${{ runner.temp }}/native-dns-race.jsonl
             ${{ runner.temp }}/native-private-control.jsonl
