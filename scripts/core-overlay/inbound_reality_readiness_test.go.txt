@@ -1,0 +1,58 @@
+package inbound
+
+import (
+	"strconv"
+	"testing"
+
+	goreality "github.com/xtls/reality"
+)
+
+func TestDarkProRealityStartupRequiresEveryNameAndALPN(t *testing.T) {
+	target := "darkpro-readiness-fixture.invalid:443"
+	names := []string{"one.example.test", ""}
+	check, err := darkProRealityStartupCheck(target, names)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var keys []string
+	for _, name := range names {
+		for alpn := 0; alpn < 3; alpn++ {
+			key := target + " " + name + " " + strconv.Itoa(alpn)
+			keys = append(keys, key)
+			goreality.GlobalPostHandshakeRecordsLens.Delete(key)
+			t.Cleanup(func() { goreality.GlobalPostHandshakeRecordsLens.Delete(key) })
+		}
+	}
+	if check() {
+		t.Fatal("missing detector state reported ready")
+	}
+	for i, key := range keys {
+		goreality.GlobalPostHandshakeRecordsLens.Store(key, false)
+		if check() {
+			t.Fatal("pending detector state reported ready")
+		}
+		goreality.GlobalPostHandshakeRecordsLens.Store(key, []int{303, 303})
+		if check() != (i == len(keys)-1) {
+			t.Fatal("partial detector completion was accepted or full completion was lost")
+		}
+	}
+	// Upstream also uses an empty slice on detection failure. This check
+	// proves the handshake's wait is finished, not target reachability.
+	goreality.GlobalPostHandshakeRecordsLens.Store(keys[0], []int{})
+	if !check() {
+		t.Fatal("completed empty result was mistaken for pending initialization")
+	}
+	goreality.GlobalPostHandshakeRecordsLens.Store(keys[0], "invalid")
+	if check() {
+		t.Fatal("unknown detector state reported ready")
+	}
+}
+
+func TestDarkProRealityStartupRejectsMissingTargetOrNames(t *testing.T) {
+	if _, err := darkProRealityStartupCheck("", []string{"example.test"}); err == nil {
+		t.Fatal("missing target accepted")
+	}
+	if _, err := darkProRealityStartupCheck("example.test:443", nil); err == nil {
+		t.Fatal("missing SNI variants accepted")
+	}
+}

@@ -62,6 +62,11 @@ if subprocess.check_output(["git", "-C", str(source), "status", "--porcelain", "
     raise SystemExit("upstream checkout must be completely clean")
 if not HASHES:
     raise SystemExit("source hash manifest is missing")
+# The readiness adapter reads this dependency's exact process-local completion
+# contract. A dependency update needs a separate source and behavior review.
+reality_dependency = "github.com/xtls/reality v0.0.0-20260908062103-8cdf7bf9c7f0"
+if (source / "go.mod").read_text().count(reality_dependency) != 1:
+    raise SystemExit("unexpected REALITY readiness dependency")
 contents = {}
 for name, digest in HASHES.items():
     raw = (source / name).read_bytes()
@@ -91,7 +96,7 @@ for name in HASHES:
 # The API can start before other features. Activation requires all starts to
 # have completed, not merely a successful StatsService RPC.
 after("core/xray.go", '\terrors.LogWarning(s.ctx, "Xray ", Version(), " started")', '\n\tdarkpro.MarkReady()')
-after("main/version.go", 'func executeVersion(cmd *base.Command, args []string) {\n\tprintVersion()', '\n\tfmt.Println(darkpro.TUNDNSCapability)')
+after("main/version.go", 'func executeVersion(cmd *base.Command, args []string) {\n\tprintVersion()', '\n\tfmt.Println(darkpro.TUNDNSCapability)\n\tfmt.Println(darkpro.RealityReadinessCapability)')
 
 command = "app/stats/command/command.go"
 for method, req, resp in (("GetStats", "GetStatsRequest", "GetStatsResponse"), ("GetUsersStats", "GetUsersStatsRequest", "GetUsersStatsResponse"), ("QueryStats", "QueryStatsRequest", "QueryStatsResponse")):
@@ -102,6 +107,9 @@ for method, req, resp in (("GetStats", "GetStatsRequest", "GetStatsResponse"), (
     after(command, anchor, extra)
 
 always = "app/proxyman/inbound/always.go"
+after(always, '\tmss, err := internet.ToMemoryStreamConfig(receiverConfig.StreamSettings)\n\tif err != nil {\n\t\treturn nil, errors.New("failed to parse stream config").Base(err)\n\t}', '''
+    if err := darkProRegisterRealityReadiness(tag, mss); err != nil { return nil, err }
+''')
 after(always, "func getStatCounter(v *core.Instance, tag string) (stats.Counter, stats.Counter) {", '\n\tif darkpro.IsControl(tag) { return nil, nil }\n')
 replace(always, "\tfor _, worker := range h.workers {\n\t\tif err := worker.Start(); err != nil {\n\t\t\treturn err\n\t\t}\n\t}\n\treturn nil", "\tfor _, worker := range h.workers {\n\t\tif err := worker.Start(); err != nil { return err }\n\t}\n\tif err := darkpro.RegisterResource(h.tag, h.Close); err != nil { _ = h.Close(); return err }\n\treturn nil")
 
@@ -503,17 +511,23 @@ shutil.copyfile(repo / "scripts/core-overlay/inbound_xdrive_test.go.txt", source
 shutil.copyfile(repo / "scripts/core-overlay/inbound_tun_dns.go.txt", source / "proxy/tun/darkprov2_dns_linux.go")
 shutil.copyfile(repo / "scripts/core-overlay/inbound_tun_dns_test.go.txt", source / "proxy/tun/darkprov2_dns_linux_test.go")
 shutil.copyfile(repo / "scripts/core-overlay/inbound_vision_test.go.txt", source / "proxy/darkprov2_vision_test.go")
+reality_overlays = {
+    "scripts/core-overlay/inbound_reality_readiness.go.txt": "app/proxyman/inbound/darkprov2_reality.go",
+    "scripts/core-overlay/inbound_reality_readiness_test.go.txt": "app/proxyman/inbound/darkprov2_reality_test.go",
+}
+for original, destination in reality_overlays.items():
+    shutil.copyfile(repo / original, source / destination)
 provenance = {
     "upstream_commit": PIN,
     "protocol": "darkpro-inbound-v2/",
     "upstream_source_sha256": HASHES,
     "overlay_sha256": {
         str(p.relative_to(repo)): hashlib.sha256(p.read_bytes()).hexdigest()
-        for p in (Path(__file__).resolve(), repo / "internal/corebarrierv2/barrier.go", repo / "scripts/core-overlay/inbound_stats.go.txt", repo / "scripts/core-overlay/inbound_xdrive_test.go.txt", repo / "scripts/core-overlay/inbound_tun_dns.go.txt", repo / "scripts/core-overlay/inbound_tun_dns_test.go.txt", repo / "scripts/core-overlay/inbound_vision_test.go.txt")
+        for p in (Path(__file__).resolve(), repo / "internal/corebarrierv2/barrier.go", repo / "scripts/core-overlay/inbound_stats.go.txt", repo / "scripts/core-overlay/inbound_xdrive_test.go.txt", repo / "scripts/core-overlay/inbound_tun_dns.go.txt", repo / "scripts/core-overlay/inbound_tun_dns_test.go.txt", repo / "scripts/core-overlay/inbound_vision_test.go.txt", *(repo / name for name in reality_overlays))
     },
     "patched_source_sha256": {
         name: hashlib.sha256((source / name).read_bytes()).hexdigest()
-        for name in sorted(list(HASHES) + ["common/darkprov2/barrier.go", "common/darkprov2/barrier_test.go", "app/stats/command/darkprov2.go", "transport/internet/xdrive/darkprov2_test.go", "proxy/tun/darkprov2_dns_linux.go", "proxy/tun/darkprov2_dns_linux_test.go", "proxy/darkprov2_vision_test.go"])
+        for name in sorted(list(HASHES) + ["common/darkprov2/barrier.go", "common/darkprov2/barrier_test.go", "app/stats/command/darkprov2.go", "transport/internet/xdrive/darkprov2_test.go", "proxy/tun/darkprov2_dns_linux.go", "proxy/tun/darkprov2_dns_linux_test.go", "proxy/darkprov2_vision_test.go"] + list(reality_overlays.values()))
     },
 }
 (source / "darkpro-inbound-provenance.json").write_text(json.dumps(provenance, sort_keys=True, indent=2) + "\n")

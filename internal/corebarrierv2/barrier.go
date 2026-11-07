@@ -16,10 +16,11 @@ import (
 )
 
 const (
-	Protocol         = "darkpro-inbound-v2/"
-	ControlTag       = "dark-pro-usage-api"
-	DNSTag           = "dark-pro-inbound-dns-upstream"
-	TUNDNSCapability = Protocol + "tun-dns-activation-v1"
+	Protocol                   = "darkpro-inbound-v2/"
+	ControlTag                 = "dark-pro-usage-api"
+	DNSTag                     = "dark-pro-inbound-dns-upstream"
+	TUNDNSCapability           = Protocol + "tun-dns-activation-v1"
+	RealityReadinessCapability = Protocol + "reality-startup-readiness-v1"
 )
 
 var ErrBarrier = errors.New("inbound counter barrier is unavailable or conflicting")
@@ -39,6 +40,7 @@ type activationHook struct {
 type gate struct {
 	mu             sync.Mutex
 	ready          bool
+	startupChecks  map[string]func() bool
 	active         bool
 	closing        bool
 	activation     string
@@ -59,7 +61,7 @@ type gate struct {
 }
 
 func newGate() *gate {
-	return &gate{roots: make(map[uint64]func()), resources: make(map[string]func() error), activators: make(map[string]activationHook), changed: make(chan struct{}), zero: make(chan struct{})}
+	return &gate{roots: make(map[uint64]func()), resources: make(map[string]func() error), activators: make(map[string]activationHook), startupChecks: make(map[string]func() bool), changed: make(chan struct{}), zero: make(chan struct{})}
 }
 
 var processGate = newGate()
@@ -71,7 +73,8 @@ func Enabled() bool { return os.Getenv("DARK_PRO_INBOUND_V2") == "1" }
 func IsControl(tag string) bool { return Enabled() && tag == ControlTag }
 
 // MarkReady is called after core.Instance.Start has successfully started every
-// configured feature. Merely accepting a StatsService connection is not ready.
+// configured feature. Registered asynchronous startup checks must also finish;
+// merely accepting a StatsService connection is not ready.
 func MarkReady() {
 	if Enabled() {
 		processGate.mu.Lock()
@@ -81,10 +84,52 @@ func MarkReady() {
 }
 
 func Health() (ready, active, sealed bool) {
-	g := processGate
+	return processGate.health()
+}
+
+func (g *gate) health() (ready, active, sealed bool) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	return g.ready, g.active && !g.closing, g.finished != nil && g.values != nil && g.err == nil
+	return g.readyLocked(), g.active && !g.closing, g.finished != nil && g.values != nil && g.err == nil
+}
+
+// RegisterStartupCheck runs only during construction, before MarkReady. Checks
+// must only read process-local state: no I/O, waiting, or calls back into this
+// gate. Returning true means initialization completed, not end-to-end health.
+// Completion is latched, so later health queries cannot revoke admitted work.
+func RegisterStartupCheck(tag string, check func() bool) error {
+	if !Enabled() {
+		return nil
+	}
+	return processGate.registerStartupCheck(tag, check)
+}
+
+func (g *gate) registerStartupCheck(tag string, check func() bool) error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if tag == "" || tag == ControlTag || check == nil || g.ready || g.closing || g.activation != "" {
+		return ErrBarrier
+	}
+	if _, exists := g.startupChecks[tag]; exists {
+		return ErrBarrier
+	}
+	g.startupChecks[tag] = check
+	return nil
+}
+
+func (g *gate) readyLocked() bool {
+	if !g.ready {
+		return false
+	}
+	for _, check := range g.startupChecks {
+		if !check() {
+			return false
+		}
+	}
+	// No new checks can register after MarkReady. Clear only after all checks
+	// finish; a partial result must not hide another pending listener.
+	g.startupChecks = nil
+	return true
 }
 
 func Activate(nonce string) error {
@@ -110,7 +155,7 @@ func (g *gate) activateContext(ctx context.Context, nonce string) error {
 		return ErrBarrier
 	}
 	g.mu.Lock()
-	if !validNonce(nonce) || !g.ready || g.closing || (g.activation != "" && g.activation != nonce) {
+	if !validNonce(nonce) || !g.readyLocked() || g.closing || (g.activation != "" && g.activation != nonce) {
 		g.mu.Unlock()
 		return ErrBarrier
 	}

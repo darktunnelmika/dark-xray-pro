@@ -61,6 +61,11 @@ func nativeBinary(t *testing.T) string {
 
 func startCore(t *testing.T, bin string, config map[string]any, controlled bool) *coreProcess {
 	t.Helper()
+	return startCoreWithEnv(t, bin, config, controlled, nil)
+}
+
+func startCoreWithEnv(t *testing.T, bin string, config map[string]any, controlled bool, extraEnv []string) *coreProcess {
+	t.Helper()
 	dir := t.TempDir()
 	if os.Getenv("DXP_INBOUND_CORE_V2_DEBUG") == "1" {
 		config["log"] = map[string]any{"loglevel": "debug"}
@@ -80,6 +85,7 @@ func startCore(t *testing.T, bin string, config map[string]any, controlled bool)
 	}
 	cmd := exec.Command(bin, "run", "-config", path)
 	cmd.Env = []string{"PATH=/usr/bin:/bin", "HOME=" + dir, "GORACE=halt_on_error=1 atexit_sleep_ms=0"}
+	cmd.Env = append(cmd.Env, extraEnv...)
 	if os.Getenv("DXP_TUN_DNS_NAMESPACE") == "1" {
 		// Only the isolated DNS harness supplies these tools. Its private /run
 		// contains the test's own system bus, never the host resolver socket.
