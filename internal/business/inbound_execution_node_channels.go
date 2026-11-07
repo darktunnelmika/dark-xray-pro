@@ -2,7 +2,6 @@ package business
 
 import (
 	"context"
-	"database/sql"
 
 	ix "github.com/darktunnelmika/dark-xray-pro/internal/inboundexec"
 )
@@ -12,15 +11,15 @@ import (
 // intentionally not inferred here; the owner API joins those independent
 // telemetry channels without converting one channel into another.
 func (s *Store) ListInboundExecutionNodeChannels(ctx context.Context, key []byte) ([]ix.TargetState, error) {
-	enabled, err := executionSchemaPresent(ctx, s.db)
-	if err != nil || !enabled {
-		return []ix.TargetState{}, err
-	}
-	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	tx, err := s.readSnapshot(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
+	enabled, err := executionSchemaPresent(ctx, tx)
+	if err != nil || !enabled {
+		return []ix.TargetState{}, err
+	}
 
 	rows, err := tx.QueryContext(ctx, `SELECT node_id,installation_id,desired_generation,observed_generation,observation_enc
 		FROM inbound_execution_nodes ORDER BY node_id`)

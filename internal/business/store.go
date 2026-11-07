@@ -45,6 +45,7 @@ var (
 
 type Store struct {
 	db                        *sql.DB
+	readOnly                  *sql.DB           // bounded WAL readers; never grants leases or accepts usage
 	phaseDiagnostics          *phaseDiagnostics // optional, enabled only before serving requests
 	usage                     *usageledger.Ledger
 	consumerPolicy            *consumerManifestPolicy
@@ -341,6 +342,10 @@ func Open(path string) (*Store, error) {
 	if err = s.VerifyTelegramBonusV1(context.Background()); err != nil {
 		return fail(err)
 	}
+	s.readOnly, err = openBusinessReadPool(abs)
+	if err != nil {
+		return fail(err)
+	}
 	return s, nil
 }
 func bootstrap(db *sql.DB) error {
@@ -367,7 +372,13 @@ func bootstrap(db *sql.DB) error {
 	}
 	return tx.Commit()
 }
-func (s *Store) Close() error { return s.db.Close() }
+func (s *Store) Close() error {
+	var readErr error
+	if s.readOnly != nil {
+		readErr = s.readOnly.Close()
+	}
+	return errors.Join(readErr, s.db.Close())
+}
 func repScan(row interface{ Scan(...any) error }) (Representative, error) {
 	var r Representative
 	var enabled int

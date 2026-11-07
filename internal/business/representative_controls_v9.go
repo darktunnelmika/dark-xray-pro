@@ -188,12 +188,16 @@ func (s *Store) RepresentativeControl(ctx context.Context, id string) (Represent
 // For a legacy rep with no controls row, all existing functionality stays
 // enabled. Owner permissions are independent of the reseller toggle set.
 func (s *Store) RepresentativePermissions(ctx context.Context, id string) (RepresentativePermissions, error) {
+	return readRepresentativePermissions(ctx, s.db, id)
+}
+
+func readRepresentativePermissions(ctx context.Context, q inboundReader, id string) (RepresentativePermissions, error) {
 	if !idRE.MatchString(id) {
 		return RepresentativePermissions{}, ErrInvalid
 	}
 	var p RepresentativePermissions
 	var flags [7]int
-	err := s.db.QueryRowContext(ctx, `SELECT view_clients,create_clients,renew_clients,
+	err := q.QueryRowContext(ctx, `SELECT view_clients,create_clients,renew_clients,
   edit_clients,manage_clients,manage_groups,view_finance
   FROM representative_controls WHERE representative_id=?`, id).Scan(
 		&flags[0], &flags[1], &flags[2], &flags[3], &flags[4], &flags[5], &flags[6])
@@ -208,7 +212,7 @@ func (s *Store) RepresentativePermissions(ctx context.Context, id string) (Repre
 			ViewFinance: flags[6] == 1,
 		}
 	}
-	p.ManageSellers, err = sessionSellerPermissionV2(ctx, s.db, id)
+	p.ManageSellers, err = sessionSellerPermissionV2(ctx, q, id)
 	return p, err
 }
 func (s *Store) UpdateRepresentativeControl(ctx context.Context, input RepresentativeControlChange) (RepresentativeControlReceipt, error) {
