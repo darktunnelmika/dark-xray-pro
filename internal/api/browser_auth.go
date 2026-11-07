@@ -117,6 +117,13 @@ func (s *Server) csrfValue(token string) string {
 	_, _ = m.Write([]byte(token))
 	return hex.EncodeToString(m.Sum(nil))
 }
+
+// Only these display routes may authorize from an independent committed read.
+// Other reads and every mutation retain the original writer-backed verification.
+func displaySessionSnapshot(r *http.Request) bool {
+	return r.Method == http.MethodGet && (r.URL.Path == "/api/v1/session/status" || r.URL.Path == "/api/v1/workspace/nodes")
+}
+
 func (s *Server) signedSession(r *http.Request) (business.LoginSession, error) {
 	if s.business == nil {
 		return business.LoginSession{}, business.ErrUnavailable
@@ -128,6 +135,9 @@ func (s *Server) signedSession(r *http.Request) (business.LoginSession, error) {
 	// Bound authentication only; authorized handlers keep the original context.
 	ctx, cancel := context.WithTimeout(r.Context(), browserAuthenticationBudget)
 	defer cancel()
+	if displaySessionSnapshot(r) {
+		return s.business.VerifyDisplaySession(ctx, c.Value)
+	}
 	return s.business.VerifySession(ctx, c.Value)
 }
 func (s *Server) authorizeBrowser(w http.ResponseWriter, r *http.Request, mutate, ownerOnly bool) (business.LoginSession, bool) {

@@ -249,7 +249,18 @@ func (s *Store) Login(ctx context.Context, username, password string) (diagnosti
 	return LoginSession{Token: token, User: u, ExpiresUnix: expiry}, nil
 }
 
-func (s *Store) VerifySession(ctx context.Context, token string) (diagnosticResult LoginSession, diagnosticErr error) {
+// VerifySession retains writer serialization for command authorization.
+func (s *Store) VerifySession(ctx context.Context, token string) (LoginSession, error) {
+	return s.verifySession(ctx, token, false)
+}
+
+// VerifyDisplaySession is only for the explicitly selected read-only browser
+// status/Node views. Never use it to authorize commands or other mutations.
+func (s *Store) VerifyDisplaySession(ctx context.Context, token string) (LoginSession, error) {
+	return s.verifySession(ctx, token, true)
+}
+
+func (s *Store) verifySession(ctx context.Context, token string, displayOnly bool) (diagnosticResult LoginSession, diagnosticErr error) {
 	ctx, diagnosticSpan := s.BeginDiagnostic(ctx, DiagnosticOperationSessionVerify, DiagnosticSourceStore)
 	defer func() { diagnosticSpan.End(diagnosticErr) }()
 	if len(token) != 64 {
@@ -262,16 +273,22 @@ func (s *Store) VerifySession(ctx context.Context, token string) (diagnosticResu
 	}
 	// One short committed WAL snapshot binds identity, revocation and all
 	// permissions together; no cached authentication or writer bypass.
-	tx, err := s.readSnapshot(ctx)
-	if err != nil {
-		return LoginSession{}, err
+	var q inboundReader = s.db
+	var snapshot *sql.Tx
+	var err error
+	if displayOnly {
+		snapshot, err = s.readSnapshot(ctx)
+		if err != nil {
+			return LoginSession{}, err
+		}
+		defer snapshot.Rollback()
+		q = snapshot
 	}
-	defer tx.Rollback()
 	var u AuthUser
 	var expires int64
 	var disabled, repEnabled int
 	diagnosticSpan.Enter(DiagnosticPhaseSessionRead)
-	err = tx.QueryRowContext(ctx,
+	err = q.QueryRowContext(ctx,
 		"SELECT a.id,a.username,a.role,a.representative_id,ss.expires_unix,CASE WHEN a.role='representative' AND c.representative_id IS NOT NULL THEN c.login_suspended ELSE a.disabled END,r.enabled FROM auth_sessions ss JOIN auth_users a ON a.id=ss.user_id JOIN representatives r ON r.id=a.representative_id LEFT JOIN representative_controls c ON c.representative_id=a.representative_id WHERE ss.token_sha256=?",
 		digestSession(token)).Scan(&u.ID, &u.Username, &u.Role, &u.RepresentativeID, &expires, &disabled, &repEnabled)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -285,12 +302,14 @@ func (s *Store) VerifySession(ctx context.Context, token string) (diagnosticResu
 	}
 	diagnosticFinishPhase(ctx, nil)
 	diagnosticSpan.Enter(DiagnosticPhasePermissionsRead)
-	u.Permissions, err = readRepresentativePermissions(ctx, tx, u.RepresentativeID)
+	u.Permissions, err = readRepresentativePermissions(ctx, q, u.RepresentativeID)
 	if err != nil {
 		return LoginSession{}, err
 	}
-	if err = tx.Commit(); err != nil {
-		return LoginSession{}, err
+	if snapshot != nil {
+		if err = snapshot.Commit(); err != nil {
+			return LoginSession{}, err
+		}
 	}
 	return LoginSession{Token: token, User: u, ExpiresUnix: expires}, nil
 }

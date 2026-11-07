@@ -61,7 +61,7 @@ func TestBusinessReadPoolBusyReadersCancelWithoutWriterFallback(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
 	defer cancel()
-	result, err := s.VerifySession(ctx, session.Token)
+	result, err := s.VerifyDisplaySession(ctx, session.Token)
 	if !errors.Is(err, context.DeadlineExceeded) || errors.Is(err, ErrUnauthenticated) || result.Token != "" {
 		t.Fatal("saturated readers fabricated auth or fell back", result, err)
 	}
@@ -72,7 +72,7 @@ func TestBusinessReadPoolBusyReadersCancelWithoutWriterFallback(t *testing.T) {
 	for _, c := range held {
 		c.Close()
 	}
-	result, err = s.VerifySession(context.Background(), session.Token)
+	result, err = s.VerifyDisplaySession(context.Background(), session.Token)
 	if err != nil || result.User.ID != "owner" {
 		t.Fatal("canceled read changed session", err)
 	}
@@ -105,7 +105,7 @@ func TestBusinessReadPoolSessionRevocationAndPermissionsStayCommitted(t *testing
 		t.Fatal(err)
 	}
 	readctx, cancel := context.WithTimeout(ctx, time.Second)
-	before, err := s.VerifySession(readctx, session.Token)
+	before, err := s.VerifyDisplaySession(readctx, session.Token)
 	cancel()
 	if err != nil || !before.User.Permissions.ViewClients {
 		t.Fatal("reader waited on or exposed uncommitted permission", err)
@@ -113,7 +113,7 @@ func TestBusinessReadPoolSessionRevocationAndPermissionsStayCommitted(t *testing
 	if err = tx.Commit(); err != nil {
 		t.Fatal(err)
 	}
-	after, err := s.VerifySession(ctx, session.Token)
+	after, err := s.VerifyDisplaySession(ctx, session.Token)
 	if err != nil || after.User.Permissions.ViewClients {
 		t.Fatal("reader cached permission after commit", err)
 	}
@@ -126,7 +126,7 @@ func TestBusinessReadPoolSessionRevocationAndPermissionsStayCommitted(t *testing
 		t.Fatal(err)
 	}
 	readctx, cancel = context.WithTimeout(ctx, time.Second)
-	before, err = s.VerifySession(readctx, session.Token)
+	before, err = s.VerifyDisplaySession(readctx, session.Token)
 	cancel()
 	if err != nil || before.User.ID != session.User.ID {
 		t.Fatal("uncommitted logout invalidated session", err)
@@ -134,13 +134,13 @@ func TestBusinessReadPoolSessionRevocationAndPermissionsStayCommitted(t *testing
 	if err = tx.Rollback(); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = s.VerifySession(ctx, session.Token); err != nil {
+	if _, err = s.VerifyDisplaySession(ctx, session.Token); err != nil {
 		t.Fatal("rolled back logout invalidated session", err)
 	}
 	if err = s.Logout(ctx, session.Token); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = s.VerifySession(ctx, session.Token); !errors.Is(err, ErrUnauthenticated) {
+	if _, err = s.VerifyDisplaySession(ctx, session.Token); !errors.Is(err, ErrUnauthenticated) {
 		t.Fatal("committed logout not enforced", err)
 	}
 }
@@ -189,13 +189,13 @@ func TestBusinessReadPoolCloseAndReopenHasNoOldSessionSnapshot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = s.VerifySession(ctx, session.Token); err != nil {
+	if _, err = s.VerifyDisplaySession(ctx, session.Token); err != nil {
 		t.Fatal(err)
 	}
 	if err = s.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = s.VerifySession(ctx, session.Token); err == nil || errors.Is(err, ErrUnauthenticated) {
+	if _, err = s.VerifyDisplaySession(ctx, session.Token); err == nil || errors.Is(err, ErrUnauthenticated) {
 		t.Fatal("closed reader fabricated authentication result", err)
 	}
 	reopened, err := Open(path)
@@ -206,7 +206,29 @@ func TestBusinessReadPoolCloseAndReopenHasNoOldSessionSnapshot(t *testing.T) {
 	if err = reopened.Logout(ctx, session.Token); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = reopened.VerifySession(ctx, session.Token); !errors.Is(err, ErrUnauthenticated) {
+	if _, err = reopened.VerifyDisplaySession(ctx, session.Token); !errors.Is(err, ErrUnauthenticated) {
 		t.Fatal("reopened reader retained old session", err)
+	}
+}
+
+func TestBusinessReadPoolDisplaySessionSurvivesHeldWriter(t *testing.T) {
+	s, session := authAvailabilityStore(t)
+	writer, err := s.db.Conn(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer writer.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	got, err := s.VerifyDisplaySession(ctx, session.Token)
+	if err != nil || got.User.ID != "owner" {
+		t.Fatal("writer contention blocked display session", err)
+	}
+	// The same read shortcut must not authorize a queued mutation.
+	authctx, stop := context.WithTimeout(context.Background(), 30*time.Millisecond)
+	defer stop()
+	got, err = s.VerifySession(authctx, session.Token)
+	if !errors.Is(err, context.DeadlineExceeded) || got.Token != "" {
+		t.Fatal("command authorization bypassed writer", err)
 	}
 }
