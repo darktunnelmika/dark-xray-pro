@@ -317,13 +317,16 @@ func testManagedInboundOwnerAgent(t *testing.T, soak time.Duration) {
 	}
 	var pathHistory business.InboundTrafficHistory
 	request("GET", "/api/v1/workspace/native-inbounds/501/execution/traffic/history?window=1h", nil, &pathHistory, 200)
-	if len(pathHistory.Buckets) != 1 || pathHistory.Buckets[0].Upload == 0 || pathHistory.Buckets[0].Download == 0 {
-		t.Fatal("real owner history missing", pathHistory)
-	}
 	var pathTraffic business.InboundTraffic
 	request("GET", "/api/v1/workspace/native-inbounds/501/execution/traffic", nil, &pathTraffic, 200)
 	if len(pathTraffic.Paths) != 1 || !pathTraffic.Paths[0].Measured || !pathTraffic.Paths[0].Fresh || pathTraffic.Paths[0].Upload == 0 || pathTraffic.Paths[0].Download == 0 {
 		t.Fatal("real core path counters missing", pathTraffic)
+	}
+	// The acknowledged zero receipt and payload may land in different minutes.
+	// Compare every history bucket with the committed path totals, not with
+	// customer payload bytes (listener counters include protocol overhead).
+	if err := validateManagedPathHistory(pathHistory, pathTraffic); err != nil {
+		t.Fatal("real owner history mismatch", err, pathHistory, pathTraffic)
 	}
 	var state ix.State
 	request("GET", "/api/v1/workspace/native-inbounds/501/execution", nil, &state, 200)
