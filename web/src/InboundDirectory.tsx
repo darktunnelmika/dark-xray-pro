@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { ArrowUpRight, Copy, ListFilter, Plus, Search } from "lucide-react";
+import { ArrowUpRight, Copy, Pencil, Trash2, ListFilter, Plus, Search } from "lucide-react";
 import type { Inbound, InboundOverview } from "./inboundTypes";
 import { creationNodeName, type CreationCapabilities } from "./InboundCreationModel";
 import { navigateURL } from "./navigation";
@@ -12,21 +12,22 @@ const words = {
   en: {
     add: "Add Inbound", filters: "Filters", search: "Search Inbounds", placeholder: "Name or ID…", status: "Status", transport: "Transport", node: "Node",
     all: "All", enabled: "Enabled", disabled: "Disabled", archived: "Archived", promoted: "Prepared for LAB", planned: "Saved paused setup", waitingHost: "Waiting for Host", plannedNodes: "Planned Nodes", assignedNodes: "Assigned Nodes", unknownPlanNodes: "Open the saved setup for its Nodes", name: "Inbound", nodes: "Nodes", clients: "Clients", actions: "Actions",
-    open: "Open", copy: "Copy settings", previous: "Previous", next: "Next", results: "results", page: "Page", of: "of", empty: "No Inbounds match these filters.",
+    edit: "Edit", remove: "Delete", open: "Open", copy: "Copy settings", previous: "Previous", next: "Next", results: "results", page: "Page", of: "of", empty: "No Inbounds match these filters.",
     none: "No Inbounds yet. Add an Inbound and configure its Nodes and paths.", unattached: "No Node assigned", clear: "Clear filters", swap: "Select an Inbound to manage its saved Dark Swap route drafts.",
   },
   fa: {
     add: "افزودن اینباند", filters: "فیلترها", search: "جست‌وجوی اینباند", placeholder: "نام یا شناسه…", status: "وضعیت", transport: "ترنسپورت", node: "نود",
     all: "همه", enabled: "فعال", disabled: "غیرفعال", archived: "آرشیوشده", promoted: "آماده‌شده برای LAB", planned: "طرح ذخیره‌شدهٔ غیرفعال", waitingHost: "در انتظار هاست", plannedNodes: "نودهای طرح", assignedNodes: "نودهای اختصاص‌یافته", unknownPlanNodes: "نودها را در تنظیمات ذخیره‌شده ببین", name: "اینباند", nodes: "نودها", clients: "کلاینت‌ها", actions: "عملیات",
-    open: "جزئیات", copy: "کپی تنظیمات", previous: "قبلی", next: "بعدی", results: "نتیجه", page: "صفحه", of: "از", empty: "اینباندی با این فیلترها پیدا نشد.",
+    edit: "ویرایش", remove: "حذف", open: "جزئیات", copy: "کپی تنظیمات", previous: "قبلی", next: "بعدی", results: "نتیجه", page: "صفحه", of: "از", empty: "اینباندی با این فیلترها پیدا نشد.",
     none: "هنوز اینباندی نیست. یک اینباند بساز و نودها و مسیرهایش را مشخص کن.", unattached: "بدون نود مقصد", clear: "پاک‌کردن فیلترها", swap: "برای مدیریت پیش‌نویس مسیر دارک سواپ، اینباند را انتخاب کن.",
   },
 } as const;
 
-export default function InboundDirectory({ data, plans, executions, language, blocked, swapWorkspace, onOpen, onCreate }: {
+export default function InboundDirectory({ data, plans, executions, language, blocked, swapWorkspace, onOpen, onCreate, onEdit, onDelete }: {
   data: InboundOverview; language: "fa" | "en"; blocked: boolean; swapWorkspace: boolean;
   plans?: CreationCapabilities["plans"];
   executions?: Record<number, { state: ExecutionState; observedAt: number }>;
+  onEdit: (inbound: Inbound) => void; onDelete: (inbound: Inbound) => void;
   onOpen: (inbound: Inbound) => void; onCreate: (source?: Inbound) => void;
 }) {
   const t = words[language];
@@ -53,7 +54,7 @@ export default function InboundDirectory({ data, plans, executions, language, bl
     const plan = plans?.find(plan => plan.inbound_id === item.id);
     const state = itemState(item, !!plan?.promotion);
     const pausedPlan = !!plan && !plan.promotion && !item.archived && (!item.spec && !item.enabled || state === "saved");
-    return (item.name + " " + item.id).toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()) &&
+    return !item.archived && executions?.[item.id]?.state.desired_state !== "archived" && (item.name + " " + item.id).toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()) &&
       (status === "all" || status === state || status === "planned" && pausedPlan || status === "waiting_host" && pausedPlan && plan?.status === "WAITING_HOST") && (transport === "all" || transport === item.transport) &&
       (node === "all" || data.targets.some(target => target.inbound_id === item.id && target.node_id === node) || !!plan?.node_ids?.includes(node));
   }).sort((a, b) => b.id - a.id), [data.inbounds, data.targets, plans, executions, query, status, transport, node, now]);
@@ -86,7 +87,7 @@ export default function InboundDirectory({ data, plans, executions, language, bl
     </div>
     {swapWorkspace && <p className="inbound-directory-help">{t.swap}</p>}
     <div className="inbound-filter-bar"><div className="inbound-directory-filters" id="inbound-directory-filters" data-expanded={filtersOpen}>
-      <label>{t.status}<select aria-label={t.status} value={status} onChange={event => { setStatus(event.target.value); setPage(1); }}><option value="all">{t.all}</option>{specificationRows && ["active", "running", "queued", "applying", "stopped", "failed", "blocked", "verifying", "stale", "unknown"].map(state => <option key={state} value={state}>{executionStateLabel(state, language)}</option>)}<option value="enabled">{t.enabled}</option><option value="disabled">{t.disabled}</option><option value="planned">{t.planned}</option><option value="promoted">{t.promoted}</option><option value="waiting_host">{t.waitingHost}</option><option value="archived">{t.archived}</option></select></label>
+      <label>{t.status}<select aria-label={t.status} value={status} onChange={event => { setStatus(event.target.value); setPage(1); }}><option value="all">{t.all}</option>{specificationRows && ["active", "running", "queued", "applying", "stopped", "failed", "blocked", "verifying", "stale", "unknown"].map(state => <option key={state} value={state}>{executionStateLabel(state, language)}</option>)}<option value="enabled">{t.enabled}</option><option value="disabled">{t.disabled}</option><option value="planned">{t.planned}</option><option value="promoted">{t.promoted}</option><option value="waiting_host">{t.waitingHost}</option></select></label>
       <label>{t.transport}<select aria-label={t.transport} value={transport} onChange={event => { setTransport(event.target.value); setPage(1); }}><option value="all">{t.all}</option>{transports.map(transport => <option key={transport} value={transport}>{specificationRows ? networkNames[transport] ?? transportLabel(transport) : transportLabel(transport)}</option>)}</select></label>
       <label>{t.node}<select aria-label={t.node} value={node} onChange={event => { setNode(event.target.value); setPage(1); }}><option value="all">{t.all}</option>{data.nodes.map(item => <option key={item.node_id} value={item.node_id}>{creationNodeName(data.nodes, item.node_id)}</option>)}</select></label>
       {(query || status !== "all" || transport !== "all" || node !== "all") && <button type="button" className="native-text-action" onClick={reset}>{t.clear}</button>}
@@ -106,7 +107,7 @@ export default function InboundDirectory({ data, plans, executions, language, bl
             {(!plan || attached.length > 0) && <div className="inbound-node-names" data-assigned-nodes>{plan && <strong>{t.assignedNodes}: </strong>}{attached.length ? attached.map(target => creationNodeName(data.nodes, target.node_id)).join(" · ") : t.unattached}</div>}</td>
           <td data-label={t.clients}>{item.spec ? executions?.[item.id] ? executions[item.id].state.effective_client_ids.length.toLocaleString(language === "fa" ? "fa-IR" : "en-US") : "—" : item.bound_clients.toLocaleString(language === "fa" ? "fa-IR" : "en-US")}</td>
           <td data-label={t.status}><span className={"inbound-state inbound-state-" + state} data-plan-state={pausedPlan || undefined}>{pausedPlan ? plan.status === "WAITING_HOST" ? t.waitingHost : t.planned : (t as Record<string, string>)[state] ?? executionStateLabel(state, language)}</span></td>
-          <td data-label={t.actions}><div className="inbound-row-actions"><button type="button" onClick={() => onOpen(item)} aria-label={t.open + " " + item.name}><ArrowUpRight size={16}/><span>{t.open}</span></button><button type="button" disabled={blocked} onClick={() => onCreate(item)} aria-label={t.copy + " " + item.name}><Copy size={16}/></button></div></td>
+          <td data-label={t.actions}><div className="inbound-row-actions"><button type="button" disabled={blocked} onClick={() => onEdit(item)} aria-label={t.edit + " " + item.name}><Pencil size={16}/><span>{t.edit}</span></button><button type="button" disabled={blocked} onClick={() => onDelete(item)} aria-label={t.remove + " " + item.name}><Trash2 size={16}/><span>{t.remove}</span></button><button type="button" onClick={() => onOpen(item)} aria-label={t.open + " " + item.name}><ArrowUpRight size={16}/><span>{t.open}</span></button><button type="button" disabled={blocked} onClick={() => onCreate(item)} aria-label={t.copy + " " + item.name}><Copy size={16}/></button></div></td>
         </tr>;
       })}</tbody>
     </table></div>

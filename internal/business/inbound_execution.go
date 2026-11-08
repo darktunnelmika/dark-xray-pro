@@ -501,12 +501,16 @@ func (s *Store) InboundExecution(ctx context.Context, key []byte, id uint64) (di
 }
 
 func (s *Store) ListInboundExecutionStates(ctx context.Context, key []byte) ([]ix.State, error) {
-	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	db := s.readOnly
+	if db == nil {
+		db = s.db
+	}
+	tx, err := db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
-	rows, err := tx.QueryContext(ctx, `SELECT inbound_id FROM native_inbound_plans ORDER BY inbound_id LIMIT 257`)
+	rows, err := tx.QueryContext(ctx, `SELECT p.inbound_id FROM native_inbound_plans p JOIN native_inbounds i ON i.id=p.inbound_id WHERE i.archived=0 AND NOT EXISTS(SELECT 1 FROM inbound_execution_heads h WHERE h.inbound_id=p.inbound_id AND h.desired_state='archived') ORDER BY p.inbound_id LIMIT 257`)
 	if err != nil {
 		return nil, err
 	}

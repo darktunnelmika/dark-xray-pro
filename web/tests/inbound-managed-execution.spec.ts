@@ -138,6 +138,7 @@ test("admission stays queued until exact target evidence is observed; HUB is exp
   await expect(region(page).locator('[data-managed-state="verifying"]')).toBeVisible();
   f.state.targets[0].health_state = "engine_ready"; f.state.publication_state = "available_unverified_path"; await region(page).getByRole("button", { name: "Refresh state" }).click();
   await expect(region(page).locator('[data-managed-state="running"]')).toBeVisible();
+  await region(page).locator(":scope > details").filter({ hasText: "Engine ready" }).locator(":scope > summary").click();
   await expect(region(page).getByText("Engine ready", { exact: true })).toBeVisible();
   await expect(region(page).getByText("Available; connection not yet tested", { exact: true })).toBeVisible();
   f.state.targets[0].health_state = "verified"; await region(page).getByRole("button", { name: "Refresh state" }).click();
@@ -357,4 +358,34 @@ for (const executionEnabled of [true, false, undefined]) test(`diagnostics keeps
   await fixture(page, { executionEnabled }); await open(page);
   await page.getByRole("button", { name: "Diagnostics", exact: true }).click();
   await expect(page.getByRole("region", { name: "Native deployment readiness", exact: true })).toHaveCount(executionEnabled === true ? 0 : 1);
+});
+
+
+test("directory edits directly and deletion removes the row without client deletion", async ({page}) => {
+ const f=await fixture(page,{batch:true});f.makeActive();await page.goto("/inbounds");
+ await page.getByRole("button",{name:"Edit Managed inbound",exact:true}).click();
+ const editor=page.getByRole("dialog",{name:"Edit Inbound setup",exact:true});await expect(editor).toBeVisible();
+ await editor.getByRole("button",{name:"Cancel",exact:true}).click();await page.goto("/inbounds");
+ await page.getByRole("button",{name:"Delete Managed inbound",exact:true}).click();
+ const review=page.getByRole("dialog",{name:"Review execution · Delete",exact:true});await expect(review).toBeVisible();
+ await review.getByRole("button",{name:"Confirm and continue",exact:true}).click();
+ await expect(page).toHaveURL(/\/inbounds$/);await expect(page.getByRole("button",{name:"Managed inbound",exact:true})).toHaveCount(0);
+ expect(f.writes.filter(x=>x.path.endsWith("/commands")).at(-1)?.body.action).toBe("archive");
+ expect(f.writes.some(x=>x.path.includes("/clients"))).toBe(false);
+});
+
+test("path traffic shows committed totals and never calls missing data zero or live",async({page})=>{
+ const f=await fixture(page,{batch:true});f.makeActive();let failing=false;
+ await page.route("**/execution/traffic",route=> failing?route.fulfill({status:503,json:{error:"unavailable"}}):route.fulfill({json:{inbound_id:id,sampled_at_unix_nano:Date.now()*1e6,coverage:"since_path_metering",paths:[{node_id:"hub-local",tag:"managed-test",kind:"direct",upload:"1024",download:"2048",measured:true,fresh:true,last_usage_unix_nano:Date.now()*1e6,generation:1,epoch_id:"test-epoch"}]}}));
+ await open(page);const traffic=page.getByRole("region",{name:"Live path traffic",exact:true});await expect(traffic.getByText("3 KiB",{exact:true})).toBeVisible();await expect(traffic.locator("span.traffic-live")).toBeVisible();
+ failing=true;await expect(traffic.getByText("Stale / stopped",{exact:true})).toBeVisible({timeout:10000});await expect(traffic.getByText("3 KiB",{exact:true})).toBeVisible();
+});
+
+
+test("history is requested only on demand and does not invent missing samples",async({page})=>{
+ const f=await fixture(page,{batch:true});f.makeActive();let count=0;
+ await page.route("**/execution/traffic/history?*",route=>{count++;return route.fulfill({json:{inbound_id:id,window:"1h",from_unix:1000,until_unix:4600,bucket_seconds:60,coverage:"since_path_metering",buckets:[]}})});
+ await open(page);const traffic=page.getByRole("region",{name:"Live path traffic",exact:true});expect(count).toBe(0);
+ await traffic.getByRole("button",{name:"1 hour",exact:true}).click();await expect(traffic.getByText("No measured path samples in this period.",{exact:true})).toBeVisible();expect(count).toBe(1);
+ await traffic.getByRole("button",{name:"Live",exact:true}).click();expect(count).toBe(1);
 });

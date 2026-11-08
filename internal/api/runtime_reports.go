@@ -38,7 +38,7 @@ func (s *Server) attachRuntimeReports(mux *http.ServeMux) {
 		if _, ok := s.authorizeBrowser(w, r, false, true); !ok {
 			return
 		}
-		inbounds, e := s.business.ListInbounds(r.Context(), s.inboundKey)
+		inbounds, e := s.business.ListVisibleInbounds(r.Context(), s.inboundKey)
 		if e != nil {
 			businessError(w, e)
 			return

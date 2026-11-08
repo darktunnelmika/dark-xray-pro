@@ -30,7 +30,7 @@ func TestManagedInboundOwnerBoundaryAndDisabledState(t *testing.T) {
 			})
 		}
 	}
-	for _, path := range []string{base, base + "/operations/unknown-event-0001", base + "/reconciliations/unknown-event-0001"} {
+	for _, path := range []string{base, base + "/traffic", base + "/traffic/history?window=1h", base + "/operations/unknown-event-0001", base + "/reconciliations/unknown-event-0001"} {
 		w := browserRequest(t, s.Handler(), "GET", path, nil, nil, "", "")
 		if w.Code != 401 {
 			t.Fatal("managed read exposed without owner session", path, w.Code)

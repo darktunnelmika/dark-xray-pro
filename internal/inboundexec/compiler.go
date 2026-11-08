@@ -246,7 +246,9 @@ func Compile(ctx context.Context, r CompileRequest) (Bundle, error) {
 					}
 				}
 				b.Listeners = append(b.Listeners, v)
-				if v.AccountingMode == AccountingOwnerAggregate {
+				// Native listener counters are observational even in per-client billing.
+				// Billable customer principals remain the only quota writers.
+				if v.AccountingMode == AccountingOwnerAggregate || v.Engine == "xray" && item.Profile.Spec != nil && item.Profile.Spec.PathTraffic {
 					role := "owner_aggregate"
 					if l.Kind == "swap_relay" {
 						role = "transit"

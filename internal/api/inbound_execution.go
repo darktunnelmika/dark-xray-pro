@@ -116,6 +116,45 @@ func (s *Server) attachInboundExecution(mux *http.ServeMux) {
 		return
 	}
 	base := "/api/v1/workspace/native-inbounds/{id}/execution"
+	mux.HandleFunc("GET "+base+"/traffic/history", func(w http.ResponseWriter, r *http.Request) {
+		if _, ok := s.authorizeBrowser(w, r, false, true); !ok {
+			return
+		}
+		id, ok := nativePlanPromotionID(w, r)
+		if !ok {
+			return
+		}
+		if s.inboundExecution == nil {
+			businessError(w, business.ErrUnavailable)
+			return
+		}
+		result, err := s.business.InboundTrafficHistory(r.Context(), id, r.URL.Query().Get("window"))
+		if err != nil {
+			businessError(w, err)
+			return
+		}
+		respond(w, 200, result)
+	})
+	mux.HandleFunc("GET "+base+"/traffic", func(w http.ResponseWriter, r *http.Request) {
+		if _, ok := s.authorizeBrowser(w, r, false, true); !ok {
+			return
+		}
+		id, ok := nativePlanPromotionID(w, r)
+		if !ok {
+			return
+		}
+		if s.inboundExecution == nil {
+			businessError(w, business.ErrUnavailable)
+			return
+		}
+		result, err := s.business.InboundTraffic(r.Context(), s.inboundKey, id)
+		if err != nil {
+			businessError(w, err)
+			return
+		}
+		respond(w, 200, result)
+	})
+
 	mux.HandleFunc("GET "+base, func(w http.ResponseWriter, r *http.Request) {
 		ctx, span := s.business.BeginDiagnostic(r.Context(), business.DiagnosticOperationRuntime, business.DiagnosticSourceAPI)
 		var diagnosticErr error

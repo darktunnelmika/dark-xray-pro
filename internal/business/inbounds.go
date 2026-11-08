@@ -151,7 +151,31 @@ func (s *Store) CreateInbound(ctx context.Context, key []byte, in InboundInput) 
 	return NativeInbound{InboundInput: in, PublicKey: pub, Enabled: true, Revision: 1}, nil
 }
 func (s *Store) ListInbounds(ctx context.Context, key []byte) ([]NativeInbound, error) {
-	rows, err := s.db.QueryContext(ctx, "SELECT i.id,i.name,i.profile_enc,i.public_key,i.enabled,i.archived,i.revision,(SELECT COUNT(*) FROM native_inbound_clients c WHERE c.inbound_id=i.id) FROM native_inbounds i ORDER BY i.id LIMIT 257")
+	return s.listInbounds(ctx, key, false)
+}
+
+// ListVisibleInbounds excludes deleted configurations, while retaining their
+// immutable identities and accounting records for receipt replay and recovery.
+func (s *Store) ListVisibleInbounds(ctx context.Context, key []byte) ([]NativeInbound, error) {
+	return s.listInbounds(ctx, key, true)
+}
+func (s *Store) listInbounds(ctx context.Context, key []byte, visible bool) ([]NativeInbound, error) {
+	db := s.db
+	where := ""
+	if visible {
+		if s.readOnly != nil {
+			db = s.readOnly
+		}
+		where = " WHERE i.archived=0"
+		enabled, err := executionSchemaPresent(ctx, db)
+		if err != nil {
+			return nil, err
+		}
+		if enabled {
+			where += " AND NOT EXISTS (SELECT 1 FROM inbound_execution_heads h WHERE h.inbound_id=i.id AND h.desired_state='archived')"
+		}
+	}
+	rows, err := db.QueryContext(ctx, "SELECT i.id,i.name,i.profile_enc,i.public_key,i.enabled,i.archived,i.revision,(SELECT COUNT(*) FROM native_inbound_clients c WHERE c.inbound_id=i.id) FROM native_inbounds i"+where+" ORDER BY i.id LIMIT 257")
 	if err != nil {
 		return nil, err
 	}

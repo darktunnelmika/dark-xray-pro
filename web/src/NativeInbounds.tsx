@@ -98,6 +98,7 @@ export default function NativeInbounds({ language, fallback, workspace = "inboun
  const [data, setData] = useState<Overview | null>(null); const [clients, setClients] = useState<Client[]>([]); const [bound, setBound] = useState<string[]>([]);
  const [failure, setFailure] = useState(false); const [notice, setNotice] = useState(""); const [busy, setBusy] = useState(false);
  const [refresh, setRefresh] = useState(0); const [tick, setTick] = useState(Date.now()); const lastSuccess = useRef(0);
+ const [deleteRequested, setDeleteRequested] = useState(0);
  const [chosen, setChosen] = useState(() => initialView(swapWorkspace).id);
  const [tab, setTab] = useState<DetailTab>(() => initialView(swapWorkspace).tab);
  const [visited, setVisited] = useState<DetailTab[]>(() => [initialView(swapWorkspace).tab]);
@@ -277,11 +278,11 @@ export default function NativeInbounds({ language, fallback, workspace = "inboun
   createInitial.current = JSON.stringify({ name: source ? source.name.slice(0, 128 - suffix.length) + suffix : "", transport: source?.transport ?? "tcp", grpcService: source?.grpc_service ?? "", realityTarget: source?.reality_target ?? "", serverNames: source?.server_names.join(", ") ?? "", options: profileOptionsDraft(source?.options) });
   setFormChecked(false); setNotice("");
  }
- async function openSetupPlan(issue?: PromotionIssue) {
-  if (!chosen || busy || setupBusy || executionBusy) return;
+ async function openSetupPlan(issue?: PromotionIssue, selectedID = chosen) {
+  if (!selectedID || busy || setupBusy || executionBusy) return;
   if ((profileDirty || routeDirty) && !window.confirm(u.unsaved)) return;
   const controller = lifetime.current; if (!controller || controller.signal.aborted) return;
-  const generation = ++setupLoad.current, id = chosen;
+  const generation = ++setupLoad.current, id = selectedID;
   setBusy(true); setNotice("");
   try {
    const result = await request<CreationPlanResponse>("/api/v1/workspace/native-inbound-plans/" + id, controller.signal);
@@ -371,7 +372,9 @@ export default function NativeInbounds({ language, fallback, workspace = "inboun
   {session?.authenticated && session.user?.role !== "owner" && <p className="native-warning">{t.ownerOnly}</p>}
   {session?.authenticated && session.user?.role === "owner" && data && <>
    <div hidden={chosen > 0}><InboundDirectory data={data} plans={setupCapabilities?.plans} executions={executions} language={language} blocked={busy || stale || !setupStatusReady} swapWorkspace={swapWorkspace}
-    onOpen={item => navigateDetail(item.id, swapWorkspace ? "routes" : "overview")} onCreate={openCreate}/></div>
+    onOpen={item => navigateDetail(item.id, swapWorkspace ? "routes" : "overview")} onCreate={openCreate}
+    onEdit={item => { navigateDetail(item.id, "overview"); void openSetupPlan(undefined, item.id); }}
+    onDelete={item => { setDeleteRequested(item.id); navigateDetail(item.id, "overview"); }}/></div>
    {chosen > 0 && <>
     <div className="inbound-detail-heading"><button type="button" className="inbound-back" onClick={() => navigateDetail(0, "overview")}><ChevronLeft size={17}/>{u.back}</button>
      {current && <div><div><h2 tabIndex={-1} data-workspace-focus>{current.name}</h2><bdi dir="ltr">#{current.id}</bdi></div><button type="button" disabled={busy || executionBusy || stale || !setupStatusReady} onClick={() => openCreate(current)}><Copy size={16}/>{u.copy}</button></div>}
@@ -379,7 +382,7 @@ export default function NativeInbounds({ language, fallback, workspace = "inboun
     {!current ? <p className="native-warning">{u.missing}</p> : <>
      <nav className="inbound-detail-tabs" role="tablist" aria-label="Inbound sections">{tabs.map((item, index) => <button key={item} ref={element => { tabElements.current[index] = element; }} role="tab" id={"inbound-tab-" + item} aria-controls={"inbound-panel-" + item} aria-selected={tab === item} tabIndex={tab === item ? 0 : -1} onKeyDown={event => tabKey(event, index)} onClick={() => switchTab(item)}>{u[item]}</button>)}</nav>
      {setupSummary && (!managed || executions[chosen]?.state.enabled !== true) && (tab === "overview" || tab === "routes") && <section className="native-card creation-saved-plan"><ShieldCheck size={21}/><div><h3>{u.setupTitle}</h3><p>{promotion ? u.preparedHelp : setupUnchanged ? u.setupHelp : u.setupChanged}</p>{setupSummary.node_ids && <p data-planned-nodes>{u.plannedNodes}: {setupSummary.node_ids.map(id => creationNodeName(data.nodes, id)).join(" · ")}</p>}{!promotion && setupSummary.status === "WAITING_HOST" && <p className="creation-waiting">{u.setupWaiting}</p>}</div><button type="button" disabled={busy || setupBusy || executionBusy || executionDirty} onClick={() => void openSetupPlan()}>{u.setupOpen}</button></section>}
-     {managed ? <InboundExecution key={chosen} inbound={current} nodes={data.nodes} language={language} tab={tab} refreshKey={refresh} swapWorkspace={swapWorkspace}
+     {managed ? <InboundExecution onDeleted={() => { setData(previous => previous ? { ...previous, inbounds: previous.inbounds.filter(item => item.id !== chosen) } : previous); skipNavigationGuard.current = true; navigateDetail(0, "overview"); skipNavigationGuard.current = false; setNotice(language === "fa" ? "حذف پذیرفته شد؛ توقف مسیرها و ثبت مصرف نهایی در حال پیگیری است." : "Deletion accepted; listener shutdown and final accounting are being tracked."); }} deleteRequested={deleteRequested === chosen} onDeleteRequestConsumed={() => setDeleteRequested(0)} key={chosen} inbound={current} nodes={data.nodes} language={language} tab={tab} refreshKey={refresh} swapWorkspace={swapWorkspace}
        blocked={busy || setupBusy || stale || !setupStatusReady} onOpenSetup={() => void openSetupPlan()} onSelectTab={switchTab}
        onDirtyChange={setExecutionDirty} onBusyChange={setExecutionBusy} onChanged={() => setRefresh(value => value + 1)}
        onStateChange={(state, observedAt) => setExecutions(previous => ({ ...previous, [state.inbound_id]: { state, observedAt } }))}/> : <>

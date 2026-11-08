@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { AlertCircle, CheckCircle2, Clock3, ExternalLink, Play, RefreshCw, Server, ShieldCheck, Square, Users } from "lucide-react";
 import { api, ApiError, useSession } from "./session";
 import WorkspaceDialog from "./WorkspaceDialog";
+import InboundTraffic from "./InboundTraffic";
 import InboundReconciliation from "./InboundReconciliation";
 import { navigateURL } from "./navigation";
 import { networkNames, protocolNames } from "./inboundAuthoringSpec";
@@ -18,6 +19,7 @@ import "./InboundExecution.css";
 
 type Tab = "overview" | "routes" | "clients" | "activity";
 type Props = {
+  onDeleted: () => void; deleteRequested?: boolean; onDeleteRequestConsumed?: () => void;
   inbound: Inbound; nodes: InboundNode[]; language: "fa" | "en"; tab: Tab; blocked: boolean; refreshKey: number; swapWorkspace: boolean;
   onOpenSetup: () => void; onSelectTab: (tab: Tab) => void; onChanged: () => void;
   onDirtyChange: (dirty: boolean) => void; onBusyChange: (busy: boolean) => void;
@@ -158,6 +160,9 @@ export default function InboundExecution(props: Props) {
       }
       retain(null); setReviewAction(null); setReview(null); reviewInput.current = null;
       setRefresh(value => value + 1); callbacks.current.onChanged();
+      if (candidate.kind === "command" && (JSON.parse(candidate.body) as ExecutionCommand).action === "archive") {
+        callbacks.current.onDeleted();
+      }
     } catch (error) {
       if (controller.signal.aborted) return;
       if (error instanceof ApiError && error.status >= 400 && error.status < 500 && ![408, 429].includes(error.status)) {
@@ -166,6 +171,12 @@ export default function InboundExecution(props: Props) {
       } else { setNotice(attemptRef.current ? t.unknownResult : t.accepted); setReviewAction(null); setReview(null); setRefresh(value => value + 1); }
     } finally { if (!controller.signal.aborted) setWorking(false); }
   }
+  useEffect(() => {
+    if (!state || commandLocked || reviewAction || !state.allowed_actions.includes("archive")) return;
+    if (!props.deleteRequested) return;
+    props.onDeleteRequestConsumed?.();
+    void beginReview("archive");
+  }, [state, commandLocked, reviewAction, inbound.id, props.deleteRequested]);
   function confirm() {
     const input = reviewInput.current;
     if (!review?.valid || !input || !state || commandLocked || !state.allowed_actions.includes(input.action) || state.revision !== input.expected_revision || state.plan_revision !== input.expected_plan_revision || state.inbound_revision !== input.expected_inbound_revision) return;
@@ -221,13 +232,14 @@ export default function InboundExecution(props: Props) {
             disabled={blocked || busy || !!attempt || selectionDirty || reviewAction !== null || !fresh || !state.enabled}
             onChanged={() => { setRefresh(value => value + 1); callbacks.current.onChanged(); }} onBusyChange={setReconciliationBusy} onDirtyChange={setReconciliationDirty}/>
           <div className="managed-section-heading"><h4>{t.targets}</h4><button type="button" className="native-text-action" disabled={busy} onClick={() => setRefresh(value => value + 1)}><RefreshCw size={15}/>{t.refresh}</button></div>
-          {state.targets.length ? targetCards(state.targets) : <p>{t.noTargets}</p>}
+          {tab === "overview" && <InboundTraffic language={language} inboundID={inbound.id} nodes={nodes} targets={state.targets} onEdit={() => callbacks.current.onOpenSetup()}/>}
+          <details><summary>{t.diagnostics}</summary>{state.targets.length ? targetCards(state.targets) : <p>{t.noTargets}</p>}</details>
           <div className="managed-publication"><span>{t.publication}</span><strong>{state.publication_state ? stateLabel(state.publication_state) : t.publicationUnknown}</strong></div>
           <details className="managed-diagnostics"><summary>{t.diagnostics}</summary><dl><div><dt>{t.desired}</dt><dd>{stateLabel(state.desired_state === "active" ? "accepted" : state.desired_state)}</dd></div><div><dt>{t.observed}</dt><dd>{stateLabel(state.observed_state === "active" ? "accepted" : state.observed_state)}</dd></div><div><dt>{t.accountingLabel}</dt><dd>{state.accounting_mode === "per_client" ? t.perClient : t.ownerAggregate}</dd></div></dl></details>
         </section>
         {operationCard}
       </section>
-      <section hidden={tab !== "routes"} role="tabpanel" id="inbound-panel-routes" aria-labelledby="inbound-tab-routes" className="inbound-detail-panel"><section className="native-card managed-routes"><div className="managed-section-heading"><h3>{t.routes}</h3>{swapWorkspace ? <button type="button" disabled={locked} onClick={() => callbacks.current.onOpenSetup()}>{t.editPaths}</button> : <button type="button" disabled={busy} onClick={openSwap}><ExternalLink size={16}/>{t.openSwap}</button>}</div><p>{t.routesHelp}</p>{state.targets.length ? targetCards(state.targets) : <p>{t.noRoutes}</p>}</section></section>
+      <section hidden={tab !== "routes"} role="tabpanel" id="inbound-panel-routes" aria-labelledby="inbound-tab-routes" className="inbound-detail-panel"><section className="native-card managed-routes"><div className="managed-section-heading"><h3>{t.routes}</h3>{swapWorkspace ? <button type="button" disabled={locked} onClick={() => callbacks.current.onOpenSetup()}>{t.editPaths}</button> : <button type="button" disabled={busy} onClick={openSwap}><ExternalLink size={16}/>{t.openSwap}</button>}</div><p>{t.routesHelp}</p>{tab === "routes" && <InboundTraffic language={language} inboundID={inbound.id} nodes={nodes} targets={state.targets} onEdit={() => callbacks.current.onOpenSetup()}/>}</section></section>
       <section hidden={tab !== "clients"} role="tabpanel" id="inbound-panel-clients" aria-labelledby="inbound-tab-clients" className="inbound-detail-panel"><section className="native-card managed-clients" aria-label={t.clients}>
         <h3><Users size={19}/>{t.clients}</h3><p>{t.selectionHelp}</p><dl className="managed-summary"><div><dt>{t.desiredClients}</dt><dd>{number(selected.length)}</dd></div><div><dt>{t.effectiveClients}</dt><dd>{number(state.effective_client_ids.length)}</dd></div></dl>
         <form className="managed-client-search" onSubmit={event => { event.preventDefault(); setSearch(query.trim()); setOffset(0); }}><label>{t.search}<input value={query} maxLength={128} onChange={event => setQuery(event.target.value)}/></label><button type="submit">{t.searchButton}</button></form>

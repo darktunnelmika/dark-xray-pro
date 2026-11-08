@@ -181,7 +181,7 @@ func TestManagedInboundRealOwnerToAgentAccountingSiblingsAndStop(t *testing.T) {
 		t.Helper()
 		in := template
 		in.EventID = "managed-real-create-" + strconv.FormatUint(id, 10)
-		in.Profile = business.InboundInput{ID: id, Name: "Managed " + strconv.FormatUint(id, 10), Spec: &inboundspec.Spec{Version: 1, Protocol: "http", Network: "tcp", Security: "none"}}
+		in.Profile = business.InboundInput{ID: id, Name: "Managed " + strconv.FormatUint(id, 10), Spec: &inboundspec.Spec{Version: 1, PathTraffic: true, Protocol: "http", Network: "tcp", Security: "none"}}
 		in.Nodes = []business.NativeInboundPlanNode{{NodeID: "de", InstallationID: strings.Repeat("b", 32), ListenIP: "127.0.0.1", DirectPort: port, DirectHosts: []string{"127.0.0.1"}, TunnelHosts: []string{}}}
 		request("POST", "/api/v1/workspace/native-inbound-plans", in, nil, 201)
 	}
