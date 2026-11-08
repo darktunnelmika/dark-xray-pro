@@ -1,6 +1,6 @@
 import type {Client} from "./shared";
 import "./ClientServices.css";
-export type DirectorySummary={scope:"saved_membership_and_committed_usage";inbounds:{id:number;name:string}[];usage?:{client_id:string;representative_id:string;total_bytes:string;uplink_bytes:string;downlink_bytes:string;limit_bytes:string;reserved_historical_bytes:string;remaining_native_budget_bytes?:string;known:boolean;reconciliation_holds:number;plan_kind:string}};
+export type DirectorySummary={representative?:{id:string;display_name:string};scope:"saved_membership_and_committed_usage";inbounds:{id:number;name:string}[];usage?:{client_id:string;representative_id:string;total_bytes:string;uplink_bytes:string;downlink_bytes:string;limit_bytes:string;reserved_historical_bytes:string;remaining_native_budget_bytes?:string;known:boolean;reconciliation_holds:number;plan_kind:string}};
 const bytes=(v:unknown):v is string=>typeof v==="string"&&/^(0|[1-9][0-9]{0,18})$/.test(v)&&BigInt(v)<=9223372036854775807n;
 const format=(v:string)=>{const n=BigInt(v);return (n*100n/1073741824n/100n).toString()+"."+((n*100n/1073741824n)%100n).toString().padStart(2,"0")+" GiB";};
 export default function ClientDirectorySummary({client:c,language}:{client:Client;language:"fa"|"en"}){

@@ -272,24 +272,32 @@ func TestNativeStatsCancellationAndReconnectStayWithinBirth(t *testing.T) {
 			}
 			acceptedBeforeDrop := fixture.listener.accepted.Load()
 			fixture.listener.dropConnections()
-			// Closing the server endpoint does not synchronously invalidate the
-			// client's Ready transport. Wait for observed loss before the one
-			// recovery RPC; an accepted replacement covers a missed state cycle.
+			// Neither a connectivity transition nor server Accept proves that the
+			// replacement transport is usable. In particular, a new Unix socket
+			// can be accepted before its HTTP/2 handshake and picker are ready.
+			// Finish that replacement before asserting success of one fresh RPC;
+			// calls already committed on the old transport must still fail closed.
 			waitCtx, stopWait := context.WithTimeout(context.Background(), 3*time.Second)
 			t.Cleanup(stopWait)
 			tick := time.NewTicker(time.Millisecond)
 			t.Cleanup(tick.Stop)
-			for p.stats.conn.GetState() == connectivity.Ready && fixture.listener.accepted.Load() == acceptedBeforeDrop {
+			for fixture.listener.accepted.Load() == acceptedBeforeDrop || p.stats.conn.GetState() != connectivity.Ready {
+				// Reconnect is lazy when the channel becomes idle after a closed
+				// transport. Connect starts transport setup without issuing an RPC.
+				p.stats.conn.Connect()
 				select {
 				case <-tick.C:
 				case <-waitCtx.Done():
-					t.Fatal("client did not observe the closed transport")
+					t.Fatalf("replacement transport did not become ready: accepted=%d state=%v", fixture.listener.accepted.Load(), p.stats.conn.GetState())
 				}
 			}
 			tick.Stop()
 			stopWait()
 			if values, err := p.query(context.Background(), ""); err != nil || values["alive"] != 1 {
-				t.Fatal("bounded ready wait did not reconnect", err)
+				t.Fatal("replacement owned transport did not answer", err)
+			}
+			if calls.Load() != 3 {
+				t.Fatalf("reconnection replayed an application RPC: %d", calls.Load())
 			}
 			if fixture.listener.accepted.Load() != 2 {
 				t.Fatalf("unexpected reconnect count: %d", fixture.listener.accepted.Load())

@@ -192,6 +192,8 @@ func TestStoppedObservationRestartDoesNotReuseAcknowledgementCache(t *testing.T)
 func TestStoppedObservationActiveAccountingCadenceIsUnchanged(t *testing.T) {
 	w, p, x := fixtureWorker(t, "active")
 	for i := 0; i < 3; i++ {
+		// Actual traffic must retain the per-step accounting cadence.
+		p.values[0].Download++
 		if err := w.Step(context.Background(), x); err != nil {
 			t.Fatal(err)
 		}

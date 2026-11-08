@@ -1,6 +1,7 @@
 package api
 
 import (
+	"fmt"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -29,6 +30,10 @@ func executionFormat(r *http.Request) (string, bool) {
 	}
 }
 func writeExecutionSubscription(w http.ResponseWriter, r *http.Request, s inboundexec.Subscription) {
+	if u := s.UserInfo; u != nil {
+		w.Header().Set("Subscription-Userinfo", fmt.Sprintf("upload=%d; download=%d; total=%d; expire=%d", u.Upload, u.Download, u.Total, u.Expire))
+	}
+
 	w.Header().Set("Content-Type", s.ContentType)
 	w.Header().Set("Cache-Control", "no-store, private")
 	w.Header().Set("Referrer-Policy", "no-referrer")
@@ -39,7 +44,9 @@ func writeExecutionSubscription(w http.ResponseWriter, r *http.Request, s inboun
 	w.Header().Set("X-Subscription-Runtime-Ready", strconv.FormatBool(s.RuntimeReady))
 	w.Header().Set("X-Subscription-Readiness-Valid-Until", strconv.FormatInt(s.ReadinessExpiresUnixNano/1e6, 10))
 	w.WriteHeader(200)
-	_, _ = w.Write(s.Content)
+	if r.Method != http.MethodHead {
+		_, _ = w.Write(s.Content)
+	}
 }
 func (s *Server) attachInboundExecutionSubscriptions(mux *http.ServeMux) {
 	if s.business == nil || len(s.inboundKey) != 32 {

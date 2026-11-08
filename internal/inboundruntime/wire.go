@@ -106,6 +106,20 @@ func VerifyDelivery(key []byte, d Delivery, node, installation string, now time.
 	return inboundexec.VerifyBundle(key, d.Bundle)
 }
 
+// Call only after VerifyDelivery. Its small allowed clock skew must not turn
+// a valid 30-second lease into a locally overlong deadline rejected by the
+// native supervisor. Clamp to the signed duration; never extend absolute expiry
+// or the existing hard timer bounds. A delayed/old lease keeps its shorter life.
+func verifiedLeaseDeadline(l Lease, now time.Time) time.Time {
+	absolute := time.Unix(0, l.Expires)
+	duration := time.Duration(l.Expires - l.Issued)
+	bounded := now.Add(duration)
+	if absolute.After(bounded) {
+		return bounded
+	}
+	return absolute
+}
+
 func ReportSHA(r inboundexec.UsageReport) string {
 	raw, _ := json.Marshal(r)
 	h := sha256.Sum256(raw)

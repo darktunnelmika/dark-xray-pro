@@ -1,7 +1,7 @@
 import ClientDirectorySummary from "./ClientDirectorySummary";
 import ClientInboundFilter from "./ClientInboundFilter";
 import { useEffect, useRef, useState } from "react";
-import { CalendarDays, Search, ShieldCheck, UserRoundCheck, Users, CheckSquare, Archive, AlertTriangle } from "lucide-react";
+import { CalendarDays, Search, ShieldCheck, UserRoundCheck, Users, QrCode, CheckSquare, Archive, AlertTriangle } from "lucide-react";
 import { mutation } from "../session";
 import type { BusinessModel } from "./useBusinessWorkspace";
 import { dateTime, gb, uid, type Client } from "./shared";
@@ -17,7 +17,7 @@ const words = {
     title:"Client directory", subtitle:"Search, filter and sort across every client available to your account. Results are server-scoped and paged.",
     search:"Search by name, ID, Telegram or note", status:"Status", all:"All", pending:"Pending Node Apply",
     disabled:"Disabled", expired:"Expired", archived:"Archived", other:"Other / unknown",
-    total:"Loaded", noResults:"No matches on this page", empty:"No clients returned for this page",
+    total:"Loaded", noResults:"No clients match these filters", empty:"No clients returned for this page",
     load:"Loading authenticated client records", page:"Page", previous:"Previous",next:"Next",
     manage:"Manage", volume:"Volume", unlimited:"Unlimited",
     slotUnlimited:"Unlimited IPs", slots:"user/IP slots", end:"Expires",
@@ -44,7 +44,7 @@ const words = {
     title:"فهرست کلاینت‌ها",subtitle:"جست‌وجو، فیلتر و مرتب‌سازی سراسری تمام کلاینت‌های مجاز حساب، با صفحه‌بندی واقعی سمت سرور.",
     search:"جست‌وجوی نام، شناسه، تلگرام یا یادداشت",status:"وضعیت",all:"همه",pending:"در انتظار اعمال نود",
     disabled:"غیرفعال",expired:"منقضی",archived:"آرشیوشده",other:"سایر / نامشخص",
-    total:"بارگذاری‌شده",noResults:"در این صفحه نتیجه‌ای وجود ندارد",empty:"در این صفحه کلاینتی ثبت نشده",
+    total:"بارگذاری‌شده",noResults:"کلاینتی مطابق این فیلترها پیدا نشد",empty:"در این صفحه کلاینتی ثبت نشده",
     load:"در حال دریافت کلاینت‌های معتبر",page:"صفحه",previous:"قبلی",next:"بعدی",
     manage:"مدیریت",volume:"حجمی",unlimited:"نامحدود",
     slotUnlimited:"IP نامحدود",slots:"کاربر / IP",end:"انقضا",
@@ -77,13 +77,14 @@ function clientState(client:Client,now:number): Filter {
   return "other";
 }
 
-export default function ClientListExplorer({model,onCreate}: {model:BusinessModel;onCreate?:()=>void}) {
+export default function ClientListExplorer({model,onCreate,onInspect}: {model:BusinessModel;onCreate?:()=>void;onInspect?:(id:string,panel:"overview"|"delivery"|"renew"|"edit")=>void}) {
   const { clients, clientOffset, setClientOffset, lifeClientID, setLifeClientID, language, t, session,
     clientLimit, changeClientLimit, clientTotal, clientHasMore, clientSearchDraft,setClientSearchDraft,
     clientSearch,clientStateFilter,clientPlanFilter,clientSort,clientRepFilter,clientGroupFilter,clientOriginFilter,clientInboundFilter,changeClientFilters,actionBusy,
     runAction,setNotice }=model;
   const copy=words[language];
   const canManageBulk=businessGranted(session.user,"manage_clients");
+  const canEdit=businessGranted(session.user,"edit_clients");
   const canRenewBulk=businessGranted(session.user,"renew_clients");
   const canTransfer=session.user.role==="owner" && model.me?.capabilities?.client_ownership_v1===true;
   const [bulkMode,setBulkMode]=useState(()=>session.user.role==="owner"&&!!loadOwnershipPending(session.user.id));
@@ -97,7 +98,29 @@ export default function ClientListExplorer({model,onCreate}: {model:BusinessMode
   useEffect(()=>{
     setSelected([]); pendingBulk.current=null;
   },[session.user.id,clientOffset,clientLimit,clientSearch,clientStateFilter,clientPlanFilter,clientSort,clientRepFilter,clientGroupFilter,clientOriginFilter,clientInboundFilter]);
-  const now=Date.now()/1000;
+  const activeFilters=[clientSearchDraft.trim(),clientStateFilter!=="all",clientPlanFilter!=="all",clientRepFilter,clientGroupFilter,clientOriginFilter!=="all",clientInboundFilter].filter(Boolean).length;
+  function resetFilters(){
+    setClientSearchDraft("");
+    changeClientFilters("state","all");changeClientFilters("plan","all");
+    changeClientFilters("rep","");changeClientFilters("group","");
+    changeClientFilters("origin","all");changeClientFilters("inbound","");
+    setClientOffset(0);setLifeClientID("");
+  }
+  const [now,setNow]=useState(()=>Date.now()/1000);
+  useEffect(()=>{
+    const update=()=>setNow(Date.now()/1000);
+    const timer=window.setInterval(update,30000);
+    document.addEventListener("visibilitychange",update);
+    return()=>{clearInterval(timer);document.removeEventListener("visibilitychange",update);};
+  },[]);
+  function remaining(expires:number){
+    if(!Number.isFinite(expires)||expires<=0)return language==="fa"?"اعتبار نامشخص":"Expiry unknown";
+    const seconds=expires-now;
+    if(seconds<=0)return copy.expired;
+    if(seconds<3600)return language==="fa"?"کمتر از یک ساعت":"Less than an hour";
+    if(seconds<86400)return language==="fa"?`حدود ${Math.ceil(seconds/3600)} ساعت باقی`: `About ${Math.ceil(seconds/3600)} hours left`;
+    return language==="fa"?`حدود ${Math.ceil(seconds/86400)} روز باقی`:`About ${Math.ceil(seconds/86400)} days left`;
+  }
   // The server owns the filtered result set; no client-side partial-page
   // pretending to offer a global search. Debounce hides old matches.
   const safe=clients===null?null:clients.filter(c=>
@@ -143,11 +166,13 @@ export default function ClientListExplorer({model,onCreate}: {model:BusinessMode
       {onCreate&&<button type="button" className="clients-create-button" aria-haspopup="dialog" onClick={onCreate}>{language==="fa"?"ایجاد کلاینت":"Create client"}</button>}
       <span className="clients-explorer-count">{copy.matches}: {total}</span>
     </header>
+    {activeFilters>0&&<div className="clients-active-filters" role="status"><span>{language==="fa"?"جست‌وجو و فیلترهای فعال":"Active search and filters"}: {activeFilters}</span><button type="button" disabled={actionBusy} onClick={resetFilters}>{language==="fa"?"پاک‌کردن همهٔ فیلترها":"Reset all filters"}</button></div>}
     <div className="clients-explorer-filters">
       <label>{copy.search}<div className="clients-explorer-search">
-        <Search size={15}/><input type="search" value={clientSearchDraft}
+        <Search size={15}/><input type="search" aria-label={copy.search} value={clientSearchDraft}
           onChange={e=>{setClientSearchDraft(e.target.value.slice(0,128));setClientOffset(0);setLifeClientID("");}}
-          disabled={actionBusy} maxLength={128} placeholder={copy.search}/></div></label>
+          disabled={actionBusy} maxLength={128} placeholder={copy.search}/>
+        {clientSearchDraft&&<button type="button" className="clients-search-clear" disabled={actionBusy} aria-label={language==="fa"?"پاک‌کردن جست‌وجو":"Clear search"} onClick={()=>{setClientSearchDraft("");setClientOffset(0);setLifeClientID("");}}>×</button>}</div></label>
       <label>{copy.status}<select aria-label={copy.status} value={clientStateFilter}
         disabled={actionBusy} onChange={e=>changeClientFilters("state",e.target.value)}>
         {(["all","pending","disabled","expired","archived","other"] as Filter[])
@@ -237,6 +262,8 @@ export default function ClientListExplorer({model,onCreate}: {model:BusinessMode
     <div className="clients-explorer-list">
       {valid&&matches.map(c=>{
         const status=clientState(c,now);
+        const rep=c.directory?.scope==="saved_membership_and_committed_usage"?c.directory.representative:undefined;
+        const repName=rep?.id===c.representative_id&&typeof rep.display_name==="string"&&rep.display_name.trim()?rep.display_name:c.representative_id;
         const countLabel=c.ip_count===0 && c.plan_kind==="volume"
           ?copy.slotUnlimited:c.ip_count+" "+copy.slots;
         const planLabel=c.plan_kind==="unlimited"?copy.unlimited
@@ -259,13 +286,16 @@ export default function ClientListExplorer({model,onCreate}: {model:BusinessMode
           <div className="clients-explorer-details"><div className="clients-explorer-meta">
             <span><strong>{planLabel}</strong> {c.plan_kind==="volume"?gb(c.volume_bytes):""}</span>
             <span>{countLabel}</span>
-            <span><CalendarDays size={13}/>{copy.end}: {dateTime(c.expires_unix,language)}</span>
-            {session.user.role==="owner" && <span>{copy.rep}: <b>{c.representative_id}</b></span>}
+            <span className="clients-expiry" title={dateTime(c.expires_unix,language)}><CalendarDays size={13}/><strong>{remaining(c.expires_unix)}</strong><span>{copy.end}: {dateTime(c.expires_unix,language)}</span></span>
+            {session.user.role==="owner" && <span>{copy.rep}: <b title={c.representative_id}>{repName}</b></span>}
           </div>
           <ClientDirectorySummary client={c} language={language}/></div>
           <div className="clients-explorer-actions">
             <button type="button" aria-pressed={lifeClientID===c.id}
-              onClick={()=>setLifeClientID(c.id)}>{copy.manage}</button>
+              disabled={actionBusy} onClick={()=>onInspect?onInspect(c.id,"overview"):setLifeClientID(c.id)}>{copy.manage}</button>
+            {onInspect&&<button type="button" disabled={actionBusy} aria-label={(language==="fa"?"کانفیگ و QR ":"Configuration & QR ")+c.name} onClick={()=>onInspect(c.id,"delivery")}><QrCode size={16}/> QR</button>}
+            {onInspect&&canRenewBulk&&<button type="button" disabled={actionBusy||c.archived} aria-label={(language==="fa"?"تمدید ":"Renew ")+c.name} onClick={()=>onInspect(c.id,"renew")}>{language==="fa"?"تمدید":"Renew"}</button>}
+            {onInspect&&canEdit&&<button type="button" disabled={actionBusy||c.archived} aria-label={(language==="fa"?"ویرایش ":"Edit ")+c.name} onClick={()=>onInspect(c.id,"edit")}>{language==="fa"?"ویرایش":"Edit"}</button>}
             {lifeClientID===c.id && <small><ShieldCheck size={12}/>{copy.selected}</small>}
           </div>
         </article>;

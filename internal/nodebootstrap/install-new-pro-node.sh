@@ -140,6 +140,10 @@ Wants=network-online.target
 
 [Service]
 Type=simple
+# Let the supervisor seal counters before terminating its engines.
+KillMode=mixed
+TimeoutStopSec=90
+SendSIGKILL=yes
 User=darkproagent
 Group=darkproagent
 WorkingDirectory=$state

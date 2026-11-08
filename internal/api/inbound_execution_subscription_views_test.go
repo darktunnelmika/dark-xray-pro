@@ -168,6 +168,20 @@ func TestManagedInboundSubscriptionMetadataVersionsAndRetainedDownload(t *testin
 		return out
 	}
 	before := download()
+	expectedUsage := "upload=0; download=0; total=" + strconv.FormatInt(client.VolumeBytes, 10) + "; expire=" + strconv.FormatInt(client.ExpiresUnix, 10)
+	if before.Header().Get("Subscription-Userinfo") != expectedUsage {
+		t.Fatal("missing standard entitlement header", before.Header())
+	}
+	head := httptest.NewRecorder()
+	s.Handler().ServeHTTP(head, httptest.NewRequest("HEAD", secret.Path, nil))
+	if head.Code != 200 || head.Header().Get("Subscription-Userinfo") != expectedUsage || head.Body.Len() != 0 {
+		t.Fatal("HEAD usage refresh", head.Code, head.Header(), head.Body.String())
+	}
+	exported := browserRequest(t, s.Handler(), "GET", base+"/export", nil, cookie, "", "")
+	if exported.Code != 200 || exported.Header().Get("Subscription-Userinfo") != expectedUsage || !bytes.Equal(exported.Body.Bytes(), before.Body.Bytes()) {
+		t.Fatal("authenticated export metadata", exported.Code)
+	}
+
 	if before.Code != 200 || before.Header().Get("X-Subscription-Runtime-Ready") != "true" ||
 		before.Header().Get("X-Subscription-Readiness-Valid-Until") == "0" {
 		t.Fatal("fresh download lacks bounded readiness metadata", before.Code)
@@ -197,7 +211,8 @@ func TestManagedInboundSubscriptionMetadataVersionsAndRetainedDownload(t *testin
 		after.Header().Get("X-Subscription-Valid-Until") != before.Header().Get("X-Subscription-Valid-Until") ||
 		after.Header().Get("X-Subscription-Runtime-Ready") != "false" ||
 		after.Header().Get("X-Subscription-Readiness-Valid-Until") != "0" ||
-		after.Header().Get("Cache-Control") != "no-store, private" {
+		after.Header().Get("Cache-Control") != "no-store, private" ||
+		after.Header().Get("Subscription-Userinfo") != expectedUsage {
 		t.Fatal("retained download changed credentials, expiry or cache/confidence contract", after.Code)
 	}
 	if until, err := strconv.ParseInt(after.Header().Get("X-Subscription-Valid-Until"), 10, 64); err != nil || until <= time.Now().UnixMilli() {

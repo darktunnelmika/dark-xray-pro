@@ -11,10 +11,15 @@ type ClientServiceLabel struct {
 	ID   uint64 `json:"id"`
 	Name string `json:"name"`
 }
+type ClientRepresentativeLabel struct {
+	ID          string `json:"id"`
+	DisplayName string `json:"display_name"`
+}
 type ClientDirectoryInfo struct {
-	Scope    string               `json:"scope"`
-	Inbounds []ClientServiceLabel `json:"inbounds"`
-	Usage    *usageledger.Account `json:"usage,omitempty"`
+	Representative *ClientRepresentativeLabel `json:"representative,omitempty"`
+	Scope          string                     `json:"scope"`
+	Inbounds       []ClientServiceLabel       `json:"inbounds"`
+	Usage          *usageledger.Account       `json:"usage,omitempty"`
 }
 
 // Only clients already selected by the scoped page query are enriched. Counters,
@@ -24,9 +29,19 @@ func (s *Store) enrichClientDirectory(ctx context.Context, tx *sql.Tx, key []byt
 		return nil
 	}
 	page := map[string]*Client{}
+	representatives := map[string]*ClientRepresentativeLabel{}
 	for i := range clients {
 		c := &clients[i]
 		c.Directory = &ClientDirectoryInfo{Scope: "saved_membership_and_committed_usage", Inbounds: []ClientServiceLabel{}}
+		label, found := representatives[c.RepresentativeID]
+		if !found {
+			label = &ClientRepresentativeLabel{ID: c.RepresentativeID}
+			if err := tx.QueryRowContext(ctx, "SELECT display_name FROM representatives WHERE id=?", c.RepresentativeID).Scan(&label.DisplayName); err != nil {
+				return err
+			}
+			representatives[c.RepresentativeID] = label
+		}
+		c.Directory.Representative = label
 		page[c.ID] = c
 		if s.usage != nil {
 			a, e := s.usage.AccountTx(ctx, tx, c.ID)

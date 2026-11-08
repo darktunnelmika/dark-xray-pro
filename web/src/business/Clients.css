@@ -60,3 +60,31 @@
 .clients-filter-options>summary{cursor:pointer;color:var(--sub);padding-block:6px;font-size:13px}
 .clients-explorer .clients-create-button{background:var(--accent);color:var(--accent-contrast);border:1px solid var(--accent);border-radius:10px;font-size:13px;min-height:40px;padding:8px 12px}
 @media(max-width:480px){.compact-clients-workspace .clients-explorer> .clients-explorer-filters{grid-template-columns:minmax(0,1fr)}.compact-clients-workspace .clients-explorer-heading>div{flex:1 1 100px}.compact-clients-workspace .clients-explorer-count{padding:4px 8px;font-size:11px}}
+
+/* Compact directory: aligned rows on desktop, readable stacked rows on mobile. */
+.compact-clients-workspace .clients-explorer-list{gap:0;border:1px solid var(--border);border-radius:12px;overflow:hidden}
+.compact-clients-workspace .clients-explorer-row{border:0;border-bottom:1px solid var(--border);border-radius:0;padding:10px 12px;gap:8px}
+.compact-clients-workspace .clients-explorer-row:last-child{border-bottom:0}
+.compact-clients-workspace .clients-explorer-avatar{display:none}
+.compact-clients-workspace .clients-explorer-identity>div{gap:2px}
+.compact-clients-workspace .clients-explorer-status{padding:3px 7px}
+.compact-clients-workspace .clients-explorer-actions{gap:6px}
+.compact-clients-workspace .clients-explorer-actions button{display:inline-flex;align-items:center;justify-content:center;gap:5px;min-height:40px;padding:7px 10px}
+.compact-clients-workspace .clients-explorer-filters{margin:10px 0;gap:8px}
+@media(min-width:1000px){
+.compact-clients-workspace .clients-explorer-row{grid-template-columns:minmax(190px,1fr) minmax(300px,2fr) auto;align-items:center}
+.compact-clients-workspace .clients-explorer-main{align-content:center}
+.compact-clients-workspace .clients-explorer-actions{justify-content:flex-end}
+}
+@media(max-width:600px){
+.compact-clients-workspace .clients-explorer-actions{justify-content:flex-end}
+.compact-clients-workspace .clients-explorer-meta{gap:4px 10px}
+}
+
+.clients-explorer-search .clients-search-clear{flex:0 0 auto;min-width:40px;min-height:40px;padding:4px;border:0;background:transparent;color:var(--sub);font-size:22px}
+
+.clients-active-filters{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-block:8px;font-size:12px;color:var(--sub)}
+.clients-active-filters button{min-height:40px;font-size:12px}
+
+.clients-explorer-meta .clients-expiry{flex-wrap:wrap;gap:4px 6px}
+.clients-expiry>span{font-size:11px}

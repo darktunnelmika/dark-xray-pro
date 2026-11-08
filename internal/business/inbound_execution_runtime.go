@@ -521,19 +521,13 @@ func completeExecutionOperation(ctx context.Context, tx *sql.Tx, key []byte, ope
 		state = "blocked"
 	}
 	if complete {
-		state = "active"
-		var desiredState string
-		if err = tx.QueryRowContext(ctx, `SELECT desired_state FROM inbound_execution_heads WHERE inbound_id=? AND pending_operation=?`, inbound, operation).Scan(&desiredState); err != nil && !errors.Is(err, sql.ErrNoRows) {
-			return err
-		}
-		if desiredState != "" {
-			state = desiredState
-		}
 		active := revision
 		snapshot, e := readExecutionSnapshot(ctx, tx, key, inbound, revision)
 		if e != nil {
 			return e
 		}
+		// Use the immutable command snapshot after pending_operation is cleared.
+		state = snapshot.State
 		if snapshot.Dormant {
 			state = "blocked"
 		}
@@ -544,7 +538,7 @@ func completeExecutionOperation(ctx context.Context, tx *sql.Tx, key []byte, ope
 			return err
 		}
 	}
-	if _, err = tx.ExecContext(ctx, `UPDATE inbound_execution_operations SET state=?,updated=? WHERE id=?`, state, time.Now().UnixNano(), operation); err != nil {
+	if _, err = tx.ExecContext(ctx, `UPDATE inbound_execution_operations SET state=?,updated=? WHERE id=? AND state!=?`, state, time.Now().UnixNano(), operation, state); err != nil {
 		return err
 	}
 	return nil

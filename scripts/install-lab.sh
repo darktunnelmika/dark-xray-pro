@@ -117,6 +117,10 @@ ConditionPathExists=$ENV_DIR/lab.env
 
 [Service]
 Type=simple
+# Let the supervisor seal counters before terminating its engines.
+KillMode=mixed
+TimeoutStopSec=90
+SendSIGKILL=yes
 User=darkprolab
 Group=darkprolab
 EnvironmentFile=$ENV_DIR/lab.env

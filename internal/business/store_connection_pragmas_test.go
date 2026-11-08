@@ -37,6 +37,7 @@ func TestStoreReplacementConnectionPreservesPragmas(t *testing.T) {
 		}{
 			{"busy_timeout", 5000},
 			{"foreign_keys", 1},
+			{"wal_autocheckpoint", 0},
 			{"synchronous", 2}, // FULL
 			{"trusted_schema", 0},
 		} {
