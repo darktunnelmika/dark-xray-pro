@@ -25,7 +25,51 @@
       "United Kingdom",
       "USA"
     ],
-    "new_deployment_in_this_continuation": false
+    "new_deployment_in_this_continuation": false,
+    "final_service_inspection": [
+      {
+        "name": "HUB",
+        "MainPID": "23932",
+        "NRestarts": "0",
+        "ActiveState": "active",
+        "exe": "/opt/dark-xray-pro-lab/releases/33d11e101c2f3e341826cc1ea7f7da5da8089220/dark-pro-hub"
+      },
+      {
+        "name": "Finland",
+        "ActiveState": "active",
+        "MainPID": "1139853",
+        "NRestarts": "0",
+        "exe": "/opt/dark-pro-node-agent/releases/33d11e101c2f3e341826cc1ea7f7da5da8089220/dark-pro-agent"
+      },
+      {
+        "name": "Germany",
+        "MainPID": "1022577",
+        "NRestarts": "0",
+        "ActiveState": "active",
+        "exe": "/opt/dark-pro-node-agent/releases/33d11e101c2f3e341826cc1ea7f7da5da8089220/dark-pro-agent"
+      },
+      {
+        "name": "Poland",
+        "MainPID": "1559452",
+        "NRestarts": "0",
+        "ActiveState": "active",
+        "exe": "/opt/dark-pro-node-agent/releases/33d11e101c2f3e341826cc1ea7f7da5da8089220/dark-pro-agent"
+      },
+      {
+        "name": "UK",
+        "MainPID": "176443",
+        "NRestarts": "0",
+        "ActiveState": "active",
+        "exe": "/opt/dark-pro-node-agent/releases/33d11e101c2f3e341826cc1ea7f7da5da8089220/dark-pro-agent"
+      },
+      {
+        "name": "USA",
+        "MainPID": "751188",
+        "NRestarts": "0",
+        "ActiveState": "active",
+        "exe": "/opt/dark-pro-node-agent/releases/33d11e101c2f3e341826cc1ea7f7da5da8089220/dark-pro-agent"
+      }
+    ]
   },
   "validation": {
     "fresh_real_traffic": {
@@ -86,10 +130,145 @@
     "head": "f61cec37342537dc1b435277d22b1036637d0a6f",
     "foundation_run": 42443508037,
     "managed_run": 42443508021,
-    "status": "in_progress",
+    "status": "success",
     "prior_failures_retained": [
       "3f9ebc29: module tidy difference",
       "8e3e6dd8: native stats reconnect fixture iteration_09"
+    ],
+    "passed_jobs": 17,
+    "runs": [
+      {
+        "id": 42443508037,
+        "name": "DARK XRAY PRO — Foundation CI",
+        "head": "f61cec37342537dc1b435277d22b1036637d0a6f",
+        "status": "completed",
+        "conclusion": "success",
+        "run_attempt": 1,
+        "url": "https://github.com/darktunnelmika/dark-xray-pro/actions/runs/42443508037"
+      },
+      {
+        "id": 42443508021,
+        "name": "DARK PRO Managed Inbound Execution",
+        "head": "f61cec37342537dc1b435277d22b1036637d0a6f",
+        "status": "completed",
+        "conclusion": "success",
+        "run_attempt": 1,
+        "url": "https://github.com/darktunnelmika/dark-xray-pro/actions/runs/42443508021"
+      }
+    ],
+    "job_results": [
+      {
+        "run_id": 42443508037,
+        "jobs": [
+          {
+            "id": 128617505249,
+            "name": "Real Chromium routes and theme QA",
+            "status": "completed",
+            "conclusion": "success"
+          },
+          {
+            "id": 128617505361,
+            "name": "Linux amd64 LAB bundle (no deployment)",
+            "status": "completed",
+            "conclusion": "success"
+          },
+          {
+            "id": 128617505432,
+            "name": "Web TypeScript and production build",
+            "status": "completed",
+            "conclusion": "success"
+          },
+          {
+            "id": 128617505433,
+            "name": "Business SQLite race partition (2/2)",
+            "status": "completed",
+            "conclusion": "success"
+          },
+          {
+            "id": 128617505434,
+            "name": "Go unit, race and vet",
+            "status": "completed",
+            "conclusion": "success"
+          },
+          {
+            "id": 128617505456,
+            "name": "Business SQLite race partition (1/2)",
+            "status": "completed",
+            "conclusion": "success"
+          },
+          {
+            "id": 128617505528,
+            "name": "Inbound authoring and security pinned core",
+            "status": "completed",
+            "conclusion": "success"
+          },
+          {
+            "id": 128617505616,
+            "name": "Pinned real Xray core — LAB-only syntax and loopback smoke",
+            "status": "completed",
+            "conclusion": "success"
+          },
+          {
+            "id": 128617989943,
+            "name": "Experimental pinned core final TCP counters",
+            "status": "completed",
+            "conclusion": "success"
+          },
+          {
+            "id": 128620729308,
+            "name": "Business SQLite and accounting race suite",
+            "status": "completed",
+            "conclusion": "success"
+          }
+        ]
+      },
+      {
+        "run_id": 42443508021,
+        "jobs": [
+          {
+            "id": 128617582739,
+            "name": "Business accounting race partition (1/2)",
+            "status": "completed",
+            "conclusion": "success"
+          },
+          {
+            "id": 128617582919,
+            "name": "Business accounting race partition (2/2)",
+            "status": "completed",
+            "conclusion": "success"
+          },
+          {
+            "id": 128617583012,
+            "name": "Go 1.27 contracts, accounting and race checks",
+            "status": "completed",
+            "conclusion": "success"
+          },
+          {
+            "id": 128619662866,
+            "name": "Complete business accounting race checks",
+            "status": "completed",
+            "conclusion": "success"
+          },
+          {
+            "id": 128619677205,
+            "name": "Standalone TUIC, AmneziaWG and MTProto engines",
+            "status": "completed",
+            "conclusion": "success"
+          },
+          {
+            "id": 128619677229,
+            "name": "Pinned native core, real traffic and isolated kernel TUN",
+            "status": "completed",
+            "conclusion": "success"
+          },
+          {
+            "id": 128621337685,
+            "name": "Authored profiles through real owner, Agent and pinned standalone workers",
+            "status": "completed",
+            "conclusion": "success"
+          }
+        ]
+      }
     ]
   },
   "open_issues": [
@@ -112,5 +291,13 @@
     "stability_complete": false,
     "merged": false,
     "production_migration": false
+  },
+  "final_live_audit": {
+    "at_unix": 1794110338,
+    "lease_expiries_after_2026_11_08_031430_utc": 0,
+    "uncertain_accounting_since_release": 0,
+    "reconciliations_since_release": 0,
+    "customer_ledger_mismatches": 0,
+    "active_target_epochs": 6
   }
 }
