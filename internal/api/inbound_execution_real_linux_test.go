@@ -286,6 +286,11 @@ func TestManagedInboundRealOwnerToAgentAccountingSiblingsAndStop(t *testing.T) {
 	if e != nil || usage.Total != int64(len(payload)*2) {
 		t.Fatalf("real exact payload charge=%d want=%d: %v", usage.Total, len(payload)*2, e)
 	}
+	var pathTraffic business.InboundTraffic
+	request("GET", "/api/v1/workspace/native-inbounds/501/execution/traffic", nil, &pathTraffic, 200)
+	if len(pathTraffic.Paths) != 1 || !pathTraffic.Paths[0].Measured || !pathTraffic.Paths[0].Fresh || pathTraffic.Paths[0].Upload == 0 || pathTraffic.Paths[0].Download == 0 {
+		t.Fatal("real core path counters missing", pathTraffic)
+	}
 	var state ix.State
 	request("GET", "/api/v1/workspace/native-inbounds/501/execution", nil, &state, 200)
 	if state.ObservedState != "active" || len(state.Targets) != 1 || !state.Targets[0].ProcessReady || state.Targets[0].HealthState != "engine_ready" || state.ActiveRevision == 0 {
