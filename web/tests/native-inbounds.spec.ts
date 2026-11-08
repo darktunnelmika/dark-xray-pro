@@ -453,7 +453,7 @@ test("the compact list paginates and combines search, status, transport and Node
   transport: index % 2 ? "grpc" : "tcp", grpc_service: index % 2 ? "fixture-grpc" : "",
   enabled: index < 24, archived: index === 25,
  })));
- f.targets.push({ inbound_id: 526, node_id: "new-node", installation_id: installation,
+ f.targets.push({ inbound_id: 524, node_id: "new-node", installation_id: installation,
   listen_ip: "203.0.113.7", direct_port: 19600, swap_port: 0 });
  await openPage(page);
  const rows = page.locator(".inbound-name").filter({ hasText: /Fixture inbound \d\d/ });
@@ -468,7 +468,7 @@ test("the compact list paginates and combines search, status, transport and Node
  }
  const firstPage = await rows.allTextContents();
  await pager.getByRole("button", { name: "Next", exact: true }).click();
- await expect(rows).toHaveCount(6);
+ await expect(rows).toHaveCount(5);
  expect((await rows.allTextContents()).some(row => firstPage.includes(row))).toBe(false);
  await expect(pager.getByRole("button", { name: "Next", exact: true })).toBeDisabled();
 
@@ -477,21 +477,18 @@ test("the compact list paginates and combines search, status, transport and Node
  await expect(rows).toContainText("Fixture inbound 03");
  await expect(pager.getByRole("button", { name: "Previous", exact: true })).toBeDisabled();
  await search.fill("526");
- await expect(rows).toHaveCount(1);
- await expect(rows).toContainText("Fixture inbound 26");
+ await expect(rows).toHaveCount(0);
  await search.clear();
  await page.getByLabel("Status", { exact: true }).selectOption("disabled");
  await expect(rows).toHaveCount(1);
  await expect(rows).toContainText("Fixture inbound 25");
- await page.getByLabel("Status", { exact: true }).selectOption("archived");
- await expect(rows).toHaveCount(1);
- await expect(rows).toContainText("Fixture inbound 26");
+ await expect(page.getByLabel("Status", { exact: true }).locator('option[value="archived"]')).toHaveCount(0);
  await page.getByLabel("Status", { exact: true }).selectOption({ index: 0 });
  await page.getByLabel("Transport", { exact: true }).selectOption("grpc");
- await expect(rows).toHaveCount(13);
+ await expect(rows).toHaveCount(12);
  await page.getByLabel("Node", { exact: true }).selectOption("new-node");
  await expect(rows).toHaveCount(1);
- await expect(rows).toContainText("Fixture inbound 26");
+ await expect(rows).toContainText("Fixture inbound 24");
  await search.fill("No matching inbound");
  await expect(rows).toHaveCount(0);
  await search.clear();
