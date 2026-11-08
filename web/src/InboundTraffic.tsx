@@ -17,7 +17,7 @@ function readSample(v: Sample, id: number): Sample {
  }
  return v;
 }
-export default function InboundTraffic({ inboundID, nodes, targets, onEdit, language }: { language: "fa" | "en"; inboundID: number; nodes: InboundNode[]; targets: ExecutionTarget[]; onEdit: () => void }) {
+export default function InboundTraffic({ inboundID, nodes, targets, language }: { language: "fa" | "en"; inboundID: number; nodes: InboundNode[]; targets: ExecutionTarget[] }) {
  const { session, expire } = useSession();
  const fa = language === "fa";
  const [sample,setSample] = useState<Sample|null>(null), [rates,setRates] = useState<Record<string,Rate>>({}), [failed,setFailed] = useState(false), [now,setNow] = useState(Date.now());
@@ -47,12 +47,12 @@ export default function InboundTraffic({ inboundID, nodes, targets, onEdit, lang
  },[inboundID,session,expire]);
  const fresh=!failed&&now-received.current<10000;
  return <section className="inbound-traffic" aria-label={text("Live path traffic","مصرف زندهٔ مسیرها")}>
-  <header><div><h3>{text("Live path traffic","مصرف زندهٔ مسیرها")}</h3><details className="traffic-method"><summary>{text("How usage is counted","روش محاسبهٔ مصرف")}</summary><p>{text("Recorded network traffic since path metering began. Transit is not charged again to clients.","مصرف شبکه از زمان شروع اندازه‌گیری هر مسیر؛ ترافیک عبوری دوباره از سهمیهٔ مشتری کم نمی‌شود.")}</p></details></div><button type="button" onClick={onEdit}>{text("Edit nodes and paths","ویرایش نودها و مسیرها")}</button></header>
+  <header><div><h3>{text("Live path traffic","مصرف زندهٔ مسیرها")}</h3><details className="traffic-method"><summary>{text("How usage is counted","روش محاسبهٔ مصرف")}</summary><p>{text("Recorded network traffic since path metering began. Transit is not charged again to clients.","مصرف شبکه از زمان شروع اندازه‌گیری هر مسیر؛ ترافیک عبوری دوباره از سهمیهٔ مشتری کم نمی‌شود.")}</p></details></div></header>
   <InboundTrafficHistory inboundID={inboundID} nodes={nodes} fa={fa}/>
   {failed&&<p role="status">{text("Live data unavailable; previous readings are stale.","دادهٔ زنده در دسترس نیست؛ مقادیر قبلی قدیمی‌اند.")}</p>}
   <div className="traffic-nodes">
-   {targets.filter(target=>target.listeners.some(l=>l.inbound_id===inboundID)).map(target=><article className="traffic-node" key={target.node_id} aria-label={creationNodeName(nodes,target.node_id)}>
-    <header><strong>{creationNodeName(nodes,target.node_id)}</strong><span>{target.listeners.filter(l=>l.inbound_id===inboundID).length} {text("paths","مسیر")}</span></header>
+   {targets.filter(target=>target.listeners.some(l=>l.inbound_id===inboundID)).map(target=><details open className="traffic-node" key={target.node_id} aria-label={creationNodeName(nodes,target.node_id)}>
+    <summary><strong>{creationNodeName(nodes,target.node_id)}</strong><span>{target.listeners.filter(l=>l.inbound_id===inboundID).length} {text("paths","مسیر")}</span></summary>
     <div className="traffic-paths">{target.listeners.filter(l=>l.inbound_id===inboundID).map(l=>{const p=sample?.paths.find(p=>p.node_id===target.node_id&&p.tag===l.tag),r=p?rates[key(p)]:undefined;const live=!!p?.fresh&&fresh&&target.process_ready===true;const kind=l.kind.includes("swap")?"Swap":l.kind==="tunnel"?"Tunnel":"Direct";
      return <div className="traffic-path" data-path-kind={kind} key={l.tag}>
       <div className="traffic-path-heading"><strong>{kind}{l.kind==="swap_relay"?text(" · transit"," · عبوری"):""}</strong><span className={live?"traffic-live":"traffic-stale"}>{!p?.measured?text("Not measured","اندازه‌گیری نشده"):live?text("Live","زنده"):text("Stale / stopped","قدیمی / متوقف")}</span></div>
@@ -61,7 +61,7 @@ export default function InboundTraffic({ inboundID, nodes, targets, onEdit, lang
       <details className="traffic-path-details"><summary>{text("Address & last report","آدرس و آخرین گزارش")}</summary><bdi>{l.listen}{l.port?":"+l.port:""}</bdi><p>{text("Last usage report","آخرین گزارش مصرف")}: {p?.last_usage_unix_nano?new Date(p.last_usage_unix_nano/1e6).toLocaleTimeString(fa?"fa-IR":"en-US"):"—"}</p></details>
      </div>;
     })}</div>
-   </article>)}
+   </details>)}
   </div>
   {!targets.some(t=>t.listeners.some(l=>l.inbound_id===inboundID))&&<p>{text("No deployed paths yet.","هنوز مسیری اجرا نشده است.")}</p>}
  </section>;

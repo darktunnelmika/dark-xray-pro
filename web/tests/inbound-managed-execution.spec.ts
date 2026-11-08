@@ -113,6 +113,7 @@ test("owner loss keeps runtime stopped until a fresh reviewed command even when 
   f.state.latest_operation = { id: "old-queued-event-0001", event_id: "old-queued-event-0001", inbound_id: id, action: "activate", revision: f.state.revision, state: "queued", created_unix_nano: Date.now() * 1e6, updated_unix_nano: Date.now() * 1e6, targets: [], blockers: [], replayed: false };
   await open(page);
   await expect(region(page).getByText("The previous runtime was reconciled as owner loss and remains stopped. Review and confirm a new activation, apply or restart before service can resume.", { exact: true })).toBeVisible();
+  await region(page).getByLabel("More actions", { exact: true }).click();
   await expect(region(page).getByRole("button", { name: "Restart", exact: true })).toBeEnabled();
   await expect(region(page).getByRole("button", { name: "Apply changes", exact: true })).toBeEnabled();
   expect(f.writes).toHaveLength(0);
@@ -134,14 +135,14 @@ test("admission stays queued until exact target evidence is observed; HUB is exp
   expect(f.writes[1].body).toEqual({ ...f.writes[0].body, review_sha: digest });
   expect(f.writes.every(item => item.csrf === csrf)).toBe(true);
   f.makeActive(); f.state.targets[0].health_state = "unknown";
-  await region(page).getByRole("button", { name: "Refresh state" }).click();
+  await page.getByRole("button", { name: "Refresh", exact: true }).click();
   await expect(region(page).locator('[data-managed-state="verifying"]')).toBeVisible();
-  f.state.targets[0].health_state = "engine_ready"; f.state.publication_state = "available_unverified_path"; await region(page).getByRole("button", { name: "Refresh state" }).click();
+  f.state.targets[0].health_state = "engine_ready"; f.state.publication_state = "available_unverified_path"; await page.getByRole("button", { name: "Refresh", exact: true }).click();
   await expect(region(page).locator('[data-managed-state="running"]')).toBeVisible();
   await region(page).locator(":scope > details").filter({ hasText: "Engine ready" }).locator(":scope > summary").click();
   await expect(region(page).getByText("Engine ready", { exact: true })).toBeVisible();
   await expect(region(page).getByText("Available; connection not yet tested", { exact: true })).toBeVisible();
-  f.state.targets[0].health_state = "verified"; await region(page).getByRole("button", { name: "Refresh state" }).click();
+  f.state.targets[0].health_state = "verified"; await page.getByRole("button", { name: "Refresh", exact: true }).click();
   await expect(region(page).locator('[data-managed-state="active"]')).toBeVisible();
   expect(f.reads.some(path => path.includes("/promotion") || path.includes("metered-route-transactions"))).toBe(false);
 });
