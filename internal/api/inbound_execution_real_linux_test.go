@@ -160,6 +160,17 @@ func testManagedInboundOwnerAgent(t *testing.T, soak time.Duration) {
 	s, template, cookie, csrf := creationPlanAPIFixture(t)
 	ctx, cancel := context.WithTimeout(context.Background(), soak+50*time.Second)
 	defer cancel()
+	if soak > 0 {
+		if err := s.business.EnablePhaseDiagnostics(); err != nil {
+			t.Fatal(err)
+		}
+		stopDiagnostics := s.business.StartPhaseDiagnostics()
+		defer func() {
+			flush, stop := context.WithTimeout(context.Background(), 2*time.Second)
+			defer stop()
+			stopDiagnostics(flush)
+		}()
+	}
 	if e := s.business.EnableUsageLedger(ctx); e != nil {
 		t.Fatal(e)
 	}
@@ -239,6 +250,12 @@ func testManagedInboundOwnerAgent(t *testing.T, soak time.Duration) {
 	var soakWitness managedSoakWitness
 	agentHandler := s.AgentHandler()
 	agent := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if soak > 0 {
+			started := time.Now()
+			defer func() {
+				t.Logf("MANAGED_SOAK_AGENT_REQUEST at_unix_ns=%d path=%s elapsed_us=%d context_error=%v", started.UnixNano(), r.URL.Path, time.Since(started).Microseconds(), r.Context().Err())
+			}()
+		}
 		lost := false
 		if r.URL.Path == "/api/v1/agent/inbound-execution/usage" {
 			raw, _ := io.ReadAll(r.Body)
