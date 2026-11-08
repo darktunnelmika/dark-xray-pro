@@ -42,7 +42,13 @@ func (w *Worker) saveServing(write func() error) error {
 		return err
 	}
 	if captureErr != nil {
-		return nil
+		// The core may have accepted this nonce and permanently closed admission
+		// before its response timed out. Retain that exact identity after joining
+		// the prior write; a new nonce would conflict with the core's sealed gate.
+		// No final values or receipt are inferred from this ambiguous response.
+		w.state.DrainNonce = nonce
+		w.state.Phase = "draining"
+		return write()
 	}
 	if err = w.validateInitialFinal(values); err != nil {
 		return err

@@ -670,3 +670,36 @@ func TestNativeStatsPeerChecksPIDAndUID(t *testing.T) {
 		t.Fatal("peer PID/UID identity not enforced")
 	}
 }
+
+func TestNativeFinalDiagnosticsDistinguishTransportBarrierAndCounters(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		code   codes.Code
+		values map[string]int64
+		stage  diagnosticStage
+		reason diagnosticReason
+	}{
+		{"deadline", codes.DeadlineExceeded, nil, diagnosticNativeQuery, diagnosticDeadline},
+		{"canceled", codes.Canceled, nil, diagnosticNativeQuery, diagnosticCanceled},
+		{"transport", codes.Unavailable, nil, diagnosticNativeQuery, diagnosticTransport},
+		{"barrier", codes.OK, map[string]int64{}, diagnosticFinalBarrier, diagnosticProof},
+		{"counter", codes.OK, map[string]int64{nativeProtocol + "final/" + strings.Repeat("a", 64): 1, "user>>>synthetic>>>traffic>>>uplink": 1}, diagnosticFinalCounters, diagnosticProof},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			d := &Diagnostics{}
+			f := newNativeStatsTestFixture(t, func(context.Context, *xraystats.QueryStatsRequest) (*xraystats.QueryStatsResponse, error) {
+				if tc.code != codes.OK {
+					return nil, status.Error(tc.code, "private endpoint must never enter diagnostics")
+				}
+				return nativeStatsTestResponse(tc.values), nil
+			})
+			f.p.binary = &Binary{diagnostics: d}
+			if _, err := f.p.Final(context.Background(), strings.Repeat("a", 64)); err != ErrProof {
+				t.Fatal("public proof failure changed", err)
+			}
+			if diagnosticCount(d, tc.stage, tc.reason) != 1 {
+				t.Fatal("cause was erased", d.Snapshot())
+			}
+		})
+	}
+}
