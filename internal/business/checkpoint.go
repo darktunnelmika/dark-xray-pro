@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"log"
 	"net/url"
-	"os"
 	"sync"
 	"time"
 )
@@ -14,10 +13,12 @@ import (
 // FULL durability is retained on both connections. Only PASSIVE checkpoints
 // run here: no writer lock escalation, truncate, or ledger mutation.
 type businessCheckpointer struct {
-	db     *sql.DB
-	cancel context.CancelFunc
-	done   chan struct{}
-	once   sync.Once
+	db           *sql.DB
+	cancel       context.CancelFunc
+	done         chan struct{}
+	once         sync.Once
+	pageBytes    int64
+	pendingSince time.Time
 }
 
 func openBusinessCheckpointer(path string) (*businessCheckpointer, error) {
@@ -29,15 +30,16 @@ func openBusinessCheckpointer(path string) (*businessCheckpointer, error) {
 	db.SetMaxOpenConns(1)
 	db.SetMaxIdleConns(1)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	err = db.PingContext(ctx)
+	var pageBytes int64
+	err = db.QueryRowContext(ctx, "PRAGMA page_size").Scan(&pageBytes)
 	cancel()
 	if err != nil {
 		db.Close()
 		return nil, err
 	}
 	ctx, cancel = context.WithCancel(context.Background())
-	c := &businessCheckpointer{db: db, cancel: cancel, done: make(chan struct{})}
-	go c.run(ctx, path)
+	c := &businessCheckpointer{db: db, cancel: cancel, done: make(chan struct{}), pageBytes: pageBytes}
+	go c.run(ctx)
 	return c, nil
 }
 
@@ -47,7 +49,34 @@ func (c *businessCheckpointer) checkpoint(ctx context.Context) (int, int, int, e
 	return busy, frames, done, err
 }
 
-func (c *businessCheckpointer) run(ctx context.Context, path string) {
+// NOOP reports the logical backlog without copying or syncing WAL frames.
+// The physical WAL allocation is retained for reuse and is not a backlog.
+// Small batches age out after a minute; large batches retain the 5s cadence.
+// This scheduling state belongs exclusively to the maintenance goroutine.
+func (c *businessCheckpointer) checkpointIfNeeded(ctx context.Context, now time.Time) (attempted bool, busy, frames, done int, err error) {
+	err = c.db.QueryRowContext(ctx, "PRAGMA main.wal_checkpoint(NOOP)").Scan(&busy, &frames, &done)
+	if err != nil || busy != 0 {
+		return
+	}
+	if frames <= done || frames < 0 || done < 0 {
+		c.pendingSince = time.Time{}
+		return
+	}
+	if c.pendingSince.IsZero() {
+		c.pendingSince = now
+	}
+	if int64(frames-done)*c.pageBytes < 1<<20 && now.Sub(c.pendingSince) < time.Minute {
+		return
+	}
+	attempted = true
+	busy, frames, done, err = c.checkpoint(ctx)
+	if err == nil && busy == 0 && frames >= 0 && done >= frames {
+		c.pendingSince = time.Time{}
+	}
+	return
+}
+
+func (c *businessCheckpointer) run(ctx context.Context) {
 	defer close(c.done)
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
@@ -57,23 +86,9 @@ func (c *businessCheckpointer) run(ctx context.Context, path string) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			info, err := os.Stat(path + "-wal")
-			if os.IsNotExist(err) {
-				continue
-			}
-			if err == nil && info.Size() < 1<<20 {
-				continue
-			}
-			if err != nil {
-				if !failed {
-					log.Print("PRO checkpoint WAL inspection unavailable; accounting remains FULL durable")
-				}
-				failed = true
-				continue
-			}
 			attempt, cancel := context.WithTimeout(ctx, 30*time.Second)
 			started := time.Now()
-			_, frames, done, err := c.checkpoint(attempt)
+			attempted, _, frames, done, err := c.checkpointIfNeeded(attempt, started)
 			cancel()
 			if ctx.Err() != nil {
 				return
@@ -89,7 +104,7 @@ func (c *businessCheckpointer) run(ctx context.Context, path string) {
 				log.Print("PRO background checkpoint recovered")
 				failed = false
 			}
-			if time.Since(started) > time.Second {
+			if attempted && time.Since(started) > time.Second {
 				log.Printf("PRO background checkpoint slow elapsed_ms=%d frames=%d checkpointed=%d", time.Since(started).Milliseconds(), frames, done)
 			}
 		}
