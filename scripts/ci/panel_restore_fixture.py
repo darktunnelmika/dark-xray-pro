@@ -32,7 +32,7 @@ HUB = 'dark-xray-pro-lab.service'
 WORKER = 'dark-xray-pro-backup-worker.service'
 BASE = '/api/v1/workspace/owner/backups'
 ORIGIN = 'https://127.0.0.1:28443'
-LAB_IP = '80.253.255.181'
+LAB_IP = '213.142.156.117'
 
 
 def require(condition, code):

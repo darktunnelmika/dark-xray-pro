@@ -26,7 +26,7 @@ const (
 	UnitName          = "dark-xray-pro-lab.service"
 	HubStateDirectory = "/var/lib/dark-xray-pro-lab"
 	ReleaseDirectory  = "/opt/dark-xray-pro-lab/releases"
-	LABIPv4           = "80.253.255.181"
+	LABIPv4           = "213.142.156.117"
 )
 
 var (
