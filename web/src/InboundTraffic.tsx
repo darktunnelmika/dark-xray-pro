@@ -47,7 +47,7 @@ export default function InboundTraffic({ inboundID, nodes, targets, onEdit, lang
  },[inboundID,session,expire]);
  const fresh=!failed&&now-received.current<10000;
  return <section className="inbound-traffic" aria-label={text("Live path traffic","مصرف زندهٔ مسیرها")}>
-  <header><div><h3>{text("Live path traffic","مصرف زندهٔ مسیرها")}</h3><p>{text("Recorded network traffic since path metering began. Transit is not charged again to clients.","مصرف شبکه از زمان شروع اندازه‌گیری هر مسیر؛ ترافیک عبوری دوباره از سهمیهٔ مشتری کم نمی‌شود.")}</p></div><button type="button" onClick={onEdit}>{text("Edit nodes and paths","ویرایش نودها و مسیرها")}</button></header>
+  <header><div><h3>{text("Live path traffic","مصرف زندهٔ مسیرها")}</h3><details className="traffic-method"><summary>{text("How usage is counted","روش محاسبهٔ مصرف")}</summary><p>{text("Recorded network traffic since path metering began. Transit is not charged again to clients.","مصرف شبکه از زمان شروع اندازه‌گیری هر مسیر؛ ترافیک عبوری دوباره از سهمیهٔ مشتری کم نمی‌شود.")}</p></details></div><button type="button" onClick={onEdit}>{text("Edit nodes and paths","ویرایش نودها و مسیرها")}</button></header>
   <InboundTrafficHistory inboundID={inboundID} nodes={nodes} fa={fa}/>
   {failed&&<p role="status">{text("Live data unavailable; previous readings are stale.","دادهٔ زنده در دسترس نیست؛ مقادیر قبلی قدیمی‌اند.")}</p>}
   <div className="traffic-nodes">
