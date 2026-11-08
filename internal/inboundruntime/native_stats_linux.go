@@ -16,7 +16,9 @@ import (
 	xraystats "github.com/darktunnelmika/dark-xray-pro/internal/xraystats"
 	"golang.org/x/sys/unix"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/encoding/protowire"
 	"google.golang.org/protobuf/proto"
 )
@@ -125,6 +127,7 @@ func nativeStatsPeer(conn *net.UnixConn, pid int, uid uint32) bool {
 
 func (p *Native) query(ctx context.Context, pattern string) (map[string]uint64, error) {
 	if p.checkIdentity() != nil || !p.ownsUnixControl() {
+		p.recordNativeQuery(diagnosticIdentity)
 		return nil, ErrIdentity
 	}
 	if p.stats == nil || p.stats.closed.Load() || !validNativeStatsPattern(pattern) {
@@ -143,6 +146,22 @@ func (p *Native) query(ctx context.Context, pattern string) (map[string]uint64, 
 	// awaiting a reply. Safe pre-dispatch/unprocessed transport retry can still
 	// occur; durable application replay remains the Worker's same-nonce action.
 	if err != nil || response == nil || call.Err() != nil || p.stats.closed.Load() {
+		reason := diagnosticProof
+		if call.Err() != nil {
+			reason = diagnosticErrorReason(call.Err())
+		} else if p.stats.closed.Load() {
+			reason = diagnosticProcessLost
+		} else {
+			switch status.Code(err) {
+			case codes.Canceled:
+				reason = diagnosticCanceled
+			case codes.DeadlineExceeded:
+				reason = diagnosticDeadline
+			case codes.Unavailable:
+				reason = diagnosticTransport
+			}
+		}
+		p.recordNativeQuery(reason)
 		return nil, ErrProof
 	}
 	values := make(map[string]uint64, len(response.Stat))
@@ -306,4 +325,12 @@ func nativeStatsQuotedJSONSize(name []byte) int {
 		i += width
 	}
 	return n
+}
+
+// Fixed vocabulary only: transport errors may contain private endpoint data.
+// Public ErrProof semantics and all admission/receipt decisions stay unchanged.
+func (p *Native) recordNativeQuery(reason diagnosticReason) {
+	if p != nil && p.binary != nil {
+		p.binary.diagnostics.record(diagnosticNativeQuery, reason)
+	}
 }

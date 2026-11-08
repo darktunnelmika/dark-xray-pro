@@ -495,11 +495,21 @@ func (p *Native) Final(ctx context.Context, nonce string) ([]inboundexec.Counter
 		return nil, ErrProof
 	}
 	m, e := p.query(ctx, nativeProtocol+"final/"+nonce)
-	if e != nil || m[nativeProtocol+"final/"+nonce] != 1 {
+	if e != nil {
+		return nil, ErrProof
+	}
+	if m[nativeProtocol+"final/"+nonce] != 1 {
+		if p.binary != nil {
+			p.binary.diagnostics.record(diagnosticFinalBarrier, diagnosticProof)
+		}
 		return nil, ErrProof
 	}
 	delete(m, nativeProtocol+"final/"+nonce)
-	return p.counters(m)
+	values, err := p.counters(m)
+	if err != nil && p.binary != nil {
+		p.binary.diagnostics.recordError(diagnosticFinalCounters, err)
+	}
+	return values, err
 }
 
 func (p *Native) counters(m map[string]uint64) ([]inboundexec.Counter, error) {

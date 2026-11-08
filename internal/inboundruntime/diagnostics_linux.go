@@ -55,12 +55,15 @@ const (
 	diagnosticWorkerStop
 	diagnosticNativeStop
 	diagnosticCoreState
+	diagnosticNativeQuery
+	diagnosticFinalBarrier
+	diagnosticFinalCounters
 	diagnosticStageCount
 )
 
 var diagnosticStageNames = [...]string{
 	"step", "poll", "register", "usage", "observe", "counters", "health",
-	"drain", "final_capture", "final_receipt", "worker_stop_request", "native_stop_request", "core_state",
+	"drain", "final_capture", "final_receipt", "worker_stop_request", "native_stop_request", "core_state", "native_query", "final_barrier", "final_counters",
 }
 
 type diagnosticReason uint8
