@@ -51,7 +51,7 @@ def main():
     try:
         with tempfile.TemporaryDirectory(prefix="dark-pro-business-nginx-") as directory:
             tmp = pathlib.Path(directory)
-            snippet = (root / "ops/nginx/business-management.conf").read_text()
+            snippet = (root / "ops/nginx/business-management.conf").read_text() + "\n" + (root / "ops/nginx/inbound-execution.conf").read_text()
             snippet = snippet.replace("127.0.0.1:2087", f"127.0.0.1:{backend.server_port}")
             conf = tmp / "nginx.conf"
             conf.write_text(f"""daemon off;
@@ -98,7 +98,9 @@ location / {{ return 403; }}
 
                 rep = "/api/v1/workspace/representatives/Rep.test_01-2"
                 seller = rep + "/sellers/Seller.test_01-2"
-                routes = (("/api/v1/workspace/client-inbound-options", {"GET", "HEAD"}),
+                routes = (("/api/v1/workspace/native-inbounds/912/execution/traffic", {"GET", "HEAD"}),
+                          ("/api/v1/workspace/native-inbounds/912/execution/traffic/history", {"GET", "HEAD"}),
+                          ("/api/v1/workspace/client-inbound-options", {"GET", "HEAD"}),
                           (rep + "/seller-permission", {"GET", "HEAD", "POST"}),
                           (rep + "/service-grants/910", {"GET", "HEAD", "POST"}),
                           ("/api/v1/workspace/clients/Client.test_01-2/services", {"GET", "HEAD"}),
