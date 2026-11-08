@@ -148,10 +148,10 @@ func TestManagedObservationFreshnessRejectsRevocationAndExpiredAccounting(t *tes
 					t.Fatal(err)
 				}
 			case "stale_accounting":
-				_, err := f.s.db.Exec(`UPDATE inbound_execution_usage_receipts SET created=? WHERE epoch_id=?`, time.Now().Add(-16*time.Second).UnixNano(), e.EpochID)
-				if err != nil {
-					t.Fatal(err)
-				}
+				// Receipts are immutable evidence. Let the real freshness
+				// window expire without rewriting their timestamps or triggers.
+				time.Sleep(16 * time.Second)
+				o.LeaseExpires = time.Now().Add(20 * time.Second).UnixNano()
 			case "expired_lease":
 				o.LeaseExpires = time.Now().Add(-time.Second).UnixNano()
 			case "changed_identity":
