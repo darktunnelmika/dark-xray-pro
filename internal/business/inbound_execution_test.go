@@ -611,3 +611,48 @@ func TestManagedInboundAccountingReadinessExpiresWithoutFreshReports(t *testing.
 		t.Fatal("historic zero receipt sustained publication indefinitely", err)
 	}
 }
+
+func TestManagedInboundQueuedExecutionAllowsDraftEditWithoutReplacingSnapshot(t *testing.T) {
+	f := newExecutionFixture(t)
+	ctx := context.Background()
+	op := f.command(t, "execution-queued-draft-0001", "activate")
+	before := f.bundle(t)
+	plan, err := f.s.NativeInboundPlan(ctx, f.key, 501)
+	if err != nil || !plan.Editable {
+		t.Fatal("queued operation must not lock separate draft", plan.Editable, err)
+	}
+	edit := copiedPlan(f.plan)
+	edit.EventID = "execution-queued-draft-edit-0001"
+	edit.ExpectedPlanRevision, edit.ExpectedInboundRevision = 1, 1
+	edit.Profile.Name = "Edited while runtime pending"
+	edit.Nodes[0].DirectPort++
+	if _, err = f.s.SaveNativeInboundPlan(ctx, f.key, edit); err != nil {
+		t.Fatal(err)
+	}
+	after := f.bundle(t)
+	if ix.Digest(before) != ix.Digest(after) {
+		t.Fatal("draft edit changed immutable pending bundle")
+	}
+	state, err := f.s.InboundExecution(ctx, f.key, 501)
+	if err != nil || state.PlanRevision != 2 {
+		t.Fatal(state, err)
+	}
+	for _, action := range state.AllowedActions {
+		if action == "apply" || action == "activate" {
+			t.Fatal("pending command admission was bypassed", action)
+		}
+	}
+	epoch := f.birth(t, before, "epoch-queued-draft-0001")
+	f.ready(t, before, epoch)
+	state, err = f.s.InboundExecution(ctx, f.key, 501)
+	if err != nil || state.ActiveRevision != op.Revision || state.ActivePlanRevision != 1 || !state.PendingChanges {
+		t.Fatal("pending observation adopted unsent draft", state, err)
+	}
+	if _, err = f.s.AcceptInboundExecutionUsage(ctx, f.key, executionReport(before, epoch, 2, 13, 29, false)); err != nil {
+		t.Fatal(err)
+	}
+	usage, err := f.s.ClientUsage(ctx, f.client.ID)
+	if err != nil || usage.Uplink != 13 || usage.Downlink != 29 {
+		t.Fatal("accounting changed", usage, err)
+	}
+}

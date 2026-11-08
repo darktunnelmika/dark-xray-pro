@@ -1220,7 +1220,10 @@ func rejectManagedPlanEdit(ctx context.Context, tx *sql.Tx, id uint64) error {
 	if err != nil {
 		return err
 	}
-	if pending != "" || state == "archived" {
+	// Pending execution owns an immutable snapshot. Editing the separate draft
+	// cannot replace that snapshot or bypass its accounting/final-receipt fences.
+	// Applying remains gated by the pending operation in command admission.
+	if state == "archived" {
 		return planError("", "profile", "managed_execution_busy_or_archived", ErrConflict)
 	}
 	return nil

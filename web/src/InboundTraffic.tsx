@@ -50,11 +50,19 @@ export default function InboundTraffic({ inboundID, nodes, targets, onEdit, lang
   <header><div><h3>{text("Live path traffic","مصرف زندهٔ مسیرها")}</h3><p>{text("Recorded network traffic since path metering began. Transit is not charged again to clients.","مصرف شبکه از زمان شروع اندازه‌گیری هر مسیر؛ ترافیک عبوری دوباره از سهمیهٔ مشتری کم نمی‌شود.")}</p></div><button type="button" onClick={onEdit}>{text("Edit nodes and paths","ویرایش نودها و مسیرها")}</button></header>
   <InboundTrafficHistory inboundID={inboundID} nodes={nodes} fa={fa}/>
   {failed&&<p role="status">{text("Live data unavailable; previous readings are stale.","دادهٔ زنده در دسترس نیست؛ مقادیر قبلی قدیمی‌اند.")}</p>}
-  <div className="inbound-traffic-scroll"><table><thead><tr>{[text("Node / path","نود / مسیر"),text("Total","مجموع"),text("Status","وضعیت"),text("Upload","آپلود"),text("Download","دانلود"),text("Upload / s","ارسال / ثانیه"),text("Download / s","دریافت / ثانیه"),text("Address / port","آدرس / پورت"),text("Last usage report","آخرین گزارش مصرف")].map(v=><th key={v}>{v}</th>)}</tr></thead><tbody>
-   {targets.flatMap(target=>target.listeners.filter(l=>l.inbound_id===inboundID).map(l=>{const p=sample?.paths.find(p=>p.node_id===target.node_id&&p.tag===l.tag),r=p?rates[key(p)]:undefined;const live=!!p?.fresh&&fresh&&target.process_ready===true;const kind=l.kind.includes("swap")?"Swap":l.kind==="tunnel"?"Tunnel":"Direct";
-    return <tr key={target.node_id+"/"+l.tag}><th><strong>{creationNodeName(nodes,target.node_id)}</strong><small>{kind}{l.kind==="swap_relay"?text(" · transit"," · عبوری"):""}</small></th><td>{p?.measured?bytes(Number(BigInt(p.upload)+BigInt(p.download))):"—"}</td><td><span className={live?"traffic-live":"traffic-stale"}>{!p?.measured?text("Not measured","اندازه‌گیری نشده"):live?text("Live","زنده"):text("Stale / stopped","قدیمی / متوقف")}</span></td><td>{p?.measured?bytes(Number(p.upload)):"—"}</td><td>{p?.measured?bytes(Number(p.download)):"—"}</td><td>{live&&r?bytes(r.up)+"/s":"—"}</td><td>{live&&r?bytes(r.down)+"/s":"—"}</td><td><bdi>{l.listen}{l.port?":"+l.port:""}</bdi></td><td>{p?.last_usage_unix_nano?new Date(p.last_usage_unix_nano/1e6).toLocaleTimeString(fa?"fa-IR":"en-US"):"—"}</td></tr>;
-   }))}
-  </tbody></table></div>
+  <div className="traffic-nodes">
+   {targets.filter(target=>target.listeners.some(l=>l.inbound_id===inboundID)).map(target=><article className="traffic-node" key={target.node_id} aria-label={creationNodeName(nodes,target.node_id)}>
+    <header><strong>{creationNodeName(nodes,target.node_id)}</strong><span>{target.listeners.filter(l=>l.inbound_id===inboundID).length} {text("paths","مسیر")}</span></header>
+    <div className="traffic-paths">{target.listeners.filter(l=>l.inbound_id===inboundID).map(l=>{const p=sample?.paths.find(p=>p.node_id===target.node_id&&p.tag===l.tag),r=p?rates[key(p)]:undefined;const live=!!p?.fresh&&fresh&&target.process_ready===true;const kind=l.kind.includes("swap")?"Swap":l.kind==="tunnel"?"Tunnel":"Direct";
+     return <div className="traffic-path" data-path-kind={kind} key={l.tag}>
+      <div className="traffic-path-heading"><strong>{kind}{l.kind==="swap_relay"?text(" · transit"," · عبوری"):""}</strong><span className={live?"traffic-live":"traffic-stale"}>{!p?.measured?text("Not measured","اندازه‌گیری نشده"):live?text("Live","زنده"):text("Stale / stopped","قدیمی / متوقف")}</span></div>
+      <div className="traffic-total"><span>{text("Total used","مصرف کل")}</span><strong dir="ltr">{p?.measured?bytes(Number(BigInt(p.upload)+BigInt(p.download))):"—"}</strong></div>
+      <dl className="traffic-metrics"><div><dt>{text("Upload","آپلود")}</dt><dd dir="ltr">{p?.measured?bytes(Number(p.upload)):"—"}</dd></div><div><dt>{text("Download","دانلود")}</dt><dd dir="ltr">{p?.measured?bytes(Number(p.download)):"—"}</dd></div><div><dt>{text("Upload / s","ارسال / ثانیه")}</dt><dd dir="ltr">{live&&r?bytes(r.up)+"/s":"—"}</dd></div><div><dt>{text("Download / s","دریافت / ثانیه")}</dt><dd dir="ltr">{live&&r?bytes(r.down)+"/s":"—"}</dd></div></dl>
+      <details className="traffic-path-details"><summary>{text("Address & last report","آدرس و آخرین گزارش")}</summary><bdi>{l.listen}{l.port?":"+l.port:""}</bdi><p>{text("Last usage report","آخرین گزارش مصرف")}: {p?.last_usage_unix_nano?new Date(p.last_usage_unix_nano/1e6).toLocaleTimeString(fa?"fa-IR":"en-US"):"—"}</p></details>
+     </div>;
+    })}</div>
+   </article>)}
+  </div>
   {!targets.some(t=>t.listeners.some(l=>l.inbound_id===inboundID))&&<p>{text("No deployed paths yet.","هنوز مسیری اجرا نشده است.")}</p>}
  </section>;
 }

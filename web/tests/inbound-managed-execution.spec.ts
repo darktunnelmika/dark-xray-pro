@@ -389,3 +389,16 @@ test("history is requested only on demand and does not invent missing samples",a
  await traffic.getByRole("button",{name:"1 hour",exact:true}).click();await expect(traffic.getByText("No measured path samples in this period.",{exact:true})).toBeVisible();expect(count).toBe(1);
  await traffic.getByRole("button",{name:"Live",exact:true}).click();expect(count).toBe(1);
 });
+
+test("mobile path cards expose Direct Tunnel and Swap usage without horizontal scrolling", async ({page})=>{
+ await page.setViewportSize({width:320,height:820});
+ const f=await fixture(page); f.makeActive();
+ const listener=f.state.targets[0].listeners[0];
+ f.state.targets[0].listeners=[listener,{...listener,tag:"tunnel-test",kind:"tunnel",port:19668},{...listener,tag:"swap-test",kind:"swap_relay",port:19669}];
+ await page.route("**/execution/traffic",route=>route.fulfill({json:{inbound_id:id,sampled_at_unix_nano:Date.now()*1e6,coverage:"since_path_metering",paths:f.state.targets[0].listeners.map((l,i)=>({node_id:"hub-local",tag:l.tag,kind:l.kind,upload:String(1024*(i+1)),download:"2048",measured:true,fresh:true,last_usage_unix_nano:Date.now()*1e6,generation:1,epoch_id:"test-epoch"}))}}));
+ await open(page);
+ const traffic=page.getByRole("region",{name:"Live path traffic",exact:true});
+ for(const kind of ["Direct","Tunnel","Swap"]){const card=traffic.locator(`[data-path-kind="${kind}"]`);await expect(card).toBeVisible();await expect(card.getByText("Total used",{exact:true})).toBeVisible();expect(await card.evaluate(n=>n.scrollWidth<=n.clientWidth+1)).toBe(true);}
+ expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1)).toBe(true);
+ await page.screenshot({path:"/var/tmp/inbound184-redesign-mobile.png",fullPage:true});
+});

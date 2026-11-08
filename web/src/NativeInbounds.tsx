@@ -362,7 +362,7 @@ export default function NativeInbounds({ language, fallback, workspace = "inboun
  const setupUnchanged = !!setupSummary && !!current && !current.enabled && !current.archived && current.bound_clients === 0 && assigned.length === 0 && current.revision === setupSummary.inbound_revision;
  if (disabled) return <section className="native-workspace inbound-capability-missing"><div className="native-card"><Server size={24}/><h2>{u.unavailableTitle}</h2><p>{u.unavailableHelp}</p><button type="button" onClick={() => setRefresh(n => n + 1)}><RefreshCw size={16}/>{t.retry}</button></div><details><summary>{u.legacyPreview}</summary>{fallback}</details></section>;
  return <section className="native-workspace" aria-label="Native Inbounds">
-  <div className="inbound-workspace-bar"><p>{swapWorkspace ? u.swapBoundary : u.boundary}</p><div>
+  <div className="inbound-workspace-bar"><details className="inbound-workspace-help"><summary>{language === "fa" ? "راهنمای اینباند" : "Inbound guide"}</summary><p>{swapWorkspace ? u.swapBoundary : u.boundary}</p></details><div>
    <button type="button" onClick={() => setRefresh(n => n + 1)} disabled={busy} aria-label={t.retry}><RefreshCw size={16}/><span>{t.retry}</span></button>
    <button type="button" aria-expanded={diagnostics} aria-controls="inbound-diagnostics" onClick={() => { setDiagnosticsVisited(true); setDiagnostics(value => !value); }}><SlidersHorizontal size={16}/>{u.diagnostics}</button>
   </div></div>
