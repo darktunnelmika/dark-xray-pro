@@ -120,7 +120,16 @@ func (s *Server) attachInboundExecution(mux *http.ServeMux) {
 		if _, ok := s.authorizeBrowser(w, r, false, true); !ok {
 			return
 		}
-		id, ok := nativePlanPromotionID(w, r)
+		window := r.URL.Query().Get("window")
+		if (window != "1h" && window != "24h") || r.URL.RawQuery != "window="+window {
+			businessError(w, business.ErrInvalid)
+			return
+		}
+		// The shared ID parser deliberately refuses queries on mutation routes.
+		// Validate this read-only route's exact query separately.
+		idRequest := r.Clone(r.Context())
+		idRequest.URL.RawQuery = ""
+		id, ok := nativePlanPromotionID(w, idRequest)
 		if !ok {
 			return
 		}
@@ -128,7 +137,7 @@ func (s *Server) attachInboundExecution(mux *http.ServeMux) {
 			businessError(w, business.ErrUnavailable)
 			return
 		}
-		result, err := s.business.InboundTrafficHistory(r.Context(), id, r.URL.Query().Get("window"))
+		result, err := s.business.InboundTrafficHistory(r.Context(), id, window)
 		if err != nil {
 			businessError(w, err)
 			return
