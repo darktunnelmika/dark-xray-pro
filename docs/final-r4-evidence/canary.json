@@ -1,0 +1,1 @@
+{"stopped_early": true, "reason": "persistent uncertain epoch after observed fsync stall", "total": 73, "success": 32, "first_failure": {"round": 32, "time": 1794100351.6042433, "seconds": 2.0233640670776367, "ok": false, "error": "curl: (35) Recv failure: Connection reset by peer\n"}}

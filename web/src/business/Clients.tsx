@@ -25,27 +25,31 @@ export default function Clients({ model }: { model: BusinessModel }) {
   const fa=language==="fa";
   const nextPanel=useRef<string|null>(null);
   const [panel,setPanel]=useState("overview");
+  const [visited,setVisited]=useState<{clientID:string;panels:string[]}>({clientID:"",panels:[]});
+  useEffect(()=>{setVisited(current=>({clientID:lifeClientID,panels:current.clientID===lifeClientID?Array.from(new Set([...current.panels,panel])):[panel]}));},[lifeClientID,panel]);
+  const loaded=(target:string)=>panel===target||(visited.clientID===lifeClientID&&visited.panels.includes(target));
+
   useEffect(()=>{setPanel(nextPanel.current??"overview");nextPanel.current=null;if(lifeClientID)setCreating(false);},[lifeClientID]);
   const tabs=[...((session.user.role==="owner"||canManage)?[["services",fa?"سرویس‌ها":"Services"]]:[]),['overview',fa?'وضعیت و مصرف':'Overview'],['delivery',fa?'کانفیگ و QR':'Configuration & QR'],['edit',fa?'مشخصات و تلگرام':'Details & Telegram'],...(canRenew?[['renew',fa?'تمدید':'Renew']]:[]),...(canManage?[['state',fa?'وضعیت حساب':'Account state']]:[])];
   return <>
       {canCreate && <ClientDialog open={creating} onClose={()=>setCreating(false)} title={fa?"ایجاد کلاینت":"New client"} closeLabel={fa?"بازگشت به فهرست":"Back to client list"}><ClientCreateFlow model={model} onInspect={(id,target)=>{const destination=target==="services"&&(session.user.role==="owner"||(session.user.role==="representative"&&canManage))?"services":"delivery";nextPanel.current=destination;setPanel(destination);setLifeClientID(id);setCreating(false);}}/></ClientDialog>}
-      <ClientListExplorer model={model} onCreate={canCreate&&!creating?()=>setCreating(true):undefined}/>
+      <ClientListExplorer model={model} onInspect={(id,target)=>{nextPanel.current=target;setPanel(target);setLifeClientID(id);}} onCreate={canCreate&&!creating?()=>setCreating(true):undefined}/>
       <ClientDialog onRefresh={model.reload} refreshLabel={fa?"تازه‌سازی اطلاعات":"Refresh client data"} open={!!lifeClientID} onClose={()=>setLifeClientID("")} title={clients?.find(c=>c.id===lifeClientID)?.name || lifeClientID || (fa?"کلاینت":"Client")} closeLabel={fa?"بستن جزئیات":"Close details"}>
       <nav className="client-detail-tabs" aria-label={fa?"بخش‌های کلاینت":"Client sections"}>{tabs.map(([id,label])=><button type="button" key={id} aria-pressed={panel===id} onClick={()=>setPanel(id)}>{label}</button>)}</nav>
       {lifeClientID&&panel==="services"&&session.user.role==="owner"&&<ClientServices key={session.user.id+":"+lifeClientID} clientID={lifeClientID} session={session} language={language} onChanged={model.reload}/>}
       {lifeClientID&&panel==="services"&&session.user.role==="representative"&&canManage&&<RepresentativeClientServices key={session.user.id+":"+lifeClientID} clientID={lifeClientID} session={session} language={language}/>}
       <div hidden={panel!=="overview"}>
-      {lifeClientID && <ClientUsage key={session.user.id + ":" + lifeClientID} clientID={lifeClientID} language={language} refresh={refreshKey} />}
+      {lifeClientID && loaded("overview") && <ClientUsage key={session.user.id + ":" + lifeClientID} clientID={lifeClientID} language={language} refresh={refreshKey} />}
       </div>
       <div hidden={panel!=="renew"}>
-      {canViewFinance && lifeClientID && <ClientVolumeRefund key={session.user.id + ":" + lifeClientID} clientID={lifeClientID} model={model}/>}
+      {canViewFinance && lifeClientID && loaded("renew") && <ClientVolumeRefund key={session.user.id + ":" + lifeClientID} clientID={lifeClientID} model={model}/>}
       </div>
       <div hidden={panel!=="delivery"}>
-      {lifeClientID && <ClientInboundSubscription key={session.user.id + ":" + lifeClientID} clientID={lifeClientID} language={language} session={session} canManage={canManage} refresh={refreshKey}/>}
+      {lifeClientID && loaded("delivery") && <ClientInboundSubscription key={session.user.id + ":" + lifeClientID} clientID={lifeClientID} language={language} session={session} canManage={canManage} refresh={refreshKey}/>}
       </div>
       <div hidden={panel!=="edit"}>
-      {lifeClientID && <ClientContactEditor key={session.user.id+":"+lifeClientID} model={model} clientID={lifeClientID} canEdit={canEdit}/>}
-      {canEdit && lifeClientID && <ClientProfileEditor key={session.user.id + ":" + lifeClientID} clientID={lifeClientID} model={model}/>}
+      {lifeClientID && loaded("edit") && <ClientContactEditor key={session.user.id+":"+lifeClientID} model={model} clientID={lifeClientID} canEdit={canEdit}/>}
+      {canEdit && lifeClientID && loaded("edit") && <ClientProfileEditor key={session.user.id + ":" + lifeClientID} clientID={lifeClientID} model={model}/>}
       </div>
       {lifeClientID && <div>
         {canRenew && <form hidden={panel!=="renew"} className="business-panel" onSubmit={(e) => { void extendExistingClient(e); }}>

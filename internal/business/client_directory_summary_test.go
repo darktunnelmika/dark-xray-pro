@@ -13,6 +13,9 @@ func TestClientDirectorySummaryScopeKnownBudgetAndNoMutation(t *testing.T) {
 	ctx := context.Background()
 	key := bytes.Repeat([]byte{5}, 32)
 	newRep(t, s, "summary-rep")
+	if _, e := s.db.ExecContext(ctx, "UPDATE representatives SET display_name=? WHERE id=?", "Summary Seller", "summary-rep"); e != nil {
+		t.Fatal(e)
+	}
 	grant(t, s, "summary-rep", "summary-rep-credit-0001", 10000, 10)
 	create := func(id, rep string) Client {
 		c, e := s.CreateClient(ctx, NewClient{EventID: "summary-create-" + id, ClientID: id, RepresentativeID: rep, Name: id, DurationDays: 30, VolumeBytes: 1000})
@@ -63,6 +66,9 @@ func TestClientDirectorySummaryScopeKnownBudgetAndNoMutation(t *testing.T) {
 		t.Fatal("scope", p)
 	}
 	d := p.Clients[0].Directory
+	if d == nil || d.Representative == nil || d.Representative.ID != "summary-rep" || d.Representative.DisplayName != "Summary Seller" {
+		t.Fatal("representative label scope", d)
+	}
 	if d == nil || len(d.Inbounds) != 1 || d.Inbounds[0].ID != 10 || d.Usage == nil || *d.Usage != before || !d.Usage.Known || d.Usage.RemainingNativeBudgetBytes != 300 {
 		t.Fatal("summary", d)
 	}

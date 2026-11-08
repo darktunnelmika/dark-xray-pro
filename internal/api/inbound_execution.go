@@ -87,7 +87,7 @@ func (s *Server) RunInboundExecution(ctx context.Context) {
 		}
 	}()
 	defer func() { stopMonitor(); <-monitored }()
-	x.local.Run(ctx, localInboundExchange{s: s})
+	x.local.Run(ctx, inboundruntime.WithDeadlines(localInboundExchange{s: s}))
 }
 
 func (s *Server) WaitInboundExecution(ctx context.Context) {

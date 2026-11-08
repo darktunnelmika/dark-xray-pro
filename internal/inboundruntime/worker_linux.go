@@ -9,6 +9,7 @@ import (
 	"math/rand/v2"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 	"time"
 
@@ -43,6 +44,8 @@ type Worker struct {
 	publicAliasKernel     publicAliasKernel
 	stoppedObservationSHA string
 	stoppedObservationAt  time.Time
+	lastUsageReceiptAt    time.Time
+	lastUsageReceiptEpoch string
 }
 
 // Only processes created by this worker implement this interface in
@@ -125,7 +128,14 @@ func (w *Worker) save() error {
 	if w.persistFailed {
 		return ErrPersistence
 	}
-	if err := w.journal.save(w.state); err != nil {
+	write := func() error { return w.journal.save(w.state) }
+	var err error
+	if w.process != nil && w.state.Epoch != nil && w.state.Phase == "active" && !w.state.FinalAccepted && !w.deadline.IsZero() {
+		err = w.saveServing(write)
+	} else {
+		err = write()
+	}
+	if err != nil {
 		// The in-memory state may be newer than the durable journal. Never
 		// transmit that speculative report on a later Step, or continue serving
 		// traffic after a counter/nonce/receipt durability failure.
@@ -303,17 +313,24 @@ func (w *Worker) Step(ctx context.Context, x Exchange) (stepErr error) {
 			_ = w.observe(ctx, x, "failed", "accounting_tail_uncertain", false)
 			return e
 		}
-		w.state.Sequence++
-		r := w.makeReport(values, false)
-		w.state.Pending = &r
-		w.state.LastCounters = values
-		if e = w.save(); e != nil {
-			return e
+		// Poll/lease/health still run every step. Only identical acknowledged
+		// counters may wait for the bounded accounting heartbeat.
+		if w.usageReportDue(values, time.Now()) {
+			w.state.Sequence++
+			r := w.makeReport(values, false)
+			w.state.Pending = &r
+			w.state.LastCounters = values
+			if e = w.save(); e != nil {
+				return e
+			}
+			if e = w.sendPending(ctx, x); e != nil {
+				w.maybeDrain(ctx)
+				return e
+			}
 		}
-		if e = w.sendPending(ctx, x); e != nil {
-			w.maybeDrain(ctx)
-			return e
-		}
+	}
+	if w.process != nil && w.state.Epoch != nil && (w.state.Phase == "sealed_waiting_receipt" || time.Until(w.deadline) <= 12*time.Second) {
+		return w.drain(ctx, x, diagnosticLeaseRunway)
 	}
 	poll := PollInput{NodeID: w.cfg.NodeID, InstallationID: w.cfg.InstallationID, Capabilities: w.Capabilities()}
 	if w.state.Resolution != nil {
@@ -346,7 +363,7 @@ func (w *Worker) Step(ctx context.Context, x Exchange) (stepErr error) {
 	if w.state.Bundle != nil && bundle.Generation == w.state.Generation && (bundle.ConfigSHA != w.state.Bundle.ConfigSHA || bundle.ManifestSHA != w.state.Bundle.ManifestSHA) {
 		return errors.New("inbound_generation_conflict")
 	}
-	deadline := time.Unix(0, delivery.Lease.Expires)
+	deadline := verifiedLeaseDeadline(delivery.Lease, time.Now())
 	if resolution := w.state.Resolution; resolution != nil && (len(bundle.Listeners) > 0 || len(bundle.Components) > 0) {
 		if delivery.Lease.ResumeEpochID != resolution.Epoch.EpochID || delivery.Lease.ResumeEpochSHA != inboundexec.Digest(resolution.Epoch) || delivery.Lease.ResumeOperationID == "" {
 			return ErrProof
@@ -484,6 +501,9 @@ func (w *Worker) admit(ctx context.Context, x Exchange) error {
 		w.maybeDrain(ctx)
 		return e
 	}
+	if w.state.Phase == "sealed_waiting_receipt" || time.Until(w.deadline) <= 12*time.Second {
+		return w.drain(ctx, x, diagnosticLeaseRunway)
+	}
 	// Registration and a zero receipt are durable accounting facts, not
 	// permission to admit traffic. They must remain replayable after revoke.
 	// Obtain current, short-lived authority again immediately before opening
@@ -506,7 +526,7 @@ func (w *Worker) admit(ctx context.Context, x Exchange) error {
 	if b.Generation != w.state.Generation || b.ConfigSHA != w.state.Bundle.ConfigSHA || b.ManifestSHA != w.state.Bundle.ManifestSHA {
 		return w.drain(ctx, x, w.deliveryDrainReason(b))
 	}
-	deadline := time.Unix(0, delivery.Lease.Expires)
+	deadline := verifiedLeaseDeadline(delivery.Lease, time.Now())
 	if e = w.renewPublicAliases(ctx, deadline); e != nil {
 		return w.fencePublicAliases(ctx, e)
 	}
@@ -552,6 +572,19 @@ func (w *Worker) sendPending(ctx context.Context, x Exchange) error {
 	if w.state.Pending == nil {
 		return nil
 	}
+	// A preceding durable write may consume the lease runway. Capture before
+	// another network/store wait, not only after that wait has timed out.
+	// Keep the ordinary outbox exact; captureFinal stores the sealed sample
+	// separately until that receipt has been acknowledged.
+	if w.process != nil && w.state.Epoch != nil && !w.state.Pending.Final &&
+		!w.state.FinalAccepted && w.state.Phase != "sealed_waiting_receipt" && time.Until(w.deadline) <= 12*time.Second {
+		finalCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		err := w.captureFinal(finalCtx, diagnosticLeaseRunway)
+		cancel()
+		if err != nil {
+			return err
+		}
+	}
 	r := *w.state.Pending
 	receipt, e := x.Usage(ctx, r)
 	w.cfg.Diagnostics.recordError(diagnosticUsage, e)
@@ -568,7 +601,23 @@ func (w *Worker) sendPending(ctx context.Context, x Exchange) error {
 		w.cfg.Diagnostics.record(diagnosticFinalReceipt, diagnosticSucceeded)
 		w.state.Phase = "final_accepted"
 	}
-	return w.save()
+	if err := w.save(); err != nil {
+		return err
+	}
+	// This witness is intentionally volatile: reopen must send an immediate
+	// report, and only an exact durable receipt starts the idle interval.
+	w.lastUsageReceiptAt = time.Now()
+	w.lastUsageReceiptEpoch = r.EpochID
+	return nil
+}
+
+func (w *Worker) usageReportDue(values []inboundexec.Counter, now time.Time) bool {
+	if w.state.Epoch == nil || w.state.Pending != nil || w.lastUsageReceiptAt.IsZero() ||
+		w.lastUsageReceiptEpoch != w.state.Epoch.EpochID || !slices.Equal(values, w.state.LastCounters) {
+		return true
+	}
+	age := now.Sub(w.lastUsageReceiptAt)
+	return age < 0 || age >= 5*time.Second
 }
 
 func (w *Worker) markUncertain() error {
@@ -620,8 +669,9 @@ func (w *Worker) resolveUncertain(ctx context.Context, x Exchange) error {
 	return w.save()
 }
 
-// Drain persists its nonce before requesting the irreversible engine barrier.
-// The final counters survive process exit, network loss and supervisor restart.
+// Drain seals admission before journal I/O, then persists the nonce and final
+// counters together before delivery. A crash before that save remains uncertain;
+// no unmeasured tail is ever converted into an accepted final.
 func (w *Worker) drain(ctx context.Context, x Exchange, reason diagnosticReason) error {
 	if w.state.Pending != nil {
 		if e := w.sendPending(ctx, x); e != nil {
@@ -656,9 +706,8 @@ func (w *Worker) drain(ctx context.Context, x Exchange, reason diagnosticReason)
 		w.state.DrainNonce = nonce
 		w.state.Phase = "draining"
 		w.cfg.Diagnostics.record(diagnosticDrain, reason)
-		if e = w.save(); e != nil {
-			return e
-		}
+		// Seal before disk I/O can consume the lease. Persist nonce and final
+		// together below; no report is sent before that durable save succeeds.
 	}
 	values, e := w.process.Final(ctx, w.state.DrainNonce)
 	w.cfg.Diagnostics.recordError(diagnosticFinalCapture, e)
@@ -717,9 +766,8 @@ func (w *Worker) captureFinal(ctx context.Context, reason diagnosticReason) erro
 		}
 		w.state.Phase = "draining"
 		w.cfg.Diagnostics.record(diagnosticDrain, reason)
-		if e = w.save(); e != nil {
-			return e
-		}
+		// Seal before disk I/O can consume the lease. Persist nonce and final
+		// together below; no report is sent before that durable save succeeds.
 	}
 	values, e := w.process.Final(ctx, w.state.DrainNonce)
 	w.cfg.Diagnostics.recordError(diagnosticFinalCapture, e)

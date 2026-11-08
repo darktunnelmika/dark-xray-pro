@@ -281,16 +281,25 @@ type SubscriptionRoute struct {
 	Name      string `json:"name"`
 }
 
+// SubscriptionUserInfo uses bytes and Unix seconds, independently of runtime leases.
+type SubscriptionUserInfo struct {
+	Upload   int64 `json:"upload"`
+	Download int64 `json:"download"`
+	Total    int64 `json:"total"`
+	Expire   int64 `json:"expire"`
+}
+
 type Subscription struct {
-	Version                  int                 `json:"version"`
-	ClientID                 string              `json:"client_id"`
-	Format                   string              `json:"format"`
-	SHA256                   string              `json:"sha256"`
-	ExpiresUnixNano          int64               `json:"expires_unix_nano"`
-	PathVerified             bool                `json:"path_verified"`
-	RuntimeReady             bool                `json:"runtime_ready"`
-	ReadinessExpiresUnixNano int64               `json:"readiness_expires_unix_nano"`
-	Routes                   []SubscriptionRoute `json:"routes"`
-	Content                  []byte              `json:"-"`
-	ContentType              string              `json:"content_type"`
+	UserInfo                 *SubscriptionUserInfo `json:"userinfo,omitempty"`
+	Version                  int                   `json:"version"`
+	ClientID                 string                `json:"client_id"`
+	Format                   string                `json:"format"`
+	SHA256                   string                `json:"sha256"`
+	ExpiresUnixNano          int64                 `json:"expires_unix_nano"`
+	PathVerified             bool                  `json:"path_verified"`
+	RuntimeReady             bool                  `json:"runtime_ready"`
+	ReadinessExpiresUnixNano int64                 `json:"readiness_expires_unix_nano"`
+	Routes                   []SubscriptionRoute   `json:"routes"`
+	Content                  []byte                `json:"-"`
+	ContentType              string                `json:"content_type"`
 }

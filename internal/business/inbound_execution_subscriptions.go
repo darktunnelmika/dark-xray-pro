@@ -415,12 +415,74 @@ func executionSubscriptionReadiness(routes []executionSubscriptionRoute, now int
 	return true, verified, expires
 }
 
-func projectExecutionSubscription(ctx context.Context, tx *sql.Tx, key []byte, client, format string) (ix.Subscription, error) {
+// Subscription delivery does not issue admission or mutate accounting. Read
+// authorization, token state, entitlement and routes from one fresh committed
+// snapshot without waiting for the single durable accounting writer.
+func executionSubscriptionReadTx(s *Store, ctx context.Context, key []byte) (*sql.Tx, error) {
+	if len(key) != 32 || s.usage == nil {
+		return nil, ErrUnavailable
+	}
+	tx, err := s.readSnapshot(ctx)
+	if err != nil {
+		return nil, err
+	}
+	enabled, err := executionSchemaPresent(ctx, tx)
+	if err != nil || !enabled {
+		tx.Rollback()
+		return nil, ErrUnavailable
+	}
+	return tx, nil
+}
+
+func (s *Store) projectExecutionSubscription(ctx context.Context, tx *sql.Tx, key []byte, client, format string) (ix.Subscription, error) {
 	routes, err := executionSubscriptionRoutes(ctx, tx, key, client)
 	if err != nil {
 		return ix.Subscription{}, err
 	}
-	return renderExecutionSubscription(client, format, routes)
+	out, err := renderExecutionSubscription(client, format, routes)
+	if err != nil {
+		return ix.Subscription{}, err
+	}
+	out.UserInfo, err = s.executionSubscriptionUserInfo(ctx, tx, client)
+	if err != nil {
+		return ix.Subscription{}, err
+	}
+	return out, nil
+}
+
+// Read the customer's aggregate ledger once in the authorized subscription
+// transaction. Route count and runtime lease deadlines are not entitlement.
+func (s *Store) executionSubscriptionUserInfo(ctx context.Context, tx *sql.Tx, client string) (*ix.SubscriptionUserInfo, error) {
+	if s.usage == nil {
+		return nil, ErrUnavailable
+	}
+	a, err := s.usage.AccountTx(ctx, tx, client)
+	if err != nil {
+		return nil, err
+	}
+	if !a.Known || !a.Eligible {
+		return nil, ErrConflict
+	}
+	info := &ix.SubscriptionUserInfo{Upload: a.Uplink, Download: a.Downlink}
+	if err = tx.QueryRowContext(ctx, "SELECT expires_unix FROM clients WHERE id=?", client).Scan(&info.Expire); err != nil {
+		return nil, err
+	}
+	switch a.Plan {
+	case "volume":
+		info.Total = a.Limit
+		// Imported settled history has no directional split. Include it once in
+		// download so total-upload-download matches the enforcement budget.
+		// Eligibility guarantees the combined usage is strictly below Limit.
+		if a.ReservedHistoricalBytes < 0 || a.ReservedHistoricalBytes > a.Limit || a.Total >= a.Limit-a.ReservedHistoricalBytes {
+			return nil, ErrConflict
+		}
+		info.Download += a.ReservedHistoricalBytes
+	case "unlimited":
+		info.Total = 0
+	default:
+		return nil, ErrConflict
+	}
+	return info, nil
 }
 
 // Rendering is shared by applied subscriptions and explicitly prepared exports.
@@ -492,7 +554,7 @@ func (s *Store) InboundExecutionSubscription(ctx context.Context, key []byte, ac
 	ctx, diagnosticSpan := s.BeginDiagnostic(ctx, DiagnosticOperationMetadata, DiagnosticSourceStore)
 	defer func() { diagnosticSpan.End(diagnosticErr) }()
 	out := ix.SubscriptionView{ClientID: client, State: "absent", Formats: []string{}, Blockers: []ix.Blocker{}}
-	tx, err := executionTx(s, ctx, key)
+	tx, err := executionSubscriptionReadTx(s, ctx, key)
 	if err != nil {
 		return out, err
 	}
@@ -534,7 +596,7 @@ func (s *Store) InboundExecutionSubscription(ctx context.Context, key []byte, ac
 }
 
 func (s *Store) ProjectInboundExecutionSubscription(ctx context.Context, key []byte, actor, client, format string) (ix.Subscription, error) {
-	tx, err := executionTx(s, ctx, key)
+	tx, err := executionSubscriptionReadTx(s, ctx, key)
 	if err != nil {
 		return ix.Subscription{}, err
 	}
@@ -543,7 +605,7 @@ func (s *Store) ProjectInboundExecutionSubscription(ctx context.Context, key []b
 	if _, err = subscriptionActor(ctx, tx, actor, client, true, false); err != nil {
 		return ix.Subscription{}, err
 	}
-	v, err := projectExecutionSubscription(ctx, tx, key, client, format)
+	v, err := s.projectExecutionSubscription(ctx, tx, key, client, format)
 	if err != nil {
 		return v, err
 	}
@@ -554,7 +616,7 @@ func (s *Store) ReadInboundExecutionSubscription(ctx context.Context, key []byte
 	if !validSubscriptionToken(token) {
 		return ix.Subscription{}, ErrNotFound
 	}
-	tx, err := executionTx(s, ctx, key)
+	tx, err := executionSubscriptionReadTx(s, ctx, key)
 	if err != nil {
 		return ix.Subscription{}, err
 	}
@@ -575,7 +637,7 @@ func (s *Store) ReadInboundExecutionSubscription(ctx context.Context, key []byte
 	if subtle.ConstantTimeCompare([]byte(stored), []byte(token)) != 1 {
 		return ix.Subscription{}, ErrNotFound
 	}
-	v, err := projectExecutionSubscription(ctx, tx, key, client, format)
+	v, err := s.projectExecutionSubscription(ctx, tx, key, client, format)
 	if err != nil {
 		return v, err
 	}

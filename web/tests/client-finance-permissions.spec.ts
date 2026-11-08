@@ -50,6 +50,8 @@ for (const viewFinance of [false, true]) {
   await expect.poll(()=>requests.some(r=>r.path==="/api/v1/workspace/clients"&&r.q==="Directory")).toBe(true);
   await expect(directory.getByText(client.name,{exact:true})).toBeVisible();
 
+  await expect(directory.getByRole("button",{name:"Edit Directory client",exact:true})).toHaveCount(0);
+  await expect(directory.getByRole("button",{name:"Renew Directory client",exact:true})).toHaveCount(0);
   const history=page.locator(".clients-history summary");
   if(viewFinance){
    await expect(history).toHaveText("Client operation history");

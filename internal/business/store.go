@@ -44,6 +44,7 @@ var (
 )
 
 type Store struct {
+	checkpoint                *businessCheckpointer
 	db                        *sql.DB
 	readOnly                  *sql.DB           // bounded WAL readers; never grants leases or accepts usage
 	phaseDiagnostics          *phaseDiagnostics // optional, enabled only before serving requests
@@ -205,7 +206,7 @@ func Open(path string) (*Store, error) {
 	// no legacy database is opened or auto-migrated.
 	// Every replacement connection must retain the same connection-local
 	// durability and schema protections after cancellation or pool recovery.
-	u := url.URL{Scheme: "file", Path: abs, RawQuery: "_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)&_pragma=synchronous(FULL)&_pragma=trusted_schema(OFF)"}
+	u := url.URL{Scheme: "file", Path: abs, RawQuery: "_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)&_pragma=synchronous(FULL)&_pragma=trusted_schema(OFF)&_pragma=wal_autocheckpoint(0)"}
 	db, err := sql.Open("sqlite", u.String())
 	if err != nil {
 		return nil, err
@@ -346,6 +347,11 @@ func Open(path string) (*Store, error) {
 	if err != nil {
 		return fail(err)
 	}
+	s.checkpoint, err = openBusinessCheckpointer(abs)
+	if err != nil {
+		_ = s.readOnly.Close()
+		return fail(err)
+	}
 	return s, nil
 }
 func bootstrap(db *sql.DB) error {
@@ -373,11 +379,12 @@ func bootstrap(db *sql.DB) error {
 	return tx.Commit()
 }
 func (s *Store) Close() error {
+	checkpointErr := s.checkpoint.close()
 	var readErr error
 	if s.readOnly != nil {
 		readErr = s.readOnly.Close()
 	}
-	return errors.Join(readErr, s.db.Close())
+	return errors.Join(checkpointErr, readErr, s.db.Close())
 }
 func repScan(row interface{ Scan(...any) error }) (Representative, error) {
 	var r Representative

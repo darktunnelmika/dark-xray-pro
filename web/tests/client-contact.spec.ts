@@ -2,7 +2,7 @@ import {test,expect,type Page} from '@playwright/test';
 async function fixture(page:Page,lost=false,inbound=false,echo=true){
  const user={id:'owner',username:'reviewer',role:'owner',representative_id:'owner'},csrf='a'.repeat(64);
  const creates:any[]=[],updates:any[]=[],queries:string[]=[],inboundQueries:string[]=[];let optionReads=0;
- let row:any={id:'contact-fixture',name:'Alice',representative_id:'owner',plan_kind:'volume',ip_count:0,volume_bytes:10737418240,duration_days:30,expires_unix:1900000000,created_unix:1800000000,deployment_state:'pending_node_apply',archived:false,contact:{telegram_username:'alice_test',telegram_id:'123456789',note:'test note',revision:1}},dropped=false;
+ let row:any={id:'contact-fixture',name:'Alice',representative_id:'owner',plan_kind:'volume',ip_count:0,volume_bytes:10737418240,duration_days:30,expires_unix:1900000000,created_unix:1800000000,deployment_state:'pending_node_apply',archived:false,directory:{scope:'saved_membership_and_committed_usage',inbounds:[],representative:{id:'owner',display_name:'Example Owner'}},contact:{telegram_username:'alice_test',telegram_id:'123456789',note:'test note',revision:1}},dropped=false;
  await page.route('**/api/v1/**',async r=>{
   const u=new URL(r.request().url()),p=u.pathname,method=r.request().method();
   if(p==='/api/v1/session/status')return r.fulfill({json:{authenticated:true,user,csrf_token:csrf,expires_unix:1900000000}});
@@ -142,4 +142,68 @@ test('inbound filter rejects an older backend that ignores the selected inbound'
  await expect(filter).toBeEnabled();await filter.selectOption('501');
  await expect(page.locator('.clients-explorer-row')).toHaveCount(0);
  await expect(filter).toHaveValue('501');
+});
+
+test('row QR opens delivery directly and preserves the directory search',async({page})=>{
+ const f=await fixture(page);
+ const search=page.getByLabel('Search by name, ID, Telegram or note',{exact:true});
+ await search.fill('Alice');await expect.poll(()=>f.queries.includes('Alice')).toBe(true);
+ await page.getByRole('button',{name:'Configuration & QR Alice',exact:true}).click();
+ const dialog=page.getByRole('dialog');
+ await expect(dialog.getByRole('button',{name:'Configuration & QR',exact:true})).toHaveAttribute('aria-pressed','true');
+ await dialog.getByRole('button',{name:'Close details',exact:true}).click();
+ await expect(search).toHaveValue('Alice');
+ await expect(page.locator('.clients-explorer-row')).toHaveCount(1);
+});
+
+test('client tabs preserve unsaved contact edits without eager delivery reads',async({page})=>{
+ const delivery:string[]=[];page.on('request',r=>{if(r.url().includes('/inbound-subscription'))delivery.push(r.url());});
+ await fixture(page);await page.getByRole('button',{name:'Manage',exact:true}).click();
+ await page.getByRole('button',{name:'Details & Telegram',exact:true}).click();
+ const input=page.getByRole('region',{name:'Client contact',exact:true}).getByLabel('Telegram username',{exact:true});
+ await expect(input).toHaveValue('alice_test');await input.fill('unsaved_name');
+ expect(delivery).toHaveLength(0);
+ await page.getByRole('button',{name:'Overview',exact:true}).click();
+ await page.getByRole('button',{name:'Details & Telegram',exact:true}).click();
+ await expect(input).toHaveValue('unsaved_name');
+});
+test('directory actions fit desktop and mobile and search can be cleared',async({page})=>{
+ const f=await fixture(page);
+ for(const width of [1440,1024,390,320]){
+  await page.setViewportSize({width,height:850});
+  await expect(page.getByRole('button',{name:'Configuration & QR Alice',exact:true})).toBeVisible();
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+2)).toBe(true);
+ }
+ const search=page.getByLabel('Search by name, ID, Telegram or note',{exact:true});
+ await search.fill('Alice');await expect.poll(()=>f.queries.at(-1)).toBe('Alice');
+ await page.getByRole('button',{name:'Clear search',exact:true}).click();
+ await expect(search).toHaveValue('');await expect.poll(()=>f.queries.at(-1)).toBe('');
+});
+
+test('active filters can be reset and renewal opens from the row',async({page})=>{
+ const urls:string[]=[];page.on('request',r=>{if(new URL(r.url()).pathname==='/api/v1/workspace/clients'&&r.method()==='GET')urls.push(r.url());});
+ await fixture(page);
+ await page.getByLabel('Status',{exact:true}).selectOption('expired');
+ await page.getByLabel('Search by name, ID, Telegram or note',{exact:true}).fill('Alice');
+ await expect(page.getByText('Active search and filters: 2',{exact:true})).toBeVisible();
+ await page.getByRole('button',{name:'Reset all filters',exact:true}).click();
+ await expect(page.getByLabel('Status',{exact:true})).toHaveValue('all');
+ await expect(page.getByLabel('Search by name, ID, Telegram or note',{exact:true})).toHaveValue('');
+ await expect.poll(()=>{const u=new URL(urls.at(-1)!);return !u.searchParams.get('q')&&(!u.searchParams.get('state')||u.searchParams.get('state')==='all');}).toBe(true);
+ await page.getByRole('button',{name:'Renew Alice',exact:true}).click();
+ await expect(page.getByRole('dialog').getByLabel('Additional days',{exact:true})).toBeVisible();
+});
+
+test('relative expiry keeps exact date and direct edit opens the contact tab',async({page})=>{
+ await page.clock.setFixedTime(new Date(1900000000*1000-2*86400000));
+ await fixture(page);
+ await expect(page.getByText('About 2 days left',{exact:true})).toBeVisible();
+ await expect(page.locator('.clients-expiry')).toContainText('Expires:');
+ await page.getByRole('button',{name:'Edit Alice',exact:true}).click();
+ await expect(page.getByRole('dialog').getByRole('button',{name:'Details & Telegram',exact:true})).toHaveAttribute('aria-pressed','true');
+ await expect(page.getByRole('region',{name:'Client contact',exact:true}).getByLabel('Telegram username',{exact:true})).toHaveValue('alice_test');
+});
+
+test('directory shows the matching representative name',async({page})=>{
+ await fixture(page);await expect(page.locator('.clients-explorer-row').getByText('Example Owner',{exact:true})).toBeVisible();
 });

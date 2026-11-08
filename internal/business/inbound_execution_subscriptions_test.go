@@ -88,6 +88,9 @@ func TestManagedInboundSubscriptionProjectionTokensAndWithdrawal(t *testing.T) {
 	if _, err = f.s.AcceptInboundExecutionUsage(ctx, f.key, executionReport(b, e, 1, 0, 0, false)); err != nil {
 		t.Fatal(err)
 	}
+	if _, err = f.s.AcceptInboundExecutionUsage(ctx, f.key, executionReport(b, e, 2, 123, 456, false)); err != nil {
+		t.Fatal(err)
+	}
 	observation := executionObservation(b, e)
 	observation.HealthState = "engine_ready"
 	if err = f.s.ObserveInboundExecution(ctx, f.key, observation); err != nil {
@@ -100,6 +103,29 @@ func TestManagedInboundSubscriptionProjectionTokensAndWithdrawal(t *testing.T) {
 	doc, err := f.s.ReadInboundExecutionSubscription(ctx, f.key, secret.Token, "uri")
 	if err != nil || !strings.HasPrefix(string(doc.Content), "vless://") || !strings.Contains(string(doc.Content), "a.example.org:21185") || !strings.Contains(string(doc.Content), f.client.UUID) || doc.PathVerified || doc.SHA256 != ix.BytesSHA(doc.Content) {
 		t.Fatal("wrong applied identity endpoint", string(doc.Content), err)
+	}
+	if doc.UserInfo == nil || doc.UserInfo.Upload != 123 || doc.UserInfo.Download != 456 || doc.UserInfo.Total != f.client.VolumeBytes || doc.UserInfo.Expire != f.client.ExpiresUnix {
+		t.Fatal("subscription must expose aggregate usage and customer expiry", doc.UserInfo)
+	}
+	// Hold the sole accounting writer: both download and metadata must still
+	// use a fresh read-only snapshot, not block on unrelated durable writes.
+	held, err := f.s.db.Conn(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	readCtx, cancelRead := context.WithTimeout(ctx, time.Second)
+	publicRead, publicErr := f.s.ReadInboundExecutionSubscription(readCtx, f.key, secret.Token, "uri")
+	privateRead, privateErr := f.s.ProjectInboundExecutionSubscription(readCtx, f.key, "owner", f.client.ID, "uri")
+	metadataRead, metadataErr := f.s.InboundExecutionSubscription(readCtx, f.key, "owner", f.client.ID)
+	cancelRead()
+	held.Close()
+	if publicErr != nil || privateErr != nil || metadataErr != nil || !metadataRead.Available ||
+		string(publicRead.Content) != string(doc.Content) || string(privateRead.Content) != string(doc.Content) {
+		t.Fatal("subscription depended on the accounting writer", publicErr, privateErr, metadataErr)
+	}
+	private, err := f.s.ProjectInboundExecutionSubscription(ctx, f.key, "owner", f.client.ID, "uri")
+	if err != nil || private.UserInfo == nil || *private.UserInfo != *doc.UserInfo {
+		t.Fatal("private/public usage differs", err)
 	}
 	if _, err = f.s.ProjectInboundExecutionSubscription(ctx, f.key, "owner", f.client.ID, "wireguard"); err == nil {
 		t.Fatal("unsupported format silently dropped route")
