@@ -1,0 +1,116 @@
+{
+  "schema": "dark-pro-continuation-v1",
+  "date": "2026-11-08",
+  "source_revision": "33d11e101c2f3e341826cc1ea7f7da5da8089220",
+  "deployed_source_tree": "01cd2292f36d75af1550c0f8ef4f02c4c8205076",
+  "preserved_github_revision": "3f9ebc29ab6a7059398707823416f1664d97d896",
+  "review_revision": "f61cec37342537dc1b435277d22b1036637d0a6f",
+  "review_tree": "591ba65aa9037066b0da3d3d1fef6149ac4ada0d",
+  "pull_request": 181,
+  "changes_in_continuation": [
+    "Published the exact deployed source tree on top of PR180",
+    "Normalized go.mod/go.sum after tidy CI failure; no selected runtime module version change",
+    "Corrected reconnect test ordering; production source and workflow definitions unchanged"
+  ],
+  "fleet": {
+    "release": "33d11e101c2f3e341826cc1ea7f7da5da8089220",
+    "hub_sha256": "3bce4147df85a29c108b5fe2b04f9ce4c5bfc80e91927641d03e79023b4ec6e2",
+    "agent_sha256": "e62cb73d0d942094758558a1fd04f0590c029372f7037987e67c8696d031f8ff",
+    "active_services": 6,
+    "automatic_restarts": 0,
+    "agent_locations": [
+      "Finland",
+      "Germany",
+      "Poland",
+      "United Kingdom",
+      "USA"
+    ],
+    "new_deployment_in_this_continuation": false
+  },
+  "validation": {
+    "fresh_real_traffic": {
+      "paths": 8,
+      "passed": 320,
+      "total": 320
+    },
+    "subscription_monitor": {
+      "duration_seconds": 300,
+      "samples": 100,
+      "http200": 100,
+      "runtime_ready": 100,
+      "usage_headers": 100,
+      "errors": 0,
+      "max_seconds": 0.07417574990540743
+    },
+    "read_only_accounting_audit": {
+      "customer_delta_ledger_mismatches": 0,
+      "new_uncertain_accounting_failures_since_release": 0,
+      "new_reconciliations_since_release": 0,
+      "active_target_epochs": 6
+    },
+    "local_runtime_suite": {
+      "passed": true,
+      "seconds": 16.188,
+      "pinned_native_sha256": "6861c6275ce1ca8891e8b6b6432cac94a5859e870a86224dabcd4bf9d3a4ff69"
+    },
+    "local_business_suite": {
+      "passed": true,
+      "seconds": 304.545
+    },
+    "local_api_suite": {
+      "initial_result": "failed: unprivileged-only refund test was invoked as root",
+      "corrected_fixture": {
+        "user": "darkproqa",
+        "repetitions": 3,
+        "passed": true,
+        "exact_usage_and_refund_verified": true
+      }
+    },
+    "reconnect_stress": {
+      "repetitions": 50,
+      "cases_per_repetition": 25,
+      "reconnect_cases": 1250,
+      "additional_tests": [
+        "connection reuse",
+        "lost control reply explicit replay"
+      ],
+      "passed": true
+    },
+    "go_checks": {
+      "tidy_diff": 0,
+      "mod_verify": 0,
+      "vet_all": 0
+    }
+  },
+  "ci": {
+    "head": "f61cec37342537dc1b435277d22b1036637d0a6f",
+    "foundation_run": 42443508037,
+    "managed_run": 42443508021,
+    "status": "in_progress",
+    "prior_failures_retained": [
+      "3f9ebc29: module tidy difference",
+      "8e3e6dd8: native stats reconnect fixture iteration_09"
+    ]
+  },
+  "open_issues": [
+    {
+      "name": "HUB durable commit interruption",
+      "event_utc": "2026-11-08T03:14:21Z",
+      "checkpoint_seconds": 29.802,
+      "lease_expiry_observed": true,
+      "final_capture_and_receipt_recovered": true,
+      "permanent_resolution_claimed": false
+    },
+    {
+      "name": "Germany standard NTP",
+      "synchronized": false,
+      "existing_pinned_hub_clock_timer_observed": true,
+      "timer_added_by_this_continuation": false
+    }
+  ],
+  "acceptance": {
+    "stability_complete": false,
+    "merged": false,
+    "production_migration": false
+  }
+}
