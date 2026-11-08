@@ -356,6 +356,11 @@ func testManagedInboundOwnerAgent(t *testing.T, soak time.Duration) {
 		if e = worker.Step(ctx, exchange); e != nil {
 			t.Fatal("planned final settlement", e)
 		}
+		// The prior epoch settles first. A separate successful reconciliation
+		// then acknowledges the newly desired empty bundle as stopped.
+		if e = worker.Step(ctx, exchange); e != nil {
+			t.Fatal("planned stopped-bundle acknowledgement", e)
+		}
 		account, err := s.business.ClientUsage(ctx, client.ID)
 		if err != nil || account.Total != want || account.Holds != 0 {
 			t.Fatal("soak final accounting mismatch", account.Total, want, err)
@@ -363,6 +368,14 @@ func testManagedInboundOwnerAgent(t *testing.T, soak time.Duration) {
 		request("GET", "/api/v1/workspace/native-inbounds/501/execution", nil, &state, 200)
 		if len(state.Targets) != 1 || state.Targets[0].ProcessReady || state.Targets[0].State != "stopped" {
 			t.Fatal("planned stop did not settle", state)
+		}
+		if err := managedHTTP(port1, "stopped", client.UUID, target, payload); err == nil {
+			t.Fatal("planned stop left a live customer listener")
+		}
+		public = httptest.NewRecorder()
+		s.Handler().ServeHTTP(public, httptest.NewRequest("GET", secret.Path+"?format=uri", nil))
+		if public.Code != 404 {
+			t.Fatal("planned stop left a published subscription", public.Code)
 		}
 		t.Logf("MANAGED_FIXED_VERSION_SOAK_PASS seconds=%d committed_bytes=%d holds=0 planned_final=true", int(soak/time.Second), want)
 		return

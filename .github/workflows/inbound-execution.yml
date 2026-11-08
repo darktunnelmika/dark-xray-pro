@@ -82,7 +82,9 @@ jobs:
 
   native-runtime:
     name: Pinned native core, real traffic and isolated kernel TUN
-    needs: [foundation, business-race]
+    # Independent engine acceptance can run alongside the complete business
+    # partitions. The workflow still requires every accounting job to pass.
+    needs: [foundation]
     runs-on: ubuntu-24.04
     timeout-minutes: 35
     steps:
