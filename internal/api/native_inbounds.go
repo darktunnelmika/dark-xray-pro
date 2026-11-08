@@ -34,7 +34,7 @@ func (s *Server) attachNativeInbounds(mux *http.ServeMux) {
 		if _, ok := s.authorizeBrowser(w, r, false, true); !ok {
 			return
 		}
-		rows, err := s.business.ListInbounds(r.Context(), s.inboundKey)
+		rows, err := s.business.ListVisibleInbounds(r.Context(), s.inboundKey)
 		if err != nil {
 			businessError(w, err)
 			return

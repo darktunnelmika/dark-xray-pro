@@ -3,7 +3,7 @@ import type { Inbound } from "./inboundTypes";
 export type SpecValue = string | number | boolean | null | SpecObject | SpecValue[];
 export type SpecObject = { [key: string]: SpecValue };
 export type AuthoringSpec = {
-  version: 1; protocol: string; network: string; security: "none" | "tls" | "reality";
+  path_traffic?: boolean; version: 1; protocol: string; network: string; security: "none" | "tls" | "reality";
   settings: SpecObject; stream: SpecObject; tls: SpecObject; reality: SpecObject; client: SpecObject;
 };
 export type SpecField = {
@@ -140,7 +140,7 @@ export function defaultSpec(protocol = "vless"): AuthoringSpec {
   const intrinsic = !generalTransportProtocols.includes(protocol) && !["http", "mixed", "tunnel"].includes(protocol);
   const network = intrinsic ? protocol : "tcp";
   const security = ["hysteria", "tuic", "masque", "trojan"].includes(protocol) ? "tls" : protocol === "vless" ? "reality" : "none";
-  return { version: 1, protocol, network, security, settings: protocol === "vless" ? { decryption: "none" } : protocol === "hysteria" ? { version: 2 } : protocol === "shadowsocks" ? { method: "2022-blake3-aes-256-gcm", network: "tcp,udp" } : protocol === "mixed" ? { auth: "password", udp: true } : {}, stream: {}, tls: {}, reality: security === "reality" ? { shortIds: [Array.from(crypto.getRandomValues(new Uint8Array(4)), n => n.toString(16).padStart(2, "0")).join("")] } : {}, client: {} };
+  return { version: 1, path_traffic: true, protocol, network, security, settings: protocol === "vless" ? { decryption: "none" } : protocol === "hysteria" ? { version: 2 } : protocol === "shadowsocks" ? { method: "2022-blake3-aes-256-gcm", network: "tcp,udp" } : protocol === "mixed" ? { auth: "password", udp: true } : {}, stream: {}, tls: {}, reality: security === "reality" ? { shortIds: [Array.from(crypto.getRandomValues(new Uint8Array(4)), n => n.toString(16).padStart(2, "0")).join("")] } : {}, client: {} };
 }
 export function specFromInbound(source?: Inbound): AuthoringSpec {
   if (source?.spec) return canonicalAuthoringSpec(source.spec);
@@ -168,7 +168,7 @@ export function allowedSpecSecurity(protocol: string, network: string): Array<Au
 export function validAuthoringSpec(value: unknown): value is AuthoringSpec {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const spec = value as AuthoringSpec;
-  return spec.version === 1 && inboundProtocols.includes(spec.protocol as typeof inboundProtocols[number]) && typeof spec.network === "string" && ["none", "tls", "reality"].includes(spec.security) && ["settings", "stream", "tls", "reality", "client"].every(key => { const item = (spec as unknown as SpecObject)[key]; return item === undefined || item !== null && typeof item === "object" && !Array.isArray(item); });
+  return (spec.path_traffic === undefined || typeof spec.path_traffic === "boolean") && spec.version === 1 && inboundProtocols.includes(spec.protocol as typeof inboundProtocols[number]) && typeof spec.network === "string" && ["none", "tls", "reality"].includes(spec.security) && ["settings", "stream", "tls", "reality", "client"].every(key => { const item = (spec as unknown as SpecObject)[key]; return item === undefined || item !== null && typeof item === "object" && !Array.isArray(item); });
 }
 export function canonicalAuthoringSpec(value: unknown): AuthoringSpec {
   if (!validAuthoringSpec(value)) throw new Error("invalid_authoring_spec");

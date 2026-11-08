@@ -21,15 +21,16 @@ var ErrUnsupportedFormat = errors.New("unsupported client export format")
 // Spec is an encrypted-at-rest document. Do not serialize it into public API
 // responses; use Public instead. Inner keys are the engine's canonical keys.
 type Spec struct {
-	Version  int            `json:"version"`
-	Protocol string         `json:"protocol"`
-	Network  string         `json:"network"`
-	Security string         `json:"security"`
-	Settings map[string]any `json:"settings,omitempty"`
-	Stream   map[string]any `json:"stream,omitempty"`
-	TLS      map[string]any `json:"tls,omitempty"`
-	Reality  map[string]any `json:"reality,omitempty"`
-	Client   map[string]any `json:"client,omitempty"`
+	PathTraffic bool           `json:"path_traffic,omitempty"`
+	Version     int            `json:"version"`
+	Protocol    string         `json:"protocol"`
+	Network     string         `json:"network"`
+	Security    string         `json:"security"`
+	Settings    map[string]any `json:"settings,omitempty"`
+	Stream      map[string]any `json:"stream,omitempty"`
+	TLS         map[string]any `json:"tls,omitempty"`
+	Reality     map[string]any `json:"reality,omitempty"`
+	Client      map[string]any `json:"client,omitempty"`
 }
 
 type PublicSpec struct {

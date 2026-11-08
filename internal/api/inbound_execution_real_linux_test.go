@@ -181,7 +181,7 @@ func TestManagedInboundRealOwnerToAgentAccountingSiblingsAndStop(t *testing.T) {
 		t.Helper()
 		in := template
 		in.EventID = "managed-real-create-" + strconv.FormatUint(id, 10)
-		in.Profile = business.InboundInput{ID: id, Name: "Managed " + strconv.FormatUint(id, 10), Spec: &inboundspec.Spec{Version: 1, Protocol: "http", Network: "tcp", Security: "none"}}
+		in.Profile = business.InboundInput{ID: id, Name: "Managed " + strconv.FormatUint(id, 10), Spec: &inboundspec.Spec{Version: 1, PathTraffic: true, Protocol: "http", Network: "tcp", Security: "none"}}
 		in.Nodes = []business.NativeInboundPlanNode{{NodeID: "de", InstallationID: strings.Repeat("b", 32), ListenIP: "127.0.0.1", DirectPort: port, DirectHosts: []string{"127.0.0.1"}, TunnelHosts: []string{}}}
 		request("POST", "/api/v1/workspace/native-inbound-plans", in, nil, 201)
 	}
@@ -285,6 +285,16 @@ func TestManagedInboundRealOwnerToAgentAccountingSiblingsAndStop(t *testing.T) {
 	usage, e := s.business.ClientUsage(ctx, client.ID)
 	if e != nil || usage.Total != int64(len(payload)*2) {
 		t.Fatalf("real exact payload charge=%d want=%d: %v", usage.Total, len(payload)*2, e)
+	}
+	var pathHistory business.InboundTrafficHistory
+	request("GET", "/api/v1/workspace/native-inbounds/501/execution/traffic/history?window=1h", nil, &pathHistory, 200)
+	if len(pathHistory.Buckets) != 1 || pathHistory.Buckets[0].Upload == 0 || pathHistory.Buckets[0].Download == 0 {
+		t.Fatal("real owner history missing", pathHistory)
+	}
+	var pathTraffic business.InboundTraffic
+	request("GET", "/api/v1/workspace/native-inbounds/501/execution/traffic", nil, &pathTraffic, 200)
+	if len(pathTraffic.Paths) != 1 || !pathTraffic.Paths[0].Measured || !pathTraffic.Paths[0].Fresh || pathTraffic.Paths[0].Upload == 0 || pathTraffic.Paths[0].Download == 0 {
+		t.Fatal("real core path counters missing", pathTraffic)
 	}
 	var state ix.State
 	request("GET", "/api/v1/workspace/native-inbounds/501/execution", nil, &state, 200)

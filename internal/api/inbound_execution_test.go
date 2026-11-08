@@ -16,6 +16,18 @@ func TestManagedInboundOwnerBoundaryAndDisabledState(t *testing.T) {
 	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &state) != nil || state.Enabled || state.AccountingMode != ix.AccountingPerClient || state.ServerTimeMillis <= 0 || state.PublicationState != "withheld" || state.AllowedAccountingModes == nil || state.ClientIDs == nil || state.Targets == nil {
 		t.Fatal("disabled managed state does not satisfy public UI contract", w.Code)
 	}
+	for _, query := range []string{"window=1h", "window=24h"} {
+		w := browserRequest(t, s.Handler(), "GET", base+"/traffic/history?"+query, nil, cookie, "", "")
+		if w.Code != 503 {
+			t.Fatal("valid traffic history query rejected before capability check", w.Code)
+		}
+	}
+	for _, query := range []string{"", "window=7d", "window=1h&window=24h", "window=1h&unknown=1"} {
+		w := browserRequest(t, s.Handler(), "GET", base+"/traffic/history?"+query, nil, cookie, "", "")
+		if w.Code != 422 {
+			t.Fatal("invalid history query accepted", query, w.Code)
+		}
+	}
 	for _, path := range []string{base + "/preview", base + "/commands", base + "/clients", base + "/reconciliations/preview", base + "/reconciliations"} {
 		for _, tc := range []struct {
 			name, token string
@@ -30,7 +42,7 @@ func TestManagedInboundOwnerBoundaryAndDisabledState(t *testing.T) {
 			})
 		}
 	}
-	for _, path := range []string{base, base + "/operations/unknown-event-0001", base + "/reconciliations/unknown-event-0001"} {
+	for _, path := range []string{base, base + "/traffic", base + "/traffic/history?window=1h", base + "/operations/unknown-event-0001", base + "/reconciliations/unknown-event-0001"} {
 		w := browserRequest(t, s.Handler(), "GET", path, nil, nil, "", "")
 		if w.Code != 401 {
 			t.Fatal("managed read exposed without owner session", path, w.Code)

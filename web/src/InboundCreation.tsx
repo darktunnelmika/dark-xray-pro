@@ -348,6 +348,7 @@ export default function InboundCreation({ language, nodes, targets, capabilities
             <div className="creation-connection-fields">
               <label className="creation-field"><span>{t.name}</span><input data-initial-focus data-creation-field="name" aria-label={t.name} aria-invalid={invalid("name")} maxLength={128} value={state.profile.name} disabled={locked} onChange={event => profile("name", event.target.value)} autoComplete="off"/></label>
               {authoringSection("protocol")}
+              {state.spec && !["tuic","amneziawg","mtproto"].includes(state.spec.protocol) && <label className="native-check"><input type="checkbox" checked={state.spec.path_traffic === true} disabled={locked} onChange={event=>changeSpec({...state.spec!,path_traffic:event.target.checked})}/>{language === "fa" ? "اندازه‌گیری زندهٔ مصرف Direct، Tunnel و Swap (بدون کسر دوبارهٔ سهمیه)" : "Live Direct, Tunnel and Swap traffic (no additional quota charge)"}</label>}
               {groupIssues("general")}
             </div>
           </details>
