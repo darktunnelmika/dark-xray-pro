@@ -58,7 +58,12 @@ func TestInboundPathTrafficDoesNotDoubleChargeAndSurvivesDeletion(t *testing.T) 
 		t.Fatal("incorrect committed path counters", p)
 	}
 	history, err := f.s.InboundTrafficHistory(ctx, 501, "1h")
-	if err != nil || len(history.Buckets) != 1 || history.Buckets[0].Upload != 120 || history.Buckets[0].Download != 250 {
+	var historyUpload, historyDownload uint64
+	for _, bucket := range history.Buckets {
+		historyUpload += bucket.Upload
+		historyDownload += bucket.Download
+	}
+	if err != nil || len(history.Buckets) == 0 || historyUpload != 120 || historyDownload != 250 {
 		t.Fatal("history duplicated customer or replay", history, err)
 	}
 	// Traffic reads must proceed while the sole writer is reserved by other work.
@@ -102,3 +107,4 @@ func TestInboundPathTrafficDoesNotDoubleChargeAndSurvivesDeletion(t *testing.T) 
 		t.Fatal("deletion removed receipts", receipts, err)
 	}
 }
+

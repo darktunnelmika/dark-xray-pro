@@ -364,6 +364,7 @@ func (s *Store) AcceptInboundExecutionUsage(ctx context.Context, key []byte, in 
 }
 
 func (s *Store) ObserveInboundExecution(ctx context.Context, key []byte, in ix.Observation) (diagnosticErr error) {
+	ctx = s.withObservationFreshness(ctx)
 	ctx, diagnosticSpan := s.BeginDiagnostic(ctx, DiagnosticOperationObserve, DiagnosticSourceStore)
 	defer func() { diagnosticSpan.End(diagnosticErr) }()
 	if !idRE.MatchString(in.NodeID) || !routeID.MatchString(in.InstallationID) || in.Generation == 0 || in.ObservedUnixNano <= 0 || in.ObservedUnixNano > time.Now().Add(5*time.Second).UnixNano() {
@@ -373,6 +374,14 @@ func (s *Store) ObserveInboundExecution(ctx context.Context, key []byte, in ix.O
 	case "staging", "prepared", "active", "ready", "stopped", "failed", "blocked", "draining", "degraded":
 	default:
 		return ErrInvalid
+	}
+	unlock, err := s.observationFreshness.lock(ctx, observationIdentity(in))
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	if handled, err := s.refreshExecutionObservation(ctx, key, in); handled {
+		return err
 	}
 	tx, err := executionTx(s, ctx, key)
 	if err != nil {
@@ -432,6 +441,7 @@ func (s *Store) ObserveInboundExecution(ctx context.Context, key []byte, in ix.O
 		if openPlanValue(key, executionAAD("observation", in.NodeID+"/"+in.InstallationID, observed), oldEnc, &old) != nil {
 			return ErrUnavailable
 		}
+		old = freshExecutionObservation(ctx, oldEnc, old)
 		if in.ObservedUnixNano < old.ObservedUnixNano {
 			return ErrConflict
 		}

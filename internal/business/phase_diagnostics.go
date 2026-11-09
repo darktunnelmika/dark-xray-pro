@@ -444,7 +444,15 @@ func (d *phaseDiagnostics) record(r diagnosticRecord) {
 
 func (s *Store) diagnosticBeginTx(ctx context.Context, opts *sql.TxOptions) (*sql.Tx, error) {
 	diagnosticEnter(ctx, DiagnosticPhaseBeginTx)
-	tx, err := s.db.BeginTx(ctx, opts)
+	var tx *sql.Tx
+	var err error
+	if opts != nil && opts.ReadOnly {
+		// Display snapshots must not queue behind the accounting writer.
+		// Lease authority and mutations pass nil and retain the durable path.
+		tx, err = s.readSnapshot(ctx)
+	} else {
+		tx, err = s.db.BeginTx(ctx, opts)
+	}
 	diagnosticFinishPhase(ctx, err)
 	if err == nil {
 		diagnosticEnter(ctx, DiagnosticPhaseWork)

@@ -66,6 +66,7 @@ func revealExecutionCredential(ctx context.Context, tx *sql.Tx, key []byte, h ex
 }
 
 func (s *Store) MutateInboundExecutionSubscription(ctx context.Context, key []byte, actor, client string, in SubscriptionTokenMutation) (SubscriptionTokenReceipt, error) {
+	ctx = s.withObservationFreshness(ctx)
 	var out SubscriptionTokenReceipt
 	if !eventRE.MatchString(in.EventID) || in.ExpectedGeneration >= routeMax-1 || (in.Action != "issue" && in.Action != "rotate" && in.Action != "revoke") {
 		return out, ErrInvalid
@@ -162,6 +163,7 @@ func (s *Store) MutateInboundExecutionSubscription(ctx context.Context, key []by
 }
 
 func (s *Store) RevealInboundExecutionSubscription(ctx context.Context, key []byte, actor, client string, generation uint64) (SubscriptionSecret, error) {
+	ctx = s.withObservationFreshness(ctx)
 	tx, err := executionTx(s, ctx, key)
 	if err != nil {
 		return SubscriptionSecret{}, err
@@ -300,6 +302,7 @@ func executionSubscriptionRoutesAt(ctx context.Context, tx *sql.Tx, key []byte, 
 			if openPlanValue(key, executionAAD("observation", node+"/"+install, observed), enc, &observation) != nil {
 				return nil, ErrUnavailable
 			}
+			observation = freshExecutionObservation(ctx, enc, observation)
 			if observation.NodeID != node || observation.InstallationID != install || observation.Generation != desired || observation.ConfigSHA != b.ConfigSHA || observation.ManifestSHA != b.ManifestSHA {
 				return nil, ErrConflict
 			}
@@ -551,6 +554,7 @@ func renderExecutionSubscription(client, format string, routes []executionSubscr
 }
 
 func (s *Store) InboundExecutionSubscription(ctx context.Context, key []byte, actor, client string) (diagnosticResult ix.SubscriptionView, diagnosticErr error) {
+	ctx = s.withObservationFreshness(ctx)
 	ctx, diagnosticSpan := s.BeginDiagnostic(ctx, DiagnosticOperationMetadata, DiagnosticSourceStore)
 	defer func() { diagnosticSpan.End(diagnosticErr) }()
 	out := ix.SubscriptionView{ClientID: client, State: "absent", Formats: []string{}, Blockers: []ix.Blocker{}}
@@ -596,6 +600,7 @@ func (s *Store) InboundExecutionSubscription(ctx context.Context, key []byte, ac
 }
 
 func (s *Store) ProjectInboundExecutionSubscription(ctx context.Context, key []byte, actor, client, format string) (ix.Subscription, error) {
+	ctx = s.withObservationFreshness(ctx)
 	tx, err := executionSubscriptionReadTx(s, ctx, key)
 	if err != nil {
 		return ix.Subscription{}, err
@@ -613,6 +618,7 @@ func (s *Store) ProjectInboundExecutionSubscription(ctx context.Context, key []b
 }
 
 func (s *Store) ReadInboundExecutionSubscription(ctx context.Context, key []byte, token, format string) (ix.Subscription, error) {
+	ctx = s.withObservationFreshness(ctx)
 	if !validSubscriptionToken(token) {
 		return ix.Subscription{}, ErrNotFound
 	}

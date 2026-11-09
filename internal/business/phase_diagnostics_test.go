@@ -279,7 +279,8 @@ func TestBusinessPhaseDiagnosticsBeginWaitCancellation(t *testing.T) {
 		t.Fatal("synthetic connection reservation failed")
 	}
 	defer reserved.Close()
-	s := &Store{db: db}
+	// The synthetic pool stands in for the committed reader pool here.
+	s := &Store{db: db, readOnly: db}
 	if s.EnablePhaseDiagnostics() != nil {
 		t.Fatal("enable failed")
 	}

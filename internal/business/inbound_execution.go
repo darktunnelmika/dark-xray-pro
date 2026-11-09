@@ -434,6 +434,7 @@ func readExecutionBundle(ctx context.Context, q inboundReader, key []byte, node,
 }
 
 func (s *Store) ListInboundExecutionNodes(ctx context.Context) ([]ix.TargetState, error) {
+	ctx = s.withObservationFreshness(ctx)
 	out := []ix.TargetState{}
 	enabled, err := executionSchemaPresent(ctx, s.db)
 	if err != nil || !enabled {
@@ -457,6 +458,7 @@ func (s *Store) ListInboundExecutionNodes(ctx context.Context) ([]ix.TargetState
 }
 
 func (s *Store) InboundExecutionBundle(ctx context.Context, key []byte, node, install string) (ix.Bundle, bool, error) {
+	ctx = s.withObservationFreshness(ctx)
 	tx, err := executionTx(s, ctx, key)
 	if err != nil {
 		return ix.Bundle{}, false, err
@@ -482,6 +484,7 @@ func (s *Store) InboundExecutionBundle(ctx context.Context, key []byte, node, in
 }
 
 func (s *Store) InboundExecution(ctx context.Context, key []byte, id uint64) (diagnosticResult ix.State, diagnosticErr error) {
+	ctx = s.withObservationFreshness(ctx)
 	ctx, diagnosticSpan := s.BeginDiagnostic(ctx, DiagnosticOperationRuntime, DiagnosticSourceStore)
 	defer func() { diagnosticSpan.End(diagnosticErr) }()
 	tx, err := s.diagnosticBeginTx(ctx, &sql.TxOptions{ReadOnly: true})
@@ -501,6 +504,7 @@ func (s *Store) InboundExecution(ctx context.Context, key []byte, id uint64) (di
 }
 
 func (s *Store) ListInboundExecutionStates(ctx context.Context, key []byte) ([]ix.State, error) {
+	ctx = s.withObservationFreshness(ctx)
 	db := s.readOnly
 	if db == nil {
 		db = s.db
@@ -719,6 +723,7 @@ func projectExecutionTargets(ctx context.Context, tx *sql.Tx, key []byte, snapsh
 			if openPlanValue(key, executionAAD("observation", node+"/"+nodes[node], observed), raw, &o) != nil {
 				return nil, ErrUnavailable
 			}
+			o = freshExecutionObservation(ctx, raw, o)
 			if o.Generation == desired && o.ManifestSHA == b.ManifestSHA {
 				t.State = o.State
 				t.ReportedAt = o.ObservedUnixNano
@@ -781,6 +786,7 @@ func readExecutionOperation(ctx context.Context, tx *sql.Tx, key []byte, id uint
 		if openPlanValue(key, executionAAD("observation", t.NodeID+"/"+t.InstallationID, generation), obs, &o) != nil {
 			return v, ErrUnavailable
 		}
+		o = freshExecutionObservation(ctx, obs, o)
 		if o.Generation == t.DesiredGeneration && o.ManifestSHA == t.ManifestSHA {
 			t.State = o.State
 			t.ReportedAt = o.ObservedUnixNano
@@ -801,6 +807,7 @@ func readExecutionOperation(ctx context.Context, tx *sql.Tx, key []byte, id uint
 	return v, nil
 }
 func (s *Store) InboundExecutionOperation(ctx context.Context, key []byte, id uint64, op string) (ix.Operation, error) {
+	ctx = s.withObservationFreshness(ctx)
 	tx, err := executionTx(s, ctx, key)
 	if err != nil {
 		return ix.Operation{}, err
@@ -827,6 +834,7 @@ func executionEventAvailable(ctx context.Context, tx *sql.Tx, event string) erro
 }
 
 func (s *Store) BindInboundExecutionClients(ctx context.Context, key []byte, actor string, id uint64, in ix.BindingsInput) (ix.State, error) {
+	ctx = s.withObservationFreshness(ctx)
 	if !eventRE.MatchString(in.EventID) || !validName(in.Reason, 512) {
 		return ix.State{}, ErrInvalid
 	}
@@ -1048,6 +1056,7 @@ func assessAuthorizedInboundExecution(ctx context.Context, tx *sql.Tx, key []byt
 	return a, nil
 }
 func (s *Store) PreviewInboundExecution(ctx context.Context, key []byte, actor string, id uint64, input ix.CommandInput) (ix.Preview, error) {
+	ctx = s.withObservationFreshness(ctx)
 	in, err := normalizeExecutionCommand(input)
 	if err != nil {
 		return ix.Preview{}, err
@@ -1065,6 +1074,7 @@ func (s *Store) PreviewInboundExecution(ctx context.Context, key []byte, actor s
 }
 
 func (s *Store) QueueInboundExecution(ctx context.Context, key []byte, actor string, id uint64, input ix.CommandInput) (ix.Operation, error) {
+	ctx = s.withObservationFreshness(ctx)
 	in, err := normalizeExecutionCommand(input)
 	if err != nil || !routeSHA.MatchString(in.ReviewSHA) {
 		return ix.Operation{}, ErrInvalid

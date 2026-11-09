@@ -232,3 +232,63 @@ func TestBusinessReadPoolDisplaySessionSurvivesHeldWriter(t *testing.T) {
 		t.Fatal("command authorization bypassed writer", err)
 	}
 }
+
+func TestBusinessReadPoolExecutionStatusSurvivesHeldWriter(t *testing.T) {
+	f := newExecutionFixture(t)
+	defer f.s.Close()
+	ctx := context.Background()
+	if _, err := f.s.BindInboundExecutionClients(ctx, f.key, "owner", 501, ix.BindingsInput{EventID: "status-reader-bind-00001", ExpectedRevision: 0, ClientIDs: []string{f.client.ID}, AccountingMode: ix.AccountingPerClient, Reason: "Read-only execution status contention regression"}); err != nil {
+		t.Fatal(err)
+	}
+	f.command(t, "status-reader-activate-00001", "activate")
+	b := f.bundle(t)
+	epoch := f.birth(t, b, "status-reader-epoch-00001")
+	f.ready(t, b, epoch)
+	before, err := f.s.InboundExecution(ctx, f.key, 501)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writer, err := f.s.db.Conn(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer writer.Close()
+	readctx, cancel := context.WithTimeout(ctx, time.Second)
+	defer cancel()
+	after, err := f.s.InboundExecution(readctx, f.key, 501)
+	if err != nil {
+		t.Fatal("busy writer blocked execution status", err)
+	}
+	before.ServerTimeMillis, after.ServerTimeMillis = 0, 0
+	if !reflect.DeepEqual(before, after) {
+		t.Fatal("read-only status changed committed execution evidence")
+	}
+	key := append([]byte(nil), f.key...)
+	key[0] ^= 1
+	if _, err = f.s.InboundExecution(readctx, key, 501); err == nil {
+		t.Fatal("read-only status accepted the wrong decryption authority")
+	}
+}
+
+func TestBusinessReadPoolExecutionStatusDoesNotFallBackToWriter(t *testing.T) {
+	f := newExecutionFixture(t)
+	defer f.s.Close()
+	var held []*sql.Conn
+	for i := 0; i < 2; i++ {
+		conn, err := f.s.readOnly.Conn(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		held = append(held, conn)
+		defer conn.Close()
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+	defer cancel()
+	if _, err := f.s.InboundExecution(ctx, f.key, 501); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatal("saturated readers fell back to the writer", err)
+	}
+	var one int
+	if err := f.s.db.QueryRow("SELECT 1").Scan(&one); err != nil || one != 1 {
+		t.Fatal("status reader exhaustion consumed writer", err)
+	}
+}

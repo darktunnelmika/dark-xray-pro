@@ -152,10 +152,25 @@ func managedHTTP(port uint16, user, password, target string, payload []byte) err
 // This test crosses the real owner session/CSRF boundary, reviewed plan, SQLite
 // accounting, TLS Agent API, durable worker outbox, gated Xray and TCP payload.
 func TestManagedInboundRealOwnerToAgentAccountingSiblingsAndStop(t *testing.T) {
+	testManagedInboundOwnerAgent(t, 0)
+}
+
+func testManagedInboundOwnerAgent(t *testing.T, soak time.Duration) {
 	core := managedTestCore(t)
 	s, template, cookie, csrf := creationPlanAPIFixture(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), soak+50*time.Second)
 	defer cancel()
+	if soak > 0 {
+		if err := s.business.EnablePhaseDiagnostics(); err != nil {
+			t.Fatal(err)
+		}
+		stopDiagnostics := s.business.StartPhaseDiagnostics()
+		defer func() {
+			flush, stop := context.WithTimeout(context.Background(), 2*time.Second)
+			defer stop()
+			stopDiagnostics(flush)
+		}()
+	}
 	if e := s.business.EnableUsageLedger(ctx); e != nil {
 		t.Fatal(e)
 	}
@@ -163,7 +178,11 @@ func TestManagedInboundRealOwnerToAgentAccountingSiblingsAndStop(t *testing.T) {
 		t.Fatal(e)
 	}
 	t.Cleanup(s.inboundExecution.local.Close)
-	client, e := s.business.CreateClient(ctx, business.NewClient{EventID: "managed-real-client-create-0001", ClientID: "managed-real-client", RepresentativeID: "owner", Name: "Managed real traffic", DurationDays: 30, VolumeBytes: 8 << 20})
+	quota := int64(8 << 20)
+	if soak > 0 {
+		quota = 1 << 30
+	}
+	client, e := s.business.CreateClient(ctx, business.NewClient{EventID: "managed-real-client-create-0001", ClientID: "managed-real-client", RepresentativeID: "owner", Name: "Managed real traffic", DurationDays: 30, VolumeBytes: quota})
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -208,6 +227,7 @@ func TestManagedInboundRealOwnerToAgentAccountingSiblingsAndStop(t *testing.T) {
 	port1, port2 := managedTestPort(t), managedTestPort(t)
 	create(501, port1)
 	command(501, "activate", "managed-real-activate-0001")
+	var soakPrincipalID string
 	username := func(id uint64) string {
 		t.Helper()
 		b, ok, e := s.business.InboundExecutionBundle(ctx, s.inboundKey, "de", strings.Repeat("b", 32))
@@ -216,6 +236,7 @@ func TestManagedInboundRealOwnerToAgentAccountingSiblingsAndStop(t *testing.T) {
 		}
 		for _, p := range b.Principals {
 			if p.InboundID == id && p.ClientID == client.ID {
+				soakPrincipalID = p.ID
 				return strings.Split(p.Counter, ">>>")[1]
 			}
 		}
@@ -228,14 +249,28 @@ func TestManagedInboundRealOwnerToAgentAccountingSiblingsAndStop(t *testing.T) {
 	}
 	var loseZero atomic.Bool
 	var loseFinal atomic.Bool
+	var soakWitness managedSoakWitness
 	agentHandler := s.AgentHandler()
 	agent := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if soak > 0 {
+			started := time.Now()
+			defer func() {
+				t.Logf("MANAGED_SOAK_AGENT_REQUEST at_unix_ns=%d path=%s elapsed_us=%d context_error=%v", started.UnixNano(), r.URL.Path, time.Since(started).Microseconds(), r.Context().Err())
+			}()
+		}
 		lost := false
+		var finalReport []byte
 		if r.URL.Path == "/api/v1/agent/inbound-execution/usage" {
 			raw, _ := io.ReadAll(r.Body)
 			r.Body = io.NopCloser(bytes.NewReader(raw))
 			var report ix.UsageReport
 			_ = json.Unmarshal(raw, &report)
+			if soak > 0 {
+				soakWitness.record(report)
+				if report.Final {
+					finalReport = raw
+				}
+			}
 			lost = !loseZero.Swap(true) || report.Final && loseFinal.Swap(false)
 		}
 		if lost {
@@ -247,6 +282,17 @@ func TestManagedInboundRealOwnerToAgentAccountingSiblingsAndStop(t *testing.T) {
 				w.WriteHeader(record.Code)
 				_, _ = w.Write(record.Body.Bytes())
 			}
+			return
+		}
+		if finalReport != nil {
+			record := httptest.NewRecorder()
+			agentHandler.ServeHTTP(record, r)
+			soakWitness.recordFinal(finalReport, record.Code, record.Body.Bytes())
+			for key, values := range record.Header() {
+				w.Header()[key] = values
+			}
+			w.WriteHeader(record.Code)
+			_, _ = w.Write(record.Body.Bytes())
 			return
 		}
 		agentHandler.ServeHTTP(w, r)
@@ -288,13 +334,16 @@ func TestManagedInboundRealOwnerToAgentAccountingSiblingsAndStop(t *testing.T) {
 	}
 	var pathHistory business.InboundTrafficHistory
 	request("GET", "/api/v1/workspace/native-inbounds/501/execution/traffic/history?window=1h", nil, &pathHistory, 200)
-	if len(pathHistory.Buckets) != 1 || pathHistory.Buckets[0].Upload == 0 || pathHistory.Buckets[0].Download == 0 {
-		t.Fatal("real owner history missing", pathHistory)
-	}
 	var pathTraffic business.InboundTraffic
 	request("GET", "/api/v1/workspace/native-inbounds/501/execution/traffic", nil, &pathTraffic, 200)
 	if len(pathTraffic.Paths) != 1 || !pathTraffic.Paths[0].Measured || !pathTraffic.Paths[0].Fresh || pathTraffic.Paths[0].Upload == 0 || pathTraffic.Paths[0].Download == 0 {
 		t.Fatal("real core path counters missing", pathTraffic)
+	}
+	// The acknowledged zero receipt and payload may land in different minutes.
+	// Compare every history bucket with the committed path totals, not with
+	// customer payload bytes (listener counters include protocol overhead).
+	if err := validateManagedPathHistory(pathHistory, pathTraffic); err != nil {
+		t.Fatal("real owner history mismatch", err, pathHistory, pathTraffic)
 	}
 	var state ix.State
 	request("GET", "/api/v1/workspace/native-inbounds/501/execution", nil, &state, 200)
@@ -319,6 +368,46 @@ func TestManagedInboundRealOwnerToAgentAccountingSiblingsAndStop(t *testing.T) {
 	s.Handler().ServeHTTP(public, httptest.NewRequest("GET", secret.Path+"?format=uri", nil))
 	if public.Code != 200 || !strings.Contains(public.Body.String(), "127.0.0.1") || public.Header().Get("Cache-Control") != "no-store, private" {
 		t.Fatal("current subscription unavailable or cacheable", public.Code)
+	}
+	if soak > 0 {
+		want := runManagedFixedVersionSoak(t, s, worker, exchange, &soakWitness, core.Path, ctx, soak, port1, username(501), client, target, payload, secret.Path,
+			func() { cookie, csrf = browserLogin(t, s, ownerUsername, ownerPassword) })
+		command(501, "stop", "managed-soak-planned-stop-0001")
+		if e = worker.Step(ctx, exchange); e != nil {
+			t.Fatal("planned final settlement", e)
+		}
+		// The prior epoch settles first. A separate successful reconciliation
+		// then acknowledges the newly desired empty bundle as stopped.
+		if e = worker.Step(ctx, exchange); e != nil {
+			t.Fatal("planned stopped-bundle acknowledgement", e)
+		}
+		account, err := s.business.ClientUsage(ctx, client.ID)
+		if err != nil || account.Total != want || account.Holds != 0 {
+			t.Fatal("soak final accounting mismatch", account.Total, want, err)
+		}
+		request("GET", "/api/v1/workspace/native-inbounds/501/execution", nil, &state, 200)
+		if len(state.Targets) != 1 || state.Targets[0].ProcessReady || state.Targets[0].State != "stopped" {
+			t.Fatal("planned stop did not settle", state)
+		}
+		if err := managedHTTP(port1, "stopped", client.UUID, target, payload); err == nil {
+			t.Fatal("planned stop left a live customer listener")
+		}
+		public = httptest.NewRecorder()
+		s.Handler().ServeHTTP(public, httptest.NewRequest("GET", secret.Path+"?format=uri", nil))
+		if public.Code != 404 {
+			t.Fatal("planned stop left a published subscription", public.Code)
+		}
+		finalEvidence, err := soakWitness.finalEvidence(soakPrincipalID, want)
+		if err != nil {
+			t.Fatal("independent final receipt", err)
+		}
+		rawEvidence, err := json.Marshal(finalEvidence)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Logf("MANAGED_SOAK_FINAL_EVIDENCE %s", rawEvidence)
+		t.Logf("MANAGED_FIXED_VERSION_SOAK_PASS seconds=%d committed_bytes=%d holds=0 planned_final=true", int(soak/time.Second), want)
+		return
 	}
 	// Losing an actual active process has an unknown tail. Owner loss keeps
 	// its known measured bytes and clears only that epoch; the old agent must
@@ -438,3 +527,4 @@ func TestManagedInboundRealOwnerToAgentAccountingSiblingsAndStop(t *testing.T) {
 		}
 	}
 }
+

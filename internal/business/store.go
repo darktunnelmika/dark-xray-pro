@@ -44,6 +44,7 @@ var (
 )
 
 type Store struct {
+	observationFreshness      executionObservationFreshness
 	checkpoint                *businessCheckpointer
 	db                        *sql.DB
 	readOnly                  *sql.DB           // bounded WAL readers; never grants leases or accepts usage
