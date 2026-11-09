@@ -1,0 +1,46 @@
+name: Idle usage write regression
+on:
+  push:
+    branches: ["fix/idle-usage-writes-20261110"]
+permissions:
+  contents: read
+jobs:
+  accounting:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+      - run: go mod download && go mod verify
+      - name: Confirm regression fails on installed source
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp internal/business/inbound_execution_runtime.go /tmp/fixed-runtime.go
+          git fetch --depth=1 origin fcad97b38fb95748ee91767be094fabe5cf81646
+          git show FETCH_HEAD:internal/business/inbound_execution_runtime.go > internal/business/inbound_execution_runtime.go
+          set +e
+          go test ./internal/business -run '^TestManagedInboundIdleReportsAvoidAccountWrites$' -count=1 -timeout=120s > baseline.txt 2>&1
+          result=$?
+          set -e
+          cp /tmp/fixed-runtime.go internal/business/inbound_execution_runtime.go
+          test "$result" -ne 0
+          grep -q 'idle reports rewrote account totals' baseline.txt
+      - name: Accounting regressions with race detection
+        run: |
+          go test -race ./internal/business -run 'TestManagedInbound|TestInboundExecution|TestBusinessReadPool' -count=1 -timeout=600s -json > tests.jsonl
+      - name: Vet and build
+        run: |
+          go vet ./internal/business
+          go build ./cmd/hub
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: idle-usage-regression
+          path: |
+            baseline.txt
+            tests.jsonl
+          if-no-files-found: error
