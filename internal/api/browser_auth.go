@@ -121,7 +121,28 @@ func (s *Server) csrfValue(token string) string {
 // Only these display routes may authorize from an independent committed read.
 // Other reads and every mutation retain the original writer-backed verification.
 func displaySessionSnapshot(r *http.Request) bool {
-	return r.Method == http.MethodGet && (r.URL.Path == "/api/v1/session/status" || r.URL.Path == "/api/v1/workspace/nodes")
+	if r.Method != http.MethodGet {
+		return false
+	}
+	if r.URL.Path == "/api/v1/session/status" || r.URL.Path == "/api/v1/workspace/nodes" {
+		return true
+	}
+	// Only the exact read-only managed execution status route may use the
+	// committed reader. Commands, previews and reconciliation keep strict auth.
+	id, ok := strings.CutPrefix(r.URL.Path, "/api/v1/workspace/native-inbounds/")
+	if !ok {
+		return false
+	}
+	id, ok = strings.CutSuffix(id, "/execution")
+	if !ok || id == "" || id[0] == '0' || len(id) > 16 {
+		return false
+	}
+	for _, digit := range id {
+		if digit < '0' || digit > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 func (s *Server) signedSession(r *http.Request) (business.LoginSession, error) {

@@ -56,6 +56,7 @@ func requireAuthUnavailable(t *testing.T, response *httptest.ResponseRecorder, c
 
 func TestBrowserAuthAvailabilityClosedStorePreservesCookieAndRecovers(t *testing.T) {
 	s, path := authAvailabilityServer(t)
+	s.inboundKey = bytes.Repeat([]byte{0x42}, 32)
 	cookie, csrf := browserLogin(t, s, ownerUsername, ownerPassword)
 	handler := s.Handler()
 	if err := s.business.Close(); err != nil {
@@ -68,6 +69,7 @@ func TestBrowserAuthAvailabilityClosedStorePreservesCookieAndRecovers(t *testing
 	}{
 		{"GET", "/api/v1/session/status", nil, "session_unavailable"},
 		{"GET", "/api/v1/workspace/me", nil, "session_unavailable"},
+		{"GET", "/api/v1/workspace/native-inbounds/501/execution", nil, "session_unavailable"},
 		{"POST", "/api/v1/session/logout", map[string]any{}, "session_unavailable"},
 		{"POST", "/api/v1/workspace/representatives", map[string]string{
 			"id": "auth-unavailable-rep", "name": "Must not be created",
@@ -212,5 +214,50 @@ func TestBrowserAuthAvailabilityDoesNotShortenAuthorizedRequest(t *testing.T) {
 	// context has been cancelled and its resources released.
 	if _, err := s.business.Representative(request.Context(), session.User.RepresentativeID); err != nil {
 		t.Fatalf("authentication cancellation escaped into authorized work: %v", err)
+	}
+}
+
+func TestExecutionStatusDisplayAuthenticationIsNarrow(t *testing.T) {
+	for _, test := range []struct {
+		method, path string
+		display      bool
+	}{
+		{"GET", "/api/v1/workspace/native-inbounds/501/execution", true},
+		{"GET", "/api/v1/workspace/native-inbounds/501/execution?unexpected=1", true},
+		{"POST", "/api/v1/workspace/native-inbounds/501/execution", false},
+		{"POST", "/api/v1/workspace/native-inbounds/501/execution/commands", false},
+		{"POST", "/api/v1/workspace/native-inbounds/501/execution/preview", false},
+		{"POST", "/api/v1/workspace/native-inbounds/501/execution/reconciliations", false},
+		{"GET", "/api/v1/workspace/native-inbounds/501/execution/commands", false},
+		{"GET", "/api/v1/workspace/native-inbounds/501/execution/reconciliations/event", false},
+		{"GET", "/api/v1/workspace/native-inbounds/501/execution/traffic", false},
+		{"GET", "/api/v1/workspace/native-inbounds/501/execution/", false},
+		{"GET", "/api/v1/workspace/native-inbounds/0/execution", false},
+		{"GET", "/api/v1/workspace/native-inbounds/0501/execution", false},
+		{"GET", "/api/v1/workspace/native-inbounds/501/other/execution", false},
+	} {
+		t.Run(test.method+" "+test.path, func(t *testing.T) {
+			request := httptest.NewRequest(test.method, "https://"+browserHost+test.path, nil)
+			if got := displaySessionSnapshot(request); got != test.display {
+				t.Fatalf("display authentication=%v, want %v", got, test.display)
+			}
+		})
+	}
+}
+
+func TestExecutionStatusDisplayAuthenticationEnforcesRevocation(t *testing.T) {
+	s, _ := authAvailabilityServer(t)
+	s.inboundKey = bytes.Repeat([]byte{0x42}, 32)
+	cookie, csrf := browserLogin(t, s, ownerUsername, ownerPassword)
+	handler := s.Handler()
+	path := "/api/v1/workspace/native-inbounds/501/execution"
+	if response := browserRequest(t, handler, "GET", path, nil, cookie, "", ""); response.Code != http.StatusOK {
+		t.Fatalf("valid display session rejected: %d", response.Code)
+	}
+	if response := browserRequest(t, handler, "POST", "/api/v1/session/logout", map[string]any{}, cookie, csrf, "https://"+browserHost); response.Code != http.StatusOK {
+		t.Fatal("session logout failed")
+	}
+	if response := browserRequest(t, handler, "GET", path, nil, cookie, "", ""); response.Code != http.StatusUnauthorized {
+		t.Fatal("execution status used a revoked display session")
 	}
 }

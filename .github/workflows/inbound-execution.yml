@@ -15,6 +15,21 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  execution-status-reader:
+    name: Execution status remains available behind a busy writer
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Verify committed status reads, strict commands and session revocation
+        run: |
+          go test -race -count=1 -timeout=120s ./internal/business -run '^TestBusinessReadPool'
+          go test -race -count=1 -timeout=120s ./internal/api -run '^(TestBrowserAuthAvailability|TestExecutionStatusDisplayAuthentication)'
+
   soak-evidence:
     name: Managed soak process window and final wire receipt
     runs-on: ubuntu-24.04

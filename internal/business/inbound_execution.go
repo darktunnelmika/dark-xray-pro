@@ -487,7 +487,11 @@ func (s *Store) InboundExecution(ctx context.Context, key []byte, id uint64) (di
 	ctx = s.withObservationFreshness(ctx)
 	ctx, diagnosticSpan := s.BeginDiagnostic(ctx, DiagnosticOperationRuntime, DiagnosticSourceStore)
 	defer func() { diagnosticSpan.End(diagnosticErr) }()
-	tx, err := s.diagnosticBeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	// This status projection reads the same committed evidence as the Node
+	// view. A busy durable writer must not block its read-only snapshot.
+	diagnosticSpan.Enter(DiagnosticPhaseBeginTx)
+	tx, err := s.readSnapshot(ctx)
+	diagnosticFinishPhase(ctx, err)
 	if err != nil {
 		return ix.State{}, err
 	}
