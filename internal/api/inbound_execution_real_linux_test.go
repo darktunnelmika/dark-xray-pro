@@ -248,6 +248,7 @@ func testManagedInboundOwnerAgent(t *testing.T, soak time.Duration) {
 	var loseZero atomic.Bool
 	var loseFinal atomic.Bool
 	var soakWitness managedSoakWitness
+	var finalWitness managedFinalWitness
 	agentHandler := s.AgentHandler()
 	agent := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if soak > 0 {
@@ -257,6 +258,7 @@ func testManagedInboundOwnerAgent(t *testing.T, soak time.Duration) {
 			}()
 		}
 		lost := false
+		var finalWire []byte
 		if r.URL.Path == "/api/v1/agent/inbound-execution/usage" {
 			raw, _ := io.ReadAll(r.Body)
 			r.Body = io.NopCloser(bytes.NewReader(raw))
@@ -264,6 +266,9 @@ func testManagedInboundOwnerAgent(t *testing.T, soak time.Duration) {
 			_ = json.Unmarshal(raw, &report)
 			if soak > 0 {
 				soakWitness.record(report)
+				if report.Final {
+					finalWire = raw
+				}
 			}
 			lost = !loseZero.Swap(true) || report.Final && loseFinal.Swap(false)
 		}
@@ -276,6 +281,17 @@ func testManagedInboundOwnerAgent(t *testing.T, soak time.Duration) {
 				w.WriteHeader(record.Code)
 				_, _ = w.Write(record.Body.Bytes())
 			}
+			return
+		}
+		if finalWire != nil {
+			record := httptest.NewRecorder()
+			agentHandler.ServeHTTP(record, r)
+			finalWitness.capture(finalWire, record.Body.Bytes(), record.Code)
+			for key, values := range record.Header() {
+				w.Header()[key] = values
+			}
+			w.WriteHeader(record.Code)
+			_, _ = w.Write(record.Body.Bytes())
 			return
 		}
 		agentHandler.ServeHTTP(w, r)
@@ -380,6 +396,7 @@ func testManagedInboundOwnerAgent(t *testing.T, soak time.Duration) {
 		if public.Code != 404 {
 			t.Fatal("planned stop left a published subscription", public.Code)
 		}
+		finalWitness.emit(t, &soakWitness, account.Total, account.Holds)
 		t.Logf("MANAGED_FIXED_VERSION_SOAK_PASS seconds=%d committed_bytes=%d holds=0 planned_final=true", int(soak/time.Second), want)
 		return
 	}

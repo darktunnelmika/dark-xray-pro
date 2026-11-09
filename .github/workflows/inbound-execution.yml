@@ -66,6 +66,10 @@ jobs:
           go vet ./...
       - name: Verify read-only LAB preflight boundaries
         run: python3 -m unittest discover -s scripts/ci -p test_telegram_lab_preflight.py
+      - name: Verify final-receipt evidence and traffic-window process counting
+        run: |
+          python3 -m unittest discover -s scripts/ci -p test_verify_managed_soak.py
+          go test -race ./internal/api -run '^TestManagedSoakFinalEvidenceRejectsInvalidReceipts$' -count=1
       - name: Check observation isolation and phase diagnostics before full integration
         run: go test -race -count=1 -timeout=180s ./internal/business -run '^(TestManagedObservationFreshness|TestBusinessPhaseDiagnostics)'
       - name: Exercise all other application packages under the race detector
@@ -258,11 +262,16 @@ jobs:
             cd "$app_tree"
             go test -c -o "$RUNNER_TEMP/inbound-artifact/acceptance/managed-api.test" ./internal/api
           )
-          DARK_PRO_TEST_OBSERVE_SOAK_SECONDS=15 "$RUNNER_TEMP/inbound-artifact/acceptance/managed-api.test" \
-            -test.run='^TestManagedInboundFixedVersionLiveSoak$' -test.v -test.timeout=90s \
-            > "$RUNNER_TEMP/inbound-artifact/acceptance/managed-soak-smoke.log" \
-            || { cat "$RUNNER_TEMP/inbound-artifact/acceptance/managed-soak-smoke.log"; exit 1; }
-          grep -q MANAGED_FIXED_VERSION_SOAK_PASS "$RUNNER_TEMP/inbound-artifact/acceptance/managed-soak-smoke.log"
+          command -v strace >/dev/null || { sudo apt-get update && sudo apt-get install -y strace; }
+          financial_tmp=$(mktemp -d /tmp/dxps.XXXXXX)
+          trap 'rmdir "$financial_tmp"' EXIT
+          python3 scripts/ci/run_managed_soak.py \
+            --test "$RUNNER_TEMP/inbound-artifact/acceptance/managed-api.test" \
+            --test-sha256 "$(sha256sum "$RUNNER_TEMP/inbound-artifact/acceptance/managed-api.test" | cut -d' ' -f1)" \
+            --core "$DARK_PRO_TEST_INBOUND_CORE" --core-sha256 "$DXP_INBOUND_CORE_V2_SHA256" \
+            --financial-tmpdir "$financial_tmp" --seconds 15 \
+            --evidence-dir "$RUNNER_TEMP/inbound-artifact/acceptance/managed-soak-evidence"
+          cp "$RUNNER_TEMP/inbound-artifact/acceptance/managed-soak-evidence/soak.log" "$RUNNER_TEMP/inbound-artifact/acceptance/managed-soak-smoke.log"
           python3 - "$RUNNER_TEMP/inbound-artifact" "$GITHUB_SHA" <<'PY'
           import hashlib,json,pathlib,sys
           root=pathlib.Path(sys.argv[1])

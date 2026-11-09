@@ -107,7 +107,7 @@ func runManagedFixedVersionSoak(t *testing.T, s *Server, worker *inboundruntime.
 	want := initial.Total
 	identity, generation := witness.check(t, core)
 	start := time.Now()
-	t.Logf("MANAGED_FIXED_VERSION_SOAK_BEGIN seconds=%d identity_sha=%s generation=%d", int(duration/time.Second), identity, generation)
+	t.Logf("MANAGED_FIXED_VERSION_SOAK_BEGIN seconds=%d identity_sha=%s generation=%d at_unix_ns=%d", int(duration/time.Second), identity, generation, start.UnixNano())
 	nextLogin := start
 	stepExchange := inboundruntime.WithDeadlines(exchange)
 	samples := 0
@@ -171,6 +171,6 @@ func runManagedFixedVersionSoak(t *testing.T, s *Server, worker *inboundruntime.
 		}
 	}
 	login()
-	t.Logf("MANAGED_FIXED_VERSION_SOAK_WINDOW_COMPLETE elapsed_ms=%d samples=%d committed_bytes=%d unexpected_epochs=0", time.Since(start).Milliseconds(), samples, want)
+	t.Logf("MANAGED_FIXED_VERSION_SOAK_WINDOW_COMPLETE elapsed_ms=%d samples=%d committed_bytes=%d unexpected_epochs=0 at_unix_ns=%d", time.Since(start).Milliseconds(), samples, want, time.Now().UnixNano())
 	return want
 }
