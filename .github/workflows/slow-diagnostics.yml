@@ -1,0 +1,51 @@
+name: Slow diagnostic evidence acceptance
+on:
+  push:
+    branches: ["diagnostics/slow-evidence-20261109"]
+permissions:
+  contents: read
+jobs:
+  diagnostics:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Verify dependencies and diagnose formatting
+        run: |
+          go mod download
+          go mod verify
+          gofmt -d internal/business/phase_diagnostics*.go
+      - name: Race and overflow regression
+        run: |
+          set -euo pipefail
+          go test -race ./internal/business -run '^TestBusinessPhaseDiagnostics' -count=10 -timeout=180s -json > diagnostics-tests.jsonl
+          python3 - <<'PY'
+          import json
+          rows=[json.loads(x) for x in open('diagnostics-tests.jsonl')]
+          required=['SlowCompletionSurvivesOrdinaryFlood','SlowBoundedLossAndShutdown','SlowThresholdAndBorrowing','SlowConcurrentAdmission']
+          for suffix in required:
+              assert sum(r.get('Action')=='pass' and r.get('Test')=='TestBusinessPhaseDiagnostics'+suffix for r in rows)==10,suffix
+          assert not any(r.get('Action') in ('fail','skip') for r in rows)
+          print('All diagnostic tests executed without skip or failure')
+          PY
+      - name: Vet affected package and compile HUB
+        run: |
+          go vet ./internal/business
+          go build -trimpath -o dark-pro-hub ./cmd/hub
+          sha256sum dark-pro-hub > dark-pro-hub.sha256
+          git rev-parse HEAD > source-commit.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: slow-diagnostics-evidence
+          path: |
+            diagnostics-tests.jsonl
+            dark-pro-hub
+            dark-pro-hub.sha256
+            source-commit.txt
+          if-no-files-found: error
+          retention-days: 7
