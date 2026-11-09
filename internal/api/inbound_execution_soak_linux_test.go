@@ -42,6 +42,7 @@ type managedSoakWitness struct {
 	epoch, process string
 	generation     uint64
 	changed        bool
+	finals         []managedSoakFinalEvidence
 }
 
 func (w *managedSoakWitness) record(in ix.UsageReport) {
@@ -107,6 +108,7 @@ func runManagedFixedVersionSoak(t *testing.T, s *Server, worker *inboundruntime.
 	want := initial.Total
 	identity, generation := witness.check(t, core)
 	start := time.Now()
+	witness.logBoundary(t, "BEGIN", start)
 	t.Logf("MANAGED_FIXED_VERSION_SOAK_BEGIN seconds=%d identity_sha=%s generation=%d", int(duration/time.Second), identity, generation)
 	nextLogin := start
 	stepExchange := inboundruntime.WithDeadlines(exchange)
@@ -171,6 +173,8 @@ func runManagedFixedVersionSoak(t *testing.T, s *Server, worker *inboundruntime.
 		}
 	}
 	login()
+	witness.logBoundary(t, "END", time.Now())
 	t.Logf("MANAGED_FIXED_VERSION_SOAK_WINDOW_COMPLETE elapsed_ms=%d samples=%d committed_bytes=%d unexpected_epochs=0", time.Since(start).Milliseconds(), samples, want)
 	return want
 }
+

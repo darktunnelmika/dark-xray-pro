@@ -15,6 +15,66 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  soak-evidence:
+    name: Managed soak process window and final wire receipt
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Verify process-window rejection cases and final receipt bindings
+        run: |
+          python3 -m unittest discover -s scripts/ci -p test_managed_soak_evidence.py -v
+          go test -race ./internal/api -run '^TestManagedSoakFinalEvidenceRejectsIncompleteProof$' -count=1 -timeout=180s
+      - name: Retrieve the previously accepted immutable native core
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api repos/darktunnelmika/dark-xray-pro/actions/artifacts/13638253129/zip > "$RUNNER_TEMP/pinned-native.zip"
+          python3 - "$RUNNER_TEMP" <<'PY'
+          import hashlib,pathlib,sys,zipfile
+          root=pathlib.Path(sys.argv[1])
+          archive=root/'pinned-native.zip'
+          assert hashlib.sha256(archive.read_bytes()).hexdigest() == 'e7e0c07ba73083b9b09c91a4b682ab38d4406084719c8a54465cb22897df70f1'
+          with zipfile.ZipFile(archive) as z:
+              binary=z.read('native/xray-inbound-v2')
+          assert hashlib.sha256(binary).hexdigest() == '6861c6275ce1ca8891e8b6b6432cac94a5859e870a86224dabcd4bf9d3a4ff69'
+          target=root/'pinned-core'
+          target.write_bytes(binary)
+          target.chmod(0o700)
+          PY
+      - name: Build and exercise the corrected acceptance executable
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/soak-acceptance"
+          go test -c -o "$RUNNER_TEMP/soak-acceptance/managed-api.test" ./internal/api
+          cp scripts/ci/run-managed-soak.py "$RUNNER_TEMP/soak-acceptance/"
+          task_scratch="/tmp/dxp-soak-$GITHUB_RUN_ID"
+          python3 scripts/ci/run-managed-soak.py --test "$RUNNER_TEMP/soak-acceptance/managed-api.test" \
+            --core "$RUNNER_TEMP/pinned-core" --seconds 15 --tmpdir "$task_scratch" \
+            --output "$RUNNER_TEMP/soak-acceptance/evidence"
+          python3 - "$RUNNER_TEMP/soak-acceptance" "$GITHUB_SHA" <<'PY'
+          import hashlib,json,pathlib,sys
+          root=pathlib.Path(sys.argv[1])
+          files={str(p.relative_to(root)):hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(root.rglob('*')) if p.is_file()}
+          (root/'provenance.json').write_text(json.dumps({'source_revision':sys.argv[2],'files':files},indent=2)+'\n')
+          PY
+      - name: Preserve the acceptance executable and exact receipt evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: managed-soak-evidence-${{ github.sha }}
+          path: ${{ runner.temp }}/soak-acceptance
+          if-no-files-found: warn
+          retention-days: 14
+
   business-race-shards:
     name: Business accounting race partition (${{ matrix.shard }}/2)
     runs-on: ubuntu-24.04
@@ -496,4 +556,5 @@ jobs:
           path: ${{ runner.temp }}/compiled-engine-integration.jsonl
           if-no-files-found: warn
           retention-days: 14
+
 

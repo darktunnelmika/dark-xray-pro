@@ -227,6 +227,7 @@ func testManagedInboundOwnerAgent(t *testing.T, soak time.Duration) {
 	port1, port2 := managedTestPort(t), managedTestPort(t)
 	create(501, port1)
 	command(501, "activate", "managed-real-activate-0001")
+	var soakPrincipalID string
 	username := func(id uint64) string {
 		t.Helper()
 		b, ok, e := s.business.InboundExecutionBundle(ctx, s.inboundKey, "de", strings.Repeat("b", 32))
@@ -235,6 +236,7 @@ func testManagedInboundOwnerAgent(t *testing.T, soak time.Duration) {
 		}
 		for _, p := range b.Principals {
 			if p.InboundID == id && p.ClientID == client.ID {
+				soakPrincipalID = p.ID
 				return strings.Split(p.Counter, ">>>")[1]
 			}
 		}
@@ -257,6 +259,7 @@ func testManagedInboundOwnerAgent(t *testing.T, soak time.Duration) {
 			}()
 		}
 		lost := false
+		var finalReport []byte
 		if r.URL.Path == "/api/v1/agent/inbound-execution/usage" {
 			raw, _ := io.ReadAll(r.Body)
 			r.Body = io.NopCloser(bytes.NewReader(raw))
@@ -264,6 +267,9 @@ func testManagedInboundOwnerAgent(t *testing.T, soak time.Duration) {
 			_ = json.Unmarshal(raw, &report)
 			if soak > 0 {
 				soakWitness.record(report)
+				if report.Final {
+					finalReport = raw
+				}
 			}
 			lost = !loseZero.Swap(true) || report.Final && loseFinal.Swap(false)
 		}
@@ -276,6 +282,17 @@ func testManagedInboundOwnerAgent(t *testing.T, soak time.Duration) {
 				w.WriteHeader(record.Code)
 				_, _ = w.Write(record.Body.Bytes())
 			}
+			return
+		}
+		if finalReport != nil {
+			record := httptest.NewRecorder()
+			agentHandler.ServeHTTP(record, r)
+			soakWitness.recordFinal(finalReport, record.Code, record.Body.Bytes())
+			for key, values := range record.Header() {
+				w.Header()[key] = values
+			}
+			w.WriteHeader(record.Code)
+			_, _ = w.Write(record.Body.Bytes())
 			return
 		}
 		agentHandler.ServeHTTP(w, r)
@@ -380,6 +397,15 @@ func testManagedInboundOwnerAgent(t *testing.T, soak time.Duration) {
 		if public.Code != 404 {
 			t.Fatal("planned stop left a published subscription", public.Code)
 		}
+		finalEvidence, err := soakWitness.finalEvidence(soakPrincipalID, want)
+		if err != nil {
+			t.Fatal("independent final receipt", err)
+		}
+		rawEvidence, err := json.Marshal(finalEvidence)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Logf("MANAGED_SOAK_FINAL_EVIDENCE %s", rawEvidence)
 		t.Logf("MANAGED_FIXED_VERSION_SOAK_PASS seconds=%d committed_bytes=%d holds=0 planned_final=true", int(soak/time.Second), want)
 		return
 	}
@@ -501,3 +527,4 @@ func testManagedInboundOwnerAgent(t *testing.T, soak time.Duration) {
 		}
 	}
 }
+
