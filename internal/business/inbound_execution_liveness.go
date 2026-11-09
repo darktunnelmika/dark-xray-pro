@@ -11,12 +11,18 @@ import (
 // seconds therefore includes the entire outstanding lease plus request margin.
 const executionReportLiveness = 45 * time.Second
 
+// Only unsealed epochs can affect current authority. Start with that bounded
+// active set, not every historical baseline of a long-lived customer. CROSS JOIN
+// preserves this loop order; explicit predicates allow both existing partial
+// indexes. The cutoff and fail-closed semantics are unchanged.
+const executionStaleEpochQuery = `SELECT EXISTS(SELECT 1 FROM inbound_execution_epochs e INDEXED BY inbound_execution_epoch_open CROSS JOIN inbound_execution_usage_deltas baseline INDEXED BY inbound_execution_baseline_accounts CROSS JOIN inbound_execution_usage_receipts latest WHERE e.state!='sealed' AND e.state='open' AND baseline.epoch_id=e.epoch_id AND baseline.client_id=? AND baseline.sequence=1 AND baseline.role='customer' AND latest.epoch_id=e.epoch_id AND latest.sequence=e.sequence AND latest.created<=?)`
+
 // This read-time guard complements the durable sweep. Failure or delay of the
 // background writer must not renew another node for the same customer while a
 // previously admitted incarnation has an unobserved financial tail.
 func executionClientHasStaleEpoch(ctx context.Context, tx *sql.Tx, client string, now int64) (bool, error) {
 	var stale int
-	err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM inbound_execution_usage_deltas baseline JOIN inbound_execution_epochs e ON e.epoch_id=baseline.epoch_id JOIN inbound_execution_usage_receipts latest ON latest.epoch_id=e.epoch_id AND latest.sequence=e.sequence WHERE baseline.client_id=? AND baseline.sequence=1 AND baseline.role='customer' AND e.state='open' AND latest.created<=?)`, client, now-int64(executionReportLiveness)).Scan(&stale)
+	err := tx.QueryRowContext(ctx, executionStaleEpochQuery, client, now-int64(executionReportLiveness)).Scan(&stale)
 	return stale != 0, err
 }
 
