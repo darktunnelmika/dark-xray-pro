@@ -316,13 +316,18 @@ func (s *Store) AcceptInboundExecutionUsage(ctx context.Context, key []byte, in 
 			if uint64(oldUp) > math.MaxInt64-up || uint64(oldDown) > math.MaxInt64-down || uint64(oldUp)+up > math.MaxInt64-(uint64(oldDown)+down) {
 				return none, ErrConflict
 			}
-			if _, err = tx.ExecContext(ctx, `UPDATE pro_usage_accounts SET uplink=?,downlink=? WHERE client_id=?`, oldUp+int64(up), oldDown+int64(down), p.ClientID); err != nil {
-				return none, err
+			// Idle cumulative reports still persist their receipt, cursor and zero
+			// delta evidence. Avoid rewriting unchanged account totals (and the
+			// redundant post-update eligibility query) for each idle principal.
+			if up != 0 || down != 0 {
+				if _, err = tx.ExecContext(ctx, `UPDATE pro_usage_accounts SET uplink=?,downlink=? WHERE client_id=?`, oldUp+int64(up), oldDown+int64(down), p.ClientID); err != nil {
+					return none, err
+				}
+				if err = tx.QueryRowContext(ctx, `SELECT eligible FROM pro_usage_eligibility WHERE client_id=?`, p.ClientID).Scan(&after); err != nil {
+					return none, err
+				}
+				dirty = dirty || before != after
 			}
-			if err = tx.QueryRowContext(ctx, `SELECT eligible FROM pro_usage_eligibility WHERE client_id=?`, p.ClientID).Scan(&after); err != nil {
-				return none, err
-			}
-			dirty = dirty || before != after
 		} else {
 			if p.Role != "owner_aggregate" && p.Role != "transit" && p.Role != "system_probe" {
 				return none, ErrUnavailable
