@@ -104,8 +104,8 @@ var diagnosticContextNames = [...]string{"unknown", "none", "canceled", "deadlin
 
 const (
 	diagnosticQueueCapacity   = 256
-	diagnosticSlowCapacity = 64
-	diagnosticSlowThreshold = time.Second
+	diagnosticSlowCapacity    = 64
+	diagnosticSlowThreshold   = time.Second
 	diagnosticActiveCapacity  = 64
 	diagnosticPacketLimit     = 512
 	diagnosticBatchLimit      = 16
@@ -156,17 +156,17 @@ type diagnosticCounters struct {
 }
 
 type phaseDiagnostics struct {
-	db       *sql.DB
-	queue    chan diagnosticRecord
+	db        *sql.DB
+	queue     chan diagnosticRecord
 	slowQueue chan diagnosticRecord
-	active   [diagnosticActiveCapacity]atomic.Pointer[diagnosticCurrent]
-	sequence atomic.Uint64
-	closed   atomic.Bool
-	started  atomic.Bool
-	stopOnce sync.Once
-	stop     chan struct{}
-	done     chan struct{}
-	counters diagnosticCounters
+	active    [diagnosticActiveCapacity]atomic.Pointer[diagnosticCurrent]
+	sequence  atomic.Uint64
+	closed    atomic.Bool
+	started   atomic.Bool
+	stopOnce  sync.Once
+	stop      chan struct{}
+	done      chan struct{}
+	counters  diagnosticCounters
 }
 
 // EnablePhaseDiagnostics is startup-only. It does not open a connection, start
@@ -501,4 +501,3 @@ func diagnosticRecordPacket(r diagnosticRecord) []byte {
 	}
 	return packet
 }
-

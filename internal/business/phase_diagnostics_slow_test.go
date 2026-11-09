@@ -40,17 +40,27 @@ func TestBusinessPhaseDiagnosticsSlowBoundedLossAndShutdown(t *testing.T) {
 	d := newPhaseDiagnostics(nil)
 	r := diagnosticTestRecord()
 	r.kind, r.duration = diagnosticPhaseEnd, int64(time.Second)
-	for n := 0; n < diagnosticSlowCapacity+7; n++ { d.record(r) }
-	for n := 0; n < diagnosticQueueCapacity+3; n++ { d.record(diagnosticTestRecord()) }
+	for n := 0; n < diagnosticSlowCapacity+7; n++ {
+		d.record(r)
+	}
+	for n := 0; n < diagnosticQueueCapacity+3; n++ {
+		d.record(diagnosticTestRecord())
+	}
 	s := d.snapshot()
-	if s.pending != diagnosticSlowCapacity+diagnosticQueueCapacity || s.queueFull != 10 || s.attempted != s.enqueued+s.queueFull { t.Fatal("bounded admission accounting mismatch") }
+	if s.pending != diagnosticSlowCapacity+diagnosticQueueCapacity || s.queueFull != 10 || s.attempted != s.enqueued+s.queueFull {
+		t.Fatal("bounded admission accounting mismatch")
+	}
 	d.flushEvents(nil)
-	if len(d.slowQueue) != diagnosticSlowCapacity-diagnosticBatchLimit/2 || len(d.queue) != diagnosticQueueCapacity-diagnosticBatchLimit/2 || d.snapshot().transportDropped != diagnosticBatchLimit { t.Fatal("batch lost fairness, output bound, or transport-loss accounting") }
+	if len(d.slowQueue) != diagnosticSlowCapacity-diagnosticBatchLimit/2 || len(d.queue) != diagnosticQueueCapacity-diagnosticBatchLimit/2 || d.snapshot().transportDropped != diagnosticBatchLimit {
+		t.Fatal("batch lost fairness, output bound, or transport-loss accounting")
+	}
 	d.closed.Store(true)
 	d.discardQueued()
 	d.record(r)
 	s = d.snapshot()
-	if s.pending != 0 || s.closedDropped != 1 || s.enqueued != s.transportDropped+s.shutdownDropped || s.attempted != s.enqueued+s.queueFull+s.closedDropped { t.Fatal("shutdown loss was hidden") }
+	if s.pending != 0 || s.closedDropped != 1 || s.enqueued != s.transportDropped+s.shutdownDropped || s.attempted != s.enqueued+s.queueFull+s.closedDropped {
+		t.Fatal("shutdown loss was hidden")
+	}
 }
 
 func TestBusinessPhaseDiagnosticsSlowThresholdAndBorrowing(t *testing.T) {
@@ -60,12 +70,20 @@ func TestBusinessPhaseDiagnosticsSlowThresholdAndBorrowing(t *testing.T) {
 	d.record(r)
 	r.duration++
 	d.record(r)
-	if len(d.queue) != 1 || len(d.slowQueue) != 1 { t.Fatal("threshold boundary mismatch") }
+	if len(d.queue) != 1 || len(d.slowQueue) != 1 {
+		t.Fatal("threshold boundary mismatch")
+	}
 	d.flushEvents(nil)
-	if d.snapshot().pending != 0 || d.snapshot().transportDropped != 2 { t.Fatal("unused lane slots were not borrowed") }
-	for n := 0; n < diagnosticBatchLimit; n++ { d.record(r) }
+	if d.snapshot().pending != 0 || d.snapshot().transportDropped != 2 {
+		t.Fatal("unused lane slots were not borrowed")
+	}
+	for n := 0; n < diagnosticBatchLimit; n++ {
+		d.record(r)
+	}
 	d.flushEvents(nil)
-	if d.snapshot().pending != 0 || d.snapshot().transportDropped != diagnosticBatchLimit+2 { t.Fatal("slow-only batch was not drained within the output bound") }
+	if d.snapshot().pending != 0 || d.snapshot().transportDropped != diagnosticBatchLimit+2 {
+		t.Fatal("slow-only batch was not drained within the output bound")
+	}
 }
 
 func TestBusinessPhaseDiagnosticsSlowConcurrentAdmission(t *testing.T) {
@@ -77,15 +95,21 @@ func TestBusinessPhaseDiagnosticsSlowConcurrentAdmission(t *testing.T) {
 			defer wg.Done()
 			for n := 0; n < 1000; n++ {
 				r := diagnosticTestRecord()
-				if n%2 == 0 { r.kind, r.duration = diagnosticPhaseEnd, int64(time.Second) }
+				if n%2 == 0 {
+					r.kind, r.duration = diagnosticPhaseEnd, int64(time.Second)
+				}
 				d.record(r)
 			}
 		}()
 	}
-	for n := 0; n < 100; n++ { d.flushEvents(nil) }
+	for n := 0; n < 100; n++ {
+		d.flushEvents(nil)
+	}
 	d.closed.Store(true)
 	wg.Wait()
 	d.discardQueued()
 	s := d.snapshot()
-	if s.pending != 0 || s.producers != 0 || s.attempted != 8000 || s.attempted != s.enqueued+s.queueFull+s.closedDropped || s.enqueued != s.transportDropped+s.shutdownDropped { t.Fatal("concurrent accounting mismatch") }
+	if s.pending != 0 || s.producers != 0 || s.attempted != 8000 || s.attempted != s.enqueued+s.queueFull+s.closedDropped || s.enqueued != s.transportDropped+s.shutdownDropped {
+		t.Fatal("concurrent accounting mismatch")
+	}
 }

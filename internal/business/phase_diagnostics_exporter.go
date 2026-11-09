@@ -178,4 +178,3 @@ func (d *phaseDiagnostics) runExporter(journal *phaseDiagnosticJournal) {
 		nextSummary = time.Now().Add(diagnosticSummaryInterval)
 	}
 }
-
