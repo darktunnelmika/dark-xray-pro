@@ -1,0 +1,55 @@
+name: PR189 pinned deployable LAB bundle
+on:
+  push:
+    branches: ["ci-recovery/pr189-bundle-20261109"]
+permissions:
+  contents: read
+  actions: read
+env:
+  DXP_SOURCE: fcad97b38fb95748ee91767be094fabe5cf81646
+jobs:
+  bundle:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Verify previous diagnostic acceptance
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 - <<'PY'
+          import urllib.request,os,json
+          u='https://api.github.com/repos/darktunnelmika/dark-xray-pro/actions/runs/42690145691'
+          q=urllib.request.Request(u,headers={'Authorization':'Bearer '+os.environ['GH_TOKEN']})
+          d=json.load(urllib.request.urlopen(q,timeout=30))
+          assert d['head_sha']==os.environ['DXP_SOURCE']
+          assert d['status']=='completed' and d['conclusion']=='success'
+          PY
+      - uses: actions/checkout@v4
+        with:
+          ref: fcad97b38fb95748ee91767be094fabe5cf81646
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Build verified static bundle with matching embedded UI
+        run: |
+          set -euo pipefail
+          go mod download
+          go mod verify
+          DARK_PRO_PINNED_COMMIT="$DXP_SOURCE" bash scripts/build-lab-bundle.sh
+          DARK_PRO_REQUIRE_EMBEDDED_UI=1 go test ./internal/webui -run '^TestReleaseContainsCompiledUI$' -count=1 -v
+          tar -czf pr189-lab-bundle.tar.gz -C release .
+          sha256sum pr189-lab-bundle.tar.gz > pr189-lab-bundle.tar.gz.sha256
+          echo "$DXP_SOURCE" > source-commit.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pr189-deployable-lab-bundle
+          path: |
+            pr189-lab-bundle.tar.gz
+            pr189-lab-bundle.tar.gz.sha256
+            source-commit.txt
+          if-no-files-found: error
+          retention-days: 7
