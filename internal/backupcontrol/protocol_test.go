@@ -17,6 +17,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -51,6 +52,41 @@ func TestProtocolRejectsAmbiguousMutationJSONAndQueries(t *testing.T) {
 	}
 }
 
+// A socket pathname is published by bind, before listen makes it connectable.
+// Probe only the transport so readiness does not consume handler requests.
+func unixTestListenerReady(path string) bool {
+	conn, err := net.DialTimeout("unix", path, 100*time.Millisecond)
+	if err != nil {
+		return false
+	}
+	_ = conn.Close()
+	return true
+}
+
+func TestUnixTestReadinessRejectsBoundSocket(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "control.sock")
+	fd, err := syscall.Socket(syscall.AF_UNIX, syscall.SOCK_STREAM|syscall.SOCK_CLOEXEC, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer syscall.Close(fd)
+	if err := syscall.Bind(fd, &syscall.SockaddrUnix{Name: path}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(path); err != nil {
+		t.Fatal(err)
+	}
+	if unixTestListenerReady(path) {
+		t.Fatal("bound but non-listening socket reported ready")
+	}
+	if err := syscall.Listen(fd, 1); err != nil {
+		t.Fatal(err)
+	}
+	if !unixTestListenerReady(path) {
+		t.Fatal("listening socket not ready")
+	}
+}
+
 func startUnixForTest(t *testing.T, handler http.Handler) (*Client, context.CancelFunc, <-chan struct{}) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "control.sock")
@@ -63,7 +99,7 @@ func startUnixForTest(t *testing.T, handler http.Handler) (*Client, context.Canc
 	}()
 	deadline := time.Now().Add(3 * time.Second)
 	for {
-		if _, e := os.Lstat(path); e == nil {
+		if unixTestListenerReady(path) {
 			break
 		}
 		select {
@@ -128,7 +164,7 @@ func TestUnixClientRoundTripAndStreamingHasNoMetadataDeadline(t *testing.T) {
 	ctx := context.Background()
 	status, e := client.Status(ctx)
 	if e != nil || len(status.Archives) != 1 || status.Capabilities.Restore || status.Capabilities.Upload {
-		t.Fatalf("status: %+v %v", status, e)
+		t.Fatalf("status: %+v %v; handler status calls=%d", status, e, statusCalls.Load())
 	}
 	// Only the delayed stream probe gets the deliberately tiny metadata
 	// deadlines. Its 100 ms server delay must outlive both 50 ms budgets,

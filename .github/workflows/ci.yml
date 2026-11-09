@@ -260,6 +260,8 @@ jobs:
             test -s "$path" || { echo "MISSING expected Go module: $path"; exit 1; }
           done
           test ! -e backend/dark_policy.py || { echo "Legacy HUB files must not be imported into PRO"; exit 1; }
+      - name: Repeat Unix backup readiness and metadata streaming boundary
+        run: go test -race ./internal/backupcontrol -run '^TestUnix(TestReadinessRejectsBoundSocket|ClientRoundTripAndStreamingHasNoMetadataDeadline)$' -count=25 -timeout=120s -v
       - name: Go unit/race tests for all remaining packages
         shell: bash
         run: |
