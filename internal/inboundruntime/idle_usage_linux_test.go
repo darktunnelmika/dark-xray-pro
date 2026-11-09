@@ -76,3 +76,63 @@ func TestWorkerIdleUsageRequiresExactFreshEpochWitness(t *testing.T) {
 		t.Fatal("restart invented receipt freshness")
 	}
 }
+
+type usageAttemptClock struct {
+	Exchange
+	entered time.Time
+}
+
+func (x *usageAttemptClock) Usage(ctx context.Context, r ix.UsageReport) (ix.UsageReceipt, error) {
+	x.entered = time.Now()
+	return x.Exchange.Usage(ctx, r)
+}
+
+func TestWorkerIdleUsageIntervalIncludesReceiptWait(t *testing.T) {
+	w, p, next := fixtureWorker(t, "active")
+	x := &usageAttemptClock{Exchange: next}
+	before := time.Now()
+	if err := w.Step(context.Background(), x); err != nil {
+		t.Fatal(err)
+	}
+	if x.entered.IsZero() || w.lastUsageReceiptAt.Before(before) || w.lastUsageReceiptAt.After(x.entered) {
+		t.Fatal("idle interval started after usage delivery", before, x.entered, w.lastUsageReceiptAt)
+	}
+	// Advance only the decision clock, not wall time. At five seconds after
+	// entering Usage the request and acknowledgement wait already count.
+	if !w.usageReportDue(p.values, x.entered.Add(5*time.Second)) {
+		t.Fatal("receipt wait extended the accounting heartbeat")
+	}
+	if w.state.Pending != nil || w.lastUsageReceiptEpoch != w.state.Epoch.EpochID {
+		t.Fatal("heartbeat witness exists without an exact accepted receipt")
+	}
+}
+
+func TestWorkerReplayedUsageDoesNotRefreshHeartbeat(t *testing.T) {
+	w, p, x := fixtureWorker(t, "active")
+	x.loseOrdinary = true
+	if err := w.Step(context.Background(), x); err != errLostReceipt {
+		t.Fatal("expected ambiguous receipt", err)
+	}
+	if w.state.Pending == nil {
+		t.Fatal("lost receipt discarded pending report")
+	}
+	pending := *w.state.Pending
+	if err := w.sendPending(context.Background(), x); err != nil {
+		t.Fatal(err)
+	}
+	if w.state.Pending != nil || !w.lastUsageReceiptAt.IsZero() || !w.usageReportDue(p.values, time.Now()) {
+		t.Fatal("replayed receipt invented a fresh heartbeat")
+	}
+	if ReportSHA(x.receipts[pending.Sequence]) != ReportSHA(pending) {
+		t.Fatal("replay changed the accounting report")
+	}
+	if err := w.Step(context.Background(), x); err != nil {
+		t.Fatal(err)
+	}
+	if x.usageCalls != 3 || w.state.Sequence != pending.Sequence+1 || p.finals != 0 {
+		t.Fatal("active recovery did not refresh accounting before renewal")
+	}
+	if w.lastUsageReceiptAt.IsZero() || w.usageReportDue(p.values, time.Now()) {
+		t.Fatal("new exact receipt did not restore idle coalescing")
+	}
+}
