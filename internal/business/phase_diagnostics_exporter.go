@@ -23,7 +23,7 @@ func (d *phaseDiagnostics) snapshot() diagnosticSnapshot {
 		attempted: d.counters.attempted.Load(), enqueued: d.counters.enqueued.Load(), sent: d.counters.sent.Load(),
 		queueFull: d.counters.queueFull.Load(), transportDropped: d.counters.transportDropped.Load(), closedDropped: d.counters.closedDropped.Load(), formatDropped: d.counters.formatDropped.Load(),
 		shutdownDropped: d.counters.shutdownDropped.Load(), untrackedSpans: d.counters.untrackedSpans.Load(), invalid: d.counters.invalid.Load(), auxSendFailed: d.counters.auxSendFailed.Load(), stopTimeout: d.counters.stopTimeout.Load(),
-		pending: len(d.queue), producers: d.counters.producers.Load(), closed: d.closed.Load(),
+		pending: len(d.queue) + len(d.slowQueue), producers: d.counters.producers.Load(), closed: d.closed.Load(),
 	}
 	for i := range d.active {
 		if d.active[i].Load() != nil {
@@ -51,20 +51,39 @@ func diagnosticPoolPacket(stats sql.DBStats, sampled time.Time, duration time.Du
 	return packet
 }
 
+// Alternate reserved and ordinary slots, borrowing unused slots. Total output
+// remains bounded by diagnosticBatchLimit; neither lane can starve the other.
+func (d *phaseDiagnostics) nextRecord(slowFirst bool) (diagnosticRecord, bool) {
+	first, second := d.queue, d.slowQueue
+	if slowFirst {
+		first, second = second, first
+	}
+	select {
+	case r := <-first:
+		return r, true
+	default:
+	}
+	select {
+	case r := <-second:
+		return r, true
+	default:
+		return diagnosticRecord{}, false
+	}
+}
+
 func (d *phaseDiagnostics) flushEvents(journal *phaseDiagnosticJournal) {
 	for n := 0; n < diagnosticBatchLimit && !d.closed.Load(); n++ {
-		select {
-		case record := <-d.queue:
-			packet := diagnosticRecordPacket(record)
-			if packet == nil {
-				d.counters.formatDropped.Add(1)
-			} else if journal.send(packet) {
-				d.counters.sent.Add(1)
-			} else {
-				d.counters.transportDropped.Add(1)
-			}
-		default:
+		record, ok := d.nextRecord(n%2 == 0)
+		if !ok {
 			return
+		}
+		packet := diagnosticRecordPacket(record)
+		if packet == nil {
+			d.counters.formatDropped.Add(1)
+		} else if journal.send(packet) {
+			d.counters.sent.Add(1)
+		} else {
+			d.counters.transportDropped.Add(1)
 		}
 	}
 }
@@ -95,13 +114,11 @@ func (d *phaseDiagnostics) sendAux(journal *phaseDiagnosticJournal, packet []byt
 // A producer already inside record may finish after this pass. Such a late
 // queued record remains counted by pending; no final completeness is asserted.
 func (d *phaseDiagnostics) discardQueued() {
-	for n := 0; n < diagnosticQueueCapacity; n++ {
-		select {
-		case <-d.queue:
-			d.counters.shutdownDropped.Add(1)
-		default:
+	for n := 0; n < diagnosticQueueCapacity+diagnosticSlowCapacity; n++ {
+		if _, ok := d.nextRecord(n%2 == 0); !ok {
 			return
 		}
+		d.counters.shutdownDropped.Add(1)
 	}
 }
 

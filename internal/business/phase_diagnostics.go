@@ -104,6 +104,8 @@ var diagnosticContextNames = [...]string{"unknown", "none", "canceled", "deadlin
 
 const (
 	diagnosticQueueCapacity   = 256
+	diagnosticSlowCapacity    = 64
+	diagnosticSlowThreshold   = time.Second
 	diagnosticActiveCapacity  = 64
 	diagnosticPacketLimit     = 512
 	diagnosticBatchLimit      = 16
@@ -154,16 +156,17 @@ type diagnosticCounters struct {
 }
 
 type phaseDiagnostics struct {
-	db       *sql.DB
-	queue    chan diagnosticRecord
-	active   [diagnosticActiveCapacity]atomic.Pointer[diagnosticCurrent]
-	sequence atomic.Uint64
-	closed   atomic.Bool
-	started  atomic.Bool
-	stopOnce sync.Once
-	stop     chan struct{}
-	done     chan struct{}
-	counters diagnosticCounters
+	db        *sql.DB
+	queue     chan diagnosticRecord
+	slowQueue chan diagnosticRecord
+	active    [diagnosticActiveCapacity]atomic.Pointer[diagnosticCurrent]
+	sequence  atomic.Uint64
+	closed    atomic.Bool
+	started   atomic.Bool
+	stopOnce  sync.Once
+	stop      chan struct{}
+	done      chan struct{}
+	counters  diagnosticCounters
 }
 
 // EnablePhaseDiagnostics is startup-only. It does not open a connection, start
@@ -179,7 +182,7 @@ func (s *Store) EnablePhaseDiagnostics() error {
 }
 
 func newPhaseDiagnostics(db *sql.DB) *phaseDiagnostics {
-	return &phaseDiagnostics{db: db, queue: make(chan diagnosticRecord, diagnosticQueueCapacity), stop: make(chan struct{}), done: make(chan struct{})}
+	return &phaseDiagnostics{db: db, queue: make(chan diagnosticRecord, diagnosticQueueCapacity), slowQueue: make(chan diagnosticRecord, diagnosticSlowCapacity), stop: make(chan struct{}), done: make(chan struct{})}
 }
 
 // StartPhaseDiagnostics starts at most one exporter. The returned stop function
@@ -434,8 +437,14 @@ func (d *phaseDiagnostics) record(r diagnosticRecord) {
 		d.counters.closedDropped.Add(1)
 		return
 	}
+	// Reserve bounded admission for completed slow work. Ordinary phase chatter
+	// cannot occupy this queue. No request waits for diagnostics or a sink.
+	queue := d.queue
+	if (r.kind == diagnosticPhaseEnd || r.kind == diagnosticScopeExit) && r.duration >= int64(diagnosticSlowThreshold) {
+		queue = d.slowQueue
+	}
 	select {
-	case d.queue <- r:
+	case queue <- r:
 		d.counters.enqueued.Add(1)
 	default:
 		d.counters.queueFull.Add(1)
