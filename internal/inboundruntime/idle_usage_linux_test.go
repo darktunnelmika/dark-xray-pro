@@ -106,3 +106,33 @@ func TestWorkerIdleUsageIntervalIncludesReceiptWait(t *testing.T) {
 		t.Fatal("heartbeat witness exists without an exact accepted receipt")
 	}
 }
+
+func TestWorkerReplayedUsageDoesNotRefreshHeartbeat(t *testing.T) {
+	w, p, x := fixtureWorker(t, "active")
+	x.loseOrdinary = true
+	if err := w.Step(context.Background(), x); err != errLostReceipt {
+		t.Fatal("expected ambiguous receipt", err)
+	}
+	if w.state.Pending == nil {
+		t.Fatal("lost receipt discarded pending report")
+	}
+	pending := *w.state.Pending
+	if err := w.sendPending(context.Background(), x); err != nil {
+		t.Fatal(err)
+	}
+	if w.state.Pending != nil || !w.lastUsageReceiptAt.IsZero() || !w.usageReportDue(p.values, time.Now()) {
+		t.Fatal("replayed receipt invented a fresh heartbeat")
+	}
+	if ReportSHA(x.receipts[pending.Sequence]) != ReportSHA(pending) {
+		t.Fatal("replay changed the accounting report")
+	}
+	if err := w.Step(context.Background(), x); err != nil {
+		t.Fatal(err)
+	}
+	if x.usageCalls != 3 || w.state.Sequence != pending.Sequence+1 || p.finals != 0 {
+		t.Fatal("active recovery did not refresh accounting before renewal")
+	}
+	if w.lastUsageReceiptAt.IsZero() || w.usageReportDue(p.values, time.Now()) {
+		t.Fatal("new exact receipt did not restore idle coalescing")
+	}
+}

@@ -609,8 +609,15 @@ func (w *Worker) sendPending(ctx context.Context, x Exchange) error {
 	// report. Only an exact durable receipt enables coalescing, but its
 	// interval starts before delivery: slow acknowledgement or journal I/O
 	// must not grant an additional five seconds without a usage report.
-	w.lastUsageReceiptAt = started
-	w.lastUsageReceiptEpoch = r.EpochID
+	if receipt.Replayed {
+		// Replay settles the outbox but says nothing about the original
+		// receipt's age. Refresh active accounting before coalescing again.
+		w.lastUsageReceiptAt = time.Time{}
+		w.lastUsageReceiptEpoch = ""
+	} else {
+		w.lastUsageReceiptAt = started
+		w.lastUsageReceiptEpoch = r.EpochID
+	}
 	return nil
 }
 
