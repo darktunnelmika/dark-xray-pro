@@ -586,6 +586,7 @@ func (w *Worker) sendPending(ctx context.Context, x Exchange) error {
 		}
 	}
 	r := *w.state.Pending
+	started := time.Now()
 	receipt, e := x.Usage(ctx, r)
 	w.cfg.Diagnostics.recordError(diagnosticUsage, e)
 	if e != nil {
@@ -605,8 +606,10 @@ func (w *Worker) sendPending(ctx context.Context, x Exchange) error {
 		return err
 	}
 	// This witness is intentionally volatile: reopen must send an immediate
-	// report, and only an exact durable receipt starts the idle interval.
-	w.lastUsageReceiptAt = time.Now()
+	// report. Only an exact durable receipt enables coalescing, but its
+	// interval starts before delivery: slow acknowledgement or journal I/O
+	// must not grant an additional five seconds without a usage report.
+	w.lastUsageReceiptAt = started
 	w.lastUsageReceiptEpoch = r.EpochID
 	return nil
 }

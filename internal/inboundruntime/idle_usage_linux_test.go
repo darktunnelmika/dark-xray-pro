@@ -76,3 +76,33 @@ func TestWorkerIdleUsageRequiresExactFreshEpochWitness(t *testing.T) {
 		t.Fatal("restart invented receipt freshness")
 	}
 }
+
+type usageAttemptClock struct {
+	Exchange
+	entered time.Time
+}
+
+func (x *usageAttemptClock) Usage(ctx context.Context, r ix.UsageReport) (ix.UsageReceipt, error) {
+	x.entered = time.Now()
+	return x.Exchange.Usage(ctx, r)
+}
+
+func TestWorkerIdleUsageIntervalIncludesReceiptWait(t *testing.T) {
+	w, p, next := fixtureWorker(t, "active")
+	x := &usageAttemptClock{Exchange: next}
+	before := time.Now()
+	if err := w.Step(context.Background(), x); err != nil {
+		t.Fatal(err)
+	}
+	if x.entered.IsZero() || w.lastUsageReceiptAt.Before(before) || w.lastUsageReceiptAt.After(x.entered) {
+		t.Fatal("idle interval started after usage delivery", before, x.entered, w.lastUsageReceiptAt)
+	}
+	// Advance only the decision clock, not wall time. At five seconds after
+	// entering Usage the request and acknowledgement wait already count.
+	if !w.usageReportDue(p.values, x.entered.Add(5*time.Second)) {
+		t.Fatal("receipt wait extended the accounting heartbeat")
+	}
+	if w.state.Pending != nil || w.lastUsageReceiptEpoch != w.state.Epoch.EpochID {
+		t.Fatal("heartbeat witness exists without an exact accepted receipt")
+	}
+}

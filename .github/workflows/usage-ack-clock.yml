@@ -1,0 +1,33 @@
+name: Usage acknowledgement heartbeat
+on:
+  push:
+    branches: ["fix/usage-ack-clock-20261110"]
+permissions:
+  contents: read
+jobs:
+  heartbeat:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+      - run: go mod download && go mod verify
+      - name: Heartbeat and runtime contracts
+        run: go test -race ./internal/inboundruntime -count=1 -timeout=600s -json > runtime-tests.jsonl
+      - name: Static checks
+        run: |
+          go vet ./internal/inboundruntime
+          gofmt -d internal/inboundruntime/worker_linux.go internal/inboundruntime/idle_usage_linux_test.go > formatting.patch
+          test ! -s formatting.patch
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: usage-ack-clock-evidence
+          path: |
+            runtime-tests.jsonl
+            formatting.patch
+          if-no-files-found: error
+          retention-days: 7
