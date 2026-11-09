@@ -89,13 +89,15 @@ func (c *businessCheckpointer) run(ctx context.Context) {
 			attempt, cancel := context.WithTimeout(ctx, 30*time.Second)
 			started := time.Now()
 			attempted, _, frames, done, err := c.checkpointIfNeeded(attempt, started)
+			elapsed := time.Since(started)
+			deadlineExceeded := attempt.Err() == context.DeadlineExceeded
 			cancel()
 			if ctx.Err() != nil {
 				return
 			}
 			if err != nil {
-				if !failed {
-					log.Print("PRO background checkpoint unavailable; durable WAL retained for retry")
+				if !failed || elapsed > time.Second {
+					log.Printf("PRO background checkpoint unavailable elapsed_ms=%d attempted=%t deadline_exceeded=%t; durable WAL retained for retry", elapsed.Milliseconds(), attempted, deadlineExceeded)
 				}
 				failed = true
 				continue
@@ -104,8 +106,8 @@ func (c *businessCheckpointer) run(ctx context.Context) {
 				log.Print("PRO background checkpoint recovered")
 				failed = false
 			}
-			if attempted && time.Since(started) > time.Second {
-				log.Printf("PRO background checkpoint slow elapsed_ms=%d frames=%d checkpointed=%d", time.Since(started).Milliseconds(), frames, done)
+			if attempted && elapsed > time.Second {
+				log.Printf("PRO background checkpoint slow elapsed_ms=%d frames=%d checkpointed=%d", elapsed.Milliseconds(), frames, done)
 			}
 		}
 	}
