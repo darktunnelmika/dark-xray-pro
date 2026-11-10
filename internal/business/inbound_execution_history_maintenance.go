@@ -98,10 +98,11 @@ func pruneExecutionZeroBatch(parent context.Context, conn *sql.Conn, cursor exec
 			return
 		}
 		cutoff := time.Now().Add(-24 * time.Hour).UnixNano()
-		for _, k := range keys {
+		{
+            end := keys[len(keys)-1]
 			var r sql.Result
 			r, err = conn.ExecContext(ctx, `DELETE FROM inbound_execution_usage_deltas
- WHERE epoch_id=? AND sequence=? AND principal_id=?
+ WHERE (epoch_id,sequence,principal_id)>(?,?,?) AND (epoch_id,sequence,principal_id)<=(?,?,?)
  AND upload=0 AND download=0 AND sequence>1 AND EXISTS(
  SELECT 1 FROM inbound_execution_epochs e
  JOIN inbound_execution_usage_receipts r ON r.epoch_id=e.epoch_id AND r.sequence=inbound_execution_usage_deltas.sequence
@@ -110,7 +111,7 @@ func pruneExecutionZeroBatch(parent context.Context, conn *sql.Conn, cursor exec
  AND r.final=0 AND r.sequence<e.sequence AND r.created<? AND f.created<?
  AND NOT EXISTS(SELECT 1 FROM inbound_execution_usage_holds h WHERE h.epoch_id=e.epoch_id)
  AND NOT EXISTS(SELECT 1 FROM inbound_execution_liveness_holds h WHERE h.epoch_id=e.epoch_id)
- AND NOT EXISTS(SELECT 1 FROM inbound_execution_reconciliations x WHERE x.epoch_id=e.epoch_id))`, k.Epoch, k.Sequence, k.Principal, cutoff, cutoff)
+ AND NOT EXISTS(SELECT 1 FROM inbound_execution_reconciliations x WHERE x.epoch_id=e.epoch_id))`, cursor.Epoch, cursor.Sequence, cursor.Principal, end.Epoch, end.Sequence, end.Principal, cutoff, cutoff)
 			if err != nil {
 				return
 			}
