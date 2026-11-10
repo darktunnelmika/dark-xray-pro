@@ -134,6 +134,7 @@ func (s *Store) DetachManagedNode(ctx context.Context, key []byte, actor, event,
 	}
 	nexts := map[uint64]executionSnapshot{}
 	heads := map[uint64]executionHead{}
+	scopes := map[uint64]map[string]string{}
 	for _, id := range headsIDs {
 		h, e := readExecutionHead(ctx, tx, key, id)
 		if e != nil {
@@ -155,6 +156,7 @@ func (s *Store) DetachManagedNode(ctx context.Context, key []byte, actor, event,
 		if !changed {
 			continue
 		}
+		scopes[id] = executionSnapshotNodes(old)
 		old.Nodes = nodes
 		old.Ref.Revision = h.Revision + 1
 		if p, e := readNativeInboundPlan(ctx, tx, key, id); e == nil {
@@ -165,7 +167,7 @@ func (s *Store) DetachManagedNode(ctx context.Context, key []byte, actor, event,
 			return nil, e
 		}
 		if len(nodes) == 0 {
-			old.Dormant = true
+			old.Dormant = old.State == "active"
 			old.EffectiveClientIDs = []string{}
 			old.Principals = []ix.Principal{}
 			old.Profile.Users = nil
@@ -222,14 +224,20 @@ func (s *Store) DetachManagedNode(ctx context.Context, key []byte, actor, event,
 				action = "archive"
 			}
 			in := ix.CommandInput{EventID: op + fmt.Sprintf("-%d", id), Action: action, ExpectedRevision: h.Revision, ExpectedPlanRevision: next.Ref.PlanRevision, ExpectedInboundRevision: next.Ref.InboundRevision, ClientIDs: next.Bindings.ClientIDs, AccountingMode: next.Bindings.Mode, Reason: "Owner node lifecycle detach"}
-			a := executionAssessment{head: h, snapshot: next, bundles: bundles, preview: ix.Preview{Valid: true, Targets: []ix.TargetState{}, Blockers: []ix.Blocker{}}}
+			localBundles := []ix.Bundle{}
 			for _, b := range bundles {
+				if scopes[id][b.NodeID] == b.InstallationID {
+					localBundles = append(localBundles, b)
+				}
+			}
+			a := executionAssessment{head: h, snapshot: next, bundles: localBundles, preview: ix.Preview{Valid: true, Targets: []ix.TargetState{}, Blockers: []ix.Blocker{}}}
+			for _, b := range localBundles {
 				a.preview.Targets = append(a.preview.Targets, executionTarget(b))
 			}
 			in.ReviewSHA = fingerprint("node-detach-review", struct {
 				Snapshot executionSnapshot
 				Bundles  []ix.Bundle
-			}{next, bundles})
+			}{next, localBundles})
 			if _, e = commitExecutionAssessment(ctx, tx, key, actor, id, in, a, fingerprint("node-detach-command", in)); e != nil {
 				return nil, e
 			}

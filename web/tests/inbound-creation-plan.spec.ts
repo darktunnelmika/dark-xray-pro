@@ -1490,3 +1490,13 @@ for (const language of ["en", "fa"] as const) test(`TLS certificate review and f
   await expect(dialog.locator(".creation-footer")).toBeInViewport();
   await page.screenshot({ path: testInfo.outputPath(`tls-review-${language}-320.png`) });
 });
+
+test("an inbound with its last destination detached keeps the setup index and editor available", async ({page})=>{
+ const savedPlan:CreationPlan={profile:{id:701,name:"Detached destination setup",transport:"tcp",grpc_service:"",reality_target:"example.org:443",server_names:["example.org"],short_ids:["aabb"],public_key:"SYNTHETIC_PUBLIC_KEY",revision:1,enabled:false,archived:false,bound_clients:0},nodes:[],plan_revision:2,inbound_revision:1,status:"SAVED_DISABLED",last_event_id:"fixture-node-detach-event-701",reason:"Owner node detachment",created_unix:1800000000,updated_unix:1800000001,runtime_apply:false,editable:true};
+ const f=await fixture(page,{savedPlan});await page.goto("/inbounds?inbound=701&tab=overview");
+ await expect(page.getByRole("heading",{name:"Detached destination setup",exact:true})).toBeVisible();
+ await expect(page.getByRole("button",{name:"Open saved setup",exact:true})).toBeEnabled();await page.getByRole("button",{name:"Open saved setup",exact:true}).click();
+ const dialog=page.getByRole("dialog",{name:"Edit Inbound setup",exact:true});await expect(dialog).toBeVisible();
+ await expect(dialog.getByLabel("Inbound name",{exact:true})).toHaveValue("Detached destination setup");
+ await dialog.getByRole("tab",{name:"Dark Swap",exact:true}).click();const destinations=dialog.getByRole("checkbox",{name:/Select destination:/});await expect(destinations).toHaveCount(3);for(const box of await destinations.all())await expect(box).not.toBeChecked();expect(f.calls).toHaveLength(0);
+});

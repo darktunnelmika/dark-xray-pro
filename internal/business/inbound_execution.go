@@ -609,6 +609,9 @@ func inboundExecutionState(ctx context.Context, tx *sql.Tx, key []byte, id uint6
 	}
 	if h.Pending != "" {
 		v.AllowedActions = []string{"stop"}
+		if h.DesiredState == "stopped" {
+			v.AllowedActions = append(v.AllowedActions, "archive")
+		}
 		op, e := readExecutionOperation(ctx, tx, key, id, h.Pending)
 		if e != nil {
 			return v, e
@@ -668,7 +671,7 @@ func inboundExecutionState(ctx context.Context, tx *sql.Tx, key []byte, id uint6
 		if h.Pending != "" && h.DesiredState == "active" {
 			v.AllowedActions = []string{"apply", "restart", "stop"}
 		} else if h.Pending != "" && h.DesiredState == "stopped" {
-			v.AllowedActions = []string{"activate", "stop"}
+			v.AllowedActions = []string{"activate", "stop", "archive"}
 		}
 	}
 	if h.ActiveRevision > 0 && h.ActiveRevision == h.DesiredRevision && h.DesiredState == "active" {
@@ -958,7 +961,8 @@ func assessAuthorizedInboundExecution(ctx context.Context, tx *sql.Tx, key []byt
 		return a, ErrConflict
 	}
 	resumeAction := state.OwnerResumeRequired && (in.Action == "activate" || in.Action == "apply" || in.Action == "restart")
-	if h.DesiredState == "archived" && !(h.Pending != "" && in.Action == "stop") || h.Pending != "" && in.Action != "stop" && !resumeAction {
+	archivePendingStop := in.Action == "archive" && h.DesiredState == "stopped"
+	if h.DesiredState == "archived" && !(h.Pending != "" && in.Action == "stop") || h.Pending != "" && in.Action != "stop" && !resumeAction && !archivePendingStop {
 		return a, ErrConflict
 	}
 	if in.Action == "activate" && h.DesiredState == "active" || (in.Action == "apply" || in.Action == "restart") && h.DesiredState != "active" {
@@ -1124,6 +1128,17 @@ func (s *Store) QueueInboundExecution(ctx context.Context, key []byte, actor str
 	}
 	if in.Action == "activate" || in.Action == "apply" || in.Action == "restart" {
 		if err = resolveExecutionResume(ctx, tx, in.EventID, a.bundles); err != nil {
+			return ix.Operation{}, err
+		}
+	}
+	if len(a.bundles) == 0 {
+		// Empty desired topology has no remote acknowledgement to wait for. This
+		// completes only owner intent; retained epoch accounting is unchanged.
+		if err = completeExecutionOperation(ctx, tx, key, in.EventID); err != nil {
+			return ix.Operation{}, err
+		}
+		v, err = readExecutionOperation(ctx, tx, key, id, in.EventID)
+		if err != nil {
 			return ix.Operation{}, err
 		}
 	}
