@@ -28,6 +28,6 @@ jobs:
           go-version-file: go.mod
           cache: false
       - name: Verify compact receipts, replay, freshness and source preservation
-        run: go test -race -count=1 -timeout=120s ./internal/business -run '^(TestCompactOfflineReceiptsPreservesReplayAccountingAndFinal|TestIdleUsageStoresCompactProofWithoutChangingFreshnessOrReplay|TestCompactOfflineZeroDeltas|TestManagedInboundIdleAggregateAvoidsWrites|TestManagedInboundIdleReportsAvoidAccountWrites|TestManagedInboundIdleReportsKeepQuotaAndConflictChecks|TestExecutionHistoryMaintenancePreservesAccounting)$'
+        run: go test -race -count=1 -timeout=120s ./internal/business -run '^(TestCompactOfflineReceiptsPreservesReplayAccountingAndFinal|TestIdleUsageStoresCompactProofWithoutChangingFreshnessOrReplay|TestCompactOfflineZeroDeltas|TestManagedInboundIdleAggregateAvoidsWrites|TestManagedInboundIdleReportsAvoidAccountWrites|TestManagedInboundIdleReportsKeepQuotaAndConflictChecks|TestExecutionHistoryMaintenancePreservesAccounting|TestExecutionHistoryMaintenanceBoundedCursor)$'
       - name: Verify native backup, quarantine restore and snapshot contracts
         run: go test -race -count=1 -timeout=180s ./cmd/pro-backup ./internal/hubstate ./internal/probackup ./internal/backupworker

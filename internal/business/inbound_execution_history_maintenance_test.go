@@ -228,3 +228,40 @@ func TestExecutionHistoryMaintenancePreservesAccounting(t *testing.T) {
 		})
 	}
 }
+
+func TestExecutionHistoryMaintenanceBoundedCursor(t *testing.T) {
+ f:=newExecutionFixture(t)
+ defer f.s.Close()
+ ctx:=context.Background()
+ f.command(t,"history-bounded-activate-0001","activate")
+ b:=f.bundle(t)
+ e:=f.birth(t,b,"history-bounded-epoch-0001")
+ for seq:=uint64(1);seq<=131;seq++ {
+  up,down:=uint64(17),uint64(31)
+  if seq==1 {up,down=0,0}
+  if _,err:=f.s.AcceptInboundExecutionUsage(ctx,f.key,executionReport(b,e,seq,up,down,seq==131));err!=nil {t.Fatal(err)}
+ }
+ var ddl string
+ if err:=f.s.db.QueryRow("SELECT sql FROM sqlite_master WHERE name='inbound_execution_usage_receipts_no_update'").Scan(&ddl);err!=nil{t.Fatal(err)}
+ tx,err:=f.s.db.Begin();if err!=nil{t.Fatal(err)}
+ for _,q:=range []string{"DROP TRIGGER inbound_execution_usage_receipts_no_update","UPDATE inbound_execution_usage_receipts SET created=1",ddl}{
+  if _,err=tx.Exec(q);err!=nil{tx.Rollback();t.Fatal(err)}
+ }
+ if err=tx.Commit();err!=nil{t.Fatal(err)}
+ u:=url.URL{Scheme:"file",Path:f.path,RawQuery:"mode=rw&_pragma=busy_timeout(0)&_pragma=synchronous(FULL)&_pragma=foreign_keys(1)&_pragma=trusted_schema(OFF)"}
+ db,err:=sql.Open("sqlite",u.String());if err!=nil{t.Fatal(err)}
+ defer db.Close()
+ conn,err:=db.Conn(ctx);if err!=nil{t.Fatal(err)}
+ defer conn.Close()
+ first,err:=pruneExecutionZeroBatch(ctx,conn,executionHistoryCursor{})
+ if err!=nil || first.Scanned!=128 || first.Removed!=126 || first.Done {t.Fatal("first batch not bounded",first,err)}
+ second,err:=pruneExecutionZeroBatch(ctx,conn,first.Next)
+ if err!=nil || second.Scanned!=3 || second.Removed!=2 || second.Done {t.Fatal("continuation lost rows",second,err)}
+ last,err:=pruneExecutionZeroBatch(ctx,conn,second.Next)
+ if err!=nil || !last.Done || last.Removed!=0 {t.Fatal("scan did not finish",last,err)}
+ // A lost in-memory cursor is safe: replaying the sweep only sees protected rows.
+ restart,err:=pruneExecutionZeroBatch(ctx,conn,executionHistoryCursor{})
+ if err!=nil || restart.Removed!=0 || restart.Scanned!=3 {t.Fatal("restart was not idempotent",restart,err)}
+ var receipts int
+ if err=f.s.db.QueryRow("SELECT COUNT(*) FROM inbound_execution_usage_receipts WHERE epoch_id=?",e.EpochID).Scan(&receipts);err!=nil || receipts!=131 {t.Fatal("receipts pruned",receipts,err)}
+}
