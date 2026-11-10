@@ -45,32 +45,36 @@ func TestExecutionHistoryWorkerProgressWithAccounting(t *testing.T) {
 		t.Fatal(err)
 	}
 	active := f.birth(t, b, "worker-progress-active-0001")
-	worker, err := openExecutionHistoryMaintainer(f.path)
+	worker, err := openExecutionHistoryMaintainer(f.path, f.s.db)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer worker.close()
-	holder, err := f.s.db.Conn(ctx)
+	// Hold a DEFERRED accounting snapshot, not a SQLite write lock.
+	// A second writer must not commit between this read and its upgrade.
+	holder, err := f.s.db.BeginTx(ctx, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer holder.Close()
-	if _, err = holder.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
-		t.Fatal(err)
-	}
-	// Force at least one scheduled attempt to encounter the existing writer.
-	time.Sleep(1300 * time.Millisecond)
+	defer holder.Rollback()
 	var before int
 	if err = holder.QueryRowContext(ctx, "SELECT COUNT(*) FROM inbound_execution_usage_deltas WHERE epoch_id=?", e.EpochID).Scan(&before); err != nil {
 		t.Fatal(err)
 	}
-	if before != 35 {
-		t.Fatalf("worker changed locked history: %d", before)
-	}
-	if _, err = holder.ExecContext(ctx, "ROLLBACK"); err != nil {
+	time.Sleep(1300 * time.Millisecond)
+	var after int
+	if err = holder.QueryRowContext(ctx, "SELECT COUNT(*) FROM inbound_execution_usage_deltas WHERE epoch_id=?", e.EpochID).Scan(&after); err != nil {
 		t.Fatal(err)
 	}
-	holder.Close()
+	if before != 35 || after != before {
+		t.Fatal("accounting snapshot changed", before, after)
+	}
+	if _, err = holder.ExecContext(ctx, "UPDATE inbound_execution_epochs SET state=state WHERE epoch_id=?", e.EpochID); err != nil {
+		t.Fatal("maintenance invalidated accounting snapshot", err)
+	}
+	if err = holder.Commit(); err != nil {
+		t.Fatal(err)
+	}
 	for seq := uint64(1); seq <= 40; seq++ {
 		up, down := seq*7, seq*11
 		if seq == 1 {
@@ -104,7 +108,7 @@ func TestExecutionHistoryWorkerProgressWithAccounting(t *testing.T) {
 		t.Fatal(err)
 	}
 	// A new worker must safely rescan after losing its in-memory cursor.
-	worker, err = openExecutionHistoryMaintainer(f.path)
+	worker, err = openExecutionHistoryMaintainer(f.path, f.s.db)
 	if err != nil {
 		t.Fatal(err)
 	}

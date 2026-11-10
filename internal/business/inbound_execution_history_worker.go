@@ -10,15 +10,21 @@ import (
 )
 
 // This worker is created only after explicit runtime enablement. It owns its
-// connection and cursor, and never uses the accounting writer pool.
+// connection and cursor. It reserves (but never executes SQL on) the sole
+// accounting connection while pruning, so a deferred accounting transaction
+// cannot lose its read snapshot to a concurrent maintenance commit.
 type executionHistoryMaintainer struct {
 	db     *sql.DB
+	writer *sql.DB
 	cancel context.CancelFunc
 	done   chan struct{}
 	once   sync.Once
 }
 
-func openExecutionHistoryMaintainer(path string) (*executionHistoryMaintainer, error) {
+func openExecutionHistoryMaintainer(path string, writer *sql.DB) (*executionHistoryMaintainer, error) {
+	if writer == nil || writer.Stats().MaxOpenConnections != 1 {
+		return nil, ErrUnavailable
+	}
 	u := url.URL{Scheme: "file", Path: path, RawQuery: "mode=rw&_pragma=busy_timeout(0)&_pragma=synchronous(FULL)&_pragma=foreign_keys(1)&_pragma=trusted_schema(OFF)&_pragma=wal_autocheckpoint(0)"}
 	db, err := sql.Open("sqlite", u.String())
 	if err != nil {
@@ -34,7 +40,7 @@ func openExecutionHistoryMaintainer(path string) (*executionHistoryMaintainer, e
 		return nil, err
 	}
 	ctx, cancel = context.WithCancel(context.Background())
-	m := &executionHistoryMaintainer{db: db, cancel: cancel, done: make(chan struct{})}
+	m := &executionHistoryMaintainer{db: db, writer: writer, cancel: cancel, done: make(chan struct{})}
 	go m.run(ctx)
 	return m, nil
 }
@@ -58,8 +64,22 @@ func (m *executionHistoryMaintainer) run(ctx context.Context) {
 			return
 		case <-ticker.C:
 			attempt, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
+			// Reserve the Store writer before beginning maintenance. Merely
+			// testing InUse would race with a transaction acquiring its snapshot.
+			// SQL stays on the dedicated maintenance connection; release the
+			// reservation only after commit/rollback and connection cleanup.
+			reservation, err := m.writer.Conn(attempt)
+			if err != nil {
+				cancel()
+				if ctx.Err() != nil {
+					return
+				}
+				recordFailure(err)
+				continue
+			}
 			conn, err := m.db.Conn(attempt)
 			if err != nil {
+				reservation.Close()
 				cancel()
 				if ctx.Err() != nil {
 					return
@@ -69,6 +89,7 @@ func (m *executionHistoryMaintainer) run(ctx context.Context) {
 			}
 			batch, err := pruneExecutionZeroBatch(attempt, conn, cursor)
 			conn.Close()
+			reservation.Close()
 			cancel()
 			if ctx.Err() != nil {
 				return

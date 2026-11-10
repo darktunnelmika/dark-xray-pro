@@ -355,7 +355,7 @@ func Open(path string) (*Store, error) {
 		return fail(err)
 	}
 	if version == 16 && os.Getenv("DARK_PRO_USAGE_HISTORY_MAINTENANCE") == "1" {
-		s.historyMaintenance, err = openExecutionHistoryMaintainer(abs)
+		s.historyMaintenance, err = openExecutionHistoryMaintainer(abs, s.db)
 		if err != nil {
 			s.checkpoint.close()
 			s.readOnly.Close()
