@@ -44,6 +44,7 @@ var (
 )
 
 type Store struct {
+	historyMaintenance        *executionHistoryMaintainer
 	observationFreshness      executionObservationFreshness
 	checkpoint                *businessCheckpointer
 	db                        *sql.DB
@@ -353,6 +354,14 @@ func Open(path string) (*Store, error) {
 		_ = s.readOnly.Close()
 		return fail(err)
 	}
+	if version == 16 && os.Getenv("DARK_PRO_USAGE_HISTORY_MAINTENANCE") == "1" {
+		s.historyMaintenance, err = openExecutionHistoryMaintainer(abs, s.db)
+		if err != nil {
+			s.checkpoint.close()
+			s.readOnly.Close()
+			return fail(err)
+		}
+	}
 	return s, nil
 }
 func bootstrap(db *sql.DB) error {
@@ -380,12 +389,13 @@ func bootstrap(db *sql.DB) error {
 	return tx.Commit()
 }
 func (s *Store) Close() error {
+	historyErr := s.historyMaintenance.close()
 	checkpointErr := s.checkpoint.close()
 	var readErr error
 	if s.readOnly != nil {
 		readErr = s.readOnly.Close()
 	}
-	return errors.Join(checkpointErr, readErr, s.db.Close())
+	return errors.Join(historyErr, checkpointErr, readErr, s.db.Close())
 }
 func repScan(row interface{ Scan(...any) error }) (Representative, error) {
 	var r Representative

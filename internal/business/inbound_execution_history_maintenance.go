@@ -90,18 +90,11 @@ func pruneExecutionZeroBatch(parent context.Context, conn *sql.Conn, cursor exec
 	}
 	candidate := executionHistoryBatch{Next: cursor, Scanned: len(keys), Done: len(keys) == 0}
 	if len(keys) > 0 {
-		var ddl string
-		if err = conn.QueryRowContext(ctx, "SELECT sql FROM sqlite_master WHERE type='trigger' AND name='inbound_execution_usage_deltas_no_delete'").Scan(&ddl); err != nil {
-			return
-		}
-		if _, err = conn.ExecContext(ctx, "DROP TRIGGER inbound_execution_usage_deltas_no_delete"); err != nil {
-			return
-		}
+		end := keys[len(keys)-1]
+		candidate.Next = end
 		cutoff := time.Now().Add(-24 * time.Hour).UnixNano()
-		{
-            end := keys[len(keys)-1]
-			var r sql.Result
-			r, err = conn.ExecContext(ctx, `DELETE FROM inbound_execution_usage_deltas
+		args := []any{cursor.Epoch, cursor.Sequence, cursor.Principal, end.Epoch, end.Sequence, end.Principal, cutoff, cutoff}
+		const eligibleWindow = `FROM inbound_execution_usage_deltas
  WHERE (epoch_id,sequence,principal_id)>(?,?,?) AND (epoch_id,sequence,principal_id)<=(?,?,?)
  AND upload=0 AND download=0 AND sequence>1 AND EXISTS(
  SELECT 1 FROM inbound_execution_epochs e
@@ -111,21 +104,44 @@ func pruneExecutionZeroBatch(parent context.Context, conn *sql.Conn, cursor exec
  AND r.final=0 AND r.sequence<e.sequence AND r.created<? AND f.created<?
  AND NOT EXISTS(SELECT 1 FROM inbound_execution_usage_holds h WHERE h.epoch_id=e.epoch_id)
  AND NOT EXISTS(SELECT 1 FROM inbound_execution_liveness_holds h WHERE h.epoch_id=e.epoch_id)
- AND NOT EXISTS(SELECT 1 FROM inbound_execution_reconciliations x WHERE x.epoch_id=e.epoch_id))`, cursor.Epoch, cursor.Sequence, cursor.Principal, end.Epoch, end.Sequence, end.Principal, cutoff, cutoff)
-			if err != nil {
-				return
-			}
-			var n int64
-			n, err = r.RowsAffected()
-			if err != nil {
-				return
-			}
-			candidate.Removed += int(n)
+ AND NOT EXISTS(SELECT 1 FROM inbound_execution_reconciliations x WHERE x.epoch_id=e.epoch_id))`
+		var eligible bool
+		if err = conn.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 "+eligibleWindow+")", args...).Scan(&eligible); err != nil {
+			return
 		}
+		if !eligible {
+			// A read-only scan must not rewrite the trigger or sync a WAL commit.
+			// Its cursor can advance after rollback because no deletion was needed.
+			if _, err = conn.ExecContext(ctx, "ROLLBACK"); err != nil {
+				return
+			}
+			committed = true
+			result = candidate
+			return
+		}
+		var ddl string
+		if err = conn.QueryRowContext(ctx, "SELECT sql FROM sqlite_master WHERE type='trigger' AND name='inbound_execution_usage_deltas_no_delete'").Scan(&ddl); err != nil {
+			return
+		}
+		if _, err = conn.ExecContext(ctx, "DROP TRIGGER inbound_execution_usage_deltas_no_delete"); err != nil {
+			return
+		}
+		var deleted sql.Result
+		if deleted, err = conn.ExecContext(ctx, "DELETE "+eligibleWindow, args...); err != nil {
+			return
+		}
+		var n int64
+		if n, err = deleted.RowsAffected(); err != nil {
+			return
+		}
+		if n < 0 || n > int64(len(keys)) {
+			err = ErrUnavailable
+			return
+		}
+		candidate.Removed = int(n)
 		if _, err = conn.ExecContext(ctx, ddl); err != nil {
 			return
 		}
-		candidate.Next = keys[len(keys)-1]
 	}
 	if err = ctx.Err(); err != nil {
 		return
