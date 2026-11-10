@@ -104,9 +104,27 @@ func decode(w http.ResponseWriter, r *http.Request, max int64, dest any) error {
 // Cached telemetry never queries financial history or contacts Agents.
 func (s *Server) snapshot() telemetry.Fleet {
 	fleet := s.fleet.Snapshot()
+	kept := fleet.Nodes[:0]
+	for _, n := range fleet.Nodes {
+		a := s.registry.Lifecycle(n.NodeID)
+		if a.Status == "removed" {
+			if n.Status == "online" {
+				fleet.Online--
+			} else {
+				fleet.Offline--
+			}
+			fleet.RatesComplete = false
+			continue
+		}
+		kept = append(kept, n)
+	}
+	fleet.Nodes = kept
 	known := make(map[string]bool, len(fleet.Nodes))
 	authoritative := make(map[string]noderegistry.NodeInfo)
 	for _, n := range s.registry.List() {
+		if s.registry.Lifecycle(n.NodeID).Status == "removed" {
+			continue
+		}
 		authoritative[n.NodeID] = n
 	}
 	for i := range fleet.Nodes {

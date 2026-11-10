@@ -72,11 +72,13 @@ type receipt struct {
 }
 
 type diskState struct {
-	Version  int                    `json:"version"`
-	Invites  map[string]invitation  `json:"invites"`
-	Bindings map[string]binding     `json:"bindings"`
-	Receipts map[string]receipt     `json:"receipts"`
-	Renames  map[string]NameReceipt `json:"renames,omitempty"`
+	Version         int                         `json:"version"`
+	Invites         map[string]invitation       `json:"invites"`
+	Bindings        map[string]binding          `json:"bindings"`
+	Receipts        map[string]receipt          `json:"receipts"`
+	Renames         map[string]NameReceipt      `json:"renames,omitempty"`
+	Lifecycle       map[string]LifecycleState   `json:"lifecycle,omitempty"`
+	LifecycleEvents map[string]LifecycleReceipt `json:"lifecycle_events,omitempty"`
 }
 
 type Registry struct {
@@ -88,11 +90,13 @@ type Registry struct {
 
 func empty() diskState {
 	return diskState{
-		Version:  1,
-		Invites:  map[string]invitation{},
-		Bindings: map[string]binding{},
-		Receipts: map[string]receipt{},
-		Renames:  map[string]NameReceipt{},
+		Version:         1,
+		Invites:         map[string]invitation{},
+		Bindings:        map[string]binding{},
+		Receipts:        map[string]receipt{},
+		Renames:         map[string]NameReceipt{},
+		Lifecycle:       map[string]LifecycleState{},
+		LifecycleEvents: map[string]LifecycleReceipt{},
 	}
 }
 
@@ -131,6 +135,13 @@ func clone(s diskState) diskState {
 	}
 	for k, v := range s.Receipts {
 		d.Receipts[k] = v
+	}
+	for k, v := range s.Lifecycle {
+		d.Lifecycle[k] = v
+	}
+	for k, v := range s.LifecycleEvents {
+		v.InboundIDs = append([]uint64{}, v.InboundIDs...)
+		d.LifecycleEvents[k] = v
 	}
 	for k, v := range s.Renames {
 		d.Renames[k] = v
@@ -196,6 +207,9 @@ func Open(path string, clock func() time.Time) (*Registry, error) {
 			!validName(b.Info.Name) || !hex64Pattern.MatchString(b.TokenHash) {
 			return nil, ErrUnsafeState
 		}
+	}
+	if err := validateLifecycle(state); err != nil {
+		return nil, err
 	}
 	if err := validateRenames(state); err != nil {
 		return nil, err

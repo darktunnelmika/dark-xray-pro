@@ -54,7 +54,7 @@ func (s *Server) attachNodeDependencies(mux *http.ServeMux) {
 			"observed_at": time.Now().UTC(), "coverage": "native_sqlite_and_retained_journals",
 			"atomic_across_stores": false, "can_retire": false, "can_replace": false,
 			"counts": snapshot.Counts, "unknown_reasons": snapshot.UnknownReasons,
-			"lifecycle_blocker": "atomic_node_lifecycle_not_implemented",
+			"lifecycle_blocker": "use_owner_node_lifecycle",
 		})
 	})
 }

@@ -380,8 +380,12 @@ func (s *Server) executionNode(node, install string) bool {
 	if node == localHubNodeID {
 		return install == s.localHubInstallation()
 	}
-	actual, ok := s.nativeNode(node)
-	return ok && actual == install
+	for _, registration := range s.registry.List() {
+		if registration.NodeID == node && registration.InstallationID == install {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Server) executionCapabilities(c inboundruntime.Capabilities) bool {
@@ -422,6 +426,9 @@ func (s *Server) executionDelivery(ctx context.Context, input inboundruntime.Pol
 			// authority. A subsequent poll must earn a fresh bundle and lease.
 			return &inboundruntime.Delivery{Clearance: &clearance}, nil
 		}
+	}
+	if input.NodeID != localHubNodeID && !s.registry.DeploymentAllowed(input.NodeID, input.InstallationID) {
+		return nil, business.ErrConflict
 	}
 	if !s.executionCapabilities(input.Capabilities) {
 		return nil, business.ErrConflict
@@ -507,6 +514,9 @@ func (s *Server) executionEpochProvenance(ctx context.Context, in inboundexec.Ep
 		return err
 	} else if found {
 		return nil
+	}
+	if !settlement && in.NodeID != localHubNodeID && !s.registry.DeploymentAllowed(in.NodeID, in.InstallationID) {
+		return business.ErrConflict
 	}
 	if settlement {
 		approved, err := s.business.LookupInboundExecutionBinaryApproval(ctx, s.inboundKey, in)

@@ -40,5 +40,8 @@ func ValidateOfflineBackup(raw []byte) error {
 			return ErrUnsafeState
 		}
 	}
+	if err := validateLifecycle(state); err != nil {
+		return err
+	}
 	return validateRenames(state)
 }
