@@ -99,6 +99,9 @@ func TestDetachManagedLastNodeRetainsInboundAndClient(t *testing.T) {
 	defer f.s.Close()
 	ctx := context.Background()
 	f.command(t, "detach-last-node-active-0001", "activate")
+	oldBundle := f.bundle(t)
+	oldEpoch := f.birth(t, oldBundle, "detach-last-live-epoch-0001")
+	f.ready(t, oldBundle, oldEpoch)
 	ids, e := f.s.DetachManagedNode(ctx, f.key, "owner", "detach-last-node-0001", "remote-a", strings.Repeat("a", 32))
 	if e != nil || len(ids) != 1 {
 		t.Fatal(ids, e)
@@ -117,6 +120,14 @@ func TestDetachManagedLastNodeRetainsInboundAndClient(t *testing.T) {
 	var sealed int
 	if e = f.s.db.QueryRow(`SELECT COUNT(*) FROM inbound_execution_epochs WHERE state='sealed'`).Scan(&sealed); e != nil || sealed != 0 {
 		t.Fatal("fabricated settlement", sealed, e)
+	}
+	// A final from the detached installation still settles exact measured bytes.
+	if _, e = f.s.AcceptInboundExecutionUsage(ctx, f.key, executionReport(oldBundle, oldEpoch, 2, 23, 41, true)); e != nil {
+		t.Fatal("detached final rejected", e)
+	}
+	var up, down int64
+	if e = f.s.db.QueryRow(`SELECT uplink,downlink FROM pro_usage_accounts WHERE client_id=?`, f.client.ID).Scan(&up, &down); e != nil || up != 23 || down != 41 {
+		t.Fatal("detached final lost or double charged", up, down, e)
 	}
 }
 

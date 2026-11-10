@@ -1,6 +1,7 @@
 package noderegistry
 
 import (
+	"os"
 	"strings"
 	"testing"
 )
@@ -48,6 +49,13 @@ func TestLifecycleDurableFenceReplayAndManualEnable(t *testing.T) {
 	r, e = Open(path, nil)
 	if e != nil || r.Lifecycle("lab-1").Status != "removed" || r.DeploymentAllowed("lab-1", testInstall) {
 		t.Fatal(e)
+	}
+	raw, e := os.ReadFile(path)
+	if e != nil {
+		t.Fatal(e)
+	}
+	if e = ValidateOfflineBackup(raw); e != nil {
+		t.Fatal("lifecycle backup rejected", e)
 	}
 	in = LifecycleInput{EventID: strings.Repeat("d", 32), InstallationID: testInstall, ExpectedRevision: 4, Action: "enable"}
 	if _, e = r.BeginLifecycle("lab-1", "owner", in); e == nil {
