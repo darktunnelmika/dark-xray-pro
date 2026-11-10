@@ -52,7 +52,11 @@ func TestSparseIntermediateZeroHistoryRestoresAndContinues(t *testing.T) {
 	if err != nil {
 		t.Fatal("sparse idle report lost accounting freshness", err)
 	}
-	dst := filepath.Join(t.TempDir(), "snapshot.sqlite")
+	private := filepath.Join(t.TempDir(), "private")
+	if err = os.Mkdir(private, 0700); err != nil {
+		t.Fatal(err)
+	}
+	dst := filepath.Join(private, "snapshot.sqlite")
 	if _, err = f.s.db.Exec("VACUUM INTO ?", dst); err != nil {
 		t.Fatal(err)
 	}
