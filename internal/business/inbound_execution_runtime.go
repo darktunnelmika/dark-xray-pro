@@ -344,7 +344,7 @@ func (s *Store) AcceptInboundExecutionUsage(ctx context.Context, key []byte, in 
 			if p.Role != "owner_aggregate" && p.Role != "transit" && p.Role != "system_probe" {
 				return none, ErrUnavailable
 			}
-			if _, err = tx.ExecContext(ctx, `INSERT INTO inbound_execution_aggregate_totals(principal_id,node_id,inbound_id,role,upload,download) VALUES(?,?,?,?,?,?) ON CONFLICT(principal_id) DO UPDATE SET upload=upload+excluded.upload,download=download+excluded.download`, p.ID, node, p.InboundID, p.Role, int64(up), int64(down)); err != nil {
+			if _, err = tx.ExecContext(ctx, `INSERT INTO inbound_execution_aggregate_totals(principal_id,node_id,inbound_id,role,upload,download) VALUES(?,?,?,?,?,?) ON CONFLICT(principal_id) DO UPDATE SET upload=upload+excluded.upload,download=download+excluded.download WHERE excluded.upload<>0 OR excluded.download<>0`, p.ID, node, p.InboundID, p.Role, int64(up), int64(down)); err != nil {
 				return none, err
 			}
 		}
