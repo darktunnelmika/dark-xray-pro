@@ -188,6 +188,7 @@ jobs:
           cp scripts/ci/build-inbound-core.sh "$RUNNER_TEMP/inbound-artifact/overlay/scripts/ci/"
           cp scripts/core-overlay/inbound_stats.go.txt scripts/core-overlay/inbound_xdrive_test.go.txt scripts/core-overlay/inbound_tun_dns.go.txt scripts/core-overlay/inbound_tun_dns_test.go.txt scripts/core-overlay/inbound_vision_test.go.txt "$RUNNER_TEMP/inbound-artifact/overlay/scripts/core-overlay/"
           cp scripts/core-overlay/inbound_reality_readiness.go.txt scripts/core-overlay/inbound_reality_readiness_test.go.txt "$RUNNER_TEMP/inbound-artifact/overlay/scripts/core-overlay/"
+          cp scripts/core-overlay/inbound_udp_lifecycle_test.go.txt "$RUNNER_TEMP/inbound-artifact/overlay/scripts/core-overlay/"
           cp internal/corebarrierv2/barrier.go internal/corebarrierv2/barrier_test.go internal/corebarrierv2/README.md "$RUNNER_TEMP/inbound-artifact/overlay/internal/corebarrierv2/"
       - name: Build a separate race/checkptr instrumented test core
         working-directory: .inbound-core-v2

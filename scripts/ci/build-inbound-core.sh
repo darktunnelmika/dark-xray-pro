@@ -26,6 +26,7 @@ cd -- "$task_source"
 "$task_go" test -race ./transport/internet/xdrive -run '^TestDarkProStorageProbe' -count=1
 "$task_go" test -race ./proxy/tun -run '^(TestDarkPro|TestConfigureSystemDNS|TestUnsetSystemDNS)' -count=1
 "$task_go" test -race ./proxy -run '^TestDarkProVision' -count=1
+"$task_go" test -race ./transport/internet/udp -run '^TestDarkProUDPEntry' -count=1
 CGO_ENABLED=0 "$task_go" build -buildvcs=false -trimpath -o "$task_output/xray-inbound-v2" ./main
 chmod 0755 "$task_output/xray-inbound-v2"
 cp darkpro-inbound-provenance.json "$task_output/xray-inbound-v2.provenance.json"

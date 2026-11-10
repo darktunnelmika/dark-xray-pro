@@ -1,0 +1,76 @@
+package udp
+
+import (
+	"context"
+	"errors"
+	"sync"
+	"sync/atomic"
+	"testing"
+
+	"github.com/xtls/xray-core/common/net"
+	"github.com/xtls/xray-core/features/routing"
+	"github.com/xtls/xray-core/transport"
+)
+
+var darkProDispatchRejected = errors.New("test replacement refused")
+
+type darkProRejectDispatcher struct{}
+
+func (darkProRejectDispatcher) Type() interface{} { return routing.DispatcherType() }
+func (darkProRejectDispatcher) Start() error      { return nil }
+func (darkProRejectDispatcher) Close() error      { return nil }
+func (darkProRejectDispatcher) Dispatch(context.Context, net.Destination) (*transport.Link, error) {
+	return nil, darkProDispatchRejected
+}
+func (darkProRejectDispatcher) DispatchLink(context.Context, net.Destination, *transport.Link) error {
+	return darkProDispatchRejected
+}
+
+// Uses only the original entry/dispatcher API, so this exact test also builds
+// against the unpatched pin and must expose its unsynchronized closed flag.
+func TestDarkProUDPEntryTerminationConcurrentLookup(t *testing.T) {
+	for round := 0; round < 32; round++ {
+		var cancelled atomic.Int32
+		entry := &connEntry{link: &transport.Link{}, cancel: func() { cancelled.Add(1) }}
+		dispatcher := &Dispatcher{conn: entry, dispatcher: darkProRejectDispatcher{}}
+		start := make(chan struct{})
+		var wg sync.WaitGroup
+		for reader := 0; reader < 8; reader++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				<-start
+				for i := 0; i < 64; i++ {
+					got, err := dispatcher.getInboundRay(context.Background(), net.UDPDestination(net.LocalHostIP, 53))
+					if err == nil && got != entry {
+						t.Error("unexpected connection")
+					}
+					if err != nil && got != nil {
+						t.Error("failed dispatch returned connection")
+					}
+				}
+			}()
+		}
+		wg.Add(1)
+		go func() { defer wg.Done(); <-start; entry.terminate() }()
+		close(start)
+		wg.Wait()
+		if cancelled.Load() != 1 {
+			t.Fatal("termination did not cancel exactly once")
+		}
+		if got, err := dispatcher.getInboundRay(context.Background(), net.UDPDestination(net.LocalHostIP, 53)); err == nil || got != nil {
+			t.Fatal("terminated connection reused")
+		}
+	}
+}
+
+func TestDarkProUDPEntryDuplicateTerminationDoesNotCancelTwice(t *testing.T) {
+	var cancelled atomic.Int32
+	entry := &connEntry{link: &transport.Link{}, cancel: func() { cancelled.Add(1) }}
+	entry.terminate()
+	var recovered interface{}
+	func() { defer func() { recovered = recover() }(); entry.terminate() }()
+	if recovered == nil || cancelled.Load() != 1 {
+		t.Fatal("duplicate termination contract changed", recovered, cancelled.Load())
+	}
+}

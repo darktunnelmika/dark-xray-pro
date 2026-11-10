@@ -9,7 +9,10 @@ parser = argparse.ArgumentParser()
 parser.add_argument("events", type=Path)
 parser.add_argument("--matrix", action="store_true")
 parser.add_argument("--require", action="append", default=[])
+parser.add_argument("--expected-count", type=int, default=1)
 args = parser.parse_args()
+if args.expected_count < 1:
+    parser.error("expected-count must be positive")
 events = [json.loads(line) for line in args.events.read_text().splitlines() if line]
 required = set(args.require)
 if args.matrix:
@@ -24,7 +27,7 @@ if args.matrix:
 if not required:
     raise SystemExit("at least one required positive test must be specified")
 passed = collections.Counter(e.get("Test") for e in events if e.get("Action") == "pass")
-missing = sorted(name for name in required if passed[name] != 1)
+missing = sorted(name for name in required if passed[name] != args.expected_count)
 failed = [e.get("Test", e.get("Package", "unknown")) for e in events if e.get("Action") in ("skip", "fail")]
 race = any("WARNING: DATA RACE" in e.get("Output", "") for e in events)
 for event in events:
@@ -32,4 +35,4 @@ for event in events:
         print(event["Output"], end="")
 if missing or failed or race:
     raise SystemExit(f"positive inbound acceptance missing={missing}, skipped/failed={failed}, race={race}")
-print(f"Verified {len(required)} required positive inbound acceptance events")
+print(f"Verified {len(required)} required positive inbound tests, {args.expected_count} pass events each")

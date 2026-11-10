@@ -315,6 +315,13 @@ after(dispatcher, "func (d *DefaultDispatcher) DispatchLink(ctx context.Context,
 ''')
 
 udp = "transport/internet/udp/dispatcher.go"
+# Timer termination runs outside Dispatcher.Lock; the shared lifecycle flag
+# must synchronize with getInboundRay without locking around cancellation/I/O.
+replace(udp, '\t"sync"', '\t"sync"\n\t"sync/atomic"')
+replace(udp, '\tclosed bool\n', '\tclosed atomic.Bool\n')
+replace(udp, '\tif c.closed {', '\tif c.closed.Swap(true) {')
+replace(udp, '\tc.closed = true\n', '')
+replace(udp, '\t\tif v.conn.closed {', '\t\tif v.conn.closed.Load() {')
 replace(udp, "\tgo handleInput(ctx, entry, dest, v.callback, v.callClose)", "\tdarkpro.Go(ctx, func(){ handleInput(ctx, entry, dest, v.callback, v.callClose) })")
 ss = "proxy/shadowsocks_2022/shadowsocks_2022.go"
 replace(ss, "\tgo handleUDPResponse(s, link, dest, responseEncoder)", "\tdarkpro.Go(sessCtx, func(){ handleUDPResponse(s, link, dest, responseEncoder) })")
@@ -511,6 +518,7 @@ shutil.copyfile(repo / "scripts/core-overlay/inbound_xdrive_test.go.txt", source
 shutil.copyfile(repo / "scripts/core-overlay/inbound_tun_dns.go.txt", source / "proxy/tun/darkprov2_dns_linux.go")
 shutil.copyfile(repo / "scripts/core-overlay/inbound_tun_dns_test.go.txt", source / "proxy/tun/darkprov2_dns_linux_test.go")
 shutil.copyfile(repo / "scripts/core-overlay/inbound_vision_test.go.txt", source / "proxy/darkprov2_vision_test.go")
+shutil.copyfile(repo / "scripts/core-overlay/inbound_udp_lifecycle_test.go.txt", source / "transport/internet/udp/darkprov2_lifecycle_test.go")
 reality_overlays = {
     "scripts/core-overlay/inbound_reality_readiness.go.txt": "app/proxyman/inbound/darkprov2_reality.go",
     "scripts/core-overlay/inbound_reality_readiness_test.go.txt": "app/proxyman/inbound/darkprov2_reality_test.go",
@@ -523,11 +531,11 @@ provenance = {
     "upstream_source_sha256": HASHES,
     "overlay_sha256": {
         str(p.relative_to(repo)): hashlib.sha256(p.read_bytes()).hexdigest()
-        for p in (Path(__file__).resolve(), repo / "internal/corebarrierv2/barrier.go", repo / "scripts/core-overlay/inbound_stats.go.txt", repo / "scripts/core-overlay/inbound_xdrive_test.go.txt", repo / "scripts/core-overlay/inbound_tun_dns.go.txt", repo / "scripts/core-overlay/inbound_tun_dns_test.go.txt", repo / "scripts/core-overlay/inbound_vision_test.go.txt", *(repo / name for name in reality_overlays))
+        for p in (Path(__file__).resolve(), repo / "internal/corebarrierv2/barrier.go", repo / "scripts/core-overlay/inbound_stats.go.txt", repo / "scripts/core-overlay/inbound_xdrive_test.go.txt", repo / "scripts/core-overlay/inbound_tun_dns.go.txt", repo / "scripts/core-overlay/inbound_tun_dns_test.go.txt", repo / "scripts/core-overlay/inbound_vision_test.go.txt", repo / "scripts/core-overlay/inbound_udp_lifecycle_test.go.txt", *(repo / name for name in reality_overlays))
     },
     "patched_source_sha256": {
         name: hashlib.sha256((source / name).read_bytes()).hexdigest()
-        for name in sorted(list(HASHES) + ["common/darkprov2/barrier.go", "common/darkprov2/barrier_test.go", "app/stats/command/darkprov2.go", "transport/internet/xdrive/darkprov2_test.go", "proxy/tun/darkprov2_dns_linux.go", "proxy/tun/darkprov2_dns_linux_test.go", "proxy/darkprov2_vision_test.go"] + list(reality_overlays.values()))
+        for name in sorted(list(HASHES) + ["common/darkprov2/barrier.go", "common/darkprov2/barrier_test.go", "app/stats/command/darkprov2.go", "transport/internet/xdrive/darkprov2_test.go", "proxy/tun/darkprov2_dns_linux.go", "proxy/tun/darkprov2_dns_linux_test.go", "proxy/darkprov2_vision_test.go", "transport/internet/udp/darkprov2_lifecycle_test.go"] + list(reality_overlays.values()))
     },
 }
 (source / "darkpro-inbound-provenance.json").write_text(json.dumps(provenance, sort_keys=True, indent=2) + "\n")
