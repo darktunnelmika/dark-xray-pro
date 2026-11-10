@@ -147,10 +147,7 @@ func TestExecutionHistoryMaintenancePreservesAccounting(t *testing.T) {
 			for pass := 0; pass < 2; pass++ {
 				cursor := executionHistoryCursor{}
 				for {
-					got, err := pruneExecutionZeroBatch(ctx, conn, cursor)
-					if err != nil {
-						t.Fatal(err)
-					}
+					got := completedHistoryBatch(t, maintenance, cursor)
 					if got.Scanned > 16 {
 						t.Fatal("unbounded scan", got)
 					}
@@ -230,45 +227,118 @@ func TestExecutionHistoryMaintenancePreservesAccounting(t *testing.T) {
 }
 
 func TestExecutionHistoryMaintenanceBoundedCursor(t *testing.T) {
- f:=newExecutionFixture(t)
- defer f.s.Close()
- ctx:=context.Background()
- f.command(t,"history-bounded-activate-0001","activate")
- b:=f.bundle(t)
- e:=f.birth(t,b,"history-bounded-epoch-0001")
- for seq:=uint64(1);seq<=131;seq++ {
-  up,down:=uint64(17),uint64(31)
-  if seq==1 {up,down=0,0}
-  if _,err:=f.s.AcceptInboundExecutionUsage(ctx,f.key,executionReport(b,e,seq,up,down,seq==131));err!=nil {t.Fatal(err)}
- }
- var ddl string
- if err:=f.s.db.QueryRow("SELECT sql FROM sqlite_master WHERE name='inbound_execution_usage_receipts_no_update'").Scan(&ddl);err!=nil{t.Fatal(err)}
- tx,err:=f.s.db.Begin();if err!=nil{t.Fatal(err)}
- for _,q:=range []string{"DROP TRIGGER inbound_execution_usage_receipts_no_update","UPDATE inbound_execution_usage_receipts SET created=1",ddl}{
-  if _,err=tx.Exec(q);err!=nil{tx.Rollback();t.Fatal(err)}
- }
- if err=tx.Commit();err!=nil{t.Fatal(err)}
- u:=url.URL{Scheme:"file",Path:f.path,RawQuery:"mode=rw&_pragma=busy_timeout(0)&_pragma=synchronous(FULL)&_pragma=foreign_keys(1)&_pragma=trusted_schema(OFF)"}
- db,err:=sql.Open("sqlite",u.String());if err!=nil{t.Fatal(err)}
- defer db.Close()
- conn,err:=db.Conn(ctx);if err!=nil{t.Fatal(err)}
- defer conn.Close()
- first,err:=pruneExecutionZeroBatch(ctx,conn,executionHistoryCursor{})
- if err!=nil || first.Scanned!=16 || first.Removed!=14 || first.Done {t.Fatal("first batch not bounded",first,err)}
- cursor:=first.Next
- removed,scanned,batches:=first.Removed,first.Scanned,1
- for {
-  next,err:=pruneExecutionZeroBatch(ctx,conn,cursor)
-  if err!=nil || next.Scanned>16 {t.Fatal("bounded continuation failed",next,err)}
-  removed+=next.Removed;scanned+=next.Scanned
-  if next.Done {break}
-  if next.Next==cursor || batches>20 {t.Fatal("cursor did not advance",next)}
-  cursor=next.Next;batches++
- }
- if removed!=128 || scanned!=131 || batches!=9 {t.Fatal("sweep lost or duplicated rows",removed,scanned,batches)}
- // A lost in-memory cursor is safe: replaying the sweep only sees protected rows.
- restart,err:=pruneExecutionZeroBatch(ctx,conn,executionHistoryCursor{})
- if err!=nil || restart.Removed!=0 || restart.Scanned!=3 {t.Fatal("restart was not idempotent",restart,err)}
- var receipts int
- if err=f.s.db.QueryRow("SELECT COUNT(*) FROM inbound_execution_usage_receipts WHERE epoch_id=?",e.EpochID).Scan(&receipts);err!=nil || receipts!=131 {t.Fatal("receipts pruned",receipts,err)}
+	f := newExecutionFixture(t)
+	defer f.s.Close()
+	ctx := context.Background()
+	f.command(t, "history-bounded-activate-0001", "activate")
+	b := f.bundle(t)
+	e := f.birth(t, b, "history-bounded-epoch-0001")
+	for seq := uint64(1); seq <= 131; seq++ {
+		up, down := uint64(17), uint64(31)
+		if seq == 1 {
+			up, down = 0, 0
+		}
+		if _, err := f.s.AcceptInboundExecutionUsage(ctx, f.key, executionReport(b, e, seq, up, down, seq == 131)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var ddl string
+	if err := f.s.db.QueryRow("SELECT sql FROM sqlite_master WHERE name='inbound_execution_usage_receipts_no_update'").Scan(&ddl); err != nil {
+		t.Fatal(err)
+	}
+	tx, err := f.s.db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, q := range []string{"DROP TRIGGER inbound_execution_usage_receipts_no_update", "UPDATE inbound_execution_usage_receipts SET created=1", ddl} {
+		if _, err = tx.Exec(q); err != nil {
+			tx.Rollback()
+			t.Fatal(err)
+		}
+	}
+	if err = tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	u := url.URL{Scheme: "file", Path: f.path, RawQuery: "mode=rw&_pragma=busy_timeout(0)&_pragma=synchronous(FULL)&_pragma=foreign_keys(1)&_pragma=trusted_schema(OFF)"}
+	db, err := sql.Open("sqlite", u.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	conn, err := db.Conn(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	first := completedHistoryBatch(t, db, executionHistoryCursor{})
+	if first.Scanned != 16 || first.Removed > 14 || first.Done {
+		t.Fatal("first batch not bounded", first)
+	}
+	cursor := first.Next
+	removed, scanned, batches := first.Removed, first.Scanned, 1
+	for {
+		next := completedHistoryBatch(t, db, cursor)
+		if next.Scanned > 16 {
+			t.Fatal("bounded continuation failed", next)
+		}
+		removed += next.Removed
+		scanned += next.Scanned
+		if next.Done {
+			break
+		}
+		if next.Next == cursor || batches > 20 {
+			t.Fatal("cursor did not advance", next)
+		}
+		cursor = next.Next
+		batches++
+	}
+	// A deadline can arrive after COMMIT but before its acknowledgement.
+	// Retrying the original cursor is safe; assert durable rows and totals
+	// rather than counting only acknowledged batch deletions.
+	var remaining int
+	var upload, download int64
+	if err = db.QueryRow("SELECT COUNT(*),SUM(upload),SUM(download) FROM inbound_execution_usage_deltas").Scan(&remaining, &upload, &download); err != nil || remaining != 3 || upload != 17 || download != 31 {
+		t.Fatal("sweep changed protected history or consumption", remaining, upload, download, err, removed, scanned, batches)
+	}
+	// A lost in-memory cursor is safe: replaying the sweep only sees protected rows.
+	restart := completedHistoryBatch(t, db, executionHistoryCursor{})
+	if restart.Removed != 0 || restart.Scanned != 3 {
+		t.Fatal("restart was not idempotent", restart)
+	}
+	var receipts int
+	if err = f.s.db.QueryRow("SELECT COUNT(*) FROM inbound_execution_usage_receipts WHERE epoch_id=?", e.EpochID).Scan(&receipts); err != nil || receipts != 131 {
+		t.Fatal("receipts pruned", receipts, err)
+	}
+}
+
+// Production intentionally retries failed bounded attempts. Exercise that same
+// contract rather than assuming scheduling cannot cross a 50ms deadline under
+// Race. The per-attempt budget is unchanged; errors must retain their cursor,
+// release/discard the connection and preserve the immutable trigger.
+func completedHistoryBatch(t *testing.T, db *sql.DB, cursor executionHistoryCursor) executionHistoryBatch {
+	t.Helper()
+	for attempt := 0; attempt < 20; attempt++ {
+		conn, err := db.Conn(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		start := time.Now()
+		result, err := pruneExecutionZeroBatch(context.Background(), conn, cursor)
+		conn.Close()
+		if time.Since(start) > time.Second {
+			t.Fatal("bounded maintenance blocked for over one second", err)
+		}
+		if err == nil {
+			return result
+		}
+		if !errors.Is(err, context.DeadlineExceeded) || result.Next != cursor || result.Scanned != 0 || result.Removed != 0 {
+			t.Fatal("unsafe failed maintenance attempt", result, err)
+		}
+		var triggers int
+		if e := db.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE type='trigger' AND name='inbound_execution_usage_deltas_no_delete'").Scan(&triggers); e != nil || triggers != 1 {
+			t.Fatal("retry lost immutable trigger", triggers, e)
+		}
+	}
+	t.Fatal("bounded maintenance made no progress after 20 independent attempts")
+	return executionHistoryBatch{}
 }
