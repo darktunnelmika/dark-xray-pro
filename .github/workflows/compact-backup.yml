@@ -1,0 +1,31 @@
+name: Compact backup accounting checks
+on:
+  push:
+    branches: ['fix/**']
+    paths:
+      - 'internal/business/backup_compact_receipts*'
+      - 'internal/business/backup_assets.go'
+      - 'internal/business/inbound_execution_runtime.go'
+      - 'internal/hubstate/**'
+      - 'cmd/pro-backup/**'
+      - '.github/workflows/compact-backup.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: compact-backup-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  compact-backup:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Verify compact receipts, replay, freshness and source preservation
+        run: go test -race -count=1 -timeout=120s ./internal/business -run '^(TestCompactOfflineReceiptsPreservesReplayAccountingAndFinal|TestIdleUsageStoresCompactProofWithoutChangingFreshnessOrReplay)$'
+      - name: Verify native backup, quarantine restore and snapshot contracts
+        run: go test -race -count=1 -timeout=180s ./cmd/pro-backup ./internal/hubstate ./internal/probackup

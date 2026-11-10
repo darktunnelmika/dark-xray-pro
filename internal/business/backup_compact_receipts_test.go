@@ -51,7 +51,11 @@ func TestCompactOfflineReceiptsPreservesReplayAccountingAndFinal(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			dst := filepath.Join(t.TempDir(), "snapshot.sqlite")
+			private := filepath.Join(t.TempDir(), "private")
+			if err = os.Mkdir(private, 0700); err != nil {
+				t.Fatal(err)
+			}
+			dst := filepath.Join(private, "snapshot.sqlite")
 			if _, err = f.s.db.ExecContext(ctx, "VACUUM INTO ?", dst); err != nil {
 				t.Fatal(err)
 			}
