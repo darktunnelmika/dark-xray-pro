@@ -79,7 +79,11 @@ func TestCompactOfflineZeroDeltas(t *testing.T) {
 			if err := f.s.db.QueryRow("SELECT report_enc FROM inbound_execution_usage_receipts WHERE epoch_id=? AND sequence=4", e.EpochID).Scan(&terminal); err != nil {
 				t.Fatal(err)
 			}
-			dst := filepath.Join(t.TempDir(), "snapshot.sqlite")
+			private := filepath.Join(t.TempDir(), "private")
+			if err := os.Mkdir(private, 0700); err != nil {
+				t.Fatal(err)
+			}
+			dst := filepath.Join(private, "snapshot.sqlite")
 			if _, err := f.s.db.Exec("VACUUM INTO ?", dst); err != nil {
 				t.Fatal(err)
 			}
