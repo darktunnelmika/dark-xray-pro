@@ -43,7 +43,15 @@ func (m *executionHistoryMaintainer) run(ctx context.Context) {
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 	cursor := executionHistoryCursor{}
-	var removed, scanned int
+	var removed, scanned, failures int
+	var lastFailureLog time.Time
+	recordFailure := func(err error) {
+		failures++
+		if lastFailureLog.IsZero() || time.Since(lastFailureLog) >= time.Minute {
+			log.Printf("PRO usage history maintenance deferred attempts=%d error=%v", failures, err)
+			lastFailureLog = time.Now()
+		}
+	}
 	for {
 		select {
 		case <-ctx.Done():
@@ -53,6 +61,10 @@ func (m *executionHistoryMaintainer) run(ctx context.Context) {
 			conn, err := m.db.Conn(attempt)
 			if err != nil {
 				cancel()
+				if ctx.Err() != nil {
+					return
+				}
+				recordFailure(err)
 				continue
 			}
 			batch, err := pruneExecutionZeroBatch(attempt, conn, cursor)
@@ -62,8 +74,14 @@ func (m *executionHistoryMaintainer) run(ctx context.Context) {
 				return
 			}
 			if err != nil {
+				recordFailure(err)
 				continue
 			} // original cursor retained; retry on the next tick
+			if failures > 0 {
+				log.Printf("PRO usage history maintenance resumed deferred_attempts=%d", failures)
+				failures = 0
+				lastFailureLog = time.Time{}
+			}
 			cursor = batch.Next
 			removed += batch.Removed
 			scanned += batch.Scanned
