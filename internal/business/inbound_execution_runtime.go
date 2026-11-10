@@ -328,8 +328,7 @@ func (s *Store) AcceptInboundExecutionUsage(ctx context.Context, key []byte, in 
 			if uint64(oldUp) > math.MaxInt64-up || uint64(oldDown) > math.MaxInt64-down || uint64(oldUp)+up > math.MaxInt64-(uint64(oldDown)+down) {
 				return none, ErrConflict
 			}
-			// Idle cumulative reports still persist their receipt, cursor and zero
-			// delta evidence. Avoid rewriting unchanged account totals (and the
+			// Idle cumulative reports still persist their receipt and cursor. Avoid rewriting unchanged account totals (and the
 			// redundant post-update eligibility query) for each idle principal.
 			if up != 0 || down != 0 {
 				if _, err = tx.ExecContext(ctx, `UPDATE pro_usage_accounts SET uplink=?,downlink=? WHERE client_id=?`, oldUp+int64(up), oldDown+int64(down), p.ClientID); err != nil {
@@ -348,8 +347,14 @@ func (s *Store) AcceptInboundExecutionUsage(ctx context.Context, key []byte, in 
 				return none, err
 			}
 		}
-		if _, err = tx.ExecContext(ctx, `INSERT INTO inbound_execution_usage_deltas(epoch_id,sequence,principal_id,client_id,role,upload,download) VALUES(?,?,?,?,?,?,?)`, in.EpochID, in.Sequence, p.ID, p.ClientID, p.Role, int64(up), int64(down)); err != nil {
-			return none, err
+		// Intermediate zero deltas carry no consumption. Keep their exact
+		// receipt/cursor/freshness, while avoiding one ledger row per idle
+		// principal. Baseline associations, final and uncertain evidence stay
+		// dense; every nonzero delta is still committed with its account total.
+		if up != 0 || down != 0 || sequence == 0 || in.Final || state != "open" {
+			if _, err = tx.ExecContext(ctx, `INSERT INTO inbound_execution_usage_deltas(epoch_id,sequence,principal_id,client_id,role,upload,download) VALUES(?,?,?,?,?,?,?)`, in.EpochID, in.Sequence, p.ID, p.ClientID, p.Role, int64(up), int64(down)); err != nil {
+				return none, err
+			}
 		}
 	}
 	if in.Final && state != "uncertain" {

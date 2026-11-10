@@ -10,6 +10,7 @@ on:
       - 'internal/business/store.go'
       - 'internal/business/backup_assets.go'
       - 'internal/business/inbound_execution_runtime.go'
+      - 'internal/business/sparse_usage_history*'
       - 'internal/hubstate/**'
       - 'internal/backupworker/**'
       - 'cmd/pro-backup/**'
@@ -31,7 +32,7 @@ jobs:
           go-version-file: go.mod
           cache: false
       - name: Verify compact receipts, replay, freshness and source preservation
-        run: go test -race -count=1 -timeout=120s ./internal/business -run '^(TestCompactOfflineReceiptsPreservesReplayAccountingAndFinal|TestIdleUsageStoresCompactProofWithoutChangingFreshnessOrReplay|TestCompactOfflineZeroDeltas|TestManagedInboundIdleAggregateAvoidsWrites|TestManagedInboundIdleReportsAvoidAccountWrites|TestManagedInboundIdleReportsKeepQuotaAndConflictChecks|TestExecutionHistoryMaintenancePreservesAccounting|TestExecutionHistoryMaintenanceBoundedCursor|TestExecutionHistoryWorkerOptInAndClose|TestExecutionHistoryWorkerProgressWithAccounting|TestExecutionHistoryWorkerCloseWhileWriterBusy|TestExecutionHistoryWorkerRejectsUnsafeWriterPool|TestExecutionHistoryMaintenanceNoEligibleRowsDoesNotWrite)$'
+        run: go test -race -count=1 -timeout=120s ./internal/business -run '^(TestCompactOfflineReceiptsPreservesReplayAccountingAndFinal|TestIdleUsageStoresCompactProofWithoutChangingFreshnessOrReplay|TestCompactOfflineZeroDeltas|TestManagedInboundIdleAggregateAvoidsWrites|TestManagedInboundIdleReportsAvoidAccountWrites|TestManagedInboundIdleReportsKeepQuotaAndConflictChecks|TestExecutionHistoryMaintenancePreservesAccounting|TestExecutionHistoryMaintenanceBoundedCursor|TestExecutionHistoryWorkerOptInAndClose|TestExecutionHistoryWorkerProgressWithAccounting|TestExecutionHistoryWorkerCloseWhileWriterBusy|TestExecutionHistoryWorkerRejectsUnsafeWriterPool|TestExecutionHistoryMaintenanceNoEligibleRowsDoesNotWrite|TestSparseIntermediateZeroHistoryRestoresAndContinues)$'
       - name: Verify native backup, quarantine restore and snapshot contracts
         run: go test -race -count=1 -timeout=180s ./cmd/pro-backup ./internal/hubstate ./internal/probackup ./internal/backupworker
       - name: Build portable connected-host maintenance acceptance binary
