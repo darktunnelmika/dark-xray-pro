@@ -18,12 +18,12 @@ func TestCompactOfflineZeroDeltas(t *testing.T) {
 			f := newExecutionFixture(t)
 			defer f.s.Close()
 			ctx := context.Background()
-			if _, err := f.s.BindInboundExecutionClients(ctx, f.key, "owner", 501, ix.BindingsInput{EventID: "zero-bind-0001", ExpectedRevision: 0, ClientIDs: []string{f.client.ID}, AccountingMode: ix.AccountingPerClient, Reason: "Sparse zero backup test"}); err != nil {
+			if _, err := f.s.BindInboundExecutionClients(ctx, f.key, "owner", 501, ix.BindingsInput{EventID: "zero-backup-bind-0001", ExpectedRevision: 0, ClientIDs: []string{f.client.ID}, AccountingMode: ix.AccountingPerClient, Reason: "Sparse zero backup test"}); err != nil {
 				t.Fatal(err)
 			}
 			f.command(t, "zero-activate-0001", "activate")
 			b := f.bundle(t)
-			e := f.birth(t, b, "zero-epoch-0001")
+			e := f.birth(t, b, "zero-backup-epoch-0001")
 			reports := []ix.UsageReport{
 				executionReport(b, e, 1, 0, 0, false),
 				executionReport(b, e, 2, 100, 200, false),
