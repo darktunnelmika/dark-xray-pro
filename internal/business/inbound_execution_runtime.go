@@ -278,6 +278,7 @@ func (s *Store) AcceptInboundExecutionUsage(ctx context.Context, key []byte, in 
 	if sequence > 0 && len(previous) != len(in.Counters) {
 		return none, ErrUnavailable
 	}
+	idle := sequence > 0 && state == "open" && !in.Final
 	for i, c := range in.Counters {
 		if c.PrincipalID != b.Principals[i].ID {
 			return none, ErrConflict
@@ -285,11 +286,22 @@ func (s *Store) AcceptInboundExecutionUsage(ctx context.Context, key []byte, in 
 		if sequence == 0 && (c.Upload != 0 || c.Download != 0) {
 			return none, ErrConflict
 		}
+		if sequence > 0 && (previous[i].Upload != c.Upload || previous[i].Download != c.Download) {
+			idle = false
+		}
 		if sequence > 0 && (previous[i].PrincipalID != c.PrincipalID || c.Upload < previous[i].Upload || c.Download < previous[i].Download) {
 			return none, ErrConflict
 		}
 	}
-	enc, err := sealPlanValue(key, executionAAD("usage-report", in.EpochID, in.Sequence), in)
+	// Idle heartbeats retain the authenticated replay digest, not a duplicate
+	// full cumulative body. Baselines, changed counters, uncertain settlement
+	// and final proofs retain their full report. Receipt/delta/cursor durability
+	// and freshness timestamps remain in this same FULL transaction.
+	var storedReport any = in
+	if idle {
+		storedReport = hash
+	}
+	enc, err := sealPlanValue(key, executionAAD("usage-report", in.EpochID, in.Sequence), storedReport)
 	if err != nil {
 		return none, err
 	}
