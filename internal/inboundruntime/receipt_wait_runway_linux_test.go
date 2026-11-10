@@ -132,6 +132,12 @@ func TestBlockedUsageFinalTimeoutKeepsNonceAndDoesNotInventTail(t *testing.T) {
 }
 
 func TestWorkerRealUsageWaitFinalReplay(t *testing.T) {
+	realUsageWaitFinalReplay(t, false)
+}
+func TestWorkerRealUsageWaitThirtySeconds(t *testing.T) {
+	realUsageWaitFinalReplay(t, true)
+}
+func realUsageWaitFinalReplay(t *testing.T, fullLease bool) {
 	f := newRealCounterFailureFixture(t)
 	known := f.knownAndUnreportedTraffic(t)
 	w, base := f.worker, f.exchange
@@ -143,22 +149,32 @@ func TestWorkerRealUsageWaitFinalReplay(t *testing.T) {
 	}
 	probe := &realJournalSealProbe{w.process, make(chan struct{})}
 	w.process = probe
-	if !probe.Renew(time.Now().Add(1500 * time.Millisecond)) {
+	hardLease := 1500 * time.Millisecond
+	if fullLease {
+		hardLease = 30 * time.Second
+	}
+	nativeDeadline := time.Now().Add(hardLease)
+	if !probe.Renew(nativeDeadline) {
 		t.Fatal("short real lease refused")
 	}
 	w.deadline = time.Now().Add(12*time.Second + 30*time.Millisecond)
+	if fullLease {
+		w.deadline = nativeDeadline
+	}
 	x := &blockedRunwayExchange{base, make(chan struct{}), make(chan struct{}), false}
 	done := make(chan error, 1)
-	go func() { done <- w.sendPending(context.Background(), x) }()
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	go func() { done <- w.sendPending(ctx, x) }()
 	select {
 	case <-probe.sealed:
-	case <-time.After(2 * time.Second):
+	case <-time.After(hardLease + 2*time.Second):
 		close(x.release)
 		<-done
 		t.Fatal("real final barrier missed while commit blocked")
 	}
 	f.traffic(t, false)
-	deadline := time.Now().Add(3 * time.Second)
+	deadline := time.Now().Add(hardLease + time.Second)
 	for probe.Alive() && time.Now().Before(deadline) {
 		time.Sleep(20 * time.Millisecond)
 	}
