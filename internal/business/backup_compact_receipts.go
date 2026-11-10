@@ -57,8 +57,8 @@ func CompactOfflineExecutionReceipts(ctx context.Context, path string, key []byt
    WHERE e.state='sealed' AND r.final=0 AND r.sequence<e.sequence
    AND NOT EXISTS(SELECT 1 FROM inbound_execution_usage_holds h WHERE h.epoch_id=e.epoch_id)
    AND NOT EXISTS(SELECT 1 FROM inbound_execution_reconciliations x WHERE x.epoch_id=e.epoch_id)
-   AND (r.epoch_id>? OR (r.epoch_id=? AND r.sequence>?))
-   ORDER BY r.epoch_id,r.sequence LIMIT 256`, lastEpoch, lastEpoch, lastSequence)
+   AND (r.epoch_id,r.sequence)>(?,?)
+   ORDER BY r.epoch_id,r.sequence LIMIT 256`, lastEpoch, lastSequence)
 		if e != nil {
 			return e
 		}
@@ -68,6 +68,7 @@ func CompactOfflineExecutionReceipts(ctx context.Context, path string, key []byt
 			enc         []byte
 		}
 		batch := []receipt{}
+		batchBytes := 0
 		for rows.Next() {
 			var r receipt
 			if e = rows.Scan(&r.epoch, &r.sequence, &r.hash, &r.enc); e != nil {
@@ -75,6 +76,10 @@ func CompactOfflineExecutionReceipts(ctx context.Context, path string, key []byt
 				return e
 			}
 			batch = append(batch, r)
+			batchBytes += len(r.enc)
+			if batchBytes >= 8<<20 {
+				break
+			}
 		}
 		e = rows.Err()
 		rows.Close()
