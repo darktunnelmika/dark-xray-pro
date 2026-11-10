@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	ix "github.com/darktunnelmika/dark-xray-pro/internal/inboundexec"
+	"os"
 	"path/filepath"
 	"testing"
 )
@@ -53,6 +54,9 @@ func TestSparseIntermediateZeroHistoryRestoresAndContinues(t *testing.T) {
 	}
 	dst := filepath.Join(t.TempDir(), "snapshot.sqlite")
 	if _, err = f.s.db.Exec("VACUUM INTO ?", dst); err != nil {
+		t.Fatal(err)
+	}
+	if err = os.Chmod(dst, 0600); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = ValidateOfflineBackup(ctx, dst); err != nil {
