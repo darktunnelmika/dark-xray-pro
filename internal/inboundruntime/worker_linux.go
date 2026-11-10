@@ -587,7 +587,7 @@ func (w *Worker) sendPending(ctx context.Context, x Exchange) error {
 	}
 	r := *w.state.Pending
 	started := time.Now()
-	receipt, e := x.Usage(ctx, r)
+	receipt, e := w.usageWithRunway(ctx, x, r)
 	w.cfg.Diagnostics.recordError(diagnosticUsage, e)
 	if e != nil {
 		return e

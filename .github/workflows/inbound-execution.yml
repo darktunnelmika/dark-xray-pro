@@ -270,7 +270,7 @@ jobs:
               --bounding-set=-all --inh-caps=-all --ambient-caps=-all --no-new-privs -- \
               env -i PATH=/usr/bin:/bin LANG=C TMPDIR="$3" \
                 DARK_PRO_TEST_INBOUND_CORE="$4" DXP_INBOUND_CORE_V2_SHA256="$5" \
-                "$6" -test.run="^TestWorkerRealCounterDeadline(FinalReplay|AndEngineLossFencesTail)$" \
+                "$6" -test.run="^TestWorkerReal(CounterDeadline(FinalReplay|AndEngineLossFencesTail)|BlockedUsageWaitKeepsFinalAfterHardLeaseKill)$" \
                   -test.v -test.timeout=90s
           ' -- "$task_uid" "$task_gid" "$task_temp" "$DARK_PRO_TEST_INBOUND_CORE" \
             "$DXP_INBOUND_CORE_V2_SHA256" "$RUNNER_TEMP/native-counter-recovery.test" \
@@ -278,7 +278,8 @@ jobs:
                 > "$RUNNER_TEMP/native-counter-recovery.jsonl"
           python3 scripts/ci/assert-inbound-acceptance.py "$RUNNER_TEMP/native-counter-recovery.jsonl" \
             --require TestWorkerRealCounterDeadlineFinalReplay \
-            --require TestWorkerRealCounterDeadlineAndEngineLossFencesTail
+            --require TestWorkerRealCounterDeadlineAndEngineLossFencesTail \
+            --require TestWorkerRealBlockedUsageWaitKeepsFinalAfterHardLeaseKill
       - name: Prove exact representative refunds after real partial traffic and final-tail settlement
         shell: bash
         run: |
