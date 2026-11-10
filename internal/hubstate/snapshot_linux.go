@@ -54,7 +54,13 @@ func CollectSources(l *Lock, inv Inventory) ([]Source, error) {
 // SQLite database through SQLite: committed WAL/rollback state is first copied
 // into private staging, then a real VACUUM INTO produces a standalone snapshot.
 // No Open/migration or accounting mutation from business is called.
-func Snapshot(ctx context.Context, l *Lock, inv Inventory, tempDir string) (result []Source, err error) {
+func Snapshot(ctx context.Context, l *Lock, inv Inventory, tempDir string) ([]Source, error) {
+	return SnapshotWithBusinessTransform(ctx, l, inv, tempDir, nil)
+}
+
+// SnapshotWithBusinessTransform applies an optional projection only to the
+// private standalone business copy, before inventory sizes are finalized.
+func SnapshotWithBusinessTransform(ctx context.Context, l *Lock, inv Inventory, tempDir string, transform func(context.Context, string) error) (result []Source, err error) {
 	if e := ValidateInventory(l, inv); e != nil {
 		return nil, e
 	}
@@ -106,6 +112,11 @@ func Snapshot(ctx context.Context, l *Lock, inv Inventory, tempDir string) (resu
 			}
 		} else if e = copyRegular(ctx, s.Path, dest, s.Role != "agent_tls_cert"); e != nil {
 			return nil, e
+		}
+		if s.Role == "business" && transform != nil {
+			if e = transform(ctx, dest); e != nil {
+				return nil, e
+			}
 		}
 		st, e = os.Lstat(dest)
 		if e != nil {

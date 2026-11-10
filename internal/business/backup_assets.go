@@ -172,7 +172,6 @@ func validateOfflineBackupAssetsDB(ctx context.Context, db *sql.DB, key []byte) 
 		{"inbound_execution_nodes", "observation_enc", "printf('managed-inbound-execution-v1/observation/%s/%s/%d',node_id,installation_id,observed_generation)", " WHERE observed_generation<>0 OR length(observation_enc)<>0"},
 		{"inbound_execution_epochs", "payload_enc", "printf('managed-inbound-execution-v1/epoch/%s/%d',epoch_id,generation)", ""},
 		{"inbound_execution_epochs", "cursor_enc", "printf('managed-inbound-execution-v1/usage-cursor/%s/%d',epoch_id,sequence)", ""},
-		{"inbound_execution_usage_receipts", "report_enc", "printf('managed-inbound-execution-v1/usage-report/%s/%d',epoch_id,sequence)", ""},
 		{"inbound_execution_reconciliations", "payload_enc", "printf('managed-inbound-execution-v1/owner-loss/%s/%d',event_id,revision)", ""},
 		{"inbound_execution_reconciliations", "clearance_enc", "printf('managed-inbound-execution-v1/owner-loss-clearance/%s/%d',epoch_id,revision)", ""},
 		{"inbound_execution_binary_approvals", "payload_enc", "printf('managed-inbound-execution-v1/binary-approval/%s/%s/%s/%d',node_id,installation_id,pins_sha,generation)", ""},
@@ -183,6 +182,9 @@ func validateOfflineBackupAssetsDB(ctx context.Context, db *sql.DB, key []byte) 
 		}); err != nil {
 			return err
 		}
+	}
+	if err := backupExecutionReceiptAssets(ctx, db, key); err != nil {
+		return err
 	}
 	return backupManagedCredentials(ctx, db, key)
 }

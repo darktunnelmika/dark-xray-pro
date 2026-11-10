@@ -305,7 +305,18 @@ func create(ctx context.Context, o options) (map[string]any, error) {
 		return nil, err
 	}
 	defer os.RemoveAll(work)
-	sources, err := hubstate.Snapshot(ctx, lock, inv, work)
+	key, err := hex.DecodeString(inv.Environment["DARK_PRO_NATIVE_INBOUND_KEY_HEX"])
+	if err != nil {
+		return nil, errRefused
+	}
+	defer func() {
+		for i := range key {
+			key[i] = 0
+		}
+	}()
+	sources, err := hubstate.SnapshotWithBusinessTransform(ctx, lock, inv, work, func(ctx context.Context, path string) error {
+		return business.CompactOfflineExecutionReceipts(ctx, path, key)
+	})
 	if err != nil {
 		return nil, err
 	}
