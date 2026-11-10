@@ -187,9 +187,28 @@ func (s *Store) DetachManagedNode(ctx context.Context, key []byte, actor, event,
 		}
 		retained := []ix.Bundle{}
 		for _, b := range bundles {
-			if b.NodeID != node || b.InstallationID != install {
-				retained = append(retained, b)
+			if b.NodeID == node && b.InstallationID == install {
+				continue
 			}
+			// Preserve a healthy generation when the complete executable configuration,
+			// accounting manifest and revision references are exactly unchanged. An
+			// unrelated stopped inbound must not restart another inbound's process.
+			old, e := readExecutionBundle(ctx, tx, key, b.NodeID, b.InstallationID, b.Generation-1)
+			if e == nil {
+				same := b
+				same.Generation = old.Generation
+				same.OperationID = old.OperationID
+				same, e = ix.SealBundle(key, same)
+				if e != nil {
+					return nil, e
+				}
+				if ix.Digest(same) == ix.Digest(old) {
+					b = old
+				}
+			} else if !errors.Is(e, sql.ErrNoRows) {
+				return nil, e
+			}
+			retained = append(retained, b)
 		}
 		bundles = retained
 		for _, id := range runtimeIDs {
@@ -214,23 +233,24 @@ func (s *Store) DetachManagedNode(ctx context.Context, key []byte, actor, event,
 			if _, e = commitExecutionAssessment(ctx, tx, key, actor, id, in, a, fingerprint("node-detach-command", in)); e != nil {
 				return nil, e
 			}
-			// No surviving delivery target means no remote acknowledgement is needed.
-			// Epoch accounting is retained separately and is not marked settled here.
-			if len(bundles) == 0 {
+			// Saved client selection edits remain unapplied, just like profile drafts.
+			if ix.Digest(h.Bindings) != ix.Digest(next.Bindings) {
 				current, e := readExecutionHead(ctx, tx, key, id)
 				if e != nil {
 					return nil, e
 				}
-				current.ObservedState = current.DesiredState
-				current.ActiveRevision = current.DesiredRevision
-				current.ActiveOperation = current.Pending
-				current.Pending = ""
+				current.Bindings = h.Bindings
 				if e = writeExecutionHead(ctx, tx, key, current, current.Revision); e != nil {
 					return nil, e
 				}
-				if _, e = tx.ExecContext(ctx, `UPDATE inbound_execution_operations SET state=?,updated=? WHERE id=?`, next.State, time.Now().UnixNano(), in.EventID); e != nil {
-					return nil, e
-				}
+			}
+
+		}
+		// Reused healthy observations and an empty target set can complete locally.
+		// This updates administrative intent only; it does not settle any epoch.
+		for _, id := range runtimeIDs {
+			if e := completeExecutionOperation(ctx, tx, key, op+fmt.Sprintf("-%d", id)); e != nil {
+				return nil, e
 			}
 		}
 	}
