@@ -32,6 +32,7 @@ var errPublished = errors.New("publication occurred but durability is unconfirme
 type options struct {
 	command, stateRoot, recipient, input, output, identityFile, destination string
 	maxBytes                                                                int64
+	snapshotReadyFD                                                         int
 }
 
 func arguments(args []string) (options, error) {
@@ -46,6 +47,7 @@ func arguments(args []string) (options, error) {
 	case "keygen":
 		f.StringVar(&o.output, "out", "", "new private recovery identity file")
 	case "create":
+		f.IntVar(&o.snapshotReadyFD, "snapshot-ready-fd", 0, "coordinator pipe descriptor after the private snapshot is copied")
 		f.StringVar(&o.stateRoot, "state-root", hubstate.ProductionRoot, "registered native PRO state root")
 		f.StringVar(&o.recipient, "recipient", "", "public age X25519 recipient")
 		f.StringVar(&o.output, "out", "", "new encrypted archive file in a private directory")
@@ -61,6 +63,9 @@ func arguments(args []string) (options, error) {
 		return o, errRefused
 	}
 	if f.Parse(args[1:]) != nil || len(f.Args()) != 0 {
+		return o, errRefused
+	}
+	if o.snapshotReadyFD != 0 && o.snapshotReadyFD != 3 {
 		return o, errRefused
 	}
 	if o.command != "keygen" && (o.maxBytes < 1 || o.maxBytes > 1<<40) {
@@ -316,6 +321,20 @@ func create(ctx context.Context, o options) (map[string]any, error) {
 	}()
 	sources, err := hubstate.SnapshotWithBusinessTransform(ctx, lock, inv, work, func(ctx context.Context, path string) error {
 		return business.CompactOfflineExecutionReceipts(ctx, path, key)
+	}, func() error {
+		if err := lock.Close(); err != nil {
+			return err
+		}
+		if o.snapshotReadyFD == 0 {
+			return nil
+		}
+		pipe := os.NewFile(uintptr(o.snapshotReadyFD), "snapshot-ready")
+		if pipe == nil {
+			return errRefused
+		}
+		defer pipe.Close()
+		_, err := pipe.Write([]byte{'S'})
+		return err
 	})
 	if err != nil {
 		return nil, err

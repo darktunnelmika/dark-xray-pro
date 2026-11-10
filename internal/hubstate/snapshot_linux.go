@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"sync"
 	"syscall"
 )
 
@@ -60,7 +61,10 @@ func Snapshot(ctx context.Context, l *Lock, inv Inventory, tempDir string) ([]So
 
 // SnapshotWithBusinessTransform applies an optional projection only to the
 // private standalone business copy, before inventory sizes are finalized.
-func SnapshotWithBusinessTransform(ctx context.Context, l *Lock, inv Inventory, tempDir string, transform func(context.Context, string) error) (result []Source, err error) {
+func SnapshotWithBusinessTransform(ctx context.Context, l *Lock, inv Inventory, tempDir string, transform func(context.Context, string) error, snapshotReady ...func() error) (result []Source, err error) {
+	if len(snapshotReady) > 1 {
+		return nil, ErrUnsafe
+	}
 	if e := ValidateInventory(l, inv); e != nil {
 		return nil, e
 	}
@@ -75,15 +79,19 @@ func SnapshotWithBusinessTransform(ctx context.Context, l *Lock, inv Inventory, 
 	if e != nil || len(entries) != 0 {
 		return nil, ErrUnsafe
 	}
-	release, e := holdRuntimeStopped(ctx, inv)
+	releaseRuntime, e := holdRuntimeStopped(ctx, inv)
 	if e != nil {
 		return nil, e
 	}
+	var runtimeOnce sync.Once
+	release := func() { runtimeOnce.Do(releaseRuntime) }
 	defer release()
-	releaseBot, e := holdBotStopped(inv)
+	releaseBotRaw, e := holdBotStopped(inv)
 	if e != nil {
 		return nil, e
 	}
+	var botOnce sync.Once
+	releaseBot := func() { botOnce.Do(releaseBotRaw) }
 	defer releaseBot()
 	sources, e := CollectSources(l, inv)
 	if e != nil {
@@ -113,11 +121,6 @@ func SnapshotWithBusinessTransform(ctx context.Context, l *Lock, inv Inventory, 
 		} else if e = copyRegular(ctx, s.Path, dest, s.Role != "agent_tls_cert"); e != nil {
 			return nil, e
 		}
-		if s.Role == "business" && transform != nil {
-			if e = transform(ctx, dest); e != nil {
-				return nil, e
-			}
-		}
 		st, e = os.Lstat(dest)
 		if e != nil {
 			return nil, e
@@ -128,6 +131,30 @@ func SnapshotWithBusinessTransform(ctx context.Context, l *Lock, inv Inventory, 
 			if snapshot.Resources[i].Role == s.Role {
 				snapshot.Resources[i].Present = true
 			}
+		}
+	}
+	// All authoritative resources are now copied and fsynced. From here on,
+	// only private staging paths and the captured inventory are read. The
+	// coordinator may restart HUB before validation, projection and encryption;
+	// failure of those later steps still refuses archive publication.
+	if len(snapshotReady) == 1 && snapshotReady[0] != nil {
+		releaseBot()
+		release()
+		if e = snapshotReady[0](); e != nil {
+			return nil, e
+		}
+	}
+	for i := range result {
+		if result[i].Role == "business" && transform != nil {
+			if e = transform(ctx, result[i].Path); e != nil {
+				return nil, e
+			}
+			st, e = os.Lstat(result[i].Path)
+			if e != nil {
+				return nil, e
+			}
+			result[i].Size = st.Size()
+			snapshot.SnapshotFiles[i].Size = st.Size()
 		}
 	}
 	if e = ValidateSnapshot(ctx, tempDir, snapshot); e != nil {
