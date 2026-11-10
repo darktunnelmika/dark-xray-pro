@@ -37,6 +37,7 @@ func TestExecutionHistoryMaintenancePreservesAccounting(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
+			seedLegacyZeroHistory(t, f, b, e, 3, 4)
 			// Age the fixture only; production receipt timestamps remain immutable.
 			if mode != "recent" {
 				var ddl string
@@ -242,6 +243,7 @@ func TestExecutionHistoryMaintenanceBoundedCursor(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	seedLegacyZeroHistory(t, f, b, e, 3, 130)
 	var ddl string
 	if err := f.s.db.QueryRow("SELECT sql FROM sqlite_master WHERE name='inbound_execution_usage_receipts_no_update'").Scan(&ddl); err != nil {
 		t.Fatal(err)

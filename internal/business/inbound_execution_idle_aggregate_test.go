@@ -78,7 +78,11 @@ func TestManagedInboundIdleAggregateAvoidsWrites(t *testing.T) {
 	}
 	for _, table := range []string{"inbound_execution_usage_receipts", "inbound_execution_usage_deltas"} {
 		var n int
-		if err := f.s.db.QueryRow("SELECT COUNT(*) FROM "+table+" WHERE epoch_id=?", e.EpochID).Scan(&n); err != nil || n != 6 {
+		want := 6
+		if table == "inbound_execution_usage_deltas" {
+			want = 4
+		}
+		if err := f.s.db.QueryRow("SELECT COUNT(*) FROM "+table+" WHERE epoch_id=?", e.EpochID).Scan(&n); err != nil || n != want {
 			t.Fatal("audit evidence lost", table, n, err)
 		}
 	}

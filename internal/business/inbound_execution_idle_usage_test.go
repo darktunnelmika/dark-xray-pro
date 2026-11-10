@@ -24,7 +24,7 @@ func TestManagedInboundIdleReportsAvoidAccountWrites(t *testing.T) {
 	}
 	f.ready(t, b, e)
 	for _, report := range []struct {
-		seq uint64
+		seq   uint64
 		final bool
 	}{{2, false}, {3, false}, {4, true}} {
 		r := executionReport(b, e, report.seq, 17, 31, report.final)
@@ -43,8 +43,8 @@ func TestManagedInboundIdleReportsAvoidAccountWrites(t *testing.T) {
 	if err := f.s.db.QueryRow("SELECT COUNT(*) FROM inbound_execution_usage_receipts WHERE epoch_id=?", e.EpochID).Scan(&receipts); err != nil || receipts != 4 {
 		t.Fatal("idle receipt lost", receipts, err)
 	}
-	if err := f.s.db.QueryRow("SELECT COUNT(*) FROM inbound_execution_usage_deltas WHERE epoch_id=?", e.EpochID).Scan(&deltas); err != nil || deltas != 4*len(b.Principals) {
-		t.Fatal("zero delta audit lost", deltas, err)
+	if err := f.s.db.QueryRow("SELECT COUNT(*) FROM inbound_execution_usage_deltas WHERE epoch_id=?", e.EpochID).Scan(&deltas); err != nil || deltas != 3*len(b.Principals) {
+		t.Fatal("baseline, changed or final delta evidence changed", deltas, err)
 	}
 	account, err := f.s.ClientUsage(ctx, f.client.ID)
 	if err != nil || account.Uplink != 17 || account.Downlink != 31 {
@@ -80,7 +80,7 @@ func TestManagedInboundIdleReportsKeepQuotaAndConflictChecks(t *testing.T) {
 	if err := f.s.InboundExecutionAuthority(ctx, f.key, b.NodeID, b.InstallationID, b.Generation); !errors.Is(err, ErrConflict) {
 		t.Fatal("exhausted quota gained authority", err)
 	}
-	for _, bad := range []struct{ seq, up uint64 }{{3, (1<<20)+1}, {4, (1<<20)-1}, {5, 1<<20}} {
+	for _, bad := range []struct{ seq, up uint64 }{{3, (1 << 20) + 1}, {4, (1 << 20) - 1}, {5, 1 << 20}} {
 		if _, err := f.s.AcceptInboundExecutionUsage(ctx, f.key, executionReport(b, e, bad.seq, bad.up, 0, false)); !errors.Is(err, ErrConflict) {
 			t.Fatal("accepted conflicting or out-of-order counters", bad, err)
 		}

@@ -35,6 +35,7 @@ func TestCompactOfflineZeroDeltas(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
+			seedLegacyZeroHistory(t, f, b, e, 3, 4)
 			// Age the fixture only; production receipt timestamps remain immutable.
 			if mode != "recent" {
 				var ddl string
