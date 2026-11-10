@@ -7,6 +7,7 @@ on:
       - 'internal/business/backup_assets.go'
       - 'internal/business/inbound_execution_runtime.go'
       - 'internal/hubstate/**'
+      - 'internal/backupworker/**'
       - 'cmd/pro-backup/**'
       - '.github/workflows/compact-backup.yml'
   workflow_dispatch:
@@ -28,4 +29,4 @@ jobs:
       - name: Verify compact receipts, replay, freshness and source preservation
         run: go test -race -count=1 -timeout=120s ./internal/business -run '^(TestCompactOfflineReceiptsPreservesReplayAccountingAndFinal|TestIdleUsageStoresCompactProofWithoutChangingFreshnessOrReplay)$'
       - name: Verify native backup, quarantine restore and snapshot contracts
-        run: go test -race -count=1 -timeout=180s ./cmd/pro-backup ./internal/hubstate ./internal/probackup
+        run: go test -race -count=1 -timeout=180s ./cmd/pro-backup ./internal/hubstate ./internal/probackup ./internal/backupworker

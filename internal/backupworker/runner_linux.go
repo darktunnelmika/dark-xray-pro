@@ -142,6 +142,19 @@ func waitOwnedGroup(ctx context.Context, cmd *exec.Cmd) error {
 }
 
 func (r *LinuxRuntime) Create(ctx context.Context, j backupcontrol.Job) (Receipt, error) {
+	return r.create(ctx, j, nil)
+}
+
+// CreateWithResume receives a private pipe signal only from the pinned child
+// after all source files are copied and all writer locks have been released.
+func (r *LinuxRuntime) CreateWithResume(ctx context.Context, j backupcontrol.Job, resume func() error) (Receipt, error) {
+	if resume == nil {
+		return Receipt{}, ErrCreate
+	}
+	return r.create(ctx, j, resume)
+}
+
+func (r *LinuxRuntime) create(ctx context.Context, j backupcontrol.Job, resume func() error) (Receipt, error) {
 	var empty Receipt
 	if ctx.Err() != nil {
 		return empty, ctx.Err()
@@ -170,13 +183,32 @@ func (r *LinuxRuntime) Create(ctx context.Context, j backupcontrol.Job) (Receipt
 	}
 	defer f.Close()
 	out := &limitedFileWriter{f: f, remaining: 256 << 10}
-	cmd := r.backupCommand(dir, "create", "--recipient", j.Recipient, "--out", p, "--max-bytes", strconv.FormatInt(r.config.MaxPayloadBytes, 10))
+	args := []string{"create", "--recipient", j.Recipient, "--out", p, "--max-bytes", strconv.FormatInt(r.config.MaxPayloadBytes, 10)}
+	var readyRead, readyWrite *os.File
+	if resume != nil {
+		readyRead, readyWrite, e = os.Pipe()
+		if e != nil {
+			return empty, ErrCreate
+		}
+		defer readyRead.Close()
+		defer readyWrite.Close()
+		args = append(args, "--snapshot-ready-fd", "3")
+	}
+	cmd := r.backupCommand(dir, args...)
+	if readyWrite != nil {
+		cmd.ExtraFiles = []*os.File{readyWrite}
+	}
 	cmd.Stdout = out
 	cmd.Stderr = io.Discard
 	if e = cmd.Start(); e != nil {
 		return empty, ErrCreate
 	}
-	e = waitOwnedGroup(ctx, cmd)
+	if readyWrite != nil {
+		_ = readyWrite.Close()
+		e = waitSnapshotOwnedGroup(ctx, cmd, readyRead, resume)
+	} else {
+		e = waitOwnedGroup(ctx, cmd)
+	}
 	syncErr := f.Sync()
 	closeErr := f.Close()
 	dirErr := syncDir(r.receipts)

@@ -33,6 +33,12 @@ type Runner interface {
 	RemoveArchive(backupcontrol.Archive) error
 }
 
+// SnapshotRunner can release the panel after copying a consistent private
+// snapshot, while archive validation and encryption continue independently.
+type SnapshotRunner interface {
+	CreateWithResume(context.Context, backupcontrol.Job, func() error) (Receipt, error)
+}
+
 type Worker struct {
 	restores                   *RestoreCoordinator
 	store                      Journal
@@ -287,6 +293,7 @@ func (w *Worker) execute(ctx context.Context, id string) error {
 	}
 	// This intent is durable before stop. All paths below call resume with a
 	// fresh context, including failed/ambiguous stop and process cancellation.
+	resumedEarly := false
 	stopCtx, stopCancel := context.WithTimeout(context.Background(), seconds(w.config.StopTimeoutSeconds))
 	createErr := w.host.Stop(stopCtx)
 	stopCancel()
@@ -323,7 +330,17 @@ func (w *Worker) execute(ctx context.Context, id string) error {
 					}
 				}
 			}()
-			_, createErr = w.runner.Create(backupCtx, j)
+			if runner, ok := w.runner.(SnapshotRunner); ok {
+				_, createErr = runner.CreateWithResume(backupCtx, j, func() error {
+					err := w.resume(backupcontrol.Job{ID: id, ResumeRequired: true, PreServiceActive: true})
+					if err == nil {
+						resumedEarly = true
+					}
+					return err
+				})
+			} else {
+				_, createErr = w.runner.Create(backupCtx, j)
+			}
 			close(pollDone)
 			backupCancel()
 			<-pollStopped
@@ -331,8 +348,10 @@ func (w *Worker) execute(ctx context.Context, id string) error {
 	}
 	// Use the original intent if a failed journal update zeroed the local job.
 	intent := backupcontrol.Job{ID: id, ResumeRequired: true, PreServiceActive: true}
-	if e = w.resume(intent); e != nil {
-		return e
+	if !resumedEarly {
+		if e = w.resume(intent); e != nil {
+			return e
+		}
 	}
 	current, e := w.store.GetJob(context.Background(), id)
 	if e != nil {
