@@ -117,11 +117,13 @@ func TestManagedInboundSubscriptionProjectionTokensAndWithdrawal(t *testing.T) {
 	publicRead, publicErr := f.s.ReadInboundExecutionSubscription(readCtx, f.key, secret.Token, "uri")
 	privateRead, privateErr := f.s.ProjectInboundExecutionSubscription(readCtx, f.key, "owner", f.client.ID, "uri")
 	metadataRead, metadataErr := f.s.InboundExecutionSubscription(readCtx, f.key, "owner", f.client.ID)
+	revealedRead, revealedErr := f.s.RevealInboundExecutionSubscription(readCtx, f.key, "owner", f.client.ID, 1)
 	cancelRead()
 	held.Close()
-	if publicErr != nil || privateErr != nil || metadataErr != nil || !metadataRead.Available ||
+	if publicErr != nil || privateErr != nil || metadataErr != nil || revealedErr != nil || !metadataRead.Available ||
+		revealedRead.Token != secret.Token || revealedRead.Generation != 1 ||
 		string(publicRead.Content) != string(doc.Content) || string(privateRead.Content) != string(doc.Content) {
-		t.Fatal("subscription depended on the accounting writer", publicErr, privateErr, metadataErr)
+		t.Fatal("subscription depended on the accounting writer", publicErr, privateErr, metadataErr, revealedErr)
 	}
 	private, err := f.s.ProjectInboundExecutionSubscription(ctx, f.key, "owner", f.client.ID, "uri")
 	if err != nil || private.UserInfo == nil || *private.UserInfo != *doc.UserInfo {

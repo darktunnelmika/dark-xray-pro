@@ -164,7 +164,7 @@ func (s *Store) MutateInboundExecutionSubscription(ctx context.Context, key []by
 
 func (s *Store) RevealInboundExecutionSubscription(ctx context.Context, key []byte, actor, client string, generation uint64) (SubscriptionSecret, error) {
 	ctx = s.withObservationFreshness(ctx)
-	tx, err := executionTx(s, ctx, key)
+	tx, err := executionSubscriptionReadTx(s, ctx, key)
 	if err != nil {
 		return SubscriptionSecret{}, err
 	}
