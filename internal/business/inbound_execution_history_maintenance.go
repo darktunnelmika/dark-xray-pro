@@ -67,7 +67,7 @@ func pruneExecutionZeroBatch(parent context.Context, conn *sql.Conn, cursor exec
 	}()
 	rows, e := conn.QueryContext(ctx, `SELECT epoch_id,sequence,principal_id FROM inbound_execution_usage_deltas
  WHERE (epoch_id,sequence,principal_id)>(?,?,?)
- ORDER BY epoch_id,sequence,principal_id LIMIT 128`, cursor.Epoch, cursor.Sequence, cursor.Principal)
+ ORDER BY epoch_id,sequence,principal_id LIMIT 16`, cursor.Epoch, cursor.Sequence, cursor.Principal)
 	if e != nil {
 		err = e
 		return

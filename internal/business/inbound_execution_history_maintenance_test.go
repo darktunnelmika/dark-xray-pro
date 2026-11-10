@@ -151,7 +151,7 @@ func TestExecutionHistoryMaintenancePreservesAccounting(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					if got.Scanned > 128 {
+					if got.Scanned > 16 {
 						t.Fatal("unbounded scan", got)
 					}
 					cursor = got.Next
@@ -254,11 +254,18 @@ func TestExecutionHistoryMaintenanceBoundedCursor(t *testing.T) {
  conn,err:=db.Conn(ctx);if err!=nil{t.Fatal(err)}
  defer conn.Close()
  first,err:=pruneExecutionZeroBatch(ctx,conn,executionHistoryCursor{})
- if err!=nil || first.Scanned!=128 || first.Removed!=126 || first.Done {t.Fatal("first batch not bounded",first,err)}
- second,err:=pruneExecutionZeroBatch(ctx,conn,first.Next)
- if err!=nil || second.Scanned!=3 || second.Removed!=2 || second.Done {t.Fatal("continuation lost rows",second,err)}
- last,err:=pruneExecutionZeroBatch(ctx,conn,second.Next)
- if err!=nil || !last.Done || last.Removed!=0 {t.Fatal("scan did not finish",last,err)}
+ if err!=nil || first.Scanned!=16 || first.Removed!=14 || first.Done {t.Fatal("first batch not bounded",first,err)}
+ cursor:=first.Next
+ removed,scanned,batches:=first.Removed,first.Scanned,1
+ for {
+  next,err:=pruneExecutionZeroBatch(ctx,conn,cursor)
+  if err!=nil || next.Scanned>16 {t.Fatal("bounded continuation failed",next,err)}
+  removed+=next.Removed;scanned+=next.Scanned
+  if next.Done {break}
+  if next.Next==cursor || batches>20 {t.Fatal("cursor did not advance",next)}
+  cursor=next.Next;batches++
+ }
+ if removed!=128 || scanned!=131 || batches!=9 {t.Fatal("sweep lost or duplicated rows",removed,scanned,batches)}
  // A lost in-memory cursor is safe: replaying the sweep only sees protected rows.
  restart,err:=pruneExecutionZeroBatch(ctx,conn,executionHistoryCursor{})
  if err!=nil || restart.Removed!=0 || restart.Scanned!=3 {t.Fatal("restart was not idempotent",restart,err)}
