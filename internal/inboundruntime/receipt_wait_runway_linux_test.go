@@ -131,7 +131,7 @@ func TestBlockedUsageFinalTimeoutKeepsNonceAndDoesNotInventTail(t *testing.T) {
 	}
 }
 
-func TestWorkerRealBlockedUsageWaitKeepsFinalAfterHardLeaseKill(t *testing.T) {
+func TestWorkerRealUsageWaitFinalReplay(t *testing.T) {
 	f := newRealCounterFailureFixture(t)
 	known := f.knownAndUnreportedTraffic(t)
 	w, base := f.worker, f.exchange
