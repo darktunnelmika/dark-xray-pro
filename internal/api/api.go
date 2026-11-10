@@ -108,12 +108,6 @@ func (s *Server) snapshot() telemetry.Fleet {
 	for _, n := range fleet.Nodes {
 		a := s.registry.Lifecycle(n.NodeID)
 		if a.Status == "removed" {
-			if n.Status == "online" {
-				fleet.Online--
-			} else {
-				fleet.Offline--
-			}
-			fleet.RatesComplete = false
 			continue
 		}
 		kept = append(kept, n)
@@ -143,6 +137,29 @@ func (s *Server) snapshot() telemetry.Fleet {
 	}
 	sort.Slice(fleet.Nodes, func(i, j int) bool { return fleet.Nodes[i].NodeID < fleet.Nodes[j].NodeID })
 	fleet.Total = len(fleet.Nodes)
+	// Aggregate only the displayed fleet. Retained samples from a removed
+	// installation must neither add phantom traffic nor invalidate healthy rates.
+	fleet.Online = 0
+	fleet.Offline = 0
+	fleet.InterfaceRXBps = 0
+	fleet.InterfaceTXBps = 0
+	fleet.RatesComplete = true
+	for _, n := range fleet.Nodes {
+		if n.Status != "online" {
+			fleet.Offline++
+			continue
+		}
+		fleet.Online++
+		if !n.MetricsCurrent || n.RXBitsPerSec == nil || n.TXBitsPerSec == nil {
+			fleet.RatesComplete = false
+			continue
+		}
+		fleet.InterfaceRXBps += *n.RXBitsPerSec
+		fleet.InterfaceTXBps += *n.TXBitsPerSec
+	}
+	if fleet.Online == 0 {
+		fleet.RatesComplete = false
+	}
 	return fleet
 }
 func (s *Server) Handler() http.Handler {
