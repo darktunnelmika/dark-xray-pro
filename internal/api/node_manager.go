@@ -12,6 +12,9 @@ import (
 // Owner-only, session-authenticated Node enrollment. Only NEW PRO Node identities
 // may be paired. This does not execute an installer, apply Xray or move clients.
 type ownerNode struct {
+	AdministrativeState   string     `json:"administrative_state"`
+	LifecycleRevision     uint64     `json:"lifecycle_revision"`
+	LifecyclePending      string     `json:"lifecycle_pending,omitempty"`
 	NodeID                string     `json:"node_id"`
 	Name                  string     `json:"name"`
 	PairedAt              time.Time  `json:"paired_at"`
@@ -39,6 +42,7 @@ func (s *Server) EnableNodeHistory(h *nodehistory.Store) error {
 }
 
 func (s *Server) attachNodeManager(mux *http.ServeMux) {
+	s.attachNodeLifecycle(mux)
 	s.attachNodeNames(mux)
 	s.attachNodeDependencies(mux)
 	s.attachNodeReplacements(mux)
@@ -71,9 +75,13 @@ func (s *Server) attachNodeManager(mux *http.ServeMux) {
 		}
 		rows := make([]ownerNode, 0)
 		for _, registration := range s.registry.List() {
+			admin := s.registry.Lifecycle(registration.NodeID)
+			if admin.Status == "removed" && admin.PendingEvent == "" {
+				continue
+			}
 			row := ownerNode{
 				NodeID: registration.NodeID, Name: registration.Name, PairedAt: registration.PairedAt,
-				Status: "offline", TransportState: "offline", MetricsState: "unavailable",
+				AdministrativeState: admin.Status, LifecycleRevision: admin.Revision, LifecyclePending: admin.PendingEvent, Status: "offline", TransportState: "offline", MetricsState: "unavailable",
 				CoreState: "unknown", AccountingState: "unknown",
 			}
 			if sample, found := current[registration.NodeID]; found {
@@ -126,6 +134,10 @@ func (s *Server) attachNodeManager(mux *http.ServeMux) {
 		id := r.PathValue("id")
 		var installation string
 		for _, registration := range s.registry.List() {
+			admin := s.registry.Lifecycle(registration.NodeID)
+			if admin.Status == "removed" && admin.PendingEvent == "" {
+				continue
+			}
 			if registration.NodeID == id {
 				installation = registration.InstallationID
 				break

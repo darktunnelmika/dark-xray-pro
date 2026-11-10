@@ -104,9 +104,21 @@ func decode(w http.ResponseWriter, r *http.Request, max int64, dest any) error {
 // Cached telemetry never queries financial history or contacts Agents.
 func (s *Server) snapshot() telemetry.Fleet {
 	fleet := s.fleet.Snapshot()
+	kept := fleet.Nodes[:0]
+	for _, n := range fleet.Nodes {
+		a := s.registry.Lifecycle(n.NodeID)
+		if a.Status == "removed" {
+			continue
+		}
+		kept = append(kept, n)
+	}
+	fleet.Nodes = kept
 	known := make(map[string]bool, len(fleet.Nodes))
 	authoritative := make(map[string]noderegistry.NodeInfo)
 	for _, n := range s.registry.List() {
+		if s.registry.Lifecycle(n.NodeID).Status == "removed" {
+			continue
+		}
 		authoritative[n.NodeID] = n
 	}
 	for i := range fleet.Nodes {
@@ -125,6 +137,29 @@ func (s *Server) snapshot() telemetry.Fleet {
 	}
 	sort.Slice(fleet.Nodes, func(i, j int) bool { return fleet.Nodes[i].NodeID < fleet.Nodes[j].NodeID })
 	fleet.Total = len(fleet.Nodes)
+	// Aggregate only the displayed fleet. Retained samples from a removed
+	// installation must neither add phantom traffic nor invalidate healthy rates.
+	fleet.Online = 0
+	fleet.Offline = 0
+	fleet.InterfaceRXBps = 0
+	fleet.InterfaceTXBps = 0
+	fleet.RatesComplete = true
+	for _, n := range fleet.Nodes {
+		if n.Status != "online" {
+			fleet.Offline++
+			continue
+		}
+		fleet.Online++
+		if !n.MetricsCurrent || n.RXBitsPerSec == nil || n.TXBitsPerSec == nil {
+			fleet.RatesComplete = false
+			continue
+		}
+		fleet.InterfaceRXBps += *n.RXBitsPerSec
+		fleet.InterfaceTXBps += *n.TXBitsPerSec
+	}
+	if fleet.Online == 0 {
+		fleet.RatesComplete = false
+	}
 	return fleet
 }
 func (s *Server) Handler() http.Handler {

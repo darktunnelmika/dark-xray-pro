@@ -32,7 +32,7 @@ func (s *Server) inboundDestinations() []inboundDestination {
 		rows = append(rows, inboundDestination{NodeInfo: noderegistry.NodeInfo{NodeID: localHubNodeID, InstallationID: installation, Name: "HUB — this server"}, Kind: "hub"})
 	}
 	for _, node := range s.registry.List() {
-		if node.NodeID != localHubNodeID {
+		if node.NodeID != localHubNodeID && s.registry.DeploymentAllowed(node.NodeID, node.InstallationID) {
 			rows = append(rows, inboundDestination{NodeInfo: node, Kind: "node"})
 		}
 	}
