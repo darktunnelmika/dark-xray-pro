@@ -58,7 +58,7 @@ jobs:
           export DXP_INBOUND_CORE_V2_BINARY="$RUNNER_TEMP/xray-inbound-v2-race"
           export DXP_INBOUND_CORE_V2_SHA256="$(sha256sum "$DXP_INBOUND_CORE_V2_BINARY" | cut -d' ' -f1)"
           go test -race ./internal/corebarrierv2 -run '^TestPinnedNativeDNSQueriesAndFinalReceipt$' -count=5 -json -timeout=120s > "$RUNNER_TEMP/udp-native-dns.jsonl" || { cat "$RUNNER_TEMP/udp-native-dns.jsonl"; exit 1; }
-          python3 scripts/ci/assert-inbound-acceptance.py "$RUNNER_TEMP/udp-native-dns.jsonl" --require TestPinnedNativeDNSQueriesAndFinalReceipt
+          python3 scripts/ci/assert-inbound-acceptance.py "$RUNNER_TEMP/udp-native-dns.jsonl" --require TestPinnedNativeDNSQueriesAndFinalReceipt --expected-count 5
       - uses: actions/upload-artifact@v4
         if: always()
         with:
