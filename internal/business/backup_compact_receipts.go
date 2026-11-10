@@ -7,6 +7,7 @@ import (
 	"net/url"
 
 	ix "github.com/darktunnelmika/dark-xray-pro/internal/inboundexec"
+	"github.com/darktunnelmika/dark-xray-pro/internal/usagewire"
 )
 
 // CompactOfflineExecutionReceipts operates ONLY on a disposable standalone
@@ -21,9 +22,6 @@ func CompactOfflineExecutionReceipts(ctx context.Context, path string, key []byt
 	}
 	if check.SchemaVersion != ix.SchemaVersion {
 		return nil
-	}
-	if err = ValidateOfflineBackupAssets(ctx, path, key); err != nil {
-		return err
 	}
 	u := url.URL{Scheme: "file", Path: path, RawQuery: "mode=rw&_pragma=journal_mode(DELETE)&_pragma=synchronous(FULL)&_pragma=foreign_keys(1)&_pragma=trusted_schema(0)"}
 	db, err := sql.Open("sqlite", u.String())
@@ -102,7 +100,7 @@ func CompactOfflineExecutionReceipts(ctx context.Context, path string, key []byt
 				}
 			} else {
 				var report ix.UsageReport
-				if openPlanValue(key, aad, r.enc, &report) != nil || report.Final || report.InitialEpoch != nil || report.EpochID != r.epoch || report.Sequence != r.sequence || ix.Digest(report) != r.hash {
+				if usagewire.Decode(raw, &report) != nil || report.Final || report.InitialEpoch != nil || report.EpochID != r.epoch || report.Sequence != r.sequence || ix.Digest(report) != r.hash {
 					return ErrOfflineBackupAssets
 				}
 				// Replay already uses the immutable hash, not the full body. Final refund
@@ -169,7 +167,7 @@ func backupExecutionReceiptAssets(ctx context.Context, db *sql.DB, key []byte) e
 			continue
 		}
 		var report ix.UsageReport
-		if openPlanValue(key, aad, enc, &report) != nil || report.EpochID != epoch || report.Sequence != sequence || report.Final != final || ix.Digest(report) != hash {
+		if usagewire.Decode(raw, &report) != nil || report.EpochID != epoch || report.Sequence != sequence || report.Final != final || ix.Digest(report) != hash {
 			return ErrOfflineBackupAssets
 		}
 	}
