@@ -359,7 +359,7 @@ func create(ctx context.Context, o options) (map[string]any, error) {
 	meta := probackup.Metadata{
 		BackupID: hex.EncodeToString(id[:]), CreatedUnix: time.Now().UTC().Unix(),
 		SourceRevision: inv.SourceRevision, BusinessSchemaVersion: int64(check.SchemaVersion),
-		FeatureVersions: features(inv),
+		FeatureVersions: backupFeatures(inv),
 	}
 	var manifest probackup.Manifest
 	digest := sha256.New()
@@ -398,7 +398,7 @@ func validateRestored(ctx context.Context, stage string, manifest probackup.Mani
 		return check, errRefused
 	}
 	if hubstate.ValidateArchiveInventory(inv) != nil || inv.SourceRevision != manifest.Metadata.SourceRevision ||
-		!sameFeatures(features(inv), manifest.Metadata.FeatureVersions) {
+		!compatibleBackupFeatures(inv, manifest.Metadata.FeatureVersions) {
 		return check, errRefused
 	}
 	expected := make(map[string]hubstate.SnapshotFile, len(inv.SnapshotFiles))

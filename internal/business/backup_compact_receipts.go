@@ -12,7 +12,7 @@ import (
 
 // CompactOfflineExecutionReceipts operates ONLY on a disposable standalone
 // snapshot held by its caller. Never pass a live or authoritative database.
-// It preserves every receipt key/hash/time, every delta, final proof, cursor,
+// It preserves every receipt key/hash/time, nonzero delta, final proof, cursor,
 // account, hold and non-settled epoch. Only redundant non-final report bodies
 // of genuinely finalized epochs become authenticated replay digests.
 func CompactOfflineExecutionReceipts(ctx context.Context, path string, key []byte) error {
@@ -116,6 +116,10 @@ func CompactOfflineExecutionReceipts(ctx context.Context, path string, key []byt
 			lastEpoch, lastSequence = r.epoch, r.sequence
 		}
 	}
+	removedZeroDeltas, err := compactOfflineZeroDeltas(ctx, tx)
+	if err != nil {
+		return err
+	}
 	if _, err = tx.ExecContext(ctx, ddl); err != nil {
 		return err
 	}
@@ -133,7 +137,10 @@ func CompactOfflineExecutionReceipts(ctx context.Context, path string, key []byt
 		return ErrOfflineBackupInvalid
 	}
 	for table, n := range check.TableCounts {
-		if after.TableCounts[table] != n {
+		if table == "inbound_execution_usage_deltas" {
+			n -= removedZeroDeltas
+		}
+		if n < 0 || after.TableCounts[table] != n {
 			return ErrOfflineBackupInvalid
 		}
 	}
