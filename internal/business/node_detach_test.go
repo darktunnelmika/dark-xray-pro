@@ -281,6 +281,10 @@ func TestDetachStoppedLastNodeCanArchiveWithoutRemoteAcknowledgement(t *testing.
 	if e != nil || s.ObservedState != "stopped" || len(s.Targets) != 0 {
 		t.Fatal("empty stopped inbound requires no acknowledgement", s, e)
 	}
+	summaries, e := f.s.ListNativeInboundPlans(ctx, f.key)
+	if e != nil || len(summaries) != 1 || len(summaries[0].NodeIDs) != 0 {
+		t.Fatal("empty inbound broke the global plan index", summaries, e)
+	}
 	f.command(t, "detach-empty-owner-archive-0001", "archive")
 	s, e = f.s.InboundExecution(ctx, f.key, 501)
 	if e != nil || s.ObservedState != "archived" || s.DesiredState != "archived" || len(s.Targets) != 0 {

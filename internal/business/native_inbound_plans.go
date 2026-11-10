@@ -611,7 +611,7 @@ func (s *Store) ListNativeInboundPlans(ctx context.Context, key []byte) ([]Nativ
 		}
 		if plan.Profile.ID != p.InboundID || plan.PlanRevision != p.PlanRevision || plan.InboundRevision != p.InboundRevision ||
 			plan.Profile.Revision != p.InboundRevision || plan.Status != p.Status || plan.Profile.Enabled || plan.Profile.Archived ||
-			plan.Profile.BoundClients != 0 || plan.RuntimeApply || !plan.Editable || plan.Promotion != nil || len(plan.Nodes) == 0 || len(plan.Nodes) > MaxNativeInboundPlanNodes {
+			plan.Profile.BoundClients != 0 || plan.RuntimeApply || !plan.Editable || plan.Promotion != nil || len(plan.Nodes) > MaxNativeInboundPlanNodes {
 			return nil, ErrUnavailable
 		}
 		// Include relay-only participants, but expose no addresses, keys or
@@ -670,7 +670,14 @@ func (s *Store) NativeInboundPlan(ctx context.Context, key []byte, id uint64) (N
 		p.Promotion, p.Editable, p.EditBlocker = receipt, false, "plan_promoted"
 		return p, nil
 	}
-	if e:=rejectManagedPlanEdit(ctx,tx,id);e!=nil{if !errors.Is(e,ErrConflict){return p,e};p.Editable=false;p.EditBlocker="managed_execution_busy_or_archived";return p,nil}
+	if e := rejectManagedPlanEdit(ctx, tx, id); e != nil {
+		if !errors.Is(e, ErrConflict) {
+			return p, e
+		}
+		p.Editable = false
+		p.EditBlocker = "managed_execution_busy_or_archived"
+		return p, nil
+	}
 	if _, _, err = editablePlanProfile(ctx, tx, key, p); err != nil {
 		if !errors.Is(err, ErrConflict) {
 			return p, err
@@ -782,15 +789,17 @@ func verifyPlanCollisions(ctx context.Context, tx *sql.Tx, key []byte, in Native
 	}
 	query := `SELECT p.inbound_id FROM native_inbound_plans p JOIN native_inbounds i ON i.id=p.inbound_id
  WHERE p.inbound_id<>? AND i.archived=0`
- managed, err := executionSchemaPresent(ctx, tx)
- if err != nil { return err }
- if managed {
-  // A requested archive alone is insufficient: retain reservations until
-  // the runtime acknowledges retirement and clears the pending operation.
-  query += ` AND NOT EXISTS (SELECT 1 FROM inbound_execution_heads h WHERE h.inbound_id=p.inbound_id AND h.desired_state='archived' AND h.observed_state='archived' AND h.pending_operation='' AND h.active_revision=0)`
- }
- query += ` ORDER BY p.inbound_id LIMIT 257`
- rows, err = tx.QueryContext(ctx, query, in.Profile.ID)
+	managed, err := executionSchemaPresent(ctx, tx)
+	if err != nil {
+		return err
+	}
+	if managed {
+		// A requested archive alone is insufficient: retain reservations until
+		// the runtime acknowledges retirement and clears the pending operation.
+		query += ` AND NOT EXISTS (SELECT 1 FROM inbound_execution_heads h WHERE h.inbound_id=p.inbound_id AND h.desired_state='archived' AND h.observed_state='archived' AND h.pending_operation='' AND h.active_revision=0)`
+	}
+	query += ` ORDER BY p.inbound_id LIMIT 257`
+	rows, err = tx.QueryContext(ctx, query, in.Profile.ID)
 	if err != nil {
 		return err
 	}
@@ -1064,7 +1073,9 @@ func (s *Store) SaveNativeInboundPlan(ctx context.Context, key []byte, input Nat
 	if replay, found, e := readNativePlanReplay(ctx, tx, key, in, kind, hash); e != nil || found {
 		return replay, e
 	}
-	if err=rejectManagedPlanEdit(ctx,tx,in.Profile.ID);err!=nil{return out,err}
+	if err = rejectManagedPlanEdit(ctx, tx, in.Profile.ID); err != nil {
+		return out, err
+	}
 	plan, private, _, err := validateNativeInboundPlanTx(ctx, tx, key, in)
 	if err != nil {
 		return out, err

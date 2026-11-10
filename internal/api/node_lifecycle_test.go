@@ -47,6 +47,10 @@ func TestOwnerNodeLifecycleFencesAndDetachesWithoutAgent(t *testing.T) {
 	if err != nil || len(p.Nodes) != 0 {
 		t.Fatal(p, err)
 	}
+	caps := browserRequest(t, h, "GET", "/api/v1/workspace/native-inbound-plans/capabilities", nil, cookie, "", "")
+	if caps.Code != 200 || !strings.Contains(caps.Body.String(), `"node_ids":[]`) {
+		t.Fatal("last-node detachment broke global capabilities", caps.Code, caps.Body.String())
+	}
 	if s.registry.DeploymentAllowed("de", in.InstallationID) {
 		t.Fatal("disabled node admitted")
 	}
