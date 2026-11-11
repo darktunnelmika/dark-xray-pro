@@ -47,7 +47,7 @@ type Worker struct {
 	stoppedObservationAt  time.Time
 	lastUsageReceiptAt    time.Time
 	lastUsageReceiptEpoch string
-	journalRenewal func() bool
+	journalRenewal        func() bool
 }
 
 // Only processes created by this worker implement this interface in
