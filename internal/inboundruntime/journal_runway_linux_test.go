@@ -4,8 +4,8 @@ package inboundruntime
 
 import (
 	"context"
-	"os"
 	ix "github.com/darktunnelmika/dark-xray-pro/internal/inboundexec"
+	"os"
 	"testing"
 	"time"
 )
@@ -188,36 +188,49 @@ func TestRealJournalStallKeepsFinalAfterHardLeaseKill(t *testing.T) {
 type renewalDuringSaveExchange struct {
 	*fixtureExchange
 	worker *Worker
-	mode string
+	mode   string
 }
+
 func (x *renewalDuringSaveExchange) Poll(ctx context.Context, in PollInput) (*Delivery, error) {
 	if x.mode == "timeout" {
 		<-ctx.Done()
 		return nil, ctx.Err()
 	}
-	if x.mode == "absent" { return nil, nil }
+	if x.mode == "absent" {
+		return nil, nil
+	}
 	d := *x.delivery
-	if x.mode == "stale" { return &d, nil }
+	if x.mode == "stale" {
+		return &d, nil
+	}
 	now := time.Now()
 	d.Lease.Issued = now.UnixNano()
-	d.Lease.Expires = now.Add(30*time.Second).UnixNano()
+	d.Lease.Expires = now.Add(30 * time.Second).UnixNano()
 	d.Lease, _ = SignLease(x.worker.cfg.Key, d.Lease)
-	if x.mode == "tampered" { d.Lease.Signature = "invalid" }
+	if x.mode == "tampered" {
+		d.Lease.Signature = "invalid"
+	}
 	return &d, nil
 }
 func TestJournalWaitRenewalRequiresFreshScopedAuthority(t *testing.T) {
 	for _, mode := range []string{"fresh", "stale", "absent", "tampered", "timeout", "canceled"} {
 		t.Run(mode, func(t *testing.T) {
 			w, p, x := fixtureWorker(t, "active")
-			exchange := &renewalDuringSaveExchange{x,w,mode}
-			w.deadline = time.Unix(0,x.delivery.Lease.Expires)
-			if mode == "fresh" { w.deadline = time.Now().Add(17*time.Second) }
-			ctx,cancel := context.WithCancel(context.Background())
+			exchange := &renewalDuringSaveExchange{x, w, mode}
+			w.deadline = time.Unix(0, x.delivery.Lease.Expires)
+			if mode == "fresh" {
+				w.deadline = time.Now().Add(17 * time.Second)
+			}
+			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
-			if mode == "canceled" { cancel() }
+			if mode == "canceled" {
+				cancel()
+			}
 			before := w.deadline
-			ok := w.renewWhileSaving(ctx,exchange)
-			if ok != (mode=="fresh") { t.Fatalf("unexpected renewal %v",ok) }
+			ok := w.renewWhileSaving(ctx, exchange)
+			if ok != (mode == "fresh") {
+				t.Fatalf("unexpected renewal %v", ok)
+			}
 			if !ok && (!w.deadline.Equal(before) || p.renewals != 0) {
 				t.Fatal("rejected authority extended execution")
 			}
@@ -225,27 +238,39 @@ func TestJournalWaitRenewalRequiresFreshScopedAuthority(t *testing.T) {
 	}
 }
 func TestThirtySecondFirstWriteWithFreshAuthority(t *testing.T) {
-	if os.Getenv("DARK_PRO_TEST_30S_JOURNAL")!="1" { t.Skip("explicit 30-second journal acceptance") }
-	w,p,x := fixtureWorker(t,"active")
-	p.values[0].Upload=41
+	if os.Getenv("DARK_PRO_TEST_30S_JOURNAL") != "1" {
+		t.Skip("explicit 30-second journal acceptance")
+	}
+	w, p, x := fixtureWorker(t, "active")
+	p.values[0].Upload = 41
 	w.state.Sequence++
-	r:=w.makeReport(p.values,false)
-	w.state.Pending=&r
-	w.state.LastCounters=p.values
-	w.deadline=time.Now().Add(30*time.Second)
-	exchange:=&renewalDuringSaveExchange{x,w,"fresh"}
-	w.journalRenewal=func() bool { return w.renewWhileSaving(context.Background(),exchange) }
-	writes:=0
-	err:=w.saveServing(func() error {
+	r := w.makeReport(p.values, false)
+	w.state.Pending = &r
+	w.state.LastCounters = p.values
+	w.deadline = time.Now().Add(30 * time.Second)
+	exchange := &renewalDuringSaveExchange{x, w, "fresh"}
+	w.journalRenewal = func() bool { return w.renewWhileSaving(context.Background(), exchange) }
+	writes := 0
+	err := w.saveServing(func() error {
 		writes++
-		if writes==1 {time.Sleep(30*time.Second)}
+		if writes == 1 {
+			time.Sleep(30 * time.Second)
+		}
 		return w.journal.save(w.state)
 	})
-	if err!=nil {t.Fatal(err)}
-	if writes!=1 || p.renewals!=1 || p.finals!=0 || p.stops!=0 || time.Until(w.deadline)<=0 {
+	if err != nil {
+		t.Fatal(err)
+	}
+	if writes != 1 || p.renewals != 1 || p.finals != 0 || p.stops != 0 || time.Until(w.deadline) <= 0 {
 		t.Fatal("fresh authority failed to preserve the active process")
 	}
-	if ReportSHA(*w.state.Pending)!=ReportSHA(r) { t.Fatal("ordinary report changed") }
-	if err=w.sendPending(context.Background(),x);err!=nil {t.Fatal(err)}
-	if len(x.receipts)!=1 || ReportSHA(x.receipts[r.Sequence])!=ReportSHA(r) {t.Fatal("receipt mismatch")}
+	if ReportSHA(*w.state.Pending) != ReportSHA(r) {
+		t.Fatal("ordinary report changed")
+	}
+	if err = w.sendPending(context.Background(), x); err != nil {
+		t.Fatal(err)
+	}
+	if len(x.receipts) != 1 || ReportSHA(x.receipts[r.Sequence]) != ReportSHA(r) {
+		t.Fatal("receipt mismatch")
+	}
 }
