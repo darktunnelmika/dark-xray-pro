@@ -4,6 +4,7 @@ import { api, mutation, ApiError, useSession, type Language } from "./session";
 import "./NodeManager.css";
 import NodeHealth, { type NodeHealthEvidence } from "./NodeHealth";
 import NodeNameEditor from "./NodeNameEditor";
+import NodeLifecycle from "./NodeLifecycle";
 import NodeDependencies from "./NodeDependencies";
 import NodeReplacements from "./NodeReplacements";
 import MeteredHandovers from "./MeteredHandovers";
@@ -12,6 +13,7 @@ type Registration = NodeHealthEvidence & {
   node_id: string;
   name: string;
   paired_at: string;
+  administrative_state?: "active" | "disabled" | "removed";
   status: "online" | "offline";
   metrics_current: boolean;
   last_seen: string | null;
@@ -306,10 +308,11 @@ export default function NodeManager({ language }: { language: Language }) {
         {roster?.length === 0 && <p>{t.empty}</p>}
         {roster?.map(node => (
           <div className="pro-node-roster-row" key={node.node_id}>
-            <div><strong>{node.name}</strong><small>{node.node_id} · {t.lastSeen}: {readableTime(node.last_seen, language)}</small></div>
+            <div><strong>{node.name}{node.administrative_state === "disabled" ? (language === "fa" ? " · غیرفعال" : " · Disabled") : ""}</strong><small>{node.node_id} · {t.lastSeen}: {readableTime(node.last_seen, language)}</small></div>
             <NodeHealth language={language} node={node}
               fresh={!rosterFailed && Math.max(0, healthClock - rosterAt) < 30000}
               elapsedMs={Math.max(0, healthClock - rosterAt)} />
+            <NodeLifecycle key={session?.user.id + ":lifecycle:" + node.node_id} nodeID={node.node_id} language={language} onSaved={() => { void load().catch(() => setRosterFailed(true)); }} />
             <NodeNameEditor key={session?.user.id + ":" + node.node_id} nodeID={node.node_id} language={language} onSaved={() => { void load().catch(() => setRosterFailed(true)); }} />
             <NodeDependencies key={session?.user.id + ":dependencies:" + node.node_id} nodeID={node.node_id} language={language} />
             <NodeReplacements key={session?.user.id + ":replacements:" + node.node_id} nodeID={node.node_id} language={language} />

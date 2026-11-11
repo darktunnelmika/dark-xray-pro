@@ -188,7 +188,8 @@ jobs:
           cp scripts/ci/build-inbound-core.sh "$RUNNER_TEMP/inbound-artifact/overlay/scripts/ci/"
           cp scripts/core-overlay/inbound_stats.go.txt scripts/core-overlay/inbound_xdrive_test.go.txt scripts/core-overlay/inbound_tun_dns.go.txt scripts/core-overlay/inbound_tun_dns_test.go.txt scripts/core-overlay/inbound_vision_test.go.txt "$RUNNER_TEMP/inbound-artifact/overlay/scripts/core-overlay/"
           cp scripts/core-overlay/inbound_reality_readiness.go.txt scripts/core-overlay/inbound_reality_readiness_test.go.txt "$RUNNER_TEMP/inbound-artifact/overlay/scripts/core-overlay/"
-          cp internal/corebarrierv2/barrier.go internal/corebarrierv2/barrier_test.go internal/corebarrierv2/README.md "$RUNNER_TEMP/inbound-artifact/overlay/internal/corebarrierv2/"
+          cp scripts/core-overlay/inbound_udp_lifecycle_test.go.txt "$RUNNER_TEMP/inbound-artifact/overlay/scripts/core-overlay/"
+          cp internal/corebarrierv2/barrier.go internal/corebarrierv2/barrier_test.go internal/corebarrierv2/lease*.go internal/corebarrierv2/README.md "$RUNNER_TEMP/inbound-artifact/overlay/internal/corebarrierv2/"
       - name: Build a separate race/checkptr instrumented test core
         working-directory: .inbound-core-v2
         run: go build -race -buildvcs=false -trimpath -o "$RUNNER_TEMP/xray-inbound-v2-race" ./main
@@ -202,6 +203,27 @@ jobs:
           set -euo pipefail
           go test -race ./internal/corebarrierv2 -run '^TestPinnedNativeInboundTrafficAndFinalReceipt$' -count=1 -json -timeout=300s > "$RUNNER_TEMP/native-matrix.jsonl" || { cat "$RUNNER_TEMP/native-matrix.jsonl"; exit 1; }
           python3 scripts/ci/assert-inbound-acceptance.py "$RUNNER_TEMP/native-matrix.jsonl" --matrix
+      - name: Prove the complete native matrix with independent lease authority enabled
+        shell: bash
+        run: |
+          set -euo pipefail
+          DXP_NATIVE_LEASE_MATRIX=1 go test -race ./internal/corebarrierv2 -run '^TestPinnedNativeInboundTrafficAndFinalReceipt$' -count=1 -json -timeout=300s > "$RUNNER_TEMP/native-autonomous-matrix.jsonl" || { cat "$RUNNER_TEMP/native-autonomous-matrix.jsonl"; exit 1; }
+          python3 scripts/ci/assert-inbound-acceptance.py "$RUNNER_TEMP/native-autonomous-matrix.jsonl" --matrix
+      - name: Prove independent fail-closed and exact final replay while the parent is stopped
+        shell: bash
+        run: |
+          set -euo pipefail
+          go test -race -c -o "$RUNNER_TEMP/native-parent-pause.test" ./internal/inboundruntime
+          for variant in direct pending both; do
+            seconds=30
+            extra=()
+            if [[ "$variant" == direct ]]; then seconds=15; else extra+=(--pending); fi
+            if [[ "$variant" == both ]]; then extra+=(--pause-native); fi
+            sudo --non-interactive unshare --net -- python3 scripts/ci/verify-native-parent-pause.py \
+              --test "$RUNNER_TEMP/native-parent-pause.test" --core "$DXP_INBOUND_CORE_V2_BINARY" \
+              --core-sha "$DXP_INBOUND_CORE_V2_SHA256" --seconds "$seconds" "${extra[@]}" \
+              --output "$RUNNER_TEMP/native-parent-pause-$variant"
+          done
       - name: Prove REALITY startup gates readiness and the first customer payload
         shell: bash
         run: |
@@ -224,7 +246,7 @@ jobs:
           set -euo pipefail
           export DXP_INBOUND_CORE_V2_BINARY="$RUNNER_TEMP/xray-inbound-v2-race"
           export DXP_INBOUND_CORE_V2_SHA256=$(sha256sum "$DXP_INBOUND_CORE_V2_BINARY" | cut -d' ' -f1)
-          go test -race ./internal/corebarrierv2 -run '^TestPinnedNativeInboundTrafficAndFinalReceipt/(shadowsocks|wireguard|hysteria|mixed|masque|transport_xdrive|vless_mux_xudp|reality_tcp|reality_tcp_vision_tls)$' -count=1 -json -timeout=300s > "$RUNNER_TEMP/native-race.jsonl" || { cat "$RUNNER_TEMP/native-race.jsonl"; exit 1; }
+          DXP_NATIVE_LEASE_MATRIX=1 go test -race ./internal/corebarrierv2 -run '^TestPinnedNativeInboundTrafficAndFinalReceipt/(shadowsocks|wireguard|hysteria|mixed|masque|transport_xdrive|vless_mux_xudp|reality_tcp|reality_tcp_vision_tls)$' -count=1 -json -timeout=300s > "$RUNNER_TEMP/native-race.jsonl" || { cat "$RUNNER_TEMP/native-race.jsonl"; exit 1; }
           python3 scripts/ci/assert-inbound-acceptance.py "$RUNNER_TEMP/native-race.jsonl" \
             --require TestPinnedNativeInboundTrafficAndFinalReceipt/shadowsocks \
             --require TestPinnedNativeInboundTrafficAndFinalReceipt/wireguard \
@@ -269,7 +291,7 @@ jobs:
               --bounding-set=-all --inh-caps=-all --ambient-caps=-all --no-new-privs -- \
               env -i PATH=/usr/bin:/bin LANG=C TMPDIR="$3" \
                 DARK_PRO_TEST_INBOUND_CORE="$4" DXP_INBOUND_CORE_V2_SHA256="$5" \
-                "$6" -test.run="^TestWorkerRealCounterDeadline(FinalReplay|AndEngineLossFencesTail)$" \
+                "$6" -test.run="^TestWorkerReal(CounterDeadline(FinalReplay|AndEngineLossFencesTail)|UsageWait(FinalReplay|ThirtySeconds))$" \
                   -test.v -test.timeout=90s
           ' -- "$task_uid" "$task_gid" "$task_temp" "$DARK_PRO_TEST_INBOUND_CORE" \
             "$DXP_INBOUND_CORE_V2_SHA256" "$RUNNER_TEMP/native-counter-recovery.test" \
@@ -277,7 +299,9 @@ jobs:
                 > "$RUNNER_TEMP/native-counter-recovery.jsonl"
           python3 scripts/ci/assert-inbound-acceptance.py "$RUNNER_TEMP/native-counter-recovery.jsonl" \
             --require TestWorkerRealCounterDeadlineFinalReplay \
-            --require TestWorkerRealCounterDeadlineAndEngineLossFencesTail
+            --require TestWorkerRealCounterDeadlineAndEngineLossFencesTail \
+            --require TestWorkerRealUsageWaitFinalReplay \
+            --require TestWorkerRealUsageWaitThirtySeconds
       - name: Prove exact representative refunds after real partial traffic and final-tail settlement
         shell: bash
         run: |
@@ -369,6 +393,8 @@ jobs:
           name: inbound-execution-evidence-${{ github.sha }}
           path: |
             ${{ runner.temp }}/native-matrix.jsonl
+            ${{ runner.temp }}/native-autonomous-matrix.jsonl
+            ${{ runner.temp }}/native-parent-pause-*
             ${{ runner.temp }}/native-race.jsonl
             ${{ runner.temp }}/reality-startup-normal.jsonl
             ${{ runner.temp }}/reality-startup-race.jsonl

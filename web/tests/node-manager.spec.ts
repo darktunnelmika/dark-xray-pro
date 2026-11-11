@@ -513,3 +513,25 @@ test("node transport delay cannot renew the observation lifetime", async ({page}
   await expect(page.locator('[data-node-health="core"] dd')).toHaveText("Stale");
   await expect(page.locator('[data-node-health="transport"] dd')).toHaveText("Online");
 });
+
+test("node lifecycle retries the same fenced intent and enables without restoring membership",async({page})=>{
+ await setupNames(page);let state={status:"active",revision:1,pending_event:""};let pending:Record<string,unknown>|null=null;const writes:Record<string,unknown>[]=[];
+ await page.route("**/api/v1/workspace/nodes/lab-name/lifecycle",async route=>{
+  if(route.request().method()==="GET")return route.fulfill({json:{node:{node_id:"lab-name",installation_id:"a".repeat(32)},state,pending}});
+  const body=route.request().postDataJSON() as Record<string,unknown>;writes.push(body);
+  expect(Object.keys(body).sort()).toEqual(["action","event_id","expected_revision","installation_id"]);
+  if(writes.length===1){state={status:"disabled",revision:2,pending_event:String(body.event_id)};pending={...body,node_id:"lab-name",actor_id:"owner",completed:false,state,at:"2026-11-10T18:00:00Z",inbound_ids:[]};return route.fulfill({status:503,json:{error:"node_detachment_pending",deployment_fenced:true}});}
+  if(writes.length===2)expect(body).toEqual(writes[0]);
+  state={status:body.action==="enable"?"active":body.action==="remove"?"removed":"disabled",revision:body.action==="disable"?2:body.action==="enable"?3:4,pending_event:""};pending=null;
+  return route.fulfill({json:{...body,completed:true,state,inbound_ids:[501]}});
+ });
+ await page.setViewportSize({width:320,height:760});await page.goto("/nodes");await login(page);
+ await page.getByRole("button",{name:"Manage node",exact:true}).click();await page.getByRole("button",{name:"Disable",exact:true}).click();
+ await expect(page.getByText(/Outcome pending/)).toBeVisible();
+ // A reload recovers the original durable event, rather than creating another.
+ await page.reload();await page.getByRole("button",{name:"Manage node",exact:true}).click();await page.getByRole("button",{name:"Retry same request",exact:true}).click();
+ await expect(page.getByRole("button",{name:"Enable",exact:true})).toBeVisible();expect(writes[1]).toEqual(writes[0]);
+ await page.getByRole("button",{name:"Enable",exact:true}).click();await expect(page.getByRole("button",{name:"Disable",exact:true})).toBeVisible();expect(writes[2].expected_revision).toBe(2);
+ await page.getByRole("button",{name:"Remove node",exact:true}).click();await expect(page.locator(".node-lifecycle")).toContainText("removed");expect(writes[3].expected_revision).toBe(3);
+ expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+2)).toBe(true);
+});

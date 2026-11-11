@@ -103,6 +103,12 @@ func SnapshotWithBusinessTransform(ctx context.Context, l *Lock, inv Inventory, 
 	for i := range snapshot.Resources {
 		snapshot.Resources[i].Present = false
 	}
+	prepared := map[string]*sqliteSnapshotInput{}
+	defer func() {
+		for _, input := range prepared {
+			input.cleanup()
+		}
+	}()
 	for _, s := range sources {
 		if e = ctx.Err(); e != nil {
 			return nil, e
@@ -115,18 +121,17 @@ func SnapshotWithBusinessTransform(ctx context.Context, l *Lock, inv Inventory, 
 			return nil, e
 		}
 		if s.Role == "business" || s.Role == "node_history" || s.Role == "owner_report_db" || s.Role == "telegram_bot_db" {
-			if e = snapshotSQLite(ctx, s.Path, dest, tempDir); e != nil {
-				return nil, e
+			input, captureErr := captureSQLite(ctx, s.Path, tempDir)
+			if captureErr != nil {
+				return nil, captureErr
 			}
+			prepared[dest] = input
 		} else if e = copyRegular(ctx, s.Path, dest, s.Role != "agent_tls_cert"); e != nil {
 			return nil, e
 		}
-		st, e = os.Lstat(dest)
-		if e != nil {
-			return nil, e
-		}
-		result = append(result, Source{Name: s.Name, Role: s.Role, Path: dest, Size: st.Size()})
-		snapshot.SnapshotFiles = append(snapshot.SnapshotFiles, SnapshotFile{Name: s.Name, Role: s.Role, Size: st.Size()})
+		// Sizes are finalized only after staged SQLite recovery and projection.
+		result = append(result, Source{Name: s.Name, Role: s.Role, Path: dest})
+		snapshot.SnapshotFiles = append(snapshot.SnapshotFiles, SnapshotFile{Name: s.Name, Role: s.Role})
 		for i := range snapshot.Resources {
 			if snapshot.Resources[i].Role == s.Role {
 				snapshot.Resources[i].Present = true
@@ -135,7 +140,7 @@ func SnapshotWithBusinessTransform(ctx context.Context, l *Lock, inv Inventory, 
 	}
 	// All authoritative resources are now copied and fsynced. From here on,
 	// only private staging paths and the captured inventory are read. The
-	// coordinator may restart HUB before validation, projection and encryption;
+	// coordinator may restart HUB before SQLite recovery, validation, projection and encryption;
 	// failure of those later steps still refuses archive publication.
 	if len(snapshotReady) == 1 && snapshotReady[0] != nil {
 		releaseBot()
@@ -145,17 +150,23 @@ func SnapshotWithBusinessTransform(ctx context.Context, l *Lock, inv Inventory, 
 		}
 	}
 	for i := range result {
+		if input := prepared[result[i].Path]; input != nil {
+			if e = input.materialize(ctx, result[i].Path); e != nil {
+				return nil, e
+			}
+			input.cleanup()
+		}
 		if result[i].Role == "business" && transform != nil {
 			if e = transform(ctx, result[i].Path); e != nil {
 				return nil, e
 			}
-			st, e = os.Lstat(result[i].Path)
-			if e != nil {
-				return nil, e
-			}
-			result[i].Size = st.Size()
-			snapshot.SnapshotFiles[i].Size = st.Size()
 		}
+		st, e = os.Lstat(result[i].Path)
+		if e != nil {
+			return nil, e
+		}
+		result[i].Size = st.Size()
+		snapshot.SnapshotFiles[i].Size = st.Size()
 	}
 	if e = ValidateSnapshot(ctx, tempDir, snapshot); e != nil {
 		return nil, e
@@ -230,7 +241,13 @@ func copyRegular(ctx context.Context, source, dest string, private bool) error {
 	return nil
 }
 
-func snapshotSQLite(ctx context.Context, source, dest, stagingRoot string) error {
+// Captured inputs own independent private files. They retain no authoritative
+// source paths, so SQLite recovery can run safely after the source resumes.
+type sqliteSnapshotInput struct{ work, path string }
+
+func (input *sqliteSnapshotInput) cleanup() { _ = os.RemoveAll(input.work) }
+
+func captureSQLite(ctx context.Context, source, stagingRoot string) (_ *sqliteSnapshotInput, err error) {
 	// Bound all temporary SQLite inputs, not just the main database. Stopped
 	// WAL can be larger than the database. Reserve space for both the copied
 	// inputs and the standalone output before creating either.
@@ -241,36 +258,40 @@ func snapshotSQLite(ctx context.Context, source, dest, stagingRoot string) error
 			continue
 		}
 		if e != nil {
-			return ErrUnsafe
+			return nil, ErrUnsafe
 		}
 		st, e := f.Stat()
 		f.Close()
 		if e != nil || st.Size() < 0 || st.Size() > maxSnapshotPayload || working > maxSnapshotPayload-st.Size() {
-			return ErrUnsafe
+			return nil, ErrUnsafe
 		}
 		working += st.Size()
 	}
 	var fs syscall.Statfs_t
 	if syscall.Statfs(stagingRoot, &fs) != nil || fs.Bsize <= 0 || fs.Bavail < uint64((2*working+(1<<20)+fs.Bsize-1)/fs.Bsize) {
-		return ErrUnsafe
+		return nil, ErrUnsafe
 	}
 	work, e := os.MkdirTemp(stagingRoot, "sqlite-work-")
 	if e != nil {
-		return e
+		return nil, e
 	}
-	defer os.RemoveAll(work)
+	defer func() {
+		if err != nil {
+			_ = os.RemoveAll(work)
+		}
+	}()
 	copyPath := filepath.Join(work, "source.sqlite")
 	if e = copyRegular(ctx, source, copyPath, true); e != nil {
-		return e
+		return nil, e
 	}
 	for _, suffix := range []string{"-wal", "-journal"} {
 		if _, e = os.Lstat(source + suffix); errors.Is(e, os.ErrNotExist) {
 			continue
 		} else if e != nil {
-			return ErrUnsafe
+			return nil, ErrUnsafe
 		}
 		if e = copyRegular(ctx, source+suffix, copyPath+suffix, true); e != nil {
-			return e
+			return nil, e
 		}
 	}
 	// SHM is a reconstructible lock/cache, not data. Validate its type when
@@ -278,9 +299,13 @@ func snapshotSQLite(ctx context.Context, source, dest, stagingRoot string) error
 	if f, e := openPrivate(source+"-shm", syscall.O_RDONLY, 0, true); e == nil {
 		f.Close()
 	} else if !errors.Is(e, os.ErrNotExist) {
-		return ErrUnsafe
+		return nil, ErrUnsafe
 	}
-	u := url.URL{Scheme: "file", Path: copyPath, RawQuery: "mode=rw&_pragma=busy_timeout(1000)&_pragma=trusted_schema(0)"}
+	return &sqliteSnapshotInput{work: work, path: copyPath}, nil
+}
+
+func (input *sqliteSnapshotInput) materialize(ctx context.Context, dest string) error {
+	u := url.URL{Scheme: "file", Path: input.path, RawQuery: "mode=rw&_pragma=busy_timeout(1000)&_pragma=trusted_schema(0)"}
 	db, e := sql.Open("sqlite", u.String())
 	if e != nil {
 		return ErrUnsafe

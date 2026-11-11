@@ -1,0 +1,71 @@
+name: Pinned UDP lifecycle race regression
+on:
+  push:
+    branches: ['fix/**']
+    paths:
+      - 'scripts/prepare-inbound-core.py'
+      - 'scripts/core-overlay/inbound_udp_lifecycle_test.go.txt'
+      - 'scripts/ci/build-inbound-core.sh'
+      - '.github/workflows/udp-lifecycle.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: udp-lifecycle-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  udp-lifecycle:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: XTLS/Xray-core
+          ref: 701af60772cda123492f86e383e1fdba066614a9
+          path: .inbound-core-v2
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.3'
+          cache: false
+      - name: Prove the exact regression test detects the unpatched race
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp scripts/core-overlay/inbound_udp_lifecycle_test.go.txt .inbound-core-v2/transport/internet/udp/darkprov2_lifecycle_test.go
+          set +e
+          (cd .inbound-core-v2 && go test -race ./transport/internet/udp -run '^TestDarkProUDPEntryTerminationConcurrentLookup$' -count=1 -timeout=90s) > "$RUNNER_TEMP/udp-negative.log" 2>&1
+          result=$?
+          set -e
+          cat "$RUNNER_TEMP/udp-negative.log"
+          test "$result" -ne 0
+          grep -q 'WARNING: DATA RACE' "$RUNNER_TEMP/udp-negative.log"
+          grep -q 'connEntry).*terminate' "$RUNNER_TEMP/udp-negative.log"
+          rm .inbound-core-v2/transport/internet/udp/darkprov2_lifecycle_test.go
+          test -z "$(git -C .inbound-core-v2 status --porcelain --untracked-files=all)"
+      - name: Build and test the fixed pinned core
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash scripts/ci/build-inbound-core.sh .inbound-core-v2 "$RUNNER_TEMP/udp-native"
+          (cd .inbound-core-v2 && go test -race ./transport/internet/udp -run '^TestDarkProUDPEntry' -count=10 -timeout=90s) | tee "$RUNNER_TEMP/udp-positive.log"
+          (cd .inbound-core-v2 && go build -race -buildvcs=false -trimpath -o "$RUNNER_TEMP/xray-inbound-v2-race" ./main)
+      - name: Prove repeated real DNS traffic and immutable final counters
+        shell: bash
+        run: |
+          set -euo pipefail
+          export DXP_CORE_GO="$(command -v go)"
+          export DXP_INBOUND_CORE_V2_BINARY="$RUNNER_TEMP/xray-inbound-v2-race"
+          export DXP_INBOUND_CORE_V2_SHA256="$(sha256sum "$DXP_INBOUND_CORE_V2_BINARY" | cut -d' ' -f1)"
+          go test -race ./internal/corebarrierv2 -run '^TestPinnedNativeDNSQueriesAndFinalReceipt$' -count=5 -json -timeout=120s > "$RUNNER_TEMP/udp-native-dns.jsonl" || { cat "$RUNNER_TEMP/udp-native-dns.jsonl"; exit 1; }
+          python3 scripts/ci/assert-inbound-acceptance.py "$RUNNER_TEMP/udp-native-dns.jsonl" --require TestPinnedNativeDNSQueriesAndFinalReceipt --expected-count 5
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: udp-lifecycle-evidence-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/udp-negative.log
+            ${{ runner.temp }}/udp-positive.log
+            ${{ runner.temp }}/udp-native-dns.jsonl
+            ${{ runner.temp }}/udp-native
+          retention-days: 7
