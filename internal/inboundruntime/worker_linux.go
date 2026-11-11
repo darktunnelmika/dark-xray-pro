@@ -47,6 +47,7 @@ type Worker struct {
 	stoppedObservationAt  time.Time
 	lastUsageReceiptAt    time.Time
 	lastUsageReceiptEpoch string
+	journalRenewal        func() bool
 }
 
 // Only processes created by this worker implement this interface in
@@ -198,7 +199,7 @@ func (w *Worker) Run(ctx context.Context, x Exchange) {
 			return
 		}
 		attempt, cancel := context.WithTimeout(ctx, 8*time.Second)
-		err := w.Step(attempt, x)
+		err := w.step(attempt, ctx, x)
 		cancel()
 		w.mu.Lock()
 		// Never delay admission, lease renewal, an uncertain epoch, or an
@@ -220,10 +221,16 @@ func (w *Worker) Run(ctx context.Context, x Exchange) {
 // Step performs one durable reconciliation. All outbound mutations can be
 // repeated verbatim after a lost response; a cursor advances only on its exact
 // receipt. It is exported to exercise real engines without scheduler sleeps.
-func (w *Worker) Step(ctx context.Context, x Exchange) (stepErr error) {
+func (w *Worker) Step(ctx context.Context, x Exchange) error {
+	return w.step(ctx, ctx, x)
+}
+
+func (w *Worker) step(ctx, lifetime context.Context, x Exchange) (stepErr error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	defer func() { w.cfg.Diagnostics.recordError(diagnosticStep, stepErr) }()
+	w.journalRenewal = func() bool { return w.renewWhileSaving(lifetime, x) }
+	defer func() { w.journalRenewal = nil }()
 	if w.closed || x == nil {
 		return ErrRuntime
 	}
@@ -616,8 +623,14 @@ func (w *Worker) sendPending(ctx context.Context, x Exchange) error {
 		w.cfg.Diagnostics.record(diagnosticFinalReceipt, diagnosticSucceeded)
 		w.state.Phase = "final_accepted"
 	}
-	if err := w.save(); err != nil {
-		return err
+	// While serving, the exact ordinary report is already durable locally
+	// and its receipt is durable on the HUB. Leave that replayable copy on
+	// disk until the next state transition. A crash before then replays the
+	// same sequence and still fences the lost incarnation.
+	if w.state.Phase != "active" || w.process == nil || r.Final {
+		if err := w.save(); err != nil {
+			return err
+		}
 	}
 	// This witness is intentionally volatile: reopen must send an immediate
 	// report. Only an exact durable receipt enables coalescing, but its
