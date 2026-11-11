@@ -439,3 +439,32 @@ func TestExecutionLeaseBindsEveryBundleAssetAndPrincipal(t *testing.T) {
 		})
 	}
 }
+
+func TestActiveReceiptReopensExactOrdinaryReport(t *testing.T) {
+	w, p, x := fixtureWorker(t, "active")
+	p.values[0].Upload = 37
+	if err := w.Step(context.Background(), x); err != nil {
+		t.Fatal(err)
+	}
+	if w.state.Pending != nil || len(x.receipts) != 1 {
+		t.Fatal("active receipt did not settle")
+	}
+	seq := w.state.Sequence
+	cfg := w.cfg
+	w.Close()
+	reopened, err := Open(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	if reopened.state.Phase != "uncertain" || reopened.state.Pending == nil ||
+		ReportSHA(*reopened.state.Pending) != ReportSHA(x.receipts[seq]) {
+		t.Fatal("reopen lost the exact report or the uncertain tail")
+	}
+	if err := reopened.sendPending(context.Background(), x); err != nil {
+		t.Fatal(err)
+	}
+	if len(x.receipts) != 1 || x.usageCalls != 2 || reopened.state.Phase != "uncertain" {
+		t.Fatal("replay advanced the financial cursor or cleared uncertainty")
+	}
+}
