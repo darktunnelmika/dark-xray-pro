@@ -24,14 +24,13 @@ func (w *Worker) saveServing(write func() error) error {
 	}
 	// One bounded attempt per write. The signed authority is required to
 	// advance, and the original write remains the only journal mutation.
-	if w.journalRenewal != nil {
-		w.journalRenewal()
-	}
-	timer.Reset(time.Until(w.deadline) - 12*time.Second)
-	select {
-	case err := <-done:
-		return err
-	case <-timer.C:
+	if w.journalRenewal == nil || (time.Until(w.deadline) > 12*time.Second && w.journalRenewal()) {
+		timer.Reset(time.Until(w.deadline) - 12*time.Second)
+		select {
+		case err := <-done:
+			return err
+		case <-timer.C:
+		}
 	}
 	nonce := w.state.DrainNonce
 	var err error
