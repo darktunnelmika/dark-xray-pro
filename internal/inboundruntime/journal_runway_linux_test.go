@@ -4,6 +4,7 @@ package inboundruntime
 
 import (
 	"context"
+	"os"
 	ix "github.com/darktunnelmika/dark-xray-pro/internal/inboundexec"
 	"testing"
 	"time"
@@ -40,6 +41,15 @@ func TestBlockedJournalSealsBeforeWriteCompletesAndReplaysExactTail(t *testing.T
 			probe := &journalSealProbe{p, make(chan struct{})}
 			w.process = probe
 			w.deadline = time.Now().Add(12*time.Second + 30*time.Millisecond)
+			// Exercise the observed 30-second first-write stall with the
+			// production lease length. Other runs use the accelerated guard.
+			labStall := pending && os.Getenv("DARK_PRO_TEST_30S_JOURNAL") == "1"
+			sealTimeout := 2 * time.Second
+			if labStall {
+				w.deadline = time.Now().Add(30 * time.Second)
+				sealTimeout = 25 * time.Second
+			}
+			start := time.Now()
 			release := make(chan struct{})
 			finished := make(chan error, 1)
 			writes := 0
@@ -54,7 +64,7 @@ func TestBlockedJournalSealsBeforeWriteCompletesAndReplaysExactTail(t *testing.T
 			}()
 			select {
 			case <-probe.sealed:
-			case <-time.After(2 * time.Second):
+			case <-time.After(sealTimeout):
 				close(release)
 				<-finished
 				t.Fatal("blocked journal prevented timely final barrier")
@@ -63,6 +73,9 @@ func TestBlockedJournalSealsBeforeWriteCompletesAndReplaysExactTail(t *testing.T
 			case <-finished:
 				t.Fatal("save returned before original write joined")
 			default:
+			}
+			if labStall {
+				time.Sleep(time.Until(start.Add(30 * time.Second)))
 			}
 			close(release)
 			if err := <-finished; err != nil {
