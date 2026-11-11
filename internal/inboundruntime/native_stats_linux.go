@@ -7,6 +7,7 @@ import (
 	"math"
 	"net"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -183,6 +184,14 @@ func (p *Native) query(ctx context.Context, pattern string) (map[string]uint64, 
 func validNativeStatsPattern(pattern string) bool {
 	if pattern == "" || pattern == nativeProtocol+"capabilities" || pattern == nativeProtocol+"health" {
 		return true
+	}
+	if value, ok := strings.CutPrefix(pattern, nativeProtocol+"lease/"); ok {
+		fields := strings.Split(value, "/")
+		if len(fields) != 2 || len(fields[0]) > 19 || !validNonce(fields[1]) {
+			return false
+		}
+		n, e := strconv.ParseInt(fields[0], 10, 64)
+		return e == nil && n > 0 && strconv.FormatInt(n, 10) == fields[0]
 	}
 	for _, operation := range []string{"activate/", "final/"} {
 		if nonce, ok := strings.CutPrefix(pattern, nativeProtocol+operation); ok {

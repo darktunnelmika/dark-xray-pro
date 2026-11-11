@@ -32,9 +32,11 @@ import (
 )
 
 type coreProcess struct {
-	cmd  *exec.Cmd
-	done chan struct{}
-	log  string
+	leaseCapture *os.File
+	leaseStop    func()
+	cmd          *exec.Cmd
+	done         chan struct{}
+	log          string
 }
 
 func nativeBinary(t *testing.T) string {
@@ -98,16 +100,23 @@ func startCoreWithEnv(t *testing.T, bin string, config map[string]any, controlle
 	if controlled {
 		cmd.Env = append(cmd.Env, "DARK_PRO_INBOUND_V2=1")
 	}
+	capture, leaseStop := attachFixtureAutonomousLease(t, cmd, bin, config, data, controlled)
 	cmd.Stdout, cmd.Stderr = log, log
 	if err := cmd.Start(); err != nil {
 		_ = log.Close()
 		t.Fatal(err)
 	}
-	p := &coreProcess{cmd: cmd, done: make(chan struct{}), log: logPath}
+	p := &coreProcess{cmd: cmd, done: make(chan struct{}), log: logPath, leaseCapture: capture, leaseStop: leaseStop}
 	go func() { _ = cmd.Wait(); _ = log.Close(); close(p.done) }()
 	t.Cleanup(func() {
+		if leaseStop != nil {
+			leaseStop()
+		}
 		_ = cmd.Process.Kill()
 		<-p.done
+		if capture != nil {
+			_ = capture.Close()
+		}
 		output := processLog(p)
 		if strings.Contains(output, "WARNING: DATA RACE") {
 			t.Error("native runtime race detector reported a data race")
@@ -556,7 +565,7 @@ func TestPinnedNativeInboundTrafficAndFinalReceipt(t *testing.T) {
 			p := startCore(t, bin, server, true)
 			waitCore(t, bin, api, p)
 			capability, err := query(bin, api, barrier.Protocol+"capabilities", false)
-			if err != nil || len(capability) != 1 || capability[barrier.Protocol+"scope/native-inbounds-v2"] != 1 {
+			if err != nil || capability[barrier.Protocol+"scope/native-inbounds-v2"] != 1 || (os.Getenv("DXP_NATIVE_LEASE_MATRIX") != "1" && len(capability) != 1) || (os.Getenv("DXP_NATIVE_LEASE_MATRIX") == "1" && (len(capability) != 2 || capability[barrier.AutonomousLeaseCapability] != 1)) {
 				t.Fatal(capability, err)
 			}
 			health, _ := query(bin, api, barrier.Protocol+"health", false)

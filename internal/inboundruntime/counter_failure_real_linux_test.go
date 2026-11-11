@@ -70,6 +70,10 @@ type realCounterFailureFixture struct {
 }
 
 func newRealCounterFailureFixture(t *testing.T) *realCounterFailureFixture {
+	return newRealCounterFailureFixtureLease(t, false)
+}
+
+func newRealCounterFailureFixtureLease(t *testing.T, required bool) *realCounterFailureFixture {
 	t.Helper()
 	path := os.Getenv("DARK_PRO_TEST_INBOUND_CORE")
 	if path == "" {
@@ -105,7 +109,7 @@ func newRealCounterFailureFixture(t *testing.T) *realCounterFailureFixture {
 	cfg := Config{
 		Directory: filepath.Join(t.TempDir(), "journal"), NodeID: "counter-recovery-node",
 		InstallationID: strings.Repeat("a", 32), Key: []byte(strings.Repeat("k", 32)),
-		Native: BinaryConfig{Path: path, SHA256: sha},
+		Native: BinaryConfig{Path: path, SHA256: sha, RequireAutonomousLease: required},
 	}
 	w, err := Open(cfg)
 	if err != nil {

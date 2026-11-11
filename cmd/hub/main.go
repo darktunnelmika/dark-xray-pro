@@ -309,7 +309,7 @@ func main() {
 		if e != nil {
 			log.Fatal("managed inbound engine configuration invalid")
 		}
-		if e = service.EnableInboundExecution(api.InboundExecutionConfig{Directory: os.Getenv("DARK_PRO_INBOUND_RUNTIME_DIR"), Native: inboundruntime.BinaryConfig{Path: os.Getenv("DARK_PRO_INBOUND_CORE_PATH"), SHA256: os.Getenv("DARK_PRO_INBOUND_CORE_SHA256")}, External: engines}); e != nil {
+		if e = service.EnableInboundExecution(api.InboundExecutionConfig{Directory: os.Getenv("DARK_PRO_INBOUND_RUNTIME_DIR"), Native: inboundruntime.BinaryConfig{Path: os.Getenv("DARK_PRO_INBOUND_CORE_PATH"), SHA256: os.Getenv("DARK_PRO_INBOUND_CORE_SHA256"), RequireAutonomousLease: true}, External: engines}); e != nil {
 			log.Fatal("managed inbound execution unavailable: ", e)
 		}
 	}

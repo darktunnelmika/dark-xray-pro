@@ -38,26 +38,30 @@ type activationHook struct {
 }
 
 type gate struct {
-	mu             sync.Mutex
-	ready          bool
-	startupChecks  map[string]func() bool
-	active         bool
-	closing        bool
-	activation     string
-	activators     map[string]activationHook
-	activateDone   chan struct{}
-	activateCancel context.CancelFunc
-	activateErr    error
-	nonce          string
-	next           uint64
-	count          int
-	roots          map[uint64]func()
-	resources      map[string]func() error
-	changed        chan struct{}
-	zero           chan struct{}
-	finished       chan struct{}
-	values         map[string]int64
-	err            error
+	mu              sync.Mutex
+	ready           bool
+	startupChecks   map[string]func() bool
+	active          bool
+	closing         bool
+	activation      string
+	activators      map[string]activationHook
+	activateDone    chan struct{}
+	activateCancel  context.CancelFunc
+	activateErr     error
+	nonce           string
+	next            uint64
+	count           int
+	roots           map[uint64]func()
+	resources       map[string]func() error
+	changed         chan struct{}
+	zero            chan struct{}
+	finished        chan struct{}
+	values          map[string]int64
+	err             error
+	leaseConfigured bool
+	leaseErr        error
+	lease           *nativeLease
+	autoSealed      bool
 }
 
 func newGate() *gate {
@@ -77,6 +81,7 @@ func IsControl(tag string) bool { return Enabled() && tag == ControlTag }
 // merely accepting a StatsService connection is not ready.
 func MarkReady() {
 	if Enabled() {
+		processGate.configureLeaseFromEnvironment()
 		processGate.mu.Lock()
 		processGate.ready = true
 		processGate.mu.Unlock()
@@ -90,7 +95,7 @@ func Health() (ready, active, sealed bool) {
 func (g *gate) health() (ready, active, sealed bool) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	return g.readyLocked(), g.active && !g.closing, g.finished != nil && g.values != nil && g.err == nil
+	return g.readyLocked(), g.active && !g.closing && g.leasePermitsLocked(), g.finished != nil && g.values != nil && g.err == nil
 }
 
 // RegisterStartupCheck runs only during construction, before MarkReady. Checks
@@ -118,7 +123,7 @@ func (g *gate) registerStartupCheck(tag string, check func() bool) error {
 }
 
 func (g *gate) readyLocked() bool {
-	if !g.ready {
+	if !g.ready || g.leaseErr != nil {
 		return false
 	}
 	for _, check := range g.startupChecks {
@@ -155,7 +160,7 @@ func (g *gate) activateContext(ctx context.Context, nonce string) error {
 		return ErrBarrier
 	}
 	g.mu.Lock()
-	if !validNonce(nonce) || !g.readyLocked() || g.closing || (g.activation != "" && g.activation != nonce) {
+	if !validNonce(nonce) || !g.readyLocked() || !g.leasePermitsLocked() || g.closing || (g.activation != "" && g.activation != nonce) {
 		g.mu.Unlock()
 		return ErrBarrier
 	}
@@ -206,7 +211,7 @@ func (g *gate) runActivation(ctx context.Context, cancel context.CancelFunc, hoo
 		}
 	}
 	g.mu.Lock()
-	if failure == nil && ctx.Err() == nil && !g.closing {
+	if failure == nil && ctx.Err() == nil && !g.closing && g.leasePermitsLocked() {
 		g.active = true
 		close(g.changed)
 		g.changed = make(chan struct{})
@@ -261,9 +266,10 @@ func WaitForActivation() bool {
 	for {
 		g.mu.Lock()
 		active, closing, changed := g.active, g.closing, g.changed
+		allowed := g.leasePermitsLocked()
 		g.mu.Unlock()
-		if closing || active {
-			return active && !closing
+		if closing || active || !allowed {
+			return active && !closing && allowed
 		}
 		<-changed
 	}
@@ -279,7 +285,7 @@ func Enter(ctx context.Context, tag string, interrupt func()) (context.Context, 
 func (g *gate) enter(ctx context.Context, interrupt func()) (context.Context, func(), bool) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	if ctx == nil || !g.active || g.closing {
+	if ctx == nil || !g.active || g.closing || !g.leasePermitsLocked() {
 		return ctx, func() {}, false
 	}
 	g.next++
@@ -384,20 +390,32 @@ func Snapshot(ctx context.Context, nonce string, read func() map[string]int64) (
 }
 
 func (g *gate) snapshot(ctx context.Context, nonce string, read func() map[string]int64) (map[string]int64, error) {
-	if ctx == nil || ctx.Err() != nil || !validNonce(nonce) {
+	return g.snapshotInternal(ctx, nonce, read, false)
+}
+
+func (g *gate) snapshotInternal(ctx context.Context, nonce string, read func() map[string]int64, autonomous bool) (map[string]int64, error) {
+	if ctx == nil || ctx.Err() != nil || (!autonomous && !validNonce(nonce)) {
 		return nil, ErrBarrier
 	}
 	g.mu.Lock()
-	if g.closing && g.nonce != nonce {
-		g.mu.Unlock()
-		return nil, ErrBarrier
+	if !autonomous && g.closing && g.nonce != nonce {
+		if g.autoSealed && g.nonce == "" {
+			g.nonce = nonce
+		} else {
+			g.mu.Unlock()
+			return nil, ErrBarrier
+		}
 	}
 	if !g.closing {
-		if read == nil {
+		if read == nil && !autonomous {
 			g.mu.Unlock()
 			return nil, ErrBarrier
 		}
 		g.closing, g.active, g.nonce = true, false, nonce
+		g.autoSealed = autonomous
+		if g.lease != nil && g.lease.timer != nil {
+			g.lease.timer.Stop()
+		}
 		close(g.changed)
 		g.changed = make(chan struct{})
 		g.finished = make(chan struct{})
@@ -427,6 +445,9 @@ func (g *gate) snapshot(ctx context.Context, nonce string, read func() map[strin
 			var closes sync.WaitGroup
 			var errorsMu sync.Mutex
 			var closeErr error
+			if read == nil {
+				closeErr = ErrBarrier
+			}
 			for _, stop := range stops {
 				closes.Add(1)
 				go func(stop func()) { defer closes.Done(); stop() }(stop)
@@ -447,9 +468,13 @@ func (g *gate) snapshot(ctx context.Context, nonce string, read func() map[strin
 			var values map[string]int64
 			if closeErr == nil {
 				values = clone(read())
+				if values == nil {
+					closeErr = ErrBarrier
+				}
 			}
 			g.mu.Lock()
 			g.values, g.err = values, closeErr
+			g.publishFinalLocked()
 			close(g.finished)
 			g.mu.Unlock()
 		}()

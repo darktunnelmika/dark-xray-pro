@@ -233,3 +233,34 @@ payload, a resolved D-Bus lookup and stub query through the kernel TUN,
 unchanged DNS before activation, correct owner counters, resolver/interface
 removal after both finalization and SIGKILL, and rejection of an existing
 TUN device. Its positive marker is mandatory in CI; a skip cannot pass it.
+
+
+### Independent lease authority and process-lifetime final capture
+
+The managed HUB and node Agent require `autonomous-lease-final-v1`. Each native
+birth receives a private anonymous memfd, a random binding, its configuration
+SHA-256 and the signed lease deadline. The child uses its own monotonic timer
+and checks authority on admission and counted I/O. It begins sealing at the
+existing twelve-second final runway, even if its parent is paused. Renewals are
+bounded to the existing 31-second maximum and cannot reopen a sealed birth.
+
+Sealing closes admission and resources, joins tracked tasks and counted I/O,
+then snapshots genuine counters. The child publishes one canonical record and
+applies all four kernel file seals. Its continuously owning parent can recover
+that record after child exit, bound to the exact PID, birth, configuration and
+first final receipt nonce. Legacy or external-engine exits retain the existing
+uncertainty rules. Production startup rejects a core lacking the capability;
+legacy fixture compatibility is not a production downgrade.
+
+This anonymous capture is not persistent accounting storage. Pending receipts
+still enter the ordinary durable journal before delivery. Parent death, reboot,
+missing seals or an unrecoverable capture retain uncertainty; no unknown usage
+is guessed, waived or converted to zero. Existing permanent accounting holds
+are unaffected by this repair.
+
+The isolated parent-pause acceptance checks actual authenticated traffic before
+and after expiry, verifies an independent origin remains alive, and requires
+genuine positive final replay after journal reopen. It tests a pending ordinary
+receipt and simultaneous parent/core suspension as well. No ptrace, production
+PIDs, customer records or storage mounts are involved. The complete native
+protocol matrix also runs with independent lease authority enabled.
