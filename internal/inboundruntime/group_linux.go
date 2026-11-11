@@ -450,3 +450,9 @@ func (g *engineGroup) complete(values []inboundexec.Counter) ([]inboundexec.Coun
 	sort.Slice(values, func(i, j int) bool { return values[i].PrincipalID < values[j].PrincipalID })
 	return values, nil
 }
+
+// Only a kernel-sealed capture from the continuously owned native birth can
+// survive its exit. Other engines retain their existing uncertainty fence.
+func (g *engineGroup) FinalAvailableAfterExit() bool {
+	return g != nil && len(g.external) == 0 && g.native != nil && g.native.hasFinalCapture()
+}

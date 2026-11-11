@@ -511,7 +511,7 @@ for name, text in contents.items():
     (source / name).write_text(text)
 target = source / "common/darkprov2"
 target.mkdir()
-for name in ("barrier.go", "barrier_test.go"):
+for name in ('barrier.go', 'barrier_test.go', 'lease.go', 'lease_test.go', 'lease_capture_linux.go', 'lease_capture_linux_test.go', 'lease_capture_other.go'):
     shutil.copyfile(repo / "internal/corebarrierv2" / name, target / name)
 shutil.copyfile(repo / "scripts/core-overlay/inbound_stats.go.txt", source / "app/stats/command/darkprov2.go")
 shutil.copyfile(repo / "scripts/core-overlay/inbound_xdrive_test.go.txt", source / "transport/internet/xdrive/darkprov2_test.go")
@@ -531,11 +531,11 @@ provenance = {
     "upstream_source_sha256": HASHES,
     "overlay_sha256": {
         str(p.relative_to(repo)): hashlib.sha256(p.read_bytes()).hexdigest()
-        for p in (Path(__file__).resolve(), repo / "internal/corebarrierv2/barrier.go", repo / "scripts/core-overlay/inbound_stats.go.txt", repo / "scripts/core-overlay/inbound_xdrive_test.go.txt", repo / "scripts/core-overlay/inbound_tun_dns.go.txt", repo / "scripts/core-overlay/inbound_tun_dns_test.go.txt", repo / "scripts/core-overlay/inbound_vision_test.go.txt", repo / "scripts/core-overlay/inbound_udp_lifecycle_test.go.txt", *(repo / name for name in reality_overlays))
+        for p in (Path(__file__).resolve(), repo / "internal/corebarrierv2/barrier.go", repo / "internal/corebarrierv2/lease.go", repo / "internal/corebarrierv2/lease_test.go", repo / "internal/corebarrierv2/lease_capture_linux.go", repo / "internal/corebarrierv2/lease_capture_linux_test.go", repo / "internal/corebarrierv2/lease_capture_other.go", repo / "scripts/core-overlay/inbound_stats.go.txt", repo / "scripts/core-overlay/inbound_xdrive_test.go.txt", repo / "scripts/core-overlay/inbound_tun_dns.go.txt", repo / "scripts/core-overlay/inbound_tun_dns_test.go.txt", repo / "scripts/core-overlay/inbound_vision_test.go.txt", repo / "scripts/core-overlay/inbound_udp_lifecycle_test.go.txt", *(repo / name for name in reality_overlays))
     },
     "patched_source_sha256": {
         name: hashlib.sha256((source / name).read_bytes()).hexdigest()
-        for name in sorted(list(HASHES) + ["common/darkprov2/barrier.go", "common/darkprov2/barrier_test.go", "app/stats/command/darkprov2.go", "transport/internet/xdrive/darkprov2_test.go", "proxy/tun/darkprov2_dns_linux.go", "proxy/tun/darkprov2_dns_linux_test.go", "proxy/darkprov2_vision_test.go", "transport/internet/udp/darkprov2_lifecycle_test.go"] + list(reality_overlays.values()))
+        for name in sorted(list(HASHES) + ["common/darkprov2/barrier.go", "common/darkprov2/barrier_test.go", "common/darkprov2/lease.go", "common/darkprov2/lease_test.go", "common/darkprov2/lease_capture_linux.go", "common/darkprov2/lease_capture_linux_test.go", "common/darkprov2/lease_capture_other.go", "app/stats/command/darkprov2.go", "transport/internet/xdrive/darkprov2_test.go", "proxy/tun/darkprov2_dns_linux.go", "proxy/tun/darkprov2_dns_linux_test.go", "proxy/darkprov2_vision_test.go", "transport/internet/udp/darkprov2_lifecycle_test.go"] + list(reality_overlays.values()))
     },
 }
 (source / "darkpro-inbound-provenance.json").write_text(json.dumps(provenance, sort_keys=True, indent=2) + "\n")

@@ -24,6 +24,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -46,12 +47,13 @@ var (
 // Binary pins an open descriptor, so a path replacement cannot change the
 // executable between validation, configuration checks and process creation.
 type Binary struct {
-	file             *os.File
-	SHA256           string
-	featureMu        sync.Mutex
-	featuresChecked  bool
-	tunDNSActivation bool
-	diagnostics      *Diagnostics
+	file                   *os.File
+	SHA256                 string
+	requireAutonomousLease bool
+	featureMu              sync.Mutex
+	featuresChecked        bool
+	tunDNSActivation       bool
+	diagnostics            *Diagnostics
 }
 
 func OpenBinary(path, digest string) (*Binary, error) {
@@ -110,24 +112,30 @@ func (b *boundedOutput) Write(p []byte) (int, error) {
 }
 
 type Native struct {
-	mu           sync.Mutex
-	binary       *Binary
-	cmd          *exec.Cmd
-	done         chan struct{}
-	dir          string
-	apiDirectory *os.File
-	apiSocket    string
-	stats        *nativeStatsClient
-	identity     usagecheckpoint.ProcessToken
-	configSHA    string
-	principals   []inboundexec.Principal
-	seen         map[string]bool
-	last         map[string]inboundexec.Counter
-	deadline     time.Time
-	leaseSerial  uint64
-	timer        *time.Timer
-	ending       bool
-	activated    bool
+	mu                  sync.Mutex
+	finalMu             sync.Mutex
+	finalCapture        *os.File
+	finalBinding        string
+	autonomousLease     bool
+	recoveredFinalNonce string
+	finalRunway         atomic.Pointer[time.Time]
+	binary              *Binary
+	cmd                 *exec.Cmd
+	done                chan struct{}
+	dir                 string
+	apiDirectory        *os.File
+	apiSocket           string
+	stats               *nativeStatsClient
+	identity            usagecheckpoint.ProcessToken
+	configSHA           string
+	principals          []inboundexec.Principal
+	seen                map[string]bool
+	last                map[string]inboundexec.Counter
+	deadline            time.Time
+	leaseSerial         uint64
+	timer               *time.Timer
+	ending              bool
+	activated           bool
 }
 
 func randomID(n int) (string, error) {
@@ -285,13 +293,26 @@ func StartNative(ctx context.Context, dir string, b *Binary, bundle inboundexec.
 	if e = os.WriteFile(path, raw, 0600); e != nil {
 		return nil, ErrRuntime
 	}
+	capture, binding, e := newNativeFinalCapture()
+	if e != nil {
+		return nil, e
+	}
+	defer func() {
+		if !success {
+			_ = capture.Close()
+		}
+	}()
+	h := sha256.Sum256(raw)
+	configDigest := hex.EncodeToString(h[:])
 	cmd := b.command(context.Background(), "run", "-config", path)
 	cmd.Dir = childDir
 	cmd.Env = []string{"PATH=/usr/bin:/bin", "HOME=" + childDir, "DARK_PRO_INBOUND_V2=1"}
+	cmd.ExtraFiles = append(cmd.ExtraFiles, capture)
+	cmd.Env = append(cmd.Env, "DARK_PRO_NATIVE_FINAL_FD=4", "DARK_PRO_NATIVE_FINAL_BINDING="+binding, "DARK_PRO_NATIVE_CONFIG_SHA256="+configDigest, "DARK_PRO_NATIVE_LEASE_DEADLINE="+strconv.FormatInt(deadline.UnixNano(), 10))
 	cmd.Stdout = io.Discard
 	cmd.Stderr = io.Discard
 	cmd.SysProcAttr = &syscall.SysProcAttr{Pdeathsig: syscall.SIGKILL}
-	p := &Native{binary: b, cmd: cmd, done: make(chan struct{}), dir: childDir, apiDirectory: apiDirectory, apiSocket: apiSocket, principals: bundle.Principals, seen: map[string]bool{}, last: map[string]inboundexec.Counter{}}
+	p := &Native{binary: b, cmd: cmd, finalCapture: capture, finalBinding: binding, configSHA: configDigest, done: make(chan struct{}), dir: childDir, apiDirectory: apiDirectory, apiSocket: apiSocket, principals: bundle.Principals, seen: map[string]bool{}, last: map[string]inboundexec.Counter{}}
 	start := make(chan error, 1)
 	go func() {
 		runtime.LockOSThread()
@@ -312,8 +333,6 @@ func StartNative(ctx context.Context, dir string, b *Binary, bundle inboundexec.
 		p.Stop()
 		return nil, ErrIdentity
 	}
-	h := sha256.Sum256(raw)
-	p.configSHA = hex.EncodeToString(h[:])
 	p.stats, e = newNativeStatsClient(p)
 	if e != nil {
 		p.Stop()
@@ -338,9 +357,20 @@ func StartNative(ctx context.Context, dir string, b *Binary, bundle inboundexec.
 				return nil, ErrRuntime
 			}
 			markers, err := p.query(wait, nativeProtocol+"capabilities")
-			if err == nil && len(markers) == 1 && markers[nativeProtocol+"scope/native-inbounds-v2"] == 1 {
+			if err == nil && markers[nativeProtocol+"scope/native-inbounds-v2"] == 1 && (len(markers) == 1 || len(markers) == 2 && markers[nativeProtocol+"autonomous-lease-final-v1"] == 1) {
 				health, err := p.query(wait, nativeProtocol+"health")
 				if err == nil && health[nativeProtocol+"engine-ready"] == 1 && health[nativeProtocol+"admission-open"] == 0 && p.resourcesReady(bundle.Listeners) {
+					autonomous := markers[nativeProtocol+"autonomous-lease-final-v1"] == 1
+					p.mu.Lock()
+					ending := p.ending
+					if !ending {
+						p.autonomousLease = autonomous
+					}
+					p.mu.Unlock()
+					if ending || b.requireAutonomousLease && !autonomous || autonomous && !p.Renew(deadline) {
+						p.Stop()
+						return nil, ErrProof
+					}
 					success = true
 					return p, nil
 				}
@@ -395,22 +425,47 @@ func (p *Native) Renew(deadline time.Time) bool {
 	// clock step must neither extend admission nor turn a fired timer into a
 	// permanent no-op.
 	p.deadline = now.Add(duration)
+	if p.autonomousLease {
+		cutoff := p.deadline.Add(-12 * time.Second)
+		p.finalRunway.Store(&cutoff)
+	}
 	p.leaseSerial++
 	serial := p.leaseSerial
 	if p.timer != nil {
 		p.timer.Stop()
 	}
 	p.timer = time.AfterFunc(duration, func() { p.expireLease(serial) })
+	if p.autonomousLease {
+		nonce, e := randomID(32)
+		if e != nil {
+			return false
+		}
+		pattern := nativeProtocol + "lease/" + strconv.FormatInt(deadline.UnixNano(), 10) + "/" + nonce
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		markers, e := p.query(ctx, pattern)
+		cancel()
+		if e != nil || len(markers) != 1 || markers[pattern] != 1 {
+			return false
+		}
+	}
 	return true
 }
 
 func (p *Native) expireLease(serial uint64) {
 	p.mu.Lock()
 	var stats *nativeStatsClient
-	if !p.ending && p.leaseSerial == serial {
+	kill := !p.ending && p.leaseSerial == serial
+	if kill {
 		p.ending = true
 		stats = p.stats
 		stats.markClosed()
+	}
+	p.mu.Unlock()
+	if kill {
+		// The new core rejects counted I/O using its own monotonic deadline.
+		// This existing three-second final-control budget retains a sealed capture;
+		// it grants no traffic authority and never applies to a legacy core.
+		p.waitFinalCapture()
 		if p.cmd != nil && p.cmd.Process != nil {
 			if p.binary != nil {
 				p.binary.diagnostics.record(diagnosticNativeStop, diagnosticLeaseExpired)
@@ -418,9 +473,6 @@ func (p *Native) expireLease(serial uint64) {
 			_ = p.cmd.Process.Kill()
 		}
 	}
-	p.mu.Unlock()
-	// Closing transport must never delay the owned-child lease kill or hold
-	// the renewal mutex while gRPC cancels an in-flight dial or RPC.
 	stats.close()
 }
 
@@ -452,6 +504,11 @@ func (p *Native) Stop() {
 	if p.apiDirectory != nil {
 		_ = p.apiDirectory.Close()
 	}
+	p.finalMu.Lock()
+	if p.finalCapture != nil {
+		_ = p.finalCapture.Close()
+	}
+	p.finalMu.Unlock()
 	_ = os.RemoveAll(p.dir)
 }
 
@@ -491,11 +548,38 @@ func (p *Native) Counters(ctx context.Context) ([]inboundexec.Counter, error) {
 	return p.counters(m)
 }
 func (p *Native) Final(ctx context.Context, nonce string) ([]inboundexec.Counter, error) {
+	if ctx == nil || ctx.Err() != nil {
+		return nil, ErrProof
+	}
 	if !validNonce(nonce) {
 		return nil, ErrProof
 	}
+	p.finalMu.Lock()
+	defer p.finalMu.Unlock()
+	if p.recoveredFinalNonce != "" && p.recoveredFinalNonce != nonce {
+		return nil, ErrProof
+	}
+	if captured, e := p.readFinalCapture(nonce); e == nil {
+		return p.counters(captured)
+	}
+	if p.autonomousLease {
+		cutoff := p.finalRunway.Load()
+		closing := p.stats != nil && p.stats.closed.Load()
+		if closing || cutoff != nil && !time.Now().Before(*cutoff) {
+			p.awaitFinalCapture(ctx)
+			if ctx.Err() != nil {
+				return nil, ErrProof
+			}
+			if captured, e := p.readFinalCapture(nonce); e == nil {
+				return p.counters(captured)
+			}
+		}
+	}
 	m, e := p.query(ctx, nativeProtocol+"final/"+nonce)
 	if e != nil {
+		if captured, e := p.readFinalCapture(nonce); e == nil {
+			return p.counters(captured)
+		}
 		return nil, ErrProof
 	}
 	if m[nativeProtocol+"final/"+nonce] != 1 {
@@ -506,6 +590,9 @@ func (p *Native) Final(ctx context.Context, nonce string) ([]inboundexec.Counter
 	}
 	delete(m, nativeProtocol+"final/"+nonce)
 	values, err := p.counters(m)
+	if err == nil {
+		p.recoveredFinalNonce = nonce
+	}
 	if err != nil && p.binary != nil {
 		p.binary.diagnostics.recordError(diagnosticFinalCounters, err)
 	}

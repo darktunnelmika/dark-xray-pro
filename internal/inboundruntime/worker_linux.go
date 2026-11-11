@@ -17,8 +17,9 @@ import (
 )
 
 type BinaryConfig struct {
-	Path   string `json:"path"`
-	SHA256 string `json:"sha256"`
+	Path                   string `json:"path"`
+	SHA256                 string `json:"sha256"`
+	RequireAutonomousLease bool   `json:"require_autonomous_lease,omitempty"`
 }
 type Config struct {
 	Directory      string
@@ -75,6 +76,7 @@ func Open(cfg Config) (*Worker, error) {
 		return nil, e
 	}
 	w.native.diagnostics = cfg.Diagnostics
+	w.native.requireAutonomousLease = cfg.Native.RequireAutonomousLease
 	for engine, desc := range cfg.External {
 		if engine != "tuic" && engine != "amneziawg" && engine != "mtproto" {
 			w.Close()
@@ -231,8 +233,20 @@ func (w *Worker) Step(ctx context.Context, x Exchange) (stepErr error) {
 	}
 	if w.process != nil && !w.process.Alive() && !w.state.FinalAccepted && w.state.Phase != "sealed_waiting_receipt" && (w.state.Pending == nil || !w.state.Pending.Final) {
 		w.cfg.Diagnostics.record(diagnosticCoreState, diagnosticProcessLost)
-		if err := w.markUncertain(); err != nil {
-			return err
+		recovered := false
+		if source, ok := w.process.(interface{ FinalAvailableAfterExit() bool }); ok && source.FinalAvailableAfterExit() && w.process.Identity() == w.state.Epoch.ProcessIdentity && inboundexec.Digest(w.process.BinarySHAs()) == inboundexec.Digest(w.state.Epoch.BinarySHAs) {
+			finalCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			captureErr := w.captureFinal(finalCtx, diagnosticProcessLost)
+			cancel()
+			if captureErr != nil && (w.persistFailed || w.state.Pending != nil && w.state.Pending.Final || w.state.Phase == "sealed_waiting_receipt") {
+				return captureErr
+			}
+			recovered = captureErr == nil
+		}
+		if !recovered {
+			if err := w.markUncertain(); err != nil {
+				return err
+			}
 		}
 	}
 	if w.state.Phase == "uncertain" {
