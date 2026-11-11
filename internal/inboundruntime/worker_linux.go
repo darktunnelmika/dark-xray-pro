@@ -616,8 +616,14 @@ func (w *Worker) sendPending(ctx context.Context, x Exchange) error {
 		w.cfg.Diagnostics.record(diagnosticFinalReceipt, diagnosticSucceeded)
 		w.state.Phase = "final_accepted"
 	}
-	if err := w.save(); err != nil {
-		return err
+	// While serving, the exact ordinary report is already durable locally
+	// and its receipt is durable on the HUB. Leave that replayable copy on
+	// disk until the next state transition. A crash before then replays the
+	// same sequence and still fences the lost incarnation.
+	if w.state.Phase != "active" || w.process == nil || r.Final {
+		if err := w.save(); err != nil {
+			return err
+		}
 	}
 	// This witness is intentionally volatile: reopen must send an immediate
 	// report. Only an exact durable receipt enables coalescing, but its
