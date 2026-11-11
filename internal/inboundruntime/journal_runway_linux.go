@@ -6,7 +6,7 @@ import (
 	"context"
 	"time"
 
- ix "github.com/darktunnelmika/dark-xray-pro/internal/inboundexec"
+	ix "github.com/darktunnelmika/dark-xray-pro/internal/inboundexec"
 )
 
 // The worker mutex remains held, and state is immutable until the first write
