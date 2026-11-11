@@ -276,7 +276,7 @@ jobs:
       - name: Verify receipt replay and a 30-second first journal stall
         env:
           DARK_PRO_TEST_30S_JOURNAL: "1"
-        run: go test -race ./internal/inboundruntime -run '^(TestActiveReceiptReopensExactOrdinaryReport|TestBlockedJournalSealsBeforeWriteCompletesAndReplaysExactTail)$' -count=1 -v
+        run: go test -race ./internal/inboundruntime -run '^(TestThirtySecondFirstWriteWithFreshAuthority|TestJournalWaitRenewalRequiresFreshScopedAuthority|TestActiveReceiptReopensExactOrdinaryReport|TestBlockedJournalSealsBeforeWriteCompletesAndReplaysExactTail)$' -count=1 -v
       - name: Prove backup credential failure is detected before stopping HUB
         shell: bash
         run: |
