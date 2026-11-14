@@ -25,3 +25,11 @@ func TestLogRing(t *testing.T) {
 		t.Fatal(got)
 	}
 }
+
+func TestDropTrusted(t *testing.T) {
+	online := map[string][]string{"ann": {"10.1.2.3", "5.5.5.5", "2001:db8::7"}, "ben": {"10.9.9.9"}}
+	got := DropTrusted(online, []string{"10.0.0.0/8", "2001:db8::7", "bad"})
+	if len(got["ann"]) != 1 || got["ann"][0] != "5.5.5.5" || len(got["ben"]) != 0 || len(online["ann"]) != 3 {
+		t.Fatal(got, online)
+	}
+}

@@ -30,3 +30,17 @@ func TestOutboundTraffic(t *testing.T) {
 		}
 	}
 }
+
+func TestTrustedIPs(t *testing.T) {
+	s, _ := newStore(t)
+	ctx := context.Background()
+	if err := s.PutTrustedIPs(ctx, []string{"10.0.0.0/8", "nope"}); err == nil {
+		t.Fatal("bad entry accepted")
+	}
+	if err := s.PutTrustedIPs(ctx, []string{" 10.0.0.0/8 ", "", "2001:db8::1"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := s.TrustedIPs(ctx); len(got) != 2 || got[0] != "10.0.0.0/8" {
+		t.Fatal(got)
+	}
+}

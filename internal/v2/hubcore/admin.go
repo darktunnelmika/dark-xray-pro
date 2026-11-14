@@ -525,11 +525,14 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 		reply(w, list, err)
 	}))
 	mux.HandleFunc("POST /api/v2/admin/apikeys", guard(func(w http.ResponseWriter, r *http.Request) {
-		var in struct{ Name, Level string }
+		var in struct {
+			Name, Level string
+			Days        int
+		}
 		if !decode(w, r, &in) {
 			return
 		}
-		key, err := s.CreateAPIKey(r.Context(), in.Name, in.Level, who(r).User)
+		key, err := s.CreateAPIKey(r.Context(), in.Name, in.Level, who(r).User, in.Days)
 		reply(w, map[string]string{"key": key}, err)
 	}))
 	mux.HandleFunc("DELETE /api/v2/admin/apikeys/{id}", guard(func(w http.ResponseWriter, r *http.Request) {
@@ -570,6 +573,19 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 		days, _ := strconv.Atoi(r.URL.Query().Get("days"))
 		list, err := s.OutboundTraffic(r.Context(), days)
 		reply(w, list, err)
+	}))
+	mux.HandleFunc("GET /api/v2/admin/settings/trusted-ips", guard(func(w http.ResponseWriter, r *http.Request) {
+		reply(w, map[string][]string{"ips": s.TrustedIPs(r.Context())}, nil)
+	}))
+	mux.HandleFunc("PUT /api/v2/admin/settings/trusted-ips", guard(func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			IPs []string `json:"ips"`
+		}
+		if !decode(w, r, &in) {
+			return
+		}
+		err := s.PutTrustedIPs(r.Context(), in.IPs)
+		reply(w, map[string]bool{"ok": err == nil}, err)
 	}))
 	mux.HandleFunc("GET /api/v2/admin/audit", guard(func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()

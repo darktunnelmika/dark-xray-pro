@@ -1,7 +1,9 @@
 package nodeagent
 
 import (
+	"net"
 	"sort"
+	"strings"
 
 	"github.com/darktunnelmika/dark-xray-pro/internal/v2/wire"
 )
@@ -51,5 +53,47 @@ func (d Decision) Allowed(limits []wire.UserLimit) []string {
 		}
 	}
 	sort.Strings(out)
+	return out
+}
+
+// DropTrusted removes trusted addresses (IPs or CIDRs) from the online
+// lists before IP limits are checked.
+func DropTrusted(online map[string][]string, trusted []string) map[string][]string {
+	if len(trusted) == 0 || len(online) == 0 {
+		return online
+	}
+	var nets []*net.IPNet
+	for _, t := range trusted {
+		if !strings.Contains(t, "/") {
+			if ip := net.ParseIP(t); ip != nil {
+				if ip.To4() != nil {
+					t += "/32"
+				} else {
+					t += "/128"
+				}
+			}
+		}
+		if _, n, err := net.ParseCIDR(t); err == nil {
+			nets = append(nets, n)
+		}
+	}
+	out := make(map[string][]string, len(online))
+	for email, ips := range online {
+		kept := ips[:0:0]
+		for _, s := range ips {
+			ip := net.ParseIP(s)
+			trustedIP := false
+			for _, n := range nets {
+				if ip != nil && n.Contains(ip) {
+					trustedIP = true
+					break
+				}
+			}
+			if !trustedIP {
+				kept = append(kept, s)
+			}
+		}
+		out[email] = kept
+	}
 	return out
 }

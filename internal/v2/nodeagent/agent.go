@@ -404,6 +404,7 @@ func (a *Agent) enforce(ctx context.Context) {
 	}
 	now := a.cfg.Now()
 	online, _ := a.stats.OnlineIPs(ctx)
+	online = DropTrusted(online, state.TrustedIPs)
 	d := Evaluate(now.Unix(), state.Users, a.localUsed(), online)
 	a.mu.Lock()
 	for e, until := range a.blockedUntil {

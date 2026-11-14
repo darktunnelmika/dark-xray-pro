@@ -5,8 +5,11 @@ package webui
 import (
 	"embed"
 	"io/fs"
+	"mime"
 	"net/http"
 )
+
+func init() { _ = mime.AddExtensionType(".webmanifest", "application/manifest+json") }
 
 //go:embed static
 var files embed.FS

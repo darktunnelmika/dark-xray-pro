@@ -117,6 +117,9 @@ type SyncResponse struct {
 	UnixTime    int64   `json:"unix_time"`
 	Tasks       []Task  `json:"tasks,omitempty"`
 	Assets      []Asset `json:"assets,omitempty"`
+	// TrustedIPs are addresses or CIDRs never counted toward IP limits
+	// (an office NAT, a CDN or relay egress, a monitoring probe).
+	TrustedIPs []string `json:"trusted_ips,omitempty"`
 }
 
 // UserLimit is the HUB's view of one client at the time of the sync.

@@ -206,6 +206,19 @@ func TestAPIKeys(t *testing.T) {
 	if len(log) != 1 || log[0].Role != "admin" {
 		t.Fatalf("%+v", log)
 	}
+	short, err := s.CreateAPIKey(ctx, "temp", "viewer", "boss", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code, _ := call(short, "GET", "/api/v2/admin/clients", ""); code != 200 {
+		t.Fatal("fresh expiring key works")
+	}
+	s.SetClock(func() time.Time { return time.Unix(1_800_000_000, 0).Add(25 * time.Hour) })
+	if code, _ := call(short, "GET", "/api/v2/admin/clients", ""); code != 401 {
+		t.Fatal("expired key still works")
+	}
+	s.SetClock(func() time.Time { return time.Unix(1_800_000_000, 0) })
+	_ = s.DeleteAPIKey(ctx, strings.Split(short, "_")[1])
 	keys, _ := s.APIKeys(ctx)
 	if len(keys) != 2 || keys[0].LastUsed == 0 || keys[0].CreatedBy != "api" {
 		t.Fatalf("%+v", keys)
