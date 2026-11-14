@@ -2,6 +2,8 @@ package hubcore
 
 import (
 	"encoding/json"
+
+	qrcode "github.com/skip2/go-qrcode"
 	"net/http"
 	"strings"
 	"time"
@@ -13,7 +15,16 @@ import (
 // subscriptions under /sub/<token>. adminToken guards the owner API until the
 // panel's session login is attached in front of it.
 func AdminHandler(s *Store, adminToken string) http.Handler {
+	return AdminHandlerWith(s, adminToken, "", nil)
+}
+
+// AdminHandlerWith also serves the panel UI at / and fills each client's
+// public subscription URL from subBase (e.g. https://sub.example.com).
+func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler) http.Handler {
 	mux := http.NewServeMux()
+	if ui != nil {
+		mux.Handle("GET /", ui)
+	}
 	guard := func(h http.HandlerFunc) http.HandlerFunc {
 		return func(w http.ResponseWriter, r *http.Request) {
 			if !authorized(s, adminToken, r) {
@@ -107,7 +118,36 @@ func AdminHandler(s *Store, adminToken string) http.Handler {
 	}))
 	mux.HandleFunc("GET /api/v2/admin/clients", guard(func(w http.ResponseWriter, r *http.Request) {
 		list, err := s.Clients(r.Context())
-		reply(w, list, err)
+		type view struct {
+			ClientView
+			SubURL string
+		}
+		out := make([]view, 0, len(list))
+		for _, c := range list {
+			out = append(out, view{c, subURL(subBase, r, c.SubToken)})
+		}
+		reply(w, out, err)
+	}))
+	mux.HandleFunc("GET /api/v2/admin/clients/{email}/qr.png", guard(func(w http.ResponseWriter, r *http.Request) {
+		list, err := s.Clients(r.Context())
+		if err != nil {
+			reply(w, nil, err)
+			return
+		}
+		for _, c := range list {
+			if c.Email == r.PathValue("email") {
+				png, err := qrcode.Encode(subURL(subBase, r, c.SubToken), qrcode.Medium, 320)
+				if err != nil {
+					reply(w, nil, err)
+					return
+				}
+				w.Header().Set("Content-Type", "image/png")
+				w.Header().Set("Cache-Control", "no-store")
+				_, _ = w.Write(png)
+				return
+			}
+		}
+		http.NotFound(w, r)
 	}))
 	mux.HandleFunc("PUT /api/v2/admin/clients/{email}", guard(func(w http.ResponseWriter, r *http.Request) {
 		var c Client
@@ -155,4 +195,11 @@ func SubHandler(s *Store) http.Handler {
 		_, _ = w.Write([]byte(sub.Base64(links)))
 	})
 	return mux
+}
+
+func subURL(base string, r *http.Request, tok string) string {
+	if base == "" {
+		base = "http://" + r.Host
+	}
+	return strings.TrimRight(base, "/") + "/sub/" + tok
 }

@@ -31,6 +31,7 @@ import (
 	"time"
 
 	"github.com/darktunnelmika/dark-xray-pro/internal/v2/hubcore"
+	"github.com/darktunnelmika/dark-xray-pro/internal/v2/webui"
 )
 
 func main() {
@@ -45,10 +46,11 @@ func main() {
 	tlsDir := fs.String("tls-dir", "/etc/dark-hub2", "CA and server certificate directory")
 	adminListen := fs.String("admin-listen", "127.0.0.1:2097", "owner API and /sub listen address (put HTTPS in front)")
 	subListen := fs.String("sub-listen", "", "public subscription-only listen address (optional)")
+	subBase := fs.String("sub-base", "", "public base URL for subscription links, e.g. http://1.2.3.4:28080")
 	adminTokenFile := fs.String("admin-token-file", "/etc/dark-hub2/admin-token", "owner API bearer token file")
 	hosts := fs.String("hosts", "", "comma-separated IPs/names for the server certificate")
 	id := fs.String("id", "", "node id")
-	name := fs.String("name", "", "node display name")
+	name := fs.String("name", "", "node display name / owner username")
 	tag := fs.String("tag", "", "inbound tag")
 	node := fs.String("node", "", "node id owning the inbound")
 	file := fs.String("file", "", "inbound template JSON file")
@@ -86,7 +88,7 @@ func main() {
 			}
 		}()
 		if tok, err := os.ReadFile(*adminTokenFile); err == nil && *adminListen != "" {
-			admin := &http.Server{Addr: *adminListen, Handler: hubcore.AdminHandler(s, strings.TrimSpace(string(tok))), ReadHeaderTimeout: 10 * time.Second}
+			admin := &http.Server{Addr: *adminListen, Handler: hubcore.AdminHandlerWith(s, strings.TrimSpace(string(tok)), *subBase, webui.Handler()), ReadHeaderTimeout: 10 * time.Second}
 			go func() {
 				log.Printf("owner API and subscriptions on %s", *adminListen)
 				log.Fatal(admin.ListenAndServe())

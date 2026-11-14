@@ -1,0 +1,366 @@
+// Dark VPN owner panel (v2). No framework, no build step.
+const I18N = {
+  en: {
+    dashboard: "Dashboard", clients: "Clients", inbounds: "Inbounds", nodes: "Nodes", settings: "Settings",
+    login: "Sign in", username: "Username", password: "Password", badLogin: "Invalid username or password",
+    nodesOnline: "Nodes online", activeClients: "Active clients", onlineUsers: "Online now", trafficToday: "Traffic today", trafficTotal: "Total traffic",
+    add: "Add", edit: "Edit", delete: "Delete", save: "Save", cancel: "Cancel", close: "Close", copy: "Copy", copied: "Copied",
+    search: "Search", name: "Name", volumeGB: "Volume (GB, 0 = unlimited)", days: "Days (0 = no expiry)", firstUse: "Start on first connection",
+    maxIPs: "Max IPs (0 = no limit)", enabled: "Enabled", assignInbounds: "Inbounds", unlimited: "Unlimited", noExpiry: "No expiry",
+    notStarted: "Starts on first use", daysLeft: "{n} days left", expired: "Expired", disabled: "Disabled", exhausted: "Volume used up",
+    subscription: "Subscription", subHint: "Import this link or scan the QR code in v2rayNG, Hiddify or Streisand.",
+    confirmDelete: "Delete {x}? Usage history is kept.", node: "Node", preset: "Preset", tag: "Tag", port: "Port", sni: "REALITY target (SNI)",
+    path: "Path / service name (optional)", remark: "Remark", directAddr: "Public address", tunnelAddr: "Tunnel entry (optional, address:port)",
+    addNode: "Add node", nodeId: "Node ID (e.g. de-1)", nodeToken: "Node token — shown once, keep it safe", online: "Online", offline: "Offline",
+    restarts: "Xray starts", spooled: "Waiting batches", language: "Language", theme: "Theme", system: "System", light: "Light", dark: "Dark",
+    logout: "Sign out", empty: "Nothing here yet.", saved: "Saved", failed: "Failed: {e}", clientsCount: "{n} clients", lastError: "Last error",
+  },
+  fa: {
+    dashboard: "داشبورد", clients: "کلاینت‌ها", inbounds: "اینباندها", nodes: "نودها", settings: "تنظیمات",
+    login: "ورود", username: "نام کاربری", password: "رمز عبور", badLogin: "نام کاربری یا رمز اشتباه است",
+    nodesOnline: "نود آنلاین", activeClients: "کلاینت فعال", onlineUsers: "آنلاین الان", trafficToday: "ترافیک امروز", trafficTotal: "کل ترافیک",
+    add: "افزودن", edit: "ویرایش", delete: "حذف", save: "ذخیره", cancel: "انصراف", close: "بستن", copy: "کپی", copied: "کپی شد",
+    search: "جستجو", name: "نام", volumeGB: "حجم (گیگ، ۰ = نامحدود)", days: "روز (۰ = بدون انقضا)", firstUse: "شروع از اولین اتصال",
+    maxIPs: "حداکثر IP (۰ = بدون محدودیت)", enabled: "فعال", assignInbounds: "اینباندها", unlimited: "نامحدود", noExpiry: "بدون انقضا",
+    notStarted: "از اولین اتصال شروع می‌شود", daysLeft: "{n} روز مانده", expired: "منقضی", disabled: "غیرفعال", exhausted: "حجم تمام شد",
+    subscription: "لینک ساب", subHint: "این لینک را در v2rayNG، Hiddify یا Streisand وارد کنید یا QR را اسکن کنید.",
+    confirmDelete: "{x} حذف شود؟ سابقهٔ مصرف حفظ می‌شود.", node: "نود", preset: "نوع", tag: "شناسه", port: "پورت", sni: "مقصد REALITY (SNI)",
+    path: "مسیر / نام سرویس (اختیاری)", remark: "نام نمایشی", directAddr: "آدرس عمومی", tunnelAddr: "ورودی تونل (اختیاری، آدرس:پورت)",
+    addNode: "افزودن نود", nodeId: "شناسه نود (مثلاً de-1)", nodeToken: "توکن نود — فقط یک بار نشان داده می‌شود", online: "آنلاین", offline: "آفلاین",
+    restarts: "دفعات اجرای Xray", spooled: "بستهٔ در انتظار", language: "زبان", theme: "پوسته", system: "سیستم", light: "روشن", dark: "تیره",
+    logout: "خروج", empty: "هنوز چیزی نیست.", saved: "ذخیره شد", failed: "خطا: {e}", clientsCount: "{n} کلاینت", lastError: "آخرین خطا",
+  },
+};
+let lang = safeGet("lang") === "fa" ? "fa" : "en";
+const t = (k, vars = {}) => (I18N[lang][k] ?? I18N.en[k] ?? k).replace(/\{(\w+)\}/g, (_, v) => vars[v] ?? "");
+const fmtNum = (n) => new Intl.NumberFormat(lang === "fa" ? "fa-IR" : "en-US", { maximumFractionDigits: 1 }).format(n);
+
+function safeGet(k) { try { return localStorage.getItem(k); } catch { return null; } }
+function safeSet(k, v) { try { v == null ? localStorage.removeItem(k) : localStorage.setItem(k, v); } catch {} }
+
+// Tiny element builder: never uses innerHTML, so names from the API can't inject markup.
+function h(tag, attrs = {}, ...kids) {
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (v == null || v === false) continue;
+    if (k.startsWith("on")) el.addEventListener(k.slice(2), v);
+    else if (k === "class") el.className = v;
+    else if (k === "style") el.style.cssText = v; // CSSOM: allowed under a strict style-src CSP
+    else el.setAttribute(k, v === true ? "" : v);
+  }
+  for (const kid of kids.flat()) if (kid != null && kid !== false) el.append(kid instanceof Node ? kid : String(kid));
+  return el;
+}
+
+function bytes(n) {
+  const u = ["B", "KB", "MB", "GB", "TB"];
+  let i = 0;
+  while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
+  return `${fmtNum(n)} ${u[i]}`;
+}
+
+async function api(method, path, body) {
+  const res = await fetch(path, {
+    method, credentials: "same-origin",
+    headers: { "Content-Type": "application/json", "X-Dark-Request": "1" },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  if (res.status === 401 && !path.startsWith("/api/v2/auth/login")) { location.hash = "#/login"; throw new Error("unauthorized"); }
+  const text = await res.text();
+  if (!res.ok) throw new Error(text.trim() || res.statusText);
+  return text ? JSON.parse(text) : null;
+}
+
+function toast(msg) {
+  const el = document.getElementById("toast");
+  el.textContent = msg;
+  try { el.showPopover(); } catch {}
+  clearTimeout(toast.timer);
+  toast.timer = setTimeout(() => { try { el.hidePopover(); } catch {} }, 2200);
+}
+
+async function copy(text) {
+  try { await navigator.clipboard.writeText(text); toast(t("copied")); } catch { prompt(t("copy"), text); }
+}
+
+// One shared native <dialog>; content is rebuilt per use.
+function openModal(title, body, actions = []) {
+  const d = document.getElementById("modal");
+  d.replaceChildren(
+    h("h2", { id: "modal-title" }, title), body,
+    h("form", { method: "dialog", class: "actions" },
+      ...actions, h("button", { value: "cancel", autofocus: actions.length === 0 }, actions.length ? t("cancel") : t("close"))),
+  );
+  d.returnValue = "";
+  d.showModal();
+  return d;
+}
+
+function confirmAction(text) {
+  return new Promise((resolve) => {
+    const d = openModal(text, h("p", { class: "muted" }, ""), [h("button", { value: "ok", class: "danger" }, t("delete"))]);
+    d.addEventListener("close", () => { resolve(d.returnValue === "ok"); d.returnValue = ""; }, { once: true });
+  });
+}
+
+// ---------- Views ----------
+const routes = { dashboard: viewDashboard, clients: viewClients, inbounds: viewInbounds, nodes: viewNodes, settings: viewSettings };
+
+function shell(active, content) {
+  const tabs = Object.keys(routes).map((r) => h("a", { href: `#/${r}`, "aria-current": r === active ? "page" : null }, t(r)));
+  return h("div", { class: "shell" },
+    h("header", { class: "top" }, h("span", { class: "brand" }, "Dark VPN"), h("span", { class: "muted small" }, "v2")),
+    h("nav", { class: "tabs", "aria-label": "Main" }, tabs),
+    h("main", {}, content));
+}
+
+function viewLogin() {
+  const err = h("div", { class: "error", role: "alert" });
+  const user = h("input", { name: "u", autocomplete: "username", required: true, autofocus: true });
+  const pass = h("input", { name: "p", type: "password", autocomplete: "current-password", required: true });
+  const btn = h("button", { class: "primary", type: "submit" }, t("login"));
+  const form = h("form", { class: "form", onsubmit: async (e) => {
+    e.preventDefault(); btn.disabled = true; err.textContent = "";
+    try { await api("POST", "/api/v2/auth/login", { Username: user.value, Password: pass.value }); location.hash = "#/dashboard"; }
+    catch { err.textContent = t("badLogin"); } finally { btn.disabled = false; }
+  } }, h("label", {}, h("span", {}, t("username")), user), h("label", {}, h("span", {}, t("password")), pass), err, btn);
+  return h("div", { class: "login" }, h("div", { class: "card" }, h("h1", {}, "Dark VPN"), form));
+}
+
+async function viewDashboard() {
+  const [o, nodes] = await Promise.all([api("GET", "/api/v2/admin/overview"), api("GET", "/api/v2/admin/nodes")]);
+  const stat = (k, v) => h("div", { class: "card stat" }, h("div", { class: "v" }, v), h("div", { class: "k" }, t(k)));
+  return h("div", {},
+    h("h1", {}, t("dashboard")),
+    h("div", { class: "grid" },
+      stat("nodesOnline", `${fmtNum(o.NodesOnline)} / ${fmtNum(o.Nodes)}`),
+      stat("activeClients", `${fmtNum(o.ClientsActive)} / ${fmtNum(o.Clients)}`),
+      stat("onlineUsers", fmtNum(o.OnlineUsers)),
+      stat("trafficToday", bytes(o.TrafficToday)),
+      stat("trafficTotal", bytes(o.TrafficTotal))),
+    h("div", { class: "list" }, (nodes || []).map(nodeCard)));
+}
+
+function nodeCard(n) {
+  return h("div", { class: "card item" },
+    h("div", { class: "head" }, h("span", { class: `dot ${n.online ? "on" : ""}` }), h("span", { class: "name" }, `${n.Name || n.ID}`),
+      h("span", { class: "badge" }, n.ID), h("span", { class: `badge ${n.online ? "good" : "bad"} spacer` }, t(n.online ? "online" : "offline"))),
+    h("div", { class: "muted small" }, `${t("restarts")}: ${fmtNum(n.XrayRestarts)} · ${t("spooled")}: ${fmtNum(n.Spooled)} · ${n.AgentVersion || ""}`),
+    n.LastError ? h("div", { class: "small", style: "color:var(--bad)" }, `${t("lastError")}: ${n.LastError}`) : null);
+}
+
+function clientStatus(c) {
+  const now = Date.now() / 1000;
+  if (!c.Enabled) return ["bad", t("disabled")];
+  if (c.Remaining === 0) return ["bad", t("exhausted")];
+  if (c.EffectiveUntil && c.EffectiveUntil <= now) return ["bad", t("expired")];
+  if (!c.EffectiveUntil && c.DurationSeconds) return ["", t("notStarted")];
+  if (!c.EffectiveUntil) return ["", t("noExpiry")];
+  const d = Math.ceil((c.EffectiveUntil - now) / 86400);
+  return [d <= 3 ? "warn" : "good", t("daysLeft", { n: fmtNum(d) })];
+}
+
+async function viewClients() {
+  const [list, inbounds] = await Promise.all([api("GET", "/api/v2/admin/clients"), api("GET", "/api/v2/admin/inbounds")]);
+  const box = h("div", { class: "list" });
+  const render = (q = "") => {
+    const rows = (list || []).filter((c) => c.Email.toLowerCase().includes(q.toLowerCase()));
+    box.replaceChildren(...(rows.length ? rows.map((c) => clientCard(c, inbounds)) : [h("p", { class: "muted" }, t("empty"))]));
+  };
+  render();
+  return h("div", {},
+    h("div", { class: "row" }, h("h1", {}, t("clients")), h("span", { class: "muted small" }, t("clientsCount", { n: fmtNum((list || []).length) })),
+      h("input", { class: "search spacer", type: "search", placeholder: t("search"), "aria-label": t("search"), oninput: (e) => render(e.target.value) }),
+      h("button", { class: "primary", onclick: () => clientForm(null, inbounds) }, t("add"))),
+    box);
+}
+
+function clientCard(c, inbounds) {
+  const used = c.Usage.Up + c.Usage.Down;
+  const pct = c.VolumeBytes > 0 ? Math.min(100, (used / c.VolumeBytes) * 100) : 0;
+  const [cls, status] = clientStatus(c);
+  return h("div", { class: "card item" },
+    h("div", { class: "head" }, h("span", { class: `dot ${c.Online ? "on" : ""}`, title: c.Online ? t("online") : t("offline") }),
+      h("span", { class: "name" }, c.Email), h("span", { class: `badge ${cls}` }, status)),
+    h("div", { class: "row small muted" },
+      h("span", {}, `${bytes(used)} / ${c.VolumeBytes < 0 ? t("unlimited") : bytes(c.VolumeBytes)}`),
+      c.MaxIPs ? h("span", {}, `· IP ≤ ${fmtNum(c.MaxIPs)}`) : null,
+      h("span", {}, `· ${(c.Inbounds || []).join(", ")}`)),
+    c.VolumeBytes > 0 ? h("div", { class: "bar" }, h("i", { class: pct > 90 ? "bad" : pct > 75 ? "warn" : "", style: `inline-size:${pct}%` })) : null,
+    h("div", { class: "row" },
+      h("button", { onclick: () => showSub(c) }, t("subscription")),
+      h("button", { class: "ghost", onclick: () => clientForm(c, inbounds) }, t("edit")),
+      h("button", { class: "ghost danger spacer", onclick: async () => {
+        if (await confirmAction(t("confirmDelete", { x: c.Email }))) { await guarded(() => api("DELETE", `/api/v2/admin/clients/${encodeURIComponent(c.Email)}`)); route(); }
+      } }, t("delete"))));
+}
+
+function showSub(c) {
+  const url = c.SubURL || "";
+  openModal(`${t("subscription")} · ${c.Email}`, h("div", { class: "form" },
+    h("p", { class: "muted small" }, t("subHint")),
+    h("img", { class: "qr", alt: "QR", src: `/api/v2/admin/clients/${encodeURIComponent(c.Email)}/qr.png` }),
+    h("code", {}, url),
+    h("button", { type: "button", onclick: () => copy(url) }, t("copy"))));
+}
+
+async function guarded(fn) {
+  try { const r = await fn(); toast(t("saved")); return r; } catch (e) { toast(t("failed", { e: e.message })); throw e; }
+}
+
+function clientForm(c, inbounds) {
+  const isNew = !c;
+  const v = c || { Email: "", Enabled: true, VolumeBytes: -1, ExpiresUnix: 0, DurationSeconds: 30 * 86400, MaxIPs: 2, Inbounds: [] };
+  const daysLeft = v.ExpiresUnix ? Math.max(0, Math.round((v.ExpiresUnix - Date.now() / 1000) / 86400)) : Math.round((v.DurationSeconds || 0) / 86400);
+  const name = h("input", { required: true, pattern: "[A-Za-z0-9][A-Za-z0-9._@+-]{0,127}", value: v.Email, disabled: !isNew, autofocus: isNew });
+  const vol = h("input", { type: "number", min: "0", step: "0.5", value: v.VolumeBytes < 0 ? 0 : +(v.VolumeBytes / 2 ** 30).toFixed(2) });
+  const days = h("input", { type: "number", min: "0", value: daysLeft });
+  const first = h("input", { type: "checkbox", checked: isNew ? true : !v.ExpiresUnix && v.DurationSeconds > 0 });
+  const ips = h("input", { type: "number", min: "0", max: "1000", value: v.MaxIPs });
+  const enabled = h("input", { type: "checkbox", checked: v.Enabled });
+  const boxes = (inbounds || []).map((ib) => h("label", { class: "check" },
+    h("input", { type: "checkbox", value: ib.tag, checked: isNew ? (inbounds.length === 1) : (v.Inbounds || []).includes(ib.tag) }),
+    `${ib.tag} · ${ib.node_id} · ${ib.network}/${ib.security}`));
+  const err = h("div", { class: "error" });
+  const save = h("button", { class: "primary", value: "save", onclick: async (e) => {
+    e.preventDefault();
+    if (!name.reportValidity()) return;
+    const d = +days.value || 0;
+    const body = {
+      Enabled: enabled.checked, MaxIPs: +ips.value || 0,
+      VolumeBytes: +vol.value > 0 ? Math.round(+vol.value * 2 ** 30) : -1,
+      ExpiresUnix: d && !first.checked ? Math.floor(Date.now() / 1000) + d * 86400 : 0,
+      DurationSeconds: d && first.checked ? d * 86400 : 0,
+      Inbounds: boxes.map((b) => b.querySelector("input")).filter((i) => i.checked).map((i) => i.value),
+    };
+    if (!isNew && !first.checked && v.ExpiresUnix && d === daysLeft) body.ExpiresUnix = v.ExpiresUnix;
+    try { await guarded(() => api("PUT", `/api/v2/admin/clients/${encodeURIComponent(name.value)}`, body)); document.getElementById("modal").close("save"); route(); }
+    catch (x) { err.textContent = x.message; }
+  } }, t("save"));
+  openModal(isNew ? t("add") : `${t("edit")} · ${v.Email}`, h("div", { class: "form" },
+    h("label", {}, h("span", {}, t("name")), name),
+    h("div", { class: "two" }, h("label", {}, h("span", {}, t("volumeGB")), vol), h("label", {}, h("span", {}, t("days")), days)),
+    h("label", { class: "check" }, first, t("firstUse")),
+    h("div", { class: "two" }, h("label", {}, h("span", {}, t("maxIPs")), ips), h("label", { class: "check" }, enabled, t("enabled"))),
+    h("fieldset", { class: "form", style: "border:0;padding:0;margin:0" }, h("legend", { class: "small muted" }, t("assignInbounds")), boxes),
+    err), [save]);
+}
+
+async function viewInbounds() {
+  const [list, nodes, presets] = await Promise.all([api("GET", "/api/v2/admin/inbounds"), api("GET", "/api/v2/admin/nodes"), api("GET", "/api/v2/admin/presets")]);
+  const cards = (list || []).map((ib) => {
+    let meta = {};
+    try { meta = typeof ib.meta === "string" ? JSON.parse(ib.meta) : ib.meta || {}; } catch {}
+    return h("div", { class: "card item" },
+      h("div", { class: "head" }, h("span", { class: "name" }, ib.tag), h("span", { class: "badge" }, `${ib.protocol} · ${ib.network} · ${ib.security}`),
+        h("span", { class: "badge spacer" }, `${t("node")}: ${ib.node_id}`)),
+      h("div", { class: "muted small" }, `${t("port")} ${ib.port} · ${t("clientsCount", { n: fmtNum(ib.clients) })}`),
+      h("div", { class: "small mono" }, (meta.endpoints || []).map((e) => `${e.name || ""} ${e.address}:${e.port}`).join("  ·  ")),
+      h("div", { class: "row" }, h("button", { class: "ghost danger spacer", onclick: async () => {
+        if (await confirmAction(t("confirmDelete", { x: ib.tag }))) { await guarded(() => api("DELETE", `/api/v2/admin/inbounds/${encodeURIComponent(ib.tag)}`)); route(); }
+      } }, t("delete"))));
+  });
+  return h("div", {},
+    h("div", { class: "row" }, h("h1", {}, t("inbounds")), h("button", { class: "primary spacer", onclick: () => inboundForm(nodes, presets) }, t("add"))),
+    h("div", { class: "list" }, cards.length ? cards : h("p", { class: "muted" }, t("empty"))));
+}
+
+function inboundForm(nodes, presets) {
+  const node = h("select", { required: true }, (nodes || []).map((n) => h("option", { value: n.ID }, `${n.Name || n.ID} (${n.ID})`)));
+  const preset = h("select", {}, (presets || []).map((p) => h("option", { value: p }, p)));
+  const tag = h("input", { required: true, pattern: "[a-z0-9][a-z0-9._-]{0,62}", placeholder: "de-reality" });
+  const port = h("input", { type: "number", min: "1", max: "65535", required: true, value: "443" });
+  const sni = h("input", { value: "www.speedtest.net" });
+  const path = h("input", {});
+  const remark = h("input", { value: "Dark VPN" });
+  const addr = h("input", { required: true, placeholder: "1.2.3.4" });
+  const tunnel = h("input", { placeholder: "5.6.7.8:2400" });
+  const err = h("div", { class: "error" });
+  const save = h("button", { class: "primary", value: "save", onclick: async (e) => {
+    e.preventDefault();
+    for (const f of [tag, port, addr]) if (!f.reportValidity()) return;
+    const endpoints = [{ name: "Direct", address: addr.value.trim(), port: +port.value }];
+    if (tunnel.value.trim()) {
+      const [a, p] = tunnel.value.trim().split(/:(?=\d+$)/);
+      endpoints.push({ name: "Tunnel", address: a, port: +p || +port.value });
+    }
+    try {
+      await guarded(() => api("POST", "/api/v2/admin/inbounds/preset", { tag: tag.value, node_id: node.value, preset: preset.value, port: +port.value,
+        sni: sni.value.trim(), path: path.value.trim(), remark: remark.value.trim(), endpoints }));
+      document.getElementById("modal").close("save"); route();
+    } catch (x) { err.textContent = x.message; }
+  } }, t("save"));
+  openModal(`${t("add")} · ${t("inbounds")}`, h("div", { class: "form" },
+    h("div", { class: "two" }, h("label", {}, h("span", {}, t("node")), node), h("label", {}, h("span", {}, t("preset")), preset)),
+    h("div", { class: "two" }, h("label", {}, h("span", {}, t("tag")), tag), h("label", {}, h("span", {}, t("port")), port)),
+    h("label", {}, h("span", {}, t("sni")), sni), h("label", {}, h("span", {}, t("path")), path),
+    h("label", {}, h("span", {}, t("remark")), remark),
+    h("div", { class: "two" }, h("label", {}, h("span", {}, t("directAddr")), addr), h("label", {}, h("span", {}, t("tunnelAddr")), tunnel)),
+    err), [save]);
+}
+
+async function viewNodes() {
+  const nodes = await api("GET", "/api/v2/admin/nodes");
+  return h("div", {},
+    h("div", { class: "row" }, h("h1", {}, t("nodes")), h("button", { class: "primary spacer", onclick: nodeForm }, t("addNode"))),
+    h("div", { class: "list" }, (nodes || []).length ? nodes.map(nodeCard) : h("p", { class: "muted" }, t("empty"))));
+}
+
+function nodeForm() {
+  const id = h("input", { required: true, pattern: "[a-z0-9][a-z0-9._-]{0,62}", autofocus: true });
+  const name = h("input", {});
+  const out = h("div", {});
+  const save = h("button", { class: "primary", value: "save", onclick: async (e) => {
+    e.preventDefault();
+    if (!id.reportValidity()) return;
+    try {
+      const r = await guarded(() => api("POST", "/api/v2/admin/nodes", { ID: id.value, Name: name.value }));
+      out.replaceChildren(h("p", { class: "small" }, t("nodeToken")), h("code", {}, r.token), h("button", { type: "button", onclick: () => copy(r.token) }, t("copy")));
+      save.disabled = true;
+    } catch {}
+  } }, t("save"));
+  openModal(t("addNode"), h("div", { class: "form" },
+    h("label", {}, h("span", {}, t("nodeId")), id), h("label", {}, h("span", {}, t("name")), name), out), [save]);
+}
+
+function viewSettings() {
+  const langSel = h("select", { onchange: (e) => { lang = e.target.value; safeSet("lang", lang); applyLang(); route(); } },
+    h("option", { value: "en", selected: lang === "en" }, "English"), h("option", { value: "fa", selected: lang === "fa" }, "فارسی"));
+  const cur = safeGet("color-scheme") || "light dark";
+  const themeSel = h("select", { onchange: (e) => {
+    const v = e.target.value;
+    safeSet("color-scheme", v === "light dark" ? null : v);
+    document.querySelector('meta[name="color-scheme"]').content = v;
+  } }, [["light dark", t("system")], ["light", t("light")], ["dark", t("dark")]].map(([v, l]) => h("option", { value: v, selected: v === cur }, l)));
+  return h("div", {}, h("h1", {}, t("settings")),
+    h("div", { class: "card form" },
+      h("label", {}, h("span", {}, t("language")), langSel),
+      h("label", {}, h("span", {}, t("theme")), themeSel),
+      h("button", { class: "danger", onclick: async () => { await api("POST", "/api/v2/auth/logout"); location.hash = "#/login"; } }, t("logout"))));
+}
+
+function applyLang() {
+  document.documentElement.lang = lang;
+  document.documentElement.dir = lang === "fa" ? "rtl" : "ltr";
+}
+
+async function route() {
+  const app = document.getElementById("app");
+  const name = (location.hash.replace(/^#\//, "") || "dashboard").split("?")[0];
+  if (name === "login") { app.replaceChildren(viewLogin()); return; }
+  const view = routes[name] || viewDashboard;
+  try {
+    const content = await view();
+    app.replaceChildren(shell(routes[name] ? name : "dashboard", content));
+  } catch (e) {
+    if (e.message !== "unauthorized") app.replaceChildren(shell(name, h("p", { class: "error" }, t("failed", { e: e.message }))));
+  }
+}
+
+window.addEventListener("hashchange", route);
+window.addEventListener("storage", (e) => {
+  if (e.key === "color-scheme") document.querySelector('meta[name="color-scheme"]').content = e.newValue ?? "light dark";
+});
+applyLang();
+route();
+setInterval(() => { if (!document.hidden && !document.getElementById("modal").open && /dashboard|clients|nodes/.test(location.hash || "#/dashboard")) route(); }, 15000);

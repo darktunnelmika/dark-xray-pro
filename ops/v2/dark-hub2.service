@@ -5,7 +5,7 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=/opt/dark-v2/dark-hub2 serve -db /var/lib/dark-hub2/v2.sqlite -listen ${DARK_HUB2_LISTEN} -tls-dir /etc/dark-hub2 -hosts ${DARK_HUB2_HOSTS} -sub-listen ${DARK_HUB2_SUB_LISTEN}
+ExecStart=/opt/dark-v2/dark-hub2 serve -db /var/lib/dark-hub2/v2.sqlite -listen ${DARK_HUB2_LISTEN} -tls-dir /etc/dark-hub2 -hosts ${DARK_HUB2_HOSTS} -sub-listen ${DARK_HUB2_SUB_LISTEN} -sub-base ${DARK_HUB2_SUB_BASE}
 EnvironmentFile=/etc/dark-hub2/env
 Restart=always
 RestartSec=2
