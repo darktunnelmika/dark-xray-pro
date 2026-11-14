@@ -155,6 +155,14 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 		id, err := s.StartOutboundTest(r.Context(), in.Node, in.Tag)
 		reply(w, map[string]string{"id": id}, err)
 	}))
+	mux.HandleFunc("POST /api/v2/admin/update-hub", guard(func(w http.ResponseWriter, r *http.Request) {
+		from, to, err := StageHubUpdate(r.Context(), http.MaxBytesReader(w, r.Body, 200<<20))
+		if err == nil {
+			notifyOwners(r.Context(), "⬆️ هاب از "+from+" به "+to+" به‌روز شد و ری‌استارت می‌شود.")
+			RestartHub()
+		}
+		reply(w, map[string]string{"from": from, "to": to}, err)
+	}))
 	mux.HandleFunc("GET /api/v2/admin/panel-path", guard(func(w http.ResponseWriter, r *http.Request) {
 		reply(w, map[string]string{"path": s.Setting(r.Context(), "panel_path")}, nil)
 	}))

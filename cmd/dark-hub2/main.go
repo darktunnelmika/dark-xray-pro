@@ -40,6 +40,13 @@ import (
 )
 
 func main() {
+	if len(os.Args) == 2 && os.Args[1] == "version" {
+		fmt.Println("dark-hub2", hubcore.HubVersion)
+		return
+	}
+	if len(os.Args) >= 2 && os.Args[1] == "serve" {
+		hubcore.TrialStart(log.Printf)
+	}
 	if len(os.Args) < 2 {
 		fmt.Fprintln(os.Stderr, "usage: dark-hub2 serve|node|inbound|client|sub|status [flags]")
 		os.Exit(2)

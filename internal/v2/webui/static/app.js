@@ -331,7 +331,31 @@ function hubHealthCard(si) {
       meter(s3("disk"), pct(si.disk_used, si.disk_total), ltr(`${bytes(si.disk_used)} / ${bytes(si.disk_total)}`))),
     h("div", { class: "row small muted" },
       h("span", {}, `${s3("db")}: ${bytes(si.db_size)}`), h("span", {}, `${s3("backups", { n: fmtNum(si.backups) })}: ${bytes(si.backups_size)}`),
-      h("span", { class: "spacer" }, `${s3("up")} ${dur(si.uptime_sec)}`)));
+      h("span", { class: "spacer" }, `${s3("up")} ${dur(si.uptime_sec)}`)),
+    fullOwner() ? hubUpdateRow() : null);
+}
+
+// Update the HUB by uploading a new dark-hub2 binary (checked before it replaces the old one).
+function hubUpdateRow() {
+  const fa = lang === "fa";
+  const file = h("input", { type: "file", hidden: true });
+  const out = h("span", { class: "small muted" });
+  file.addEventListener("change", async () => {
+    const f = file.files[0];
+    if (!f) return;
+    if (!(await confirmAction(fa ? `هاب با فایل ${f.name} به‌روز شود؟ اول اجرا و نسخه‌اش بررسی می‌شود؛ نسخهٔ فعلی نگه داشته می‌شود و اگر نسخهٔ جدید بالا نیاید خودکار برمی‌گردد. پنل چند ثانیه قطع می‌شود؛ نودها کار می‌کنند.` : `Update the HUB with ${f.name}? It is run and its version checked first; the current version is kept and comes back by itself if the new one does not stay up. The panel is away for a few seconds; nodes keep running.`, fa ? "به‌روزرسانی" : "Update"))) { file.value = ""; return; }
+    fill(out, fa ? "در حال بارگذاری و بررسی…" : "Uploading and checking…");
+    try {
+      const res = await fetch("/api/v2/admin/update-hub", { method: "POST", credentials: "same-origin", body: f, headers: { "X-Dark-Request": "1", "Content-Type": "application/octet-stream" } });
+      const text = await res.text();
+      if (!res.ok) throw new Error(text.trim() || res.statusText);
+      const r = JSON.parse(text);
+      fill(out, h("span", { class: "badge good" }, `${r.from} → ${r.to}`), fa ? " ری‌استارت…" : " restarting…");
+      setTimeout(() => location.reload(), 9000);
+    } catch (x) { fill(out, h("span", { class: "error" }, x.message)); }
+    file.value = "";
+  });
+  return h("div", { class: "row small" }, h("button", { class: "ghost", onclick: () => file.click() }, fa ? "به‌روزرسانی هاب (فایل dark-hub2)" : "Update the HUB (dark-hub2 file)"), file, out);
 }
 
 async function viewOnline() {
