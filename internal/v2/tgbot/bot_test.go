@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/darktunnelmika/dark-xray-pro/internal/v2/hubcore"
+	"github.com/darktunnelmika/dark-xray-pro/internal/v2/wire"
 )
 
 type sent struct {
@@ -262,4 +263,40 @@ func TestOwnerConsole(t *testing.T) {
 	if _, err := s.ClientByEmail(ctx, "p10-1"); err == nil {
 		t.Fatal("owner delete failed")
 	}
+}
+
+func TestCustomerNotifications(t *testing.T) {
+	s, err := hubcore.Open(filepath.Join(t.TempDir(), "v2.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	ctx := context.Background()
+	_, _ = s.CreateNode(ctx, "n1", "N")
+	_ = s.PutInbound(ctx, "in1", "n1", []byte(`{"protocol":"vless","port":443,"settings":{}}`), true)
+	_ = s.PutClient(ctx, hubcore.Client{Email: "neda", Enabled: true, VolumeBytes: 1000, Inbounds: []string{"in1"}})
+	_ = s.TgLink(ctx, buyerID, "neda")
+	api := &fakeAPI{}
+	now := time.Now()
+	b := &Bot{Store: s, API: api, Owners: map[int64]bool{}, Now: func() time.Time { return now }, Logf: t.Logf}
+	_, _ = s.ApplyUsage(ctx, "n1", wireBatch(1, "neda", 950))
+	b.Tick(ctx)
+	out := api.take()
+	find(t, out, buyerID, "وصل شد و فعال است")
+	find(t, out, buyerID, "۹۰٪")
+	now = now.Add(3 * time.Minute)
+	b.Tick(ctx)
+	for _, m := range api.take() {
+		if m.chat == buyerID {
+			t.Fatalf("repeated notification: %s", m.text)
+		}
+	}
+	_, _ = s.ApplyUsage(ctx, "n1", wireBatch(2, "neda", 100))
+	now = now.Add(3 * time.Minute)
+	b.Tick(ctx)
+	find(t, api.take(), buyerID, "حجم سرویس")
+}
+
+func wireBatch(seq uint64, email string, n int64) wire.UsageBatch {
+	return wire.UsageBatch{NodeID: "n1", Seq: seq, ToUnix: time.Now().Unix(), Traffic: []wire.UserTraffic{{Email: email, Down: n}}}
 }

@@ -55,6 +55,7 @@ const I18N = {
     hostsHint: "Hosts are the addresses clients receive. Add as many as you like per path; ⚙ opens per-host SNI, Host, Path, ALPN, fingerprint and format filters.",
     direct: "Direct", tunnel: "Tunnel", route: "Path", address: "Address", listenIP: "Listen IP", pathOverride: "Path / service", hideIn: "Hide in:",
     destNode: "Destination node", targetAddr: "Relay target (optional)", targetAuto: "auto: node's public IP", noHosts: "no hosts",
+    used: "Used", of: "of", last30Traffic: "Last 30 days", timeLeft: "Time left", details: "Details", firstSeen: "First connection", lastSeen: "Last seen",
     when: "When", who: "By", what: "What", more: "Load more", totalLast30: "{v} in the last 30 days",
     health: "Health (24h)", cpu: "CPU", ram: "RAM", disk: "Disk", net: "Network", uptime: "Uptime", inRate: "in", outRate: "out", noData: "No samples yet",
   },
@@ -113,6 +114,7 @@ const I18N = {
     hostsHint: "هاست‌ها آدرس‌هایی هستند که در لینک کاربر می‌آیند. برای هر مسیر هر چند تا خواستید اضافه کنید؛ ⚙ تنظیمات SNI، Host، Path، ALPN، Fingerprint و فیلتر فرمت هر هاست را باز می‌کند.",
     direct: "Direct", tunnel: "Tunnel", route: "مسیر", address: "آدرس", listenIP: "IP گوش‌دادن", pathOverride: "Path / سرویس", hideIn: "مخفی در:",
     destNode: "نود مقصد", targetAddr: "مقصد رله (اختیاری)", targetAuto: "خودکار: IP عمومی نود", noHosts: "بدون هاست",
+    used: "مصرف", of: "از", last30Traffic: "۳۰ روز اخیر", timeLeft: "زمان باقی‌مانده", details: "جزئیات", firstSeen: "اولین اتصال", lastSeen: "آخرین فعالیت",
     when: "زمان", who: "توسط", what: "شرح", more: "بیشتر", totalLast30: "{v} در ۳۰ روز اخیر",
     health: "سلامت (۲۴ ساعت)", cpu: "پردازنده", ram: "رم", disk: "دیسک", net: "شبکه", uptime: "روشن بودن", inRate: "ورودی", outRate: "خروجی", noData: "هنوز نمونه‌ای نیست",
   },
@@ -485,7 +487,7 @@ function clientCard(c, ctx, selected, onSelect) {
       selected ? h("input", { type: "checkbox", "aria-label": c.Email, checked: selected.has(c.Email), style: "inline-size:auto",
         onchange: (e) => { e.target.checked ? selected.add(c.Email) : selected.delete(c.Email); onSelect(); } }) : null,
       h("span", { class: `dot ${c.Online ? "on" : ""}`, title: c.Online ? t("online") : t("offline") }),
-      h("span", { class: "name" }, c.Email), h("span", { class: `badge ${cls}` }, status)),
+      h("a", { class: "name", href: `#/client?e=${encodeURIComponent(c.Email)}` }, c.Email), h("span", { class: `badge ${cls}` }, status)),
     h("div", { class: "row small muted" },
       h("span", {}, `${bytes(used)} / ${c.VolumeBytes < 0 ? t("unlimited") : bytes(c.VolumeBytes)}`),
       c.MaxIPs ? h("span", {}, `· IP ≤ ${fmtNum(c.MaxIPs)}`) : null,
@@ -502,6 +504,53 @@ function clientCard(c, ctx, selected, onSelect) {
         if (r && (r.refund_bytes || r.refund_units)) toast(t("refundDone", { v: [r.refund_bytes ? bytes(r.refund_bytes) : "", r.refund_units ? `${fmtNum(r.refund_units)} ${t("units")}` : ""].filter(Boolean).join(" + ") }));
         route();
       } }, t("delete"))));
+}
+
+// Client detail page: #/client?e=<name>
+async function viewClient() {
+  const email = new URLSearchParams(location.hash.split("?")[1] || "").get("e") || "";
+  const owner = me.role === "owner";
+  const [list, inbounds, days, reps] = await Promise.all([
+    api("GET", "/api/v2/admin/clients"),
+    owner ? api("GET", "/api/v2/admin/inbounds") : api("GET", "/api/v2/rep/inbounds").catch(() => []),
+    api("GET", `/api/v2/admin/clients/${encodeURIComponent(email)}/daily?days=30`).catch(() => []),
+    owner ? api("GET", "/api/v2/admin/reps") : Promise.resolve([])]);
+  const c = (list || []).find((x) => x.Email === email);
+  if (!c) return h("div", {}, h("h1", {}, t("clients")), h("p", { class: "muted" }, t("empty")));
+  const ctx = { inbounds, groups: [], reps: reps || [] };
+  const [cls, status] = clientStatus(c);
+  const used = c.Usage.Up + c.Usage.Down;
+  const now = Date.now() / 1000;
+  const left = c.EffectiveUntil ? Math.max(0, Math.ceil((c.EffectiveUntil - now) / 86400)) : null;
+  const stat = (k, v, sub) => h("div", { class: "card stat" }, h("div", { class: "v" }, v), h("div", { class: "k" }, k), sub ? h("div", { class: "small muted" }, sub) : null);
+  const url = c.SubURL || "";
+  const fmt = (label, u) => h("div", { class: "row" }, h("span", { class: "badge" }, label), h("code", { style: "flex:1" }, u), h("button", { type: "button", class: "ghost", onclick: () => copy(u) }, t("copy")));
+  const sum30 = days.reduce((a, d) => a + d.Up + d.Down, 0);
+  return h("div", {},
+    h("div", { class: "row" }, h("a", { class: "btn ghost", href: "#/clients" }, "‹"), h("span", { class: `dot ${c.Online ? "on" : ""}` }), h("h1", {}, c.Email),
+      h("span", { class: `badge ${cls}` }, status),
+      h("span", { class: "spacer" }),
+      h("button", { onclick: () => clientForm(c, inbounds, ctx) }, t("edit")),
+      me.role === "rep" && me.policy && !me.policy.CanDelete ? null : h("button", { class: "ghost danger", onclick: async () => {
+        if (await confirmAction(t("confirmDelete", { x: c.Email }))) { await guarded(() => api("DELETE", `/api/v2/admin/clients/${encodeURIComponent(c.Email)}`)); location.hash = "#/clients"; }
+      } }, t("delete"))),
+    h("div", { class: "grid" },
+      stat(t("used"), bytes(used), c.VolumeBytes > 0 ? `${t("of")} ${bytes(c.VolumeBytes)} · ${fmtNum(Math.min(100, (used / c.VolumeBytes) * 100))}%` : t("unlimited")),
+      stat(t("timeLeft"), left == null ? (c.DurationSeconds ? t("notStarted") : t("noExpiry")) : t("daysLeft", { n: fmtNum(left) })),
+      stat(t("maxIPs").split(" (")[0], c.MaxIPs ? fmtNum(c.MaxIPs) : "∞"),
+      stat(t("last30Traffic"), bytes(sum30))),
+    h("div", { class: "dash" },
+      h("div", { class: "card form wide-col" }, h("div", { class: "row" }, h("h2", {}, t("usageChart")), legend()), barsSvg(days, 1100)),
+      h("div", { class: "card form" }, h("h2", {}, t("subscription")),
+        h("img", { class: "qr", alt: "QR", src: `/api/v2/admin/clients/${encodeURIComponent(c.Email)}/qr.png` }),
+        fmt("Auto", url), fmt("sing-box", `${url}?format=singbox`), fmt("Clash", `${url}?format=clash`)),
+      h("div", { class: "card form" }, h("h2", {}, t("details")),
+        h("div", { class: "row" }, h("span", { class: "muted" }, t("assignInbounds")), ...(c.Inbounds || []).map((x) => h("span", { class: "badge" }, x))),
+        c.RepID ? h("div", { class: "row" }, h("span", { class: "muted" }, t("seller")), h("span", { class: "badge" }, c.RepID)) : null,
+        c.Plan ? h("div", { class: "row" }, h("span", { class: "muted" }, t("plan")), h("span", {}, c.Plan === "unlimited" ? t("planUnlimited") : t("planVolume"))) : null,
+        c.Note ? h("div", { class: "row" }, h("span", { class: "muted" }, t("note")), h("span", {}, c.Note)) : null,
+        c.Usage.FirstSeen ? h("div", { class: "row small" }, h("span", { class: "muted" }, t("firstSeen")), h("span", {}, new Date(c.Usage.FirstSeen * 1000).toLocaleString(lang === "fa" ? "fa-IR" : "en-GB"))) : null,
+        c.Usage.LastSeen ? h("div", { class: "row small" }, h("span", { class: "muted" }, t("lastSeen")), h("span", {}, new Date(c.Usage.LastSeen * 1000).toLocaleString(lang === "fa" ? "fa-IR" : "en-GB"))) : null)));
 }
 
 function showSub(c) {
@@ -1259,6 +1308,7 @@ function barsSvg(days, W = 600) {
     g.append(el("stop", { offset: "0", "stop-color": col, "stop-opacity": ".35" }), el("stop", { offset: "1", "stop-color": col, "stop-opacity": "0" })); return g; };
   defs.append(glow, area("#2de2e6", "d"), area("#9b5cff", "u"));
   svg.append(defs);
+  if (!days.length) return svg;
   const top = Math.max(1, ...days.map((d) => Math.max(d.Down, d.Up))) * 1.12;
   const x = (i) => L + (days.length === 1 ? W / 2 : (i / (days.length - 1)) * (W - L - 2 * P) + P);
   const y = (v) => H - (v / top) * (H - P);
@@ -1349,11 +1399,12 @@ async function route() {
   } catch { return; }
   routes = routesFor(me);
   const first = Object.keys(routes)[0];
-  const view = routes[name] || routes[first];
+  const hidden = { client: [viewClient, "clients"] };
+  const view = hidden[name] ? hidden[name][0] : routes[name] || routes[first];
   try {
     const content = await view();
     if (seq !== routeSeq) return;
-    app.replaceChildren(shell(routes[name] ? name : first, content));
+    app.replaceChildren(shell(hidden[name] ? hidden[name][1] : routes[name] ? name : first, content));
   } catch (e) {
     if (e.message !== "unauthorized") app.replaceChildren(shell(name, h("p", { class: "error" }, t("failed", { e: e.message }))));
   }

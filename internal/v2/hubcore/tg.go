@@ -289,3 +289,26 @@ func (s *Store) TgRepChat(ctx context.Context, repID string) int64 {
 	_ = s.ro.QueryRowContext(ctx, `SELECT tg_chat FROM reps WHERE id=?`, repID).Scan(&c)
 	return c
 }
+
+// TgLinkedChats maps each client to the chats that own it (links and bot
+// orders), for notifications.
+func (s *Store) TgLinkedChats(ctx context.Context) (map[string][]int64, error) {
+	rows, err := s.ro.QueryContext(ctx, `SELECT email,chat_id FROM tg_links
+UNION SELECT client_email, CAST(substr(buyer,4) AS INTEGER) FROM orders WHERE buyer LIKE 'tg:%' AND status='fulfilled' AND client_email<>''`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string][]int64{}
+	for rows.Next() {
+		var e string
+		var c int64
+		if err := rows.Scan(&e, &c); err != nil {
+			return nil, err
+		}
+		if c != 0 {
+			out[e] = append(out[e], c)
+		}
+	}
+	return out, rows.Err()
+}

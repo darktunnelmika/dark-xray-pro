@@ -29,11 +29,12 @@ type Bot struct {
 	Logf    func(string, ...any)
 	Now     func() time.Time
 
-	mu        sync.Mutex
-	awaiting  map[int64]string // chat -> expected input: "support" | "link" | owner prompts
-	draft     map[int64]string // owner chat -> broadcast awaiting confirmation
-	nodeState map[string]bool
-	lastDaily string
+	mu         sync.Mutex
+	awaiting   map[int64]string // chat -> expected input: "support" | "link" | owner prompts
+	draft      map[int64]string // owner chat -> broadcast awaiting confirmation
+	lastNotify time.Time
+	nodeState  map[string]bool
+	lastDaily  string
 }
 
 func (b *Bot) logf(f string, a ...any) {
@@ -132,6 +133,7 @@ func (b *Bot) Tick(ctx context.Context) {
 	b.announceOrders(ctx)
 	b.watchNodes(ctx)
 	b.dailyReport(ctx)
+	b.notifyClients(ctx)
 }
 
 func (b *Bot) send(ctx context.Context, chat int64, text string, kb *Keyboard) int64 {
