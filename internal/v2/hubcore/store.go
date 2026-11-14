@@ -146,6 +146,10 @@ func Open(path string) (*Store, error) {
 		st.Close()
 		return nil, err
 	}
+	if err := st.ensureRepSchema(); err != nil {
+		st.Close()
+		return nil, err
+	}
 	return st, nil
 }
 
@@ -235,26 +239,35 @@ type Client struct {
 }
 
 func (s *Store) PutClient(ctx context.Context, c Client) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := putClientTx(ctx, tx, c, s.now().Unix()); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// putClientTx writes a client inside the caller's transaction, so a charge
+// and the change it pays for commit or fail together.
+func putClientTx(ctx context.Context, tx *sql.Tx, c Client, now int64) error {
 	if !emailRE.MatchString(c.Email) || c.MaxIPs < 0 || c.DurationSeconds < 0 {
 		return ErrInvalid
 	}
 	// An update that omits credentials keeps the existing ones, so editing a
 	// client never breaks its connections or its subscription link.
 	var oldUUID, oldSecret, oldTok string
-	_ = s.ro.QueryRowContext(ctx, `SELECT uuid,secret,sub_token FROM clients WHERE email=?`, c.Email).Scan(&oldUUID, &oldSecret, &oldTok)
+	_ = tx.QueryRowContext(ctx, `SELECT uuid,secret,sub_token FROM clients WHERE email=?`, c.Email).Scan(&oldUUID, &oldSecret, &oldTok)
 	c.UUID = firstNonEmpty(c.UUID, oldUUID, RandomUUID())
 	c.Secret = firstNonEmpty(c.Secret, oldSecret, randomHex(16))
 	c.SubToken = firstNonEmpty(c.SubToken, oldTok, randomHex(16))
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	_, err = tx.ExecContext(ctx, `INSERT INTO clients(email,uuid,secret,enabled,volume_bytes,expires_unix,duration_seconds,max_ips,sub_token,created_unix)
+	_, err := tx.ExecContext(ctx, `INSERT INTO clients(email,uuid,secret,enabled,volume_bytes,expires_unix,duration_seconds,max_ips,sub_token,created_unix)
 VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(email) DO UPDATE SET uuid=excluded.uuid, secret=excluded.secret, enabled=excluded.enabled,
 volume_bytes=excluded.volume_bytes, expires_unix=excluded.expires_unix, duration_seconds=excluded.duration_seconds, max_ips=excluded.max_ips,
 sub_token=excluded.sub_token`,
-		c.Email, c.UUID, c.Secret, c.Enabled, c.VolumeBytes, c.ExpiresUnix, c.DurationSeconds, c.MaxIPs, c.SubToken, s.now().Unix())
+		c.Email, c.UUID, c.Secret, c.Enabled, c.VolumeBytes, c.ExpiresUnix, c.DurationSeconds, c.MaxIPs, c.SubToken, now)
 	if err != nil {
 		return err
 	}
@@ -263,10 +276,10 @@ sub_token=excluded.sub_token`,
 	}
 	for _, tag := range c.Inbounds {
 		if _, err = tx.ExecContext(ctx, `INSERT INTO client_inbounds(email,tag) VALUES(?,?)`, c.Email, tag); err != nil {
-			return fmt.Errorf("inbound %q: %w", tag, err)
+			return fmt.Errorf("%w: inbound %q", ErrInvalid, tag)
 		}
 	}
-	return tx.Commit()
+	return nil
 }
 
 // PutInbound stores an Xray inbound template for one node. The HUB fills
@@ -349,6 +362,8 @@ WHERE ci.email=? AND i.enabled=1 ORDER BY i.tag`, email)
 // ClientView is a client with its live usage, for the panel.
 type ClientView struct {
 	Client
+	RepID          string
+	Plan           string
 	Usage          Usage
 	EffectiveUntil int64
 	Remaining      int64
@@ -357,7 +372,7 @@ type ClientView struct {
 
 // Clients lists every client with usage, newest first.
 func (s *Store) Clients(ctx context.Context) ([]ClientView, error) {
-	rows, err := s.ro.QueryContext(ctx, `SELECT c.email,c.uuid,c.enabled,c.volume_bytes,c.expires_unix,c.duration_seconds,c.max_ips,c.sub_token,
+	rows, err := s.ro.QueryContext(ctx, `SELECT c.email,c.uuid,c.enabled,c.volume_bytes,c.expires_unix,c.duration_seconds,c.max_ips,c.sub_token,c.rep_id,c.plan,
 COALESCE(u.up,0),COALESCE(u.down,0),COALESCE(u.first_seen_unix,0),COALESCE(u.last_seen_unix,0),
 EXISTS(SELECT 1 FROM online o WHERE o.email=c.email AND o.seen_unix>=?)
 FROM clients c LEFT JOIN client_usage u ON u.email=c.email ORDER BY c.created_unix DESC, c.email`, s.now().Unix()-120)
@@ -368,7 +383,7 @@ FROM clients c LEFT JOIN client_usage u ON u.email=c.email ORDER BY c.created_un
 	var out []ClientView
 	for rows.Next() {
 		var v ClientView
-		if err := rows.Scan(&v.Email, &v.UUID, &v.Enabled, &v.VolumeBytes, &v.ExpiresUnix, &v.DurationSeconds, &v.MaxIPs, &v.SubToken,
+		if err := rows.Scan(&v.Email, &v.UUID, &v.Enabled, &v.VolumeBytes, &v.ExpiresUnix, &v.DurationSeconds, &v.MaxIPs, &v.SubToken, &v.RepID, &v.Plan,
 			&v.Usage.Up, &v.Usage.Down, &v.Usage.FirstSeen, &v.Usage.LastSeen, &v.Online); err != nil {
 			return nil, err
 		}

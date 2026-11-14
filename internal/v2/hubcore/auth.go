@@ -92,22 +92,39 @@ func (s *Store) Logout(ctx context.Context, tok string) error {
 	return err
 }
 
-// authorized accepts the session cookie, or the bearer admin token used by
-// scripts. Mutations through a cookie must carry X-Dark-Request (a custom
-// header a cross-site form cannot send), in addition to SameSite=Strict.
-func authorized(s *Store, adminToken string, r *http.Request) bool {
+// authorize accepts the session cookie, or the bearer admin token used by
+// scripts (which acts as the owner). Mutations through a cookie must carry
+// X-Dark-Request (a custom header a cross-site form cannot send), in
+// addition to SameSite=Strict.
+func authorize(s *Store, adminToken string, r *http.Request) (Principal, bool) {
 	if tok, err := bearer(r.Header.Get("Authorization")); err == nil {
-		return adminToken != "" && constantEqual(tok, adminToken)
+		if adminToken != "" && constantEqual(tok, adminToken) {
+			return Principal{User: "api", Role: "owner"}, true
+		}
+		return Principal{}, false
 	}
 	c, err := r.Cookie(sessionCookie)
 	if err != nil || c.Value == "" {
-		return false
+		return Principal{}, false
 	}
 	if r.Method != http.MethodGet && r.Method != http.MethodHead && r.Header.Get("X-Dark-Request") != "1" {
-		return false
+		return Principal{}, false
 	}
-	_, err = s.SessionUser(r.Context(), c.Value)
-	return err == nil
+	user, err := s.SessionUser(r.Context(), c.Value)
+	if err != nil {
+		return Principal{}, false
+	}
+	p, err := s.principal(r.Context(), user)
+	if err != nil {
+		return Principal{}, false
+	}
+	if p.Role == "rep" {
+		var enabled bool
+		if s.ro.QueryRowContext(r.Context(), `SELECT enabled FROM reps WHERE id=?`, p.RepID).Scan(&enabled) != nil || !enabled {
+			return Principal{}, false
+		}
+	}
+	return p, true
 }
 
 func setSessionCookie(w http.ResponseWriter, r *http.Request, tok string, maxAge int) {

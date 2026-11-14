@@ -3,6 +3,7 @@ package hubcore
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -325,5 +326,80 @@ func TestRealityKeysShape(t *testing.T) {
 	priv, pub, err := RealityKeys()
 	if err != nil || len(priv) != 43 || len(pub) != 43 || priv == pub {
 		t.Fatalf("keys %q %q %v", priv, pub, err)
+	}
+}
+
+func TestRepresentativeCreditAndScope(t *testing.T) {
+	s, _ := newStore(t)
+	ctx := context.Background()
+	seed(t, s) // owner clients alice, bob on de-vless
+	if err := s.PutRep(ctx, Rep{ID: "ali", Name: "Ali", Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.AdjustCredit(ctx, "owner", "ali", 10<<30, 3, "start"); err != nil {
+		t.Fatal(err)
+	}
+	vol := Client{Email: "r1", Enabled: true, VolumeBytes: 4 << 30, DurationSeconds: 30 * 86400, Inbounds: []string{"de-vless"}}
+	if err := s.RepPutClient(ctx, "ali-login", "ali", vol, "volume"); err != nil {
+		t.Fatal(err)
+	}
+	// Raising volume charges only the difference.
+	vol.VolumeBytes = 6 << 30
+	if err := s.RepPutClient(ctx, "ali-login", "ali", vol, "volume"); err != nil {
+		t.Fatal(err)
+	}
+	// 4 GiB left: 5 GiB more must fail and leave the client unchanged.
+	vol.VolumeBytes = 11 << 30
+	if err := s.RepPutClient(ctx, "ali-login", "ali", vol, "volume"); !errors.Is(err, ErrCredit) {
+		t.Fatalf("over-credit edit: %v", err)
+	}
+	// Unlimited for 60 days costs 2 units.
+	unl := Client{Email: "r2", Enabled: true, DurationSeconds: 60 * 86400, Inbounds: []string{"de-vless"}}
+	if err := s.RepPutClient(ctx, "ali-login", "ali", unl, "unlimited"); err != nil {
+		t.Fatal(err)
+	}
+	unl.Email, unl.DurationSeconds = "r3", 61*86400 // 3 units, only 1 left
+	if err := s.RepPutClient(ctx, "ali-login", "ali", unl, "unlimited"); !errors.Is(err, ErrCredit) {
+		t.Fatalf("over-unit create: %v", err)
+	}
+	reps, _ := s.Reps(ctx)
+	if reps[0].VolumeCredit != 4<<30 || reps[0].UnlimitedUnits != 1 || reps[0].Clients != 2 {
+		t.Fatalf("rep balances %+v", reps[0])
+	}
+	list, _ := s.Clients(ctx)
+	for _, c := range list {
+		if c.Email == "r1" && c.VolumeBytes != 6<<30 {
+			t.Fatal("failed edit must not change the client")
+		}
+		if c.Email == "r3" {
+			t.Fatal("failed create must not leave a client")
+		}
+	}
+	// A rep can't touch the owner's client.
+	if err := s.RepPutClient(ctx, "ali-login", "ali", Client{Email: "alice", Enabled: true, VolumeBytes: 1, DurationSeconds: 86400}, "volume"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("rep edited owner client: %v", err)
+	}
+	mine, _ := s.scopedClients(ctx, Principal{Role: "rep", RepID: "ali"})
+	if len(mine) != 2 {
+		t.Fatalf("rep sees %d clients, want 2", len(mine))
+	}
+}
+
+func TestChangePasswordKeepsRole(t *testing.T) {
+	s, _ := newStore(t)
+	ctx := context.Background()
+	_ = s.PutRep(ctx, Rep{ID: "ali", Name: "Ali", Enabled: true})
+	if err := s.SetRepLogin(ctx, "ali", "first password", "ali"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ChangePassword(ctx, "ali", "wrong password", "second password"); err == nil {
+		t.Fatal("wrong old password accepted")
+	}
+	if err := s.ChangePassword(ctx, "ali", "first password", "second password"); err != nil {
+		t.Fatal(err)
+	}
+	p, _ := s.principal(ctx, "ali")
+	if p.Role != "rep" || p.RepID != "ali" {
+		t.Fatalf("role lost: %+v", p)
 	}
 }

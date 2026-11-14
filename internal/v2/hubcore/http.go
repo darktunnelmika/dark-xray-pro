@@ -65,6 +65,10 @@ func reply(w http.ResponseWriter, v any, err error) {
 	case err == nil:
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(v)
+	case errors.Is(err, ErrCredit):
+		http.Error(w, "insufficient credit", http.StatusPaymentRequired)
+	case errors.Is(err, ErrAuth):
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
 	case errors.Is(err, ErrInvalid):
 		http.Error(w, err.Error(), http.StatusBadRequest)
 	case errors.Is(err, ErrNotFound):
