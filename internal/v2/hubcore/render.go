@@ -60,15 +60,18 @@ var clientShapes = map[string]func(c Client, flow string) map[string]any{
 }
 
 type nodeInbound struct {
-	tag      string
-	template []byte
+	tag            string
+	template       []byte
+	listen         string
+	direct, tunnel int
 }
 
 // RenderNode builds the full Xray config for one node: its enabled
 // inbounds with every assigned client, plus the stats API the agent needs.
 // The output is deterministic so its hash identifies the revision.
 func (s *Store) RenderNode(ctx context.Context, nodeID string) ([]byte, error) {
-	rows, err := s.ro.QueryContext(ctx, `SELECT tag,template FROM inbounds WHERE node_id=? AND enabled=1 ORDER BY tag`, nodeID)
+	rows, err := s.ro.QueryContext(ctx, `SELECT i.tag,i.template,r.listen_ip,r.direct_port,r.tunnel_port FROM inbound_routes r
+JOIN inbounds i ON i.tag=r.tag WHERE r.node_id=? AND i.enabled=1 ORDER BY i.tag`, nodeID)
 	if err != nil {
 		return nil, err
 	}
@@ -76,7 +79,7 @@ func (s *Store) RenderNode(ctx context.Context, nodeID string) ([]byte, error) {
 	for rows.Next() {
 		var n nodeInbound
 		var tpl string
-		if err := rows.Scan(&n.tag, &tpl); err != nil {
+		if err := rows.Scan(&n.tag, &tpl, &n.listen, &n.direct, &n.tunnel); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -101,6 +104,11 @@ func (s *Store) RenderNode(ctx context.Context, nodeID string) ([]byte, error) {
 			return nil, fmt.Errorf("inbound %s: %w", in.tag, err)
 		}
 		t["tag"] = in.tag
+		t["port"] = in.direct
+		t["listen"] = "0.0.0.0"
+		if in.listen != "" {
+			t["listen"] = in.listen
+		}
 		if err := s.resolveCerts(ctx, t); err != nil {
 			return nil, fmt.Errorf("inbound %s: %w", in.tag, err)
 		}
@@ -126,6 +134,16 @@ func (s *Store) RenderNode(ctx context.Context, nodeID string) ([]byte, error) {
 		}
 		t["settings"] = settings
 		inbounds = append(inbounds, t)
+		if in.tunnel > 0 {
+			// Tunnel: the same inbound on its own port and tag, so its
+			// traffic is counted apart from Direct.
+			tt := map[string]any{}
+			for k, v := range t {
+				tt[k] = v
+			}
+			tt["tag"], tt["port"] = in.tag+tunnelSuffix, in.tunnel
+			inbounds = append(inbounds, tt)
+		}
 	}
 	fwd, err := s.swapForwarders(ctx, nodeID)
 	if err != nil {
@@ -151,7 +169,7 @@ func (s *Store) RenderNode(ctx context.Context, nodeID string) ([]byte, error) {
 
 func (s *Store) clientsByInbound(ctx context.Context, nodeID string) (map[string][]Client, error) {
 	rows, err := s.ro.QueryContext(ctx, `SELECT ci.tag,c.email,c.uuid,c.secret FROM client_inbounds ci
-JOIN clients c ON c.email=ci.email JOIN inbounds i ON i.tag=ci.tag WHERE i.node_id=? ORDER BY ci.tag,c.email`, nodeID)
+JOIN clients c ON c.email=ci.email JOIN inbound_routes r ON r.tag=ci.tag WHERE r.node_id=? ORDER BY ci.tag,c.email`, nodeID)
 	if err != nil {
 		return nil, err
 	}
@@ -171,7 +189,7 @@ JOIN clients c ON c.email=ci.email JOIN inbounds i ON i.tag=ci.tag WHERE i.node_
 // nodeClients lists every client assigned to an inbound on the node.
 func (s *Store) nodeClients(ctx context.Context, nodeID string) ([]Client, error) {
 	rows, err := s.ro.QueryContext(ctx, `SELECT DISTINCT c.email,c.enabled,c.volume_bytes,c.expires_unix,c.duration_seconds,c.max_ips
-FROM clients c JOIN client_inbounds ci ON ci.email=c.email JOIN inbounds i ON i.tag=ci.tag WHERE i.node_id=? ORDER BY c.email`, nodeID)
+FROM clients c JOIN client_inbounds ci ON ci.email=c.email JOIN inbound_routes r ON r.tag=ci.tag WHERE r.node_id=? ORDER BY c.email`, nodeID)
 	if err != nil {
 		return nil, err
 	}

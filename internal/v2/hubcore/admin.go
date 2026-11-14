@@ -422,6 +422,31 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 		err := s.SetInboundEnabled(r.Context(), r.PathValue("tag"), in.Enabled)
 		reply(w, map[string]bool{"ok": err == nil}, err)
 	}))
+	mux.HandleFunc("GET /api/v2/admin/inbounds/{tag}/routes", guard(func(w http.ResponseWriter, r *http.Request) {
+		routes, err := s.Routes(r.Context(), r.PathValue("tag"))
+		reply(w, routes, err)
+	}))
+	mux.HandleFunc("PUT /api/v2/admin/inbounds/{tag}/routes", guard(func(w http.ResponseWriter, r *http.Request) {
+		var routes []Route
+		if !decode(w, r, &routes) {
+			return
+		}
+		err := s.PutRoutes(r.Context(), r.PathValue("tag"), routes)
+		reply(w, map[string]bool{"ok": err == nil}, err)
+	}))
+	// compose: create a profile from a preset and place it on several nodes
+	// in one request; nothing is left behind if placement fails.
+	mux.HandleFunc("POST /api/v2/admin/inbounds/compose", guard(func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			PresetRequest
+			Routes []Route `json:"routes"`
+		}
+		if !decode(w, r, &in) {
+			return
+		}
+		err := s.ComposeInbound(r.Context(), in.PresetRequest, in.Routes)
+		reply(w, map[string]bool{"ok": err == nil}, err)
+	}))
 	mux.HandleFunc("GET /api/v2/admin/swaps", guard(func(w http.ResponseWriter, r *http.Request) {
 		list, err := s.Swaps(r.Context(), r.URL.Query().Get("inbound"))
 		reply(w, list, err)

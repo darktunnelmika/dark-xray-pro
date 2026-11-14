@@ -190,6 +190,10 @@ func Open(path string) (*Store, error) {
 		st.Close()
 		return nil, err
 	}
+	if err := st.ensureRouteSchema(); err != nil {
+		st.Close()
+		return nil, err
+	}
 	return st, nil
 }
 
@@ -343,10 +347,27 @@ func (s *Store) PutInboundMeta(ctx context.Context, tag, nodeID string, template
 	if err := json.Unmarshal(meta, &m); err != nil {
 		return fmt.Errorf("%w: inbound meta: %v", ErrInvalid, err)
 	}
-	_, err := s.db.ExecContext(ctx, `INSERT INTO inbounds(tag,node_id,template,meta,enabled) VALUES(?,?,?,?,?)
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var cur string
+	if tx.QueryRowContext(ctx, `SELECT node_id FROM inbounds WHERE tag=?`, tag).Scan(&cur) == nil {
+		var x int
+		if nodeID == "" || tx.QueryRowContext(ctx, `SELECT 1 FROM inbound_routes WHERE tag=?`, tag).Scan(&x) == nil {
+			nodeID = cur // a placed inbound keeps its routes; edit them with PutRoutes
+		}
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO inbounds(tag,node_id,template,meta,enabled) VALUES(?,?,?,?,?)
 ON CONFLICT(tag) DO UPDATE SET node_id=excluded.node_id, template=excluded.template, meta=excluded.meta, enabled=excluded.enabled`,
-		tag, nodeID, string(template), string(meta), enabled)
-	return err
+		tag, nodeID, string(template), string(meta), enabled); err != nil {
+		return err
+	}
+	if err := s.legacyRoute(ctx, tx, tag, nodeID, template, meta); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // Subscription returns the client's share links and userinfo header.
@@ -410,11 +431,15 @@ WHERE ci.email=? AND i.enabled=1 ORDER BY i.tag`, email)
 	}
 	rows.Close()
 	for i := range ins {
+		eps, err := s.routeEndpoints(ctx, ins[i].Tag)
+		if err != nil {
+			return sub.Account{}, nil, "", err
+		}
 		extra, err := s.swapEndpoints(ctx, ins[i].Tag)
 		if err != nil {
 			return sub.Account{}, nil, "", err
 		}
-		ins[i].Meta.Endpoints = append(ins[i].Meta.Endpoints, extra...)
+		ins[i].Meta.Endpoints = append(eps, extra...)
 	}
 	if !c.Enabled {
 		ins = nil

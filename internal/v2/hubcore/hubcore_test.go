@@ -762,7 +762,7 @@ func TestDarkSwapRelay(t *testing.T) {
 		t.Fatal(err)
 	}
 	bad := []Swap{
-		{ID: "s1", InboundTag: "de-vless", SourceNode: "de-1", SourcePort: 6801, EntryAddress: "ir.example", EntryPort: 6801}, // same node
+		{ID: "s1", InboundTag: "de-vless", SourceNode: "de-1", SourcePort: 6801, EntryAddress: "ir.example", EntryPort: 6801},     // same node
 		{ID: "s1", InboundTag: "de-vless", SourceNode: "ir-relay", SourcePort: 6900, EntryAddress: "ir.example", EntryPort: 6801}, // port taken
 		{ID: "s1", InboundTag: "nope", SourceNode: "ir-relay", SourcePort: 6801, EntryAddress: "ir.example", EntryPort: 6801},
 	}
@@ -868,7 +868,7 @@ func TestSubSellers(t *testing.T) {
 		t.Fatal(p, err)
 	}
 	led, _ := s.Ledger(ctx, "ali", 0, 10)
-	if led[0].Kind != "transfer" || led[0].VolumeDelta != -(4 << 30) {
+	if led[0].Kind != "transfer" || led[0].VolumeDelta != -(4<<30) {
 		t.Fatalf("%+v", led[0])
 	}
 	reps, _ := s.Reps(ctx)
@@ -962,4 +962,89 @@ func TestShopProductsAndOrders(t *testing.T) {
 		t.Fatalf("owner fulfilled %d", len(all))
 	}
 	_ = now
+}
+
+func TestMultiNodeInboundRoutes(t *testing.T) {
+	s, _ := newStore(t)
+	ctx := context.Background()
+	for _, n := range []string{"de-1", "fi-1", "ir-1"} {
+		if _, err := s.CreateNode(ctx, n, n); err != nil {
+			t.Fatal(err)
+		}
+	}
+	routes := []Route{
+		{NodeID: "de-1", DirectPort: 443, TunnelPort: 8443, Hosts: []Host{
+			{Path: "direct", Enabled: true, Address: "de.example.com", Port: 443, Remark: "DE"},
+			{Path: "tunnel", Enabled: true, Address: "ir-entry.example", Port: 2053, Remark: "DE via IR", SNI: "cdn.example", Exclude: []string{"clash"}},
+			{Path: "direct", Enabled: false, Address: "off.example", Port: 443},
+		}},
+		{NodeID: "fi-1", ListenIP: "10.0.0.5", DirectPort: 443, Hosts: []Host{{Path: "direct", Enabled: true, Address: "fi.example.com", Port: 443}}},
+	}
+	err := s.ComposeInbound(ctx, PresetRequest{Tag: "multi", Preset: "vless-reality-tcp", SNI: "www.speedtest.net", Remark: "Dark"}, routes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.PutClient(ctx, Client{Email: "amir", Enabled: true, VolumeBytes: -1, Inbounds: []string{"multi"}}); err != nil {
+		t.Fatal(err)
+	}
+	// Both nodes run the same inbound with the same keys; DE also runs Tunnel on its own tag/port.
+	de, _ := s.RenderNode(ctx, "de-1")
+	fi, _ := s.RenderNode(ctx, "fi-1")
+	if !strings.Contains(string(de), `"tag":"multi__t"`) || !strings.Contains(string(de), `"port":8443`) || !strings.Contains(string(de), "amir") {
+		t.Fatalf("de config: %s", de)
+	}
+	if !strings.Contains(string(fi), `"listen":"10.0.0.5"`) || strings.Contains(string(fi), "multi__t") || !strings.Contains(string(fi), "amir") {
+		t.Fatalf("fi config: %s", fi)
+	}
+	ir, _ := s.RenderNode(ctx, "ir-1")
+	if strings.Contains(string(ir), "amir") {
+		t.Fatal("an unplaced node must not get the clients")
+	}
+	links, _, _ := s.Subscription(ctx, "amir")
+	all := strings.Join(links, "\n")
+	if len(links) != 3 || !strings.Contains(all, "@de.example.com:443") || !strings.Contains(all, "@fi.example.com:443") || !strings.Contains(all, "sni=cdn.example") || strings.Contains(all, "off.example") {
+		t.Fatalf("links: %v", links)
+	}
+	clash, _, _, _ := s.SubscriptionBody(ctx, "amir", "clash")
+	if strings.Contains(string(clash), "ir-entry.example") {
+		t.Fatal("a host excluded from Clash must not appear there")
+	}
+	// Port collisions on the same node are refused.
+	if err := s.PutInbound(ctx, "other", "de-1", []byte(strings.Replace(vlessTemplate, "18580", "9000", 1)), true); err != nil {
+		t.Fatal(err)
+	}
+	bad := []Route{{NodeID: "de-1", DirectPort: 9000}}
+	if err := s.PutRoutes(ctx, "multi", bad); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("collision: %v", err)
+	}
+	// A swap to fi-1 relayed by ir-1; ir-1 forwards to fi-1's Direct port.
+	if err := s.PutSwap(ctx, Swap{ID: "sw", InboundTag: "multi", DestNode: "fi-1", SourceNode: "ir-1", SourcePort: 6801, EntryAddress: "entry.ir", EntryPort: 6801, Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	irc, _ := s.RenderNode(ctx, "ir-1")
+	if !strings.Contains(string(irc), `"address":"fi.example.com"`) || !strings.Contains(string(irc), `"port":443`) {
+		t.Fatalf("relay: %s", irc)
+	}
+	s.NodeAddress(ctx, "fi-1", "203.0.113.9:51234")
+	irc, _ = s.RenderNode(ctx, "ir-1")
+	if !strings.Contains(string(irc), `"address":"203.0.113.9"`) {
+		t.Fatal("relay should prefer the node's public IP")
+	}
+	// Removing fi-1 from the inbound pauses its swap; deleting de-1 keeps the inbound.
+	if err := s.PutRoutes(ctx, "multi", routes[:1]); err != nil {
+		t.Fatal(err)
+	}
+	if sw, _ := s.Swaps(ctx, "multi"); len(sw) != 1 || sw[0].Enabled {
+		t.Fatalf("swap should be paused: %+v", sw)
+	}
+	if err := s.PutRoutes(ctx, "multi", routes); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DeleteNode(ctx, "de-1"); err != nil {
+		t.Fatal(err)
+	}
+	r, err := s.Routes(ctx, "multi")
+	if err != nil || len(r) != 1 || r[0].NodeID != "fi-1" {
+		t.Fatalf("after node delete: %v %+v", err, r)
+	}
 }

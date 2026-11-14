@@ -20,6 +20,49 @@ type Endpoint struct {
 	Name    string `json:"name"`
 	Address string `json:"address"`
 	Port    int    `json:"port"`
+	// Optional per-host overrides of what the client sends.
+	SNI           string   `json:"sni,omitempty"`
+	Host          string   `json:"host,omitempty"`
+	Path          string   `json:"path,omitempty"` // ws/httpupgrade/xhttp path or gRPC service name
+	ALPN          string   `json:"alpn,omitempty"` // comma-separated
+	Fingerprint   string   `json:"fingerprint,omitempty"`
+	AllowInsecure bool     `json:"allow_insecure,omitempty"`
+	Exclude       []string `json:"exclude,omitempty"` // formats that skip this host: links | singbox | clash
+}
+
+func (ep Endpoint) excluded(format string) bool {
+	for _, f := range ep.Exclude {
+		if f == format {
+			return true
+		}
+	}
+	return false
+}
+
+// forEndpoint applies an endpoint's overrides to a copy of the template.
+func forEndpoint(t template, m Meta, ep Endpoint) (template, Meta) {
+	if ep.SNI != "" {
+		if t.Stream.Security == "reality" {
+			t.Stream.Reality.ServerNames = []string{ep.SNI}
+		} else {
+			t.Stream.TLS.ServerName = ep.SNI
+		}
+	}
+	if ep.Host != "" {
+		t.Stream.WS.Host, t.Stream.HTTPUpgrade.Host, t.Stream.XHTTP.Host = ep.Host, ep.Host, ep.Host
+	}
+	if ep.Path != "" {
+		t.Stream.WS.Path, t.Stream.HTTPUpgrade.Path, t.Stream.XHTTP.Path = ep.Path, ep.Path, ep.Path
+		t.Stream.GRPC.ServiceName = ep.Path
+	}
+	if ep.ALPN != "" {
+		t.Stream.TLS.ALPN = strings.Split(ep.ALPN, ",")
+	}
+	if ep.Fingerprint != "" {
+		m.Fingerprint = ep.Fingerprint
+	}
+	t.Stream.insecure = ep.AllowInsecure
+	return t, m
 }
 
 // Meta holds what a client needs but the server config does not carry.
@@ -47,6 +90,7 @@ type Account struct {
 }
 
 type stream struct {
+	insecure bool
 	Network  string `json:"network"`
 	Security string `json:"security"`
 	Reality  struct {
@@ -128,6 +172,9 @@ func params(t template, m Meta) url.Values {
 	case "tls":
 		q.Set("sni", s.TLS.ServerName)
 		q.Set("fp", or(m.Fingerprint, "chrome"))
+		if s.insecure {
+			q.Set("allowInsecure", "1")
+		}
 		if len(s.TLS.ALPN) > 0 {
 			q.Set("alpn", strings.Join(s.TLS.ALPN, ","))
 		}
@@ -211,11 +258,17 @@ func Links(a Account, ins []Inbound) ([]string, error) {
 	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Tag < sorted[j].Tag })
 	var out []string
 	for _, in := range sorted {
-		t, err := parse(in.Template)
+		base, err := parse(in.Template)
 		if err != nil {
 			return nil, fmt.Errorf("inbound %s: %w", in.Tag, err)
 		}
 		for _, ep := range in.Meta.Endpoints {
+			if ep.excluded("links") {
+				continue
+			}
+			t, meta := forEndpoint(base, in.Meta, ep)
+			in := in
+			in.Meta = meta
 			host := net.JoinHostPort(ep.Address, strconv.Itoa(ep.Port))
 			frag := url.PathEscape(remark(in, ep))
 			switch t.Protocol {
@@ -245,6 +298,8 @@ func Links(a Account, ins []Inbound) ([]string, error) {
 				switch s.Network {
 				case "ws":
 					v["path"], v["host"] = s.WS.Path, s.WS.Host
+				case "httpupgrade":
+					v["path"], v["host"] = s.HTTPUpgrade.Path, s.HTTPUpgrade.Host
 				case "grpc":
 					v["path"] = s.GRPC.ServiceName
 				}

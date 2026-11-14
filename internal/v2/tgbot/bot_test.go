@@ -40,7 +40,7 @@ func (f *fakeAPI) SendPhoto(_ context.Context, chat int64, _ []byte, caption str
 	return nil
 }
 func (f *fakeAPI) Answer(context.Context, string, string) error { return nil }
-func (f *fakeAPI) Me(context.Context) (string, error)            { return "test_bot", nil }
+func (f *fakeAPI) Me(context.Context) (string, error)           { return "test_bot", nil }
 
 func (f *fakeAPI) take() []sent {
 	f.mu.Lock()

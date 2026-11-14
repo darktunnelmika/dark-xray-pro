@@ -224,13 +224,15 @@ type InboundView struct {
 	Clients  int             `json:"clients"`
 	Today    int64           `json:"traffic_today"`
 	Total    int64           `json:"traffic_total"`
+	Nodes    []string        `json:"nodes"`
 }
 
 func (s *Store) Inbounds(ctx context.Context) ([]InboundView, error) {
 	rows, err := s.ro.QueryContext(ctx, `SELECT i.tag,i.node_id,i.template,i.meta,i.enabled,(SELECT COUNT(*) FROM client_inbounds ci WHERE ci.tag=i.tag),
-(SELECT COALESCE(SUM(up+down),0) FROM inbound_traffic t WHERE t.tag=i.tag AND t.day=?),
-(SELECT COALESCE(SUM(up+down),0) FROM inbound_traffic t WHERE t.tag=i.tag)
-FROM inbounds i ORDER BY i.node_id,i.tag`, s.now().UTC().Format("2006-01-02"))
+(SELECT COALESCE(SUM(up+down),0) FROM inbound_traffic t WHERE t.tag IN (i.tag, i.tag||'__t') AND t.day=?),
+(SELECT COALESCE(SUM(up+down),0) FROM inbound_traffic t WHERE t.tag IN (i.tag, i.tag||'__t')),
+(SELECT COALESCE(group_concat(node_id),'') FROM (SELECT node_id FROM inbound_routes r WHERE r.tag=i.tag ORDER BY node_id))
+FROM inbounds i ORDER BY i.tag`, s.now().UTC().Format("2006-01-02"))
 	if err != nil {
 		return nil, err
 	}
@@ -239,7 +241,8 @@ FROM inbounds i ORDER BY i.node_id,i.tag`, s.now().UTC().Format("2006-01-02"))
 	for rows.Next() {
 		var v InboundView
 		var tpl, meta string
-		if err := rows.Scan(&v.Tag, &v.NodeID, &tpl, &meta, &v.Enabled, &v.Clients, &v.Today, &v.Total); err != nil {
+		var nodes string
+		if err := rows.Scan(&v.Tag, &v.NodeID, &tpl, &meta, &v.Enabled, &v.Clients, &v.Today, &v.Total, &nodes); err != nil {
 			return nil, err
 		}
 		var t struct {
@@ -252,6 +255,7 @@ FROM inbounds i ORDER BY i.node_id,i.tag`, s.now().UTC().Format("2006-01-02"))
 		}
 		_ = json.Unmarshal([]byte(tpl), &t)
 		v.Protocol, v.Port, v.Network, v.Security, v.Meta = t.Protocol, t.Port, t.Stream.Network, t.Stream.Security, json.RawMessage(meta)
+		v.Nodes = splitTags(nodes)
 		out = append(out, v)
 	}
 	return out, rows.Err()

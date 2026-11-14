@@ -4,8 +4,9 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"errors"
 	"fmt"
+	"net"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -40,11 +41,15 @@ type Swap struct {
 	ID           string `json:"id"`
 	Name         string `json:"name"`
 	InboundTag   string `json:"inbound_tag"`
+	DestNode     string `json:"dest_node"` // the inbound's node the relay reaches ("" = its first node)
 	SourceNode   string `json:"source_node"`
 	SourcePort   int    `json:"source_port"`
 	EntryAddress string `json:"entry_address"`
 	EntryPort    int    `json:"entry_port"`
-	Enabled      bool   `json:"enabled"`
+	// TargetAddress overrides where the relay connects (default: the
+	// destination node's public IP as seen by the HUB).
+	TargetAddress string `json:"target_address"`
+	Enabled       bool   `json:"enabled"`
 	// Read-only, filled by Swaps: where the forwarder sends traffic.
 	Target string `json:"target,omitempty"`
 }
@@ -54,26 +59,39 @@ func (s *Store) ensureSwapSchema() error {
 	return err
 }
 
-// swapTarget is the exit inbound's public address: its Direct endpoint, or
-// the first endpoint when none is named Direct.
-func swapTarget(metaJSON string) (string, int, error) {
-	var m sub.Meta
-	if err := json.Unmarshal([]byte(metaJSON), &m); err != nil || len(m.Endpoints) == 0 {
-		return "", 0, fmt.Errorf("%w: the inbound needs a Direct endpoint before it can be swapped", ErrInvalid)
+type rowQuerier interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}
+
+// swapDest resolves where a relay forwards: the destination route's Tunnel
+// port if it has one (so relayed traffic is counted with Tunnel), else its
+// Direct port, at the target address, the node's public IP, or its first
+// Direct host.
+func swapDest(ctx context.Context, q rowQuerier, tag, dest, target string) (string, int, error) {
+	var direct, tunnel int
+	if err := q.QueryRowContext(ctx, `SELECT direct_port,tunnel_port FROM inbound_routes WHERE tag=? AND node_id=?`, tag, dest).Scan(&direct, &tunnel); err != nil {
+		return "", 0, fmt.Errorf("%w: the inbound is not placed on node %s", ErrInvalid, dest)
 	}
-	ep := m.Endpoints[0]
-	for _, e := range m.Endpoints {
-		if e.Name == "Direct" {
-			ep = e
-			break
-		}
+	port := direct
+	if tunnel > 0 {
+		port = tunnel
 	}
-	return ep.Address, ep.Port, nil
+	addr := target
+	if addr == "" {
+		_ = q.QueryRowContext(ctx, `SELECT public_ip FROM nodes WHERE id=?`, dest).Scan(&addr)
+	}
+	if addr == "" {
+		_ = q.QueryRowContext(ctx, `SELECT address FROM inbound_hosts WHERE tag=? AND node_id=? AND path='direct' ORDER BY sort,id LIMIT 1`, tag, dest).Scan(&addr)
+	}
+	if addr == "" {
+		return "", 0, fmt.Errorf("%w: node %s has no known address yet; set the relay target address", ErrInvalid, dest)
+	}
+	return addr, port, nil
 }
 
 // PutSwap creates or updates a route after checking it can work.
 func (s *Store) PutSwap(ctx context.Context, w Swap) error {
-	if !idRE.MatchString(w.ID) || w.SourcePort < 1 || w.SourcePort > 65535 || w.EntryPort < 1 || w.EntryPort > 65535 || w.EntryAddress == "" {
+	if !idRE.MatchString(w.ID) || w.SourcePort < 1 || w.SourcePort > 65535 || w.EntryPort < 1 || w.EntryPort > 65535 || strings.TrimSpace(w.EntryAddress) == "" {
 		return ErrInvalid
 	}
 	if w.Name == "" {
@@ -82,23 +100,29 @@ func (s *Store) PutSwap(ctx context.Context, w Swap) error {
 	if len(w.Name) > 160 {
 		return fmt.Errorf("%w: name is too long", ErrInvalid)
 	}
+	if w.TargetAddress != "" && net.ParseIP(w.TargetAddress) == nil && !hostRE.MatchString(w.TargetAddress) {
+		return fmt.Errorf("%w: target address", ErrInvalid)
+	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-	var exitNode, tpl, meta string
-	if err := tx.QueryRowContext(ctx, `SELECT node_id,template,meta FROM inbounds WHERE tag=?`, w.InboundTag).Scan(&exitNode, &tpl, &meta); err != nil {
+	var first, tpl string
+	if err := tx.QueryRowContext(ctx, `SELECT node_id,template FROM inbounds WHERE tag=?`, w.InboundTag).Scan(&first, &tpl); err != nil {
 		return fmt.Errorf("%w: unknown inbound", ErrInvalid)
 	}
-	if exitNode == w.SourceNode {
-		return fmt.Errorf("%w: the relay node must differ from the inbound's node", ErrInvalid)
+	if w.DestNode == "" {
+		w.DestNode = first
+	}
+	if w.DestNode == w.SourceNode {
+		return fmt.Errorf("%w: the relay node must differ from the destination node", ErrInvalid)
 	}
 	var x int
 	if err := tx.QueryRowContext(ctx, `SELECT 1 FROM nodes WHERE id=?`, w.SourceNode).Scan(&x); err != nil {
 		return fmt.Errorf("%w: unknown relay node", ErrInvalid)
 	}
-	if _, _, err := swapTarget(meta); err != nil {
+	if _, _, err := swapDest(ctx, tx, w.InboundTag, w.DestNode, w.TargetAddress); err != nil {
 		return err
 	}
 	var t struct {
@@ -110,35 +134,18 @@ func (s *Store) PutSwap(ctx context.Context, w Swap) error {
 	if t.Stream.Network == "kcp" || t.Stream.Network == "mkcp" || t.Stream.Network == "quic" {
 		return fmt.Errorf("%w: Dark Swap relays TCP transports only", ErrInvalid)
 	}
-	// The relay port must not collide with an inbound on the relay node.
-	rows, err := tx.QueryContext(ctx, `SELECT template FROM inbounds WHERE node_id=?`, w.SourceNode)
+	used, err := usedPorts(ctx, tx, w.SourceNode, "", w.ID)
 	if err != nil {
 		return err
 	}
-	for rows.Next() {
-		var other string
-		if err := rows.Scan(&other); err != nil {
-			rows.Close()
-			return err
-		}
-		var p struct {
-			Port json.Number `json:"port"`
-		}
-		_ = json.Unmarshal([]byte(other), &p)
-		if n, _ := strconv.Atoi(p.Port.String()); n == w.SourcePort {
-			rows.Close()
-			return fmt.Errorf("%w: port %d is already used by an inbound on %s", ErrInvalid, w.SourcePort, w.SourceNode)
-		}
+	if who, taken := used[w.SourcePort]; taken {
+		return fmt.Errorf("%w: port %d on %s is already used by %s", ErrInvalid, w.SourcePort, w.SourceNode, who)
 	}
-	rows.Close()
-	if w.SourcePort == apiPort {
-		return fmt.Errorf("%w: port %d is reserved", ErrInvalid, apiPort)
-	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO swaps(id,name,inbound_tag,source_node,source_port,entry_address,entry_port,enabled,created_unix)
-VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name, inbound_tag=excluded.inbound_tag,
+	_, err = tx.ExecContext(ctx, `INSERT INTO swaps(id,name,inbound_tag,source_node,source_port,entry_address,entry_port,enabled,created_unix,dest_node,target_address)
+VALUES(?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name, inbound_tag=excluded.inbound_tag,
 source_node=excluded.source_node, source_port=excluded.source_port, entry_address=excluded.entry_address,
-entry_port=excluded.entry_port, enabled=excluded.enabled`,
-		w.ID, w.Name, w.InboundTag, w.SourceNode, w.SourcePort, w.EntryAddress, w.EntryPort, w.Enabled, s.now().Unix())
+entry_port=excluded.entry_port, enabled=excluded.enabled, dest_node=excluded.dest_node, target_address=excluded.target_address`,
+		w.ID, w.Name, w.InboundTag, w.SourceNode, w.SourcePort, strings.TrimSpace(w.EntryAddress), w.EntryPort, w.Enabled, s.now().Unix(), w.DestNode, w.TargetAddress)
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE") {
 			return fmt.Errorf("%w: port %d is already used by another swap on %s", ErrInvalid, w.SourcePort, w.SourceNode)
@@ -161,60 +168,68 @@ func (s *Store) DeleteSwap(ctx context.Context, id string) error {
 
 // Swaps lists routes, optionally for one inbound.
 func (s *Store) Swaps(ctx context.Context, inboundTag string) ([]Swap, error) {
-	rows, err := s.ro.QueryContext(ctx, `SELECT w.id,w.name,w.inbound_tag,w.source_node,w.source_port,w.entry_address,w.entry_port,w.enabled,i.meta
+	rows, err := s.ro.QueryContext(ctx, `SELECT w.id,w.name,w.inbound_tag,w.source_node,w.source_port,w.entry_address,w.entry_port,w.enabled,
+CASE WHEN w.dest_node='' THEN i.node_id ELSE w.dest_node END,w.target_address
 FROM swaps w JOIN inbounds i ON i.tag=w.inbound_tag WHERE ?='' OR w.inbound_tag=? ORDER BY w.inbound_tag,w.id`, inboundTag, inboundTag)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 	out := []Swap{}
 	for rows.Next() {
 		var w Swap
-		var meta string
-		if err := rows.Scan(&w.ID, &w.Name, &w.InboundTag, &w.SourceNode, &w.SourcePort, &w.EntryAddress, &w.EntryPort, &w.Enabled, &meta); err != nil {
+		if err := rows.Scan(&w.ID, &w.Name, &w.InboundTag, &w.SourceNode, &w.SourcePort, &w.EntryAddress, &w.EntryPort, &w.Enabled, &w.DestNode, &w.TargetAddress); err != nil {
+			rows.Close()
 			return nil, err
-		}
-		if a, p, err := swapTarget(meta); err == nil {
-			w.Target = a + ":" + strconv.Itoa(p)
 		}
 		out = append(out, w)
 	}
-	return out, rows.Err()
+	rows.Close()
+	for i := range out {
+		if a, p, err := swapDest(ctx, s.ro, out[i].InboundTag, out[i].DestNode, out[i].TargetAddress); err == nil {
+			out[i].Target = net.JoinHostPort(a, strconv.Itoa(p))
+		}
+	}
+	return out, nil
 }
 
 // swapForwarders renders the relay inbounds a node must run.
 func (s *Store) swapForwarders(ctx context.Context, nodeID string) ([]any, error) {
-	rows, err := s.ro.QueryContext(ctx, `SELECT w.id,w.source_port,i.meta FROM swaps w JOIN inbounds i ON i.tag=w.inbound_tag
-WHERE w.source_node=? AND w.enabled=1 AND i.enabled=1 ORDER BY w.id`, nodeID)
+	rows, err := s.ro.QueryContext(ctx, `SELECT w.id,w.source_port,w.inbound_tag,CASE WHEN w.dest_node='' THEN i.node_id ELSE w.dest_node END,w.target_address
+FROM swaps w JOIN inbounds i ON i.tag=w.inbound_tag WHERE w.source_node=? AND w.enabled=1 AND i.enabled=1 ORDER BY w.id`, nodeID)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	var out []any
+	type fw struct {
+		id, tag, dest, target string
+		port                  int
+	}
+	var list []fw
 	for rows.Next() {
-		var id, meta string
-		var port int
-		if err := rows.Scan(&id, &port, &meta); err != nil {
+		var f fw
+		if err := rows.Scan(&f.id, &f.port, &f.tag, &f.dest, &f.target); err != nil {
+			rows.Close()
 			return nil, err
 		}
-		addr, tport, err := swapTarget(meta)
+		list = append(list, f)
+	}
+	rows.Close()
+	var out []any
+	for _, f := range list {
+		addr, tport, err := swapDest(ctx, s.ro, f.tag, f.dest, f.target)
 		if err != nil {
-			continue // the inbound lost its endpoint; the route pauses
+			continue // destination unplaced or unknown: the route pauses
 		}
 		out = append(out, map[string]any{
-			"tag": "swap-" + id, "listen": "0.0.0.0", "port": port, "protocol": "dokodemo-door",
+			"tag": "swap-" + f.id, "listen": "0.0.0.0", "port": f.port, "protocol": "dokodemo-door",
 			"settings": map[string]any{"address": addr, "port": tport, "network": "tcp"},
 		})
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 // swapEndpoints adds each enabled route of an inbound to its subscription.
 func (s *Store) swapEndpoints(ctx context.Context, tag string) ([]sub.Endpoint, error) {
 	rows, err := s.ro.QueryContext(ctx, `SELECT name,entry_address,entry_port FROM swaps WHERE inbound_tag=? AND enabled=1 ORDER BY id`, tag)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, nil
-	}
 	if err != nil {
 		return nil, err
 	}
@@ -229,3 +244,5 @@ func (s *Store) swapEndpoints(ctx context.Context, tag string) ([]sub.Endpoint, 
 	}
 	return out, rows.Err()
 }
+
+var hostRE = regexp.MustCompile(`^[A-Za-z0-9]([A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$`)

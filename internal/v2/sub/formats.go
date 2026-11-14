@@ -38,16 +38,17 @@ type outbound struct {
 	m                  Meta
 }
 
-func outbounds(a Account, ins []Inbound) ([]outbound, error) {
+func outbounds(a Account, ins []Inbound, format string) ([]outbound, error) {
 	sorted := append([]Inbound(nil), ins...)
 	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Tag < sorted[j].Tag })
 	var out []outbound
 	seen := map[string]int{}
 	for _, in := range sorted {
-		t, err := parse(in.Template)
+		base, err := parse(in.Template)
 		if err != nil {
 			return nil, fmt.Errorf("inbound %s: %w", in.Tag, err)
 		}
+		t := base
 		switch t.Protocol {
 		case "vless", "vmess", "trojan":
 		case "shadowsocks":
@@ -58,12 +59,16 @@ func outbounds(a Account, ins []Inbound) ([]outbound, error) {
 			continue
 		}
 		for _, ep := range in.Meta.Endpoints {
+			if ep.excluded(format) {
+				continue
+			}
+			t, m := forEndpoint(base, in.Meta, ep)
 			tag := remark(in, ep)
 			if n := seen[tag]; n > 0 {
 				tag += " " + strconv.Itoa(n+1)
 			}
 			seen[remark(in, ep)]++
-			o := outbound{tag: tag, proto: t.Protocol, server: ep.Address, port: ep.Port, uuid: a.UUID, password: a.Secret, t: t, m: in.Meta}
+			o := outbound{tag: tag, proto: t.Protocol, server: ep.Address, port: ep.Port, uuid: a.UUID, password: a.Secret, t: t, m: m}
 			if t.Protocol == "shadowsocks" {
 				o.password = ssPassword(t, a.Secret)
 			}
@@ -79,7 +84,7 @@ func outbounds(a Account, ins []Inbound) ([]outbound, error) {
 // SingBox renders a complete sing-box client config: one outbound per
 // endpoint, an automatic best-latency group and a manual selector.
 func SingBox(a Account, ins []Inbound) ([]byte, error) {
-	obs, err := outbounds(a, ins)
+	obs, err := outbounds(a, ins, "singbox")
 	if err != nil {
 		return nil, err
 	}
@@ -108,6 +113,9 @@ func SingBox(a Account, ins []Inbound) ([]byte, error) {
 				"reality": map[string]any{"enabled": true, "public_key": o.m.PublicKey, "short_id": or(o.m.ShortID, first(s.Reality.ShortIDs))}}
 		case "tls":
 			tls := map[string]any{"enabled": true, "server_name": s.TLS.ServerName, "utls": map[string]any{"enabled": true, "fingerprint": or(o.m.Fingerprint, "chrome")}}
+			if s.insecure {
+				tls["insecure"] = true
+			}
 			if len(s.TLS.ALPN) > 0 {
 				tls["alpn"] = s.TLS.ALPN
 			}
@@ -154,7 +162,7 @@ func yq(s string) string { // YAML double-quoted scalar
 
 // Clash renders a mihomo (Clash Meta) profile.
 func Clash(a Account, ins []Inbound) ([]byte, error) {
-	obs, err := outbounds(a, ins)
+	obs, err := outbounds(a, ins, "clash")
 	if err != nil {
 		return nil, err
 	}
@@ -193,6 +201,9 @@ func Clash(a Account, ins []Inbound) ([]byte, error) {
 				yq(first(s.Reality.ServerNames)), or(o.m.Fingerprint, "chrome"), yq(o.m.PublicKey), yq(or(o.m.ShortID, first(s.Reality.ShortIDs))))
 		case "tls":
 			fmt.Fprintf(&b, "    tls: true\n    servername: %s\n    client-fingerprint: %s\n", yq(s.TLS.ServerName), or(o.m.Fingerprint, "chrome"))
+			if s.insecure {
+				b.WriteString("    skip-cert-verify: true\n")
+			}
 		}
 		switch s.Network {
 		case "grpc":

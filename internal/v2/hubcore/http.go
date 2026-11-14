@@ -23,6 +23,7 @@ func NodeHandler(s *Store) http.Handler {
 		if !decode(w, r, &req) {
 			return
 		}
+		s.NodeAddress(r.Context(), id, r.RemoteAddr)
 		resp, err := s.Sync(r.Context(), id, req)
 		reply(w, resp, err)
 	})

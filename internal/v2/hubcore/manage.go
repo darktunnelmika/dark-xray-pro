@@ -57,14 +57,28 @@ func (s *Store) RenameNode(ctx context.Context, id, name string) error {
 // DeleteNode removes a node and its inbounds. Clients and their usage stay;
 // they simply lose the inbounds that lived on that node.
 func (s *Store) DeleteNode(ctx context.Context, id string) error {
-	r, err := s.db.ExecContext(ctx, `DELETE FROM nodes WHERE id=?`, id)
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	// An inbound placed on other nodes too survives: point it elsewhere
+	// first, so the cascade only removes inbounds that lived here alone.
+	if _, err := tx.ExecContext(ctx, `UPDATE inbounds SET node_id=(SELECT MIN(node_id) FROM inbound_routes r WHERE r.tag=inbounds.tag AND r.node_id<>?)
+WHERE node_id=? AND EXISTS (SELECT 1 FROM inbound_routes r WHERE r.tag=inbounds.tag AND r.node_id<>?)`, id, id, id); err != nil {
+		return err
+	}
+	r, err := tx.ExecContext(ctx, `DELETE FROM nodes WHERE id=?`, id)
 	if err != nil {
 		return err
 	}
 	if n, _ := r.RowsAffected(); n != 1 {
 		return ErrNotFound
 	}
-	return nil
+	if _, err := tx.ExecContext(ctx, `DELETE FROM inbound_hosts WHERE node_id=?`, id); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // SetClientNote stores free-form contact details (phone, Telegram, notes).

@@ -147,6 +147,10 @@ ON CONFLICT(email,node_id,day) DO UPDATE SET up=up+excluded.up, down=down+exclud
 ON CONFLICT(tag,day) DO UPDATE SET up=up+excluded.up, down=down+excluded.down`, t.Email, day, t.Up, t.Down); err != nil {
 			return wire.UsageAck{}, err
 		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO route_traffic(tag,node_id,day,up,down) VALUES(?,?,?,?,?)
+ON CONFLICT(tag,node_id,day) DO UPDATE SET up=up+excluded.up, down=down+excluded.down`, t.Email, nodeID, day, t.Up, t.Down); err != nil {
+			return wire.UsageAck{}, err
+		}
 	}
 	if b.Online != nil {
 		if _, err := tx.ExecContext(ctx, `DELETE FROM online WHERE node_id=?`, nodeID); err != nil {
