@@ -857,7 +857,13 @@ func (s *Store) foreignSubToken(ctx context.Context, tok string) (string, error)
 	if !ok {
 		return "", ErrNotFound
 	}
-	return s.legacySubToken(ctx, "marzban-user", user)
+	var v2 string
+	err := s.ro.QueryRowContext(ctx, `SELECT c.sub_token FROM legacy_sub_tokens l JOIN clients c ON c.email=l.email WHERE l.token_sha=? AND l.kind='marzban-user'`,
+		legacyTokenSHA("marzban-user", user)).Scan(&v2)
+	if err != nil {
+		return "", ErrNotFound
+	}
+	return v2, nil
 }
 
 var legacyPathRE = regexp.MustCompile(`^/[A-Za-z0-9._/-]{1,60}/$`)
