@@ -3,6 +3,7 @@ package hubcore
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log"
 	"net/http"
