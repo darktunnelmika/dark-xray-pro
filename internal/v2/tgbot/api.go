@@ -71,9 +71,25 @@ type Keyboard struct {
 }
 
 type Button struct {
-	Text string `json:"text"`
-	Data string `json:"callback_data,omitempty"`
-	URL  string `json:"url,omitempty"`
+	Text   string  `json:"text"`
+	Data   string  `json:"callback_data,omitempty"`
+	URL    string  `json:"url,omitempty"`
+	WebApp *WebApp `json:"web_app,omitempty"` // opens a Mini App
+}
+
+// WebApp is a Mini App address for a button.
+type WebApp struct {
+	URL string `json:"url"`
+}
+
+// SetMenuButton points the chat's menu button at a Mini App ("" restores
+// the command list).
+func (a *HTTPAPI) SetMenuButton(ctx context.Context, url, text string) error {
+	mb := map[string]any{"type": "commands"}
+	if url != "" {
+		mb = map[string]any{"type": "web_app", "text": text, "web_app": map[string]string{"url": url}}
+	}
+	return a.callJSON(ctx, "setChatMenuButton", map[string]any{"menu_button": mb}, nil)
 }
 
 // ErrBlocked means the user blocked the bot (403).

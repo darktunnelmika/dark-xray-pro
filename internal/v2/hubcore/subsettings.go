@@ -20,6 +20,9 @@ type SubSettings struct {
 	FragmentLength   string `json:"fragment_length"`
 	FragmentInterval string `json:"fragment_interval"`
 	Noise            bool   `json:"noise"`
+	// Telegram Mini App store (the bot opens it; needs an HTTPS address).
+	MiniApp    bool   `json:"miniapp"`
+	MiniAppURL string `json:"miniapp_url"` // "" = <public address>/app/
 }
 
 func (s *Store) SubSettings(ctx context.Context) SubSettings {
@@ -31,7 +34,8 @@ func (s *Store) SubSettings(ctx context.Context) SubSettings {
 		Title:          s.Setting(ctx, "sub_title"),
 		Fragment:       s.Setting(ctx, "sub_frag") == "1",
 		FragmentLength: s.Setting(ctx, "sub_frag_len"), FragmentInterval: s.Setting(ctx, "sub_frag_int"),
-		Noise: s.Setting(ctx, "sub_noise") == "1",
+		Noise:   s.Setting(ctx, "sub_noise") == "1",
+		MiniApp: s.Setting(ctx, "miniapp") == "1", MiniAppURL: s.Setting(ctx, "miniapp_url"),
 	}
 }
 
@@ -63,7 +67,11 @@ func (s *Store) PutSubSettings(ctx context.Context, v SubSettings) error {
 		}
 		return ""
 	}
-	for k, val := range map[string]string{"sub_frag": b01(v.Fragment), "sub_frag_len": v.FragmentLength, "sub_frag_int": v.FragmentInterval, "sub_noise": b01(v.Noise)} {
+	v.MiniAppURL = strings.TrimSpace(v.MiniAppURL)
+	if v.MiniAppURL != "" && !strings.HasPrefix(v.MiniAppURL, "https://") {
+		return fmt.Errorf("%w: Telegram opens Mini Apps only over https://", ErrInvalid)
+	}
+	for k, val := range map[string]string{"miniapp": b01(v.MiniApp), "miniapp_url": v.MiniAppURL, "sub_frag": b01(v.Fragment), "sub_frag_len": v.FragmentLength, "sub_frag_int": v.FragmentInterval, "sub_noise": b01(v.Noise)} {
 		if err := s.SetSetting(ctx, k, val); err != nil {
 			return err
 		}

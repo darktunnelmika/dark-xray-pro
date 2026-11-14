@@ -37,6 +37,8 @@ type Bot struct {
 	nodeState  map[string]bool
 	lastDaily  string
 	schedBusy  bool
+	menuURL    string // Mini App address the menu button points at
+	menuSet    bool
 	// SyncSchedule sends scheduled broadcasts inside Tick (tests).
 	SyncSchedule bool
 }
@@ -135,6 +137,7 @@ func (b *Bot) background(ctx context.Context) {
 // Tick announces new orders and deliveries, node changes and the daily report.
 func (b *Bot) Tick(ctx context.Context) {
 	b.init()
+	b.syncMenuButton(ctx)
 	b.announceOrders(ctx)
 	b.watchNodes(ctx)
 	b.dailyReport(ctx)
@@ -332,7 +335,36 @@ func (b *Bot) menu(ctx context.Context, chat int64) {
 		}
 		welcome += "\n\nسرویس‌های شما:\n" + esc(strings.Join(lines, "\n"))
 	}
-	b.send(ctx, chat, welcome, mainMenu)
+	b.send(ctx, chat, welcome, b.menuKB(ctx))
+}
+
+// menuKB is the main menu, led by the Mini App store when it is on.
+func (b *Bot) menuKB(ctx context.Context) *Keyboard {
+	u := b.Store.MiniAppURL(ctx, b.SubBase)
+	if u == "" {
+		return mainMenu
+	}
+	rows := append([][]Button{{{Text: "🛍 فروشگاه و سرویس‌های من", WebApp: &WebApp{URL: u}}}}, mainMenu.Rows...)
+	return &Keyboard{Rows: rows}
+}
+
+// syncMenuButton keeps the chat menu button in step with the Mini App setting.
+func (b *Bot) syncMenuButton(ctx context.Context) {
+	setter, ok := b.API.(interface {
+		SetMenuButton(ctx context.Context, url, text string) error
+	})
+	if !ok {
+		return
+	}
+	u := b.Store.MiniAppURL(ctx, b.SubBase)
+	if u == b.menuURL && b.menuSet {
+		return
+	}
+	if err := setter.SetMenuButton(ctx, u, "فروشگاه"); err != nil {
+		b.logf("tgbot menu button: %v", err)
+		return
+	}
+	b.menuURL, b.menuSet = u, true
 }
 
 func (b *Bot) shop(ctx context.Context, chat int64) {

@@ -92,6 +92,7 @@ func main() {
 		os.Exit(0)
 	})
 	s.SetDistDir(*distDir)
+	hubcore.SetPublicBase(*subBase)
 	ctx := context.Background()
 
 	switch cmd {
@@ -129,6 +130,7 @@ func main() {
 					owners[n] = true
 				}
 			}
+			hubcore.SetTelegramToken(string(tok))
 			bot := &tgbot.Bot{Store: s, API: &tgbot.HTTPAPI{Token: strings.TrimSpace(string(tok))}, Owners: owners, SubBase: *subBase}
 			go bot.Run(ctx)
 			log.Printf("telegram bot on (%d owners)", len(owners))

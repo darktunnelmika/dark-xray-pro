@@ -1,0 +1,139 @@
+/* Dark VPN store — the panel's night-glass look, shrunk to a phone sheet.
+   One loud element per service: the usage ring. Everything else stays calm. */
+@font-face {
+  font-family: "Vazirmatn";
+  src: url("vazirmatn.woff2") format("woff2");
+  font-weight: 100 900;
+  font-display: swap;
+}
+:root {
+  color-scheme: dark;
+  --cyan: #2de2e6;
+  --violet: #9b5cff;
+  --bg: #060912;
+  --glass: rgb(148 163 255 / .06);
+  --glass-2: rgb(148 163 255 / .1);
+  --line: rgb(160 175 255 / .12);
+  --text: #e9ecff;
+  --muted: #8d95bd;
+  --good: #3ef0a1;
+  --warn: #ffc857;
+  --bad: #ff4d8d;
+  --r: 18px;
+  font: 15px/1.6 "Vazirmatn", system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-feature-settings: "tnum" 1;
+}
+:root.light {
+  color-scheme: light;
+  --cyan: #0e9fb3;
+  --violet: #7a3cf0;
+  --bg: #eef0fb;
+  --glass: rgb(255 255 255 / .7);
+  --glass-2: rgb(255 255 255 / .9);
+  --line: rgb(40 50 120 / .1);
+  --text: #10142a;
+  --muted: #5b6283;
+  --good: #0b9a6a;
+  --warn: #b7791f;
+  --bad: #d6336c;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; min-height: 100%; }
+body {
+  background: var(--bg);
+  background-image:
+    radial-gradient(60vmax 40vmax at 110% -10%, color-mix(in oklab, var(--violet) 22%, transparent), transparent 70%),
+    radial-gradient(50vmax 35vmax at -20% 10%, color-mix(in oklab, var(--cyan) 16%, transparent), transparent 70%);
+  background-attachment: fixed;
+  color: var(--text);
+  padding: 16px 14px calc(88px + env(safe-area-inset-bottom));
+  -webkit-tap-highlight-color: transparent;
+}
+h1, h2, h3, p { margin: 0; }
+button { font: inherit; color: inherit; }
+.ltr { direction: ltr; unicode-bidi: isolate; }
+
+.boot { display: grid; place-items: center; min-height: 70vh; }
+.spinner { inline-size: 34px; block-size: 34px; border-radius: 50%; border: 3px solid var(--line); border-top-color: var(--cyan); animation: spin .9s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 3s; } }
+
+header.hello { display: flex; align-items: center; justify-content: space-between; margin-block-end: 18px; }
+header.hello h1 { font-size: 22px; font-weight: 800; letter-spacing: -.01em; }
+header.hello p { color: var(--muted); font-size: 13px; }
+.mark { inline-size: 40px; block-size: 40px; border-radius: 13px; display: grid; place-items: center;
+  background: linear-gradient(135deg, color-mix(in oklab, var(--cyan) 30%, transparent), color-mix(in oklab, var(--violet) 30%, transparent)); border: 1px solid var(--line); }
+.mark svg { inline-size: 22px; block-size: 22px; stroke: var(--text); fill: none; stroke-width: 2; stroke-linecap: round; }
+
+.announce { padding: 10px 14px; border-radius: 14px; background: color-mix(in oklab, var(--warn) 12%, transparent); border: 1px solid color-mix(in oklab, var(--warn) 30%, transparent); font-size: 13.5px; margin-block-end: 14px; }
+
+.card { background: var(--glass); border: 1px solid var(--line); border-radius: var(--r); padding: 16px; backdrop-filter: blur(16px) saturate(140%); margin-block-end: 12px; }
+.svc { display: grid; grid-template-columns: 96px 1fr; gap: 14px; align-items: center; }
+.svc h2 { font-size: 16px; font-weight: 700; overflow-wrap: anywhere; }
+.svc .meta { color: var(--muted); font-size: 13px; }
+.svc .actions { grid-column: 1 / -1; display: flex; gap: 8px; flex-wrap: wrap; }
+
+.ring { position: relative; inline-size: 96px; block-size: 96px; }
+.ring svg { inline-size: 100%; block-size: 100%; transform: rotate(-90deg); }
+.ring circle { fill: none; stroke-width: 9; }
+.ring .track { stroke: var(--line); }
+.ring .val { stroke: url(#neon); stroke-linecap: round; transition: stroke-dashoffset .8s cubic-bezier(.2,.8,.2,1); }
+.ring.bad .val { stroke: var(--bad); }
+.ring .num { position: absolute; inset: 0; display: grid; place-content: center; text-align: center; line-height: 1.15; }
+.ring .num b { font-size: 17px; font-weight: 800; }
+.ring .num small { color: var(--muted); font-size: 11px; }
+
+.badge { display: inline-flex; align-items: center; gap: 5px; padding: 1px 9px; border-radius: 999px; font-size: 12px; font-weight: 600; border: 1px solid var(--line); background: var(--glass-2); white-space: nowrap; unicode-bidi: isolate; }
+.badge.good { color: var(--good); border-color: color-mix(in oklab, var(--good) 35%, transparent); }
+.badge.bad { color: var(--bad); border-color: color-mix(in oklab, var(--bad) 35%, transparent); }
+.badge.warn { color: var(--warn); border-color: color-mix(in oklab, var(--warn) 35%, transparent); }
+.dot { inline-size: 7px; block-size: 7px; border-radius: 50%; background: currentColor; box-shadow: 0 0 8px currentColor; }
+
+.btn { border: 1px solid var(--line); background: var(--glass-2); border-radius: 12px; padding: 8px 14px; font-weight: 600; font-size: 14px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
+.btn.primary { border: 0; color: #061018; background: linear-gradient(120deg, var(--cyan), var(--violet)); box-shadow: 0 6px 22px -8px color-mix(in oklab, var(--cyan) 70%, transparent); }
+.btn.ghost { background: transparent; }
+.btn.block { inline-size: 100%; justify-content: center; padding-block: 12px; }
+.btn:disabled { opacity: .55; }
+.btn:focus-visible, .tabs button:focus-visible, input:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
+
+.qr { display: block; margin: 12px auto 4px; inline-size: 220px; block-size: 220px; background: #fff; border-radius: 16px; padding: 8px; image-rendering: pixelated; }
+code.link { display: block; font-size: 12px; direction: ltr; text-align: left; padding: 8px 10px; border-radius: 10px; background: var(--glass-2); overflow-wrap: anywhere; margin-block-start: 8px; }
+
+.product { display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; align-items: center; }
+.product h3 { font-size: 16px; font-weight: 700; }
+.product .spec { color: var(--muted); font-size: 13px; }
+.product .price { grid-row: 1 / 3; grid-column: 2; text-align: center; }
+.product .price b { display: block; font-size: 18px; font-weight: 800; background: linear-gradient(120deg, var(--cyan), var(--violet)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.product .price small { color: var(--muted); font-size: 11px; }
+.product .btn { grid-column: 1 / -1; margin-block-start: 8px; }
+
+.section-title { font-size: 13px; color: var(--muted); font-weight: 600; margin: 18px 4px 8px; }
+.empty { text-align: center; padding: 26px 12px; color: var(--muted); }
+.empty h2 { color: var(--text); font-size: 17px; margin-block-end: 6px; }
+.field { display: flex; gap: 8px; margin-block-start: 12px; }
+.field input { flex: 1; min-inline-size: 0; font: inherit; font-size: 13px; color: var(--text); background: var(--glass-2); border: 1px solid var(--line); border-radius: 12px; padding: 9px 12px; direction: ltr; }
+
+.order { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+.order .what { font-weight: 600; }
+.order .when { color: var(--muted); font-size: 12px; }
+
+.sheet-back { position: fixed; inset: 0; background: rgb(0 0 0 / .5); display: flex; align-items: flex-end; z-index: 20; }
+.sheet { inline-size: 100%; background: var(--bg); border-radius: 22px 22px 0 0; border-top: 1px solid var(--line); padding: 20px 16px calc(20px + env(safe-area-inset-bottom)); max-block-size: 85vh; overflow: auto;
+  animation: up .25s cubic-bezier(.2,.8,.2,1); }
+@keyframes up { from { transform: translateY(30%); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .sheet { animation: none; } }
+.sheet h2 { font-size: 18px; margin-block-end: 10px; }
+.sheet .pay { white-space: pre-wrap; background: var(--glass); border: 1px solid var(--line); border-radius: 14px; padding: 12px; margin-block: 10px; font-size: 14px; }
+.sheet .row { display: flex; gap: 8px; margin-block-start: 12px; }
+.sheet .row .btn { flex: 1; justify-content: center; }
+
+.tabs { position: fixed; inset-inline: 10px; inset-block-end: calc(10px + env(safe-area-inset-bottom)); display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; padding: 6px;
+  background: color-mix(in oklab, var(--bg) 70%, transparent); border: 1px solid var(--line); border-radius: 20px; backdrop-filter: blur(18px) saturate(150%); z-index: 10; }
+.tabs button { border: 0; background: transparent; border-radius: 14px; padding: 6px 4px; display: grid; justify-items: center; gap: 1px; font-size: 12px; color: var(--muted); cursor: pointer; }
+.tabs svg { inline-size: 21px; block-size: 21px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.tabs button[aria-current="page"] { color: var(--text); background: var(--glass-2); }
+.tabs button[aria-current="page"] svg { stroke: var(--cyan); }
+
+.toast { position: fixed; inset-inline: 20px; inset-block-end: calc(92px + env(safe-area-inset-bottom)); text-align: center; padding: 10px 14px; border-radius: 14px; background: var(--glass-2); border: 1px solid var(--line); backdrop-filter: blur(16px); z-index: 30; font-size: 14px; }
+.error-page { text-align: center; padding-block-start: 22vh; color: var(--muted); }
+.error-page h1 { color: var(--text); font-size: 20px; margin-block-end: 8px; }

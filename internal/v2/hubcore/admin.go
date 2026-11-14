@@ -1009,7 +1009,9 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 		err := s.DeleteClient(r.Context(), r.PathValue("email"))
 		reply(w, map[string]bool{"ok": err == nil}, err)
 	}))
-	mux.Handle("GET /sub/{token}", SubHandler(s))
+	sh := SubHandler(s)
+	mux.Handle("GET /sub/{token}", sh)
+	mux.Handle("/app/", sh) // Telegram Mini App
 	routes := mux.apiRoutes()
 	mux.HandleFunc("GET /api/v2/admin/docs", member(func(w http.ResponseWriter, r *http.Request) {
 		reply(w, routes, nil)
@@ -1023,6 +1025,7 @@ func b64(s string) string { return sub.Base64([]string{s}) }
 // address without exposing the owner API.
 func SubHandler(s *Store) http.Handler {
 	mux := http.NewServeMux()
+	registerMiniApp(mux, s)
 	mux.HandleFunc("GET /sub/{token}", func(w http.ResponseWriter, r *http.Request) {
 		email, err := s.EmailBySubToken(r.Context(), r.PathValue("token"))
 		if err != nil {
