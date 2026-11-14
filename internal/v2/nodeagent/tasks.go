@@ -143,7 +143,11 @@ func (b *taskBox) start(ctx context.Context, list []wire.Task, logf func(string,
 			continue
 		}
 		go func(t wire.Task) {
-			tctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
+			limit := 3 * time.Minute
+			if t.Kind == wire.TaskSelfUpdate || t.Kind == wire.TaskXrayUpdate {
+				limit = 15 * time.Minute // downloads over slow links
+			}
+			tctx, cancel := context.WithTimeout(ctx, limit)
 			defer cancel()
 			res := wire.TaskResult{ID: t.ID}
 			v, err := f(tctx, t.Args)

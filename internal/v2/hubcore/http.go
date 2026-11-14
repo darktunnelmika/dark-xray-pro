@@ -1,11 +1,14 @@
 package hubcore
 
 import (
+	"compress/gzip"
 	"encoding/json"
 	"errors"
 	"io"
 	"log"
 	"net/http"
+	"os"
+	"strings"
 
 	"github.com/darktunnelmika/dark-xray-pro/internal/v2/wire"
 )
@@ -46,6 +49,22 @@ func NodeHandler(s *Store) http.Handler {
 		p, ok := s.distFile(r.PathValue("file"))
 		if !ok {
 			http.NotFound(w, r)
+			return
+		}
+		// Binaries shrink by about half compressed; slow node links finish
+		// updates in time. Go's client undoes the encoding transparently.
+		if strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
+			f, err := os.Open(p)
+			if err != nil {
+				http.NotFound(w, r)
+				return
+			}
+			defer f.Close()
+			w.Header().Set("Content-Encoding", "gzip")
+			w.Header().Set("Content-Type", "application/octet-stream")
+			gz, _ := gzip.NewWriterLevel(w, gzip.BestSpeed)
+			_, _ = io.Copy(gz, f)
+			_ = gz.Close()
 			return
 		}
 		http.ServeFile(w, r, p)
