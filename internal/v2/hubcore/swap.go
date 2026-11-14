@@ -91,6 +91,9 @@ func swapDest(ctx context.Context, q rowQuerier, tag, dest, target string) (stri
 
 // PutSwap creates or updates a route after checking it can work.
 func (s *Store) PutSwap(ctx context.Context, w Swap) error {
+	if reservedPort(w.SourcePort) {
+		return fmt.Errorf("%w: ports %d-%d are reserved for internal fallback inbounds", ErrInvalid, fallbackPortBase, fallbackPortBase+999)
+	}
 	if !idRE.MatchString(w.ID) || w.SourcePort < 1 || w.SourcePort > 65535 || w.EntryPort < 1 || w.EntryPort > 65535 || strings.TrimSpace(w.EntryAddress) == "" {
 		return ErrInvalid
 	}

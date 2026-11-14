@@ -42,7 +42,7 @@ type PresetRequest struct {
 
 // Presets lists what the panel offers.
 var Presets = []string{"vless-reality-tcp", "vless-reality-grpc", "vless-reality-xhttp", "vless-ws", "vmess-ws", "vmess-tcp", "trojan-ws", "ss2022",
-	"vless-tls-ws", "vless-tls-grpc", "vless-tls-xhttp", "vmess-tls-ws", "trojan-tls-tcp", "hysteria2"}
+	"vless-tls-ws", "vless-tls-grpc", "vless-tls-xhttp", "vmess-tls-ws", "trojan-tls-tcp", "vless-tls-fallback", "hysteria2"}
 
 // BuildPreset renders the template and client metadata for a preset.
 func BuildPreset(p PresetRequest) (template, meta []byte, err error) {
@@ -127,6 +127,20 @@ func BuildPreset(p PresetRequest) (template, meta []byte, err error) {
 	case "trojan-tls-tcp":
 		t["protocol"] = "trojan"
 		err = tlsStream("tcp", nil)
+	case "vless-tls-fallback":
+		// One TLS port for several protocols: VLESS TCP (vision) answers
+		// directly; WebSocket requests are passed by path to internal
+		// VLESS, VMess and Trojan inbounds (see render.go).
+		t["settings"] = map[string]any{"flow": "xtls-rprx-vision"}
+		if err = tlsStream("tcp", nil); err == nil {
+			st := t["streamSettings"].(map[string]any)
+			st["tlsSettings"].(map[string]any)["alpn"] = []string{"http/1.1"}
+			t[fallbackKey] = []any{
+				map[string]any{"name": "VLESS-WS", "protocol": "vless", "path": "/" + randomHex(6)},
+				map[string]any{"name": "VMess-WS", "protocol": "vmess", "path": "/" + randomHex(6)},
+				map[string]any{"name": "Trojan-WS", "protocol": "trojan", "path": "/" + randomHex(6)},
+			}
+		}
 	case "vless-reality-tcp":
 		t["settings"] = map[string]any{"flow": "xtls-rprx-vision"}
 		err = reality("tcp", nil)

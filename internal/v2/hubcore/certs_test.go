@@ -87,3 +87,50 @@ func TestCertificatesAndTLSPresets(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestFallbackPreset(t *testing.T) {
+	s, now := newStore(t)
+	ctx := context.Background()
+	cert, key := testCert(t, "edge.example.com", now.Add(60*24*time.Hour))
+	if err := s.PutCert(ctx, "edge", cert, key); err != nil {
+		t.Fatal(err)
+	}
+	req := PresetRequest{Tag: "de-fb", NodeID: "de-1", Preset: "vless-tls-fallback", Port: 443, SNI: "edge.example.com", Cert: "edge",
+		Endpoints: []sub.Endpoint{{Name: "Direct", Address: "edge.example.com", Port: 443}}}
+	if err := s.CreatePreset(ctx, req); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.PutClient(ctx, Client{Email: "dave", Enabled: true, VolumeBytes: -1, Inbounds: []string{"de-fb"}}); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := s.RenderNode(ctx, "de-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := string(cfg)
+	for _, want := range []string{`"fallbacks"`, `"de-fb__fb0"`, `"de-fb__fb1"`, `"de-fb__fb2"`, `"dest":41000`, `"listen":"127.0.0.1"`, `xtls-rprx-vision`} {
+		if !strings.Contains(c, want) {
+			t.Fatalf("missing %s in %s", want, c)
+		}
+	}
+	if strings.Contains(c, "dark_fallbacks") {
+		t.Fatal("internal key leaked into config")
+	}
+	links, _, _ := s.Subscription(ctx, "dave")
+	if len(links) != 4 {
+		t.Fatalf("want parent + 3 fallback links, got %v", links)
+	}
+	joined := strings.Join(links, "\n")
+	for _, want := range []string{"vless://", "vmess://", "trojan://", "type=ws", "flow=xtls-rprx-vision"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("missing %s in %v", want, links)
+		}
+	}
+	if parentTag("de-fb__fb2") != "de-fb" || parentTag("de-fb") != "de-fb" {
+		t.Fatal("parentTag")
+	}
+	bad := PresetRequest{Tag: "de-x", NodeID: "de-1", Preset: "vless-ws", Port: 41003}
+	if err := s.CreatePreset(ctx, bad); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("reserved port: %v", err)
+	}
+}

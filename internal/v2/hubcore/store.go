@@ -474,6 +474,7 @@ WHERE ci.email=? AND i.enabled=1 ORDER BY i.tag`, email)
 		}
 		ins[i].Meta.Endpoints = append(eps, extra...)
 	}
+	ins = sub.ExpandFallbacks(ins)
 	if !c.Enabled {
 		ins = nil
 	}

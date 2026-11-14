@@ -100,11 +100,13 @@ JOIN inbounds i ON i.tag=r.tag WHERE r.node_id=? AND i.enabled=1 ORDER BY i.tag`
 		"tag": apiTag, "listen": "127.0.0.1", "port": apiPort, "protocol": "dokodemo-door",
 		"settings": map[string]any{"address": "127.0.0.1"},
 	}}
-	for _, in := range ins {
+	for idx, in := range ins {
 		t, err := parseTemplate(in.template)
 		if err != nil {
 			return nil, fmt.Errorf("inbound %s: %w", in.tag, err)
 		}
+		fbs, _ := t[fallbackKey].([]any)
+		delete(t, fallbackKey)
 		t["tag"] = in.tag
 		t["port"] = in.direct
 		t["listen"] = "0.0.0.0"
@@ -135,6 +137,40 @@ JOIN inbounds i ON i.tag=r.tag WHERE r.node_id=? AND i.enabled=1 ORDER BY i.tag`
 			}
 		}
 		t["settings"] = settings
+		if len(fbs) > 0 {
+			// Fallback children: internal WebSocket inbounds the TLS port
+			// hands requests to by path. Their traffic is counted under the
+			// parent tag (fallbackSuffix is stripped when usage arrives).
+			var routes []any
+			for i, x := range fbs {
+				fb, _ := x.(map[string]any)
+				fproto, _ := fb["protocol"].(string)
+				fpath, _ := fb["path"].(string)
+				shape := clientShapes[fproto]
+				if shape == nil || fpath == "" || i > 7 {
+					continue
+				}
+				port := fallbackPortBase + idx*8 + i
+				clist := make([]any, 0, len(clients[in.tag]))
+				for _, c := range clients[in.tag] {
+					clist = append(clist, shape(c, ""))
+				}
+				cs := map[string]any{"clients": clist}
+				if fproto == "vless" {
+					cs["decryption"] = "none"
+				}
+				child := map[string]any{"tag": fmt.Sprintf("%s%s%d", in.tag, fallbackSuffix, i), "listen": "127.0.0.1", "port": port, "protocol": fproto,
+					"settings": cs, "streamSettings": map[string]any{"network": "ws", "security": "none", "wsSettings": map[string]any{"path": fpath}}}
+				if sn, ok := t["sniffing"]; ok {
+					child["sniffing"] = sn
+				}
+				inbounds = append(inbounds, child)
+				routes = append(routes, map[string]any{"path": fpath, "dest": port, "xver": 0})
+			}
+			if len(routes) > 0 {
+				settings["fallbacks"] = routes
+			}
+		}
 		inbounds = append(inbounds, t)
 		if in.tunnel > 0 {
 			// Tunnel: the same inbound on its own port and tag, so its

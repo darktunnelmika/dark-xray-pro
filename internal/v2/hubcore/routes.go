@@ -61,6 +61,24 @@ CREATE TABLE IF NOT EXISTS route_traffic (
 
 const tunnelSuffix = "__t"
 
+// Fallback children (see the vless-tls-fallback preset) are tagged
+// <parent>__fb<n> and listen on 127.0.0.1 from fallbackPortBase.
+const (
+	fallbackKey      = "dark_fallbacks"
+	fallbackSuffix   = "__fb"
+	fallbackPortBase = 41000
+)
+
+func reservedPort(p int) bool { return p >= fallbackPortBase && p < fallbackPortBase+1000 }
+
+// parentTag maps a fallback child tag to its parent.
+func parentTag(tag string) string {
+	if i := strings.LastIndex(tag, fallbackSuffix); i > 0 {
+		return tag[:i]
+	}
+	return tag
+}
+
 // Host is one address handed to clients for a route.
 type Host struct {
 	Path          string   `json:"path"` // direct | tunnel
@@ -310,6 +328,10 @@ func (s *Store) PutRoutes(ctx context.Context, tag string, routes []Route) error
 		if r.DirectPort < 1 || r.DirectPort > 65535 || r.TunnelPort < 0 || r.TunnelPort > 65535 || r.TunnelPort == r.DirectPort {
 			return fmt.Errorf("%w: %s: Direct needs a port, and Tunnel (if used) a different one", ErrInvalid, r.NodeID)
 		}
+		if reservedPort(r.DirectPort) || reservedPort(r.TunnelPort) {
+			return fmt.Errorf("%w: ports %d-%d are reserved for internal fallback inbounds", ErrInvalid, fallbackPortBase, fallbackPortBase+999)
+		}
+
 		used, err := usedPorts(ctx, tx, r.NodeID, tag, "")
 		if err != nil {
 			return err
