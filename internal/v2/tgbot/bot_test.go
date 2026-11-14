@@ -114,9 +114,8 @@ func TestStorefrontOrderDeliverySupport(t *testing.T) {
 	}
 
 	b.Handle(ctx, cb(ownerID, "ok:1"))
-	find(t, api.take(), ownerID, "تحویل شد")
-	b.Tick(ctx)
 	out = api.take()
+	find(t, out, ownerID, "تحویل شد")
 	find(t, out, buyerID, "آماده شد")
 	find(t, out, buyerID, "https://sub.example/sub/")
 	photo := false
