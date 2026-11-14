@@ -765,6 +765,36 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 		report, err := s.MigrateFromOld(r.Context(), src, opt)
 		reply(w, report, err)
 	}))
+	mux.HandleFunc("POST /api/v2/admin/migrate/foreign", guard(func(w http.ResponseWriter, r *http.Request) {
+		// Body: the other panel's SQLite file (x-ui.db, db.sqlite3).
+		q := r.URL.Query()
+		opt := ForeignOptions{DryRun: q.Get("dry_run") != "0", Node: q.Get("node"), Address: q.Get("address"), Prefix: q.Get("prefix")}
+		for _, t := range strings.Split(q.Get("inbounds"), ",") {
+			if t = strings.TrimSpace(t); t != "" {
+				opt.Inbounds = append(opt.Inbounds, t)
+			}
+		}
+		dir, err := os.MkdirTemp(s.tmpDir(), "foreign-")
+		if err != nil {
+			reply(w, nil, err)
+			return
+		}
+		defer os.RemoveAll(dir)
+		src := filepath.Join(dir, "panel.sqlite")
+		f, err := os.OpenFile(src, os.O_CREATE|os.O_WRONLY, 0o600)
+		if err == nil {
+			_, err = io.Copy(f, http.MaxBytesReader(w, r.Body, 2<<30))
+			if cerr := f.Close(); err == nil {
+				err = cerr
+			}
+		}
+		if err != nil {
+			reply(w, nil, fmt.Errorf("%w: upload failed: %v", ErrInvalid, err))
+			return
+		}
+		report, err := s.ImportForeign(r.Context(), src, opt)
+		reply(w, report, err)
+	}))
 	mux.HandleFunc("GET /api/v2/admin/backup", guard(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/gzip")
 		w.Header().Set("Content-Disposition", `attachment; filename="dark-v2-`+time.Now().UTC().Format("20060102-1504")+`.sqlite.gz"`)
@@ -1311,8 +1341,17 @@ func SubHandler(s *Store) http.Handler {
 	serveSub = func(w http.ResponseWriter, r *http.Request) {
 		email, err := s.EmailBySubToken(r.Context(), r.PathValue("token"))
 		if err != nil {
-			http.NotFound(w, r)
-			return
+			// A link from Marzban/PasarGuard moved here keeps working.
+			tok, ferr := s.foreignSubToken(r.Context(), r.PathValue("token"))
+			if ferr != nil {
+				http.NotFound(w, r)
+				return
+			}
+			r.SetPathValue("token", tok)
+			if email, err = s.EmailBySubToken(r.Context(), tok); err != nil {
+				http.NotFound(w, r)
+				return
+			}
 		}
 		if err := s.CheckDevice(r.Context(), email, r.Header.Get("X-Hwid"), r.Header.Get("X-Device-Os"), r.Header.Get("X-Device-Model"), r.UserAgent()); err != nil {
 			if errors.Is(err, ErrDeviceLimit) {
@@ -1363,7 +1402,23 @@ func SubHandler(s *Store) http.Handler {
 		_, _ = w.Write(body)
 	}
 	mux.HandleFunc("GET /sub/{token}", serveSub)
-	return mux
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Custom subscription paths of a 3x-ui panel moved here.
+		if r.Method == http.MethodGet && !strings.HasPrefix(r.URL.Path, "/sub/") && !strings.HasPrefix(r.URL.Path, "/app/") {
+			if tok, format, ok := s.legacyPath(r); ok {
+				r2 := r.Clone(r.Context())
+				r2.URL.Path = "/sub/" + tok
+				if format != "" {
+					q := r2.URL.Query()
+					q.Set("format", format)
+					r2.URL.RawQuery = q.Encode()
+				}
+				mux.ServeHTTP(w, r2)
+				return
+			}
+		}
+		mux.ServeHTTP(w, r)
+	})
 }
 
 func publicBase(base string, r *http.Request) string {
