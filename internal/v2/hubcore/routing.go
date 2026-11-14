@@ -20,16 +20,17 @@ import (
 // files (geoip:/geosite:) are left out of a node's config until that node
 // reports having the files, because Xray refuses to start without them.
 type Routing struct {
-	BlockTorrent   bool            `json:"block_torrent"`
-	BlockPrivate   bool            `json:"block_private"`
-	BlockAds       bool            `json:"block_ads"`
-	Iran           string          `json:"iran"`            // "" (nothing), "block", or an outbound tag
-	RouteOnly      bool            `json:"route_only"`      // sniffing for routing only
-	DomainStrategy string          `json:"domain_strategy"` // freedom: AsIs, UseIP, UseIPv4, UseIPv6
-	DNS            []string        `json:"dns"`
-	Outbounds      []RouteOutbound `json:"outbounds"`
-	Balancers      []RouteBalancer `json:"balancers"`
-	Rules          []RouteRule     `json:"rules"`
+	BlockTorrent     bool            `json:"block_torrent"`
+	BlockPrivate     bool            `json:"block_private"`
+	BlockAds         bool            `json:"block_ads"`
+	Iran             string          `json:"iran"`            // "" (nothing), "block", or an outbound tag
+	RouteOnly        bool            `json:"route_only"`      // sniffing for routing only
+	DomainStrategy   string          `json:"domain_strategy"` // freedom: AsIs, UseIP, UseIPv4, UseIPv6
+	DNS              []string        `json:"dns"`
+	ClientIranDirect bool            `json:"client_iran_direct"` // app profiles send Iranian traffic direct
+	Outbounds        []RouteOutbound `json:"outbounds"`
+	Balancers        []RouteBalancer `json:"balancers"`
+	Rules            []RouteRule     `json:"rules"`
 }
 
 // RouteOutbound is an extra Xray outbound (WARP, a chained server, ...).
