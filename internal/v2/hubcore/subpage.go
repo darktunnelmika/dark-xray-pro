@@ -43,6 +43,7 @@ type pageApp struct {
 type pageData struct {
 	Lang, Dir, Title, Email, Status, StatusClass string
 	Used, Total, Left, ExpiresText, DaysText     string
+	DaysUnit                                     string
 	Percent                                      int
 	SubURL                                       string
 	Links                                        []pageLink
@@ -55,10 +56,10 @@ type pageData struct {
 type pageLink struct{ Name, URL string }
 
 var pageText = map[string]map[string]string{
-	"fa": {"used": "مصرف‌شده", "left": "باقی‌مانده", "expires": "انقضا", "days": "روز مانده", "noexp": "بدون انقضا", "notstarted": "از اولین اتصال شروع می‌شود",
+	"fa": {"used": "مصرف‌شده", "left": "باقی‌مانده", "expires": "انقضا", "days": "روز مانده", "dayunit": "روز", "noexp": "بدون انقضا", "notstarted": "از اولین اتصال شروع می‌شود",
 		"active": "فعال", "ended": "تمام‌شده", "disabled": "غیرفعال", "sub": "لینک اشتراک", "copy": "کپی", "copied": "کپی شد", "add": "افزودن به برنامه",
 		"configs": "کانفیگ‌ها", "support": "پشتیبانی", "scan": "این کد را با برنامهٔ VPN اسکن کنید", "of": "از", "unlimited": "نامحدود"},
-	"en": {"used": "Used", "left": "Remaining", "expires": "Expires", "days": "days left", "noexp": "No expiry", "notstarted": "Starts at first connection",
+	"en": {"used": "Used", "left": "Remaining", "expires": "Expires", "days": "days left", "dayunit": "days", "noexp": "No expiry", "notstarted": "Starts at first connection",
 		"active": "Active", "ended": "Ended", "disabled": "Disabled", "sub": "Subscription link", "copy": "Copy", "copied": "Copied", "add": "Add to an app",
 		"configs": "Configs", "support": "Support", "scan": "Scan this code with your VPN app", "of": "of", "unlimited": "Unlimited"},
 }
@@ -98,10 +99,10 @@ FROM clients c LEFT JOIN client_usage cu ON cu.email=c.email WHERE c.email=?`, e
 		if days < 0 {
 			days = 0
 		}
-		d.DaysText = fmt.Sprintf("%d %s", days, T["days"])
+		d.DaysText, d.DaysUnit = fmt.Sprint(days), T["days"]
 		d.ExpiresText = time.Unix(exp, 0).UTC().Format("2006-01-02")
 	case c.DurationSeconds > 0:
-		d.DaysText = fmt.Sprintf("%d", c.DurationSeconds/86400)
+		d.DaysText, d.DaysUnit = fmt.Sprint(c.DurationSeconds/86400), T["dayunit"]
 		d.ExpiresText = T["notstarted"]
 	default:
 		d.DaysText, d.ExpiresText = "∞", T["noexp"]
@@ -191,21 +192,21 @@ var subPageTmpl = template.Must(template.New("sub").Funcs(template.FuncMap{"safe
 <meta name="color-scheme" content="dark"><meta name="robots" content="noindex"><title>{{.Title}}</title>
 <style>
 :root{--bg:#060912;--glass:rgb(148 163 255/.06);--line:rgb(160 175 255/.13);--text:#e9ecff;--muted:#8d95c4;--cyan:#2de2e6;--violet:#9b5cff;--good:#3ef0a1;--bad:#ff5f7e;--warn:#ffc65c}
-*{box-sizing:border-box}body{margin:0;min-height:100vh;background:radial-gradient(1200px 600px at 80% -10%,rgb(155 92 255/.18),transparent 60%),radial-gradient(900px 500px at -10% 10%,rgb(45 226 230/.12),transparent 60%),var(--bg);
+*{box-sizing:border-box}html,body{overflow-x:hidden}body{margin:0;min-height:100vh;background:radial-gradient(1200px 600px at 80% -10%,rgb(155 92 255/.18),transparent 60%),radial-gradient(900px 500px at -10% 10%,rgb(45 226 230/.12),transparent 60%),var(--bg);
 color:var(--text);font:15px/1.6 Vazirmatn,"Segoe UI",Tahoma,system-ui,sans-serif;padding:20px 14px 40px}
-.wrap{max-width:560px;margin:0 auto;display:grid;gap:14px}
+.wrap{max-width:560px;margin:0 auto;display:grid;gap:14px;grid-template-columns:minmax(0,1fr)}.wrap>*{min-width:0}
 .card{background:var(--glass);border:1px solid var(--line);border-radius:20px;padding:18px;backdrop-filter:blur(16px);box-shadow:inset 0 1px 0 rgb(45 226 230/.15)}
 h1{margin:0;font-size:22px}.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.sp{flex:1}
 .badge{font-size:12px;padding:3px 12px;border-radius:99px;border:1px solid currentColor}.good{color:var(--good)}.bad{color:var(--bad)}
-.muted{color:var(--muted);font-size:13px}.big{font-size:26px;font-weight:700;text-shadow:0 0 18px rgb(45 226 230/.35)}
-.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}.stat{background:rgb(255 255 255/.03);border:1px solid var(--line);border-radius:14px;padding:12px}
+.muted{color:var(--muted);font-size:13px}.big{font-size:26px;font-weight:700;text-shadow:0 0 18px rgb(45 226 230/.35);white-space:nowrap}.big small{font-size:13px;font-weight:500;color:var(--muted);text-shadow:none}
+.grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:10px}.stat{background:rgb(255 255 255/.03);border:1px solid var(--line);border-radius:14px;padding:12px}
 .bar{height:8px;border-radius:99px;background:rgb(255 255 255/.06);overflow:hidden;margin-top:10px}.bar i{display:block;height:100%;border-radius:inherit;background:linear-gradient(90deg,var(--violet),var(--cyan));box-shadow:0 0 12px var(--cyan)}
 .qr{display:block;margin:6px auto;width:220px;height:220px;border-radius:14px;background:#fff;padding:8px}
 code{display:block;direction:ltr;text-align:left;word-break:break-all;font-size:12px;background:rgb(0 0 0/.3);border-radius:10px;padding:10px}
 button,.btn{appearance:none;border:1px solid var(--line);background:rgb(255 255 255/.05);color:var(--text);border-radius:12px;padding:9px 14px;font:inherit;cursor:pointer;text-decoration:none;display:inline-flex;gap:6px;align-items:center}
-.btn.app{justify-content:space-between;width:100%}.apps{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.btn.app{justify-content:space-between;width:100%}.apps{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:8px}
 .primary{background:linear-gradient(90deg,rgb(155 92 255/.35),rgb(45 226 230/.35));border-color:rgb(45 226 230/.5)}
-.cfg{display:flex;gap:8px;align-items:center;padding:8px 0;border-bottom:1px solid var(--line)}.cfg:last-child{border:0}.cfg span{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cfg{display:flex;gap:8px;align-items:center;padding:8px 0;border-bottom:1px solid var(--line)}.cfg:last-child{border:0}.cfg span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .ann{border-color:rgb(255 198 92/.4);color:var(--warn);white-space:pre-wrap}
 @media(max-width:420px){.apps{grid-template-columns:1fr}}
 </style></head><body><div class="wrap">
@@ -213,9 +214,9 @@ button,.btn{appearance:none;border:1px solid var(--line);background:rgb(255 255 
 {{if ne .Title .Email}}<div class="muted">{{.Email}}</div>{{end}}</div>
 {{if .Announce}}<div class="card ann">{{.Announce}}</div>{{end}}
 <div class="card"><div class="grid">
-<div class="stat"><div class="muted">{{index .T "left"}}</div><div class="big">{{.Left}}</div></div>
-<div class="stat"><div class="muted">{{index .T "expires"}}</div><div class="big">{{.DaysText}}</div><div class="muted">{{.ExpiresText}}</div></div></div>
-<div class="row muted" style="margin-top:12px"><span>{{index .T "used"}}: {{.Used}}</span><span class="sp"></span><span>{{index .T "of"}} {{.Total}}</span></div>
+<div class="stat"><div class="muted">{{index .T "left"}}</div><div class="big"><bdi>{{.Left}}</bdi></div></div>
+<div class="stat"><div class="muted">{{index .T "expires"}}</div><div class="big"><bdi>{{.DaysText}}</bdi> <small>{{.DaysUnit}}</small></div><div class="muted"><bdi>{{.ExpiresText}}</bdi></div></div></div>
+<div class="row muted" style="margin-top:12px"><span>{{index .T "used"}}: <bdi>{{.Used}}</bdi></span><span class="sp"></span><span>{{index .T "of"}} <bdi>{{.Total}}</bdi></span></div>
 <div class="bar"><i style="width:{{.Percent}}%"></i></div></div>
 <div class="card"><div class="row"><b>{{index .T "sub"}}</b><span class="sp"></span><button class="primary" data-copy="{{.SubURL}}">{{index .T "copy"}}</button></div>
 <img class="qr" src="?qr=1" alt="QR"><div class="muted" style="text-align:center">{{index .T "scan"}}</div><code>{{.SubURL}}</code></div>
