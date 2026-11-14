@@ -63,7 +63,7 @@ func startMTP(in mtpInbound, logf func(string, ...any)) (*mtpServer, error) {
 	s := &mtpServer{}
 	p, err := mtglib.NewProxy(mtglib.ProxyOpts{
 		Secret: secret, Network: ntw, AntiReplayCache: antireplay.NewStableBloomFilter(1<<20, 0.001),
-		IPBlocklist: ipblocklist.NewNoop(), EventStream: trafficStream{s}, Logger: logger.NewNoopLogger(),
+		IPBlocklist: ipblocklist.NewNoop(), IPAllowlist: ipblocklist.NewNoop(), EventStream: trafficStream{s}, Logger: logger.NewNoopLogger(),
 		Concurrency: 8192, IdleTimeout: 5 * time.Minute, TolerateTimeSkewness: 5 * time.Second, DomainFrontingPort: 443,
 	})
 	if err != nil {
