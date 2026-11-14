@@ -36,6 +36,9 @@ type Bot struct {
 	lastNotify time.Time
 	nodeState  map[string]bool
 	lastDaily  string
+	schedBusy  bool
+	// SyncSchedule sends scheduled broadcasts inside Tick (tests).
+	SyncSchedule bool
 }
 
 func (b *Bot) logf(f string, a ...any) {
@@ -85,6 +88,7 @@ func (b *Bot) init() {
 // Run long-polls until ctx ends, and runs the background announcers.
 func (b *Bot) Run(ctx context.Context) {
 	b.init()
+	b.Store.TgFinishInterrupted(ctx)
 	if b.Store.Setting(ctx, "tg_started") == "" {
 		b.Store.MarkAllOrdersAnnounced(ctx) // first start: do not replay history
 		_ = b.Store.SetSetting(ctx, "tg_started", "1")
@@ -135,6 +139,7 @@ func (b *Bot) Tick(ctx context.Context) {
 	b.watchNodes(ctx)
 	b.dailyReport(ctx)
 	b.notifyClients(ctx)
+	b.runScheduled(ctx)
 }
 
 func (b *Bot) send(ctx context.Context, chat int64, text string, kb *Keyboard) int64 {

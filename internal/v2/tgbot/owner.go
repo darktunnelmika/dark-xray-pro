@@ -22,8 +22,8 @@ var ownerMenu = &Keyboard{Rows: [][]Button{
 	{{Text: "👥 کلاینت‌ها", Data: "a:clients"}, {Text: "🔎 جستجو", Data: "a:find"}},
 	{{Text: "⚡ فروش سریع", Data: "a:quick"}, {Text: "🛒 سفارش‌ها", Data: "a:orders"}},
 	{{Text: "💼 نماینده‌ها", Data: "a:reps"}, {Text: "📋 گزارش امروز", Data: "a:report"}},
-	{{Text: "📣 پیام همگانی", Data: "a:bc"}, {Text: "📦 بکاپ الان", Data: "a:backup"}},
-	{{Text: "⚙️ تنظیمات ربات", Data: "a:settings"}},
+	{{Text: "📣 پیام همگانی", Data: "a:bc"}, {Text: "⏰ زمان‌بندی‌ها", Data: "a:schlist"}},
+	{{Text: "⚙️ تنظیمات ربات", Data: "a:settings"}, {Text: "📦 بکاپ الان", Data: "a:backup"}},
 	{{Text: "🛍 نمای مشتری", Data: "a:customer"}},
 }}
 
@@ -136,7 +136,29 @@ func (b *Bot) ownerCallback(ctx context.Context, chat int64, data string) bool {
 		d.chats = b.audience(ctx, d.audience)
 		_ = b.sendDraft(ctx, chat, d)
 		b.send(ctx, chat, fmt.Sprintf("👆 پیش‌نمایش. برای «%s» یعنی %d نفر ارسال شود؟", audienceName[d.audience], len(d.chats)), &Keyboard{Rows: [][]Button{
-			{{Text: "✅ ارسال", Data: "a:bcok"}, {Text: "✖️ لغو", Data: "a:bcno"}}, {{Text: "تغییر مخاطب", Data: "a:bcaud"}}}})
+			{{Text: "✅ ارسال الان", Data: "a:bcok"}, {Text: "⏰ زمان‌بندی", Data: "a:bcsch"}},
+			{{Text: "تغییر مخاطب", Data: "a:bcaud"}, {Text: "✖️ لغو", Data: "a:bcno"}}}})
+	case "bcsch":
+		b.askWhen(ctx, chat)
+	case "bcat":
+		at, ok := quickWhen(arg(1), b.now())
+		if !ok {
+			return true
+		}
+		b.takeAwait(chat)
+		b.setWhen(ctx, chat, at)
+	case "bcrep":
+		b.saveScheduled(ctx, chat, arg(1))
+	case "schlist":
+		b.scheduledView(ctx, chat)
+	case "schcancel":
+		id, _ := strconv.ParseInt(arg(1), 10, 64)
+		if err := b.Store.TgScheduledCancel(ctx, id); err != nil {
+			b.send(ctx, chat, "پیدا نشد یا قبلاً ارسال شده.", nil)
+			return true
+		}
+		b.send(ctx, chat, fmt.Sprintf("🗑 زمان‌بندی #%d لغو شد.", id), nil)
+		b.scheduledView(ctx, chat)
 	case "bcaud":
 		b.askAudience(ctx, chat)
 	case "bcok":
@@ -193,6 +215,14 @@ func (b *Bot) ownerInput(ctx context.Context, chat int64, what, text string) boo
 		b.findClients(ctx, chat, text)
 	case what == "broadcast":
 		b.prepareBroadcast(ctx, chat, text, "")
+	case what == "schedtime":
+		at, err := parseWhen(text, b.now())
+		if err != nil {
+			b.send(ctx, chat, "این زمان را نفهمیدم. مثال: <code>21:30</code> یا <code>+2h</code> یا <code>1405/08/25 21:30</code>", nil)
+			b.setAwait(chat, "schedtime")
+			return true
+		}
+		b.setWhen(ctx, chat, at)
 	case strings.HasPrefix(what, "set:"):
 		if what == "set:backup" {
 			if len(text) < 8 {
@@ -220,6 +250,9 @@ type bcDraft struct {
 	button      *Button
 	audience    string
 	chats       []int64
+	at          int64               // scheduled time (unix), while scheduling
+	title       string              // report heading; default "پیام همگانی"
+	done        func(result string) // scheduled runs record their outcome
 }
 
 var audienceName = map[string]string{"all": "همه", "active": "دارای سرویس فعال", "expiring": "رو به انقضا (۳ روز)", "expired": "منقضی یا حجم‌تمام", "none": "بدون سرویس"}
@@ -332,7 +365,18 @@ func (b *Bot) broadcast(ctx context.Context, owner int64, d *bcDraft) {
 		}
 		time.Sleep(40 * time.Millisecond) // under Telegram's 30 messages/second
 	}
-	msg := fmt.Sprintf("📣 پیام همگانی تمام شد: %d ارسال، %d ناموفق.", sent, failed)
+	title := d.title
+	if title == "" {
+		title = "📣 پیام همگانی"
+	}
+	result := fmt.Sprintf("%d ارسال، %d ناموفق", sent, failed)
+	if stopped > 0 {
+		result += fmt.Sprintf("، %d متوقف", stopped)
+	}
+	if d.done != nil {
+		d.done(result)
+	}
+	msg := fmt.Sprintf("%s تمام شد: %d ارسال، %d ناموفق.", title, sent, failed)
 	if stopped > 0 {
 		msg += fmt.Sprintf(" %d نفر به‌خاطر توقف ارسال نشدند.", stopped)
 	}
