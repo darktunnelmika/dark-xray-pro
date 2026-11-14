@@ -129,12 +129,14 @@ func (s *Store) PutSwap(ctx context.Context, w Swap) error {
 		return err
 	}
 	var t struct {
-		Stream struct {
+		Protocol string `json:"protocol"`
+		Stream   struct {
 			Network string `json:"network"`
 		} `json:"streamSettings"`
 	}
 	_ = json.Unmarshal([]byte(tpl), &t)
-	if t.Stream.Network == "kcp" || t.Stream.Network == "mkcp" || t.Stream.Network == "quic" || t.Stream.Network == "hysteria" {
+	udp := t.Protocol == "wireguard" || t.Protocol == "amneziawg" || t.Protocol == "tuic"
+	if udp || t.Stream.Network == "kcp" || t.Stream.Network == "mkcp" || t.Stream.Network == "quic" || t.Stream.Network == "hysteria" || t.Stream.Network == "tuic" {
 		return fmt.Errorf("%w: Dark Swap relays TCP transports only", ErrInvalid)
 	}
 	used, err := usedPorts(ctx, tx, w.SourceNode, "", w.ID)

@@ -6,6 +6,9 @@ require (
 	filippo.io/age v1.3.2
 	github.com/9seconds/mtg/v2 v2.3.0
 	github.com/amnezia-vpn/amneziawg-go v1.0.4
+	github.com/rs/zerolog v1.35.0
+	github.com/sagernet/sing v0.9.0-beta.4
+	github.com/sagernet/sing-quic v0.7.1
 	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e
 	github.com/xtls/xray-core v1.260327.1-0.20261109052709-676eaf66f8f0
 	golang.org/x/crypto v0.58.0
@@ -22,9 +25,11 @@ replace github.com/skip2/go-qrcode => ./third_party/go-qrcode
 require (
 	filippo.io/hpke v0.4.0 // indirect
 	github.com/OneOfOne/xxhash v1.2.8 // indirect
+	github.com/andybalholm/brotli v1.2.3 // indirect
 	github.com/apernet/quic-go v0.61.1-0.20260806010916-184d081eef3e // indirect
 	github.com/babolivier/go-doh-client v0.0.0-20201028162107-a76cff4cb8b6 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
+	github.com/gofrs/uuid/v5 v5.5.1 // indirect
 	github.com/google/btree v1.1.3 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/juju/ratelimit v1.0.2 // indirect
@@ -32,15 +37,17 @@ require (
 	github.com/klauspost/cpuid/v2 v2.4.2 // indirect
 	github.com/mattn/go-colorable v0.1.14 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
+	github.com/metacubex/utls v1.8.7 // indirect
 	github.com/miekg/dns v1.1.73 // indirect
 	github.com/molecule-man/go-brrr v1.2.0 // indirect
 	github.com/ncruces/go-strftime v1.0.0 // indirect
 	github.com/panjf2000/ants/v2 v2.12.0 // indirect
 	github.com/patrickmn/go-cache v2.1.0+incompatible // indirect
 	github.com/pires/go-proxyproto v0.16.0 // indirect
+	github.com/quic-go/qpack v0.6.0 // indirect
 	github.com/refraction-networking/utls v1.8.3-0.20261108164504-a13c59ffe98b // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
-	github.com/rs/zerolog v1.35.0 // indirect
+	github.com/sagernet/quic-go v0.61.0-sing-box-mod.6 // indirect
 	github.com/tevino/abool v1.2.0 // indirect
 	github.com/txthinking/runnergroup v0.0.0-20250224021307-5864ffeb65ae // indirect
 	github.com/txthinking/socks5 v0.0.0-20251011041537-5c31f201a10e // indirect

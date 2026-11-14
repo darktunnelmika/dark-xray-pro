@@ -54,7 +54,7 @@ func outbounds(a Account, ins []Inbound, format string) ([]outbound, error) {
 		}
 		t := base
 		switch t.Protocol {
-		case "vless", "vmess", "trojan", "hysteria":
+		case "vless", "vmess", "trojan", "hysteria", "tuic":
 		case "wireguard":
 			if in.Meta.WGPrivateKey == "" {
 				continue
@@ -120,6 +120,13 @@ func SingBox(a Account, ins []Inbound) ([]byte, error) {
 			endpoints = append(endpoints, map[string]any{"type": "wireguard", "tag": o.tag, "address": []string{o.m.WGAddress},
 				"private_key": o.m.WGPrivateKey, "mtu": or0(o.m.MTU, 1420),
 				"peers": []any{map[string]any{"address": o.server, "port": o.port, "public_key": o.m.PublicKey, "allowed_ips": []string{"0.0.0.0/0", "::/0"}}}})
+			tags = append(tags, o.tag)
+			continue
+		case "tuic":
+			ob["uuid"], ob["password"] = o.uuid, o.password
+			ob["congestion_control"], ob["udp_relay_mode"] = or(o.t.Settings.CongestionControl, "bbr"), "native"
+			ob["tls"] = map[string]any{"enabled": true, "server_name": o.t.Stream.TLS.ServerName, "alpn": []string{"h3"}, "insecure": o.t.Stream.insecure}
+			list = append(list, ob)
 			tags = append(tags, o.tag)
 			continue
 		case "hysteria":
@@ -240,6 +247,14 @@ func Clash(a Account, ins []Inbound) ([]byte, error) {
 			fmt.Fprintf(&b, "    uuid: %s\n    alterId: 0\n    cipher: auto\n", yq(o.uuid))
 		case "trojan":
 			fmt.Fprintf(&b, "    password: %s\n", yq(o.password))
+		case "tuic":
+			fmt.Fprintf(&b, "    uuid: %s\n    password: %s\n    sni: %s\n    alpn: [h3]\n    congestion-controller: %s\n    udp-relay-mode: native\n    reduce-rtt: true\n",
+				yq(o.uuid), yq(o.password), yq(o.t.Stream.TLS.ServerName), or(o.t.Settings.CongestionControl, "bbr"))
+			if o.t.Stream.insecure {
+				b.WriteString("    skip-cert-verify: true\n")
+			}
+			names = append(names, o.tag)
+			continue
 		case "hysteria":
 			fmt.Fprintf(&b, "    password: %s\n    sni: %s\n    alpn: [h3]\n", yq(o.password), yq(o.t.Stream.TLS.ServerName))
 			if o.t.Stream.insecure {

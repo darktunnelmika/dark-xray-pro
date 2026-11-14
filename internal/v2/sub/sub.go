@@ -153,9 +153,10 @@ type stream struct {
 type template struct {
 	Protocol string `json:"protocol"`
 	Settings struct {
-		Flow     string `json:"flow"`
-		Method   string `json:"method"`   // shadowsocks
-		Password string `json:"password"` // shadowsocks 2022 server key
+		Flow              string `json:"flow"`
+		Method            string `json:"method"`             // shadowsocks
+		CongestionControl string `json:"congestion_control"` // tuic
+		Password          string `json:"password"`           // shadowsocks 2022 server key
 	} `json:"settings"`
 	Stream stream `json:"streamSettings"`
 }
@@ -364,6 +365,17 @@ func Links(a Account, ins []Inbound) ([]string, error) {
 					q.Set("pinSHA256", in.Meta.PinSHA256)
 				}
 				out = append(out, "hysteria2://"+url.PathEscape(a.Secret)+"@"+host+"/?"+q.Encode()+"#"+frag)
+			case "tuic":
+				q := url.Values{}
+				q.Set("sni", t.Stream.TLS.ServerName)
+				q.Set("alpn", "h3")
+				q.Set("congestion_control", or(t.Settings.CongestionControl, "bbr"))
+				q.Set("udp_relay_mode", "native")
+				if t.Stream.insecure {
+					q.Set("allow_insecure", "1")
+					q.Set("insecure", "1")
+				}
+				out = append(out, "tuic://"+a.UUID+":"+url.PathEscape(a.Secret)+"@"+host+"?"+q.Encode()+"#"+frag)
 			case "wireguard":
 				if in.Meta.WGPrivateKey == "" {
 					continue

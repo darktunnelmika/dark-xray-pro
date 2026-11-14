@@ -1872,17 +1872,20 @@ async function inboundStudio(tag, ctx) {
       sniWrap.hidden = (plain && p.preset !== "mtproto") || p.preset === "wireguard";
       pathLabel.textContent = p.preset === "dokodemo" ? (lang === "fa" ? "مقصد (host:port)" : "Target (host:port)") : t("path");
       if (pathInput) pathInput.placeholder = p.preset === "dokodemo" ? "1.2.3.4:443" : p.preset === "wireguard" ? "10.66.0.0/16" : "";
-      plainNote.hidden = !plain;
-      plainNote.textContent = p.preset === "amneziawg"
+      const quic = p.preset === "hysteria2" || p.preset === "tuic";
+      plainNote.hidden = !plain && p.preset !== "tuic";
+      plainNote.textContent = p.preset === "tuic"
+        ? (lang === "fa" ? "TUIC v5 روی QUIC (پورت UDP)، با موتور sing-box کنار Xray داخل عامل نود (v2.7 به بالا). هر کاربر uuid و رمز خودش را دارد و مصرف، آنلاین و محدودیت‌ها مثل بقیه کار می‌کند. در اشتراک sing-box، Clash و لینک tuic:// می‌آید (Xray TUIC ندارد). بدون گواهی، گواهی خودامضا ساخته می‌شود." : "TUIC v5 over QUIC (UDP port), on sing-box's engine beside Xray in the node agent (v2.7+). Each client has its own uuid and password; usage, online and limits work as for the rest. In sing-box, Clash and tuic:// links (Xray has no TUIC). Without a certificate a self-signed one is issued.")
+        : p.preset === "amneziawg"
         ? (lang === "fa" ? "AmneziaWG: همان WireGuard با بسته‌های اضافه و سربرگ‌های عوض‌شده که DPI نمی‌شناسد. کنار Xray داخل عامل نود اجرا می‌شود (عامل v2.6 به بالا) و پورت UDP می‌خواهد. هر کاربر یک کانفیگ (فایل .conf یا QR) برای برنامهٔ AmneziaWG یا AmneziaVPN می‌گیرد؛ مسیر = زیرشبکهٔ تونل (پیش‌فرض 10.67.0.0/16)." : "AmneziaWG: WireGuard with junk packets and changed headers DPI does not recognise. Runs beside Xray in the node agent (v2.6+) on a UDP port. Each client gets a config (.conf file or QR) for the AmneziaWG or AmneziaVPN app; Path = tunnel subnet (default 10.67.0.0/16).")
         : p.preset === "mtproto"
         ? (lang === "fa" ? "پروکسی تلگرام (MTProto با fake TLS): یک رمز مشترک مثل پروکسی SOCKS؛ SNI دامنه‌ای است که پروکسی خودش را شبیه آن نشان می‌دهد. لینک t.me روی کارت اینباند است. داخل عامل نود اجرا می‌شود (v2.6 به بالا)." : "Telegram proxy (MTProto with fake TLS): one shared secret like a SOCKS proxy; SNI is the domain it pretends to be. The t.me link is on the inbound card. Runs in the node agent (v2.6+).")
         : p.preset === "dokodemo"
         ? (lang === "fa" ? "انتقال پورت (تونل): هر چیزی که به این پورت برسد به مقصد فرستاده می‌شود؛ مثلاً یک ریلی جلوی سرور دیگر. کاربری ندارد و در اشتراک‌ها نمی‌آید؛ ترافیکش در آمار اینباند هست." : "Port forwarding (tunnel): everything arriving on this port goes to the target — e.g. a relay in front of another server. No clients, not in subscriptions; its traffic shows in the inbound's stats.")
         : (lang === "fa" ? "پروکسی ساده با یک نام کاربری و رمز تصادفی (هرگز پروکسی باز نیست). کاربرهای پنل به آن وصل نمی‌شوند و در اشتراک‌ها نمی‌آید؛ لینک و رمز روی کارت اینباند است." : "A plain proxy with one random username and password (never an open proxy). Panel clients don't use it and it is not in subscriptions; the link and password are on the inbound card.");
-      certRow.hidden = !(p.preset.includes("-tls-") || p.preset === "hysteria2");
-      certSel.options[0].hidden = p.preset !== "hysteria2";
-      if (p.preset === "hysteria2" && !(ctx.certs || []).length) p.cert = "";
+      certRow.hidden = !(p.preset.includes("-tls-") || quic);
+      certSel.options[0].hidden = !quic;
+      if (quic && !(ctx.certs || []).length) p.cert = "";
     };
     const sniInput = bind(p, "sni");
     var pathInput = bind(p, "path");
@@ -2007,7 +2010,7 @@ async function inboundStudio(tag, ctx) {
     try {
       if (isNew) {
         const p = st.profile;
-        await api("POST", "/api/v2/admin/inbounds/compose", { tag: p.tag, preset: p.preset, sni: p.sni.trim(), path: p.path.trim(), remark: p.remark.trim(), cert: p.preset.includes("-tls-") || p.preset === "hysteria2" ? p.cert : "", routes });
+        await api("POST", "/api/v2/admin/inbounds/compose", { tag: p.tag, preset: p.preset, sni: p.sni.trim(), path: p.path.trim(), remark: p.remark.trim(), cert: p.preset.includes("-tls-") || p.preset === "hysteria2" || p.preset === "tuic" ? p.cert : "", routes });
       } else {
         await api("PUT", `/api/v2/admin/inbounds/${encodeURIComponent(theTag)}/routes`, routes);
       }

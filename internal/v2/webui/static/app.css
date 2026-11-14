@@ -404,7 +404,7 @@ pre.logview.loading { opacity: 0.55; }
 .cfg .badge { flex: none; text-transform: lowercase; }
 .badge.proto-vless { color: var(--cyan); }
 .badge.proto-vmess, .badge.proto-trojan { color: var(--violet); }
-.badge.proto-hysteria2, .badge.proto-wireguard { color: var(--good); }
+.badge.proto-hysteria2, .badge.proto-wireguard, .badge.proto-tuic, .badge.proto-awg { color: var(--good); }
 .badge.proto-ss { color: var(--warn); }
 .qrbox { display: grid; place-items: center; min-block-size: 260px; }
 .qrbox .qr { inline-size: min(300px, 72vw); block-size: auto; aspect-ratio: 1; }

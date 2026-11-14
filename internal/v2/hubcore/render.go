@@ -61,6 +61,10 @@ var clientShapes = map[string]func(c Client, flow string) map[string]any{
 	"trojan": func(c Client, _ string) map[string]any { return map[string]any{"password": c.Secret, "email": c.Email} },
 	// Hysteria2 (QUIC, UDP): the client's secret is its auth string.
 	"hysteria": func(c Client, _ string) map[string]any { return map[string]any{"auth": c.Secret, "email": c.Email} },
+	// TUIC (QUIC, UDP) runs beside Xray in the node agent: uuid + secret.
+	"tuic": func(c Client, _ string) map[string]any {
+		return map[string]any{"uuid": c.UUID, "password": c.Secret, "email": c.Email}
+	},
 	// Shadowsocks 2022 multi-user: each client gets a PSK derived from its
 	// secret; the second argument carries the inbound's method.
 	// WireGuard peers are built by wgPeers (keys and addresses); this entry
@@ -74,7 +78,10 @@ var clientShapes = map[string]func(c Client, flow string) map[string]any{
 }
 
 // sideProtocols run beside Xray in the node agent (v2.6+), never in Xray.
-var sideProtocols = map[string]bool{"amneziawg": true, "mtproto": true}
+var sideProtocols = map[string]bool{"amneziawg": true, "mtproto": true, "tuic": true}
+
+// sideMinor is the agent v2.x minor version that runs each side protocol.
+var sideMinor = map[string]int{"amneziawg": 6, "mtproto": 6, "tuic": 7}
 
 // agentAtLeast compares a node agent version such as "v2.6.0".
 func agentAtLeast(v string, major, minor int) bool {
@@ -156,13 +163,12 @@ JOIN inbounds i ON i.tag=r.tag WHERE r.node_id=? AND i.enabled=1 ORDER BY i.tag`
 	}}
 	var agentVer string
 	_ = s.ro.QueryRowContext(ctx, `SELECT agent_version FROM nodes WHERE id=?`, nodeID).Scan(&agentVer)
-	sideOK := agentAtLeast(agentVer, 2, 6)
 	for idx, in := range ins {
 		t, err := parseTemplate(in.template)
 		if err != nil {
 			return nil, fmt.Errorf("inbound %s: %w", in.tag, err)
 		}
-		if p, _ := t["protocol"].(string); sideProtocols[p] && !sideOK {
+		if p, _ := t["protocol"].(string); sideProtocols[p] && !agentAtLeast(agentVer, 2, sideMinor[p]) {
 			continue // an older agent would hand it to Xray, which refuses the whole config
 		}
 		fbs, _ := t[fallbackKey].([]any)

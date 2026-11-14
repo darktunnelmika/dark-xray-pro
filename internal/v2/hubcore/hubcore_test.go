@@ -715,7 +715,7 @@ func TestPresetsRenderForEveryProtocol(t *testing.T) {
 		t.Fatal(err)
 	}
 	// AmneziaWG/MTProto go only to agents that run them.
-	if _, err := s.db.Exec(`UPDATE nodes SET agent_version='v2.6.0' WHERE id='n1'`); err != nil {
+	if _, err := s.db.Exec(`UPDATE nodes SET agent_version='v2.7.0' WHERE id='n1'`); err != nil {
 		t.Fatal(err)
 	}
 	cfg, err := s.RenderNode(ctx, "n1")

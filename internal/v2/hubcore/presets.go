@@ -45,7 +45,7 @@ type PresetRequest struct {
 
 // Presets lists what the panel offers.
 var Presets = []string{"vless-reality-tcp", "vless-reality-grpc", "vless-reality-xhttp", "vless-ws", "vmess-ws", "vmess-tcp", "trojan-ws", "ss2022",
-	"vless-tls-ws", "vless-tls-grpc", "vless-tls-xhttp", "vmess-tls-ws", "trojan-tls-tcp", "vless-tls-fallback", "vless-httpupgrade", "vless-tls-httpupgrade", "hysteria2", "wireguard", "socks", "http", "dokodemo", "amneziawg", "mtproto"}
+	"vless-tls-ws", "vless-tls-grpc", "vless-tls-xhttp", "vmess-tls-ws", "trojan-tls-tcp", "vless-tls-fallback", "vless-httpupgrade", "vless-tls-httpupgrade", "hysteria2", "wireguard", "socks", "http", "dokodemo", "amneziawg", "mtproto", "tuic"}
 
 // BuildPreset renders the template and client metadata for a preset.
 func BuildPreset(p PresetRequest) (template, meta []byte, err error) {
@@ -157,6 +157,21 @@ func BuildPreset(p PresetRequest) (template, meta []byte, err error) {
 		t["streamSettings"] = map[string]any{"network": "hysteria", "security": "tls",
 			"tlsSettings":      map[string]any{"serverName": p.SNI, "alpn": []string{"h3"}, "certificates": []any{map[string]any{"dark_cert": p.Cert}}},
 			"hysteriaSettings": map[string]any{"version": 2}}
+		m.Insecure, m.PinSHA256 = p.selfSigned, p.selfPin
+	case "tuic":
+		// TUIC v5 over QUIC (UDP port), run by the node agent beside Xray.
+		// Certificates work as for Hysteria2.
+		if p.Cert == "" {
+			return nil, nil, fmt.Errorf("%w: tuic needs a certificate", ErrInvalid)
+		}
+		if p.SNI == "" {
+			return nil, nil, fmt.Errorf("%w: tuic needs a server name (sni)", ErrInvalid)
+		}
+		t["protocol"] = "tuic"
+		t["settings"] = map[string]any{"congestion_control": "bbr"}
+		delete(t, "sniffing")
+		t["streamSettings"] = map[string]any{"network": "tuic", "security": "tls",
+			"tlsSettings": map[string]any{"serverName": p.SNI, "alpn": []string{"h3"}, "certificates": []any{map[string]any{"dark_cert": p.Cert}}}}
 		m.Insecure, m.PinSHA256 = p.selfSigned, p.selfPin
 	case "trojan-tls-tcp":
 		t["protocol"] = "trojan"
@@ -284,7 +299,7 @@ func BuildPreset(p PresetRequest) (template, meta []byte, err error) {
 
 // CreatePreset builds and stores a preset inbound.
 func (s *Store) CreatePreset(ctx context.Context, p PresetRequest) error {
-	if p.Preset == "hysteria2" && p.Cert == "" {
+	if (p.Preset == "hysteria2" || p.Preset == "tuic") && p.Cert == "" {
 		if p.SNI == "" {
 			p.SNI = "www.bing.com"
 		}

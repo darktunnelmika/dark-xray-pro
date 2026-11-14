@@ -246,3 +246,79 @@ func TestAmneziaWGAndMTProto(t *testing.T) {
 		}
 	}
 }
+
+func TestTUICPreset(t *testing.T) {
+	s, _ := newStore(t)
+	ctx := context.Background()
+	seed(t, s)
+	if err := s.ComposeInbound(ctx, PresetRequest{Tag: "tq", Preset: "tuic"}, []Route{{NodeID: "de-1", DirectPort: 8443, Hosts: []Host{{Path: "direct", Enabled: true, Address: "1.2.3.4", Port: 8443}}}}); err != nil {
+		t.Fatal(err)
+	}
+	c, _ := s.ClientByEmail(ctx, "alice")
+	c.Inbounds = append(c.Inbounds, "tq")
+	_ = s.PutClient(ctx, c.Client)
+	// TUIC needs agent v2.7; a v2.6 agent never gets it.
+	if _, err := s.db.Exec(`UPDATE nodes SET agent_version='v2.6.0' WHERE id='de-1'`); err != nil {
+		t.Fatal(err)
+	}
+	if cfg, _ := s.RenderNode(ctx, "de-1"); strings.Contains(string(cfg), `"tuic"`) {
+		t.Fatal("v2.6 agent must not get TUIC")
+	}
+	_, _ = s.db.Exec(`UPDATE nodes SET agent_version='v2.7.0' WHERE id='de-1'`)
+	cfg, _ := s.RenderNode(ctx, "de-1")
+	var parsed struct {
+		Inbounds []struct {
+			Tag      string `json:"tag"`
+			Protocol string `json:"protocol"`
+			Settings struct {
+				Clients []map[string]any `json:"clients"`
+			} `json:"settings"`
+			Stream struct {
+				TLS struct {
+					Certificates []map[string]any `json:"certificates"`
+				} `json:"tlsSettings"`
+			} `json:"streamSettings"`
+		} `json:"inbounds"`
+	}
+	_ = json.Unmarshal(cfg, &parsed)
+	found := false
+	for _, in := range parsed.Inbounds {
+		if in.Tag != "tq" {
+			continue
+		}
+		found = true
+		if in.Protocol != "tuic" || len(in.Settings.Clients) != 1 || in.Settings.Clients[0]["uuid"] == nil || in.Settings.Clients[0]["password"] == nil || in.Settings.Clients[0]["email"] != "alice" {
+			t.Fatalf("tuic inbound %+v", in)
+		}
+		if len(in.Stream.TLS.Certificates) != 1 || in.Stream.TLS.Certificates[0]["certificate"] == nil {
+			t.Fatal("tuic certificate must be inline for the agent")
+		}
+	}
+	if !found || strings.Contains(string(stripSide(cfg)), `"tuic"`) {
+		t.Fatal("tuic rendered for the agent, never for Xray")
+	}
+	links, err := s.ClientLinks(ctx, "alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var tl string
+	for _, l := range links {
+		if l.Kind == "tuic" {
+			tl = l.Link
+		}
+	}
+	if !strings.HasPrefix(tl, "tuic://") || !strings.Contains(tl, "congestion_control=bbr") || !strings.Contains(tl, "allow_insecure=1") || !strings.Contains(tl, "@1.2.3.4:8443") {
+		t.Fatal("tuic link", tl)
+	}
+	sb, _, _, err := s.SubscriptionBody(ctx, "alice", "singbox")
+	if err != nil || !strings.Contains(string(sb), `"type":"tuic"`) && !strings.Contains(string(sb), `"type": "tuic"`) {
+		t.Fatal("sing-box tuic", err)
+	}
+	cl, _, _, err := s.SubscriptionBody(ctx, "alice", "clash")
+	if err != nil || !strings.Contains(string(cl), "type: tuic") || !strings.Contains(string(cl), "congestion-controller: bbr") {
+		t.Fatal("clash tuic", err, string(cl))
+	}
+	if xj, _, _, _ := s.SubscriptionBody(ctx, "alice", "xray"); strings.Contains(string(xj), "tuic") {
+		t.Fatal("xray has no tuic outbound")
+	}
+}
