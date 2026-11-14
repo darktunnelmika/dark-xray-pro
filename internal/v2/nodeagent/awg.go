@@ -305,10 +305,8 @@ func newAWGTun(mtu int, logf func(string, ...any)) (*awgTun, error) {
 	s.SetRouteTable([]tcpip.Route{{Destination: header.IPv4EmptySubnet, NIC: 1}, {Destination: header.IPv6EmptySubnet, NIC: 1}})
 	tf := tcp.NewForwarder(s, 0, 4096, func(r *tcp.ForwarderRequest) {
 		id := r.ID()
-		dst := netip.AddrFrom16(id.LocalAddress.As16()).Unmap()
-		if id.LocalAddress.Len() == 4 {
-			dst = netip.AddrFrom4(id.LocalAddress.As4())
-		}
+		dst, _ := netip.AddrFromSlice(id.LocalAddress.AsSlice())
+		dst = dst.Unmap()
 		if blockedDest(dst) {
 			r.Complete(true)
 			return
@@ -331,10 +329,8 @@ func newAWGTun(mtu int, logf func(string, ...any)) (*awgTun, error) {
 	s.SetTransportProtocolHandler(tcp.ProtocolNumber, tf.HandlePacket)
 	uf := udp.NewForwarder(s, func(r *udp.ForwarderRequest) bool {
 		id := r.ID()
-		dst := netip.AddrFrom16(id.LocalAddress.As16()).Unmap()
-		if id.LocalAddress.Len() == 4 {
-			dst = netip.AddrFrom4(id.LocalAddress.As4())
-		}
+		dst, _ := netip.AddrFromSlice(id.LocalAddress.AsSlice())
+		dst = dst.Unmap()
 		if blockedDest(dst) {
 			return true // dropped
 		}
