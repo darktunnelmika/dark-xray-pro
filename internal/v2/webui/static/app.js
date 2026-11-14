@@ -47,6 +47,14 @@ const I18N = {
     newClient: "New client", firstUseShort: "starts on first use",
     telegram: "Telegram", telegramHint: "Connect your Telegram to get your order cards with Deliver/Cancel, your credit and your clients in the bot.",
     connectTelegram: "Connect Telegram", openBot: "Open the bot", codeExpires: "The link works once, for 15 minutes.",
+    stepProfile: "Profile", stepNodes: "Nodes & routes", stepSwap: "Dark Swap", stepReview: "Review", next: "Next", back: "Back",
+    newInbound: "New inbound", editInbound: "Nodes & routes", nodesRoutes: "Nodes & routes", pickNode: "Select at least one node.",
+    badTag: "Tag: lowercase letters, digits, dot, dash or underscore.", needCert: "TLS presets need a certificate (add one under TLS certificates).",
+    profileHint: "One profile — protocol, transport, security and keys — shared by every node you place it on. Clients assigned to it work on all of them.",
+    nodesHint: "Pick the nodes. Each gets its own listen IP, a Direct port and, if you want, a separate Tunnel port so their traffic is counted apart.",
+    hostsHint: "Hosts are the addresses clients receive. Add as many as you like per path; ⚙ opens per-host SNI, Host, Path, ALPN, fingerprint and format filters.",
+    direct: "Direct", tunnel: "Tunnel", route: "Path", address: "Address", listenIP: "Listen IP", pathOverride: "Path / service", hideIn: "Hide in:",
+    destNode: "Destination node", targetAddr: "Relay target (optional)", targetAuto: "auto: node's public IP", noHosts: "no hosts",
     when: "When", who: "By", what: "What", more: "Load more", totalLast30: "{v} in the last 30 days",
     health: "Health (24h)", cpu: "CPU", ram: "RAM", disk: "Disk", net: "Network", uptime: "Uptime", inRate: "in", outRate: "out", noData: "No samples yet",
   },
@@ -97,6 +105,14 @@ const I18N = {
     newClient: "کلاینت جدید", firstUseShort: "شروع از اولین اتصال",
     telegram: "تلگرام", telegramHint: "تلگرامتان را وصل کنید تا سفارش‌ها با دکمهٔ تحویل/لغو، اعتبار و کلاینت‌هایتان در ربات بیاید.",
     connectTelegram: "اتصال تلگرام", openBot: "باز کردن ربات", codeExpires: "این لینک یک‌بار مصرف است و ۱۵ دقیقه اعتبار دارد.",
+    stepProfile: "پروفایل", stepNodes: "نودها و مسیرها", stepSwap: "دارک سواپ", stepReview: "بازبینی", next: "بعدی", back: "قبلی",
+    newInbound: "اینباند جدید", editInbound: "نودها و مسیرها", nodesRoutes: "نودها و مسیرها", pickNode: "حداقل یک نود انتخاب کنید.",
+    badTag: "شناسه: حروف کوچک انگلیسی، عدد، نقطه، خط تیره یا زیرخط.", needCert: "الگوهای TLS گواهی لازم دارند (از بخش گواهی‌های TLS اضافه کنید).",
+    profileHint: "یک پروفایل — پروتکل، شبکه، امنیت و کلیدها — که روی همهٔ نودهای انتخابی یکسان است. کلاینتِ این اینباند روی همهٔ آن‌ها کار می‌کند.",
+    nodesHint: "نودها را انتخاب کنید. هر نود IP گوش‌دادن، پورت Direct و در صورت نیاز پورت جدای Tunnel دارد تا مصرف هر مسیر جدا شمرده شود.",
+    hostsHint: "هاست‌ها آدرس‌هایی هستند که در لینک کاربر می‌آیند. برای هر مسیر هر چند تا خواستید اضافه کنید؛ ⚙ تنظیمات SNI، Host، Path، ALPN، Fingerprint و فیلتر فرمت هر هاست را باز می‌کند.",
+    direct: "Direct", tunnel: "Tunnel", route: "مسیر", address: "آدرس", listenIP: "IP گوش‌دادن", pathOverride: "Path / سرویس", hideIn: "مخفی در:",
+    destNode: "نود مقصد", targetAddr: "مقصد رله (اختیاری)", targetAuto: "خودکار: IP عمومی نود", noHosts: "بدون هاست",
     when: "زمان", who: "توسط", what: "شرح", more: "بیشتر", totalLast30: "{v} در ۳۰ روز اخیر",
     health: "سلامت (۲۴ ساعت)", cpu: "پردازنده", ram: "رم", disk: "دیسک", net: "شبکه", uptime: "روشن بودن", inRate: "ورودی", outRate: "خروجی", noData: "هنوز نمونه‌ای نیست",
   },
@@ -187,23 +203,45 @@ function routesFor(m) {
   return allRoutes;
 }
 
-// Brand mark: a node with three signal arcs, the last one amber. Built with
-// the DOM so it needs no image file and passes the strict CSP.
+// Brand mark and icons are built with the DOM (strict CSP, no image files).
+const SVGNS = "http://www.w3.org/2000/svg";
+function svgEl(n, a) { const x = document.createElementNS(SVGNS, n); for (const [k, v] of Object.entries(a)) x.setAttribute(k, v); return x; }
+let markSeq = 0;
 function mark() {
-  const NS = "http://www.w3.org/2000/svg";
-  const el = (n, a) => { const x = document.createElementNS(NS, n); for (const [k, v] of Object.entries(a)) x.setAttribute(k, v); return x; };
-  const svg = el("svg", { viewBox: "0 0 32 32", "aria-hidden": "true" });
-  svg.append(
-    el("rect", { x: 1, y: 1, width: 30, height: 30, rx: 9, fill: "#173445" }),
-    el("circle", { cx: 11, cy: 21, r: 2.6, fill: "#e8a33d" }),
-    el("path", { d: "M11 15.5a5.5 5.5 0 0 1 5.5 5.5", stroke: "#7fc2dc", "stroke-width": 2.4, fill: "none", "stroke-linecap": "round" }),
-    el("path", { d: "M11 10.5A10.5 10.5 0 0 1 21.5 21", stroke: "#7fc2dc", "stroke-width": 2.4, fill: "none", "stroke-linecap": "round", opacity: .75 }),
-    el("path", { d: "M11 5.5A15.5 15.5 0 0 1 26.5 21", stroke: "#e8a33d", "stroke-width": 2.4, fill: "none", "stroke-linecap": "round" }));
+  const id = `g${++markSeq}`;
+  const svg = svgEl("svg", { viewBox: "0 0 32 32", "aria-hidden": "true" });
+  const defs = svgEl("defs", {});
+  const g = svgEl("linearGradient", { id, x1: "0", y1: "0", x2: "1", y2: "1" });
+  g.append(svgEl("stop", { offset: "0", "stop-color": "#2de2e6" }), svgEl("stop", { offset: "1", "stop-color": "#9b5cff" }));
+  defs.append(g);
+  svg.append(defs,
+    svgEl("path", { d: "M16 2.5 28 9.25v13.5L16 29.5 4 22.75V9.25z", fill: "none", stroke: `url(#${id})`, "stroke-width": 2.2, "stroke-linejoin": "round" }),
+    svgEl("circle", { cx: 12.5, cy: 19.5, r: 2.2, fill: `url(#${id})` }),
+    svgEl("path", { d: "M12.5 14.5a5 5 0 0 1 5 5", stroke: `url(#${id})`, "stroke-width": 2.2, fill: "none", "stroke-linecap": "round" }),
+    svgEl("path", { d: "M12.5 10a9.5 9.5 0 0 1 9.5 9.5", stroke: `url(#${id})`, "stroke-width": 2.2, fill: "none", "stroke-linecap": "round" }));
+  return svg;
+}
+const ICONS = {
+  dashboard: "M3 13h8V3H3zM13 21h8V11h-8zM3 21h8v-6H3zM13 3v6h8V3z",
+  clients: "M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75",
+  groups: "M12 2 2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5",
+  inbounds: "M6 3v6M18 3v6M4 9h16v3a8 8 0 0 1-16 0zM12 20v2",
+  nodes: "M3 4h18v6H3zM3 14h18v6H3zM7 7h.01M7 17h.01",
+  reps: "M3 7h18v13H3zM8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M3 13h18",
+  sellers: "M15 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M8.5 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM20 8v6M23 11h-6",
+  shop: "M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4zM3 6h18M16 10a4 4 0 0 1-8 0",
+  finance: "M3 3v18h18M7 15l4-4 3 3 6-6",
+  activity: "M22 12h-4l-3 9L9 3l-3 9H2",
+  settings: "M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6",
+};
+function icon(name) {
+  const svg = svgEl("svg", { viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", "stroke-width": 1.8, "stroke-linecap": "round", "stroke-linejoin": "round", "aria-hidden": "true" });
+  svg.append(svgEl("path", { d: ICONS[name] || ICONS.dashboard }));
   return svg;
 }
 
 function shell(active, content) {
-  const tabs = Object.keys(routes).map((r) => h("a", { href: `#/${r}`, "aria-current": r === active ? "page" : null }, t(r)));
+  const tabs = Object.keys(routes).map((r) => h("a", { href: `#/${r}`, "aria-current": r === active ? "page" : null }, icon(r), h("span", {}, t(r))));
   return h("div", { class: "shell" },
     h("header", { class: "top" }, h("span", { class: "brand" }, mark(), "Dark VPN"),
       me && me.role === "rep" ? h("span", { class: "badge" }, `${t("volumeCredit")}: ${bytes(me.volume_credit || 0)} · ${t("units")}: ${fmtNum(me.unlimited_units || 0)}`) : null,
@@ -542,19 +580,19 @@ async function viewInbounds() {
     return h("div", { class: "card item" },
       h("div", { class: "head" }, h("span", { class: `dot ${ib.enabled ? "on" : ""}` }), h("span", { class: "name" }, ib.tag), h("span", { class: "badge" }, `${ib.protocol} · ${ib.network} · ${ib.security}`),
         ib.enabled ? null : h("span", { class: "badge bad" }, t("disabled")),
-        h("span", { class: "badge spacer" }, `${t("node")}: ${ib.node_id}`)),
-      h("div", { class: "muted small" }, `${t("port")} ${ib.port} · ${t("clientsCount", { n: fmtNum(ib.clients) })} · ${t("trafficToday")}: ${bytes(ib.traffic_today || 0)} · ${t("trafficTotal")}: ${bytes(ib.traffic_total || 0)}`),
-      h("div", { class: "small mono" }, (meta.endpoints || []).map((e) => `${e.name || ""} ${e.address}:${e.port}`).join("  ·  ")),
+        h("span", { class: "spacer" })),
+      h("div", { class: "row" }, (ib.nodes || []).map((n) => h("span", { class: "badge" }, n))),
+      h("div", { class: "muted small" }, `${t("clientsCount", { n: fmtNum(ib.clients) })} · ${t("trafficToday")}: ${bytes(ib.traffic_today || 0)} · ${t("trafficTotal")}: ${bytes(ib.traffic_total || 0)}`),
       h("div", { class: "row" },
+        h("button", { class: "primary", onclick: () => inboundStudio(ib.tag, { nodes, presets, certs }) }, t("nodesRoutes")),
         h("button", { onclick: async () => { await guarded(() => api("POST", `/api/v2/admin/inbounds/${encodeURIComponent(ib.tag)}/enabled`, { Enabled: !ib.enabled })); route(); } }, t(ib.enabled ? "disable" : "enable")),
         h("button", { class: "ghost", onclick: () => inboundEditor(ib.tag, nodes) }, t("advanced")),
-        h("button", { class: "ghost", onclick: () => swapDialog(ib, nodes) }, t("swap")),
         h("button", { class: "ghost danger spacer", onclick: async () => {
         if (await confirmAction(t("confirmDelete", { x: ib.tag }))) { await guarded(() => api("DELETE", `/api/v2/admin/inbounds/${encodeURIComponent(ib.tag)}`)); route(); }
       } }, t("delete"))));
   });
   return h("div", {},
-    h("div", { class: "row" }, h("h1", {}, t("inbounds")), h("button", { class: "primary spacer", onclick: () => inboundForm(nodes, presets, certs) }, t("add"))),
+    h("div", { class: "row" }, h("h1", {}, t("inbounds")), h("button", { class: "primary spacer", onclick: () => inboundStudio(null, { nodes, presets, certs }) }, t("newInbound"))),
     h("div", { class: "list" }, cards.length ? cards : h("p", { class: "muted" }, t("empty"))),
     h("div", { class: "row section" }, h("h2", {}, t("certs")), h("button", { class: "spacer", onclick: () => certForm() }, t("addCert"))),
     h("div", { class: "list" }, certs.length ? certs.map((c) => h("div", { class: "card item" },
@@ -565,6 +603,195 @@ async function viewInbounds() {
         h("button", { class: "ghost danger spacer", onclick: async () => {
           if (await confirmAction(t("confirmDelete", { x: c.id }))) { await guarded(() => api("DELETE", `/api/v2/admin/certs/${encodeURIComponent(c.id)}`)); route(); }
         } }, t("delete"))))) : h("p", { class: "muted small" }, t("empty"))));
+}
+
+// ---------- Inbound studio: one profile, many nodes, Direct/Tunnel/Swap per node ----------
+async function inboundStudio(tag, ctx) {
+  const isNew = !tag;
+  const nodes = ctx.nodes || [];
+  const nodeName = (id) => { const n = nodes.find((x) => x.ID === id); return n ? n.Name || n.ID : id; };
+  const st = {
+    step: 0,
+    profile: { tag: "", preset: (ctx.presets || [])[0] || "vless-reality-tcp", sni: "www.speedtest.net", path: "", remark: "Dark VPN", cert: (ctx.certs || [])[0]?.id || "" },
+    routes: {}, // nodeID -> {listen_ip, direct_port, tunnel_port, hosts}
+    swaps: [], removedSwaps: [],
+  };
+  const newHost = (path, node) => ({ path, enabled: true, remark: "", address: path === "direct" ? (node?.PublicIP || "") : "", port: 443,
+    sni: "", host: "", path_override: "", alpn: "", fingerprint: "", allow_insecure: false, exclude: [], _adv: false });
+  const newRoute = (node) => ({ listen_ip: "", direct_port: 443, tunnel_port: 0, hosts: [newHost("direct", node)] });
+  if (!isNew) {
+    const [routes, swaps] = await Promise.all([api("GET", `/api/v2/admin/inbounds/${encodeURIComponent(tag)}/routes`), api("GET", `/api/v2/admin/swaps?inbound=${encodeURIComponent(tag)}`)]);
+    for (const r of routes) st.routes[r.node_id] = { ...r, hosts: r.hosts.map((x) => ({ ...x, exclude: x.exclude || [], _adv: !!(x.sni || x.host || x.path_override || x.alpn || x.fingerprint || x.allow_insecure || x.exclude?.length) })) };
+    st.swaps = swaps.map((w) => ({ ...w }));
+    st.step = 1;
+  }
+  const steps = [["stepProfile"], ["stepNodes"], ["stepSwap"], ["stepReview"]];
+  const body = h("div", { class: "form" });
+  const err = h("div", { class: "error", role: "alert" });
+  const d = openModal(isNew ? t("newInbound") : `${t("editInbound")} · ${tag}`, h("div", {}, h("div", { class: "steps", role: "tablist" }), body, err), [
+    h("button", { class: "ghost", type: "button", onclick: (e) => { e.preventDefault(); go(st.step - 1); } }, t("back")),
+    h("button", { class: "primary", value: "save", onclick: async (e) => { e.preventDefault(); if (st.step < 3) go(st.step + 1); else await save(); } }, t("next")),
+  ]);
+  d.classList.add("wide");
+  d.addEventListener("close", () => d.classList.remove("wide"), { once: true });
+  const stepBar = d.querySelector(".steps");
+  const nextBtn = d.querySelector(".actions .primary");
+  const backBtn = d.querySelector(".actions .ghost");
+
+  function go(i) {
+    if (i < (isNew ? 0 : 1) || i > 3) return;
+    if (i > st.step && st.step === 0 && !validProfile()) return;
+    if (i > 1 && st.step <= 1 && !Object.keys(st.routes).length) { err.textContent = t("pickNode"); return; }
+    err.textContent = ""; st.step = i; draw();
+  }
+  function validProfile() {
+    if (!/^[a-z0-9][a-z0-9._-]{0,62}$/.test(st.profile.tag)) { err.textContent = t("badTag"); return false; }
+    if (st.profile.preset.includes("-tls-") && !st.profile.cert) { err.textContent = t("needCert"); return false; }
+    return true;
+  }
+  const field = (label, el) => h("label", {}, h("span", {}, label), el);
+  const bind = (obj, key, attrs = {}, num = false) => {
+    const el = h("input", { ...attrs, value: obj[key] ?? "" });
+    el.addEventListener("input", () => { obj[key] = num ? (+el.value || 0) : el.value; });
+    return el;
+  };
+
+  function draw() {
+    stepBar.replaceChildren(...steps.map(([k], i) => h("button", { type: "button", role: "tab", "aria-current": i === st.step ? "step" : null,
+      disabled: isNew ? false : i === 0, onclick: () => go(i) }, `${i + 1}. ${t(k)}`)));
+    backBtn.hidden = st.step === (isNew ? 0 : 1);
+    nextBtn.textContent = st.step === 3 ? t("save") : t("next");
+    body.replaceChildren(...[drawProfile, drawNodes, drawSwaps, drawReview][st.step]());
+  }
+
+  function drawProfile() {
+    const p = st.profile;
+    const preset = h("select", {}, (ctx.presets || []).map((x) => h("option", { value: x, selected: x === p.preset }, x)));
+    const certSel = h("select", {}, (ctx.certs || []).map((c) => h("option", { value: c.id, selected: c.id === p.cert }, `${c.id} · ${c.domains.join(", ")}`)));
+    const certRow = field(t("certFor"), certSel);
+    const sync = () => { certRow.hidden = !p.preset.includes("-tls-"); };
+    preset.addEventListener("change", () => { p.preset = preset.value; sync(); });
+    certSel.addEventListener("change", () => { p.cert = certSel.value; const c = (ctx.certs || []).find((x) => x.id === p.cert); if (c?.domains[0]) { p.sni = c.domains[0]; draw(); } });
+    sync();
+    return [
+      h("p", { class: "small muted" }, t("profileHint")),
+      h("div", { class: "two" }, field(t("tag"), bind(p, "tag", { required: true, placeholder: "multi-reality", autofocus: true })), field(t("preset"), preset)),
+      certRow,
+      h("div", { class: "two" }, field(t("sni"), bind(p, "sni")), field(t("path"), bind(p, "path"))),
+      field(t("remark"), bind(p, "remark")),
+    ];
+  }
+
+  function hostRow(r, hst, idx, node) {
+    const pathSel = h("select", {}, [["direct", t("direct")], ["tunnel", t("tunnel")]].map(([v, l]) => h("option", { value: v, selected: hst.path === v }, l)));
+    pathSel.addEventListener("change", () => { hst.path = pathSel.value; });
+    const en = h("input", { type: "checkbox", checked: hst.enabled, "aria-label": t("enabled") });
+    en.addEventListener("change", () => { hst.enabled = en.checked; });
+    const adv = h("div", { class: "adv", hidden: !hst._adv },
+      field("SNI", bind(hst, "sni")), field("Host", bind(hst, "host")), field(t("pathOverride"), bind(hst, "path_override")),
+      field("ALPN", bind(hst, "alpn", { placeholder: "h2,http/1.1" })), field("Fingerprint", bind(hst, "fingerprint", { placeholder: "chrome" })),
+      h("div", { class: "form" },
+        h("label", { class: "check" }, (() => { const c = h("input", { type: "checkbox", checked: hst.allow_insecure }); c.addEventListener("change", () => { hst.allow_insecure = c.checked; }); return c; })(), "allowInsecure"),
+        h("div", { class: "row small" }, t("hideIn"), ...["links", "singbox", "clash"].map((f) => h("label", { class: "check" },
+          (() => { const c = h("input", { type: "checkbox", checked: hst.exclude.includes(f) }); c.addEventListener("change", () => { hst.exclude = c.checked ? [...hst.exclude, f] : hst.exclude.filter((x) => x !== f); }); return c; })(), f)))));
+    return h("div", { class: "hostrow" },
+      field(t("route"), pathSel), field(t("address"), bind(hst, "address", { placeholder: "1.2.3.4 / cdn.example.com" })),
+      field(t("port"), bind(hst, "port", { type: "number", min: "1", max: "65535" }, true)), field(t("remark"), bind(hst, "remark", { placeholder: node })),
+      h("label", { class: "check" }, en, t("enabled")),
+      h("div", { class: "row" },
+        h("button", { type: "button", class: "ghost", onclick: () => { hst._adv = !hst._adv; adv.hidden = !hst._adv; } }, "⚙"),
+        h("button", { type: "button", class: "ghost danger", "aria-label": t("delete"), onclick: () => { r.hosts.splice(idx, 1); draw(); } }, "✕")),
+      adv);
+  }
+
+  function drawNodes() {
+    const pick = h("div", { class: "nodepick" }, nodes.map((n) => {
+      const c = h("input", { type: "checkbox", checked: !!st.routes[n.ID] });
+      c.addEventListener("change", () => { if (c.checked) st.routes[n.ID] = st.routes[n.ID] || newRoute(n); else delete st.routes[n.ID]; draw(); });
+      return h("label", {}, c, h("span", { class: `dot ${n.online ? "on" : ""}` }), `${n.Name || n.ID}`, h("span", { class: "muted small" }, n.ID));
+    }));
+    const cards = Object.keys(st.routes).sort().map((id) => {
+      const r = st.routes[id];
+      const node = nodes.find((x) => x.ID === id);
+      const tunnelOn = h("input", { type: "checkbox", checked: r.tunnel_port > 0 });
+      const tport = bind(r, "tunnel_port", { type: "number", min: "1", max: "65535", disabled: !(r.tunnel_port > 0) }, true);
+      tunnelOn.addEventListener("change", () => { r.tunnel_port = tunnelOn.checked ? (r.direct_port === 8443 ? 2083 : 8443) : 0; draw(); });
+      return h("div", { class: "route" },
+        h("div", { class: "head" }, h("span", { class: `dot ${node?.online ? "on" : ""}` }), h("strong", {}, nodeName(id)), h("span", { class: "badge" }, id),
+          node?.PublicIP ? h("span", { class: "badge" }, node.PublicIP) : null,
+          !isNew && r.direct_total != null ? h("span", { class: "small muted spacer" }, `${t("direct")} ${bytes(r.direct_total || 0)} · ${t("tunnel")} ${bytes(r.tunnel_total || 0)}`) : null),
+        h("div", { class: "three" },
+          field(t("listenIP"), bind(r, "listen_ip", { placeholder: "0.0.0.0" })),
+          field(`${t("direct")} · ${t("port")}`, bind(r, "direct_port", { type: "number", min: "1", max: "65535", required: true }, true)),
+          h("label", { class: "tunnel-label" }, h("span", {}, tunnelOn, `${t("tunnel")} · ${t("port")}`), tport)),
+        ...r.hosts.map((x, i) => hostRow(r, x, i, id)),
+        h("div", { class: "row" },
+          h("button", { type: "button", onclick: () => { r.hosts.push(newHost("direct", node)); draw(); } }, `+ ${t("direct")}`),
+          h("button", { type: "button", onclick: () => { r.hosts.push({ ...newHost("tunnel", node), port: r.tunnel_port || r.direct_port }); draw(); } }, `+ ${t("tunnel")}`)));
+    });
+    return [h("p", { class: "small muted" }, t("nodesHint")), pick, cards.length ? h("p", { class: "small muted" }, t("hostsHint")) : null, ...cards];
+  }
+
+  function drawSwaps() {
+    const placed = Object.keys(st.routes).sort();
+    const rows = st.swaps.map((w, i) => {
+      const dest = h("select", {}, placed.map((id) => h("option", { value: id, selected: id === w.dest_node }, nodeName(id))));
+      dest.addEventListener("change", () => { w.dest_node = dest.value; });
+      const src = h("select", {}, nodes.map((n) => h("option", { value: n.ID, selected: n.ID === w.source_node }, n.Name || n.ID)));
+      src.addEventListener("change", () => { w.source_node = src.value; });
+      const en = h("input", { type: "checkbox", checked: w.enabled });
+      en.addEventListener("change", () => { w.enabled = en.checked; });
+      return h("div", { class: "route" },
+        h("div", { class: "head" }, h("span", { class: "pathtag swap" }, "Dark Swap"), h("strong", {}, w.name || "DARK SWAP"), w.target ? h("span", { class: "small muted mono" }, `→ ${w.target}`) : null,
+          h("button", { type: "button", class: "ghost danger spacer", onclick: () => { if (!w._new) st.removedSwaps.push(w.id); st.swaps.splice(i, 1); draw(); } }, t("delete"))),
+        h("div", { class: "three" }, field(t("name"), bind(w, "name")), field(t("destNode"), dest), field(t("relayNode"), src)),
+        h("div", { class: "three" }, field(t("relayPort"), bind(w, "source_port", { type: "number", min: "1", max: "65535" }, true)),
+          field(t("entryAddr"), bind(w, "entry_address", { placeholder: "ir.example.com" })), field(t("entryPort"), bind(w, "entry_port", { type: "number", min: "1", max: "65535" }, true))),
+        h("div", { class: "two" }, field(t("targetAddr"), bind(w, "target_address", { placeholder: t("targetAuto") })), h("label", { class: "check" }, en, t("enabled"))));
+    });
+    return [h("p", { class: "small muted" }, t("swapHint")), ...rows,
+      h("div", { class: "row" }, h("button", { type: "button", disabled: !placed.length || nodes.length < 2, onclick: () => {
+        const dest = placed[0];
+        const src = nodes.find((n) => n.ID !== dest)?.ID || "";
+        st.swaps.push({ _new: true, id: `${st.profile.tag || tag}-swap${st.swaps.length + 1}`, name: "DARK SWAP", dest_node: dest, source_node: src, source_port: 6801, entry_address: "", entry_port: 6801, target_address: "", enabled: true });
+        draw();
+      } }, `+ ${t("swap")}`))];
+  }
+
+  function drawReview() {
+    const lines = [];
+    for (const id of Object.keys(st.routes).sort()) {
+      const r = st.routes[id];
+      lines.push(h("div", { class: "line" }, h("strong", {}, nodeName(id)), h("span", { class: "pathtag direct" }, `${t("direct")} :${r.direct_port}`),
+        r.tunnel_port ? h("span", { class: "pathtag tunnel" }, `${t("tunnel")} :${r.tunnel_port}`) : null,
+        h("span", { class: "small muted" }, r.hosts.filter((x) => x.enabled).map((x) => `${x.address}:${x.port}`).join("  ") || t("noHosts"))));
+    }
+    for (const w of st.swaps) lines.push(h("div", { class: "line" }, h("span", { class: "pathtag swap" }, "Dark Swap"),
+      h("span", { class: "mono small" }, `${w.entry_address || "?"}:${w.entry_port} → ${nodeName(w.source_node)}:${w.source_port} → ${nodeName(w.dest_node)}`)));
+    return [isNew ? h("p", {}, h("strong", {}, st.profile.tag), h("span", { class: "muted" }, ` · ${st.profile.preset}`)) : null, h("div", { class: "review" }, lines)];
+  }
+
+  async function save() {
+    err.textContent = "";
+    const routes = Object.entries(st.routes).map(([node_id, r]) => ({ node_id, listen_ip: (r.listen_ip || "").trim(), direct_port: +r.direct_port, tunnel_port: +r.tunnel_port || 0,
+      hosts: r.hosts.map(({ _adv, ...x }) => ({ ...x, port: +x.port })) }));
+    const theTag = isNew ? st.profile.tag : tag;
+    try {
+      if (isNew) {
+        const p = st.profile;
+        await api("POST", "/api/v2/admin/inbounds/compose", { tag: p.tag, preset: p.preset, sni: p.sni.trim(), path: p.path.trim(), remark: p.remark.trim(), cert: p.preset.includes("-tls-") ? p.cert : "", routes });
+      } else {
+        await api("PUT", `/api/v2/admin/inbounds/${encodeURIComponent(theTag)}/routes`, routes);
+      }
+      for (const id of st.removedSwaps) await api("DELETE", `/api/v2/admin/swaps/${encodeURIComponent(id)}`);
+      for (const w of st.swaps) {
+        const { _new, target, ...body } = w;
+        await api("PUT", `/api/v2/admin/swaps/${encodeURIComponent(w.id)}`, { ...body, inbound_tag: theTag, source_port: +w.source_port, entry_port: +w.entry_port });
+      }
+      toast(t("saved")); d.close("save"); route();
+    } catch (x) { err.textContent = x.message; }
+  }
+  draw();
 }
 
 async function swapDialog(ib, nodes) {
@@ -1023,6 +1250,10 @@ function barsSvg(days, W = 600) {
   const NS = "http://www.w3.org/2000/svg", H = 180, P = 4;
   const el = (n, a) => { const x = document.createElementNS(NS, n); for (const [k, v] of Object.entries(a)) x.setAttribute(k, v); return x; };
   const svg = el("svg", { viewBox: `0 0 ${W} ${H + 18}`, class: "bars", role: "img", "aria-label": t("usageChart") });
+  const gid = `bars${++markSeq}`;
+  const defs = el("defs", {}), grad = el("linearGradient", { id: gid, x1: "0", y1: "0", x2: "0", y2: "1" });
+  grad.append(el("stop", { offset: "0", "stop-color": "#2de2e6" }), el("stop", { offset: "1", "stop-color": "#2de2e6", "stop-opacity": ".25" }));
+  defs.append(grad); svg.append(defs);
   const top = Math.max(1, ...days.map((d) => d.Up + d.Down));
   const bw = W / days.length;
   const step = Math.max(1, Math.round(days.length / 5));
@@ -1032,7 +1263,7 @@ function barsSvg(days, W = 600) {
     const title = el("title", {}); title.textContent = `${d.Day}: ${bytes(total)} (↓ ${bytes(d.Down)} · ↑ ${bytes(d.Up)})`;
     g.append(title,
       el("rect", { x: i * bw + 1, y: 0, width: Math.max(1, bw - 2), height: H, class: "bar-hit" }),
-      el("rect", { x: i * bw + 1, y: H - hd, width: Math.max(1, bw - 2), height: hd, class: "bar-down", rx: 2 }),
+      el("rect", { x: i * bw + 1, y: H - hd, width: Math.max(1, bw - 2), height: hd, class: "bar-down", rx: 3, fill: `url(#${gid})` }),
       el("rect", { x: i * bw + 1, y: H - hd - hu, width: Math.max(1, bw - 2), height: hu, class: "bar-up", rx: 2 }));
     svg.append(g);
     if ((days.length - 1 - i) % step === 0) {

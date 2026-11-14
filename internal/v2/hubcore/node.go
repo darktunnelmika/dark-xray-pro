@@ -200,6 +200,7 @@ type NodeStatus struct {
 	ConfigRevision, ReportedRevision  int64
 	UsageSeq                          int64
 	Host                              *wire.Host
+	PublicIP                          string
 }
 
 // HistoryPoint is one 5-minute sample of a node's health.
@@ -241,7 +242,7 @@ func (n NodeStatus) Online(now time.Time) bool {
 
 func (s *Store) Nodes(ctx context.Context) ([]NodeStatus, error) {
 	rows, err := s.ro.QueryContext(ctx, `SELECT id,name,agent_version,last_error,last_seen_unix,xray_running,xray_restarts,spooled,
-config_revision,reported_revision,usage_seq,host_json FROM nodes ORDER BY id`)
+config_revision,reported_revision,usage_seq,host_json,public_ip FROM nodes ORDER BY id`)
 	if err != nil {
 		return nil, err
 	}
@@ -251,7 +252,7 @@ config_revision,reported_revision,usage_seq,host_json FROM nodes ORDER BY id`)
 		var n NodeStatus
 		var hj string
 		if err := rows.Scan(&n.ID, &n.Name, &n.AgentVersion, &n.LastError, &n.LastSeen, &n.XrayRunning, &n.XrayRestarts,
-			&n.Spooled, &n.ConfigRevision, &n.ReportedRevision, &n.UsageSeq, &hj); err != nil {
+			&n.Spooled, &n.ConfigRevision, &n.ReportedRevision, &n.UsageSeq, &hj, &n.PublicIP); err != nil {
 			return nil, err
 		}
 		if hj != "" {
