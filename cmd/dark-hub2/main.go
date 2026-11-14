@@ -27,10 +27,12 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/darktunnelmika/dark-xray-pro/internal/v2/hubcore"
+	"github.com/darktunnelmika/dark-xray-pro/internal/v2/tgbot"
 	"github.com/darktunnelmika/dark-xray-pro/internal/v2/webui"
 )
 
@@ -50,6 +52,8 @@ func main() {
 	subBase := fs.String("sub-base", "", "public base URL for subscription links, e.g. http://1.2.3.4:28080")
 	adminTokenFile := fs.String("admin-token-file", "/etc/dark-hub2/admin-token", "owner API bearer token file")
 	hosts := fs.String("hosts", "", "comma-separated IPs/names for the server certificate")
+	tgTokenFile := fs.String("tg-token-file", "/etc/dark-hub2/tg-token", "Telegram bot token file (bot disabled if missing)")
+	tgOwners := fs.String("tg-owners", "", "comma-separated Telegram user IDs of the owners")
 	id := fs.String("id", "", "node id")
 	name := fs.String("name", "", "node display name / owner username")
 	tag := fs.String("tag", "", "inbound tag")
@@ -99,6 +103,17 @@ func main() {
 				time.Sleep(24 * time.Hour)
 			}
 		}()
+		if tok, err := os.ReadFile(*tgTokenFile); err == nil && strings.TrimSpace(string(tok)) != "" {
+			owners := map[int64]bool{}
+			for _, f := range strings.Split(*tgOwners, ",") {
+				if n, err := strconv.ParseInt(strings.TrimSpace(f), 10, 64); err == nil {
+					owners[n] = true
+				}
+			}
+			bot := &tgbot.Bot{Store: s, API: &tgbot.HTTPAPI{Token: strings.TrimSpace(string(tok))}, Owners: owners, SubBase: *subBase}
+			go bot.Run(ctx)
+			log.Printf("telegram bot on (%d owners)", len(owners))
+		}
 		if tok, err := os.ReadFile(*adminTokenFile); err == nil && *adminListen != "" {
 			admin := &http.Server{Addr: *adminListen, Handler: hubcore.AdminHandlerWith(s, strings.TrimSpace(string(tok)), *subBase, webui.Handler(), func(m *http.ServeMux) {
 				inst := hubcore.InstallHandler(s, hubcore.InstallConfig{DistDir: *distDir, PublicURL: *subBase, HubURL: "https://" + *listen, CAFile: filepath.Join(*tlsDir, "ca.pem")})

@@ -182,6 +182,10 @@ func Open(path string) (*Store, error) {
 		st.Close()
 		return nil, err
 	}
+	if err := st.ensureTgSchema(); err != nil {
+		st.Close()
+		return nil, err
+	}
 	return st, nil
 }
 
