@@ -179,14 +179,25 @@ func (s *Store) MigrateFromOld(ctx context.Context, oldPath string, opt MigrateO
 	}
 	rows.Close()
 	suspended := map[string]bool{}
+	type perms struct{ create, renew, edit bool }
+	controls := map[string]perms{}
 	if tableExists(ctx, old, "representative_controls") {
-		r2, err := old.QueryContext(ctx, `SELECT representative_id,login_suspended FROM representative_controls`)
-		if err == nil {
+		if r2, err := old.QueryContext(ctx, `SELECT representative_id,login_suspended,create_clients,renew_clients,edit_clients FROM representative_controls`); err == nil {
 			for r2.Next() {
 				var id string
-				var s bool
-				if r2.Scan(&id, &s) == nil {
-					suspended[id] = s
+				var sus bool
+				var p perms
+				if r2.Scan(&id, &sus, &p.create, &p.renew, &p.edit) == nil {
+					suspended[id], controls[id] = sus, p
+				}
+			}
+			r2.Close()
+		} else if r2, err := old.QueryContext(ctx, `SELECT representative_id,login_suspended FROM representative_controls`); err == nil {
+			for r2.Next() {
+				var id string
+				var sus bool
+				if r2.Scan(&id, &sus) == nil {
+					suspended[id] = sus
 				}
 			}
 			r2.Close()
@@ -211,6 +222,11 @@ func (s *Store) MigrateFromOld(ctx context.Context, oldPath string, opt MigrateO
 		if _, err := tx.ExecContext(ctx, `INSERT INTO reps(id,name,enabled,volume_credit,unlimited_units,created_unix) VALUES(?,?,?,?,?,?)`,
 			id, name, r.enabled && !suspended[r.id], max(r.vol, 0), max(r.units, 0), now); err != nil {
 			return rep, fmt.Errorf("reseller %s: %w", r.id, err)
+		}
+		if p, ok := controls[r.id]; ok {
+			if _, err := tx.ExecContext(ctx, `UPDATE reps SET deny_create=?, deny_renew=?, deny_edit=? WHERE id=?`, !p.create, !p.renew, !p.edit, id); err != nil {
+				return rep, err
+			}
 		}
 		if r.vol > 0 || r.units > 0 {
 			if _, err := tx.ExecContext(ctx, `INSERT INTO credit_ledger(unix,rep_id,actor,kind,volume_delta,units_delta,note) VALUES(?,?,?,?,?,?,?)`,

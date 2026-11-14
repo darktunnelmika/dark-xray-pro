@@ -725,6 +725,20 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 		emails, err := s.BulkCreateClients(r.Context(), in)
 		reply(w, map[string]any{"emails": emails}, err)
 	}))
+	mux.HandleFunc("GET /api/v2/admin/clients/{email}/telegram", guard(func(w http.ResponseWriter, r *http.Request) {
+		chats, err := s.ClientTelegram(r.Context(), r.PathValue("email"))
+		reply(w, map[string]any{"chats": chats}, err)
+	}))
+	mux.HandleFunc("PUT /api/v2/admin/clients/{email}/telegram", guard(func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Chat int64 `json:"chat"`
+		}
+		if !decode(w, r, &in) {
+			return
+		}
+		err := s.SetClientTelegram(r.Context(), r.PathValue("email"), in.Chat)
+		reply(w, map[string]bool{"ok": err == nil}, err)
+	}))
 	mux.HandleFunc("PUT /api/v2/admin/clients/{email}/on-hold", guard(func(w http.ResponseWriter, r *http.Request) {
 		var in struct{ Days int64 }
 		if !decode(w, r, &in) {

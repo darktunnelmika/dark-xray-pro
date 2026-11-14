@@ -115,6 +115,42 @@ func (s *Store) TgLinkByToken(ctx context.Context, chat int64, tokenOrURL string
 	return email, s.TgLink(ctx, chat, email)
 }
 
+// ClientTelegram lists the Telegram chats a client is linked to.
+func (s *Store) ClientTelegram(ctx context.Context, email string) ([]int64, error) {
+	rows, err := s.ro.QueryContext(ctx, `SELECT chat_id FROM tg_links WHERE email=? ORDER BY chat_id`, email)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []int64{}
+	for rows.Next() {
+		var c int64
+		if rows.Scan(&c) == nil {
+			out = append(out, c)
+		}
+	}
+	return out, rows.Err()
+}
+
+// SetClientTelegram links a client to one Telegram user (expiry notices,
+// "my services" in the bot and the store); 0 removes every link.
+func (s *Store) SetClientTelegram(ctx context.Context, email string, chat int64) error {
+	var n int
+	if err := s.ro.QueryRowContext(ctx, `SELECT COUNT(*) FROM clients WHERE email=?`, email).Scan(&n); err != nil || n == 0 {
+		return ErrNotFound
+	}
+	if chat < 0 {
+		return ErrInvalid
+	}
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM tg_links WHERE email=?`, email); err != nil {
+		return err
+	}
+	if chat == 0 {
+		return nil
+	}
+	return s.TgLink(ctx, chat, email)
+}
+
 func (s *Store) TgLink(ctx context.Context, chat int64, email string) error {
 	_, err := s.db.ExecContext(ctx, `INSERT OR IGNORE INTO tg_links(chat_id,email) VALUES(?,?)`, chat, email)
 	return err

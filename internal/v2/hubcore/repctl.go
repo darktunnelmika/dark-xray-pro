@@ -27,6 +27,11 @@ type RepPolicy struct {
 	Inbounds       []string // empty: every inbound
 	PriceGB        int64    // sale price per GB, for the finance page
 	PriceUnit      int64    // sale price per unlimited unit
+	// Permissions carried over from the old panel. They are "deny" flags so
+	// that older API callers (which do not send them) keep full rights.
+	DenyCreate bool // may not create clients
+	DenyRenew  bool // may not add days or volume
+	DenyEdit   bool // may not change other settings (IP limit, inbounds, on/off)
 }
 
 // DefaultRepPolicy is what a new representative gets.
@@ -44,6 +49,9 @@ func (s *Store) ensureRepCtlSchema() error {
 		{"reps", "price_gb", "INTEGER NOT NULL DEFAULT 0"},
 		{"reps", "price_unit", "INTEGER NOT NULL DEFAULT 0"},
 		{"credit_ledger", "amount", "INTEGER NOT NULL DEFAULT 0"},
+		{"reps", "deny_create", "INTEGER NOT NULL DEFAULT 0"},
+		{"reps", "deny_renew", "INTEGER NOT NULL DEFAULT 0"},
+		{"reps", "deny_edit", "INTEGER NOT NULL DEFAULT 0"},
 	} {
 		if err := s.addColumn(c.table, c.col, c.def); err != nil {
 			return err
@@ -52,14 +60,14 @@ func (s *Store) ensureRepCtlSchema() error {
 	return nil
 }
 
-const policyCols = `max_clients,max_days,max_client_gb,allow_unlimited,can_delete,refund_unused,inbounds,price_gb,price_unit`
+const policyCols = `max_clients,max_days,max_client_gb,allow_unlimited,can_delete,refund_unused,inbounds,price_gb,price_unit,deny_create,deny_renew,deny_edit`
 
 type scanner interface{ Scan(...any) error }
 
 func scanPolicy(row scanner, extra ...any) (RepPolicy, error) {
 	var p RepPolicy
 	var tags string
-	err := row.Scan(append(extra, &p.MaxClients, &p.MaxDays, &p.MaxClientGB, &p.AllowUnlimited, &p.CanDelete, &p.RefundUnused, &tags, &p.PriceGB, &p.PriceUnit)...)
+	err := row.Scan(append(extra, &p.MaxClients, &p.MaxDays, &p.MaxClientGB, &p.AllowUnlimited, &p.CanDelete, &p.RefundUnused, &tags, &p.PriceGB, &p.PriceUnit, &p.DenyCreate, &p.DenyRenew, &p.DenyEdit)...)
 	p.Inbounds = splitTags(tags)
 	return p, err
 }
@@ -85,8 +93,9 @@ func (s *Store) SetRepPolicy(ctx context.Context, repID string, p RepPolicy) err
 		}
 	}
 	r, err := s.db.ExecContext(ctx, `UPDATE reps SET max_clients=?,max_days=?,max_client_gb=?,allow_unlimited=?,can_delete=?,
-refund_unused=?,inbounds=?,price_gb=?,price_unit=? WHERE id=?`,
-		p.MaxClients, p.MaxDays, p.MaxClientGB, p.AllowUnlimited, p.CanDelete, p.RefundUnused, strings.Join(p.Inbounds, ","), p.PriceGB, p.PriceUnit, repID)
+refund_unused=?,inbounds=?,price_gb=?,price_unit=?,deny_create=?,deny_renew=?,deny_edit=? WHERE id=?`,
+		p.MaxClients, p.MaxDays, p.MaxClientGB, p.AllowUnlimited, p.CanDelete, p.RefundUnused, strings.Join(p.Inbounds, ","), p.PriceGB, p.PriceUnit,
+		p.DenyCreate, p.DenyRenew, p.DenyEdit, repID)
 	if err != nil {
 		return err
 	}
@@ -110,6 +119,9 @@ func checkPolicy(ctx context.Context, tx *sql.Tx, repID string, c Client, plan s
 	p, err := scanPolicy(tx.QueryRowContext(ctx, `SELECT `+policyCols+` FROM reps WHERE id=?`, repID))
 	if err != nil {
 		return err
+	}
+	if isNew && p.DenyCreate {
+		return fmt.Errorf("%w: creating clients is not allowed for this representative", ErrPolicy)
 	}
 	if plan == "unlimited" && !p.AllowUnlimited {
 		return fmt.Errorf("%w: unlimited plans are not allowed for this representative", ErrPolicy)

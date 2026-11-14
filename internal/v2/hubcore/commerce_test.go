@@ -132,3 +132,44 @@ func TestTelegramCommerce(t *testing.T) {
 		t.Fatal("trial must show under the customer's services")
 	}
 }
+
+func TestRepPermissions(t *testing.T) {
+	s, now := newStore(t)
+	ctx := context.Background()
+	seed(t, s)
+	_ = s.PutRep(ctx, Rep{ID: "ali", Name: "Ali", Enabled: true})
+	_ = s.AdjustCredit(ctx, "owner", "ali", 100<<30, 0, "")
+	c := Client{Email: "r1", Enabled: true, VolumeBytes: 10 << 30, ExpiresUnix: now.Unix() + 30*86400, Inbounds: []string{"de-vless"}}
+	pol := DefaultRepPolicy
+	pol.DenyCreate = true
+	if err := s.SetRepPolicy(ctx, "ali", pol); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RepPutClient(ctx, "ali", "ali", c, "volume"); !errors.Is(err, ErrPolicy) {
+		t.Fatalf("create while denied: %v", err)
+	}
+	pol.DenyCreate, pol.DenyRenew = false, true
+	_ = s.SetRepPolicy(ctx, "ali", pol)
+	if err := s.RepPutClient(ctx, "ali", "ali", c, "volume"); err != nil {
+		t.Fatal(err)
+	}
+	more := c
+	more.VolumeBytes = 20 << 30
+	if err := s.RepPutClient(ctx, "ali", "ali", more, "volume"); !errors.Is(err, ErrPolicy) {
+		t.Fatalf("renew while denied: %v", err)
+	}
+	pol.DenyRenew, pol.DenyEdit = false, true
+	_ = s.SetRepPolicy(ctx, "ali", pol)
+	ips := c
+	ips.MaxIPs = 5
+	if err := s.RepPutClient(ctx, "ali", "ali", ips, "volume"); !errors.Is(err, ErrPolicy) {
+		t.Fatalf("edit while denied: %v", err)
+	}
+	if err := s.RepPutClient(ctx, "ali", "ali", more, "volume"); err != nil {
+		t.Fatal("renew allowed", err)
+	}
+	got, _ := s.RepPolicyOf(ctx, "ali")
+	if !got.DenyEdit || got.DenyRenew || got.DenyCreate {
+		t.Fatalf("%+v", got)
+	}
+}

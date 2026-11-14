@@ -202,8 +202,8 @@ func (s *Store) RepPutClient(ctx context.Context, actor, repID string, c Client,
 	}
 	var existsRep, oldPlan string
 	var old Client
-	err = tx.QueryRowContext(ctx, `SELECT rep_id,plan,volume_bytes,expires_unix,duration_seconds FROM clients WHERE email=?`, c.Email).
-		Scan(&existsRep, &oldPlan, &old.VolumeBytes, &old.ExpiresUnix, &old.DurationSeconds)
+	err = tx.QueryRowContext(ctx, `SELECT rep_id,plan,volume_bytes,expires_unix,duration_seconds,max_ips,enabled FROM clients WHERE email=?`, c.Email).
+		Scan(&existsRep, &oldPlan, &old.VolumeBytes, &old.ExpiresUnix, &old.DurationSeconds, &old.MaxIPs, &old.Enabled)
 	isNew := errors.Is(err, sql.ErrNoRows)
 	if err != nil && !isNew {
 		return err
@@ -213,6 +213,20 @@ func (s *Store) RepPutClient(ctx context.Context, actor, repID string, c Client,
 	}
 	if err := checkPolicy(ctx, tx, repID, c, plan, isNew, now); err != nil {
 		return err
+	}
+	if !isNew {
+		pol, err := scanPolicy(tx.QueryRowContext(ctx, `SELECT `+policyCols+` FROM reps WHERE id=?`, repID))
+		if err != nil {
+			return err
+		}
+		renewed := plan != oldPlan || c.VolumeBytes > old.VolumeBytes || termDays(c, now) > termDays(old, now)
+		edited := c.MaxIPs != old.MaxIPs || c.Enabled != old.Enabled
+		if renewed && pol.DenyRenew {
+			return fmt.Errorf("%w: renewing clients is not allowed for this representative", ErrPolicy)
+		}
+		if edited && pol.DenyEdit {
+			return fmt.Errorf("%w: changing client settings is not allowed for this representative", ErrPolicy)
+		}
 	}
 	var volCharge, unitCharge int64
 	switch {
