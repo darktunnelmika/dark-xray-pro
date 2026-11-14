@@ -43,6 +43,8 @@ func main() {
 	dbPath := fs.String("db", "/var/lib/dark-hub2/v2.sqlite", "v2 store")
 	listen := fs.String("listen", ":8443", "node API listen address")
 	tlsDir := fs.String("tls-dir", "/etc/dark-hub2", "CA and server certificate directory")
+	adminListen := fs.String("admin-listen", "127.0.0.1:2097", "owner API and /sub listen address (put HTTPS in front)")
+	adminTokenFile := fs.String("admin-token-file", "/etc/dark-hub2/admin-token", "owner API bearer token file")
 	hosts := fs.String("hosts", "", "comma-separated IPs/names for the server certificate")
 	id := fs.String("id", "", "node id")
 	name := fs.String("name", "", "node display name")
@@ -82,6 +84,15 @@ func main() {
 				}
 			}
 		}()
+		if tok, err := os.ReadFile(*adminTokenFile); err == nil && *adminListen != "" {
+			admin := &http.Server{Addr: *adminListen, Handler: hubcore.AdminHandler(s, strings.TrimSpace(string(tok))), ReadHeaderTimeout: 10 * time.Second}
+			go func() {
+				log.Printf("owner API and subscriptions on %s", *adminListen)
+				log.Fatal(admin.ListenAndServe())
+			}()
+		} else {
+			log.Printf("owner API disabled: %s not readable", *adminTokenFile)
+		}
 		srv := &http.Server{Addr: *listen, Handler: hubcore.NodeHandler(s), ReadHeaderTimeout: 10 * time.Second,
 			TLSConfig: &tls.Config{MinVersion: tls.VersionTLS13, Certificates: []tls.Certificate{cert}}}
 		log.Printf("dark-hub2 node API on %s (CA: %s)", *listen, filepath.Join(*tlsDir, "ca.pem"))

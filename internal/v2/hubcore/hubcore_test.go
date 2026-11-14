@@ -3,8 +3,11 @@ package hubcore
 import (
 	"context"
 	"encoding/json"
+	"io"
+	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -210,5 +213,55 @@ func TestSubscriptionLinks(t *testing.T) {
 	links, info, err := s.Subscription(ctx, "alice")
 	if err != nil || len(links) != 1 || info != "upload=0; download=0; total=1073741824; expire=0" {
 		t.Fatalf("links %v info %q err %v", links, info, err)
+	}
+}
+
+func TestAdminAndPublicSubscription(t *testing.T) {
+	s, _ := newStore(t)
+	ctx := context.Background()
+	if _, err := s.CreateNode(ctx, "de-1", "Germany"); err != nil {
+		t.Fatal(err)
+	}
+	h := httptest.NewServer(AdminHandler(s, "admintok"))
+	defer h.Close()
+	do := func(method, path, body, tok string) (int, string) {
+		req, _ := http.NewRequest(method, h.URL+path, strings.NewReader(body))
+		if tok != "" {
+			req.Header.Set("Authorization", "Bearer "+tok)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		b, _ := io.ReadAll(resp.Body)
+		return resp.StatusCode, string(b)
+	}
+	if code, _ := do("GET", "/api/v2/admin/clients", "", "wrong"); code != 401 {
+		t.Fatalf("bad token got %d", code)
+	}
+	inb := `{"node_id":"de-1","template":` + vlessTemplate + `,"meta":{"public_key":"PUB","endpoints":[{"name":"Direct","address":"1.2.3.4","port":18580}]}}`
+	if code, body := do("PUT", "/api/v2/admin/inbounds/de-vless", inb, "admintok"); code != 200 {
+		t.Fatalf("inbound %d %s", code, body)
+	}
+	if code, body := do("PUT", "/api/v2/admin/clients/alice", `{"Enabled":true,"VolumeBytes":-1,"MaxIPs":2,"Inbounds":["de-vless"]}`, "admintok"); code != 200 {
+		t.Fatalf("client %d %s", code, body)
+	}
+	list, err := s.Clients(ctx)
+	if err != nil || len(list) != 1 || list[0].SubToken == "" || list[0].Inbounds[0] != "de-vless" {
+		t.Fatalf("clients %+v %v", list, err)
+	}
+	code, body := do("GET", "/sub/"+list[0].SubToken+"?raw", "", "")
+	if code != 200 || !strings.HasPrefix(body, "vless://") {
+		t.Fatalf("sub %d %q", code, body)
+	}
+	if code, _ := do("GET", "/sub/0000000000000000000", "", ""); code != 404 {
+		t.Fatal("unknown sub token must 404")
+	}
+	// Updating the client keeps its subscription link.
+	do("PUT", "/api/v2/admin/clients/alice", `{"Enabled":true,"VolumeBytes":1000,"Inbounds":["de-vless"]}`, "admintok")
+	again, _ := s.Clients(ctx)
+	if again[0].SubToken != list[0].SubToken || again[0].UUID != list[0].UUID {
+		t.Fatal("credentials changed on update")
 	}
 }

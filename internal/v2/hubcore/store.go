@@ -62,8 +62,10 @@ CREATE TABLE IF NOT EXISTS clients (
   expires_unix INTEGER NOT NULL DEFAULT 0,
   duration_seconds INTEGER NOT NULL DEFAULT 0,
   max_ips INTEGER NOT NULL DEFAULT 0,
+  sub_token TEXT NOT NULL DEFAULT '',
   created_unix INTEGER NOT NULL
 );
+CREATE UNIQUE INDEX IF NOT EXISTS clients_sub_token ON clients(sub_token) WHERE sub_token<>'';
 CREATE TABLE IF NOT EXISTS inbounds (
   tag TEXT PRIMARY KEY,
   node_id TEXT NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
@@ -224,27 +226,30 @@ type Client struct {
 	DurationSeconds int64
 	MaxIPs          int
 	Inbounds        []string
+	SubToken        string
 }
 
 func (s *Store) PutClient(ctx context.Context, c Client) error {
 	if !emailRE.MatchString(c.Email) || c.MaxIPs < 0 || c.DurationSeconds < 0 {
 		return ErrInvalid
 	}
-	if c.UUID == "" {
-		c.UUID = RandomUUID()
-	}
-	if c.Secret == "" {
-		c.Secret = randomHex(16)
-	}
+	// An update that omits credentials keeps the existing ones, so editing a
+	// client never breaks its connections or its subscription link.
+	var oldUUID, oldSecret, oldTok string
+	_ = s.ro.QueryRowContext(ctx, `SELECT uuid,secret,sub_token FROM clients WHERE email=?`, c.Email).Scan(&oldUUID, &oldSecret, &oldTok)
+	c.UUID = firstNonEmpty(c.UUID, oldUUID, RandomUUID())
+	c.Secret = firstNonEmpty(c.Secret, oldSecret, randomHex(16))
+	c.SubToken = firstNonEmpty(c.SubToken, oldTok, randomHex(16))
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-	_, err = tx.ExecContext(ctx, `INSERT INTO clients(email,uuid,secret,enabled,volume_bytes,expires_unix,duration_seconds,max_ips,created_unix)
-VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(email) DO UPDATE SET uuid=excluded.uuid, secret=excluded.secret, enabled=excluded.enabled,
-volume_bytes=excluded.volume_bytes, expires_unix=excluded.expires_unix, duration_seconds=excluded.duration_seconds, max_ips=excluded.max_ips`,
-		c.Email, c.UUID, c.Secret, c.Enabled, c.VolumeBytes, c.ExpiresUnix, c.DurationSeconds, c.MaxIPs, s.now().Unix())
+	_, err = tx.ExecContext(ctx, `INSERT INTO clients(email,uuid,secret,enabled,volume_bytes,expires_unix,duration_seconds,max_ips,sub_token,created_unix)
+VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(email) DO UPDATE SET uuid=excluded.uuid, secret=excluded.secret, enabled=excluded.enabled,
+volume_bytes=excluded.volume_bytes, expires_unix=excluded.expires_unix, duration_seconds=excluded.duration_seconds, max_ips=excluded.max_ips,
+sub_token=excluded.sub_token`,
+		c.Email, c.UUID, c.Secret, c.Enabled, c.VolumeBytes, c.ExpiresUnix, c.DurationSeconds, c.MaxIPs, c.SubToken, s.now().Unix())
 	if err != nil {
 		return err
 	}
@@ -336,6 +341,82 @@ WHERE ci.email=? AND i.enabled=1 ORDER BY i.tag`, email)
 	return links, sub.Userinfo(u.Up, u.Down, total, EffectiveExpiry(c, u)), nil
 }
 
+// ClientView is a client with its live usage, for the panel.
+type ClientView struct {
+	Client
+	Usage          Usage
+	EffectiveUntil int64
+	Remaining      int64
+	Online         bool
+}
+
+// Clients lists every client with usage, newest first.
+func (s *Store) Clients(ctx context.Context) ([]ClientView, error) {
+	rows, err := s.ro.QueryContext(ctx, `SELECT c.email,c.uuid,c.enabled,c.volume_bytes,c.expires_unix,c.duration_seconds,c.max_ips,c.sub_token,
+COALESCE(u.up,0),COALESCE(u.down,0),COALESCE(u.first_seen_unix,0),COALESCE(u.last_seen_unix,0),
+EXISTS(SELECT 1 FROM online o WHERE o.email=c.email AND o.seen_unix>=?)
+FROM clients c LEFT JOIN client_usage u ON u.email=c.email ORDER BY c.created_unix DESC, c.email`, s.now().Unix()-120)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []ClientView
+	for rows.Next() {
+		var v ClientView
+		if err := rows.Scan(&v.Email, &v.UUID, &v.Enabled, &v.VolumeBytes, &v.ExpiresUnix, &v.DurationSeconds, &v.MaxIPs, &v.SubToken,
+			&v.Usage.Up, &v.Usage.Down, &v.Usage.FirstSeen, &v.Usage.LastSeen, &v.Online); err != nil {
+			return nil, err
+		}
+		v.EffectiveUntil = EffectiveExpiry(v.Client, v.Usage)
+		v.Remaining = Remaining(v.Client, v.Usage)
+		out = append(out, v)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	for i := range out {
+		tags, err := s.ro.QueryContext(ctx, `SELECT tag FROM client_inbounds WHERE email=? ORDER BY tag`, out[i].Email)
+		if err != nil {
+			return nil, err
+		}
+		for tags.Next() {
+			var t string
+			if err := tags.Scan(&t); err != nil {
+				tags.Close()
+				return nil, err
+			}
+			out[i].Inbounds = append(out[i].Inbounds, t)
+		}
+		tags.Close()
+	}
+	return out, nil
+}
+
+// DeleteClient removes a client; its usage history is kept for accounting.
+func (s *Store) DeleteClient(ctx context.Context, email string) error {
+	r, err := s.db.ExecContext(ctx, `DELETE FROM clients WHERE email=?`, email)
+	if err != nil {
+		return err
+	}
+	if n, _ := r.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// EmailBySubToken resolves a public subscription token.
+func (s *Store) EmailBySubToken(ctx context.Context, tok string) (string, error) {
+	if len(tok) < 16 {
+		return "", ErrNotFound
+	}
+	var email string
+	err := s.ro.QueryRowContext(ctx, `SELECT email FROM clients WHERE sub_token=?`, tok).Scan(&email)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", ErrNotFound
+	}
+	return email, err
+}
+
 // Usage is a client's metered total.
 type Usage struct {
 	Up, Down            int64
@@ -373,4 +454,13 @@ func Remaining(c Client, u Usage) int64 {
 		return 0
 	}
 	return r
+}
+
+func firstNonEmpty(v ...string) string {
+	for _, x := range v {
+		if x != "" {
+			return x
+		}
+	}
+	return ""
 }
