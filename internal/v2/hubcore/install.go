@@ -184,7 +184,9 @@ ReadWritePaths=/var/lib/dark-node
 WantedBy=multi-user.target
 UNIT
 systemctl daemon-reload
-systemctl enable --now dark-node.service
+systemctl enable dark-node.service >/dev/null 2>&1
+# restart (not just start): a re-install must pick up the new credential.
+systemctl restart dark-node.service
 sleep 3
 systemctl is-active dark-node.service && echo "[dark] node %[1]s is running"
 `
