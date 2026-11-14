@@ -36,7 +36,7 @@ const I18N = {
     enable: "Enable", disable: "Disable", advancedHint: "Clients are injected by the HUB. Nodes pick up changes within a few seconds without dropping other inbounds.",
     swap: "Dark Swap", swapHint: "Relay this inbound through another node: the relay listens on its own port and forwards TCP to this inbound's Direct address. Users and accounting stay on the inbound's node. Point your entry server (e.g. in Iran) at relay address:relay port.",
     relayNode: "Relay node", relayPort: "Relay port", entryAddr: "Entry address (in the link)", entryPort: "Entry port", forwardsTo: "forwards to",
-    traffic14: "Traffic, last 14 days", topToday: "Top users today", recentEvents: "Recent blocks", noEvents: "No blocks — every limit is quiet.",
+    traffic14: "Traffic, last 14 days", topToday: "Top users today", recentEvents: "Recent events", noEvents: "No blocks — every limit is quiet.",
     certs: "TLS certificates", addCert: "Add certificate", certPem: "Certificate (PEM, full chain)", keyPem: "Private key (PEM)",
     certFor: "Certificate (TLS presets)", noCert: "— none —", usedBy: "used by", certHint: "Paste the full chain and key (e.g. from certbot or Cloudflare origin). Uploading again with the same ID renews it on every inbound and node.",
     sellers: "Sub-sellers", transferCredit: "Transfer credit", subOf: "under", kind_transfer: "Transfer",
@@ -101,7 +101,7 @@ const I18N = {
     enable: "فعال کردن", disable: "غیرفعال کردن", advancedHint: "کلاینت‌ها را هاب اضافه می‌کند. نودها تغییر را ظرف چند ثانیه می‌گیرند و بقیهٔ اینباندها قطع نمی‌شوند.",
     swap: "Dark Swap", swapHint: "این اینباند را از یک نود دیگر رله کن: نود واسط روی پورت خودش گوش می‌دهد و TCP را به آدرس Direct این اینباند می‌فرستد. کاربر و حسابداری روی نود اصلی می‌ماند. سرور ورودی (مثلاً ایران) را به آدرس:پورت واسط بفرست.",
     relayNode: "نود واسط", relayPort: "پورت واسط", entryAddr: "آدرس ورودی (داخل لینک)", entryPort: "پورت ورودی", forwardsTo: "ارسال به",
-    traffic14: "ترافیک ۱۴ روز اخیر", topToday: "پرمصرف‌های امروز", recentEvents: "آخرین قطع‌ها", noEvents: "قطعی نداشته‌ایم؛ همهٔ محدودیت‌ها آرام‌اند.",
+    traffic14: "ترافیک ۱۴ روز اخیر", topToday: "پرمصرف‌های امروز", recentEvents: "رویدادهای اخیر", noEvents: "قطعی نداشته‌ایم؛ همهٔ محدودیت‌ها آرام‌اند.",
     certs: "گواهی‌های TLS", addCert: "افزودن گواهی", certPem: "گواهی (PEM، زنجیرهٔ کامل)", keyPem: "کلید خصوصی (PEM)",
     certFor: "گواهی (برای الگوهای TLS)", noCert: "— هیچ —", usedBy: "استفاده در", certHint: "زنجیرهٔ کامل و کلید را وارد کنید (مثلاً از certbot یا Cloudflare Origin). آپلود دوباره با همان شناسه، گواهی را روی همهٔ اینباندها و نودها تمدید می‌کند.",
     sellers: "زیرفروشنده‌ها", transferCredit: "انتقال اعتبار", subOf: "زیرمجموعهٔ", kind_transfer: "انتقال",
@@ -298,7 +298,7 @@ async function viewDashboard() {
         ins.top.length ? h("div", { class: "meters" }, ins.top.map((u) => meter(u.email, (100 * u.bytes) / topMax, bytes(u.bytes), true))) : h("p", { class: "muted small" }, t("noData"))),
       h("div", { class: "card form" }, h("h2", {}, t("recentEvents")),
         ins.events.length ? h("div", { class: "form" }, ins.events.map((e) => h("div", { class: "row small" },
-          h("span", { class: "badge bad" }, e.kind.replace("blocked:", "")), h("span", {}, e.email), h("span", { class: "muted spacer" }, `${e.node_id} · ${fmtTime(e.unix)}`))))
+          eventBadge(e.kind), h("span", {}, e.email), h("span", { class: "muted spacer" }, `${e.node_id} · ${fmtTime(e.unix)}`))))
           : h("p", { class: "muted small" }, t("noEvents")))),
     h("div", { class: "list" }, (nodes || []).map((n) => nodeCard(n))));
 }
@@ -316,6 +316,16 @@ function dayLabel(day, full = false) {
   return new Intl.DateTimeFormat("fa-IR-u-ca-persian", full ? { year: "numeric", month: "2-digit", day: "2-digit" } : { month: "2-digit", day: "2-digit" }).format(d);
 }
 const ltr = (s) => `\u2066${s}\u2069`;
+// Readable event names ("blocked:ip_limit" -> "IP limit") with a colour by type.
+function eventBadge(kind) {
+  const fa = lang === "fa";
+  const names = fa
+    ? { ip_limit: "محدودیت IP", volume: "حجم تمام شد", expired: "انقضا", disabled: "غیرفعال", unknown: "کاربر ناشناس", manual: "ریست دستی", "auto:day": "ریست روزانه", "auto:week": "ریست هفتگی", "auto:month": "ریست ماهانه", "next-plan": "برنامهٔ بعدی", "device-refused": "دستگاه اضافه رد شد" }
+    : { ip_limit: "IP limit", volume: "Volume used up", expired: "Expired", disabled: "Disabled", unknown: "Unknown user", manual: "Manual reset", "auto:day": "Daily reset", "auto:week": "Weekly reset", "auto:month": "Monthly reset", "next-plan": "Next plan", "device-refused": "Extra device refused" };
+  const key = kind.replace(/^(blocked|reset):/, "");
+  const cls = kind.startsWith("blocked:") || kind === "device-refused" ? "bad" : kind === "next-plan" ? "good" : "";
+  return h("span", { class: `badge ${cls}` }, names[key] || key);
+}
 // replaceChildren that skips empty slots (null/false), like h() does.
 function fill(el, ...kids) { el.replaceChildren(...kids.flat().filter((k) => k != null && k !== false)); return el; }
 
@@ -1046,7 +1056,8 @@ function clientForm(c, inbounds, ctx = { reps: [] }) {
 
 async function viewInbounds() {
   const [list, nodes, presets, certs] = await Promise.all([api("GET", "/api/v2/admin/inbounds"), api("GET", "/api/v2/admin/nodes"), api("GET", "/api/v2/admin/presets"), api("GET", "/api/v2/admin/certs")]);
-  const acme = await api("GET", "/api/v2/admin/acme").catch(() => ({ settings: {}, certs: [] }));
+  const acme = await api("GET", "/api/v2/admin/acme").catch(() => ({}));
+  acme.settings ||= {}; acme.certs ||= [];
   const cards = (list || []).map((ib) => {
     let meta = {};
     try { meta = typeof ib.meta === "string" ? JSON.parse(ib.meta) : ib.meta || {}; } catch {}
@@ -2107,9 +2118,10 @@ function subSettingsCard() {
   api("GET", "/api/v2/admin/sub-settings").then((v) => {
     const title = h("input", { value: v.title || "" });
     const tpl = h("input", { value: v.remark_template || "", dir: "ltr", placeholder: "{remark} | {path}" });
-    const prev = h("div", { class: "small mono", dir: "ltr" });
+    const prevOut = h("bdi", { class: "mono", dir: "ltr" });
+    const prev = h("div", { class: "small muted" }, `${L.preview}: `, prevOut);
     const sample = { remark: "Dark VPN", path: "Direct", left: "12.40 GB", used: "17.60 GB", total: "30 GB", days: "18", email: "ali", proto: "vless", tag: "multi-reality" };
-    const upd = () => { prev.textContent = `${L.preview}: ` + (tpl.value || "{remark} | {path}").replace(/\{(\w+)\}/g, (m, k) => sample[k] ?? m); };
+    const upd = () => { prevOut.textContent = (tpl.value || "{remark} | {path}").replace(/\{(\w+)\}/g, (m, k) => sample[k] ?? m); };
     tpl.addEventListener("input", upd); upd();
     const info = h("input", { type: "checkbox", checked: !!v.info_lines });
     const ann = h("textarea", { rows: 2 }); ann.value = v.announce || "";
