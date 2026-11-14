@@ -183,6 +183,33 @@ func telegramRoutes(s *Store, mux *docMux, guard func(http.HandlerFunc) http.Han
 		err := s.SetSetting(r.Context(), "tg_backup_hours", strconv.Itoa(in.Hours))
 		reply(w, s.telegramStatus(r.Context(), owners(r.Context())), err)
 	}))
+	mux.HandleFunc("GET /api/v2/admin/telegram/notices", guard(func(w http.ResponseWriter, r *http.Request) {
+		pct, _ := strconv.Atoi(s.Setting(r.Context(), "notify_percent"))
+		days, _ := strconv.Atoi(s.Setting(r.Context(), "notify_days"))
+		if pct == 0 {
+			pct = 90
+		}
+		if days == 0 {
+			days = 1
+		}
+		reply(w, map[string]int{"percent": pct, "days": days}, nil)
+	}))
+	mux.HandleFunc("PUT /api/v2/admin/telegram/notices", guard(func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Percent int `json:"percent"`
+			Days    int `json:"days"`
+		}
+		if !decode(w, r, &in) {
+			return
+		}
+		if in.Percent < 50 || in.Percent > 99 || in.Days < 1 || in.Days > 14 {
+			reply(w, nil, fmt.Errorf("%w: percent 50–99, days 1–14", ErrInvalid))
+			return
+		}
+		_ = s.SetSetting(r.Context(), "notify_percent", strconv.Itoa(in.Percent))
+		err := s.SetSetting(r.Context(), "notify_days", strconv.Itoa(in.Days))
+		reply(w, in, err)
+	}))
 	mux.HandleFunc("POST /api/v2/admin/telegram/backup-now", guard(func(w http.ResponseWriter, r *http.Request) {
 		c := telegramControl()
 		if c.BackupNow == nil || (c.Running != nil && !c.Running()) {

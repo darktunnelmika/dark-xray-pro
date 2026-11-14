@@ -782,6 +782,7 @@ async function viewClients() {
     fill(bulkBar,
       h("b", {}, L.sel.replace("{n}", fmtNum(selected.size))),
       owner ? h("button", { onclick: () => bulkForm(emails) }, t("bulkRenew")) : null,
+      owner ? h("button", { onclick: () => bulkSettingsForm(emails, inbounds, ctx.reps) }, lang === "fa" ? "تغییر تنظیمات" : "Change settings") : null,
       owner ? h("button", { onclick: async () => { if (await confirmText(L.resetAsk.replace("{x}", `${fmtNum(emails.length)}`))) run((c) => api("POST", `/api/v2/admin/clients/${encodeURIComponent(c.Email)}/reset`)); } }, L.reset) : null,
       h("button", { class: "ghost", onclick: () => run((c) => putToggle(c, true)) }, L.enable),
       h("button", { class: "ghost", onclick: () => run((c) => putToggle(c, false)) }, L.disable),
@@ -1268,6 +1269,31 @@ function showSub(c) {
 
 async function guarded(fn) {
   try { const r = await fn(); toast(t("saved")); return r; } catch (e) { toast(t("failed", { e: e.message })); throw e; }
+}
+
+// One change for many clients: inbounds added or removed, IP limit, reseller.
+function bulkSettingsForm(emails, inbounds, reps) {
+  const fa = lang === "fa";
+  const list = (inbounds || []).filter((ib) => !["socks", "http", "dokodemo-door", "tunnel"].includes(ib.protocol));
+  const box = (name) => h("div", { class: "chips" }, list.map((ib) => h("label", { class: "check" }, h("input", { type: "checkbox", value: ib.tag, name }), h("span", {}, ib.tag))));
+  const add = box("add"), rem = box("rem");
+  const ips = h("input", { type: "number", min: "0", max: "1000", placeholder: fa ? "بدون تغییر" : "unchanged", dir: "ltr" });
+  const rep = h("select", {}, h("option", { value: "-" }, fa ? "بدون تغییر" : "unchanged"), h("option", { value: "" }, fa ? "مالک (بدون نماینده)" : "Owner (no reseller)"),
+    (reps || []).map((r) => h("option", { value: r.ID }, r.Name || r.ID)));
+  const err = h("div", { class: "error" });
+  const save = h("button", { class: "primary", value: "save", onclick: async (e) => {
+    e.preventDefault(); err.textContent = "";
+    const body = { Emails: emails, add_inbounds: [...add.querySelectorAll("input:checked")].map((x) => x.value), remove_inbounds: [...rem.querySelectorAll("input:checked")].map((x) => x.value) };
+    if (ips.value !== "") body.max_ips = +ips.value;
+    if (rep.value !== "-") body.rep_id = rep.value;
+    try { const r = await api("POST", "/api/v2/admin/clients/bulk", body); toast((fa ? "{n} کاربر تغییر کرد" : "{n} clients changed").replace("{n}", fmtNum(r.changed))); document.getElementById("modal").close("save"); route(); }
+    catch (x) { err.textContent = x.message; }
+  } }, t("save"));
+  openModal(fa ? `تغییر تنظیمات ${fmtNum(emails.length)} کاربر` : `Change ${fmtNum(emails.length)} clients`, h("div", { class: "form" },
+    h("div", { class: "small muted" }, fa ? "این اینباندها اضافه شود" : "Add these inbounds"), add,
+    h("div", { class: "small muted" }, fa ? "این اینباندها برداشته شود" : "Remove these inbounds"), rem,
+    h("div", { class: "two" }, h("label", {}, h("span", {}, fa ? "محدودیت IP (۰ = آزاد)" : "IP limit (0 = any)"), ips), h("label", {}, h("span", {}, fa ? "نماینده" : "Reseller"), rep)),
+    h("p", { class: "small muted" }, fa ? "انتقال به نماینده اعتبار جابه‌جا نمی‌کند؛ اگر لازم است اعتبار را دستی تنظیم کنید." : "Moving to a reseller does not move credit; adjust credit by hand if needed."), err), [save]);
 }
 
 function clientForm(c, inbounds, ctx = { reps: [] }) {
@@ -3268,6 +3294,7 @@ function telegramBotCard() {
           if (!(await confirmAction(s2("botOffAsk"), s2("botOffBtn")))) return;
           try { await api("PUT", "/api/v2/admin/telegram", { token: "-", owners: [] }); route(); } catch (x) { toast(t("failed", { e: x.message })); }
         } }, s2("botOffBtn")) : null),
+      noticesBox(),
       h("h2", { class: "section" }, s2("bkTitle")), h("p", { class: "small muted" }, s2("bkHint")),
       h("div", { class: "two" }, h("label", {}, h("span", {}, s2("bkPass")), pass), h("label", {}, h("span", {}, s2("bkEvery")), every)),
       h("p", { class: "small muted" }, st.backup_last ? s2("bkLast", { d: when(st.backup_last) }) : s2("bkNever")),
@@ -3284,6 +3311,19 @@ function telegramBotCard() {
   };
   api("GET", "/api/v2/admin/telegram").then(draw).catch((x) => card.replaceChildren(h("h2", {}, s2("botTitle")), h("p", { class: "error" }, x.message)));
   return card;
+}
+
+// When the bot warns customers: volume percent used, days left.
+function noticesBox() {
+  const fa = lang === "fa";
+  const pct = h("input", { type: "number", min: "50", max: "99", dir: "ltr" });
+  const days = h("input", { type: "number", min: "1", max: "14", dir: "ltr" });
+  api("GET", "/api/v2/admin/telegram/notices").then((r) => { pct.value = r.percent; days.value = r.days; }).catch(() => {});
+  return h("div", { class: "form" }, h("h2", { class: "section" }, fa ? "هشدار به مشتری" : "Customer notices"),
+    h("p", { class: "small muted" }, fa ? "ربات به مشتری‌هایی که تلگرامشان وصل است خبر می‌دهد: اولین اتصال، نزدیک شدن به پایان حجم و زمان، و تمام شدن. هر هشدار برای هر دورهٔ سرویس یک بار فرستاده می‌شود." : "The bot tells customers whose Telegram is linked: first connection, volume and time running out, and when they end. Each notice goes once per service term."),
+    h("div", { class: "two" }, h("label", {}, h("span", {}, fa ? "هشدار حجم بعد از مصرف (درصد)" : "Volume notice after (percent used)"), pct),
+      h("label", {}, h("span", {}, fa ? "هشدار زمان وقتی این تعداد روز مانده" : "Time notice when this many days are left"), days)),
+    h("div", { class: "row" }, h("button", { onclick: async () => { try { await api("PUT", "/api/v2/admin/telegram/notices", { percent: +pct.value, days: +days.value }); toast(t("saved")); } catch (x) { toast(t("failed", { e: x.message })); } } }, t("save"))));
 }
 
 function sessionsCard() {

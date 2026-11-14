@@ -890,16 +890,21 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 	}))
 	mux.HandleFunc("POST /api/v2/admin/clients/bulk", guard(func(w http.ResponseWriter, r *http.Request) {
 		var in struct {
-			Emails  []string
-			Group   string
-			AddDays int64
-			AddGB   float64
-			Enable  *bool
+			Emails         []string
+			Group          string
+			AddDays        int64
+			AddGB          float64
+			Enable         *bool
+			AddInbounds    []string `json:"add_inbounds"`
+			RemoveInbounds []string `json:"remove_inbounds"`
+			MaxIPs         *int     `json:"max_ips"`
+			RepID          *string  `json:"rep_id"`
 		}
 		if !decode(w, r, &in) {
 			return
 		}
-		n, err := s.BulkExtend(r.Context(), BulkRequest{Emails: in.Emails, Group: in.Group, AddDays: in.AddDays, AddBytes: int64(in.AddGB * (1 << 30)), Enable: in.Enable})
+		n, err := s.BulkExtend(r.Context(), BulkRequest{Emails: in.Emails, Group: in.Group, AddDays: in.AddDays, AddBytes: int64(in.AddGB * (1 << 30)), Enable: in.Enable,
+			AddInbounds: in.AddInbounds, RemoveInbounds: in.RemoveInbounds, MaxIPs: in.MaxIPs, RepID: in.RepID})
 		reply(w, map[string]int{"changed": n}, err)
 	}))
 	mux.HandleFunc("POST /api/v2/admin/clients/{email}/transfer", guard(func(w http.ResponseWriter, r *http.Request) {

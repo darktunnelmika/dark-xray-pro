@@ -30,6 +30,11 @@ func FilterConfig(raw []byte, allowed map[string]bool) ([]byte, error) {
 		if !ok {
 			continue
 		}
+		if p, _ := in["protocol"].(string); p == "socks" || p == "http" {
+			// A plain proxy's fixed accounts are its own login (set in the
+			// panel), not metered clients: they are served as written.
+			continue
+		}
 		for _, key := range []string{"clients", "users", "accounts", "peers"} {
 			list, ok := settings[key].([]any)
 			if !ok {

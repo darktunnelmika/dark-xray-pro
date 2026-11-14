@@ -121,13 +121,30 @@ type BulkRequest struct {
 	AddDays  int64
 	AddBytes int64
 	Enable   *bool
+	// Settings for every selected client (nil = unchanged).
+	AddInbounds    []string `json:"add_inbounds"`
+	RemoveInbounds []string `json:"remove_inbounds"`
+	MaxIPs         *int     `json:"max_ips"`
+	RepID          *string  `json:"rep_id"` // "" = owner
 }
 
 // BulkExtend applies a renewal to every selected client in one transaction
 // and returns how many changed. Owner only.
 func (s *Store) BulkExtend(ctx context.Context, req BulkRequest) (int, error) {
-	if req.AddDays < 0 || req.AddBytes < 0 {
+	if req.AddDays < 0 || req.AddBytes < 0 || (req.MaxIPs != nil && (*req.MaxIPs < 0 || *req.MaxIPs > 1000)) {
 		return 0, ErrInvalid
+	}
+	for _, tag := range req.AddInbounds {
+		var n int
+		if s.ro.QueryRowContext(ctx, `SELECT COUNT(*) FROM inbounds WHERE tag=?`, tag).Scan(&n); n == 0 {
+			return 0, fmt.Errorf("%w: inbound %q does not exist", ErrInvalid, tag)
+		}
+	}
+	if req.RepID != nil && *req.RepID != "" {
+		var n int
+		if s.ro.QueryRowContext(ctx, `SELECT COUNT(*) FROM reps WHERE id=?`, *req.RepID).Scan(&n); n == 0 {
+			return 0, fmt.Errorf("%w: reseller %q does not exist", ErrInvalid, *req.RepID)
+		}
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -186,6 +203,26 @@ func (s *Store) BulkExtend(ctx context.Context, req BulkRequest) (int, error) {
 		}
 		if _, err := tx.ExecContext(ctx, q, args...); err != nil {
 			return 0, err
+		}
+		for _, tag := range req.AddInbounds {
+			if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO client_inbounds(email,tag) VALUES(?,?)`, e, tag); err != nil {
+				return 0, err
+			}
+		}
+		for _, tag := range req.RemoveInbounds {
+			if _, err := tx.ExecContext(ctx, `DELETE FROM client_inbounds WHERE email=? AND tag=?`, e, tag); err != nil {
+				return 0, err
+			}
+		}
+		if req.MaxIPs != nil {
+			if _, err := tx.ExecContext(ctx, `UPDATE clients SET max_ips=? WHERE email=?`, *req.MaxIPs, e); err != nil {
+				return 0, err
+			}
+		}
+		if req.RepID != nil {
+			if _, err := tx.ExecContext(ctx, `UPDATE clients SET rep_id=? WHERE email=?`, *req.RepID, e); err != nil {
+				return 0, err
+			}
 		}
 		changed++
 	}

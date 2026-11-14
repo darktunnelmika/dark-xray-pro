@@ -31,6 +31,14 @@ func (b *Bot) notifyClients(ctx context.Context) {
 		return
 	}
 	now := b.now().Unix()
+	// Thresholds set in the panel (Settings → customer notices).
+	pct, days := 90, 1
+	if v, err := strconv.Atoi(b.Store.Setting(ctx, "notify_percent")); err == nil && v >= 50 && v <= 99 {
+		pct = v
+	}
+	if v, err := strconv.Atoi(b.Store.Setting(ctx, "notify_days")); err == nil && v >= 1 && v <= 14 {
+		days = v
+	}
 	for _, c := range all {
 		chats := links[c.Email]
 		if len(chats) == 0 {
@@ -46,16 +54,20 @@ func (b *Bot) notifyClients(ctx context.Context) {
 			switch {
 			case used >= c.VolumeBytes:
 				events = append(events, [2]string{"vol100", "⛔ حجم سرویس <b>%s</b> تمام شد. برای ادامه، از «سرویس‌های من» تمدید کنید."})
-			case used*10 >= c.VolumeBytes*9:
-				events = append(events, [2]string{"vol90", "⚠️ بیش از ۹۰٪ حجم سرویس <b>%s</b> مصرف شده است."})
+			case used*100 >= c.VolumeBytes*int64(pct):
+				events = append(events, [2]string{"vol90", "⚠️ بیش از " + faNum(strconv.Itoa(pct)) + "٪ حجم سرویس <b>%s</b> مصرف شده است."})
 			}
 		}
 		if c.EffectiveUntil > 0 {
 			switch {
 			case c.EffectiveUntil <= now:
 				events = append(events, [2]string{"exp", "⛔ مدت سرویس <b>%s</b> تمام شد. برای ادامه، از «سرویس‌های من» تمدید کنید."})
-			case c.EffectiveUntil-now <= 86400:
-				events = append(events, [2]string{"exp1", "⏰ کمتر از یک روز از سرویس <b>%s</b> باقی مانده است."})
+			case c.EffectiveUntil-now <= int64(days)*86400:
+				left := "یک روز"
+				if days > 1 {
+					left = faNum(strconv.Itoa(days)) + " روز"
+				}
+				events = append(events, [2]string{"exp1", "⏰ کمتر از " + left + " از سرویس <b>%s</b> باقی مانده است."})
 			}
 		}
 		for _, e := range events {
