@@ -55,6 +55,7 @@ const I18N = {
     hostsHint: "Hosts are the addresses clients receive. Add as many as you like per path; ⚙ opens per-host SNI, Host, Path, ALPN, fingerprint and format filters.",
     direct: "Direct", tunnel: "Tunnel", route: "Path", address: "Address", listenIP: "Listen IP", pathOverride: "Path / service", hideIn: "Hide in:",
     destNode: "Destination node", targetAddr: "Relay target (optional)", targetAuto: "auto: node's public IP", noHosts: "no hosts",
+    todayTasks: "Needs renewal soon", todayHint: "Ending within 3 days or 90% of volume used — renew them before they stop.",
     used: "Used", of: "of", last30Traffic: "Last 30 days", timeLeft: "Time left", details: "Details", firstSeen: "First connection", lastSeen: "Last seen",
     when: "When", who: "By", what: "What", more: "Load more", totalLast30: "{v} in the last 30 days",
     health: "Health (24h)", cpu: "CPU", ram: "RAM", disk: "Disk", net: "Network", uptime: "Uptime", inRate: "in", outRate: "out", noData: "No samples yet",
@@ -114,6 +115,7 @@ const I18N = {
     hostsHint: "هاست‌ها آدرس‌هایی هستند که در لینک کاربر می‌آیند. برای هر مسیر هر چند تا خواستید اضافه کنید؛ ⚙ تنظیمات SNI، Host، Path، ALPN، Fingerprint و فیلتر فرمت هر هاست را باز می‌کند.",
     direct: "Direct", tunnel: "Tunnel", route: "مسیر", address: "آدرس", listenIP: "IP گوش‌دادن", pathOverride: "Path / سرویس", hideIn: "مخفی در:",
     destNode: "نود مقصد", targetAddr: "مقصد رله (اختیاری)", targetAuto: "خودکار: IP عمومی نود", noHosts: "بدون هاست",
+    todayTasks: "کارهای امروز: نیازمند تمدید", todayHint: "تا ۳ روز دیگر تمام می‌شوند یا ۹۰٪ حجمشان مصرف شده — قبل از قطع شدن تمدید کنید.",
     used: "مصرف", of: "از", last30Traffic: "۳۰ روز اخیر", timeLeft: "زمان باقی‌مانده", details: "جزئیات", firstSeen: "اولین اتصال", lastSeen: "آخرین فعالیت",
     when: "زمان", who: "توسط", what: "شرح", more: "بیشتر", totalLast30: "{v} در ۳۰ روز اخیر",
     health: "سلامت (۲۴ ساعت)", cpu: "پردازنده", ram: "رم", disk: "دیسک", net: "شبکه", uptime: "روشن بودن", inRate: "ورودی", outRate: "خروجی", noData: "هنوز نمونه‌ای نیست",
@@ -409,11 +411,23 @@ async function viewClients() {
   q.addEventListener("input", render);
   filter.addEventListener("change", render);
   render();
+  const nowS = Date.now() / 1000;
+  const attention = (list || []).filter((c) => c.Enabled && ((c.EffectiveUntil && c.EffectiveUntil > nowS && c.EffectiveUntil - nowS <= 3 * 86400) ||
+    (c.VolumeBytes > 0 && (c.Usage.Up + c.Usage.Down) / c.VolumeBytes >= 0.9))).slice(0, 8);
+  const todo = attention.length ? h("div", { class: "card form" },
+    h("div", { class: "row" }, h("h2", {}, t("todayTasks")), h("span", { class: "badge warn" }, fmtNum(attention.length))),
+    h("p", { class: "small muted" }, t("todayHint")),
+    h("div", { class: "row" }, attention.map((c) => {
+      const [cls, st] = clientStatus(c);
+      const pct = c.VolumeBytes > 0 ? Math.round(((c.Usage.Up + c.Usage.Down) / c.VolumeBytes) * 100) : 0;
+      return h("a", { class: "btn", href: `#/client?e=${encodeURIComponent(c.Email)}` }, c.Email, " ", h("span", { class: `badge ${cls}` }, pct >= 90 ? `${fmtNum(pct)}%` : st));
+    }))) : null;
   return h("div", {},
     h("div", { class: "row" }, h("h1", {}, t("clients")), count,
       h("span", { class: "spacer" }), owner ? bulkBtn : null,
       h("button", { class: "primary", onclick: () => clientForm(null, inbounds) }, t("add"))),
-    h("div", { class: "row" }, q, filter),
+    todo,
+    h("div", { class: "row", style: "margin-block-start:14px" }, q, filter),
     box);
 }
 

@@ -775,6 +775,7 @@ const repHelp = `دستورهای نماینده:
 /credit — اعتبار و تعداد کلاینت‌ها
 /orders — سفارش‌های در انتظار
 /client نام — اطلاعات یک کلاینت
+/today — کلاینت‌های نیازمند تمدید
 /admins — ادمین‌های ربات (فقط خود نماینده)
 /invite manager|sales|support — دعوت ادمین جدید`
 
@@ -826,6 +827,24 @@ func (b *Bot) repMessage(ctx context.Context, chat int64, rep, role, text string
 			return true
 		}
 		b.send(ctx, chat, b.clientCard(c), nil)
+	case "/today":
+		all, _ := b.Store.Clients(ctx)
+		now := b.now().Unix()
+		var lines []string
+		for _, c := range all {
+			if c.RepID != rep || !c.Enabled {
+				continue
+			}
+			used := c.Usage.Up + c.Usage.Down
+			if c.EffectiveUntil > now && c.EffectiveUntil-now <= 3*86400 || c.VolumeBytes > 0 && used*10 >= c.VolumeBytes*9 {
+				lines = append(lines, "• "+esc(clientLabel(c, now))+" — "+gb(used))
+			}
+		}
+		if len(lines) == 0 {
+			b.send(ctx, chat, "✅ امروز کلاینتی نیازمند تمدید نیست.", nil)
+			return true
+		}
+		b.send(ctx, chat, "📋 <b>کارهای امروز</b> — نیازمند تمدید (۳ روز یا ۹۰٪ حجم):\n"+strings.Join(lines, "\n"), nil)
 	case "/invite":
 		if !can("owner") {
 			return true
