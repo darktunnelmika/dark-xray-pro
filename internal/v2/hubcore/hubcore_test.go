@@ -1048,3 +1048,39 @@ func TestMultiNodeInboundRoutes(t *testing.T) {
 		t.Fatalf("after node delete: %v %+v", err, r)
 	}
 }
+
+func TestEncryptedBackupRoundTrip(t *testing.T) {
+	s, _ := newStore(t)
+	ctx := context.Background()
+	seed(t, s)
+	enc, err := s.EncryptedBackup(ctx, "correct horse")
+	if err != nil || !IsEncryptedBackup(enc) {
+		t.Fatal(err)
+	}
+	if _, err := DecryptBackup(enc, "wrong pass!"); !errors.Is(err, ErrBadPassword) {
+		t.Fatalf("wrong password: %v", err)
+	}
+	path := filepath.Join(t.TempDir(), "b.dkb")
+	if err := os.WriteFile(path, enc, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	plain, err := DecryptFile(path, "correct horse")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dst := filepath.Join(t.TempDir(), "restored.sqlite")
+	if err := RestoreBackup(plain, dst); err != nil {
+		t.Fatal(err)
+	}
+	r, err := Open(dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	if list, _ := r.Clients(ctx); len(list) != 2 {
+		t.Fatalf("restored clients: %d", len(list))
+	}
+	if _, err := EncryptBackup([]byte("x"), "short"); !errors.Is(err, ErrInvalid) {
+		t.Fatal("short password must be refused")
+	}
+}

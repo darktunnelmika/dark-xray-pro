@@ -24,6 +24,8 @@ type API interface {
 	Answer(ctx context.Context, callbackID, text string) error
 	Me(ctx context.Context) (string, error)
 	SetCommands(ctx context.Context, chat int64, cmds [][2]string) error
+	SendDocument(ctx context.Context, chat int64, name string, data []byte, caption string) error
+	SendPhotoID(ctx context.Context, chat int64, fileID, caption string, kb *Keyboard) error
 }
 
 type Update struct {
@@ -45,10 +47,14 @@ type Chat struct {
 }
 
 type Message struct {
-	ID      int64    `json:"message_id"`
-	From    *User    `json:"from"`
-	Chat    Chat     `json:"chat"`
-	Text    string   `json:"text"`
+	ID      int64  `json:"message_id"`
+	From    *User  `json:"from"`
+	Chat    Chat   `json:"chat"`
+	Text    string `json:"text"`
+	Caption string `json:"caption"`
+	Photo   []struct {
+		FileID string `json:"file_id"`
+	} `json:"photo"`
 	ReplyTo *Message `json:"reply_to_message"`
 }
 
@@ -196,4 +202,32 @@ func (a *HTTPAPI) SetCommands(ctx context.Context, chat int64, cmds [][2]string)
 		p["scope"] = map[string]any{"type": "chat", "chat_id": chat}
 	}
 	return a.callJSON(ctx, "setMyCommands", p, nil)
+}
+
+func (a *HTTPAPI) SendDocument(ctx context.Context, chat int64, name string, data []byte, caption string) error {
+	var buf bytes.Buffer
+	w := multipart.NewWriter(&buf)
+	_ = w.WriteField("chat_id", strconv.FormatInt(chat, 10))
+	_ = w.WriteField("caption", caption)
+	_ = w.WriteField("parse_mode", "HTML")
+	fw, err := w.CreateFormFile("document", name)
+	if err != nil {
+		return err
+	}
+	if _, err := fw.Write(data); err != nil {
+		return err
+	}
+	if err := w.Close(); err != nil {
+		return err
+	}
+	return a.call(ctx, "sendDocument", &buf, w.FormDataContentType(), nil)
+}
+
+// SendPhotoID re-sends a photo Telegram already has (by file_id).
+func (a *HTTPAPI) SendPhotoID(ctx context.Context, chat int64, fileID, caption string, kb *Keyboard) error {
+	p := map[string]any{"chat_id": chat, "photo": fileID, "caption": caption, "parse_mode": "HTML"}
+	if kb != nil {
+		p["reply_markup"] = kb
+	}
+	return a.callJSON(ctx, "sendPhoto", p, nil)
 }

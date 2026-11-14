@@ -3,6 +3,7 @@ package tgbot
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -21,7 +22,8 @@ var ownerMenu = &Keyboard{Rows: [][]Button{
 	{{Text: "👥 کلاینت‌ها", Data: "a:clients"}, {Text: "🔎 جستجو", Data: "a:find"}},
 	{{Text: "⚡ فروش سریع", Data: "a:quick"}, {Text: "🛒 سفارش‌ها", Data: "a:orders"}},
 	{{Text: "💼 نماینده‌ها", Data: "a:reps"}, {Text: "📋 گزارش امروز", Data: "a:report"}},
-	{{Text: "📣 پیام همگانی", Data: "a:bc"}, {Text: "⚙️ تنظیمات ربات", Data: "a:settings"}},
+	{{Text: "📣 پیام همگانی", Data: "a:bc"}, {Text: "📦 بکاپ الان", Data: "a:backup"}},
+	{{Text: "⚙️ تنظیمات ربات", Data: "a:settings"}},
 	{{Text: "🛍 نمای مشتری", Data: "a:customer"}},
 }}
 
@@ -121,29 +123,52 @@ func (b *Bot) ownerCallback(ctx context.Context, chat int64, data string) bool {
 		b.repsView(ctx, chat)
 	case "bc":
 		b.setAwait(chat, "broadcast")
-		b.send(ctx, chat, "📣 متن پیام همگانی را بفرستید. قبل از ارسال پیش‌نمایش و تأیید می‌گیرید.", nil)
-	case "bcok":
+		b.send(ctx, chat, "📣 متن پیام همگانی را بفرستید (یا یک عکس با کپشن).\nبرای دکمهٔ لینک، آخرین خط را این‌طور بنویسید:\n<code>[متن دکمه](https://example.com)</code>\nبعد مخاطب را انتخاب می‌کنید و پیش‌نمایش می‌گیرید.", nil)
+	case "bca": // audience chosen
 		b.mu.Lock()
-		text := b.draft[chat]
-		delete(b.draft, chat)
+		d := b.draft[chat]
 		b.mu.Unlock()
-		if text == "" {
+		if d == nil {
 			b.send(ctx, chat, "پیش‌نویسی نیست.", nil)
 			return true
 		}
-		go b.broadcast(context.WithoutCancel(ctx), chat, text)
-		b.send(ctx, chat, "ارسال شروع شد… گزارش پس از پایان می‌آید.", nil)
+		d.audience = arg(1)
+		d.chats = b.audience(ctx, d.audience)
+		_ = b.sendDraft(ctx, chat, d)
+		b.send(ctx, chat, fmt.Sprintf("👆 پیش‌نمایش. برای «%s» یعنی %d نفر ارسال شود؟", audienceName[d.audience], len(d.chats)), &Keyboard{Rows: [][]Button{
+			{{Text: "✅ ارسال", Data: "a:bcok"}, {Text: "✖️ لغو", Data: "a:bcno"}}, {{Text: "تغییر مخاطب", Data: "a:bcaud"}}}})
+	case "bcaud":
+		b.askAudience(ctx, chat)
+	case "bcok":
+		b.mu.Lock()
+		d := b.draft[chat]
+		delete(b.draft, chat)
+		b.bcStop = false
+		b.mu.Unlock()
+		if d == nil || d.audience == "" {
+			b.send(ctx, chat, "پیش‌نویسی نیست.", nil)
+			return true
+		}
+		go b.broadcast(context.WithoutCancel(ctx), chat, d)
+		b.send(ctx, chat, "📣 ارسال شروع شد… گزارش پس از پایان می‌آید.", &Keyboard{Rows: [][]Button{{{Text: "⏹ توقف ارسال", Data: "a:bcstop"}}}})
+	case "bcstop":
+		b.mu.Lock()
+		b.bcStop = true
+		b.mu.Unlock()
+		b.send(ctx, chat, "⏹ ادامهٔ ارسال متوقف می‌شود (پیام‌های ارسال‌شده پس گرفته نمی‌شوند).", nil)
 	case "bcno":
 		b.mu.Lock()
 		delete(b.draft, chat)
 		b.mu.Unlock()
 		b.send(ctx, chat, "لغو شد.", &Keyboard{Rows: [][]Button{back("a:home")}})
+	case "backup":
+		b.sendBackup(ctx, chat)
 	case "settings":
 		pay := b.Store.Setting(ctx, "tg_pay_text")
 		wel := b.Store.Setting(ctx, "tg_welcome")
 		b.send(ctx, chat, fmt.Sprintf("⚙️ <b>تنظیمات ربات</b>\n\n💳 متن پرداخت:\n%s\n\n👋 متن خوش‌آمد:\n%s", orDash(esc(pay)), orDash(esc(wel))), &Keyboard{Rows: [][]Button{
 			{{Text: "ویرایش متن پرداخت", Data: "a:set:pay"}, {Text: "ویرایش خوش‌آمد", Data: "a:set:welcome"}},
-			{{Text: "ویرایش آموزش اتصال", Data: "a:set:guide"}},
+			{{Text: "ویرایش آموزش اتصال", Data: "a:set:guide"}, {Text: "🔐 رمز بکاپ", Data: "a:set:backup"}},
 			back("a:home")}})
 	case "set":
 		b.setAwait(chat, "set:"+arg(1))
@@ -167,17 +192,17 @@ func (b *Bot) ownerInput(ctx context.Context, chat int64, what, text string) boo
 	case what == "find":
 		b.findClients(ctx, chat, text)
 	case what == "broadcast":
-		chats, _ := b.Store.TgChats(ctx)
-		b.mu.Lock()
-		if b.draft == nil {
-			b.draft = map[int64]string{}
-		}
-		b.draft[chat] = text
-		b.mu.Unlock()
-		b.send(ctx, chat, "👁 <b>پیش‌نمایش</b>\n\n"+esc(text), nil)
-		b.send(ctx, chat, fmt.Sprintf("برای %d نفر ارسال شود؟", len(chats)), &Keyboard{Rows: [][]Button{
-			{{Text: "✅ ارسال", Data: "a:bcok"}, {Text: "✖️ لغو", Data: "a:bcno"}}}})
+		b.prepareBroadcast(ctx, chat, text, "")
 	case strings.HasPrefix(what, "set:"):
+		if what == "set:backup" {
+			if len(text) < 8 {
+				b.send(ctx, chat, "رمز باید حداقل ۸ کاراکتر باشد.", nil)
+				return true
+			}
+			_ = b.Store.SetSetting(ctx, "tg_backup_pass", text)
+			b.send(ctx, chat, "🔐 رمز بکاپ ذخیره شد. این رمز را جایی امن یادداشت کنید؛ بدون آن بکاپ باز نمی‌شود.\nاز این به بعد هر روز یک بکاپ رمزگذاری‌شده همین‌جا می‌آید.", &Keyboard{Rows: [][]Button{{{Text: "📦 بکاپ الان", Data: "a:backup"}}}})
+			return true
+		}
 		key := map[string]string{"pay": "tg_pay_text", "welcome": "tg_welcome", "guide": "tg_guide"}[strings.TrimPrefix(what, "set:")]
 		if key == "" {
 			return false
@@ -190,11 +215,114 @@ func (b *Bot) ownerInput(ctx context.Context, chat int64, what, text string) boo
 	return true
 }
 
-func (b *Bot) broadcast(ctx context.Context, owner int64, text string) {
+type bcDraft struct {
+	text, photo string
+	button      *Button
+	audience    string
+	chats       []int64
+}
+
+var audienceName = map[string]string{"all": "همه", "active": "دارای سرویس فعال", "expiring": "رو به انقضا (۳ روز)", "expired": "منقضی یا حجم‌تمام", "none": "بدون سرویس"}
+
+var buttonRE = regexp.MustCompile(`\[([^\]]{1,60})\]\((https?://[^\s)]+)\)\s*$`)
+
+func (b *Bot) prepareBroadcast(ctx context.Context, chat int64, text, photo string) {
+	d := &bcDraft{text: text, photo: photo}
+	if m := buttonRE.FindStringSubmatch(text); m != nil {
+		d.button = &Button{Text: m[1], URL: m[2]}
+		d.text = strings.TrimSpace(strings.TrimSuffix(text, m[0]))
+	}
+	if d.text == "" && d.photo == "" {
+		b.send(ctx, chat, "پیام خالی است.", nil)
+		return
+	}
+	b.mu.Lock()
+	if b.draft == nil {
+		b.draft = map[int64]*bcDraft{}
+	}
+	b.draft[chat] = d
+	b.mu.Unlock()
+	b.askAudience(ctx, chat)
+}
+
+func (b *Bot) askAudience(ctx context.Context, chat int64) {
+	kb := &Keyboard{}
+	for _, k := range []string{"all", "active", "expiring", "expired", "none"} {
+		kb.Rows = append(kb.Rows, []Button{{Text: fmt.Sprintf("%s (%d)", audienceName[k], len(b.audience(ctx, k))), Data: "a:bca:" + k}})
+	}
+	kb.Rows = append(kb.Rows, []Button{{Text: "✖️ لغو", Data: "a:bcno"}})
+	b.send(ctx, chat, "👥 پیام برای چه کسانی ارسال شود؟", kb)
+}
+
+// audience resolves a target group to bot chats that have not blocked the bot.
+func (b *Bot) audience(ctx context.Context, kind string) []int64 {
 	chats, _ := b.Store.TgChats(ctx)
-	sent, failed := 0, 0
-	for _, c := range chats {
-		if _, err := b.API.Send(ctx, c, esc(text), nil, 0); err == nil {
+	if kind == "all" || kind == "" {
+		return chats
+	}
+	links, _ := b.Store.TgLinkedChats(ctx)
+	clients, _ := b.Store.Clients(ctx)
+	now := b.now().Unix()
+	state := map[int64]string{}
+	rank := map[string]int{"expired": 1, "expiring": 2, "active": 3}
+	for _, c := range clients {
+		st := "active"
+		switch {
+		case !c.Enabled || c.Remaining == 0 || c.EffectiveUntil > 0 && c.EffectiveUntil <= now:
+			st = "expired"
+		case c.EffectiveUntil > 0 && c.EffectiveUntil-now <= 3*86400:
+			st = "expiring"
+		}
+		for _, ch := range links[c.Email] {
+			if rank[st] > rank[state[ch]] {
+				state[ch] = st
+			}
+		}
+	}
+	var out []int64
+	for _, ch := range chats {
+		st := state[ch]
+		switch kind {
+		case "none":
+			if st == "" {
+				out = append(out, ch)
+			}
+		case "active":
+			if st == "active" || st == "expiring" {
+				out = append(out, ch)
+			}
+		default:
+			if st == kind {
+				out = append(out, ch)
+			}
+		}
+	}
+	return out
+}
+
+func (b *Bot) sendDraft(ctx context.Context, chat int64, d *bcDraft) error {
+	var kb *Keyboard
+	if d.button != nil {
+		kb = &Keyboard{Rows: [][]Button{{*d.button}}}
+	}
+	if d.photo != "" {
+		return b.API.SendPhotoID(ctx, chat, d.photo, esc(d.text), kb)
+	}
+	_, err := b.API.Send(ctx, chat, esc(d.text), kb, 0)
+	return err
+}
+
+func (b *Bot) broadcast(ctx context.Context, owner int64, d *bcDraft) {
+	sent, failed, stopped := 0, 0, 0
+	for i, c := range d.chats {
+		b.mu.Lock()
+		stop := b.bcStop
+		b.mu.Unlock()
+		if stop {
+			stopped = len(d.chats) - i
+			break
+		}
+		if err := b.sendDraft(ctx, c, d); err == nil {
 			sent++
 		} else {
 			failed++
@@ -202,9 +330,13 @@ func (b *Bot) broadcast(ctx context.Context, owner int64, text string) {
 				b.Store.TgSetBlocked(ctx, c)
 			}
 		}
-		time.Sleep(40 * time.Millisecond)
+		time.Sleep(40 * time.Millisecond) // under Telegram's 30 messages/second
 	}
-	b.send(ctx, owner, fmt.Sprintf("📣 پیام همگانی تمام شد: %d ارسال، %d ناموفق.", sent, failed), &Keyboard{Rows: [][]Button{back("a:home")}})
+	msg := fmt.Sprintf("📣 پیام همگانی تمام شد: %d ارسال، %d ناموفق.", sent, failed)
+	if stopped > 0 {
+		msg += fmt.Sprintf(" %d نفر به‌خاطر توقف ارسال نشدند.", stopped)
+	}
+	b.send(ctx, owner, msg, &Keyboard{Rows: [][]Button{back("a:home")}})
 }
 
 func (b *Bot) nodesView(ctx context.Context, chat int64) {
@@ -410,4 +542,24 @@ func (b *Bot) repsView(ctx context.Context, chat int64) {
 	}
 	kb.Rows = append(kb.Rows, back("a:home"))
 	b.send(ctx, chat, "💼 <b>نماینده‌ها</b>\n\n"+strings.Join(lines, "\n"), kb)
+}
+
+// sendBackup sends an encrypted snapshot to one owner chat.
+func (b *Bot) sendBackup(ctx context.Context, chat int64) {
+	pass := b.Store.Setting(ctx, "tg_backup_pass")
+	if pass == "" {
+		b.setAwait(chat, "set:backup")
+		b.send(ctx, chat, "🔐 اول یک رمز بکاپ (حداقل ۸ کاراکتر) بفرستید. بکاپ‌ها با این رمز رمزگذاری می‌شوند.", nil)
+		return
+	}
+	data, err := b.Store.EncryptedBackup(ctx, pass)
+	if err != nil {
+		b.send(ctx, chat, "ساخت بکاپ ممکن نشد: "+esc(err.Error()), nil)
+		return
+	}
+	name := "dark-v2-" + b.now().UTC().Format("20060102-1504") + ".dkb"
+	caption := fmt.Sprintf("📦 بکاپ رمزگذاری‌شدهٔ هاب (%s)\nبازیابی: <code>dark-hub2 restore -file %s</code> (رمز را می‌پرسد)", gb(int64(len(data))), name)
+	if err := b.API.SendDocument(ctx, chat, name, data, caption); err != nil {
+		b.logf("tgbot backup: %v", err)
+	}
 }

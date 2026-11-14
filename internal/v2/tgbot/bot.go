@@ -30,8 +30,9 @@ type Bot struct {
 	Now     func() time.Time
 
 	mu         sync.Mutex
-	awaiting   map[int64]string // chat -> expected input: "support" | "link" | owner prompts
-	draft      map[int64]string // owner chat -> broadcast awaiting confirmation
+	awaiting   map[int64]string   // chat -> expected input: "support" | "link" | owner prompts
+	draft      map[int64]*bcDraft // owner chat -> broadcast being prepared
+	bcStop     bool
 	lastNotify time.Time
 	nodeState  map[string]bool
 	lastDaily  string
@@ -172,6 +173,19 @@ func (b *Bot) onMessage(ctx context.Context, m *Message) {
 	name := strings.TrimSpace(m.From.FirstName + " " + m.From.LastName)
 	_ = b.Store.TgTouch(ctx, chat, name, m.From.Username)
 	text := strings.TrimSpace(m.Text)
+	if text == "" {
+		text = strings.TrimSpace(m.Caption)
+	}
+	if b.Owners[chat] && len(m.Photo) > 0 {
+		b.mu.Lock()
+		what := b.awaiting[chat]
+		b.mu.Unlock()
+		if what == "broadcast" {
+			b.takeAwait(chat)
+			b.prepareBroadcast(ctx, chat, text, m.Photo[len(m.Photo)-1].FileID)
+			return
+		}
+	}
 	if b.Owners[chat] {
 		if text == "/start" || text == "/admin" || text == "/menu" {
 			b.ownerHome(ctx, chat)
@@ -587,17 +601,7 @@ func (b *Bot) ownerMessage(ctx context.Context, m *Message, text string) bool {
 			b.send(ctx, m.Chat.ID, "متن را بعد از /broadcast بنویسید.", nil)
 			return true
 		}
-		chats, _ := b.Store.TgChats(ctx)
-		sent := 0
-		for _, c := range chats {
-			if _, err := b.API.Send(ctx, c, esc(arg), nil, 0); err == nil {
-				sent++
-			} else if errors.Is(err, ErrBlocked) {
-				b.Store.TgSetBlocked(ctx, c)
-			}
-			time.Sleep(40 * time.Millisecond) // stay under Telegram's 30 msg/s
-		}
-		b.send(ctx, m.Chat.ID, fmt.Sprintf("پیام همگانی برای %d نفر ارسال شد.", sent), nil)
+		b.prepareBroadcast(ctx, m.Chat.ID, arg, "")
 	case "/paytext":
 		_ = b.Store.SetSetting(ctx, "tg_pay_text", arg)
 		b.send(ctx, m.Chat.ID, "متن پرداخت ذخیره شد.", nil)
@@ -760,6 +764,11 @@ func (b *Bot) dailyReport(ctx context.Context) {
 	}
 	_ = b.Store.SetSetting(ctx, "tg_daily", day)
 	b.toOwners(ctx, b.reportText(ctx), nil)
+	if b.Store.Setting(ctx, "tg_backup_pass") != "" {
+		for id := range b.Owners {
+			b.sendBackup(ctx, id)
+		}
+	}
 }
 
 const repHelp = `دستورهای نماینده:

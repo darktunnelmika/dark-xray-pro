@@ -11,6 +11,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
@@ -197,7 +198,19 @@ func main() {
 	case "restore":
 		// dark-hub2 restore -db v2.sqlite -file backup.sqlite.gz   (stop the service first)
 		s.Close()
-		if err := hubcore.RestoreBackup(*file, *dbPath); err != nil {
+		src := *file
+		if data, err := os.ReadFile(src); err == nil && hubcore.IsEncryptedBackup(data) {
+			// Encrypted (.dkb): the password is read from stdin.
+			fmt.Fprint(os.Stderr, "backup password: ")
+			line, _ := bufio.NewReader(os.Stdin).ReadString('\n')
+			plain, err := hubcore.DecryptFile(src, strings.TrimRight(line, "\r\n"))
+			if err != nil {
+				log.Fatal(err)
+			}
+			defer os.Remove(plain)
+			src = plain
+		}
+		if err := hubcore.RestoreBackup(src, *dbPath); err != nil {
 			log.Fatal(err)
 		}
 		fmt.Println("restored", *file, "into", *dbPath)

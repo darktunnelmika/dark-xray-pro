@@ -40,7 +40,19 @@ func (f *fakeAPI) SendPhoto(_ context.Context, chat int64, _ []byte, caption str
 	f.out = append(f.out, sent{chat: chat, text: caption, photo: true})
 	return nil
 }
-func (f *fakeAPI) Answer(context.Context, string, string) error          { return nil }
+func (f *fakeAPI) Answer(context.Context, string, string) error { return nil }
+func (f *fakeAPI) SendPhotoID(_ context.Context, chat int64, _ string, caption string, _ *Keyboard) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.out = append(f.out, sent{chat: chat, text: caption, photo: true})
+	return nil
+}
+func (f *fakeAPI) SendDocument(_ context.Context, chat int64, name string, data []byte, _ string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.out = append(f.out, sent{chat: chat, text: "doc:" + name})
+	return nil
+}
 func (f *fakeAPI) Me(context.Context) (string, error)                    { return "test_bot", nil }
 func (f *fakeAPI) SetCommands(context.Context, int64, [][2]string) error { return nil }
 
@@ -160,9 +172,14 @@ func TestStorefrontOrderDeliverySupport(t *testing.T) {
 	b.Handle(ctx, msg(ownerID, "/status"))
 	find(t, api.take(), ownerID, "نودها")
 	b.Handle(ctx, msg(ownerID, "/broadcast hello <all>"))
+	find(t, api.take(), ownerID, "چه کسانی")
+	b.Handle(ctx, cb(ownerID, "a:bca:active"))
+	find(t, api.take(), ownerID, "1 نفر")
+	b.Handle(ctx, cb(ownerID, "a:bcok"))
+	time.Sleep(300 * time.Millisecond)
 	out = api.take()
 	find(t, out, buyerID, "hello &lt;all&gt;")
-	find(t, out, ownerID, "ارسال شد")
+	find(t, out, ownerID, "تمام شد")
 }
 
 // firstTicketMessage finds the owner-side message id mapped to ticket 1.
@@ -269,8 +286,22 @@ func TestOwnerConsole(t *testing.T) {
 	// Broadcast needs a confirmation.
 	b.Handle(ctx, cb(ownerID, "a:bc"))
 	api.take()
-	b.Handle(ctx, msg(ownerID, "hello all"))
-	find(t, api.take(), ownerID, "پیش‌نمایش")
+	b.Handle(ctx, msg(ownerID, "hello all\n[Open](https://example.com)"))
+	find(t, api.take(), ownerID, "چه کسانی")
+	b.Handle(ctx, cb(ownerID, "a:bca:all"))
+	out = api.take()
+	prev := find(t, out, ownerID, "hello all")
+	if prev.kb == nil || prev.kb.Rows[0][0].URL != "https://example.com" {
+		t.Fatalf("button: %+v", prev.kb)
+	}
+	find(t, out, ownerID, "پیش‌نمایش")
+	// Backup: asks for a password first, then sends an encrypted file.
+	b.Handle(ctx, cb(ownerID, "a:backup"))
+	find(t, api.take(), ownerID, "رمز بکاپ")
+	b.Handle(ctx, msg(ownerID, "super-secret-1"))
+	api.take()
+	b.Handle(ctx, cb(ownerID, "a:backup"))
+	find(t, api.take(), ownerID, ".dkb")
 	// A customer cannot use owner buttons.
 	b.Handle(ctx, cb(buyerID, "a:delok:p10-1"))
 	if _, err := s.ClientByEmail(ctx, "p10-1"); err != nil {
