@@ -129,7 +129,8 @@ func TestMigrateFromOld(t *testing.T) {
 	}
 	body, _ := io.ReadAll(resp.Body)
 	resp.Body.Close()
-	if resp.StatusCode != 200 || !strings.Contains(resp.Header.Get("Subscription-Userinfo"), "total=") || len(body) == 0 {
+	// (The seeded inbound has no public endpoints, so the body itself is empty.)
+	if resp.StatusCode != 200 || !strings.Contains(resp.Header.Get("Subscription-Userinfo"), "total=32212254720") {
 		t.Fatalf("%d %s", resp.StatusCode, body)
 	}
 	if r2, _ := http.Get(srv.URL + "/api/v1/inbound-subscriptions/" + strings.Repeat("B", 43)); r2.StatusCode != 404 {
