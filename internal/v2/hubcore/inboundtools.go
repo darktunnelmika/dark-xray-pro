@@ -150,6 +150,9 @@ func (s *Store) CloneInbound(ctx context.Context, src string, req CloneRequest) 
 	if m == nil {
 		m = map[string]any{}
 	}
+	if rm, _ := m["remark"].(string); rm != "" {
+		m["remark"] = rm + " - " + req.Tag // apps list both; keep them apart
+	}
 	oldPort := intOf(t["port"])
 	t["port"] = req.Port
 	if st, _ := t["streamSettings"].(map[string]any); st != nil {

@@ -141,3 +141,10 @@ func TestSubMultiModeAndSingboxSkip(t *testing.T) {
 		t.Fatal("sing-box must skip VLESS encryption inbounds", string(sb), err)
 	}
 }
+
+func TestXrayError(t *testing.T) {
+	out := "Xray 26\nA unified platform\npanic: infra/conf: Failed to build VLESS inbound: invalid decryption\n\ngoroutine 1 [running]:\nmain.main()\n\tgithub.com/xtls/xray-core/main/main.go:22 +0x1b2"
+	if got := xrayError(out); got != "infra/conf: Failed to build VLESS inbound: invalid decryption" {
+		t.Fatal(got)
+	}
+}

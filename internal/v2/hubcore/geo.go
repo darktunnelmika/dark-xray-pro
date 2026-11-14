@@ -237,11 +237,28 @@ func (s *Store) testConfig(ctx context.Context, cfg []byte) error {
 	cmd.Env = append(os.Environ(), "XRAY_LOCATION_ASSET="+s.geoDir())
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		msg := strings.TrimSpace(string(out))
-		if i := strings.LastIndex(msg, "\n"); i >= 0 {
-			msg = msg[i+1:]
-		}
+		msg := xrayError(string(out))
 		return fmt.Errorf("xray rejects the config: %s", msg)
 	}
 	return nil
+}
+
+// xrayError picks the line of "xray run -test" output that says what is
+// wrong: Xray prints a panic with a stack trace, so the last line is
+// usually a source position, not the reason.
+func xrayError(out string) string {
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		l := strings.TrimSpace(lines[i])
+		if strings.HasPrefix(l, "panic:") || strings.Contains(l, "Failed to") || strings.Contains(l, "failed to") || strings.Contains(l, "invalid") {
+			if len(l) > 400 {
+				l = l[:400]
+			}
+			return strings.TrimPrefix(l, "panic: ")
+		}
+	}
+	if len(lines) > 0 {
+		return strings.TrimSpace(lines[len(lines)-1])
+	}
+	return "unknown error"
 }
