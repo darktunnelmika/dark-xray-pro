@@ -86,6 +86,9 @@ func (b *Bot) Run(ctx context.Context) {
 		b.Store.MarkAllOrdersAnnounced(ctx) // first start: do not replay history
 		_ = b.Store.SetSetting(ctx, "tg_started", "1")
 	}
+	if name, err := b.API.Me(ctx); err == nil && name != "" {
+		_ = b.Store.SetSetting(ctx, "tg_username", name)
+	}
 	go b.background(ctx)
 	var offset int64
 	for ctx.Err() == nil {
@@ -163,6 +166,22 @@ func (b *Bot) onMessage(ctx context.Context, m *Message) {
 	text := strings.TrimSpace(m.Text)
 	if b.Owners[chat] {
 		if b.ownerMessage(ctx, m, text) {
+			return
+		}
+	}
+	if code, ok := strings.CutPrefix(text, "/start rep_"); ok {
+		rep, err := b.Store.ClaimTgLinkCode(ctx, strings.TrimSpace(code), chat)
+		if err != nil {
+			b.send(ctx, chat, "این کد معتبر نیست یا منقضی شده. از پنل یک کد تازه بگیرید.", nil)
+			return
+		}
+		b.send(ctx, chat, "✅ تلگرام شما به نمایندگی <b>"+esc(rep)+"</b> وصل شد.
+
+"+repHelp, nil)
+		return
+	}
+	if rep := b.Store.TgRep(ctx, chat); rep != "" {
+		if b.repMessage(ctx, chat, rep, text) {
 			return
 		}
 	}
@@ -420,19 +439,24 @@ func (b *Bot) onCallback(ctx context.Context, q *CallbackQuery) {
 			b.sendSub(ctx, chat, rest)
 		}
 	case "ok", "no":
+		by := b.owner()
 		if !b.Owners[chat] {
-			return
+			rep := b.Store.TgRep(ctx, chat)
+			if rep == "" {
+				return
+			}
+			by = hubcore.Principal{User: "tg:" + strconv.FormatInt(chat, 10), Role: "rep", RepID: rep}
 		}
 		id, _ := strconv.ParseInt(rest, 10, 64)
 		if verb == "ok" {
-			email, err := b.Store.FulfillOrder(ctx, b.owner(), id)
+			email, err := b.Store.FulfillOrder(ctx, by, id)
 			if err != nil {
 				b.send(ctx, chat, fmt.Sprintf("تحویل سفارش #%d ممکن نشد: %s", id, esc(err.Error())), nil)
 				return
 			}
 			b.send(ctx, chat, fmt.Sprintf("✅ سفارش #%d تحویل شد: <code>%s</code>", id, esc(email)), &Keyboard{Rows: [][]Button{{{Text: "لینک و QR", Data: "sub:" + email}}}})
 		} else {
-			if err := b.Store.CancelOrder(ctx, b.owner(), id); err != nil {
+			if err := b.Store.CancelOrder(ctx, by, id); err != nil {
 				b.send(ctx, chat, fmt.Sprintf("لغو سفارش #%d ممکن نشد: %s", id, esc(err.Error())), nil)
 				return
 			}
@@ -549,7 +573,14 @@ func (b *Bot) orderCard(ctx context.Context, o hubcore.Order) string {
 func (b *Bot) announceOrders(ctx context.Context) {
 	if news, err := b.Store.OrdersToAnnounce(ctx); err == nil {
 		for _, o := range news {
-			b.toOwners(ctx, b.orderCard(ctx, o), orderButtons(o.ID))
+			if o.Seller != "" {
+				// A reseller's order goes to that reseller, who pays for it.
+				if chat := b.Store.TgRepChat(ctx, o.Seller); chat != 0 {
+					b.send(ctx, chat, b.orderCard(ctx, o), orderButtons(o.ID))
+				}
+			} else {
+				b.toOwners(ctx, b.orderCard(ctx, o), orderButtons(o.ID))
+			}
 			b.Store.MarkOrderAnnounced(ctx, o.ID, false)
 		}
 	}
@@ -656,4 +687,44 @@ func (b *Bot) dailyReport(ctx context.Context) {
 	}
 	_ = b.Store.SetSetting(ctx, "tg_daily", day)
 	b.toOwners(ctx, b.reportText(ctx), nil)
+}
+
+const repHelp = `دستورهای نماینده:
+/credit — اعتبار و تعداد کلاینت‌ها
+/orders — سفارش‌های در انتظار شما
+/client نام — اطلاعات یکی از کلاینت‌های شما`
+
+func (b *Bot) repMessage(ctx context.Context, chat int64, rep, text string) bool {
+	cmd, arg, _ := strings.Cut(text, " ")
+	arg = strings.TrimSpace(arg)
+	p := hubcore.Principal{User: "tg:" + strconv.FormatInt(chat, 10), Role: "rep", RepID: rep}
+	switch strings.SplitN(cmd, "@", 2)[0] {
+	case "/help":
+		b.send(ctx, chat, repHelp, nil)
+	case "/credit":
+		reps, _ := b.Store.Reps(ctx)
+		for _, r := range reps {
+			if r.ID == rep {
+				b.send(ctx, chat, fmt.Sprintf("💳 <b>%s</b>\nاعتبار حجمی: %s\nواحد نامحدود: %d\nکلاینت‌ها: %d", esc(r.Name), gb(r.VolumeCredit), r.UnlimitedUnits, r.Clients), nil)
+			}
+		}
+	case "/orders":
+		list, _ := b.Store.Orders(ctx, p, "pending", 20)
+		if len(list) == 0 {
+			b.send(ctx, chat, "سفارش در انتظاری نیست.", nil)
+		}
+		for _, o := range list {
+			b.send(ctx, chat, b.orderCard(ctx, o), orderButtons(o.ID))
+		}
+	case "/client":
+		c, err := b.Store.ClientByEmail(ctx, arg)
+		if err != nil || c.RepID != rep {
+			b.send(ctx, chat, "کلاینت پیدا نشد.", nil)
+			return true
+		}
+		b.send(ctx, chat, b.clientCard(c), nil)
+	default:
+		return false
+	}
+	return true
 }

@@ -239,3 +239,53 @@ func (s *Store) ClientByEmail(ctx context.Context, email string) (ClientView, er
 	}
 	return ClientView{}, ErrNotFound
 }
+
+// Representatives connect their Telegram with a one-time code from the
+// panel; the bot then sends them their own order cards and balances.
+
+func (s *Store) ensureTgRepSchema() error {
+	return s.addColumn("reps", "tg_chat", "INTEGER NOT NULL DEFAULT 0")
+}
+
+// NewTgLinkCode returns a code valid for 15 minutes.
+func (s *Store) NewTgLinkCode(ctx context.Context, repID string) (string, error) {
+	code := randomHex(8)
+	exp := s.now().Unix() + 900
+	return code, s.SetSetting(ctx, "tglink:"+code, repID+"|"+strconv.FormatInt(exp, 10))
+}
+
+// ClaimTgLinkCode binds chat to the representative that owns the code.
+func (s *Store) ClaimTgLinkCode(ctx context.Context, code string, chat int64) (string, error) {
+	v := s.Setting(ctx, "tglink:"+code)
+	rep, expS, ok := strings.Cut(v, "|")
+	exp, _ := strconv.ParseInt(expS, 10, 64)
+	_, _ = s.db.ExecContext(ctx, `DELETE FROM settings WHERE key=?`, "tglink:"+code)
+	if !ok || exp < s.now().Unix() {
+		return "", ErrNotFound
+	}
+	if _, err := s.db.ExecContext(ctx, `UPDATE reps SET tg_chat=0 WHERE tg_chat=?`, chat); err != nil {
+		return "", err
+	}
+	r, err := s.db.ExecContext(ctx, `UPDATE reps SET tg_chat=? WHERE id=?`, chat, rep)
+	if err != nil {
+		return "", err
+	}
+	if n, _ := r.RowsAffected(); n != 1 {
+		return "", ErrNotFound
+	}
+	return rep, nil
+}
+
+// TgRep returns the representative bound to a chat ("" if none).
+func (s *Store) TgRep(ctx context.Context, chat int64) string {
+	var id string
+	_ = s.ro.QueryRowContext(ctx, `SELECT id FROM reps WHERE tg_chat=? AND enabled=1`, chat).Scan(&id)
+	return id
+}
+
+// TgRepChat returns a representative's chat (0 if not connected).
+func (s *Store) TgRepChat(ctx context.Context, repID string) int64 {
+	var c int64
+	_ = s.ro.QueryRowContext(ctx, `SELECT tg_chat FROM reps WHERE id=?`, repID).Scan(&c)
+	return c
+}

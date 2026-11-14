@@ -22,6 +22,7 @@ type API interface {
 	Send(ctx context.Context, chat int64, text string, kb *Keyboard, replyTo int64) (int64, error)
 	SendPhoto(ctx context.Context, chat int64, png []byte, caption string) error
 	Answer(ctx context.Context, callbackID, text string) error
+	Me(ctx context.Context) (string, error)
 }
 
 type Update struct {
@@ -175,4 +176,10 @@ func (a *HTTPAPI) SendPhoto(ctx context.Context, chat int64, png []byte, caption
 
 func (a *HTTPAPI) Answer(ctx context.Context, id, text string) error {
 	return a.callJSON(ctx, "answerCallbackQuery", map[string]any{"callback_query_id": id, "text": text}, nil)
+}
+
+func (a *HTTPAPI) Me(ctx context.Context) (string, error) {
+	var u User
+	err := a.callJSON(ctx, "getMe", map[string]any{}, &u)
+	return u.Username, err
 }

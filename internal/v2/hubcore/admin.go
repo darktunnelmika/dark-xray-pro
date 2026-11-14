@@ -186,6 +186,15 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 			h(w, r)
 		})
 	}
+	mux.HandleFunc("POST /api/v2/rep/telegram", repOnly(func(w http.ResponseWriter, r *http.Request) {
+		code, err := s.NewTgLinkCode(r.Context(), who(r).RepID)
+		bot := s.Setting(r.Context(), "tg_username")
+		link := ""
+		if bot != "" {
+			link = "https://t.me/" + bot + "?start=rep_" + code
+		}
+		reply(w, map[string]string{"code": code, "link": link, "bot": bot}, err)
+	}))
 	mux.HandleFunc("GET /api/v2/rep/sellers", repOnly(func(w http.ResponseWriter, r *http.Request) {
 		list, err := s.Sellers(r.Context(), who(r).RepID)
 		for i := range list {

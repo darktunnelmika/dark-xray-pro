@@ -3,6 +3,7 @@ package tgbot
 import (
 	"context"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -39,6 +40,7 @@ func (f *fakeAPI) SendPhoto(_ context.Context, chat int64, _ []byte, caption str
 	return nil
 }
 func (f *fakeAPI) Answer(context.Context, string, string) error { return nil }
+func (f *fakeAPI) Me(context.Context) (string, error)            { return "test_bot", nil }
 
 func (f *fakeAPI) take() []sent {
 	f.mu.Lock()
@@ -169,4 +171,49 @@ func firstTicketMessage(s *hubcore.Store, ctx context.Context) (int64, error) {
 		}
 	}
 	return 0, hubcore.ErrNotFound
+}
+
+func TestResellerTelegram(t *testing.T) {
+	s, err := hubcore.Open(filepath.Join(t.TempDir(), "v2.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	ctx := context.Background()
+	_, _ = s.CreateNode(ctx, "n1", "N")
+	_ = s.PutInbound(ctx, "in1", "n1", []byte(`{"protocol":"vless","port":443,"settings":{}}`), true)
+	owner := hubcore.Principal{User: "o", Role: "owner"}
+	_ = s.PutRep(ctx, hubcore.Rep{ID: "ali", Name: "Ali", Enabled: true})
+	_ = s.AdjustCredit(ctx, "o", "ali", 10<<30, 0, "")
+	if err := s.PutProduct(ctx, owner, hubcore.Product{ID: "a5", Seller: "ali", Name: "5GB", Plan: "volume", GB: 5, Days: 30, Inbounds: []string{"in1"}, Price: 1, Status: "published"}); err != nil {
+		t.Fatal(err)
+	}
+	api := &fakeAPI{}
+	b := &Bot{Store: s, API: api, Owners: map[int64]bool{ownerID: true}, SubBase: "https://x", Logf: t.Logf}
+	b.Tick(ctx)
+	const repChat = int64(3000)
+	b.Handle(ctx, msg(repChat, "/start rep_bogus"))
+	find(t, api.take(), repChat, "معتبر نیست")
+	code, _ := s.NewTgLinkCode(ctx, "ali")
+	b.Handle(ctx, msg(repChat, "/start rep_"+code))
+	find(t, api.take(), repChat, "وصل شد")
+	b.Handle(ctx, msg(repChat, "/start rep_"+code)) // single use
+	find(t, api.take(), repChat, "معتبر نیست")
+
+	id, err := s.CreateOrder(ctx, owner, "a5", "walk-in", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	b.Tick(ctx)
+	out := api.take()
+	find(t, out, repChat, "سفارش <b>#")
+	for _, m := range out {
+		if m.chat == ownerID {
+			t.Fatal("a reseller's order must go to the reseller")
+		}
+	}
+	b.Handle(ctx, cb(repChat, "ok:"+strconv.FormatInt(id, 10)))
+	find(t, api.take(), repChat, "تحویل شد")
+	b.Handle(ctx, msg(repChat, "/credit"))
+	find(t, api.take(), repChat, "5.00 GB")
 }
