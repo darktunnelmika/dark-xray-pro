@@ -504,3 +504,24 @@ func TestBulkGroupsTransferNodeManagement(t *testing.T) {
 		t.Fatal("clients survive node deletion")
 	}
 }
+
+func TestNodeHostHistory(t *testing.T) {
+	s, now := newStore(t)
+	ctx := context.Background()
+	seed(t, s)
+	for i := 0; i < 3; i++ {
+		_, err := s.Sync(ctx, "de-1", wire.SyncRequest{Host: &wire.Host{CPUPercent: float64(10 * (i + 1)), RAMUsed: 1, RAMTotal: 4, RXRate: 100, OnlineUsers: i}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		*now = now.Add(5 * time.Minute)
+	}
+	pts, err := s.NodeHistory(ctx, "de-1", 1)
+	if err != nil || len(pts) != 3 || pts[2].CPU != 30 || pts[0].RAM != 25 {
+		t.Fatalf("history %+v %v", pts, err)
+	}
+	nodes, _ := s.Nodes(ctx)
+	if nodes[0].Host == nil || nodes[0].Host.CPUPercent != 30 {
+		t.Fatalf("latest host %+v", nodes[0].Host)
+	}
+}

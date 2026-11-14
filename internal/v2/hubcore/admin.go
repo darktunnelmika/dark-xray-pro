@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -135,6 +136,11 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 	mux.HandleFunc("GET /api/v2/admin/inbounds", guard(func(w http.ResponseWriter, r *http.Request) {
 		list, err := s.Inbounds(r.Context())
 		reply(w, list, err)
+	}))
+	mux.HandleFunc("GET /api/v2/admin/nodes/{id}/history", guard(func(w http.ResponseWriter, r *http.Request) {
+		hours, _ := strconv.Atoi(r.URL.Query().Get("hours"))
+		pts, err := s.NodeHistory(r.Context(), r.PathValue("id"), hours)
+		reply(w, pts, err)
 	}))
 	mux.HandleFunc("PUT /api/v2/admin/nodes/{id}", guard(func(w http.ResponseWriter, r *http.Request) {
 		var in struct{ Name string }

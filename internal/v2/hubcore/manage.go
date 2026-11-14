@@ -12,6 +12,12 @@ CREATE TABLE IF NOT EXISTS client_groups (
   name TEXT NOT NULL,
   created_unix INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS node_history (
+  node_id TEXT NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
+  bucket INTEGER NOT NULL,
+  cpu REAL NOT NULL, ram_pct REAL NOT NULL, rx_rate REAL NOT NULL, tx_rate REAL NOT NULL, online INTEGER NOT NULL,
+  PRIMARY KEY(node_id, bucket)
+);
 CREATE TABLE IF NOT EXISTS client_group_members (
   group_id TEXT NOT NULL REFERENCES client_groups(id) ON DELETE CASCADE,
   email TEXT NOT NULL REFERENCES clients(email) ON DELETE CASCADE,
@@ -21,6 +27,9 @@ CREATE TABLE IF NOT EXISTS client_group_members (
 
 func (s *Store) ensureManageSchema() error {
 	if _, err := s.db.Exec(manageSchema); err != nil {
+		return err
+	}
+	if err := s.addColumn("nodes", "host_json", "TEXT NOT NULL DEFAULT ''"); err != nil {
 		return err
 	}
 	return s.addColumn("clients", "note", "TEXT NOT NULL DEFAULT ''")

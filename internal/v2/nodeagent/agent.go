@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/darktunnelmika/dark-xray-pro/internal/hostmetrics"
 	"github.com/darktunnelmika/dark-xray-pro/internal/v2/wire"
 )
 
@@ -58,6 +59,54 @@ type Agent struct {
 	pendingDisc  []wire.Disconnect
 	lastOnline   time.Time
 	lastFrom     int64
+	lastHost     *hostSample
+	onlineCount  int
+}
+
+type hostSample struct {
+	raw hostmetrics.Raw
+	at  time.Time
+}
+
+// hostStats samples machine health; rates need two samples.
+func (a *Agent) hostStats() *wire.Host {
+	raw, err := hostmetrics.Read()
+	if err != nil {
+		return nil
+	}
+	now := time.Now()
+	h := &wire.Host{RAMUsed: raw.RAMUsed, RAMTotal: raw.RAMTotal}
+	if raw.DiskTotal != nil && raw.DiskUsed != nil {
+		h.DiskTotal, h.DiskUsed = *raw.DiskTotal, *raw.DiskUsed
+	}
+	if raw.Load1 != nil {
+		h.Load1 = *raw.Load1
+	}
+	if raw.UptimeSec != nil {
+		h.UptimeSec = *raw.UptimeSec
+	}
+	if raw.TCPInUse != nil {
+		h.TCP = *raw.TCPInUse
+	}
+	a.mu.Lock()
+	prev := a.lastHost
+	a.lastHost = &hostSample{raw: raw, at: now}
+	h.OnlineUsers = a.onlineCount
+	a.mu.Unlock()
+	if prev != nil {
+		if cpu, ok := hostmetrics.CPUPercent(prev.raw, raw); ok {
+			h.CPUPercent = cpu
+		}
+		if dt := now.Sub(prev.at).Seconds(); dt > 0 && raw.Interface == prev.raw.Interface {
+			if raw.RXBytes >= prev.raw.RXBytes {
+				h.RXRate = float64(raw.RXBytes-prev.raw.RXBytes) / dt
+			}
+			if raw.TXBytes >= prev.raw.TXBytes {
+				h.TXRate = float64(raw.TXBytes-prev.raw.TXBytes) / dt
+			}
+		}
+	}
+	return h
 }
 
 func New(cfg Config, hub Hub, xray Applier, stats StatsSource) (*Agent, error) {
@@ -133,6 +182,7 @@ func (a *Agent) Collect(ctx context.Context) {
 	}
 	online, _ := a.stats.OnlineIPs(ctx)
 	a.mu.Lock()
+	a.onlineCount = len(online)
 	disc := a.pendingDisc
 	a.pendingDisc = nil
 	sendOnline := len(online) > 0 && now.Sub(a.lastOnline) >= time.Minute
@@ -245,7 +295,8 @@ func (a *Agent) Exchange(ctx context.Context) time.Duration {
 	rev := a.state.ConfigRevision
 	a.mu.Unlock()
 	resp, err := a.hub.Sync(ctx, wire.SyncRequest{NodeID: a.cfg.NodeID, AgentVersion: Version, ConfigRevision: rev,
-		XrayRunning: running, XrayRestarts: restarts, LastError: lastErr, SpooledBatches: a.spool.Len(), UnixTime: a.cfg.Now().Unix()})
+		XrayRunning: running, XrayRestarts: restarts, LastError: lastErr, SpooledBatches: a.spool.Len(), UnixTime: a.cfg.Now().Unix(),
+		Host: a.hostStats()})
 	if err != nil {
 		a.cfg.Logf("hub sync unavailable, serving last state: %v", err)
 		return poll

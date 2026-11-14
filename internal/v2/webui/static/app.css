@@ -115,3 +115,9 @@ dialog .actions { display: flex; gap: 8px; justify-content: flex-end; margin-blo
 .login { min-block-size: 100dvh; display: grid; place-items: center; padding: 16px; }
 .login .card { inline-size: min(380px, 100%); }
 .error { color: var(--bad); font-size: 13px; min-block-size: 1.2em; }
+
+.meters { display: grid; gap: 6px; }
+.meter .row { margin-block-end: 2px; }
+.spark { inline-size: 100%; block-size: 48px; display: block; }
+.spark-line { fill: none; stroke: var(--accent); stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+.spark-area { fill: color-mix(in oklab, var(--accent) 16%, transparent); stroke: none; }

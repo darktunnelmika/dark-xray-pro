@@ -22,6 +22,7 @@ const I18N = {
     selected: "{n} selected", changed: "{n} clients updated", all: "All", filterOnline: "Online", filterExpiring: "Expiring (≤3 days)",
     filterExpired: "Expired / used up", filterDisabled: "Disabled", group: "Group", contact: "Contact / note", transfer: "Move to reseller",
     ownerSelf: "Owner (me)", confirmNodeDelete: "Delete node {x} and its inbounds? Clients and usage stay.", selectAll: "Select all",
+    health: "Health (24h)", cpu: "CPU", ram: "RAM", disk: "Disk", net: "Network", uptime: "Uptime", inRate: "in", outRate: "out", noData: "No samples yet",
   },
   fa: {
     dashboard: "داشبورد", clients: "کلاینت‌ها", inbounds: "اینباندها", nodes: "نودها", settings: "تنظیمات",
@@ -45,6 +46,7 @@ const I18N = {
     selected: "{n} انتخاب شده", changed: "{n} کلاینت به‌روز شد", all: "همه", filterOnline: "آنلاین", filterExpiring: "رو به انقضا (≤۳ روز)",
     filterExpired: "منقضی / حجم تمام", filterDisabled: "غیرفعال", group: "گروه", contact: "تماس / یادداشت", transfer: "انتقال به نماینده",
     ownerSelf: "مالک (خودم)", confirmNodeDelete: "نود {x} و اینباندهایش حذف شود؟ کلاینت‌ها و مصرف حفظ می‌شوند.", selectAll: "انتخاب همه",
+    health: "سلامت (۲۴ ساعت)", cpu: "پردازنده", ram: "رم", disk: "دیسک", net: "شبکه", uptime: "روشن بودن", inRate: "ورودی", outRate: "خروجی", noData: "هنوز نمونه‌ای نیست",
   },
 };
 let lang = safeGet("lang") === "fa" ? "fa" : "en";
@@ -165,13 +167,51 @@ async function viewDashboard() {
     h("div", { class: "list" }, (nodes || []).map((n) => nodeCard(n))));
 }
 
+function rate(bps) { return `${bytes(bps)}/s`; }
+function dur(sec) { const d = Math.floor(sec / 86400), hh = Math.floor((sec % 86400) / 3600); return d ? `${fmtNum(d)}d ${fmtNum(hh)}h` : `${fmtNum(hh)}h`; }
+
+// Sparkline as inline SVG (built with the DOM, never markup strings).
+function spark(values, max) {
+  const NS = "http://www.w3.org/2000/svg", W = 300, H = 48;
+  const svg = document.createElementNS(NS, "svg");
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`); svg.setAttribute("class", "spark"); svg.setAttribute("preserveAspectRatio", "none");
+  if (values.length < 2) return svg;
+  const top = max || Math.max(1, ...values);
+  const pts = values.map((v, i) => `${(i / (values.length - 1)) * W},${H - 2 - (Math.min(v, top) / top) * (H - 4)}`).join(" ");
+  const area = document.createElementNS(NS, "polygon");
+  area.setAttribute("points", `0,${H} ${pts} ${W},${H}`); area.setAttribute("class", "spark-area");
+  const line = document.createElementNS(NS, "polyline");
+  line.setAttribute("points", pts); line.setAttribute("class", "spark-line");
+  svg.append(area, line);
+  return svg;
+}
+
+async function nodeHealth(n) {
+  const pts = await api("GET", `/api/v2/admin/nodes/${encodeURIComponent(n.ID)}/history?hours=24`);
+  const block = (label, vals, max, fmt) => h("div", { class: "form" },
+    h("div", { class: "row small" }, h("strong", {}, label), h("span", { class: "muted spacer" }, vals.length ? fmt(vals.at(-1)) : "—")), spark(vals, max));
+  openModal(`${t("health")} · ${n.Name || n.ID}`, pts.length ? h("div", { class: "form" },
+    block(t("cpu"), pts.map((p) => p.cpu), 100, (v) => `${fmtNum(v)}%`),
+    block(t("ram"), pts.map((p) => p.ram), 100, (v) => `${fmtNum(v)}%`),
+    block(`${t("net")} · ${t("inRate")}`, pts.map((p) => p.rx), 0, rate),
+    block(`${t("net")} · ${t("outRate")}`, pts.map((p) => p.tx), 0, rate),
+    block(t("onlineUsers"), pts.map((p) => p.online), 0, (v) => fmtNum(v))) : h("p", { class: "muted" }, t("noData")));
+}
+
 function nodeCard(n, actions = false) {
+  const host = n.Host;
   return h("div", { class: "card item" },
     h("div", { class: "head" }, h("span", { class: `dot ${n.online ? "on" : ""}` }), h("span", { class: "name" }, `${n.Name || n.ID}`),
       h("span", { class: "badge" }, n.ID), h("span", { class: `badge ${n.online ? "good" : "bad"} spacer` }, t(n.online ? "online" : "offline"))),
     h("div", { class: "muted small" }, `${t("restarts")}: ${fmtNum(n.XrayRestarts)} · ${t("spooled")}: ${fmtNum(n.Spooled)} · ${n.AgentVersion || ""}`),
+    host ? h("div", { class: "meters" },
+      meter(t("cpu"), host.cpu_percent, `${fmtNum(host.cpu_percent)}%`),
+      meter(t("ram"), host.ram_total ? (100 * host.ram_used) / host.ram_total : 0, `${bytes(host.ram_used)} / ${bytes(host.ram_total)}`),
+      host.disk_total ? meter(t("disk"), (100 * host.disk_used) / host.disk_total, `${bytes(host.disk_used)} / ${bytes(host.disk_total)}`) : null,
+      h("div", { class: "small muted" }, `↓ ${rate(host.rx_rate)} · ↑ ${rate(host.tx_rate)} · ${t("onlineUsers")}: ${fmtNum(host.online_users)} · ${t("uptime")}: ${dur(host.uptime_sec)}`)) : null,
     n.LastError ? h("div", { class: "small", style: "color:var(--bad)" }, `${t("lastError")}: ${n.LastError}`) : null,
     actions ? h("div", { class: "row" },
+      h("button", { onclick: () => nodeHealth(n) }, t("health")),
       h("button", { class: "ghost", onclick: () => renameNode(n) }, t("rename")),
       h("button", { class: "ghost", onclick: async () => {
         try { const r = await guarded(() => api("POST", `/api/v2/admin/nodes/${encodeURIComponent(n.ID)}/install`));
@@ -181,6 +221,12 @@ function nodeCard(n, actions = false) {
       h("button", { class: "ghost danger spacer", onclick: async () => {
         if (await confirmAction(t("confirmNodeDelete", { x: n.ID }))) { await guarded(() => api("DELETE", `/api/v2/admin/nodes/${encodeURIComponent(n.ID)}`)); route(); }
       } }, t("delete"))) : null);
+}
+
+function meter(label, pct, text) {
+  const p = Math.max(0, Math.min(100, pct || 0));
+  return h("div", { class: "meter" }, h("div", { class: "row small" }, h("span", {}, label), h("span", { class: "muted spacer" }, text)),
+    h("div", { class: "bar" }, h("i", { class: p > 90 ? "bad" : p > 75 ? "warn" : "", style: `inline-size:${p}%` })));
 }
 
 function renameNode(n) {

@@ -30,6 +30,22 @@ type SyncRequest struct {
 	LastError      string `json:"last_error,omitempty"`
 	SpooledBatches int    `json:"spooled_batches"`
 	UnixTime       int64  `json:"unix_time"`
+	Host           *Host  `json:"host,omitempty"`
+}
+
+// Host is the node machine's health at the time of the sync.
+type Host struct {
+	CPUPercent  float64 `json:"cpu_percent"`
+	RAMUsed     uint64  `json:"ram_used"`
+	RAMTotal    uint64  `json:"ram_total"`
+	DiskUsed    uint64  `json:"disk_used"`
+	DiskTotal   uint64  `json:"disk_total"`
+	Load1       float64 `json:"load1"`
+	UptimeSec   uint64  `json:"uptime_sec"`
+	RXRate      float64 `json:"rx_rate"` // bytes per second on the default interface
+	TXRate      float64 `json:"tx_rate"`
+	TCP         uint64  `json:"tcp"`
+	OnlineUsers int     `json:"online_users"`
 }
 
 // SyncResponse carries the desired state. Config is only present when

@@ -45,6 +45,24 @@ spooled=?, reported_revision=?, config_revision=?, config_sha256=? WHERE id=?`,
 		now, req.AgentVersion, req.XrayRunning, req.XrayRestarts, lastErr, req.SpooledBatches, req.ConfigRevision, rev, digest, nodeID); err != nil {
 		return wire.SyncResponse{}, err
 	}
+	if req.Host != nil {
+		hj, _ := json.Marshal(req.Host)
+		if _, err := tx.ExecContext(ctx, `UPDATE nodes SET host_json=? WHERE id=?`, string(hj), nodeID); err != nil {
+			return wire.SyncResponse{}, err
+		}
+		bucket := now - now%300
+		ramPct := 0.0
+		if req.Host.RAMTotal > 0 {
+			ramPct = 100 * float64(req.Host.RAMUsed) / float64(req.Host.RAMTotal)
+		}
+		// One row per node per 5 minutes; the latest sample in the bucket wins.
+		if _, err := tx.ExecContext(ctx, `INSERT INTO node_history(node_id,bucket,cpu,ram_pct,rx_rate,tx_rate,online) VALUES(?,?,?,?,?,?,?)
+ON CONFLICT(node_id,bucket) DO UPDATE SET cpu=excluded.cpu, ram_pct=excluded.ram_pct, rx_rate=MAX(rx_rate,excluded.rx_rate),
+tx_rate=MAX(tx_rate,excluded.tx_rate), online=MAX(online,excluded.online)`,
+			nodeID, bucket, req.Host.CPUPercent, ramPct, req.Host.RXRate, req.Host.TXRate, req.Host.OnlineUsers); err != nil {
+			return wire.SyncResponse{}, err
+		}
+	}
 	if err := tx.Commit(); err != nil {
 		return wire.SyncResponse{}, err
 	}
@@ -152,6 +170,9 @@ func (s *Store) Prune(ctx context.Context, keepDays int) error {
 	if _, err := s.db.ExecContext(ctx, `DELETE FROM usage_daily WHERE day < ?`, cut.UTC().Format("2006-01-02")); err != nil {
 		return err
 	}
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM node_history WHERE bucket < ?`, s.now().Add(-7*24*time.Hour).Unix()); err != nil {
+		return err
+	}
 	_, err := s.db.ExecContext(ctx, `DELETE FROM events WHERE unix < ?`, cut.Unix())
 	return err
 }
@@ -165,6 +186,39 @@ type NodeStatus struct {
 	Spooled                           int
 	ConfigRevision, ReportedRevision  int64
 	UsageSeq                          int64
+	Host                              *wire.Host
+}
+
+// HistoryPoint is one 5-minute sample of a node's health.
+type HistoryPoint struct {
+	Unix   int64   `json:"t"`
+	CPU    float64 `json:"cpu"`
+	RAM    float64 `json:"ram"`
+	RX     float64 `json:"rx"`
+	TX     float64 `json:"tx"`
+	Online int     `json:"online"`
+}
+
+// NodeHistory returns up to the last `hours` of samples.
+func (s *Store) NodeHistory(ctx context.Context, id string, hours int) ([]HistoryPoint, error) {
+	if hours <= 0 || hours > 24*7 {
+		hours = 24
+	}
+	rows, err := s.ro.QueryContext(ctx, `SELECT bucket,cpu,ram_pct,rx_rate,tx_rate,online FROM node_history WHERE node_id=? AND bucket>=? ORDER BY bucket`,
+		id, s.now().Unix()-int64(hours)*3600)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []HistoryPoint{}
+	for rows.Next() {
+		var p HistoryPoint
+		if err := rows.Scan(&p.Unix, &p.CPU, &p.RAM, &p.RX, &p.TX, &p.Online); err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
 }
 
 // Online reports whether the node synced within 3 polls.
@@ -174,7 +228,7 @@ func (n NodeStatus) Online(now time.Time) bool {
 
 func (s *Store) Nodes(ctx context.Context) ([]NodeStatus, error) {
 	rows, err := s.ro.QueryContext(ctx, `SELECT id,name,agent_version,last_error,last_seen_unix,xray_running,xray_restarts,spooled,
-config_revision,reported_revision,usage_seq FROM nodes ORDER BY id`)
+config_revision,reported_revision,usage_seq,host_json FROM nodes ORDER BY id`)
 	if err != nil {
 		return nil, err
 	}
@@ -182,9 +236,16 @@ config_revision,reported_revision,usage_seq FROM nodes ORDER BY id`)
 	var out []NodeStatus
 	for rows.Next() {
 		var n NodeStatus
+		var hj string
 		if err := rows.Scan(&n.ID, &n.Name, &n.AgentVersion, &n.LastError, &n.LastSeen, &n.XrayRunning, &n.XrayRestarts,
-			&n.Spooled, &n.ConfigRevision, &n.ReportedRevision, &n.UsageSeq); err != nil {
+			&n.Spooled, &n.ConfigRevision, &n.ReportedRevision, &n.UsageSeq, &hj); err != nil {
 			return nil, err
+		}
+		if hj != "" {
+			var h wire.Host
+			if json.Unmarshal([]byte(hj), &h) == nil {
+				n.Host = &h
+			}
 		}
 		out = append(out, n)
 	}
