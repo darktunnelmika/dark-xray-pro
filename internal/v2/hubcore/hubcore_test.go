@@ -742,3 +742,76 @@ func TestPresetsRenderForEveryProtocol(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestDarkSwapRelay(t *testing.T) {
+	s, _ := newStore(t)
+	ctx := context.Background()
+	seed(t, s)
+	if _, err := s.CreateNode(ctx, "ir-relay", "Relay"); err != nil {
+		t.Fatal(err)
+	}
+	meta := []byte(`{"endpoints":[{"name":"Direct","address":"9.9.9.9","port":18580}]}`)
+	if err := s.PutInboundMeta(ctx, "de-vless", "de-1", []byte(vlessTemplate), meta, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.PutInbound(ctx, "relay-own", "ir-relay", []byte(strings.Replace(vlessTemplate, "18580", "6900", 1)), true); err != nil {
+		t.Fatal(err)
+	}
+	bad := []Swap{
+		{ID: "s1", InboundTag: "de-vless", SourceNode: "de-1", SourcePort: 6801, EntryAddress: "ir.example", EntryPort: 6801}, // same node
+		{ID: "s1", InboundTag: "de-vless", SourceNode: "ir-relay", SourcePort: 6900, EntryAddress: "ir.example", EntryPort: 6801}, // port taken
+		{ID: "s1", InboundTag: "nope", SourceNode: "ir-relay", SourcePort: 6801, EntryAddress: "ir.example", EntryPort: 6801},
+	}
+	for i, w := range bad {
+		if err := s.PutSwap(ctx, w); !errors.Is(err, ErrInvalid) {
+			t.Fatalf("bad %d: %v", i, err)
+		}
+	}
+	ok := Swap{ID: "s1", InboundTag: "de-vless", SourceNode: "ir-relay", SourcePort: 6801, EntryAddress: "ir.example", EntryPort: 443, Enabled: true}
+	if err := s.PutSwap(ctx, ok); err != nil {
+		t.Fatal(err)
+	}
+	dup := ok
+	dup.ID = "s2"
+	if err := s.PutSwap(ctx, dup); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("duplicate relay port: %v", err)
+	}
+	cfg, err := s.RenderNode(ctx, "ir-relay")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(cfg), `"tag":"swap-s1"`) || !strings.Contains(string(cfg), `"address":"9.9.9.9"`) {
+		t.Fatalf("relay config: %s", cfg)
+	}
+	links, _, err := s.Subscription(ctx, "alice")
+	if err != nil || len(links) != 2 || !strings.Contains(strings.Join(links, " "), "@ir.example:443") {
+		t.Fatalf("%v %v", err, links)
+	}
+	list, _ := s.Swaps(ctx, "de-vless")
+	if len(list) != 1 || list[0].Target != "9.9.9.9:18580" {
+		t.Fatalf("%+v", list)
+	}
+	ok.Enabled = false
+	_ = s.PutSwap(ctx, ok)
+	cfg, _ = s.RenderNode(ctx, "ir-relay")
+	links, _, _ = s.Subscription(ctx, "alice")
+	if strings.Contains(string(cfg), "swap-s1") || len(links) != 1 {
+		t.Fatal("a paused swap must leave config and subscription")
+	}
+	if err := s.DeleteSwap(ctx, "s1"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestInsights(t *testing.T) {
+	s, now := newStore(t)
+	ctx := context.Background()
+	seed(t, s)
+	day := now.UTC().Format("2006-01-02")
+	_, _ = s.db.Exec(`INSERT INTO usage_daily(email,node_id,day,up,down) VALUES('alice','de-1',?,1,9),('bob','de-1',?,50,50)`, day, day)
+	_, _ = s.db.Exec(`INSERT INTO events(unix,node_id,email,kind) VALUES(1,'de-1','bob','blocked:volume')`)
+	in, err := s.Insights(ctx, 7)
+	if err != nil || len(in.Daily) != 7 || in.Daily[6].Up != 51 || len(in.Top) != 2 || in.Top[0].Email != "bob" || len(in.Events) != 1 {
+		t.Fatalf("%v %+v", err, in)
+	}
+}

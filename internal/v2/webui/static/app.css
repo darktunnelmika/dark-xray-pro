@@ -152,3 +152,7 @@ textarea.code {
   border: 1px solid var(--line); background: var(--surface-2); color: var(--text); resize: vertical; tab-size: 2;
 }
 dialog.wide { inline-size: min(860px, calc(100vw - 24px)); }
+
+.dash { display: grid; gap: var(--gap); margin-block-start: var(--gap); grid-template-columns: 1fr; }
+@media (min-width: 900px) { .dash { grid-template-columns: 1fr 1fr; } .dash .wide-col { grid-column: 1 / -1; } }
+.bar-hit { fill: transparent; }

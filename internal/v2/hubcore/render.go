@@ -124,6 +124,11 @@ func (s *Store) RenderNode(ctx context.Context, nodeID string) ([]byte, error) {
 		t["settings"] = settings
 		inbounds = append(inbounds, t)
 	}
+	fwd, err := s.swapForwarders(ctx, nodeID)
+	if err != nil {
+		return nil, err
+	}
+	inbounds = append(inbounds, fwd...)
 	cfg := map[string]any{
 		"log":   map[string]any{"loglevel": "warning"},
 		"api":   map[string]any{"tag": apiTag, "services": []string{"StatsService", "HandlerService"}},

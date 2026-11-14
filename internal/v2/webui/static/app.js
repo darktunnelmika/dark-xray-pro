@@ -32,6 +32,9 @@ const I18N = {
     kind_adjust: "Credit change", kind_charge: "Sale", kind_refund: "Return", kind_delete: "Deleted", kind_payment: "Payment",
     advanced: "Advanced editor", template: "Xray inbound (JSON, without clients)", metaJson: "Subscription settings (JSON)", invalidJson: "Invalid JSON in {x}",
     enable: "Enable", disable: "Disable", advancedHint: "Clients are injected by the HUB. Nodes pick up changes within a few seconds without dropping other inbounds.",
+    swap: "Dark Swap", swapHint: "Relay this inbound through another node: the relay listens on its own port and forwards TCP to this inbound's Direct address. Users and accounting stay on the inbound's node. Point your entry server (e.g. in Iran) at relay address:relay port.",
+    relayNode: "Relay node", relayPort: "Relay port", entryAddr: "Entry address (in the link)", entryPort: "Entry port", forwardsTo: "forwards to",
+    traffic14: "Traffic, last 14 days", topToday: "Top users today", recentEvents: "Recent blocks", noEvents: "No blocks — every limit is quiet.",
     when: "When", who: "By", what: "What", more: "Load more", totalLast30: "{v} in the last 30 days",
     health: "Health (24h)", cpu: "CPU", ram: "RAM", disk: "Disk", net: "Network", uptime: "Uptime", inRate: "in", outRate: "out", noData: "No samples yet",
   },
@@ -67,6 +70,9 @@ const I18N = {
     kind_adjust: "تغییر اعتبار", kind_charge: "فروش", kind_refund: "برگشت", kind_delete: "حذف", kind_payment: "پرداخت",
     advanced: "ویرایشگر پیشرفته", template: "اینباند Xray (JSON، بدون کلاینت)", metaJson: "تنظیمات ساب (JSON)", invalidJson: "JSON نامعتبر در {x}",
     enable: "فعال کردن", disable: "غیرفعال کردن", advancedHint: "کلاینت‌ها را هاب اضافه می‌کند. نودها تغییر را ظرف چند ثانیه می‌گیرند و بقیهٔ اینباندها قطع نمی‌شوند.",
+    swap: "Dark Swap", swapHint: "این اینباند را از یک نود دیگر رله کن: نود واسط روی پورت خودش گوش می‌دهد و TCP را به آدرس Direct این اینباند می‌فرستد. کاربر و حسابداری روی نود اصلی می‌ماند. سرور ورودی (مثلاً ایران) را به آدرس:پورت واسط بفرست.",
+    relayNode: "نود واسط", relayPort: "پورت واسط", entryAddr: "آدرس ورودی (داخل لینک)", entryPort: "پورت ورودی", forwardsTo: "ارسال به",
+    traffic14: "ترافیک ۱۴ روز اخیر", topToday: "پرمصرف‌های امروز", recentEvents: "آخرین قطع‌ها", noEvents: "قطعی نداشته‌ایم؛ همهٔ محدودیت‌ها آرام‌اند.",
     when: "زمان", who: "توسط", what: "شرح", more: "بیشتر", totalLast30: "{v} در ۳۰ روز اخیر",
     health: "سلامت (۲۴ ساعت)", cpu: "پردازنده", ram: "رم", disk: "دیسک", net: "شبکه", uptime: "روشن بودن", inRate: "ورودی", outRate: "خروجی", noData: "هنوز نمونه‌ای نیست",
   },
@@ -176,8 +182,10 @@ function viewLogin() {
 }
 
 async function viewDashboard() {
-  const [o, nodes] = await Promise.all([api("GET", "/api/v2/admin/overview"), api("GET", "/api/v2/admin/nodes")]);
+  const [o, nodes, ins] = await Promise.all([api("GET", "/api/v2/admin/overview"), api("GET", "/api/v2/admin/nodes"), api("GET", "/api/v2/admin/insights?days=14")]);
   const stat = (k, v) => h("div", { class: "card stat" }, h("div", { class: "v" }, v), h("div", { class: "k" }, t(k)));
+  const fmtTime = (u) => new Intl.DateTimeFormat(lang === "fa" ? "fa-IR" : "en-GB", { dateStyle: "short", timeStyle: "short" }).format(new Date(u * 1000));
+  const topMax = Math.max(1, ...ins.top.map((u) => u.bytes));
   return h("div", {},
     h("h1", {}, t("dashboard")),
     h("div", { class: "grid" },
@@ -186,6 +194,14 @@ async function viewDashboard() {
       stat("onlineUsers", fmtNum(o.OnlineUsers)),
       stat("trafficToday", bytes(o.TrafficToday)),
       stat("trafficTotal", bytes(o.TrafficTotal))),
+    h("div", { class: "dash" },
+      h("div", { class: "card form wide-col" }, h("div", { class: "row" }, h("h2", {}, t("traffic14")), legend()), barsSvg(ins.daily)),
+      h("div", { class: "card form" }, h("h2", {}, t("topToday")),
+        ins.top.length ? ins.top.map((u) => meter(u.email, (100 * u.bytes) / topMax, bytes(u.bytes))) : h("p", { class: "muted small" }, t("noData"))),
+      h("div", { class: "card form" }, h("h2", {}, t("recentEvents")),
+        ins.events.length ? h("div", { class: "form" }, ins.events.map((e) => h("div", { class: "row small" },
+          h("span", { class: "badge bad" }, e.kind.replace("blocked:", "")), h("span", {}, e.email), h("span", { class: "muted spacer" }, `${e.node_id} · ${fmtTime(e.unix)}`))))
+          : h("p", { class: "muted small" }, t("noEvents")))),
     h("div", { class: "list" }, (nodes || []).map((n) => nodeCard(n))));
 }
 
@@ -488,6 +504,7 @@ async function viewInbounds() {
       h("div", { class: "row" },
         h("button", { onclick: async () => { await guarded(() => api("POST", `/api/v2/admin/inbounds/${encodeURIComponent(ib.tag)}/enabled`, { Enabled: !ib.enabled })); route(); } }, t(ib.enabled ? "disable" : "enable")),
         h("button", { class: "ghost", onclick: () => inboundEditor(ib.tag, nodes) }, t("advanced")),
+        h("button", { class: "ghost", onclick: () => swapDialog(ib, nodes) }, t("swap")),
         h("button", { class: "ghost danger spacer", onclick: async () => {
         if (await confirmAction(t("confirmDelete", { x: ib.tag }))) { await guarded(() => api("DELETE", `/api/v2/admin/inbounds/${encodeURIComponent(ib.tag)}`)); route(); }
       } }, t("delete"))));
@@ -495,6 +512,41 @@ async function viewInbounds() {
   return h("div", {},
     h("div", { class: "row" }, h("h1", {}, t("inbounds")), h("button", { class: "primary spacer", onclick: () => inboundForm(nodes, presets) }, t("add"))),
     h("div", { class: "list" }, cards.length ? cards : h("p", { class: "muted" }, t("empty"))));
+}
+
+async function swapDialog(ib, nodes) {
+  const list = await api("GET", `/api/v2/admin/swaps?inbound=${encodeURIComponent(ib.tag)}`);
+  const others = (nodes || []).filter((n) => n.ID !== ib.node_id);
+  const rows = list.map((w) => h("div", { class: "card item" },
+    h("div", { class: "head" }, h("span", { class: `dot ${w.enabled ? "on" : ""}` }), h("span", { class: "name" }, w.name), h("span", { class: "badge" }, w.id)),
+    h("div", { class: "small mono" }, `${w.entry_address}:${w.entry_port} → ${w.source_node}:${w.source_port} → ${w.target || "?"}`),
+    h("div", { class: "row" },
+      h("button", { type: "button", onclick: async () => { await guarded(() => api("PUT", `/api/v2/admin/swaps/${encodeURIComponent(w.id)}`, { ...w, enabled: !w.enabled })); swapDialog(ib, nodes); } }, t(w.enabled ? "disable" : "enable")),
+      h("button", { type: "button", class: "ghost danger spacer", onclick: async () => { await guarded(() => api("DELETE", `/api/v2/admin/swaps/${encodeURIComponent(w.id)}`)); swapDialog(ib, nodes); } }, t("delete")))));
+  const id = h("input", { required: true, pattern: "[a-z0-9][a-z0-9._-]{0,62}", value: `${ib.tag}-swap${list.length ? list.length + 1 : ""}` });
+  const name = h("input", { value: "DARK SWAP", maxlength: "160" });
+  const node = h("select", { required: true }, others.map((n) => h("option", { value: n.ID }, `${n.Name || n.ID} (${n.ID})`)));
+  const sport = h("input", { type: "number", min: "1", max: "65535", required: true, value: "6801" });
+  const eaddr = h("input", { required: true, placeholder: "ir.example.com" });
+  const eport = h("input", { type: "number", min: "1", max: "65535", required: true, value: "6801" });
+  const err = h("div", { class: "error" });
+  const add = h("button", { class: "primary", value: "save", onclick: async (e) => {
+    e.preventDefault(); err.textContent = "";
+    for (const f of [id, node, sport, eaddr, eport]) if (!f.reportValidity()) return;
+    try {
+      await guarded(() => api("PUT", `/api/v2/admin/swaps/${encodeURIComponent(id.value)}`, { name: name.value, inbound_tag: ib.tag, source_node: node.value,
+        source_port: +sport.value, entry_address: eaddr.value.trim(), entry_port: +eport.value, enabled: true }));
+      swapDialog(ib, nodes);
+    } catch (x) { err.textContent = x.message; }
+  } }, t("add"));
+  openModal(`${t("swap")} · ${ib.tag}`, h("div", { class: "form" },
+    h("p", { class: "small muted" }, t("swapHint")),
+    rows.length ? h("div", { class: "list" }, rows) : null,
+    others.length ? h("div", { class: "form" },
+      h("div", { class: "two" }, h("label", {}, h("span", {}, t("tag")), id), h("label", {}, h("span", {}, t("name")), name)),
+      h("div", { class: "two" }, h("label", {}, h("span", {}, t("relayNode")), node), h("label", {}, h("span", {}, t("relayPort")), sport)),
+      h("div", { class: "two" }, h("label", {}, h("span", {}, t("entryAddr")), eaddr), h("label", {}, h("span", {}, t("entryPort")), eport)), err)
+      : h("p", { class: "muted" }, t("empty"))), others.length ? [add] : []);
 }
 
 async function inboundEditor(tag, nodes) {
@@ -755,31 +807,39 @@ async function viewActivity() {
       body)) : h("p", { class: "muted" }, t("empty")), more);
 }
 
-// Daily usage as SVG bars (download stacked on upload), built with the DOM.
-async function usageChart(c) {
-  const days = await api("GET", `/api/v2/admin/clients/${encodeURIComponent(c.Email)}/daily?days=30`);
+// Daily traffic as SVG bars (download stacked under upload), built with the DOM.
+function barsSvg(days) {
   const NS = "http://www.w3.org/2000/svg", W = 600, H = 180, P = 4;
   const el = (n, a) => { const x = document.createElementNS(NS, n); for (const [k, v] of Object.entries(a)) x.setAttribute(k, v); return x; };
   const svg = el("svg", { viewBox: `0 0 ${W} ${H + 18}`, class: "bars", role: "img", "aria-label": t("usageChart") });
   const top = Math.max(1, ...days.map((d) => d.Up + d.Down));
   const bw = W / days.length;
+  const step = Math.max(1, Math.round(days.length / 5));
   days.forEach((d, i) => {
     const total = d.Up + d.Down, hd = (d.Down / top) * (H - P), hu = (d.Up / top) * (H - P);
     const g = el("g", {});
     const title = el("title", {}); title.textContent = `${d.Day}: ${bytes(total)} (↓ ${bytes(d.Down)} · ↑ ${bytes(d.Up)})`;
     g.append(title,
+      el("rect", { x: i * bw + 1, y: 0, width: Math.max(1, bw - 2), height: H, class: "bar-hit" }),
       el("rect", { x: i * bw + 1, y: H - hd, width: Math.max(1, bw - 2), height: hd, class: "bar-down", rx: 2 }),
       el("rect", { x: i * bw + 1, y: H - hd - hu, width: Math.max(1, bw - 2), height: hu, class: "bar-up", rx: 2 }));
     svg.append(g);
-    if (i % 7 === days.length % 7 || i === days.length - 1) {
+    if ((days.length - 1 - i) % step === 0) {
       const lab = el("text", { x: i * bw + bw / 2, y: H + 14, "text-anchor": "middle", class: "bar-label" }); lab.textContent = d.Day.slice(5); svg.append(lab);
     }
   });
+  return svg;
+}
+
+function legend() {
+  return h("span", { class: "spacer legend" }, h("i", { class: "sw down" }), `↓ ${t("inRate")}`, h("i", { class: "sw up" }), `↑ ${t("outRate")}`);
+}
+
+async function usageChart(c) {
+  const days = await api("GET", `/api/v2/admin/clients/${encodeURIComponent(c.Email)}/daily?days=30`);
   const sum = days.reduce((a, d) => a + d.Up + d.Down, 0);
   openModal(`${t("usageChart")} · ${c.Email}`, h("div", { class: "form" },
-    h("div", { class: "row small" }, h("strong", {}, t("totalLast30", { v: bytes(sum) })),
-      h("span", { class: "spacer legend" }, h("i", { class: "sw down" }), `↓ ${t("inRate")}`, h("i", { class: "sw up" }), `↑ ${t("outRate")}`)),
-    svg));
+    h("div", { class: "row small" }, h("strong", {}, t("totalLast30", { v: bytes(sum) })), legend()), barsSvg(days)));
 }
 
 function viewSettings() {

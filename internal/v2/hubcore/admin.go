@@ -182,6 +182,11 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 		list, err := s.ClientDailyUsage(r.Context(), r.PathValue("email"), days)
 		reply(w, list, err)
 	}))
+	mux.HandleFunc("GET /api/v2/admin/insights", guard(func(w http.ResponseWriter, r *http.Request) {
+		days, _ := strconv.Atoi(r.URL.Query().Get("days"))
+		in, err := s.Insights(r.Context(), days)
+		reply(w, in, err)
+	}))
 	mux.HandleFunc("GET /api/v2/admin/overview", guard(func(w http.ResponseWriter, r *http.Request) {
 		o, err := s.Overview(r.Context())
 		reply(w, o, err)
@@ -304,6 +309,23 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 			return
 		}
 		err := s.SetInboundEnabled(r.Context(), r.PathValue("tag"), in.Enabled)
+		reply(w, map[string]bool{"ok": err == nil}, err)
+	}))
+	mux.HandleFunc("GET /api/v2/admin/swaps", guard(func(w http.ResponseWriter, r *http.Request) {
+		list, err := s.Swaps(r.Context(), r.URL.Query().Get("inbound"))
+		reply(w, list, err)
+	}))
+	mux.HandleFunc("PUT /api/v2/admin/swaps/{id}", guard(func(w http.ResponseWriter, r *http.Request) {
+		var sw Swap
+		if !decode(w, r, &sw) {
+			return
+		}
+		sw.ID = r.PathValue("id")
+		err := s.PutSwap(r.Context(), sw)
+		reply(w, map[string]bool{"ok": err == nil}, err)
+	}))
+	mux.HandleFunc("DELETE /api/v2/admin/swaps/{id}", guard(func(w http.ResponseWriter, r *http.Request) {
+		err := s.DeleteSwap(r.Context(), r.PathValue("id"))
 		reply(w, map[string]bool{"ok": err == nil}, err)
 	}))
 	mux.HandleFunc("GET /api/v2/admin/presets", guard(func(w http.ResponseWriter, r *http.Request) {

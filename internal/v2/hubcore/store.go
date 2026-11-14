@@ -166,6 +166,10 @@ func Open(path string) (*Store, error) {
 		st.Close()
 		return nil, err
 	}
+	if err := st.ensureSwapSchema(); err != nil {
+		st.Close()
+		return nil, err
+	}
 	return st, nil
 }
 
@@ -385,6 +389,13 @@ WHERE ci.email=? AND i.enabled=1 ORDER BY i.tag`, email)
 		ins = append(ins, in)
 	}
 	rows.Close()
+	for i := range ins {
+		extra, err := s.swapEndpoints(ctx, ins[i].Tag)
+		if err != nil {
+			return sub.Account{}, nil, "", err
+		}
+		ins[i].Meta.Endpoints = append(ins[i].Meta.Endpoints, extra...)
+	}
 	if !c.Enabled {
 		ins = nil
 	}
