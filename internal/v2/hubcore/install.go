@@ -178,7 +178,7 @@ LimitNOFILE=1048576
 AmbientCapabilities=CAP_NET_BIND_SERVICE CAP_NET_ADMIN
 NoNewPrivileges=yes
 ProtectSystem=strict
-ReadWritePaths=/var/lib/dark-node
+ReadWritePaths=/var/lib/dark-node /opt/dark-v2
 
 [Install]
 WantedBy=multi-user.target

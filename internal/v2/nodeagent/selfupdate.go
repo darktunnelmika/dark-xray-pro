@@ -76,6 +76,9 @@ func SelfUpdateTask(f Fetcher, exe string) TaskFunc {
 		tmp := exe + ".new"
 		out, err := os.OpenFile(tmp, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o755)
 		if err != nil {
+			if errors.Is(err, syscall.EROFS) {
+				return nil, errors.New("agent directory is read-only (installed by an older installer): use the new install link once")
+			}
 			return nil, err
 		}
 		h := sha256.New()
