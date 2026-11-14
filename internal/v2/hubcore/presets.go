@@ -35,11 +35,13 @@ type PresetRequest struct {
 	Remark    string         `json:"remark"`
 	Endpoints []sub.Endpoint `json:"endpoints"` // Direct and/or Tunnel addresses shown in subscriptions
 	Cert      string         `json:"cert"`      // TLS presets: stored certificate id; SNI is the domain
+
+	selfSigned bool // set by CreatePreset when it issued the certificate itself
 }
 
 // Presets lists what the panel offers.
 var Presets = []string{"vless-reality-tcp", "vless-reality-grpc", "vless-reality-xhttp", "vless-ws", "vmess-ws", "vmess-tcp", "trojan-ws", "ss2022",
-	"vless-tls-ws", "vless-tls-grpc", "vless-tls-xhttp", "vmess-tls-ws", "trojan-tls-tcp"}
+	"vless-tls-ws", "vless-tls-grpc", "vless-tls-xhttp", "vmess-tls-ws", "trojan-tls-tcp", "hysteria2"}
 
 // BuildPreset renders the template and client metadata for a preset.
 func BuildPreset(p PresetRequest) (template, meta []byte, err error) {
@@ -103,6 +105,24 @@ func BuildPreset(p PresetRequest) (template, meta []byte, err error) {
 			path = "/" + randomHex(6)
 		}
 		err = tlsStream("xhttp", map[string]any{"xhttpSettings": map[string]any{"path": path, "mode": "auto"}})
+	case "hysteria2":
+		// Hysteria2 over QUIC (UDP port). Without an uploaded certificate the
+		// HUB issues a self-signed one and links ask clients to skip
+		// verification (still encrypted, but not pinned to a CA).
+		if p.Cert == "" {
+			return nil, nil, fmt.Errorf("%w: hysteria2 needs a certificate", ErrInvalid)
+		}
+		if p.SNI == "" {
+			return nil, nil, fmt.Errorf("%w: hysteria2 needs a server name (sni)", ErrInvalid)
+		}
+		t["protocol"] = "hysteria"
+		t["settings"] = map[string]any{"version": 2}
+		delete(t, "sniffing")
+		t["sniffing"] = map[string]any{"enabled": true, "destOverride": []string{"http", "tls", "quic"}}
+		t["streamSettings"] = map[string]any{"network": "hysteria", "security": "tls",
+			"tlsSettings":      map[string]any{"serverName": p.SNI, "alpn": []string{"h3"}, "certificates": []any{map[string]any{"dark_cert": p.Cert}}},
+			"hysteriaSettings": map[string]any{"version": 2}}
+		m.Insecure = p.selfSigned
 	case "trojan-tls-tcp":
 		t["protocol"] = "trojan"
 		err = tlsStream("tcp", nil)
@@ -158,6 +178,16 @@ func BuildPreset(p PresetRequest) (template, meta []byte, err error) {
 
 // CreatePreset builds and stores a preset inbound.
 func (s *Store) CreatePreset(ctx context.Context, p PresetRequest) error {
+	if p.Preset == "hysteria2" && p.Cert == "" {
+		if p.SNI == "" {
+			p.SNI = "www.bing.com"
+		}
+		id := p.Tag + "-self"
+		if err := s.SelfSignedCert(ctx, id, p.SNI); err != nil {
+			return err
+		}
+		p.Cert, p.selfSigned = id, true
+	}
 	if p.Cert != "" {
 		var x int
 		if err := s.ro.QueryRowContext(ctx, `SELECT 1 FROM certs WHERE id=?`, p.Cert).Scan(&x); err != nil {

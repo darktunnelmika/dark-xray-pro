@@ -52,6 +52,8 @@ var clientShapes = map[string]func(c Client, flow string) map[string]any{
 	},
 	"vmess":  func(c Client, _ string) map[string]any { return map[string]any{"id": c.UUID, "email": c.Email} },
 	"trojan": func(c Client, _ string) map[string]any { return map[string]any{"password": c.Secret, "email": c.Email} },
+	// Hysteria2 (QUIC, UDP): the client's secret is its auth string.
+	"hysteria": func(c Client, _ string) map[string]any { return map[string]any{"auth": c.Secret, "email": c.Email} },
 	// Shadowsocks 2022 multi-user: each client gets a PSK derived from its
 	// secret; the second argument carries the inbound's method.
 	"shadowsocks": func(c Client, method string) map[string]any {

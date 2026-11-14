@@ -2,12 +2,19 @@ package hubcore
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
+	"crypto/x509/pkix"
 	"database/sql"
+	"encoding/pem"
 	"errors"
 	"fmt"
+	"math/big"
 	"strings"
+	"time"
 )
 
 // TLS certificates are stored once on the HUB and referenced from inbound
@@ -164,4 +171,27 @@ func (s *Store) resolveCerts(ctx context.Context, t map[string]any) error {
 		list[i] = map[string]any{"certificate": pemLines(cp), "key": pemLines(kp)}
 	}
 	return nil
+}
+
+// SelfSignedCert stores a fresh self-signed certificate for name (10 years).
+func (s *Store) SelfSignedCert(ctx context.Context, id, name string) error {
+	k, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		return err
+	}
+	serial, _ := rand.Int(rand.Reader, big.NewInt(1<<62))
+	now := s.now()
+	tpl := &x509.Certificate{SerialNumber: serial, Subject: pkix.Name{CommonName: name}, DNSNames: []string{name},
+		NotBefore: now.Add(-time.Hour), NotAfter: now.AddDate(10, 0, 0), KeyUsage: x509.KeyUsageDigitalSignature,
+		ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}}
+	der, err := x509.CreateCertificate(rand.Reader, tpl, tpl, &k.PublicKey, k)
+	if err != nil {
+		return err
+	}
+	kd, err := x509.MarshalECPrivateKey(k)
+	if err != nil {
+		return err
+	}
+	return s.PutCert(ctx, id, string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})),
+		string(pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: kd})))
 }

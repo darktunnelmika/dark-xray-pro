@@ -50,7 +50,7 @@ func outbounds(a Account, ins []Inbound, format string) ([]outbound, error) {
 		}
 		t := base
 		switch t.Protocol {
-		case "vless", "vmess", "trojan":
+		case "vless", "vmess", "trojan", "hysteria":
 		case "shadowsocks":
 			if SS2022KeySize(t.Settings.Method) == 0 {
 				continue
@@ -104,6 +104,12 @@ func SingBox(a Account, ins []Inbound) ([]byte, error) {
 			ob["password"] = o.password
 		case "shadowsocks":
 			ob["method"], ob["password"] = o.t.Settings.Method, o.password
+		case "hysteria":
+			ob["type"], ob["password"] = "hysteria2", o.password
+			ob["tls"] = map[string]any{"enabled": true, "server_name": o.t.Stream.TLS.ServerName, "alpn": []string{"h3"}, "insecure": o.t.Stream.insecure}
+			list = append(list, ob)
+			tags = append(tags, o.tag)
+			continue
 		}
 		s := o.t.Stream
 		switch s.Security {
@@ -175,8 +181,11 @@ func Clash(a Account, ins []Inbound) ([]byte, error) {
 			continue // not supported by mihomo; link-only
 		}
 		ctype := o.proto
-		if ctype == "shadowsocks" {
+		switch ctype {
+		case "shadowsocks":
 			ctype = "ss"
+		case "hysteria":
+			ctype = "hysteria2"
 		}
 		fmt.Fprintf(&b, "  - name: %s\n    type: %s\n    server: %s\n    port: %d\n    udp: true\n", yq(o.tag), ctype, yq(o.server), o.port)
 		switch o.proto {
@@ -189,6 +198,13 @@ func Clash(a Account, ins []Inbound) ([]byte, error) {
 			fmt.Fprintf(&b, "    uuid: %s\n    alterId: 0\n    cipher: auto\n", yq(o.uuid))
 		case "trojan":
 			fmt.Fprintf(&b, "    password: %s\n", yq(o.password))
+		case "hysteria":
+			fmt.Fprintf(&b, "    password: %s\n    sni: %s\n    alpn: [h3]\n", yq(o.password), yq(o.t.Stream.TLS.ServerName))
+			if o.t.Stream.insecure {
+				b.WriteString("    skip-cert-verify: true\n")
+			}
+			names = append(names, o.tag)
+			continue
 		case "shadowsocks":
 			fmt.Fprintf(&b, "    cipher: %s\n    password: %s\n", yq(o.t.Settings.Method), yq(o.password))
 			names = append(names, o.tag)

@@ -10,6 +10,7 @@ import (
 	"github.com/xtls/xray-core/app/proxyman/command"
 	"github.com/xtls/xray-core/common/protocol"
 	"github.com/xtls/xray-core/common/serial"
+	hyaccount "github.com/xtls/xray-core/proxy/hysteria/account"
 	"github.com/xtls/xray-core/proxy/trojan"
 	"github.com/xtls/xray-core/proxy/vless"
 	"github.com/xtls/xray-core/proxy/vmess"
@@ -49,7 +50,7 @@ func (x *XrayUsers) client() (command.HandlerServiceClient, error) {
 func (x *XrayUsers) Supports(p string) bool {
 	// Stock Xray's Shadowsocks 2022 multi-user inbound is not a UserManager
 	// ("proxy is not a UserManager"), so its user changes take a restart.
-	return p == "vless" || p == "vmess" || p == "trojan"
+	return p == "vless" || p == "vmess" || p == "trojan" || p == "hysteria"
 }
 
 func account(u ConfigUser) (proto.Message, error) {
@@ -60,6 +61,8 @@ func account(u ConfigUser) (proto.Message, error) {
 		return &vmess.Account{Id: u.ID}, nil
 	case "trojan":
 		return &trojan.Account{Password: u.Password}, nil
+	case "hysteria":
+		return &hyaccount.Account{Auth: u.Password}, nil
 	}
 	return nil, fmt.Errorf("protocol %s has no live user API", u.Protocol)
 }

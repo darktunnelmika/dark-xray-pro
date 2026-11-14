@@ -106,3 +106,18 @@ func TestShadowsocks2022Links(t *testing.T) {
 		t.Fatal(links)
 	}
 }
+
+func TestHysteria2Links(t *testing.T) {
+	in := Inbound{Tag: "hy", Template: []byte(`{"protocol":"hysteria","port":443,"settings":{"version":2},"streamSettings":{"network":"hysteria","security":"tls","tlsSettings":{"serverName":"www.bing.com","alpn":["h3"]}}}`),
+		Meta: Meta{Remark: "HY", Insecure: true, Endpoints: []Endpoint{{Name: "Direct", Address: "1.2.3.4", Port: 443}}}}
+	a := Account{Email: "x", UUID: "u", Secret: "abc123"}
+	links, _ := Links(a, []Inbound{in})
+	if len(links) != 1 || !strings.HasPrefix(links[0], "hysteria2://abc123@1.2.3.4:443/?") || !strings.Contains(links[0], "insecure=1") || !strings.Contains(links[0], "sni=www.bing.com") {
+		t.Fatal(links)
+	}
+	sb, _ := SingBox(a, []Inbound{in})
+	cl, _ := Clash(a, []Inbound{in})
+	if !strings.Contains(string(sb), `"type": "hysteria2"`) || !strings.Contains(string(cl), "type: hysteria2") || !strings.Contains(string(cl), "skip-cert-verify: true") {
+		t.Fatalf("%s\n%s", sb, cl)
+	}
+}

@@ -58,6 +58,7 @@ const I18N = {
     todayTasks: "Needs renewal soon", todayHint: "Ending within 3 days or 90% of volume used — renew them before they stop.",
     exportImport: "Clients export / import", exportHint: "JSON with each client's UUID, secret, subscription token, limits and usage — imported clients keep working with their old links. Import needs the same inbound tags.",
     exportClients: "Export clients", importClients: "Import clients", imported: "{n} clients imported",
+    selfSigned: "Self-signed (issued by the HUB)",
     used: "Used", of: "of", last30Traffic: "Last 30 days", timeLeft: "Time left", details: "Details", firstSeen: "First connection", lastSeen: "Last seen",
     when: "When", who: "By", what: "What", more: "Load more", totalLast30: "{v} in the last 30 days",
     health: "Health (24h)", cpu: "CPU", ram: "RAM", disk: "Disk", net: "Network", uptime: "Uptime", inRate: "in", outRate: "out", noData: "No samples yet",
@@ -120,6 +121,7 @@ const I18N = {
     todayTasks: "کارهای امروز: نیازمند تمدید", todayHint: "تا ۳ روز دیگر تمام می‌شوند یا ۹۰٪ حجمشان مصرف شده — قبل از قطع شدن تمدید کنید.",
     exportImport: "خروجی / ورودی کلاینت‌ها", exportHint: "فایل JSON شامل UUID، رمز، توکن ساب، محدودیت‌ها و مصرف هر کلاینت — کلاینت‌های واردشده با همان لینک قبلی کار می‌کنند. ورودی به همان شناسه‌های اینباند نیاز دارد.",
     exportClients: "خروجی کلاینت‌ها", importClients: "ورود کلاینت‌ها", imported: "{n} کلاینت وارد شد",
+    selfSigned: "خودامضا (هاب صادر می‌کند)",
     used: "مصرف", of: "از", last30Traffic: "۳۰ روز اخیر", timeLeft: "زمان باقی‌مانده", details: "جزئیات", firstSeen: "اولین اتصال", lastSeen: "آخرین فعالیت",
     when: "زمان", who: "توسط", what: "شرح", more: "بیشتر", totalLast30: "{v} در ۳۰ روز اخیر",
     health: "سلامت (۲۴ ساعت)", cpu: "پردازنده", ram: "رم", disk: "دیسک", net: "شبکه", uptime: "روشن بودن", inRate: "ورودی", outRate: "خروجی", noData: "هنوز نمونه‌ای نیست",
@@ -734,9 +736,13 @@ async function inboundStudio(tag, ctx) {
   function drawProfile() {
     const p = st.profile;
     const preset = h("select", {}, (ctx.presets || []).map((x) => h("option", { value: x, selected: x === p.preset }, x)));
-    const certSel = h("select", {}, (ctx.certs || []).map((c) => h("option", { value: c.id, selected: c.id === p.cert }, `${c.id} · ${c.domains.join(", ")}`)));
+    const certSel = h("select", {}, h("option", { value: "" }, t("selfSigned")), (ctx.certs || []).map((c) => h("option", { value: c.id, selected: c.id === p.cert }, `${c.id} · ${c.domains.join(", ")}`)));
     const certRow = field(t("certFor"), certSel);
-    const sync = () => { certRow.hidden = !p.preset.includes("-tls-"); };
+    const sync = () => {
+      certRow.hidden = !(p.preset.includes("-tls-") || p.preset === "hysteria2");
+      certSel.options[0].hidden = p.preset !== "hysteria2";
+      if (p.preset === "hysteria2" && !(ctx.certs || []).length) p.cert = "";
+    };
     preset.addEventListener("change", () => { p.preset = preset.value; sync(); });
     certSel.addEventListener("change", () => { p.cert = certSel.value; const c = (ctx.certs || []).find((x) => x.id === p.cert); if (c?.domains[0]) { p.sni = c.domains[0]; draw(); } });
     sync();
@@ -846,7 +852,7 @@ async function inboundStudio(tag, ctx) {
     try {
       if (isNew) {
         const p = st.profile;
-        await api("POST", "/api/v2/admin/inbounds/compose", { tag: p.tag, preset: p.preset, sni: p.sni.trim(), path: p.path.trim(), remark: p.remark.trim(), cert: p.preset.includes("-tls-") ? p.cert : "", routes });
+        await api("POST", "/api/v2/admin/inbounds/compose", { tag: p.tag, preset: p.preset, sni: p.sni.trim(), path: p.path.trim(), remark: p.remark.trim(), cert: p.preset.includes("-tls-") || p.preset === "hysteria2" ? p.cert : "", routes });
       } else {
         await api("PUT", `/api/v2/admin/inbounds/${encodeURIComponent(theTag)}/routes`, routes);
       }

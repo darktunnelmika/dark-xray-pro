@@ -1116,3 +1116,28 @@ func TestClientExportImportKeepsIdentity(t *testing.T) {
 		t.Fatalf("bad import: %v", err)
 	}
 }
+
+func TestHysteria2SelfSigned(t *testing.T) {
+	s, _ := newStore(t)
+	ctx := context.Background()
+	if _, err := s.CreateNode(ctx, "n1", "N"); err != nil {
+		t.Fatal(err)
+	}
+	err := s.ComposeInbound(ctx, PresetRequest{Tag: "hy", Preset: "hysteria2", SNI: "www.bing.com", Remark: "HY"},
+		[]Route{{NodeID: "n1", DirectPort: 443, Hosts: []Host{{Path: "direct", Enabled: true, Address: "1.2.3.4", Port: 443}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = s.PutClient(ctx, Client{Email: "h1", Enabled: true, VolumeBytes: -1, Inbounds: []string{"hy"}})
+	cfg, err := s.RenderNode(ctx, "n1")
+	if err != nil || !strings.Contains(string(cfg), `"network":"hysteria"`) || !strings.Contains(string(cfg), `"auth":`) || !strings.Contains(string(cfg), "BEGIN CERTIFICATE") {
+		t.Fatalf("%v %s", err, cfg)
+	}
+	links, _, _ := s.Subscription(ctx, "h1")
+	if len(links) != 1 || !strings.Contains(links[0], "insecure=1") {
+		t.Fatal(links)
+	}
+	if err := s.PutSwap(ctx, Swap{ID: "x", InboundTag: "hy", SourceNode: "n1", SourcePort: 7000, EntryAddress: "e", EntryPort: 7000}); !errors.Is(err, ErrInvalid) {
+		t.Fatal("UDP inbounds cannot be swapped")
+	}
+}

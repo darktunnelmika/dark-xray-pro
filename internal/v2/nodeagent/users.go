@@ -38,6 +38,7 @@ func ParseUsers(raw []byte) (InboundUsers, error) {
 				ID       string `json:"id"`
 				Flow     string `json:"flow"`
 				Password string `json:"password"`
+				Auth     string `json:"auth"` // hysteria
 			}
 			v, ok := in.Settings[key]
 			if !ok || json.Unmarshal(v, &list) != nil {
@@ -50,7 +51,11 @@ func ParseUsers(raw []byte) (InboundUsers, error) {
 				if out[in.Tag] == nil {
 					out[in.Tag] = map[string]ConfigUser{}
 				}
-				out[in.Tag][c.Email] = ConfigUser{Tag: in.Tag, Protocol: in.Protocol, Email: c.Email, ID: c.ID, Flow: c.Flow, Password: c.Password}
+				pw := c.Password
+				if pw == "" {
+					pw = c.Auth
+				}
+				out[in.Tag][c.Email] = ConfigUser{Tag: in.Tag, Protocol: in.Protocol, Email: c.Email, ID: c.ID, Flow: c.Flow, Password: pw}
 			}
 		}
 	}

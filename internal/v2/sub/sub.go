@@ -61,7 +61,7 @@ func forEndpoint(t template, m Meta, ep Endpoint) (template, Meta) {
 	if ep.Fingerprint != "" {
 		m.Fingerprint = ep.Fingerprint
 	}
-	t.Stream.insecure = ep.AllowInsecure
+	t.Stream.insecure = ep.AllowInsecure || m.Insecure
 	return t, m
 }
 
@@ -73,6 +73,7 @@ type Meta struct {
 	Fingerprint string     `json:"fingerprint,omitempty"` // uTLS
 	SpiderX     string     `json:"spider_x,omitempty"`
 	Remark      string     `json:"remark,omitempty"`
+	Insecure    bool       `json:"insecure,omitempty"` // self-signed certificate: clients skip verification
 }
 
 // Inbound is one inbound template with its metadata.
@@ -286,6 +287,14 @@ func Links(a Account, ins []Inbound) ([]string, error) {
 				// SIP022: the 2022 userinfo is percent-encoded, not base64.
 				ui := url.QueryEscape(t.Settings.Method) + ":" + url.QueryEscape(ssPassword(t, a.Secret))
 				out = append(out, "ss://"+ui+"@"+host+"#"+frag)
+			case "hysteria":
+				q := url.Values{}
+				q.Set("sni", t.Stream.TLS.ServerName)
+				q.Set("alpn", "h3")
+				if t.Stream.insecure {
+					q.Set("insecure", "1")
+				}
+				out = append(out, "hysteria2://"+url.PathEscape(a.Secret)+"@"+host+"/?"+q.Encode()+"#"+frag)
 			case "trojan":
 				out = append(out, "trojan://"+url.PathEscape(a.Secret)+"@"+host+"?"+params(t, in.Meta).Encode()+"#"+frag)
 			case "vmess":
