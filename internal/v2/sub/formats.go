@@ -63,11 +63,11 @@ func outbounds(a Account, ins []Inbound, format string) ([]outbound, error) {
 				continue
 			}
 			t, m := forEndpoint(base, in.Meta, ep)
-			tag := remark(in, ep)
+			tag := remark(a, in, ep)
 			if n := seen[tag]; n > 0 {
 				tag += " " + strconv.Itoa(n+1)
 			}
-			seen[remark(in, ep)]++
+			seen[remark(a, in, ep)]++
 			o := outbound{tag: tag, proto: t.Protocol, server: ep.Address, port: ep.Port, uuid: a.UUID, password: a.Secret, t: t, m: m}
 			if t.Protocol == "shadowsocks" {
 				o.password = ssPassword(t, a.Secret)

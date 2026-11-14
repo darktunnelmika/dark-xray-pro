@@ -92,6 +92,14 @@ type Account struct {
 	// IranDirect adds "Iranian sites and IPs go direct" to app profiles
 	// (sing-box, Clash): those sites often refuse foreign addresses.
 	IranDirect bool
+	// RemarkTemplate names each config, e.g. "{remark} · {path} · {left}".
+	// Variables: {remark} {tag} {path} {email} {used} {left} {total} {days} {proto}.
+	RemarkTemplate string
+	// Vars holds the client's live values for the template.
+	Vars map[string]string
+	// InfoLines adds non-working entries at the top of plain link lists
+	// that show remaining volume and days in the app's server list.
+	InfoLines []string
 }
 
 type stream struct {
@@ -217,12 +225,38 @@ func or(a, b string) string {
 	return b
 }
 
-func remark(in Inbound, ep Endpoint) string {
-	r := or(in.Meta.Remark, in.Tag)
-	if ep.Name != "" {
-		r += " | " + ep.Name
+func remark(a Account, in Inbound, ep Endpoint) string {
+	base := or(in.Meta.Remark, in.Tag)
+	if a.RemarkTemplate == "" {
+		if ep.Name != "" {
+			return base + " | " + ep.Name
+		}
+		return base
 	}
-	return r
+	var proto string
+	var t template
+	if json.Unmarshal(in.Template, &t) == nil {
+		proto = t.Protocol
+	}
+	pairs := []string{"{remark}", base, "{tag}", in.Tag, "{path}", ep.Name, "{proto}", proto}
+	for k, v := range a.Vars {
+		pairs = append(pairs, "{"+k+"}", v)
+	}
+	out := strings.NewReplacer(pairs...).Replace(a.RemarkTemplate)
+	// Collapse separators left by empty variables.
+	for _, sep := range []string{" ·  · ", " |  | ", " - - "} {
+		out = strings.ReplaceAll(out, sep, sep[:3])
+	}
+	out = strings.Trim(strings.TrimSpace(out), "·|-")
+	if strings.TrimSpace(out) == "" {
+		return base
+	}
+	return strings.TrimSpace(out)
+}
+
+// infoLink is a placeholder entry that only carries a label.
+func infoLink(label string) string {
+	return "vless://00000000-0000-0000-0000-000000000000@127.0.0.1:1?encryption=none&type=tcp#" + url.PathEscape(label)
 }
 
 // SS2022KeySize is the PSK length a Shadowsocks 2022 method needs (0 if the
@@ -262,6 +296,11 @@ func Links(a Account, ins []Inbound) ([]string, error) {
 	sorted := append([]Inbound(nil), ins...)
 	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Tag < sorted[j].Tag })
 	var out []string
+	if len(ins) > 0 {
+		for _, l := range a.InfoLines {
+			out = append(out, infoLink(l))
+		}
+	}
 	for _, in := range sorted {
 		base, err := parse(in.Template)
 		if err != nil {
@@ -275,7 +314,7 @@ func Links(a Account, ins []Inbound) ([]string, error) {
 			in := in
 			in.Meta = meta
 			host := net.JoinHostPort(ep.Address, strconv.Itoa(ep.Port))
-			frag := url.PathEscape(remark(in, ep))
+			frag := url.PathEscape(remark(a, in, ep))
 			switch t.Protocol {
 			case "vless":
 				q := params(t, in.Meta)
@@ -306,7 +345,7 @@ func Links(a Account, ins []Inbound) ([]string, error) {
 				out = append(out, "trojan://"+url.PathEscape(a.Secret)+"@"+host+"?"+params(t, in.Meta).Encode()+"#"+frag)
 			case "vmess":
 				s := t.Stream
-				v := map[string]string{"v": "2", "ps": remark(in, ep), "add": ep.Address, "port": strconv.Itoa(ep.Port),
+				v := map[string]string{"v": "2", "ps": remark(a, in, ep), "add": ep.Address, "port": strconv.Itoa(ep.Port),
 					"id": a.UUID, "aid": "0", "scy": "auto", "net": s.Network, "type": "none", "tls": ""}
 				if s.Security == "tls" {
 					v["tls"], v["sni"] = "tls", s.TLS.ServerName

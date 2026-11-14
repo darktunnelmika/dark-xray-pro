@@ -403,6 +403,16 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 		}
 		reply(w, map[string]bool{"ok": true}, s.SetSetting(r.Context(), "hwid_strict", v))
 	}))
+	mux.HandleFunc("GET /api/v2/admin/sub-settings", guard(func(w http.ResponseWriter, r *http.Request) {
+		reply(w, s.SubSettings(r.Context()), nil)
+	}))
+	mux.HandleFunc("PUT /api/v2/admin/sub-settings", guard(func(w http.ResponseWriter, r *http.Request) {
+		var in SubSettings
+		if !decode(w, r, &in) {
+			return
+		}
+		reply(w, map[string]bool{"ok": true}, s.PutSubSettings(r.Context(), in))
+	}))
 	mux.HandleFunc("GET /api/v2/admin/insights", guard(func(w http.ResponseWriter, r *http.Request) {
 		days, _ := strconv.Atoi(r.URL.Query().Get("days"))
 		in, err := s.Insights(r.Context(), days)
@@ -856,8 +866,25 @@ func SubHandler(s *Store) http.Handler {
 			reply(w, nil, err)
 			return
 		}
+		pageURL := publicBase("", r) + "/sub/" + r.PathValue("token")
+		if r.URL.Query().Get("qr") == "1" {
+			serveSubQR(w, pageURL)
+			return
+		}
+		if wantsPage(r) {
+			s.serveSubPage(w, r, email, pageURL)
+			return
+		}
+		set := s.SubSettings(r.Context())
 		w.Header().Set("Profile-Update-Interval", "12")
-		w.Header().Set("Profile-Title", "base64:"+b64(email))
+		w.Header().Set("Profile-Title", "base64:"+b64(or2(set.Title, email)))
+		w.Header().Set("Profile-Web-Page-Url", pageURL)
+		if set.SupportURL != "" {
+			w.Header().Set("Support-Url", set.SupportURL)
+		}
+		if set.Announce != "" {
+			w.Header().Set("Announce", "base64:"+b64(set.Announce))
+		}
 		w.Header().Set("Cache-Control", "no-store")
 		if r.URL.Query().Has("raw") {
 			links, info, err := s.Subscription(r.Context(), email)

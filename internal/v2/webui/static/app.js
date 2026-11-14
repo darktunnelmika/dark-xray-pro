@@ -2078,6 +2078,40 @@ async function usageChart(c) {
     h("div", { class: "row small" }, h("strong", {}, t("totalLast30", { v: bytes(sum) })), legend()), barsSvg(days)));
 }
 
+function subSettingsCard() {
+  const fa = lang === "fa";
+  const L = fa ? { h: "اشتراک و صفحهٔ مشتری", hint: "وقتی مشتری لینک اشتراکش را در مرورگر باز کند، یک صفحه با حجم، زمان، QR و دکمهٔ افزودن به برنامه‌ها می‌بیند. برنامه‌ها مثل قبل کانفیگ می‌گیرند.",
+      title: "عنوان (خالی = نام کلاینت)", tpl: "نام کانفیگ‌ها", vars: "متغیرها: {remark} {path} {left} {used} {total} {days} {email} {proto} {tag}", info: "نمایش حجم و روز باقی‌مانده به‌صورت دو ردیف بالای فهرست سرورها",
+      ann: "اعلان (در صفحه و برنامه‌هایی مثل Happ و Hiddify)", sup: "لینک پشتیبانی (https://t.me/...)", save: "ذخیره", preview: "پیش‌نمایش" }
+    : { h: "Subscription & customer page", hint: "Opening the subscription link in a browser shows a page with volume, time, QR and add-to-app buttons. Apps keep getting configs as before.",
+      title: "Title (empty = client name)", tpl: "Config names", vars: "Variables: {remark} {path} {left} {used} {total} {days} {email} {proto} {tag}", info: "Show remaining volume and days as two entries at the top of the server list",
+      ann: "Announcement (page and apps such as Happ, Hiddify)", sup: "Support link (https://t.me/...)", save: "Save", preview: "Preview" };
+  const card = h("div", { class: "card form" }, h("h2", {}, L.h), h("p", { class: "small muted" }, "…"));
+  api("GET", "/api/v2/admin/sub-settings").then((v) => {
+    const title = h("input", { value: v.title || "" });
+    const tpl = h("input", { value: v.remark_template || "", dir: "ltr", placeholder: "{remark} | {path}" });
+    const prev = h("div", { class: "small mono", dir: "ltr" });
+    const sample = { remark: "Dark VPN", path: "Direct", left: "12.40 GB", used: "17.60 GB", total: "30 GB", days: "18", email: "ali", proto: "vless", tag: "multi-reality" };
+    const upd = () => { prev.textContent = `${L.preview}: ` + (tpl.value || "{remark} | {path}").replace(/\{(\w+)\}/g, (m, k) => sample[k] ?? m); };
+    tpl.addEventListener("input", upd); upd();
+    const info = h("input", { type: "checkbox", checked: !!v.info_lines });
+    const ann = h("textarea", { rows: 2 }); ann.value = v.announce || "";
+    const sup = h("input", { value: v.support_url || "", dir: "ltr", placeholder: "https://t.me/" });
+    const err = h("div", { class: "error small" });
+    card.replaceChildren(h("h2", {}, L.h), h("p", { class: "small muted" }, L.hint),
+      h("label", {}, h("span", {}, L.title), title),
+      h("label", {}, h("span", {}, L.tpl), tpl), h("div", { class: "small muted" }, L.vars), prev,
+      h("label", { class: "check" }, info, h("span", {}, L.info)),
+      h("label", {}, h("span", {}, L.ann), ann), h("label", {}, h("span", {}, L.sup), sup), err,
+      h("button", { class: "primary", onclick: async () => {
+        err.textContent = "";
+        try { await guarded(() => api("PUT", "/api/v2/admin/sub-settings", { title: title.value, remark_template: tpl.value, info_lines: info.checked, announce: ann.value, support_url: sup.value })); toast(t("saved")); }
+        catch (x) { err.textContent = x.message; }
+      } }, L.save));
+  }).catch(() => {});
+  return card;
+}
+
 function viewSettings() {
   const langSel = h("select", { onchange: (e) => { lang = e.target.value; safeSet("lang", lang); applyLang(); route(); } },
     h("option", { value: "en", selected: lang === "en" }, "English"), h("option", { value: "fa", selected: lang === "fa" }, "فارسی"));
@@ -2118,7 +2152,7 @@ function viewSettings() {
       tgOut.replaceChildren(r.link ? h("a", { class: "btn", href: r.link, target: "_blank", rel: "noopener" }, t("openBot")) : null,
         h("code", {}, `/start rep_${r.code}`), h("p", { class: "small muted" }, t("codeExpires")));
     } }, t("connectTelegram"))) : null;
-  return h("div", { class: "form" }, h("h1", {}, t("settings")), pwForm, tgCard, backupCard,
+  return h("div", { class: "form" }, h("h1", {}, t("settings")), me.role === "owner" ? subSettingsCard() : null, pwForm, tgCard, backupCard,
     h("div", { class: "card form" },
       h("label", {}, h("span", {}, t("language")), langSel),
       h("label", {}, h("span", {}, t("theme")), themeSel),
