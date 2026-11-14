@@ -32,8 +32,10 @@ const (
 )
 
 func (s *Store) ensureAuthSchema() error {
-	_, err := s.db.Exec(authSchema)
-	return err
+	if _, err := s.db.Exec(authSchema); err != nil {
+		return err
+	}
+	return s.ensureSessionColumns()
 }
 
 // SetAdmin creates or resets an owner login.
@@ -144,6 +146,7 @@ func authorize(s *Store, adminToken string, r *http.Request) (Principal, bool) {
 	if err != nil {
 		return Principal{}, false
 	}
+	s.touchSession(r.Context(), c.Value, r)
 	p, err := s.principal(r.Context(), user)
 	if err != nil {
 		return Principal{}, false

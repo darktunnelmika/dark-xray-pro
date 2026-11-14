@@ -26,6 +26,7 @@ var staffRoles = map[string]bool{"owner": true, "admin": true, "viewer": true}
 var ownerOnly = []string{
 	"/api/v2/admin/staff", "/api/v2/admin/audit", "/api/v2/admin/backup", "/api/v2/admin/restore",
 	"/api/v2/admin/finance", "/api/v2/admin/xray/overlay", "/api/v2/admin/apikeys", "/api/v2/admin/webhook", "/api/v2/admin/panel-https", "/api/v2/admin/migrate",
+	"/api/v2/admin/security", "/api/v2/admin/telegram",
 }
 
 func isOwnerOnly(path string) bool {
@@ -194,10 +195,7 @@ func (s *Store) Audit(ctx context.Context, p Principal, r *http.Request, status 
 	if p.Level != "" {
 		role = p.Level
 	}
-	ip, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		ip = r.RemoteAddr
-	}
+	ip := realIP(r)
 	path := r.URL.Path
 	if len(path) > 300 {
 		path = path[:300]

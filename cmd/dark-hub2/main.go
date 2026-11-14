@@ -31,6 +31,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/darktunnelmika/dark-xray-pro/internal/v2/hubcore"
@@ -126,18 +127,22 @@ func main() {
 		go s.RunGeo(ctx)
 		go s.RunResets(ctx)
 		go s.RunWebhooks(ctx)
-		if tok, err := os.ReadFile(*tgTokenFile); err == nil && strings.TrimSpace(string(tok)) != "" {
-			owners := map[int64]bool{}
-			for _, f := range strings.Split(*tgOwners, ",") {
-				if n, err := strconv.ParseInt(strings.TrimSpace(f), 10, 64); err == nil {
-					owners[n] = true
-				}
+		var cliOwners []int64
+		for _, f := range strings.Split(*tgOwners, ",") {
+			if n, err := strconv.ParseInt(strings.TrimSpace(f), 10, 64); err == nil {
+				cliOwners = append(cliOwners, n)
 			}
-			hubcore.SetTelegramToken(string(tok))
-			tgAPI := &tgbot.HTTPAPI{Token: strings.TrimSpace(string(tok))}
-			hubcore.SetInvoiceLinker(tgAPI.InvoiceLink) // Mini App: pay with Telegram Stars
-			bot := &tgbot.Bot{Store: s, API: tgAPI, Owners: owners, SubBase: *subBase}
-			go bot.Run(ctx)
+		}
+		hubcore.SetTelegramDefaultOwners(cliOwners)
+		tgc := &tgController{store: s, file: *tgTokenFile, subBase: *subBase, parent: ctx}
+		hubcore.SetTelegramControl(hubcore.TelegramControl{Apply: tgc.apply, Running: tgc.running, BackupNow: tgc.backupNow, Test: tgc.test})
+		hubcore.SetOwnerNotify(tgc.alert)
+		if tok, err := os.ReadFile(*tgTokenFile); err == nil && strings.TrimSpace(string(tok)) != "" {
+			owners := s.TelegramOwners(ctx)
+			if len(owners) == 0 {
+				owners = cliOwners
+			}
+			tgc.start(strings.TrimSpace(string(tok)), owners)
 			log.Printf("telegram bot on (%d owners)", len(owners))
 		}
 		if tok, err := os.ReadFile(*adminTokenFile); err == nil && *adminListen != "" {
@@ -361,4 +366,100 @@ func ensureTLS(dir, hosts string) (tls.Certificate, error) {
 	}
 	// The CA key is not kept: certificates are re-issued by deleting dir.
 	return tls.LoadX509KeyPair(certPath, keyPath)
+}
+
+// tgController runs the Telegram bot and lets the panel connect, change or
+// stop it without restarting the HUB. The token stays in its own 0600 file.
+type tgController struct {
+	store   *hubcore.Store
+	file    string
+	subBase string
+	parent  context.Context
+
+	mu     sync.Mutex
+	bot    *tgbot.Bot
+	cancel context.CancelFunc
+}
+
+func (c *tgController) start(token string, owners []int64) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.cancel != nil {
+		c.cancel()
+		c.cancel, c.bot = nil, nil
+	}
+	if token == "" {
+		hubcore.SetTelegramToken("")
+		hubcore.SetInvoiceLinker(nil)
+		return
+	}
+	set := map[int64]bool{}
+	for _, id := range owners {
+		set[id] = true
+	}
+	hubcore.SetTelegramToken(token)
+	api := &tgbot.HTTPAPI{Token: token}
+	hubcore.SetInvoiceLinker(api.InvoiceLink) // Mini App: pay with Telegram Stars
+	ctx, cancel := context.WithCancel(c.parent)
+	c.bot, c.cancel = &tgbot.Bot{Store: c.store, API: api, Owners: set, SubBase: c.subBase}, cancel
+	go c.bot.Run(ctx)
+}
+
+func (c *tgController) apply(ctx context.Context, token string, owners []int64) (string, error) {
+	if token == "-" {
+		if err := os.Remove(c.file); err != nil && !os.IsNotExist(err) {
+			return "", err
+		}
+		c.start("", nil)
+		return "", nil
+	}
+	if token == "" {
+		b, err := os.ReadFile(c.file)
+		if err != nil || strings.TrimSpace(string(b)) == "" {
+			return "", fmt.Errorf("%w: enter the bot token from @BotFather", hubcore.ErrInvalid)
+		}
+		token = strings.TrimSpace(string(b))
+	}
+	cctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	name, err := (&tgbot.HTTPAPI{Token: token}).Me(cctx)
+	if err != nil {
+		return "", fmt.Errorf("%w: Telegram refused this token (%v)", hubcore.ErrInvalid, err)
+	}
+	if err := os.MkdirAll(filepath.Dir(c.file), 0o700); err != nil {
+		return "", err
+	}
+	if err := os.WriteFile(c.file, []byte(token+"\n"), 0o600); err != nil {
+		return "", err
+	}
+	c.start(token, owners)
+	return name, nil
+}
+
+func (c *tgController) current() *tgbot.Bot {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.bot
+}
+
+func (c *tgController) running() bool { return c.current() != nil }
+
+func (c *tgController) backupNow(ctx context.Context) error {
+	if b := c.current(); b != nil {
+		return b.BackupNow(ctx)
+	}
+	return fmt.Errorf("bot is off")
+}
+
+func (c *tgController) test(ctx context.Context) error {
+	if b := c.current(); b != nil {
+		return b.Test(ctx)
+	}
+	return fmt.Errorf("bot is off")
+}
+
+func (c *tgController) alert(ctx context.Context, text string) {
+	if b := c.current(); b != nil {
+		b.Alert(ctx, text)
+	}
 }

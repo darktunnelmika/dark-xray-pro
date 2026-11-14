@@ -116,6 +116,8 @@ CREATE INDEX IF NOT EXISTS events_unix ON events(unix);
 // Store holds all v2 HUB state in one small SQLite file. A single writer
 // connection serialises short transactions; readers use their own pool.
 type Store struct {
+	logins loginGuard // wrong-password counters (security.go)
+
 	db   *sql.DB
 	ro   *sql.DB
 	now  func() time.Time

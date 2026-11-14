@@ -145,6 +145,7 @@ func (b *Bot) Tick(ctx context.Context) {
 	b.announceOrders(ctx)
 	b.watchNodes(ctx)
 	b.dailyReport(ctx)
+	b.scheduledBackup(ctx)
 	b.notifyClients(ctx)
 	b.runScheduled(ctx)
 }
@@ -880,12 +881,53 @@ func (b *Bot) dailyReport(ctx context.Context) {
 	}
 	_ = b.Store.SetSetting(ctx, "tg_daily", day)
 	b.toOwners(ctx, b.reportText(ctx), nil)
-	if b.Store.Setting(ctx, "tg_backup_pass") != "" {
-		for id := range b.Owners {
-			b.sendBackup(ctx, id)
+}
+
+// scheduledBackup sends the encrypted backup every tg_backup_hours (set in
+// the panel; default daily) once a backup password is set.
+func (b *Bot) scheduledBackup(ctx context.Context) {
+	hrs := b.Store.BackupHours(ctx)
+	if hrs <= 0 || b.Store.Setting(ctx, "tg_backup_pass") == "" || len(b.Owners) == 0 {
+		return
+	}
+	last, _ := strconv.ParseInt(b.Store.Setting(ctx, "tg_backup_last"), 10, 64)
+	if b.now().Unix()-last < int64(hrs)*3600 {
+		return
+	}
+	_ = b.BackupNow(ctx)
+}
+
+// BackupNow sends an encrypted backup to every owner and records the result.
+func (b *Bot) BackupNow(ctx context.Context) error {
+	var first error
+	for id := range b.Owners {
+		if err := b.sendBackup(ctx, id); err != nil && first == nil {
+			first = err
 		}
 	}
+	_ = b.Store.SetSetting(ctx, "tg_backup_last", strconv.FormatInt(b.now().Unix(), 10))
+	msg := ""
+	if first != nil {
+		msg = first.Error()
+	}
+	_ = b.Store.SetSetting(ctx, "tg_backup_error", msg)
+	return first
 }
+
+// Test sends a short check message to every owner.
+func (b *Bot) Test(ctx context.Context) error {
+	var first error
+	for id := range b.Owners {
+		if _, err := b.API.Send(ctx, id, "✅ اتصال ربات به پنل Dark VPN برقرار است.", nil, 0); err != nil && first == nil {
+			first = fmt.Errorf("owner %d: %w", id, err)
+		}
+	}
+	return first
+}
+
+// Alert tells every owner something urgent (used by the HUB, e.g. a
+// locked-out address).
+func (b *Bot) Alert(ctx context.Context, text string) { b.toOwners(ctx, text, nil) }
 
 const repHelp = `دستورهای نماینده:
 /credit — اعتبار و تعداد کلاینت‌ها

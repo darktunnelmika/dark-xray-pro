@@ -184,7 +184,7 @@ func (b *Bot) ownerCallback(ctx context.Context, chat int64, data string) bool {
 		b.mu.Unlock()
 		b.send(ctx, chat, "لغو شد.", &Keyboard{Rows: [][]Button{back("a:home")}})
 	case "backup":
-		b.sendBackup(ctx, chat)
+		_ = b.sendBackup(ctx, chat)
 	case "settings":
 		pay := b.Store.Setting(ctx, "tg_pay_text")
 		wel := b.Store.Setting(ctx, "tg_welcome")
@@ -589,21 +589,23 @@ func (b *Bot) repsView(ctx context.Context, chat int64) {
 }
 
 // sendBackup sends an encrypted snapshot to one owner chat.
-func (b *Bot) sendBackup(ctx context.Context, chat int64) {
+func (b *Bot) sendBackup(ctx context.Context, chat int64) error {
 	pass := b.Store.Setting(ctx, "tg_backup_pass")
 	if pass == "" {
 		b.setAwait(chat, "set:backup")
 		b.send(ctx, chat, "🔐 اول یک رمز بکاپ (حداقل ۸ کاراکتر) بفرستید. بکاپ‌ها با این رمز رمزگذاری می‌شوند.", nil)
-		return
+		return fmt.Errorf("no backup password")
 	}
 	data, err := b.Store.EncryptedBackup(ctx, pass)
 	if err != nil {
 		b.send(ctx, chat, "ساخت بکاپ ممکن نشد: "+esc(err.Error()), nil)
-		return
+		return err
 	}
 	name := "dark-v2-" + b.now().UTC().Format("20060102-1504") + ".dkb"
-	caption := fmt.Sprintf("📦 بکاپ رمزگذاری‌شدهٔ هاب (%s)\nبازیابی: <code>dark-hub2 restore -file %s</code> (رمز را می‌پرسد)", gb(int64(len(data))), name)
+	caption := fmt.Sprintf("📦 بکاپ رمزگذاری‌شدهٔ هاب (%s)\nبازیابی: از پنل ← تنظیمات ← بازگردانی بکاپ، یا <code>dark-hub2 restore -file %s</code> (رمز را می‌پرسد)", gb(int64(len(data))), name)
 	if err := b.API.SendDocument(ctx, chat, name, data, caption); err != nil {
 		b.logf("tgbot backup: %v", err)
+		return err
 	}
+	return nil
 }

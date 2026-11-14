@@ -77,6 +77,13 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 		if !decode(w, r, &in) {
 			return
 		}
+		ip := realIP(r)
+		if wait := s.logins.blocked(ip, in.Username, s.now()); wait > 0 {
+			s.Audit(r.Context(), Principal{User: in.Username, Role: "login"}, r, http.StatusTooManyRequests)
+			w.Header().Set("Retry-After", strconv.Itoa(int(wait.Seconds())+1))
+			http.Error(w, fmt.Sprintf("too many wrong passwords from this address; try again in %d minutes", int(wait.Minutes())+1), http.StatusTooManyRequests)
+			return
+		}
 		tok, err := s.LoginTOTP(r.Context(), in.Username, in.Password, in.Code)
 		if errors.Is(err, ErrTOTPRequired) {
 			// Password was right: ask for the authenticator code (no session yet).
@@ -88,10 +95,15 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 		lp := Principal{User: in.Username, Role: "login"}
 		if err != nil {
 			s.Audit(r.Context(), lp, r, http.StatusUnauthorized)
+			if d := s.logins.fail(ip, in.Username, s.now()); d > 0 {
+				notifyOwners(r.Context(), lockText(ip, in.Username, d))
+			}
 			time.Sleep(500 * time.Millisecond)
 			http.Error(w, "invalid username or password", http.StatusUnauthorized)
 			return
 		}
+		s.logins.success(ip, in.Username)
+		s.noteSession(r.Context(), tok, r)
 		s.Audit(r.Context(), lp, r, http.StatusOK)
 		setSessionCookie(w, r, tok, int(sessionTTL.Seconds()))
 		reply(w, map[string]string{"username": in.Username}, nil)
@@ -103,6 +115,41 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 		setSessionCookie(w, r, "", -1)
 		reply(w, map[string]bool{"ok": true}, nil)
 	})
+	cookieTok := func(r *http.Request) string {
+		if c, err := r.Cookie(sessionCookie); err == nil {
+			return c.Value
+		}
+		return ""
+	}
+	mux.HandleFunc("GET /api/v2/auth/sessions", member(func(w http.ResponseWriter, r *http.Request) {
+		p := who(r)
+		user := p.User
+		if r.URL.Query().Get("all") == "1" && p.Role == "owner" && p.Level == "" {
+			user = ""
+		}
+		list, err := s.Sessions(r.Context(), user, cookieTok(r))
+		reply(w, list, err)
+	}))
+	mux.HandleFunc("DELETE /api/v2/auth/sessions/{id}", member(func(w http.ResponseWriter, r *http.Request) {
+		p := who(r)
+		user := p.User
+		if p.Role == "owner" && p.Level == "" {
+			user = "" // owners may end anyone's session
+		}
+		err := s.EndSession(r.Context(), user, r.PathValue("id"))
+		reply(w, map[string]bool{"ok": err == nil}, err)
+	}))
+	mux.HandleFunc("POST /api/v2/auth/sessions/end-others", member(func(w http.ResponseWriter, r *http.Request) {
+		n, err := s.EndOtherSessions(r.Context(), who(r).User, cookieTok(r))
+		reply(w, map[string]any{"ended": n}, err)
+	}))
+	telegramRoutes(s, mux, guard, func() []int64 { return tgDefaultOwners })
+	mux.HandleFunc("GET /api/v2/admin/security/lockouts", guard(func(w http.ResponseWriter, r *http.Request) {
+		reply(w, s.logins.list(s.now()), nil)
+	}))
+	mux.HandleFunc("DELETE /api/v2/admin/security/lockouts", guard(func(w http.ResponseWriter, r *http.Request) {
+		reply(w, map[string]int{"unlocked": s.logins.unlock(r.URL.Query().Get("ip"))}, nil)
+	}))
 	mux.HandleFunc("GET /api/v2/auth/me", member(func(w http.ResponseWriter, r *http.Request) {
 		p := who(r)
 		out := map[string]any{"user": p.User, "role": p.Role, "rep_id": p.RepID, "level": p.Level}
