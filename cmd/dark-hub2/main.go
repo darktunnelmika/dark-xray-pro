@@ -6,6 +6,7 @@
 //	dark-hub2 node   -db v2.sqlite -id de-1 -name Germany        (prints token)
 //	dark-hub2 inbound -db v2.sqlite -tag de-vless -node de-1 -file inbound.json
 //	dark-hub2 client -db v2.sqlite -email alice -inbounds de-vless -volume-gb 100 -days 30 -first-use -max-ips 2
+//	dark-hub2 sub    -db v2.sqlite -email alice                  (share links)
 //	dark-hub2 status -db v2.sqlite
 package main
 
@@ -34,7 +35,7 @@ import (
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: dark-hub2 serve|node|inbound|client|status [flags]")
+		fmt.Fprintln(os.Stderr, "usage: dark-hub2 serve|node|inbound|client|sub|status [flags]")
 		os.Exit(2)
 	}
 	cmd, args := os.Args[1], os.Args[2:]
@@ -48,6 +49,7 @@ func main() {
 	tag := fs.String("tag", "", "inbound tag")
 	node := fs.String("node", "", "node id owning the inbound")
 	file := fs.String("file", "", "inbound template JSON file")
+	metaFile := fs.String("meta", "", "inbound client metadata JSON file (endpoints, REALITY public key)")
 	email := fs.String("email", "", "client name")
 	inbounds := fs.String("inbounds", "", "comma-separated inbound tags")
 	volGB := fs.Float64("volume-gb", -1, "volume in GiB (-1 unlimited)")
@@ -95,8 +97,23 @@ func main() {
 		if err != nil {
 			log.Fatal(err)
 		}
-		if err := s.PutInbound(ctx, *tag, *node, b, true); err != nil {
+		var meta []byte
+		if *metaFile != "" {
+			if meta, err = os.ReadFile(*metaFile); err != nil {
+				log.Fatal(err)
+			}
+		}
+		if err := s.PutInboundMeta(ctx, *tag, *node, b, meta, true); err != nil {
 			log.Fatal(err)
+		}
+	case "sub":
+		links, info, err := s.Subscription(ctx, *email)
+		if err != nil {
+			log.Fatal(err)
+		}
+		fmt.Println("# " + info)
+		for _, l := range links {
+			fmt.Println(l)
 		}
 	case "client":
 		c := hubcore.Client{Email: *email, Enabled: !*disabled, VolumeBytes: -1, MaxIPs: *maxIPs}

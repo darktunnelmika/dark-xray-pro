@@ -11,6 +11,7 @@ import (
 	"crypto/subtle"
 	"database/sql"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
@@ -19,6 +20,8 @@ import (
 	"time"
 
 	_ "modernc.org/sqlite"
+
+	"github.com/darktunnelmika/dark-xray-pro/internal/v2/sub"
 )
 
 var (
@@ -65,6 +68,7 @@ CREATE TABLE IF NOT EXISTS inbounds (
   tag TEXT PRIMARY KEY,
   node_id TEXT NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
   template TEXT NOT NULL,
+  meta TEXT NOT NULL DEFAULT '{}',
   enabled INTEGER NOT NULL DEFAULT 1
 );
 CREATE TABLE IF NOT EXISTS client_inbounds (
@@ -256,18 +260,80 @@ volume_bytes=excluded.volume_bytes, expires_unix=excluded.expires_unix, duration
 }
 
 // PutInbound stores an Xray inbound template for one node. The HUB fills
-// settings.clients when it renders the node config.
+// settings.clients when it renders the node config. meta is the client-side
+// metadata (public endpoints, REALITY public key) used for subscriptions.
 func (s *Store) PutInbound(ctx context.Context, tag, nodeID string, template []byte, enabled bool) error {
+	return s.PutInboundMeta(ctx, tag, nodeID, template, nil, enabled)
+}
+
+func (s *Store) PutInboundMeta(ctx context.Context, tag, nodeID string, template, meta []byte, enabled bool) error {
 	if !idRE.MatchString(tag) || tag == apiTag {
 		return ErrInvalid
 	}
 	if _, err := parseTemplate(template); err != nil {
 		return err
 	}
-	_, err := s.db.ExecContext(ctx, `INSERT INTO inbounds(tag,node_id,template,enabled) VALUES(?,?,?,?)
-ON CONFLICT(tag) DO UPDATE SET node_id=excluded.node_id, template=excluded.template, enabled=excluded.enabled`,
-		tag, nodeID, string(template), enabled)
+	if len(meta) == 0 {
+		meta = []byte("{}")
+	}
+	var m sub.Meta
+	if err := json.Unmarshal(meta, &m); err != nil {
+		return fmt.Errorf("%w: inbound meta: %v", ErrInvalid, err)
+	}
+	_, err := s.db.ExecContext(ctx, `INSERT INTO inbounds(tag,node_id,template,meta,enabled) VALUES(?,?,?,?,?)
+ON CONFLICT(tag) DO UPDATE SET node_id=excluded.node_id, template=excluded.template, meta=excluded.meta, enabled=excluded.enabled`,
+		tag, nodeID, string(template), string(meta), enabled)
 	return err
+}
+
+// Subscription returns the client's share links and userinfo header.
+func (s *Store) Subscription(ctx context.Context, email string) (links []string, userinfo string, err error) {
+	var c Client
+	err = s.ro.QueryRowContext(ctx, `SELECT email,uuid,secret,enabled,volume_bytes,expires_unix,duration_seconds,max_ips FROM clients WHERE email=?`, email).
+		Scan(&c.Email, &c.UUID, &c.Secret, &c.Enabled, &c.VolumeBytes, &c.ExpiresUnix, &c.DurationSeconds, &c.MaxIPs)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, "", ErrNotFound
+	}
+	if err != nil {
+		return nil, "", err
+	}
+	rows, err := s.ro.QueryContext(ctx, `SELECT i.tag,i.template,i.meta FROM inbounds i JOIN client_inbounds ci ON ci.tag=i.tag
+WHERE ci.email=? AND i.enabled=1 ORDER BY i.tag`, email)
+	if err != nil {
+		return nil, "", err
+	}
+	var ins []sub.Inbound
+	for rows.Next() {
+		var in sub.Inbound
+		var tpl, meta string
+		if err := rows.Scan(&in.Tag, &tpl, &meta); err != nil {
+			rows.Close()
+			return nil, "", err
+		}
+		in.Template = []byte(tpl)
+		if err := json.Unmarshal([]byte(meta), &in.Meta); err != nil {
+			rows.Close()
+			return nil, "", err
+		}
+		ins = append(ins, in)
+	}
+	rows.Close()
+	if !c.Enabled {
+		ins = nil
+	}
+	links, err = sub.Links(sub.Account{Email: c.Email, UUID: c.UUID, Secret: c.Secret}, ins)
+	if err != nil {
+		return nil, "", err
+	}
+	u, err := s.ClientUsage(ctx, email)
+	if err != nil {
+		return nil, "", err
+	}
+	total := c.VolumeBytes
+	if total < 0 {
+		total = 0
+	}
+	return links, sub.Userinfo(u.Up, u.Down, total, EffectiveExpiry(c, u)), nil
 }
 
 // Usage is a client's metered total.

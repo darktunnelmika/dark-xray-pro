@@ -193,3 +193,22 @@ func (s *scriptedStats) TakeTraffic(context.Context) ([]wire.UserTraffic, error)
 	return t, nil
 }
 func (s *scriptedStats) OnlineIPs(context.Context) (map[string][]string, error) { return nil, nil }
+
+func TestSubscriptionLinks(t *testing.T) {
+	s, _ := newStore(t)
+	ctx := context.Background()
+	if _, err := s.CreateNode(ctx, "de-1", "Germany"); err != nil {
+		t.Fatal(err)
+	}
+	meta := []byte(`{"public_key":"PUB","remark":"Dark VPN","endpoints":[{"name":"Direct","address":"167.233.192.101","port":18580}]}`)
+	if err := s.PutInboundMeta(ctx, "de-vless", "de-1", []byte(vlessTemplate), meta, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.PutClient(ctx, Client{Email: "alice", UUID: "u-1", Enabled: true, VolumeBytes: 1 << 30, Inbounds: []string{"de-vless"}}); err != nil {
+		t.Fatal(err)
+	}
+	links, info, err := s.Subscription(ctx, "alice")
+	if err != nil || len(links) != 1 || info != "upload=0; download=0; total=1073741824; expire=0" {
+		t.Fatalf("links %v info %q err %v", links, info, err)
+	}
+}
