@@ -100,6 +100,9 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 	mux.HandleFunc("GET /api/v2/auth/me", member(func(w http.ResponseWriter, r *http.Request) {
 		p := who(r)
 		out := map[string]any{"user": p.User, "role": p.Role, "rep_id": p.RepID, "level": p.Level}
+		var totp bool
+		_ = s.ro.QueryRowContext(r.Context(), `SELECT totp_secret<>'' FROM admins WHERE username=?`, p.User).Scan(&totp)
+		out["totp"] = totp
 		if p.Role == "rep" {
 			reps, _ := s.Reps(r.Context())
 			for _, rp := range reps {

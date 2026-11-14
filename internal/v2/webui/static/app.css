@@ -365,3 +365,11 @@ table.dtable.compact tr:last-child td { border-block-end: 0; }
 .badge, .chip, .name, td { unicode-bidi: isolate; }
 .toolbar select { inline-size: auto; min-inline-size: 220px; flex: 0 0 auto; }
 .toolbar { flex-wrap: nowrap; } @media (max-width: 720px) { .toolbar { flex-wrap: wrap; } .toolbar select { inline-size: 100%; } }
+
+/* Team page: logins and change log */
+.row.spread { justify-content: space-between; }
+.dtable.audit td { padding-block: 6px; }
+.dtable.audit tr.bad td:first-child { box-shadow: inset 3px 0 0 var(--bad); }
+.dtable.audit tr.warn td:first-child { box-shadow: inset 3px 0 0 var(--warn); }
+.dtable.audit code.path { font-size: 0.82em; color: var(--muted); unicode-bidi: isolate; word-break: break-all; }
+code.tfakey { letter-spacing: 0.08em; user-select: all; unicode-bidi: isolate; }

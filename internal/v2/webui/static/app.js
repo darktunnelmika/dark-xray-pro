@@ -51,7 +51,7 @@ const I18N = {
     connectTelegram: "Connect Telegram", openBot: "Open the bot", codeExpires: "The link works once, for 15 minutes.",
     stepProfile: "Profile", stepNodes: "Nodes & routes", stepSwap: "Dark Swap", stepReview: "Review", next: "Next", back: "Back",
     newInbound: "New inbound", editInbound: "Nodes & routes", nodesRoutes: "Nodes & routes", pickNode: "Select at least one node.",
-    fbHint: "One TLS port for everything: VLESS Vision answers directly, and VLESS, VMess and Trojan over WebSocket are passed on by path. Customers get all four in their subscription; traffic is counted under this inbound.", badTag: "Tag: lowercase letters, digits, dot, dash or underscore.", needCert: "TLS presets need a certificate (add one under TLS certificates).",
+    you: "you", staff: "Team", staffTitle: "Panel logins", staffHint: "Admins manage clients, inbounds, nodes and routing; viewers can only look. Staff, the change log, backups and finance stay with owners.", role: "Role", role_owner: "Owner", role_admin: "Admin", role_viewer: "Viewer", addLogin: "Add login", newPassOpt: "New password (empty = keep)", lastSeen: "Last change", tfaOn: "2FA on", tfaReset: "Reset 2FA", tfaResetAsk: "Turn off two-step login for {x}? They can sign in with the password alone until they set it up again.", delLoginAsk: "Delete the login {x}? Their sessions end now.", auditTitle: "Change log", auditHint: "Every change made in the panel or through the API, and every sign-in. Request contents are never stored.", auditFilter: "Filter by login, client or path", auditMore: "Older", act_login: "signed in", act_loginFail: "wrong password", act_denied: "refused", tfaTitle: "Two-step login", tfaHint: "Sign-in also asks for a 6-digit code from an authenticator app (Google Authenticator, Aegis, 2FAS…).", tfaStart: "Set up", tfaScan: "Scan this in the app, or enter the key by hand, then type the code it shows.", tfaKey: "Key", tfaCode: "6-digit code", tfaEnable: "Turn on", tfaEnabled: "Two-step login is on.", tfaDisable: "Turn off", tfaOff: "Two-step login is off.", tfaNeed: "Enter the code from your authenticator app.", fbHint: "One TLS port for everything: VLESS Vision answers directly, and VLESS, VMess and Trojan over WebSocket are passed on by path. Customers get all four in their subscription; traffic is counted under this inbound.", badTag: "Tag: lowercase letters, digits, dot, dash or underscore.", needCert: "TLS presets need a certificate (add one under TLS certificates).",
     profileHint: "One profile — protocol, transport, security and keys — shared by every node you place it on. Clients assigned to it work on all of them.",
     nodesHint: "Pick the nodes. Each gets its own listen IP, a Direct port and, if you want, a separate Tunnel port so their traffic is counted apart.",
     hostsHint: "Hosts are the addresses clients receive. Add as many as you like per path; ⚙ opens per-host SNI, Host, Path, ALPN, fingerprint and format filters.",
@@ -116,7 +116,7 @@ const I18N = {
     connectTelegram: "اتصال تلگرام", openBot: "باز کردن ربات", codeExpires: "این لینک یک‌بار مصرف است و ۱۵ دقیقه اعتبار دارد.",
     stepProfile: "پروفایل", stepNodes: "نودها و مسیرها", stepSwap: "دارک سواپ", stepReview: "بازبینی", next: "بعدی", back: "قبلی",
     newInbound: "اینباند جدید", editInbound: "نودها و مسیرها", nodesRoutes: "نودها و مسیرها", pickNode: "حداقل یک نود انتخاب کنید.",
-    fbHint: "یک پورت TLS برای همه: VLESS Vision مستقیم جواب می‌دهد و VLESS، VMess و Trojan روی WebSocket بر اساس مسیر تحویل داده می‌شوند. مشتری هر چهار را در اشتراکش می‌گیرد و ترافیک به حساب همین اینباند نوشته می‌شود.", badTag: "شناسه: حروف کوچک انگلیسی، عدد، نقطه، خط تیره یا زیرخط.", needCert: "الگوهای TLS گواهی لازم دارند (از بخش گواهی‌های TLS اضافه کنید).",
+    you: "شما", staff: "تیم", staffTitle: "ورودهای پنل", staffHint: "مدیر کمکی کاربران، اینباندها، نودها و مسیریابی را مدیریت می‌کند؛ ناظر فقط می‌بیند. تیم، گزارش تغییرات، بکاپ و مالی فقط دست مالک است.", role: "نقش", role_owner: "مالک", role_admin: "مدیر کمکی", role_viewer: "ناظر", addLogin: "افزودن ورود", newPassOpt: "رمز جدید (خالی = بدون تغییر)", lastSeen: "آخرین تغییر", tfaOn: "دومرحله‌ای فعال", tfaReset: "حذف دومرحله‌ای", tfaResetAsk: "ورود دومرحله‌ای {x} خاموش شود؟ تا دوباره راه‌اندازی کند فقط با رمز وارد می‌شود.", delLoginAsk: "ورود {x} حذف شود؟ نشست‌هایش همین حالا بسته می‌شود.", auditTitle: "گزارش تغییرات", auditHint: "هر تغییری که در پنل یا با API انجام شود و هر ورود. محتوای درخواست‌ها هرگز ذخیره نمی‌شود.", auditFilter: "فیلتر با نام ورود، کاربر یا مسیر", auditMore: "قدیمی‌تر", act_login: "وارد شد", act_loginFail: "رمز اشتباه", act_denied: "رد شد", tfaTitle: "ورود دومرحله‌ای", tfaHint: "هنگام ورود یک کد ۶ رقمی از برنامهٔ احراز هویت (Google Authenticator، Aegis، 2FAS و…) هم پرسیده می‌شود.", tfaStart: "راه‌اندازی", tfaScan: "این را در برنامه اسکن کنید یا کلید را دستی وارد کنید، بعد کدی که نشان می‌دهد را بنویسید.", tfaKey: "کلید", tfaCode: "کد ۶ رقمی", tfaEnable: "فعال کن", tfaEnabled: "ورود دومرحله‌ای فعال شد.", tfaDisable: "خاموش کن", tfaOff: "ورود دومرحله‌ای خاموش شد.", tfaNeed: "کد برنامهٔ احراز هویت را وارد کنید.", fbHint: "یک پورت TLS برای همه: VLESS Vision مستقیم جواب می‌دهد و VLESS، VMess و Trojan روی WebSocket بر اساس مسیر تحویل داده می‌شوند. مشتری هر چهار را در اشتراکش می‌گیرد و ترافیک به حساب همین اینباند نوشته می‌شود.", badTag: "شناسه: حروف کوچک انگلیسی، عدد، نقطه، خط تیره یا زیرخط.", needCert: "الگوهای TLS گواهی لازم دارند (از بخش گواهی‌های TLS اضافه کنید).",
     profileHint: "یک پروفایل — پروتکل، شبکه، امنیت و کلیدها — که روی همهٔ نودهای انتخابی یکسان است. کلاینتِ این اینباند روی همهٔ آن‌ها کار می‌کند.",
     nodesHint: "نودها را انتخاب کنید. هر نود IP گوش‌دادن، پورت Direct و در صورت نیاز پورت جدای Tunnel دارد تا مصرف هر مسیر جدا شمرده شود.",
     hostsHint: "هاست‌ها آدرس‌هایی هستند که در لینک کاربر می‌آیند. برای هر مسیر هر چند تا خواستید اضافه کنید؛ ⚙ تنظیمات SNI، Host، Path، ALPN، Fingerprint و فیلتر فرمت هر هاست را باز می‌کند.",
@@ -205,10 +205,16 @@ function confirmAction(text) {
 }
 
 // ---------- Views ----------
-const allRoutes = { dashboard: viewDashboard, clients: viewClients, groups: viewGroups, inbounds: viewInbounds, nodes: viewNodes, routing: viewRouting, reps: viewReps, shop: viewShop, finance: viewFinance, activity: viewActivity, settings: viewSettings };
+const allRoutes = { dashboard: viewDashboard, clients: viewClients, groups: viewGroups, inbounds: viewInbounds, nodes: viewNodes, routing: viewRouting, reps: viewReps, shop: viewShop, finance: viewFinance, activity: viewActivity, staff: viewStaff, settings: viewSettings };
 let me = null;
 let routes = allRoutes;
+function fullOwner() { return me && me.role === "owner" && !me.level; }
 function routesFor(m) {
+  if (m && m.role === "owner" && m.level) {
+    const r = { ...allRoutes };
+    delete r.finance; delete r.staff;
+    return r;
+  }
   if (m && m.role === "rep") {
     const r = { clients: viewClients };
     if (m.can_sell) r.sellers = viewSellers;
@@ -247,6 +253,7 @@ const ICONS = {
   shop: "M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4zM3 6h18M16 10a4 4 0 0 1-8 0",
   finance: "M3 3v18h18M7 15l4-4 3 3 6-6",
   activity: "M22 12h-4l-3 9L9 3l-3 9H2",
+  staff: "M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10zM9 12l2 2 4-4",
   settings: "M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6",
   routing: "M6 3v12M18 9v12M6 15a3 3 0 1 0 0 6 3 3 0 0 0 0-6zM18 3a3 3 0 1 0 0 6 3 3 0 0 0 0-6zM6 15c0-4 12-2 12-6",
 };
@@ -270,12 +277,17 @@ function viewLogin() {
   const err = h("div", { class: "error", role: "alert" });
   const user = h("input", { name: "u", autocomplete: "username", required: true, autofocus: true });
   const pass = h("input", { name: "p", type: "password", autocomplete: "current-password", required: true });
+  const code = h("input", { name: "c", inputmode: "numeric", autocomplete: "one-time-code", pattern: "[0-9 ]{6,7}", maxlength: "7", dir: "ltr" });
+  const codeRow = h("label", { hidden: true }, h("span", {}, t("tfaCode")), code);
   const btn = h("button", { class: "primary", type: "submit" }, t("login"));
   const form = h("form", { class: "form", onsubmit: async (e) => {
     e.preventDefault(); btn.disabled = true; err.textContent = "";
-    try { await api("POST", "/api/v2/auth/login", { Username: user.value, Password: pass.value }); location.hash = "#/dashboard"; }
-    catch { err.textContent = t("badLogin"); } finally { btn.disabled = false; }
-  } }, h("label", {}, h("span", {}, t("username")), user), h("label", {}, h("span", {}, t("password")), pass), err, btn);
+    try { await api("POST", "/api/v2/auth/login", { Username: user.value, Password: pass.value, Code: code.value }); location.hash = "#/dashboard"; }
+    catch (x) {
+      if (String(x.message).includes("need_code")) { codeRow.hidden = false; err.textContent = codeRow.dataset.asked ? t("badLogin") : t("tfaNeed"); codeRow.dataset.asked = "1"; code.value = ""; code.focus(); }
+      else err.textContent = t("badLogin");
+    } finally { btn.disabled = false; }
+  } }, h("label", {}, h("span", {}, t("username")), user), h("label", {}, h("span", {}, t("password")), pass), codeRow, err, btn);
   return h("div", { class: "login" }, h("div", { class: "card" }, h("h1", {}, mark(), "Dark VPN"), form));
 }
 
@@ -2153,6 +2165,106 @@ function subSettingsCard() {
   return card;
 }
 
+function tfaCard() {
+  const out = h("div", { class: "form" });
+  const card = h("div", { class: "card form" }, h("h2", {}, t("tfaTitle")), h("p", { class: "small muted" }, t("tfaHint")), out);
+  const draw = () => {
+    if (me.totp) {
+      const pw = h("input", { type: "password", autocomplete: "current-password", required: true });
+      const code = h("input", { inputmode: "numeric", autocomplete: "one-time-code", required: true, maxlength: "7", dir: "ltr" });
+      const err = h("div", { class: "error" });
+      fill(out, h("p", {}, h("span", { class: "badge good" }, t("tfaOn"))), h("form", { class: "form", onsubmit: async (e) => {
+        e.preventDefault(); err.textContent = "";
+        try { await api("POST", "/api/v2/auth/2fa/disable", { Password: pw.value, Code: code.value }); me.totp = false; toast(t("tfaOff")); draw(); }
+        catch (x) { err.textContent = x.message; }
+      } }, h("div", { class: "two" }, h("label", {}, h("span", {}, t("password")), pw), h("label", {}, h("span", {}, t("tfaCode")), code)), err,
+        h("button", { class: "danger", type: "submit" }, t("tfaDisable"))));
+      return;
+    }
+    fill(out, h("button", { onclick: async () => {
+      const r = await guarded(() => api("POST", "/api/v2/auth/2fa/setup"));
+      if (!r) return;
+      const code = h("input", { inputmode: "numeric", autocomplete: "one-time-code", required: true, maxlength: "7", dir: "ltr", autofocus: true });
+      const err = h("div", { class: "error" });
+      fill(out, h("p", { class: "small" }, t("tfaScan")), h("img", { class: "qr", src: r.qr, alt: "QR", width: 200, height: 200 }),
+        h("p", { class: "small" }, `${t("tfaKey")}: `, h("code", { dir: "ltr", class: "tfakey" }, r.secret.replace(/(.{4})/g, "$1 ").trim())),
+        h("form", { class: "form", onsubmit: async (e) => {
+          e.preventDefault(); err.textContent = "";
+          try { await api("POST", "/api/v2/auth/2fa/enable", { Code: code.value }); me.totp = true; toast(t("tfaEnabled")); draw(); }
+          catch (x) { err.textContent = x.message; }
+        } }, h("label", {}, h("span", {}, t("tfaCode")), code), err, h("button", { class: "primary", type: "submit" }, t("tfaEnable"))));
+      code.focus();
+    } }, t("tfaStart")));
+  };
+  draw();
+  return card;
+}
+
+async function viewStaff() {
+  const [list, first] = await Promise.all([api("GET", "/api/v2/admin/staff"), api("GET", "/api/v2/admin/audit?limit=100")]);
+  const roleBadge = (r) => h("span", { class: `badge ${r === "owner" ? "good" : r === "admin" ? "warn" : ""}` }, t(`role_${r}`));
+  const L = CT[lang] || CT.en;
+  const editLogin = (l) => {
+    const user = h("input", { required: true, pattern: "[a-z0-9][a-z0-9._-]{0,62}", value: l ? l.username : "", disabled: !!l, dir: "ltr" });
+    const role = h("select", {}, ["admin", "viewer", "owner"].map((r) => h("option", { value: r, selected: l ? l.role === r : r === "admin" }, t(`role_${r}`))));
+    const pass = h("input", { type: "password", autocomplete: "new-password", minlength: "10", required: !l });
+    const err = h("div", { class: "error" });
+    const save = h("button", { class: "primary", value: "save", onclick: async (e) => {
+      e.preventDefault(); err.textContent = "";
+      try { await api("PUT", `/api/v2/admin/staff/${encodeURIComponent(user.value.trim())}`, { Role: role.value, Password: pass.value }); document.getElementById("modal").close(); toast(t("saved")); route(); }
+      catch (x) { err.textContent = x.message; }
+    } }, t("save"));
+    openModal(l ? l.username : t("addLogin"), h("div", { class: "form" }, h("p", { class: "small muted" }, t("staffHint")),
+      h("label", {}, h("span", {}, t("username")), user), h("label", {}, h("span", {}, t("role")), role),
+      h("label", {}, h("span", {}, l ? t("newPassOpt") : t("password")), pass), err), [save]);
+  };
+  const rows = list.map((l) => h("tr", {},
+    h("td", { class: "name" }, ltr(l.username), l.username === me.user ? h("span", { class: "muted small" }, ` (${t("you")})`) : null),
+    h("td", {}, roleBadge(l.role), l.totp ? h("span", { class: "badge good" }, "2FA") : null),
+    h("td", { class: "muted small" }, relTime(l.last_seen, L)),
+    h("td", { class: "row" },
+      h("button", { class: "small", onclick: () => editLogin(l) }, t("edit")),
+      l.totp && l.username !== me.user ? h("button", { class: "small", onclick: async () => {
+        if (!await confirmText(t("tfaResetAsk", { x: l.username }))) return;
+        await guarded(() => api("DELETE", `/api/v2/admin/staff/${encodeURIComponent(l.username)}/2fa`)); route();
+      } }, t("tfaReset")) : null,
+      l.username !== me.user ? h("button", { class: "small danger", onclick: async () => {
+        if (!await confirmAction(t("delLoginAsk", { x: l.username }))) return;
+        await guarded(() => api("DELETE", `/api/v2/admin/staff/${encodeURIComponent(l.username)}`)); route();
+      } }, t("delete")) : null)));
+  const fmtTime = (u) => new Intl.DateTimeFormat(lang === "fa" ? "fa-IR" : "en-GB", { dateStyle: "short", timeStyle: "medium" }).format(new Date(u * 1000));
+  const what = (e) => {
+    if (e.path === "/api/v2/auth/login") return e.status === 200 ? t("act_login") : t("act_loginFail");
+    return h("code", { dir: "ltr", class: "path" }, `${e.method} ${e.path.replace(/^\/api\/v2\/(admin\/)?/, "")}`);
+  };
+  const tone = (e) => e.status >= 400 ? "bad" : e.method === "DELETE" ? "warn" : "";
+  const body = h("tbody", {});
+  let oldest = 0;
+  const add = (items) => {
+    body.append(...items.map((e) => h("tr", { class: tone(e) },
+      h("td", { class: "muted small" }, ltr(fmtTime(e.unix))),
+      h("td", { class: "name" }, ltr(e.actor), " ", h("span", { class: "muted small" }, e.role === "login" ? "" : t(`role_${e.role}`) || e.role)),
+      h("td", {}, what(e), e.status >= 400 && e.path !== "/api/v2/auth/login" ? h("span", { class: "badge bad" }, `${t("act_denied")} ${e.status}`) : null),
+      h("td", { class: "muted small" }, ltr(e.ip)))));
+    if (items.length) oldest = items[items.length - 1].id;
+    more.hidden = items.length < 100;
+  };
+  const filter = h("input", { type: "search", placeholder: t("auditFilter") });
+  const more = h("button", { onclick: async () => add(await api("GET", `/api/v2/admin/audit?limit=100&before=${oldest}&q=${encodeURIComponent(filter.value.trim())}`)) }, t("auditMore"));
+  let timer;
+  filter.addEventListener("input", () => { clearTimeout(timer); timer = setTimeout(async () => {
+    body.replaceChildren(); oldest = 0;
+    add(await api("GET", `/api/v2/admin/audit?limit=100&q=${encodeURIComponent(filter.value.trim())}`));
+  }, 300); });
+  add(first);
+  return h("div", { class: "form" },
+    h("div", { class: "card form" }, h("div", { class: "row spread" }, h("h1", {}, t("staffTitle")), h("button", { class: "primary", onclick: () => editLogin(null) }, t("addLogin"))),
+      h("p", { class: "small muted" }, t("staffHint")),
+      h("div", { class: "table-wrap" }, h("table", { class: "dtable" }, h("thead", {}, h("tr", {}, h("th", {}, t("username")), h("th", {}, t("role")), h("th", {}, t("lastSeen")), h("th", {}, ""))), h("tbody", {}, rows)))),
+    h("div", { class: "card form" }, h("h2", {}, t("auditTitle")), h("p", { class: "small muted" }, t("auditHint")), filter,
+      h("div", { class: "table-wrap" }, h("table", { class: "dtable audit" }, body)), more));
+}
+
 function viewSettings() {
   const langSel = h("select", { onchange: (e) => { lang = e.target.value; safeSet("lang", lang); applyLang(); route(); } },
     h("option", { value: "en", selected: lang === "en" }, "English"), h("option", { value: "fa", selected: lang === "fa" }, "فارسی"));
@@ -2181,7 +2293,7 @@ function viewSettings() {
     } catch (x) { toast(t("failed", { e: x.message })); }
     e.target.value = "";
   } });
-  const backupCard = me.role === "owner" ? h("div", { class: "card form" }, h("h2", {}, t("backup")), h("p", { class: "small muted" }, t("backupHint")),
+  const backupCard = fullOwner() ? h("div", { class: "card form" }, h("h2", {}, t("backup")), h("p", { class: "small muted" }, t("backupHint")),
     h("div", { class: "row" }, h("a", { class: "btn", href: "/api/v2/admin/backup", download: "" }, t("download"))),
     h("h2", { class: "section" }, t("exportImport")), h("p", { class: "small muted" }, t("exportHint")),
     h("div", { class: "row" }, h("a", { class: "btn", href: "/api/v2/admin/clients/export", download: "" }, t("exportClients")),
@@ -2193,7 +2305,7 @@ function viewSettings() {
       fill(tgOut, r.link ? h("a", { class: "btn", href: r.link, target: "_blank", rel: "noopener" }, t("openBot")) : null,
         h("code", {}, `/start rep_${r.code}`), h("p", { class: "small muted" }, t("codeExpires")));
     } }, t("connectTelegram"))) : null;
-  return h("div", { class: "form" }, h("h1", {}, t("settings")), me.role === "owner" ? subSettingsCard() : null, pwForm, tgCard, backupCard,
+  return h("div", { class: "form" }, h("h1", {}, t("settings")), me.role === "owner" ? subSettingsCard() : null, pwForm, tfaCard(), tgCard, backupCard,
     h("div", { class: "card form" },
       h("label", {}, h("span", {}, t("language")), langSel),
       h("label", {}, h("span", {}, t("theme")), themeSel),
