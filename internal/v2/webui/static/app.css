@@ -362,3 +362,6 @@ table.dtable.compact tr:last-child td { border-block-end: 0; }
 .nodebars { display: grid; gap: 6px; }
 .nodebar { display: grid; grid-template-columns: minmax(70px, 120px) 1fr auto; gap: 10px; align-items: center; }
 .nodebar .bar.slim { max-inline-size: none; margin: 0; }
+.badge, .chip, .name, td { unicode-bidi: isolate; }
+.toolbar select { inline-size: auto; min-inline-size: 220px; flex: 0 0 auto; }
+.toolbar { flex-wrap: nowrap; } @media (max-width: 720px) { .toolbar { flex-wrap: wrap; } .toolbar select { inline-size: 100%; } }

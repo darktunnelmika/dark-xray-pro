@@ -156,7 +156,8 @@ function bytes(n) {
   const u = ["B", "KB", "MB", "GB", "TB"];
   let i = 0;
   while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
-  return `${fmtNum(n)} ${u[i]}`;
+  // Left-to-right isolate: "۳۴٫۸ GB" keeps its order inside Persian text.
+  return `\u2066${fmtNum(n)} ${u[i]}\u2069`;
 }
 
 async function api(method, path, body) {
@@ -302,8 +303,21 @@ async function viewDashboard() {
     h("div", { class: "list" }, (nodes || []).map((n) => nodeCard(n))));
 }
 
-function rate(bps) { return `${bytes(bps)}/s`; }
-function dur(sec) { const d = Math.floor(sec / 86400), hh = Math.floor((sec % 86400) / 3600); return d ? `${fmtNum(d)}d ${fmtNum(hh)}h` : `${fmtNum(hh)}h`; }
+function rate(bps) { return bytes(bps).replace(/\u2069$/, "/s\u2069"); }
+function dur(sec) {
+  const d = Math.floor(sec / 86400), hh = Math.floor((sec % 86400) / 3600);
+  const [ud, uh] = lang === "fa" ? [" روز", " ساعت"] : ["d", "h"];
+  return d ? `${fmtNum(d)}${ud} ${fmtNum(hh)}${uh}` : `${fmtNum(hh)}${uh}`;
+}
+// Chart dates: Persian calendar on the Persian panel ("۰۸/۲۳"), MM-DD otherwise.
+function dayLabel(day, full = false) {
+  if (lang !== "fa") return full ? day : day.slice(5);
+  const d = new Date(day + "T12:00:00Z");
+  return new Intl.DateTimeFormat("fa-IR-u-ca-persian", full ? { year: "numeric", month: "2-digit", day: "2-digit" } : { month: "2-digit", day: "2-digit" }).format(d);
+}
+const ltr = (s) => `\u2066${s}\u2069`;
+// replaceChildren that skips empty slots (null/false), like h() does.
+function fill(el, ...kids) { el.replaceChildren(...kids.flat().filter((k) => k != null && k !== false)); return el; }
 
 // Sparkline as inline SVG (built with the DOM, never markup strings).
 function spark(values, max) {
@@ -459,8 +473,9 @@ function relTime(u, L) {
   if (!u) return L.never;
   const s = Date.now() / 1000 - u;
   if (s < 120) return L.now;
-  const v = s < 3600 ? `${Math.round(s / 60)}m` : s < 86400 ? `${Math.round(s / 3600)}h` : `${Math.round(s / 86400)}d`;
-  return L.ago.replace("{t}", fmtNum(v));
+  const fa = lang === "fa";
+  const [n, unit] = s < 3600 ? [Math.round(s / 60), fa ? "دقیقه" : "min"] : s < 86400 ? [Math.round(s / 3600), fa ? "ساعت" : "h"] : [Math.round(s / 86400), fa ? "روز" : "d"];
+  return L.ago.replace("{t}", `${fmtNum(n)} ${unit}`);
 }
 
 function clientState(c) {
@@ -568,7 +583,7 @@ async function viewClients() {
     const emails = [...selected];
     const pick = list.filter((c) => selected.has(c.Email));
     const run = async (fn) => { let n = 0; for (const c of pick) { try { await fn(c); n++; } catch {} } toast(L.done.replace("{n}", fmtNum(n))); selected.clear(); route(); };
-    bulkBar.replaceChildren(
+    fill(bulkBar,
       h("b", {}, L.sel.replace("{n}", fmtNum(selected.size))),
       owner ? h("button", { onclick: () => bulkForm(emails) }, t("bulkRenew")) : null,
       owner ? h("button", { onclick: async () => { if (await confirmText(L.resetAsk.replace("{x}", `${fmtNum(emails.length)}`))) run((c) => api("POST", `/api/v2/admin/clients/${encodeURIComponent(c.Email)}/reset`)); } }, L.reset) : null,
@@ -652,7 +667,7 @@ async function templatesModal(inbounds) {
   async function load() {
     const tl = await api("GET", "/api/v2/admin/templates").catch(() => []);
     list.replaceChildren(...(tl.length ? tl.map((tp) => h("div", { class: "row card item" }, h("span", { class: "name" }, tp.name),
-      h("span", { class: "badge" }, `${tp.gb ? fmtNum(tp.gb) + " GB" : "∞"} · ${fmtNum(tp.days)}d`), tp.reset_period ? h("span", { class: "badge" }, "↻ " + tp.reset_period) : null,
+      h("span", { class: "badge" }, `${tp.gb ? ltr(fmtNum(tp.gb) + " GB") : "∞"} · ${fmtNum(tp.days)} ${lang === "fa" ? "روز" : "d"}`), tp.reset_period ? h("span", { class: "badge" }, "↻ " + tp.reset_period) : null,
       h("button", { class: "ghost danger spacer", onclick: async () => { await guarded(() => api("DELETE", `/api/v2/admin/templates/${encodeURIComponent(tp.id)}`)); load(); } }, L.del))) : [h("p", { class: "muted small" }, L.none)]));
   }
   const add = h("button", { type: "button", class: "primary", onclick: async () => {
@@ -849,7 +864,7 @@ function usageCard(email, days0) {
       return b;
     }));
     const total = (nodes || []).reduce((a, n) => a + n.up + n.down, 0);
-    card.replaceChildren(
+    fill(card,
       h("div", { class: "row" }, h("h2", {}, t("usageChart")), legend(), h("span", { class: "spacer" }), chips),
       barsSvg(days, 1100),
       h("div", { class: "small muted" }, L.byNode),
@@ -875,7 +890,7 @@ function nextPlanCard(c) {
     try { await guarded(() => api("PUT", `/api/v2/admin/clients/${encodeURIComponent(c.Email)}/next-plan`, { plan })); toast(L.saved); route(); } catch (x) { err.textContent = x.message; }
   };
   return h("div", { class: "card form" },
-    h("div", { class: "row" }, h("h2", {}, L.np), p ? h("span", { class: "badge good" }, L.npSet.replace("{g}", p.gb ? `${fmtNum(p.gb)} GB` : L.unl).replace("{d}", fmtNum(p.days))) : null),
+    h("div", { class: "row" }, h("h2", {}, L.np), p ? h("span", { class: "badge good" }, L.npSet.replace("{g}", p.gb ? ltr(`${fmtNum(p.gb)} GB`) : L.unl).replace("{d}", fmtNum(p.days))) : null),
     h("p", { class: "small muted" }, p ? L.npHint : L.npNone + " " + L.npHint),
     h("div", { class: "two" }, h("label", {}, h("span", {}, L.gb), gb), h("label", {}, h("span", {}, L.days), days)),
     h("label", { class: "check" }, first, h("span", {}, L.firstUse)), err,
@@ -892,7 +907,7 @@ function devicesCard(c) {
   const del = async (hwid) => { await guarded(() => api("DELETE", `/api/v2/admin/clients/${encodeURIComponent(c.Email)}/devices/${encodeURIComponent(hwid)}`)); load(); };
   async function load() {
     const devs = await api("GET", `/api/v2/admin/clients/${encodeURIComponent(c.Email)}/devices`).catch(() => []);
-    list.replaceChildren(devs.length ? h("table", { class: "dtable compact" }, h("tbody", {}, devs.map((d) => h("tr", {},
+    fill(list, devs.length ? h("table", { class: "dtable compact" }, h("tbody", {}, devs.map((d) => h("tr", {},
       h("td", {}, h("div", {}, [d.os, d.model].filter(Boolean).join(" · ") || "?"), h("div", { class: "small muted clip", dir: "ltr" }, d.agent || d.hwid)),
       h("td", { class: "small muted" }, fmtDT(d.last)),
       h("td", { class: "c-act" }, h("button", { class: "ghost danger", onclick: () => del(d.hwid) }, L.rm)))))) : h("p", { class: "muted small" }, L.noDev),
@@ -1256,7 +1271,7 @@ async function viewRouting() {
   function draw() {
     const missing = data.status?.nodes_without_geo || [];
     const iranOpts = [["", L.iranNone], ["block", L.iranBlock], ...r.outbounds.map((o) => [o.tag, `${L.iranVia} ${o.tag}`])];
-    root.replaceChildren(
+    fill(root,
       h("div", { class: "row sticky-head" }, h("h1", {}, L.title), dirty, h("button", { class: "primary spacer", onclick: save }, L.save)),
       err,
       missing.length ? h("div", { class: "card warnbox small" }, L.geoMissing, " ", h("b", { dir: "ltr" }, missing.join(", "))) : null,
@@ -1349,7 +1364,7 @@ function sniFinder({ nodes, node, onPick }) {
     const all = res.candidates || [];
     const good = all.filter((c) => c.ok && c.tls13 && c.h2);
     status.textContent = `${fmtNum(res.scanned || 0)} · ${(res.took_ms / 1000).toFixed(1)}s` + (res.neighbors ? ` · ${t("neighbor")}: ${fmtNum(res.neighbors)}` : "");
-    out.replaceChildren(
+    fill(out,
       good.length ? h("table", {},
         h("thead", {}, h("tr", {}, h("th", {}, "SNI"), h("th", {}, t("score")), h("th", {}, t("latency")), h("th", {}, ""), h("th", {}, ""))),
         h("tbody", {}, good.slice(0, 25).map((c) => h("tr", {},
@@ -2058,10 +2073,10 @@ function barsSvg(days, W = 600) {
   const step = Math.max(1, Math.round(days.length / 6));
   days.forEach((d, i) => {
     const hit = el("rect", { x: x(i) - W / days.length / 2, y: 0, width: W / days.length, height: H, class: "bar-hit" });
-    const title = el("title", {}); title.textContent = `${d.Day}: ↓ ${bytes(d.Down)} · ↑ ${bytes(d.Up)}`;
+    const title = el("title", {}); title.textContent = `${dayLabel(d.Day, true)}: ↓ ${bytes(d.Down)} · ↑ ${bytes(d.Up)}`;
     hit.append(title); svg.append(hit);
     if ((days.length - 1 - i) % step === 0) {
-      const lab = el("text", { x: x(i), y: H + 15, "text-anchor": "middle", class: "bar-label" }); lab.textContent = d.Day.slice(5); svg.append(lab);
+      const lab = el("text", { x: x(i), y: H + 15, "text-anchor": "middle", class: "bar-label" }); lab.textContent = dayLabel(d.Day); svg.append(lab);
     }
   });
   return svg;
@@ -2098,7 +2113,7 @@ function subSettingsCard() {
     const ann = h("textarea", { rows: 2 }); ann.value = v.announce || "";
     const sup = h("input", { value: v.support_url || "", dir: "ltr", placeholder: "https://t.me/" });
     const err = h("div", { class: "error small" });
-    card.replaceChildren(h("h2", {}, L.h), h("p", { class: "small muted" }, L.hint),
+    fill(card, h("h2", {}, L.h), h("p", { class: "small muted" }, L.hint),
       h("label", {}, h("span", {}, L.title), title),
       h("label", {}, h("span", {}, L.tpl), tpl), h("div", { class: "small muted" }, L.vars), prev,
       h("label", { class: "check" }, info, h("span", {}, L.info)),
@@ -2149,7 +2164,7 @@ function viewSettings() {
   const tgCard = me.role === "rep" ? h("div", { class: "card form" }, h("h2", {}, t("telegram")), h("p", { class: "small muted" }, t("telegramHint")),
     tgOut, h("button", { onclick: async () => {
       const r = await guarded(() => api("POST", "/api/v2/rep/telegram"));
-      tgOut.replaceChildren(r.link ? h("a", { class: "btn", href: r.link, target: "_blank", rel: "noopener" }, t("openBot")) : null,
+      fill(tgOut, r.link ? h("a", { class: "btn", href: r.link, target: "_blank", rel: "noopener" }, t("openBot")) : null,
         h("code", {}, `/start rep_${r.code}`), h("p", { class: "small muted" }, t("codeExpires")));
     } }, t("connectTelegram"))) : null;
   return h("div", { class: "form" }, h("h1", {}, t("settings")), me.role === "owner" ? subSettingsCard() : null, pwForm, tgCard, backupCard,
