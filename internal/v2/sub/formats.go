@@ -158,6 +158,18 @@ func SingBox(a Account, ins []Inbound) ([]byte, error) {
 		"outbounds": append(append(groups, list...), map[string]any{"type": "direct", "tag": "direct"}),
 		"route":     map[string]any{"auto_detect_interface": true, "final": "Dark VPN"},
 	}
+	if a.IranDirect && len(tags) > 0 {
+		base := "https://raw.githubusercontent.com/Chocolate4U/Iran-sing-box-rules/rule-set/"
+		route := cfg["route"].(map[string]any)
+		route["rule_set"] = []any{
+			map[string]any{"tag": "geosite-ir", "type": "remote", "format": "binary", "url": base + "geosite-ir.srs", "download_detour": "Dark VPN"},
+			map[string]any{"tag": "geoip-ir", "type": "remote", "format": "binary", "url": base + "geoip-ir.srs", "download_detour": "Dark VPN"},
+		}
+		route["rules"] = []any{
+			map[string]any{"domain_suffix": []string{".ir"}, "outbound": "direct"},
+			map[string]any{"rule_set": []string{"geosite-ir", "geoip-ir"}, "outbound": "direct"},
+		}
+	}
 	return json.MarshalIndent(cfg, "", "  ")
 }
 
@@ -246,6 +258,10 @@ func Clash(a Account, ins []Inbound) ([]byte, error) {
 	if len(names) == 0 {
 		b.WriteString("      - DIRECT\n")
 	}
-	b.WriteString("rules:\n  - MATCH,Dark VPN\n")
+	b.WriteString("rules:\n")
+	if a.IranDirect && len(names) > 0 {
+		b.WriteString("  - DOMAIN-SUFFIX,ir,DIRECT\n  - GEOIP,IR,DIRECT\n")
+	}
+	b.WriteString("  - MATCH,Dark VPN\n")
 	return []byte(b.String()), nil
 }

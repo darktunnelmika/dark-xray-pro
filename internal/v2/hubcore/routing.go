@@ -71,7 +71,7 @@ var privateNets = []string{"0.0.0.0/8", "10.0.0.0/8", "100.64.0.0/10", "127.0.0.
 const routingKey = "routing"
 
 func defaultRouting() Routing {
-	return Routing{BlockTorrent: true, BlockPrivate: true, RouteOnly: true, DomainStrategy: "AsIs"}
+	return Routing{BlockTorrent: true, BlockPrivate: true, RouteOnly: true, DomainStrategy: "AsIs", ClientIranDirect: true}
 }
 
 // Routing returns the stored policy, or the safe defaults.

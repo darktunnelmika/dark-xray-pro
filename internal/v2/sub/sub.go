@@ -89,6 +89,9 @@ type Account struct {
 	Email  string
 	UUID   string
 	Secret string
+	// IranDirect adds "Iranian sites and IPs go direct" to app profiles
+	// (sing-box, Clash): those sites often refuse foreign addresses.
+	IranDirect bool
 }
 
 type stream struct {

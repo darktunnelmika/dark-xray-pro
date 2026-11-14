@@ -474,7 +474,7 @@ WHERE ci.email=? AND i.enabled=1 ORDER BY i.tag`, email)
 	if total < 0 {
 		total = 0
 	}
-	return sub.Account{Email: c.Email, UUID: c.UUID, Secret: c.Secret}, ins, sub.Userinfo(u.Up, u.Down, total, EffectiveExpiry(c, u)), nil
+	return sub.Account{Email: c.Email, UUID: c.UUID, Secret: c.Secret, IranDirect: s.Routing(ctx).ClientIranDirect}, ins, sub.Userinfo(u.Up, u.Down, total, EffectiveExpiry(c, u)), nil
 }
 
 // ClientView is a client with its live usage, for the panel.
