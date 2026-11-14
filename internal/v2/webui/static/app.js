@@ -9,7 +9,7 @@ const I18N = {
     maxIPs: "Max IPs (0 = no limit)", enabled: "Enabled", assignInbounds: "Inbounds", unlimited: "Unlimited", noExpiry: "No expiry",
     notStarted: "Starts on first use", daysLeft: "{n} days left", expired: "Expired", disabled: "Disabled", exhausted: "Volume used up",
     subscription: "Subscription", subHint: "Import this link or scan the QR code in v2rayNG, Hiddify or Streisand.",
-    confirmDelete: "Delete {x}? Usage history is kept.", node: "Node", preset: "Preset", tag: "Tag", port: "Port", sni: "REALITY target (SNI)", findSni: "Find SNI", updateNode: "Update agent", freeCert: "Free certificate", acmeTitle: "Free certificates (Let's Encrypt)", acmeSettings: "CA settings", acmeEmail: "Email for expiry notices (optional)", acmeCA: "Certificate authority", acmeStaging: "Let's Encrypt staging (test, untrusted)", cfToken: "Cloudflare API token (Zone · DNS · Edit)", cfSaved: "saved — leave empty to keep, - to remove", acmeDomains: "Domains (one per line, *.example.com for wildcard)", acmeMethod: "Prove the domain via", acmeDNS: "Cloudflare DNS (wildcards, no ports)", acmeHTTP: "HTTP on the node (port 80 must be free)", acmeNodeAuto: "auto: the node the domain points to", acmeHint: "The certificate is stored under this id and renewed automatically 30 days before expiry; inbounds using it pick up each renewal.", st_pending: "waiting", st_issuing: "issuing…", st_ok: "issued", st_failed: "failed", renew: "Renew now", acmeEmpty: "No free certificates yet.", updateAvail: "update available", updateAsk: "Update the agent on {x}? Connections drop for a few seconds while it restarts.", updating: "Updating {x}…", updated: "{x} updated", updateFail: "Update failed: {x}", sniScan: "Scan", sniScanning: "Scanning from {x}… {s}s", sniNeighbors: "Also scan neighbours in the node's datacenter (/24)",
+    confirmDelete: "Delete {x}? Usage history is kept.", node: "Node", preset: "Preset", tag: "Tag", port: "Port", sni: "REALITY target (SNI)", findSni: "Find SNI", updateNode: "Update agent", xrayVer: "Xray version", xrayPick: "Install Xray on {x}", xrayCur: "installed", xrayPre: "pre-release", xrayAsk: "Install Xray {v} on {x}? Connections drop for a few seconds; the previous version is kept.", xrayInstalling: "Downloading and installing Xray {v} on {x}…", xrayDone: "Xray on {x}: {v}", xrayHint: "Official XTLS builds, checked against the release checksum. Pick an older version to roll back.", freeCert: "Free certificate", acmeTitle: "Free certificates (Let's Encrypt)", acmeSettings: "CA settings", acmeEmail: "Email for expiry notices (optional)", acmeCA: "Certificate authority", acmeStaging: "Let's Encrypt staging (test, untrusted)", cfToken: "Cloudflare API token (Zone · DNS · Edit)", cfSaved: "saved — leave empty to keep, - to remove", acmeDomains: "Domains (one per line, *.example.com for wildcard)", acmeMethod: "Prove the domain via", acmeDNS: "Cloudflare DNS (wildcards, no ports)", acmeHTTP: "HTTP on the node (port 80 must be free)", acmeNodeAuto: "auto: the node the domain points to", acmeHint: "The certificate is stored under this id and renewed automatically 30 days before expiry; inbounds using it pick up each renewal.", st_pending: "waiting", st_issuing: "issuing…", st_ok: "issued", st_failed: "failed", renew: "Renew now", acmeEmpty: "No free certificates yet.", updateAvail: "update available", updateAsk: "Update the agent on {x}? Connections drop for a few seconds while it restarts.", updating: "Updating {x}…", updated: "{x} updated", updateFail: "Update failed: {x}", sniScan: "Scan", sniScanning: "Scanning from {x}… {s}s", sniNeighbors: "Also scan neighbours in the node's datacenter (/24)",
     sniCustom: "Your own domains (one per line, empty = built-in list)", sniHint: "Probes each domain from the node itself: TLS 1.3, HTTP/2, a valid certificate and handshake time. The best REALITY targets are fast, TLS 1.3 + h2, and ideally in the same datacenter.",
     sniUse: "Use", sniFailed: "{x} unusable (no TLS 1.3/h2, bad certificate or unreachable)", sniExpired: "The node did not answer. Is it online and updated?", neighbor: "neighbour", latency: "Handshake", score: "Score",
     path: "Path / service name (optional)", remark: "Remark", directAddr: "Public address", tunnelAddr: "Tunnel entry (optional, address:port)",
@@ -74,7 +74,7 @@ const I18N = {
     maxIPs: "حداکثر IP (۰ = بدون محدودیت)", enabled: "فعال", assignInbounds: "اینباندها", unlimited: "نامحدود", noExpiry: "بدون انقضا",
     notStarted: "از اولین اتصال شروع می‌شود", daysLeft: "{n} روز مانده", expired: "منقضی", disabled: "غیرفعال", exhausted: "حجم تمام شد",
     subscription: "لینک ساب", subHint: "این لینک را در v2rayNG، Hiddify یا Streisand وارد کنید یا QR را اسکن کنید.",
-    confirmDelete: "{x} حذف شود؟ سابقهٔ مصرف حفظ می‌شود.", node: "نود", preset: "نوع", tag: "شناسه", port: "پورت", sni: "مقصد REALITY (SNI)", findSni: "یافتن SNI", updateNode: "به‌روزرسانی نود", freeCert: "گواهی رایگان", acmeTitle: "گواهی رایگان (Let's Encrypt)", acmeSettings: "تنظیمات صادرکننده", acmeEmail: "ایمیل برای هشدار انقضا (اختیاری)", acmeCA: "صادرکننده", acmeStaging: "Let's Encrypt آزمایشی (فقط تست، نامعتبر)", cfToken: "توکن API کلودفلر (Zone · DNS · Edit)", cfSaved: "ذخیره شده — خالی بگذارید تا بماند، - برای حذف", acmeDomains: "دامنه‌ها (هر خط یکی؛ برای وایلدکارت *.example.com)", acmeMethod: "روش تأیید دامنه", acmeDNS: "DNS کلودفلر (وایلدکارت، بدون پورت)", acmeHTTP: "HTTP روی نود (پورت ۸۰ باید آزاد باشد)", acmeNodeAuto: "خودکار: نودی که دامنه به آن اشاره می‌کند", acmeHint: "گواهی با همین شناسه ذخیره و ۳۰ روز مانده به انقضا خودکار تمدید می‌شود؛ اینباندهایی که از آن استفاده می‌کنند هر تمدید را خودشان می‌گیرند.", st_pending: "در انتظار", st_issuing: "در حال صدور…", st_ok: "صادر شد", st_failed: "ناموفق", renew: "تمدید همین حالا", acmeEmpty: "هنوز گواهی رایگانی نساخته‌اید.", updateAvail: "نسخهٔ جدید آماده است", updateAsk: "نرم‌افزار نود {x} به‌روز شود؟ هنگام ری‌استارت، اتصال‌ها چند ثانیه قطع می‌شوند.", updating: "در حال به‌روزرسانی {x}…", updated: "{x} به‌روز شد", updateFail: "به‌روزرسانی ناموفق: {x}", sniScan: "اسکن", sniScanning: "در حال اسکن از {x}… {s} ثانیه", sniNeighbors: "سایت‌های همسایه در دیتاسنتر نود (/24) هم بررسی شوند",
+    confirmDelete: "{x} حذف شود؟ سابقهٔ مصرف حفظ می‌شود.", node: "نود", preset: "نوع", tag: "شناسه", port: "پورت", sni: "مقصد REALITY (SNI)", findSni: "یافتن SNI", updateNode: "به‌روزرسانی نود", xrayVer: "نسخهٔ Xray", xrayPick: "نصب Xray روی {x}", xrayCur: "نصب‌شده", xrayPre: "پیش‌انتشار", xrayAsk: "Xray نسخهٔ {v} روی {x} نصب شود؟ اتصال‌ها چند ثانیه قطع می‌شوند؛ نسخهٔ قبلی نگه داشته می‌شود.", xrayInstalling: "در حال دانلود و نصب Xray {v} روی {x}…", xrayDone: "Xray روی {x}: {v}", xrayHint: "نسخه‌های رسمی XTLS، با چک‌سام خود انتشار سنجیده می‌شوند. برای برگشت، نسخهٔ قدیمی‌تر را انتخاب کنید.", freeCert: "گواهی رایگان", acmeTitle: "گواهی رایگان (Let's Encrypt)", acmeSettings: "تنظیمات صادرکننده", acmeEmail: "ایمیل برای هشدار انقضا (اختیاری)", acmeCA: "صادرکننده", acmeStaging: "Let's Encrypt آزمایشی (فقط تست، نامعتبر)", cfToken: "توکن API کلودفلر (Zone · DNS · Edit)", cfSaved: "ذخیره شده — خالی بگذارید تا بماند، - برای حذف", acmeDomains: "دامنه‌ها (هر خط یکی؛ برای وایلدکارت *.example.com)", acmeMethod: "روش تأیید دامنه", acmeDNS: "DNS کلودفلر (وایلدکارت، بدون پورت)", acmeHTTP: "HTTP روی نود (پورت ۸۰ باید آزاد باشد)", acmeNodeAuto: "خودکار: نودی که دامنه به آن اشاره می‌کند", acmeHint: "گواهی با همین شناسه ذخیره و ۳۰ روز مانده به انقضا خودکار تمدید می‌شود؛ اینباندهایی که از آن استفاده می‌کنند هر تمدید را خودشان می‌گیرند.", st_pending: "در انتظار", st_issuing: "در حال صدور…", st_ok: "صادر شد", st_failed: "ناموفق", renew: "تمدید همین حالا", acmeEmpty: "هنوز گواهی رایگانی نساخته‌اید.", updateAvail: "نسخهٔ جدید آماده است", updateAsk: "نرم‌افزار نود {x} به‌روز شود؟ هنگام ری‌استارت، اتصال‌ها چند ثانیه قطع می‌شوند.", updating: "در حال به‌روزرسانی {x}…", updated: "{x} به‌روز شد", updateFail: "به‌روزرسانی ناموفق: {x}", sniScan: "اسکن", sniScanning: "در حال اسکن از {x}… {s} ثانیه", sniNeighbors: "سایت‌های همسایه در دیتاسنتر نود (/24) هم بررسی شوند",
     sniCustom: "دامنه‌های دلخواه (هر خط یکی، خالی = فهرست آماده)", sniHint: "هر دامنه از خود نود سنجیده می‌شود: TLS 1.3، HTTP/2، گواهی معتبر و زمان دست‌دهی. بهترین مقصد REALITY سریع است، TLS 1.3 و h2 دارد و ترجیحاً در همان دیتاسنتر است.",
     sniUse: "انتخاب", sniFailed: "{x} مورد قابل استفاده نیست (بدون TLS 1.3/h2، گواهی نامعتبر یا در دسترس نبود)", sniExpired: "نود جواب نداد. آنلاین و به‌روز است؟", neighbor: "همسایه", latency: "دست‌دهی", score: "امتیاز",
     path: "مسیر / نام سرویس (اختیاری)", remark: "نام نمایشی", directAddr: "آدرس عمومی", tunnelAddr: "ورودی تونل (اختیاری، آدرس:پورت)",
@@ -337,7 +337,7 @@ function nodeCard(n, actions = false) {
   const host = n.Host;
   return h("div", { class: "card item" },
     h("div", { class: "head" }, h("span", { class: `dot ${n.online ? "on" : ""}` }), h("span", { class: "name" }, `${n.Name || n.ID}`),
-      h("span", { class: "badge" }, n.ID), n.update_available ? h("span", { class: "badge warn" }, t("updateAvail")) : null, h("span", { class: `badge ${n.online ? "good" : "bad"} spacer` }, t(n.online ? "online" : "offline"))),
+      h("span", { class: "badge" }, n.ID), n.update_available ? h("span", { class: "badge warn" }, t("updateAvail")) : null, n.xray_version ? h("span", { class: "badge", dir: "ltr" }, `Xray ${n.xray_version}${n.arch ? " · " + n.arch : ""}`) : null, h("span", { class: `badge ${n.online ? "good" : "bad"} spacer` }, t(n.online ? "online" : "offline"))),
     h("div", { class: "muted small" }, `${t("restarts")}: ${fmtNum(n.XrayRestarts)} · ${t("spooled")}: ${fmtNum(n.Spooled)} · ${n.AgentVersion || ""}`),
     host ? h("div", { class: "meters" },
       meter(t("cpu"), host.cpu_percent, `${fmtNum(host.cpu_percent)}%`),
@@ -348,6 +348,7 @@ function nodeCard(n, actions = false) {
     actions ? h("div", { class: "row" },
       n.update_available ? h("button", { class: "primary", onclick: () => updateNode(n) }, t("updateNode")) : null,
       h("button", { onclick: () => nodeHealth(n) }, t("health")),
+      h("button", { class: "ghost", onclick: () => xrayPicker(n) }, t("xrayVer")),
       h("button", { class: "ghost", onclick: () => renameNode(n) }, t("rename")),
       h("button", { class: "ghost", onclick: () => {
         const f = sniFinder({ nodes: [n], node: n.ID, onPick: (d) => copy(d) });
@@ -381,6 +382,38 @@ async function updateNode(n) {
     route();
     return;
   }
+}
+
+async function pollTask(id, done) {
+  for (let i = 0; i < 120; i++) {
+    await new Promise((r) => setTimeout(r, 2000));
+    let r;
+    try { r = await api("GET", `/api/v2/admin/tasks/${id}`); } catch { continue; }
+    if (r.status !== "queued") return done(r);
+  }
+  done({ status: "expired" });
+}
+
+async function xrayPicker(n) {
+  const name = n.Name || n.ID;
+  const list = h("div", { class: "list" }, h("p", { class: "muted small" }, "…"));
+  const d = openModal(t("xrayPick", { x: name }), h("div", { class: "form" }, h("p", { class: "small muted" }, t("xrayHint")), list));
+  let rel;
+  try { rel = await api("GET", "/api/v2/admin/xray/releases"); } catch (e) { list.replaceChildren(h("p", { class: "error" }, e.message)); return; }
+  list.replaceChildren(...rel.map((r) => {
+    const cur = n.xray_version && r.tag === "v" + n.xray_version;
+    return h("div", { class: "row card item" },
+      h("span", { class: "name", dir: "ltr" }, r.tag), h("span", { class: "small muted" }, r.published),
+      r.prerelease ? h("span", { class: "badge warn" }, t("xrayPre")) : null, cur ? h("span", { class: "badge good" }, t("xrayCur")) : null,
+      h("button", { class: cur ? "ghost spacer" : "primary spacer", disabled: cur, onclick: async () => {
+        d.close();
+        if (!(await new Promise((res) => { const c = openModal(t("xrayAsk", { v: r.tag, x: name }), h("p", {}, ""), [h("button", { value: "ok", class: "primary" }, t("save"))]); c.addEventListener("close", () => res(c.returnValue === "ok"), { once: true }); }))) return;
+        let task;
+        try { task = await guarded(() => api("POST", `/api/v2/admin/nodes/${encodeURIComponent(n.ID)}/xray`, { version: r.tag })); } catch { return; }
+        toast(t("xrayInstalling", { v: r.tag, x: name }));
+        pollTask(task.id, (res) => { toast(res.status === "done" ? t("xrayDone", { x: name, v: res.result?.to || r.tag }) : t("updateFail", { x: res.error || res.status })); route(); });
+      } }, r.tag));
+  }));
 }
 
 function meter(label, pct, text, neutral = false) {
@@ -777,7 +810,7 @@ const RT = {
     network: "شبکه", users: "کاربرها (ایمیل)", inbounds: "اینباندها", to: "خروجی", remark: "توضیح", enabled: "فعال", del: "حذف", up: "بالا", down: "پایین",
     geo: "فایل‌های geo", geoUpdate: "به‌روزرسانی الان", geoMissing: "این نودها هنوز فایل geo ندارند؛ قانون‌های geoip/geosite فعلاً روی آن‌ها اعمال نمی‌شود:",
     geoNeed: "برای تبلیغات، ایران و قانون‌های geo لازم است. هفتگی خودکار به‌روز می‌شود.", any: "همه", none: "هیچ", edit: "ویرایش", warpOk: "اکانت WARP ساخته شد", empty: "چیزی نیست",
-    unsaved: "تغییرات ذخیره نشده" },
+    unsaved: "تغییرات ذخیره نشده", adv: "کانفیگ پیشرفتهٔ Xray", advHint: "بخش‌های اضافه که روی کانفیگ همهٔ نودها اضافه می‌شوند: log، policy، dns، observatory، fakedns، reverse، metrics. قبل از ذخیره با خود Xray چک می‌شود.", advSave: "ذخیرهٔ کانفیگ پیشرفته", view: "کانفیگ نهایی نود", show: "نمایش" },
   en: { title: "Routing & outbounds", save: "Save and apply to nodes", saved: "Saved; nodes pick it up on their next sync", safe: "Safe defaults",
     private: "Block private networks and the node's own IP", torrent: "Block BitTorrent (avoids copyright complaints)", routeOnly: "Sniffing for routing only (recommended)",
     ads: "Block ads", clientIran: "App profiles (sing-box, Clash) send Iranian sites and IPs direct", iran: "Iranian traffic on the server", iranNone: "Do nothing", iranBlock: "Block (clients go direct themselves)", iranVia: "Via outbound", ds: "Domain resolution on the direct outbound",
@@ -789,12 +822,12 @@ const RT = {
     network: "Network", users: "Users (email)", inbounds: "Inbounds", to: "Outbound", remark: "Remark", enabled: "Enabled", del: "Delete", up: "Up", down: "Down",
     geo: "Geo files", geoUpdate: "Update now", geoMissing: "These nodes have no geo files yet; geoip/geosite rules are not applied on them:",
     geoNeed: "Needed for ads, Iran and geo rules. Updated weekly.", any: "any", none: "none", edit: "Edit", warpOk: "WARP account created", empty: "Nothing yet",
-    unsaved: "Unsaved changes" },
+    unsaved: "Unsaved changes", adv: "Advanced Xray config", advHint: "Extra sections merged into every node's config: log, policy, dns, observatory, fakedns, reverse, metrics. Checked with Xray before it is saved.", advSave: "Save advanced config", view: "Node's final config", show: "Show" },
 };
 
 async function viewRouting() {
   const L = RT[lang] || RT.en;
-  const [data, nodes, inbounds] = await Promise.all([api("GET", "/api/v2/admin/routing"), api("GET", "/api/v2/admin/nodes"), api("GET", "/api/v2/admin/inbounds")]);
+  const [data, nodes, inbounds, overlay] = await Promise.all([api("GET", "/api/v2/admin/routing"), api("GET", "/api/v2/admin/nodes"), api("GET", "/api/v2/admin/inbounds"), api("GET", "/api/v2/admin/xray/overlay")]);
   const r = JSON.parse(JSON.stringify(data.routing));
   r.outbounds ||= []; r.balancers ||= []; r.rules ||= []; r.dns ||= [];
   const root = h("div", {});
@@ -924,7 +957,29 @@ async function viewRouting() {
       h("div", { class: "list" }, (data.geo || []).map((g) => h("div", { class: "card item" },
         h("div", { class: "head" }, h("span", { class: "name", dir: "ltr" }, g.name), h("span", { class: `badge ${g.size ? "good" : "warn"}` }, g.size ? bytes(g.size) : "—"),
           g.updated ? h("span", { class: "badge spacer" }, new Date(g.updated * 1000).toLocaleString(lang === "fa" ? "fa-IR" : "en-GB")) : null),
-        h("div", { class: "small muted mono", dir: "ltr" }, g.url)))));
+        h("div", { class: "small muted mono", dir: "ltr" }, g.url)))),
+      advSection());
+  }
+  const ovText = h("textarea", { class: "code", rows: 8, dir: "ltr", spellcheck: "false" });
+  ovText.value = JSON.stringify(overlay, null, 2);
+  function advSection() {
+    const ovErr = h("div", { class: "error small" });
+    const nodeSel = h("select", {}, nodes.map((n) => h("option", { value: n.ID }, n.Name || n.ID)));
+    return h("section", { class: "card form" }, h("h2", {}, L.adv), h("p", { class: "small muted" }, L.advHint), ovText, ovErr,
+      h("div", { class: "row" }, h("button", { class: "primary", onclick: async () => {
+        ovErr.textContent = "";
+        let body;
+        try { body = JSON.parse(ovText.value || "{}"); } catch (e) { ovErr.textContent = e.message; return; }
+        try { await guarded(() => api("PUT", "/api/v2/admin/xray/overlay", body)); toast(L.saved); } catch (x) { ovErr.textContent = x.message; }
+      } }, L.advSave),
+        h("span", { class: "spacer" }), h("span", { class: "small muted" }, L.view), nodeSel,
+        h("button", { class: "ghost", onclick: async () => {
+          try {
+            const cfg = await api("GET", `/api/v2/admin/nodes/${encodeURIComponent(nodeSel.value)}/config`);
+            const txt = JSON.stringify(cfg, null, 2);
+            openModal(`${L.view} · ${nodeSel.value}`, h("div", { class: "form" }, h("pre", { class: "code cfgview", dir: "ltr" }, txt), h("button", { type: "button", onclick: () => copy(txt) }, t("copy"))));
+          } catch (e) { toast(e.message); }
+        } }, L.show)));
   }
   draw();
   return root;

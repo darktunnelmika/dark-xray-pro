@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -16,7 +17,7 @@ import (
 )
 
 // Version is reported to the HUB.
-var Version = "v2.0.2"
+var Version = "v2.1.0"
 
 // Applier is the part of Supervisor the agent uses.
 type Applier interface {
@@ -36,6 +37,7 @@ type Config struct {
 	Now             func() time.Time
 	AgentSHA        string // sha256 of the running binary, reported to the HUB
 	AssetDir        string // where Xray reads geo files (next to its binary)
+	XrayVersion     string // reported to the HUB
 }
 
 // Agent ties Xray, the usage spool, local enforcement and the HUB together.
@@ -314,7 +316,7 @@ func (a *Agent) Exchange(ctx context.Context) time.Duration {
 	resp, err := a.hub.Sync(ctx, wire.SyncRequest{NodeID: a.cfg.NodeID, AgentVersion: Version, ConfigRevision: rev,
 		XrayRunning: running, XrayRestarts: restarts, LastError: lastErr, SpooledBatches: a.spool.Len(), UnixTime: a.cfg.Now().Unix(),
 		Host: a.hostStats(), Results: results, AgentSHA: a.cfg.AgentSHA,
-		Assets: a.assets.held()})
+		Assets: a.assets.held(), XrayVersion: a.cfg.XrayVersion, Arch: runtime.GOARCH})
 	if err != nil {
 		a.cfg.Logf("hub sync unavailable, serving last state: %v", err)
 		return poll

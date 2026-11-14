@@ -58,7 +58,7 @@ func main() {
 	}
 	selfSHA, _ := nodeagent.FileSHA(exe)
 	agent, err := nodeagent.New(nodeagent.Config{NodeID: *nodeID, StateDir: *stateDir, Logf: log.Printf, AgentSHA: selfSHA,
-		AssetDir: filepath.Dir(*xrayBin)}, hub, sup, stats)
+		AssetDir: filepath.Dir(*xrayBin), XrayVersion: nodeagent.XrayVersion(*xrayBin)}, hub, sup, stats)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -68,6 +68,7 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	agent.SetTask(wire.TaskSelfUpdate, nodeagent.SelfUpdateTask(hub, exe))
+	agent.SetTask(wire.TaskXrayUpdate, nodeagent.XrayUpdateTask(hub, *xrayBin))
 	// After a self-update: stop cleanly; systemd (Restart=always) starts
 	// the new binary.
 	agent.SetRestart(func() {

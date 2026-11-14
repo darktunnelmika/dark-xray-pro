@@ -68,6 +68,7 @@ tx_rate=MAX(tx_rate,excluded.tx_rate), online=MAX(online,excluded.online)`,
 	}
 	s.applyTaskResults(ctx, nodeID, req.Results)
 	s.recordAssets(ctx, nodeID, req.Assets)
+	s.recordXray(ctx, nodeID, req.XrayVersion, req.Arch)
 	if req.AgentSHA != "" && len(req.AgentSHA) <= 64 {
 		_, _ = s.db.ExecContext(ctx, `UPDATE nodes SET agent_sha=? WHERE id=? AND agent_sha<>?`, req.AgentSHA, nodeID, req.AgentSHA)
 	}
@@ -208,7 +209,9 @@ type NodeStatus struct {
 	Host                              *wire.Host
 	PublicIP                          string
 	AgentSHA                          string
-	UpdateAvailable                   bool `json:"update_available"`
+	UpdateAvailable                   bool   `json:"update_available"`
+	XrayVersion                       string `json:"xray_version"`
+	Arch                              string `json:"arch"`
 }
 
 // HistoryPoint is one 5-minute sample of a node's health.
@@ -250,7 +253,7 @@ func (n NodeStatus) Online(now time.Time) bool {
 
 func (s *Store) Nodes(ctx context.Context) ([]NodeStatus, error) {
 	rows, err := s.ro.QueryContext(ctx, `SELECT id,name,agent_version,last_error,last_seen_unix,xray_running,xray_restarts,spooled,
-config_revision,reported_revision,usage_seq,host_json,public_ip,agent_sha FROM nodes ORDER BY id`)
+config_revision,reported_revision,usage_seq,host_json,public_ip,agent_sha,xray_version,agent_arch FROM nodes ORDER BY id`)
 	if err != nil {
 		return nil, err
 	}
@@ -261,7 +264,7 @@ config_revision,reported_revision,usage_seq,host_json,public_ip,agent_sha FROM n
 		var n NodeStatus
 		var hj string
 		if err := rows.Scan(&n.ID, &n.Name, &n.AgentVersion, &n.LastError, &n.LastSeen, &n.XrayRunning, &n.XrayRestarts,
-			&n.Spooled, &n.ConfigRevision, &n.ReportedRevision, &n.UsageSeq, &hj, &n.PublicIP, &n.AgentSHA); err != nil {
+			&n.Spooled, &n.ConfigRevision, &n.ReportedRevision, &n.UsageSeq, &hj, &n.PublicIP, &n.AgentSHA, &n.XrayVersion, &n.Arch); err != nil {
 			return nil, err
 		}
 		if hj != "" {

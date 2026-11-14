@@ -3,6 +3,7 @@ package hubcore
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"log"
 	"net/http"
 	"strconv"
@@ -601,6 +602,41 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 			return
 		}
 		reply(w, map[string]bool{"ok": true}, s.SetGeoURL(r.Context(), r.PathValue("name"), in.URL))
+	}))
+	mux.HandleFunc("GET /api/v2/admin/xray/releases", guard(func(w http.ResponseWriter, r *http.Request) {
+		rel, err := XrayReleases(r.Context())
+		reply(w, rel, err)
+	}))
+	mux.HandleFunc("POST /api/v2/admin/nodes/{id}/xray", guard(func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Version string `json:"version"`
+		}
+		if !decode(w, r, &in) {
+			return
+		}
+		id, err := s.StartXrayUpdate(r.Context(), r.PathValue("id"), in.Version)
+		reply(w, map[string]string{"id": id}, err)
+	}))
+	mux.HandleFunc("GET /api/v2/admin/xray/overlay", guard(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(s.XrayOverlay(r.Context()))
+	}))
+	mux.HandleFunc("PUT /api/v2/admin/xray/overlay", guard(func(w http.ResponseWriter, r *http.Request) {
+		raw, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+		if err != nil {
+			http.Error(w, "bad request", http.StatusBadRequest)
+			return
+		}
+		reply(w, map[string]bool{"ok": true}, s.PutXrayOverlay(r.Context(), raw))
+	}))
+	mux.HandleFunc("GET /api/v2/admin/nodes/{id}/config", guard(func(w http.ResponseWriter, r *http.Request) {
+		cfg, err := s.RenderNode(r.Context(), r.PathValue("id"))
+		if err != nil {
+			reply(w, nil, err)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(cfg)
 	}))
 	mux.HandleFunc("GET /api/v2/admin/tasks/{id}", guard(func(w http.ResponseWriter, r *http.Request) {
 		t, err := s.TaskByID(r.Context(), r.PathValue("id"))

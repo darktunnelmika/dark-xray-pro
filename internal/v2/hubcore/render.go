@@ -184,6 +184,7 @@ JOIN inbounds i ON i.tag=r.tag WHERE r.node_id=? AND i.enabled=1 ORDER BY i.tag`
 	if dns != nil {
 		cfg["dns"] = dns
 	}
+	s.applyOverlay(ctx, cfg)
 	return json.Marshal(cfg) // map keys are sorted: deterministic
 }
 

@@ -41,7 +41,12 @@ func (s *Store) ensureTaskSchema() error {
 	if err := s.addColumn("nodes", "agent_sha", "TEXT NOT NULL DEFAULT ''"); err != nil {
 		return err
 	}
-	return s.addColumn("nodes", "agent_assets", "TEXT NOT NULL DEFAULT ''")
+	for _, c := range []string{"agent_assets", "xray_version", "agent_arch"} {
+		if err := s.addColumn("nodes", c, "TEXT NOT NULL DEFAULT ''"); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // SetDistDir tells the store where the Node binaries live.
@@ -81,6 +86,11 @@ func (s *Store) distFile(name string) (string, bool) {
 			_, err := os.Stat(p)
 			return p, err == nil
 		}
+	}
+	if m := xrayDistRE.FindStringSubmatch(name); m != nil {
+		p := s.xrayBuildPath(m[1], m[2])
+		_, err := os.Stat(p)
+		return p, err == nil
 	}
 	if name != "dark-node" && name != "xray" {
 		return "", false

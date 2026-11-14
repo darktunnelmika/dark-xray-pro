@@ -309,3 +309,4 @@ details.rule > summary::-webkit-details-marker { display: none; }
 details.rule[open] > summary { margin-block-end: 10px; }
 details.rule.off { opacity: .55; }
 details > summary.small { cursor: pointer; margin-block: 6px; }
+.cfgview { max-height: 60vh; overflow: auto; font-size: 12px; white-space: pre; padding: 10px; border-radius: 10px; background: var(--surface-2); }

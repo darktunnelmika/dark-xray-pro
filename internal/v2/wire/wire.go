@@ -40,6 +40,9 @@ type SyncRequest struct {
 	AgentSHA string `json:"agent_sha,omitempty"`
 	// Assets maps asset file names (geoip.dat, ...) to the sha256 held.
 	Assets map[string]string `json:"assets,omitempty"`
+	// XrayVersion ("26.11.9") and Arch (Go GOARCH) of this node.
+	XrayVersion string `json:"xray_version,omitempty"`
+	Arch        string `json:"arch,omitempty"`
 }
 
 // Asset is a file a Node should hold next to Xray, fetched from PathDist.
@@ -74,6 +77,10 @@ const TaskSelfUpdate = "self_update"
 // TaskACMEHTTP serves one ACME HTTP-01 answer on port 80 for a few minutes
 // (args: {"path","body","seconds"}); the task finishes once listening.
 const TaskACMEHTTP = "acme_http"
+
+// TaskXrayUpdate replaces the Xray binary (args: {"name","sha256","version"})
+// with a build from PathDist, keeps the old one, and restarts.
+const TaskXrayUpdate = "xray_update"
 
 // Host is the node machine's health at the time of the sync.
 type Host struct {
