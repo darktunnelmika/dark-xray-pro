@@ -634,7 +634,7 @@ func (s *Store) DeleteClient(ctx context.Context, email string) error {
 // credit ledger stay for reports.
 func forgetClient(ctx context.Context, tx *sql.Tx, email string) error {
 	for _, table := range []string{"client_usage", "online", "ip_log", "client_devices", "wg_ips", "tg_links", "usage_resets"} {
-		if _, err := tx.ExecContext(ctx, `DELETE FROM `+table+` WHERE email=?`, email); err != nil && !strings.Contains(err.Error(), "no such table") {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM `+table+` WHERE email=?`, email); err != nil {
 			return err
 		}
 	}
