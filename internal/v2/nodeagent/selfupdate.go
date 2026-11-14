@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 
 	"github.com/darktunnelmika/dark-xray-pro/internal/v2/wire"
 )
