@@ -148,7 +148,9 @@ function h(tag, attrs = {}, ...kids) {
     else if (k === "style") el.style.cssText = v; // CSSOM: allowed under a strict style-src CSP
     else el.setAttribute(k, v === true ? "" : v);
   }
-  for (const kid of kids.flat()) if (kid != null && kid !== false) el.append(kid instanceof Node ? kid : String(kid));
+  // In Persian a middle dot reads like the digit zero (۰): use the Persian comma.
+  const txt = (x) => (lang === "fa" && /[\u0600-\u06ff]/.test(x) ? String(x).replaceAll(" · ", "، ") : String(x));
+  for (const kid of kids.flat()) if (kid != null && kid !== false) el.append(kid instanceof Node ? kid : txt(kid));
   return el;
 }
 
