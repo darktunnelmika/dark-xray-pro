@@ -734,6 +734,12 @@ func TestPresetsRenderForEveryProtocol(t *testing.T) {
 		if in.Protocol == "wireguard" {
 			in.Settings.Clients = in.Settings.Peers // WireGuard lists peers
 		}
+		if plainProtocols[in.Protocol] {
+			if len(in.Settings.Clients) != 0 {
+				t.Fatalf("%s must not get panel clients", in.Protocol)
+			}
+			continue
+		}
 		if len(in.Settings.Clients) != 1 || in.Settings.Clients[0]["email"] != "all" {
 			t.Fatalf("%s clients %v", in.Protocol, in.Settings.Clients)
 		}
