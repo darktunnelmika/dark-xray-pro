@@ -48,7 +48,13 @@ func outbounds(a Account, ins []Inbound) ([]outbound, error) {
 		if err != nil {
 			return nil, fmt.Errorf("inbound %s: %w", in.Tag, err)
 		}
-		if t.Protocol != "vless" && t.Protocol != "vmess" && t.Protocol != "trojan" {
+		switch t.Protocol {
+		case "vless", "vmess", "trojan":
+		case "shadowsocks":
+			if SS2022KeySize(t.Settings.Method) == 0 {
+				continue
+			}
+		default:
 			continue
 		}
 		for _, ep := range in.Meta.Endpoints {
@@ -58,6 +64,9 @@ func outbounds(a Account, ins []Inbound) ([]outbound, error) {
 			}
 			seen[remark(in, ep)]++
 			o := outbound{tag: tag, proto: t.Protocol, server: ep.Address, port: ep.Port, uuid: a.UUID, password: a.Secret, t: t, m: in.Meta}
+			if t.Protocol == "shadowsocks" {
+				o.password = ssPassword(t, a.Secret)
+			}
 			if t.Protocol == "vless" && t.Stream.Network == "tcp" {
 				o.flow = t.Settings.Flow
 			}
@@ -88,6 +97,8 @@ func SingBox(a Account, ins []Inbound) ([]byte, error) {
 			ob["uuid"], ob["security"], ob["alter_id"] = o.uuid, "auto", 0
 		case "trojan":
 			ob["password"] = o.password
+		case "shadowsocks":
+			ob["method"], ob["password"] = o.t.Settings.Method, o.password
 		}
 		s := o.t.Stream
 		switch s.Security {
@@ -155,7 +166,11 @@ func Clash(a Account, ins []Inbound) ([]byte, error) {
 		if s.Network == "xhttp" || s.Network == "splithttp" || s.Network == "httpupgrade" {
 			continue // not supported by mihomo; link-only
 		}
-		fmt.Fprintf(&b, "  - name: %s\n    type: %s\n    server: %s\n    port: %d\n    udp: true\n", yq(o.tag), o.proto, yq(o.server), o.port)
+		ctype := o.proto
+		if ctype == "shadowsocks" {
+			ctype = "ss"
+		}
+		fmt.Fprintf(&b, "  - name: %s\n    type: %s\n    server: %s\n    port: %d\n    udp: true\n", yq(o.tag), ctype, yq(o.server), o.port)
 		switch o.proto {
 		case "vless":
 			fmt.Fprintf(&b, "    uuid: %s\n", yq(o.uuid))
@@ -166,6 +181,10 @@ func Clash(a Account, ins []Inbound) ([]byte, error) {
 			fmt.Fprintf(&b, "    uuid: %s\n    alterId: 0\n    cipher: auto\n", yq(o.uuid))
 		case "trojan":
 			fmt.Fprintf(&b, "    password: %s\n", yq(o.password))
+		case "shadowsocks":
+			fmt.Fprintf(&b, "    cipher: %s\n    password: %s\n", yq(o.t.Settings.Method), yq(o.password))
+			names = append(names, o.tag)
+			continue
 		}
 		fmt.Fprintf(&b, "    network: %s\n", s.Network)
 		switch s.Security {

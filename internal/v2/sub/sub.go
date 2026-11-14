@@ -3,6 +3,7 @@
 package sub
 
 import (
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -77,7 +78,9 @@ type stream struct {
 type template struct {
 	Protocol string `json:"protocol"`
 	Settings struct {
-		Flow string `json:"flow"`
+		Flow     string `json:"flow"`
+		Method   string `json:"method"`   // shadowsocks
+		Password string `json:"password"` // shadowsocks 2022 server key
 	} `json:"settings"`
 	Stream stream `json:"streamSettings"`
 }
@@ -170,6 +173,38 @@ func remark(in Inbound, ep Endpoint) string {
 	return r
 }
 
+// SS2022KeySize is the PSK length a Shadowsocks 2022 method needs (0 if the
+// method is not a 2022 method).
+func SS2022KeySize(method string) int {
+	switch method {
+	case "2022-blake3-aes-128-gcm":
+		return 16
+	case "2022-blake3-aes-256-gcm", "2022-blake3-chacha20-poly1305":
+		return 32
+	}
+	return 0
+}
+
+// SS2022UserKey derives a client's Shadowsocks 2022 PSK from its secret, so
+// the HUB never stores a second credential and the key is stable across edits.
+func SS2022UserKey(secret, method string) string {
+	n := SS2022KeySize(method)
+	if n == 0 {
+		return ""
+	}
+	sum := sha256.Sum256([]byte("dark-ss2022|" + secret))
+	if n == 32 {
+		sum2 := sha256.Sum256(append(sum[:], []byte(secret)...))
+		return base64.StdEncoding.EncodeToString(append(sum[:16], sum2[:16]...))
+	}
+	return base64.StdEncoding.EncodeToString(sum[:n])
+}
+
+// ssPassword is the client-side password of a 2022 multi-user inbound.
+func ssPassword(t template, secret string) string {
+	return t.Settings.Password + ":" + SS2022UserKey(secret, t.Settings.Method)
+}
+
 // Links returns one share link per inbound endpoint, in a stable order.
 func Links(a Account, ins []Inbound) ([]string, error) {
 	sorted := append([]Inbound(nil), ins...)
@@ -191,6 +226,13 @@ func Links(a Account, ins []Inbound) ([]string, error) {
 					q.Set("flow", t.Settings.Flow)
 				}
 				out = append(out, "vless://"+a.UUID+"@"+host+"?"+q.Encode()+"#"+frag)
+			case "shadowsocks":
+				if SS2022KeySize(t.Settings.Method) == 0 {
+					continue
+				}
+				// SIP022: the 2022 userinfo is percent-encoded, not base64.
+				ui := url.QueryEscape(t.Settings.Method) + ":" + url.QueryEscape(ssPassword(t, a.Secret))
+				out = append(out, "ss://"+ui+"@"+host+"#"+frag)
 			case "trojan":
 				out = append(out, "trojan://"+url.PathEscape(a.Secret)+"@"+host+"?"+params(t, in.Meta).Encode()+"#"+frag)
 			case "vmess":

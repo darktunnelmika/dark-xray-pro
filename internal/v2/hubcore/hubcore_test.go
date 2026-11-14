@@ -2,6 +2,7 @@ package hubcore
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"io"
@@ -9,11 +10,13 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/darktunnelmika/dark-xray-pro/internal/v2/nodeagent"
+	"github.com/darktunnelmika/dark-xray-pro/internal/v2/sub"
 	"github.com/darktunnelmika/dark-xray-pro/internal/v2/wire"
 )
 
@@ -680,6 +683,62 @@ func TestInboundTrafficToggleAndRaw(t *testing.T) {
 		t.Fatal("a disabled inbound must leave the node config")
 	}
 	if err := s.SetInboundEnabled(ctx, "nope", true); !errors.Is(err, ErrNotFound) {
+		t.Fatal(err)
+	}
+}
+
+func TestPresetsRenderForEveryProtocol(t *testing.T) {
+	s, _ := newStore(t)
+	ctx := context.Background()
+	if _, err := s.CreateNode(ctx, "n1", "N"); err != nil {
+		t.Fatal(err)
+	}
+	for i, p := range Presets {
+		req := PresetRequest{Tag: "in-" + strconv.Itoa(i), NodeID: "n1", Preset: p, Port: 20000 + i, SNI: "www.speedtest.net",
+			Endpoints: []sub.Endpoint{{Name: "Direct", Address: "1.2.3.4", Port: 20000 + i}}}
+		if err := s.CreatePreset(ctx, req); err != nil {
+			t.Fatalf("%s: %v", p, err)
+		}
+	}
+	tags := []string{}
+	for i := range Presets {
+		tags = append(tags, "in-"+strconv.Itoa(i))
+	}
+	if err := s.PutClient(ctx, Client{Email: "all", Enabled: true, VolumeBytes: -1, Inbounds: tags}); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := s.RenderNode(ctx, "n1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var parsed struct {
+		Inbounds []struct {
+			Protocol string `json:"protocol"`
+			Settings struct {
+				Clients []map[string]any `json:"clients"`
+			} `json:"settings"`
+		} `json:"inbounds"`
+	}
+	if err := json.Unmarshal(cfg, &parsed); err != nil || len(parsed.Inbounds) != len(Presets)+1 {
+		t.Fatalf("%v %d", err, len(parsed.Inbounds))
+	}
+	for _, in := range parsed.Inbounds[1:] {
+		if len(in.Settings.Clients) != 1 || in.Settings.Clients[0]["email"] != "all" {
+			t.Fatalf("%s clients %v", in.Protocol, in.Settings.Clients)
+		}
+		if in.Protocol == "shadowsocks" {
+			pw, _ := in.Settings.Clients[0]["password"].(string)
+			if raw, _ := base64.StdEncoding.DecodeString(pw); len(raw) != 16 {
+				t.Fatalf("ss client key %q", pw)
+			}
+		}
+	}
+	links, _, err := s.Subscription(ctx, "all")
+	if err != nil || len(links) != len(Presets) {
+		t.Fatalf("%v %d links: %v", err, len(links), links)
+	}
+	// A broken shadowsocks template is refused.
+	if err := s.PutInbound(ctx, "bad-ss", "n1", []byte(`{"protocol":"shadowsocks","port":1,"settings":{"method":"aes-256-gcm","password":"x"}}`), true); !errors.Is(err, ErrInvalid) {
 		t.Fatal(err)
 	}
 }

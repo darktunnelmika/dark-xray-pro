@@ -37,7 +37,7 @@ type PresetRequest struct {
 }
 
 // Presets lists what the panel offers.
-var Presets = []string{"vless-reality-tcp", "vless-reality-grpc", "vless-reality-xhttp", "vless-ws", "trojan-ws"}
+var Presets = []string{"vless-reality-tcp", "vless-reality-grpc", "vless-reality-xhttp", "vless-ws", "vmess-ws", "vmess-tcp", "trojan-ws", "ss2022"}
 
 // BuildPreset renders the template and client metadata for a preset.
 func BuildPreset(p PresetRequest) (template, meta []byte, err error) {
@@ -84,12 +84,27 @@ func BuildPreset(p PresetRequest) (template, meta []byte, err error) {
 			path = "/" + randomHex(6)
 		}
 		err = reality("xhttp", map[string]any{"xhttpSettings": map[string]any{"path": path, "mode": "auto"}})
-	case "vless-ws", "trojan-ws":
+	case "ss2022":
+		// Shadowsocks 2022 with AES-128-GCM: no TLS layer, fits tunnels and
+		// clients that cannot do REALITY.
+		key := make([]byte, 16)
+		if _, err := rand.Read(key); err != nil {
+			return nil, nil, err
+		}
+		t["protocol"] = "shadowsocks"
+		t["settings"] = map[string]any{"method": "2022-blake3-aes-128-gcm", "password": base64.StdEncoding.EncodeToString(key), "network": "tcp,udp"}
+	case "vmess-tcp":
+		t["protocol"] = "vmess"
+		t["streamSettings"] = map[string]any{"network": "tcp", "security": "none"}
+	case "vless-ws", "trojan-ws", "vmess-ws":
 		if path == "" {
 			path = "/" + randomHex(6)
 		}
-		if p.Preset == "trojan-ws" {
+		switch p.Preset {
+		case "trojan-ws":
 			t["protocol"] = "trojan"
+		case "vmess-ws":
+			t["protocol"] = "vmess"
 		}
 		// Plain WebSocket is meant to sit behind a CDN or TLS front.
 		t["streamSettings"] = map[string]any{"network": "ws", "security": "none", "wsSettings": map[string]any{"path": path}}

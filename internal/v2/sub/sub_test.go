@@ -76,3 +76,33 @@ func TestSingBoxAndClash(t *testing.T) {
 		t.Fatal("format detection")
 	}
 }
+
+func TestShadowsocks2022Links(t *testing.T) {
+	in := Inbound{Tag: "ss", Template: []byte(`{"protocol":"shadowsocks","port":8388,"settings":{"method":"2022-blake3-aes-128-gcm","password":"AAAAAAAAAAAAAAAAAAAAAA=="}}`),
+		Meta: Meta{Remark: "SS", Endpoints: []Endpoint{{Name: "Direct", Address: "1.2.3.4", Port: 8388}}}}
+	a := Account{Email: "x", UUID: "u", Secret: "s3cret"}
+	links, err := Links(a, []Inbound{in})
+	if err != nil || len(links) != 1 {
+		t.Fatal(links, err)
+	}
+	key := SS2022UserKey("s3cret", "2022-blake3-aes-128-gcm")
+	if raw, _ := base64.StdEncoding.DecodeString(key); len(raw) != 16 {
+		t.Fatalf("user key %q", key)
+	}
+	if !strings.HasPrefix(links[0], "ss://2022-blake3-aes-128-gcm:") || !strings.Contains(links[0], "@1.2.3.4:8388#") {
+		t.Fatal(links[0])
+	}
+	if raw, _ := base64.StdEncoding.DecodeString(SS2022UserKey("s3cret", "2022-blake3-aes-256-gcm")); len(raw) != 32 {
+		t.Fatal("256-bit key size")
+	}
+	sb, _ := SingBox(a, []Inbound{in})
+	cl, _ := Clash(a, []Inbound{in})
+	if !strings.Contains(string(sb), `"type": "shadowsocks"`) || !strings.Contains(string(cl), "type: ss") || !strings.Contains(string(cl), "AAAAAAAAAAAAAAAAAAAAAA==:"+key) {
+		t.Fatalf("formats:\n%s\n%s", sb, cl)
+	}
+	// Legacy (non-2022) shadowsocks is not offered.
+	in.Template = []byte(`{"protocol":"shadowsocks","port":1,"settings":{"method":"aes-256-gcm","password":"x"}}`)
+	if links, _ := Links(a, []Inbound{in}); len(links) != 0 {
+		t.Fatal(links)
+	}
+}

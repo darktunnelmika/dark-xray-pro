@@ -3,9 +3,12 @@ package hubcore
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+
+	"github.com/darktunnelmika/dark-xray-pro/internal/v2/sub"
 )
 
 const (
@@ -25,6 +28,15 @@ func parseTemplate(raw []byte) (map[string]any, error) {
 	if _, ok := t["port"]; !ok {
 		return nil, fmt.Errorf("%w: inbound template needs a port", ErrInvalid)
 	}
+	if p == "shadowsocks" {
+		st, _ := t["settings"].(map[string]any)
+		m, _ := st["method"].(string)
+		pw, _ := st["password"].(string)
+		key, err := base64.StdEncoding.DecodeString(pw)
+		if sub.SS2022KeySize(m) == 0 || err != nil || len(key) != sub.SS2022KeySize(m) {
+			return nil, fmt.Errorf("%w: shadowsocks inbounds must use a 2022 method with a matching base64 server key", ErrInvalid)
+		}
+	}
 	return t, nil
 }
 
@@ -40,8 +52,11 @@ var clientShapes = map[string]func(c Client, flow string) map[string]any{
 	},
 	"vmess":  func(c Client, _ string) map[string]any { return map[string]any{"id": c.UUID, "email": c.Email} },
 	"trojan": func(c Client, _ string) map[string]any { return map[string]any{"password": c.Secret, "email": c.Email} },
-	// Shadowsocks 2022 multi-user needs per-method key sizes; it is added
-	// with its own key handling rather than a generic password.
+	// Shadowsocks 2022 multi-user: each client gets a PSK derived from its
+	// secret; the second argument carries the inbound's method.
+	"shadowsocks": func(c Client, method string) map[string]any {
+		return map[string]any{"password": sub.SS2022UserKey(c.Secret, method), "email": c.Email}
+	},
 }
 
 type nodeInbound struct {
@@ -93,6 +108,9 @@ func (s *Store) RenderNode(ctx context.Context, nodeID string) ([]byte, error) {
 		}
 		flow, _ := settings["flow"].(string)
 		delete(settings, "flow")
+		if proto == "shadowsocks" {
+			flow, _ = settings["method"].(string)
+		}
 		list := make([]any, 0, len(clients[in.tag]))
 		for _, c := range clients[in.tag] {
 			list = append(list, clientShapes[proto](c, flow))
