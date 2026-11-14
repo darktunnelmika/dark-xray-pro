@@ -127,6 +127,7 @@ func main() {
 		go s.RunGeo(ctx)
 		go s.RunResets(ctx)
 		go s.RunWebhooks(ctx)
+		go s.RunSystemWatch(ctx)
 		var cliOwners []int64
 		for _, f := range strings.Split(*tgOwners, ",") {
 			if n, err := strconv.ParseInt(strings.TrimSpace(f), 10, 64); err == nil {

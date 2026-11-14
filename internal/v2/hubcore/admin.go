@@ -144,6 +144,32 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 		reply(w, map[string]any{"ended": n}, err)
 	}))
 	telegramRoutes(s, mux, guard, func() []int64 { return tgDefaultOwners })
+	mux.HandleFunc("GET /api/v2/admin/system", guard(func(w http.ResponseWriter, r *http.Request) {
+		reply(w, s.System(r.Context()), nil)
+	}))
+	mux.HandleFunc("GET /api/v2/admin/online", member(func(w http.ResponseWriter, r *http.Request) {
+		list, err := s.Online(r.Context())
+		if err == nil && who(r).Role == "rep" {
+			mine, _ := s.scopedClients(r.Context(), who(r))
+			keep := map[string]bool{}
+			for _, c := range mine {
+				keep[c.Email] = true
+			}
+			kept := list[:0]
+			for _, o := range list {
+				if keep[o.Email] {
+					kept = append(kept, o)
+				}
+			}
+			list = kept
+		}
+		reply(w, list, err)
+	}))
+	mux.HandleFunc("GET /api/v2/admin/nodes/traffic", guard(func(w http.ResponseWriter, r *http.Request) {
+		days, _ := strconv.Atoi(r.URL.Query().Get("days"))
+		list, err := s.NodeTraffic(r.Context(), days)
+		reply(w, list, err)
+	}))
 	mux.HandleFunc("GET /api/v2/admin/security/lockouts", guard(func(w http.ResponseWriter, r *http.Request) {
 		reply(w, s.logins.list(s.now()), nil)
 	}))

@@ -60,7 +60,6 @@ type loginGuard struct {
 	m  map[string]*guardEntry
 }
 
-
 // Lockout is a locked address shown in the panel.
 type Lockout struct {
 	Key     string `json:"key"`
