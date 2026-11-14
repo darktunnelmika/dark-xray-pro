@@ -93,6 +93,10 @@ type Host struct {
 	Fingerprint   string   `json:"fingerprint"`
 	AllowInsecure bool     `json:"allow_insecure"`
 	Exclude       []string `json:"exclude"`
+	// Xray JSON profiles only: TLS fragment for this address, and mux
+	// (connections shared over one; 0 = off, never with Vision).
+	Fragment bool `json:"fragment"`
+	Mux      int  `json:"mux"`
 }
 
 // Route is an inbound's placement on one node.
@@ -116,6 +120,8 @@ func (s *Store) ensureRouteSchema() error {
 	for _, c := range []struct{ table, col, def string }{
 		{"nodes", "public_ip", "TEXT NOT NULL DEFAULT ''"},
 		{"nodes", "traffic_percent", "INTEGER NOT NULL DEFAULT 100"},
+		{"inbound_hosts", "fragment", "INTEGER NOT NULL DEFAULT 0"},
+		{"inbound_hosts", "mux", "INTEGER NOT NULL DEFAULT 0"},
 		{"swaps", "dest_node", "TEXT NOT NULL DEFAULT ''"},
 		{"swaps", "target_address", "TEXT NOT NULL DEFAULT ''"},
 	} {
@@ -242,7 +248,7 @@ FROM route_traffic WHERE tag=? AND node_id=?`, day, t, out[i].NodeID).Scan(&toda
 }
 
 func (s *Store) hostsOf(ctx context.Context, tag string) (map[string][]Host, error) {
-	rows, err := s.ro.QueryContext(ctx, `SELECT node_id,path,enabled,remark,address,port,sni,host,path_override,alpn,fingerprint,allow_insecure,exclude
+	rows, err := s.ro.QueryContext(ctx, `SELECT node_id,path,enabled,remark,address,port,sni,host,path_override,alpn,fingerprint,allow_insecure,exclude,fragment,mux
 FROM inbound_hosts WHERE tag=? ORDER BY node_id, CASE path WHEN 'direct' THEN 0 ELSE 1 END, sort, id`, tag)
 	if err != nil {
 		return nil, err
@@ -252,7 +258,7 @@ FROM inbound_hosts WHERE tag=? ORDER BY node_id, CASE path WHEN 'direct' THEN 0 
 	for rows.Next() {
 		var node, ex string
 		var h Host
-		if err := rows.Scan(&node, &h.Path, &h.Enabled, &h.Remark, &h.Address, &h.Port, &h.SNI, &h.Host, &h.PathOverride, &h.ALPN, &h.Fingerprint, &h.AllowInsecure, &ex); err != nil {
+		if err := rows.Scan(&node, &h.Path, &h.Enabled, &h.Remark, &h.Address, &h.Port, &h.SNI, &h.Host, &h.PathOverride, &h.ALPN, &h.Fingerprint, &h.AllowInsecure, &ex, &h.Fragment, &h.Mux); err != nil {
 			return nil, err
 		}
 		h.Exclude = splitTags(ex)
@@ -366,9 +372,12 @@ func (s *Store) PutRoutes(ctx context.Context, tag string, routes []Route) error
 			return err
 		}
 		for i, h := range r.Hosts {
-			if _, err := tx.ExecContext(ctx, `INSERT INTO inbound_hosts(tag,node_id,path,sort,enabled,remark,address,port,sni,host,path_override,alpn,fingerprint,allow_insecure,exclude)
-VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, tag, r.NodeID, h.Path, i, h.Enabled, h.Remark, strings.TrimSpace(h.Address), h.Port, h.SNI, h.Host, h.PathOverride,
-				h.ALPN, h.Fingerprint, h.AllowInsecure, strings.Join(h.Exclude, ",")); err != nil {
+			if h.Mux < 0 || h.Mux > 128 {
+				return fmt.Errorf("%w: mux must be 0–128", ErrInvalid)
+			}
+			if _, err := tx.ExecContext(ctx, `INSERT INTO inbound_hosts(tag,node_id,path,sort,enabled,remark,address,port,sni,host,path_override,alpn,fingerprint,allow_insecure,exclude,fragment,mux)
+VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, tag, r.NodeID, h.Path, i, h.Enabled, h.Remark, strings.TrimSpace(h.Address), h.Port, h.SNI, h.Host, h.PathOverride,
+				h.ALPN, h.Fingerprint, h.AllowInsecure, strings.Join(h.Exclude, ","), h.Fragment, h.Mux); err != nil {
 				return err
 			}
 		}
@@ -414,7 +423,7 @@ func (s *Store) routeEndpoints(ctx context.Context, tag string) ([]sub.Endpoint,
 				}
 			}
 			out = append(out, sub.Endpoint{Name: name, Address: h.Address, Port: h.Port, SNI: h.SNI, Host: h.Host, Path: h.PathOverride,
-				ALPN: h.ALPN, Fingerprint: h.Fingerprint, AllowInsecure: h.AllowInsecure, Exclude: h.Exclude})
+				ALPN: h.ALPN, Fingerprint: h.Fingerprint, AllowInsecure: h.AllowInsecure, Exclude: h.Exclude, Fragment: h.Fragment, Mux: h.Mux})
 		}
 	}
 	return out, nil

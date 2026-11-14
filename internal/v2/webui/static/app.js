@@ -1801,11 +1801,11 @@ async function inboundStudio(tag, ctx) {
     swaps: [], removedSwaps: [],
   };
   const newHost = (path, node) => ({ path, enabled: true, remark: "", address: path === "direct" ? (node?.PublicIP || "") : "", port: 443,
-    sni: "", host: "", path_override: "", alpn: "", fingerprint: "", allow_insecure: false, exclude: [], _adv: false });
+    sni: "", host: "", path_override: "", alpn: "", fingerprint: "", allow_insecure: false, exclude: [], fragment: false, mux: 0, _adv: false });
   const newRoute = (node) => ({ listen_ip: "", direct_port: 443, tunnel_port: 0, hosts: [newHost("direct", node)] });
   if (!isNew) {
     const [routes, swaps] = await Promise.all([api("GET", `/api/v2/admin/inbounds/${encodeURIComponent(tag)}/routes`), api("GET", `/api/v2/admin/swaps?inbound=${encodeURIComponent(tag)}`)]);
-    for (const r of routes) st.routes[r.node_id] = { ...r, hosts: r.hosts.map((x) => ({ ...x, exclude: x.exclude || [], _adv: !!(x.sni || x.host || x.path_override || x.alpn || x.fingerprint || x.allow_insecure || x.exclude?.length) })) };
+    for (const r of routes) st.routes[r.node_id] = { ...r, hosts: r.hosts.map((x) => ({ ...x, exclude: x.exclude || [], _adv: !!(x.sni || x.host || x.path_override || x.alpn || x.fingerprint || x.allow_insecure || x.exclude?.length || x.fragment || x.mux) })) };
     st.swaps = swaps.map((w) => ({ ...w }));
     st.step = 1;
   }
@@ -1903,6 +1903,9 @@ async function inboundStudio(tag, ctx) {
       field("ALPN", bind(hst, "alpn", { placeholder: "h2,http/1.1" })), field("Fingerprint", bind(hst, "fingerprint", { placeholder: "chrome" })),
       h("div", { class: "form" },
         h("label", { class: "check" }, (() => { const c = h("input", { type: "checkbox", checked: hst.allow_insecure }); c.addEventListener("change", () => { hst.allow_insecure = c.checked; }); return c; })(), "allowInsecure"),
+        h("div", { class: "row small" },
+          h("label", { class: "check" }, (() => { const c = h("input", { type: "checkbox", checked: !!hst.fragment }); c.addEventListener("change", () => { hst.fragment = c.checked; }); return c; })(), lang === "fa" ? "Fragment (فقط پروفایل Xray JSON)" : "Fragment (Xray JSON profile only)"),
+          h("label", {}, h("span", {}, lang === "fa" ? "Mux (همزمانی، ۰ = خاموش؛ نه با Vision)" : "Mux (concurrency, 0 = off; not with Vision)"), bind(hst, "mux", { type: "number", min: "0", max: "128", style: "max-inline-size:110px" }, true))),
         h("div", { class: "row small" }, t("hideIn"), ...["links", "singbox", "clash"].map((f) => h("label", { class: "check" },
           (() => { const c = h("input", { type: "checkbox", checked: hst.exclude.includes(f) }); c.addEventListener("change", () => { hst.exclude = c.checked ? [...hst.exclude, f] : hst.exclude.filter((x) => x !== f); }); return c; })(), f)))));
     return h("div", { class: "hostrow" },

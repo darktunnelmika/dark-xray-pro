@@ -25,12 +25,19 @@ func XrayJSON(a Account, ins []Inbound) ([]byte, error) {
 	}
 	var list []any
 	for _, o := range obs {
-		proxy := xrayOutbound(o, a.Fragment != nil)
+		f := a.Fragment
+		if f == nil && o.frag {
+			f = &Fragment{} // this address asks for it: default fragment settings
+		}
+		proxy := xrayOutbound(o, f != nil)
 		if proxy == nil {
 			continue
 		}
+		if o.mux > 0 && o.flow == "" {
+			proxy["mux"] = map[string]any{"enabled": true, "concurrency": o.mux}
+		}
 		outs := []any{proxy, map[string]any{"tag": "direct", "protocol": "freedom"}, map[string]any{"tag": "block", "protocol": "blackhole"}}
-		if f := a.Fragment; f != nil {
+		if f != nil {
 			fs := map[string]any{"fragment": map[string]any{"packets": or(f.Packets, "tlshello"), "length": or(f.Length, "100-200"), "interval": or(f.Interval, "10-20")}}
 			if f.Noise {
 				fs["noises"] = []any{map[string]any{"type": "rand", "packet": "10-20", "delay": "10-16"}}

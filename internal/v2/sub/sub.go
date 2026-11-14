@@ -27,7 +27,9 @@ type Endpoint struct {
 	ALPN          string   `json:"alpn,omitempty"` // comma-separated
 	Fingerprint   string   `json:"fingerprint,omitempty"`
 	AllowInsecure bool     `json:"allow_insecure,omitempty"`
-	Exclude       []string `json:"exclude,omitempty"` // formats that skip this host: links | singbox | clash
+	Exclude       []string `json:"exclude,omitempty"`  // formats that skip this host: links | singbox | clash
+	Fragment      bool     `json:"fragment,omitempty"` // Xray JSON: fragment the TLS hello for this address
+	Mux           int      `json:"mux,omitempty"`      // Xray JSON: mux concurrency (0 = off)
 }
 
 func (ep Endpoint) excluded(format string) bool {

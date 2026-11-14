@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/darktunnelmika/dark-xray-pro/internal/v2/sub"
 	"github.com/darktunnelmika/dark-xray-pro/internal/v2/wire"
 )
 
@@ -153,5 +154,27 @@ func TestInboundLimitsAndBranding(t *testing.T) {
 	d, err := s.subPageData(ctx, "alice", "https://x/sub/t", "fa")
 	if err != nil || string(d.Accent) != "#ff8800" || !strings.HasPrefix(string(d.Logo), "data:image/png") {
 		t.Fatal(d.Accent, d.Logo, err)
+	}
+}
+
+func TestHostFragmentAndMux(t *testing.T) {
+	tpl := []byte(`{"protocol":"vless","port":443,"settings":{},"streamSettings":{"network":"ws","security":"tls","tlsSettings":{"serverName":"a.com"},"wsSettings":{"path":"/x"}}}`)
+	in := sub.Inbound{Tag: "w", Template: tpl, Meta: sub.Meta{Endpoints: []sub.Endpoint{{Name: "cdn", Address: "1.1.1.1", Port: 443, Fragment: true, Mux: 8}, {Name: "plain", Address: "2.2.2.2", Port: 443}}}}
+	b, err := sub.XrayJSON(sub.Account{Email: "a", UUID: "u"}, []sub.Inbound{in})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var list []map[string]any
+	_ = json.Unmarshal(b, &list)
+	if len(list) != 2 {
+		t.Fatal(string(b))
+	}
+	first, _ := json.Marshal(list[0])
+	second, _ := json.Marshal(list[1])
+	if !strings.Contains(string(first), `"fragment"`) || !strings.Contains(string(first), `"concurrency":8`) {
+		t.Fatal("the cdn address asks for fragment and mux", string(first))
+	}
+	if strings.Contains(string(second), `"fragment"`) || strings.Contains(string(second), `"mux"`) {
+		t.Fatal("other addresses stay plain", string(second))
 	}
 }

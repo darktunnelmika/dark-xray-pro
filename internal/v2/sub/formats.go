@@ -38,6 +38,8 @@ type outbound struct {
 	flow               string
 	t                  template
 	m                  Meta
+	frag               bool // this address asks for TLS fragmentation (Xray JSON)
+	mux                int  // mux concurrency (Xray JSON, 0 = off)
 }
 
 func outbounds(a Account, ins []Inbound, format string) ([]outbound, error) {
@@ -77,7 +79,7 @@ func outbounds(a Account, ins []Inbound, format string) ([]outbound, error) {
 				tag += " " + strconv.Itoa(n+1)
 			}
 			seen[remark(a, in, ep)]++
-			o := outbound{tag: tag, proto: t.Protocol, server: ep.Address, port: ep.Port, uuid: a.UUID, password: a.Secret, t: t, m: m}
+			o := outbound{tag: tag, proto: t.Protocol, server: ep.Address, port: ep.Port, uuid: a.UUID, password: a.Secret, t: t, m: m, frag: ep.Fragment, mux: ep.Mux}
 			if t.Protocol == "shadowsocks" {
 				o.password = ssPassword(t, a.Secret)
 			}
