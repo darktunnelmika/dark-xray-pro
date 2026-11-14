@@ -1415,7 +1415,7 @@ function plainLine(ib, meta, nodes) {
 // Test one outbound from a node with a throwaway Xray (agent v2.5.0+).
 function outboundTester(tag, nodes) {
   const fa = lang === "fa";
-  const sel = h("select", { "aria-label": fa ? "نود" : "Node" }, nodes.map((n) => h("option", { value: n.ID }, `${n.Name || n.ID}${n.online ? "" : fa ? " (خاموش)" : " (offline)"}`)));
+  const sel = h("select", { "aria-label": fa ? "نود" : "Node", style: "max-inline-size:220px;flex:none" }, nodes.map((n) => h("option", { value: n.ID }, `${n.Name || n.ID}${n.online ? "" : fa ? " (خاموش)" : " (offline)"}`)));
   const out = h("span", { class: "small muted" }, fa ? "با تنظیمات ذخیره‌شده روی نود تست می‌شود" : "Tests the saved settings on the node");
   const btn = h("button", { type: "button", class: "ghost", onclick: async () => {
     btn.disabled = true; fill(out, h("span", { class: "muted" }, fa ? "در حال تست…" : "Testing…"));
