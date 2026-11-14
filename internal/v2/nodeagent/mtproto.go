@@ -101,7 +101,7 @@ func startMTP(in mtpInbound, logf func(string, ...any)) (*mtpServer, error) {
 	}
 	s.proxy, s.ln = p, ln
 	go func() {
-		if err := p.Serve(ln); err != nil {
+		if err := p.Serve(ln); err != nil && !strings.Contains(err.Error(), "use of closed network connection") {
 			logf("mtproto %s stopped: %v", in.Tag, err)
 		}
 	}()
