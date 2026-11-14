@@ -714,6 +714,10 @@ func TestPresetsRenderForEveryProtocol(t *testing.T) {
 	if err := s.PutClient(ctx, Client{Email: "all", Enabled: true, VolumeBytes: -1, Inbounds: tags}); err != nil {
 		t.Fatal(err)
 	}
+	// AmneziaWG/MTProto go only to agents that run them.
+	if _, err := s.db.Exec(`UPDATE nodes SET agent_version='v2.6.0' WHERE id='n1'`); err != nil {
+		t.Fatal(err)
+	}
 	cfg, err := s.RenderNode(ctx, "n1")
 	if err != nil {
 		t.Fatal(err)
@@ -731,7 +735,7 @@ func TestPresetsRenderForEveryProtocol(t *testing.T) {
 		t.Fatalf("%v %d", err, len(parsed.Inbounds))
 	}
 	for _, in := range parsed.Inbounds[1:] {
-		if in.Protocol == "wireguard" {
+		if in.Protocol == "wireguard" || in.Protocol == "amneziawg" {
 			in.Settings.Clients = in.Settings.Peers // WireGuard lists peers
 		}
 		if plainProtocols[in.Protocol] {
