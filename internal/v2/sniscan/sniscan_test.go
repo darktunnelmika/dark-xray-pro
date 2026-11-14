@@ -57,7 +57,7 @@ func TestValidName(t *testing.T) {
 			t.Errorf("%s rejected", ok)
 		}
 	}
-	for _, bad := range []string{"", "*.x.com", "1.2.3.4", "localhost", "x.local", "a b.com", "ex_ample.com"} {
+	for _, bad := range []string{"", "*.x.com", "1.2.3.4", "localhost", "x.local", "a b.com", "ex_ample.com", "srv.5.101.216.99.nip.io", "x.sslip.io"} {
 		if validName(bad) {
 			t.Errorf("%s accepted", bad)
 		}

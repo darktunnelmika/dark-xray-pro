@@ -204,9 +204,10 @@ func score(c Candidate) int {
 	if !c.H2 {
 		v -= 25
 	}
-	v -= c.LatencyMS / 8
+	// 3 ms costs one point: 5 ms scores 98, 150 ms scores 50.
+	v -= c.LatencyMS / 3
 	if c.Neighbor {
-		v += 10
+		v += 5
 	}
 	if v < 1 {
 		v = 1
@@ -292,6 +293,12 @@ func validName(d string) bool {
 	}
 	if net.ParseIP(d) != nil || strings.HasSuffix(d, ".local") || strings.HasSuffix(d, ".localhost") {
 		return false
+	}
+	// Wildcard-DNS services that just echo an IP make poor camouflage.
+	for _, z := range []string{".nip.io", ".sslip.io", ".xip.io", ".traefik.me", ".localtest.me"} {
+		if strings.HasSuffix(d, z) {
+			return false
+		}
 	}
 	for _, r := range d {
 		if !(r == '.' || r == '-' || r >= 'a' && r <= 'z' || r >= '0' && r <= '9') {
