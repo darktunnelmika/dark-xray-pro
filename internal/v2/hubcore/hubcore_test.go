@@ -738,7 +738,7 @@ func TestPresetsRenderForEveryProtocol(t *testing.T) {
 		}
 	}
 	links, _, err := s.Subscription(ctx, "all")
-	if err != nil || len(links) != len(Presets) {
+	if err != nil || len(links) != len(Presets)+3 { // fallback lists its three WebSocket routes too
 		t.Fatalf("%v %d links: %v", err, len(links), links)
 	}
 	// A broken shadowsocks template is refused.
