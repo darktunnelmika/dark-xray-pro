@@ -77,6 +77,16 @@ func AdminHandler(s *Store, adminToken string) http.Handler {
 		err := s.DeleteClient(r.Context(), r.PathValue("email"))
 		reply(w, map[string]bool{"ok": err == nil}, err)
 	}))
+	mux.Handle("GET /sub/{token}", SubHandler(s))
+	return mux
+}
+
+func b64(s string) string { return sub.Base64([]string{s}) }
+
+// SubHandler serves only public subscriptions, so it can listen on a public
+// address without exposing the owner API.
+func SubHandler(s *Store) http.Handler {
+	mux := http.NewServeMux()
 	mux.HandleFunc("GET /sub/{token}", func(w http.ResponseWriter, r *http.Request) {
 		email, err := s.EmailBySubToken(r.Context(), r.PathValue("token"))
 		if err != nil {
@@ -101,5 +111,3 @@ func AdminHandler(s *Store, adminToken string) http.Handler {
 	})
 	return mux
 }
-
-func b64(s string) string { return sub.Base64([]string{s}) }

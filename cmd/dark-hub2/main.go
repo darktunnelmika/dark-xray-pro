@@ -44,6 +44,7 @@ func main() {
 	listen := fs.String("listen", ":8443", "node API listen address")
 	tlsDir := fs.String("tls-dir", "/etc/dark-hub2", "CA and server certificate directory")
 	adminListen := fs.String("admin-listen", "127.0.0.1:2097", "owner API and /sub listen address (put HTTPS in front)")
+	subListen := fs.String("sub-listen", "", "public subscription-only listen address (optional)")
 	adminTokenFile := fs.String("admin-token-file", "/etc/dark-hub2/admin-token", "owner API bearer token file")
 	hosts := fs.String("hosts", "", "comma-separated IPs/names for the server certificate")
 	id := fs.String("id", "", "node id")
@@ -92,6 +93,10 @@ func main() {
 			}()
 		} else {
 			log.Printf("owner API disabled: %s not readable", *adminTokenFile)
+		}
+		if *subListen != "" {
+			subSrv := &http.Server{Addr: *subListen, Handler: hubcore.SubHandler(s), ReadHeaderTimeout: 10 * time.Second}
+			go func() { log.Printf("subscriptions on %s", *subListen); log.Fatal(subSrv.ListenAndServe()) }()
 		}
 		srv := &http.Server{Addr: *listen, Handler: hubcore.NodeHandler(s), ReadHeaderTimeout: 10 * time.Second,
 			TLSConfig: &tls.Config{MinVersion: tls.VersionTLS13, Certificates: []tls.Certificate{cert}}}
