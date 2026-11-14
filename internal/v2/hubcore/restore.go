@@ -125,11 +125,17 @@ func (s *Store) ApplyRestore() error {
 	if !s.HasPendingRestore() {
 		return fmt.Errorf("%w: upload a backup first", ErrInvalid)
 	}
+	RestartHub()
+	return nil
+}
+
+// RestartHub exits shortly after the current reply; systemd starts the HUB
+// again (used after a restore and to apply panel listener changes).
+func RestartHub() {
 	go func() {
 		time.Sleep(700 * time.Millisecond) // let the reply reach the browser
 		restartHook()
 	}()
-	return nil
 }
 
 // ApplyPendingRestore swaps a staged backup in. Call it before Open.

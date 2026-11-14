@@ -551,6 +551,21 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 		err := s.TestWebhook(r.Context())
 		reply(w, map[string]bool{"ok": err == nil}, err)
 	}))
+	mux.HandleFunc("GET /api/v2/admin/panel-https", guard(func(w http.ResponseWriter, r *http.Request) {
+		reply(w, s.PanelHTTPSStatus(r.Context()), nil)
+	}))
+	mux.HandleFunc("PUT /api/v2/admin/panel-https", guard(func(w http.ResponseWriter, r *http.Request) {
+		var in PanelHTTPS
+		if !decode(w, r, &in) {
+			return
+		}
+		err := s.PutPanelHTTPS(r.Context(), in)
+		reply(w, s.PanelHTTPSStatus(r.Context()), err)
+	}))
+	mux.HandleFunc("POST /api/v2/admin/panel-https/restart", guard(func(w http.ResponseWriter, r *http.Request) {
+		RestartHub()
+		reply(w, map[string]bool{"ok": true}, nil)
+	}))
 	mux.HandleFunc("GET /api/v2/admin/audit", guard(func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
 		before, _ := strconv.ParseInt(q.Get("before"), 10, 64)

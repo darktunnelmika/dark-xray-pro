@@ -142,6 +142,19 @@ func main() {
 				log.Printf("owner API and subscriptions on %s", *adminListen)
 				log.Fatal(admin.ListenAndServe())
 			}()
+			// Optional HTTPS listener for the panel itself (set from the panel).
+			if ph := s.PanelHTTPSSettings(ctx); ph.Port > 0 {
+				psrv := &http.Server{Addr: ":" + strconv.Itoa(ph.Port), Handler: admin.Handler, ReadHeaderTimeout: 10 * time.Second,
+					TLSConfig: &tls.Config{MinVersion: tls.VersionTLS12, GetCertificate: s.PanelCertificate(cert)}}
+				hubcore.SetPanelRunning(ph.Port)
+				go func() {
+					log.Printf("panel HTTPS on :%d", ph.Port)
+					if err := psrv.ListenAndServeTLS("", ""); err != nil {
+						log.Printf("panel HTTPS on :%d: %v", ph.Port, err)
+						hubcore.SetPanelRunning(0)
+					}
+				}()
+			}
 		} else {
 			log.Printf("owner API disabled: %s not readable", *adminTokenFile)
 		}
