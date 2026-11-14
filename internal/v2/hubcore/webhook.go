@@ -200,6 +200,13 @@ var webhookClient = &http.Client{Timeout: 15 * time.Second}
 // sendWebhook posts one batch and reports the receiver's answer.
 func sendWebhook(ctx context.Context, w WebhookSettings, items []WebhookItem) error {
 	body, _ := json.Marshal(map[string]any{"source": "dark-xray-pro", "events": items})
+	// Chat webhooks (Discord, Slack) want readable text, not our JSON.
+	switch {
+	case strings.Contains(w.URL, "discord.com/api/webhooks/") || strings.Contains(w.URL, "discordapp.com/api/webhooks/"):
+		body, _ = json.Marshal(map[string]any{"username": "Dark VPN", "content": chatText(items, 1900)})
+	case strings.Contains(w.URL, "hooks.slack.com/"):
+		body, _ = json.Marshal(map[string]any{"text": chatText(items, 3500)})
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, w.URL, bytes.NewReader(body))
 	if err != nil {
 		return err
@@ -285,4 +292,32 @@ func (s *Store) RunWebhooks(ctx context.Context) {
 		case <-time.After(wait):
 		}
 	}
+}
+
+// chatText renders items as short lines for chat webhooks.
+func chatText(items []WebhookItem, max int) string {
+	var b strings.Builder
+	for _, it := range items {
+		var line string
+		switch it.Kind {
+		case "client":
+			line = fmt.Sprintf("👤 %s — %s", it.Client, it.Event)
+		case "change":
+			line = fmt.Sprintf("✏️ %s %s %s", it.Actor, it.Event, strings.TrimPrefix(it.Path, "/api/v2/admin/"))
+		case "node":
+			icon := "🟢"
+			if it.Event == "offline" {
+				icon = "🔴"
+			}
+			line = fmt.Sprintf("%s node %s %s", icon, it.Node, it.Event)
+		default:
+			line = "✅ Dark VPN webhook test"
+		}
+		if b.Len()+len(line)+1 > max {
+			b.WriteString("…")
+			break
+		}
+		b.WriteString(line + "\n")
+	}
+	return b.String()
 }

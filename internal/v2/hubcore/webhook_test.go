@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -82,5 +83,15 @@ func TestWebhookDelivery(t *testing.T) {
 	}
 	if fails != 0 || s.Webhook(ctx).LastOK == 0 {
 		t.Fatal("status not recorded")
+	}
+}
+
+func TestWebhookChatText(t *testing.T) {
+	txt := chatText([]WebhookItem{{Kind: "node", Event: "offline", Node: "uk-1"}, {Kind: "client", Client: "ali", Event: "blocked:expired"}}, 500)
+	if !strings.Contains(txt, "🔴 node uk-1 offline") || !strings.Contains(txt, "ali — blocked:expired") {
+		t.Fatal(txt)
+	}
+	if long := chatText(make([]WebhookItem, 400), 100); len(long) > 110 {
+		t.Fatal("chat text must be capped", len(long))
 	}
 }
