@@ -1084,3 +1084,35 @@ func TestEncryptedBackupRoundTrip(t *testing.T) {
 		t.Fatal("short password must be refused")
 	}
 }
+
+func TestClientExportImportKeepsIdentity(t *testing.T) {
+	s, _ := newStore(t)
+	ctx := context.Background()
+	seed(t, s)
+	_, _ = s.ApplyUsage(ctx, "de-1", wire.UsageBatch{NodeID: "de-1", Seq: 1, Traffic: []wire.UserTraffic{{Email: "alice", Up: 5, Down: 7}}})
+	recs, err := s.ExportClients(ctx)
+	if err != nil || len(recs) != 2 {
+		t.Fatal(err, len(recs))
+	}
+	d, _ := newStore(t)
+	seed(t, d) // same inbound tag exists on the target
+	_ = d.DeleteClient(ctx, "alice")
+	n, err := d.ImportClients(ctx, recs)
+	if err != nil || n != 2 {
+		t.Fatal(err, n)
+	}
+	src, _ := s.ClientByEmail(ctx, "alice")
+	dst, _ := d.ClientByEmail(ctx, "alice")
+	if src.SubToken != dst.SubToken || dst.Usage.Up != 5 || dst.Usage.Down != 7 {
+		t.Fatalf("identity/usage lost: %+v vs %+v", src, dst)
+	}
+	srcLinks, _, _ := s.Subscription(ctx, "alice")
+	dstLinks, _, _ := d.Subscription(ctx, "alice")
+	if strings.Join(srcLinks, "") != strings.Join(dstLinks, "") {
+		t.Fatal("links must stay identical")
+	}
+	bad := []ClientRecord{{Client: Client{Email: "x", Enabled: true, VolumeBytes: -1, Inbounds: []string{"nope"}}}}
+	if _, err := d.ImportClients(ctx, bad); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("bad import: %v", err)
+	}
+}

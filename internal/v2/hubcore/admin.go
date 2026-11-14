@@ -306,6 +306,22 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 		list, err := s.Inbounds(r.Context())
 		reply(w, list, err)
 	}))
+	mux.HandleFunc("GET /api/v2/admin/clients/export", guard(func(w http.ResponseWriter, r *http.Request) {
+		recs, err := s.ExportClients(r.Context())
+		if err == nil {
+			w.Header().Set("Content-Disposition", `attachment; filename="dark-clients-`+time.Now().UTC().Format("20060102")+`.json"`)
+			w.Header().Set("Cache-Control", "no-store")
+		}
+		reply(w, recs, err)
+	}))
+	mux.HandleFunc("POST /api/v2/admin/clients/import", guard(func(w http.ResponseWriter, r *http.Request) {
+		var recs []ClientRecord
+		if !decode(w, r, &recs) {
+			return
+		}
+		n, err := s.ImportClients(r.Context(), recs)
+		reply(w, map[string]int{"imported": n}, err)
+	}))
 	mux.HandleFunc("GET /api/v2/admin/backup", guard(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/gzip")
 		w.Header().Set("Content-Disposition", `attachment; filename="dark-v2-`+time.Now().UTC().Format("20060102-1504")+`.sqlite.gz"`)
