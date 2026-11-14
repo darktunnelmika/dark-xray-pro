@@ -214,8 +214,25 @@ func TestResellerTelegram(t *testing.T) {
 			t.Fatal("a reseller's order must go to the reseller")
 		}
 	}
-	b.Handle(ctx, cb(repChat, "ok:"+strconv.FormatInt(id, 10)))
-	find(t, api.take(), repChat, "تحویل شد")
+	// The reseller invites a sales helper and a support helper.
+	const salesChat, supportChat = int64(3100), int64(3200)
+	invite := func(role string, who int64) {
+		b.Handle(ctx, msg(repChat, "/invite "+role))
+		m := find(t, api.take(), repChat, "start=adm_")
+		code := m.text[strings.Index(m.text, "adm_")+4:]
+		b.Handle(ctx, msg(who, "/start adm_"+code))
+		find(t, api.take(), who, "ادمین ربات")
+	}
+	invite("sales", salesChat)
+	invite("support", supportChat)
+	b.Handle(ctx, cb(supportChat, "ok:"+strconv.FormatInt(id, 10)))
+	if o, _ := s.Orders(ctx, owner, "pending", 0); len(o) != 1 {
+		t.Fatal("support must not deliver")
+	}
+	b.Handle(ctx, msg(supportChat, "/credit"))
+	find(t, api.take(), supportChat, "مجاز نیست")
+	b.Handle(ctx, cb(salesChat, "ok:"+strconv.FormatInt(id, 10)))
+	find(t, api.take(), salesChat, "تحویل شد")
 	b.Handle(ctx, msg(repChat, "/credit"))
 	find(t, api.take(), repChat, "5.00 GB")
 }

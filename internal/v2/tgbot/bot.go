@@ -199,8 +199,20 @@ func (b *Bot) onMessage(ctx context.Context, m *Message) {
 		b.send(ctx, chat, "✅ تلگرام شما به نمایندگی <b>"+esc(rep)+"</b> وصل شد.\n\n"+repHelp, nil)
 		return
 	}
-	if rep := b.Store.TgRep(ctx, chat); rep != "" {
-		if b.repMessage(ctx, chat, rep, text) {
+	if code, ok := strings.CutPrefix(text, "/start adm_"); ok {
+		rep, role, err := b.Store.ClaimTgAdminInvite(ctx, strings.TrimSpace(code), chat, name)
+		if err != nil {
+			b.send(ctx, chat, "این دعوت معتبر نیست یا منقضی شده.", nil)
+			return
+		}
+		b.send(ctx, chat, fmt.Sprintf("✅ شما با نقش «%s» ادمین ربات نمایندگی <b>%s</b> شدید.\n\n%s", roleName(role), esc(rep), repHelp), nil)
+		if c := b.Store.TgRepChat(ctx, rep); c != 0 {
+			b.send(ctx, c, fmt.Sprintf("👤 %s با نقش «%s» به ادمین‌های ربات شما اضافه شد.", esc(name), roleName(role)), nil)
+		}
+		return
+	}
+	if rep, role := b.Store.TgRepRole(ctx, chat); rep != "" {
+		if b.repMessage(ctx, chat, rep, role, text) {
 			return
 		}
 	}
@@ -492,11 +504,18 @@ func (b *Bot) onCallback(ctx context.Context, q *CallbackQuery) {
 		if b.ownsClient(ctx, chat, rest) || b.Owners[chat] {
 			b.sendSub(ctx, chat, rest)
 		}
+	case "radm":
+		if rep, role := b.Store.TgRepRole(ctx, chat); rep != "" && role == "owner" {
+			id, _ := strconv.ParseInt(rest, 10, 64)
+			_ = b.Store.RemoveTgRepAdmin(ctx, rep, id)
+			b.send(ctx, chat, "حذف شد.", nil)
+			b.send(ctx, id, "دسترسی ادمین شما به ربات نمایندگی برداشته شد.", nil)
+		}
 	case "ok", "no":
 		by := b.owner()
 		if !b.Owners[chat] {
-			rep := b.Store.TgRep(ctx, chat)
-			if rep == "" {
+			rep, role := b.Store.TgRepRole(ctx, chat)
+			if rep == "" || role == "support" {
 				return
 			}
 			by = hubcore.Principal{User: "tg:" + strconv.FormatInt(chat, 10), Role: "rep", RepID: rep}
@@ -629,7 +648,7 @@ func (b *Bot) announceOrders(ctx context.Context) {
 		for _, o := range news {
 			if o.Seller != "" {
 				// A reseller's order goes to that reseller, who pays for it.
-				if chat := b.Store.TgRepChat(ctx, o.Seller); chat != 0 {
+				for _, chat := range b.Store.TgRepChats(ctx, o.Seller) {
 					b.send(ctx, chat, b.orderCard(ctx, o), orderButtons(o.ID))
 				}
 			} else {
@@ -745,17 +764,35 @@ func (b *Bot) dailyReport(ctx context.Context) {
 
 const repHelp = `دستورهای نماینده:
 /credit — اعتبار و تعداد کلاینت‌ها
-/orders — سفارش‌های در انتظار شما
-/client نام — اطلاعات یکی از کلاینت‌های شما`
+/orders — سفارش‌های در انتظار
+/client نام — اطلاعات یک کلاینت
+/admins — ادمین‌های ربات (فقط خود نماینده)
+/invite manager|sales|support — دعوت ادمین جدید`
 
-func (b *Bot) repMessage(ctx context.Context, chat int64, rep, text string) bool {
+func roleName(r string) string {
+	return map[string]string{"owner": "نماینده", "manager": "مدیر", "sales": "فروش", "support": "پشتیبانی"}[r]
+}
+
+func (b *Bot) repMessage(ctx context.Context, chat int64, rep, role, text string) bool {
 	cmd, arg, _ := strings.Cut(text, " ")
 	arg = strings.TrimSpace(arg)
 	p := hubcore.Principal{User: "tg:" + strconv.FormatInt(chat, 10), Role: "rep", RepID: rep}
+	can := func(roles ...string) bool {
+		for _, r := range roles {
+			if r == role {
+				return true
+			}
+		}
+		b.send(ctx, chat, "این کار با نقش شما مجاز نیست.", nil)
+		return false
+	}
 	switch strings.SplitN(cmd, "@", 2)[0] {
-	case "/help":
-		b.send(ctx, chat, repHelp, nil)
+	case "/help", "/start":
+		b.send(ctx, chat, fmt.Sprintf("نقش شما: %s\n\n%s", roleName(role), repHelp), nil)
 	case "/credit":
+		if !can("owner", "manager", "sales") {
+			return true
+		}
 		reps, _ := b.Store.Reps(ctx)
 		for _, r := range reps {
 			if r.ID == rep {
@@ -763,6 +800,9 @@ func (b *Bot) repMessage(ctx context.Context, chat int64, rep, text string) bool
 			}
 		}
 	case "/orders":
+		if !can("owner", "manager", "sales") {
+			return true
+		}
 		list, _ := b.Store.Orders(ctx, p, "pending", 20)
 		if len(list) == 0 {
 			b.send(ctx, chat, "سفارش در انتظاری نیست.", nil)
@@ -777,6 +817,33 @@ func (b *Bot) repMessage(ctx context.Context, chat int64, rep, text string) bool
 			return true
 		}
 		b.send(ctx, chat, b.clientCard(c), nil)
+	case "/invite":
+		if !can("owner") {
+			return true
+		}
+		code, err := b.Store.NewTgAdminInvite(ctx, rep, arg)
+		if err != nil {
+			b.send(ctx, chat, "نقش را بنویسید: /invite manager یا sales یا support", nil)
+			return true
+		}
+		bot := b.Store.Setting(ctx, "tg_username")
+		b.send(ctx, chat, fmt.Sprintf("لینک دعوت نقش «%s» (یک‌بار مصرف، ۱ ساعت):\nhttps://t.me/%s?start=adm_%s", roleName(arg), esc(bot), code), nil)
+	case "/admins":
+		if !can("owner") {
+			return true
+		}
+		list, _ := b.Store.TgRepAdmins(ctx, rep)
+		if len(list) == 0 {
+			b.send(ctx, chat, "ادمینی ندارید. با /invite دعوت کنید.", nil)
+			return true
+		}
+		kb := &Keyboard{}
+		var lines []string
+		for _, a := range list {
+			lines = append(lines, fmt.Sprintf("• %s — %s", esc(a.Name), roleName(a.Role)))
+			kb.Rows = append(kb.Rows, []Button{{Text: "حذف " + a.Name, Data: "radm:" + strconv.FormatInt(a.ChatID, 10)}})
+		}
+		b.send(ctx, chat, "👥 ادمین‌های ربات:\n"+strings.Join(lines, "\n"), kb)
 	default:
 		return false
 	}

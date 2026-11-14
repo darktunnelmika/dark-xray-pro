@@ -312,3 +312,105 @@ UNION SELECT client_email, CAST(substr(buyer,4) AS INTEGER) FROM orders WHERE bu
 	}
 	return out, rows.Err()
 }
+
+// Reseller bot admins: a representative invites helpers to its own scope.
+// Roles: manager (everything the reseller can do in the bot), sales
+// (orders and clients) and support (look up clients). Nobody gets more
+// than the reseller itself, and only the reseller manages the list.
+
+func (s *Store) ensureTgAdminSchema() error {
+	_, err := s.db.Exec(`CREATE TABLE IF NOT EXISTS rep_tg_admins (
+  rep_id TEXT NOT NULL REFERENCES reps(id) ON DELETE CASCADE,
+  chat_id INTEGER NOT NULL,
+  role TEXT NOT NULL CHECK(role IN ('manager','sales','support')),
+  name TEXT NOT NULL DEFAULT '',
+  added_unix INTEGER NOT NULL,
+  PRIMARY KEY(rep_id, chat_id)
+)`)
+	return err
+}
+
+// TgRepAdmin is one helper of a reseller.
+type TgRepAdmin struct {
+	ChatID int64
+	Role   string
+	Name   string
+}
+
+func (s *Store) NewTgAdminInvite(ctx context.Context, repID, role string) (string, error) {
+	if role != "manager" && role != "sales" && role != "support" {
+		return "", ErrInvalid
+	}
+	code := randomHex(8)
+	exp := s.now().Unix() + 3600
+	return code, s.SetSetting(ctx, "tgadm:"+code, repID+"|"+role+"|"+strconv.FormatInt(exp, 10))
+}
+
+func (s *Store) ClaimTgAdminInvite(ctx context.Context, code string, chat int64, name string) (rep, role string, err error) {
+	v := s.Setting(ctx, "tgadm:"+code)
+	_, _ = s.db.ExecContext(ctx, `DELETE FROM settings WHERE key=?`, "tgadm:"+code)
+	parts := strings.Split(v, "|")
+	if len(parts) != 3 {
+		return "", "", ErrNotFound
+	}
+	exp, _ := strconv.ParseInt(parts[2], 10, 64)
+	if exp < s.now().Unix() {
+		return "", "", ErrNotFound
+	}
+	rep, role = parts[0], parts[1]
+	_, err = s.db.ExecContext(ctx, `INSERT INTO rep_tg_admins(rep_id,chat_id,role,name,added_unix) VALUES(?,?,?,?,?)
+ON CONFLICT(rep_id,chat_id) DO UPDATE SET role=excluded.role, name=excluded.name`, rep, chat, role, name, s.now().Unix())
+	return rep, role, err
+}
+
+func (s *Store) TgRepAdmins(ctx context.Context, repID string) ([]TgRepAdmin, error) {
+	rows, err := s.ro.QueryContext(ctx, `SELECT chat_id,role,name FROM rep_tg_admins WHERE rep_id=? ORDER BY added_unix`, repID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []TgRepAdmin
+	for rows.Next() {
+		var a TgRepAdmin
+		if err := rows.Scan(&a.ChatID, &a.Role, &a.Name); err != nil {
+			return nil, err
+		}
+		out = append(out, a)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) RemoveTgRepAdmin(ctx context.Context, repID string, chat int64) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM rep_tg_admins WHERE rep_id=? AND chat_id=?`, repID, chat)
+	return err
+}
+
+// TgRepRole returns the reseller a chat works for and its role: "owner" for
+// the reseller's own chat, else the helper role ("" if none).
+func (s *Store) TgRepRole(ctx context.Context, chat int64) (rep, role string) {
+	if rep = s.TgRep(ctx, chat); rep != "" {
+		return rep, "owner"
+	}
+	_ = s.ro.QueryRowContext(ctx, `SELECT a.rep_id,a.role FROM rep_tg_admins a JOIN reps r ON r.id=a.rep_id WHERE a.chat_id=? AND r.enabled=1 ORDER BY a.added_unix LIMIT 1`, chat).Scan(&rep, &role)
+	return rep, role
+}
+
+// TgRepChats lists every chat that should see a reseller's order cards.
+func (s *Store) TgRepChats(ctx context.Context, repID string) []int64 {
+	var out []int64
+	if c := s.TgRepChat(ctx, repID); c != 0 {
+		out = append(out, c)
+	}
+	rows, err := s.ro.QueryContext(ctx, `SELECT chat_id FROM rep_tg_admins WHERE rep_id=? AND role IN ('manager','sales')`, repID)
+	if err != nil {
+		return out
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var c int64
+		if rows.Scan(&c) == nil {
+			out = append(out, c)
+		}
+	}
+	return out
+}
