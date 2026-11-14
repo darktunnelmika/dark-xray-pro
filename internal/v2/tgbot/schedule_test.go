@@ -64,7 +64,7 @@ func TestScheduledBroadcast(t *testing.T) {
 	b.Handle(ctx, cb(ownerID, "a:bc"))
 	b.Handle(ctx, msg(ownerID, "Sale tonight!\n[Buy](https://example.com/shop)"))
 	b.Handle(ctx, cb(ownerID, "a:bca:all"))
-	prev := find(t, api.take(), ownerID, "پیش‌نمایش")
+	prev := find(t, api.take(), ownerID, "👆 پیش‌نمایش")
 	if prev.kb.Rows[0][1].Data != "a:bcsch" {
 		t.Fatalf("no schedule button: %+v", prev.kb)
 	}
