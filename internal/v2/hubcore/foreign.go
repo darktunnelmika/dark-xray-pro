@@ -496,6 +496,32 @@ func readXUI(ctx context.Context, db *sql.DB, rep *ForeignReport) ([]foreignInbo
 		origin := strconv.Itoa(x.port)
 		switch x.proto {
 		case "vless", "vmess", "trojan", "shadowsocks":
+		case "socks", "http", "dokodemo-door", "tunnel", "mixed":
+			// Plain proxies and port forwards move as written.
+			var set map[string]any
+			_ = json.Unmarshal([]byte(x.settings), &set)
+			if set == nil {
+				set = map[string]any{}
+			}
+			proto := x.proto
+			if proto == "mixed" {
+				proto = "socks" // Xray's SOCKS inbound also answers HTTP proxy requests
+			}
+			meta := map[string]any{"remark": or2(x.remark, origin)}
+			if accs, _ := set["accounts"].([]any); len(accs) > 0 {
+				if a, _ := accs[0].(map[string]any); a != nil {
+					meta["proxy_user"], meta["proxy_pass"] = a["user"], a["pass"]
+				}
+			}
+			if (proto == "socks" || proto == "http") && meta["proxy_user"] == nil {
+				rep.note("inbound %s: a %s proxy without a password is open to anyone — add an account in its settings", or2(x.remark, origin), proto)
+			}
+			if addr, _ := set["address"].(string); addr != "" {
+				meta["target"] = addr + ":" + strconv.Itoa(intOf(set["port"]))
+			}
+			tpl := map[string]any{"protocol": proto, "port": x.port, "listen": or2(x.listen, "0.0.0.0"), "settings": set}
+			ins = append(ins, foreignInbound{origin: origin, port: x.port, template: tpl, meta: meta})
+			continue
 		default:
 			rep.skip("inbound %s (%s on port %d): %s inbounds are not moved yet", or2(x.remark, x.tag), x.proto, x.port, x.proto)
 			continue

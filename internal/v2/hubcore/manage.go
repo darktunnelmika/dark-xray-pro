@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 )
 
 const manageSchema = `
@@ -45,6 +46,22 @@ func (s *Store) ensureManageSchema() error {
 // RenameNode changes a node's display name.
 func (s *Store) RenameNode(ctx context.Context, id, name string) error {
 	r, err := s.db.ExecContext(ctx, `UPDATE nodes SET name=? WHERE id=?`, name, id)
+	if err != nil {
+		return err
+	}
+	if n, _ := r.RowsAffected(); n != 1 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// SetNodeTrafficPercent sets how client traffic on a node is billed
+// (100 = as measured).
+func (s *Store) SetNodeTrafficPercent(ctx context.Context, id string, pct int) error {
+	if pct < 10 || pct > 1000 {
+		return fmt.Errorf("%w: traffic percent must be 10–1000", ErrInvalid)
+	}
+	r, err := s.db.ExecContext(ctx, `UPDATE nodes SET traffic_percent=? WHERE id=?`, pct, id)
 	if err != nil {
 		return err
 	}

@@ -144,6 +144,17 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 		reply(w, map[string]any{"ended": n}, err)
 	}))
 	telegramRoutes(s, mux, guard, func() []int64 { return tgDefaultOwners })
+	mux.HandleFunc("POST /api/v2/admin/routing/test", guard(func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Node string `json:"node"`
+			Tag  string `json:"tag"`
+		}
+		if !decode(w, r, &in) {
+			return
+		}
+		id, err := s.StartOutboundTest(r.Context(), in.Node, in.Tag)
+		reply(w, map[string]string{"id": id}, err)
+	}))
 	mux.HandleFunc("GET /api/v2/admin/panel-path", guard(func(w http.ResponseWriter, r *http.Request) {
 		reply(w, map[string]string{"path": s.Setting(r.Context(), "panel_path")}, nil)
 	}))
@@ -830,11 +841,17 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 		reply(w, pts, err)
 	}))
 	mux.HandleFunc("PUT /api/v2/admin/nodes/{id}", guard(func(w http.ResponseWriter, r *http.Request) {
-		var in struct{ Name string }
+		var in struct {
+			Name           string
+			TrafficPercent *int `json:"traffic_percent"`
+		}
 		if !decode(w, r, &in) {
 			return
 		}
 		err := s.RenameNode(r.Context(), r.PathValue("id"), in.Name)
+		if err == nil && in.TrafficPercent != nil {
+			err = s.SetNodeTrafficPercent(r.Context(), r.PathValue("id"), *in.TrafficPercent)
+		}
 		reply(w, map[string]bool{"ok": err == nil}, err)
 	}))
 	mux.HandleFunc("DELETE /api/v2/admin/nodes/{id}", guard(func(w http.ResponseWriter, r *http.Request) {

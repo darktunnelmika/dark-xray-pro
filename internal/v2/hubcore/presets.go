@@ -9,6 +9,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"strconv"
+	"strings"
 
 	"github.com/darktunnelmika/dark-xray-pro/internal/v2/sub"
 )
@@ -43,7 +45,7 @@ type PresetRequest struct {
 
 // Presets lists what the panel offers.
 var Presets = []string{"vless-reality-tcp", "vless-reality-grpc", "vless-reality-xhttp", "vless-ws", "vmess-ws", "vmess-tcp", "trojan-ws", "ss2022",
-	"vless-tls-ws", "vless-tls-grpc", "vless-tls-xhttp", "vmess-tls-ws", "trojan-tls-tcp", "vless-tls-fallback", "vless-httpupgrade", "vless-tls-httpupgrade", "hysteria2", "wireguard"}
+	"vless-tls-ws", "vless-tls-grpc", "vless-tls-xhttp", "vmess-tls-ws", "trojan-tls-tcp", "vless-tls-fallback", "vless-httpupgrade", "vless-tls-httpupgrade", "hysteria2", "wireguard", "socks", "http", "dokodemo"}
 
 // BuildPreset renders the template and client metadata for a preset.
 func BuildPreset(p PresetRequest) (template, meta []byte, err error) {
@@ -210,6 +212,28 @@ func BuildPreset(p PresetRequest) (template, meta []byte, err error) {
 		}
 		// Plain WebSocket is meant to sit behind a CDN or TLS front.
 		t["streamSettings"] = map[string]any{"network": "ws", "security": "none", "wsSettings": map[string]any{"path": path}}
+	case "socks", "http":
+		// A plain proxy with one fixed account (never an open proxy).
+		user, pass := "dark"+randomHex(3), randomHex(10)
+		t["protocol"] = p.Preset
+		if p.Preset == "socks" {
+			t["settings"] = map[string]any{"auth": "password", "accounts": []any{map[string]any{"user": user, "pass": pass}}, "udp": true}
+		} else {
+			t["settings"] = map[string]any{"accounts": []any{map[string]any{"user": user, "pass": pass}}}
+		}
+		m.ProxyUser, m.ProxyPass, m.Fingerprint = user, pass, ""
+	case "dokodemo":
+		// Port forwarding: everything arriving on the port goes to Path
+		// (host:port), e.g. a relay in front of another server.
+		host, port, perr := net.SplitHostPort(strings.TrimSpace(p.Path))
+		pn, _ := strconv.Atoi(port)
+		if perr != nil || host == "" || pn < 1 || pn > 65535 {
+			return nil, nil, fmt.Errorf("%w: port forwarding needs a target such as 1.2.3.4:443", ErrInvalid)
+		}
+		t["protocol"] = "dokodemo-door"
+		t["settings"] = map[string]any{"address": host, "port": pn, "network": "tcp,udp"}
+		delete(t, "sniffing")
+		m.Target, m.Fingerprint = net.JoinHostPort(host, port), ""
 	default:
 		return nil, nil, fmt.Errorf("%w: unknown preset %q", ErrInvalid, p.Preset)
 	}

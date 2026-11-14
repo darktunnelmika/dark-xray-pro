@@ -115,6 +115,7 @@ func (s *Store) ensureRouteSchema() error {
 	}
 	for _, c := range []struct{ table, col, def string }{
 		{"nodes", "public_ip", "TEXT NOT NULL DEFAULT ''"},
+		{"nodes", "traffic_percent", "INTEGER NOT NULL DEFAULT 100"},
 		{"swaps", "dest_node", "TEXT NOT NULL DEFAULT ''"},
 		{"swaps", "target_address", "TEXT NOT NULL DEFAULT ''"},
 	} {

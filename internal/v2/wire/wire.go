@@ -88,6 +88,11 @@ const (
 	TaskXrayRestart = "xray_restart"
 )
 
+// TaskOutboundTest checks one outbound from the node: Args carry the
+// node's outbounds and the tag to test; the result has the latency and
+// the exit address (agent v2.5.0+).
+const TaskOutboundTest = "outbound_test"
+
 // Host is the node machine's health at the time of the sync.
 type Host struct {
 	CPUPercent  float64 `json:"cpu_percent"`

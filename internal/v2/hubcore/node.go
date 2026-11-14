@@ -116,8 +116,12 @@ func (s *Store) ApplyUsage(ctx context.Context, nodeID string, b wire.UsageBatch
 	}
 	defer tx.Rollback()
 	var last uint64
-	if err := tx.QueryRowContext(ctx, `SELECT usage_seq FROM nodes WHERE id=?`, nodeID).Scan(&last); err != nil {
+	var pct int64
+	if err := tx.QueryRowContext(ctx, `SELECT usage_seq,traffic_percent FROM nodes WHERE id=?`, nodeID).Scan(&last, &pct); err != nil {
 		return wire.UsageAck{}, ErrNotFound
+	}
+	if pct <= 0 {
+		pct = 100
 	}
 	if b.Seq <= last {
 		return wire.UsageAck{Seq: last}, nil
@@ -134,6 +138,9 @@ func (s *Store) ApplyUsage(ctx context.Context, nodeID string, b wire.UsageBatch
 		}
 		if t.Up == 0 && t.Down == 0 {
 			continue
+		}
+		if pct != 100 {
+			t.Up, t.Down = t.Up*pct/100, t.Down*pct/100
 		}
 		if _, err := tx.ExecContext(ctx, `INSERT INTO client_usage(email,up,down,first_seen_unix,last_seen_unix) VALUES(?,?,?,?,?)
 ON CONFLICT(email) DO UPDATE SET up=up+excluded.up, down=down+excluded.down, last_seen_unix=excluded.last_seen_unix,
@@ -237,6 +244,9 @@ type NodeStatus struct {
 	UpdateAvailable                   bool   `json:"update_available"`
 	XrayVersion                       string `json:"xray_version"`
 	Arch                              string `json:"arch"`
+	// TrafficPercent bills client traffic on this node: 150 counts 1 GB as
+	// 1.5 GB (a premium node), 50 as half. Server-side totals stay real.
+	TrafficPercent int `json:"traffic_percent"`
 }
 
 // HistoryPoint is one 5-minute sample of a node's health.
@@ -278,7 +288,7 @@ func (n NodeStatus) Online(now time.Time) bool {
 
 func (s *Store) Nodes(ctx context.Context) ([]NodeStatus, error) {
 	rows, err := s.ro.QueryContext(ctx, `SELECT id,name,agent_version,last_error,last_seen_unix,xray_running,xray_restarts,spooled,
-config_revision,reported_revision,usage_seq,host_json,public_ip,agent_sha,xray_version,agent_arch FROM nodes ORDER BY id`)
+config_revision,reported_revision,usage_seq,host_json,public_ip,agent_sha,xray_version,agent_arch,traffic_percent FROM nodes ORDER BY id`)
 	if err != nil {
 		return nil, err
 	}
@@ -289,7 +299,7 @@ config_revision,reported_revision,usage_seq,host_json,public_ip,agent_sha,xray_v
 		var n NodeStatus
 		var hj string
 		if err := rows.Scan(&n.ID, &n.Name, &n.AgentVersion, &n.LastError, &n.LastSeen, &n.XrayRunning, &n.XrayRestarts,
-			&n.Spooled, &n.ConfigRevision, &n.ReportedRevision, &n.UsageSeq, &hj, &n.PublicIP, &n.AgentSHA, &n.XrayVersion, &n.Arch); err != nil {
+			&n.Spooled, &n.ConfigRevision, &n.ReportedRevision, &n.UsageSeq, &hj, &n.PublicIP, &n.AgentSHA, &n.XrayVersion, &n.Arch, &n.TrafficPercent); err != nil {
 			return nil, err
 		}
 		if hj != "" {

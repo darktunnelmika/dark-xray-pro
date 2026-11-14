@@ -79,6 +79,10 @@ type Meta struct {
 	// VLESSEncryption is what clients send when the inbound uses Xray's
 	// VLESS encryption (settings.decryption on the server); empty = none.
 	VLESSEncryption string `json:"vless_encryption,omitempty"`
+	// Plain inbounds (SOCKS, HTTP, port forwarding) shown on the inbound card.
+	ProxyUser string `json:"proxy_user,omitempty"`
+	ProxyPass string `json:"proxy_pass,omitempty"`
+	Target    string `json:"target,omitempty"`
 	// Per client, filled when a subscription is built (never stored):
 	WGPrivateKey string `json:"-"`
 	WGAddress    string `json:"-"` // e.g. 10.66.0.2/32

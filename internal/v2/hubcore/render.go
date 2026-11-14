@@ -22,6 +22,12 @@ func parseTemplate(raw []byte) (map[string]any, error) {
 		return nil, fmt.Errorf("%w: inbound template is not JSON", ErrInvalid)
 	}
 	p, _ := t["protocol"].(string)
+	if plainProtocols[p] {
+		if _, ok := t["port"]; !ok {
+			return nil, fmt.Errorf("%w: inbound template needs a port", ErrInvalid)
+		}
+		return t, nil
+	}
 	if _, ok := clientShapes[p]; !ok {
 		return nil, fmt.Errorf("%w: protocol %q is not a managed multi-user protocol", ErrInvalid, p)
 	}
@@ -63,6 +69,11 @@ var clientShapes = map[string]func(c Client, flow string) map[string]any{
 		return map[string]any{"password": sub.SS2022UserKey(c.Secret, method), "email": c.Email}
 	},
 }
+
+// plainProtocols are inbounds without managed clients: a SOCKS or HTTP
+// proxy (optionally with its own fixed accounts) and port forwarding
+// (dokodemo-door, called tunnel in newer Xray).
+var plainProtocols = map[string]bool{"socks": true, "http": true, "dokodemo-door": true, "tunnel": true}
 
 type nodeInbound struct {
 	tag            string
@@ -125,6 +136,14 @@ JOIN inbounds i ON i.tag=r.tag WHERE r.node_id=? AND i.enabled=1 ORDER BY i.tag`
 		settings, _ := t["settings"].(map[string]any)
 		if settings == nil {
 			settings = map[string]any{}
+		}
+		if plainProtocols[proto] {
+			// SOCKS, HTTP and port-forward inbounds carry no clients:
+			// they go out exactly as written (their traffic is still
+			// counted per inbound).
+			t["settings"] = settings
+			inbounds = append(inbounds, t)
+			continue
 		}
 		flow, _ := settings["flow"].(string)
 		delete(settings, "flow")

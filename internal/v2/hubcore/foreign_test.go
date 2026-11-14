@@ -55,7 +55,7 @@ func TestImport3xui(t *testing.T) {
 		`INSERT INTO client_traffics(email,up,down,last_online) VALUES('ali',100,900,0),('ali-tr',10,90,0),('sara',0,0,0)`,
 	)
 	dry, err := s.ImportForeign(ctx, src, ForeignOptions{Node: "de-1", DryRun: true})
-	if err != nil || dry.Kind != "3x-ui" || dry.Clients != 2 || len(dry.Inbounds) != 2 || len(dry.Skipped) == 0 {
+	if err != nil || dry.Kind != "3x-ui" || dry.Clients != 2 || len(dry.Inbounds) != 3 {
 		t.Fatalf("%+v %v", dry, err)
 	}
 	if all, _ := s.Clients(ctx); len(all) != 2 {

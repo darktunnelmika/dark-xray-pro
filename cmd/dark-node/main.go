@@ -76,6 +76,7 @@ func main() {
 	agent.SetTask(wire.TaskXrayUpdate, nodeagent.XrayUpdateTask(hub, *xrayBin))
 	agent.SetTask(wire.TaskXrayLog, nodeagent.XrayLogTask(logs))
 	agent.SetTask(wire.TaskXrayRestart, nodeagent.XrayRestartTask(sup))
+	agent.SetTask(wire.TaskOutboundTest, nodeagent.OutboundTestTask(sup))
 	// After a self-update: stop cleanly; systemd (Restart=always) starts
 	// the new binary.
 	agent.SetRestart(func() {

@@ -501,7 +501,8 @@ function nodeCard(n, actions = false) {
   const host = n.Host;
   return h("div", { class: "card item" },
     h("div", { class: "head" }, h("span", { class: `dot ${n.online ? "on" : ""}` }), h("span", { class: "name" }, `${n.Name || n.ID}`),
-      h("span", { class: "badge" }, n.ID), n.update_available ? h("span", { class: "badge warn" }, t("updateAvail")) : null, n.xray_version ? h("span", { class: "badge", dir: "ltr" }, `Xray ${n.xray_version}${n.arch ? " · " + n.arch : ""}`) : null, h("span", { class: `badge ${n.online ? "good" : "bad"} spacer` }, t(n.online ? "online" : "offline"))),
+      h("span", { class: "badge" }, n.ID), n.update_available ? h("span", { class: "badge warn" }, t("updateAvail")) : null,
+      n.traffic_percent && n.traffic_percent !== 100 ? h("span", { class: "badge", dir: "ltr", title: lang === "fa" ? "ضریب ترافیک" : "Traffic rate" }, `×${fmtNum(n.traffic_percent / 100)}`) : null, n.xray_version ? h("span", { class: "badge", dir: "ltr" }, `Xray ${n.xray_version}${n.arch ? " · " + n.arch : ""}`) : null, h("span", { class: `badge ${n.online ? "good" : "bad"} spacer` }, t(n.online ? "online" : "offline"))),
     h("div", { class: "muted small" }, `${t("restarts")}: ${fmtNum(n.XrayRestarts)} · ${t("spooled")}: ${fmtNum(n.Spooled)} · ${n.AgentVersion || ""}`),
     host ? h("div", { class: "meters" },
       meter(t("cpu"), host.cpu_percent, `${fmtNum(host.cpu_percent)}%`),
@@ -515,7 +516,7 @@ function nodeCard(n, actions = false) {
       h("button", { onclick: () => nodeLogs(n) }, t("xrayLogs")),
       h("button", { class: "ghost", onclick: () => restartXray(n) }, t("restartXray")),
       h("button", { class: "ghost", onclick: () => xrayPicker(n) }, t("xrayVer")),
-      h("button", { class: "ghost", onclick: () => renameNode(n) }, t("rename")),
+      h("button", { class: "ghost", onclick: () => renameNode(n) }, t("edit")),
       h("button", { class: "ghost", onclick: () => {
         const f = sniFinder({ nodes: [n], node: n.ID, onPick: (d) => copy(d) });
         const d = openModal(`${t("findSni")} · ${n.Name || n.ID}`, f);
@@ -627,12 +628,17 @@ function meter(label, pct, text, neutral = false) {
 }
 
 function renameNode(n) {
+  const fa = lang === "fa";
   const name = h("input", { value: n.Name || "", autofocus: true });
+  const pct = h("input", { type: "number", min: "10", max: "1000", step: "5", value: String(n.traffic_percent || 100), dir: "ltr" });
   const save = h("button", { class: "primary", value: "save", onclick: async (e) => {
     e.preventDefault();
-    try { await guarded(() => api("PUT", `/api/v2/admin/nodes/${encodeURIComponent(n.ID)}`, { Name: name.value })); document.getElementById("modal").close("save"); route(); } catch {}
+    if (!pct.reportValidity()) return;
+    try { await guarded(() => api("PUT", `/api/v2/admin/nodes/${encodeURIComponent(n.ID)}`, { Name: name.value, traffic_percent: +pct.value })); document.getElementById("modal").close("save"); route(); } catch {}
   } }, t("save"));
-  openModal(`${t("rename")} · ${n.ID}`, h("label", {}, h("span", {}, t("name")), name), [save]);
+  openModal(`${t("edit")} · ${n.ID}`, h("div", { class: "form" }, h("label", {}, h("span", {}, t("name")), name),
+    h("label", {}, h("span", {}, fa ? "ضریب ترافیک کاربرها (درصد)" : "Client traffic rate (percent)"), pct,
+      h("small", { class: "muted" }, fa ? "مصرف کاربرها روی این نود با این درصد حساب می‌شود: ۱۵۰ یعنی هر ۱ گیگ ۱٫۵ گیگ حساب شود (نود ویژه) و ۵۰ یعنی نصف. آمار سرور واقعی می‌ماند." : "Client usage on this node is billed at this rate: 150 counts 1 GB as 1.5 GB (a premium node), 50 as half. Server totals stay real."))), [save]);
 }
 
 function clientStatus(c) {
@@ -1265,6 +1271,7 @@ async function guarded(fn) {
 }
 
 function clientForm(c, inbounds, ctx = { reps: [] }) {
+  inbounds = (inbounds || []).filter((ib) => !["socks", "http", "dokodemo-door", "tunnel"].includes(ib.protocol));
   const isNew = !c;
   const v = c || { Email: "", Enabled: true, VolumeBytes: -1, ExpiresUnix: 0, DurationSeconds: 30 * 86400, MaxIPs: 2, Inbounds: [] };
   const daysLeft = v.ExpiresUnix ? Math.max(0, Math.round((v.ExpiresUnix - Date.now() / 1000) / 86400)) : Math.round((v.DurationSeconds || 0) / 86400);
@@ -1349,7 +1356,10 @@ async function viewInbounds() {
         ib.enabled ? null : h("span", { class: "badge bad" }, t("disabled")),
         h("span", { class: "spacer" })),
       h("div", { class: "row" }, (ib.nodes || []).map((n) => h("span", { class: "badge" }, n))),
-      h("div", { class: "muted small" }, `${t("clientsCount", { n: fmtNum(ib.clients) })} · ${t("trafficToday")}: ${bytes(ib.traffic_today || 0)} · ${t("trafficTotal")}: ${bytes(ib.traffic_total || 0)}`),
+      ["socks", "http", "dokodemo-door", "tunnel"].includes(ib.protocol)
+        ? h("div", { class: "muted small" }, `${t("trafficToday")}: ${bytes(ib.traffic_today || 0)} · ${t("trafficTotal")}: ${bytes(ib.traffic_total || 0)}`)
+        : h("div", { class: "muted small" }, `${t("clientsCount", { n: fmtNum(ib.clients) })} · ${t("trafficToday")}: ${bytes(ib.traffic_today || 0)} · ${t("trafficTotal")}: ${bytes(ib.traffic_total || 0)}`),
+      plainLine(ib, meta, nodes),
       h("div", { class: "row" },
         h("button", { class: "primary", onclick: () => inboundStudio(ib.tag, { nodes, presets, certs }) }, t("nodesRoutes")),
         h("button", { onclick: async () => { await guarded(() => api("POST", `/api/v2/admin/inbounds/${encodeURIComponent(ib.tag)}/enabled`, { Enabled: !ib.enabled })); route(); } }, t(ib.enabled ? "disable" : "enable")),
@@ -1389,6 +1399,47 @@ async function viewInbounds() {
     const seq = routeSeq;
     setTimeout(() => { if (seq === routeSeq) route(); }, 4000);
   }
+}
+
+// SOCKS / HTTP proxy link, or the port-forward target, on the inbound card.
+function plainLine(ib, meta, nodes) {
+  if (meta.target) return h("div", { class: "row small" }, h("span", { class: "badge" }, lang === "fa" ? "انتقال پورت" : "Port forward"), h("code", { dir: "ltr" }, `:${ib.port} → ${meta.target}`));
+  if (!meta.proxy_user) return null;
+  const node = (nodes || []).find((n) => n.ID === (ib.nodes || [])[0]);
+  const host = node?.PublicIP || "SERVER-IP";
+  const link = `${ib.protocol}://${encodeURIComponent(meta.proxy_user)}:${encodeURIComponent(meta.proxy_pass)}@${host.includes(":") ? `[${host}]` : host}:${ib.port}`;
+  return h("div", { class: "row small" }, h("code", { dir: "ltr", style: "flex:1;overflow:hidden;text-overflow:ellipsis" }, link),
+    h("button", { type: "button", class: "ghost", onclick: () => copy(link) }, t("copy")), h("button", { type: "button", class: "ghost", onclick: () => showQR(ib.tag, link) }, "QR"));
+}
+
+// Test one outbound from a node with a throwaway Xray (agent v2.5.0+).
+function outboundTester(tag, nodes) {
+  const fa = lang === "fa";
+  const sel = h("select", { "aria-label": fa ? "نود" : "Node" }, nodes.map((n) => h("option", { value: n.ID }, `${n.Name || n.ID}${n.online ? "" : fa ? " (خاموش)" : " (offline)"}`)));
+  const out = h("span", { class: "small muted" }, fa ? "با تنظیمات ذخیره‌شده روی نود تست می‌شود" : "Tests the saved settings on the node");
+  const btn = h("button", { type: "button", class: "ghost", onclick: async () => {
+    btn.disabled = true; fill(out, h("span", { class: "muted" }, fa ? "در حال تست…" : "Testing…"));
+    try {
+      const { id } = await api("POST", "/api/v2/admin/routing/test", { node: sel.value, tag });
+      for (let i = 0; i < 40; i++) {
+        await new Promise((r) => setTimeout(r, 1500));
+        const tk = await api("GET", `/api/v2/admin/tasks/${id}`);
+        if (tk.status === "queued") continue;
+        if (tk.status === "failed" || tk.status === "expired") {
+          const old = /unsupported task/.test(tk.error || "");
+          fill(out, h("span", { class: "badge bad" }, old ? (fa ? "عامل این نود قدیمی است؛ اول به‌روز کنید" : "This node's agent is too old — update it first") : (tk.error || tk.status)));
+          return;
+        }
+        const r = tk.result || {};
+        fill(out, r.ok ? h("span", { class: `badge ${r.ms < 400 ? "good" : r.ms < 1200 ? "warn" : "bad"}` }, `${fmtNum(r.ms)} ms`) : h("span", { class: "badge bad" }, fa ? "کار نمی‌کند" : "Not working"),
+          r.ip ? h("span", { class: "small", dir: "ltr" }, ` ${fa ? "IP خروجی" : "exit IP"}: ${r.ip}`) : null,
+          r.error ? h("span", { class: "small muted", dir: "ltr" }, ` ${r.error}`) : null);
+        return;
+      }
+      fill(out, h("span", { class: "badge warn" }, fa ? "نود جواب نداد" : "The node did not answer"));
+    } catch (x) { fill(out, h("span", { class: "badge bad" }, x.message)); } finally { btn.disabled = false; }
+  } }, fa ? "تست اتصال" : "Test");
+  return nodes.length ? h("div", { class: "row small" }, sel, btn, out) : null;
 }
 
 function acmeSettingsForm(cur = {}) {
@@ -1501,7 +1552,7 @@ async function viewRouting() {
       h("div", { class: "head" }, h("span", { class: "name", dir: "ltr" }, o.tag), h("span", { class: "badge" }, o.kind === "warp" ? "WARP" : o.config?.protocol || "?"), usageBadge(o.tag),
         h("button", { class: "ghost danger spacer", onclick: () => { r.outbounds.splice(i, 1); touch(); draw(); } }, L.del)),
       h("div", { class: "two" }, field(L.tag, txt(o, "tag", { dir: "ltr" })), field(L.remark, txt(o, "remark"))),
-      field(L.nodes, nodePick(o)), det);
+      field(L.nodes, nodePick(o)), outboundTester(o.tag, nodes.filter((n) => !(o.nodes || []).length || o.nodes.includes(n.ID))), det);
   }
 
   function balancerCard(b, i) {
@@ -1750,21 +1801,31 @@ async function inboundStudio(tag, ctx) {
     const certSel = h("select", {}, h("option", { value: "" }, t("selfSigned")), (ctx.certs || []).map((c) => h("option", { value: c.id, selected: c.id === p.cert }, `${c.id} · ${c.domains.join(", ")}`)));
     const certRow = field(t("certFor"), certSel);
     const fbNote = h("p", { class: "small muted", hidden: true }, t("fbHint"));
+    const plainNote = h("p", { class: "small muted", hidden: true });
+    const sniWrap = h("div", {}), pathLabel = h("span", {}, t("path"));
     const sync = () => {
       fbNote.hidden = p.preset !== "vless-tls-fallback";
+      const plain = ["socks", "http", "dokodemo"].includes(p.preset);
+      sniWrap.hidden = plain || p.preset === "wireguard";
+      pathLabel.textContent = p.preset === "dokodemo" ? (lang === "fa" ? "مقصد (host:port)" : "Target (host:port)") : t("path");
+      if (pathInput) pathInput.placeholder = p.preset === "dokodemo" ? "1.2.3.4:443" : p.preset === "wireguard" ? "10.66.0.0/16" : "";
+      plainNote.hidden = !plain;
+      plainNote.textContent = p.preset === "dokodemo"
+        ? (lang === "fa" ? "انتقال پورت (تونل): هر چیزی که به این پورت برسد به مقصد فرستاده می‌شود؛ مثلاً یک ریلی جلوی سرور دیگر. کاربری ندارد و در اشتراک‌ها نمی‌آید؛ ترافیکش در آمار اینباند هست." : "Port forwarding (tunnel): everything arriving on this port goes to the target — e.g. a relay in front of another server. No clients, not in subscriptions; its traffic shows in the inbound's stats.")
+        : (lang === "fa" ? "پروکسی ساده با یک نام کاربری و رمز تصادفی (هرگز پروکسی باز نیست). کاربرهای پنل به آن وصل نمی‌شوند و در اشتراک‌ها نمی‌آید؛ لینک و رمز روی کارت اینباند است." : "A plain proxy with one random username and password (never an open proxy). Panel clients don't use it and it is not in subscriptions; the link and password are on the inbound card.");
       certRow.hidden = !(p.preset.includes("-tls-") || p.preset === "hysteria2");
       certSel.options[0].hidden = p.preset !== "hysteria2";
       if (p.preset === "hysteria2" && !(ctx.certs || []).length) p.cert = "";
     };
     const sniInput = bind(p, "sni");
-    const pathInput = bind(p, "path");
-    pathInput.placeholder = p.preset === "wireguard" ? "10.66.0.0/16" : "";
+    var pathInput = bind(p, "path");
     const finder = sniFinder({ nodes, node: Object.keys(st.routes)[0] || nodes[0]?.ID, onPick: (d) => { p.sni = d; sniInput.value = d; } });
     finder.hidden = true;
     const findBtn = h("button", { type: "button", class: "ghost" }, t("findSni"));
     findBtn.addEventListener("click", () => { finder.hidden = !finder.hidden; });
     const isReality = () => p.preset.includes("reality");
-    preset.addEventListener("change", () => { p.preset = preset.value; sync(); pathInput.placeholder = p.preset === "wireguard" ? "10.66.0.0/16" : ""; findBtn.hidden = !isReality(); if (!isReality()) finder.hidden = true; });
+    sniWrap.append(field(t("sni"), h("div", { class: "row tight" }, sniInput, findBtn)));
+    preset.addEventListener("change", () => { p.preset = preset.value; sync(); findBtn.hidden = !isReality(); if (!isReality()) finder.hidden = true; });
     findBtn.hidden = !isReality();
     certSel.addEventListener("change", () => { p.cert = certSel.value; const c = (ctx.certs || []).find((x) => x.id === p.cert); if (c?.domains[0]) { p.sni = c.domains[0]; draw(); } });
     sync();
@@ -1772,7 +1833,8 @@ async function inboundStudio(tag, ctx) {
       h("p", { class: "small muted" }, t("profileHint")),
       h("div", { class: "two" }, field(t("tag"), bind(p, "tag", { required: true, placeholder: "multi-reality", autofocus: true })), field(t("preset"), preset)),
       certRow, fbNote,
-      h("div", { class: "two" }, field(t("sni"), h("div", { class: "row tight" }, sniInput, findBtn)), field(t("path"), pathInput)),
+      plainNote,
+      h("div", { class: "two" }, h("div", {}, sniWrap), h("label", {}, pathLabel, pathInput)),
       finder,
       field(t("remark"), bind(p, "remark")),
     ];
