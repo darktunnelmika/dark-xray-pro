@@ -104,11 +104,17 @@ func TestCloneRotateAndLinks(t *testing.T) {
 	}
 	// Rotate: new UUID and secret keep the link; a new link keeps the UUID.
 	before, _ := s.ClientByEmail(ctx, "alice")
+	secret := func() string {
+		var x string
+		_ = s.db.QueryRow(`SELECT secret FROM clients WHERE email='alice'`).Scan(&x)
+		return x
+	}
+	oldSecret := secret()
 	if err := s.RotateClient(ctx, "alice", true, false); err != nil {
 		t.Fatal(err)
 	}
 	mid, _ := s.ClientByEmail(ctx, "alice")
-	if mid.UUID == before.UUID || mid.Secret == before.Secret || mid.SubToken != before.SubToken {
+	if mid.UUID == before.UUID || secret() == oldSecret || mid.SubToken != before.SubToken {
 		t.Fatal("credentials rotation", before.Client, mid.Client)
 	}
 	if err := s.RotateClient(ctx, "alice", false, true); err != nil {
