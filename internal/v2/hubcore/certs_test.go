@@ -91,6 +91,9 @@ func TestCertificatesAndTLSPresets(t *testing.T) {
 func TestFallbackPreset(t *testing.T) {
 	s, now := newStore(t)
 	ctx := context.Background()
+	if _, err := s.CreateNode(ctx, "de-1", "Germany"); err != nil {
+		t.Fatal(err)
+	}
 	cert, key := testCert(t, "edge.example.com", now.Add(60*24*time.Hour))
 	if err := s.PutCert(ctx, "edge", cert, key); err != nil {
 		t.Fatal(err)

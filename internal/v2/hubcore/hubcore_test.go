@@ -723,7 +723,7 @@ func TestPresetsRenderForEveryProtocol(t *testing.T) {
 			} `json:"settings"`
 		} `json:"inbounds"`
 	}
-	if err := json.Unmarshal(cfg, &parsed); err != nil || len(parsed.Inbounds) != len(Presets)+1 {
+	if err := json.Unmarshal(cfg, &parsed); err != nil || len(parsed.Inbounds) != len(Presets)+1+3 { // +3 fallback children
 		t.Fatalf("%v %d", err, len(parsed.Inbounds))
 	}
 	for _, in := range parsed.Inbounds[1:] {
