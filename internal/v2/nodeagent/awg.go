@@ -313,7 +313,7 @@ func newAWGTun(mtu int, logf func(string, ...any)) (*awgTun, error) {
 			r.Complete(true)
 			return
 		}
-		out, err := net.DialTimeout("tcp", netip.AddrPortFrom(dst, id.LocalPort).String(), 10*time.Second)
+		out, err := forwardDial("tcp", netip.AddrPortFrom(dst, id.LocalPort).String())
 		if err != nil {
 			r.Complete(true)
 			return
@@ -329,27 +329,28 @@ func newAWGTun(mtu int, logf func(string, ...any)) (*awgTun, error) {
 		go pipe(gonet.NewTCPConn(&wq, ep), out)
 	})
 	s.SetTransportProtocolHandler(tcp.ProtocolNumber, tf.HandlePacket)
-	uf := udp.NewForwarder(s, func(r *udp.ForwarderRequest) {
+	uf := udp.NewForwarder(s, func(r *udp.ForwarderRequest) bool {
 		id := r.ID()
 		dst := netip.AddrFrom16(id.LocalAddress.As16()).Unmap()
 		if id.LocalAddress.Len() == 4 {
 			dst = netip.AddrFrom4(id.LocalAddress.As4())
 		}
 		if blockedDest(dst) {
-			return
+			return true // dropped
 		}
 		var wq waiter.Queue
 		ep, terr := r.CreateEndpoint(&wq)
 		if terr != nil {
-			return
+			return true
 		}
 		in := gonet.NewUDPConn(&wq, ep)
-		out, err := net.Dial("udp", netip.AddrPortFrom(dst, id.LocalPort).String())
+		out, err := forwardDial("udp", netip.AddrPortFrom(dst, id.LocalPort).String())
 		if err != nil {
 			in.Close()
-			return
+			return true
 		}
 		go pipeUDP(in, out)
+		return true
 	})
 	s.SetTransportProtocolHandler(udp.ProtocolNumber, uf.HandlePacket)
 	t.events <- tun.EventUp
@@ -358,12 +359,11 @@ func newAWGTun(mtu int, logf func(string, ...any)) (*awgTun, error) {
 
 // blockedDest keeps tunnel users away from the node itself and private
 // networks (the same as the panel's "block private networks" default).
-var allowLocalDest = false // tests only
+// forwardDial opens the node-side connection of a tunnel flow (tests
+// replace it).
+var forwardDial = func(network, addr string) (net.Conn, error) { return net.DialTimeout(network, addr, 10*time.Second) }
 
 func blockedDest(a netip.Addr) bool {
-	if allowLocalDest && a.IsLoopback() {
-		return false
-	}
 	return !a.IsValid() || a.IsLoopback() || a.IsPrivate() || a.IsLinkLocalUnicast() || a.IsLinkLocalMulticast() || a.IsMulticast() || a.IsUnspecified() ||
 		netip.MustParsePrefix("100.64.0.0/10").Contains(a)
 }
@@ -459,7 +459,7 @@ func (t *awgTun) Write(bufs [][]byte, offset int) (int, error) {
 // packet back toward the clients.
 func (t *awgTun) WriteNotify() {
 	pkt := t.ep.Read()
-	if pkt.IsNil() {
+	if pkt == nil {
 		return
 	}
 	v := pkt.ToView()
