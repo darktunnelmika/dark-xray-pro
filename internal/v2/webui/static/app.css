@@ -369,8 +369,8 @@ table.dtable.compact tr:last-child td { border-block-end: 0; }
 /* Team page: logins and change log */
 .row.spread { justify-content: space-between; }
 .dtable.audit td { padding-block: 6px; }
-.dtable.audit tr.bad td:first-child { box-shadow: inset 3px 0 0 var(--bad); }
-.dtable.audit tr.warn td:first-child { box-shadow: inset 3px 0 0 var(--warn); }
+.dtable.audit tr.bad td:first-child { border-inline-start: 3px solid var(--bad); }
+.dtable.audit tr.warn td:first-child { border-inline-start: 3px solid var(--warn); }
 .dtable.audit code.path { font-size: 0.82em; color: var(--muted); unicode-bidi: isolate; word-break: break-all; }
 code.tfakey { letter-spacing: 0.08em; user-select: all; unicode-bidi: isolate; }
 code.keyout { display: block; padding: 10px 12px; border-radius: var(--r-md, 10px); background: var(--glass); border: 1px solid var(--glass-line); word-break: break-all; }
