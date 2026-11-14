@@ -14,6 +14,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"path/filepath"
 	"regexp"
 	"time"
 
@@ -112,6 +113,10 @@ type Store struct {
 }
 
 func Open(path string) (*Store, error) {
+	path, err := filepath.Abs(path)
+	if err != nil {
+		return nil, err
+	}
 	q := "_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=synchronous(FULL)"
 	u := url.URL{Scheme: "file", Path: path, RawQuery: q}
 	db, err := sql.Open("sqlite", u.String())

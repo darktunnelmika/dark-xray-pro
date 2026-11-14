@@ -42,10 +42,13 @@ log "bob after limit (expect 000): $(fetch 21081 200000)"
 restarts(){ $HUB status -db $DB | grep -o 'restarts=[0-9]*'; }
 log "xray process $(restarts) (1 = never restarted)"
 log "--- add carol while alice streams 20MB ---"
-( r=$(fetch 21080 20000000); log "alice long download during user change: $r" ) &
-sleep 2
+# Throttled to ~1 MB/s so the stream is still open when carol is added.
+( r=$(curl -s -o /dev/null -w "%{http_code} %{size_download}" --limit-rate 1M --max-time 40 --socks5-hostname 127.0.0.1:21080 "https://speed.cloudflare.com/__down?bytes=15000000"); log "alice stream across the user change: $r" ) &
+STREAM=$!
+sleep 3
 $HUB client -db $DB -email carol -inbounds de-test-vless -volume-gb 1
-sleep 12; wait
+log "carol added at the HUB while alice streams"
+wait $STREAM
 mkclient carol 21082 "$(uuid carol)"; sleep 2
 log "carol (added live): $(fetch 21082 100000)"
 log "xray process $(restarts) after adding a user (expect 1)"
