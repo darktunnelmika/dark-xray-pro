@@ -62,6 +62,10 @@ func TestMiniApp(t *testing.T) {
 	if err := s.PutProduct(ctx, owner, Product{ID: "m30", Name: "ماهانه ۳۰ گیگ", Plan: "volume", GB: 30, Days: 30, Price: 150000, Status: "published", Inbounds: []string{"de-vless"}}); err != nil {
 		t.Fatal(err)
 	}
+	// The panel handler (with its UI at /) must also route the Mini App.
+	if h := AdminHandlerWith(s, "tok", "", http.NotFoundHandler()); h == nil {
+		t.Fatal("handler")
+	}
 	srv := httptest.NewServer(SubHandler(s))
 	defer srv.Close()
 	call := func(method, path, body, data string) (int, string) {

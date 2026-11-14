@@ -1011,7 +1011,8 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 	}))
 	sh := SubHandler(s)
 	mux.Handle("GET /sub/{token}", sh)
-	mux.Handle("/app/", sh) // Telegram Mini App
+	mux.Handle("GET /app/", sh) // Telegram Mini App
+	mux.Handle("POST /app/", sh)
 	routes := mux.apiRoutes()
 	mux.HandleFunc("GET /api/v2/admin/docs", member(func(w http.ResponseWriter, r *http.Request) {
 		reply(w, routes, nil)
