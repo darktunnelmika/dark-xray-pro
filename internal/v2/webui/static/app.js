@@ -2739,7 +2739,7 @@ async function viewStaff() {
       } }, t("delete")) : null)));
   const fmtTime = (u) => new Intl.DateTimeFormat(lang === "fa" ? "fa-IR" : "en-GB", { dateStyle: "short", timeStyle: "medium" }).format(new Date(u * 1000));
   const what = (e) => {
-    if (e.path === "/api/v2/auth/login") return e.status === 200 ? t("act_login") : t("act_loginFail");
+    if (e.path === "/api/v2/auth/login") return e.status === 200 ? t("act_login") : e.status === 429 ? (lang === "fa" ? "ورود بسته (رمز اشتباه زیاد)" : "locked out (too many wrong passwords)") : t("act_loginFail");
     return h("code", { dir: "ltr", class: "path" }, `${e.method} ${e.path.replace(/^\/api\/v2\/(admin\/)?/, "")}`);
   };
   const tone = (e) => e.status >= 400 ? "bad" : e.method === "DELETE" ? "warn" : "";
@@ -2766,7 +2766,7 @@ async function viewStaff() {
     h("div", { class: "card form" }, h("div", { class: "row spread" }, h("h1", {}, t("staffTitle")), h("button", { class: "primary", onclick: () => editLogin(null) }, t("addLogin"))),
       h("p", { class: "small muted" }, t("staffHint")),
       h("div", { class: "table-wrap" }, h("table", { class: "dtable" }, h("thead", {}, h("tr", {}, h("th", {}, t("username")), h("th", {}, t("role")), h("th", {}, t("lastSeen")), h("th", {}, ""))), h("tbody", {}, rows)))),
-    keysCard(keys, L), webhookCard(wh, L),
+    lockoutsCard(), keysCard(keys, L), webhookCard(wh, L),
     h("div", { class: "card form" }, h("h2", {}, t("auditTitle")), h("p", { class: "small muted" }, t("auditHint")), filter,
       h("div", { class: "table-wrap" }, h("table", { class: "dtable audit" }, body)), more));
 }
@@ -2933,6 +2933,128 @@ function restoreSection() {
   return h("div", { class: "form" }, h("h2", { class: "section" }, t("restoreTitle")), h("p", { class: "small muted" }, t("restoreHint")), form, out);
 }
 
+// ---------- Telegram bot, backups to Telegram, sessions, login protection ----------
+const S2 = {
+  fa: { botTitle: "ربات تلگرام", botHint: "ربات را از @BotFather بسازید، توکنش را این‌جا بگذارید و شناسهٔ عددی تلگرام مالک‌ها را اضافه کنید (شناسه را از @userinfobot بگیرید). توکن فقط در یک فایل محافظت‌شده روی هاب می‌ماند و در بکاپ‌ها نیست.",
+    botOn: "وصل است", botOff: "وصل نیست", botToken: "توکن ربات", botTokenKeep: "ذخیره شده ({x}) — خالی یعنی بدون تغییر", botOwners: "مالک‌ها (شناسهٔ عددی، هر خط یکی)",
+    botSave: "ذخیره و اتصال", botTest: "پیام آزمایشی", botTestOK: "پیام آزمایشی برای مالک‌ها فرستاده شد", botOffBtn: "قطع ربات", botOffAsk: "ربات قطع و توکنش از هاب پاک شود؟ فروشگاه تلگرام و هشدارها تا اتصال دوباره کار نمی‌کنند.",
+    botSaved: "ربات وصل شد: @{x}", botNA: "این هاب بدون پشتیبانی ربات اجرا شده.",
+    bkTitle: "بکاپ خودکار به تلگرام", bkHint: "بکاپ کامل هاب با رمز شما رمزگذاری می‌شود و برای مالک‌ها در تلگرام فرستاده می‌شود. بدون این رمز بکاپ باز نمی‌شود؛ جایی امن نگهش دارید.",
+    bkPass: "رمز بکاپ", bkPassSet: "ذخیره شده — خالی یعنی بدون تغییر، - یعنی حذف", bkEvery: "هر چند وقت", bkOff: "خاموش", bkH: "هر {n} ساعت", bkDay: "روزانه", bkLast: "آخرین ارسال: {d}",
+    bkNever: "هنوز ارسال نشده", bkNow: "ارسال بکاپ الان", bkSent: "بکاپ برای مالک‌ها فرستاده شد", bkErr: "خطای آخرین ارسال: {x}",
+    sessTitle: "نشست‌های فعال", sessHint: "دستگاه‌هایی که با ورود شما وارد پنل هستند. هر کدام را نمی‌شناسید ببندید و رمز را عوض کنید.", sessThis: "همین دستگاه",
+    sessEnd: "خروج", sessOthers: "خروج از همهٔ دستگاه‌های دیگر", sessOthersAsk: "همهٔ نشست‌های دیگر شما بسته شود؟", sessEnded: "{n} نشست بسته شد", sessAll: "همهٔ ورودها",
+    sessSeen: "آخرین فعالیت", sessFrom: "از",
+    lockTitle: "امنیت ورود", lockHint: "بعد از ۵ رمز اشتباه برای یک نام ورود، یا ۱۰ رمز اشتباه از یک آدرس در ۱۵ دقیقه، آن آدرس موقتاً بسته می‌شود (بار اول ۱۵ دقیقه، هر بار دو برابر تا ۲۴ ساعت). نام ورود برای بقیهٔ آدرس‌ها باز می‌ماند تا کسی نتواند شما را بیرون نگه دارد. با ربات وصل، به مالک‌ها هشدار داده می‌شود.",
+    lockNone: "الان هیچ آدرسی بسته نیست.", lockUntil: "تا {d}", lockOpen: "باز کردن", lockOpenAll: "باز کردن همه", lockUser: "نام ورود: {x}", lockStrikes: "بار {n}" },
+  en: { botTitle: "Telegram bot", botHint: "Create the bot with @BotFather, paste its token here and add the owners' numeric Telegram ids (get yours from @userinfobot). The token stays in a protected file on the HUB and is never in backups.",
+    botOn: "Connected", botOff: "Not connected", botToken: "Bot token", botTokenKeep: "saved ({x}) — empty keeps it", botOwners: "Owners (numeric ids, one per line)",
+    botSave: "Save and connect", botTest: "Send a test", botTestOK: "Test message sent to the owners", botOffBtn: "Disconnect", botOffAsk: "Disconnect the bot and delete its token from the HUB? The Telegram store and alerts stop until it is connected again.",
+    botSaved: "Bot connected: @{x}", botNA: "This HUB runs without bot support.",
+    bkTitle: "Automatic backups to Telegram", bkHint: "A full HUB backup, encrypted with your password, is sent to the owners on Telegram. Without the password a backup cannot be opened — keep it somewhere safe.",
+    bkPass: "Backup password", bkPassSet: "saved — empty keeps it, - removes it", bkEvery: "How often", bkOff: "Off", bkH: "Every {n} hours", bkDay: "Daily", bkLast: "Last sent: {d}",
+    bkNever: "Not sent yet", bkNow: "Send a backup now", bkSent: "Backup sent to the owners", bkErr: "Last send failed: {x}",
+    sessTitle: "Active sessions", sessHint: "Devices signed in with your login. End any you don't recognise and change your password.", sessThis: "This device",
+    sessEnd: "Sign out", sessOthers: "Sign out every other device", sessOthersAsk: "End all your other sessions?", sessEnded: "{n} sessions ended", sessAll: "All logins",
+    sessSeen: "Last active", sessFrom: "from",
+    lockTitle: "Login protection", lockHint: "After 5 wrong passwords for one login, or 10 from one address within 15 minutes, that address is locked for a while (15 minutes the first time, doubling up to 24 hours). The login stays open from other addresses, so nobody can keep you out. With the bot connected, owners get an alert.",
+    lockNone: "No address is locked right now.", lockUntil: "until {d}", lockOpen: "Unlock", lockOpenAll: "Unlock all", lockUser: "login: {x}", lockStrikes: "time {n}" },
+};
+const s2 = (k, vars) => { let s = (S2[lang] || S2.en)[k] ?? S2.en[k] ?? k; for (const [a, b] of Object.entries(vars || {})) s = s.replaceAll(`{${a}}`, b); return s; };
+const when = (u) => new Date(u * 1000).toLocaleString(lang === "fa" ? "fa-IR" : "en-GB", { dateStyle: "short", timeStyle: "short" });
+const shortAgent = (a) => {
+  if (!a) return "—";
+  const os = /Android/.test(a) ? "Android" : /iPhone|iPad/.test(a) ? "iOS" : /Windows/.test(a) ? "Windows" : /Mac OS/.test(a) ? "macOS" : /Linux/.test(a) ? "Linux" : "";
+  const br = /Edg\//.test(a) ? "Edge" : /Firefox\//.test(a) ? "Firefox" : /Chrome\//.test(a) ? "Chrome" : /Safari\//.test(a) ? "Safari" : /curl|Go-http|python/i.test(a) ? "script" : "";
+  return [br, os].filter(Boolean).join(" · ") || a.slice(0, 40);
+};
+
+function telegramBotCard() {
+  const card = h("div", { class: "card form" }, h("h2", {}, s2("botTitle")), h("p", { class: "muted small" }, "…"));
+  const draw = (st) => {
+    if (!st.available) { card.replaceChildren(h("h2", {}, s2("botTitle")), h("p", { class: "muted small" }, s2("botNA"))); return; }
+    const tok = h("input", { type: "password", autocomplete: "off", dir: "ltr", placeholder: st.token_set ? s2("botTokenKeep", { x: st.token_hint || "…" }) : "123456789:AA…" });
+    const owners = h("textarea", { rows: "2", dir: "ltr", inputmode: "numeric", placeholder: "1906987468" }, (st.owners || []).join("\n"));
+    const err = h("div", { class: "error" });
+    const save = h("button", { class: "primary", onclick: async () => {
+      err.textContent = "";
+      const ids = owners.value.split(/[\s,]+/).map((x) => parseInt(x, 10)).filter((x) => x > 0);
+      try { const r = await api("PUT", "/api/v2/admin/telegram", { token: tok.value.trim(), owners: ids }); toast(s2("botSaved", { x: r.username || "?" })); draw(r); }
+      catch (x) { err.textContent = x.message; }
+    } }, s2("botSave"));
+    const pass = h("input", { type: "password", autocomplete: "new-password", placeholder: st.backup_pass ? s2("bkPassSet") : "", minlength: "8" });
+    const every = h("select", {}, [[0, s2("bkOff")], [6, s2("bkH", { n: fmtNum(6) })], [12, s2("bkH", { n: fmtNum(12) })], [24, s2("bkDay")], [48, s2("bkH", { n: fmtNum(48) })]]
+      .map(([v, l]) => h("option", { value: String(v), selected: v === st.backup_hours }, l)));
+    const bkErr = h("div", { class: "error" });
+    fill(card,
+      h("div", { class: "row" }, h("h2", {}, s2("botTitle")), h("span", { class: `badge ${st.running ? "good" : "bad"}` }, st.running ? s2("botOn") : s2("botOff")),
+        st.running && st.username ? h("a", { class: "badge", dir: "ltr", href: `https://t.me/${st.username}`, target: "_blank", rel: "noopener" }, `@${st.username}`) : null),
+      h("p", { class: "small muted" }, s2("botHint")),
+      h("label", {}, h("span", {}, s2("botToken")), tok), h("label", {}, h("span", {}, s2("botOwners")), owners), err,
+      h("div", { class: "row" }, save,
+        st.running ? h("button", { onclick: async () => { try { await api("POST", "/api/v2/admin/telegram/test"); toast(s2("botTestOK")); } catch (x) { err.textContent = x.message; } } }, s2("botTest")) : null,
+        st.token_set ? h("button", { class: "ghost danger spacer", onclick: async () => {
+          if (!(await confirmAction(s2("botOffAsk"), s2("botOffBtn")))) return;
+          try { await api("PUT", "/api/v2/admin/telegram", { token: "-", owners: [] }); route(); } catch (x) { toast(t("failed", { e: x.message })); }
+        } }, s2("botOffBtn")) : null),
+      h("h2", { class: "section" }, s2("bkTitle")), h("p", { class: "small muted" }, s2("bkHint")),
+      h("div", { class: "two" }, h("label", {}, h("span", {}, s2("bkPass")), pass), h("label", {}, h("span", {}, s2("bkEvery")), every)),
+      h("p", { class: "small muted" }, st.backup_last ? s2("bkLast", { d: when(st.backup_last) }) : s2("bkNever")),
+      st.backup_error ? h("p", { class: "small error" }, s2("bkErr", { x: st.backup_error })) : null, bkErr,
+      h("div", { class: "row" },
+        h("button", { onclick: async () => {
+          bkErr.textContent = "";
+          try { const r = await api("PUT", "/api/v2/admin/telegram/backup", { pass: pass.value, hours: +every.value }); toast(t("saved")); draw(r); } catch (x) { bkErr.textContent = x.message; }
+        } }, t("save")),
+        h("button", { class: "ghost", disabled: !st.running || !st.backup_pass, onclick: async (e) => {
+          bkErr.textContent = ""; e.target.disabled = true;
+          try { await api("POST", "/api/v2/admin/telegram/backup-now"); toast(s2("bkSent")); draw(await api("GET", "/api/v2/admin/telegram")); } catch (x) { bkErr.textContent = x.message; e.target.disabled = false; }
+        } }, s2("bkNow"))));
+  };
+  api("GET", "/api/v2/admin/telegram").then(draw).catch((x) => card.replaceChildren(h("h2", {}, s2("botTitle")), h("p", { class: "error" }, x.message)));
+  return card;
+}
+
+function sessionsCard() {
+  const list = h("div", { class: "cfglist" });
+  let all = false;
+  const load = async () => {
+    try {
+      const rows = await api("GET", `/api/v2/auth/sessions${all ? "?all=1" : ""}`);
+      list.replaceChildren(...rows.map((x) => h("div", { class: "cfg sess" },
+        h("span", { class: `dot ${x.current ? "on" : ""}` }),
+        h("div", { class: "cfgname" }, h("div", {}, shortAgent(x.agent), all ? h("span", { class: "badge" }, x.user) : null, x.current ? h("span", { class: "badge good" }, s2("sessThis")) : null),
+          h("div", { class: "small muted", dir: "auto" }, `${x.ip || "?"} · ${s2("sessSeen")}: ${when(x.last_seen || x.created || 0)}`)),
+        x.current ? null : h("button", { type: "button", class: "ghost danger", onclick: async () => { try { await api("DELETE", `/api/v2/auth/sessions/${x.id}`); load(); } catch (e) { toast(t("failed", { e: e.message })); } } }, s2("sessEnd")))));
+    } catch (x) { list.replaceChildren(h("p", { class: "error" }, x.message)); }
+  };
+  load();
+  return h("div", { class: "card form" }, h("div", { class: "row" }, h("h2", {}, s2("sessTitle")),
+      fullOwner() ? h("label", { class: "check spacer" }, (() => { const c = h("input", { type: "checkbox" }); c.addEventListener("change", () => { all = c.checked; load(); }); return c; })(), s2("sessAll")) : null),
+    h("p", { class: "small muted" }, s2("sessHint")), list,
+    h("div", { class: "row" }, h("button", { class: "ghost danger", onclick: async () => {
+      if (!(await confirmAction(s2("sessOthersAsk"), s2("sessOthers")))) return;
+      try { const r = await api("POST", "/api/v2/auth/sessions/end-others"); toast(s2("sessEnded", { n: fmtNum(r.ended) })); route(); } catch (x) { toast(t("failed", { e: x.message })); }
+    } }, s2("sessOthers"))));
+}
+
+function lockoutsCard() {
+  const list = h("div", { class: "cfglist" });
+  const load = async () => {
+    try {
+      const rows = await api("GET", "/api/v2/admin/security/lockouts");
+      if (!rows.length) { list.replaceChildren(h("p", { class: "muted small" }, s2("lockNone"))); return; }
+      list.replaceChildren(...rows.map((x) => h("div", { class: "cfg" },
+        h("span", { class: "badge bad", dir: "ltr" }, x.ip),
+        h("span", { class: "cfgname small" }, [x.user ? s2("lockUser", { x: x.user }) : null, s2("lockUntil", { d: when(x.until) }), s2("lockStrikes", { n: fmtNum(x.strikes) })].filter(Boolean).join(" · ")),
+        h("button", { type: "button", class: "ghost", onclick: async () => { await api("DELETE", `/api/v2/admin/security/lockouts?ip=${encodeURIComponent(x.ip)}`); load(); } }, s2("lockOpen")))),
+        h("div", { class: "row" }, h("button", { class: "ghost", onclick: async () => { await api("DELETE", "/api/v2/admin/security/lockouts"); load(); } }, s2("lockOpenAll"))));
+    } catch (x) { list.replaceChildren(h("p", { class: "error" }, x.message)); }
+  };
+  load();
+  return h("div", { class: "card form" }, h("h2", {}, s2("lockTitle")), h("p", { class: "small muted" }, s2("lockHint")), list);
+}
+
 function viewSettings() {
   const langSel = h("select", { onchange: (e) => { lang = e.target.value; safeSet("lang", lang); applyLang(); route(); } },
     h("option", { value: "en", selected: lang === "en" }, "English"), h("option", { value: "fa", selected: lang === "fa" }, "فارسی"));
@@ -2973,7 +3095,7 @@ function viewSettings() {
       fill(tgOut, r.link ? h("a", { class: "btn", href: r.link, target: "_blank", rel: "noopener" }, t("openBot")) : null,
         h("code", {}, `/start rep_${r.code}`), h("p", { class: "small muted" }, t("codeExpires")));
     } }, t("connectTelegram"))) : null;
-  return h("div", { class: "form" }, h("h1", {}, t("settings")), me.role === "owner" ? subSettingsCard() : null, me.role === "owner" ? trustedCard() : null, fullOwner() ? panelHTTPSCard() : null, me.role === "owner" ? tgCommerceCard() : null, fullOwner() ? migrateCard() : null, pwForm, tfaCard(), tgCard, backupCard,
+  return h("div", { class: "form" }, h("h1", {}, t("settings")), me.role === "owner" ? subSettingsCard() : null, me.role === "owner" ? trustedCard() : null, fullOwner() ? panelHTTPSCard() : null, me.role === "owner" ? tgCommerceCard() : null, fullOwner() ? migrateCard() : null, pwForm, tfaCard(), sessionsCard(), fullOwner() ? telegramBotCard() : null, tgCard, backupCard,
     h("div", { class: "card form" },
       h("label", {}, h("span", {}, t("language")), langSel),
       h("label", {}, h("span", {}, t("theme")), themeSel),
