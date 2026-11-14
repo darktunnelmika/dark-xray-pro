@@ -8,6 +8,7 @@ import (
 	"html/template"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 
@@ -51,6 +52,8 @@ type pageData struct {
 	Announce, Support                            string
 	Nonce                                        string
 	T                                            map[string]string
+	Accent                                       template.CSS // checked #rrggbb
+	Logo                                         template.URL // checked data:image/… URL
 }
 
 type pageLink struct{ Name, URL string }
@@ -76,6 +79,12 @@ FROM clients c LEFT JOIN client_usage cu ON cu.email=c.email WHERE c.email=?`, e
 	T := pageText[lang]
 	set := s.SubSettings(ctx)
 	d := pageData{Lang: lang, Dir: "rtl", Email: c.Email, Title: or2(set.Title, c.Email), SubURL: subURL, Announce: set.Announce, Support: set.SupportURL, T: T}
+	if accentRE.MatchString(set.Accent) {
+		d.Accent = template.CSS(set.Accent)
+	}
+	if validLogo(set.Logo) {
+		d.Logo = template.URL(set.Logo)
+	}
 	if lang == "en" {
 		d.Dir = "ltr"
 	}
@@ -198,6 +207,8 @@ var subPageTmpl = template.Must(template.New("sub").Funcs(template.FuncMap{"safe
 <meta name="color-scheme" content="dark"><meta name="robots" content="noindex"><title>{{.Title}}</title>
 <style>
 :root{--bg:#060912;--glass:rgb(148 163 255/.06);--line:rgb(160 175 255/.13);--text:#e9ecff;--muted:#8d95c4;--cyan:#2de2e6;--violet:#9b5cff;--good:#3ef0a1;--bad:#ff5f7e;--warn:#ffc65c}
+{{if .Accent}}:root{--cyan:{{.Accent}};--violet:{{.Accent}}}{{end}}
+.logo{width:44px;height:44px;border-radius:12px;object-fit:contain;flex:none}
 *{box-sizing:border-box}html,body{overflow-x:hidden}body{margin:0;min-height:100vh;background:radial-gradient(1200px 600px at 80% -10%,rgb(155 92 255/.18),transparent 60%),radial-gradient(900px 500px at -10% 10%,rgb(45 226 230/.12),transparent 60%),var(--bg);
 color:var(--text);font:15px/1.6 Vazirmatn,"Segoe UI",Tahoma,system-ui,sans-serif;padding:20px 14px 40px}
 .wrap{max-width:560px;margin:0 auto;display:grid;gap:14px;grid-template-columns:minmax(0,1fr)}.wrap>*{min-width:0}
@@ -216,7 +227,7 @@ button,.btn{appearance:none;border:1px solid var(--line);background:rgb(255 255 
 .ann{border-color:rgb(255 198 92/.4);color:var(--warn);white-space:pre-wrap}
 @media(max-width:420px){.apps{grid-template-columns:1fr}}
 </style></head><body><div class="wrap">
-<div class="card"><div class="row"><h1>{{.Title}}</h1><span class="sp"></span><span class="badge {{.StatusClass}}">{{.Status}}</span></div>
+<div class="card"><div class="row">{{if .Logo}}<img class="logo" src="{{.Logo}}" alt="">{{end}}<h1>{{.Title}}</h1><span class="sp"></span><span class="badge {{.StatusClass}}">{{.Status}}</span></div>
 {{if ne .Title .Email}}<div class="muted">{{.Email}}</div>{{end}}</div>
 {{if .Announce}}<div class="card ann">{{.Announce}}</div>{{end}}
 <div class="card"><div class="grid">
@@ -234,3 +245,20 @@ document.addEventListener("click",function(e){var b=e.target.closest("[data-copy
 (navigator.clipboard?navigator.clipboard.writeText(v):Promise.reject()).catch(function(){var a=document.createElement("textarea");a.value=v;document.body.appendChild(a);a.select();document.execCommand("copy");a.remove();})
 .finally(function(){b.textContent={{index .T "copied"}};setTimeout(function(){b.textContent=t},1500)});});
 </script></body></html>`))
+
+var accentRE = regexp.MustCompile(`^#[0-9a-fA-F]{6}$`)
+
+// validLogo accepts a small inline image (the page's CSP only allows data:
+// images, so no third party ever sees a customer open their page).
+func validLogo(v string) bool {
+	if v == "" || len(v) > 200000 {
+		return false
+	}
+	for _, p := range []string{"data:image/png;base64,", "data:image/jpeg;base64,", "data:image/webp;base64,", "data:image/svg+xml;base64,"} {
+		if strings.HasPrefix(v, p) {
+			_, err := base64.StdEncoding.DecodeString(v[len(p):])
+			return err == nil
+		}
+	}
+	return false
+}

@@ -1386,6 +1386,9 @@ async function viewInbounds() {
         ? h("div", { class: "muted small" }, `${t("trafficToday")}: ${bytes(ib.traffic_today || 0)} · ${t("trafficTotal")}: ${bytes(ib.traffic_total || 0)}`)
         : h("div", { class: "muted small" }, `${t("clientsCount", { n: fmtNum(ib.clients) })} · ${t("trafficToday")}: ${bytes(ib.traffic_today || 0)} · ${t("trafficTotal")}: ${bytes(ib.traffic_total || 0)}`),
       plainLine(ib, meta, nodes),
+      ib.cap_bytes || ib.ends_unix ? h("div", { class: "row small" },
+        ib.cap_bytes ? meter(lang === "fa" ? "سقف ترافیک" : "Traffic cap", (100 * (ib.cap_used || 0)) / ib.cap_bytes, ltr(`${bytes(ib.cap_used || 0)} / ${bytes(ib.cap_bytes)}`)) : null,
+        ib.ends_unix ? h("span", { class: "badge" }, `${lang === "fa" ? "پایان" : "Ends"}: ${new Date(ib.ends_unix * 1000).toLocaleDateString(lang === "fa" ? "fa-IR" : "en-GB")}`) : null) : null,
       h("div", { class: "row" },
         h("button", { class: "primary", onclick: () => inboundStudio(ib.tag, { nodes, presets, certs }) }, t("nodesRoutes")),
         h("button", { onclick: async () => { await guarded(() => api("POST", `/api/v2/admin/inbounds/${encodeURIComponent(ib.tag)}/enabled`, { Enabled: !ib.enabled })); route(); } }, t(ib.enabled ? "disable" : "enable")),
@@ -2086,10 +2089,14 @@ function cloneInbound(ib) {
 }
 
 async function inboundEditor(tag, nodes, certs) {
-  const [raw, routes, certList] = await Promise.all([
+  const [raw, routes, certList, all] = await Promise.all([
     api("GET", `/api/v2/admin/inbounds/${encodeURIComponent(tag)}`),
     api("GET", `/api/v2/admin/inbounds/${encodeURIComponent(tag)}/routes`).catch(() => []),
-    certs ? Promise.resolve(certs) : api("GET", "/api/v2/admin/certs").catch(() => [])]);
+    certs ? Promise.resolve(certs) : api("GET", "/api/v2/admin/certs").catch(() => []),
+    api("GET", "/api/v2/admin/inbounds").catch(() => [])]);
+  const view = (all || []).find((x) => x.tag === tag) || {};
+  const lim = { cap: view.cap_bytes ? +(view.cap_bytes / 2 ** 30).toFixed(2) : 0, ends: view.ends_unix ? new Date(view.ends_unix * 1000).toISOString().slice(0, 10) : "" };
+  const lim0 = JSON.stringify(lim);
   const parse = (v) => { try { return typeof v === "string" ? JSON.parse(v) : structuredClone(v || {}); } catch { return {}; } };
   let tpl = parse(raw.template), meta = parse(raw.meta);
   let enabled = raw.enabled;
@@ -2148,7 +2155,12 @@ async function inboundEditor(tag, nodes, certs) {
       h("div", { class: "two" },
         field(ie("listen"), input(() => tpl.listen, (v) => { tpl.listen = v || undefined; }, { placeholder: "0.0.0.0", dir: "ltr" })),
         field(ie("port"), input(() => tpl.port, (v) => { tpl.port = v; }, { type: "number", min: "1", max: "65535", dir: "ltr", disabled: routed }), routed ? ie("portRouted") : null)),
-      check(() => enabled, (v) => { enabled = v; }, ie("enabled"))));
+      check(() => enabled, (v) => { enabled = v; }, ie("enabled")),
+      h("div", { class: "two" },
+        field(lang === "fa" ? "سقف ترافیک کل اینباند (گیگ، ۰ = ندارد)" : "Inbound traffic cap (GB, 0 = none)", input(() => lim.cap, (v) => { lim.cap = v || 0; }, { type: "number", min: "0", step: "1", dir: "ltr" }),
+          view.cap_bytes ? `${bytes(view.cap_used || 0)} / ${bytes(view.cap_bytes)}` : (lang === "fa" ? "از لحظهٔ ذخیره شمرده می‌شود" : "Counted from when you save")),
+        field(lang === "fa" ? "تاریخ پایان (خالی = ندارد)" : "End date (empty = none)", input(() => lim.ends, (v) => { lim.ends = v; }, { type: "date", dir: "ltr" }),
+          lang === "fa" ? "بعد از سقف یا تاریخ، اینباند خاموش می‌شود و به مالک‌ها خبر داده می‌شود" : "Past the cap or date the inbound turns off and owners are told"))));
     // Protocol
     if (proto === "vless") out.push(drawVless(settings));
     if (proto === "shadowsocks") out.push(drawSS(settings));
@@ -2308,6 +2320,9 @@ async function inboundEditor(tag, nodes, certs) {
     if (st.security === "reality" && st.realitySettings) meta.short_id = (st.realitySettings.shortIds || [])[0] || meta.short_id;
     try {
       await guarded(() => api("PUT", `/api/v2/admin/inbounds/${encodeURIComponent(tag)}`, { node_id: raw.node_id, template: tpl, meta, enabled }));
+      if (JSON.stringify(lim) !== lim0) {
+        await api("PUT", `/api/v2/admin/inbounds/${encodeURIComponent(tag)}/limits`, { cap_gb: +lim.cap || 0, ends_unix: lim.ends ? Math.floor(new Date(lim.ends + "T23:59:59").getTime() / 1000) : 0 });
+      }
       toast(ie("saved")); d.close("save"); route();
     } catch (x) { err.textContent = x.message; }
   }
@@ -2799,6 +2814,21 @@ function subSettingsCard() {
     const noise = h("input", { type: "checkbox", checked: !!v.noise });
     const mini = h("input", { type: "checkbox", checked: !!v.miniapp });
     const miniURL = h("input", { value: v.miniapp_url || "", dir: "ltr", placeholder: "https://panel.example.com/app/" });
+    // Branding of the customer page: accent colour and a small logo (stored inline).
+    let logo = v.logo || "";
+    const accentOn = h("input", { type: "checkbox", checked: !!v.accent });
+    const accent = h("input", { type: "color", value: v.accent || "#2de2e6" });
+    const logoPrev = h("img", { class: "logoprev", alt: "", hidden: !logo, src: logo || null });
+    const logoIn = h("input", { type: "file", accept: "image/png,image/jpeg,image/webp,image/svg+xml" });
+    logoIn.addEventListener("change", () => {
+      const f = logoIn.files[0];
+      if (!f) return;
+      if (f.size > 150000) { err.textContent = fa ? "لوگو باید کمتر از ۱۵۰ کیلوبایت باشد." : "The logo must be under 150 KB."; return; }
+      const rd = new FileReader();
+      rd.onload = () => { logo = rd.result; logoPrev.src = logo; logoPrev.hidden = false; };
+      rd.readAsDataURL(f);
+    });
+    const logoDel = h("button", { type: "button", class: "ghost", onclick: () => { logo = ""; logoPrev.hidden = true; logoIn.value = ""; } }, fa ? "حذف لوگو" : "Remove logo");
     fill(card, h("h2", {}, L.h), h("p", { class: "small muted" }, L.hint),
       h("label", {}, h("span", {}, L.title), title),
       h("label", {}, h("span", {}, L.tpl), tpl), h("div", { class: "small muted" }, L.vars), prev,
@@ -2807,13 +2837,16 @@ function subSettingsCard() {
       h("label", { class: "check" }, frag, h("span", {}, L.frag)),
       h("div", { class: "two" }, h("label", {}, h("span", {}, L.fl), fl), h("label", {}, h("span", {}, L.fi), fi)),
       h("label", { class: "check" }, noise, h("span", {}, L.noise)),
+      h("h2", { class: "section" }, fa ? "ظاهر صفحهٔ مشتری" : "Customer page look"),
+      h("div", { class: "row" }, h("label", { class: "check" }, accentOn, h("span", {}, fa ? "رنگ برند" : "Brand colour")), accent),
+      h("div", { class: "row" }, logoPrev, h("label", {}, h("span", {}, fa ? "لوگو (PNG، JPG، WebP یا SVG، زیر ۱۵۰ کیلوبایت)" : "Logo (PNG, JPG, WebP or SVG, under 150 KB)"), logoIn), logoDel),
       h("h2", { class: "section" }, t("miniTitle")), h("p", { class: "small muted" }, t("miniHint")),
       h("label", { class: "check" }, mini, h("span", {}, t("miniOn"))),
       h("label", {}, h("span", {}, t("miniURL")), miniURL), err,
       h("button", { class: "primary", onclick: async () => {
         err.textContent = "";
         try { await guarded(() => api("PUT", "/api/v2/admin/sub-settings", { title: title.value, remark_template: tpl.value, info_lines: info.checked, announce: ann.value, support_url: sup.value,
-          fragment: frag.checked, fragment_length: fl.value.trim(), fragment_interval: fi.value.trim(), noise: noise.checked, miniapp: mini.checked, miniapp_url: miniURL.value.trim() })); toast(t("saved")); }
+          fragment: frag.checked, fragment_length: fl.value.trim(), fragment_interval: fi.value.trim(), noise: noise.checked, miniapp: mini.checked, miniapp_url: miniURL.value.trim(), accent: accentOn.checked ? accent.value : "", logo })); toast(t("saved")); }
         catch (x) { err.textContent = x.message; }
       } }, L.save));
   }).catch(() => {});

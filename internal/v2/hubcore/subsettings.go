@@ -23,6 +23,9 @@ type SubSettings struct {
 	// Telegram Mini App store (the bot opens it; needs an HTTPS address).
 	MiniApp    bool   `json:"miniapp"`
 	MiniAppURL string `json:"miniapp_url"` // "" = <public address>/app/
+	// Customer page branding.
+	Accent string `json:"accent"` // #rrggbb, "" = the default neon
+	Logo   string `json:"logo"`   // small image as a data: URL
 }
 
 func (s *Store) SubSettings(ctx context.Context) SubSettings {
@@ -36,6 +39,7 @@ func (s *Store) SubSettings(ctx context.Context) SubSettings {
 		FragmentLength: s.Setting(ctx, "sub_frag_len"), FragmentInterval: s.Setting(ctx, "sub_frag_int"),
 		Noise:   s.Setting(ctx, "sub_noise") == "1",
 		MiniApp: s.Setting(ctx, "miniapp") == "1", MiniAppURL: s.Setting(ctx, "miniapp_url"),
+		Accent: s.Setting(ctx, "sub_accent"), Logo: s.Setting(ctx, "sub_logo"),
 	}
 }
 
@@ -66,6 +70,18 @@ func (s *Store) PutSubSettings(ctx context.Context, v SubSettings) error {
 			return "1"
 		}
 		return ""
+	}
+	if v.Accent != "" && !accentRE.MatchString(v.Accent) {
+		return fmt.Errorf("%w: colour must look like #2de2e6", ErrInvalid)
+	}
+	if v.Logo != "" && !validLogo(v.Logo) {
+		return fmt.Errorf("%w: logo must be a PNG, JPEG, WebP or SVG image under 150 KB", ErrInvalid)
+	}
+	if err := s.SetSetting(ctx, "sub_accent", v.Accent); err != nil {
+		return err
+	}
+	if err := s.SetSetting(ctx, "sub_logo", v.Logo); err != nil {
+		return err
 	}
 	v.MiniAppURL = strings.TrimSpace(v.MiniAppURL)
 	if v.MiniAppURL != "" && !strings.HasPrefix(v.MiniAppURL, "https://") {

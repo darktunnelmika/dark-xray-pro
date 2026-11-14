@@ -128,6 +128,7 @@ func main() {
 		go s.RunResets(ctx)
 		go s.RunWebhooks(ctx)
 		go s.RunSystemWatch(ctx)
+		go s.RunInboundLimits(ctx)
 		var cliOwners []int64
 		for _, f := range strings.Split(*tgOwners, ",") {
 			if n, err := strconv.ParseInt(strings.TrimSpace(f), 10, 64); err == nil {

@@ -1224,6 +1224,17 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 		err := s.PutInboundChecked(r.Context(), r.PathValue("tag"), in.NodeID, in.Template, in.Meta, enabled)
 		reply(w, map[string]bool{"ok": err == nil}, err)
 	}))
+	mux.HandleFunc("PUT /api/v2/admin/inbounds/{tag}/limits", guard(func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			CapGB float64 `json:"cap_gb"`
+			Ends  int64   `json:"ends_unix"`
+		}
+		if !decode(w, r, &in) {
+			return
+		}
+		err := s.SetInboundLimits(r.Context(), r.PathValue("tag"), int64(in.CapGB*(1<<30)), in.Ends)
+		reply(w, map[string]bool{"ok": err == nil}, err)
+	}))
 	mux.HandleFunc("POST /api/v2/admin/inbounds/{tag}/clone", guard(func(w http.ResponseWriter, r *http.Request) {
 		var in CloneRequest
 		if !decode(w, r, &in) {

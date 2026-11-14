@@ -110,3 +110,48 @@ func TestOutboundTestQueue(t *testing.T) {
 		t.Fatal(tasks)
 	}
 }
+
+func TestInboundLimitsAndBranding(t *testing.T) {
+	s, now := newStore(t)
+	ctx := context.Background()
+	seed(t, s)
+	if err := s.SetInboundLimits(ctx, "de-vless", 1000, 0); err != nil {
+		t.Fatal(err)
+	}
+	day := now.UTC().Format("2006-01-02")
+	if _, err := s.db.Exec(`INSERT INTO inbound_traffic(tag,day,up,down) VALUES('de-vless',?,400,700)`, day); err != nil {
+		t.Fatal(err)
+	}
+	s.checkInboundLimits(ctx)
+	raw, _ := s.InboundRaw(ctx, "de-vless")
+	if raw.Enabled {
+		t.Fatal("past its cap the inbound turns off")
+	}
+	_ = s.SetInboundEnabled(ctx, "de-vless", true)
+	if err := s.SetInboundLimits(ctx, "de-vless", 5000, now.Unix()-1); err != nil {
+		t.Fatal(err)
+	}
+	s.checkInboundLimits(ctx)
+	if raw, _ = s.InboundRaw(ctx, "de-vless"); raw.Enabled {
+		t.Fatal("past its end date the inbound turns off")
+	}
+	v := s.SubSettings(ctx)
+	v.Accent, v.Logo = "#ff8800", "data:image/png;base64,iVBORw0KGgo="
+	if err := s.PutSubSettings(ctx, v); err != nil {
+		t.Fatal(err)
+	}
+	bad := v
+	bad.Accent = "red;}body{display:none"
+	if err := s.PutSubSettings(ctx, bad); err == nil {
+		t.Fatal("a colour must be #rrggbb")
+	}
+	bad = v
+	bad.Logo = "javascript:alert(1)"
+	if err := s.PutSubSettings(ctx, bad); err == nil {
+		t.Fatal("a logo must be an inline image")
+	}
+	d, err := s.subPageData(ctx, "alice", "https://x/sub/t", "fa")
+	if err != nil || string(d.Accent) != "#ff8800" || !strings.HasPrefix(string(d.Logo), "data:image/png") {
+		t.Fatal(d.Accent, d.Logo, err)
+	}
+}
