@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -13,7 +14,19 @@ import (
 	"github.com/9seconds/mtg/v2/logger"
 	"github.com/9seconds/mtg/v2/mtglib"
 	"github.com/9seconds/mtg/v2/network"
+	"github.com/rs/zerolog"
 )
+
+// mtpLogLevel is how much of mtg's own log reaches the agent log (tests
+// raise it).
+var mtpLogLevel = zerolog.WarnLevel
+
+type logfWriter func(string, ...any)
+
+func (f logfWriter) Write(p []byte) (int, error) {
+	f("mtproto: %s", strings.TrimSpace(string(p)))
+	return len(p), nil
+}
 
 // MTProto proxy for Telegram (fake-TLS, mtg's engine) inside the agent.
 // It has one shared secret per inbound — the link is handed out like a
@@ -63,7 +76,7 @@ func startMTP(in mtpInbound, logf func(string, ...any)) (*mtpServer, error) {
 	s := &mtpServer{}
 	p, err := mtglib.NewProxy(mtglib.ProxyOpts{
 		Secret: secret, Network: ntw, AntiReplayCache: antireplay.NewStableBloomFilter(1<<20, 0.001),
-		IPBlocklist: ipblocklist.NewNoop(), IPAllowlist: ipblocklist.NewNoop(), EventStream: trafficStream{s}, Logger: logger.NewNoopLogger(),
+		IPBlocklist: ipblocklist.NewNoop(), IPAllowlist: ipblocklist.NewNoop(), EventStream: trafficStream{s}, Logger: logger.NewZeroLogger(zerolog.New(logfWriter(logf)).Level(mtpLogLevel).With().Str("inbound", in.Tag).Logger()),
 		Concurrency: 8192, IdleTimeout: 5 * time.Minute, TolerateTimeSkewness: 5 * time.Second, DomainFrontingPort: 443,
 	})
 	if err != nil {
@@ -89,7 +102,14 @@ func startMTP(in mtpInbound, logf func(string, ...any)) (*mtpServer, error) {
 
 func (s *mtpServer) take() (up, down uint64) { return s.up.Swap(0), s.down.Swap(0) }
 
+// close stops accepting first, then lets open streams finish for a few
+// seconds; a stuck stream never holds up the agent.
 func (s *mtpServer) close() {
-	s.proxy.Shutdown()
 	s.ln.Close()
+	done := make(chan struct{})
+	go func() { s.proxy.Shutdown(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+	}
 }

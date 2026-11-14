@@ -8,9 +8,13 @@ import (
 	"strconv"
 	"testing"
 	"time"
+
+	"github.com/rs/zerolog"
 )
 
 func TestMTProtoStarts(t *testing.T) {
+	mtpLogLevel = zerolog.InfoLevel
+	defer func() { mtpLogLevel = zerolog.WarnLevel }()
 	key := make([]byte, 16)
 	_, _ = rand.Read(key)
 	ln, _ := net.Listen("tcp", "127.0.0.1:0")
