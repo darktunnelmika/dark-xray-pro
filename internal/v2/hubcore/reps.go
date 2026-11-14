@@ -92,6 +92,7 @@ type Rep struct {
 	Clients        int
 	Policy         RepPolicy
 	ParentID       string
+	ManageProducts bool
 }
 
 func (s *Store) PutRep(ctx context.Context, r Rep) error {
@@ -105,7 +106,7 @@ ON CONFLICT(id) DO UPDATE SET name=excluded.name, enabled=excluded.enabled`, r.I
 
 func (s *Store) Reps(ctx context.Context) ([]Rep, error) {
 	rows, err := s.ro.QueryContext(ctx, `SELECT r.id,r.name,r.enabled,r.volume_credit,r.unlimited_units,
-(SELECT COUNT(*) FROM clients c WHERE c.rep_id=r.id),r.parent_id,`+policyCols+` FROM reps r ORDER BY r.id`)
+(SELECT COUNT(*) FROM clients c WHERE c.rep_id=r.id),r.parent_id,r.manage_products,`+policyCols+` FROM reps r ORDER BY r.id`)
 	if err != nil {
 		return nil, err
 	}
@@ -113,7 +114,7 @@ func (s *Store) Reps(ctx context.Context) ([]Rep, error) {
 	var out []Rep
 	for rows.Next() {
 		var r Rep
-		p, err := scanPolicy(rows, &r.ID, &r.Name, &r.Enabled, &r.VolumeCredit, &r.UnlimitedUnits, &r.Clients, &r.ParentID)
+		p, err := scanPolicy(rows, &r.ID, &r.Name, &r.Enabled, &r.VolumeCredit, &r.UnlimitedUnits, &r.Clients, &r.ParentID, &r.ManageProducts)
 		if err != nil {
 			return nil, err
 		}

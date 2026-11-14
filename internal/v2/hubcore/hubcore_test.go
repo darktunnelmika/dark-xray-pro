@@ -880,3 +880,86 @@ func TestSubSellers(t *testing.T) {
 		t.Fatalf("credit leaked: %d", total)
 	}
 }
+
+func TestShopProductsAndOrders(t *testing.T) {
+	s, now := newStore(t)
+	ctx := context.Background()
+	seed(t, s)
+	owner := Principal{User: "owner", Role: "owner"}
+	_ = s.PutRep(ctx, Rep{ID: "ali", Name: "Ali", Enabled: true})
+	_ = s.AdjustCredit(ctx, "owner", "ali", 10<<30, 0, "")
+	rep := Principal{User: "ali-login", Role: "rep", RepID: "ali"}
+	// Owner product, published, sold and fulfilled.
+	op := Product{ID: "gold", Name: "Gold 50GB", Plan: "volume", GB: 50, Days: 30, MaxIPs: 2, Inbounds: []string{"de-vless"}, Price: 150000, Status: "published", FirstUse: true}
+	if err := s.PutProduct(ctx, owner, op); err != nil {
+		t.Fatal(err)
+	}
+	id, err := s.CreateOrder(ctx, owner, "gold", "@buyer", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	email, err := s.FulfillOrder(ctx, owner, id)
+	if err != nil || email != "gold-1" {
+		t.Fatal(email, err)
+	}
+	if _, err := s.FulfillOrder(ctx, owner, id); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("double fulfill: %v", err)
+	}
+	// Renewal adds 30 days and 50 GB.
+	rid, _ := s.CreateOrder(ctx, owner, "gold", "@buyer", "gold-1", "renew")
+	if _, err := s.FulfillOrder(ctx, owner, rid); err != nil {
+		t.Fatal(err)
+	}
+	list, _ := s.Clients(ctx)
+	for _, c := range list {
+		if c.Email == "gold-1" && (c.VolumeBytes != 100<<30 || c.DurationSeconds != 60*86400) {
+			t.Fatalf("renewal %+v", c.Client)
+		}
+	}
+	// A representative without the grant cannot create products.
+	rp := Product{ID: "ali-5", Name: "Ali 5GB", Plan: "volume", GB: 5, Days: 30, Inbounds: []string{"de-vless"}, Price: 30000, Status: "published"}
+	if err := s.PutProduct(ctx, rep, rp); !errors.Is(err, ErrPolicy) {
+		t.Fatalf("no grant: %v", err)
+	}
+	_ = s.SetManageProducts(ctx, "ali", true)
+	if err := s.PutProduct(ctx, rep, rp); err != nil {
+		t.Fatal(err)
+	}
+	// The rep cannot see or sell the owner's product, and pays its own orders from credit.
+	if _, err := s.CreateOrder(ctx, rep, "gold", "", "", ""); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("foreign product: %v", err)
+	}
+	prods, _ := s.Products(ctx, rep, false)
+	if len(prods) != 1 || prods[0].ID != "ali-5" {
+		t.Fatalf("%+v", prods)
+	}
+	big := rp
+	big.ID, big.GB = "ali-20", 20
+	if err := s.PutProduct(ctx, rep, big); err != nil {
+		t.Fatal(err)
+	}
+	o1, _ := s.CreateOrder(ctx, rep, "ali-20", "", "", "")
+	if _, err := s.FulfillOrder(ctx, rep, o1); !errors.Is(err, ErrCredit) {
+		t.Fatalf("over credit: %v", err)
+	}
+	o2, _ := s.CreateOrder(ctx, rep, "ali-5", "", "", "")
+	if _, err := s.FulfillOrder(ctx, rep, o2); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CancelOrder(ctx, rep, o1); err != nil {
+		t.Fatal(err)
+	}
+	reps, _ := s.Reps(ctx)
+	if reps[0].VolumeCredit != 5<<30 {
+		t.Fatalf("credit %d", reps[0].VolumeCredit)
+	}
+	orders, _ := s.Orders(ctx, rep, "", 0)
+	if len(orders) != 2 || orders[0].Status != "fulfilled" && orders[0].Status != "cancelled" {
+		t.Fatalf("%+v", orders)
+	}
+	all, _ := s.Orders(ctx, owner, "fulfilled", 0)
+	if len(all) != 3 {
+		t.Fatalf("owner fulfilled %d", len(all))
+	}
+	_ = now
+}

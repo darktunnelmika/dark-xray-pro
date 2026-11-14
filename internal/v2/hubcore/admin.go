@@ -85,6 +85,9 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 					pol.PriceGB, pol.PriceUnit = 0, 0 // sale prices are the owner's business
 					out["policy"] = pol
 					out["can_sell"] = rp.ParentID == ""
+					var mp bool
+					_ = s.ro.QueryRowContext(r.Context(), `SELECT manage_products FROM reps WHERE id=?`, rp.ID).Scan(&mp)
+					out["manage_products"] = mp
 				}
 			}
 		}
@@ -220,6 +223,55 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 			return
 		}
 		err := s.SetSellerPolicy(r.Context(), who(r).RepID, r.PathValue("id"), pol)
+		reply(w, map[string]bool{"ok": err == nil}, err)
+	}))
+	// Shop: owners see everything; a representative its own products/orders.
+	mux.HandleFunc("GET /api/v2/shop/products", member(func(w http.ResponseWriter, r *http.Request) {
+		list, err := s.Products(r.Context(), who(r), r.URL.Query().Has("published"))
+		reply(w, list, err)
+	}))
+	mux.HandleFunc("PUT /api/v2/shop/products/{id}", member(func(w http.ResponseWriter, r *http.Request) {
+		var p Product
+		if !decode(w, r, &p) {
+			return
+		}
+		p.ID = r.PathValue("id")
+		err := s.PutProduct(r.Context(), who(r), p)
+		reply(w, map[string]bool{"ok": err == nil}, err)
+	}))
+	mux.HandleFunc("GET /api/v2/shop/orders", member(func(w http.ResponseWriter, r *http.Request) {
+		list, err := s.Orders(r.Context(), who(r), r.URL.Query().Get("status"), 200)
+		reply(w, list, err)
+	}))
+	mux.HandleFunc("POST /api/v2/shop/orders", member(func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			ProductID   string `json:"product_id"`
+			Buyer       string `json:"buyer"`
+			ClientEmail string `json:"client_email"`
+			Note        string `json:"note"`
+		}
+		if !decode(w, r, &in) {
+			return
+		}
+		id, err := s.CreateOrder(r.Context(), who(r), in.ProductID, in.Buyer, in.ClientEmail, in.Note)
+		reply(w, map[string]int64{"id": id}, err)
+	}))
+	mux.HandleFunc("POST /api/v2/shop/orders/{id}/fulfill", member(func(w http.ResponseWriter, r *http.Request) {
+		id, _ := strconv.ParseInt(r.PathValue("id"), 10, 64)
+		email, err := s.FulfillOrder(r.Context(), who(r), id)
+		reply(w, map[string]string{"client_email": email}, err)
+	}))
+	mux.HandleFunc("POST /api/v2/shop/orders/{id}/cancel", member(func(w http.ResponseWriter, r *http.Request) {
+		id, _ := strconv.ParseInt(r.PathValue("id"), 10, 64)
+		err := s.CancelOrder(r.Context(), who(r), id)
+		reply(w, map[string]bool{"ok": err == nil}, err)
+	}))
+	mux.HandleFunc("PUT /api/v2/admin/reps/{id}/products", guard(func(w http.ResponseWriter, r *http.Request) {
+		var in struct{ Enabled bool }
+		if !decode(w, r, &in) {
+			return
+		}
+		err := s.SetManageProducts(r.Context(), r.PathValue("id"), in.Enabled)
 		reply(w, map[string]bool{"ok": err == nil}, err)
 	}))
 	mux.HandleFunc("GET /api/v2/admin/clients/{email}/daily", member(func(w http.ResponseWriter, r *http.Request) {

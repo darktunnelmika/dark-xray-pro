@@ -40,6 +40,11 @@ const I18N = {
     sellers: "Sub-sellers", transferCredit: "Transfer credit", subOf: "under", kind_transfer: "Transfer",
     sellersHint: "Open sellers under you and give them part of your credit. Their limits can only be tighter than yours.",
     transferHint: "Moves credit from your balance to this seller. Negative numbers take unused credit back.",
+    shop: "Shop", products: "Products", orders: "Orders", newOrder: "New order", product: "Product", price: "Price", buyer: "Buyer (name, @telegram, phone)",
+    renewClient: "Renew an existing client (optional)", fulfill: "Deliver", cancelOrder: "Cancel", status_pending: "Pending", status_fulfilled: "Delivered",
+    status_cancelled: "Cancelled", status_draft: "Draft", status_published: "Published", status_archived: "Archived", statusLabel: "Status", seller: "Seller",
+    delivered: "Delivered to {x}", manageProducts: "May create own shop products", shopHint: "Orders are recorded here; delivering one creates (or renews) the client in one step. A reseller's orders are paid from that reseller's credit.",
+    newClient: "New client", firstUseShort: "starts on first use",
     when: "When", who: "By", what: "What", more: "Load more", totalLast30: "{v} in the last 30 days",
     health: "Health (24h)", cpu: "CPU", ram: "RAM", disk: "Disk", net: "Network", uptime: "Uptime", inRate: "in", outRate: "out", noData: "No samples yet",
   },
@@ -83,6 +88,11 @@ const I18N = {
     sellers: "زیرفروشنده‌ها", transferCredit: "انتقال اعتبار", subOf: "زیرمجموعهٔ", kind_transfer: "انتقال",
     sellersHint: "برای خودتان زیرفروشنده بسازید و بخشی از اعتبارتان را به او بدهید. محدودیت‌های او فقط می‌تواند سخت‌تر از شما باشد.",
     transferHint: "اعتبار را از موجودی شما به این فروشنده منتقل می‌کند. عدد منفی اعتبار مصرف‌نشده را برمی‌گرداند.",
+    shop: "فروشگاه", products: "محصولات", orders: "سفارش‌ها", newOrder: "سفارش جدید", product: "محصول", price: "قیمت", buyer: "خریدار (نام، آیدی تلگرام، تلفن)",
+    renewClient: "تمدید کلاینت موجود (اختیاری)", fulfill: "تحویل", cancelOrder: "لغو", status_pending: "در انتظار", status_fulfilled: "تحویل شد",
+    status_cancelled: "لغو شد", status_draft: "پیش‌نویس", status_published: "منتشر", status_archived: "بایگانی", statusLabel: "وضعیت", seller: "فروشنده",
+    delivered: "تحویل شد: {x}", manageProducts: "اجازهٔ ساخت محصول فروشگاه", shopHint: "سفارش‌ها اینجا ثبت می‌شوند؛ با «تحویل» کلاینت یک‌جا ساخته (یا تمدید) می‌شود. سفارش‌های نماینده از اعتبار همان نماینده پرداخت می‌شود.",
+    newClient: "کلاینت جدید", firstUseShort: "شروع از اولین اتصال",
     when: "زمان", who: "توسط", what: "شرح", more: "بیشتر", totalLast30: "{v} در ۳۰ روز اخیر",
     health: "سلامت (۲۴ ساعت)", cpu: "پردازنده", ram: "رم", disk: "دیسک", net: "شبکه", uptime: "روشن بودن", inRate: "ورودی", outRate: "خروجی", noData: "هنوز نمونه‌ای نیست",
   },
@@ -160,11 +170,16 @@ function confirmAction(text) {
 }
 
 // ---------- Views ----------
-const allRoutes = { dashboard: viewDashboard, clients: viewClients, groups: viewGroups, inbounds: viewInbounds, nodes: viewNodes, reps: viewReps, finance: viewFinance, activity: viewActivity, settings: viewSettings };
+const allRoutes = { dashboard: viewDashboard, clients: viewClients, groups: viewGroups, inbounds: viewInbounds, nodes: viewNodes, reps: viewReps, shop: viewShop, finance: viewFinance, activity: viewActivity, settings: viewSettings };
 let me = null;
 let routes = allRoutes;
 function routesFor(m) {
-  if (m && m.role === "rep") return m.can_sell ? { clients: viewClients, sellers: viewSellers, activity: viewActivity, settings: viewSettings } : { clients: viewClients, activity: viewActivity, settings: viewSettings };
+  if (m && m.role === "rep") {
+    const r = { clients: viewClients };
+    if (m.can_sell) r.sellers = viewSellers;
+    r.shop = viewShop; r.activity = viewActivity; r.settings = viewSettings;
+    return r;
+  }
   return allRoutes;
 }
 
@@ -773,7 +788,7 @@ function policyForm(r, inbounds) {
   const p = r.Policy || {};
   const num = (v) => h("input", { type: "number", min: "0", step: "1", value: v || 0 });
   const box = (v) => h("input", { type: "checkbox", checked: !!v });
-  const f = { mc: num(p.MaxClients), md: num(p.MaxDays), mg: num(p.MaxClientGB), au: box(p.AllowUnlimited), cd: box(p.CanDelete), ru: box(p.RefundUnused), pg: num(p.PriceGB), pu: num(p.PriceUnit) };
+  const f = { mc: num(p.MaxClients), md: num(p.MaxDays), mg: num(p.MaxClientGB), au: box(p.AllowUnlimited), cd: box(p.CanDelete), ru: box(p.RefundUnused), pg: num(p.PriceGB), pu: num(p.PriceUnit), mp: box(r.ManageProducts) };
   const allowed = new Set(p.Inbounds || []);
   const boxes = (inbounds || []).map((ib) => h("label", { class: "check" }, h("input", { type: "checkbox", value: ib.tag, checked: allowed.has(ib.tag) }), `${ib.tag} · ${ib.node_id}`));
   const err = h("div", { class: "error" });
@@ -785,6 +800,7 @@ function policyForm(r, inbounds) {
         AllowUnlimited: f.au.checked, CanDelete: f.cd.checked, RefundUnused: f.ru.checked,
         Inbounds: boxes.map((b) => b.querySelector("input")).filter((i) => i.checked).map((i) => i.value),
         PriceGB: +f.pg.value || 0, PriceUnit: +f.pu.value || 0 }));
+      if (me.role === "owner" && f.mp.checked !== !!r.ManageProducts) await api("PUT", `/api/v2/admin/reps/${encodeURIComponent(r.ID)}/products`, { Enabled: f.mp.checked });
       document.getElementById("modal").close("save"); route();
     } catch (x) { err.textContent = x.message; }
   } }, t("save"));
@@ -795,6 +811,7 @@ function policyForm(r, inbounds) {
     h("label", { class: "check" }, f.au, t("allowUnlimited")),
     h("label", { class: "check" }, f.cd, t("canDelete")),
     h("label", { class: "check" }, f.ru, t("refundUnused")),
+    me.role === "owner" ? h("label", { class: "check" }, f.mp, t("manageProducts")) : null,
     h("fieldset", { class: "form", style: "border:0;padding:0;margin:0" }, h("legend", { class: "small muted" }, t("allowedInbounds")), boxes),
     me.role === "rep" ? null : h("div", { class: "two" }, lab("priceGB", f.pg), lab("priceUnit", f.pu)), err), [save]);
 }
@@ -815,6 +832,111 @@ function paymentForm(r) {
 }
 
 function money(n) { return fmtNum(n); }
+
+async function viewShop() {
+  const owner = me.role === "owner";
+  const [products, orders, inbounds, reps] = await Promise.all([
+    api("GET", "/api/v2/shop/products"), api("GET", "/api/v2/shop/orders"),
+    owner ? api("GET", "/api/v2/admin/inbounds") : api("GET", "/api/v2/rep/inbounds"),
+    owner ? api("GET", "/api/v2/admin/reps") : Promise.resolve([])]);
+  const canEdit = owner || me.manage_products;
+  const fmtTime = (u) => new Intl.DateTimeFormat(lang === "fa" ? "fa-IR" : "en-GB", { dateStyle: "short", timeStyle: "short" }).format(new Date(u * 1000));
+  const planText = (p) => `${p.plan === "unlimited" ? t("planUnlimited") : `${fmtNum(p.gb)} GB`} · ${fmtNum(p.days)}d${p.max_ips ? ` · IP ≤ ${fmtNum(p.max_ips)}` : ""}`;
+  const stCls = { published: "good", draft: "", archived: "bad", pending: "warn", fulfilled: "good", cancelled: "bad" };
+  const cards = products.map((p) => h("div", { class: "card item" },
+    h("div", { class: "head" }, h("span", { class: "name" }, p.name), h("span", { class: "badge" }, p.id),
+      owner && p.seller ? h("span", { class: "badge" }, `${t("seller")}: ${p.seller}`) : null,
+      h("span", { class: `badge spacer ${stCls[p.status]}` }, t(`status_${p.status}`))),
+    h("div", { class: "row small muted" }, h("span", {}, planText(p)), h("strong", { class: "spacer" }, money(p.price))),
+    h("div", { class: "row" },
+      p.status === "published" ? h("button", { onclick: () => orderForm(products, p.id) }, t("newOrder")) : null,
+      canEdit && p.status !== "archived" ? h("button", { class: "ghost", onclick: () => productForm(p, inbounds, reps) }, t("edit")) : null)));
+  const body = h("tbody", {}, orders.map((o) => h("tr", {},
+    h("td", { class: "small" }, `#${o.id}`, h("div", { class: "muted" }, fmtTime(o.created_unix))),
+    h("td", {}, o.product_name || o.product_id, owner && o.seller ? h("div", { class: "small muted" }, o.seller) : null),
+    h("td", { class: "small" }, o.buyer || "—", o.note ? h("div", { class: "muted" }, o.note) : null),
+    h("td", { class: "small mono" }, o.client_email ? `${o.renew ? "↻ " : ""}${o.client_email}` : t("newClient")),
+    h("td", {}, money(o.amount)),
+    h("td", {}, h("span", { class: `badge ${stCls[o.status]}` }, t(`status_${o.status}`))),
+    h("td", {}, o.status === "pending" ? h("div", { class: "row" },
+      h("button", { class: "primary", onclick: async () => {
+        const r = await guarded(() => api("POST", `/api/v2/shop/orders/${o.id}/fulfill`));
+        toast(t("delivered", { x: r.client_email })); route();
+      } }, t("fulfill")),
+      h("button", { class: "ghost danger", onclick: async () => { await guarded(() => api("POST", `/api/v2/shop/orders/${o.id}/cancel`)); route(); } }, t("cancelOrder"))) : null))));
+  return h("div", {},
+    h("div", { class: "row" }, h("h1", {}, t("shop")),
+      h("span", { class: "spacer" }), canEdit ? h("button", { onclick: () => productForm(null, inbounds, reps) }, `${t("add")} · ${t("product")}`) : null,
+      products.some((p) => p.status === "published") ? h("button", { class: "primary", onclick: () => orderForm(products) }, t("newOrder")) : null),
+    h("p", { class: "small muted" }, t("shopHint")),
+    h("h2", {}, t("products")),
+    h("div", { class: "list" }, cards.length ? cards : h("p", { class: "muted small" }, t("empty"))),
+    h("h2", { class: "section" }, t("orders")),
+    orders.length ? h("div", { class: "table-wrap" }, h("table", { class: "table" },
+      h("thead", {}, h("tr", {}, ["#", t("product"), t("buyer").split(" (")[0], t("clients"), t("price"), t("statusLabel"), ""].map((x) => h("th", {}, x)))), body))
+      : h("p", { class: "muted small" }, t("empty")));
+}
+
+function productForm(p, inbounds, reps) {
+  const owner = me.role === "owner";
+  const v = p || { id: "", name: "", plan: "volume", gb: 50, days: 30, max_ips: 2, inbounds: [], price: 0, status: "published", first_use: true, seller: "" };
+  const id = h("input", { required: true, pattern: "[a-z0-9][a-z0-9._-]{0,62}", value: v.id, disabled: !!p });
+  const name = h("input", { required: true, maxlength: "120", value: v.name });
+  const plan = h("select", {}, h("option", { value: "volume", selected: v.plan === "volume" }, t("planVolume")), h("option", { value: "unlimited", selected: v.plan === "unlimited" }, t("planUnlimited")));
+  const gb = h("input", { type: "number", min: "1", value: v.gb || 50 });
+  const days = h("input", { type: "number", min: "1", max: "3650", required: true, value: v.days });
+  const ips = h("input", { type: "number", min: "0", value: v.max_ips });
+  const price = h("input", { type: "number", min: "0", step: "1", value: v.price });
+  const first = h("input", { type: "checkbox", checked: v.first_use });
+  const status = h("select", {}, ["draft", "published", "archived"].map((x) => h("option", { value: x, selected: v.status === x }, t(`status_${x}`))));
+  const seller = owner ? h("select", {}, h("option", { value: "" }, t("ownerSelf")), (reps || []).map((r) => h("option", { value: r.ID, selected: v.seller === r.ID }, r.Name || r.ID))) : null;
+  const boxes = (inbounds || []).map((ib) => h("label", { class: "check" }, h("input", { type: "checkbox", value: ib.tag, checked: (v.inbounds || []).includes(ib.tag) || (!p && inbounds.length === 1) }), `${ib.tag} · ${ib.node_id}`));
+  const gbRow = h("label", {}, h("span", {}, "GB"), gb);
+  const sync = () => { gbRow.hidden = plan.value === "unlimited"; };
+  plan.addEventListener("change", sync); sync();
+  const err = h("div", { class: "error" });
+  const save = h("button", { class: "primary", value: "save", onclick: async (e) => {
+    e.preventDefault(); err.textContent = "";
+    for (const f of [id, name, days]) if (!f.reportValidity()) return;
+    try {
+      await guarded(() => api("PUT", `/api/v2/shop/products/${encodeURIComponent(id.value)}`, {
+        name: name.value, plan: plan.value, gb: +gb.value || 0, days: +days.value, max_ips: +ips.value || 0, price: Math.round(+price.value || 0),
+        status: status.value, first_use: first.checked, seller: seller ? seller.value : "",
+        inbounds: boxes.map((b) => b.querySelector("input")).filter((i) => i.checked).map((i) => i.value) }));
+      document.getElementById("modal").close("save"); route();
+    } catch (x) { err.textContent = x.message; }
+  } }, t("save"));
+  openModal(p ? `${t("edit")} · ${p.name}` : `${t("add")} · ${t("product")}`, h("div", { class: "form" },
+    h("div", { class: "two" }, h("label", {}, h("span", {}, t("tag")), id), h("label", {}, h("span", {}, t("name")), name)),
+    h("div", { class: "two" }, h("label", {}, h("span", {}, t("plan")), plan), gbRow),
+    h("div", { class: "two" }, h("label", {}, h("span", {}, t("days").split(" (")[0]), days), h("label", {}, h("span", {}, t("maxIPs")), ips)),
+    h("label", { class: "check" }, first, t("firstUse")),
+    h("div", { class: "two" }, h("label", {}, h("span", {}, t("price")), price), h("label", {}, h("span", {}, t("statusLabel")), status)),
+    seller ? h("label", {}, h("span", {}, t("seller")), seller) : null,
+    h("fieldset", { class: "form", style: "border:0;padding:0;margin:0" }, h("legend", { class: "small muted" }, t("assignInbounds")), boxes), err), [save]);
+}
+
+async function orderForm(products, preselect) {
+  const list = products.filter((p) => p.status === "published");
+  const clients = await api("GET", "/api/v2/admin/clients");
+  const prod = h("select", {}, list.map((p) => h("option", { value: p.id, selected: p.id === preselect }, `${p.name} · ${money(p.price)}`)));
+  const buyer = h("input", { maxlength: "200", autofocus: true });
+  const renew = h("select", {}, h("option", { value: "" }, t("newClient")), clients.map((c) => h("option", { value: c.Email }, c.Email)));
+  const note = h("input", { maxlength: "1000" });
+  const err = h("div", { class: "error" });
+  const mk = (deliver) => h("button", { class: deliver ? "primary" : "", value: "save", onclick: async (e) => {
+    e.preventDefault(); err.textContent = "";
+    try {
+      const r = await api("POST", "/api/v2/shop/orders", { product_id: prod.value, buyer: buyer.value, client_email: renew.value, note: note.value });
+      if (deliver) { const d = await api("POST", `/api/v2/shop/orders/${r.id}/fulfill`); toast(t("delivered", { x: d.client_email })); } else toast(t("saved"));
+      document.getElementById("modal").close("save"); route();
+    } catch (x) { err.textContent = x.message; }
+  } }, deliver ? `${t("save")} + ${t("fulfill")}` : t("save"));
+  openModal(t("newOrder"), h("div", { class: "form" },
+    h("label", {}, h("span", {}, t("product")), prod), h("label", {}, h("span", {}, t("buyer")), buyer),
+    h("label", {}, h("span", {}, t("renewClient")), renew), h("label", {}, h("span", {}, t("note")), note), err), [mk(false), mk(true)]);
+}
+
 
 async function viewFinance() {
   const days = new URLSearchParams(location.hash.split("?")[1] || "").get("days") ?? "30";
