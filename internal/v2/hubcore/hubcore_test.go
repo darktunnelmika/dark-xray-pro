@@ -720,6 +720,7 @@ func TestPresetsRenderForEveryProtocol(t *testing.T) {
 			Protocol string `json:"protocol"`
 			Settings struct {
 				Clients []map[string]any `json:"clients"`
+				Peers   []map[string]any `json:"peers"`
 			} `json:"settings"`
 		} `json:"inbounds"`
 	}
@@ -727,6 +728,9 @@ func TestPresetsRenderForEveryProtocol(t *testing.T) {
 		t.Fatalf("%v %d", err, len(parsed.Inbounds))
 	}
 	for _, in := range parsed.Inbounds[1:] {
+		if in.Protocol == "wireguard" {
+			in.Settings.Clients = in.Settings.Peers // WireGuard lists peers
+		}
 		if len(in.Settings.Clients) != 1 || in.Settings.Clients[0]["email"] != "all" {
 			t.Fatalf("%s clients %v", in.Protocol, in.Settings.Clients)
 		}
