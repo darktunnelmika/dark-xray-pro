@@ -207,7 +207,7 @@ function confirmAction(text, label) {
 }
 
 // ---------- Views ----------
-const allRoutes = { dashboard: viewDashboard, clients: viewClients, groups: viewGroups, inbounds: viewInbounds, nodes: viewNodes, routing: viewRouting, reps: viewReps, shop: viewShop, finance: viewFinance, activity: viewActivity, staff: viewStaff, settings: viewSettings };
+const allRoutes = { dashboard: viewDashboard, online: viewOnline, clients: viewClients, groups: viewGroups, inbounds: viewInbounds, nodes: viewNodes, routing: viewRouting, reps: viewReps, shop: viewShop, finance: viewFinance, activity: viewActivity, staff: viewStaff, settings: viewSettings };
 let me = null;
 let routes = allRoutes;
 function fullOwner() { return me && me.role === "owner" && !me.level; }
@@ -218,7 +218,7 @@ function routesFor(m) {
     return r;
   }
   if (m && m.role === "rep") {
-    const r = { clients: viewClients };
+    const r = { clients: viewClients, online: viewOnline };
     if (m.can_sell) r.sellers = viewSellers;
     r.shop = viewShop; r.activity = viewActivity; r.settings = viewSettings;
     return r;
@@ -293,13 +293,138 @@ function viewLogin() {
   return h("div", { class: "login" }, h("div", { class: "card" }, h("h1", {}, mark(), "Dark VPN"), form));
 }
 
+// ---------- HUB health, online now, traffic per node ----------
+const S3 = {
+  fa: { hubTitle: "سرور هاب", cpu: "پردازنده", ram: "حافظه", disk: "دیسک", db: "دیتابیس", backups: "بکاپ‌ها ({n})", version: "نسخه", up: "روشن از",
+    diskWarn: "دیسک سرور هاب {p}٪ پر است. اگر پر شود هاب نمی‌تواند مصرف کاربرها و تغییرات را ذخیره کند؛ فایل‌های اضافهٔ سرور را پاک کنید. هر روز یک بار در تلگرام هم یادآوری می‌شود.",
+    ramWarn: "حافظهٔ سرور هاب {p}٪ پر است.",
+    online: "آنلاین", onlineHint: "کاربرهایی که همین حالا وصل‌اند (چند ثانیه یک بار تازه می‌شود). روی نام بزنید تا صفحهٔ کاربر باز شود.", onlineNone: "الان کسی وصل نیست.",
+    onSearch: "جستجوی نام یا IP", onNode: "نود", onIPs: "IPها", onToday: "امروز روی این نود", onSeen: "آخرین گزارش", onTotal: "{n} کاربر روی {m} نود",
+    ntTitle: "ترافیک هر نود", ntHint: "مجموع مصرف کاربرها روی هر نود در هر روز.", ntDays: "{n} روز", updAll: "به‌روزرسانی همهٔ عامل‌ها ({n})",
+    updAllAsk: "عامل {n} نود به آخرین نسخه به‌روز شود؟ هر نود چند ثانیه Xray را دوباره بالا می‌آورد.", updStarted: "به‌روزرسانی {n} نود شروع شد" },
+  en: { hubTitle: "HUB server", cpu: "CPU", ram: "Memory", disk: "Disk", db: "Database", backups: "Backups ({n})", version: "Version", up: "Up for",
+    diskWarn: "The HUB's disk is {p}% full. When it fills up the HUB cannot save usage or changes — delete unneeded files on the server. A reminder also goes to Telegram once a day.",
+    ramWarn: "The HUB's memory is {p}% used.",
+    online: "Online", onlineHint: "Clients connected right now (refreshes every few seconds). Tap a name to open the client.", onlineNone: "Nobody is connected right now.",
+    onSearch: "Search name or IP", onNode: "Node", onIPs: "IPs", onToday: "Today on this node", onSeen: "Last report", onTotal: "{n} clients on {m} nodes",
+    ntTitle: "Traffic per node", ntHint: "Client traffic summed per node and day.", ntDays: "{n} days", updAll: "Update all agents ({n})",
+    updAllAsk: "Update the agent on {n} nodes to the latest version? Each node restarts Xray for a few seconds.", updStarted: "Update started on {n} nodes" },
+};
+const s3 = (k, vars) => { let s = (S3[lang] || S3.en)[k] ?? S3.en[k] ?? k; for (const [a, b] of Object.entries(vars || {})) s = s.replaceAll(`{${a}}`, b); return s; };
+I18N.en.online = S3.en.online; I18N.fa.online = S3.fa.online;
+ICONS.online = "M5 12.55a11 11 0 0 1 14.08 0M1.42 9a16 16 0 0 1 21.16 0M8.53 16.11a6 6 0 0 1 6.95 0M12 20h.01";
+
+function systemWarnings(si) {
+  return (si.warnings || []).map((w) => {
+    const [k, p] = w.split(":");
+    return h("div", { class: "banner bad", role: "alert" }, s3(k === "disk" ? "diskWarn" : "ramWarn", { p: fmtNum(+p) }));
+  });
+}
+
+function hubHealthCard(si) {
+  const pct = (a, b) => (b ? (100 * a) / b : 0);
+  return h("div", { class: "card form" },
+    h("div", { class: "row" }, h("h2", {}, s3("hubTitle")), h("span", { class: "badge spacer", dir: "ltr" }, `${si.version}${si.commit ? ` · ${si.commit}` : ""}`)),
+    h("div", { class: "meters" },
+      meter(`${s3("cpu")} (${fmtNum(si.cores)})`, si.cpu_percent, ltr(`${fmtNum(si.cpu_percent)}% · load ${fmtNum(si.load1)}`)),
+      meter(s3("ram"), pct(si.ram_used, si.ram_total), ltr(`${bytes(si.ram_used)} / ${bytes(si.ram_total)}`)),
+      meter(s3("disk"), pct(si.disk_used, si.disk_total), ltr(`${bytes(si.disk_used)} / ${bytes(si.disk_total)}`))),
+    h("div", { class: "row small muted" },
+      h("span", {}, `${s3("db")}: ${bytes(si.db_size)}`), h("span", {}, `${s3("backups", { n: fmtNum(si.backups) })}: ${bytes(si.backups_size)}`),
+      h("span", { class: "spacer" }, `${s3("up")} ${dur(si.uptime_sec)}`)));
+}
+
+async function viewOnline() {
+  const box = h("div", { class: "list" });
+  const sum = h("span", { class: "badge spacer" });
+  const q = h("input", { type: "search", placeholder: s3("onSearch") });
+  let rows = [];
+  const fmtTime = (u) => new Intl.DateTimeFormat(lang === "fa" ? "fa-IR" : "en-GB", { timeStyle: "medium" }).format(new Date(u * 1000));
+  const draw = () => {
+    const f = q.value.trim().toLowerCase();
+    const list = rows.filter((o) => !f || o.email.toLowerCase().includes(f) || o.ips.some((ip) => ip.includes(f)));
+    const people = new Set(rows.map((o) => o.email)), nodes = new Set(rows.map((o) => o.node_id));
+    sum.textContent = s3("onTotal", { n: fmtNum(people.size), m: fmtNum(nodes.size) });
+    fill(box, list.length ? h("div", { class: "table-wrap card" }, h("table", { class: "dtable" },
+      h("thead", {}, h("tr", {}, h("th", {}, t("clients")), h("th", {}, s3("onNode")), h("th", {}, s3("onIPs")), h("th", {}, s3("onToday")), h("th", {}, s3("onSeen")))),
+      h("tbody", {}, list.map((o) => h("tr", {},
+        h("td", {}, h("span", { class: "dot on" }), " ", h("a", { href: `#/client?e=${encodeURIComponent(o.email)}` }, o.email)),
+        h("td", {}, h("span", { class: "badge" }, o.node_id)),
+        h("td", { dir: "ltr", class: "small" }, o.ips.length ? o.ips.join("  ") : "—"),
+        h("td", {}, bytes(o.today)), h("td", { class: "small muted" }, fmtTime(o.seen))))))) : h("p", { class: "muted" }, rows.length ? t("empty") : s3("onlineNone")));
+  };
+  q.addEventListener("input", draw);
+  const seq = routeSeq;
+  const load = async () => {
+    if (seq !== routeSeq) return;
+    try { rows = await api("GET", "/api/v2/admin/online"); draw(); } catch {}
+    setTimeout(load, 8000);
+  };
+  await load();
+  return h("div", { class: "form" }, h("div", { class: "row" }, h("h1", {}, s3("online")), sum), h("p", { class: "small muted" }, s3("onlineHint")), q, box);
+}
+
+const NODE_COLORS = ["#2de2e6", "#9b5cff", "#3ef0a1", "#ffc857", "#ff4d8d", "#5aa9ff", "#ff8f4d", "#c0f04d"];
+function nodeTrafficCard(nodes) {
+  const body = h("div", {});
+  let days = 14;
+  const load = async () => {
+    const rows = await api("GET", `/api/v2/admin/nodes/traffic?days=${days}`).catch(() => []);
+    const ids = [...new Set([...nodes.map((n) => n.ID), ...rows.map((r) => r.node_id)])];
+    const color = (id) => NODE_COLORS[ids.indexOf(id) % NODE_COLORS.length];
+    const dayList = [];
+    for (let i = days - 1; i >= 0; i--) dayList.push(new Date(Date.now() - i * 86400000).toISOString().slice(0, 10));
+    const by = {}; for (const r of rows) (by[r.day] ||= {})[r.node_id] = r.up + r.down;
+    const max = Math.max(1, ...dayList.map((d) => Object.values(by[d] || {}).reduce((a, b) => a + b, 0)));
+    const W = 1100, H = 180, bw = W / dayList.length;
+    const svg = svgEl("svg", { viewBox: `0 0 ${W} ${H + 20}`, class: "bars", role: "img", "aria-label": s3("ntTitle") });
+    for (let k = 0; k <= 4; k++) svg.append(svgEl("line", { x1: 0, x2: W, y1: 4 + ((H - 4) * k) / 4, y2: 4 + ((H - 4) * k) / 4, class: "grid-line" }));
+    const step = Math.max(1, Math.round(dayList.length / 7));
+    dayList.forEach((d, i) => {
+      let y = H;
+      const parts = [];
+      for (const id of ids) {
+        const v = (by[d] || {})[id] || 0;
+        if (!v) continue;
+        const hgt = ((H - 6) * v) / max;
+        y -= hgt;
+        svg.append(svgEl("rect", { x: i * bw + bw * 0.18, y, width: bw * 0.64, height: Math.max(1, hgt), rx: 3, fill: color(id), opacity: ".85" }));
+        parts.push(`${id}: ${bytes(v)}`);
+      }
+      const hit = svgEl("rect", { x: i * bw, y: 0, width: bw, height: H, class: "bar-hit" });
+      const tt = svgEl("title", {}); tt.textContent = `${dayLabel(d, true)}\n${parts.join("\n") || "—"}`; hit.append(tt); svg.append(hit);
+      if ((dayList.length - 1 - i) % step === 0) { const lab = svgEl("text", { x: i * bw + bw / 2, y: H + 15, "text-anchor": "middle", class: "bar-label" }); lab.textContent = dayLabel(d); svg.append(lab); }
+    });
+    const total = (id) => rows.filter((r) => r.node_id === id).reduce((a, r) => a + r.up + r.down, 0);
+    fill(body, svg, h("div", { class: "row small" }, ids.map((id) => h("span", { class: "legend-item" }, h("i", { class: "sw", style: `background:${color(id)}` }), `${id} · ${bytes(total(id))}`))));
+  };
+  const seg = h("div", { class: "row tight spacer" }, [7, 14, 30].map((n) => h("button", { type: "button", class: n === days ? "chip on" : "chip", onclick: (e) => {
+    days = n; seg.querySelectorAll("button").forEach((b) => b.classList.toggle("on", b === e.target)); load();
+  } }, s3("ntDays", { n: fmtNum(n) }))));
+  load();
+  return h("div", { class: "card form" }, h("div", { class: "row" }, h("h2", {}, s3("ntTitle")), seg), h("p", { class: "small muted" }, s3("ntHint")), body);
+}
+
+function updateAllButton(nodes) {
+  const old = nodes.filter((n) => n.update_available && n.online);
+  if (!old.length) return null;
+  return h("button", { onclick: async () => {
+    if (!(await confirmAction(s3("updAllAsk", { n: fmtNum(old.length) }), s3("updAll", { n: fmtNum(old.length) })))) return;
+    let ok = 0;
+    for (const n of old) { try { await api("POST", `/api/v2/admin/nodes/${encodeURIComponent(n.ID)}/update`); ok++; } catch {} }
+    toast(s3("updStarted", { n: fmtNum(ok) })); setTimeout(route, 1500);
+  } }, s3("updAll", { n: fmtNum(old.length) }));
+}
+
 async function viewDashboard() {
   const [o, nodes, ins] = await Promise.all([api("GET", "/api/v2/admin/overview"), api("GET", "/api/v2/admin/nodes"), api("GET", "/api/v2/admin/insights?days=14")]);
+  const si = await api("GET", "/api/v2/admin/system").catch(() => null);
   const stat = (k, v) => h("div", { class: "card stat" }, h("div", { class: "v" }, v), h("div", { class: "k" }, t(k)));
   const fmtTime = (u) => new Intl.DateTimeFormat(lang === "fa" ? "fa-IR" : "en-GB", { dateStyle: "short", timeStyle: "short" }).format(new Date(u * 1000));
   const topMax = Math.max(1, ...ins.top.map((u) => u.bytes));
   return h("div", {},
     h("h1", {}, t("dashboard")),
+    si ? systemWarnings(si) : null,
     h("div", { class: "grid" },
       stat("nodesOnline", `${fmtNum(o.NodesOnline)} / ${fmtNum(o.Nodes)}`),
       stat("activeClients", `${fmtNum(o.ClientsActive)} / ${fmtNum(o.Clients)}`),
@@ -313,7 +438,8 @@ async function viewDashboard() {
       h("div", { class: "card form" }, h("h2", {}, t("recentEvents")),
         ins.events.length ? h("div", { class: "form" }, ins.events.map((e) => h("div", { class: "row small" },
           eventBadge(e.kind), h("span", {}, e.email), h("span", { class: "muted spacer" }, `${e.node_id} · ${fmtTime(e.unix)}`))))
-          : h("p", { class: "muted small" }, t("noEvents")))),
+          : h("p", { class: "muted small" }, t("noEvents"))),
+      si ? hubHealthCard(si) : null),
     h("div", { class: "list" }, (nodes || []).map((n) => nodeCard(n))));
 }
 
@@ -2168,7 +2294,8 @@ function inboundForm(nodes, presets, certs = []) {
 async function viewNodes() {
   const nodes = await api("GET", "/api/v2/admin/nodes");
   return h("div", {},
-    h("div", { class: "row" }, h("h1", {}, t("nodes")), h("button", { class: "primary spacer", onclick: nodeForm }, t("addNode"))),
+    h("div", { class: "row" }, h("h1", {}, t("nodes")), h("span", { class: "spacer" }), updateAllButton(nodes || []), h("button", { class: "primary", onclick: nodeForm }, t("addNode"))),
+    (nodes || []).length ? nodeTrafficCard(nodes) : null,
     h("div", { class: "list" }, (nodes || []).length ? nodes.map((n) => nodeCard(n, true)) : h("p", { class: "muted" }, t("empty"))));
 }
 
