@@ -322,3 +322,28 @@ func TestTUICPreset(t *testing.T) {
 		t.Fatal("xray has no tuic outbound")
 	}
 }
+
+func TestDeletedClientLeavesNoUsage(t *testing.T) {
+	s, _ := newStore(t)
+	ctx := context.Background()
+	seed(t, s)
+	if _, err := s.db.Exec(`INSERT OR REPLACE INTO client_usage(email,up,down,first_seen_unix,last_seen_unix) VALUES('alice',500,900,100,200)`); err != nil {
+		t.Fatal(err)
+	}
+	_, _ = s.db.Exec(`INSERT INTO online(email,node_id,ips,seen_unix) VALUES('alice','de-1','["1.1.1.1"]',200)`)
+	if err := s.DeleteClient(ctx, "alice"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.PutClient(ctx, Client{Email: "alice", Enabled: true, VolumeBytes: -1}); err != nil {
+		t.Fatal(err)
+	}
+	u, _ := s.ClientUsage(ctx, "alice")
+	if u.Up+u.Down != 0 || u.FirstSeen != 0 {
+		t.Fatalf("a new client with an old name must start clean: %+v", u)
+	}
+	var n int
+	_ = s.db.QueryRow(`SELECT COUNT(*) FROM online WHERE email='alice'`).Scan(&n)
+	if n != 0 {
+		t.Fatal("online row survived the delete")
+	}
+}

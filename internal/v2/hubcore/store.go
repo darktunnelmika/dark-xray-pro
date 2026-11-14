@@ -610,12 +610,33 @@ FROM clients c LEFT JOIN client_usage u ON u.email=c.email ORDER BY c.created_un
 
 // DeleteClient removes a client; its usage history is kept for accounting.
 func (s *Store) DeleteClient(ctx context.Context, email string) error {
-	r, err := s.db.ExecContext(ctx, `DELETE FROM clients WHERE email=?`, email)
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	r, err := tx.ExecContext(ctx, `DELETE FROM clients WHERE email=?`, email)
 	if err != nil {
 		return err
 	}
 	if n, _ := r.RowsAffected(); n == 0 {
 		return ErrNotFound
+	}
+	if err := forgetClient(ctx, tx, email); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// forgetClient removes a deleted client's live state, so a new client
+// with the same name starts clean (no old usage, first-use time, devices,
+// tunnel addresses or Telegram links). Daily history, events and the
+// credit ledger stay for reports.
+func forgetClient(ctx context.Context, tx *sql.Tx, email string) error {
+	for _, table := range []string{"client_usage", "online", "ip_log", "client_devices", "wg_ips", "tg_links", "usage_resets"} {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM `+table+` WHERE email=?`, email); err != nil && !strings.Contains(err.Error(), "no such table") {
+			return err
+		}
 	}
 	return nil
 }

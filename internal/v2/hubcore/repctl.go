@@ -215,6 +215,9 @@ COALESCE(u.up+u.down,0),COALESCE(u.first_seen_unix,0) FROM clients c LEFT JOIN c
 	if _, err := tx.ExecContext(ctx, `DELETE FROM clients WHERE email=?`, email); err != nil {
 		return 0, 0, err
 	}
+	if err := forgetClient(ctx, tx, email); err != nil {
+		return 0, 0, err
+	}
 	return refundBytes, refundUnits, tx.Commit()
 }
 
