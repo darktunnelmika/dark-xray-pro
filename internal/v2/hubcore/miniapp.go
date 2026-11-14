@@ -27,10 +27,10 @@ import (
 //go:embed miniapp
 var miniappFS embed.FS
 
-var tgToken, publicBase string
+var tgToken, miniBase string
 
 // SetPublicBase is the public subscription address (links in the Mini App).
-func SetPublicBase(b string) { publicBase = strings.TrimRight(b, "/") }
+func SetPublicBase(b string) { miniBase = strings.TrimRight(b, "/") }
 
 // SetTelegramToken enables the Mini App API (the bot token signs initData).
 func SetTelegramToken(tok string) { tgToken = strings.TrimSpace(tok) }
@@ -173,8 +173,8 @@ func (s *Store) MiniAppURL(ctx context.Context, subBase string) string {
 // registerMiniApp adds /app/ to the public mux.
 func registerMiniApp(mux *http.ServeMux, s *Store) {
 	base := func(r *http.Request) string {
-		if publicBase != "" {
-			return publicBase
+		if miniBase != "" {
+			return miniBase
 		}
 		scheme := "http"
 		if r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https") {
