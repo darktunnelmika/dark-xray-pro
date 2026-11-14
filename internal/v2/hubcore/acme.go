@@ -103,6 +103,10 @@ func (s *Store) PutACMESettings(ctx context.Context, a ACMESettings) error {
 	if dir != "" && !strings.HasPrefix(dir, "https://") {
 		return fmt.Errorf("%w: directory must be https", ErrInvalid)
 	}
+	if a.Email != s.Setting(ctx, "acme:email") {
+		// The account carries the contact; register again with the new one.
+		_ = s.SetSetting(ctx, "acme:account_key", "")
+	}
 	if err := s.SetSetting(ctx, "acme:email", a.Email); err != nil {
 		return err
 	}
@@ -193,9 +197,6 @@ func (s *Store) PutACMECert(ctx context.Context, id string, domains []string, me
 		}
 	default:
 		return fmt.Errorf("%w: method", ErrInvalid)
-	}
-	if s.ACMESettings(ctx).Email == "" {
-		return fmt.Errorf("%w: set an email for the certificate authority first", ErrInvalid)
 	}
 	_, err := s.db.ExecContext(ctx, `INSERT INTO acme_certs(id,domains,method,node_id,status) VALUES(?,?,?,?,'pending')
 ON CONFLICT(id) DO UPDATE SET domains=excluded.domains, method=excluded.method, node_id=excluded.node_id, status='pending', last_error=''`,
@@ -310,7 +311,12 @@ func (s *Store) acmeClient(ctx context.Context) (*acme.Client, error) {
 	}
 	c := &acme.Client{Key: key, DirectoryURL: set.Directory, UserAgent: "dark-hub2"}
 	if fresh {
-		_, err := c.Register(ctx, &acme.Account{Contact: []string{"mailto:" + set.Email}}, acme.AcceptTOS)
+		// The email is optional: it only gets expiry notices from the CA.
+		acct := &acme.Account{}
+		if set.Email != "" {
+			acct.Contact = []string{"mailto:" + set.Email}
+		}
+		_, err := c.Register(ctx, acct, acme.AcceptTOS)
 		if err != nil && !errors.Is(err, acme.ErrAccountAlreadyExists) {
 			return nil, fmt.Errorf("account: %w", err)
 		}

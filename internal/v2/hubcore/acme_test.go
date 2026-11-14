@@ -58,8 +58,8 @@ func TestACMEValidation(t *testing.T) {
 	s, _ := newStore(t)
 	seed(t, s)
 	ctx := context.Background()
-	if err := s.PutACMECert(ctx, "c1", []string{"vpn.example.com"}, ACMEHTTPNode, "de-1"); err == nil {
-		t.Fatal("issued without an email")
+	if err := s.PutACMECert(ctx, "c1", []string{"vpn.example.com"}, ACMEDNSCloudflare, ""); err == nil {
+		t.Fatal("DNS method without a Cloudflare token")
 	}
 	if err := s.PutACMESettings(ctx, ACMESettings{Email: "me@example.com", Directory: "https://127.0.0.1:1/directory", CFToken: "secret"}); err != nil {
 		t.Fatal(err)
