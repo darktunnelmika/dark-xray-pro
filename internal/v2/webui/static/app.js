@@ -1286,7 +1286,7 @@ async function viewRouting() {
   const [data, nodes, inbounds, overlay, traffic] = await Promise.all([api("GET", "/api/v2/admin/routing"), api("GET", "/api/v2/admin/nodes"), api("GET", "/api/v2/admin/inbounds"), api("GET", "/api/v2/admin/xray/overlay"),
     api("GET", "/api/v2/admin/routing/traffic?days=30").catch(() => [])]);
   const usage = Object.fromEntries((traffic || []).map((x) => [x.tag, x]));
-  const usageBadge = (tag) => usage[tag] ? h("span", { class: "badge" }, lang === "fa" ? `امروز ${bytes(usage[tag].today)} · ۳۰ روز ${bytes(usage[tag].total)}` : `today ${bytes(usage[tag].today)} · 30 days ${bytes(usage[tag].total)}`) : null;
+  const usageBadge = (tag) => usage[tag] ? h("span", { class: "badge" }, lang === "fa" ? `امروز ${bytes(usage[tag].today)}، ۳۰ روز ${bytes(usage[tag].total)}` : `today ${bytes(usage[tag].today)} · 30 days ${bytes(usage[tag].total)}`) : null;
   const r = JSON.parse(JSON.stringify(data.routing));
   r.outbounds ||= []; r.balancers ||= []; r.rules ||= []; r.dns ||= [];
   const root = h("div", {});
