@@ -84,6 +84,7 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 					pol := rp.Policy
 					pol.PriceGB, pol.PriceUnit = 0, 0 // sale prices are the owner's business
 					out["policy"] = pol
+					out["can_sell"] = rp.ParentID == ""
 				}
 			}
 		}
@@ -165,12 +166,61 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 	mux.HandleFunc("GET /api/v2/rep/ledger", member(func(w http.ResponseWriter, r *http.Request) {
 		p := who(r)
 		rep := r.URL.Query().Get("rep")
-		if p.Role == "rep" {
+		if p.Role == "rep" && !(rep != "" && s.IsSellerOf(r.Context(), p.RepID, rep)) {
 			rep = p.RepID
 		}
 		before, _ := strconv.ParseInt(r.URL.Query().Get("before"), 10, 64)
 		list, err := s.Ledger(r.Context(), rep, before, 100)
 		reply(w, list, err)
+	}))
+	// Sub-sellers, managed by their parent representative.
+	repOnly := func(h http.HandlerFunc) http.HandlerFunc {
+		return member(func(w http.ResponseWriter, r *http.Request) {
+			if who(r).Role != "rep" {
+				http.Error(w, "forbidden", http.StatusForbidden)
+				return
+			}
+			h(w, r)
+		})
+	}
+	mux.HandleFunc("GET /api/v2/rep/sellers", repOnly(func(w http.ResponseWriter, r *http.Request) {
+		list, err := s.Sellers(r.Context(), who(r).RepID)
+		for i := range list {
+			list[i].Policy.PriceGB, list[i].Policy.PriceUnit = 0, 0
+		}
+		reply(w, list, err)
+	}))
+	mux.HandleFunc("PUT /api/v2/rep/sellers/{id}", repOnly(func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Name, Username, Password string
+			Enabled                  bool
+		}
+		if !decode(w, r, &in) {
+			return
+		}
+		err := s.PutSeller(r.Context(), who(r).RepID, Rep{ID: r.PathValue("id"), Name: in.Name, Enabled: in.Enabled}, in.Username, in.Password)
+		reply(w, map[string]bool{"ok": err == nil}, err)
+	}))
+	mux.HandleFunc("POST /api/v2/rep/sellers/{id}/credit", repOnly(func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			VolumeGB float64
+			Units    int64
+			Note     string
+		}
+		if !decode(w, r, &in) {
+			return
+		}
+		p := who(r)
+		err := s.TransferCredit(r.Context(), p.User, p.RepID, r.PathValue("id"), int64(in.VolumeGB*(1<<30)), in.Units, in.Note)
+		reply(w, map[string]bool{"ok": err == nil}, err)
+	}))
+	mux.HandleFunc("PUT /api/v2/rep/sellers/{id}/policy", repOnly(func(w http.ResponseWriter, r *http.Request) {
+		var pol RepPolicy
+		if !decode(w, r, &pol) {
+			return
+		}
+		err := s.SetSellerPolicy(r.Context(), who(r).RepID, r.PathValue("id"), pol)
+		reply(w, map[string]bool{"ok": err == nil}, err)
 	}))
 	mux.HandleFunc("GET /api/v2/admin/clients/{email}/daily", member(func(w http.ResponseWriter, r *http.Request) {
 		p := who(r)

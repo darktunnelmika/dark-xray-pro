@@ -37,6 +37,9 @@ const I18N = {
     traffic14: "Traffic, last 14 days", topToday: "Top users today", recentEvents: "Recent blocks", noEvents: "No blocks — every limit is quiet.",
     certs: "TLS certificates", addCert: "Add certificate", certPem: "Certificate (PEM, full chain)", keyPem: "Private key (PEM)",
     certFor: "Certificate (TLS presets)", noCert: "— none —", usedBy: "used by", certHint: "Paste the full chain and key (e.g. from certbot or Cloudflare origin). Uploading again with the same ID renews it on every inbound and node.",
+    sellers: "Sub-sellers", transferCredit: "Transfer credit", subOf: "under", kind_transfer: "Transfer",
+    sellersHint: "Open sellers under you and give them part of your credit. Their limits can only be tighter than yours.",
+    transferHint: "Moves credit from your balance to this seller. Negative numbers take unused credit back.",
     when: "When", who: "By", what: "What", more: "Load more", totalLast30: "{v} in the last 30 days",
     health: "Health (24h)", cpu: "CPU", ram: "RAM", disk: "Disk", net: "Network", uptime: "Uptime", inRate: "in", outRate: "out", noData: "No samples yet",
   },
@@ -77,6 +80,9 @@ const I18N = {
     traffic14: "ترافیک ۱۴ روز اخیر", topToday: "پرمصرف‌های امروز", recentEvents: "آخرین قطع‌ها", noEvents: "قطعی نداشته‌ایم؛ همهٔ محدودیت‌ها آرام‌اند.",
     certs: "گواهی‌های TLS", addCert: "افزودن گواهی", certPem: "گواهی (PEM، زنجیرهٔ کامل)", keyPem: "کلید خصوصی (PEM)",
     certFor: "گواهی (برای الگوهای TLS)", noCert: "— هیچ —", usedBy: "استفاده در", certHint: "زنجیرهٔ کامل و کلید را وارد کنید (مثلاً از certbot یا Cloudflare Origin). آپلود دوباره با همان شناسه، گواهی را روی همهٔ اینباندها و نودها تمدید می‌کند.",
+    sellers: "زیرفروشنده‌ها", transferCredit: "انتقال اعتبار", subOf: "زیرمجموعهٔ", kind_transfer: "انتقال",
+    sellersHint: "برای خودتان زیرفروشنده بسازید و بخشی از اعتبارتان را به او بدهید. محدودیت‌های او فقط می‌تواند سخت‌تر از شما باشد.",
+    transferHint: "اعتبار را از موجودی شما به این فروشنده منتقل می‌کند. عدد منفی اعتبار مصرف‌نشده را برمی‌گرداند.",
     when: "زمان", who: "توسط", what: "شرح", more: "بیشتر", totalLast30: "{v} در ۳۰ روز اخیر",
     health: "سلامت (۲۴ ساعت)", cpu: "پردازنده", ram: "رم", disk: "دیسک", net: "شبکه", uptime: "روشن بودن", inRate: "ورودی", outRate: "خروجی", noData: "هنوز نمونه‌ای نیست",
   },
@@ -158,7 +164,7 @@ const allRoutes = { dashboard: viewDashboard, clients: viewClients, groups: view
 let me = null;
 let routes = allRoutes;
 function routesFor(m) {
-  if (m && m.role === "rep") return { clients: viewClients, activity: viewActivity, settings: viewSettings };
+  if (m && m.role === "rep") return m.can_sell ? { clients: viewClients, sellers: viewSellers, activity: viewActivity, settings: viewSettings } : { clients: viewClients, activity: viewActivity, settings: viewSettings };
   return allRoutes;
 }
 
@@ -674,10 +680,32 @@ function nodeForm() {
     h("label", {}, h("span", {}, t("nodeId")), id), h("label", {}, h("span", {}, t("name")), name), out), [save]);
 }
 
+// Owners manage resellers at /api/v2/admin/reps; a reseller manages its own
+// sub-sellers at /api/v2/rep/sellers with the same forms.
+const repBase = () => (me && me.role === "rep" ? "/api/v2/rep/sellers" : "/api/v2/admin/reps");
+
+async function viewSellers() {
+  const [reps, inbounds] = await Promise.all([api("GET", "/api/v2/rep/sellers"), api("GET", "/api/v2/rep/inbounds")]);
+  const cards = (reps || []).map((r) => h("div", { class: "card item" },
+    h("div", { class: "head" }, h("span", { class: "name" }, r.Name || r.ID), h("span", { class: "badge" }, r.ID),
+      h("span", { class: `badge ${r.Enabled ? "good" : "bad"} spacer` }, t(r.Enabled ? "enabled" : "disabled"))),
+    h("div", { class: "muted small" }, `${t("volumeCredit")}: ${bytes(r.VolumeCredit)} · ${t("units")}: ${fmtNum(r.UnlimitedUnits)} · ${t("clientsCount", { n: fmtNum(r.Clients) })}`),
+    h("div", { class: "muted small" }, policySummary(r.Policy)),
+    h("div", { class: "row" }, h("button", { onclick: () => creditForm(r) }, t("transferCredit")),
+      h("button", { class: "ghost", onclick: () => policyForm(r, inbounds) }, t("policy")),
+      h("a", { class: "btn ghost", href: `#/activity?rep=${encodeURIComponent(r.ID)}` }, t("activity")),
+      h("button", { class: "ghost", onclick: () => repForm(r) }, t("edit")))));
+  return h("div", {},
+    h("div", { class: "row" }, h("h1", {}, t("sellers")), h("button", { class: "primary spacer", onclick: () => repForm(null) }, t("add"))),
+    h("p", { class: "small muted" }, t("sellersHint")),
+    h("div", { class: "list" }, cards.length ? cards : h("p", { class: "muted" }, t("empty"))));
+}
+
 async function viewReps() {
   const [reps, inbounds] = await Promise.all([api("GET", "/api/v2/admin/reps"), api("GET", "/api/v2/admin/inbounds")]);
   const cards = (reps || []).map((r) => h("div", { class: "card item" },
     h("div", { class: "head" }, h("span", { class: "name" }, r.Name || r.ID), h("span", { class: "badge" }, r.ID),
+      r.ParentID ? h("span", { class: "badge" }, `${t("subOf")} ${r.ParentID}`) : null,
       h("span", { class: `badge ${r.Enabled ? "good" : "bad"} spacer` }, t(r.Enabled ? "enabled" : "disabled"))),
     h("div", { class: "muted small" }, `${t("volumeCredit")}: ${bytes(r.VolumeCredit)} · ${t("units")}: ${fmtNum(r.UnlimitedUnits)} · ${t("clientsCount", { n: fmtNum(r.Clients) })}`),
     h("div", { class: "muted small" }, policySummary(r.Policy)),
@@ -701,7 +729,7 @@ function repForm(r) {
     e.preventDefault();
     if (!id.reportValidity()) return;
     try {
-      await guarded(() => api("PUT", `/api/v2/admin/reps/${encodeURIComponent(id.value)}`, { Name: name.value, Enabled: en.checked, Username: user.value, Password: pass.value }));
+      await guarded(() => api("PUT", `${repBase()}/${encodeURIComponent(id.value)}`, { Name: name.value, Enabled: en.checked, Username: user.value, Password: pass.value }));
       document.getElementById("modal").close("save"); route();
     } catch {}
   } }, t("save"));
@@ -718,11 +746,12 @@ function creditForm(r) {
   const save = h("button", { class: "primary", value: "save", onclick: async (e) => {
     e.preventDefault();
     try {
-      await guarded(() => api("POST", `/api/v2/admin/reps/${encodeURIComponent(r.ID)}/credit`, { VolumeGB: +gb.value || 0, Units: +units.value || 0, Note: note.value }));
+      await guarded(() => api("POST", `${repBase()}/${encodeURIComponent(r.ID)}/credit`, { VolumeGB: +gb.value || 0, Units: +units.value || 0, Note: note.value }));
       document.getElementById("modal").close("save"); route();
     } catch {}
   } }, t("save"));
-  openModal(`${t("addCredit")} · ${r.Name || r.ID}`, h("div", { class: "form" },
+  openModal(`${t(me.role === "rep" ? "transferCredit" : "addCredit")} · ${r.Name || r.ID}`, h("div", { class: "form" },
+    me.role === "rep" ? h("p", { class: "small muted" }, t("transferHint")) : null,
     h("div", { class: "two" }, h("label", {}, h("span", {}, `${t("volumeCredit")} (GB)`), gb), h("label", {}, h("span", {}, t("units")), units)),
     h("p", { class: "small muted" }, t("unitsHint")), h("label", {}, h("span", {}, t("note")), note)), [save]);
 }
@@ -751,7 +780,7 @@ function policyForm(r, inbounds) {
   const save = h("button", { class: "primary", value: "save", onclick: async (e) => {
     e.preventDefault();
     try {
-      await guarded(() => api("PUT", `/api/v2/admin/reps/${encodeURIComponent(r.ID)}/policy`, {
+      await guarded(() => api("PUT", `${repBase()}/${encodeURIComponent(r.ID)}/policy`, {
         MaxClients: +f.mc.value || 0, MaxDays: +f.md.value || 0, MaxClientGB: +f.mg.value || 0,
         AllowUnlimited: f.au.checked, CanDelete: f.cd.checked, RefundUnused: f.ru.checked,
         Inbounds: boxes.map((b) => b.querySelector("input")).filter((i) => i.checked).map((i) => i.value),
@@ -767,7 +796,7 @@ function policyForm(r, inbounds) {
     h("label", { class: "check" }, f.cd, t("canDelete")),
     h("label", { class: "check" }, f.ru, t("refundUnused")),
     h("fieldset", { class: "form", style: "border:0;padding:0;margin:0" }, h("legend", { class: "small muted" }, t("allowedInbounds")), boxes),
-    h("div", { class: "two" }, lab("priceGB", f.pg), lab("priceUnit", f.pu)), err), [save]);
+    me.role === "rep" ? null : h("div", { class: "two" }, lab("priceGB", f.pg), lab("priceUnit", f.pu)), err), [save]);
 }
 
 function paymentForm(r) {
@@ -825,7 +854,7 @@ async function viewActivity() {
     e.VolumeDelta ? `${e.VolumeDelta > 0 ? "+" : "−"}${bytes(Math.abs(e.VolumeDelta))}` : "",
     e.UnitsDelta ? `${e.UnitsDelta > 0 ? "+" : "−"}${fmtNum(Math.abs(e.UnitsDelta))} ${t("units")}` : "",
     e.Amount ? `${t("amount")} ${money(e.Amount)}` : ""].filter(Boolean).join(" · ");
-  const cls = { charge: "", refund: "good", adjust: "good", delete: "bad", payment: "good" };
+  const cls = { charge: "", refund: "good", adjust: "good", delete: "bad", payment: "good", transfer: "warn" };
   const body = h("tbody", {});
   const add = (list) => body.append(...list.map((e) => h("tr", {},
     h("td", { class: "small" }, fmtTime(e.Unix)),

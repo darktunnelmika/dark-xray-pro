@@ -819,3 +819,64 @@ func TestInsights(t *testing.T) {
 		t.Fatalf("%v %+v", err, in)
 	}
 }
+
+func TestSubSellers(t *testing.T) {
+	s, _ := newStore(t)
+	ctx := context.Background()
+	seed(t, s)
+	if err := s.PutRep(ctx, Rep{ID: "ali", Name: "Ali", Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.PutRep(ctx, Rep{ID: "reza", Name: "Reza", Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	_ = s.AdjustCredit(ctx, "owner", "ali", 10<<30, 4, "")
+	_ = s.SetRepPolicy(ctx, "ali", RepPolicy{MaxDays: 30, AllowUnlimited: true, CanDelete: true})
+	if err := s.PutSeller(ctx, "ali", Rep{ID: "ali-1", Name: "Sub", Enabled: true}, "sub1", "sub-password-1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.PutSeller(ctx, "ali", Rep{ID: "reza", Name: "steal", Enabled: false}, "", ""); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("taking another rep: %v", err)
+	}
+	if err := s.PutSeller(ctx, "ali-1", Rep{ID: "deep", Enabled: true}, "", ""); !errors.Is(err, ErrPolicy) {
+		t.Fatalf("second level: %v", err)
+	}
+	if err := s.TransferCredit(ctx, "ali", "ali", "ali-1", 4<<30, 1, "start"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.TransferCredit(ctx, "ali", "ali", "ali-1", 7<<30, 0, ""); !errors.Is(err, ErrCredit) {
+		t.Fatalf("over-transfer: %v", err)
+	}
+	if err := s.TransferCredit(ctx, "reza", "reza", "ali-1", 1, 0, ""); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("foreign transfer: %v", err)
+	}
+	// Looser limits than the parent's are clamped.
+	if err := s.SetSellerPolicy(ctx, "ali", "ali-1", RepPolicy{MaxDays: 90, AllowUnlimited: true}); err != nil {
+		t.Fatal(err)
+	}
+	sel, _ := s.Sellers(ctx, "ali")
+	if len(sel) != 1 || sel[0].VolumeCredit != 4<<30 || sel[0].UnlimitedUnits != 1 || sel[0].Policy.MaxDays != 30 {
+		t.Fatalf("%+v", sel)
+	}
+	// The sub-seller sells within its own credit and limits.
+	c := Client{Email: "sub-c", Enabled: true, VolumeBytes: 3 << 30, DurationSeconds: 30 * 86400, Inbounds: []string{"de-vless"}}
+	if err := s.RepPutClient(ctx, "sub1", "ali-1", c, "volume"); err != nil {
+		t.Fatal(err)
+	}
+	p, err := s.principal(ctx, "sub1")
+	if err != nil || p.Role != "rep" || p.RepID != "ali-1" {
+		t.Fatal(p, err)
+	}
+	led, _ := s.Ledger(ctx, "ali", 0, 10)
+	if led[0].Kind != "transfer" || led[0].VolumeDelta != -(4 << 30) {
+		t.Fatalf("%+v", led[0])
+	}
+	reps, _ := s.Reps(ctx)
+	total := int64(0)
+	for _, r := range reps {
+		total += r.VolumeCredit
+	}
+	if total != 7<<30 { // 10 granted - 3 sold; transfers create nothing
+		t.Fatalf("credit leaked: %d", total)
+	}
+}
