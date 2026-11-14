@@ -358,3 +358,7 @@ table.dtable td.empty { text-align: center; padding: 28px; }
 }
 table.dtable.compact td { padding: 6px 8px; }
 table.dtable.compact tr:last-child td { border-block-end: 0; }
+.small-chips { margin: 0; } .small-chips .chip { padding: 3px 10px; font-size: 12px; }
+.nodebars { display: grid; gap: 6px; }
+.nodebar { display: grid; grid-template-columns: minmax(70px, 120px) 1fr auto; gap: 10px; align-items: center; }
+.nodebar .bar.slim { max-inline-size: none; margin: 0; }

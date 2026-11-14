@@ -628,11 +628,50 @@ async function viewClients() {
     }))) : null;
   return h("div", {},
     h("div", { class: "row" }, h("h1", {}, t("clients")), h("span", { class: "muted small" }, t("clientsCount", { n: fmtNum(list.length) })),
-      h("button", { class: "primary spacer", onclick: () => clientForm(null, inbounds) }, t("add"))),
+      owner ? h("button", { class: "ghost spacer", onclick: () => templatesModal(inbounds) }, lang === "fa" ? "قالب‌ها" : "Templates") : h("span", { class: "spacer" }),
+      h("button", { class: "primary", onclick: () => clientForm(null, inbounds) }, t("add"))),
     todo, chips,
     h("div", { class: "row toolbar" }, q, extra),
     bulkBar,
     h("div", { class: "card tablecard" }, table), pager);
+}
+
+async function templatesModal(inbounds) {
+  const fa = lang === "fa";
+  const L = fa ? { title: "قالب‌های کاربر", hint: "هنگام ساخت کلاینت جدید، «از روی قالب» همهٔ فیلدها را پر می‌کند.", id: "شناسه", name: "نام", gb: "حجم (گیگ، ۰ = نامحدود)", days: "روز",
+      first: "زمان از اولین اتصال", ips: "حداکثر IP", dev: "حداکثر دستگاه", reset: "ریست دوره‌ای", prefix: "پیشوند نام", add: "افزودن قالب", del: "حذف", off: "خاموش", day: "روزانه", week: "هفتگی", month: "ماهانه", none: "هنوز قالبی نیست." }
+    : { title: "Client templates", hint: "When adding a client, “From template” fills every field.", id: "ID", name: "Name", gb: "Volume (GB, 0 = unlimited)", days: "Days",
+      first: "Time from first connection", ips: "Max IPs", dev: "Max devices", reset: "Periodic reset", prefix: "Name prefix", add: "Add template", del: "Delete", off: "Off", day: "Daily", week: "Weekly", month: "Monthly", none: "No templates yet." };
+  const list = h("div", { class: "list" });
+  const f = { id: h("input", { pattern: "[a-z0-9][a-z0-9._-]{0,62}", placeholder: "plan-30", dir: "ltr" }), name: h("input", { placeholder: "30 GB · 30 days" }),
+    gb: h("input", { type: "number", min: "0", step: "0.5", value: "30" }), days: h("input", { type: "number", min: "0", value: "30" }),
+    first: h("input", { type: "checkbox", checked: true }), ips: h("input", { type: "number", min: "0", value: "2" }), dev: h("input", { type: "number", min: "0", value: "0" }),
+    reset: h("select", {}, [["", L.off], ["day", L.day], ["week", L.week], ["month", L.month]].map(([v, l]) => h("option", { value: v }, l))), prefix: h("input", { dir: "ltr" }) };
+  const boxes = (inbounds || []).map((ib) => h("label", { class: "check" }, h("input", { type: "checkbox", value: ib.tag }), h("span", { dir: "ltr" }, ib.tag)));
+  const err = h("div", { class: "error small" });
+  async function load() {
+    const tl = await api("GET", "/api/v2/admin/templates").catch(() => []);
+    list.replaceChildren(...(tl.length ? tl.map((tp) => h("div", { class: "row card item" }, h("span", { class: "name" }, tp.name),
+      h("span", { class: "badge" }, `${tp.gb ? fmtNum(tp.gb) + " GB" : "∞"} · ${fmtNum(tp.days)}d`), tp.reset_period ? h("span", { class: "badge" }, "↻ " + tp.reset_period) : null,
+      h("button", { class: "ghost danger spacer", onclick: async () => { await guarded(() => api("DELETE", `/api/v2/admin/templates/${encodeURIComponent(tp.id)}`)); load(); } }, L.del))) : [h("p", { class: "muted small" }, L.none)]));
+  }
+  const add = h("button", { type: "button", class: "primary", onclick: async () => {
+    err.textContent = "";
+    if (!f.id.value || !f.id.reportValidity() || !f.name.value) { err.textContent = `${L.id} / ${L.name}`; return; }
+    try {
+      await guarded(() => api("PUT", `/api/v2/admin/templates/${encodeURIComponent(f.id.value)}`, { name: f.name.value, gb: +f.gb.value || 0, days: +f.days.value || 0, first_use: f.first.checked,
+        max_ips: +f.ips.value || 0, hwid_limit: +f.dev.value || 0, reset_period: f.reset.value, prefix: f.prefix.value.trim(),
+        inbounds: boxes.map((b) => b.querySelector("input")).filter((i) => i.checked).map((i) => i.value) }));
+      f.id.value = ""; f.name.value = ""; load();
+    } catch (x) { err.textContent = x.message; }
+  } }, L.add);
+  const lab = (l, el) => h("label", {}, h("span", {}, l), el);
+  openModal(L.title, h("div", { class: "form" }, h("p", { class: "small muted" }, L.hint), list,
+    h("div", { class: "two" }, lab(L.id, f.id), lab(L.name, f.name)), h("div", { class: "two" }, lab(L.gb, f.gb), lab(L.days, f.days)),
+    h("label", { class: "check" }, f.first, h("span", {}, L.first)),
+    h("div", { class: "two" }, lab(L.ips, f.ips), lab(L.dev, f.dev)), h("div", { class: "two" }, lab(L.reset, f.reset), lab(L.prefix, f.prefix)),
+    boxes.length ? h("div", { class: "row" }, boxes) : null, err, add));
+  load();
 }
 
 function confirmText(text) {
@@ -768,7 +807,7 @@ async function viewClient() {
       stat(t("maxIPs").split(" (")[0], c.MaxIPs ? fmtNum(c.MaxIPs) : "∞"),
       stat(t("last30Traffic"), bytes(sum30))),
     h("div", { class: "dash" },
-      h("div", { class: "card form wide-col" }, h("div", { class: "row" }, h("h2", {}, t("usageChart")), legend()), barsSvg(days, 1100)),
+      usageCard(c.Email, days),
       h("div", { class: "card form" }, h("h2", {}, t("subscription")),
         h("img", { class: "qr", alt: "QR", src: `/api/v2/admin/clients/${encodeURIComponent(c.Email)}/qr.png` }),
         fmt("Auto", url), fmt("sing-box", `${url}?format=singbox`), fmt("Clash", `${url}?format=clash`)),
@@ -780,7 +819,90 @@ async function viewClient() {
         c.Usage.FirstSeen ? h("div", { class: "row small" }, h("span", { class: "muted" }, t("firstSeen")), h("span", {}, new Date(c.Usage.FirstSeen * 1000).toLocaleString(lang === "fa" ? "fa-IR" : "en-GB"))) : null,
         c.Usage.LastSeen ? h("div", { class: "row small" }, h("span", { class: "muted" }, t("lastSeen")), h("span", {}, new Date(c.Usage.LastSeen * 1000).toLocaleString(lang === "fa" ? "fa-IR" : "en-GB"))) : null),
       clientIPsCard(c, ips || []),
-      clientResetCard(c, resets || [], owner)));
+      clientResetCard(c, resets || [], owner),
+      owner ? nextPlanCard(c) : null,
+      devicesCard(c)));
+}
+
+const CX = {
+  fa: { range: "بازه", d7: "۷ روز", d30: "۳۰ روز", d90: "۹۰ روز", byNode: "به تفکیک نود", noData: "در این بازه مصرفی نیست.",
+    np: "برنامهٔ بعدی", npHint: "وقتی حجم یا زمان فعلی تمام شود، مصرف صفر و این برنامه خودکار شروع می‌شود.", npNone: "برنامهٔ بعدی تنظیم نشده.", gb: "حجم (گیگ، ۰ = نامحدود)", days: "روز (۰ = بدون انقضا)",
+    firstUse: "شروع زمان از اولین اتصال", setNp: "ذخیرهٔ برنامهٔ بعدی", clearNp: "حذف برنامهٔ بعدی", npSet: "{g} · {d} روز",
+    dev: "دستگاه‌ها", devHint: "برنامه‌هایی مثل Happ، v2rayN و Hiddify هنگام گرفتن اشتراک شناسهٔ دستگاه می‌فرستند. با محدودیت، دستگاه اضافه اشتراک نمی‌گیرد.", devLimit: "حداکثر دستگاه (۰ = بدون محدودیت)",
+    noDev: "هنوز دستگاهی ثبت نشده.", rmAll: "حذف همهٔ دستگاه‌ها", rm: "حذف", saved: "ذخیره شد", unl: "نامحدود" },
+  en: { range: "Range", d7: "7 days", d30: "30 days", d90: "90 days", byNode: "By node", noData: "No usage in this range.",
+    np: "Next plan", npHint: "When the current volume or time runs out, usage resets and this plan starts automatically.", npNone: "No next plan set.", gb: "Volume (GB, 0 = unlimited)", days: "Days (0 = no expiry)",
+    firstUse: "Time starts at first connection", setNp: "Save next plan", clearNp: "Remove next plan", npSet: "{g} · {d} days",
+    dev: "Devices", devHint: "Apps such as Happ, v2rayN and Hiddify send a device ID when fetching the subscription. With a limit, an extra device gets no subscription.", devLimit: "Max devices (0 = no limit)",
+    noDev: "No devices yet.", rmAll: "Remove all devices", rm: "Remove", saved: "Saved", unl: "Unlimited" },
+};
+
+function usageCard(email, days0) {
+  const L = CX[lang] || CX.en;
+  const card = h("div", { class: "card form wide-col" });
+  let range = 30;
+  async function draw(days) {
+    const [nodes] = await Promise.all([api("GET", `/api/v2/admin/clients/${encodeURIComponent(email)}/nodes?days=${range}`).catch(() => [])]);
+    const chips = h("div", { class: "chips small-chips" }, [[7, L.d7], [30, L.d30], [90, L.d90]].map(([n, l]) => {
+      const b = h("button", { class: `chip ${range === n ? "on" : ""}` }, l);
+      b.addEventListener("click", async () => { range = n; const d = await api("GET", `/api/v2/admin/clients/${encodeURIComponent(email)}/daily?days=${n}`).catch(() => []); draw(d); });
+      return b;
+    }));
+    const total = (nodes || []).reduce((a, n) => a + n.up + n.down, 0);
+    card.replaceChildren(
+      h("div", { class: "row" }, h("h2", {}, t("usageChart")), legend(), h("span", { class: "spacer" }), chips),
+      barsSvg(days, 1100),
+      h("div", { class: "small muted" }, L.byNode),
+      total ? h("div", { class: "nodebars" }, nodes.map((n) => {
+        const v = n.up + n.down, pct = (v / total) * 100;
+        return h("div", { class: "nodebar" }, h("span", { class: "name" }, n.node_id), h("div", { class: "bar slim" }, h("i", { style: `inline-size:${pct}%` })),
+          h("span", { class: "mono small" }, `${bytes(v)} · ${fmtNum(Math.round(pct))}%`));
+      })) : h("p", { class: "muted small" }, L.noData));
+  }
+  draw(days0);
+  return card;
+}
+
+function nextPlanCard(c) {
+  const L = CX[lang] || CX.en;
+  const p = c.next_plan;
+  const gb = h("input", { type: "number", min: "0", step: "0.5", value: p ? p.gb : 30 });
+  const days = h("input", { type: "number", min: "0", value: p ? p.days : 30 });
+  const first = h("input", { type: "checkbox", checked: p ? p.first_use : true });
+  const err = h("div", { class: "error small" });
+  const save = async (plan) => {
+    err.textContent = "";
+    try { await guarded(() => api("PUT", `/api/v2/admin/clients/${encodeURIComponent(c.Email)}/next-plan`, { plan })); toast(L.saved); route(); } catch (x) { err.textContent = x.message; }
+  };
+  return h("div", { class: "card form" },
+    h("div", { class: "row" }, h("h2", {}, L.np), p ? h("span", { class: "badge good" }, L.npSet.replace("{g}", p.gb ? `${fmtNum(p.gb)} GB` : L.unl).replace("{d}", fmtNum(p.days))) : null),
+    h("p", { class: "small muted" }, p ? L.npHint : L.npNone + " " + L.npHint),
+    h("div", { class: "two" }, h("label", {}, h("span", {}, L.gb), gb), h("label", {}, h("span", {}, L.days), days)),
+    h("label", { class: "check" }, first, h("span", {}, L.firstUse)), err,
+    h("div", { class: "row" }, h("button", { class: "primary", onclick: () => save({ gb: +gb.value || 0, days: +days.value || 0, first_use: first.checked }) }, L.setNp),
+      p ? h("button", { class: "ghost danger spacer", onclick: () => save(null) }, L.clearNp) : null));
+}
+
+function devicesCard(c) {
+  const L = CX[lang] || CX.en;
+  const card = h("div", { class: "card form" });
+  const limit = h("input", { type: "number", min: "0", max: "100", value: c.hwid_limit || 0 });
+  const saveLimit = h("button", { class: "ghost", onclick: async () => { await guarded(() => api("PUT", `/api/v2/admin/clients/${encodeURIComponent(c.Email)}/hwid-limit`, { limit: +limit.value || 0 })); toast(L.saved); } }, t("save"));
+  const list = h("div", {});
+  const del = async (hwid) => { await guarded(() => api("DELETE", `/api/v2/admin/clients/${encodeURIComponent(c.Email)}/devices/${encodeURIComponent(hwid)}`)); load(); };
+  async function load() {
+    const devs = await api("GET", `/api/v2/admin/clients/${encodeURIComponent(c.Email)}/devices`).catch(() => []);
+    list.replaceChildren(devs.length ? h("table", { class: "dtable compact" }, h("tbody", {}, devs.map((d) => h("tr", {},
+      h("td", {}, h("div", {}, [d.os, d.model].filter(Boolean).join(" · ") || "?"), h("div", { class: "small muted clip", dir: "ltr" }, d.agent || d.hwid)),
+      h("td", { class: "small muted" }, fmtDT(d.last)),
+      h("td", { class: "c-act" }, h("button", { class: "ghost danger", onclick: () => del(d.hwid) }, L.rm)))))) : h("p", { class: "muted small" }, L.noDev),
+      devs.length > 1 ? h("button", { class: "ghost danger", onclick: () => del("*") }, L.rmAll) : null);
+  }
+  card.append(h("div", { class: "row" }, h("h2", {}, L.dev), c.hwid_limit ? h("span", { class: "badge spacer" }, `≤ ${fmtNum(c.hwid_limit)}`) : null),
+    h("p", { class: "small muted" }, L.devHint),
+    h("div", { class: "row" }, h("label", { style: "flex:1" }, h("span", {}, L.devLimit), limit), saveLimit), list);
+  load();
+  return card;
 }
 
 const CD = {
@@ -854,6 +976,21 @@ function clientForm(c, inbounds, ctx = { reps: [] }) {
     h("input", { type: "checkbox", value: ib.tag, checked: isNew ? (inbounds.length === 1) : (v.Inbounds || []).includes(ib.tag) }),
     `${ib.tag} · ${ib.node_id} · ${ib.network}/${ib.security}`));
   const err = h("div", { class: "error" });
+  let tplExtra = null; // reset period and device limit from a template
+  const tplSel = isNew ? h("select", {}, h("option", { value: "" }, "—")) : null;
+  if (tplSel) {
+    api("GET", "/api/v2/admin/templates").then((list) => {
+      for (const tp of list || []) tplSel.append(h("option", { value: tp.id }, tp.name));
+      tplSel.addEventListener("change", () => {
+        const tp = (list || []).find((x) => x.id === tplSel.value);
+        if (!tp) { tplExtra = null; return; }
+        vol.value = tp.gb || 0; days.value = tp.days || 0; first.checked = !!tp.first_use; ips.value = tp.max_ips || 0;
+        for (const b of boxes) { const i = b.querySelector("input"); i.checked = (tp.inbounds || []).includes(i.value); }
+        if (tp.prefix && !name.value) name.value = tp.prefix;
+        tplExtra = { reset_period: tp.reset_period || "", hwid_limit: tp.hwid_limit || 0 };
+      });
+    }).catch(() => {});
+  }
   const save = h("button", { class: "primary", value: "save", onclick: async (e) => {
     e.preventDefault();
     if (!name.reportValidity()) return;
@@ -873,11 +1010,14 @@ function clientForm(c, inbounds, ctx = { reps: [] }) {
       await api("PUT", `/api/v2/admin/clients/${em}`, body);
       if ((note.value || "") !== (v.Note || "")) await api("PUT", `/api/v2/admin/clients/${em}/note`, { Note: note.value });
       if (repSel && repSel.value !== (v.RepID || "")) await api("POST", `/api/v2/admin/clients/${em}/transfer`, { RepID: repSel.value });
+      if (tplExtra?.reset_period && owner) await api("PUT", `/api/v2/admin/clients/${em}/reset-period`, { period: tplExtra.reset_period });
+      if (tplExtra?.hwid_limit) await api("PUT", `/api/v2/admin/clients/${em}/hwid-limit`, { limit: tplExtra.hwid_limit });
       toast(t("saved")); document.getElementById("modal").close("save"); route();
     }
     catch (x) { err.textContent = x.message; }
   } }, t("save"));
   openModal(isNew ? t("add") : `${t("edit")} · ${v.Email}`, h("div", { class: "form" },
+    tplSel ? h("label", {}, h("span", {}, lang === "fa" ? "از روی قالب" : "From template"), tplSel) : null,
     h("label", {}, h("span", {}, t("name")), name),
     me.role === "rep" ? h("label", {}, h("span", {}, t("plan")), plan, h("span", { class: "small" }, t("unitsHint"))) : null,
     h("div", { class: "two" }, h("label", {}, h("span", {}, t("volumeGB")), vol), h("label", {}, h("span", {}, t("days")), days)),

@@ -324,6 +324,84 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 		}
 		reply(w, map[string]bool{"ok": true}, s.SetResetPeriod(r.Context(), r.PathValue("email"), in.Period))
 	}))
+	mux.HandleFunc("GET /api/v2/admin/clients/{email}/nodes", member(func(w http.ResponseWriter, r *http.Request) {
+		p := who(r)
+		if p.Role == "rep" && !s.ownsClient(r.Context(), p.RepID, r.PathValue("email")) {
+			http.NotFound(w, r)
+			return
+		}
+		days, _ := strconv.Atoi(r.URL.Query().Get("days"))
+		list, err := s.ClientNodeUsage(r.Context(), r.PathValue("email"), days)
+		reply(w, list, err)
+	}))
+	mux.HandleFunc("GET /api/v2/admin/clients/{email}/devices", member(func(w http.ResponseWriter, r *http.Request) {
+		p := who(r)
+		if p.Role == "rep" && !s.ownsClient(r.Context(), p.RepID, r.PathValue("email")) {
+			http.NotFound(w, r)
+			return
+		}
+		list, err := s.Devices(r.Context(), r.PathValue("email"))
+		reply(w, list, err)
+	}))
+	mux.HandleFunc("DELETE /api/v2/admin/clients/{email}/devices/{hwid}", member(func(w http.ResponseWriter, r *http.Request) {
+		p := who(r)
+		if p.Role == "rep" && !s.ownsClient(r.Context(), p.RepID, r.PathValue("email")) {
+			http.NotFound(w, r)
+			return
+		}
+		reply(w, map[string]bool{"ok": true}, s.DeleteDevice(r.Context(), r.PathValue("email"), r.PathValue("hwid")))
+	}))
+	mux.HandleFunc("PUT /api/v2/admin/clients/{email}/hwid-limit", member(func(w http.ResponseWriter, r *http.Request) {
+		p := who(r)
+		if p.Role == "rep" && !s.ownsClient(r.Context(), p.RepID, r.PathValue("email")) {
+			http.NotFound(w, r)
+			return
+		}
+		var in struct {
+			Limit int `json:"limit"`
+		}
+		if !decode(w, r, &in) {
+			return
+		}
+		reply(w, map[string]bool{"ok": true}, s.SetHWIDLimit(r.Context(), r.PathValue("email"), in.Limit))
+	}))
+	mux.HandleFunc("PUT /api/v2/admin/clients/{email}/next-plan", guard(func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Plan *NextPlan `json:"plan"`
+		}
+		if !decode(w, r, &in) {
+			return
+		}
+		reply(w, map[string]bool{"ok": true}, s.SetNextPlan(r.Context(), r.PathValue("email"), in.Plan))
+	}))
+	mux.HandleFunc("GET /api/v2/admin/templates", member(func(w http.ResponseWriter, r *http.Request) {
+		list, err := s.Templates(r.Context())
+		reply(w, list, err)
+	}))
+	mux.HandleFunc("PUT /api/v2/admin/templates/{id}", guard(func(w http.ResponseWriter, r *http.Request) {
+		var in ClientTemplate
+		if !decode(w, r, &in) {
+			return
+		}
+		in.ID = r.PathValue("id")
+		reply(w, map[string]bool{"ok": true}, s.PutTemplate(r.Context(), in))
+	}))
+	mux.HandleFunc("DELETE /api/v2/admin/templates/{id}", guard(func(w http.ResponseWriter, r *http.Request) {
+		reply(w, map[string]bool{"ok": true}, s.DeleteTemplate(r.Context(), r.PathValue("id")))
+	}))
+	mux.HandleFunc("PUT /api/v2/admin/settings/hwid-strict", guard(func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			On bool `json:"on"`
+		}
+		if !decode(w, r, &in) {
+			return
+		}
+		v := ""
+		if in.On {
+			v = "1"
+		}
+		reply(w, map[string]bool{"ok": true}, s.SetSetting(r.Context(), "hwid_strict", v))
+	}))
 	mux.HandleFunc("GET /api/v2/admin/insights", guard(func(w http.ResponseWriter, r *http.Request) {
 		days, _ := strconv.Atoi(r.URL.Query().Get("days"))
 		in, err := s.Insights(r.Context(), days)
@@ -767,6 +845,14 @@ func SubHandler(s *Store) http.Handler {
 		email, err := s.EmailBySubToken(r.Context(), r.PathValue("token"))
 		if err != nil {
 			http.NotFound(w, r)
+			return
+		}
+		if err := s.CheckDevice(r.Context(), email, r.Header.Get("X-Hwid"), r.Header.Get("X-Device-Os"), r.Header.Get("X-Device-Model"), r.UserAgent()); err != nil {
+			if errors.Is(err, ErrDeviceLimit) {
+				http.Error(w, "device limit reached: remove a device in the panel or ask your seller", http.StatusForbidden)
+				return
+			}
+			reply(w, nil, err)
 			return
 		}
 		w.Header().Set("Profile-Update-Interval", "12")

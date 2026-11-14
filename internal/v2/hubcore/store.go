@@ -220,6 +220,10 @@ func Open(path string) (*Store, error) {
 		st.Close()
 		return nil, err
 	}
+	if err := st.ensurePlanSchema(); err != nil {
+		st.Close()
+		return nil, err
+	}
 	return st, nil
 }
 
@@ -491,16 +495,18 @@ type ClientView struct {
 	EffectiveUntil int64
 	Remaining      int64
 	Online         bool
-	ResetPeriod    string `json:"reset_period"`
-	LastReset      int64  `json:"last_reset"`
-	NextReset      int64  `json:"next_reset,omitempty"`
+	ResetPeriod    string    `json:"reset_period"`
+	LastReset      int64     `json:"last_reset"`
+	NextReset      int64     `json:"next_reset,omitempty"`
+	NextPlan       *NextPlan `json:"next_plan,omitempty"`
+	HWIDLimit      int       `json:"hwid_limit"`
 }
 
 // Clients lists every client with usage, newest first.
 func (s *Store) Clients(ctx context.Context) ([]ClientView, error) {
 	rows, err := s.ro.QueryContext(ctx, `SELECT c.email,c.uuid,c.enabled,c.volume_bytes,c.expires_unix,c.duration_seconds,c.max_ips,c.sub_token,c.rep_id,c.plan,c.note,
 COALESCE(u.up,0),COALESCE(u.down,0),COALESCE(u.first_seen_unix,0),COALESCE(u.last_seen_unix,0),
-EXISTS(SELECT 1 FROM online o WHERE o.email=c.email AND o.seen_unix>=?),c.reset_period,c.last_reset_unix
+EXISTS(SELECT 1 FROM online o WHERE o.email=c.email AND o.seen_unix>=?),c.reset_period,c.last_reset_unix,c.next_plan,c.hwid_limit
 FROM clients c LEFT JOIN client_usage u ON u.email=c.email ORDER BY c.created_unix DESC, c.email`, s.now().Unix()-120)
 	if err != nil {
 		return nil, err
@@ -509,9 +515,16 @@ FROM clients c LEFT JOIN client_usage u ON u.email=c.email ORDER BY c.created_un
 	var out []ClientView
 	for rows.Next() {
 		var v ClientView
+		var np string
 		if err := rows.Scan(&v.Email, &v.UUID, &v.Enabled, &v.VolumeBytes, &v.ExpiresUnix, &v.DurationSeconds, &v.MaxIPs, &v.SubToken, &v.RepID, &v.Plan, &v.Note,
-			&v.Usage.Up, &v.Usage.Down, &v.Usage.FirstSeen, &v.Usage.LastSeen, &v.Online, &v.ResetPeriod, &v.LastReset); err != nil {
+			&v.Usage.Up, &v.Usage.Down, &v.Usage.FirstSeen, &v.Usage.LastSeen, &v.Online, &v.ResetPeriod, &v.LastReset, &np, &v.HWIDLimit); err != nil {
 			return nil, err
+		}
+		if np != "" {
+			var p NextPlan
+			if json.Unmarshal([]byte(np), &p) == nil {
+				v.NextPlan = &p
+			}
 		}
 		if v.ResetPeriod != "" && v.LastReset > 0 {
 			v.NextReset = nextReset(v.ResetPeriod, v.LastReset)

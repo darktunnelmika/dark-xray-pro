@@ -133,14 +133,15 @@ func (s *Store) runDueResets(ctx context.Context) int {
 	return len(list)
 }
 
-// RunResets checks periodic resets every 5 minutes.
+// RunResets checks periodic resets and next plans every minute.
 func (s *Store) RunResets(ctx context.Context) {
 	for {
 		s.runDueResets(ctx)
+		s.runNextPlans(ctx)
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.After(5 * time.Minute):
+		case <-time.After(time.Minute):
 		}
 	}
 }
