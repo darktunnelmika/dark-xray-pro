@@ -23,6 +23,14 @@ const I18N = {
     filterExpired: "Expired / used up", filterDisabled: "Disabled", group: "Group", contact: "Contact / note", transfer: "Move to reseller",
     ownerSelf: "Owner (me)", confirmNodeDelete: "Delete node {x} and its inbounds? Clients and usage stay.", selectAll: "Select all",
     backup: "Backup", backupHint: "Download a full snapshot (nodes, inbounds and keys, clients, resellers, credit, usage). The HUB also keeps 14 daily snapshots.", download: "Download backup",
+    finance: "Finance", activity: "Activity", policy: "Limits", usageChart: "Daily usage", payment: "Record payment", amount: "Amount",
+    maxClients: "Max clients (0 = no cap)", maxDays: "Longest term, days (0 = no cap)", maxClientGB: "Largest client volume, GB (0 = no cap)",
+    allowUnlimited: "May sell unlimited plans", canDelete: "May delete clients", refundUnused: "Return unused volume on delete",
+    allowedInbounds: "Allowed inbounds (none ticked = all)", priceGB: "Price per GB", priceUnit: "Price per unlimited unit",
+    period: "Period", last30: "Last 30 days", last7: "Last 7 days", allTime: "All time", sold: "Sold", refunded: "Returned", granted: "Credit given",
+    paid: "Paid", revenue: "Revenue", debt: "Balance due", balance: "Remaining credit", refundDone: "Returned {v} to your credit",
+    kind_adjust: "Credit change", kind_charge: "Sale", kind_refund: "Return", kind_delete: "Deleted", kind_payment: "Payment",
+    when: "When", who: "By", what: "What", more: "Load more", totalLast30: "{v} in the last 30 days",
     health: "Health (24h)", cpu: "CPU", ram: "RAM", disk: "Disk", net: "Network", uptime: "Uptime", inRate: "in", outRate: "out", noData: "No samples yet",
   },
   fa: {
@@ -48,6 +56,14 @@ const I18N = {
     filterExpired: "منقضی / حجم تمام", filterDisabled: "غیرفعال", group: "گروه", contact: "تماس / یادداشت", transfer: "انتقال به نماینده",
     ownerSelf: "مالک (خودم)", confirmNodeDelete: "نود {x} و اینباندهایش حذف شود؟ کلاینت‌ها و مصرف حفظ می‌شوند.", selectAll: "انتخاب همه",
     backup: "بکاپ", backupHint: "دانلود نسخهٔ کامل (نودها، اینباندها و کلیدها، کلاینت‌ها، نماینده‌ها، اعتبار، مصرف). هاب ۱۴ بکاپ روزانه هم نگه می‌دارد.", download: "دانلود بکاپ",
+    finance: "مالی", activity: "فعالیت", policy: "محدودیت‌ها", usageChart: "مصرف روزانه", payment: "ثبت پرداخت", amount: "مبلغ",
+    maxClients: "حداکثر کلاینت (۰ = بدون سقف)", maxDays: "بیشترین مدت، روز (۰ = بدون سقف)", maxClientGB: "بیشترین حجم هر کلاینت، گیگ (۰ = بدون سقف)",
+    allowUnlimited: "اجازهٔ فروش نامحدود", canDelete: "اجازهٔ حذف کلاینت", refundUnused: "برگشت حجم مصرف‌نشده هنگام حذف",
+    allowedInbounds: "اینباندهای مجاز (هیچ‌کدام = همه)", priceGB: "قیمت هر گیگ", priceUnit: "قیمت هر واحد نامحدود",
+    period: "بازه", last30: "۳۰ روز اخیر", last7: "۷ روز اخیر", allTime: "همهٔ زمان‌ها", sold: "فروش", refunded: "برگشتی", granted: "اعتبار داده‌شده",
+    paid: "پرداختی", revenue: "درآمد", debt: "بدهی", balance: "اعتبار باقی‌مانده", refundDone: "{v} به اعتبار شما برگشت",
+    kind_adjust: "تغییر اعتبار", kind_charge: "فروش", kind_refund: "برگشت", kind_delete: "حذف", kind_payment: "پرداخت",
+    when: "زمان", who: "توسط", what: "شرح", more: "بیشتر", totalLast30: "{v} در ۳۰ روز اخیر",
     health: "سلامت (۲۴ ساعت)", cpu: "پردازنده", ram: "رم", disk: "دیسک", net: "شبکه", uptime: "روشن بودن", inRate: "ورودی", outRate: "خروجی", noData: "هنوز نمونه‌ای نیست",
   },
 };
@@ -124,11 +140,11 @@ function confirmAction(text) {
 }
 
 // ---------- Views ----------
-const allRoutes = { dashboard: viewDashboard, clients: viewClients, groups: viewGroups, inbounds: viewInbounds, nodes: viewNodes, reps: viewReps, settings: viewSettings };
+const allRoutes = { dashboard: viewDashboard, clients: viewClients, groups: viewGroups, inbounds: viewInbounds, nodes: viewNodes, reps: viewReps, finance: viewFinance, activity: viewActivity, settings: viewSettings };
 let me = null;
 let routes = allRoutes;
 function routesFor(m) {
-  if (m && m.role === "rep") return { clients: viewClients, settings: viewSettings };
+  if (m && m.role === "rep") return { clients: viewClients, activity: viewActivity, settings: viewSettings };
   return allRoutes;
 }
 
@@ -377,8 +393,12 @@ function clientCard(c, ctx, selected, onSelect) {
     h("div", { class: "row" },
       h("button", { onclick: () => showSub(c) }, t("subscription")),
       h("button", { class: "ghost", onclick: () => clientForm(c, inbounds, ctx) }, t("edit")),
-      h("button", { class: "ghost danger spacer", onclick: async () => {
-        if (await confirmAction(t("confirmDelete", { x: c.Email }))) { await guarded(() => api("DELETE", `/api/v2/admin/clients/${encodeURIComponent(c.Email)}`)); route(); }
+      h("button", { class: "ghost", onclick: () => usageChart(c) }, t("usageChart")),
+      me.role === "rep" && me.policy && !me.policy.CanDelete ? null : h("button", { class: "ghost danger spacer", onclick: async () => {
+        if (!(await confirmAction(t("confirmDelete", { x: c.Email })))) return;
+        const r = await guarded(() => api("DELETE", `/api/v2/admin/clients/${encodeURIComponent(c.Email)}`));
+        if (r && (r.refund_bytes || r.refund_units)) toast(t("refundDone", { v: [r.refund_bytes ? bytes(r.refund_bytes) : "", r.refund_units ? `${fmtNum(r.refund_units)} ${t("units")}` : ""].filter(Boolean).join(" + ") }));
+        route();
       } }, t("delete"))));
 }
 
@@ -410,7 +430,7 @@ function clientForm(c, inbounds, ctx = { reps: [] }) {
   const repSel = owner && !isNew && ctx.reps.length ? h("select", {}, h("option", { value: "" }, t("ownerSelf")),
     ctx.reps.map((r) => h("option", { value: r.ID, selected: v.RepID === r.ID }, r.Name || r.ID))) : null;
   const plan = h("select", {}, h("option", { value: "volume", selected: v.Plan !== "unlimited" }, t("planVolume")),
-    h("option", { value: "unlimited", selected: v.Plan === "unlimited" }, t("planUnlimited")));
+    me.role === "rep" && me.policy && !me.policy.AllowUnlimited ? null : h("option", { value: "unlimited", selected: v.Plan === "unlimited" }, t("planUnlimited")));
   const boxes = (inbounds || []).map((ib) => h("label", { class: "check" },
     h("input", { type: "checkbox", value: ib.tag, checked: isNew ? (inbounds.length === 1) : (v.Inbounds || []).includes(ib.tag) }),
     `${ib.tag} · ${ib.node_id} · ${ib.network}/${ib.security}`));
@@ -528,12 +548,17 @@ function nodeForm() {
 }
 
 async function viewReps() {
-  const reps = await api("GET", "/api/v2/admin/reps");
+  const [reps, inbounds] = await Promise.all([api("GET", "/api/v2/admin/reps"), api("GET", "/api/v2/admin/inbounds")]);
   const cards = (reps || []).map((r) => h("div", { class: "card item" },
     h("div", { class: "head" }, h("span", { class: "name" }, r.Name || r.ID), h("span", { class: "badge" }, r.ID),
       h("span", { class: `badge ${r.Enabled ? "good" : "bad"} spacer` }, t(r.Enabled ? "enabled" : "disabled"))),
     h("div", { class: "muted small" }, `${t("volumeCredit")}: ${bytes(r.VolumeCredit)} · ${t("units")}: ${fmtNum(r.UnlimitedUnits)} · ${t("clientsCount", { n: fmtNum(r.Clients) })}`),
-    h("div", { class: "row" }, h("button", { onclick: () => creditForm(r) }, t("addCredit")), h("button", { class: "ghost", onclick: () => repForm(r) }, t("edit")))));
+    h("div", { class: "muted small" }, policySummary(r.Policy)),
+    h("div", { class: "row" }, h("button", { onclick: () => creditForm(r) }, t("addCredit")),
+      h("button", { class: "ghost", onclick: () => policyForm(r, inbounds) }, t("policy")),
+      h("button", { class: "ghost", onclick: () => paymentForm(r) }, t("payment")),
+      h("a", { class: "btn ghost", href: `#/activity?rep=${encodeURIComponent(r.ID)}` }, t("activity")),
+      h("button", { class: "ghost", onclick: () => repForm(r) }, t("edit")))));
   return h("div", {},
     h("div", { class: "row" }, h("h1", {}, t("reps")), h("button", { class: "primary spacer", onclick: () => repForm(null) }, t("add"))),
     h("div", { class: "list" }, cards.length ? cards : h("p", { class: "muted" }, t("empty"))));
@@ -573,6 +598,154 @@ function creditForm(r) {
   openModal(`${t("addCredit")} · ${r.Name || r.ID}`, h("div", { class: "form" },
     h("div", { class: "two" }, h("label", {}, h("span", {}, `${t("volumeCredit")} (GB)`), gb), h("label", {}, h("span", {}, t("units")), units)),
     h("p", { class: "small muted" }, t("unitsHint")), h("label", {}, h("span", {}, t("note")), note)), [save]);
+}
+
+function policySummary(p) {
+  if (!p) return "";
+  const parts = [];
+  if (p.MaxClients) parts.push(`≤ ${fmtNum(p.MaxClients)} ${t("clients")}`);
+  if (p.MaxDays) parts.push(`≤ ${fmtNum(p.MaxDays)}d`);
+  if (p.MaxClientGB) parts.push(`≤ ${fmtNum(p.MaxClientGB)} GB`);
+  if (!p.AllowUnlimited) parts.push(`✕ ${t("planUnlimited")}`);
+  if (!p.CanDelete) parts.push(`✕ ${t("delete")}`);
+  if (p.RefundUnused) parts.push(`↺ ${t("refunded")}`);
+  if ((p.Inbounds || []).length) parts.push(p.Inbounds.join(", "));
+  return parts.length ? `${t("policy")}: ${parts.join(" · ")}` : "";
+}
+
+function policyForm(r, inbounds) {
+  const p = r.Policy || {};
+  const num = (v) => h("input", { type: "number", min: "0", step: "1", value: v || 0 });
+  const box = (v) => h("input", { type: "checkbox", checked: !!v });
+  const f = { mc: num(p.MaxClients), md: num(p.MaxDays), mg: num(p.MaxClientGB), au: box(p.AllowUnlimited), cd: box(p.CanDelete), ru: box(p.RefundUnused), pg: num(p.PriceGB), pu: num(p.PriceUnit) };
+  const allowed = new Set(p.Inbounds || []);
+  const boxes = (inbounds || []).map((ib) => h("label", { class: "check" }, h("input", { type: "checkbox", value: ib.tag, checked: allowed.has(ib.tag) }), `${ib.tag} · ${ib.node_id}`));
+  const err = h("div", { class: "error" });
+  const save = h("button", { class: "primary", value: "save", onclick: async (e) => {
+    e.preventDefault();
+    try {
+      await guarded(() => api("PUT", `/api/v2/admin/reps/${encodeURIComponent(r.ID)}/policy`, {
+        MaxClients: +f.mc.value || 0, MaxDays: +f.md.value || 0, MaxClientGB: +f.mg.value || 0,
+        AllowUnlimited: f.au.checked, CanDelete: f.cd.checked, RefundUnused: f.ru.checked,
+        Inbounds: boxes.map((b) => b.querySelector("input")).filter((i) => i.checked).map((i) => i.value),
+        PriceGB: +f.pg.value || 0, PriceUnit: +f.pu.value || 0 }));
+      document.getElementById("modal").close("save"); route();
+    } catch (x) { err.textContent = x.message; }
+  } }, t("save"));
+  const lab = (k, el) => h("label", {}, h("span", {}, t(k)), el);
+  openModal(`${t("policy")} · ${r.Name || r.ID}`, h("div", { class: "form" },
+    h("div", { class: "two" }, lab("maxClients", f.mc), lab("maxDays", f.md)),
+    lab("maxClientGB", f.mg),
+    h("label", { class: "check" }, f.au, t("allowUnlimited")),
+    h("label", { class: "check" }, f.cd, t("canDelete")),
+    h("label", { class: "check" }, f.ru, t("refundUnused")),
+    h("fieldset", { class: "form", style: "border:0;padding:0;margin:0" }, h("legend", { class: "small muted" }, t("allowedInbounds")), boxes),
+    h("div", { class: "two" }, lab("priceGB", f.pg), lab("priceUnit", f.pu)), err), [save]);
+}
+
+function paymentForm(r) {
+  const amount = h("input", { type: "number", step: "1", required: true, autofocus: true });
+  const note = h("input", {});
+  const save = h("button", { class: "primary", value: "save", onclick: async (e) => {
+    e.preventDefault();
+    if (!amount.reportValidity()) return;
+    try {
+      await guarded(() => api("POST", `/api/v2/admin/reps/${encodeURIComponent(r.ID)}/payment`, { Amount: Math.round(+amount.value), Note: note.value }));
+      document.getElementById("modal").close("save"); route();
+    } catch {}
+  } }, t("save"));
+  openModal(`${t("payment")} · ${r.Name || r.ID}`, h("div", { class: "form" },
+    h("label", {}, h("span", {}, t("amount")), amount), h("label", {}, h("span", {}, t("note")), note)), [save]);
+}
+
+function money(n) { return fmtNum(n); }
+
+async function viewFinance() {
+  const days = new URLSearchParams(location.hash.split("?")[1] || "").get("days") ?? "30";
+  const rows = await api("GET", `/api/v2/admin/finance?days=${encodeURIComponent(days)}`);
+  const period = h("select", { onchange: (e) => { location.hash = `#/finance?days=${e.target.value}`; } },
+    [["7", t("last7")], ["30", t("last30")], ["0", t("allTime")]].map(([v, l]) => h("option", { value: v, selected: v === days }, l)));
+  const sum = (k) => rows.reduce((a, r) => a + r[k], 0);
+  const stat = (k, v, cls = "") => h("div", { class: `card stat ${cls}` }, h("div", { class: "v" }, v), h("div", { class: "k" }, t(k)));
+  const head = ["reps", "sold", "refunded", "granted", "revenue", "paid", "debt", "balance"];
+  const table = h("div", { class: "table-wrap" }, h("table", { class: "table" },
+    h("thead", {}, h("tr", {}, head.map((k) => h("th", { scope: "col" }, t(k))))),
+    h("tbody", {}, rows.map((r) => h("tr", {},
+      h("th", { scope: "row" }, h("a", { href: `#/activity?rep=${encodeURIComponent(r.RepID)}` }, r.Name || r.RepID), h("div", { class: "small muted" }, t("clientsCount", { n: fmtNum(r.Clients) }))),
+      h("td", {}, bytes(r.SoldBytes), r.SoldUnits ? h("div", { class: "small muted" }, `${fmtNum(r.SoldUnits)} ${t("units")}`) : null),
+      h("td", {}, bytes(r.RefundBytes), r.RefundUnits ? h("div", { class: "small muted" }, `${fmtNum(r.RefundUnits)} ${t("units")}`) : null),
+      h("td", {}, bytes(r.GrantedBytes), r.GrantedUnits ? h("div", { class: "small muted" }, `${fmtNum(r.GrantedUnits)} ${t("units")}`) : null),
+      h("td", {}, money(r.Revenue)), h("td", {}, money(r.Paid)),
+      h("td", { class: r.Debt > 0 ? "warn-text" : "" }, money(r.Debt)),
+      h("td", {}, bytes(r.VolumeCredit), h("div", { class: "small muted" }, `${fmtNum(r.Units)} ${t("units")}`)))))));
+  return h("div", {},
+    h("div", { class: "row" }, h("h1", {}, t("finance")), h("label", { class: "spacer inline" }, h("span", { class: "small muted" }, t("period")), period)),
+    h("div", { class: "grid" }, stat("sold", bytes(sum("SoldBytes"))), stat("revenue", money(sum("Revenue"))), stat("paid", money(sum("Paid"))),
+      stat("debt", money(sum("Debt")), sum("Debt") > 0 ? "warn" : "")),
+    rows.length ? table : h("p", { class: "muted" }, t("empty")));
+}
+
+async function viewActivity() {
+  const q = new URLSearchParams(location.hash.split("?")[1] || "");
+  const rep = q.get("rep") || "";
+  const owner = me.role === "owner";
+  const [first, reps] = await Promise.all([
+    api("GET", `/api/v2/rep/ledger?rep=${encodeURIComponent(rep)}`),
+    owner ? api("GET", "/api/v2/admin/reps") : Promise.resolve([]),
+  ]);
+  const fmtTime = (u) => new Intl.DateTimeFormat(lang === "fa" ? "fa-IR" : "en-GB", { dateStyle: "short", timeStyle: "short" }).format(new Date(u * 1000));
+  const delta = (e) => [
+    e.VolumeDelta ? `${e.VolumeDelta > 0 ? "+" : "−"}${bytes(Math.abs(e.VolumeDelta))}` : "",
+    e.UnitsDelta ? `${e.UnitsDelta > 0 ? "+" : "−"}${fmtNum(Math.abs(e.UnitsDelta))} ${t("units")}` : "",
+    e.Amount ? `${t("amount")} ${money(e.Amount)}` : ""].filter(Boolean).join(" · ");
+  const cls = { charge: "", refund: "good", adjust: "good", delete: "bad", payment: "good" };
+  const body = h("tbody", {});
+  const add = (list) => body.append(...list.map((e) => h("tr", {},
+    h("td", { class: "small" }, fmtTime(e.Unix)),
+    owner && !rep ? h("td", {}, e.RepID) : null,
+    h("td", {}, h("span", { class: `badge ${cls[e.Kind] || ""}` }, t(`kind_${e.Kind}`)), e.ClientEmail ? ` ${e.ClientEmail}` : ""),
+    h("td", { class: "mono small" }, delta(e)),
+    h("td", { class: "small muted" }, [e.Actor, e.Note].filter(Boolean).join(" — ")))));
+  add(first);
+  let last = first.at(-1);
+  const more = h("button", { class: "ghost", hidden: first.length < 100, onclick: async () => {
+    const next = await api("GET", `/api/v2/rep/ledger?rep=${encodeURIComponent(rep)}&before=${last.ID}`);
+    add(next); last = next.at(-1) || last; more.hidden = next.length < 100;
+  } }, t("more"));
+  const repSel = owner ? h("select", { onchange: (e) => { location.hash = `#/activity${e.target.value ? `?rep=${encodeURIComponent(e.target.value)}` : ""}`; } },
+    h("option", { value: "" }, t("all")), reps.map((r) => h("option", { value: r.ID, selected: r.ID === rep }, r.Name || r.ID))) : null;
+  return h("div", {},
+    h("div", { class: "row" }, h("h1", {}, t("activity")), repSel ? h("span", { class: "spacer" }, repSel) : null),
+    first.length ? h("div", { class: "table-wrap" }, h("table", { class: "table" },
+      h("thead", {}, h("tr", {}, h("th", {}, t("when")), owner && !rep ? h("th", {}, t("reps")) : null, h("th", {}, t("what")), h("th", {}, t("credit")), h("th", {}, t("who")))),
+      body)) : h("p", { class: "muted" }, t("empty")), more);
+}
+
+// Daily usage as SVG bars (download stacked on upload), built with the DOM.
+async function usageChart(c) {
+  const days = await api("GET", `/api/v2/admin/clients/${encodeURIComponent(c.Email)}/daily?days=30`);
+  const NS = "http://www.w3.org/2000/svg", W = 600, H = 180, P = 4;
+  const el = (n, a) => { const x = document.createElementNS(NS, n); for (const [k, v] of Object.entries(a)) x.setAttribute(k, v); return x; };
+  const svg = el("svg", { viewBox: `0 0 ${W} ${H + 18}`, class: "bars", role: "img", "aria-label": t("usageChart") });
+  const top = Math.max(1, ...days.map((d) => d.Up + d.Down));
+  const bw = W / days.length;
+  days.forEach((d, i) => {
+    const total = d.Up + d.Down, hd = (d.Down / top) * (H - P), hu = (d.Up / top) * (H - P);
+    const g = el("g", {});
+    const title = el("title", {}); title.textContent = `${d.Day}: ${bytes(total)} (↓ ${bytes(d.Down)} · ↑ ${bytes(d.Up)})`;
+    g.append(title,
+      el("rect", { x: i * bw + 1, y: H - hd, width: Math.max(1, bw - 2), height: hd, class: "bar-down", rx: 2 }),
+      el("rect", { x: i * bw + 1, y: H - hd - hu, width: Math.max(1, bw - 2), height: hu, class: "bar-up", rx: 2 }));
+    svg.append(g);
+    if (i % 7 === days.length % 7 || i === days.length - 1) {
+      const lab = el("text", { x: i * bw + bw / 2, y: H + 14, "text-anchor": "middle", class: "bar-label" }); lab.textContent = d.Day.slice(5); svg.append(lab);
+    }
+  });
+  const sum = days.reduce((a, d) => a + d.Up + d.Down, 0);
+  openModal(`${t("usageChart")} · ${c.Email}`, h("div", { class: "form" },
+    h("div", { class: "row small" }, h("strong", {}, t("totalLast30", { v: bytes(sum) })),
+      h("span", { class: "spacer legend" }, h("i", { class: "sw down" }), `↓ ${t("inRate")}`, h("i", { class: "sw up" }), `↑ ${t("outRate")}`)),
+    svg));
 }
 
 function viewSettings() {
