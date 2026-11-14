@@ -101,6 +101,9 @@ func (s *Store) RenderNode(ctx context.Context, nodeID string) ([]byte, error) {
 			return nil, fmt.Errorf("inbound %s: %w", in.tag, err)
 		}
 		t["tag"] = in.tag
+		if err := s.resolveCerts(ctx, t); err != nil {
+			return nil, fmt.Errorf("inbound %s: %w", in.tag, err)
+		}
 		proto := t["protocol"].(string)
 		settings, _ := t["settings"].(map[string]any)
 		if settings == nil {

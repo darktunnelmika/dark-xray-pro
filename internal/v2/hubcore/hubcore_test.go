@@ -693,8 +693,12 @@ func TestPresetsRenderForEveryProtocol(t *testing.T) {
 	if _, err := s.CreateNode(ctx, "n1", "N"); err != nil {
 		t.Fatal(err)
 	}
+	cert, key := testCert(t, "www.speedtest.net", time.Unix(1_800_000_000, 0).Add(30*24*time.Hour))
+	if err := s.PutCert(ctx, "c", cert, key); err != nil {
+		t.Fatal(err)
+	}
 	for i, p := range Presets {
-		req := PresetRequest{Tag: "in-" + strconv.Itoa(i), NodeID: "n1", Preset: p, Port: 20000 + i, SNI: "www.speedtest.net",
+		req := PresetRequest{Tag: "in-" + strconv.Itoa(i), NodeID: "n1", Preset: p, Port: 20000 + i, SNI: "www.speedtest.net", Cert: "c",
 			Endpoints: []sub.Endpoint{{Name: "Direct", Address: "1.2.3.4", Port: 20000 + i}}}
 		if err := s.CreatePreset(ctx, req); err != nil {
 			t.Fatalf("%s: %v", p, err)

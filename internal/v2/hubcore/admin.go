@@ -328,6 +328,22 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 		err := s.DeleteSwap(r.Context(), r.PathValue("id"))
 		reply(w, map[string]bool{"ok": err == nil}, err)
 	}))
+	mux.HandleFunc("GET /api/v2/admin/certs", guard(func(w http.ResponseWriter, r *http.Request) {
+		list, err := s.Certs(r.Context())
+		reply(w, list, err)
+	}))
+	mux.HandleFunc("PUT /api/v2/admin/certs/{id}", guard(func(w http.ResponseWriter, r *http.Request) {
+		var in struct{ Cert, Key string }
+		if !decode(w, r, &in) {
+			return
+		}
+		err := s.PutCert(r.Context(), r.PathValue("id"), in.Cert, in.Key)
+		reply(w, map[string]bool{"ok": err == nil}, err)
+	}))
+	mux.HandleFunc("DELETE /api/v2/admin/certs/{id}", guard(func(w http.ResponseWriter, r *http.Request) {
+		err := s.DeleteCert(r.Context(), r.PathValue("id"))
+		reply(w, map[string]bool{"ok": err == nil}, err)
+	}))
 	mux.HandleFunc("GET /api/v2/admin/presets", guard(func(w http.ResponseWriter, r *http.Request) {
 		reply(w, Presets, nil)
 	}))

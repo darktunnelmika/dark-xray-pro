@@ -170,6 +170,10 @@ func Open(path string) (*Store, error) {
 		st.Close()
 		return nil, err
 	}
+	if err := st.ensureCertSchema(); err != nil {
+		st.Close()
+		return nil, err
+	}
 	return st, nil
 }
 

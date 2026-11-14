@@ -34,10 +34,12 @@ type PresetRequest struct {
 	Path      string         `json:"path"` // ws/xhttp path or gRPC service name
 	Remark    string         `json:"remark"`
 	Endpoints []sub.Endpoint `json:"endpoints"` // Direct and/or Tunnel addresses shown in subscriptions
+	Cert      string         `json:"cert"`      // TLS presets: stored certificate id; SNI is the domain
 }
 
 // Presets lists what the panel offers.
-var Presets = []string{"vless-reality-tcp", "vless-reality-grpc", "vless-reality-xhttp", "vless-ws", "vmess-ws", "vmess-tcp", "trojan-ws", "ss2022"}
+var Presets = []string{"vless-reality-tcp", "vless-reality-grpc", "vless-reality-xhttp", "vless-ws", "vmess-ws", "vmess-tcp", "trojan-ws", "ss2022",
+	"vless-tls-ws", "vless-tls-grpc", "vless-tls-xhttp", "vmess-tls-ws", "trojan-tls-tcp"}
 
 // BuildPreset renders the template and client metadata for a preset.
 func BuildPreset(p PresetRequest) (template, meta []byte, err error) {
@@ -69,8 +71,41 @@ func BuildPreset(p PresetRequest) (template, meta []byte, err error) {
 		t["streamSettings"] = st
 		return nil
 	}
+	tlsStream := func(network string, extra map[string]any) error {
+		if p.Cert == "" || p.SNI == "" {
+			return fmt.Errorf("%w: TLS presets need a certificate and its domain (sni)", ErrInvalid)
+		}
+		st := map[string]any{"network": network, "security": "tls", "tlsSettings": map[string]any{
+			"serverName": p.SNI, "alpn": []string{"h2", "http/1.1"}, "certificates": []any{map[string]any{"dark_cert": p.Cert}}}}
+		for k, v := range extra {
+			st[k] = v
+		}
+		t["streamSettings"] = st
+		return nil
+	}
 	path := p.Path
 	switch p.Preset {
+	case "vless-tls-ws", "vmess-tls-ws":
+		if path == "" {
+			path = "/" + randomHex(6)
+		}
+		if p.Preset == "vmess-tls-ws" {
+			t["protocol"] = "vmess"
+		}
+		err = tlsStream("ws", map[string]any{"wsSettings": map[string]any{"path": path}})
+	case "vless-tls-grpc":
+		if path == "" {
+			path = randomHex(6)
+		}
+		err = tlsStream("grpc", map[string]any{"grpcSettings": map[string]any{"serviceName": path}})
+	case "vless-tls-xhttp":
+		if path == "" {
+			path = "/" + randomHex(6)
+		}
+		err = tlsStream("xhttp", map[string]any{"xhttpSettings": map[string]any{"path": path, "mode": "auto"}})
+	case "trojan-tls-tcp":
+		t["protocol"] = "trojan"
+		err = tlsStream("tcp", nil)
 	case "vless-reality-tcp":
 		t["settings"] = map[string]any{"flow": "xtls-rprx-vision"}
 		err = reality("tcp", nil)
@@ -123,6 +158,12 @@ func BuildPreset(p PresetRequest) (template, meta []byte, err error) {
 
 // CreatePreset builds and stores a preset inbound.
 func (s *Store) CreatePreset(ctx context.Context, p PresetRequest) error {
+	if p.Cert != "" {
+		var x int
+		if err := s.ro.QueryRowContext(ctx, `SELECT 1 FROM certs WHERE id=?`, p.Cert).Scan(&x); err != nil {
+			return fmt.Errorf("%w: unknown certificate %q", ErrInvalid, p.Cert)
+		}
+	}
 	tpl, meta, err := BuildPreset(p)
 	if err != nil {
 		return err
