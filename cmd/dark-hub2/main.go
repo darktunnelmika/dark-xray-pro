@@ -151,6 +151,17 @@ func main() {
 		if err := s.PutClient(ctx, c); err != nil {
 			log.Fatal(err)
 		}
+	case "admin":
+		// dark-hub2 admin -db v2.sqlite -name owner   (reads the password from stdin)
+		var pass string
+		fmt.Fprint(os.Stderr, "password (10+ chars): ")
+		if _, err := fmt.Scanln(&pass); err != nil {
+			log.Fatal(err)
+		}
+		if err := s.SetAdmin(ctx, *name, pass); err != nil {
+			log.Fatal(err)
+		}
+		fmt.Println("owner login saved:", *name)
 	case "status":
 		nodes, err := s.Nodes(ctx)
 		if err != nil {

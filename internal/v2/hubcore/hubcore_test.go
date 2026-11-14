@@ -265,3 +265,65 @@ func TestAdminAndPublicSubscription(t *testing.T) {
 		t.Fatal("credentials changed on update")
 	}
 }
+
+func TestLoginSessionAndPreset(t *testing.T) {
+	s, _ := newStore(t)
+	ctx := context.Background()
+	if err := s.SetAdmin(ctx, "owner", "correct horse battery"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Login(ctx, "owner", "wrong password!!"); err == nil {
+		t.Fatal("wrong password accepted")
+	}
+	h := httptest.NewServer(AdminHandler(s, ""))
+	defer h.Close()
+	resp, err := http.Post(h.URL+"/api/v2/auth/login", "application/json", strings.NewReader(`{"Username":"owner","Password":"correct horse battery"}`))
+	if err != nil || resp.StatusCode != 200 {
+		t.Fatalf("login %v %v", resp.Status, err)
+	}
+	cookie := resp.Cookies()[0]
+	if !cookie.HttpOnly || cookie.SameSite != http.SameSiteStrictMode {
+		t.Fatal("session cookie must be HttpOnly and SameSite=Strict")
+	}
+	if _, err := s.CreateNode(ctx, "uk-1", "UK"); err != nil {
+		t.Fatal(err)
+	}
+	body := `{"tag":"uk-grpc","node_id":"uk-1","preset":"vless-reality-grpc","port":2083,"sni":"www.speedtest.net","endpoints":[{"name":"Direct","address":"5.101.216.178","port":2083}]}`
+	call := func(withHeader bool) int {
+		req, _ := http.NewRequest("POST", h.URL+"/api/v2/admin/inbounds/preset", strings.NewReader(body))
+		req.AddCookie(cookie)
+		if withHeader {
+			req.Header.Set("X-Dark-Request", "1")
+		}
+		r, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		r.Body.Close()
+		return r.StatusCode
+	}
+	if call(false) != 401 {
+		t.Fatal("cookie mutation without X-Dark-Request must be refused (CSRF)")
+	}
+	if code := call(true); code != 200 {
+		t.Fatalf("preset create %d", code)
+	}
+	list, err := s.Inbounds(ctx)
+	if err != nil || len(list) != 1 || list[0].Network != "grpc" || list[0].Security != "reality" {
+		t.Fatalf("inbounds %+v %v", list, err)
+	}
+	if strings.Contains(string(list[0].Meta), "privateKey") {
+		t.Fatal("private key must not leave the HUB")
+	}
+	cfg, err := s.RenderNode(ctx, "uk-1")
+	if err != nil || !strings.Contains(string(cfg), `"serviceName"`) {
+		t.Fatalf("render %v", err)
+	}
+}
+
+func TestRealityKeysShape(t *testing.T) {
+	priv, pub, err := RealityKeys()
+	if err != nil || len(priv) != 43 || len(pub) != 43 || priv == pub {
+		t.Fatalf("keys %q %q %v", priv, pub, err)
+	}
+}

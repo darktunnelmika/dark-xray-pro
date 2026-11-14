@@ -1,7 +1,6 @@
 package hubcore
 
 import (
-	"crypto/subtle"
 	"encoding/json"
 	"net/http"
 	"strings"
@@ -17,14 +16,60 @@ func AdminHandler(s *Store, adminToken string) http.Handler {
 	mux := http.NewServeMux()
 	guard := func(h http.HandlerFunc) http.HandlerFunc {
 		return func(w http.ResponseWriter, r *http.Request) {
-			tok, err := bearer(r.Header.Get("Authorization"))
-			if err != nil || adminToken == "" || subtle.ConstantTimeCompare([]byte(tok), []byte(adminToken)) != 1 {
+			if !authorized(s, adminToken, r) {
 				http.Error(w, "unauthorized", http.StatusUnauthorized)
 				return
 			}
 			h(w, r)
 		}
 	}
+	mux.HandleFunc("POST /api/v2/auth/login", func(w http.ResponseWriter, r *http.Request) {
+		var in struct{ Username, Password string }
+		if !decode(w, r, &in) {
+			return
+		}
+		tok, err := s.Login(r.Context(), in.Username, in.Password)
+		if err != nil {
+			time.Sleep(500 * time.Millisecond)
+			http.Error(w, "invalid username or password", http.StatusUnauthorized)
+			return
+		}
+		setSessionCookie(w, r, tok, int(sessionTTL.Seconds()))
+		reply(w, map[string]string{"username": in.Username}, nil)
+	})
+	mux.HandleFunc("POST /api/v2/auth/logout", func(w http.ResponseWriter, r *http.Request) {
+		if c, err := r.Cookie(sessionCookie); err == nil {
+			_ = s.Logout(r.Context(), c.Value)
+		}
+		setSessionCookie(w, r, "", -1)
+		reply(w, map[string]bool{"ok": true}, nil)
+	})
+	mux.HandleFunc("GET /api/v2/auth/me", guard(func(w http.ResponseWriter, r *http.Request) {
+		reply(w, map[string]bool{"ok": true}, nil)
+	}))
+	mux.HandleFunc("GET /api/v2/admin/overview", guard(func(w http.ResponseWriter, r *http.Request) {
+		o, err := s.Overview(r.Context())
+		reply(w, o, err)
+	}))
+	mux.HandleFunc("GET /api/v2/admin/inbounds", guard(func(w http.ResponseWriter, r *http.Request) {
+		list, err := s.Inbounds(r.Context())
+		reply(w, list, err)
+	}))
+	mux.HandleFunc("GET /api/v2/admin/presets", guard(func(w http.ResponseWriter, r *http.Request) {
+		reply(w, Presets, nil)
+	}))
+	mux.HandleFunc("POST /api/v2/admin/inbounds/preset", guard(func(w http.ResponseWriter, r *http.Request) {
+		var p PresetRequest
+		if !decode(w, r, &p) {
+			return
+		}
+		err := s.CreatePreset(r.Context(), p)
+		reply(w, map[string]bool{"ok": err == nil}, err)
+	}))
+	mux.HandleFunc("DELETE /api/v2/admin/inbounds/{tag}", guard(func(w http.ResponseWriter, r *http.Request) {
+		err := s.DeleteInbound(r.Context(), r.PathValue("tag"))
+		reply(w, map[string]bool{"ok": err == nil}, err)
+	}))
 	mux.HandleFunc("GET /api/v2/admin/nodes", guard(func(w http.ResponseWriter, r *http.Request) {
 		nodes, err := s.Nodes(r.Context())
 		type view struct {

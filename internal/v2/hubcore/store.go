@@ -141,7 +141,12 @@ func Open(path string) (*Store, error) {
 		return nil, err
 	}
 	ro.SetMaxOpenConns(4)
-	return &Store{db: db, ro: ro, now: time.Now}, nil
+	st := &Store{db: db, ro: ro, now: time.Now}
+	if err := st.ensureAuthSchema(); err != nil {
+		st.Close()
+		return nil, err
+	}
+	return st, nil
 }
 
 func (s *Store) Close() error {
