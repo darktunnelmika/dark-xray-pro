@@ -426,3 +426,19 @@ func TestDiffUsersAccountChange(t *testing.T) {
 		t.Fatalf("ops %+v", ops)
 	}
 }
+
+func TestSumInboundStatsSkipsAPI(t *testing.T) {
+	got := SumInboundStats([]*xstats.Stat{
+		{Name: "inbound>>>vless-1>>>traffic>>>uplink", Value: 5},
+		{Name: "inbound>>>vless-1>>>traffic>>>downlink", Value: 7},
+		{Name: "inbound>>>api>>>traffic>>>downlink", Value: 9},
+		{Name: "user>>>alice>>>traffic>>>uplink", Value: 3},
+	})
+	if len(got) != 1 || got[0].Email != "vless-1" || got[0].Up != 5 || got[0].Down != 7 {
+		t.Fatalf("%+v", got)
+	}
+	m := MergeBatches(wire.UsageBatch{Inbounds: got}, wire.UsageBatch{Inbounds: got})
+	if len(m.Inbounds) != 1 || m.Inbounds[0].Down != 14 {
+		t.Fatalf("merge %+v", m.Inbounds)
+	}
+}

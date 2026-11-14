@@ -181,16 +181,20 @@ func (a *Agent) Collect(ctx context.Context) {
 		return
 	}
 	online, _ := a.stats.OnlineIPs(ctx)
+	var inbounds []wire.UserTraffic
+	if src, ok := unwrapStats(a.stats).(interface{ TakeInbound() []wire.UserTraffic }); ok {
+		inbounds = src.TakeInbound()
+	}
 	a.mu.Lock()
 	a.onlineCount = len(online)
 	disc := a.pendingDisc
 	a.pendingDisc = nil
 	sendOnline := len(online) > 0 && now.Sub(a.lastOnline) >= time.Minute
 	a.mu.Unlock()
-	if len(traffic) == 0 && len(disc) == 0 && !sendOnline {
+	if len(traffic) == 0 && len(disc) == 0 && len(inbounds) == 0 && !sendOnline {
 		return
 	}
-	b := wire.UsageBatch{NodeID: a.cfg.NodeID, FromUnix: a.lastFrom, ToUnix: now.Unix(), Traffic: traffic, Disconnects: disc}
+	b := wire.UsageBatch{NodeID: a.cfg.NodeID, FromUnix: a.lastFrom, ToUnix: now.Unix(), Traffic: traffic, Disconnects: disc, Inbounds: inbounds}
 	if sendOnline || len(traffic) > 0 {
 		b.Online = onlineList(online)
 	}
@@ -210,6 +214,13 @@ func (a *Agent) Collect(ctx context.Context) {
 		a.lastOnline = now
 	}
 	a.mu.Unlock()
+}
+
+func unwrapStats(s StatsSource) StatsSource {
+	if c, ok := s.(*carryStats); ok {
+		return c.inner
+	}
+	return s
 }
 
 // carry re-queues traffic after a failed spool write by wrapping the source.

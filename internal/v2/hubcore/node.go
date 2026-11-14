@@ -139,6 +139,15 @@ ON CONFLICT(email,node_id,day) DO UPDATE SET up=up+excluded.up, down=down+exclud
 			return wire.UsageAck{}, err
 		}
 	}
+	for _, t := range b.Inbounds {
+		if t.Up < 0 || t.Down < 0 || !idRE.MatchString(t.Email) || t.Email == apiTag || t.Up+t.Down == 0 {
+			continue // informational: a bad entry never rejects the batch
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO inbound_traffic(tag,day,up,down) VALUES(?,?,?,?)
+ON CONFLICT(tag,day) DO UPDATE SET up=up+excluded.up, down=down+excluded.down`, t.Email, day, t.Up, t.Down); err != nil {
+			return wire.UsageAck{}, err
+		}
+	}
 	if b.Online != nil {
 		if _, err := tx.ExecContext(ctx, `DELETE FROM online WHERE node_id=?`, nodeID); err != nil {
 			return wire.UsageAck{}, err

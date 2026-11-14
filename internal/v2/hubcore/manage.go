@@ -7,6 +7,13 @@ import (
 )
 
 const manageSchema = `
+CREATE TABLE IF NOT EXISTS inbound_traffic (
+  tag TEXT NOT NULL,
+  day TEXT NOT NULL,
+  up INTEGER NOT NULL DEFAULT 0,
+  down INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY(tag, day)
+);
 CREATE TABLE IF NOT EXISTS client_groups (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,

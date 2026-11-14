@@ -26,8 +26,9 @@ type StatsSource interface {
 type XrayStats struct {
 	Addr string
 
-	mu   sync.Mutex
-	conn *grpc.ClientConn
+	mu       sync.Mutex
+	conn     *grpc.ClientConn
+	inbounds []wire.UserTraffic
 }
 
 func (x *XrayStats) client() (xstats.StatsServiceClient, error) {
@@ -97,7 +98,47 @@ func (x *XrayStats) TakeTraffic(ctx context.Context) ([]wire.UserTraffic, error)
 	if err != nil {
 		return nil, err
 	}
+	// Per-inbound counters are informational: a failure here never blocks
+	// user accounting.
+	if ib, err := c.QueryStats(ctx, &xstats.QueryStatsRequest{Pattern: "inbound>>>", Reset_: true}); err == nil {
+		x.mu.Lock()
+		x.inbounds = mergeTraffic(x.inbounds, SumInboundStats(ib.Stat))
+		x.mu.Unlock()
+	}
 	return SumUserStats(resp.Stat), nil
+}
+
+// TakeInbound returns per-inbound deltas collected since the last call.
+func (x *XrayStats) TakeInbound() []wire.UserTraffic {
+	x.mu.Lock()
+	defer x.mu.Unlock()
+	out := x.inbounds
+	x.inbounds = nil
+	return out
+}
+
+// SumInboundStats folds "inbound>>>TAG>>>traffic>>>uplink" entries, skipping
+// the local API inbound.
+func SumInboundStats(stats []*xstats.Stat) []wire.UserTraffic {
+	renamed := make([]*xstats.Stat, 0, len(stats))
+	for _, s := range stats {
+		if s == nil {
+			continue
+		}
+		parts := strings.Split(s.Name, ">>>")
+		if len(parts) != 4 || parts[0] != "inbound" || parts[1] == "api" {
+			continue
+		}
+		renamed = append(renamed, &xstats.Stat{Name: "user>>>" + parts[1] + ">>>" + parts[2] + ">>>" + parts[3], Value: s.Value})
+	}
+	return SumUserStats(renamed)
+}
+
+func mergeTraffic(a, b []wire.UserTraffic) []wire.UserTraffic {
+	if len(a) == 0 {
+		return b
+	}
+	return MergeBatches(wire.UsageBatch{Traffic: a}, wire.UsageBatch{Traffic: b}).Traffic
 }
 
 func onlineEmail(name string) string {

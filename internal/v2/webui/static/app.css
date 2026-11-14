@@ -146,3 +146,9 @@ label.inline select { inline-size: auto; }
 .sw { inline-size: 10px; block-size: 10px; border-radius: 3px; display: inline-block; }
 .sw.down { background: var(--accent); }
 .sw.up { background: color-mix(in oklab, var(--accent) 45%, var(--good)); }
+
+textarea.code {
+  inline-size: 100%; font: 12.5px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; padding: 10px; border-radius: 10px;
+  border: 1px solid var(--line); background: var(--surface-2); color: var(--text); resize: vertical; tab-size: 2;
+}
+dialog.wide { inline-size: min(860px, calc(100vw - 24px)); }

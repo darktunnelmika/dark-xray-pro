@@ -30,6 +30,8 @@ const I18N = {
     period: "Period", last30: "Last 30 days", last7: "Last 7 days", allTime: "All time", sold: "Sold", refunded: "Returned", granted: "Credit given",
     paid: "Paid", revenue: "Revenue", debt: "Balance due", balance: "Remaining credit", refundDone: "Returned {v} to your credit",
     kind_adjust: "Credit change", kind_charge: "Sale", kind_refund: "Return", kind_delete: "Deleted", kind_payment: "Payment",
+    advanced: "Advanced editor", template: "Xray inbound (JSON, without clients)", metaJson: "Subscription settings (JSON)", invalidJson: "Invalid JSON in {x}",
+    enable: "Enable", disable: "Disable", advancedHint: "Clients are injected by the HUB. Nodes pick up changes within a few seconds without dropping other inbounds.",
     when: "When", who: "By", what: "What", more: "Load more", totalLast30: "{v} in the last 30 days",
     health: "Health (24h)", cpu: "CPU", ram: "RAM", disk: "Disk", net: "Network", uptime: "Uptime", inRate: "in", outRate: "out", noData: "No samples yet",
   },
@@ -63,6 +65,8 @@ const I18N = {
     period: "بازه", last30: "۳۰ روز اخیر", last7: "۷ روز اخیر", allTime: "همهٔ زمان‌ها", sold: "فروش", refunded: "برگشتی", granted: "اعتبار داده‌شده",
     paid: "پرداختی", revenue: "درآمد", debt: "بدهی", balance: "اعتبار باقی‌مانده", refundDone: "{v} به اعتبار شما برگشت",
     kind_adjust: "تغییر اعتبار", kind_charge: "فروش", kind_refund: "برگشت", kind_delete: "حذف", kind_payment: "پرداخت",
+    advanced: "ویرایشگر پیشرفته", template: "اینباند Xray (JSON، بدون کلاینت)", metaJson: "تنظیمات ساب (JSON)", invalidJson: "JSON نامعتبر در {x}",
+    enable: "فعال کردن", disable: "غیرفعال کردن", advancedHint: "کلاینت‌ها را هاب اضافه می‌کند. نودها تغییر را ظرف چند ثانیه می‌گیرند و بقیهٔ اینباندها قطع نمی‌شوند.",
     when: "زمان", who: "توسط", what: "شرح", more: "بیشتر", totalLast30: "{v} در ۳۰ روز اخیر",
     health: "سلامت (۲۴ ساعت)", cpu: "پردازنده", ram: "رم", disk: "دیسک", net: "شبکه", uptime: "روشن بودن", inRate: "ورودی", outRate: "خروجی", noData: "هنوز نمونه‌ای نیست",
   },
@@ -476,17 +480,47 @@ async function viewInbounds() {
     let meta = {};
     try { meta = typeof ib.meta === "string" ? JSON.parse(ib.meta) : ib.meta || {}; } catch {}
     return h("div", { class: "card item" },
-      h("div", { class: "head" }, h("span", { class: "name" }, ib.tag), h("span", { class: "badge" }, `${ib.protocol} · ${ib.network} · ${ib.security}`),
+      h("div", { class: "head" }, h("span", { class: `dot ${ib.enabled ? "on" : ""}` }), h("span", { class: "name" }, ib.tag), h("span", { class: "badge" }, `${ib.protocol} · ${ib.network} · ${ib.security}`),
+        ib.enabled ? null : h("span", { class: "badge bad" }, t("disabled")),
         h("span", { class: "badge spacer" }, `${t("node")}: ${ib.node_id}`)),
-      h("div", { class: "muted small" }, `${t("port")} ${ib.port} · ${t("clientsCount", { n: fmtNum(ib.clients) })}`),
+      h("div", { class: "muted small" }, `${t("port")} ${ib.port} · ${t("clientsCount", { n: fmtNum(ib.clients) })} · ${t("trafficToday")}: ${bytes(ib.traffic_today || 0)} · ${t("trafficTotal")}: ${bytes(ib.traffic_total || 0)}`),
       h("div", { class: "small mono" }, (meta.endpoints || []).map((e) => `${e.name || ""} ${e.address}:${e.port}`).join("  ·  ")),
-      h("div", { class: "row" }, h("button", { class: "ghost danger spacer", onclick: async () => {
+      h("div", { class: "row" },
+        h("button", { onclick: async () => { await guarded(() => api("POST", `/api/v2/admin/inbounds/${encodeURIComponent(ib.tag)}/enabled`, { Enabled: !ib.enabled })); route(); } }, t(ib.enabled ? "disable" : "enable")),
+        h("button", { class: "ghost", onclick: () => inboundEditor(ib.tag, nodes) }, t("advanced")),
+        h("button", { class: "ghost danger spacer", onclick: async () => {
         if (await confirmAction(t("confirmDelete", { x: ib.tag }))) { await guarded(() => api("DELETE", `/api/v2/admin/inbounds/${encodeURIComponent(ib.tag)}`)); route(); }
       } }, t("delete"))));
   });
   return h("div", {},
     h("div", { class: "row" }, h("h1", {}, t("inbounds")), h("button", { class: "primary spacer", onclick: () => inboundForm(nodes, presets) }, t("add"))),
     h("div", { class: "list" }, cards.length ? cards : h("p", { class: "muted" }, t("empty"))));
+}
+
+async function inboundEditor(tag, nodes) {
+  const raw = await api("GET", `/api/v2/admin/inbounds/${encodeURIComponent(tag)}`);
+  const pretty = (v) => { try { return JSON.stringify(typeof v === "string" ? JSON.parse(v) : v, null, 2); } catch { return String(v || ""); } };
+  const node = h("select", {}, (nodes || []).map((n) => h("option", { value: n.ID, selected: n.ID === raw.node_id }, `${n.Name || n.ID} (${n.ID})`)));
+  const tpl = h("textarea", { class: "code", rows: "16", spellcheck: "false", dir: "ltr" }, pretty(raw.template));
+  const meta = h("textarea", { class: "code", rows: "8", spellcheck: "false", dir: "ltr" }, pretty(raw.meta));
+  const en = h("input", { type: "checkbox", checked: raw.enabled });
+  const err = h("div", { class: "error" });
+  const parse = (el, name) => { try { return JSON.parse(el.value); } catch (x) { throw new Error(t("invalidJson", { x: name }) + `: ${x.message}`); } };
+  const save = h("button", { class: "primary", value: "save", onclick: async (e) => {
+    e.preventDefault(); err.textContent = "";
+    try {
+      const body = { node_id: node.value, template: parse(tpl, "template"), meta: parse(meta, "meta"), enabled: en.checked };
+      await guarded(() => api("PUT", `/api/v2/admin/inbounds/${encodeURIComponent(tag)}`, body));
+      document.getElementById("modal").close("save"); route();
+    } catch (x) { err.textContent = x.message; }
+  } }, t("save"));
+  const d = openModal(`${t("advanced")} · ${tag}`, h("div", { class: "form" },
+    h("p", { class: "small muted" }, t("advancedHint")),
+    h("div", { class: "two" }, h("label", {}, h("span", {}, t("node")), node), h("label", { class: "check" }, en, t("enabled"))),
+    h("label", {}, h("span", {}, t("template")), tpl),
+    h("label", {}, h("span", {}, t("metaJson")), meta), err), [save]);
+  d.classList.add("wide");
+  d.addEventListener("close", () => d.classList.remove("wide"), { once: true });
 }
 
 function inboundForm(nodes, presets) {

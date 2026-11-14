@@ -294,6 +294,18 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 		}
 		reply(w, list, err)
 	}))
+	mux.HandleFunc("GET /api/v2/admin/inbounds/{tag}", guard(func(w http.ResponseWriter, r *http.Request) {
+		raw, err := s.InboundRaw(r.Context(), r.PathValue("tag"))
+		reply(w, raw, err)
+	}))
+	mux.HandleFunc("POST /api/v2/admin/inbounds/{tag}/enabled", guard(func(w http.ResponseWriter, r *http.Request) {
+		var in struct{ Enabled bool }
+		if !decode(w, r, &in) {
+			return
+		}
+		err := s.SetInboundEnabled(r.Context(), r.PathValue("tag"), in.Enabled)
+		reply(w, map[string]bool{"ok": err == nil}, err)
+	}))
 	mux.HandleFunc("GET /api/v2/admin/presets", guard(func(w http.ResponseWriter, r *http.Request) {
 		reply(w, Presets, nil)
 	}))

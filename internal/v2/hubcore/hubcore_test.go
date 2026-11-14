@@ -650,3 +650,36 @@ func TestClientDailyUsageFillsGaps(t *testing.T) {
 		t.Fatalf("%v %+v", err, got)
 	}
 }
+
+func TestInboundTrafficToggleAndRaw(t *testing.T) {
+	s, _ := newStore(t)
+	ctx := context.Background()
+	seed(t, s)
+	ack, err := s.ApplyUsage(ctx, "de-1", wire.UsageBatch{NodeID: "de-1", Seq: 1,
+		Traffic:  []wire.UserTraffic{{Email: "alice", Up: 1, Down: 2}},
+		Inbounds: []wire.UserTraffic{{Email: "de-vless", Up: 100, Down: 200}, {Email: "api", Up: 5}, {Email: "bad tag!", Up: 1}}})
+	if err != nil || ack.Seq != 1 {
+		t.Fatal(ack, err)
+	}
+	list, _ := s.Inbounds(ctx)
+	if len(list) != 1 || list[0].Today != 300 || list[0].Total != 300 {
+		t.Fatalf("%+v", list)
+	}
+	raw, err := s.InboundRaw(ctx, "de-vless")
+	if err != nil || raw.NodeID != "de-1" || len(raw.Template) == 0 {
+		t.Fatal(raw, err)
+	}
+	if err := s.SetInboundEnabled(ctx, "de-vless", false); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := s.RenderNode(ctx, "de-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(cfg), `"de-vless"`) {
+		t.Fatal("a disabled inbound must leave the node config")
+	}
+	if err := s.SetInboundEnabled(ctx, "nope", true); !errors.Is(err, ErrNotFound) {
+		t.Fatal(err)
+	}
+}
