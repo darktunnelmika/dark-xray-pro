@@ -17,6 +17,7 @@ import (
 	"net/url"
 	"path/filepath"
 	"regexp"
+	"sync"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -117,6 +118,11 @@ type Store struct {
 	ro   *sql.DB
 	now  func() time.Time
 	path string
+
+	distMu  sync.Mutex
+	distDir string // dark-node and xray for installs and self-update
+	distSHA string
+	distMod time.Time
 }
 
 // tmpDir is next to the database, so snapshots stay on the same disk.

@@ -7,6 +7,9 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/darktunnelmika/dark-xray-pro/internal/v2/sniscan"
@@ -32,8 +35,62 @@ CREATE INDEX IF NOT EXISTS node_tasks_open ON node_tasks(node_id,status);
 const taskTTL = 10 * 60
 
 func (s *Store) ensureTaskSchema() error {
-	_, err := s.db.Exec(taskSchema)
-	return err
+	if _, err := s.db.Exec(taskSchema); err != nil {
+		return err
+	}
+	return s.addColumn("nodes", "agent_sha", "TEXT NOT NULL DEFAULT ''")
+}
+
+// SetDistDir tells the store where the Node binaries live.
+func (s *Store) SetDistDir(dir string) {
+	s.distMu.Lock()
+	s.distDir = dir
+	s.distMu.Unlock()
+}
+
+// DistSHA is the sha256 of the HUB's dark-node, cached by mtime; "" if none.
+func (s *Store) DistSHA() string {
+	s.distMu.Lock()
+	defer s.distMu.Unlock()
+	if s.distDir == "" {
+		return ""
+	}
+	p := filepath.Join(s.distDir, "dark-node")
+	st, err := os.Stat(p)
+	if err != nil {
+		return ""
+	}
+	if !st.ModTime().Equal(s.distMod) {
+		sum, err := fileSHA(p)
+		if err != nil {
+			return ""
+		}
+		s.distSHA, s.distMod = sum, st.ModTime()
+	}
+	return s.distSHA
+}
+
+// distFile resolves a servable distribution file.
+func (s *Store) distFile(name string) (string, bool) {
+	if name != "dark-node" && name != "xray" {
+		return "", false
+	}
+	s.distMu.Lock()
+	dir := s.distDir
+	s.distMu.Unlock()
+	if dir == "" {
+		return "", false
+	}
+	return filepath.Join(dir, name), true
+}
+
+// StartNodeUpdate asks a Node to replace its agent with the HUB's copy.
+func (s *Store) StartNodeUpdate(ctx context.Context, nodeID string) (string, error) {
+	sum := s.DistSHA()
+	if sum == "" {
+		return "", fmt.Errorf("%w: no dark-node binary on the HUB", ErrInvalid)
+	}
+	return s.QueueTask(ctx, nodeID, wire.TaskSelfUpdate, map[string]string{"sha256": sum})
 }
 
 // Task is the owner's view of one Node task.

@@ -2,7 +2,13 @@ package hubcore
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -60,5 +66,61 @@ func TestNodeTasksLifecycle(t *testing.T) {
 	}
 	if resp, _ := s.Sync(ctx, "de-1", wire.SyncRequest{NodeID: "de-1"}); len(resp.Tasks) != 0 {
 		t.Fatalf("expired task sent: %+v", resp.Tasks)
+	}
+}
+
+func TestNodeUpdateAndDist(t *testing.T) {
+	s, _ := newStore(t)
+	tok := seed(t, s)
+	ctx := context.Background()
+	if _, err := s.StartNodeUpdate(ctx, "de-1"); err == nil {
+		t.Fatal("update without a dist binary")
+	}
+	dir := t.TempDir()
+	bin := []byte("node-binary-v2")
+	if err := os.WriteFile(filepath.Join(dir, "dark-node"), bin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	s.SetDistDir(dir)
+	sum := sha256.Sum256(bin)
+	want := hex.EncodeToString(sum[:])
+	if s.DistSHA() != want {
+		t.Fatal("dist sha")
+	}
+	s.Sync(ctx, "de-1", wire.SyncRequest{NodeID: "de-1", AgentSHA: "old"})
+	ns, _ := s.Nodes(ctx)
+	if !ns[0].UpdateAvailable {
+		t.Fatalf("update not offered: %+v", ns[0])
+	}
+	id, err := s.StartNodeUpdate(ctx, "de-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, _ := s.Sync(ctx, "de-1", wire.SyncRequest{NodeID: "de-1", AgentSHA: "old"})
+	if len(resp.Tasks) != 1 || resp.Tasks[0].ID != id || !strings.Contains(string(resp.Tasks[0].Args), want) {
+		t.Fatalf("tasks %+v", resp.Tasks)
+	}
+	s.Sync(ctx, "de-1", wire.SyncRequest{NodeID: "de-1", AgentSHA: want, Results: []wire.TaskResult{{ID: id, Result: json.RawMessage(`{}`)}}})
+	if ns, _ := s.Nodes(ctx); ns[0].UpdateAvailable {
+		t.Fatal("still offered after update")
+	}
+	// Dist download needs the node credential and serves only known files.
+	h := NodeHandler(s)
+	get := func(file, token string) int {
+		r := httptest.NewRequest("GET", wire.PathDist+file, nil)
+		r.Header.Set(wire.HeaderNodeID, "de-1")
+		r.Header.Set("Authorization", "Bearer "+token)
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		return w.Code
+	}
+	if c := get("dark-node", "wrong"); c != 401 {
+		t.Fatalf("unauthenticated dist: %d", c)
+	}
+	if c := get("dark-node", tok); c != 200 {
+		t.Fatalf("dist: %d", c)
+	}
+	if c := get("..%2Fsecret", tok); c != 404 {
+		t.Fatalf("unknown file: %d", c)
 	}
 }

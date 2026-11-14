@@ -7,6 +7,7 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"log"
 	"os"
 	"os/signal"
@@ -15,6 +16,7 @@ import (
 	"syscall"
 
 	"github.com/darktunnelmika/dark-xray-pro/internal/v2/nodeagent"
+	"github.com/darktunnelmika/dark-xray-pro/internal/v2/wire"
 )
 
 func main() {
@@ -26,7 +28,12 @@ func main() {
 	xrayBin := flag.String("xray", "/usr/local/bin/xray", "stock Xray binary")
 	stateDir := flag.String("state", "/var/lib/dark-node", "durable state directory")
 	statsAddr := flag.String("stats", "127.0.0.1:10085", "Xray API (StatsService) address from the HUB config")
+	showVersion := flag.Bool("version", false, "print the version and exit")
 	flag.Parse()
+	if *showVersion {
+		fmt.Println("dark-node", nodeagent.Version)
+		return
+	}
 
 	if *hubURL == "" || *nodeID == "" {
 		log.Fatal("-hub and -node-id are required")
@@ -45,7 +52,12 @@ func main() {
 	}
 	stats := &nodeagent.XrayStats{Addr: *statsAddr}
 	defer stats.Close()
-	agent, err := nodeagent.New(nodeagent.Config{NodeID: *nodeID, StateDir: *stateDir, Logf: log.Printf}, hub, sup, stats)
+	exe, _ := os.Executable()
+	if r, err := filepath.EvalSymlinks(exe); err == nil {
+		exe = r
+	}
+	selfSHA, _ := nodeagent.FileSHA(exe)
+	agent, err := nodeagent.New(nodeagent.Config{NodeID: *nodeID, StateDir: *stateDir, Logf: log.Printf, AgentSHA: selfSHA}, hub, sup, stats)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -54,6 +66,13 @@ func main() {
 	agent.SetUserAPI(users)
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+	agent.SetTask(wire.TaskSelfUpdate, nodeagent.SelfUpdateTask(hub, exe))
+	// After a self-update: stop cleanly; systemd (Restart=always) starts
+	// the new binary.
+	agent.SetRestart(func() {
+		log.Printf("dark-node updated, restarting")
+		stop()
+	})
 	go sup.Run(ctx)
 	log.Printf("dark-node %s started: node=%s hub=%s", nodeagent.Version, *nodeID, *hubURL)
 	agent.Run(ctx)

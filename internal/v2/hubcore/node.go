@@ -67,6 +67,9 @@ tx_rate=MAX(tx_rate,excluded.tx_rate), online=MAX(online,excluded.online)`,
 		return wire.SyncResponse{}, err
 	}
 	s.applyTaskResults(ctx, nodeID, req.Results)
+	if req.AgentSHA != "" && len(req.AgentSHA) <= 64 {
+		_, _ = s.db.ExecContext(ctx, `UPDATE nodes SET agent_sha=? WHERE id=? AND agent_sha<>?`, req.AgentSHA, nodeID, req.AgentSHA)
+	}
 	users, err := s.limits(ctx, nodeID)
 	if err != nil {
 		return wire.SyncResponse{}, err
@@ -203,6 +206,8 @@ type NodeStatus struct {
 	UsageSeq                          int64
 	Host                              *wire.Host
 	PublicIP                          string
+	AgentSHA                          string
+	UpdateAvailable                   bool `json:"update_available"`
 }
 
 // HistoryPoint is one 5-minute sample of a node's health.
@@ -244,17 +249,18 @@ func (n NodeStatus) Online(now time.Time) bool {
 
 func (s *Store) Nodes(ctx context.Context) ([]NodeStatus, error) {
 	rows, err := s.ro.QueryContext(ctx, `SELECT id,name,agent_version,last_error,last_seen_unix,xray_running,xray_restarts,spooled,
-config_revision,reported_revision,usage_seq,host_json,public_ip FROM nodes ORDER BY id`)
+config_revision,reported_revision,usage_seq,host_json,public_ip,agent_sha FROM nodes ORDER BY id`)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	var out []NodeStatus
+	dist := s.DistSHA()
 	for rows.Next() {
 		var n NodeStatus
 		var hj string
 		if err := rows.Scan(&n.ID, &n.Name, &n.AgentVersion, &n.LastError, &n.LastSeen, &n.XrayRunning, &n.XrayRestarts,
-			&n.Spooled, &n.ConfigRevision, &n.ReportedRevision, &n.UsageSeq, &hj, &n.PublicIP); err != nil {
+			&n.Spooled, &n.ConfigRevision, &n.ReportedRevision, &n.UsageSeq, &hj, &n.PublicIP, &n.AgentSHA); err != nil {
 			return nil, err
 		}
 		if hj != "" {
@@ -263,6 +269,7 @@ config_revision,reported_revision,usage_seq,host_json,public_ip FROM nodes ORDER
 				n.Host = &h
 			}
 		}
+		n.UpdateAvailable = dist != "" && n.AgentSHA != "" && n.AgentSHA != dist
 		out = append(out, n)
 	}
 	return out, rows.Err()

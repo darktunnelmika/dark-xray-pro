@@ -15,6 +15,8 @@ const (
 	// PathUsage delivers one spooled usage batch. The HUB acknowledges the
 	// batch sequence; re-delivery of an acknowledged sequence is a no-op.
 	PathUsage = "/api/v2/node/usage"
+	// PathDist + file name serves the Node binaries for self-update.
+	PathDist = "/api/v2/node/dist/"
 
 	// HeaderNodeID and HeaderAuthorization authenticate every Node request.
 	HeaderNodeID = "X-Dark-Node"
@@ -34,6 +36,8 @@ type SyncRequest struct {
 	// Results reports finished one-off tasks; the Node resends a result
 	// until a sync succeeds, and the HUB ignores results it already has.
 	Results []TaskResult `json:"results,omitempty"`
+	// AgentSHA is the sha256 of the running dark-node binary.
+	AgentSHA string `json:"agent_sha,omitempty"`
 }
 
 // Task is a one-off job the HUB asks a Node to run, for example scanning
@@ -54,6 +58,10 @@ type TaskResult struct {
 
 // TaskSNIScan probes TLS camouflage candidates (see package sniscan).
 const TaskSNIScan = "sni_scan"
+
+// TaskSelfUpdate replaces the dark-node binary with the HUB's copy
+// (args: {"sha256": "..."}) and restarts the agent.
+const TaskSelfUpdate = "self_update"
 
 // Host is the node machine's health at the time of the sync.
 type Host struct {

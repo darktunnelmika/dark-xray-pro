@@ -78,6 +78,7 @@ func main() {
 		log.Fatal(err)
 	}
 	defer s.Close()
+	s.SetDistDir(*distDir)
 	ctx := context.Background()
 
 	switch cmd {

@@ -39,6 +39,17 @@ func NodeHandler(s *Store) http.Handler {
 		ack, err := s.ApplyUsage(r.Context(), id, b)
 		reply(w, ack, err)
 	})
+	mux.HandleFunc("GET "+wire.PathDist+"{file}", func(w http.ResponseWriter, r *http.Request) {
+		if _, ok := authNode(s, w, r); !ok {
+			return
+		}
+		p, ok := s.distFile(r.PathValue("file"))
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+		http.ServeFile(w, r, p)
+	})
 	return mux
 }
 

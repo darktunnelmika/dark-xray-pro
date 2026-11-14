@@ -543,6 +543,10 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 		id, err := s.StartSNIScan(r.Context(), r.PathValue("id"), in.Domains, in.Subnet)
 		reply(w, map[string]string{"id": id}, err)
 	}))
+	mux.HandleFunc("POST /api/v2/admin/nodes/{id}/update", guard(func(w http.ResponseWriter, r *http.Request) {
+		id, err := s.StartNodeUpdate(r.Context(), r.PathValue("id"))
+		reply(w, map[string]string{"id": id}, err)
+	}))
 	mux.HandleFunc("GET /api/v2/admin/tasks/{id}", guard(func(w http.ResponseWriter, r *http.Request) {
 		t, err := s.TaskByID(r.Context(), r.PathValue("id"))
 		reply(w, t, err)
