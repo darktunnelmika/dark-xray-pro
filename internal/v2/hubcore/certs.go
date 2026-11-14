@@ -5,10 +5,12 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"database/sql"
+	"encoding/hex"
 	"encoding/pem"
 	"errors"
 	"fmt"
@@ -173,11 +175,12 @@ func (s *Store) resolveCerts(ctx context.Context, t map[string]any) error {
 	return nil
 }
 
-// SelfSignedCert stores a fresh self-signed certificate for name (10 years).
-func (s *Store) SelfSignedCert(ctx context.Context, id, name string) error {
+// SelfSignedCert stores a fresh self-signed certificate for name (10 years)
+// and returns its SHA-256 fingerprint (hex), which clients can pin.
+func (s *Store) SelfSignedCert(ctx context.Context, id, name string) (string, error) {
 	k, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
-		return err
+		return "", err
 	}
 	serial, _ := rand.Int(rand.Reader, big.NewInt(1<<62))
 	now := s.now()
@@ -186,12 +189,13 @@ func (s *Store) SelfSignedCert(ctx context.Context, id, name string) error {
 		ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}}
 	der, err := x509.CreateCertificate(rand.Reader, tpl, tpl, &k.PublicKey, k)
 	if err != nil {
-		return err
+		return "", err
 	}
 	kd, err := x509.MarshalECPrivateKey(k)
 	if err != nil {
-		return err
+		return "", err
 	}
-	return s.PutCert(ctx, id, string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})),
+	sum := sha256.Sum256(der)
+	return hex.EncodeToString(sum[:]), s.PutCert(ctx, id, string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})),
 		string(pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: kd})))
 }

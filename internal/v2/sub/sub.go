@@ -73,7 +73,8 @@ type Meta struct {
 	Fingerprint string     `json:"fingerprint,omitempty"` // uTLS
 	SpiderX     string     `json:"spider_x,omitempty"`
 	Remark      string     `json:"remark,omitempty"`
-	Insecure    bool       `json:"insecure,omitempty"` // self-signed certificate: clients skip verification
+	Insecure    bool       `json:"insecure,omitempty"`   // self-signed certificate: clients skip CA verification
+	PinSHA256   string     `json:"pin_sha256,omitempty"` // and pin this certificate fingerprint where they can
 }
 
 // Inbound is one inbound template with its metadata.
@@ -293,6 +294,9 @@ func Links(a Account, ins []Inbound) ([]string, error) {
 				q.Set("alpn", "h3")
 				if t.Stream.insecure {
 					q.Set("insecure", "1")
+				}
+				if in.Meta.PinSHA256 != "" {
+					q.Set("pinSHA256", in.Meta.PinSHA256)
 				}
 				out = append(out, "hysteria2://"+url.PathEscape(a.Secret)+"@"+host+"/?"+q.Encode()+"#"+frag)
 			case "trojan":

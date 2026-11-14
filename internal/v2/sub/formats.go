@@ -203,6 +203,9 @@ func Clash(a Account, ins []Inbound) ([]byte, error) {
 			if o.t.Stream.insecure {
 				b.WriteString("    skip-cert-verify: true\n")
 			}
+			if o.m.PinSHA256 != "" {
+				fmt.Fprintf(&b, "    fingerprint: %s\n", yq(o.m.PinSHA256))
+			}
 			names = append(names, o.tag)
 			continue
 		case "shadowsocks":

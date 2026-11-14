@@ -36,7 +36,8 @@ type PresetRequest struct {
 	Endpoints []sub.Endpoint `json:"endpoints"` // Direct and/or Tunnel addresses shown in subscriptions
 	Cert      string         `json:"cert"`      // TLS presets: stored certificate id; SNI is the domain
 
-	selfSigned bool // set by CreatePreset when it issued the certificate itself
+	selfSigned bool   // set by CreatePreset when it issued the certificate itself
+	selfPin    string // its SHA-256 fingerprint
 }
 
 // Presets lists what the panel offers.
@@ -122,7 +123,7 @@ func BuildPreset(p PresetRequest) (template, meta []byte, err error) {
 		t["streamSettings"] = map[string]any{"network": "hysteria", "security": "tls",
 			"tlsSettings":      map[string]any{"serverName": p.SNI, "alpn": []string{"h3"}, "certificates": []any{map[string]any{"dark_cert": p.Cert}}},
 			"hysteriaSettings": map[string]any{"version": 2}}
-		m.Insecure = p.selfSigned
+		m.Insecure, m.PinSHA256 = p.selfSigned, p.selfPin
 	case "trojan-tls-tcp":
 		t["protocol"] = "trojan"
 		err = tlsStream("tcp", nil)
@@ -183,10 +184,11 @@ func (s *Store) CreatePreset(ctx context.Context, p PresetRequest) error {
 			p.SNI = "www.bing.com"
 		}
 		id := p.Tag + "-self"
-		if err := s.SelfSignedCert(ctx, id, p.SNI); err != nil {
+		pin, err := s.SelfSignedCert(ctx, id, p.SNI)
+		if err != nil {
 			return err
 		}
-		p.Cert, p.selfSigned = id, true
+		p.Cert, p.selfSigned, p.selfPin = id, true, pin
 	}
 	if p.Cert != "" {
 		var x int

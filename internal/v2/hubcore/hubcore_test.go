@@ -1134,7 +1134,7 @@ func TestHysteria2SelfSigned(t *testing.T) {
 		t.Fatalf("%v %s", err, cfg)
 	}
 	links, _, _ := s.Subscription(ctx, "h1")
-	if len(links) != 1 || !strings.Contains(links[0], "insecure=1") {
+	if len(links) != 1 || !strings.Contains(links[0], "insecure=1") || !strings.Contains(links[0], "pinSHA256=") {
 		t.Fatal(links)
 	}
 	if err := s.PutSwap(ctx, Swap{ID: "x", InboundTag: "hy", SourceNode: "n1", SourcePort: 7000, EntryAddress: "e", EntryPort: 7000}); !errors.Is(err, ErrInvalid) {
