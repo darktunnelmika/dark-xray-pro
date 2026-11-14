@@ -45,7 +45,7 @@ type PresetRequest struct {
 
 // Presets lists what the panel offers.
 var Presets = []string{"vless-reality-tcp", "vless-reality-grpc", "vless-reality-xhttp", "vless-ws", "vmess-ws", "vmess-tcp", "trojan-ws", "ss2022",
-	"vless-tls-ws", "vless-tls-grpc", "vless-tls-xhttp", "vmess-tls-ws", "trojan-tls-tcp", "vless-tls-fallback", "vless-httpupgrade", "vless-tls-httpupgrade", "hysteria2", "wireguard", "socks", "http", "dokodemo"}
+	"vless-tls-ws", "vless-tls-grpc", "vless-tls-xhttp", "vmess-tls-ws", "trojan-tls-tcp", "vless-tls-fallback", "vless-httpupgrade", "vless-tls-httpupgrade", "hysteria2", "wireguard", "socks", "http", "dokodemo", "amneziawg", "mtproto"}
 
 // BuildPreset renders the template and client metadata for a preset.
 func BuildPreset(p PresetRequest) (template, meta []byte, err error) {
@@ -212,6 +212,41 @@ func BuildPreset(p PresetRequest) (template, meta []byte, err error) {
 		}
 		// Plain WebSocket is meant to sit behind a CDN or TLS front.
 		t["streamSettings"] = map[string]any{"network": "ws", "security": "none", "wsSettings": map[string]any{"path": path}}
+	case "amneziawg":
+		// AmneziaWG: WireGuard with junk packets and changed headers that
+		// DPI does not recognise. Runs beside Xray in the node agent (v2.6+).
+		subnet := "10.67.0.0/16"
+		if p.Path != "" {
+			if _, n, perr := net.ParseCIDR(p.Path); perr != nil || n.IP.To4() == nil {
+				return nil, nil, fmt.Errorf("%w: the tunnel subnet must be an IPv4 network such as 10.67.0.0/16", ErrInvalid)
+			}
+			subnet = p.Path
+		}
+		priv, pub, kerr := WGServerKeys()
+		if kerr != nil {
+			return nil, nil, kerr
+		}
+		ob := awgObfuscation()
+		ob["secretKey"], ob["mtu"] = priv, 1280
+		t["protocol"], t["settings"] = "amneziawg", ob
+		delete(t, "sniffing")
+		t[wgKey] = map[string]any{"subnet": subnet}
+		m.PublicKey, m.MTU, m.Fingerprint = pub, 1280, ""
+	case "mtproto":
+		// Telegram proxy with fake TLS: one shared secret, like a SOCKS
+		// proxy. SNI is the domain the proxy pretends to be.
+		dom := p.SNI
+		if dom == "" {
+			dom = "www.google.com"
+		}
+		key := make([]byte, 16)
+		if _, err := rand.Read(key); err != nil {
+			return nil, nil, err
+		}
+		secret := "ee" + hex.EncodeToString(key) + hex.EncodeToString([]byte(dom))
+		t["protocol"], t["settings"] = "mtproto", map[string]any{"secret": secret}
+		delete(t, "sniffing")
+		m.MTProtoSecret, m.Fingerprint = secret, ""
 	case "socks", "http":
 		// A plain proxy with one fixed account (never an open proxy).
 		user, pass := "dark"+randomHex(3), randomHex(10)
@@ -379,4 +414,32 @@ func (s *Store) DeleteInbound(ctx context.Context, tag string) error {
 		return ErrNotFound
 	}
 	return nil
+}
+
+// awgObfuscation picks random AmneziaWG junk settings (the client gets the
+// same values in its config): 3–8 junk packets of 40–70 bytes, padded
+// handshakes and four distinct header values.
+func awgObfuscation() map[string]any {
+	rnd := func(lo, hi int) int {
+		b := make([]byte, 2)
+		_, _ = rand.Read(b)
+		return lo + int(uint16(b[0])<<8|uint16(b[1]))%(hi-lo+1)
+	}
+	s1 := rnd(15, 150)
+	s2 := rnd(15, 150)
+	for s1+56 == s2 {
+		s2 = rnd(15, 150)
+	}
+	hs := map[uint32]bool{}
+	var h []uint32
+	for len(h) < 4 {
+		b := make([]byte, 4)
+		_, _ = rand.Read(b)
+		v := uint32(b[0])<<24 | uint32(b[1])<<16 | uint32(b[2])<<8 | uint32(b[3])
+		if v > 4 && !hs[v] {
+			hs[v] = true
+			h = append(h, v)
+		}
+	}
+	return map[string]any{"jc": rnd(3, 8), "jmin": 40, "jmax": 70, "s1": s1, "s2": s2, "h1": h[0], "h2": h[1], "h3": h[2], "h4": h[3]}
 }

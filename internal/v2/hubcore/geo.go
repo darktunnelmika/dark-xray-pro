@@ -229,7 +229,7 @@ func (s *Store) testConfig(ctx context.Context, cfg []byte) error {
 		return nil
 	}
 	defer os.Remove(f.Name())
-	_, _ = f.Write(cfg)
+	_, _ = f.Write(stripSide(cfg))
 	f.Close()
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()

@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/darktunnelmika/dark-xray-pro/internal/v2/sub"
 )
@@ -65,15 +66,54 @@ var clientShapes = map[string]func(c Client, flow string) map[string]any{
 	// WireGuard peers are built by wgPeers (keys and addresses); this entry
 	// only marks the protocol as managed.
 	"wireguard": func(c Client, _ string) map[string]any { return map[string]any{"email": c.Email} },
+	// AmneziaWG runs beside Xray in the node agent; peers as for WireGuard.
+	"amneziawg": func(c Client, _ string) map[string]any { return map[string]any{"email": c.Email} },
 	"shadowsocks": func(c Client, method string) map[string]any {
 		return map[string]any{"password": sub.SS2022UserKey(c.Secret, method), "email": c.Email}
 	},
 }
 
+// sideProtocols run beside Xray in the node agent (v2.6+), never in Xray.
+var sideProtocols = map[string]bool{"amneziawg": true, "mtproto": true}
+
+// agentAtLeast compares a node agent version such as "v2.6.0".
+func agentAtLeast(v string, major, minor int) bool {
+	var a, b, c int
+	if n, _ := fmt.Sscanf(strings.TrimPrefix(v, "v"), "%d.%d.%d", &a, &b, &c); n < 2 {
+		return false
+	}
+	return a > major || (a == major && b >= minor)
+}
+
+// stripSide removes AmneziaWG and MTProto inbounds from a rendered config
+// (Xray's own check would refuse them; the agent runs them itself).
+func stripSide(cfg []byte) []byte {
+	var c map[string]any
+	if json.Unmarshal(cfg, &c) != nil {
+		return cfg
+	}
+	ins, _ := c["inbounds"].([]any)
+	kept := ins[:0]
+	for _, x := range ins {
+		if m, _ := x.(map[string]any); m != nil {
+			if p, _ := m["protocol"].(string); sideProtocols[p] {
+				continue
+			}
+		}
+		kept = append(kept, x)
+	}
+	c["inbounds"] = kept
+	b, err := json.Marshal(c)
+	if err != nil {
+		return cfg
+	}
+	return b
+}
+
 // plainProtocols are inbounds without managed clients: a SOCKS or HTTP
 // proxy (optionally with its own fixed accounts) and port forwarding
 // (dokodemo-door, called tunnel in newer Xray).
-var plainProtocols = map[string]bool{"socks": true, "http": true, "dokodemo-door": true, "tunnel": true}
+var plainProtocols = map[string]bool{"socks": true, "http": true, "dokodemo-door": true, "tunnel": true, "mtproto": true}
 
 type nodeInbound struct {
 	tag            string
@@ -114,10 +154,16 @@ JOIN inbounds i ON i.tag=r.tag WHERE r.node_id=? AND i.enabled=1 ORDER BY i.tag`
 		"tag": apiTag, "listen": "127.0.0.1", "port": apiPort, "protocol": "dokodemo-door",
 		"settings": map[string]any{"address": "127.0.0.1"},
 	}}
+	var agentVer string
+	_ = s.ro.QueryRowContext(ctx, `SELECT agent_version FROM nodes WHERE id=?`, nodeID).Scan(&agentVer)
+	sideOK := agentAtLeast(agentVer, 2, 6)
 	for idx, in := range ins {
 		t, err := parseTemplate(in.template)
 		if err != nil {
 			return nil, fmt.Errorf("inbound %s: %w", in.tag, err)
+		}
+		if p, _ := t["protocol"].(string); sideProtocols[p] && !sideOK {
+			continue // an older agent would hand it to Xray, which refuses the whole config
 		}
 		fbs, _ := t[fallbackKey].([]any)
 		delete(t, fallbackKey)
@@ -150,7 +196,7 @@ JOIN inbounds i ON i.tag=r.tag WHERE r.node_id=? AND i.enabled=1 ORDER BY i.tag`
 		if proto == "shadowsocks" {
 			flow, _ = settings["method"].(string)
 		}
-		if proto == "wireguard" {
+		if proto == "wireguard" || proto == "amneziawg" {
 			peers, err := s.wgPeers(ctx, in.tag, wgNet, clients[in.tag])
 			if err != nil {
 				return nil, fmt.Errorf("inbound %s: %w", in.tag, err)

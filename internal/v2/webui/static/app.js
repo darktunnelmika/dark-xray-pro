@@ -1125,10 +1125,14 @@ function clientConfigsCard(c) {
   api("GET", `/api/v2/admin/clients/${encodeURIComponent(c.Email)}/links`).then((links) => {
     if (!links?.length) { list.replaceChildren(h("p", { class: "muted small" }, cc("noConfigs"))); return; }
     list.replaceChildren(...links.map((l) => h("div", { class: "cfg" },
-      h("span", { class: `badge proto-${l.kind}` }, l.kind === "hysteria2" ? "hy2" : l.kind),
+      h("span", { class: `badge proto-${l.kind}` }, l.kind === "hysteria2" ? "hy2" : l.kind === "awg" ? "AmneziaWG" : l.kind),
       h("span", { class: "cfgname", dir: "auto" }, l.name || "—"),
       h("span", { class: "spacer" }),
       h("button", { type: "button", class: "ghost", "aria-label": "QR", onclick: () => showQR(l.name || c.Email, l.link) }, "QR"),
+      l.kind === "awg" ? h("button", { type: "button", class: "ghost", onclick: () => {
+        const a = h("a", { href: URL.createObjectURL(new Blob([l.link], { type: "text/plain" })), download: `${c.Email}-${(l.name || "awg").replace(/[^A-Za-z0-9._-]+/g, "-")}.conf` });
+        document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+      } }, ".conf") : null,
       h("button", { type: "button", class: "ghost", onclick: () => copy(l.link) }, t("copy")))));
   }).catch((x) => list.replaceChildren(h("p", { class: "error" }, x.message)));
   return h("div", { class: "card form" }, h("h2", {}, cc("configs")), h("p", { class: "small muted" }, cc("configsHint")), list);
@@ -1298,7 +1302,7 @@ async function guarded(fn) {
 // One change for many clients: inbounds added or removed, IP limit, reseller.
 function bulkSettingsForm(emails, inbounds, reps) {
   const fa = lang === "fa";
-  const list = (inbounds || []).filter((ib) => !["socks", "http", "dokodemo-door", "tunnel"].includes(ib.protocol));
+  const list = (inbounds || []).filter((ib) => !["socks", "http", "dokodemo-door", "tunnel", "mtproto"].includes(ib.protocol));
   const box = (name) => h("div", { class: "chips" }, list.map((ib) => h("label", { class: "check" }, h("input", { type: "checkbox", value: ib.tag, name }), h("span", {}, ib.tag))));
   const add = box("add"), rem = box("rem");
   const ips = h("input", { type: "number", min: "0", max: "1000", placeholder: fa ? "بدون تغییر" : "unchanged", dir: "ltr" });
@@ -1321,7 +1325,7 @@ function bulkSettingsForm(emails, inbounds, reps) {
 }
 
 function clientForm(c, inbounds, ctx = { reps: [] }) {
-  inbounds = (inbounds || []).filter((ib) => !["socks", "http", "dokodemo-door", "tunnel"].includes(ib.protocol));
+  inbounds = (inbounds || []).filter((ib) => !["socks", "http", "dokodemo-door", "tunnel", "mtproto"].includes(ib.protocol));
   const isNew = !c;
   const v = c || { Email: "", Enabled: true, VolumeBytes: -1, ExpiresUnix: 0, DurationSeconds: 30 * 86400, MaxIPs: 2, Inbounds: [] };
   const daysLeft = v.ExpiresUnix ? Math.max(0, Math.round((v.ExpiresUnix - Date.now() / 1000) / 86400)) : Math.round((v.DurationSeconds || 0) / 86400);
@@ -1406,7 +1410,7 @@ async function viewInbounds() {
         ib.enabled ? null : h("span", { class: "badge bad" }, t("disabled")),
         h("span", { class: "spacer" })),
       h("div", { class: "row" }, (ib.nodes || []).map((n) => h("span", { class: "badge" }, n))),
-      ["socks", "http", "dokodemo-door", "tunnel"].includes(ib.protocol)
+      ["socks", "http", "dokodemo-door", "tunnel", "mtproto"].includes(ib.protocol)
         ? h("div", { class: "muted small" }, `${t("trafficToday")}: ${bytes(ib.traffic_today || 0)} · ${t("trafficTotal")}: ${bytes(ib.traffic_total || 0)}`)
         : h("div", { class: "muted small" }, `${t("clientsCount", { n: fmtNum(ib.clients) })} · ${t("trafficToday")}: ${bytes(ib.traffic_today || 0)} · ${t("trafficTotal")}: ${bytes(ib.traffic_total || 0)}`),
       plainLine(ib, meta, nodes),
@@ -1456,6 +1460,12 @@ async function viewInbounds() {
 
 // SOCKS / HTTP proxy link, or the port-forward target, on the inbound card.
 function plainLine(ib, meta, nodes) {
+  if (meta.mtproto_secret) {
+    const node = (nodes || []).find((n) => n.ID === (ib.nodes || [])[0]);
+    const link = `https://t.me/proxy?server=${encodeURIComponent(node?.PublicIP || "SERVER-IP")}&port=${ib.port}&secret=${meta.mtproto_secret}`;
+    return h("div", { class: "row small" }, h("span", { class: "badge" }, "Telegram"), h("code", { dir: "ltr", style: "flex:1;overflow:hidden;text-overflow:ellipsis" }, link),
+      h("button", { type: "button", class: "ghost", onclick: () => copy(link) }, t("copy")), h("button", { type: "button", class: "ghost", onclick: () => showQR(ib.tag, link) }, "QR"));
+  }
   if (meta.target) return h("div", { class: "row small" }, h("span", { class: "badge" }, lang === "fa" ? "انتقال پورت" : "Port forward"), h("code", { dir: "ltr" }, `:${ib.port} → ${meta.target}`));
   if (!meta.proxy_user) return null;
   const node = (nodes || []).find((n) => n.ID === (ib.nodes || [])[0]);
@@ -1858,12 +1868,16 @@ async function inboundStudio(tag, ctx) {
     const sniWrap = h("div", {}), pathLabel = h("span", {}, t("path"));
     const sync = () => {
       fbNote.hidden = p.preset !== "vless-tls-fallback";
-      const plain = ["socks", "http", "dokodemo"].includes(p.preset);
-      sniWrap.hidden = plain || p.preset === "wireguard";
+      const plain = ["socks", "http", "dokodemo", "mtproto", "amneziawg"].includes(p.preset);
+      sniWrap.hidden = (plain && p.preset !== "mtproto") || p.preset === "wireguard";
       pathLabel.textContent = p.preset === "dokodemo" ? (lang === "fa" ? "مقصد (host:port)" : "Target (host:port)") : t("path");
       if (pathInput) pathInput.placeholder = p.preset === "dokodemo" ? "1.2.3.4:443" : p.preset === "wireguard" ? "10.66.0.0/16" : "";
       plainNote.hidden = !plain;
-      plainNote.textContent = p.preset === "dokodemo"
+      plainNote.textContent = p.preset === "amneziawg"
+        ? (lang === "fa" ? "AmneziaWG: همان WireGuard با بسته‌های اضافه و سربرگ‌های عوض‌شده که DPI نمی‌شناسد. کنار Xray داخل عامل نود اجرا می‌شود (عامل v2.6 به بالا) و پورت UDP می‌خواهد. هر کاربر یک کانفیگ (فایل .conf یا QR) برای برنامهٔ AmneziaWG یا AmneziaVPN می‌گیرد؛ مسیر = زیرشبکهٔ تونل (پیش‌فرض 10.67.0.0/16)." : "AmneziaWG: WireGuard with junk packets and changed headers DPI does not recognise. Runs beside Xray in the node agent (v2.6+) on a UDP port. Each client gets a config (.conf file or QR) for the AmneziaWG or AmneziaVPN app; Path = tunnel subnet (default 10.67.0.0/16).")
+        : p.preset === "mtproto"
+        ? (lang === "fa" ? "پروکسی تلگرام (MTProto با fake TLS): یک رمز مشترک مثل پروکسی SOCKS؛ SNI دامنه‌ای است که پروکسی خودش را شبیه آن نشان می‌دهد. لینک t.me روی کارت اینباند است. داخل عامل نود اجرا می‌شود (v2.6 به بالا)." : "Telegram proxy (MTProto with fake TLS): one shared secret like a SOCKS proxy; SNI is the domain it pretends to be. The t.me link is on the inbound card. Runs in the node agent (v2.6+).")
+        : p.preset === "dokodemo"
         ? (lang === "fa" ? "انتقال پورت (تونل): هر چیزی که به این پورت برسد به مقصد فرستاده می‌شود؛ مثلاً یک ریلی جلوی سرور دیگر. کاربری ندارد و در اشتراک‌ها نمی‌آید؛ ترافیکش در آمار اینباند هست." : "Port forwarding (tunnel): everything arriving on this port goes to the target — e.g. a relay in front of another server. No clients, not in subscriptions; its traffic shows in the inbound's stats.")
         : (lang === "fa" ? "پروکسی ساده با یک نام کاربری و رمز تصادفی (هرگز پروکسی باز نیست). کاربرهای پنل به آن وصل نمی‌شوند و در اشتراک‌ها نمی‌آید؛ لینک و رمز روی کارت اینباند است." : "A plain proxy with one random username and password (never an open proxy). Panel clients don't use it and it is not in subscriptions; the link and password are on the inbound card.");
       certRow.hidden = !(p.preset.includes("-tls-") || p.preset === "hysteria2");

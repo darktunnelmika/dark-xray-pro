@@ -513,7 +513,7 @@ WHERE ci.email=? AND i.enabled=1 ORDER BY i.tag`, email)
 	}
 	for i := range ins {
 		var t map[string]any
-		if json.Unmarshal(ins[i].Template, &t) != nil || t["protocol"] != "wireguard" {
+		if json.Unmarshal(ins[i].Template, &t) != nil || (t["protocol"] != "wireguard" && t["protocol"] != "amneziawg") {
 			continue
 		}
 		ip, err := s.wgIP(ctx, ins[i].Tag, c.Email, wgSubnet(t))

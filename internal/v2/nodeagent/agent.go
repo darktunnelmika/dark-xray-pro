@@ -17,7 +17,7 @@ import (
 )
 
 // Version is reported to the HUB.
-var Version = "v2.5.1"
+var Version = "v2.6.0"
 
 // Applier is the part of Supervisor the agent uses.
 type Applier interface {
@@ -67,6 +67,7 @@ type Agent struct {
 	onlineCount  int
 	tasks        *taskBox
 	assets       *assetBox
+	side         *SideServers // AmneziaWG and MTProto next to Xray
 }
 
 type hostSample struct {
@@ -143,7 +144,7 @@ func New(cfg Config, hub Hub, xray Applier, stats StatsSource) (*Agent, error) {
 	}
 	a := &Agent{cfg: cfg, hub: hub, xray: xray, stats: stats, spool: sp,
 		delivered: map[uint64]map[string]int64{}, blockedUntil: map[string]time.Time{}, lastDecision: Decision{}, tasks: newTaskBox(filepath.Join(cfg.StateDir, "tasks.json")),
-		assets: newAssetBox(cfg.AssetDir)}
+		assets: newAssetBox(cfg.AssetDir), side: NewSideServers(cfg.Logf)}
 	if b, err := os.ReadFile(a.statePath()); err == nil {
 		_ = json.Unmarshal(b, &a.state)
 	}
@@ -195,6 +196,22 @@ func (a *Agent) Collect(ctx context.Context) {
 	var outbounds []wire.UserTraffic
 	if src, ok := unwrapStats(a.stats).(interface{ TakeOutbound() []wire.UserTraffic }); ok {
 		outbounds = src.TakeOutbound()
+	}
+	if su, si := a.side.Take(); len(su)+len(si) > 0 {
+		var extra []wire.UserTraffic
+		for e, v := range su {
+			extra = append(extra, wire.UserTraffic{Email: e, Up: v[0], Down: v[1]})
+		}
+		traffic = MergeBatches(wire.UsageBatch{Traffic: traffic}, wire.UsageBatch{Traffic: extra}).Traffic
+		for tag, v := range si {
+			inbounds = append(inbounds, wire.UserTraffic{Email: tag, Up: v[0], Down: v[1]})
+		}
+	}
+	for e, ips := range a.side.Online(now) {
+		if online == nil {
+			online = map[string][]string{}
+		}
+		online[e] = append(online[e], ips...)
 	}
 	a.mu.Lock()
 	a.onlineCount = len(online)
@@ -404,6 +421,12 @@ func (a *Agent) enforce(ctx context.Context) {
 	}
 	now := a.cfg.Now()
 	online, _ := a.stats.OnlineIPs(ctx)
+	for e, ips := range a.side.Online(now) {
+		if online == nil {
+			online = map[string][]string{}
+		}
+		online[e] = append(online[e], ips...)
+	}
 	online = DropTrusted(online, state.TrustedIPs)
 	d := Evaluate(now.Unix(), state.Users, a.localUsed(), online)
 	a.mu.Lock()
@@ -438,12 +461,20 @@ func (a *Agent) enforce(ctx context.Context) {
 	for _, e := range allowed {
 		set[e] = true
 	}
-	cfg, err := FilterConfig(state.Config, set)
+	filtered, err := FilterConfig(state.Config, set)
 	if err != nil {
 		a.cfg.Logf("config %d unusable: %v", state.ConfigRevision, err)
 		return
 	}
-	if a.applyLive(ctx, state.Config, cfg) {
+	// AmneziaWG and MTProto run beside Xray; Xray never sees them.
+	cfg, side, err := SplitSide(filtered)
+	if err != nil {
+		a.cfg.Logf("config %d unusable: %v", state.ConfigRevision, err)
+		return
+	}
+	a.side.Apply(side)
+	hubXray, _, _ := SplitSide(state.Config)
+	if a.applyLive(ctx, hubXray, cfg) {
 		a.mu.Lock()
 		a.appliedKey = key
 		a.mu.Unlock()
@@ -453,7 +484,7 @@ func (a *Agent) enforce(ctx context.Context) {
 		a.cfg.Logf("config %d not applied, keeping last good: %v", state.ConfigRevision, err)
 		return
 	}
-	skel, _ := Skeleton(state.Config)
+	skel, _ := Skeleton(hubXray)
 	users, _ := ParseUsers(cfg)
 	a.mu.Lock()
 	a.appliedKey, a.appliedSkel, a.appliedUsers = key, skel, users

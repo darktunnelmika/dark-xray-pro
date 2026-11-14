@@ -85,6 +85,8 @@ type Meta struct {
 	ProxyUser string `json:"proxy_user,omitempty"`
 	ProxyPass string `json:"proxy_pass,omitempty"`
 	Target    string `json:"target,omitempty"`
+	// MTProto proxy secret (shared, shown on the inbound card).
+	MTProtoSecret string `json:"mtproto_secret,omitempty"`
 	// Per client, filled when a subscription is built (never stored):
 	WGPrivateKey string `json:"-"`
 	WGAddress    string `json:"-"` // e.g. 10.66.0.2/32

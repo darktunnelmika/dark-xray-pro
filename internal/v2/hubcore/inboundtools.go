@@ -275,7 +275,11 @@ type ClientLink struct {
 // ClientLinks lists every config in a client's subscription, one per
 // inbound address, without the info entries.
 func (s *Store) ClientLinks(ctx context.Context, email string) ([]ClientLink, error) {
-	links, _, err := s.Subscription(ctx, email)
+	acc, ins, _, err := s.subscriptionData(ctx, email)
+	if err != nil {
+		return nil, err
+	}
+	links, err := sub.Links(acc, ins)
 	if err != nil {
 		return nil, err
 	}
@@ -300,6 +304,9 @@ func (s *Store) ClientLinks(ctx context.Context, email string) ([]ClientLink, er
 			}
 		}
 		out = append(out, ClientLink{Name: name, Link: l, Kind: kind})
+	}
+	for _, c := range sub.AWGConfs(acc, ins) {
+		out = append(out, ClientLink{Name: c.Name, Link: c.Conf, Kind: "awg"})
 	}
 	return out, nil
 }

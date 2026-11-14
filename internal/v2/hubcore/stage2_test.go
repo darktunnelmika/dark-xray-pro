@@ -178,3 +178,71 @@ func TestHostFragmentAndMux(t *testing.T) {
 		t.Fatal("other addresses stay plain", string(second))
 	}
 }
+
+func TestAmneziaWGAndMTProto(t *testing.T) {
+	s, _ := newStore(t)
+	ctx := context.Background()
+	seed(t, s)
+	for i, p := range []PresetRequest{{Tag: "awg", Preset: "amneziawg"}, {Tag: "tgp", Preset: "mtproto", SNI: "www.cloudflare.com"}} {
+		if err := s.ComposeInbound(ctx, p, []Route{{NodeID: "de-1", DirectPort: 51820 + i, Hosts: []Host{{Path: "direct", Enabled: true, Address: "1.2.3.4", Port: 51820 + i}}}}); err != nil {
+			t.Fatal(p.Preset, err)
+		}
+	}
+	c, _ := s.ClientByEmail(ctx, "alice")
+	c.Inbounds = append(c.Inbounds, "awg")
+	_ = s.PutClient(ctx, c.Client)
+	// An agent older than v2.6 never gets them (its Xray would refuse the config).
+	cfg, _ := s.RenderNode(ctx, "de-1")
+	if strings.Contains(string(cfg), "amneziawg") || strings.Contains(string(cfg), "mtproto") {
+		t.Fatal("old agent must not get side inbounds")
+	}
+	if _, err := s.db.Exec(`UPDATE nodes SET agent_version='v2.6.0' WHERE id='de-1'`); err != nil {
+		t.Fatal(err)
+	}
+	cfg, _ = s.RenderNode(ctx, "de-1")
+	var parsed struct {
+		Inbounds []map[string]any `json:"inbounds"`
+	}
+	_ = json.Unmarshal(cfg, &parsed)
+	var awg, tgp map[string]any
+	for _, in := range parsed.Inbounds {
+		switch in["tag"] {
+		case "awg":
+			awg = in
+		case "tgp":
+			tgp = in
+		}
+	}
+	if awg == nil || tgp == nil {
+		t.Fatal(string(cfg))
+	}
+	set := awg["settings"].(map[string]any)
+	peers, _ := set["peers"].([]any)
+	if len(peers) != 1 || set["jc"] == nil || set["h4"] == nil || set["secretKey"] == nil {
+		t.Fatal("awg settings", set)
+	}
+	if sec, _ := tgp["settings"].(map[string]any)["secret"].(string); !strings.HasPrefix(sec, "ee") || !strings.HasSuffix(sec, "7777772e636c6f7564666c6172652e636f6d") {
+		t.Fatal("mtproto secret must carry the fake-TLS domain", sec)
+	}
+	if strings.Contains(string(stripSide(cfg)), "amneziawg") {
+		t.Fatal("xray's own check sees no side inbounds")
+	}
+	links, err := s.ClientLinks(ctx, "alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var conf string
+	for _, l := range links {
+		if l.Kind == "awg" {
+			conf = l.Link
+		}
+		if strings.HasPrefix(l.Link, "amneziawg") || strings.Contains(l.Link, "mtproto") {
+			t.Fatal("not in plain subscriptions", l.Link)
+		}
+	}
+	for _, want := range []string{"[Interface]", "PrivateKey = ", "Address = 10.67.0.2/32", "Jc = ", "H4 = ", "[Peer]", "Endpoint = 1.2.3.4:51820"} {
+		if !strings.Contains(conf, want) {
+			t.Fatalf("awg conf misses %q:\n%s", want, conf)
+		}
+	}
+}
