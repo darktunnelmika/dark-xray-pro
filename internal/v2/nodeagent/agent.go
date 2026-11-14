@@ -17,7 +17,7 @@ import (
 )
 
 // Version is reported to the HUB.
-var Version = "v2.3.0"
+var Version = "v2.4.0"
 
 // Applier is the part of Supervisor the agent uses.
 type Applier interface {
@@ -192,16 +192,20 @@ func (a *Agent) Collect(ctx context.Context) {
 	if src, ok := unwrapStats(a.stats).(interface{ TakeInbound() []wire.UserTraffic }); ok {
 		inbounds = src.TakeInbound()
 	}
+	var outbounds []wire.UserTraffic
+	if src, ok := unwrapStats(a.stats).(interface{ TakeOutbound() []wire.UserTraffic }); ok {
+		outbounds = src.TakeOutbound()
+	}
 	a.mu.Lock()
 	a.onlineCount = len(online)
 	disc := a.pendingDisc
 	a.pendingDisc = nil
 	sendOnline := len(online) > 0 && now.Sub(a.lastOnline) >= time.Minute
 	a.mu.Unlock()
-	if len(traffic) == 0 && len(disc) == 0 && len(inbounds) == 0 && !sendOnline {
+	if len(traffic) == 0 && len(disc) == 0 && len(inbounds) == 0 && len(outbounds) == 0 && !sendOnline {
 		return
 	}
-	b := wire.UsageBatch{NodeID: a.cfg.NodeID, FromUnix: a.lastFrom, ToUnix: now.Unix(), Traffic: traffic, Disconnects: disc, Inbounds: inbounds}
+	b := wire.UsageBatch{NodeID: a.cfg.NodeID, FromUnix: a.lastFrom, ToUnix: now.Unix(), Traffic: traffic, Disconnects: disc, Inbounds: inbounds, Outbounds: outbounds}
 	if sendOnline || len(traffic) > 0 {
 		b.Online = onlineList(online)
 	}

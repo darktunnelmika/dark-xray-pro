@@ -224,7 +224,7 @@ JOIN inbounds i ON i.tag=r.tag WHERE r.node_id=? AND i.enabled=1 ORDER BY i.tag`
 		"stats": map[string]any{},
 		"policy": map[string]any{
 			"levels": map[string]any{"0": map[string]any{"statsUserUplink": true, "statsUserDownlink": true, "statsUserOnline": true}},
-			"system": map[string]any{"statsInboundUplink": true, "statsInboundDownlink": true},
+			"system": map[string]any{"statsInboundUplink": true, "statsInboundDownlink": true, "statsOutboundUplink": true, "statsOutboundDownlink": true},
 		},
 		"inbounds":  inbounds,
 		"outbounds": outbounds,

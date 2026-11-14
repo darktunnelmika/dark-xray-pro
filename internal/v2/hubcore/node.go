@@ -146,6 +146,15 @@ ON CONFLICT(email,node_id,day) DO UPDATE SET up=up+excluded.up, down=down+exclud
 			return wire.UsageAck{}, err
 		}
 	}
+	for _, t := range b.Outbounds {
+		if t.Up < 0 || t.Down < 0 || !idRE.MatchString(t.Email) || t.Email == apiTag || t.Up+t.Down == 0 {
+			continue
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO outbound_traffic(tag,node_id,day,up,down) VALUES(?,?,?,?,?)
+ON CONFLICT(tag,node_id,day) DO UPDATE SET up=up+excluded.up, down=down+excluded.down`, t.Email, nodeID, day, t.Up, t.Down); err != nil {
+			return wire.UsageAck{}, err
+		}
+	}
 	for _, t := range b.Inbounds {
 		if t.Up < 0 || t.Down < 0 || !idRE.MatchString(t.Email) || t.Email == apiTag || t.Up+t.Down == 0 {
 			continue // informational: a bad entry never rejects the batch
@@ -198,6 +207,9 @@ ON CONFLICT(email,ip,node_id) DO UPDATE SET last_unix=MAX(last_unix,excluded.las
 func (s *Store) Prune(ctx context.Context, keepDays int) error {
 	cut := s.now().AddDate(0, 0, -keepDays)
 	if _, err := s.db.ExecContext(ctx, `DELETE FROM usage_daily WHERE day < ?`, cut.UTC().Format("2006-01-02")); err != nil {
+		return err
+	}
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM outbound_traffic WHERE day < ?`, cut.UTC().Format("2006-01-02")); err != nil {
 		return err
 	}
 	if _, err := s.db.ExecContext(ctx, `DELETE FROM ip_log WHERE last_unix < ?`, s.now().Add(-30*24*time.Hour).Unix()); err != nil {

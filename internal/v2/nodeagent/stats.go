@@ -26,9 +26,10 @@ type StatsSource interface {
 type XrayStats struct {
 	Addr string
 
-	mu       sync.Mutex
-	conn     *grpc.ClientConn
-	inbounds []wire.UserTraffic
+	mu        sync.Mutex
+	conn      *grpc.ClientConn
+	inbounds  []wire.UserTraffic
+	outbounds []wire.UserTraffic
 }
 
 func (x *XrayStats) client() (xstats.StatsServiceClient, error) {
@@ -105,6 +106,11 @@ func (x *XrayStats) TakeTraffic(ctx context.Context) ([]wire.UserTraffic, error)
 		x.inbounds = mergeTraffic(x.inbounds, SumInboundStats(ib.Stat))
 		x.mu.Unlock()
 	}
+	if ob, err := c.QueryStats(ctx, &xstats.QueryStatsRequest{Pattern: "outbound>>>", Reset_: true}); err == nil {
+		x.mu.Lock()
+		x.outbounds = mergeTraffic(x.outbounds, SumOutboundStats(ob.Stat))
+		x.mu.Unlock()
+	}
 	return SumUserStats(resp.Stat), nil
 }
 
@@ -115,6 +121,32 @@ func (x *XrayStats) TakeInbound() []wire.UserTraffic {
 	out := x.inbounds
 	x.inbounds = nil
 	return out
+}
+
+// TakeOutbound returns per-outbound deltas collected since the last call.
+func (x *XrayStats) TakeOutbound() []wire.UserTraffic {
+	x.mu.Lock()
+	defer x.mu.Unlock()
+	out := x.outbounds
+	x.outbounds = nil
+	return out
+}
+
+// SumOutboundStats folds "outbound>>>TAG>>>traffic>>>uplink" entries,
+// skipping the local API outbound.
+func SumOutboundStats(stats []*xstats.Stat) []wire.UserTraffic {
+	renamed := make([]*xstats.Stat, 0, len(stats))
+	for _, s := range stats {
+		if s == nil {
+			continue
+		}
+		parts := strings.Split(s.Name, ">>>")
+		if len(parts) != 4 || parts[0] != "outbound" || parts[1] == "api" {
+			continue
+		}
+		renamed = append(renamed, &xstats.Stat{Name: "user>>>" + parts[1] + ">>>" + parts[2] + ">>>" + parts[3], Value: s.Value})
+	}
+	return SumUserStats(renamed)
 }
 
 // SumInboundStats folds "inbound>>>TAG>>>traffic>>>uplink" entries, skipping

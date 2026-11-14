@@ -566,6 +566,11 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 		RestartHub()
 		reply(w, map[string]bool{"ok": true}, nil)
 	}))
+	mux.HandleFunc("GET /api/v2/admin/routing/traffic", guard(func(w http.ResponseWriter, r *http.Request) {
+		days, _ := strconv.Atoi(r.URL.Query().Get("days"))
+		list, err := s.OutboundTraffic(r.Context(), days)
+		reply(w, list, err)
+	}))
 	mux.HandleFunc("GET /api/v2/admin/audit", guard(func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
 		before, _ := strconv.ParseInt(q.Get("before"), 10, 64)

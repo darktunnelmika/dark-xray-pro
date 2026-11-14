@@ -272,5 +272,8 @@ func MergeBatches(a, b wire.UsageBatch) wire.UsageBatch {
 	if len(a.Inbounds)+len(b.Inbounds) > 0 {
 		out.Inbounds = MergeBatches(wire.UsageBatch{Traffic: a.Inbounds}, wire.UsageBatch{Traffic: b.Inbounds}).Traffic
 	}
+	if len(a.Outbounds)+len(b.Outbounds) > 0 {
+		out.Outbounds = MergeBatches(wire.UsageBatch{Traffic: a.Outbounds}, wire.UsageBatch{Traffic: b.Outbounds}).Traffic
+	}
 	return out
 }

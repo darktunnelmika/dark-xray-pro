@@ -178,6 +178,10 @@ func Open(path string) (*Store, error) {
 		st.Close()
 		return nil, err
 	}
+	if err := st.ensureOutboundTrafficSchema(); err != nil {
+		st.Close()
+		return nil, err
+	}
 	if err := st.ensureRepCtlSchema(); err != nil {
 		st.Close()
 		return nil, err

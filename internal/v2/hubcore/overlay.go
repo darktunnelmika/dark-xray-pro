@@ -100,6 +100,7 @@ func (s *Store) applyOverlay(ctx context.Context, cfg map[string]any) {
 		pol["system"] = sys
 	}
 	sys["statsInboundUplink"], sys["statsInboundDownlink"] = true, true
+	sys["statsOutboundUplink"], sys["statsOutboundDownlink"] = true, true
 }
 
 func deepMerge(dst, src map[string]any) map[string]any {

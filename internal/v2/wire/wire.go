@@ -143,6 +143,8 @@ type UsageBatch struct {
 	// Inbounds carries per-inbound byte deltas; Email holds the inbound tag.
 	// Older HUBs ignore it.
 	Inbounds []UserTraffic `json:"inbounds,omitempty"`
+	// Outbounds carries per-outbound byte deltas (Email holds the outbound tag).
+	Outbounds []UserTraffic `json:"outbounds,omitempty"`
 }
 
 // UserTraffic is a byte delta since the previous batch.
