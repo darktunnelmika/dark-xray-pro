@@ -64,6 +64,9 @@ func outbounds(a Account, ins []Inbound, format string) ([]outbound, error) {
 		default:
 			continue
 		}
+		if t.Protocol == "vless" && in.Meta.VLESSEncryption != "" && format == "singbox" {
+			continue // sing-box does not speak VLESS encryption
+		}
 		for _, ep := range in.Meta.Endpoints {
 			if ep.excluded(format) {
 				continue
@@ -225,6 +228,9 @@ func Clash(a Account, ins []Inbound) ([]byte, error) {
 		switch o.proto {
 		case "vless":
 			fmt.Fprintf(&b, "    uuid: %s\n", yq(o.uuid))
+			if o.m.VLESSEncryption != "" {
+				fmt.Fprintf(&b, "    encryption: %s\n", yq(o.m.VLESSEncryption))
+			}
 			if o.flow != "" {
 				fmt.Fprintf(&b, "    flow: %s\n", yq(o.flow))
 			}

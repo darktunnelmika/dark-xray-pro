@@ -69,7 +69,7 @@ func xrayOutbound(o outbound, fragment bool) map[string]any {
 	ob := map[string]any{"tag": "proxy", "protocol": o.proto}
 	switch o.proto {
 	case "vless":
-		u := map[string]any{"id": o.uuid, "encryption": "none"}
+		u := map[string]any{"id": o.uuid, "encryption": or(o.m.VLESSEncryption, "none")}
 		if o.flow != "" {
 			u["flow"] = o.flow
 		}
@@ -112,7 +112,7 @@ func xrayOutbound(o outbound, fragment bool) map[string]any {
 	case "ws":
 		st["wsSettings"] = map[string]any{"path": or(s.WS.Path, "/"), "host": s.WS.Host}
 	case "grpc":
-		st["grpcSettings"] = map[string]any{"serviceName": s.GRPC.ServiceName}
+		st["grpcSettings"] = map[string]any{"serviceName": s.GRPC.ServiceName, "multiMode": s.GRPC.MultiMode}
 	case "httpupgrade":
 		st["httpupgradeSettings"] = map[string]any{"path": or(s.HTTPUpgrade.Path, "/"), "host": s.HTTPUpgrade.Host}
 	case "xhttp", "splithttp":

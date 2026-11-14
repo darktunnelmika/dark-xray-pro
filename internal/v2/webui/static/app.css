@@ -389,3 +389,25 @@ pre.logview .bad { color: var(--bad); }
 pre.logview .warn { color: var(--warn); }
 pre.logview.loading { opacity: 0.55; }
 .bad-text { color: var(--bad); }
+
+/* Inbound settings editor: one frosted group per layer of the connection. */
+.ie-sec { border: 1px solid var(--line); border-radius: var(--r-lg); padding: 12px 14px 14px; margin: 0; display: grid; gap: 12px; background: var(--surface-2); }
+.ie-sec legend { padding-inline: 8px; font-weight: 700; color: var(--cyan); font-size: 14px; }
+.ie-sec textarea.code { font-size: 12px; word-break: break-all; }
+.ie-sec small.muted { display: block; font-size: 12.5px; line-height: 1.5; margin-block-start: 4px; }
+/* A client's single configs */
+.cfglist { display: grid; gap: 6px; }
+.cfg { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--r-md); background: var(--surface-2); min-inline-size: 0; }
+.cfg .cfgname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-inline-size: 0; flex: 1 1 auto; font-size: 13.5px; }
+.cfg .spacer { flex: 0 0 auto; margin: 0; }
+.cfg button { padding: 5px 10px; font-size: 13px; flex: none; }
+.cfg .badge { flex: none; text-transform: lowercase; }
+.badge.proto-vless { color: var(--cyan); }
+.badge.proto-vmess, .badge.proto-trojan { color: var(--violet); }
+.badge.proto-hysteria2, .badge.proto-wireguard { color: var(--good); }
+.badge.proto-ss { color: var(--warn); }
+.qrbox { display: grid; place-items: center; min-block-size: 260px; }
+.qrbox .qr { inline-size: min(300px, 72vw); block-size: auto; aspect-ratio: 1; }
+.linkline { display: block; max-block-size: 7.5em; overflow: auto; word-break: break-all; font-size: 12px; padding: 8px 10px; border-radius: var(--r-md); background: var(--surface-2); }
+.ie .two { align-items: start; }
+.ie .row.tight > button { white-space: nowrap; flex: none; }

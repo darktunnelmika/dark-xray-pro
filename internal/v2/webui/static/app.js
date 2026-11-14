@@ -935,6 +935,8 @@ async function viewClient() {
       h("div", { class: "card form" }, h("h2", {}, t("subscription")),
         h("img", { class: "qr", alt: "QR", src: `/api/v2/admin/clients/${encodeURIComponent(c.Email)}/qr.png` }),
         fmt("Auto", url), fmt("sing-box", `${url}?format=singbox`), fmt("Clash", `${url}?format=clash`), fmt("Xray JSON", `${url}?format=xray`)),
+      clientConfigsCard(c),
+      owner ? rotateCard(c) : null,
       h("div", { class: "card form" }, h("h2", {}, t("details")),
         h("div", { class: "row" }, h("span", { class: "muted" }, t("assignInbounds")), ...(c.Inbounds || []).map((x) => h("span", { class: "badge" }, x))),
         c.RepID ? h("div", { class: "row" }, h("span", { class: "muted" }, t("seller")), h("span", { class: "badge" }, c.RepID)) : null,
@@ -947,6 +949,43 @@ async function viewClient() {
       owner ? nextPlanCard(c) : null,
       owner ? telegramCard(c) : null,
       devicesCard(c)));
+}
+
+const CC = {
+  fa: { configs: "کانفیگ‌ها", configsHint: "هر کانفیگ جدا، برای برنامه‌هایی که اشتراک نمی‌گیرند. QR را با برنامه اسکن کنید.", noConfigs: "این کاربر هنوز اینباند فعالی ندارد.",
+    rotate: "امنیت لینک و کلید", rotateHint: "اگر لینک یا کانفیگ این کاربر به دست کس دیگری افتاده، عوضش کنید. مصرف، پلن و تنظیمات دست نمی‌خورد.",
+    rotLink: "لینک اشتراک تازه", rotLinkAsk: "لینک اشتراک {x} عوض شود؟ لینک قبلی دیگر جواب نمی‌دهد و باید لینک تازه را به مشتری بدهید.",
+    rotCreds: "UUID و رمز تازه", rotCredsAsk: "UUID و رمز {x} عوض شود؟ همهٔ کانفیگ‌های فعلی‌اش تا وقتی اشتراک را به‌روز نکند قطع می‌شوند.", rotDone: "عوض شد", change: "عوض کن" },
+  en: { configs: "Configs", configsHint: "Each config on its own, for apps that don't take subscriptions. Scan the QR with the app.", noConfigs: "This client has no active inbound yet.",
+    rotate: "Link and key security", rotateHint: "If this client's link or configs reached someone else, replace them. Usage, plan and settings stay as they are.",
+    rotLink: "New subscription link", rotLinkAsk: "Replace the subscription link of {x}? The old link stops answering; give the customer the new one.",
+    rotCreds: "New UUID and password", rotCredsAsk: "Replace the UUID and password of {x}? Every current config stops working until the subscription is refreshed.", rotDone: "Replaced", change: "Replace" },
+};
+const cc = (k, vars) => { let s = (CC[lang] || CC.en)[k] ?? CC.en[k] ?? k; for (const [a, b] of Object.entries(vars || {})) s = s.replaceAll(`{${a}}`, b); return s; };
+
+function clientConfigsCard(c) {
+  const list = h("div", { class: "cfglist" }, h("p", { class: "muted small" }, "…"));
+  api("GET", `/api/v2/admin/clients/${encodeURIComponent(c.Email)}/links`).then((links) => {
+    if (!links?.length) { list.replaceChildren(h("p", { class: "muted small" }, cc("noConfigs"))); return; }
+    list.replaceChildren(...links.map((l) => h("div", { class: "cfg" },
+      h("span", { class: `badge proto-${l.kind}` }, l.kind === "hysteria2" ? "hy2" : l.kind),
+      h("span", { class: "cfgname", dir: "auto" }, l.name || "—"),
+      h("span", { class: "spacer" }),
+      h("button", { type: "button", class: "ghost", "aria-label": "QR", onclick: () => showQR(l.name || c.Email, l.link) }, "QR"),
+      h("button", { type: "button", class: "ghost", onclick: () => copy(l.link) }, t("copy")))));
+  }).catch((x) => list.replaceChildren(h("p", { class: "error" }, x.message)));
+  return h("div", { class: "card form" }, h("h2", {}, cc("configs")), h("p", { class: "small muted" }, cc("configsHint")), list);
+}
+
+function rotateCard(c) {
+  const run = async (body, ask) => {
+    if (!(await confirmAction(cc(ask, { x: c.Email }), cc("change")))) return;
+    try { await api("POST", `/api/v2/admin/clients/${encodeURIComponent(c.Email)}/rotate`, body); toast(cc("rotDone")); route(); } catch (x) { toast(t("failed", { e: x.message })); }
+  };
+  return h("div", { class: "card form" }, h("h2", {}, cc("rotate")), h("p", { class: "small muted" }, cc("rotateHint")),
+    h("div", { class: "row" },
+      h("button", { type: "button", onclick: () => run({ link: true }, "rotLinkAsk") }, cc("rotLink")),
+      h("button", { type: "button", class: "ghost danger", onclick: () => run({ credentials: true }, "rotCredsAsk") }, cc("rotCreds"))));
 }
 
 function telegramCard(c) {
@@ -1188,7 +1227,8 @@ async function viewInbounds() {
       h("div", { class: "row" },
         h("button", { class: "primary", onclick: () => inboundStudio(ib.tag, { nodes, presets, certs }) }, t("nodesRoutes")),
         h("button", { onclick: async () => { await guarded(() => api("POST", `/api/v2/admin/inbounds/${encodeURIComponent(ib.tag)}/enabled`, { Enabled: !ib.enabled })); route(); } }, t(ib.enabled ? "disable" : "enable")),
-        h("button", { class: "ghost", onclick: () => inboundEditor(ib.tag, nodes) }, t("advanced")),
+        h("button", { onclick: () => inboundEditor(ib.tag, nodes, certs) }, ie("title")),
+        h("button", { class: "ghost", onclick: () => cloneInbound(ib) }, ie("clone")),
         h("button", { class: "ghost danger spacer", onclick: async () => {
         if (await confirmAction(t("confirmDelete", { x: ib.tag }))) { await guarded(() => api("DELETE", `/api/v2/admin/inbounds/${encodeURIComponent(ib.tag)}`)); route(); }
       } }, t("delete"))));
@@ -1759,30 +1799,305 @@ async function swapDialog(ib, nodes) {
       : h("p", { class: "muted" }, t("empty"))), others.length ? [add] : []);
 }
 
-async function inboundEditor(tag, nodes) {
-  const raw = await api("GET", `/api/v2/admin/inbounds/${encodeURIComponent(tag)}`);
-  const pretty = (v) => { try { return JSON.stringify(typeof v === "string" ? JSON.parse(v) : v, null, 2); } catch { return String(v || ""); } };
-  const node = h("select", {}, (nodes || []).map((n) => h("option", { value: n.ID, selected: n.ID === raw.node_id }, `${n.Name || n.ID} (${n.ID})`)));
-  const tpl = h("textarea", { class: "code", rows: "16", spellcheck: "false", dir: "ltr" }, pretty(raw.template));
-  const meta = h("textarea", { class: "code", rows: "8", spellcheck: "false", dir: "ltr" }, pretty(raw.meta));
-  const en = h("input", { type: "checkbox", checked: raw.enabled });
+// ---------- Inbound settings editor (form + JSON) ----------
+const IE = {
+  fa: { title: "تنظیمات", form: "فرم", json: "JSON", general: "عمومی", protocol: "پروتکل", transport: "انتقال (ترنسپورت)", security: "امنیت", sniffing: "Sniffing",
+    listen: "IP شنود", port: "پورت", portRouted: "این اینباند روی نود قرار گرفته؛ پورت هر نود را در «نودها و مسیرها» عوض کنید.", remark: "نام در برنامه‌ها", enabled: "فعال",
+    flow: "Flow", flowNone: "بدون flow", venc: "رمزنگاری VLESS (Xray 26)", vencOff: "خاموش (none)", vencX: "X25519 (سریع)", vencM: "ML-KEM-768 (پساکوانتومی)",
+    vencHint: "لایهٔ رمزنگاری خود VLESS روی هر ترنسپورت. فقط برنامه‌های مبتنی بر Xray 26 (v2rayNG، v2rayN، Happ، Streisand جدید) و Clash Meta جدید پشتیبانی می‌کنند؛ sing-box این اینباند را در اشتراکش نمی‌گیرد.",
+    vencNew: "کلید تازه", server: "سمت سرور (decryption)", client: "سمت برنامه (encryption)",
+    method: "روش رمزنگاری", ssKey: "کلید سرور", newKey: "ساخت کلید تازه", ssWarn: "با عوض کردن روش یا کلید سرور، همهٔ مشتری‌ها باید اشتراک را به‌روز کنند.",
+    network: "شبکه", path: "مسیر (path)", host: "Host", service: "نام سرویس gRPC", multi: "multiMode (چند جریانی، سریع‌تر)", xmode: "حالت XHTTP", padding: "Padding (بایت، مثل 100-1000)",
+    proxyProto: "پذیرش PROXY protocol (پشت HAProxy/Nginx یا ریلی)", sec: "امنیت", none: "هیچ", target: "مقصد (target)", sni: "serverNames (هر خط یکی)",
+    sids: "shortIds (هر خط یکی؛ اولی در لینک‌ها)", addSid: "+ shortId", priv: "کلید خصوصی", pub: "کلید عمومی (در لینک‌ها)", newKeys: "کلید تازه",
+    keysWarn: "با کلید تازه همهٔ کانفیگ‌های قبلی این اینباند از کار می‌افتند تا مشتری اشتراک را به‌روز کند.",
+    fp: "Fingerprint (uTLS)", spx: "spiderX", xver: "xver (PROXY به مقصد)", cert: "گواهی", sniName: "serverName (دامنه)", alpn: "ALPN", minVer: "حداقل نسخهٔ TLS",
+    insecure: "گواهی خودامضا (برنامه‌ها تأیید CA را رد می‌کنند)", sniffOn: "فعال", dest: "destOverride", routeOnly: "فقط برای مسیریابی (routeOnly)", metaOnly: "metadataOnly",
+    realityNeeds: "REALITY فقط با tcp، grpc و xhttp کار می‌کند.", visionNeeds: "Vision فقط با tcp و امنیت REALITY یا TLS کار می‌کند؛ خاموش شد.",
+    needCert: "برای TLS یک گواهی انتخاب کنید (اینباندها ← گواهی‌ها).", saved: "ذخیره شد؛ Xray کانفیگ را تأیید کرد و نودها در همگام‌سازی بعدی می‌گیرند.",
+    badJson: "JSON نامعتبر", mtu: "MTU", clone: "کپی", cloneTitle: "کپی اینباند {x}", cloneHint: "همان تنظیمات و همان نودها با شناسه و پورت تازه. کلیدهای REALITY و Shadowsocks تازه ساخته می‌شوند؛ تونل‌ها کپی نمی‌شوند.",
+    newTag: "شناسهٔ تازه", newPort: "پورت تازه", cloneClients: "به همان کاربرها هم داده شود", cloned: "کپی ساخته شد", jsonHint: "تغییرات این‌جا با فرم یکی است. قبل از ذخیره Xray کانفیگ را بررسی می‌کند و اگر رد کند هیچ تغییری اعمال نمی‌شود." },
+  en: { title: "Settings", form: "Form", json: "JSON", general: "General", protocol: "Protocol", transport: "Transport", security: "Security", sniffing: "Sniffing",
+    listen: "Listen IP", port: "Port", portRouted: "This inbound is placed on nodes; change each node's port under Nodes & routes.", remark: "Name in apps", enabled: "Enabled",
+    flow: "Flow", flowNone: "No flow", venc: "VLESS encryption (Xray 26)", vencOff: "Off (none)", vencX: "X25519 (fast)", vencM: "ML-KEM-768 (post-quantum)",
+    vencHint: "VLESS's own encryption layer, over any transport. Only Xray 26 based apps (recent v2rayNG, v2rayN, Happ, Streisand) and recent Clash Meta support it; sing-box subscriptions leave this inbound out.",
+    vencNew: "New key", server: "Server side (decryption)", client: "App side (encryption)",
+    method: "Method", ssKey: "Server key", newKey: "New key", ssWarn: "Changing the method or server key means every customer must refresh the subscription.",
+    network: "Network", path: "Path", host: "Host", service: "gRPC service name", multi: "multiMode (several streams, faster)", xmode: "XHTTP mode", padding: "Padding (bytes, e.g. 100-1000)",
+    proxyProto: "Accept PROXY protocol (behind HAProxy/Nginx or a relay)", sec: "Security", none: "none", target: "Target", sni: "serverNames (one per line)",
+    sids: "shortIds (one per line; the first goes in links)", addSid: "+ shortId", priv: "Private key", pub: "Public key (in links)", newKeys: "New keys",
+    keysWarn: "New keys stop every existing config of this inbound until customers refresh the subscription.",
+    fp: "Fingerprint (uTLS)", spx: "spiderX", xver: "xver (PROXY to target)", cert: "Certificate", sniName: "serverName (domain)", alpn: "ALPN", minVer: "Minimum TLS version",
+    insecure: "Self-signed certificate (apps skip CA verification)", sniffOn: "Enabled", dest: "destOverride", routeOnly: "For routing only (routeOnly)", metaOnly: "metadataOnly",
+    realityNeeds: "REALITY works only with tcp, grpc and xhttp.", visionNeeds: "Vision needs tcp with REALITY or TLS; it was turned off.",
+    needCert: "Pick a certificate for TLS (Inbounds → Certificates).", saved: "Saved; Xray accepted the config and nodes pick it up on their next sync.",
+    badJson: "Invalid JSON", mtu: "MTU", clone: "Copy", cloneTitle: "Copy inbound {x}", cloneHint: "Same settings and nodes under a new tag and port. REALITY and Shadowsocks keys are made fresh; tunnels are not copied.",
+    newTag: "New tag", newPort: "New port", cloneClients: "Give it to the same clients", cloned: "Copy created", jsonHint: "This is the same data as the form. Xray checks the config before it is saved; if Xray refuses it nothing changes." },
+};
+const ie = (k, vars) => { let s = (IE[lang] || IE.en)[k] ?? IE.en[k] ?? k; for (const [a, b] of Object.entries(vars || {})) s = s.replaceAll(`{${a}}`, b); return s; };
+
+async function qrImage(text) {
+  const img = h("img", { class: "qr", alt: "QR" });
+  try {
+    const res = await fetch("/api/v2/admin/qr.png", { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json", "X-Dark-Request": "1" }, body: JSON.stringify({ text }) });
+    if (!res.ok) throw new Error(await res.text());
+    img.src = URL.createObjectURL(await res.blob());
+    img.addEventListener("load", () => URL.revokeObjectURL(img.src), { once: true });
+  } catch (x) { return h("p", { class: "error" }, x.message); }
+  return img;
+}
+
+function showQR(title, text) {
+  const box = h("div", { class: "qrbox" }, h("p", { class: "muted small" }, "…"));
+  openModal(title, h("div", { class: "form" }, box, h("code", { class: "linkline", dir: "ltr" }, text)), [h("button", { type: "button", onclick: (e) => { e.preventDefault(); copy(text); } }, t("copy"))]);
+  qrImage(text).then((img) => box.replaceChildren(img));
+}
+
+function cloneInbound(ib) {
+  const tag = h("input", { required: true, pattern: "[a-z0-9][a-z0-9._-]{0,62}", value: `${ib.tag}-2`, dir: "ltr", autofocus: true });
+  const port = h("input", { type: "number", min: "1", max: "65535", required: true, value: String((ib.port || 443) + 1), dir: "ltr" });
+  const cl = h("input", { type: "checkbox", checked: true });
   const err = h("div", { class: "error" });
-  const parse = (el, name) => { try { return JSON.parse(el.value); } catch (x) { throw new Error(t("invalidJson", { x: name }) + `: ${x.message}`); } };
   const save = h("button", { class: "primary", value: "save", onclick: async (e) => {
     e.preventDefault(); err.textContent = "";
+    for (const f of [tag, port]) if (!f.reportValidity()) return;
     try {
-      const body = { node_id: node.value, template: parse(tpl, "template"), meta: parse(meta, "meta"), enabled: en.checked };
-      await guarded(() => api("PUT", `/api/v2/admin/inbounds/${encodeURIComponent(tag)}`, body));
-      document.getElementById("modal").close("save"); route();
+      await guarded(() => api("POST", `/api/v2/admin/inbounds/${encodeURIComponent(ib.tag)}/clone`, { tag: tag.value.trim(), port: +port.value, clients: cl.checked }));
+      document.getElementById("modal").close("save"); toast(ie("cloned")); route();
     } catch (x) { err.textContent = x.message; }
-  } }, t("save"));
-  const d = openModal(`${t("advanced")} · ${tag}`, h("div", { class: "form" },
-    h("p", { class: "small muted" }, t("advancedHint")),
-    h("div", { class: "two" }, h("label", {}, h("span", {}, t("node")), node), h("label", { class: "check" }, en, t("enabled"))),
-    h("label", {}, h("span", {}, t("template")), tpl),
-    h("label", {}, h("span", {}, t("metaJson")), meta), err), [save]);
+  } }, ie("clone"));
+  openModal(ie("cloneTitle", { x: ib.tag }), h("div", { class: "form" }, h("p", { class: "small muted" }, ie("cloneHint")),
+    h("div", { class: "two" }, h("label", {}, h("span", {}, ie("newTag")), tag), h("label", {}, h("span", {}, ie("newPort")), port)),
+    h("label", { class: "check" }, cl, ie("cloneClients")), err), [save]);
+}
+
+async function inboundEditor(tag, nodes, certs) {
+  const [raw, routes, certList] = await Promise.all([
+    api("GET", `/api/v2/admin/inbounds/${encodeURIComponent(tag)}`),
+    api("GET", `/api/v2/admin/inbounds/${encodeURIComponent(tag)}/routes`).catch(() => []),
+    certs ? Promise.resolve(certs) : api("GET", "/api/v2/admin/certs").catch(() => [])]);
+  const parse = (v) => { try { return typeof v === "string" ? JSON.parse(v) : structuredClone(v || {}); } catch { return {}; } };
+  let tpl = parse(raw.template), meta = parse(raw.meta);
+  let enabled = raw.enabled;
+  const routed = (routes || []).length > 0;
+  let mode = "form";
+  const body = h("div", { class: "form ie" });
+  const err = h("div", { class: "error", role: "alert" });
+  const tabs = h("div", { class: "steps", role: "tablist" });
+  const d = openModal(`${ie("title")} · ${tag}`, h("div", {}, tabs, body, err), [
+    h("button", { class: "primary", value: "save", onclick: async (e) => { e.preventDefault(); await save(); } }, t("save"))]);
   d.classList.add("wide");
   d.addEventListener("close", () => d.classList.remove("wide"), { once: true });
+
+  const field = (label, el, hint) => h("label", {}, h("span", {}, label), el, hint ? h("small", { class: "muted" }, hint) : null);
+  const obj = (o, k) => (o[k] && typeof o[k] === "object" && !Array.isArray(o[k]) ? o[k] : (o[k] = {}));
+  const input = (get, set, attrs = {}) => { const el = h("input", { ...attrs, value: get() ?? "" }); el.addEventListener("input", () => set(attrs.type === "number" ? (el.value === "" ? undefined : +el.value) : el.value)); return el; };
+  const select = (opts, get, set, onChange) => {
+    const el = h("select", {}, opts.map(([v, l]) => h("option", { value: v, selected: String(get() ?? "") === v }, l)));
+    el.addEventListener("change", () => { set(el.value); if (onChange) onChange(); });
+    return el;
+  };
+  const check = (get, set, label, onChange) => { const c = h("input", { type: "checkbox", checked: !!get() }); c.addEventListener("change", () => { set(c.checked); if (onChange) onChange(); }); return h("label", { class: "check" }, c, label); };
+  const lines = (get, set, attrs = {}) => { const el = h("textarea", { rows: "3", dir: "ltr", spellcheck: "false", ...attrs }, (get() || []).join("\n")); el.addEventListener("input", () => set(el.value.split(/\s+/).map((x) => x.trim()).filter(Boolean))); return el; };
+  const section = (title, ...kids) => h("fieldset", { class: "ie-sec" }, h("legend", {}, title), ...kids);
+  const keys = (kind, extra = {}) => api("POST", "/api/v2/admin/keys", { kind, ...extra });
+  const randB64 = (n) => { const b = new Uint8Array(n); crypto.getRandomValues(b); return btoa(String.fromCharCode(...b)); };
+
+  function draw() {
+    tabs.replaceChildren(...[["form", ie("form")], ["json", ie("json")]].map(([k, l]) => h("button", { type: "button", role: "tab", "aria-current": mode === k ? "step" : null, onclick: () => switchTo(k) }, l)));
+    body.replaceChildren(...(mode === "form" ? drawForm() : drawJSON()));
+  }
+  let jsonTpl, jsonMeta;
+  function switchTo(k) {
+    if (k === mode) return;
+    if (mode === "json") {
+      try { tpl = JSON.parse(jsonTpl.value); meta = JSON.parse(jsonMeta.value); } catch (x) { err.textContent = `${ie("badJson")}: ${x.message}`; return; }
+    }
+    err.textContent = ""; mode = k; draw();
+  }
+  function drawJSON() {
+    jsonTpl = h("textarea", { class: "code", rows: "18", spellcheck: "false", dir: "ltr" }, JSON.stringify(tpl, null, 2));
+    jsonMeta = h("textarea", { class: "code", rows: "8", spellcheck: "false", dir: "ltr" }, JSON.stringify(meta, null, 2));
+    return [h("p", { class: "small muted" }, ie("jsonHint")), field(t("template"), jsonTpl), field(t("metaJson"), jsonMeta)];
+  }
+
+  function drawForm() {
+    const proto = tpl.protocol;
+    const settings = obj(tpl, "settings");
+    const hasStream = !["wireguard", "shadowsocks"].includes(proto);
+    const out = [];
+    // General
+    out.push(section(ie("general"),
+      h("div", { class: "two" },
+        field(ie("protocol"), h("input", { value: proto, disabled: true, dir: "ltr" })),
+        field(ie("remark"), input(() => meta.remark, (v) => { meta.remark = v; }))),
+      h("div", { class: "two" },
+        field(ie("listen"), input(() => tpl.listen, (v) => { tpl.listen = v || undefined; }, { placeholder: "0.0.0.0", dir: "ltr" })),
+        field(ie("port"), input(() => tpl.port, (v) => { tpl.port = v; }, { type: "number", min: "1", max: "65535", dir: "ltr", disabled: routed }), routed ? ie("portRouted") : null)),
+      check(() => enabled, (v) => { enabled = v; }, ie("enabled"))));
+    // Protocol
+    if (proto === "vless") out.push(drawVless(settings));
+    if (proto === "shadowsocks") out.push(drawSS(settings));
+    if (proto === "wireguard") out.push(section(ie("protocol"), field(ie("mtu"), input(() => meta.mtu, (v) => { meta.mtu = v; }, { type: "number", min: "1280", max: "1500", placeholder: "1420", dir: "ltr" }))));
+    if (hasStream && proto !== "hysteria") out.push(drawTransport());
+    if (hasStream) out.push(drawSecurity());
+    out.push(drawSniff());
+    return out;
+  }
+
+  function drawVless(settings) {
+    const st = obj(tpl, "streamSettings");
+    const visionOK = (st.network || "tcp") === "tcp" && ["reality", "tls"].includes(st.security);
+    const dec = settings.decryption && settings.decryption !== "none" ? settings.decryption : "";
+    const kind = !dec ? "" : (dec.split(".").pop().length > 60 ? "vlessenc-mlkem" : "vlessenc-x25519");
+    const decView = h("textarea", { class: "code", rows: "2", readonly: true, dir: "ltr" }, dec);
+    const encView = h("textarea", { class: "code", rows: "2", readonly: true, dir: "ltr" }, meta.vless_encryption || "");
+    const keyRow = h("div", { class: "form", hidden: !dec }, field(ie("server"), decView), field(ie("client"), encView));
+    const regen = async (k) => {
+      if (!k) { delete settings.decryption; delete meta.vless_encryption; decView.value = encView.value = ""; keyRow.hidden = true; regenBtn.hidden = true; return; }
+      try { const r = await keys(k); settings.decryption = r.decryption; meta.vless_encryption = r.encryption; decView.value = r.decryption; encView.value = r.encryption; keyRow.hidden = false; regenBtn.hidden = false; } catch (x) { err.textContent = x.message; }
+    };
+    const vsel = select([["", ie("vencOff")], ["vlessenc-x25519", ie("vencX")], ["vlessenc-mlkem", ie("vencM")]], () => kind, () => {}, () => regen(vsel.value));
+    const regenBtn = h("button", { type: "button", class: "ghost", hidden: !dec, onclick: () => regen(vsel.value) }, ie("vencNew"));
+    return section(ie("protocol"),
+      field(ie("flow"), select([["", ie("flowNone")], ["xtls-rprx-vision", "xtls-rprx-vision"]], () => settings.flow || "", (v) => { if (v) settings.flow = v; else delete settings.flow; }),
+        visionOK ? null : "Vision: tcp + REALITY/TLS"),
+      field(ie("venc"), h("div", { class: "row tight" }, vsel, regenBtn), ie("vencHint")), keyRow);
+  }
+
+  function drawSS(settings) {
+    const sizes = { "2022-blake3-aes-128-gcm": 16, "2022-blake3-aes-256-gcm": 32, "2022-blake3-chacha20-poly1305": 32 };
+    const key = input(() => settings.password, (v) => { settings.password = v; }, { dir: "ltr" });
+    const meth = select(Object.keys(sizes).map((m) => [m, m]), () => settings.method, (v) => { settings.method = v; settings.password = randB64(sizes[v]); key.value = settings.password; });
+    return section(ie("protocol"), h("p", { class: "small muted" }, ie("ssWarn")),
+      field(ie("method"), meth),
+      field(ie("ssKey"), h("div", { class: "row tight" }, key, h("button", { type: "button", class: "ghost", onclick: () => { settings.password = randB64(sizes[settings.method] || 32); key.value = settings.password; } }, ie("newKey")))));
+  }
+
+  function drawTransport() {
+    const st = obj(tpl, "streamSettings");
+    const net = st.network || "tcp";
+    const kids = [];
+    const netSel = select([["tcp", "TCP (RAW)"], ["ws", "WebSocket"], ["grpc", "gRPC"], ["httpupgrade", "HTTPUpgrade"], ["xhttp", "XHTTP"]], () => (net === "splithttp" ? "xhttp" : net), (v) => {
+      for (const k of ["tcpSettings", "rawSettings", "wsSettings", "grpcSettings", "httpupgradeSettings", "xhttpSettings", "splithttpSettings"]) delete st[k];
+      st.network = v;
+      if (v === "ws") st.wsSettings = { path: "/" + Math.random().toString(36).slice(2, 8) };
+      if (v === "grpc") st.grpcSettings = { serviceName: Math.random().toString(36).slice(2, 8) };
+      if (v === "httpupgrade") st.httpupgradeSettings = { path: "/" + Math.random().toString(36).slice(2, 8) };
+      if (v === "xhttp") st.xhttpSettings = { path: "/" + Math.random().toString(36).slice(2, 8), mode: "auto" };
+      if (st.security === "reality" && !["tcp", "grpc", "xhttp"].includes(v)) { err.textContent = ie("realityNeeds"); }
+      if (v !== "tcp" && tpl.settings?.flow) { delete tpl.settings.flow; err.textContent = ie("visionNeeds"); }
+    }, draw);
+    kids.push(field(ie("network"), netSel));
+    if (net === "ws" || net === "httpupgrade") {
+      const o = obj(st, net === "ws" ? "wsSettings" : "httpupgradeSettings");
+      kids.push(h("div", { class: "two" }, field(ie("path"), input(() => o.path, (v) => { o.path = v; }, { dir: "ltr", placeholder: "/" })),
+        field(ie("host"), input(() => o.host, (v) => { if (v) o.host = v; else delete o.host; }, { dir: "ltr" }))));
+    }
+    if (net === "grpc") {
+      const o = obj(st, "grpcSettings");
+      kids.push(field(ie("service"), input(() => o.serviceName, (v) => { o.serviceName = v; }, { dir: "ltr" })),
+        check(() => o.multiMode, (v) => { if (v) o.multiMode = true; else delete o.multiMode; }, ie("multi")));
+    }
+    if (net === "xhttp" || net === "splithttp") {
+      const o = obj(st, net === "xhttp" ? "xhttpSettings" : "splithttpSettings");
+      kids.push(h("div", { class: "two" }, field(ie("path"), input(() => o.path, (v) => { o.path = v; }, { dir: "ltr", placeholder: "/" })),
+        field(ie("host"), input(() => o.host, (v) => { if (v) o.host = v; else delete o.host; }, { dir: "ltr" }))),
+        h("div", { class: "two" },
+          field(ie("xmode"), select([["auto", "auto"], ["packet-up", "packet-up"], ["stream-up", "stream-up"], ["stream-one", "stream-one"]], () => o.mode || "auto", (v) => { o.mode = v; })),
+          field(ie("padding"), input(() => o.xPaddingBytes, (v) => { if (v) o.xPaddingBytes = v; else delete o.xPaddingBytes; }, { dir: "ltr", placeholder: "100-1000" }))));
+    }
+    kids.push(check(() => st.sockopt?.acceptProxyProtocol, (v) => { const so = obj(st, "sockopt"); if (v) so.acceptProxyProtocol = true; else { delete so.acceptProxyProtocol; if (!Object.keys(so).length) delete st.sockopt; } }, ie("proxyProto")));
+    return section(ie("transport"), ...kids);
+  }
+
+  function drawSecurity() {
+    const st = obj(tpl, "streamSettings");
+    const proto = tpl.protocol;
+    const sec = proto === "hysteria" ? "tls" : (st.security || "none");
+    const net = st.network || "tcp";
+    const kids = [];
+    const fpSel = () => field(ie("fp"), select(["chrome", "firefox", "safari", "ios", "android", "edge", "360", "qq", "random", "randomized"].map((x) => [x, x]), () => meta.fingerprint || "chrome", (v) => { meta.fingerprint = v; }));
+    if (proto !== "hysteria") {
+      const opts = [["none", ie("none")], ["tls", "TLS"]];
+      if (["vless", "trojan"].includes(proto) && ["tcp", "grpc", "xhttp", "splithttp"].includes(net)) opts.push(["reality", "REALITY"]);
+      kids.push(field(ie("sec"), select(opts, () => sec, async (v) => {
+        delete st.realitySettings; delete st.tlsSettings; st.security = v;
+        if (v === "reality") {
+          const k = await keys("reality"); const sid = await keys("shortid");
+          const name = meta.sni || "www.speedtest.net";
+          st.realitySettings = { target: `${name}:443`, serverNames: [name], privateKey: k.private, shortIds: [sid.short_id.slice(0, 8)] };
+          meta.public_key = k.public; meta.short_id = sid.short_id.slice(0, 8);
+        } else { delete meta.public_key; delete meta.short_id; delete meta.spider_x; }
+        if (v === "tls") st.tlsSettings = { serverName: "", alpn: ["h2", "http/1.1"], certificates: certList[0] ? [{ dark_cert: certList[0].id }] : [] };
+        if (v === "none" && tpl.settings?.flow) { delete tpl.settings.flow; err.textContent = ie("visionNeeds"); }
+        draw();
+      })));
+    }
+    if (sec === "reality") {
+      const rs = obj(st, "realitySettings");
+      const tKey = rs.target !== undefined ? "target" : "dest";
+      const pub = h("input", { value: meta.public_key || "", readonly: true, dir: "ltr" });
+      const priv = input(() => rs.privateKey, async (v) => { rs.privateKey = v; try { const r = await keys("reality", { private: v }); meta.public_key = r.public; pub.value = r.public; err.textContent = ""; } catch (x) { err.textContent = x.message; } }, { dir: "ltr" });
+      const sids = lines(() => rs.shortIds, (v) => { rs.shortIds = v; meta.short_id = v[0] || ""; });
+      kids.push(
+        h("div", { class: "two" },
+          field(ie("target"), input(() => rs[tKey], (v) => { rs[tKey] = v; }, { dir: "ltr", placeholder: "www.speedtest.net:443" })),
+          field(ie("xver"), select([["0", "0"], ["1", "1"], ["2", "2"]], () => String(rs.xver || 0), (v) => { if (+v) rs.xver = +v; else delete rs.xver; }))),
+        h("div", { class: "two" },
+          field(ie("sni"), lines(() => rs.serverNames, (v) => { rs.serverNames = v; })),
+          field(ie("sids"), h("div", { class: "form" }, sids, h("button", { type: "button", class: "ghost", onclick: async () => {
+            const r = await keys("shortid"); rs.shortIds = [...(rs.shortIds || []), r.short_id.slice(0, 8)]; if (!meta.short_id) meta.short_id = rs.shortIds[0]; sids.value = rs.shortIds.join("\n");
+          } }, ie("addSid"))))),
+        h("div", { class: "two" }, field(ie("priv"), priv), field(ie("pub"), pub)),
+        h("div", { class: "row" }, h("button", { type: "button", class: "ghost", onclick: async () => {
+          try { const k = await keys("reality"); rs.privateKey = k.private; meta.public_key = k.public; priv.value = k.private; pub.value = k.public; } catch (x) { err.textContent = x.message; }
+        } }, ie("newKeys")), h("span", { class: "small muted" }, ie("keysWarn"))),
+        h("div", { class: "two" }, fpSel(), field(ie("spx"), input(() => meta.spider_x, (v) => { if (v) meta.spider_x = v; else delete meta.spider_x; }, { dir: "ltr", placeholder: "/" }))));
+    }
+    if (sec === "tls") {
+      const ts = obj(st, "tlsSettings");
+      const certs = Array.isArray(ts.certificates) ? ts.certificates : (ts.certificates = []);
+      const curCert = certs.find((c) => c.dark_cert)?.dark_cert || "";
+      const alpnOpts = proto === "hysteria" ? ["h3"] : ["h3", "h2", "http/1.1"];
+      const alpn = new Set(ts.alpn || []);
+      kids.push(
+        h("div", { class: "two" },
+          field(ie("cert"), select([["", "—"], ...certList.map((c) => [c.id, `${c.id} · ${(c.domains || []).join(", ")}`])], () => curCert, (v) => {
+            ts.certificates = v ? [{ dark_cert: v }] : []; const c = certList.find((x) => x.id === v); if (c?.domains?.[0] && !ts.serverName) ts.serverName = c.domains[0];
+          }, draw)),
+          field(ie("sniName"), input(() => ts.serverName, (v) => { ts.serverName = v; }, { dir: "ltr" }))),
+        h("div", { class: "row" }, h("span", { class: "muted small" }, ie("alpn")), ...alpnOpts.map((a) => check(() => alpn.has(a), (v) => { if (v) alpn.add(a); else alpn.delete(a); ts.alpn = alpnOpts.filter((x) => alpn.has(x)); if (!ts.alpn.length) delete ts.alpn; }, a))),
+        h("div", { class: "two" },
+          field(ie("minVer"), select([["", "—"], ["1.2", "1.2"], ["1.3", "1.3"]], () => ts.minVersion || "", (v) => { if (v) ts.minVersion = v; else delete ts.minVersion; })),
+          fpSel()),
+        check(() => meta.insecure, (v) => { if (v) meta.insecure = true; else delete meta.insecure; }, ie("insecure")));
+    }
+    return section(ie("security"), ...kids);
+  }
+
+  function drawSniff() {
+    const sn = obj(tpl, "sniffing");
+    const dest = new Set(sn.destOverride || []);
+    return section(ie("sniffing"),
+      h("div", { class: "row" }, check(() => sn.enabled, (v) => { sn.enabled = v; }, ie("sniffOn")),
+        check(() => sn.routeOnly, (v) => { if (v) sn.routeOnly = true; else delete sn.routeOnly; }, ie("routeOnly")),
+        check(() => sn.metadataOnly, (v) => { if (v) sn.metadataOnly = true; else delete sn.metadataOnly; }, ie("metaOnly"))),
+      h("div", { class: "row" }, h("span", { class: "muted small" }, ie("dest")), ...["http", "tls", "quic", "fakedns"].map((x) => check(() => dest.has(x), (v) => { if (v) dest.add(x); else dest.delete(x); sn.destOverride = [...dest]; }, x))));
+  }
+
+  async function save() {
+    err.textContent = "";
+    if (mode === "json") { try { tpl = JSON.parse(jsonTpl.value); meta = JSON.parse(jsonMeta.value); } catch (x) { err.textContent = `${ie("badJson")}: ${x.message}`; return; } }
+    const st = tpl.streamSettings || {};
+    if (st.security === "tls" && tpl.protocol !== "hysteria" && !(st.tlsSettings?.certificates || []).length) { err.textContent = ie("needCert"); return; }
+    if (st.security === "reality" && st.realitySettings) meta.short_id = (st.realitySettings.shortIds || [])[0] || meta.short_id;
+    try {
+      await guarded(() => api("PUT", `/api/v2/admin/inbounds/${encodeURIComponent(tag)}`, { node_id: raw.node_id, template: tpl, meta, enabled }));
+      toast(ie("saved")); d.close("save"); route();
+    } catch (x) { err.textContent = x.message; }
+  }
+  draw();
 }
 
 function certForm(id) {

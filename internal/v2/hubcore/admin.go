@@ -1075,8 +1075,67 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 			return
 		}
 		enabled := in.Enabled == nil || *in.Enabled
-		err := s.PutInboundMeta(r.Context(), r.PathValue("tag"), in.NodeID, in.Template, in.Meta, enabled)
+		err := s.PutInboundChecked(r.Context(), r.PathValue("tag"), in.NodeID, in.Template, in.Meta, enabled)
 		reply(w, map[string]bool{"ok": err == nil}, err)
+	}))
+	mux.HandleFunc("POST /api/v2/admin/inbounds/{tag}/clone", guard(func(w http.ResponseWriter, r *http.Request) {
+		var in CloneRequest
+		if !decode(w, r, &in) {
+			return
+		}
+		err := s.CloneInbound(r.Context(), r.PathValue("tag"), in)
+		reply(w, map[string]bool{"ok": err == nil}, err)
+	}))
+	mux.HandleFunc("POST /api/v2/admin/keys", guard(func(w http.ResponseWriter, r *http.Request) {
+		var in KeyRequest
+		if !decode(w, r, &in) {
+			return
+		}
+		k, err := GenerateKeys(in)
+		reply(w, k, err)
+	}))
+	mux.HandleFunc("POST /api/v2/admin/clients/{email}/rotate", guard(func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Credentials bool `json:"credentials"`
+			Link        bool `json:"link"`
+		}
+		if !decode(w, r, &in) {
+			return
+		}
+		err := s.RotateClient(r.Context(), r.PathValue("email"), in.Credentials, in.Link)
+		reply(w, map[string]bool{"ok": err == nil}, err)
+	}))
+	mux.HandleFunc("GET /api/v2/admin/clients/{email}/links", member(func(w http.ResponseWriter, r *http.Request) {
+		if !s.canSeeClient(r, r.PathValue("email")) {
+			http.NotFound(w, r)
+			return
+		}
+		list, err := s.ClientLinks(r.Context(), r.PathValue("email"))
+		reply(w, list, err)
+	}))
+	mux.HandleFunc("POST /api/v2/admin/qr.png", member(func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Text string `json:"text"`
+		}
+		if !decode(w, r, &in) {
+			return
+		}
+		if in.Text == "" || len(in.Text) > 2800 {
+			reply(w, nil, fmt.Errorf("%w: text too long for a QR code", ErrInvalid))
+			return
+		}
+		lvl := qrcode.Medium
+		if len(in.Text) > 1200 {
+			lvl = qrcode.Low
+		}
+		png, err := qrcode.Encode(in.Text, lvl, 512)
+		if err != nil {
+			reply(w, nil, err)
+			return
+		}
+		w.Header().Set("Content-Type", "image/png")
+		w.Header().Set("Cache-Control", "no-store")
+		_, _ = w.Write(png)
 	}))
 	mux.HandleFunc("GET /api/v2/admin/clients", member(func(w http.ResponseWriter, r *http.Request) {
 		list, err := s.scopedClients(r.Context(), who(r))

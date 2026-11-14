@@ -76,6 +76,9 @@ type Meta struct {
 	Insecure    bool       `json:"insecure,omitempty"`   // self-signed certificate: clients skip CA verification
 	PinSHA256   string     `json:"pin_sha256,omitempty"` // and pin this certificate fingerprint where they can
 	MTU         int        `json:"mtu,omitempty"`        // WireGuard
+	// VLESSEncryption is what clients send when the inbound uses Xray's
+	// VLESS encryption (settings.decryption on the server); empty = none.
+	VLESSEncryption string `json:"vless_encryption,omitempty"`
 	// Per client, filled when a subscription is built (never stored):
 	WGPrivateKey string `json:"-"`
 	WGAddress    string `json:"-"` // e.g. 10.66.0.2/32
@@ -122,6 +125,7 @@ type stream struct {
 	} `json:"tlsSettings"`
 	GRPC struct {
 		ServiceName string `json:"serviceName"`
+		MultiMode   bool   `json:"multiMode"`
 	} `json:"grpcSettings"`
 	WS struct {
 		Path string `json:"path"`
@@ -201,7 +205,11 @@ func params(t template, m Meta) url.Values {
 	switch s.Network {
 	case "grpc":
 		q.Set("serviceName", s.GRPC.ServiceName)
-		q.Set("mode", "gun")
+		if s.GRPC.MultiMode {
+			q.Set("mode", "multi")
+		} else {
+			q.Set("mode", "gun")
+		}
 	case "ws":
 		q.Set("path", or(s.WS.Path, "/"))
 		if s.WS.Host != "" {
@@ -325,7 +333,7 @@ func Links(a Account, ins []Inbound) ([]string, error) {
 			switch t.Protocol {
 			case "vless":
 				q := params(t, in.Meta)
-				q.Set("encryption", "none")
+				q.Set("encryption", or(in.Meta.VLESSEncryption, "none"))
 				if t.Settings.Flow != "" && t.Stream.Network == "tcp" {
 					q.Set("flow", t.Settings.Flow)
 				}
