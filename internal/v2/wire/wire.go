@@ -31,7 +31,29 @@ type SyncRequest struct {
 	SpooledBatches int    `json:"spooled_batches"`
 	UnixTime       int64  `json:"unix_time"`
 	Host           *Host  `json:"host,omitempty"`
+	// Results reports finished one-off tasks; the Node resends a result
+	// until a sync succeeds, and the HUB ignores results it already has.
+	Results []TaskResult `json:"results,omitempty"`
 }
+
+// Task is a one-off job the HUB asks a Node to run, for example scanning
+// for REALITY camouflage domains as seen from the Node's own network.
+// A Node runs each ID at most once; older Nodes ignore unknown kinds.
+type Task struct {
+	ID   string          `json:"id"`
+	Kind string          `json:"kind"`
+	Args json.RawMessage `json:"args,omitempty"`
+}
+
+// TaskResult is the outcome of one Task.
+type TaskResult struct {
+	ID     string          `json:"id"`
+	Result json.RawMessage `json:"result,omitempty"`
+	Error  string          `json:"error,omitempty"`
+}
+
+// TaskSNIScan probes TLS camouflage candidates (see package sniscan).
+const TaskSNIScan = "sni_scan"
 
 // Host is the node machine's health at the time of the sync.
 type Host struct {
@@ -60,6 +82,7 @@ type SyncResponse struct {
 	UsageSeq    uint64 `json:"usage_seq"`
 	PollSeconds int    `json:"poll_seconds"`
 	UnixTime    int64  `json:"unix_time"`
+	Tasks       []Task `json:"tasks,omitempty"`
 }
 
 // UserLimit is the HUB's view of one client at the time of the sync.

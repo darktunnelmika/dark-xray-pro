@@ -61,6 +61,7 @@ type Agent struct {
 	lastFrom     int64
 	lastHost     *hostSample
 	onlineCount  int
+	tasks        *taskBox
 }
 
 type hostSample struct {
@@ -136,7 +137,7 @@ func New(cfg Config, hub Hub, xray Applier, stats StatsSource) (*Agent, error) {
 		return nil, err
 	}
 	a := &Agent{cfg: cfg, hub: hub, xray: xray, stats: stats, spool: sp,
-		delivered: map[uint64]map[string]int64{}, blockedUntil: map[string]time.Time{}, lastDecision: Decision{}}
+		delivered: map[uint64]map[string]int64{}, blockedUntil: map[string]time.Time{}, lastDecision: Decision{}, tasks: newTaskBox()}
 	if b, err := os.ReadFile(a.statePath()); err == nil {
 		_ = json.Unmarshal(b, &a.state)
 	}
@@ -305,13 +306,16 @@ func (a *Agent) Exchange(ctx context.Context) time.Duration {
 	a.mu.Lock()
 	rev := a.state.ConfigRevision
 	a.mu.Unlock()
+	results := a.tasks.pending()
 	resp, err := a.hub.Sync(ctx, wire.SyncRequest{NodeID: a.cfg.NodeID, AgentVersion: Version, ConfigRevision: rev,
 		XrayRunning: running, XrayRestarts: restarts, LastError: lastErr, SpooledBatches: a.spool.Len(), UnixTime: a.cfg.Now().Unix(),
-		Host: a.hostStats()})
+		Host: a.hostStats(), Results: results})
 	if err != nil {
 		a.cfg.Logf("hub sync unavailable, serving last state: %v", err)
 		return poll
 	}
+	a.tasks.delivered(results)
+	a.tasks.start(ctx, resp.Tasks, a.cfg.Logf)
 	if resp.PollSeconds > 0 {
 		poll = time.Duration(resp.PollSeconds) * time.Second
 	}

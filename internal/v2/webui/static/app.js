@@ -9,7 +9,9 @@ const I18N = {
     maxIPs: "Max IPs (0 = no limit)", enabled: "Enabled", assignInbounds: "Inbounds", unlimited: "Unlimited", noExpiry: "No expiry",
     notStarted: "Starts on first use", daysLeft: "{n} days left", expired: "Expired", disabled: "Disabled", exhausted: "Volume used up",
     subscription: "Subscription", subHint: "Import this link or scan the QR code in v2rayNG, Hiddify or Streisand.",
-    confirmDelete: "Delete {x}? Usage history is kept.", node: "Node", preset: "Preset", tag: "Tag", port: "Port", sni: "REALITY target (SNI)",
+    confirmDelete: "Delete {x}? Usage history is kept.", node: "Node", preset: "Preset", tag: "Tag", port: "Port", sni: "REALITY target (SNI)", findSni: "Find SNI", sniScan: "Scan", sniScanning: "Scanning from {x}… {s}s", sniNeighbors: "Also scan neighbours in the node's datacenter (/24)",
+    sniCustom: "Your own domains (one per line, empty = built-in list)", sniHint: "Probes each domain from the node itself: TLS 1.3, HTTP/2, a valid certificate and handshake time. The best REALITY targets are fast, TLS 1.3 + h2, and ideally in the same datacenter.",
+    sniUse: "Use", sniFailed: "{x} unusable (no TLS 1.3/h2, bad certificate or unreachable)", sniExpired: "The node did not answer. Is it online and updated?", neighbor: "neighbour", latency: "Handshake", score: "Score",
     path: "Path / service name (optional)", remark: "Remark", directAddr: "Public address", tunnelAddr: "Tunnel entry (optional, address:port)",
     addNode: "Add node", nodeId: "Node ID (e.g. de-1)", nodeToken: "Node token — shown once, keep it safe", online: "Online", offline: "Offline",
     restarts: "Xray starts", spooled: "Waiting batches", language: "Language", theme: "Theme", system: "System", light: "Light", dark: "Dark",
@@ -72,7 +74,9 @@ const I18N = {
     maxIPs: "حداکثر IP (۰ = بدون محدودیت)", enabled: "فعال", assignInbounds: "اینباندها", unlimited: "نامحدود", noExpiry: "بدون انقضا",
     notStarted: "از اولین اتصال شروع می‌شود", daysLeft: "{n} روز مانده", expired: "منقضی", disabled: "غیرفعال", exhausted: "حجم تمام شد",
     subscription: "لینک ساب", subHint: "این لینک را در v2rayNG، Hiddify یا Streisand وارد کنید یا QR را اسکن کنید.",
-    confirmDelete: "{x} حذف شود؟ سابقهٔ مصرف حفظ می‌شود.", node: "نود", preset: "نوع", tag: "شناسه", port: "پورت", sni: "مقصد REALITY (SNI)",
+    confirmDelete: "{x} حذف شود؟ سابقهٔ مصرف حفظ می‌شود.", node: "نود", preset: "نوع", tag: "شناسه", port: "پورت", sni: "مقصد REALITY (SNI)", findSni: "یافتن SNI", sniScan: "اسکن", sniScanning: "در حال اسکن از {x}… {s} ثانیه", sniNeighbors: "سایت‌های همسایه در دیتاسنتر نود (/24) هم بررسی شوند",
+    sniCustom: "دامنه‌های دلخواه (هر خط یکی، خالی = فهرست آماده)", sniHint: "هر دامنه از خود نود سنجیده می‌شود: TLS 1.3، HTTP/2، گواهی معتبر و زمان دست‌دهی. بهترین مقصد REALITY سریع است، TLS 1.3 و h2 دارد و ترجیحاً در همان دیتاسنتر است.",
+    sniUse: "انتخاب", sniFailed: "{x} مورد قابل استفاده نیست (بدون TLS 1.3/h2، گواهی نامعتبر یا در دسترس نبود)", sniExpired: "نود جواب نداد. آنلاین و به‌روز است؟", neighbor: "همسایه", latency: "دست‌دهی", score: "امتیاز",
     path: "مسیر / نام سرویس (اختیاری)", remark: "نام نمایشی", directAddr: "آدرس عمومی", tunnelAddr: "ورودی تونل (اختیاری، آدرس:پورت)",
     addNode: "افزودن نود", nodeId: "شناسه نود (مثلاً de-1)", nodeToken: "توکن نود — فقط یک بار نشان داده می‌شود", online: "آنلاین", offline: "آفلاین",
     restarts: "دفعات اجرای Xray", spooled: "بستهٔ در انتظار", language: "زبان", theme: "پوسته", system: "سیستم", light: "روشن", dark: "تیره",
@@ -343,6 +347,11 @@ function nodeCard(n, actions = false) {
     actions ? h("div", { class: "row" },
       h("button", { onclick: () => nodeHealth(n) }, t("health")),
       h("button", { class: "ghost", onclick: () => renameNode(n) }, t("rename")),
+      h("button", { class: "ghost", onclick: () => {
+        const f = sniFinder({ nodes: [n], node: n.ID, onPick: (d) => copy(d) });
+        const d = openModal(`${t("findSni")} · ${n.Name || n.ID}`, f);
+        d.addEventListener("close", () => f.cancel(), { once: true });
+      } }, t("findSni")),
       h("button", { class: "ghost", onclick: async () => {
         try { const r = await guarded(() => api("POST", `/api/v2/admin/nodes/${encodeURIComponent(n.ID)}/install`));
           openModal(t("reinstall"), h("div", { class: "form" }, h("p", { class: "small" }, t("installCmd")), h("code", {}, r.install), h("button", { type: "button", onclick: () => copy(r.install) }, t("copy"))));
@@ -674,6 +683,67 @@ async function viewInbounds() {
         } }, t("delete"))))) : h("p", { class: "muted small" }, t("empty"))));
 }
 
+// ---------- REALITY SNI finder: probes candidates from the node itself ----------
+function sniFinder({ nodes, node, onPick }) {
+  const field = (label, el) => h("label", {}, h("span", {}, label), el);
+  const box = h("div", { class: "card snifind" });
+  const sel = h("select", {}, (nodes || []).map((n) => h("option", { value: n.ID, selected: n.ID === node }, n.Name || n.ID)));
+  const subnet = h("input", { type: "checkbox", checked: true });
+  const custom = h("textarea", { rows: 3, placeholder: "www.example.com", dir: "ltr" });
+  const status = h("div", { class: "small muted", role: "status" });
+  const out = h("div", { class: "sniresults" });
+  const go = h("button", { type: "button", class: "primary" }, t("sniScan"));
+  let timer = 0;
+  const stop = () => { clearInterval(timer); timer = 0; go.disabled = false; };
+  go.addEventListener("click", async () => {
+    const id = sel.value || node;
+    if (!id) return;
+    go.disabled = true; out.replaceChildren();
+    let task;
+    try {
+      task = await api("POST", `/api/v2/admin/nodes/${encodeURIComponent(id)}/sniscan`, { subnet: subnet.checked, domains: custom.value.split(/\s+/).filter(Boolean) });
+    } catch (e) { status.textContent = e.message; stop(); return; }
+    const t0 = Date.now();
+    const name = (nodes || []).find((n) => n.ID === id)?.Name || id;
+    const tick = async () => {
+      status.textContent = t("sniScanning", { x: name, s: Math.round((Date.now() - t0) / 1000) });
+      let r;
+      try { r = await api("GET", `/api/v2/admin/tasks/${task.id}`); } catch { return; }
+      if (r.status === "queued") return;
+      stop();
+      if (r.status === "expired") { status.textContent = t("sniExpired"); return; }
+      if (r.status === "failed") { status.textContent = r.error || "failed"; return; }
+      show(r.result || {});
+    };
+    timer = setInterval(tick, 2000);
+    tick();
+  });
+  function show(res) {
+    const all = res.candidates || [];
+    const good = all.filter((c) => c.ok && c.tls13 && c.h2);
+    status.textContent = `${fmtNum(res.scanned || 0)} · ${(res.took_ms / 1000).toFixed(1)}s` + (res.neighbors ? ` · ${t("neighbor")}: ${fmtNum(res.neighbors)}` : "");
+    out.replaceChildren(
+      good.length ? h("table", {},
+        h("thead", {}, h("tr", {}, h("th", {}, "SNI"), h("th", {}, t("score")), h("th", {}, t("latency")), h("th", {}, ""), h("th", {}, ""))),
+        h("tbody", {}, good.slice(0, 25).map((c) => h("tr", {},
+          h("td", { class: "mono", dir: "ltr" }, c.domain, c.neighbor ? h("span", { class: "badge good" }, t("neighbor")) : null),
+          h("td", {}, h("div", { class: "scorebar" }, h("i", { style: `width:${c.score}%` })), h("span", { class: "small" }, String(c.score))),
+          h("td", { class: "mono" }, `${c.latency_ms} ms`),
+          h("td", { class: "small muted" }, c.issuer || ""),
+          h("td", {}, h("button", { type: "button", onclick: () => { onPick(c.domain, c); toast(`SNI → ${c.domain}`); } }, t("sniUse"))))))) : null,
+      all.length > good.length ? h("p", { class: "small muted" }, t("sniFailed", { x: fmtNum(all.length - good.length) })) : null,
+    );
+  }
+  box.append(
+    h("p", { class: "small muted" }, t("sniHint")),
+    nodes && nodes.length > 1 ? field(t("node"), sel) : null,
+    h("label", { class: "check" }, subnet, h("span", {}, t("sniNeighbors"))),
+    field(t("sniCustom"), custom),
+    h("div", { class: "row" }, go, status), out);
+  box.cancel = stop;
+  return box;
+}
+
 // ---------- Inbound studio: one profile, many nodes, Direct/Tunnel/Swap per node ----------
 async function inboundStudio(tag, ctx) {
   const isNew = !tag;
@@ -743,14 +813,22 @@ async function inboundStudio(tag, ctx) {
       certSel.options[0].hidden = p.preset !== "hysteria2";
       if (p.preset === "hysteria2" && !(ctx.certs || []).length) p.cert = "";
     };
-    preset.addEventListener("change", () => { p.preset = preset.value; sync(); });
+    const sniInput = bind(p, "sni");
+    const finder = sniFinder({ nodes, node: Object.keys(st.routes)[0] || nodes[0]?.ID, onPick: (d) => { p.sni = d; sniInput.value = d; } });
+    finder.hidden = true;
+    const findBtn = h("button", { type: "button", class: "ghost" }, t("findSni"));
+    findBtn.addEventListener("click", () => { finder.hidden = !finder.hidden; });
+    const isReality = () => p.preset.includes("reality");
+    preset.addEventListener("change", () => { p.preset = preset.value; sync(); findBtn.hidden = !isReality(); if (!isReality()) finder.hidden = true; });
+    findBtn.hidden = !isReality();
     certSel.addEventListener("change", () => { p.cert = certSel.value; const c = (ctx.certs || []).find((x) => x.id === p.cert); if (c?.domains[0]) { p.sni = c.domains[0]; draw(); } });
     sync();
     return [
       h("p", { class: "small muted" }, t("profileHint")),
       h("div", { class: "two" }, field(t("tag"), bind(p, "tag", { required: true, placeholder: "multi-reality", autofocus: true })), field(t("preset"), preset)),
       certRow,
-      h("div", { class: "two" }, field(t("sni"), bind(p, "sni")), field(t("path"), bind(p, "path"))),
+      h("div", { class: "two" }, field(t("sni"), h("div", { class: "row tight" }, sniInput, findBtn)), field(t("path"), bind(p, "path"))),
+      finder,
       field(t("remark"), bind(p, "remark")),
     ];
   }

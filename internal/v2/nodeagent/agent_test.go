@@ -102,11 +102,13 @@ type fakeHub struct {
 	resp     wire.SyncResponse
 	received []wire.UsageBatch
 	acked    uint64
+	results  []wire.TaskResult
 }
 
-func (h *fakeHub) Sync(_ context.Context, _ wire.SyncRequest) (wire.SyncResponse, error) {
+func (h *fakeHub) Sync(_ context.Context, req wire.SyncRequest) (wire.SyncResponse, error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	h.results = append(h.results, req.Results...)
 	if h.down {
 		return wire.SyncResponse{}, errors.New("hub down")
 	}

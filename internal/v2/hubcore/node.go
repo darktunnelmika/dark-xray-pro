@@ -66,11 +66,13 @@ tx_rate=MAX(tx_rate,excluded.tx_rate), online=MAX(online,excluded.online)`,
 	if err := tx.Commit(); err != nil {
 		return wire.SyncResponse{}, err
 	}
+	s.applyTaskResults(ctx, nodeID, req.Results)
 	users, err := s.limits(ctx, nodeID)
 	if err != nil {
 		return wire.SyncResponse{}, err
 	}
-	resp := wire.SyncResponse{ConfigRevision: uint64(rev), Users: users, UsageSeq: uint64(usageSeq), PollSeconds: PollSeconds, UnixTime: now}
+	resp := wire.SyncResponse{ConfigRevision: uint64(rev), Users: users, UsageSeq: uint64(usageSeq), PollSeconds: PollSeconds, UnixTime: now,
+		Tasks: s.openTasks(ctx, nodeID)}
 	if uint64(rev) != req.ConfigRevision {
 		resp.Config = cfg
 	}

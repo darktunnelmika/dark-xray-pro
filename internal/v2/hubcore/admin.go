@@ -532,6 +532,21 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 		tok, err := s.CreateNodeInstall(r.Context(), in.ID, in.Name)
 		reply(w, map[string]string{"id": in.ID, "install": "curl -fsSL " + publicBase(subBase, r) + "/install/" + tok + " | bash"}, err)
 	}))
+	mux.HandleFunc("POST /api/v2/admin/nodes/{id}/sniscan", guard(func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Domains []string `json:"domains"`
+			Subnet  bool     `json:"subnet"`
+		}
+		if !decode(w, r, &in) {
+			return
+		}
+		id, err := s.StartSNIScan(r.Context(), r.PathValue("id"), in.Domains, in.Subnet)
+		reply(w, map[string]string{"id": id}, err)
+	}))
+	mux.HandleFunc("GET /api/v2/admin/tasks/{id}", guard(func(w http.ResponseWriter, r *http.Request) {
+		t, err := s.TaskByID(r.Context(), r.PathValue("id"))
+		reply(w, t, err)
+	}))
 	mux.HandleFunc("POST /api/v2/admin/nodes/{id}/install", guard(func(w http.ResponseWriter, r *http.Request) {
 		tok, err := s.NewInstallToken(r.Context(), r.PathValue("id"))
 		reply(w, map[string]string{"install": "curl -fsSL " + publicBase(subBase, r) + "/install/" + tok + " | bash"}, err)
