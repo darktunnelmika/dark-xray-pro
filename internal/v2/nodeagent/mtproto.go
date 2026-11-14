@@ -21,6 +21,14 @@ import (
 // raise it).
 var mtpLogLevel = zerolog.WarnLevel
 
+// allowAll lets every address in (mtg's noop list matches none, which as
+// an allowlist would refuse everyone).
+type allowAll struct{}
+
+func (allowAll) Contains(net.IP) bool { return true }
+func (allowAll) Run(time.Duration)    {}
+func (allowAll) Shutdown()            {}
+
 type logfWriter func(string, ...any)
 
 func (f logfWriter) Write(p []byte) (int, error) {
@@ -76,7 +84,7 @@ func startMTP(in mtpInbound, logf func(string, ...any)) (*mtpServer, error) {
 	s := &mtpServer{}
 	p, err := mtglib.NewProxy(mtglib.ProxyOpts{
 		Secret: secret, Network: ntw, AntiReplayCache: antireplay.NewStableBloomFilter(1<<20, 0.001),
-		IPBlocklist: ipblocklist.NewNoop(), IPAllowlist: ipblocklist.NewNoop(), EventStream: trafficStream{s}, Logger: logger.NewZeroLogger(zerolog.New(logfWriter(logf)).Level(mtpLogLevel).With().Str("inbound", in.Tag).Logger()),
+		IPBlocklist: ipblocklist.NewNoop(), IPAllowlist: allowAll{}, EventStream: trafficStream{s}, Logger: logger.NewZeroLogger(zerolog.New(logfWriter(logf)).Level(mtpLogLevel).With().Str("inbound", in.Tag).Logger()),
 		Concurrency: 8192, IdleTimeout: 5 * time.Minute, TolerateTimeSkewness: 5 * time.Second, DomainFrontingPort: 443,
 	})
 	if err != nil {
