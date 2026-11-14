@@ -46,6 +46,7 @@ func main() {
 	tlsDir := fs.String("tls-dir", "/etc/dark-hub2", "CA and server certificate directory")
 	adminListen := fs.String("admin-listen", "127.0.0.1:2097", "owner API and /sub listen address (put HTTPS in front)")
 	subListen := fs.String("sub-listen", "", "public subscription-only listen address (optional)")
+	distDir := fs.String("dist", "/opt/dark-v2/dist", "dark-node and xray binaries served to one-line installs")
 	subBase := fs.String("sub-base", "", "public base URL for subscription links, e.g. http://1.2.3.4:28080")
 	adminTokenFile := fs.String("admin-token-file", "/etc/dark-hub2/admin-token", "owner API bearer token file")
 	hosts := fs.String("hosts", "", "comma-separated IPs/names for the server certificate")
@@ -88,7 +89,10 @@ func main() {
 			}
 		}()
 		if tok, err := os.ReadFile(*adminTokenFile); err == nil && *adminListen != "" {
-			admin := &http.Server{Addr: *adminListen, Handler: hubcore.AdminHandlerWith(s, strings.TrimSpace(string(tok)), *subBase, webui.Handler()), ReadHeaderTimeout: 10 * time.Second}
+			admin := &http.Server{Addr: *adminListen, Handler: hubcore.AdminHandlerWith(s, strings.TrimSpace(string(tok)), *subBase, webui.Handler(), func(m *http.ServeMux) {
+				inst := hubcore.InstallHandler(s, hubcore.InstallConfig{DistDir: *distDir, PublicURL: *subBase, HubURL: "https://" + *listen, CAFile: filepath.Join(*tlsDir, "ca.pem")})
+				m.Handle("GET /install/", inst)
+			}), ReadHeaderTimeout: 10 * time.Second}
 			go func() {
 				log.Printf("owner API and subscriptions on %s", *adminListen)
 				log.Fatal(admin.ListenAndServe())

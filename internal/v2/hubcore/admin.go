@@ -21,8 +21,11 @@ func AdminHandler(s *Store, adminToken string) http.Handler {
 
 // AdminHandlerWith also serves the panel UI at / and fills each client's
 // public subscription URL from subBase (e.g. https://sub.example.com).
-func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler) http.Handler {
+func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, extra ...func(*http.ServeMux)) http.Handler {
 	mux := http.NewServeMux()
+	for _, f := range extra {
+		f(mux)
+	}
 	if ui != nil {
 		mux.Handle("GET /", ui)
 	}
@@ -166,8 +169,12 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler) htt
 		if !decode(w, r, &in) {
 			return
 		}
-		tok, err := s.CreateNode(r.Context(), in.ID, in.Name)
-		reply(w, map[string]string{"id": in.ID, "token": tok}, err)
+		tok, err := s.CreateNodeInstall(r.Context(), in.ID, in.Name)
+		reply(w, map[string]string{"id": in.ID, "install": "curl -fsSL " + publicBase(subBase, r) + "/install/" + tok + " | bash"}, err)
+	}))
+	mux.HandleFunc("POST /api/v2/admin/nodes/{id}/install", guard(func(w http.ResponseWriter, r *http.Request) {
+		tok, err := s.NewInstallToken(r.Context(), r.PathValue("id"))
+		reply(w, map[string]string{"install": "curl -fsSL " + publicBase(subBase, r) + "/install/" + tok + " | bash"}, err)
 	}))
 	mux.HandleFunc("PUT /api/v2/admin/inbounds/{tag}", guard(func(w http.ResponseWriter, r *http.Request) {
 		var in struct {
@@ -280,11 +287,19 @@ func SubHandler(s *Store) http.Handler {
 	return mux
 }
 
-func subURL(base string, r *http.Request, tok string) string {
+func publicBase(base string, r *http.Request) string {
 	if base == "" {
-		base = "http://" + r.Host
+		scheme := "http"
+		if r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https") {
+			scheme = "https"
+		}
+		base = scheme + "://" + r.Host
 	}
-	return strings.TrimRight(base, "/") + "/sub/" + tok
+	return strings.TrimRight(base, "/")
+}
+
+func subURL(base string, r *http.Request, tok string) string {
+	return publicBase(base, r) + "/sub/" + tok
 }
 
 type principalKey struct{}

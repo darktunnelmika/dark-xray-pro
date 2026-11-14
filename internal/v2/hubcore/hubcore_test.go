@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -401,5 +402,47 @@ func TestChangePasswordKeepsRole(t *testing.T) {
 	p, _ := s.principal(ctx, "ali")
 	if p.Role != "rep" || p.RepID != "ali" {
 		t.Fatalf("role lost: %+v", p)
+	}
+}
+
+func TestOneLineInstall(t *testing.T) {
+	s, _ := newStore(t)
+	ctx := context.Background()
+	dist := t.TempDir()
+	for _, f := range []string{"dark-node", "xray"} {
+		if err := os.WriteFile(filepath.Join(dist, f), []byte("bin-"+f), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ca := filepath.Join(dist, "ca.pem")
+	_ = os.WriteFile(ca, []byte("CA"), 0o600)
+	tok, err := s.CreateNodeInstall(ctx, "fi-1", "Finland")
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := httptest.NewServer(InstallHandler(s, InstallConfig{DistDir: dist, PublicURL: "https://hub.example:28096", HubURL: "https://hub.example:28443", CAFile: ca}))
+	defer h.Close()
+	get := func(p string) (int, string) {
+		r, err := http.Get(h.URL + p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer r.Body.Close()
+		b, _ := io.ReadAll(r.Body)
+		return r.StatusCode, string(b)
+	}
+	code, script := get("/install/" + tok)
+	if code != 200 || !strings.Contains(script, "DARK_NODE_ID=fi-1") || !strings.Contains(script, "sha256sum -c") {
+		t.Fatalf("script %d %q", code, script)
+	}
+	if code, body := get("/install/" + tok + "/xray"); code != 200 || body != "bin-xray" {
+		t.Fatalf("xray %d %q", code, body)
+	}
+	code, nodeTok := get("/install/" + tok + "/token")
+	if code != 200 || s.AuthNode(ctx, "fi-1", nodeTok) != nil {
+		t.Fatal("installer token must authenticate the node")
+	}
+	if code, _ := get("/install/" + tok + "/token"); code != 404 {
+		t.Fatal("install link must die after the credential is fetched")
 	}
 }
