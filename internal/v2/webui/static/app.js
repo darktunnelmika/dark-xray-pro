@@ -18,6 +18,10 @@ const I18N = {
     credit: "Credit", volumeCredit: "Volume credit", units: "Unlimited units", addCredit: "Add credit", unitsHint: "1 unit = 1 user × 30 days",
     plan: "Plan", planVolume: "Volume", planUnlimited: "Unlimited", repId: "Reseller ID", loginUser: "Login username", loginPass: "Login password",
     installCmd: "Run this on the new server as root (link works once, for 1 hour):", note: "Note", reinstall: "New install link",
+    rename: "Rename", groups: "Groups", members: "Members", bulkRenew: "Bulk renew", addDays: "Add days", addGB: "Add GB",
+    selected: "{n} selected", changed: "{n} clients updated", all: "All", filterOnline: "Online", filterExpiring: "Expiring (≤3 days)",
+    filterExpired: "Expired / used up", filterDisabled: "Disabled", group: "Group", contact: "Contact / note", transfer: "Move to reseller",
+    ownerSelf: "Owner (me)", confirmNodeDelete: "Delete node {x} and its inbounds? Clients and usage stay.", selectAll: "Select all",
   },
   fa: {
     dashboard: "داشبورد", clients: "کلاینت‌ها", inbounds: "اینباندها", nodes: "نودها", settings: "تنظیمات",
@@ -37,6 +41,10 @@ const I18N = {
     credit: "اعتبار", volumeCredit: "اعتبار حجمی", units: "واحد نامحدود", addCredit: "افزودن اعتبار", unitsHint: "هر واحد = ۱ کاربر × ۳۰ روز",
     plan: "نوع پلن", planVolume: "حجمی", planUnlimited: "نامحدود", repId: "شناسه نماینده", loginUser: "نام کاربری ورود", loginPass: "رمز ورود",
     installCmd: "این دستور را روی سرور جدید با root اجرا کنید (یک‌بار مصرف، ۱ ساعت):", note: "توضیح", reinstall: "لینک نصب جدید",
+    rename: "تغییر نام", groups: "گروه‌ها", members: "اعضا", bulkRenew: "تمدید گروهی", addDays: "افزودن روز", addGB: "افزودن گیگ",
+    selected: "{n} انتخاب شده", changed: "{n} کلاینت به‌روز شد", all: "همه", filterOnline: "آنلاین", filterExpiring: "رو به انقضا (≤۳ روز)",
+    filterExpired: "منقضی / حجم تمام", filterDisabled: "غیرفعال", group: "گروه", contact: "تماس / یادداشت", transfer: "انتقال به نماینده",
+    ownerSelf: "مالک (خودم)", confirmNodeDelete: "نود {x} و اینباندهایش حذف شود؟ کلاینت‌ها و مصرف حفظ می‌شوند.", selectAll: "انتخاب همه",
   },
 };
 let lang = safeGet("lang") === "fa" ? "fa" : "en";
@@ -112,7 +120,7 @@ function confirmAction(text) {
 }
 
 // ---------- Views ----------
-const allRoutes = { dashboard: viewDashboard, clients: viewClients, inbounds: viewInbounds, nodes: viewNodes, reps: viewReps, settings: viewSettings };
+const allRoutes = { dashboard: viewDashboard, clients: viewClients, groups: viewGroups, inbounds: viewInbounds, nodes: viewNodes, reps: viewReps, settings: viewSettings };
 let me = null;
 let routes = allRoutes;
 function routesFor(m) {
@@ -154,15 +162,34 @@ async function viewDashboard() {
       stat("onlineUsers", fmtNum(o.OnlineUsers)),
       stat("trafficToday", bytes(o.TrafficToday)),
       stat("trafficTotal", bytes(o.TrafficTotal))),
-    h("div", { class: "list" }, (nodes || []).map(nodeCard)));
+    h("div", { class: "list" }, (nodes || []).map((n) => nodeCard(n))));
 }
 
-function nodeCard(n) {
+function nodeCard(n, actions = false) {
   return h("div", { class: "card item" },
     h("div", { class: "head" }, h("span", { class: `dot ${n.online ? "on" : ""}` }), h("span", { class: "name" }, `${n.Name || n.ID}`),
       h("span", { class: "badge" }, n.ID), h("span", { class: `badge ${n.online ? "good" : "bad"} spacer` }, t(n.online ? "online" : "offline"))),
     h("div", { class: "muted small" }, `${t("restarts")}: ${fmtNum(n.XrayRestarts)} · ${t("spooled")}: ${fmtNum(n.Spooled)} · ${n.AgentVersion || ""}`),
-    n.LastError ? h("div", { class: "small", style: "color:var(--bad)" }, `${t("lastError")}: ${n.LastError}`) : null);
+    n.LastError ? h("div", { class: "small", style: "color:var(--bad)" }, `${t("lastError")}: ${n.LastError}`) : null,
+    actions ? h("div", { class: "row" },
+      h("button", { class: "ghost", onclick: () => renameNode(n) }, t("rename")),
+      h("button", { class: "ghost", onclick: async () => {
+        try { const r = await guarded(() => api("POST", `/api/v2/admin/nodes/${encodeURIComponent(n.ID)}/install`));
+          openModal(t("reinstall"), h("div", { class: "form" }, h("p", { class: "small" }, t("installCmd")), h("code", {}, r.install), h("button", { type: "button", onclick: () => copy(r.install) }, t("copy"))));
+        } catch {}
+      } }, t("reinstall")),
+      h("button", { class: "ghost danger spacer", onclick: async () => {
+        if (await confirmAction(t("confirmNodeDelete", { x: n.ID }))) { await guarded(() => api("DELETE", `/api/v2/admin/nodes/${encodeURIComponent(n.ID)}`)); route(); }
+      } }, t("delete"))) : null);
+}
+
+function renameNode(n) {
+  const name = h("input", { value: n.Name || "", autofocus: true });
+  const save = h("button", { class: "primary", value: "save", onclick: async (e) => {
+    e.preventDefault();
+    try { await guarded(() => api("PUT", `/api/v2/admin/nodes/${encodeURIComponent(n.ID)}`, { Name: name.value })); document.getElementById("modal").close("save"); route(); } catch {}
+  } }, t("save"));
+  openModal(`${t("rename")} · ${n.ID}`, h("label", {}, h("span", {}, t("name")), name), [save]);
 }
 
 function clientStatus(c) {
@@ -177,35 +204,131 @@ function clientStatus(c) {
 }
 
 async function viewClients() {
-  const [list, inbounds] = await Promise.all([api("GET", "/api/v2/admin/clients"), me.role === "owner" ? api("GET", "/api/v2/admin/inbounds") : api("GET", "/api/v2/rep/inbounds").catch(() => [])]);
+  const owner = me.role === "owner";
+  const [list, inbounds, groups, reps] = await Promise.all([
+    api("GET", "/api/v2/admin/clients"),
+    owner ? api("GET", "/api/v2/admin/inbounds") : api("GET", "/api/v2/rep/inbounds").catch(() => []),
+    owner ? api("GET", "/api/v2/admin/groups") : Promise.resolve([]),
+    owner ? api("GET", "/api/v2/admin/reps") : Promise.resolve([]),
+  ]);
+  const ctx = { inbounds, groups: groups || [], reps: reps || [] };
+  const selected = new Set();
   const box = h("div", { class: "list" });
-  const render = (q = "") => {
-    const rows = (list || []).filter((c) => c.Email.toLowerCase().includes(q.toLowerCase()));
-    box.replaceChildren(...(rows.length ? rows.map((c) => clientCard(c, inbounds)) : [h("p", { class: "muted" }, t("empty"))]));
+  const count = h("span", { class: "muted small" });
+  const q = h("input", { class: "search", type: "search", placeholder: t("search"), "aria-label": t("search") });
+  const filter = h("select", { "aria-label": t("all") }, [["", t("all")], ["online", t("filterOnline")], ["expiring", t("filterExpiring")], ["bad", t("filterExpired")], ["disabled", t("filterDisabled")]]
+    .map(([v, l]) => h("option", { value: v }, l)),
+    ctx.groups.map((g) => h("option", { value: `g:${g.ID}` }, `${t("group")}: ${g.Name || g.ID}`)),
+    (inbounds || []).map((ib) => h("option", { value: `i:${ib.tag}` }, `${t("inbounds")}: ${ib.tag}`)));
+  const match = (c) => {
+    const f = filter.value, now = Date.now() / 1000;
+    if (q.value && !(c.Email + " " + (c.Note || "")).toLowerCase().includes(q.value.toLowerCase())) return false;
+    if (f === "online") return c.Online;
+    if (f === "disabled") return !c.Enabled;
+    if (f === "bad") return c.Remaining === 0 || (c.EffectiveUntil && c.EffectiveUntil <= now);
+    if (f === "expiring") return c.EffectiveUntil && c.EffectiveUntil > now && c.EffectiveUntil - now <= 3 * 86400;
+    if (f.startsWith("g:")) return (ctx.groups.find((g) => g.ID === f.slice(2))?.Members || []).includes(c.Email);
+    if (f.startsWith("i:")) return (c.Inbounds || []).includes(f.slice(2));
+    return true;
   };
+  const bulkBtn = h("button", { onclick: () => bulkForm([...selected]), disabled: true }, t("bulkRenew"));
+  const sync = () => { count.textContent = selected.size ? t("selected", { n: fmtNum(selected.size) }) : t("clientsCount", { n: fmtNum((list || []).length) }); bulkBtn.disabled = selected.size === 0; };
+  const render = () => {
+    const rows = (list || []).filter(match);
+    box.replaceChildren(...(rows.length ? rows.map((c) => clientCard(c, ctx, owner ? selected : null, sync)) : [h("p", { class: "muted" }, t("empty"))]));
+    sync();
+  };
+  q.addEventListener("input", render);
+  filter.addEventListener("change", render);
   render();
   return h("div", {},
-    h("div", { class: "row" }, h("h1", {}, t("clients")), h("span", { class: "muted small" }, t("clientsCount", { n: fmtNum((list || []).length) })),
-      h("input", { class: "search spacer", type: "search", placeholder: t("search"), "aria-label": t("search"), oninput: (e) => render(e.target.value) }),
+    h("div", { class: "row" }, h("h1", {}, t("clients")), count,
+      h("span", { class: "spacer" }), owner ? bulkBtn : null,
       h("button", { class: "primary", onclick: () => clientForm(null, inbounds) }, t("add"))),
+    h("div", { class: "row" }, q, filter),
     box);
 }
 
-function clientCard(c, inbounds) {
+function bulkForm(emails) {
+  const days = h("input", { type: "number", min: "0", value: "30" });
+  const gb = h("input", { type: "number", min: "0", step: "0.5", value: "0" });
+  const save = h("button", { class: "primary", value: "save", onclick: async (e) => {
+    e.preventDefault();
+    try {
+      const r = await api("POST", "/api/v2/admin/clients/bulk", { Emails: emails, AddDays: +days.value || 0, AddGB: +gb.value || 0 });
+      toast(t("changed", { n: fmtNum(r.changed) })); document.getElementById("modal").close("save"); route();
+    } catch (x) { toast(t("failed", { e: x.message })); }
+  } }, t("save"));
+  openModal(`${t("bulkRenew")} · ${t("selected", { n: fmtNum(emails.length) })}`, h("div", { class: "form two" },
+    h("label", {}, h("span", {}, t("addDays")), days), h("label", {}, h("span", {}, t("addGB")), gb)), [save]);
+}
+
+async function viewGroups() {
+  const [groups, clients] = await Promise.all([api("GET", "/api/v2/admin/groups"), api("GET", "/api/v2/admin/clients")]);
+  const cards = (groups || []).map((g) => h("div", { class: "card item" },
+    h("div", { class: "head" }, h("span", { class: "name" }, g.Name || g.ID), h("span", { class: "badge" }, g.ID),
+      h("span", { class: "badge spacer" }, t("clientsCount", { n: fmtNum(g.Members.length) }))),
+    h("div", { class: "small muted" }, g.Members.join(", ")),
+    h("div", { class: "row" },
+      h("button", { onclick: () => bulkGroup(g) }, t("bulkRenew")),
+      h("button", { class: "ghost", onclick: () => groupForm(g, clients) }, t("edit")),
+      h("button", { class: "ghost danger spacer", onclick: async () => {
+        if (await confirmAction(t("confirmDelete", { x: g.Name || g.ID }))) { await guarded(() => api("DELETE", `/api/v2/admin/groups/${encodeURIComponent(g.ID)}`)); route(); }
+      } }, t("delete")))));
+  return h("div", {},
+    h("div", { class: "row" }, h("h1", {}, t("groups")), h("button", { class: "primary spacer", onclick: () => groupForm(null, clients) }, t("add"))),
+    h("div", { class: "list" }, cards.length ? cards : h("p", { class: "muted" }, t("empty"))));
+}
+
+function bulkGroup(g) {
+  const days = h("input", { type: "number", min: "0", value: "30" });
+  const gb = h("input", { type: "number", min: "0", step: "0.5", value: "0" });
+  const save = h("button", { class: "primary", value: "save", onclick: async (e) => {
+    e.preventDefault();
+    try { const r = await api("POST", "/api/v2/admin/clients/bulk", { Group: g.ID, AddDays: +days.value || 0, AddGB: +gb.value || 0 });
+      toast(t("changed", { n: fmtNum(r.changed) })); document.getElementById("modal").close("save"); route(); } catch (x) { toast(t("failed", { e: x.message })); }
+  } }, t("save"));
+  openModal(`${t("bulkRenew")} · ${g.Name || g.ID}`, h("div", { class: "form two" },
+    h("label", {}, h("span", {}, t("addDays")), days), h("label", {}, h("span", {}, t("addGB")), gb)), [save]);
+}
+
+function groupForm(g, clients) {
+  const id = h("input", { required: true, pattern: "[a-z0-9][a-z0-9._-]{0,62}", value: g ? g.ID : "", disabled: !!g, autofocus: !g });
+  const name = h("input", { value: g ? g.Name : "" });
+  const boxes = (clients || []).map((c) => h("label", { class: "check" },
+    h("input", { type: "checkbox", value: c.Email, checked: !!g && g.Members.includes(c.Email) }), c.Email));
+  const save = h("button", { class: "primary", value: "save", onclick: async (e) => {
+    e.preventDefault();
+    if (!id.reportValidity()) return;
+    const members = boxes.map((b) => b.querySelector("input")).filter((i) => i.checked).map((i) => i.value);
+    try { await guarded(() => api("PUT", `/api/v2/admin/groups/${encodeURIComponent(id.value)}`, { Name: name.value, Members: members }));
+      document.getElementById("modal").close("save"); route(); } catch {}
+  } }, t("save"));
+  openModal(g ? `${t("edit")} · ${g.Name || g.ID}` : `${t("add")} · ${t("groups")}`, h("div", { class: "form" },
+    h("div", { class: "two" }, h("label", {}, h("span", {}, t("tag")), id), h("label", {}, h("span", {}, t("name")), name)),
+    h("fieldset", { class: "form", style: "border:0;padding:0;margin:0" }, h("legend", { class: "small muted" }, t("members")), boxes)), [save]);
+}
+
+function clientCard(c, ctx, selected, onSelect) {
+  const inbounds = ctx.inbounds;
   const used = c.Usage.Up + c.Usage.Down;
   const pct = c.VolumeBytes > 0 ? Math.min(100, (used / c.VolumeBytes) * 100) : 0;
   const [cls, status] = clientStatus(c);
   return h("div", { class: "card item" },
-    h("div", { class: "head" }, h("span", { class: `dot ${c.Online ? "on" : ""}`, title: c.Online ? t("online") : t("offline") }),
+    h("div", { class: "head" },
+      selected ? h("input", { type: "checkbox", "aria-label": c.Email, checked: selected.has(c.Email), style: "inline-size:auto",
+        onchange: (e) => { e.target.checked ? selected.add(c.Email) : selected.delete(c.Email); onSelect(); } }) : null,
+      h("span", { class: `dot ${c.Online ? "on" : ""}`, title: c.Online ? t("online") : t("offline") }),
       h("span", { class: "name" }, c.Email), h("span", { class: `badge ${cls}` }, status)),
     h("div", { class: "row small muted" },
       h("span", {}, `${bytes(used)} / ${c.VolumeBytes < 0 ? t("unlimited") : bytes(c.VolumeBytes)}`),
       c.MaxIPs ? h("span", {}, `· IP ≤ ${fmtNum(c.MaxIPs)}`) : null,
       h("span", {}, `· ${(c.Inbounds || []).join(", ")}`)),
+    c.Note ? h("div", { class: "small muted" }, c.Note) : null,
     c.VolumeBytes > 0 ? h("div", { class: "bar" }, h("i", { class: pct > 90 ? "bad" : pct > 75 ? "warn" : "", style: `inline-size:${pct}%` })) : null,
     h("div", { class: "row" },
       h("button", { onclick: () => showSub(c) }, t("subscription")),
-      h("button", { class: "ghost", onclick: () => clientForm(c, inbounds) }, t("edit")),
+      h("button", { class: "ghost", onclick: () => clientForm(c, inbounds, ctx) }, t("edit")),
       h("button", { class: "ghost danger spacer", onclick: async () => {
         if (await confirmAction(t("confirmDelete", { x: c.Email }))) { await guarded(() => api("DELETE", `/api/v2/admin/clients/${encodeURIComponent(c.Email)}`)); route(); }
       } }, t("delete"))));
@@ -224,7 +347,7 @@ async function guarded(fn) {
   try { const r = await fn(); toast(t("saved")); return r; } catch (e) { toast(t("failed", { e: e.message })); throw e; }
 }
 
-function clientForm(c, inbounds) {
+function clientForm(c, inbounds, ctx = { reps: [] }) {
   const isNew = !c;
   const v = c || { Email: "", Enabled: true, VolumeBytes: -1, ExpiresUnix: 0, DurationSeconds: 30 * 86400, MaxIPs: 2, Inbounds: [] };
   const daysLeft = v.ExpiresUnix ? Math.max(0, Math.round((v.ExpiresUnix - Date.now() / 1000) / 86400)) : Math.round((v.DurationSeconds || 0) / 86400);
@@ -234,6 +357,10 @@ function clientForm(c, inbounds) {
   const first = h("input", { type: "checkbox", checked: isNew ? true : !v.ExpiresUnix && v.DurationSeconds > 0 });
   const ips = h("input", { type: "number", min: "0", max: "1000", value: v.MaxIPs });
   const enabled = h("input", { type: "checkbox", checked: v.Enabled });
+  const note = h("input", { value: v.Note || "", maxlength: "2000" });
+  const owner = me.role === "owner";
+  const repSel = owner && !isNew && ctx.reps.length ? h("select", {}, h("option", { value: "" }, t("ownerSelf")),
+    ctx.reps.map((r) => h("option", { value: r.ID, selected: v.RepID === r.ID }, r.Name || r.ID))) : null;
   const plan = h("select", {}, h("option", { value: "volume", selected: v.Plan !== "unlimited" }, t("planVolume")),
     h("option", { value: "unlimited", selected: v.Plan === "unlimited" }, t("planUnlimited")));
   const boxes = (inbounds || []).map((ib) => h("label", { class: "check" },
@@ -254,7 +381,13 @@ function clientForm(c, inbounds) {
     };
     if (plan.value === "unlimited") body.VolumeBytes = -1;
     if (!isNew && !first.checked && v.ExpiresUnix && d === daysLeft) body.ExpiresUnix = v.ExpiresUnix;
-    try { await guarded(() => api("PUT", `/api/v2/admin/clients/${encodeURIComponent(name.value)}`, body)); document.getElementById("modal").close("save"); route(); }
+    try {
+      const em = encodeURIComponent(name.value);
+      await api("PUT", `/api/v2/admin/clients/${em}`, body);
+      if ((note.value || "") !== (v.Note || "")) await api("PUT", `/api/v2/admin/clients/${em}/note`, { Note: note.value });
+      if (repSel && repSel.value !== (v.RepID || "")) await api("POST", `/api/v2/admin/clients/${em}/transfer`, { RepID: repSel.value });
+      toast(t("saved")); document.getElementById("modal").close("save"); route();
+    }
     catch (x) { err.textContent = x.message; }
   } }, t("save"));
   openModal(isNew ? t("add") : `${t("edit")} · ${v.Email}`, h("div", { class: "form" },
@@ -264,6 +397,8 @@ function clientForm(c, inbounds) {
     h("label", { class: "check" }, first, t("firstUse")),
     h("div", { class: "two" }, h("label", {}, h("span", {}, t("maxIPs")), ips), h("label", { class: "check" }, enabled, t("enabled"))),
     h("fieldset", { class: "form", style: "border:0;padding:0;margin:0" }, h("legend", { class: "small muted" }, t("assignInbounds")), boxes),
+    h("label", {}, h("span", {}, t("contact")), note),
+    repSel ? h("label", {}, h("span", {}, t("transfer")), repSel) : null,
     err), [save]);
 }
 
@@ -324,7 +459,7 @@ async function viewNodes() {
   const nodes = await api("GET", "/api/v2/admin/nodes");
   return h("div", {},
     h("div", { class: "row" }, h("h1", {}, t("nodes")), h("button", { class: "primary spacer", onclick: nodeForm }, t("addNode"))),
-    h("div", { class: "list" }, (nodes || []).length ? nodes.map(nodeCard) : h("p", { class: "muted" }, t("empty"))));
+    h("div", { class: "list" }, (nodes || []).length ? nodes.map((n) => nodeCard(n, true)) : h("p", { class: "muted" }, t("empty"))));
 }
 
 function nodeForm() {

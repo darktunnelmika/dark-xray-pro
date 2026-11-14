@@ -446,3 +446,61 @@ func TestOneLineInstall(t *testing.T) {
 		t.Fatal("install link must die after the credential is fetched")
 	}
 }
+
+func TestBulkGroupsTransferNodeManagement(t *testing.T) {
+	s, now := newStore(t)
+	ctx := context.Background()
+	seed(t, s)
+	// alice: 1000 B, no expiry; bob: first-use 1 day.
+	if err := s.PutClient(ctx, Client{Email: "carol", Enabled: true, VolumeBytes: 1 << 30, ExpiresUnix: now.Unix() - 10, Inbounds: []string{"de-vless"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.PutGroup(ctx, Group{ID: "vip", Name: "VIP", Members: []string{"bob", "carol", "ghost"}}); err != nil {
+		t.Fatal(err)
+	}
+	gs, _ := s.Groups(ctx)
+	if len(gs) != 1 || len(gs[0].Members) != 2 {
+		t.Fatalf("groups %+v", gs)
+	}
+	n, err := s.BulkExtend(ctx, BulkRequest{Group: "vip", AddDays: 30, AddBytes: 1 << 30})
+	if err != nil || n != 2 {
+		t.Fatalf("bulk %d %v", n, err)
+	}
+	list, _ := s.Clients(ctx)
+	for _, c := range list {
+		switch c.Email {
+		case "carol":
+			if c.ExpiresUnix != now.Unix()+30*86400 || c.VolumeBytes != 2<<30 {
+				t.Fatalf("expired client must renew from today: %+v", c.Client)
+			}
+		case "bob":
+			if c.DurationSeconds != 31*86400 || c.VolumeBytes != -1 {
+				t.Fatalf("first-use term must grow, unlimited stays: %+v", c.Client)
+			}
+		}
+	}
+	_ = s.PutRep(ctx, Rep{ID: "ali", Name: "Ali", Enabled: true})
+	if err := s.TransferClient(ctx, "carol", "ali"); err != nil {
+		t.Fatal(err)
+	}
+	if mine, _ := s.scopedClients(ctx, Principal{Role: "rep", RepID: "ali"}); len(mine) != 1 {
+		t.Fatal("transferred client must belong to the new rep")
+	}
+	if err := s.SetClientNote(ctx, "carol", "tg: @carol"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RenameNode(ctx, "de-1", "Frankfurt"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DeleteNode(ctx, "de-1"); err != nil {
+		t.Fatal(err)
+	}
+	ins, _ := s.Inbounds(ctx)
+	if len(ins) != 0 {
+		t.Fatal("deleting a node removes its inbounds")
+	}
+	list, _ = s.Clients(ctx)
+	if len(list) != 3 {
+		t.Fatal("clients survive node deletion")
+	}
+}

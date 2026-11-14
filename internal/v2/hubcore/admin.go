@@ -136,6 +136,70 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 		list, err := s.Inbounds(r.Context())
 		reply(w, list, err)
 	}))
+	mux.HandleFunc("PUT /api/v2/admin/nodes/{id}", guard(func(w http.ResponseWriter, r *http.Request) {
+		var in struct{ Name string }
+		if !decode(w, r, &in) {
+			return
+		}
+		err := s.RenameNode(r.Context(), r.PathValue("id"), in.Name)
+		reply(w, map[string]bool{"ok": err == nil}, err)
+	}))
+	mux.HandleFunc("DELETE /api/v2/admin/nodes/{id}", guard(func(w http.ResponseWriter, r *http.Request) {
+		err := s.DeleteNode(r.Context(), r.PathValue("id"))
+		reply(w, map[string]bool{"ok": err == nil}, err)
+	}))
+	mux.HandleFunc("POST /api/v2/admin/clients/bulk", guard(func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Emails  []string
+			Group   string
+			AddDays int64
+			AddGB   float64
+			Enable  *bool
+		}
+		if !decode(w, r, &in) {
+			return
+		}
+		n, err := s.BulkExtend(r.Context(), BulkRequest{Emails: in.Emails, Group: in.Group, AddDays: in.AddDays, AddBytes: int64(in.AddGB * (1 << 30)), Enable: in.Enable})
+		reply(w, map[string]int{"changed": n}, err)
+	}))
+	mux.HandleFunc("POST /api/v2/admin/clients/{email}/transfer", guard(func(w http.ResponseWriter, r *http.Request) {
+		var in struct{ RepID string }
+		if !decode(w, r, &in) {
+			return
+		}
+		err := s.TransferClient(r.Context(), r.PathValue("email"), in.RepID)
+		reply(w, map[string]bool{"ok": err == nil}, err)
+	}))
+	mux.HandleFunc("PUT /api/v2/admin/clients/{email}/note", member(func(w http.ResponseWriter, r *http.Request) {
+		var in struct{ Note string }
+		if !decode(w, r, &in) {
+			return
+		}
+		p := who(r)
+		if p.Role == "rep" && !s.ownsClient(r.Context(), p.RepID, r.PathValue("email")) {
+			http.NotFound(w, r)
+			return
+		}
+		err := s.SetClientNote(r.Context(), r.PathValue("email"), in.Note)
+		reply(w, map[string]bool{"ok": err == nil}, err)
+	}))
+	mux.HandleFunc("GET /api/v2/admin/groups", guard(func(w http.ResponseWriter, r *http.Request) {
+		list, err := s.Groups(r.Context())
+		reply(w, list, err)
+	}))
+	mux.HandleFunc("PUT /api/v2/admin/groups/{id}", guard(func(w http.ResponseWriter, r *http.Request) {
+		var g Group
+		if !decode(w, r, &g) {
+			return
+		}
+		g.ID = r.PathValue("id")
+		err := s.PutGroup(r.Context(), g)
+		reply(w, map[string]bool{"ok": err == nil}, err)
+	}))
+	mux.HandleFunc("DELETE /api/v2/admin/groups/{id}", guard(func(w http.ResponseWriter, r *http.Request) {
+		err := s.DeleteGroup(r.Context(), r.PathValue("id"))
+		reply(w, map[string]bool{"ok": err == nil}, err)
+	}))
 	mux.HandleFunc("GET /api/v2/rep/inbounds", member(func(w http.ResponseWriter, r *http.Request) {
 		list, err := s.Inbounds(r.Context())
 		for i := range list {
