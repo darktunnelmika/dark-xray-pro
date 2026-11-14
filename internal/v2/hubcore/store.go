@@ -174,6 +174,10 @@ func Open(path string) (*Store, error) {
 		st.Close()
 		return nil, err
 	}
+	if err := st.ensureWGSchema(); err != nil {
+		st.Close()
+		return nil, err
+	}
 	if err := st.ensureRepCtlSchema(); err != nil {
 		st.Close()
 		return nil, err
@@ -487,6 +491,18 @@ WHERE ci.email=? AND i.enabled=1 ORDER BY i.tag`, email)
 			return sub.Account{}, nil, "", err
 		}
 		ins[i].Meta.Endpoints = append(eps, extra...)
+	}
+	for i := range ins {
+		var t map[string]any
+		if json.Unmarshal(ins[i].Template, &t) != nil || t["protocol"] != "wireguard" {
+			continue
+		}
+		ip, err := s.wgIP(ctx, ins[i].Tag, c.Email, wgSubnet(t))
+		if err != nil {
+			return sub.Account{}, nil, "", err
+		}
+		ins[i].Meta.WGPrivateKey, _ = WGKeys(c.Secret)
+		ins[i].Meta.WGAddress = ip + "/32"
 	}
 	ins = sub.ExpandFallbacks(ins)
 	if !c.Enabled {

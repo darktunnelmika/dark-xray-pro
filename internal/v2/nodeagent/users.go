@@ -32,13 +32,14 @@ func ParseUsers(raw []byte) (InboundUsers, error) {
 	}
 	out := InboundUsers{}
 	for _, in := range cfg.Inbounds {
-		for _, key := range []string{"clients", "users", "accounts"} {
+		for _, key := range []string{"clients", "users", "accounts", "peers"} {
 			var list []struct {
 				Email    string `json:"email"`
 				ID       string `json:"id"`
 				Flow     string `json:"flow"`
 				Password string `json:"password"`
-				Auth     string `json:"auth"` // hysteria
+				Auth     string `json:"auth"`      // hysteria
+				Key      string `json:"publicKey"` // wireguard peer
 			}
 			v, ok := in.Settings[key]
 			if !ok || json.Unmarshal(v, &list) != nil {
@@ -54,6 +55,9 @@ func ParseUsers(raw []byte) (InboundUsers, error) {
 				pw := c.Password
 				if pw == "" {
 					pw = c.Auth
+				}
+				if pw == "" {
+					pw = c.Key
 				}
 				out[in.Tag][c.Email] = ConfigUser{Tag: in.Tag, Protocol: in.Protocol, Email: c.Email, ID: c.ID, Flow: c.Flow, Password: pw}
 			}

@@ -30,7 +30,7 @@ func FilterConfig(raw []byte, allowed map[string]bool) ([]byte, error) {
 		if !ok {
 			continue
 		}
-		for _, key := range []string{"clients", "users", "accounts"} {
+		for _, key := range []string{"clients", "users", "accounts", "peers"} {
 			list, ok := settings[key].([]any)
 			if !ok {
 				continue
@@ -69,7 +69,7 @@ func ConfigEmails(raw []byte) ([]string, error) {
 	}
 	seen := map[string]bool{}
 	for _, in := range cfg.Inbounds {
-		for _, key := range []string{"clients", "users", "accounts"} {
+		for _, key := range []string{"clients", "users", "accounts", "peers"} {
 			var list []struct {
 				Email string `json:"email"`
 			}

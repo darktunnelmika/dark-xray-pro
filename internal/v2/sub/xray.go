@@ -2,6 +2,8 @@ package sub
 
 import (
 	"encoding/json"
+	"net"
+	"strconv"
 )
 
 // Fragment configures TLS ClientHello fragmentation and UDP noise in Xray
@@ -79,6 +81,10 @@ func xrayOutbound(o outbound, fragment bool) map[string]any {
 		ob["settings"] = map[string]any{"servers": []any{map[string]any{"address": o.server, "port": o.port, "password": o.password}}}
 	case "shadowsocks":
 		ob["settings"] = map[string]any{"servers": []any{map[string]any{"address": o.server, "port": o.port, "method": o.t.Settings.Method, "password": o.password}}}
+	case "wireguard":
+		ob["settings"] = map[string]any{"secretKey": o.m.WGPrivateKey, "address": []string{o.m.WGAddress}, "mtu": or0(o.m.MTU, 1420),
+			"peers": []any{map[string]any{"publicKey": o.m.PublicKey, "endpoint": net.JoinHostPort(o.server, strconv.Itoa(o.port))}}}
+		return ob
 	default:
 		return nil // hysteria and others stay link-only
 	}

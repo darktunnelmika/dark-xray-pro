@@ -75,6 +75,10 @@ type Meta struct {
 	Remark      string     `json:"remark,omitempty"`
 	Insecure    bool       `json:"insecure,omitempty"`   // self-signed certificate: clients skip CA verification
 	PinSHA256   string     `json:"pin_sha256,omitempty"` // and pin this certificate fingerprint where they can
+	MTU         int        `json:"mtu,omitempty"`        // WireGuard
+	// Per client, filled when a subscription is built (never stored):
+	WGPrivateKey string `json:"-"`
+	WGAddress    string `json:"-"` // e.g. 10.66.0.2/32
 }
 
 // Inbound is one inbound template with its metadata.
@@ -344,6 +348,15 @@ func Links(a Account, ins []Inbound) ([]string, error) {
 					q.Set("pinSHA256", in.Meta.PinSHA256)
 				}
 				out = append(out, "hysteria2://"+url.PathEscape(a.Secret)+"@"+host+"/?"+q.Encode()+"#"+frag)
+			case "wireguard":
+				if in.Meta.WGPrivateKey == "" {
+					continue
+				}
+				q := url.Values{}
+				q.Set("publickey", in.Meta.PublicKey)
+				q.Set("address", in.Meta.WGAddress)
+				q.Set("mtu", strconv.Itoa(or0(in.Meta.MTU, 1420)))
+				out = append(out, "wireguard://"+url.PathEscape(in.Meta.WGPrivateKey)+"@"+host+"/?"+q.Encode()+"#"+frag)
 			case "trojan":
 				out = append(out, "trojan://"+url.PathEscape(a.Secret)+"@"+host+"?"+params(t, in.Meta).Encode()+"#"+frag)
 			case "vmess":
@@ -381,4 +394,11 @@ func Userinfo(up, down, total, expire int64) string {
 		total = 0
 	}
 	return fmt.Sprintf("upload=%d; download=%d; total=%d; expire=%d", up, down, total, expire)
+}
+
+func or0(v, def int) int {
+	if v == 0 {
+		return def
+	}
+	return v
 }

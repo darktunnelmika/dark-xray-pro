@@ -53,6 +53,10 @@ func outbounds(a Account, ins []Inbound, format string) ([]outbound, error) {
 		t := base
 		switch t.Protocol {
 		case "vless", "vmess", "trojan", "hysteria":
+		case "wireguard":
+			if in.Meta.WGPrivateKey == "" {
+				continue
+			}
 		case "shadowsocks":
 			if SS2022KeySize(t.Settings.Method) == 0 {
 				continue
@@ -90,7 +94,7 @@ func SingBox(a Account, ins []Inbound) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	var list []any
+	var list, endpoints []any
 	var tags []string
 	for _, o := range obs {
 		ob := map[string]any{"type": o.proto, "tag": o.tag, "server": o.server, "server_port": o.port}
@@ -106,6 +110,13 @@ func SingBox(a Account, ins []Inbound) ([]byte, error) {
 			ob["password"] = o.password
 		case "shadowsocks":
 			ob["method"], ob["password"] = o.t.Settings.Method, o.password
+		case "wireguard":
+			// sing-box 1.11+: WireGuard is an endpoint, usable by tag like an outbound.
+			endpoints = append(endpoints, map[string]any{"type": "wireguard", "tag": o.tag, "address": []string{o.m.WGAddress},
+				"private_key": o.m.WGPrivateKey, "mtu": or0(o.m.MTU, 1420),
+				"peers": []any{map[string]any{"address": o.server, "port": o.port, "public_key": o.m.PublicKey, "allowed_ips": []string{"0.0.0.0/0", "::/0"}}}})
+			tags = append(tags, o.tag)
+			continue
 		case "hysteria":
 			ob["type"], ob["password"] = "hysteria2", o.password
 			ob["tls"] = map[string]any{"enabled": true, "server_name": o.t.Stream.TLS.ServerName, "alpn": []string{"h3"}, "insecure": o.t.Stream.insecure}
@@ -160,6 +171,9 @@ func SingBox(a Account, ins []Inbound) ([]byte, error) {
 		"outbounds": append(append(groups, list...), map[string]any{"type": "direct", "tag": "direct"}),
 		"route":     map[string]any{"auto_detect_interface": true, "final": "Dark VPN"},
 	}
+	if len(endpoints) > 0 {
+		cfg["endpoints"] = endpoints
+	}
 	if a.IranDirect && len(tags) > 0 {
 		base := "https://raw.githubusercontent.com/Chocolate4U/Iran-sing-box-rules/rule-set/"
 		route := cfg["route"].(map[string]any)
@@ -200,6 +214,12 @@ func Clash(a Account, ins []Inbound) ([]byte, error) {
 			ctype = "ss"
 		case "hysteria":
 			ctype = "hysteria2"
+		}
+		if ctype == "wireguard" {
+			fmt.Fprintf(&b, "  - name: %s\n    type: wireguard\n    server: %s\n    port: %d\n    udp: true\n", yq(o.tag), yq(o.server), o.port)
+			fmt.Fprintf(&b, "    private-key: %s\n    public-key: %s\n    ip: %s\n    mtu: %d\n", yq(o.m.WGPrivateKey), yq(o.m.PublicKey), yq(strings.TrimSuffix(o.m.WGAddress, "/32")), or0(o.m.MTU, 1420))
+			names = append(names, o.tag)
+			continue
 		}
 		fmt.Fprintf(&b, "  - name: %s\n    type: %s\n    server: %s\n    port: %d\n    udp: true\n", yq(o.tag), ctype, yq(o.server), o.port)
 		switch o.proto {

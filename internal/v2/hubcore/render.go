@@ -56,6 +56,9 @@ var clientShapes = map[string]func(c Client, flow string) map[string]any{
 	"hysteria": func(c Client, _ string) map[string]any { return map[string]any{"auth": c.Secret, "email": c.Email} },
 	// Shadowsocks 2022 multi-user: each client gets a PSK derived from its
 	// secret; the second argument carries the inbound's method.
+	// WireGuard peers are built by wgPeers (keys and addresses); this entry
+	// only marks the protocol as managed.
+	"wireguard": func(c Client, _ string) map[string]any { return map[string]any{"email": c.Email} },
 	"shadowsocks": func(c Client, method string) map[string]any {
 		return map[string]any{"password": sub.SS2022UserKey(c.Secret, method), "email": c.Email}
 	},
@@ -107,6 +110,8 @@ JOIN inbounds i ON i.tag=r.tag WHERE r.node_id=? AND i.enabled=1 ORDER BY i.tag`
 		}
 		fbs, _ := t[fallbackKey].([]any)
 		delete(t, fallbackKey)
+		wgNet := wgSubnet(t)
+		delete(t, wgKey)
 		t["tag"] = in.tag
 		t["port"] = in.direct
 		t["listen"] = "0.0.0.0"
@@ -126,11 +131,19 @@ JOIN inbounds i ON i.tag=r.tag WHERE r.node_id=? AND i.enabled=1 ORDER BY i.tag`
 		if proto == "shadowsocks" {
 			flow, _ = settings["method"].(string)
 		}
-		list := make([]any, 0, len(clients[in.tag]))
-		for _, c := range clients[in.tag] {
-			list = append(list, clientShapes[proto](c, flow))
+		if proto == "wireguard" {
+			peers, err := s.wgPeers(ctx, in.tag, wgNet, clients[in.tag])
+			if err != nil {
+				return nil, fmt.Errorf("inbound %s: %w", in.tag, err)
+			}
+			settings["peers"] = peers
+		} else {
+			list := make([]any, 0, len(clients[in.tag]))
+			for _, c := range clients[in.tag] {
+				list = append(list, clientShapes[proto](c, flow))
+			}
+			settings["clients"] = list
 		}
-		settings["clients"] = list
 		if proto == "vless" {
 			if _, ok := settings["decryption"]; !ok {
 				settings["decryption"] = "none"

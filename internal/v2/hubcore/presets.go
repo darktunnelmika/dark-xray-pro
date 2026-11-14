@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"net"
 
 	"github.com/darktunnelmika/dark-xray-pro/internal/v2/sub"
 )
@@ -42,7 +43,7 @@ type PresetRequest struct {
 
 // Presets lists what the panel offers.
 var Presets = []string{"vless-reality-tcp", "vless-reality-grpc", "vless-reality-xhttp", "vless-ws", "vmess-ws", "vmess-tcp", "trojan-ws", "ss2022",
-	"vless-tls-ws", "vless-tls-grpc", "vless-tls-xhttp", "vmess-tls-ws", "trojan-tls-tcp", "vless-tls-fallback", "vless-httpupgrade", "vless-tls-httpupgrade", "hysteria2"}
+	"vless-tls-ws", "vless-tls-grpc", "vless-tls-xhttp", "vmess-tls-ws", "trojan-tls-tcp", "vless-tls-fallback", "vless-httpupgrade", "vless-tls-httpupgrade", "hysteria2", "wireguard"}
 
 // BuildPreset renders the template and client metadata for a preset.
 func BuildPreset(p PresetRequest) (template, meta []byte, err error) {
@@ -120,6 +121,23 @@ func BuildPreset(p PresetRequest) (template, meta []byte, err error) {
 			path = "/" + randomHex(6)
 		}
 		err = tlsStream("xhttp", map[string]any{"xhttpSettings": map[string]any{"path": path, "mode": "auto"}})
+	case "wireguard":
+		// WireGuard (UDP). Path may name the tunnel subnet (default 10.66.0.0/16).
+		subnet := "10.66.0.0/16"
+		if p.Path != "" {
+			if _, n, perr := net.ParseCIDR(p.Path); perr != nil || n.IP.To4() == nil {
+				return nil, nil, fmt.Errorf("%w: the WireGuard subnet must be an IPv4 network such as 10.66.0.0/16", ErrInvalid)
+			}
+			subnet = p.Path
+		}
+		priv, pub, kerr := WGServerKeys()
+		if kerr != nil {
+			return nil, nil, kerr
+		}
+		t["protocol"] = "wireguard"
+		t["settings"] = map[string]any{"secretKey": priv, "mtu": 1420}
+		t[wgKey] = map[string]any{"subnet": subnet}
+		m.PublicKey, m.MTU, m.Fingerprint = pub, 1420, ""
 	case "hysteria2":
 		// Hysteria2 over QUIC (UDP port). Without an uploaded certificate the
 		// HUB issues a self-signed one and links ask clients to skip
