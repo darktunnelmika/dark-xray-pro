@@ -264,7 +264,7 @@ func (s *Store) CheckDevice(ctx context.Context, email, hwid, os, model, agent s
 		return nil
 	}
 	now := s.now().Unix()
-	r, err := s.db.ExecContext(ctx, `UPDATE client_devices SET last_unix=?, os=?, model=?, agent=? WHERE email=? AND hwid=?`, now, clip(os, 64), clip(model, 64), clip(agent, 128), email, hwid)
+	r, err := s.db.ExecContext(ctx, `UPDATE client_devices SET last_unix=?, os=COALESCE(NULLIF(?,''),os), model=COALESCE(NULLIF(?,''),model), agent=COALESCE(NULLIF(?,''),agent) WHERE email=? AND hwid=?`, now, clip(os, 64), clip(model, 64), clip(agent, 128), email, hwid)
 	if err != nil {
 		return err
 	}

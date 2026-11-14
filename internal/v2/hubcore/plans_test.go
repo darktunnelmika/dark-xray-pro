@@ -87,7 +87,11 @@ func TestDeviceLimit(t *testing.T) {
 	if err := s.SetHWIDLimit(ctx, "bob", 2); err != nil {
 		t.Fatal(err)
 	}
-	if fetch("dev-b") != 200 || fetch("dev-a") != 200 {
+	// A later fetch without the OS header keeps what was learned.
+	r := httptest.NewRequest("GET", "/sub/"+tok, nil)
+	r.Header.Set("X-Hwid", "dev-a")
+	h.ServeHTTP(httptest.NewRecorder(), r)
+	if fetch("dev-b") != 200 {
 		t.Fatal("within the limit refused")
 	}
 	if c := fetch("dev-c"); c != http.StatusForbidden {
