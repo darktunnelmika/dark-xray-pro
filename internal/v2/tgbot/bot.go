@@ -84,6 +84,9 @@ func (b *Bot) init() {
 	defer b.mu.Unlock()
 	if b.awaiting == nil {
 		b.awaiting = map[int64]string{}
+		hubcore.SetRewardHook(func(referrer, stars int64) {
+			b.send(context.Background(), referrer, fmt.Sprintf("🎉 یکی از دوستانی که دعوت کردید خرید کرد: %d⭐ به کیف پول شما اضافه شد.", stars), nil)
+		})
 	}
 }
 
@@ -138,6 +141,7 @@ func (b *Bot) background(ctx context.Context) {
 func (b *Bot) Tick(ctx context.Context) {
 	b.init()
 	b.syncMenuButton(ctx)
+	b.Store.ExpireStarsInvoices(ctx)
 	b.announceOrders(ctx)
 	b.watchNodes(ctx)
 	b.dailyReport(ctx)
@@ -169,6 +173,8 @@ func (b *Bot) owner() hubcore.Principal { return hubcore.Principal{User: "telegr
 func (b *Bot) Handle(ctx context.Context, u Update) {
 	b.init()
 	switch {
+	case u.PreCheckout != nil:
+		b.onPreCheckout(ctx, u.PreCheckout)
 	case u.Callback != nil:
 		b.onCallback(ctx, u.Callback)
 	case u.Message != nil && u.Message.Chat.Type == "private" && u.Message.From != nil:
@@ -180,6 +186,10 @@ func (b *Bot) onMessage(ctx context.Context, m *Message) {
 	chat := m.Chat.ID
 	name := strings.TrimSpace(m.From.FirstName + " " + m.From.LastName)
 	_ = b.Store.TgTouch(ctx, chat, name, m.From.Username)
+	if m.Paid != nil {
+		b.onPaid(ctx, chat, name, m.Paid)
+		return
+	}
 	text := strings.TrimSpace(m.Text)
 	if text == "" {
 		text = strings.TrimSpace(m.Caption)
@@ -211,6 +221,13 @@ func (b *Bot) onMessage(ctx context.Context, m *Message) {
 				return
 			}
 		}
+	}
+	if code, ok := strings.CutPrefix(text, "/start ref_"); ok {
+		if referrer, err := b.Store.AttributeReferral(ctx, chat, code); err == nil {
+			b.send(ctx, referrer, "👥 "+esc(name)+" با لینک دعوت شما وارد شد. با اولین خریدش اعتبار می‌گیرید.", nil)
+		}
+		b.menu(ctx, chat)
+		return
 	}
 	if code, ok := strings.CutPrefix(text, "/start rep_"); ok {
 		rep, err := b.Store.ClaimTgLinkCode(ctx, strings.TrimSpace(code), chat)
@@ -335,16 +352,29 @@ func (b *Bot) menu(ctx context.Context, chat int64) {
 		}
 		welcome += "\n\nسرویس‌های شما:\n" + esc(strings.Join(lines, "\n"))
 	}
-	b.send(ctx, chat, welcome, b.menuKB(ctx))
+	b.send(ctx, chat, welcome, b.menuKB(ctx, chat))
 }
 
 // menuKB is the main menu, led by the Mini App store when it is on.
-func (b *Bot) menuKB(ctx context.Context) *Keyboard {
-	u := b.Store.MiniAppURL(ctx, b.SubBase)
-	if u == "" {
-		return mainMenu
+func (b *Bot) menuKB(ctx context.Context, chat int64) *Keyboard {
+	var rows [][]Button
+	if u := b.Store.MiniAppURL(ctx, b.SubBase); u != "" {
+		rows = append(rows, []Button{{Text: "🛍 فروشگاه و سرویس‌های من", WebApp: &WebApp{URL: u}}})
 	}
-	rows := append([][]Button{{{Text: "🛍 فروشگاه و سرویس‌های من", WebApp: &WebApp{URL: u}}}}, mainMenu.Rows...)
+	rows = append(rows, mainMenu.Rows...)
+	var extra []Button
+	if b.Store.TrialPolicy(ctx).Enabled && !b.Store.TrialUsed(ctx, chat) {
+		extra = append(extra, Button{Text: "🎁 تست رایگان", Data: "trial"})
+	}
+	if b.Store.ReferralPolicy(ctx).Enabled {
+		extra = append(extra, Button{Text: "👥 دعوت دوستان", Data: "invite"})
+	}
+	if b.Store.WalletBalance(ctx, chat) > 0 {
+		extra = append(extra, Button{Text: "👛 کیف پول", Data: "wallet"})
+	}
+	if len(extra) > 0 {
+		rows = append(rows, extra)
+	}
 	return &Keyboard{Rows: rows}
 }
 
@@ -383,8 +413,18 @@ func (b *Bot) shop(ctx context.Context, chat int64) {
 		if p.Plan == "volume" {
 			size = fmt.Sprintf("%d گیگ", p.GB)
 		}
-		lines = append(lines, fmt.Sprintf("• <b>%s</b> — %s، %d روز — %s تومان", esc(p.Name), size, p.Days, money(p.Price)))
-		kb.Rows = append(kb.Rows, []Button{{Text: "خرید " + p.Name, Data: "buy:" + p.ID}})
+		price := []string{}
+		if p.Price > 0 {
+			price = append(price, money(p.Price)+" تومان")
+		}
+		if p.PriceStars > 0 {
+			price = append(price, fmt.Sprintf("%d ⭐", p.PriceStars))
+		}
+		if len(price) == 0 {
+			price = append(price, "رایگان")
+		}
+		lines = append(lines, fmt.Sprintf("• <b>%s</b> — %s، %d روز — %s", esc(p.Name), size, p.Days, strings.Join(price, " یا ")))
+		kb.Rows = append(kb.Rows, b.buyButtons(ctx, chat, p, "")...)
 	}
 	if len(lines) == 0 {
 		b.send(ctx, chat, "فعلاً محصولی برای فروش نیست.", mainMenu)
@@ -422,23 +462,22 @@ func (b *Bot) mine(ctx context.Context, chat int64) {
 			continue
 		}
 		kb := &Keyboard{Rows: [][]Button{{{Text: "🔗 لینک و QR", Data: "sub:" + e}}}}
-		if renewals := b.renewButtons(ctx, e); len(renewals) > 0 {
+		if renewals := b.renewButtons(ctx, chat, e); len(renewals) > 0 {
 			kb.Rows = append(kb.Rows, renewals...)
 		}
 		b.send(ctx, chat, b.clientCard(c), kb)
 	}
 }
 
-func (b *Bot) renewButtons(ctx context.Context, email string) [][]Button {
+func (b *Bot) renewButtons(ctx context.Context, chat int64, email string) [][]Button {
 	all, _ := b.Store.Products(ctx, b.owner(), true)
 	var rows [][]Button
+	n := 0
 	for _, p := range all {
-		if p.Seller == "" {
-			rows = append(rows, []Button{{Text: "تمدید با " + p.Name, Data: "renew:" + p.ID + ":" + email}})
+		if p.Seller == "" && n < 3 {
+			rows = append(rows, b.buyButtons(ctx, chat, p, email)...)
+			n++
 		}
-	}
-	if len(rows) > 3 {
-		rows = rows[:3]
 	}
 	return rows
 }
@@ -546,6 +585,27 @@ func (b *Bot) onCallback(ctx context.Context, q *CallbackQuery) {
 		b.send(ctx, chat, g, mainMenu)
 	case "buy":
 		b.buy(ctx, chat, rest, "")
+	case "pay", "wpay":
+		pid, email, _ := strings.Cut(rest, ":")
+		if email != "" && !b.ownsClient(ctx, chat, email) {
+			return
+		}
+		if verb == "pay" {
+			b.payStars(ctx, chat, pid, email)
+		} else {
+			b.payWallet(ctx, chat, pid, email)
+		}
+	case "trial":
+		b.trial(ctx, chat)
+	case "invite":
+		b.invite(ctx, chat)
+	case "wallet":
+		b.wallet(ctx, chat)
+	case "srf":
+		if b.Owners[chat] {
+			id, _ := strconv.ParseInt(rest, 10, 64)
+			b.refundStars(ctx, chat, id)
+		}
 	case "renew":
 		pid, email, _ := strings.Cut(rest, ":")
 		if b.ownsClient(ctx, chat, email) {
@@ -639,6 +699,24 @@ func (b *Bot) ownerMessage(ctx context.Context, m *Message, text string) bool {
 			return true
 		}
 		b.prepareBroadcast(ctx, m.Chat.ID, arg, "")
+	case "/wallet":
+		// /wallet <chat id> <+/-stars> [note]
+		f := strings.Fields(arg)
+		chat, err1 := strconv.ParseInt(firstOr(f, 0), 10, 64)
+		delta, err2 := strconv.ParseInt(firstOr(f, 1), 10, 64)
+		if err1 != nil || err2 != nil {
+			b.send(ctx, m.Chat.ID, "نمونه: <code>/wallet 123456789 +50 هدیه</code>", nil)
+			return true
+		}
+		bal, err := b.Store.WalletAdjust(ctx, chat, delta, strings.Join(f[2:], " "))
+		if err != nil {
+			b.send(ctx, m.Chat.ID, "انجام نشد: "+esc(err.Error()), nil)
+			return true
+		}
+		b.send(ctx, m.Chat.ID, fmt.Sprintf("کیف پول %d: %+d⭐ — موجودی %d⭐", chat, delta, bal), nil)
+		if delta > 0 {
+			b.send(ctx, chat, fmt.Sprintf("🎁 %d⭐ هدیه به کیف پول شما اضافه شد. موجودی: %d⭐", delta, bal), nil)
+		}
 	case "/paytext":
 		_ = b.Store.SetSetting(ctx, "tg_pay_text", arg)
 		b.send(ctx, m.Chat.ID, "متن پرداخت ذخیره شد.", nil)
@@ -661,6 +739,7 @@ const ownerHelp = `دستورهای مدیر:
 /broadcast متن — پیام همگانی
 /paytext متن — متن راهنمای پرداخت برای خریدار
 /welcome متن — متن خوش‌آمد
+/wallet شناسه ±استارز — هدیه یا اصلاح کیف پول مشتری
 برای پاسخ به تیکت، روی پیام تیکت Reply کنید.`
 
 func orderButtons(id int64) *Keyboard {
@@ -913,4 +992,11 @@ func (b *Bot) repMessage(ctx context.Context, chat int64, rep, role, text string
 		return false
 	}
 	return true
+}
+
+func firstOr(f []string, i int) string {
+	if i < len(f) {
+		return f[i]
+	}
+	return ""
 }

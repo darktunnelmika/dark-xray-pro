@@ -138,3 +138,7 @@ code.link { display: block; font-size: 12px; direction: ltr; text-align: left; p
 .toast { position: fixed; inset-inline: 20px; inset-block-end: calc(92px + env(safe-area-inset-bottom)); text-align: center; padding: 10px 14px; border-radius: 14px; background: var(--glass-2); border: 1px solid var(--line); backdrop-filter: blur(16px); z-index: 30; font-size: 14px; }
 .error-page { text-align: center; padding-block-start: 22vh; color: var(--muted); }
 .error-page h1 { color: var(--text); font-size: 20px; margin-block-end: 8px; }
+.card.promo { border-color: color-mix(in oklab, var(--violet) 35%, var(--line)); background: linear-gradient(135deg, color-mix(in oklab, var(--cyan) 8%, var(--glass)), color-mix(in oklab, var(--violet) 10%, var(--glass))); }
+.card.promo h3 { font-size: 16px; margin-block-end: 4px; }
+.card.promo .btn, .product .btn + .btn { margin-block-start: 8px; }
+header.hello .badge { margin-inline-start: 8px; }

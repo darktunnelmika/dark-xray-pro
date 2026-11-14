@@ -134,7 +134,9 @@ func main() {
 				}
 			}
 			hubcore.SetTelegramToken(string(tok))
-			bot := &tgbot.Bot{Store: s, API: &tgbot.HTTPAPI{Token: strings.TrimSpace(string(tok))}, Owners: owners, SubBase: *subBase}
+			tgAPI := &tgbot.HTTPAPI{Token: strings.TrimSpace(string(tok))}
+			hubcore.SetInvoiceLinker(tgAPI.InvoiceLink) // Mini App: pay with Telegram Stars
+			bot := &tgbot.Bot{Store: s, API: tgAPI, Owners: owners, SubBase: *subBase}
 			go bot.Run(ctx)
 			log.Printf("telegram bot on (%d owners)", len(owners))
 		}

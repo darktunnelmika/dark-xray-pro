@@ -62,6 +62,8 @@ type Product struct {
 	Price    int64    `json:"price"`
 	Status   string   `json:"status"`
 	FirstUse bool     `json:"first_use"`
+	// PriceStars > 0 sells it for Telegram Stars (paid and delivered at once).
+	PriceStars int64 `json:"price_stars"`
 }
 
 // Order is a purchase request.
@@ -79,6 +81,8 @@ type Order struct {
 	CreatedUnix int64  `json:"created_unix"`
 	DoneUnix    int64  `json:"done_unix"`
 	DoneBy      string `json:"done_by"`
+	Method      string `json:"method"` // manual | stars | wallet
+	Stars       int64  `json:"stars"`
 }
 
 func (s *Store) ensureShopSchema() error {
@@ -97,7 +101,7 @@ func canSell(p Principal, seller string) bool {
 // representative; a representative needs the manage_products grant and its
 // product must fit its policy.
 func (s *Store) PutProduct(ctx context.Context, by Principal, p Product) error {
-	if !idRE.MatchString(p.ID) || p.Name == "" || len(p.Name) > 120 || p.Days <= 0 || p.Days > 3650 || p.MaxIPs < 0 || p.Price < 0 {
+	if !idRE.MatchString(p.ID) || p.Name == "" || len(p.Name) > 120 || p.Days <= 0 || p.Days > 3650 || p.MaxIPs < 0 || p.Price < 0 || p.PriceStars < 0 || p.PriceStars > 100000 {
 		return ErrInvalid
 	}
 	if p.Plan != "volume" && p.Plan != "unlimited" {
@@ -173,23 +177,26 @@ func (s *Store) PutProduct(ctx context.Context, by Principal, p Product) error {
 			return fmt.Errorf("%w: unknown inbound %q", ErrInvalid, t)
 		}
 	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO products(id,seller,name,plan,gb,days,max_ips,inbounds,price,status,first_use,created_unix)
-VALUES(?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET seller=excluded.seller, name=excluded.name, plan=excluded.plan,
+	if p.Seller != "" {
+		p.PriceStars = 0 // Stars go to the owner's bot only
+	}
+	_, err = tx.ExecContext(ctx, `INSERT INTO products(id,seller,name,plan,gb,days,max_ips,inbounds,price,status,first_use,created_unix,price_stars)
+VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET seller=excluded.seller, name=excluded.name, plan=excluded.plan,
 gb=excluded.gb, days=excluded.days, max_ips=excluded.max_ips, inbounds=excluded.inbounds, price=excluded.price,
-status=excluded.status, first_use=excluded.first_use`,
-		p.ID, p.Seller, p.Name, p.Plan, p.GB, p.Days, p.MaxIPs, strings.Join(p.Inbounds, ","), p.Price, p.Status, p.FirstUse, s.now().Unix())
+status=excluded.status, first_use=excluded.first_use, price_stars=excluded.price_stars`,
+		p.ID, p.Seller, p.Name, p.Plan, p.GB, p.Days, p.MaxIPs, strings.Join(p.Inbounds, ","), p.Price, p.Status, p.FirstUse, s.now().Unix(), p.PriceStars)
 	if err != nil {
 		return err
 	}
 	return tx.Commit()
 }
 
-const productCols = `id,seller,name,plan,gb,days,max_ips,inbounds,price,status,first_use`
+const productCols = `id,seller,name,plan,gb,days,max_ips,inbounds,price,status,first_use,price_stars`
 
 func scanProduct(row scanner) (Product, error) {
 	var p Product
 	var tags string
-	err := row.Scan(&p.ID, &p.Seller, &p.Name, &p.Plan, &p.GB, &p.Days, &p.MaxIPs, &tags, &p.Price, &p.Status, &p.FirstUse)
+	err := row.Scan(&p.ID, &p.Seller, &p.Name, &p.Plan, &p.GB, &p.Days, &p.MaxIPs, &tags, &p.Price, &p.Status, &p.FirstUse, &p.PriceStars)
 	p.Inbounds = splitTags(tags)
 	return p, err
 }
@@ -255,7 +262,7 @@ func (s *Store) Orders(ctx context.Context, by Principal, status string, limit i
 		limit = 200
 	}
 	rows, err := s.ro.QueryContext(ctx, `SELECT o.id,o.product_id,COALESCE(p.name,''),o.seller,o.buyer,o.client_email,o.renew,o.amount,o.status,o.note,
-o.created_unix,o.done_unix,o.done_by FROM orders o LEFT JOIN products p ON p.id=o.product_id
+o.created_unix,o.done_unix,o.done_by,o.method,o.stars FROM orders o LEFT JOIN products p ON p.id=o.product_id
 WHERE (?='owner' OR (o.seller=? AND o.seller<>'')) AND (?='' OR o.status=?) ORDER BY o.id DESC LIMIT ?`, by.Role, by.RepID, status, status, limit)
 	if err != nil {
 		return nil, err
@@ -265,7 +272,7 @@ WHERE (?='owner' OR (o.seller=? AND o.seller<>'')) AND (?='' OR o.status=?) ORDE
 	for rows.Next() {
 		var o Order
 		if err := rows.Scan(&o.ID, &o.ProductID, &o.ProductName, &o.Seller, &o.Buyer, &o.ClientEmail, &o.Renew, &o.Amount, &o.Status, &o.Note,
-			&o.CreatedUnix, &o.DoneUnix, &o.DoneBy); err != nil {
+			&o.CreatedUnix, &o.DoneUnix, &o.DoneBy, &o.Method, &o.Stars); err != nil {
 			return nil, err
 		}
 		out = append(out, o)
@@ -349,8 +356,17 @@ func (s *Store) FulfillOrder(ctx context.Context, by Principal, id int64) (strin
 	if n, _ := r.RowsAffected(); n != 1 {
 		return "", fmt.Errorf("%w: order changed meanwhile", ErrInvalid)
 	}
+	if referrer, reward := s.rewardReferral(ctx, id); reward > 0 && rewardHook != nil {
+		rewardHook(referrer, reward)
+	}
 	return email, nil
 }
+
+// rewardHook tells the bot about referral rewards (to notify the inviter).
+var rewardHook func(referrer, stars int64)
+
+// SetRewardHook registers the referral notification.
+func SetRewardHook(f func(referrer, stars int64)) { rewardHook = f }
 
 // CancelOrder closes a pending order without touching any client or credit.
 func (s *Store) CancelOrder(ctx context.Context, by Principal, id int64) error {

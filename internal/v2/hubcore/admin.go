@@ -589,6 +589,42 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 		err := s.PutTrustedIPs(r.Context(), in.IPs)
 		reply(w, map[string]bool{"ok": err == nil}, err)
 	}))
+	mux.HandleFunc("GET /api/v2/admin/tg/commerce", guard(func(w http.ResponseWriter, r *http.Request) {
+		reply(w, map[string]any{"trial": s.TrialPolicy(r.Context()), "referral": s.ReferralPolicy(r.Context())}, nil)
+	}))
+	mux.HandleFunc("PUT /api/v2/admin/tg/trial", guard(func(w http.ResponseWriter, r *http.Request) {
+		var in TrialPolicy
+		if !decode(w, r, &in) {
+			return
+		}
+		err := s.PutTrialPolicy(r.Context(), in)
+		reply(w, map[string]bool{"ok": err == nil}, err)
+	}))
+	mux.HandleFunc("PUT /api/v2/admin/tg/referral", guard(func(w http.ResponseWriter, r *http.Request) {
+		var in ReferralPolicy
+		if !decode(w, r, &in) {
+			return
+		}
+		err := s.PutReferralPolicy(r.Context(), in)
+		reply(w, map[string]bool{"ok": err == nil}, err)
+	}))
+	mux.HandleFunc("GET /api/v2/admin/tg/wallet/{chat}", guard(func(w http.ResponseWriter, r *http.Request) {
+		chat, _ := strconv.ParseInt(r.PathValue("chat"), 10, 64)
+		hist, err := s.WalletHistory(r.Context(), chat, 50)
+		reply(w, map[string]any{"balance": s.WalletBalance(r.Context(), chat), "history": hist}, err)
+	}))
+	mux.HandleFunc("POST /api/v2/admin/tg/wallet/{chat}", guard(func(w http.ResponseWriter, r *http.Request) {
+		chat, _ := strconv.ParseInt(r.PathValue("chat"), 10, 64)
+		var in struct {
+			Delta int64  `json:"delta"`
+			Note  string `json:"note"`
+		}
+		if !decode(w, r, &in) {
+			return
+		}
+		bal, err := s.WalletAdjust(r.Context(), chat, in.Delta, in.Note)
+		reply(w, map[string]int64{"balance": bal}, err)
+	}))
 	mux.HandleFunc("GET /api/v2/admin/audit", guard(func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
 		before, _ := strconv.ParseInt(q.Get("before"), 10, 64)

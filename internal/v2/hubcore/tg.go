@@ -185,7 +185,8 @@ func (s *Store) TgTicketChat(ctx context.Context, ownerChat, messageID int64) (t
 
 // OrdersToAnnounce returns pending orders the owners were not told about yet.
 func (s *Store) OrdersToAnnounce(ctx context.Context) ([]Order, error) {
-	return s.ordersWhere(ctx, `o.status='pending' AND o.tg_owner_notified=0`)
+	// Stars invoices are paid and delivered automatically: nothing to approve.
+	return s.ordersWhere(ctx, `o.status='pending' AND o.tg_owner_notified=0 AND o.method='manual'`)
 }
 
 // DeliveriesToAnnounce returns fulfilled bot orders whose buyer was not told.
@@ -209,7 +210,7 @@ func (s *Store) MarkAllOrdersAnnounced(ctx context.Context) {
 
 func (s *Store) ordersWhere(ctx context.Context, where string) ([]Order, error) {
 	rows, err := s.ro.QueryContext(ctx, `SELECT o.id,o.product_id,COALESCE(p.name,''),o.seller,o.buyer,o.client_email,o.renew,o.amount,o.status,o.note,
-o.created_unix,o.done_unix,o.done_by FROM orders o LEFT JOIN products p ON p.id=o.product_id WHERE `+where+` ORDER BY o.id LIMIT 50`)
+o.created_unix,o.done_unix,o.done_by,o.method,o.stars FROM orders o LEFT JOIN products p ON p.id=o.product_id WHERE `+where+` ORDER BY o.id LIMIT 50`)
 	if err != nil {
 		return nil, err
 	}
@@ -218,7 +219,7 @@ o.created_unix,o.done_unix,o.done_by FROM orders o LEFT JOIN products p ON p.id=
 	for rows.Next() {
 		var o Order
 		if err := rows.Scan(&o.ID, &o.ProductID, &o.ProductName, &o.Seller, &o.Buyer, &o.ClientEmail, &o.Renew, &o.Amount, &o.Status, &o.Note,
-			&o.CreatedUnix, &o.DoneUnix, &o.DoneBy); err != nil {
+			&o.CreatedUnix, &o.DoneUnix, &o.DoneBy, &o.Method, &o.Stars); err != nil {
 			return nil, err
 		}
 		out = append(out, o)

@@ -29,9 +29,27 @@ type API interface {
 }
 
 type Update struct {
-	ID       int64          `json:"update_id"`
-	Message  *Message       `json:"message"`
-	Callback *CallbackQuery `json:"callback_query"`
+	ID          int64             `json:"update_id"`
+	Message     *Message          `json:"message"`
+	Callback    *CallbackQuery    `json:"callback_query"`
+	PreCheckout *PreCheckoutQuery `json:"pre_checkout_query"`
+}
+
+// PreCheckoutQuery asks the bot to confirm a payment before Telegram charges.
+type PreCheckoutQuery struct {
+	ID       string `json:"id"`
+	From     User   `json:"from"`
+	Currency string `json:"currency"`
+	Total    int64  `json:"total_amount"`
+	Payload  string `json:"invoice_payload"`
+}
+
+// SuccessfulPayment arrives in a message once Telegram charged the customer.
+type SuccessfulPayment struct {
+	Currency string `json:"currency"`
+	Total    int64  `json:"total_amount"`
+	Payload  string `json:"invoice_payload"`
+	ChargeID string `json:"telegram_payment_charge_id"`
 }
 
 type User struct {
@@ -55,7 +73,8 @@ type Message struct {
 	Photo   []struct {
 		FileID string `json:"file_id"`
 	} `json:"photo"`
-	ReplyTo *Message `json:"reply_to_message"`
+	ReplyTo *Message           `json:"reply_to_message"`
+	Paid    *SuccessfulPayment `json:"successful_payment"`
 }
 
 type CallbackQuery struct {
@@ -80,6 +99,34 @@ type Button struct {
 // WebApp is a Mini App address for a button.
 type WebApp struct {
 	URL string `json:"url"`
+}
+
+// SendInvoice asks for a Telegram Stars payment (currency XTR, no provider).
+func (a *HTTPAPI) SendInvoice(ctx context.Context, chat int64, title, desc, payload string, stars int64) error {
+	return a.callJSON(ctx, "sendInvoice", map[string]any{"chat_id": chat, "title": title, "description": desc, "payload": payload,
+		"currency": "XTR", "prices": []map[string]any{{"label": title, "amount": stars}}}, nil)
+}
+
+// InvoiceLink makes a Stars invoice link (the Mini App opens it in place).
+func (a *HTTPAPI) InvoiceLink(ctx context.Context, title, desc, payload string, stars int64) (string, error) {
+	var link string
+	err := a.callJSON(ctx, "createInvoiceLink", map[string]any{"title": title, "description": desc, "payload": payload,
+		"currency": "XTR", "prices": []map[string]any{{"label": title, "amount": stars}}}, &link)
+	return link, err
+}
+
+// AnswerPreCheckout confirms (ok) or refuses a payment about to happen.
+func (a *HTTPAPI) AnswerPreCheckout(ctx context.Context, id string, ok bool, msg string) error {
+	p := map[string]any{"pre_checkout_query_id": id, "ok": ok}
+	if !ok {
+		p["error_message"] = msg
+	}
+	return a.callJSON(ctx, "answerPreCheckoutQuery", p, nil)
+}
+
+// RefundStars gives a Stars payment back to the customer.
+func (a *HTTPAPI) RefundStars(ctx context.Context, user int64, chargeID string) error {
+	return a.callJSON(ctx, "refundStarPayment", map[string]any{"user_id": user, "telegram_payment_charge_id": chargeID}, nil)
 }
 
 // SetMenuButton points the chat's menu button at a Mini App ("" restores
@@ -161,7 +208,7 @@ func (a *HTTPAPI) callJSON(ctx context.Context, method string, payload, out any)
 
 func (a *HTTPAPI) Updates(ctx context.Context, offset int64) ([]Update, error) {
 	var ups []Update
-	err := a.callJSON(ctx, "getUpdates", map[string]any{"offset": offset, "timeout": 50, "allowed_updates": []string{"message", "callback_query"}}, &ups)
+	err := a.callJSON(ctx, "getUpdates", map[string]any{"offset": offset, "timeout": 50, "allowed_updates": []string{"message", "callback_query", "pre_checkout_query"}}, &ups)
 	return ups, err
 }
 

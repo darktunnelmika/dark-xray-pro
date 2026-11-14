@@ -29,6 +29,14 @@ var miniappFS embed.FS
 
 var tgToken, miniBase string
 
+// invoiceLinker makes Telegram Stars invoice links (set by the bot).
+var invoiceLinker func(ctx context.Context, title, desc, payload string, stars int64) (string, error)
+
+// SetInvoiceLinker lets the Mini App sell for Stars.
+func SetInvoiceLinker(f func(ctx context.Context, title, desc, payload string, stars int64) (string, error)) {
+	invoiceLinker = f
+}
+
 // SetPublicBase is the public subscription address (links in the Mini App).
 func SetPublicBase(b string) { miniBase = strings.TrimRight(b, "/") }
 
@@ -232,8 +240,18 @@ func registerMiniApp(mux *http.ServeMux, s *Store) {
 			}
 		}
 		ss := s.SubSettings(r.Context())
-		reply(w, map[string]any{"user": u, "services": services, "orders": orders, "products": products,
-			"pay_text": s.Setting(r.Context(), "tg_pay_text"), "support": ss.SupportURL, "title": ss.Title, "announce": ss.Announce}, nil)
+		out := map[string]any{"user": u, "services": services, "orders": orders, "products": products,
+			"pay_text": s.Setting(r.Context(), "tg_pay_text"), "support": ss.SupportURL, "title": ss.Title, "announce": ss.Announce,
+			"stars": invoiceLinker != nil, "wallet": s.WalletBalance(r.Context(), u.ID), "bot": s.Setting(r.Context(), "tg_username")}
+		if tp := s.TrialPolicy(r.Context()); tp.Enabled && !s.TrialUsed(r.Context(), u.ID) {
+			out["trial"] = map[string]int64{"gb": tp.GB, "hours": tp.Hours}
+		}
+		if rp := s.ReferralPolicy(r.Context()); rp.Enabled {
+			if sum, err := s.ReferralSummary(r.Context(), u.ID); err == nil {
+				out["referral"] = map[string]any{"code": sum.Code, "invited": sum.Invited, "earned": sum.Earned, "percent": rp.Percent, "fixed": rp.Fixed, "first_only": rp.FirstOnly}
+			}
+		}
+		reply(w, out, nil)
 	})
 	mux.HandleFunc("POST /app/api/order", func(w http.ResponseWriter, r *http.Request) {
 		u, ok := user(w, r)
@@ -268,6 +286,59 @@ func registerMiniApp(mux *http.ServeMux, s *Store) {
 		}
 		id, err := s.CreateOrder(r.Context(), owner, in.Product, TgBuyer(u.ID), in.Renew, "mini app")
 		reply(w, map[string]any{"id": id}, err)
+	})
+	mux.HandleFunc("POST /app/api/pay", func(w http.ResponseWriter, r *http.Request) {
+		u, ok := user(w, r)
+		if !ok {
+			return
+		}
+		var in struct {
+			Product string `json:"product"`
+			Renew   string `json:"renew"`
+			Method  string `json:"method"` // stars | wallet
+		}
+		if !decode(w, r, &in) {
+			return
+		}
+		if in.Renew != "" {
+			mine, _ := s.TgClients(r.Context(), u.ID)
+			found := false
+			for _, e := range mine {
+				found = found || e == in.Renew
+			}
+			if !found {
+				http.Error(w, "not your service", http.StatusForbidden)
+				return
+			}
+		}
+		if in.Method == "wallet" {
+			email, left, err := s.WalletPay(r.Context(), u.ID, in.Product, in.Renew)
+			reply(w, map[string]any{"email": email, "wallet": left}, err)
+			return
+		}
+		if invoiceLinker == nil {
+			http.Error(w, "Stars payments are not available", http.StatusServiceUnavailable)
+			return
+		}
+		id, stars, title, err := s.StarsCheckout(r.Context(), u.ID, in.Product, in.Renew)
+		if err != nil {
+			reply(w, nil, err)
+			return
+		}
+		link, err := invoiceLinker(r.Context(), title, "Dark VPN", "order:"+strconv.FormatInt(id, 10), stars)
+		reply(w, map[string]any{"invoice": link, "order": id}, err)
+	})
+	mux.HandleFunc("POST /app/api/trial", func(w http.ResponseWriter, r *http.Request) {
+		u, ok := user(w, r)
+		if !ok {
+			return
+		}
+		email, err := s.ClaimTrial(r.Context(), u.ID)
+		if errors.Is(err, ErrTrialUsed) {
+			http.Error(w, "the free trial was already used", http.StatusConflict)
+			return
+		}
+		reply(w, map[string]string{"email": email}, err)
 	})
 	mux.HandleFunc("POST /app/api/cancel/{id}", func(w http.ResponseWriter, r *http.Request) {
 		u, ok := user(w, r)

@@ -109,6 +109,7 @@ function sheet(...content) {
 function services() {
   const out = [];
   if (!state.services.length) {
+    out.push(...extras());
     const input = h("input", { placeholder: "https://…/sub/…", "aria-label": "لینک اشتراک" });
     out.push(h("div", { class: "card empty" },
       h("h2", {}, "هنوز سرویسی ندارید"),
@@ -131,6 +132,7 @@ function services() {
         h("button", { class: "btn", onclick: () => copy(sv.sub_url) }, "کپی لینک"),
         state.products.length ? h("button", { class: "btn ghost", onclick: () => renew(sv) }, "تمدید") : null)));
   }
+  out.push(...extras());
   const input = h("input", { placeholder: "https://…/sub/…", "aria-label": "لینک اشتراک دیگر" });
   out.push(h("div", { class: "section-title" }, "سرویس دیگری دارید؟"),
     h("div", { class: "card" }, h("div", { class: "field" }, input, h("button", { class: "btn", onclick: () => link(input.value) }, "اتصال"))));
@@ -151,10 +153,60 @@ function connect(sv) {
 
 function productCard(p, renewEmail) {
   const spec = `${p.plan === "unlimited" ? "حجم نامحدود" : size(p.gb * 2 ** 30)}، ${num(p.days)} روز${p.max_ips ? `، ${num(p.max_ips)} دستگاه` : ""}${p.first_use ? "، شروع از اولین اتصال" : ""}`;
+  const stars = p.price_stars > 0 && state.stars;
+  const price = p.price ? [h("b", {}, toman(p.price)), h("small", {}, "تومان")] : stars ? [h("b", {}, `${num(p.price_stars)} ⭐`), h("small", {}, "استارز")] : [h("b", {}, "رایگان")];
+  const buttons = [];
+  if (stars) buttons.push(h("button", { class: "btn primary block", onclick: () => payStars(p, renewEmail) }, `⭐ ${renewEmail ? "تمدید" : "خرید"} با ${num(p.price_stars)} استارز`));
+  if (p.price_stars > 0 && state.wallet >= p.price_stars) buttons.push(h("button", { class: "btn block", onclick: () => payWallet(p, renewEmail) }, `👛 از کیف پول (${num(state.wallet)}⭐)`));
+  if (p.price > 0 || !(p.price_stars > 0)) buttons.push(h("button", { class: stars ? "btn ghost block" : "btn primary block", onclick: () => buy(p, renewEmail) }, renewEmail ? "تمدید با کارت به کارت" : (stars ? "خرید با کارت به کارت" : "خرید")));
   return h("div", { class: "card product" },
     h("h3", {}, p.name), h("div", { class: "spec" }, spec),
-    h("div", { class: "price" }, h("b", {}, p.price ? toman(p.price) : "رایگان"), p.price ? h("small", {}, "تومان") : null),
-    h("button", { class: "btn primary block", onclick: () => buy(p, renewEmail) }, renewEmail ? "تمدید با این پلن" : "خرید"));
+    h("div", { class: "price" }, ...price), ...buttons);
+}
+
+async function payStars(p, renewEmail) {
+  if (renew.close) { renew.close(); renew.close = null; }
+  try {
+    const r = await api("POST", "pay", { product: p.id, renew: renewEmail, method: "stars" });
+    const done = async (status) => {
+      if (status === "paid") { haptic("success"); toast("پرداخت شد — سرویس فعال است"); await load(false); setTab("services"); }
+      else if (status === "failed") { haptic("error"); toast("پرداخت انجام نشد"); }
+    };
+    if (tg && tg.openInvoice) tg.openInvoice(r.invoice, done); else location.href = r.invoice;
+  } catch (e) { haptic("error"); toast(e.message); }
+}
+
+async function payWallet(p, renewEmail) {
+  if (renew.close) { renew.close(); renew.close = null; }
+  try {
+    const r = await api("POST", "pay", { product: p.id, renew: renewEmail, method: "wallet" });
+    haptic("success"); toast(`پرداخت شد — موجودی ${num(r.wallet)}⭐`);
+    await load(false); setTab("services");
+  } catch (e) { haptic("error"); toast(e.message); }
+}
+
+function extras() {
+  const out = [];
+  if (state.trial) out.push(h("div", { class: "card promo" },
+    h("h3", {}, "🎁 تست رایگان"), h("p", { class: "meta" }, `${state.trial.gb ? size(state.trial.gb * 2 ** 30) : "حجم نامحدود"} برای ${num(state.trial.hours)} ساعت — یک بار برای هر حساب.`),
+    h("button", { class: "btn primary block", onclick: async (e) => {
+      e.target.disabled = true;
+      try { await api("POST", "trial"); haptic("success"); toast("تست رایگان فعال شد"); await load(false); }
+      catch (x) { e.target.disabled = false; toast(x.status === 409 ? "تست رایگان قبلاً استفاده شده" : x.message); }
+    } }, "فعال کردن تست")));
+  if (state.referral) {
+    const rf = state.referral;
+    const bot = state.bot || "";
+    const reward = [rf.percent ? `${num(rf.percent)}٪ مبلغ استارز` : "", rf.fixed ? `${num(rf.fixed)}⭐` : ""].filter(Boolean).join(" + ");
+    const code = `ref_${rf.code}`;
+    out.push(h("div", { class: "card promo" },
+      h("h3", {}, "👥 دعوت دوستان"),
+      h("p", { class: "meta" }, `برای هر خرید دوستانتان ${reward}${rf.first_only ? " (فقط اولین خرید)" : ""} به کیف پول شما اضافه می‌شود.`),
+      h("p", { class: "meta" }, `دعوت‌شده: ${num(rf.invited)}، اعتبار گرفته‌شده: ${num(rf.earned)}⭐`),
+      h("code", { class: "link" }, bot ? `https://t.me/${bot}?start=${code}` : `/start ${code}`),
+      h("button", { class: "btn block", onclick: () => copy(bot ? `https://t.me/${bot}?start=${code}` : code) }, "کپی لینک دعوت")));
+  }
+  return out;
 }
 
 function shop() {
@@ -217,7 +269,7 @@ async function link(value) {
 function render() {
   const name = (state.user && state.user.first_name) || "";
   const head = h("header", { class: "hello" },
-    h("div", {}, h("h1", {}, state.title || "Dark VPN"), h("p", {}, name ? `سلام ${name}` : "")),
+    h("div", {}, h("h1", {}, state.title || "Dark VPN"), h("p", {}, name ? `سلام ${name}` : "", state.wallet > 0 ? h("span", { class: "badge good" }, `👛 ${num(state.wallet)}⭐`) : null)),
     h("div", { class: "mark", "aria-hidden": "true" }, (() => { const v = s("svg", { viewBox: "0 0 24 24" }); v.append(s("path", { d: "M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" })); return v; })()));
   const body = { services, shop, orders }[tab]();
   app.replaceChildren(head, state.announce ? h("div", { class: "announce" }, state.announce) : "", ...body);
