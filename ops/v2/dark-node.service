@@ -1,0 +1,21 @@
+[Unit]
+Description=DARK v2 Node (stock Xray supervisor; traffic never waits for the HUB)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/dark-node/env
+ExecStart=/opt/dark-v2/dark-node -hub ${DARK_NODE_HUB} -node-id ${DARK_NODE_ID} -token-file /etc/dark-node/token -hub-ca /etc/dark-node/hub-ca.pem -xray /opt/dark-v2/xray -state /var/lib/dark-node
+# Xray runs as the agent's child. Only an agent upgrade restarts it; HUB
+# outages, user changes and limit enforcement never do.
+Restart=always
+RestartSec=2
+LimitNOFILE=1048576
+AmbientCapabilities=CAP_NET_BIND_SERVICE CAP_NET_ADMIN
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths=/var/lib/dark-node
+
+[Install]
+WantedBy=multi-user.target

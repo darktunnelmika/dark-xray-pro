@@ -38,9 +38,10 @@ var clientShapes = map[string]func(c Client, flow string) map[string]any{
 		}
 		return m
 	},
-	"vmess":       func(c Client, _ string) map[string]any { return map[string]any{"id": c.UUID, "email": c.Email} },
-	"trojan":      func(c Client, _ string) map[string]any { return map[string]any{"password": c.Secret, "email": c.Email} },
-	"shadowsocks": func(c Client, _ string) map[string]any { return map[string]any{"password": c.Secret, "email": c.Email} },
+	"vmess":  func(c Client, _ string) map[string]any { return map[string]any{"id": c.UUID, "email": c.Email} },
+	"trojan": func(c Client, _ string) map[string]any { return map[string]any{"password": c.Secret, "email": c.Email} },
+	// Shadowsocks 2022 multi-user needs per-method key sizes; it is added
+	// with its own key handling rather than a generic password.
 }
 
 type nodeInbound struct {

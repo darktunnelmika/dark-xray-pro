@@ -37,8 +37,18 @@ log "--- HUB DOWN ---"; kill "$(cat $E/hub.pid)"; sleep 2
 log "alice 3MB during outage: $(fetch 21080 3000000)"; sleep 22
 log "spooled batches: $(ls $E/node/spool | grep -c batch)"
 log "--- HUB UP ---"; start_hub; sleep 15; log "hub usage alice after recovery=$(usage alice)"
-log "bob (10 KB limit): $(fetch 21081 200000)"; sleep 25
+log "bob (10 KB limit): $(fetch 21081 200000)"; sleep 12
 log "bob after limit (expect 000): $(fetch 21081 200000)"
+restarts(){ $HUB status -db $DB | grep -o 'restarts=[0-9]*'; }
+log "xray process $(restarts) (1 = never restarted)"
+log "--- add carol while alice streams 20MB ---"
+( r=$(fetch 21080 20000000); log "alice long download during user change: $r" ) &
+sleep 2
+$HUB client -db $DB -email carol -inbounds de-test-vless -volume-gb 1
+sleep 12; wait
+mkclient carol 21082 "$(uuid carol)"; sleep 2
+log "carol (added live): $(fetch 21082 100000)"
+log "xray process $(restarts) after adding a user (expect 1)"
 log "events:"; python3 -c "import sqlite3;[print(r) for r in sqlite3.connect('$DB').execute('select * from events')]"
 log "status:"; $HUB status -db $DB
 pkill -f "$E/"; log DONE

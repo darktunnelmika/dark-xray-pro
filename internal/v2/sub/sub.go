@@ -1,0 +1,229 @@
+// Package sub renders subscription content for v2 clients: share links,
+// the Base64 list most clients import, and a sing-box outbound set.
+package sub
+
+import (
+	"encoding/base64"
+	"encoding/json"
+	"fmt"
+	"net"
+	"net/url"
+	"sort"
+	"strconv"
+	"strings"
+)
+
+// Endpoint is one public way to reach an inbound: the node's own address
+// (Direct) or an entry server in front of it (Tunnel).
+type Endpoint struct {
+	Name    string `json:"name"`
+	Address string `json:"address"`
+	Port    int    `json:"port"`
+}
+
+// Meta holds what a client needs but the server config does not carry.
+type Meta struct {
+	Endpoints   []Endpoint `json:"endpoints"`
+	PublicKey   string     `json:"public_key,omitempty"`  // REALITY
+	ShortID     string     `json:"short_id,omitempty"`    // REALITY
+	Fingerprint string     `json:"fingerprint,omitempty"` // uTLS
+	SpiderX     string     `json:"spider_x,omitempty"`
+	Remark      string     `json:"remark,omitempty"`
+}
+
+// Inbound is one inbound template with its metadata.
+type Inbound struct {
+	Tag      string
+	Template []byte
+	Meta     Meta
+}
+
+// Account identifies the client inside every protocol.
+type Account struct {
+	Email  string
+	UUID   string
+	Secret string
+}
+
+type stream struct {
+	Network  string `json:"network"`
+	Security string `json:"security"`
+	Reality  struct {
+		ServerNames []string `json:"serverNames"`
+		ShortIDs    []string `json:"shortIds"`
+	} `json:"realitySettings"`
+	TLS struct {
+		ServerName string   `json:"serverName"`
+		ALPN       []string `json:"alpn"`
+	} `json:"tlsSettings"`
+	GRPC struct {
+		ServiceName string `json:"serviceName"`
+	} `json:"grpcSettings"`
+	WS struct {
+		Path string `json:"path"`
+		Host string `json:"host"`
+	} `json:"wsSettings"`
+	HTTPUpgrade struct {
+		Path string `json:"path"`
+		Host string `json:"host"`
+	} `json:"httpupgradeSettings"`
+	XHTTP struct {
+		Path string `json:"path"`
+		Host string `json:"host"`
+		Mode string `json:"mode"`
+	} `json:"xhttpSettings"`
+}
+
+type template struct {
+	Protocol string `json:"protocol"`
+	Settings struct {
+		Flow string `json:"flow"`
+	} `json:"settings"`
+	Stream stream `json:"streamSettings"`
+}
+
+func parse(raw []byte) (template, error) {
+	var t template
+	if err := json.Unmarshal(raw, &t); err != nil {
+		return t, err
+	}
+	if t.Stream.Network == "" {
+		t.Stream.Network = "tcp"
+	}
+	if t.Stream.Security == "" {
+		t.Stream.Security = "none"
+	}
+	return t, nil
+}
+
+func first(v []string) string {
+	if len(v) > 0 {
+		return v[0]
+	}
+	return ""
+}
+
+// params builds the shared query string of vless/trojan links.
+func params(t template, m Meta) url.Values {
+	q := url.Values{}
+	s := t.Stream
+	q.Set("type", s.Network)
+	q.Set("security", s.Security)
+	switch s.Security {
+	case "reality":
+		q.Set("sni", first(s.Reality.ServerNames))
+		q.Set("pbk", m.PublicKey)
+		sid := m.ShortID
+		if sid == "" {
+			sid = first(s.Reality.ShortIDs)
+		}
+		q.Set("sid", sid)
+		q.Set("fp", or(m.Fingerprint, "chrome"))
+		if m.SpiderX != "" {
+			q.Set("spx", m.SpiderX)
+		}
+	case "tls":
+		q.Set("sni", s.TLS.ServerName)
+		q.Set("fp", or(m.Fingerprint, "chrome"))
+		if len(s.TLS.ALPN) > 0 {
+			q.Set("alpn", strings.Join(s.TLS.ALPN, ","))
+		}
+	}
+	switch s.Network {
+	case "grpc":
+		q.Set("serviceName", s.GRPC.ServiceName)
+		q.Set("mode", "gun")
+	case "ws":
+		q.Set("path", or(s.WS.Path, "/"))
+		if s.WS.Host != "" {
+			q.Set("host", s.WS.Host)
+		}
+	case "httpupgrade":
+		q.Set("path", or(s.HTTPUpgrade.Path, "/"))
+		if s.HTTPUpgrade.Host != "" {
+			q.Set("host", s.HTTPUpgrade.Host)
+		}
+	case "xhttp", "splithttp":
+		q.Set("path", or(s.XHTTP.Path, "/"))
+		if s.XHTTP.Host != "" {
+			q.Set("host", s.XHTTP.Host)
+		}
+		if s.XHTTP.Mode != "" {
+			q.Set("mode", s.XHTTP.Mode)
+		}
+	}
+	return q
+}
+
+func or(a, b string) string {
+	if a != "" {
+		return a
+	}
+	return b
+}
+
+func remark(in Inbound, ep Endpoint) string {
+	r := or(in.Meta.Remark, in.Tag)
+	if ep.Name != "" {
+		r += " | " + ep.Name
+	}
+	return r
+}
+
+// Links returns one share link per inbound endpoint, in a stable order.
+func Links(a Account, ins []Inbound) ([]string, error) {
+	sorted := append([]Inbound(nil), ins...)
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Tag < sorted[j].Tag })
+	var out []string
+	for _, in := range sorted {
+		t, err := parse(in.Template)
+		if err != nil {
+			return nil, fmt.Errorf("inbound %s: %w", in.Tag, err)
+		}
+		for _, ep := range in.Meta.Endpoints {
+			host := net.JoinHostPort(ep.Address, strconv.Itoa(ep.Port))
+			frag := url.PathEscape(remark(in, ep))
+			switch t.Protocol {
+			case "vless":
+				q := params(t, in.Meta)
+				q.Set("encryption", "none")
+				if t.Settings.Flow != "" && t.Stream.Network == "tcp" {
+					q.Set("flow", t.Settings.Flow)
+				}
+				out = append(out, "vless://"+a.UUID+"@"+host+"?"+q.Encode()+"#"+frag)
+			case "trojan":
+				out = append(out, "trojan://"+url.PathEscape(a.Secret)+"@"+host+"?"+params(t, in.Meta).Encode()+"#"+frag)
+			case "vmess":
+				s := t.Stream
+				v := map[string]string{"v": "2", "ps": remark(in, ep), "add": ep.Address, "port": strconv.Itoa(ep.Port),
+					"id": a.UUID, "aid": "0", "scy": "auto", "net": s.Network, "type": "none", "tls": ""}
+				if s.Security == "tls" {
+					v["tls"], v["sni"] = "tls", s.TLS.ServerName
+				}
+				switch s.Network {
+				case "ws":
+					v["path"], v["host"] = s.WS.Path, s.WS.Host
+				case "grpc":
+					v["path"] = s.GRPC.ServiceName
+				}
+				b, _ := json.Marshal(v)
+				out = append(out, "vmess://"+base64.StdEncoding.EncodeToString(b))
+			}
+		}
+	}
+	return out, nil
+}
+
+// Base64 is the plain subscription body most clients accept.
+func Base64(links []string) string {
+	return base64.StdEncoding.EncodeToString([]byte(strings.Join(links, "\n")))
+}
+
+// Userinfo is the Subscription-Userinfo header clients use to show volume
+// and expiry: upload, download, total (0 = unlimited) and expire (unix).
+func Userinfo(up, down, total, expire int64) string {
+	if total < 0 {
+		total = 0
+	}
+	return fmt.Sprintf("upload=%d; download=%d; total=%d; expire=%d", up, down, total, expire)
+}
