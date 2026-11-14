@@ -120,7 +120,7 @@ func authorize(s *Store, adminToken string, r *http.Request) (Principal, bool) {
 		if adminToken != "" && constantEqual(tok, adminToken) {
 			return Principal{User: "api", Role: "owner"}, true
 		}
-		return Principal{}, false
+		return s.apiKeyPrincipal(r.Context(), tok)
 	}
 	c, err := r.Cookie(sessionCookie)
 	if err != nil || c.Value == "" {

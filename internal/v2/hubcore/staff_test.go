@@ -161,3 +161,62 @@ func TestTOTPLogin(t *testing.T) {
 		t.Fatal("2fa off", err)
 	}
 }
+
+func TestAPIKeys(t *testing.T) {
+	s, _ := newStore(t)
+	ctx := context.Background()
+	h := httptest.NewServer(AdminHandler(s, "master"))
+	defer h.Close()
+	call := func(tok, method, path, body string) (int, string) {
+		req, _ := http.NewRequest(method, h.URL+path, strings.NewReader(body))
+		req.Header.Set("Authorization", "Bearer "+tok)
+		r, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, _ := io.ReadAll(r.Body)
+		r.Body.Close()
+		return r.StatusCode, string(b)
+	}
+	code, b := call("master", "POST", "/api/v2/admin/apikeys", `{"Name":"billing bot","Level":"admin"}`)
+	var out struct{ Key string }
+	if code != 200 || json.Unmarshal([]byte(b), &out) != nil || !strings.HasPrefix(out.Key, "dk_") {
+		t.Fatalf("%d %s", code, b)
+	}
+	_, b = call("master", "POST", "/api/v2/admin/apikeys", `{"Name":"stats","Level":"viewer"}`)
+	var ro struct{ Key string }
+	_ = json.Unmarshal([]byte(b), &ro)
+	if code, b := call(out.Key, "PUT", "/api/v2/admin/clients/bot1", `{"Enabled":true,"VolumeBytes":-1}`); code != 200 {
+		t.Fatalf("admin key writes: %d %s", code, b)
+	}
+	if code, _ := call(out.Key, "GET", "/api/v2/admin/apikeys", ""); code != 403 {
+		t.Fatal("a key must not manage keys")
+	}
+	if code, _ := call(ro.Key, "GET", "/api/v2/admin/clients", ""); code != 200 {
+		t.Fatal("viewer key reads")
+	}
+	if code, _ := call(ro.Key, "DELETE", "/api/v2/admin/clients/bot1", ""); code != 403 {
+		t.Fatal("viewer key must not delete")
+	}
+	if code, _ := call(out.Key+"x", "GET", "/api/v2/admin/clients", ""); code != 401 {
+		t.Fatal("tampered key accepted")
+	}
+	log, _ := s.AuditLog(ctx, "key:billing bot", "", 0, 10)
+	if len(log) != 1 || log[0].Role != "admin" {
+		t.Fatalf("%+v", log)
+	}
+	keys, _ := s.APIKeys(ctx)
+	if len(keys) != 2 || keys[0].LastUsed == 0 || keys[0].CreatedBy != "api" {
+		t.Fatalf("%+v", keys)
+	}
+	code, b = call(ro.Key, "GET", "/api/v2/admin/docs", "")
+	if code != 200 || !strings.Contains(b, `"path":"/api/v2/admin/apikeys","access":"owner"`) || !strings.Contains(b, `"path":"/api/v2/admin/clients/{email}","access":"admin"`) {
+		t.Fatalf("docs %d %.300s", code, b)
+	}
+	if err := s.DeleteAPIKey(ctx, keys[0].ID); err != nil {
+		t.Fatal(err)
+	}
+	if code, _ := call(out.Key, "GET", "/api/v2/admin/clients", ""); code != 401 {
+		t.Fatal("deleted key still works")
+	}
+}

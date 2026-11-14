@@ -28,9 +28,9 @@ func AdminHandler(s *Store, adminToken string) http.Handler {
 // AdminHandlerWith also serves the panel UI at / and fills each client's
 // public subscription URL from subBase (e.g. https://sub.example.com).
 func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, extra ...func(*http.ServeMux)) http.Handler {
-	mux := http.NewServeMux()
+	mux := &docMux{ServeMux: http.NewServeMux()}
 	for _, f := range extra {
-		f(mux)
+		f(mux.ServeMux)
 	}
 	if ui != nil {
 		mux.Handle("GET /", ui)
@@ -46,6 +46,9 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 			}
 			if !p.allowed(r) {
 				http.Error(w, "forbidden: your role cannot do this", http.StatusForbidden)
+				if r.Method != http.MethodGet && r.Method != http.MethodHead {
+					s.Audit(r.Context(), p, r, http.StatusForbidden)
+				}
 				return
 			}
 			if r.Method == http.MethodGet || r.Method == http.MethodHead {
@@ -516,6 +519,22 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 		err := s.DeleteStaff(r.Context(), r.PathValue("user"))
 		reply(w, map[string]bool{"ok": err == nil}, err)
 	}))
+	mux.HandleFunc("GET /api/v2/admin/apikeys", guard(func(w http.ResponseWriter, r *http.Request) {
+		list, err := s.APIKeys(r.Context())
+		reply(w, list, err)
+	}))
+	mux.HandleFunc("POST /api/v2/admin/apikeys", guard(func(w http.ResponseWriter, r *http.Request) {
+		var in struct{ Name, Level string }
+		if !decode(w, r, &in) {
+			return
+		}
+		key, err := s.CreateAPIKey(r.Context(), in.Name, in.Level, who(r).User)
+		reply(w, map[string]string{"key": key}, err)
+	}))
+	mux.HandleFunc("DELETE /api/v2/admin/apikeys/{id}", guard(func(w http.ResponseWriter, r *http.Request) {
+		err := s.DeleteAPIKey(r.Context(), r.PathValue("id"))
+		reply(w, map[string]bool{"ok": err == nil}, err)
+	}))
 	mux.HandleFunc("GET /api/v2/admin/audit", guard(func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
 		before, _ := strconv.ParseInt(q.Get("before"), 10, 64)
@@ -924,7 +943,11 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 		reply(w, map[string]bool{"ok": err == nil}, err)
 	}))
 	mux.Handle("GET /sub/{token}", SubHandler(s))
-	return mux
+	routes := mux.apiRoutes()
+	mux.HandleFunc("GET /api/v2/admin/docs", member(func(w http.ResponseWriter, r *http.Request) {
+		reply(w, routes, nil)
+	}))
+	return mux.ServeMux
 }
 
 func b64(s string) string { return sub.Base64([]string{s}) }
