@@ -319,19 +319,47 @@ ON CONFLICT(tag) DO UPDATE SET node_id=excluded.node_id, template=excluded.templ
 
 // Subscription returns the client's share links and userinfo header.
 func (s *Store) Subscription(ctx context.Context, email string) (links []string, userinfo string, err error) {
-	var c Client
-	err = s.ro.QueryRowContext(ctx, `SELECT email,uuid,secret,enabled,volume_bytes,expires_unix,duration_seconds,max_ips FROM clients WHERE email=?`, email).
-		Scan(&c.Email, &c.UUID, &c.Secret, &c.Enabled, &c.VolumeBytes, &c.ExpiresUnix, &c.DurationSeconds, &c.MaxIPs)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, "", ErrNotFound
-	}
+	acc, ins, info, err := s.subscriptionData(ctx, email)
 	if err != nil {
 		return nil, "", err
+	}
+	links, err = sub.Links(acc, ins)
+	return links, info, err
+}
+
+// SubscriptionBody renders the subscription in the requested format
+// ("base64", "singbox" or "clash").
+func (s *Store) SubscriptionBody(ctx context.Context, email, format string) (body []byte, contentType, userinfo string, err error) {
+	acc, ins, info, err := s.subscriptionData(ctx, email)
+	if err != nil {
+		return nil, "", "", err
+	}
+	switch format {
+	case "singbox":
+		body, err = sub.SingBox(acc, ins)
+		return body, "application/json; charset=utf-8", info, err
+	case "clash":
+		body, err = sub.Clash(acc, ins)
+		return body, "text/yaml; charset=utf-8", info, err
+	}
+	links, err := sub.Links(acc, ins)
+	return []byte(sub.Base64(links)), "text/plain; charset=utf-8", info, err
+}
+
+func (s *Store) subscriptionData(ctx context.Context, email string) (sub.Account, []sub.Inbound, string, error) {
+	var c Client
+	err := s.ro.QueryRowContext(ctx, `SELECT email,uuid,secret,enabled,volume_bytes,expires_unix,duration_seconds,max_ips FROM clients WHERE email=?`, email).
+		Scan(&c.Email, &c.UUID, &c.Secret, &c.Enabled, &c.VolumeBytes, &c.ExpiresUnix, &c.DurationSeconds, &c.MaxIPs)
+	if errors.Is(err, sql.ErrNoRows) {
+		return sub.Account{}, nil, "", ErrNotFound
+	}
+	if err != nil {
+		return sub.Account{}, nil, "", err
 	}
 	rows, err := s.ro.QueryContext(ctx, `SELECT i.tag,i.template,i.meta FROM inbounds i JOIN client_inbounds ci ON ci.tag=i.tag
 WHERE ci.email=? AND i.enabled=1 ORDER BY i.tag`, email)
 	if err != nil {
-		return nil, "", err
+		return sub.Account{}, nil, "", err
 	}
 	var ins []sub.Inbound
 	for rows.Next() {
@@ -339,12 +367,12 @@ WHERE ci.email=? AND i.enabled=1 ORDER BY i.tag`, email)
 		var tpl, meta string
 		if err := rows.Scan(&in.Tag, &tpl, &meta); err != nil {
 			rows.Close()
-			return nil, "", err
+			return sub.Account{}, nil, "", err
 		}
 		in.Template = []byte(tpl)
 		if err := json.Unmarshal([]byte(meta), &in.Meta); err != nil {
 			rows.Close()
-			return nil, "", err
+			return sub.Account{}, nil, "", err
 		}
 		ins = append(ins, in)
 	}
@@ -352,19 +380,15 @@ WHERE ci.email=? AND i.enabled=1 ORDER BY i.tag`, email)
 	if !c.Enabled {
 		ins = nil
 	}
-	links, err = sub.Links(sub.Account{Email: c.Email, UUID: c.UUID, Secret: c.Secret}, ins)
-	if err != nil {
-		return nil, "", err
-	}
 	u, err := s.ClientUsage(ctx, email)
 	if err != nil {
-		return nil, "", err
+		return sub.Account{}, nil, "", err
 	}
 	total := c.VolumeBytes
 	if total < 0 {
 		total = 0
 	}
-	return links, sub.Userinfo(u.Up, u.Down, total, EffectiveExpiry(c, u)), nil
+	return sub.Account{Email: c.Email, UUID: c.UUID, Secret: c.Secret}, ins, sub.Userinfo(u.Up, u.Down, total, EffectiveExpiry(c, u)), nil
 }
 
 // ClientView is a client with its live usage, for the panel.

@@ -339,21 +339,28 @@ func SubHandler(s *Store) http.Handler {
 			http.NotFound(w, r)
 			return
 		}
-		links, info, err := s.Subscription(r.Context(), email)
+		w.Header().Set("Profile-Update-Interval", "12")
+		w.Header().Set("Profile-Title", "base64:"+b64(email))
+		w.Header().Set("Cache-Control", "no-store")
+		if r.URL.Query().Has("raw") {
+			links, info, err := s.Subscription(r.Context(), email)
+			if err != nil {
+				reply(w, nil, err)
+				return
+			}
+			w.Header().Set("Subscription-Userinfo", info)
+			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+			_, _ = w.Write([]byte(strings.Join(links, "\n")))
+			return
+		}
+		body, ctype, info, err := s.SubscriptionBody(r.Context(), email, sub.Format(r.URL.Query().Get("format"), r.UserAgent()))
 		if err != nil {
 			reply(w, nil, err)
 			return
 		}
 		w.Header().Set("Subscription-Userinfo", info)
-		w.Header().Set("Profile-Update-Interval", "12")
-		w.Header().Set("Profile-Title", "base64:"+b64(email))
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		w.Header().Set("Cache-Control", "no-store")
-		if strings.Contains(r.URL.RawQuery, "raw") {
-			_, _ = w.Write([]byte(strings.Join(links, "\n")))
-			return
-		}
-		_, _ = w.Write([]byte(sub.Base64(links)))
+		w.Header().Set("Content-Type", ctype)
+		_, _ = w.Write(body)
 	})
 	return mux
 }
