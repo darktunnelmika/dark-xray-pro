@@ -43,7 +43,7 @@ type SyncResponse struct {
 	// traffic, so local enforcement neither double counts nor misses bytes.
 	UsageSeq    uint64 `json:"usage_seq"`
 	PollSeconds int    `json:"poll_seconds"`
-	UnixTime       int64           `json:"unix_time"`
+	UnixTime    int64  `json:"unix_time"`
 }
 
 // UserLimit is the HUB's view of one client at the time of the sync.

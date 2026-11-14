@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	xstats "github.com/darktunnelmika/dark-xray-pro/internal/xraystats"
 	"github.com/darktunnelmika/dark-xray-pro/internal/v2/wire"
+	xstats "github.com/darktunnelmika/dark-xray-pro/internal/xraystats"
 )
 
 const testConfig = `{"api":{"tag":"api","services":["StatsService"]},"stats":{},

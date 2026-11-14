@@ -10,8 +10,8 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
-	xstats "github.com/darktunnelmika/dark-xray-pro/internal/xraystats"
 	"github.com/darktunnelmika/dark-xray-pro/internal/v2/wire"
+	xstats "github.com/darktunnelmika/dark-xray-pro/internal/xraystats"
 )
 
 // StatsSource reads per-user counters from Xray.
