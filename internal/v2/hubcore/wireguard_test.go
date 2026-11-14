@@ -3,6 +3,7 @@ package hubcore
 import (
 	"context"
 	"encoding/json"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -67,7 +68,7 @@ func TestWireGuardInbound(t *testing.T) {
 		t.Fatal(links, err)
 	}
 	priv, _ := WGKeys(clientSecret(t, s, "ann"))
-	if !strings.Contains(links[0], strings.NewReplacer("+", "%2B", "/", "%2F", "=", "%3D").Replace(priv)) && !strings.Contains(links[0], priv) {
+	if !strings.Contains(links[0], "wireguard://"+url.PathEscape(priv)+"@") {
 		t.Fatal("link must carry the client's own key")
 	}
 	// The address stays the same on the next render.
