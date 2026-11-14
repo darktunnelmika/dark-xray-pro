@@ -187,10 +187,25 @@ function routesFor(m) {
   return allRoutes;
 }
 
+// Brand mark: a node with three signal arcs, the last one amber. Built with
+// the DOM so it needs no image file and passes the strict CSP.
+function mark() {
+  const NS = "http://www.w3.org/2000/svg";
+  const el = (n, a) => { const x = document.createElementNS(NS, n); for (const [k, v] of Object.entries(a)) x.setAttribute(k, v); return x; };
+  const svg = el("svg", { viewBox: "0 0 32 32", "aria-hidden": "true" });
+  svg.append(
+    el("rect", { x: 1, y: 1, width: 30, height: 30, rx: 9, fill: "#173445" }),
+    el("circle", { cx: 11, cy: 21, r: 2.6, fill: "#e8a33d" }),
+    el("path", { d: "M11 15.5a5.5 5.5 0 0 1 5.5 5.5", stroke: "#7fc2dc", "stroke-width": 2.4, fill: "none", "stroke-linecap": "round" }),
+    el("path", { d: "M11 10.5A10.5 10.5 0 0 1 21.5 21", stroke: "#7fc2dc", "stroke-width": 2.4, fill: "none", "stroke-linecap": "round", opacity: .75 }),
+    el("path", { d: "M11 5.5A15.5 15.5 0 0 1 26.5 21", stroke: "#e8a33d", "stroke-width": 2.4, fill: "none", "stroke-linecap": "round" }));
+  return svg;
+}
+
 function shell(active, content) {
   const tabs = Object.keys(routes).map((r) => h("a", { href: `#/${r}`, "aria-current": r === active ? "page" : null }, t(r)));
   return h("div", { class: "shell" },
-    h("header", { class: "top" }, h("span", { class: "brand" }, "Dark VPN"),
+    h("header", { class: "top" }, h("span", { class: "brand" }, mark(), "Dark VPN"),
       me && me.role === "rep" ? h("span", { class: "badge" }, `${t("volumeCredit")}: ${bytes(me.volume_credit || 0)} · ${t("units")}: ${fmtNum(me.unlimited_units || 0)}`) : null,
       h("span", { class: "muted small" }, me ? me.user : "")),
     h("nav", { class: "tabs", "aria-label": "Main" }, tabs),
@@ -207,7 +222,7 @@ function viewLogin() {
     try { await api("POST", "/api/v2/auth/login", { Username: user.value, Password: pass.value }); location.hash = "#/dashboard"; }
     catch { err.textContent = t("badLogin"); } finally { btn.disabled = false; }
   } }, h("label", {}, h("span", {}, t("username")), user), h("label", {}, h("span", {}, t("password")), pass), err, btn);
-  return h("div", { class: "login" }, h("div", { class: "card" }, h("h1", {}, "Dark VPN"), form));
+  return h("div", { class: "login" }, h("div", { class: "card" }, h("h1", {}, mark(), "Dark VPN"), form));
 }
 
 async function viewDashboard() {
@@ -224,9 +239,9 @@ async function viewDashboard() {
       stat("trafficToday", bytes(o.TrafficToday)),
       stat("trafficTotal", bytes(o.TrafficTotal))),
     h("div", { class: "dash" },
-      h("div", { class: "card form wide-col" }, h("div", { class: "row" }, h("h2", {}, t("traffic14")), legend()), barsSvg(ins.daily)),
+      h("div", { class: "card form wide-col" }, h("div", { class: "row" }, h("h2", {}, t("traffic14")), legend()), barsSvg(ins.daily, 1100)),
       h("div", { class: "card form" }, h("h2", {}, t("topToday")),
-        ins.top.length ? ins.top.map((u) => meter(u.email, (100 * u.bytes) / topMax, bytes(u.bytes))) : h("p", { class: "muted small" }, t("noData"))),
+        ins.top.length ? h("div", { class: "meters" }, ins.top.map((u) => meter(u.email, (100 * u.bytes) / topMax, bytes(u.bytes), true))) : h("p", { class: "muted small" }, t("noData"))),
       h("div", { class: "card form" }, h("h2", {}, t("recentEvents")),
         ins.events.length ? h("div", { class: "form" }, ins.events.map((e) => h("div", { class: "row small" },
           h("span", { class: "badge bad" }, e.kind.replace("blocked:", "")), h("span", {}, e.email), h("span", { class: "muted spacer" }, `${e.node_id} · ${fmtTime(e.unix)}`))))
@@ -290,10 +305,10 @@ function nodeCard(n, actions = false) {
       } }, t("delete"))) : null);
 }
 
-function meter(label, pct, text) {
+function meter(label, pct, text, neutral = false) {
   const p = Math.max(0, Math.min(100, pct || 0));
   return h("div", { class: "meter" }, h("div", { class: "row small" }, h("span", {}, label), h("span", { class: "muted spacer" }, text)),
-    h("div", { class: "bar" }, h("i", { class: p > 90 ? "bad" : p > 75 ? "warn" : "", style: `inline-size:${p}%` })));
+    h("div", { class: "bar" }, h("i", { class: neutral ? "" : p > 90 ? "bad" : p > 75 ? "warn" : "", style: `inline-size:${p}%` })));
 }
 
 function renameNode(n) {
@@ -1004,8 +1019,8 @@ async function viewActivity() {
 }
 
 // Daily traffic as SVG bars (download stacked under upload), built with the DOM.
-function barsSvg(days) {
-  const NS = "http://www.w3.org/2000/svg", W = 600, H = 180, P = 4;
+function barsSvg(days, W = 600) {
+  const NS = "http://www.w3.org/2000/svg", H = 180, P = 4;
   const el = (n, a) => { const x = document.createElementNS(NS, n); for (const [k, v] of Object.entries(a)) x.setAttribute(k, v); return x; };
   const svg = el("svg", { viewBox: `0 0 ${W} ${H + 18}`, class: "bars", role: "img", "aria-label": t("usageChart") });
   const top = Math.max(1, ...days.map((d) => d.Up + d.Down));
@@ -1077,7 +1092,9 @@ function applyLang() {
   document.documentElement.dir = lang === "fa" ? "rtl" : "ltr";
 }
 
+let routeSeq = 0;
 async function route() {
+  const seq = ++routeSeq; // a slower, older navigation must not overwrite a newer one
   const app = document.getElementById("app");
   const name = (location.hash.replace(/^#\//, "") || "dashboard").split("?")[0];
   if (name === "login") { app.replaceChildren(viewLogin()); return; }
@@ -1089,6 +1106,7 @@ async function route() {
   const view = routes[name] || routes[first];
   try {
     const content = await view();
+    if (seq !== routeSeq) return;
     app.replaceChildren(shell(routes[name] ? name : first, content));
   } catch (e) {
     if (e.message !== "unauthorized") app.replaceChildren(shell(name, h("p", { class: "error" }, t("failed", { e: e.message }))));
