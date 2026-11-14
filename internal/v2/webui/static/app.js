@@ -51,7 +51,7 @@ const I18N = {
     connectTelegram: "Connect Telegram", openBot: "Open the bot", codeExpires: "The link works once, for 15 minutes.",
     stepProfile: "Profile", stepNodes: "Nodes & routes", stepSwap: "Dark Swap", stepReview: "Review", next: "Next", back: "Back",
     newInbound: "New inbound", editInbound: "Nodes & routes", nodesRoutes: "Nodes & routes", pickNode: "Select at least one node.",
-    you: "you", staff: "Team", staffTitle: "Panel logins", staffHint: "Admins manage clients, inbounds, nodes and routing; viewers can only look. Staff, the change log, backups and finance stay with owners.", role: "Role", role_owner: "Owner", role_admin: "Admin", role_viewer: "Viewer", addLogin: "Add login", newPassOpt: "New password (empty = keep)", lastSeen: "Last change", tfaOn: "2FA on", tfaReset: "Reset 2FA", tfaResetAsk: "Turn off two-step login for {x}? They can sign in with the password alone until they set it up again.", delLoginAsk: "Delete the login {x}? Their sessions end now.", auditTitle: "Change log", auditHint: "Every change made in the panel or through the API, and every sign-in. Request contents are never stored.", auditFilter: "Filter by login, client or path", auditMore: "Older", act_login: "signed in", act_loginFail: "wrong password", act_denied: "refused", tfaTitle: "Two-step login", tfaHint: "Sign-in also asks for a 6-digit code from an authenticator app (Google Authenticator, Aegis, 2FAS…).", tfaStart: "Set up", tfaScan: "Scan this in the app, or enter the key by hand, then type the code it shows.", tfaKey: "Key", tfaCode: "6-digit code", tfaEnable: "Turn on", tfaEnabled: "Two-step login is on.", tfaDisable: "Turn off", tfaOff: "Two-step login is off.", tfaNeed: "Enter the code from your authenticator app.", fbHint: "One TLS port for everything: VLESS Vision answers directly, and VLESS, VMess and Trojan over WebSocket are passed on by path. Customers get all four in their subscription; traffic is counted under this inbound.", badTag: "Tag: lowercase letters, digits, dot, dash or underscore.", needCert: "TLS presets need a certificate (add one under TLS certificates).",
+    keysTitle: "API keys", keysHint: "For scripts, bots and other panels. Send it as Authorization: Bearer <key>. An admin key can change things, a viewer key only reads; staff, keys, backups and finance stay closed. Every change is in the change log.", keyName: "Name", addKey: "New key", keyOnce: "Copy this key now — it is not shown again.", keyDelAsk: "Delete the key {x}? Anything using it stops working.", keyNone: "No API keys yet.", apiRef: "API reference", acc_public: "public", acc_viewer: "read", acc_admin: "admin", acc_owner: "owner", acc_rep: "reseller", you: "you", staff: "Team", staffTitle: "Panel logins", staffHint: "Admins manage clients, inbounds, nodes and routing; viewers can only look. Staff, the change log, backups and finance stay with owners.", role: "Role", role_owner: "Owner", role_admin: "Admin", role_viewer: "Viewer", addLogin: "Add login", newPassOpt: "New password (empty = keep)", lastSeen: "Last change", tfaOn: "2FA on", tfaReset: "Reset 2FA", tfaResetAsk: "Turn off two-step login for {x}? They can sign in with the password alone until they set it up again.", delLoginAsk: "Delete the login {x}? Their sessions end now.", auditTitle: "Change log", auditHint: "Every change made in the panel or through the API, and every sign-in. Request contents are never stored.", auditFilter: "Filter by login, client or path", auditMore: "Older", act_login: "signed in", act_loginFail: "wrong password", act_denied: "refused", tfaTitle: "Two-step login", tfaHint: "Sign-in also asks for a 6-digit code from an authenticator app (Google Authenticator, Aegis, 2FAS…).", tfaStart: "Set up", tfaScan: "Scan this in the app, or enter the key by hand, then type the code it shows.", tfaKey: "Key", tfaCode: "6-digit code", tfaEnable: "Turn on", tfaEnabled: "Two-step login is on.", tfaDisable: "Turn off", tfaOff: "Two-step login is off.", tfaNeed: "Enter the code from your authenticator app.", fbHint: "One TLS port for everything: VLESS Vision answers directly, and VLESS, VMess and Trojan over WebSocket are passed on by path. Customers get all four in their subscription; traffic is counted under this inbound.", badTag: "Tag: lowercase letters, digits, dot, dash or underscore.", needCert: "TLS presets need a certificate (add one under TLS certificates).",
     profileHint: "One profile — protocol, transport, security and keys — shared by every node you place it on. Clients assigned to it work on all of them.",
     nodesHint: "Pick the nodes. Each gets its own listen IP, a Direct port and, if you want, a separate Tunnel port so their traffic is counted apart.",
     hostsHint: "Hosts are the addresses clients receive. Add as many as you like per path; ⚙ opens per-host SNI, Host, Path, ALPN, fingerprint and format filters.",
@@ -116,7 +116,7 @@ const I18N = {
     connectTelegram: "اتصال تلگرام", openBot: "باز کردن ربات", codeExpires: "این لینک یک‌بار مصرف است و ۱۵ دقیقه اعتبار دارد.",
     stepProfile: "پروفایل", stepNodes: "نودها و مسیرها", stepSwap: "دارک سواپ", stepReview: "بازبینی", next: "بعدی", back: "قبلی",
     newInbound: "اینباند جدید", editInbound: "نودها و مسیرها", nodesRoutes: "نودها و مسیرها", pickNode: "حداقل یک نود انتخاب کنید.",
-    you: "شما", staff: "تیم", staffTitle: "ورودهای پنل", staffHint: "مدیر کمکی کاربران، اینباندها، نودها و مسیریابی را مدیریت می‌کند؛ ناظر فقط می‌بیند. تیم، گزارش تغییرات، بکاپ و مالی فقط دست مالک است.", role: "نقش", role_owner: "مالک", role_admin: "مدیر کمکی", role_viewer: "ناظر", addLogin: "افزودن ورود", newPassOpt: "رمز جدید (خالی = بدون تغییر)", lastSeen: "آخرین تغییر", tfaOn: "دومرحله‌ای فعال", tfaReset: "حذف دومرحله‌ای", tfaResetAsk: "ورود دومرحله‌ای {x} خاموش شود؟ تا دوباره راه‌اندازی کند فقط با رمز وارد می‌شود.", delLoginAsk: "ورود {x} حذف شود؟ نشست‌هایش همین حالا بسته می‌شود.", auditTitle: "گزارش تغییرات", auditHint: "هر تغییری که در پنل یا با API انجام شود و هر ورود. محتوای درخواست‌ها هرگز ذخیره نمی‌شود.", auditFilter: "فیلتر با نام ورود، کاربر یا مسیر", auditMore: "قدیمی‌تر", act_login: "وارد شد", act_loginFail: "رمز اشتباه", act_denied: "رد شد", tfaTitle: "ورود دومرحله‌ای", tfaHint: "هنگام ورود یک کد ۶ رقمی از برنامهٔ احراز هویت (Google Authenticator، Aegis، 2FAS و…) هم پرسیده می‌شود.", tfaStart: "راه‌اندازی", tfaScan: "این را در برنامه اسکن کنید یا کلید را دستی وارد کنید، بعد کدی که نشان می‌دهد را بنویسید.", tfaKey: "کلید", tfaCode: "کد ۶ رقمی", tfaEnable: "فعال کن", tfaEnabled: "ورود دومرحله‌ای فعال شد.", tfaDisable: "خاموش کن", tfaOff: "ورود دومرحله‌ای خاموش شد.", tfaNeed: "کد برنامهٔ احراز هویت را وارد کنید.", fbHint: "یک پورت TLS برای همه: VLESS Vision مستقیم جواب می‌دهد و VLESS، VMess و Trojan روی WebSocket بر اساس مسیر تحویل داده می‌شوند. مشتری هر چهار را در اشتراکش می‌گیرد و ترافیک به حساب همین اینباند نوشته می‌شود.", badTag: "شناسه: حروف کوچک انگلیسی، عدد، نقطه، خط تیره یا زیرخط.", needCert: "الگوهای TLS گواهی لازم دارند (از بخش گواهی‌های TLS اضافه کنید).",
+    keysTitle: "کلیدهای API", keysHint: "برای اسکریپت، ربات و پنل‌های دیگر. به شکل Authorization: Bearer <کلید> بفرستید. کلید مدیر می‌تواند تغییر دهد و کلید ناظر فقط می‌خواند؛ تیم، کلیدها، بکاپ و مالی بسته می‌ماند. هر تغییر در گزارش تغییرات ثبت می‌شود.", keyName: "نام", addKey: "کلید جدید", keyOnce: "همین حالا این کلید را کپی کنید — دوباره نشان داده نمی‌شود.", keyDelAsk: "کلید {x} حذف شود؟ هر چیزی که از آن استفاده می‌کند از کار می‌افتد.", keyNone: "هنوز کلید API ندارید.", apiRef: "مرجع API", acc_public: "عمومی", acc_viewer: "خواندن", acc_admin: "مدیر", acc_owner: "مالک", acc_rep: "نماینده", you: "شما", staff: "تیم", staffTitle: "ورودهای پنل", staffHint: "مدیر کمکی کاربران، اینباندها، نودها و مسیریابی را مدیریت می‌کند؛ ناظر فقط می‌بیند. تیم، گزارش تغییرات، بکاپ و مالی فقط دست مالک است.", role: "نقش", role_owner: "مالک", role_admin: "مدیر کمکی", role_viewer: "ناظر", addLogin: "افزودن ورود", newPassOpt: "رمز جدید (خالی = بدون تغییر)", lastSeen: "آخرین تغییر", tfaOn: "دومرحله‌ای فعال", tfaReset: "حذف دومرحله‌ای", tfaResetAsk: "ورود دومرحله‌ای {x} خاموش شود؟ تا دوباره راه‌اندازی کند فقط با رمز وارد می‌شود.", delLoginAsk: "ورود {x} حذف شود؟ نشست‌هایش همین حالا بسته می‌شود.", auditTitle: "گزارش تغییرات", auditHint: "هر تغییری که در پنل یا با API انجام شود و هر ورود. محتوای درخواست‌ها هرگز ذخیره نمی‌شود.", auditFilter: "فیلتر با نام ورود، کاربر یا مسیر", auditMore: "قدیمی‌تر", act_login: "وارد شد", act_loginFail: "رمز اشتباه", act_denied: "رد شد", tfaTitle: "ورود دومرحله‌ای", tfaHint: "هنگام ورود یک کد ۶ رقمی از برنامهٔ احراز هویت (Google Authenticator، Aegis، 2FAS و…) هم پرسیده می‌شود.", tfaStart: "راه‌اندازی", tfaScan: "این را در برنامه اسکن کنید یا کلید را دستی وارد کنید، بعد کدی که نشان می‌دهد را بنویسید.", tfaKey: "کلید", tfaCode: "کد ۶ رقمی", tfaEnable: "فعال کن", tfaEnabled: "ورود دومرحله‌ای فعال شد.", tfaDisable: "خاموش کن", tfaOff: "ورود دومرحله‌ای خاموش شد.", tfaNeed: "کد برنامهٔ احراز هویت را وارد کنید.", fbHint: "یک پورت TLS برای همه: VLESS Vision مستقیم جواب می‌دهد و VLESS، VMess و Trojan روی WebSocket بر اساس مسیر تحویل داده می‌شوند. مشتری هر چهار را در اشتراکش می‌گیرد و ترافیک به حساب همین اینباند نوشته می‌شود.", badTag: "شناسه: حروف کوچک انگلیسی، عدد، نقطه، خط تیره یا زیرخط.", needCert: "الگوهای TLS گواهی لازم دارند (از بخش گواهی‌های TLS اضافه کنید).",
     profileHint: "یک پروفایل — پروتکل، شبکه، امنیت و کلیدها — که روی همهٔ نودهای انتخابی یکسان است. کلاینتِ این اینباند روی همهٔ آن‌ها کار می‌کند.",
     nodesHint: "نودها را انتخاب کنید. هر نود IP گوش‌دادن، پورت Direct و در صورت نیاز پورت جدای Tunnel دارد تا مصرف هر مسیر جدا شمرده شود.",
     hostsHint: "هاست‌ها آدرس‌هایی هستند که در لینک کاربر می‌آیند. برای هر مسیر هر چند تا خواستید اضافه کنید؛ ⚙ تنظیمات SNI، Host، Path، ALPN، Fingerprint و فیلتر فرمت هر هاست را باز می‌کند.",
@@ -2200,8 +2200,48 @@ function tfaCard() {
   return card;
 }
 
+function keysCard(keys, L) {
+  const roleBadge = (r) => h("span", { class: `badge ${r === "admin" ? "warn" : ""}` }, t(`role_${r}`));
+  const add = () => {
+    const name = h("input", { required: true, maxlength: "64", placeholder: "billing-bot" });
+    const level = h("select", {}, ["viewer", "admin"].map((r) => h("option", { value: r }, t(`role_${r}`))));
+    const err = h("div", { class: "error" });
+    const save = h("button", { class: "primary", value: "save", onclick: async (e) => {
+      e.preventDefault(); err.textContent = "";
+      try {
+        const r = await api("POST", "/api/v2/admin/apikeys", { Name: name.value, Level: level.value });
+        const d = openModal(t("addKey"), h("div", { class: "form" }, h("p", { class: "small" }, t("keyOnce")),
+          h("code", { dir: "ltr", class: "tfakey keyout" }, r.key)), [h("button", { class: "primary", onclick: (ev) => { ev.preventDefault(); copy(r.key); } }, t("copy"))]);
+        d.addEventListener("close", () => route(), { once: true });
+      } catch (x) { err.textContent = x.message; }
+    } }, t("save"));
+    openModal(t("addKey"), h("div", { class: "form" }, h("p", { class: "small muted" }, t("keysHint")),
+      h("label", {}, h("span", {}, t("keyName")), name), h("label", {}, h("span", {}, t("role")), level), err), [save]);
+  };
+  const ref = async () => {
+    const routes = await guarded(() => api("GET", "/api/v2/admin/docs"));
+    if (!routes) return;
+    openModal(t("apiRef"), h("div", { class: "table-wrap apiref" }, h("table", { class: "dtable" }, h("tbody", {}, routes.map((x) => h("tr", {},
+      h("td", {}, h("span", { class: `badge method m-${x.method.toLowerCase()}` }, x.method)),
+      h("td", {}, h("code", { dir: "ltr", class: "path" }, x.path)),
+      h("td", {}, h("span", { class: `badge ${x.access === "owner" ? "bad" : x.access === "admin" ? "warn" : x.access === "public" ? "good" : ""}` }, t(`acc_${x.access}`)))))))));
+  };
+  const rows = keys.map((k) => h("tr", {},
+    h("td", { class: "name" }, k.name), h("td", {}, roleBadge(k.level)),
+    h("td", { class: "muted small" }, ltr(`dk_${k.id}_…`)),
+    h("td", { class: "muted small" }, relTime(k.last_used, L)),
+    h("td", {}, h("button", { class: "small danger", onclick: async () => {
+      if (!await confirmAction(t("keyDelAsk", { x: k.name }))) return;
+      await guarded(() => api("DELETE", `/api/v2/admin/apikeys/${encodeURIComponent(k.id)}`)); route();
+    } }, t("delete")))));
+  return h("div", { class: "card form" },
+    h("div", { class: "row spread" }, h("h2", {}, t("keysTitle")), h("div", { class: "row" }, h("button", { onclick: ref }, t("apiRef")), h("button", { class: "primary", onclick: add }, t("addKey")))),
+    h("p", { class: "small muted" }, t("keysHint")),
+    keys.length ? h("div", { class: "table-wrap" }, h("table", { class: "dtable" }, h("tbody", {}, rows))) : h("p", { class: "muted" }, t("keyNone")));
+}
+
 async function viewStaff() {
-  const [list, first] = await Promise.all([api("GET", "/api/v2/admin/staff"), api("GET", "/api/v2/admin/audit?limit=100")]);
+  const [list, first, keys] = await Promise.all([api("GET", "/api/v2/admin/staff"), api("GET", "/api/v2/admin/audit?limit=100"), api("GET", "/api/v2/admin/apikeys")]);
   const roleBadge = (r) => h("span", { class: `badge ${r === "owner" ? "good" : r === "admin" ? "warn" : ""}` }, t(`role_${r}`));
   const L = CT[lang] || CT.en;
   const editLogin = (l) => {
@@ -2261,6 +2301,7 @@ async function viewStaff() {
     h("div", { class: "card form" }, h("div", { class: "row spread" }, h("h1", {}, t("staffTitle")), h("button", { class: "primary", onclick: () => editLogin(null) }, t("addLogin"))),
       h("p", { class: "small muted" }, t("staffHint")),
       h("div", { class: "table-wrap" }, h("table", { class: "dtable" }, h("thead", {}, h("tr", {}, h("th", {}, t("username")), h("th", {}, t("role")), h("th", {}, t("lastSeen")), h("th", {}, ""))), h("tbody", {}, rows)))),
+    keysCard(keys, L),
     h("div", { class: "card form" }, h("h2", {}, t("auditTitle")), h("p", { class: "small muted" }, t("auditHint")), filter,
       h("div", { class: "table-wrap" }, h("table", { class: "dtable audit" }, body)), more));
 }

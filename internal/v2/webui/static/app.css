@@ -373,3 +373,9 @@ table.dtable.compact tr:last-child td { border-block-end: 0; }
 .dtable.audit tr.warn td:first-child { box-shadow: inset 3px 0 0 var(--warn); }
 .dtable.audit code.path { font-size: 0.82em; color: var(--muted); unicode-bidi: isolate; word-break: break-all; }
 code.tfakey { letter-spacing: 0.08em; user-select: all; unicode-bidi: isolate; }
+code.keyout { display: block; padding: 10px 12px; border-radius: var(--r-md, 10px); background: var(--glass); border: 1px solid var(--glass-line); word-break: break-all; }
+.apiref { max-block-size: 60vh; overflow: auto; margin: 0; }
+.badge.method { font-family: ui-monospace, monospace; font-size: 0.75em; min-inline-size: 4.2em; justify-content: center; }
+.badge.m-get { color: var(--good); }
+.badge.m-delete { color: var(--bad); }
+.badge.m-put, .badge.m-post { color: var(--warn); }
