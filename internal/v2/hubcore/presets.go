@@ -42,7 +42,7 @@ type PresetRequest struct {
 
 // Presets lists what the panel offers.
 var Presets = []string{"vless-reality-tcp", "vless-reality-grpc", "vless-reality-xhttp", "vless-ws", "vmess-ws", "vmess-tcp", "trojan-ws", "ss2022",
-	"vless-tls-ws", "vless-tls-grpc", "vless-tls-xhttp", "vmess-tls-ws", "trojan-tls-tcp", "vless-tls-fallback", "hysteria2"}
+	"vless-tls-ws", "vless-tls-grpc", "vless-tls-xhttp", "vmess-tls-ws", "trojan-tls-tcp", "vless-tls-fallback", "vless-httpupgrade", "vless-tls-httpupgrade", "hysteria2"}
 
 // BuildPreset renders the template and client metadata for a preset.
 func BuildPreset(p PresetRequest) (template, meta []byte, err error) {
@@ -96,6 +96,20 @@ func BuildPreset(p PresetRequest) (template, meta []byte, err error) {
 			t["protocol"] = "vmess"
 		}
 		err = tlsStream("ws", map[string]any{"wsSettings": map[string]any{"path": path}})
+	case "vless-tls-httpupgrade":
+		if path == "" {
+			path = "/" + randomHex(6)
+		}
+		err = tlsStream("httpupgrade", map[string]any{"httpupgradeSettings": map[string]any{"path": path}})
+		if err == nil {
+			t["streamSettings"].(map[string]any)["tlsSettings"].(map[string]any)["alpn"] = []string{"http/1.1"}
+		}
+	case "vless-httpupgrade":
+		// Plain HTTPUpgrade: a lighter WebSocket handshake for CDN fronts.
+		if path == "" {
+			path = "/" + randomHex(6)
+		}
+		t["streamSettings"] = map[string]any{"network": "httpupgrade", "security": "none", "httpupgradeSettings": map[string]any{"path": path}}
 	case "vless-tls-grpc":
 		if path == "" {
 			path = randomHex(6)

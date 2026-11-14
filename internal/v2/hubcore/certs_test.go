@@ -129,6 +129,17 @@ func TestFallbackPreset(t *testing.T) {
 	if parentTag("de-fb__fb2") != "de-fb" || parentTag("de-fb") != "de-fb" {
 		t.Fatal("parentTag")
 	}
+	hu := PresetRequest{Tag: "de-hu", NodeID: "de-1", Preset: "vless-tls-httpupgrade", Port: 8443, SNI: "edge.example.com", Cert: "edge",
+		Endpoints: []sub.Endpoint{{Name: "Direct", Address: "edge.example.com", Port: 8443}}}
+	if err := s.CreatePreset(ctx, hu); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.PutClient(ctx, Client{Email: "erin", Enabled: true, VolumeBytes: -1, Inbounds: []string{"de-hu"}}); err != nil {
+		t.Fatal(err)
+	}
+	if hl, _, _ := s.Subscription(ctx, "erin"); len(hl) != 1 || !strings.Contains(hl[0], "type=httpupgrade") || !strings.Contains(hl[0], "security=tls") {
+		t.Fatalf("httpupgrade link: %v", hl)
+	}
 	bad := PresetRequest{Tag: "de-x", NodeID: "de-1", Preset: "vless-ws", Port: 41003}
 	if err := s.CreatePreset(ctx, bad); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("reserved port: %v", err)
