@@ -313,7 +313,10 @@ func (s *Store) ImportForeign(ctx context.Context, path string, opt ForeignOptio
 		if cl.VolumeBytes < 0 {
 			plan = "unlimited"
 		}
-		if _, err := tx.ExecContext(ctx, `UPDATE clients SET rep_id=?, plan=?, note=?, created_unix=? WHERE email=?`, repID, plan, c.note, max(c.created, 1), c.name); err != nil {
+		if c.created <= 0 {
+			c.created = now
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE clients SET rep_id=?, plan=?, note=?, created_unix=? WHERE email=?`, repID, plan, c.note, c.created, c.name); err != nil {
 			undo()
 			return rep, err
 		}
@@ -321,8 +324,13 @@ func (s *Store) ImportForeign(ctx context.Context, path string, opt ForeignOptio
 			_, _ = tx.ExecContext(ctx, `UPDATE clients SET reset_period=?, last_reset_unix=? WHERE email=?`, c.period, now, c.name)
 		}
 		if c.up+c.down > 0 {
-			seen := max(c.lastSeen, c.created)
-			if _, err := tx.ExecContext(ctx, `INSERT OR REPLACE INTO client_usage(email,up,down,first_seen_unix,last_seen_unix) VALUES(?,?,?,?,?)`, c.name, c.up, c.down, max(c.created, 1), max(seen, 1)); err != nil {
+			// A term that starts at the first connection must not start
+			// because of usage carried over, so those get no "seen" time.
+			first, last := min(c.created, now), max(c.lastSeen, c.created)
+			if c.duration > 0 {
+				first, last = 0, 0
+			}
+			if _, err := tx.ExecContext(ctx, `INSERT OR REPLACE INTO client_usage(email,up,down,first_seen_unix,last_seen_unix) VALUES(?,?,?,?,?)`, c.name, c.up, c.down, first, last); err != nil {
 				undo()
 				return rep, err
 			}
