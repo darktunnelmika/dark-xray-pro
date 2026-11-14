@@ -14,6 +14,10 @@ const I18N = {
     addNode: "Add node", nodeId: "Node ID (e.g. de-1)", nodeToken: "Node token — shown once, keep it safe", online: "Online", offline: "Offline",
     restarts: "Xray starts", spooled: "Waiting batches", language: "Language", theme: "Theme", system: "System", light: "Light", dark: "Dark",
     logout: "Sign out", empty: "Nothing here yet.", saved: "Saved", failed: "Failed: {e}", clientsCount: "{n} clients", lastError: "Last error",
+    reps: "Resellers", changePassword: "Change password", oldPassword: "Current password", newPassword: "New password (10+ chars)",
+    credit: "Credit", volumeCredit: "Volume credit", units: "Unlimited units", addCredit: "Add credit", unitsHint: "1 unit = 1 user × 30 days",
+    plan: "Plan", planVolume: "Volume", planUnlimited: "Unlimited", repId: "Reseller ID", loginUser: "Login username", loginPass: "Login password",
+    installCmd: "Run this on the new server as root (link works once, for 1 hour):", note: "Note", reinstall: "New install link",
   },
   fa: {
     dashboard: "داشبورد", clients: "کلاینت‌ها", inbounds: "اینباندها", nodes: "نودها", settings: "تنظیمات",
@@ -29,6 +33,10 @@ const I18N = {
     addNode: "افزودن نود", nodeId: "شناسه نود (مثلاً de-1)", nodeToken: "توکن نود — فقط یک بار نشان داده می‌شود", online: "آنلاین", offline: "آفلاین",
     restarts: "دفعات اجرای Xray", spooled: "بستهٔ در انتظار", language: "زبان", theme: "پوسته", system: "سیستم", light: "روشن", dark: "تیره",
     logout: "خروج", empty: "هنوز چیزی نیست.", saved: "ذخیره شد", failed: "خطا: {e}", clientsCount: "{n} کلاینت", lastError: "آخرین خطا",
+    reps: "نماینده‌ها", changePassword: "تغییر رمز", oldPassword: "رمز فعلی", newPassword: "رمز جدید (حداقل ۱۰ کاراکتر)",
+    credit: "اعتبار", volumeCredit: "اعتبار حجمی", units: "واحد نامحدود", addCredit: "افزودن اعتبار", unitsHint: "هر واحد = ۱ کاربر × ۳۰ روز",
+    plan: "نوع پلن", planVolume: "حجمی", planUnlimited: "نامحدود", repId: "شناسه نماینده", loginUser: "نام کاربری ورود", loginPass: "رمز ورود",
+    installCmd: "این دستور را روی سرور جدید با root اجرا کنید (یک‌بار مصرف، ۱ ساعت):", note: "توضیح", reinstall: "لینک نصب جدید",
   },
 };
 let lang = safeGet("lang") === "fa" ? "fa" : "en";
@@ -104,12 +112,20 @@ function confirmAction(text) {
 }
 
 // ---------- Views ----------
-const routes = { dashboard: viewDashboard, clients: viewClients, inbounds: viewInbounds, nodes: viewNodes, settings: viewSettings };
+const allRoutes = { dashboard: viewDashboard, clients: viewClients, inbounds: viewInbounds, nodes: viewNodes, reps: viewReps, settings: viewSettings };
+let me = null;
+let routes = allRoutes;
+function routesFor(m) {
+  if (m && m.role === "rep") return { clients: viewClients, settings: viewSettings };
+  return allRoutes;
+}
 
 function shell(active, content) {
   const tabs = Object.keys(routes).map((r) => h("a", { href: `#/${r}`, "aria-current": r === active ? "page" : null }, t(r)));
   return h("div", { class: "shell" },
-    h("header", { class: "top" }, h("span", { class: "brand" }, "Dark VPN"), h("span", { class: "muted small" }, "v2")),
+    h("header", { class: "top" }, h("span", { class: "brand" }, "Dark VPN"),
+      me && me.role === "rep" ? h("span", { class: "badge" }, `${t("volumeCredit")}: ${bytes(me.volume_credit || 0)} · ${t("units")}: ${fmtNum(me.unlimited_units || 0)}`) : null,
+      h("span", { class: "muted small" }, me ? me.user : "")),
     h("nav", { class: "tabs", "aria-label": "Main" }, tabs),
     h("main", {}, content));
 }
@@ -161,7 +177,7 @@ function clientStatus(c) {
 }
 
 async function viewClients() {
-  const [list, inbounds] = await Promise.all([api("GET", "/api/v2/admin/clients"), api("GET", "/api/v2/admin/inbounds")]);
+  const [list, inbounds] = await Promise.all([api("GET", "/api/v2/admin/clients"), me.role === "owner" ? api("GET", "/api/v2/admin/inbounds") : api("GET", "/api/v2/rep/inbounds").catch(() => [])]);
   const box = h("div", { class: "list" });
   const render = (q = "") => {
     const rows = (list || []).filter((c) => c.Email.toLowerCase().includes(q.toLowerCase()));
@@ -218,6 +234,8 @@ function clientForm(c, inbounds) {
   const first = h("input", { type: "checkbox", checked: isNew ? true : !v.ExpiresUnix && v.DurationSeconds > 0 });
   const ips = h("input", { type: "number", min: "0", max: "1000", value: v.MaxIPs });
   const enabled = h("input", { type: "checkbox", checked: v.Enabled });
+  const plan = h("select", {}, h("option", { value: "volume", selected: v.Plan !== "unlimited" }, t("planVolume")),
+    h("option", { value: "unlimited", selected: v.Plan === "unlimited" }, t("planUnlimited")));
   const boxes = (inbounds || []).map((ib) => h("label", { class: "check" },
     h("input", { type: "checkbox", value: ib.tag, checked: isNew ? (inbounds.length === 1) : (v.Inbounds || []).includes(ib.tag) }),
     `${ib.tag} · ${ib.node_id} · ${ib.network}/${ib.security}`));
@@ -232,13 +250,16 @@ function clientForm(c, inbounds) {
       ExpiresUnix: d && !first.checked ? Math.floor(Date.now() / 1000) + d * 86400 : 0,
       DurationSeconds: d && first.checked ? d * 86400 : 0,
       Inbounds: boxes.map((b) => b.querySelector("input")).filter((i) => i.checked).map((i) => i.value),
+      Plan: plan.value,
     };
+    if (plan.value === "unlimited") body.VolumeBytes = -1;
     if (!isNew && !first.checked && v.ExpiresUnix && d === daysLeft) body.ExpiresUnix = v.ExpiresUnix;
     try { await guarded(() => api("PUT", `/api/v2/admin/clients/${encodeURIComponent(name.value)}`, body)); document.getElementById("modal").close("save"); route(); }
     catch (x) { err.textContent = x.message; }
   } }, t("save"));
   openModal(isNew ? t("add") : `${t("edit")} · ${v.Email}`, h("div", { class: "form" },
     h("label", {}, h("span", {}, t("name")), name),
+    me.role === "rep" ? h("label", {}, h("span", {}, t("plan")), plan, h("span", { class: "small" }, t("unitsHint"))) : null,
     h("div", { class: "two" }, h("label", {}, h("span", {}, t("volumeGB")), vol), h("label", {}, h("span", {}, t("days")), days)),
     h("label", { class: "check" }, first, t("firstUse")),
     h("div", { class: "two" }, h("label", {}, h("span", {}, t("maxIPs")), ips), h("label", { class: "check" }, enabled, t("enabled"))),
@@ -315,12 +336,60 @@ function nodeForm() {
     if (!id.reportValidity()) return;
     try {
       const r = await guarded(() => api("POST", "/api/v2/admin/nodes", { ID: id.value, Name: name.value }));
-      out.replaceChildren(h("p", { class: "small" }, t("nodeToken")), h("code", {}, r.token), h("button", { type: "button", onclick: () => copy(r.token) }, t("copy")));
+      out.replaceChildren(h("p", { class: "small" }, t("installCmd")), h("code", {}, r.install), h("button", { type: "button", onclick: () => copy(r.install) }, t("copy")));
       save.disabled = true;
     } catch {}
   } }, t("save"));
   openModal(t("addNode"), h("div", { class: "form" },
     h("label", {}, h("span", {}, t("nodeId")), id), h("label", {}, h("span", {}, t("name")), name), out), [save]);
+}
+
+async function viewReps() {
+  const reps = await api("GET", "/api/v2/admin/reps");
+  const cards = (reps || []).map((r) => h("div", { class: "card item" },
+    h("div", { class: "head" }, h("span", { class: "name" }, r.Name || r.ID), h("span", { class: "badge" }, r.ID),
+      h("span", { class: `badge ${r.Enabled ? "good" : "bad"} spacer` }, t(r.Enabled ? "enabled" : "disabled"))),
+    h("div", { class: "muted small" }, `${t("volumeCredit")}: ${bytes(r.VolumeCredit)} · ${t("units")}: ${fmtNum(r.UnlimitedUnits)} · ${t("clientsCount", { n: fmtNum(r.Clients) })}`),
+    h("div", { class: "row" }, h("button", { onclick: () => creditForm(r) }, t("addCredit")), h("button", { class: "ghost", onclick: () => repForm(r) }, t("edit")))));
+  return h("div", {},
+    h("div", { class: "row" }, h("h1", {}, t("reps")), h("button", { class: "primary spacer", onclick: () => repForm(null) }, t("add"))),
+    h("div", { class: "list" }, cards.length ? cards : h("p", { class: "muted" }, t("empty"))));
+}
+
+function repForm(r) {
+  const id = h("input", { required: true, pattern: "[a-z0-9][a-z0-9._-]{0,62}", value: r ? r.ID : "", disabled: !!r });
+  const name = h("input", { value: r ? r.Name : "" });
+  const en = h("input", { type: "checkbox", checked: r ? r.Enabled : true });
+  const user = h("input", { autocomplete: "off", pattern: "[a-z0-9][a-z0-9._-]{0,62}" });
+  const pass = h("input", { type: "password", autocomplete: "new-password", minlength: "10" });
+  const save = h("button", { class: "primary", value: "save", onclick: async (e) => {
+    e.preventDefault();
+    if (!id.reportValidity()) return;
+    try {
+      await guarded(() => api("PUT", `/api/v2/admin/reps/${encodeURIComponent(id.value)}`, { Name: name.value, Enabled: en.checked, Username: user.value, Password: pass.value }));
+      document.getElementById("modal").close("save"); route();
+    } catch {}
+  } }, t("save"));
+  openModal(r ? `${t("edit")} · ${r.ID}` : `${t("add")} · ${t("reps")}`, h("div", { class: "form" },
+    h("div", { class: "two" }, h("label", {}, h("span", {}, t("repId")), id), h("label", {}, h("span", {}, t("name")), name)),
+    h("label", { class: "check" }, en, t("enabled")),
+    h("div", { class: "two" }, h("label", {}, h("span", {}, t("loginUser")), user), h("label", {}, h("span", {}, t("loginPass")), pass))), [save]);
+}
+
+function creditForm(r) {
+  const gb = h("input", { type: "number", step: "1", value: "0" });
+  const units = h("input", { type: "number", step: "1", value: "0" });
+  const note = h("input", {});
+  const save = h("button", { class: "primary", value: "save", onclick: async (e) => {
+    e.preventDefault();
+    try {
+      await guarded(() => api("POST", `/api/v2/admin/reps/${encodeURIComponent(r.ID)}/credit`, { VolumeGB: +gb.value || 0, Units: +units.value || 0, Note: note.value }));
+      document.getElementById("modal").close("save"); route();
+    } catch {}
+  } }, t("save"));
+  openModal(`${t("addCredit")} · ${r.Name || r.ID}`, h("div", { class: "form" },
+    h("div", { class: "two" }, h("label", {}, h("span", {}, `${t("volumeCredit")} (GB)`), gb), h("label", {}, h("span", {}, t("units")), units)),
+    h("p", { class: "small muted" }, t("unitsHint")), h("label", {}, h("span", {}, t("note")), note)), [save]);
 }
 
 function viewSettings() {
@@ -332,7 +401,16 @@ function viewSettings() {
     safeSet("color-scheme", v === "light dark" ? null : v);
     document.querySelector('meta[name="color-scheme"]').content = v;
   } }, [["light dark", t("system")], ["light", t("light")], ["dark", t("dark")]].map(([v, l]) => h("option", { value: v, selected: v === cur }, l)));
-  return h("div", {}, h("h1", {}, t("settings")),
+  const oldP = h("input", { type: "password", autocomplete: "current-password", required: true });
+  const newP = h("input", { type: "password", autocomplete: "new-password", required: true, minlength: "10" });
+  const pwErr = h("div", { class: "error" });
+  const pwForm = h("form", { class: "card form", onsubmit: async (e) => {
+    e.preventDefault(); pwErr.textContent = "";
+    try { await api("POST", "/api/v2/auth/password", { Old: oldP.value, New: newP.value }); toast(t("saved")); location.hash = "#/login"; }
+    catch (x) { pwErr.textContent = x.message; }
+  } }, h("h2", {}, t("changePassword")), h("label", {}, h("span", {}, t("oldPassword")), oldP), h("label", {}, h("span", {}, t("newPassword")), newP), pwErr,
+    h("button", { class: "primary", type: "submit" }, t("save")));
+  return h("div", { class: "form" }, h("h1", {}, t("settings")), pwForm,
     h("div", { class: "card form" },
       h("label", {}, h("span", {}, t("language")), langSel),
       h("label", {}, h("span", {}, t("theme")), themeSel),
@@ -348,10 +426,15 @@ async function route() {
   const app = document.getElementById("app");
   const name = (location.hash.replace(/^#\//, "") || "dashboard").split("?")[0];
   if (name === "login") { app.replaceChildren(viewLogin()); return; }
-  const view = routes[name] || viewDashboard;
+  try {
+    me = await api("GET", "/api/v2/auth/me");
+  } catch { return; }
+  routes = routesFor(me);
+  const first = Object.keys(routes)[0];
+  const view = routes[name] || routes[first];
   try {
     const content = await view();
-    app.replaceChildren(shell(routes[name] ? name : "dashboard", content));
+    app.replaceChildren(shell(routes[name] ? name : first, content));
   } catch (e) {
     if (e.message !== "unauthorized") app.replaceChildren(shell(name, h("p", { class: "error" }, t("failed", { e: e.message }))));
   }

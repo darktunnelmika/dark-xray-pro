@@ -136,6 +136,13 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 		list, err := s.Inbounds(r.Context())
 		reply(w, list, err)
 	}))
+	mux.HandleFunc("GET /api/v2/rep/inbounds", member(func(w http.ResponseWriter, r *http.Request) {
+		list, err := s.Inbounds(r.Context())
+		for i := range list {
+			list[i].Meta = nil // representatives only need names to assign
+		}
+		reply(w, list, err)
+	}))
 	mux.HandleFunc("GET /api/v2/admin/presets", guard(func(w http.ResponseWriter, r *http.Request) {
 		reply(w, Presets, nil)
 	}))
