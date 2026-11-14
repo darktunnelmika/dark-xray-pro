@@ -38,7 +38,7 @@ func StageHubUpdate(ctx context.Context, r io.Reader) (from, to string, err erro
 	tmp := exe + ".new"
 	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o755)
 	if err != nil {
-		return "", "", err
+		return "", "", fmt.Errorf("%w: the HUB cannot write next to its program (%v) — update its service file (ReadWritePaths) or update from the server", ErrInvalid, err)
 	}
 	_, err = io.Copy(f, io.LimitReader(r, 200<<20))
 	if cerr := f.Close(); err == nil {

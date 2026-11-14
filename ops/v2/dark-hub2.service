@@ -13,7 +13,7 @@ NoNewPrivileges=yes
 ProtectSystem=strict
 ProtectHome=yes
 PrivateTmp=yes
-ReadWritePaths=/var/lib/dark-hub2 /etc/dark-hub2
+ReadWritePaths=/var/lib/dark-hub2 /etc/dark-hub2 /opt/dark-v2
 LimitNOFILE=65535
 
 [Install]
