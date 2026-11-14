@@ -35,6 +35,7 @@ type Config struct {
 	Logf            func(string, ...any)
 	Now             func() time.Time
 	AgentSHA        string // sha256 of the running binary, reported to the HUB
+	AssetDir        string // where Xray reads geo files (next to its binary)
 }
 
 // Agent ties Xray, the usage spool, local enforcement and the HUB together.
@@ -63,6 +64,7 @@ type Agent struct {
 	lastHost     *hostSample
 	onlineCount  int
 	tasks        *taskBox
+	assets       *assetBox
 }
 
 type hostSample struct {
@@ -138,7 +140,8 @@ func New(cfg Config, hub Hub, xray Applier, stats StatsSource) (*Agent, error) {
 		return nil, err
 	}
 	a := &Agent{cfg: cfg, hub: hub, xray: xray, stats: stats, spool: sp,
-		delivered: map[uint64]map[string]int64{}, blockedUntil: map[string]time.Time{}, lastDecision: Decision{}, tasks: newTaskBox(filepath.Join(cfg.StateDir, "tasks.json"))}
+		delivered: map[uint64]map[string]int64{}, blockedUntil: map[string]time.Time{}, lastDecision: Decision{}, tasks: newTaskBox(filepath.Join(cfg.StateDir, "tasks.json")),
+		assets: newAssetBox(cfg.AssetDir)}
 	if b, err := os.ReadFile(a.statePath()); err == nil {
 		_ = json.Unmarshal(b, &a.state)
 	}
@@ -310,13 +313,17 @@ func (a *Agent) Exchange(ctx context.Context) time.Duration {
 	results := a.tasks.pending()
 	resp, err := a.hub.Sync(ctx, wire.SyncRequest{NodeID: a.cfg.NodeID, AgentVersion: Version, ConfigRevision: rev,
 		XrayRunning: running, XrayRestarts: restarts, LastError: lastErr, SpooledBatches: a.spool.Len(), UnixTime: a.cfg.Now().Unix(),
-		Host: a.hostStats(), Results: results, AgentSHA: a.cfg.AgentSHA})
+		Host: a.hostStats(), Results: results, AgentSHA: a.cfg.AgentSHA,
+		Assets: a.assets.held()})
 	if err != nil {
 		a.cfg.Logf("hub sync unavailable, serving last state: %v", err)
 		return poll
 	}
 	a.tasks.delivered(results)
 	a.tasks.start(ctx, resp.Tasks, a.cfg.Logf)
+	if f, ok := a.hub.(Fetcher); ok {
+		a.assets.sync(ctx, f, resp.Assets, a.cfg.Logf)
+	}
 	if resp.PollSeconds > 0 {
 		poll = time.Duration(resp.PollSeconds) * time.Second
 	}

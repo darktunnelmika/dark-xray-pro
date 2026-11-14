@@ -152,6 +152,23 @@ JOIN inbounds i ON i.tag=r.tag WHERE r.node_id=? AND i.enabled=1 ORDER BY i.tag`
 		return nil, err
 	}
 	inbounds = append(inbounds, fwd...)
+	var swapTags []string
+	for _, f := range fwd {
+		if m, ok := f.(map[string]any); ok {
+			if tag, _ := m["tag"].(string); tag != "" {
+				swapTags = append(swapTags, tag)
+			}
+		}
+	}
+	outbounds, routing, dns, routeOnly := s.nodeRouting(ctx, nodeID, swapTags)
+	if routeOnly {
+		for _, x := range inbounds {
+			m, _ := x.(map[string]any)
+			if sn, ok := m["sniffing"].(map[string]any); ok && sn["enabled"] == true {
+				sn["routeOnly"] = true
+			}
+		}
+	}
 	cfg := map[string]any{
 		"log":   map[string]any{"loglevel": "warning"},
 		"api":   map[string]any{"tag": apiTag, "services": []string{"StatsService", "HandlerService"}},
@@ -161,10 +178,11 @@ JOIN inbounds i ON i.tag=r.tag WHERE r.node_id=? AND i.enabled=1 ORDER BY i.tag`
 			"system": map[string]any{"statsInboundUplink": true, "statsInboundDownlink": true},
 		},
 		"inbounds":  inbounds,
-		"outbounds": []any{map[string]any{"tag": "direct", "protocol": "freedom"}, map[string]any{"tag": "block", "protocol": "blackhole"}},
-		"routing": map[string]any{"rules": []any{
-			map[string]any{"type": "field", "inboundTag": []string{apiTag}, "outboundTag": apiTag},
-		}},
+		"outbounds": outbounds,
+		"routing":   routing,
+	}
+	if dns != nil {
+		cfg["dns"] = dns
 	}
 	return json.Marshal(cfg) // map keys are sorted: deterministic
 }

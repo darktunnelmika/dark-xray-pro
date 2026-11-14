@@ -57,7 +57,8 @@ func main() {
 		exe = r
 	}
 	selfSHA, _ := nodeagent.FileSHA(exe)
-	agent, err := nodeagent.New(nodeagent.Config{NodeID: *nodeID, StateDir: *stateDir, Logf: log.Printf, AgentSHA: selfSHA}, hub, sup, stats)
+	agent, err := nodeagent.New(nodeagent.Config{NodeID: *nodeID, StateDir: *stateDir, Logf: log.Printf, AgentSHA: selfSHA,
+		AssetDir: filepath.Dir(*xrayBin)}, hub, sup, stats)
 	if err != nil {
 		log.Fatal(err)
 	}

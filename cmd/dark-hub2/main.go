@@ -106,6 +106,7 @@ func main() {
 			}
 		}()
 		go s.RunACME(ctx)
+		go s.RunGeo(ctx)
 		if tok, err := os.ReadFile(*tgTokenFile); err == nil && strings.TrimSpace(string(tok)) != "" {
 			owners := map[int64]bool{}
 			for _, f := range strings.Split(*tgOwners, ",") {

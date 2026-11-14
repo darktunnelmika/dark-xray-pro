@@ -38,6 +38,14 @@ type SyncRequest struct {
 	Results []TaskResult `json:"results,omitempty"`
 	// AgentSHA is the sha256 of the running dark-node binary.
 	AgentSHA string `json:"agent_sha,omitempty"`
+	// Assets maps asset file names (geoip.dat, ...) to the sha256 held.
+	Assets map[string]string `json:"assets,omitempty"`
+}
+
+// Asset is a file a Node should hold next to Xray, fetched from PathDist.
+type Asset struct {
+	Name   string `json:"name"`
+	SHA256 string `json:"sha256"`
 }
 
 // Task is a one-off job the HUB asks a Node to run, for example scanning
@@ -91,10 +99,11 @@ type SyncResponse struct {
 	// UsageSeq: RemainingBytes already accounts for every usage batch from
 	// this Node with sequence <= UsageSeq. The Node subtracts only newer
 	// traffic, so local enforcement neither double counts nor misses bytes.
-	UsageSeq    uint64 `json:"usage_seq"`
-	PollSeconds int    `json:"poll_seconds"`
-	UnixTime    int64  `json:"unix_time"`
-	Tasks       []Task `json:"tasks,omitempty"`
+	UsageSeq    uint64  `json:"usage_seq"`
+	PollSeconds int     `json:"poll_seconds"`
+	UnixTime    int64   `json:"unix_time"`
+	Tasks       []Task  `json:"tasks,omitempty"`
+	Assets      []Asset `json:"assets,omitempty"`
 }
 
 // UserLimit is the HUB's view of one client at the time of the sync.

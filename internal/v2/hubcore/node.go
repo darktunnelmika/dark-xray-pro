@@ -67,6 +67,7 @@ tx_rate=MAX(tx_rate,excluded.tx_rate), online=MAX(online,excluded.online)`,
 		return wire.SyncResponse{}, err
 	}
 	s.applyTaskResults(ctx, nodeID, req.Results)
+	s.recordAssets(ctx, nodeID, req.Assets)
 	if req.AgentSHA != "" && len(req.AgentSHA) <= 64 {
 		_, _ = s.db.ExecContext(ctx, `UPDATE nodes SET agent_sha=? WHERE id=? AND agent_sha<>?`, req.AgentSHA, nodeID, req.AgentSHA)
 	}
@@ -75,7 +76,7 @@ tx_rate=MAX(tx_rate,excluded.tx_rate), online=MAX(online,excluded.online)`,
 		return wire.SyncResponse{}, err
 	}
 	resp := wire.SyncResponse{ConfigRevision: uint64(rev), Users: users, UsageSeq: uint64(usageSeq), PollSeconds: PollSeconds, UnixTime: now,
-		Tasks: s.openTasks(ctx, nodeID)}
+		Tasks: s.openTasks(ctx, nodeID), Assets: s.geoWanted()}
 	if uint64(rev) != req.ConfigRevision {
 		resp.Config = cfg
 	}

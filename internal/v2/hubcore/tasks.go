@@ -38,7 +38,10 @@ func (s *Store) ensureTaskSchema() error {
 	if _, err := s.db.Exec(taskSchema); err != nil {
 		return err
 	}
-	return s.addColumn("nodes", "agent_sha", "TEXT NOT NULL DEFAULT ''")
+	if err := s.addColumn("nodes", "agent_sha", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	return s.addColumn("nodes", "agent_assets", "TEXT NOT NULL DEFAULT ''")
 }
 
 // SetDistDir tells the store where the Node binaries live.
@@ -72,6 +75,13 @@ func (s *Store) DistSHA() string {
 
 // distFile resolves a servable distribution file.
 func (s *Store) distFile(name string) (string, bool) {
+	for _, g := range GeoAssets {
+		if name == g {
+			p := filepath.Join(s.geoDir(), name)
+			_, err := os.Stat(p)
+			return p, err == nil
+		}
+	}
 	if name != "dark-node" && name != "xray" {
 		return "", false
 	}
