@@ -42,12 +42,9 @@ log "bob after limit (expect 000): $(fetch 21081 200000)"
 restarts(){ $HUB status -db $DB | grep -o 'restarts=[0-9]*'; }
 log "xray process $(restarts) (1 = never restarted)"
 log "--- add carol while alice streams 20MB ---"
-# A local file server, throttled to ~1 MB/s, keeps alice's stream open
-# across the user change.
-head -c 15000000 /dev/zero > $E/big.bin
-(cd $E && setsid python3 -m http.server 28099 --bind 127.0.0.1 > $E/http.log 2>&1 < /dev/null &)
-sleep 1
-( r=$(curl -s -o /dev/null -w "%{http_code} %{size_download}" --limit-rate 1M --max-time 40 --socks5-hostname 127.0.0.1:21080 "http://127.0.0.1:28099/big.bin"); log "alice stream across the user change: $r" ) &
+# Throttled to ~700 KB/s so alice's stream is still open when carol is
+# added (stock Xray refuses loopback targets, so the source is external).
+( r=$(curl -s -o /dev/null -w "%{http_code} %{size_download}" --limit-rate 700K --max-time 40 --socks5-hostname 127.0.0.1:21080 "https://proof.ovh.net/files/10Mb.dat"); log "alice stream across the user change: $r" ) &
 STREAM=$!
 sleep 3
 $HUB client -db $DB -email carol -inbounds de-test-vless -volume-gb 1
@@ -58,4 +55,4 @@ log "carol (added live): $(fetch 21082 100000)"
 log "xray process $(restarts) after adding a user (expect 1)"
 log "events:"; python3 -c "import sqlite3;[print(r) for r in sqlite3.connect('$DB').execute('select * from events')]"
 log "status:"; $HUB status -db $DB
-pkill -f "$E/"; pkill -f "http.server 28099"; log DONE
+pkill -f "$E/"; log DONE
