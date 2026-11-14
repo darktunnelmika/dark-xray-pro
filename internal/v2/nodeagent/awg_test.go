@@ -15,6 +15,7 @@ import (
 	"net/netip"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -37,11 +38,13 @@ type clientTun struct {
 	s      *stack.Stack
 	events chan tun.Event
 	in     chan *buffer.View
+	closed chan struct{}
+	once   sync.Once
 }
 
 func newClientTun(t *testing.T, addr string) *clientTun {
 	s := stack.New(stack.Options{NetworkProtocols: []stack.NetworkProtocolFactory{ipv4.NewProtocol}, TransportProtocols: []stack.TransportProtocolFactory{tcp.NewProtocol}})
-	c := &clientTun{ep: channel.New(256, 1280, ""), s: s, events: make(chan tun.Event, 2), in: make(chan *buffer.View, 256)}
+	c := &clientTun{ep: channel.New(256, 1280, ""), s: s, events: make(chan tun.Event, 2), in: make(chan *buffer.View, 256), closed: make(chan struct{})}
 	c.ep.AddNotify(c)
 	if err := s.CreateNIC(1, c.ep); err != nil {
 		t.Fatal(err)
@@ -54,7 +57,10 @@ func newClientTun(t *testing.T, addr string) *clientTun {
 }
 func (c *clientTun) WriteNotify() {
 	if p := c.ep.Read(); p != nil {
-		c.in <- p.ToView()
+		select {
+		case c.in <- p.ToView():
+		default:
+		}
 		p.DecRef()
 	}
 }
@@ -63,9 +69,17 @@ func (c *clientTun) File() *os.File           { return nil }
 func (c *clientTun) Events() <-chan tun.Event { return c.events }
 func (c *clientTun) MTU() (int, error)        { return 1280, nil }
 func (c *clientTun) BatchSize() int           { return 1 }
-func (c *clientTun) Close() error             { c.s.RemoveNIC(1); c.ep.Close(); return nil }
+func (c *clientTun) Close() error {
+	c.once.Do(func() { close(c.closed); c.s.RemoveNIC(1); c.ep.Close(); close(c.events) })
+	return nil
+}
 func (c *clientTun) Read(b [][]byte, sz []int, off int) (int, error) {
-	v := <-c.in
+	var v *buffer.View
+	select {
+	case v = <-c.in:
+	case <-c.closed:
+		return 0, os.ErrClosed
+	}
 	n, err := v.Read(b[0][off:])
 	sz[0] = n
 	return 1, err
