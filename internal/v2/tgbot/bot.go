@@ -30,7 +30,8 @@ type Bot struct {
 	Now     func() time.Time
 
 	mu        sync.Mutex
-	awaiting  map[int64]string // chat -> expected input: "support" | "link"
+	awaiting  map[int64]string // chat -> expected input: "support" | "link" | owner prompts
+	draft     map[int64]string // owner chat -> broadcast awaiting confirmation
 	nodeState map[string]bool
 	lastDaily string
 }
@@ -88,6 +89,11 @@ func (b *Bot) Run(ctx context.Context) {
 	}
 	if name, err := b.API.Me(ctx); err == nil && name != "" {
 		_ = b.Store.SetSetting(ctx, "tg_username", name)
+	}
+	_ = b.API.SetCommands(ctx, 0, [][2]string{{"start", "منوی اصلی"}, {"my", "سرویس‌های من"}, {"buy", "خرید سرویس"}, {"support", "پشتیبانی"}})
+	for id := range b.Owners {
+		_ = b.API.SetCommands(ctx, id, [][2]string{{"admin", "پنل مدیریت"}, {"status", "وضعیت هاب و نودها"}, {"orders", "سفارش‌های در انتظار"},
+			{"report", "گزارش امروز"}, {"client", "اطلاعات یک کلاینت"}, {"broadcast", "پیام همگانی"}, {"help", "راهنما"}})
 	}
 	go b.background(ctx)
 	var offset int64
@@ -165,8 +171,21 @@ func (b *Bot) onMessage(ctx context.Context, m *Message) {
 	_ = b.Store.TgTouch(ctx, chat, name, m.From.Username)
 	text := strings.TrimSpace(m.Text)
 	if b.Owners[chat] {
+		if text == "/start" || text == "/admin" || text == "/menu" {
+			b.ownerHome(ctx, chat)
+			return
+		}
 		if b.ownerMessage(ctx, m, text) {
 			return
+		}
+		b.mu.Lock()
+		what := b.awaiting[chat]
+		b.mu.Unlock()
+		if what != "" && what != "support" && what != "link" && !strings.HasPrefix(text, "/") {
+			b.takeAwait(chat)
+			if b.ownerInput(ctx, chat, what, text) {
+				return
+			}
 		}
 	}
 	if code, ok := strings.CutPrefix(text, "/start rep_"); ok {
@@ -246,8 +265,22 @@ func (b *Bot) takeAwait(chat int64) string {
 
 var mainMenu = &Keyboard{Rows: [][]Button{
 	{{Text: "🛒 خرید سرویس", Data: "shop"}, {Text: "📊 سرویس‌های من", Data: "mine"}},
-	{{Text: "🔗 اتصال سرویس موجود", Data: "link"}, {Text: "💬 پشتیبانی", Data: "support"}},
+	{{Text: "📲 آموزش اتصال", Data: "guide"}, {Text: "💬 پشتیبانی", Data: "support"}},
+	{{Text: "🔗 اتصال سرویس موجود", Data: "link"}},
 }}
+
+const defaultGuide = `📲 <b>آموزش اتصال</b>
+
+۱. یکی از برنامه‌ها را نصب کنید:
+• اندروید: v2rayNG یا Hiddify
+• آیفون: Streisand یا V2Box
+• ویندوز/مک: Hiddify یا v2rayN
+
+۲. در «سرویس‌های من» دکمهٔ «لینک و QR» را بزنید.
+۳. لینک را کپی کنید و در برنامه «Import from clipboard» را بزنید (یا QR را اسکن کنید).
+۴. سرور را انتخاب و اتصال را بزنید. برای به‌روزرسانی سرورها، Update subscription را بزنید.`
+
+func isBlocked(err error) bool { return errors.Is(err, ErrBlocked) }
 
 func (b *Bot) menu(ctx context.Context, chat int64) {
 	welcome := b.Store.Setting(ctx, "tg_welcome")
@@ -255,6 +288,16 @@ func (b *Bot) menu(ctx context.Context, chat int64) {
 		welcome = "به <b>Dark VPN</b> خوش آمدید. یکی از گزینه‌ها را انتخاب کنید:"
 	} else {
 		welcome = esc(welcome)
+	}
+	if emails, _ := b.Store.TgClients(ctx, chat); len(emails) > 0 {
+		var lines []string
+		now := b.now().Unix()
+		for _, e := range emails {
+			if c, err := b.Store.ClientByEmail(ctx, e); err == nil {
+				lines = append(lines, clientLabel(c, now)+" — "+gb(c.Usage.Up+c.Usage.Down))
+			}
+		}
+		welcome += "\n\nسرویس‌های شما:\n" + esc(strings.Join(lines, "\n"))
 	}
 	b.send(ctx, chat, welcome, mainMenu)
 }
@@ -413,6 +456,9 @@ func (b *Bot) ticket(ctx context.Context, chat int64, name, username, text strin
 func (b *Bot) onCallback(ctx context.Context, q *CallbackQuery) {
 	chat := q.From.ID
 	_ = b.API.Answer(ctx, q.ID, "")
+	if b.ownerCallback(ctx, chat, q.Data) {
+		return
+	}
 	verb, rest, _ := strings.Cut(q.Data, ":")
 	switch verb {
 	case "shop":
@@ -425,6 +471,14 @@ func (b *Bot) onCallback(ctx context.Context, q *CallbackQuery) {
 	case "support":
 		b.setAwait(chat, "support")
 		b.send(ctx, chat, "پیام خود را بنویسید؛ به پشتیبانی ارسال می‌شود.", nil)
+	case "guide":
+		g := b.Store.Setting(ctx, "tg_guide")
+		if g == "" {
+			g = defaultGuide
+		} else {
+			g = esc(g)
+		}
+		b.send(ctx, chat, g, mainMenu)
 	case "buy":
 		b.buy(ctx, chat, rest, "")
 	case "renew":

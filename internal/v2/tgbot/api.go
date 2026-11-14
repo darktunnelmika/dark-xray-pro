@@ -23,6 +23,7 @@ type API interface {
 	SendPhoto(ctx context.Context, chat int64, png []byte, caption string) error
 	Answer(ctx context.Context, callbackID, text string) error
 	Me(ctx context.Context) (string, error)
+	SetCommands(ctx context.Context, chat int64, cmds [][2]string) error
 }
 
 type Update struct {
@@ -182,4 +183,17 @@ func (a *HTTPAPI) Me(ctx context.Context) (string, error) {
 	var u User
 	err := a.callJSON(ctx, "getMe", map[string]any{}, &u)
 	return u.Username, err
+}
+
+// SetCommands sets the "/" menu; chat 0 is the default for everyone.
+func (a *HTTPAPI) SetCommands(ctx context.Context, chat int64, cmds [][2]string) error {
+	list := make([]map[string]string, 0, len(cmds))
+	for _, c := range cmds {
+		list = append(list, map[string]string{"command": c[0], "description": c[1]})
+	}
+	p := map[string]any{"commands": list}
+	if chat != 0 {
+		p["scope"] = map[string]any{"type": "chat", "chat_id": chat}
+	}
+	return a.callJSON(ctx, "setMyCommands", p, nil)
 }

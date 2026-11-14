@@ -39,8 +39,9 @@ func (f *fakeAPI) SendPhoto(_ context.Context, chat int64, _ []byte, caption str
 	f.out = append(f.out, sent{chat: chat, text: caption, photo: true})
 	return nil
 }
-func (f *fakeAPI) Answer(context.Context, string, string) error { return nil }
-func (f *fakeAPI) Me(context.Context) (string, error)           { return "test_bot", nil }
+func (f *fakeAPI) Answer(context.Context, string, string) error          { return nil }
+func (f *fakeAPI) Me(context.Context) (string, error)                    { return "test_bot", nil }
+func (f *fakeAPI) SetCommands(context.Context, int64, [][2]string) error { return nil }
 
 func (f *fakeAPI) take() []sent {
 	f.mu.Lock()
@@ -216,4 +217,49 @@ func TestResellerTelegram(t *testing.T) {
 	find(t, api.take(), repChat, "تحویل شد")
 	b.Handle(ctx, msg(repChat, "/credit"))
 	find(t, api.take(), repChat, "5.00 GB")
+}
+
+func TestOwnerConsole(t *testing.T) {
+	s, err := hubcore.Open(filepath.Join(t.TempDir(), "v2.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	ctx := context.Background()
+	_, _ = s.CreateNode(ctx, "n1", "N")
+	_ = s.PutInbound(ctx, "in1", "n1", []byte(`{"protocol":"vless","port":443,"settings":{}}`), true)
+	owner := hubcore.Principal{User: "o", Role: "owner"}
+	_ = s.PutProduct(ctx, owner, hubcore.Product{ID: "p10", Name: "10GB", Plan: "volume", GB: 10, Days: 30, Inbounds: []string{"in1"}, Price: 5, Status: "published"})
+	api := &fakeAPI{}
+	b := &Bot{Store: s, API: api, Owners: map[int64]bool{ownerID: true}, SubBase: "https://x", Logf: t.Logf}
+	b.Handle(ctx, msg(ownerID, "/start"))
+	home := find(t, api.take(), ownerID, "پنل مدیریت")
+	if home.kb == nil || len(home.kb.Rows) < 5 {
+		t.Fatal("owner menu missing")
+	}
+	b.Handle(ctx, cb(ownerID, "a:qs:p10"))
+	out := api.take()
+	find(t, out, ownerID, "p10-1")
+	b.Handle(ctx, cb(ownerID, "a:renew:p10-1:30:5"))
+	find(t, api.take(), ownerID, "15.00 GB")
+	b.Handle(ctx, cb(ownerID, "a:toggle:p10-1"))
+	find(t, api.take(), ownerID, "غیرفعال ⛔")
+	b.Handle(ctx, cb(ownerID, "a:find"))
+	api.take()
+	b.Handle(ctx, msg(ownerID, "p10"))
+	find(t, api.take(), ownerID, "p10-1")
+	// Broadcast needs a confirmation.
+	b.Handle(ctx, cb(ownerID, "a:bc"))
+	api.take()
+	b.Handle(ctx, msg(ownerID, "hello all"))
+	find(t, api.take(), ownerID, "پیش‌نمایش")
+	// A customer cannot use owner buttons.
+	b.Handle(ctx, cb(buyerID, "a:delok:p10-1"))
+	if _, err := s.ClientByEmail(ctx, "p10-1"); err != nil {
+		t.Fatal("customer must not delete clients")
+	}
+	b.Handle(ctx, cb(ownerID, "a:delok:p10-1"))
+	if _, err := s.ClientByEmail(ctx, "p10-1"); err == nil {
+		t.Fatal("owner delete failed")
+	}
 }
