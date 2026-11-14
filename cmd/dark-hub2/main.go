@@ -105,6 +105,7 @@ func main() {
 				time.Sleep(24 * time.Hour)
 			}
 		}()
+		go s.RunACME(ctx)
 		if tok, err := os.ReadFile(*tgTokenFile); err == nil && strings.TrimSpace(string(tok)) != "" {
 			owners := map[int64]bool{}
 			for _, f := range strings.Split(*tgOwners, ",") {

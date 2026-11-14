@@ -547,6 +547,34 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 		id, err := s.StartNodeUpdate(r.Context(), r.PathValue("id"))
 		reply(w, map[string]string{"id": id}, err)
 	}))
+	mux.HandleFunc("GET /api/v2/admin/acme", guard(func(w http.ResponseWriter, r *http.Request) {
+		certs, err := s.ACMECerts(r.Context())
+		reply(w, map[string]any{"settings": s.ACMESettings(r.Context()), "certs": certs}, err)
+	}))
+	mux.HandleFunc("PUT /api/v2/admin/acme/settings", guard(func(w http.ResponseWriter, r *http.Request) {
+		var in ACMESettings
+		if !decode(w, r, &in) {
+			return
+		}
+		reply(w, map[string]bool{"ok": true}, s.PutACMESettings(r.Context(), in))
+	}))
+	mux.HandleFunc("PUT /api/v2/admin/acme/certs/{id}", guard(func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Domains []string `json:"domains"`
+			Method  string   `json:"method"`
+			NodeID  string   `json:"node_id"`
+		}
+		if !decode(w, r, &in) {
+			return
+		}
+		reply(w, map[string]bool{"ok": true}, s.PutACMECert(r.Context(), r.PathValue("id"), in.Domains, in.Method, in.NodeID))
+	}))
+	mux.HandleFunc("POST /api/v2/admin/acme/certs/{id}/renew", guard(func(w http.ResponseWriter, r *http.Request) {
+		reply(w, map[string]bool{"ok": true}, s.RenewACMECert(r.Context(), r.PathValue("id")))
+	}))
+	mux.HandleFunc("DELETE /api/v2/admin/acme/certs/{id}", guard(func(w http.ResponseWriter, r *http.Request) {
+		reply(w, map[string]bool{"ok": true}, s.DeleteACMECert(r.Context(), r.PathValue("id")))
+	}))
 	mux.HandleFunc("GET /api/v2/admin/tasks/{id}", guard(func(w http.ResponseWriter, r *http.Request) {
 		t, err := s.TaskByID(r.Context(), r.PathValue("id"))
 		reply(w, t, err)

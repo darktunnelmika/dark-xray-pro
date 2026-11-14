@@ -62,6 +62,9 @@ func newTaskBox(path string) *taskBox {
 			}
 			return sniscan.Scanner{}.Run(ctx, a), nil
 		},
+		wire.TaskACMEHTTP: func(ctx context.Context, raw json.RawMessage) (any, error) {
+			return serveACME(raw, ":80")
+		},
 	}
 	return b
 }

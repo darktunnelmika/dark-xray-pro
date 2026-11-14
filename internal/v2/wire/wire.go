@@ -63,6 +63,10 @@ const TaskSNIScan = "sni_scan"
 // (args: {"sha256": "..."}) and restarts the agent.
 const TaskSelfUpdate = "self_update"
 
+// TaskACMEHTTP serves one ACME HTTP-01 answer on port 80 for a few minutes
+// (args: {"path","body","seconds"}); the task finishes once listening.
+const TaskACMEHTTP = "acme_http"
+
 // Host is the node machine's health at the time of the sync.
 type Host struct {
 	CPUPercent  float64 `json:"cpu_percent"`
