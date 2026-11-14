@@ -1245,29 +1245,44 @@ async function viewActivity() {
       body)) : h("p", { class: "muted" }, t("empty")), more);
 }
 
-// Daily traffic as SVG bars (download stacked under upload), built with the DOM.
+// Daily traffic as a neon line chart: grid, glowing lines, soft area fill.
 function barsSvg(days, W = 600) {
-  const NS = "http://www.w3.org/2000/svg", H = 180, P = 4;
+  const NS = "http://www.w3.org/2000/svg", H = 190, P = 8, L = 0;
   const el = (n, a) => { const x = document.createElementNS(NS, n); for (const [k, v] of Object.entries(a)) x.setAttribute(k, v); return x; };
-  const svg = el("svg", { viewBox: `0 0 ${W} ${H + 18}`, class: "bars", role: "img", "aria-label": t("usageChart") });
-  const gid = `bars${++markSeq}`;
-  const defs = el("defs", {}), grad = el("linearGradient", { id: gid, x1: "0", y1: "0", x2: "0", y2: "1" });
-  grad.append(el("stop", { offset: "0", "stop-color": "#2de2e6" }), el("stop", { offset: "1", "stop-color": "#2de2e6", "stop-opacity": ".25" }));
-  defs.append(grad); svg.append(defs);
-  const top = Math.max(1, ...days.map((d) => d.Up + d.Down));
-  const bw = W / days.length;
-  const step = Math.max(1, Math.round(days.length / 5));
+  const svg = el("svg", { viewBox: `0 0 ${W} ${H + 20}`, class: "bars", role: "img", "aria-label": t("usageChart") });
+  const id = `c${++markSeq}`;
+  const defs = el("defs", {});
+  const glow = el("filter", { id: `${id}g`, x: "-10%", y: "-30%", width: "120%", height: "160%" });
+  glow.append(el("feGaussianBlur", { stdDeviation: "3.5", result: "b" }));
+  const merge = el("feMerge", {}); merge.append(el("feMergeNode", { in: "b" }), el("feMergeNode", { in: "SourceGraphic" })); glow.append(merge);
+  const area = (col, key) => { const g = el("linearGradient", { id: `${id}${key}`, x1: 0, y1: 0, x2: 0, y2: 1 });
+    g.append(el("stop", { offset: "0", "stop-color": col, "stop-opacity": ".35" }), el("stop", { offset: "1", "stop-color": col, "stop-opacity": "0" })); return g; };
+  defs.append(glow, area("#2de2e6", "d"), area("#9b5cff", "u"));
+  svg.append(defs);
+  const top = Math.max(1, ...days.map((d) => Math.max(d.Down, d.Up))) * 1.12;
+  const x = (i) => L + (days.length === 1 ? W / 2 : (i / (days.length - 1)) * (W - L - 2 * P) + P);
+  const y = (v) => H - (v / top) * (H - P);
+  for (let k = 0; k <= 4; k++) {
+    const yy = P + ((H - P) * k) / 4;
+    svg.append(el("line", { x1: 0, x2: W, y1: yy, y2: yy, class: "grid-line" }));
+  }
+  const series = (key, col) => {
+    const pts = days.map((d, i) => [x(i), y(d[key])]);
+    const line = pts.map(([a, b]) => `${a.toFixed(1)},${b.toFixed(1)}`).join(" ");
+    svg.append(el("polygon", { points: `${pts[0][0]},${H} ${line} ${pts.at(-1)[0]},${H}`, fill: `url(#${id}${key === "Down" ? "d" : "u"})` }));
+    svg.append(el("polyline", { points: line, fill: "none", stroke: col, "stroke-width": 2.2, "stroke-linejoin": "round", "stroke-linecap": "round", filter: `url(#${id}g)`, "vector-effect": "non-scaling-stroke" }));
+    const [lx, ly] = pts.at(-1);
+    svg.append(el("circle", { cx: lx, cy: ly, r: 4, fill: col, filter: `url(#${id}g)` }));
+  };
+  series("Up", "#9b5cff");
+  series("Down", "#2de2e6");
+  const step = Math.max(1, Math.round(days.length / 6));
   days.forEach((d, i) => {
-    const total = d.Up + d.Down, hd = (d.Down / top) * (H - P), hu = (d.Up / top) * (H - P);
-    const g = el("g", {});
-    const title = el("title", {}); title.textContent = `${d.Day}: ${bytes(total)} (↓ ${bytes(d.Down)} · ↑ ${bytes(d.Up)})`;
-    g.append(title,
-      el("rect", { x: i * bw + 1, y: 0, width: Math.max(1, bw - 2), height: H, class: "bar-hit" }),
-      el("rect", { x: i * bw + 1, y: H - hd, width: Math.max(1, bw - 2), height: hd, class: "bar-down", rx: 3, fill: `url(#${gid})` }),
-      el("rect", { x: i * bw + 1, y: H - hd - hu, width: Math.max(1, bw - 2), height: hu, class: "bar-up", rx: 2 }));
-    svg.append(g);
+    const hit = el("rect", { x: x(i) - W / days.length / 2, y: 0, width: W / days.length, height: H, class: "bar-hit" });
+    const title = el("title", {}); title.textContent = `${d.Day}: ↓ ${bytes(d.Down)} · ↑ ${bytes(d.Up)}`;
+    hit.append(title); svg.append(hit);
     if ((days.length - 1 - i) % step === 0) {
-      const lab = el("text", { x: i * bw + bw / 2, y: H + 14, "text-anchor": "middle", class: "bar-label" }); lab.textContent = d.Day.slice(5); svg.append(lab);
+      const lab = el("text", { x: x(i), y: H + 15, "text-anchor": "middle", class: "bar-label" }); lab.textContent = d.Day.slice(5); svg.append(lab);
     }
   });
   return svg;
