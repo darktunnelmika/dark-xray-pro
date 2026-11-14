@@ -700,6 +700,9 @@ func TestPresetsRenderForEveryProtocol(t *testing.T) {
 	for i, p := range Presets {
 		req := PresetRequest{Tag: "in-" + strconv.Itoa(i), NodeID: "n1", Preset: p, Port: 20000 + i, SNI: "www.speedtest.net", Cert: "c",
 			Endpoints: []sub.Endpoint{{Name: "Direct", Address: "1.2.3.4", Port: 20000 + i}}}
+		if p == "dokodemo" {
+			req.Path = "9.9.9.9:443"
+		}
 		if err := s.CreatePreset(ctx, req); err != nil {
 			t.Fatalf("%s: %v", p, err)
 		}

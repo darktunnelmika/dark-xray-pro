@@ -42,8 +42,8 @@ func TestPlainInbounds(t *testing.T) {
 	s, _ := newStore(t)
 	ctx := context.Background()
 	seed(t, s)
-	for _, p := range []PresetRequest{{Tag: "px", Preset: "socks"}, {Tag: "hp", Preset: "http"}, {Tag: "fw", Preset: "dokodemo", Path: "9.9.9.9:443"}} {
-		if err := s.ComposeInbound(ctx, p, []Route{{NodeID: "de-1", DirectPort: 1080 + len(p.Tag), Hosts: []Host{{Path: "direct", Enabled: true, Address: "1.2.3.4", Port: 1080}}}}); err != nil {
+	for i, p := range []PresetRequest{{Tag: "px", Preset: "socks"}, {Tag: "hp", Preset: "http"}, {Tag: "fw", Preset: "dokodemo", Path: "9.9.9.9:443"}} {
+		if err := s.ComposeInbound(ctx, p, []Route{{NodeID: "de-1", DirectPort: 1080 + i, Hosts: []Host{{Path: "direct", Enabled: true, Address: "1.2.3.4", Port: 1080 + i}}}}); err != nil {
 			t.Fatal(p.Preset, err)
 		}
 	}
