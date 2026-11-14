@@ -90,6 +90,7 @@ type Rep struct {
 	VolumeCredit   int64
 	UnlimitedUnits int64
 	Clients        int
+	Policy         RepPolicy
 }
 
 func (s *Store) PutRep(ctx context.Context, r Rep) error {
@@ -103,7 +104,7 @@ ON CONFLICT(id) DO UPDATE SET name=excluded.name, enabled=excluded.enabled`, r.I
 
 func (s *Store) Reps(ctx context.Context) ([]Rep, error) {
 	rows, err := s.ro.QueryContext(ctx, `SELECT r.id,r.name,r.enabled,r.volume_credit,r.unlimited_units,
-(SELECT COUNT(*) FROM clients c WHERE c.rep_id=r.id) FROM reps r ORDER BY r.id`)
+(SELECT COUNT(*) FROM clients c WHERE c.rep_id=r.id),`+policyCols+` FROM reps r ORDER BY r.id`)
 	if err != nil {
 		return nil, err
 	}
@@ -111,9 +112,11 @@ func (s *Store) Reps(ctx context.Context) ([]Rep, error) {
 	var out []Rep
 	for rows.Next() {
 		var r Rep
-		if err := rows.Scan(&r.ID, &r.Name, &r.Enabled, &r.VolumeCredit, &r.UnlimitedUnits, &r.Clients); err != nil {
+		p, err := scanPolicy(rows, &r.ID, &r.Name, &r.Enabled, &r.VolumeCredit, &r.UnlimitedUnits, &r.Clients)
+		if err != nil {
 			return nil, err
 		}
+		r.Policy = p
 		out = append(out, r)
 	}
 	return out, rows.Err()
@@ -205,6 +208,9 @@ func (s *Store) RepPutClient(ctx context.Context, actor, repID string, c Client,
 	}
 	if !isNew && existsRep != repID {
 		return ErrNotFound // another seller's (or the owner's) client is invisible
+	}
+	if err := checkPolicy(ctx, tx, repID, c, plan, isNew, now); err != nil {
+		return err
 	}
 	var volCharge, unitCharge int64
 	switch {

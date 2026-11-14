@@ -81,6 +81,9 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 			for _, rp := range reps {
 				if rp.ID == p.RepID {
 					out["volume_credit"], out["unlimited_units"] = rp.VolumeCredit, rp.UnlimitedUnits
+					pol := rp.Policy
+					pol.PriceGB, pol.PriceUnit = 0, 0 // sale prices are the owner's business
+					out["policy"] = pol
 				}
 			}
 		}
@@ -129,6 +132,55 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 		}
 		err := s.AdjustCredit(r.Context(), who(r).User, r.PathValue("id"), int64(in.VolumeGB*(1<<30)), in.Units, in.Note)
 		reply(w, map[string]bool{"ok": err == nil}, err)
+	}))
+	mux.HandleFunc("PUT /api/v2/admin/reps/{id}/policy", guard(func(w http.ResponseWriter, r *http.Request) {
+		var p RepPolicy
+		if !decode(w, r, &p) {
+			return
+		}
+		err := s.SetRepPolicy(r.Context(), r.PathValue("id"), p)
+		reply(w, map[string]bool{"ok": err == nil}, err)
+	}))
+	mux.HandleFunc("POST /api/v2/admin/reps/{id}/payment", guard(func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Amount int64
+			Note   string
+		}
+		if !decode(w, r, &in) {
+			return
+		}
+		err := s.RecordPayment(r.Context(), who(r).User, r.PathValue("id"), in.Amount, in.Note)
+		reply(w, map[string]bool{"ok": err == nil}, err)
+	}))
+	mux.HandleFunc("GET /api/v2/admin/finance", guard(func(w http.ResponseWriter, r *http.Request) {
+		days, _ := strconv.Atoi(r.URL.Query().Get("days"))
+		var since int64
+		if days > 0 {
+			since = time.Now().Add(-time.Duration(days) * 24 * time.Hour).Unix()
+		}
+		rows, err := s.Finance(r.Context(), since)
+		reply(w, rows, err)
+	}))
+	// Activity: owners see every representative (or ?rep=), a representative only itself.
+	mux.HandleFunc("GET /api/v2/rep/ledger", member(func(w http.ResponseWriter, r *http.Request) {
+		p := who(r)
+		rep := r.URL.Query().Get("rep")
+		if p.Role == "rep" {
+			rep = p.RepID
+		}
+		before, _ := strconv.ParseInt(r.URL.Query().Get("before"), 10, 64)
+		list, err := s.Ledger(r.Context(), rep, before, 100)
+		reply(w, list, err)
+	}))
+	mux.HandleFunc("GET /api/v2/admin/clients/{email}/daily", member(func(w http.ResponseWriter, r *http.Request) {
+		p := who(r)
+		if p.Role == "rep" && !s.ownsClient(r.Context(), p.RepID, r.PathValue("email")) {
+			http.NotFound(w, r)
+			return
+		}
+		days, _ := strconv.Atoi(r.URL.Query().Get("days"))
+		list, err := s.ClientDailyUsage(r.Context(), r.PathValue("email"), days)
+		reply(w, list, err)
 	}))
 	mux.HandleFunc("GET /api/v2/admin/overview", guard(func(w http.ResponseWriter, r *http.Request) {
 		o, err := s.Overview(r.Context())
@@ -217,6 +269,26 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 	}))
 	mux.HandleFunc("GET /api/v2/rep/inbounds", member(func(w http.ResponseWriter, r *http.Request) {
 		list, err := s.Inbounds(r.Context())
+		if p := who(r); p.Role == "rep" && err == nil {
+			pol, perr := s.RepPolicyOf(r.Context(), p.RepID)
+			if perr != nil {
+				reply(w, nil, perr)
+				return
+			}
+			if len(pol.Inbounds) > 0 {
+				ok := map[string]bool{}
+				for _, t := range pol.Inbounds {
+					ok[t] = true
+				}
+				kept := list[:0]
+				for _, ib := range list {
+					if ok[ib.Tag] {
+						kept = append(kept, ib)
+					}
+				}
+				list = kept
+			}
+		}
 		for i := range list {
 			list[i].Meta = nil // representatives only need names to assign
 		}
@@ -331,8 +403,9 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 	}))
 	mux.HandleFunc("DELETE /api/v2/admin/clients/{email}", member(func(w http.ResponseWriter, r *http.Request) {
 		p := who(r)
-		if p.Role == "rep" && !s.ownsClient(r.Context(), p.RepID, r.PathValue("email")) {
-			http.NotFound(w, r)
+		if p.Role == "rep" {
+			b, u, err := s.RepDeleteClient(r.Context(), p.User, p.RepID, r.PathValue("email"))
+			reply(w, map[string]any{"ok": err == nil, "refund_bytes": b, "refund_units": u}, err)
 			return
 		}
 		err := s.DeleteClient(r.Context(), r.PathValue("email"))

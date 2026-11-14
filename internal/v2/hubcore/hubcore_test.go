@@ -553,3 +553,100 @@ func TestBackupAndRestore(t *testing.T) {
 		t.Fatal("missing backup must fail")
 	}
 }
+
+func TestRepPolicyRefundLedgerFinance(t *testing.T) {
+	s, _ := newStore(t)
+	ctx := context.Background()
+	seed(t, s)
+	if err := s.PutRep(ctx, Rep{ID: "ali", Name: "Ali", Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.AdjustCredit(ctx, "owner", "ali", 20<<30, 4, "start"); err != nil {
+		t.Fatal(err)
+	}
+	pol := RepPolicy{MaxClients: 2, MaxDays: 60, MaxClientGB: 8, AllowUnlimited: false, CanDelete: true, RefundUnused: true,
+		Inbounds: []string{"de-vless"}, PriceGB: 1000, PriceUnit: 50000}
+	if err := s.SetRepPolicy(ctx, "ali", pol); err != nil {
+		t.Fatal(err)
+	}
+	base := Client{Email: "p1", Enabled: true, VolumeBytes: 5 << 30, DurationSeconds: 30 * 86400, Inbounds: []string{"de-vless"}}
+	cases := []struct {
+		name string
+		edit func(c *Client) string
+	}{
+		{"unlimited", func(c *Client) string { return "unlimited" }},
+		{"too long", func(c *Client) string { c.DurationSeconds = 61 * 86400; return "volume" }},
+		{"too big", func(c *Client) string { c.VolumeBytes = 9 << 30; return "volume" }},
+		{"inbound", func(c *Client) string { c.Inbounds = []string{"other"}; return "volume" }},
+	}
+	for _, tc := range cases {
+		c := base
+		plan := tc.edit(&c)
+		if err := s.RepPutClient(ctx, "ali", "ali", c, plan); !errors.Is(err, ErrPolicy) {
+			t.Fatalf("%s: want policy error, got %v", tc.name, err)
+		}
+	}
+	for _, e := range []string{"p1", "p2"} {
+		c := base
+		c.Email = e
+		if err := s.RepPutClient(ctx, "ali", "ali", c, "volume"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	c := base
+	c.Email = "p3"
+	if err := s.RepPutClient(ctx, "ali", "ali", c, "volume"); !errors.Is(err, ErrPolicy) {
+		t.Fatalf("client cap: %v", err)
+	}
+	// p1 used 2 GiB of 5: deleting it returns 3 GiB.
+	if _, err := s.db.Exec(`INSERT INTO client_usage(email,up,down,first_seen_unix,last_seen_unix) VALUES('p1',?,?,1,1)`, int64(1<<30), int64(1<<30)); err != nil {
+		t.Fatal(err)
+	}
+	b, u, err := s.RepDeleteClient(ctx, "ali", "ali", "p1")
+	if err != nil || b != 3<<30 || u != 0 {
+		t.Fatalf("refund %d %d %v", b, u, err)
+	}
+	if _, _, err := s.RepDeleteClient(ctx, "ali", "ali", "alice"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("deleting the owner's client: %v", err)
+	}
+	reps, _ := s.Reps(ctx)
+	if reps[0].VolumeCredit != (20-10+3)<<30 || reps[0].Policy.MaxClients != 2 {
+		t.Fatalf("balance %+v", reps[0])
+	}
+	if err := s.RecordPayment(ctx, "owner", "ali", 4000, "cash"); err != nil {
+		t.Fatal(err)
+	}
+	led, err := s.Ledger(ctx, "ali", 0, 10)
+	if err != nil || len(led) != 6 || led[0].Kind != "payment" || led[1].Kind != "delete" || led[2].Kind != "refund" {
+		t.Fatalf("ledger %v %+v", err, led)
+	}
+	fin, err := s.Finance(ctx, 0)
+	if err != nil || len(fin) != 1 {
+		t.Fatal(err)
+	}
+	f := fin[0]
+	// sold 10 GiB, refunded 3: 7 GB x 1000 = 7000, paid 4000.
+	if f.SoldBytes != 10<<30 || f.RefundBytes != 3<<30 || f.Revenue != 7000 || f.Debt != 3000 || f.Clients != 1 {
+		t.Fatalf("finance %+v", f)
+	}
+	// Turning deletes off is enforced.
+	pol.CanDelete = false
+	_ = s.SetRepPolicy(ctx, "ali", pol)
+	if _, _, err := s.RepDeleteClient(ctx, "ali", "ali", "p2"); !errors.Is(err, ErrPolicy) {
+		t.Fatalf("delete disabled: %v", err)
+	}
+}
+
+func TestClientDailyUsageFillsGaps(t *testing.T) {
+	s, now := newStore(t)
+	ctx := context.Background()
+	seed(t, s)
+	day := now.UTC().Format("2006-01-02")
+	if _, err := s.db.Exec(`INSERT INTO usage_daily(email,node_id,day,up,down) VALUES('alice','de',?,10,20),('alice','fi',?,1,2)`, day, day); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.ClientDailyUsage(ctx, "alice", 7)
+	if err != nil || len(got) != 7 || got[6].Day != day || got[6].Up != 11 || got[6].Down != 22 || got[0].Up != 0 {
+		t.Fatalf("%v %+v", err, got)
+	}
+}
