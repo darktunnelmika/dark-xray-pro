@@ -9,6 +9,8 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -611,6 +613,49 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 		err := s.CancelRestore()
 		reply(w, map[string]bool{"ok": err == nil}, err)
 	}))
+	mux.HandleFunc("POST /api/v2/admin/migrate", guard(func(w http.ResponseWriter, r *http.Request) {
+		// Source: the old panel's database on this server (path), or an
+		// uploaded copy (body, when Content-Type is application/octet-stream).
+		q := r.URL.Query()
+		opt := MigrateOptions{DryRun: q.Get("dry_run") != "0", IncludeArchived: q.Get("archived") == "1"}
+		for _, t := range strings.Split(q.Get("inbounds"), ",") {
+			if t = strings.TrimSpace(t); t != "" {
+				opt.Inbounds = append(opt.Inbounds, t)
+			}
+		}
+		dir, err := os.MkdirTemp(s.tmpDir(), "migrate-")
+		if err != nil {
+			reply(w, nil, err)
+			return
+		}
+		defer os.RemoveAll(dir)
+		var src string
+		if strings.HasPrefix(r.Header.Get("Content-Type"), "application/octet-stream") {
+			src = filepath.Join(dir, "upload.sqlite")
+			f, err := os.OpenFile(src, os.O_CREATE|os.O_WRONLY, 0o600)
+			if err == nil {
+				_, err = io.Copy(f, http.MaxBytesReader(w, r.Body, 2<<30))
+				if cerr := f.Close(); err == nil {
+					err = cerr
+				}
+			}
+			if err != nil {
+				reply(w, nil, fmt.Errorf("%w: upload failed: %v", ErrInvalid, err))
+				return
+			}
+		} else {
+			path := q.Get("path")
+			if path == "" {
+				path = DefaultOldPanelDB
+			}
+			if src, err = CopyOldDatabase(path, dir); err != nil {
+				reply(w, nil, fmt.Errorf("%w: cannot read %s: %v", ErrInvalid, path, err))
+				return
+			}
+		}
+		report, err := s.MigrateFromOld(r.Context(), src, opt)
+		reply(w, report, err)
+	}))
 	mux.HandleFunc("GET /api/v2/admin/backup", guard(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/gzip")
 		w.Header().Set("Content-Disposition", `attachment; filename="dark-v2-`+time.Now().UTC().Format("20060102-1504")+`.sqlite.gz"`)
@@ -1048,7 +1093,8 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 	}))
 	sh := SubHandler(s)
 	mux.Handle("GET /sub/{token}", sh)
-	mux.Handle("GET /app/", sh) // Telegram Mini App
+	mux.Handle("GET /api/v1/", sh) // old-panel subscription URLs
+	mux.Handle("GET /app/", sh)    // Telegram Mini App
 	mux.Handle("POST /app/", sh)
 	routes := mux.apiRoutes()
 	mux.HandleFunc("GET /api/v2/admin/docs", member(func(w http.ResponseWriter, r *http.Request) {
@@ -1064,7 +1110,23 @@ func b64(s string) string { return sub.Base64([]string{s}) }
 func SubHandler(s *Store) http.Handler {
 	mux := http.NewServeMux()
 	registerMiniApp(mux, s)
-	mux.HandleFunc("GET /sub/{token}", func(w http.ResponseWriter, r *http.Request) {
+	var serveSub http.HandlerFunc
+	// Subscription URLs from the old panel keep working after a migration:
+	// they answer with the same client's v2 subscription.
+	legacy := func(kind string) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) {
+			tok, err := s.legacySubToken(r.Context(), kind, r.PathValue("token"))
+			if err != nil {
+				http.NotFound(w, r)
+				return
+			}
+			r.SetPathValue("token", tok)
+			serveSub(w, r)
+		}
+	}
+	mux.HandleFunc("GET /api/v1/inbound-subscriptions/{token}", legacy("managed"))
+	mux.HandleFunc("GET /api/v1/subscriptions/{token}", legacy("lab"))
+	serveSub = func(w http.ResponseWriter, r *http.Request) {
 		email, err := s.EmailBySubToken(r.Context(), r.PathValue("token"))
 		if err != nil {
 			http.NotFound(w, r)
@@ -1117,7 +1179,8 @@ func SubHandler(s *Store) http.Handler {
 		w.Header().Set("Subscription-Userinfo", info)
 		w.Header().Set("Content-Type", ctype)
 		_, _ = w.Write(body)
-	})
+	}
+	mux.HandleFunc("GET /sub/{token}", serveSub)
 	return mux
 }
 

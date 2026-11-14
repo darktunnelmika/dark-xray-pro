@@ -89,6 +89,17 @@ func (s *Store) verifyPassword(ctx context.Context, user, pass string) (secret s
 		_ = bcrypt.CompareHashAndPassword(dummyHash(), []byte(pass))
 		return "", 0, ErrAuth
 	}
+	if strings.HasPrefix(h, "argon2id:") {
+		// A login moved from the old panel: check its argon2id hash, then
+		// upgrade it to bcrypt so the old format disappears.
+		if !oldArgonMatch(h, pass) {
+			return "", 0, ErrAuth
+		}
+		if nh, err := bcrypt.GenerateFromPassword([]byte(pass), 12); err == nil {
+			_, _ = s.db.ExecContext(ctx, `UPDATE admins SET pass_hash=? WHERE username=? AND pass_hash=?`, string(nh), user, h)
+		}
+		return secret, last, nil
+	}
 	if bcrypt.CompareHashAndPassword([]byte(h), []byte(pass)) != nil {
 		return "", 0, ErrAuth
 	}

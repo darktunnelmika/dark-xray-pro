@@ -19,6 +19,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/json"
 	"encoding/pem"
 	"flag"
 	"fmt"
@@ -68,6 +69,8 @@ func main() {
 	firstUse := fs.Bool("first-use", false, "term starts at first connection")
 	maxIPs := fs.Int("max-ips", 0, "simultaneous IP limit (0 = none)")
 	disabled := fs.Bool("disabled", false, "create the client disabled")
+	apply := fs.Bool("apply", false, "migrate: import (default is a preview)")
+	archived := fs.Bool("archived", false, "migrate: also move archived clients")
 	_ = fs.Parse(args)
 
 	if err := os.MkdirAll(filepath.Dir(*dbPath), 0o700); err != nil {
@@ -232,6 +235,39 @@ func main() {
 			log.Fatal(err)
 		}
 		fmt.Println("owner login saved (two-step login cleared):", *name)
+	case "migrate":
+		// dark-hub2 migrate -db v2.sqlite [-file old.sqlite] -inbounds a,b [-archived] [-apply]
+		// Reads the old panel's database (a private copy; the original is never
+		// written). Without -apply it only reports what it would do.
+		dir, err := os.MkdirTemp(filepath.Dir(*dbPath), "migrate-")
+		if err != nil {
+			log.Fatal(err)
+		}
+		defer os.RemoveAll(dir)
+		srcPath := *file
+		if srcPath == "" {
+			srcPath = hubcore.DefaultOldPanelDB
+		}
+		cp, err := hubcore.CopyOldDatabase(srcPath, dir)
+		if err != nil {
+			log.Fatal(err)
+		}
+		opt := hubcore.MigrateOptions{DryRun: !*apply, IncludeArchived: *archived}
+		for _, t := range strings.Split(*inbounds, ",") {
+			if t = strings.TrimSpace(t); t != "" {
+				opt.Inbounds = append(opt.Inbounds, t)
+			}
+		}
+		rep, err := s.MigrateFromOld(ctx, cp, opt)
+		if err != nil {
+			log.Fatal(err)
+		}
+		out, _ := json.MarshalIndent(rep, "", "  ")
+		fmt.Println(string(out))
+		if opt.DryRun {
+			fmt.Println("preview only — run again with -apply to import")
+		}
+		return
 	case "restore":
 		// dark-hub2 restore -db v2.sqlite -file backup.sqlite.gz   (stop the service first)
 		s.Close()
