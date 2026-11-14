@@ -1,0 +1,166 @@
+package hubcore
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+)
+
+const (
+	apiTag  = "api"
+	apiPort = 10085
+)
+
+func parseTemplate(raw []byte) (map[string]any, error) {
+	var t map[string]any
+	if err := json.Unmarshal(raw, &t); err != nil {
+		return nil, fmt.Errorf("%w: inbound template is not JSON", ErrInvalid)
+	}
+	p, _ := t["protocol"].(string)
+	if _, ok := clientShapes[p]; !ok {
+		return nil, fmt.Errorf("%w: protocol %q is not a managed multi-user protocol", ErrInvalid, p)
+	}
+	if _, ok := t["port"]; !ok {
+		return nil, fmt.Errorf("%w: inbound template needs a port", ErrInvalid)
+	}
+	return t, nil
+}
+
+// clientShapes builds the per-protocol client entry. Every entry carries
+// the email: it is the stats key and the enforcement key on the Node.
+var clientShapes = map[string]func(c Client, flow string) map[string]any{
+	"vless": func(c Client, flow string) map[string]any {
+		m := map[string]any{"id": c.UUID, "email": c.Email}
+		if flow != "" {
+			m["flow"] = flow
+		}
+		return m
+	},
+	"vmess":       func(c Client, _ string) map[string]any { return map[string]any{"id": c.UUID, "email": c.Email} },
+	"trojan":      func(c Client, _ string) map[string]any { return map[string]any{"password": c.Secret, "email": c.Email} },
+	"shadowsocks": func(c Client, _ string) map[string]any { return map[string]any{"password": c.Secret, "email": c.Email} },
+}
+
+type nodeInbound struct {
+	tag      string
+	template []byte
+}
+
+// RenderNode builds the full Xray config for one node: its enabled
+// inbounds with every assigned client, plus the stats API the agent needs.
+// The output is deterministic so its hash identifies the revision.
+func (s *Store) RenderNode(ctx context.Context, nodeID string) ([]byte, error) {
+	rows, err := s.ro.QueryContext(ctx, `SELECT tag,template FROM inbounds WHERE node_id=? AND enabled=1 ORDER BY tag`, nodeID)
+	if err != nil {
+		return nil, err
+	}
+	var ins []nodeInbound
+	for rows.Next() {
+		var n nodeInbound
+		var tpl string
+		if err := rows.Scan(&n.tag, &tpl); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		n.template = []byte(tpl)
+		ins = append(ins, n)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	clients, err := s.clientsByInbound(ctx, nodeID)
+	if err != nil {
+		return nil, err
+	}
+	inbounds := []any{map[string]any{
+		"tag": apiTag, "listen": "127.0.0.1", "port": apiPort, "protocol": "dokodemo-door",
+		"settings": map[string]any{"address": "127.0.0.1"},
+	}}
+	for _, in := range ins {
+		t, err := parseTemplate(in.template)
+		if err != nil {
+			return nil, fmt.Errorf("inbound %s: %w", in.tag, err)
+		}
+		t["tag"] = in.tag
+		proto := t["protocol"].(string)
+		settings, _ := t["settings"].(map[string]any)
+		if settings == nil {
+			settings = map[string]any{}
+		}
+		flow, _ := settings["flow"].(string)
+		delete(settings, "flow")
+		list := make([]any, 0, len(clients[in.tag]))
+		for _, c := range clients[in.tag] {
+			list = append(list, clientShapes[proto](c, flow))
+		}
+		settings["clients"] = list
+		if proto == "vless" {
+			if _, ok := settings["decryption"]; !ok {
+				settings["decryption"] = "none"
+			}
+		}
+		t["settings"] = settings
+		inbounds = append(inbounds, t)
+	}
+	cfg := map[string]any{
+		"log":   map[string]any{"loglevel": "warning"},
+		"api":   map[string]any{"tag": apiTag, "services": []string{"StatsService"}},
+		"stats": map[string]any{},
+		"policy": map[string]any{
+			"levels": map[string]any{"0": map[string]any{"statsUserUplink": true, "statsUserDownlink": true, "statsUserOnline": true}},
+			"system": map[string]any{"statsInboundUplink": true, "statsInboundDownlink": true},
+		},
+		"inbounds":  inbounds,
+		"outbounds": []any{map[string]any{"tag": "direct", "protocol": "freedom"}, map[string]any{"tag": "block", "protocol": "blackhole"}},
+		"routing": map[string]any{"rules": []any{
+			map[string]any{"type": "field", "inboundTag": []string{apiTag}, "outboundTag": apiTag},
+		}},
+	}
+	return json.Marshal(cfg) // map keys are sorted: deterministic
+}
+
+func (s *Store) clientsByInbound(ctx context.Context, nodeID string) (map[string][]Client, error) {
+	rows, err := s.ro.QueryContext(ctx, `SELECT ci.tag,c.email,c.uuid,c.secret FROM client_inbounds ci
+JOIN clients c ON c.email=ci.email JOIN inbounds i ON i.tag=ci.tag WHERE i.node_id=? ORDER BY ci.tag,c.email`, nodeID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string][]Client{}
+	for rows.Next() {
+		var tag string
+		var c Client
+		if err := rows.Scan(&tag, &c.Email, &c.UUID, &c.Secret); err != nil {
+			return nil, err
+		}
+		out[tag] = append(out[tag], c)
+	}
+	return out, rows.Err()
+}
+
+// nodeClients lists every client assigned to an inbound on the node.
+func (s *Store) nodeClients(ctx context.Context, nodeID string) ([]Client, error) {
+	rows, err := s.ro.QueryContext(ctx, `SELECT DISTINCT c.email,c.enabled,c.volume_bytes,c.expires_unix,c.duration_seconds,c.max_ips
+FROM clients c JOIN client_inbounds ci ON ci.email=c.email JOIN inbounds i ON i.tag=ci.tag WHERE i.node_id=? ORDER BY c.email`, nodeID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Client
+	for rows.Next() {
+		var c Client
+		if err := rows.Scan(&c.Email, &c.Enabled, &c.VolumeBytes, &c.ExpiresUnix, &c.DurationSeconds, &c.MaxIPs); err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
+func sha(b []byte) string {
+	s := sha256.Sum256(b)
+	return hex.EncodeToString(s[:])
+}
