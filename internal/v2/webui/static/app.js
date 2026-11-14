@@ -1,7 +1,7 @@
 // Dark VPN owner panel (v2). No framework, no build step.
 const I18N = {
   en: {
-    dashboard: "Dashboard", clients: "Clients", inbounds: "Inbounds", nodes: "Nodes", settings: "Settings",
+    dashboard: "Dashboard", clients: "Clients", inbounds: "Inbounds", nodes: "Nodes", routing: "Routing", settings: "Settings",
     login: "Sign in", username: "Username", password: "Password", badLogin: "Invalid username or password",
     nodesOnline: "Nodes online", activeClients: "Active clients", onlineUsers: "Online now", trafficToday: "Traffic today", trafficTotal: "Total traffic",
     add: "Add", edit: "Edit", delete: "Delete", save: "Save", cancel: "Cancel", close: "Close", copy: "Copy", copied: "Copied",
@@ -66,7 +66,7 @@ const I18N = {
     health: "Health (24h)", cpu: "CPU", ram: "RAM", disk: "Disk", net: "Network", uptime: "Uptime", inRate: "in", outRate: "out", noData: "No samples yet",
   },
   fa: {
-    dashboard: "داشبورد", clients: "کلاینت‌ها", inbounds: "اینباندها", nodes: "نودها", settings: "تنظیمات",
+    dashboard: "داشبورد", clients: "کلاینت‌ها", inbounds: "اینباندها", nodes: "نودها", routing: "مسیریابی", settings: "تنظیمات",
     login: "ورود", username: "نام کاربری", password: "رمز عبور", badLogin: "نام کاربری یا رمز اشتباه است",
     nodesOnline: "نود آنلاین", activeClients: "کلاینت فعال", onlineUsers: "آنلاین الان", trafficToday: "ترافیک امروز", trafficTotal: "کل ترافیک",
     add: "افزودن", edit: "ویرایش", delete: "حذف", save: "ذخیره", cancel: "انصراف", close: "بستن", copy: "کپی", copied: "کپی شد",
@@ -204,7 +204,7 @@ function confirmAction(text) {
 }
 
 // ---------- Views ----------
-const allRoutes = { dashboard: viewDashboard, clients: viewClients, groups: viewGroups, inbounds: viewInbounds, nodes: viewNodes, reps: viewReps, shop: viewShop, finance: viewFinance, activity: viewActivity, settings: viewSettings };
+const allRoutes = { dashboard: viewDashboard, clients: viewClients, groups: viewGroups, inbounds: viewInbounds, nodes: viewNodes, routing: viewRouting, reps: viewReps, shop: viewShop, finance: viewFinance, activity: viewActivity, settings: viewSettings };
 let me = null;
 let routes = allRoutes;
 function routesFor(m) {
@@ -247,6 +247,7 @@ const ICONS = {
   finance: "M3 3v18h18M7 15l4-4 3 3 6-6",
   activity: "M22 12h-4l-3 9L9 3l-3 9H2",
   settings: "M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6",
+  routing: "M6 3v12M18 9v12M6 15a3 3 0 1 0 0 6 3 3 0 0 0 0-6zM18 3a3 3 0 1 0 0 6 3 3 0 0 0 0-6zM6 15c0-4 12-2 12-6",
 };
 function icon(name) {
   const svg = svgEl("svg", { viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", "stroke-width": 1.8, "stroke-linecap": "round", "stroke-linejoin": "round", "aria-hidden": "true" });
@@ -761,6 +762,172 @@ function acmeForm(nodes, settings = {}) {
     h("p", { class: "small muted" }, t("acmeHint")),
     h("label", {}, h("span", {}, t("tag")), idf), h("label", {}, h("span", {}, t("acmeDomains")), doms),
     h("label", {}, h("span", {}, t("acmeMethod")), method), nodeRow, err), [save]);
+}
+
+// ---------- Routing and outbounds ----------
+const RT = {
+  fa: { title: "مسیریابی و خروجی‌ها", save: "ذخیره و اعمال روی نودها", saved: "ذخیره شد؛ نودها در همگام‌سازی بعدی می‌گیرند", safe: "پیش‌فرض‌های امن",
+    private: "بستن شبکهٔ داخلی و IP خود نود", torrent: "بلاک تورنت (جلوگیری از شکایت کپی‌رایت)", routeOnly: "sniffing فقط برای مسیریابی (پیشنهادی)",
+    ads: "بلاک تبلیغات", iran: "ترافیک ایران روی سرور", iranNone: "کاری نکن", iranBlock: "بلاک (کلاینت خودش مستقیم برود)", iranVia: "از خروجی", ds: "حل نام دامنه در خروجی مستقیم",
+    dns: "سرورهای DNS (هر خط یکی، خالی = DNS سیستم نود)", outbounds: "خروجی‌ها", addWarp: "+ WARP رایگان", addCustom: "+ خروجی دلخواه (JSON)", tag: "شناسه",
+    allNodes: "همهٔ نودها", nodes: "نودها", balancers: "بالانسرها", addBal: "+ بالانسر", strategy: "روش", rules: "قانون‌ها", addRule: "+ قانون",
+    rulesHint: "به ترتیب بررسی می‌شوند؛ اولین قانونی که بخورد اجرا می‌شود. قانون‌های شما بعد از پیش‌فرض‌های امن و قبل از تبلیغات و ایران هستند.",
+    tpl: "الگوهای آماده", tplAI: "هوش مصنوعی از WARP", tplMail: "بلاک پورت ایمیل (اسپم)", tplSpeed: "سایت‌های تست سرعت مستقیم",
+    domains: "دامنه‌ها (domain:، full:، keyword:، regexp:، geosite:)", ips: "IP / CIDR / geoip:", ports: "پورت (مثل 25,465 یا 1000-2000)", protocols: "پروتکل",
+    network: "شبکه", users: "کاربرها (ایمیل)", inbounds: "اینباندها", to: "خروجی", remark: "توضیح", enabled: "فعال", del: "حذف", up: "بالا", down: "پایین",
+    geo: "فایل‌های geo", geoUpdate: "به‌روزرسانی الان", geoMissing: "این نودها هنوز فایل geo ندارند؛ قانون‌های geoip/geosite فعلاً روی آن‌ها اعمال نمی‌شود:",
+    geoNeed: "برای تبلیغات، ایران و قانون‌های geo لازم است. هفتگی خودکار به‌روز می‌شود.", any: "همه", none: "هیچ", edit: "ویرایش", warpOk: "اکانت WARP ساخته شد", empty: "چیزی نیست",
+    unsaved: "تغییرات ذخیره نشده" },
+  en: { title: "Routing & outbounds", save: "Save and apply to nodes", saved: "Saved; nodes pick it up on their next sync", safe: "Safe defaults",
+    private: "Block private networks and the node's own IP", torrent: "Block BitTorrent (avoids copyright complaints)", routeOnly: "Sniffing for routing only (recommended)",
+    ads: "Block ads", iran: "Iranian traffic on the server", iranNone: "Do nothing", iranBlock: "Block (clients go direct themselves)", iranVia: "Via outbound", ds: "Domain resolution on the direct outbound",
+    dns: "DNS servers (one per line, empty = node's system DNS)", outbounds: "Outbounds", addWarp: "+ Free WARP", addCustom: "+ Custom outbound (JSON)", tag: "Tag",
+    allNodes: "All nodes", nodes: "Nodes", balancers: "Balancers", addBal: "+ Balancer", strategy: "Strategy", rules: "Rules", addRule: "+ Rule",
+    rulesHint: "Checked in order; the first match wins. Your rules run after the safe defaults and before ads and Iran.",
+    tpl: "Templates", tplAI: "AI sites via WARP", tplMail: "Block mail ports (spam)", tplSpeed: "Speed-test sites direct",
+    domains: "Domains (domain:, full:, keyword:, regexp:, geosite:)", ips: "IP / CIDR / geoip:", ports: "Ports (e.g. 25,465 or 1000-2000)", protocols: "Protocol",
+    network: "Network", users: "Users (email)", inbounds: "Inbounds", to: "Outbound", remark: "Remark", enabled: "Enabled", del: "Delete", up: "Up", down: "Down",
+    geo: "Geo files", geoUpdate: "Update now", geoMissing: "These nodes have no geo files yet; geoip/geosite rules are not applied on them:",
+    geoNeed: "Needed for ads, Iran and geo rules. Updated weekly.", any: "any", none: "none", edit: "Edit", warpOk: "WARP account created", empty: "Nothing yet",
+    unsaved: "Unsaved changes" },
+};
+
+async function viewRouting() {
+  const L = RT[lang] || RT.en;
+  const [data, nodes, inbounds] = await Promise.all([api("GET", "/api/v2/admin/routing"), api("GET", "/api/v2/admin/nodes"), api("GET", "/api/v2/admin/inbounds")]);
+  const r = JSON.parse(JSON.stringify(data.routing));
+  r.outbounds ||= []; r.balancers ||= []; r.rules ||= []; r.dns ||= [];
+  const root = h("div", {});
+  const dirty = h("span", { class: "badge warn", hidden: true }, L.unsaved);
+  const err = h("div", { class: "error", role: "alert" });
+  const touch = () => { dirty.hidden = false; };
+  const lines = (v) => v.split(/\n+/).map((x) => x.trim()).filter(Boolean);
+  const chk = (obj, key, label) => { const i = h("input", { type: "checkbox", checked: !!obj[key] }); i.addEventListener("change", () => { obj[key] = i.checked; touch(); }); return h("label", { class: "check" }, i, h("span", {}, label)); };
+  const txt = (obj, key, attrs = {}) => { const i = h("input", { value: obj[key] || "", ...attrs }); i.addEventListener("input", () => { obj[key] = i.value.trim(); touch(); }); return i; };
+  const area = (obj, key, attrs = {}) => { const i = h("textarea", { rows: 2, dir: "ltr", ...attrs }); i.value = (obj[key] || []).join("\n"); i.addEventListener("input", () => { obj[key] = lines(i.value); touch(); }); return i; };
+  const sel = (obj, key, opts, onChange) => { const s = h("select", {}, opts.map(([v, l]) => h("option", { value: v, selected: (obj[key] || "") === v }, l))); s.addEventListener("change", () => { obj[key] = s.value; touch(); onChange?.(); }); return s; };
+  const field = (label, el) => h("label", {}, h("span", {}, label), el);
+  const nodePick = (obj) => {
+    const all = h("label", { class: "check" }, h("input", { type: "checkbox", checked: !(obj.nodes || []).length }), h("span", {}, L.allNodes));
+    const box = h("div", { class: "row" }, all, nodes.map((n) => {
+      const i = h("input", { type: "checkbox", checked: (obj.nodes || []).includes(n.ID) });
+      i.addEventListener("change", () => { const set = new Set(obj.nodes || []); i.checked ? set.add(n.ID) : set.delete(n.ID); obj.nodes = [...set]; all.firstChild.checked = !obj.nodes.length; touch(); });
+      return h("label", { class: "check" }, i, h("span", {}, n.Name || n.ID));
+    }));
+    all.firstChild.addEventListener("change", () => { if (all.firstChild.checked) { obj.nodes = []; draw(); touch(); } });
+    return box;
+  };
+  const targets = () => [["direct", "direct"], ["block", "block"], ...r.outbounds.map((o) => [o.tag, o.tag]), ...r.balancers.map((b) => [b.tag, `⚖ ${b.tag}`])];
+  const uniq = (base) => { let tag = base, i = 2; const used = new Set(targets().map((x) => x[0])); while (used.has(tag)) tag = `${base}${i++}`; return tag; };
+
+  function outboundCard(o, i) {
+    const cfg = h("textarea", { class: "code", rows: 6, dir: "ltr", spellcheck: "false" });
+    cfg.value = JSON.stringify(o.config, null, 2);
+    const bad = h("div", { class: "error small" });
+    cfg.addEventListener("input", () => { try { o.config = JSON.parse(cfg.value); bad.textContent = ""; touch(); } catch (e) { bad.textContent = e.message; } });
+    const det = h("details", {}, h("summary", { class: "small muted" }, L.edit + " JSON"), cfg, bad);
+    return h("div", { class: "card item" },
+      h("div", { class: "head" }, h("span", { class: "name", dir: "ltr" }, o.tag), h("span", { class: "badge" }, o.kind === "warp" ? "WARP" : o.config?.protocol || "?"),
+        h("button", { class: "ghost danger spacer", onclick: () => { r.outbounds.splice(i, 1); touch(); draw(); } }, L.del)),
+      h("div", { class: "two" }, field(L.tag, txt(o, "tag", { dir: "ltr" })), field(L.remark, txt(o, "remark"))),
+      field(L.nodes, nodePick(o)), det);
+  }
+
+  function balancerCard(b, i) {
+    const picks = h("div", { class: "row" }, r.outbounds.map((o) => {
+      const c = h("input", { type: "checkbox", checked: b.outbounds.includes(o.tag) });
+      c.addEventListener("change", () => { b.outbounds = c.checked ? [...b.outbounds, o.tag] : b.outbounds.filter((x) => x !== o.tag); touch(); });
+      return h("label", { class: "check" }, c, h("span", { dir: "ltr" }, o.tag));
+    }));
+    return h("div", { class: "card item" },
+      h("div", { class: "head" }, h("span", { class: "name", dir: "ltr" }, `⚖ ${b.tag}`), h("button", { class: "ghost danger spacer", onclick: () => { r.balancers.splice(i, 1); touch(); draw(); } }, L.del)),
+      h("div", { class: "two" }, field(L.tag, txt(b, "tag", { dir: "ltr" })), field(L.strategy, sel(b, "strategy", [["", "random"], ["roundRobin", "roundRobin"], ["leastPing", "leastPing"], ["leastLoad", "leastLoad"]]))),
+      field(L.outbounds, picks));
+  }
+
+  function ruleCard(ru, i) {
+    const protos = h("div", { class: "row" }, ["bittorrent", "http", "tls", "quic"].map((p) => {
+      const c = h("input", { type: "checkbox", checked: (ru.protocols || []).includes(p) });
+      c.addEventListener("change", () => { const s = new Set(ru.protocols || []); c.checked ? s.add(p) : s.delete(p); ru.protocols = [...s]; touch(); });
+      return h("label", { class: "check" }, c, h("span", {}, p));
+    }));
+    const ibs = h("div", { class: "row" }, inbounds.map((ib) => {
+      const c = h("input", { type: "checkbox", checked: (ru.inbounds || []).includes(ib.tag) });
+      c.addEventListener("change", () => { const s = new Set(ru.inbounds || []); c.checked ? s.add(ib.tag) : s.delete(ib.tag); ru.inbounds = [...s]; touch(); });
+      return h("label", { class: "check" }, c, h("span", { dir: "ltr" }, ib.tag));
+    }));
+    const move = (d) => { const j = i + d; if (j < 0 || j >= r.rules.length) return; [r.rules[i], r.rules[j]] = [r.rules[j], r.rules[i]]; touch(); draw(); };
+    const summary = [ru.domains?.length ? `${ru.domains.length} domain` : "", ru.ips?.length ? `${ru.ips.length} ip` : "", ru.ports ? `port ${ru.ports}` : "", (ru.protocols || []).join(","), ru.users?.length ? `${ru.users.length} user` : ""].filter(Boolean).join(" · ");
+    return h("details", { class: `card item rule ${ru.enabled ? "" : "off"}` },
+      h("summary", { class: "head" }, h("span", { class: "badge" }, String(i + 1)), h("span", { class: "name" }, ru.remark || summary || "—"),
+        h("span", { class: "badge", dir: "ltr" }, `→ ${ru.outbound}`), ru.nodes?.length ? h("span", { class: "badge" }, `${ru.nodes.length} ${L.nodes}`) : null),
+      h("div", { class: "form" },
+        h("div", { class: "row" }, chk(ru, "enabled", L.enabled), h("button", { type: "button", class: "ghost", onclick: () => move(-1) }, "↑ " + L.up), h("button", { type: "button", class: "ghost", onclick: () => move(1) }, "↓ " + L.down),
+          h("button", { type: "button", class: "ghost danger spacer", onclick: () => { r.rules.splice(i, 1); touch(); draw(); } }, L.del)),
+        h("div", { class: "two" }, field(L.remark, txt(ru, "remark")), field(L.to, sel(ru, "outbound", targets()))),
+        field(L.domains, area(ru, "domains", { placeholder: "domain:example.com\ngeosite:category-ads-all" })),
+        h("div", { class: "two" }, field(L.ips, area(ru, "ips", { placeholder: "geoip:ir\n1.2.3.0/24" })), field(L.users, area(ru, "users"))),
+        h("div", { class: "two" }, field(L.ports, txt(ru, "ports", { dir: "ltr" })), field(L.network, sel(ru, "network", [["", L.any], ["tcp", "tcp"], ["udp", "udp"], ["tcp,udp", "tcp,udp"]]))),
+        field(L.protocols, protos), inbounds.length ? field(L.inbounds, ibs) : null, field(L.nodes, nodePick(ru))));
+  }
+
+  const addRule = (x) => { r.rules.push({ enabled: true, outbound: "block", ...x }); touch(); draw(); };
+  async function addWarp() {
+    try {
+      const res = await guarded(() => api("POST", "/api/v2/admin/routing/warp"));
+      r.outbounds.push({ tag: uniq("warp"), kind: "warp", remark: "Cloudflare WARP", config: res.config });
+      toast(L.warpOk); touch(); draw();
+    } catch {}
+  }
+  function addCustom() {
+    r.outbounds.push({ tag: uniq("out"), kind: "custom", config: { protocol: "socks", settings: { servers: [{ address: "203.0.113.1", port: 1080 }] } } });
+    touch(); draw();
+  }
+  async function save() {
+    err.textContent = "";
+    try {
+      await guarded(() => api("PUT", "/api/v2/admin/routing", r));
+      dirty.hidden = true; toast(L.saved);
+    } catch (x) { err.textContent = x.message; }
+  }
+  async function geoUpdate(btn) {
+    btn.disabled = true;
+    try { data.geo = await guarded(() => api("POST", "/api/v2/admin/routing/geo/update")); draw(); } catch {} finally { btn.disabled = false; }
+  }
+
+  function draw() {
+    const missing = data.status?.nodes_without_geo || [];
+    const iranOpts = [["", L.iranNone], ["block", L.iranBlock], ...r.outbounds.map((o) => [o.tag, `${L.iranVia} ${o.tag}`])];
+    root.replaceChildren(
+      h("div", { class: "row sticky-head" }, h("h1", {}, L.title), dirty, h("button", { class: "primary spacer", onclick: save }, L.save)),
+      err,
+      missing.length ? h("div", { class: "card warnbox small" }, L.geoMissing, " ", h("b", { dir: "ltr" }, missing.join(", "))) : null,
+      h("section", { class: "card form" }, h("h2", {}, L.safe),
+        chk(r, "block_private", L.private), chk(r, "block_torrent", L.torrent), chk(r, "route_only", L.routeOnly), chk(r, "block_ads", L.ads),
+        h("div", { class: "two" }, field(L.iran, sel(r, "iran", iranOpts)),
+          field(L.ds, sel(r, "domain_strategy", [["AsIs", "AsIs"], ["UseIPv4", "UseIPv4"], ["UseIPv6", "UseIPv6"], ["UseIP", "UseIP"], ["ForceIPv4", "ForceIPv4"]]))),
+        field(L.dns, area(r, "dns", { placeholder: "https://1.1.1.1/dns-query\n8.8.8.8" }))),
+      h("div", { class: "row section" }, h("h2", {}, L.outbounds), h("button", { class: "spacer", onclick: addWarp }, L.addWarp), h("button", { class: "ghost", onclick: addCustom }, L.addCustom)),
+      h("div", { class: "list" }, r.outbounds.length ? r.outbounds.map(outboundCard) : h("p", { class: "muted small" }, L.empty)),
+      r.outbounds.length > 1 || r.balancers.length ? h("div", { class: "row section" }, h("h2", {}, L.balancers),
+        h("button", { class: "ghost spacer", onclick: () => { r.balancers.push({ tag: uniq("lb"), outbounds: r.outbounds.map((o) => o.tag), strategy: "" }); touch(); draw(); } }, L.addBal)) : null,
+      h("div", { class: "list" }, r.balancers.map(balancerCard)),
+      h("div", { class: "row section" }, h("h2", {}, L.rules), h("button", { class: "spacer", onclick: () => addRule({ remark: "" }) }, L.addRule)),
+      h("p", { class: "small muted" }, L.rulesHint),
+      h("div", { class: "row small" }, h("span", { class: "muted" }, L.tpl + ":"),
+        h("button", { class: "ghost", onclick: () => addRule({ remark: L.tplMail, ports: "25,465,587", outbound: "block" }) }, L.tplMail),
+        h("button", { class: "ghost", onclick: () => addRule({ remark: L.tplAI, domains: ["domain:openai.com", "domain:chatgpt.com", "domain:oaistatic.com", "domain:oaiusercontent.com", "domain:gemini.google.com", "domain:claude.ai", "domain:anthropic.com"], outbound: r.outbounds.find((o) => o.kind === "warp")?.tag || "direct" }) }, L.tplAI),
+        h("button", { class: "ghost", onclick: () => addRule({ remark: L.tplSpeed, domains: ["domain:speedtest.net", "domain:fast.com", "domain:ookla.com"], outbound: "direct" }) }, L.tplSpeed)),
+      h("div", { class: "list" }, r.rules.length ? r.rules.map(ruleCard) : h("p", { class: "muted small" }, L.empty)),
+      h("div", { class: "row section" }, h("h2", {}, L.geo), h("button", { class: "ghost spacer", onclick: (e) => geoUpdate(e.currentTarget) }, L.geoUpdate)),
+      h("p", { class: "small muted" }, L.geoNeed),
+      h("div", { class: "list" }, (data.geo || []).map((g) => h("div", { class: "card item" },
+        h("div", { class: "head" }, h("span", { class: "name", dir: "ltr" }, g.name), h("span", { class: `badge ${g.size ? "good" : "warn"}` }, g.size ? bytes(g.size) : "—"),
+          g.updated ? h("span", { class: "badge spacer" }, new Date(g.updated * 1000).toLocaleString(lang === "fa" ? "fa-IR" : "en-GB")) : null),
+        h("div", { class: "small muted mono", dir: "ltr" }, g.url)))));
+  }
+  draw();
+  return root;
 }
 
 // ---------- REALITY SNI finder: probes candidates from the node itself ----------

@@ -300,3 +300,12 @@ textarea.code { font: 12.5px/1.5 ui-monospace, "SF Mono", Menlo, monospace; padd
 .sniresults .badge { margin-inline-start: 6px; }
 .scorebar { display: inline-block; inline-size: 64px; block-size: 6px; border-radius: 3px; background: var(--surface-2); margin-inline-end: 6px; overflow: hidden; vertical-align: middle; }
 .scorebar > i { display: block; block-size: 100%; background: linear-gradient(90deg, var(--violet), var(--cyan)); box-shadow: 0 0 8px var(--cyan); }
+
+/* Routing page */
+.sticky-head { position: sticky; inset-block-start: 0; z-index: 5; padding-block: 8px; backdrop-filter: blur(14px); }
+.warnbox { border-color: color-mix(in oklab, var(--warn) 45%, transparent); color: var(--warn); }
+details.rule > summary { cursor: pointer; list-style: none; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+details.rule > summary::-webkit-details-marker { display: none; }
+details.rule[open] > summary { margin-block-end: 10px; }
+details.rule.off { opacity: .55; }
+details > summary.small { cursor: pointer; margin-block: 6px; }
