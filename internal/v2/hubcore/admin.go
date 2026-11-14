@@ -536,6 +536,21 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 		err := s.DeleteAPIKey(r.Context(), r.PathValue("id"))
 		reply(w, map[string]bool{"ok": err == nil}, err)
 	}))
+	mux.HandleFunc("GET /api/v2/admin/webhook", guard(func(w http.ResponseWriter, r *http.Request) {
+		reply(w, s.Webhook(r.Context()), nil)
+	}))
+	mux.HandleFunc("PUT /api/v2/admin/webhook", guard(func(w http.ResponseWriter, r *http.Request) {
+		var in WebhookSettings
+		if !decode(w, r, &in) {
+			return
+		}
+		err := s.PutWebhook(r.Context(), in)
+		reply(w, map[string]bool{"ok": err == nil}, err)
+	}))
+	mux.HandleFunc("POST /api/v2/admin/webhook/test", guard(func(w http.ResponseWriter, r *http.Request) {
+		err := s.TestWebhook(r.Context())
+		reply(w, map[string]bool{"ok": err == nil}, err)
+	}))
 	mux.HandleFunc("GET /api/v2/admin/audit", guard(func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
 		before, _ := strconv.ParseInt(q.Get("before"), 10, 64)

@@ -388,3 +388,4 @@ pre.logview { margin: 0; max-block-size: 58vh; overflow: auto; padding: 12px 14p
 pre.logview .bad { color: var(--bad); }
 pre.logview .warn { color: var(--warn); }
 pre.logview.loading { opacity: 0.55; }
+.bad-text { color: var(--bad); }
