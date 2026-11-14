@@ -318,6 +318,7 @@ func (s *Store) WalletPay(ctx context.Context, chat int64, productID, renew stri
 		return "", 0, err
 	}
 	if bal < priceStars {
+		_ = tx.Rollback() // the store has one writer connection: release it first
 		_, _ = s.db.ExecContext(ctx, `UPDATE orders SET status='cancelled', note='wallet: not enough credit' WHERE id=?`, id)
 		return "", bal, fmt.Errorf("%w: not enough credit (%d of %d Stars)", ErrInvalid, bal, priceStars)
 	}
