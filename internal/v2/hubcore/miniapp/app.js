@@ -90,7 +90,7 @@ function statusBadge(sv) {
 
 function daysText(sv) {
   const now = Date.now() / 1000;
-  if (sv.until > now) return `${num(Math.ceil((sv.until - now) / 86400))} روز مانده · تا ${date(sv.until)}`;
+  if (sv.until > now) return `${num(Math.ceil((sv.until - now) / 86400))} روز مانده، تا ${date(sv.until)}`;
   if (sv.until === 0 && sv.days_on_use) return `${num(sv.days_on_use)} روز از اولین اتصال`;
   if (sv.until === 0) return "بدون محدودیت زمانی";
   return `پایان: ${date(sv.until)}`;
@@ -141,7 +141,7 @@ function connect(sv) {
   const close = sheet(
     h("h2", {}, "اتصال ", ltr(sv.email)),
     h("p", { class: "meta" }, "این QR را در v2rayNG، Hiddify، Streisand یا V2Box اسکن کنید، یا لینک را کپی و در برنامه وارد کنید."),
-    h("img", { class: "qr", src: sv.sub_url + "?qr=1", alt: "QR", width: "220", height: "220" }),
+    h("img", { class: "qr", src: new URL(sv.sub_url).pathname + "?qr=1", alt: "QR", width: "220", height: "220" }),
     h("code", { class: "link" }, sv.sub_url),
     h("div", { class: "row" },
       h("button", { class: "btn primary", onclick: () => copy(sv.sub_url) }, "کپی لینک"),
@@ -150,7 +150,7 @@ function connect(sv) {
 }
 
 function productCard(p, renewEmail) {
-  const spec = `${p.plan === "unlimited" ? "حجم نامحدود" : size(p.gb * 2 ** 30)} · ${num(p.days)} روز${p.max_ips ? ` · ${num(p.max_ips)} دستگاه` : ""}${p.first_use ? " · شروع از اولین اتصال" : ""}`;
+  const spec = `${p.plan === "unlimited" ? "حجم نامحدود" : size(p.gb * 2 ** 30)}، ${num(p.days)} روز${p.max_ips ? `، ${num(p.max_ips)} دستگاه` : ""}${p.first_use ? "، شروع از اولین اتصال" : ""}`;
   return h("div", { class: "card product" },
     h("h3", {}, p.name), h("div", { class: "spec" }, spec),
     h("div", { class: "price" }, h("b", {}, p.price ? toman(p.price) : "رایگان"), p.price ? h("small", {}, "تومان") : null),
@@ -173,7 +173,7 @@ async function buy(p, renewEmail) {
   const go = h("button", { class: "btn primary" }, "ثبت سفارش");
   const close = sheet(
     h("h2", {}, renewEmail ? "تمدید سرویس" : "خرید ", p.name),
-    h("p", {}, `${p.plan === "unlimited" ? "نامحدود" : size(p.gb * 2 ** 30)} · ${num(p.days)} روز — `, h("b", {}, p.price ? `${toman(p.price)} تومان` : "رایگان")),
+    h("p", {}, `${p.plan === "unlimited" ? "نامحدود" : size(p.gb * 2 ** 30)}، ${num(p.days)} روز — `, h("b", {}, p.price ? `${toman(p.price)} تومان` : "رایگان")),
     renewEmail ? h("p", { class: "meta" }, "برای: ", ltr(renewEmail)) : null,
     h("div", { class: "row" }, go, h("button", { class: "btn", onclick: () => close() }, "انصراف")));
   go.addEventListener("click", async () => {
@@ -198,8 +198,8 @@ function orders() {
   return [h("div", { class: "section-title" }, "سفارش‌های شما"), ...state.orders.map((o) => {
     const [cls, label] = orderStatus[o.status] || ["", o.status];
     return h("div", { class: "card order" },
-      h("div", {}, h("div", { class: "what" }, `#${num(o.id)} · ${o.product}`),
-        h("div", { class: "when" }, date(o.created), o.amount ? ` · ${toman(o.amount)} تومان` : "", o.renew ? [" · تمدید ", ltr(o.renew)] : "")),
+      h("div", {}, h("div", { class: "what" }, `#${num(o.id)}، ${o.product}`),
+        h("div", { class: "when" }, date(o.created), o.amount ? `، ${toman(o.amount)} تومان` : "", o.renew ? ["، تمدید ", ltr(o.renew)] : "")),
       h("div", {}, h("span", { class: "badge " + cls }, label),
         o.status === "pending" ? h("button", { class: "btn ghost", onclick: async () => {
           try { await api("POST", "cancel/" + o.id); toast("لغو شد"); await load(false); } catch (e) { toast(e.message); }
