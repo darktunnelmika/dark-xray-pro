@@ -82,6 +82,12 @@ const TaskACMEHTTP = "acme_http"
 // with a build from PathDist, keeps the old one, and restarts.
 const TaskXrayUpdate = "xray_update"
 
+// TaskXrayLog returns recent Xray output; TaskXrayRestart restarts Xray.
+const (
+	TaskXrayLog     = "xray_log"
+	TaskXrayRestart = "xray_restart"
+)
+
 // Host is the node machine's health at the time of the sync.
 type Host struct {
 	CPUPercent  float64 `json:"cpu_percent"`

@@ -379,3 +379,12 @@ code.keyout { display: block; padding: 10px 12px; border-radius: var(--r-md, 10p
 .badge.m-get { color: var(--good); }
 .badge.m-delete { color: var(--bad); }
 .badge.m-put, .badge.m-post { color: var(--warn); }
+
+/* Xray log viewer */
+.logmodal { min-inline-size: min(92vw, 820px); }
+.logmodal .row > input[type=search] { flex: 1 1 220px; }
+pre.logview { margin: 0; max-block-size: 58vh; overflow: auto; padding: 12px 14px; border-radius: var(--r-md); background: color-mix(in oklab, var(--bg, #05070d) 85%, transparent); border: 1px solid var(--glass-line);
+  font: 12px/1.55 ui-monospace, "JetBrains Mono", Menlo, monospace; white-space: pre-wrap; word-break: break-all; text-align: left; }
+pre.logview .bad { color: var(--bad); }
+pre.logview .warn { color: var(--warn); }
+pre.logview.loading { opacity: 0.55; }

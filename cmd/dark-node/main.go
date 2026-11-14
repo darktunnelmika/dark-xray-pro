@@ -54,6 +54,8 @@ func main() {
 	defer xstats.Close()
 	tracker := nodeagent.NewIPTracker()
 	sup.Access = tracker
+	logs := nodeagent.NewLogRing(600)
+	sup.Log = logs
 	stats := &nodeagent.TrackedStats{StatsSource: xstats, Tracker: tracker}
 	exe, _ := os.Executable()
 	if r, err := filepath.EvalSymlinks(exe); err == nil {
@@ -72,6 +74,8 @@ func main() {
 	defer stop()
 	agent.SetTask(wire.TaskSelfUpdate, nodeagent.SelfUpdateTask(hub, exe))
 	agent.SetTask(wire.TaskXrayUpdate, nodeagent.XrayUpdateTask(hub, *xrayBin))
+	agent.SetTask(wire.TaskXrayLog, nodeagent.XrayLogTask(logs))
+	agent.SetTask(wire.TaskXrayRestart, nodeagent.XrayRestartTask(sup))
 	// After a self-update: stop cleanly; systemd (Restart=always) starts
 	// the new binary.
 	agent.SetRestart(func() {

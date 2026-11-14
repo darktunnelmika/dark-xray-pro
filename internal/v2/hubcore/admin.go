@@ -16,6 +16,7 @@ import (
 	qrcode "github.com/skip2/go-qrcode"
 
 	"github.com/darktunnelmika/dark-xray-pro/internal/v2/sub"
+	"github.com/darktunnelmika/dark-xray-pro/internal/v2/wire"
 )
 
 // AdminHandler serves the owner API under /api/v2/admin/ and public
@@ -765,6 +766,25 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 	}))
 	mux.HandleFunc("POST /api/v2/admin/nodes/{id}/update", guard(func(w http.ResponseWriter, r *http.Request) {
 		id, err := s.StartNodeUpdate(r.Context(), r.PathValue("id"))
+		reply(w, map[string]string{"id": id}, err)
+	}))
+	mux.HandleFunc("POST /api/v2/admin/nodes/{id}/logs", guard(func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Lines  int    `json:"lines"`
+			Errors bool   `json:"errors"`
+			Grep   string `json:"grep"`
+		}
+		if !decode(w, r, &in) {
+			return
+		}
+		if len(in.Grep) > 100 {
+			in.Grep = in.Grep[:100]
+		}
+		id, err := s.QueueTask(r.Context(), r.PathValue("id"), wire.TaskXrayLog, in)
+		reply(w, map[string]string{"id": id}, err)
+	}))
+	mux.HandleFunc("POST /api/v2/admin/nodes/{id}/restart", guard(func(w http.ResponseWriter, r *http.Request) {
+		id, err := s.QueueTask(r.Context(), r.PathValue("id"), wire.TaskXrayRestart, nil)
 		reply(w, map[string]string{"id": id}, err)
 	}))
 	mux.HandleFunc("GET /api/v2/admin/acme", guard(func(w http.ResponseWriter, r *http.Request) {

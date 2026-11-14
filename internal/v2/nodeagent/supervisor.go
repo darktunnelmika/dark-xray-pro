@@ -25,6 +25,8 @@ type Supervisor struct {
 	Logf   func(string, ...any)
 	// Access, if set, also receives Xray's output (access log parsing).
 	Access io.Writer
+	// Log, if set, receives stdout and stderr (recent lines for the panel).
+	Log io.Writer
 
 	mu       sync.Mutex
 	cmd      *exec.Cmd
@@ -189,10 +191,14 @@ func (s *Supervisor) Run(ctx context.Context) {
 func (s *Supervisor) runOnce(ctx context.Context) error {
 	cmd := exec.Command(s.Binary, "run", "-c", s.activePath())
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true, Pdeathsig: syscall.SIGTERM}
-	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+	out, errOut := io.Writer(os.Stdout), io.Writer(os.Stderr)
 	if s.Access != nil {
-		cmd.Stdout = io.MultiWriter(os.Stdout, s.Access)
+		out = io.MultiWriter(out, s.Access)
 	}
+	if s.Log != nil {
+		out, errOut = io.MultiWriter(out, s.Log), io.MultiWriter(errOut, s.Log)
+	}
+	cmd.Stdout, cmd.Stderr = out, errOut
 	if err := cmd.Start(); err != nil {
 		return err
 	}
