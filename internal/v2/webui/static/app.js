@@ -349,9 +349,9 @@ async function viewOnline() {
       h("thead", {}, h("tr", {}, h("th", {}, t("clients")), h("th", {}, s3("onNode")), h("th", {}, s3("onIPs")), h("th", {}, s3("onToday")), h("th", {}, s3("onSeen")))),
       h("tbody", {}, list.map((o) => h("tr", {},
         h("td", {}, h("span", { class: "dot on" }), " ", h("a", { href: `#/client?e=${encodeURIComponent(o.email)}` }, o.email)),
-        h("td", {}, h("span", { class: "badge" }, o.node_id)),
-        h("td", { dir: "ltr", class: "small" }, o.ips.length ? o.ips.join("  ") : "—"),
-        h("td", {}, bytes(o.today)), h("td", { class: "small muted" }, fmtTime(o.seen))))))) : h("p", { class: "muted" }, rows.length ? t("empty") : s3("onlineNone")));
+        h("td", { "data-label": s3("onNode") }, h("span", { class: "badge" }, o.node_id)),
+        h("td", { "data-label": s3("onIPs"), class: "small" }, h("span", { dir: "ltr" }, o.ips.length ? o.ips.join("  ") : "—")),
+        h("td", { "data-label": s3("onToday") }, bytes(o.today)), h("td", { "data-label": s3("onSeen"), class: "small muted" }, fmtTime(o.seen))))))) : h("p", { class: "muted" }, rows.length ? t("empty") : s3("onlineNone")));
   };
   q.addEventListener("input", draw);
   const seq = routeSeq;
