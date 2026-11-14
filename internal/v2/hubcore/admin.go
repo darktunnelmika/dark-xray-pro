@@ -615,6 +615,22 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 		err := s.DeleteNode(r.Context(), r.PathValue("id"))
 		reply(w, map[string]bool{"ok": err == nil}, err)
 	}))
+	mux.HandleFunc("POST /api/v2/admin/clients/bulk-create", guard(func(w http.ResponseWriter, r *http.Request) {
+		var in BulkCreate
+		if !decode(w, r, &in) {
+			return
+		}
+		emails, err := s.BulkCreateClients(r.Context(), in)
+		reply(w, map[string]any{"emails": emails}, err)
+	}))
+	mux.HandleFunc("PUT /api/v2/admin/clients/{email}/on-hold", guard(func(w http.ResponseWriter, r *http.Request) {
+		var in struct{ Days int64 }
+		if !decode(w, r, &in) {
+			return
+		}
+		err := s.SetOnHold(r.Context(), r.PathValue("email"), in.Days)
+		reply(w, map[string]bool{"ok": err == nil}, err)
+	}))
 	mux.HandleFunc("POST /api/v2/admin/clients/bulk", guard(func(w http.ResponseWriter, r *http.Request) {
 		var in struct {
 			Emails  []string

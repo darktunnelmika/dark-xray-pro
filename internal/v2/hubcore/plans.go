@@ -36,7 +36,10 @@ func (s *Store) ensurePlanSchema() error {
 	if err := s.addColumn("clients", "next_plan", "TEXT NOT NULL DEFAULT ''"); err != nil {
 		return err
 	}
-	return s.addColumn("clients", "hwid_limit", "INTEGER NOT NULL DEFAULT 0")
+	if err := s.addColumn("clients", "hwid_limit", "INTEGER NOT NULL DEFAULT 0"); err != nil {
+		return err
+	}
+	return s.addColumn("clients", "start_by_unix", "INTEGER NOT NULL DEFAULT 0")
 }
 
 // ---------- templates ----------

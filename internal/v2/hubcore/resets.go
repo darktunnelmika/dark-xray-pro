@@ -138,6 +138,7 @@ func (s *Store) RunResets(ctx context.Context) {
 	for {
 		s.runDueResets(ctx)
 		s.runNextPlans(ctx)
+		s.runOnHold(ctx)
 		select {
 		case <-ctx.Done():
 			return
