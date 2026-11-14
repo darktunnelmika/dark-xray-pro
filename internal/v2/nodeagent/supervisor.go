@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -22,6 +23,8 @@ type Supervisor struct {
 	Binary string
 	Dir    string
 	Logf   func(string, ...any)
+	// Access, if set, also receives Xray's output (access log parsing).
+	Access io.Writer
 
 	mu       sync.Mutex
 	cmd      *exec.Cmd
@@ -187,6 +190,9 @@ func (s *Supervisor) runOnce(ctx context.Context) error {
 	cmd := exec.Command(s.Binary, "run", "-c", s.activePath())
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true, Pdeathsig: syscall.SIGTERM}
 	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+	if s.Access != nil {
+		cmd.Stdout = io.MultiWriter(os.Stdout, s.Access)
+	}
 	if err := cmd.Start(); err != nil {
 		return err
 	}

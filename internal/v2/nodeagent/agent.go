@@ -17,7 +17,7 @@ import (
 )
 
 // Version is reported to the HUB.
-var Version = "v2.1.0"
+var Version = "v2.1.1"
 
 // Applier is the part of Supervisor the agent uses.
 type Applier interface {
@@ -224,10 +224,16 @@ func (a *Agent) Collect(ctx context.Context) {
 }
 
 func unwrapStats(s StatsSource) StatsSource {
-	if c, ok := s.(*carryStats); ok {
-		return c.inner
+	for {
+		switch c := s.(type) {
+		case *carryStats:
+			s = c.inner
+		case *TrackedStats:
+			s = c.StatsSource
+		default:
+			return s
+		}
 	}
-	return s
 }
 
 // carry re-queues traffic after a failed spool write by wrapping the source.

@@ -50,8 +50,11 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	stats := &nodeagent.XrayStats{Addr: *statsAddr}
-	defer stats.Close()
+	xstats := &nodeagent.XrayStats{Addr: *statsAddr}
+	defer xstats.Close()
+	tracker := nodeagent.NewIPTracker()
+	sup.Access = tracker
+	stats := &nodeagent.TrackedStats{StatsSource: xstats, Tracker: tracker}
 	exe, _ := os.Executable()
 	if r, err := filepath.EvalSymlinks(exe); err == nil {
 		exe = r
