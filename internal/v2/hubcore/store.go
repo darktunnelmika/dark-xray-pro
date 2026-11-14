@@ -424,6 +424,9 @@ func (s *Store) SubscriptionBody(ctx context.Context, email, format string) (bod
 	case "clash":
 		body, err = sub.Clash(acc, ins)
 		return body, "text/yaml; charset=utf-8", info, err
+	case "xray":
+		body, err = sub.XrayJSON(acc, ins)
+		return body, "application/json; charset=utf-8", info, err
 	}
 	links, err := sub.Links(acc, ins)
 	return []byte(sub.Base64(links)), "text/plain; charset=utf-8", info, err

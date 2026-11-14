@@ -825,7 +825,7 @@ async function viewClient() {
       usageCard(c.Email, days),
       h("div", { class: "card form" }, h("h2", {}, t("subscription")),
         h("img", { class: "qr", alt: "QR", src: `/api/v2/admin/clients/${encodeURIComponent(c.Email)}/qr.png` }),
-        fmt("Auto", url), fmt("sing-box", `${url}?format=singbox`), fmt("Clash", `${url}?format=clash`)),
+        fmt("Auto", url), fmt("sing-box", `${url}?format=singbox`), fmt("Clash", `${url}?format=clash`), fmt("Xray JSON", `${url}?format=xray`)),
       h("div", { class: "card form" }, h("h2", {}, t("details")),
         h("div", { class: "row" }, h("span", { class: "muted" }, t("assignInbounds")), ...(c.Inbounds || []).map((x) => h("span", { class: "badge" }, x))),
         c.RepID ? h("div", { class: "row" }, h("span", { class: "muted" }, t("seller")), h("span", { class: "badge" }, c.RepID)) : null,
@@ -2097,10 +2097,12 @@ function subSettingsCard() {
   const fa = lang === "fa";
   const L = fa ? { h: "اشتراک و صفحهٔ مشتری", hint: "وقتی مشتری لینک اشتراکش را در مرورگر باز کند، یک صفحه با حجم، زمان، QR و دکمهٔ افزودن به برنامه‌ها می‌بیند. برنامه‌ها مثل قبل کانفیگ می‌گیرند.",
       title: "عنوان (خالی = نام کلاینت)", tpl: "نام کانفیگ‌ها", vars: "متغیرها: {remark} {path} {left} {used} {total} {days} {email} {proto} {tag}", info: "نمایش حجم و روز باقی‌مانده به‌صورت دو ردیف بالای فهرست سرورها",
-      ann: "اعلان (در صفحه و برنامه‌هایی مثل Happ و Hiddify)", sup: "لینک پشتیبانی (https://t.me/...)", save: "ذخیره", preview: "پیش‌نمایش" }
+      ann: "اعلان (در صفحه و برنامه‌هایی مثل Happ و Hiddify)", sup: "لینک پشتیبانی (https://t.me/...)", save: "ذخیره", preview: "پیش‌نمایش",
+      frag: "fragment برای عبور از فیلتر (فرمت Xray JSON؛ v2rayNG و Happ در صفحهٔ مشتری همین را می‌گیرند)", fl: "طول تکه‌ها (بایت)", fi: "فاصله (میلی‌ثانیه)", noise: "noise روی UDP" }
     : { h: "Subscription & customer page", hint: "Opening the subscription link in a browser shows a page with volume, time, QR and add-to-app buttons. Apps keep getting configs as before.",
       title: "Title (empty = client name)", tpl: "Config names", vars: "Variables: {remark} {path} {left} {used} {total} {days} {email} {proto} {tag}", info: "Show remaining volume and days as two entries at the top of the server list",
-      ann: "Announcement (page and apps such as Happ, Hiddify)", sup: "Support link (https://t.me/...)", save: "Save", preview: "Preview" };
+      ann: "Announcement (page and apps such as Happ, Hiddify)", sup: "Support link (https://t.me/...)", save: "Save", preview: "Preview",
+      frag: "Fragment to get past filtering (Xray JSON format; v2rayNG and Happ on the customer page get it)", fl: "Fragment length (bytes)", fi: "Interval (ms)", noise: "UDP noise" };
   const card = h("div", { class: "card form" }, h("h2", {}, L.h), h("p", { class: "small muted" }, "…"));
   api("GET", "/api/v2/admin/sub-settings").then((v) => {
     const title = h("input", { value: v.title || "" });
@@ -2113,14 +2115,22 @@ function subSettingsCard() {
     const ann = h("textarea", { rows: 2 }); ann.value = v.announce || "";
     const sup = h("input", { value: v.support_url || "", dir: "ltr", placeholder: "https://t.me/" });
     const err = h("div", { class: "error small" });
+    const frag = h("input", { type: "checkbox", checked: !!v.fragment });
+    const fl = h("input", { value: v.fragment_length || "", placeholder: "100-200", dir: "ltr" });
+    const fi = h("input", { value: v.fragment_interval || "", placeholder: "10-20", dir: "ltr" });
+    const noise = h("input", { type: "checkbox", checked: !!v.noise });
     fill(card, h("h2", {}, L.h), h("p", { class: "small muted" }, L.hint),
       h("label", {}, h("span", {}, L.title), title),
       h("label", {}, h("span", {}, L.tpl), tpl), h("div", { class: "small muted" }, L.vars), prev,
       h("label", { class: "check" }, info, h("span", {}, L.info)),
-      h("label", {}, h("span", {}, L.ann), ann), h("label", {}, h("span", {}, L.sup), sup), err,
+      h("label", {}, h("span", {}, L.ann), ann), h("label", {}, h("span", {}, L.sup), sup),
+      h("label", { class: "check" }, frag, h("span", {}, L.frag)),
+      h("div", { class: "two" }, h("label", {}, h("span", {}, L.fl), fl), h("label", {}, h("span", {}, L.fi), fi)),
+      h("label", { class: "check" }, noise, h("span", {}, L.noise)), err,
       h("button", { class: "primary", onclick: async () => {
         err.textContent = "";
-        try { await guarded(() => api("PUT", "/api/v2/admin/sub-settings", { title: title.value, remark_template: tpl.value, info_lines: info.checked, announce: ann.value, support_url: sup.value })); toast(t("saved")); }
+        try { await guarded(() => api("PUT", "/api/v2/admin/sub-settings", { title: title.value, remark_template: tpl.value, info_lines: info.checked, announce: ann.value, support_url: sup.value,
+          fragment: frag.checked, fragment_length: fl.value.trim(), fragment_interval: fi.value.trim(), noise: noise.checked })); toast(t("saved")); }
         catch (x) { err.textContent = x.message; }
       } }, L.save));
   }).catch(() => {});

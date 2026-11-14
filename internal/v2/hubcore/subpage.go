@@ -131,11 +131,17 @@ FROM clients c LEFT JOIN client_usage cu ON cu.email=c.email WHERE c.email=?`, e
 		}
 	}
 	enc := url.QueryEscape(subURL)
+	// With fragment on, apps that import Xray JSON get that format.
+	xenc, xurl := enc, subURL
+	if set.Fragment {
+		xurl = subURL + "?format=xray"
+		xenc = url.QueryEscape(xurl)
+	}
 	name := url.QueryEscape(d.Title)
 	d.Apps = []pageApp{
-		{"v2rayNG", "Android", "v2rayng://install-sub?url=" + enc + "&name=" + name},
+		{"v2rayNG", "Android", "v2rayng://install-sub?url=" + xenc + "&name=" + name},
 		{"Hiddify", "Android · iOS · Desktop", "hiddify://import/" + subURL + "#" + url.PathEscape(d.Title)},
-		{"Happ", "Android · iOS", "happ://add/" + subURL},
+		{"Happ", "Android · iOS", "happ://add/" + xurl},
 		{"Streisand", "iOS", "streisand://import/" + subURL + "#" + url.PathEscape(d.Title)},
 		{"V2Box", "iOS", "v2box://install-sub?url=" + enc + "&name=" + name},
 		{"sing-box", "Android · iOS", "sing-box://import-remote-profile?url=" + url.QueryEscape(subURL+"?format=singbox") + "#" + url.PathEscape(d.Title)},

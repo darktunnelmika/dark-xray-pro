@@ -100,6 +100,8 @@ type Account struct {
 	// InfoLines adds non-working entries at the top of plain link lists
 	// that show remaining volume and days in the app's server list.
 	InfoLines []string
+	// Fragment, if set, adds fragmentation (and noise) to Xray JSON configs.
+	Fragment *Fragment
 }
 
 type stream struct {

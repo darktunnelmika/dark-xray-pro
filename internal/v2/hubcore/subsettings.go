@@ -15,6 +15,11 @@ type SubSettings struct {
 	Announce       string `json:"announce"`        // shown on the page and in apps that support it
 	SupportURL     string `json:"support_url"`     // e.g. https://t.me/your_support
 	Title          string `json:"title"`           // page and profile title ("" = client name)
+	// Fragment settings for the Xray JSON format (?format=xray).
+	Fragment         bool   `json:"fragment"`
+	FragmentLength   string `json:"fragment_length"`
+	FragmentInterval string `json:"fragment_interval"`
+	Noise            bool   `json:"noise"`
 }
 
 func (s *Store) SubSettings(ctx context.Context) SubSettings {
@@ -24,6 +29,9 @@ func (s *Store) SubSettings(ctx context.Context) SubSettings {
 		Announce:       s.Setting(ctx, "sub_announce"),
 		SupportURL:     s.Setting(ctx, "sub_support"),
 		Title:          s.Setting(ctx, "sub_title"),
+		Fragment:       s.Setting(ctx, "sub_frag") == "1",
+		FragmentLength: s.Setting(ctx, "sub_frag_len"), FragmentInterval: s.Setting(ctx, "sub_frag_int"),
+		Noise: s.Setting(ctx, "sub_noise") == "1",
 	}
 }
 
@@ -37,6 +45,28 @@ func (s *Store) PutSubSettings(ctx context.Context, v SubSettings) error {
 	info := ""
 	if v.InfoLines {
 		info = "1"
+	}
+	rangeRE := func(x string) bool {
+		if x == "" {
+			return true
+		}
+		var a, b int
+		n, _ := fmt.Sscanf(x, "%d-%d", &a, &b)
+		return n == 2 && a > 0 && b >= a && b <= 5000
+	}
+	if !rangeRE(v.FragmentLength) || !rangeRE(v.FragmentInterval) {
+		return fmt.Errorf("%w: fragment ranges look like 100-200", ErrInvalid)
+	}
+	b01 := func(x bool) string {
+		if x {
+			return "1"
+		}
+		return ""
+	}
+	for k, val := range map[string]string{"sub_frag": b01(v.Fragment), "sub_frag_len": v.FragmentLength, "sub_frag_int": v.FragmentInterval, "sub_noise": b01(v.Noise)} {
+		if err := s.SetSetting(ctx, k, val); err != nil {
+			return err
+		}
 	}
 	for k, val := range map[string]string{"sub_remark": strings.TrimSpace(v.RemarkTemplate), "sub_info": info, "sub_announce": strings.TrimSpace(v.Announce),
 		"sub_support": strings.TrimSpace(v.SupportURL), "sub_title": strings.TrimSpace(v.Title)} {
@@ -78,6 +108,9 @@ func (s *Store) subAccount(ctx context.Context, c Client, u Usage) sub.Account {
 		total = gbText(c.VolumeBytes)
 	}
 	acc.Vars = map[string]string{"email": c.Email, "used": gbText(u.Up + u.Down), "left": gbText(left), "total": total, "days": days}
+	if set.Fragment {
+		acc.Fragment = &sub.Fragment{Length: set.FragmentLength, Interval: set.FragmentInterval, Noise: set.Noise}
+	}
 	if set.InfoLines {
 		acc.InfoLines = []string{"📊 " + gbText(left) + " / " + total, "⏳ " + days + " days"}
 	}

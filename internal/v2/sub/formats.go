@@ -18,6 +18,8 @@ func Format(query, userAgent string) string {
 		return "clash"
 	case "links", "base64", "v2ray":
 		return "base64"
+	case "xray", "xray-json", "v2ray-json":
+		return "xray"
 	}
 	ua := strings.ToLower(userAgent)
 	switch {
