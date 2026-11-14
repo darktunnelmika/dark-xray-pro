@@ -543,6 +543,23 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 		list, err := s.AuditLog(r.Context(), q.Get("actor"), q.Get("q"), before, limit)
 		reply(w, list, err)
 	}))
+	mux.HandleFunc("POST /api/v2/admin/restore", guard(func(w http.ResponseWriter, r *http.Request) {
+		data, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 1<<30))
+		if err != nil {
+			reply(w, nil, fmt.Errorf("%w: upload failed or larger than 1 GB", ErrInvalid))
+			return
+		}
+		p, err := s.StageRestore(r.Context(), data, r.Header.Get("X-Backup-Password"))
+		reply(w, p, err)
+	}))
+	mux.HandleFunc("POST /api/v2/admin/restore/apply", guard(func(w http.ResponseWriter, r *http.Request) {
+		err := s.ApplyRestore()
+		reply(w, map[string]bool{"ok": err == nil}, err)
+	}))
+	mux.HandleFunc("DELETE /api/v2/admin/restore", guard(func(w http.ResponseWriter, r *http.Request) {
+		err := s.CancelRestore()
+		reply(w, map[string]bool{"ok": err == nil}, err)
+	}))
 	mux.HandleFunc("GET /api/v2/admin/backup", guard(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/gzip")
 		w.Header().Set("Content-Disposition", `attachment; filename="dark-v2-`+time.Now().UTC().Format("20060102-1504")+`.sqlite.gz"`)

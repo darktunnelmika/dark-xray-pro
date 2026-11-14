@@ -73,11 +73,24 @@ func main() {
 	if err := os.MkdirAll(filepath.Dir(*dbPath), 0o700); err != nil {
 		log.Fatal(err)
 	}
+	if cmd == "serve" {
+		// A backup staged from the panel is swapped in before anything opens the database.
+		if ok, err := hubcore.ApplyPendingRestore(*dbPath); err != nil {
+			log.Fatalf("restore: %v", err)
+		} else if ok {
+			log.Printf("restored the backup staged from the panel; the previous database is kept as %s.before-restore-*", *dbPath)
+		}
+	}
 	s, err := hubcore.Open(*dbPath)
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer s.Close()
+	hubcore.SetRestartHook(func() {
+		log.Printf("restarting into the staged backup")
+		s.Close()
+		os.Exit(0)
+	})
 	s.SetDistDir(*distDir)
 	ctx := context.Background()
 
