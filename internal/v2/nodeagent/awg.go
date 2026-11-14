@@ -488,6 +488,8 @@ type SideServers struct {
 	awgKey map[string]string
 	mtp    map[string]*mtpServer
 	mtpKey map[string]string
+	tuic   map[string]*tuicServer
+	tuicK  map[string]string
 	logf   func(string, ...any)
 }
 
@@ -495,10 +497,10 @@ func NewSideServers(logf func(string, ...any)) *SideServers {
 	if logf == nil {
 		logf = func(string, ...any) {}
 	}
-	return &SideServers{awg: map[string]*awgServer{}, awgKey: map[string]string{}, mtp: map[string]*mtpServer{}, mtpKey: map[string]string{}, logf: logf}
+	return &SideServers{awg: map[string]*awgServer{}, awgKey: map[string]string{}, mtp: map[string]*mtpServer{}, mtpKey: map[string]string{}, tuic: map[string]*tuicServer{}, tuicK: map[string]string{}, logf: logf}
 }
 
-var sideProtocols = map[string]bool{"amneziawg": true, "mtproto": true}
+var sideProtocols = map[string]bool{"amneziawg": true, "mtproto": true, "tuic": true}
 
 // SplitSide removes AmneziaWG and MTProto inbounds from an Xray config and
 // returns them separately.
@@ -536,7 +538,7 @@ func SplitSide(raw []byte) (xray []byte, side []json.RawMessage, err error) {
 func (m *SideServers) Apply(side []json.RawMessage) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	seenA, seenM := map[string]bool{}, map[string]bool{}
+	seenA, seenM, seenT := map[string]bool{}, map[string]bool{}, map[string]bool{}
 	for _, raw := range side {
 		var p struct {
 			Tag      string `json:"tag"`
@@ -589,6 +591,27 @@ func (m *SideServers) Apply(side []json.RawMessage) {
 				continue
 			}
 			m.mtp[in.Tag], m.mtpKey[in.Tag] = s, key
+		case "tuic":
+			var in tuicInbound
+			if json.Unmarshal(raw, &in) != nil || in.Port <= 0 {
+				continue
+			}
+			seenT[in.Tag] = true
+			base := tuicBase(in)
+			if s := m.tuic[in.Tag]; s != nil && m.tuicK[in.Tag] == base {
+				s.setUsers(in.Settings.Clients)
+				continue
+			}
+			if s := m.tuic[in.Tag]; s != nil {
+				s.close()
+				delete(m.tuic, in.Tag)
+			}
+			s, err := startTUIC(in, m.logf)
+			if err != nil {
+				m.logf("tuic %s not started: %v", in.Tag, err)
+				continue
+			}
+			m.tuic[in.Tag], m.tuicK[in.Tag] = s, base
 		}
 	}
 	for tag, s := range m.awg {
@@ -605,6 +628,13 @@ func (m *SideServers) Apply(side []json.RawMessage) {
 			delete(m.mtpKey, tag)
 		}
 	}
+	for tag, s := range m.tuic {
+		if !seenT[tag] {
+			s.close()
+			delete(m.tuic, tag)
+			delete(m.tuicK, tag)
+		}
+	}
 }
 
 // Take returns user traffic (AmneziaWG peers) and per-inbound traffic.
@@ -615,6 +645,14 @@ func (m *SideServers) Take() (users map[string][2]int64, inbounds map[string][2]
 	for tag, s := range m.awg {
 		list, _ := s.take()
 		for _, u := range list {
+			x := users[u.email]
+			users[u.email] = [2]int64{x[0] + int64(u.up), x[1] + int64(u.down)}
+			y := inbounds[tag]
+			inbounds[tag] = [2]int64{y[0] + int64(u.up), y[1] + int64(u.down)}
+		}
+	}
+	for tag, s := range m.tuic {
+		for _, u := range s.take() {
 			x := users[u.email]
 			users[u.email] = [2]int64{x[0] + int64(u.up), x[1] + int64(u.down)}
 			y := inbounds[tag]
@@ -636,6 +674,11 @@ func (m *SideServers) Online(now time.Time) map[string][]string {
 	defer m.mu.Unlock()
 	out := map[string][]string{}
 	for _, s := range m.awg {
+		for e, ips := range s.online(now) {
+			out[e] = append(out[e], ips...)
+		}
+	}
+	for _, s := range m.tuic {
 		for e, ips := range s.online(now) {
 			out[e] = append(out[e], ips...)
 		}
