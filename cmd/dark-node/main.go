@@ -49,6 +49,9 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	users := &nodeagent.XrayUsers{Addr: *statsAddr}
+	defer users.Close()
+	agent.SetUserAPI(users)
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	go sup.Run(ctx)

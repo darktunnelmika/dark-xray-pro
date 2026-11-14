@@ -180,6 +180,7 @@ type recordingXray struct{ n int }
 
 func (r *recordingXray) Apply(context.Context, []byte) (bool, error) { r.n++; return true, nil }
 func (r *recordingXray) Status() (bool, uint64, string)              { return true, 1, "" }
+func (r *recordingXray) Install(context.Context, []byte) error       { return nil }
 
 type scriptedStats struct{ pending []wire.UserTraffic }
 

@@ -20,6 +20,7 @@ var Version = "v2-dev"
 // Applier is the part of Supervisor the agent uses.
 type Applier interface {
 	Apply(ctx context.Context, cfg []byte) (bool, error)
+	Install(ctx context.Context, cfg []byte) error
 	Status() (running bool, restarts uint64, lastErr string)
 }
 
@@ -41,6 +42,7 @@ type Agent struct {
 	hub   Hub
 	xray  Applier
 	stats StatsSource
+	users UserAPI
 	spool *Spool
 
 	mu           sync.Mutex
@@ -49,6 +51,10 @@ type Agent struct {
 	blockedUntil map[string]time.Time
 	lastDecision Decision
 	appliedKey   string
+	appliedSkel  string
+	appliedUsers InboundUsers
+	liveChanges  uint64
+	restarts     uint64
 	pendingDisc  []wire.Disconnect
 	lastOnline   time.Time
 	lastFrom     int64
@@ -59,7 +65,7 @@ func New(cfg Config, hub Hub, xray Applier, stats StatsSource) (*Agent, error) {
 		return nil, errors.New("node id and state dir are required")
 	}
 	if cfg.CollectInterval <= 0 {
-		cfg.CollectInterval = 10 * time.Second
+		cfg.CollectInterval = 5 * time.Second
 	}
 	if cfg.IPLimitCooldown <= 0 {
 		cfg.IPLimitCooldown = 2 * time.Minute
@@ -350,13 +356,81 @@ func (a *Agent) enforce(ctx context.Context) {
 		a.cfg.Logf("config %d unusable: %v", state.ConfigRevision, err)
 		return
 	}
+	if a.applyLive(ctx, state.Config, cfg) {
+		a.mu.Lock()
+		a.appliedKey = key
+		a.mu.Unlock()
+		return
+	}
 	if _, err := a.xray.Apply(ctx, cfg); err != nil {
 		a.cfg.Logf("config %d not applied, keeping last good: %v", state.ConfigRevision, err)
 		return
 	}
+	skel, _ := Skeleton(state.Config)
+	users, _ := ParseUsers(cfg)
 	a.mu.Lock()
-	a.appliedKey = key
+	a.appliedKey, a.appliedSkel, a.appliedUsers = key, skel, users
+	a.restarts++
 	a.mu.Unlock()
+}
+
+// applyLive changes only users through the Xray API when the inbound
+// structure is unchanged. It returns false when a restart is required.
+func (a *Agent) applyLive(ctx context.Context, hubCfg, filtered []byte) bool {
+	if a.users == nil {
+		return false
+	}
+	skel, err := Skeleton(hubCfg)
+	if err != nil {
+		return false
+	}
+	a.mu.Lock()
+	sameSkel := skel == a.appliedSkel && a.appliedUsers != nil
+	from := a.appliedUsers
+	a.mu.Unlock()
+	if !sameSkel {
+		return false
+	}
+	to, err := ParseUsers(filtered)
+	if err != nil {
+		return false
+	}
+	ops := DiffUsers(from, to)
+	for _, op := range ops {
+		if !a.users.Supports(op.User.Protocol) {
+			return false
+		}
+	}
+	for _, op := range ops {
+		var err error
+		if op.Add {
+			err = a.users.AddUser(ctx, op.User)
+		} else {
+			err = a.users.RemoveUser(ctx, op.User)
+		}
+		if err != nil {
+			a.cfg.Logf("live user change failed, restarting Xray instead: %v", err)
+			return false
+		}
+	}
+	if err := a.xray.Install(ctx, filtered); err != nil {
+		a.cfg.Logf("active config not persisted: %v", err)
+	}
+	a.mu.Lock()
+	a.appliedUsers = to
+	a.liveChanges += uint64(len(ops))
+	a.mu.Unlock()
+	return true
+}
+
+// SetUserAPI enables live user changes without Xray restarts.
+func (a *Agent) SetUserAPI(u UserAPI) { a.users = u }
+
+// Counters reports live user changes and full config applies.
+func (a *Agent) Counters() (live, applies uint64) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.liveChanges, a.restarts
 }
 
 // Decision returns the current local block list (copy).

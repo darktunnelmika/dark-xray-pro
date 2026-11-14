@@ -99,6 +99,19 @@ func (s *Supervisor) Apply(ctx context.Context, cfg []byte) (changed bool, err e
 	return true, nil
 }
 
+// Install records cfg as the active config without restarting Xray. It is
+// used after live user changes so a later restart or reboot serves exactly
+// the users Xray already has.
+func (s *Supervisor) Install(_ context.Context, cfg []byte) error {
+	if err := writeFileAtomic(s.activePath(), cfg); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	s.activeID = configID(cfg)
+	s.mu.Unlock()
+	return nil
+}
+
 func (s *Supervisor) setErr(err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

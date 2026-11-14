@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -59,6 +60,27 @@ func (f *fakeXray) Apply(_ context.Context, cfg []byte) (bool, error) {
 }
 
 func (f *fakeXray) Status() (bool, uint64, string) { return true, 1, "" }
+
+func (f *fakeXray) Install(context.Context, []byte) error { return nil }
+
+type fakeUsers struct {
+	mu  sync.Mutex
+	ops []string
+}
+
+func (f *fakeUsers) Supports(p string) bool { return p == "vless" }
+func (f *fakeUsers) AddUser(_ context.Context, u ConfigUser) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.ops = append(f.ops, "+"+u.Tag+"/"+u.Email)
+	return nil
+}
+func (f *fakeUsers) RemoveUser(_ context.Context, u ConfigUser) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.ops = append(f.ops, "-"+u.Tag+"/"+u.Email)
+	return nil
+}
 
 func (f *fakeXray) last(t *testing.T) []string {
 	t.Helper()
@@ -346,5 +368,61 @@ func TestEvaluateUnknownAndExpiry(t *testing.T) {
 	}
 	if _, ok := d["b"]; ok {
 		t.Fatal("no expiry yet (first-connection plan) must serve")
+	}
+}
+
+func TestUserChangesDoNotRestartXray(t *testing.T) {
+	ctx := context.Background()
+	now := time.Unix(1_800_000_000, 0)
+	hub := &fakeHub{resp: wire.SyncResponse{ConfigRevision: 1, Config: json.RawMessage(testConfig),
+		Users: limits(wire.UserLimit{Enabled: true, RemainingBytes: -1, MaxIPs: 1}, wire.UserLimit{Enabled: true, RemainingBytes: -1})}}
+	st := &fakeStats{}
+	x := &fakeXray{}
+	u := &fakeUsers{}
+	a := newTestAgent(t, t.TempDir(), hub, x, st, &now)
+	a.SetUserAPI(u)
+	a.Exchange(ctx)
+	a.enforce(ctx)
+	if len(x.applied) != 1 {
+		t.Fatalf("first apply must start Xray once, got %d", len(x.applied))
+	}
+	// IP limit: alice must be removed live.
+	st.mu.Lock()
+	st.online = map[string][]string{"alice": {"1.1.1.1", "2.2.2.2"}}
+	st.mu.Unlock()
+	a.enforce(ctx)
+	// HUB adds carol to the same inbound: only users change.
+	hub.mu.Lock()
+	hub.resp.ConfigRevision = 2
+	hub.resp.Config = json.RawMessage(strings.Replace(testConfig, `{"id":"33333333`, `{"id":"44444444-4444-4444-4444-444444444444","email":"carol"},{"id":"33333333`, 1))
+	hub.resp.Users = append(hub.resp.Users, wire.UserLimit{Email: "carol", Enabled: true, RemainingBytes: -1})
+	hub.mu.Unlock()
+	a.Exchange(ctx)
+	a.enforce(ctx)
+	if len(x.applied) != 1 {
+		t.Fatalf("user changes restarted Xray %d times", len(x.applied)-1)
+	}
+	want := []string{"-vless-1/alice", "+vless-1/carol"}
+	if strings.Join(u.ops, ",") != strings.Join(want, ",") {
+		t.Fatalf("live ops %v, want %v", u.ops, want)
+	}
+	// A new inbound changes the structure: a restart is correct.
+	hub.mu.Lock()
+	hub.resp.ConfigRevision = 3
+	hub.resp.Config = json.RawMessage(strings.Replace(testConfig, `"tag":"vless-1"`, `"tag":"vless-2"`, 1))
+	hub.mu.Unlock()
+	a.Exchange(ctx)
+	a.enforce(ctx)
+	if len(x.applied) != 2 {
+		t.Fatal("a structural change must apply the new config")
+	}
+}
+
+func TestDiffUsersAccountChange(t *testing.T) {
+	from := InboundUsers{"t": {"a": {Tag: "t", Email: "a", ID: "1", Protocol: "vless"}}}
+	to := InboundUsers{"t": {"a": {Tag: "t", Email: "a", ID: "2", Protocol: "vless"}}}
+	ops := DiffUsers(from, to)
+	if len(ops) != 2 || ops[0].Add || !ops[1].Add || ops[1].User.ID != "2" {
+		t.Fatalf("ops %+v", ops)
 	}
 }

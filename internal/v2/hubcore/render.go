@@ -107,7 +107,7 @@ func (s *Store) RenderNode(ctx context.Context, nodeID string) ([]byte, error) {
 	}
 	cfg := map[string]any{
 		"log":   map[string]any{"loglevel": "warning"},
-		"api":   map[string]any{"tag": apiTag, "services": []string{"StatsService"}},
+		"api":   map[string]any{"tag": apiTag, "services": []string{"StatsService", "HandlerService"}},
 		"stats": map[string]any{},
 		"policy": map[string]any{
 			"levels": map[string]any{"0": map[string]any{"statsUserUplink": true, "statsUserDownlink": true, "statsUserOnline": true}},
