@@ -244,8 +244,9 @@ func remark(a Account, in Inbound, ep Endpoint) string {
 	}
 	out := strings.NewReplacer(pairs...).Replace(a.RemarkTemplate)
 	// Collapse separators left by empty variables.
-	for _, sep := range []string{" ·  · ", " |  | ", " - - "} {
-		out = strings.ReplaceAll(out, sep, sep[:3])
+	collapse := strings.NewReplacer(" ·  · ", " · ", " |  | ", " | ", " -  - ", " - ")
+	for prev := ""; prev != out; {
+		prev, out = out, collapse.Replace(out)
 	}
 	out = strings.Trim(strings.TrimSpace(out), "·|-")
 	if strings.TrimSpace(out) == "" {
