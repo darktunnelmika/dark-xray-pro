@@ -77,6 +77,7 @@ h2 { font-size: 16px; margin: 0 0 8px; }
 .dot.on { background: var(--good); }
 code, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; overflow-wrap: anywhere; }
 
+.btn { display: inline-block; text-align: center; text-decoration: none; color: inherit; }
 button, .btn {
   border: 1px solid var(--line); background: var(--surface); padding: 7px 12px; border-radius: 10px; cursor: pointer;
 }

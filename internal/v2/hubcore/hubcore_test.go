@@ -525,3 +525,31 @@ func TestNodeHostHistory(t *testing.T) {
 		t.Fatalf("latest host %+v", nodes[0].Host)
 	}
 }
+
+func TestBackupAndRestore(t *testing.T) {
+	s, _ := newStore(t)
+	ctx := context.Background()
+	seed(t, s)
+	dir := t.TempDir()
+	path, err := s.AutoBackup(ctx, dir, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(t.TempDir(), "restored.sqlite")
+	if err := RestoreBackup(path, target); err != nil {
+		t.Fatal(err)
+	}
+	r, err := Open(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	list, _ := r.Clients(ctx)
+	nodes, _ := r.Nodes(ctx)
+	if len(list) != 2 || len(nodes) != 1 {
+		t.Fatalf("restored %d clients %d nodes", len(list), len(nodes))
+	}
+	if err := RestoreBackup(filepath.Join(dir, "missing.gz"), target); err == nil {
+		t.Fatal("missing backup must fail")
+	}
+}

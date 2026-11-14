@@ -88,6 +88,17 @@ func main() {
 				}
 			}
 		}()
+		go func() {
+			// Daily snapshot, newest 14 kept, next to the database.
+			for {
+				if p, err := s.AutoBackup(ctx, filepath.Join(filepath.Dir(*dbPath), "backups"), 14); err != nil {
+					log.Printf("auto backup: %v", err)
+				} else {
+					log.Printf("auto backup: %s", p)
+				}
+				time.Sleep(24 * time.Hour)
+			}
+		}()
 		if tok, err := os.ReadFile(*adminTokenFile); err == nil && *adminListen != "" {
 			admin := &http.Server{Addr: *adminListen, Handler: hubcore.AdminHandlerWith(s, strings.TrimSpace(string(tok)), *subBase, webui.Handler(), func(m *http.ServeMux) {
 				inst := hubcore.InstallHandler(s, hubcore.InstallConfig{DistDir: *distDir, PublicURL: *subBase, HubURL: "https://" + *listen, CAFile: filepath.Join(*tlsDir, "ca.pem")})
@@ -168,6 +179,14 @@ func main() {
 			log.Fatal(err)
 		}
 		fmt.Println("owner login saved:", *name)
+	case "restore":
+		// dark-hub2 restore -db v2.sqlite -file backup.sqlite.gz   (stop the service first)
+		s.Close()
+		if err := hubcore.RestoreBackup(*file, *dbPath); err != nil {
+			log.Fatal(err)
+		}
+		fmt.Println("restored", *file, "into", *dbPath)
+		return
 	case "status":
 		nodes, err := s.Nodes(ctx)
 		if err != nil {

@@ -113,10 +113,14 @@ CREATE INDEX IF NOT EXISTS events_unix ON events(unix);
 // Store holds all v2 HUB state in one small SQLite file. A single writer
 // connection serialises short transactions; readers use their own pool.
 type Store struct {
-	db  *sql.DB
-	ro  *sql.DB
-	now func() time.Time
+	db   *sql.DB
+	ro   *sql.DB
+	now  func() time.Time
+	path string
 }
+
+// tmpDir is next to the database, so snapshots stay on the same disk.
+func (s *Store) tmpDir() string { return filepath.Dir(s.path) }
 
 func Open(path string) (*Store, error) {
 	path, err := filepath.Abs(path)
@@ -141,7 +145,7 @@ func Open(path string) (*Store, error) {
 		return nil, err
 	}
 	ro.SetMaxOpenConns(4)
-	st := &Store{db: db, ro: ro, now: time.Now}
+	st := &Store{db: db, ro: ro, now: time.Now, path: path}
 	if err := st.ensureAuthSchema(); err != nil {
 		st.Close()
 		return nil, err
