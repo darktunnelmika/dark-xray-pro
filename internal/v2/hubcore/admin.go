@@ -2,8 +2,10 @@ package hubcore
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -42,7 +44,17 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 				http.Error(w, "unauthorized", http.StatusUnauthorized)
 				return
 			}
-			h(w, r.WithContext(context.WithValue(r.Context(), principalKey{}, p)))
+			if !p.allowed(r) {
+				http.Error(w, "forbidden: your role cannot do this", http.StatusForbidden)
+				return
+			}
+			if r.Method == http.MethodGet || r.Method == http.MethodHead {
+				h(w, r.WithContext(context.WithValue(r.Context(), principalKey{}, p)))
+				return
+			}
+			sw := &statusWriter{ResponseWriter: w}
+			h(sw, r.WithContext(context.WithValue(r.Context(), principalKey{}, p)))
+			s.Audit(r.Context(), p, r, sw.status)
 		}
 	}
 	guard := func(h http.HandlerFunc) http.HandlerFunc {
@@ -55,16 +67,26 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 		})
 	}
 	mux.HandleFunc("POST /api/v2/auth/login", func(w http.ResponseWriter, r *http.Request) {
-		var in struct{ Username, Password string }
+		var in struct{ Username, Password, Code string }
 		if !decode(w, r, &in) {
 			return
 		}
-		tok, err := s.Login(r.Context(), in.Username, in.Password)
+		tok, err := s.LoginTOTP(r.Context(), in.Username, in.Password, in.Code)
+		if errors.Is(err, ErrTOTPRequired) {
+			// Password was right: ask for the authenticator code (no session yet).
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = w.Write([]byte(`{"need_code":true}`))
+			return
+		}
+		lp := Principal{User: in.Username, Role: "login"}
 		if err != nil {
+			s.Audit(r.Context(), lp, r, http.StatusUnauthorized)
 			time.Sleep(500 * time.Millisecond)
 			http.Error(w, "invalid username or password", http.StatusUnauthorized)
 			return
 		}
+		s.Audit(r.Context(), lp, r, http.StatusOK)
 		setSessionCookie(w, r, tok, int(sessionTTL.Seconds()))
 		reply(w, map[string]string{"username": in.Username}, nil)
 	})
@@ -77,7 +99,7 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 	})
 	mux.HandleFunc("GET /api/v2/auth/me", member(func(w http.ResponseWriter, r *http.Request) {
 		p := who(r)
-		out := map[string]any{"user": p.User, "role": p.Role, "rep_id": p.RepID}
+		out := map[string]any{"user": p.User, "role": p.Role, "rep_id": p.RepID, "level": p.Level}
 		if p.Role == "rep" {
 			reps, _ := s.Reps(r.Context())
 			for _, rp := range reps {
@@ -94,6 +116,35 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 			}
 		}
 		reply(w, out, nil)
+	}))
+	mux.HandleFunc("POST /api/v2/auth/2fa/setup", member(func(w http.ResponseWriter, r *http.Request) {
+		secret, uri, err := s.TOTPSetup(r.Context(), who(r).User)
+		if err != nil {
+			reply(w, nil, err)
+			return
+		}
+		png, err := qrcode.Encode(uri, qrcode.Medium, 256)
+		reply(w, map[string]string{"secret": secret, "uri": uri, "qr": "data:image/png;base64," + base64.StdEncoding.EncodeToString(png)}, err)
+	}))
+	mux.HandleFunc("POST /api/v2/auth/2fa/enable", member(func(w http.ResponseWriter, r *http.Request) {
+		var in struct{ Code string }
+		if !decode(w, r, &in) {
+			return
+		}
+		err := s.TOTPEnable(r.Context(), who(r).User, in.Code)
+		reply(w, map[string]bool{"ok": err == nil}, err)
+	}))
+	mux.HandleFunc("POST /api/v2/auth/2fa/disable", member(func(w http.ResponseWriter, r *http.Request) {
+		var in struct{ Password, Code string }
+		if !decode(w, r, &in) {
+			return
+		}
+		err := s.TOTPDisable(r.Context(), who(r).User, in.Password, in.Code)
+		reply(w, map[string]bool{"ok": err == nil}, err)
+	}))
+	mux.HandleFunc("DELETE /api/v2/admin/staff/{user}/2fa", guard(func(w http.ResponseWriter, r *http.Request) {
+		err := s.ClearTOTP(r.Context(), r.PathValue("user"))
+		reply(w, map[string]bool{"ok": err == nil}, err)
 	}))
 	mux.HandleFunc("POST /api/v2/auth/password", member(func(w http.ResponseWriter, r *http.Request) {
 		var in struct{ Old, New string }
@@ -441,6 +492,33 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 		}
 		n, err := s.ImportClients(r.Context(), recs)
 		reply(w, map[string]int{"imported": n}, err)
+	}))
+	mux.HandleFunc("GET /api/v2/admin/staff", guard(func(w http.ResponseWriter, r *http.Request) {
+		list, err := s.Staff(r.Context())
+		reply(w, list, err)
+	}))
+	mux.HandleFunc("PUT /api/v2/admin/staff/{user}", guard(func(w http.ResponseWriter, r *http.Request) {
+		var in struct{ Role, Password string }
+		if !decode(w, r, &in) {
+			return
+		}
+		err := s.PutStaff(r.Context(), r.PathValue("user"), in.Role, in.Password)
+		reply(w, map[string]bool{"ok": err == nil}, err)
+	}))
+	mux.HandleFunc("DELETE /api/v2/admin/staff/{user}", guard(func(w http.ResponseWriter, r *http.Request) {
+		if r.PathValue("user") == who(r).User {
+			reply(w, nil, fmt.Errorf("%w: you cannot delete your own login", ErrInvalid))
+			return
+		}
+		err := s.DeleteStaff(r.Context(), r.PathValue("user"))
+		reply(w, map[string]bool{"ok": err == nil}, err)
+	}))
+	mux.HandleFunc("GET /api/v2/admin/audit", guard(func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		before, _ := strconv.ParseInt(q.Get("before"), 10, 64)
+		limit, _ := strconv.Atoi(q.Get("limit"))
+		list, err := s.AuditLog(r.Context(), q.Get("actor"), q.Get("q"), before, limit)
+		reply(w, list, err)
 	}))
 	mux.HandleFunc("GET /api/v2/admin/backup", guard(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/gzip")

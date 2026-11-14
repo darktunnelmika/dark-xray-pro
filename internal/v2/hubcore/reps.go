@@ -257,17 +257,21 @@ type Principal struct {
 	User  string
 	Role  string // owner | rep
 	RepID string
+	Level string // "" = full owner; admin | viewer = staff with the owner's scope (staff.go)
 }
 
 func (s *Store) principal(ctx context.Context, user string) (Principal, error) {
 	p := Principal{User: user}
 	err := s.ro.QueryRowContext(ctx, `SELECT role,rep_id FROM admins WHERE username=?`, user).Scan(&p.Role, &p.RepID)
+	if p.Role == "admin" || p.Role == "viewer" {
+		p.Level, p.Role, p.RepID = p.Role, "owner", ""
+	}
 	return p, err
 }
 
 // ChangePassword checks the current password first.
 func (s *Store) ChangePassword(ctx context.Context, user, oldPass, newPass string) error {
-	if _, err := s.Login(ctx, user, oldPass); err != nil {
+	if _, _, err := s.verifyPassword(ctx, user, oldPass); err != nil {
 		return ErrAuth
 	}
 	var role, rep string

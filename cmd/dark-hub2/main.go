@@ -198,7 +198,11 @@ func main() {
 		if err := s.SetAdmin(ctx, *name, pass); err != nil {
 			log.Fatal(err)
 		}
-		fmt.Println("owner login saved:", *name)
+		// Server-side reset is also the recovery path for a lost authenticator.
+		if err := s.ClearTOTP(ctx, *name); err != nil {
+			log.Fatal(err)
+		}
+		fmt.Println("owner login saved (two-step login cleared):", *name)
 	case "restore":
 		// dark-hub2 restore -db v2.sqlite -file backup.sqlite.gz   (stop the service first)
 		s.Close()

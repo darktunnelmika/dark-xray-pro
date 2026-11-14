@@ -54,17 +54,21 @@ ON CONFLICT(username) DO UPDATE SET pass_hash=excluded.pass_hash`, user, string(
 	return err
 }
 
-// Login checks a password and returns a new session token.
+// Login checks a password and returns a new session token. A login with
+// two-step on needs LoginTOTP.
 func (s *Store) Login(ctx context.Context, user, pass string) (string, error) {
-	var h string
-	err := s.ro.QueryRowContext(ctx, `SELECT pass_hash FROM admins WHERE username=?`, user).Scan(&h)
+	return s.LoginTOTP(ctx, user, pass, "")
+}
+
+// LoginTOTP checks the password, then the authenticator code when the login
+// has two-step on (ErrTOTPRequired when it is missing).
+func (s *Store) LoginTOTP(ctx context.Context, user, pass, code string) (string, error) {
+	secret, last, err := s.verifyPassword(ctx, user, pass)
 	if err != nil {
-		// Spend comparable time on unknown users.
-		_ = bcrypt.CompareHashAndPassword(dummyHash(), []byte(pass))
-		return "", ErrAuth
+		return "", err
 	}
-	if bcrypt.CompareHashAndPassword([]byte(h), []byte(pass)) != nil {
-		return "", ErrAuth
+	if err := s.checkTOTP(ctx, user, secret, last, code); err != nil {
+		return "", err
 	}
 	tok := randomHex(32)
 	now := s.now()
@@ -74,6 +78,21 @@ func (s *Store) Login(ctx context.Context, user, pass string) (string, error) {
 	_, err = s.db.ExecContext(ctx, `INSERT INTO sessions(token_sha256,username,expires_unix) VALUES(?,?,?)`,
 		hashToken(tok), user, now.Add(sessionTTL).Unix())
 	return tok, err
+}
+
+// verifyPassword checks a password and returns the login's TOTP state.
+func (s *Store) verifyPassword(ctx context.Context, user, pass string) (secret string, last int64, err error) {
+	var h string
+	err = s.ro.QueryRowContext(ctx, `SELECT pass_hash,totp_secret,totp_last FROM admins WHERE username=?`, user).Scan(&h, &secret, &last)
+	if err != nil {
+		// Spend comparable time on unknown users.
+		_ = bcrypt.CompareHashAndPassword(dummyHash(), []byte(pass))
+		return "", 0, ErrAuth
+	}
+	if bcrypt.CompareHashAndPassword([]byte(h), []byte(pass)) != nil {
+		return "", 0, ErrAuth
+	}
+	return secret, last, nil
 }
 
 // SessionUser resolves a session token.

@@ -29,6 +29,8 @@ var (
 	ErrNotFound = errors.New("not found")
 	ErrInvalid  = errors.New("invalid")
 	ErrAuth     = errors.New("unauthorized")
+	// ErrTOTPRequired: the password was right and the login has two-step on.
+	ErrTOTPRequired = errors.New("2fa code required")
 )
 
 var idRE = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,62}$`)
@@ -157,6 +159,14 @@ func Open(path string) (*Store, error) {
 		return nil, err
 	}
 	if err := st.ensureRepSchema(); err != nil {
+		st.Close()
+		return nil, err
+	}
+	if err := st.ensureStaffSchema(); err != nil {
+		st.Close()
+		return nil, err
+	}
+	if err := st.ensureTOTPSchema(); err != nil {
 		st.Close()
 		return nil, err
 	}
