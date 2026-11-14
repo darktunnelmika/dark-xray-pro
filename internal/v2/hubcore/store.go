@@ -117,6 +117,7 @@ CREATE INDEX IF NOT EXISTS events_unix ON events(unix);
 // connection serialises short transactions; readers use their own pool.
 type Store struct {
 	logins loginGuard // wrong-password counters (security.go)
+	gate   gateState  // secret panel path (panelpath.go)
 
 	db   *sql.DB
 	ro   *sql.DB

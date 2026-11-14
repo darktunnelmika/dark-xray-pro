@@ -126,3 +126,60 @@ func TestSessions(t *testing.T) {
 		t.Fatal("this session stays")
 	}
 }
+
+func TestPanelPathGate(t *testing.T) {
+	s, _ := newStore(t)
+	ctx := context.Background()
+	if err := s.SetAdmin(ctx, "boss", "correct horse battery"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetPanelPath(ctx, "bad"); err == nil {
+		t.Fatal("too short")
+	}
+	if err := s.SetPanelPath(ctx, "/k9-door_77/"); err != nil {
+		t.Fatal(err)
+	}
+	h := httptest.NewServer(AdminHandlerWith(s, "tok", "", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte("panel")) })))
+	defer h.Close()
+	noRedirect := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	get := func(path string, c *http.Cookie) int {
+		req, _ := http.NewRequest("GET", h.URL+path, nil)
+		if c != nil {
+			req.AddCookie(c)
+		}
+		resp, err := noRedirect.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		return resp.StatusCode
+	}
+	if c := get("/", nil); c != 404 {
+		t.Fatal("the panel hides without the path", c)
+	}
+	resp, err := http.Post(h.URL+"/api/v2/auth/login", "application/json", strings.NewReader(`{"Username":"boss","Password":"correct horse battery"}`))
+	if err != nil || resp.StatusCode != 404 {
+		t.Fatal("sign-in hides too", resp.StatusCode)
+	}
+	req, _ := http.NewRequest("GET", h.URL+"/k9-door_77/", nil)
+	r2, err := noRedirect.Do(req)
+	if err != nil || r2.StatusCode != 302 || len(r2.Cookies()) == 0 {
+		t.Fatal("the secret path opens the gate", r2.StatusCode)
+	}
+	gate := r2.Cookies()[0]
+	if c := get("/", gate); c != 200 {
+		t.Fatal("with the gate cookie the panel shows", c)
+	}
+	req, _ = http.NewRequest("GET", h.URL+"/api/v2/admin/nodes", nil)
+	req.Header.Set("Authorization", "Bearer tok")
+	if r3, _ := http.DefaultClient.Do(req); r3.StatusCode != 200 {
+		t.Fatal("scripts are not affected", r3.StatusCode)
+	}
+	if c := get("/sub/nothing", nil); c != 404 {
+		t.Fatal(c)
+	}
+	_ = s.SetPanelPath(ctx, "")
+	if c := get("/", nil); c != 200 {
+		t.Fatal("off again", c)
+	}
+}

@@ -242,7 +242,11 @@ func main() {
 		if err := s.ClearTOTP(ctx, *name); err != nil {
 			log.Fatal(err)
 		}
-		fmt.Println("owner login saved (two-step login cleared):", *name)
+		// ...and for a forgotten secret panel address.
+		if err := s.SetPanelPath(ctx, ""); err != nil {
+			log.Fatal(err)
+		}
+		fmt.Println("owner login saved (two-step login and secret panel path cleared):", *name)
 	case "migrate":
 		// dark-hub2 migrate -db v2.sqlite [-file old.sqlite] -inbounds a,b [-archived] [-apply]
 		// Reads the old panel's database (a private copy; the original is never

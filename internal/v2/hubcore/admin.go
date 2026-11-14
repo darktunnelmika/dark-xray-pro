@@ -144,6 +144,27 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 		reply(w, map[string]any{"ended": n}, err)
 	}))
 	telegramRoutes(s, mux, guard, func() []int64 { return tgDefaultOwners })
+	mux.HandleFunc("GET /api/v2/admin/panel-path", guard(func(w http.ResponseWriter, r *http.Request) {
+		reply(w, map[string]string{"path": s.Setting(r.Context(), "panel_path")}, nil)
+	}))
+	mux.HandleFunc("PUT /api/v2/admin/panel-path", guard(func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Path string `json:"path"`
+		}
+		if !decode(w, r, &in) {
+			return
+		}
+		err := s.SetPanelPath(r.Context(), in.Path)
+		if err == nil {
+			if p := s.Setting(r.Context(), "panel_path"); p != "" {
+				setGate(w, r, p) // this browser keeps its way in
+				notifyOwners(r.Context(), "🔐 آدرس مخفی پنل عوض شد: "+publicBase("", r)+"/"+p+"/\nاین پیام را نگه دارید؛ بدون این آدرس صفحهٔ ورود پیدا نمی‌شود.")
+			} else {
+				notifyOwners(r.Context(), "🔓 آدرس مخفی پنل خاموش شد.")
+			}
+		}
+		reply(w, map[string]string{"path": s.Setting(r.Context(), "panel_path")}, err)
+	}))
 	mux.HandleFunc("GET /api/v2/admin/system", guard(func(w http.ResponseWriter, r *http.Request) {
 		reply(w, s.System(r.Context()), nil)
 	}))
@@ -1312,7 +1333,7 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 	mux.HandleFunc("GET /api/v2/admin/docs", member(func(w http.ResponseWriter, r *http.Request) {
 		reply(w, routes, nil)
 	}))
-	return mux.ServeMux
+	return s.panelGate(mux.ServeMux)
 }
 
 func b64(s string) string { return sub.Base64([]string{s}) }

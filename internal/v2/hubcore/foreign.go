@@ -452,10 +452,10 @@ func readXUI(ctx context.Context, db *sql.DB, rep *ForeignReport) ([]foreignInbo
 		return nil, nil, err
 	}
 	type xin struct {
-		id                                                   int
+		id                                                  int
 		remark, listen, proto, settings, stream, sniff, tag string
-		enable                                               bool
-		port                                                 int
+		enable                                              bool
+		port                                                int
 	}
 	var list []xin
 	for rows.Next() {

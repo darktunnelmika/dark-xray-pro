@@ -2980,6 +2980,88 @@ function tgCommerceCard() {
   return card;
 }
 
+// ---------- Move from 3x-ui / Marzban / PasarGuard, secret panel address ----------
+const S4 = {
+  fa: { fTitle: "انتقال از 3x-ui، Marzban یا PasarGuard", fHint: "فایل دیتابیس پنل قبلی را بدهید: در 3x-ui فایل \u2066/etc/x-ui/x-ui.db\u2069، در Marzban فایل \u2066/var/lib/marzban/db.sqlite3\u2069 و در PasarGuard فایل \u2066/var/lib/pasarguard/db.sqlite3\u2069. کاربرها با همان UUID و رمز Trojan، حجم، انقضا، محدودیت IP، مصرف و آیدی تلگرام منتقل می‌شوند و اینباندهای 3x-ui و PasarGuard روی نودی که انتخاب می‌کنید ساخته می‌شوند. لینک‌های اشتراک قبلی هم جواب می‌دهند، به شرطی که دامنهٔ قبلی را به این سرور وصل کنید. فایل فقط خوانده می‌شود. اول پیش‌نمایش بگیرید.",
+    fFile: "فایل دیتابیس", fNode: "نود اینباندهای منتقل‌شده", fAddr: "آدرسی که کاربرها وصل می‌شوند (خالی = IP نود)", fExtra: "این اینباندهای موجود هم به کاربرهای منتقل‌شده داده شود",
+    fWould: "پیش‌نمایش ({k}) — هنوز چیزی نوشته نشده:", fGot: "منتقل شد ({k}):", f_inbounds: "اینباند", f_clients: "کاربر", f_disabled: "غیرفعال", f_usage: "با مصرف", f_reps: "نماینده", f_logins: "ورود پنل", f_links: "لینک قبلی حفظ‌شده",
+    fAsk: "همین حالا منتقل شود؟ نام‌های موجود رد می‌شوند و هرگز بازنویسی نمی‌شوند.", fNeedFile: "اول فایل دیتابیس را انتخاب کنید.",
+    ppTitle: "آدرس مخفی پنل", ppHint: "با آدرس مخفی، صفحهٔ ورود و پنل فقط از آدرس مخفی باز می‌شوند و بقیه خطای ۴۰۴ می‌بینند، پس اسکنرها و حدس‌زن‌ها اصلاً صفحهٔ ورود را پیدا نمی‌کنند. هر مرورگر فقط یک بار باید این آدرس را باز کند. اسکریپت‌ها و کلیدهای API، لینک‌های اشتراک و نصب نود تغییری نمی‌کنند. آدرس برای مالک‌ها در تلگرام هم فرستاده می‌شود. اگر گمش کردید، دستور \u2066dark-hub2 admin\u2069 روی سرور آن را پاک می‌کند.",
+    ppPath: "مسیر مخفی (۶ تا ۶۴ حرف، عدد، - یا _)", ppRandom: "ساخت تصادفی", ppSave: "ذخیره", ppOff: "خاموش کردن", ppNow: "آدرس پنل: {x}", ppNone: "خاموش — پنل از ریشهٔ آدرس باز می‌شود.", ppCopy: "کپی آدرس", ppAsk: "آدرس مخفی ذخیره شود؟ این مرورگر باز می‌ماند؛ بقیهٔ دستگاه‌ها باید یک بار آدرس جدید را باز کنند." },
+  en: { fTitle: "Move from 3x-ui, Marzban or PasarGuard", fHint: "Give the old panel's database file: /etc/x-ui/x-ui.db for 3x-ui, /var/lib/marzban/db.sqlite3 for Marzban, /var/lib/pasarguard/db.sqlite3 for PasarGuard. Clients keep their UUID and Trojan password, volume, expiry, IP limit, usage and Telegram id; 3x-ui and PasarGuard inbounds are created on the node you pick. Old subscription links keep answering once the old domain points here. The file is only read — preview first.",
+    fFile: "Database file", fNode: "Node for the moved inbounds", fAddr: "Address clients connect to (empty = the node's IP)", fExtra: "Also give the moved clients these existing inbounds",
+    fWould: "Preview ({k}) — nothing written yet:", fGot: "Moved ({k}):", f_inbounds: "inbounds", f_clients: "clients", f_disabled: "disabled", f_usage: "with usage", f_reps: "resellers", f_logins: "logins", f_links: "old links kept",
+    fAsk: "Move it into this panel now? Existing names are skipped, never overwritten.", fNeedFile: "Pick the database file first.",
+    ppTitle: "Secret panel address", ppHint: "With a secret address the sign-in page and the panel only open from it; everyone else gets 404, so scanners and guessers never find a login page. Each browser opens the address once. Scripts and API keys, subscription links and node installs are not affected. The address is also sent to the owners on Telegram; if you lose it, run dark-hub2 admin on the server to clear it.",
+    ppPath: "Secret path (6–64 letters, digits, - or _)", ppRandom: "Random", ppSave: "Save", ppOff: "Turn off", ppNow: "Panel address: {x}", ppNone: "Off — the panel opens at the root address.", ppCopy: "Copy address", ppAsk: "Save the secret address? This browser stays in; other devices open the new address once." },
+};
+const s4 = (k, vars) => { let s = (S4[lang] || S4.en)[k] ?? S4.en[k] ?? k; for (const [a, b] of Object.entries(vars || {})) s = s.replaceAll(`{${a}}`, b); return s; };
+
+function foreignCard() {
+  const out = h("div", { class: "form" });
+  const file = h("input", { type: "file", accept: ".db,.sqlite,.sqlite3,application/octet-stream" });
+  const node = h("select", {}, h("option", { value: "" }, "—"));
+  const addr = h("input", { dir: "ltr", placeholder: "vpn.example.com" });
+  const ins = h("div", { class: "chips" }, h("span", { class: "muted small" }, "…"));
+  api("GET", "/api/v2/admin/nodes").then((list) => fill(node, (list || []).map((n, i) => h("option", { value: n.ID, selected: i === 0 }, `${n.Name || n.ID}${n.PublicIP ? ` · ${n.PublicIP}` : ""}`)))).catch(() => {});
+  api("GET", "/api/v2/admin/inbounds").then((list) => fill(ins, (list || []).map((i) => h("label", { class: "check" }, h("input", { type: "checkbox", value: i.tag }), h("span", {}, i.tag))))).catch(() => {});
+  const show = (r, dry) => {
+    const keys = ["clients", "disabled", "usage", "reps", "logins", "links"];
+    fill(out, h("p", { class: "small" }, h("b", {}, s4(dry ? "fWould" : "fGot", { k: r.kind }))),
+      h("div", { class: "chips" }, h("span", { class: `badge ${r.inbounds.length ? "good" : ""}` }, `${fmtNum(r.inbounds.length)} ${s4("f_inbounds")}`),
+        keys.map((k) => h("span", { class: `badge ${r[k] ? "good" : ""}` }, `${fmtNum(r[k] || 0)} ${s4("f_" + k)}`))),
+      r.inbounds.length ? h("div", { class: "small muted", dir: "ltr" }, r.inbounds.join("  ")) : null,
+      r.skipped?.length ? h("details", {}, h("summary", { class: "small" }, `${t("migSkipped")} (${fmtNum(r.skipped.length)})`), h("ul", { class: "small muted", dir: "ltr" }, r.skipped.map((x) => h("li", {}, x)))) : null,
+      r.notes?.length ? h("details", { open: true }, h("summary", { class: "small" }, `${t("migNotes")} (${fmtNum(r.notes.length)})`), h("ul", { class: "small muted", dir: "ltr" }, r.notes.map((x) => h("li", {}, x)))) : null);
+  };
+  const run = async (dry, btn) => {
+    if (!file.files[0]) { fill(out, h("p", { class: "error" }, s4("fNeedFile"))); return; }
+    if (!dry && !await confirmAction(s4("fAsk"), t("migImport"))) return;
+    btn.disabled = true; fill(out, h("p", { class: "muted small" }, t("migWorking")));
+    const q = new URLSearchParams({ dry_run: dry ? "1" : "0", node: node.value, address: addr.value.trim(),
+      inbounds: [...ins.querySelectorAll("input:checked")].map((x) => x.value).join(",") });
+    try {
+      const res = await fetch(`/api/v2/admin/migrate/foreign?${q}`, { method: "POST", credentials: "same-origin", body: file.files[0], headers: { "X-Dark-Request": "1", "Content-Type": "application/octet-stream" } });
+      const text = await res.text();
+      if (!res.ok) throw new Error(text.trim() || res.statusText);
+      show(JSON.parse(text), dry);
+      if (!dry) toast(t("migDone"));
+    } catch (x) { fill(out, h("p", { class: "error" }, x.message)); }
+    finally { btn.disabled = false; }
+  };
+  const preview = h("button", { onclick: () => run(true, preview) }, t("migPreview"));
+  const imp = h("button", { class: "primary", onclick: () => run(false, imp) }, t("migImport"));
+  return h("div", { class: "card form" }, h("h2", {}, s4("fTitle")), h("p", { class: "small muted" }, s4("fHint")),
+    h("label", {}, h("span", {}, s4("fFile")), file),
+    h("div", { class: "two" }, h("label", {}, h("span", {}, s4("fNode")), node), h("label", {}, h("span", {}, s4("fAddr")), addr)),
+    h("div", { class: "small muted" }, s4("fExtra")), ins,
+    h("div", { class: "row" }, preview, imp), out);
+}
+
+function panelPathCard() {
+  const card = h("div", { class: "card form" });
+  const draw = (cur) => {
+    const input = h("input", { dir: "ltr", value: cur || "", placeholder: "my-door-82kq", pattern: "[A-Za-z0-9_-]{6,64}" });
+    const url = cur ? `${location.origin}/${cur}/` : "";
+    const err = h("div", { class: "error" });
+    const save = async (v) => {
+      err.textContent = "";
+      if (v && !(await confirmAction(s4("ppAsk"), s4("ppSave")))) return;
+      try { const r = await api("PUT", "/api/v2/admin/panel-path", { path: v }); toast(t("saved")); route(); return r; } catch (x) { err.textContent = x.message; }
+    };
+    fill(card, h("h2", {}, s4("ppTitle")), h("p", { class: "small muted" }, s4("ppHint")),
+      h("p", { class: "small" }, cur ? h("span", {}, s4("ppNow", { x: "" }), h("code", { dir: "ltr" }, url)) : h("span", { class: "muted" }, s4("ppNone"))),
+      h("label", {}, h("span", {}, s4("ppPath")), h("div", { class: "row tight" }, input,
+        h("button", { type: "button", class: "ghost", onclick: () => { const b = new Uint8Array(9); crypto.getRandomValues(b); input.value = btoa(String.fromCharCode(...b)).replace(/[+/=]/g, "").toLowerCase(); } }, s4("ppRandom")))),
+      err,
+      h("div", { class: "row" }, h("button", { class: "primary", onclick: () => { if (input.reportValidity()) save(input.value.trim()); } }, s4("ppSave")),
+        cur ? h("button", { onclick: () => copy(url) }, s4("ppCopy")) : null,
+        cur ? h("button", { class: "ghost danger spacer", onclick: () => save("") }, s4("ppOff")) : null));
+  };
+  api("GET", "/api/v2/admin/panel-path").then((r) => draw(r.path)).catch((x) => fill(card, h("p", { class: "error" }, x.message)));
+  return card;
+}
+
 function migrateCard() {
   const out = h("div", { class: "form" });
   const srcServer = h("input", { type: "radio", name: "migsrc", checked: true });
@@ -3222,7 +3304,7 @@ function viewSettings() {
       fill(tgOut, r.link ? h("a", { class: "btn", href: r.link, target: "_blank", rel: "noopener" }, t("openBot")) : null,
         h("code", {}, `/start rep_${r.code}`), h("p", { class: "small muted" }, t("codeExpires")));
     } }, t("connectTelegram"))) : null;
-  return h("div", { class: "form" }, h("h1", {}, t("settings")), me.role === "owner" ? subSettingsCard() : null, me.role === "owner" ? trustedCard() : null, fullOwner() ? panelHTTPSCard() : null, me.role === "owner" ? tgCommerceCard() : null, fullOwner() ? migrateCard() : null, pwForm, tfaCard(), sessionsCard(), fullOwner() ? telegramBotCard() : null, tgCard, backupCard,
+  return h("div", { class: "form" }, h("h1", {}, t("settings")), me.role === "owner" ? subSettingsCard() : null, me.role === "owner" ? trustedCard() : null, fullOwner() ? panelHTTPSCard() : null, fullOwner() ? panelPathCard() : null, me.role === "owner" ? tgCommerceCard() : null, fullOwner() ? migrateCard() : null, fullOwner() ? foreignCard() : null, pwForm, tfaCard(), sessionsCard(), fullOwner() ? telegramBotCard() : null, tgCard, backupCard,
     h("div", { class: "card form" },
       h("label", {}, h("span", {}, t("language")), langSel),
       h("label", {}, h("span", {}, t("theme")), themeSel),
