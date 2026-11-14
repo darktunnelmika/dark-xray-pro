@@ -84,7 +84,8 @@ func TestStaffRolesAndAudit(t *testing.T) {
 	}
 	code, b := call(boss, "GET", "/api/v2/admin/audit?q=amir", "")
 	var log []AuditEntry
-	if code != 200 || json.Unmarshal([]byte(b), &log) != nil || len(log) != 1 || log[0].Actor != "helper" || log[0].Role != "admin" || log[0].Status != 200 || log[0].Method != "PUT" {
+	// Newest first: the viewer's refused delete, then the helper's change.
+	if code != 200 || json.Unmarshal([]byte(b), &log) != nil || len(log) != 2 || log[0].Status != 403 || log[1].Actor != "helper" || log[1].Role != "admin" || log[1].Status != 200 || log[1].Method != "PUT" {
 		t.Fatalf("audit %d %s", code, b)
 	}
 	code, b = call(boss, "GET", "/api/v2/admin/audit?actor=watcher", "")
