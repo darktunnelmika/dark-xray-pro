@@ -755,7 +755,7 @@ func TestPresetsRenderForEveryProtocol(t *testing.T) {
 		}
 	}
 	links, _, err := s.Subscription(ctx, "all")
-	if err != nil || len(links) != len(Presets)+3-3 { // fallback lists its three WebSocket routes too; socks, http and port forward are not in subscriptions
+	if err != nil || len(links) != len(Presets)+3-5 { // fallback lists its three WebSocket routes too; socks, http, port forward, AmneziaWG (.conf) and MTProto (tg:// link) are not in subscriptions
 		t.Fatalf("%v %d links: %v", err, len(links), links)
 	}
 	// A broken shadowsocks template is refused.
