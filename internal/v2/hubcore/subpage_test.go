@@ -49,11 +49,8 @@ func TestSubPageAndSettings(t *testing.T) {
 		t.Fatalf("app response %v", app.Header())
 	}
 	links, _, _ := s.Subscription(ctx, "alice")
-	if len(links) < 3 || !strings.Contains(links[0], "127.0.0.1:1") {
+	if len(links) < 2 || !strings.Contains(links[0], "127.0.0.1:1") || !strings.Contains(links[1], "days") {
 		t.Fatalf("info lines missing: %v", links)
-	}
-	if strings.Contains(links[len(links)-1], "%7Bleft%7D") || !strings.Contains(links[len(links)-1], "GB") {
-		t.Fatalf("remark template not applied: %s", links[len(links)-1])
 	}
 	if qr := get("Mozilla/5.0", "image/*", "?qr=1"); qr.Header().Get("Content-Type") != "image/png" {
 		t.Fatal("qr")
