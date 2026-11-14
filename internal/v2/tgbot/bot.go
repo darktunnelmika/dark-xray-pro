@@ -175,9 +175,7 @@ func (b *Bot) onMessage(ctx context.Context, m *Message) {
 			b.send(ctx, chat, "این کد معتبر نیست یا منقضی شده. از پنل یک کد تازه بگیرید.", nil)
 			return
 		}
-		b.send(ctx, chat, "✅ تلگرام شما به نمایندگی <b>"+esc(rep)+"</b> وصل شد.
-
-"+repHelp, nil)
+		b.send(ctx, chat, "✅ تلگرام شما به نمایندگی <b>"+esc(rep)+"</b> وصل شد.\n\n"+repHelp, nil)
 		return
 	}
 	if rep := b.Store.TgRep(ctx, chat); rep != "" {
