@@ -310,3 +310,51 @@ details.rule[open] > summary { margin-block-end: 10px; }
 details.rule.off { opacity: .55; }
 details > summary.small { cursor: pointer; margin-block: 6px; }
 .cfgview { max-height: 60vh; overflow: auto; font-size: 12px; white-space: pre; padding: 10px; border-radius: 10px; background: var(--surface-2); }
+
+/* Clients table */
+.chips { display: flex; gap: 6px; flex-wrap: wrap; margin-block: 14px 8px; }
+.chip { display: inline-flex; gap: 6px; align-items: center; padding: 6px 12px; border-radius: 99px; background: var(--surface-2); border: 1px solid var(--glass-line); color: var(--muted); font-weight: 600; cursor: pointer; }
+.chip .count { font-size: 11px; padding: 1px 7px; border-radius: 99px; background: color-mix(in oklab, var(--text) 8%, transparent); color: var(--text); }
+.chip.on { color: var(--text); border-color: color-mix(in oklab, var(--cyan) 60%, transparent); box-shadow: 0 0 0 1px color-mix(in oklab, var(--cyan) 35%, transparent), 0 0 18px color-mix(in oklab, var(--cyan) 22%, transparent); }
+.chip.online .count { color: var(--good); } .chip.expiring .count { color: var(--warn); } .chip.bad .count, .chip.disabled .count { color: var(--bad); }
+.toolbar { margin-block-end: 8px; } .toolbar .search { flex: 1; min-width: 180px; }
+.bulkbar { position: sticky; inset-block-start: 8px; z-index: 6; padding: 8px 12px; border-radius: 14px; margin-block-end: 8px;
+  background: color-mix(in oklab, var(--surface-2) 85%, var(--cyan) 15%); border: 1px solid color-mix(in oklab, var(--cyan) 40%, transparent); backdrop-filter: blur(14px); }
+.tablecard { padding: 0; overflow: visible; }
+table.dtable { width: 100%; border-collapse: separate; border-spacing: 0; }
+table.dtable th { position: sticky; inset-block-start: 0; z-index: 2; text-align: start; font-size: 12px; font-weight: 600; color: var(--muted); padding: 10px 12px;
+  background: color-mix(in oklab, var(--bg) 88%, transparent); backdrop-filter: blur(10px); border-block-end: 1px solid var(--glass-line); white-space: nowrap; }
+table.dtable th.sortable { cursor: pointer; user-select: none; } table.dtable th.sortable:hover { color: var(--text); }
+.sortmark { margin-inline-start: 4px; font-size: 9px; color: var(--cyan); }
+table.dtable td { padding: 10px 12px; border-block-end: 1px solid color-mix(in oklab, var(--glass-line) 60%, transparent); vertical-align: middle; }
+table.dtable tbody tr { transition: background .15s; }
+table.dtable tbody tr:hover { background: color-mix(in oklab, var(--cyan) 6%, transparent); }
+table.dtable .c-sel { inline-size: 36px; } table.dtable .c-sel input { inline-size: 16px; block-size: 16px; }
+table.dtable .c-act { inline-size: 44px; text-align: end; }
+table.dtable td.empty { text-align: center; padding: 28px; }
+.muted-row td { opacity: .6; }
+.good-text { color: var(--good); font-weight: 600; }
+.clip { max-inline-size: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bar.slim { block-size: 4px; margin-block-start: 5px; max-inline-size: 180px; }
+.rowmenu { position: relative; display: inline-block; }
+.rowmenu > summary { list-style: none; cursor: pointer; padding: 2px 10px; border-radius: 8px; font-size: 18px; line-height: 1; }
+.rowmenu > summary::-webkit-details-marker { display: none; }
+.rowmenu > summary:hover, .rowmenu[open] > summary { background: var(--surface-2); }
+.rowmenu .menu { position: absolute; inset-inline-end: 0; inset-block-start: 110%; z-index: 20; min-inline-size: 170px; display: grid; gap: 2px; padding: 6px;
+  border-radius: 12px; background: color-mix(in oklab, var(--bg) 94%, var(--cyan) 6%); border: 1px solid var(--glass-line); box-shadow: 0 14px 40px rgba(0,0,0,.35); }
+.rowmenu .menu button { justify-content: flex-start; text-align: start; background: transparent; border: 0; padding: 8px 10px; }
+.rowmenu .menu button:hover { background: var(--surface-2); }
+.pager { margin-block: 10px; }
+@media (max-width: 720px) {
+  table.dtable thead { display: none; }
+  table.dtable, table.dtable tbody, table.dtable tr, table.dtable td { display: block; }
+  table.dtable tr { position: relative; padding: 10px 12px; border-block-end: 1px solid var(--glass-line); }
+  table.dtable td { border: 0; padding: 3px 0; }
+  table.dtable td[data-label]::before { content: attr(data-label); display: inline-block; min-inline-size: 90px; color: var(--muted); font-size: 12px; }
+  table.dtable td.c-user::before { display: none; }
+  table.dtable .c-sel { position: absolute; inset-inline-start: 10px; inset-block-start: 12px; }
+  table.dtable .c-user { padding-inline-start: 28px; }
+  table.dtable .c-act { position: absolute; inset-inline-end: 8px; inset-block-start: 8px; }
+}
+table.dtable.compact td { padding: 6px 8px; }
+table.dtable.compact tr:last-child td { border-block-end: 0; }

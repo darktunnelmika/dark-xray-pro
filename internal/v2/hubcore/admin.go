@@ -294,6 +294,36 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 		list, err := s.ClientDailyUsage(r.Context(), r.PathValue("email"), days)
 		reply(w, list, err)
 	}))
+	mux.HandleFunc("GET /api/v2/admin/clients/{email}/ips", member(func(w http.ResponseWriter, r *http.Request) {
+		p := who(r)
+		if p.Role == "rep" && !s.ownsClient(r.Context(), p.RepID, r.PathValue("email")) {
+			http.NotFound(w, r)
+			return
+		}
+		list, err := s.ClientIPs(r.Context(), r.PathValue("email"))
+		reply(w, list, err)
+	}))
+	mux.HandleFunc("GET /api/v2/admin/clients/{email}/resets", member(func(w http.ResponseWriter, r *http.Request) {
+		p := who(r)
+		if p.Role == "rep" && !s.ownsClient(r.Context(), p.RepID, r.PathValue("email")) {
+			http.NotFound(w, r)
+			return
+		}
+		list, err := s.UsageResets(r.Context(), r.PathValue("email"))
+		reply(w, list, err)
+	}))
+	mux.HandleFunc("POST /api/v2/admin/clients/{email}/reset", guard(func(w http.ResponseWriter, r *http.Request) {
+		reply(w, map[string]bool{"ok": true}, s.ResetUsage(r.Context(), r.PathValue("email"), "manual"))
+	}))
+	mux.HandleFunc("PUT /api/v2/admin/clients/{email}/reset-period", guard(func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Period string `json:"period"`
+		}
+		if !decode(w, r, &in) {
+			return
+		}
+		reply(w, map[string]bool{"ok": true}, s.SetResetPeriod(r.Context(), r.PathValue("email"), in.Period))
+	}))
 	mux.HandleFunc("GET /api/v2/admin/insights", guard(func(w http.ResponseWriter, r *http.Request) {
 		days, _ := strconv.Atoi(r.URL.Query().Get("days"))
 		in, err := s.Insights(r.Context(), days)

@@ -168,6 +168,15 @@ ON CONFLICT(tag,node_id,day) DO UPDATE SET up=up+excluded.up, down=down+excluded
 			if _, err := tx.ExecContext(ctx, `INSERT OR REPLACE INTO online(email,node_id,ips,seen_unix) VALUES(?,?,?,?)`, o.Email, nodeID, string(ips), ts); err != nil {
 				return wire.UsageAck{}, err
 			}
+			for i, ip := range o.IPs {
+				if i >= 32 || len(ip) > 64 {
+					break
+				}
+				if _, err := tx.ExecContext(ctx, `INSERT INTO ip_log(email,ip,node_id,first_unix,last_unix) VALUES(?,?,?,?,?)
+ON CONFLICT(email,ip,node_id) DO UPDATE SET last_unix=MAX(last_unix,excluded.last_unix)`, o.Email, ip, nodeID, ts, ts); err != nil {
+					return wire.UsageAck{}, err
+				}
+			}
 		}
 	}
 	for _, d := range b.Disconnects {
@@ -188,6 +197,9 @@ ON CONFLICT(tag,node_id,day) DO UPDATE SET up=up+excluded.up, down=down+excluded
 func (s *Store) Prune(ctx context.Context, keepDays int) error {
 	cut := s.now().AddDate(0, 0, -keepDays)
 	if _, err := s.db.ExecContext(ctx, `DELETE FROM usage_daily WHERE day < ?`, cut.UTC().Format("2006-01-02")); err != nil {
+		return err
+	}
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM ip_log WHERE last_unix < ?`, s.now().Add(-30*24*time.Hour).Unix()); err != nil {
 		return err
 	}
 	if _, err := s.db.ExecContext(ctx, `DELETE FROM node_history WHERE bucket < ?`, s.now().Add(-7*24*time.Hour).Unix()); err != nil {

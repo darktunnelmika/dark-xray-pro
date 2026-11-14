@@ -442,62 +442,204 @@ function clientStatus(c) {
   return [d <= 3 ? "warn" : "good", t("daysLeft", { n: fmtNum(d) })];
 }
 
+const CT = {
+  fa: { all: "همه", online: "آنلاین", active: "فعال", expiring: "رو به انقضا", bad: "تمام‌شده", disabled: "غیرفعال", user: "کاربر", usage: "مصرف", remain: "باقی‌مانده",
+    expiry: "انقضا", seen: "آخرین اتصال", actions: "", perPage: "در هر صفحه", page: "صفحهٔ {p} از {n}", prev: "قبلی", next: "بعدی", none: "کلاینتی با این فیلتر نیست.",
+    reset: "صفر کردن مصرف", resetAsk: "مصرف {x} صفر شود؟ مقدار فعلی در سابقه می‌ماند.", resetDone: "مصرف {n} کلاینت صفر شد", enable: "فعال کردن", disable: "غیرفعال کردن",
+    del: "حذف", delAsk: "{n} کلاینت حذف شوند؟", done: "{n} مورد انجام شد", never: "هرگز", now: "الان", ago: "{t} پیش", sub: "اشتراک", edit: "ویرایش", chart: "نمودار",
+    sel: "{n} انتخاب‌شده", clear: "لغو انتخاب", allFilters: "همهٔ گروه‌ها و اینباندها", sortBy: "مرتب‌سازی" },
+  en: { all: "All", online: "Online", active: "Active", expiring: "Expiring", bad: "Ended", disabled: "Disabled", user: "Client", usage: "Usage", remain: "Remaining",
+    expiry: "Expiry", seen: "Last seen", actions: "", perPage: "per page", page: "Page {p} of {n}", prev: "Prev", next: "Next", none: "No clients match.",
+    reset: "Reset usage", resetAsk: "Reset {x}'s usage? The current total stays in the history.", resetDone: "Usage reset for {n}", enable: "Enable", disable: "Disable",
+    del: "Delete", delAsk: "Delete {n} clients?", done: "{n} done", never: "never", now: "now", ago: "{t} ago", sub: "Subscription", edit: "Edit", chart: "Chart",
+    sel: "{n} selected", clear: "Clear", allFilters: "All groups and inbounds", sortBy: "Sort" },
+};
+
+function relTime(u, L) {
+  if (!u) return L.never;
+  const s = Date.now() / 1000 - u;
+  if (s < 120) return L.now;
+  const v = s < 3600 ? `${Math.round(s / 60)}m` : s < 86400 ? `${Math.round(s / 3600)}h` : `${Math.round(s / 86400)}d`;
+  return L.ago.replace("{t}", fmtNum(v));
+}
+
+function clientState(c) {
+  const now = Date.now() / 1000;
+  if (!c.Enabled) return "disabled";
+  if (c.Remaining === 0 || (c.EffectiveUntil && c.EffectiveUntil <= now)) return "bad";
+  if (c.EffectiveUntil && c.EffectiveUntil - now <= 3 * 86400) return "expiring";
+  return "active";
+}
+
+const putToggle = (c, on) => api("PUT", `/api/v2/admin/clients/${encodeURIComponent(c.Email)}`, {
+  Enabled: on, MaxIPs: c.MaxIPs, VolumeBytes: c.VolumeBytes, ExpiresUnix: c.ExpiresUnix, DurationSeconds: c.DurationSeconds, Inbounds: c.Inbounds || [], Plan: c.Plan || "" });
+
 async function viewClients() {
+  const L = CT[lang] || CT.en;
   const owner = me.role === "owner";
-  const [list, inbounds, groups, reps] = await Promise.all([
+  const [list0, inbounds, groups, reps] = await Promise.all([
     api("GET", "/api/v2/admin/clients"),
     owner ? api("GET", "/api/v2/admin/inbounds") : api("GET", "/api/v2/rep/inbounds").catch(() => []),
     owner ? api("GET", "/api/v2/admin/groups") : Promise.resolve([]),
     owner ? api("GET", "/api/v2/admin/reps") : Promise.resolve([]),
   ]);
+  const list = list0 || [];
   const ctx = { inbounds, groups: groups || [], reps: reps || [] };
+  const saved = (() => { try { return JSON.parse(localStorage.getItem("clients-view") || "{}"); } catch { return {}; } })();
+  const st = { q: "", state: saved.state || "", extra: "", sort: saved.sort || "created", dir: saved.dir || 1, page: 0, size: saved.size || 25 };
+  const remember = () => { try { localStorage.setItem("clients-view", JSON.stringify({ state: st.state, sort: st.sort, dir: st.dir, size: st.size })); } catch {} };
   const selected = new Set();
-  const box = h("div", { class: "list" });
-  const count = h("span", { class: "muted small" });
-  const q = h("input", { class: "search", type: "search", placeholder: t("search"), "aria-label": t("search") });
-  const filter = h("select", { "aria-label": t("all") }, [["", t("all")], ["online", t("filterOnline")], ["expiring", t("filterExpiring")], ["bad", t("filterExpired")], ["disabled", t("filterDisabled")]]
-    .map(([v, l]) => h("option", { value: v }, l)),
-    ctx.groups.map((g) => h("option", { value: `g:${g.ID}` }, `${t("group")}: ${g.Name || g.ID}`)),
-    (inbounds || []).map((ib) => h("option", { value: `i:${ib.tag}` }, `${t("inbounds")}: ${ib.tag}`)));
+  const used = (c) => c.Usage.Up + c.Usage.Down;
+  const counts = { "": list.length, online: 0, active: 0, expiring: 0, bad: 0, disabled: 0 };
+  for (const c of list) { counts[clientState(c)]++; if (c.Online) counts.online++; }
+  const keyOf = {
+    created: (c, i) => i, email: (c) => c.Email.toLowerCase(), usage: (c) => used(c),
+    remain: (c) => (c.Remaining < 0 ? Infinity : c.Remaining), expiry: (c) => c.EffectiveUntil || Infinity, seen: (c) => -(c.Usage.LastSeen || 0),
+  };
   const match = (c) => {
-    const f = filter.value, now = Date.now() / 1000;
-    if (q.value && !(c.Email + " " + (c.Note || "")).toLowerCase().includes(q.value.toLowerCase())) return false;
-    if (f === "online") return c.Online;
-    if (f === "disabled") return !c.Enabled;
-    if (f === "bad") return c.Remaining === 0 || (c.EffectiveUntil && c.EffectiveUntil <= now);
-    if (f === "expiring") return c.EffectiveUntil && c.EffectiveUntil > now && c.EffectiveUntil - now <= 3 * 86400;
-    if (f.startsWith("g:")) return (ctx.groups.find((g) => g.ID === f.slice(2))?.Members || []).includes(c.Email);
-    if (f.startsWith("i:")) return (c.Inbounds || []).includes(f.slice(2));
+    if (st.q && !(c.Email + " " + (c.Note || "")).toLowerCase().includes(st.q.toLowerCase())) return false;
+    if (st.state === "online" && !c.Online) return false;
+    if (st.state && st.state !== "online" && clientState(c) !== st.state) return false;
+    const f = st.extra;
+    if (f.startsWith("g:") && !(ctx.groups.find((g) => g.ID === f.slice(2))?.Members || []).includes(c.Email)) return false;
+    if (f.startsWith("i:") && !(c.Inbounds || []).includes(f.slice(2))) return false;
+    if (f.startsWith("r:") && (c.RepID || "") !== f.slice(2)) return false;
     return true;
   };
-  const bulkBtn = h("button", { onclick: () => bulkForm([...selected]), disabled: true }, t("bulkRenew"));
-  const sync = () => { count.textContent = selected.size ? t("selected", { n: fmtNum(selected.size) }) : t("clientsCount", { n: fmtNum((list || []).length) }); bulkBtn.disabled = selected.size === 0; };
-  const render = () => {
-    const rows = (list || []).filter(match);
-    box.replaceChildren(...(rows.length ? rows.map((c) => clientCard(c, ctx, owner ? selected : null, sync)) : [h("p", { class: "muted" }, t("empty"))]));
-    sync();
+
+  const chips = h("div", { class: "chips", role: "tablist" });
+  const q = h("input", { class: "search", type: "search", placeholder: t("search"), "aria-label": t("search") });
+  const extra = h("select", { "aria-label": L.allFilters }, h("option", { value: "" }, L.allFilters),
+    ctx.groups.map((g) => h("option", { value: `g:${g.ID}` }, `${t("group")}: ${g.Name || g.ID}`)),
+    (inbounds || []).map((ib) => h("option", { value: `i:${ib.tag}` }, `${t("inbounds")}: ${ib.tag}`)),
+    ctx.reps.map((r) => h("option", { value: `r:${r.ID}` }, `${t("reps")}: ${r.Name || r.ID}`)));
+  const table = h("table", { class: "dtable" });
+  const pager = h("div", { class: "row pager" });
+  const bulkBar = h("div", { class: "row bulkbar", hidden: true });
+
+  const sortHead = (key, label) => {
+    const th = h("th", { scope: "col", class: key ? "sortable" : "", "aria-sort": st.sort === key ? (st.dir > 0 ? "ascending" : "descending") : "none" }, label,
+      st.sort === key ? h("span", { class: "sortmark" }, st.dir > 0 ? "▲" : "▼") : null);
+    if (key) th.addEventListener("click", () => { st.dir = st.sort === key ? -st.dir : 1; st.sort = key; remember(); draw(); });
+    return th;
   };
-  q.addEventListener("input", render);
-  filter.addEventListener("change", render);
-  render();
+
+  function rowActions(c) {
+    const menu = h("details", { class: "rowmenu" }, h("summary", { "aria-label": t("edit") }, "⋯"),
+      h("div", { class: "menu" },
+        h("button", { onclick: () => showSub(c) }, L.sub),
+        h("button", { onclick: () => clientForm(c, inbounds, ctx) }, L.edit),
+        h("button", { onclick: () => usageChart(c) }, L.chart),
+        owner ? h("button", { onclick: async () => { if (await confirmText(L.resetAsk.replace("{x}", c.Email))) { await guarded(() => api("POST", `/api/v2/admin/clients/${encodeURIComponent(c.Email)}/reset`)); toast(L.resetDone.replace("{n}", "1")); route(); } } }, L.reset) : null,
+        h("button", { onclick: async () => { await guarded(() => putToggle(c, !c.Enabled)); route(); } }, c.Enabled ? L.disable : L.enable),
+        me.role === "rep" && me.policy && !me.policy.CanDelete ? null : h("button", { class: "danger", onclick: async () => {
+          if (!(await confirmAction(t("confirmDelete", { x: c.Email })))) return;
+          await guarded(() => api("DELETE", `/api/v2/admin/clients/${encodeURIComponent(c.Email)}`)); route();
+        } }, L.del)));
+    menu.addEventListener("toggle", () => { if (menu.open) document.querySelectorAll("details.rowmenu[open]").forEach((d) => { if (d !== menu) d.open = false; }); });
+    return menu;
+  }
+
+  function row(c) {
+    const u = used(c);
+    const pct = c.VolumeBytes > 0 ? Math.min(100, (u / c.VolumeBytes) * 100) : 0;
+    const [cls, status] = clientStatus(c);
+    const cb = h("input", { type: "checkbox", "aria-label": c.Email, checked: selected.has(c.Email) });
+    cb.addEventListener("change", () => { cb.checked ? selected.add(c.Email) : selected.delete(c.Email); syncBulk(); });
+    return h("tr", { class: c.Enabled ? "" : "muted-row" },
+      h("td", { class: "c-sel" }, cb),
+      h("td", { class: "c-user", "data-label": L.user },
+        h("div", { class: "row tight" }, h("span", { class: `dot ${c.Online ? "on" : ""}`, title: c.Online ? t("online") : t("offline") }),
+          h("a", { class: "name", href: `#/client?e=${encodeURIComponent(c.Email)}` }, c.Email)),
+        c.Note ? h("div", { class: "small muted clip" }, c.Note) : null),
+      h("td", { class: "c-usage", "data-label": L.usage },
+        h("div", { class: "small mono" }, `${bytes(u)} / ${c.VolumeBytes < 0 ? "∞" : bytes(c.VolumeBytes)}`),
+        c.VolumeBytes > 0 ? h("div", { class: "bar slim" }, h("i", { class: pct > 90 ? "bad" : pct > 75 ? "warn" : "", style: `inline-size:${pct}%` })) : null),
+      h("td", { class: "c-remain mono small", "data-label": L.remain }, c.Remaining < 0 ? "∞" : bytes(c.Remaining)),
+      h("td", { class: "c-exp", "data-label": L.expiry }, h("span", { class: `badge ${cls}` }, status),
+        c.ResetPeriod ? h("span", { class: "badge", title: "reset" }, "↻ " + c.ResetPeriod) : null),
+      h("td", { class: "c-seen small muted", "data-label": L.seen }, c.Online ? h("span", { class: "good-text" }, L.now) : relTime(c.Usage.LastSeen, L)),
+      h("td", { class: "c-act" }, rowActions(c)));
+  }
+
+  function syncBulk() {
+    bulkBar.hidden = selected.size === 0;
+    if (bulkBar.hidden) return;
+    const emails = [...selected];
+    const pick = list.filter((c) => selected.has(c.Email));
+    const run = async (fn) => { let n = 0; for (const c of pick) { try { await fn(c); n++; } catch {} } toast(L.done.replace("{n}", fmtNum(n))); selected.clear(); route(); };
+    bulkBar.replaceChildren(
+      h("b", {}, L.sel.replace("{n}", fmtNum(selected.size))),
+      owner ? h("button", { onclick: () => bulkForm(emails) }, t("bulkRenew")) : null,
+      owner ? h("button", { onclick: async () => { if (await confirmText(L.resetAsk.replace("{x}", `${fmtNum(emails.length)}`))) run((c) => api("POST", `/api/v2/admin/clients/${encodeURIComponent(c.Email)}/reset`)); } }, L.reset) : null,
+      h("button", { class: "ghost", onclick: () => run((c) => putToggle(c, true)) }, L.enable),
+      h("button", { class: "ghost", onclick: () => run((c) => putToggle(c, false)) }, L.disable),
+      me.role === "rep" && me.policy && !me.policy.CanDelete ? null : h("button", { class: "ghost danger", onclick: async () => {
+        if (await confirmAction(L.delAsk.replace("{n}", fmtNum(emails.length)))) run((c) => api("DELETE", `/api/v2/admin/clients/${encodeURIComponent(c.Email)}`));
+      } }, L.del),
+      h("button", { class: "ghost spacer", onclick: () => { selected.clear(); draw(); } }, L.clear));
+  }
+
+  function draw() {
+    chips.replaceChildren(...["", "online", "active", "expiring", "bad", "disabled"].map((k) => {
+      const b = h("button", { role: "tab", "aria-selected": st.state === k ? "true" : "false", class: `chip ${st.state === k ? "on" : ""} ${k}` },
+        k ? L[k] : L.all, h("span", { class: "count" }, fmtNum(counts[k])));
+      b.addEventListener("click", () => { st.state = k; st.page = 0; remember(); draw(); });
+      return b;
+    }));
+    const idx = new Map(list.map((c, i) => [c.Email, i]));
+    const rows = list.filter(match).sort((a, b) => {
+      const ka = keyOf[st.sort](a, idx.get(a.Email)), kb = keyOf[st.sort](b, idx.get(b.Email));
+      return (ka < kb ? -1 : ka > kb ? 1 : 0) * st.dir;
+    });
+    const pages = Math.max(1, Math.ceil(rows.length / st.size));
+    st.page = Math.min(st.page, pages - 1);
+    const view = rows.slice(st.page * st.size, (st.page + 1) * st.size);
+    const all = h("input", { type: "checkbox", "aria-label": L.all, checked: view.length > 0 && view.every((c) => selected.has(c.Email)) });
+    all.addEventListener("change", () => { for (const c of view) all.checked ? selected.add(c.Email) : selected.delete(c.Email); draw(); });
+    table.replaceChildren(
+      h("thead", {}, h("tr", {}, h("th", { class: "c-sel" }, all), sortHead("email", L.user), sortHead("usage", L.usage), sortHead("remain", L.remain),
+        sortHead("expiry", L.expiry), sortHead("seen", L.seen), h("th", {}, ""))),
+      h("tbody", {}, view.length ? view.map(row) : h("tr", {}, h("td", { colspan: 7, class: "muted empty" }, L.none))));
+    const size = h("select", { "aria-label": L.perPage }, [25, 50, 100, 250].map((n) => h("option", { value: n, selected: n === st.size }, `${n} ${L.perPage}`)));
+    size.addEventListener("change", () => { st.size = +size.value; st.page = 0; remember(); draw(); });
+    pager.replaceChildren(
+      h("span", { class: "small muted" }, `${fmtNum(rows.length)} / ${fmtNum(list.length)}`), h("span", { class: "spacer" }), size,
+      h("button", { class: "ghost", disabled: st.page === 0, onclick: () => { st.page--; draw(); } }, L.prev),
+      h("span", { class: "small" }, L.page.replace("{p}", fmtNum(st.page + 1)).replace("{n}", fmtNum(pages))),
+      h("button", { class: "ghost", disabled: st.page >= pages - 1, onclick: () => { st.page++; draw(); } }, L.next));
+    syncBulk();
+  }
+  let timer = 0;
+  q.addEventListener("input", () => { clearTimeout(timer); timer = setTimeout(() => { st.q = q.value.trim(); st.page = 0; draw(); }, 150); });
+  extra.addEventListener("change", () => { st.extra = extra.value; st.page = 0; draw(); });
+  draw();
+
   const nowS = Date.now() / 1000;
-  const attention = (list || []).filter((c) => c.Enabled && ((c.EffectiveUntil && c.EffectiveUntil > nowS && c.EffectiveUntil - nowS <= 3 * 86400) ||
-    (c.VolumeBytes > 0 && (c.Usage.Up + c.Usage.Down) / c.VolumeBytes >= 0.9))).slice(0, 8);
+  const attention = list.filter((c) => c.Enabled && ((c.EffectiveUntil && c.EffectiveUntil > nowS && c.EffectiveUntil - nowS <= 3 * 86400) ||
+    (c.VolumeBytes > 0 && used(c) / c.VolumeBytes >= 0.9))).slice(0, 8);
   const todo = attention.length ? h("div", { class: "card form" },
     h("div", { class: "row" }, h("h2", {}, t("todayTasks")), h("span", { class: "badge warn" }, fmtNum(attention.length))),
     h("p", { class: "small muted" }, t("todayHint")),
     h("div", { class: "row" }, attention.map((c) => {
-      const [cls, st] = clientStatus(c);
-      const pct = c.VolumeBytes > 0 ? Math.round(((c.Usage.Up + c.Usage.Down) / c.VolumeBytes) * 100) : 0;
-      return h("a", { class: "btn", href: `#/client?e=${encodeURIComponent(c.Email)}` }, c.Email, " ", h("span", { class: `badge ${cls}` }, pct >= 90 ? `${fmtNum(pct)}%` : st));
+      const [cls, s] = clientStatus(c);
+      const pct = c.VolumeBytes > 0 ? Math.round((used(c) / c.VolumeBytes) * 100) : 0;
+      return h("a", { class: "btn", href: `#/client?e=${encodeURIComponent(c.Email)}` }, c.Email, " ", h("span", { class: `badge ${cls}` }, pct >= 90 ? `${fmtNum(pct)}%` : s));
     }))) : null;
   return h("div", {},
-    h("div", { class: "row" }, h("h1", {}, t("clients")), count,
-      h("span", { class: "spacer" }), owner ? bulkBtn : null,
-      h("button", { class: "primary", onclick: () => clientForm(null, inbounds) }, t("add"))),
-    todo,
-    h("div", { class: "row", style: "margin-block-start:14px" }, q, filter),
-    box);
+    h("div", { class: "row" }, h("h1", {}, t("clients")), h("span", { class: "muted small" }, t("clientsCount", { n: fmtNum(list.length) })),
+      h("button", { class: "primary spacer", onclick: () => clientForm(null, inbounds) }, t("add"))),
+    todo, chips,
+    h("div", { class: "row toolbar" }, q, extra),
+    bulkBar,
+    h("div", { class: "card tablecard" }, table), pager);
+}
+
+function confirmText(text) {
+  return new Promise((resolve) => {
+    const d = openModal(text, h("p", { class: "muted" }, ""), [h("button", { value: "ok", class: "primary" }, t("save"))]);
+    d.addEventListener("close", () => { resolve(d.returnValue === "ok"); d.returnValue = ""; }, { once: true });
+  });
 }
 
 function bulkForm(emails) {
@@ -598,6 +740,9 @@ async function viewClient() {
     owner ? api("GET", "/api/v2/admin/inbounds") : api("GET", "/api/v2/rep/inbounds").catch(() => []),
     api("GET", `/api/v2/admin/clients/${encodeURIComponent(email)}/daily?days=30`).catch(() => []),
     owner ? api("GET", "/api/v2/admin/reps") : Promise.resolve([])]);
+  const [ips, resets] = await Promise.all([
+    api("GET", `/api/v2/admin/clients/${encodeURIComponent(email)}/ips`).catch(() => []),
+    api("GET", `/api/v2/admin/clients/${encodeURIComponent(email)}/resets`).catch(() => [])]);
   const c = (list || []).find((x) => x.Email === email);
   if (!c) return h("div", {}, h("h1", {}, t("clients")), h("p", { class: "muted" }, t("empty")));
   const ctx = { inbounds, groups: [], reps: reps || [] };
@@ -633,7 +778,47 @@ async function viewClient() {
         c.Plan ? h("div", { class: "row" }, h("span", { class: "muted" }, t("plan")), h("span", {}, c.Plan === "unlimited" ? t("planUnlimited") : t("planVolume"))) : null,
         c.Note ? h("div", { class: "row" }, h("span", { class: "muted" }, t("note")), h("span", {}, c.Note)) : null,
         c.Usage.FirstSeen ? h("div", { class: "row small" }, h("span", { class: "muted" }, t("firstSeen")), h("span", {}, new Date(c.Usage.FirstSeen * 1000).toLocaleString(lang === "fa" ? "fa-IR" : "en-GB"))) : null,
-        c.Usage.LastSeen ? h("div", { class: "row small" }, h("span", { class: "muted" }, t("lastSeen")), h("span", {}, new Date(c.Usage.LastSeen * 1000).toLocaleString(lang === "fa" ? "fa-IR" : "en-GB"))) : null)));
+        c.Usage.LastSeen ? h("div", { class: "row small" }, h("span", { class: "muted" }, t("lastSeen")), h("span", {}, new Date(c.Usage.LastSeen * 1000).toLocaleString(lang === "fa" ? "fa-IR" : "en-GB"))) : null),
+      clientIPsCard(c, ips || []),
+      clientResetCard(c, resets || [], owner)));
+}
+
+const CD = {
+  fa: { ips: "IPهای متصل", ipsHint: "آدرس‌هایی که نودها در ۳۰ روز اخیر برای این کلاینت دیده‌اند.", noIPs: "هنوز IPی دیده نشده.", onlineNow: "الان", reset: "صفر کردن مصرف", resetAsk: "مصرف {x} صفر شود؟ مقدار فعلی در سابقه می‌ماند.",
+    period: "ریست دوره‌ای", off: "خاموش", day: "روزانه", week: "هفتگی", month: "ماهانه", next: "ریست بعدی", history: "سابقهٔ ریست", resetDone: "مصرف صفر شد", noHistory: "هنوز ریستی نشده.", saved: "ذخیره شد" },
+  en: { ips: "Connected IPs", ipsHint: "Addresses nodes saw for this client in the last 30 days.", noIPs: "No addresses seen yet.", onlineNow: "now", reset: "Reset usage", resetAsk: "Reset {x}'s usage? The current total stays in the history.",
+    period: "Periodic reset", off: "Off", day: "Daily", week: "Weekly", month: "Monthly", next: "Next reset", history: "Reset history", resetDone: "Usage reset", noHistory: "No resets yet.", saved: "Saved" },
+};
+const fmtDT = (u) => new Date(u * 1000).toLocaleString(lang === "fa" ? "fa-IR" : "en-GB", { dateStyle: "short", timeStyle: "short" });
+
+function clientIPsCard(c, ips) {
+  const L = CD[lang] || CD.en;
+  const online = ips.filter((x) => x.online).length;
+  return h("div", { class: "card form" },
+    h("div", { class: "row" }, h("h2", {}, L.ips), online ? h("span", { class: "badge good" }, `${fmtNum(online)} ${L.onlineNow}`) : null,
+      c.MaxIPs ? h("span", { class: "badge spacer" }, `≤ ${fmtNum(c.MaxIPs)}`) : null),
+    h("p", { class: "small muted" }, L.ipsHint),
+    ips.length ? h("table", { class: "dtable compact" }, h("tbody", {}, ips.slice(0, 30).map((x) => h("tr", {},
+      h("td", {}, h("span", { class: `dot ${x.online ? "on" : ""}` }), " ", h("span", { class: "mono", dir: "ltr" }, x.ip)),
+      h("td", { class: "small muted" }, x.node_id),
+      h("td", { class: "small muted" }, x.online ? L.onlineNow : fmtDT(x.last)))))) : h("p", { class: "muted small" }, L.noIPs));
+}
+
+function clientResetCard(c, resets, owner) {
+  const L = CD[lang] || CD.en;
+  const period = h("select", { disabled: !owner }, [["", L.off], ["day", L.day], ["week", L.week], ["month", L.month]].map(([v, l]) => h("option", { value: v, selected: (c.reset_period || "") === v }, l)));
+  period.addEventListener("change", async () => { try { await guarded(() => api("PUT", `/api/v2/admin/clients/${encodeURIComponent(c.Email)}/reset-period`, { period: period.value })); toast(L.saved); route(); } catch {} });
+  return h("div", { class: "card form" },
+    h("div", { class: "row" }, h("h2", {}, L.reset),
+      owner ? h("button", { class: "spacer", onclick: async () => {
+        if (await confirmText(L.resetAsk.replace("{x}", c.Email))) { await guarded(() => api("POST", `/api/v2/admin/clients/${encodeURIComponent(c.Email)}/reset`)); toast(L.resetDone); route(); }
+      } }, L.reset) : null),
+    h("label", {}, h("span", {}, L.period), period),
+    c.next_reset ? h("div", { class: "row small" }, h("span", { class: "muted" }, L.next), h("span", {}, fmtDT(c.next_reset))) : null,
+    h("div", { class: "small muted" }, L.history),
+    resets.length ? h("table", { class: "dtable compact" }, h("tbody", {}, resets.slice(0, 10).map((r) => h("tr", {},
+      h("td", { class: "small" }, fmtDT(r.unix)), h("td", { class: "mono small" }, bytes(r.up + r.down)),
+      h("td", { class: "small muted" }, r.reason.startsWith("auto:") ? `↻ ${L[r.reason.slice(5)] || r.reason}` : r.reason))))) : h("p", { class: "muted small" }, L.noHistory));
 }
 
 function showSub(c) {
