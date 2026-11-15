@@ -1202,6 +1202,23 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 		tok, err := s.CreateNodeInstall(r.Context(), in.ID, in.Name)
 		reply(w, map[string]string{"id": in.ID, "install": "curl -fsSL " + publicBase(subBase, r) + "/install/" + tok + " | bash"}, err)
 	}))
+	mux.HandleFunc("POST /api/v2/admin/ssh-install", guard(func(w http.ResponseWriter, r *http.Request) {
+		var in SSHInstall
+		if !decode(w, r, &in) {
+			return
+		}
+		base := publicBase(subBase, r)
+		id, err := s.StartSSHInstall(r.Context(), in, func(tok string) string { return base + "/install/" + tok })
+		reply(w, map[string]string{"job": id}, err)
+	}))
+	mux.HandleFunc("GET /api/v2/admin/ssh-install/{job}", guard(func(w http.ResponseWriter, r *http.Request) {
+		j, ok := SSHInstallJob(r.PathValue("job"))
+		if !ok {
+			reply(w, nil, ErrNotFound)
+			return
+		}
+		reply(w, j, nil)
+	}))
 	mux.HandleFunc("POST /api/v2/admin/nodes/{id}/sniscan", guard(func(w http.ResponseWriter, r *http.Request) {
 		var in struct {
 			Domains []string `json:"domains"`

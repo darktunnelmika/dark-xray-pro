@@ -3018,20 +3018,59 @@ async function viewNodes() {
 }
 
 function nodeForm() {
-  const id = h("input", { required: true, pattern: "[a-z0-9][a-z0-9._-]{0,62}", autofocus: true });
-  const name = h("input", {});
-  const out = h("div", {});
-  const save = h("button", { class: "primary", value: "save", onclick: async (e) => {
+  const fa = lang === "fa";
+  const id = h("input", { required: true, pattern: "[a-z0-9][a-z0-9._-]{0,62}", autofocus: true, dir: "ltr", placeholder: "fr-1" });
+  const name = h("input", { placeholder: fa ? "فرانسه" : "France" });
+  let mode = "ssh";
+  const host = h("input", { dir: "ltr", placeholder: "1.2.3.4" }), port = h("input", { type: "number", dir: "ltr", value: "22", min: "1", max: "65535" });
+  const user = h("input", { dir: "ltr", value: "root" }), pass = h("input", { type: "password", dir: "ltr", autocomplete: "new-password" });
+  const key = h("textarea", { rows: "3", dir: "ltr", spellcheck: "false", placeholder: "-----BEGIN OPENSSH PRIVATE KEY-----" });
+  const out = h("div", { class: "form" });
+  const log = h("pre", { class: "logview", dir: "ltr", hidden: true });
+  const body = h("div", { class: "form" });
+  const seg = h("div", { class: "seg", role: "radiogroup" });
+  const save = h("button", { class: "primary", value: "save" }, fa ? "نصب" : "Install");
+  const drawMode = () => {
+    seg.replaceChildren(...[["ssh", fa ? "نصب خودکار با SSH" : "Install over SSH"], ["cmd", fa ? "دستور نصب (دستی)" : "Install command (manual)"]].map(([k, l]) =>
+      h("button", { type: "button", class: mode === k ? "on" : "", onclick: () => { mode = k; drawMode(); } }, l)));
+    save.textContent = mode === "ssh" ? (fa ? "نصب" : "Install") : t("save");
+    fill(body, ...(mode === "ssh" ? [
+      h("p", { class: "small muted" }, fa ? "هاب با SSH به سرور جدید وصل می‌شود، نود را نصب و به پنل اضافه می‌کند و مراحل را همین‌جا نشان می‌دهد. رمز یا کلید فقط یک بار استفاده می‌شود و هیچ‌جا ذخیره نمی‌شود." : "The HUB signs in to the new server over SSH, installs the node, adds it to the panel and shows each step here. The password or key is used once and never stored."),
+      h("div", { class: "three" }, h("label", {}, h("span", {}, fa ? "IP سرور" : "Server IP"), host), h("label", {}, h("span", {}, fa ? "پورت SSH" : "SSH port"), port), h("label", {}, h("span", {}, fa ? "کاربر" : "User"), user)),
+      h("label", {}, h("span", {}, fa ? "رمز" : "Password"), pass),
+      h("details", { class: "adv-box" }, h("summary", {}, fa ? "یا کلید خصوصی SSH" : "Or an SSH private key"), key)] :
+      [h("p", { class: "small muted" }, fa ? "دستور نصب را می‌گیرید و خودتان روی سرور اجرا می‌کنید." : "You get an install command to run on the server yourself.")]));
+  };
+  save.addEventListener("click", async (e) => {
     e.preventDefault();
     if (!id.reportValidity()) return;
-    try {
-      const r = await guarded(() => api("POST", "/api/v2/admin/nodes", { ID: id.value, Name: name.value }));
-      out.replaceChildren(h("p", { class: "small" }, t("installCmd")), h("code", {}, r.install), h("button", { type: "button", onclick: () => copy(r.install) }, t("copy")));
-      save.disabled = true;
-    } catch {}
-  } }, t("save"));
+    if (mode === "cmd") {
+      try {
+        const r = await guarded(() => api("POST", "/api/v2/admin/nodes", { ID: id.value, Name: name.value }));
+        out.replaceChildren(h("p", { class: "small" }, t("installCmd")), h("code", {}, r.install), h("button", { type: "button", onclick: () => copy(r.install) }, t("copy")));
+        save.disabled = true;
+      } catch {}
+      return;
+    }
+    if (!host.value.trim() || (!pass.value && !key.value.trim())) { toast(fa ? "IP سرور و رمز (یا کلید) لازم است." : "Server IP and a password (or key) are needed."); return; }
+    save.disabled = true; log.hidden = false; log.textContent = fa ? "در حال اتصال…" : "Connecting…";
+    let job;
+    try { job = (await api("POST", "/api/v2/admin/ssh-install", { node_id: id.value, name: name.value, host: host.value.trim(), port: +port.value || 22, user: user.value.trim() || "root", password: pass.value, key: key.value })).job; }
+    catch (x) { log.textContent = x.message; save.disabled = false; return; }
+    pass.value = ""; key.value = "";
+    const poll = async () => {
+      let j;
+      try { j = await api("GET", `/api/v2/admin/ssh-install/${job}`); } catch { setTimeout(poll, 2000); return; }
+      log.textContent = j.lines.join("\n"); log.scrollTop = log.scrollHeight;
+      if (j.status === "running") { setTimeout(poll, 1500); return; }
+      if (j.status === "done") { out.replaceChildren(h("p", { class: "small", style: "color:var(--good)" }, fa ? "✅ نود نصب شد؛ چند ثانیه دیگر در فهرست نودها آنلاین می‌شود." : "✅ Installed; the node comes online in a few seconds."), h("button", { type: "button", onclick: () => { document.getElementById("modal").close(); route(); } }, fa ? "رفتن به نودها" : "Go to nodes")); }
+      else { out.replaceChildren(h("p", { class: "error" }, (fa ? "نصب نشد: " : "Not installed: ") + (j.error || ""))); save.disabled = false; }
+    };
+    poll();
+  });
+  drawMode();
   openModal(t("addNode"), h("div", { class: "form" },
-    h("label", {}, h("span", {}, t("nodeId")), id), h("label", {}, h("span", {}, t("name")), name), out), [save]);
+    h("div", { class: "two" }, h("label", {}, h("span", {}, t("nodeId")), id), h("label", {}, h("span", {}, t("name")), name)), seg, body, log, out), [save]);
 }
 
 // Owners manage resellers at /api/v2/admin/reps; a reseller manages its own
