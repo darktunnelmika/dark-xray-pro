@@ -41,10 +41,10 @@ func (f *fakeAPI) SendPhoto(_ context.Context, chat int64, _ []byte, caption str
 	return nil
 }
 func (f *fakeAPI) Answer(context.Context, string, string) error { return nil }
-func (f *fakeAPI) SendPhotoID(_ context.Context, chat int64, _ string, caption string, _ *Keyboard) error {
+func (f *fakeAPI) SendPhotoID(_ context.Context, chat int64, _ string, caption string, kb *Keyboard) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.out = append(f.out, sent{chat: chat, text: caption, photo: true})
+	f.out = append(f.out, sent{chat: chat, text: caption, photo: true, kb: kb})
 	return nil
 }
 func (f *fakeAPI) SendDocument(_ context.Context, chat int64, name string, data []byte, _ string) error {
@@ -392,5 +392,93 @@ func TestButtonsRedrawTheScreen(t *testing.T) {
 	b.Handle(ctx, msg(buyerID, "/start"))
 	if len(api.take()) != 1 {
 		t.Fatal("typed /start must send")
+	}
+}
+
+func TestCardReceiptAndDiscount(t *testing.T) {
+	s, err := hubcore.Open(filepath.Join(t.TempDir(), "v2.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	ctx := context.Background()
+	_, _ = s.CreateNode(ctx, "n1", "N")
+	_ = s.PutInbound(ctx, "in1", "n1", []byte(`{"protocol":"vless","port":443,"settings":{}}`), true)
+	owner := hubcore.Principal{User: "o", Role: "owner"}
+	if err := s.PutProduct(ctx, owner, hubcore.Product{ID: "p30", Name: "30GB", Plan: "volume", GB: 30, Days: 30, Inbounds: []string{"in1"}, Price: 200000, Status: "published"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.PutCard(ctx, hubcore.CardInfo{Number: "6037-9911-2233-4455", Holder: "Ali", Bank: "Melli"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.PutDiscount(ctx, hubcore.Discount{Code: "nowruz", Percent: 25, MaxUses: 1, OncePerBuyer: true, Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	api := &fakeAPI{}
+	b := &Bot{Store: s, API: api, Owners: map[int64]bool{ownerID: true}, SubBase: "https://sub.example", Now: time.Now, Logf: t.Logf}
+	b.Tick(ctx)
+
+	// A wrong code, then the right one (case does not matter).
+	b.Handle(ctx, cb(buyerID, "cpn:p30"))
+	api.take()
+	b.Handle(ctx, msg(buyerID, "WRONG"))
+	find(t, api.take(), buyerID, "وجود ندارد")
+	b.Handle(ctx, cb(buyerID, "cpn:p30"))
+	api.take()
+	b.Handle(ctx, msg(buyerID, "NowRuz"))
+	out := api.take()
+	find(t, out, buyerID, "اعمال شد")
+	find(t, out, buyerID, "۱۵۰٬۰۰۰")
+
+	// Buying shows an invoice with the card; the owner hears nothing yet.
+	b.Handle(ctx, cb(buyerID, "buy:p30"))
+	out = api.take()
+	inv := find(t, out, buyerID, "6037-9911-2233-4455")
+	if !strings.Contains(inv.text, "۱۵۰٬۰۰۰") || !strings.Contains(inv.text, "NOWRUZ") {
+		t.Fatalf("invoice: %s", inv.text)
+	}
+	for _, m := range out {
+		if m.chat == ownerID {
+			t.Fatal("owner must wait for the receipt")
+		}
+	}
+	// The receipt photo goes to the owner with approve / refuse.
+	photo := msg(buyerID, "")
+	photo.Message.Photo = []struct {
+		FileID string `json:"file_id"`
+	}{{FileID: "small"}, {FileID: "big-photo-id"}}
+	b.Handle(ctx, photo)
+	out = api.take()
+	find(t, out, buyerID, "دریافت شد")
+	card := find(t, out, ownerID, "رسید پرداخت")
+	if !card.photo || card.kb == nil || card.kb.Rows[0][0].Data != "ok:1" {
+		t.Fatalf("receipt card: %+v", card)
+	}
+	b.Handle(ctx, cb(ownerID, "ok:1"))
+	out = api.take()
+	find(t, out, buyerID, "آماده شد")
+	o, _ := s.OrderByID(ctx, 1)
+	if o.Status != "fulfilled" || o.Amount != 150000 || o.Discount != 50000 || !o.HasReceipt {
+		t.Fatalf("order: %+v", o)
+	}
+	// The code was for one use: it is used up now.
+	if _, err := s.HoldDiscount(ctx, hubcore.TgBuyer(3000), "NOWRUZ", "p30"); err == nil {
+		t.Fatal("a used-up code must be refused")
+	}
+
+	// A refused receipt cancels the order and tells the buyer.
+	b.Handle(ctx, cb(buyerID, "buy:p30"))
+	api.take()
+	b.Handle(ctx, photo)
+	api.take()
+	b.Handle(ctx, cb(ownerID, "no:2"))
+	find(t, api.take(), buyerID, "تأیید نشد")
+	// The buyer can cancel an order before paying.
+	b.Handle(ctx, cb(buyerID, "buy:p30"))
+	api.take()
+	b.Handle(ctx, cb(buyerID, "ocx:3"))
+	find(t, api.take(), buyerID, "لغو شد")
+	if o, _ := s.OrderByID(ctx, 3); o.Status != "cancelled" {
+		t.Fatal("buyer cancel failed")
 	}
 }
