@@ -713,6 +713,31 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 		err := s.PutCard(r.Context(), in)
 		reply(w, map[string]bool{"ok": err == nil}, err)
 	}))
+	mux.HandleFunc("POST /api/v2/admin/inbounds/{tag}/reset-usage", guard(func(w http.ResponseWriter, r *http.Request) {
+		n, err := s.ResetInboundUsage(r.Context(), r.PathValue("tag"))
+		reply(w, map[string]int{"reset": n}, err)
+	}))
+	mux.HandleFunc("POST /api/v2/admin/clients/cleanup", guard(func(w http.ResponseWriter, r *http.Request) {
+		var in CleanupRequest
+		if !decode(w, r, &in) {
+			return
+		}
+		list, err := s.CleanupClients(r.Context(), in)
+		if list == nil {
+			list = []string{}
+		}
+		reply(w, map[string]any{"clients": list, "count": len(list), "dry_run": in.DryRun}, err)
+	}))
+	mux.HandleFunc("POST /api/v2/admin/clients/{email}/clone", guard(func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Email string `json:"email"`
+		}
+		if !decode(w, r, &in) {
+			return
+		}
+		err := s.CloneClient(r.Context(), r.PathValue("email"), in.Email)
+		reply(w, map[string]bool{"ok": err == nil}, err)
+	}))
 	mux.HandleFunc("GET /api/v2/admin/discounts", guard(func(w http.ResponseWriter, r *http.Request) {
 		list, err := s.Discounts(r.Context())
 		reply(w, list, err)

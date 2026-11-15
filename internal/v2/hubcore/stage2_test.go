@@ -377,3 +377,48 @@ func TestNodePublicIPPinAndTunnel(t *testing.T) {
 		t.Fatal("automatic again after clearing", ip)
 	}
 }
+
+func TestBulkClientActions(t *testing.T) {
+	s, _ := newStore(t)
+	ctx := context.Background()
+	seed(t, s)
+	now := s.now().Unix()
+	_ = s.PutClient(ctx, Client{Email: "old1", Enabled: true, VolumeBytes: -1, ExpiresUnix: now - 40*86400, Inbounds: []string{"de-vless"}})
+	_ = s.PutClient(ctx, Client{Email: "fresh", Enabled: true, VolumeBytes: -1, ExpiresUnix: now - 86400, Inbounds: []string{"de-vless"}})
+	_, _ = s.db.Exec(`INSERT OR REPLACE INTO client_usage(email,up,down,first_seen_unix,last_seen_unix) VALUES('alice',5,7,1,1)`)
+	// Preview, then delete clients expired more than 30 days ago.
+	list, err := s.CleanupClients(ctx, CleanupRequest{Expired: true, MinDays: 30, DryRun: true})
+	if err != nil || len(list) != 1 || list[0] != "old1" {
+		t.Fatalf("preview %v %v", list, err)
+	}
+	if _, err := s.ClientByEmail(ctx, "old1"); err != nil {
+		t.Fatal("a dry run must not delete")
+	}
+	if done, _ := s.CleanupClients(ctx, CleanupRequest{Expired: true, MinDays: 30}); len(done) != 1 {
+		t.Fatal("cleanup", done)
+	}
+	if _, err := s.ClientByEmail(ctx, "old1"); err == nil {
+		t.Fatal("old1 must be gone")
+	}
+	// Zero the usage of everyone on an inbound.
+	c, _ := s.ClientByEmail(ctx, "alice")
+	tag := c.Inbounds[0]
+	if n, err := s.ResetInboundUsage(ctx, tag); err != nil || n == 0 {
+		t.Fatal("reset", n, err)
+	}
+	if c, _ := s.ClientByEmail(ctx, "alice"); c.Usage.Up+c.Usage.Down != 0 {
+		t.Fatal("usage not reset")
+	}
+	// Copy a client: same plan and inbounds, new credentials.
+	if err := s.CloneClient(ctx, "alice", "alice-2"); err != nil {
+		t.Fatal(err)
+	}
+	a, _ := s.ClientByEmail(ctx, "alice")
+	b, _ := s.ClientByEmail(ctx, "alice-2")
+	if b.VolumeBytes != a.VolumeBytes || len(b.Inbounds) != len(a.Inbounds) || b.UUID == a.UUID || b.SubToken == a.SubToken {
+		t.Fatalf("clone %+v vs %+v", b.Client, a.Client)
+	}
+	if err := s.CloneClient(ctx, "alice", "alice-2"); err == nil {
+		t.Fatal("cloning onto an existing name must fail")
+	}
+}
