@@ -54,6 +54,7 @@ type pageData struct {
 	Nonce                                        string
 	Ring                                         int // stroke offset of the usage ring (0–100)
 	OtherLang, OtherLangName                     string
+	BotLink                                      string // t.me deep link that ties this service to the visitor's Telegram
 	T                                            map[string]string
 	Accent                                       template.CSS // checked #rrggbb
 	Logo                                         template.URL // checked data:image/… URL
@@ -65,10 +66,10 @@ type pageLink struct {
 }
 
 var pageText = map[string]map[string]string{
-	"fa": {"qr": "QR", "rec": "پیشنهادی برای دستگاه شما", "other": "برنامه‌های دیگر", "usage": "مصرف", "hide": "بستن", "used": "مصرف‌شده", "left": "باقی‌مانده", "expires": "انقضا", "days": "روز مانده", "dayunit": "روز", "noexp": "بدون انقضا", "notstarted": "از اولین اتصال شروع می‌شود",
+	"fa": {"bot": "اتصال به ربات تلگرام", "botsub": "هشدار پایان حجم و زمان، تمدید و پشتیبانی", "qr": "QR", "rec": "پیشنهادی برای دستگاه شما", "other": "برنامه‌های دیگر", "usage": "مصرف", "hide": "بستن", "used": "مصرف‌شده", "left": "باقی‌مانده", "expires": "انقضا", "days": "روز مانده", "dayunit": "روز", "noexp": "بدون انقضا", "notstarted": "از اولین اتصال شروع می‌شود",
 		"active": "فعال", "ended": "تمام‌شده", "disabled": "غیرفعال", "sub": "لینک اشتراک", "copy": "کپی", "copied": "کپی شد", "add": "افزودن به برنامه",
 		"configs": "کانفیگ‌ها", "support": "پشتیبانی", "scan": "این کد را با برنامهٔ VPN اسکن کنید", "of": "از", "unlimited": "نامحدود"},
-	"en": {"qr": "QR", "rec": "Suggested for your device", "other": "Other apps", "usage": "Usage", "hide": "Close", "used": "Used", "left": "Remaining", "expires": "Expires", "days": "days left", "dayunit": "days", "noexp": "No expiry", "notstarted": "Starts at first connection",
+	"en": {"bot": "Connect the Telegram bot", "botsub": "Alerts before it runs out, renewal and support", "qr": "QR", "rec": "Suggested for your device", "other": "Other apps", "usage": "Usage", "hide": "Close", "used": "Used", "left": "Remaining", "expires": "Expires", "days": "days left", "dayunit": "days", "noexp": "No expiry", "notstarted": "Starts at first connection",
 		"active": "Active", "ended": "Ended", "disabled": "Disabled", "sub": "Subscription link", "copy": "Copy", "copied": "Copied", "add": "Add to an app",
 		"configs": "Configs", "support": "Support", "scan": "Scan this code with your VPN app", "of": "of", "unlimited": "Unlimited"},
 }
@@ -166,6 +167,13 @@ FROM clients c LEFT JOIN client_usage cu ON cu.email=c.email WHERE c.email=?`, e
 	d.Ring = 100 - d.Percent
 	if c.VolumeBytes <= 0 {
 		d.Ring = 0
+	}
+	if bot := strings.TrimPrefix(s.Setting(ctx, "tg_username"), "@"); bot != "" && botNameRE.MatchString(bot) {
+		if i := strings.LastIndex(subURL, "/sub/"); i >= 0 {
+			if tok := subURL[i+5:]; tgStartRE.MatchString(tok) {
+				d.BotLink = "https://t.me/" + bot + "?start=" + tok
+			}
+		}
 	}
 	d.OtherLang, d.OtherLangName = "en", "English"
 	if lang == "en" {
@@ -301,6 +309,7 @@ button,.btn{appearance:none;border:1px solid var(--line);background:rgb(255 255 
 <div><span class="muted">{{index .T "expires"}}</span><b><bdi>{{.DaysText}}</bdi> <small class="muted">{{.DaysUnit}}</small></b></div>
 <div><span class="muted"></span><span class="muted"><bdi>{{.ExpiresText}}</bdi></span></div>
 </div></div>
+{{if .BotLink}}<a class="btn app rec" href="{{safeURL .BotLink}}"><span>🤖 {{index .T "bot"}}</span><span class="muted">{{index .T "botsub"}}</span></a>{{end}}
 <div class="card"><b>{{index .T "add"}}</b>
 {{$rec := false}}{{range .Apps}}{{if .Rec}}{{$rec = true}}{{end}}{{end}}
 {{if $rec}}<div class="lbl">{{index .T "rec"}}</div><div class="apps">{{range .Apps}}{{if .Rec}}<a class="btn app rec" href="{{safeURL .Link}}"><span>{{.Name}}</span><span class="muted">{{.Platform}}</span></a>{{end}}{{end}}</div><div class="lbl">{{index .T "other"}}</div>{{end}}
@@ -317,6 +326,11 @@ var b=e.target.closest("[data-copy]");if(!b)return;var v=b.getAttribute("data-co
 </script></body></html>`))
 
 var accentRE = regexp.MustCompile(`^#[0-9a-fA-F]{6}$`)
+
+var (
+	botNameRE = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_]{3,31}$`)
+	tgStartRE = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`) // Telegram's limit for a start parameter
+)
 
 // validLogo accepts a small inline image (the page's CSP only allows data:
 // images, so no third party ever sees a customer open their page).

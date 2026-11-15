@@ -612,6 +612,14 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 		list, err := s.Inbounds(r.Context())
 		reply(w, list, err)
 	}))
+	mux.HandleFunc("GET /api/v2/admin/clients/export.csv", guard(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+		w.Header().Set("Content-Disposition", `attachment; filename="dark-clients-`+time.Now().UTC().Format("20060102")+`.csv"`)
+		w.Header().Set("Cache-Control", "no-store")
+		if err := s.WriteClientsCSV(r.Context(), w, publicBase("", r)); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+		}
+	}))
 	mux.HandleFunc("GET /api/v2/admin/clients/export", guard(func(w http.ResponseWriter, r *http.Request) {
 		recs, err := s.ExportClients(r.Context())
 		if err == nil {

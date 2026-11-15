@@ -66,6 +66,14 @@ func TestSubPageAndSettings(t *testing.T) {
 	if !strings.Contains(body, "app rec") {
 		t.Fatal("suggested apps missing for Android")
 	}
+	_ = s.SetSetting(ctx, "tg_username", "DarkShopBot")
+	if b := get("Mozilla/5.0 (iPhone)", "text/html", "").Body.String(); !strings.Contains(b, "https://t.me/DarkShopBot?start="+tok) {
+		t.Fatal("bot deep link missing")
+	}
+	var csvBuf strings.Builder
+	if err := s.WriteClientsCSV(ctx, &csvBuf, "https://x.example"); err != nil || !strings.HasPrefix(csvBuf.String(), "\ufeffemail,") || !strings.Contains(csvBuf.String(), "alice,true") || !strings.Contains(csvBuf.String(), "https://x.example/sub/") {
+		t.Fatalf("csv %v %q", err, csvBuf.String()[:min(csvBuf.Len(), 300)])
+	}
 	if out := os.Getenv("SUBPAGE_OUT"); out != "" {
 		_ = os.WriteFile(out, []byte(body), 0o644)
 	}

@@ -2,7 +2,12 @@ package hubcore
 
 import (
 	"context"
+	"encoding/csv"
 	"fmt"
+	"io"
+	"strconv"
+	"strings"
+	"time"
 )
 
 // Client export/import keeps identity: UUID, secret and subscription token
@@ -77,4 +82,45 @@ ON CONFLICT(email) DO UPDATE SET up=excluded.up, down=excluded.down, first_seen_
 		}
 	}
 	return len(recs), tx.Commit()
+}
+
+// WriteClientsCSV writes a spreadsheet-friendly list (UTF-8 with BOM so
+// Excel shows Persian names correctly). It carries no keys, only what an
+// owner reads: volume, usage, expiry, devices and each subscription link.
+func (s *Store) WriteClientsCSV(ctx context.Context, w io.Writer, base string) error {
+	list, err := s.Clients(ctx)
+	if err != nil {
+		return err
+	}
+	_, _ = w.Write([]byte{0xEF, 0xBB, 0xBF})
+	cw := csv.NewWriter(w)
+	_ = cw.Write([]string{"email", "enabled", "volume_gb", "used_gb", "remaining_gb", "expires", "days_left", "max_ips", "inbounds", "seller", "note", "last_seen", "subscription"})
+	gb := func(b int64) string { return strconv.FormatFloat(float64(b)/(1<<30), 'f', 2, 64) }
+	day := func(u int64) string {
+		if u <= 0 {
+			return ""
+		}
+		return time.Unix(u, 0).UTC().Format("2006-01-02")
+	}
+	now := s.now().Unix()
+	for _, c := range list {
+		used := c.Usage.Up + c.Usage.Down
+		vol, rem := "unlimited", "unlimited"
+		if c.VolumeBytes > 0 {
+			vol, rem = gb(c.VolumeBytes), gb(max(0, c.VolumeBytes-used))
+		}
+		exp := EffectiveExpiry(c.Client, c.Usage)
+		left := ""
+		if exp > 0 {
+			left = strconv.FormatInt(max(0, (exp-now+86399)/86400), 10)
+		}
+		sub := ""
+		if c.SubToken != "" {
+			sub = base + "/sub/" + c.SubToken
+		}
+		_ = cw.Write([]string{c.Email, strconv.FormatBool(c.Enabled), vol, gb(used), rem, day(exp), left, strconv.Itoa(c.MaxIPs),
+			strings.Join(c.Inbounds, " "), c.RepID, c.Note, day(c.Usage.LastSeen), sub})
+	}
+	cw.Flush()
+	return cw.Error()
 }

@@ -80,7 +80,7 @@ func (s *Store) AutoBackup(ctx context.Context, dir string, keep int) (string, e
 	for _, e := range entries {
 		// Leftovers of a backup that was cut off (a restart mid-way).
 		if strings.HasPrefix(e.Name(), "snapshot-") || strings.HasSuffix(e.Name(), ".partial") {
-			if fi, err := e.Info(); err == nil && s.now().Sub(fi.ModTime()) > time.Hour {
+			if fi, err := e.Info(); err == nil && time.Since(fi.ModTime()) > time.Hour { // real file times, not the store clock
 				os.Remove(filepath.Join(dir, e.Name()))
 			}
 			continue
