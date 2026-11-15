@@ -285,6 +285,8 @@ Object.assign(ICONS, {
   more: "M12 13a1 1 0 1 0 0-2 1 1 0 0 0 0 2zM19 13a1 1 0 1 0 0-2 1 1 0 0 0 0 2zM5 13a1 1 0 1 0 0-2 1 1 0 0 0 0 2z",
   traffic: "M3 17l6-6 4 4 8-8M14 7h7v7",
   pulse: "M22 12h-4l-3 9L9 3l-3 9H2",
+  trash: "M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6M10 11v6M14 11v6",
+  link: "M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71",
 });
 
 function avatar(name, cls = "") {
@@ -674,32 +676,36 @@ function nodeCard(n, actions = false) {
       h("span", { class: "badge" }, n.ID), n.update_available ? h("span", { class: "badge warn" }, t("updateAvail")) : null,
       n.traffic_percent && n.traffic_percent !== 100 ? h("span", { class: "badge", dir: "ltr", title: lang === "fa" ? "ضریب ترافیک" : "Traffic rate" }, `×${fmtNum(n.traffic_percent / 100)}`) : null, n.xray_version ? h("span", { class: "badge", dir: "ltr" }, `Xray ${n.xray_version}${n.arch ? " · " + n.arch : ""}`) : null, h("span", { class: `badge ${n.online ? "good" : "bad"} spacer` }, t(n.online ? "online" : "offline"))),
     h("div", { class: "muted small" }, `${t("restarts")}: ${fmtNum(n.XrayRestarts)} · ${t("spooled")}: ${fmtNum(n.Spooled)} · ${n.AgentVersion || ""}`),
-    host ? h("div", { class: "meters" },
+    host ? h("div", { class: "meters node-meters" },
       meter(t("cpu"), host.cpu_percent, `${fmtNum(host.cpu_percent)}%`),
       meter(t("ram"), host.ram_total ? (100 * host.ram_used) / host.ram_total : 0, `\u2066${bytes(host.ram_used)} / ${bytes(host.ram_total)}\u2069`),
       host.disk_total ? meter(t("disk"), (100 * host.disk_used) / host.disk_total, `\u2066${bytes(host.disk_used)} / ${bytes(host.disk_total)}\u2069`) : null,
-      h("div", { class: "small muted" }, `↓ ${rate(host.rx_rate)} · ↑ ${rate(host.tx_rate)} · ${t("onlineUsers")}: ${fmtNum(host.online_users)} · ${t("uptime")}: ${dur(host.uptime_sec)}`)) : null,
+      h("div", { class: "small muted full" }, `↓ ${rate(host.rx_rate)} · ↑ ${rate(host.tx_rate)} · ${t("onlineUsers")}: ${fmtNum(host.online_users)} · ${t("uptime")}: ${dur(host.uptime_sec)}`)) : null,
     n.LastError ? h("div", { class: "small", style: "color:var(--bad)" }, `${t("lastError")}: ${n.LastError}`) : null,
-    actions ? h("div", { class: "row" },
+    actions ? h("div", { class: "row node-actions" },
       n.update_available ? h("button", { class: "primary", onclick: () => updateNode(n) }, t("updateNode")) : null,
       h("button", { onclick: () => nodeHealth(n) }, t("health")),
       h("button", { onclick: () => nodeLogs(n) }, t("xrayLogs")),
-      h("button", { class: "ghost", onclick: () => restartXray(n) }, t("restartXray")),
-      h("button", { class: "ghost", onclick: () => xrayPicker(n) }, t("xrayVer")),
-      h("button", { class: "ghost", onclick: () => renameNode(n) }, t("edit")),
-      h("button", { class: "ghost", onclick: () => {
-        const f = sniFinder({ nodes: [n], node: n.ID, onPick: (d) => copy(d) });
-        const d = openModal(`${t("findSni")} · ${n.Name || n.ID}`, f);
-        d.addEventListener("close", () => f.cancel(), { once: true });
-      } }, t("findSni")),
-      h("button", { class: "ghost", onclick: async () => {
-        try { const r = await guarded(() => api("POST", `/api/v2/admin/nodes/${encodeURIComponent(n.ID)}/install`));
-          openModal(t("reinstall"), h("div", { class: "form" }, h("p", { class: "small" }, t("installCmd")), h("code", {}, r.install), h("button", { type: "button", onclick: () => copy(r.install) }, t("copy"))));
-        } catch {}
-      } }, t("reinstall")),
-      h("button", { class: "ghost danger spacer", onclick: async () => {
-        if (await confirmAction(t("confirmNodeDelete", { x: n.ID }))) { await guarded(() => api("DELETE", `/api/v2/admin/nodes/${encodeURIComponent(n.ID)}`)); route(); }
-      } }, t("delete"))) : null);
+      iconBtn("more", ux("more"), (e) => popMenu(e.currentTarget, (m) => {
+        const item = (ic, label, fn, cls = "") => h("button", { class: `pm-item ${cls}`, onclick: () => { m.remove(); fn(); } }, icon(ic), label);
+        m.append(
+          item("pulse", t("restartXray"), () => restartXray(n)),
+          item("inbounds", t("xrayVer"), () => xrayPicker(n)),
+          item("settings", t("edit"), () => renameNode(n)),
+          item("search", t("findSni"), () => {
+            const f = sniFinder({ nodes: [n], node: n.ID, onPick: (d) => copy(d) });
+            const d = openModal(`${t("findSni")} · ${n.Name || n.ID}`, f);
+            d.addEventListener("close", () => f.cancel(), { once: true });
+          }),
+          item("link", t("reinstall"), async () => {
+            try { const r = await guarded(() => api("POST", `/api/v2/admin/nodes/${encodeURIComponent(n.ID)}/install`));
+              openModal(t("reinstall"), h("div", { class: "form" }, h("p", { class: "small" }, t("installCmd")), h("code", {}, r.install), h("button", { type: "button", onclick: () => copy(r.install) }, t("copy"))));
+            } catch {}
+          }),
+          item("trash", t("delete"), async () => {
+            if (await confirmAction(t("confirmNodeDelete", { x: n.ID }))) { await guarded(() => api("DELETE", `/api/v2/admin/nodes/${encodeURIComponent(n.ID)}`)); route(); }
+          }, "bad"));
+      }))) : null);
 }
 
 function nodeLogs(n) {

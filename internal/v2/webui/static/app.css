@@ -572,3 +572,5 @@ a.name:hover { color: var(--cyan); }
 .detail-cols { columns: 2 420px; column-gap: var(--gap); }
 .detail-cols > .card { break-inside: avoid; margin-block-end: var(--gap); display: block; }
 .detail-cols > .card.form > * + * { margin-block-start: 10px; }
+@media (min-width: 900px) { .node-meters { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; } .node-meters > .full { grid-column: 1 / -1; } }
+.node-actions .iconbtn { margin-inline-start: auto; border-color: var(--glass-line); }
