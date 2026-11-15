@@ -102,7 +102,7 @@ func TestShadowsocks2022Links(t *testing.T) {
 	}
 	// Classic AEAD methods: each client's own password, SIP002 base64 userinfo.
 	in.Template = []byte(`{"protocol":"shadowsocks","port":1,"settings":{"method":"aes-256-gcm"}}`)
-	links, _ := Links(a, []Inbound{in})
+	links, _ = Links(a, []Inbound{in})
 	if len(links) != 1 || !strings.HasPrefix(links[0], "ss://"+base64.RawURLEncoding.EncodeToString([]byte("aes-256-gcm:"+a.Secret))+"@") {
 		t.Fatal(links)
 	}
