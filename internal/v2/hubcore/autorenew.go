@@ -115,7 +115,7 @@ func (s *Store) AutoRenewOnce(ctx context.Context) int {
 		// Stars products when the toman balance does not cover it.
 		unit := "تومان"
 		var bal int64
-		var err error
+
 		if price > 0 && (s.TomanBalance(ctx, seller, it.chat) >= price || stars <= 0 || seller != "") {
 			_, bal, err = s.TomanPay(ctx, it.chat, it.product, it.email)
 		} else {

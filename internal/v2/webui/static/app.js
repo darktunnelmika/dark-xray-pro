@@ -3202,6 +3202,7 @@ async function viewReps() {
       h("button", { class: "ghost", onclick: () => policyForm(r, inbounds) }, t("policy")),
       h("button", { class: "ghost", onclick: () => paymentForm(r) }, t("payment")),
       h("button", { class: "ghost", onclick: () => openModal(lang === "fa" ? `برند و صفحهٔ اشتراک · ${r.Name || r.ID}` : `Brand & subscription page · ${r.Name || r.ID}`, repBrandCard(`/api/v2/admin/reps/${encodeURIComponent(r.ID)}/brand`)) }, lang === "fa" ? "صفحهٔ اشتراک" : "Sub page"),
+      h("button", { class: "ghost", onclick: () => openModal(lang === "fa" ? `ربات و کارت · ${r.Name || r.ID}` : `Bot & card · ${r.Name || r.ID}`, h("div", { class: "form" }, repBotCard(`/api/v2/admin/reps/${encodeURIComponent(r.ID)}/bot`), sellerCardCard(`/api/v2/shop/card?seller=${encodeURIComponent(r.ID)}`))) }, lang === "fa" ? "ربات و کارت" : "Bot & card"),
       h("a", { class: "btn ghost", href: `#/activity?rep=${encodeURIComponent(r.ID)}` }, t("activity")),
       h("button", { class: "ghost", onclick: () => repForm(r) }, t("edit")))));
   return h("div", {},
@@ -3379,6 +3380,7 @@ async function viewShop() {
         canEdit ? `${t("add")} · ${t("product")}` : "", () => productForm(null, inbounds, reps)));
   const panes = [["orders", t("orders"), ordersPane, pending.length], ["products", t("products"), productsPane]];
   if (owner) panes.push(["pay", fa ? "پرداخت و تخفیف" : "Payments & codes", () => h("div", { class: "dash" }, payCardCard(), discountsCard(products))]);
+  panes.push(["wallets", fa ? "کیف پول و شارژ" : "Wallets & top-ups", () => walletsPane()]);
   let cur = sessionStorage.getItem("shopTab") || (pending.length ? "orders" : "products");
   if (!panes.some((x) => x[0] === cur)) cur = panes[0][0];
   const pane = h("div", {});
@@ -3399,6 +3401,81 @@ async function viewShop() {
       tile(money(sum(done.filter((o) => o.created_unix >= since(30)))), fa ? "فروش ۳۰ روز" : "Sales, 30 days"),
       tile(fmtNum(products.filter((p) => p.status === "published").length), fa ? "محصول فعال" : "Products on sale")),
     tabs, pane);
+}
+
+// ---------- Toman wallets, top-ups, resellers' own bots ----------
+function walletsPane() {
+  const fa = lang === "fa";
+  const box = h("div", { class: "form" });
+  const fmtTime = (u) => new Intl.DateTimeFormat(fa ? "fa-IR" : "en-GB", { dateStyle: "short", timeStyle: "short" }).format(new Date(u * 1000));
+  const load = async () => {
+    let tops, wals;
+    try { [tops, wals] = await Promise.all([api("GET", "/api/v2/shop/topups"), api("GET", "/api/v2/shop/wallets")]); } catch (x) { fill(box, h("p", { class: "error" }, x.message)); return; }
+    const review = tops.filter((x) => x.status === "review" || x.status === "awaiting");
+    const decide = async (x, ok) => { await guarded(() => api("POST", `/api/v2/shop/topups/${x.id}/${ok ? "approve" : "reject"}`)); toast(ok ? (fa ? "تأیید شد" : "Approved") : (fa ? "رد شد" : "Rejected")); load(); };
+    const st = { awaiting: [fa ? "منتظر رسید" : "awaiting", ""], review: [fa ? "منتظر بررسی" : "to review", "warn"], approved: [fa ? "تأیید شد" : "approved", "good"], rejected: [fa ? "رد شد" : "rejected", "bad"] };
+    const topRow = (x) => h("div", { class: `order-row ${x.status}` },
+      h("div", { class: "o-id" }, h("b", {}, `#${fmtNum(x.id)}`), h("span", { class: "muted small" }, fmtTime(x.created))),
+      h("div", { class: "o-main" }, h("b", { dir: "ltr" }, String(x.chat)), h("span", { class: "muted small" }, (fa ? "موجودی فعلی: " : "balance: ") + money(x.balance))),
+      h("div", { class: "o-amt" }, h("b", {}, money(x.amount))),
+      h("div", { class: "o-st" }, h("span", { class: `badge ${st[x.status][1]}` }, st[x.status][0]), x.has_receipt ? h("span", { class: "badge good" }, fa ? "🧾 رسید در تلگرام" : "🧾 receipt in Telegram") : null),
+      x.status === "review" || x.status === "awaiting" ? h("div", { class: "o-act" }, h("button", { class: "primary", onclick: () => decide(x, true) }, fa ? "تأیید" : "Approve"), h("button", { class: "ghost danger", onclick: () => decide(x, false) }, fa ? "رد" : "Reject")) : null);
+    const chat = h("input", { dir: "ltr", inputmode: "numeric", placeholder: fa ? "آیدی عددی تلگرام" : "Telegram user id" });
+    const delta = h("input", { dir: "ltr", inputmode: "numeric", placeholder: fa ? "مبلغ (منفی = کسر)" : "Amount (negative = take)" });
+    const note = h("input", { placeholder: fa ? "توضیح" : "Note" });
+    fill(box,
+      h("div", { class: "card form" }, h("h2", {}, fa ? `شارژهای منتظر (${fmtNum(review.length)})` : `Top-ups to review (${review.length})`),
+        h("p", { class: "small muted" }, fa ? "مشتری در ربات مبلغ را انتخاب می‌کند، به کارت شما واریز می‌کند و عکس رسید را می‌فرستد. رسید در تلگرام برای شما می‌آید؛ همان‌جا یا این‌جا تأیید کنید." : "In the bot the customer picks an amount, pays to your card and sends the receipt photo, which reaches you in Telegram; approve there or here."),
+        h("div", { class: "order-list" }, ...(tops.length ? tops.slice(0, 60).map(topRow) : [h("p", { class: "muted small", style: "padding:10px" }, fa ? "شارژی ثبت نشده." : "No top-ups yet.")]))),
+      h("div", { class: "card form" }, h("h2", {}, fa ? `کیف پول مشتری‌ها (${fmtNum(wals.length)})` : `Customer wallets (${wals.length})`),
+        h("div", { class: "row" }, chat, delta, note, h("button", { onclick: async () => {
+          const r = await guarded(() => api("POST", "/api/v2/shop/wallet", { chat: +chat.value || 0, delta: +delta.value || 0, note: note.value }));
+          toast((fa ? "موجودی جدید: " : "New balance: ") + money(r.balance)); load();
+        } }, fa ? "اعمال" : "Apply")),
+        wals.length ? h("div", { class: "table-wrap" }, h("table", { class: "table" }, h("thead", {}, h("tr", {}, h("th", {}, fa ? "تلگرام" : "Telegram"), h("th", {}, fa ? "موجودی" : "Balance"), h("th", {}, fa ? "آخرین تراکنش" : "Last"))),
+          h("tbody", {}, ...wals.slice(0, 300).map((w) => h("tr", { onclick: () => { chat.value = w.chat; delta.focus(); }, style: "cursor:pointer" }, h("td", { dir: "ltr" }, String(w.chat)), h("td", {}, money(w.balance)), h("td", {}, fmtTime(w.last)))))))
+          : h("p", { class: "muted small" }, fa ? "هنوز کیف پولی ساخته نشده." : "No wallets yet.")));
+  };
+  load();
+  return box;
+}
+
+// A reseller's own Telegram sales bot.
+function repBotCard(path) {
+  const fa = lang === "fa";
+  const tok = h("input", { type: "password", dir: "ltr", autocomplete: "off", placeholder: "123456789:AA..." });
+  const en = h("input", { type: "checkbox" });
+  const st = h("div", { class: "small" });
+  const draw = (b) => {
+    en.checked = !!b.enabled;
+    tok.placeholder = b.has_token ? (fa ? "توکن ثبت شده — برای تغییر، توکن جدید بزنید" : "token saved — type a new one to change") : "123456789:AA...";
+    st.replaceChildren(b.running ? h("span", { class: "badge good" }, `● ${fa ? "روشن" : "running"} @${b.username || ""}`) :
+      b.error ? h("span", { class: "badge bad" }, (fa ? "خطا: " : "error: ") + b.error) : h("span", { class: "badge" }, fa ? "خاموش" : "off"));
+  };
+  api("GET", path).then(draw).catch(() => {});
+  return h("form", { class: "card form", onsubmit: async (e) => {
+    e.preventDefault();
+    const r = await guarded(() => api("PUT", path, { token: tok.value.trim(), enabled: en.checked }));
+    tok.value = ""; draw(r); toast(fa ? "ذخیره شد؛ ربات تا چند ثانیه دیگر روشن می‌شود" : "Saved; the bot starts in a few seconds");
+  } },
+    h("h2", {}, "🤖 ", fa ? "ربات فروش اختصاصی" : "Own sales bot"),
+    h("p", { class: "small muted" }, fa ? "از @BotFather یک ربات بسازید و توکنش را این‌جا بزنید. ربات فقط محصولات شما را می‌فروشد، پرداخت‌ها به کارت شما می‌آید، کیف پول مشتری‌ها مال شماست و فقط کلاینت‌های خودتان را نشان می‌دهد. رسیدها برای تلگرامی که به نمایندگی وصل کرده‌اید فرستاده می‌شود." : "Create a bot with @BotFather and paste its token. It sells only your products, payments go to your card, the customers' wallets are yours and it shows only your clients. Receipts go to the Telegram you linked to your reseller account."),
+    st, h("label", {}, h("span", {}, fa ? "توکن ربات" : "Bot token"), tok),
+    h("label", { class: "check" }, en, fa ? "روشن باشد" : "Enabled"),
+    h("div", { class: "row" }, h("button", { class: "primary", type: "submit" }, t("save"))));
+}
+
+// A seller's card for card-to-card payment (resellers: their own card).
+function sellerCardCard(path) {
+  const fa = lang === "fa";
+  const num = h("input", { dir: "ltr", inputmode: "numeric", placeholder: "6037 9911 2233 4455" }), holder = h("input", {}), bank = h("input", {});
+  api("GET", path).then((c) => { num.value = c.number || ""; holder.value = c.holder || ""; bank.value = c.bank || ""; }).catch(() => {});
+  return h("form", { class: "card form", onsubmit: async (e) => { e.preventDefault(); await guarded(() => api("PUT", path, { number: num.value, holder: holder.value, bank: bank.value })); toast(t("saved")); } },
+    h("h2", {}, "💳 ", fa ? "کارت من (کارت به کارت)" : "My card (card-to-card)"),
+    h("p", { class: "small muted" }, fa ? "مشتری‌های ربات شما برای خرید و شارژ کیف پول به این کارت واریز می‌کنند. خالی بگذارید تا پرداخت کارتی خاموش شود." : "Your bot's customers pay to this card for purchases and wallet top-ups. Leave empty to turn card payment off."),
+    h("label", {}, h("span", {}, fa ? "شماره کارت (یا شبا)" : "Card number (or IBAN)"), num),
+    h("div", { class: "two" }, h("label", {}, h("span", {}, fa ? "به نام" : "Holder"), holder), h("label", {}, h("span", {}, fa ? "بانک" : "Bank"), bank)),
+    h("div", { class: "row" }, h("button", { class: "primary", type: "submit" }, t("save"))));
 }
 
 // ---------- Card-to-card payment and discount codes ----------
@@ -4489,6 +4566,7 @@ function viewSettings() {
     owner && ["sub", "link", fa ? "اشتراک مشتری" : "Customer subscription", fa ? "عنوان، نام کانفیگ‌ها و صفحهٔ مشتری" : "Title, config names, customer page", () => [subSettingsCard()]],
     (owner || fullOwner()) && ["panel", "globe", fa ? "آدرس و دسترسی پنل" : "Panel address and access", fa ? "HTTPS، مسیر مخفی، IPهای مجاز" : "HTTPS, secret path, trusted IPs", () => [fullOwner() ? panelHTTPSCard() : null, fullOwner() ? panelPathCard() : null, owner ? trustedCard() : null]],
     me.role === "rep" && ["repsub", "link", fa ? "صفحهٔ اشتراک من" : "My subscription page", fa ? "برند، لوگو و آدرس اختصاصی" : "Brand, logo and own address", () => [repBrandCard("/api/v2/rep/brand")]],
+    me.role === "rep" && ["repbot", "bell", fa ? "ربات فروش و کارت من" : "My sales bot and card", fa ? "ربات تلگرام اختصاصی، کارت به کارت" : "Own Telegram bot, card payment", () => [repBotCard("/api/v2/rep/bot"), sellerCardCard("/api/v2/shop/card")]],
     ["security", "staff", fa ? "امنیت حساب" : "Account security", fa ? "رمز، ورود دومرحله‌ای، نشست‌ها" : "Password, two-step sign-in, sessions", () => [pwForm, tfaCard(), sessionsCard()]],
     (fullOwner() || owner || tgCard) && ["telegram", "bell", fa ? "تلگرام" : "Telegram", fa ? "ربات، هشدارها، فروش و دعوت" : "Bot, alerts, sales and referrals", () => [fullOwner() ? telegramBotCard() : null, owner ? tgCommerceCard() : null, tgCard]],
     fullOwner() && ["backup", "traffic", fa ? "پشتیبان و انتقال" : "Backup and migration", fa ? "دانلود، بازگردانی، ورود از پنل‌های دیگر" : "Download, restore, import from other panels", () => [backupCard, migrateCard(), foreignCard()]],
