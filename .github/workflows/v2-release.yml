@@ -1,11 +1,14 @@
 name: v2 release
 
-# Push a tag like v2.8.0 and this publishes dark-hub2 and dark-node for
-# linux amd64 and arm64 with SHA256SUMS. The HUB's "update from release"
-# button installs the newest one.
+# Push to release/v2 (or a tag like v2.8.0) and this publishes dark-hub2
+# and dark-node for linux amd64 and arm64 with SHA256SUMS, tagged with the
+# HUB version in the code. The HUB's "update from release" button installs
+# the newest one. A version that is already released is skipped.
 
 on:
   push:
+    branches:
+      - release/v2
     tags:
       - "v2.*.*"
 
@@ -17,12 +20,25 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+      - name: Version
+        id: v
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          V=$(sed -n 's/^const HubVersion = "\(v[0-9.]*\)"$/\1/p' internal/v2/hubcore/system.go)
+          test -n "$V"
+          echo "tag=$V" >> "$GITHUB_OUTPUT"
+          if gh release view "$V" >/dev/null 2>&1; then echo "skip=1" >> "$GITHUB_OUTPUT"; fi
       - uses: actions/setup-go@v5
+        if: steps.v.outputs.skip != '1'
         with:
           go-version-file: go.mod
       - name: Test
+        if: steps.v.outputs.skip != '1'
         run: go test -count=1 ./internal/v2/...
       - name: Build
+        if: steps.v.outputs.skip != '1'
         env:
           CGO_ENABLED: "0"
         run: |
@@ -32,9 +48,10 @@ jobs:
             GOOS=linux GOARCH=$arch go build -trimpath -ldflags "-s -w" -o dist/dark-hub2-linux-$arch ./cmd/dark-hub2
             GOOS=linux GOARCH=$arch go build -trimpath -ldflags "-s -w" -o dist/dark-node-linux-$arch ./cmd/dark-node
           done
-          ./dist/dark-hub2-linux-amd64 version | grep -qx "dark-hub2 ${GITHUB_REF_NAME}"
+          ./dist/dark-hub2-linux-amd64 version | grep -qx "dark-hub2 ${{ steps.v.outputs.tag }}"
           (cd dist && sha256sum dark-* > SHA256SUMS)
       - name: Publish
+        if: steps.v.outputs.skip != '1'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" dist/* --title "Dark Xray Pro $GITHUB_REF_NAME" --generate-notes
+        run: gh release create "${{ steps.v.outputs.tag }}" dist/* --target "$GITHUB_SHA" --title "Dark Xray Pro ${{ steps.v.outputs.tag }}" --generate-notes
