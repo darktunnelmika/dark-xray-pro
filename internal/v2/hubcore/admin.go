@@ -574,20 +574,6 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 		}
 		reply(w, map[string]bool{"ok": true}, s.SetHWIDLimit(r.Context(), r.PathValue("email"), in.Limit))
 	}))
-	mux.HandleFunc("PUT /api/v2/admin/clients/{email}/speed", member(func(w http.ResponseWriter, r *http.Request) {
-		p := who(r)
-		if p.Role == "rep" && !s.ownsClient(r.Context(), p.RepID, r.PathValue("email")) {
-			http.NotFound(w, r)
-			return
-		}
-		var in struct {
-			Kbps int `json:"kbps"`
-		}
-		if !decode(w, r, &in) {
-			return
-		}
-		reply(w, map[string]bool{"ok": true}, s.SetSpeedLimit(r.Context(), r.PathValue("email"), in.Kbps))
-	}))
 	mux.HandleFunc("PUT /api/v2/admin/clients/{email}/next-plan", guard(func(w http.ResponseWriter, r *http.Request) {
 		var in struct {
 			Plan *NextPlan `json:"plan"`
@@ -1399,6 +1385,16 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 			return
 		}
 		err := s.SetInboundLimits(r.Context(), r.PathValue("tag"), int64(in.CapGB*(1<<30)), in.Ends)
+		reply(w, map[string]bool{"ok": err == nil}, err)
+	}))
+	mux.HandleFunc("PUT /api/v2/admin/inbounds/{tag}/speed", guard(func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Kbps int `json:"kbps"`
+		}
+		if !decode(w, r, &in) {
+			return
+		}
+		err := s.SetInboundSpeed(r.Context(), r.PathValue("tag"), in.Kbps)
 		reply(w, map[string]bool{"ok": err == nil}, err)
 	}))
 	mux.HandleFunc("POST /api/v2/admin/inbounds/{tag}/clone", guard(func(w http.ResponseWriter, r *http.Request) {

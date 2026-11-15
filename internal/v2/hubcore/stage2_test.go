@@ -735,25 +735,25 @@ func TestSmartOrder(t *testing.T) {
 	}
 }
 
-func TestSpeedLimit(t *testing.T) {
+func TestInboundSpeed(t *testing.T) {
 	s, _ := newStore(t)
 	ctx := context.Background()
 	if _, err := s.CreateNode(ctx, "n1", "n1"); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.CreatePreset(ctx, PresetRequest{Tag: "r1", NodeID: "n1", Preset: "vless-reality-tcp", Port: 443, SNI: "www.speedtest.net",
-		Endpoints: []sub.Endpoint{{Name: "Direct", Address: "1.2.3.4", Port: 443}}}); err != nil {
-		t.Fatal(err)
-	}
-	for _, e := range []string{"slow", "fast"} {
-		if err := s.PutClient(ctx, Client{Email: e, Enabled: true, VolumeBytes: -1, Inbounds: []string{"r1"}}); err != nil {
+	for i, tag := range []string{"cheap", "vip"} {
+		if err := s.CreatePreset(ctx, PresetRequest{Tag: tag, NodeID: "n1", Preset: "vless-reality-tcp", Port: 443 + i, SNI: "www.speedtest.net",
+			Endpoints: []sub.Endpoint{{Name: "Direct", Address: "1.2.3.4", Port: 443 + i}}}); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if err := s.SetSpeedLimit(ctx, "slow", 10); err == nil {
-		t.Fatal("a limit under 64 kbit/s must be refused")
+	if err := s.PutClient(ctx, Client{Email: "u", Enabled: true, VolumeBytes: -1, Inbounds: []string{"cheap", "vip"}}); err != nil {
+		t.Fatal(err)
 	}
-	if err := s.SetSpeedLimit(ctx, "slow", 8000); err != nil {
+	if err := s.SetInboundSpeed(ctx, "cheap", 10); err == nil {
+		t.Fatal("a cap under 64 kbit/s must be refused")
+	}
+	if err := s.SetInboundSpeed(ctx, "cheap", 15000); err != nil {
 		t.Fatal(err)
 	}
 	render := func() string {
@@ -768,17 +768,17 @@ func TestSpeedLimit(t *testing.T) {
 	}
 	_, _ = s.db.Exec(`UPDATE nodes SET agent_version='v2.10.0' WHERE id='n1'`)
 	cfg := render()
-	if !strings.Contains(cfg, `"dark-limit-1"`) || !strings.Contains(cfg, `"pass":"8000"`) || !strings.Contains(cfg, `"user":["slow"]`) || strings.Contains(cfg, `"user":["fast"]`) {
+	if !strings.Contains(cfg, `"pass":"15000"`) || !strings.Contains(cfg, `"user":"inbound:cheap"`) || !strings.Contains(cfg, `"inboundTag":["cheap"`) || strings.Contains(cfg, `inbound:vip`) {
 		t.Fatal(cfg)
 	}
-	list, _ := s.Clients(ctx)
-	for _, c := range list {
-		if c.Email == "slow" && c.SpeedKbps != 8000 {
-			t.Fatal("the list must show the limit")
+	list, _ := s.Inbounds(ctx)
+	for _, v := range list {
+		if v.Tag == "cheap" && v.SpeedKbps != 15000 {
+			t.Fatal("the list must show the cap")
 		}
 	}
-	_ = s.SetSpeedLimit(ctx, "slow", 0)
+	_ = s.SetInboundSpeed(ctx, "cheap", 0)
 	if strings.Contains(render(), "dark-limit") {
-		t.Fatal("removing the limit must remove the route")
+		t.Fatal("removing the cap must remove the route")
 	}
 }

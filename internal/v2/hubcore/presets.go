@@ -440,6 +440,8 @@ type InboundView struct {
 	CapBytes int64 `json:"cap_bytes"`
 	CapUsed  int64 `json:"cap_used"`
 	EndsUnix int64 `json:"ends_unix"`
+	// Shared speed cap of the whole inbound per node, kbit/s; 0 = none.
+	SpeedKbps int `json:"speed_kbps"`
 }
 
 func (s *Store) Inbounds(ctx context.Context) ([]InboundView, error) {
@@ -447,7 +449,7 @@ func (s *Store) Inbounds(ctx context.Context) ([]InboundView, error) {
 (SELECT COALESCE(SUM(up+down),0) FROM inbound_traffic t WHERE t.tag IN (i.tag, i.tag||'__t') AND t.day=?),
 (SELECT COALESCE(SUM(up+down),0) FROM inbound_traffic t WHERE t.tag IN (i.tag, i.tag||'__t')),
 (SELECT COALESCE(group_concat(node_id),'') FROM (SELECT node_id FROM inbound_routes r WHERE r.tag=i.tag ORDER BY node_id)),
-i.cap_bytes,i.cap_base,i.ends_unix
+i.cap_bytes,i.cap_base,i.ends_unix,i.speed_kbps
 FROM inbounds i ORDER BY i.tag`, s.now().UTC().Format("2006-01-02"))
 	if err != nil {
 		return nil, err
@@ -459,7 +461,7 @@ FROM inbounds i ORDER BY i.tag`, s.now().UTC().Format("2006-01-02"))
 		var tpl, meta string
 		var nodes string
 		var base int64
-		if err := rows.Scan(&v.Tag, &v.NodeID, &tpl, &meta, &v.Enabled, &v.Clients, &v.Today, &v.Total, &nodes, &v.CapBytes, &base, &v.EndsUnix); err != nil {
+		if err := rows.Scan(&v.Tag, &v.NodeID, &tpl, &meta, &v.Enabled, &v.Clients, &v.Today, &v.Total, &nodes, &v.CapBytes, &base, &v.EndsUnix, &v.SpeedKbps); err != nil {
 			return nil, err
 		}
 		var t struct {

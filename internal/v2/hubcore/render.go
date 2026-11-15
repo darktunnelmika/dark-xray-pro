@@ -129,6 +129,7 @@ var plainProtocols = map[string]bool{"socks": true, "http": true, "dokodemo-door
 
 type nodeInbound struct {
 	tag            string
+	speedKbps      int
 	template       []byte
 	listen         string
 	direct, tunnel int
@@ -138,7 +139,7 @@ type nodeInbound struct {
 // inbounds with every assigned client, plus the stats API the agent needs.
 // The output is deterministic so its hash identifies the revision.
 func (s *Store) RenderNode(ctx context.Context, nodeID string) ([]byte, error) {
-	rows, err := s.ro.QueryContext(ctx, `SELECT i.tag,i.template,r.listen_ip,r.direct_port,r.tunnel_port FROM inbound_routes r
+	rows, err := s.ro.QueryContext(ctx, `SELECT i.tag,i.template,r.listen_ip,r.direct_port,r.tunnel_port,i.speed_kbps FROM inbound_routes r
 JOIN inbounds i ON i.tag=r.tag WHERE r.node_id=? AND i.enabled=1 ORDER BY i.tag`, nodeID)
 	if err != nil {
 		return nil, err
@@ -147,7 +148,7 @@ JOIN inbounds i ON i.tag=r.tag WHERE r.node_id=? AND i.enabled=1 ORDER BY i.tag`
 	for rows.Next() {
 		var n nodeInbound
 		var tpl string
-		if err := rows.Scan(&n.tag, &tpl, &n.listen, &n.direct, &n.tunnel); err != nil {
+		if err := rows.Scan(&n.tag, &tpl, &n.listen, &n.direct, &n.tunnel, &n.speedKbps); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -286,7 +287,7 @@ JOIN inbounds i ON i.tag=r.tag WHERE r.node_id=? AND i.enabled=1 ORDER BY i.tag`
 		}
 	}
 	outbounds, routing, dns, routeOnly := s.nodeRouting(ctx, nodeID, swapTags)
-	outbounds = s.speedRouting(ctx, agentVer, clients, outbounds, routing)
+	outbounds = speedRouting(agentVer, ins, outbounds, routing)
 	if routeOnly {
 		for _, x := range inbounds {
 			m, _ := x.(map[string]any)

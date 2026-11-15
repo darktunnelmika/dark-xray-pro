@@ -108,8 +108,8 @@ func (s *Store) CloneClient(ctx context.Context, from, to string) error {
 		return err
 	}
 	_, _ = s.db.ExecContext(ctx, `UPDATE clients SET rep_id=(SELECT rep_id FROM clients WHERE email=?), plan=(SELECT plan FROM clients WHERE email=?),
-note=(SELECT note FROM clients WHERE email=?), reset_period=(SELECT reset_period FROM clients WHERE email=?), hwid_limit=(SELECT hwid_limit FROM clients WHERE email=?), speed_kbps=(SELECT speed_kbps FROM clients WHERE email=?) WHERE email=?`,
-		from, from, from, from, from, from, to)
+note=(SELECT note FROM clients WHERE email=?), reset_period=(SELECT reset_period FROM clients WHERE email=?), hwid_limit=(SELECT hwid_limit FROM clients WHERE email=?) WHERE email=?`,
+		from, from, from, from, from, to)
 	_, _ = s.db.ExecContext(ctx, `INSERT OR IGNORE INTO client_group_members(group_id,email) SELECT group_id,? FROM client_group_members WHERE email=?`, to, from)
 	return nil
 }

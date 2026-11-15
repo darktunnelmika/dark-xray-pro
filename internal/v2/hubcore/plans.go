@@ -39,9 +39,6 @@ func (s *Store) ensurePlanSchema() error {
 	if err := s.addColumn("clients", "hwid_limit", "INTEGER NOT NULL DEFAULT 0"); err != nil {
 		return err
 	}
-	if err := s.addColumn("clients", "speed_kbps", "INTEGER NOT NULL DEFAULT 0"); err != nil {
-		return err
-	}
 	return s.addColumn("clients", "start_by_unix", "INTEGER NOT NULL DEFAULT 0")
 }
 

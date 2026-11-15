@@ -1293,7 +1293,6 @@ function clientCard(c, ctx, selected, onSelect) {
     h("div", { class: "row small muted" },
       h("span", {}, `${bytes(used)} / ${c.VolumeBytes < 0 ? t("unlimited") : bytes(c.VolumeBytes)}`),
       c.MaxIPs ? h("span", {}, `· IP ≤ ${fmtNum(c.MaxIPs)}`) : null,
-      c.speed_kbps ? h("span", {}, `· ⚡ ${fmtNum(+(c.speed_kbps / 1000).toFixed(1))} Mbps`) : null,
       h("span", {}, `· ${(c.Inbounds || []).join(", ")}`)),
     c.Note ? h("div", { class: "small muted" }, c.Note) : null,
     c.VolumeBytes > 0 ? h("div", { class: "bar" }, h("i", { class: pct > 90 ? "bad" : pct > 75 ? "warn" : "", style: `inline-size:${pct}%` })) : null,
@@ -1607,7 +1606,6 @@ function clientForm(c, inbounds, ctx = { reps: [] }) {
   const days = h("input", { type: "number", min: "0", value: daysLeft });
   const first = h("input", { type: "checkbox", checked: isNew ? true : !v.ExpiresUnix && v.DurationSeconds > 0 });
   const ips = h("input", { type: "number", min: "0", max: "1000", value: v.MaxIPs });
-  const speed = h("input", { type: "number", min: "0", step: "0.5", value: v.speed_kbps ? +(v.speed_kbps / 1000).toFixed(2) : 0 });
   const enabled = h("input", { type: "checkbox", checked: v.Enabled });
   const note = h("input", { value: v.Note || "", maxlength: "2000" });
   const owner = me.role === "owner";
@@ -1652,8 +1650,6 @@ function clientForm(c, inbounds, ctx = { reps: [] }) {
       const em = encodeURIComponent(name.value);
       await api("PUT", `/api/v2/admin/clients/${em}`, body);
       if ((note.value || "") !== (v.Note || "")) await api("PUT", `/api/v2/admin/clients/${em}/note`, { Note: note.value });
-      const kbps = Math.round((+speed.value || 0) * 1000);
-      if (kbps !== (v.speed_kbps || 0)) await api("PUT", `/api/v2/admin/clients/${em}/speed`, { kbps });
       if (repSel && repSel.value !== (v.RepID || "")) await api("POST", `/api/v2/admin/clients/${em}/transfer`, { RepID: repSel.value });
       if (tplExtra?.reset_period && owner) await api("PUT", `/api/v2/admin/clients/${em}/reset-period`, { period: tplExtra.reset_period });
       if (tplExtra?.hwid_limit) await api("PUT", `/api/v2/admin/clients/${em}/hwid-limit`, { limit: tplExtra.hwid_limit });
@@ -1667,9 +1663,7 @@ function clientForm(c, inbounds, ctx = { reps: [] }) {
     me.role === "rep" ? h("label", {}, h("span", {}, t("plan")), plan, h("span", { class: "small" }, t("unitsHint"))) : null,
     h("div", { class: "two" }, h("label", {}, h("span", {}, t("volumeGB")), vol), h("label", {}, h("span", {}, t("days")), days)),
     h("label", { class: "check" }, first, t("firstUse")),
-    h("div", { class: "two" }, h("label", {}, h("span", {}, t("maxIPs")), ips),
-      h("label", {}, h("span", {}, lang === "fa" ? "سقف سرعت (مگابیت، ۰ = آزاد)" : "Speed limit (Mbit/s, 0 = none)"), speed)),
-    h("label", { class: "check" }, enabled, t("enabled")),
+    h("div", { class: "two" }, h("label", {}, h("span", {}, t("maxIPs")), ips), h("label", { class: "check" }, enabled, t("enabled"))),
     h("fieldset", { class: "form", style: "border:0;padding:0;margin:0" }, h("legend", { class: "small muted" }, t("assignInbounds")), boxes),
     h("label", {}, h("span", {}, t("contact")), note),
     repSel ? h("label", {}, h("span", {}, t("transfer")), repSel) : null,
@@ -1731,6 +1725,7 @@ async function viewInbounds() {
         stat(ltr(bytes(ib.traffic_today || 0)), t("trafficToday")),
         stat(ltr(bytes(ib.traffic_total || 0)), t("trafficTotal"))),
       plainLine(ib, meta, nodes),
+      ib.speed_kbps ? h("div", { class: "row small" }, h("span", { class: "badge" }, `⚡ ${fa ? "سقف سرعت مشترک" : "Shared speed cap"}: ${fmtNum(+(ib.speed_kbps / 1000).toFixed(1))} Mbps`)) : null,
       ib.cap_bytes || ib.ends_unix ? h("div", { class: "row small" },
         ib.cap_bytes ? meter(fa ? "سقف ترافیک" : "Traffic cap", (100 * (ib.cap_used || 0)) / ib.cap_bytes, ltr(`${bytes(ib.cap_used || 0)} / ${bytes(ib.cap_bytes)}`)) : null,
         ib.ends_unix ? h("span", { class: "badge" }, `${fa ? "پایان" : "Ends"}: ${new Date(ib.ends_unix * 1000).toLocaleDateString(fa ? "fa-IR" : "en-GB")}`) : null) : null,
@@ -2284,7 +2279,7 @@ async function inboundStudio(tag, ctx) {
       const d = await api("POST", "/api/v2/admin/inbounds/draft", { ...req, sni: "www.speedtest.net", port: p.port || 443, remark: p.remark || "Dark VPN" });
       const tpl = typeof d.template === "string" ? JSON.parse(d.template) : d.template, meta = typeof d.meta === "string" ? JSON.parse(d.meta) : d.meta;
       meta.remark ||= p.remark || "Dark VPN";
-      p.lim = { cap: 0, ends: "" };
+      p.lim = { cap: 0, ends: "", speed: 0 };
       p.draft = { tpl, meta, enabled: true };
       p.kit = inboundFormKit({ tpl, meta, enabled: true, lim: p.lim, view: {}, routed: false, certList: ctx.certs || [], err, draw: () => draw(), create: true, nodes });
     } catch (x) { err.textContent = x.message; }
@@ -2433,6 +2428,7 @@ async function inboundStudio(tag, ctx) {
         const usesCert = ["hysteria2", "tuic", "vless-tls-fallback"].includes(preset);
         await api("POST", "/api/v2/admin/inbounds/compose", { tag: p.tag, preset, template: ks ? ks.tpl : undefined, meta: ks ? ks.meta : undefined, sni: (p.sni || "").trim(), path: (p.path || "").trim(), remark: ks ? (ks.meta.remark || "") : (p.remark || "").trim(), cert: usesCert ? p.cert : "", routes });
         if (ks && (+p.lim.cap || p.lim.ends)) await api("PUT", `/api/v2/admin/inbounds/${encodeURIComponent(p.tag)}/limits`, { cap_gb: +p.lim.cap || 0, ends_unix: p.lim.ends ? Math.floor(new Date(p.lim.ends + "T23:59:59").getTime() / 1000) : 0 });
+        if (ks && +p.lim.speed) await api("PUT", `/api/v2/admin/inbounds/${encodeURIComponent(p.tag)}/speed`, { kbps: Math.round(+p.lim.speed * 1000) });
         if (ks && !ks.enabled) await api("POST", `/api/v2/admin/inbounds/${encodeURIComponent(p.tag)}/enabled`, { Enabled: false });
       } else {
         await api("PUT", `/api/v2/admin/inbounds/${encodeURIComponent(theTag)}/routes`, routes);
@@ -2615,7 +2611,10 @@ function inboundFormKit(o) {
         field(lang === "fa" ? "سقف ترافیک کل اینباند (گیگ، ۰ = ندارد)" : "Inbound traffic cap (GB, 0 = none)", input(() => lim.cap, (v) => { lim.cap = v || 0; }, { type: "number", min: "0", step: "1", dir: "ltr" }),
           view.cap_bytes ? `${bytes(view.cap_used || 0)} / ${bytes(view.cap_bytes)}` : (lang === "fa" ? "از لحظهٔ ذخیره شمرده می‌شود" : "Counted from when you save")),
         field(lang === "fa" ? "تاریخ پایان (خالی = ندارد)" : "End date (empty = none)", input(() => lim.ends, (v) => { lim.ends = v; }, { type: "date", dir: "ltr" }),
-          lang === "fa" ? "بعد از سقف یا تاریخ، اینباند خاموش می‌شود و به مالک‌ها خبر داده می‌شود" : "Past the cap or date the inbound turns off and owners are told"))));
+          lang === "fa" ? "بعد از سقف یا تاریخ، اینباند خاموش می‌شود و به مالک‌ها خبر داده می‌شود" : "Past the cap or date the inbound turns off and owners are told")),
+      me.role === "owner" ? field(lang === "fa" ? "سقف سرعت مشترک (مگابیت، ۰ = بدون محدودیت)" : "Shared speed cap (Mbit/s, 0 = none)",
+        input(() => lim.speed, (v) => { lim.speed = v || 0; }, { type: "number", min: "0", step: "0.5", dir: "ltr" }),
+        lang === "fa" ? "همهٔ کاربرهای این اینباند روی هر سرور همین سرعت را بین خودشان تقسیم می‌کنند (مستقیم و تانل با هم)" : "Everyone on this inbound shares this speed on each server (direct and tunnel together)") : null));
     // Protocol
     if (proto === "vless") out.push(drawVless(settings));
     if (proto === "shadowsocks") out.push(drawSS(settings));
@@ -2907,8 +2906,9 @@ async function inboundEditor(tag, nodes, certs) {
     certs ? Promise.resolve(certs) : api("GET", "/api/v2/admin/certs").catch(() => []),
     api("GET", "/api/v2/admin/inbounds").catch(() => [])]);
   const view = (all || []).find((x) => x.tag === tag) || {};
-  const lim = { cap: view.cap_bytes ? +(view.cap_bytes / 2 ** 30).toFixed(2) : 0, ends: view.ends_unix ? new Date(view.ends_unix * 1000).toISOString().slice(0, 10) : "" };
-  const lim0 = JSON.stringify(lim);
+  const lim = { cap: view.cap_bytes ? +(view.cap_bytes / 2 ** 30).toFixed(2) : 0, ends: view.ends_unix ? new Date(view.ends_unix * 1000).toISOString().slice(0, 10) : "", speed: view.speed_kbps ? +(view.speed_kbps / 1000).toFixed(2) : 0 };
+  const speed0 = lim.speed;
+  const lim0 = JSON.stringify({ cap: lim.cap, ends: lim.ends });
   const parse = (v) => { try { return typeof v === "string" ? JSON.parse(v) : structuredClone(v || {}); } catch { return {}; } };
   let tpl = parse(raw.template), meta = parse(raw.meta);
   let enabled = raw.enabled;
@@ -2941,7 +2941,8 @@ async function inboundEditor(tag, nodes, certs) {
     if (st.security === "reality" && st.realitySettings) meta.short_id = (st.realitySettings.shortIds || [])[0] || meta.short_id;
     try {
       await guarded(() => api("PUT", `/api/v2/admin/inbounds/${encodeURIComponent(tag)}`, { node_id: raw.node_id, template: tpl, meta, enabled }));
-      if (JSON.stringify(lim) !== lim0) {
+      if (+lim.speed !== speed0) await api("PUT", `/api/v2/admin/inbounds/${encodeURIComponent(tag)}/speed`, { kbps: Math.round((+lim.speed || 0) * 1000) });
+      if (JSON.stringify({ cap: lim.cap, ends: lim.ends }) !== lim0) {
         await api("PUT", `/api/v2/admin/inbounds/${encodeURIComponent(tag)}/limits`, { cap_gb: +lim.cap || 0, ends_unix: lim.ends ? Math.floor(new Date(lim.ends + "T23:59:59").getTime() / 1000) : 0 });
       }
       toast(ie("saved")); d.close("save"); route();

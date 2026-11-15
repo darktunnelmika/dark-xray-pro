@@ -12,7 +12,7 @@ import (
 
 func (s *Store) ensureInboundLimitColumns() error {
 	for _, c := range []struct{ col, def string }{
-		{"cap_bytes", "INTEGER NOT NULL DEFAULT 0"}, {"cap_base", "INTEGER NOT NULL DEFAULT 0"}, {"ends_unix", "INTEGER NOT NULL DEFAULT 0"},
+		{"cap_bytes", "INTEGER NOT NULL DEFAULT 0"}, {"cap_base", "INTEGER NOT NULL DEFAULT 0"}, {"ends_unix", "INTEGER NOT NULL DEFAULT 0"}, {"speed_kbps", "INTEGER NOT NULL DEFAULT 0"},
 	} {
 		if err := s.addColumn("inbounds", c.col, c.def); err != nil {
 			return err
