@@ -208,6 +208,11 @@ func (b *Bot) onMessage(ctx context.Context, m *Message) {
 			return
 		}
 	}
+	if len(m.Photo) > 0 && !(b.Owners[chat] && b.peekAwait(chat) == "broadcast") {
+		if b.onReceipt(ctx, chat, name, m.Photo[len(m.Photo)-1].FileID, b.peekAwait(chat)) {
+			return
+		}
+	}
 	if b.Owners[chat] {
 		if text == "/start" || text == "/admin" || text == "/menu" {
 			b.ownerHome(ctx, chat)
@@ -298,6 +303,11 @@ func (b *Bot) onMessage(ctx context.Context, m *Message) {
 		b.ticket(ctx, chat, name, m.From.Username, arg)
 		return
 	}
+	if what := b.peekAwait(chat); strings.HasPrefix(what, "coupon:") && text != "" && !strings.HasPrefix(text, "/") {
+		b.takeAwait(chat)
+		b.takeCoupon(ctx, chat, strings.TrimPrefix(what, "coupon:"), text)
+		return
+	}
 	switch b.takeAwait(chat) {
 	case "link":
 		b.link(ctx, chat, text)
@@ -316,6 +326,12 @@ func (b *Bot) setAwait(chat int64, what string) {
 	b.mu.Lock()
 	b.awaiting[chat] = what
 	b.mu.Unlock()
+}
+
+func (b *Bot) peekAwait(chat int64) string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.awaiting[chat]
 }
 
 func (b *Bot) takeAwait(chat int64) string {
@@ -461,6 +477,16 @@ func (b *Bot) buy(ctx context.Context, chat int64, productID, renew string) {
 	if err != nil {
 		b.send(ctx, chat, "ثبت سفارش ممکن نشد. لطفاً دوباره تلاش کنید یا با پشتیبانی در تماس باشید.", mainMenu)
 		return
+	}
+	if o, err := b.Store.OrderByID(ctx, id); err == nil && o.Amount > 0 && b.cardOn(ctx) {
+		b.invoice(ctx, chat, id)
+		return
+	} else if err == nil && o.Amount == 0 && o.Discount > 0 {
+		// A 100% code: nothing to pay, deliver now.
+		if _, err := b.Store.FulfillOrder(ctx, b.owner(), id); err == nil {
+			b.announceOrders(ctx)
+			return
+		}
 	}
 	pay := b.Store.Setting(ctx, "tg_pay_text")
 	if pay == "" {
@@ -624,6 +650,19 @@ func (b *Bot) onCallback(ctx context.Context, q *CallbackQuery) {
 		}
 	case "prod":
 		b.showProduct(ctx, chat, rest)
+	case "cpn":
+		b.askCoupon(ctx, chat, rest)
+	case "rcpt":
+		b.setAwait(chat, "receipt:"+rest)
+		b.send(ctx, chat, "📸 عکس رسید واریز را همین‌جا بفرستید (اسکرین‌شات یا عکس).", homeKB)
+	case "ocx":
+		id, _ := strconv.ParseInt(rest, 10, 64)
+		if err := b.Store.CancelOwnOrder(ctx, hubcore.TgBuyer(chat), id); err != nil {
+			b.send(ctx, chat, "این سفارش دیگر قابل لغو نیست.", homeKB)
+			return
+		}
+		b.takeAwait(chat)
+		b.send(ctx, chat, "سفارش لغو شد.", homeKB)
 	case "status":
 		b.showStatus(ctx, chat)
 	case "shop":
@@ -816,12 +855,20 @@ func (b *Bot) orderCard(ctx context.Context, o hubcore.Order) string {
 	if o.Seller != "" {
 		seller = "\nفروشنده: " + esc(o.Seller)
 	}
-	return fmt.Sprintf("🛒 سفارش <b>#%d</b>\nمحصول: %s\nنوع: %s\nخریدار: %s\nمبلغ: %s تومان%s", o.ID, esc(o.ProductName), kind, buyer, money(o.Amount), seller)
+	disc := ""
+	if o.Discount > 0 {
+		disc = fmt.Sprintf("\n🎟 تخفیف %s: %s تومان", esc(o.DiscountCode), faMoney(o.Discount))
+	}
+	return fmt.Sprintf("🛒 سفارش <b>#%s</b>\n📦 محصول: %s\n🔖 نوع: %s\n👤 خریدار: %s\n💳 مبلغ: <b>%s تومان</b>%s%s", faInt(o.ID), esc(o.ProductName), kind, buyer, faMoney(o.Amount), disc, seller)
 }
 
 func (b *Bot) announceOrders(ctx context.Context) {
 	if news, err := b.Store.OrdersToAnnounce(ctx); err == nil {
+		cardOn := b.cardOn(ctx)
 		for _, o := range news {
+			if cardOn && o.Seller == "" && !o.HasReceipt && o.Amount > 0 && strings.HasPrefix(o.Buyer, "tg:") {
+				continue // announced with the receipt photo
+			}
 			if o.Seller != "" {
 				// A reseller's order goes to that reseller, who pays for it.
 				for _, chat := range b.Store.TgRepChats(ctx, o.Seller) {
@@ -841,7 +888,11 @@ func (b *Bot) announceOrders(ctx context.Context) {
 					b.send(ctx, chat, fmt.Sprintf("✅ سفارش #%d آماده شد.", o.ID), nil)
 					b.sendSub(ctx, chat, o.ClientEmail)
 				} else {
-					b.send(ctx, chat, fmt.Sprintf("سفارش #%d لغو شد. برای پیگیری با پشتیبانی در تماس باشید.", o.ID), mainMenu)
+					msg := fmt.Sprintf("❌ سفارش <b>#%s</b> لغو شد.", faInt(o.ID))
+					if o.HasReceipt {
+						msg = fmt.Sprintf("❌ رسید سفارش <b>#%s</b> تأیید نشد و سفارش لغو شد.\nاگر مبلغ را واریز کرده‌اید، با پشتیبانی در تماس باشید.", faInt(o.ID))
+					}
+					b.send(ctx, chat, msg, &Keyboard{Rows: [][]Button{row(cbBtn("💬 پشتیبانی", "support"), cbBtn("« منو", "home"))}})
 				}
 			}
 			b.Store.MarkOrderAnnounced(ctx, o.ID, true)

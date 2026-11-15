@@ -379,10 +379,20 @@ func (b *Bot) showProduct(ctx context.Context, chat int64, id string) {
 		if p.ID != id {
 			continue
 		}
-		text := fmt.Sprintf("📦 <b>%s</b>\n%s\n📶 حجم: <b>%s</b>\n⏳ مدت: <b>%s روز</b>\n💳 قیمت: <b>%s</b>\n\n✅ همهٔ سرورها · ⚡ تحویل خودکار · 🔗 یک لینک برای همه",
-			esc(p.Name), line, map[bool]string{true: faInt(p.GB) + " گیگ", false: "نامحدود"}[p.Plan == "volume"], faInt(p.Days), productPrice(p))
+		price := "<b>" + productPrice(p) + "</b>"
+		if d, ok := b.Store.HeldDiscount(ctx, hubcore.TgBuyer(chat), p.ID); ok {
+			np, ns := d.Discounted(p.Price, p.PriceStars)
+			q := p
+			q.Price, q.PriceStars = np, ns
+			if d.Percent == 0 {
+				q.PriceStars = p.PriceStars
+			}
+			price = "<s>" + productPrice(p) + "</s> ← <b>" + productPrice(q) + "</b> 🎟 " + esc(d.Code)
+		}
+		text := fmt.Sprintf("📦 <b>%s</b>\n%s\n📶 حجم: <b>%s</b>\n⏳ مدت: <b>%s روز</b>\n💳 قیمت: %s\n\n✅ همهٔ سرورها · ⚡ تحویل خودکار · 🔗 یک لینک برای همه",
+			esc(p.Name), line, map[bool]string{true: faInt(p.GB) + " گیگ", false: "نامحدود"}[p.Plan == "volume"], faInt(p.Days), price)
 		kb := &Keyboard{Rows: b.buyButtons(ctx, chat, p, "")}
-		kb.Rows = append(kb.Rows, row(cbBtn("« بسته‌ها", "shop")))
+		kb.Rows = append(kb.Rows, row(cbBtn("🎟 کد تخفیف دارم", "cpn:"+p.ID), cbBtn("« بسته‌ها", "shop")))
 		b.send(ctx, chat, text, kb)
 		return
 	}

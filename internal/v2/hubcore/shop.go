@@ -83,6 +83,12 @@ type Order struct {
 	DoneBy      string `json:"done_by"`
 	Method      string `json:"method"` // manual | stars | wallet
 	Stars       int64  `json:"stars"`
+	// Discount code taken off the price (toman), and the card receipt.
+	DiscountCode string `json:"discount_code"`
+	Discount     int64  `json:"discount"`
+	Receipt      string `json:"-"`
+	HasReceipt   bool   `json:"has_receipt"`
+	ReceiptUnix  int64  `json:"receipt_unix"`
 }
 
 func (s *Store) ensureShopSchema() error {
@@ -253,7 +259,11 @@ func (s *Store) CreateOrder(ctx context.Context, by Principal, productID, buyer,
 	if err != nil {
 		return 0, err
 	}
-	return r.LastInsertId()
+	id, err := r.LastInsertId()
+	if err == nil && buyer != "" {
+		s.applyHeldDiscount(ctx, id, buyer, p.ID, p.Price)
+	}
+	return id, err
 }
 
 // Orders lists orders newest first within by's scope.
@@ -262,7 +272,7 @@ func (s *Store) Orders(ctx context.Context, by Principal, status string, limit i
 		limit = 200
 	}
 	rows, err := s.ro.QueryContext(ctx, `SELECT o.id,o.product_id,COALESCE(p.name,''),o.seller,o.buyer,o.client_email,o.renew,o.amount,o.status,o.note,
-o.created_unix,o.done_unix,o.done_by,o.method,o.stars FROM orders o LEFT JOIN products p ON p.id=o.product_id
+o.created_unix,o.done_unix,o.done_by,o.method,o.stars,o.discount_code,o.discount,o.receipt,o.receipt_unix FROM orders o LEFT JOIN products p ON p.id=o.product_id
 WHERE (?='owner' OR (o.seller=? AND o.seller<>'')) AND (?='' OR o.status=?) ORDER BY o.id DESC LIMIT ?`, by.Role, by.RepID, status, status, limit)
 	if err != nil {
 		return nil, err
@@ -272,9 +282,10 @@ WHERE (?='owner' OR (o.seller=? AND o.seller<>'')) AND (?='' OR o.status=?) ORDE
 	for rows.Next() {
 		var o Order
 		if err := rows.Scan(&o.ID, &o.ProductID, &o.ProductName, &o.Seller, &o.Buyer, &o.ClientEmail, &o.Renew, &o.Amount, &o.Status, &o.Note,
-			&o.CreatedUnix, &o.DoneUnix, &o.DoneBy, &o.Method, &o.Stars); err != nil {
+			&o.CreatedUnix, &o.DoneUnix, &o.DoneBy, &o.Method, &o.Stars, &o.DiscountCode, &o.Discount, &o.Receipt, &o.ReceiptUnix); err != nil {
 			return nil, err
 		}
+		o.HasReceipt = o.Receipt != ""
 		out = append(out, o)
 	}
 	return out, rows.Err()
@@ -381,6 +392,7 @@ func (s *Store) CancelOrder(ctx context.Context, by Principal, id int64) error {
 	if n, _ := r.RowsAffected(); n != 1 {
 		return fmt.Errorf("%w: only pending orders can be cancelled", ErrInvalid)
 	}
+	s.releaseDiscount(ctx, id)
 	return nil
 }
 

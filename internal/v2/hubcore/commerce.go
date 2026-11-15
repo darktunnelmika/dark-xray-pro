@@ -206,8 +206,13 @@ func (s *Store) StarsCheckout(ctx context.Context, chat int64, productID, renew 
 	if priceStars <= 0 {
 		return 0, 0, "", ErrNotForStars
 	}
-	// Reuse an open invoice for the same thing (a double tap is harmless).
+	// Reuse an open invoice for the same thing (a double tap is harmless),
+	// unless the buyer now holds a discount code for it.
 	var open int64
+	if _, held := s.HeldDiscount(ctx, TgBuyer(chat), productID); held {
+		_, _ = s.db.ExecContext(ctx, `UPDATE orders SET status='cancelled', note=note||' · replaced' WHERE buyer=? AND product_id=? AND client_email=? AND status='pending' AND method='stars'`,
+			TgBuyer(chat), productID, renew)
+	}
 	_ = s.ro.QueryRowContext(ctx, `SELECT id FROM orders WHERE buyer=? AND product_id=? AND client_email=? AND status='pending' AND method='stars' ORDER BY id DESC LIMIT 1`,
 		TgBuyer(chat), productID, renew).Scan(&open)
 	if open > 0 {
@@ -217,6 +222,9 @@ func (s *Store) StarsCheckout(ctx context.Context, chat int64, productID, renew 
 	id, err = s.CreateOrder(ctx, Principal{User: "telegram", Role: "owner"}, productID, TgBuyer(chat), renew, "Telegram Stars")
 	if err != nil {
 		return 0, 0, "", err
+	}
+	if pct := s.orderStarsPercent(ctx, id); pct > 0 {
+		priceStars = max(1, priceStars*(100-pct)/100)
 	}
 	if _, err := s.db.ExecContext(ctx, `UPDATE orders SET method='stars', stars=? WHERE id=?`, priceStars, id); err != nil {
 		return 0, 0, "", err
@@ -308,6 +316,9 @@ func (s *Store) WalletPay(ctx context.Context, chat int64, productID, renew stri
 	if err != nil {
 		return "", 0, err
 	}
+	if pct := s.orderStarsPercent(ctx, id); pct > 0 {
+		priceStars = max(1, priceStars*(100-pct)/100)
+	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return "", 0, err
@@ -320,6 +331,7 @@ func (s *Store) WalletPay(ctx context.Context, chat int64, productID, renew stri
 	if bal < priceStars {
 		_ = tx.Rollback() // the store has one writer connection: release it first
 		_, _ = s.db.ExecContext(ctx, `UPDATE orders SET status='cancelled', note='wallet: not enough credit' WHERE id=?`, id)
+		s.releaseDiscount(ctx, id)
 		return "", bal, fmt.Errorf("%w: not enough credit (%d of %d Stars)", ErrInvalid, bal, priceStars)
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO tg_wallet(chat_id,unix,delta,kind,order_id,note) VALUES(?,?,?,?,?,?)`, chat, s.now().Unix(), -priceStars, "spend", id, ""); err != nil {

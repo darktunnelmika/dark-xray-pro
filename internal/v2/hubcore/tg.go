@@ -246,7 +246,7 @@ func (s *Store) MarkAllOrdersAnnounced(ctx context.Context) {
 
 func (s *Store) ordersWhere(ctx context.Context, where string) ([]Order, error) {
 	rows, err := s.ro.QueryContext(ctx, `SELECT o.id,o.product_id,COALESCE(p.name,''),o.seller,o.buyer,o.client_email,o.renew,o.amount,o.status,o.note,
-o.created_unix,o.done_unix,o.done_by,o.method,o.stars FROM orders o LEFT JOIN products p ON p.id=o.product_id WHERE `+where+` ORDER BY o.id LIMIT 50`)
+o.created_unix,o.done_unix,o.done_by,o.method,o.stars,o.discount_code,o.discount,o.receipt,o.receipt_unix FROM orders o LEFT JOIN products p ON p.id=o.product_id WHERE `+where+` ORDER BY o.id LIMIT 50`)
 	if err != nil {
 		return nil, err
 	}
@@ -255,9 +255,10 @@ o.created_unix,o.done_unix,o.done_by,o.method,o.stars FROM orders o LEFT JOIN pr
 	for rows.Next() {
 		var o Order
 		if err := rows.Scan(&o.ID, &o.ProductID, &o.ProductName, &o.Seller, &o.Buyer, &o.ClientEmail, &o.Renew, &o.Amount, &o.Status, &o.Note,
-			&o.CreatedUnix, &o.DoneUnix, &o.DoneBy, &o.Method, &o.Stars); err != nil {
+			&o.CreatedUnix, &o.DoneUnix, &o.DoneBy, &o.Method, &o.Stars, &o.DiscountCode, &o.Discount, &o.Receipt, &o.ReceiptUnix); err != nil {
 			return nil, err
 		}
+		o.HasReceipt = o.Receipt != ""
 		out = append(out, o)
 	}
 	return out, rows.Err()

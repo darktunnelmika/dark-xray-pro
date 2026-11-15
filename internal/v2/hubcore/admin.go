@@ -703,7 +703,31 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 		reply(w, map[string]bool{"ok": err == nil}, err)
 	}))
 	mux.HandleFunc("GET /api/v2/admin/tg/commerce", guard(func(w http.ResponseWriter, r *http.Request) {
-		reply(w, map[string]any{"trial": s.TrialPolicy(r.Context()), "referral": s.ReferralPolicy(r.Context())}, nil)
+		reply(w, map[string]any{"trial": s.TrialPolicy(r.Context()), "referral": s.ReferralPolicy(r.Context()), "card": s.Card(r.Context())}, nil)
+	}))
+	mux.HandleFunc("PUT /api/v2/admin/pay/card", guard(func(w http.ResponseWriter, r *http.Request) {
+		var in CardInfo
+		if !decode(w, r, &in) {
+			return
+		}
+		err := s.PutCard(r.Context(), in)
+		reply(w, map[string]bool{"ok": err == nil}, err)
+	}))
+	mux.HandleFunc("GET /api/v2/admin/discounts", guard(func(w http.ResponseWriter, r *http.Request) {
+		list, err := s.Discounts(r.Context())
+		reply(w, list, err)
+	}))
+	mux.HandleFunc("PUT /api/v2/admin/discounts", guard(func(w http.ResponseWriter, r *http.Request) {
+		var in Discount
+		if !decode(w, r, &in) {
+			return
+		}
+		err := s.PutDiscount(r.Context(), in)
+		reply(w, map[string]bool{"ok": err == nil}, err)
+	}))
+	mux.HandleFunc("DELETE /api/v2/admin/discounts/{code}", guard(func(w http.ResponseWriter, r *http.Request) {
+		err := s.DeleteDiscount(r.Context(), r.PathValue("code"))
+		reply(w, map[string]bool{"ok": err == nil}, err)
 	}))
 	mux.HandleFunc("PUT /api/v2/admin/tg/trial", guard(func(w http.ResponseWriter, r *http.Request) {
 		var in TrialPolicy

@@ -257,6 +257,10 @@ func Open(path string) (*Store, error) {
 		st.Close()
 		return nil, err
 	}
+	if err := st.ensureDiscountSchema(); err != nil {
+		st.Close()
+		return nil, err
+	}
 	if err := st.ensureCommerceSchema(); err != nil { // alters products and orders: after the shop schema
 		st.Close()
 		return nil, err

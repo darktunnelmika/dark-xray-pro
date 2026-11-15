@@ -21,6 +21,9 @@ type payAPI interface {
 // buyButtons lists how a product can be bought: Stars (paid and delivered
 // at once), wallet credit, or a manual order the owner confirms.
 func (b *Bot) buyButtons(ctx context.Context, chat int64, p hubcore.Product, renew string) [][]Button {
+	if d, ok := b.Store.HeldDiscount(ctx, hubcore.TgBuyer(chat), p.ID); ok && d.Percent > 0 && p.PriceStars > 0 {
+		p.PriceStars = max(1, p.PriceStars*(100-d.Percent)/100)
+	}
 	suffix := ""
 	label := "خرید "
 	if renew != "" {
