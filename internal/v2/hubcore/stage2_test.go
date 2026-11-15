@@ -790,6 +790,9 @@ func TestFullBackupAndRestore(t *testing.T) {
 	if err := s.PutClient(ctx, Client{Email: "keep-me", Enabled: true, VolumeBytes: -1}); err != nil {
 		t.Fatal(err)
 	}
+	if err := s.SetAdmin(ctx, "boss", "correct horse battery"); err != nil {
+		t.Fatal(err)
+	}
 	etc := t.TempDir()
 	os.WriteFile(filepath.Join(etc, "ca.pem"), []byte("CA"), 0o600)
 	os.WriteFile(filepath.Join(etc, "server.key"), []byte("KEY"), 0o600)
