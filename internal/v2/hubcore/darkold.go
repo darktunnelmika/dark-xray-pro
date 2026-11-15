@@ -194,6 +194,7 @@ type DarkOldReport struct {
 	Clients  int      `json:"clients"`
 	Restore  int      `json:"restore"`
 	Disabled int      `json:"disabled"`
+	Ended    int      `json:"ended"` // expired or used up (switched off in the old panel; enforced here)
 	Usage    int      `json:"usage"`
 	Links    int      `json:"links"`
 	Telegram int      `json:"telegram"` // clients linked to a Telegram account
@@ -441,6 +442,14 @@ FROM clients c JOIN managed_clients m ON m.email=c.id JOIN core_clients k ON k.e
 		var b darkOldBody
 		_ = json.Unmarshal([]byte(c.body), &b)
 		enabled := !c.extDisabled && (b.Enable == nil || *b.Enable)
+		if !enabled && !c.extDisabled {
+			// The old panel switches clients off when they expire or run out;
+			// here the panel enforces that itself, and a renewal must just work.
+			if (c.expires > 0 && c.expires < now) || (c.quota > 0 && c.up+c.down >= c.quota) {
+				enabled = true
+				rep.Ended++
+			}
+		}
 		vol := c.quota
 		if vol <= 0 {
 			vol = -1
