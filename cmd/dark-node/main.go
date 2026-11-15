@@ -38,6 +38,13 @@ func main() {
 	if *hubURL == "" || *nodeID == "" {
 		log.Fatal("-hub and -node-id are required")
 	}
+	if a, ok := nodeagent.LoadHubAddr(*stateDir); ok {
+		// Set from the panel (a new HUB address); wins over the flags.
+		*hubURL = a.URL
+		if a.Name != "" {
+			*serverName = a.Name
+		}
+	}
 	tok, err := os.ReadFile(*tokenFile)
 	if err != nil {
 		log.Fatalf("token: %v", err)
@@ -77,6 +84,7 @@ func main() {
 	agent.SetTask(wire.TaskXrayLog, nodeagent.XrayLogTask(logs))
 	agent.SetTask(wire.TaskXrayRestart, nodeagent.XrayRestartTask(sup))
 	agent.SetTask(wire.TaskOutboundTest, nodeagent.OutboundTestTask(sup))
+	agent.SetTask(wire.TaskSetHub, nodeagent.SetHubTask(*stateDir, *caFile))
 	// After a self-update: stop cleanly; systemd (Restart=always) starts
 	// the new binary.
 	agent.SetRestart(func() {

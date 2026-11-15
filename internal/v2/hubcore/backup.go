@@ -105,7 +105,7 @@ func RestoreBackup(backupPath, dbPath string) error {
 		return err
 	}
 	defer in.Close()
-	gz, err := gzip.NewReader(in)
+	gz, _, err := backupParts(in)
 	if err != nil {
 		return fmt.Errorf("not a dark-v2 backup: %w", err)
 	}

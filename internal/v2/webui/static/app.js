@@ -4251,6 +4251,53 @@ function lockoutsCard() {
   return h("div", { class: "card form" }, h("h2", {}, s2("lockTitle")), h("p", { class: "small muted" }, s2("lockHint")), list);
 }
 
+// Full backup: the database plus the HUB's keys and settings, encrypted,
+// so a new server can take over without reinstalling nodes.
+function fullBackupSection() {
+  const fa = lang === "fa";
+  const pass = h("input", { type: "password", dir: "ltr", autocomplete: "new-password", minlength: "8", placeholder: fa ? "رمز بکاپ (حداقل ۸ کاراکتر)" : "Backup password (8+ characters)" });
+  const err = h("div", { class: "error" });
+  const btn = h("button", { class: "primary", onclick: async () => {
+    err.textContent = "";
+    if (pass.value.length < 8) { err.textContent = fa ? "رمز حداقل ۸ کاراکتر باشد." : "The password needs 8+ characters."; return; }
+    btn.disabled = true;
+    try {
+      const res = await fetch("/api/v2/admin/backup/full", { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json", "X-Dark-Request": "1" }, body: JSON.stringify({ password: pass.value }) });
+      if (!res.ok) throw new Error((await res.text()).trim() || res.statusText);
+      const blob = await res.blob();
+      const name = (res.headers.get("Content-Disposition") || "").match(/filename="([^"]+)"/)?.[1] || "dark-v2-full.dkb";
+      const a = h("a", { href: URL.createObjectURL(blob), download: name });
+      document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+      pass.value = "";
+    } catch (x) { err.textContent = x.message; }
+    btn.disabled = false;
+  } }, fa ? "دانلود بکاپ کامل" : "Download full backup");
+  return h("div", { class: "form" },
+    h("h2", { class: "section" }, fa ? "بکاپ کامل (برای سرور جدید)" : "Full backup (for a new server)"),
+    h("p", { class: "small muted" }, fa ? "دیتابیس به‌همراه گواهی هاب، توکن‌ها و تنظیمات سرویس، رمزگذاری‌شده. اگر سرور هاب از دست برود، روی سرور جدید با «dark-hub2 restore -file … -new-ip …» برمی‌گردد و نودها بدون نصب دوباره وصل می‌شوند. رمز را جایی امن نگه دارید؛ بدون آن فایل باز نمی‌شود." : "The database plus the HUB certificate, tokens and service settings, encrypted. If the HUB server is lost, restore it on a new one with “dark-hub2 restore -file … -new-ip …” and nodes reconnect without a reinstall. Keep the password safe; the file cannot be opened without it."),
+    h("div", { class: "row" }, pass, btn), err);
+}
+
+// The address nodes use to reach the HUB (a domain survives a server move).
+function hubAddrSection() {
+  const fa = lang === "fa";
+  const url = h("input", { dir: "ltr", placeholder: "https://hub.example.com:28443" });
+  const out = h("div", { class: "form" });
+  api("GET", "/api/v2/admin/hub-address").then((a) => { if (a && a.url) url.value = a.url; }).catch(() => {});
+  const btn = h("button", { onclick: async () => {
+    btn.disabled = true;
+    try {
+      const res = await api("POST", "/api/v2/admin/hub-address", { url: url.value.trim() });
+      fill(out, ...(res || []).map((m) => h("div", { class: "small" }, m.task ? `✅ ${m.node}: ${fa ? "آدرس فرستاده شد؛ نود اول اتصال را چک می‌کند و بعد جابه‌جا می‌شود" : "sent; the node checks the address, then moves"}` : `⚠️ ${m.node}: ${m.reason}`)));
+    } catch (x) { fill(out, h("div", { class: "error" }, x.message)); }
+    btn.disabled = false;
+  } }, fa ? "ذخیره و ارسال به نودها" : "Save and send to nodes");
+  return h("div", { class: "form" },
+    h("h2", { class: "section" }, fa ? "آدرس هاب برای نودها" : "HUB address for nodes"),
+    h("p", { class: "small muted" }, fa ? "بهتر است یک دامنه باشد (رکورد A به IP هاب). هر نود قبل از جابه‌جایی چک می‌کند آدرس جدید واقعاً همین هاب است؛ اگر نبود، سر جایش می‌ماند. با دامنه، برای انتقال هاب فقط DNS را عوض می‌کنید." : "Best as a domain (an A record to the HUB's IP). Each node checks the new address really is this HUB before moving; if not, it stays. With a domain, moving the HUB is only a DNS change."),
+    h("div", { class: "row" }, url, btn), out);
+}
+
 function viewSettings() {
   const langSel = h("select", { onchange: (e) => { lang = e.target.value; safeSet("lang", lang); applyLang(); route(); } },
     h("option", { value: "en", selected: lang === "en" }, "English"), h("option", { value: "fa", selected: lang === "fa" }, "فارسی"));
@@ -4281,6 +4328,7 @@ function viewSettings() {
   } });
   const backupCard = fullOwner() ? h("div", { class: "card form" }, h("h2", {}, t("backup")), h("p", { class: "small muted" }, t("backupHint")),
     h("div", { class: "row" }, h("a", { class: "btn", href: "/api/v2/admin/backup", download: "" }, t("download"))),
+    fullBackupSection(), hubAddrSection(),
     h("h2", { class: "section" }, t("exportImport")), h("p", { class: "small muted" }, t("exportHint")),
     h("div", { class: "row" }, h("a", { class: "btn", href: "/api/v2/admin/clients/export", download: "" }, t("exportClients")), h("a", { class: "btn", href: "/api/v2/admin/clients/export.csv", download: "" }, lang === "fa" ? "خروجی اکسل (CSV)" : "Excel export (CSV)"),
       h("button", { onclick: () => importIn.click() }, t("importClients")), importIn), restoreSection()) : null;

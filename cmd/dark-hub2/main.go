@@ -79,6 +79,7 @@ func main() {
 	disabled := fs.Bool("disabled", false, "create the client disabled")
 	apply := fs.Bool("apply", false, "migrate: import (default is a preview)")
 	archived := fs.Bool("archived", false, "migrate: also move archived clients")
+	newIP := fs.String("new-ip", "", "restore: this server's IP, replacing the old server's in the service settings")
 	_ = fs.Parse(args)
 
 	if err := os.MkdirAll(filepath.Dir(*dbPath), 0o700); err != nil {
@@ -97,6 +98,7 @@ func main() {
 		log.Fatal(err)
 	}
 	defer s.Close()
+	hubcore.SetHubFiles(*tlsDir, hubcore.DefaultHubFiles...)
 	hubcore.SetRestartHook(func() {
 		log.Printf("restarting into the staged backup")
 		s.Close()
@@ -304,6 +306,22 @@ func main() {
 			}
 			defer os.Remove(plain)
 			src = plain
+		}
+		if hubcore.IsFullBackup(src) {
+			done, err := hubcore.RestoreFull(src, *dbPath, *tlsDir, *newIP)
+			if err != nil {
+				log.Fatal(err)
+			}
+			fmt.Println("restored the database into", *dbPath, "and HUB files into", *tlsDir+":", strings.Join(done, ", "))
+			unit := "/etc/systemd/system/dark-hub2.service"
+			if _, err := os.Stat(unit); os.IsNotExist(err) {
+				if err := os.WriteFile(unit, []byte(hubcore.HubUnit), 0o644); err == nil {
+					fmt.Println("wrote", unit)
+				}
+			}
+			fmt.Println("next: systemctl daemon-reload && systemctl enable --now dark-hub2")
+			fmt.Println("nodes reconnect by themselves once the HUB address they use points here (a domain, or set it in the panel before moving)")
+			return
 		}
 		if err := hubcore.RestoreBackup(src, *dbPath); err != nil {
 			log.Fatal(err)

@@ -1,6 +1,7 @@
 package hubcore
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -780,5 +781,95 @@ func TestInboundSpeed(t *testing.T) {
 	_ = s.SetInboundSpeed(ctx, "cheap", 0)
 	if strings.Contains(render(), "dark-limit") {
 		t.Fatal("removing the cap must remove the route")
+	}
+}
+
+func TestFullBackupAndRestore(t *testing.T) {
+	s, _ := newStore(t)
+	ctx := context.Background()
+	if err := s.PutClient(ctx, Client{Email: "keep-me", Enabled: true, VolumeBytes: -1}); err != nil {
+		t.Fatal(err)
+	}
+	etc := t.TempDir()
+	os.WriteFile(filepath.Join(etc, "ca.pem"), []byte("CA"), 0o600)
+	os.WriteFile(filepath.Join(etc, "server.key"), []byte("KEY"), 0o600)
+	os.WriteFile(filepath.Join(etc, "env"), []byte("DARK_HUB2_LISTEN=1.2.3.4:28443\nDARK_HUB2_HOSTS=1.2.3.4\nDARK_HUB2_SUB_BASE=https://1.2.3.4:28096\n"), 0o600)
+	SetHubFiles(etc, DefaultHubFiles...)
+	defer SetHubFiles("")
+	if _, err := s.FullBackup(ctx, "short"); err == nil {
+		t.Fatal("a short password must be refused")
+	}
+	data, err := s.FullBackup(ctx, "long-enough-pass")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(data, []byte("KEY")) {
+		t.Fatal("the full backup must be encrypted")
+	}
+	dir := t.TempDir()
+	enc := filepath.Join(dir, "full.dkb")
+	os.WriteFile(enc, data, 0o600)
+	if _, err := DecryptFile(enc, "wrong-password"); err == nil {
+		t.Fatal("a wrong password must fail")
+	}
+	plain, err := DecryptFile(enc, "long-enough-pass")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !IsFullBackup(plain) {
+		t.Fatal("not recognised as a full backup")
+	}
+	newEtc := filepath.Join(dir, "etc")
+	newDB := filepath.Join(dir, "v2.sqlite")
+	done, err := RestoreFull(plain, newDB, newEtc, "5.6.7.8")
+	if err != nil || len(done) != 3 {
+		t.Fatal(done, err)
+	}
+	if b, _ := os.ReadFile(filepath.Join(newEtc, "server.key")); string(b) != "KEY" {
+		t.Fatal("the HUB key must come back")
+	}
+	env, _ := os.ReadFile(filepath.Join(newEtc, "env"))
+	if !strings.Contains(string(env), "LISTEN=5.6.7.8:28443") || !strings.Contains(string(env), "SUB_BASE=https://5.6.7.8:28096") || !strings.Contains(string(env), "HOSTS=1.2.3.4") {
+		t.Fatal(string(env))
+	}
+	st, err := Open(newDB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	list, _ := st.Clients(ctx)
+	st.Close()
+	if len(list) != 1 || list[0].Email != "keep-me" {
+		t.Fatal("the database must come back", list)
+	}
+	// The panel's restore takes a full backup too (database only).
+	if _, err := s.StageRestore(ctx, data, "long-enough-pass"); err != nil {
+		t.Fatal(err)
+	}
+	_ = s.CancelRestore()
+}
+
+func TestMoveNodes(t *testing.T) {
+	s, _ := newStore(t)
+	ctx := context.Background()
+	for _, id := range []string{"new", "old"} {
+		if _, err := s.CreateNode(ctx, id, id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_, _ = s.db.Exec(`UPDATE nodes SET agent_version='v2.11.0' WHERE id='new'`)
+	_, _ = s.db.Exec(`UPDATE nodes SET agent_version='v2.10.0' WHERE id='old'`)
+	if _, err := s.MoveNodes(ctx, "http://hub.example.com", ""); err == nil {
+		t.Fatal("a non-https address must be refused")
+	}
+	res, err := s.MoveNodes(ctx, "https://hub.example.com:28443/", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res) != 2 || res[0].Node != "new" || res[0].Task == "" || res[1].Task != "" || res[1].Reason == "" {
+		t.Fatalf("%+v", res)
+	}
+	a, ok := s.NodeHubAddr(ctx)
+	if !ok || a.URL != "https://hub.example.com:28443" || a.Name != "dark-hub2" {
+		t.Fatalf("%+v", a)
 	}
 }

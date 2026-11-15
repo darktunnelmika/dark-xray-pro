@@ -2,7 +2,6 @@ package hubcore
 
 import (
 	"bytes"
-	"compress/gzip"
 	"context"
 	"fmt"
 	"io"
@@ -45,7 +44,7 @@ func (s *Store) StageRestore(ctx context.Context, data []byte, pass string) (Res
 		}
 		data = plain
 	}
-	gz, err := gzip.NewReader(bytes.NewReader(data))
+	gz, _, err := backupParts(bytes.NewReader(data))
 	if err != nil {
 		return RestorePreview{}, fmt.Errorf("%w: not a Dark backup (expected .sqlite.gz or .dkb)", ErrInvalid)
 	}

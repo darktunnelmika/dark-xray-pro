@@ -657,13 +657,18 @@ func (b *Bot) sendBackup(ctx context.Context, chat int64) error {
 		b.send(ctx, chat, "🔐 اول یک رمز بکاپ (حداقل ۸ کاراکتر) بفرستید. بکاپ‌ها با این رمز رمزگذاری می‌شوند.", nil)
 		return fmt.Errorf("no backup password")
 	}
-	data, err := b.Store.EncryptedBackup(ctx, pass)
+	// A full backup (database + the HUB's keys and settings) lets a new
+	// server take over without reinstalling nodes.
+	data, err := b.Store.FullBackup(ctx, pass)
+	if err != nil {
+		data, err = b.Store.EncryptedBackup(ctx, pass)
+	}
 	if err != nil {
 		b.send(ctx, chat, "ساخت بکاپ ممکن نشد: "+esc(err.Error()), nil)
 		return err
 	}
 	name := "dark-v2-" + b.now().UTC().Format("20060102-1504") + ".dkb"
-	caption := fmt.Sprintf("📦 بکاپ رمزگذاری‌شدهٔ هاب (%s)\nبازیابی: از پنل ← تنظیمات ← بازگردانی بکاپ، یا <code>dark-hub2 restore -file %s</code> (رمز را می‌پرسد)", gb(int64(len(data))), name)
+	caption := fmt.Sprintf("📦 بکاپ کامل و رمزگذاری‌شدهٔ هاب (%s)\nبازیابی روی همین سرور: پنل ← تنظیمات ← بازگردانی بکاپ\nروی سرور جدید: <code>dark-hub2 restore -file %s -new-ip IP_جدید</code> (رمز را می‌پرسد؛ نودها خودشان وصل می‌شوند)", gb(int64(len(data))), name)
 	if err := b.API.SendDocument(ctx, chat, name, data, caption); err != nil {
 		b.logf("tgbot backup: %v", err)
 		return err

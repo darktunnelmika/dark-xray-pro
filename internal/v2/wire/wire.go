@@ -93,6 +93,11 @@ const (
 // the exit address (agent v2.5.0+).
 const TaskOutboundTest = "outbound_test"
 
+// TaskSetHub moves the agent to a new HUB address (args: {"url","name"}):
+// the agent checks the address serves the pinned HUB certificate, saves
+// it and restarts onto it (agent v2.11.0+).
+const TaskSetHub = "set_hub"
+
 // Host is the node machine's health at the time of the sync.
 type Host struct {
 	CPUPercent  float64 `json:"cpu_percent"`

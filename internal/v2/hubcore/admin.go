@@ -935,6 +935,35 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 			log.Printf("backup download: %v", err)
 		}
 	}))
+	mux.HandleFunc("POST /api/v2/admin/backup/full", guard(func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Password string `json:"password"`
+		}
+		if !decode(w, r, &in) {
+			return
+		}
+		data, err := s.FullBackup(r.Context(), in.Password)
+		if err != nil {
+			reply(w, nil, err)
+			return
+		}
+		w.Header().Set("Content-Type", "application/octet-stream")
+		w.Header().Set("Content-Disposition", `attachment; filename="dark-v2-full-`+time.Now().UTC().Format("20060102-1504")+`.dkb"`)
+		w.Header().Set("Cache-Control", "no-store")
+		_, _ = w.Write(data)
+	}))
+	mux.HandleFunc("GET /api/v2/admin/hub-address", guard(func(w http.ResponseWriter, r *http.Request) {
+		a, _ := s.NodeHubAddr(r.Context())
+		reply(w, a, nil)
+	}))
+	mux.HandleFunc("POST /api/v2/admin/hub-address", guard(func(w http.ResponseWriter, r *http.Request) {
+		var in NodeHubAddr
+		if !decode(w, r, &in) {
+			return
+		}
+		res, err := s.MoveNodes(r.Context(), in.URL, in.Name)
+		reply(w, res, err)
+	}))
 	mux.HandleFunc("GET /api/v2/admin/nodes/{id}/history", guard(func(w http.ResponseWriter, r *http.Request) {
 		hours, _ := strconv.Atoi(r.URL.Query().Get("hours"))
 		pts, err := s.NodeHistory(r.Context(), r.PathValue("id"), hours)

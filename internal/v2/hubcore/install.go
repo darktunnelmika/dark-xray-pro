@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -116,7 +117,14 @@ func InstallHandler(s *Store, cfg InstallConfig) http.Handler {
 		base := strings.TrimRight(cfg.PublicURL, "/") + "/install/" + tok
 		w.Header().Set("Content-Type", "text/x-shellscript; charset=utf-8")
 		w.Header().Set("Cache-Control", "no-store")
-		fmt.Fprintf(w, installScript, nodeID, base, nodeSHA, xraySHA, cfg.HubURL)
+		hubURL, hubJSON := cfg.HubURL, ""
+		if a, ok := s.NodeHubAddr(r.Context()); ok {
+			// The owner set a HUB address for nodes (a domain or a new server).
+			hubURL = a.URL
+			b, _ := json.Marshal(a)
+			hubJSON = string(b)
+		}
+		fmt.Fprintf(w, installScript, nodeID, base, nodeSHA, xraySHA, hubURL, hubJSON)
 	})
 	mux.HandleFunc("GET /install/{tok}/{file}", func(w http.ResponseWriter, r *http.Request) {
 		tok := r.PathValue("tok")
@@ -162,6 +170,8 @@ install -d -m 0700 /etc/dark-node /var/lib/dark-node
 install -m 0600 "$T/token" /etc/dark-node/token
 install -m 0600 "$T/hub-ca.pem" /etc/dark-node/hub-ca.pem
 printf 'DARK_NODE_HUB=%[5]s\nDARK_NODE_ID=%[1]s\n' > /etc/dark-node/env
+H='%[6]s'
+[ -n "$H" ] && printf '%%s' "$H" > /var/lib/dark-node/hub.json
 cat > /etc/systemd/system/dark-node.service <<'UNIT'
 [Unit]
 Description=DARK v2 Node (stock Xray supervisor; traffic never waits for the HUB)
