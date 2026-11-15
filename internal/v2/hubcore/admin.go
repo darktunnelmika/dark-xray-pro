@@ -164,6 +164,18 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 		}
 		reply(w, map[string]string{"from": from, "to": to}, err)
 	}))
+	mux.HandleFunc("GET /api/v2/admin/update-hub/release", guard(func(w http.ResponseWriter, r *http.Request) {
+		rel, err := LatestHubRelease(r.Context())
+		reply(w, rel, err)
+	}))
+	mux.HandleFunc("POST /api/v2/admin/update-hub/release", guard(func(w http.ResponseWriter, r *http.Request) {
+		from, to, nodeOK, err := s.InstallHubRelease(r.Context())
+		if err == nil {
+			notifyOwners(r.Context(), "⬆️ هاب از "+from+" به "+to+" (نسخهٔ رسمی) به‌روز شد و ری‌استارت می‌شود.")
+			defer RestartHub()
+		}
+		reply(w, map[string]any{"from": from, "to": to, "node_updated": nodeOK}, err)
+	}))
 	mux.HandleFunc("GET /api/v2/admin/panel-path", guard(func(w http.ResponseWriter, r *http.Request) {
 		reply(w, map[string]string{"path": s.Setting(r.Context(), "panel_path")}, nil)
 	}))

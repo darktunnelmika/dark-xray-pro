@@ -489,7 +489,26 @@ function hubUpdateRow() {
     } catch (x) { fill(out, h("span", { class: "error" }, x.message)); }
     file.value = "";
   });
-  return h("div", { class: "row small" }, h("button", { class: "ghost", onclick: () => file.click() }, fa ? "به‌روزرسانی هاب (فایل dark-hub2)" : "Update the HUB (dark-hub2 file)"), file, out);
+  const rel = h("span", { class: "small" });
+  const install = async (r) => {
+    if (!(await confirmAction(fa ? `هاب به نسخهٔ ${r.tag} به‌روز شود؟ فایل از گیت‌هاب دانلود و با checksum بررسی می‌شود؛ اگر بالا نیاید خودکار به ${r.current} برمی‌گردد. فایل نود هم به‌روز می‌شود تا بعداً نودها را با یک دکمه به‌روز کنید.` : `Update the HUB to ${r.tag}? It is downloaded from GitHub and checked against its checksum; if it does not stay up, ${r.current} comes back by itself. The node binary is refreshed too so nodes can follow with one click.`, fa ? "به‌روزرسانی" : "Update"))) return;
+    fill(rel, fa ? "در حال دانلود و بررسی…" : "Downloading and checking…");
+    try {
+      const x = await guarded(() => api("POST", "/api/v2/admin/update-hub/release"));
+      fill(rel, h("span", { class: "badge good" }, `${x.from} → ${x.to}`), fa ? " ری‌استارت…" : " restarting…");
+      setTimeout(() => location.reload(), 9000);
+    } catch (e) { fill(rel, h("span", { class: "error" }, e.message)); }
+  };
+  const check = h("button", { class: "ghost", onclick: async () => {
+    fill(rel, fa ? "در حال بررسی…" : "Checking…");
+    try {
+      const r = await api("GET", "/api/v2/admin/update-hub/release");
+      fill(rel, r.newer
+        ? [h("span", { class: "badge good" }, fa ? `نسخهٔ ${r.tag} آماده است` : `${r.tag} is available`), " ", h("button", { class: "primary", onclick: () => install(r) }, fa ? "نصب" : "Install")]
+        : h("span", { class: "muted" }, fa ? `آخرین نسخه را دارید (${r.current})` : `Up to date (${r.current})`));
+    } catch (e) { fill(rel, h("span", { class: "error" }, e.message)); }
+  } }, fa ? "بررسی نسخهٔ جدید" : "Check for updates");
+  return h("div", { class: "row small" }, check, rel, h("button", { class: "ghost spacer", onclick: () => file.click() }, fa ? "یا بارگذاری فایل dark-hub2" : "or upload a dark-hub2 file"), file, out);
 }
 
 async function viewOnline() {
