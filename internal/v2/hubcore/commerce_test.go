@@ -3,7 +3,9 @@ package hubcore
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
+	"time"
 )
 
 func TestTelegramCommerce(t *testing.T) {
@@ -171,5 +173,66 @@ func TestRepPermissions(t *testing.T) {
 	got, _ := s.RepPolicyOf(ctx, "ali")
 	if !got.DenyEdit || got.DenyRenew || got.DenyCreate {
 		t.Fatalf("%+v", got)
+	}
+}
+
+func TestAutoRenew(t *testing.T) {
+	s, now := newStore(t)
+	ctx := context.Background()
+	seed(t, s)
+	owner := Principal{User: "boss", Role: "owner"}
+	if err := s.PutProduct(ctx, owner, Product{ID: "m30", Name: "30 GB", Plan: "volume", GB: 30, Days: 30, Price: 150000, PriceStars: 250, Status: "published", Inbounds: []string{"de-vless"}}); err != nil {
+		t.Fatal(err)
+	}
+	const chat = int64(777)
+	if err := s.PutClient(ctx, Client{Email: "carol", Enabled: true, VolumeBytes: 30 << 30, ExpiresUnix: now.Unix() + 3*86400, Inbounds: []string{"de-vless"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetAutoRenew(ctx, chat, "carol", "m30"); err == nil {
+		t.Fatal("a chat that does not own the service")
+	}
+	if err := s.TgLink(ctx, chat, "carol"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetAutoRenew(ctx, chat, "carol", "m30"); err != nil {
+		t.Fatal(err)
+	}
+	var told []string
+	old := customerNotify
+	customerNotify = func(_ context.Context, _ int64, text string) { told = append(told, text) }
+	defer func() { customerNotify = old }()
+	wait := func() { time.Sleep(60 * time.Millisecond) }
+	if n := s.AutoRenewOnce(ctx); n != 0 {
+		t.Fatal("three days left: not due yet")
+	}
+	*now = now.Add(2*24*time.Hour + 13*time.Hour) // under a day left
+	if n := s.AutoRenewOnce(ctx); n != 0 {
+		t.Fatal("no credit: nothing to renew")
+	}
+	wait()
+	if len(told) != 1 || !strings.Contains(told[0], "کافی نیست") {
+		t.Fatalf("one notice about credit: %v", told)
+	}
+	if _, err := s.WalletAdjust(ctx, chat, 300, "gift"); err != nil {
+		t.Fatal(err)
+	}
+	if n := s.AutoRenewOnce(ctx); n != 0 {
+		t.Fatal("tries at most every six hours")
+	}
+	*now = now.Add(7 * time.Hour)
+	before, _ := s.ClientByEmail(ctx, "carol")
+	if n := s.AutoRenewOnce(ctx); n != 1 {
+		t.Fatal("should renew now")
+	}
+	wait()
+	after, _ := s.ClientByEmail(ctx, "carol")
+	if after.EffectiveUntil <= before.EffectiveUntil || s.WalletBalance(ctx, chat) != 50 {
+		t.Fatalf("renewal %d -> %d, balance %d", before.EffectiveUntil, after.EffectiveUntil, s.WalletBalance(ctx, chat))
+	}
+	if len(told) != 2 || !strings.Contains(told[1], "تمدید شد") {
+		t.Fatalf("renewal notice: %v", told)
+	}
+	if err := s.SetAutoRenew(ctx, chat, "carol", ""); err != nil || s.AutoRenew(ctx, "carol") != "" {
+		t.Fatal("turn off", err)
 	}
 }

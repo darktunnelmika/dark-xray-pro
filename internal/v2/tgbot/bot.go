@@ -648,6 +648,23 @@ func (b *Bot) onCallback(ctx context.Context, q *CallbackQuery) {
 		if mine() {
 			b.showRenew(ctx, chat, rest)
 		}
+	case "ar":
+		if mine() {
+			b.showAutoRenew(ctx, chat, rest)
+		}
+	case "arp", "arx":
+		email, pid, _ := strings.Cut(rest, "|")
+		if !b.ownsClient(ctx, chat, email) {
+			return
+		}
+		if verb == "arx" {
+			pid = ""
+		}
+		if err := b.Store.SetAutoRenew(ctx, chat, email, pid); err != nil {
+			b.send(ctx, chat, "این تنظیم انجام نشد: "+esc(err.Error()), homeKB)
+			return
+		}
+		b.showAutoRenew(ctx, chat, email)
 	case "prod":
 		b.showProduct(ctx, chat, rest)
 	case "cpn":
@@ -1044,6 +1061,11 @@ func (b *Bot) Test(ctx context.Context) error {
 // Alert tells every owner something urgent (used by the HUB, e.g. a
 // locked-out address).
 func (b *Bot) Alert(ctx context.Context, text string) { b.toOwners(ctx, text, nil) }
+
+// Tell sends one customer a message (auto-renew notices and the like).
+func (b *Bot) Tell(ctx context.Context, chat int64, text string) {
+	_, _ = b.API.Send(ctx, chat, text, &Keyboard{Rows: [][]Button{row(cbBtn("📦 سرویس‌های من", "mine"), cbBtn("💰 کیف پول", "wallet"))}}, 0)
+}
 
 const repHelp = `دستورهای نماینده:
 /credit — اعتبار و تعداد کلاینت‌ها

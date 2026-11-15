@@ -133,6 +133,7 @@ func main() {
 		go s.RunACME(ctx)
 		go s.RunGeo(ctx)
 		go s.RunResets(ctx)
+		go s.RunAutoRenew(ctx)
 		go s.RunWebhooks(ctx)
 		go s.RunSystemWatch(ctx)
 		go s.RunInboundLimits(ctx)
@@ -146,6 +147,7 @@ func main() {
 		tgc := &tgController{store: s, file: *tgTokenFile, subBase: *subBase, parent: ctx}
 		hubcore.SetTelegramControl(hubcore.TelegramControl{Apply: tgc.apply, Running: tgc.running, BackupNow: tgc.backupNow, Test: tgc.test})
 		hubcore.SetOwnerNotify(tgc.alert)
+		hubcore.SetCustomerNotify(tgc.tell)
 		if tok, err := os.ReadFile(*tgTokenFile); err == nil && strings.TrimSpace(string(tok)) != "" {
 			owners := s.TelegramOwners(ctx)
 			if len(owners) == 0 {
@@ -469,6 +471,12 @@ func (c *tgController) test(ctx context.Context) error {
 		return b.Test(ctx)
 	}
 	return fmt.Errorf("bot is off")
+}
+
+func (c *tgController) tell(ctx context.Context, chat int64, text string) {
+	if b := c.current(); b != nil {
+		b.Tell(ctx, chat, text)
+	}
 }
 
 func (c *tgController) alert(ctx context.Context, text string) {

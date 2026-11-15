@@ -181,6 +181,13 @@ func (b *Bot) serviceKB(ctx context.Context, chat int64, c hubcore.ClientView, m
 	if len(b.renewProducts(ctx)) > 0 {
 		kb.Rows = append(kb.Rows, row(cbBtn("♻️ تمدید / افزایش حجم", "rnw:"+e)))
 	}
+	if len(b.starsPlans(ctx)) > 0 {
+		label := "🔁 تمدید خودکار: خاموش"
+		if b.Store.AutoRenew(ctx, e) != "" {
+			label = "🔁 تمدید خودکار: روشن ✅"
+		}
+		kb.Rows = append(kb.Rows, row(cbBtn(label, "ar:"+e)))
+	}
 	nav := row(cbBtn("🔄 بروزرسانی", "svc:"+e))
 	if many {
 		nav = append(nav, cbBtn("« سرویس‌ها", "mine"))
@@ -484,4 +491,41 @@ func (b *Bot) showStatus(ctx context.Context, chat int64) {
 	}
 	fmt.Fprintf(&sb, "\n%s از %s سرور فعال · به‌روز: %s", faInt(int64(up)), faInt(int64(len(nodes))), faNum(now.In(tehran).Format("15:04")))
 	b.send(ctx, chat, sb.String(), &Keyboard{Rows: [][]Button{row(cbBtn("🔄 بروزرسانی", "status"), cbBtn("« منوی اصلی", "home"))}})
+}
+
+// starsPlans are the plans that can be paid from the wallet.
+func (b *Bot) starsPlans(ctx context.Context) []hubcore.Product {
+	var out []hubcore.Product
+	for _, p := range b.renewProducts(ctx) {
+		if p.PriceStars > 0 {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// showAutoRenew lets the customer pick the plan their service renews with
+// from the wallet shortly before it ends, or turn it off.
+func (b *Bot) showAutoRenew(ctx context.Context, chat int64, email string) {
+	cur := b.Store.AutoRenew(ctx, email)
+	bal := b.Store.WalletBalance(ctx, chat)
+	text := "🔁 <b>تمدید خودکار</b> · " + esc(email) + "\n" + line + "\n" +
+		"یک روز مانده به پایان (یا وقتی کمتر از ۵٪ حجم مانده) سرویس با پلن انتخابی از کیف پول تمدید می‌شود و همین‌جا خبر می‌دهیم.\n\n" +
+		fmt.Sprintf("💰 موجودی کیف پول: <b>%d⭐</b>\n", bal)
+	kb := &Keyboard{}
+	for _, p := range b.starsPlans(ctx) {
+		mark := ""
+		if p.ID == cur {
+			mark = "✅ "
+		}
+		kb.Rows = append(kb.Rows, row(cbBtn(fmt.Sprintf("%s%s · %d⭐", mark, p.Name, p.PriceStars), "arp:"+email+"|"+p.ID)))
+	}
+	if cur != "" {
+		text += "وضعیت: <b>روشن</b>"
+		kb.Rows = append(kb.Rows, row(cbBtn("⏹ خاموش کردن", "arx:"+email)))
+	} else {
+		text += "وضعیت: خاموش — یک پلن را انتخاب کنید تا روشن شود."
+	}
+	kb.Rows = append(kb.Rows, row(cbBtn("💰 کیف پول", "wallet"), cbBtn("« سرویس", "svc:"+email)))
+	b.send(ctx, chat, text, kb)
 }
