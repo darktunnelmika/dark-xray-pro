@@ -674,3 +674,20 @@ input.switch:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px
 .pw-eye { position: absolute; inset-block: 4px; inset-inline-end: 4px; padding: 0 10px; min-block-size: 0; border: 0; box-shadow: none; }
 .warn-text { color: var(--warn); margin-block-start: -6px; }
 .end-row { color: inherit; text-decoration: none; padding: 4px 6px; border-radius: 8px; } .end-row:hover { background: var(--surface-2); }
+
+/* Inbound builder: kind cards, then protocol / transport / security. */
+.kind-grid { display: grid; gap: 8px; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+.kind { display: grid; gap: 2px; text-align: start; padding: 10px 12px; border-radius: var(--r-md); background: var(--surface-2); border: 1px solid var(--glass-line); color: var(--text); box-shadow: none; }
+.kind b { font-size: 13.5px; } .kind small { font-size: 11.5px; color: var(--muted); }
+.kind.on { border-color: color-mix(in oklab, var(--cyan) 60%, transparent); background: color-mix(in oklab, var(--cyan) 10%, transparent); box-shadow: 0 0 18px -8px var(--cyan); }
+.tpl-row { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.tpl-row .chip { padding: 4px 11px; font-size: 12.5px; }
+.builder { display: grid; gap: 10px; padding: 14px; border-radius: var(--r-lg); background: var(--surface-2); border: 1px solid var(--glass-line); }
+.b-row { display: grid; grid-template-columns: 80px minmax(0, 1fr); gap: 10px; align-items: center; }
+.b-row > span { font-size: 13px; color: var(--muted); font-weight: 600; }
+.seg { display: flex; flex-wrap: wrap; gap: 4px; padding: 3px; border-radius: 12px; background: color-mix(in oklab, var(--bg) 50%, transparent); border: 1px solid var(--glass-line); inline-size: fit-content; max-inline-size: 100%; }
+.seg button { padding: 6px 12px; border-radius: 9px; border: 0; background: none; box-shadow: none; color: var(--muted); font-weight: 600; font-size: 13px; }
+.seg button.on { background: var(--neon); color: #050814; }
+.seg button.clash:not(.on) { opacity: .55; }
+.b-sum { margin: 0; font-size: 13px; color: var(--muted); } .b-sum b { color: var(--text); }
+@media (max-width: 520px) { .b-row { grid-template-columns: 1fr; gap: 4px; } }

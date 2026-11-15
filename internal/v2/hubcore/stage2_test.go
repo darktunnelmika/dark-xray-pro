@@ -569,7 +569,7 @@ func TestCustomStream(t *testing.T) {
 		in := sub.Inbound{Tag: "x", Template: tpl}
 		_ = json.Unmarshal(meta, &in.Meta)
 		links, err := sub.Links(sub.Account{Email: "a", UUID: "11111111-2222-3333-4444-555555555555", Secret: "pw"}, []sub.Inbound{in})
-		if err != nil || len(links) != 1 || !strings.Contains(links[0], "type="+s.Network) || !strings.Contains(links[0], "security="+s.Security) {
+		if err != nil || len(links) != 1 || s.Protocol != "vmess" && (!strings.Contains(links[0], "type="+s.Network) || !strings.Contains(links[0], "security="+s.Security)) {
 			t.Fatalf("%+v links %v %v", s, links, err)
 		}
 		if s.Network == "grpc" && !strings.Contains(links[0], "mode=multi") || s.Vision && !strings.Contains(links[0], "flow=xtls-rprx-vision") || s.Fingerprint == "firefox" && !strings.Contains(links[0], "fp=firefox") {

@@ -2127,6 +2127,72 @@ function sniFinder({ nodes, node, onPick }) {
 }
 
 // ---------- Inbound studio: one profile, many nodes, Direct/Tunnel/Swap per node ----------
+// The preset the HUB builds for the studio's choice.
+function profilePreset(p) {
+  return { xray: "custom", ss: "ss2022", proxy: p.proxy || "socks", fallback: "vless-tls-fallback" }[p.kind] || p.kind;
+}
+function profileLabel(p) {
+  if (p.kind !== "xray") return profilePreset(p);
+  const s = p.stream;
+  return `${s.protocol.toUpperCase()} · ${s.network} · ${s.security}${s.vision ? " · Vision" : ""}`;
+}
+
+// Words of the inbound builder.
+const BUILDER = {
+  fa: {
+    kinds: [["xray", "VLESS / VMess / Trojan", "پروتکل، انتقال و امنیت جدا"], ["ss", "Shadowsocks 2022", "ساده، مناسب تانل"], ["hysteria2", "Hysteria2", "QUIC، سریع روی شبکهٔ بد"],
+      ["tuic", "TUIC v5", "QUIC با کنترل ازدحام"], ["amneziawg", "AmneziaWG", "وایرگارد ضد DPI"], ["wireguard", "WireGuard", "VPN کامل"], ["mtproto", "MTProto", "پروکسی تلگرام"],
+      ["proxy", "SOCKS / HTTP", "پروکسی ساده با رمز"], ["dokodemo", "انتقال پورت", "ریلی به سرور دیگر"], ["fallback", "چندتایی روی یک پورت", "TLS + فال‌بک"]],
+    quick: "قالب آماده:",
+    templates: [["Reality + Vision (پیشنهادی)", { protocol: "vless", network: "tcp", security: "reality", vision: true }], ["Reality + gRPC", { protocol: "vless", network: "grpc", security: "reality" }],
+      ["Reality + XHTTP", { protocol: "vless", network: "xhttp", security: "reality" }], ["CDN: WS + TLS", { protocol: "vless", network: "ws", security: "tls" }],
+      ["CDN: XHTTP + TLS", { protocol: "vless", network: "xhttp", security: "tls" }], ["پشت CDN/تانل: WS بدون TLS", { protocol: "vless", network: "ws", security: "none" }]],
+    protocol: "پروتکل", transport: "انتقال", security: "امنیت", none: "بدون",
+    fixedTls: "REALITY با این انتخاب کار نمی‌کند؛ امنیت به TLS تغییر کرد.", fixedVless: "REALITY با VMess کار نمی‌کند؛ پروتکل به VLESS تغییر کرد.", fixedTcp: "REALITY فقط روی TCP، gRPC و XHTTP است؛ انتقال به TCP تغییر کرد.",
+    noRealityVmess: "REALITY با VMess کار نمی‌کند", noRealityNet: "REALITY فقط روی TCP، gRPC و XHTTP کار می‌کند",
+    hint: (s) => s.security === "reality" ? (s.network === "tcp" ? "بهترین انتخاب برای اتصال مستقیم؛ شبیه سایت واقعی دیده می‌شود." : s.network === "grpc" ? "برای شبکه‌هایی که TCP ساده را می‌بندند؛ multiMode سریع‌ترش می‌کند." : "XHTTP با REALITY؛ مقاوم در برابر فیلتر و قابل عبور از برخی CDNها.")
+      : s.security === "tls" ? (["ws", "httpupgrade", "xhttp", "grpc"].includes(s.network) ? "مناسب پشت CDN (مثلاً Cloudflare) با دامنهٔ خودتان." : "TLS مستقیم با گواهی دامنهٔ خودتان.")
+      : "بدون رمزنگاری لایهٔ انتقال؛ فقط پشت CDN با TLS یا داخل تانل استفاده کنید.",
+    service: "نام سرویس gRPC", multi: "multiMode (چند جریان، سریع‌تر)", path: "مسیر (path)", host: "Host", hostHint: "برای CDN: دامنه‌ای که روی CDN است؛ خالی = هر چیزی.", auto: "خالی = تصادفی",
+    xmode: "حالت XHTTP", xmodeHint: "auto معمولاً بهترین است؛ packet-up برای CDNهایی که استریم را قطع می‌کنند.",
+    realitySni: "سایت هدف (SNI)", realitySniHint: "یک سایت خارجی معتبر با TLS 1.3 و HTTP/2؛ «پیدا کردن SNI» بهترین را از روی نود می‌سنجد.",
+    fp: "اثر انگشت مرورگر (fingerprint)", dest: "مقصد (dest)", names: "نام‌های دیگر (اختیاری)", namesHint: "نام‌های دیگری از همان سایت که کلاینت می‌تواند بفرستد؛ با کاما جدا کنید.",
+    domain: "دامنه (SNI)", selfHint: "بدون گواهی، یک گواهی خودامضا ساخته می‌شود و کلاینت‌ها بررسی گواهی را رد می‌کنند (رمزنگاری برقرار است).",
+    noneWarn: "بدون امنیت فقط وقتی امن است که پشت CDN با TLS یا داخل تانل رمزدار باشد.", vision: "Vision (xtls-rprx-vision) — توصیه می‌شود",
+    fakeTls: "دامنهٔ fake TLS", target: "مقصد (host:port)", subnet: "زیرشبکهٔ تانل (اختیاری)",
+    info: { ss: "Shadowsocks 2022 با AES-128-GCM؛ بدون لایهٔ TLS، مناسب تانل‌ها و کلاینت‌هایی که REALITY ندارند.", hysteria2: "Hysteria2 روی QUIC (پورت UDP)؛ روی شبکه‌های پرافت سریع است.",
+      tuic: "TUIC v5 روی QUIC (پورت UDP)، کنار Xray داخل عامل نود (v2.7 به بالا).", amneziawg: "AmneziaWG: وایرگارد با بسته‌های اضافه که DPI نمی‌شناسد (عامل v2.6 به بالا). کاربرها فایل ‎.conf می‌گیرند.",
+      wireguard: "WireGuard ساده (UDP).", mtproto: "پروکسی تلگرام با fake TLS؛ لینک t.me روی کارت اینباند می‌آید.", proxy: "پروکسی با نام کاربری و رمز تصادفی؛ هرگز پروکسی باز نیست.",
+      dokodemo: "هر چیزی که به این پورت برسد به مقصد فرستاده می‌شود؛ کاربر ندارد.", fallback: "یک پورت TLS برای VLESS Vision و سه مسیر WebSocket (VLESS، VMess، Trojan)؛ گواهی دامنه لازم است." },
+  },
+  en: {
+    kinds: [["xray", "VLESS / VMess / Trojan", "protocol, transport, security"], ["ss", "Shadowsocks 2022", "simple, good for tunnels"], ["hysteria2", "Hysteria2", "QUIC, fast on bad links"],
+      ["tuic", "TUIC v5", "QUIC with congestion control"], ["amneziawg", "AmneziaWG", "WireGuard against DPI"], ["wireguard", "WireGuard", "full VPN"], ["mtproto", "MTProto", "Telegram proxy"],
+      ["proxy", "SOCKS / HTTP", "plain proxy with a password"], ["dokodemo", "Port forward", "relay to another server"], ["fallback", "Several on one port", "TLS + fallbacks"]],
+    quick: "Templates:",
+    templates: [["Reality + Vision (recommended)", { protocol: "vless", network: "tcp", security: "reality", vision: true }], ["Reality + gRPC", { protocol: "vless", network: "grpc", security: "reality" }],
+      ["Reality + XHTTP", { protocol: "vless", network: "xhttp", security: "reality" }], ["CDN: WS + TLS", { protocol: "vless", network: "ws", security: "tls" }],
+      ["CDN: XHTTP + TLS", { protocol: "vless", network: "xhttp", security: "tls" }], ["Behind CDN/tunnel: WS, no TLS", { protocol: "vless", network: "ws", security: "none" }]],
+    protocol: "Protocol", transport: "Transport", security: "Security", none: "None",
+    fixedTls: "REALITY does not work with this choice; security switched to TLS.", fixedVless: "REALITY does not work with VMess; protocol switched to VLESS.", fixedTcp: "REALITY works only over TCP, gRPC and XHTTP; transport switched to TCP.",
+    noRealityVmess: "REALITY does not work with VMess", noRealityNet: "REALITY works only over TCP, gRPC and XHTTP",
+    hint: (s) => s.security === "reality" ? (s.network === "tcp" ? "Best for direct connections; looks like a real website." : s.network === "grpc" ? "For networks that block plain TCP; multiMode makes it faster." : "XHTTP with REALITY; resists filtering and passes some CDNs.")
+      : s.security === "tls" ? (["ws", "httpupgrade", "xhttp", "grpc"].includes(s.network) ? "Good behind a CDN (e.g. Cloudflare) with your own domain." : "Direct TLS with your domain's certificate.")
+      : "No transport encryption; use only behind a TLS CDN or inside a tunnel.",
+    service: "gRPC service name", multi: "multiMode (several streams, faster)", path: "Path", host: "Host", hostHint: "For a CDN: the domain on the CDN; empty = anything.", auto: "empty = random",
+    xmode: "XHTTP mode", xmodeHint: "auto is usually best; packet-up for CDNs that cut streams.",
+    realitySni: "Target site (SNI)", realitySniHint: "A real foreign site with TLS 1.3 and HTTP/2; \"Find SNI\" measures the best from the node.",
+    fp: "Browser fingerprint", dest: "Destination (dest)", names: "Other names (optional)", namesHint: "Other names of the same site clients may send; comma separated.",
+    domain: "Domain (SNI)", selfHint: "Without a certificate a self-signed one is made and clients skip certificate checks (still encrypted).",
+    noneWarn: "No security is safe only behind a TLS CDN or inside an encrypted tunnel.", vision: "Vision (xtls-rprx-vision) — recommended",
+    fakeTls: "Fake-TLS domain", target: "Target (host:port)", subnet: "Tunnel subnet (optional)",
+    info: { ss: "Shadowsocks 2022 with AES-128-GCM; no TLS layer, good for tunnels and clients without REALITY.", hysteria2: "Hysteria2 over QUIC (UDP port); fast on lossy networks.",
+      tuic: "TUIC v5 over QUIC (UDP port), run beside Xray by the node agent (v2.7+).", amneziawg: "AmneziaWG: WireGuard with junk packets DPI does not recognise (agent v2.6+). Clients get a .conf file.",
+      wireguard: "Plain WireGuard (UDP).", mtproto: "Telegram proxy with fake TLS; the t.me link shows on the inbound card.", proxy: "A proxy with a random username and password; never an open proxy.",
+      dokodemo: "Everything reaching this port goes to the target; no users.", fallback: "One TLS port for VLESS Vision and three WebSocket paths (VLESS, VMess, Trojan); needs a domain certificate." },
+  },
+};
+
 async function inboundStudio(tag, ctx) {
   const isNew = !tag;
   const nodes = ctx.nodes || [];
@@ -2167,7 +2233,10 @@ async function inboundStudio(tag, ctx) {
   }
   function validProfile() {
     if (!/^[a-z0-9][a-z0-9._-]{0,62}$/.test(st.profile.tag)) { err.textContent = t("badTag"); return false; }
-    if (st.profile.preset.includes("-tls-") && !st.profile.cert) { err.textContent = t("needCert"); return false; }
+    const p = st.profile, fa = lang === "fa";
+    if (p.kind === "xray" && p.stream.security !== "none" && !(p.sni || "").trim()) { err.textContent = fa ? "نام دامنه (SNI) را وارد کنید." : "Enter the server name (SNI)."; return false; }
+    if (p.kind === "fallback" && !p.cert) { err.textContent = t("needCert"); return false; }
+    if (p.kind === "dokodemo" && !/^[^\s:]+:\d+$/.test((p.path || "").trim())) { err.textContent = fa ? "مقصد را به شکل 1.2.3.4:443 بنویسید." : "Write the target as 1.2.3.4:443."; return false; }
     return true;
   }
   const field = (label, el) => h("label", {}, h("span", {}, label), el);
@@ -2187,53 +2256,105 @@ async function inboundStudio(tag, ctx) {
 
   function drawProfile() {
     const p = st.profile;
-    const preset = h("select", {}, (ctx.presets || []).map((x) => h("option", { value: x, selected: x === p.preset }, x)));
-    const certSel = h("select", {}, h("option", { value: "" }, t("selfSigned")), (ctx.certs || []).map((c) => h("option", { value: c.id, selected: c.id === p.cert }, `${c.id} · ${c.domains.join(", ")}`)));
-    const certRow = field(t("certFor"), certSel);
-    const fbNote = h("p", { class: "small muted", hidden: true }, t("fbHint"));
-    const plainNote = h("p", { class: "small muted", hidden: true });
-    const sniWrap = h("div", {}), pathLabel = h("span", {}, t("path"));
-    const sync = () => {
-      fbNote.hidden = p.preset !== "vless-tls-fallback";
-      const plain = ["socks", "http", "dokodemo", "mtproto", "amneziawg"].includes(p.preset);
-      sniWrap.hidden = (plain && p.preset !== "mtproto") || p.preset === "wireguard";
-      pathLabel.textContent = p.preset === "dokodemo" ? (lang === "fa" ? "مقصد (host:port)" : "Target (host:port)") : t("path");
-      if (pathInput) pathInput.placeholder = p.preset === "dokodemo" ? "1.2.3.4:443" : p.preset === "wireguard" ? "10.66.0.0/16" : "";
-      const quic = p.preset === "hysteria2" || p.preset === "tuic";
-      plainNote.hidden = !plain && p.preset !== "tuic";
-      plainNote.textContent = p.preset === "tuic"
-        ? (lang === "fa" ? "TUIC v5 روی QUIC (پورت UDP)، با موتور sing-box کنار Xray داخل عامل نود (v2.7 به بالا). هر کاربر uuid و رمز خودش را دارد و مصرف، آنلاین و محدودیت‌ها مثل بقیه کار می‌کند. در اشتراک sing-box، Clash و لینک tuic:// می‌آید (Xray TUIC ندارد). بدون گواهی، گواهی خودامضا ساخته می‌شود." : "TUIC v5 over QUIC (UDP port), on sing-box's engine beside Xray in the node agent (v2.7+). Each client has its own uuid and password; usage, online and limits work as for the rest. In sing-box, Clash and tuic:// links (Xray has no TUIC). Without a certificate a self-signed one is issued.")
-        : p.preset === "amneziawg"
-        ? (lang === "fa" ? "AmneziaWG: همان WireGuard با بسته‌های اضافه و سربرگ‌های عوض‌شده که DPI نمی‌شناسد. کنار Xray داخل عامل نود اجرا می‌شود (عامل v2.6 به بالا) و پورت UDP می‌خواهد. هر کاربر یک کانفیگ (فایل .conf یا QR) برای برنامهٔ AmneziaWG یا AmneziaVPN می‌گیرد؛ مسیر = زیرشبکهٔ تونل (پیش‌فرض 10.67.0.0/16)." : "AmneziaWG: WireGuard with junk packets and changed headers DPI does not recognise. Runs beside Xray in the node agent (v2.6+) on a UDP port. Each client gets a config (.conf file or QR) for the AmneziaWG or AmneziaVPN app; Path = tunnel subnet (default 10.67.0.0/16).")
-        : p.preset === "mtproto"
-        ? (lang === "fa" ? "پروکسی تلگرام (MTProto با fake TLS): یک رمز مشترک مثل پروکسی SOCKS؛ SNI دامنه‌ای است که پروکسی خودش را شبیه آن نشان می‌دهد. لینک t.me روی کارت اینباند است. داخل عامل نود اجرا می‌شود (v2.6 به بالا)." : "Telegram proxy (MTProto with fake TLS): one shared secret like a SOCKS proxy; SNI is the domain it pretends to be. The t.me link is on the inbound card. Runs in the node agent (v2.6+).")
-        : p.preset === "dokodemo"
-        ? (lang === "fa" ? "انتقال پورت (تونل): هر چیزی که به این پورت برسد به مقصد فرستاده می‌شود؛ مثلاً یک ریلی جلوی سرور دیگر. کاربری ندارد و در اشتراک‌ها نمی‌آید؛ ترافیکش در آمار اینباند هست." : "Port forwarding (tunnel): everything arriving on this port goes to the target — e.g. a relay in front of another server. No clients, not in subscriptions; its traffic shows in the inbound's stats.")
-        : (lang === "fa" ? "پروکسی ساده با یک نام کاربری و رمز تصادفی (هرگز پروکسی باز نیست). کاربرهای پنل به آن وصل نمی‌شوند و در اشتراک‌ها نمی‌آید؛ لینک و رمز روی کارت اینباند است." : "A plain proxy with one random username and password (never an open proxy). Panel clients don't use it and it is not in subscriptions; the link and password are on the inbound card.");
-      certRow.hidden = !(p.preset.includes("-tls-") || quic);
-      certSel.options[0].hidden = !quic;
-      if (quic && !(ctx.certs || []).length) p.cert = "";
+    const fa = lang === "fa";
+    const B = BUILDER[fa ? "fa" : "en"];
+    p.kind ||= "xray";
+    p.stream ||= { protocol: "vless", network: "tcp", security: "reality", vision: true, path: "", host: "", grpc_multi: false, xhttp_mode: "auto", fingerprint: "chrome", alpn: "", server_names: "", dest: "" };
+    const s = p.stream;
+    const wrap = h("div", { class: "form" });
+    let note = "";
+    // An option that clashes with the other choices stays clickable: picking
+    // it adjusts them and says what changed.
+    const seg = (items, cur, onPick, why) => h("div", { class: "seg", role: "radiogroup" }, items.map(([v, l]) => {
+      const reason = why ? why(v) : "";
+      return h("button", { type: "button", role: "radio", "aria-checked": String(v === cur), class: `${v === cur ? "on" : ""} ${reason ? "clash" : ""}`, title: reason || null,
+        onclick: () => { note = ""; onPick(v); fix(); redraw(); } }, l);
+    }));
+    const fix = () => {
+      if (s.security === "reality" && s.protocol === "vmess") { s.security = "tls"; note = B.fixedTls; }
+      if (s.security === "reality" && !["tcp", "grpc", "xhttp"].includes(s.network)) { s.security = "tls"; note = B.fixedTls; }
     };
-    const sniInput = bind(p, "sni");
-    var pathInput = bind(p, "path");
-    const finder = sniFinder({ nodes, node: Object.keys(st.routes)[0] || nodes[0]?.ID, onPick: (d) => { p.sni = d; sniInput.value = d; } });
-    finder.hidden = true;
-    const findBtn = h("button", { type: "button", class: "ghost" }, t("findSni"));
-    findBtn.addEventListener("click", () => { finder.hidden = !finder.hidden; });
-    const isReality = () => p.preset.includes("reality");
-    sniWrap.append(field(t("sni"), h("div", { class: "row tight" }, sniInput, findBtn)));
-    preset.addEventListener("change", () => { p.preset = preset.value; sync(); findBtn.hidden = !isReality(); if (!isReality()) finder.hidden = true; });
-    findBtn.hidden = !isReality();
-    certSel.addEventListener("change", () => { p.cert = certSel.value; const c = (ctx.certs || []).find((x) => x.id === p.cert); if (c?.domains[0]) { p.sni = c.domains[0]; draw(); } });
-    sync();
+    const pickSecurity = (v) => {
+      s.security = v;
+      if (v === "reality") {
+        if (s.protocol === "vmess") { s.protocol = "vless"; note = B.fixedVless; }
+        if (!["tcp", "grpc", "xhttp"].includes(s.network)) { s.network = "tcp"; note = B.fixedTcp; }
+        if (!p.sni) p.sni = "www.speedtest.net";
+      }
+    };
+    const fld = (label, el, hint) => h("label", {}, h("span", {}, label), el, hint ? h("small", { class: "muted" }, hint) : null);
+    const inp = (obj, key, attrs = {}) => { const el = h("input", { ...attrs, value: obj[key] ?? "" }); el.addEventListener("input", () => { obj[key] = attrs.type === "number" ? +el.value : el.value; }); return el; };
+    const chk = (obj, key, label) => { const c = h("input", { type: "checkbox", checked: !!obj[key] }); c.addEventListener("change", () => { obj[key] = c.checked; redraw(); }); return h("label", { class: "check" }, c, label); };
+    // What Xray accepts (mirrors the HUB's checkStream).
+    const realityWhy = (sec) => sec !== "reality" ? "" : s.protocol === "vmess" ? B.noRealityVmess : !["tcp", "grpc", "xhttp"].includes(s.network) ? B.noRealityNet : "";
+    const netWhy = (net) => s.security === "reality" && !["tcp", "grpc", "xhttp"].includes(net) ? B.noRealityNet : "";
+    const protoWhy = (pr) => s.security === "reality" && pr === "vmess" ? B.noRealityVmess : "";
+    const visionOK = () => s.protocol === "vless" && s.network === "tcp" && s.security !== "none";
+    const certSel = () => {
+      const el = h("select", {}, h("option", { value: "" }, t("selfSigned")), (ctx.certs || []).map((c) => h("option", { value: c.id, selected: c.id === p.cert }, `${c.id} · ${c.domains.join(", ")}`)));
+      el.addEventListener("change", () => { p.cert = el.value; const c = (ctx.certs || []).find((x) => x.id === p.cert); if (c?.domains[0]) p.sni = c.domains[0]; redraw(); });
+      return el;
+    };
+    const sniRow = (label, hint) => {
+      const el = inp(p, "sni", { dir: "ltr" });
+      if (p.kind === "xray" && s.security !== "reality") return fld(label, el, hint);
+      const finder = sniFinder({ nodes, node: Object.keys(st.routes)[0] || nodes[0]?.ID, onPick: (d) => { p.sni = d; el.value = d; } });
+      finder.hidden = true;
+      return h("div", {}, fld(label, h("div", { class: "row tight" }, el, h("button", { type: "button", class: "ghost", onclick: () => { finder.hidden = !finder.hidden; } }, t("findSni"))), hint), finder);
+    };
+    function redraw() {
+      if (!visionOK()) s.vision = false;
+      const kids = [];
+      kids.push(h("div", { class: "kind-grid" }, B.kinds.map(([k, title, sub]) => h("button", { type: "button", class: `kind ${p.kind === k ? "on" : ""}`, "aria-pressed": String(p.kind === k),
+        onclick: () => { p.kind = k; if (k === "proxy") p.proxy ||= "socks"; redraw(); } }, h("b", {}, title), h("small", {}, sub)))));
+      if (p.kind === "xray") {
+        kids.push(h("div", { class: "tpl-row" }, h("span", { class: "muted small" }, B.quick), B.templates.map(([label, x]) =>
+          h("button", { type: "button", class: "chip", onclick: () => { Object.assign(s, { vision: false, path: "", host: "", grpc_multi: false, xhttp_mode: "auto" }, x); redraw(); } }, label))));
+        kids.push(h("div", { class: "builder" },
+          h("div", { class: "b-row" }, h("span", {}, B.protocol), seg([["vless", "VLESS"], ["vmess", "VMess"], ["trojan", "Trojan"]], s.protocol, (v) => { s.protocol = v; }, protoWhy)),
+          h("div", { class: "b-row" }, h("span", {}, B.transport), seg([["tcp", "TCP"], ["ws", "WebSocket"], ["grpc", "gRPC"], ["httpupgrade", "HTTPUpgrade"], ["xhttp", "XHTTP"]], s.network, (v) => { s.network = v; }, netWhy)),
+          h("div", { class: "b-row" }, h("span", {}, B.security), seg([["none", B.none], ["tls", "TLS"], ["reality", "REALITY"]], s.security, pickSecurity, realityWhy))));
+        if (note) kids.push(h("p", { class: "small warn-text", role: "status" }, note));
+        kids.push(h("p", { class: "b-sum" }, h("b", { dir: "ltr" }, `${s.protocol.toUpperCase()} · ${s.network} · ${s.security === "none" ? B.none : s.security.toUpperCase()}${s.vision ? " · Vision" : ""}`), " — ", B.hint(s)));
+        // Transport settings.
+        const tr = [];
+        if (s.network === "grpc") tr.push(h("div", { class: "two" }, fld(B.service, inp(s, "path", { dir: "ltr", placeholder: B.auto })), h("div", {}, chk(s, "grpc_multi", B.multi))));
+        if (["ws", "httpupgrade", "xhttp"].includes(s.network)) tr.push(h("div", { class: "two" }, fld(B.path, inp(s, "path", { dir: "ltr", placeholder: B.auto })), fld(B.host, inp(s, "host", { dir: "ltr", placeholder: "cdn.example.com" }), B.hostHint)));
+        if (s.network === "xhttp") {
+          const m = h("select", {}, [["auto", "auto"], ["packet-up", "packet-up"], ["stream-up", "stream-up"], ["stream-one", "stream-one"]].map(([v, l]) => h("option", { value: v, selected: s.xhttp_mode === v }, l)));
+          m.addEventListener("change", () => { s.xhttp_mode = m.value; });
+          tr.push(fld(B.xmode, m, B.xmodeHint));
+        }
+        if (tr.length) kids.push(h("fieldset", { class: "ie-sec" }, h("legend", {}, B.transport), ...tr));
+        // Security settings.
+        const fp = h("select", {}, ["chrome", "firefox", "safari", "ios", "android", "edge", "random", "randomized"].map((v) => h("option", { value: v, selected: s.fingerprint === v }, v)));
+        fp.addEventListener("change", () => { s.fingerprint = fp.value; });
+        if (s.security === "reality") kids.push(h("fieldset", { class: "ie-sec" }, h("legend", {}, "REALITY"),
+          sniRow(B.realitySni, B.realitySniHint),
+          h("div", { class: "two" }, fld(B.fp, fp), fld(B.dest, inp(s, "dest", { dir: "ltr", placeholder: `${p.sni || "www.speedtest.net"}:443` }))),
+          fld(B.names, inp(s, "server_names", { dir: "ltr", placeholder: "www.example.com, cdn.example.com" }), B.namesHint)));
+        if (s.security === "tls") kids.push(h("fieldset", { class: "ie-sec" }, h("legend", {}, "TLS"),
+          fld(t("certFor"), certSel(), p.cert ? "" : B.selfHint),
+          h("div", { class: "two" }, sniRow(B.domain), fld(B.fp, fp)),
+          fld("ALPN", inp(s, "alpn", { dir: "ltr", placeholder: s.network === "ws" || s.network === "httpupgrade" ? "http/1.1" : "h2,http/1.1" }))));
+        if (s.security === "none") kids.push(h("p", { class: "small warn-text" }, B.noneWarn));
+        if (visionOK()) kids.push(chk(s, "vision", B.vision));
+      } else {
+        const info = B.info[p.kind];
+        if (info) kids.push(h("p", { class: "small muted" }, info));
+        if (p.kind === "proxy") kids.push(seg([["socks", "SOCKS5"], ["http", "HTTP"]], p.proxy, (v) => { p.proxy = v; }));
+        if (["hysteria2", "tuic", "fallback"].includes(p.kind)) kids.push(fld(t("certFor"), certSel(), p.kind === "fallback" ? "" : p.cert ? "" : B.selfHint));
+        if (["hysteria2", "tuic", "fallback"].includes(p.kind)) kids.push(sniRow(B.domain));
+        if (p.kind === "mtproto") kids.push(fld(B.fakeTls, inp(p, "sni", { dir: "ltr", placeholder: "www.google.com" })));
+        if (p.kind === "dokodemo") kids.push(fld(B.target, inp(p, "path", { dir: "ltr", placeholder: "1.2.3.4:443" })));
+        if (p.kind === "wireguard" || p.kind === "amneziawg") kids.push(fld(B.subnet, inp(p, "path", { dir: "ltr", placeholder: p.kind === "wireguard" ? "10.66.0.0/16" : "10.67.0.0/16" })));
+      }
+      fill(wrap, ...kids);
+    }
+    redraw();
     return [
-      h("p", { class: "small muted" }, t("profileHint")),
-      h("div", { class: "two" }, field(t("tag"), bind(p, "tag", { required: true, placeholder: "multi-reality", autofocus: true })), field(t("preset"), preset)),
-      certRow, fbNote,
-      plainNote,
-      h("div", { class: "two" }, h("div", {}, sniWrap), h("label", {}, pathLabel, pathInput)),
-      finder,
-      field(t("remark"), bind(p, "remark")),
+      h("div", { class: "two" }, field(t("tag"), bind(p, "tag", { required: true, placeholder: "de-reality", autofocus: true })), field(t("remark"), bind(p, "remark"))),
+      wrap,
     ];
   }
 
@@ -2326,7 +2447,7 @@ async function inboundStudio(tag, ctx) {
     }
     for (const w of st.swaps) lines.push(h("div", { class: "line" }, h("span", { class: "pathtag swap" }, "Dark Swap"),
       h("span", { class: "mono small" }, `${w.entry_address || "?"}:${w.entry_port} → ${nodeName(w.source_node)}:${w.source_port} → ${nodeName(w.dest_node)}`)));
-    return [isNew ? h("p", {}, h("strong", {}, st.profile.tag), h("span", { class: "muted" }, ` · ${st.profile.preset}`)) : null, h("div", { class: "review" }, lines)];
+    return [isNew ? h("p", {}, h("strong", {}, st.profile.tag), h("span", { class: "muted", dir: "ltr" }, ` · ${profileLabel(st.profile)}`)) : null, h("div", { class: "review" }, lines)];
   }
 
   async function save() {
@@ -2337,7 +2458,11 @@ async function inboundStudio(tag, ctx) {
     try {
       if (isNew) {
         const p = st.profile;
-        await api("POST", "/api/v2/admin/inbounds/compose", { tag: p.tag, preset: p.preset, sni: p.sni.trim(), path: p.path.trim(), remark: p.remark.trim(), cert: p.preset.includes("-tls-") || p.preset === "hysteria2" || p.preset === "tuic" ? p.cert : "", routes });
+        const preset = profilePreset(p);
+        const s = p.stream;
+        const stream = preset === "custom" ? { ...s, path: (s.path || "").trim(), host: (s.host || "").trim(), dest: (s.dest || "").trim(), alpn: (s.alpn || "").trim(), server_names: String(s.server_names || "").split(/[\s,]+/).filter(Boolean) } : undefined;
+        const usesCert = (preset === "custom" && s.security === "tls") || ["hysteria2", "tuic", "vless-tls-fallback"].includes(preset);
+        await api("POST", "/api/v2/admin/inbounds/compose", { tag: p.tag, preset, stream, sni: (p.sni || "").trim(), path: preset === "custom" ? "" : (p.path || "").trim(), remark: p.remark.trim(), cert: usesCert ? p.cert : "", routes });
       } else {
         await api("PUT", `/api/v2/admin/inbounds/${encodeURIComponent(theTag)}/routes`, routes);
       }
