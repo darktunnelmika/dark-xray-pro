@@ -154,14 +154,14 @@ FROM clients c LEFT JOIN client_usage cu ON cu.email=c.email WHERE c.email=?`, e
 	}
 	name := url.QueryEscape(d.Title)
 	d.Apps = []pageApp{
-		{"v2rayNG", "Android", "v2rayng://install-sub?url=" + xenc + "&name=" + name},
-		{"Hiddify", "Android · iOS · Desktop", "hiddify://import/" + subURL + "#" + url.PathEscape(d.Title)},
-		{"Happ", "Android · iOS", "happ://add/" + xurl},
-		{"Streisand", "iOS", "streisand://import/" + subURL + "#" + url.PathEscape(d.Title)},
-		{"V2Box", "iOS", "v2box://install-sub?url=" + enc + "&name=" + name},
-		{"sing-box", "Android · iOS", "sing-box://import-remote-profile?url=" + url.QueryEscape(subURL+"?format=singbox") + "#" + url.PathEscape(d.Title)},
-		{"Clash Meta", "Android · Desktop", "clash://install-config?url=" + url.QueryEscape(subURL+"?format=clash") + "&name=" + name},
-		{"Karing", "Android · iOS · Desktop", "karing://install-config?url=" + enc + "&name=" + name},
+		{"v2rayNG", "Android", "v2rayng://install-sub?url=" + xenc + "&name=" + name, false},
+		{"Hiddify", "Android · iOS · Desktop", "hiddify://import/" + subURL + "#" + url.PathEscape(d.Title), false},
+		{"Happ", "Android · iOS", "happ://add/" + xurl, false},
+		{"Streisand", "iOS", "streisand://import/" + subURL + "#" + url.PathEscape(d.Title), false},
+		{"V2Box", "iOS", "v2box://install-sub?url=" + enc + "&name=" + name, false},
+		{"sing-box", "Android · iOS", "sing-box://import-remote-profile?url=" + url.QueryEscape(subURL+"?format=singbox") + "#" + url.PathEscape(d.Title), false},
+		{"Clash Meta", "Android · Desktop", "clash://install-config?url=" + url.QueryEscape(subURL+"?format=clash") + "&name=" + name, false},
+		{"Karing", "Android · iOS · Desktop", "karing://install-config?url=" + enc + "&name=" + name, false},
 	}
 	d.Ring = 100 - d.Percent
 	if c.VolumeBytes <= 0 {
