@@ -574,3 +574,7 @@ a.name:hover { color: var(--cyan); }
 .detail-cols > .card.form > * + * { margin-block-start: 10px; }
 @media (min-width: 900px) { .node-meters { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; } .node-meters > .full { grid-column: 1 / -1; } }
 .node-actions .iconbtn { margin-inline-start: auto; border-color: var(--glass-line); }
+.dc-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 8px 10px; border-radius: 12px; background: var(--surface-2); border: 1px solid var(--glass-line); }
+.dc-row .dc-code { display: inline-block; padding: 4px 10px; font-weight: 800; letter-spacing: .06em; border-style: dashed; border-color: color-mix(in oklab, var(--cyan) 45%, transparent); color: var(--cyan); }
+.dc-new { border-block-start: 1px solid var(--glass-line); padding-block-start: 12px; }
+button.small { padding: 4px 10px; font-size: 12.5px; }

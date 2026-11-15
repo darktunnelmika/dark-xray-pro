@@ -123,7 +123,7 @@ func TestStorefrontOrderDeliverySupport(t *testing.T) {
 	b.Handle(ctx, cb(buyerID, "buy:p30"))
 	out := api.take()
 	find(t, out, buyerID, "#1")
-	card := find(t, out, ownerID, "سفارش <b>#1</b>")
+	card := find(t, out, ownerID, "سفارش <b>#۱</b>")
 	if card.kb == nil || card.kb.Rows[0][0].Data != "ok:1" {
 		t.Fatalf("owner buttons: %+v", card.kb)
 	}

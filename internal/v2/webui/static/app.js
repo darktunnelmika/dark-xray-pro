@@ -2797,8 +2797,8 @@ async function viewShop() {
     h("td", {}, o.product_name || o.product_id, owner && o.seller ? h("div", { class: "small muted" }, o.seller) : null),
     h("td", { class: "small" }, o.buyer || "—", o.note ? h("div", { class: "muted" }, o.note) : null),
     h("td", { class: "small mono" }, o.client_email ? `${o.renew ? "↻ " : ""}${o.client_email}` : t("newClient")),
-    h("td", {}, money(o.amount)),
-    h("td", {}, h("span", { class: `badge ${stCls[o.status]}` }, t(`status_${o.status}`))),
+    h("td", {}, money(o.amount), o.discount ? h("div", { class: "small muted" }, `🎟 ${o.discount_code} −${money(o.discount)}`) : null),
+    h("td", {}, h("span", { class: `badge ${stCls[o.status]}` }, t(`status_${o.status}`)), o.has_receipt ? h("div", {}, h("span", { class: "badge good small" }, lang === "fa" ? "🧾 رسید در تلگرام" : "🧾 receipt in Telegram")) : null),
     h("td", {}, o.status === "pending" ? h("div", { class: "row" },
       h("button", { class: "primary", onclick: async () => {
         const r = await guarded(() => api("POST", `/api/v2/shop/orders/${o.id}/fulfill`));
@@ -2812,10 +2812,80 @@ async function viewShop() {
     h("p", { class: "small muted" }, t("shopHint")),
     h("h2", {}, t("products")),
     h("div", { class: "list" }, cards.length ? cards : h("p", { class: "muted small" }, t("empty"))),
+    owner ? h("div", { class: "dash" }, payCardCard(), discountsCard(products)) : null,
     h("h2", { class: "section" }, t("orders")),
     orders.length ? h("div", { class: "table-wrap" }, h("table", { class: "table" },
       h("thead", {}, h("tr", {}, ["#", t("product"), t("buyer").split(" (")[0], t("clients"), t("price"), t("statusLabel"), ""].map((x) => h("th", {}, x)))), body))
       : h("p", { class: "muted small" }, t("empty")));
+}
+
+// ---------- Card-to-card payment and discount codes ----------
+const PAY = {
+  fa: { cardTitle: "پرداخت کارت به کارت", cardHint: "با شماره کارت، ربات برای هر سفارش فاکتور با مبلغ و شمارهٔ کارت می‌فرستد. مشتری عکس رسید را می‌فرستد و رسید با دکمهٔ تأیید و رد برای شما می‌آید؛ تأیید یعنی تحویل خودکار. خالی بودن شماره یعنی خاموش.",
+    cardNum: "شماره کارت (یا شبا)", cardHolder: "به نام", cardBank: "بانک", save: "ذخیره",
+    dcTitle: "کدهای تخفیف", dcHint: "مشتری کد را در ربات یا فروشگاه وارد می‌کند و تخفیف روی سفارش بعدی‌اش اعمال می‌شود. کد درصدی قیمت استارز را هم کم می‌کند. اگر سفارش لغو شود، استفاده برمی‌گردد.",
+    dcCode: "کد", dcKind: "نوع", dcPct: "درصد", dcAmt: "مبلغ (تومان)", dcValue: "مقدار", dcMax: "حداکثر استفاده (۰ = نامحدود)", dcDays: "اعتبار (روز، ۰ = همیشه)", dcProduct: "بسته", dcAny: "همهٔ بسته‌ها",
+    dcOnce: "هر مشتری فقط یک بار", dcAdd: "ساخت کد", dcNone: "هنوز کدی نساخته‌اید.", dcUsed: "{u} از {m} استفاده", dcUsedInf: "{u} استفاده", dcExp: "تا {d}", dcExpired: "منقضی", dcOff: "خاموش", dcDelAsk: "کد {x} حذف شود؟", dcRandom: "کد تصادفی" },
+  en: { cardTitle: "Card-to-card payment", cardHint: "With a card number the bot sends an invoice with the amount and the card for each order. The customer sends a receipt photo; it reaches you with Approve and Refuse — approving delivers at once. Empty number = off.",
+    cardNum: "Card number (or IBAN)", cardHolder: "Holder", cardBank: "Bank", save: "Save",
+    dcTitle: "Discount codes", dcHint: "Customers enter the code in the bot or the store and it applies to their next order. Percent codes also lower the Stars price. A cancelled order gives the use back.",
+    dcCode: "Code", dcKind: "Kind", dcPct: "Percent", dcAmt: "Amount (toman)", dcValue: "Value", dcMax: "Max uses (0 = unlimited)", dcDays: "Valid for (days, 0 = always)", dcProduct: "Product", dcAny: "Every product",
+    dcOnce: "Once per customer", dcAdd: "Create code", dcNone: "No codes yet.", dcUsed: "{u} of {m} used", dcUsedInf: "{u} used", dcExp: "until {d}", dcExpired: "expired", dcOff: "off", dcDelAsk: "Delete the code {x}?", dcRandom: "Random code" },
+};
+const pay = (k, v) => { let x = (PAY[lang] || PAY.en)[k] ?? PAY.en[k] ?? k; for (const [a, b] of Object.entries(v || {})) x = x.replaceAll(`{${a}}`, b); return x; };
+
+function payCardCard() {
+  const num = h("input", { dir: "ltr", inputmode: "numeric", placeholder: "6037 9911 2233 4455" }), holder = h("input", {}), bank = h("input", {});
+  api("GET", "/api/v2/admin/tg/commerce").then((r) => { const c = (r && r.card) || {}; num.value = c.number || ""; holder.value = c.holder || ""; bank.value = c.bank || ""; }).catch(() => {});
+  return h("form", { class: "card form", onsubmit: async (e) => { e.preventDefault(); await guarded(() => api("PUT", "/api/v2/admin/pay/card", { number: num.value, holder: holder.value, bank: bank.value })); toast(t("saved")); } },
+    h("h2", {}, "💳 ", pay("cardTitle")), h("p", { class: "small muted" }, pay("cardHint")),
+    h("label", {}, h("span", {}, pay("cardNum")), num), h("div", { class: "two" }, h("label", {}, h("span", {}, pay("cardHolder")), holder), h("label", {}, h("span", {}, pay("cardBank")), bank)),
+    h("div", { class: "row" }, h("button", { class: "primary", type: "submit" }, pay("save"))));
+}
+
+function discountsCard(products) {
+  const list = h("div", { class: "form" });
+  const fmtD = (u) => new Intl.DateTimeFormat(lang === "fa" ? "fa-IR" : "en-GB", { dateStyle: "medium" }).format(new Date(u * 1000));
+  const load = async () => {
+    const ds = await api("GET", "/api/v2/admin/discounts").catch(() => []);
+    const now = Date.now() / 1000;
+    list.replaceChildren(...(ds.length ? ds.map((d) => {
+      const expired = d.expires_unix && d.expires_unix <= now;
+      const full = d.max_uses && d.used >= d.max_uses;
+      return h("div", { class: "dc-row" },
+        h("code", { class: "dc-code" }, d.code),
+        h("b", {}, d.percent ? `${fmtNum(d.percent)}%` : money(d.amount)),
+        h("span", { class: "small muted" }, d.max_uses ? pay("dcUsed", { u: fmtNum(d.used), m: fmtNum(d.max_uses) }) : pay("dcUsedInf", { u: fmtNum(d.used) })),
+        d.product_id ? h("span", { class: "badge" }, d.product_id) : null,
+        expired ? h("span", { class: "badge bad" }, pay("dcExpired")) : d.expires_unix ? h("span", { class: "badge" }, pay("dcExp", { d: fmtD(d.expires_unix) })) : null,
+        full ? h("span", { class: "badge warn" }, "✓") : null, !d.enabled ? h("span", { class: "badge" }, pay("dcOff")) : null,
+        h("span", { class: "spacer" }),
+        h("button", { type: "button", class: "ghost small", onclick: () => copy(d.code) }, t("copy")),
+        h("button", { type: "button", class: "ghost danger small", onclick: async () => { if (await confirmAction(pay("dcDelAsk", { x: d.code }))) { await guarded(() => api("DELETE", `/api/v2/admin/discounts/${encodeURIComponent(d.code)}`)); load(); } } }, t("delete")));
+    }) : [h("p", { class: "muted small" }, pay("dcNone"))]));
+  };
+  const code = h("input", { required: true, dir: "ltr", pattern: "[A-Za-z0-9_\\-]{3,32}", style: "text-transform:uppercase" });
+  const rnd = h("button", { type: "button", class: "ghost", onclick: () => { code.value = Array.from(crypto.getRandomValues(new Uint8Array(6)), (b) => "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"[b % 32]).join(""); } }, pay("dcRandom"));
+  const kind = h("select", {}, h("option", { value: "pct" }, pay("dcPct")), h("option", { value: "amt" }, pay("dcAmt")));
+  const value = h("input", { type: "number", min: 1, required: true, value: 10 });
+  const max = h("input", { type: "number", min: 0, value: 0 }), days = h("input", { type: "number", min: 0, value: 30 });
+  const prod = h("select", {}, h("option", { value: "" }, pay("dcAny")), (products || []).filter((p) => !p.seller).map((p) => h("option", { value: p.id }, p.name)));
+  const once = h("input", { type: "checkbox", checked: true });
+  kind.addEventListener("change", () => { value.max = kind.value === "pct" ? 100 : ""; });
+  value.max = 100;
+  load();
+  return h("div", { class: "card form" }, h("h2", {}, "🎟 ", pay("dcTitle")), h("p", { class: "small muted" }, pay("dcHint")), list,
+    h("form", { class: "form dc-new", onsubmit: async (e) => {
+      e.preventDefault();
+      const v = +value.value;
+      await guarded(() => api("PUT", "/api/v2/admin/discounts", { code: code.value, percent: kind.value === "pct" ? v : 0, amount: kind.value === "amt" ? v : 0,
+        max_uses: +max.value, expires_unix: +days.value ? Math.floor(Date.now() / 1000) + +days.value * 86400 : 0, product_id: prod.value, once_per_buyer: once.checked, enabled: true }));
+      toast(t("saved")); code.value = ""; load();
+    } },
+      h("div", { class: "two" }, h("label", {}, h("span", {}, pay("dcCode")), h("div", { class: "row tight" }, code, rnd)), h("label", {}, h("span", {}, pay("dcProduct")), prod)),
+      h("div", { class: "three" }, h("label", {}, h("span", {}, pay("dcKind")), kind), h("label", {}, h("span", {}, pay("dcValue")), value), h("label", {}, h("span", {}, pay("dcMax")), max)),
+      h("div", { class: "two" }, h("label", {}, h("span", {}, pay("dcDays")), days), h("label", { class: "check" }, once, pay("dcOnce"))),
+      h("div", { class: "row" }, h("button", { class: "primary", type: "submit" }, pay("dcAdd")))));
 }
 
 function productForm(p, inbounds, reps) {
