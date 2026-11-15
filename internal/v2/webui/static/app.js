@@ -4340,6 +4340,57 @@ function lockoutsCard() {
   return h("div", { class: "card form" }, h("h2", {}, s2("lockTitle")), h("p", { class: "small muted" }, s2("lockHint")), list);
 }
 
+// Moving from the old DARK XRAY panel: export on the old server, preview, import.
+function darkOldSection() {
+  const fa = lang === "fa";
+  const box = h("div", { class: "form" });
+  let timer = 0;
+  const draw = async () => {
+    clearTimeout(timer);
+    if (!box.isConnected && timer) return;
+    let st, ins;
+    try { [st, ins] = await Promise.all([api("GET", "/api/v2/admin/migrate/darkold"), api("GET", "/api/v2/admin/inbounds")]); } catch { return; }
+    if (!st.uploaded) {
+      const out = h("div", { class: "form" });
+      fill(box, h("p", { class: "small muted" }, fa ? "یک دستور می‌گیرید و روی سرور پنل قبلی اجرا می‌کنید. دیتابیس فقط خوانده می‌شود و روی آن سرور چیزی تغییر نمی‌کند؛ نماینده‌ها، کلاینت‌ها، لینک‌های Restore، فروشگاه، کیف پول‌ها و ربات‌ها یک بار به این‌جا فرستاده می‌شوند. بعد پیش‌نمایش می‌بینید و تصمیم می‌گیرید." : "You get a command to run on the old panel's server. Its database is only read and nothing there changes; resellers, clients, Restore links, shop, wallets and bots are sent here once. Then you preview and decide."),
+        out, h("div", { class: "row" }, h("button", { onclick: async () => {
+          const r = await guarded(() => api("POST", "/api/v2/admin/migrate/darkold/start"));
+          fill(out, h("code", {}, r.command), h("div", { class: "row" }, h("button", { onclick: () => copy(r.command) }, t("copy")), h("span", { class: "small muted" }, fa ? "منتظر ارسال از سرور قبلی… (لینک ۲ ساعت اعتبار دارد)" : "Waiting for the upload… (the link works for 2 hours)")));
+          timer = setTimeout(draw, 5000);
+        } }, fa ? "ساخت دستور خروجی" : "Get the export command")));
+      return;
+    }
+    const pick = (sel) => h("div", { class: "row" }, (ins || []).map((ib) => h("label", { class: "check" }, h("input", { type: "checkbox", value: ib.tag, checked: sel }), ib.tag)));
+    const main = pick(true), rest = pick(true);
+    const tags = (el) => [...el.querySelectorAll("input:checked")].map((x) => x.value);
+    const rep = h("div", { class: "form" });
+    const c = st.counts || {};
+    const show = (r) => fill(rep,
+      h("div", { class: "row" }, ...[[fa ? "نماینده" : "resellers", r.reps], [fa ? "ورود" : "logins", r.logins], [fa ? "کلاینت" : "clients", r.clients], ["Restore", r.restore], [fa ? "لینک ساب" : "links", r.links], [fa ? "مصرف" : "usage", r.usage], [fa ? "تلگرام" : "Telegram", r.telegram], [fa ? "غیرفعال" : "disabled", r.disabled]].map(([k, v]) => h("span", { class: "badge" }, `${k}: ${fmtNum(v || 0)}`))),
+      (r.domains || []).length ? h("p", { class: "small" }, (fa ? "این دامنه‌ها را بعد از انتقال به IP همین هاب ببرید تا لینک‌های قدیمی کار کنند: " : "Point these domains here after the move so old links keep working: ") + r.domains.join("، ")) : null,
+      ...(r.notes || []).slice(0, 20).map((n) => h("div", { class: "small muted" }, "• " + n)),
+      ...(r.skipped || []).slice(0, 20).map((n) => h("div", { class: "small", style: "color:var(--warn)" }, "• " + n)));
+    const run = async (dry) => {
+      const body = { inbounds: tags(main), restore_inbounds: tags(rest), dry_run: dry };
+      if (!body.inbounds.length) { toast(fa ? "حداقل یک اینباند انتخاب کنید." : "Pick at least one inbound."); return; }
+      if (!dry && !(await confirmAction(fa ? "انتقال انجام شود؟ کلاینت‌ها، نماینده‌ها و ورودها به این پنل اضافه می‌شوند." : "Import now? Clients, resellers and logins are added to this panel."))) return;
+      const r = await guarded(() => api("POST", "/api/v2/admin/migrate/darkold/run", body));
+      show(r);
+      if (!dry) toast(fa ? "انتقال انجام شد ✅" : "Imported ✅");
+    };
+    fill(box,
+      h("p", { class: "small" }, `${fa ? "فایل خروجی رسید" : "Export received"}: ${st.origin || ""} ${st.version ? "· " + st.version : ""}`),
+      h("div", { class: "row" }, ...Object.entries(c).map(([k, v]) => h("span", { class: "badge" }, `${k}: ${fmtNum(v)}`))),
+      h("label", {}, h("span", {}, fa ? "اینباندهای کلاینت‌ها" : "Inbounds for the clients"), main),
+      h("label", {}, h("span", {}, fa ? "اینباندهای کلاینت‌های Restore" : "Inbounds for the Restore clients"), rest),
+      h("div", { class: "row" }, h("button", { onclick: () => run(true) }, fa ? "پیش‌نمایش" : "Preview"), h("button", { class: "primary", onclick: () => run(false) }, fa ? "انتقال" : "Import"),
+        h("button", { class: "ghost danger", onclick: async () => { await guarded(() => api("DELETE", "/api/v2/admin/migrate/darkold")); draw(); } }, fa ? "حذف فایل خروجی" : "Discard the export")),
+      rep);
+  };
+  draw();
+  return h("div", { class: "form" }, h("h2", { class: "section" }, fa ? "انتقال از پنل DARK XRAY قبلی" : "Move from the old DARK XRAY panel"), box);
+}
+
 // Full backup: the database plus the HUB's keys and settings, encrypted,
 // so a new server can take over without reinstalling nodes.
 function fullBackupSection() {
@@ -4420,7 +4471,7 @@ function viewSettings() {
     fullBackupSection(), hubAddrSection(),
     h("h2", { class: "section" }, t("exportImport")), h("p", { class: "small muted" }, t("exportHint")),
     h("div", { class: "row" }, h("a", { class: "btn", href: "/api/v2/admin/clients/export", download: "" }, t("exportClients")), h("a", { class: "btn", href: "/api/v2/admin/clients/export.csv", download: "" }, lang === "fa" ? "خروجی اکسل (CSV)" : "Excel export (CSV)"),
-      h("button", { onclick: () => importIn.click() }, t("importClients")), importIn), restoreSection()) : null;
+      h("button", { onclick: () => importIn.click() }, t("importClients")), importIn), restoreSection(), darkOldSection()) : null;
   const tgOut = h("div", { class: "form" });
   const tgCard = me.role === "rep" ? h("div", { class: "card form" }, h("h2", {}, t("telegram")), h("p", { class: "small muted" }, t("telegramHint")),
     tgOut, h("button", { onclick: async () => {
