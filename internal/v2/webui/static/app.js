@@ -606,6 +606,49 @@ async function viewDashboard() {
     h("div", { class: "list nodes-grid" }, (nodes || []).map((n) => nodeCard(n))));
 }
 
+// cleanupForm previews and deletes expired, used-up or disabled clients.
+function cleanupForm() {
+  const fa = lang === "fa";
+  const exp = h("input", { type: "checkbox", checked: true }), vol = h("input", { type: "checkbox" }), dis = h("input", { type: "checkbox" });
+  const days = h("input", { type: "number", min: 0, max: 3650, value: 30 });
+  const out = h("div", { class: "form" });
+  const body = () => ({ expired: exp.checked, used_up: vol.checked, disabled: dis.checked, min_days: +days.value || 0 });
+  let found = [];
+  const del = h("button", { class: "danger", type: "button", disabled: true, onclick: async () => {
+    if (!(await confirmAction(fa ? `${fmtNum(found.length)} کاربر برای همیشه حذف شوند؟ تاریخچهٔ مصرف روزانه برای گزارش‌ها می‌ماند.` : `Delete ${fmtNum(found.length)} clients for good? Daily history stays for reports.`))) return;
+    const r = await guarded(() => api("POST", "/api/v2/admin/clients/cleanup", body()));
+    toast(fa ? `${fmtNum(r.count)} کاربر حذف شد` : `${fmtNum(r.count)} clients deleted`); document.getElementById("modal").close(); route();
+  } }, fa ? "حذف" : "Delete");
+  const preview = async () => {
+    const r = await guarded(() => api("POST", "/api/v2/admin/clients/cleanup", { ...body(), dry_run: true }));
+    found = r.clients || [];
+    del.disabled = !found.length;
+    del.textContent = fa ? `حذف ${fmtNum(found.length)} کاربر` : `Delete ${fmtNum(found.length)}`;
+    out.replaceChildren(found.length ? h("div", { class: "row" }, found.slice(0, 60).map((e) => h("span", { class: "badge" }, e)), found.length > 60 ? h("span", { class: "muted small" }, `+${fmtNum(found.length - 60)}`) : null)
+      : h("p", { class: "muted small" }, fa ? "کاربری با این شرط‌ها نیست ✨" : "No client matches ✨"));
+  };
+  [exp, vol, dis, days].forEach((x) => x.addEventListener("change", preview));
+  openModal(fa ? "پاک‌سازی کاربرها" : "Clean up clients", h("div", { class: "form" },
+    h("p", { class: "small muted" }, fa ? "کاربرهایی که دیگر استفاده نمی‌شوند را یک‌جا حذف کنید. اول فهرست را ببینید؛ تا «حذف» را نزنید چیزی پاک نمی‌شود." : "Delete clients nobody uses any more. You see the list first; nothing is deleted until you press Delete."),
+    h("label", { class: "check" }, exp, fa ? "منقضی‌شده‌ها" : "Expired"), h("label", { class: "check" }, vol, fa ? "حجم‌تمام‌ها" : "Out of volume"), h("label", { class: "check" }, dis, fa ? "غیرفعال‌ها" : "Disabled"),
+    h("label", {}, h("span", {}, fa ? "حداقل چند روز از انقضا یا آخرین اتصال گذشته باشد" : "At least this many days since expiry or last use"), days), out), [del]);
+  preview();
+}
+
+// cloneClient copies a client under a new name.
+function cloneClient(c) {
+  const fa = lang === "fa";
+  const name = h("input", { required: true, value: `${c.Email}-2`, dir: "ltr", autofocus: true });
+  const go = h("button", { class: "primary", type: "button", onclick: async () => {
+    await guarded(() => api("POST", `/api/v2/admin/clients/${encodeURIComponent(c.Email)}/clone`, { email: name.value.trim() }));
+    document.getElementById("modal").close(); toast(fa ? "کپی ساخته شد" : "Copy created");
+    location.hash = `#/client?e=${encodeURIComponent(name.value.trim())}`;
+  } }, fa ? "ساخت کپی" : "Create copy");
+  openModal(fa ? `کپی از ${c.Email}` : `Copy ${c.Email}`, h("div", { class: "form" },
+    h("p", { class: "small muted" }, fa ? "همان پلن، حجم، مدت، اینباندها، گروه و تنظیمات؛ با لینک و کلید جدا و مصرف صفر." : "Same plan, volume, term, inbounds, group and settings; its own link and keys, usage at zero."),
+    h("label", {}, h("span", {}, t("username")), name)), [go]);
+}
+
 // ring draws a small donut with a value in the middle.
 function ring(share, value, label, sub, time = false, plain = false) {
   const r = 30, c = 2 * Math.PI * r, p = Math.max(0, Math.min(1, share || 0));
@@ -1020,6 +1063,7 @@ async function viewClients() {
   return h("div", {},
     h("div", { class: "row" }, h("h1", {}, t("clients")), h("span", { class: "muted small" }, t("clientsCount", { n: fmtNum(list.length) })),
       owner ? h("button", { class: "ghost spacer", onclick: () => templatesModal(inbounds) }, lang === "fa" ? "قالب‌ها" : "Templates") : h("span", { class: "spacer" }),
+      owner ? h("button", { class: "ghost", onclick: () => cleanupForm() }, lang === "fa" ? "پاک‌سازی" : "Clean up") : null,
       owner ? h("button", { onclick: () => bulkCreateForm(inbounds) }, t("bulkCreate")) : null,
       me.role === "rep" && me.policy && me.policy.DenyCreate ? null : h("button", { class: "primary", onclick: () => clientForm(null, inbounds) }, t("add"))),
     todo, chips,
@@ -1251,6 +1295,7 @@ async function viewClient() {
       canQuick ? h("button", { onclick: () => quick({ AddGB: 10, Enable: true }, fa ? "۱۰ گیگ اضافه شد" : "10 GB added") }, fa ? "+۱۰ گیگ" : "+10 GB") : null,
       canQuick ? h("button", { class: "ghost", onclick: () => quick({ Enable: !c.Enabled }, c.Enabled ? (fa ? "غیرفعال شد" : "Disabled") : (fa ? "فعال شد" : "Enabled")) }, c.Enabled ? (fa ? "غیرفعال کردن" : "Disable") : (fa ? "فعال کردن" : "Enable")) : null,
       h("button", { class: "ghost", onclick: () => clientForm(c, inbounds, ctx) }, t("edit")),
+      canQuick ? h("button", { class: "ghost", onclick: () => cloneClient(c) }, fa ? "کپی" : "Copy") : null,
       me.role === "rep" && me.policy && !me.policy.CanDelete ? null : h("button", { class: "ghost danger", onclick: async () => {
         if (await confirmAction(t("confirmDelete", { x: c.Email }))) { await guarded(() => api("DELETE", `/api/v2/admin/clients/${encodeURIComponent(c.Email)}`)); location.hash = "#/clients"; }
       } }, t("delete"))));
@@ -1591,6 +1636,12 @@ async function viewInbounds() {
         h("button", { onclick: async () => { await guarded(() => api("POST", `/api/v2/admin/inbounds/${encodeURIComponent(ib.tag)}/enabled`, { Enabled: !ib.enabled })); route(); } }, t(ib.enabled ? "disable" : "enable")),
         h("button", { onclick: () => inboundEditor(ib.tag, nodes, certs) }, ie("title")),
         h("button", { class: "ghost", onclick: () => cloneInbound(ib) }, ie("clone")),
+        h("button", { class: "ghost", onclick: async () => {
+          const fa = lang === "fa";
+          if (!(await confirmAction(fa ? `مصرف همهٔ کاربرهای ${ib.tag} صفر شود؟ حجم کاملشان دوباره در دسترس قرار می‌گیرد.` : `Zero the usage of every client on ${ib.tag}? Their full volume becomes available again.`))) return;
+          const r = await guarded(() => api("POST", `/api/v2/admin/inbounds/${encodeURIComponent(ib.tag)}/reset-usage`));
+          toast(fa ? `مصرف ${fmtNum(r.reset)} کاربر صفر شد` : `${fmtNum(r.reset)} clients reset`); route();
+        } }, lang === "fa" ? "صفر کردن مصرف کاربرها" : "Reset client usage"),
         h("button", { class: "ghost danger spacer", onclick: async () => {
         if (await confirmAction(t("confirmDelete", { x: ib.tag }))) { await guarded(() => api("DELETE", `/api/v2/admin/inbounds/${encodeURIComponent(ib.tag)}`)); route(); }
       } }, t("delete"))));
