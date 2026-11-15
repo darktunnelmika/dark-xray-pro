@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"testing"
 
+	"github.com/darktunnelmika/dark-xray-pro/internal/v2/sub"
 	"golang.org/x/crypto/scrypt"
 )
 
@@ -55,7 +56,8 @@ func TestImportDarkOld(t *testing.T) {
 	if _, err := s.CreateNode(ctx, "n1", "n1"); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.CreatePreset(ctx, PresetRequest{Tag: "main", NodeID: "n1", Preset: "vless-reality-tcp", Port: 443, SNI: "www.speedtest.net"}); err != nil {
+	if err := s.CreatePreset(ctx, PresetRequest{Tag: "main", NodeID: "n1", Preset: "vless-reality-tcp", Port: 443, SNI: "www.speedtest.net",
+		Endpoints: []sub.Endpoint{{Name: "Direct", Address: "1.2.3.4", Port: 443}}}); err != nil {
 		t.Fatal(err)
 	}
 	darkOldFixture(t, s.darkOldPath())
