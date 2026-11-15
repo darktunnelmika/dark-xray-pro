@@ -952,6 +952,23 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 		w.Header().Set("Cache-Control", "no-store")
 		_, _ = w.Write(data)
 	}))
+	mux.HandleFunc("POST /api/v2/admin/migrate/darkold/start", guard(func(w http.ResponseWriter, r *http.Request) {
+		reply(w, map[string]string{"command": s.DarkOldStart(publicBase(subBase, r))}, nil)
+	}))
+	mux.HandleFunc("GET /api/v2/admin/migrate/darkold", guard(func(w http.ResponseWriter, r *http.Request) {
+		reply(w, s.DarkOldStatus(r.Context()), nil)
+	}))
+	mux.HandleFunc("DELETE /api/v2/admin/migrate/darkold", guard(func(w http.ResponseWriter, r *http.Request) {
+		reply(w, map[string]bool{"ok": true}, s.DarkOldDiscard())
+	}))
+	mux.HandleFunc("POST /api/v2/admin/migrate/darkold/run", guard(func(w http.ResponseWriter, r *http.Request) {
+		var in DarkOldOptions
+		if !decode(w, r, &in) {
+			return
+		}
+		res, err := s.ImportDarkOld(r.Context(), in)
+		reply(w, res, err)
+	}))
 	mux.HandleFunc("GET /api/v2/admin/hub-address", guard(func(w http.ResponseWriter, r *http.Request) {
 		a, _ := s.NodeHubAddr(r.Context())
 		reply(w, a, nil)

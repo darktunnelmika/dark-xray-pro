@@ -68,7 +68,7 @@ func setGate(w http.ResponseWriter, r *http.Request, path string) {
 // sign-in. Everything else under /api/ checks its own credentials.
 func gated(r *http.Request) bool {
 	p := r.URL.Path
-	for _, pub := range []string{"/sub/", "/app/", "/install/", "/api/v1/"} {
+	for _, pub := range []string{"/sub/", "/app/", "/install/", "/migrate/", "/api/v1/"} {
 		if strings.HasPrefix(p, pub) {
 			return false
 		}

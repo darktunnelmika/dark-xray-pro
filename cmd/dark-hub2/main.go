@@ -162,6 +162,7 @@ func main() {
 			admin := &http.Server{Addr: *adminListen, Handler: hubcore.AdminHandlerWith(s, strings.TrimSpace(string(tok)), *subBase, webui.Handler(), func(m *http.ServeMux) {
 				inst := hubcore.InstallHandler(s, hubcore.InstallConfig{DistDir: *distDir, PublicURL: *subBase, HubURL: "https://" + *listen, CAFile: filepath.Join(*tlsDir, "ca.pem")})
 				m.Handle("GET /install/", inst)
+				m.Handle("/migrate/", hubcore.DarkOldHandler(s))
 			}), ReadHeaderTimeout: 10 * time.Second}
 			go func() {
 				log.Printf("owner API and subscriptions on %s", *adminListen)
