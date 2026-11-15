@@ -265,13 +265,145 @@ function icon(name) {
   return svg;
 }
 
+// ---------- Shell: header actions, command palette, notifications ----------
+const UX = {
+  fa: { search: "جستجو…", searchHint: "نام کاربر، نود یا صفحه", noHits: "چیزی پیدا نشد", pages: "صفحه‌ها", clientsH: "کلاینت‌ها", nodesH: "نودها",
+    notif: "اعلان‌ها", allGood: "همه چیز مرتب است ✨", nodeDown: "نود {x} آفلاین است", pendingOrders: "{n} سفارش در انتظار تأیید", theme: "پوسته", dark: "تیره", light: "روشن", auto: "خودکار",
+    more: "بیشتر", of: "از", account: "حساب", ofTotal: "{a} از {b}", online: "آنلاین", offline: "آفلاین", nodesSection: "نودها" },
+  en: { search: "Search…", searchHint: "Client, node or page", noHits: "Nothing found", pages: "Pages", clientsH: "Clients", nodesH: "Nodes",
+    notif: "Notifications", allGood: "All good ✨", nodeDown: "Node {x} is offline", pendingOrders: "{n} orders waiting", theme: "Theme", dark: "Dark", light: "Light", auto: "Auto",
+    more: "More", of: "of", account: "Account", ofTotal: "{a} of {b}", online: "online", offline: "offline", nodesSection: "Nodes" },
+};
+const ux = (k, vars) => { let s = (UX[lang] || UX.en)[k] ?? UX.en[k] ?? k; for (const [a, b] of Object.entries(vars || {})) s = s.replaceAll(`{${a}}`, b); return s; };
+Object.assign(ICONS, {
+  search: "M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16zM21 21l-4.35-4.35",
+  bell: "M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 0 1-3.46 0",
+  moon: "M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z",
+  sun: "M12 17a5 5 0 1 0 0-10 5 5 0 0 0 0 10zM12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42",
+  globe: "M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z",
+  logout: "M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9",
+  more: "M12 13a1 1 0 1 0 0-2 1 1 0 0 0 0 2zM19 13a1 1 0 1 0 0-2 1 1 0 0 0 0 2zM5 13a1 1 0 1 0 0-2 1 1 0 0 0 0 2z",
+  traffic: "M3 17l6-6 4 4 8-8M14 7h7v7",
+  pulse: "M22 12h-4l-3 9L9 3l-3 9H2",
+});
+
+function avatar(name, cls = "") {
+  let hsh = 0;
+  for (const ch of String(name)) hsh = (hsh * 31 + ch.codePointAt(0)) >>> 0;
+  const hue = hsh % 360;
+  return h("span", { class: `avatar ${cls}`, style: `--h:${hue}`, "aria-hidden": "true" }, [...String(name).replace(/[^\p{L}\p{N}]/gu, "")].slice(0, 2).join("").toUpperCase() || "?");
+}
+
+function iconBtn(name, label, onclick, extra) {
+  return h("button", { class: "iconbtn", type: "button", title: label, "aria-label": label, onclick }, icon(name), extra || null);
+}
+
+function setScheme(v) {
+  safeSet("color-scheme", v === "light dark" ? null : v);
+  document.querySelector('meta[name="color-scheme"]').content = v;
+}
+
+function openPalette() {
+  const dlg = h("dialog", { class: "palette", closedby: "any" });
+  const input = h("input", { type: "text", enterkeyhint: "go", placeholder: ux("searchHint"), autocomplete: "off", "aria-label": ux("search") });
+  const list = h("div", { class: "hits", role: "listbox" });
+  let clients = [], nodes = [], sel = 0, items = [];
+  const go = (href) => { dlg.close(); location.hash = href; };
+  const draw = () => {
+    const q = input.value.trim().toLowerCase();
+    const pages = Object.keys(routes).filter((r) => !q || t(r).toLowerCase().includes(q) || r.includes(q)).map((r) => ({ g: ux("pages"), ic: r, label: t(r), href: `#/${r}` }));
+    const cs = q ? clients.filter((c) => (c.Email + " " + (c.Note || "")).toLowerCase().includes(q)).slice(0, 8).map((c) => ({ g: ux("clientsH"), av: c.Email, label: c.Email, sub: c.Note || "", href: `#/client?e=${encodeURIComponent(c.Email)}` })) : [];
+    const ns = q ? nodes.filter((n) => (n.ID + " " + (n.Name || "")).toLowerCase().includes(q)).map((n) => ({ g: ux("nodesH"), ic: "nodes", label: n.Name || n.ID, sub: n.ID, href: "#/nodes" })) : [];
+    items = [...cs, ...ns, ...pages].slice(0, 14);
+    sel = Math.min(sel, Math.max(0, items.length - 1));
+    let lastG = "";
+    list.replaceChildren(...(items.length ? items.flatMap((it, i) => {
+      const head = it.g !== lastG ? h("div", { class: "hit-group" }, (lastG = it.g)) : null;
+      const btn = h("button", { type: "button", class: "hit", role: "option", "aria-selected": i === sel ? "true" : "false", onclick: () => go(it.href) },
+        it.av ? avatar(it.av, "sm") : icon(it.ic), h("span", {}, it.label), it.sub ? h("span", { class: "muted small spacer" }, it.sub) : null);
+      return head ? [head, btn] : [btn];
+    }) : [h("p", { class: "muted small", style: "padding:14px" }, ux("noHits"))]));
+  };
+  input.addEventListener("input", () => { sel = 0; draw(); });
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "ArrowDown") { sel = Math.min(sel + 1, items.length - 1); draw(); e.preventDefault(); }
+    else if (e.key === "ArrowUp") { sel = Math.max(sel - 1, 0); draw(); e.preventDefault(); }
+    else if (e.key === "Enter" && items[sel]) go(items[sel].href);
+    else if (e.key === "Escape") { e.preventDefault(); dlg.close(); }
+  });
+  dlg.append(h("div", { class: "pal-in" }, icon("search"), input, h("kbd", {}, "Esc")), list);
+  dlg.addEventListener("close", () => dlg.remove());
+  document.body.append(dlg);
+  dlg.showModal();
+  draw();
+  api("GET", "/api/v2/admin/clients").then((c) => { clients = c || []; draw(); }).catch(() => {});
+  if (me && me.role !== "rep") api("GET", "/api/v2/admin/nodes").then((n) => { nodes = n || []; draw(); }).catch(() => {});
+}
+document.addEventListener("keydown", (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k" && me && !document.querySelector("dialog.palette")) { e.preventDefault(); openPalette(); }
+});
+
+// popMenu shows a small menu under a header button.
+function popMenu(anchor, build) {
+  document.querySelectorAll(".popmenu").forEach((m) => m.remove());
+  const m = h("div", { class: "popmenu card", role: "menu" });
+  build(m);
+  document.body.append(m);
+  const r = anchor.getBoundingClientRect();
+  m.style.insetBlockStart = `${r.bottom + 8 + window.scrollY}px`;
+  if (document.documentElement.dir === "rtl") m.style.left = `${Math.max(8, r.left)}px`; else m.style.right = `${Math.max(8, innerWidth - r.right)}px`;
+  const off = (e) => { if (!m.contains(e.target) && !anchor.contains(e.target)) { m.remove(); document.removeEventListener("pointerdown", off); } };
+  setTimeout(() => document.addEventListener("pointerdown", off), 0);
+}
+
+let notifCache = null;
+async function loadNotifs() {
+  if (!me || me.role === "rep") return [];
+  const out = [];
+  const [nodes, orders, si] = await Promise.all([api("GET", "/api/v2/admin/nodes").catch(() => []), api("GET", "/api/v2/shop/orders").catch(() => []), api("GET", "/api/v2/admin/system").catch(() => null)]);
+  const now = Date.now() / 1000;
+  for (const n of nodes || []) if (!n.online) out.push({ cls: "bad", text: ux("nodeDown", { x: n.Name || n.ID }), href: "#/nodes" });
+  const pend = (orders || []).filter((o) => (o.status || o.Status) === "pending").length;
+  if (pend) out.push({ cls: "warn", text: ux("pendingOrders", { n: fmtNum(pend) }), href: "#/shop" });
+  for (const w of (si && si.warnings) || []) { const [k, p] = w.split(":"); out.push({ cls: "bad", text: s3(k === "disk" ? "diskWarn" : "ramWarn", { p: fmtNum(+p) }).split(/[.؛]/)[0], href: "#/dashboard" }); }
+  notifCache = { at: now, list: out };
+  return out;
+}
+
 function shell(active, content) {
-  const tabs = Object.keys(routes).map((r) => h("a", { href: `#/${r}`, "aria-current": r === active ? "page" : null }, icon(r), h("span", {}, t(r))));
+  const keys = Object.keys(routes);
+  const tabs = keys.map((r) => h("a", { href: `#/${r}`, "aria-current": r === active ? "page" : null }, icon(r), h("span", {}, t(r))));
+  // Phones: four tabs and a "more" sheet with the rest.
+  const mainKeys = keys.slice(0, 4);
+  const moreActive = !mainKeys.includes(active);
+  const moreBtn = h("button", { type: "button", class: "more-tab", "aria-current": moreActive ? "page" : null, onclick: () => {
+    const sheet = h("dialog", { class: "sheet", closedby: "any" },
+      h("div", { class: "sheet-grid" }, keys.slice(4).map((r) => h("a", { href: `#/${r}`, "aria-current": r === active ? "page" : null, onclick: () => sheet.close() }, icon(r), h("span", {}, t(r))))));
+    sheet.addEventListener("close", () => sheet.remove());
+    document.body.append(sheet); sheet.showModal();
+  } }, icon("more"), h("span", {}, ux("more")));
+  const bell = h("span", { class: "dotcount", hidden: true });
+  const bellBtn = iconBtn("bell", ux("notif"), (e) => {
+    const list = (notifCache && notifCache.list) || [];
+    popMenu(e.currentTarget, (m) => m.append(h("div", { class: "pm-head" }, ux("notif")),
+      ...(list.length ? list.map((n) => h("a", { class: `pm-item ${n.cls}`, href: n.href, onclick: () => m.remove() }, h("i", { class: `dot ${n.cls === "bad" ? "off" : "warn"}` }), n.text)) : [h("p", { class: "muted small pm-empty" }, ux("allGood"))])));
+  }, bell);
+  loadNotifs().then((l) => { if (l.length) { bell.hidden = false; bell.textContent = fmtNum(l.length); } });
+  const schemeNow = safeGet("color-scheme") || "light dark";
+  const themeBtn = iconBtn(schemeNow === "light" ? "sun" : "moon", ux("theme"), (e) => popMenu(e.currentTarget, (m) => m.append(h("div", { class: "pm-head" }, ux("theme")),
+    ...[["dark", "moon"], ["light", "sun"], ["light dark", "globe"]].map(([v, ic]) => h("button", { class: "pm-item", "aria-checked": (safeGet("color-scheme") || "light dark") === v ? "true" : "false", onclick: () => { setScheme(v); m.remove(); route(); } }, icon(ic), ux(v === "light dark" ? "auto" : v))))));
+  const langBtn = h("button", { class: "iconbtn lang", type: "button", title: "زبان / Language", onclick: () => { lang = lang === "fa" ? "en" : "fa"; safeSet("lang", lang); applyLang(); route(); } }, lang === "fa" ? "EN" : "فا");
+  const userBtn = me ? h("button", { class: "userchip", type: "button", onclick: (e) => popMenu(e.currentTarget, (m) => m.append(
+    h("div", { class: "pm-head row" }, avatar(me.user), h("div", {}, h("b", {}, me.user), h("div", { class: "muted small" }, me.role === "rep" ? t("reps") : t(`role_${me.level ? "admin" : me.role}`)))),
+    h("a", { class: "pm-item", href: "#/settings", onclick: () => m.remove() }, icon("settings"), t("settings")),
+    h("button", { class: "pm-item bad", onclick: async () => { await api("POST", "/api/v2/auth/logout"); location.hash = "#/login"; } }, icon("logout"), t("logout")))) },
+    avatar(me.user), h("span", { class: "uname" }, me.user)) : null;
   return h("div", { class: "shell" },
-    h("header", { class: "top" }, h("span", { class: "brand" }, mark(), "Dark VPN"),
-      me && me.role === "rep" ? h("span", { class: "badge" }, `${t("volumeCredit")}: ${bytes(me.volume_credit || 0)} · ${t("units")}: ${fmtNum(me.unlimited_units || 0)}`) : null,
-      h("span", { class: "muted small" }, me ? me.user : "")),
-    h("nav", { class: "tabs", "aria-label": "Main" }, tabs),
+    h("header", { class: "top" }, h("a", { class: "brand", href: "#/dashboard" }, mark(), h("span", {}, "Dark ", h("b", { class: "neon-text" }, "VPN"))),
+      me && me.role === "rep" ? h("span", { class: "badge credit" }, `${t("volumeCredit")}: ${bytes(me.volume_credit || 0)} · ${t("units")}: ${fmtNum(me.unlimited_units || 0)}`) : null,
+      h("button", { class: "searchbox", type: "button", onclick: openPalette }, icon("search"), h("span", {}, ux("search")), h("kbd", {}, "Ctrl K")),
+      h("div", { class: "actions" }, iconBtn("search", ux("search"), openPalette), me && me.role !== "rep" ? bellBtn : null, themeBtn, langBtn, userBtn)),
+    h("nav", { class: "tabs", "aria-label": "Main" }, tabs, keys.length > 5 ? moreBtn : null),
     h("main", {}, content));
 }
 
@@ -323,7 +455,7 @@ function systemWarnings(si) {
 
 function hubHealthCard(si) {
   const pct = (a, b) => (b ? (100 * a) / b : 0);
-  return h("div", { class: "card form" },
+  return h("div", { class: "card form hub-card wide-col" },
     h("div", { class: "row" }, h("h2", {}, s3("hubTitle")), h("span", { class: "badge spacer", dir: "ltr" }, `${si.version}${si.commit ? ` · ${si.commit}` : ""}`)),
     h("div", { class: "meters" },
       meter(`${s3("cpu")} (${fmtNum(si.cores)})`, si.cpu_percent, ltr(`${fmtNum(si.cpu_percent)}% · load ${fmtNum(si.load1)}`)),
@@ -443,18 +575,22 @@ function updateAllButton(nodes) {
 async function viewDashboard() {
   const [o, nodes, ins] = await Promise.all([api("GET", "/api/v2/admin/overview"), api("GET", "/api/v2/admin/nodes"), api("GET", "/api/v2/admin/insights?days=14")]);
   const si = await api("GET", "/api/v2/admin/system").catch(() => null);
-  const stat = (k, v) => h("div", { class: "card stat" }, h("div", { class: "v" }, v), h("div", { class: "k" }, t(k)));
+  const stat = (k, v, ic, share, sub) => h("div", { class: "card stat" },
+    h("div", { class: "stat-top" }, h("span", { class: "stat-ic" }, icon(ic)), h("div", { class: "k" }, t(k))),
+    h("div", { class: "v" }, v), share != null ? h("div", { class: "bar thin" }, h("i", { style: `inline-size:${Math.round(Math.max(0, Math.min(1, share)) * 100)}%` })) : null,
+    sub ? h("div", { class: "muted small" }, sub) : null);
+  const frac = (a, b) => h("span", {}, fmtNum(a), h("small", { class: "of" }, ` ${ux("of")} ${fmtNum(b)}`));
   const fmtTime = (u) => new Intl.DateTimeFormat(lang === "fa" ? "fa-IR" : "en-GB", { dateStyle: "short", timeStyle: "short" }).format(new Date(u * 1000));
   const topMax = Math.max(1, ...ins.top.map((u) => u.bytes));
   return h("div", {},
     h("h1", {}, t("dashboard")),
     si ? systemWarnings(si) : null,
     h("div", { class: "grid" },
-      stat("nodesOnline", `${fmtNum(o.NodesOnline)} / ${fmtNum(o.Nodes)}`),
-      stat("activeClients", `${fmtNum(o.ClientsActive)} / ${fmtNum(o.Clients)}`),
-      stat("onlineUsers", fmtNum(o.OnlineUsers)),
-      stat("trafficToday", bytes(o.TrafficToday)),
-      stat("trafficTotal", bytes(o.TrafficTotal))),
+      stat("nodesOnline", frac(o.NodesOnline, o.Nodes), "nodes", o.Nodes ? o.NodesOnline / o.Nodes : 0),
+      stat("activeClients", frac(o.ClientsActive, o.Clients), "clients", o.Clients ? o.ClientsActive / o.Clients : 0),
+      stat("onlineUsers", fmtNum(o.OnlineUsers), "online"),
+      stat("trafficToday", bytes(o.TrafficToday), "traffic"),
+      stat("trafficTotal", bytes(o.TrafficTotal), "finance")),
     h("div", { class: "dash" },
       h("div", { class: "card form wide-col" }, h("div", { class: "row" }, h("h2", {}, t("traffic14")), legend()), barsSvg(ins.daily, 1100)),
       h("div", { class: "card form" }, h("h2", {}, t("topToday")),
@@ -464,7 +600,8 @@ async function viewDashboard() {
           eventBadge(e.kind), h("span", {}, e.email), h("span", { class: "muted spacer" }, `${e.node_id} · ${fmtTime(e.unix)}`))))
           : h("p", { class: "muted small" }, t("noEvents"))),
       si ? hubHealthCard(si) : null),
-    h("div", { class: "list" }, (nodes || []).map((n) => nodeCard(n))));
+    (nodes || []).length ? h("div", { class: "row section-head" }, h("h2", {}, ux("nodesSection")), h("a", { class: "spacer small", href: "#/nodes" }, t("nodes"), " ›")) : null,
+    h("div", { class: "list nodes-grid" }, (nodes || []).map((n) => nodeCard(n))));
 }
 
 function rate(bps) { return bytes(bps).replace(/\u2069$/, "/s\u2069"); }
@@ -787,11 +924,11 @@ async function viewClients() {
     return h("tr", { class: c.Enabled ? "" : "muted-row" },
       h("td", { class: "c-sel" }, cb),
       h("td", { class: "c-user", "data-label": L.user },
-        h("div", { class: "row tight" }, h("span", { class: `dot ${c.Online ? "on" : ""}`, title: c.Online ? t("online") : t("offline") }),
+        h("div", { class: "row tight" }, h("span", { class: "av-wrap" }, avatar(c.Email, "sm"), h("span", { class: `dot ${c.Online ? "on" : ""}`, title: c.Online ? t("online") : t("offline") })),
           h("a", { class: "name", href: `#/client?e=${encodeURIComponent(c.Email)}` }, c.Email)),
         c.Note ? h("div", { class: "small muted clip" }, c.Note) : null),
       h("td", { class: "c-usage", "data-label": L.usage },
-        h("div", { class: "small mono" }, `${bytes(u)} / ${c.VolumeBytes < 0 ? "∞" : bytes(c.VolumeBytes)}`),
+        h("div", { class: "small mono" }, `${bytes(u)} ${lang === "fa" ? "از" : "/"} ${c.VolumeBytes < 0 ? "∞" : bytes(c.VolumeBytes)}`),
         c.VolumeBytes > 0 ? h("div", { class: "bar slim" }, h("i", { class: pct > 90 ? "bad" : pct > 75 ? "warn" : "", style: `inline-size:${pct}%` })) : null),
       h("td", { class: "c-remain mono small", "data-label": L.remain }, c.Remaining < 0 ? "∞" : bytes(c.Remaining)),
       h("td", { class: "c-exp", "data-label": L.expiry }, h("span", { class: `badge ${cls}` }, status),
