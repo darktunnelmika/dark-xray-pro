@@ -46,7 +46,7 @@ jobs:
           mkdir -p dist
           for arch in amd64 arm64; do
             GOOS=linux GOARCH=$arch go build -trimpath -ldflags "-s -w" -o dist/dark-hub2-linux-$arch ./cmd/dark-hub2
-            GOOS=linux GOARCH=$arch go build -trimpath -ldflags "-s -w" -o dist/dark-node-linux-$arch ./cmd/dark-node
+            GOOS=linux GOARCH=$arch go build -trimpath -buildvcs=false -ldflags "-s -w" -o dist/dark-node-linux-$arch ./cmd/dark-node
           done
           ./dist/dark-hub2-linux-amd64 version | grep -qx "dark-hub2 ${{ steps.v.outputs.tag }}"
           (cd dist && sha256sum dark-* > SHA256SUMS)
