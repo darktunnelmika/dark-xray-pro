@@ -202,7 +202,7 @@ func (b *Bot) renewProducts(ctx context.Context) []hubcore.Product {
 	all, _ := b.Store.Products(ctx, b.owner(), true)
 	var out []hubcore.Product
 	for _, p := range all {
-		if p.Seller == "" {
+		if b.sells(p) {
 			out = append(out, p)
 		}
 	}
@@ -215,7 +215,7 @@ func (b *Bot) showService(ctx context.Context, chat int64, email string) {
 		b.send(ctx, chat, "این سرویس پیدا نشد.", homeKB)
 		return
 	}
-	list, _ := b.Store.TgClients(ctx, chat)
+	list, _ := b.clients(ctx, chat)
 	b.send(ctx, chat, b.serviceCard(c), b.serviceKB(ctx, chat, c, len(list) > 1))
 }
 
@@ -493,32 +493,45 @@ func (b *Bot) showStatus(ctx context.Context, chat int64) {
 	b.send(ctx, chat, sb.String(), &Keyboard{Rows: [][]Button{row(cbBtn("🔄 بروزرسانی", "status"), cbBtn("« منوی اصلی", "home"))}})
 }
 
-// starsPlans are the plans that can be paid from the wallet.
+// starsPlans are the plans that can be paid from a wallet (toman, or
+// Stars in the main bot).
 func (b *Bot) starsPlans(ctx context.Context) []hubcore.Product {
 	var out []hubcore.Product
 	for _, p := range b.renewProducts(ctx) {
-		if p.PriceStars > 0 {
+		if p.Price > 0 || (p.PriceStars > 0 && b.Seller == "") {
 			out = append(out, p)
 		}
 	}
 	return out
 }
 
+func walletPrice(p hubcore.Product) string {
+	if p.Price > 0 {
+		return faMoney(p.Price) + " تومان"
+	}
+	return fmt.Sprintf("%d⭐", p.PriceStars)
+}
+
 // showAutoRenew lets the customer pick the plan their service renews with
 // from the wallet shortly before it ends, or turn it off.
 func (b *Bot) showAutoRenew(ctx context.Context, chat int64, email string) {
 	cur := b.Store.AutoRenew(ctx, email)
-	bal := b.Store.WalletBalance(ctx, chat)
 	text := "🔁 <b>تمدید خودکار</b> · " + esc(email) + "\n" + line + "\n" +
 		"یک روز مانده به پایان (یا وقتی کمتر از ۵٪ حجم مانده) سرویس با پلن انتخابی از کیف پول تمدید می‌شود و همین‌جا خبر می‌دهیم.\n\n" +
-		fmt.Sprintf("💰 موجودی کیف پول: <b>%d⭐</b>\n", bal)
+		fmt.Sprintf("💰 موجودی کیف پول: <b>%s تومان</b>", faMoney(b.Store.TomanBalance(ctx, b.Seller, chat)))
+	if b.Seller == "" {
+		if st := b.Store.WalletBalance(ctx, chat); st > 0 {
+			text += fmt.Sprintf(" · %d⭐", st)
+		}
+	}
+	text += "\n"
 	kb := &Keyboard{}
 	for _, p := range b.starsPlans(ctx) {
 		mark := ""
 		if p.ID == cur {
 			mark = "✅ "
 		}
-		kb.Rows = append(kb.Rows, row(cbBtn(fmt.Sprintf("%s%s · %d⭐", mark, p.Name, p.PriceStars), "arp:"+email+"|"+p.ID)))
+		kb.Rows = append(kb.Rows, row(cbBtn(fmt.Sprintf("%s%s · %s", mark, p.Name, walletPrice(p)), "arp:"+email+"|"+p.ID)))
 	}
 	if cur != "" {
 		text += "وضعیت: <b>روشن</b>"

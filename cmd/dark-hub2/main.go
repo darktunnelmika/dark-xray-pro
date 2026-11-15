@@ -150,6 +150,9 @@ func main() {
 		hubcore.SetTelegramControl(hubcore.TelegramControl{Apply: tgc.apply, Running: tgc.running, BackupNow: tgc.backupNow, Test: tgc.test})
 		hubcore.SetOwnerNotify(tgc.alert)
 		hubcore.SetCustomerNotify(tgc.tell)
+		rbots := &repBots{store: s, subBase: *subBase, parent: ctx, running: map[string]*repBot{}}
+		hubcore.SetSellerNotify(rbots.tell)
+		go rbots.run(ctx)
 		if tok, err := os.ReadFile(*tgTokenFile); err == nil && strings.TrimSpace(string(tok)) != "" {
 			owners := s.TelegramOwners(ctx)
 			if len(owners) == 0 {
@@ -504,4 +507,81 @@ func (c *tgController) alert(ctx context.Context, text string) {
 	if b := c.current(); b != nil {
 		b.Alert(ctx, text)
 	}
+}
+
+// repBots runs the resellers' own sales bots (set in the panel), checking
+// every 20 seconds for bots added, changed or removed.
+type repBots struct {
+	store   *hubcore.Store
+	subBase string
+	parent  context.Context
+
+	mu      sync.Mutex
+	running map[string]*repBot
+}
+
+type repBot struct {
+	token  string
+	bot    *tgbot.Bot
+	cancel context.CancelFunc
+}
+
+func (r *repBots) run(ctx context.Context) {
+	t := time.NewTicker(20 * time.Second)
+	defer t.Stop()
+	for {
+		r.reconcile(ctx)
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+	}
+}
+
+func (r *repBots) reconcile(ctx context.Context) {
+	want := map[string]string{}
+	for _, c := range r.store.RepBotsAll(ctx) {
+		want[c.Rep] = c.Token
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for rep, b := range r.running {
+		if want[rep] != b.token {
+			b.cancel()
+			delete(r.running, rep)
+			hubcore.SetRepBotStatus(rep, false, "", "")
+		}
+	}
+	for rep, tok := range want {
+		if _, ok := r.running[rep]; ok {
+			continue
+		}
+		api := &tgbot.HTTPAPI{Token: tok}
+		cctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+		user, err := api.Me(cctx)
+		cancel()
+		if err != nil {
+			hubcore.SetRepBotStatus(rep, false, "", err.Error())
+			continue // tried again next round
+		}
+		bctx, bcancel := context.WithCancel(r.parent)
+		b := &tgbot.Bot{Store: r.store, API: api, Owners: map[int64]bool{}, SubBase: r.subBase, Seller: rep}
+		r.running[rep] = &repBot{token: tok, bot: b, cancel: bcancel}
+		hubcore.SetRepBotStatus(rep, true, user, "")
+		log.Printf("reseller bot for %s on (@%s)", rep, user)
+		go b.Run(bctx)
+	}
+}
+
+// tell messages a customer through a reseller's bot; false if it is off.
+func (r *repBots) tell(ctx context.Context, seller string, chat int64, text string) bool {
+	r.mu.Lock()
+	b := r.running[seller]
+	r.mu.Unlock()
+	if b == nil {
+		return false
+	}
+	go b.bot.Tell(context.WithoutCancel(ctx), chat, text)
+	return true
 }

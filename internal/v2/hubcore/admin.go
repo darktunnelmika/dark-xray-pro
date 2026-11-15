@@ -756,6 +756,108 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 		err := s.PutCard(r.Context(), in)
 		reply(w, map[string]bool{"ok": err == nil}, err)
 	}))
+	// Toman sales per seller: card, wallets, top-ups, the reseller's own bot.
+	sellerOf := func(r *http.Request) (string, bool) {
+		p := who(r)
+		if p.Role == "rep" {
+			return p.RepID, p.RepID != ""
+		}
+		return r.URL.Query().Get("seller"), true
+	}
+	mux.HandleFunc("GET /api/v2/shop/card", member(func(w http.ResponseWriter, r *http.Request) {
+		seller, ok := sellerOf(r)
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+		reply(w, s.CardFor(r.Context(), seller), nil)
+	}))
+	mux.HandleFunc("PUT /api/v2/shop/card", member(func(w http.ResponseWriter, r *http.Request) {
+		seller, ok := sellerOf(r)
+		var in CardInfo
+		if !ok || !decode(w, r, &in) {
+			return
+		}
+		err := s.PutCardFor(r.Context(), seller, in)
+		reply(w, map[string]bool{"ok": err == nil}, err)
+	}))
+	mux.HandleFunc("GET /api/v2/shop/topups", member(func(w http.ResponseWriter, r *http.Request) {
+		seller, ok := sellerOf(r)
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+		list, err := s.Topups(r.Context(), seller, r.URL.Query().Get("status"), 200)
+		reply(w, list, err)
+	}))
+	mux.HandleFunc("POST /api/v2/shop/topups/{id}/{verb}", member(func(w http.ResponseWriter, r *http.Request) {
+		seller, ok := sellerOf(r)
+		id, _ := strconv.ParseInt(r.PathValue("id"), 10, 64)
+		verb := r.PathValue("verb")
+		if !ok || (verb != "approve" && verb != "reject") {
+			http.NotFound(w, r)
+			return
+		}
+		t, err := s.DecideTopup(r.Context(), seller, id, verb == "approve", "panel:"+who(r).User)
+		if err == nil {
+			msg := fmt.Sprintf("✅ شارژ کیف پول تأیید شد: %d تومان\n💰 موجودی: %d تومان", t.Amount, t.Balance)
+			if verb != "approve" {
+				msg = "❌ رسید شارژ کیف پول رد شد. اگر فکر می‌کنید اشتباهی شده، با پشتیبانی تماس بگیرید."
+			}
+			s.tellFrom(r.Context(), t.Seller, t.Chat, msg)
+		}
+		reply(w, t, err)
+	}))
+	mux.HandleFunc("POST /api/v2/shop/wallet", member(func(w http.ResponseWriter, r *http.Request) {
+		seller, ok := sellerOf(r)
+		var in struct {
+			Chat  int64  `json:"chat"`
+			Delta int64  `json:"delta"`
+			Note  string `json:"note"`
+		}
+		if !ok || !decode(w, r, &in) {
+			return
+		}
+		bal, err := s.TomanAdjust(r.Context(), seller, in.Chat, in.Delta, in.Note, who(r).User)
+		reply(w, map[string]int64{"balance": bal}, err)
+	}))
+	mux.HandleFunc("GET /api/v2/shop/wallets", member(func(w http.ResponseWriter, r *http.Request) {
+		seller, ok := sellerOf(r)
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+		list, err := s.TomanWallets(r.Context(), seller)
+		reply(w, list, err)
+	}))
+	mux.HandleFunc("GET /api/v2/rep/bot", member(func(w http.ResponseWriter, r *http.Request) {
+		p := who(r)
+		if p.Role != "rep" {
+			http.NotFound(w, r)
+			return
+		}
+		reply(w, s.RepBotOf(r.Context(), p.RepID), nil)
+	}))
+	mux.HandleFunc("PUT /api/v2/rep/bot", member(func(w http.ResponseWriter, r *http.Request) {
+		p := who(r)
+		var in RepBot
+		if p.Role != "rep" || !decode(w, r, &in) {
+			return
+		}
+		err := s.PutRepBot(r.Context(), p.RepID, in)
+		reply(w, s.RepBotOf(r.Context(), p.RepID), err)
+	}))
+	mux.HandleFunc("GET /api/v2/admin/reps/{id}/bot", guard(func(w http.ResponseWriter, r *http.Request) {
+		reply(w, s.RepBotOf(r.Context(), r.PathValue("id")), nil)
+	}))
+	mux.HandleFunc("PUT /api/v2/admin/reps/{id}/bot", guard(func(w http.ResponseWriter, r *http.Request) {
+		var in RepBot
+		if !decode(w, r, &in) {
+			return
+		}
+		err := s.PutRepBot(r.Context(), r.PathValue("id"), in)
+		reply(w, s.RepBotOf(r.Context(), r.PathValue("id")), err)
+	}))
 	mux.HandleFunc("POST /api/v2/admin/inbounds/{tag}/reset-usage", guard(func(w http.ResponseWriter, r *http.Request) {
 		n, err := s.ResetInboundUsage(r.Context(), r.PathValue("tag"))
 		reply(w, map[string]int{"reset": n}, err)

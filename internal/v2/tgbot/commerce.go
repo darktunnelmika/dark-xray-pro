@@ -30,7 +30,10 @@ func (b *Bot) buyButtons(ctx context.Context, chat int64, p hubcore.Product, ren
 		suffix, label = ":"+renew, "تمدید با "
 	}
 	var rows [][]Button
-	if p.PriceStars > 0 {
+	if p.Price > 0 && chat != 0 && b.Store.TomanBalance(ctx, b.Seller, chat) >= p.Price {
+		rows = append(rows, []Button{{Text: "💰 " + label + p.Name + " از کیف پول", Data: "tpay:" + p.ID + suffix}})
+	}
+	if p.PriceStars > 0 && b.Seller == "" {
 		if _, ok := b.API.(payAPI); ok {
 			rows = append(rows, []Button{{Text: fmt.Sprintf("⭐ %s%s — %d استارز", label, p.Name, p.PriceStars), Data: "pay:" + p.ID + suffix}})
 		}
@@ -38,7 +41,7 @@ func (b *Bot) buyButtons(ctx context.Context, chat int64, p hubcore.Product, ren
 			rows = append(rows, []Button{{Text: "👛 " + label + p.Name + " از کیف پول", Data: "wpay:" + p.ID + suffix}})
 		}
 	}
-	if p.Price > 0 || p.PriceStars == 0 {
+	if p.Price > 0 || p.PriceStars == 0 || b.Seller != "" {
 		data := "buy:" + p.ID
 		if renew != "" {
 			data = "renew:" + p.ID + ":" + renew
@@ -182,6 +185,35 @@ func (b *Bot) invite(ctx context.Context, chat int64) {
 }
 
 func (b *Bot) wallet(ctx context.Context, chat int64) {
+	toman := b.Store.TomanBalance(ctx, b.Seller, chat)
+	if b.Seller != "" || b.cardOn(ctx) || toman > 0 {
+		hist, _ := b.Store.TomanHistory(ctx, b.Seller, chat, 8)
+		kinds := map[string]string{"topup": "شارژ", "spend": "خرید", "gift": "هدیه", "correction": "اصلاح", "refund": "برگشت", "import": "انتقال از پنل قبلی"}
+		var lines []string
+		for _, e := range hist {
+			sign := "+"
+			if e.Delta < 0 {
+				sign = "−"
+			}
+			lines = append(lines, fmt.Sprintf("%s%s تومان — %s", sign, faMoney(abs64(e.Delta)), kinds[e.Kind]))
+		}
+		text := fmt.Sprintf("💰 <b>کیف پول</b>\nموجودی: <b>%s تومان</b>", faMoney(toman))
+		if b.Seller == "" {
+			if st := b.Store.WalletBalance(ctx, chat); st > 0 {
+				text += fmt.Sprintf("\nاعتبار استارز: %d⭐", st)
+			}
+		}
+		if len(lines) > 0 {
+			text += "\n\n" + strings.Join(lines, "\n")
+		}
+		text += "\n\nبا موجودی کیف پول سرویس بخرید یا تمدید کنید؛ تمدید خودکار هم از همین موجودی انجام می‌شود."
+		kb := &Keyboard{Rows: [][]Button{row(cbBtn("🛒 خرید سرویس", "shop"))}}
+		if b.cardOn(ctx) {
+			kb.Rows = append([][]Button{row(cbBtn("➕ شارژ کیف پول", "topup"))}, kb.Rows...)
+		}
+		b.send(ctx, chat, text, kb)
+		return
+	}
 	bal := b.Store.WalletBalance(ctx, chat)
 	hist, _ := b.Store.WalletHistory(ctx, chat, 8)
 	kinds := map[string]string{"reward": "پاداش دعوت", "spend": "خرید", "gift": "هدیه", "correction": "اصلاح", "refund": "برگشت"}
@@ -195,4 +227,11 @@ func (b *Bot) wallet(ctx context.Context, chat int64) {
 	}
 	text += "\n\nبا موجودی کیف پول می‌توانید از «خرید سرویس» پلن‌های استارزی را بخرید."
 	b.send(ctx, chat, text, &Keyboard{Rows: [][]Button{{{Text: "🛒 خرید سرویس", Data: "shop"}}}})
+}
+
+func abs64(n int64) int64 {
+	if n < 0 {
+		return -n
+	}
+	return n
 }

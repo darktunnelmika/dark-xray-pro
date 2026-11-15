@@ -41,8 +41,8 @@ func (b *Bot) notifyClients(ctx context.Context) {
 	}
 	for _, c := range all {
 		chats := links[c.Email]
-		if len(chats) == 0 {
-			continue
+		if len(chats) == 0 || !b.handles(c.RepID) {
+			continue // a reseller with its own bot tells its customers there
 		}
 		version := strconv.FormatInt(c.VolumeBytes, 10) + "/" + strconv.FormatInt(c.EffectiveUntil, 10) + "/" + strconv.FormatInt(c.DurationSeconds, 10)
 		used := c.Usage.Up + c.Usage.Down

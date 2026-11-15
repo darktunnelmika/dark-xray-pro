@@ -199,7 +199,11 @@ type DarkOldReport struct {
 	Links    int      `json:"links"`
 	Telegram int      `json:"telegram"` // clients linked to a Telegram account
 	Groups   int      `json:"groups"`
-	Domains  []string `json:"domains"` // domains to point here so old links keep working
+	Cards    int      `json:"cards"`    // sellers' cards for card-to-card payment
+	Bots     int      `json:"bots"`     // resellers' own Telegram bots
+	Wallets  int      `json:"wallets"`  // customers' toman wallets with a balance
+	Products int      `json:"products"` // plans for sale
+	Domains  []string `json:"domains"`  // domains to point here so old links keep working
 	Skipped  []string `json:"skipped"`
 	Notes    []string `json:"notes"`
 }
@@ -586,6 +590,9 @@ FROM restore_subscriptions r LEFT JOIN core_clients k ON k.email=r.core_email WH
 			}
 		}
 	}
+	if err := s.darkOldShop(ctx, tx, old, repOf, opt, now, &rep); err != nil {
+		return rep, err
+	}
 	var origin string
 	_ = old.QueryRowContext(ctx, `SELECT v FROM export_meta WHERE k='public_origin'`).Scan(&origin)
 	if u, err := url.Parse(origin); err == nil && u.Host != "" {
@@ -622,4 +629,198 @@ func darkOldScryptMatch(stored, pass string) bool {
 	}
 	got, err := scrypt.Key([]byte(pass), salt, n, r, q, len(want))
 	return err == nil && subtle.ConstantTimeCompare(got, want) == 1
+}
+
+func setSettingTx(ctx context.Context, tx *sql.Tx, k, v string) error {
+	_, err := tx.ExecContext(ctx, `INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value`, k, v)
+	return err
+}
+
+// darkOldShop moves the sellers' cards, bots, wallets and plans.
+func (s *Store) darkOldShop(ctx context.Context, tx *sql.Tx, old *sql.DB, repOf map[string]string, opt DarkOldOptions, now int64, rep *DarkOldReport) error {
+	seller := func(owner string) (string, bool) {
+		r, ok := repOf[owner]
+		return r, ok
+	}
+	// Cards (manual card-to-card gateways).
+	if tableExists(ctx, old, "commerce_gateways") {
+		rows, err := old.QueryContext(ctx, `SELECT owner,card_number,card_holder,bank_name FROM commerce_gateways WHERE enabled=1 AND card_number<>'' ORDER BY updated_at`)
+		if err != nil {
+			return err
+		}
+		type card struct{ owner, num, holder, bank string }
+		var cards []card
+		for rows.Next() {
+			var c card
+			if rows.Scan(&c.owner, &c.num, &c.holder, &c.bank) == nil {
+				cards = append(cards, c)
+			}
+		}
+		rows.Close()
+		done := map[string]bool{}
+		for _, c := range cards {
+			sl, ok := seller(c.owner)
+			if !ok || done[sl] {
+				continue
+			}
+			if s.CardFor(ctx, sl).Number != "" {
+				rep.note("card of %s: one is already set here; kept", firstNonEmpty(sl, "owner"))
+				done[sl] = true
+				continue
+			}
+			num := strings.Map(func(r rune) rune {
+				if r >= '0' && r <= '9' {
+					return r
+				}
+				return -1
+			}, c.num)
+			if len(num) < 16 || len(num) > 26 {
+				continue
+			}
+			for k, v := range map[string]string{"pay_card_number": num, "pay_card_holder": c.holder, "pay_card_bank": c.bank} {
+				if err := setSettingTx(ctx, tx, cardKey(k, sl), strings.TrimSpace(v)); err != nil {
+					return err
+				}
+			}
+			done[sl] = true
+			rep.Cards++
+		}
+	}
+	// Resellers' own bots (the owner's bot stays the panel's main bot).
+	if tableExists(ctx, old, "export_bot_tokens") {
+		rows, err := old.QueryContext(ctx, `SELECT owner,token,enabled,admin_telegram_id FROM export_bot_tokens`)
+		if err != nil {
+			return err
+		}
+		type bot struct {
+			owner, token string
+			enabled      bool
+			admin        int64
+		}
+		var bots []bot
+		for rows.Next() {
+			var b bot
+			if rows.Scan(&b.owner, &b.token, &b.enabled, &b.admin) == nil {
+				bots = append(bots, b)
+			}
+		}
+		rows.Close()
+		for _, b := range bots {
+			sl, ok := seller(b.owner)
+			if !ok {
+				continue
+			}
+			if sl == "" {
+				rep.note("the owner's old bot is not moved: the panel's main bot (Settings → Telegram) serves the owner")
+				continue
+			}
+			if !botTokenRE.MatchString(b.token) {
+				continue
+			}
+			if cur := s.repBotRaw(ctx, sl); cur.Token != "" {
+				rep.note("bot of %s: one is already set here; kept", sl)
+				continue
+			}
+			v, _ := json.Marshal(RepBot{Token: b.token, Enabled: b.enabled})
+			if err := setSettingTx(ctx, tx, "rep_bot:"+sl, string(v)); err != nil {
+				return err
+			}
+			if b.admin > 0 {
+				if _, err := tx.ExecContext(ctx, `UPDATE reps SET tg_chat=? WHERE id=? AND tg_chat=0`, b.admin, sl); err != nil {
+					return err
+				}
+			}
+			rep.Bots++
+		}
+	}
+	// Customers' toman wallets.
+	if tableExists(ctx, old, "customer_wallets") {
+		rows, err := old.QueryContext(ctx, `SELECT owner,telegram_id,balance_minor FROM customer_wallets WHERE balance_minor>0`)
+		if err != nil {
+			return err
+		}
+		type w struct {
+			owner string
+			chat  int64
+			bal   int64
+		}
+		var ws []w
+		for rows.Next() {
+			var x w
+			if rows.Scan(&x.owner, &x.chat, &x.bal) == nil {
+				ws = append(ws, x)
+			}
+		}
+		rows.Close()
+		for _, x := range ws {
+			sl, ok := seller(x.owner)
+			if !ok || x.chat == 0 {
+				continue
+			}
+			var n int
+			_ = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM toman_wallet WHERE seller=? AND chat_id=? AND kind='import'`, sl, x.chat).Scan(&n)
+			if n > 0 {
+				continue
+			}
+			if _, err := tx.ExecContext(ctx, `INSERT INTO toman_wallet(seller,chat_id,unix,delta,kind,note) VALUES(?,?,?,?,?,?)`, sl, x.chat, now, x.bal, "import", "old panel balance"); err != nil {
+				return err
+			}
+			rep.Wallets++
+		}
+	}
+	// Plans: each old price becomes one product.
+	if tableExists(ctx, old, "commerce_prices") && tableExists(ctx, old, "commerce_products") {
+		rows, err := old.QueryContext(ctx, `SELECT p.id,p.owner,pr.name,pr.kind,pr.active,pr.visible,p.label,p.price_minor,p.duration_days,p.volume_bytes,p.ip_limit,p.active,COALESCE(p.activation_mode,'')
+FROM commerce_prices p JOIN commerce_products pr ON pr.id=p.product_id AND pr.owner=p.owner ORDER BY p.owner,p.price_minor`)
+		if err != nil {
+			return err
+		}
+		type pr struct {
+			id, owner, name, kind, label, mode string
+			pActive, pVisible, active          bool
+			price, days, vol                   int64
+			ips                                int
+		}
+		var list []pr
+		for rows.Next() {
+			var x pr
+			if err := rows.Scan(&x.id, &x.owner, &x.name, &x.kind, &x.pActive, &x.pVisible, &x.label, &x.price, &x.days, &x.vol, &x.ips, &x.active, &x.mode); err == nil {
+				list = append(list, x)
+			}
+		}
+		rows.Close()
+		for _, x := range list {
+			sl, ok := seller(x.owner)
+			if !ok || x.days <= 0 || x.days > 3650 {
+				continue
+			}
+			id := v2ID("old-" + x.owner + "-" + x.id)
+			var n int
+			_ = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM products WHERE id=?`, id).Scan(&n)
+			if n > 0 {
+				continue
+			}
+			plan, gb := "volume", x.vol>>30
+			if x.kind == "unlimited" || x.vol <= 0 {
+				plan, gb = "unlimited", 0
+			}
+			status := "draft"
+			if x.active && x.pActive && x.pVisible {
+				status = "published"
+			}
+			name := strings.TrimSpace(x.name)
+			if l := strings.TrimSpace(x.label); l != "" && l != name {
+				name = strings.TrimSpace(name + " · " + l)
+			}
+			if len(name) > 120 {
+				name = name[:120]
+			}
+			if _, err := tx.ExecContext(ctx, `INSERT INTO products(id,seller,name,plan,gb,days,max_ips,inbounds,price,status,first_use,created_unix) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`,
+				id, sl, name, plan, gb, x.days, max(x.ips, 0), strings.Join(opt.Inbounds, ","), max(x.price, 0), status, x.mode == "first_connection", now); err != nil {
+				return fmt.Errorf("product %s: %w", x.id, err)
+			}
+			rep.Products++
+		}
+	}
+	return nil
 }

@@ -482,3 +482,105 @@ func TestCardReceiptAndDiscount(t *testing.T) {
 		t.Fatal("buyer cancel failed")
 	}
 }
+
+// A reseller's own bot: its catalog only, its card, its toman wallet
+// topped up by receipt, purchases paid from the wallet out of its credit.
+func TestResellerBotTomanWallet(t *testing.T) {
+	s, err := hubcore.Open(filepath.Join(t.TempDir(), "v2.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	ctx := context.Background()
+	_, _ = s.CreateNode(ctx, "n1", "N")
+	_ = s.PutInbound(ctx, "in1", "n1", []byte(`{"protocol":"vless","port":443,"settings":{}}`), true)
+	owner := hubcore.Principal{User: "o", Role: "owner"}
+	_ = s.PutRep(ctx, hubcore.Rep{ID: "ali", Name: "Ali", Enabled: true})
+	_ = s.AdjustCredit(ctx, "o", "ali", 100<<30, 0, "")
+	for _, p := range []hubcore.Product{
+		{ID: "own10", Name: "Owner 10GB", Plan: "volume", GB: 10, Days: 30, Inbounds: []string{"in1"}, Price: 90000, Status: "published"},
+		{ID: "ali20", Seller: "ali", Name: "Ali 20GB", Plan: "volume", GB: 20, Days: 30, Inbounds: []string{"in1"}, Price: 150000, Status: "published"},
+	} {
+		if err := s.PutProduct(ctx, owner, p); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.PutCardFor(ctx, "ali", hubcore.CardInfo{Number: "6219861012345678", Holder: "Ali R"}); err != nil {
+		t.Fatal(err)
+	}
+	const repChat = int64(3000)
+	code, _ := s.NewTgLinkCode(ctx, "ali")
+	if _, err := s.ClaimTgLinkCode(ctx, code, repChat); err != nil {
+		t.Fatal(err)
+	}
+	api := &fakeAPI{}
+	b := &Bot{Store: s, API: api, Owners: map[int64]bool{}, SubBase: "https://x", Seller: "ali", Now: time.Now, Logf: t.Logf}
+	b.Tick(ctx)
+	b.Handle(ctx, cb(buyerID, "shop"))
+	out := api.take()
+	shop := find(t, out, buyerID, "")
+	all := ""
+	for _, m := range out {
+		all += m.text
+		if m.kb != nil {
+			for _, r := range m.kb.Rows {
+				for _, btn := range r {
+					all += btn.Text + btn.Data
+				}
+			}
+		}
+	}
+	_ = shop
+	if !strings.Contains(all, "ali20") || strings.Contains(all, "own10") {
+		t.Fatalf("the reseller's bot must sell only its catalog: %s", all)
+	}
+	// Top up 200,000 toman by receipt; the reseller approves.
+	b.Handle(ctx, cb(buyerID, "topup"))
+	api.take()
+	b.Handle(ctx, msg(buyerID, "۲۰۰٬۰۰۰"))
+	inv := find(t, api.take(), buyerID, "6219-8610-1234-5678")
+	if !strings.Contains(inv.text, "۲۰۰٬۰۰۰") {
+		t.Fatal(inv.text)
+	}
+	photo := msg(buyerID, "")
+	photo.Message.Photo = []struct {
+		FileID string `json:"file_id"`
+	}{{FileID: "rcpt"}}
+	b.Handle(ctx, photo)
+	out = api.take()
+	find(t, out, buyerID, "دریافت شد")
+	card := find(t, out, repChat, "شارژ کیف پول")
+	if !card.photo || card.kb.Rows[0][0].Data != "tok:1" {
+		t.Fatalf("%+v", card)
+	}
+	b.Handle(ctx, cb(int64(9999), "tok:1")) // a stranger cannot approve
+	if s.TomanBalance(ctx, "ali", buyerID) != 0 {
+		t.Fatal("only the reseller approves")
+	}
+	b.Handle(ctx, cb(repChat, "tok:1"))
+	find(t, api.take(), buyerID, "شارژ شد")
+	if s.TomanBalance(ctx, "ali", buyerID) != 200000 || s.TomanBalance(ctx, "", buyerID) != 0 {
+		t.Fatal("the top-up belongs to the reseller's wallet only")
+	}
+	// Buy from the wallet: delivered at once, paid from the reseller's credit.
+	b.Handle(ctx, cb(buyerID, "tpay:ali20"))
+	b.Tick(ctx)
+	out = api.take()
+	find(t, out, buyerID, "از کیف پول پرداخت شد")
+	if s.TomanBalance(ctx, "ali", buyerID) != 50000 {
+		t.Fatal("wallet not charged", s.TomanBalance(ctx, "ali", buyerID))
+	}
+	mine, _ := s.TgClientsOf(ctx, buyerID, "ali")
+	if len(mine) != 1 {
+		t.Fatal("the client must belong to the reseller", mine)
+	}
+	reps, _ := s.Reps(ctx)
+	for _, r := range reps {
+		if r.ID == "ali" && r.VolumeCredit != 80<<30 {
+			t.Fatal("the reseller's credit pays for it", r.VolumeCredit)
+		}
+	}
+	// Not enough credit: refused, nothing delivered.
+	b.Handle(ctx, cb(buyerID, "tpay:ali20"))
+	find(t, api.take(), buyerID, "ممکن نشد")
+}

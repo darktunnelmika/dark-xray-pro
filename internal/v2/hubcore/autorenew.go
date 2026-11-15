@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strconv"
 	"time"
 )
 
@@ -50,13 +51,13 @@ func (s *Store) SetAutoRenew(ctx context.Context, chat int64, email, productID s
 		_, err := s.db.ExecContext(ctx, `DELETE FROM tg_autorenew WHERE email=?`, email)
 		return err
 	}
-	var stars int64
+	var stars, price int64
 	var seller, status string
-	if err := s.ro.QueryRowContext(ctx, `SELECT price_stars,seller,status FROM products WHERE id=?`, productID).Scan(&stars, &seller, &status); err != nil || seller != "" || status != "published" {
+	if err := s.ro.QueryRowContext(ctx, `SELECT price_stars,price,seller,status FROM products WHERE id=?`, productID).Scan(&stars, &price, &seller, &status); err != nil || status != "published" {
 		return ErrNotFound
 	}
-	if stars <= 0 {
-		return ErrNotForStars
+	if price <= 0 && (stars <= 0 || seller != "") {
+		return ErrNotForStars // nothing a wallet can pay
 	}
 	_, err := s.db.ExecContext(ctx, `INSERT INTO tg_autorenew(email,chat_id,product_id) VALUES(?,?,?)
 ON CONFLICT(email) DO UPDATE SET chat_id=excluded.chat_id, product_id=excluded.product_id, last_note_unix=0`, email, chat, productID)
@@ -107,20 +108,48 @@ func (s *Store) AutoRenewOnce(ctx context.Context) int {
 			continue
 		}
 		_, _ = s.db.ExecContext(ctx, `UPDATE tg_autorenew SET last_try_unix=? WHERE email=?`, now, it.email)
-		_, bal, err := s.WalletPay(ctx, it.chat, it.product, it.email)
-		var name string
-		_ = s.ro.QueryRowContext(ctx, `SELECT name FROM products WHERE id=?`, it.product).Scan(&name)
+		var name, seller string
+		var price, stars int64
+		_ = s.ro.QueryRowContext(ctx, `SELECT name,seller,price,price_stars FROM products WHERE id=?`, it.product).Scan(&name, &seller, &price, &stars)
+		// Toman wallet first (the seller's), Telegram Stars for the owner's
+		// Stars products when the toman balance does not cover it.
+		unit := "تومان"
+		var bal int64
+		var err error
+		if price > 0 && (s.TomanBalance(ctx, seller, it.chat) >= price || stars <= 0 || seller != "") {
+			_, bal, err = s.TomanPay(ctx, it.chat, it.product, it.email)
+		} else {
+			unit = "⭐"
+			_, bal, err = s.WalletPay(ctx, it.chat, it.product, it.email)
+		}
 		switch {
 		case err == nil:
 			done++
-			s.tell(ctx, it.chat, fmt.Sprintf("🔁 سرویس <b>%s</b> خودکار با «%s» تمدید شد.\n💰 موجودی کیف پول: %d⭐", it.email, name, bal))
+			s.tellFrom(ctx, seller, it.chat, fmt.Sprintf("🔁 سرویس <b>%s</b> خودکار با «%s» تمدید شد.\n💰 موجودی کیف پول: %s %s", it.email, name, strconv.FormatInt(bal, 10), unit))
 			_, _ = s.db.ExecContext(ctx, `INSERT INTO events(unix,node_id,email,kind) VALUES(?,?,?,?)`, now, "", it.email, "autorenew")
 		case now-it.noted >= 24*3600:
 			_, _ = s.db.ExecContext(ctx, `UPDATE tg_autorenew SET last_note_unix=? WHERE email=?`, now, it.email)
-			s.tell(ctx, it.chat, fmt.Sprintf("⚠️ تمدید خودکار سرویس <b>%s</b> انجام نشد: موجودی کیف پول کافی نیست (موجودی: %d⭐). کیف پول را شارژ کنید تا خودکار تمدید شود.", it.email, bal))
+			s.tellFrom(ctx, seller, it.chat, fmt.Sprintf("⚠️ تمدید خودکار سرویس <b>%s</b> انجام نشد: موجودی کیف پول کافی نیست (موجودی: %s %s). کیف پول را شارژ کنید تا خودکار تمدید شود.", it.email, strconv.FormatInt(bal, 10), unit))
 		}
 	}
 	return done
+}
+
+// sellerNotify sends from a reseller's own bot (main sets it).
+var sellerNotify func(ctx context.Context, seller string, chat int64, text string) bool
+
+// SetSellerNotify sets how messages go out through a reseller's own bot;
+// it returns false when that bot is not running.
+func SetSellerNotify(f func(ctx context.Context, seller string, chat int64, text string) bool) {
+	sellerNotify = f
+}
+
+// tellFrom messages a customer from the seller's bot, else the main bot.
+func (s *Store) tellFrom(ctx context.Context, seller string, chat int64, text string) {
+	if seller != "" && sellerNotify != nil && sellerNotify(ctx, seller, chat, text) {
+		return
+	}
+	s.tell(ctx, chat, text)
 }
 
 func (s *Store) tell(ctx context.Context, chat int64, text string) {

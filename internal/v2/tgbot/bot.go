@@ -26,8 +26,12 @@ type Bot struct {
 	API     API
 	Owners  map[int64]bool
 	SubBase string // public base URL for /sub/<token>
-	Logf    func(string, ...any)
-	Now     func() time.Time
+	// Seller is "" for the panel's main bot; a reseller's own bot sells only
+	// that reseller's catalog, to its card and toman wallet, and shows only
+	// that reseller's clients. It has no owner menu (Owners is empty).
+	Seller string
+	Logf   func(string, ...any)
+	Now    func() time.Time
 
 	mu         sync.Mutex
 	awaiting   map[int64]string   // chat -> expected input: "support" | "link" | owner prompts
@@ -93,13 +97,15 @@ func (b *Bot) init() {
 // Run long-polls until ctx ends, and runs the background announcers.
 func (b *Bot) Run(ctx context.Context) {
 	b.init()
-	b.Store.TgFinishInterrupted(ctx)
-	if b.Store.Setting(ctx, "tg_started") == "" {
-		b.Store.MarkAllOrdersAnnounced(ctx) // first start: do not replay history
-		_ = b.Store.SetSetting(ctx, "tg_started", "1")
-	}
-	if name, err := b.API.Me(ctx); err == nil && name != "" {
-		_ = b.Store.SetSetting(ctx, "tg_username", name)
+	if b.Seller == "" { // the panel's main bot keeps the shared state
+		b.Store.TgFinishInterrupted(ctx)
+		if b.Store.Setting(ctx, "tg_started") == "" {
+			b.Store.MarkAllOrdersAnnounced(ctx) // first start: do not replay history
+			_ = b.Store.SetSetting(ctx, "tg_started", "1")
+		}
+		if name, err := b.API.Me(ctx); err == nil && name != "" {
+			_ = b.Store.SetSetting(ctx, "tg_username", name)
+		}
 	}
 	_ = b.API.SetCommands(ctx, 0, [][2]string{{"start", "🏠 منوی اصلی"}, {"my", "📦 سرویس‌های من"}, {"buy", "🛍 خرید اشتراک"}, {"help", "📚 آموزش اتصال"}, {"status", "🌐 وضعیت سرورها"}, {"support", "💬 پشتیبانی"}})
 	for id := range b.Owners {
@@ -140,6 +146,12 @@ func (b *Bot) background(ctx context.Context) {
 // Tick announces new orders and deliveries, node changes and the daily report.
 func (b *Bot) Tick(ctx context.Context) {
 	b.init()
+	if b.Seller != "" {
+		// A reseller's own bot: its orders and its customers' notices only.
+		b.announceOrders(ctx)
+		b.notifyClients(ctx)
+		return
+	}
 	b.syncMenuButton(ctx)
 	b.Store.ExpireStarsInvoices(ctx)
 	b.announceOrders(ctx)
@@ -172,6 +184,27 @@ func (b *Bot) toOwners(ctx context.Context, text string, kb *Keyboard) map[int64
 }
 
 func (b *Bot) owner() hubcore.Principal { return hubcore.Principal{User: "telegram", Role: "owner"} }
+
+// handles reports whether this bot speaks for a seller's orders: a
+// reseller's own bot for its orders, the main bot for the owner's and for
+// resellers without a running bot of their own.
+func (b *Bot) handles(seller string) bool {
+	if b.Seller != "" {
+		return seller == b.Seller
+	}
+	return seller == "" || !hubcore.RepBotRunning(seller)
+}
+
+// sells reports whether this bot sells a product.
+func (b *Bot) sells(p hubcore.Product) bool { return p.Seller == b.Seller }
+
+// clients lists the services a chat sees in this bot.
+func (b *Bot) clients(ctx context.Context, chat int64) ([]string, error) {
+	if b.Seller == "" {
+		return b.Store.TgClients(ctx, chat)
+	}
+	return b.Store.TgClientsOf(ctx, chat, b.Seller)
+}
 
 // Handle processes one update.
 func (b *Bot) Handle(ctx context.Context, u Update) {
@@ -259,7 +292,7 @@ func (b *Bot) onMessage(ctx context.Context, m *Message) {
 		}
 		return
 	}
-	if rep, role := b.Store.TgRepRole(ctx, chat); rep != "" {
+	if rep, role := b.Store.TgRepRole(ctx, chat); rep != "" && (b.Seller == "" || rep == b.Seller) {
 		if b.repMessage(ctx, chat, rep, role, text) {
 			return
 		}
@@ -301,6 +334,11 @@ func (b *Bot) onMessage(ctx context.Context, m *Message) {
 			return
 		}
 		b.ticket(ctx, chat, name, m.From.Username, arg)
+		return
+	}
+	if what := b.peekAwait(chat); what == "topamt" && text != "" && !strings.HasPrefix(text, "/") {
+		b.takeAwait(chat)
+		b.startTopup(ctx, chat, text)
 		return
 	}
 	if what := b.peekAwait(chat); strings.HasPrefix(what, "coupon:") && text != "" && !strings.HasPrefix(text, "/") {
@@ -367,7 +405,7 @@ func (b *Bot) menu(ctx context.Context, chat int64) {
 	} else {
 		welcome = esc(welcome)
 	}
-	if emails, _ := b.Store.TgClients(ctx, chat); len(emails) > 0 {
+	if emails, _ := b.clients(ctx, chat); len(emails) > 0 {
 		var lines []string
 		for _, e := range emails {
 			if c, err := b.Store.ClientByEmail(ctx, e); err == nil {
@@ -442,8 +480,8 @@ func (b *Bot) shop(ctx context.Context, chat int64) {
 	kb := &Keyboard{}
 	var lines []string
 	for _, p := range all {
-		if p.Seller != "" {
-			continue // the bot sells the owner's catalog
+		if !b.sells(p) {
+			continue // each bot sells its own seller's catalog
 		}
 		size := "نامحدود"
 		if p.Plan == "volume" {
@@ -499,7 +537,7 @@ func (b *Bot) buy(ctx context.Context, chat int64, productID, renew string) {
 }
 
 func (b *Bot) mine(ctx context.Context, chat int64) {
-	emails, err := b.Store.TgClients(ctx, chat)
+	emails, err := b.clients(ctx, chat)
 	if err != nil || len(emails) == 0 {
 		b.send(ctx, chat, "📦 <b>سرویس‌های من</b>\n"+line+"\nهنوز سرویسی به این حساب وصل نیست.\n\n• برای خرید، «🛍 خرید اشتراک» را بزنید.\n• اگر سرویس دارید، «🔗 افزودن با لینک» را بزنید و لینک اشتراک را بفرستید.", &Keyboard{Rows: [][]Button{
 			row(cbBtn("🛍 خرید اشتراک", "shop"), cbBtn("🔗 افزودن با لینک", "link")), row(cbBtn("« منوی اصلی", "home"))}})
@@ -527,7 +565,7 @@ func (b *Bot) renewButtons(ctx context.Context, chat int64, email string) [][]Bu
 	var rows [][]Button
 	n := 0
 	for _, p := range all {
-		if p.Seller == "" && n < 3 {
+		if b.sells(p) && n < 3 {
 			rows = append(rows, b.buyButtons(ctx, chat, p, email)...)
 			n++
 		}
@@ -601,7 +639,7 @@ func (b *Bot) ticket(ctx context.Context, chat int64, name, username, text strin
 	if username != "" {
 		who += " (@" + esc(username) + ")"
 	}
-	emails, _ := b.Store.TgClients(ctx, chat)
+	emails, _ := b.clients(ctx, chat)
 	msgs := b.toOwners(ctx, fmt.Sprintf("💬 تیکت #%d از %s\nسرویس‌ها: %s\n\n%s\n\n<i>برای پاسخ، روی همین پیام Reply کنید.</i>",
 		id, who, esc(strings.Join(emails, ", ")), esc(text)), nil)
 	for owner, mid := range msgs {
@@ -712,6 +750,18 @@ func (b *Bot) onCallback(ctx context.Context, q *CallbackQuery) {
 		b.invite(ctx, chat)
 	case "wallet":
 		b.wallet(ctx, chat)
+	case "topup":
+		b.askTopup(ctx, chat)
+	case "tamt":
+		b.takeAwait(chat)
+		b.startTopup(ctx, chat, rest)
+	case "tok", "tno":
+		b.decideTopup(ctx, chat, rest, verb == "tok")
+	case "tpay":
+		pid, email, _ := strings.Cut(rest, ":")
+		if email == "" || b.ownsClient(ctx, chat, email) {
+			b.payToman(ctx, chat, pid, email)
+		}
 	case "srf":
 		if b.Owners[chat] {
 			id, _ := strconv.ParseInt(rest, 10, 64)
@@ -763,7 +813,7 @@ func (b *Bot) onCallback(ctx context.Context, q *CallbackQuery) {
 }
 
 func (b *Bot) ownsClient(ctx context.Context, chat int64, email string) bool {
-	list, _ := b.Store.TgClients(ctx, chat)
+	list, _ := b.clients(ctx, chat)
 	for _, e := range list {
 		if e == email {
 			return true
@@ -883,7 +933,10 @@ func (b *Bot) announceOrders(ctx context.Context) {
 	if news, err := b.Store.OrdersToAnnounce(ctx); err == nil {
 		cardOn := b.cardOn(ctx)
 		for _, o := range news {
-			if cardOn && o.Seller == "" && !o.HasReceipt && o.Amount > 0 && strings.HasPrefix(o.Buyer, "tg:") {
+			if !b.handles(o.Seller) {
+				continue // another bot (the reseller's own) announces it
+			}
+			if cardOn && o.Seller == b.Seller && !o.HasReceipt && o.Amount > 0 && strings.HasPrefix(o.Buyer, "tg:") {
 				continue // announced with the receipt photo
 			}
 			if o.Seller != "" {
@@ -899,6 +952,9 @@ func (b *Bot) announceOrders(ctx context.Context) {
 	}
 	if done, err := b.Store.DeliveriesToAnnounce(ctx); err == nil {
 		for _, o := range done {
+			if !b.handles(o.Seller) {
+				continue
+			}
 			chat, ok := hubcore.TgChatOfBuyer(o.Buyer)
 			if ok {
 				if o.Status == "fulfilled" {

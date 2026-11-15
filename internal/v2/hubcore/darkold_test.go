@@ -46,6 +46,15 @@ func darkOldFixture(t *testing.T, path string) {
 		`INSERT INTO commerce_orders VALUES('o1','u3',30,'provisioned_waiting_activation')`,
 		`INSERT INTO restore_subscriptions(id,public_token,legacy_url,legacy_host,legacy_path,core_email,legacy_upload,legacy_download,legacy_total,legacy_expire,enabled,created_at) VALUES('rs1','x','https://hex.example.info:2096/sub/00lb0xrdtbgqxvk5','hex.example.info','/sub/00lb0xrdtbgqxvk5','r1',10,20,53687091200,1794601800000,1,1700000000)`,
 		`INSERT INTO restore_usage(restore_id,scope,up,down) VALUES('rs1','local',5,5)`,
+		`CREATE TABLE commerce_gateways(id TEXT, owner TEXT, label TEXT, kind TEXT, enabled INTEGER, instructions TEXT, plugin TEXT, secret_enc TEXT, updated_at REAL, card_number TEXT, card_holder TEXT, bank_name TEXT)`,
+		`INSERT INTO commerce_gateways VALUES('g1','ali','card','manual',1,'','','',1,'6219-8610-1234-5678','Ali R','Saman')`,
+		`INSERT INTO export_bot_tokens VALUES('ali','123456789:AAbbccddeeffgghhiijjkkllmmnnooppqq',1,777,'alibot'),('boss','987654321:AAbbccddeeffgghhiijjkkllmmnnooppqq',1,1,'bossbot')`,
+		`CREATE TABLE customer_wallets(owner TEXT, telegram_id INTEGER, currency TEXT, balance_minor INTEGER, updated_at REAL)`,
+		`INSERT INTO customer_wallets VALUES('ali',12345,'IRT',250000,1),('ali',555,'IRT',0,1)`,
+		`CREATE TABLE commerce_products(id TEXT, owner TEXT, name TEXT, description TEXT, kind TEXT, active INTEGER, visible INTEGER, created_at REAL, updated_at REAL, category TEXT)`,
+		`INSERT INTO commerce_products VALUES('p1','ali','Ali Plans','','volume',1,1,1,1,'General')`,
+		`CREATE TABLE commerce_prices(id TEXT, owner TEXT, product_id TEXT, label TEXT, price_minor INTEGER, currency TEXT, duration_days INTEGER, volume_bytes INTEGER, unlimited_units INTEGER, device_limit INTEGER, inbound_ids TEXT, active INTEGER, created_at REAL, updated_at REAL, ip_limit INTEGER, hwid_limit INTEGER, activation_mode TEXT)`,
+		`INSERT INTO commerce_prices VALUES('pr1','ali','p1','10 GB / 30D',38000,'IRT',30,10737418240,0,1,'[]',1,1,1,2,0,'first_connection')`,
 	} {
 		if _, err := db.Exec(q); err != nil {
 			t.Fatal(q[:40], err)
@@ -111,6 +120,22 @@ func TestImportDarkOld(t *testing.T) {
 	}
 	if _, err := s.Login(ctx, "ali", "wrong"); err == nil {
 		t.Fatal("a wrong password must fail")
+	}
+	if res.Cards != 1 || res.Bots != 1 || res.Wallets != 1 || res.Products != 1 {
+		t.Fatalf("shop: %+v", res)
+	}
+	if c := s.CardFor(ctx, "ali"); c.Number != "6219861012345678" || c.Bank != "Saman" {
+		t.Fatalf("card %+v", c)
+	}
+	if b := s.RepBotOf(ctx, "ali"); !b.HasToken || !b.Enabled {
+		t.Fatalf("bot %+v", b)
+	}
+	if bal := s.TomanBalance(ctx, "ali", 12345); bal != 250000 {
+		t.Fatal("wallet", bal)
+	}
+	prods, _ := s.Products(ctx, Principal{Role: "owner"}, false)
+	if len(prods) != 1 || prods[0].Seller != "ali" || prods[0].GB != 10 || prods[0].Price != 38000 || !prods[0].FirstUse || prods[0].Status != "published" {
+		t.Fatalf("products %+v", prods)
 	}
 	if again, _ := s.ImportDarkOld(ctx, DarkOldOptions{Inbounds: []string{"main"}, DryRun: true}); again.Clients != 0 {
 		t.Fatal("a second import must not duplicate clients")
