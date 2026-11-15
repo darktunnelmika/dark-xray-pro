@@ -546,3 +546,29 @@ a.name:hover { color: var(--cyan); }
   .stat .v { font-size: 24px; }
 }
 .pm-item.bad .dot { background: var(--bad); box-shadow: 0 0 8px var(--bad); }
+
+/* Client profile card */
+.hero { display: grid; gap: 18px; padding: 20px 22px; margin-block-end: var(--gap); position: relative; overflow: hidden; }
+.hero::before { content: ""; position: absolute; inset: -40% -10% auto auto; inline-size: 340px; block-size: 340px; border-radius: 50%; pointer-events: none;
+  background: radial-gradient(circle, color-mix(in oklab, var(--violet) 22%, transparent), transparent 65%); }
+.hero-id { display: flex; align-items: center; gap: 14px; position: relative; }
+.hero-id h1 { margin: 0 0 4px; font-size: 24px; }
+.hero-id .back { padding: 6px 12px; }
+.avatar.lg { inline-size: 56px; block-size: 56px; font-size: 19px; border-radius: 18px; }
+.av-wrap:has(.avatar.lg) .dot { inline-size: 13px; block-size: 13px; inset-block-end: -2px; inset-inline-end: -2px; }
+.hero-rings { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); position: relative; }
+.ring { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 14px; background: var(--surface-2); border: 1px solid var(--glass-line); }
+.ring-box { position: relative; inline-size: 64px; block-size: 64px; flex: none; display: grid; place-items: center; }
+.ring-box b { position: absolute; font-size: 14px; font-weight: 800; }
+.ring-svg { position: absolute; inset: 0; inline-size: 100%; block-size: 100%; transform: rotate(-90deg); }
+.ring-bg { fill: none; stroke: color-mix(in oklab, var(--muted) 18%, transparent); stroke-width: 7; }
+.ring-fg { fill: none; stroke: var(--cyan); stroke-width: 7; stroke-linecap: round; filter: drop-shadow(0 0 5px color-mix(in oklab, var(--cyan) 60%, transparent)); }
+.ring-fg.time { stroke: var(--violet); filter: drop-shadow(0 0 5px color-mix(in oklab, var(--violet) 60%, transparent)); }
+.ring-fg.warn { stroke: var(--warn); } .ring-fg.bad { stroke: var(--bad); }
+[dir="rtl"] .ring-svg { transform: rotate(-90deg) scaleY(-1); }
+.ring-label { font-weight: 700; font-size: 13.5px; }
+.hero-actions { display: flex; flex-wrap: wrap; gap: 8px; position: relative; }
+.detail-wide { margin-block-end: var(--gap); }
+.detail-cols { columns: 2 420px; column-gap: var(--gap); }
+.detail-cols > .card { break-inside: avoid; margin-block-end: var(--gap); display: block; }
+.detail-cols > .card.form > * + * { margin-block-start: 10px; }

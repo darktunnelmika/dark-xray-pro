@@ -604,6 +604,15 @@ async function viewDashboard() {
     h("div", { class: "list nodes-grid" }, (nodes || []).map((n) => nodeCard(n))));
 }
 
+// ring draws a small donut with a value in the middle.
+function ring(share, value, label, sub, time = false, plain = false) {
+  const r = 30, c = 2 * Math.PI * r, p = Math.max(0, Math.min(1, share || 0));
+  const svg = svgEl("svg", { viewBox: "0 0 76 76", class: "ring-svg", "aria-hidden": "true" });
+  svg.append(svgEl("circle", { cx: 38, cy: 38, r, class: "ring-bg" }));
+  if (!plain) svg.append(svgEl("circle", { cx: 38, cy: 38, r, class: `ring-fg ${time ? "time" : ""} ${time ? (p < .1 ? "bad" : p < .25 ? "warn" : "") : (p > .9 ? "bad" : p > .75 ? "warn" : "")}`, "stroke-dasharray": `${c * p} ${c}` }));
+  return h("div", { class: "ring" }, h("div", { class: "ring-box" }, svg, h("b", {}, value)), h("div", {}, h("div", { class: "ring-label" }, label), h("div", { class: "muted small" }, sub)));
+}
+
 function rate(bps) { return bytes(bps).replace(/\u2069$/, "/s\u2069"); }
 function dur(sec) {
   const d = Math.floor(sec / 86400), hh = Math.floor((sec % 86400) / 3600);
@@ -1214,21 +1223,35 @@ async function viewClient() {
   const url = c.SubURL || "";
   const fmt = (label, u) => h("div", { class: "row" }, h("span", { class: "badge" }, label), h("code", { style: "flex:1" }, u), h("button", { type: "button", class: "ghost", onclick: () => copy(u) }, t("copy")));
   const sum30 = days.reduce((a, d) => a + d.Up + d.Down, 0);
-  return h("div", {},
-    h("div", { class: "row" }, h("a", { class: "btn ghost", href: "#/clients" }, "‹"), h("span", { class: `dot ${c.Online ? "on" : ""}` }), h("h1", {}, c.Email),
-      h("span", { class: `badge ${cls}` }, status),
-      h("span", { class: "spacer" }),
-      h("button", { onclick: () => clientForm(c, inbounds, ctx) }, t("edit")),
+  const fa = lang === "fa";
+  const canQuick = me.role !== "rep";
+  const quick = async (body, msg) => { await guarded(() => api("POST", "/api/v2/admin/clients/bulk", { Emails: [c.Email], ...body })); toast(msg); route(); };
+  const volShare = c.VolumeBytes > 0 ? Math.min(1, used / c.VolumeBytes) : 0;
+  const totalDays = c.DurationSeconds ? c.DurationSeconds / 86400 : (left || 0);
+  const timeShare = left == null || !totalDays ? 1 : Math.max(0, Math.min(1, left / Math.max(totalDays, left)));
+  const hero = h("div", { class: "card hero" },
+    h("div", { class: "hero-id" }, h("a", { class: "btn ghost back", href: "#/clients", "aria-label": t("clients") }, fa ? "›" : "‹"),
+      h("span", { class: "av-wrap" }, avatar(c.Email, "lg"), h("span", { class: `dot ${c.Online ? "on" : ""}` })),
+      h("div", {}, h("h1", {}, c.Email),
+        h("div", { class: "row tight" }, h("span", { class: `badge ${cls}` }, status), c.Online ? h("span", { class: "badge good" }, t("online")) : null,
+          c.RepID ? h("span", { class: "badge" }, c.RepID) : null, c.Note ? h("span", { class: "muted small" }, c.Note) : null))),
+    h("div", { class: "hero-rings" },
+      ring(volShare, c.VolumeBytes > 0 ? `${fmtNum(Math.round(volShare * 100))}%` : "∞", t("used"), c.VolumeBytes > 0 ? `${bytes(used)} ${fa ? "از" : "/"} ${bytes(c.VolumeBytes)}` : bytes(used)),
+      ring(timeShare, left == null ? "∞" : fmtNum(left), t("timeLeft"), left == null ? (c.DurationSeconds ? t("notStarted") : t("noExpiry")) : t("daysLeft", { n: fmtNum(left) }), true),
+      ring(0, c.MaxIPs ? fmtNum(c.MaxIPs) : "∞", t("maxIPs").split(" (")[0], `${t("last30Traffic")}: ${bytes(sum30)}`, false, true)),
+    h("div", { class: "hero-actions" },
+      url ? h("button", { class: "primary", onclick: () => copy(url) }, fa ? "کپی لینک اشتراک" : "Copy subscription link") : null,
+      canQuick ? h("button", { onclick: () => quick({ AddDays: 30, Enable: true }, fa ? "۳۰ روز اضافه شد" : "30 days added") }, fa ? "+۳۰ روز" : "+30 days") : null,
+      canQuick ? h("button", { onclick: () => quick({ AddGB: 10, Enable: true }, fa ? "۱۰ گیگ اضافه شد" : "10 GB added") }, fa ? "+۱۰ گیگ" : "+10 GB") : null,
+      canQuick ? h("button", { class: "ghost", onclick: () => quick({ Enable: !c.Enabled }, c.Enabled ? (fa ? "غیرفعال شد" : "Disabled") : (fa ? "فعال شد" : "Enabled")) }, c.Enabled ? (fa ? "غیرفعال کردن" : "Disable") : (fa ? "فعال کردن" : "Enable")) : null,
+      h("button", { class: "ghost", onclick: () => clientForm(c, inbounds, ctx) }, t("edit")),
       me.role === "rep" && me.policy && !me.policy.CanDelete ? null : h("button", { class: "ghost danger", onclick: async () => {
         if (await confirmAction(t("confirmDelete", { x: c.Email }))) { await guarded(() => api("DELETE", `/api/v2/admin/clients/${encodeURIComponent(c.Email)}`)); location.hash = "#/clients"; }
-      } }, t("delete"))),
-    h("div", { class: "grid" },
-      stat(t("used"), bytes(used), c.VolumeBytes > 0 ? `${t("of")} ${bytes(c.VolumeBytes)} · ${fmtNum(Math.min(100, (used / c.VolumeBytes) * 100))}%` : t("unlimited")),
-      stat(t("timeLeft"), left == null ? (c.DurationSeconds ? t("notStarted") : t("noExpiry")) : t("daysLeft", { n: fmtNum(left) })),
-      stat(t("maxIPs").split(" (")[0], c.MaxIPs ? fmtNum(c.MaxIPs) : "∞"),
-      stat(t("last30Traffic"), bytes(sum30))),
-    h("div", { class: "dash" },
-      usageCard(c.Email, days),
+      } }, t("delete"))));
+  return h("div", {},
+    hero,
+    h("div", { class: "detail-wide" }, usageCard(c.Email, days)),
+    h("div", { class: "detail-cols" },
       h("div", { class: "card form" }, h("h2", {}, t("subscription")),
         h("img", { class: "qr", alt: "QR", src: `/api/v2/admin/clients/${encodeURIComponent(c.Email)}/qr.png` }),
         fmt("Auto", url), fmt("sing-box", `${url}?format=singbox`), fmt("Clash", `${url}?format=clash`), fmt("Xray JSON", `${url}?format=xray`)),
