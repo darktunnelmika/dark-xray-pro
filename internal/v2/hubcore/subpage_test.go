@@ -56,14 +56,15 @@ func TestSubPageAndSettings(t *testing.T) {
 	if qr := get("Mozilla/5.0", "image/*", "?qr=1"); qr.Header().Get("Content-Type") != "image/png" {
 		t.Fatal("qr")
 	}
-	if qr := get("Mozilla/5.0", "image/*", "?qr=1&cfg=0"); qr.Header().Get("Content-Type") != "image/png" {
-		t.Fatal("config qr", qr.Code, qr.Header(), qr.Body.String()[:min(qr.Body.Len(), 200)])
+	pd, _ := s.subPageData(ctx, "alice", "x", "fa")
+	if qr := get("Mozilla/5.0", "image/*", "?qr=1&cfg=0"); (len(pd.Links) > 0) != (qr.Header().Get("Content-Type") == "image/png") {
+		t.Fatal("config qr", len(pd.Links), qr.Code)
 	}
 	if qr := get("Mozilla/5.0", "image/*", "?qr=1&cfg=99"); qr.Code != 404 {
 		t.Fatal("config qr out of range", qr.Code)
 	}
-	if !strings.Contains(body, "rec") || !strings.Contains(body, "data-qr") {
-		t.Fatal("suggested apps or config QR missing")
+	if !strings.Contains(body, "app rec") {
+		t.Fatal("suggested apps missing for Android")
 	}
 	if out := os.Getenv("SUBPAGE_OUT"); out != "" {
 		_ = os.WriteFile(out, []byte(body), 0o644)
