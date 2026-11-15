@@ -39,7 +39,7 @@ func darkOldFixture(t *testing.T, path string) {
 		`INSERT INTO owners(id,volume_credit_bytes,unlimited_credit) VALUES('boss',0,0),('ali',107374182400,5),('gone',10737418240,3)`,
 		`INSERT INTO owner_profiles(id,name) VALUES('ali','Ali Shop')`,
 		`INSERT INTO api_admins VALUES('boss','owner','` + hash + `','{}',0),('ali','reseller','` + hash + `','{}',0),('gone','reseller','` + hash + `','{}',0)`,
-		`INSERT INTO clients(id,owner,limit_ip,quota_bytes,expires_at) VALUES('u1','ali',2,53687091200,1900000000),('u2','boss',1,0,0),('u3','ali',1,1073741824,0),('u4','ali',1,21474836480,1600000000),('g1','gone',1,1073741824,0)`,
+		`INSERT INTO clients(id,owner,limit_ip,quota_bytes,expires_at,used_bytes) VALUES('u1','ali',2,53687091200,1900000000,0),('u2','boss',1,0,0,0),('u3','ali',1,1073741824,0,0),('u4','ali',1,21474836480,1600000000,6442450944),('g1','gone',1,1073741824,0,0)`,
 		`INSERT INTO managed_clients(email,public_token,state,created_at,updated_at,external_disabled) VALUES('u1','-11QabcdefghijklmnopqrstuvwxyzABCDEFGHIJKLM','applied',1700000000,1700000000,0),('u2','tok2-abcdefghijklmnopqrstuvwxyzABCDEFGHIJKL','applied',1700000001,1700000001,1),('u3','tok3-abcdefghijklmnopqrstuvwxyzABCDEFGHIJKL','applied',1700000002,1700000002,0),('u4','tok4-abcdefghijklmnopqrstuvwxyzABCDEFGHIJKL','applied',1700000003,1700000003,0),('g1','tokg-abcdefghijklmnopqrstuvwxyzABCDEFGHIJKL','applied',1700000004,1700000004,0)`,
 		`INSERT INTO core_clients VALUES('u1','{"id":"11111111-2222-3333-4444-555555555555","password":"pw1","enable":true,"group":"vip","comment":"Ali friend","tgId":"12345","limitHwid":2}','[]',100,200),('u2','{"id":"22222222-2222-3333-4444-555555555555","enable":true}','[]',0,0),('u3','{"id":"33333333-2222-3333-4444-555555555555","enable":true}','[]',0,0),('r1','{"id":"44444444-2222-3333-4444-555555555555","enable":true}','[]',0,0),('u4','{"id":"55555555-2222-3333-4444-555555555555","enable":false}','[]',2147483648,3221225472),('g1','{"id":"66666666-2222-3333-4444-555555555555","enable":true}','[]',0,0)`,
 		`INSERT INTO unlimited_entitlements VALUES('u2','boss','{"segments":[[1,2,1]],"units":1}',1,0)`,
@@ -156,15 +156,16 @@ func TestImportDarkOld(t *testing.T) {
 		prods[0].Category != "VIP" || !prods[0].NoRenew || prods[0].PerBuyer != 2 {
 		t.Fatalf("products %+v", prods)
 	}
-	// Credit: capacity 100 GB − 71 GB in use + 15 GB unused by the expired u4.
+	// Credit: capacity 100 GB − 71 GB in use + 14 GB unused by the expired u4
+	// (the old panel metered 6 GB, more than its local core's 5 GB).
 	reps, _ := s.Reps(ctx)
-	if len(reps) != 1 || reps[0].ID != "ali" || reps[0].VolumeCredit != 44<<30 || reps[0].UnlimitedUnits != 0 {
+	if len(reps) != 1 || reps[0].ID != "ali" || reps[0].VolumeCredit != 43<<30 || reps[0].UnlimitedUnits != 0 {
 		t.Fatalf("credit %+v", reps)
 	}
 	if reps[0].UsedBytes != 10<<30 {
 		t.Fatal("lifetime usage must include the old panel's deleted clients", reps[0].UsedBytes)
 	}
-	if u4 := byEmail["u4"]; u4.VolumeBytes != 5<<30 || !u4.Enabled {
+	if u4 := byEmail["u4"]; u4.VolumeBytes != 6<<30 || !u4.Enabled {
 		t.Fatalf("expired u4 keeps only what it used: %+v", u4)
 	}
 	if _, ok := byEmail["g1"]; ok {
@@ -173,7 +174,7 @@ func TestImportDarkOld(t *testing.T) {
 	if _, err := s.Login(ctx, "gone", "rep-pass-123"); err == nil {
 		t.Fatal("a left-behind reseller must not get a login")
 	}
-	if len(res.Credit) != 1 || res.Credit[0].Expired != 15<<30 || res.Credit[0].OldUnits != 5 || res.LedgerRows != 1 || res.WalletRows != 2 {
+	if len(res.Credit) != 1 || res.Credit[0].Expired != 14<<30 || res.Credit[0].OldUnits != 5 || res.LedgerRows != 1 || res.WalletRows != 2 {
 		t.Fatalf("history %+v", res)
 	}
 	led, _ := s.Ledger(ctx, "ali", 0, 50)

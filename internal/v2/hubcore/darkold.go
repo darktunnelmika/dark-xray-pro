@@ -426,16 +426,22 @@ FROM api_admins a LEFT JOIN owner_profiles p ON p.id=a.id LEFT JOIN owners o ON 
 		unlimited, waitDays              int64
 	}
 	var list []oc
-	rows, err = old.QueryContext(ctx, `SELECT c.id,c.owner,c.limit_ip,c.quota_bytes,c.expires_at,m.public_token,m.state,m.external_disabled,m.created_at,k.body,k.up,k.down
+	rows, err = old.QueryContext(ctx, `SELECT c.id,c.owner,c.limit_ip,c.quota_bytes,c.expires_at,m.public_token,m.state,m.external_disabled,m.created_at,k.body,k.up,k.down,COALESCE(c.used_bytes,0)
 FROM clients c JOIN managed_clients m ON m.email=c.id JOIN core_clients k ON k.email=c.id ORDER BY m.created_at`)
 	if err != nil {
 		return rep, err
 	}
 	for rows.Next() {
 		var c oc
-		if err := rows.Scan(&c.email, &c.owner, &c.limitIP, &c.quota, &c.expires, &c.token, &c.state, &c.extDisabled, &c.created, &c.body, &c.up, &c.down); err != nil {
+		var used int64
+		if err := rows.Scan(&c.email, &c.owner, &c.limitIP, &c.quota, &c.expires, &c.token, &c.state, &c.extDisabled, &c.created, &c.body, &c.up, &c.down, &used); err != nil {
 			rows.Close()
 			return rep, err
+		}
+		// clients.used_bytes is what the old panel metered across every node
+		// (and enforced); core_clients only counts the local core.
+		if used > c.up+c.down {
+			c.down += used - c.up - c.down
 		}
 		list = append(list, c)
 	}
