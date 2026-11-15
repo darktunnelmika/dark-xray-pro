@@ -498,5 +498,19 @@ func (s *Store) ComposeInbound(ctx context.Context, p PresetRequest, routes []Ro
 		_ = s.DeleteInbound(ctx, p.Tag)
 		return err
 	}
+	if p.Preset == "template" {
+		// A hand-written inbound must pass Xray's own check on every node
+		// before it stays, so a mistake never takes a node down.
+		for _, r := range routes {
+			cfg, err := s.RenderNode(ctx, r.NodeID)
+			if err == nil {
+				err = s.testConfig(ctx, cfg)
+			}
+			if err != nil {
+				_ = s.DeleteInbound(ctx, p.Tag)
+				return fmt.Errorf("%w: node %s: %v", ErrInvalid, r.NodeID, err)
+			}
+		}
+	}
 	return nil
 }

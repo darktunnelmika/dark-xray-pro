@@ -590,3 +590,56 @@ func TestCustomStream(t *testing.T) {
 		}
 	}
 }
+
+func TestComposeFromTemplate(t *testing.T) {
+	s, _ := newStore(t)
+	seed(t, s)
+	ctx := context.Background()
+	route := func(port int) []Route {
+		return []Route{{NodeID: "de-1", DirectPort: port, Hosts: []Host{{Path: "direct", Enabled: true, Address: "1.2.3.4", Port: port}}}}
+	}
+	cases := []struct {
+		tag, tpl, want string
+	}{
+		{"t-kcp", `{"protocol":"vless","settings":{},"streamSettings":{"network":"kcp","security":"none","kcpSettings":{"mtu":1350,"header":{"type":"wechat-video"},"seed":"s3"}}}`, "headerType=wechat-video"},
+		{"t-http", `{"protocol":"vless","settings":{},"streamSettings":{"network":"tcp","security":"none","tcpSettings":{"header":{"type":"http","request":{"path":["/x"],"headers":{"Host":["a.com"]}}}}}}`, "headerType=http"},
+		{"t-tls", `{"protocol":"trojan","settings":{},"streamSettings":{"network":"ws","security":"tls","tlsSettings":{"serverName":"x.example.com","certificates":[{"dark_cert":"pending"}]},"wsSettings":{"path":"/w"}}}`, "allowInsecure=1"},
+		{"t-ss", `{"protocol":"shadowsocks","settings":{"method":"aes-256-gcm","network":"tcp,udp"}}`, "ss://"},
+	}
+	port := 30000
+	for _, c := range cases {
+		port++
+		if err := s.ComposeInbound(ctx, PresetRequest{Tag: c.tag, Preset: "template", Template: []byte(c.tpl), Meta: []byte(`{"remark":"T"}`)}, route(port)); err != nil {
+			t.Fatalf("%s: %v", c.tag, err)
+		}
+		cl, _ := s.Clients(ctx)
+		var bob Client
+		for _, x := range cl {
+			if x.Email == "bob" {
+				bob = x.Client
+			}
+		}
+		bob.Inbounds = append(bob.Inbounds, c.tag)
+		if err := s.PutClient(ctx, bob); err != nil {
+			t.Fatal(err)
+		}
+		links, _, err := s.Subscription(ctx, "bob")
+		found := false
+		for _, l := range links {
+			if strings.Contains(l, "#T") || strings.Contains(l, c.want) && !strings.Contains(l, "127.0.0.1") {
+				if strings.Contains(l, c.want) {
+					found = true
+				}
+			}
+		}
+		if err != nil || !found {
+			t.Fatalf("%s: link with %q missing in %v (%v)", c.tag, c.want, links, err)
+		}
+	}
+	if _, err := s.RenderNode(ctx, "de-1"); err != nil {
+		t.Fatal("render:", err)
+	}
+	if err := s.ComposeInbound(ctx, PresetRequest{Tag: "t-bad", Preset: "template", Template: []byte(`{"settings":{}}`)}, route(30100)); err == nil {
+		t.Fatal("a template without a protocol must be refused")
+	}
+}

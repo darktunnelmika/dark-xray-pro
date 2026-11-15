@@ -60,7 +60,7 @@ func outbounds(a Account, ins []Inbound, format string) ([]outbound, error) {
 				continue
 			}
 		case "shadowsocks":
-			if SS2022KeySize(t.Settings.Method) == 0 {
+			if !SSKnown(t.Settings.Method) {
 				continue
 			}
 		default:
@@ -163,9 +163,12 @@ func SingBox(a Account, ins []Inbound) ([]byte, error) {
 			ob["transport"] = tr
 		case "httpupgrade":
 			ob["transport"] = map[string]any{"type": "httpupgrade", "path": or(s.HTTPUpgrade.Path, "/"), "host": s.HTTPUpgrade.Host}
-		case "xhttp", "splithttp":
-			// sing-box has no xhttp transport; such endpoints stay link-only.
+		case "xhttp", "splithttp", "kcp":
+			// sing-box has no xhttp or mKCP transport; such endpoints stay link-only.
 			continue
+		}
+		if _, _, ok := s.tcpHTTP(); ok {
+			continue // TCP with HTTP obfuscation: link-only
 		}
 		list = append(list, ob)
 		tags = append(tags, o.tag)
@@ -217,8 +220,11 @@ func Clash(a Account, ins []Inbound) ([]byte, error) {
 	var names []string
 	for _, o := range obs {
 		s := o.t.Stream
-		if s.Network == "xhttp" || s.Network == "splithttp" || s.Network == "httpupgrade" {
+		if s.Network == "xhttp" || s.Network == "splithttp" || s.Network == "httpupgrade" || s.Network == "kcp" {
 			continue // not supported by mihomo; link-only
+		}
+		if _, _, ok := s.tcpHTTP(); ok {
+			continue // TCP with HTTP obfuscation: link-only
 		}
 		ctype := o.proto
 		switch ctype {

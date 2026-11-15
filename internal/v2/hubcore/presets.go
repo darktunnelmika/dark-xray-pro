@@ -39,6 +39,10 @@ type PresetRequest struct {
 	Endpoints []sub.Endpoint `json:"endpoints"`        // Direct and/or Tunnel addresses shown in subscriptions
 	Cert      string         `json:"cert"`             // TLS presets: stored certificate id; SNI is the domain
 	Stream    *StreamSpec    `json:"stream,omitempty"` // preset "custom": protocol, transport and security chosen separately
+	// preset "template": the full inbound as written in the panel's form
+	// (keys already made by POST /keys); Xray checks it on every node.
+	Template json.RawMessage `json:"template,omitempty"`
+	Meta     json.RawMessage `json:"meta,omitempty"`
 
 	selfSigned bool   // set by CreatePreset when it issued the certificate itself
 	selfPin    string // its SHA-256 fingerprint
@@ -322,6 +326,54 @@ func (s *Store) CreatePreset(ctx context.Context, p PresetRequest) error {
 		if err := s.ro.QueryRowContext(ctx, `SELECT 1 FROM certs WHERE id=?`, p.Cert).Scan(&x); err != nil {
 			return fmt.Errorf("%w: unknown certificate %q", ErrInvalid, p.Cert)
 		}
+	}
+	if p.Preset == "template" {
+		var t map[string]any
+		if json.Unmarshal(p.Template, &t) != nil || t["protocol"] == nil {
+			return fmt.Errorf("%w: the inbound form is incomplete", ErrInvalid)
+		}
+		t["port"] = p.Port
+		meta := p.Meta
+		if len(meta) == 0 {
+			meta = []byte("{}")
+		}
+		// TLS without a stored certificate: issue a self-signed one, as for
+		// Hysteria2; links then tell clients to skip CA checks.
+		if st, _ := t["streamSettings"].(map[string]any); st != nil && st["security"] == "tls" {
+			ts, _ := st["tlsSettings"].(map[string]any)
+			if ts == nil {
+				ts = map[string]any{}
+				st["tlsSettings"] = ts
+			}
+			certs, _ := ts["certificates"].([]any)
+			cur := ""
+			if len(certs) > 0 {
+				if c, ok := certs[0].(map[string]any); ok {
+					cur, _ = c["dark_cert"].(string)
+				}
+			}
+			if cur == "" || cur == "pending" {
+				name, _ := ts["serverName"].(string)
+				if name == "" {
+					name = "www.bing.com"
+					ts["serverName"] = name
+				}
+				id := p.Tag + "-self"
+				pin, err := s.SelfSignedCert(ctx, id, name)
+				if err != nil {
+					return err
+				}
+				ts["certificates"] = []any{map[string]any{"dark_cert": id}}
+				var m map[string]any
+				if json.Unmarshal(meta, &m) != nil || m == nil {
+					m = map[string]any{}
+				}
+				m["insecure"], m["pin_sha256"] = true, pin
+				meta, _ = json.Marshal(m)
+			}
+		}
+		tpl, _ := json.Marshal(t)
+		return s.PutInboundMeta(ctx, p.Tag, p.NodeID, tpl, meta, true)
 	}
 	tpl, meta, err := BuildPreset(p)
 	if err != nil {

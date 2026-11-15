@@ -2129,20 +2129,21 @@ function sniFinder({ nodes, node, onPick }) {
 // ---------- Inbound studio: one profile, many nodes, Direct/Tunnel/Swap per node ----------
 // The preset the HUB builds for the studio's choice.
 function profilePreset(p) {
-  return { xray: "custom", ss: "ss2022", proxy: p.proxy || "socks", fallback: "vless-tls-fallback" }[p.kind] || p.kind;
+  if (p.kit) return "template";
+  return { fallback: "vless-tls-fallback" }[p.kind] || p.kind;
 }
 function profileLabel(p) {
-  if (p.kind !== "xray") return profilePreset(p);
-  const s = p.stream;
-  return `${s.protocol.toUpperCase()} · ${s.network} · ${s.security}${s.vision ? " · Vision" : ""}`;
+  if (!p.kit) return profilePreset(p);
+  const t2 = p.kit.state().tpl, s = t2.streamSettings || {};
+  return [String(t2.protocol).toUpperCase(), s.network, s.security, t2.settings?.flow ? "Vision" : ""].filter(Boolean).join(" · ");
 }
 
 // Words of the inbound builder.
 const BUILDER = {
   fa: {
-    kinds: [["xray", "VLESS / VMess / Trojan", "پروتکل، انتقال و امنیت جدا"], ["ss", "Shadowsocks 2022", "ساده، مناسب تانل"], ["hysteria2", "Hysteria2", "QUIC، سریع روی شبکهٔ بد"],
-      ["tuic", "TUIC v5", "QUIC با کنترل ازدحام"], ["amneziawg", "AmneziaWG", "وایرگارد ضد DPI"], ["wireguard", "WireGuard", "VPN کامل"], ["mtproto", "MTProto", "پروکسی تلگرام"],
-      ["proxy", "SOCKS / HTTP", "پروکسی ساده با رمز"], ["dokodemo", "انتقال پورت", "ریلی به سرور دیگر"], ["fallback", "چندتایی روی یک پورت", "TLS + فال‌بک"]],
+    kinds: [["vless", "VLESS", "REALITY، TLS، CDN"], ["vmess", "VMess", "سازگار با برنامه‌های قدیمی"], ["trojan", "Trojan", "REALITY یا TLS"], ["shadowsocks", "Shadowsocks", "2022 یا کلاسیک"],
+      ["hysteria2", "Hysteria2", "QUIC، سریع روی شبکهٔ بد"], ["tuic", "TUIC v5", "QUIC با کنترل ازدحام"], ["amneziawg", "AmneziaWG", "وایرگارد ضد DPI"], ["wireguard", "WireGuard", "VPN کامل"],
+      ["mtproto", "MTProto", "پروکسی تلگرام"], ["socks", "SOCKS5", "پروکسی با رمز"], ["http", "HTTP", "پروکسی با رمز"], ["dokodemo", "انتقال پورت", "dokodemo-door / تانل"], ["fallback", "چندتایی روی یک پورت", "TLS + فال‌بک"]],
     quick: "قالب آماده:",
     templates: [["Reality + Vision (پیشنهادی)", { protocol: "vless", network: "tcp", security: "reality", vision: true }], ["Reality + gRPC", { protocol: "vless", network: "grpc", security: "reality" }],
       ["Reality + XHTTP", { protocol: "vless", network: "xhttp", security: "reality" }], ["CDN: WS + TLS", { protocol: "vless", network: "ws", security: "tls" }],
@@ -2166,9 +2167,9 @@ const BUILDER = {
       dokodemo: "هر چیزی که به این پورت برسد به مقصد فرستاده می‌شود؛ کاربر ندارد.", fallback: "یک پورت TLS برای VLESS Vision و سه مسیر WebSocket (VLESS، VMess، Trojan)؛ گواهی دامنه لازم است." },
   },
   en: {
-    kinds: [["xray", "VLESS / VMess / Trojan", "protocol, transport, security"], ["ss", "Shadowsocks 2022", "simple, good for tunnels"], ["hysteria2", "Hysteria2", "QUIC, fast on bad links"],
-      ["tuic", "TUIC v5", "QUIC with congestion control"], ["amneziawg", "AmneziaWG", "WireGuard against DPI"], ["wireguard", "WireGuard", "full VPN"], ["mtproto", "MTProto", "Telegram proxy"],
-      ["proxy", "SOCKS / HTTP", "plain proxy with a password"], ["dokodemo", "Port forward", "relay to another server"], ["fallback", "Several on one port", "TLS + fallbacks"]],
+    kinds: [["vless", "VLESS", "REALITY, TLS, CDN"], ["vmess", "VMess", "for older apps"], ["trojan", "Trojan", "REALITY or TLS"], ["shadowsocks", "Shadowsocks", "2022 or classic"],
+      ["hysteria2", "Hysteria2", "QUIC, fast on bad links"], ["tuic", "TUIC v5", "QUIC with congestion control"], ["amneziawg", "AmneziaWG", "WireGuard against DPI"], ["wireguard", "WireGuard", "full VPN"],
+      ["mtproto", "MTProto", "Telegram proxy"], ["socks", "SOCKS5", "proxy with a password"], ["http", "HTTP", "proxy with a password"], ["dokodemo", "Port forward", "dokodemo-door / tunnel"], ["fallback", "Several on one port", "TLS + fallbacks"]],
     quick: "Templates:",
     templates: [["Reality + Vision (recommended)", { protocol: "vless", network: "tcp", security: "reality", vision: true }], ["Reality + gRPC", { protocol: "vless", network: "grpc", security: "reality" }],
       ["Reality + XHTTP", { protocol: "vless", network: "xhttp", security: "reality" }], ["CDN: WS + TLS", { protocol: "vless", network: "ws", security: "tls" }],
@@ -2203,9 +2204,10 @@ async function inboundStudio(tag, ctx) {
     routes: {}, // nodeID -> {listen_ip, direct_port, tunnel_port, hosts}
     swaps: [], removedSwaps: [],
   };
-  const newHost = (path, node) => ({ path, enabled: true, remark: "", address: path === "direct" ? (node?.PublicIP || "") : "", port: 443,
+  const defPort = () => +(st.profile.kit?.state().tpl.port) || 443;
+  const newHost = (path, node) => ({ path, enabled: true, remark: "", address: path === "direct" ? (node?.PublicIP || "") : "", port: defPort(),
     sni: "", host: "", path_override: "", alpn: "", fingerprint: "", allow_insecure: false, exclude: [], fragment: false, mux: 0, _adv: false });
-  const newRoute = (node) => ({ listen_ip: "", direct_port: 443, tunnel_port: 0, hosts: [newHost("direct", node)] });
+  const newRoute = (node) => ({ listen_ip: "", direct_port: defPort(), tunnel_port: 0, hosts: [newHost("direct", node)] });
   if (!isNew) {
     const [routes, swaps] = await Promise.all([api("GET", `/api/v2/admin/inbounds/${encodeURIComponent(tag)}/routes`), api("GET", `/api/v2/admin/swaps?inbound=${encodeURIComponent(tag)}`)]);
     for (const r of routes) st.routes[r.node_id] = { ...r, hosts: r.hosts.map((x) => ({ ...x, exclude: x.exclude || [], _adv: !!(x.sni || x.host || x.path_override || x.alpn || x.fingerprint || x.allow_insecure || x.exclude?.length || x.fragment || x.mux) })) };
@@ -2234,9 +2236,14 @@ async function inboundStudio(tag, ctx) {
   function validProfile() {
     if (!/^[a-z0-9][a-z0-9._-]{0,62}$/.test(st.profile.tag)) { err.textContent = t("badTag"); return false; }
     const p = st.profile, fa = lang === "fa";
-    if (p.kind === "xray" && p.stream.security !== "none" && !(p.sni || "").trim()) { err.textContent = fa ? "نام دامنه (SNI) را وارد کنید." : "Enter the server name (SNI)."; return false; }
+    if (TEMPLATE_KINDS.includes(p.kind)) {
+      if (!p.kit) { err.textContent = fa ? "صبر کنید تا کلیدها آماده شوند." : "Wait for the keys."; return false; }
+      const t2 = p.kit.state().tpl, s2 = t2.streamSettings || {};
+      if (s2.security === "reality" && !(s2.realitySettings?.serverNames || []).length) { err.textContent = fa ? "برای REALITY سایت هدف (serverNames) لازم است." : "REALITY needs a target name (serverNames)."; return false; }
+      if (t2.protocol === "dokodemo-door" && !(t2.settings?.address && t2.settings?.port)) { err.textContent = fa ? "آدرس و پورت مقصد را وارد کنید." : "Enter the target address and port."; return false; }
+      if (["socks", "http"].includes(t2.protocol) && !(t2.settings?.accounts?.[0]?.user && t2.settings.accounts[0].pass)) { err.textContent = fa ? "نام کاربری و رمز لازم است." : "Username and password are required."; return false; }
+    }
     if (p.kind === "fallback" && !p.cert) { err.textContent = t("needCert"); return false; }
-    if (p.kind === "dokodemo" && !/^[^\s:]+:\d+$/.test((p.path || "").trim())) { err.textContent = fa ? "مقصد را به شکل 1.2.3.4:443 بنویسید." : "Write the target as 1.2.3.4:443."; return false; }
     return true;
   }
   const field = (label, el) => h("label", {}, h("span", {}, label), el);
@@ -2254,108 +2261,64 @@ async function inboundStudio(tag, ctx) {
     body.replaceChildren(...[drawProfile, drawNodes, drawSwaps, drawReview][st.step]());
   }
 
+  // Step 1. Xray protocols (VLESS, VMess, Trojan, Shadowsocks, SOCKS, HTTP,
+  // port forward) open the full inbound form — the same one used to edit,
+  // in 3x-ui's order — on a draft the HUB prepares with fresh keys. The
+  // others (QUIC, WireGuard kinds, MTProto, fallback) are built by the HUB.
+  const TEMPLATE_KINDS = ["vless", "vmess", "trojan", "shadowsocks", "socks", "http", "dokodemo"];
+  async function loadDraft(kind, choice = {}) {
+    const p = st.profile;
+    p.kind = kind; p.draft = null; p.kit = null; err.textContent = "";
+    if (!TEMPLATE_KINDS.includes(kind)) { draw(); return; }
+    draw();
+    const req = { vless: { preset: "custom", stream: { protocol: "vless", network: "tcp", security: "reality", vision: true } }, trojan: { preset: "custom", stream: { protocol: "trojan", network: "tcp", security: "reality" } },
+      vmess: { preset: "custom", stream: { protocol: "vmess", network: "ws", security: "none" } }, shadowsocks: { preset: "ss2022" }, socks: { preset: "socks" }, http: { preset: "http" }, dokodemo: { preset: "dokodemo" } }[kind];
+    if (req.stream && Object.keys(choice).length) Object.assign(req.stream, { vision: false }, choice);
+    try {
+      const d = await api("POST", "/api/v2/admin/inbounds/draft", { ...req, sni: "www.speedtest.net", port: p.port || 443, remark: p.remark || "Dark VPN" });
+      const tpl = typeof d.template === "string" ? JSON.parse(d.template) : d.template, meta = typeof d.meta === "string" ? JSON.parse(d.meta) : d.meta;
+      meta.remark ||= p.remark || "Dark VPN";
+      p.lim = { cap: 0, ends: "" };
+      p.draft = { tpl, meta, enabled: true };
+      p.kit = inboundFormKit({ tpl, meta, enabled: true, lim: p.lim, view: {}, routed: false, certList: ctx.certs || [], err, draw: () => draw(), create: true });
+    } catch (x) { err.textContent = x.message; }
+    draw();
+  }
+
   function drawProfile() {
     const p = st.profile;
     const fa = lang === "fa";
     const B = BUILDER[fa ? "fa" : "en"];
-    p.kind ||= "xray";
-    p.stream ||= { protocol: "vless", network: "tcp", security: "reality", vision: true, path: "", host: "", grpc_multi: false, xhttp_mode: "auto", fingerprint: "chrome", alpn: "", server_names: "", dest: "" };
-    const s = p.stream;
-    const wrap = h("div", { class: "form" });
-    let note = "";
-    // An option that clashes with the other choices stays clickable: picking
-    // it adjusts them and says what changed.
-    const seg = (items, cur, onPick, why) => h("div", { class: "seg", role: "radiogroup" }, items.map(([v, l]) => {
-      const reason = why ? why(v) : "";
-      return h("button", { type: "button", role: "radio", "aria-checked": String(v === cur), class: `${v === cur ? "on" : ""} ${reason ? "clash" : ""}`, title: reason || null,
-        onclick: () => { note = ""; onPick(v); fix(); redraw(); } }, l);
-    }));
-    const fix = () => {
-      if (s.security === "reality" && s.protocol === "vmess") { s.security = "tls"; note = B.fixedTls; }
-      if (s.security === "reality" && !["tcp", "grpc", "xhttp"].includes(s.network)) { s.security = "tls"; note = B.fixedTls; }
-    };
-    const pickSecurity = (v) => {
-      s.security = v;
-      if (v === "reality") {
-        if (s.protocol === "vmess") { s.protocol = "vless"; note = B.fixedVless; }
-        if (!["tcp", "grpc", "xhttp"].includes(s.network)) { s.network = "tcp"; note = B.fixedTcp; }
-        if (!p.sni) p.sni = "www.speedtest.net";
+    if (!p.kind) { loadDraft("vless"); p.kind = "vless"; }
+    const kids = [];
+    kids.push(h("div", { class: "two" }, field(t("tag"), bind(p, "tag", { required: true, placeholder: "de-reality", autofocus: true })),
+      p.kit ? h("span") : field(t("remark"), bind(p, "remark"))));
+    kids.push(h("div", { class: "kind-grid" }, B.kinds.map(([k, title, sub]) => h("button", { type: "button", class: `kind ${p.kind === k ? "on" : ""}`, "aria-pressed": String(p.kind === k),
+      onclick: () => { if (k === "proxy") p.proxy ||= "socks"; loadDraft(k); } }, h("b", {}, title), h("small", {}, sub)))));
+    if (["vless", "trojan", "vmess"].includes(p.kind)) kids.push(h("div", { class: "tpl-row" }, h("span", { class: "muted small" }, B.quick), B.templates.map(([label, x]) =>
+      h("button", { type: "button", class: "chip", onclick: () => loadDraft(x.protocol, x) }, label))));
+    if (TEMPLATE_KINDS.includes(p.kind)) {
+      if (!p.kit) kids.push(h("p", { class: "muted small" }, fa ? "در حال آماده‌سازی کلیدها…" : "Preparing keys…"));
+      else {
+        const s0 = p.kit.state().tpl;
+        const ss = s0.streamSettings || {};
+        if (["vless", "vmess", "trojan"].includes(s0.protocol)) kids.push(h("p", { class: "b-sum" }, B.hint({ security: ss.security || "none", network: ss.network || "tcp" })));
+        kids.push(...p.kit.drawForm());
       }
-    };
-    const fld = (label, el, hint) => h("label", {}, h("span", {}, label), el, hint ? h("small", { class: "muted" }, hint) : null);
-    const inp = (obj, key, attrs = {}) => { const el = h("input", { ...attrs, value: obj[key] ?? "" }); el.addEventListener("input", () => { obj[key] = attrs.type === "number" ? +el.value : el.value; }); return el; };
-    const chk = (obj, key, label) => { const c = h("input", { type: "checkbox", checked: !!obj[key] }); c.addEventListener("change", () => { obj[key] = c.checked; redraw(); }); return h("label", { class: "check" }, c, label); };
-    // What Xray accepts (mirrors the HUB's checkStream).
-    const realityWhy = (sec) => sec !== "reality" ? "" : s.protocol === "vmess" ? B.noRealityVmess : !["tcp", "grpc", "xhttp"].includes(s.network) ? B.noRealityNet : "";
-    const netWhy = (net) => s.security === "reality" && !["tcp", "grpc", "xhttp"].includes(net) ? B.noRealityNet : "";
-    const protoWhy = (pr) => s.security === "reality" && pr === "vmess" ? B.noRealityVmess : "";
-    const visionOK = () => s.protocol === "vless" && s.network === "tcp" && s.security !== "none";
+      return kids;
+    }
+    // HUB-built kinds.
+    const info = B.info[p.kind];
+    if (info) kids.push(h("p", { class: "small muted" }, info));
     const certSel = () => {
       const el = h("select", {}, h("option", { value: "" }, t("selfSigned")), (ctx.certs || []).map((c) => h("option", { value: c.id, selected: c.id === p.cert }, `${c.id} · ${c.domains.join(", ")}`)));
-      el.addEventListener("change", () => { p.cert = el.value; const c = (ctx.certs || []).find((x) => x.id === p.cert); if (c?.domains[0]) p.sni = c.domains[0]; redraw(); });
+      el.addEventListener("change", () => { p.cert = el.value; const c = (ctx.certs || []).find((x) => x.id === p.cert); if (c?.domains[0]) p.sni = c.domains[0]; draw(); });
       return el;
     };
-    const sniRow = (label, hint) => {
-      const el = inp(p, "sni", { dir: "ltr" });
-      if (p.kind === "xray" && s.security !== "reality") return fld(label, el, hint);
-      const finder = sniFinder({ nodes, node: Object.keys(st.routes)[0] || nodes[0]?.ID, onPick: (d) => { p.sni = d; el.value = d; } });
-      finder.hidden = true;
-      return h("div", {}, fld(label, h("div", { class: "row tight" }, el, h("button", { type: "button", class: "ghost", onclick: () => { finder.hidden = !finder.hidden; } }, t("findSni"))), hint), finder);
-    };
-    function redraw() {
-      if (!visionOK()) s.vision = false;
-      const kids = [];
-      kids.push(h("div", { class: "kind-grid" }, B.kinds.map(([k, title, sub]) => h("button", { type: "button", class: `kind ${p.kind === k ? "on" : ""}`, "aria-pressed": String(p.kind === k),
-        onclick: () => { p.kind = k; if (k === "proxy") p.proxy ||= "socks"; redraw(); } }, h("b", {}, title), h("small", {}, sub)))));
-      if (p.kind === "xray") {
-        kids.push(h("div", { class: "tpl-row" }, h("span", { class: "muted small" }, B.quick), B.templates.map(([label, x]) =>
-          h("button", { type: "button", class: "chip", onclick: () => { Object.assign(s, { vision: false, path: "", host: "", grpc_multi: false, xhttp_mode: "auto" }, x); redraw(); } }, label))));
-        kids.push(h("div", { class: "builder" },
-          h("div", { class: "b-row" }, h("span", {}, B.protocol), seg([["vless", "VLESS"], ["vmess", "VMess"], ["trojan", "Trojan"]], s.protocol, (v) => { s.protocol = v; }, protoWhy)),
-          h("div", { class: "b-row" }, h("span", {}, B.transport), seg([["tcp", "TCP"], ["ws", "WebSocket"], ["grpc", "gRPC"], ["httpupgrade", "HTTPUpgrade"], ["xhttp", "XHTTP"]], s.network, (v) => { s.network = v; }, netWhy)),
-          h("div", { class: "b-row" }, h("span", {}, B.security), seg([["none", B.none], ["tls", "TLS"], ["reality", "REALITY"]], s.security, pickSecurity, realityWhy))));
-        if (note) kids.push(h("p", { class: "small warn-text", role: "status" }, note));
-        kids.push(h("p", { class: "b-sum" }, h("b", { dir: "ltr" }, `${s.protocol.toUpperCase()} · ${s.network} · ${s.security === "none" ? B.none : s.security.toUpperCase()}${s.vision ? " · Vision" : ""}`), " — ", B.hint(s)));
-        // Transport settings.
-        const tr = [];
-        if (s.network === "grpc") tr.push(h("div", { class: "two" }, fld(B.service, inp(s, "path", { dir: "ltr", placeholder: B.auto })), h("div", {}, chk(s, "grpc_multi", B.multi))));
-        if (["ws", "httpupgrade", "xhttp"].includes(s.network)) tr.push(h("div", { class: "two" }, fld(B.path, inp(s, "path", { dir: "ltr", placeholder: B.auto })), fld(B.host, inp(s, "host", { dir: "ltr", placeholder: "cdn.example.com" }), B.hostHint)));
-        if (s.network === "xhttp") {
-          const m = h("select", {}, [["auto", "auto"], ["packet-up", "packet-up"], ["stream-up", "stream-up"], ["stream-one", "stream-one"]].map(([v, l]) => h("option", { value: v, selected: s.xhttp_mode === v }, l)));
-          m.addEventListener("change", () => { s.xhttp_mode = m.value; });
-          tr.push(fld(B.xmode, m, B.xmodeHint));
-        }
-        if (tr.length) kids.push(h("fieldset", { class: "ie-sec" }, h("legend", {}, B.transport), ...tr));
-        // Security settings.
-        const fp = h("select", {}, ["chrome", "firefox", "safari", "ios", "android", "edge", "random", "randomized"].map((v) => h("option", { value: v, selected: s.fingerprint === v }, v)));
-        fp.addEventListener("change", () => { s.fingerprint = fp.value; });
-        if (s.security === "reality") kids.push(h("fieldset", { class: "ie-sec" }, h("legend", {}, "REALITY"),
-          sniRow(B.realitySni, B.realitySniHint),
-          h("div", { class: "two" }, fld(B.fp, fp), fld(B.dest, inp(s, "dest", { dir: "ltr", placeholder: `${p.sni || "www.speedtest.net"}:443` }))),
-          fld(B.names, inp(s, "server_names", { dir: "ltr", placeholder: "www.example.com, cdn.example.com" }), B.namesHint)));
-        if (s.security === "tls") kids.push(h("fieldset", { class: "ie-sec" }, h("legend", {}, "TLS"),
-          fld(t("certFor"), certSel(), p.cert ? "" : B.selfHint),
-          h("div", { class: "two" }, sniRow(B.domain), fld(B.fp, fp)),
-          fld("ALPN", inp(s, "alpn", { dir: "ltr", placeholder: s.network === "ws" || s.network === "httpupgrade" ? "http/1.1" : "h2,http/1.1" }))));
-        if (s.security === "none") kids.push(h("p", { class: "small warn-text" }, B.noneWarn));
-        if (visionOK()) kids.push(chk(s, "vision", B.vision));
-      } else {
-        const info = B.info[p.kind];
-        if (info) kids.push(h("p", { class: "small muted" }, info));
-        if (p.kind === "proxy") kids.push(seg([["socks", "SOCKS5"], ["http", "HTTP"]], p.proxy, (v) => { p.proxy = v; }));
-        if (["hysteria2", "tuic", "fallback"].includes(p.kind)) kids.push(fld(t("certFor"), certSel(), p.kind === "fallback" ? "" : p.cert ? "" : B.selfHint));
-        if (["hysteria2", "tuic", "fallback"].includes(p.kind)) kids.push(sniRow(B.domain));
-        if (p.kind === "mtproto") kids.push(fld(B.fakeTls, inp(p, "sni", { dir: "ltr", placeholder: "www.google.com" })));
-        if (p.kind === "dokodemo") kids.push(fld(B.target, inp(p, "path", { dir: "ltr", placeholder: "1.2.3.4:443" })));
-        if (p.kind === "wireguard" || p.kind === "amneziawg") kids.push(fld(B.subnet, inp(p, "path", { dir: "ltr", placeholder: p.kind === "wireguard" ? "10.66.0.0/16" : "10.67.0.0/16" })));
-      }
-      fill(wrap, ...kids);
-    }
-    redraw();
-    return [
-      h("div", { class: "two" }, field(t("tag"), bind(p, "tag", { required: true, placeholder: "de-reality", autofocus: true })), field(t("remark"), bind(p, "remark"))),
-      wrap,
-    ];
+    if (["hysteria2", "tuic", "fallback"].includes(p.kind)) kids.push(field(t("certFor"), certSel()), field(B.domain, bind(p, "sni", { dir: "ltr" })));
+    if (p.kind === "mtproto") kids.push(field(B.fakeTls, bind(p, "sni", { dir: "ltr", placeholder: "www.google.com" })));
+    if (p.kind === "wireguard" || p.kind === "amneziawg") kids.push(field(B.subnet, bind(p, "path", { dir: "ltr", placeholder: p.kind === "wireguard" ? "10.66.0.0/16" : "10.67.0.0/16" })));
+    return kids;
   }
 
   function hostRow(r, hst, idx, node) {
@@ -2459,10 +2422,12 @@ async function inboundStudio(tag, ctx) {
       if (isNew) {
         const p = st.profile;
         const preset = profilePreset(p);
-        const s = p.stream;
-        const stream = preset === "custom" ? { ...s, path: (s.path || "").trim(), host: (s.host || "").trim(), dest: (s.dest || "").trim(), alpn: (s.alpn || "").trim(), server_names: String(s.server_names || "").split(/[\s,]+/).filter(Boolean) } : undefined;
-        const usesCert = (preset === "custom" && s.security === "tls") || ["hysteria2", "tuic", "vless-tls-fallback"].includes(preset);
-        await api("POST", "/api/v2/admin/inbounds/compose", { tag: p.tag, preset, stream, sni: (p.sni || "").trim(), path: preset === "custom" ? "" : (p.path || "").trim(), remark: p.remark.trim(), cert: usesCert ? p.cert : "", routes });
+        const ks = p.kit ? p.kit.state() : null;
+        if (ks) { const s3 = ks.tpl.streamSettings || {}; if (s3.security === "reality" && s3.realitySettings) ks.meta.short_id = (s3.realitySettings.shortIds || [])[0] || ks.meta.short_id; }
+        const usesCert = ["hysteria2", "tuic", "vless-tls-fallback"].includes(preset);
+        await api("POST", "/api/v2/admin/inbounds/compose", { tag: p.tag, preset, template: ks ? ks.tpl : undefined, meta: ks ? ks.meta : undefined, sni: (p.sni || "").trim(), path: (p.path || "").trim(), remark: ks ? (ks.meta.remark || "") : (p.remark || "").trim(), cert: usesCert ? p.cert : "", routes });
+        if (ks && (+p.lim.cap || p.lim.ends)) await api("PUT", `/api/v2/admin/inbounds/${encodeURIComponent(p.tag)}/limits`, { cap_gb: +p.lim.cap || 0, ends_unix: p.lim.ends ? Math.floor(new Date(p.lim.ends + "T23:59:59").getTime() / 1000) : 0 });
+        if (ks && !ks.enabled) await api("POST", `/api/v2/admin/inbounds/${encodeURIComponent(p.tag)}/enabled`, { Enabled: false });
       } else {
         await api("PUT", `/api/v2/admin/inbounds/${encodeURIComponent(theTag)}/routes`, routes);
       }
@@ -2584,28 +2549,12 @@ function cloneInbound(ib) {
     h("label", { class: "check" }, cl, ie("cloneClients")), err), [save]);
 }
 
-async function inboundEditor(tag, nodes, certs) {
-  const [raw, routes, certList, all] = await Promise.all([
-    api("GET", `/api/v2/admin/inbounds/${encodeURIComponent(tag)}`),
-    api("GET", `/api/v2/admin/inbounds/${encodeURIComponent(tag)}/routes`).catch(() => []),
-    certs ? Promise.resolve(certs) : api("GET", "/api/v2/admin/certs").catch(() => []),
-    api("GET", "/api/v2/admin/inbounds").catch(() => [])]);
-  const view = (all || []).find((x) => x.tag === tag) || {};
-  const lim = { cap: view.cap_bytes ? +(view.cap_bytes / 2 ** 30).toFixed(2) : 0, ends: view.ends_unix ? new Date(view.ends_unix * 1000).toISOString().slice(0, 10) : "" };
-  const lim0 = JSON.stringify(lim);
-  const parse = (v) => { try { return typeof v === "string" ? JSON.parse(v) : structuredClone(v || {}); } catch { return {}; } };
-  let tpl = parse(raw.template), meta = parse(raw.meta);
-  let enabled = raw.enabled;
-  const routed = (routes || []).length > 0;
-  let mode = "form";
-  const body = h("div", { class: "form ie" });
-  const err = h("div", { class: "error", role: "alert" });
-  const tabs = h("div", { class: "steps", role: "tablist" });
-  const d = openModal(`${ie("title")} · ${tag}`, h("div", {}, tabs, body, err), [
-    h("button", { class: "primary", value: "save", onclick: async (e) => { e.preventDefault(); await save(); } }, t("save"))]);
-  d.classList.add("wide");
-  d.addEventListener("close", () => d.classList.remove("wide"), { once: true });
-
+// The inbound form, shared by "new inbound" and "edit inbound": general,
+// protocol, transport, security, socket options, sniffing and fallbacks.
+function inboundFormKit(o) {
+  let tpl = o.tpl, meta = o.meta, enabled = o.enabled;
+  const { lim, view, routed, certList, err } = o;
+  const draw = () => o.draw();
   const field = (label, el, hint) => h("label", {}, h("span", {}, label), el, hint ? h("small", { class: "muted" }, hint) : null);
   const obj = (o, k) => (o[k] && typeof o[k] === "object" && !Array.isArray(o[k]) ? o[k] : (o[k] = {}));
   const input = (get, set, attrs = {}) => { const el = h("input", { ...attrs, value: get() ?? "" }); el.addEventListener("input", () => set(attrs.type === "number" ? (el.value === "" ? undefined : +el.value) : el.value)); return el; };
@@ -2619,22 +2568,19 @@ async function inboundEditor(tag, nodes, certs) {
   // Segmented choice, the same control as the inbound builder.
   const segPick = (opts, get, set, onChange) => h("div", { class: "seg", role: "radiogroup" }, opts.map(([v, l]) => h("button", { type: "button", role: "radio",
     "aria-checked": String(String(get() ?? "") === v), class: String(get() ?? "") === v ? "on" : "", onclick: () => { if (String(get() ?? "") === v) return; set(v); if (onChange) onChange(); } }, l)));
+  // "Name: value" lines <-> a headers object.
+  const hdrs = (o2, key) => {
+    const el = h("textarea", { rows: "2", dir: "ltr", spellcheck: "false", placeholder: "User-Agent: Mozilla/5.0" }, Object.entries(o2[key] || {}).map(([k, v]) => `${k}: ${v}`).join("\n"));
+    el.addEventListener("input", () => { const m = {}; for (const l of el.value.split("\n")) { const i = l.indexOf(":"); if (i > 0) m[l.slice(0, i).trim()] = l.slice(i + 1).trim(); } if (Object.keys(m).length) o2[key] = m; else delete o2[key]; });
+    return el;
+  };
+  const num = (o2, key, attrs = {}) => input(() => o2[key], (v) => { if (v === undefined || v === "" || Number.isNaN(v)) delete o2[key]; else o2[key] = v; }, { type: "number", dir: "ltr", ...attrs });
+  const opt = (o2, key, label) => check(() => o2[key], (v) => { if (v) o2[key] = true; else delete o2[key]; }, label);
   const section = (title, ...kids) => h("fieldset", { class: "ie-sec" }, h("legend", {}, title), ...kids);
   const keys = (kind, extra = {}) => api("POST", "/api/v2/admin/keys", { kind, ...extra });
   const randB64 = (n) => { const b = new Uint8Array(n); crypto.getRandomValues(b); return btoa(String.fromCharCode(...b)); };
 
-  function draw() {
-    tabs.replaceChildren(...[["form", ie("form")], ["json", ie("json")]].map(([k, l]) => h("button", { type: "button", role: "tab", "aria-current": mode === k ? "step" : null, onclick: () => switchTo(k) }, l)));
-    body.replaceChildren(...(mode === "form" ? drawForm() : drawJSON()));
-  }
   let jsonTpl, jsonMeta;
-  function switchTo(k) {
-    if (k === mode) return;
-    if (mode === "json") {
-      try { tpl = JSON.parse(jsonTpl.value); meta = JSON.parse(jsonMeta.value); } catch (x) { err.textContent = `${ie("badJson")}: ${x.message}`; return; }
-    }
-    err.textContent = ""; mode = k; draw();
-  }
   function drawJSON() {
     jsonTpl = h("textarea", { class: "code", rows: "18", spellcheck: "false", dir: "ltr" }, JSON.stringify(tpl, null, 2));
     jsonMeta = h("textarea", { class: "code", rows: "8", spellcheck: "false", dir: "ltr" }, JSON.stringify(meta, null, 2));
@@ -2644,12 +2590,13 @@ async function inboundEditor(tag, nodes, certs) {
   function drawForm() {
     const proto = tpl.protocol;
     const settings = obj(tpl, "settings");
-    const hasStream = !["wireguard", "shadowsocks"].includes(proto);
+    const hasStream = ["vless", "vmess", "trojan", "hysteria"].includes(proto);
     const out = [];
     // General
     const stx = tpl.streamSettings || {};
     out.push(h("p", { class: "b-sum" }, h("b", { dir: "ltr" }, [String(proto).toUpperCase(), hasStream && proto !== "hysteria" ? (stx.network || "tcp") : "", hasStream ? (proto === "hysteria" ? "TLS" : (stx.security || "none").toUpperCase()) : "", settings.flow ? "Vision" : ""].filter(Boolean).join(" · ")),
-      lang === "fa" ? " — پروتکل بعد از ساخت عوض نمی‌شود (لینک کاربرها به آن بسته است)؛ انتقال و امنیت را همین‌جا عوض کنید." : " — the protocol cannot change after creation (client links depend on it); change transport and security here."));
+      o.create ? (lang === "fa" ? " — پورت این‌جا پورت پیش‌فرض نودهاست؛ در قدم بعد برای هر نود جدا قابل تغییر است." : " — the port here is the default for nodes; the next step can change it per node.")
+        : lang === "fa" ? " — پروتکل بعد از ساخت عوض نمی‌شود (لینک کاربرها به آن بسته است)؛ انتقال و امنیت را همین‌جا عوض کنید." : " — the protocol cannot change after creation (client links depend on it); change transport and security here."));
     out.push(section(ie("general"),
       h("div", { class: "two" },
         field(ie("protocol"), h("input", { value: proto, disabled: true, dir: "ltr" })),
@@ -2666,9 +2613,13 @@ async function inboundEditor(tag, nodes, certs) {
     // Protocol
     if (proto === "vless") out.push(drawVless(settings));
     if (proto === "shadowsocks") out.push(drawSS(settings));
+    if (proto === "dokodemo-door" || proto === "tunnel") out.push(drawDoko(settings));
+    if (proto === "socks" || proto === "http" || proto === "mixed") out.push(drawProxy(settings, proto));
     if (proto === "wireguard") out.push(section(ie("protocol"), field(ie("mtu"), input(() => meta.mtu, (v) => { meta.mtu = v; }, { type: "number", min: "1280", max: "1500", placeholder: "1420", dir: "ltr" }))));
     if (hasStream && proto !== "hysteria") out.push(drawTransport());
     if (hasStream) out.push(drawSecurity());
+    if (["vless", "trojan"].includes(proto) && ["tcp", "raw"].includes(tpl.streamSettings?.network || "tcp") && (tpl.streamSettings?.security || "none") !== "reality") out.push(drawFallbacks(settings));
+    if (!["wireguard", "hysteria"].includes(proto)) out.push(drawSockopt());
     out.push(drawSniff());
     return out;
   }
@@ -2693,21 +2644,64 @@ async function inboundEditor(tag, nodes, certs) {
       field(ie("venc"), h("div", { class: "row tight" }, vsel, regenBtn), ie("vencHint")), keyRow);
   }
 
+  function drawFallbacks(settings) {
+    const FA = lang === "fa";
+    const list = Array.isArray(settings.fallbacks) ? settings.fallbacks : [];
+    const box = h("div", { class: "form" });
+    const commit = () => { if (list.length) settings.fallbacks = list; else delete settings.fallbacks; };
+    const redrawFb = () => box.replaceChildren(...list.map((f, i) => h("div", { class: "fb-row" },
+      input(() => f.name, (v) => { if (v) f.name = v; else delete f.name; }, { dir: "ltr", placeholder: "SNI" }),
+      input(() => f.alpn, (v) => { if (v) f.alpn = v; else delete f.alpn; }, { dir: "ltr", placeholder: "ALPN" }),
+      input(() => f.path, (v) => { if (v) f.path = v; else delete f.path; }, { dir: "ltr", placeholder: "/path" }),
+      input(() => f.dest, (v) => { f.dest = /^\d+$/.test(v) ? +v : v; }, { dir: "ltr", placeholder: "8080 / 127.0.0.1:80" }),
+      select([["0", "xver 0"], ["1", "xver 1"], ["2", "xver 2"]], () => String(f.xver || 0), (v) => { if (+v) f.xver = +v; else delete f.xver; }),
+      h("button", { type: "button", class: "ghost danger", onclick: () => { list.splice(i, 1); commit(); redrawFb(); } }, "✕"))), list.length ? null : h("p", { class: "small muted" }, FA ? "فال‌بکی تعریف نشده." : "No fallbacks."));
+    redrawFb();
+    return h("details", { class: "ie-sec adv-box", open: list.length > 0 }, h("summary", {}, FA ? "فال‌بک‌ها (Fallbacks)" : "Fallbacks"),
+      h("p", { class: "small muted" }, FA ? "اتصال‌هایی که این پروتکل نیستند بر اساس SNI، ALPN یا مسیر به مقصد دیگری (مثلاً یک وب‌سایت یا اینباند دیگر) فرستاده می‌شوند." : "Connections that are not this protocol go to another destination (a website or another inbound) by SNI, ALPN or path."),
+      box, h("button", { type: "button", class: "ghost", onclick: () => { list.push({ dest: 80 }); commit(); redrawFb(); } }, FA ? "+ افزودن فال‌بک" : "+ Add fallback"));
+  }
+
+  function drawDoko(settings) {
+    const FA = lang === "fa";
+    return section(ie("protocol"),
+      h("div", { class: "two" }, field(FA ? "آدرس مقصد" : "Target address", input(() => settings.address, (v) => { settings.address = v; meta.target = `${v}:${settings.port || ""}`; }, { dir: "ltr", placeholder: "1.2.3.4" })),
+        field(FA ? "پورت مقصد" : "Target port", input(() => settings.port, (v) => { settings.port = v; meta.target = `${settings.address || ""}:${v}`; }, { type: "number", min: "1", max: "65535", dir: "ltr" }))),
+      h("div", { class: "two" }, field(FA ? "شبکه" : "Network", select([["tcp,udp", "TCP + UDP"], ["tcp", "TCP"], ["udp", "UDP"]], () => settings.network || "tcp,udp", (v) => { settings.network = v; })),
+        h("div", {}, opt(settings, "followRedirect", "followRedirect"))));
+  }
+
+  function drawProxy(settings, proto) {
+    const FA = lang === "fa";
+    const acc = (settings.accounts && settings.accounts[0]) || (settings.accounts = [{ user: meta.proxy_user || "", pass: meta.proxy_pass || "" }])[0];
+    const kids = [h("div", { class: "two" },
+      field(FA ? "نام کاربری" : "Username", input(() => acc.user, (v) => { acc.user = v; meta.proxy_user = v; }, { dir: "ltr" })),
+      field(FA ? "رمز" : "Password", input(() => acc.pass, (v) => { acc.pass = v; meta.proxy_pass = v; }, { dir: "ltr" })))];
+    if (proto !== "http") kids.push(h("div", { class: "two" }, h("div", {}, opt(settings, "udp", "UDP")), field(FA ? "IP برای UDP (اختیاری)" : "UDP address (optional)", input(() => settings.ip, (v) => { if (v) settings.ip = v; else delete settings.ip; }, { dir: "ltr", placeholder: "127.0.0.1" }))));
+    if (proto === "http") kids.push(opt(settings, "allowTransparent", "allowTransparent"));
+    kids.push(h("p", { class: "small muted" }, FA ? "پروکسی بدون رمز ساخته نمی‌شود (پروکسی باز سوءاستفاده می‌شود)." : "Never without a password (open proxies get abused)."));
+    return section(ie("protocol"), ...kids);
+  }
+
   function drawSS(settings) {
-    const sizes = { "2022-blake3-aes-128-gcm": 16, "2022-blake3-aes-256-gcm": 32, "2022-blake3-chacha20-poly1305": 32 };
+    const sizes = { "2022-blake3-aes-128-gcm": 16, "2022-blake3-aes-256-gcm": 32, "2022-blake3-chacha20-poly1305": 32, "aes-128-gcm": 0, "aes-256-gcm": 0, "chacha20-poly1305": 0, "xchacha20-poly1305": 0 };
     const key = input(() => settings.password, (v) => { settings.password = v; }, { dir: "ltr" });
-    const meth = select(Object.keys(sizes).map((m) => [m, m]), () => settings.method, (v) => { settings.method = v; settings.password = randB64(sizes[v]); key.value = settings.password; });
+    const meth = select(Object.keys(sizes).map((m) => [m, m + (sizes[m] ? "" : lang === "fa" ? " (کلاسیک)" : " (classic)")]), () => settings.method, (v) => { settings.method = v; if (sizes[v]) { settings.password = randB64(sizes[v]); key.value = settings.password; } else delete settings.password; draw(); });
+    const net2 = field(lang === "fa" ? "شبکه" : "Network", select([["tcp,udp", "TCP + UDP"], ["tcp", "TCP"], ["udp", "UDP"]], () => settings.network || "tcp,udp", (v) => { settings.network = v; }));
+    if (!sizes[settings.method]) return section(ie("protocol"), field(ie("method"), meth), net2,
+      h("p", { class: "small muted" }, lang === "fa" ? "روش کلاسیک: هر کاربر رمز خودش را دارد. برای برنامه‌های قدیمی؛ روش‌های 2022 امن‌ترند." : "Classic method: each client has its own password. For older apps; 2022 methods are safer."));
     return section(ie("protocol"), h("p", { class: "small muted" }, ie("ssWarn")),
       field(ie("method"), meth),
-      field(ie("ssKey"), h("div", { class: "row tight" }, key, h("button", { type: "button", class: "ghost", onclick: () => { settings.password = randB64(sizes[settings.method] || 32); key.value = settings.password; } }, ie("newKey")))));
+      field(ie("ssKey"), h("div", { class: "row tight" }, key, h("button", { type: "button", class: "ghost", onclick: () => { settings.password = randB64(sizes[settings.method] || 32); key.value = settings.password; } }, ie("newKey")))), net2);
   }
 
   function drawTransport() {
     const st = obj(tpl, "streamSettings");
     const net = st.network || "tcp";
     const kids = [];
-    const netSel = segPick([["tcp", "TCP"], ["ws", "WebSocket"], ["grpc", "gRPC"], ["httpupgrade", "HTTPUpgrade"], ["xhttp", "XHTTP"]], () => (net === "splithttp" ? "xhttp" : net), (v) => {
-      for (const k of ["tcpSettings", "rawSettings", "wsSettings", "grpcSettings", "httpupgradeSettings", "xhttpSettings", "splithttpSettings"]) delete st[k];
+    const netSel = segPick([["tcp", "TCP"], ["kcp", "mKCP"], ["ws", "WebSocket"], ["grpc", "gRPC"], ["httpupgrade", "HTTPUpgrade"], ["xhttp", "XHTTP"]], () => (net === "splithttp" ? "xhttp" : net), (v) => {
+      for (const k of ["tcpSettings", "rawSettings", "kcpSettings", "wsSettings", "grpcSettings", "httpupgradeSettings", "xhttpSettings", "splithttpSettings"]) delete st[k];
+      if (v === "kcp") st.kcpSettings = { mtu: 1350, tti: 20, uplinkCapacity: 5, downlinkCapacity: 20, congestion: false, readBufferSize: 2, writeBufferSize: 2, header: { type: "none" } };
       st.network = v;
       if (v === "ws") st.wsSettings = { path: "/" + Math.random().toString(36).slice(2, 8) };
       if (v === "grpc") st.grpcSettings = { serviceName: Math.random().toString(36).slice(2, 8) };
@@ -2717,15 +2711,44 @@ async function inboundEditor(tag, nodes, certs) {
       if (v !== "tcp" && tpl.settings?.flow) { delete tpl.settings.flow; err.textContent = ie("visionNeeds"); }
     }, draw);
     kids.push(field(ie("network"), netSel));
+    const FA = lang === "fa";
+    if (net === "tcp" || net === "raw") {
+      const o2 = obj(st, net === "raw" ? "rawSettings" : "tcpSettings");
+      const hd = o2.header || {};
+      kids.push(field(FA ? "استتار HTTP" : "HTTP obfuscation", segPick([["none", FA ? "خاموش" : "Off"], ["http", "HTTP"]], () => hd.type || "none", (v) => {
+        if (v === "http") o2.header = { type: "http", request: { path: ["/"], headers: { Host: [] } } }; else { delete o2.header; if (!Object.keys(o2).length) delete st[net === "raw" ? "rawSettings" : "tcpSettings"]; }
+      }, draw)));
+      if (hd.type === "http") {
+        const rq = hd.request || (hd.request = {});
+        const hs = rq.headers || (rq.headers = {});
+        kids.push(h("div", { class: "two" },
+          field(FA ? "مسیرها (هر خط یکی)" : "Paths (one per line)", lines(() => rq.path, (v) => { rq.path = v.length ? v : ["/"]; })),
+          field("Host", lines(() => hs.Host, (v) => { hs.Host = v; }, { placeholder: "www.example.com" }))));
+      }
+    }
+    if (net === "kcp") {
+      const o2 = obj(st, "kcpSettings");
+      const hd = o2.header || (o2.header = { type: "none" });
+      kids.push(h("div", { class: "three" }, field("MTU", num(o2, "mtu", { min: "576", max: "1460" })), field("TTI (ms)", num(o2, "tti", { min: "10", max: "100" })),
+          field(FA ? "استتار (header)" : "Header", select([["none", "none"], ["srtp", "srtp (FaceTime)"], ["utp", "utp (BitTorrent)"], ["wechat-video", "wechat-video"], ["dtls", "dtls"], ["wireguard", "wireguard"], ["dns", "dns"]], () => hd.type || "none", (v) => { hd.type = v; }))),
+        h("div", { class: "three" }, field(FA ? "ظرفیت آپلود (MB/s)" : "Uplink (MB/s)", num(o2, "uplinkCapacity", { min: "0" })), field(FA ? "ظرفیت دانلود (MB/s)" : "Downlink (MB/s)", num(o2, "downlinkCapacity", { min: "0" })),
+          field(FA ? "رمز (seed، اختیاری)" : "Seed (optional)", input(() => o2.seed, (v) => { if (v) o2.seed = v; else delete o2.seed; }, { dir: "ltr" }))),
+        h("div", { class: "three" }, field(FA ? "بافر خواندن (MB)" : "Read buffer (MB)", num(o2, "readBufferSize", { min: "1" })), field(FA ? "بافر نوشتن (MB)" : "Write buffer (MB)", num(o2, "writeBufferSize", { min: "1" })),
+          h("div", {}, opt(o2, "congestion", FA ? "کنترل ازدحام" : "Congestion control"))),
+        h("p", { class: "small muted" }, FA ? "mKCP روی UDP است؛ پورت UDP باید باز باشد. در اشتراک‌های sing-box و Clash نمی‌آید (فقط لینک)." : "mKCP runs over UDP; the UDP port must be open. Not in sing-box or Clash profiles (links only)."));
+    }
     if (net === "ws" || net === "httpupgrade") {
       const o = obj(st, net === "ws" ? "wsSettings" : "httpupgradeSettings");
       kids.push(h("div", { class: "two" }, field(ie("path"), input(() => o.path, (v) => { o.path = v; }, { dir: "ltr", placeholder: "/" })),
         field(ie("host"), input(() => o.host, (v) => { if (v) o.host = v; else delete o.host; }, { dir: "ltr" }))));
+      kids.push(h("div", { class: "two" }, net === "ws" ? field(FA ? "Heartbeat (ثانیه، ۰ = خاموش)" : "Heartbeat (s, 0 = off)", num(o, "heartbeatPeriod", { min: "0", placeholder: "0" })) : h("span"),
+        field(FA ? "هدرهای اضافه" : "Extra headers", hdrs(o, "headers"))));
     }
     if (net === "grpc") {
       const o = obj(st, "grpcSettings");
       kids.push(field(ie("service"), input(() => o.serviceName, (v) => { o.serviceName = v; }, { dir: "ltr" })),
-        check(() => o.multiMode, (v) => { if (v) o.multiMode = true; else delete o.multiMode; }, ie("multi")));
+        check(() => o.multiMode, (v) => { if (v) o.multiMode = true; else delete o.multiMode; }, ie("multi")),
+        field("Authority", input(() => o.authority, (v) => { if (v) o.authority = v; else delete o.authority; }, { dir: "ltr", placeholder: FA ? "خالی = خودکار" : "empty = automatic" })));
     }
     if (net === "xhttp" || net === "splithttp") {
       const o = obj(st, net === "xhttp" ? "xhttpSettings" : "splithttpSettings");
@@ -2734,8 +2757,11 @@ async function inboundEditor(tag, nodes, certs) {
         h("div", { class: "two" },
           field(ie("xmode"), select([["auto", "auto"], ["packet-up", "packet-up"], ["stream-up", "stream-up"], ["stream-one", "stream-one"]], () => o.mode || "auto", (v) => { o.mode = v; })),
           field(ie("padding"), input(() => o.xPaddingBytes, (v) => { if (v) o.xPaddingBytes = v; else delete o.xPaddingBytes; }, { dir: "ltr", placeholder: "100-1000" }))));
+      kids.push(h("details", { class: "adv-box" }, h("summary", {}, FA ? "تنظیمات بیشتر XHTTP" : "More XHTTP settings"),
+        h("div", { class: "three" }, field("scMaxBufferedPosts", num(o, "scMaxBufferedPosts", { min: "1", placeholder: "30" })), field("scMaxEachPostBytes", input(() => o.scMaxEachPostBytes, (v) => { if (v) o.scMaxEachPostBytes = v; else delete o.scMaxEachPostBytes; }, { dir: "ltr", placeholder: "1000000" })),
+          field("scStreamUpServerSecs", input(() => o.scStreamUpServerSecs, (v) => { if (v) o.scStreamUpServerSecs = v; else delete o.scStreamUpServerSecs; }, { dir: "ltr", placeholder: "20-80" }))),
+        opt(o, "noSSEHeader", "noSSEHeader"), field(FA ? "هدرهای اضافه" : "Extra headers", hdrs(o, "headers"))));
     }
-    kids.push(check(() => st.sockopt?.acceptProxyProtocol, (v) => { const so = obj(st, "sockopt"); if (v) so.acceptProxyProtocol = true; else { delete so.acceptProxyProtocol; if (!Object.keys(so).length) delete st.sockopt; } }, ie("proxyProto")));
     return section(ie("transport"), ...kids);
   }
 
@@ -2781,7 +2807,11 @@ async function inboundEditor(tag, nodes, certs) {
         h("div", { class: "row" }, h("button", { type: "button", class: "ghost", onclick: async () => {
           try { const k = await keys("reality"); rs.privateKey = k.private; meta.public_key = k.public; priv.value = k.private; pub.value = k.public; } catch (x) { err.textContent = x.message; }
         } }, ie("newKeys")), h("span", { class: "small muted" }, ie("keysWarn"))),
-        h("div", { class: "two" }, fpSel(), field(ie("spx"), input(() => meta.spider_x, (v) => { if (v) meta.spider_x = v; else delete meta.spider_x; }, { dir: "ltr", placeholder: "/" }))));
+        h("div", { class: "two" }, fpSel(), field(ie("spx"), input(() => meta.spider_x, (v) => { if (v) meta.spider_x = v; else delete meta.spider_x; }, { dir: "ltr", placeholder: "/" }))),
+        h("details", { class: "adv-box" }, h("summary", {}, lang === "fa" ? "تنظیمات بیشتر REALITY" : "More REALITY settings"),
+          h("div", { class: "three" }, field(lang === "fa" ? "حداکثر اختلاف ساعت (ms)" : "Max time difference (ms)", num(rs, "maxTimeDiff", { min: "0", placeholder: "0" })),
+            field(lang === "fa" ? "حداقل نسخهٔ کلاینت" : "Min client version", input(() => rs.minClientVer, (v) => { if (v) rs.minClientVer = v; else delete rs.minClientVer; }, { dir: "ltr", placeholder: "25.1.1" })),
+            field(lang === "fa" ? "حداکثر نسخهٔ کلاینت" : "Max client version", input(() => rs.maxClientVer, (v) => { if (v) rs.maxClientVer = v; else delete rs.maxClientVer; }, { dir: "ltr" })))));
     }
     if (sec === "tls") {
       const ts = obj(st, "tlsSettings");
@@ -2796,12 +2826,35 @@ async function inboundEditor(tag, nodes, certs) {
           }, draw)),
           field(ie("sniName"), input(() => ts.serverName, (v) => { ts.serverName = v; }, { dir: "ltr" }))),
         h("div", { class: "row" }, h("span", { class: "muted small" }, ie("alpn")), ...alpnOpts.map((a) => check(() => alpn.has(a), (v) => { if (v) alpn.add(a); else alpn.delete(a); ts.alpn = alpnOpts.filter((x) => alpn.has(x)); if (!ts.alpn.length) delete ts.alpn; }, a))),
-        h("div", { class: "two" },
+        h("div", { class: "three" },
           field(ie("minVer"), select([["", "—"], ["1.2", "1.2"], ["1.3", "1.3"]], () => ts.minVersion || "", (v) => { if (v) ts.minVersion = v; else delete ts.minVersion; })),
+          field(lang === "fa" ? "حداکثر نسخهٔ TLS" : "Max TLS version", select([["", "—"], ["1.2", "1.2"], ["1.3", "1.3"]], () => ts.maxVersion || "", (v) => { if (v) ts.maxVersion = v; else delete ts.maxVersion; })),
           fpSel()),
+        h("details", { class: "adv-box" }, h("summary", {}, lang === "fa" ? "تنظیمات بیشتر TLS" : "More TLS settings"),
+          field("Cipher suites", input(() => ts.cipherSuites, (v) => { if (v) ts.cipherSuites = v; else delete ts.cipherSuites; }, { dir: "ltr", placeholder: "TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256:…" })),
+          h("div", { class: "row" }, opt(ts, "rejectUnknownSni", lang === "fa" ? "رد SNI ناشناس" : "Reject unknown SNI"), opt(ts, "disableSystemRoot", lang === "fa" ? "بدون گواهی‌های ریشهٔ سیستم" : "Disable system roots"),
+            opt(ts, "enableSessionResumption", lang === "fa" ? "ادامهٔ نشست (session resumption)" : "Session resumption")),
+          field(lang === "fa" ? "OCSP stapling (ثانیه، ۰ = خاموش)" : "OCSP stapling (s, 0 = off)", num(ts, "ocspStapling", { min: "0", placeholder: "0" }))),
         check(() => meta.insecure, (v) => { if (v) meta.insecure = true; else delete meta.insecure; }, ie("insecure")));
     }
     return section(ie("security"), ...kids);
+  }
+
+  function drawSockopt() {
+    const st = obj(tpl, "streamSettings");
+    const so = st.sockopt || {};
+    const FA = lang === "fa";
+    const commit = () => { if (Object.keys(so).length) st.sockopt = so; else delete st.sockopt; };
+    const bool = (key, label) => check(() => so[key], (v) => { if (v) so[key] = true; else delete so[key]; commit(); }, label);
+    const n2 = (key, attrs) => input(() => so[key], (v) => { if (v === undefined || Number.isNaN(v) || v === 0) delete so[key]; else so[key] = v; commit(); }, { type: "number", dir: "ltr", ...attrs });
+    return h("details", { class: "ie-sec adv-box", open: Object.keys(so).length > 0 }, h("summary", {}, FA ? "تنظیمات سوکت (پیشرفته)" : "Socket options (advanced)"),
+      h("div", { class: "row" }, bool("acceptProxyProtocol", ie("proxyProto")), bool("tcpFastOpen", "TCP Fast Open"), bool("tcpMptcp", "MPTCP"), bool("V6Only", FA ? "فقط IPv6" : "IPv6 only")),
+      h("div", { class: "three" },
+        field(FA ? "الگوریتم ازدحام" : "TCP congestion", select([["", FA ? "پیش‌فرض سیستم" : "System default"], ["bbr", "bbr"], ["cubic", "cubic"], ["reno", "reno"]], () => so.tcpcongestion || "", (v) => { if (v) so.tcpcongestion = v; else delete so.tcpcongestion; commit(); })),
+        field("Keep-alive interval (s)", n2("tcpKeepAliveInterval", { min: "0" })), field("Keep-alive idle (s)", n2("tcpKeepAliveIdle", { min: "0" }))),
+      h("div", { class: "three" },
+        field("TProxy", select([["", FA ? "خاموش" : "Off"], ["redirect", "redirect"], ["tproxy", "tproxy"]], () => so.tproxy || "", (v) => { if (v) so.tproxy = v; else delete so.tproxy; commit(); })),
+        field("Mark", n2("mark", { min: "0" })), field("Interface", input(() => so.interface, (v) => { if (v) so.interface = v; else delete so.interface; commit(); }, { dir: "ltr", placeholder: "eth0" }))));
   }
 
   function drawSniff() {
@@ -2811,12 +2864,55 @@ async function inboundEditor(tag, nodes, certs) {
       h("div", { class: "row" }, check(() => sn.enabled, (v) => { sn.enabled = v; }, ie("sniffOn")),
         check(() => sn.routeOnly, (v) => { if (v) sn.routeOnly = true; else delete sn.routeOnly; }, ie("routeOnly")),
         check(() => sn.metadataOnly, (v) => { if (v) sn.metadataOnly = true; else delete sn.metadataOnly; }, ie("metaOnly"))),
-      h("div", { class: "row" }, h("span", { class: "muted small" }, ie("dest")), ...["http", "tls", "quic", "fakedns"].map((x) => check(() => dest.has(x), (v) => { if (v) dest.add(x); else dest.delete(x); sn.destOverride = [...dest]; }, x))));
+      h("div", { class: "row" }, h("span", { class: "muted small" }, ie("dest")), ...["http", "tls", "quic", "fakedns"].map((x) => check(() => dest.has(x), (v) => { if (v) dest.add(x); else dest.delete(x); sn.destOverride = [...dest]; }, x))),
+      h("div", { class: "two" },
+        field(lang === "fa" ? "دامنه‌های مستثنا" : "Excluded domains", lines(() => sn.domainsExcluded, (v) => { if (v.length) sn.domainsExcluded = v; else delete sn.domainsExcluded; }, { placeholder: "courier.push.apple.com" })),
+        field(lang === "fa" ? "IPهای مستثنا" : "Excluded IPs", lines(() => sn.ipsExcluded, (v) => { if (v.length) sn.ipsExcluded = v; else delete sn.ipsExcluded; }, { placeholder: "10.0.0.0/8" }))));
   }
 
+  return {
+    drawForm, drawJSON,
+    readJSON() { try { tpl = JSON.parse(jsonTpl.value); meta = JSON.parse(jsonMeta.value); return ""; } catch (x) { return `${ie("badJson")}: ${x.message}`; } },
+    state: () => ({ tpl, meta, enabled }),
+  };
+}
+
+async function inboundEditor(tag, nodes, certs) {
+  const [raw, routes, certList, all] = await Promise.all([
+    api("GET", `/api/v2/admin/inbounds/${encodeURIComponent(tag)}`),
+    api("GET", `/api/v2/admin/inbounds/${encodeURIComponent(tag)}/routes`).catch(() => []),
+    certs ? Promise.resolve(certs) : api("GET", "/api/v2/admin/certs").catch(() => []),
+    api("GET", "/api/v2/admin/inbounds").catch(() => [])]);
+  const view = (all || []).find((x) => x.tag === tag) || {};
+  const lim = { cap: view.cap_bytes ? +(view.cap_bytes / 2 ** 30).toFixed(2) : 0, ends: view.ends_unix ? new Date(view.ends_unix * 1000).toISOString().slice(0, 10) : "" };
+  const lim0 = JSON.stringify(lim);
+  const parse = (v) => { try { return typeof v === "string" ? JSON.parse(v) : structuredClone(v || {}); } catch { return {}; } };
+  let tpl = parse(raw.template), meta = parse(raw.meta);
+  let enabled = raw.enabled;
+  const routed = (routes || []).length > 0;
+  let mode = "form";
+  const body = h("div", { class: "form ie" });
+  const err = h("div", { class: "error", role: "alert" });
+  const tabs = h("div", { class: "steps", role: "tablist" });
+  const d = openModal(`${ie("title")} · ${tag}`, h("div", {}, tabs, body, err), [
+    h("button", { class: "primary", value: "save", onclick: async (e) => { e.preventDefault(); await save(); } }, t("save"))]);
+  d.classList.add("wide");
+  d.addEventListener("close", () => d.classList.remove("wide"), { once: true });
+
+  const kit = inboundFormKit({ tpl, meta, enabled, lim, view, routed, certList, err, draw: () => draw() });
+  function draw() {
+    tabs.replaceChildren(...[["form", ie("form")], ["json", ie("json")]].map(([k, l]) => h("button", { type: "button", role: "tab", "aria-current": mode === k ? "step" : null, onclick: () => switchTo(k) }, l)));
+    body.replaceChildren(...(mode === "form" ? kit.drawForm() : kit.drawJSON()));
+  }
+  function switchTo(k) {
+    if (k === mode) return;
+    if (mode === "json") { const e = kit.readJSON(); if (e) { err.textContent = e; return; } }
+    err.textContent = ""; mode = k; draw();
+  }
   async function save() {
     err.textContent = "";
-    if (mode === "json") { try { tpl = JSON.parse(jsonTpl.value); meta = JSON.parse(jsonMeta.value); } catch (x) { err.textContent = `${ie("badJson")}: ${x.message}`; return; } }
+    if (mode === "json") { const e = kit.readJSON(); if (e) { err.textContent = e; return; } }
+    ({ tpl, meta, enabled } = kit.state());
     const st = tpl.streamSettings || {};
     if (st.security === "tls" && tpl.protocol !== "hysteria" && !(st.tlsSettings?.certificates || []).length) { err.textContent = ie("needCert"); return; }
     if (st.security === "reality" && st.realitySettings) meta.short_id = (st.realitySettings.shortIds || [])[0] || meta.short_id;

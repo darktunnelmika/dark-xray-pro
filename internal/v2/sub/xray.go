@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net"
 	"strconv"
+	"strings"
 )
 
 // Fragment configures TLS ClientHello fragmentation and UDP noise in Xray
@@ -129,6 +130,20 @@ func xrayOutbound(o outbound, fragment bool) map[string]any {
 		}
 		st["network"] = "xhttp"
 		st["xhttpSettings"] = xs
+	case "kcp":
+		ks := map[string]any{"header": map[string]any{"type": or(s.KCP.Header.Type, "none")}}
+		if s.KCP.Seed != "" {
+			ks["seed"] = s.KCP.Seed
+		}
+		st["kcpSettings"] = ks
+	case "tcp":
+		if p, h, ok := s.tcpHTTP(); ok {
+			req := map[string]any{"path": []string{p}}
+			if h != "" {
+				req["headers"] = map[string]any{"Host": strings.Split(h, ",")}
+			}
+			st["tcpSettings"] = map[string]any{"header": map[string]any{"type": "http", "request": req}}
+		}
 	}
 	if fragment {
 		st["sockopt"] = map[string]any{"dialerProxy": "fragment"}

@@ -1080,6 +1080,26 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 	}))
 	// compose: create a profile from a preset and place it on several nodes
 	// in one request; nothing is left behind if placement fails.
+	// draft: a ready inbound (keys made) for the panel's form to start from;
+	// nothing is stored.
+	mux.HandleFunc("POST /api/v2/admin/inbounds/draft", guard(func(w http.ResponseWriter, r *http.Request) {
+		var p PresetRequest
+		if !decode(w, r, &p) {
+			return
+		}
+		if p.Port == 0 {
+			p.Port = 443
+		}
+		p.Endpoints = []sub.Endpoint{{Name: "Direct", Address: "0.0.0.0", Port: p.Port}}
+		if p.Cert == "" {
+			p.Cert = "pending" // TLS drafts: the form picks the certificate
+		}
+		if p.Preset == "dokodemo" && p.Path == "" {
+			p.Path = "127.0.0.1:80"
+		}
+		tpl, meta, err := BuildPreset(p)
+		reply(w, map[string]json.RawMessage{"template": tpl, "meta": meta}, err)
+	}))
 	mux.HandleFunc("POST /api/v2/admin/inbounds/compose", guard(func(w http.ResponseWriter, r *http.Request) {
 		var in struct {
 			PresetRequest

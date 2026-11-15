@@ -691,3 +691,8 @@ input.switch:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px
 .seg button.clash:not(.on) { opacity: .55; }
 .b-sum { margin: 0; font-size: 13px; color: var(--muted); } .b-sum b { color: var(--text); }
 @media (max-width: 520px) { .b-row { grid-template-columns: 1fr; gap: 4px; } }
+.adv-box > summary { cursor: pointer; color: var(--muted); font-weight: 600; font-size: 13px; padding-block: 4px; }
+.adv-box[open] > summary { color: var(--text); margin-block-end: 8px; }
+details.ie-sec { padding: 12px 14px; border: 1px solid var(--glass-line); border-radius: var(--r-lg); }
+.fb-row { display: grid; grid-template-columns: 1fr 1fr 1fr 1.3fr 90px auto; gap: 6px; align-items: center; }
+@media (max-width: 720px) { .fb-row { grid-template-columns: 1fr 1fr; } }

@@ -148,6 +148,38 @@ type stream struct {
 		Host string `json:"host"`
 		Mode string `json:"mode"`
 	} `json:"xhttpSettings"`
+	KCP struct {
+		Header struct {
+			Type string `json:"type"`
+		} `json:"header"`
+		Seed string `json:"seed"`
+	} `json:"kcpSettings"`
+	TCP struct {
+		Header struct {
+			Type    string `json:"type"`
+			Request struct {
+				Path    []string            `json:"path"`
+				Headers map[string][]string `json:"headers"`
+			} `json:"request"`
+		} `json:"header"`
+	} `json:"tcpSettings"`
+}
+
+// tcpHTTP returns the path and Host of a TCP inbound with HTTP obfuscation.
+func (s stream) tcpHTTP() (path, host string, ok bool) {
+	if s.Network != "tcp" || s.TCP.Header.Type != "http" {
+		return "", "", false
+	}
+	path = "/"
+	if len(s.TCP.Header.Request.Path) > 0 {
+		path = s.TCP.Header.Request.Path[0]
+	}
+	for k, v := range s.TCP.Header.Request.Headers {
+		if strings.EqualFold(k, "host") && len(v) > 0 {
+			host = strings.Join(v, ",")
+		}
+	}
+	return path, host, true
 }
 
 type template struct {
@@ -212,6 +244,19 @@ func params(t template, m Meta) url.Values {
 		}
 	}
 	switch s.Network {
+	case "tcp":
+		if p, h, ok := s.tcpHTTP(); ok {
+			q.Set("headerType", "http")
+			q.Set("path", p)
+			if h != "" {
+				q.Set("host", h)
+			}
+		}
+	case "kcp":
+		q.Set("headerType", or(s.KCP.Header.Type, "none"))
+		if s.KCP.Seed != "" {
+			q.Set("seed", s.KCP.Seed)
+		}
 	case "grpc":
 		q.Set("serviceName", s.GRPC.ServiceName)
 		if s.GRPC.MultiMode {
@@ -310,8 +355,24 @@ func SS2022UserKey(secret, method string) string {
 	return base64.StdEncoding.EncodeToString(sum[:n])
 }
 
-// ssPassword is the client-side password of a 2022 multi-user inbound.
+// SSClassic reports a classic (pre-2022) AEAD method: each client has its
+// own password (its secret) and there is no server key.
+func SSClassic(method string) bool {
+	switch method {
+	case "aes-128-gcm", "aes-256-gcm", "chacha20-poly1305", "chacha20-ietf-poly1305", "xchacha20-poly1305", "xchacha20-ietf-poly1305":
+		return true
+	}
+	return false
+}
+
+// SSKnown is any Shadowsocks method the panel can serve.
+func SSKnown(method string) bool { return SS2022KeySize(method) > 0 || SSClassic(method) }
+
+// ssPassword is the client-side password of a multi-user inbound.
 func ssPassword(t template, secret string) string {
+	if SSClassic(t.Settings.Method) {
+		return secret
+	}
 	return t.Settings.Password + ":" + SS2022UserKey(secret, t.Settings.Method)
 }
 
@@ -348,11 +409,15 @@ func Links(a Account, ins []Inbound) ([]string, error) {
 				}
 				out = append(out, "vless://"+a.UUID+"@"+host+"?"+q.Encode()+"#"+frag)
 			case "shadowsocks":
-				if SS2022KeySize(t.Settings.Method) == 0 {
+				if !SSKnown(t.Settings.Method) {
 					continue
 				}
-				// SIP022: the 2022 userinfo is percent-encoded, not base64.
+				// SIP022: the 2022 userinfo is percent-encoded, not base64;
+				// classic methods use SIP002's base64 userinfo.
 				ui := url.QueryEscape(t.Settings.Method) + ":" + url.QueryEscape(ssPassword(t, a.Secret))
+				if SSClassic(t.Settings.Method) {
+					ui = base64.RawURLEncoding.EncodeToString([]byte(t.Settings.Method + ":" + ssPassword(t, a.Secret)))
+				}
 				out = append(out, "ss://"+ui+"@"+host+"#"+frag)
 			case "hysteria":
 				q := url.Values{}
@@ -401,6 +466,12 @@ func Links(a Account, ins []Inbound) ([]string, error) {
 					v["path"], v["host"] = s.HTTPUpgrade.Path, s.HTTPUpgrade.Host
 				case "grpc":
 					v["path"] = s.GRPC.ServiceName
+				case "kcp":
+					v["type"], v["path"] = or(s.KCP.Header.Type, "none"), s.KCP.Seed
+				case "tcp":
+					if p, h, ok := s.tcpHTTP(); ok {
+						v["type"], v["path"], v["host"] = "http", p, h
+					}
 				}
 				b, _ := json.Marshal(v)
 				out = append(out, "vmess://"+base64.StdEncoding.EncodeToString(b))

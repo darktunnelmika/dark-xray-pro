@@ -39,9 +39,11 @@ func parseTemplate(raw []byte) (map[string]any, error) {
 		st, _ := t["settings"].(map[string]any)
 		m, _ := st["method"].(string)
 		pw, _ := st["password"].(string)
-		key, err := base64.StdEncoding.DecodeString(pw)
-		if sub.SS2022KeySize(m) == 0 || err != nil || len(key) != sub.SS2022KeySize(m) {
-			return nil, fmt.Errorf("%w: shadowsocks inbounds must use a 2022 method with a matching base64 server key", ErrInvalid)
+		if !sub.SSClassic(m) {
+			key, err := base64.StdEncoding.DecodeString(pw)
+			if sub.SS2022KeySize(m) == 0 || err != nil || len(key) != sub.SS2022KeySize(m) {
+				return nil, fmt.Errorf("%w: shadowsocks needs a 2022 method with a matching base64 server key, or a classic AEAD method (aes-128-gcm, aes-256-gcm, chacha20-poly1305)", ErrInvalid)
+			}
 		}
 	}
 	return t, nil
@@ -73,6 +75,9 @@ var clientShapes = map[string]func(c Client, flow string) map[string]any{
 	// AmneziaWG runs beside Xray in the node agent; peers as for WireGuard.
 	"amneziawg": func(c Client, _ string) map[string]any { return map[string]any{"email": c.Email} },
 	"shadowsocks": func(c Client, method string) map[string]any {
+		if sub.SSClassic(method) {
+			return map[string]any{"method": method, "password": c.Secret, "email": c.Email}
+		}
 		return map[string]any{"password": sub.SS2022UserKey(c.Secret, method), "email": c.Email}
 	},
 }
