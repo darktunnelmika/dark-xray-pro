@@ -180,9 +180,10 @@ func (s *Store) System(ctx context.Context) SystemInfo {
 // RunSystemWatch tells the owners (Telegram) once a day while the HUB's
 // disk is nearly full.
 func (s *Store) RunSystemWatch(ctx context.Context) {
-	t := time.NewTicker(10 * time.Minute)
+	t := time.NewTicker(2 * time.Minute)
 	defer t.Stop()
 	for {
+		s.watchLoad(ctx)
 		si := s.System(ctx)
 		if si.DiskTotal > 0 {
 			p := 100 * si.DiskUsed / si.DiskTotal

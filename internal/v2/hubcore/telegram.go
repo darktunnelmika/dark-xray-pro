@@ -183,6 +183,17 @@ func telegramRoutes(s *Store, mux *docMux, guard func(http.HandlerFunc) http.Han
 		err := s.SetSetting(r.Context(), "tg_backup_hours", strconv.Itoa(in.Hours))
 		reply(w, s.telegramStatus(r.Context(), owners(r.Context())), err)
 	}))
+	mux.HandleFunc("GET /api/v2/admin/telegram/alerts", guard(func(w http.ResponseWriter, r *http.Request) {
+		reply(w, s.Alerts(r.Context()), nil)
+	}))
+	mux.HandleFunc("PUT /api/v2/admin/telegram/alerts", guard(func(w http.ResponseWriter, r *http.Request) {
+		var in AlertSettings
+		if !decode(w, r, &in) {
+			return
+		}
+		err := s.PutAlerts(r.Context(), in)
+		reply(w, s.Alerts(r.Context()), err)
+	}))
 	mux.HandleFunc("GET /api/v2/admin/telegram/notices", guard(func(w http.ResponseWriter, r *http.Request) {
 		pct, _ := strconv.Atoi(s.Setting(r.Context(), "notify_percent"))
 		days, _ := strconv.Atoi(s.Setting(r.Context(), "notify_days"))

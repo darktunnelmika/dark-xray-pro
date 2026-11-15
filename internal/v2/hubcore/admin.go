@@ -104,6 +104,7 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 		}
 		s.logins.success(ip, in.Username)
 		s.noteSession(r.Context(), tok, r)
+		s.noteLogin(r.Context(), in.Username, r)
 		s.Audit(r.Context(), lp, r, http.StatusOK)
 		setSessionCookie(w, r, tok, int(sessionTTL.Seconds()))
 		reply(w, map[string]string{"username": in.Username}, nil)

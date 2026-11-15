@@ -968,6 +968,16 @@ func (b *Bot) reportText(ctx context.Context) string {
 
 // dailyReport sends the report once a day at 09:00 Tehran time (05:30 UTC).
 func (b *Bot) dailyReport(ctx context.Context) {
+	// Every N hours when the owner picked a shorter interval (Settings).
+	if h := b.Store.Alerts(ctx).ReportHours; h != 24 {
+		last, _ := strconv.ParseInt(b.Store.Setting(ctx, "tg_report_last"), 10, 64)
+		if b.now().Unix()-last < int64(h)*3600 {
+			return
+		}
+		_ = b.Store.SetSetting(ctx, "tg_report_last", strconv.FormatInt(b.now().Unix(), 10))
+		b.toOwners(ctx, b.reportText(ctx), nil)
+		return
+	}
 	now := b.now().UTC()
 	if now.Hour() < 5 || now.Hour() == 5 && now.Minute() < 30 {
 		return

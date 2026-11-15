@@ -4,8 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/darktunnelmika/dark-xray-pro/internal/v2/sub"
 	"github.com/darktunnelmika/dark-xray-pro/internal/v2/wire"
@@ -420,5 +423,55 @@ func TestBulkClientActions(t *testing.T) {
 	}
 	if err := s.CloneClient(ctx, "alice", "alice-2"); err == nil {
 		t.Fatal("cloning onto an existing name must fail")
+	}
+}
+
+func TestOwnerAlerts(t *testing.T) {
+	s, _ := newStore(t)
+	ctx := context.Background()
+	var mu sync.Mutex
+	var got []string
+	old := ownerNotify
+	ownerNotify = func(_ context.Context, text string) { mu.Lock(); got = append(got, text); mu.Unlock() }
+	defer func() { ownerNotify = old }()
+	if err := s.PutAlerts(ctx, AlertSettings{CPUPercent: 30, ReportHours: 24}); err == nil {
+		t.Fatal("thresholds under 50 must be refused")
+	}
+	if err := s.PutAlerts(ctx, AlertSettings{Login: true, CPUPercent: 80, ReportHours: 6}); err != nil {
+		t.Fatal(err)
+	}
+	if a := s.Alerts(ctx); !a.Login || a.CPUPercent != 80 || a.ReportHours != 6 {
+		t.Fatal("alerts", a)
+	}
+	wait := func() { time.Sleep(50 * time.Millisecond) }
+	s.checkLoad(ctx, "node:x", "نود X", "پردازنده", 95, 80)
+	wait()
+	if len(got) != 0 {
+		t.Fatal("one high reading must not alert")
+	}
+	s.checkLoad(ctx, "node:x", "نود X", "پردازنده", 96, 80)
+	s.checkLoad(ctx, "node:x", "نود X", "پردازنده", 97, 80)
+	wait()
+	mu.Lock()
+	n := len(got)
+	mu.Unlock()
+	if n != 1 || !strings.Contains(got[0], "نود X") {
+		t.Fatalf("one alert expected: %v", got)
+	}
+	s.checkLoad(ctx, "node:x", "نود X", "پردازنده", 40, 80)
+	wait()
+	mu.Lock()
+	defer mu.Unlock()
+	if len(got) != 2 || !strings.Contains(got[1], "عادی") {
+		t.Fatalf("calm-down note expected: %v", got)
+	}
+	r, _ := http.NewRequest("POST", "/", nil)
+	r.RemoteAddr = "9.9.9.9:1"
+	mu.Unlock()
+	s.noteLogin(ctx, "boss", r)
+	wait()
+	mu.Lock()
+	if len(got) != 3 || !strings.Contains(got[2], "boss") || !strings.Contains(got[2], "9.9.9.9") {
+		t.Fatalf("login notice: %v", got)
 	}
 }
