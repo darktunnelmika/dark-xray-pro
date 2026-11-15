@@ -2858,7 +2858,7 @@ function discountsCard(products) {
         h("span", { class: "small muted" }, d.max_uses ? pay("dcUsed", { u: fmtNum(d.used), m: fmtNum(d.max_uses) }) : pay("dcUsedInf", { u: fmtNum(d.used) })),
         d.product_id ? h("span", { class: "badge" }, d.product_id) : null,
         expired ? h("span", { class: "badge bad" }, pay("dcExpired")) : d.expires_unix ? h("span", { class: "badge" }, pay("dcExp", { d: fmtD(d.expires_unix) })) : null,
-        full ? h("span", { class: "badge warn" }, "✓") : null, !d.enabled ? h("span", { class: "badge" }, pay("dcOff")) : null,
+        full ? h("span", { class: "badge warn" }, lang === "fa" ? "ظرفیت تمام شد" : "used up") : null, !d.enabled ? h("span", { class: "badge" }, pay("dcOff")) : null,
         h("span", { class: "spacer" }),
         h("button", { type: "button", class: "ghost small", onclick: () => copy(d.code) }, t("copy")),
         h("button", { type: "button", class: "ghost danger small", onclick: async () => { if (await confirmAction(pay("dcDelAsk", { x: d.code }))) { await guarded(() => api("DELETE", `/api/v2/admin/discounts/${encodeURIComponent(d.code)}`)); load(); } } }, t("delete")));
