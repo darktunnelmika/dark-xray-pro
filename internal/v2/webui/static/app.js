@@ -2616,6 +2616,9 @@ async function inboundEditor(tag, nodes, certs) {
   };
   const check = (get, set, label, onChange) => { const c = h("input", { type: "checkbox", checked: !!get() }); c.addEventListener("change", () => { set(c.checked); if (onChange) onChange(); }); return h("label", { class: "check" }, c, label); };
   const lines = (get, set, attrs = {}) => { const el = h("textarea", { rows: "3", dir: "ltr", spellcheck: "false", ...attrs }, (get() || []).join("\n")); el.addEventListener("input", () => set(el.value.split(/\s+/).map((x) => x.trim()).filter(Boolean))); return el; };
+  // Segmented choice, the same control as the inbound builder.
+  const segPick = (opts, get, set, onChange) => h("div", { class: "seg", role: "radiogroup" }, opts.map(([v, l]) => h("button", { type: "button", role: "radio",
+    "aria-checked": String(String(get() ?? "") === v), class: String(get() ?? "") === v ? "on" : "", onclick: () => { if (String(get() ?? "") === v) return; set(v); if (onChange) onChange(); } }, l)));
   const section = (title, ...kids) => h("fieldset", { class: "ie-sec" }, h("legend", {}, title), ...kids);
   const keys = (kind, extra = {}) => api("POST", "/api/v2/admin/keys", { kind, ...extra });
   const randB64 = (n) => { const b = new Uint8Array(n); crypto.getRandomValues(b); return btoa(String.fromCharCode(...b)); };
@@ -2644,6 +2647,9 @@ async function inboundEditor(tag, nodes, certs) {
     const hasStream = !["wireguard", "shadowsocks"].includes(proto);
     const out = [];
     // General
+    const stx = tpl.streamSettings || {};
+    out.push(h("p", { class: "b-sum" }, h("b", { dir: "ltr" }, [String(proto).toUpperCase(), hasStream && proto !== "hysteria" ? (stx.network || "tcp") : "", hasStream ? (proto === "hysteria" ? "TLS" : (stx.security || "none").toUpperCase()) : "", settings.flow ? "Vision" : ""].filter(Boolean).join(" · ")),
+      lang === "fa" ? " — پروتکل بعد از ساخت عوض نمی‌شود (لینک کاربرها به آن بسته است)؛ انتقال و امنیت را همین‌جا عوض کنید." : " — the protocol cannot change after creation (client links depend on it); change transport and security here."));
     out.push(section(ie("general"),
       h("div", { class: "two" },
         field(ie("protocol"), h("input", { value: proto, disabled: true, dir: "ltr" })),
@@ -2700,7 +2706,7 @@ async function inboundEditor(tag, nodes, certs) {
     const st = obj(tpl, "streamSettings");
     const net = st.network || "tcp";
     const kids = [];
-    const netSel = select([["tcp", "TCP (RAW)"], ["ws", "WebSocket"], ["grpc", "gRPC"], ["httpupgrade", "HTTPUpgrade"], ["xhttp", "XHTTP"]], () => (net === "splithttp" ? "xhttp" : net), (v) => {
+    const netSel = segPick([["tcp", "TCP"], ["ws", "WebSocket"], ["grpc", "gRPC"], ["httpupgrade", "HTTPUpgrade"], ["xhttp", "XHTTP"]], () => (net === "splithttp" ? "xhttp" : net), (v) => {
       for (const k of ["tcpSettings", "rawSettings", "wsSettings", "grpcSettings", "httpupgradeSettings", "xhttpSettings", "splithttpSettings"]) delete st[k];
       st.network = v;
       if (v === "ws") st.wsSettings = { path: "/" + Math.random().toString(36).slice(2, 8) };
@@ -2743,7 +2749,7 @@ async function inboundEditor(tag, nodes, certs) {
     if (proto !== "hysteria") {
       const opts = [["none", ie("none")], ["tls", "TLS"]];
       if (["vless", "trojan"].includes(proto) && ["tcp", "grpc", "xhttp", "splithttp"].includes(net)) opts.push(["reality", "REALITY"]);
-      kids.push(field(ie("sec"), select(opts, () => sec, async (v) => {
+      kids.push(field(ie("sec"), segPick(opts, () => sec, async (v) => {
         delete st.realitySettings; delete st.tlsSettings; st.security = v;
         if (v === "reality") {
           const k = await keys("reality"); const sid = await keys("shortid");
