@@ -673,3 +673,4 @@ input.switch:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px
 .pw-wrap input { inline-size: 100%; padding-inline-end: 44px; }
 .pw-eye { position: absolute; inset-block: 4px; inset-inline-end: 4px; padding: 0 10px; min-block-size: 0; border: 0; box-shadow: none; }
 .warn-text { color: var(--warn); margin-block-start: -6px; }
+.end-row { color: inherit; text-decoration: none; padding: 4px 6px; border-radius: 8px; } .end-row:hover { background: var(--surface-2); }

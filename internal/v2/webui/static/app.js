@@ -611,9 +611,28 @@ function updateAllButton(nodes) {
   } }, s3("updAll", { n: fmtNum(old.length) }));
 }
 
+// Services that end within three days or have under a tenth of their volume
+// left: the people to remind or renew today.
+function endingSoonCard(list) {
+  const fa = lang === "fa";
+  const now = Date.now() / 1000;
+  const rows = list.filter((c) => c.Enabled && !(c.VolumeBytes > 0 && c.Remaining <= 0)).map((c) => {
+    const days = c.EffectiveUntil > 0 ? (c.EffectiveUntil - now) / 86400 : Infinity;
+    const share = c.VolumeBytes > 0 ? c.Remaining / c.VolumeBytes : 1;
+    return { c, days, share, score: Math.min(days / 3, share * 10) };
+  }).filter((x) => x.days > 0 && (x.days <= 3 || x.share < 0.1)).sort((a, b) => a.score - b.score);
+  return h("div", { class: "card form" }, h("div", { class: "row" }, h("h2", {}, fa ? "رو به پایان" : "Ending soon"), rows.length ? h("span", { class: "badge warn" }, fmtNum(rows.length)) : null),
+    rows.length ? h("div", { class: "form" }, rows.slice(0, 8).map(({ c, days, share }) => h("a", { class: "row small end-row", href: `#/client?e=${encodeURIComponent(c.Email)}` },
+      h("span", { class: "name" }, c.Email), h("span", { class: "spacer" }),
+      days <= 3 ? h("span", { class: `badge ${days < 1 ? "bad" : "warn"}` }, days < 1 ? (fa ? "امروز" : "today") : fa ? `${fmtNum(Math.ceil(days))} روز` : `${Math.ceil(days)} d`) : null,
+      share < 0.1 ? h("span", { class: "badge warn", dir: "ltr" }, bytes(c.Remaining)) : null)),
+      rows.length > 8 ? h("a", { class: "small", href: "#/clients" }, fa ? `و ${fmtNum(rows.length - 8)} مورد دیگر…` : `and ${rows.length - 8} more…`) : null)
+      : h("p", { class: "muted small" }, fa ? "سرویسی در سه روز آینده تمام نمی‌شود." : "Nothing ends in the next three days."));
+}
+
 async function viewDashboard() {
   const [o, nodes, ins] = await Promise.all([api("GET", "/api/v2/admin/overview"), api("GET", "/api/v2/admin/nodes"), api("GET", "/api/v2/admin/insights?days=14")]);
-  const si = await api("GET", "/api/v2/admin/system").catch(() => null);
+  const [si, cls] = await Promise.all([api("GET", "/api/v2/admin/system").catch(() => null), api("GET", "/api/v2/admin/clients").catch(() => [])]);
   const stat = (k, v, ic, share, sub) => h("div", { class: "card stat" },
     h("div", { class: "stat-top" }, h("span", { class: "stat-ic" }, icon(ic)), h("div", { class: "k" }, t(k))),
     h("div", { class: "v" }, v), share != null ? h("div", { class: "bar thin" }, h("i", { style: `inline-size:${Math.round(Math.max(0, Math.min(1, share)) * 100)}%` })) : null,
@@ -632,6 +651,7 @@ async function viewDashboard() {
       stat("trafficTotal", bytes(o.TrafficTotal), "finance")),
     h("div", { class: "dash" },
       h("div", { class: "card form wide-col" }, h("div", { class: "row" }, h("h2", {}, t("traffic14")), legend()), barsSvg(ins.daily, 1100)),
+      endingSoonCard(cls || []),
       h("div", { class: "card form" }, h("h2", {}, t("topToday")),
         ins.top.length ? h("div", { class: "meters" }, ins.top.map((u) => meter(u.email, (100 * u.bytes) / topMax, bytes(u.bytes), true))) : h("p", { class: "muted small" }, t("noData"))),
       h("div", { class: "card form" }, h("h2", {}, t("recentEvents")),
