@@ -734,3 +734,51 @@ func TestSmartOrder(t *testing.T) {
 		t.Fatal("smart order off must keep the list as is")
 	}
 }
+
+func TestSpeedLimit(t *testing.T) {
+	s, _ := newStore(t)
+	ctx := context.Background()
+	if _, err := s.CreateNode(ctx, "n1", "n1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CreatePreset(ctx, PresetRequest{Tag: "r1", NodeID: "n1", Preset: "vless-reality", Port: 443, SNI: "www.speedtest.net",
+		Endpoints: []sub.Endpoint{{Name: "Direct", Address: "1.2.3.4", Port: 443}}}); err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range []string{"slow", "fast"} {
+		if err := s.PutClient(ctx, Client{Email: e, Enabled: true, VolumeBytes: -1, Inbounds: []string{"r1"}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.SetSpeedLimit(ctx, "slow", 10); err == nil {
+		t.Fatal("a limit under 64 kbit/s must be refused")
+	}
+	if err := s.SetSpeedLimit(ctx, "slow", 8000); err != nil {
+		t.Fatal(err)
+	}
+	render := func() string {
+		cfg, err := s.RenderNode(ctx, "n1")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(cfg)
+	}
+	if strings.Contains(render(), "dark-limit") {
+		t.Fatal("an old agent has no limiter; nothing may route to it")
+	}
+	_, _ = s.db.Exec(`UPDATE nodes SET agent_version='v2.10.0' WHERE id='n1'`)
+	cfg := render()
+	if !strings.Contains(cfg, `"dark-limit-1"`) || !strings.Contains(cfg, `"pass":"8000"`) || !strings.Contains(cfg, `"user":["slow"]`) || strings.Contains(cfg, `"user":["fast"]`) {
+		t.Fatal(cfg)
+	}
+	list, _ := s.Clients(ctx)
+	for _, c := range list {
+		if c.Email == "slow" && c.SpeedKbps != 8000 {
+			t.Fatal("the list must show the limit")
+		}
+	}
+	_ = s.SetSpeedLimit(ctx, "slow", 0)
+	if strings.Contains(render(), "dark-limit") {
+		t.Fatal("removing the limit must remove the route")
+	}
+}

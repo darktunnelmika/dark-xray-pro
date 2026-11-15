@@ -1293,6 +1293,7 @@ function clientCard(c, ctx, selected, onSelect) {
     h("div", { class: "row small muted" },
       h("span", {}, `${bytes(used)} / ${c.VolumeBytes < 0 ? t("unlimited") : bytes(c.VolumeBytes)}`),
       c.MaxIPs ? h("span", {}, `· IP ≤ ${fmtNum(c.MaxIPs)}`) : null,
+      c.speed_kbps ? h("span", {}, `· ⚡ ${fmtNum(+(c.speed_kbps / 1000).toFixed(1))} Mbps`) : null,
       h("span", {}, `· ${(c.Inbounds || []).join(", ")}`)),
     c.Note ? h("div", { class: "small muted" }, c.Note) : null,
     c.VolumeBytes > 0 ? h("div", { class: "bar" }, h("i", { class: pct > 90 ? "bad" : pct > 75 ? "warn" : "", style: `inline-size:${pct}%` })) : null,
@@ -1606,6 +1607,7 @@ function clientForm(c, inbounds, ctx = { reps: [] }) {
   const days = h("input", { type: "number", min: "0", value: daysLeft });
   const first = h("input", { type: "checkbox", checked: isNew ? true : !v.ExpiresUnix && v.DurationSeconds > 0 });
   const ips = h("input", { type: "number", min: "0", max: "1000", value: v.MaxIPs });
+  const speed = h("input", { type: "number", min: "0", step: "0.5", value: v.speed_kbps ? +(v.speed_kbps / 1000).toFixed(2) : 0 });
   const enabled = h("input", { type: "checkbox", checked: v.Enabled });
   const note = h("input", { value: v.Note || "", maxlength: "2000" });
   const owner = me.role === "owner";
@@ -1650,6 +1652,8 @@ function clientForm(c, inbounds, ctx = { reps: [] }) {
       const em = encodeURIComponent(name.value);
       await api("PUT", `/api/v2/admin/clients/${em}`, body);
       if ((note.value || "") !== (v.Note || "")) await api("PUT", `/api/v2/admin/clients/${em}/note`, { Note: note.value });
+      const kbps = Math.round((+speed.value || 0) * 1000);
+      if (kbps !== (v.speed_kbps || 0)) await api("PUT", `/api/v2/admin/clients/${em}/speed`, { kbps });
       if (repSel && repSel.value !== (v.RepID || "")) await api("POST", `/api/v2/admin/clients/${em}/transfer`, { RepID: repSel.value });
       if (tplExtra?.reset_period && owner) await api("PUT", `/api/v2/admin/clients/${em}/reset-period`, { period: tplExtra.reset_period });
       if (tplExtra?.hwid_limit) await api("PUT", `/api/v2/admin/clients/${em}/hwid-limit`, { limit: tplExtra.hwid_limit });
@@ -1663,7 +1667,9 @@ function clientForm(c, inbounds, ctx = { reps: [] }) {
     me.role === "rep" ? h("label", {}, h("span", {}, t("plan")), plan, h("span", { class: "small" }, t("unitsHint"))) : null,
     h("div", { class: "two" }, h("label", {}, h("span", {}, t("volumeGB")), vol), h("label", {}, h("span", {}, t("days")), days)),
     h("label", { class: "check" }, first, t("firstUse")),
-    h("div", { class: "two" }, h("label", {}, h("span", {}, t("maxIPs")), ips), h("label", { class: "check" }, enabled, t("enabled"))),
+    h("div", { class: "two" }, h("label", {}, h("span", {}, t("maxIPs")), ips),
+      h("label", {}, h("span", {}, lang === "fa" ? "سقف سرعت (مگابیت، ۰ = آزاد)" : "Speed limit (Mbit/s, 0 = none)"), speed)),
+    h("label", { class: "check" }, enabled, t("enabled")),
     h("fieldset", { class: "form", style: "border:0;padding:0;margin:0" }, h("legend", { class: "small muted" }, t("assignInbounds")), boxes),
     h("label", {}, h("span", {}, t("contact")), note),
     repSel ? h("label", {}, h("span", {}, t("transfer")), repSel) : null,

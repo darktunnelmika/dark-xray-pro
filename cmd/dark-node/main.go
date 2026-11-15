@@ -84,6 +84,7 @@ func main() {
 		stop()
 	})
 	go sup.Run(ctx)
+	go nodeagent.RunLimiter(ctx, log.Printf)
 	log.Printf("dark-node %s started: node=%s hub=%s", nodeagent.Version, *nodeID, *hubURL)
 	agent.Run(ctx)
 }

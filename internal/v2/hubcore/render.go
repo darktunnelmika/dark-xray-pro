@@ -286,6 +286,7 @@ JOIN inbounds i ON i.tag=r.tag WHERE r.node_id=? AND i.enabled=1 ORDER BY i.tag`
 		}
 	}
 	outbounds, routing, dns, routeOnly := s.nodeRouting(ctx, nodeID, swapTags)
+	outbounds = s.speedRouting(ctx, agentVer, clients, outbounds, routing)
 	if routeOnly {
 		for _, x := range inbounds {
 			m, _ := x.(map[string]any)
