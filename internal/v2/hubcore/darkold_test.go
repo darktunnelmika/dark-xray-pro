@@ -88,7 +88,10 @@ func TestImportDarkOld(t *testing.T) {
 		t.Fatal("a preview must not write")
 	}
 	var applied string
-	SetTelegramControl(TelegramControl{Apply: func(_ context.Context, tok string, owners []int64) (string, error) { applied = tok; return "bossbot", nil }})
+	SetTelegramControl(TelegramControl{Apply: func(_ context.Context, tok string, owners []int64) (string, error) {
+		applied = tok
+		return "bossbot", nil
+	}})
 	defer SetTelegramControl(TelegramControl{})
 	res, err := s.ImportDarkOld(ctx, DarkOldOptions{Inbounds: []string{"main"}, OwnerBot: true})
 	if err != nil || res.Clients != 3 || res.Telegram != 1 || res.Links != 4 {
