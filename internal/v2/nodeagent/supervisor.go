@@ -192,11 +192,14 @@ func (s *Supervisor) runOnce(ctx context.Context) error {
 	cmd := exec.Command(s.Binary, "run", "-c", s.activePath())
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true, Pdeathsig: syscall.SIGTERM}
 	out, errOut := io.Writer(os.Stdout), io.Writer(os.Stderr)
-	if s.Access != nil {
-		out = io.MultiWriter(out, s.Access)
-	}
 	if s.Log != nil {
 		out, errOut = io.MultiWriter(out, s.Log), io.MultiWriter(errOut, s.Log)
+	}
+	if s.Access != nil {
+		// Connection lines ("... accepted ... email: x") feed the IP tracker
+		// only: in the system journal they would grow by one line per
+		// connection and keep a record of who connected when.
+		out = &splitAccess{access: s.Access, rest: out}
 	}
 	cmd.Stdout, cmd.Stderr = out, errOut
 	if err := cmd.Start(); err != nil {
@@ -229,4 +232,33 @@ func (s *Supervisor) runOnce(ctx context.Context) error {
 		return nil
 	}
 	return err
+}
+
+// splitAccess sends Xray's access-log lines to one writer and every other
+// line to another. It never fails, so Xray is never blocked.
+type splitAccess struct {
+	access, rest io.Writer
+	buf          []byte
+}
+
+func (w *splitAccess) Write(p []byte) (int, error) {
+	w.buf = append(w.buf, p...)
+	for {
+		i := bytes.IndexByte(w.buf, '\n')
+		if i < 0 {
+			break
+		}
+		line := w.buf[:i+1]
+		if bytes.Contains(line, []byte(" accepted ")) {
+			_, _ = w.access.Write(line)
+		} else {
+			_, _ = w.rest.Write(line)
+		}
+		w.buf = w.buf[i+1:]
+	}
+	if len(w.buf) > 64<<10 {
+		_, _ = w.rest.Write(w.buf)
+		w.buf = w.buf[:0]
+	}
+	return len(p), nil
 }
