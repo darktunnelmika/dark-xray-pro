@@ -39,6 +39,7 @@ func wantsPage(r *http.Request) bool {
 
 type pageApp struct {
 	Name, Platform, Link string
+	Rec                  bool // suits the visitor's device
 }
 
 type pageData struct {
@@ -51,18 +52,23 @@ type pageData struct {
 	Apps                                         []pageApp
 	Announce, Support                            string
 	Nonce                                        string
+	Ring                                         int // stroke offset of the usage ring (0–100)
+	OtherLang, OtherLangName                     string
 	T                                            map[string]string
 	Accent                                       template.CSS // checked #rrggbb
 	Logo                                         template.URL // checked data:image/… URL
 }
 
-type pageLink struct{ Name, URL string }
+type pageLink struct {
+	Name, URL string
+	I         int
+}
 
 var pageText = map[string]map[string]string{
-	"fa": {"used": "مصرف‌شده", "left": "باقی‌مانده", "expires": "انقضا", "days": "روز مانده", "dayunit": "روز", "noexp": "بدون انقضا", "notstarted": "از اولین اتصال شروع می‌شود",
+	"fa": {"qr": "QR", "rec": "پیشنهادی برای دستگاه شما", "other": "برنامه‌های دیگر", "usage": "مصرف", "hide": "بستن", "used": "مصرف‌شده", "left": "باقی‌مانده", "expires": "انقضا", "days": "روز مانده", "dayunit": "روز", "noexp": "بدون انقضا", "notstarted": "از اولین اتصال شروع می‌شود",
 		"active": "فعال", "ended": "تمام‌شده", "disabled": "غیرفعال", "sub": "لینک اشتراک", "copy": "کپی", "copied": "کپی شد", "add": "افزودن به برنامه",
 		"configs": "کانفیگ‌ها", "support": "پشتیبانی", "scan": "این کد را با برنامهٔ VPN اسکن کنید", "of": "از", "unlimited": "نامحدود"},
-	"en": {"used": "Used", "left": "Remaining", "expires": "Expires", "days": "days left", "dayunit": "days", "noexp": "No expiry", "notstarted": "Starts at first connection",
+	"en": {"qr": "QR", "rec": "Suggested for your device", "other": "Other apps", "usage": "Usage", "hide": "Close", "used": "Used", "left": "Remaining", "expires": "Expires", "days": "days left", "dayunit": "days", "noexp": "No expiry", "notstarted": "Starts at first connection",
 		"active": "Active", "ended": "Ended", "disabled": "Disabled", "sub": "Subscription link", "copy": "Copy", "copied": "Copied", "add": "Add to an app",
 		"configs": "Configs", "support": "Support", "scan": "Scan this code with your VPN app", "of": "of", "unlimited": "Unlimited"},
 }
@@ -136,7 +142,7 @@ FROM clients c LEFT JOIN client_usage cu ON cu.email=c.email WHERE c.email=?`, e
 			} else if strings.HasPrefix(l, "vmess://") {
 				name = "VMess"
 			}
-			d.Links = append(d.Links, pageLink{Name: name, URL: l})
+			d.Links = append(d.Links, pageLink{Name: name, URL: l, I: len(d.Links)})
 		}
 	}
 	enc := url.QueryEscape(subURL)
@@ -157,7 +163,52 @@ FROM clients c LEFT JOIN client_usage cu ON cu.email=c.email WHERE c.email=?`, e
 		{"Clash Meta", "Android · Desktop", "clash://install-config?url=" + url.QueryEscape(subURL+"?format=clash") + "&name=" + name},
 		{"Karing", "Android · iOS · Desktop", "karing://install-config?url=" + enc + "&name=" + name},
 	}
+	d.Ring = 100 - d.Percent
+	if c.VolumeBytes <= 0 {
+		d.Ring = 0
+	}
+	d.OtherLang, d.OtherLangName = "en", "English"
+	if lang == "en" {
+		d.OtherLang, d.OtherLangName = "fa", "فارسی"
+	}
 	return d, nil
+}
+
+// suggestApps puts the apps for the visitor's system first.
+func suggestApps(apps []pageApp, ua string) []pageApp {
+	ua = strings.ToLower(ua)
+	os := ""
+	switch {
+	case strings.Contains(ua, "android"):
+		os = "Android"
+	case strings.Contains(ua, "iphone"), strings.Contains(ua, "ipad"):
+		os = "iOS"
+	case strings.Contains(ua, "windows"), strings.Contains(ua, "macintosh"), strings.Contains(ua, "linux"):
+		os = "Desktop"
+	}
+	if os == "" {
+		return apps
+	}
+	var rec, rest []pageApp
+	for _, a := range apps {
+		if strings.Contains(a.Platform, os) && len(rec) < 3 {
+			a.Rec = true
+			rec = append(rec, a)
+		} else {
+			rest = append(rest, a)
+		}
+	}
+	return append(rec, rest...)
+}
+
+// configQR is the QR of one config on the page (?qr=1&cfg=N).
+func (s *Store) configQR(ctx context.Context, w http.ResponseWriter, email string, n int) {
+	d, err := s.subPageData(ctx, email, "", "fa")
+	if err != nil || n < 0 || n >= len(d.Links) {
+		http.NotFound(w, nil)
+		return
+	}
+	serveSubQR(w, d.Links[n].URL)
 }
 
 func or2(a, b string) string {
@@ -183,6 +234,7 @@ func (s *Store) serveSubPage(w http.ResponseWriter, r *http.Request, email, subU
 	nb := make([]byte, 16)
 	_, _ = rand.Read(nb)
 	d.Nonce = base64.StdEncoding.EncodeToString(nb)
+	d.Apps = suggestApps(d.Apps, r.UserAgent())
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Content-Security-Policy", "default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; script-src 'nonce-"+d.Nonce+"'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
@@ -226,22 +278,40 @@ button,.btn{appearance:none;border:1px solid var(--line);background:rgb(255 255 
 .cfg{display:flex;gap:8px;align-items:center;padding:8px 0;border-bottom:1px solid var(--line)}.cfg:last-child{border:0}.cfg span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .ann{border-color:rgb(255 198 92/.4);color:var(--warn);white-space:pre-wrap}
 @media(max-width:420px){.apps{grid-template-columns:1fr}}
+.hero{display:grid;grid-template-columns:auto minmax(0,1fr);gap:18px;align-items:center}
+.ring{position:relative;width:118px;height:118px}.ring svg{width:100%;height:100%;transform:rotate(-90deg)}
+.ring .tr{stroke:rgb(255 255 255/.07)}.ring .fg{stroke:url(#g);stroke-linecap:round;filter:drop-shadow(0 0 6px var(--cyan))}
+.ring .c{position:absolute;inset:0;display:grid;place-content:center;text-align:center;line-height:1.2}.ring .c b{font-size:20px}.ring .c span{font-size:11px;color:var(--muted)}
+.kv{display:grid;gap:6px}.kv div{display:flex;justify-content:space-between;gap:10px;border-bottom:1px dashed var(--line);padding-bottom:6px}.kv div:last-child{border:0}
+.kv b{white-space:nowrap}.lang{color:var(--muted);font-size:13px;text-decoration:none}
+.rec{border-color:rgb(45 226 230/.55);box-shadow:0 0 18px -8px var(--cyan)}.lbl{font-size:12px;color:var(--muted);margin:12px 0 6px}
+.cqr{display:none;margin:8px auto 4px;width:200px;height:200px;border-radius:12px;background:#fff;padding:6px}.cfg.open .cqr{display:block}.cfg{flex-wrap:wrap}
+@media(max-width:400px){.hero{grid-template-columns:1fr;justify-items:center}.kv{width:100%}}
 </style></head><body><div class="wrap">
+<div class="row"><a class="lang" href="?lang={{.OtherLang}}">🌐 {{.OtherLangName}}</a></div>
 <div class="card"><div class="row">{{if .Logo}}<img class="logo" src="{{.Logo}}" alt="">{{end}}<h1>{{.Title}}</h1><span class="sp"></span><span class="badge {{.StatusClass}}">{{.Status}}</span></div>
 {{if ne .Title .Email}}<div class="muted">{{.Email}}</div>{{end}}</div>
 {{if .Announce}}<div class="card ann">{{.Announce}}</div>{{end}}
-<div class="card"><div class="grid">
-<div class="stat"><div class="muted">{{index .T "left"}}</div><div class="big"><bdi>{{.Left}}</bdi></div></div>
-<div class="stat"><div class="muted">{{index .T "expires"}}</div><div class="big"><bdi>{{.DaysText}}</bdi> <small>{{.DaysUnit}}</small></div><div class="muted"><bdi>{{.ExpiresText}}</bdi></div></div></div>
-<div class="row muted" style="margin-top:12px"><span>{{index .T "used"}}: <bdi>{{.Used}}</bdi></span><span class="sp"></span><span>{{index .T "of"}} <bdi>{{.Total}}</bdi></span></div>
-<div class="bar"><i style="width:{{.Percent}}%"></i></div></div>
+<div class="card hero">
+<div class="ring"><svg viewBox="0 0 36 36"><defs><linearGradient id="g"><stop offset="0" stop-color="var(--violet)"/><stop offset="1" stop-color="var(--cyan)"/></linearGradient></defs>
+<circle class="tr" cx="18" cy="18" r="15.9" fill="none" stroke-width="3"/><circle class="fg" cx="18" cy="18" r="15.9" fill="none" stroke-width="3" pathLength="100" stroke-dasharray="100" stroke-dashoffset="{{.Ring}}"/></svg>
+<div class="c"><b><bdi>{{.Left}}</bdi></b><span>{{index .T "left"}}</span></div></div>
+<div class="kv">
+<div><span class="muted">{{index .T "used"}}</span><b><bdi>{{.Used}}</bdi> <small class="muted">{{index .T "of"}} <bdi>{{.Total}}</bdi></small></b></div>
+<div><span class="muted">{{index .T "expires"}}</span><b><bdi>{{.DaysText}}</bdi> <small class="muted">{{.DaysUnit}}</small></b></div>
+<div><span class="muted"></span><span class="muted"><bdi>{{.ExpiresText}}</bdi></span></div>
+</div></div>
+<div class="card"><b>{{index .T "add"}}</b>
+{{$rec := false}}{{range .Apps}}{{if .Rec}}{{$rec = true}}{{end}}{{end}}
+{{if $rec}}<div class="lbl">{{index .T "rec"}}</div><div class="apps">{{range .Apps}}{{if .Rec}}<a class="btn app rec" href="{{safeURL .Link}}"><span>{{.Name}}</span><span class="muted">{{.Platform}}</span></a>{{end}}{{end}}</div><div class="lbl">{{index .T "other"}}</div>{{end}}
+<div class="apps"{{if not $rec}} style="margin-top:10px"{{end}}>{{range .Apps}}{{if not .Rec}}<a class="btn app" href="{{safeURL .Link}}"><span>{{.Name}}</span><span class="muted">{{.Platform}}</span></a>{{end}}{{end}}</div></div>
 <div class="card"><div class="row"><b>{{index .T "sub"}}</b><span class="sp"></span><button class="primary" data-copy="{{.SubURL}}">{{index .T "copy"}}</button></div>
 <img class="qr" src="?qr=1" alt="QR"><div class="muted" style="text-align:center">{{index .T "scan"}}</div><code>{{.SubURL}}</code></div>
-<div class="card"><b>{{index .T "add"}}</b><div class="apps" style="margin-top:10px">{{range .Apps}}<a class="btn app" href="{{safeURL .Link}}"><span>{{.Name}}</span><span class="muted">{{.Platform}}</span></a>{{end}}</div></div>
-{{if .Links}}<div class="card"><b>{{index .T "configs"}}</b>{{range .Links}}<div class="cfg"><span dir="ltr">{{.Name}}</span><button data-copy="{{.URL}}">{{index $.T "copy"}}</button></div>{{end}}</div>{{end}}
+{{if .Links}}<div class="card"><b>{{index .T "configs"}}</b>{{range .Links}}<div class="cfg"><span dir="ltr">{{.Name}}</span><button data-qr>{{index $.T "qr"}}</button><button data-copy="{{.URL}}">{{index $.T "copy"}}</button><img class="cqr" alt="QR" loading="lazy" data-src="?qr=1&amp;cfg={{.I}}"></div>{{end}}</div>{{end}}
 {{if .Support}}<a class="btn" href="{{safeURL .Support}}">💬 {{index .T "support"}}</a>{{end}}
 </div><script nonce="{{.Nonce}}">
-document.addEventListener("click",function(e){var b=e.target.closest("[data-copy]");if(!b)return;var v=b.getAttribute("data-copy"),t=b.textContent;
+document.addEventListener("click",function(e){var q=e.target.closest("[data-qr]");if(q){var r=q.parentNode,im=r.querySelector(".cqr");if(!im.src)im.src=im.getAttribute("data-src");r.classList.toggle("open");return;}
+var b=e.target.closest("[data-copy]");if(!b)return;var v=b.getAttribute("data-copy"),t=b.textContent;
 (navigator.clipboard?navigator.clipboard.writeText(v):Promise.reject()).catch(function(){var a=document.createElement("textarea");a.value=v;document.body.appendChild(a);a.select();document.execCommand("copy");a.remove();})
 .finally(function(){b.textContent={{index .T "copied"}};setTimeout(function(){b.textContent=t},1500)});});
 </script></body></html>`))

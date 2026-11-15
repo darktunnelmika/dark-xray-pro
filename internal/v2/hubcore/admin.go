@@ -1502,6 +1502,11 @@ func SubHandler(s *Store) http.Handler {
 		}
 		pageURL := publicBase("", r) + "/sub/" + r.PathValue("token")
 		if r.URL.Query().Get("qr") == "1" {
+			if c := r.URL.Query().Get("cfg"); c != "" {
+				n, _ := strconv.Atoi(c)
+				s.configQR(r.Context(), w, email, n)
+				return
+			}
 			serveSubQR(w, pageURL)
 			return
 		}

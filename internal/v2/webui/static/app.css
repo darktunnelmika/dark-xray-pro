@@ -647,3 +647,29 @@ input.switch:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px
   .order-row .o-st, .order-row .o-act { grid-column: span 1; }
 }
 .order-row .o-id span { white-space: nowrap; }
+
+/* Settings: a side list of groups, one group at a time. */
+.set-layout { display: grid; gap: var(--gap); grid-template-columns: 270px minmax(0, 1fr); align-items: start; }
+.set-nav { display: grid; gap: 4px; padding: 8px; position: sticky; inset-block-start: 84px; }
+.set-tab { display: flex; gap: 12px; align-items: center; text-align: start; padding: 10px 12px; border-radius: var(--r-md); border: 1px solid transparent; background: none; color: var(--muted); box-shadow: none; }
+.set-tab svg { flex: none; inline-size: 20px; block-size: 20px; }
+.set-tab-t { display: grid; gap: 1px; min-inline-size: 0; }
+.set-tab-t b { color: var(--text); font-size: 14px; } .set-tab-t small { font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.set-tab:hover { background: var(--surface-2); }
+.set-tab[aria-current="page"] { background: var(--glass-2); border-color: color-mix(in oklab, var(--cyan) 45%, transparent); color: var(--cyan); }
+.set-pane { min-inline-size: 0; }
+.set-title { margin: 0 0 4px; font-size: 20px; }
+@media (max-width: 900px) {
+  .set-layout { grid-template-columns: 1fr; }
+  .set-nav { position: static; display: flex; overflow-x: auto; scrollbar-width: none; padding: 6px; }
+  .set-tab { flex: none; padding: 8px 12px; } .set-tab-t small { display: none; }
+}
+
+/* Login extras. */
+.login { position: relative; }
+.login-lang { position: absolute; inset-block-start: 16px; inset-inline-end: 16px; }
+.login-sub { margin: -6px 0 6px; }
+.pw-wrap { position: relative; display: block; }
+.pw-wrap input { inline-size: 100%; padding-inline-end: 44px; }
+.pw-eye { position: absolute; inset-block: 4px; inset-inline-end: 4px; padding: 0 10px; min-block-size: 0; border: 0; box-shadow: none; }
+.warn-text { color: var(--warn); margin-block-start: -6px; }

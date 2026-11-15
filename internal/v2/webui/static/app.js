@@ -425,6 +425,11 @@ function viewLogin() {
   const code = h("input", { name: "c", inputmode: "numeric", autocomplete: "one-time-code", pattern: "[0-9 ]{6,7}", maxlength: "7", dir: "ltr" });
   const codeRow = h("label", { hidden: true }, h("span", {}, t("tfaCode")), code);
   const btn = h("button", { class: "primary", type: "submit" }, t("login"));
+  const eye = h("button", { type: "button", class: "ghost pw-eye", "aria-label": lang === "fa" ? "نمایش رمز" : "Show password", "aria-pressed": "false", onclick: () => {
+    const show = pass.type === "password"; pass.type = show ? "text" : "password"; eye.setAttribute("aria-pressed", String(show)); eye.textContent = show ? "🙈" : "👁"; pass.focus();
+  } }, "👁");
+  const caps = h("div", { class: "small warn-text", hidden: true, role: "status" }, lang === "fa" ? "Caps Lock روشن است" : "Caps Lock is on");
+  pass.addEventListener("keyup", (e) => { caps.hidden = !e.getModifierState?.("CapsLock"); });
   const form = h("form", { class: "form", onsubmit: async (e) => {
     e.preventDefault(); btn.disabled = true; err.textContent = "";
     try { await api("POST", "/api/v2/auth/login", { Username: user.value, Password: pass.value, Code: code.value }); location.hash = "#/dashboard"; }
@@ -432,8 +437,12 @@ function viewLogin() {
       if (String(x.message).includes("need_code")) { codeRow.hidden = false; err.textContent = codeRow.dataset.asked ? t("badLogin") : t("tfaNeed"); codeRow.dataset.asked = "1"; code.value = ""; code.focus(); }
       else err.textContent = t("badLogin");
     } finally { btn.disabled = false; }
-  } }, h("label", {}, h("span", {}, t("username")), user), h("label", {}, h("span", {}, t("password")), pass), codeRow, err, btn);
-  return h("div", { class: "login" }, h("div", { class: "card" }, h("h1", {}, mark(), "Dark VPN"), form));
+  } }, h("label", {}, h("span", {}, t("username")), user),
+    h("label", {}, h("span", {}, t("password")), h("div", { class: "pw-wrap" }, pass, eye)), caps, codeRow, err, btn);
+  const fa = lang === "fa";
+  const langBtn = h("button", { type: "button", class: "ghost login-lang", onclick: () => { lang = fa ? "en" : "fa"; safeSet("lang", lang); applyLang(); route(); } }, fa ? "English" : "فارسی");
+  return h("div", { class: "login" }, langBtn, h("div", { class: "card" }, h("h1", {}, mark(), "Dark VPN"),
+    h("p", { class: "muted small login-sub" }, fa ? "ورود به پنل مدیریت" : "Sign in to the control panel"), form));
 }
 
 // ---------- HUB health, online now, traffic per node ----------
@@ -3899,11 +3908,33 @@ function viewSettings() {
       fill(tgOut, r.link ? h("a", { class: "btn", href: r.link, target: "_blank", rel: "noopener" }, t("openBot")) : null,
         h("code", {}, `/start rep_${r.code}`), h("p", { class: "small muted" }, t("codeExpires")));
     } }, t("connectTelegram"))) : null;
-  return h("div", { class: "form" }, h("h1", {}, t("settings")), me.role === "owner" ? subSettingsCard() : null, me.role === "owner" ? trustedCard() : null, fullOwner() ? panelHTTPSCard() : null, fullOwner() ? panelPathCard() : null, me.role === "owner" ? tgCommerceCard() : null, fullOwner() ? migrateCard() : null, fullOwner() ? foreignCard() : null, pwForm, tfaCard(), sessionsCard(), fullOwner() ? telegramBotCard() : null, tgCard, backupCard,
-    h("div", { class: "card form" },
-      h("label", {}, h("span", {}, t("language")), langSel),
-      h("label", {}, h("span", {}, t("theme")), themeSel),
-      h("button", { class: "danger", onclick: async () => { await api("POST", "/api/v2/auth/logout"); location.hash = "#/login"; } }, t("logout"))));
+  const fa = lang === "fa";
+  const owner = me.role === "owner";
+  const lookCard = h("div", { class: "card form" }, h("h2", {}, fa ? "زبان و ظاهر" : "Language and look"),
+    h("div", { class: "two" }, h("label", {}, h("span", {}, t("language")), langSel), h("label", {}, h("span", {}, t("theme")), themeSel)),
+    h("div", { class: "row" }, h("button", { class: "danger", onclick: async () => { await api("POST", "/api/v2/auth/logout"); location.hash = "#/login"; } }, t("logout"))));
+  // Settings are grouped; one group shows at a time so the page stays short.
+  const groups = [
+    owner && ["sub", "link", fa ? "اشتراک مشتری" : "Customer subscription", fa ? "عنوان، نام کانفیگ‌ها و صفحهٔ مشتری" : "Title, config names, customer page", () => [subSettingsCard()]],
+    (owner || fullOwner()) && ["panel", "globe", fa ? "آدرس و دسترسی پنل" : "Panel address and access", fa ? "HTTPS، مسیر مخفی، IPهای مجاز" : "HTTPS, secret path, trusted IPs", () => [fullOwner() ? panelHTTPSCard() : null, fullOwner() ? panelPathCard() : null, owner ? trustedCard() : null]],
+    ["security", "staff", fa ? "امنیت حساب" : "Account security", fa ? "رمز، ورود دومرحله‌ای، نشست‌ها" : "Password, two-step sign-in, sessions", () => [pwForm, tfaCard(), sessionsCard()]],
+    (fullOwner() || owner || tgCard) && ["telegram", "bell", fa ? "تلگرام" : "Telegram", fa ? "ربات، هشدارها، فروش و دعوت" : "Bot, alerts, sales and referrals", () => [fullOwner() ? telegramBotCard() : null, owner ? tgCommerceCard() : null, tgCard]],
+    fullOwner() && ["backup", "traffic", fa ? "پشتیبان و انتقال" : "Backup and migration", fa ? "دانلود، بازگردانی، ورود از پنل‌های دیگر" : "Download, restore, import from other panels", () => [backupCard, migrateCard(), foreignCard()]],
+    ["look", "moon", fa ? "زبان و ظاهر" : "Language and look", fa ? "زبان، تم، خروج" : "Language, theme, sign out", () => [lookCard]],
+  ].filter(Boolean);
+  const want = new URLSearchParams(location.hash.split("?")[1] || "").get("s") || sessionStorage.getItem("setTab");
+  let tab = groups.some((g) => g[0] === want) ? want : groups[0][0];
+  const nav = h("nav", { class: "set-nav card", "aria-label": t("settings") });
+  const pane = h("div", { class: "set-pane form" });
+  const show = () => {
+    try { sessionStorage.setItem("setTab", tab); } catch {}
+    nav.replaceChildren(...groups.map(([k, ic, label, sub]) => h("button", { type: "button", class: "set-tab", "aria-current": k === tab ? "page" : null, onclick: () => { tab = k; show(); pane.scrollIntoView({ block: "nearest" }); } },
+      icon(ic), h("span", { class: "set-tab-t" }, h("b", {}, label), h("small", {}, sub)))));
+    const g = groups.find((x) => x[0] === tab);
+    fill(pane, h("h2", { class: "set-title" }, g[2]), ...g[4]().filter(Boolean));
+  };
+  show();
+  return h("div", {}, h("div", { class: "row sticky-head" }, h("h1", {}, t("settings"))), h("div", { class: "set-layout" }, nav, pane));
 }
 
 function applyLang() {
