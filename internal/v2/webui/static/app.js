@@ -235,7 +235,7 @@ function mark() {
   const svg = svgEl("svg", { viewBox: "0 0 32 32", "aria-hidden": "true" });
   const defs = svgEl("defs", {});
   const g = svgEl("linearGradient", { id, x1: "0", y1: "0", x2: "1", y2: "1" });
-  g.append(svgEl("stop", { offset: "0", "stop-color": "#2de2e6" }), svgEl("stop", { offset: "1", "stop-color": "#9b5cff" }));
+  g.append(svgEl("stop", { offset: "0", "stop-color": "#4f8cff" }), svgEl("stop", { offset: "1", "stop-color": "#6f7dff" }));
   defs.append(g);
   svg.append(defs,
     svgEl("path", { d: "M16 2.5 28 9.25v13.5L16 29.5 4 22.75V9.25z", fill: "none", stroke: `url(#${id})`, "stroke-width": 2.2, "stroke-linejoin": "round" }),
@@ -381,9 +381,27 @@ async function loadNotifs() {
   return out;
 }
 
+// Sidebar groups (desktop); phones keep the same order in the tab bar.
+const NAV_GROUPS = [
+  ["overview", ["dashboard", "online"]],
+  ["people", ["clients", "groups", "reps", "sellers"]],
+  ["infra", ["inbounds", "nodes", "routing"]],
+  ["sales", ["shop", "finance"]],
+  ["system", ["activity", "staff", "settings"]],
+];
+const NAV_LABELS = { fa: { overview: "نمای کلی", people: "کاربران و نماینده‌ها", infra: "زیرساخت", sales: "فروش", system: "سیستم" },
+  en: { overview: "Overview", people: "People", infra: "Infrastructure", sales: "Sales", system: "System" } };
 function shell(active, content) {
-  const keys = Object.keys(routes);
-  const tabs = keys.map((r) => h("a", { href: `#/${r}`, "aria-current": r === active ? "page" : null }, icon(r), h("span", {}, t(r))));
+  const present = new Set(Object.keys(routes));
+  const keys = [];
+  const tabs = [];
+  for (const [g, list] of NAV_GROUPS) {
+    const ks = list.filter((k) => present.has(k));
+    if (!ks.length) continue;
+    tabs.push(h("span", { class: "nav-group", "aria-hidden": "true" }, NAV_LABELS[lang === "fa" ? "fa" : "en"][g]));
+    for (const r of ks) { keys.push(r); tabs.push(h("a", { href: `#/${r}`, "aria-current": r === active ? "page" : null }, icon(r), h("span", {}, t(r)))); }
+  }
+  for (const r of present) if (!keys.includes(r)) { keys.push(r); tabs.push(h("a", { href: `#/${r}`, "aria-current": r === active ? "page" : null }, icon(r), h("span", {}, t(r)))); }
   // Phones: four tabs and a "more" sheet with the rest.
   const mainKeys = keys.slice(0, 4);
   const moreActive = !mainKeys.includes(active);
@@ -559,7 +577,7 @@ async function viewOnline() {
   return h("div", { class: "form" }, h("div", { class: "row" }, h("h1", {}, s3("online")), sum), h("p", { class: "small muted" }, s3("onlineHint")), q, box);
 }
 
-const NODE_COLORS = ["#2de2e6", "#9b5cff", "#3ef0a1", "#ffc857", "#ff4d8d", "#5aa9ff", "#ff8f4d", "#c0f04d"];
+const NODE_COLORS = ["#4f8cff", "#ff8a4c", "#2fd39b", "#f4b740", "#ff5470", "#a78bfa", "#38bdf8", "#c0f04d"];
 function nodeTrafficCard(nodes) {
   const body = h("div", {});
   let days = 14;
@@ -630,37 +648,105 @@ function endingSoonCard(list) {
       : h("p", { class: "muted small" }, fa ? "سرویسی در سه روز آینده تمام نمی‌شود." : "Nothing ends in the next three days."));
 }
 
+// gauge: a ring with a percentage, a label and a detail line.
+function gauge(label) {
+  const ring = h("div", { class: "ring" }, h("b", {}, "–"));
+  const v = h("div", { class: "g-v" }, "");
+  const el = h("div", { class: "gauge" }, ring, h("div", {}, h("div", { class: "g-k" }, label), v));
+  return { el, set(p, detail) {
+    p = Math.max(0, Math.min(100, p || 0));
+    ring.style.setProperty("--p", p.toFixed(1));
+    ring.style.setProperty("--c", p >= 90 ? "var(--bad)" : p >= 75 ? "var(--warn)" : "var(--ion)");
+    ring.firstChild.textContent = `\u2066${fmtNum(Math.round(p))}%\u2069`;
+    v.textContent = detail || "";
+  } };
+}
+
+function hubStrip(si) {
+  const fa = lang === "fa";
+  const cpu = gauge(t("cpu")), ram = gauge(t("ram")), disk = gauge(t("disk"));
+  const down = h("b", {}, "–"), up = h("b", {}, "–");
+  const meta = h("span", { class: "hs-meta" });
+  const el = h("section", { class: "hub-strip", "aria-label": fa ? "وضعیت هاب" : "HUB status" },
+    h("div", { class: "hs-head" }, h("span", { class: "hs-title" }, h("span", { class: "live-dot" }), fa ? "هاب" : "HUB"), meta),
+    h("div", { class: "hs-body" }, cpu.el, ram.el, disk.el,
+      h("div", { class: "netbox" }, h("div", { class: "nb down" }, h("span", { class: "arr" }, "↓"), down),
+        h("div", { class: "nb up" }, h("span", { class: "arr" }, "↑"), up))));
+  const update = (x) => {
+    if (!x) return;
+    cpu.set(x.cpu_percent, `${fmtNum(x.cores)} ${fa ? "هسته" : "cores"} · load ${(+x.load1 || 0).toFixed(2)}`);
+    ram.set(x.ram_total ? (100 * x.ram_used) / x.ram_total : 0, `${bytes(x.ram_used)} / ${bytes(x.ram_total)}`);
+    disk.set(x.disk_total ? (100 * x.disk_used) / x.disk_total : 0, `${bytes(x.disk_used)} / ${bytes(x.disk_total)}`);
+    down.textContent = rate(x.rx_rate || 0); up.textContent = rate(x.tx_rate || 0);
+    meta.textContent = [`v${String(x.version || "").replace(/^v/, "")}`, `${fa ? "روشن" : "up"} ${dur(x.uptime_sec)}`,
+      x.backups ? `${fmtNum(x.backups)} ${fa ? "بکاپ" : "backups"}` : null].filter(Boolean).join(" · ");
+  };
+  update(si);
+  return { el, update };
+}
+
+function nodeRow(n) {
+  const fa = lang === "fa";
+  const host = n.Host || {};
+  const ramP = host.ram_total ? (100 * host.ram_used) / host.ram_total : 0;
+  const mini = (k, p, txt) => h("div", { class: "mini" }, h("div", {}, k, " ", h("b", {}, txt)),
+    h("div", { class: "bar" }, h("i", { class: p >= 90 ? "bad" : p >= 75 ? "warn" : "", style: `inline-size:${Math.round(Math.max(0, Math.min(100, p)))}%` })));
+  return h("a", { class: `node-row ${n.online ? "" : "off"}`, href: "#/nodes" },
+    h("div", { class: "nr-name" }, h("span", { class: `dot ${n.online ? "on" : ""}` }),
+      h("div", { style: "min-inline-size:0" }, h("span", {}, n.Name || n.ID), h("div", { class: "nr-sub" }, `${n.ID} · ${n.AgentVersion || "—"}${n.update_available ? (fa ? " · به‌روزرسانی" : " · update") : ""}`))),
+    mini("CPU", host.cpu_percent || 0, `\u2066${fmtNum(Math.round(host.cpu_percent || 0))}%\u2069`),
+    mini(fa ? "رم" : "RAM", ramP, `\u2066${fmtNum(Math.round(ramP))}%\u2069`),
+    h("div", { class: "nr-net" }, h("span", { class: "d" }, "↓ "), rate(host.rx_rate || 0), "  ", h("span", { class: "u" }, "↑ "), rate(host.tx_rate || 0)),
+    h("div", { class: "nr-users" }, h("b", {}, fmtNum(host.online_users || 0)), " ", fa ? "آنلاین" : "online"));
+}
+
 async function viewDashboard() {
+  const fa = lang === "fa";
   const [o, nodes, ins] = await Promise.all([api("GET", "/api/v2/admin/overview"), api("GET", "/api/v2/admin/nodes"), api("GET", "/api/v2/admin/insights?days=14")]);
   const [si, cls] = await Promise.all([api("GET", "/api/v2/admin/system").catch(() => null), api("GET", "/api/v2/admin/clients").catch(() => [])]);
-  const stat = (k, v, ic, share, sub) => h("div", { class: "card stat" },
-    h("div", { class: "stat-top" }, h("span", { class: "stat-ic" }, icon(ic)), h("div", { class: "k" }, t(k))),
-    h("div", { class: "v" }, v), share != null ? h("div", { class: "bar thin" }, h("i", { style: `inline-size:${Math.round(Math.max(0, Math.min(1, share)) * 100)}%` })) : null,
-    sub ? h("div", { class: "muted small" }, sub) : null);
-  const frac = (a, b) => h("span", {}, fmtNum(a), h("small", { class: "of" }, ` ${ux("of")} ${fmtNum(b)}`));
-  const fmtTime = (u) => new Intl.DateTimeFormat(lang === "fa" ? "fa-IR" : "en-GB", { dateStyle: "short", timeStyle: "short" }).format(new Date(u * 1000));
+  const kpi = (ic, k, v) => h("div", { class: "card kpi" }, h("div", { class: "k" }, icon(ic), k), h("div", { class: "v" }, v));
+  const frac = (a, b) => h("span", { dir: "ltr" }, fmtNum(a), h("small", {}, ` / ${fmtNum(b)}`));
+  const fmtTime = (u) => new Intl.DateTimeFormat(fa ? "fa-IR" : "en-GB", { dateStyle: "short", timeStyle: "short" }).format(new Date(u * 1000));
   const topMax = Math.max(1, ...ins.top.map((u) => u.bytes));
-  return h("div", {},
+  const strip = si ? hubStrip(si) : null;
+  const rowsBox = h("div", {}, (nodes || []).map(nodeRow));
+  const onlineK = h("span", {}, fmtNum(o.OnlineUsers));
+  const nodesK = h("span", {}, frac(o.NodesOnline, o.Nodes));
+  const view = h("div", {},
     h("h1", {}, t("dashboard")),
     si ? systemWarnings(si) : null,
-    h("div", { class: "grid" },
-      stat("nodesOnline", frac(o.NodesOnline, o.Nodes), "nodes", o.Nodes ? o.NodesOnline / o.Nodes : 0),
-      stat("activeClients", frac(o.ClientsActive, o.Clients), "clients", o.Clients ? o.ClientsActive / o.Clients : 0),
-      stat("onlineUsers", fmtNum(o.OnlineUsers), "online"),
-      stat("trafficToday", bytes(o.TrafficToday), "traffic"),
-      stat("trafficTotal", bytes(o.TrafficTotal), "finance")),
-    h("div", { class: "dash" },
-      h("div", { class: "card form wide-col" }, h("div", { class: "row" }, h("h2", {}, t("traffic14")), legend()), barsSvg(ins.daily, 1100)),
-      endingSoonCard(cls || []),
+    strip ? strip.el : null,
+    h("div", { class: "kpis" },
+      kpi("nodes", t("nodesOnline"), nodesK),
+      kpi("clients", t("activeClients"), frac(o.ClientsActive, o.Clients)),
+      kpi("online", t("onlineUsers"), onlineK),
+      kpi("traffic", t("trafficToday"), bytes(o.TrafficToday)),
+      kpi("finance", t("trafficTotal"), bytes(o.TrafficTotal))),
+    (nodes || []).length ? h("div", { class: "card node-rows" },
+      h("div", { class: "nr-head" }, h("h2", { style: "margin:0" }, ux("nodesSection")), h("a", { class: "spacer small", href: "#/nodes" }, fa ? "مدیریت نودها ›" : "Manage nodes ›")),
+      rowsBox) : null,
+    h("div", { class: "dash2" },
+      h("div", { class: "card form span2" }, h("div", { class: "row" }, h("h2", {}, t("traffic14")), legend()), barsSvg(ins.daily, 1100)),
       h("div", { class: "card form" }, h("h2", {}, t("topToday")),
         ins.top.length ? h("div", { class: "meters" }, ins.top.map((u) => meter(u.email, (100 * u.bytes) / topMax, bytes(u.bytes), true))) : h("p", { class: "muted small" }, t("noData"))),
-      h("div", { class: "card form" }, h("h2", {}, t("recentEvents")),
-        ins.events.length ? h("div", { class: "form" }, ins.events.map((e) => h("div", { class: "row small" },
+      endingSoonCard(cls || []),
+      h("div", { class: "card form span2" }, h("h2", {}, t("recentEvents")),
+        ins.events.length ? h("div", { class: "form" }, ins.events.slice(0, 8).map((e) => h("div", { class: "row small" },
           eventBadge(e.kind), h("span", {}, e.email), h("span", { class: "muted spacer" }, `${e.node_id} · ${fmtTime(e.unix)}`))))
-          : h("p", { class: "muted small" }, t("noEvents"))),
-      si ? hubHealthCard(si) : null),
-    (nodes || []).length ? h("div", { class: "row section-head" }, h("h2", {}, ux("nodesSection")), h("a", { class: "spacer small", href: "#/nodes" }, t("nodes"), " ›")) : null,
-    h("div", { class: "list nodes-grid" }, (nodes || []).map((n) => nodeCard(n))));
+          : h("p", { class: "muted small" }, t("noEvents")))));
+  // Live: the HUB strip and node rows refresh every 5 s while the page is open.
+  const timer = setInterval(async () => {
+    if (!view.isConnected) { clearInterval(timer); return; }
+    if (document.hidden) return;
+    try {
+      const [x, ns, ov] = await Promise.all([api("GET", "/api/v2/admin/system"), api("GET", "/api/v2/admin/nodes"), api("GET", "/api/v2/admin/overview")]);
+      if (strip) strip.update(x);
+      rowsBox.replaceChildren(...(ns || []).map(nodeRow));
+      onlineK.textContent = fmtNum(ov.OnlineUsers);
+      nodesK.replaceChildren(frac(ov.NodesOnline, ov.Nodes));
+    } catch {}
+  }, 5000);
+  return view;
 }
 
 // cleanupForm previews and deletes expired, used-up or disabled clients.
@@ -776,10 +862,13 @@ function nodeCard(n, actions = false) {
       h("span", { class: "badge" }, n.ID), n.update_available ? h("span", { class: "badge warn" }, t("updateAvail")) : null,
       n.traffic_percent && n.traffic_percent !== 100 ? h("span", { class: "badge", dir: "ltr", title: lang === "fa" ? "ضریب ترافیک" : "Traffic rate" }, `×${fmtNum(n.traffic_percent / 100)}`) : null, n.xray_version ? h("span", { class: "badge", dir: "ltr" }, `Xray ${n.xray_version}${n.arch ? " · " + n.arch : ""}`) : null, h("span", { class: `badge ${n.online ? "good" : "bad"} spacer` }, t(n.online ? "online" : "offline"))),
     h("div", { class: "muted small" }, `${t("restarts")}: ${fmtNum(n.XrayRestarts)} · ${t("spooled")}: ${fmtNum(n.Spooled)} · ${n.AgentVersion || ""}`),
-    host ? h("div", { class: "meters node-meters" },
-      meter(t("cpu"), host.cpu_percent, `${fmtNum(host.cpu_percent)}%`),
-      meter(t("ram"), host.ram_total ? (100 * host.ram_used) / host.ram_total : 0, `\u2066${bytes(host.ram_used)} / ${bytes(host.ram_total)}\u2069`),
-      host.disk_total ? meter(t("disk"), (100 * host.disk_used) / host.disk_total, `\u2066${bytes(host.disk_used)} / ${bytes(host.disk_total)}\u2069`) : null,
+    host ? h("div", { class: "node-gauges" }, ...(() => {
+      const c = gauge(t("cpu")), r = gauge(t("ram")), d = gauge(t("disk"));
+      c.set(host.cpu_percent, host.cores ? `${fmtNum(host.cores)} ${lang === "fa" ? "هسته" : "cores"}` : "");
+      r.set(host.ram_total ? (100 * host.ram_used) / host.ram_total : 0, `${bytes(host.ram_used)} / ${bytes(host.ram_total)}`);
+      d.set(host.disk_total ? (100 * host.disk_used) / host.disk_total : 0, `${bytes(host.disk_used)} / ${bytes(host.disk_total)}`);
+      return [c.el, r.el, host.disk_total ? d.el : null];
+    })(),
       h("div", { class: "small muted full" }, `↓ ${rate(host.rx_rate)} · ↑ ${rate(host.tx_rate)} · ${t("onlineUsers")}: ${fmtNum(host.online_users)} · ${t("uptime")}: ${dur(host.uptime_sec)}`)) : null,
     n.LastError ? h("div", { class: "small", style: "color:var(--bad)" }, `${t("lastError")}: ${n.LastError}`) : null,
     actions ? h("div", { class: "row node-actions" },
@@ -3517,8 +3606,8 @@ function barsSvg(days, W = 600) {
   glow.append(el("feGaussianBlur", { stdDeviation: "3.5", result: "b" }));
   const merge = el("feMerge", {}); merge.append(el("feMergeNode", { in: "b" }), el("feMergeNode", { in: "SourceGraphic" })); glow.append(merge);
   const area = (col, key) => { const g = el("linearGradient", { id: `${id}${key}`, x1: 0, y1: 0, x2: 0, y2: 1 });
-    g.append(el("stop", { offset: "0", "stop-color": col, "stop-opacity": ".35" }), el("stop", { offset: "1", "stop-color": col, "stop-opacity": "0" })); return g; };
-  defs.append(glow, area("#2de2e6", "d"), area("#9b5cff", "u"));
+    g.append(el("stop", { offset: "0", style: `stop-color:${col};stop-opacity:.28` }), el("stop", { offset: "1", style: `stop-color:${col};stop-opacity:0` })); return g; };
+  defs.append(glow, area("var(--ion)", "d"), area("var(--ember)", "u"));
   svg.append(defs);
   if (!days.length) return svg;
   const top = Math.max(1, ...days.map((d) => Math.max(d.Down, d.Up))) * 1.12;
@@ -3532,12 +3621,12 @@ function barsSvg(days, W = 600) {
     const pts = days.map((d, i) => [x(i), y(d[key])]);
     const line = pts.map(([a, b]) => `${a.toFixed(1)},${b.toFixed(1)}`).join(" ");
     svg.append(el("polygon", { points: `${pts[0][0]},${H} ${line} ${pts.at(-1)[0]},${H}`, fill: `url(#${id}${key === "Down" ? "d" : "u"})` }));
-    svg.append(el("polyline", { points: line, fill: "none", stroke: col, "stroke-width": 2.2, "stroke-linejoin": "round", "stroke-linecap": "round", filter: `url(#${id}g)`, "vector-effect": "non-scaling-stroke" }));
+    svg.append(el("polyline", { points: line, fill: "none", style: `stroke:${col}`, "stroke-width": 2.2, "stroke-linejoin": "round", "stroke-linecap": "round", "vector-effect": "non-scaling-stroke" }));
     const [lx, ly] = pts.at(-1);
-    svg.append(el("circle", { cx: lx, cy: ly, r: 4, fill: col, filter: `url(#${id}g)` }));
+    svg.append(el("circle", { cx: lx, cy: ly, r: 4, style: `fill:${col}` }));
   };
-  series("Up", "#9b5cff");
-  series("Down", "#2de2e6");
+  series("Up", "var(--ember)");
+  series("Down", "var(--ion)");
   const step = Math.max(1, Math.round(days.length / 6));
   days.forEach((d, i) => {
     const hit = el("rect", { x: x(i) - W / days.length / 2, y: 0, width: W / days.length, height: H, class: "bar-hit" });

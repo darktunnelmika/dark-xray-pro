@@ -17,7 +17,7 @@ import (
 )
 
 // HubVersion is the panel's release; the commit comes from the build.
-const HubVersion = "v2.11.0"
+const HubVersion = "v2.12.0"
 
 var hubStarted = time.Now()
 
@@ -30,6 +30,8 @@ type SystemInfo struct {
 	Uptime     int64    `json:"uptime_sec"`
 	HostUptime int64    `json:"host_uptime_sec"`
 	CPU        float64  `json:"cpu_percent"`
+	RxRate     float64  `json:"rx_rate"` // bytes/s, all interfaces but lo
+	TxRate     float64  `json:"tx_rate"`
 	Load1      float64  `json:"load1"`
 	Cores      int      `json:"cores"`
 	RAMUsed    uint64   `json:"ram_used"`
@@ -105,6 +107,47 @@ func cpuPercent() float64 {
 	return cpuSample.pct
 }
 
+var netSample struct {
+	sync.Mutex
+	rx, tx uint64
+	at     time.Time
+	rr, tr float64
+}
+
+// netRates compares /proc/net/dev with the previous call (≥1s apart).
+func netRates() (rx, tx float64) {
+	b, err := os.ReadFile("/proc/net/dev")
+	if err != nil {
+		return 0, 0
+	}
+	var r, t uint64
+	for _, l := range strings.Split(string(b), "\n")[2:] {
+		name, rest, ok := strings.Cut(l, ":")
+		name = strings.TrimSpace(name)
+		if !ok || name == "lo" {
+			continue
+		}
+		f := strings.Fields(rest)
+		if len(f) < 9 {
+			continue
+		}
+		a, _ := strconv.ParseUint(f[0], 10, 64)
+		c, _ := strconv.ParseUint(f[8], 10, 64)
+		r += a
+		t += c
+	}
+	netSample.Lock()
+	defer netSample.Unlock()
+	now := time.Now()
+	if el := now.Sub(netSample.at).Seconds(); netSample.rx > 0 && el >= 1 && r >= netSample.rx && t >= netSample.tx {
+		netSample.rr, netSample.tr = float64(r-netSample.rx)/el, float64(t-netSample.tx)/el
+		netSample.rx, netSample.tx, netSample.at = r, t, now
+	} else if netSample.rx == 0 || r < netSample.rx {
+		netSample.rx, netSample.tx, netSample.at = r, t, now
+	}
+	return netSample.rr, netSample.tr
+}
+
 func memInfo() (used, total uint64) {
 	f, err := os.Open("/proc/meminfo")
 	if err != nil {
@@ -147,6 +190,7 @@ func (s *Store) System(ctx context.Context) SystemInfo {
 	commit, at := buildInfo()
 	si := SystemInfo{Version: HubVersion, Commit: commit, BuiltAt: at, GoVersion: runtime.Version(),
 		Uptime: int64(time.Since(hubStarted).Seconds()), Cores: runtime.NumCPU(), CPU: cpuPercent(), DiskPath: filepath.Dir(s.path), Warnings: []string{}}
+	si.RxRate, si.TxRate = netRates()
 	if b, err := os.ReadFile("/proc/loadavg"); err == nil {
 		si.Load1, _ = strconv.ParseFloat(strings.Fields(string(b) + " 0")[0], 64)
 	}
