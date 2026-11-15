@@ -4449,6 +4449,9 @@ function darkOldSection() {
     const pick = (sel) => h("div", { class: "row" }, (ins || []).map((ib) => h("label", { class: "check" }, h("input", { type: "checkbox", value: ib.tag, checked: sel }), ib.tag)));
     const main = pick(true), rest = pick(true);
     const ownerBot = h("input", { type: "checkbox", checked: true });
+    const withRestore = h("input", { type: "checkbox" });
+    const restLabel = h("label", { hidden: true }, h("span", {}, fa ? "اینباندهای کلاینت‌های Restore" : "Inbounds for the Restore clients"), rest);
+    withRestore.addEventListener("change", () => { restLabel.hidden = !withRestore.checked; });
     const tags = (el) => [...el.querySelectorAll("input:checked")].map((x) => x.value);
     const rep = h("div", { class: "form" });
     const c = st.counts || {};
@@ -4459,7 +4462,7 @@ function darkOldSection() {
       ...(r.notes || []).slice(0, 20).map((n) => h("div", { class: "small muted" }, "• " + n)),
       ...(r.skipped || []).slice(0, 20).map((n) => h("div", { class: "small", style: "color:var(--warn)" }, "• " + n)));
     const run = async (dry) => {
-      const body = { inbounds: tags(main), restore_inbounds: tags(rest), owner_bot: ownerBot.checked, dry_run: dry };
+      const body = { inbounds: tags(main), restore_inbounds: tags(rest), include_restore: withRestore.checked, owner_bot: ownerBot.checked, dry_run: dry };
       if (!body.inbounds.length) { toast(fa ? "حداقل یک اینباند انتخاب کنید." : "Pick at least one inbound."); return; }
       if (!dry && !(await confirmAction(fa ? "انتقال انجام شود؟ کلاینت‌ها، نماینده‌ها و ورودها به این پنل اضافه می‌شوند." : "Import now? Clients, resellers and logins are added to this panel."))) return;
       const r = await guarded(() => api("POST", "/api/v2/admin/migrate/darkold/run", body));
@@ -4470,7 +4473,8 @@ function darkOldSection() {
       h("p", { class: "small" }, `${fa ? "فایل خروجی رسید" : "Export received"}: ${st.origin || ""} ${st.version ? "· " + st.version : ""}`),
       h("div", { class: "row" }, ...Object.entries(c).map(([k, v]) => h("span", { class: "badge" }, `${k}: ${fmtNum(v)}`))),
       h("label", {}, h("span", {}, fa ? "اینباندهای کلاینت‌ها" : "Inbounds for the clients"), main),
-      h("label", {}, h("span", {}, fa ? "اینباندهای کلاینت‌های Restore" : "Inbounds for the Restore clients"), rest),
+      h("label", { class: "check" }, withRestore, fa ? "کلاینت‌های Dark Restore هم منتقل شوند (منسوخ؛ معمولاً لازم نیست)" : "Also move the Dark Restore clients (retired; usually not needed)"),
+      restLabel,
       h("label", { class: "check" }, ownerBot, fa ? "ربات خودِ مالک در پنل قبلی، ربات اصلی این پنل شود (ربات نماینده‌ها همیشه منتقل و روشن می‌شوند)" : "The owner's old bot becomes this panel's main bot (resellers' bots are always moved and turned on)"),
       h("p", { class: "small", style: "color:var(--warn)" }, fa ? "⚠️ یک ربات هم‌زمان روی دو پنل کار نمی‌کند: قبل از «انتقال»، پنل قبلی را خاموش کنید." : "⚠️ A bot cannot run on two panels at once: stop the old panel before importing."),
       h("div", { class: "row" }, h("button", { onclick: () => run(true) }, fa ? "پیش‌نمایش" : "Preview"), h("button", { class: "primary", onclick: () => run(false) }, fa ? "انتقال" : "Import"),

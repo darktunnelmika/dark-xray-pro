@@ -77,7 +77,10 @@ func TestImportDarkOld(t *testing.T) {
 	if !st.Uploaded || st.Counts["clients"] != 3 || st.Counts["resellers"] != 1 || st.Origin == "" {
 		t.Fatalf("%+v", st)
 	}
-	pre, err := s.ImportDarkOld(ctx, DarkOldOptions{Inbounds: []string{"main"}, DryRun: true})
+	if pre, _ := s.ImportDarkOld(ctx, DarkOldOptions{Inbounds: []string{"main"}, DryRun: true}); pre.Restore != 0 || len(pre.Domains) != 1 {
+		t.Fatalf("Dark Restore is retired: off unless asked: %+v", pre)
+	}
+	pre, err := s.ImportDarkOld(ctx, DarkOldOptions{Inbounds: []string{"main"}, IncludeRestore: true, DryRun: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,7 +96,7 @@ func TestImportDarkOld(t *testing.T) {
 		return "bossbot", nil
 	}})
 	defer SetTelegramControl(TelegramControl{})
-	res, err := s.ImportDarkOld(ctx, DarkOldOptions{Inbounds: []string{"main"}, OwnerBot: true})
+	res, err := s.ImportDarkOld(ctx, DarkOldOptions{Inbounds: []string{"main"}, IncludeRestore: true, OwnerBot: true})
 	if err != nil || res.Clients != 3 || res.Telegram != 1 || res.Links != 4 {
 		t.Fatalf("%+v %v", res, err)
 	}

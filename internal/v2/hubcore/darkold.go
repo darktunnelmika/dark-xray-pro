@@ -184,6 +184,9 @@ func (s *Store) DarkOldDiscard() error {
 type DarkOldOptions struct {
 	Inbounds        []string `json:"inbounds"`         // v2 inbounds every moved client gets
 	RestoreInbounds []string `json:"restore_inbounds"` // for the Restore clients (default: Inbounds)
+	// IncludeRestore also moves the Dark Restore clients (old 3x-ui links);
+	// off by default — Dark Restore is retired.
+	IncludeRestore bool `json:"include_restore"`
 	// OwnerBot makes the owner's old bot the panel's main bot, so the
 	// owner's customers keep the bot they know.
 	OwnerBot bool `json:"owner_bot"`
@@ -510,7 +513,7 @@ FROM clients c JOIN managed_clients m ON m.email=c.id JOIN core_clients k ON k.e
 	// Restore clients: users of the old 3x-ui panels, reached by their old
 	// links (/sub/<id> on the old domains).
 	domains := map[string]bool{}
-	if tableExists(ctx, old, "restore_subscriptions") {
+	if opt.IncludeRestore && tableExists(ctx, old, "restore_subscriptions") {
 		type rc struct {
 			email, legacyURL, path, body string
 			enabled                      bool
