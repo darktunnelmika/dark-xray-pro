@@ -741,7 +741,7 @@ func TestSpeedLimit(t *testing.T) {
 	if _, err := s.CreateNode(ctx, "n1", "n1"); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.CreatePreset(ctx, PresetRequest{Tag: "r1", NodeID: "n1", Preset: "vless-reality", Port: 443, SNI: "www.speedtest.net",
+	if err := s.CreatePreset(ctx, PresetRequest{Tag: "r1", NodeID: "n1", Preset: "vless-reality-tcp", Port: 443, SNI: "www.speedtest.net",
 		Endpoints: []sub.Endpoint{{Name: "Direct", Address: "1.2.3.4", Port: 443}}}); err != nil {
 		t.Fatal(err)
 	}
