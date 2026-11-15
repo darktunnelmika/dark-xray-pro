@@ -100,8 +100,14 @@ func TestShadowsocks2022Links(t *testing.T) {
 	if !strings.Contains(string(sb), `"type": "shadowsocks"`) || !strings.Contains(string(cl), "type: ss") || !strings.Contains(string(cl), "AAAAAAAAAAAAAAAAAAAAAA==:"+key) {
 		t.Fatalf("formats:\n%s\n%s", sb, cl)
 	}
-	// Legacy (non-2022) shadowsocks is not offered.
-	in.Template = []byte(`{"protocol":"shadowsocks","port":1,"settings":{"method":"aes-256-gcm","password":"x"}}`)
+	// Classic AEAD methods: each client's own password, SIP002 base64 userinfo.
+	in.Template = []byte(`{"protocol":"shadowsocks","port":1,"settings":{"method":"aes-256-gcm"}}`)
+	links, _ := Links(a, []Inbound{in})
+	if len(links) != 1 || !strings.HasPrefix(links[0], "ss://"+base64.RawURLEncoding.EncodeToString([]byte("aes-256-gcm:"+a.Secret))+"@") {
+		t.Fatal(links)
+	}
+	// Unknown methods are not offered.
+	in.Template = []byte(`{"protocol":"shadowsocks","port":1,"settings":{"method":"rc4-md5"}}`)
 	if links, _ := Links(a, []Inbound{in}); len(links) != 0 {
 		t.Fatal(links)
 	}

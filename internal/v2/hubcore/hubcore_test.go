@@ -758,8 +758,8 @@ func TestPresetsRenderForEveryProtocol(t *testing.T) {
 	if err != nil || len(links) != len(Presets)+3-5 { // fallback lists its three WebSocket routes too; socks, http, port forward, AmneziaWG (.conf) and MTProto (tg:// link) are not in subscriptions
 		t.Fatalf("%v %d links: %v", err, len(links), links)
 	}
-	// A broken shadowsocks template is refused.
-	if err := s.PutInbound(ctx, "bad-ss", "n1", []byte(`{"protocol":"shadowsocks","port":1,"settings":{"method":"aes-256-gcm","password":"x"}}`), true); !errors.Is(err, ErrInvalid) {
+	// A broken shadowsocks template is refused (a 2022 method needs its key).
+	if err := s.PutInbound(ctx, "bad-ss", "n1", []byte(`{"protocol":"shadowsocks","port":1,"settings":{"method":"2022-blake3-aes-256-gcm","password":"x"}}`), true); !errors.Is(err, ErrInvalid) {
 		t.Fatal(err)
 	}
 }
