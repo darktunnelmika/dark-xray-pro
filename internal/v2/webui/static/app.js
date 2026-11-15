@@ -2837,6 +2837,9 @@ function inboundFormKit(o) {
           field(lang === "fa" ? "OCSP stapling (ثانیه، ۰ = خاموش)" : "OCSP stapling (s, 0 = off)", num(ts, "ocspStapling", { min: "0", placeholder: "0" }))),
         check(() => meta.insecure, (v) => { if (v) meta.insecure = true; else delete meta.insecure; }, ie("insecure")));
     }
+    if (sec === "none" && proto === "vless" && !tpl.settings?.decryption) kids.push(h("p", { class: "small warn-text" }, lang === "fa"
+      ? "توجه: کلاینت‌های Xray 26 (v2rayNG، v2rayN، Happ جدید) VLESS بدون TLS/REALITY را به IP عمومی وصل نمی‌کنند. یا «رمزنگاری VLESS» را در بخش پروتکل روشن کنید، یا TLS/REALITY بگذارید، یا فقط پشت CDN با TLS استفاده کنید."
+      : "Note: Xray 26 clients (recent v2rayNG, v2rayN, Happ) refuse VLESS without TLS/REALITY to a public IP. Turn on VLESS encryption in the protocol section, use TLS/REALITY, or use it only behind a TLS CDN."));
     return section(ie("security"), ...kids);
   }
 
