@@ -4,6 +4,9 @@ import (
 	"context"
 	"database/sql"
 	"encoding/hex"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/darktunnelmika/dark-xray-pro/internal/v2/sub"
@@ -111,5 +114,28 @@ func TestImportDarkOld(t *testing.T) {
 	}
 	if again, _ := s.ImportDarkOld(ctx, DarkOldOptions{Inbounds: []string{"main"}, DryRun: true}); again.Clients != 0 {
 		t.Fatal("a second import must not duplicate clients")
+	}
+}
+
+// The routes main.go adds to the owner API must not clash with its own.
+func TestDarkOldRoutesMount(t *testing.T) {
+	s, _ := newStore(t)
+	h := AdminHandlerWith(s, "tok", "https://hub.example", http.NotFoundHandler(), func(m *http.ServeMux) {
+		mig := DarkOldHandler(s)
+		m.Handle("GET /migrate/", mig)
+		m.Handle("POST /migrate/", mig)
+		m.Handle("GET /install/", InstallHandler(s, InstallConfig{}))
+	})
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("GET", "/migrate/nope/export.py", nil))
+	if rec.Code != 404 {
+		t.Fatal(rec.Code)
+	}
+	cmd := s.DarkOldStart("https://hub.example")
+	tok := strings.Split(strings.Split(cmd, "/migrate/")[1], "/")[0]
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("GET", "/migrate/"+tok+"/export.py", nil))
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), "export_bot_tokens") {
+		t.Fatal(rec.Code)
 	}
 }
