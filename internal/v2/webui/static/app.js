@@ -3800,16 +3800,18 @@ function telegramBotCard() {
 function alertsBox() {
   const fa = lang === "fa";
   const login = h("input", { type: "checkbox" });
+  const nodesOn = h("input", { type: "checkbox", checked: true });
   const cpu = h("input", { type: "number", min: "0", max: "100", dir: "ltr", placeholder: "0" });
   const ram = h("input", { type: "number", min: "0", max: "100", dir: "ltr", placeholder: "0" });
   const rep = h("select", {}, [[1, fa ? "هر ساعت" : "Every hour"], [3, fa ? "هر ۳ ساعت" : "Every 3 hours"], [6, fa ? "هر ۶ ساعت" : "Every 6 hours"], [12, fa ? "هر ۱۲ ساعت" : "Every 12 hours"], [24, fa ? "روزانه" : "Daily"], [168, fa ? "هفتگی" : "Weekly"]].map(([v, l]) => h("option", { value: v }, l)));
-  api("GET", "/api/v2/admin/telegram/alerts").then((r) => { login.checked = r.login; cpu.value = r.cpu_percent || ""; ram.value = r.ram_percent || ""; rep.value = r.report_hours; }).catch(() => {});
+  api("GET", "/api/v2/admin/telegram/alerts").then((r) => { login.checked = r.login; nodesOn.checked = r.nodes !== false; cpu.value = r.cpu_percent || ""; ram.value = r.ram_percent || ""; rep.value = r.report_hours; }).catch(() => {});
   const save = h("button", { type: "button", onclick: async () => {
-    await guarded(() => api("PUT", "/api/v2/admin/telegram/alerts", { login: login.checked, cpu_percent: +cpu.value || 0, ram_percent: +ram.value || 0, report_hours: +rep.value }));
+    await guarded(() => api("PUT", "/api/v2/admin/telegram/alerts", { login: login.checked, nodes: nodesOn.checked, cpu_percent: +cpu.value || 0, ram_percent: +ram.value || 0, report_hours: +rep.value }));
     toast(t("saved"));
   } }, t("save"));
   return h("div", { class: "form" }, h("h2", { class: "section" }, fa ? "هشدار به شما" : "Alerts for you"),
     h("p", { class: "small muted" }, fa ? "ربات این‌ها را برای شما (مالک) می‌فرستد. هشدار پردازنده و حافظه برای هاب و همهٔ نودهاست: وقتی دو بار پشت سر هم از حد بالاتر برود، حداکثر ساعتی یک بار، و وقتی عادی شد هم خبر می‌دهد." : "The bot sends these to you (the owner). CPU and memory alerts cover the HUB and every node: after two high readings in a row, at most once an hour, with a note when it calms down."),
+    h("label", { class: "check" }, nodesOn, fa ? "قطع شدن نود یا Xray و وصل شدن دوباره" : "A node or its Xray going down, and coming back"),
     h("label", { class: "check" }, login, fa ? "خبر هر ورود به پنل (نام، IP و مرورگر)" : "Tell me about every panel sign-in (name, IP, browser)"),
     h("div", { class: "three" }, h("label", {}, h("span", {}, fa ? "هشدار پردازنده از (٪، ۰ = خاموش)" : "CPU alert at (%, 0 = off)"), cpu),
       h("label", {}, h("span", {}, fa ? "هشدار حافظه از (٪، ۰ = خاموش)" : "Memory alert at (%, 0 = off)"), ram),

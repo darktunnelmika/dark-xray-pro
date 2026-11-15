@@ -511,3 +511,35 @@ func TestPruneAndBackupLeftovers(t *testing.T) {
 		t.Fatal("a snapshot still being written must stay")
 	}
 }
+
+func TestNodeDownAlert(t *testing.T) {
+	s, _ := newStore(t)
+	ctx := context.Background()
+	var mu sync.Mutex
+	var got []string
+	old := ownerNotify
+	ownerNotify = func(_ context.Context, text string) { mu.Lock(); got = append(got, text); mu.Unlock() }
+	defer func() { ownerNotify = old }()
+	count := func() int { time.Sleep(40 * time.Millisecond); mu.Lock(); defer mu.Unlock(); return len(got) }
+	s.checkDown(ctx, "off:n1", "down n1", "up n1", true)
+	if count() != 0 {
+		t.Fatal("one bad check must not alert")
+	}
+	s.checkDown(ctx, "off:n1", "down n1", "up n1", true)
+	s.checkDown(ctx, "off:n1", "down n1", "up n1", true)
+	if count() != 1 {
+		t.Fatal("exactly one down alert expected", got)
+	}
+	s.checkDown(ctx, "off:n1", "down n1", "up n1", false)
+	if count() != 2 || !strings.HasPrefix(got[1], "up n1") {
+		t.Fatal("recovery alert expected", got)
+	}
+	s.checkDown(ctx, "off:n2", "down n2", "up n2", true)
+	s.checkDown(ctx, "off:n2", "down n2", "up n2", false)
+	if count() != 2 {
+		t.Fatal("a blip must stay silent", got)
+	}
+	if a := s.Alerts(ctx); !a.Nodes {
+		t.Fatal("node alerts are on by default")
+	}
+}

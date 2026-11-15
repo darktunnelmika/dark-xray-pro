@@ -20,10 +20,11 @@ type AlertSettings struct {
 	CPUPercent  int  `json:"cpu_percent"`  // 0 = off
 	RAMPercent  int  `json:"ram_percent"`  // 0 = off
 	ReportHours int  `json:"report_hours"` // the bot's report: every N hours (24 = daily)
+	Nodes       bool `json:"nodes"`        // a node or its Xray going down and coming back (on by default)
 }
 
 func (s *Store) Alerts(ctx context.Context) AlertSettings {
-	a := AlertSettings{Login: s.Setting(ctx, "alert_login") == "1", ReportHours: 24}
+	a := AlertSettings{Login: s.Setting(ctx, "alert_login") == "1", ReportHours: 24, Nodes: s.Setting(ctx, "alert_nodes") != "0"}
 	a.CPUPercent, _ = strconv.Atoi(s.Setting(ctx, "alert_cpu"))
 	a.RAMPercent, _ = strconv.Atoi(s.Setting(ctx, "alert_ram"))
 	if h, err := strconv.Atoi(s.Setting(ctx, "tg_report_hours")); err == nil && h > 0 {
@@ -45,7 +46,11 @@ func (s *Store) PutAlerts(ctx context.Context, a AlertSettings) error {
 	if a.Login {
 		login = "1"
 	}
-	for k, v := range map[string]string{"alert_login": login, "alert_cpu": strconv.Itoa(a.CPUPercent), "alert_ram": strconv.Itoa(a.RAMPercent), "tg_report_hours": strconv.Itoa(a.ReportHours)} {
+	nodesOn := "0"
+	if a.Nodes {
+		nodesOn = "1"
+	}
+	for k, v := range map[string]string{"alert_nodes": nodesOn, "alert_login": login, "alert_cpu": strconv.Itoa(a.CPUPercent), "alert_ram": strconv.Itoa(a.RAMPercent), "tg_report_hours": strconv.Itoa(a.ReportHours)} {
 		if err := s.SetSetting(ctx, k, v); err != nil {
 			return err
 		}
@@ -108,6 +113,24 @@ func (s *Store) checkLoad(ctx context.Context, key, label, metric string, value 
 // watchLoad checks the HUB and every online node once.
 func (s *Store) watchLoad(ctx context.Context) {
 	a := s.Alerts(ctx)
+	now := s.now()
+	if a.Nodes {
+		nodes, _ := s.Nodes(ctx)
+		for _, n := range nodes {
+			if n.LastSeen == 0 {
+				continue // never connected yet
+			}
+			name := n.Name
+			if name == "" {
+				name = n.ID
+			}
+			on := n.Online(now)
+			s.checkDown(ctx, "off:"+n.ID, "🔴 نود "+name+" قطع شد: بیش از چند دقیقه است که به هاب وصل نشده. کاربرهای این نود احتمالاً وصل نمی‌شوند.", "🟢 نود "+name+" دوباره وصل شد", !on)
+			if on {
+				s.checkDown(ctx, "xray:"+n.ID, "⚠️ Xray روی نود "+name+" اجرا نمی‌شود"+lastErr(n.LastError), "✅ Xray روی نود "+name+" دوباره کار می‌کند", !n.XrayRunning)
+			}
+		}
+	}
 	if a.CPUPercent == 0 && a.RAMPercent == 0 {
 		return
 	}
@@ -117,7 +140,6 @@ func (s *Store) watchLoad(ctx context.Context) {
 		s.checkLoad(ctx, "hub", "سرور هاب", "حافظه", 100*float64(si.RAMUsed)/float64(si.RAMTotal), a.RAMPercent)
 	}
 	nodes, _ := s.Nodes(ctx)
-	now := s.now()
 	for _, n := range nodes {
 		if !n.Online(now) || n.Host == nil {
 			continue
@@ -132,4 +154,14 @@ func (s *Store) watchLoad(ctx context.Context) {
 			s.checkLoad(ctx, "node:"+n.ID, label, "حافظه", 100*float64(n.Host.RAMUsed)/float64(n.Host.RAMTotal), a.RAMPercent)
 		}
 	}
+}
+
+func lastErr(e string) string {
+	if e == "" {
+		return "."
+	}
+	if len(e) > 160 {
+		e = e[:160] + "…"
+	}
+	return ": " + e
 }
