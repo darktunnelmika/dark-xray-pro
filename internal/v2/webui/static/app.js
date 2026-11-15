@@ -1682,6 +1682,20 @@ async function viewInbounds() {
     const r = await guarded(() => api("POST", `/api/v2/admin/inbounds/${encodeURIComponent(ib.tag)}/reset-usage`));
     toast(fa ? `مصرف ${fmtNum(r.reset)} کاربر صفر شد` : `${fmtNum(r.reset)} clients reset`); route();
   };
+  // After an outage: add days and/or volume to everyone on this inbound.
+  const compensate = async (ib) => {
+    const all = await api("GET", "/api/v2/admin/clients").catch(() => []);
+    const emails = all.filter((c) => (c.Inbounds || []).includes(ib.tag)).map((c) => c.Email);
+    const days = h("input", { type: "number", min: "0", value: "1", dir: "ltr" }), gb = h("input", { type: "number", min: "0", step: "0.5", value: "0", dir: "ltr" });
+    const go = h("button", { class: "primary", onclick: async (e) => {
+      e.preventDefault();
+      const r = await guarded(() => api("POST", "/api/v2/admin/clients/bulk", { Emails: emails, AddDays: +days.value || 0, AddGB: +gb.value || 0 }));
+      d.close(); toast(fa ? `${fmtNum(r.changed ?? emails.length)} کاربر جبران شد` : `${r.changed ?? emails.length} clients compensated`);
+    } }, fa ? "اعمال" : "Apply");
+    const d = openModal(fa ? `جبران برای کاربرهای ${ib.tag}` : `Compensate ${ib.tag} clients`, h("div", { class: "form" },
+      h("p", { class: "small muted" }, fa ? `به ${fmtNum(emails.length)} کاربر این اینباند اضافه می‌شود. برای سرویس‌های بدون انقضا روز اثری ندارد و برای حجم نامحدود گیگ اثری ندارد.` : `Added to the ${emails.length} clients of this inbound. Days do nothing for services without expiry, GB nothing for unlimited volume.`),
+      h("div", { class: "two" }, h("label", {}, h("span", {}, fa ? "روز اضافه" : "Extra days"), days), h("label", {}, h("span", {}, fa ? "گیگ اضافه" : "Extra GB"), gb))), emails.length ? [go] : []);
+  };
   const toggle = async (ib) => { await guarded(() => api("POST", `/api/v2/admin/inbounds/${encodeURIComponent(ib.tag)}/enabled`, { Enabled: !ib.enabled })); route(); };
   const cardOf = (ib) => {
     let meta = {};
@@ -1701,6 +1715,7 @@ async function viewInbounds() {
             item("settings", ie("title"), () => inboundEditor(ib.tag, nodes, certs)),
             item("copy", ie("clone"), () => cloneInbound(ib)),
             plain ? "" : item("refresh", fa ? "صفر کردن مصرف کاربرها" : "Reset client usage", () => resetUsage(ib)),
+            plain ? "" : item("clients", fa ? "جبران برای کاربرها (+روز / +گیگ)" : "Compensate clients (+days / +GB)", () => compensate(ib)),
             item("trash", t("delete"), async () => {
               if (await confirmAction(t("confirmDelete", { x: ib.tag }))) { await guarded(() => api("DELETE", `/api/v2/admin/inbounds/${encodeURIComponent(ib.tag)}`)); route(); }
             }, "bad"));
