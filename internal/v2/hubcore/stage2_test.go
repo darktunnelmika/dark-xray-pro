@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -473,5 +475,39 @@ func TestOwnerAlerts(t *testing.T) {
 	mu.Lock()
 	if len(got) != 3 || !strings.Contains(got[2], "boss") || !strings.Contains(got[2], "9.9.9.9") {
 		t.Fatalf("login notice: %v", got)
+	}
+}
+
+func TestPruneAndBackupLeftovers(t *testing.T) {
+	s, _ := newStore(t)
+	ctx := context.Background()
+	old := time.Now().AddDate(-2, 0, 0).Unix()
+	if _, err := s.db.ExecContext(ctx, `INSERT INTO audit_log(unix,actor,role,method,path,status) VALUES(?,?,?,?,?,?),(?,?,?,?,?,?)`,
+		old, "a", "owner", "GET", "/x", 200, time.Now().Unix(), "b", "owner", "GET", "/y", 200); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Prune(ctx, 400); err != nil {
+		t.Fatal(err)
+	}
+	var n int
+	_ = s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM audit_log`).Scan(&n)
+	if n != 1 {
+		t.Fatal("audit rows after prune:", n)
+	}
+	dir := t.TempDir()
+	stale := filepath.Join(dir, "snapshot-123.sqlite")
+	_ = os.WriteFile(stale, []byte("x"), 0o600)
+	past := time.Now().Add(-2 * time.Hour)
+	_ = os.Chtimes(stale, past, past)
+	fresh := filepath.Join(dir, "snapshot-456.sqlite")
+	_ = os.WriteFile(fresh, []byte("x"), 0o600)
+	if _, err := s.AutoBackup(ctx, dir, 14); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(stale); !os.IsNotExist(err) {
+		t.Fatal("stale snapshot left behind")
+	}
+	if _, err := os.Stat(fresh); err != nil {
+		t.Fatal("a snapshot still being written must stay")
 	}
 }

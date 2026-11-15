@@ -225,9 +225,18 @@ func (s *Store) Prune(ctx context.Context, keepDays int) error {
 	if _, err := s.db.ExecContext(ctx, `DELETE FROM node_history WHERE bucket < ?`, s.now().Add(-7*24*time.Hour).Unix()); err != nil {
 		return err
 	}
+	// The audit log keeps a year; held discount codes expire after an hour.
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM audit_log WHERE unix < ?`, s.now().AddDate(-1, 0, 0).Unix()); err != nil && !noTable(err) {
+		return err
+	}
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM discount_pending WHERE unix < ?`, s.now().Add(-2*time.Hour).Unix()); err != nil && !noTable(err) && !strings.Contains(err.Error(), "no such column") {
+		return err
+	}
 	_, err := s.db.ExecContext(ctx, `DELETE FROM events WHERE unix < ?`, cut.Unix())
 	return err
 }
+
+func noTable(err error) bool { return err != nil && strings.Contains(err.Error(), "no such table") }
 
 // NodeStatus is what the dashboard shows per node.
 type NodeStatus struct {
