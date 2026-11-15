@@ -17,6 +17,7 @@ import (
 // Endpoint is one public way to reach an inbound: the node's own address
 // (Direct) or an entry server in front of it (Tunnel).
 type Endpoint struct {
+	Node    string `json:"-"` // the node behind this address (for ordering by health)
 	Name    string `json:"name"`
 	Address string `json:"address"`
 	Port    int    `json:"port"`
@@ -97,6 +98,17 @@ type Inbound struct {
 	Tag      string
 	Template []byte
 	Meta     Meta
+	Rank     int // lower comes first in subscriptions (node health); ties by tag
+}
+
+// byRank orders inbounds for subscriptions: healthiest first, then by tag.
+func byRank(list []Inbound) {
+	sort.SliceStable(list, func(i, j int) bool {
+		if list[i].Rank != list[j].Rank {
+			return list[i].Rank < list[j].Rank
+		}
+		return list[i].Tag < list[j].Tag
+	})
 }
 
 // Account identifies the client inside every protocol.
@@ -379,7 +391,7 @@ func ssPassword(t template, secret string) string {
 // Links returns one share link per inbound endpoint, in a stable order.
 func Links(a Account, ins []Inbound) ([]string, error) {
 	sorted := append([]Inbound(nil), ins...)
-	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Tag < sorted[j].Tag })
+	byRank(sorted)
 	var out []string
 	if len(ins) > 0 {
 		for _, l := range a.InfoLines {

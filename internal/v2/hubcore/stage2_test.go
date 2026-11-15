@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -685,5 +686,51 @@ func TestRepBrand(t *testing.T) {
 	}
 	if got := s.SubBaseFor(ctx, "alice", "https://hub"); got != "https://hub" {
 		t.Fatal(got)
+	}
+}
+
+func TestSmartOrder(t *testing.T) {
+	s, _ := newStore(t)
+	ctx := context.Background()
+	mk := func(id string, cpu float64, seen int64, xray bool) {
+		if _, err := s.CreateNode(ctx, id, id); err != nil {
+			t.Fatal(err)
+		}
+		host, _ := json.Marshal(wire.Host{CPUPercent: cpu, RAMUsed: 1, RAMTotal: 10})
+		_, _ = s.db.ExecContext(ctx, `UPDATE nodes SET last_seen_unix=?, xray_running=?, host_json=? WHERE id=?`, seen, xray, string(host), id)
+	}
+	now := s.now().Unix()
+	mk("busy", 95, now, true)
+	mk("calm", 5, now, true)
+	mk("dead", 1, now-3600, true)
+	ins := []sub.Inbound{
+		{Tag: "a-busy", Meta: sub.Meta{Endpoints: []sub.Endpoint{{Node: "busy", Address: "1.1.1.1", Port: 1}}}},
+		{Tag: "b-dead", Meta: sub.Meta{Endpoints: []sub.Endpoint{{Node: "dead", Address: "3.3.3.3", Port: 1}}}},
+		{Tag: "c-calm", Meta: sub.Meta{Endpoints: []sub.Endpoint{{Node: "dead", Address: "4.4.4.4", Port: 1}, {Node: "calm", Address: "2.2.2.2", Port: 1}}}},
+	}
+	got := s.rankInbounds(ctx, append([]sub.Inbound(nil), ins...))
+	sorted := append([]sub.Inbound(nil), got...)
+	sort.SliceStable(sorted, func(i, j int) bool { return sorted[i].Rank < sorted[j].Rank })
+	if sorted[0].Tag != "c-calm" || sorted[1].Tag != "a-busy" || sorted[2].Tag != "b-dead" {
+		t.Fatalf("order %v %v %v", sorted[0].Tag, sorted[1].Tag, sorted[2].Tag)
+	}
+	if sorted[0].Meta.Endpoints[0].Address != "2.2.2.2" {
+		t.Fatal("the live address must come first inside an inbound")
+	}
+	_ = s.SetSetting(ctx, "sub_hide_down", "1")
+	got = s.rankInbounds(ctx, append([]sub.Inbound(nil), ins...))
+	for _, in := range got {
+		for _, e := range in.Meta.Endpoints {
+			if e.Node == "dead" {
+				t.Fatal("a down node's address must be left out")
+			}
+		}
+	}
+	if len(got) != 2 {
+		t.Fatalf("an inbound only on the down node must be left out: %d", len(got))
+	}
+	_ = s.SetSetting(ctx, "sub_smart", "0")
+	if got := s.rankInbounds(ctx, append([]sub.Inbound(nil), ins...)); got[0].Tag != "a-busy" {
+		t.Fatal("smart order off must keep the list as is")
 	}
 }

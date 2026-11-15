@@ -423,7 +423,7 @@ func (s *Store) routeEndpoints(ctx context.Context, tag string) ([]sub.Endpoint,
 					name += " Tunnel"
 				}
 			}
-			out = append(out, sub.Endpoint{Name: name, Address: h.Address, Port: h.Port, SNI: h.SNI, Host: h.Host, Path: h.PathOverride,
+			out = append(out, sub.Endpoint{Node: n, Name: name, Address: h.Address, Port: h.Port, SNI: h.SNI, Host: h.Host, Path: h.PathOverride,
 				ALPN: h.ALPN, Fingerprint: h.Fingerprint, AllowInsecure: h.AllowInsecure, Exclude: h.Exclude, Fragment: h.Fragment, Mux: h.Mux})
 		}
 	}

@@ -234,7 +234,7 @@ FROM swaps w JOIN inbounds i ON i.tag=w.inbound_tag WHERE w.source_node=? AND w.
 
 // swapEndpoints adds each enabled route of an inbound to its subscription.
 func (s *Store) swapEndpoints(ctx context.Context, tag string) ([]sub.Endpoint, error) {
-	rows, err := s.ro.QueryContext(ctx, `SELECT name,entry_address,entry_port FROM swaps WHERE inbound_tag=? AND enabled=1 ORDER BY id`, tag)
+	rows, err := s.ro.QueryContext(ctx, `SELECT name,entry_address,entry_port,source_node FROM swaps WHERE inbound_tag=? AND enabled=1 ORDER BY id`, tag)
 	if err != nil {
 		return nil, err
 	}
@@ -242,7 +242,7 @@ func (s *Store) swapEndpoints(ctx context.Context, tag string) ([]sub.Endpoint, 
 	var out []sub.Endpoint
 	for rows.Next() {
 		var e sub.Endpoint
-		if err := rows.Scan(&e.Name, &e.Address, &e.Port); err != nil {
+		if err := rows.Scan(&e.Name, &e.Address, &e.Port, &e.Node); err != nil {
 			return nil, err
 		}
 		out = append(out, e)

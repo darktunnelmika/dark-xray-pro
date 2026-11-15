@@ -3,7 +3,6 @@ package sub
 import (
 	"encoding/json"
 	"fmt"
-	"sort"
 	"strconv"
 	"strings"
 )
@@ -44,7 +43,7 @@ type outbound struct {
 
 func outbounds(a Account, ins []Inbound, format string) ([]outbound, error) {
 	sorted := append([]Inbound(nil), ins...)
-	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Tag < sorted[j].Tag })
+	byRank(sorted)
 	var out []outbound
 	seen := map[string]int{}
 	for _, in := range sorted {

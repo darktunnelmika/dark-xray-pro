@@ -528,6 +528,7 @@ WHERE ci.email=? AND i.enabled=1 ORDER BY i.tag`, email)
 		ins[i].Meta.WGAddress = ip + "/32"
 	}
 	ins = sub.ExpandFallbacks(ins)
+	ins = s.rankInbounds(ctx, ins)
 	if !c.Enabled {
 		ins = nil
 	}

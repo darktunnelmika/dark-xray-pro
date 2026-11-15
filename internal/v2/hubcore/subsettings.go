@@ -26,6 +26,10 @@ type SubSettings struct {
 	// Customer page branding.
 	Accent string `json:"accent"` // #rrggbb, "" = the default neon
 	Logo   string `json:"logo"`   // small image as a data: URL
+	// Order configs by node health (on by default) and leave out a down
+	// node's configs (off by default; never all of them).
+	SmartOrder bool `json:"smart_order"`
+	HideDown   bool `json:"hide_down"`
 }
 
 func (s *Store) SubSettings(ctx context.Context) SubSettings {
@@ -40,6 +44,7 @@ func (s *Store) SubSettings(ctx context.Context) SubSettings {
 		Noise:   s.Setting(ctx, "sub_noise") == "1",
 		MiniApp: s.Setting(ctx, "miniapp") == "1", MiniAppURL: s.Setting(ctx, "miniapp_url"),
 		Accent: s.Setting(ctx, "sub_accent"), Logo: s.Setting(ctx, "sub_logo"),
+		SmartOrder: s.Setting(ctx, "sub_smart") != "0", HideDown: s.Setting(ctx, "sub_hide_down") == "1",
 	}
 }
 
@@ -87,7 +92,11 @@ func (s *Store) PutSubSettings(ctx context.Context, v SubSettings) error {
 	if v.MiniAppURL != "" && !strings.HasPrefix(v.MiniAppURL, "https://") {
 		return fmt.Errorf("%w: Telegram opens Mini Apps only over https://", ErrInvalid)
 	}
-	for k, val := range map[string]string{"miniapp": b01(v.MiniApp), "miniapp_url": v.MiniAppURL, "sub_frag": b01(v.Fragment), "sub_frag_len": v.FragmentLength, "sub_frag_int": v.FragmentInterval, "sub_noise": b01(v.Noise)} {
+	smart := "0"
+	if v.SmartOrder {
+		smart = "1"
+	}
+	for k, val := range map[string]string{"sub_smart": smart, "sub_hide_down": b01(v.HideDown), "miniapp": b01(v.MiniApp), "miniapp_url": v.MiniAppURL, "sub_frag": b01(v.Fragment), "sub_frag_len": v.FragmentLength, "sub_frag_int": v.FragmentInterval, "sub_noise": b01(v.Noise)} {
 		if err := s.SetSetting(ctx, k, val); err != nil {
 			return err
 		}

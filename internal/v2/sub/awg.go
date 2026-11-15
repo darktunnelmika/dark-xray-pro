@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
-	"sort"
 	"strconv"
 	"strings"
 )
@@ -21,7 +20,7 @@ type AWGConf struct {
 // AWGConfs builds the client's AmneziaWG configs, one per address.
 func AWGConfs(a Account, ins []Inbound) []AWGConf {
 	sorted := append([]Inbound(nil), ins...)
-	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Tag < sorted[j].Tag })
+	byRank(sorted)
 	var out []AWGConf
 	for _, in := range sorted {
 		var t struct {

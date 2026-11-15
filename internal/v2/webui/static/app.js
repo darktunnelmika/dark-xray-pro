@@ -3592,6 +3592,8 @@ function subSettingsCard() {
     const fi = h("input", { value: v.fragment_interval || "", placeholder: "10-20", dir: "ltr" });
     const noise = h("input", { type: "checkbox", checked: !!v.noise });
     const mini = h("input", { type: "checkbox", checked: !!v.miniapp });
+    const smart = h("input", { type: "checkbox", checked: v.smart_order !== false });
+    const hideDown = h("input", { type: "checkbox", checked: !!v.hide_down });
     const miniURL = h("input", { value: v.miniapp_url || "", dir: "ltr", placeholder: "https://panel.example.com/app/" });
     // Branding of the customer page: accent colour and a small logo (stored inline).
     let logo = v.logo || "";
@@ -3616,6 +3618,9 @@ function subSettingsCard() {
       h("label", { class: "check" }, frag, h("span", {}, L.frag)),
       h("div", { class: "two" }, h("label", {}, h("span", {}, L.fl), fl), h("label", {}, h("span", {}, L.fi), fi)),
       h("label", { class: "check" }, noise, h("span", {}, L.noise)),
+      h("h3", { class: "section" }, fa ? "ترتیب کانفیگ‌ها" : "Config order"),
+      h("label", { class: "check" }, smart, h("span", {}, fa ? "بهترین سرور اول: کانفیگ‌ها بر اساس سلامت و بار نودها مرتب شوند" : "Best server first: order configs by node health and load")),
+      h("label", { class: "check" }, hideDown, h("span", {}, fa ? "کانفیگ نودهای قطع از اشتراک کنار برود (وقتی دوباره وصل شد برمی‌گردد؛ هیچ‌وقت همه پنهان نمی‌شوند)" : "Leave out configs of nodes that are down (back when they recover; never all of them)")),
       h("h2", { class: "section" }, fa ? "ظاهر صفحهٔ مشتری" : "Customer page look"),
       h("div", { class: "row" }, h("label", { class: "check" }, accentOn, h("span", {}, fa ? "رنگ برند" : "Brand colour")), accent),
       h("div", { class: "row" }, logoPrev, h("label", {}, h("span", {}, fa ? "لوگو (PNG، JPG، WebP یا SVG، زیر ۱۵۰ کیلوبایت)" : "Logo (PNG, JPG, WebP or SVG, under 150 KB)"), logoIn), logoDel),
@@ -3625,7 +3630,7 @@ function subSettingsCard() {
       h("button", { class: "primary", onclick: async () => {
         err.textContent = "";
         try { await guarded(() => api("PUT", "/api/v2/admin/sub-settings", { title: title.value, remark_template: tpl.value, info_lines: info.checked, announce: ann.value, support_url: sup.value,
-          fragment: frag.checked, fragment_length: fl.value.trim(), fragment_interval: fi.value.trim(), noise: noise.checked, miniapp: mini.checked, miniapp_url: miniURL.value.trim(), accent: accentOn.checked ? accent.value : "", logo })); toast(t("saved")); }
+          fragment: frag.checked, fragment_length: fl.value.trim(), fragment_interval: fi.value.trim(), noise: noise.checked, smart_order: smart.checked, hide_down: hideDown.checked, miniapp: mini.checked, miniapp_url: miniURL.value.trim(), accent: accentOn.checked ? accent.value : "", logo })); toast(t("saved")); }
         catch (x) { err.textContent = x.message; }
       } }, L.save));
   }).catch(() => {});
