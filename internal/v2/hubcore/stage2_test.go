@@ -652,7 +652,7 @@ func TestRepBrand(t *testing.T) {
 	if err := s.PutRep(ctx, Rep{ID: "ali", Name: "Ali", Enabled: true}); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.PutRep(ctx, Rep{ID: "ali-sub", Name: "Sub", Enabled: true, ParentID: "ali"}); err != nil {
+	if err := s.PutSeller(ctx, "ali", Rep{ID: "ali-sub", Name: "Sub", Enabled: true}, "alisub", "password-123456"); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.PutSubSettings(ctx, SubSettings{Title: "Main VPN", SupportURL: "https://t.me/main"}); err != nil {
