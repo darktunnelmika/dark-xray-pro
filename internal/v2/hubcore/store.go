@@ -594,22 +594,26 @@ FROM clients c LEFT JOIN client_usage u ON u.email=c.email ORDER BY c.created_un
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
+	// Every client's inbounds in one query (not one per client).
+	at := make(map[string]int, len(out))
 	for i := range out {
-		tags, err := s.ro.QueryContext(ctx, `SELECT tag FROM client_inbounds WHERE email=? ORDER BY tag`, out[i].Email)
-		if err != nil {
+		at[out[i].Email] = i
+	}
+	tags, err := s.ro.QueryContext(ctx, `SELECT email,tag FROM client_inbounds ORDER BY email,tag`)
+	if err != nil {
+		return nil, err
+	}
+	defer tags.Close()
+	for tags.Next() {
+		var e, t string
+		if err := tags.Scan(&e, &t); err != nil {
 			return nil, err
 		}
-		for tags.Next() {
-			var t string
-			if err := tags.Scan(&t); err != nil {
-				tags.Close()
-				return nil, err
-			}
+		if i, ok := at[e]; ok {
 			out[i].Inbounds = append(out[i].Inbounds, t)
 		}
-		tags.Close()
 	}
-	return out, nil
+	return out, tags.Err()
 }
 
 // DeleteClient removes a client; its usage history is kept for accounting.

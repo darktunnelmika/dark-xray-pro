@@ -2,6 +2,7 @@ package hubcore
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"strings"
@@ -132,6 +133,21 @@ func (s *Store) ApplyUsage(ctx context.Context, nodeID string, b wire.UsageBatch
 		ts = now.Unix()
 	}
 	day := time.Unix(ts, 0).UTC().Format("2006-01-02")
+	// Statements reused for every row of the batch (thousands of users).
+	prep := func(q string) (*sql.Stmt, error) { return tx.PrepareContext(ctx, q) }
+	stUsage, err := prep(`INSERT INTO client_usage(email,up,down,first_seen_unix,last_seen_unix) VALUES(?,?,?,?,?)
+ON CONFLICT(email) DO UPDATE SET up=up+excluded.up, down=down+excluded.down, last_seen_unix=excluded.last_seen_unix,
+first_seen_unix=CASE WHEN first_seen_unix=0 THEN excluded.first_seen_unix ELSE first_seen_unix END`)
+	if err != nil {
+		return wire.UsageAck{}, err
+	}
+	defer stUsage.Close()
+	stDaily, err := prep(`INSERT INTO usage_daily(email,node_id,day,up,down) VALUES(?,?,?,?,?)
+ON CONFLICT(email,node_id,day) DO UPDATE SET up=up+excluded.up, down=down+excluded.down`)
+	if err != nil {
+		return wire.UsageAck{}, err
+	}
+	defer stDaily.Close()
 	for _, t := range b.Traffic {
 		if t.Up < 0 || t.Down < 0 || !emailRE.MatchString(t.Email) {
 			return wire.UsageAck{}, ErrInvalid
@@ -142,14 +158,10 @@ func (s *Store) ApplyUsage(ctx context.Context, nodeID string, b wire.UsageBatch
 		if pct != 100 {
 			t.Up, t.Down = t.Up*pct/100, t.Down*pct/100
 		}
-		if _, err := tx.ExecContext(ctx, `INSERT INTO client_usage(email,up,down,first_seen_unix,last_seen_unix) VALUES(?,?,?,?,?)
-ON CONFLICT(email) DO UPDATE SET up=up+excluded.up, down=down+excluded.down, last_seen_unix=excluded.last_seen_unix,
-first_seen_unix=CASE WHEN first_seen_unix=0 THEN excluded.first_seen_unix ELSE first_seen_unix END`,
-			t.Email, t.Up, t.Down, ts, ts); err != nil {
+		if _, err := stUsage.ExecContext(ctx, t.Email, t.Up, t.Down, ts, ts); err != nil {
 			return wire.UsageAck{}, err
 		}
-		if _, err := tx.ExecContext(ctx, `INSERT INTO usage_daily(email,node_id,day,up,down) VALUES(?,?,?,?,?)
-ON CONFLICT(email,node_id,day) DO UPDATE SET up=up+excluded.up, down=down+excluded.down`, t.Email, nodeID, day, t.Up, t.Down); err != nil {
+		if _, err := stDaily.ExecContext(ctx, t.Email, nodeID, day, t.Up, t.Down); err != nil {
 			return wire.UsageAck{}, err
 		}
 	}
@@ -180,17 +192,27 @@ ON CONFLICT(tag,node_id,day) DO UPDATE SET up=up+excluded.up, down=down+excluded
 		if _, err := tx.ExecContext(ctx, `DELETE FROM online WHERE node_id=?`, nodeID); err != nil {
 			return wire.UsageAck{}, err
 		}
+		stOnline, err := prep(`INSERT OR REPLACE INTO online(email,node_id,ips,seen_unix) VALUES(?,?,?,?)`)
+		if err != nil {
+			return wire.UsageAck{}, err
+		}
+		defer stOnline.Close()
+		stIP, err := prep(`INSERT INTO ip_log(email,ip,node_id,first_unix,last_unix) VALUES(?,?,?,?,?)
+ON CONFLICT(email,ip,node_id) DO UPDATE SET last_unix=MAX(last_unix,excluded.last_unix)`)
+		if err != nil {
+			return wire.UsageAck{}, err
+		}
+		defer stIP.Close()
 		for _, o := range b.Online {
 			ips, _ := json.Marshal(o.IPs)
-			if _, err := tx.ExecContext(ctx, `INSERT OR REPLACE INTO online(email,node_id,ips,seen_unix) VALUES(?,?,?,?)`, o.Email, nodeID, string(ips), ts); err != nil {
+			if _, err := stOnline.ExecContext(ctx, o.Email, nodeID, string(ips), ts); err != nil {
 				return wire.UsageAck{}, err
 			}
 			for i, ip := range o.IPs {
 				if i >= 32 || len(ip) > 64 {
 					break
 				}
-				if _, err := tx.ExecContext(ctx, `INSERT INTO ip_log(email,ip,node_id,first_unix,last_unix) VALUES(?,?,?,?,?)
-ON CONFLICT(email,ip,node_id) DO UPDATE SET last_unix=MAX(last_unix,excluded.last_unix)`, o.Email, ip, nodeID, ts, ts); err != nil {
+				if _, err := stIP.ExecContext(ctx, o.Email, ip, nodeID, ts, ts); err != nil {
 					return wire.UsageAck{}, err
 				}
 			}
