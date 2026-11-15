@@ -3066,6 +3066,7 @@ async function viewReps() {
     h("div", { class: "row" }, h("button", { onclick: () => creditForm(r) }, t("addCredit")),
       h("button", { class: "ghost", onclick: () => policyForm(r, inbounds) }, t("policy")),
       h("button", { class: "ghost", onclick: () => paymentForm(r) }, t("payment")),
+      h("button", { class: "ghost", onclick: () => openModal(lang === "fa" ? `برند و صفحهٔ اشتراک · ${r.Name || r.ID}` : `Brand & subscription page · ${r.Name || r.ID}`, repBrandCard(`/api/v2/admin/reps/${encodeURIComponent(r.ID)}/brand`)) }, lang === "fa" ? "صفحهٔ اشتراک" : "Sub page"),
       h("a", { class: "btn ghost", href: `#/activity?rep=${encodeURIComponent(r.ID)}` }, t("activity")),
       h("button", { class: "ghost", onclick: () => repForm(r) }, t("edit")))));
   return h("div", {},
@@ -3512,6 +3513,55 @@ async function usageChart(c) {
   const sum = days.reduce((a, d) => a + d.Up + d.Down, 0);
   openModal(`${t("usageChart")} · ${c.Email}`, h("div", { class: "form" },
     h("div", { class: "row small" }, h("strong", {}, t("totalLast30", { v: bytes(sum) })), legend()), barsSvg(days)));
+}
+
+// A reseller's own subscription page and link address. path is
+// /api/v2/rep/brand for the reseller, /api/v2/admin/reps/<id>/brand for owners.
+function repBrandCard(path, repName) {
+  const fa = lang === "fa";
+  const err = h("div", { class: "error", role: "alert" });
+  const card = h("div", { class: "card form" }, h("h2", {}, fa ? "صفحهٔ اشتراک اختصاصی" : "Own subscription page"), h("p", { class: "small muted" }, "…"));
+  api("GET", path).then((v) => {
+    const inp = (k, attrs = {}) => h("input", { value: v[k] || "", ...attrs });
+    const title = inp("title", { placeholder: fa ? "مثلاً: فروشگاه علی VPN" : "e.g. Ali VPN shop" });
+    const sup = inp("support_url", { dir: "ltr", placeholder: "https://t.me/your_support" });
+    const tpl = inp("remark_template", { dir: "ltr", placeholder: "{remark} · {left}" });
+    const base = inp("base_url", { dir: "ltr", placeholder: "https://sub.myshop.com" });
+    const ann = h("textarea", { rows: "2" }, v.announce || "");
+    let logo = v.logo || "";
+    const accentOn = h("input", { type: "checkbox", checked: !!v.accent });
+    const accent = h("input", { type: "color", value: v.accent || "#2de2e6" });
+    const logoPrev = h("img", { class: "logoprev", alt: "", hidden: !logo, src: logo || null });
+    const logoIn = h("input", { type: "file", accept: "image/png,image/jpeg,image/webp,image/svg+xml" });
+    logoIn.addEventListener("change", () => {
+      const f = logoIn.files[0];
+      if (!f) return;
+      if (f.size > 150000) { err.textContent = fa ? "لوگو باید کمتر از ۱۵۰ کیلوبایت باشد." : "The logo must be under 150 KB."; return; }
+      const rd = new FileReader();
+      rd.onload = () => { logo = rd.result; logoPrev.src = logo; logoPrev.hidden = false; };
+      rd.readAsDataURL(f);
+    });
+    const save = h("button", { class: "primary", type: "button", onclick: async () => {
+      err.textContent = "";
+      try {
+        await api("PUT", path, { title: title.value, support_url: sup.value, remark_template: tpl.value, base_url: base.value, announce: ann.value, accent: accentOn.checked ? accent.value : "", logo });
+        toast(t("saved"));
+      } catch (x) { err.textContent = x.message; }
+    } }, fa ? "ذخیره" : "Save");
+    const lab = (l, el, hint) => h("label", {}, h("span", {}, l), el, hint ? h("small", { class: "muted" }, hint) : null);
+    fill(card, h("h2", {}, fa ? "صفحهٔ اشتراک اختصاصی" : "Own subscription page", repName ? h("span", { class: "badge", style: "margin-inline-start:8px" }, repName) : null),
+      h("p", { class: "small muted" }, fa ? "مشتری‌های این نماینده (و زیرفروشنده‌هایش) صفحهٔ اشتراک و نام کانفیگ‌ها را با برند خود او می‌بینند. فیلدهای خالی از تنظیمات اصلی پنل می‌آیند." : "This reseller's customers (and their sub-sellers') see the subscription page and config names with this brand. Empty fields come from the panel's settings."),
+      h("div", { class: "two" }, lab(fa ? "عنوان" : "Title", title), lab(fa ? "لینک پشتیبانی" : "Support link", sup)),
+      lab(fa ? "اعلان (در صفحه و برنامه‌ها)" : "Announcement (page and apps)", ann),
+      lab(fa ? "نام کانفیگ‌ها" : "Config names", tpl, fa ? "متغیرها: {remark} {left} {used} {total} {days} {email} {proto} {tag}" : "Variables: {remark} {left} {used} {total} {days} {email} {proto} {tag}"),
+      h("div", { class: "row" }, h("label", { class: "check" }, accentOn, h("span", {}, fa ? "رنگ برند" : "Brand colour")), accent),
+      h("div", { class: "row" }, logoPrev, h("label", {}, h("span", {}, fa ? "لوگو (زیر ۱۵۰ کیلوبایت)" : "Logo (under 150 KB)"), logoIn),
+        h("button", { type: "button", class: "ghost", onclick: () => { logo = ""; logoPrev.hidden = true; logoIn.value = ""; } }, fa ? "حذف لوگو" : "Remove logo")),
+      lab(fa ? "آدرس اختصاصی لینک‌ها (اختیاری)" : "Own link address (optional)", base,
+        fa ? "دامنهٔ خودتان را (مثلاً از طریق Cloudflare) به آدرس اشتراک هاب وصل کنید؛ لینک‌های مشتری‌ها با این آدرس ساخته می‌شوند و نام پنل اصلی دیده نمی‌شود." : "Point your own domain (e.g. through Cloudflare) at the HUB's subscription address; customers' links use it and the main panel's name never shows."),
+      err, h("div", { class: "row" }, save));
+  }).catch((x) => fill(card, h("p", { class: "error" }, x.message)));
+  return card;
 }
 
 function subSettingsCard() {
@@ -4199,6 +4249,7 @@ function viewSettings() {
   const groups = [
     owner && ["sub", "link", fa ? "اشتراک مشتری" : "Customer subscription", fa ? "عنوان، نام کانفیگ‌ها و صفحهٔ مشتری" : "Title, config names, customer page", () => [subSettingsCard()]],
     (owner || fullOwner()) && ["panel", "globe", fa ? "آدرس و دسترسی پنل" : "Panel address and access", fa ? "HTTPS، مسیر مخفی، IPهای مجاز" : "HTTPS, secret path, trusted IPs", () => [fullOwner() ? panelHTTPSCard() : null, fullOwner() ? panelPathCard() : null, owner ? trustedCard() : null]],
+    me.role === "rep" && ["repsub", "link", fa ? "صفحهٔ اشتراک من" : "My subscription page", fa ? "برند، لوگو و آدرس اختصاصی" : "Brand, logo and own address", () => [repBrandCard("/api/v2/rep/brand")]],
     ["security", "staff", fa ? "امنیت حساب" : "Account security", fa ? "رمز، ورود دومرحله‌ای، نشست‌ها" : "Password, two-step sign-in, sessions", () => [pwForm, tfaCard(), sessionsCard()]],
     (fullOwner() || owner || tgCard) && ["telegram", "bell", fa ? "تلگرام" : "Telegram", fa ? "ربات، هشدارها، فروش و دعوت" : "Bot, alerts, sales and referrals", () => [fullOwner() ? telegramBotCard() : null, owner ? tgCommerceCard() : null, tgCard]],
     fullOwner() && ["backup", "traffic", fa ? "پشتیبان و انتقال" : "Backup and migration", fa ? "دانلود، بازگردانی، ورود از پنل‌های دیگر" : "Download, restore, import from other panels", () => [backupCard, migrateCard(), foreignCard()]],

@@ -115,7 +115,7 @@ func gbText(b int64) string {
 
 // subAccount adds the settings-driven naming to an account.
 func (s *Store) subAccount(ctx context.Context, c Client, u Usage) sub.Account {
-	set := s.SubSettings(ctx)
+	set, _ := s.brandFor(ctx, c.Email)
 	acc := sub.Account{Email: c.Email, UUID: c.UUID, Secret: c.Secret, IranDirect: s.Routing(ctx).ClientIranDirect, RemarkTemplate: set.RemarkTemplate}
 	left := Remaining(c, u)
 	exp := EffectiveExpiry(c, u)

@@ -570,7 +570,7 @@ func (b *Bot) sendSub(ctx context.Context, chat int64, email string) {
 	if err != nil {
 		return
 	}
-	url := strings.TrimRight(b.SubBase, "/") + "/sub/" + c.SubToken
+	url := strings.TrimRight(b.Store.SubBaseFor(ctx, c.Email, b.SubBase), "/") + "/sub/" + c.SubToken
 	if png, err := qrcode.Encode(url, qrcode.Medium, 512); err == nil {
 		if err := b.API.SendPhoto(ctx, chat, png, "<b>"+esc(email)+"</b>"); err != nil {
 			b.logf("tgbot photo: %v", err)

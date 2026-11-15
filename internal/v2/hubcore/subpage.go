@@ -84,7 +84,7 @@ FROM clients c LEFT JOIN client_usage cu ON cu.email=c.email WHERE c.email=?`, e
 		return pageData{}, ErrNotFound
 	}
 	T := pageText[lang]
-	set := s.SubSettings(ctx)
+	set, _ := s.brandFor(ctx, email)
 	d := pageData{Lang: lang, Dir: "rtl", Email: c.Email, Title: or2(set.Title, c.Email), SubURL: subURL, Announce: set.Announce, Support: set.SupportURL, T: T}
 	if accentRE.MatchString(set.Accent) {
 		d.Accent = template.CSS(set.Accent)

@@ -383,6 +383,28 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 		}
 		reply(w, map[string]string{"code": code, "link": link, "bot": bot}, err)
 	}))
+	mux.HandleFunc("GET /api/v2/rep/brand", repOnly(func(w http.ResponseWriter, r *http.Request) {
+		reply(w, s.RepBrand(r.Context(), who(r).RepID), nil)
+	}))
+	mux.HandleFunc("PUT /api/v2/rep/brand", repOnly(func(w http.ResponseWriter, r *http.Request) {
+		var b RepBrand
+		if !decode(w, r, &b) {
+			return
+		}
+		err := s.PutRepBrand(r.Context(), who(r).RepID, b)
+		reply(w, s.RepBrand(r.Context(), who(r).RepID), err)
+	}))
+	mux.HandleFunc("GET /api/v2/admin/reps/{id}/brand", guard(func(w http.ResponseWriter, r *http.Request) {
+		reply(w, s.RepBrand(r.Context(), r.PathValue("id")), nil)
+	}))
+	mux.HandleFunc("PUT /api/v2/admin/reps/{id}/brand", guard(func(w http.ResponseWriter, r *http.Request) {
+		var b RepBrand
+		if !decode(w, r, &b) {
+			return
+		}
+		err := s.PutRepBrand(r.Context(), r.PathValue("id"), b)
+		reply(w, s.RepBrand(r.Context(), r.PathValue("id")), err)
+	}))
 	mux.HandleFunc("GET /api/v2/rep/sellers", repOnly(func(w http.ResponseWriter, r *http.Request) {
 		list, err := s.Sellers(r.Context(), who(r).RepID)
 		for i := range list {
@@ -1415,7 +1437,11 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 		}
 		out := make([]view, 0, len(list))
 		for _, c := range list {
-			out = append(out, view{c, subURL(subBase, r, c.SubToken)})
+			base := subBase
+			if c.RepID != "" {
+				base = s.SubBaseFor(r.Context(), c.Email, subBase)
+			}
+			out = append(out, view{c, subURL(base, r, c.SubToken)})
 		}
 		reply(w, out, err)
 	}))
@@ -1542,7 +1568,7 @@ func SubHandler(s *Store) http.Handler {
 			s.serveSubPage(w, r, email, pageURL)
 			return
 		}
-		set := s.SubSettings(r.Context())
+		set, _ := s.brandFor(r.Context(), email)
 		w.Header().Set("Profile-Update-Interval", "12")
 		w.Header().Set("Profile-Title", "base64:"+b64(or2(set.Title, email)))
 		w.Header().Set("Profile-Web-Page-Url", pageURL)

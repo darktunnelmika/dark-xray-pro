@@ -643,3 +643,47 @@ func TestComposeFromTemplate(t *testing.T) {
 		t.Fatal("a template without a protocol must be refused")
 	}
 }
+
+func TestRepBrand(t *testing.T) {
+	s, _ := newStore(t)
+	seed(t, s)
+	ctx := context.Background()
+	if err := s.PutRep(ctx, Rep{ID: "ali", Name: "Ali", Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.PutRep(ctx, Rep{ID: "ali-sub", Name: "Sub", Enabled: true, ParentID: "ali"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.PutSubSettings(ctx, SubSettings{Title: "Main VPN", SupportURL: "https://t.me/main"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.PutRepBrand(ctx, "ali", RepBrand{Title: "Ali VPN", SupportURL: "https://t.me/ali", BaseURL: "https://sub.ali.example", Accent: "#ff0088"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.PutRepBrand(ctx, "ali", RepBrand{BaseURL: "ftp://x"}); err == nil {
+		t.Fatal("bad address accepted")
+	}
+	for _, c := range []Client{{Email: "ali-cust", Enabled: true, VolumeBytes: -1, Inbounds: []string{"de-vless"}}, {Email: "sub-cust", Enabled: true, VolumeBytes: -1, Inbounds: []string{"de-vless"}}} {
+		if err := s.PutClient(ctx, c); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_, _ = s.db.ExecContext(ctx, `UPDATE clients SET rep_id='ali' WHERE email='ali-cust'`)
+	_, _ = s.db.ExecContext(ctx, `UPDATE clients SET rep_id='ali-sub' WHERE email='sub-cust'`)
+	for _, e := range []string{"ali-cust", "sub-cust"} {
+		set, base := s.brandFor(ctx, e)
+		if set.Title != "Ali VPN" || set.SupportURL != "https://t.me/ali" || set.Accent != "#ff0088" || base != "https://sub.ali.example" {
+			t.Fatalf("%s: %+v %s", e, set, base)
+		}
+		d, err := s.subPageData(ctx, e, "https://sub.ali.example/sub/x", "fa")
+		if err != nil || d.Title != "Ali VPN" || d.Support != "https://t.me/ali" {
+			t.Fatalf("%s page: %+v %v", e, d, err)
+		}
+	}
+	if set, base := s.brandFor(ctx, "alice"); set.Title != "Main VPN" || base != "" {
+		t.Fatalf("a direct customer must keep the panel's brand: %+v %q", set, base)
+	}
+	if got := s.SubBaseFor(ctx, "alice", "https://hub"); got != "https://hub" {
+		t.Fatal(got)
+	}
+}

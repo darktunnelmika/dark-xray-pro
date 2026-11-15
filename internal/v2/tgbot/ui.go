@@ -220,7 +220,11 @@ func backTo(data, text string) *Keyboard {
 
 // subURL is the client's subscription address.
 func (b *Bot) subURL(c hubcore.ClientView) string {
-	return strings.TrimRight(b.SubBase, "/") + "/sub/" + c.SubToken
+	base := b.SubBase
+	if c.RepID != "" {
+		base = b.Store.SubBaseFor(context.Background(), c.Email, base) // the reseller's own address
+	}
+	return strings.TrimRight(base, "/") + "/sub/" + c.SubToken
 }
 
 func (b *Bot) showSubLink(ctx context.Context, chat int64, email string) {
