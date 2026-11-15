@@ -81,9 +81,31 @@ type loadWatch struct {
 	mu      sync.Mutex
 	high    map[string]int       // consecutive high readings
 	alerted map[string]time.Time // last alert per server+metric
+	down    map[string]int       // consecutive bad checks per node problem
+	downAt  map[string]time.Time // when an announced outage began
 }
 
-var loads = &loadWatch{high: map[string]int{}, alerted: map[string]time.Time{}}
+var loads = &loadWatch{high: map[string]int{}, alerted: map[string]time.Time{}, down: map[string]int{}, downAt: map[string]time.Time{}}
+
+// checkDown announces a problem after two bad checks in a row and its end.
+func (s *Store) checkDown(ctx context.Context, key, downText, upText string, bad bool) {
+	loads.mu.Lock()
+	defer loads.mu.Unlock()
+	if bad {
+		loads.down[key]++
+		if loads.down[key] == 2 {
+			loads.downAt[key] = s.now()
+			notifyOwners(ctx, downText)
+		}
+		return
+	}
+	if at, ok := loads.downAt[key]; ok {
+		mins := int(s.now().Sub(at).Minutes()) + 4 // it was already down for two checks
+		notifyOwners(ctx, fmt.Sprintf("%s (حدود %d دقیقه)", upText, mins))
+		delete(loads.downAt, key)
+	}
+	loads.down[key] = 0
+}
 
 // checkLoad raises (or clears) an alert for one reading.
 func (s *Store) checkLoad(ctx context.Context, key, label, metric string, value float64, limit int) {
