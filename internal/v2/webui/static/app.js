@@ -4448,16 +4448,18 @@ function darkOldSection() {
     }
     const pick = (sel) => h("div", { class: "row" }, (ins || []).map((ib) => h("label", { class: "check" }, h("input", { type: "checkbox", value: ib.tag, checked: sel }), ib.tag)));
     const main = pick(true), rest = pick(true);
+    const ownerBot = h("input", { type: "checkbox", checked: true });
     const tags = (el) => [...el.querySelectorAll("input:checked")].map((x) => x.value);
     const rep = h("div", { class: "form" });
     const c = st.counts || {};
     const show = (r) => fill(rep,
-      h("div", { class: "row" }, ...[[fa ? "نماینده" : "resellers", r.reps], [fa ? "ورود" : "logins", r.logins], [fa ? "کلاینت" : "clients", r.clients], ["Restore", r.restore], [fa ? "لینک ساب" : "links", r.links], [fa ? "مصرف" : "usage", r.usage], [fa ? "تلگرام" : "Telegram", r.telegram], [fa ? "غیرفعال" : "disabled", r.disabled], [fa ? "تمام‌شده (قابل تمدید)" : "ended (renewable)", r.ended]].map(([k, v]) => h("span", { class: "badge" }, `${k}: ${fmtNum(v || 0)}`))),
+      h("div", { class: "row" }, ...[[fa ? "نماینده" : "resellers", r.reps], [fa ? "ورود" : "logins", r.logins], [fa ? "کلاینت" : "clients", r.clients], ["Restore", r.restore], [fa ? "لینک ساب" : "links", r.links], [fa ? "مصرف" : "usage", r.usage], [fa ? "تلگرام" : "Telegram", r.telegram], [fa ? "غیرفعال" : "disabled", r.disabled], [fa ? "تمام‌شده (قابل تمدید)" : "ended (renewable)", r.ended], [fa ? "ربات نماینده" : "reseller bots", r.bots], [fa ? "کارت" : "cards", r.cards], [fa ? "کیف پول" : "wallets", r.wallets], [fa ? "پلن" : "plans", r.products]].map(([k, v]) => h("span", { class: "badge" }, `${k}: ${fmtNum(v || 0)}`))),
+      r.main_bot ? h("p", { class: "small" }, (fa ? "ربات اصلی: " : "Main bot: ") + r.main_bot) : null,
       (r.domains || []).length ? h("p", { class: "small" }, (fa ? "این دامنه‌ها را بعد از انتقال به IP همین هاب ببرید تا لینک‌های قدیمی کار کنند: " : "Point these domains here after the move so old links keep working: ") + r.domains.join("، ")) : null,
       ...(r.notes || []).slice(0, 20).map((n) => h("div", { class: "small muted" }, "• " + n)),
       ...(r.skipped || []).slice(0, 20).map((n) => h("div", { class: "small", style: "color:var(--warn)" }, "• " + n)));
     const run = async (dry) => {
-      const body = { inbounds: tags(main), restore_inbounds: tags(rest), dry_run: dry };
+      const body = { inbounds: tags(main), restore_inbounds: tags(rest), owner_bot: ownerBot.checked, dry_run: dry };
       if (!body.inbounds.length) { toast(fa ? "حداقل یک اینباند انتخاب کنید." : "Pick at least one inbound."); return; }
       if (!dry && !(await confirmAction(fa ? "انتقال انجام شود؟ کلاینت‌ها، نماینده‌ها و ورودها به این پنل اضافه می‌شوند." : "Import now? Clients, resellers and logins are added to this panel."))) return;
       const r = await guarded(() => api("POST", "/api/v2/admin/migrate/darkold/run", body));
@@ -4469,6 +4471,8 @@ function darkOldSection() {
       h("div", { class: "row" }, ...Object.entries(c).map(([k, v]) => h("span", { class: "badge" }, `${k}: ${fmtNum(v)}`))),
       h("label", {}, h("span", {}, fa ? "اینباندهای کلاینت‌ها" : "Inbounds for the clients"), main),
       h("label", {}, h("span", {}, fa ? "اینباندهای کلاینت‌های Restore" : "Inbounds for the Restore clients"), rest),
+      h("label", { class: "check" }, ownerBot, fa ? "ربات خودِ مالک در پنل قبلی، ربات اصلی این پنل شود (ربات نماینده‌ها همیشه منتقل و روشن می‌شوند)" : "The owner's old bot becomes this panel's main bot (resellers' bots are always moved and turned on)"),
+      h("p", { class: "small", style: "color:var(--warn)" }, fa ? "⚠️ یک ربات هم‌زمان روی دو پنل کار نمی‌کند: قبل از «انتقال»، پنل قبلی را خاموش کنید." : "⚠️ A bot cannot run on two panels at once: stop the old panel before importing."),
       h("div", { class: "row" }, h("button", { onclick: () => run(true) }, fa ? "پیش‌نمایش" : "Preview"), h("button", { class: "primary", onclick: () => run(false) }, fa ? "انتقال" : "Import"),
         h("button", { class: "ghost danger", onclick: async () => { await guarded(() => api("DELETE", "/api/v2/admin/migrate/darkold")); draw(); } }, fa ? "حذف فایل خروجی" : "Discard the export")),
       rep);

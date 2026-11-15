@@ -87,7 +87,10 @@ func TestImportDarkOld(t *testing.T) {
 	if list, _ := s.Clients(ctx); len(list) != 0 {
 		t.Fatal("a preview must not write")
 	}
-	res, err := s.ImportDarkOld(ctx, DarkOldOptions{Inbounds: []string{"main"}})
+	var applied string
+	SetTelegramControl(TelegramControl{Apply: func(_ context.Context, tok string, owners []int64) (string, error) { applied = tok; return "bossbot", nil }})
+	defer SetTelegramControl(TelegramControl{})
+	res, err := s.ImportDarkOld(ctx, DarkOldOptions{Inbounds: []string{"main"}, OwnerBot: true})
 	if err != nil || res.Clients != 3 || res.Telegram != 1 || res.Links != 4 {
 		t.Fatalf("%+v %v", res, err)
 	}
@@ -120,6 +123,9 @@ func TestImportDarkOld(t *testing.T) {
 	}
 	if _, err := s.Login(ctx, "ali", "wrong"); err == nil {
 		t.Fatal("a wrong password must fail")
+	}
+	if !strings.HasPrefix(applied, "987654321:") || res.MainBot != "@bossbot" {
+		t.Fatal("the owner's old bot must become the main bot", applied, res.MainBot)
 	}
 	if res.Cards != 1 || res.Bots != 1 || res.Wallets != 1 || res.Products != 1 {
 		t.Fatalf("shop: %+v", res)

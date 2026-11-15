@@ -184,7 +184,10 @@ func (s *Store) DarkOldDiscard() error {
 type DarkOldOptions struct {
 	Inbounds        []string `json:"inbounds"`         // v2 inbounds every moved client gets
 	RestoreInbounds []string `json:"restore_inbounds"` // for the Restore clients (default: Inbounds)
-	DryRun          bool     `json:"dry_run"`
+	// OwnerBot makes the owner's old bot the panel's main bot, so the
+	// owner's customers keep the bot they know.
+	OwnerBot bool `json:"owner_bot"`
+	DryRun   bool `json:"dry_run"`
 }
 
 type DarkOldReport struct {
@@ -199,11 +202,12 @@ type DarkOldReport struct {
 	Links    int      `json:"links"`
 	Telegram int      `json:"telegram"` // clients linked to a Telegram account
 	Groups   int      `json:"groups"`
-	Cards    int      `json:"cards"`    // sellers' cards for card-to-card payment
-	Bots     int      `json:"bots"`     // resellers' own Telegram bots
-	Wallets  int      `json:"wallets"`  // customers' toman wallets with a balance
-	Products int      `json:"products"` // plans for sale
-	Domains  []string `json:"domains"`  // domains to point here so old links keep working
+	Cards    int      `json:"cards"`              // sellers' cards for card-to-card payment
+	Bots     int      `json:"bots"`               // resellers' own Telegram bots
+	Wallets  int      `json:"wallets"`            // customers' toman wallets with a balance
+	Products int      `json:"products"`           // plans for sale
+	MainBot  string   `json:"main_bot,omitempty"` // the owner's old bot now serving as the main bot
+	Domains  []string `json:"domains"`            // domains to point here so old links keep working
 	Skipped  []string `json:"skipped"`
 	Notes    []string `json:"notes"`
 }
@@ -602,6 +606,17 @@ FROM restore_subscriptions r LEFT JOIN core_clients k ON k.email=r.core_email WH
 		rep.Domains = append(rep.Domains, d)
 	}
 	sort.Strings(rep.Domains)
+	// The owner's old bot (applied after the import is saved).
+	var ownerTok, ownerUser string
+	var ownerAdmin int64
+	if opt.OwnerBot && tableExists(ctx, old, "export_bot_tokens") {
+		_ = old.QueryRowContext(ctx, `SELECT b.token,b.bot_username,b.admin_telegram_id FROM export_bot_tokens b JOIN api_admins a ON a.id=b.owner WHERE a.role='owner' LIMIT 1`).Scan(&ownerTok, &ownerUser, &ownerAdmin)
+		if ownerTok == "" {
+			rep.note("the owner had no bot in the old panel")
+		} else {
+			rep.MainBot = "@" + ownerUser
+		}
+	}
 	if opt.DryRun {
 		return rep, nil
 	}
@@ -609,6 +624,20 @@ FROM restore_subscriptions r LEFT JOIN core_clients k ON k.email=r.core_email WH
 		return rep, err
 	}
 	_ = s.SetSetting(ctx, "darkold_imported", strconv.FormatInt(now, 10))
+	if ownerTok != "" {
+		owners := s.TelegramOwners(ctx)
+		if ownerAdmin > 0 && !slicesContains(owners, ownerAdmin) {
+			owners = append(owners, ownerAdmin)
+		}
+		if c := telegramControl(); c.Apply != nil {
+			if user, err := c.Apply(ctx, ownerTok, owners); err != nil {
+				rep.MainBot = ""
+				rep.note("the owner's old bot could not be started: %v — set it in Settings → Telegram", err)
+			} else {
+				rep.MainBot = "@" + user
+			}
+		}
+	}
 	return rep, nil
 }
 
@@ -831,4 +860,13 @@ FROM commerce_prices p JOIN commerce_products pr ON pr.id=p.product_id AND pr.ow
 		}
 	}
 	return nil
+}
+
+func slicesContains(list []int64, v int64) bool {
+	for _, x := range list {
+		if x == v {
+			return true
+		}
+	}
+	return false
 }
