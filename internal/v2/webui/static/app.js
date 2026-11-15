@@ -3180,7 +3180,7 @@ async function viewSellers() {
   const cards = (reps || []).map((r) => h("div", { class: "card item" },
     h("div", { class: "head" }, h("span", { class: "name" }, r.Name || r.ID), h("span", { class: "badge" }, r.ID),
       h("span", { class: `badge ${r.Enabled ? "good" : "bad"} spacer` }, t(r.Enabled ? "enabled" : "disabled"))),
-    h("div", { class: "muted small" }, `${t("volumeCredit")}: ${bytes(r.VolumeCredit)} · ${t("units")}: ${fmtNum(r.UnlimitedUnits)} · ${t("clientsCount", { n: fmtNum(r.Clients) })}`),
+    h("div", { class: "muted small" }, `${t("volumeCredit")}: ${bytes(r.VolumeCredit)} · ${t("units")}: ${fmtNum(r.UnlimitedUnits)} · ${t("clientsCount", { n: fmtNum(r.Clients) })} · ${lang === "fa" ? "مصرف کل" : "used"}: ${bytes(r.UsedBytes || 0)}`),
     h("div", { class: "muted small" }, policySummary(r.Policy)),
     h("div", { class: "row" }, h("button", { onclick: () => creditForm(r) }, t("transferCredit")),
       h("button", { class: "ghost", onclick: () => policyForm(r, inbounds) }, t("policy")),
@@ -3198,7 +3198,7 @@ async function viewReps() {
     h("div", { class: "head" }, h("span", { class: "name" }, r.Name || r.ID), h("span", { class: "badge" }, r.ID),
       r.ParentID ? h("span", { class: "badge" }, `${t("subOf")} ${r.ParentID}`) : null,
       h("span", { class: `badge ${r.Enabled ? "good" : "bad"} spacer` }, t(r.Enabled ? "enabled" : "disabled"))),
-    h("div", { class: "muted small" }, `${t("volumeCredit")}: ${bytes(r.VolumeCredit)} · ${t("units")}: ${fmtNum(r.UnlimitedUnits)} · ${t("clientsCount", { n: fmtNum(r.Clients) })}`),
+    h("div", { class: "muted small" }, `${t("volumeCredit")}: ${bytes(r.VolumeCredit)} · ${t("units")}: ${fmtNum(r.UnlimitedUnits)} · ${t("clientsCount", { n: fmtNum(r.Clients) })} · ${lang === "fa" ? "مصرف کل" : "used"}: ${bytes(r.UsedBytes || 0)}`),
     h("div", { class: "muted small" }, policySummary(r.Policy)),
     h("div", { class: "row" }, h("button", { onclick: () => creditForm(r) }, t("addCredit")),
       h("button", { class: "ghost", onclick: () => policyForm(r, inbounds) }, t("policy")),
@@ -4449,6 +4449,7 @@ function darkOldSection() {
     const pick = (sel) => h("div", { class: "row" }, (ins || []).map((ib) => h("label", { class: "check" }, h("input", { type: "checkbox", value: ib.tag, checked: sel }), ib.tag)));
     const main = pick(true), rest = pick(true);
     const ownerBot = h("input", { type: "checkbox", checked: true });
+    const dropBox = h("div", { class: "row" }, (st.resellers || []).map((id) => h("label", { class: "check" }, h("input", { type: "checkbox", value: id }), id)));
     const withRestore = h("input", { type: "checkbox" });
     const restLabel = h("label", { hidden: true }, h("span", {}, fa ? "اینباندهای کلاینت‌های Restore" : "Inbounds for the Restore clients"), rest);
     withRestore.addEventListener("change", () => { restLabel.hidden = !withRestore.checked; });
@@ -4456,13 +4457,16 @@ function darkOldSection() {
     const rep = h("div", { class: "form" });
     const c = st.counts || {};
     const show = (r) => fill(rep,
-      h("div", { class: "row" }, ...[[fa ? "نماینده" : "resellers", r.reps], [fa ? "ورود" : "logins", r.logins], [fa ? "کلاینت" : "clients", r.clients], ["Restore", r.restore], [fa ? "لینک ساب" : "links", r.links], [fa ? "مصرف" : "usage", r.usage], [fa ? "تلگرام" : "Telegram", r.telegram], [fa ? "غیرفعال" : "disabled", r.disabled], [fa ? "تمام‌شده (قابل تمدید)" : "ended (renewable)", r.ended], [fa ? "ربات نماینده" : "reseller bots", r.bots], [fa ? "کارت" : "cards", r.cards], [fa ? "کیف پول" : "wallets", r.wallets], [fa ? "پلن" : "plans", r.products]].map(([k, v]) => h("span", { class: "badge" }, `${k}: ${fmtNum(v || 0)}`))),
+      h("div", { class: "row" }, ...[[fa ? "نماینده" : "resellers", r.reps], [fa ? "ورود" : "logins", r.logins], [fa ? "کلاینت" : "clients", r.clients], ["Restore", r.restore], [fa ? "لینک ساب" : "links", r.links], [fa ? "مصرف" : "usage", r.usage], [fa ? "تلگرام" : "Telegram", r.telegram], [fa ? "غیرفعال" : "disabled", r.disabled], [fa ? "تمام‌شده (قابل تمدید)" : "ended (renewable)", r.ended], [fa ? "ربات نماینده" : "reseller bots", r.bots], [fa ? "کارت" : "cards", r.cards], [fa ? "کیف پول" : "wallets", r.wallets], [fa ? "پلن" : "plans", r.products], [fa ? "کلاینت جامانده" : "left behind", r.dropped], [fa ? "سفارش (سابقه)" : "orders (history)", r.orders], [fa ? "شارژ کیف پول (سابقه)" : "top-ups (history)", r.topups], [fa ? "ردیف کیف پول" : "wallet rows", r.wallet_rows], [fa ? "ردیف اعتبار" : "credit rows", r.ledger_rows]].map(([k, v]) => h("span", { class: "badge" }, `${k}: ${fmtNum(v || 0)}`))),
+      (r.credit || []).length ? h("div", { class: "table-wrap" }, h("table", {}, h("thead", {}, h("tr", {}, ...(fa ? ["نماینده", "سقف", "در حال استفاده", "برگشتی منقضی‌ها", "اعتبار نهایی", "نامحدود قبلی (منتقل نمی‌شود)", "مصرف کل"] : ["Reseller", "Capacity", "In use", "Expired back", "Credit", "Old unlimited (not moved)", "Lifetime use"]).map((x) => h("th", {}, x)))),
+        h("tbody", {}, ...r.credit.map((x) => h("tr", {}, h("td", {}, x.rep), h("td", {}, bytes(x.cap)), h("td", {}, bytes(x.in_use)), h("td", {}, bytes(x.expired_back)), h("td", {}, h("b", {}, bytes(x.credit))), h("td", {}, fmtNum(x.old_units)), h("td", {}, bytes(x.lifetime))))))) : null,
+      r.unsettled ? h("p", { class: "small", style: "color:var(--warn)" }, fa ? `⚠️ ${fmtNum(r.unsettled)} سفارش یا شارژ در پنل قبلی هنوز منتظر تصمیم است؛ قبل از انتقال همان‌جا تأیید یا رد کنید.` : `⚠️ ${fmtNum(r.unsettled)} orders or top-ups are still waiting for a decision in the old panel; settle them there before the move.`) : null,
       r.main_bot ? h("p", { class: "small" }, (fa ? "ربات اصلی: " : "Main bot: ") + r.main_bot) : null,
       (r.domains || []).length ? h("p", { class: "small" }, (fa ? "این دامنه‌ها را بعد از انتقال به IP همین هاب ببرید تا لینک‌های قدیمی کار کنند: " : "Point these domains here after the move so old links keep working: ") + r.domains.join("، ")) : null,
       ...(r.notes || []).slice(0, 20).map((n) => h("div", { class: "small muted" }, "• " + n)),
       ...(r.skipped || []).slice(0, 20).map((n) => h("div", { class: "small", style: "color:var(--warn)" }, "• " + n)));
     const run = async (dry) => {
-      const body = { inbounds: tags(main), restore_inbounds: tags(rest), include_restore: withRestore.checked, owner_bot: ownerBot.checked, dry_run: dry };
+      const body = { inbounds: tags(main), restore_inbounds: tags(rest), include_restore: withRestore.checked, owner_bot: ownerBot.checked, drop_reps: tags(dropBox), dry_run: dry };
       if (!body.inbounds.length) { toast(fa ? "حداقل یک اینباند انتخاب کنید." : "Pick at least one inbound."); return; }
       if (!dry && !(await confirmAction(fa ? "انتقال انجام شود؟ کلاینت‌ها، نماینده‌ها و ورودها به این پنل اضافه می‌شوند." : "Import now? Clients, resellers and logins are added to this panel."))) return;
       const r = await guarded(() => api("POST", "/api/v2/admin/migrate/darkold/run", body));
@@ -4475,6 +4479,7 @@ function darkOldSection() {
       h("label", {}, h("span", {}, fa ? "اینباندهای کلاینت‌ها" : "Inbounds for the clients"), main),
       h("label", { class: "check" }, withRestore, fa ? "کلاینت‌های Dark Restore هم منتقل شوند (منسوخ؛ معمولاً لازم نیست)" : "Also move the Dark Restore clients (retired; usually not needed)"),
       restLabel,
+      (st.resellers || []).length ? h("label", {}, h("span", {}, fa ? "این نماینده‌ها با همهٔ کلاینت‌هایشان منتقل نشوند" : "Leave these resellers behind with all their clients"), dropBox) : null,
       h("label", { class: "check" }, ownerBot, fa ? "ربات خودِ مالک در پنل قبلی، ربات اصلی این پنل شود (ربات نماینده‌ها همیشه منتقل و روشن می‌شوند)" : "The owner's old bot becomes this panel's main bot (resellers' bots are always moved and turned on)"),
       h("p", { class: "small", style: "color:var(--warn)" }, fa ? "⚠️ یک ربات هم‌زمان روی دو پنل کار نمی‌کند: قبل از «انتقال»، پنل قبلی را خاموش کنید." : "⚠️ A bot cannot run on two panels at once: stop the old panel before importing."),
       h("div", { class: "row" }, h("button", { onclick: () => run(true) }, fa ? "پیش‌نمایش" : "Preview"), h("button", { class: "primary", onclick: () => run(false) }, fa ? "انتقال" : "Import"),

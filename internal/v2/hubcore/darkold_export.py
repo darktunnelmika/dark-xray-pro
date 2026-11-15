@@ -18,7 +18,8 @@ TABLES = [
     "unlimited_entitlements", "client_groups", "restore_subscriptions", "restore_usage", "restore_safety",
     "restore_domains", "customer_wallets", "customer_wallet_ledger", "customer_referrals",
     "commerce_products", "commerce_prices", "commerce_gateways", "commerce_orders",
-    "telegram_customer_settings", "resource_credit_ledger",
+    "telegram_customer_settings", "resource_credit_ledger", "traffic_totals", "customer_topups",
+    "customer_support_tickets", "customer_support_messages", "commerce_payments",
 ]
 
 

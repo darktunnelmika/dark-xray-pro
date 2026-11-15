@@ -52,6 +52,7 @@ func (s *Store) ensureRepCtlSchema() error {
 		{"reps", "deny_create", "INTEGER NOT NULL DEFAULT 0"},
 		{"reps", "deny_renew", "INTEGER NOT NULL DEFAULT 0"},
 		{"reps", "deny_edit", "INTEGER NOT NULL DEFAULT 0"},
+		{"reps", "used_base", "INTEGER NOT NULL DEFAULT 0"},
 	} {
 		if err := s.addColumn(c.table, c.col, c.def); err != nil {
 			return err
@@ -210,6 +211,9 @@ COALESCE(u.up+u.down,0),COALESCE(u.first_seen_unix,0) FROM clients c LEFT JOIN c
 		}
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO credit_ledger(unix,rep_id,actor,kind,client_email) VALUES(?,?,?,?,?)`, now, repID, actor, "delete", email); err != nil {
+		return 0, 0, err
+	}
+	if err := keepRepUsage(ctx, tx, email); err != nil {
 		return 0, 0, err
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM clients WHERE email=?`, email); err != nil {

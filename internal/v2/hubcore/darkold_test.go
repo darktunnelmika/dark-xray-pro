@@ -36,12 +36,12 @@ func darkOldFixture(t *testing.T, path string) {
 		`CREATE TABLE export_bot_tokens(owner TEXT PRIMARY KEY, token TEXT NOT NULL, enabled INTEGER, admin_telegram_id INTEGER, bot_username TEXT)`,
 		`CREATE TABLE export_meta(k TEXT PRIMARY KEY, v TEXT)`,
 		`INSERT INTO export_meta VALUES('public_origin','https://steven.example.info:2087')`,
-		`INSERT INTO owners(id,volume_credit_bytes,unlimited_credit) VALUES('boss',0,0),('ali',107374182400,5)`,
+		`INSERT INTO owners(id,volume_credit_bytes,unlimited_credit) VALUES('boss',0,0),('ali',107374182400,5),('gone',10737418240,3)`,
 		`INSERT INTO owner_profiles(id,name) VALUES('ali','Ali Shop')`,
-		`INSERT INTO api_admins VALUES('boss','owner','` + hash + `','{}',0),('ali','reseller','` + hash + `','{}',0)`,
-		`INSERT INTO clients(id,owner,limit_ip,quota_bytes,expires_at) VALUES('u1','ali',2,53687091200,1900000000),('u2','boss',1,0,0),('u3','ali',1,1073741824,0)`,
-		`INSERT INTO managed_clients(email,public_token,state,created_at,updated_at,external_disabled) VALUES('u1','-11QabcdefghijklmnopqrstuvwxyzABCDEFGHIJKLM','applied',1700000000,1700000000,0),('u2','tok2-abcdefghijklmnopqrstuvwxyzABCDEFGHIJKL','applied',1700000001,1700000001,1),('u3','tok3-abcdefghijklmnopqrstuvwxyzABCDEFGHIJKL','applied',1700000002,1700000002,0)`,
-		`INSERT INTO core_clients VALUES('u1','{"id":"11111111-2222-3333-4444-555555555555","password":"pw1","enable":true,"group":"vip","comment":"Ali friend","tgId":"12345","limitHwid":2}','[]',100,200),('u2','{"id":"22222222-2222-3333-4444-555555555555","enable":true}','[]',0,0),('u3','{"id":"33333333-2222-3333-4444-555555555555","enable":true}','[]',0,0),('r1','{"id":"44444444-2222-3333-4444-555555555555","enable":true}','[]',0,0)`,
+		`INSERT INTO api_admins VALUES('boss','owner','` + hash + `','{}',0),('ali','reseller','` + hash + `','{}',0),('gone','reseller','` + hash + `','{}',0)`,
+		`INSERT INTO clients(id,owner,limit_ip,quota_bytes,expires_at) VALUES('u1','ali',2,53687091200,1900000000),('u2','boss',1,0,0),('u3','ali',1,1073741824,0),('u4','ali',1,21474836480,1600000000),('g1','gone',1,1073741824,0)`,
+		`INSERT INTO managed_clients(email,public_token,state,created_at,updated_at,external_disabled) VALUES('u1','-11QabcdefghijklmnopqrstuvwxyzABCDEFGHIJKLM','applied',1700000000,1700000000,0),('u2','tok2-abcdefghijklmnopqrstuvwxyzABCDEFGHIJKL','applied',1700000001,1700000001,1),('u3','tok3-abcdefghijklmnopqrstuvwxyzABCDEFGHIJKL','applied',1700000002,1700000002,0),('u4','tok4-abcdefghijklmnopqrstuvwxyzABCDEFGHIJKL','applied',1700000003,1700000003,0),('g1','tokg-abcdefghijklmnopqrstuvwxyzABCDEFGHIJKL','applied',1700000004,1700000004,0)`,
+		`INSERT INTO core_clients VALUES('u1','{"id":"11111111-2222-3333-4444-555555555555","password":"pw1","enable":true,"group":"vip","comment":"Ali friend","tgId":"12345","limitHwid":2}','[]',100,200),('u2','{"id":"22222222-2222-3333-4444-555555555555","enable":true}','[]',0,0),('u3','{"id":"33333333-2222-3333-4444-555555555555","enable":true}','[]',0,0),('r1','{"id":"44444444-2222-3333-4444-555555555555","enable":true}','[]',0,0),('u4','{"id":"55555555-2222-3333-4444-555555555555","enable":false}','[]',2147483648,3221225472),('g1','{"id":"66666666-2222-3333-4444-555555555555","enable":true}','[]',0,0)`,
 		`INSERT INTO unlimited_entitlements VALUES('u2','boss','{"segments":[[1,2,1]],"units":1}',1,0)`,
 		`INSERT INTO commerce_orders VALUES('o1','u3',30,'provisioned_waiting_activation')`,
 		`INSERT INTO restore_subscriptions(id,public_token,legacy_url,legacy_host,legacy_path,core_email,legacy_upload,legacy_download,legacy_total,legacy_expire,enabled,created_at) VALUES('rs1','x','https://hex.example.info:2096/sub/00lb0xrdtbgqxvk5','hex.example.info','/sub/00lb0xrdtbgqxvk5','r1',10,20,53687091200,1794601800000,1,1700000000)`,
@@ -51,6 +51,12 @@ func darkOldFixture(t *testing.T, path string) {
 		`INSERT INTO export_bot_tokens VALUES('ali','123456789:AAbbccddeeffgghhiijjkkllmmnnooppqq',1,777,'alibot'),('boss','987654321:AAbbccddeeffgghhiijjkkllmmnnooppqq',1,1,'bossbot')`,
 		`CREATE TABLE customer_wallets(owner TEXT, telegram_id INTEGER, currency TEXT, balance_minor INTEGER, updated_at REAL)`,
 		`INSERT INTO customer_wallets VALUES('ali',12345,'IRT',250000,1),('ali',555,'IRT',0,1)`,
+		`CREATE TABLE customer_wallet_ledger(id INTEGER PRIMARY KEY, owner TEXT, telegram_id INTEGER, delta_minor INTEGER, currency TEXT, kind TEXT, reference TEXT, detail TEXT, created_at REAL)`,
+		`INSERT INTO customer_wallet_ledger(owner,telegram_id,delta_minor,currency,kind,detail,created_at) VALUES('ali',12345,300000,'IRT','topup','',1700000100),('ali',12345,-50000,'IRT','purchase','10 GB',1700000200)`,
+		`CREATE TABLE resource_credit_ledger(event_id TEXT, owner TEXT, volume_bytes INTEGER, unlimited_units INTEGER, kind TEXT, reference TEXT, at REAL)`,
+		`INSERT INTO resource_credit_ledger VALUES('e1','ali',107374182400,5,'adjust','',1700000000)`,
+		`CREATE TABLE traffic_totals(owner TEXT, period INTEGER, up_bytes INTEGER, down_bytes INTEGER, events INTEGER, last_seen REAL)`,
+		`INSERT INTO traffic_totals VALUES('ali',0,10737418240,0,1,1)`,
 		`CREATE TABLE commerce_products(id TEXT, owner TEXT, name TEXT, description TEXT, kind TEXT, active INTEGER, visible INTEGER, created_at REAL, updated_at REAL, category TEXT, sale_limit_per_user INTEGER DEFAULT 0, renewal_enabled INTEGER DEFAULT 1)`,
 		`INSERT INTO commerce_products VALUES('p1','ali','Ali Plans','','volume',1,1,1,1,'VIP',2,0)`,
 		`CREATE TABLE commerce_prices(id TEXT, owner TEXT, product_id TEXT, label TEXT, price_minor INTEGER, currency TEXT, duration_days INTEGER, volume_bytes INTEGER, unlimited_units INTEGER, device_limit INTEGER, inbound_ids TEXT, active INTEGER, created_at REAL, updated_at REAL, ip_limit INTEGER, hwid_limit INTEGER, activation_mode TEXT)`,
@@ -74,17 +80,17 @@ func TestImportDarkOld(t *testing.T) {
 	}
 	darkOldFixture(t, s.darkOldPath())
 	st := s.DarkOldStatus(ctx)
-	if !st.Uploaded || st.Counts["clients"] != 3 || st.Counts["resellers"] != 1 || st.Origin == "" {
+	if !st.Uploaded || st.Counts["clients"] != 5 || st.Counts["resellers"] != 2 || st.Origin == "" {
 		t.Fatalf("%+v", st)
 	}
 	if pre, _ := s.ImportDarkOld(ctx, DarkOldOptions{Inbounds: []string{"main"}, DryRun: true}); pre.Restore != 0 || len(pre.Domains) != 1 {
 		t.Fatalf("Dark Restore is retired: off unless asked: %+v", pre)
 	}
-	pre, err := s.ImportDarkOld(ctx, DarkOldOptions{Inbounds: []string{"main"}, IncludeRestore: true, DryRun: true})
+	pre, err := s.ImportDarkOld(ctx, DarkOldOptions{Inbounds: []string{"main"}, IncludeRestore: true, DryRun: true, DropReps: []string{"gone"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if pre.Clients != 3 || pre.Restore != 1 || pre.Reps != 1 || pre.Logins != 2 || len(pre.Domains) != 2 {
+	if pre.Clients != 4 || pre.Dropped != 1 || pre.Restore != 1 || pre.Reps != 1 || pre.Logins != 2 || len(pre.Domains) != 2 {
 		t.Fatalf("%+v", pre)
 	}
 	if list, _ := s.Clients(ctx); len(list) != 0 {
@@ -96,8 +102,8 @@ func TestImportDarkOld(t *testing.T) {
 		return "bossbot", nil
 	}})
 	defer SetTelegramControl(TelegramControl{})
-	res, err := s.ImportDarkOld(ctx, DarkOldOptions{Inbounds: []string{"main"}, IncludeRestore: true, OwnerBot: true})
-	if err != nil || res.Clients != 3 || res.Telegram != 1 || res.Links != 4 {
+	res, err := s.ImportDarkOld(ctx, DarkOldOptions{Inbounds: []string{"main"}, IncludeRestore: true, OwnerBot: true, DropReps: []string{"gone"}})
+	if err != nil || res.Clients != 4 || res.Telegram != 1 || res.Links != 5 {
 		t.Fatalf("%+v %v", res, err)
 	}
 	if e, err := s.EmailBySubToken(ctx, "-11QabcdefghijklmnopqrstuvwxyzABCDEFGHIJKLM"); err != nil || e != "u1" {
@@ -150,7 +156,31 @@ func TestImportDarkOld(t *testing.T) {
 		prods[0].Category != "VIP" || !prods[0].NoRenew || prods[0].PerBuyer != 2 {
 		t.Fatalf("products %+v", prods)
 	}
-	if again, _ := s.ImportDarkOld(ctx, DarkOldOptions{Inbounds: []string{"main"}, DryRun: true}); again.Clients != 0 {
+	// Credit: capacity 100 GB − 71 GB in use + 15 GB unused by the expired u4.
+	reps, _ := s.Reps(ctx)
+	if len(reps) != 1 || reps[0].ID != "ali" || reps[0].VolumeCredit != 44<<30 || reps[0].UnlimitedUnits != 0 {
+		t.Fatalf("credit %+v", reps)
+	}
+	if reps[0].UsedBytes != 10<<30 {
+		t.Fatal("lifetime usage must include the old panel's deleted clients", reps[0].UsedBytes)
+	}
+	if u4 := byEmail["u4"]; u4.VolumeBytes != 5<<30 || !u4.Enabled {
+		t.Fatalf("expired u4 keeps only what it used: %+v", u4)
+	}
+	if _, ok := byEmail["g1"]; ok {
+		t.Fatal("a left-behind reseller's clients must not move")
+	}
+	if _, err := s.Login(ctx, "gone", "rep-pass-123"); err == nil {
+		t.Fatal("a left-behind reseller must not get a login")
+	}
+	if len(res.Credit) != 1 || res.Credit[0].Expired != 15<<30 || res.Credit[0].OldUnits != 5 || res.LedgerRows != 1 || res.WalletRows != 2 {
+		t.Fatalf("history %+v", res)
+	}
+	led, _ := s.Ledger(ctx, "ali", 0, 50)
+	if len(led) != 2 {
+		t.Fatalf("ledger %+v", led)
+	}
+	if again, _ := s.ImportDarkOld(ctx, DarkOldOptions{Inbounds: []string{"main"}, DryRun: true, DropReps: []string{"gone"}}); again.Clients != 0 {
 		t.Fatal("a second import must not duplicate clients")
 	}
 }

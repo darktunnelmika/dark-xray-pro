@@ -633,6 +633,9 @@ func (s *Store) DeleteClient(ctx context.Context, email string) error {
 		return err
 	}
 	defer tx.Rollback()
+	if err := keepRepUsage(ctx, tx, email); err != nil {
+		return err
+	}
 	r, err := tx.ExecContext(ctx, `DELETE FROM clients WHERE email=?`, email)
 	if err != nil {
 		return err
@@ -644,6 +647,14 @@ func (s *Store) DeleteClient(ctx context.Context, email string) error {
 		return err
 	}
 	return tx.Commit()
+}
+
+// keepRepUsage adds a reseller's client's usage to the reseller's lifetime
+// total before the client is deleted, so the total never shrinks.
+func keepRepUsage(ctx context.Context, tx *sql.Tx, email string) error {
+	_, err := tx.ExecContext(ctx, `UPDATE reps SET used_base=used_base+COALESCE((SELECT up+down FROM client_usage WHERE email=?),0)
+WHERE id=(SELECT rep_id FROM clients WHERE email=? AND rep_id<>'')`, email, email)
+	return err
 }
 
 // forgetClient removes a deleted client's live state, so a new client

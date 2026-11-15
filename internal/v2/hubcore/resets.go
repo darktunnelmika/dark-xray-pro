@@ -139,6 +139,7 @@ func (s *Store) RunResets(ctx context.Context) {
 		s.runDueResets(ctx)
 		s.runNextPlans(ctx)
 		s.runOnHold(ctx)
+		s.runExpiryRefunds(ctx)
 		select {
 		case <-ctx.Done():
 			return

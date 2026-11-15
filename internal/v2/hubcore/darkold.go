@@ -118,11 +118,12 @@ func DarkOldHandler(s *Store) http.Handler {
 }
 
 type DarkOldStatus struct {
-	Uploaded bool           `json:"uploaded"`
-	At       int64          `json:"at,omitempty"`
-	Origin   string         `json:"origin,omitempty"`
-	Version  string         `json:"version,omitempty"`
-	Counts   map[string]int `json:"counts,omitempty"`
+	Uploaded  bool           `json:"uploaded"`
+	At        int64          `json:"at,omitempty"`
+	Origin    string         `json:"origin,omitempty"`
+	Version   string         `json:"version,omitempty"`
+	Counts    map[string]int `json:"counts,omitempty"`
+	Resellers []string       `json:"resellers,omitempty"`
 }
 
 func darkOldOpen(path string) (*sql.DB, error) {
@@ -142,6 +143,15 @@ func darkOldSummary(ctx context.Context, path string) (DarkOldStatus, error) {
 	}
 	_ = db.QueryRowContext(ctx, `SELECT v FROM export_meta WHERE k='public_origin'`).Scan(&st.Origin)
 	_ = db.QueryRowContext(ctx, `SELECT v FROM export_meta WHERE k='version'`).Scan(&st.Version)
+	if rr, err := db.QueryContext(ctx, `SELECT id FROM api_admins WHERE role='reseller' ORDER BY id`); err == nil {
+		for rr.Next() {
+			var id string
+			if rr.Scan(&id) == nil {
+				st.Resellers = append(st.Resellers, id)
+			}
+		}
+		rr.Close()
+	}
 	for k, q := range map[string]string{
 		"resellers": `SELECT COUNT(*) FROM api_admins WHERE role='reseller'`,
 		"clients":   `SELECT COUNT(*) FROM clients`,
@@ -190,29 +200,51 @@ type DarkOldOptions struct {
 	// OwnerBot makes the owner's old bot the panel's main bot, so the
 	// owner's customers keep the bot they know.
 	OwnerBot bool `json:"owner_bot"`
-	DryRun   bool `json:"dry_run"`
+	// DropReps are old reseller usernames left behind together with all
+	// their clients.
+	DropReps []string `json:"drop_reps"`
+	DryRun   bool     `json:"dry_run"`
 }
 
 type DarkOldReport struct {
-	DryRun   bool     `json:"dry_run"`
-	Reps     int      `json:"reps"`
-	Logins   int      `json:"logins"`
-	Clients  int      `json:"clients"`
-	Restore  int      `json:"restore"`
-	Disabled int      `json:"disabled"`
-	Ended    int      `json:"ended"` // expired or used up (switched off in the old panel; enforced here)
-	Usage    int      `json:"usage"`
-	Links    int      `json:"links"`
-	Telegram int      `json:"telegram"` // clients linked to a Telegram account
-	Groups   int      `json:"groups"`
-	Cards    int      `json:"cards"`              // sellers' cards for card-to-card payment
-	Bots     int      `json:"bots"`               // resellers' own Telegram bots
-	Wallets  int      `json:"wallets"`            // customers' toman wallets with a balance
-	Products int      `json:"products"`           // plans for sale
-	MainBot  string   `json:"main_bot,omitempty"` // the owner's old bot now serving as the main bot
-	Domains  []string `json:"domains"`            // domains to point here so old links keep working
-	Skipped  []string `json:"skipped"`
-	Notes    []string `json:"notes"`
+	DryRun     bool            `json:"dry_run"`
+	Reps       int             `json:"reps"`
+	Logins     int             `json:"logins"`
+	Clients    int             `json:"clients"`
+	Restore    int             `json:"restore"`
+	Disabled   int             `json:"disabled"`
+	Ended      int             `json:"ended"` // expired or used up (switched off in the old panel; enforced here)
+	Usage      int             `json:"usage"`
+	Links      int             `json:"links"`
+	Telegram   int             `json:"telegram"` // clients linked to a Telegram account
+	Groups     int             `json:"groups"`
+	Cards      int             `json:"cards"`              // sellers' cards for card-to-card payment
+	Bots       int             `json:"bots"`               // resellers' own Telegram bots
+	Wallets    int             `json:"wallets"`            // customers' toman wallets with a balance
+	Products   int             `json:"products"`           // plans for sale
+	Dropped    int             `json:"dropped"`            // clients of left-behind resellers
+	Credit     []DarkOldCredit `json:"credit"`             // how each reseller's credit was worked out
+	Orders     int             `json:"orders"`             // old orders kept as history
+	Topups     int             `json:"topups"`             // old wallet top-ups kept as history
+	WalletRows int             `json:"wallet_rows"`        // old wallet history rows
+	LedgerRows int             `json:"ledger_rows"`        // old credit history rows
+	Unsettled  int             `json:"unsettled"`          // orders/top-ups still waiting for a decision in the old panel
+	MainBot    string          `json:"main_bot,omitempty"` // the owner's old bot now serving as the main bot
+	Domains    []string        `json:"domains"`            // domains to point here so old links keep working
+	Skipped    []string        `json:"skipped"`
+	Notes      []string        `json:"notes"`
+}
+
+// DarkOldCredit explains one reseller's moved volume credit (bytes): the
+// old panel's free capacity plus the unused volume of expired clients.
+type DarkOldCredit struct {
+	Rep      string `json:"rep"`
+	Cap      int64  `json:"cap"`
+	InUse    int64  `json:"in_use"`
+	Expired  int64  `json:"expired_back"`
+	Credit   int64  `json:"credit"`
+	OldUnits int64  `json:"old_units"` // unlimited units left in the old panel (not moved)
+	Lifetime int64  `json:"lifetime"`  // total traffic of the reseller's users ever
 }
 
 func (r *DarkOldReport) skip(f string, a ...any) { r.Skipped = append(r.Skipped, fmt.Sprintf(f, a...)) }
@@ -276,7 +308,7 @@ func (s *Store) ImportDarkOld(ctx context.Context, opt DarkOldOptions) (DarkOldR
 		disabled             bool
 	}
 	var owners []owner
-	rows, err := old.QueryContext(ctx, `SELECT a.id,a.role,a.password_hash,a.disabled,COALESCE(p.name,''),COALESCE(o.volume_credit_bytes,0),COALESCE(o.unlimited_credit,0),COALESCE(o.account_disabled,0)
+	rows, err := old.QueryContext(ctx, `SELECT a.id,a.role,a.password_hash,a.disabled,COALESCE(p.name,''),COALESCE(o.volume_credit_bytes,0),COALESCE(o.unlimited_credit,0)-COALESCE(o.unlimited_spent,0),COALESCE(o.account_disabled,0)
 FROM api_admins a LEFT JOIN owner_profiles p ON p.id=a.id LEFT JOIN owners o ON o.id=a.id ORDER BY a.id`)
 	if err != nil {
 		return rep, err
@@ -292,10 +324,46 @@ FROM api_admins a LEFT JOIN owner_profiles p ON p.id=a.id LEFT JOIN owners o ON 
 		owners = append(owners, o)
 	}
 	rows.Close()
-	repOf := map[string]string{} // old owner id -> v2 rep id ("" = the owner)
+	drop := map[string]bool{}
+	for _, d := range opt.DropReps {
+		if d = strings.TrimSpace(d); d != "" {
+			drop[d] = true
+		}
+	}
+	// The old panel's capacity in use: the volume of every client it holds.
+	alloc := map[string]int64{}
+	if r2, err := old.QueryContext(ctx, `SELECT owner,COALESCE(SUM(CASE WHEN quota_bytes>0 THEN quota_bytes ELSE 0 END),0) FROM clients GROUP BY owner`); err == nil {
+		for r2.Next() {
+			var o string
+			var b int64
+			if r2.Scan(&o, &b) == nil {
+				alloc[o] = b
+			}
+		}
+		r2.Close()
+	}
+	lifetime := map[string]int64{}
+	if tableExists(ctx, old, "traffic_totals") {
+		if r2, err := old.QueryContext(ctx, `SELECT owner,SUM(up_bytes+down_bytes) FROM traffic_totals GROUP BY owner`); err == nil {
+			for r2.Next() {
+				var o string
+				var b int64
+				if r2.Scan(&o, &b) == nil {
+					lifetime[o] = b
+				}
+			}
+			r2.Close()
+		}
+	}
+	repOf := map[string]string{}         // old owner id -> v2 rep id ("" = the owner)
+	fresh := map[string]*DarkOldCredit{} // resellers created by this import
 	for _, o := range owners {
 		if o.role == "owner" {
 			repOf[o.id] = ""
+			continue
+		}
+		if drop[o.id] {
+			rep.note("reseller %s is left behind with all its clients", o.id)
 			continue
 		}
 		id := v2ID(o.id)
@@ -306,10 +374,16 @@ FROM api_admins a LEFT JOIN owner_profiles p ON p.id=a.id LEFT JOIN owners o ON 
 			if name == "" {
 				name = o.id
 			}
-			if _, err := tx.ExecContext(ctx, `INSERT INTO reps(id,name,enabled,volume_credit,unlimited_units,created_unix) VALUES(?,?,?,?,?,?)`,
-				id, name, !o.disabled, max(o.volume, 0), max(o.units, 0), now); err != nil {
+			// Credit here is spent on every sale, so only the old panel's free
+			// capacity moves (expired clients' unused volume is added below).
+			// Unlimited units are not moved: resellers sell volume only.
+			cr := &DarkOldCredit{Rep: id, Cap: max(o.volume, 0), InUse: alloc[o.id], OldUnits: max(o.units, 0), Lifetime: lifetime[o.id]}
+			cr.Credit = max(cr.Cap-cr.InUse, 0)
+			if _, err := tx.ExecContext(ctx, `INSERT INTO reps(id,name,enabled,volume_credit,unlimited_units,created_unix) VALUES(?,?,?,?,0,?)`,
+				id, name, !o.disabled, cr.Credit, now); err != nil {
 				return rep, fmt.Errorf("reseller %s: %w", o.id, err)
 			}
+			fresh[id] = cr
 			rep.Reps++
 		} else {
 			rep.note("reseller %s already exists here; its clients join it", id)
@@ -318,6 +392,9 @@ FROM api_admins a LEFT JOIN owner_profiles p ON p.id=a.id LEFT JOIN owners o ON 
 	}
 	// Logins keep their passwords (scrypt, upgraded to bcrypt on first sign-in).
 	for _, o := range owners {
+		if drop[o.id] {
+			continue
+		}
 		user := v2ID(o.id)
 		var exists int
 		_ = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM admins WHERE username=?`, user).Scan(&exists)
@@ -443,6 +520,10 @@ FROM clients c JOIN managed_clients m ON m.email=c.id JOIN core_clients k ON k.e
 		if c.state == "deleted" {
 			continue
 		}
+		if drop[c.owner] {
+			rep.Dropped++
+			continue
+		}
 		email := v2Email(c.email)
 		var exists int
 		_ = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM clients WHERE email=?`, email).Scan(&exists)
@@ -464,6 +545,15 @@ FROM clients c JOIN managed_clients m ON m.email=c.id JOIN core_clients k ON k.e
 		vol := c.quota
 		if vol <= 0 {
 			vol = -1
+		}
+		// A reseller's expired volume client gives its unused volume back
+		// (as the panel does from now on); it keeps only what it used, so a
+		// renewal adds new, paid volume.
+		if cr := fresh[repOf[c.owner]]; cr != nil && vol > 0 && !unl[c.email] && c.expires > 0 && c.expires < now {
+			if used := max(c.up+c.down, 1); used < vol {
+				cr.Expired += vol - used
+				vol = used
+			}
 		}
 		var dur int64
 		expires := c.expires
@@ -508,6 +598,10 @@ FROM clients c JOIN managed_clients m ON m.email=c.id JOIN core_clients k ON k.e
 		if !enabled {
 			rep.Disabled++
 		}
+	}
+
+	if err := s.darkOldCredit(ctx, tx, old, fresh, repOf, now, &rep); err != nil {
+		return rep, err
 	}
 
 	// Restore clients: users of the old 3x-ui panels, reached by their old
@@ -765,40 +859,9 @@ func (s *Store) darkOldShop(ctx context.Context, tx *sql.Tx, old *sql.DB, repOf 
 			rep.Bots++
 		}
 	}
-	// Customers' toman wallets.
-	if tableExists(ctx, old, "customer_wallets") {
-		rows, err := old.QueryContext(ctx, `SELECT owner,telegram_id,balance_minor FROM customer_wallets WHERE balance_minor>0`)
-		if err != nil {
-			return err
-		}
-		type w struct {
-			owner string
-			chat  int64
-			bal   int64
-		}
-		var ws []w
-		for rows.Next() {
-			var x w
-			if rows.Scan(&x.owner, &x.chat, &x.bal) == nil {
-				ws = append(ws, x)
-			}
-		}
-		rows.Close()
-		for _, x := range ws {
-			sl, ok := seller(x.owner)
-			if !ok || x.chat == 0 {
-				continue
-			}
-			var n int
-			_ = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM toman_wallet WHERE seller=? AND chat_id=? AND kind='import'`, sl, x.chat).Scan(&n)
-			if n > 0 {
-				continue
-			}
-			if _, err := tx.ExecContext(ctx, `INSERT INTO toman_wallet(seller,chat_id,unix,delta,kind,note) VALUES(?,?,?,?,?,?)`, sl, x.chat, now, x.bal, "import", "old panel balance"); err != nil {
-				return err
-			}
-			rep.Wallets++
-		}
+	// Customers' toman wallets, with their history.
+	if err := s.darkOldWallets(ctx, tx, old, repOf, rep); err != nil {
+		return err
 	}
 	// Plans: each old price becomes one product.
 	if tableExists(ctx, old, "commerce_prices") && tableExists(ctx, old, "commerce_products") {
@@ -843,6 +906,9 @@ FROM commerce_prices p JOIN commerce_products pr ON pr.id=p.product_id AND pr.ow
 			if x.active && x.pActive && x.pVisible {
 				status = "published"
 			}
+			if sl != "" && plan == "unlimited" {
+				status = "draft" // resellers sell volume only for now
+			}
 			name := strings.TrimSpace(x.name)
 			if l := strings.TrimSpace(x.label); l != "" && l != name {
 				name = strings.TrimSpace(name + " · " + l)
@@ -862,7 +928,7 @@ FROM commerce_prices p JOIN commerce_products pr ON pr.id=p.product_id AND pr.ow
 			rep.Products++
 		}
 	}
-	return nil
+	return s.darkOldHistory(ctx, tx, old, repOf, rep)
 }
 
 func slicesContains(list []int64, v int64) bool {
