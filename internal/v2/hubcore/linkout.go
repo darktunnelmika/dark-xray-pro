@@ -163,7 +163,7 @@ func stream(get func(string) string, host string) map[string]any {
 	return ss
 }
 
-func b64(s string) ([]byte, error) {
+func linkB64(s string) ([]byte, error) {
 	s = strings.TrimSpace(s)
 	for _, enc := range []*base64.Encoding{base64.StdEncoding, base64.RawStdEncoding, base64.URLEncoding, base64.RawURLEncoding} {
 		if b, err := enc.DecodeString(s); err == nil {
@@ -174,7 +174,7 @@ func b64(s string) ([]byte, error) {
 }
 
 func vmessOut(link string) (map[string]any, string, error) {
-	raw, err := b64(link[len("vmess://"):])
+	raw, err := linkB64(link[len("vmess://"):])
 	if err != nil {
 		return nil, "", err
 	}
@@ -218,14 +218,14 @@ func ssOut(link string) (map[string]any, string, error) {
 			userinfo = u
 		}
 		if !strings.Contains(userinfo, ":") {
-			b, err := b64(userinfo)
+			b, err := linkB64(userinfo)
 			if err != nil {
 				return nil, "", err
 			}
 			userinfo = string(b)
 		}
 	} else {
-		b, err := b64(rest)
+		b, err := linkB64(rest)
 		if err != nil {
 			return nil, "", err
 		}
