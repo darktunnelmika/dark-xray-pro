@@ -313,6 +313,10 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 		}
 		reply(w, map[string]bool{"ok": err == nil}, err)
 	}))
+	mux.HandleFunc("DELETE /api/v2/admin/reps/{id}", guard(func(w http.ResponseWriter, r *http.Request) {
+		n, err := s.DeleteRep(r.Context(), r.PathValue("id"), r.URL.Query().Get("clients") == "1")
+		reply(w, map[string]any{"ok": err == nil, "clients": n}, err)
+	}))
 	mux.HandleFunc("POST /api/v2/admin/reps/{id}/credit", guard(func(w http.ResponseWriter, r *http.Request) {
 		var in struct {
 			VolumeGB float64

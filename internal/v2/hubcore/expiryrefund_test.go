@@ -61,3 +61,33 @@ func TestExpiryRefund(t *testing.T) {
 		t.Fatal("lifetime usage", reps[0].UsedBytes)
 	}
 }
+
+func TestDeleteRep(t *testing.T) {
+	s, now := newStore(t)
+	ctx := context.Background()
+	seed(t, s)
+	_ = s.PutRep(ctx, Rep{ID: "ali", Name: "Ali", Enabled: true})
+	_ = s.AdjustCredit(ctx, "owner", "ali", 100<<30, 0, "")
+	if err := s.SetRepLogin(ctx, "ali", "pass-12345678", "ali"); err != nil {
+		t.Fatal(err)
+	}
+	c := Client{Email: "r1", Enabled: true, VolumeBytes: 10 << 30, ExpiresUnix: now.Unix() + 86400, Inbounds: []string{"de-vless"}}
+	if err := s.RepPutClient(ctx, "ali", "ali", c, "volume"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.DeleteRep(ctx, "ali", false); err == nil {
+		t.Fatal("a reseller with clients needs withClients")
+	}
+	if n, err := s.DeleteRep(ctx, "ali", true); err != nil || n != 1 {
+		t.Fatal(n, err)
+	}
+	if reps, _ := s.Reps(ctx); len(reps) != 0 {
+		t.Fatal(reps)
+	}
+	if list, _ := s.Clients(ctx); len(list) != 0 {
+		t.Fatal("clients gone", list)
+	}
+	if _, err := s.Login(ctx, "ali", "pass-12345678"); err == nil {
+		t.Fatal("login gone")
+	}
+}

@@ -228,7 +228,7 @@ type DarkOldReport struct {
 	Topups     int             `json:"topups"`             // old wallet top-ups kept as history
 	WalletRows int             `json:"wallet_rows"`        // old wallet history rows
 	LedgerRows int             `json:"ledger_rows"`        // old credit history rows
-	Unsettled  int             `json:"unsettled"`          // orders/top-ups still waiting for a decision in the old panel
+	Unsettled  int             `json:"unsettled"`          // orders/top-ups left open in the old panel (settled by hand, left out)
 	MainBot    string          `json:"main_bot,omitempty"` // the owner's old bot now serving as the main bot
 	Domains    []string        `json:"domains"`            // domains to point here so old links keep working
 	Skipped    []string        `json:"skipped"`

@@ -3206,7 +3206,16 @@ async function viewReps() {
       h("button", { class: "ghost", onclick: () => openModal(lang === "fa" ? `برند و صفحهٔ اشتراک · ${r.Name || r.ID}` : `Brand & subscription page · ${r.Name || r.ID}`, repBrandCard(`/api/v2/admin/reps/${encodeURIComponent(r.ID)}/brand`)) }, lang === "fa" ? "صفحهٔ اشتراک" : "Sub page"),
       h("button", { class: "ghost", onclick: () => openModal(lang === "fa" ? `ربات و کارت · ${r.Name || r.ID}` : `Bot & card · ${r.Name || r.ID}`, h("div", { class: "form" }, repBotCard(`/api/v2/admin/reps/${encodeURIComponent(r.ID)}/bot`), sellerCardCard(`/api/v2/shop/card?seller=${encodeURIComponent(r.ID)}`))) }, lang === "fa" ? "ربات و کارت" : "Bot & card"),
       h("a", { class: "btn ghost", href: `#/activity?rep=${encodeURIComponent(r.ID)}` }, t("activity")),
-      h("button", { class: "ghost", onclick: () => repForm(r) }, t("edit")))));
+      h("button", { class: "ghost", onclick: () => repForm(r) }, t("edit")),
+      h("button", { class: "ghost danger", onclick: async () => {
+        const fa = lang === "fa";
+        const msg = r.Clients
+          ? (fa ? `نمایندهٔ ${r.Name || r.ID} همراه زیرفروشنده‌ها و ${fmtNum(r.Clients)} کلاینتش حذف شود؟ کلاینت‌ها قطع می‌شوند و این کار برگشت ندارد.` : `Delete ${r.Name || r.ID}, its sub-sellers and its ${r.Clients} clients? The clients stop working; this cannot be undone.`)
+          : (fa ? `نمایندهٔ ${r.Name || r.ID} و زیرفروشنده‌هایش حذف شود؟` : `Delete ${r.Name || r.ID} and its sub-sellers?`);
+        if (!(await confirmAction(msg, t("delete")))) return;
+        await guarded(() => api("DELETE", `/api/v2/admin/reps/${encodeURIComponent(r.ID)}?clients=1`));
+        toast(fa ? "حذف شد" : "Deleted"); route();
+      } }, t("delete")))));
   return h("div", {},
     h("div", { class: "row" }, h("h1", {}, t("reps")), h("button", { class: "primary spacer", onclick: () => repForm(null) }, t("add"))),
     h("div", { class: "list" }, cards.length ? cards : h("p", { class: "muted" }, t("empty"))));
@@ -4460,7 +4469,7 @@ function darkOldSection() {
       h("div", { class: "row" }, ...[[fa ? "نماینده" : "resellers", r.reps], [fa ? "ورود" : "logins", r.logins], [fa ? "کلاینت" : "clients", r.clients], ["Restore", r.restore], [fa ? "لینک ساب" : "links", r.links], [fa ? "مصرف" : "usage", r.usage], [fa ? "تلگرام" : "Telegram", r.telegram], [fa ? "غیرفعال" : "disabled", r.disabled], [fa ? "تمام‌شده (قابل تمدید)" : "ended (renewable)", r.ended], [fa ? "ربات نماینده" : "reseller bots", r.bots], [fa ? "کارت" : "cards", r.cards], [fa ? "کیف پول" : "wallets", r.wallets], [fa ? "پلن" : "plans", r.products], [fa ? "کلاینت جامانده" : "left behind", r.dropped], [fa ? "سفارش (سابقه)" : "orders (history)", r.orders], [fa ? "شارژ کیف پول (سابقه)" : "top-ups (history)", r.topups], [fa ? "ردیف کیف پول" : "wallet rows", r.wallet_rows], [fa ? "ردیف اعتبار" : "credit rows", r.ledger_rows]].map(([k, v]) => h("span", { class: "badge" }, `${k}: ${fmtNum(v || 0)}`))),
       (r.credit || []).length ? h("div", { class: "table-wrap" }, h("table", {}, h("thead", {}, h("tr", {}, ...(fa ? ["نماینده", "سقف", "در حال استفاده", "برگشتی منقضی‌ها", "اعتبار نهایی", "نامحدود قبلی (منتقل نمی‌شود)", "مصرف کل"] : ["Reseller", "Capacity", "In use", "Expired back", "Credit", "Old unlimited (not moved)", "Lifetime use"]).map((x) => h("th", {}, x)))),
         h("tbody", {}, ...r.credit.map((x) => h("tr", {}, h("td", {}, x.rep), h("td", {}, bytes(x.cap)), h("td", {}, bytes(x.in_use)), h("td", {}, bytes(x.expired_back)), h("td", {}, h("b", {}, bytes(x.credit))), h("td", {}, fmtNum(x.old_units)), h("td", {}, bytes(x.lifetime))))))) : null,
-      r.unsettled ? h("p", { class: "small", style: "color:var(--warn)" }, fa ? `⚠️ ${fmtNum(r.unsettled)} سفارش یا شارژ در پنل قبلی هنوز منتظر تصمیم است؛ قبل از انتقال همان‌جا تأیید یا رد کنید.` : `⚠️ ${fmtNum(r.unsettled)} orders or top-ups are still waiting for a decision in the old panel; settle them there before the move.`) : null,
+      r.unsettled ? h("p", { class: "small", style: "color:var(--warn)" }, fa ? `${fmtNum(r.unsettled)} سفارش یا شارژِ بازمانده در پنل قبلی (دستی تسویه شده) منتقل نمی‌شود.` : `${fmtNum(r.unsettled)} orders or top-ups left open in the old panel (settled by hand) are not moved.`) : null,
       r.main_bot ? h("p", { class: "small" }, (fa ? "ربات اصلی: " : "Main bot: ") + r.main_bot) : null,
       (r.domains || []).length ? h("p", { class: "small" }, (fa ? "این دامنه‌ها را بعد از انتقال به IP همین هاب ببرید تا لینک‌های قدیمی کار کنند: " : "Point these domains here after the move so old links keep working: ") + r.domains.join("، ")) : null,
       ...(r.notes || []).slice(0, 20).map((n) => h("div", { class: "small muted" }, "• " + n)),

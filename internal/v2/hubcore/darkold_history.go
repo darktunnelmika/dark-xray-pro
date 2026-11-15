@@ -170,9 +170,9 @@ func (s *Store) darkOldWallets(ctx context.Context, tx *sql.Tx, old *sql.DB, rep
 	return nil
 }
 
-// darkOldHistory keeps the old orders and wallet top-ups as history. Nothing
-// is left open here: anything still waiting for a decision in the old panel
-// is counted in Unsettled, so it can be settled there before the move.
+// darkOldHistory keeps the old orders and wallet top-ups as history. Orders
+// and top-ups still waiting for a decision in the old panel were settled by
+// hand by the sellers, so they are left out (counted in Unsettled).
 func (s *Store) darkOldHistory(ctx context.Context, tx *sql.Tx, old *sql.DB, repOf map[string]string, rep *DarkOldReport) error {
 	if tableExists(ctx, old, "commerce_orders") {
 		rows, err := old.QueryContext(ctx, `SELECT id,owner,buyer_telegram_id,price_id,amount_minor,currency,status,COALESCE(gateway_id,''),created_at,updated_at,COALESCE(client_id,''),COALESCE(order_type,'')
@@ -212,8 +212,9 @@ FROM commerce_orders ORDER BY created_at`)
 			case "provisioned", "provisioned_waiting_activation", "renewed":
 				status = "fulfilled"
 			case "paid", "payment_review":
+				// Settled by hand by the sellers: left out.
 				rep.Unsettled++
-				note += " · still open in the old panel (" + x.status + ")"
+				continue
 			default:
 				note += " · " + x.status
 			}
@@ -270,7 +271,7 @@ FROM commerce_orders ORDER BY created_at`)
 				status = "approved"
 			case "review":
 				rep.Unsettled++
-				by = "old panel: still open there"
+				continue // settled by hand: left out
 			case "awaiting_receipt":
 				by = "old panel: no receipt sent"
 			}
