@@ -64,6 +64,12 @@ type Product struct {
 	FirstUse bool     `json:"first_use"`
 	// PriceStars > 0 sells it for Telegram Stars (paid and delivered at once).
 	PriceStars int64 `json:"price_stars"`
+	// Category groups products in the bot's shop ("" = none).
+	Category string `json:"category"`
+	// NoRenew hides it from renewals (only new purchases); PerBuyer > 0 caps
+	// how many new services one customer may buy.
+	NoRenew  bool `json:"no_renew"`
+	PerBuyer int  `json:"per_buyer"`
 }
 
 // Order is a purchase request.
@@ -95,6 +101,11 @@ func (s *Store) ensureShopSchema() error {
 	if _, err := s.db.Exec(shopSchema); err != nil {
 		return err
 	}
+	for _, c := range [][3]string{{"products", "category", "TEXT NOT NULL DEFAULT ''"}, {"products", "no_renew", "INTEGER NOT NULL DEFAULT 0"}, {"products", "per_buyer", "INTEGER NOT NULL DEFAULT 0"}} {
+		if err := s.addColumn(c[0], c[1], c[2]); err != nil {
+			return err
+		}
+	}
 	return s.addColumn("reps", "manage_products", "INTEGER NOT NULL DEFAULT 0")
 }
 
@@ -107,7 +118,9 @@ func canSell(p Principal, seller string) bool {
 // representative; a representative needs the manage_products grant and its
 // product must fit its policy.
 func (s *Store) PutProduct(ctx context.Context, by Principal, p Product) error {
-	if !idRE.MatchString(p.ID) || p.Name == "" || len(p.Name) > 120 || p.Days <= 0 || p.Days > 3650 || p.MaxIPs < 0 || p.Price < 0 || p.PriceStars < 0 || p.PriceStars > 100000 {
+	p.Category = strings.TrimSpace(p.Category)
+	if !idRE.MatchString(p.ID) || p.Name == "" || len(p.Name) > 120 || p.Days <= 0 || p.Days > 3650 || p.MaxIPs < 0 || p.Price < 0 || p.PriceStars < 0 || p.PriceStars > 100000 ||
+		len(p.Category) > 40 || p.PerBuyer < 0 || p.PerBuyer > 1000 {
 		return ErrInvalid
 	}
 	if p.Plan != "volume" && p.Plan != "unlimited" {
@@ -186,23 +199,25 @@ func (s *Store) PutProduct(ctx context.Context, by Principal, p Product) error {
 	if p.Seller != "" {
 		p.PriceStars = 0 // Stars go to the owner's bot only
 	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO products(id,seller,name,plan,gb,days,max_ips,inbounds,price,status,first_use,created_unix,price_stars)
-VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET seller=excluded.seller, name=excluded.name, plan=excluded.plan,
+	_, err = tx.ExecContext(ctx, `INSERT INTO products(id,seller,name,plan,gb,days,max_ips,inbounds,price,status,first_use,created_unix,price_stars,category,no_renew,per_buyer)
+VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET seller=excluded.seller, name=excluded.name, plan=excluded.plan,
 gb=excluded.gb, days=excluded.days, max_ips=excluded.max_ips, inbounds=excluded.inbounds, price=excluded.price,
-status=excluded.status, first_use=excluded.first_use, price_stars=excluded.price_stars`,
-		p.ID, p.Seller, p.Name, p.Plan, p.GB, p.Days, p.MaxIPs, strings.Join(p.Inbounds, ","), p.Price, p.Status, p.FirstUse, s.now().Unix(), p.PriceStars)
+status=excluded.status, first_use=excluded.first_use, price_stars=excluded.price_stars, category=excluded.category,
+no_renew=excluded.no_renew, per_buyer=excluded.per_buyer`,
+		p.ID, p.Seller, p.Name, p.Plan, p.GB, p.Days, p.MaxIPs, strings.Join(p.Inbounds, ","), p.Price, p.Status, p.FirstUse, s.now().Unix(), p.PriceStars,
+		p.Category, p.NoRenew, p.PerBuyer)
 	if err != nil {
 		return err
 	}
 	return tx.Commit()
 }
 
-const productCols = `id,seller,name,plan,gb,days,max_ips,inbounds,price,status,first_use,price_stars`
+const productCols = `id,seller,name,plan,gb,days,max_ips,inbounds,price,status,first_use,price_stars,category,no_renew,per_buyer`
 
 func scanProduct(row scanner) (Product, error) {
 	var p Product
 	var tags string
-	err := row.Scan(&p.ID, &p.Seller, &p.Name, &p.Plan, &p.GB, &p.Days, &p.MaxIPs, &tags, &p.Price, &p.Status, &p.FirstUse, &p.PriceStars)
+	err := row.Scan(&p.ID, &p.Seller, &p.Name, &p.Plan, &p.GB, &p.Days, &p.MaxIPs, &tags, &p.Price, &p.Status, &p.FirstUse, &p.PriceStars, &p.Category, &p.NoRenew, &p.PerBuyer)
 	p.Inbounds = splitTags(tags)
 	return p, err
 }
@@ -248,6 +263,16 @@ func (s *Store) CreateOrder(ctx context.Context, by Principal, productID, buyer,
 		return 0, ErrInvalid
 	}
 	renew := clientEmail != ""
+	if renew && p.NoRenew {
+		return 0, fmt.Errorf("%w: this product is for new services only", ErrInvalid)
+	}
+	if !renew && p.PerBuyer > 0 && buyer != "" {
+		var n int
+		_ = s.ro.QueryRowContext(ctx, `SELECT COUNT(*) FROM orders WHERE product_id=? AND buyer=? AND renew=0 AND status IN ('pending','fulfilled')`, p.ID, buyer).Scan(&n)
+		if n >= p.PerBuyer {
+			return 0, fmt.Errorf("%w: you have reached the purchase limit for this product", ErrInvalid)
+		}
+	}
 	if renew {
 		var owner string
 		if err := s.ro.QueryRowContext(ctx, `SELECT rep_id FROM clients WHERE email=?`, clientEmail).Scan(&owner); err != nil || owner != p.Seller {

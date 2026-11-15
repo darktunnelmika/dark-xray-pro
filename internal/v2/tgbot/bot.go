@@ -471,10 +471,37 @@ func (b *Bot) syncMenuButton(ctx context.Context) {
 	b.menuURL, b.menuSet = u, true
 }
 
-func (b *Bot) shop(ctx context.Context, chat int64) {
+func (b *Bot) shop(ctx context.Context, chat int64) { b.shopIn(ctx, chat, "") }
+
+// shopIn lists the catalog; with categories, it first lists those.
+func (b *Bot) shopIn(ctx context.Context, chat int64, cat string) {
 	all, err := b.Store.Products(ctx, b.owner(), true)
 	if err != nil {
 		b.logf("tgbot products: %v", err)
+		return
+	}
+	cats, seen, uncategorised := []string{}, map[string]bool{}, false
+	for _, p := range all {
+		if !b.sells(p) {
+			continue
+		}
+		if p.Category == "" {
+			uncategorised = true
+		} else if !seen[p.Category] {
+			seen[p.Category] = true
+			cats = append(cats, p.Category)
+		}
+	}
+	if cat == "" && len(cats) > 0 && (len(cats) > 1 || uncategorised) {
+		kb := &Keyboard{}
+		for _, c := range cats {
+			kb.Rows = append(kb.Rows, row(cbBtn("📂 "+c, "cat:"+c)))
+		}
+		if uncategorised {
+			kb.Rows = append(kb.Rows, row(cbBtn("📦 سایر بسته‌ها", "cat:-")))
+		}
+		kb.Rows = append(kb.Rows, row(cbBtn("« منوی اصلی", "home")))
+		b.send(ctx, chat, "🛍 <b>خرید سرویس</b>\n"+line+"\nیک دسته را انتخاب کنید:", kb)
 		return
 	}
 	kb := &Keyboard{}
@@ -482,6 +509,9 @@ func (b *Bot) shop(ctx context.Context, chat int64) {
 	for _, p := range all {
 		if !b.sells(p) {
 			continue // each bot sells its own seller's catalog
+		}
+		if (cat == "-" && p.Category != "") || (cat != "" && cat != "-" && p.Category != cat) {
+			continue
 		}
 		size := "نامحدود"
 		if p.Plan == "volume" {
@@ -750,6 +780,8 @@ func (b *Bot) onCallback(ctx context.Context, q *CallbackQuery) {
 		b.invite(ctx, chat)
 	case "wallet":
 		b.wallet(ctx, chat)
+	case "cat":
+		b.shopIn(ctx, chat, rest)
 	case "topup":
 		b.askTopup(ctx, chat)
 	case "tamt":

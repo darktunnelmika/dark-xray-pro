@@ -51,8 +51,8 @@ func darkOldFixture(t *testing.T, path string) {
 		`INSERT INTO export_bot_tokens VALUES('ali','123456789:AAbbccddeeffgghhiijjkkllmmnnooppqq',1,777,'alibot'),('boss','987654321:AAbbccddeeffgghhiijjkkllmmnnooppqq',1,1,'bossbot')`,
 		`CREATE TABLE customer_wallets(owner TEXT, telegram_id INTEGER, currency TEXT, balance_minor INTEGER, updated_at REAL)`,
 		`INSERT INTO customer_wallets VALUES('ali',12345,'IRT',250000,1),('ali',555,'IRT',0,1)`,
-		`CREATE TABLE commerce_products(id TEXT, owner TEXT, name TEXT, description TEXT, kind TEXT, active INTEGER, visible INTEGER, created_at REAL, updated_at REAL, category TEXT)`,
-		`INSERT INTO commerce_products VALUES('p1','ali','Ali Plans','','volume',1,1,1,1,'General')`,
+		`CREATE TABLE commerce_products(id TEXT, owner TEXT, name TEXT, description TEXT, kind TEXT, active INTEGER, visible INTEGER, created_at REAL, updated_at REAL, category TEXT, sale_limit_per_user INTEGER DEFAULT 0, renewal_enabled INTEGER DEFAULT 1)`,
+		`INSERT INTO commerce_products VALUES('p1','ali','Ali Plans','','volume',1,1,1,1,'VIP',2,0)`,
 		`CREATE TABLE commerce_prices(id TEXT, owner TEXT, product_id TEXT, label TEXT, price_minor INTEGER, currency TEXT, duration_days INTEGER, volume_bytes INTEGER, unlimited_units INTEGER, device_limit INTEGER, inbound_ids TEXT, active INTEGER, created_at REAL, updated_at REAL, ip_limit INTEGER, hwid_limit INTEGER, activation_mode TEXT)`,
 		`INSERT INTO commerce_prices VALUES('pr1','ali','p1','10 GB / 30D',38000,'IRT',30,10737418240,0,1,'[]',1,1,1,2,0,'first_connection')`,
 	} {
@@ -134,7 +134,8 @@ func TestImportDarkOld(t *testing.T) {
 		t.Fatal("wallet", bal)
 	}
 	prods, _ := s.Products(ctx, Principal{Role: "owner"}, false)
-	if len(prods) != 1 || prods[0].Seller != "ali" || prods[0].GB != 10 || prods[0].Price != 38000 || !prods[0].FirstUse || prods[0].Status != "published" {
+	if len(prods) != 1 || prods[0].Seller != "ali" || prods[0].GB != 10 || prods[0].Price != 38000 || !prods[0].FirstUse || prods[0].Status != "published" ||
+		prods[0].Category != "VIP" || !prods[0].NoRenew || prods[0].PerBuyer != 2 {
 		t.Fatalf("products %+v", prods)
 	}
 	if again, _ := s.ImportDarkOld(ctx, DarkOldOptions{Inbounds: []string{"main"}, DryRun: true}); again.Clients != 0 {

@@ -202,7 +202,7 @@ func (b *Bot) renewProducts(ctx context.Context) []hubcore.Product {
 	all, _ := b.Store.Products(ctx, b.owner(), true)
 	var out []hubcore.Product
 	for _, p := range all {
-		if b.sells(p) {
+		if b.sells(p) && !p.NoRenew {
 			out = append(out, p)
 		}
 	}

@@ -770,21 +770,24 @@ func (s *Store) darkOldShop(ctx context.Context, tx *sql.Tx, old *sql.DB, repOf 
 	}
 	// Plans: each old price becomes one product.
 	if tableExists(ctx, old, "commerce_prices") && tableExists(ctx, old, "commerce_products") {
-		rows, err := old.QueryContext(ctx, `SELECT p.id,p.owner,pr.name,pr.kind,pr.active,pr.visible,p.label,p.price_minor,p.duration_days,p.volume_bytes,p.ip_limit,p.active,COALESCE(p.activation_mode,'')
+		rows, err := old.QueryContext(ctx, `SELECT p.id,p.owner,pr.name,pr.kind,pr.active,pr.visible,p.label,p.price_minor,p.duration_days,p.volume_bytes,p.ip_limit,p.active,COALESCE(p.activation_mode,''),
+COALESCE(pr.category,''),COALESCE(pr.renewal_enabled,1),COALESCE(pr.sale_limit_per_user,0)
 FROM commerce_prices p JOIN commerce_products pr ON pr.id=p.product_id AND pr.owner=p.owner ORDER BY p.owner,p.price_minor`)
 		if err != nil {
 			return err
 		}
 		type pr struct {
-			id, owner, name, kind, label, mode string
-			pActive, pVisible, active          bool
-			price, days, vol                   int64
-			ips                                int
+			id, owner, name, kind, label, mode, cat string
+			renewable                               bool
+			limit                                   int
+			pActive, pVisible, active               bool
+			price, days, vol                        int64
+			ips                                     int
 		}
 		var list []pr
 		for rows.Next() {
 			var x pr
-			if err := rows.Scan(&x.id, &x.owner, &x.name, &x.kind, &x.pActive, &x.pVisible, &x.label, &x.price, &x.days, &x.vol, &x.ips, &x.active, &x.mode); err == nil {
+			if err := rows.Scan(&x.id, &x.owner, &x.name, &x.kind, &x.pActive, &x.pVisible, &x.label, &x.price, &x.days, &x.vol, &x.ips, &x.active, &x.mode, &x.cat, &x.renewable, &x.limit); err == nil {
 				list = append(list, x)
 			}
 		}
@@ -815,8 +818,13 @@ FROM commerce_prices p JOIN commerce_products pr ON pr.id=p.product_id AND pr.ow
 			if len(name) > 120 {
 				name = name[:120]
 			}
-			if _, err := tx.ExecContext(ctx, `INSERT INTO products(id,seller,name,plan,gb,days,max_ips,inbounds,price,status,first_use,created_unix) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`,
-				id, sl, name, plan, gb, x.days, max(x.ips, 0), strings.Join(opt.Inbounds, ","), max(x.price, 0), status, x.mode == "first_connection", now); err != nil {
+			cat := strings.TrimSpace(x.cat)
+			if cat == "General" || len(cat) > 40 {
+				cat = ""
+			}
+			if _, err := tx.ExecContext(ctx, `INSERT INTO products(id,seller,name,plan,gb,days,max_ips,inbounds,price,status,first_use,created_unix,category,no_renew,per_buyer) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+				id, sl, name, plan, gb, x.days, max(x.ips, 0), strings.Join(opt.Inbounds, ","), max(x.price, 0), status, x.mode == "first_connection", now,
+				cat, !x.renewable, max(min(x.limit, 1000), 0)); err != nil {
 				return fmt.Errorf("product %s: %w", x.id, err)
 			}
 			rep.Products++

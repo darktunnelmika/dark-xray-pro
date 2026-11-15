@@ -1064,6 +1064,7 @@ async function viewClients() {
   ]);
   const list = list0 || [];
   const ctx = { inbounds, groups: groups || [], reps: reps || [] };
+  const repNames = Object.fromEntries((reps || []).map((r) => [r.ID, r.Name || r.ID]));
   const saved = (() => { try { return JSON.parse(localStorage.getItem("clients-view") || "{}"); } catch { return {}; } })();
   const st = { q: "", state: saved.state || "", extra: "", sort: saved.sort || "created", dir: saved.dir || 1, page: 0, size: saved.size || 25 };
   const remember = () => { try { localStorage.setItem("clients-view", JSON.stringify({ state: st.state, sort: st.sort, dir: st.dir, size: st.size })); } catch {} };
@@ -1130,6 +1131,7 @@ async function viewClients() {
       h("td", { class: "c-user", "data-label": L.user },
         h("div", { class: "row tight" }, h("span", { class: "av-wrap" }, avatar(c.Email, "sm"), h("span", { class: `dot ${c.Online ? "on" : ""}`, title: c.Online ? t("online") : t("offline") })),
           h("a", { class: "name", href: `#/client?e=${encodeURIComponent(c.Email)}` }, c.Email)),
+        me && me.role !== "rep" ? h("div", { class: "small muted" }, (lang === "fa" ? "سازنده: " : "by ") + (c.RepID ? (repNames[c.RepID] || c.RepID) : (lang === "fa" ? "مالک" : "owner"))) : null,
         c.Note ? h("div", { class: "small muted clip" }, c.Note) : null),
       h("td", { class: "c-usage", "data-label": L.usage },
         h("div", { class: "small mono" }, `${bytes(u)} ${lang === "fa" ? "از" : "/"} ${c.VolumeBytes < 0 ? "∞" : bytes(c.VolumeBytes)}`),
@@ -3559,6 +3561,9 @@ function productForm(p, inbounds, reps) {
   const price = h("input", { type: "number", min: "0", step: "1", value: v.price });
   const stars = h("input", { type: "number", min: "0", max: "100000", step: "1", value: v.price_stars || 0, dir: "ltr" });
   const first = h("input", { type: "checkbox", checked: v.first_use });
+  const category = h("input", { maxlength: "40", value: v.category || "", placeholder: lang === "fa" ? "مثلاً VIP یا گیمینگ" : "e.g. VIP or Gaming" });
+  const renewable = h("input", { type: "checkbox", checked: !v.no_renew });
+  const perBuyer = h("input", { type: "number", min: "0", max: "1000", value: v.per_buyer || 0 });
   const status = h("select", {}, ["draft", "published", "archived"].map((x) => h("option", { value: x, selected: v.status === x }, t(`status_${x}`))));
   const seller = owner ? h("select", {}, h("option", { value: "" }, t("ownerSelf")), (reps || []).map((r) => h("option", { value: r.ID, selected: v.seller === r.ID }, r.Name || r.ID))) : null;
   const boxes = (inbounds || []).map((ib) => h("label", { class: "check" }, h("input", { type: "checkbox", value: ib.tag, checked: (v.inbounds || []).includes(ib.tag) || (!p && inbounds.length === 1) }), `${ib.tag} · ${ib.node_id}`));
@@ -3573,6 +3578,7 @@ function productForm(p, inbounds, reps) {
       await guarded(() => api("PUT", `/api/v2/shop/products/${encodeURIComponent(id.value)}`, {
         name: name.value, plan: plan.value, gb: +gb.value || 0, days: +days.value, max_ips: +ips.value || 0, price: Math.round(+price.value || 0), price_stars: Math.round(+stars.value || 0),
         status: status.value, first_use: first.checked, seller: seller ? seller.value : "",
+        category: category.value.trim(), no_renew: !renewable.checked, per_buyer: +perBuyer.value || 0,
         inbounds: boxes.map((b) => b.querySelector("input")).filter((i) => i.checked).map((i) => i.value) }));
       document.getElementById("modal").close("save"); route();
     } catch (x) { err.textContent = x.message; }
@@ -3583,6 +3589,9 @@ function productForm(p, inbounds, reps) {
     h("div", { class: "two" }, h("label", {}, h("span", {}, t("days").split(" (")[0]), days), h("label", {}, h("span", {}, t("maxIPs")), ips)),
     h("label", { class: "check" }, first, t("firstUse")),
     h("div", { class: "two" }, h("label", {}, h("span", {}, t("price")), price), h("label", {}, h("span", {}, t("statusLabel")), status)),
+    h("div", { class: "two" }, h("label", {}, h("span", {}, lang === "fa" ? "دسته (در ربات)" : "Category (in the bot)"), category),
+      h("label", {}, h("span", {}, lang === "fa" ? "سقف خرید هر مشتری (۰ = آزاد)" : "Per-customer limit (0 = none)"), perBuyer)),
+    h("label", { class: "check" }, renewable, lang === "fa" ? "برای تمدید هم نمایش داده شود" : "Also offered for renewals"),
     owner ? h("label", {}, h("span", {}, t("priceStars")), stars) : null,
     owner ? h("p", { class: "small muted" }, t("priceStarsHint")) : null,
     seller ? h("label", {}, h("span", {}, t("seller")), seller) : null,
