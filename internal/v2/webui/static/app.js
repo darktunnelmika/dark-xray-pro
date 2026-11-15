@@ -2258,7 +2258,7 @@ async function inboundStudio(tag, ctx) {
       disabled: isNew ? false : i === 0, onclick: () => go(i) }, `${i + 1}. ${t(k)}`)));
     backBtn.hidden = st.step === (isNew ? 0 : 1);
     nextBtn.textContent = st.step === 3 ? t("save") : t("next");
-    body.replaceChildren(...[drawProfile, drawNodes, drawSwaps, drawReview][st.step]());
+    body.replaceChildren(...[drawProfile, drawNodes, drawSwaps, drawReview][st.step]().filter((x) => x != null));
   }
 
   // Step 1. Xray protocols (VLESS, VMess, Trojan, Shadowsocks, SOCKS, HTTP,
@@ -2280,7 +2280,7 @@ async function inboundStudio(tag, ctx) {
       meta.remark ||= p.remark || "Dark VPN";
       p.lim = { cap: 0, ends: "" };
       p.draft = { tpl, meta, enabled: true };
-      p.kit = inboundFormKit({ tpl, meta, enabled: true, lim: p.lim, view: {}, routed: false, certList: ctx.certs || [], err, draw: () => draw(), create: true });
+      p.kit = inboundFormKit({ tpl, meta, enabled: true, lim: p.lim, view: {}, routed: false, certList: ctx.certs || [], err, draw: () => draw(), create: true, nodes });
     } catch (x) { err.textContent = x.message; }
     draw();
   }
@@ -2707,7 +2707,14 @@ function inboundFormKit(o) {
       if (v === "grpc") st.grpcSettings = { serviceName: Math.random().toString(36).slice(2, 8) };
       if (v === "httpupgrade") st.httpupgradeSettings = { path: "/" + Math.random().toString(36).slice(2, 8) };
       if (v === "xhttp") st.xhttpSettings = { path: "/" + Math.random().toString(36).slice(2, 8), mode: "auto" };
-      if (st.security === "reality" && !["tcp", "grpc", "xhttp"].includes(v)) { err.textContent = ie("realityNeeds"); }
+      if (st.security === "reality" && !["tcp", "grpc", "xhttp"].includes(v)) {
+        // REALITY cannot run here: switch to TLS (as the builder did) and say so.
+        const name = (st.realitySettings?.serverNames || [])[0] || "";
+        delete st.realitySettings; delete meta.public_key; delete meta.short_id; delete meta.spider_x;
+        st.security = "tls";
+        st.tlsSettings = { serverName: certList[0]?.domains?.[0] || name, alpn: v === "ws" || v === "httpupgrade" ? ["http/1.1"] : ["h2", "http/1.1"], certificates: certList[0] ? [{ dark_cert: certList[0].id }] : [] };
+        err.textContent = lang === "fa" ? "REALITY روی این انتقال کار نمی‌کند؛ امنیت به TLS تغییر کرد (گواهی را در بخش امنیت انتخاب کنید)." : "REALITY does not work over this transport; security switched to TLS (pick the certificate under Security).";
+      }
       if (v !== "tcp" && tpl.settings?.flow) { delete tpl.settings.flow; err.textContent = ie("visionNeeds"); }
     }, draw);
     kids.push(field(ie("network"), netSel));
@@ -2794,7 +2801,14 @@ function inboundFormKit(o) {
       const pub = h("input", { value: meta.public_key || "", readonly: true, dir: "ltr" });
       const priv = input(() => rs.privateKey, async (v) => { rs.privateKey = v; try { const r = await keys("reality", { private: v }); meta.public_key = r.public; pub.value = r.public; err.textContent = ""; } catch (x) { err.textContent = x.message; } }, { dir: "ltr" });
       const sids = lines(() => rs.shortIds, (v) => { rs.shortIds = v; meta.short_id = v[0] || ""; });
+      // Dark's SNI finder: measures real sites from a node and fills the target.
+      const nodesForSni = o.nodes || [];
+      const finder = nodesForSni.length ? sniFinder({ nodes: nodesForSni, node: o.nodeId || nodesForSni[0]?.ID, onPick: (d) => { rs[tKey] = `${d}:443`; rs.serverNames = [d]; draw(); } }) : null;
+      if (finder) finder.hidden = true;
       kids.push(
+        finder ? h("div", { class: "row" }, h("button", { type: "button", class: "ghost", onclick: () => { finder.hidden = !finder.hidden; } }, "🔎 " + t("findSni")),
+          h("span", { class: "small muted" }, lang === "fa" ? "بهترین سایت هدف را از روی نود اندازه می‌گیرد و target و serverNames را پر می‌کند." : "Measures the best target site from the node and fills target and serverNames.")) : null,
+        finder,
         h("div", { class: "two" },
           field(ie("target"), input(() => rs[tKey], (v) => { rs[tKey] = v; }, { dir: "ltr", placeholder: "www.speedtest.net:443" })),
           field(ie("xver"), select([["0", "0"], ["1", "1"], ["2", "2"]], () => String(rs.xver || 0), (v) => { if (+v) rs.xver = +v; else delete rs.xver; }))),
@@ -2902,7 +2916,7 @@ async function inboundEditor(tag, nodes, certs) {
   d.classList.add("wide");
   d.addEventListener("close", () => d.classList.remove("wide"), { once: true });
 
-  const kit = inboundFormKit({ tpl, meta, enabled, lim, view, routed, certList, err, draw: () => draw() });
+  const kit = inboundFormKit({ tpl, meta, enabled, lim, view, routed, certList, err, draw: () => draw(), nodes: nodes || [], nodeId: (routes || [])[0]?.node_id || raw.node_id });
   function draw() {
     tabs.replaceChildren(...[["form", ie("form")], ["json", ie("json")]].map(([k, l]) => h("button", { type: "button", role: "tab", "aria-current": mode === k ? "step" : null, onclick: () => switchTo(k) }, l)));
     body.replaceChildren(...(mode === "form" ? kit.drawForm() : kit.drawJSON()));
