@@ -88,7 +88,7 @@ func TestSSHInstall(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("no command ran")
 	}
-	var j sshJob
+	var j SSHJobView
 	for i := 0; i < 50; i++ {
 		j, _ = SSHInstallJob(id)
 		if j.Status != "running" {

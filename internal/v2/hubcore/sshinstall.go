@@ -30,13 +30,18 @@ type SSHInstall struct {
 	Key      string `json:"key"` // PEM private key (optional, instead of a password)
 }
 
-type sshJob struct {
-	mu     sync.Mutex
+// SSHJobView is what the panel polls.
+type SSHJobView struct {
 	Lines  []string `json:"lines"`
 	Status string   `json:"status"` // running | done | failed
 	Error  string   `json:"error,omitempty"`
 	NodeID string   `json:"node_id"`
-	start  time.Time
+}
+
+type sshJob struct {
+	mu sync.Mutex
+	SSHJobView
+	start time.Time
 }
 
 func (j *sshJob) add(line string) {
@@ -57,10 +62,12 @@ func (j *sshJob) finish(err error) {
 	}
 }
 
-func (j *sshJob) view() sshJob {
+func (j *sshJob) view() SSHJobView {
 	j.mu.Lock()
 	defer j.mu.Unlock()
-	return sshJob{Lines: append([]string(nil), j.Lines...), Status: j.Status, Error: j.Error, NodeID: j.NodeID}
+	v := j.SSHJobView
+	v.Lines = append([]string(nil), j.Lines...)
+	return v
 }
 
 var (
@@ -69,12 +76,12 @@ var (
 )
 
 // SSHInstallJob returns a running or finished install.
-func SSHInstallJob(id string) (sshJob, bool) {
+func SSHInstallJob(id string) (SSHJobView, bool) {
 	sshJobsMu.Lock()
 	j, ok := sshJobs[id]
 	sshJobsMu.Unlock()
 	if !ok {
-		return sshJob{}, false
+		return SSHJobView{}, false
 	}
 	return j.view(), true
 }
@@ -131,7 +138,7 @@ func (s *Store) StartSSHInstall(ctx context.Context, in SSHInstall, installURL f
 		cmd = "sudo -S -p '' bash -c " + strconv.Quote(cmd)
 	}
 	id := randomHex(8)
-	j := &sshJob{Status: "running", NodeID: in.NodeID, start: time.Now()}
+	j := &sshJob{SSHJobView: SSHJobView{Status: "running", NodeID: in.NodeID}, start: time.Now()}
 	sshJobsMu.Lock()
 	for k, old := range sshJobs { // forget installs older than a day
 		if time.Since(old.start) > 24*time.Hour {
