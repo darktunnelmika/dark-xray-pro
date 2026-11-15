@@ -851,7 +851,8 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 	mux.HandleFunc("PUT /api/v2/admin/nodes/{id}", guard(func(w http.ResponseWriter, r *http.Request) {
 		var in struct {
 			Name           string
-			TrafficPercent *int `json:"traffic_percent"`
+			TrafficPercent *int    `json:"traffic_percent"`
+			PublicIP       *string `json:"public_ip"`
 		}
 		if !decode(w, r, &in) {
 			return
@@ -859,6 +860,9 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 		err := s.RenameNode(r.Context(), r.PathValue("id"), in.Name)
 		if err == nil && in.TrafficPercent != nil {
 			err = s.SetNodeTrafficPercent(r.Context(), r.PathValue("id"), *in.TrafficPercent)
+		}
+		if err == nil && in.PublicIP != nil {
+			err = s.SetNodePublicIP(r.Context(), r.PathValue("id"), *in.PublicIP)
 		}
 		reply(w, map[string]bool{"ok": err == nil}, err)
 	}))

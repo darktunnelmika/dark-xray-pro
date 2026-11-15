@@ -655,14 +655,17 @@ function renameNode(n) {
   const fa = lang === "fa";
   const name = h("input", { value: n.Name || "", autofocus: true });
   const pct = h("input", { type: "number", min: "10", max: "1000", step: "5", value: String(n.traffic_percent || 100), dir: "ltr" });
+  const pub = h("input", { value: n.public_ip_fixed ? n.PublicIP || "" : "", placeholder: (fa ? "خودکار: " : "Automatic: ") + (n.PublicIP || "—"), dir: "ltr", inputmode: "decimal" });
   const save = h("button", { class: "primary", value: "save", onclick: async (e) => {
     e.preventDefault();
     if (!pct.reportValidity()) return;
-    try { await guarded(() => api("PUT", `/api/v2/admin/nodes/${encodeURIComponent(n.ID)}`, { Name: name.value, traffic_percent: +pct.value })); document.getElementById("modal").close("save"); route(); } catch {}
+    try { await guarded(() => api("PUT", `/api/v2/admin/nodes/${encodeURIComponent(n.ID)}`, { Name: name.value, traffic_percent: +pct.value, public_ip: pub.value.trim() })); document.getElementById("modal").close("save"); route(); } catch {}
   } }, t("save"));
   openModal(`${t("edit")} · ${n.ID}`, h("div", { class: "form" }, h("label", {}, h("span", {}, t("name")), name),
     h("label", {}, h("span", {}, fa ? "ضریب ترافیک کاربرها (درصد)" : "Client traffic rate (percent)"), pct,
-      h("small", { class: "muted" }, fa ? "مصرف کاربرها روی این نود با این درصد حساب می‌شود: ۱۵۰ یعنی هر ۱ گیگ ۱٫۵ گیگ حساب شود (نود ویژه) و ۵۰ یعنی نصف. آمار سرور واقعی می‌ماند." : "Client usage on this node is billed at this rate: 150 counts 1 GB as 1.5 GB (a premium node), 50 as half. Server totals stay real."))), [save]);
+      h("small", { class: "muted" }, fa ? "مصرف کاربرها روی این نود با این درصد حساب می‌شود: ۱۵۰ یعنی هر ۱ گیگ ۱٫۵ گیگ حساب شود (نود ویژه) و ۵۰ یعنی نصف. آمار سرور واقعی می‌ماند." : "Client usage on this node is billed at this rate: 150 counts 1 GB as 1.5 GB (a premium node), 50 as half. Server totals stay real.")),
+    h("label", {}, h("span", {}, fa ? "آی‌پی عمومی نود" : "Node public IP"), pub,
+      h("small", { class: "muted" }, fa ? "خالی = خودکار (آدرسی که نود از آن وصل می‌شود). برای نودی که پشت NAT است یا از تونل هاب وصل می‌شود، آی‌پی واقعی‌اش را بنویس؛ Swap و لینک‌ها از آن استفاده می‌کنند." : "Empty = automatic (the address the node connects from). For a node behind NAT or connected through the HUB's tunnel, enter its real IP; Swap and links use it."))), [save]);
 }
 
 function clientStatus(c) {

@@ -240,6 +240,7 @@ type NodeStatus struct {
 	UsageSeq                          int64
 	Host                              *wire.Host
 	PublicIP                          string
+	PublicIPFixed                     bool `json:"public_ip_fixed"`
 	AgentSHA                          string
 	UpdateAvailable                   bool   `json:"update_available"`
 	XrayVersion                       string `json:"xray_version"`
@@ -288,7 +289,7 @@ func (n NodeStatus) Online(now time.Time) bool {
 
 func (s *Store) Nodes(ctx context.Context) ([]NodeStatus, error) {
 	rows, err := s.ro.QueryContext(ctx, `SELECT id,name,agent_version,last_error,last_seen_unix,xray_running,xray_restarts,spooled,
-config_revision,reported_revision,usage_seq,host_json,public_ip,agent_sha,xray_version,agent_arch,traffic_percent FROM nodes ORDER BY id`)
+config_revision,reported_revision,usage_seq,host_json,public_ip,agent_sha,xray_version,agent_arch,traffic_percent,public_ip_fixed FROM nodes ORDER BY id`)
 	if err != nil {
 		return nil, err
 	}
@@ -299,7 +300,7 @@ config_revision,reported_revision,usage_seq,host_json,public_ip,agent_sha,xray_v
 		var n NodeStatus
 		var hj string
 		if err := rows.Scan(&n.ID, &n.Name, &n.AgentVersion, &n.LastError, &n.LastSeen, &n.XrayRunning, &n.XrayRestarts,
-			&n.Spooled, &n.ConfigRevision, &n.ReportedRevision, &n.UsageSeq, &hj, &n.PublicIP, &n.AgentSHA, &n.XrayVersion, &n.Arch, &n.TrafficPercent); err != nil {
+			&n.Spooled, &n.ConfigRevision, &n.ReportedRevision, &n.UsageSeq, &hj, &n.PublicIP, &n.AgentSHA, &n.XrayVersion, &n.Arch, &n.TrafficPercent, &n.PublicIPFixed); err != nil {
 			return nil, err
 		}
 		if hj != "" {

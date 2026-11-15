@@ -3,6 +3,7 @@ package hubcore
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 
@@ -345,5 +346,34 @@ func TestDeletedClientLeavesNoUsage(t *testing.T) {
 	_ = s.db.QueryRow(`SELECT COUNT(*) FROM online WHERE email='alice'`).Scan(&n)
 	if n != 0 {
 		t.Fatal("online row survived the delete")
+	}
+}
+
+func TestNodePublicIPPinAndTunnel(t *testing.T) {
+	s, _ := newStore(t)
+	ctx := context.Background()
+	seed(t, s)
+	s.NodeAddress(ctx, "de-1", "127.0.0.1:5000") // through a local tunnel: ignored
+	var ip string
+	_ = s.db.QueryRow(`SELECT public_ip FROM nodes WHERE id='de-1'`).Scan(&ip)
+	if ip == "127.0.0.1" {
+		t.Fatal("a tunnelled connection must not become the node address")
+	}
+	if err := s.SetNodePublicIP(ctx, "de-1", "10.0.0.5"); !errors.Is(err, ErrInvalid) {
+		t.Fatal("private addresses are refused", err)
+	}
+	if err := s.SetNodePublicIP(ctx, "de-1", "167.233.192.101"); err != nil {
+		t.Fatal(err)
+	}
+	s.NodeAddress(ctx, "de-1", "198.51.100.7:4000") // pinned: not overwritten
+	_ = s.db.QueryRow(`SELECT public_ip FROM nodes WHERE id='de-1'`).Scan(&ip)
+	if ip != "167.233.192.101" {
+		t.Fatal("pinned address changed", ip)
+	}
+	_ = s.SetNodePublicIP(ctx, "de-1", "")
+	s.NodeAddress(ctx, "de-1", "198.51.100.7:4000")
+	_ = s.db.QueryRow(`SELECT public_ip FROM nodes WHERE id='de-1'`).Scan(&ip)
+	if ip != "198.51.100.7" {
+		t.Fatal("automatic again after clearing", ip)
 	}
 }

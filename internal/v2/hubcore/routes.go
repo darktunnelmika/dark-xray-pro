@@ -120,6 +120,7 @@ func (s *Store) ensureRouteSchema() error {
 	for _, c := range []struct{ table, col, def string }{
 		{"nodes", "public_ip", "TEXT NOT NULL DEFAULT ''"},
 		{"nodes", "traffic_percent", "INTEGER NOT NULL DEFAULT 100"},
+		{"nodes", "public_ip_fixed", "INTEGER NOT NULL DEFAULT 0"},
 		{"inbound_hosts", "fragment", "INTEGER NOT NULL DEFAULT 0"},
 		{"inbound_hosts", "mux", "INTEGER NOT NULL DEFAULT 0"},
 		{"swaps", "dest_node", "TEXT NOT NULL DEFAULT ''"},
@@ -436,10 +437,45 @@ func (s *Store) NodeAddress(ctx context.Context, nodeID, remote string) {
 	if err != nil {
 		host = remote
 	}
-	if net.ParseIP(host) == nil {
-		return
+	ip := net.ParseIP(host)
+	if ip == nil || ip.IsLoopback() || hubOwnIP(ip) {
+		return // a node reached through a tunnel from the HUB arrives from the HUB itself
 	}
-	_, _ = s.db.ExecContext(ctx, `UPDATE nodes SET public_ip=? WHERE id=? AND public_ip<>?`, host, nodeID, host)
+	_, _ = s.db.ExecContext(ctx, `UPDATE nodes SET public_ip=? WHERE id=? AND public_ip<>? AND public_ip_fixed=0`, host, nodeID, host)
+}
+
+// hubOwnIP tells whether ip belongs to this machine.
+func hubOwnIP(ip net.IP) bool {
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		return false
+	}
+	for _, a := range addrs {
+		if n, ok := a.(*net.IPNet); ok && n.IP.Equal(ip) {
+			return true
+		}
+	}
+	return false
+}
+
+// SetNodePublicIP pins a node's public address (for a node behind NAT or
+// reached through a tunnel); an empty address goes back to automatic.
+func (s *Store) SetNodePublicIP(ctx context.Context, id, ip string) error {
+	ip = strings.TrimSpace(ip)
+	fixed := 1
+	if ip == "" {
+		fixed = 0
+	} else if p := net.ParseIP(ip); p == nil || p.IsLoopback() || p.IsPrivate() || p.IsUnspecified() {
+		return fmt.Errorf("%w: public IP must be a public address", ErrInvalid)
+	}
+	r, err := s.db.ExecContext(ctx, `UPDATE nodes SET public_ip=CASE WHEN ?='' THEN public_ip ELSE ? END, public_ip_fixed=? WHERE id=?`, ip, ip, fixed, id)
+	if err != nil {
+		return err
+	}
+	if n, _ := r.RowsAffected(); n != 1 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 // ComposeInbound creates a preset profile and places it on the given nodes.
