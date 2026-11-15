@@ -101,7 +101,7 @@ func (b *Bot) Run(ctx context.Context) {
 	if name, err := b.API.Me(ctx); err == nil && name != "" {
 		_ = b.Store.SetSetting(ctx, "tg_username", name)
 	}
-	_ = b.API.SetCommands(ctx, 0, [][2]string{{"start", "منوی اصلی"}, {"my", "سرویس‌های من"}, {"buy", "خرید سرویس"}, {"support", "پشتیبانی"}})
+	_ = b.API.SetCommands(ctx, 0, [][2]string{{"start", "🏠 منوی اصلی"}, {"my", "📦 سرویس‌های من"}, {"buy", "🛍 خرید اشتراک"}, {"help", "📚 آموزش اتصال"}, {"status", "🌐 وضعیت سرورها"}, {"support", "💬 پشتیبانی"}})
 	for id := range b.Owners {
 		_ = b.API.SetCommands(ctx, id, [][2]string{{"admin", "پنل مدیریت"}, {"status", "وضعیت هاب و نودها"}, {"orders", "سفارش‌های در انتظار"},
 			{"report", "گزارش امروز"}, {"client", "اطلاعات یک کلاینت"}, {"broadcast", "پیام همگانی"}, {"help", "راهنما"}})
@@ -151,6 +151,9 @@ func (b *Bot) Tick(ctx context.Context) {
 }
 
 func (b *Bot) send(ctx context.Context, chat int64, text string, kb *Keyboard) int64 {
+	if id, ok := b.redraw(ctx, chat, text, kb); ok {
+		return id
+	}
 	id, err := b.API.Send(ctx, chat, text, kb, 0)
 	if errors.Is(err, ErrBlocked) {
 		b.Store.TgSetBlocked(ctx, chat)
@@ -272,6 +275,12 @@ func (b *Bot) onMessage(ctx context.Context, m *Message) {
 	case "/my":
 		b.mine(ctx, chat)
 		return
+	case "/help", "/guide":
+		b.showGuide(ctx, chat, "")
+		return
+	case "/status":
+		b.showStatus(ctx, chat)
+		return
 	case "/link":
 		if arg == "" {
 			b.setAwait(chat, "link")
@@ -318,9 +327,8 @@ func (b *Bot) takeAwait(chat int64) string {
 }
 
 var mainMenu = &Keyboard{Rows: [][]Button{
-	{{Text: "🛒 خرید سرویس", Data: "shop"}, {Text: "📊 سرویس‌های من", Data: "mine"}},
-	{{Text: "📲 آموزش اتصال", Data: "guide"}, {Text: "💬 پشتیبانی", Data: "support"}},
-	{{Text: "🔗 اتصال سرویس موجود", Data: "link"}},
+	{{Text: "🛍 خرید اشتراک", Data: "shop"}, {Text: "📦 سرویس‌های من", Data: "mine"}},
+	{{Text: "« منوی اصلی", Data: "home"}},
 }}
 
 const defaultGuide = `📲 <b>آموزش اتصال</b>
@@ -339,19 +347,27 @@ func isBlocked(err error) bool { return errors.Is(err, ErrBlocked) }
 func (b *Bot) menu(ctx context.Context, chat int64) {
 	welcome := b.Store.Setting(ctx, "tg_welcome")
 	if welcome == "" {
-		welcome = "به <b>Dark VPN</b> خوش آمدید. یکی از گزینه‌ها را انتخاب کنید:"
+		welcome = "✨ <b>به Dark VPN خوش آمدید</b>\n" + line + "\nاینترنت آزاد، سریع و پایدار روی چند سرور.\nاز دکمه‌های زیر شروع کنید 👇"
 	} else {
 		welcome = esc(welcome)
 	}
 	if emails, _ := b.Store.TgClients(ctx, chat); len(emails) > 0 {
 		var lines []string
-		now := b.now().Unix()
 		for _, e := range emails {
 			if c, err := b.Store.ClientByEmail(ctx, e); err == nil {
-				lines = append(lines, clientLabel(c, now)+" — "+gb(c.Usage.Up+c.Usage.Down))
+				st := b.state(c)
+				left := ""
+				if c.VolumeBytes > 0 {
+					l := c.VolumeBytes - c.Usage.Up - c.Usage.Down
+					if l < 0 {
+						l = 0
+					}
+					left = " · " + size(l) + " مانده"
+				}
+				lines = append(lines, st.icon+" <b>"+esc(c.Email)+"</b>"+left)
 			}
 		}
-		welcome += "\n\nسرویس‌های شما:\n" + esc(strings.Join(lines, "\n"))
+		welcome += "\n\n📦 سرویس‌های شما:\n" + strings.Join(lines, "\n")
 	}
 	b.send(ctx, chat, welcome, b.menuKB(ctx, chat))
 }
@@ -362,20 +378,23 @@ func (b *Bot) menuKB(ctx context.Context, chat int64) *Keyboard {
 	if u := b.Store.MiniAppURL(ctx, b.SubBase); u != "" {
 		rows = append(rows, []Button{{Text: "🛍 فروشگاه و سرویس‌های من", WebApp: &WebApp{URL: u}}})
 	}
-	rows = append(rows, mainMenu.Rows...)
+	rows = append(rows, row(cbBtn("🛍 خرید اشتراک", "shop"), cbBtn("📦 سرویس‌های من", "mine")))
 	var extra []Button
 	if b.Store.TrialPolicy(ctx).Enabled && !b.Store.TrialUsed(ctx, chat) {
-		extra = append(extra, Button{Text: "🎁 تست رایگان", Data: "trial"})
-	}
-	if b.Store.ReferralPolicy(ctx).Enabled {
-		extra = append(extra, Button{Text: "👥 دعوت دوستان", Data: "invite"})
+		extra = append(extra, cbBtn("🎁 تست رایگان", "trial"))
 	}
 	if b.Store.WalletBalance(ctx, chat) > 0 {
-		extra = append(extra, Button{Text: "👛 کیف پول", Data: "wallet"})
+		extra = append(extra, cbBtn("👛 کیف پول", "wallet"))
 	}
 	if len(extra) > 0 {
 		rows = append(rows, extra)
 	}
+	rows = append(rows, row(cbBtn("📚 آموزش اتصال", "guide"), cbBtn("🌐 وضعیت سرورها", "status")))
+	social := row(cbBtn("💬 پشتیبانی", "support"))
+	if b.Store.ReferralPolicy(ctx).Enabled {
+		social = append([]Button{cbBtn("👥 دعوت دوستان", "invite")}, social...)
+	}
+	rows = append(rows, social, row(cbBtn("🔗 افزودن سرویس با لینک", "link")))
 	return &Keyboard{Rows: rows}
 }
 
@@ -424,14 +443,16 @@ func (b *Bot) shop(ctx context.Context, chat int64) {
 		if len(price) == 0 {
 			price = append(price, "رایگان")
 		}
-		lines = append(lines, fmt.Sprintf("• <b>%s</b> — %s، %d روز — %s", esc(p.Name), size, p.Days, strings.Join(price, " یا ")))
-		kb.Rows = append(kb.Rows, b.buyButtons(ctx, chat, p, "")...)
+		_ = size
+		lines = append(lines, p.ID)
+		kb.Rows = append(kb.Rows, row(cbBtn("📦 "+p.Name+" — "+productPrice(p), "prod:"+p.ID)))
 	}
 	if len(lines) == 0 {
-		b.send(ctx, chat, "فعلاً محصولی برای فروش نیست.", mainMenu)
+		b.send(ctx, chat, "🛍 فعلاً بسته‌ای برای فروش نیست. کمی بعد سر بزنید.", homeKB)
 		return
 	}
-	b.send(ctx, chat, "محصولات:\n\n"+strings.Join(lines, "\n"), kb)
+	kb.Rows = append(kb.Rows, row(cbBtn("« منوی اصلی", "home")))
+	b.send(ctx, chat, "🛍 <b>بسته‌ها</b>\n"+line+"\nهمهٔ بسته‌ها روی همهٔ سرورها کار می‌کنند و با یک لینک تحویل می‌شوند.\nیک بسته را انتخاب کنید:", kb)
 }
 
 func (b *Bot) buy(ctx context.Context, chat int64, productID, renew string) {
@@ -454,20 +475,25 @@ func (b *Bot) buy(ctx context.Context, chat int64, productID, renew string) {
 func (b *Bot) mine(ctx context.Context, chat int64) {
 	emails, err := b.Store.TgClients(ctx, chat)
 	if err != nil || len(emails) == 0 {
-		b.send(ctx, chat, "سرویسی به این حساب وصل نیست. اگر سرویس دارید، «اتصال سرویس موجود» را بزنید و لینک ساب را بفرستید.", mainMenu)
+		b.send(ctx, chat, "📦 <b>سرویس‌های من</b>\n"+line+"\nهنوز سرویسی به این حساب وصل نیست.\n\n• برای خرید، «🛍 خرید اشتراک» را بزنید.\n• اگر سرویس دارید، «🔗 افزودن با لینک» را بزنید و لینک اشتراک را بفرستید.", &Keyboard{Rows: [][]Button{
+			row(cbBtn("🛍 خرید اشتراک", "shop"), cbBtn("🔗 افزودن با لینک", "link")), row(cbBtn("« منوی اصلی", "home"))}})
 		return
 	}
+	if len(emails) == 1 {
+		b.showService(ctx, chat, emails[0])
+		return
+	}
+	kb := &Keyboard{}
 	for _, e := range emails {
 		c, err := b.Store.ClientByEmail(ctx, e)
 		if err != nil {
 			continue
 		}
-		kb := &Keyboard{Rows: [][]Button{{{Text: "🔗 لینک و QR", Data: "sub:" + e}}}}
-		if renewals := b.renewButtons(ctx, chat, e); len(renewals) > 0 {
-			kb.Rows = append(kb.Rows, renewals...)
-		}
-		b.send(ctx, chat, b.clientCard(c), kb)
+		st := b.state(c)
+		kb.Rows = append(kb.Rows, row(cbBtn(st.icon+" "+c.Email, "svc:"+e)))
 	}
+	kb.Rows = append(kb.Rows, row(cbBtn("« منوی اصلی", "home")))
+	b.send(ctx, chat, "📦 <b>سرویس‌های شما</b>\n"+line+"\nیک سرویس را برای دیدن جزئیات انتخاب کنید:", kb)
 }
 
 func (b *Bot) renewButtons(ctx context.Context, chat int64, email string) [][]Button {
@@ -483,7 +509,9 @@ func (b *Bot) renewButtons(ctx context.Context, chat int64, email string) [][]Bu
 	return rows
 }
 
-func (b *Bot) clientCard(c hubcore.ClientView) string {
+func (b *Bot) clientCard(c hubcore.ClientView) string { return b.serviceCard(c) }
+
+func (b *Bot) clientCardOld(c hubcore.ClientView) string {
 	used := c.Usage.Up + c.Usage.Down
 	status := "فعال ✅"
 	now := b.now().Unix()
@@ -531,7 +559,7 @@ func (b *Bot) link(ctx context.Context, chat int64, tokenOrURL string) {
 		b.send(ctx, chat, "این لینک پیدا نشد. لینک کامل ساب را بفرستید.", mainMenu)
 		return
 	}
-	b.send(ctx, chat, "سرویس <b>"+esc(email)+"</b> به حساب شما وصل شد.", mainMenu)
+	b.send(ctx, chat, "✅ سرویس <b>"+esc(email)+"</b> به حساب شما وصل شد.\nاز این به بعد هشدار حجم و انقضا همین‌جا می‌آید.", &Keyboard{Rows: [][]Button{row(cbBtn("📦 مشاهدهٔ سرویس", "svc:"+email), cbBtn("« منو", "home"))}})
 }
 
 func (b *Bot) ticket(ctx context.Context, chat int64, name, username, text string) {
@@ -561,29 +589,55 @@ func (b *Bot) ticket(ctx context.Context, chat int64, name, username, text strin
 func (b *Bot) onCallback(ctx context.Context, q *CallbackQuery) {
 	chat := q.From.ID
 	_ = b.API.Answer(ctx, q.ID, "")
+	ctx = onScreen(ctx, q)
 	if b.ownerCallback(ctx, chat, q.Data) {
 		return
 	}
 	verb, rest, _ := strings.Cut(q.Data, ":")
+	mine := func() bool { return b.ownsClient(ctx, chat, rest) || b.Owners[chat] }
 	switch verb {
+	case "home":
+		b.menu(ctx, chat)
+	case "svc":
+		if mine() {
+			b.showService(ctx, chat, rest)
+		}
+	case "subl":
+		if mine() {
+			b.showSubLink(ctx, chat, rest)
+		}
+	case "qr":
+		if mine() {
+			b.sendQR(ctx, chat, rest)
+		}
+	case "cfg":
+		if mine() {
+			b.showConfigs(ctx, chat, rest)
+		}
+	case "use":
+		if mine() {
+			b.showUsage(ctx, chat, rest)
+		}
+	case "rnw":
+		if mine() {
+			b.showRenew(ctx, chat, rest)
+		}
+	case "prod":
+		b.showProduct(ctx, chat, rest)
+	case "status":
+		b.showStatus(ctx, chat)
 	case "shop":
 		b.shop(ctx, chat)
 	case "mine":
 		b.mine(ctx, chat)
 	case "link":
 		b.setAwait(chat, "link")
-		b.send(ctx, chat, "لینک ساب سرویس خود را بفرستید.", nil)
+		b.send(ctx, chat, "🔗 <b>افزودن سرویس</b>\n"+line+"\nلینک اشتراک سرویس خود را همین‌جا بفرستید تا به این حساب تلگرام وصل شود و هشدارهای حجم و انقضا را بگیرید.", homeKB)
 	case "support":
 		b.setAwait(chat, "support")
-		b.send(ctx, chat, "پیام خود را بنویسید؛ به پشتیبانی ارسال می‌شود.", nil)
+		b.send(ctx, chat, "💬 <b>پشتیبانی</b>\n"+line+"\nپیام خود را بنویسید و بفرستید؛ مستقیم به پشتیبانی می‌رسد و پاسخ همین‌جا می‌آید.", homeKB)
 	case "guide":
-		g := b.Store.Setting(ctx, "tg_guide")
-		if g == "" {
-			g = defaultGuide
-		} else {
-			g = esc(g)
-		}
-		b.send(ctx, chat, g, mainMenu)
+		b.showGuide(ctx, chat, rest)
 	case "buy":
 		b.buy(ctx, chat, rest, "")
 	case "pay", "wpay":
@@ -613,8 +667,9 @@ func (b *Bot) onCallback(ctx context.Context, q *CallbackQuery) {
 			b.buy(ctx, chat, pid, email)
 		}
 	case "sub":
-		if b.ownsClient(ctx, chat, rest) || b.Owners[chat] {
-			b.sendSub(ctx, chat, rest)
+		if mine() {
+			b.showSubLink(ctx, chat, rest)
+			b.sendQR(ctx, chat, rest)
 		}
 	case "radm":
 		if rep, role := b.Store.TgRepRole(ctx, chat); rep != "" && role == "owner" {

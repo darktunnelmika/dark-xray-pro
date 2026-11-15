@@ -17,6 +17,25 @@ import (
 // enable/disable, delete), quick sale from a product, nodes, resellers with
 // credit top-ups, broadcast with preview and confirmation, bot texts.
 
+// ownerMenuKB shows the pending-order count on its button.
+func (b *Bot) ownerMenuKB(pending int) *Keyboard {
+	orders := "🛒 سفارش‌ها"
+	if pending > 0 {
+		orders = "🛒 سفارش‌ها (" + faInt(int64(pending)) + ")"
+	}
+	kb := &Keyboard{}
+	for _, r := range ownerMenu.Rows {
+		nr := append([]Button(nil), r...)
+		for i := range nr {
+			if nr[i].Data == "a:orders" {
+				nr[i].Text = orders
+			}
+		}
+		kb.Rows = append(kb.Rows, nr)
+	}
+	return kb
+}
+
 var ownerMenu = &Keyboard{Rows: [][]Button{
 	{{Text: "📊 وضعیت", Data: "a:status"}, {Text: "🧩 نودها", Data: "a:nodes"}},
 	{{Text: "👥 کلاینت‌ها", Data: "a:clients"}, {Text: "🔎 جستجو", Data: "a:find"}},
@@ -24,14 +43,30 @@ var ownerMenu = &Keyboard{Rows: [][]Button{
 	{{Text: "💼 نماینده‌ها", Data: "a:reps"}, {Text: "📋 گزارش امروز", Data: "a:report"}},
 	{{Text: "📣 پیام همگانی", Data: "a:bc"}, {Text: "⏰ زمان‌بندی‌ها", Data: "a:schlist"}},
 	{{Text: "⚙️ تنظیمات ربات", Data: "a:settings"}, {Text: "📦 بکاپ الان", Data: "a:backup"}},
-	{{Text: "🛍 نمای مشتری", Data: "a:customer"}},
+	{{Text: "🛍 نمای مشتری", Data: "a:customer"}, {Text: "🔄 بروزرسانی", Data: "a:home"}},
 }}
 
 func (b *Bot) ownerHome(ctx context.Context, chat int64) {
 	o, _ := b.Store.Overview(ctx)
 	pending, _ := b.Store.Orders(ctx, b.owner(), "pending", 100)
-	b.send(ctx, chat, fmt.Sprintf("🛡 <b>پنل مدیریت Dark VPN</b>\n\n📡 نود آنلاین: %d از %d\n👥 کلاینت فعال: %d از %d — آنلاین الان: %d\n📶 ترافیک امروز: %s\n⏳ سفارش در انتظار: %d",
-		o.NodesOnline, o.Nodes, o.ClientsActive, o.Clients, o.OnlineUsers, gb(o.TrafficToday), len(pending)), ownerMenu)
+	share := func(a, t int) float64 {
+		if t == 0 {
+			return 0
+		}
+		return float64(a) / float64(t)
+	}
+	alert := ""
+	if o.NodesOnline < o.Nodes {
+		alert = fmt.Sprintf("\n\n⚠️ <b>%s نود آفلاین است</b>", faInt(int64(o.Nodes-o.NodesOnline)))
+	}
+	orders := ""
+	if len(pending) > 0 {
+		orders = fmt.Sprintf("\n🛒 سفارش در انتظار: <b>%s</b>", faInt(int64(len(pending))))
+	}
+	b.send(ctx, chat, fmt.Sprintf("🛡 <b>پنل مدیریت Dark VPN</b>\n%s\n📡 نودها   <code>%s</code> %s/%s\n👥 فعال    <code>%s</code> %s/%s\n🟢 آنلاین الان: <b>%s</b>\n📶 ترافیک امروز: <b>%s</b>%s%s\n\n<i>%s</i>",
+		line, bar(share(o.NodesOnline, o.Nodes)), faInt(int64(o.NodesOnline)), faInt(int64(o.Nodes)),
+		bar(share(o.ClientsActive, o.Clients)), faInt(int64(o.ClientsActive)), faInt(int64(o.Clients)),
+		faInt(int64(o.OnlineUsers)), size(o.TrafficToday), orders, alert, faTime(b.now().Unix())), b.ownerMenuKB(len(pending)))
 }
 
 func back(data string) []Button { return []Button{{Text: "« بازگشت", Data: data}} }
@@ -68,12 +103,37 @@ func (b *Bot) ownerCallback(ctx context.Context, chat int64, data string) bool {
 			b.send(ctx, chat, b.orderCard(ctx, o), orderButtons(o.ID))
 		}
 	case "clients":
-		b.clientsView(ctx, chat, arg(1))
+		page, _ := strconv.Atoi(arg(2))
+		b.clientsPage(ctx, chat, arg(1), page)
 	case "find":
 		b.setAwait(chat, "find")
 		b.send(ctx, chat, "🔎 نام کلاینت یا بخشی از آن (یا یادداشتش) را بفرستید:", nil)
 	case "c": // client card
 		b.ownerClient(ctx, chat, arg(1))
+	case "cfg":
+		b.showConfigs(ctx, chat, arg(1))
+	case "use":
+		b.showUsage(ctx, chat, arg(1))
+	case "reset":
+		b.send(ctx, chat, "♻️ مصرف <b>"+esc(arg(1))+"</b> صفر شود؟ حجم کامل دوباره در دسترس قرار می‌گیرد.", &Keyboard{Rows: [][]Button{
+			row(cbBtn("بله، صفر شود", "a:resetok:"+arg(1)), cbBtn("انصراف", "a:c:"+arg(1)))}})
+	case "resetok":
+		if err := b.Store.ResetUsage(ctx, arg(1), "telegram"); err != nil {
+			b.send(ctx, chat, "انجام نشد: "+esc(err.Error()), backTo("a:c:"+arg(1), "کلاینت"))
+			return true
+		}
+		b.ownerClient(ctx, chat, arg(1))
+	case "rot":
+		b.send(ctx, chat, "🔁 لینک اشتراک و کلید اتصال <b>"+esc(arg(1))+"</b> عوض شود؟ لینک قبلی دیگر کار نمی‌کند و مشتری باید لینک تازه را وارد کند.", &Keyboard{Rows: [][]Button{
+			row(cbBtn("بله، لینک تازه", "a:rotok:"+arg(1)), cbBtn("انصراف", "a:c:"+arg(1)))}})
+	case "rotok":
+		if err := b.Store.RotateClient(ctx, arg(1), true, true); err != nil {
+			b.send(ctx, chat, "انجام نشد: "+esc(err.Error()), backTo("a:c:"+arg(1), "کلاینت"))
+			return true
+		}
+		b.ownerClient(ctx, chat, arg(1))
+	case "node":
+		b.nodeCard(ctx, chat, arg(1))
 	case "sub":
 		b.sendSub(ctx, chat, arg(1))
 	case "renew": // a:renew:<email>:<days>:<gb>
@@ -387,6 +447,7 @@ func (b *Bot) nodesView(ctx context.Context, chat int64) {
 	nodes, _ := b.Store.Nodes(ctx)
 	now := b.now()
 	var lines []string
+	kb := &Keyboard{}
 	for _, n := range nodes {
 		dot, extra := "🔴", " — آفلاین"
 		if n.Online(now) {
@@ -404,11 +465,13 @@ func (b *Bot) nodesView(ctx context.Context, chat int64) {
 			name = n.ID
 		}
 		lines = append(lines, fmt.Sprintf("%s <b>%s</b> (%s)%s", dot, esc(name), esc(n.ID), extra))
+		kb.Rows = append(kb.Rows, row(cbBtn(dot+" "+name, "a:node:"+n.ID)))
 	}
 	if len(lines) == 0 {
 		lines = []string{"نودی ثبت نشده."}
 	}
-	b.send(ctx, chat, "🧩 <b>نودها</b>\n\n"+strings.Join(lines, "\n"), &Keyboard{Rows: [][]Button{back("a:home")}})
+	kb.Rows = append(kb.Rows, row(cbBtn("🔄 بروزرسانی", "a:nodes"), cbBtn("« پنل", "a:home")))
+	b.send(ctx, chat, "🧩 <b>نودها</b>\n"+line+"\n"+strings.Join(lines, "\n"), kb)
 }
 
 func (b *Bot) clientsView(ctx context.Context, chat int64, filter string) {
@@ -508,10 +571,7 @@ func (b *Bot) ownerClient(ctx context.Context, chat int64, email string) {
 		b.send(ctx, chat, "کلاینت پیدا نشد.", &Keyboard{Rows: [][]Button{back("a:clients")}})
 		return
 	}
-	text := b.clientCard(c)
-	if c.Online {
-		text += "\n🟢 الان آنلاین"
-	}
+	text := b.serviceCard(c)
 	if c.RepID != "" {
 		text += "\n💼 نماینده: " + esc(c.RepID)
 	}
@@ -527,10 +587,11 @@ func (b *Bot) ownerClient(ctx context.Context, chat int64, email string) {
 	}
 	e := c.Email
 	b.send(ctx, chat, text, &Keyboard{Rows: [][]Button{
-		{{Text: "🔗 لینک و QR", Data: "a:sub:" + e}},
-		{{Text: "+۳۰ روز", Data: "a:renew:" + e + ":30:0"}, {Text: "+۱۰ گیگ", Data: "a:renew:" + e + ":0:10"}, {Text: "+۳۰ر و ۵۰گ", Data: "a:renew:" + e + ":30:50"}},
-		{{Text: toggle, Data: "a:toggle:" + e}, {Text: "🗑 حذف", Data: "a:del:" + e}},
-		back("a:clients"),
+		row(cbBtn("🔗 لینک و QR", "a:sub:"+e), cbBtn("🧩 کانفیگ‌ها", "a:cfg:"+e), cbBtn("📈 مصرف", "a:use:"+e)),
+		row(cbBtn("➕ ۳۰ روز", "a:renew:"+e+":30:0"), cbBtn("➕ ۱۰ گیگ", "a:renew:"+e+":0:10"), cbBtn("➕ ۳۰ر و ۵۰گ", "a:renew:"+e+":30:50")),
+		row(cbBtn("♻️ صفر کردن مصرف", "a:reset:"+e), cbBtn("🔁 لینک تازه", "a:rot:"+e)),
+		row(cbBtn(toggle, "a:toggle:"+e), cbBtn("🗑 حذف", "a:del:"+e)),
+		row(cbBtn("🔄", "a:c:"+e), cbBtn("« کلاینت‌ها", "a:clients")),
 	}})
 }
 
@@ -608,4 +669,115 @@ func (b *Bot) sendBackup(ctx context.Context, chat int64) error {
 		return err
 	}
 	return nil
+}
+
+const clientsPerPage = 10
+
+// clientsPage lists clients ten at a time with page buttons.
+func (b *Bot) clientsPage(ctx context.Context, chat int64, filter string, page int) {
+	all, err := b.Store.Clients(ctx)
+	if err != nil {
+		return
+	}
+	now := b.now().Unix()
+	var list []hubcore.ClientView
+	title := "👥 همهٔ کلاینت‌ها"
+	for _, c := range all {
+		ok := true
+		switch filter {
+		case "exp":
+			title = "⏰ رو به انقضا (۳ روز)"
+			ok = c.EffectiveUntil > now && c.EffectiveUntil-now <= 3*86400
+		case "bad":
+			title = "⛔ منقضی یا حجم‌تمام"
+			ok = c.Remaining == 0 || c.EffectiveUntil > 0 && c.EffectiveUntil <= now
+		case "on":
+			title = "🟢 آنلاین الان"
+			ok = c.Online
+		case "off":
+			title = "⏸ غیرفعال"
+			ok = !c.Enabled
+		}
+		if ok {
+			list = append(list, c)
+		}
+	}
+	pages := (len(list) + clientsPerPage - 1) / clientsPerPage
+	if page < 0 || page >= pages {
+		page = 0
+	}
+	kb := &Keyboard{}
+	from := page * clientsPerPage
+	for _, c := range list[from:min(from+clientsPerPage, len(list))] {
+		kb.Rows = append(kb.Rows, row(cbBtn(clientLabel(c, now), "a:c:"+c.Email)))
+	}
+	if pages > 1 {
+		var nav []Button
+		if page > 0 {
+			nav = append(nav, cbBtn("◀️ قبلی", fmt.Sprintf("a:clients:%s:%d", filter, page-1)))
+		}
+		nav = append(nav, cbBtn(fmt.Sprintf("%s / %s", faInt(int64(page+1)), faInt(int64(pages))), fmt.Sprintf("a:clients:%s:%d", filter, page)))
+		if page < pages-1 {
+			nav = append(nav, cbBtn("بعدی ▶️", fmt.Sprintf("a:clients:%s:%d", filter, page+1)))
+		}
+		kb.Rows = append(kb.Rows, nav)
+	}
+	kb.Rows = append(kb.Rows,
+		row(cbBtn("🟢 آنلاین", "a:clients:on"), cbBtn("⏰ رو به انقضا", "a:clients:exp"), cbBtn("⛔ منقضی", "a:clients:bad")),
+		row(cbBtn("👥 همه", "a:clients"), cbBtn("⏸ غیرفعال", "a:clients:off"), cbBtn("🔎 جستجو", "a:find")),
+		row(cbBtn("« پنل", "a:home")))
+	msg := fmt.Sprintf("%s\n%s\n%s مورد", title, line, faInt(int64(len(list))))
+	if len(list) == 0 {
+		msg = title + "\n" + line + "\nموردی نیست ✨"
+	}
+	b.send(ctx, chat, msg, kb)
+}
+
+// nodeCard shows one node's health with bars.
+func (b *Bot) nodeCard(ctx context.Context, chat int64, id string) {
+	nodes, _ := b.Store.Nodes(ctx)
+	now := b.now()
+	for _, n := range nodes {
+		if n.ID != id {
+			continue
+		}
+		name := n.Name
+		if name == "" {
+			name = n.ID
+		}
+		var sb strings.Builder
+		fmt.Fprintf(&sb, "🧩 <b>%s</b> <code>%s</code>\n%s\n", esc(name), esc(n.ID), line)
+		if !n.Online(now) {
+			seen := "هرگز"
+			if n.LastSeen > 0 {
+				seen = faTime(n.LastSeen)
+			}
+			fmt.Fprintf(&sb, "🔴 <b>آفلاین</b>\nآخرین تماس: %s\n", seen)
+		} else {
+			sb.WriteString("🟢 <b>آنلاین</b>")
+			if !n.XrayRunning {
+				sb.WriteString(" · ⚠️ Xray متوقف است")
+			}
+			sb.WriteString("\n")
+			if h := n.Host; h != nil {
+				ram := 0.0
+				if h.RAMTotal > 0 {
+					ram = float64(h.RAMUsed) / float64(h.RAMTotal)
+				}
+				fmt.Fprintf(&sb, "🧠 CPU  <code>%s</code> %s٪\n", bar(h.CPUPercent/100), faInt(int64(h.CPUPercent+0.5)))
+				fmt.Fprintf(&sb, "💾 RAM  <code>%s</code> %s٪\n", bar(ram), faInt(int64(ram*100+0.5)))
+				fmt.Fprintf(&sb, "👥 آنلاین: <b>%s</b> · ⬇️ %s/s · ⬆️ %s/s\n", faInt(int64(h.OnlineUsers)), size(int64(h.RXRate)), size(int64(h.TXRate)))
+			}
+		}
+		fmt.Fprintf(&sb, "\n🔖 ایجنت %s · Xray %s", esc(n.AgentVersion), esc(n.XrayVersion))
+		if n.PublicIP != "" {
+			fmt.Fprintf(&sb, "\n🌍 <code>%s</code>", esc(n.PublicIP))
+		}
+		if n.UpdateAvailable {
+			sb.WriteString("\n⬆️ نسخهٔ تازه‌تر ایجنت آماده است (از پنل وب).")
+		}
+		b.send(ctx, chat, sb.String(), &Keyboard{Rows: [][]Button{row(cbBtn("🔄 بروزرسانی", "a:node:"+id), cbBtn("« نودها", "a:nodes"))}})
+		return
+	}
+	b.send(ctx, chat, "نود پیدا نشد.", backTo("a:nodes", "نودها"))
 }

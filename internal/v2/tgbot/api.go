@@ -244,6 +244,19 @@ func (a *HTTPAPI) SendPhoto(ctx context.Context, chat int64, png []byte, caption
 	return a.call(ctx, "sendPhoto", &buf, w.FormDataContentType(), nil)
 }
 
+// EditText redraws a message in place (one screen per chat).
+func (a *HTTPAPI) EditText(ctx context.Context, chat, msgID int64, text string, kb *Keyboard) error {
+	p := map[string]any{"chat_id": chat, "message_id": msgID, "text": text, "parse_mode": "HTML", "link_preview_options": map[string]bool{"is_disabled": true}}
+	if kb != nil {
+		p["reply_markup"] = kb
+	}
+	err := a.callJSON(ctx, "editMessageText", p, nil)
+	if err != nil && bytes.Contains([]byte(err.Error()), []byte("message is not modified")) {
+		return errNotModified
+	}
+	return err
+}
+
 func (a *HTTPAPI) Answer(ctx context.Context, id, text string) error {
 	return a.callJSON(ctx, "answerCallbackQuery", map[string]any{"callback_query_id": id, "text": text}, nil)
 }
