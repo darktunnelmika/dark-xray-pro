@@ -57,7 +57,7 @@ func TestSubPageAndSettings(t *testing.T) {
 		t.Fatal("qr")
 	}
 	if qr := get("Mozilla/5.0", "image/*", "?qr=1&cfg=0"); qr.Header().Get("Content-Type") != "image/png" {
-		t.Fatal("config qr")
+		t.Fatal("config qr", qr.Code, qr.Header(), qr.Body.String()[:min(qr.Body.Len(), 200)])
 	}
 	if qr := get("Mozilla/5.0", "image/*", "?qr=1&cfg=99"); qr.Code != 404 {
 		t.Fatal("config qr out of range", qr.Code)
