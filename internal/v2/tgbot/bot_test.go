@@ -110,7 +110,12 @@ func TestStorefrontOrderDeliverySupport(t *testing.T) {
 	find(t, api.take(), buyerID, "خوش آمدید")
 
 	b.Handle(ctx, cb(buyerID, "shop"))
-	m := find(t, api.take(), buyerID, "120,000")
+	m := find(t, api.take(), buyerID, "بسته‌ها")
+	if m.kb == nil || m.kb.Rows[0][0].Data != "prod:p30" {
+		t.Fatalf("product button: %+v", m.kb)
+	}
+	b.Handle(ctx, cb(buyerID, "prod:p30"))
+	m = find(t, api.take(), buyerID, "۱۲۰٬۰۰۰")
 	if m.kb == nil || m.kb.Rows[0][0].Data != "buy:p30" {
 		t.Fatalf("buy button: %+v", m.kb)
 	}
@@ -276,9 +281,9 @@ func TestOwnerConsole(t *testing.T) {
 	out := api.take()
 	find(t, out, ownerID, "p10-1")
 	b.Handle(ctx, cb(ownerID, "a:renew:p10-1:30:5"))
-	find(t, api.take(), ownerID, "15.00 GB")
+	find(t, api.take(), ownerID, "۱۵٫۰۰ گیگ")
 	b.Handle(ctx, cb(ownerID, "a:toggle:p10-1"))
-	find(t, api.take(), ownerID, "غیرفعال ⛔")
+	find(t, api.take(), ownerID, "غیرفعال")
 	b.Handle(ctx, cb(ownerID, "a:find"))
 	api.take()
 	b.Handle(ctx, msg(ownerID, "p10"))
@@ -347,4 +352,45 @@ func TestCustomerNotifications(t *testing.T) {
 
 func wireBatch(seq uint64, email string, n int64) wire.UsageBatch {
 	return wire.UsageBatch{NodeID: "n1", Seq: seq, ToUnix: time.Now().Unix(), Traffic: []wire.UserTraffic{{Email: email, Down: n}}}
+}
+
+// editAPI also redraws messages, like the real Bot API.
+type editAPI struct {
+	fakeAPI
+	edits []sent
+}
+
+func (e *editAPI) EditText(_ context.Context, chat, _ int64, text string, kb *Keyboard) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.edits = append(e.edits, sent{chat: chat, text: text, kb: kb})
+	return nil
+}
+
+func TestButtonsRedrawTheScreen(t *testing.T) {
+	s, err := hubcore.Open(filepath.Join(t.TempDir(), "v2.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	ctx := context.Background()
+	api := &editAPI{}
+	b := &Bot{Store: s, API: api, Owners: map[int64]bool{}, SubBase: "https://x", Logf: t.Logf}
+	press := func(data string) {
+		b.Handle(ctx, Update{Callback: &CallbackQuery{ID: "q", From: User{ID: buyerID}, Data: data, Message: &Message{ID: 7, Text: "old screen"}}})
+	}
+	press("guide")
+	press("guide:android")
+	press("status")
+	if len(api.take()) != 0 || len(api.edits) != 3 {
+		t.Fatalf("buttons must redraw, not send: sent %d, edits %d", len(api.out), len(api.edits))
+	}
+	if !strings.Contains(api.edits[1].text, "v2rayNG") || api.edits[1].kb.Rows[0][0].URL == "" {
+		t.Fatalf("android guide: %+v", api.edits[1])
+	}
+	// Typed messages still get a new message.
+	b.Handle(ctx, msg(buyerID, "/start"))
+	if len(api.take()) != 1 {
+		t.Fatal("typed /start must send")
+	}
 }
