@@ -1771,7 +1771,7 @@ const RT = {
   fa: { title: "مسیریابی و خروجی‌ها", save: "ذخیره و اعمال روی نودها", saved: "ذخیره شد؛ نودها در همگام‌سازی بعدی می‌گیرند", safe: "پیش‌فرض‌های امن",
     private: "بستن شبکهٔ داخلی و IP خود نود", torrent: "بلاک تورنت (جلوگیری از شکایت کپی‌رایت)", routeOnly: "sniffing فقط برای مسیریابی (پیشنهادی)",
     ads: "بلاک تبلیغات", clientIran: "در کانفیگ برنامه‌ها (sing-box، Clash) سایت‌ها و IPهای ایران مستقیم بروند", iran: "ترافیک ایران روی سرور", iranNone: "کاری نکن", iranBlock: "بلاک (کلاینت خودش مستقیم برود)", iranVia: "از خروجی", ds: "حل نام دامنه در خروجی مستقیم",
-    dns: "سرورهای DNS (هر خط یکی، خالی = DNS سیستم نود)", outbounds: "خروجی‌ها", addWarp: "+ WARP رایگان", addCustom: "+ خروجی دلخواه (JSON)", tag: "شناسه",
+    dns: "سرورهای DNS (هر خط یکی، خالی = DNS سیستم نود)", outbounds: "خروجی‌ها", addWarp: "+ WARP رایگان", addCustom: "+ خروجی دلخواه (JSON)", addLink: "+ از لینک", linkTitle: "خروجی از لینک اشتراک", linkHelp: "لینک vless، vmess، trojan، ss یا socks یک سرور دیگر را بچسبانید تا ترافیک از آن عبور کند (زنجیره).", linkOk: "خروجی اضافه شد؛ ذخیره را بزنید", tag: "شناسه",
     allNodes: "همهٔ نودها", nodes: "نودها", balancers: "بالانسرها", addBal: "+ بالانسر", strategy: "روش", rules: "قانون‌ها", addRule: "+ قانون",
     rulesHint: "به ترتیب بررسی می‌شوند؛ اولین قانونی که بخورد اجرا می‌شود. قانون‌های شما بعد از پیش‌فرض‌های امن و قبل از تبلیغات و ایران هستند.",
     tpl: "الگوهای آماده", tplAI: "هوش مصنوعی از WARP", tplMail: "بلاک پورت ایمیل (اسپم)", tplSpeed: "سایت‌های تست سرعت مستقیم",
@@ -1783,7 +1783,7 @@ const RT = {
   en: { title: "Routing & outbounds", save: "Save and apply to nodes", saved: "Saved; nodes pick it up on their next sync", safe: "Safe defaults",
     private: "Block private networks and the node's own IP", torrent: "Block BitTorrent (avoids copyright complaints)", routeOnly: "Sniffing for routing only (recommended)",
     ads: "Block ads", clientIran: "App profiles (sing-box, Clash) send Iranian sites and IPs direct", iran: "Iranian traffic on the server", iranNone: "Do nothing", iranBlock: "Block (clients go direct themselves)", iranVia: "Via outbound", ds: "Domain resolution on the direct outbound",
-    dns: "DNS servers (one per line, empty = node's system DNS)", outbounds: "Outbounds", addWarp: "+ Free WARP", addCustom: "+ Custom outbound (JSON)", tag: "Tag",
+    dns: "DNS servers (one per line, empty = node's system DNS)", outbounds: "Outbounds", addWarp: "+ Free WARP", addCustom: "+ Custom outbound (JSON)", addLink: "+ From a link", linkTitle: "Outbound from a share link", linkHelp: "Paste a vless, vmess, trojan, ss or socks link of another server to chain traffic through it.", linkOk: "Outbound added; press Save", tag: "Tag",
     allNodes: "All nodes", nodes: "Nodes", balancers: "Balancers", addBal: "+ Balancer", strategy: "Strategy", rules: "Rules", addRule: "+ Rule",
     rulesHint: "Checked in order; the first match wins. Your rules run after the safe defaults and before ads and Iran.",
     tpl: "Templates", tplAI: "AI sites via WARP", tplMail: "Block mail ports (spam)", tplSpeed: "Speed-test sites direct",
@@ -1884,6 +1884,22 @@ async function viewRouting() {
       toast(L.warpOk); touch(); draw();
     } catch {}
   }
+  function addLink() {
+    const inp = h("textarea", { rows: "3", dir: "ltr", placeholder: "vless://…" });
+    const msg = h("p", { class: "error small" });
+    const go = h("button", { type: "button", class: "primary", onclick: async () => {
+      msg.textContent = "";
+      try {
+        const o = await api("POST", "/api/v2/admin/routing/from-link", { link: inp.value });
+        o.tag = uniq(o.tag);
+        o.config = { ...(typeof o.config === "string" ? JSON.parse(o.config) : o.config), tag: o.tag };
+        r.outbounds.push(o);
+        d.close(); toast(L.linkOk); touch(); draw();
+      } catch (x) { msg.textContent = x.message; }
+    } }, t("save"));
+    const d = openModal(L.linkTitle, h("div", { class: "form" }, h("p", { class: "small muted" }, L.linkHelp), inp, msg), [go]);
+    inp.focus();
+  }
   function addCustom() {
     r.outbounds.push({ tag: uniq("out"), kind: "custom", config: { protocol: "socks", settings: { servers: [{ address: "203.0.113.1", port: 1080 }] } } });
     touch(); draw();
@@ -1912,7 +1928,7 @@ async function viewRouting() {
         h("div", { class: "two" }, field(L.iran, sel(r, "iran", iranOpts)),
           field(L.ds, sel(r, "domain_strategy", [["AsIs", "AsIs"], ["UseIPv4", "UseIPv4"], ["UseIPv6", "UseIPv6"], ["UseIP", "UseIP"], ["ForceIPv4", "ForceIPv4"]]))),
         field(L.dns, area(r, "dns", { placeholder: "https://1.1.1.1/dns-query\n8.8.8.8" }))),
-      h("div", { class: "row section" }, h("h2", {}, L.outbounds), h("button", { class: "spacer", onclick: addWarp }, L.addWarp), h("button", { class: "ghost", onclick: addCustom }, L.addCustom)),
+      h("div", { class: "row section" }, h("h2", {}, L.outbounds), h("button", { class: "spacer", onclick: addWarp }, L.addWarp), h("button", { class: "ghost", onclick: addLink }, L.addLink), h("button", { class: "ghost", onclick: addCustom }, L.addCustom)),
       h("div", { class: "row small" }, ["direct", "block"].map((tag) => usage[tag] ? h("span", { class: "chip" }, h("b", { dir: "ltr" }, tag), " ", usageBadge(tag)) : null)),
       h("div", { class: "list" }, r.outbounds.length ? r.outbounds.map(outboundCard) : h("p", { class: "muted small" }, L.empty)),
       r.outbounds.length > 1 || r.balancers.length ? h("div", { class: "row section" }, h("h2", {}, L.balancers),

@@ -1216,6 +1216,17 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 		cfg, err := RegisterWARP(r.Context())
 		reply(w, map[string]json.RawMessage{"config": cfg}, err)
 	}))
+	mux.HandleFunc("POST /api/v2/admin/routing/from-link", guard(func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Link string `json:"link"`
+			Tag  string `json:"tag"`
+		}
+		if !decode(w, r, &in) {
+			return
+		}
+		o, err := OutboundFromLink(in.Link, in.Tag)
+		reply(w, o, err)
+	}))
 	mux.HandleFunc("POST /api/v2/admin/routing/geo/update", guard(func(w http.ResponseWriter, r *http.Request) {
 		err := s.UpdateGeo(r.Context())
 		reply(w, s.GeoInfo(r.Context()), err)
