@@ -543,3 +543,50 @@ func TestNodeDownAlert(t *testing.T) {
 		t.Fatal("node alerts are on by default")
 	}
 }
+
+func TestCustomStream(t *testing.T) {
+	ep := []sub.Endpoint{{Name: "Direct", Address: "1.2.3.4", Port: 443}}
+	ok := []StreamSpec{
+		{Protocol: "vless", Network: "grpc", Security: "reality", GRPCMulti: true, Path: "svc"},
+		{Protocol: "vless", Network: "tcp", Security: "reality", Vision: true, Fingerprint: "firefox", ServerNames: []string{"www.example.org"}},
+		{Protocol: "trojan", Network: "xhttp", Security: "reality", XHTTPMode: "packet-up"},
+		{Protocol: "vmess", Network: "ws", Security: "none", Host: "cdn.example.com"},
+		{Protocol: "vless", Network: "httpupgrade", Security: "tls"},
+	}
+	for _, s := range ok {
+		s := s
+		p := PresetRequest{Tag: "x", Preset: "custom", Port: 443, SNI: "www.speedtest.net", Cert: "c1", Endpoints: ep, Stream: &s}
+		tpl, meta, err := BuildPreset(p)
+		if err != nil {
+			t.Fatalf("%+v: %v", s, err)
+		}
+		var tt map[string]any
+		_ = json.Unmarshal(tpl, &tt)
+		st := tt["streamSettings"].(map[string]any)
+		if tt["protocol"] != s.Protocol || st["network"] != s.Network || st["security"] != s.Security {
+			t.Fatalf("%+v → %s", s, tpl)
+		}
+		in := sub.Inbound{Tag: "x", Template: tpl}
+		_ = json.Unmarshal(meta, &in.Meta)
+		links, err := sub.Links(sub.Account{Email: "a", UUID: "11111111-2222-3333-4444-555555555555", Secret: "pw"}, []sub.Inbound{in})
+		if err != nil || len(links) != 1 || !strings.Contains(links[0], "type="+s.Network) || !strings.Contains(links[0], "security="+s.Security) {
+			t.Fatalf("%+v links %v %v", s, links, err)
+		}
+		if s.Network == "grpc" && !strings.Contains(links[0], "mode=multi") || s.Vision && !strings.Contains(links[0], "flow=xtls-rprx-vision") || s.Fingerprint == "firefox" && !strings.Contains(links[0], "fp=firefox") {
+			t.Fatalf("%+v link %s", s, links[0])
+		}
+	}
+	bad := []StreamSpec{
+		{Protocol: "vmess", Network: "tcp", Security: "reality"},
+		{Protocol: "vless", Network: "ws", Security: "reality"},
+		{Protocol: "vless", Network: "grpc", Security: "reality", Vision: true},
+		{Protocol: "vless", Network: "tcp", Security: "none", Vision: true},
+		{Protocol: "ss", Network: "tcp", Security: "none"},
+		{Protocol: "vless", Network: "xhttp", Security: "tls", XHTTPMode: "weird"},
+	}
+	for _, s := range bad {
+		if err := checkStream(s); err == nil {
+			t.Fatalf("must refuse %+v", s)
+		}
+	}
+}

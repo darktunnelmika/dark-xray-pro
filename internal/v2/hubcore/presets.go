@@ -36,8 +36,9 @@ type PresetRequest struct {
 	SNI       string         `json:"sni"`  // REALITY target name, e.g. www.speedtest.net
 	Path      string         `json:"path"` // ws/xhttp path or gRPC service name
 	Remark    string         `json:"remark"`
-	Endpoints []sub.Endpoint `json:"endpoints"` // Direct and/or Tunnel addresses shown in subscriptions
-	Cert      string         `json:"cert"`      // TLS presets: stored certificate id; SNI is the domain
+	Endpoints []sub.Endpoint `json:"endpoints"`        // Direct and/or Tunnel addresses shown in subscriptions
+	Cert      string         `json:"cert"`             // TLS presets: stored certificate id; SNI is the domain
+	Stream    *StreamSpec    `json:"stream,omitempty"` // preset "custom": protocol, transport and security chosen separately
 
 	selfSigned bool   // set by CreatePreset when it issued the certificate itself
 	selfPin    string // its SHA-256 fingerprint
@@ -91,6 +92,11 @@ func BuildPreset(p PresetRequest) (template, meta []byte, err error) {
 	}
 	path := p.Path
 	switch p.Preset {
+	case "custom":
+		if p.Stream == nil {
+			return nil, nil, fmt.Errorf("%w: a custom inbound needs its protocol, transport and security", ErrInvalid)
+		}
+		err = buildStream(p, t, &m)
 	case "vless-tls-ws", "vmess-tls-ws":
 		if path == "" {
 			path = "/" + randomHex(6)
@@ -299,7 +305,8 @@ func BuildPreset(p PresetRequest) (template, meta []byte, err error) {
 
 // CreatePreset builds and stores a preset inbound.
 func (s *Store) CreatePreset(ctx context.Context, p PresetRequest) error {
-	if (p.Preset == "hysteria2" || p.Preset == "tuic") && p.Cert == "" {
+	customTLS := p.Preset == "custom" && p.Stream != nil && p.Stream.Security == "tls"
+	if (p.Preset == "hysteria2" || p.Preset == "tuic" || customTLS) && p.Cert == "" {
 		if p.SNI == "" {
 			p.SNI = "www.bing.com"
 		}
