@@ -4191,10 +4191,80 @@ async function viewFinance() {
       h("td", { class: r.Debt > 0 ? "warn-text" : "" }, money(r.Debt)),
       h("td", {}, bytes(r.VolumeCredit), h("div", { class: "small muted" }, `${fmtNum(r.Units)} ${t("units")}`)))))));
   return h("div", {},
+    salesReportCard(),
     h("div", { class: "row" }, h("h1", {}, t("finance")), h("label", { class: "spacer inline" }, h("span", { class: "small muted" }, t("period")), period)),
     h("div", { class: "grid" }, stat("sold", bytes(sum("SoldBytes"))), stat("revenue", money(sum("Revenue"))), stat("paid", money(sum("Paid"))),
       stat("debt", money(sum("Debt")), sum("Debt") > 0 ? "warn" : "")),
     rows.length ? table : h("p", { class: "muted" }, t("empty")));
+}
+
+// salesReportCard: resellers' sales in a period next to the period before,
+// new services and renewals apart, the shop's toman orders, a daily chart
+// and a CSV for Excel.
+function salesReportCard() {
+  const fa = lang === "fa";
+  const box = h("section", { class: "card sales-report" });
+  let days = +(sessionStorage.getItem("salesDays") || 30);
+  const gbs = (b) => `${fmtNum(Math.round(b / 2 ** 30))} ${fa ? "گیگ" : "GB"}`;
+  const delta = (cur, prev) => {
+    if (!prev) return cur ? h("span", { class: "chg up" }, fa ? "جدید" : "new") : h("span", { class: "chg" }, "—");
+    const p = Math.round(((cur - prev) / prev) * 100);
+    return h("span", { class: `chg ${p > 0 ? "up" : p < 0 ? "down" : ""}`, dir: "ltr" }, `${p > 0 ? "+" : ""}${fmtNum(p)}%`);
+  };
+  const csv = (r) => {
+    const head = ["reseller", "parent", "new", "renewals", "sold_gb", "refund_gb", "net_gb", "prev_net_gb", "revenue", "shop_orders", "shop_toman", "clients"];
+    const q = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+    const lines = [head.join(",")].concat(r.reps.map((x) => [x.name || x.rep_id, x.parent, x.new, x.renew, (x.sold_bytes / 2 ** 30).toFixed(1), (x.refund_bytes / 2 ** 30).toFixed(1),
+      (x.net_bytes / 2 ** 30).toFixed(1), (x.prev_net_bytes / 2 ** 30).toFixed(1), x.revenue, x.shop_orders, x.shop_toman, x.clients].map(q).join(",")));
+    const blob = new Blob(["\ufeff" + lines.join("\n")], { type: "text/csv;charset=utf-8" });
+    const a = h("a", { href: URL.createObjectURL(blob), download: `sales-${days}d-${new Date().toISOString().slice(0, 10)}.csv` });
+    document.body.append(a); a.click(); a.remove();
+  };
+  const chart = (daily) => {
+    const W = 720, H = 150, P = 22, max = Math.max(1, ...daily.map((d) => d.bytes)), bw = (W - P * 2) / daily.length;
+    const svg = svgEl("svg", { viewBox: `0 0 ${W} ${H + 22}`, class: "sales-chart", role: "img", "aria-label": fa ? "فروش روزانه" : "Daily sales" });
+    svg.append(svgEl("line", { x1: P, x2: W - P, y1: H, y2: H, class: "axis" }));
+    daily.forEach((d, i) => {
+      const hgt = (d.bytes / max) * (H - 18), x = P + i * bw + bw * 0.15;
+      const r = svgEl("rect", { x, y: H - hgt, width: Math.max(2, bw * 0.7), height: Math.max(hgt, d.bytes ? 2 : 0), rx: 2, class: "bar" });
+      const tt = svgEl("title", {}); tt.textContent = `${d.day}: ${gbs(d.bytes)} · ${fmtNum(d.count)}`; r.append(tt); svg.append(r);
+      if (daily.length <= 31 && (i % Math.ceil(daily.length / 8) === 0 || i === daily.length - 1)) {
+        const tx = svgEl("text", { x: x + bw * 0.35, y: H + 16, "text-anchor": "middle", class: "lbl" });
+        tx.textContent = new Intl.DateTimeFormat(fa ? "fa-IR" : "en-GB", { month: "short", day: "numeric" }).format(new Date(d.day + "T12:00:00Z"));
+        svg.append(tx);
+      }
+    });
+    return svg;
+  };
+  const load = async () => {
+    fill(box, h("p", { class: "muted small" }, fa ? "در حال آماده‌سازی گزارش…" : "Loading report…"));
+    let r;
+    try { r = await api("GET", `/api/v2/admin/reports/sales?days=${days}`); } catch (e) { fill(box, h("p", { class: "error" }, e.message)); return; }
+    const reps = r.reps.filter((x) => x.new || x.renew || x.sold_bytes || x.prev_net_bytes || x.shop_orders).sort((a, b) => b.net_bytes - a.net_bytes);
+    const tot = (k) => r.reps.reduce((a, x) => a + (x[k] || 0), 0);
+    const chips = h("div", { class: "chips", role: "tablist" }, [[1, fa ? "امروز" : "Today"], [7, fa ? "۷ روز" : "7 days"], [30, fa ? "۳۰ روز" : "30 days"], [90, fa ? "۹۰ روز" : "90 days"]].map(([d, l]) =>
+      h("button", { type: "button", role: "tab", class: `chip ${d === days ? "on" : ""}`, "aria-selected": String(d === days), onclick: () => { days = d; try { sessionStorage.setItem("salesDays", d); } catch {} load(); } }, l)));
+    const kpi = (v, l, extra) => h("div", { class: "card stat" }, h("div", { class: "v" }, v, " ", extra || null), h("div", { class: "k" }, l));
+    fill(box,
+      h("div", { class: "row" }, h("h2", {}, fa ? "گزارش فروش نماینده‌ها" : "Reseller sales"), h("span", { class: "spacer" }), chips,
+        h("button", { class: "ghost", onclick: () => csv(r) }, fa ? "خروجی اکسل (CSV)" : "Export CSV")),
+      h("div", { class: "grid" },
+        kpi(gbs(tot("net_bytes")), fa ? "فروش خالص" : "Net sold", delta(tot("net_bytes"), tot("prev_net_bytes"))),
+        kpi(fmtNum(tot("new")), fa ? "سرویس جدید" : "New services"),
+        kpi(fmtNum(tot("renew")), fa ? "تمدید" : "Renewals"),
+        kpi(money(tot("shop_toman") + (r.owner_shop_toman || 0)), fa ? "فروش تومانی فروشگاه" : "Shop sales (toman)")),
+      chart(r.daily),
+      reps.length ? h("div", { class: "table-wrap" }, h("table", { class: "table" },
+        h("thead", {}, h("tr", {}, [fa ? "نماینده" : "Reseller", fa ? "جدید" : "New", fa ? "تمدید" : "Renew", fa ? "فروش" : "Sold", fa ? "برگشتی" : "Refund", fa ? "خالص" : "Net", fa ? "نسبت به دورهٔ قبل" : "vs before", fa ? "درآمد" : "Revenue", fa ? "فروشگاه" : "Shop"].map((x) => h("th", { scope: "col" }, x)))),
+        h("tbody", {}, reps.map((x) => h("tr", {},
+          h("th", { scope: "row" }, h("a", { href: `#/activity?rep=${encodeURIComponent(x.rep_id)}` }, x.name || x.rep_id), x.parent ? h("div", { class: "small muted" }, `${fa ? "زیرِ" : "under"} ${x.parent}`) : null),
+          h("td", {}, fmtNum(x.new)), h("td", {}, fmtNum(x.renew)), h("td", {}, gbs(x.sold_bytes)), h("td", { class: "muted" }, gbs(x.refund_bytes)),
+          h("td", {}, h("b", {}, gbs(x.net_bytes))), h("td", {}, delta(x.net_bytes, x.prev_net_bytes)), h("td", {}, money(x.revenue)),
+          h("td", {}, x.shop_orders ? `${fmtNum(x.shop_orders)} · ${money(x.shop_toman)}` : "—")))))) :
+        h("p", { class: "muted" }, fa ? "در این بازه فروشی ثبت نشده." : "No sales in this period."));
+  };
+  load();
+  return box;
 }
 
 async function viewActivity() {

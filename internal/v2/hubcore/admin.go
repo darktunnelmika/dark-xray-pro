@@ -358,6 +358,11 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 		rows, err := s.Finance(r.Context(), since)
 		reply(w, rows, err)
 	}))
+	mux.HandleFunc("GET /api/v2/admin/reports/sales", guard(func(w http.ResponseWriter, r *http.Request) {
+		days, _ := strconv.Atoi(r.URL.Query().Get("days"))
+		rep, err := s.SalesReport(r.Context(), days)
+		reply(w, rep, err)
+	}))
 	// Activity: owners see every representative (or ?rep=), a representative only itself.
 	mux.HandleFunc("GET /api/v2/rep/ledger", member(func(w http.ResponseWriter, r *http.Request) {
 		p := who(r)

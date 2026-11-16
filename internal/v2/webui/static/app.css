@@ -1028,3 +1028,13 @@ dialog.wide:has(.cform) { inline-size: min(780px, calc(100vw - 20px)); }
 .tun-chip.up { color: var(--good); } .tun-chip.down { color: var(--bad); border-color: var(--bad); }
 @keyframes tun-blink { 50% { opacity: .25; } }
 @media (prefers-reduced-motion: reduce) { .tun.down .dot { animation: none; } }
+
+/* Sales report */
+.sales-report { display: grid; gap: 12px; margin-block-end: 18px; }
+.sales-report .chg { font-size: 12px; font-weight: 600; color: var(--muted); }
+.sales-report .chg.up { color: var(--good); } .sales-report .chg.down { color: var(--bad); }
+.sales-chart { inline-size: 100%; block-size: auto; }
+.sales-chart .bar { fill: color-mix(in oklab, var(--ion) 70%, transparent); }
+.sales-chart .bar:hover { fill: var(--ion); }
+.sales-chart .axis { stroke: var(--glass-line); }
+.sales-chart .lbl { fill: var(--muted); font-size: 11px; }
