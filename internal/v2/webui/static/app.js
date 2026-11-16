@@ -430,7 +430,7 @@ function shell(active, content) {
     avatar(me.user), h("span", { class: "uname" }, me.user)) : null;
   return h("div", { class: "shell" },
     h("header", { class: "top" }, h("a", { class: "brand", href: "#/dashboard" }, mark(), h("span", {}, "Dark ", h("b", { class: "neon-text" }, "VPN"))),
-      me && me.role === "rep" ? h("span", { class: "badge credit" }, `${t("volumeCredit")}: ${bytes(me.volume_credit || 0)} · ${t("units")}: ${fmtNum(me.unlimited_units || 0)}`) : null,
+      me && me.role === "rep" ? h("span", { class: "badge credit" }, `${t("volumeCredit")}: ${gbs(me.volume_credit || 0)}${me.unlimited_units ? ` · ${t("units")}: ${fmtNum(me.unlimited_units)}` : ""}`) : null,
       h("button", { class: "searchbox", type: "button", onclick: openPalette }, icon("search"), h("span", {}, ux("search")), h("kbd", {}, "Ctrl K")),
       h("div", { class: "actions" }, iconBtn("search", ux("search"), openPalette), me && me.role !== "rep" ? bellBtn : null, themeBtn, langBtn, userBtn)),
     h("nav", { class: "tabs", "aria-label": "Main" }, tabs, keys.length > 5 ? moreBtn : null),
@@ -1109,6 +1109,7 @@ async function viewClients() {
     const menu = h("details", { class: "rowmenu" }, h("summary", { "aria-label": t("edit") }, "⋯"),
       h("div", { class: "menu" },
         h("button", { onclick: () => showSub(c) }, L.sub),
+        me.role === "rep" && me.policy && me.policy.DenyRenew ? null : h("button", { onclick: () => renewForm([c]) }, lang === "fa" ? "تمدید" : "Renew"),
         h("button", { onclick: () => clientForm(c, inbounds, ctx) }, L.edit),
         h("button", { onclick: () => usageChart(c) }, L.chart),
         owner ? h("button", { onclick: async () => { if (await confirmText(L.resetAsk.replace("{x}", c.Email))) { await guarded(() => api("POST", `/api/v2/admin/clients/${encodeURIComponent(c.Email)}/reset`)); toast(L.resetDone.replace("{n}", "1")); route(); } } }, L.reset) : null,
@@ -1208,7 +1209,8 @@ async function viewClients() {
       const [cls, s] = clientStatus(c);
       const pct = c.VolumeBytes > 0 ? Math.round((used(c) / c.VolumeBytes) * 100) : 0;
       return h("a", { class: "btn", href: `#/client?e=${encodeURIComponent(c.Email)}` }, c.Email, " ", h("span", { class: `badge ${cls}` }, pct >= 90 ? `${fmtNum(pct)}%` : s));
-    }))) : null;
+    })),
+    me.role === "rep" && me.policy && me.policy.DenyRenew ? null : h("div", { class: "row" }, h("button", { class: "primary", onclick: () => renewForm(attention) }, lang === "fa" ? `تمدید هر ${fmtNum(attention.length)} مورد` : `Renew all ${attention.length}`))) : null;
   return h("div", {},
     h("div", { class: "row" }, h("h1", {}, t("clients")), h("span", { class: "muted small" }, t("clientsCount", { n: fmtNum(list.length) })),
       owner ? h("button", { class: "ghost spacer", onclick: () => templatesModal(inbounds) }, lang === "fa" ? "قالب‌ها" : "Templates") : h("span", { class: "spacer" }),
@@ -3667,9 +3669,12 @@ async function viewActivity() {
 // ---- Resellers: dashboard, credit history, renewals -------------------
 
 // A small two-series chart for reseller days: a = ion line, b = ember line.
-function repChart(days, a, b) {
-  return barsSvg(days.map((d) => ({ Day: d.day, Down: d[a] || 0, Up: b ? d[b] || 0 : 0 })), 1100);
+function repChart(days, a, b, la, lb) {
+  return barsSvg(days.map((d) => ({ Day: d.day, Down: d[a] || 0, Up: b ? d[b] || 0 : 0 })), 1100, { single: !b, la, lb });
 }
+
+// Credit reads best in whole GB (resellers count in GB, not TB).
+const gbs = (b) => `\u2066${fmtNum(Math.round((b || 0) / 2 ** 30))} GB\u2069`;
 
 function repLegend(a, b) {
   return h("span", { class: "spacer legend" }, h("i", { class: "sw down" }), a, b ? h("i", { class: "sw up" }) : null, b || "");
@@ -3706,19 +3711,19 @@ async function viewRepDashboard() {
   const hero = h("div", { class: "card credit-hero" },
     h("div", {},
       h("div", { class: "k" }, fa ? "اعتبار حجمی باقی‌مانده" : "Volume credit left"),
-      h("div", { class: "big", dir: "ltr" }, bytes(o.volume_credit)),
+      h("div", { class: "big", dir: "ltr" }, gbs(o.volume_credit)),
       o.unlimited_units ? h("div", { class: "small muted" }, `${t("units")}: ${fmtNum(o.unlimited_units)}`) : null),
     h("div", { class: "credit-month" },
       h("div", { class: "small muted" }, fa ? "این ماه" : "This month"),
       h("div", { class: "row tight" },
-        chip(fa ? "فروش" : "Sold", bytes(o.month_sold)),
+        chip(fa ? "فروش" : "Sold", gbs(o.month_sold)),
         chip(fa ? "تعداد فروش" : "Sales", fmtNum(o.month_sales)),
-        chip(fa ? "برگشتی" : "Returned", bytes(o.month_back), "good"),
-        o.month_topup ? chip(fa ? "شارژ مالک" : "Top-ups", bytes(o.month_topup), "good") : null)),
+        chip(fa ? "برگشتی" : "Returned", gbs(o.month_back), "good"),
+        o.month_topup ? chip(fa ? "شارژ مالک" : "Top-ups", gbs(o.month_topup), "good") : null)),
     h("div", { class: "row tight credit-actions" },
       h("a", { class: "btn", href: owner ? `#/activity?rep=${encodeURIComponent(o.rep_id)}` : "#/credit" }, fa ? "تاریخچهٔ اعتبار" : "Credit history"),
       owner ? null : h("a", { class: "btn primary", href: "#/clients" }, fa ? "کلاینت‌ها" : "Clients")));
-  const recent = h("div", { class: "card form span2" }, h("div", { class: "row" }, h("h2", {}, fa ? "آخرین تراکنش‌ها" : "Latest activity"),
+  const recent = h("div", { class: `card form ${owner ? "span2" : ""}` }, h("div", { class: "row" }, h("h2", {}, fa ? "آخرین تراکنش‌ها" : "Latest activity"),
     h("a", { class: "spacer small", href: owner ? `#/activity?rep=${encodeURIComponent(o.rep_id)}` : "#/credit" }, fa ? "همه ›" : "All ›")),
     (o.recent || []).length ? h("div", { class: "form" }, o.recent.map((e) => {
       const [k, c] = ledgerKind(e);
@@ -3738,10 +3743,10 @@ async function viewRepDashboard() {
       kpi("traffic", fa ? "مصرف کل کاربران" : "Users' total traffic", bytes(o.used_bytes))),
     h("div", { class: "dash2" },
       h("div", { class: "card form span2" }, h("div", { class: "row" }, h("h2", {}, fa ? "فروش و برگشتی ۳۰ روز" : "Sold and returned, 30 days"),
-        repLegend(fa ? "فروش" : "Sold", fa ? "برگشتی" : "Returned")), repChart(o.days || [], "sold", "back")),
-      owner ? null : endingSoonCard(cls || []),
+        repLegend(fa ? "فروش" : "Sold", fa ? "برگشتی" : "Returned")), repChart(o.days || [], "sold", "back", fa ? "فروش" : "Sold", fa ? "برگشتی" : "Returned")),
       h("div", { class: "card form span2" }, h("div", { class: "row" }, h("h2", {}, fa ? "مصرف کاربران ۳۰ روز" : "Users' traffic, 30 days"),
-        repLegend(fa ? "مصرف" : "Traffic")), repChart(o.days || [], "traffic")),
+        repLegend(fa ? "مصرف" : "Traffic")), repChart(o.days || [], "traffic", null, fa ? "مصرف" : "Traffic")),
+      owner ? null : endingSoonCard(cls || []),
       recent));
 }
 
@@ -3768,7 +3773,7 @@ async function viewCredit() {
     const [k, c] = ledgerKind(e);
     return h("tr", {}, h("td", { class: "small" }, fmtWhen(e.Unix)), h("td", {}, h("span", { class: `badge ${c}` }, k)),
       h("td", { class: "small" }, e.ClientEmail || ""), h("td", { class: "mono small", dir: "ltr" }, ledgerDelta(e)),
-      h("td", { class: "mono small", dir: "ltr" }, e.VolumeDelta ? bytes(e._bal) : ""), h("td", { class: "small muted" }, e.Note || ""));
+      h("td", { class: "mono small", dir: "ltr" }, e.VolumeDelta ? gbs(e._bal) : ""), h("td", { class: "small muted" }, e.Note || ""));
   }));
   const chips = h("div", { class: "chips" }, kinds.map(([k, label]) => {
     const b = h("button", { type: "button", class: "chip", "aria-pressed": k === f ? "true" : "false", onclick: () => {
@@ -3791,7 +3796,7 @@ async function viewCredit() {
   };
   return h("div", {},
     h("div", { class: "row" }, h("h1", {}, fa ? "اعتبار من" : "My credit"), h("button", { class: "ghost spacer", onclick: csv }, fa ? "دانلود CSV" : "Download CSV")),
-    h("div", { class: "card credit-hero" }, h("div", {}, h("div", { class: "k" }, fa ? "اعتبار حجمی باقی‌مانده" : "Volume credit left"), h("div", { class: "big", dir: "ltr" }, bytes(o.volume_credit))),
+    h("div", { class: "card credit-hero" }, h("div", {}, h("div", { class: "k" }, fa ? "اعتبار حجمی باقی‌مانده" : "Volume credit left"), h("div", { class: "big", dir: "ltr" }, gbs(o.volume_credit))),
       h("div", { class: "small muted" }, fa ? "هر فروش از اعتبار کم می‌کند؛ حجم مصرف‌نشدهٔ کانفیگ منقضی‌شده و کانفیگ حذف‌شده خودکار برمی‌گردد." : "Every sale takes credit; the unused volume of expired or deleted configs comes back by itself.")),
     Object.keys(months).length ? h("div", { class: "card form" }, h("h2", {}, fa ? "خلاصهٔ ماهانه" : "By month"),
       h("div", { class: "table-wrap" }, h("table", { class: "table" },
@@ -3856,8 +3861,8 @@ function renewForm(list) {
       list.length > 1 ? h("div", { class: "small" }, fa ? `${fmtNum(list.length)} کلاینت انتخاب شده` : `${list.length} clients selected`) : null,
       unl.length && addB ? h("div", { class: "small muted" }, fa ? "به کلاینت‌های نامحدود حجم اضافه نمی‌شود." : "Unlimited clients get no volume.") : null,
       rep ? h("div", { class: `cost ${short ? "bad" : ""}` },
-        h("div", {}, `${fa ? "از اعتبار کم می‌شود" : "Takes from credit"}: `, h("b", { dir: "ltr" }, [cost.bytes ? bytes(cost.bytes) : "", cost.units ? `${fmtNum(cost.units)} ${t("units")}` : ""].filter(Boolean).join(" + ") || "0")),
-        h("div", {}, `${fa ? "مانده بعد از تمدید" : "Left after"}: `, h("b", { dir: "ltr" }, bytes(Math.max(0, credit - cost.bytes))), cost.units || units ? ` · ${fmtNum(Math.max(0, units - cost.units))} ${t("units")}` : ""),
+        h("div", {}, `${fa ? "از اعتبار کم می‌شود" : "Takes from credit"}: `, h("b", { dir: "ltr" }, [cost.bytes ? gbs(cost.bytes) : "", cost.units ? `${fmtNum(cost.units)} ${t("units")}` : ""].filter(Boolean).join(" + ") || "0")),
+        h("div", {}, `${fa ? "مانده بعد از تمدید" : "Left after"}: `, h("b", { dir: "ltr" }, gbs(Math.max(0, credit - cost.bytes))), cost.units || units ? ` · ${fmtNum(Math.max(0, units - cost.units))} ${t("units")}` : ""),
         short ? h("div", {}, fa ? "اعتبار کافی نیست." : "Not enough credit.") : null) : null);
   };
   gb.addEventListener("input", calc); days.addEventListener("input", calc);
@@ -3897,8 +3902,8 @@ async function viewReps() {
     return h("tr", {},
       h("td", {}, h("a", { class: "name", href: `#/repview?rep=${encodeURIComponent(r.ID)}` }, r.Name || r.ID),
         h("div", { class: "small muted" }, r.ID, r.ParentID ? ` · ${t("subOf")} ${r.ParentID}` : "", r.Enabled ? "" : ` · ${t("disabled")}`)),
-      h("td", { dir: "ltr" }, h("b", {}, bytes(r.VolumeCredit)), r.UnlimitedUnits ? h("div", { class: "small muted" }, `${fmtNum(r.UnlimitedUnits)} ${t("units")}`) : null),
-      h("td", { dir: "ltr" }, bytes(o.month_sold || 0), h("div", { class: "small muted" }, `${fmtNum(o.month_sales || 0)} ${fa ? "فروش" : "sales"}`)),
+      h("td", { dir: "ltr" }, h("b", {}, gbs(r.VolumeCredit)), r.UnlimitedUnits ? h("div", { class: "small muted" }, `${fmtNum(r.UnlimitedUnits)} ${t("units")}`) : null),
+      h("td", { dir: "ltr" }, gbs(o.month_sold || 0), h("div", { class: "small muted" }, `${fmtNum(o.month_sales || 0)} ${fa ? "فروش" : "sales"}`)),
       h("td", {}, h("span", { dir: "ltr" }, `${fmtNum(o.active || 0)} / ${fmtNum(r.Clients)}`), o.expiring ? h("div", { class: "small" }, h("span", { class: "badge warn" }, `${fmtNum(o.expiring)} ${fa ? "رو به اتمام" : "ending"}`)) : null),
       h("td", {}, fmtNum(o.online || 0)),
       h("td", { dir: "ltr" }, bytes(r.UsedBytes || 0)),
@@ -3912,8 +3917,8 @@ async function viewReps() {
     h("div", { class: "row" }, h("h1", {}, t("reps")), h("button", { class: "primary spacer", onclick: () => repForm(null) }, t("add"))),
     (reps || []).length ? h("div", { class: "kpis" },
       h("div", { class: "card kpi" }, h("div", { class: "k" }, icon("reps"), fa ? "نماینده" : "Resellers"), h("div", { class: "v" }, fmtNum(reps.length))),
-      h("div", { class: "card kpi" }, h("div", { class: "k" }, icon("finance"), fa ? "اعتبار دست نماینده‌ها" : "Credit held"), h("div", { class: "v", dir: "ltr" }, bytes(reps.reduce((a, r) => a + r.VolumeCredit, 0)))),
-      h("div", { class: "card kpi" }, h("div", { class: "k" }, icon("shop"), fa ? "فروش این ماه" : "Sold this month"), h("div", { class: "v", dir: "ltr" }, bytes(tot("month_sold")))),
+      h("div", { class: "card kpi" }, h("div", { class: "k" }, icon("finance"), fa ? "اعتبار دست نماینده‌ها" : "Credit held"), h("div", { class: "v", dir: "ltr" }, gbs(reps.reduce((a, r) => a + r.VolumeCredit, 0)))),
+      h("div", { class: "card kpi" }, h("div", { class: "k" }, icon("shop"), fa ? "فروش این ماه" : "Sold this month"), h("div", { class: "v", dir: "ltr" }, gbs(tot("month_sold")))),
       h("div", { class: "card kpi" }, h("div", { class: "k" }, icon("clients"), fa ? "کلاینت فعال" : "Active clients"), h("div", { class: "v" }, fmtNum(tot("active")))),
       h("div", { class: "card kpi" }, h("div", { class: "k" }, icon("online"), fa ? "آنلاین" : "Online"), h("div", { class: "v" }, fmtNum(tot("online"))))) : null,
     rows.length ? h("div", { class: "card table-wrap" }, h("table", { class: "table reps-table" },
@@ -3922,7 +3927,7 @@ async function viewReps() {
 }
 
 // Daily traffic as a neon line chart: grid, glowing lines, soft area fill.
-function barsSvg(days, W = 600) {
+function barsSvg(days, W = 600, opt = {}) {
   const NS = "http://www.w3.org/2000/svg", H = 190, P = 8, L = 0;
   const el = (n, a) => { const x = document.createElementNS(NS, n); for (const [k, v] of Object.entries(a)) x.setAttribute(k, v); return x; };
   const svg = el("svg", { viewBox: `0 0 ${W} ${H + 20}`, class: "bars", role: "img", "aria-label": t("usageChart") });
@@ -3951,12 +3956,12 @@ function barsSvg(days, W = 600) {
     const [lx, ly] = pts.at(-1);
     svg.append(el("circle", { cx: lx, cy: ly, r: 4, style: `fill:${col}` }));
   };
-  series("Up", "var(--ember)");
+  if (!opt.single) series("Up", "var(--ember)");
   series("Down", "var(--ion)");
   const step = Math.max(1, Math.round(days.length / 6));
   days.forEach((d, i) => {
     const hit = el("rect", { x: x(i) - W / days.length / 2, y: 0, width: W / days.length, height: H, class: "bar-hit" });
-    const title = el("title", {}); title.textContent = `${dayLabel(d.Day, true)}: ↓ ${bytes(d.Down)} · ↑ ${bytes(d.Up)}`;
+    const title = el("title", {}); title.textContent = opt.la ? `${dayLabel(d.Day, true)}: ${opt.la} ${bytes(d.Down)}${opt.single ? "" : ` · ${opt.lb} ${bytes(d.Up)}`}` : `${dayLabel(d.Day, true)}: ↓ ${bytes(d.Down)} · ↑ ${bytes(d.Up)}`;
     hit.append(title); svg.append(hit);
     if ((days.length - 1 - i) % step === 0) {
       const lab = el("text", { x: x(i), y: H + 15, "text-anchor": "middle", class: "bar-label" }); lab.textContent = dayLabel(d.Day); svg.append(lab);
