@@ -28,7 +28,7 @@ func (s *Store) ShopCategories(ctx context.Context, seller string) []ShopCategor
 	for i := range list {
 		at[list[i].Name] = i
 	}
-	rows, err := s.ro.QueryContext(ctx, `SELECT category,SUM(status='published') FROM products WHERE seller=? AND category<>'' AND status<>'archived' GROUP BY category ORDER BY MIN(sort),MIN(price)`, seller)
+	rows, err := s.ro.QueryContext(ctx, `SELECT category,SUM(status='published') FROM products WHERE seller=? AND category<>'' AND status<>'archived' GROUP BY category ORDER BY MIN(sort),MIN(rowid)`, seller)
 	if err == nil {
 		defer rows.Close()
 		for rows.Next() {

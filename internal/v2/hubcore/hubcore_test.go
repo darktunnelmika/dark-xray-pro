@@ -934,7 +934,9 @@ func TestShopProductsAndOrders(t *testing.T) {
 			t.Fatalf("renewal %+v", c.Client)
 		}
 	}
-	// A representative without the grant cannot create products.
+	// A representative without the grant cannot create products (new
+	// resellers get it; the owner can take it away).
+	_ = s.SetManageProducts(ctx, "ali", false)
 	rp := Product{ID: "ali-5", Name: "Ali 5GB", Plan: "volume", GB: 5, Days: 30, Inbounds: []string{"de-vless"}, Price: 30000, Status: "published"}
 	if err := s.PutProduct(ctx, rep, rp); !errors.Is(err, ErrPolicy) {
 		t.Fatalf("no grant: %v", err)
