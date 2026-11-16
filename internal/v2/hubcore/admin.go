@@ -519,6 +519,24 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 		err := s.PutProduct(r.Context(), who(r), p)
 		reply(w, map[string]bool{"ok": err == nil}, err)
 	}))
+	mux.HandleFunc("GET /api/v2/shop/categories", member(func(w http.ResponseWriter, r *http.Request) {
+		seller := r.URL.Query().Get("seller")
+		if p := who(r); p.Role == "rep" {
+			seller = p.RepID
+		}
+		reply(w, s.ShopCategories(r.Context(), seller), nil)
+	}))
+	mux.HandleFunc("PUT /api/v2/shop/categories", member(func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Seller     string         `json:"seller"`
+			Categories []ShopCategory `json:"categories"`
+		}
+		if !decode(w, r, &in) {
+			return
+		}
+		err := s.PutShopCategories(r.Context(), who(r), in.Seller, in.Categories)
+		reply(w, map[string]bool{"ok": err == nil}, err)
+	}))
 	mux.HandleFunc("GET /api/v2/shop/orders", member(func(w http.ResponseWriter, r *http.Request) {
 		list, err := s.Orders(r.Context(), who(r), r.URL.Query().Get("status"), 200)
 		reply(w, list, err)

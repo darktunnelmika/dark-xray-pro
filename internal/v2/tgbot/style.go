@@ -301,8 +301,20 @@ func keyboardAction(text string) string {
 		return "guide"
 	case "منوی اصلی", "بیشتر", "منو":
 		return "home"
-	case "داشبورد", "کاربران", "فروش", "گزارش‌ها", "مدیریت", "نمایندگان", "اعلان‌ها":
+	case "داشبورد", "فروش", "گزارش‌ها", "مدیریت", "نمایندگان", "اعلان‌ها":
 		return "admin"
+	case "کاربران":
+		return "rclients"
+	case "ساخت کاربر":
+		return "rnew"
+	case "سفارش‌ها", "سفارش ها":
+		return "rorders"
+	case "اعتبار":
+		return "rcredit"
+	case "حالت مشتری":
+		return "rcustomer"
+	case "حالت نماینده":
+		return "repmode"
 	}
 	return ""
 }
@@ -326,7 +338,18 @@ func (b *Bot) keyAction(ctx context.Context, chat int64, act string) {
 			b.ownerHome(ctx, chat)
 			return
 		}
-		if rep, role := b.Store.TgRepRole(ctx, chat); rep != "" && (b.Seller == "" || rep == b.Seller) && b.repMessage(ctx, chat, rep, role, "/help") {
+		if rep, role := b.repOf(ctx, chat); rep != "" {
+			b.repHome(ctx, chat, rep, role)
+			return
+		}
+		b.menu(ctx, chat)
+	case "rclients", "rnew", "rorders", "rcredit", "rcustomer", "repmode":
+		if b.Owners[chat] {
+			b.ownerHome(ctx, chat)
+			return
+		}
+		if rep, role := b.repOf(ctx, chat); rep != "" {
+			b.repKey(ctx, chat, rep, role, act)
 			return
 		}
 		b.menu(ctx, chat)
@@ -342,6 +365,10 @@ func (b *Bot) ensureKeyboard(ctx context.Context, chat int64) {
 		SendReplyKeyboard(ctx context.Context, chat int64, text string, rows [][]string) error
 	})
 	if !ok {
+		return
+	}
+	if rep, _ := b.repOf(ctx, chat); rep != "" && b.repMode(ctx, chat) {
+		b.ensureRepKeyboard(ctx, chat)
 		return
 	}
 	key := fmt.Sprintf("tg_kb1:%s:%d", b.Seller, chat)

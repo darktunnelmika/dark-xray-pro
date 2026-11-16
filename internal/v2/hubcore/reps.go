@@ -100,7 +100,7 @@ func (s *Store) PutRep(ctx context.Context, r Rep) error {
 	if !idRE.MatchString(r.ID) {
 		return ErrInvalid
 	}
-	_, err := s.db.ExecContext(ctx, `INSERT INTO reps(id,name,enabled,created_unix) VALUES(?,?,?,?)
+	_, err := s.db.ExecContext(ctx, `INSERT INTO reps(id,name,enabled,created_unix,manage_products) VALUES(?,?,?,?,1)
 ON CONFLICT(id) DO UPDATE SET name=excluded.name, enabled=excluded.enabled`, r.ID, r.Name, r.Enabled, s.now().Unix())
 	return err
 }

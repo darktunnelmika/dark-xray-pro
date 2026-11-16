@@ -35,8 +35,10 @@ type Bot struct {
 	Now    func() time.Time
 
 	mu         sync.Mutex
-	awaiting   map[int64]string   // chat -> expected input: "support" | "link" | owner prompts
-	draft      map[int64]*bcDraft // owner chat -> broadcast being prepared
+	awaiting   map[int64]string    // chat -> expected input: "support" | "link" | owner prompts
+	rdraft     map[int64]*repDraft // reseller chat -> client being created or renewed
+	refs       map[string]string   // short reference -> client name (reseller buttons)
+	draft      map[int64]*bcDraft  // owner chat -> broadcast being prepared
 	bcStop     bool
 	lastNotify time.Time
 	nodeState  map[string]bool
@@ -296,7 +298,11 @@ func (b *Bot) onMessage(ctx context.Context, m *Message) {
 			b.send(ctx, chat, "این کد معتبر نیست یا منقضی شده. از پنل یک کد تازه بگیرید.", nil)
 			return
 		}
-		b.send(ctx, chat, "✅ تلگرام شما به نمایندگی <b>"+esc(rep)+"</b> وصل شد.\n\n"+repHelp, nil)
+		b.send(ctx, chat, "✅ تلگرام شما به نمایندگی <b>"+esc(rep)+"</b> وصل شد. همهٔ کارها با دکمه‌های زیر انجام می‌شود.", nil)
+		if r, role := b.repOf(ctx, chat); r != "" {
+			b.ensureRepKeyboard(ctx, chat)
+			b.repHome(ctx, chat, r, role)
+		}
 		return
 	}
 	if code, ok := strings.CutPrefix(text, "/start adm_"); ok {
@@ -305,13 +311,32 @@ func (b *Bot) onMessage(ctx context.Context, m *Message) {
 			b.send(ctx, chat, "این دعوت معتبر نیست یا منقضی شده.", nil)
 			return
 		}
-		b.send(ctx, chat, fmt.Sprintf("✅ شما با نقش «%s» ادمین ربات نمایندگی <b>%s</b> شدید.\n\n%s", roleName(role), esc(rep), repHelp), nil)
+		b.send(ctx, chat, fmt.Sprintf("✅ شما با نقش «%s» ادمین ربات نمایندگی <b>%s</b> شدید.", roleName(role), esc(rep)), nil)
+		if r, rl := b.repOf(ctx, chat); r != "" {
+			b.ensureRepKeyboard(ctx, chat)
+			b.repHome(ctx, chat, r, rl)
+		}
 		if c := b.Store.TgRepChat(ctx, rep); c != 0 {
 			b.send(ctx, c, fmt.Sprintf("👤 %s با نقش «%s» به ادمین‌های ربات شما اضافه شد.", esc(name), roleName(role)), nil)
 		}
 		return
 	}
 	if rep, role := b.Store.TgRepRole(ctx, chat); rep != "" && (b.Seller == "" || rep == b.Seller) {
+		if w := b.peekAwait(chat); strings.HasPrefix(w, "r:") && !strings.HasPrefix(text, "/") {
+			b.takeAwait(chat)
+			if b.repInput(ctx, chat, rep, role, w, text) {
+				return
+			}
+		}
+		if act := keyboardAction(text); strings.HasPrefix(act, "r") || act == "admin" || act == "repmode" {
+			b.repKey(ctx, chat, rep, role, act)
+			return
+		}
+		if (text == "/start" || text == "/help" || text == "/admin" || text == "/panel") && b.repMode(ctx, chat) {
+			b.repHome(ctx, chat, rep, role)
+			b.ensureRepKeyboard(ctx, chat)
+			return
+		}
 		if b.repMessage(ctx, chat, rep, role, text) {
 			return
 		}
@@ -532,8 +557,26 @@ func (b *Bot) shopIn(ctx context.Context, chat int64, cat string) {
 	}
 	if cat == "" && len(cats) > 0 && (len(cats) > 1 || uncategorised) {
 		kb := &Keyboard{}
+		// The seller's own order and emojis (Shop → categories in the panel).
+		emoji, ordered := map[string]string{}, []string{}
+		for _, c := range b.Store.ShopCategories(ctx, b.Seller) {
+			if seen[c.Name] {
+				emoji[c.Name] = c.Emoji
+				ordered = append(ordered, c.Name)
+				delete(seen, c.Name)
+			}
+		}
 		for _, c := range cats {
-			kb.Rows = append(kb.Rows, row(cbBtn("📂 "+c, "cat:"+c)))
+			if seen[c] {
+				ordered = append(ordered, c)
+			}
+		}
+		for _, c := range ordered {
+			e := emoji[c]
+			if e == "" {
+				e = "📂"
+			}
+			kb.Rows = append(kb.Rows, row(cbBtn(e+" "+c, "cat:"+c)))
 		}
 		if uncategorised {
 			kb.Rows = append(kb.Rows, row(cbBtn("📦 سایر بسته‌ها", "cat:-")))
@@ -723,6 +766,9 @@ func (b *Bot) onCallback(ctx context.Context, q *CallbackQuery) {
 	_ = b.API.Answer(ctx, q.ID, "")
 	ctx = onScreen(ctx, q)
 	if b.ownerCallback(ctx, chat, q.Data) {
+		return
+	}
+	if b.repCallback(ctx, chat, q.Data) {
 		return
 	}
 	verb, rest, _ := strings.Cut(q.Data, ":")

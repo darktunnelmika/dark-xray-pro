@@ -60,7 +60,7 @@ func (s *Store) PutSeller(ctx context.Context, parent string, r Rep, user, pass 
 			return err
 		}
 		if _, err := tx.ExecContext(ctx, `INSERT INTO reps(id,name,enabled,created_unix,parent_id,max_clients,max_days,max_client_gb,
-allow_unlimited,can_delete,refund_unused,inbounds) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`,
+allow_unlimited,can_delete,refund_unused,inbounds,manage_products) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,1)`,
 			r.ID, r.Name, r.Enabled, s.now().Unix(), parent, pol.MaxClients, pol.MaxDays, pol.MaxClientGB,
 			pol.AllowUnlimited, pol.CanDelete, pol.RefundUnused, strings.Join(pol.Inbounds, ",")); err != nil {
 			if strings.Contains(err.Error(), "UNIQUE") {

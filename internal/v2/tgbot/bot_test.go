@@ -584,3 +584,72 @@ func TestResellerBotTomanWallet(t *testing.T) {
 	b.Handle(ctx, cb(buyerID, "tpay:ali20"))
 	find(t, api.take(), buyerID, "ممکن نشد")
 }
+
+func TestResellerButtons(t *testing.T) {
+	s, err := hubcore.Open(filepath.Join(t.TempDir(), "v2.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	ctx := context.Background()
+	_, _ = s.CreateNode(ctx, "n1", "N")
+	_ = s.PutInbound(ctx, "in1", "n1", []byte(`{"protocol":"vless","port":443,"settings":{}}`), true)
+	owner := hubcore.Principal{User: "o", Role: "owner"}
+	_ = s.PutRep(ctx, hubcore.Rep{ID: "ali", Name: "Ali", Enabled: true})
+	_ = s.AdjustCredit(ctx, "o", "ali", 100<<30, 0, "")
+	_ = s.PutProduct(ctx, owner, hubcore.Product{ID: "a30", Seller: "ali", Name: "30GB", Plan: "volume", GB: 30, Days: 30, MaxIPs: 2, Inbounds: []string{"in1"}, Price: 1, Status: "published", FirstUse: true})
+	api := &fakeAPI{}
+	b := &Bot{Store: s, API: api, SubBase: "https://x", Logf: t.Logf, Seller: "ali"}
+	const repChat = int64(3000)
+	code, _ := s.NewTgLinkCode(ctx, "ali")
+	b.Handle(ctx, msg(repChat, "/start rep_"+code))
+	find(t, api.take(), repChat, "اعتبار")
+	// Create with a ready plan and an automatic name.
+	b.Handle(ctx, msg(repChat, "➕ ساخت کاربر"))
+	find(t, api.take(), repChat, "پلن آماده")
+	b.Handle(ctx, cb(repChat, "R:p:a30"))
+	find(t, api.take(), repChat, "نام کاربر")
+	b.Handle(ctx, msg(repChat, "bad name!"))
+	find(t, api.take(), repChat, "حروف انگلیسی")
+	b.Handle(ctx, msg(repChat, "cust-1"))
+	find(t, api.take(), repChat, "مانده بعد از این")
+	b.Handle(ctx, cb(repChat, "R:ok"))
+	find(t, api.take(), repChat, "ساخته شد")
+	c, err := s.ClientByEmail(ctx, "cust-1")
+	if err != nil || c.RepID != "ali" || c.VolumeBytes != 30<<30 || c.DurationSeconds != 30*86400 || c.MaxIPs != 2 {
+		t.Fatalf("created: %+v %v", c.Client, err)
+	}
+	// Find it, renew with custom volume and term.
+	b.Handle(ctx, cb(repChat, "R:cs"))
+	api.take()
+	b.Handle(ctx, msg(repChat, "cust"))
+	m := find(t, api.take(), repChat, "نتیجهٔ جستجو")
+	_ = m
+	r := b.ref("cust-1")
+	b.Handle(ctx, cb(repChat, "R:rn:"+r))
+	api.take()
+	b.Handle(ctx, cb(repChat, "R:c"))
+	b.Handle(ctx, cb(repChat, "R:g:50"))
+	b.Handle(ctx, cb(repChat, "R:d:60"))
+	find(t, api.take(), repChat, "دورهٔ جدید از امروز")
+	b.Handle(ctx, cb(repChat, "R:ok"))
+	find(t, api.take(), repChat, "تمدید شد")
+	c, _ = s.ClientByEmail(ctx, "cust-1")
+	if c.VolumeBytes != 50<<30 {
+		t.Fatal("renewed to the new package", c.VolumeBytes>>30)
+	}
+	// Switch off, then delete.
+	b.Handle(ctx, cb(repChat, "R:tg:"+r))
+	api.take()
+	if c, _ = s.ClientByEmail(ctx, "cust-1"); c.Enabled {
+		t.Fatal("switched off")
+	}
+	b.Handle(ctx, cb(repChat, "R:dy:"+r))
+	find(t, api.take(), repChat, "حذف شد")
+	if _, err := s.ClientByEmail(ctx, "cust-1"); err == nil {
+		t.Fatal("deleted")
+	}
+	// A stranger gets nothing.
+	b.Handle(ctx, cb(9999, "R:new"))
+	find(t, api.take(), 9999, "فقط برای نماینده")
+}

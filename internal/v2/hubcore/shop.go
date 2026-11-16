@@ -70,6 +70,8 @@ type Product struct {
 	// how many new services one customer may buy.
 	NoRenew  bool `json:"no_renew"`
 	PerBuyer int  `json:"per_buyer"`
+	// Sort orders products inside the shop (lower first).
+	Sort int `json:"sort"`
 }
 
 // Order is a purchase request.
@@ -101,7 +103,7 @@ func (s *Store) ensureShopSchema() error {
 	if _, err := s.db.Exec(shopSchema); err != nil {
 		return err
 	}
-	for _, c := range [][3]string{{"products", "category", "TEXT NOT NULL DEFAULT ''"}, {"products", "no_renew", "INTEGER NOT NULL DEFAULT 0"}, {"products", "per_buyer", "INTEGER NOT NULL DEFAULT 0"}} {
+	for _, c := range [][3]string{{"products", "category", "TEXT NOT NULL DEFAULT ''"}, {"products", "no_renew", "INTEGER NOT NULL DEFAULT 0"}, {"products", "per_buyer", "INTEGER NOT NULL DEFAULT 0"}, {"products", "sort", "INTEGER NOT NULL DEFAULT 0"}} {
 		if err := s.addColumn(c[0], c[1], c[2]); err != nil {
 			return err
 		}
@@ -199,25 +201,25 @@ func (s *Store) PutProduct(ctx context.Context, by Principal, p Product) error {
 	if p.Seller != "" {
 		p.PriceStars = 0 // Stars go to the owner's bot only
 	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO products(id,seller,name,plan,gb,days,max_ips,inbounds,price,status,first_use,created_unix,price_stars,category,no_renew,per_buyer)
-VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET seller=excluded.seller, name=excluded.name, plan=excluded.plan,
+	_, err = tx.ExecContext(ctx, `INSERT INTO products(id,seller,name,plan,gb,days,max_ips,inbounds,price,status,first_use,created_unix,price_stars,category,no_renew,per_buyer,sort)
+VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET seller=excluded.seller, name=excluded.name, plan=excluded.plan,
 gb=excluded.gb, days=excluded.days, max_ips=excluded.max_ips, inbounds=excluded.inbounds, price=excluded.price,
 status=excluded.status, first_use=excluded.first_use, price_stars=excluded.price_stars, category=excluded.category,
-no_renew=excluded.no_renew, per_buyer=excluded.per_buyer`,
+no_renew=excluded.no_renew, per_buyer=excluded.per_buyer, sort=excluded.sort`,
 		p.ID, p.Seller, p.Name, p.Plan, p.GB, p.Days, p.MaxIPs, strings.Join(p.Inbounds, ","), p.Price, p.Status, p.FirstUse, s.now().Unix(), p.PriceStars,
-		p.Category, p.NoRenew, p.PerBuyer)
+		p.Category, p.NoRenew, p.PerBuyer, p.Sort)
 	if err != nil {
 		return err
 	}
 	return tx.Commit()
 }
 
-const productCols = `id,seller,name,plan,gb,days,max_ips,inbounds,price,status,first_use,price_stars,category,no_renew,per_buyer`
+const productCols = `id,seller,name,plan,gb,days,max_ips,inbounds,price,status,first_use,price_stars,category,no_renew,per_buyer,sort`
 
 func scanProduct(row scanner) (Product, error) {
 	var p Product
 	var tags string
-	err := row.Scan(&p.ID, &p.Seller, &p.Name, &p.Plan, &p.GB, &p.Days, &p.MaxIPs, &tags, &p.Price, &p.Status, &p.FirstUse, &p.PriceStars, &p.Category, &p.NoRenew, &p.PerBuyer)
+	err := row.Scan(&p.ID, &p.Seller, &p.Name, &p.Plan, &p.GB, &p.Days, &p.MaxIPs, &tags, &p.Price, &p.Status, &p.FirstUse, &p.PriceStars, &p.Category, &p.NoRenew, &p.PerBuyer, &p.Sort)
 	p.Inbounds = splitTags(tags)
 	return p, err
 }
@@ -226,7 +228,7 @@ func scanProduct(row scanner) (Product, error) {
 // own products. publishedOnly is for storefronts (bots).
 func (s *Store) Products(ctx context.Context, by Principal, publishedOnly bool) ([]Product, error) {
 	rows, err := s.ro.QueryContext(ctx, `SELECT `+productCols+` FROM products
-WHERE (?='owner' OR seller=?) AND (?=0 OR status='published') ORDER BY seller,price,id`, by.Role, by.RepID, publishedOnly)
+WHERE (?='owner' OR seller=?) AND (?=0 OR status='published') ORDER BY seller,sort,price,id`, by.Role, by.RepID, publishedOnly)
 	if err != nil {
 		return nil, err
 	}

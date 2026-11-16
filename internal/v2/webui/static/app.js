@@ -3706,10 +3706,7 @@ async function viewShop() {
     draw();
     return h("div", {}, chips, list);
   };
-  const productsPane = () => h("div", {}, h("p", { class: "small muted" }, t("shopHint")),
-    products.length ? h("div", { class: "price-grid" }, products.filter((p) => p.status !== "archived").concat(products.filter((p) => p.status === "archived")).map(productTile))
-      : emptyState(fa ? "هنوز محصولی ندارید" : "No products yet", fa ? "یک بسته (حجم، مدت و قیمت) بسازید تا در ربات و فروشگاه فروخته شود." : "Create a plan (volume, days and price) to sell it in the bot and the store.",
-        canEdit ? `${t("add")} · ${t("product")}` : "", () => productForm(null, inbounds, reps)));
+  const productsPane = () => productsView(products, inbounds, reps, sold, canEdit);
   const panes = [["orders", t("orders"), ordersPane, pending.length], ["products", t("products"), productsPane]];
   if (owner) panes.push(["pay", fa ? "پرداخت و تخفیف" : "Payments & codes", () => h("div", { class: "dash" }, payCardCard(), discountsCard(products))]);
   panes.push(["wallets", fa ? "کیف پول و شارژ" : "Wallets & top-ups", () => walletsPane()]);
@@ -3725,7 +3722,7 @@ async function viewShop() {
   show();
   return h("div", {},
     h("div", { class: "row sticky-head" }, h("h1", {}, t("shop")),
-      h("span", { class: "spacer" }), canEdit ? h("button", { class: "ghost", onclick: () => productForm(null, inbounds, reps) }, fa ? "محصول جدید" : "New product") : null,
+      h("span", { class: "spacer" }), canEdit ? h("button", { class: "ghost", onclick: () => productForm(null, inbounds, reps, { seller: shopSeller }) }, fa ? "محصول جدید" : "New product") : null,
       products.some((p) => p.status === "published") ? h("button", { class: "primary", onclick: () => orderForm(products) }, t("newOrder")) : null),
     h("div", { class: "shop-kpis" },
       tile(fmtNum(pending.length), fa ? "منتظر تأیید" : "Waiting", pending.length ? "warn" : ""),
@@ -3882,53 +3879,205 @@ function discountsCard(products) {
       h("div", { class: "row" }, h("button", { class: "primary", type: "submit" }, pay("dcAdd")))));
 }
 
-function productForm(p, inbounds, reps) {
+// The shop's products: grouped by category in the seller's order, with a
+// category editor, a published switch, copy and up/down on each card.
+// Owners pick whose shop they look at (their own or a reseller's).
+let shopSeller = "";
+function productsView(products, inbounds, reps, sold, canEdit) {
+  const fa = lang === "fa";
   const owner = me.role === "owner";
-  const v = p || { id: "", name: "", plan: "volume", gb: 50, days: 30, max_ips: 2, inbounds: [], price: 0, status: "published", first_use: true, seller: "" };
-  const id = h("input", { required: true, pattern: "[a-z0-9][a-z0-9._\\-]{0,62}", value: v.id, disabled: !!p });
-  const name = h("input", { required: true, maxlength: "120", value: v.name });
-  const plan = h("select", {}, h("option", { value: "volume", selected: v.plan === "volume" }, t("planVolume")), h("option", { value: "unlimited", selected: v.plan === "unlimited" }, t("planUnlimited")));
-  const gb = h("input", { type: "number", min: "1", value: v.gb || 50 });
-  const days = h("input", { type: "number", min: "1", max: "3650", required: true, value: v.days });
-  const ips = h("input", { type: "number", min: "0", value: v.max_ips });
-  const price = h("input", { type: "number", min: "0", step: "1", value: v.price });
+  const seller = owner ? shopSeller : me.rep_id || "";
+  const box = h("div", {});
+  const mine = products.filter((p) => (owner ? (p.seller || "") === seller : true));
+  const sellerSel = owner && (reps || []).length ? h("select", { onchange: (e) => { shopSeller = e.target.value; fill(box, ...draw([])); load(); } },
+    h("option", { value: "" }, fa ? "فروشگاه خودم" : "My shop"), reps.map((r) => h("option", { value: r.ID, selected: r.ID === seller }, `${fa ? "فروشگاه" : "Shop of"} ${r.Name || r.ID}`))) : null;
+  const toggle = async (p, on) => { await guarded(() => api("PUT", `/api/v2/shop/products/${encodeURIComponent(p.id)}`, { ...p, status: on ? "published" : "draft" })); route(); };
+  const move = async (list, i, d) => {
+    const j = i + d; if (j < 0 || j >= list.length) return;
+    const order = list.slice(); [order[i], order[j]] = [order[j], order[i]];
+    await guarded(async () => { for (let k = 0; k < order.length; k++) if (order[k].sort !== (k + 1) * 10) await api("PUT", `/api/v2/shop/products/${encodeURIComponent(order[k].id)}`, { ...order[k], sort: (k + 1) * 10 }); });
+    route();
+  };
+  const card = (p, list, i) => {
+    const on = p.status === "published";
+    const sw = h("input", { type: "checkbox", role: "switch", class: "switch", checked: on, disabled: !canEdit || p.status === "archived", "aria-label": fa ? "فعال در ربات" : "On sale" });
+    sw.addEventListener("change", () => toggle(p, sw.checked));
+    return h("article", { class: `card price-tile ${p.status}` },
+      h("div", { class: "row" }, sw, h("span", { class: "small muted" }, p.status === "archived" ? t("status_archived") : on ? (fa ? "در حال فروش" : "On sale") : (fa ? "پیش‌نویس" : "Draft")),
+        h("span", { class: "spacer" }), canEdit && list.length > 1 ? h("span", { class: "row", style: "gap:2px" },
+          h("button", { class: "ghost icon-only", title: fa ? "بالاتر" : "Up", disabled: i === 0, onclick: () => move(list, i, -1) }, "↑"),
+          h("button", { class: "ghost icon-only", title: fa ? "پایین‌تر" : "Down", disabled: i === list.length - 1, onclick: () => move(list, i, 1) }, "↓")) : null),
+      h("h3", {}, p.name),
+      h("div", { class: "price" }, money(p.price), h("small", { class: "muted" }, fa ? " تومان" : " toman"), p.price_stars ? h("small", { class: "muted" }, ` · ⭐ ${fmtNum(p.price_stars)}`) : null),
+      h("div", { class: "specs" },
+        h("span", {}, p.plan === "unlimited" ? t("planUnlimited") : `${fmtNum(p.gb)} GB`),
+        h("span", {}, fa ? `${fmtNum(p.days)} روز` : `${p.days} days`),
+        p.max_ips ? h("span", {}, fa ? `${fmtNum(p.max_ips)} کاربره` : `${p.max_ips} devices`) : null,
+        p.first_use ? h("span", {}, fa ? "از اولین اتصال" : "from first use") : null,
+        p.no_renew ? h("span", {}, fa ? "فقط خرید جدید" : "new only") : null),
+      h("div", { class: "row tile-foot" },
+        h("span", { class: "small muted" }, fa ? `${fmtNum(sold[p.id] || 0)} فروش` : `${sold[p.id] || 0} sold`),
+        h("span", { class: "spacer" }),
+        canEdit && p.status !== "archived" ? h("button", { class: "ghost", onclick: () => productForm(p, inbounds, reps) }, t("edit")) : null,
+        canEdit ? h("button", { class: "ghost", onclick: () => productForm({ ...p, id: "", name: `${p.name} (${fa ? "کپی" : "copy"})`, status: "draft" }, inbounds, reps, { copy: true }) }, fa ? "کپی" : "Copy") : null));
+  };
+  function draw(cats) {
+    const groups = [];
+    const byCat = {};
+    for (const p of mine) (byCat[p.category || ""] ||= []).push(p);
+    const order = cats.map((c) => c.name).filter((n) => byCat[n]);
+    for (const n of Object.keys(byCat)) if (n && !order.includes(n)) order.push(n);
+    if (byCat[""]) order.push("");
+    const emoji = Object.fromEntries(cats.map((c) => [c.name, c.emoji]));
+    for (const n of order) {
+      const list = byCat[n].filter((p) => p.status !== "archived").concat(byCat[n].filter((p) => p.status === "archived"));
+      groups.push(h("section", { class: "shop-group" },
+        h("h2", { class: "row" }, h("span", {}, `${emoji[n] || (n ? "📂" : "📦")} ${n || (fa ? "بدون دسته" : "No category")}`), h("span", { class: "badge" }, fmtNum(list.length))),
+        h("div", { class: "price-grid" }, list.map((p, i) => card(p, list.filter((x) => x.status !== "archived"), i)))));
+    }
+    return [
+      h("div", { class: "row shop-bar" }, sellerSel,
+        h("div", { class: "chips" }, cats.map((c) => h("span", { class: "chip" }, `${c.emoji || "📂"} ${c.name}`, h("span", { class: "count" }, fmtNum(c.count))))),
+        canEdit ? h("button", { class: "ghost spacer", onclick: () => categoriesForm(seller, cats) }, fa ? "مدیریت دسته‌ها" : "Categories") : null),
+      groups.length ? groups : emptyState(fa ? "هنوز محصولی ندارید" : "No products yet", fa ? "یک بسته (حجم، مدت و قیمت) بسازید تا در ربات و فروشگاه فروخته شود." : "Create a plan (volume, days and price) to sell it in the bot and the store.",
+        canEdit ? `${t("add")} · ${t("product")}` : "", () => productForm(null, inbounds, reps, { seller }))];
+  }
+  const load = () => api("GET", `/api/v2/shop/categories${owner ? `?seller=${encodeURIComponent(seller)}` : ""}`).then((cats) => fill(box, ...draw(cats || []))).catch(() => fill(box, ...draw([])));
+  fill(box, ...draw([]));
+  load();
+  return box;
+}
+
+// categoriesForm: rename, emoji, order and remove the shop's categories.
+function categoriesForm(seller, cats) {
+  const fa = lang === "fa";
+  const rows = cats.map((c) => ({ name: c.name, emoji: c.emoji || "", old: c.name, count: c.count }));
+  const list = h("div", { class: "form" });
+  const draw = () => fill(list, rows.length ? rows.map((r, i) => {
+    const em = h("input", { value: r.emoji, maxlength: "4", placeholder: "📂", style: "inline-size:56px;text-align:center" });
+    const nm = h("input", { value: r.name, maxlength: "40" });
+    em.addEventListener("input", () => { r.emoji = em.value.trim(); });
+    nm.addEventListener("input", () => { r.name = nm.value.trim(); });
+    return h("div", { class: "row nowrap cat-row" }, em, nm,
+      h("span", { class: "muted small" }, fa ? `${fmtNum(r.count || 0)} محصول` : `${r.count || 0}`),
+      h("button", { type: "button", class: "ghost icon-only", disabled: i === 0, onclick: () => { [rows[i - 1], rows[i]] = [rows[i], rows[i - 1]]; draw(); } }, "↑"),
+      h("button", { type: "button", class: "ghost icon-only", disabled: i === rows.length - 1, onclick: () => { [rows[i + 1], rows[i]] = [rows[i], rows[i + 1]]; draw(); } }, "↓"),
+      h("button", { type: "button", class: "ghost icon-only danger", title: fa ? "حذف دسته (محصولاتش بدون دسته می‌شوند)" : "Remove (its products become uncategorised)", onclick: () => { rows.splice(i, 1); draw(); } }, "✕"));
+  }) : [h("p", { class: "muted small" }, fa ? "هنوز دسته‌ای ندارید." : "No categories yet.")]);
+  const add = h("button", { type: "button", class: "ghost", onclick: () => { rows.push({ name: fa ? "دستهٔ جدید" : "New category", emoji: "", count: 0 }); draw(); } }, fa ? "+ دستهٔ جدید" : "+ New category");
+  const err = h("div", { class: "error" });
+  const save = h("button", { class: "primary", type: "button", onclick: async () => {
+    err.textContent = "";
+    try {
+      await api("PUT", "/api/v2/shop/categories", { seller, categories: rows.map((r) => ({ name: r.name, emoji: r.emoji, old: r.old || "" })) });
+      document.getElementById("modal").close(); toast(t("saved")); route();
+    } catch (x) { err.textContent = x.message; }
+  } }, t("save"));
+  draw();
+  openModal(fa ? "دسته‌بندی فروشگاه" : "Shop categories", h("div", { class: "form" },
+    h("p", { class: "small muted" }, fa ? "ترتیب این‌جا همان ترتیب دسته‌ها در ربات است. تغییر نام روی همهٔ محصولات آن دسته اعمال می‌شود؛ حذف دسته محصولاتش را پاک نمی‌کند، فقط بدون دسته می‌شوند." : "This order is the order in the bot. A rename applies to all its products; removing a category keeps its products, uncategorised."),
+    list, add, err), [save]);
+}
+
+// productForm: name, category, volume, term, devices and price; the ID is
+// made automatically. A live line shows the button customers see in the bot.
+function productForm(p, inbounds, reps, opt = {}) {
+  const fa = lang === "fa";
+  const owner = me.role === "owner";
+  const T = (f, e) => (fa ? f : e);
+  const isNew = !p || opt.copy;
+  const v = p || { id: "", name: "", plan: "volume", gb: 30, days: 30, max_ips: 2, inbounds: [], price: 0, status: "published", first_use: true, seller: opt.seller || "", category: "" };
+  const newID = () => `p${Date.now().toString(36)}${Math.floor(Math.random() * 1296).toString(36)}`;
+  const id = isNew ? newID() : v.id;
+  const name = h("input", { required: true, maxlength: "120", value: v.name, placeholder: T("مثلاً: ۳۰ گیگ یک‌ماهه", "e.g. 30 GB monthly"), autofocus: isNew });
+  const canUnl = !(me.role === "rep" && me.policy && !me.policy.AllowUnlimited);
+  let plan = v.plan === "unlimited" && canUnl ? "unlimited" : "volume";
+  const planSeg = h("div", { class: "seg" });
+  const gb = h("input", { type: "number", min: "1", value: v.gb || 30, dir: "ltr" });
+  const days = h("input", { type: "number", min: "1", max: "3650", value: v.days || 30, dir: "ltr" });
+  const ips = h("input", { type: "number", min: "0", max: "100", value: v.max_ips, dir: "ltr" });
+  const price = h("input", { type: "number", min: "0", step: "1000", value: v.price || "", dir: "ltr", placeholder: "150000" });
+  const priceTxt = h("span", { class: "small muted" });
   const stars = h("input", { type: "number", min: "0", max: "100000", step: "1", value: v.price_stars || 0, dir: "ltr" });
   const first = h("input", { type: "checkbox", checked: v.first_use });
-  const category = h("input", { maxlength: "40", value: v.category || "", placeholder: lang === "fa" ? "مثلاً VIP یا گیمینگ" : "e.g. VIP or Gaming" });
+  const onSale = h("input", { type: "checkbox", checked: v.status !== "draft" && v.status !== "archived" });
+  const archived = h("input", { type: "checkbox", checked: v.status === "archived" });
   const renewable = h("input", { type: "checkbox", checked: !v.no_renew });
-  const perBuyer = h("input", { type: "number", min: "0", max: "1000", value: v.per_buyer || 0 });
-  const status = h("select", {}, ["draft", "published", "archived"].map((x) => h("option", { value: x, selected: v.status === x }, t(`status_${x}`))));
-  const seller = owner ? h("select", {}, h("option", { value: "" }, t("ownerSelf")), (reps || []).map((r) => h("option", { value: r.ID, selected: v.seller === r.ID }, r.Name || r.ID))) : null;
-  const boxes = (inbounds || []).map((ib) => h("label", { class: "check" }, h("input", { type: "checkbox", value: ib.tag, checked: (v.inbounds || []).includes(ib.tag) || (!p && inbounds.length === 1) }), `${ib.tag} · ${ib.node_id}`));
-  const gbRow = h("label", {}, h("span", {}, "GB"), gb);
-  const sync = () => { gbRow.hidden = plan.value === "unlimited"; };
-  plan.addEventListener("change", sync); sync();
+  const perBuyer = h("input", { type: "number", min: "0", max: "1000", value: v.per_buyer || 0, dir: "ltr" });
+  const seller = owner ? h("select", {}, h("option", { value: "" }, t("ownerSelf")), (reps || []).map((r) => h("option", { value: r.ID, selected: (v.seller || "") === r.ID }, r.Name || r.ID))) : null;
+  const catSel = h("select", {}, h("option", { value: "" }, T("بدون دسته", "No category")));
+  const catNew = h("input", { maxlength: "40", placeholder: T("نام دستهٔ جدید", "New category name"), hidden: true });
+  const loadCats = (sel) => api("GET", `/api/v2/shop/categories${owner ? `?seller=${encodeURIComponent(sel || "")}` : ""}`).then((cats) => {
+    catSel.replaceChildren(h("option", { value: "" }, T("بدون دسته", "No category")),
+      ...(cats || []).map((c) => h("option", { value: c.name, selected: c.name === v.category }, `${c.emoji || "📂"} ${c.name}`)),
+      h("option", { value: "+" }, T("➕ دستهٔ جدید…", "➕ New category…")));
+    if (v.category && !(cats || []).some((c) => c.name === v.category)) catSel.prepend(h("option", { value: v.category, selected: true }, v.category));
+  }).catch(() => {});
+  loadCats(v.seller);
+  if (seller) seller.addEventListener("change", () => loadCats(seller.value));
+  catSel.addEventListener("change", () => { catNew.hidden = catSel.value !== "+"; if (!catNew.hidden) catNew.focus(); });
+  const ibs = (inbounds || []).filter((ib) => !["socks", "http", "dokodemo-door", "tunnel", "mtproto"].includes(ib.protocol));
+  const ibChips = ibs.map((ib) => {
+    const b = h("button", { type: "button", class: "chip", "aria-pressed": String((v.inbounds || []).includes(ib.tag) || (isNew && !(v.inbounds || []).length)), "data-tag": ib.tag, dir: "ltr" }, ib.tag);
+    b.addEventListener("click", () => b.setAttribute("aria-pressed", String(b.getAttribute("aria-pressed") !== "true")));
+    return b;
+  });
+  const chipRow = (inp, vals, fmt) => h("div", { class: "chips qp" }, vals.map((x) => h("button", { type: "button", class: "chip", onclick: () => { inp.value = x; calc(); } }, fmt(x))));
+  const gbBox = h("div", {}, h("label", {}, h("span", {}, T("حجم (گیگ)", "Volume (GB)")), gb), chipRow(gb, [10, 20, 30, 50, 100, 200], (x) => `${fmtNum(x)} GB`));
+  const preview = h("div", { class: "csum" });
+  const calc = () => {
+    gbBox.hidden = plan === "unlimited";
+    const pr = Math.round(+price.value || 0);
+    priceTxt.textContent = pr ? `${fmtNum(pr)} ${T("تومان", "toman")}` : T("رایگان", "free");
+    const size = plan === "unlimited" ? T("نامحدود", "unlimited") : `${fmtNum(+gb.value || 0)} ${T("گیگ", "GB")}`;
+    const cat = catSel.value === "+" ? catNew.value.trim() : catSel.value;
+    preview.replaceChildren(
+      h("div", { class: "small muted" }, T("در ربات این‌طور دیده می‌شود:", "Customers see in the bot:")),
+      h("div", { class: "bot-btn" }, `📦 ${name.value || T("نام محصول", "Product name")} — ${pr ? `${fmtNum(pr)} ${T("تومان", "toman")}` : T("رایگان", "free")}`),
+      h("div", { class: "small" }, [cat ? `📂 ${cat}` : null, size, T(`${fmtNum(+days.value || 0)} روز`, `${days.value} days`), +ips.value ? T(`${fmtNum(+ips.value)} کاربره`, `${ips.value} devices`) : null,
+        first.checked ? T("شروع از اولین اتصال", "starts on first use") : null, onSale.checked && !archived.checked ? T("در حال فروش", "on sale") : T("پیش‌نویس (در ربات دیده نمی‌شود)", "draft (hidden in the bot)")].filter(Boolean).join(" · ")));
+  };
+  for (const [k, l] of [["volume", T("حجمی", "Volume")], canUnl ? ["unlimited", T("نامحدود", "Unlimited")] : null].filter(Boolean)) {
+    planSeg.append(h("button", { type: "button", role: "radio", "aria-checked": String(plan === k), onclick: (e) => { plan = k; for (const x of planSeg.children) x.setAttribute("aria-checked", String(x === e.currentTarget)); calc(); } }, l));
+  }
+  [name, gb, days, ips, price, catNew].forEach((x) => x.addEventListener("input", calc));
+  [first, onSale, archived, catSel].forEach((x) => x.addEventListener("change", calc));
   const err = h("div", { class: "error" });
   const save = h("button", { class: "primary", value: "save", onclick: async (e) => {
     e.preventDefault(); err.textContent = "";
-    for (const f of [id, name, days]) if (!f.reportValidity()) return;
+    if (!name.reportValidity()) return;
+    const cat = catSel.value === "+" ? catNew.value.trim() : catSel.value;
+    const tags = ibChips.filter((b) => b.getAttribute("aria-pressed") === "true").map((b) => b.dataset.tag);
     try {
-      await guarded(() => api("PUT", `/api/v2/shop/products/${encodeURIComponent(id.value)}`, {
-        name: name.value, plan: plan.value, gb: +gb.value || 0, days: +days.value, max_ips: +ips.value || 0, price: Math.round(+price.value || 0), price_stars: Math.round(+stars.value || 0),
-        status: status.value, first_use: first.checked, seller: seller ? seller.value : "",
-        category: category.value.trim(), no_renew: !renewable.checked, per_buyer: +perBuyer.value || 0,
-        inbounds: boxes.map((b) => b.querySelector("input")).filter((i) => i.checked).map((i) => i.value) }));
-      document.getElementById("modal").close("save"); route();
+      await api("PUT", `/api/v2/shop/products/${encodeURIComponent(id)}`, {
+        name: name.value.trim(), plan, gb: plan === "unlimited" ? 0 : +gb.value || 0, days: +days.value, max_ips: +ips.value || 0, price: Math.round(+price.value || 0), price_stars: Math.round(+stars.value || 0),
+        status: archived.checked ? "archived" : onSale.checked ? "published" : "draft", first_use: first.checked, seller: seller ? seller.value : "",
+        category: cat, no_renew: !renewable.checked, per_buyer: +perBuyer.value || 0, sort: v.sort || 0,
+        inbounds: tags.length ? tags : ibs.map((ib) => ib.tag) });
+      document.getElementById("modal").close("save"); toast(t("saved")); route();
     } catch (x) { err.textContent = x.message; }
-  } }, t("save"));
-  openModal(p ? `${t("edit")} · ${p.name}` : `${t("add")} · ${t("product")}`, h("div", { class: "form" },
-    h("div", { class: "two" }, h("label", {}, h("span", {}, t("tag")), id), h("label", {}, h("span", {}, t("name")), name)),
-    h("div", { class: "two" }, h("label", {}, h("span", {}, t("plan")), plan), gbRow),
-    h("div", { class: "two" }, h("label", {}, h("span", {}, t("days").split(" (")[0]), days), h("label", {}, h("span", {}, t("maxIPs")), ips)),
-    h("label", { class: "check" }, first, t("firstUse")),
-    h("div", { class: "two" }, h("label", {}, h("span", {}, t("price")), price), h("label", {}, h("span", {}, t("statusLabel")), status)),
-    h("div", { class: "two" }, h("label", {}, h("span", {}, lang === "fa" ? "دسته (در ربات)" : "Category (in the bot)"), category),
-      h("label", {}, h("span", {}, lang === "fa" ? "سقف خرید هر مشتری (۰ = آزاد)" : "Per-customer limit (0 = none)"), perBuyer)),
-    h("label", { class: "check" }, renewable, lang === "fa" ? "برای تمدید هم نمایش داده شود" : "Also offered for renewals"),
-    owner ? h("label", {}, h("span", {}, t("priceStars")), stars) : null,
-    owner ? h("p", { class: "small muted" }, t("priceStarsHint")) : null,
-    seller ? h("label", {}, h("span", {}, t("seller")), seller) : null,
-    h("fieldset", { class: "form", style: "border:0;padding:0;margin:0" }, h("legend", { class: "small muted" }, t("assignInbounds")), boxes), err), [save]);
+  } }, isNew ? T("ساخت محصول", "Create product") : t("save"));
+  calc();
+  const d = openModal(isNew ? T("محصول جدید", "New product") : `${t("edit")} · ${v.name}`, h("div", { class: "form cform" },
+    h("div", { class: "two" }, h("label", {}, h("span", {}, T("نام محصول", "Product name")), name), h("label", {}, h("span", {}, T("دسته", "Category")), catSel, catNew)),
+    h("div", {}, h("span", { class: "lbl" }, T("نوع", "Type")), planSeg),
+    h("div", { class: "two" }, gbBox,
+      h("div", {}, h("label", {}, h("span", {}, T("مدت (روز)", "Days")), days), chipRow(days, [30, 60, 90, 180, 365], (x) => (x === 365 ? T("۱ سال", "1 yr") : T(`${fmtNum(x / 30)} ماه`, `${x / 30} mo`))))),
+    h("div", { class: "two" },
+      h("div", {}, h("label", {}, h("span", {}, T("تعداد کاربر (دستگاه هم‌زمان)", "Users (devices at once)")), ips), chipRow(ips, [1, 2, 3, 5], (x) => T(`${fmtNum(x)} کاربره`, `${x}`))),
+      h("label", {}, h("span", {}, T("قیمت (تومان)", "Price (toman)")), price, priceTxt)),
+    h("label", { class: "check" }, onSale, T("در حال فروش (در ربات و فروشگاه نمایش داده شود)", "On sale (shown in the bot and store)")),
+    h("label", { class: "check" }, first, T("زمان از اولین اتصال مشتری شروع شود", "Time starts at the customer's first connection")),
+    h("label", { class: "check" }, renewable, T("برای تمدید هم نمایش داده شود", "Also offered for renewals")),
+    h("details", { class: "adv" }, h("summary", {}, T("تنظیمات پیشرفته", "Advanced")), h("div", { class: "form" },
+      h("label", {}, h("span", {}, T("سقف خرید هر مشتری (۰ = آزاد)", "Per-customer limit (0 = none)")), perBuyer),
+      owner ? h("label", {}, h("span", {}, t("priceStars")), stars) : null,
+      seller ? h("label", {}, h("span", {}, t("seller")), seller) : null,
+      ibs.length > 1 ? h("div", {}, h("span", { class: "lbl" }, T("اینباندها (خالی = همه)", "Inbounds (none = all)")), h("div", { class: "chips" }, ibChips)) : null,
+      !isNew ? h("label", { class: "check" }, archived, T("بایگانی (دیگر فروخته و ویرایش نمی‌شود)", "Archive (no longer sold or edited)")) : null,
+      h("p", { class: "small muted", dir: "ltr" }, `id: ${id}`))),
+    preview, err), [save]);
+  d.classList.add("wide");
 }
 
 async function orderForm(products, preselect) {

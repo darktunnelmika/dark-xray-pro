@@ -1004,3 +1004,14 @@ dialog.wide:has(.cform) { inline-size: min(780px, calc(100vw - 20px)); }
 .pick-list .pick { text-align: start; border: 0; background: transparent; padding: 4px 8px; font-family: var(--mono); font-size: 12px; box-shadow: none; }
 .pick-list .pick:hover { background: var(--surface-2); color: var(--ion); }
 .badge.tun { color: var(--sky); border-color: color-mix(in oklab, var(--sky) 35%, transparent); background: color-mix(in oklab, var(--sky) 8%, transparent); }
+
+/* ---------- Shop: categories and products ---------- */
+.shop-bar { margin-block: 6px 12px; gap: 8px; }
+.shop-bar .chips { margin: 0; }
+.shop-group { margin-block-end: 18px; }
+.shop-group > h2 { gap: 8px; margin-block-end: 8px; }
+.cat-row { gap: 6px; align-items: center; }
+.cat-row input:nth-child(2) { flex: 1; }
+.bot-btn { display: inline-block; padding: 7px 14px; border-radius: 8px; background: color-mix(in oklab, var(--sky) 14%, var(--surface-2)); border: 1px solid color-mix(in oklab, var(--sky) 30%, transparent); font-size: 13px; }
+.price-tile .switch { flex: none; }
+.price-tile .switch + span { margin-inline-start: 10px; }
