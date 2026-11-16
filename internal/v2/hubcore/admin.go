@@ -387,6 +387,16 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 		_, err := s.TicketClose(r.Context(), who(r), id, true)
 		reply(w, map[string]bool{"ok": err == nil}, err)
 	}))
+	mux.HandleFunc("PUT /api/v2/admin/nodes/{id}/tunnels/{iface}", guard(func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Hidden bool `json:"hidden"`
+		}
+		if !decode(w, r, &in) {
+			return
+		}
+		err := s.HideTunnel(r.Context(), r.PathValue("id"), r.PathValue("iface"), in.Hidden)
+		reply(w, map[string]bool{"ok": err == nil}, err)
+	}))
 	mux.HandleFunc("GET /api/v2/admin/reports/sales", guard(func(w http.ResponseWriter, r *http.Request) {
 		days, _ := strconv.Atoi(r.URL.Query().Get("days"))
 		rep, err := s.SalesReport(r.Context(), days)

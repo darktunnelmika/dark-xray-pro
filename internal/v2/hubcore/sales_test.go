@@ -54,3 +54,23 @@ func TestSalesReport(t *testing.T) {
 		t.Fatalf("daily: %+v", r.Daily)
 	}
 }
+
+func TestHiddenTunnels(t *testing.T) {
+	s, err := Open(filepath.Join(t.TempDir(), "v2.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	ctx := context.Background()
+	if err := s.HideTunnel(ctx, "nl-1", "ir72", true); err != nil {
+		t.Fatal(err)
+	}
+	_ = s.HideTunnel(ctx, "nl-1", "ir85", true)
+	_ = s.HideTunnel(ctx, "nl-1", "ir85", false)
+	if h := s.hiddenTunnels(ctx); !h["nl-1:ir72"] || h["nl-1:ir85"] || len(h) != 1 {
+		t.Fatalf("hidden: %v", h)
+	}
+	if s.HideTunnel(ctx, "nl-1", "a,b", true) == nil {
+		t.Fatal("bad iface accepted")
+	}
+}

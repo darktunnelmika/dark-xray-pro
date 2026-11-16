@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"sort"
 	"strings"
 	"time"
 
@@ -328,6 +329,7 @@ config_revision,reported_revision,usage_seq,host_json,public_ip,agent_sha,xray_v
 	defer rows.Close()
 	var out []NodeStatus
 	dist := s.DistSHA()
+	hidden := s.hiddenTunnels(ctx)
 	for rows.Next() {
 		var n NodeStatus
 		var hj string
@@ -338,6 +340,13 @@ config_revision,reported_revision,usage_seq,host_json,public_ip,agent_sha,xray_v
 		if hj != "" {
 			var h wire.Host
 			if json.Unmarshal([]byte(hj), &h) == nil {
+				kept := h.Tunnels[:0]
+				for _, t := range h.Tunnels {
+					if !hidden[n.ID+":"+t.Iface] {
+						kept = append(kept, t)
+					}
+				}
+				h.Tunnels = kept
 				n.Host = &h
 			}
 		}
@@ -354,4 +363,35 @@ func bearer(h string) (string, error) {
 		return "", errors.New("missing bearer token")
 	}
 	return tok, nil
+}
+
+// hiddenTunnels: tunnels the owner keeps out of the panel (they belong to
+// another panel on the same server); "node:iface" keys.
+func (s *Store) hiddenTunnels(ctx context.Context) map[string]bool {
+	out := map[string]bool{}
+	for _, k := range strings.Split(s.Setting(ctx, "tunnels_hidden"), ",") {
+		if k = strings.TrimSpace(k); k != "" {
+			out[k] = true
+		}
+	}
+	return out
+}
+
+// HideTunnel hides or shows one tunnel of a node.
+func (s *Store) HideTunnel(ctx context.Context, node, iface string, hide bool) error {
+	if !idRE.MatchString(node) || iface == "" || len(iface) > 32 || strings.ContainsAny(iface, ",: ") {
+		return ErrInvalid
+	}
+	m := s.hiddenTunnels(ctx)
+	if hide {
+		m[node+":"+iface] = true
+	} else {
+		delete(m, node+":"+iface)
+	}
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return s.SetSetting(ctx, "tunnels_hidden", strings.Join(keys, ","))
 }
