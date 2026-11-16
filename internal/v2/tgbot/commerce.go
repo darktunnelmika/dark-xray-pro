@@ -139,7 +139,7 @@ func (b *Bot) payWallet(ctx context.Context, chat int64, productID, renew string
 		return
 	}
 	b.announceOrders(ctx)
-	b.send(ctx, chat, fmt.Sprintf("✅ از کیف پول پرداخت شد: <code>%s</code>\nموجودی باقی‌مانده: %d⭐", esc(email), left), nil)
+	b.celebrate(ctx, chat, fmt.Sprintf("✅ از کیف پول پرداخت شد: <code>%s</code>\nموجودی باقی‌مانده: %d⭐", esc(email), left), nil, EffectLike)
 }
 
 func (b *Bot) trial(ctx context.Context, chat int64) {

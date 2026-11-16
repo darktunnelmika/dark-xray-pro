@@ -437,7 +437,8 @@ func (c *tgController) start(token string, owners []int64) {
 		set[id] = true
 	}
 	hubcore.SetTelegramToken(token)
-	api := &tgbot.HTTPAPI{Token: token}
+	st := c.store
+	api := &tgbot.HTTPAPI{Token: token, Emoji: func() map[string]string { return st.EmojiTheme(context.Background()) }}
 	hubcore.SetInvoiceLinker(api.InvoiceLink) // Mini App: pay with Telegram Stars
 	ctx, cancel := context.WithCancel(c.parent)
 	c.bot, c.cancel = &tgbot.Bot{Store: c.store, API: api, Owners: set, SubBase: c.subBase}, cancel
@@ -557,7 +558,8 @@ func (r *repBots) reconcile(ctx context.Context) {
 		if _, ok := r.running[rep]; ok {
 			continue
 		}
-		api := &tgbot.HTTPAPI{Token: tok}
+		st := r.store
+		api := &tgbot.HTTPAPI{Token: tok, Emoji: func() map[string]string { return st.EmojiTheme(context.Background()) }}
 		cctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 		user, err := api.Me(cctx)
 		cancel()

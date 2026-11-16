@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"html"
 	"log"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -245,6 +246,21 @@ func (b *Bot) onMessage(ctx context.Context, m *Message) {
 	}
 	if len(m.Photo) > 0 && !(b.Owners[chat] && b.peekAwait(chat) == "broadcast") {
 		if b.onReceipt(ctx, chat, name, m.Photo[len(m.Photo)-1].FileID, b.peekAwait(chat)) {
+			return
+		}
+	}
+	if b.Owners[chat] && b.peekAwait(chat) == "emoji" {
+		if ce := m.CustomEmoji(); len(ce) > 0 {
+			n, err := b.Store.AddEmoji(ctx, ce, false)
+			if err != nil {
+				b.send(ctx, chat, "ذخیره نشد: "+esc(err.Error()), nil)
+				return
+			}
+			var keys []string
+			for k := range ce {
+				keys = append(keys, k)
+			}
+			b.send(ctx, chat, fmt.Sprintf("✨ %d ایموجی ثبت شد (جمعاً %d). از این به بعد این‌ها در پیام‌ها و دکمه‌ها متحرک‌اند:\n%s\n\nایموجی‌های بیشتری بفرستید یا /done بزنید.", len(ce), n, strings.Join(keys, " ")), nil)
 			return
 		}
 	}
@@ -655,7 +671,7 @@ func (b *Bot) link(ctx context.Context, chat int64, tokenOrURL string) {
 		b.send(ctx, chat, "این لینک پیدا نشد. لینک کامل ساب را بفرستید.", mainMenu)
 		return
 	}
-	b.send(ctx, chat, "✅ سرویس <b>"+esc(email)+"</b> به حساب شما وصل شد.\nاز این به بعد هشدار حجم و انقضا همین‌جا می‌آید.", &Keyboard{Rows: [][]Button{row(cbBtn("📦 مشاهدهٔ سرویس", "svc:"+email), cbBtn("« منو", "home"))}})
+	b.celebrate(ctx, chat, "✅ سرویس <b>"+esc(email)+"</b> به حساب شما وصل شد.\nاز این به بعد هشدار حجم و انقضا همین‌جا می‌آید.", &Keyboard{Rows: [][]Button{row(cbBtn("📦 مشاهدهٔ سرویس", "svc:"+email), cbBtn("« منو", "home"))}}, EffectHeart)
 }
 
 func (b *Bot) ticket(ctx context.Context, chat int64, name, username, text string) {
@@ -921,6 +937,31 @@ func (b *Bot) ownerMessage(ctx context.Context, m *Message, text string) bool {
 		b.send(ctx, m.Chat.ID, "متن خوش‌آمد ذخیره شد.", nil)
 	case "/report":
 		b.send(ctx, m.Chat.ID, b.reportText(ctx), nil)
+	case "/emoji":
+		if arg == "reset" {
+			_, _ = b.Store.AddEmoji(ctx, nil, true)
+			b.send(ctx, m.Chat.ID, "ایموجی‌های متحرک پاک شدند؛ ربات دوباره ایموجی معمولی نشان می‌دهد.", nil)
+			return true
+		}
+		b.setAwait(m.Chat.ID, "emoji")
+		theme := b.Store.EmojiTheme(ctx)
+		var keys []string
+		for k := range theme {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		cur := "هنوز چیزی ثبت نشده."
+		if len(keys) > 0 {
+			cur = "ثبت‌شده: " + strings.Join(keys, " ")
+		}
+		b.send(ctx, m.Chat.ID, "✨ ایموجی متحرک\n\nایموجی‌های پرمیوم دلخواهتان را (از پک‌های متحرک) همین‌جا بفرستید. هر کدام جای ایموجی معمولی هم‌شکلش می‌نشیند — مثلاً یک 🔥 متحرک، همهٔ 🔥های ربات را متحرک می‌کند؛ روی دکمه‌ها هم.\n\nبرای ایموجی‌های رایج ربات: 🛒 📊 💳 👛 🎁 ✅ ❌ ⏳ 🔗 💬 🚀 📦 🌐 ⚡️ 🎉 ❤️\n\nشرط تلگرام: صاحب ربات باید Telegram Premium داشته باشد؛ وگرنه ایموجی معمولی نمایش داده می‌شود.\n\n"+cur+"\n\nپایان: /done — پاک کردن همه: <code>/emoji reset</code>", nil)
+	case "/done":
+		if b.peekAwait(m.Chat.ID) == "emoji" {
+			b.takeAwait(m.Chat.ID)
+			b.send(ctx, m.Chat.ID, "✅ تمام. نمونه: 🛒 خرید سرویس · 📊 سرویس‌های من · 👛 کیف پول · 🎉 مبارک باشد", &Keyboard{Rows: [][]Button{{{Text: "🛒 خرید سرویس", Data: "shop"}, {Text: "📊 سرویس‌های من", Data: "mine"}}}})
+			return true
+		}
+		return false
 	default:
 		return false
 	}
@@ -936,6 +977,7 @@ const ownerHelp = `دستورهای مدیر:
 /paytext متن — متن راهنمای پرداخت برای خریدار
 /welcome متن — متن خوش‌آمد
 /wallet شناسه ±استارز — هدیه یا اصلاح کیف پول مشتری
+/emoji — ایموجی‌های متحرک پرمیوم برای ربات
 برای پاسخ به تیکت، روی پیام تیکت Reply کنید.`
 
 func orderButtons(id int64) *Keyboard {
@@ -992,7 +1034,8 @@ func (b *Bot) announceOrders(ctx context.Context) {
 			chat, ok := hubcore.TgChatOfBuyer(o.Buyer)
 			if ok {
 				if o.Status == "fulfilled" {
-					b.send(ctx, chat, fmt.Sprintf("✅ سفارش #%d آماده شد.", o.ID), nil)
+					b.draft(ctx, chat, "⏳ در حال آماده‌سازی سرویس شما…")
+					b.celebrate(ctx, chat, fmt.Sprintf("🎉 سفارش #%s آماده شد! سرویس شما فعال است.", faInt(o.ID)), nil, EffectParty)
 					b.sendSub(ctx, chat, o.ClientEmail)
 				} else {
 					msg := fmt.Sprintf("❌ سفارش <b>#%s</b> لغو شد.", faInt(o.ID))

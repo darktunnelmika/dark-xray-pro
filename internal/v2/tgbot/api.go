@@ -13,6 +13,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -73,8 +74,18 @@ type Message struct {
 	Photo   []struct {
 		FileID string `json:"file_id"`
 	} `json:"photo"`
-	ReplyTo *Message           `json:"reply_to_message"`
-	Paid    *SuccessfulPayment `json:"successful_payment"`
+	ReplyTo         *Message           `json:"reply_to_message"`
+	Paid            *SuccessfulPayment `json:"successful_payment"`
+	Entities        []MessageEntity    `json:"entities"`
+	CaptionEntities []MessageEntity    `json:"caption_entities"`
+}
+
+// MessageEntity marks a span of text (offsets in UTF-16 units).
+type MessageEntity struct {
+	Type          string `json:"type"`
+	Offset        int    `json:"offset"`
+	Length        int    `json:"length"`
+	CustomEmojiID string `json:"custom_emoji_id,omitempty"`
 }
 
 type CallbackQuery struct {
@@ -94,6 +105,8 @@ type Button struct {
 	Data   string  `json:"callback_data,omitempty"`
 	URL    string  `json:"url,omitempty"`
 	WebApp *WebApp `json:"web_app,omitempty"` // opens a Mini App
+	Style  string  `json:"style,omitempty"`   // danger | success | primary (set automatically by meaning)
+	Icon   string  `json:"icon_custom_emoji_id,omitempty"`
 }
 
 // WebApp is a Mini App address for a button.
@@ -147,6 +160,40 @@ type HTTPAPI struct {
 	Token  string
 	Base   string // default https://api.telegram.org
 	Client *http.Client
+	// Emoji is the custom emoji theme (plain emoji → custom emoji id).
+	Emoji func() map[string]string
+	es    emojiState
+}
+
+// sendStyled sends a text-or-caption method with the look applied: animated
+// emoji, coloured buttons and an effect from ctx; when Telegram refuses the
+// custom emoji it is sent again plain.
+func (a *HTTPAPI) sendStyled(ctx context.Context, method, textKey string, p map[string]any, kb *Keyboard, out any) error {
+	theme := a.emojiTheme()
+	raw, _ := p[textKey].(string)
+	if len(theme) > 0 {
+		p[textKey] = decorate(raw, theme)
+	}
+	if kb != nil {
+		p["reply_markup"] = styleKeyboard(kb, theme)
+	}
+	if fx := effectOf(ctx); fx != "" && method != "editMessageText" {
+		p["message_effect_id"] = fx
+	}
+	err := a.callJSON(ctx, method, p, out)
+	if err != nil && len(theme) > 0 && emojiError(err) {
+		a.emojiRefused()
+		p[textKey] = raw
+		if kb != nil {
+			p["reply_markup"] = plainKeyboard(styleKeyboard(kb, nil))
+		}
+		err = a.callJSON(ctx, method, p, out)
+	}
+	if err != nil && p["message_effect_id"] != nil && strings.Contains(strings.ToUpper(err.Error()), "EFFECT") {
+		delete(p, "message_effect_id")
+		err = a.callJSON(ctx, method, p, out)
+	}
+	return err
 }
 
 func (a *HTTPAPI) url(method string) string {
@@ -214,14 +261,11 @@ func (a *HTTPAPI) Updates(ctx context.Context, offset int64) ([]Update, error) {
 
 func (a *HTTPAPI) Send(ctx context.Context, chat int64, text string, kb *Keyboard, replyTo int64) (int64, error) {
 	p := map[string]any{"chat_id": chat, "text": text, "parse_mode": "HTML", "link_preview_options": map[string]bool{"is_disabled": true}}
-	if kb != nil {
-		p["reply_markup"] = kb
-	}
 	if replyTo != 0 {
 		p["reply_parameters"] = map[string]any{"message_id": replyTo, "allow_sending_without_reply": true}
 	}
 	var m Message
-	err := a.callJSON(ctx, "sendMessage", p, &m)
+	err := a.sendStyled(ctx, "sendMessage", "text", p, kb, &m)
 	return m.ID, err
 }
 
@@ -247,10 +291,7 @@ func (a *HTTPAPI) SendPhoto(ctx context.Context, chat int64, png []byte, caption
 // EditText redraws a message in place (one screen per chat).
 func (a *HTTPAPI) EditText(ctx context.Context, chat, msgID int64, text string, kb *Keyboard) error {
 	p := map[string]any{"chat_id": chat, "message_id": msgID, "text": text, "parse_mode": "HTML", "link_preview_options": map[string]bool{"is_disabled": true}}
-	if kb != nil {
-		p["reply_markup"] = kb
-	}
-	err := a.callJSON(ctx, "editMessageText", p, nil)
+	err := a.sendStyled(ctx, "editMessageText", "text", p, kb, nil)
 	if err != nil && bytes.Contains([]byte(err.Error()), []byte("message is not modified")) {
 		return errNotModified
 	}
@@ -302,8 +343,5 @@ func (a *HTTPAPI) SendDocument(ctx context.Context, chat int64, name string, dat
 // SendPhotoID re-sends a photo Telegram already has (by file_id).
 func (a *HTTPAPI) SendPhotoID(ctx context.Context, chat int64, fileID, caption string, kb *Keyboard) error {
 	p := map[string]any{"chat_id": chat, "photo": fileID, "caption": caption, "parse_mode": "HTML"}
-	if kb != nil {
-		p["reply_markup"] = kb
-	}
-	return a.callJSON(ctx, "sendPhoto", p, nil)
+	return a.sendStyled(ctx, "sendPhoto", "caption", p, kb, nil)
 }

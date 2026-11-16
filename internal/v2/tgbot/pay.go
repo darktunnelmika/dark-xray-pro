@@ -250,7 +250,7 @@ func (b *Bot) decideTopup(ctx context.Context, chat int64, idText string, approv
 	}
 	if approve {
 		b.send(ctx, chat, fmt.Sprintf("✅ شارژ #%s تأیید شد (%s تومان).", faInt(t.ID), faMoney(t.Amount)), nil)
-		b.send(ctx, t.Chat, fmt.Sprintf("✅ کیف پول شما %s تومان شارژ شد.\n💰 موجودی: <b>%s تومان</b>", faMoney(t.Amount), faMoney(t.Balance)), &Keyboard{Rows: [][]Button{row(cbBtn("🛒 خرید سرویس", "shop"), cbBtn("💰 کیف پول", "wallet"))}})
+		b.celebrate(ctx, t.Chat, fmt.Sprintf("✅ کیف پول شما %s تومان شارژ شد.\n💰 موجودی: <b>%s تومان</b>", faMoney(t.Amount), faMoney(t.Balance)), &Keyboard{Rows: [][]Button{row(cbBtn("🛒 خرید سرویس", "shop"), cbBtn("💰 کیف پول", "wallet"))}}, EffectParty)
 	} else {
 		b.send(ctx, chat, fmt.Sprintf("شارژ #%s رد شد.", faInt(t.ID)), nil)
 		b.send(ctx, t.Chat, "❌ رسید شارژ کیف پول تأیید نشد. اگر مبلغ را واریز کرده‌اید، با پشتیبانی در تماس باشید.", &Keyboard{Rows: [][]Button{row(cbBtn("💬 پشتیبانی", "support"), cbBtn("« منو", "home"))}})
@@ -265,5 +265,5 @@ func (b *Bot) payToman(ctx context.Context, chat int64, productID, renew string)
 		return
 	}
 	b.announceOrders(ctx)
-	b.send(ctx, chat, fmt.Sprintf("✅ از کیف پول پرداخت شد: <code>%s</code>\nموجودی باقی‌مانده: %s تومان", esc(email), faMoney(left)), nil)
+	b.celebrate(ctx, chat, fmt.Sprintf("✅ از کیف پول پرداخت شد: <code>%s</code>\nموجودی باقی‌مانده: %s تومان", esc(email), faMoney(left)), nil, EffectLike)
 }
