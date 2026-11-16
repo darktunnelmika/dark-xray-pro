@@ -368,6 +368,30 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 		list, err := s.Ledger(r.Context(), rep, before, 100)
 		reply(w, list, err)
 	}))
+	mux.HandleFunc("GET /api/v2/rep/overview", member(func(w http.ResponseWriter, r *http.Request) {
+		p := who(r)
+		rep := r.URL.Query().Get("rep")
+		if p.Role == "rep" && !(rep != "" && s.IsSellerOf(r.Context(), p.RepID, rep)) {
+			rep = p.RepID
+		}
+		if rep == "" {
+			reply(w, nil, ErrNotFound)
+			return
+		}
+		list, err := s.RepOverviews(r.Context(), rep, true)
+		if err == nil && len(list) == 0 {
+			err = ErrNotFound
+		}
+		if err != nil {
+			reply(w, nil, err)
+			return
+		}
+		reply(w, list[0], nil)
+	}))
+	mux.HandleFunc("GET /api/v2/admin/reps/overview", guard(func(w http.ResponseWriter, r *http.Request) {
+		list, err := s.RepOverviews(r.Context(), "", false)
+		reply(w, list, err)
+	}))
 	// Sub-sellers, managed by their parent representative.
 	repOnly := func(h http.HandlerFunc) http.HandlerFunc {
 		return member(func(w http.ResponseWriter, r *http.Request) {

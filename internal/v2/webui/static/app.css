@@ -812,3 +812,19 @@ dialog::backdrop { background: rgb(4 6 10 / .6); backdrop-filter: blur(3px); }
 .node-gauges .gauge .ring b { font-size: 13px; }
 .node-gauges .full { grid-column: 1 / -1; }
 .gauge .g-v { white-space: nowrap; }
+
+/* Resellers: credit hero, renew cost, reseller table */
+.chip[aria-pressed="true"] { color: var(--text); border-color: color-mix(in oklab, var(--ion) 60%, transparent); background: color-mix(in oklab, var(--ion) 14%, var(--surface-2)); }
+a.kpi { color: inherit; text-decoration: none; transition: border-color .15s; }
+a.kpi:hover { border-color: color-mix(in oklab, var(--ion) 45%, transparent); }
+.credit-hero { display: grid; gap: 14px 28px; grid-template-columns: auto 1fr auto; align-items: center; padding: 20px 22px; margin-block-end: var(--gap);
+  background: linear-gradient(135deg, color-mix(in oklab, var(--ion) 16%, var(--surface)) 0%, var(--surface) 70%); }
+.credit-hero .k { color: var(--muted); font-size: 13px; }
+.credit-hero .big { font-size: clamp(30px, 5vw, 44px); font-weight: 800; letter-spacing: -.03em; line-height: 1.1; color: var(--ion); }
+.credit-month { display: grid; gap: 6px; }
+.credit-actions { justify-content: flex-end; }
+@media (max-width: 760px) { .credit-hero { grid-template-columns: 1fr; } .credit-actions { justify-content: flex-start; } }
+.cost { display: grid; gap: 4px; padding: 12px 14px; border-radius: 12px; background: var(--surface-2); border: 1px solid var(--glass-line); font-size: 14px; }
+.cost.bad { border-color: color-mix(in oklab, var(--bad) 55%, transparent); color: var(--bad); }
+.reps-table td { vertical-align: middle; }
+.reps-table .name { font-weight: 700; }

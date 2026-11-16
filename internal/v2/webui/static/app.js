@@ -218,9 +218,9 @@ function routesFor(m) {
     return r;
   }
   if (m && m.role === "rep") {
-    const r = { clients: viewClients, online: viewOnline };
+    const r = { dashboard: viewRepDashboard, clients: viewClients, online: viewOnline, credit: viewCredit };
     if (m.can_sell) r.sellers = viewSellers;
-    r.shop = viewShop; r.activity = viewActivity; r.settings = viewSettings;
+    r.shop = viewShop; r.settings = viewSettings;
     return r;
   }
   return allRoutes;
@@ -258,6 +258,7 @@ const ICONS = {
   shop: "M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4zM3 6h18M16 10a4 4 0 0 1-8 0",
   finance: "M3 3v18h18M7 15l4-4 3 3 6-6",
   activity: "M22 12h-4l-3 9L9 3l-3 9H2",
+  credit: "M2 7h20v12H2zM2 11h20M6 15h4",
   staff: "M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10zM9 12l2 2 4-4",
   settings: "M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6",
   routing: "M6 3v12M18 9v12M6 15a3 3 0 1 0 0 6 3 3 0 0 0 0-6zM18 3a3 3 0 1 0 0 6 3 3 0 0 0 0-6zM6 15c0-4 12-2 12-6",
@@ -386,7 +387,7 @@ const NAV_GROUPS = [
   ["overview", ["dashboard", "online"]],
   ["people", ["clients", "groups", "reps", "sellers"]],
   ["infra", ["inbounds", "nodes", "routing"]],
-  ["sales", ["shop", "finance"]],
+  ["sales", ["shop", "credit", "finance"]],
   ["system", ["activity", "staff", "settings"]],
 ];
 const NAV_LABELS = { fa: { overview: "نمای کلی", people: "کاربران و نماینده‌ها", infra: "زیرساخت", sales: "فروش", system: "سیستم" },
@@ -1151,7 +1152,7 @@ async function viewClients() {
     const run = async (fn) => { let n = 0; for (const c of pick) { try { await fn(c); n++; } catch {} } toast(L.done.replace("{n}", fmtNum(n))); selected.clear(); route(); };
     fill(bulkBar,
       h("b", {}, L.sel.replace("{n}", fmtNum(selected.size))),
-      owner ? h("button", { onclick: () => bulkForm(emails) }, t("bulkRenew")) : null,
+      owner ? h("button", { onclick: () => bulkForm(emails) }, t("bulkRenew")) : (me.policy && me.policy.DenyRenew ? null : h("button", { onclick: () => renewForm(list.filter((c) => emails.includes(c.Email))) }, t("bulkRenew"))),
       owner ? h("button", { onclick: () => bulkSettingsForm(emails, inbounds, ctx.reps) }, lang === "fa" ? "تغییر تنظیمات" : "Change settings") : null,
       owner ? h("button", { onclick: async () => { if (await confirmText(L.resetAsk.replace("{x}", `${fmtNum(emails.length)}`))) run((c) => api("POST", `/api/v2/admin/clients/${encodeURIComponent(c.Email)}/reset`)); } }, L.reset) : null,
       h("button", { class: "ghost", onclick: () => run((c) => putToggle(c, true)) }, L.enable),
@@ -1389,6 +1390,7 @@ function clientCard(c, ctx, selected, onSelect) {
     c.VolumeBytes > 0 ? h("div", { class: "bar" }, h("i", { class: pct > 90 ? "bad" : pct > 75 ? "warn" : "", style: `inline-size:${pct}%` })) : null,
     h("div", { class: "row" },
       h("button", { onclick: () => showSub(c) }, t("subscription")),
+      me.role === "rep" && me.policy && me.policy.DenyRenew ? null : h("button", { class: "ghost", onclick: () => renewForm([c]) }, lang === "fa" ? "تمدید" : "Renew"),
       h("button", { class: "ghost", onclick: () => clientForm(c, inbounds, ctx) }, t("edit")),
       h("button", { class: "ghost", onclick: () => usageChart(c) }, t("usageChart")),
       me.role === "rep" && me.policy && !me.policy.CanDelete ? null : h("button", { class: "ghost danger spacer", onclick: async () => {
@@ -1440,6 +1442,7 @@ async function viewClient() {
       ring(0, c.MaxIPs ? fmtNum(c.MaxIPs) : "∞", t("maxIPs").split(" (")[0], `${t("last30Traffic")}: ${bytes(sum30)}`, false, true)),
     h("div", { class: "hero-actions" },
       url ? h("button", { class: "primary", onclick: () => copy(url) }, fa ? "کپی لینک اشتراک" : "Copy subscription link") : null,
+      me.role === "rep" && me.policy && me.policy.DenyRenew ? null : h("button", { onclick: () => renewForm([c]) }, fa ? "تمدید" : "Renew"),
       canQuick ? h("button", { onclick: () => quick({ AddDays: 30, Enable: true }, fa ? "۳۰ روز اضافه شد" : "30 days added") }, fa ? "+۳۰ روز" : "+30 days") : null,
       canQuick ? h("button", { onclick: () => quick({ AddGB: 10, Enable: true }, fa ? "۱۰ گیگ اضافه شد" : "10 GB added") }, fa ? "+۱۰ گیگ" : "+10 GB") : null,
       canQuick ? h("button", { class: "ghost", onclick: () => quick({ Enable: !c.Enabled }, c.Enabled ? (fa ? "غیرفعال شد" : "Disabled") : (fa ? "فعال شد" : "Enabled")) }, c.Enabled ? (fa ? "غیرفعال کردن" : "Disable") : (fa ? "فعال کردن" : "Enable")) : null,
@@ -3192,35 +3195,6 @@ async function viewSellers() {
     h("div", { class: "list" }, cards.length ? cards : h("p", { class: "muted" }, t("empty"))));
 }
 
-async function viewReps() {
-  const [reps, inbounds] = await Promise.all([api("GET", "/api/v2/admin/reps"), api("GET", "/api/v2/admin/inbounds")]);
-  const cards = (reps || []).map((r) => h("div", { class: "card item" },
-    h("div", { class: "head" }, h("span", { class: "name" }, r.Name || r.ID), h("span", { class: "badge" }, r.ID),
-      r.ParentID ? h("span", { class: "badge" }, `${t("subOf")} ${r.ParentID}`) : null,
-      h("span", { class: `badge ${r.Enabled ? "good" : "bad"} spacer` }, t(r.Enabled ? "enabled" : "disabled"))),
-    h("div", { class: "muted small" }, `${t("volumeCredit")}: ${bytes(r.VolumeCredit)} · ${t("units")}: ${fmtNum(r.UnlimitedUnits)} · ${t("clientsCount", { n: fmtNum(r.Clients) })} · ${lang === "fa" ? "مصرف کل" : "used"}: ${bytes(r.UsedBytes || 0)}`),
-    h("div", { class: "muted small" }, policySummary(r.Policy)),
-    h("div", { class: "row" }, h("button", { onclick: () => creditForm(r) }, t("addCredit")),
-      h("button", { class: "ghost", onclick: () => policyForm(r, inbounds) }, t("policy")),
-      h("button", { class: "ghost", onclick: () => paymentForm(r) }, t("payment")),
-      h("button", { class: "ghost", onclick: () => openModal(lang === "fa" ? `برند و صفحهٔ اشتراک · ${r.Name || r.ID}` : `Brand & subscription page · ${r.Name || r.ID}`, repBrandCard(`/api/v2/admin/reps/${encodeURIComponent(r.ID)}/brand`)) }, lang === "fa" ? "صفحهٔ اشتراک" : "Sub page"),
-      h("button", { class: "ghost", onclick: () => openModal(lang === "fa" ? `ربات و کارت · ${r.Name || r.ID}` : `Bot & card · ${r.Name || r.ID}`, h("div", { class: "form" }, repBotCard(`/api/v2/admin/reps/${encodeURIComponent(r.ID)}/bot`), sellerCardCard(`/api/v2/shop/card?seller=${encodeURIComponent(r.ID)}`))) }, lang === "fa" ? "ربات و کارت" : "Bot & card"),
-      h("a", { class: "btn ghost", href: `#/activity?rep=${encodeURIComponent(r.ID)}` }, t("activity")),
-      h("button", { class: "ghost", onclick: () => repForm(r) }, t("edit")),
-      h("button", { class: "ghost danger", onclick: async () => {
-        const fa = lang === "fa";
-        const msg = r.Clients
-          ? (fa ? `نمایندهٔ ${r.Name || r.ID} همراه زیرفروشنده‌ها و ${fmtNum(r.Clients)} کلاینتش حذف شود؟ کلاینت‌ها قطع می‌شوند و این کار برگشت ندارد.` : `Delete ${r.Name || r.ID}, its sub-sellers and its ${r.Clients} clients? The clients stop working; this cannot be undone.`)
-          : (fa ? `نمایندهٔ ${r.Name || r.ID} و زیرفروشنده‌هایش حذف شود؟` : `Delete ${r.Name || r.ID} and its sub-sellers?`);
-        if (!(await confirmAction(msg, t("delete")))) return;
-        await guarded(() => api("DELETE", `/api/v2/admin/reps/${encodeURIComponent(r.ID)}?clients=1`));
-        toast(fa ? "حذف شد" : "Deleted"); route();
-      } }, t("delete")))));
-  return h("div", {},
-    h("div", { class: "row" }, h("h1", {}, t("reps")), h("button", { class: "primary spacer", onclick: () => repForm(null) }, t("add"))),
-    h("div", { class: "list" }, cards.length ? cards : h("p", { class: "muted" }, t("empty"))));
-}
-
 function repForm(r) {
   const id = h("input", { required: true, pattern: "[a-z0-9][a-z0-9._-]{0,62}", value: r ? r.ID : "", disabled: !!r });
   const name = h("input", { value: r ? r.Name : "" });
@@ -3688,6 +3662,263 @@ async function viewActivity() {
     first.length ? h("div", { class: "table-wrap" }, h("table", { class: "table" },
       h("thead", {}, h("tr", {}, h("th", {}, t("when")), owner && !rep ? h("th", {}, t("reps")) : null, h("th", {}, t("what")), h("th", {}, t("credit")), h("th", {}, t("who")))),
       body)) : h("p", { class: "muted" }, t("empty")), more);
+}
+
+// ---- Resellers: dashboard, credit history, renewals -------------------
+
+// A small two-series chart for reseller days: a = ion line, b = ember line.
+function repChart(days, a, b) {
+  return barsSvg(days.map((d) => ({ Day: d.day, Down: d[a] || 0, Up: b ? d[b] || 0 : 0 })), 1100);
+}
+
+function repLegend(a, b) {
+  return h("span", { class: "spacer legend" }, h("i", { class: "sw down" }), a, b ? h("i", { class: "sw up" }) : null, b || "");
+}
+
+const fmtWhen = (u) => new Intl.DateTimeFormat(lang === "fa" ? "fa-IR" : "en-GB", { dateStyle: "short", timeStyle: "short" }).format(new Date(u * 1000));
+
+function ledgerDelta(e) {
+  return [e.VolumeDelta ? `${e.VolumeDelta > 0 ? "+" : "−"}${bytes(Math.abs(e.VolumeDelta))}` : "",
+    e.UnitsDelta ? `${e.UnitsDelta > 0 ? "+" : "−"}${fmtNum(Math.abs(e.UnitsDelta))} ${t("units")}` : "",
+    e.Amount ? `${t("amount")} ${money(e.Amount)}` : ""].filter(Boolean).join(" · ");
+}
+
+// What a ledger row means, in plain words.
+function ledgerKind(e) {
+  const fa = lang === "fa";
+  if (e.Kind === "refund" && /expired/.test(e.Note || "")) return [fa ? "برگشت انقضا" : "Expired, returned", "good"];
+  if (e.Kind === "refund") return [fa ? "برگشت حذف" : "Returned on delete", "good"];
+  if (e.Kind === "charge") return [fa ? "فروش" : "Sale", ""];
+  if (e.Kind === "adjust" && (e.Actor === "import" || e.Actor === "old panel")) return [fa ? "پنل قبلی" : "Old panel", ""];
+  if (e.Kind === "adjust") return [e.VolumeDelta < 0 || e.UnitsDelta < 0 ? (fa ? "کسر مالک" : "Owner removed") : (fa ? "شارژ مالک" : "Owner top-up"), e.VolumeDelta < 0 ? "warn" : "good"];
+  return [t(`kind_${e.Kind}`), e.Kind === "delete" ? "bad" : e.Kind === "transfer" ? "warn" : ""];
+}
+
+// #/dashboard for a reseller, #/repview?rep=<id> for the owner.
+async function viewRepDashboard() {
+  const fa = lang === "fa";
+  const owner = me.role === "owner";
+  const rep = new URLSearchParams(location.hash.split("?")[1] || "").get("rep") || "";
+  const o = await api("GET", `/api/v2/rep/overview${rep ? `?rep=${encodeURIComponent(rep)}` : ""}`);
+  const cls = owner ? [] : await api("GET", "/api/v2/admin/clients").catch(() => []);
+  const kpi = (ic, k, v, href) => h(href ? "a" : "div", { class: "card kpi", href }, h("div", { class: "k" }, icon(ic), k), h("div", { class: "v" }, v));
+  const chip = (k, v, c) => h("span", { class: `badge ${c || ""}` }, `${k}: `, h("b", { dir: "ltr" }, v));
+  const hero = h("div", { class: "card credit-hero" },
+    h("div", {},
+      h("div", { class: "k" }, fa ? "اعتبار حجمی باقی‌مانده" : "Volume credit left"),
+      h("div", { class: "big", dir: "ltr" }, bytes(o.volume_credit)),
+      o.unlimited_units ? h("div", { class: "small muted" }, `${t("units")}: ${fmtNum(o.unlimited_units)}`) : null),
+    h("div", { class: "credit-month" },
+      h("div", { class: "small muted" }, fa ? "این ماه" : "This month"),
+      h("div", { class: "row tight" },
+        chip(fa ? "فروش" : "Sold", bytes(o.month_sold)),
+        chip(fa ? "تعداد فروش" : "Sales", fmtNum(o.month_sales)),
+        chip(fa ? "برگشتی" : "Returned", bytes(o.month_back), "good"),
+        o.month_topup ? chip(fa ? "شارژ مالک" : "Top-ups", bytes(o.month_topup), "good") : null)),
+    h("div", { class: "row tight credit-actions" },
+      h("a", { class: "btn", href: owner ? `#/activity?rep=${encodeURIComponent(o.rep_id)}` : "#/credit" }, fa ? "تاریخچهٔ اعتبار" : "Credit history"),
+      owner ? null : h("a", { class: "btn primary", href: "#/clients" }, fa ? "کلاینت‌ها" : "Clients")));
+  const recent = h("div", { class: "card form span2" }, h("div", { class: "row" }, h("h2", {}, fa ? "آخرین تراکنش‌ها" : "Latest activity"),
+    h("a", { class: "spacer small", href: owner ? `#/activity?rep=${encodeURIComponent(o.rep_id)}` : "#/credit" }, fa ? "همه ›" : "All ›")),
+    (o.recent || []).length ? h("div", { class: "form" }, o.recent.map((e) => {
+      const [k, c] = ledgerKind(e);
+      return h("div", { class: "row small" }, h("span", { class: `badge ${c}` }, k), e.ClientEmail ? h("span", {}, e.ClientEmail) : null,
+        h("span", { class: "mono", dir: "ltr" }, ledgerDelta(e)), h("span", { class: "muted spacer" }, fmtWhen(e.Unix)));
+    })) : h("p", { class: "muted small" }, t("empty")));
+  return h("div", {},
+    h("div", { class: "row" }, owner ? h("a", { class: "btn ghost back", href: "#/reps" }, fa ? "›" : "‹") : null,
+      h("h1", {}, owner ? o.name || o.rep_id : t("dashboard")),
+      o.last_login ? h("span", { class: "muted small spacer" }, `${fa ? "آخرین ورود" : "Last sign-in"}: ${fmtWhen(o.last_login)}`) : null),
+    hero,
+    h("div", { class: "kpis" },
+      kpi("clients", fa ? "کلاینت فعال" : "Active", h("span", { dir: "ltr" }, fmtNum(o.active), h("small", {}, ` / ${fmtNum(o.clients)}`)), owner ? null : "#/clients"),
+      kpi("activity", fa ? "رو به اتمام" : "Ending soon", fmtNum(o.expiring), owner ? null : "#/clients"),
+      kpi("power", fa ? "تمام‌شده" : "Ended", fmtNum(o.ended), owner ? null : "#/clients"),
+      kpi("online", fa ? "آنلاین" : "Online", fmtNum(o.online), owner ? null : "#/online"),
+      kpi("traffic", fa ? "مصرف کل کاربران" : "Users' total traffic", bytes(o.used_bytes))),
+    h("div", { class: "dash2" },
+      h("div", { class: "card form span2" }, h("div", { class: "row" }, h("h2", {}, fa ? "فروش و برگشتی ۳۰ روز" : "Sold and returned, 30 days"),
+        repLegend(fa ? "فروش" : "Sold", fa ? "برگشتی" : "Returned")), repChart(o.days || [], "sold", "back")),
+      owner ? null : endingSoonCard(cls || []),
+      h("div", { class: "card form span2" }, h("div", { class: "row" }, h("h2", {}, fa ? "مصرف کاربران ۳۰ روز" : "Users' traffic, 30 days"),
+        repLegend(fa ? "مصرف" : "Traffic")), repChart(o.days || [], "traffic")),
+      recent));
+}
+
+// #/credit: a reseller's own credit history with the balance after each row.
+async function viewCredit() {
+  const fa = lang === "fa";
+  const o = await api("GET", "/api/v2/rep/overview");
+  let all = [];
+  let before = 0;
+  for (let i = 0; i < 10; i++) { // up to 1000 rows
+    const page = await api("GET", `/api/v2/rep/ledger${before ? `?before=${before}` : ""}`);
+    all = all.concat(page || []);
+    if (!page || page.length < 100) break;
+    before = page.at(-1).ID;
+  }
+  // Balance after each row: walk back from today's balance.
+  let bal = o.volume_credit;
+  for (const e of all) { e._bal = bal; bal -= e.VolumeDelta || 0; }
+  const kinds = [["", fa ? "همه" : "All"], ["sale", fa ? "فروش" : "Sales"], ["back", fa ? "برگشتی" : "Returned"], ["owner", fa ? "شارژ مالک" : "Owner"], ["other", fa ? "سایر" : "Other"]];
+  const group = (e) => e.Kind === "charge" ? "sale" : e.Kind === "refund" ? "back" : e.Kind === "adjust" && e.Actor !== "import" && e.Actor !== "old panel" ? "owner" : "other";
+  let f = "";
+  const body = h("tbody", {});
+  const draw = () => body.replaceChildren(...all.filter((e) => !f || group(e) === f).map((e) => {
+    const [k, c] = ledgerKind(e);
+    return h("tr", {}, h("td", { class: "small" }, fmtWhen(e.Unix)), h("td", {}, h("span", { class: `badge ${c}` }, k)),
+      h("td", { class: "small" }, e.ClientEmail || ""), h("td", { class: "mono small", dir: "ltr" }, ledgerDelta(e)),
+      h("td", { class: "mono small", dir: "ltr" }, e.VolumeDelta ? bytes(e._bal) : ""), h("td", { class: "small muted" }, e.Note || ""));
+  }));
+  const chips = h("div", { class: "chips" }, kinds.map(([k, label]) => {
+    const b = h("button", { type: "button", class: "chip", "aria-pressed": k === f ? "true" : "false", onclick: () => {
+      f = k; chips.querySelectorAll("button").forEach((x) => x.setAttribute("aria-pressed", x === b ? "true" : "false")); draw();
+    } }, label);
+    return b;
+  }));
+  // Month by month.
+  const months = {};
+  for (const e of all) {
+    const m = new Intl.DateTimeFormat(fa ? "fa-IR-u-ca-persian" : "en-GB", { year: "numeric", month: "long" }).format(new Date(e.Unix * 1000));
+    const x = months[m] || (months[m] = { sold: 0, back: 0, owner: 0, n: 0 });
+    const g = group(e);
+    if (g === "sale") { x.sold -= e.VolumeDelta; x.n++; } else if (g === "back") x.back += e.VolumeDelta; else if (g === "owner") x.owner += e.VolumeDelta;
+  }
+  const csv = () => {
+    const rows = [["time", "kind", "client", "volume_bytes", "units", "balance_bytes", "note"]].concat(all.map((e) => [new Date(e.Unix * 1000).toISOString(), e.Kind, e.ClientEmail, e.VolumeDelta, e.UnitsDelta, e._bal, (e.Note || "").replace(/[\r\n]/g, " ")]));
+    const blob = new Blob(["﻿" + rows.map((r) => r.map((v) => `"${String(v ?? "").replace(/"/g, '""')}"`).join(",")).join("\n")], { type: "text/csv" });
+    const a = h("a", { href: URL.createObjectURL(blob), download: "credit.csv" }); document.body.append(a); a.click(); a.remove();
+  };
+  return h("div", {},
+    h("div", { class: "row" }, h("h1", {}, fa ? "اعتبار من" : "My credit"), h("button", { class: "ghost spacer", onclick: csv }, fa ? "دانلود CSV" : "Download CSV")),
+    h("div", { class: "card credit-hero" }, h("div", {}, h("div", { class: "k" }, fa ? "اعتبار حجمی باقی‌مانده" : "Volume credit left"), h("div", { class: "big", dir: "ltr" }, bytes(o.volume_credit))),
+      h("div", { class: "small muted" }, fa ? "هر فروش از اعتبار کم می‌کند؛ حجم مصرف‌نشدهٔ کانفیگ منقضی‌شده و کانفیگ حذف‌شده خودکار برمی‌گردد." : "Every sale takes credit; the unused volume of expired or deleted configs comes back by itself.")),
+    Object.keys(months).length ? h("div", { class: "card form" }, h("h2", {}, fa ? "خلاصهٔ ماهانه" : "By month"),
+      h("div", { class: "table-wrap" }, h("table", { class: "table" },
+        h("thead", {}, h("tr", {}, ...[fa ? "ماه" : "Month", fa ? "فروش" : "Sold", fa ? "تعداد" : "Sales", fa ? "برگشتی" : "Returned", fa ? "شارژ مالک" : "Top-ups"].map((x) => h("th", {}, x)))),
+        h("tbody", {}, ...Object.entries(months).map(([m, x]) => h("tr", {}, h("td", {}, m), h("td", { dir: "ltr" }, bytes(x.sold)), h("td", {}, fmtNum(x.n)), h("td", { dir: "ltr" }, bytes(x.back)), h("td", { dir: "ltr" }, bytes(x.owner)))))))) : null,
+    h("div", { class: "card form" }, h("div", { class: "row" }, h("h2", {}, fa ? "تراکنش‌ها" : "Transactions"), h("span", { class: "spacer" }), chips),
+      all.length ? h("div", { class: "table-wrap" }, h("table", { class: "table" },
+        h("thead", {}, h("tr", {}, ...[t("when"), t("what"), fa ? "کلاینت" : "Client", t("credit"), fa ? "مانده" : "Balance", t("note")].map((x) => h("th", {}, x)))), body)) : h("p", { class: "muted" }, t("empty"))),
+    (draw(), null));
+}
+
+// Quick renewal of one or more clients: add volume and/or days, with the
+// cost against the reseller's credit shown before anything is saved.
+function renewForm(list) {
+  const fa = lang === "fa";
+  const rep = me.role === "rep";
+  const gb = h("input", { type: "number", min: 0, max: 100000, step: 1, value: 0, dir: "ltr" });
+  const days = h("input", { type: "number", min: 0, max: 3650, step: 1, value: 30, dir: "ltr" });
+  const presets = (inp, vals, unit) => h("div", { class: "chips" }, vals.map((v) => h("button", { type: "button", class: "chip", onclick: () => { inp.value = v; calc(); } }, `${fmtNum(v)} ${unit}`)));
+  const info = h("div", { class: "form" });
+  const err = h("div", { class: "error" });
+  const unl = list.filter((c) => c.Plan === "unlimited" || c.VolumeBytes < 0);
+  const now = Math.floor(Date.now() / 1000);
+  const term = (c) => c.DurationSeconds && !c.ExpiresUnix ? Math.ceil(c.DurationSeconds / 86400) : c.ExpiresUnix > now ? Math.ceil((c.ExpiresUnix - now) / 86400) : 0;
+  const unitsFor = (d) => (d > 0 ? Math.ceil(d / 30) : 0);
+  let cost = { bytes: 0, units: 0 };
+  const save = h("button", { class: "primary", type: "button", onclick: async () => {
+    err.textContent = "";
+    save.disabled = true;
+    let done = 0;
+    try {
+      for (const c of list) {
+        const addB = Math.round((+gb.value || 0) * 2 ** 30), addD = +days.value || 0;
+        const isUnl = c.Plan === "unlimited" || c.VolumeBytes < 0;
+        const body = { Email: c.Email, Enabled: true, MaxIPs: c.MaxIPs, Inbounds: c.Inbounds, VolumeBytes: isUnl ? -1 : c.VolumeBytes + addB,
+          ExpiresUnix: c.ExpiresUnix, DurationSeconds: c.DurationSeconds, Plan: isUnl ? "unlimited" : "volume" };
+        if (addD) {
+          if (c.DurationSeconds && !c.ExpiresUnix) body.DurationSeconds = c.DurationSeconds + addD * 86400;
+          else body.ExpiresUnix = Math.max(now, c.ExpiresUnix || now) + addD * 86400;
+        }
+        await api("PUT", `/api/v2/admin/clients/${encodeURIComponent(c.Email)}`, body);
+        done++;
+      }
+      document.getElementById("modal").close(); toast(fa ? `${fmtNum(done)} کلاینت تمدید شد` : `${done} renewed`); route();
+    } catch (e) {
+      err.textContent = (done ? (fa ? `${fmtNum(done)} مورد تمدید شد، بقیه نه: ` : `${done} renewed, then: `) : "") + e.message;
+      save.disabled = false;
+    }
+  } }, fa ? "تمدید" : "Renew");
+  const calc = () => {
+    const addB = Math.round((+gb.value || 0) * 2 ** 30), addD = +days.value || 0;
+    cost = { bytes: 0, units: 0 };
+    for (const c of list) {
+      if (c.Plan === "unlimited" || c.VolumeBytes < 0) {
+        if (addD) cost.units += Math.max(0, unitsFor(term(c) + addD) - unitsFor(term(c)));
+      } else cost.bytes += addB;
+    }
+    const credit = me.volume_credit || 0, units = me.unlimited_units || 0;
+    const short = rep && (cost.bytes > credit || cost.units > units);
+    save.disabled = (!addB && !addD) || short;
+    fill(info,
+      list.length > 1 ? h("div", { class: "small" }, fa ? `${fmtNum(list.length)} کلاینت انتخاب شده` : `${list.length} clients selected`) : null,
+      unl.length && addB ? h("div", { class: "small muted" }, fa ? "به کلاینت‌های نامحدود حجم اضافه نمی‌شود." : "Unlimited clients get no volume.") : null,
+      rep ? h("div", { class: `cost ${short ? "bad" : ""}` },
+        h("div", {}, `${fa ? "از اعتبار کم می‌شود" : "Takes from credit"}: `, h("b", { dir: "ltr" }, [cost.bytes ? bytes(cost.bytes) : "", cost.units ? `${fmtNum(cost.units)} ${t("units")}` : ""].filter(Boolean).join(" + ") || "0")),
+        h("div", {}, `${fa ? "مانده بعد از تمدید" : "Left after"}: `, h("b", { dir: "ltr" }, bytes(Math.max(0, credit - cost.bytes))), cost.units || units ? ` · ${fmtNum(Math.max(0, units - cost.units))} ${t("units")}` : ""),
+        short ? h("div", {}, fa ? "اعتبار کافی نیست." : "Not enough credit.") : null) : null);
+  };
+  gb.addEventListener("input", calc); days.addEventListener("input", calc);
+  calc();
+  openModal(list.length === 1 ? `${fa ? "تمدید" : "Renew"} · ${list[0].Email}` : (fa ? "تمدید گروهی" : "Renew selected"), h("div", { class: "form" },
+    h("label", {}, h("span", {}, fa ? "افزودن حجم (گیگ)" : "Add volume (GB)"), gb), presets(gb, [10, 20, 30, 50, 100], fa ? "گیگ" : "GB"),
+    h("label", {}, h("span", {}, fa ? "افزودن روز" : "Add days"), days), presets(days, [30, 60, 90], fa ? "روز" : "days"),
+    info, err), [save]);
+}
+
+// Owner: resellers as a table with this month's numbers; actions in a menu.
+async function viewReps() {
+  const fa = lang === "fa";
+  const [reps, inbounds, ov] = await Promise.all([api("GET", "/api/v2/admin/reps"), api("GET", "/api/v2/admin/inbounds"), api("GET", "/api/v2/admin/reps/overview").catch(() => [])]);
+  const byID = Object.fromEntries((ov || []).map((o) => [o.rep_id, o]));
+  const del = async (r) => {
+    const msg = r.Clients
+      ? (fa ? `نمایندهٔ ${r.Name || r.ID} همراه زیرفروشنده‌ها و ${fmtNum(r.Clients)} کلاینتش حذف شود؟ کلاینت‌ها قطع می‌شوند و این کار برگشت ندارد.` : `Delete ${r.Name || r.ID}, its sub-sellers and its ${r.Clients} clients? The clients stop working; this cannot be undone.`)
+      : (fa ? `نمایندهٔ ${r.Name || r.ID} و زیرفروشنده‌هایش حذف شود؟` : `Delete ${r.Name || r.ID} and its sub-sellers?`);
+    if (!(await confirmAction(msg, t("delete")))) return;
+    await guarded(() => api("DELETE", `/api/v2/admin/reps/${encodeURIComponent(r.ID)}?clients=1`));
+    toast(fa ? "حذف شد" : "Deleted"); route();
+  };
+  const menu = (r) => (e) => popMenu(e.currentTarget, (m) => {
+    const item = (label, fn, cls) => h("button", { class: `pm-item ${cls || ""}`, onclick: () => { m.remove(); fn(); } }, label);
+    m.append(
+      item(t("policy"), () => policyForm(r, inbounds)),
+      item(t("payment"), () => paymentForm(r)),
+      item(fa ? "صفحهٔ اشتراک" : "Sub page", () => openModal(`${fa ? "برند و صفحهٔ اشتراک" : "Brand & subscription page"} · ${r.Name || r.ID}`, repBrandCard(`/api/v2/admin/reps/${encodeURIComponent(r.ID)}/brand`))),
+      item(fa ? "ربات و کارت" : "Bot & card", () => openModal(`${fa ? "ربات و کارت" : "Bot & card"} · ${r.Name || r.ID}`, h("div", { class: "form" }, repBotCard(`/api/v2/admin/reps/${encodeURIComponent(r.ID)}/bot`), sellerCardCard(`/api/v2/shop/card?seller=${encodeURIComponent(r.ID)}`)))),
+      item(t("activity"), () => { location.hash = `#/activity?rep=${encodeURIComponent(r.ID)}`; }),
+      item(t("edit"), () => repForm(r)),
+      item(t("delete"), () => del(r), "bad"));
+  });
+  const rows = (reps || []).map((r) => {
+    const o = byID[r.ID] || {};
+    return h("tr", {},
+      h("td", {}, h("a", { class: "name", href: `#/repview?rep=${encodeURIComponent(r.ID)}` }, r.Name || r.ID),
+        h("div", { class: "small muted" }, r.ID, r.ParentID ? ` · ${t("subOf")} ${r.ParentID}` : "", r.Enabled ? "" : ` · ${t("disabled")}`)),
+      h("td", { dir: "ltr" }, h("b", {}, bytes(r.VolumeCredit)), r.UnlimitedUnits ? h("div", { class: "small muted" }, `${fmtNum(r.UnlimitedUnits)} ${t("units")}`) : null),
+      h("td", { dir: "ltr" }, bytes(o.month_sold || 0), h("div", { class: "small muted" }, `${fmtNum(o.month_sales || 0)} ${fa ? "فروش" : "sales"}`)),
+      h("td", {}, h("span", { dir: "ltr" }, `${fmtNum(o.active || 0)} / ${fmtNum(r.Clients)}`), o.expiring ? h("div", { class: "small" }, h("span", { class: "badge warn" }, `${fmtNum(o.expiring)} ${fa ? "رو به اتمام" : "ending"}`)) : null),
+      h("td", {}, fmtNum(o.online || 0)),
+      h("td", { dir: "ltr" }, bytes(r.UsedBytes || 0)),
+      h("td", { class: "small muted" }, o.last_login ? fmtWhen(o.last_login) : (fa ? "هرگز" : "never")),
+      h("td", {}, h("div", { class: "row tight" },
+        h("button", { onclick: () => creditForm(r) }, t("addCredit")),
+        h("button", { class: "ghost", "aria-label": fa ? "بیشتر" : "More", onclick: menu(r) }, "⋯"))));
+  });
+  const tot = (k) => (ov || []).reduce((a, o) => a + (o[k] || 0), 0);
+  return h("div", {},
+    h("div", { class: "row" }, h("h1", {}, t("reps")), h("button", { class: "primary spacer", onclick: () => repForm(null) }, t("add"))),
+    (reps || []).length ? h("div", { class: "kpis" },
+      h("div", { class: "card kpi" }, h("div", { class: "k" }, icon("reps"), fa ? "نماینده" : "Resellers"), h("div", { class: "v" }, fmtNum(reps.length))),
+      h("div", { class: "card kpi" }, h("div", { class: "k" }, icon("finance"), fa ? "اعتبار دست نماینده‌ها" : "Credit held"), h("div", { class: "v", dir: "ltr" }, bytes(reps.reduce((a, r) => a + r.VolumeCredit, 0)))),
+      h("div", { class: "card kpi" }, h("div", { class: "k" }, icon("shop"), fa ? "فروش این ماه" : "Sold this month"), h("div", { class: "v", dir: "ltr" }, bytes(tot("month_sold")))),
+      h("div", { class: "card kpi" }, h("div", { class: "k" }, icon("clients"), fa ? "کلاینت فعال" : "Active clients"), h("div", { class: "v" }, fmtNum(tot("active")))),
+      h("div", { class: "card kpi" }, h("div", { class: "k" }, icon("online"), fa ? "آنلاین" : "Online"), h("div", { class: "v" }, fmtNum(tot("online"))))) : null,
+    rows.length ? h("div", { class: "card table-wrap" }, h("table", { class: "table reps-table" },
+      h("thead", {}, h("tr", {}, ...[fa ? "نماینده" : "Reseller", t("volumeCredit"), fa ? "فروش این ماه" : "Sold this month", fa ? "فعال / کل" : "Active / all", fa ? "آنلاین" : "Online", fa ? "مصرف کل" : "Total traffic", fa ? "آخرین ورود" : "Last sign-in", ""].map((x) => h("th", {}, x)))),
+      h("tbody", {}, ...rows))) : h("p", { class: "muted" }, t("empty")));
 }
 
 // Daily traffic as a neon line chart: grid, glowing lines, soft area fill.
@@ -4634,7 +4865,7 @@ async function route() {
   } catch { return; }
   routes = routesFor(me);
   const first = Object.keys(routes)[0];
-  const hidden = { client: [viewClient, "clients"] };
+  const hidden = { client: [viewClient, "clients"], repview: [viewRepDashboard, "reps"] };
   const view = hidden[name] ? hidden[name][0] : routes[name] || routes[first];
   try {
     const content = await view();

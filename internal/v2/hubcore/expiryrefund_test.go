@@ -102,3 +102,28 @@ func (s *Store) mustClients(t *testing.T) []ClientView {
 	}
 	return list
 }
+
+func TestRepOverview(t *testing.T) {
+	s, now := newStore(t)
+	ctx := context.Background()
+	seed(t, s)
+	_ = s.PutRep(ctx, Rep{ID: "ali", Name: "Ali", Enabled: true})
+	_ = s.AdjustCredit(ctx, "owner", "ali", 100<<30, 0, "")
+	for i, days := range []int64{30, 2} {
+		c := Client{Email: []string{"r1", "r2"}[i], Enabled: true, VolumeBytes: 10 << 30, ExpiresUnix: now.Unix() + days*86400, Inbounds: []string{"de-vless"}}
+		if err := s.RepPutClient(ctx, "ali", "ali", c, "volume"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	list, err := s.RepOverviews(ctx, "ali", true)
+	if err != nil || len(list) != 1 {
+		t.Fatal(list, err)
+	}
+	o := list[0]
+	if o.VolumeCredit != 80<<30 || o.Clients != 2 || o.Active != 2 || o.Expiring != 1 || o.MonthSold != 20<<30 || o.MonthSales != 2 || o.MonthTopup != 100<<30 {
+		t.Fatalf("%+v", o)
+	}
+	if len(o.Days) != 30 || o.Days[29].Sold != 20<<30 || len(o.Recent) != 3 {
+		t.Fatalf("days %+v recent %d", o.Days[29], len(o.Recent))
+	}
+}
