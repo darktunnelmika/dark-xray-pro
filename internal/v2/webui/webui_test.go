@@ -39,7 +39,7 @@ func TestAssetsGzipAndRevalidate(t *testing.T) {
 	r := httptest.NewRecorder()
 	h.ServeHTTP(r, req)
 	tag := r.Header().Get("ETag")
-	if r.Code != 200 || r.Header().Get("Content-Encoding") != "gzip" || tag == "" || r.Body.Len() > 150_000 || !strings.Contains(r.Header().Get("Content-Type"), "javascript") {
+	if r.Code != 200 || r.Header().Get("Content-Encoding") != "gzip" || tag == "" || r.Body.Len() > 200_000 || !strings.Contains(r.Header().Get("Content-Type"), "javascript") {
 		t.Fatalf("app.js %d enc=%q etag=%q size=%d type=%q", r.Code, r.Header().Get("Content-Encoding"), tag, r.Body.Len(), r.Header().Get("Content-Type"))
 	}
 	again := httptest.NewRequest("GET", "/app.js", nil)

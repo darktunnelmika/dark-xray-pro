@@ -146,12 +146,11 @@ WHERE id=? AND volume_credit>=? AND unlimited_units>=?`, net, res.ChargedUnits, 
 	if err := keepRepUsage(ctx, tx, email); err != nil {
 		return res, err
 	}
-	if used > 0 {
-		var up, down int64
-		_ = tx.QueryRowContext(ctx, `SELECT up,down FROM client_usage WHERE email=?`, email).Scan(&up, &down)
-		if _, err := tx.ExecContext(ctx, `INSERT INTO usage_resets(email,unix,up,down,reason) VALUES(?,?,?,?,?)`, email, now, up, down, "renew"); err != nil {
-			return res, err
-		}
+	// Every renewal is logged (with zero use too): reports count renewals here.
+	var up, down int64
+	_ = tx.QueryRowContext(ctx, `SELECT up,down FROM client_usage WHERE email=?`, email).Scan(&up, &down)
+	if _, err := tx.ExecContext(ctx, `INSERT INTO usage_resets(email,unix,up,down,reason) VALUES(?,?,?,?,?)`, email, now, up, down, "renew"); err != nil {
+		return res, err
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE client_usage SET up=0, down=0 WHERE email=?`, email); err != nil {
 		return res, err
