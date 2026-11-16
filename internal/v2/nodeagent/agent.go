@@ -17,7 +17,7 @@ import (
 )
 
 // Version is reported to the HUB.
-var Version = "v2.11.0"
+var Version = "v2.12.0"
 
 // Applier is the part of Supervisor the agent uses.
 type Applier interface {
@@ -434,7 +434,7 @@ func (a *Agent) enforce(ctx context.Context) {
 		}
 		online[e] = append(online[e], ips...)
 	}
-	online = DropTrusted(online, state.TrustedIPs)
+	online = Collapse(DropTrusted(online, state.TrustedIPs))
 	d := Evaluate(now.Unix(), state.Users, a.localUsed(), online)
 	a.mu.Lock()
 	// The HUB counts addresses on every Node together; trust its list only

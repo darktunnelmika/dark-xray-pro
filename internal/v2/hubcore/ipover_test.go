@@ -22,9 +22,10 @@ func TestIPOverCountsEveryNode(t *testing.T) {
 	ins("c", "de-1", `["4.4.4.4"]`, n)
 	ins("c", "fi-1", `["5.5.5.5"]`, n-120) // a stale report does not count
 	ins("d", "de-1", `["6.6.6.6"]`, n)
-	ins("d", "fi-1", `["6.6.6.6"]`, n) // the same address on two nodes is one
+	ins("d", "fi-1", `["6.6.6.6"]`, n)                            // the same address on two nodes is one
+	ins("f", "de-1", `["2a01:5ec0:1::1","2a01:5ec0:1::abcd"]`, n) // one phone rotating IPv6
 	limits := []wire.UserLimit{{Email: "a", Enabled: true, MaxIPs: 1}, {Email: "b", Enabled: true, MaxIPs: 1},
-		{Email: "c", Enabled: true, MaxIPs: 1}, {Email: "d", Enabled: true, MaxIPs: 1}, {Email: "e", Enabled: true, MaxIPs: 0}}
+		{Email: "c", Enabled: true, MaxIPs: 1}, {Email: "d", Enabled: true, MaxIPs: 1}, {Email: "f", Enabled: true, MaxIPs: 1}, {Email: "e", Enabled: true, MaxIPs: 0}}
 	got := s.ipOver(ctx, n, limits, []string{"10.0.0.0/8"})
 	if len(got) != 1 || got[0] != "a" {
 		t.Fatalf("only a is over across nodes: %v", got)

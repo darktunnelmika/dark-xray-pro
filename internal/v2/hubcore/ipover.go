@@ -53,7 +53,7 @@ func (s *Store) ipOver(ctx context.Context, now int64, limits []wire.UserLimit, 
 			if seen[email] == nil {
 				seen[email] = map[string]bool{}
 			}
-			seen[email][ip] = true
+			seen[email][countKey(ip)] = true
 		}
 	}
 	var out []string
@@ -96,4 +96,14 @@ func isTrusted(s string, nets []*net.IPNet) bool {
 		}
 	}
 	return false
+}
+
+// countKey: an IPv6 address counts by its /64 (phones rotate addresses
+// inside it); IPv4 as itself. Same rule as the Node's.
+func countKey(s string) string {
+	ip := net.ParseIP(s)
+	if ip == nil || ip.To4() != nil {
+		return s
+	}
+	return ip.Mask(net.CIDRMask(64, 128)).String() + "/64"
 }

@@ -437,6 +437,9 @@ func TestUserChangesDoNotRestartXray(t *testing.T) {
 	st.online = map[string][]string{"alice": {"1.1.1.1", "2.2.2.2"}}
 	st.mu.Unlock()
 	a.enforce(ctx)
+	now = now.Add(50 * time.Second) // past the grace
+	a.Exchange(ctx)
+	a.enforce(ctx)
 	// HUB adds carol to the same inbound: only users change.
 	hub.mu.Lock()
 	hub.resp.ConfigRevision = 2
