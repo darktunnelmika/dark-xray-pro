@@ -854,6 +854,8 @@ function nodeRow(n) {
     h("div", { class: "nr-name" }, h("span", { class: `dot ${n.online ? "on" : ""}` }),
       h("div", { style: "min-inline-size:0" }, h("span", {}, n.Name || n.ID, n.PublicIP ? h("span", { class: "nr-ip" }, n.PublicIP) : null),
         h("div", { class: "nr-sub" }, [n.ID, n.AgentVersion || "—", n.xray_version ? `xray ${n.xray_version}` : null].filter(Boolean).join(" · "), n.update_available ? (fa ? " · به‌روزرسانی" : " · update") : "",
+          n.online && host.hub_rtt_ms ? h("span", { class: `tun-chip ${host.hub_fails_1h ? "down" : "up"}`, dir: "ltr", title: fa ? "ارتباط این نود با سرور اصلی؛ قطعی‌ها = همگام‌سازی‌های ناموفق در ساعت اخیر" : "Link to the HUB; failures = failed syncs in the last hour" },
+            `⇆ hub ${Math.round(host.hub_rtt_ms)}ms${host.hub_fails_1h ? ` · ${host.hub_fails_1h}✕/1h` : ""}`) : null,
           ...(n.online ? host.tunnels || [] : []).map((tn) => h("span", { class: `tun-chip ${tn.up ? "up" : "down"}`, dir: "ltr" }, `⇄ ${tn.name} ${tn.up ? `${Math.round(tn.rtt_ms)}ms` : "✕"}`))))),
     mini("CPU", host.cpu_percent || 0, p(host.cpu_percent)),
     mini(fa ? "رم" : "RAM", ramP, p(ramP)),

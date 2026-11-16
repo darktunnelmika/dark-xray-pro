@@ -114,6 +114,11 @@ type Host struct {
 	// Tunnels: the tunnels ending on this node (GRE and other point-to-point
 	// links from relay servers), probed every 30 seconds.
 	Tunnels []Tunnel `json:"tunnels,omitempty"`
+	// The node's link to the HUB: last sync round trip, and failed syncs in
+	// the last hour (a network hiccup between node and HUB).
+	HubRTTms    float64 `json:"hub_rtt_ms,omitempty"`
+	HubFails    int     `json:"hub_fails_1h,omitempty"`
+	HubLastFail int64   `json:"hub_last_fail,omitempty"`
 }
 
 // Tunnel is one tunnel ending on a node and how its far end answers.

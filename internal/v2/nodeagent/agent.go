@@ -53,6 +53,8 @@ type Agent struct {
 
 	mu           sync.Mutex
 	collectMu    sync.Mutex           // one usage collection at a time
+	hubRTT       time.Duration        // last successful sync round trip
+	hubFails     []time.Time          // failed syncs, last hour
 	tunnels      func() []wire.Tunnel // tunnel health for the HUB (nil = none)
 	state        wire.SyncResponse    // last desired state from the HUB
 	delivered    map[uint64]map[string]int64
@@ -104,6 +106,19 @@ func (a *Agent) hostStats() *wire.Host {
 	prev := a.lastHost
 	a.lastHost = &hostSample{raw: raw, at: now}
 	h.OnlineUsers = a.onlineCount
+	h.HubRTTms = float64(a.hubRTT.Microseconds()) / 1000
+	cut := now.Add(-time.Hour)
+	kept := a.hubFails[:0]
+	for _, f := range a.hubFails {
+		if f.After(cut) {
+			kept = append(kept, f)
+		}
+	}
+	a.hubFails = kept
+	h.HubFails = len(kept)
+	if len(kept) > 0 {
+		h.HubLastFail = kept[len(kept)-1].Unix()
+	}
 	tunnels := a.tunnels
 	a.mu.Unlock()
 	if tunnels != nil {
@@ -354,10 +369,12 @@ func (a *Agent) Exchange(ctx context.Context) time.Duration {
 	rev := a.state.ConfigRevision
 	a.mu.Unlock()
 	results := a.tasks.pending()
+	t0 := time.Now()
 	resp, err := a.hub.Sync(ctx, wire.SyncRequest{NodeID: a.cfg.NodeID, AgentVersion: Version, ConfigRevision: rev,
 		XrayRunning: running, XrayRestarts: restarts, LastError: lastErr, SpooledBatches: a.spool.Len(), UnixTime: a.cfg.Now().Unix(),
 		Host: a.hostStats(), Results: results, AgentSHA: a.cfg.AgentSHA,
 		Assets: a.assets.held(), XrayVersion: a.cfg.XrayVersion, Arch: runtime.GOARCH})
+	a.noteHubLink(t0, err)
 	if err != nil {
 		a.cfg.Logf("hub sync unavailable, serving last state: %v", err)
 		return poll
@@ -629,4 +646,18 @@ func (a *Agent) SetTunnels(f func() []wire.Tunnel) {
 	a.mu.Lock()
 	a.tunnels = f
 	a.mu.Unlock()
+}
+
+// noteHubLink records how the last sync with the HUB went.
+func (a *Agent) noteHubLink(start time.Time, err error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if err != nil {
+		a.hubFails = append(a.hubFails, time.Now())
+		if len(a.hubFails) > 720 {
+			a.hubFails = a.hubFails[len(a.hubFails)-720:]
+		}
+		return
+	}
+	a.hubRTT = time.Since(start)
 }
