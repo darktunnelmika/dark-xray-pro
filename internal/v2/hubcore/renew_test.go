@@ -82,7 +82,9 @@ func TestSubSellerBrandIsTheirOwn(t *testing.T) {
 	ctx := context.Background()
 	seed(t, s)
 	_ = s.PutRep(ctx, Rep{ID: "boss", Name: "Boss", Enabled: true})
-	_ = s.PutRep(ctx, Rep{ID: "kid", Name: "Kid", Enabled: true, ParentID: "boss"})
+	if err := s.PutSeller(ctx, "boss", Rep{ID: "kid", Name: "Kid", Enabled: true}, "kidlogin", "password-123456"); err != nil {
+		t.Fatal(err)
+	}
 	_ = s.AdjustCredit(ctx, "owner", "kid", 50<<30, 0, "")
 	if err := s.PutRepBrand(ctx, "boss", RepBrand{Title: "Boss VPN", SupportURL: "https://t.me/boss"}); err != nil {
 		t.Fatal(err)

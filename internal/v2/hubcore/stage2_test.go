@@ -672,7 +672,7 @@ func TestRepBrand(t *testing.T) {
 	}
 	_, _ = s.db.ExecContext(ctx, `UPDATE clients SET rep_id='ali' WHERE email='ali-cust'`)
 	_, _ = s.db.ExecContext(ctx, `UPDATE clients SET rep_id='ali-sub' WHERE email='sub-cust'`)
-	for _, e := range []string{"ali-cust", "sub-cust"} {
+	for _, e := range []string{"ali-cust"} {
 		set, base := s.brandFor(ctx, e)
 		if set.Title != "Ali VPN" || set.SupportURL != "https://t.me/ali" || set.Accent != "#ff0088" || base != "https://sub.ali.example" {
 			t.Fatalf("%s: %+v %s", e, set, base)
@@ -681,6 +681,14 @@ func TestRepBrand(t *testing.T) {
 		if err != nil || d.Title != "Ali VPN" || d.Support != "https://t.me/ali" {
 			t.Fatalf("%s page: %+v %v", e, d, err)
 		}
+	}
+	// A sub-seller's customer sees nothing of the reseller above or the
+	// panel (only the link address is inherited), and no bot button.
+	if set, base := s.brandFor(ctx, "sub-cust"); set.Title != "" || set.SupportURL != "" || set.Accent != "" || base != "https://sub.ali.example" {
+		t.Fatalf("sub-cust: %+v %s", set, base)
+	}
+	if d, err := s.subPageData(ctx, "sub-cust", "https://sub.ali.example/sub/x", "fa"); err != nil || d.BotLink != "" || !d.Seller {
+		t.Fatalf("sub-cust page: %+v %v", d, err)
 	}
 	if set, base := s.brandFor(ctx, "alice"); set.Title != "Main VPN" || base != "" {
 		t.Fatalf("a direct customer must keep the panel's brand: %+v %q", set, base)

@@ -922,14 +922,15 @@ func TestShopProductsAndOrders(t *testing.T) {
 	if _, err := s.FulfillOrder(ctx, owner, id); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("double fulfill: %v", err)
 	}
-	// Renewal adds 30 days and 50 GB.
+	// Renewal starts a new period: 50 GB from zero, 30 days (from the first
+	// connection here, as the service was never used).
 	rid, _ := s.CreateOrder(ctx, owner, "gold", "@buyer", "gold-1", "renew")
 	if _, err := s.FulfillOrder(ctx, owner, rid); err != nil {
 		t.Fatal(err)
 	}
 	list, _ := s.Clients(ctx)
 	for _, c := range list {
-		if c.Email == "gold-1" && (c.VolumeBytes != 100<<30 || c.DurationSeconds != 60*86400) {
+		if c.Email == "gold-1" && (c.VolumeBytes != 50<<30 || c.DurationSeconds != 30*86400) {
 			t.Fatalf("renewal %+v", c.Client)
 		}
 	}
