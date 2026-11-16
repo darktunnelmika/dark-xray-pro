@@ -191,6 +191,8 @@ const FA_ERRS = [
   [/product is gone/i, "این محصول حذف شده"],
   [/only pending orders can be cancelled/i, "فقط سفارش‌های منتظر لغو می‌شوند"],
   [/order changed meanwhile/i, "سفارش هم‌زمان تغییر کرد؛ صفحه را تازه کنید"],
+  [/sub-sellers sell the products their reseller defines/i, "زیرفروشنده محصول نمی‌سازد؛ محصولات را نماینده برایش تعریف می‌کند"],
+  [/sub-sellers (sell only|renew with) .*plan/i, "فقط پلن‌هایی که نماینده برای شما تعریف کرده قابل فروش و تمدید است"],
   [/^not found$/i, "پیدا نشد"],
   [/^temporarily unavailable$/i, "سرور موقتاً در دسترس نیست؛ کمی بعد دوباره امتحان کنید"],
   [/^invalid( input)?$/i, "اطلاعات واردشده درست نیست"],
@@ -2000,7 +2002,14 @@ function clientForm(c, inbounds, ctx = { reps: [] }) {
   // ready plans (saved templates) as one-click chips; hidden when there are none
   const tplBox = isNew ? h("div", { hidden: true }) : null;
   if (tplBox) {
-    api("GET", "/api/v2/admin/templates").then((list) => {
+    const sub = me && me.sub_seller;
+    (sub ? api("GET", "/api/v2/shop/products?published").then((ps) => (ps || []).map((p) => ({ name: p.name, gb: p.plan === "unlimited" ? 0 : p.gb, days: p.days, first_use: p.first_use, max_ips: p.max_ips, inbounds: p.inbounds })))
+      : api("GET", "/api/v2/admin/templates")).then((list) => {
+      if (sub) {
+        // A sub-seller sells only the plans its reseller defined.
+        for (const x of [vol, days, ips]) x.readOnly = true;
+        if (!(list || []).length) { tplBox.append(h("p", { class: "error" }, T("نماینده هنوز پلنی برای شما تعریف نکرده؛ از نماینده بخواهید در «فروشگاه» برایتان محصول بسازد.", "Your reseller has not defined any plans for you yet."))); tplBox.hidden = false; return; }
+      }
       if (!(list || []).length) return;
       const chips = h("div", { class: "chips" });
       const apply = (tp, btn) => {
@@ -2016,8 +2025,9 @@ function clientForm(c, inbounds, ctx = { reps: [] }) {
         btn.addEventListener("click", () => apply(tp, btn));
         chips.append(btn);
       }
-      tplBox.append(h("span", { class: "lbl" }, T("پلن آماده", "Ready plan")), chips);
+      tplBox.append(h("span", { class: "lbl" }, sub ? T("پلن (تعریف‌شده توسط نماینده)", "Plan (set by your reseller)") : T("پلن آماده", "Ready plan")), chips);
       tplBox.hidden = false;
+      if (sub && chips.firstChild) chips.firstChild.click();
     }).catch(() => {});
   }
 
@@ -3695,7 +3705,7 @@ async function viewShop() {
   const [products, orders, inbounds, reps] = await Promise.all([
     api("GET", "/api/v2/shop/products"), api("GET", "/api/v2/shop/orders"),
     owner ? api("GET", "/api/v2/admin/inbounds") : api("GET", "/api/v2/rep/inbounds"),
-    owner ? api("GET", "/api/v2/admin/reps") : Promise.resolve([])]);
+    owner ? api("GET", "/api/v2/admin/reps") : me.can_sell && me.manage_products ? api("GET", "/api/v2/rep/sellers").catch(() => []) : Promise.resolve([])]);
   const canEdit = owner || me.manage_products;
   const fmtTime = (u) => new Intl.DateTimeFormat(lang === "fa" ? "fa-IR" : "en-GB", { dateStyle: "short", timeStyle: "short" }).format(new Date(u * 1000));
   const planText = (p) => `${p.plan === "unlimited" ? t("planUnlimited") : `${fmtNum(p.gb)} GB`} · ${fmtNum(p.days)}d${p.max_ips ? ` · IP ≤ ${fmtNum(p.max_ips)}` : ""}`;
@@ -3985,11 +3995,13 @@ let shopSeller = "";
 function productsView(products, inbounds, reps, sold, canEdit) {
   const fa = lang === "fa";
   const owner = me.role === "owner";
-  const seller = owner ? shopSeller : me.rep_id || "";
+  const own = owner ? "" : me.rep_id || "";
+  if (!owner && shopSeller && !(reps || []).some((r) => r.ID === shopSeller)) shopSeller = "";
+  const seller = shopSeller || own;
   const box = h("div", {});
-  const mine = products.filter((p) => (owner ? (p.seller || "") === seller : true));
-  const sellerSel = owner && (reps || []).length ? h("select", { onchange: (e) => { shopSeller = e.target.value; fill(box, ...draw([])); load(); } },
-    h("option", { value: "" }, fa ? "فروشگاه خودم" : "My shop"), reps.map((r) => h("option", { value: r.ID, selected: r.ID === seller }, `${fa ? "فروشگاه" : "Shop of"} ${r.Name || r.ID}`))) : null;
+  const mine = products.filter((p) => (p.seller || "") === seller);
+  const sellerSel = (reps || []).length ? h("select", { onchange: (e) => { shopSeller = e.target.value; route(); } },
+    h("option", { value: "" }, fa ? "فروشگاه خودم" : "My shop"), reps.map((r) => h("option", { value: r.ID, selected: r.ID === seller }, `${owner ? (fa ? "فروشگاه" : "Shop of") : (fa ? "زیرفروشنده" : "Sub-seller")} ${r.Name || r.ID}`))) : null;
   const toggle = async (p, on) => { await guarded(() => api("PUT", `/api/v2/shop/products/${encodeURIComponent(p.id)}`, { ...p, status: on ? "published" : "draft" })); route(); };
   const move = async (list, i, d) => {
     const j = i + d; if (j < 0 || j >= list.length) return;
@@ -4048,7 +4060,7 @@ function productsView(products, inbounds, reps, sold, canEdit) {
         canEdit ? `${t("add")} · ${t("product")}` : "", () => productForm(null, inbounds, reps, { seller }))];
   }
   let lastCats = [];
-  const load = () => api("GET", `/api/v2/shop/categories${owner ? `?seller=${encodeURIComponent(seller)}` : ""}`).then((cats) => { lastCats = cats || []; fill(box, ...draw(lastCats)); }).catch(() => fill(box, ...draw([])));
+  const load = () => api("GET", `/api/v2/shop/categories${owner || seller !== own ? `?seller=${encodeURIComponent(seller)}` : ""}`).then((cats) => { lastCats = cats || []; fill(box, ...draw(lastCats)); }).catch(() => fill(box, ...draw([])));
   fill(box, ...draw([]));
   load();
   return box;
@@ -4122,10 +4134,10 @@ function productForm(p, inbounds, reps, opt = {}) {
   const onSale = h("input", { type: "checkbox", checked: v.status !== "draft" && v.status !== "archived" });
   const renewable = h("input", { type: "checkbox", checked: !v.no_renew });
   const perBuyer = h("input", { type: "number", min: "0", max: "1000", value: v.per_buyer || 0, dir: "ltr" });
-  const seller = owner ? h("select", {}, h("option", { value: "" }, t("ownerSelf")), (reps || []).map((r) => h("option", { value: r.ID, selected: (v.seller || "") === r.ID }, r.Name || r.ID))) : null;
+  const seller = owner || (reps || []).length ? h("select", {}, h("option", { value: owner ? "" : me.rep_id }, owner ? t("ownerSelf") : T("فروشگاه خودم", "My shop")), (reps || []).map((r) => h("option", { value: r.ID, selected: (v.seller || "") === r.ID }, owner ? r.Name || r.ID : `${T("زیرفروشنده", "Sub-seller")} ${r.Name || r.ID}`))) : null;
   const catSel = h("select", {}, h("option", { value: "" }, T("بدون دسته", "No category")));
   const catNew = h("input", { maxlength: "40", placeholder: T("نام دستهٔ جدید", "New category name"), hidden: true });
-  const loadCats = (sel) => api("GET", `/api/v2/shop/categories${owner ? `?seller=${encodeURIComponent(sel || "")}` : ""}`).then((cats) => {
+  const loadCats = (sel) => api("GET", `/api/v2/shop/categories${owner || sel ? `?seller=${encodeURIComponent(sel || "")}` : ""}`).then((cats) => {
     catSel.replaceChildren(h("option", { value: "" }, T("بدون دسته", "No category")),
       ...(cats || []).map((c) => h("option", { value: c.name, selected: c.name === v.category }, `${c.emoji || "📂"} ${c.name}`)),
       h("option", { value: "+" }, T("➕ دستهٔ جدید…", "➕ New category…")));
@@ -4595,9 +4607,27 @@ function renewForm(list) {
   };
   gb.addEventListener("input", calc); days.addEventListener("input", calc);
   calc();
+  const sub = me && me.sub_seller;
+  const planBox = h("div", {});
+  if (sub) {
+    gb.readOnly = days.readOnly = true;
+    api("GET", "/api/v2/shop/products?published").then((ps) => {
+      const ok = (ps || []).filter((p) => !p.no_renew);
+      if (!ok.length) { fill(planBox, h("p", { class: "error" }, fa ? "نماینده هنوز پلن تمدیدی برای شما تعریف نکرده." : "No renewal plans defined for you yet.")); save.disabled = true; return; }
+      const chips = h("div", { class: "chips" });
+      for (const p of ok) {
+        const b = h("button", { type: "button", class: "chip", "aria-pressed": "false" }, p.name);
+        b.addEventListener("click", () => { for (const x of chips.children) x.setAttribute("aria-pressed", String(x === b)); gb.value = p.gb; days.value = p.days; calc(); });
+        chips.append(b);
+      }
+      fill(planBox, h("span", { class: "lbl" }, fa ? "پلن تمدید (تعریف‌شده توسط نماینده)" : "Renewal plan"), chips);
+      chips.firstChild.click();
+    }).catch(() => {});
+  }
   openModal(list.length === 1 ? `${fa ? "تمدید" : "Renew"} · ${list[0].Email}` : (fa ? "تمدید گروهی" : "Renew selected"), h("div", { class: "form cform" },
-    vols.length ? h("div", {}, h("label", {}, h("span", {}, fa ? "حجم بستهٔ جدید (گیگ)" : "New package volume (GB)"), gb), presets(gb, [10, 20, 30, 50, 100, 200], "GB")) : null,
-    h("div", {}, h("label", {}, h("span", {}, fa ? "مدت دورهٔ جدید (روز)" : "New period (days)"), days), presets(days, [30, 60, 90, 180], fa ? "روز" : "days")),
+    planBox,
+    vols.length ? h("div", {}, h("label", {}, h("span", {}, fa ? "حجم بستهٔ جدید (گیگ)" : "New package volume (GB)"), gb), sub ? null : presets(gb, [10, 20, 30, 50, 100, 200], "GB")) : null,
+    h("div", {}, h("label", {}, h("span", {}, fa ? "مدت دورهٔ جدید (روز)" : "New period (days)"), days), sub ? null : presets(days, [30, 60, 90, 180], fa ? "روز" : "days")),
     info, err), [save]);
 }
 

@@ -216,6 +216,13 @@ func (s *Store) RepPutClient(ctx context.Context, actor, repID string, c Client,
 	if err := checkPolicy(ctx, tx, repID, c, plan, isNew, now); err != nil {
 		return err
 	}
+	if isNew {
+		if err := s.subSellerPlan(ctx, repID, plan, c.VolumeBytes, termDays(c, now), c.MaxIPs, false); err != nil {
+			return err
+		}
+	} else if s.IsSubSeller(ctx, repID) && (plan != oldPlan || c.VolumeBytes != old.VolumeBytes || termDays(c, now) > termDays(old, now) || c.MaxIPs > old.MaxIPs) {
+		return fmt.Errorf("%w: sub-sellers renew with a plan their reseller defined", ErrPolicy)
+	}
 	if !isNew {
 		pol, err := scanPolicy(tx.QueryRowContext(ctx, `SELECT `+policyCols+` FROM reps WHERE id=?`, repID))
 		if err != nil {

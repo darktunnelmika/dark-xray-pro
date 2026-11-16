@@ -27,6 +27,9 @@ func (s *Store) RenewClient(ctx context.Context, p Principal, email, plan string
 	repID := ""
 	if p.Role == "rep" {
 		repID = p.RepID
+		if err := s.subSellerPlan(ctx, repID, plan, int64(gb*(1<<30)), days, -1, true); err != nil {
+			return RenewResult{}, err
+		}
 	}
 	return s.renewPeriod(ctx, p.User, repID, email, plan, int64(gb*(1<<30)), days, true)
 }

@@ -81,19 +81,13 @@ func (b *Bot) onReceipt(ctx context.Context, chat int64, name, fileID string, aw
 	b.takeAwait(chat)
 	b.send(ctx, chat, fmt.Sprintf("✅ رسید سفارش <b>#%s</b> دریافت شد.\nبعد از بررسی (معمولاً چند دقیقه) سرویس همین‌جا برایتان ارسال می‌شود.", faInt(o.ID)), homeKB)
 	caption := b.orderCard(ctx, o) + "\n\n🧾 <b>رسید پرداخت</b> از " + esc(name) + "\nمبلغ را با حساب خود تطبیق دهید، بعد تأیید یا رد کنید."
-	targets := map[int64]bool{}
-	if o.Seller != "" {
-		for _, c := range b.Store.TgRepChats(ctx, o.Seller) {
-			targets[c] = true
-		}
+	if o.Seller == b.Seller {
+		b.notifyPhoto(ctx, "orders", fileID, caption, receiptButtons(o.ID))
 	} else {
-		for c := range b.Owners {
-			targets[c] = true
-		}
-	}
-	for c := range targets {
-		if err := b.API.SendPhotoID(ctx, c, fileID, caption, receiptButtons(o.ID)); err != nil {
-			b.logf("tgbot receipt: %v", err)
+		for _, c := range b.Store.TgRepChats(ctx, o.Seller) {
+			if err := b.API.SendPhotoID(ctx, c, fileID, caption, receiptButtons(o.ID)); err != nil {
+				b.logf("tgbot receipt: %v", err)
+			}
 		}
 	}
 	b.Store.MarkOrderAnnounced(ctx, o.ID, false)
@@ -212,11 +206,7 @@ func (b *Bot) onTopupReceipt(ctx context.Context, chat int64, name, fileID, awai
 	b.send(ctx, chat, fmt.Sprintf("✅ رسید شارژ <b>#%s</b> دریافت شد. بعد از بررسی، موجودی کیف پول شما زیاد می‌شود.", faInt(t.ID)), homeKB)
 	caption := fmt.Sprintf("➕ <b>شارژ کیف پول #%s</b>\n👤 %s (<code>%d</code>)\n💳 مبلغ: <b>%s تومان</b>\nمبلغ را با حساب خود تطبیق دهید.", faInt(t.ID), esc(name), chat, faMoney(t.Amount))
 	kb := &Keyboard{Rows: [][]Button{row(cbBtn("✅ تأیید شارژ", "tok:"+strconv.FormatInt(t.ID, 10)), cbBtn("❌ رد", "tno:"+strconv.FormatInt(t.ID, 10)))}}
-	for c := range b.sellerAdmins(ctx) {
-		if err := b.API.SendPhotoID(ctx, c, fileID, caption, kb); err != nil {
-			b.logf("tgbot topup receipt: %v", err)
-		}
-	}
+	b.notifyPhoto(ctx, "orders", fileID, caption, kb)
 	return true
 }
 

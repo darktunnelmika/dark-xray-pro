@@ -25,7 +25,7 @@ func (b *Bot) repAlerts(ctx context.Context) {
 		}
 	}
 	for _, l := range b.Store.DueLowCredit(ctx, "owner", "") {
-		b.toOwners(ctx, fmt.Sprintf("⚠️ اعتبار نمایندهٔ <b>%s</b> کم شده: <b>%s</b> مانده (حد هشدار %s).",
+		b.notify(ctx, "reps", fmt.Sprintf("⚠️ اعتبار نمایندهٔ <b>%s</b> کم شده: <b>%s</b> مانده (حد هشدار %s).",
 			esc(firstNonEmpty(l.Name, l.RepID)), hubcore.GBText(l.Credit), hubcore.GBText(l.Limit)), nil)
 	}
 }
@@ -37,16 +37,12 @@ func (b *Bot) repAlertsFor(ctx context.Context, rep string) {
 	}
 	for _, l := range b.Store.DueLowCredit(ctx, "rep", rep) {
 		msg := fmt.Sprintf("⚠️ اعتبار حجمی شما رو به اتمام است: <b>%s</b> مانده.\nبرای ادامهٔ فروش و تمدید، اعتبار را شارژ کنید.", hubcore.GBText(l.Credit))
-		for _, c := range chats {
-			b.send(ctx, c, msg, nil)
-		}
+		b.repNotice(ctx, rep, chats, msg)
 	}
 	if s, ok := b.Store.DueRepSummary(ctx, rep); ok {
 		msg := fmt.Sprintf("📋 خلاصهٔ ۲۴ ساعت گذشته\n\n🛒 فروش: <b>%s</b> (%s مورد)\n♻️ برگشتی به اعتبار: <b>%s</b>\n💾 اعتبار فعلی: <b>%s</b>\n\n👥 کلاینت فعال: %s\n⏳ رو به اتمام: <b>%s</b>\n⛔ تمام‌شده: %s",
 			hubcore.GBText(s.Sold), faInt(int64(s.Sales)), hubcore.GBText(s.Back), hubcore.GBText(s.Credit), faInt(int64(s.Active)), faInt(int64(s.Expiring)), faInt(int64(s.Ended)))
-		for _, c := range chats {
-			b.send(ctx, c, msg, nil)
-		}
+		b.repNotice(ctx, rep, chats, msg)
 	}
 }
 
@@ -57,4 +53,16 @@ func firstNonEmpty(v ...string) string {
 		}
 	}
 	return ""
+}
+
+// repNotice: in the reseller's own bot, its group topic when it has one;
+// otherwise its chats.
+func (b *Bot) repNotice(ctx context.Context, rep string, chats []int64, msg string) {
+	if b.Seller == rep {
+		b.notify(ctx, "reports", msg, nil)
+		return
+	}
+	for _, c := range chats {
+		b.send(ctx, c, msg, nil)
+	}
 }

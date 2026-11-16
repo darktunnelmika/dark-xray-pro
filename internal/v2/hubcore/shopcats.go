@@ -56,7 +56,12 @@ func (s *Store) ShopCategories(ctx context.Context, seller string) []ShopCategor
 // its products uncategorised.
 func (s *Store) PutShopCategories(ctx context.Context, by Principal, seller string, list []ShopCategory) error {
 	if by.Role == "rep" {
-		seller = by.RepID
+		if seller == "" {
+			seller = by.RepID
+		}
+		if err := s.repMayStock(ctx, by, seller); err != nil {
+			return err
+		}
 	} else if by.Role != "owner" {
 		return ErrAuth
 	}

@@ -108,7 +108,11 @@ func (s *Store) ensureShopSchema() error {
 			return err
 		}
 	}
-	return s.addColumn("reps", "manage_products", "INTEGER NOT NULL DEFAULT 0")
+	if err := s.addColumn("reps", "manage_products", "INTEGER NOT NULL DEFAULT 0"); err != nil {
+		return err
+	}
+	_, err := s.db.Exec(`UPDATE reps SET manage_products=0 WHERE parent_id<>'' AND manage_products<>0`)
+	return err
 }
 
 // canSell: the owner sells anything; a representative only its own items.
@@ -142,7 +146,12 @@ func (s *Store) PutProduct(ctx context.Context, by Principal, p Product) error {
 		return ErrInvalid
 	}
 	if by.Role == "rep" {
-		p.Seller = by.RepID
+		if p.Seller == "" {
+			p.Seller = by.RepID
+		}
+		if err := s.repMayStock(ctx, by, p.Seller); err != nil {
+			return err
+		}
 	}
 	if p.Seller != "" {
 		pol, err := s.RepPolicyOf(ctx, p.Seller)
@@ -184,7 +193,7 @@ func (s *Store) PutProduct(ctx context.Context, by Principal, p Product) error {
 	case errors.Is(err, sql.ErrNoRows):
 	case err != nil:
 		return err
-	case !canSell(by, curSeller):
+	case !s.canStock(ctx, by, curSeller):
 		return fmt.Errorf("%w: that ID is taken", ErrInvalid)
 	}
 	for _, t := range p.Inbounds {
@@ -223,7 +232,7 @@ func scanProduct(row scanner) (Product, error) {
 // own products. publishedOnly is for storefronts (bots).
 func (s *Store) Products(ctx context.Context, by Principal, publishedOnly bool) ([]Product, error) {
 	rows, err := s.ro.QueryContext(ctx, `SELECT `+productCols+` FROM products
-WHERE (?='owner' OR seller=?) AND (?=0 OR status='published') ORDER BY seller,sort,price,id`, by.Role, by.RepID, publishedOnly)
+WHERE (?='owner' OR seller=? OR seller IN (SELECT id FROM reps WHERE parent_id=? AND parent_id<>'')) AND (?=0 OR status='published') ORDER BY seller,sort,price,id`, by.Role, by.RepID, by.RepID, publishedOnly)
 	if err != nil {
 		return nil, err
 	}
@@ -441,7 +450,57 @@ func (s *Store) canManageProducts(ctx context.Context, by Principal) error {
 	if by.Role != "rep" || s.ro.QueryRowContext(ctx, `SELECT manage_products FROM reps WHERE id=?`, by.RepID).Scan(&manage) != nil || !manage {
 		return fmt.Errorf("%w: managing products is not allowed", ErrPolicy)
 	}
+	if s.IsSubSeller(ctx, by.RepID) {
+		return fmt.Errorf("%w: sub-sellers sell the products their reseller defines", ErrPolicy)
+	}
 	return nil
+}
+
+// childOf reports whether seller is a sub-seller of rep.
+func (s *Store) childOf(ctx context.Context, seller, rep string) bool {
+	var parent string
+	return seller != "" && rep != "" && s.ro.QueryRowContext(ctx, `SELECT parent_id FROM reps WHERE id=?`, seller).Scan(&parent) == nil && parent == rep
+}
+
+// canStock: may by see and edit the products of seller — the owner all,
+// a reseller its own and its sub-sellers', a sub-seller (read only) its own.
+func (s *Store) canStock(ctx context.Context, by Principal, seller string) bool {
+	return canSell(by, seller) || (by.Role == "rep" && s.childOf(ctx, seller, by.RepID))
+}
+
+// repMayStock: a reseller makes products for itself or for its own
+// sub-sellers; a sub-seller makes none.
+func (s *Store) repMayStock(ctx context.Context, by Principal, seller string) error {
+	if s.IsSubSeller(ctx, by.RepID) {
+		return fmt.Errorf("%w: sub-sellers sell the products their reseller defines", ErrPolicy)
+	}
+	if seller != by.RepID && !s.childOf(ctx, seller, by.RepID) {
+		return fmt.Errorf("%w: unknown seller", ErrInvalid)
+	}
+	return nil
+}
+
+// subSellerPlan: a sub-seller sells only a plan its reseller defined for
+// it (a published product with the same type, volume, term and users).
+func (s *Store) subSellerPlan(ctx context.Context, repID, plan string, volBytes, days int64, ips int, renew bool) error {
+	if !s.IsSubSeller(ctx, repID) {
+		return nil
+	}
+	rows, err := s.ro.QueryContext(ctx, `SELECT `+productCols+` FROM products WHERE seller=? AND status='published'`, repID)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		p, err := scanProduct(rows)
+		if err != nil {
+			return err
+		}
+		if p.Plan == plan && (plan == "unlimited" || p.GB<<30 == volBytes) && p.Days == days && (ips < 0 || p.MaxIPs == ips) && !(renew && p.NoRenew) {
+			return nil
+		}
+	}
+	return fmt.Errorf("%w: sub-sellers sell only the plans their reseller defined", ErrPolicy)
 }
 
 // SellerInbounds: the inbounds a seller's products give when none are
@@ -469,7 +528,7 @@ func (s *Store) SellerInbounds(ctx context.Context, seller string) []string {
 // ProductByID returns one product by may manage or sell.
 func (s *Store) ProductByID(ctx context.Context, by Principal, id string) (Product, error) {
 	p, err := scanProduct(s.ro.QueryRowContext(ctx, `SELECT `+productCols+` FROM products WHERE id=?`, id))
-	if err != nil || !canSell(by, p.Seller) || (by.Role != "owner" && p.Seller == "") {
+	if err != nil || !s.canStock(ctx, by, p.Seller) || (by.Role != "owner" && p.Seller == "") {
 		return Product{}, ErrNotFound
 	}
 	return p, nil
@@ -485,6 +544,9 @@ func (s *Store) DeleteProduct(ctx context.Context, by Principal, id string) (boo
 	}
 	if p.Seller != "" || by.Role != "owner" {
 		if err := s.canManageProducts(ctx, by); err != nil {
+			return false, err
+		}
+		if err := s.repMayStock(ctx, by, p.Seller); by.Role == "rep" && err != nil {
 			return false, err
 		}
 	}
@@ -503,7 +565,12 @@ func (s *Store) DeleteProduct(ctx context.Context, by Principal, id string) (boo
 // ReorderProducts sets the shop order of a seller's products in one go.
 func (s *Store) ReorderProducts(ctx context.Context, by Principal, seller string, ids []string) error {
 	if by.Role == "rep" {
-		seller = by.RepID
+		if seller == "" {
+			seller = by.RepID
+		}
+		if err := s.repMayStock(ctx, by, seller); err != nil {
+			return err
+		}
 	}
 	if err := s.canManageProducts(ctx, by); err != nil {
 		return err

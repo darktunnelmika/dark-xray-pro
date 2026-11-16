@@ -14,19 +14,6 @@ import (
 // "answer" and "close" buttons and can also just Reply to it. Answers typed
 // in the panel come through the outbox on each tick.
 
-// ticketStaff: who handles this bot's tickets — the owner's chats in the
-// main bot; the reseller and its bot admins in a reseller's bot.
-func (b *Bot) ticketStaff(ctx context.Context) []int64 {
-	if b.Seller == "" {
-		out := make([]int64, 0, len(b.Owners))
-		for id := range b.Owners {
-			out = append(out, id)
-		}
-		return out
-	}
-	return b.Store.TgRepChats(ctx, b.Seller)
-}
-
 func (b *Bot) isTicketStaff(ctx context.Context, chat int64) bool {
 	if b.Seller == "" {
 		return b.Owners[chat]
@@ -75,8 +62,8 @@ func (b *Bot) ticket(ctx context.Context, chat int64, name, username, text strin
 	}
 	msg := fmt.Sprintf("%s <b>#%d</b>\n👤 %s\n📦 سرویس‌ها: %s\n%s\n%s\n\n<i>با «پاسخ» یا Reply روی همین پیام جواب بدهید.</i>",
 		head, id, who, esc(svc), line, esc(text))
-	for _, staff := range b.ticketStaff(ctx) {
-		if mid := b.send(ctx, staff, msg, ticketKB(id)); mid != 0 {
+	for staff, mid := range b.notify(ctx, "tickets", msg, ticketKB(id)) {
+		if mid != 0 {
 			b.Store.TgMapMessage(ctx, staff, mid, id)
 		}
 	}

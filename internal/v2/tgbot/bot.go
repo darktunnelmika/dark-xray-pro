@@ -226,6 +226,8 @@ func (b *Bot) Handle(ctx context.Context, u Update) {
 		b.onCallback(ctx, u.Callback)
 	case u.Message != nil && u.Message.Chat.Type == "private" && u.Message.From != nil:
 		b.onMessage(ctx, u.Message)
+	case u.Message != nil && (u.Message.Chat.Type == "supergroup" || u.Message.Chat.Type == "group") && u.Message.From != nil:
+		b.onGroupMessage(ctx, u.Message)
 	}
 }
 
@@ -1068,13 +1070,14 @@ func (b *Bot) announceOrders(ctx context.Context) {
 			if cardOn && o.Seller == b.Seller && !o.HasReceipt && o.Amount > 0 && strings.HasPrefix(o.Buyer, "tg:") {
 				continue // announced with the receipt photo
 			}
-			if o.Seller != "" {
-				// A reseller's order goes to that reseller, who pays for it.
+			if o.Seller == b.Seller {
+				b.notify(ctx, "orders", b.orderCard(ctx, o), orderButtons(o.ID))
+			} else {
+				// A reseller without its own bot: its order goes to that
+				// reseller, who pays for it.
 				for _, chat := range b.Store.TgRepChats(ctx, o.Seller) {
 					b.send(ctx, chat, b.orderCard(ctx, o), orderButtons(o.ID))
 				}
-			} else {
-				b.toOwners(ctx, b.orderCard(ctx, o), orderButtons(o.ID))
 			}
 			b.Store.MarkOrderAnnounced(ctx, o.ID, false)
 		}
@@ -1144,7 +1147,7 @@ func (b *Bot) watchNodes(ctx context.Context) {
 	}
 	b.mu.Unlock()
 	for _, c := range changes {
-		b.toOwners(ctx, c, nil)
+		b.notify(ctx, "nodes", c, nil)
 	}
 }
 
@@ -1203,7 +1206,7 @@ func (b *Bot) dailyReport(ctx context.Context) {
 			return
 		}
 		_ = b.Store.SetSetting(ctx, "tg_report_last", strconv.FormatInt(b.now().Unix(), 10))
-		b.toOwners(ctx, b.reportText(ctx), nil)
+		b.notify(ctx, "reports", b.reportText(ctx), nil)
 		return
 	}
 	now := b.now().UTC()
@@ -1224,7 +1227,7 @@ func (b *Bot) dailyReport(ctx context.Context) {
 		return
 	}
 	_ = b.Store.SetSetting(ctx, "tg_daily", day)
-	b.toOwners(ctx, b.reportText(ctx), nil)
+	b.notify(ctx, "reports", b.reportText(ctx), nil)
 }
 
 // scheduledBackup sends the encrypted backup every tg_backup_hours (set in
@@ -1244,6 +1247,11 @@ func (b *Bot) scheduledBackup(ctx context.Context) {
 // BackupNow sends an encrypted backup to every owner and records the result.
 func (b *Bot) BackupNow(ctx context.Context) error {
 	var first error
+	if b.backupToGroup(ctx) {
+		_ = b.Store.SetSetting(ctx, "tg_backup_last", strconv.FormatInt(b.now().Unix(), 10))
+		_ = b.Store.SetSetting(ctx, "tg_backup_error", "")
+		return nil
+	}
 	for id := range b.Owners {
 		if err := b.sendBackup(ctx, id); err != nil && first == nil {
 			first = err

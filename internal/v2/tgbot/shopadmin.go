@@ -22,7 +22,7 @@ func (b *Bot) shopWho(ctx context.Context, chat int64) (p hubcore.Principal, sel
 	if b.Owners[chat] && b.Seller == "" {
 		return hubcore.Principal{User: "tg:" + strconv.FormatInt(chat, 10), Role: "owner"}, "", "a:home", true
 	}
-	if rep, role := b.repOf(ctx, chat); rep != "" && repCan(role, "shop") {
+	if rep, role := b.repOf(ctx, chat); rep != "" && repCan(role, "shop") && !b.Store.IsSubSeller(ctx, rep) {
 		return hubcore.Principal{User: "tg:" + strconv.FormatInt(chat, 10), Role: "rep", RepID: rep}, rep, "R:home", true
 	}
 	return hubcore.Principal{}, "", "", false

@@ -61,8 +61,10 @@ type User struct {
 }
 
 type Chat struct {
-	ID   int64  `json:"id"`
-	Type string `json:"type"`
+	ID      int64  `json:"id"`
+	Type    string `json:"type"`
+	Title   string `json:"title"`
+	IsForum bool   `json:"is_forum"`
 }
 
 type Message struct {
@@ -75,6 +77,7 @@ type Message struct {
 		FileID string `json:"file_id"`
 	} `json:"photo"`
 	ReplyTo         *Message           `json:"reply_to_message"`
+	Thread          int64              `json:"message_thread_id"`
 	Paid            *SuccessfulPayment `json:"successful_payment"`
 	Entities        []MessageEntity    `json:"entities"`
 	CaptionEntities []MessageEntity    `json:"caption_entities"`
@@ -344,4 +347,52 @@ func (a *HTTPAPI) SendDocument(ctx context.Context, chat int64, name string, dat
 func (a *HTTPAPI) SendPhotoID(ctx context.Context, chat int64, fileID, caption string, kb *Keyboard) error {
 	p := map[string]any{"chat_id": chat, "photo": fileID, "caption": caption, "parse_mode": "HTML"}
 	return a.sendStyled(ctx, "sendPhoto", "caption", p, kb, nil)
+}
+
+// CreateForumTopic opens a topic in a forum group and returns its thread id.
+func (a *HTTPAPI) CreateForumTopic(ctx context.Context, chat int64, name string, color int) (int64, error) {
+	var out struct {
+		Thread int64 `json:"message_thread_id"`
+	}
+	p := map[string]any{"chat_id": chat, "name": name}
+	if color != 0 {
+		p["icon_color"] = color
+	}
+	err := a.callJSON(ctx, "createForumTopic", p, &out)
+	return out.Thread, err
+}
+
+// SendThread sends a message into one topic of a forum group.
+func (a *HTTPAPI) SendThread(ctx context.Context, chat, thread int64, text string, kb *Keyboard) (int64, error) {
+	p := map[string]any{"chat_id": chat, "message_thread_id": thread, "text": text, "parse_mode": "HTML", "link_preview_options": map[string]bool{"is_disabled": true}}
+	var m Message
+	err := a.sendStyled(ctx, "sendMessage", "text", p, kb, &m)
+	return m.ID, err
+}
+
+// SendPhotoIDThread re-sends a known photo into a topic.
+func (a *HTTPAPI) SendPhotoIDThread(ctx context.Context, chat, thread int64, fileID, caption string, kb *Keyboard) error {
+	p := map[string]any{"chat_id": chat, "message_thread_id": thread, "photo": fileID, "caption": caption, "parse_mode": "HTML"}
+	return a.sendStyled(ctx, "sendPhoto", "caption", p, kb, nil)
+}
+
+// SendDocumentThread uploads a file into a topic.
+func (a *HTTPAPI) SendDocumentThread(ctx context.Context, chat, thread int64, name string, data []byte, caption string) error {
+	var buf bytes.Buffer
+	w := multipart.NewWriter(&buf)
+	_ = w.WriteField("chat_id", strconv.FormatInt(chat, 10))
+	_ = w.WriteField("message_thread_id", strconv.FormatInt(thread, 10))
+	_ = w.WriteField("caption", caption)
+	_ = w.WriteField("parse_mode", "HTML")
+	fw, err := w.CreateFormFile("document", name)
+	if err != nil {
+		return err
+	}
+	if _, err := fw.Write(data); err != nil {
+		return err
+	}
+	if err := w.Close(); err != nil {
+		return err
+	}
+	return a.call(ctx, "sendDocument", &buf, w.FormDataContentType(), nil)
 }

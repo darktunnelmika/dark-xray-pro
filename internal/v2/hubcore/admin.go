@@ -247,7 +247,8 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 					out["can_sell"] = rp.ParentID == ""
 					var mp bool
 					_ = s.ro.QueryRowContext(r.Context(), `SELECT manage_products FROM reps WHERE id=?`, rp.ID).Scan(&mp)
-					out["manage_products"] = mp
+					out["manage_products"] = mp && rp.ParentID == ""
+					out["sub_seller"] = rp.ParentID != ""
 				}
 			}
 		}
@@ -580,7 +581,7 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 	}))
 	mux.HandleFunc("GET /api/v2/shop/categories", member(func(w http.ResponseWriter, r *http.Request) {
 		seller := r.URL.Query().Get("seller")
-		if p := who(r); p.Role == "rep" {
+		if p := who(r); p.Role == "rep" && (seller == "" || !s.childOf(r.Context(), seller, p.RepID)) {
 			seller = p.RepID
 		}
 		reply(w, s.ShopCategories(r.Context(), seller), nil)

@@ -104,12 +104,12 @@ func (b *Bot) onPaid(ctx context.Context, chat int64, name string, p *Successful
 		// Charged but not delivered: tell the owners with a refund button.
 		b.logf("tgbot stars delivery %d: %v", id, err)
 		b.send(ctx, chat, "✅ پرداخت انجام شد، ولی فعال‌سازی با خطا روبه‌رو شد. پشتیبانی همین الان پیگیری می‌کند.", nil)
-		b.toOwners(ctx, fmt.Sprintf("⚠️ پرداخت %d⭐ سفارش #%d از %s انجام شد ولی تحویل نشد: %s", p.Total, id, esc(name), esc(err.Error())),
+		b.notify(ctx, "orders", fmt.Sprintf("⚠️ پرداخت %d⭐ سفارش #%d از %s انجام شد ولی تحویل نشد: %s", p.Total, id, esc(name), esc(err.Error())),
 			&Keyboard{Rows: [][]Button{{{Text: "↩️ بازپرداخت استارز", Data: "srf:" + strconv.FormatInt(id, 10)}}}})
 		return
 	}
 	b.announceOrders(ctx) // sends the link and QR right away
-	b.toOwners(ctx, fmt.Sprintf("⭐ فروش با استارز: سفارش #%d، %d⭐ — %s ← <code>%s</code>", id, p.Total, esc(name), esc(email)),
+	b.notify(ctx, "orders", fmt.Sprintf("⭐ فروش با استارز: سفارش #%d، %d⭐ — %s ← <code>%s</code>", id, p.Total, esc(name), esc(email)),
 		&Keyboard{Rows: [][]Button{{{Text: "↩️ بازپرداخت", Data: "srf:" + strconv.FormatInt(id, 10)}}}})
 }
 

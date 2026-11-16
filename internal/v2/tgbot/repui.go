@@ -158,7 +158,7 @@ func (b *Bot) repHome(ctx context.Context, chat int64, rep, role string) {
 	if repCan(role, "credit") {
 		r3 = append(r3, repBtn("💳 اعتبار و گزارش", "cr"))
 	}
-	if repCan(role, "shop") {
+	if repCan(role, "shop") && !b.Store.IsSubSeller(ctx, rep) {
 		r3 = append(r3, Button{Text: "🧾 محصولات", Data: "S:h"})
 	}
 	if repCan(role, "admins") {
@@ -214,14 +214,14 @@ func (b *Bot) repCallback(ctx context.Context, chat int64, data string) bool {
 		}
 		prods, _ := b.Store.Products(ctx, hubcore.Principal{Role: "rep", RepID: rep}, true)
 		for _, p := range prods {
-			if p.ID == arg(1) {
+			if p.ID == arg(1) && p.Seller == rep {
 				d.gb, d.days, d.ips, d.firstUse, d.plan, d.inbounds, d.product = float64(p.GB), p.Days, p.MaxIPs, p.FirstUse, p.Plan, p.Inbounds, p.Name
 			}
 		}
 		b.repNext(ctx, chat, rep)
 	case "c": // custom: volume
 		d := b.draftOf(chat)
-		if d == nil {
+		if d == nil || b.Store.IsSubSeller(ctx, rep) {
 			return true
 		}
 		d.product = ""
@@ -399,7 +399,7 @@ func (b *Bot) repPickPlan(ctx context.Context, chat int64, rep, mode string) {
 	prods, _ := b.Store.Products(ctx, hubcore.Principal{Role: "rep", RepID: rep}, true)
 	kb := &Keyboard{}
 	for _, p := range prods {
-		if mode == "renew" && p.NoRenew {
+		if p.Seller != rep || mode == "renew" && p.NoRenew {
 			continue
 		}
 		kb.Rows = append(kb.Rows, []Button{repBtn("📦 "+p.Name, "p:"+p.ID)})
@@ -407,7 +407,14 @@ func (b *Bot) repPickPlan(ctx context.Context, chat int64, rep, mode string) {
 			break
 		}
 	}
-	kb.Rows = append(kb.Rows, []Button{repBtn("✍️ حجم و مدت دلخواه", "c")}, []Button{repBtn("« انصراف", "home")})
+	sub := b.Store.IsSubSeller(ctx, rep)
+	if !sub {
+		kb.Rows = append(kb.Rows, []Button{repBtn("✍️ حجم و مدت دلخواه", "c")})
+	} else if len(kb.Rows) == 0 {
+		b.send(ctx, chat, "نماینده‌تان هنوز پلنی برای شما تعریف نکرده؛ از او بخواهید در فروشگاه برایتان محصول بسازد.", repBackKB)
+		return
+	}
+	kb.Rows = append(kb.Rows, []Button{repBtn("« انصراف", "home")})
 	title := "➕ <b>ساخت کاربر</b>\nیک پلن آماده انتخاب کنید یا حجم و مدت را خودتان بزنید:"
 	if mode == "renew" {
 		d := b.draftOf(chat)
@@ -553,6 +560,8 @@ func friendlyErr(err error) string {
 		return "مدت بیشتر از سقف مجاز شماست"
 	case strings.Contains(s, "largest volume"):
 		return "حجم بیشتر از سقف مجاز شماست"
+	case strings.Contains(s, "sub-sellers"):
+		return "فقط پلن‌هایی که نماینده برایتان تعریف کرده مجاز است"
 	case strings.Contains(s, "unlimited plans are not allowed"):
 		return "فروش نامحدود برای شما فعال نیست"
 	case strings.Contains(s, "not allowed"):

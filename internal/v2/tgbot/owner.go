@@ -650,6 +650,27 @@ func (b *Bot) repsView(ctx context.Context, chat int64) {
 	b.send(ctx, chat, "💼 <b>نماینده‌ها</b>\n\n"+strings.Join(lines, "\n"), kb)
 }
 
+// backupToGroup posts the backup in the group's backup topic (false = no group).
+func (b *Bot) backupToGroup(ctx context.Context) bool {
+	if _, _, ok := b.noticeTarget(ctx, "backups"); !ok {
+		return false
+	}
+	pass := b.Store.Setting(ctx, "tg_backup_pass")
+	if pass == "" {
+		return false
+	}
+	data, err := b.Store.FullBackup(ctx, pass)
+	if err != nil {
+		data, err = b.Store.EncryptedBackup(ctx, pass)
+	}
+	if err != nil {
+		return false
+	}
+	name := "dark-v2-" + b.now().UTC().Format("20060102-1504") + ".dkb"
+	caption := fmt.Sprintf("📦 بکاپ کامل و رمزگذاری‌شدهٔ هاب (%s)\nبازیابی: پنل ← تنظیمات ← بازگردانی بکاپ", gb(int64(len(data))))
+	return b.notifyDoc(ctx, "backups", name, data, caption)
+}
+
 // sendBackup sends an encrypted snapshot to one owner chat.
 func (b *Bot) sendBackup(ctx context.Context, chat int64) error {
 	pass := b.Store.Setting(ctx, "tg_backup_pass")
