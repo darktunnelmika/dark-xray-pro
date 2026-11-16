@@ -34,6 +34,17 @@ func TestP2PPeer(t *testing.T) {
 	}
 }
 
+func TestTunPeer(t *testing.T) {
+	cases := map[string]string{"10.10.66.2/24": "10.10.66.1", "10.10.66.1/24": "10.10.66.2", "172.16.0.2/32": "", "8.8.8.2/24": ""}
+	for in, want := range cases {
+		ip, n, _ := net.ParseCIDR(in)
+		n.IP = ip
+		if got := tunPeer(n); got != want {
+			t.Errorf("%s: %q want %q", in, got, want)
+		}
+	}
+}
+
 func TestTunnelMonitorDownAfterTwoMisses(t *testing.T) {
 	dir := t.TempDir()
 	_ = os.MkdirAll(filepath.Join(dir, "poland"), 0o700)

@@ -17,7 +17,7 @@ import (
 )
 
 // Version is reported to the HUB.
-var Version = "v2.13.0"
+var Version = "v2.13.1"
 
 // Applier is the part of Supervisor the agent uses.
 type Applier interface {

@@ -26,6 +26,7 @@ type TunnelMonitor struct {
 	Logf     func(string, ...any)
 	Interval time.Duration
 	GREDir   string
+	SysNet   string // /sys/class/net
 	Ping     func(ctx context.Context, iface, peer string) (rttMS, loss float64, err error)
 
 	mu    sync.Mutex
@@ -155,14 +156,47 @@ func (m *TunnelMonitor) discover() []wire.Tunnel {
 			continue
 		}
 		addrs, _ := ifc.Addrs()
+		_, err := os.Stat(filepath.Join(m.sysNet(), ifc.Name, "tun_flags"))
+		isTun := err == nil
 		for _, a := range addrs {
-			if peer := p2pPeer(a); peer != "" {
+			peer := p2pPeer(a)
+			if peer == "" && isTun {
+				peer = tunPeer(a) // Dark Tunnel style TUN: a private /24, far end .1
+			}
+			if peer != "" {
 				out = append(out, wire.Tunnel{Name: ifc.Name, Iface: ifc.Name, Peer: peer})
 				break
 			}
 		}
 	}
 	return out
+}
+
+func (m *TunnelMonitor) sysNet() string {
+	if m.SysNet != "" {
+		return m.SysNet
+	}
+	return "/sys/class/net"
+}
+
+// tunPeer: on a TUN interface with a private IPv4 subnet, the far end is
+// the subnet's first host (.1), or the second when this side is .1.
+func tunPeer(a net.Addr) string {
+	n, ok := a.(*net.IPNet)
+	if !ok {
+		return ""
+	}
+	ip := n.IP.To4()
+	ones, bits := n.Mask.Size()
+	if ip == nil || bits != 32 || ones < 16 || ones > 30 || !ip.IsPrivate() && !cgnat.Contains(ip) {
+		return ""
+	}
+	first := append(net.IP{}, ip.Mask(n.Mask)...)
+	first[3]++
+	if ip.Equal(first) {
+		first[3]++
+	}
+	return first.String()
 }
 
 var skipIface = regexp.MustCompile(`^(docker|br-|veth|virbr|cni|flannel|kube|lxc|tailscale|zt)`)
