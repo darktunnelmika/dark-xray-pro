@@ -258,7 +258,7 @@ type drafter interface {
 	Draft(ctx context.Context, chat int64, text string)
 }
 
-func (b *Bot) draft(ctx context.Context, chat int64, text string) {
+func (b *Bot) typing(ctx context.Context, chat int64, text string) {
 	if d, ok := b.API.(drafter); ok {
 		d.Draft(ctx, chat, text)
 	}

@@ -1034,7 +1034,7 @@ func (b *Bot) announceOrders(ctx context.Context) {
 			chat, ok := hubcore.TgChatOfBuyer(o.Buyer)
 			if ok {
 				if o.Status == "fulfilled" {
-					b.draft(ctx, chat, "⏳ در حال آماده‌سازی سرویس شما…")
+					b.typing(ctx, chat, "⏳ در حال آماده‌سازی سرویس شما…")
 					b.celebrate(ctx, chat, fmt.Sprintf("🎉 سفارش #%s آماده شد! سرویس شما فعال است.", faInt(o.ID)), nil, EffectParty)
 					b.sendSub(ctx, chat, o.ClientEmail)
 				} else {
