@@ -189,6 +189,7 @@ async function copy(text) {
 // One shared native <dialog>; content is rebuilt per use.
 function openModal(title, body, actions = []) {
   const d = document.getElementById("modal");
+  d.classList.remove("wide");
   d.replaceChildren(
     h("h2", { id: "modal-title" }, title), body,
     h("form", { method: "dialog", class: "actions" },
@@ -1334,7 +1335,7 @@ async function viewClients() {
     me.role === "rep" && me.policy && me.policy.DenyRenew ? null : h("div", { class: "row" }, h("button", { class: "primary", onclick: () => renewForm(attention) }, lang === "fa" ? `تمدید هر ${fmtNum(attention.length)} مورد` : `Renew all ${attention.length}`))) : null;
   return h("div", {},
     h("div", { class: "row" }, h("h1", {}, t("clients")), h("span", { class: "muted small" }, t("clientsCount", { n: fmtNum(list.length) })),
-      owner ? h("button", { class: "ghost spacer", onclick: () => templatesModal(inbounds) }, lang === "fa" ? "قالب‌ها" : "Templates") : h("span", { class: "spacer" }),
+      owner ? h("button", { class: "ghost spacer", onclick: () => templatesModal(inbounds) }, lang === "fa" ? "پلن‌های آماده" : "Ready plans") : h("span", { class: "spacer" }),
       owner ? h("button", { class: "ghost", onclick: () => cleanupForm() }, lang === "fa" ? "پاک‌سازی" : "Clean up") : null,
       owner ? h("a", { class: "btn ghost", href: "/api/v2/admin/clients/export.csv", download: "", title: lang === "fa" ? "فهرست کاربرها برای اکسل" : "Client list for Excel" }, lang === "fa" ? "اکسل" : "Excel") : null,
       owner ? h("button", { onclick: () => bulkCreateForm(inbounds) }, t("bulkCreate")) : null,
@@ -1391,9 +1392,9 @@ async function bulkCreateForm(inbounds) {
 
 async function templatesModal(inbounds) {
   const fa = lang === "fa";
-  const L = fa ? { title: "قالب‌های کاربر", hint: "هنگام ساخت کلاینت جدید، «از روی قالب» همهٔ فیلدها را پر می‌کند.", id: "شناسه", name: "نام", gb: "حجم (گیگ، ۰ = نامحدود)", days: "روز",
-      first: "زمان از اولین اتصال", ips: "حداکثر IP", dev: "حداکثر دستگاه", reset: "ریست دوره‌ای", prefix: "پیشوند نام", add: "افزودن قالب", del: "حذف", off: "خاموش", day: "روزانه", week: "هفتگی", month: "ماهانه", none: "هنوز قالبی نیست." }
-    : { title: "Client templates", hint: "When adding a client, “From template” fills every field.", id: "ID", name: "Name", gb: "Volume (GB, 0 = unlimited)", days: "Days",
+  const L = fa ? { title: "پلن‌های آماده", hint: "هر پلن آماده بالای فرم ساخت کلاینت یک دکمه می‌شود؛ با یک کلیک همهٔ فیلدها پر می‌شوند.", id: "شناسه", name: "نام", gb: "حجم (گیگ، ۰ = نامحدود)", days: "روز",
+      first: "زمان از اولین اتصال", ips: "حداکثر IP", dev: "حداکثر دستگاه", reset: "ریست دوره‌ای", prefix: "پیشوند نام", add: "افزودن پلن", del: "حذف", off: "خاموش", day: "روزانه", week: "هفتگی", month: "ماهانه", none: "هنوز پلن آماده‌ای نیست." }
+    : { title: "Ready plans", hint: "When adding a client, “From template” fills every field.", id: "ID", name: "Name", gb: "Volume (GB, 0 = unlimited)", days: "Days",
       first: "Time from first connection", ips: "Max IPs", dev: "Max devices", reset: "Periodic reset", prefix: "Name prefix", add: "Add template", del: "Delete", off: "Off", day: "Daily", week: "Weekly", month: "Monthly", none: "No templates yet." };
   const list = h("div", { class: "list" });
   const f = { id: h("input", { pattern: "[a-z0-9][a-z0-9._-]{0,62}", placeholder: "plan-30", dir: "ltr" }), name: h("input", { placeholder: "30 GB · 30 days" }),
@@ -1813,78 +1814,255 @@ function bulkSettingsForm(emails, inbounds, reps) {
     h("p", { class: "small muted" }, fa ? "انتقال به نماینده اعتبار جابه‌جا نمی‌کند؛ اگر لازم است اعتبار را دستی تنظیم کنید." : "Moving to a reseller does not move credit; adjust credit by hand if needed."), err), [save]);
 }
 
+// clientForm creates or edits a client. Everything PasarGuard/3x-ui offer is
+// here, but the common path stays short: name, volume, term, inbounds, save.
+// The rest (periodic reset, devices, auto-renew, groups, Telegram, keys) is
+// under "Advanced". A live summary shows the result, and resellers see what
+// it costs before saving. A new client ends on its link and QR.
 function clientForm(c, inbounds, ctx = { reps: [] }) {
   inbounds = (inbounds || []).filter((ib) => !["socks", "http", "dokodemo-door", "tunnel", "mtproto"].includes(ib.protocol));
-  const isNew = !c;
-  const v = c || { Email: "", Enabled: true, VolumeBytes: -1, ExpiresUnix: 0, DurationSeconds: 30 * 86400, MaxIPs: 2, Inbounds: [] };
-  const daysLeft = v.ExpiresUnix ? Math.max(0, Math.round((v.ExpiresUnix - Date.now() / 1000) / 86400)) : Math.round((v.DurationSeconds || 0) / 86400);
-  const name = h("input", { required: true, pattern: "[A-Za-z0-9][A-Za-z0-9._@+-]{0,127}", value: v.Email, disabled: !isNew, autofocus: isNew });
-  const vol = h("input", { type: "number", min: "0", step: "0.5", value: v.VolumeBytes < 0 ? 0 : +(v.VolumeBytes / 2 ** 30).toFixed(2) });
-  const days = h("input", { type: "number", min: "0", value: daysLeft });
-  const first = h("input", { type: "checkbox", checked: isNew ? true : !v.ExpiresUnix && v.DurationSeconds > 0 });
-  const ips = h("input", { type: "number", min: "0", max: "1000", value: v.MaxIPs });
-  const enabled = h("input", { type: "checkbox", checked: v.Enabled });
-  const note = h("input", { value: v.Note || "", maxlength: "2000" });
-  const owner = me.role === "owner";
-  const repSel = owner && !isNew && ctx.reps.length ? h("select", {}, h("option", { value: "" }, t("ownerSelf")),
-    ctx.reps.map((r) => h("option", { value: r.ID, selected: v.RepID === r.ID }, r.Name || r.ID))) : null;
-  const plan = h("select", {}, h("option", { value: "volume", selected: v.Plan !== "unlimited" }, t("planVolume")),
-    me.role === "rep" && me.policy && !me.policy.AllowUnlimited ? null : h("option", { value: "unlimited", selected: v.Plan === "unlimited" }, t("planUnlimited")));
-  const boxes = (inbounds || []).map((ib) => h("label", { class: "check" },
-    h("input", { type: "checkbox", value: ib.tag, checked: isNew ? (inbounds.length === 1) : (v.Inbounds || []).includes(ib.tag) }),
-    `${ib.tag} · ${ib.node_id} · ${ib.network}/${ib.security}`));
-  const err = h("div", { class: "error" });
-  let tplExtra = null; // reset period and device limit from a template
-  const tplSel = isNew ? h("select", {}, h("option", { value: "" }, "—")) : null;
-  if (tplSel) {
+  const fa = lang === "fa";
+  const isNew = !c, owner = me.role === "owner", rep = me.role === "rep";
+  const v = c || { Email: "", Enabled: true, VolumeBytes: -1, ExpiresUnix: 0, DurationSeconds: 30 * 86400, MaxIPs: 2, Inbounds: [], ...(ctx.seed || {}) };
+  const now = () => Math.floor(Date.now() / 1000);
+  const T = (f, e) => (fa ? f : e);
+  const seg = (opts, val, onch) => {
+    const box = h("div", { class: "seg", role: "radiogroup" });
+    const set = (k) => { box.dataset.v = k; for (const b of box.children) b.setAttribute("aria-checked", String(b.dataset.k === k)); onch && onch(k); };
+    for (const [k, l] of opts) box.append(h("button", { type: "button", role: "radio", "data-k": k, onclick: () => { set(k); calc(); } }, l));
+    set(val); return box;
+  };
+  const chipRow = (vals, fn, fmt) => h("div", { class: "chips qp" }, vals.map((x) => h("button", { type: "button", class: "chip", onclick: () => { fn(x); calc(); } }, fmt(x))));
+  const rnd = () => { const a = "abcdefghjkmnpqrstuvwxyz23456789"; let r = ""; const b = crypto.getRandomValues(new Uint8Array(8)); for (const x of b) r += a[x % a.length]; return r; };
+
+  // identity
+  const name = h("input", { required: true, pattern: "[A-Za-z0-9][A-Za-z0-9._@+-]{0,127}", value: v.Email, disabled: !isNew, dir: "ltr", autofocus: isNew, placeholder: "ali-30gb" });
+  const dice = isNew ? h("button", { type: "button", class: "ghost icon-only", title: T("نام تصادفی", "Random name"), onclick: () => { name.value = (tplPrefix || "") + rnd(); calc(); } }, "🎲") : null;
+  let tplPrefix = "";
+  const status = seg([["on", T("فعال", "Active")], owner ? ["hold", T("در انتظار", "On hold")] : null, ["off", T("غیرفعال", "Disabled")]].filter(Boolean),
+    !v.Enabled ? "off" : v.StartBy ? "hold" : "on");
+
+  // volume
+  const unl0 = v.VolumeBytes < 0 || v.Plan === "unlimited";
+  const vol = h("input", { type: "number", min: "0", step: "0.5", dir: "ltr", value: unl0 ? 0 : +(v.VolumeBytes / 2 ** 30).toFixed(2) });
+  const canUnl = !(rep && me.policy && !me.policy.AllowUnlimited);
+  const volChips = chipRow([10, 20, 30, 50, 100, 200].concat(canUnl ? [0] : []), (x) => { vol.value = x; }, (x) => (x ? `${fmtNum(x)} GB` : "∞"));
+
+  // term
+  const daysLeft = v.ExpiresUnix ? Math.max(0, Math.round((v.ExpiresUnix - now()) / 86400)) : Math.round((v.DurationSeconds || 0) / 86400);
+  const days = h("input", { type: "number", min: "0", max: "3650", dir: "ltr", value: daysLeft });
+  const date = h("input", { type: "date", dir: "ltr" });
+  const fromDays = () => { const d = +days.value || 0; date.value = d ? new Date((now() + d * 86400) * 1000).toISOString().slice(0, 10) : ""; };
+  date.addEventListener("change", () => { days.value = date.value ? Math.max(1, Math.ceil((new Date(date.value + "T23:59:59").getTime() / 1000 - now()) / 86400)) : 0; calc(); });
+  days.addEventListener("input", fromDays);
+  const dateFa = h("span", { class: "small muted datefa" });
+  const dayChips = chipRow([7, 30, 60, 90, 180, 365, 0], (x) => { days.value = x; fromDays(); }, (x) => (x ? (x % 30 === 0 ? T(`${fmtNum(x / 30)} ماه`, `${x / 30} mo`) : x === 365 ? T("۱ سال", "1 yr") : T(`${fmtNum(x)} روز`, `${x} d`)) : "∞"));
+  const firstUse0 = isNew ? true : !v.ExpiresUnix && v.DurationSeconds > 0;
+  const start = seg([["now", T("از همین الان", "From now")], ["first", T("از اولین اتصال", "First connection")]], firstUse0 ? "first" : "now");
+  const holdDays = h("input", { type: "number", min: "1", max: "365", dir: "ltr", value: v.StartBy ? Math.max(1, Math.round((v.StartBy - now()) / 86400)) : 7 });
+
+  // inbounds
+  const ibChips = inbounds.map((ib) => {
+    const on = isNew && !ctx.seed ? inbounds.length <= 3 : (v.Inbounds || []).includes(ib.tag);
+    const b = h("button", { type: "button", class: "chip ib", "aria-pressed": String(on), "data-tag": ib.tag, title: `${ib.protocol} · ${ib.network}/${ib.security}` },
+      h("span", { dir: "ltr" }, ib.tag), h("small", { class: "muted", dir: "ltr" }, ` ${ib.protocol}`));
+    b.addEventListener("click", () => { b.setAttribute("aria-pressed", String(b.getAttribute("aria-pressed") !== "true")); calc(); });
+    return b;
+  });
+  const allIb = h("button", { type: "button", class: "ghost small", onclick: () => { const all = ibChips.every((b) => b.getAttribute("aria-pressed") === "true"); ibChips.forEach((b) => b.setAttribute("aria-pressed", String(!all))); calc(); } }, T("همه", "All"));
+  const pickedIb = () => ibChips.filter((b) => b.getAttribute("aria-pressed") === "true").map((b) => b.dataset.tag);
+
+  // advanced
+  const ips = h("input", { type: "number", min: "0", max: "1000", dir: "ltr", value: v.MaxIPs });
+  const hwid = h("input", { type: "number", min: "0", max: "100", dir: "ltr", value: v.hwid_limit || 0 });
+  const reset = h("select", {}, [["", T("بدون ریست", "Never")], ["day", T("روزانه", "Daily")], ["week", T("هفتگی", "Weekly")], ["month", T("ماهانه", "Monthly")]]
+    .map(([k, l]) => h("option", { value: k, selected: (v.reset_period || "") === k }, l)));
+  const np0 = v.next_plan || null;
+  const npOn = h("input", { type: "checkbox", checked: !!np0 });
+  const npGB = h("input", { type: "number", min: "0", step: "0.5", dir: "ltr", value: np0 ? np0.gb : 30 });
+  const npDays = h("input", { type: "number", min: "0", dir: "ltr", value: np0 ? np0.days : 30 });
+  const npFirst = h("input", { type: "checkbox", checked: np0 ? !!np0.first_use : false });
+  const tg = h("input", { type: "number", dir: "ltr", placeholder: "123456789" });
+  const note = h("input", { value: v.Note || "", maxlength: "2000", placeholder: T("مثلاً @username یا شماره تماس", "e.g. @username or phone") });
+  const uuid = h("input", { dir: "ltr", value: isNew ? "" : v.UUID || "", placeholder: T("خودکار", "auto"), pattern: "[0-9a-fA-F-]{36}" });
+  const subTok = h("input", { dir: "ltr", value: isNew ? "" : v.SubToken || "", placeholder: T("خودکار", "auto"), pattern: "[A-Za-z0-9_-]{8,64}" });
+  const rotate = !isNew && owner ? h("div", { class: "row" },
+    h("button", { type: "button", class: "ghost small", onclick: async () => { if (await confirmAction(T("کلید اتصال عوض شود؟ کانفیگ‌های فعلی کاربر از کار می‌افتند.", "Replace the connection keys? The user's current configs stop working."))) { await guarded(() => api("POST", `/api/v2/admin/clients/${encodeURIComponent(v.Email)}/rotate`, { credentials: true })); toast(T("کلید عوض شد", "Keys replaced")); } } }, T("کلید جدید", "New keys")),
+    h("button", { type: "button", class: "ghost small", onclick: async () => { if (await confirmAction(T("لینک ساب عوض شود؟ لینک قبلی از کار می‌افتد.", "Replace the subscription link? The old link stops working."))) { await guarded(() => api("POST", `/api/v2/admin/clients/${encodeURIComponent(v.Email)}/rotate`, { link: true })); toast(T("لینک عوض شد", "Link replaced")); } } }, T("لینک ساب جدید", "New sub link"))) : null;
+  const repSel = owner ? h("select", {}, h("option", { value: "" }, t("ownerSelf"))) : null;
+  const groupBox = owner ? h("div", { class: "chips" }) : null;
+  let groups = [];
+  if (owner) {
+    Promise.all([ctx.reps && ctx.reps.length ? Promise.resolve(ctx.reps) : api("GET", "/api/v2/admin/reps").catch(() => []), api("GET", "/api/v2/admin/groups").catch(() => [])]).then(([reps, gs]) => {
+      for (const r of reps || []) repSel.append(h("option", { value: r.ID, selected: v.RepID === r.ID }, r.Name || r.ID));
+      groups = gs || [];
+      for (const g of groups) {
+        const on = !isNew && (g.Members || []).includes(v.Email);
+        const b = h("button", { type: "button", class: "chip", "aria-pressed": String(on), "data-id": g.ID }, g.Name || g.ID);
+        b.addEventListener("click", () => b.setAttribute("aria-pressed", String(b.getAttribute("aria-pressed") !== "true")));
+        groupBox.append(b);
+      }
+      if (!groups.length) groupBox.append(h("span", { class: "muted small" }, T("گروهی ساخته نشده", "No groups yet")));
+    });
+    if (!isNew) api("GET", `/api/v2/admin/clients/${encodeURIComponent(v.Email)}/telegram`).then((r) => { if (r && r.chats && r.chats[0]) tg.value = r.chats[0]; }).catch(() => {});
+  }
+
+  // ready plans (saved templates) as one-click chips; hidden when there are none
+  const tplBox = isNew ? h("div", { hidden: true }) : null;
+  if (tplBox) {
     api("GET", "/api/v2/admin/templates").then((list) => {
-      for (const tp of list || []) tplSel.append(h("option", { value: tp.id }, tp.name));
-      tplSel.addEventListener("change", () => {
-        const tp = (list || []).find((x) => x.id === tplSel.value);
-        if (!tp) { tplExtra = null; return; }
-        vol.value = tp.gb || 0; days.value = tp.days || 0; first.checked = !!tp.first_use; ips.value = tp.max_ips || 0;
-        for (const b of boxes) { const i = b.querySelector("input"); i.checked = (tp.inbounds || []).includes(i.value); }
-        if (tp.prefix && !name.value) name.value = tp.prefix;
-        tplExtra = { reset_period: tp.reset_period || "", hwid_limit: tp.hwid_limit || 0 };
-      });
+      if (!(list || []).length) return;
+      const chips = h("div", { class: "chips" });
+      const apply = (tp, btn) => {
+        for (const x of chips.children) x.setAttribute("aria-pressed", String(x === btn));
+        vol.value = tp.gb || 0; days.value = tp.days || 0; fromDays(); start.querySelector(`[data-k="${tp.first_use ? "first" : "now"}"]`).click(); ips.value = tp.max_ips || 0;
+        for (const b of ibChips) b.setAttribute("aria-pressed", String((tp.inbounds || []).includes(b.dataset.tag)));
+        tplPrefix = tp.prefix || ""; if (tplPrefix && !name.value) name.value = tplPrefix;
+        reset.value = tp.reset_period || ""; hwid.value = tp.hwid_limit || 0;
+        calc();
+      };
+      for (const tp of list) {
+        const btn = h("button", { type: "button", class: "chip", "aria-pressed": "false", title: [tp.gb ? `${tp.gb} GB` : "∞", tp.days ? `${tp.days} ${T("روز", "d")}` : ""].filter(Boolean).join(" · ") }, tp.name);
+        btn.addEventListener("click", () => apply(tp, btn));
+        chips.append(btn);
+      }
+      tplBox.append(h("span", { class: "lbl" }, T("پلن آماده", "Ready plan")), chips);
+      tplBox.hidden = false;
     }).catch(() => {});
   }
-  const save = h("button", { class: "primary", value: "save", onclick: async (e) => {
-    e.preventDefault();
-    if (!name.reportValidity()) return;
-    const d = +days.value || 0;
-    const body = {
-      Enabled: enabled.checked, MaxIPs: +ips.value || 0,
-      VolumeBytes: +vol.value > 0 ? Math.round(+vol.value * 2 ** 30) : -1,
-      ExpiresUnix: d && !first.checked ? Math.floor(Date.now() / 1000) + d * 86400 : 0,
-      DurationSeconds: d && first.checked ? d * 86400 : 0,
-      Inbounds: boxes.map((b) => b.querySelector("input")).filter((i) => i.checked).map((i) => i.value),
-      Plan: plan.value,
-    };
-    if (plan.value === "unlimited") body.VolumeBytes = -1;
-    if (!isNew && !first.checked && v.ExpiresUnix && d === daysLeft) body.ExpiresUnix = v.ExpiresUnix;
-    try {
-      const em = encodeURIComponent(name.value);
-      await api("PUT", `/api/v2/admin/clients/${em}`, body);
-      if ((note.value || "") !== (v.Note || "")) await api("PUT", `/api/v2/admin/clients/${em}/note`, { Note: note.value });
-      if (repSel && repSel.value !== (v.RepID || "")) await api("POST", `/api/v2/admin/clients/${em}/transfer`, { RepID: repSel.value });
-      if (tplExtra?.reset_period && owner) await api("PUT", `/api/v2/admin/clients/${em}/reset-period`, { period: tplExtra.reset_period });
-      if (tplExtra?.hwid_limit) await api("PUT", `/api/v2/admin/clients/${em}/hwid-limit`, { limit: tplExtra.hwid_limit });
-      toast(t("saved")); document.getElementById("modal").close("save"); route();
+
+  // live summary + reseller cost
+  const sumBox = h("div", { class: "csum" });
+  const err = h("div", { class: "error" });
+  const save = h("button", { class: "primary", value: "save" }, isNew ? T("ساخت کلاینت", "Create client") : t("save"));
+  const holdRow = h("div", { class: "two" }, h("label", {}, h("span", {}, T("مهلت شروع (روز)", "Must start within (days)")), holdDays),
+    h("p", { class: "small muted", style: "align-self:end;margin:0 0 8px" }, T("اگر تا این مهلت وصل نشود، زمانش خودکار شروع می‌شود.", "If unused by then, the term starts anyway.")));
+  const startRow = h("div", {}, h("span", { class: "lbl" }, T("شروع زمان", "Term starts")), start);
+  const unitsFor = (d) => (d > 0 ? Math.ceil(d / 30) : 0);
+  function calc() {
+    const st = status.dataset.v, gb = +vol.value || 0, d = +days.value || 0;
+    holdRow.hidden = st !== "hold"; startRow.hidden = st === "hold" || !d;
+    const until = !d ? T("بدون انقضا", "no expiry") : st === "hold" || start.dataset.v === "first" ? T(`${fmtNum(d)} روز از اولین اتصال`, `${d} days from first use`)
+      : new Intl.DateTimeFormat(fa ? "fa-IR-u-ca-persian" : "en-GB", { dateStyle: "medium" }).format(new Date((now() + d * 86400) * 1000));
+    dateFa.textContent = d ? new Intl.DateTimeFormat(fa ? "fa-IR-u-ca-persian" : "en-GB", { dateStyle: "full" }).format(new Date((now() + d * 86400) * 1000)) : "";
+    const n = pickedIb().length;
+    const bits = [gb ? `${fmtNum(gb)} GB` : T("حجم نامحدود", "unlimited volume"), until, n ? T(`${fmtNum(n)} اینباند`, `${n} inbound${n > 1 ? "s" : ""}`) : null,
+      +ips.value ? T(`${fmtNum(+ips.value)} IP`, `${ips.value} IP`) : null, +hwid.value ? T(`${fmtNum(+hwid.value)} دستگاه`, `${hwid.value} devices`) : null, reset.value ? T("ریست دوره‌ای", "periodic reset") : null].filter(Boolean);
+    const kids = [h("div", { class: "csum-line" }, h("b", {}, T("نتیجه: ", "Result: ")), bits.join(" · "))];
+    let short = false;
+    if (rep) {
+      const isUnl = gb === 0;
+      const credit = me.volume_credit || 0, units = me.unlimited_units || 0;
+      const prev = isNew ? 0 : (v.VolumeBytes > 0 ? v.VolumeBytes : 0);
+      const costB = isUnl ? 0 : Math.max(0, Math.round(gb * 2 ** 30) - prev);
+      const costU = isUnl ? Math.max(0, unitsFor(d) - (isNew ? 0 : unitsFor(daysLeft))) : 0;
+      short = costB > credit || costU > units;
+      kids.push(h("div", { class: `cost ${short ? "bad" : ""}` },
+        h("div", {}, T("از اعتبار کم می‌شود: ", "Takes from credit: "), h("b", { dir: "ltr" }, [costB ? gbs(costB) : "", costU ? `${fmtNum(costU)} ${t("units")}` : ""].filter(Boolean).join(" + ") || "0")),
+        h("div", {}, T("مانده بعد از ساخت: ", "Left after: "), h("b", { dir: "ltr" }, gbs(Math.max(0, credit - costB))), units || costU ? ` · ${fmtNum(Math.max(0, units - costU))} ${t("units")}` : ""),
+        short ? h("div", {}, T("اعتبار کافی نیست.", "Not enough credit.")) : null));
     }
-    catch (x) { err.textContent = x.message; }
-  } }, t("save"));
-  openModal(isNew ? t("add") : `${t("edit")} · ${v.Email}`, h("div", { class: "form" },
-    tplSel ? h("label", {}, h("span", {}, lang === "fa" ? "از روی قالب" : "From template"), tplSel) : null,
-    h("label", {}, h("span", {}, t("name")), name),
-    me.role === "rep" ? h("label", {}, h("span", {}, t("plan")), plan, h("span", { class: "small" }, t("unitsHint"))) : null,
-    h("div", { class: "two" }, h("label", {}, h("span", {}, t("volumeGB")), vol), h("label", {}, h("span", {}, t("days")), days)),
-    h("label", { class: "check" }, first, t("firstUse")),
-    h("div", { class: "two" }, h("label", {}, h("span", {}, t("maxIPs")), ips), h("label", { class: "check" }, enabled, t("enabled"))),
-    h("fieldset", { class: "form", style: "border:0;padding:0;margin:0" }, h("legend", { class: "small muted" }, t("assignInbounds")), boxes),
-    h("label", {}, h("span", {}, t("contact")), note),
-    repSel ? h("label", {}, h("span", {}, t("transfer")), repSel) : null,
-    err), [save]);
+    save.disabled = short || (!n && inbounds.length > 0);
+    sumBox.replaceChildren(...kids);
+  }
+  [vol, ips, hwid, reset, days].forEach((x) => x.addEventListener("input", calc));
+  reset.addEventListener("change", calc);
+
+  save.addEventListener("click", async (e) => {
+    e.preventDefault();
+    err.textContent = "";
+    if (!name.reportValidity() || (uuid.value && !uuid.reportValidity()) || (subTok.value && !subTok.reportValidity())) return;
+    const st = status.dataset.v, d = +days.value || 0, gb = +vol.value || 0;
+    const first = st === "hold" || start.dataset.v === "first";
+    const body = {
+      Enabled: st !== "off", MaxIPs: +ips.value || 0,
+      VolumeBytes: gb > 0 ? Math.round(gb * 2 ** 30) : -1,
+      ExpiresUnix: d && !first ? now() + d * 86400 : 0,
+      DurationSeconds: d && first ? d * 86400 : 0,
+      Inbounds: pickedIb(),
+      Plan: gb > 0 ? "volume" : "unlimited",
+    };
+    if (!isNew && !first && v.ExpiresUnix && d === daysLeft) body.ExpiresUnix = v.ExpiresUnix;
+    if (owner && uuid.value && uuid.value !== v.UUID) body.UUID = uuid.value;
+    if (owner && subTok.value && subTok.value !== v.SubToken) body.SubToken = subTok.value;
+    if (!isNew && owner) { body.UUID ||= v.UUID; body.SubToken ||= v.SubToken; }
+    save.disabled = true;
+    const em = encodeURIComponent(name.value);
+    try {
+      await api("PUT", `/api/v2/admin/clients/${em}`, body);
+      const extra = [];
+      if ((note.value || "") !== (v.Note || "")) extra.push(api("PUT", `/api/v2/admin/clients/${em}/note`, { Note: note.value }));
+      if (+hwid.value !== (v.hwid_limit || 0)) extra.push(api("PUT", `/api/v2/admin/clients/${em}/hwid-limit`, { limit: +hwid.value || 0 }));
+      if (owner) {
+        if (reset.value !== (v.reset_period || "")) extra.push(api("PUT", `/api/v2/admin/clients/${em}/reset-period`, { period: reset.value }));
+        const np = npOn.checked ? { gb: +npGB.value || 0, days: +npDays.value || 0, first_use: npFirst.checked } : null;
+        if (JSON.stringify(np) !== JSON.stringify(np0 ? { gb: np0.gb, days: np0.days, first_use: !!np0.first_use } : null)) extra.push(api("PUT", `/api/v2/admin/clients/${em}/next-plan`, { plan: np }));
+        if (st === "hold") extra.push(api("PUT", `/api/v2/admin/clients/${em}/on-hold`, { Days: +holdDays.value || 7 }));
+        else if (v.StartBy) extra.push(api("PUT", `/api/v2/admin/clients/${em}/on-hold`, { Days: 0 }));
+        if (tg.value) extra.push(api("PUT", `/api/v2/admin/clients/${em}/telegram`, { chat: +tg.value }));
+        if (repSel.value !== (v.RepID || "")) extra.push(api("POST", `/api/v2/admin/clients/${em}/transfer`, { RepID: repSel.value }));
+        for (const b of groupBox.querySelectorAll("button[data-id]")) {
+          const g = groups.find((x) => x.ID === b.dataset.id); if (!g) continue;
+          const want = b.getAttribute("aria-pressed") === "true", has = (g.Members || []).includes(name.value);
+          if (want !== has) extra.push(api("PUT", `/api/v2/admin/groups/${encodeURIComponent(g.ID)}`, { Name: g.Name, Members: want ? [...(g.Members || []), name.value] : (g.Members || []).filter((m) => m !== name.value) }));
+        }
+      }
+      const res = await Promise.allSettled(extra);
+      const bad = res.filter((r) => r.status === "rejected");
+      if (bad.length) toast(T(`ذخیره شد، ولی ${fmtNum(bad.length)} تنظیم اعمال نشد: ${bad[0].reason.message}`, `Saved, but ${bad.length} setting(s) failed: ${bad[0].reason.message}`));
+      if (!isNew) { document.getElementById("modal").close("save"); if (!bad.length) toast(t("saved")); route(); return; }
+      created(name.value);
+    } catch (x) { err.textContent = x.message; save.disabled = false; }
+  });
+
+  // after creating: the link, a QR and "another like this"
+  async function created(email) {
+    const list = await api("GET", "/api/v2/admin/clients").catch(() => []);
+    const cl = (list || []).find((x) => x.Email === email) || { Email: email };
+    const link = cl.SubURL || "";
+    const copy = h("button", { class: "primary", type: "button", onclick: async () => { try { await navigator.clipboard.writeText(link); toast(T("لینک کپی شد", "Link copied")); } catch {} } }, T("کپی لینک ساب", "Copy sub link"));
+    const again = h("button", { type: "button", onclick: () => { const st = status.dataset.v, gb = +vol.value || 0, dd = +days.value || 0, first = st === "hold" || start.dataset.v === "first";
+      clientForm(null, inbounds, { ...ctx, seed: { VolumeBytes: gb ? Math.round(gb * 2 ** 30) : -1, DurationSeconds: dd && first ? dd * 86400 : 0, ExpiresUnix: dd && !first ? now() + dd * 86400 : 0, MaxIPs: +ips.value || 0, Inbounds: pickedIb(), hwid_limit: +hwid.value || 0, reset_period: reset.value } }); } }, T("یکی دیگر مثل همین", "Another like this"));
+    const open = h("button", { type: "button", onclick: () => { document.getElementById("modal").close(); location.hash = `#/client?e=${encodeURIComponent(email)}`; } }, T("صفحهٔ کلاینت", "Open client"));
+    openModal(T(`ساخته شد · ${email}`, `Created · ${email}`), h("div", { class: "form created" },
+      h("img", { class: "qr", alt: "QR", src: `/api/v2/admin/clients/${encodeURIComponent(email)}/qr.png`, onerror: (e) => e.target.remove() }),
+      link ? h("code", {}, link) : null,
+      h("p", { class: "small muted center" }, T("این لینک را برای کاربر بفرستید؛ همهٔ کانفیگ‌ها و تغییرات بعدی از همین لینک به او می‌رسد.", "Send this link to the user; every config and later change reaches them through it.")),
+      h("div", { class: "row" }, again, open)), [copy]);
+    route();
+  }
+
+  const adv = h("details", { class: "adv" }, h("summary", {}, T("تنظیمات پیشرفته", "Advanced")),
+    h("div", { class: "form" },
+      h("div", { class: "three" },
+        h("label", {}, h("span", {}, T("حداکثر IP هم‌زمان", "Max concurrent IPs")), ips),
+        h("label", {}, h("span", {}, T("حداکثر دستگاه (HWID)", "Max devices (HWID)")), hwid),
+        owner ? h("label", {}, h("span", {}, T("ریست دوره‌ای حجم", "Periodic volume reset")), reset) : null),
+      owner ? h("fieldset", { class: "np" }, h("label", { class: "check" }, npOn, T("تمدید خودکار با پلن بعدی وقتی حجم یا زمان تمام شد", "Auto-renew with a next plan when volume or time runs out")),
+        h("div", { class: "three" }, h("label", {}, h("span", {}, T("حجم بعدی (گیگ، ۰ = نامحدود)", "Next volume (GB, 0 = ∞)")), npGB), h("label", {}, h("span", {}, T("روز بعدی", "Next days")), npDays),
+          h("label", { class: "check", style: "align-self:end" }, npFirst, T("از اولین اتصال", "From first use")))) : null,
+      owner ? h("div", { class: "two" }, h("label", {}, h("span", {}, T("مالک (نماینده)", "Owner (reseller)")), repSel), h("label", {}, h("span", {}, T("آیدی عددی تلگرام کاربر", "User's Telegram ID")), tg)) : null,
+      owner ? h("div", {}, h("span", { class: "lbl" }, T("گروه‌ها", "Groups")), groupBox) : null,
+      h("label", {}, h("span", {}, t("contact")), note),
+      owner ? h("div", { class: "two" }, h("label", {}, h("span", {}, "UUID"), uuid), h("label", {}, h("span", {}, T("توکن لینک ساب", "Sub link token")), subTok)) : null,
+      rotate));
+
+  const body = h("div", { class: "form cform" },
+    tplBox,
+    h("div", { class: "two" },
+      h("label", {}, h("span", {}, t("name")), h("div", { class: "row nowrap" }, name, dice)),
+      h("div", {}, h("span", { class: "lbl" }, T("وضعیت", "Status")), status)),
+    rep ? h("p", { class: "small muted", style: "margin:0" }, t("unitsHint")) : null,
+    h("div", { class: "two" },
+      h("div", {}, h("label", {}, h("span", {}, T("حجم (گیگ) — ۰ یعنی نامحدود", "Volume (GB) — 0 = unlimited")), vol), volChips),
+      h("div", {}, h("div", { class: "row nowrap tight2" }, h("label", { style: "flex:1" }, h("span", {}, T("مدت (روز)", "Days")), days), h("label", { style: "flex:1.3" }, h("span", {}, T("یا تاریخ انقضا", "or expiry date")), date)), dateFa, dayChips)),
+    startRow, holdRow,
+    h("div", {}, h("div", { class: "row" }, h("span", { class: "lbl" }, t("assignInbounds")), inbounds.length > 1 ? h("span", { class: "spacer" }, allIb) : null),
+      h("div", { class: "chips" }, ibChips.length ? ibChips : h("span", { class: "muted small" }, T("اینباندی نیست", "No inbounds")))),
+    adv, sumBox, err);
+  fromDays(); calc();
+  const d = openModal(isNew ? T("کلاینت جدید", "New client") : `${t("edit")} · ${v.Email}`, body, [save]);
+  d.classList.add("wide");
 }
 
 async function viewInbounds() {

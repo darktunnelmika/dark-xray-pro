@@ -974,3 +974,29 @@ input[type="checkbox"], input[type="radio"] { inline-size: 16px; block-size: 16p
 .chip.on { border-color: color-mix(in oklab, var(--ion) 60%, transparent); box-shadow: 0 0 0 1px color-mix(in oklab, var(--ion) 30%, transparent), 0 0 14px -4px color-mix(in oklab, var(--ion) 40%, transparent); }
 .avatar { inline-size: 24px; block-size: 24px; font-size: 9.5px; }
 .row:has(> h1) { margin-block-end: 12px; }
+
+/* ---------- Client form ---------- */
+dialog.wide:has(.cform) { inline-size: min(780px, calc(100vw - 20px)); }
+.cform { gap: 12px; }
+.cform .lbl { display: block; font-size: 12.5px; color: var(--muted); margin-block-end: 5px; }
+.cform label > span { font-size: 12.5px; }
+.cform .row.nowrap { flex-wrap: nowrap; }
+.cform .icon-only { padding: 6px 9px; flex: none; }
+.cform .tight2 { gap: 8px; align-items: end; }
+.cform .chips { margin-block: 6px 0; }
+.cform .chips.qp .chip { font-family: var(--mono); font-size: 11.5px; padding: 2px 8px; }
+.chip[aria-pressed="true"] { color: var(--text); border-color: color-mix(in oklab, var(--ion) 65%, transparent); background: color-mix(in oklab, var(--ion) 12%, var(--surface-2)); }
+.chip.ib small { font-family: var(--mono); font-size: 10.5px; }
+.seg { display: inline-flex; padding: 3px; gap: 2px; border: 1px solid var(--glass-line); border-radius: var(--r-md); background: var(--glass-2); flex-wrap: wrap; }
+.seg button { border: 0; background: transparent; padding: 5px 12px; color: var(--muted); box-shadow: none; }
+.seg button[aria-checked="true"] { background: color-mix(in oklab, var(--ion) 16%, var(--surface-2)); color: var(--ion); box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--ion) 45%, transparent); }
+.cform details.adv { border: 1px solid var(--glass-line); border-radius: var(--r-md); padding: 8px 12px; background: var(--glass-2); }
+.cform details.adv > summary { cursor: pointer; font-weight: 600; font-size: 13px; color: var(--ion); }
+.cform details.adv[open] > summary { margin-block-end: 10px; }
+.cform fieldset.np { border: 1px dashed var(--glass-line); border-radius: var(--r-md); padding: 8px 10px; margin: 0; display: grid; gap: 8px; }
+.csum { border: 1px solid color-mix(in oklab, var(--ion) 30%, var(--glass-line)); background: color-mix(in oklab, var(--ion) 5%, var(--glass)); border-radius: var(--r-md); padding: 8px 12px; font-size: 12.5px; display: grid; gap: 6px; }
+.csum .csum-line b { color: var(--ion); }
+.created { justify-items: center; text-align: center; }
+.created code { inline-size: 100%; font-size: 11.5px; }
+.center { text-align: center; }
+.cform .datefa { display: block; margin-block-start: 4px; font-size: 11.5px; }
