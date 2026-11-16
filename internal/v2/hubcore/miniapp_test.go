@@ -130,3 +130,63 @@ func TestMiniApp(t *testing.T) {
 		t.Fatal(code, b)
 	}
 }
+
+// A reseller's bot opens the same Mini App; it shows that reseller's store.
+func TestMiniAppReseller(t *testing.T) {
+	s, now := newStore(t)
+	ctx := context.Background()
+	seed(t, s)
+	SetTelegramToken("123:main-bot-token-xxxxxxxxxxxxxxxxxxxxxxxx")
+	defer SetTelegramToken("")
+	_ = s.PutRep(ctx, Rep{ID: "ali", Name: "Ali", Enabled: true})
+	const repTok = "555555:AArepbottokenrepbottokenrepbottoken12"
+	if err := s.PutRepBot(ctx, "ali", RepBot{Token: repTok, Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	_ = s.PutCardFor(ctx, "ali", CardInfo{Number: "6037991122334455", Holder: "Ali", Bank: "Melli"})
+	owner := Principal{User: "boss", Role: "owner"}
+	_ = s.PutProduct(ctx, owner, Product{ID: "own", Name: "owner plan", Plan: "volume", GB: 10, Days: 30, Price: 100000, Status: "published", Inbounds: []string{"de-vless"}})
+	if err := s.PutProduct(ctx, owner, Product{ID: "alip", Seller: "ali", Name: "ali plan", Plan: "volume", GB: 10, Days: 30, Price: 90000, Status: "published", Inbounds: []string{"de-vless"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.PutSubSettings(ctx, SubSettings{MiniApp: true}); err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(SubHandler(s))
+	defer srv.Close()
+	data := signInitData(repTok, `{"id":888,"first_name":"Sara"}`, *now)
+	get := func(method, path, body string) (int, string) {
+		req, _ := http.NewRequest(method, srv.URL+path, strings.NewReader(body))
+		req.Header.Set("X-Init-Data", data)
+		r, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, _ := io.ReadAll(r.Body)
+		r.Body.Close()
+		return r.StatusCode, string(b)
+	}
+	code, b := get("GET", "/app/api/me", "")
+	var me struct {
+		Products []Product
+		Card     *CardInfo
+		Stars    bool
+	}
+	if code != 200 || json.Unmarshal([]byte(b), &me) != nil {
+		t.Fatal(code, b)
+	}
+	if len(me.Products) != 1 || me.Products[0].ID != "alip" || me.Card == nil || me.Card.Holder != "Ali" || me.Stars {
+		t.Fatalf("the reseller's store only: %s", b)
+	}
+	if code, _ := get("POST", "/app/api/order", `{"product":"own"}`); code != 403 {
+		t.Fatal("the owner's plan is not sold in a reseller's store", code)
+	}
+	if code, b := get("POST", "/app/api/order", `{"product":"alip"}`); code != 200 {
+		t.Fatal(code, b)
+	}
+	off := false
+	_ = s.PutRepBot(ctx, "ali", RepBot{Enabled: true, MiniApp: &off})
+	if code, _ := get("GET", "/app/api/me", ""); code != 503 {
+		t.Fatal("a reseller can turn its store off", code)
+	}
+}

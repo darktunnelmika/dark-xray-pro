@@ -52,6 +52,7 @@ svg { inline-size: 18px; block-size: 18px; fill: none; stroke: currentColor; str
 .hello { display: flex; align-items: center; gap: 12px; margin: 4px 2px 14px; }
 .av { inline-size: 44px; block-size: 44px; border-radius: 14px; display: grid; place-items: center; font-weight: 800; font-size: 18px; color: #fff;
   background: linear-gradient(135deg, var(--ion), var(--ion-2)); box-shadow: 0 6px 18px rgb(79 140 255 / .35); }
+.av.logo { object-fit: cover; background: var(--surface); }
 .hello-t { flex: 1; min-inline-size: 0; }
 .hello-t p { margin: 0; color: var(--muted); font-size: 13px; }
 .hello-t h1 { margin: 0; font-size: 20px; letter-spacing: -.01em; }

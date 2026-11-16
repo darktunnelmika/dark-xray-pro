@@ -404,8 +404,10 @@ function render() {
   const u = state.user || {};
   const name = u.first_name || "";
   const initials = (name || "D").slice(0, 1);
+  // A reseller's store wears its brand: accent colour and logo.
+  if (state.accent && /^#[0-9a-f]{6}$/i.test(state.accent)) { document.documentElement.style.setProperty("--ion", state.accent); document.documentElement.style.setProperty("--ion-2", state.accent); }
   const head = h("header", { class: "hello" },
-    h("div", { class: "av" }, initials),
+    state.logo && /^data:image\//.test(state.logo) ? h("img", { class: "av logo", src: state.logo, alt: "" }) : h("div", { class: "av" }, initials),
     h("div", { class: "hello-t" }, h("p", {}, name ? `سلام ${name} 👋` : "سلام 👋"), h("h1", {}, state.title || "Dark VPN")),
     h("button", { class: "wallet-chip", onclick: () => { tap(); setTab("wallet"); } }, icon(IC.wallet), h("span", {}, `${toman(state.toman || 0)}`)));
   const body = { services, shop, wallet, orders }[tab]();

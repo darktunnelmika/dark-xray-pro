@@ -149,6 +149,7 @@ func (b *Bot) Tick(ctx context.Context) {
 	b.init()
 	if b.Seller != "" {
 		// A reseller's own bot: its orders and its customers' notices only.
+		b.syncMenuButton(ctx)
 		b.announceOrders(ctx)
 		b.notifyClients(ctx)
 		b.repAlerts(ctx)
@@ -450,7 +451,7 @@ func (b *Bot) menu(ctx context.Context, chat int64) {
 // menuKB is the main menu, led by the Mini App store when it is on.
 func (b *Bot) menuKB(ctx context.Context, chat int64) *Keyboard {
 	var rows [][]Button
-	if u := b.Store.MiniAppURL(ctx, b.SubBase); u != "" {
+	if u := b.miniURL(ctx); u != "" {
 		rows = append(rows, []Button{{Text: "🛍 فروشگاه و سرویس‌های من", WebApp: &WebApp{URL: u}}})
 	}
 	rows = append(rows, row(cbBtn("🛍 خرید اشتراک", "shop"), cbBtn("📦 سرویس‌های من", "mine")))
@@ -474,6 +475,15 @@ func (b *Bot) menuKB(ctx context.Context, chat int64) *Keyboard {
 }
 
 // syncMenuButton keeps the chat menu button in step with the Mini App setting.
+// miniURL is this bot's Mini App address ("" = off): a reseller's bot opens
+// the same app, which shows that reseller's store.
+func (b *Bot) miniURL(ctx context.Context) string {
+	if b.Seller != "" {
+		return b.Store.RepMiniAppURL(ctx, b.Seller, b.SubBase)
+	}
+	return b.Store.MiniAppURL(ctx, b.SubBase)
+}
+
 func (b *Bot) syncMenuButton(ctx context.Context) {
 	setter, ok := b.API.(interface {
 		SetMenuButton(ctx context.Context, url, text string) error
@@ -481,7 +491,7 @@ func (b *Bot) syncMenuButton(ctx context.Context) {
 	if !ok {
 		return
 	}
-	u := b.Store.MiniAppURL(ctx, b.SubBase)
+	u := b.miniURL(ctx)
 	if u == b.menuURL && b.menuSet {
 		return
 	}

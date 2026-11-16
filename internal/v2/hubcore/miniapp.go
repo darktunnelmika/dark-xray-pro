@@ -116,8 +116,11 @@ type miniOrder struct {
 	Created int64  `json:"created"`
 }
 
-func (s *Store) miniServices(ctx context.Context, chat int64, subBase string) ([]MiniAppService, error) {
+func (s *Store) miniServices(ctx context.Context, chat int64, subBase, seller string) ([]MiniAppService, error) {
 	emails, err := s.TgClients(ctx, chat)
+	if seller != "" {
+		emails, err = s.TgClientsOf(ctx, chat, seller)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -129,7 +132,7 @@ func (s *Store) miniServices(ctx context.Context, chat int64, subBase string) ([
 			continue
 		}
 		sv := MiniAppService{Email: c.Email, Enabled: c.Enabled, Used: c.Usage.Up + c.Usage.Down, Total: c.VolumeBytes,
-			Until: c.EffectiveUntil, Online: c.Online, SubURL: strings.TrimRight(subBase, "/") + "/sub/" + c.SubToken, Status: "active"}
+			Until: c.EffectiveUntil, Online: c.Online, SubURL: strings.TrimRight(s.SubBaseFor(ctx, c.Email, subBase), "/") + "/sub/" + c.SubToken, Status: "active"}
 		if c.EffectiveUntil == 0 {
 			sv.DaysOnUse = c.DurationSeconds / 86400
 		}
@@ -204,18 +207,29 @@ func registerMiniApp(mux *http.ServeMux, s *Store) {
 		w.Header().Set("Cache-Control", "no-cache")
 		files.ServeHTTP(w, r)
 	})))
+	// sellerOf is filled per request by user(): "" for the main bot, a
+	// reseller id when the Mini App was opened from that reseller's bot
+	// (Telegram signs the data with the bot's own token).
 	user := func(w http.ResponseWriter, r *http.Request) (TgUser, bool) {
-		u, err := VerifyInitData(r.Header.Get("X-Init-Data"), tgToken, s.now(), 24*time.Hour)
+		u, seller, err := s.verifyMiniUser(r.Context(), r.Header.Get("X-Init-Data"))
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusUnauthorized)
 			return TgUser{}, false
 		}
-		if s.Setting(r.Context(), "miniapp") != "1" {
+		if !s.MiniAppOn(r.Context(), seller) {
 			http.Error(w, "the store is closed", http.StatusServiceUnavailable)
 			return TgUser{}, false
 		}
 		_ = s.TgTouch(r.Context(), u.ID, u.FirstName, u.Username)
+		*r = *r.WithContext(context.WithValue(r.Context(), miniSellerKey{}, seller))
 		return u, true
+	}
+	sellerOf := func(r *http.Request) string { v, _ := r.Context().Value(miniSellerKey{}).(string); return v }
+	mine := func(r *http.Request, chat int64) ([]string, error) {
+		if sl := sellerOf(r); sl != "" {
+			return s.TgClientsOf(r.Context(), chat, sl)
+		}
+		return s.TgClients(r.Context(), chat)
 	}
 	owner := Principal{User: "miniapp", Role: "owner"}
 	mux.HandleFunc("GET /app/api/me", func(w http.ResponseWriter, r *http.Request) {
@@ -223,7 +237,8 @@ func registerMiniApp(mux *http.ServeMux, s *Store) {
 		if !ok {
 			return
 		}
-		services, err := s.miniServices(r.Context(), u.ID, base(r))
+		seller := sellerOf(r)
+		services, err := s.miniServices(r.Context(), u.ID, base(r), seller)
 		if err != nil {
 			reply(w, nil, err)
 			return
@@ -240,7 +255,7 @@ func registerMiniApp(mux *http.ServeMux, s *Store) {
 		}
 		products := []Product{}
 		for _, p := range all {
-			if p.Seller == "" {
+			if p.Seller == seller {
 				p.Inbounds = nil // internal
 				products = append(products, p)
 			}
@@ -248,15 +263,26 @@ func registerMiniApp(mux *http.ServeMux, s *Store) {
 		ss := s.SubSettings(r.Context())
 		out := map[string]any{"user": u, "services": services, "orders": orders, "products": products,
 			"pay_text": s.Setting(r.Context(), "tg_pay_text"), "support": ss.SupportURL, "title": ss.Title, "announce": ss.Announce,
-			"stars": invoiceLinker != nil, "wallet": s.WalletBalance(r.Context(), u.ID), "bot": s.Setting(r.Context(), "tg_username"),
-			"toman": s.TomanBalance(r.Context(), "", u.ID)}
-		if c := s.CardFor(r.Context(), ""); c.Number != "" {
+			"stars": invoiceLinker != nil && seller == "", "wallet": 0, "bot": s.Setting(r.Context(), "tg_username"),
+			"toman": s.TomanBalance(r.Context(), seller, u.ID), "accent": ss.Accent, "logo": ss.Logo}
+		if seller == "" {
+			out["wallet"] = s.WalletBalance(r.Context(), u.ID)
+		} else {
+			// The reseller's own brand, bot and support; Stars, trials and
+			// referrals belong to the main store.
+			b := s.RepBrand(r.Context(), seller)
+			out["title"] = firstNonEmpty(b.Title, ss.Title)
+			out["announce"], out["support"], out["accent"], out["logo"] = b.Announce, b.SupportURL, b.Accent, b.Logo
+			out["bot"] = s.RepBotOf(r.Context(), seller).Username
+			out["pay_text"] = ""
+		}
+		if c := s.CardFor(r.Context(), seller); c.Number != "" {
 			out["card"] = c
 		}
-		if tp := s.TrialPolicy(r.Context()); tp.Enabled && !s.TrialUsed(r.Context(), u.ID) {
+		if tp := s.TrialPolicy(r.Context()); seller == "" && tp.Enabled && !s.TrialUsed(r.Context(), u.ID) {
 			out["trial"] = map[string]int64{"gb": tp.GB, "hours": tp.Hours}
 		}
-		if rp := s.ReferralPolicy(r.Context()); rp.Enabled {
+		if rp := s.ReferralPolicy(r.Context()); seller == "" && rp.Enabled {
 			if sum, err := s.ReferralSummary(r.Context(), u.ID); err == nil {
 				out["referral"] = map[string]any{"code": sum.Code, "invited": sum.Invited, "earned": sum.Earned, "percent": rp.Percent, "fixed": rp.Fixed, "first_only": rp.FirstOnly}
 			}
@@ -276,9 +302,9 @@ func registerMiniApp(mux *http.ServeMux, s *Store) {
 			return
 		}
 		if in.Renew != "" {
-			mine, _ := s.TgClients(r.Context(), u.ID)
+			list, _ := mine(r, u.ID)
 			found := false
-			for _, e := range mine {
+			for _, e := range list {
 				found = found || e == in.Renew
 			}
 			if !found {
@@ -292,6 +318,10 @@ func registerMiniApp(mux *http.ServeMux, s *Store) {
 			TgBuyer(u.ID), in.Product, in.Renew).Scan(&open)
 		if open > 0 {
 			reply(w, map[string]any{"id": open, "existing": true}, nil)
+			return
+		}
+		if !s.productOf(r.Context(), in.Product, sellerOf(r)) {
+			http.Error(w, "this plan is not sold here", http.StatusForbidden)
 			return
 		}
 		id, err := s.CreateOrder(r.Context(), owner, in.Product, TgBuyer(u.ID), in.Renew, "mini app")
@@ -311,15 +341,23 @@ func registerMiniApp(mux *http.ServeMux, s *Store) {
 			return
 		}
 		if in.Renew != "" {
-			mine, _ := s.TgClients(r.Context(), u.ID)
+			list, _ := mine(r, u.ID)
 			found := false
-			for _, e := range mine {
+			for _, e := range list {
 				found = found || e == in.Renew
 			}
 			if !found {
 				http.Error(w, "not your service", http.StatusForbidden)
 				return
 			}
+		}
+		if !s.productOf(r.Context(), in.Product, sellerOf(r)) {
+			http.Error(w, "this plan is not sold here", http.StatusForbidden)
+			return
+		}
+		if sellerOf(r) != "" && in.Method != "toman" {
+			http.Error(w, "this store takes wallet (toman) or card payments", http.StatusBadRequest)
+			return
 		}
 		if in.Method == "wallet" {
 			email, left, err := s.WalletPay(r.Context(), u.ID, in.Product, in.Renew)
@@ -355,16 +393,20 @@ func registerMiniApp(mux *http.ServeMux, s *Store) {
 		if !decode(w, r, &in) {
 			return
 		}
-		if s.CardFor(r.Context(), "").Number == "" {
+		if s.CardFor(r.Context(), sellerOf(r)).Number == "" {
 			http.Error(w, "card payment is not set up", http.StatusServiceUnavailable)
 			return
 		}
-		id, err := s.CreateTopup(r.Context(), "", u.ID, in.Amount)
+		id, err := s.CreateTopup(r.Context(), sellerOf(r), u.ID, in.Amount)
 		reply(w, map[string]any{"id": id}, err)
 	})
 	mux.HandleFunc("POST /app/api/trial", func(w http.ResponseWriter, r *http.Request) {
 		u, ok := user(w, r)
 		if !ok {
+			return
+		}
+		if sellerOf(r) != "" {
+			http.Error(w, "no free trial here", http.StatusForbidden)
 			return
 		}
 		email, err := s.ClaimTrial(r.Context(), u.ID)
@@ -406,4 +448,43 @@ func registerMiniApp(mux *http.ServeMux, s *Store) {
 		}
 		reply(w, map[string]string{"email": email}, err)
 	})
+}
+
+type miniSellerKey struct{}
+
+// verifyMiniUser checks Telegram's signature with the main bot's token,
+// then with each reseller bot's; the matching bot tells whose store it is.
+func (s *Store) verifyMiniUser(ctx context.Context, initData string) (TgUser, string, error) {
+	u, err := VerifyInitData(initData, tgToken, s.now(), 24*time.Hour)
+	if err == nil {
+		return u, "", nil
+	}
+	for _, b := range s.RepBotsAll(ctx) {
+		if ru, rerr := VerifyInitData(initData, b.Token, s.now(), 24*time.Hour); rerr == nil {
+			return ru, b.Rep, nil
+		}
+	}
+	return TgUser{}, "", err
+}
+
+// MiniAppOn: the store is open for the main bot when the owner turned it
+// on; for a reseller's bot also unless the reseller turned it off.
+func (s *Store) MiniAppOn(ctx context.Context, seller string) bool {
+	if s.Setting(ctx, "miniapp") != "1" {
+		return false
+	}
+	return seller == "" || s.Setting(ctx, "rep_miniapp:"+seller) != "0"
+}
+
+// RepMiniAppURL is the Mini App address for a reseller's bot ("" = off).
+func (s *Store) RepMiniAppURL(ctx context.Context, seller, subBase string) string {
+	if !s.MiniAppOn(ctx, seller) {
+		return ""
+	}
+	return s.MiniAppURL(ctx, subBase)
+}
+
+func (s *Store) productOf(ctx context.Context, id, seller string) bool {
+	var got string
+	return s.ro.QueryRowContext(ctx, `SELECT seller FROM products WHERE id=?`, id).Scan(&got) == nil && got == seller
 }

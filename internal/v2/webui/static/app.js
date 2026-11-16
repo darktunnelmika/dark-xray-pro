@@ -3432,9 +3432,11 @@ function repBotCard(path) {
   const fa = lang === "fa";
   const tok = h("input", { type: "password", dir: "ltr", autocomplete: "off", placeholder: "123456789:AA..." });
   const en = h("input", { type: "checkbox" });
+  const mini = h("input", { type: "checkbox", checked: true });
   const st = h("div", { class: "small" });
   const draw = (b) => {
     en.checked = !!b.enabled;
+    mini.checked = b.miniapp !== false;
     tok.placeholder = b.has_token ? (fa ? "توکن ثبت شده — برای تغییر، توکن جدید بزنید" : "token saved — type a new one to change") : "123456789:AA...";
     st.replaceChildren(b.running ? h("span", { class: "badge good" }, `● ${fa ? "روشن" : "running"} @${b.username || ""}`) :
       b.error ? h("span", { class: "badge bad" }, (fa ? "خطا: " : "error: ") + b.error) : h("span", { class: "badge" }, fa ? "خاموش" : "off"));
@@ -3442,13 +3444,14 @@ function repBotCard(path) {
   api("GET", path).then(draw).catch(() => {});
   return h("form", { class: "card form", onsubmit: async (e) => {
     e.preventDefault();
-    const r = await guarded(() => api("PUT", path, { token: tok.value.trim(), enabled: en.checked }));
+    const r = await guarded(() => api("PUT", path, { token: tok.value.trim(), enabled: en.checked, miniapp: mini.checked }));
     tok.value = ""; draw(r); toast(fa ? "ذخیره شد؛ ربات تا چند ثانیه دیگر روشن می‌شود" : "Saved; the bot starts in a few seconds");
   } },
     h("h2", {}, "🤖 ", fa ? "ربات فروش اختصاصی" : "Own sales bot"),
     h("p", { class: "small muted" }, fa ? "از @BotFather یک ربات بسازید و توکنش را این‌جا بزنید. ربات فقط محصولات شما را می‌فروشد، پرداخت‌ها به کارت شما می‌آید، کیف پول مشتری‌ها مال شماست و فقط کلاینت‌های خودتان را نشان می‌دهد. رسیدها برای تلگرامی که به نمایندگی وصل کرده‌اید فرستاده می‌شود." : "Create a bot with @BotFather and paste its token. It sells only your products, payments go to your card, the customers' wallets are yours and it shows only your clients. Receipts go to the Telegram you linked to your reseller account."),
     st, h("label", {}, h("span", {}, fa ? "توکن ربات" : "Bot token"), tok),
     h("label", { class: "check" }, en, fa ? "روشن باشد" : "Enabled"),
+    h("label", { class: "check" }, mini, fa ? "دکمهٔ فروشگاه (مینی‌اپ) در ربات: پلن‌ها، کارت و کیف پول خودتان، با نام و لوگوی برندتان" : "Store button (Mini App) in the bot: your plans, card and wallet, with your brand"),
     h("div", { class: "row" }, h("button", { class: "primary", type: "submit" }, t("save"))));
 }
 

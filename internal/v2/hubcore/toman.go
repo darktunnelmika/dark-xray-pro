@@ -371,6 +371,9 @@ type RepBot struct {
 	HasToken bool   `json:"has_token"`
 	Running  bool   `json:"running"`
 	Error    string `json:"error,omitempty"`
+	// MiniApp: the store (Mini App) button in this bot; nil on writes
+	// leaves it as it is. Stored apart from the token.
+	MiniApp *bool `json:"miniapp,omitempty"`
 }
 
 var botTokenRE = regexp.MustCompile(`^[0-9]{5,15}:[A-Za-z0-9_-]{30,64}$`)
@@ -390,6 +393,8 @@ func (s *Store) RepBotOf(ctx context.Context, rep string) RepBot {
 		v := st.(RepBot)
 		b.Running, b.Username, b.Error = v.Running, firstNonEmpty(v.Username, b.Username), v.Error
 	}
+	on := s.Setting(ctx, "rep_miniapp:"+rep) != "0"
+	b.MiniApp = &on
 	return b
 }
 
@@ -420,6 +425,15 @@ func (s *Store) PutRepBot(ctx context.Context, rep string, in RepBot) error {
 		cur.Token, cur.Username = tok, ""
 	}
 	cur.Enabled = in.Enabled && cur.Token != ""
+	if in.MiniApp != nil {
+		v := "1"
+		if !*in.MiniApp {
+			v = "0"
+		}
+		if err := s.SetSetting(ctx, "rep_miniapp:"+rep, v); err != nil {
+			return err
+		}
+	}
 	b, _ := json.Marshal(RepBot{Token: cur.Token, Enabled: cur.Enabled, Username: cur.Username})
 	return s.SetSetting(ctx, "rep_bot:"+rep, string(b))
 }
