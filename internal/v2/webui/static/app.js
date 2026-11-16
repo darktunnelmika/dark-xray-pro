@@ -1054,6 +1054,7 @@ function clientState(c) {
 const putToggle = (c, on) => api("PUT", `/api/v2/admin/clients/${encodeURIComponent(c.Email)}`, {
   Enabled: on, MaxIPs: c.MaxIPs, VolumeBytes: c.VolumeBytes, ExpiresUnix: c.ExpiresUnix, DurationSeconds: c.DurationSeconds, Inbounds: c.Inbounds || [], Plan: c.Plan || "" });
 
+let clientsMem = null;
 async function viewClients() {
   const L = CT[lang] || CT.en;
   const owner = me.role === "owner";
@@ -1067,7 +1068,9 @@ async function viewClients() {
   const ctx = { inbounds, groups: groups || [], reps: reps || [] };
   const repNames = Object.fromEntries((reps || []).map((r) => [r.ID, r.Name || r.ID]));
   const saved = (() => { try { return JSON.parse(localStorage.getItem("clients-view") || "{}"); } catch { return {}; } })();
-  const st = { q: "", state: saved.state || "", extra: "", sort: saved.sort || "created", dir: saved.dir || 1, page: 0, size: saved.size || 25 };
+  // Search, filter and page survive the 15-second refresh (they used to reset).
+  const st = clientsMem || { q: "", state: saved.state || "", extra: "", sort: saved.sort || "created", dir: saved.dir || 1, page: 0, size: saved.size || 25 };
+  clientsMem = st;
   const remember = () => { try { localStorage.setItem("clients-view", JSON.stringify({ state: st.state, sort: st.sort, dir: st.dir, size: st.size })); } catch {} };
   const selected = new Set();
   const used = (c) => c.Usage.Up + c.Usage.Down;
@@ -1195,6 +1198,7 @@ async function viewClients() {
     syncBulk();
   }
   let timer = 0;
+  q.value = st.q; extra.value = st.extra;
   q.addEventListener("input", () => { clearTimeout(timer); timer = setTimeout(() => { st.q = q.value.trim(); st.page = 0; draw(); }, 150); });
   extra.addEventListener("change", () => { st.extra = extra.value; st.page = 0; draw(); });
   draw();
@@ -4930,6 +4934,20 @@ window.addEventListener("storage", (e) => {
 });
 applyLang();
 route();
-setInterval(() => { if (!document.hidden && !document.getElementById("modal").open && /dashboard|clients|nodes/.test(location.hash || "#/dashboard")) route(); }, 15000);
+// Live refresh, but never under the user's hands: not while typing, with a
+// menu open or rows ticked; the scroll position is kept.
+function busyUI() {
+  const a = document.activeElement;
+  return (a && /^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName) && a.type !== "checkbox") ||
+    !!document.querySelector("#app details[open], #app .bulkbar:not([hidden])") ||
+    (() => { try { return !!document.querySelector("[popover]:popover-open:not(#toast)"); } catch { return false; } })();
+}
+setInterval(async () => {
+  if (document.hidden || document.getElementById("modal").open || busyUI() || !/dashboard|clients|nodes/.test(location.hash || "#/dashboard")) return;
+  const y = window.scrollY;
+  await route();
+  window.scrollTo(0, y);
+}, 15000);
+window.addEventListener("hashchange", () => { if (!/^#\/clients?\b/.test(location.hash)) clientsMem = null; });
 
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => {});
