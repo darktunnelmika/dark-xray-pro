@@ -20,11 +20,11 @@ type IPTracker struct {
 	seen   map[string]map[string]time.Time // email -> ip -> last seen
 	buf    []byte
 	now    func() time.Time
-	Window time.Duration // how long an address counts as online (default 75s)
+	Window time.Duration // how long an address counts as online (default 40s)
 }
 
 func NewIPTracker() *IPTracker {
-	return &IPTracker{seen: map[string]map[string]time.Time{}, now: time.Now, Window: 75 * time.Second}
+	return &IPTracker{seen: map[string]map[string]time.Time{}, now: time.Now, Window: 40 * time.Second}
 }
 
 var accessRE = regexp.MustCompile(`from (?:tcp:|udp:)?(\[[0-9a-fA-F:.]+\]|[0-9a-fA-F:.]+):\d+ accepted .*email: (\S+)`)

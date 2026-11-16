@@ -276,8 +276,14 @@ func TestIPLimitCooldown(t *testing.T) {
 	a := newTestAgent(t, t.TempDir(), hub, x, st, &now)
 	a.Exchange(ctx)
 	a.enforce(ctx)
+	if _, blocked := a.Decision()["alice"]; blocked {
+		t.Fatal("a fresh breach waits out the grace (switching networks)")
+	}
+	now = now.Add(50 * time.Second)
+	a.Exchange(ctx)
+	a.enforce(ctx)
 	if a.Decision()["alice"] != ReasonIPLimit {
-		t.Fatal("alice must be blocked for the IP limit")
+		t.Fatal("alice must be blocked once the breach lasts")
 	}
 	st.mu.Lock()
 	st.online = nil
@@ -291,6 +297,44 @@ func TestIPLimitCooldown(t *testing.T) {
 	a.enforce(ctx)
 	if _, blocked := a.Decision()["alice"]; blocked {
 		t.Fatal("block must lift after the cooldown")
+	}
+}
+
+func TestIPLimitAcrossNodesAndGrace(t *testing.T) {
+	ctx := context.Background()
+	now := time.Unix(1_800_000_000, 0)
+	hub := &fakeHub{resp: wire.SyncResponse{ConfigRevision: 1, Config: json.RawMessage(testConfig),
+		Users: limits(wire.UserLimit{Enabled: true, RemainingBytes: -1, MaxIPs: 1}, wire.UserLimit{Enabled: true, RemainingBytes: -1}), IPOver: []string{"alice"}}}
+	st := &fakeStats{online: map[string][]string{"alice": {"1.1.1.1"}}}
+	a := newTestAgent(t, t.TempDir(), hub, &fakeXray{}, st, &now)
+	a.Exchange(ctx)
+	a.enforce(ctx)
+	if _, blocked := a.Decision()["alice"]; blocked {
+		t.Fatal("grace first")
+	}
+	now = now.Add(20 * time.Second)
+	a.Exchange(ctx)
+	hub.mu.Lock()
+	hub.resp.IPOver = nil // she dropped the second address in time
+	hub.mu.Unlock()
+	a.Exchange(ctx)
+	a.enforce(ctx)
+	now = now.Add(40 * time.Second)
+	a.Exchange(ctx)
+	a.enforce(ctx)
+	if _, blocked := a.Decision()["alice"]; blocked {
+		t.Fatal("a short overlap never blocks")
+	}
+	hub.mu.Lock()
+	hub.resp.IPOver = []string{"alice"} // over again, counting every node
+	hub.mu.Unlock()
+	a.Exchange(ctx)
+	a.enforce(ctx)
+	now = now.Add(50 * time.Second)
+	a.Exchange(ctx)
+	a.enforce(ctx)
+	if a.Decision()["alice"] != ReasonIPLimit {
+		t.Fatal("over the limit across nodes for long enough blocks here too")
 	}
 }
 

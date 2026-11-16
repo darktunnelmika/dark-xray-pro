@@ -79,6 +79,7 @@ tx_rate=MAX(tx_rate,excluded.tx_rate), online=MAX(online,excluded.online)`,
 	}
 	resp := wire.SyncResponse{ConfigRevision: uint64(rev), Users: users, UsageSeq: uint64(usageSeq), PollSeconds: PollSeconds, UnixTime: now,
 		Tasks: s.openTasks(ctx, nodeID), Assets: s.geoWanted(), TrustedIPs: s.TrustedIPs(ctx)}
+	resp.IPOver = s.ipOver(ctx, now, users, resp.TrustedIPs)
 	if uint64(rev) != req.ConfigRevision {
 		resp.Config = cfg
 	}

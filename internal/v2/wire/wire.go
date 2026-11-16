@@ -130,6 +130,10 @@ type SyncResponse struct {
 	// TrustedIPs are addresses or CIDRs never counted toward IP limits
 	// (an office NAT, a CDN or relay egress, a monitoring probe).
 	TrustedIPs []string `json:"trusted_ips,omitempty"`
+	// IPOver lists users of this Node over their IP limit counting the
+	// addresses seen on every Node together (a limit of 2 means 2 in total,
+	// not 2 per Node). The Node treats them like a local IP-limit breach.
+	IPOver []string `json:"ip_over,omitempty"`
 }
 
 // UserLimit is the HUB's view of one client at the time of the sync.

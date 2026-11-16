@@ -32,6 +32,7 @@ type Config struct {
 	StateDir        string
 	CollectInterval time.Duration // default 10s
 	IPLimitCooldown time.Duration // default 2m
+	IPLimitGrace    time.Duration // default 45s: how long a breach must last before it blocks
 	MaxSpool        int           // default 8640 (one day at 10s)
 	Logf            func(string, ...any)
 	Now             func() time.Time
@@ -54,6 +55,8 @@ type Agent struct {
 	state        wire.SyncResponse // last desired state from the HUB
 	delivered    map[uint64]map[string]int64
 	blockedUntil map[string]time.Time
+	overSince    map[string]time.Time // first moment a user was seen over their IP limit
+	stateAt      time.Time            // when state last came from the HUB
 	lastDecision Decision
 	appliedKey   string
 	appliedSkel  string
@@ -123,6 +126,9 @@ func New(cfg Config, hub Hub, xray Applier, stats StatsSource) (*Agent, error) {
 	if cfg.CollectInterval <= 0 {
 		cfg.CollectInterval = 5 * time.Second
 	}
+	if cfg.IPLimitGrace <= 0 {
+		cfg.IPLimitGrace = 45 * time.Second
+	}
 	if cfg.IPLimitCooldown <= 0 {
 		cfg.IPLimitCooldown = 2 * time.Minute
 	}
@@ -143,7 +149,7 @@ func New(cfg Config, hub Hub, xray Applier, stats StatsSource) (*Agent, error) {
 		return nil, err
 	}
 	a := &Agent{cfg: cfg, hub: hub, xray: xray, stats: stats, spool: sp,
-		delivered: map[uint64]map[string]int64{}, blockedUntil: map[string]time.Time{}, lastDecision: Decision{}, tasks: newTaskBox(filepath.Join(cfg.StateDir, "tasks.json")),
+		delivered: map[uint64]map[string]int64{}, blockedUntil: map[string]time.Time{}, overSince: map[string]time.Time{}, lastDecision: Decision{}, tasks: newTaskBox(filepath.Join(cfg.StateDir, "tasks.json")),
 		assets: newAssetBox(cfg.AssetDir), side: NewSideServers(cfg.Logf)}
 	if b, err := os.ReadFile(a.statePath()); err == nil {
 		_ = json.Unmarshal(b, &a.state)
@@ -366,6 +372,7 @@ func (a *Agent) Exchange(ctx context.Context) time.Duration {
 		return poll
 	}
 	a.state = resp
+	a.stateAt = a.cfg.Now()
 	for seq := range a.delivered {
 		if seq <= resp.UsageSeq {
 			delete(a.delivered, seq)
@@ -430,6 +437,42 @@ func (a *Agent) enforce(ctx context.Context) {
 	online = DropTrusted(online, state.TrustedIPs)
 	d := Evaluate(now.Unix(), state.Users, a.localUsed(), online)
 	a.mu.Lock()
+	// The HUB counts addresses on every Node together; trust its list only
+	// while it is fresh, so a lost HUB never keeps anyone blocked.
+	if now.Sub(a.stateAt) < 30*time.Second {
+		for _, e := range state.IPOver {
+			if _, ok := d[e]; !ok && hasUser(state.Users, e) {
+				d[e] = ReasonIPLimit
+			}
+		}
+	}
+	// A breach blocks only once it has lasted IPLimitGrace: switching from
+	// Wi-Fi to mobile data shows two addresses for a moment, sharing does
+	// not go away.
+	over := map[string]bool{}
+	for e, r := range d {
+		if r == ReasonIPLimit {
+			over[e] = true
+		}
+	}
+	for e := range a.overSince {
+		if !over[e] {
+			delete(a.overSince, e)
+		}
+	}
+	for e := range over {
+		if until, ok := a.blockedUntil[e]; ok && now.Before(until) {
+			continue
+		}
+		since, ok := a.overSince[e]
+		if !ok {
+			a.overSince[e] = now
+			since = now
+		}
+		if now.Sub(since) < a.cfg.IPLimitGrace {
+			delete(d, e)
+		}
+	}
 	for e, until := range a.blockedUntil {
 		if now.Before(until) {
 			if _, ok := d[e]; !ok {
@@ -560,4 +603,13 @@ func (a *Agent) Decision() Decision {
 		out[k] = v
 	}
 	return out
+}
+
+func hasUser(users []wire.UserLimit, email string) bool {
+	for _, u := range users {
+		if u.Email == email {
+			return true
+		}
+	}
+	return false
 }
