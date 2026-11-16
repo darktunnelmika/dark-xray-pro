@@ -444,7 +444,7 @@ header.top .actions { display: flex; align-items: center; gap: 4px; }
 }
 .avatar.sm { inline-size: 24px; block-size: 24px; font-size: 10px; }
 @media (min-width: 900px) { header.top .searchbox { display: flex; } header.top .actions > .iconbtn:first-child { display: none; } }
-@media (max-width: 520px) { .userchip .uname { display: none; } .userchip { padding: 3px; } header.top .credit { display: none; } }
+@media (max-width: 520px) { .userchip .uname { display: none; } .userchip { padding: 3px; } header.top .credit .lbl { display: none; } }
 
 .popmenu {
   position: absolute; z-index: 60; min-inline-size: 240px; max-inline-size: min(360px, 92vw); padding: 6px; border-radius: 14px;
@@ -828,3 +828,5 @@ a.kpi:hover { border-color: color-mix(in oklab, var(--ion) 45%, transparent); }
 .cost.bad { border-color: color-mix(in oklab, var(--bad) 55%, transparent); color: var(--bad); }
 .reps-table td { vertical-align: middle; }
 .reps-table .name { font-weight: 700; }
+a.badge.credit { text-decoration: none; color: inherit; } a.badge.credit b { color: var(--ion); }
+header.top .brand > span { white-space: nowrap; }

@@ -517,3 +517,14 @@ func RepBotRunning(rep string) bool {
 	v, ok := repBotStatus.Load(rep)
 	return ok && v.(RepBot).Running
 }
+
+// BotUsernameFor is the bot a seller's customers should open: the
+// reseller's own bot when it is set up and running, otherwise the main bot.
+func (s *Store) BotUsernameFor(ctx context.Context, seller string) string {
+	if seller != "" {
+		if b := s.RepBotOf(ctx, seller); b.Enabled && b.Running && b.Username != "" {
+			return strings.TrimPrefix(b.Username, "@")
+		}
+	}
+	return strings.TrimPrefix(s.Setting(ctx, "tg_username"), "@")
+}

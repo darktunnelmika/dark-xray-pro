@@ -430,7 +430,7 @@ function shell(active, content) {
     avatar(me.user), h("span", { class: "uname" }, me.user)) : null;
   return h("div", { class: "shell" },
     h("header", { class: "top" }, h("a", { class: "brand", href: "#/dashboard" }, mark(), h("span", {}, "Dark ", h("b", { class: "neon-text" }, "VPN"))),
-      me && me.role === "rep" ? h("span", { class: "badge credit" }, `${t("volumeCredit")}: ${gbs(me.volume_credit || 0)}${me.unlimited_units ? ` · ${t("units")}: ${fmtNum(me.unlimited_units)}` : ""}`) : null,
+      me && me.role === "rep" ? h("a", { class: "badge credit", href: "#/credit", title: t("volumeCredit") }, h("span", { class: "lbl" }, `${t("volumeCredit")}: `), h("b", { dir: "ltr" }, gbs(me.volume_credit || 0)), me.unlimited_units ? ` · ${t("units")}: ${fmtNum(me.unlimited_units)}` : "") : null,
       h("button", { class: "searchbox", type: "button", onclick: openPalette }, icon("search"), h("span", {}, ux("search")), h("kbd", {}, "Ctrl K")),
       h("div", { class: "actions" }, iconBtn("search", ux("search"), openPalette), me && me.role !== "rep" ? bellBtn : null, themeBtn, langBtn, userBtn)),
     h("nav", { class: "tabs", "aria-label": "Main" }, tabs, keys.length > 5 ? moreBtn : null),

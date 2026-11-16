@@ -168,7 +168,9 @@ FROM clients c LEFT JOIN client_usage cu ON cu.email=c.email WHERE c.email=?`, e
 	if c.VolumeBytes <= 0 {
 		d.Ring = 0
 	}
-	if bot := strings.TrimPrefix(s.Setting(ctx, "tg_username"), "@"); bot != "" && botNameRE.MatchString(bot) {
+	var seller string
+	_ = s.ro.QueryRowContext(ctx, `SELECT rep_id FROM clients WHERE email=?`, email).Scan(&seller)
+	if bot := s.BotUsernameFor(ctx, seller); bot != "" && botNameRE.MatchString(bot) {
 		if i := strings.LastIndex(subURL, "/sub/"); i >= 0 {
 			if tok := subURL[i+5:]; tgStartRE.MatchString(tok) {
 				d.BotLink = "https://t.me/" + bot + "?start=" + tok

@@ -1303,7 +1303,7 @@ func (b *Bot) repMessage(ctx context.Context, chat int64, rep, role, text string
 			b.send(ctx, chat, "نقش را بنویسید: /invite manager یا sales یا support", nil)
 			return true
 		}
-		bot := b.Store.Setting(ctx, "tg_username")
+		bot := b.Store.BotUsernameFor(ctx, rep)
 		b.send(ctx, chat, fmt.Sprintf("لینک دعوت نقش «%s» (یک‌بار مصرف، ۱ ساعت):\nhttps://t.me/%s?start=adm_%s", roleName(arg), esc(bot), code), nil)
 	case "/admins":
 		if !can("owner") {

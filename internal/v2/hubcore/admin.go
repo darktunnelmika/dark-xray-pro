@@ -437,7 +437,7 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 	}
 	mux.HandleFunc("POST /api/v2/rep/telegram", repOnly(func(w http.ResponseWriter, r *http.Request) {
 		code, err := s.NewTgLinkCode(r.Context(), who(r).RepID)
-		bot := s.Setting(r.Context(), "tg_username")
+		bot := s.BotUsernameFor(r.Context(), who(r).RepID)
 		link := ""
 		if bot != "" {
 			link = "https://t.me/" + bot + "?start=rep_" + code
