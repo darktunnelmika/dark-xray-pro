@@ -170,7 +170,8 @@ func (s *Store) darkOldWallets(ctx context.Context, tx *sql.Tx, old *sql.DB, rep
 	return nil
 }
 
-// darkOldHistory keeps the old orders and wallet top-ups as history. Orders
+// darkOldHistory keeps the old orders (marked as already announced, so
+// the bots never tell buyers about them again) and wallet top-ups as history. Orders
 // and top-ups still waiting for a decision in the old panel were settled by
 // hand by the sellers, so they are left out (counted in Unsettled).
 func (s *Store) darkOldHistory(ctx context.Context, tx *sql.Tx, old *sql.DB, repOf map[string]string, rep *DarkOldReport) error {
@@ -230,7 +231,7 @@ FROM commerce_orders ORDER BY created_at`)
 			if status != "cancelled" || x.updated > x.created {
 				done = int64(x.updated)
 			}
-			if _, err := tx.ExecContext(ctx, `INSERT INTO orders(product_id,seller,buyer,client_email,renew,amount,status,note,created_unix,done_unix,done_by,method) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`,
+			if _, err := tx.ExecContext(ctx, `INSERT INTO orders(product_id,seller,buyer,client_email,renew,amount,status,note,created_unix,done_unix,done_by,method,tg_owner_notified,tg_buyer_notified) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,1,1)`,
 				v2ID("old-"+x.owner+"-"+x.price), sl, TgBuyer(x.buyer), email, strings.HasPrefix(x.typ, "renew"), max(x.amount, 0), status, note, int64(x.created), done, "old panel", method); err != nil {
 				return fmt.Errorf("order %s: %w", x.id, err)
 			}
