@@ -1274,7 +1274,8 @@ async function viewClients() {
     const run = async (fn) => { let n = 0; for (const c of pick) { try { await fn(c); n++; } catch {} } toast(L.done.replace("{n}", fmtNum(n))); selected.clear(); route(); };
     fill(bulkBar,
       h("b", {}, L.sel.replace("{n}", fmtNum(selected.size))),
-      owner ? h("button", { onclick: () => bulkForm(emails) }, t("bulkRenew")) : (me.policy && me.policy.DenyRenew ? null : h("button", { onclick: () => renewForm(list.filter((c) => emails.includes(c.Email))) }, t("bulkRenew"))),
+      me.policy && me.policy.DenyRenew ? null : h("button", { onclick: () => renewForm(list.filter((c) => emails.includes(c.Email))) }, t("bulkRenew")),
+      owner ? h("button", { onclick: () => bulkForm(emails) }, lang === "fa" ? "افزودن روز / حجم" : "Add days / volume") : null,
       owner ? h("button", { onclick: () => bulkSettingsForm(emails, inbounds, ctx.reps) }, lang === "fa" ? "تغییر تنظیمات" : "Change settings") : null,
       owner ? h("button", { onclick: async () => { if (await confirmText(L.resetAsk.replace("{x}", `${fmtNum(emails.length)}`))) run((c) => api("POST", `/api/v2/admin/clients/${encodeURIComponent(c.Email)}/reset`)); } }, L.reset) : null,
       h("button", { class: "ghost", onclick: () => run((c) => putToggle(c, true)) }, L.enable),
@@ -1445,7 +1446,7 @@ function bulkForm(emails) {
       toast(t("changed", { n: fmtNum(r.changed) })); document.getElementById("modal").close("save"); route();
     } catch (x) { toast(t("failed", { e: x.message })); }
   } }, t("save"));
-  openModal(`${t("bulkRenew")} · ${t("selected", { n: fmtNum(emails.length) })}`, h("div", { class: "form two" },
+  openModal(`${lang === "fa" ? "افزودن روز / حجم" : "Add days / volume"} · ${t("selected", { n: fmtNum(emails.length) })}`, h("div", { class: "form two" },
     h("label", {}, h("span", {}, t("addDays")), days), h("label", {}, h("span", {}, t("addGB")), gb)), [save]);
 }
 
@@ -1459,7 +1460,8 @@ async function viewGroups() {
       g.Members.length > 8 ? h("span", { class: "chip" }, `+${fmtNum(g.Members.length - 8)}`) : null)
       : h("p", { class: "small muted", style: "margin:0" }, fa ? "هنوز عضوی ندارد" : "No members yet"),
     h("div", { class: "row" },
-      h("button", { onclick: () => bulkGroup(g) }, t("bulkRenew")),
+      h("button", { onclick: () => renewGroup(g, clients) }, t("bulkRenew")),
+      h("button", { class: "ghost", onclick: () => bulkGroup(g) }, lang === "fa" ? "افزودن روز / حجم" : "Add days / volume"),
       h("button", { class: "ghost", onclick: () => groupForm(g, clients) }, t("edit")),
       h("button", { class: "ghost danger spacer", onclick: async () => {
         if (await confirmAction(t("confirmDelete", { x: g.Name || g.ID }))) { await guarded(() => api("DELETE", `/api/v2/admin/groups/${encodeURIComponent(g.ID)}`)); route(); }
@@ -1467,6 +1469,11 @@ async function viewGroups() {
   return h("div", {},
     h("div", { class: "row" }, h("h1", {}, t("groups")), h("button", { class: "primary spacer", onclick: () => groupForm(null, clients) }, t("add"))),
     h("div", { class: "list" }, cards.length ? cards : h("p", { class: "muted" }, t("empty"))));
+}
+
+function renewGroup(g, clients) {
+  const list = (clients || []).filter((c) => g.Members.includes(c.Email));
+  if (list.length) renewForm(list);
 }
 
 function bulkGroup(g) {
@@ -1477,7 +1484,7 @@ function bulkGroup(g) {
     try { const r = await api("POST", "/api/v2/admin/clients/bulk", { Group: g.ID, AddDays: +days.value || 0, AddGB: +gb.value || 0 });
       toast(t("changed", { n: fmtNum(r.changed) })); document.getElementById("modal").close("save"); route(); } catch (x) { toast(t("failed", { e: x.message })); }
   } }, t("save"));
-  openModal(`${t("bulkRenew")} · ${g.Name || g.ID}`, h("div", { class: "form two" },
+  openModal(`${lang === "fa" ? "افزودن روز / حجم" : "Add days / volume"} · ${g.Name || g.ID}`, h("div", { class: "form two" },
     h("label", {}, h("span", {}, t("addDays")), days), h("label", {}, h("span", {}, t("addGB")), gb)), [save]);
 }
 
@@ -4191,34 +4198,29 @@ async function viewCredit() {
 
 // Quick renewal of one or more clients: add volume and/or days, with the
 // cost against the reseller's credit shown before anything is saved.
+// renewForm starts a new period for one or more clients (see renew.go on
+// the HUB): the term starts again today, usage goes to zero and the volume
+// becomes the new package; nothing is added on top of what was left.
+// Resellers see the cost first; unused volume from the old package comes back.
 function renewForm(list) {
   const fa = lang === "fa";
   const rep = me.role === "rep";
-  const gb = h("input", { type: "number", min: 0, max: 100000, step: 1, value: 0, dir: "ltr" });
-  const days = h("input", { type: "number", min: 0, max: 3650, step: 1, value: 30, dir: "ltr" });
-  const presets = (inp, vals, unit) => h("div", { class: "chips" }, vals.map((v) => h("button", { type: "button", class: "chip", onclick: () => { inp.value = v; calc(); } }, `${fmtNum(v)} ${unit}`)));
+  const gb = h("input", { type: "number", min: 1, max: 100000, step: 1, value: 30, dir: "ltr" });
+  const days = h("input", { type: "number", min: 1, max: 3650, step: 1, value: 30, dir: "ltr" });
+  const presets = (inp, vals, unit) => h("div", { class: "chips qp" }, vals.map((v) => h("button", { type: "button", class: "chip", onclick: () => { inp.value = v; calc(); } }, `${fmtNum(v)} ${unit}`)));
   const info = h("div", { class: "form" });
   const err = h("div", { class: "error" });
-  const unl = list.filter((c) => c.Plan === "unlimited" || c.VolumeBytes < 0);
-  const now = Math.floor(Date.now() / 1000);
-  const term = (c) => c.DurationSeconds && !c.ExpiresUnix ? Math.ceil(c.DurationSeconds / 86400) : c.ExpiresUnix > now ? Math.ceil((c.ExpiresUnix - now) / 86400) : 0;
+  const isUnl = (c) => c.Plan === "unlimited" || c.VolumeBytes < 0;
+  const unl = list.filter(isUnl), vols = list.filter((c) => !isUnl(c));
   const unitsFor = (d) => (d > 0 ? Math.ceil(d / 30) : 0);
-  let cost = { bytes: 0, units: 0 };
+  const left = (c) => (isUnl(c) || c.VolumeBytes <= 0 ? 0 : Math.max(0, c.VolumeBytes - (c.Usage.Up + c.Usage.Down)));
   const save = h("button", { class: "primary", type: "button", onclick: async () => {
     err.textContent = "";
     save.disabled = true;
     let done = 0;
     try {
       for (const c of list) {
-        const addB = Math.round((+gb.value || 0) * 2 ** 30), addD = +days.value || 0;
-        const isUnl = c.Plan === "unlimited" || c.VolumeBytes < 0;
-        const body = { Email: c.Email, Enabled: true, MaxIPs: c.MaxIPs, Inbounds: c.Inbounds, VolumeBytes: isUnl ? -1 : c.VolumeBytes + addB,
-          ExpiresUnix: c.ExpiresUnix, DurationSeconds: c.DurationSeconds, Plan: isUnl ? "unlimited" : "volume" };
-        if (addD) {
-          if (c.DurationSeconds && !c.ExpiresUnix) body.DurationSeconds = c.DurationSeconds + addD * 86400;
-          else body.ExpiresUnix = Math.max(now, c.ExpiresUnix || now) + addD * 86400;
-        }
-        await api("PUT", `/api/v2/admin/clients/${encodeURIComponent(c.Email)}`, body);
+        await api("POST", `/api/v2/admin/clients/${encodeURIComponent(c.Email)}/renew`, { gb: isUnl(c) ? 0 : +gb.value || 0, days: +days.value || 0 });
         done++;
       }
       document.getElementById("modal").close(); toast(fa ? `${fmtNum(done)} کلاینت تمدید شد` : `${done} renewed`); route();
@@ -4228,29 +4230,30 @@ function renewForm(list) {
     }
   } }, fa ? "تمدید" : "Renew");
   const calc = () => {
-    const addB = Math.round((+gb.value || 0) * 2 ** 30), addD = +days.value || 0;
-    cost = { bytes: 0, units: 0 };
-    for (const c of list) {
-      if (c.Plan === "unlimited" || c.VolumeBytes < 0) {
-        if (addD) cost.units += Math.max(0, unitsFor(term(c) + addD) - unitsFor(term(c)));
-      } else cost.bytes += addB;
-    }
-    const credit = me.volume_credit || 0, units = me.unlimited_units || 0;
-    const short = rep && (cost.bytes > credit || cost.units > units);
-    save.disabled = (!addB && !addD) || short;
+    const nb = Math.round((+gb.value || 0) * 2 ** 30), d = +days.value || 0;
+    const charge = vols.length * nb, refund = vols.reduce((a, c) => a + left(c), 0), units = unl.length * unitsFor(d);
+    const net = charge - refund;
+    const credit = me.volume_credit || 0, haveU = me.unlimited_units || 0;
+    const short = rep && (net > credit || units > haveU);
+    save.disabled = !d || (vols.length && !nb) || short;
+    const until = d ? new Intl.DateTimeFormat(fa ? "fa-IR-u-ca-persian" : "en-GB", { dateStyle: "medium" }).format(new Date(Date.now() + d * 86400000)) : "—";
     fill(info,
       list.length > 1 ? h("div", { class: "small" }, fa ? `${fmtNum(list.length)} کلاینت انتخاب شده` : `${list.length} clients selected`) : null,
-      unl.length && addB ? h("div", { class: "small muted" }, fa ? "به کلاینت‌های نامحدود حجم اضافه نمی‌شود." : "Unlimited clients get no volume.") : null,
-      rep ? h("div", { class: `cost ${short ? "bad" : ""}` },
-        h("div", {}, `${fa ? "از اعتبار کم می‌شود" : "Takes from credit"}: `, h("b", { dir: "ltr" }, [cost.bytes ? gbs(cost.bytes) : "", cost.units ? `${fmtNum(cost.units)} ${t("units")}` : ""].filter(Boolean).join(" + ") || "0")),
-        h("div", {}, `${fa ? "مانده بعد از تمدید" : "Left after"}: `, h("b", { dir: "ltr" }, gbs(Math.max(0, credit - cost.bytes))), cost.units || units ? ` · ${fmtNum(Math.max(0, units - cost.units))} ${t("units")}` : ""),
-        short ? h("div", {}, fa ? "اعتبار کافی نیست." : "Not enough credit.") : null) : null);
+      h("div", { class: "csum" }, h("div", { class: "csum-line" }, h("b", {}, fa ? "بعد از تمدید: " : "After renewing: "),
+        [vols.length ? `${fmtNum(+gb.value || 0)} GB` : null, unl.length ? (fa ? "حجم نامحدود" : "unlimited volume") : null].filter(Boolean).join(" / "),
+        ` · ${fa ? "تا" : "until"} ${until} · ${fa ? "مصرف از صفر" : "usage from zero"}`),
+        h("div", { class: "small muted" }, fa ? "دورهٔ قبلی تمام می‌شود و دورهٔ تازه از امروز شروع می‌شود (سرویسی که هنوز وصل نشده، از اولین اتصال)." : "The old period ends and a fresh one starts today (a service never used starts at its first connection)."),
+        rep ? h("div", { class: `cost ${short ? "bad" : ""}` },
+          h("div", {}, `${fa ? "بستهٔ جدید" : "New package"}: `, h("b", { dir: "ltr" }, [charge ? gbs(charge) : "", units ? `${fmtNum(units)} ${t("units")}` : ""].filter(Boolean).join(" + ") || "0")),
+          refund ? h("div", {}, `${fa ? "برگشت حجم مصرف‌نشدهٔ قبلی" : "Unused volume returned"}: `, h("b", { dir: "ltr" }, gbs(refund))) : null,
+          h("div", {}, `${fa ? "مانده بعد از تمدید" : "Left after"}: `, h("b", { dir: "ltr" }, gbs(Math.max(0, credit - net))), units || haveU ? ` · ${fmtNum(Math.max(0, haveU - units))} ${t("units")}` : ""),
+          short ? h("div", {}, fa ? "اعتبار کافی نیست." : "Not enough credit.") : null) : null));
   };
   gb.addEventListener("input", calc); days.addEventListener("input", calc);
   calc();
-  openModal(list.length === 1 ? `${fa ? "تمدید" : "Renew"} · ${list[0].Email}` : (fa ? "تمدید گروهی" : "Renew selected"), h("div", { class: "form" },
-    h("label", {}, h("span", {}, fa ? "افزودن حجم (گیگ)" : "Add volume (GB)"), gb), presets(gb, [10, 20, 30, 50, 100], fa ? "گیگ" : "GB"),
-    h("label", {}, h("span", {}, fa ? "افزودن روز" : "Add days"), days), presets(days, [30, 60, 90], fa ? "روز" : "days"),
+  openModal(list.length === 1 ? `${fa ? "تمدید" : "Renew"} · ${list[0].Email}` : (fa ? "تمدید گروهی" : "Renew selected"), h("div", { class: "form cform" },
+    vols.length ? h("div", {}, h("label", {}, h("span", {}, fa ? "حجم بستهٔ جدید (گیگ)" : "New package volume (GB)"), gb), presets(gb, [10, 20, 30, 50, 100, 200], "GB")) : null,
+    h("div", {}, h("label", {}, h("span", {}, fa ? "مدت دورهٔ جدید (روز)" : "New period (days)"), days), presets(days, [30, 60, 90, 180], fa ? "روز" : "days")),
     info, err), [save]);
 }
 
@@ -4374,6 +4377,8 @@ function repBrandCard(path, repName) {
     const inp = (k, attrs = {}) => h("input", { value: v[k] || "", ...attrs });
     const title = inp("title", { placeholder: fa ? "مثلاً: فروشگاه علی VPN" : "e.g. Ali VPN shop" });
     const sup = inp("support_url", { dir: "ltr", placeholder: "https://t.me/your_support" });
+    const tgId = inp("telegram", { dir: "ltr", placeholder: "@myshop" });
+    const sub = me.role === "rep" && !me.can_sell; // a sub-seller
     const tpl = inp("remark_template", { dir: "ltr", placeholder: "{remark} · {left}" });
     const base = inp("base_url", { dir: "ltr", placeholder: "https://sub.myshop.com" });
     const ann = h("textarea", { rows: "2" }, v.announce || "");
@@ -4393,14 +4398,16 @@ function repBrandCard(path, repName) {
     const save = h("button", { class: "primary", type: "button", onclick: async () => {
       err.textContent = "";
       try {
-        await api("PUT", path, { title: title.value, support_url: sup.value, remark_template: tpl.value, base_url: base.value, announce: ann.value, accent: accentOn.checked ? accent.value : "", logo });
+        await api("PUT", path, { title: title.value, support_url: sup.value, telegram: tgId.value, remark_template: tpl.value, base_url: base.value, announce: ann.value, accent: accentOn.checked ? accent.value : "", logo });
         toast(t("saved"));
       } catch (x) { err.textContent = x.message; }
     } }, fa ? "ذخیره" : "Save");
     const lab = (l, el, hint) => h("label", {}, h("span", {}, l), el, hint ? h("small", { class: "muted" }, hint) : null);
     fill(card, h("h2", {}, fa ? "صفحهٔ اشتراک اختصاصی" : "Own subscription page", repName ? h("span", { class: "badge", style: "margin-inline-start:8px" }, repName) : null),
       h("p", { class: "small muted" }, fa ? "مشتری‌های این نماینده (و زیرفروشنده‌هایش) صفحهٔ اشتراک و نام کانفیگ‌ها را با برند خود او می‌بینند. فیلدهای خالی از تنظیمات اصلی پنل می‌آیند." : "This reseller's customers (and their sub-sellers') see the subscription page and config names with this brand. Empty fields come from the panel's settings."),
-      h("div", { class: "two" }, lab(fa ? "عنوان" : "Title", title), lab(fa ? "لینک پشتیبانی" : "Support link", sup)),
+      sub ? h("p", { class: "small", style: "color:var(--ion);margin:0" }, fa ? "مشتری‌های شما ربات نماینده یا پنل را نمی‌بینند؛ در صفحهٔ اشتراکشان دکمهٔ «پیام به فروشنده» با آیدی تلگرام شما و برند شما نشان داده می‌شود." : "Your customers never see the reseller's or the panel's bot; their subscription page shows a \"Message the seller\" button with your Telegram id and your brand.") : null,
+      h("div", { class: "two" }, lab(fa ? "عنوان (نام برند)" : "Title (brand name)", title), lab(fa ? "آیدی تلگرام (پیوی شما)" : "Telegram id (your chat)", tgId, fa ? "مثلاً @myshop — مشتری با یک کلیک به پیوی شما می‌آید" : "e.g. @myshop — customers reach your chat in one tap")),
+      lab(fa ? "لینک پشتیبانی دیگر (اگر آیدی تلگرام خالی است)" : "Other support link (when no Telegram id)", sup),
       lab(fa ? "اعلان (در صفحه و برنامه‌ها)" : "Announcement (page and apps)", ann),
       lab(fa ? "نام کانفیگ‌ها" : "Config names", tpl, fa ? "متغیرها: {remark} {left} {used} {total} {days} {email} {proto} {tag}" : "Variables: {remark} {left} {used} {total} {days} {email} {proto} {tag}"),
       h("div", { class: "row" }, h("label", { class: "check" }, accentOn, h("span", {}, fa ? "رنگ برند" : "Brand colour")), accent),

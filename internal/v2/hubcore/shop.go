@@ -337,31 +337,10 @@ func (s *Store) FulfillOrder(ctx context.Context, by Principal, id int64) (strin
 	var c Client
 	email := o.ClientEmail
 	if o.Renew {
-		var old Client
-		err := s.ro.QueryRowContext(ctx, `SELECT email,enabled,volume_bytes,expires_unix,duration_seconds,max_ips FROM clients WHERE email=?`, email).
-			Scan(&old.Email, &old.Enabled, &old.VolumeBytes, &old.ExpiresUnix, &old.DurationSeconds, &old.MaxIPs)
-		if err != nil {
-			return "", fmt.Errorf("%w: the client to renew is gone", ErrInvalid)
+		// A renewal starts a new period (see renew.go), charged to the seller.
+		if _, err := s.renewPeriod(ctx, by.User, o.Seller, email, p.Plan, p.GB<<30, p.Days, p.FirstUse); err != nil {
+			return "", err
 		}
-		old.Inbounds, _ = s.clientInbounds(ctx, email)
-		c = old
-		add := p.Days * 86400
-		switch {
-		case c.ExpiresUnix > now:
-			c.ExpiresUnix += add
-		case c.ExpiresUnix > 0:
-			c.ExpiresUnix = now + add
-		default:
-			c.DurationSeconds += add
-		}
-		if p.Plan == "unlimited" {
-			c.VolumeBytes = -1
-		} else if c.VolumeBytes >= 0 {
-			c.VolumeBytes += p.GB << 30
-		} else {
-			c.VolumeBytes = p.GB << 30
-		}
-		c.Enabled = true
 	} else {
 		if email == "" {
 			email = fmt.Sprintf("%s-%d", p.ID, id)
@@ -377,13 +356,15 @@ func (s *Store) FulfillOrder(ctx context.Context, by Principal, id int64) (strin
 		}
 	}
 	actor := by.User
-	if o.Seller != "" {
-		err = s.RepPutClient(ctx, actor, o.Seller, c, p.Plan)
-	} else {
-		err = s.PutClient(ctx, c)
-	}
-	if err != nil {
-		return "", err
+	if !o.Renew {
+		if o.Seller != "" {
+			err = s.RepPutClient(ctx, actor, o.Seller, c, p.Plan)
+		} else {
+			err = s.PutClient(ctx, c)
+		}
+		if err != nil {
+			return "", err
+		}
 	}
 	r, err := s.db.ExecContext(ctx, `UPDATE orders SET status='fulfilled', client_email=?, done_unix=?, done_by=? WHERE id=? AND status='pending'`, email, now, actor, id)
 	if err != nil {

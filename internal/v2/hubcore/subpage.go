@@ -55,6 +55,7 @@ type pageData struct {
 	Ring                                         int // stroke offset of the usage ring (0–100)
 	OtherLang, OtherLangName                     string
 	BotLink                                      string // t.me deep link that ties this service to the visitor's Telegram
+	Seller                                       bool   // a sub-seller's customer: the support button reads "message the seller"
 	T                                            map[string]string
 	Accent                                       template.CSS // checked #rrggbb
 	Logo                                         template.URL // checked data:image/… URL
@@ -68,10 +69,10 @@ type pageLink struct {
 var pageText = map[string]map[string]string{
 	"fa": {"bot": "اتصال به ربات تلگرام", "botsub": "هشدار پایان حجم و زمان، تمدید و پشتیبانی", "qr": "QR", "rec": "پیشنهادی برای دستگاه شما", "other": "برنامه‌های دیگر", "usage": "مصرف", "hide": "بستن", "used": "مصرف‌شده", "left": "باقی‌مانده", "expires": "انقضا", "days": "روز مانده", "dayunit": "روز", "noexp": "بدون انقضا", "notstarted": "از اولین اتصال شروع می‌شود",
 		"active": "فعال", "ended": "تمام‌شده", "disabled": "غیرفعال", "sub": "لینک اشتراک", "copy": "کپی", "copied": "کپی شد", "add": "افزودن به برنامه",
-		"configs": "کانفیگ‌ها", "support": "پشتیبانی", "scan": "این کد را با برنامهٔ VPN اسکن کنید", "of": "از", "unlimited": "نامحدود"},
+		"configs": "کانفیگ‌ها", "support": "پشتیبانی", "seller": "پیام به فروشنده", "sellersub": "خرید، تمدید و پشتیبانی", "scan": "این کد را با برنامهٔ VPN اسکن کنید", "of": "از", "unlimited": "نامحدود"},
 	"en": {"bot": "Connect the Telegram bot", "botsub": "Alerts before it runs out, renewal and support", "qr": "QR", "rec": "Suggested for your device", "other": "Other apps", "usage": "Usage", "hide": "Close", "used": "Used", "left": "Remaining", "expires": "Expires", "days": "days left", "dayunit": "days", "noexp": "No expiry", "notstarted": "Starts at first connection",
 		"active": "Active", "ended": "Ended", "disabled": "Disabled", "sub": "Subscription link", "copy": "Copy", "copied": "Copied", "add": "Add to an app",
-		"configs": "Configs", "support": "Support", "scan": "Scan this code with your VPN app", "of": "of", "unlimited": "Unlimited"},
+		"configs": "Configs", "support": "Support", "seller": "Message the seller", "sellersub": "Buy, renew and support", "scan": "Scan this code with your VPN app", "of": "of", "unlimited": "Unlimited"},
 }
 
 func (s *Store) subPageData(ctx context.Context, email, subURL, lang string) (pageData, error) {
@@ -170,7 +171,18 @@ FROM clients c LEFT JOIN client_usage cu ON cu.email=c.email WHERE c.email=?`, e
 	}
 	var seller string
 	_ = s.ro.QueryRowContext(ctx, `SELECT rep_id FROM clients WHERE email=?`, email).Scan(&seller)
-	if bot := s.BotUsernameFor(ctx, seller); bot != "" && botNameRE.MatchString(bot) {
+	bot := s.BotUsernameFor(ctx, seller)
+	if s.IsSubSeller(ctx, seller) {
+		// Sub-sellers' customers are not sent to the reseller's or the panel's
+		// bot; only to the sub-seller's own bot, if they run one. The page
+		// shows their Telegram contact instead (see brandFor).
+		bot = ""
+		if b := s.RepBotOf(ctx, seller); b.Enabled && b.Running && b.Username != "" {
+			bot = strings.TrimPrefix(b.Username, "@")
+		}
+		d.Seller = true
+	}
+	if bot != "" && botNameRE.MatchString(bot) {
 		if i := strings.LastIndex(subURL, "/sub/"); i >= 0 {
 			if tok := subURL[i+5:]; tgStartRE.MatchString(tok) {
 				d.BotLink = "https://t.me/" + bot + "?start=" + tok
@@ -322,7 +334,7 @@ button,.btn{appearance:none;border:1px solid var(--line);background:rgb(255 255 
 <div class="card"><div class="row"><b>{{index .T "sub"}}</b><span class="sp"></span><button class="primary" data-copy="{{.SubURL}}">{{index .T "copy"}}</button></div>
 <img class="qr" src="?qr=1" alt="QR"><div class="muted" style="text-align:center">{{index .T "scan"}}</div><code>{{.SubURL}}</code></div>
 {{if .Links}}<div class="card"><b>{{index .T "configs"}}</b>{{range .Links}}<div class="cfg"><span dir="ltr">{{.Name}}</span><button data-qr>{{index $.T "qr"}}</button><button data-copy="{{.URL}}">{{index $.T "copy"}}</button><img class="cqr" alt="QR" loading="lazy" data-src="?qr=1&amp;cfg={{.I}}"></div>{{end}}</div>{{end}}
-{{if .Support}}<a class="btn" href="{{safeURL .Support}}">💬 {{index .T "support"}}</a>{{end}}
+{{if .Support}}{{if .Seller}}<a class="btn app rec" href="{{safeURL .Support}}"><span>💬 {{index .T "seller"}}</span><span class="muted">{{index .T "sellersub"}}</span></a>{{else}}<a class="btn" href="{{safeURL .Support}}">💬 {{index .T "support"}}</a>{{end}}{{end}}
 </div><script nonce="{{.Nonce}}">
 document.addEventListener("click",function(e){var q=e.target.closest("[data-qr]");if(q){var r=q.parentNode,im=r.querySelector(".cqr");if(!im.src)im.src=im.getAttribute("data-src");r.classList.toggle("open");return;}
 var b=e.target.closest("[data-copy]");if(!b)return;var v=b.getAttribute("data-copy"),t=b.textContent;

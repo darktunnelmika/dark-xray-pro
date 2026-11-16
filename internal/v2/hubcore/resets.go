@@ -65,6 +65,9 @@ func (s *Store) ResetUsage(ctx context.Context, email, reason string) error {
 	if _, err := tx.ExecContext(ctx, `INSERT INTO usage_resets(email,unix,up,down,reason) VALUES(?,?,?,?,?)`, email, now, up, down, reason); err != nil {
 		return err
 	}
+	if err := keepRepUsage(ctx, tx, email); err != nil { // the reseller's lifetime total keeps it
+		return err
+	}
 	if _, err := tx.ExecContext(ctx, `UPDATE client_usage SET up=0, down=0 WHERE email=?`, email); err != nil {
 		return err
 	}

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"regexp"
 	"strings"
 )
 
@@ -19,6 +20,19 @@ type RepBrand struct {
 	Logo           string `json:"logo"`
 	RemarkTemplate string `json:"remark_template"`
 	BaseURL        string `json:"base_url"` // e.g. https://sub.myshop.com (points at the HUB's subscription address)
+	Telegram       string `json:"telegram"` // a seller's Telegram username: customers are sent to their private chat
+}
+
+// tgUserRE is a Telegram username (5–32 letters, digits or _).
+var tgUserRE = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_]{3,31}$`)
+
+// cleanTgUser accepts @name, t.me/name or https://t.me/name.
+func cleanTgUser(v string) string {
+	v = strings.TrimSpace(v)
+	for _, p := range []string{"https://", "http://", "t.me/", "telegram.me/", "@"} {
+		v = strings.TrimPrefix(v, p)
+	}
+	return strings.TrimRight(v, "/")
 }
 
 func (s *Store) RepBrand(ctx context.Context, repID string) RepBrand {
@@ -36,7 +50,10 @@ func (s *Store) PutRepBrand(ctx context.Context, repID string, b RepBrand) error
 	}
 	b.Title, b.Announce, b.SupportURL = strings.TrimSpace(b.Title), strings.TrimSpace(b.Announce), strings.TrimSpace(b.SupportURL)
 	b.RemarkTemplate, b.BaseURL = strings.TrimSpace(b.RemarkTemplate), strings.TrimRight(strings.TrimSpace(b.BaseURL), "/")
+	b.Telegram = cleanTgUser(b.Telegram)
 	switch {
+	case b.Telegram != "" && !tgUserRE.MatchString(b.Telegram):
+		return fmt.Errorf("%w: Telegram id looks like @myshop", ErrInvalid)
 	case len(b.Title) > 80 || len(b.Announce) > 1000 || len(b.RemarkTemplate) > 200:
 		return fmt.Errorf("%w: too long", ErrInvalid)
 	case b.SupportURL != "" && !strings.HasPrefix(b.SupportURL, "https://") && !strings.HasPrefix(b.SupportURL, "tg://"):
@@ -83,6 +100,18 @@ func (s *Store) brandFor(ctx context.Context, email string) (SubSettings, string
 	set := s.SubSettings(ctx)
 	base := ""
 	chain := s.repChain(ctx, email)
+	if len(chain) > 1 {
+		// A sub-seller's customers are their own: nothing of the reseller
+		// above or of the panel (title, notice, support, look) shows, only
+		// what the sub-seller set. The link address still comes from above.
+		for _, r := range chain[1:] {
+			if b := s.RepBrand(ctx, r).BaseURL; b != "" && base == "" {
+				base = b
+			}
+		}
+		set.Title, set.Announce, set.SupportURL, set.Accent, set.Logo = "", "", "", "", ""
+		chain = chain[:1]
+	}
 	for i := len(chain) - 1; i >= 0; i-- { // parent first, nearest reseller last
 		b := s.RepBrand(ctx, chain[i])
 		pick := func(dst *string, v string) {
@@ -93,12 +122,21 @@ func (s *Store) brandFor(ctx context.Context, email string) (SubSettings, string
 		pick(&set.Title, b.Title)
 		pick(&set.Announce, b.Announce)
 		pick(&set.SupportURL, b.SupportURL)
+		if b.Telegram != "" {
+			set.SupportURL = "https://t.me/" + b.Telegram
+		}
 		pick(&set.Accent, b.Accent)
 		pick(&set.Logo, b.Logo)
 		pick(&set.RemarkTemplate, b.RemarkTemplate)
 		pick(&base, b.BaseURL)
 	}
 	return set, base
+}
+
+// IsSubSeller reports whether a reseller sits under another reseller.
+func (s *Store) IsSubSeller(ctx context.Context, repID string) bool {
+	var parent string
+	return repID != "" && s.ro.QueryRowContext(ctx, `SELECT parent_id FROM reps WHERE id=?`, repID).Scan(&parent) == nil && parent != ""
 }
 
 // repBase is the address a reseller's clients use (their own, else their

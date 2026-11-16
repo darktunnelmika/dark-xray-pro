@@ -1220,6 +1220,18 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 			AddInbounds: in.AddInbounds, RemoveInbounds: in.RemoveInbounds, MaxIPs: in.MaxIPs, RepID: in.RepID})
 		reply(w, map[string]int{"changed": n}, err)
 	}))
+	mux.HandleFunc("POST /api/v2/admin/clients/{email}/renew", member(func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Plan string  `json:"plan"`
+			GB   float64 `json:"gb"`
+			Days int64   `json:"days"`
+		}
+		if !decode(w, r, &in) {
+			return
+		}
+		res, err := s.RenewClient(r.Context(), who(r), r.PathValue("email"), in.Plan, in.GB, in.Days)
+		reply(w, res, err)
+	}))
 	mux.HandleFunc("POST /api/v2/admin/clients/{email}/transfer", guard(func(w http.ResponseWriter, r *http.Request) {
 		var in struct{ RepID string }
 		if !decode(w, r, &in) {
