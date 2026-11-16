@@ -1106,42 +1106,55 @@ func (b *Bot) announceOrders(ctx context.Context) {
 	}
 }
 
+// alertGrace: a node or tunnel must stay down this long before an alert,
+// so a short network hiccup (a missed sync, one lost ping) stays quiet.
+const alertGrace = 3 * 60
+
+// watchNodes alerts when a node or tunnel has been down for alertGrace,
+// and again when it comes back — only if the down alert went out.
 func (b *Bot) watchNodes(ctx context.Context) {
 	nodes, err := b.Store.Nodes(ctx)
 	if err != nil {
 		return
 	}
-	now := b.now()
+	now := b.now().Unix()
 	b.mu.Lock()
 	first := b.nodeState == nil
 	if first {
-		b.nodeState = map[string]bool{}
+		b.nodeState = map[string]bool{} // node -> a down alert went out
+		b.tunState = map[string]bool{}  // node|tunnel -> a down alert went out
 	}
 	var changes []string
+	mins := func(sec int64) string { return faInt((sec + 59) / 60) }
 	for _, n := range nodes {
-		on := n.Online(now)
-		if was, seen := b.nodeState[n.ID]; seen && was != on && n.LastSeen > 0 {
-			if on {
-				changes = append(changes, "🟢 نود <b>"+esc(n.ID)+"</b> دوباره آنلاین شد.")
-			} else {
-				changes = append(changes, "🔴 نود <b>"+esc(n.ID)+"</b> آفلاین شد.")
+		if n.LastSeen == 0 {
+			continue
+		}
+		down := now - n.LastSeen
+		switch {
+		case down >= alertGrace && !b.nodeState[n.ID]:
+			b.nodeState[n.ID] = true
+			if !first {
+				changes = append(changes, fmt.Sprintf("🔴 نود <b>%s</b> %s دقیقه است به پنل وصل نیست.\nکاربران روی همین نود با آخرین تنظیمات کار می‌کنند؛ فقط تغییرات تازه و آمار مصرف منتظر می‌مانند.", esc(n.ID), mins(down)))
 			}
+		case down < alertGrace && b.nodeState[n.ID] && n.Online(b.now()):
+			delete(b.nodeState, n.ID)
+			changes = append(changes, "🟢 نود <b>"+esc(n.ID)+"</b> دوباره به پنل وصل شد.")
 		}
-		b.nodeState[n.ID] = on
-		if b.tunState == nil {
-			b.tunState = map[string]bool{}
+		if !n.Online(b.now()) || n.Host == nil {
+			continue
 		}
-		if on && n.Host != nil {
-			for _, t := range n.Host.Tunnels {
-				key := n.ID + "|" + t.Name
-				if was, seen := b.tunState[key]; seen && was != t.Up {
-					if t.Up {
-						changes = append(changes, fmt.Sprintf("🟢 تونل <b>%s</b> به نود <b>%s</b> دوباره وصل شد (%.0fms).", esc(t.Name), esc(n.ID), t.RTTms))
-					} else {
-						changes = append(changes, fmt.Sprintf("🔴 تونل <b>%s</b> به نود <b>%s</b> قطع شد.\nکاربرانی که از این تونل وصل می‌شوند الان اتصال ندارند.", esc(t.Name), esc(n.ID)))
-					}
+		for _, t := range n.Host.Tunnels {
+			key := n.ID + "|" + t.Name
+			switch {
+			case !t.Up && now-t.Since >= alertGrace && !b.tunState[key]:
+				b.tunState[key] = true
+				if !first {
+					changes = append(changes, fmt.Sprintf("🔴 تونل <b>%s</b> به نود <b>%s</b> %s دقیقه است قطع است.\nکاربرانی که از این تونل وصل می‌شوند الان اتصال ندارند.", esc(t.Name), esc(n.ID), mins(now-t.Since)))
 				}
-				b.tunState[key] = t.Up
+			case t.Up && b.tunState[key]:
+				delete(b.tunState, key)
+				changes = append(changes, fmt.Sprintf("🟢 تونل <b>%s</b> به نود <b>%s</b> دوباره وصل شد (%.0fms).", esc(t.Name), esc(n.ID), t.RTTms))
 			}
 		}
 	}
