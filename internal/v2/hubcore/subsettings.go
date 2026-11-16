@@ -145,7 +145,26 @@ func (s *Store) subAccount(ctx context.Context, c Client, u Usage) sub.Account {
 		acc.Fragment = &sub.Fragment{Length: set.FragmentLength, Interval: set.FragmentInterval, Noise: set.Noise}
 	}
 	if set.InfoLines {
-		acc.InfoLines = []string{"📊 " + gbText(left) + " / " + total, "⏳ " + days + " days"}
+		// One line that says it all: who, volume left, time left. The
+		// client's name lives here only, not on every config.
+		vol := "📊 " + gbText(left) + " / " + total
+		if c.VolumeBytes < 0 {
+			vol = "📊 نامحدود"
+		} else if left <= 0 {
+			vol = "📊 حجم تمام شد"
+		}
+		var when string
+		switch {
+		case exp > 0 && exp <= s.now().Unix():
+			when = "⏳ زمان تمام شد"
+		case exp > 0:
+			when = "⏳ " + days + " روز"
+		case c.DurationSeconds > 0:
+			when = fmt.Sprintf("⏳ %d روز از اولین اتصال", (c.DurationSeconds+86399)/86400)
+		default:
+			when = "⏳ بدون انقضا"
+		}
+		acc.InfoLines = []string{"👤 " + c.Email + " | " + vol + " | " + when}
 	}
 	return acc
 }
