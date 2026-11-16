@@ -251,6 +251,16 @@ func TestRoleSweep(t *testing.T) {
 		}
 	}
 	diffSnap(t, "sub-seller kid", before, dbSnapshot(t, s, "kid"))
+	// Control: the same calls by ali itself do change ali's things, so the
+	// sweep above would have seen a leak.
+	aliC := login("aliuser", "ali password 123")
+	before = dbSnapshot(t, s)
+	if code, b := call(aliC, "PUT", "/api/v2/shop/products/ali-p1", evil); code != 200 {
+		t.Fatalf("control: ali edits its product: %d %s", code, b)
+	}
+	if after := dbSnapshot(t, s); after["products"] == before["products"] {
+		t.Fatal("control: the snapshot did not see ali's own change")
+	}
 }
 
 func diffSnap(t *testing.T, who string, a, b map[string]string) {
