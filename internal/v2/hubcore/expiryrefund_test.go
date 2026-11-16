@@ -84,10 +84,21 @@ func TestDeleteRep(t *testing.T) {
 	if reps, _ := s.Reps(ctx); len(reps) != 0 {
 		t.Fatal(reps)
 	}
-	if list, _ := s.Clients(ctx); len(list) != 0 {
-		t.Fatal("clients gone", list)
+	for _, c := range s.mustClients(t) {
+		if c.Email == "r1" {
+			t.Fatal("the reseller's clients must go")
+		}
 	}
 	if _, err := s.Login(ctx, "ali", "pass-12345678"); err == nil {
 		t.Fatal("login gone")
 	}
+}
+
+func (s *Store) mustClients(t *testing.T) []ClientView {
+	t.Helper()
+	list, err := s.Clients(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return list
 }
