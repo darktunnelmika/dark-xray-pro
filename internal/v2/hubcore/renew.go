@@ -76,7 +76,9 @@ func (s *Store) renewPeriod(ctx context.Context, actor, repID, email, plan strin
 		}
 		c.VolumeBytes = volBytes
 	}
-	never := firstSeen == 0 && used == 0
+	// Only a first-connection service still waiting for its first use keeps
+	// waiting; anything else starts today.
+	never := firstSeen == 0 && used == 0 && old.ExpiresUnix == 0 && old.DurationSeconds > 0
 	if days > 0 {
 		if firstUse && never {
 			c.DurationSeconds = days * 86400

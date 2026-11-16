@@ -71,6 +71,20 @@ func TestRenewStartsNewPeriod(t *testing.T) {
 			t.Fatal("unused: 30 days from the first connection, not 60", x.DurationSeconds/86400, x.ExpiresUnix)
 		}
 	}
+	// A fixed-date service that was never used still starts today.
+	f := Client{Email: "r3", Enabled: true, VolumeBytes: 1 << 30, ExpiresUnix: now.Unix() + 86400, Inbounds: []string{"de-vless"}}
+	if err := s.RepPutClient(ctx, "ali", "ali", f, "volume"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.RenewClient(ctx, rep, "r3", "", 1, 30); err != nil {
+		t.Fatal(err)
+	}
+	list, _ = s.Clients(ctx)
+	for _, x := range list {
+		if x.Email == "r3" && x.ExpiresUnix-now.Unix() != 30*86400 {
+			t.Fatal("fixed-date service: 30 days from today", x.ExpiresUnix, x.DurationSeconds)
+		}
+	}
 	// Not enough credit: nothing changes.
 	if _, err := s.RenewClient(ctx, rep, "r1", "", 1000, 30); err == nil {
 		t.Fatal("over credit must fail")
