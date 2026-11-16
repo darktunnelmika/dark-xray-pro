@@ -405,7 +405,7 @@ function render() {
   const name = u.first_name || "";
   const initials = (name || "D").slice(0, 1);
   // A reseller's store wears its brand: accent colour and logo.
-  if (state.accent && /^#[0-9a-f]{6}$/i.test(state.accent)) { document.documentElement.style.setProperty("--ion", state.accent); document.documentElement.style.setProperty("--ion-2", state.accent); }
+  if (state.accent && /^#[0-9a-f]{6}$/i.test(state.accent)) { document.documentElement.style.setProperty("--ion", state.accent); document.documentElement.style.setProperty("--ion-2", state.accent); document.documentElement.style.setProperty("--on-ion", "#fff"); }
   const head = h("header", { class: "hello" },
     state.logo && /^data:image\//.test(state.logo) ? h("img", { class: "av logo", src: state.logo, alt: "" }) : h("div", { class: "av" }, initials),
     h("div", { class: "hello-t" }, h("p", {}, name ? `سلام ${name} 👋` : "سلام 👋"), h("h1", {}, state.title || "Dark VPN")),
