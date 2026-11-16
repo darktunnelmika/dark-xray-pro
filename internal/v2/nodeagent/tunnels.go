@@ -108,9 +108,10 @@ func (m *TunnelMonitor) Probe(ctx context.Context) {
 	for r := range results {
 		t := byKey[r.key]
 		s := m.state[r.key]
-		if s == nil {
+		fresh := s == nil
+		if fresh {
 			s = &tunState{t: t}
-			s.t.Up, s.t.Since = true, now
+			s.t.Since = now
 			m.state[r.key] = s
 		}
 		s.t.Name, s.t.Remote = t.Name, t.Remote
@@ -122,6 +123,11 @@ func (m *TunnelMonitor) Probe(ctx context.Context) {
 			s.fails = 0
 		}
 		up := s.fails < 2
+		if fresh {
+			// The first probe decides: no "up, 0ms" for a tunnel that is down.
+			s.t.Up = s.fails == 0
+			continue
+		}
 		if up != s.t.Up {
 			s.t.Up, s.t.Since = up, now
 			if m.Logf != nil {

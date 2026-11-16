@@ -17,7 +17,7 @@ import (
 )
 
 // Version is reported to the HUB.
-var Version = "v2.13.1"
+var Version = "v2.13.2"
 
 // Applier is the part of Supervisor the agent uses.
 type Applier interface {
@@ -52,6 +52,7 @@ type Agent struct {
 	spool *Spool
 
 	mu           sync.Mutex
+	collectMu    sync.Mutex           // one usage collection at a time
 	tunnels      func() []wire.Tunnel // tunnel health for the HUB (nil = none)
 	state        wire.SyncResponse    // last desired state from the HUB
 	delivered    map[uint64]map[string]int64
@@ -193,6 +194,8 @@ func (a *Agent) Run(ctx context.Context) {
 
 // Collect reads Xray counters and spools them durably.
 func (a *Agent) Collect(ctx context.Context) {
+	a.collectMu.Lock()
+	defer a.collectMu.Unlock()
 	now := a.cfg.Now()
 	traffic, err := a.stats.TakeTraffic(ctx)
 	if err != nil {
@@ -528,6 +531,8 @@ func (a *Agent) enforce(ctx context.Context) {
 		a.mu.Unlock()
 		return
 	}
+	// A restart zeroes Xray's counters: take what they hold first.
+	a.Collect(ctx)
 	if _, err := a.xray.Apply(ctx, cfg); err != nil {
 		a.cfg.Logf("config %d not applied, keeping last good: %v", state.ConfigRevision, err)
 		return

@@ -93,3 +93,21 @@ func TestTunnelMonitorDownAfterTwoMisses(t *testing.T) {
 		t.Fatalf("back: %+v", g)
 	}
 }
+
+func TestTunnelFirstProbeDecides(t *testing.T) {
+	dir := t.TempDir()
+	_ = os.MkdirAll(filepath.Join(dir, "x"), 0o700)
+	_ = os.WriteFile(filepath.Join(dir, "x", "meta.conf"), []byte("NAME=x\nIFNAME=dgrx\nREMOTE_TUN=10.77.10.1\n"), 0o600)
+	m := &TunnelMonitor{GREDir: dir, state: map[string]*tunState{}, Ping: func(ctx context.Context, iface, peer string) (float64, float64, error) {
+		if iface == "dgrx" {
+			return 0, 100, errors.New("timeout")
+		}
+		return 0, 0, nil
+	}}
+	m.Probe(context.Background())
+	for _, x := range m.Snapshot() {
+		if x.Name == "x" && x.Up {
+			t.Fatalf("a tunnel down from the start shows up: %+v", x)
+		}
+	}
+}
