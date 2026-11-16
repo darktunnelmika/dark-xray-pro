@@ -17,7 +17,7 @@ import (
 )
 
 // Version is reported to the HUB.
-var Version = "v2.12.0"
+var Version = "v2.13.0"
 
 // Applier is the part of Supervisor the agent uses.
 type Applier interface {
@@ -52,7 +52,8 @@ type Agent struct {
 	spool *Spool
 
 	mu           sync.Mutex
-	state        wire.SyncResponse // last desired state from the HUB
+	tunnels      func() []wire.Tunnel // tunnel health for the HUB (nil = none)
+	state        wire.SyncResponse    // last desired state from the HUB
 	delivered    map[uint64]map[string]int64
 	blockedUntil map[string]time.Time
 	overSince    map[string]time.Time // first moment a user was seen over their IP limit
@@ -102,7 +103,11 @@ func (a *Agent) hostStats() *wire.Host {
 	prev := a.lastHost
 	a.lastHost = &hostSample{raw: raw, at: now}
 	h.OnlineUsers = a.onlineCount
+	tunnels := a.tunnels
 	a.mu.Unlock()
+	if tunnels != nil {
+		h.Tunnels = tunnels()
+	}
 	if prev != nil {
 		if cpu, ok := hostmetrics.CPUPercent(prev.raw, raw); ok {
 			h.CPUPercent = cpu
@@ -612,4 +617,11 @@ func hasUser(users []wire.UserLimit, email string) bool {
 		}
 	}
 	return false
+}
+
+// SetTunnels reports tunnel health with every sync.
+func (a *Agent) SetTunnels(f func() []wire.Tunnel) {
+	a.mu.Lock()
+	a.tunnels = f
+	a.mu.Unlock()
 }

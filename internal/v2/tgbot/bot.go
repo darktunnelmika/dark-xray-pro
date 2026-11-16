@@ -43,6 +43,7 @@ type Bot struct {
 	bcStop     bool
 	lastNotify time.Time
 	nodeState  map[string]bool
+	tunState   map[string]bool // node|tunnel -> up (alerts on change)
 	lastDaily  string
 	schedBusy  bool
 	menuURL    string // Mini App address the menu button points at
@@ -1148,6 +1149,22 @@ func (b *Bot) watchNodes(ctx context.Context) {
 			}
 		}
 		b.nodeState[n.ID] = on
+		if b.tunState == nil {
+			b.tunState = map[string]bool{}
+		}
+		if on && n.Host != nil {
+			for _, t := range n.Host.Tunnels {
+				key := n.ID + "|" + t.Name
+				if was, seen := b.tunState[key]; seen && was != t.Up {
+					if t.Up {
+						changes = append(changes, fmt.Sprintf("🟢 تونل <b>%s</b> به نود <b>%s</b> دوباره وصل شد (%.0fms).", esc(t.Name), esc(n.ID), t.RTTms))
+					} else {
+						changes = append(changes, fmt.Sprintf("🔴 تونل <b>%s</b> به نود <b>%s</b> قطع شد.\nکاربرانی که از این تونل وصل می‌شوند الان اتصال ندارند.", esc(t.Name), esc(n.ID)))
+					}
+				}
+				b.tunState[key] = t.Up
+			}
+		}
 	}
 	b.mu.Unlock()
 	for _, c := range changes {
@@ -1173,6 +1190,15 @@ func (b *Bot) statusText(ctx context.Context) string {
 			extra = fmt.Sprintf(" — CPU %.0f%%، آنلاین %d", n.Host.CPUPercent, n.Host.OnlineUsers)
 		}
 		lines = append(lines, dot+" "+esc(n.ID)+extra)
+		if n.Online(now) && n.Host != nil {
+			for _, t := range n.Host.Tunnels {
+				if t.Up {
+					lines = append(lines, fmt.Sprintf("   ⇄ تونل %s: 🟢 %.0fms", esc(t.Name), t.RTTms))
+				} else {
+					lines = append(lines, fmt.Sprintf("   ⇄ تونل %s: 🔴 قطع", esc(t.Name)))
+				}
+			}
+		}
 	}
 	return fmt.Sprintf("📡 نودها %d/%d آنلاین\n%s\n\n👥 کلاینت فعال %d از %d — آنلاین الان %d\n📶 ترافیک امروز %s",
 		o.NodesOnline, o.Nodes, strings.Join(lines, "\n"), o.ClientsActive, o.Clients, o.OnlineUsers, gb(o.TrafficToday))

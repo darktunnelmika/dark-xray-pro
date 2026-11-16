@@ -1015,3 +1015,16 @@ dialog.wide:has(.cform) { inline-size: min(780px, calc(100vw - 20px)); }
 .bot-btn { display: inline-block; padding: 7px 14px; border-radius: 8px; background: color-mix(in oklab, var(--sky) 14%, var(--surface-2)); border: 1px solid color-mix(in oklab, var(--sky) 30%, transparent); font-size: 13px; }
 .price-tile input.switch, input.switch[type="checkbox"] { flex: none; inline-size: 40px; min-inline-size: 40px; block-size: 22px; }
 .price-tile .switch + span { margin-inline-start: 10px; }
+
+/* Tunnel health under the network map and in node rows */
+.tun-strip { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; padding: 10px 4px 2px; border-block-start: 1px dashed var(--glass-line); margin-block-start: 6px; font-size: 12px; }
+.tun-strip .tun-title { color: var(--muted); margin-inline-end: 4px; }
+.tun { display: inline-flex; align-items: center; gap: 6px; padding: 3px 9px; border-radius: 99px; border: 1px solid var(--glass-line); background: var(--surface-2); }
+.tun .dot { inline-size: 7px; block-size: 7px; border-radius: 50%; background: var(--good); box-shadow: 0 0 6px var(--good); }
+.tun.down { border-color: color-mix(in oklab, var(--bad) 60%, transparent); background: color-mix(in oklab, var(--bad) 12%, transparent); }
+.tun.down .dot { background: var(--bad); box-shadow: 0 0 6px var(--bad); animation: tun-blink 1.2s steps(2) infinite; }
+.tun .warn { color: var(--warn); } .tun .bad { color: var(--bad); }
+.tun-chip { display: inline-block; margin-inline-start: 6px; padding: 0 6px; border-radius: 4px; font-size: 11px; border: 1px solid var(--glass-line); }
+.tun-chip.up { color: var(--good); } .tun-chip.down { color: var(--bad); border-color: var(--bad); }
+@keyframes tun-blink { 50% { opacity: .25; } }
+@media (prefers-reduced-motion: reduce) { .tun.down .dot { animation: none; } }

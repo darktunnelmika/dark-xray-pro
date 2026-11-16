@@ -93,6 +93,9 @@ func main() {
 	})
 	go sup.Run(ctx)
 	go nodeagent.RunLimiter(ctx, log.Printf)
+	tunnels := nodeagent.NewTunnelMonitor(log.Printf)
+	agent.SetTunnels(tunnels.Snapshot)
+	go tunnels.Run(ctx)
 	log.Printf("dark-node %s started: node=%s hub=%s", nodeagent.Version, *nodeID, *hubURL)
 	agent.Run(ctx)
 }

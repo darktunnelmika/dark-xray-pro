@@ -785,13 +785,29 @@ function netMap(nodes0, si0) {
     const ht = svgEl("text", { x: hub.x, y: hub.y + 4, "text-anchor": "middle", "font-size": 12 }); ht.textContent = "HUB";
     g.append(ht);
     svg.append(g);
-    box.replaceChildren(svg);
+    box.replaceChildren(svg, tunnelStrip(ns));
     sum.textContent = fa ? `${fmtNum(up)}/${fmtNum(n)} نود روشن · ${fmtNum(users)} کاربر آنلاین` : `${fmtNum(up)}/${fmtNum(n)} nodes up · ${fmtNum(users)} online`;
   };
   let last = nodes0;
   requestAnimationFrame(() => draw(last));
   draw(nodes0);
   return { el, update: (nodes) => { last = nodes; draw(nodes); } };
+}
+
+// tunnelStrip: every tunnel ending on a node, with its health, under the map.
+function tunnelStrip(nodes) {
+  const fa = lang === "fa";
+  const items = [];
+  for (const nd of nodes || []) for (const tn of (nd.online && nd.Host && nd.Host.tunnels) || []) items.push({ nd, tn });
+  if (!items.length) return h("span", {});
+  const ago = (u) => { const m = Math.max(0, Math.round((Date.now() / 1000 - u) / 60)); return m < 60 ? `${fmtNum(m)} ${fa ? "دقیقه" : "min"}` : m < 1440 ? `${fmtNum(Math.round(m / 60))} ${fa ? "ساعت" : "h"}` : `${fmtNum(Math.round(m / 1440))} ${fa ? "روز" : "d"}`; };
+  items.sort((a, b) => (a.tn.up - b.tn.up) || String(a.tn.name).localeCompare(String(b.tn.name)));
+  return h("div", { class: "tun-strip", role: "list", "aria-label": fa ? "تونل‌ها" : "Tunnels" },
+    h("span", { class: "tun-title" }, fa ? "تونل‌ها" : "Tunnels"),
+    items.map(({ nd, tn }) => h("span", { class: `tun ${tn.up ? "up" : "down"}`, role: "listitem",
+      title: [tn.iface, tn.peer, tn.remote].filter(Boolean).join(" · ") + (tn.since ? ` · ${fa ? "از" : "since"} ${ago(tn.since)}` : "") },
+      h("span", { class: "dot" }), h("b", { dir: "ltr" }, tn.name), h("span", { class: "muted" }, "→ ", nd.Name || nd.ID),
+      h("span", { dir: "ltr", class: tn.up ? (tn.loss > 0 ? "warn" : "") : "bad" }, tn.up ? `${Math.round(tn.rtt_ms)}ms${tn.loss > 0 ? ` · ${Math.round(tn.loss)}%` : ""}` : (fa ? `قطع · ${ago(tn.since)}` : `down · ${ago(tn.since)}`)))));
 }
 
 function hubStrip(si) {
@@ -834,7 +850,8 @@ function nodeRow(n) {
   return h("a", { class: `node-row ${n.online ? "" : "off"}`, href: "#/nodes" },
     h("div", { class: "nr-name" }, h("span", { class: `dot ${n.online ? "on" : ""}` }),
       h("div", { style: "min-inline-size:0" }, h("span", {}, n.Name || n.ID, n.PublicIP ? h("span", { class: "nr-ip" }, n.PublicIP) : null),
-        h("div", { class: "nr-sub" }, [n.ID, n.AgentVersion || "—", n.xray_version ? `xray ${n.xray_version}` : null].filter(Boolean).join(" · "), n.update_available ? (fa ? " · به‌روزرسانی" : " · update") : ""))),
+        h("div", { class: "nr-sub" }, [n.ID, n.AgentVersion || "—", n.xray_version ? `xray ${n.xray_version}` : null].filter(Boolean).join(" · "), n.update_available ? (fa ? " · به‌روزرسانی" : " · update") : "",
+          ...(n.online ? host.tunnels || [] : []).map((tn) => h("span", { class: `tun-chip ${tn.up ? "up" : "down"}`, dir: "ltr" }, `⇄ ${tn.name} ${tn.up ? `${Math.round(tn.rtt_ms)}ms` : "✕"}`))))),
     mini("CPU", host.cpu_percent || 0, p(host.cpu_percent)),
     mini(fa ? "رم" : "RAM", ramP, p(ramP)),
     mini(fa ? "دیسک" : "Disk", diskP, p(diskP)),

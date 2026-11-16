@@ -111,6 +111,21 @@ type Host struct {
 	TXRate      float64 `json:"tx_rate"`
 	TCP         uint64  `json:"tcp"`
 	OnlineUsers int     `json:"online_users"`
+	// Tunnels: the tunnels ending on this node (GRE and other point-to-point
+	// links from relay servers), probed every 30 seconds.
+	Tunnels []Tunnel `json:"tunnels,omitempty"`
+}
+
+// Tunnel is one tunnel ending on a node and how its far end answers.
+type Tunnel struct {
+	Name   string  `json:"name"`             // the tunnel's own name, or its interface
+	Iface  string  `json:"iface"`            // local interface
+	Peer   string  `json:"peer"`             // far end inside the tunnel (pinged)
+	Remote string  `json:"remote,omitempty"` // far end's public address, when known
+	Up     bool    `json:"up"`
+	RTTms  float64 `json:"rtt_ms"`
+	Loss   float64 `json:"loss"`  // percent lost in the last probe
+	Since  int64   `json:"since"` // unix time of the last up/down change
 }
 
 // SyncResponse carries the desired state. Config is only present when
