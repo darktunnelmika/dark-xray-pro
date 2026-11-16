@@ -358,6 +358,35 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 		rows, err := s.Finance(r.Context(), since)
 		reply(w, rows, err)
 	}))
+	mux.HandleFunc("GET /api/v2/tickets", member(func(w http.ResponseWriter, r *http.Request) {
+		list, err := s.Tickets(r.Context(), who(r), r.URL.Query().Get("status"), 300)
+		reply(w, list, err)
+	}))
+	mux.HandleFunc("GET /api/v2/tickets/{id}", member(func(w http.ResponseWriter, r *http.Request) {
+		id, _ := strconv.ParseInt(r.PathValue("id"), 10, 64)
+		t, err := s.TicketByID(r.Context(), who(r), id)
+		reply(w, t, err)
+	}))
+	mux.HandleFunc("POST /api/v2/tickets/{id}/reply", member(func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Text  string `json:"text"`
+			Close bool   `json:"close"`
+		}
+		if !decode(w, r, &in) {
+			return
+		}
+		id, _ := strconv.ParseInt(r.PathValue("id"), 10, 64)
+		_, err := s.TicketReply(r.Context(), who(r), id, who(r).User, in.Text, false)
+		if err == nil && in.Close {
+			_, err = s.TicketClose(r.Context(), who(r), id, false)
+		}
+		reply(w, map[string]bool{"ok": err == nil}, err)
+	}))
+	mux.HandleFunc("POST /api/v2/tickets/{id}/close", member(func(w http.ResponseWriter, r *http.Request) {
+		id, _ := strconv.ParseInt(r.PathValue("id"), 10, 64)
+		_, err := s.TicketClose(r.Context(), who(r), id, true)
+		reply(w, map[string]bool{"ok": err == nil}, err)
+	}))
 	mux.HandleFunc("GET /api/v2/admin/reports/sales", guard(func(w http.ResponseWriter, r *http.Request) {
 		days, _ := strconv.Atoi(r.URL.Query().Get("days"))
 		rep, err := s.SalesReport(r.Context(), days)

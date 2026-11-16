@@ -42,7 +42,7 @@ const I18N = {
     sellers: "Sub-sellers", transferCredit: "Transfer credit", subOf: "under", kind_transfer: "Transfer",
     sellersHint: "Open sellers under you and give them part of your credit. Their limits can only be tighter than yours.",
     transferHint: "Moves credit from your balance to this seller. Negative numbers take unused credit back.",
-    shop: "Shop", products: "Products", orders: "Orders", newOrder: "New order", product: "Product", price: "Price", buyer: "Buyer (name, @telegram, phone)",
+    shop: "Shop", tickets: "Support", products: "Products", orders: "Orders", newOrder: "New order", product: "Product", price: "Price", buyer: "Buyer (name, @telegram, phone)",
     renewClient: "Renew an existing client (optional)", fulfill: "Deliver", cancelOrder: "Cancel", status_pending: "Pending", status_fulfilled: "Delivered",
     status_cancelled: "Cancelled", status_draft: "Draft", status_published: "Published", status_archived: "Archived", statusLabel: "Status", seller: "Seller",
     delivered: "Delivered to {x}", manageProducts: "May create own shop products", shopHint: "Orders are recorded here; delivering one creates (or renews) the client in one step. A reseller's orders are paid from that reseller's credit.",
@@ -107,7 +107,7 @@ const I18N = {
     sellers: "زیرفروشنده‌ها", transferCredit: "انتقال اعتبار", subOf: "زیرمجموعهٔ", kind_transfer: "انتقال",
     sellersHint: "برای خودتان زیرفروشنده بسازید و بخشی از اعتبارتان را به او بدهید. محدودیت‌های او فقط می‌تواند سخت‌تر از شما باشد.",
     transferHint: "اعتبار را از موجودی شما به این فروشنده منتقل می‌کند. عدد منفی اعتبار مصرف‌نشده را برمی‌گرداند.",
-    shop: "فروشگاه", products: "محصولات", orders: "سفارش‌ها", newOrder: "سفارش جدید", product: "محصول", price: "قیمت", buyer: "خریدار (نام، آیدی تلگرام، تلفن)",
+    shop: "فروشگاه", tickets: "پشتیبانی", products: "محصولات", orders: "سفارش‌ها", newOrder: "سفارش جدید", product: "محصول", price: "قیمت", buyer: "خریدار (نام، آیدی تلگرام، تلفن)",
     renewClient: "تمدید کلاینت موجود (اختیاری)", fulfill: "تحویل", cancelOrder: "لغو", status_pending: "در انتظار", status_fulfilled: "تحویل شد",
     status_cancelled: "لغو شد", status_draft: "پیش‌نویس", status_published: "منتشر", status_archived: "حذف‌شده", statusLabel: "وضعیت", seller: "فروشنده",
     delivered: "تحویل شد: {x}", manageProducts: "اجازهٔ ساخت محصول فروشگاه", shopHint: "سفارش‌ها اینجا ثبت می‌شوند؛ با «تحویل» کلاینت یک‌جا ساخته (یا تمدید) می‌شود. سفارش‌های نماینده از اعتبار همان نماینده پرداخت می‌شود.",
@@ -235,7 +235,7 @@ function confirmAction(text, label) {
 }
 
 // ---------- Views ----------
-const allRoutes = { dashboard: viewDashboard, online: viewOnline, clients: viewClients, groups: viewGroups, inbounds: viewInbounds, nodes: viewNodes, routing: viewRouting, reps: viewReps, shop: viewShop, finance: viewFinance, activity: viewActivity, staff: viewStaff, settings: viewSettings };
+const allRoutes = { dashboard: viewDashboard, online: viewOnline, clients: viewClients, groups: viewGroups, inbounds: viewInbounds, nodes: viewNodes, routing: viewRouting, reps: viewReps, shop: viewShop, tickets: viewTickets, finance: viewFinance, activity: viewActivity, staff: viewStaff, settings: viewSettings };
 let me = null;
 let routes = allRoutes;
 function fullOwner() { return me && me.role === "owner" && !me.level; }
@@ -248,7 +248,7 @@ function routesFor(m) {
   if (m && m.role === "rep") {
     const r = { dashboard: viewRepDashboard, clients: viewClients, online: viewOnline, credit: viewCredit };
     if (m.can_sell) r.sellers = viewSellers;
-    r.shop = viewShop; r.settings = viewSettings;
+    r.shop = viewShop; r.tickets = viewTickets; r.settings = viewSettings;
     return r;
   }
   return allRoutes;
@@ -283,6 +283,7 @@ const ICONS = {
   nodes: "M3 4h18v6H3zM3 14h18v6H3zM7 7h.01M7 17h.01",
   reps: "M3 7h18v13H3zM8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M3 13h18",
   sellers: "M15 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M8.5 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM20 8v6M23 11h-6",
+  tickets: "M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2zM8 9h8M8 13h5",
   shop: "M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4zM3 6h18M16 10a4 4 0 0 1-8 0",
   finance: "M3 3v18h18M7 15l4-4 3 3 6-6",
   activity: "M22 12h-4l-3 9L9 3l-3 9H2",
@@ -415,7 +416,7 @@ const NAV_GROUPS = [
   ["overview", ["dashboard", "online"]],
   ["people", ["clients", "groups", "reps", "sellers"]],
   ["infra", ["inbounds", "nodes", "routing"]],
-  ["sales", ["shop", "credit", "finance"]],
+  ["sales", ["shop", "tickets", "credit", "finance"]],
   ["system", ["activity", "staff", "settings"]],
 ];
 const NAV_LABELS = { fa: { overview: "نمای کلی", people: "کاربران و نماینده‌ها", infra: "زیرساخت", sales: "فروش", system: "سیستم" },
@@ -3776,6 +3777,60 @@ async function viewShop() {
     tabs, pane);
 }
 
+// ---------- Support tickets ----------
+async function viewTickets() {
+  const fa = lang === "fa";
+  const owner = me.role === "owner";
+  let f = sessionStorage.getItem("ticketFilter") || "active";
+  const list = h("div", { class: "card order-list" });
+  const chips = h("div", { class: "chips", role: "tablist" });
+  const fmtTime = (u) => new Intl.DateTimeFormat(fa ? "fa-IR" : "en-GB", { dateStyle: "short", timeStyle: "short" }).format(new Date(u * 1000));
+  const stName = { open: [fa ? "منتظر پاسخ" : "waiting", "warn"], answered: [fa ? "پاسخ داده شد" : "answered", "good"], closed: [fa ? "بسته" : "closed", ""] };
+  let all = [];
+  const draw = () => {
+    const counts = { active: all.filter((x) => x.status !== "closed").length, open: all.filter((x) => x.status === "open").length, answered: all.filter((x) => x.status === "answered").length, closed: all.filter((x) => x.status === "closed").length, all: all.length };
+    const names = { active: fa ? "باز" : "Active", open: fa ? "منتظر پاسخ" : "Waiting", answered: fa ? "پاسخ‌داده" : "Answered", closed: fa ? "بسته" : "Closed", all: fa ? "همه" : "All" };
+    chips.replaceChildren(...Object.keys(counts).map((k) => h("button", { type: "button", role: "tab", class: `chip ${f === k ? "on" : ""}`, "aria-selected": String(f === k),
+      onclick: () => { f = k; try { sessionStorage.setItem("ticketFilter", k); } catch {} draw(); } }, names[k], h("span", { class: "count" }, fmtNum(counts[k])))));
+    const l = all.filter((x) => f === "all" || (f === "active" ? x.status !== "closed" : x.status === f));
+    list.replaceChildren(...(l.length ? l.map((x) => h("button", { type: "button", class: `order-row ticket-row ${x.status}`, onclick: () => openTicket(x.id) },
+      h("div", { class: "o-id" }, h("b", {}, `#${fmtNum(x.id)}`), h("span", { class: "muted small" }, fmtTime(x.updated))),
+      h("div", { class: "o-main" }, h("b", {}, x.name || String(x.chat)), h("span", { class: "muted small" }, x.last)),
+      h("div", { class: "o-amt" }, h("span", { class: "small muted" }, fa ? `${fmtNum(x.count)} پیام` : `${x.count} msgs`), owner && x.seller ? h("span", { class: "badge" }, x.seller) : null),
+      h("div", { class: "o-st" }, h("span", { class: `badge ${stName[x.status][1]}` }, stName[x.status][0])))) :
+      [h("p", { class: "muted small", style: "padding:14px" }, f === "active" || f === "open" ? (fa ? "تیکت بازی ندارید." : "No open tickets.") : t("empty"))]));
+  };
+  const load = async () => { all = await api("GET", "/api/v2/tickets"); draw(); };
+  const openTicket = async (id) => {
+    const tk = await api("GET", `/api/v2/tickets/${id}`);
+    const thread = h("div", { class: "ticket-thread" }, (tk.msgs || []).map((m) => h("div", { class: `tmsg ${m.staff ? "staff" : "cust"}` },
+      h("div", { class: "tmeta small muted" }, m.staff ? (fa ? `پشتیبانی · ${m.author}` : `Support · ${m.author}`) : (tk.name || (fa ? "مشتری" : "Customer")), " · ", fmtTime(m.unix),
+        m.staff && !m.delivered ? h("span", { class: "badge warn" }, fa ? "در صف ارسال" : "queued") : null),
+      h("div", { class: "tbody" }, m.text))));
+    const txt = h("textarea", { rows: 4, maxlength: "4000", placeholder: fa ? "پاسخ را بنویسید… (از طریق ربات برای مشتری فرستاده می‌شود)" : "Write the answer… (sent to the customer by the bot)" });
+    const err = h("div", { class: "error" });
+    const send = (close) => async (e) => {
+      e.preventDefault(); err.textContent = "";
+      if (!txt.value.trim()) { txt.focus(); return; }
+      try { await api("POST", `/api/v2/tickets/${id}/reply`, { text: txt.value, close }); document.getElementById("modal").close(); toast(fa ? "پاسخ ثبت شد؛ ربات تا چند ثانیهٔ دیگر می‌فرستد" : "Answer queued; the bot sends it in a few seconds"); load(); } catch (x) { err.textContent = x.message; }
+    };
+    const actions = tk.status === "closed" ? [] : [
+      h("button", { class: "ghost", value: "close", onclick: async (e) => { e.preventDefault(); await guarded(() => api("POST", `/api/v2/tickets/${id}/close`)); document.getElementById("modal").close(); load(); } }, fa ? "بستن بدون پاسخ" : "Close"),
+      h("button", { value: "sc", onclick: send(true) }, fa ? "ارسال و بستن" : "Send and close"),
+      h("button", { class: "primary", value: "s", onclick: send(false) }, fa ? "ارسال پاسخ" : "Send")];
+    const d = openModal(`${fa ? "تیکت" : "Ticket"} #${fmtNum(id)} · ${tk.name || tk.chat}`, h("div", { class: "form" },
+      h("div", { class: "small muted" }, [owner && tk.seller ? `${fa ? "فروشنده" : "Seller"}: ${tk.seller}` : null, (tk.clients || []).length ? `${fa ? "سرویس‌ها" : "Services"}: ${tk.clients.join("، ")}` : null, `Telegram: ${tk.chat}`].filter(Boolean).join(" · ")),
+      thread, tk.status === "closed" ? h("p", { class: "muted small" }, fa ? "این تیکت بسته است؛ پیام تازهٔ مشتری تیکت جدیدی باز می‌کند." : "Closed; a new customer message opens a new ticket.") : txt, err), actions);
+    d.classList.add("wide");
+    requestAnimationFrame(() => { thread.scrollTop = thread.scrollHeight; });
+  };
+  await load();
+  return h("div", {},
+    h("div", { class: "row sticky-head" }, h("h1", {}, t("tickets")), h("span", { class: "spacer" }), h("button", { class: "ghost", onclick: load }, fa ? "تازه کردن" : "Refresh")),
+    h("p", { class: "small muted" }, fa ? "پیام‌هایی که مشتری‌ها در ربات به پشتیبانی می‌فرستند. هر مشتری تا وقتی تیکتش باز است در همان تیکت ادامه می‌دهد؛ پاسخ شما از طریق ربات به خودش می‌رسد." : "Messages customers send to support in the bot. Answers go back to them through the bot."),
+    chips, list);
+}
+
 // ---------- Toman wallets, top-ups, resellers' own bots ----------
 function walletsPane() {
   const fa = lang === "fa";
@@ -4226,9 +4281,9 @@ function salesReportCard() {
     svg.append(svgEl("line", { x1: P, x2: W - P, y1: H, y2: H, class: "axis" }));
     daily.forEach((d, i) => {
       const hgt = (d.bytes / max) * (H - 18), x = P + i * bw + bw * 0.15;
-      const r = svgEl("rect", { x, y: H - hgt, width: Math.max(2, bw * 0.7), height: Math.max(hgt, d.bytes ? 2 : 0), rx: 2, class: "bar" });
+      const r = svgEl("rect", { x, y: H - hgt, width: Math.max(2, bw * 0.7), height: Math.max(hgt, d.bytes ? 2 : 0), rx: 2, class: "sbar" });
       const tt = svgEl("title", {}); tt.textContent = `${d.day}: ${gbs(d.bytes)} · ${fmtNum(d.count)}`; r.append(tt); svg.append(r);
-      if (daily.length <= 31 && (i % Math.ceil(daily.length / 8) === 0 || i === daily.length - 1)) {
+      if (daily.length <= 31 && i % Math.ceil(daily.length / 8) === 0) {
         const tx = svgEl("text", { x: x + bw * 0.35, y: H + 16, "text-anchor": "middle", class: "lbl" });
         tx.textContent = new Intl.DateTimeFormat(fa ? "fa-IR" : "en-GB", { month: "short", day: "numeric" }).format(new Date(d.day + "T12:00:00Z"));
         svg.append(tx);

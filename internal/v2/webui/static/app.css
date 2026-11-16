@@ -1034,7 +1034,16 @@ dialog.wide:has(.cform) { inline-size: min(780px, calc(100vw - 20px)); }
 .sales-report .chg { font-size: 12px; font-weight: 600; color: var(--muted); }
 .sales-report .chg.up { color: var(--good); } .sales-report .chg.down { color: var(--bad); }
 .sales-chart { inline-size: 100%; block-size: auto; }
-.sales-chart .bar { fill: color-mix(in oklab, var(--ion) 70%, transparent); }
-.sales-chart .bar:hover { fill: var(--ion); }
+.sales-chart .sbar { fill: color-mix(in oklab, var(--ion) 70%, transparent); }
+.sales-chart .sbar:hover { fill: var(--ion); }
 .sales-chart .axis { stroke: var(--glass-line); }
 .sales-chart .lbl { fill: var(--muted); font-size: 11px; }
+
+/* Support tickets */
+.ticket-row { inline-size: 100%; text-align: start; background: none; border: 0; color: inherit; cursor: pointer; font: inherit; }
+.ticket-row.open { box-shadow: inset 3px 0 0 var(--warn); }
+.ticket-thread { display: flex; flex-direction: column; gap: 10px; max-block-size: 52vh; overflow: auto; padding: 4px; }
+.tmsg { max-inline-size: 85%; padding: 8px 12px; border-radius: 12px; border: 1px solid var(--glass-line); background: var(--surface-2); }
+.tmsg.staff { align-self: flex-end; background: color-mix(in oklab, var(--ion) 12%, var(--surface-2)); border-color: color-mix(in oklab, var(--ion) 35%, transparent); }
+.tmsg .tbody { white-space: pre-wrap; overflow-wrap: anywhere; margin-block-start: 4px; }
+.tmsg .badge { margin-inline-start: 6px; }

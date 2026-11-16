@@ -746,3 +746,67 @@ func TestShopButtons(t *testing.T) {
 	ob.Handle(ctx, cb(9999, "S:h"))
 	find(t, api.take(), 9999, "مجاز نیست")
 }
+
+func TestTickets(t *testing.T) {
+	s, err := hubcore.Open(filepath.Join(t.TempDir(), "v2.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	ctx := context.Background()
+	_ = s.PutRep(ctx, hubcore.Rep{ID: "ali", Name: "Ali", Enabled: true})
+	api := &fakeAPI{}
+	b := &Bot{Store: s, API: api, SubBase: "https://x", Logf: t.Logf, Seller: "ali", Owners: map[int64]bool{}}
+	const repChat, cust = int64(3200), int64(4200)
+	code, _ := s.NewTgLinkCode(ctx, "ali")
+	b.Handle(ctx, msg(repChat, "/start rep_"+code))
+	api.take()
+	// The customer writes twice: one ticket, and the reseller hears both.
+	b.Handle(ctx, cb(cust, "support"))
+	b.Handle(ctx, msg(cust, "no internet"))
+	out := api.take()
+	find(t, out, cust, "تیکت #1")
+	find(t, out, repChat, "تیکت جدید")
+	b.Handle(ctx, cb(cust, "support"))
+	b.Handle(ctx, msg(cust, "still nothing"))
+	find(t, api.take(), repChat, "پیام تازه در تیکت")
+	// Answer with the button.
+	b.Handle(ctx, cb(repChat, "T:r:1"))
+	api.take()
+	b.Handle(ctx, msg(repChat, "restart the app"))
+	out = api.take()
+	find(t, out, cust, "restart the app")
+	find(t, out, repChat, "ارسال شد")
+	// An answer typed in the panel arrives on the next tick, then close.
+	rep := hubcore.Principal{User: "ali", Role: "rep", RepID: "ali"}
+	if _, err := s.TicketReply(ctx, rep, 1, "ali", "works now?", false); err != nil {
+		t.Fatal(err)
+	}
+	b.deliverTickets(ctx)
+	find(t, api.take(), cust, "works now?")
+	if _, err := s.TicketClose(ctx, rep, 1, true); err != nil {
+		t.Fatal(err)
+	}
+	b.deliverTickets(ctx)
+	find(t, api.take(), cust, "بسته شد")
+	b.deliverTickets(ctx)
+	if len(api.take()) != 0 {
+		t.Fatal("delivered once")
+	}
+	tk, err := s.TicketByID(ctx, rep, 1)
+	if err != nil || tk.Status != "closed" || len(tk.Msgs) != 4 {
+		t.Fatalf("thread: %+v %v", tk, err)
+	}
+	// The owner sees it; another reseller does not; a new message opens #2.
+	if _, err := s.TicketByID(ctx, hubcore.Principal{Role: "rep", RepID: "bob"}, 1); err == nil {
+		t.Fatal("other reseller")
+	}
+	b.Handle(ctx, cb(cust, "support"))
+	b.Handle(ctx, msg(cust, "again"))
+	find(t, api.take(), cust, "تیکت #2")
+	// A stranger's button does nothing.
+	b.Handle(ctx, cb(9999, "T:c:2"))
+	if tk, _ := s.TicketByID(ctx, rep, 2); tk.Status != "open" {
+		t.Fatal("stranger closed it")
+	}
+}

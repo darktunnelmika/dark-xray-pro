@@ -191,15 +191,6 @@ func TgChatOfBuyer(b string) (int64, bool) {
 	return n, err == nil
 }
 
-// TgTicket stores a support message and returns its id.
-func (s *Store) TgTicket(ctx context.Context, chat int64, text string) (int64, error) {
-	r, err := s.db.ExecContext(ctx, `INSERT INTO tg_tickets(chat_id,text,unix) VALUES(?,?,?)`, chat, text, s.now().Unix())
-	if err != nil {
-		return 0, err
-	}
-	return r.LastInsertId()
-}
-
 // TgMapMessage remembers which ticket an owner-side message belongs to, so a
 // reply to it reaches the customer.
 func (s *Store) TgMapMessage(ctx context.Context, ownerChat, messageID, ticket int64) {

@@ -157,6 +157,7 @@ func (b *Bot) Tick(ctx context.Context) {
 		b.announceOrders(ctx)
 		b.notifyClients(ctx)
 		b.repAlerts(ctx)
+		b.deliverTickets(ctx)
 		return
 	}
 	b.syncMenuButton(ctx)
@@ -168,6 +169,7 @@ func (b *Bot) Tick(ctx context.Context) {
 	b.notifyClients(ctx)
 	b.repAlerts(ctx)
 	b.runScheduled(ctx)
+	b.deliverTickets(ctx)
 }
 
 func (b *Bot) send(ctx context.Context, chat int64, text string, kb *Keyboard) int64 {
@@ -268,6 +270,9 @@ func (b *Bot) onMessage(ctx context.Context, m *Message) {
 			b.send(ctx, chat, fmt.Sprintf("✨ %d ایموجی ثبت شد (جمعاً %d). از این به بعد این‌ها در پیام‌ها و دکمه‌ها متحرک‌اند:\n%s\n\nایموجی‌های بیشتری بفرستید یا /done بزنید.", len(ce), n, strings.Join(keys, " ")), nil)
 			return
 		}
+	}
+	if b.ticketMessage(ctx, m, text) {
+		return
 	}
 	if w := b.peekAwait(chat); strings.HasPrefix(w, "S:") && text != "" && !strings.HasPrefix(text, "/") && keyboardAction(text) == "" {
 		b.takeAwait(chat)
@@ -745,30 +750,6 @@ func (b *Bot) link(ctx context.Context, chat int64, tokenOrURL string) {
 	b.celebrate(ctx, chat, "✅ سرویس <b>"+esc(email)+"</b> به حساب شما وصل شد.\nاز این به بعد هشدار حجم و انقضا همین‌جا می‌آید.", &Keyboard{Rows: [][]Button{row(cbBtn("📦 مشاهدهٔ سرویس", "svc:"+email), cbBtn("« منو", "home"))}}, EffectHeart)
 }
 
-func (b *Bot) ticket(ctx context.Context, chat int64, name, username, text string) {
-	if text == "" {
-		return
-	}
-	id, err := b.Store.TgTicket(ctx, chat, text)
-	if err != nil {
-		b.logf("tgbot ticket: %v", err)
-		return
-	}
-	who := esc(name)
-	if username != "" {
-		who += " (@" + esc(username) + ")"
-	}
-	emails, _ := b.clients(ctx, chat)
-	msgs := b.toOwners(ctx, fmt.Sprintf("💬 تیکت #%d از %s\nسرویس‌ها: %s\n\n%s\n\n<i>برای پاسخ، روی همین پیام Reply کنید.</i>",
-		id, who, esc(strings.Join(emails, ", ")), esc(text)), nil)
-	for owner, mid := range msgs {
-		if mid != 0 {
-			b.Store.TgMapMessage(ctx, owner, mid, id)
-		}
-	}
-	b.send(ctx, chat, fmt.Sprintf("پیام شما ثبت شد (تیکت #%d). پاسخ همین‌جا ارسال می‌شود.", id), nil)
-}
-
 func (b *Bot) onCallback(ctx context.Context, q *CallbackQuery) {
 	chat := q.From.ID
 	_ = b.API.Answer(ctx, q.ID, "")
@@ -780,6 +761,9 @@ func (b *Bot) onCallback(ctx context.Context, q *CallbackQuery) {
 		return
 	}
 	if b.shopCallback(ctx, chat, q.Data) {
+		return
+	}
+	if b.ticketCallback(ctx, chat, q.Data) {
 		return
 	}
 	verb, rest, _ := strings.Cut(q.Data, ":")
@@ -952,14 +936,6 @@ func (b *Bot) ownsClient(ctx context.Context, chat int64, email string) bool {
 // ownerMessage handles owner commands and ticket replies; false means "not
 // an owner action", so the owner can also use the customer menu.
 func (b *Bot) ownerMessage(ctx context.Context, m *Message, text string) bool {
-	if m.ReplyTo != nil && !strings.HasPrefix(text, "/") {
-		_, chat, err := b.Store.TgTicketChat(ctx, m.Chat.ID, m.ReplyTo.ID)
-		if err == nil {
-			b.send(ctx, chat, "📩 پاسخ پشتیبانی:\n\n"+esc(text), nil)
-			b.send(ctx, m.Chat.ID, "ارسال شد ✅", nil)
-			return true
-		}
-	}
 	cmd, arg, _ := strings.Cut(text, " ")
 	arg = strings.TrimSpace(arg)
 	switch strings.SplitN(cmd, "@", 2)[0] {
