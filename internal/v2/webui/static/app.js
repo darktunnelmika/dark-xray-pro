@@ -235,7 +235,7 @@ function mark() {
   const svg = svgEl("svg", { viewBox: "0 0 32 32", "aria-hidden": "true" });
   const defs = svgEl("defs", {});
   const g = svgEl("linearGradient", { id, x1: "0", y1: "0", x2: "1", y2: "1" });
-  g.append(svgEl("stop", { offset: "0", "stop-color": "#f5b73b" }), svgEl("stop", { offset: "1", "stop-color": "#36c2b4" }));
+  g.append(svgEl("stop", { offset: "0", "stop-color": "#28f7a0" }), svgEl("stop", { offset: "1", "stop-color": "#4bb9ff" }));
   defs.append(g);
   svg.append(defs,
     svgEl("path", { d: "M16 2.5 28 9.25v13.5L16 29.5 4 22.75V9.25z", fill: "none", stroke: `url(#${id})`, "stroke-width": 2.2, "stroke-linejoin": "round" }),
@@ -578,7 +578,7 @@ async function viewOnline() {
   return h("div", { class: "form" }, h("div", { class: "row" }, h("h1", {}, s3("online")), sum), h("p", { class: "small muted" }, s3("onlineHint")), q, box);
 }
 
-const NODE_COLORS = ["#4f8cff", "#ff8a4c", "#2fd39b", "#f4b740", "#ff5470", "#a78bfa", "#38bdf8", "#c0f04d"];
+const NODE_COLORS = ["#28f7a0", "#b36cff", "#4bb9ff", "#ff7a59", "#ff415d", "#00e8c0", "#7d9bff", "#e070ff"];
 function nodeTrafficCard(nodes) {
   const body = h("div", {});
   let days = 14;
@@ -663,28 +663,36 @@ function gauge(label) {
   } };
 }
 
-// netMap is the dashboard's hero: the hub in the middle and each node on a
-// line whose flow speed and thickness follow its live traffic; a node that
-// is down sits on a broken red line. Phones get a vertical layout.
+// netMap is the dashboard's hero, a live tunnel matrix after DARK NOC: the
+// hub in the middle and each node on a three-layer line (aura, backbone,
+// bright core) with packets whose speed and glow follow its live traffic;
+// a node that is down sits on a broken red line. Phones get a spine layout.
 function netMap(nodes0, si0) {
   const fa = lang === "fa";
   const box = h("div", {});
-  const sum = h("span", { class: "muted small" });
+  const sum = h("span", { class: "muted" });
   const el = h("section", { class: "card netmap", "aria-label": fa ? "نقشهٔ شبکه" : "Network map" },
-    h("div", { class: "nm-head" }, h("h2", {}, fa ? "نقشهٔ شبکه" : "Network map"), sum,
+    h("div", { class: "nm-head" }, h("h2", {}, fa ? "نقشهٔ زندهٔ شبکه" : "Live network map"), sum,
       h("a", { class: "spacer small", href: "#/nodes" }, fa ? "مدیریت نودها ›" : "Manage nodes ›")), box);
-  const draw = (nodes, si) => {
+  const draw = (nodes) => {
     const ns = (nodes || []).slice().sort((a, b) => (b.online - a.online) || String(a.Name || a.ID).localeCompare(String(b.Name || b.ID)));
     const narrow = (el.clientWidth || window.innerWidth) < 640;
     const n = ns.length, rows = Math.max(1, Math.ceil(n / 2));
-    const W = narrow ? 360 : 1000;
-    const BW = narrow ? 156 : 236, BH = 62;
-    const H = narrow ? 150 + rows * 80 : Math.max(250, rows * 86 + 40);
-    const hub = narrow ? { x: W / 2, y: 58 } : { x: W / 2, y: H / 2 };
+    const W = narrow ? 360 : 1000, BW = narrow ? 156 : 236, BH = narrow ? 58 : 76, RS = narrow ? 74 : 90;
+    const H = narrow ? 128 + rows * RS : Math.max(230, rows * RS + 30);
+    const hub = narrow ? { x: W / 2, y: 54 } : { x: W / 2, y: H / 2 };
     const svg = svgEl("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": fa ? "هاب و نودها" : "HUB and nodes" });
+    const defs = svgEl("defs", {});
+    const f = svgEl("filter", { id: "nm-glow", x: "-50%", y: "-50%", width: "200%", height: "200%" });
+    f.append(svgEl("feGaussianBlur", { stdDeviation: "2.2", result: "b" }));
+    const m = svgEl("feMerge", {}); m.append(svgEl("feMergeNode", { in: "b" }), svgEl("feMergeNode", { in: "SourceGraphic" })); f.append(m);
+    defs.append(f); svg.append(defs);
     for (let gx = 20; gx < W; gx += 40) svg.append(svgEl("line", { x1: gx, y1: 0, x2: gx, y2: H, class: "nm-grid", "stroke-dasharray": "1 39" }));
     const links = svgEl("g", {}), boxes = svgEl("g", {});
     svg.append(links, boxes);
+    const rtl = document.documentElement.dir === "rtl";
+    const iso = (x) => (fa ? `⁧${x}⁩` : x);
+    const txt = (x, y, anchor, cls, v) => { const e = svgEl("text", { x, y, "text-anchor": anchor, class: cls, direction: "ltr" }); e.textContent = v; return e; };
     let up = 0, users = 0;
     ns.forEach((nd, i) => {
       const host = nd.Host || {}, live = !!nd.online;
@@ -692,63 +700,70 @@ function netMap(nodes0, si0) {
       let bx, by, ax, ay, d;
       if (narrow) {
         const col = i % 2, row = Math.floor(i / 2);
-        // A spine down the middle with a short branch to each card.
-        bx = col ? W - 10 - BW : 10; by = 130 + row * 80;
+        bx = col ? W - 10 - BW : 10; by = 118 + row * RS;
         ax = col ? bx : bx + BW; ay = by + BH / 2;
-        d = `M${hub.x} ${hub.y + 30} L ${hub.x} ${ay - 14} Q ${hub.x} ${ay}, ${hub.x + (ax > hub.x ? 14 : -14)} ${ay} L ${ax} ${ay}`;
+        d = `M${hub.x} ${hub.y + 30} L ${hub.x} ${ay - 12} Q ${hub.x} ${ay}, ${hub.x + (ax > hub.x ? 12 : -12)} ${ay} L ${ax} ${ay}`;
       } else {
         const side = i % 2, row = Math.floor(i / 2), rowsSide = side ? Math.floor(n / 2) : Math.ceil(n / 2);
-        const span = rowsSide * 86;
-        by = (H - span) / 2 + row * 86 + (86 - BH) / 2;
-        bx = side ? W - 24 - BW : 24;
+        by = (H - rowsSide * RS) / 2 + row * RS + (RS - BH) / 2;
+        bx = side ? W - 20 - BW : 20;
         ax = side ? bx : bx + BW; ay = by + BH / 2;
         const mx = (hub.x + ax) / 2;
         d = `M${hub.x} ${hub.y} C ${mx} ${hub.y}, ${mx} ${ay}, ${ax} ${ay}`;
       }
       const r = (host.rx_rate || 0) + (host.tx_rate || 0);
+      const lg = Math.log10(r + 1), energy = Math.max(0, Math.min(1, (lg - 3) / 4)); // 1 KB/s → 0, 10 MB/s → 1
+      const g = svgEl("g", { class: `nm-route ${live ? "" : "down"}` });
+      g.style.setProperty("--e", energy.toFixed(2));
       if (live) {
-        const lg = Math.log10(r + 1);
-        links.append(svgEl("path", { d, class: "nm-link base" }));
+        g.append(svgEl("path", { d, class: "nm-link aura" }), svgEl("path", { d, class: "nm-link base" }), svgEl("path", { d, class: "nm-link core" }));
         if (r > 0) {
-          const f = svgEl("path", { d, class: "nm-link flow", "stroke-width": (2 + Math.min(4, lg / 1.6)).toFixed(1) });
-          f.style.setProperty("animation-duration", `${Math.max(0.5, 4.2 - lg / 1.9).toFixed(2)}s`);
-          links.append(f);
+          const dur = Math.max(0.8, 5 - lg / 1.6);
+          const fl = svgEl("path", { d, class: "nm-link flow" });
+          fl.style.setProperty("animation-duration", `${(dur / 1.6).toFixed(2)}s`);
+          g.append(fl);
+          for (let k = 0; k < (energy > .5 ? 2 : 1); k++) {
+            const pk = svgEl("circle", { r: 2.4, class: "nm-packet" });
+            const mo = svgEl("animateMotion", { dur: `${dur.toFixed(2)}s`, repeatCount: "indefinite", path: d, begin: `${(-k * dur / 2).toFixed(2)}s` });
+            pk.append(mo); g.append(pk);
+          }
         }
-      } else links.append(svgEl("path", { d, class: "nm-link dead" }));
+      } else g.append(svgEl("path", { d, class: "nm-link dead" }));
+      links.append(g);
       const a = svgEl("a", { href: "#/nodes", class: `nm-node ${live ? "up" : "down"}` });
-      // SVG text gets an explicit LTR base so anchors mean what they say;
-      // Persian runs are isolated (RLI…PDI) so "۶۱ آنلاین" still reads right.
-      const iso = (x) => (fa ? `\u2067${x}\u2069` : x);
-      const rtl = document.documentElement.dir === "rtl", pad = 14;
+      const pad = 12, sx = rtl ? bx + BW - pad : bx + pad, ex = rtl ? bx + pad : bx + BW - pad;
       const onl = live ? iso(`${fmtNum(host.online_users || 0)} ${fa ? "آنلاین" : "online"}`) : iso(fa ? "قطع" : "down");
-      const txt = (x, y, anchor, cls, v) => { const e = svgEl("text", { x, y, "text-anchor": anchor, class: cls, direction: "ltr" }); e.textContent = v; return e; };
-      let parts;
+      const ip = nd.PublicIP || "";
+      const parts = [svgEl("rect", { x: bx, y: by, width: BW, height: BH, rx: 6, class: "box" }),
+        svgEl("circle", { cx: rtl ? bx + BW - 8 : bx + 8, cy: by + 8, r: 2.6, class: "led" })];
       if (narrow) {
-        parts = [txt(bx + BW / 2, by + 25, "middle", "nm-name", nd.Name || nd.ID),
-          txt(bx + BW / 2, by + 46, "middle", live ? "nm-users" : "nm-sub", onl)];
+        parts.push(txt(bx + BW / 2, by + 24, "middle", "nm-name", nd.Name || nd.ID), txt(bx + BW / 2, by + 44, "middle", live ? "nm-users" : "nm-sub", onl));
       } else {
-        parts = [txt(rtl ? bx + BW - pad : bx + pad, by + 26, rtl ? "end" : "start", "nm-name", nd.Name || nd.ID),
-          txt(rtl ? bx + pad : bx + BW - pad, by + 26, rtl ? "start" : "end", "nm-users", onl),
-          txt(bx + BW / 2, by + 47, "middle", "nm-sub", live ? `↓ ${rate(host.rx_rate || 0)}   ↑ ${rate(host.tx_rate || 0)}` : (nd.PublicIP || nd.ID))];
+        parts.push(txt(sx, by + 23, rtl ? "end" : "start", "nm-name", nd.Name || nd.ID), txt(ex, by + 23, rtl ? "start" : "end", "nm-users", onl));
+        if (live) parts.push(txt(sx, by + 44, rtl ? "end" : "start", "nm-sub", `↓ ${rate(host.rx_rate || 0)}   ↑ ${rate(host.tx_rate || 0)}`));
+        if (ip) {
+          const iw = ip.length * 6.1 + 10, ix = rtl ? bx + BW - pad - iw : bx + pad;
+          parts.push(svgEl("rect", { x: ix, y: by + 52, width: iw, height: 16, rx: 3, class: "ip" }), txt(ix + iw / 2, by + 64, "middle", "nm-ip", ip));
+        }
+        if (live && host.cpu_percent != null) parts.push(txt(ex, by + 64, rtl ? "start" : "end", "nm-sub", `cpu ${Math.round(host.cpu_percent || 0)}%`));
       }
-      const led = svgEl("circle", { cx: rtl ? bx + BW - 11 : bx + 11, cy: by + 11, r: 3, class: "led" });
-      a.append(svgEl("rect", { x: bx, y: by, width: BW, height: BH, rx: 14 }), led, ...parts);
+      a.append(...parts);
       boxes.append(a);
     });
     const g = svgEl("g", { class: "nm-hub" });
-    const hexPts = (r) => [0, 1, 2, 3, 4, 5].map((k) => { const a = Math.PI / 3 * k - Math.PI / 2; return `${(hub.x + r * Math.cos(a)).toFixed(1)},${(hub.y + r * Math.sin(a)).toFixed(1)}`; }).join(" ");
-    g.append(svgEl("circle", { cx: hub.x, cy: hub.y, r: 36, class: "halo" }), svgEl("circle", { cx: hub.x, cy: hub.y, r: 44, class: "orbit" }),
-      svgEl("polygon", { points: hexPts(33), class: "hex", "stroke-linejoin": "round" }));
-    const ht = svgEl("text", { x: hub.x, y: hub.y + 5, "text-anchor": "middle", "font-size": 15 }); ht.textContent = fa ? "هاب" : "HUB";
+    const hexPts = (r) => [0, 1, 2, 3, 4, 5].map((k) => { const ang = Math.PI / 3 * k - Math.PI / 2; return `${(hub.x + r * Math.cos(ang)).toFixed(1)},${(hub.y + r * Math.sin(ang)).toFixed(1)}`; }).join(" ");
+    g.append(svgEl("circle", { cx: hub.x, cy: hub.y, r: 34, class: "halo" }), svgEl("circle", { cx: hub.x, cy: hub.y, r: 42, class: "orbit" }),
+      svgEl("polygon", { points: hexPts(30), class: "hex", "stroke-linejoin": "round" }));
+    const ht = svgEl("text", { x: hub.x, y: hub.y + 4, "text-anchor": "middle", "font-size": 12 }); ht.textContent = "HUB";
     g.append(ht);
     svg.append(g);
     box.replaceChildren(svg);
-    sum.textContent = fa ? `${fmtNum(up)} از ${fmtNum(n)} نود روشن · ${fmtNum(users)} کاربر آنلاین` : `${fmtNum(up)} of ${fmtNum(n)} nodes up · ${fmtNum(users)} online`;
+    sum.textContent = fa ? `${fmtNum(up)}/${fmtNum(n)} نود روشن · ${fmtNum(users)} کاربر آنلاین` : `${fmtNum(up)}/${fmtNum(n)} nodes up · ${fmtNum(users)} online`;
   };
-  let last = [nodes0, si0];
-  requestAnimationFrame(() => draw(...last));
-  draw(nodes0, si0);
-  return { el, update: (nodes, si) => { last = [nodes, si]; draw(nodes, si); } };
+  let last = nodes0;
+  requestAnimationFrame(() => draw(last));
+  draw(nodes0);
+  return { el, update: (nodes) => { last = nodes; draw(nodes); } };
 }
 
 function hubStrip(si) {
@@ -774,17 +789,28 @@ function hubStrip(si) {
   return { el, update };
 }
 
+// upShort is uptime in a node row: "9d 22h", "5h 10m".
+function upShort(sec) {
+  const d = Math.floor(sec / 86400), hh = Math.floor((sec % 86400) / 3600), mm = Math.floor((sec % 3600) / 60);
+  return d ? `${d}d ${hh}h` : hh ? `${hh}h ${mm}m` : `${mm}m`;
+}
+
 function nodeRow(n) {
   const fa = lang === "fa";
   const host = n.Host || {};
-  const ramP = host.ram_total ? (100 * host.ram_used) / host.ram_total : 0;
+  const pct = (u, t) => (t ? (100 * u) / t : 0);
+  const ramP = pct(host.ram_used, host.ram_total), diskP = pct(host.disk_used, host.disk_total);
   const mini = (k, p, txt) => h("div", { class: "mini" }, h("div", {}, k, " ", h("b", {}, txt)),
     h("div", { class: "bar" }, h("i", { class: p >= 90 ? "bad" : p >= 75 ? "warn" : "", style: `inline-size:${Math.round(Math.max(0, Math.min(100, p)))}%` })));
+  const p = (v) => `\u2066${fmtNum(Math.round(v || 0))}%\u2069`;
   return h("a", { class: `node-row ${n.online ? "" : "off"}`, href: "#/nodes" },
     h("div", { class: "nr-name" }, h("span", { class: `dot ${n.online ? "on" : ""}` }),
-      h("div", { style: "min-inline-size:0" }, h("span", {}, n.Name || n.ID), h("div", { class: "nr-sub" }, `${n.ID} · ${n.AgentVersion || "—"}${n.update_available ? (fa ? " · به‌روزرسانی" : " · update") : ""}`))),
-    mini("CPU", host.cpu_percent || 0, `\u2066${fmtNum(Math.round(host.cpu_percent || 0))}%\u2069`),
-    mini(fa ? "رم" : "RAM", ramP, `\u2066${fmtNum(Math.round(ramP))}%\u2069`),
+      h("div", { style: "min-inline-size:0" }, h("span", {}, n.Name || n.ID, n.PublicIP ? h("span", { class: "nr-ip" }, n.PublicIP) : null),
+        h("div", { class: "nr-sub" }, [n.ID, n.AgentVersion || "—", n.xray_version ? `xray ${n.xray_version}` : null].filter(Boolean).join(" · "), n.update_available ? (fa ? " · به‌روزرسانی" : " · update") : ""))),
+    mini("CPU", host.cpu_percent || 0, p(host.cpu_percent)),
+    mini(fa ? "رم" : "RAM", ramP, p(ramP)),
+    mini(fa ? "دیسک" : "Disk", diskP, p(diskP)),
+    h("div", { class: "nr-load" }, h("span", {}, "load ", h("b", {}, (+host.load1 || 0).toFixed(2))), h("span", {}, "up ", h("b", {}, host.uptime_sec ? upShort(host.uptime_sec) : "—"))),
     h("div", { class: "nr-net" }, h("span", { class: "d" }, "↓ "), rate(host.rx_rate || 0), "  ", h("span", { class: "u" }, "↑ "), rate(host.tx_rate || 0)),
     h("div", { class: "nr-users" }, h("b", {}, fmtNum(host.online_users || 0)), " ", fa ? "آنلاین" : "online"));
 }
@@ -4072,10 +4098,10 @@ function barsSvg(days, W = 600, opt = {}) {
   const id = `c${++markSeq}`;
   const defs = el("defs", {});
   const glow = el("filter", { id: `${id}g`, x: "-10%", y: "-30%", width: "120%", height: "160%" });
-  glow.append(el("feGaussianBlur", { stdDeviation: "3.5", result: "b" }));
+  glow.append(el("feGaussianBlur", { stdDeviation: "2.5", result: "b" }));
   const merge = el("feMerge", {}); merge.append(el("feMergeNode", { in: "b" }), el("feMergeNode", { in: "SourceGraphic" })); glow.append(merge);
   const area = (col, key) => { const g = el("linearGradient", { id: `${id}${key}`, x1: 0, y1: 0, x2: 0, y2: 1 });
-    g.append(el("stop", { offset: "0", style: `stop-color:${col};stop-opacity:.28` }), el("stop", { offset: "1", style: `stop-color:${col};stop-opacity:0` })); return g; };
+    g.append(el("stop", { offset: "0", style: `stop-color:${col};stop-opacity:.16` }), el("stop", { offset: "1", style: `stop-color:${col};stop-opacity:0` })); return g; };
   defs.append(glow, area("var(--ion)", "d"), area("var(--ember)", "u"));
   svg.append(defs);
   if (!days.length) return svg;
@@ -4086,13 +4112,15 @@ function barsSvg(days, W = 600, opt = {}) {
     const yy = P + ((H - P) * k) / 4;
     svg.append(el("line", { x1: 0, x2: W, y1: yy, y2: yy, class: "grid-line" }));
   }
+  for (let i = 0; i < days.length; i++) svg.append(el("line", { x1: x(i), x2: x(i), y1: P, y2: H, class: "grid-v" }));
   const series = (key, col) => {
     const pts = days.map((d, i) => [x(i), y(d[key])]);
     const line = pts.map(([a, b]) => `${a.toFixed(1)},${b.toFixed(1)}`).join(" ");
     svg.append(el("polygon", { points: `${pts[0][0]},${H} ${line} ${pts.at(-1)[0]},${H}`, fill: `url(#${id}${key === "Down" ? "d" : "u"})` }));
-    svg.append(el("polyline", { points: line, fill: "none", style: `stroke:${col}`, "stroke-width": 2.2, "stroke-linejoin": "round", "stroke-linecap": "round", "vector-effect": "non-scaling-stroke" }));
+    svg.append(el("polyline", { points: line, fill: "none", style: `stroke:${col}`, "stroke-width": key === "Down" ? 2 : 1.6, "stroke-linejoin": "round", "stroke-linecap": "round",
+      "vector-effect": "non-scaling-stroke", filter: `url(#${id}g)`, ...(key === "Down" ? {} : { "stroke-dasharray": "5 5" }) }));
     const [lx, ly] = pts.at(-1);
-    svg.append(el("circle", { cx: lx, cy: ly, r: 4, style: `fill:${col}` }));
+    svg.append(el("circle", { cx: lx, cy: ly, r: 3, style: `fill:${col}`, filter: `url(#${id}g)` }));
   };
   if (!opt.single) series("Up", "var(--ember)");
   series("Down", "var(--ion)");

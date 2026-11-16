@@ -1,41 +1,41 @@
-/* Dark VPN store — the panel's "night network" look on a phone: ink-navy
-   surfaces, one amber signal, teal as the second colour. The rings are the
+/* Dark VPN store — the panel's "NOC" look on a phone: matte near-black
+   surfaces, one neon-mint signal, violet as the second colour. The rings are the
    loud part; everything else stays calm. */
-@font-face { font-family: "Dark Latin"; src: url("plex-regular.woff") format("woff"); font-weight: 100 500; font-display: swap; }
-@font-face { font-family: "Dark Latin"; src: url("plex-bold.woff") format("woff"); font-weight: 600 900; font-display: swap; }
+@font-face { font-family: "Dark Latin"; src: url("inter-regular.woff") format("woff"); font-weight: 100 500; font-display: swap; }
+@font-face { font-family: "Dark Latin"; src: url("inter-semibold.woff") format("woff"); font-weight: 600 900; font-display: swap; }
 @font-face { font-family: "Dark Kufi"; src: url("kufi.woff") format("woff"); font-weight: 100 900; font-display: swap; }
 :root {
   color-scheme: dark;
-  --ion: #f5b73b;
-  --ion-2: #ffcf6b;
-  --ember: #36c2b4;
-  --bg: #0a0f1d;
-  --surface: #111a2d;
-  --surface-2: #18243c;
-  --line: #22304d;
+  --ion: #28f7a0;
+  --ion-2: #4bb9ff;
+  --ember: #b36cff;
+  --bg: #05070b;
+  --surface: #0a0f16;
+  --surface-2: #0f1722;
+  --line: #18222f;
   --text: #e9edf6;
   --muted: #8b97b4;
-  --good: #36c2b4;
-  --warn: #ff9a4d;
+  --good: #28f7a0;
+  --warn: #ff7a59;
   --bad: #f2616f;
-  --r: 18px;
-  --on-ion: #1a1203;
+  --r: 10px;
+  --on-ion: #02140c;
   font: 15px/1.7 "Dark Latin", "Dark Kufi", system-ui, -apple-system, "Segoe UI", sans-serif;
   font-feature-settings: "tnum" 1;
 }
 :root.light {
   color-scheme: light;
   --on-ion: #ffffff;
-  --ion: #a86a00;
-  --ion-2: #c4850f;
-  --ember: #0f8f84;
+  --ion: #04875f;
+  --ion-2: #1f6fd1;
+  --ember: #7a3fd6;
   --bg: #f2f3f7;
   --surface: #ffffff;
   --surface-2: #f3f5fb;
   --line: rgb(30 40 90 / .1);
   --text: #10152a;
   --muted: #5d6585;
-  --good: #0f8f84;
+  --good: #04875f;
   --warn: #b7791f;
   --bad: #e11d48;
 }
@@ -50,7 +50,7 @@ svg { inline-size: 18px; block-size: 18px; fill: none; stroke: currentColor; str
 /* header */
 .hello { display: flex; align-items: center; gap: 12px; margin: 4px 2px 14px; }
 .av { inline-size: 44px; block-size: 44px; border-radius: 14px; display: grid; place-items: center; font-weight: 800; font-size: 18px; color: var(--on-ion);
-  background: linear-gradient(135deg, var(--ion), var(--ion-2)); box-shadow: 0 6px 18px rgb(245 183 59 / .35); }
+  background: linear-gradient(135deg, var(--ion), var(--ion-2)); box-shadow: 0 6px 18px rgb(40 247 160 / .35); }
 .av.logo { object-fit: cover; background: var(--surface); }
 .hello-t { flex: 1; min-inline-size: 0; }
 .hello-t p { margin: 0; color: var(--muted); font-size: 13px; }
@@ -108,7 +108,7 @@ svg { inline-size: 18px; block-size: 18px; fill: none; stroke: currentColor; str
   background: var(--surface-2); font-weight: 700; cursor: pointer; transition: transform .12s, filter .12s; }
 .btn:active { transform: scale(.97); }
 .btn:disabled { opacity: .55; pointer-events: none; }
-.btn.primary { border-color: transparent; color: var(--on-ion); background: linear-gradient(135deg, var(--ion), var(--ion-2)); box-shadow: 0 6px 18px rgb(245 183 59 / .3); }
+.btn.primary { border-color: transparent; color: var(--on-ion); background: linear-gradient(135deg, var(--ion), var(--ion-2)); box-shadow: 0 6px 18px rgb(40 247 160 / .3); }
 .btn.ghost { background: transparent; }
 .btn.small { min-block-size: 32px; padding: 4px 10px; font-size: 13px; }
 .btn.block { inline-size: 100%; margin-block-start: 8px; }
@@ -124,8 +124,8 @@ input:focus-visible, .btn:focus-visible, .chip:focus-visible { outline: 2px soli
 .product .price { display: flex; align-items: baseline; gap: 6px; margin-block: 6px 2px; }
 .product .price b { font-size: 24px; letter-spacing: -.02em; }
 .product .price small { color: var(--muted); }
-.product.featured { border-color: color-mix(in oklab, var(--ion) 55%, transparent); box-shadow: 0 0 0 1px color-mix(in oklab, var(--ion) 35%, transparent), 0 10px 30px rgb(245 183 59 / .15); }
-.ribbon { position: absolute; inset-block-start: -10px; inset-inline-end: 14px; padding: 2px 10px; border-radius: 99px; font-size: 11.5px; font-weight: 800; color: #062420; background: var(--ember); }
+.product.featured { border-color: color-mix(in oklab, var(--ion) 55%, transparent); box-shadow: 0 0 0 1px color-mix(in oklab, var(--ion) 35%, transparent), 0 10px 30px rgb(40 247 160 / .15); }
+.ribbon { position: absolute; inset-block-start: -10px; inset-inline-end: 14px; padding: 2px 10px; border-radius: 99px; font-size: 11.5px; font-weight: 800; color: #fff; background: var(--ember); }
 
 /* wallet */
 .wallet-hero { background: linear-gradient(135deg, color-mix(in oklab, var(--ion) 22%, var(--surface)), var(--surface) 75%); }
@@ -155,7 +155,7 @@ input:focus-visible, .btn:focus-visible, .chip:focus-visible { outline: 2px soli
 .empty { text-align: center; }
 .empty h2 { margin: 6px 0 4px; } .empty p { color: var(--muted); margin: 0 0 6px; }
 .glow-mark { inline-size: 64px; block-size: 64px; margin: 4px auto 6px; border-radius: 20px; display: grid; place-items: center; color: var(--on-ion);
-  background: linear-gradient(135deg, var(--ion), var(--ion-2)); box-shadow: 0 10px 30px rgb(245 183 59 / .4); }
+  background: linear-gradient(135deg, var(--ion), var(--ion-2)); box-shadow: 0 10px 30px rgb(40 247 160 / .4); }
 .glow-mark svg { inline-size: 30px; block-size: 30px; }
 .error-page { text-align: center; padding-block-start: 22vh; }
 .error-page p { color: var(--muted); }

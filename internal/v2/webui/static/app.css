@@ -3,11 +3,11 @@
    One signal colour (ion blue) marks what you can act on and what is live;
    ember is the second data series (upload). The HUB strip on the dashboard
    is the one loud element; everything else stays quiet. */
-/* Type: Noto Kufi Arabic for Persian (angular, engineered), IBM Plex Sans
+/* Type: Noto Kufi Arabic for Persian (angular, engineered), Inter
    for Latin, JetBrains Mono for addresses, keys and versions. The Latin
    faces come first so each script gets its own face. */
-@font-face { font-family: "Dark Latin"; src: url("fonts/PlexSans-Regular.woff") format("woff"); font-weight: 100 500; font-display: swap; }
-@font-face { font-family: "Dark Latin"; src: url("fonts/PlexSans-Bold.woff") format("woff"); font-weight: 600 900; font-display: swap; }
+@font-face { font-family: "Dark Latin"; src: url("fonts/Inter-Regular.woff") format("woff"); font-weight: 100 500; font-display: swap; }
+@font-face { font-family: "Dark Latin"; src: url("fonts/Inter-SemiBold.woff") format("woff"); font-weight: 600 900; font-display: swap; }
 @font-face { font-family: "Dark Kufi"; src: url("fonts/NotoKufiArabic.woff") format("woff"); font-weight: 100 900; font-display: swap; }
 @font-face { font-family: "Dark Mono"; src: url("fonts/JetBrainsMono.woff") format("woff"); font-weight: 100 900; font-display: swap; }
 :root {
@@ -831,91 +831,146 @@ a.kpi:hover { border-color: color-mix(in oklab, var(--ion) 45%, transparent); }
 a.badge.credit { text-decoration: none; color: inherit; } a.badge.credit b { color: var(--ion); }
 header.top .brand > span { white-space: nowrap; }
 
+
 /* ===================================================================
-   DARK theme — "night network" (v2.20).
-   Ink-navy night, not black. One signal colour, amber, marks what is live
-   or actionable (online, current traffic, the primary button); teal is the
-   second data series. The network map on the dashboard is the one loud
-   element; everything else stays quiet.
+   DARK theme — "NOC" (v2.21), after DARK NOC's Nightfall Command.
+   Matte near-black, flat panels with hairline borders and small radii.
+   Neon mint marks what is live or actionable; violet is the second data
+   series; no yellow anywhere (warnings are coral). Glow lives only on
+   lines and charts. Dense like a control panel: small type, mono labels.
    =================================================================== */
 :root {
-  --ion: light-dark(#a86a00, #f5b73b);
-  --ember: light-dark(#0f8f84, #36c2b4);
+  --ion: light-dark(#04875f, #28f7a0);
+  --ember: light-dark(#7a3fd6, #b36cff);
+  --sky: light-dark(#1f6fd1, #4bb9ff);
   --neon: var(--ion);
-  --bg: light-dark(#f2f3f7, #0a0f1d);
-  --glass: light-dark(#ffffff, #111a2d);
-  --glass-2: light-dark(#f5f6fa, #152036);
-  --glass-line: light-dark(#dfe2ea, #22304d);
-  --surface-2: light-dark(#eef0f5, #18243c);
-  --text: light-dark(#121a2c, #e9edf6);
-  --muted: light-dark(#5a6378, #8b97b4);
-  --good: light-dark(#0f8f84, #36c2b4);
-  --warn: light-dark(#c2620e, #ff9a4d);
-  --bad: light-dark(#cc3348, #f2616f);
-  --on-ion: light-dark(#ffffff, #1a1203);
-  --glow: 0 0 0 1px color-mix(in oklab, var(--ion) 35%, transparent), 0 8px 24px -12px color-mix(in oklab, var(--ion) 60%, transparent);
+  --bg: light-dark(#eef2f4, #05070b);
+  --glass: light-dark(#ffffff, #0a0f16);
+  --glass-2: light-dark(#f5f7f9, #0d131d);
+  --glass-line: light-dark(#d8dfe5, #18222f);
+  --surface-2: light-dark(#eef2f5, #0f1722);
+  --text: light-dark(#0f1720, #e8f0f7);
+  --muted: light-dark(#5a6676, #7d8a9c);
+  --good: light-dark(#04875f, #28f7a0);
+  --warn: light-dark(#c4452a, #ff7a59);
+  --bad: light-dark(#cc2342, #ff415d);
+  --on-ion: light-dark(#ffffff, #02140c);
+  --glow: 0 0 0 1px color-mix(in oklab, var(--ion) 30%, transparent), 0 0 18px -6px color-mix(in oklab, var(--ion) 55%, transparent);
+  --r-xl: 10px; --r-lg: 8px; --r-md: 6px; --gap: 10px;
+  --mono: "Dark Mono", "Dark Kufi", ui-monospace, Menlo, monospace;
+  font-size: 14px; line-height: 1.6;
 }
-body::before { background: radial-gradient(70% 340px at 50% 0, color-mix(in oklab, var(--ion) 7%, transparent), transparent); }
-header.top { background: light-dark(rgb(242 243 247 / .85), rgb(10 15 29 / .82)); backdrop-filter: blur(10px); }
-nav.tabs { background: light-dark(rgb(242 243 247 / .9), rgb(10 15 29 / .9)); backdrop-filter: blur(10px); }
-input, select, textarea { background: light-dark(#fff, #0c1424); }
-select option, dialog { background: light-dark(#fff, #111a2d); }
-#toast { background: light-dark(#fff, #152036); }
-button.primary { background: var(--ion); color: var(--on-ion); text-shadow: none; }
-.brand svg { filter: drop-shadow(0 0 10px color-mix(in oklab, var(--ion) 45%, transparent)); }
+body::before { block-size: 260px; background: radial-gradient(60% 260px at 55% 0, color-mix(in oklab, var(--ion) 6%, transparent), transparent); }
+body { background-image: radial-gradient(color-mix(in oklab, var(--muted) 13%, transparent) 1px, transparent 1.3px); background-size: 20px 20px; background-attachment: fixed; }
+/* scanlines: barely there, matte not glossy */
+body::after { content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 60; opacity: light-dark(0, .5);
+  background: repeating-linear-gradient(0deg, transparent 0 3px, rgb(255 255 255 / .018) 3px 4px); }
+header.top { background: light-dark(rgb(238 242 244 / .9), rgb(5 7 11 / .9)); backdrop-filter: blur(8px); padding-block: 8px; }
+nav.tabs { background: light-dark(rgb(238 242 244 / .94), rgb(5 7 11 / .94)); backdrop-filter: blur(8px); }
+input, select, textarea { background: light-dark(#fff, #060a10); border-radius: var(--r-md); }
+select option, dialog { background: light-dark(#fff, #0a0f16); }
+#toast { background: light-dark(#fff, #0d131d); }
+.card { box-shadow: none; padding: 14px; border-radius: var(--r-lg); background: var(--glass); }
+button { border-radius: var(--r-md); }
+button.primary { background: var(--ion); color: var(--on-ion); text-shadow: none; box-shadow: 0 0 14px -4px color-mix(in oklab, var(--ion) 70%, transparent); }
+.badge { border-radius: 4px; font-family: var(--mono); font-size: 11px; padding: 1px 7px; }
+.brand svg { filter: drop-shadow(0 0 8px color-mix(in oklab, var(--ion) 45%, transparent)); }
 .brand b, .brand em { color: var(--ion); }
+main { padding-block-start: 18px; }
+h1 { font-size: 21px; margin-block-end: 12px; letter-spacing: 0; }
+h2 { font-size: 14px; margin-block-end: 8px; letter-spacing: 0; }
+.small { font-size: 12px; }
 
-/* Network map: the hub in the middle, every node on a line whose glow and
-   flow follow its live traffic. A dead node is a broken red line. */
-.netmap { padding: 18px 18px 10px; overflow: hidden; position: relative;
-  background:
-    radial-gradient(circle at 50% 50%, color-mix(in oklab, var(--ion) 10%, transparent), transparent 55%),
-    var(--glass); }
+/* KPI tiles: compact, mono numbers */
+.kpis { grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); }
+.kpi { padding: 10px 12px; }
+.kpi .k { font-size: 11.5px; }
+.kpi .k svg { inline-size: 14px; block-size: 14px; }
+.kpi .v { font-family: var(--mono); font-size: 19px; font-weight: 700; margin-block-start: 2px; }
+.kpi .v small { font-size: 11.5px; }
+
+/* tables: denser rows like 3x-ui */
+table.dtable th { font-family: var(--mono); font-size: 11px; padding: 7px 10px; letter-spacing: .02em; }
+table.dtable td { padding: 6px 10px; font-size: 13px; }
+
+/* HUB strip: matte, tighter */
+.hub-strip { background: var(--glass); padding: 12px 14px; }
+
+/* HUD corners on the hero panels */
+.netmap, .hub-strip { position: relative; isolation: isolate; }
+.netmap::before, .netmap::after, .hub-strip::before, .hub-strip::after {
+  content: ""; position: absolute; inline-size: 14px; block-size: 14px; pointer-events: none; z-index: 1; border: 1.5px solid var(--ion); opacity: .8; }
+.netmap::before, .hub-strip::before { inset-block-start: 6px; inset-inline-start: 6px; border-inline-end: 0; border-block-end: 0; }
+.netmap::after, .hub-strip::after { inset-block-end: 6px; inset-inline-end: 6px; border-inline-start: 0; border-block-start: 0; }
+
+/* ---------- Live network matrix ---------- */
+.netmap { padding: 12px 14px 6px; overflow: hidden;
+  background: radial-gradient(circle at 50% 50%, color-mix(in oklab, var(--ion) 7%, transparent), transparent 55%), var(--glass); }
 .netmap .nm-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
 .netmap .nm-head h2 { margin: 0; }
 .netmap .nm-head .spacer { margin-inline-start: auto; }
-.netmap svg { display: block; inline-size: 100%; block-size: auto; margin-block-start: 6px; }
-.nm-grid { stroke: color-mix(in oklab, var(--muted) 14%, transparent); stroke-width: 1; }
-.nm-link { fill: none; stroke-linecap: round; }
-.nm-link.base { stroke: color-mix(in oklab, var(--ion) 22%, transparent); stroke-width: 6; }
-.nm-link.flow { stroke: var(--ion); stroke-dasharray: 2 14; animation: nm-flow linear infinite; }
-.nm-link.dead { stroke: var(--bad); stroke-width: 2; stroke-dasharray: 6 7; opacity: .75; }
-@keyframes nm-flow { to { stroke-dashoffset: -64; } }
-.nm-hub circle.core { fill: var(--ion); }
-.nm-hub circle.halo { fill: none; stroke: var(--ion); stroke-width: 1.5; opacity: .35; transform-origin: center; transform-box: fill-box; animation: nm-pulse 2.8s ease-out infinite; }
-@keyframes nm-pulse { from { transform: scale(.6); opacity: .55; } to { transform: scale(1.6); opacity: 0; } }
-.nm-hub text { fill: var(--on-ion); font-weight: 800; }
-.nm-node rect { fill: var(--glass-2); stroke: var(--glass-line); }
-.nm-node.up rect { stroke: color-mix(in oklab, var(--ion) 55%, var(--glass-line)); }
-.nm-node.down rect { stroke: color-mix(in oklab, var(--bad) 60%, var(--glass-line)); }
-.nm-node .dot { fill: var(--ion); } .nm-node.down .dot { fill: var(--bad); }
-.nm-node text { fill: var(--text); font-size: 13px; }
-.nm-node .nm-name { font-weight: 800; font-size: 14px; }
-.nm-node .nm-sub { fill: var(--muted); font-size: 11.5px; }
-.nm-node .nm-users { fill: var(--ion); font-weight: 800; }
-.nm-node.down .nm-users { fill: var(--bad); }
-.nm-hubstat { fill: var(--muted); font-size: 12px; }
-@media (prefers-reduced-motion: reduce) { .nm-link.flow, .nm-hub circle.halo { animation: none; } }
-
-/* ---------- Tech layer (balanced) ----------
-   A faint dot grid behind everything, HUD corner brackets on the two hero
-   panels, a hexagon hub with a turning orbit, and mono for machine text. */
-body { background-image: radial-gradient(color-mix(in oklab, var(--muted) 16%, transparent) 1px, transparent 1.4px); background-size: 22px 22px; background-attachment: fixed; }
-.netmap, .hub-strip { position: relative; isolation: isolate; }
-.netmap::before, .netmap::after, .hub-strip::before, .hub-strip::after {
-  content: ""; position: absolute; inline-size: 18px; block-size: 18px; pointer-events: none; z-index: 1;
-  border: 2px solid var(--ion); opacity: .85;
-}
-.netmap::before, .hub-strip::before { inset-block-start: 8px; inset-inline-start: 8px; border-inline-end: 0; border-block-end: 0; border-start-start-radius: 6px; }
-.netmap::after, .hub-strip::after { inset-block-end: 8px; inset-inline-end: 8px; border-inline-start: 0; border-block-start: 0; border-end-end-radius: 6px; }
-.hub-strip { background: linear-gradient(135deg, color-mix(in oklab, var(--ion) 7%, var(--glass)), var(--glass) 55%); }
-.nm-hub .hex { fill: var(--ion); }
-.nm-hub .orbit { fill: none; stroke: var(--ion); stroke-width: 1.2; stroke-dasharray: 3 7; opacity: .7; transform-origin: center; transform-box: fill-box; animation: nm-spin 14s linear infinite; }
+.netmap .nm-head .muted { font-family: var(--mono); font-size: 11.5px; }
+.netmap svg { display: block; inline-size: 100%; block-size: auto; margin-block-start: 4px; }
+.nm-grid { stroke: color-mix(in oklab, var(--muted) 12%, transparent); stroke-width: 1; }
+.nm-route { color: var(--ion); }
+.nm-route.down { color: var(--bad); }
+.nm-link { fill: none; stroke: currentColor; stroke-linecap: round; vector-effect: non-scaling-stroke; }
+.nm-link.aura { stroke-width: calc(7px + var(--e, 0) * 8px); opacity: calc(.08 + var(--e, 0) * .14); filter: url(#nm-glow); }
+.nm-link.base { stroke-width: 2px; opacity: .8; }
+.nm-link.core { stroke: light-dark(#ffffff, #e4fffc); stroke-width: .7px; opacity: .65; }
+.nm-link.flow { stroke-width: calc(2.4px + var(--e, 0) * 2.4px); stroke-dasharray: 3 20; filter: url(#nm-glow); animation: nm-flow linear infinite; }
+.nm-link.dead { stroke-width: 1.6px; stroke-dasharray: 5 6; opacity: .8; }
+.nm-packet { fill: light-dark(#ffffff, #effffc); stroke: currentColor; stroke-width: 1; filter: url(#nm-glow); }
+@keyframes nm-flow { to { stroke-dashoffset: -46; } }
+.nm-hub .hex { fill: color-mix(in oklab, var(--ion) 14%, var(--glass)); stroke: var(--ion); stroke-width: 1.6; filter: url(#nm-glow); }
+.nm-hub .halo { fill: none; stroke: var(--ion); stroke-width: 1; opacity: .3; transform-origin: center; transform-box: fill-box; animation: nm-pulse 2.8s ease-out infinite; }
+.nm-hub .orbit { fill: none; stroke: var(--ion); stroke-width: 1; stroke-dasharray: 2 6; opacity: .65; transform-origin: center; transform-box: fill-box; animation: nm-spin 16s linear infinite; }
+.nm-hub text { fill: var(--ion); font-family: var(--mono); font-weight: 700; letter-spacing: .08em; }
+@keyframes nm-pulse { from { transform: scale(.7); opacity: .5; } to { transform: scale(1.6); opacity: 0; } }
 @keyframes nm-spin { to { transform: rotate(360deg); } }
+.nm-node rect.box { fill: light-dark(#ffffff, #070c12); stroke: color-mix(in oklab, var(--ion) 35%, var(--glass-line)); }
+.nm-node.down rect.box { stroke: color-mix(in oklab, var(--bad) 55%, var(--glass-line)); }
+.nm-node rect.ip { fill: color-mix(in oklab, var(--sky) 9%, transparent); stroke: color-mix(in oklab, var(--sky) 30%, transparent); }
+.nm-node text { fill: var(--text); font-size: 12.5px; }
+.nm-node .nm-name { font-weight: 700; font-size: 13px; }
+.nm-node .nm-ip { fill: var(--sky); font-family: var(--mono); font-size: 10px; }
+.nm-node .nm-sub { fill: var(--muted); font-family: var(--mono); font-size: 10.5px; }
+.nm-node .nm-users { fill: var(--ion); font-family: var(--mono); font-weight: 700; font-size: 11.5px; }
+.nm-node.down .nm-users { fill: var(--bad); }
 .nm-node .led { fill: var(--ion); } .nm-node.down .led { fill: var(--bad); }
 .nm-node.up .led { animation: nm-blink 2.4s ease-in-out infinite; }
-@keyframes nm-blink { 50% { opacity: .35; } }
-.nm-node .nm-sub, .nm-hubstat { font-family: "Dark Mono", "Dark Kufi", monospace; font-size: 11px; }
-.kpi .v { letter-spacing: -.01em; }
-h1 { letter-spacing: -.01em; }
-@media (prefers-reduced-motion: reduce) { .nm-hub .orbit, .nm-node.up .led { animation: none; } }
+@keyframes nm-blink { 50% { opacity: .3; } }
+@media (prefers-reduced-motion: reduce) { .nm-link.flow, .nm-hub .orbit, .nm-hub .halo, .nm-node.up .led { animation: none; } .nm-packet { display: none; } }
+
+/* ---------- Node rows: every number at a glance ---------- */
+.node-rows { padding: 4px; }
+.node-rows .nr-head { padding: 8px 10px 4px; }
+.node-row { padding: 8px 10px; border-radius: var(--r-md); gap: 6px 14px;
+  grid-template-columns: minmax(170px, 1.5fr) repeat(3, minmax(70px, .8fr)) minmax(64px, .5fr) minmax(130px, 1fr) minmax(60px, .45fr); }
+.node-row .nr-name { font-size: 13px; }
+.node-row .nr-sub { font-family: var(--mono); font-size: 10.5px; }
+.node-row .nr-ip { font-family: var(--mono); font-size: 10.5px; color: var(--sky); border: 1px solid color-mix(in oklab, var(--sky) 28%, transparent); background: color-mix(in oklab, var(--sky) 7%, transparent); border-radius: 4px; padding: 0 5px; margin-inline-start: 4px; direction: ltr; unicode-bidi: isolate; }
+.mini { font-size: 11px; gap: 3px; }
+.mini b { font-family: var(--mono); font-weight: 600; }
+.mini .bar { block-size: 3px; border-radius: 2px; }
+.node-row .nr-load { font-family: var(--mono); font-size: 11px; color: var(--muted); display: grid; gap: 1px; }
+.node-row .nr-load b { color: var(--text); font-weight: 600; }
+.node-row .nr-net { font-family: var(--mono); font-size: 11.5px; }
+.node-row .nr-users { font-size: 11px; } .node-row .nr-users b { font-family: var(--mono); font-size: 14px; color: var(--ion); }
+@media (max-width: 900px) { .node-row { grid-template-columns: 1fr 1fr 1fr; } .node-row .nr-name { grid-column: 1 / -1; } }
+
+/* ---------- Charts: grid, neon line with glow, dashed second series ---------- */
+svg.bars .grid-line { stroke: color-mix(in oklab, var(--muted) 14%, transparent); }
+svg.bars .grid-v { stroke: color-mix(in oklab, var(--muted) 8%, transparent); }
+svg.bars .bar-label { font-family: var(--mono); font-size: 10.5px; fill: var(--muted); }
+
+/* density: controls sized like a control panel, not a landing page */
+button, .btn { padding: 6px 12px; font-size: 13px; }
+input, select, textarea { padding: 7px 10px; font-size: 13.5px; }
+input[type="checkbox"], input[type="radio"] { inline-size: 16px; block-size: 16px; padding: 0; }
+.chips { margin-block: 10px 6px; gap: 5px; }
+.chip { padding: 3px 10px; border-radius: 5px; font-size: 12.5px; }
+.chip .count { border-radius: 3px; font-family: var(--mono); font-size: 10.5px; padding: 0 5px; }
+.chip.on { border-color: color-mix(in oklab, var(--ion) 60%, transparent); box-shadow: 0 0 0 1px color-mix(in oklab, var(--ion) 30%, transparent), 0 0 14px -4px color-mix(in oklab, var(--ion) 40%, transparent); }
+.avatar { inline-size: 24px; block-size: 24px; font-size: 9.5px; }
+.row:has(> h1) { margin-block-end: 12px; }
