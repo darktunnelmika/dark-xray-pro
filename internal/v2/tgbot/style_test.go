@@ -46,3 +46,12 @@ func TestCustomEmojiFromMessage(t *testing.T) {
 		t.Fatal("a learned emoji decorates")
 	}
 }
+
+func TestKeyboardAction(t *testing.T) {
+	for in, want := range map[string]string{"⚡ خرید سرویس": "shop", "🛍 خرید اشتراک": "shop", "📦 سرویس‌های من": "mine", "💳 کیف پول": "wallet",
+		"🎫 پشتیبانی": "support", "☰ بیشتر": "home", "🏠 داشبورد": "admin", "سلام": "", "/start": ""} {
+		if got := keyboardAction(in); got != want {
+			t.Errorf("%q: %q, want %q", in, got, want)
+		}
+	}
+}

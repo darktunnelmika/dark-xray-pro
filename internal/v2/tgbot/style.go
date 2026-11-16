@@ -3,6 +3,7 @@ package tgbot
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math/rand/v2"
 	"strings"
 	"sync"
@@ -272,4 +273,94 @@ func (b *Bot) celebrate(ctx context.Context, chat int64, text string, kb *Keyboa
 	} else if err != nil {
 		b.logf("tgbot send: %v", err)
 	}
+}
+
+// The bottom keyboard: always-there shortcuts below the message box.
+var replyRows = [][]string{
+	{"🛍 خرید اشتراک", "📦 سرویس‌های من"},
+	{"👛 کیف پول", "💬 پشتیبانی"},
+	{"📚 آموزش اتصال", "🏠 منوی اصلی"},
+}
+
+// keyboardAction maps a bottom-keyboard label (ours or the old panel's) to
+// an action.
+func keyboardAction(text string) string {
+	t := strings.TrimSpace(text)
+	// Drop a leading emoji and spaces, compare the words.
+	words := strings.TrimLeftFunc(t, func(r rune) bool { return r > 0x2000 || r == ' ' || r == '️' })
+	switch words {
+	case "خرید اشتراک", "خرید سرویس":
+		return "shop"
+	case "سرویس‌های من", "سرویس های من":
+		return "mine"
+	case "کیف پول":
+		return "wallet"
+	case "پشتیبانی":
+		return "support"
+	case "آموزش اتصال", "آموزش":
+		return "guide"
+	case "منوی اصلی", "بیشتر", "منو":
+		return "home"
+	case "داشبورد", "کاربران", "فروش", "گزارش‌ها", "مدیریت", "نمایندگان", "اعلان‌ها":
+		return "admin"
+	}
+	return ""
+}
+
+func (b *Bot) keyAction(ctx context.Context, chat int64, act string) {
+	b.takeAwait(chat) // a button press ends whatever the bot was waiting for
+	switch act {
+	case "shop":
+		b.shop(ctx, chat)
+	case "mine":
+		b.mine(ctx, chat)
+	case "wallet":
+		b.wallet(ctx, chat)
+	case "support":
+		b.setAwait(chat, "support")
+		b.send(ctx, chat, "💬 <b>پشتیبانی</b>\n"+line+"\nپیام خود را بنویسید و بفرستید؛ مستقیم به پشتیبانی می‌رسد و پاسخ همین‌جا می‌آید.", homeKB)
+	case "guide":
+		b.showGuide(ctx, chat, "")
+	case "admin":
+		if b.Owners[chat] {
+			b.ownerHome(ctx, chat)
+			return
+		}
+		if rep, role := b.Store.TgRepRole(ctx, chat); rep != "" && (b.Seller == "" || rep == b.Seller) && b.repMessage(ctx, chat, rep, role, "/help") {
+			return
+		}
+		b.menu(ctx, chat)
+	default:
+		b.menu(ctx, chat)
+	}
+}
+
+// ensureKeyboard puts our bottom keyboard on a chat once (it also replaces
+// the old panel's keyboard).
+func (b *Bot) ensureKeyboard(ctx context.Context, chat int64) {
+	kb, ok := b.API.(interface {
+		SendReplyKeyboard(ctx context.Context, chat int64, text string, rows [][]string) error
+	})
+	if !ok {
+		return
+	}
+	key := fmt.Sprintf("tg_kb1:%s:%d", b.Seller, chat)
+	if b.Store.Setting(ctx, key) == "1" {
+		return
+	}
+	if err := kb.SendReplyKeyboard(ctx, chat, "⌨️ منوی سریع پایین صفحه آماده است.", replyRows); err == nil {
+		_ = b.Store.SetSetting(ctx, key, "1")
+	}
+}
+
+// SendReplyKeyboard sends a message carrying a persistent bottom keyboard.
+func (a *HTTPAPI) SendReplyKeyboard(ctx context.Context, chat int64, text string, rows [][]string) error {
+	kb := make([][]map[string]string, len(rows))
+	for i, r := range rows {
+		for _, t := range r {
+			kb[i] = append(kb[i], map[string]string{"text": t})
+		}
+	}
+	return a.callJSON(ctx, "sendMessage", map[string]any{"chat_id": chat, "text": text,
+		"reply_markup": map[string]any{"keyboard": kb, "resize_keyboard": true, "is_persistent": true}}, nil)
 }

@@ -316,6 +316,12 @@ func (b *Bot) onMessage(ctx context.Context, m *Message) {
 			return
 		}
 	}
+	// Buttons of the bottom keyboard (ours, or the old panel's, still on
+	// some phones) arrive as plain text.
+	if act := keyboardAction(text); act != "" {
+		b.keyAction(ctx, chat, act)
+		return
+	}
 	cmd, arg, _ := strings.Cut(text, " ")
 	cmd = strings.SplitN(cmd, "@", 2)[0]
 	switch cmd {
@@ -325,6 +331,7 @@ func (b *Bot) onMessage(ctx context.Context, m *Message) {
 			return
 		}
 		b.menu(ctx, chat)
+		b.ensureKeyboard(ctx, chat)
 		return
 	case "/buy":
 		b.shop(ctx, chat)
