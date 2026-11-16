@@ -3705,7 +3705,45 @@ async function viewRepDashboard() {
   const owner = me.role === "owner";
   const rep = new URLSearchParams(location.hash.split("?")[1] || "").get("rep") || "";
   const o = await api("GET", `/api/v2/rep/overview${rep ? `?rep=${encodeURIComponent(rep)}` : ""}`);
-  const cls = owner ? [] : await api("GET", "/api/v2/admin/clients").catch(() => []);
+  const [allCls, reps, inbounds, alert] = await Promise.all([
+    api("GET", "/api/v2/admin/clients").catch(() => []),
+    owner ? api("GET", "/api/v2/admin/reps").catch(() => []) : Promise.resolve([]),
+    owner ? api("GET", "/api/v2/admin/inbounds").catch(() => []) : Promise.resolve([]),
+    api("GET", owner ? `/api/v2/admin/reps/${encodeURIComponent(o.rep_id)}/alert` : "/api/v2/rep/alert").catch(() => ({ low_gb: 50 }))]);
+  const cls = (allCls || []).filter((c) => c.RepID === o.rep_id);
+  const r = (reps || []).find((x) => x.ID === o.rep_id);
+  // Low-credit warning threshold (GB, 0 = off).
+  const lowIn = h("input", { type: "number", min: 0, max: 1000000, step: 10, value: alert.low_gb ?? 50, dir: "ltr", style: "max-inline-size:140px" });
+  const alertCard = h("div", { class: "card form" }, h("h2", {}, fa ? "هشدار کم شدن اعتبار" : "Low-credit warning"),
+    h("p", { class: "small muted" }, owner
+      ? (fa ? "وقتی اعتبار این نماینده از این مقدار کمتر شد، به خودش (در رباتش) و به شما در تلگرام خبر داده می‌شود. ۰ یعنی خاموش. هر روز ساعت ۹ صبح هم خلاصهٔ روزش برای نماینده فرستاده می‌شود." : "When this reseller's credit drops under this, they (in their bot) and you are told on Telegram. 0 = off. They also get a daily summary at 9:00.")
+      : (fa ? "وقتی اعتبارتان از این مقدار کمتر شد، ربات خبرتان می‌کند. ۰ یعنی خاموش. هر روز ساعت ۹ صبح هم خلاصهٔ فروش و کلاینت‌ها برایتان فرستاده می‌شود." : "Your bot tells you when credit drops under this. 0 = off. You also get a daily summary at 9:00.")),
+    h("div", { class: "row" }, lowIn, h("span", {}, fa ? "گیگ" : "GB"), h("button", { onclick: async () => {
+      await guarded(() => api("PUT", owner ? `/api/v2/admin/reps/${encodeURIComponent(o.rep_id)}/alert` : "/api/v2/rep/alert", { low_gb: +lowIn.value || 0 }));
+      toast(fa ? "ذخیره شد" : "Saved");
+    } }, t("save"))));
+  // Owner: this reseller's clients, those needing attention first.
+  const nowS = Date.now() / 1000;
+  const score = (c) => !c.Enabled ? 3 : clientStatus(c)[0] === "bad" ? 2 : (c.EffectiveUntil && c.EffectiveUntil - nowS <= 3 * 86400) || (c.VolumeBytes > 0 && c.Remaining * 10 <= c.VolumeBytes) ? 0 : 1;
+  const clientsCard = owner ? h("div", { class: "card form span2" }, h("div", { class: "row" }, h("h2", {}, fa ? "کلاینت‌های این نماینده" : "This reseller's clients"), h("span", { class: "badge" }, fmtNum(cls.length))),
+    cls.length ? h("div", { class: "table-wrap" }, h("table", { class: "table" },
+      h("thead", {}, h("tr", {}, ...[fa ? "کلاینت" : "Client", fa ? "وضعیت" : "State", fa ? "مصرف" : "Used", fa ? "انقضا" : "Expires"].map((x) => h("th", {}, x)))),
+      h("tbody", {}, ...[...cls].sort((a, b) => score(a) - score(b)).slice(0, 40).map((c) => {
+        const [k, st] = clientStatus(c);
+        const left = c.EffectiveUntil ? Math.ceil((c.EffectiveUntil - nowS) / 86400) : null;
+        return h("tr", {}, h("td", {}, h("span", { class: `dot ${c.Online ? "on" : ""}` }), " ", h("a", { href: `#/client?e=${encodeURIComponent(c.Email)}` }, c.Email)),
+          h("td", {}, h("span", { class: `badge ${k}` }, st)),
+          h("td", { dir: "ltr", class: "small" }, `${bytes(c.Usage.Up + c.Usage.Down)} / ${c.VolumeBytes < 0 ? "∞" : bytes(c.VolumeBytes)}`),
+          h("td", { class: "small" }, left == null ? (c.DurationSeconds ? (fa ? "از اولین اتصال" : "on first use") : "∞") : left <= 0 ? (fa ? "تمام شده" : "ended") : fa ? `${fmtNum(left)} روز` : `${left} d`));
+      })))) : h("p", { class: "muted small" }, t("empty")),
+    cls.length > 40 ? h("p", { class: "small muted" }, fa ? "۴۰ مورد اول (اول رو به اتمام‌ها) — بقیه در صفحهٔ کلاینت‌ها با فیلتر نماینده." : "First 40 (ending soon first) — the rest are on the Clients page with the reseller filter.") : null) : null;
+  const ownerActions = owner && r ? h("div", { class: "row tight" },
+    h("button", { class: "primary", onclick: () => creditForm(r) }, t("addCredit")),
+    h("button", { class: "ghost", onclick: () => policyForm(r, inbounds) }, t("policy")),
+    h("button", { class: "ghost", onclick: () => paymentForm(r) }, t("payment")),
+    h("button", { class: "ghost", onclick: () => openModal(`${fa ? "ربات و کارت" : "Bot & card"} · ${r.Name || r.ID}`, h("div", { class: "form" }, repBotCard(`/api/v2/admin/reps/${encodeURIComponent(r.ID)}/bot`), sellerCardCard(`/api/v2/shop/card?seller=${encodeURIComponent(r.ID)}`))) }, fa ? "ربات و کارت" : "Bot & card"),
+    h("button", { class: "ghost", onclick: () => openModal(`${fa ? "برند و صفحهٔ اشتراک" : "Brand & subscription page"} · ${r.Name || r.ID}`, repBrandCard(`/api/v2/admin/reps/${encodeURIComponent(r.ID)}/brand`)) }, fa ? "صفحهٔ اشتراک" : "Sub page"),
+    h("button", { class: "ghost", onclick: () => repForm(r) }, t("edit"))) : null;
   const kpi = (ic, k, v, href) => h(href ? "a" : "div", { class: "card kpi", href }, h("div", { class: "k" }, icon(ic), k), h("div", { class: "v" }, v));
   const chip = (k, v, c) => h("span", { class: `badge ${c || ""}` }, `${k}: `, h("b", { dir: "ltr" }, v));
   const hero = h("div", { class: "card credit-hero" },
@@ -3723,7 +3761,7 @@ async function viewRepDashboard() {
     h("div", { class: "row tight credit-actions" },
       h("a", { class: "btn", href: owner ? `#/activity?rep=${encodeURIComponent(o.rep_id)}` : "#/credit" }, fa ? "تاریخچهٔ اعتبار" : "Credit history"),
       owner ? null : h("a", { class: "btn primary", href: "#/clients" }, fa ? "کلاینت‌ها" : "Clients")));
-  const recent = h("div", { class: `card form ${owner ? "span2" : ""}` }, h("div", { class: "row" }, h("h2", {}, fa ? "آخرین تراکنش‌ها" : "Latest activity"),
+  const recent = h("div", { class: "card form" }, h("div", { class: "row" }, h("h2", {}, fa ? "آخرین تراکنش‌ها" : "Latest activity"),
     h("a", { class: "spacer small", href: owner ? `#/activity?rep=${encodeURIComponent(o.rep_id)}` : "#/credit" }, fa ? "همه ›" : "All ›")),
     (o.recent || []).length ? h("div", { class: "form" }, o.recent.map((e) => {
       const [k, c] = ledgerKind(e);
@@ -3734,6 +3772,7 @@ async function viewRepDashboard() {
     h("div", { class: "row" }, owner ? h("a", { class: "btn ghost back", href: "#/reps" }, fa ? "›" : "‹") : null,
       h("h1", {}, owner ? o.name || o.rep_id : t("dashboard")),
       o.last_login ? h("span", { class: "muted small spacer" }, `${fa ? "آخرین ورود" : "Last sign-in"}: ${fmtWhen(o.last_login)}`) : null),
+    ownerActions,
     hero,
     h("div", { class: "kpis" },
       kpi("clients", fa ? "کلاینت فعال" : "Active", h("span", { dir: "ltr" }, fmtNum(o.active), h("small", {}, ` / ${fmtNum(o.clients)}`)), owner ? null : "#/clients"),
@@ -3746,8 +3785,9 @@ async function viewRepDashboard() {
         repLegend(fa ? "فروش" : "Sold", fa ? "برگشتی" : "Returned")), repChart(o.days || [], "sold", "back", fa ? "فروش" : "Sold", fa ? "برگشتی" : "Returned")),
       h("div", { class: "card form span2" }, h("div", { class: "row" }, h("h2", {}, fa ? "مصرف کاربران ۳۰ روز" : "Users' traffic, 30 days"),
         repLegend(fa ? "مصرف" : "Traffic")), repChart(o.days || [], "traffic", null, fa ? "مصرف" : "Traffic")),
-      owner ? null : endingSoonCard(cls || []),
-      recent));
+      owner ? clientsCard : endingSoonCard(cls || []),
+      recent,
+      alertCard));
 }
 
 // #/credit: a reseller's own credit history with the balance after each row.
