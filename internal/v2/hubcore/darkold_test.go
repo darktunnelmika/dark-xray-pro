@@ -130,6 +130,9 @@ func TestImportDarkOld(t *testing.T) {
 	if r1.ExpiresUnix != 1794601800 || r1.VolumeBytes != 53687091200 || r1.Usage.Up+r1.Usage.Down != 40 {
 		t.Fatalf("r1 %+v", r1)
 	}
+	if _, err := s.Login(ctx, "Ali", "rep-pass-123"); err != nil {
+		t.Fatal("sign-in names ignore letter case:", err)
+	}
 	if _, err := s.Login(ctx, "ali", "rep-pass-123"); err != nil {
 		t.Fatal("the reseller must sign in with the old password:", err)
 	}

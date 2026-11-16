@@ -77,6 +77,7 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 		if !decode(w, r, &in) {
 			return
 		}
+		in.Username = s.canonicalUser(r.Context(), strings.TrimSpace(in.Username))
 		ip := realIP(r)
 		if wait := s.logins.blocked(ip, in.Username, s.now()); wait > 0 {
 			s.Audit(r.Context(), Principal{User: in.Username, Role: "login"}, r, http.StatusTooManyRequests)

@@ -65,6 +65,7 @@ func (s *Store) Login(ctx context.Context, user, pass string) (string, error) {
 // LoginTOTP checks the password, then the authenticator code when the login
 // has two-step on (ErrTOTPRequired when it is missing).
 func (s *Store) LoginTOTP(ctx context.Context, user, pass, code string) (string, error) {
+	user = s.canonicalUser(ctx, user)
 	secret, last, err := s.verifyPassword(ctx, user, pass)
 	if err != nil {
 		return "", err
@@ -83,6 +84,17 @@ func (s *Store) LoginTOTP(ctx context.Context, user, pass, code string) (string,
 }
 
 // verifyPassword checks a password and returns the login's TOTP state.
+// canonicalUser matches a sign-in name regardless of letter case (logins
+// moved from the old panel were stored in lower case, people type
+// "Mehdi"), preferring an exact match.
+func (s *Store) canonicalUser(ctx context.Context, user string) string {
+	var got string
+	if s.ro.QueryRowContext(ctx, `SELECT username FROM admins WHERE username=? COLLATE NOCASE ORDER BY username=? DESC LIMIT 1`, user, user).Scan(&got) == nil {
+		return got
+	}
+	return user
+}
+
 func (s *Store) verifyPassword(ctx context.Context, user, pass string) (secret string, last int64, err error) {
 	var h string
 	err = s.ro.QueryRowContext(ctx, `SELECT pass_hash,totp_secret,totp_last FROM admins WHERE username=?`, user).Scan(&h, &secret, &last)
