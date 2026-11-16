@@ -565,7 +565,7 @@ async function viewOnline() {
       h("tbody", {}, list.map((o) => h("tr", {},
         h("td", {}, h("span", { class: "dot on" }), " ", h("a", { href: `#/client?e=${encodeURIComponent(o.email)}` }, o.email)),
         h("td", { "data-label": s3("onNode") }, h("span", { class: "badge" }, o.node_id)),
-        h("td", { "data-label": s3("onIPs"), class: "small" }, h("span", { dir: "ltr" }, o.ips.length ? o.ips.join("  ") : "—")),
+        h("td", { "data-label": s3("onIPs"), class: "small" }, o.ips.length ? h("span", { class: "row", style: "gap:4px" }, o.ips.map((ip) => ipView(ip, ""))) : "—"),
         h("td", { "data-label": s3("onToday") }, bytes(o.today)), h("td", { "data-label": s3("onSeen"), class: "small muted" }, fmtTime(o.seen))))))) : h("p", { class: "muted" }, rows.length ? t("empty") : s3("onlineNone")));
   };
   q.addEventListener("input", draw);
@@ -1762,15 +1762,27 @@ const CD = {
 };
 const fmtDT = (u) => new Date(u * 1000).toLocaleString(lang === "fa" ? "fa-IR" : "en-GB", { dateStyle: "short", timeStyle: "short" });
 
+// A private address in an IP list is the far end of a tunnel (the Iran
+// relay replaces the user's real address), not the user: label it.
+function isTunnelIP(ip) {
+  return /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.|fd|fc)/i.test(String(ip || ""));
+}
+function ipView(ip, node) {
+  if (!isTunnelIP(ip)) return h("span", { class: "mono", dir: "ltr" }, ip);
+  return h("span", { class: "badge tun", title: ip }, `${lang === "fa" ? "تانل" : "tunnel"}${node ? ` · ${node}` : ""}`);
+}
+
 function clientIPsCard(c, ips) {
   const L = CD[lang] || CD.en;
-  const online = ips.filter((x) => x.online).length;
+  const online = ips.filter((x) => x.online && !isTunnelIP(x.ip)).length;
+  const tun = ips.some((x) => isTunnelIP(x.ip));
   return h("div", { class: "card form" },
     h("div", { class: "row" }, h("h2", {}, L.ips), online ? h("span", { class: "badge good" }, `${fmtNum(online)} ${L.onlineNow}`) : null,
       c.MaxIPs ? h("span", { class: "badge spacer" }, `≤ ${fmtNum(c.MaxIPs)}`) : null),
     h("p", { class: "small muted" }, L.ipsHint),
+    tun ? h("p", { class: "small muted" }, lang === "fa" ? "«تانل» یعنی کاربر از راه تانل ایران وصل شده و IP واقعی‌اش به نود نمی‌رسد؛ این اتصال‌ها در محدودیت IP شمرده نمی‌شوند. برای محدود کردن آن‌ها از «حداکثر دستگاه» استفاده کنید." : "\"Tunnel\" means the user came through an Iran relay and their real IP never reaches the node; these connections do not count toward the IP limit. Use \"Max devices\" to limit them.") : null,
     ips.length ? h("table", { class: "dtable compact" }, h("tbody", {}, ips.slice(0, 30).map((x) => h("tr", {},
-      h("td", {}, h("span", { class: `dot ${x.online ? "on" : ""}` }), " ", h("span", { class: "mono", dir: "ltr" }, x.ip)),
+      h("td", {}, h("span", { class: `dot ${x.online ? "on" : ""}` }), " ", ipView(x.ip, x.node_id)),
       h("td", { class: "small muted" }, x.node_id),
       h("td", { class: "small muted" }, x.online ? L.onlineNow : fmtDT(x.last)))))) : h("p", { class: "muted small" }, L.noIPs));
 }
