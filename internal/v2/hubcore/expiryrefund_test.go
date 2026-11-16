@@ -127,3 +127,43 @@ func TestRepOverview(t *testing.T) {
 		t.Fatalf("days %+v recent %d", o.Days[29], len(o.Recent))
 	}
 }
+
+func TestRepAlerts(t *testing.T) {
+	s, now := newStore(t)
+	ctx := context.Background()
+	seed(t, s)
+	_ = s.PutRep(ctx, Rep{ID: "ali", Name: "Ali", Enabled: true})
+	_ = s.AdjustCredit(ctx, "owner", "ali", 60<<30, 0, "")
+	if got := s.DueLowCredit(ctx, "owner", ""); len(got) != 0 {
+		t.Fatal("60 GB is over the default 50 GB threshold", got)
+	}
+	_ = s.AdjustCredit(ctx, "owner", "ali", -20<<30, 0, "")
+	if got := s.DueLowCredit(ctx, "owner", ""); len(got) != 1 || got[0].Credit != 40<<30 {
+		t.Fatal(got)
+	}
+	if got := s.DueLowCredit(ctx, "owner", ""); len(got) != 0 {
+		t.Fatal("told once", got)
+	}
+	if got := s.DueLowCredit(ctx, "rep", "ali"); len(got) != 1 {
+		t.Fatal("each audience is told once", got)
+	}
+	_ = s.AdjustCredit(ctx, "owner", "ali", 100<<30, 0, "")
+	_ = s.DueLowCredit(ctx, "owner", "")
+	_ = s.AdjustCredit(ctx, "owner", "ali", -120<<30, 0, "")
+	if got := s.DueLowCredit(ctx, "owner", ""); len(got) != 1 {
+		t.Fatal("falling again warns again", got)
+	}
+	if err := s.SetRepAlertGB(ctx, "ali", 0); err != nil || s.RepAlertGB(ctx, "ali") != 0 {
+		t.Fatal(err)
+	}
+	*now = time.Date(2027, 1, 10, 6, 0, 0, 0, time.UTC)
+	if sum, ok := s.DueRepSummary(ctx, "ali"); !ok || sum.Credit != 20<<30 {
+		t.Fatal(sum, ok)
+	}
+	if _, ok := s.DueRepSummary(ctx, "ali"); ok {
+		t.Fatal("once a day")
+	}
+	if GBText(4130<<30) != "4,130 GB" {
+		t.Fatal(GBText(4130 << 30))
+	}
+}

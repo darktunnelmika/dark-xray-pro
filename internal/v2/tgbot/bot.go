@@ -150,6 +150,7 @@ func (b *Bot) Tick(ctx context.Context) {
 		// A reseller's own bot: its orders and its customers' notices only.
 		b.announceOrders(ctx)
 		b.notifyClients(ctx)
+		b.repAlerts(ctx)
 		return
 	}
 	b.syncMenuButton(ctx)
@@ -159,6 +160,7 @@ func (b *Bot) Tick(ctx context.Context) {
 	b.dailyReport(ctx)
 	b.scheduledBackup(ctx)
 	b.notifyClients(ctx)
+	b.repAlerts(ctx)
 	b.runScheduled(ctx)
 }
 

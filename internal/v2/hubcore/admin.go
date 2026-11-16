@@ -389,6 +389,38 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 		}
 		reply(w, list[0], nil)
 	}))
+	mux.HandleFunc("GET /api/v2/rep/alert", member(func(w http.ResponseWriter, r *http.Request) {
+		if who(r).Role != "rep" {
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
+		reply(w, map[string]int64{"low_gb": s.RepAlertGB(r.Context(), who(r).RepID)}, nil)
+	}))
+	mux.HandleFunc("PUT /api/v2/rep/alert", member(func(w http.ResponseWriter, r *http.Request) {
+		if who(r).Role != "rep" {
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
+		var in struct {
+			LowGB int64 `json:"low_gb"`
+		}
+		if !decode(w, r, &in) {
+			return
+		}
+		reply(w, map[string]bool{"ok": true}, s.SetRepAlertGB(r.Context(), who(r).RepID, in.LowGB))
+	}))
+	mux.HandleFunc("GET /api/v2/admin/reps/{id}/alert", guard(func(w http.ResponseWriter, r *http.Request) {
+		reply(w, map[string]int64{"low_gb": s.RepAlertGB(r.Context(), r.PathValue("id"))}, nil)
+	}))
+	mux.HandleFunc("PUT /api/v2/admin/reps/{id}/alert", guard(func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			LowGB int64 `json:"low_gb"`
+		}
+		if !decode(w, r, &in) {
+			return
+		}
+		reply(w, map[string]bool{"ok": true}, s.SetRepAlertGB(r.Context(), r.PathValue("id"), in.LowGB))
+	}))
 	mux.HandleFunc("GET /api/v2/admin/reps/overview", guard(func(w http.ResponseWriter, r *http.Request) {
 		list, err := s.RepOverviews(r.Context(), "", false)
 		reply(w, list, err)
