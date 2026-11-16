@@ -1672,10 +1672,18 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 			SubURL string
 		}
 		out := make([]view, 0, len(list))
+		bases := map[string]string{} // one lookup per reseller, not per client
 		for _, c := range list {
 			base := subBase
 			if c.RepID != "" {
-				base = s.SubBaseFor(r.Context(), c.Email, subBase)
+				b, ok := bases[c.RepID]
+				if !ok {
+					b = s.repBase(r.Context(), c.RepID)
+					bases[c.RepID] = b
+				}
+				if b != "" {
+					base = b
+				}
 			}
 			out = append(out, view{c, subURL(base, r, c.SubToken)})
 		}
@@ -1741,7 +1749,7 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 	mux.HandleFunc("GET /api/v2/admin/docs", member(func(w http.ResponseWriter, r *http.Request) {
 		reply(w, routes, nil)
 	}))
-	return s.panelGate(mux.ServeMux)
+	return gzipJSON(s.panelGate(mux.ServeMux))
 }
 
 func b64(s string) string { return sub.Base64([]string{s}) }

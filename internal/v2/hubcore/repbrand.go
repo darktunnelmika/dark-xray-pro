@@ -101,6 +101,23 @@ func (s *Store) brandFor(ctx context.Context, email string) (SubSettings, string
 	return set, base
 }
 
+// repBase is the address a reseller's clients use (their own, else their
+// parent's), "" for none. Only rep rows are read, not the panel settings.
+func (s *Store) repBase(ctx context.Context, rep string) string {
+	base := ""
+	for i := 0; rep != "" && i < 4; i++ {
+		if base == "" {
+			base = s.RepBrand(ctx, rep).BaseURL
+		}
+		var parent string
+		if s.ro.QueryRowContext(ctx, `SELECT parent_id FROM reps WHERE id=?`, rep).Scan(&parent) != nil {
+			break
+		}
+		rep = parent
+	}
+	return base
+}
+
 // SubBaseFor is the address a client's links use: their reseller's own
 // address if set, otherwise def.
 func (s *Store) SubBaseFor(ctx context.Context, email, def string) string {
