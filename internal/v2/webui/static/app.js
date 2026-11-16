@@ -1397,7 +1397,7 @@ async function templatesModal(inbounds) {
     : { title: "Ready plans", hint: "When adding a client, “From template” fills every field.", id: "ID", name: "Name", gb: "Volume (GB, 0 = unlimited)", days: "Days",
       first: "Time from first connection", ips: "Max IPs", dev: "Max devices", reset: "Periodic reset", prefix: "Name prefix", add: "Add template", del: "Delete", off: "Off", day: "Daily", week: "Weekly", month: "Monthly", none: "No templates yet." };
   const list = h("div", { class: "list" });
-  const f = { id: h("input", { pattern: "[a-z0-9][a-z0-9._-]{0,62}", placeholder: "plan-30", dir: "ltr" }), name: h("input", { placeholder: "30 GB · 30 days" }),
+  const f = { id: h("input", { pattern: "[a-z0-9][a-z0-9._\\-]{0,62}", placeholder: "plan-30", dir: "ltr" }), name: h("input", { placeholder: "30 GB · 30 days" }),
     gb: h("input", { type: "number", min: "0", step: "0.5", value: "30" }), days: h("input", { type: "number", min: "0", value: "30" }),
     first: h("input", { type: "checkbox", checked: true }), ips: h("input", { type: "number", min: "0", value: "2" }), dev: h("input", { type: "number", min: "0", value: "0" }),
     reset: h("select", {}, [["", L.off], ["day", L.day], ["week", L.week], ["month", L.month]].map(([v, l]) => h("option", { value: v }, l))), prefix: h("input", { dir: "ltr" }) };
@@ -1450,11 +1450,14 @@ function bulkForm(emails) {
 }
 
 async function viewGroups() {
+  const fa = lang === "fa";
   const [groups, clients] = await Promise.all([api("GET", "/api/v2/admin/groups"), api("GET", "/api/v2/admin/clients")]);
   const cards = (groups || []).map((g) => h("div", { class: "card item" },
     h("div", { class: "head" }, h("span", { class: "name" }, g.Name || g.ID), h("span", { class: "badge" }, g.ID),
       h("span", { class: "badge spacer" }, t("clientsCount", { n: fmtNum(g.Members.length) }))),
-    h("div", { class: "small muted" }, g.Members.join(", ")),
+    g.Members.length ? h("div", { class: "chips" }, g.Members.slice(0, 8).map((m) => h("a", { class: "chip", href: `#/client?e=${encodeURIComponent(m)}`, dir: "ltr" }, m)),
+      g.Members.length > 8 ? h("span", { class: "chip" }, `+${fmtNum(g.Members.length - 8)}`) : null)
+      : h("p", { class: "small muted", style: "margin:0" }, fa ? "هنوز عضوی ندارد" : "No members yet"),
     h("div", { class: "row" },
       h("button", { onclick: () => bulkGroup(g) }, t("bulkRenew")),
       h("button", { class: "ghost", onclick: () => groupForm(g, clients) }, t("edit")),
@@ -1478,21 +1481,42 @@ function bulkGroup(g) {
     h("label", {}, h("span", {}, t("addDays")), days), h("label", {}, h("span", {}, t("addGB")), gb)), [save]);
 }
 
+// groupForm: members are picked with a search, not from a wall of every
+// client; the chosen ones sit on top and are removed with a tap.
 function groupForm(g, clients) {
-  const id = h("input", { required: true, pattern: "[a-z0-9][a-z0-9._-]{0,62}", value: g ? g.ID : "", disabled: !!g, autofocus: !g });
+  const fa = lang === "fa";
+  const id = h("input", { required: true, pattern: "[a-z0-9][a-z0-9._\\-]{0,62}", value: g ? g.ID : "", disabled: !!g, autofocus: !g, dir: "ltr" });
   const name = h("input", { value: g ? g.Name : "" });
-  const boxes = (clients || []).map((c) => h("label", { class: "check" },
-    h("input", { type: "checkbox", value: c.Email, checked: !!g && g.Members.includes(c.Email) }), c.Email));
+  const picked = new Set(g ? g.Members : []);
+  const all = (clients || []).map((c) => c.Email);
+  const chosen = h("div", { class: "chips" });
+  const q = h("input", { type: "search", dir: "ltr", placeholder: fa ? "جستجوی نام کلاینت…" : "Search clients…" });
+  const results = h("div", { class: "pick-list" });
+  const count = h("span", { class: "badge" });
+  const draw = () => {
+    count.textContent = fmtNum(picked.size);
+    chosen.replaceChildren(...(picked.size ? [...picked].map((m) => h("button", { type: "button", class: "chip", "aria-pressed": "true", dir: "ltr", title: fa ? "حذف از گروه" : "Remove", onclick: () => { picked.delete(m); draw(); } }, m, " ✕"))
+      : [h("span", { class: "muted small" }, fa ? "هنوز کسی انتخاب نشده" : "Nobody picked yet")]));
+    const f = q.value.trim().toLowerCase();
+    const hits = all.filter((e) => !picked.has(e) && (!f || e.toLowerCase().includes(f)));
+    results.replaceChildren(
+      ...hits.slice(0, 40).map((e) => h("button", { type: "button", class: "pick", dir: "ltr", onclick: () => { picked.add(e); draw(); } }, "+ ", e)),
+      hits.length > 40 ? h("div", { class: "muted small" }, fa ? `${fmtNum(hits.length - 40)} مورد دیگر؛ دقیق‌تر جستجو کنید` : `${hits.length - 40} more; narrow the search`) : null,
+      f && hits.length > 1 ? h("button", { type: "button", class: "ghost small", onclick: () => { hits.forEach((e) => picked.add(e)); draw(); } }, fa ? `افزودن همهٔ ${fmtNum(hits.length)} نتیجه` : `Add all ${hits.length} results`) : null,
+      !hits.length ? h("div", { class: "muted small" }, fa ? "نتیجه‌ای نیست" : "No match") : null);
+  };
+  q.addEventListener("input", draw);
   const save = h("button", { class: "primary", value: "save", onclick: async (e) => {
     e.preventDefault();
     if (!id.reportValidity()) return;
-    const members = boxes.map((b) => b.querySelector("input")).filter((i) => i.checked).map((i) => i.value);
-    try { await guarded(() => api("PUT", `/api/v2/admin/groups/${encodeURIComponent(id.value)}`, { Name: name.value, Members: members }));
+    try { await guarded(() => api("PUT", `/api/v2/admin/groups/${encodeURIComponent(id.value)}`, { Name: name.value, Members: [...picked] }));
       document.getElementById("modal").close("save"); route(); } catch {}
   } }, t("save"));
+  draw();
   openModal(g ? `${t("edit")} · ${g.Name || g.ID}` : `${t("add")} · ${t("groups")}`, h("div", { class: "form" },
     h("div", { class: "two" }, h("label", {}, h("span", {}, t("tag")), id), h("label", {}, h("span", {}, t("name")), name)),
-    h("fieldset", { class: "form", style: "border:0;padding:0;margin:0" }, h("legend", { class: "small muted" }, t("members")), boxes)), [save]);
+    h("div", {}, h("div", { class: "row" }, h("span", { class: "lbl" }, t("members")), count), chosen),
+    h("div", {}, q, results)), [save]);
 }
 
 function clientCard(c, ctx, selected, onSelect) {
@@ -1836,7 +1860,7 @@ function clientForm(c, inbounds, ctx = { reps: [] }) {
   const rnd = () => { const a = "abcdefghjkmnpqrstuvwxyz23456789"; let r = ""; const b = crypto.getRandomValues(new Uint8Array(8)); for (const x of b) r += a[x % a.length]; return r; };
 
   // identity
-  const name = h("input", { required: true, pattern: "[A-Za-z0-9][A-Za-z0-9._@+-]{0,127}", value: v.Email, disabled: !isNew, dir: "ltr", autofocus: isNew, placeholder: "ali-30gb" });
+  const name = h("input", { required: true, pattern: "[A-Za-z0-9][A-Za-z0-9._@+\\-]{0,127}", value: v.Email, disabled: !isNew, dir: "ltr", autofocus: isNew, placeholder: "ali-30gb" });
   const dice = isNew ? h("button", { type: "button", class: "ghost icon-only", title: T("نام تصادفی", "Random name"), onclick: () => { name.value = (tplPrefix || "") + rnd(); calc(); } }, "🎲") : null;
   let tplPrefix = "";
   const status = seg([["on", T("فعال", "Active")], owner ? ["hold", T("در انتظار", "On hold")] : null, ["off", T("غیرفعال", "Disabled")]].filter(Boolean),
@@ -1870,7 +1894,9 @@ function clientForm(c, inbounds, ctx = { reps: [] }) {
     return b;
   });
   const allIb = h("button", { type: "button", class: "ghost small", onclick: () => { const all = ibChips.every((b) => b.getAttribute("aria-pressed") === "true"); ibChips.forEach((b) => b.setAttribute("aria-pressed", String(!all))); calc(); } }, T("همه", "All"));
-  const pickedIb = () => ibChips.filter((b) => b.getAttribute("aria-pressed") === "true").map((b) => b.dataset.tag);
+  const shownIb = new Set(inbounds.map((ib) => ib.tag));
+  const hiddenIb = (v.Inbounds || []).filter((t0) => !shownIb.has(t0)); // e.g. outside a reseller's list: kept as they are
+  const pickedIb = () => [...hiddenIb, ...ibChips.filter((b) => b.getAttribute("aria-pressed") === "true").map((b) => b.dataset.tag)];
 
   // advanced
   const ips = h("input", { type: "number", min: "0", max: "1000", dir: "ltr", value: v.MaxIPs });
@@ -1884,8 +1910,8 @@ function clientForm(c, inbounds, ctx = { reps: [] }) {
   const npFirst = h("input", { type: "checkbox", checked: np0 ? !!np0.first_use : false });
   const tg = h("input", { type: "number", dir: "ltr", placeholder: "123456789" });
   const note = h("input", { value: v.Note || "", maxlength: "2000", placeholder: T("مثلاً @username یا شماره تماس", "e.g. @username or phone") });
-  const uuid = h("input", { dir: "ltr", value: isNew ? "" : v.UUID || "", placeholder: T("خودکار", "auto"), pattern: "[0-9a-fA-F-]{36}" });
-  const subTok = h("input", { dir: "ltr", value: isNew ? "" : v.SubToken || "", placeholder: T("خودکار", "auto"), pattern: "[A-Za-z0-9_-]{8,64}" });
+  const uuid = h("input", { dir: "ltr", value: isNew ? "" : v.UUID || "", placeholder: T("خودکار", "auto"), pattern: "[0-9a-fA-F\\-]{36}" });
+  const subTok = h("input", { dir: "ltr", value: isNew ? "" : v.SubToken || "", placeholder: T("خودکار", "auto"), pattern: "[A-Za-z0-9_\\-]{8,64}" });
   const rotate = !isNew && owner ? h("div", { class: "row" },
     h("button", { type: "button", class: "ghost small", onclick: async () => { if (await confirmAction(T("کلید اتصال عوض شود؟ کانفیگ‌های فعلی کاربر از کار می‌افتند.", "Replace the connection keys? The user's current configs stop working."))) { await guarded(() => api("POST", `/api/v2/admin/clients/${encodeURIComponent(v.Email)}/rotate`, { credentials: true })); toast(T("کلید عوض شد", "Keys replaced")); } } }, T("کلید جدید", "New keys")),
     h("button", { type: "button", class: "ghost small", onclick: async () => { if (await confirmAction(T("لینک ساب عوض شود؟ لینک قبلی از کار می‌افتد.", "Replace the subscription link? The old link stops working."))) { await guarded(() => api("POST", `/api/v2/admin/clients/${encodeURIComponent(v.Email)}/rotate`, { link: true })); toast(T("لینک عوض شد", "Link replaced")); } } }, T("لینک ساب جدید", "New sub link"))) : null;
@@ -1962,7 +1988,8 @@ function clientForm(c, inbounds, ctx = { reps: [] }) {
         h("div", {}, T("مانده بعد از ساخت: ", "Left after: "), h("b", { dir: "ltr" }, gbs(Math.max(0, credit - costB))), units || costU ? ` · ${fmtNum(Math.max(0, units - costU))} ${t("units")}` : ""),
         short ? h("div", {}, T("اعتبار کافی نیست.", "Not enough credit.")) : null));
     }
-    save.disabled = short || (!n && inbounds.length > 0);
+    if (!n) kids.push(h("div", { class: "small", style: "color:var(--warn)" }, T("هیچ اینباندی انتخاب نشده؛ کاربر کانفیگی نمی‌گیرد.", "No inbound selected; the user gets no configs.")));
+    save.disabled = short;
     sumBox.replaceChildren(...kids);
   }
   [vol, ips, hwid, reset, days].forEach((x) => x.addEventListener("input", calc));
@@ -2231,7 +2258,7 @@ function acmeSettingsForm(cur = {}) {
 }
 
 function acmeForm(nodes, settings = {}) {
-  const idf = h("input", { required: true, pattern: "[a-z0-9][a-z0-9._-]{0,62}", placeholder: "vpn-cert", autofocus: true, dir: "ltr" });
+  const idf = h("input", { required: true, pattern: "[a-z0-9][a-z0-9._\\-]{0,62}", placeholder: "vpn-cert", autofocus: true, dir: "ltr" });
   const doms = h("textarea", { rows: 3, required: true, dir: "ltr", placeholder: "vpn.example.com" });
   const method = h("select", {}, [["http_node", t("acmeHTTP")], ["dns_cf", t("acmeDNS")]].map(([v, l]) => h("option", { value: v, selected: v === (settings.cf_set ? "dns_cf" : "http_node") }, l)));
   const node = h("select", {}, h("option", { value: "" }, t("acmeNodeAuto")), nodes.map((n) => h("option", { value: n.ID }, n.Name || n.ID)));
@@ -2848,7 +2875,7 @@ async function swapDialog(ib, nodes) {
     h("div", { class: "row" },
       h("button", { type: "button", onclick: async () => { await guarded(() => api("PUT", `/api/v2/admin/swaps/${encodeURIComponent(w.id)}`, { ...w, enabled: !w.enabled })); swapDialog(ib, nodes); } }, t(w.enabled ? "disable" : "enable")),
       h("button", { type: "button", class: "ghost danger spacer", onclick: async () => { await guarded(() => api("DELETE", `/api/v2/admin/swaps/${encodeURIComponent(w.id)}`)); swapDialog(ib, nodes); } }, t("delete")))));
-  const id = h("input", { required: true, pattern: "[a-z0-9][a-z0-9._-]{0,62}", value: `${ib.tag}-swap${list.length ? list.length + 1 : ""}` });
+  const id = h("input", { required: true, pattern: "[a-z0-9][a-z0-9._\\-]{0,62}", value: `${ib.tag}-swap${list.length ? list.length + 1 : ""}` });
   const name = h("input", { value: "DARK SWAP", maxlength: "160" });
   const node = h("select", { required: true }, others.map((n) => h("option", { value: n.ID }, `${n.Name || n.ID} (${n.ID})`)));
   const sport = h("input", { type: "number", min: "1", max: "65535", required: true, value: "6801" });
@@ -2929,7 +2956,7 @@ function showQR(title, text) {
 }
 
 function cloneInbound(ib) {
-  const tag = h("input", { required: true, pattern: "[a-z0-9][a-z0-9._-]{0,62}", value: `${ib.tag}-2`, dir: "ltr", autofocus: true });
+  const tag = h("input", { required: true, pattern: "[a-z0-9][a-z0-9._\\-]{0,62}", value: `${ib.tag}-2`, dir: "ltr", autofocus: true });
   const port = h("input", { type: "number", min: "1", max: "65535", required: true, value: String((ib.port || 443) + 1), dir: "ltr" });
   const cl = h("input", { type: "checkbox", checked: true });
   const err = h("div", { class: "error" });
@@ -3347,7 +3374,7 @@ async function inboundEditor(tag, nodes, certs) {
 }
 
 function certForm(id) {
-  const idf = h("input", { required: true, pattern: "[a-z0-9][a-z0-9._-]{0,62}", value: id || "", disabled: !!id, autofocus: !id });
+  const idf = h("input", { required: true, pattern: "[a-z0-9][a-z0-9._\\-]{0,62}", value: id || "", disabled: !!id, autofocus: !id });
   const cert = h("textarea", { class: "code", rows: "8", required: true, spellcheck: "false", dir: "ltr", placeholder: "-----BEGIN CERTIFICATE-----" });
   const key = h("textarea", { class: "code", rows: "6", required: true, spellcheck: "false", dir: "ltr", placeholder: "-----BEGIN PRIVATE KEY-----" });
   const err = h("div", { class: "error" });
@@ -3367,7 +3394,7 @@ function certForm(id) {
 function inboundForm(nodes, presets, certs = []) {
   const node = h("select", { required: true }, (nodes || []).map((n) => h("option", { value: n.ID }, `${n.Name || n.ID} (${n.ID})`)));
   const preset = h("select", {}, (presets || []).map((p) => h("option", { value: p }, p)));
-  const tag = h("input", { required: true, pattern: "[a-z0-9][a-z0-9._-]{0,62}", placeholder: "de-reality" });
+  const tag = h("input", { required: true, pattern: "[a-z0-9][a-z0-9._\\-]{0,62}", placeholder: "de-reality" });
   const port = h("input", { type: "number", min: "1", max: "65535", required: true, value: "443" });
   const sni = h("input", { value: "www.speedtest.net" });
   const path = h("input", {});
@@ -3421,7 +3448,7 @@ async function viewNodes() {
 
 function nodeForm() {
   const fa = lang === "fa";
-  const id = h("input", { required: true, pattern: "[a-z0-9][a-z0-9._-]{0,62}", autofocus: true, dir: "ltr", placeholder: "fr-1" });
+  const id = h("input", { required: true, pattern: "[a-z0-9][a-z0-9._\\-]{0,62}", autofocus: true, dir: "ltr", placeholder: "fr-1" });
   const name = h("input", { placeholder: fa ? "فرانسه" : "France" });
   let mode = "ssh";
   const host = h("input", { dir: "ltr", placeholder: "1.2.3.4" }), port = h("input", { type: "number", dir: "ltr", value: "22", min: "1", max: "65535" });
@@ -3497,10 +3524,10 @@ async function viewSellers() {
 }
 
 function repForm(r) {
-  const id = h("input", { required: true, pattern: "[a-z0-9][a-z0-9._-]{0,62}", value: r ? r.ID : "", disabled: !!r });
+  const id = h("input", { required: true, pattern: "[a-z0-9][a-z0-9._\\-]{0,62}", value: r ? r.ID : "", disabled: !!r });
   const name = h("input", { value: r ? r.Name : "" });
   const en = h("input", { type: "checkbox", checked: r ? r.Enabled : true });
-  const user = h("input", { autocomplete: "off", pattern: "[a-z0-9][a-z0-9._-]{0,62}" });
+  const user = h("input", { autocomplete: "off", pattern: "[a-z0-9][a-z0-9._\\-]{0,62}" });
   const pass = h("input", { type: "password", autocomplete: "new-password", minlength: "10" });
   const save = h("button", { class: "primary", value: "save", onclick: async (e) => {
     e.preventDefault();
@@ -3839,7 +3866,7 @@ function discountsCard(products) {
 function productForm(p, inbounds, reps) {
   const owner = me.role === "owner";
   const v = p || { id: "", name: "", plan: "volume", gb: 50, days: 30, max_ips: 2, inbounds: [], price: 0, status: "published", first_use: true, seller: "" };
-  const id = h("input", { required: true, pattern: "[a-z0-9][a-z0-9._-]{0,62}", value: v.id, disabled: !!p });
+  const id = h("input", { required: true, pattern: "[a-z0-9][a-z0-9._\\-]{0,62}", value: v.id, disabled: !!p });
   const name = h("input", { required: true, maxlength: "120", value: v.name });
   const plan = h("select", {}, h("option", { value: "volume", selected: v.plan === "volume" }, t("planVolume")), h("option", { value: "unlimited", selected: v.plan === "unlimited" }, t("planUnlimited")));
   const gb = h("input", { type: "number", min: "1", value: v.gb || 50 });
@@ -4552,7 +4579,7 @@ async function viewStaff() {
   const roleBadge = (r) => h("span", { class: `badge ${r === "owner" ? "good" : r === "admin" ? "warn" : ""}` }, t(`role_${r}`));
   const L = CT[lang] || CT.en;
   const editLogin = (l) => {
-    const user = h("input", { required: true, pattern: "[a-z0-9][a-z0-9._-]{0,62}", value: l ? l.username : "", disabled: !!l, dir: "ltr" });
+    const user = h("input", { required: true, pattern: "[a-z0-9][a-z0-9._\\-]{0,62}", value: l ? l.username : "", disabled: !!l, dir: "ltr" });
     const role = h("select", {}, ["admin", "viewer", "owner"].map((r) => h("option", { value: r, selected: l ? l.role === r : r === "admin" }, t(`role_${r}`))));
     const pass = h("input", { type: "password", autocomplete: "new-password", minlength: "10", required: !l });
     const err = h("div", { class: "error" });
@@ -4756,7 +4783,7 @@ function foreignCard() {
 function panelPathCard() {
   const card = h("div", { class: "card form" });
   const draw = (cur) => {
-    const input = h("input", { dir: "ltr", value: cur || "", placeholder: "my-door-82kq", pattern: "[A-Za-z0-9_-]{6,64}" });
+    const input = h("input", { dir: "ltr", value: cur || "", placeholder: "my-door-82kq", pattern: "[A-Za-z0-9_\\-]{6,64}" });
     const url = cur ? `${location.origin}/${cur}/` : "";
     const err = h("div", { class: "error" });
     const save = async (v) => {
