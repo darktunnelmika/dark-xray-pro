@@ -50,7 +50,8 @@ func TestSubPageAndSettings(t *testing.T) {
 		t.Fatalf("app response %v", app.Header())
 	}
 	links, _, _ := s.Subscription(ctx, "alice")
-	if len(links) < 2 || !strings.Contains(links[0], "127.0.0.1:1") || !strings.Contains(links[1], "days") {
+	// One info line: the client's name, volume and time together.
+	if len(links) < 1 || !strings.Contains(links[0], "127.0.0.1:1") || !strings.Contains(links[0], "%F0%9F%91%A4%20alice%20%7C") || strings.Contains(strings.Join(links, ""), "days") {
 		t.Fatalf("info lines missing: %v", links)
 	}
 	if qr := get("Mozilla/5.0", "image/*", "?qr=1"); qr.Header().Get("Content-Type") != "image/png" {
