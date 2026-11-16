@@ -2,6 +2,7 @@ package tgbot
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -178,5 +179,38 @@ func TestNodeAlertsWaitForGrace(t *testing.T) {
 	b.watchNodes(ctx)
 	if out := api.take(); len(out) != 1 || !strings.Contains(out[0].text, "دوباره وصل") {
 		t.Fatalf("tunnel back: %+v", out)
+	}
+}
+
+func TestRenewalReminder(t *testing.T) {
+	s, err := hubcore.Open(filepath.Join(t.TempDir(), "v2.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	ctx := context.Background()
+	_, _ = s.CreateNode(ctx, "n1", "N")
+	_ = s.PutInbound(ctx, "in1", "n1", []byte(`{"protocol":"vless","port":443,"settings":{}}`), true)
+	_ = s.PutClient(ctx, hubcore.Client{Email: "soon", Enabled: true, VolumeBytes: 10 << 30, ExpiresUnix: time.Now().Unix() + 2*86400, Inbounds: []string{"in1"}})
+	_ = s.TgLink(ctx, 4242, "soon")
+	if _, _, err := s.RemindRenewal(ctx, hubcore.Principal{Role: "owner"}, "soon"); err != nil {
+		t.Fatal(err)
+	}
+	api := &fakeAPI{}
+	// A reseller's bot leaves the owner's reminder alone; the main bot sends it once.
+	rb := &Bot{Store: s, API: api, Seller: "ali", Logf: t.Logf}
+	rb.deliverReminders(ctx)
+	if len(api.take()) != 0 {
+		t.Fatal("reseller bot sent the owner's reminder")
+	}
+	b := &Bot{Store: s, API: api, Logf: t.Logf}
+	b.deliverReminders(ctx)
+	m := find(t, api.take(), 4242, "یادآوری تمدید")
+	if m.kb == nil || !strings.Contains(fmt.Sprint(m.kb.Rows), "rnw:soon") {
+		t.Fatalf("no renew button: %+v", m.kb)
+	}
+	b.deliverReminders(ctx)
+	if len(api.take()) != 0 {
+		t.Fatal("sent twice")
 	}
 }

@@ -158,6 +158,7 @@ func (b *Bot) Tick(ctx context.Context) {
 		b.notifyClients(ctx)
 		b.repAlerts(ctx)
 		b.deliverTickets(ctx)
+		b.deliverReminders(ctx)
 		return
 	}
 	b.syncMenuButton(ctx)
@@ -171,6 +172,7 @@ func (b *Bot) Tick(ctx context.Context) {
 	b.repAlerts(ctx)
 	b.runScheduled(ctx)
 	b.deliverTickets(ctx)
+	b.deliverReminders(ctx)
 }
 
 func (b *Bot) send(ctx context.Context, chat int64, text string, kb *Keyboard) int64 {

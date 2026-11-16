@@ -398,6 +398,14 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 		err := s.HideTunnel(r.Context(), r.PathValue("id"), r.PathValue("iface"), in.Hidden)
 		reply(w, map[string]bool{"ok": err == nil}, err)
 	}))
+	mux.HandleFunc("GET /api/v2/analytics", member(func(w http.ResponseWriter, r *http.Request) {
+		a, err := s.Analytics(r.Context(), who(r), r.URL.Query().Get("seller"))
+		reply(w, a, err)
+	}))
+	mux.HandleFunc("POST /api/v2/analytics/remind/{email}", member(func(w http.ResponseWriter, r *http.Request) {
+		_, _, err := s.RemindRenewal(r.Context(), who(r), r.PathValue("email"))
+		reply(w, map[string]bool{"ok": err == nil}, err)
+	}))
 	mux.HandleFunc("GET /api/v2/admin/reports/sales", guard(func(w http.ResponseWriter, r *http.Request) {
 		days, _ := strconv.Atoi(r.URL.Query().Get("days"))
 		rep, err := s.SalesReport(r.Context(), days)

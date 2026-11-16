@@ -42,7 +42,7 @@ const I18N = {
     sellers: "Sub-sellers", transferCredit: "Transfer credit", subOf: "under", kind_transfer: "Transfer",
     sellersHint: "Open sellers under you and give them part of your credit. Their limits can only be tighter than yours.",
     transferHint: "Moves credit from your balance to this seller. Negative numbers take unused credit back.",
-    shop: "Shop", tickets: "Support", products: "Products", orders: "Orders", newOrder: "New order", product: "Product", price: "Price", buyer: "Buyer (name, @telegram, phone)",
+    shop: "Shop", tickets: "Support", analytics: "Insights", products: "Products", orders: "Orders", newOrder: "New order", product: "Product", price: "Price", buyer: "Buyer (name, @telegram, phone)",
     renewClient: "Renew an existing client (optional)", fulfill: "Deliver", cancelOrder: "Cancel", status_pending: "Pending", status_fulfilled: "Delivered",
     status_cancelled: "Cancelled", status_draft: "Draft", status_published: "Published", status_archived: "Archived", statusLabel: "Status", seller: "Seller",
     delivered: "Delivered to {x}", manageProducts: "May create own shop products", shopHint: "Orders are recorded here; delivering one creates (or renews) the client in one step. A reseller's orders are paid from that reseller's credit.",
@@ -107,7 +107,7 @@ const I18N = {
     sellers: "زیرفروشنده‌ها", transferCredit: "انتقال اعتبار", subOf: "زیرمجموعهٔ", kind_transfer: "انتقال",
     sellersHint: "برای خودتان زیرفروشنده بسازید و بخشی از اعتبارتان را به او بدهید. محدودیت‌های او فقط می‌تواند سخت‌تر از شما باشد.",
     transferHint: "اعتبار را از موجودی شما به این فروشنده منتقل می‌کند. عدد منفی اعتبار مصرف‌نشده را برمی‌گرداند.",
-    shop: "فروشگاه", tickets: "پشتیبانی", products: "محصولات", orders: "سفارش‌ها", newOrder: "سفارش جدید", product: "محصول", price: "قیمت", buyer: "خریدار (نام، آیدی تلگرام، تلفن)",
+    shop: "فروشگاه", tickets: "پشتیبانی", analytics: "تحلیل", products: "محصولات", orders: "سفارش‌ها", newOrder: "سفارش جدید", product: "محصول", price: "قیمت", buyer: "خریدار (نام، آیدی تلگرام، تلفن)",
     renewClient: "تمدید کلاینت موجود (اختیاری)", fulfill: "تحویل", cancelOrder: "لغو", status_pending: "در انتظار", status_fulfilled: "تحویل شد",
     status_cancelled: "لغو شد", status_draft: "پیش‌نویس", status_published: "منتشر", status_archived: "حذف‌شده", statusLabel: "وضعیت", seller: "فروشنده",
     delivered: "تحویل شد: {x}", manageProducts: "اجازهٔ ساخت محصول فروشگاه", shopHint: "سفارش‌ها اینجا ثبت می‌شوند؛ با «تحویل» کلاینت یک‌جا ساخته (یا تمدید) می‌شود. سفارش‌های نماینده از اعتبار همان نماینده پرداخت می‌شود.",
@@ -237,7 +237,7 @@ function confirmAction(text, label) {
 }
 
 // ---------- Views ----------
-const allRoutes = { dashboard: viewDashboard, online: viewOnline, clients: viewClients, groups: viewGroups, inbounds: viewInbounds, nodes: viewNodes, routing: viewRouting, reps: viewReps, shop: viewShop, tickets: viewTickets, finance: viewFinance, activity: viewActivity, staff: viewStaff, settings: viewSettings };
+const allRoutes = { dashboard: viewDashboard, online: viewOnline, clients: viewClients, groups: viewGroups, inbounds: viewInbounds, nodes: viewNodes, routing: viewRouting, reps: viewReps, shop: viewShop, tickets: viewTickets, analytics: viewAnalytics, finance: viewFinance, activity: viewActivity, staff: viewStaff, settings: viewSettings };
 let me = null;
 let routes = allRoutes;
 function fullOwner() { return me && me.role === "owner" && !me.level; }
@@ -250,7 +250,7 @@ function routesFor(m) {
   if (m && m.role === "rep") {
     const r = { dashboard: viewRepDashboard, clients: viewClients, online: viewOnline, credit: viewCredit };
     if (m.can_sell) r.sellers = viewSellers;
-    r.shop = viewShop; r.tickets = viewTickets; r.settings = viewSettings;
+    r.shop = viewShop; r.tickets = viewTickets; r.analytics = viewAnalytics; r.settings = viewSettings;
     return r;
   }
   return allRoutes;
@@ -285,6 +285,7 @@ const ICONS = {
   nodes: "M3 4h18v6H3zM3 14h18v6H3zM7 7h.01M7 17h.01",
   reps: "M3 7h18v13H3zM8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M3 13h18",
   sellers: "M15 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M8.5 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM20 8v6M23 11h-6",
+  analytics: "M4 20V10M10 20V4M16 20v-7M22 20H2",
   tickets: "M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2zM8 9h8M8 13h5",
   shop: "M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4zM3 6h18M16 10a4 4 0 0 1-8 0",
   finance: "M3 3v18h18M7 15l4-4 3 3 6-6",
@@ -415,7 +416,7 @@ async function loadNotifs() {
 
 // Sidebar groups (desktop); phones keep the same order in the tab bar.
 const NAV_GROUPS = [
-  ["overview", ["dashboard", "online"]],
+  ["overview", ["dashboard", "analytics", "online"]],
   ["people", ["clients", "groups", "reps", "sellers"]],
   ["infra", ["inbounds", "nodes", "routing"]],
   ["sales", ["shop", "tickets", "credit", "finance"]],
@@ -3787,6 +3788,107 @@ async function viewShop() {
       tile(money(sum(done.filter((o) => o.created_unix >= since(30)))), fa ? "فروش ۳۰ روز" : "Sales, 30 days"),
       tile(fmtNum(products.filter((p) => p.status === "published").length), fa ? "محصول فعال" : "Products on sale")),
     tabs, pane);
+}
+
+// ---------- Business insights ----------
+async function viewAnalytics() {
+  const fa = lang === "fa";
+  const owner = me.role === "owner";
+  let seller = sessionStorage.getItem("anSeller") || "";
+  const reps = owner ? await api("GET", "/api/v2/admin/reps").catch(() => []) : [];
+  const body = h("div", {});
+  const pct = (x) => `${fmtNum(Math.round(x * 100))}٪`;
+  const gbs = (b) => b < 0 ? (fa ? "نامحدود" : "unlimited") : `${(b / 2 ** 30).toFixed(1)} ${fa ? "گیگ" : "GB"}`;
+  const monthName = (m) => new Intl.DateTimeFormat(fa ? "fa-IR-u-ca-persian" : "en-GB", { month: "short" }).format(new Date(m + "-15T12:00:00Z"));
+  const delta = (cur, prev) => {
+    if (!prev) return cur ? h("span", { class: "chg up" }, fa ? "جدید" : "new") : null;
+    const p = Math.round(((cur - prev) / prev) * 100);
+    return h("span", { class: `chg ${p > 0 ? "up" : p < 0 ? "down" : ""}`, dir: "ltr" }, `${p > 0 ? "+" : ""}${fmtNum(p)}%`);
+  };
+  const bars = (rows, keys, colors, label) => {
+    const W = 480, H = 170, P = 18, max = Math.max(1, ...rows.map((r) => keys.reduce((a, k) => a + (r[k] || 0), 0)));
+    const bw = (W - 2 * P) / rows.length;
+    const svg = svgEl("svg", { viewBox: `0 0 ${W} ${H + 24}`, class: "an-chart", direction: "ltr", role: "img", "aria-label": label });
+    svg.append(svgEl("line", { x1: P, x2: W - P, y1: H, y2: H, class: "axis" }));
+    rows.forEach((r, i) => {
+      let y = H;
+      keys.forEach((k, j) => {
+        const v = r[k] || 0, hh = (v / max) * (H - 20);
+        if (!hh) return;
+        y -= hh;
+        const rect = svgEl("rect", { x: P + i * bw + bw * 0.2, y, width: bw * 0.6, height: hh, rx: 2, fill: colors[j] });
+        const tt = svgEl("title", {}); tt.textContent = `${monthName(r.month)}: ${money(v)}`; rect.append(tt); svg.append(rect);
+      });
+      const tx = svgEl("text", { x: P + i * bw + bw / 2, y: H + 17, "text-anchor": "middle", class: "lbl" }); tx.textContent = fa ? `\u2067${monthName(r.month)}\u2069` : monthName(r.month); svg.append(tx);
+      const total = keys.reduce((a, k) => a + (r[k] || 0), 0);
+      if (total) { const tv = svgEl("text", { x: P + i * bw + bw / 2, y: y - 5, "text-anchor": "middle", class: "lbl val" }); tv.textContent = fmtNum(Math.round(total / 1e5) / 10); svg.append(tv); }
+    });
+    return svg;
+  };
+  const line = (daily) => {
+    const W = 480, H = 120, P = 12, max = Math.max(1, ...daily.map((d) => d.active)), min = Math.min(...daily.map((d) => d.active));
+    const lo = Math.max(0, Math.floor(min * 0.9)), span = Math.max(1, max - lo);
+    const x = (i) => P + (i * (W - 2 * P)) / Math.max(1, daily.length - 1), y = (v) => H - ((v - lo) / span) * (H - 28) - 4;
+    const svg = svgEl("svg", { viewBox: `0 0 ${W} ${H + 8}`, class: "an-chart", direction: "ltr", role: "img", "aria-label": fa ? "مشتری فعال روزانه" : "Active customers per day" });
+    svg.append(svgEl("path", { d: daily.map((d, i) => `${i ? "L" : "M"}${x(i)} ${y(d.active)}`).join(""), class: "an-line" }));
+    daily.forEach((d, i) => { const c = svgEl("circle", { cx: x(i), cy: y(d.active), r: 2.5, class: "an-dot" }); const tt = svgEl("title", {}); tt.textContent = `${d.day}: ${fmtNum(d.active)}`; c.append(tt); svg.append(c); });
+    const last = daily[daily.length - 1];
+    if (last) { const tv = svgEl("text", { x: x(daily.length - 1), y: y(last.active) - 9, "text-anchor": "end", class: "lbl val" }); tv.textContent = fa ? `\u2067${fmtNum(last.active)} امروز\u2069` : `${last.active} today`; svg.append(tv); }
+    const mx = svgEl("text", { x: P, y: 14, class: "lbl" }); mx.textContent = fa ? `\u2067بیشترین ${fmtNum(max)} · کمترین ${fmtNum(min)}\u2069` : `max ${max} · min ${min}`; svg.append(mx);
+    return svg;
+  };
+  const load = async () => {
+    fill(body, h("p", { class: "muted small" }, fa ? "در حال محاسبه…" : "Working…"));
+    let a;
+    try { a = await api("GET", `/api/v2/analytics${owner && seller ? `?seller=${encodeURIComponent(seller)}` : ""}`); } catch (e) { fill(body, h("p", { class: "error" }, e.message)); return; }
+    const kpi = (v, l, extra, sub) => h("div", { class: "card stat" }, h("div", { class: "v" }, v, " ", extra || null), h("div", { class: "k" }, l), sub ? h("div", { class: "small muted" }, sub) : null);
+    const showResell = owner && a.months.some((m) => m.resell);
+    const sentToday = (r) => r.reminded && Date.now() / 1000 - r.reminded < 12 * 3600;
+    const risk = a.at_risk.length ? h("div", { class: "risk-list" }, a.at_risk.map((r) => {
+      const days = r.expires ? Math.max(0, Math.ceil((r.expires - Date.now() / 1000) / 86400)) : null;
+      const btn = h("button", { class: "ghost", disabled: !r.telegram || sentToday(r), title: r.telegram ? "" : (fa ? "این مشتری به ربات وصل نیست" : "Not linked to the bot"),
+        onclick: async () => { btn.disabled = true; try { await api("POST", `/api/v2/analytics/remind/${encodeURIComponent(r.email)}`); btn.textContent = fa ? "✓ فرستاده شد" : "✓ Sent"; } catch (e) { toast(e.message); btn.disabled = false; } } },
+        !r.telegram ? (fa ? "بدون تلگرام" : "No Telegram") : sentToday(r) ? (fa ? "✓ امروز فرستاده شد" : "✓ Sent today") : (fa ? "🔔 یادآوری" : "🔔 Remind"));
+      const why = [r.reason === "volume" ? (fa ? "حجم رو به اتمام" : "Low volume") : (fa ? "پایان مدت" : "Ending"),
+        days !== null ? (fa ? `${fmtNum(days)} روز مانده` : `${days} d left`) : null, r.left_bytes >= 0 ? gbs(r.left_bytes) : null].filter(Boolean).join(" · ");
+      return h("div", { class: `risk-row ${days !== null && days <= 2 ? "hot" : ""}` },
+        h("div", { class: "rr-main" }, h("a", { href: `#/clients?q=${encodeURIComponent(r.email)}`, dir: "ltr" }, r.email), owner && r.seller ? h("span", { class: "badge" }, r.seller) : null,
+          h("div", { class: "small muted" }, why)), btn);
+    })) : h("p", { class: "muted small" }, fa ? "فعلاً مشتری در خطر نیست." : "No one at risk right now.");
+    fill(body,
+      h("div", { class: "grid" },
+        kpi(money(a.revenue_month), fa ? "درآمد این ماه (تومان)" : "Revenue this month", delta(a.revenue_month, a.revenue_prev), owner ? (fa ? "فروش فروشگاه + فروش نماینده‌ها" : "shop + resellers") : (fa ? "فروش فروشگاه ربات شما" : "your bot shop")),
+        kpi(fmtNum(a.active), fa ? "مشتری فعال" : "Active customers", null, fa ? `از ${fmtNum(a.total)} سرویس` : `of ${a.total}`),
+        kpi(a.renew_rate < 0 ? "—" : pct(a.renew_rate), fa ? "نرخ تمدید (۳۰ روز)" : "Renewal rate (30d)", null, fa ? `${fmtNum(a.renewed_30d)} تمدید · ${fmtNum(a.lapsed_30d)} تمدید نکرده` : `${a.renewed_30d} renewed · ${a.lapsed_30d} lapsed`),
+        kpi(fmtNum(a.expiring_7d), fa ? "پایان در ۷ روز آینده" : "Ending in 7 days")),
+      h("section", { class: "card an-sec" }, h("h2", {}, fa ? "درآمد ماهانه (میلیون تومان)" : "Monthly revenue (million toman)"),
+        showResell ? h("div", { class: "an-legend small" }, h("span", { class: "sw a" }), fa ? "فروشگاه" : "Shop", h("span", { class: "sw b" }), fa ? "نماینده‌ها (به قیمت نماینده)" : "Resellers") : null,
+        bars(a.months, showResell ? ["shop", "resell"] : ["shop"], ["var(--ion)", "var(--sky)"], fa ? "درآمد ماهانه" : "Monthly revenue")),
+      h("section", { class: "card an-sec" }, h("h2", {}, fa ? "مشتری‌ها ماه‌به‌ماه" : "Customers by month"),
+        h("div", { class: "table-wrap" }, h("table", { class: "table" },
+          h("thead", {}, h("tr", {}, [fa ? "ماه" : "Month", fa ? "جدید" : "New", fa ? "تمدید" : "Renewed", fa ? "ریزش" : "Churned"].map((x) => h("th", { scope: "col" }, x)))),
+          h("tbody", {}, a.months.slice().reverse().map((m) => h("tr", {}, h("th", { scope: "row" }, monthName(m.month)), h("td", {}, fmtNum(m.new)), h("td", {}, fmtNum(m.renewed)), h("td", { class: m.churned ? "bad" : "" }, fmtNum(m.churned))))))),
+        h("p", { class: "small muted" }, fa ? "ریزش: سرویس‌هایی که در آن ماه تمام شدند و بیش از ۷ روز است تمدید نشده‌اند. آمار تمدید از نسخهٔ ۲.۲۳ به بعد کامل است." : "Churned: ended that month and not renewed for 7+ days.")),
+      h("section", { class: "card an-sec" }, h("h2", {}, fa ? "مشتری فعال در ۳۰ روز اخیر" : "Active customers, last 30 days"), line(a.daily)),
+      h("section", { class: "card an-sec" }, h("h2", {}, fa ? "در خطر: تمدید نکرده‌اند" : "At risk"),
+        h("p", { class: "small muted" }, fa ? "سرویس‌هایی که تا ۷ روز دیگر تمام می‌شوند یا کمتر از ۱۵٪ حجمشان مانده. «یادآوری» یک پیام با دکمهٔ تمدید از ربات برای مشتری می‌فرستد (هر مشتری حداکثر هر ۱۲ ساعت یک بار)." : "Ending within 7 days or under 15% volume left. Remind sends a renewal message from the bot."),
+        risk),
+      a.products.length ? h("section", { class: "card an-sec" }, h("h2", {}, fa ? "پرفروش‌ها (۳۰ روز)" : "Best sellers (30 days)"),
+        h("div", { class: "table-wrap" }, h("table", { class: "table" },
+          h("thead", {}, h("tr", {}, [fa ? "محصول" : "Product", fa ? "تعداد" : "Sold", fa ? "مبلغ" : "Toman"].map((x) => h("th", { scope: "col" }, x)))),
+          h("tbody", {}, a.products.map((p) => h("tr", {}, h("th", { scope: "row" }, p.name), h("td", {}, fmtNum(p.count)), h("td", {}, money(p.toman)))))))) : null,
+      a.sellers.length ? h("section", { class: "card an-sec" }, h("h2", {}, fa ? "نرخ تمدید به تفکیک فروشنده (۳۰ روز)" : "Renewal rate by seller"),
+        h("div", { class: "table-wrap" }, h("table", { class: "table" },
+          h("thead", {}, h("tr", {}, [fa ? "فروشنده" : "Seller", fa ? "تمدید" : "Renewed", fa ? "تمدید نکرده" : "Lapsed", fa ? "نرخ" : "Rate"].map((x) => h("th", { scope: "col" }, x)))),
+          h("tbody", {}, a.sellers.sort((x, y) => y.rate - x.rate).map((x) => h("tr", {}, h("th", { scope: "row" }, x.seller ? x.name || x.seller : (fa ? "فروش مستقیم من" : "My own")), h("td", {}, fmtNum(x.renewed)), h("td", {}, fmtNum(x.lapsed)), h("td", {}, h("b", {}, pct(x.rate))))))))) : null);
+  };
+  const sel = owner && reps.length ? h("select", { onchange: (e) => { seller = e.target.value; try { sessionStorage.setItem("anSeller", seller); } catch {} load(); } },
+    h("option", { value: "" }, fa ? "همه" : "Everyone"), h("option", { value: "-", selected: seller === "-" }, fa ? "فروش مستقیم من" : "My own sales"),
+    reps.map((r) => h("option", { value: r.ID, selected: r.ID === seller }, r.Name || r.ID))) : null;
+  load();
+  return h("div", { class: "analytics" },
+    h("div", { class: "row sticky-head" }, h("h1", {}, t("analytics")), h("span", { class: "spacer" }), sel),
+    body);
 }
 
 // ---------- Support tickets ----------

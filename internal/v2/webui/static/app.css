@@ -1051,3 +1051,26 @@ dialog.wide:has(.cform) { inline-size: min(780px, calc(100vw - 20px)); }
 .drill-box { display: grid; gap: 6px; padding: 10px 12px; border: 1px solid var(--glass-line); border-radius: 10px; }
 .drill-box .good { color: var(--good); } .drill-box .bad { color: var(--bad); }
 .drill-box button { justify-self: start; }
+
+/* Business insights */
+.analytics .grid { margin-block-end: 14px; }
+.an-sec { display: grid; gap: 10px; margin-block-end: 14px; }
+.an-sec h2 { margin: 0; font-size: 15px; }
+.an-chart { inline-size: 100%; block-size: auto; }
+.an-chart .axis { stroke: var(--glass-line); }
+.an-chart .lbl { fill: var(--muted); font-size: 13px; }
+.an-chart .lbl.val { fill: var(--text); font-weight: 600; }
+.an-line { fill: none; stroke: var(--ion); stroke-width: 2; }
+.an-dot { fill: var(--ion); }
+.an-legend { display: flex; align-items: center; gap: 6px; color: var(--muted); }
+.an-legend .sw { inline-size: 10px; block-size: 10px; border-radius: 2px; display: inline-block; margin-inline-start: 8px; }
+.an-legend .sw.a { background: var(--ion); } .an-legend .sw.b { background: var(--sky); }
+.analytics .chg { font-size: 12px; font-weight: 600; color: var(--muted); }
+.analytics .chg.up { color: var(--good); } .analytics .chg.down { color: var(--bad); }
+.analytics td.bad { color: var(--bad); }
+.risk-list { display: grid; gap: 6px; }
+.risk-row { display: flex; align-items: center; gap: 10px; padding: 9px 12px; border: 1px solid var(--glass-line); border-radius: 10px; }
+.risk-row.hot { border-color: color-mix(in oklab, var(--bad) 55%, transparent); }
+.risk-row .rr-main { flex: 1; min-inline-size: 0; }
+.risk-row .rr-main a { font-weight: 600; display: inline-block; margin-inline-end: 8px; }
+.risk-row button { flex: none; }
