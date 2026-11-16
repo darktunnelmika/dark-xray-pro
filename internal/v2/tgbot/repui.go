@@ -43,7 +43,7 @@ func repCan(role, what string) bool {
 	case "owner":
 		return true
 	case "manager":
-		return what != "admins"
+		return what != "admins" // includes "shop"
 	case "sales":
 		return what == "new" || what == "renew" || what == "orders" || what == "credit" || what == "view" || what == "link"
 	case "support":
@@ -157,6 +157,9 @@ func (b *Bot) repHome(ctx context.Context, chat int64, rep, role string) {
 	r3 := []Button{}
 	if repCan(role, "credit") {
 		r3 = append(r3, repBtn("💳 اعتبار و گزارش", "cr"))
+	}
+	if repCan(role, "shop") {
+		r3 = append(r3, Button{Text: "🧾 محصولات", Data: "S:h"})
 	}
 	if repCan(role, "admins") {
 		r3 = append(r3, repBtn("⚙️ ادمین‌های ربات", "adm"))
@@ -560,21 +563,7 @@ func friendlyErr(err error) string {
 
 // repInbounds: the reseller's allowed inbounds (all, when unrestricted).
 func (b *Bot) repInbounds(ctx context.Context, rep string) []string {
-	if pol, err := b.Store.RepPolicyOf(ctx, rep); err == nil && len(pol.Inbounds) > 0 {
-		return pol.Inbounds
-	}
-	list, _ := b.Store.Inbounds(ctx)
-	var out []string
-	for _, ib := range list {
-		switch ib.Protocol {
-		case "socks", "http", "dokodemo-door", "tunnel", "mtproto":
-			continue
-		}
-		if ib.Enabled {
-			out = append(out, ib.Tag)
-		}
-	}
-	return out
+	return b.Store.SellerInbounds(ctx, rep)
 }
 
 func (b *Bot) repOwns(ctx context.Context, rep, email string) bool {
@@ -748,8 +737,9 @@ func fmtGB(g float64) string { return strconv.FormatFloat(g, 'f', -1, 64) }
 
 var repRows = [][]string{
 	{"➕ ساخت کاربر", "👥 کاربران"},
-	{"🛒 سفارش‌ها", "💳 اعتبار"},
-	{"🏠 داشبورد", "🛍 حالت مشتری"},
+	{"🛒 سفارش‌ها", "🧾 محصولات"},
+	{"💳 اعتبار", "🏠 داشبورد"},
+	{"🛍 حالت مشتری"},
 }
 
 func (b *Bot) repModeKey(chat int64) string { return fmt.Sprintf("tg_repmode:%s:%d", b.Seller, chat) }
@@ -788,6 +778,12 @@ func (b *Bot) repKey(ctx context.Context, chat int64, rep, role, act string) {
 		b.repCallback(ctx, chat, "R:ord")
 	case "rcredit":
 		b.repCallback(ctx, chat, "R:cr")
+	case "rshop":
+		if !repCan(role, "shop") {
+			b.send(ctx, chat, "مدیریت محصولات با نقش شما مجاز نیست.", repBackKB)
+			return
+		}
+		b.shopHome(ctx, chat)
 	case "rcustomer":
 		b.setRepMode(ctx, chat, false)
 		b.menu(ctx, chat)
@@ -802,7 +798,7 @@ func (b *Bot) repKey(ctx context.Context, chat int64, rep, role, act string) {
 // ensureRepKeyboard puts the reseller keyboard on once (it replaces the
 // customer keyboard and the old panel's).
 func (b *Bot) ensureRepKeyboard(ctx context.Context, chat int64) {
-	key := fmt.Sprintf("tg_kbrep1:%s:%d", b.Seller, chat)
+	key := fmt.Sprintf("tg_kbrep2:%s:%d", b.Seller, chat)
 	if b.Store.Setting(ctx, key) == "1" {
 		return
 	}

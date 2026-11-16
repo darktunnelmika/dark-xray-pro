@@ -40,6 +40,7 @@ var ownerMenu = &Keyboard{Rows: [][]Button{
 	{{Text: "📊 وضعیت", Data: "a:status"}, {Text: "🧩 نودها", Data: "a:nodes"}},
 	{{Text: "👥 کلاینت‌ها", Data: "a:clients"}, {Text: "🔎 جستجو", Data: "a:find"}},
 	{{Text: "⚡ فروش سریع", Data: "a:quick"}, {Text: "🛒 سفارش‌ها", Data: "a:orders"}},
+	{{Text: "🧾 محصولات فروشگاه", Data: "S:h"}},
 	{{Text: "💼 نماینده‌ها", Data: "a:reps"}, {Text: "📋 گزارش امروز", Data: "a:report"}},
 	{{Text: "📣 پیام همگانی", Data: "a:bc"}, {Text: "⏰ زمان‌بندی‌ها", Data: "a:schlist"}},
 	{{Text: "⚙️ تنظیمات ربات", Data: "a:settings"}, {Text: "📦 بکاپ الان", Data: "a:backup"}},

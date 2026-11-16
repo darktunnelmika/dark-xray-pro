@@ -311,6 +311,8 @@ func keyboardAction(text string) string {
 		return "rorders"
 	case "اعتبار":
 		return "rcredit"
+	case "محصولات", "محصولات فروشگاه":
+		return "rshop"
 	case "حالت مشتری":
 		return "rcustomer"
 	case "حالت نماینده":
@@ -343,8 +345,12 @@ func (b *Bot) keyAction(ctx context.Context, chat int64, act string) {
 			return
 		}
 		b.menu(ctx, chat)
-	case "rclients", "rnew", "rorders", "rcredit", "rcustomer", "repmode":
+	case "rclients", "rnew", "rorders", "rcredit", "rshop", "rcustomer", "repmode":
 		if b.Owners[chat] {
+			if act == "rshop" && b.Seller == "" {
+				b.shopHome(ctx, chat)
+				return
+			}
 			b.ownerHome(ctx, chat)
 			return
 		}

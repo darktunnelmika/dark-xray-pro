@@ -149,11 +149,8 @@ func (s *Store) PutProduct(ctx context.Context, by Principal, p Product) error {
 		if err != nil {
 			return fmt.Errorf("%w: unknown seller", ErrInvalid)
 		}
-		if by.Role == "rep" {
-			var manage bool
-			if err := s.ro.QueryRowContext(ctx, `SELECT manage_products FROM reps WHERE id=?`, by.RepID).Scan(&manage); err != nil || !manage {
-				return fmt.Errorf("%w: managing products is not allowed", ErrPolicy)
-			}
+		if err := s.canManageProducts(ctx, by); err != nil {
+			return err
 		}
 		if p.Plan == "unlimited" && !pol.AllowUnlimited {
 			return fmt.Errorf("%w: unlimited plans are not allowed for this seller", ErrPolicy)
@@ -189,8 +186,6 @@ func (s *Store) PutProduct(ctx context.Context, by Principal, p Product) error {
 		return err
 	case !canSell(by, curSeller):
 		return fmt.Errorf("%w: that ID is taken", ErrInvalid)
-	case cur == "archived":
-		return fmt.Errorf("%w: archived products cannot be changed", ErrInvalid)
 	}
 	for _, t := range p.Inbounds {
 		var x int
@@ -347,7 +342,11 @@ func (s *Store) FulfillOrder(ctx context.Context, by Principal, id int64) (strin
 		if email == "" {
 			email = fmt.Sprintf("%s-%d", p.ID, id)
 		}
-		c = Client{Email: email, Enabled: true, MaxIPs: p.MaxIPs, Inbounds: p.Inbounds, VolumeBytes: -1}
+		ibs := p.Inbounds
+		if len(ibs) == 0 {
+			ibs = s.SellerInbounds(ctx, o.Seller) // none picked = every inbound, also ones added later
+		}
+		c = Client{Email: email, Enabled: true, MaxIPs: p.MaxIPs, Inbounds: ibs, VolumeBytes: -1}
 		if p.Plan == "volume" {
 			c.VolumeBytes = p.GB << 30
 		}
@@ -431,4 +430,96 @@ func (s *Store) SetManageProducts(ctx context.Context, repID string, on bool) er
 		return ErrNotFound
 	}
 	return nil
+}
+
+// canManageProducts: owners always; a representative with the grant.
+func (s *Store) canManageProducts(ctx context.Context, by Principal) error {
+	if by.Role == "owner" {
+		return nil
+	}
+	var manage bool
+	if by.Role != "rep" || s.ro.QueryRowContext(ctx, `SELECT manage_products FROM reps WHERE id=?`, by.RepID).Scan(&manage) != nil || !manage {
+		return fmt.Errorf("%w: managing products is not allowed", ErrPolicy)
+	}
+	return nil
+}
+
+// SellerInbounds: the inbounds a seller's products give when none are
+// picked: the representative's allowed list, or every customer inbound.
+func (s *Store) SellerInbounds(ctx context.Context, seller string) []string {
+	if seller != "" {
+		if pol, err := s.RepPolicyOf(ctx, seller); err == nil && len(pol.Inbounds) > 0 {
+			return pol.Inbounds
+		}
+	}
+	list, _ := s.Inbounds(ctx)
+	out := []string{}
+	for _, ib := range list {
+		switch ib.Protocol {
+		case "socks", "http", "dokodemo-door", "tunnel", "mtproto":
+			continue
+		}
+		if ib.Enabled {
+			out = append(out, ib.Tag)
+		}
+	}
+	return out
+}
+
+// ProductByID returns one product by may manage or sell.
+func (s *Store) ProductByID(ctx context.Context, by Principal, id string) (Product, error) {
+	p, err := scanProduct(s.ro.QueryRowContext(ctx, `SELECT `+productCols+` FROM products WHERE id=?`, id))
+	if err != nil || !canSell(by, p.Seller) || (by.Role != "owner" && p.Seller == "") {
+		return Product{}, ErrNotFound
+	}
+	return p, nil
+}
+
+// DeleteProduct removes a product that was never ordered; one with orders
+// is archived instead (hidden, restorable) so the order history keeps its
+// name. It reports whether the row was really removed.
+func (s *Store) DeleteProduct(ctx context.Context, by Principal, id string) (bool, error) {
+	p, err := s.ProductByID(ctx, by, id)
+	if err != nil {
+		return false, err
+	}
+	if p.Seller != "" || by.Role != "owner" {
+		if err := s.canManageProducts(ctx, by); err != nil {
+			return false, err
+		}
+	}
+	var n int
+	if err := s.ro.QueryRowContext(ctx, `SELECT COUNT(*) FROM orders WHERE product_id=?`, id).Scan(&n); err != nil {
+		return false, err
+	}
+	if n == 0 {
+		_, err = s.db.ExecContext(ctx, `DELETE FROM products WHERE id=?`, id)
+		return err == nil, err
+	}
+	_, err = s.db.ExecContext(ctx, `UPDATE products SET status='archived' WHERE id=?`, id)
+	return false, err
+}
+
+// ReorderProducts sets the shop order of a seller's products in one go.
+func (s *Store) ReorderProducts(ctx context.Context, by Principal, seller string, ids []string) error {
+	if by.Role == "rep" {
+		seller = by.RepID
+	}
+	if err := s.canManageProducts(ctx, by); err != nil {
+		return err
+	}
+	if len(ids) > 1000 {
+		return ErrInvalid
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for i, id := range ids {
+		if _, err := tx.ExecContext(ctx, `UPDATE products SET sort=? WHERE id=? AND seller=?`, (i+1)*10, id, seller); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }

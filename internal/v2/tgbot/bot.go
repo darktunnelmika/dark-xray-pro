@@ -35,10 +35,11 @@ type Bot struct {
 	Now    func() time.Time
 
 	mu         sync.Mutex
-	awaiting   map[int64]string    // chat -> expected input: "support" | "link" | owner prompts
-	rdraft     map[int64]*repDraft // reseller chat -> client being created or renewed
-	refs       map[string]string   // short reference -> client name (reseller buttons)
-	draft      map[int64]*bcDraft  // owner chat -> broadcast being prepared
+	awaiting   map[int64]string           // chat -> expected input: "support" | "link" | owner prompts
+	rdraft     map[int64]*repDraft        // reseller chat -> client being created or renewed
+	refs       map[string]string          // short reference -> client name (reseller buttons)
+	pdraft     map[int64]*hubcore.Product // chat -> product being made with buttons
+	draft      map[int64]*bcDraft         // owner chat -> broadcast being prepared
 	bcStop     bool
 	lastNotify time.Time
 	nodeState  map[string]bool
@@ -264,6 +265,12 @@ func (b *Bot) onMessage(ctx context.Context, m *Message) {
 				keys = append(keys, k)
 			}
 			b.send(ctx, chat, fmt.Sprintf("✨ %d ایموجی ثبت شد (جمعاً %d). از این به بعد این‌ها در پیام‌ها و دکمه‌ها متحرک‌اند:\n%s\n\nایموجی‌های بیشتری بفرستید یا /done بزنید.", len(ce), n, strings.Join(keys, " ")), nil)
+			return
+		}
+	}
+	if w := b.peekAwait(chat); strings.HasPrefix(w, "S:") && text != "" && !strings.HasPrefix(text, "/") && keyboardAction(text) == "" {
+		b.takeAwait(chat)
+		if b.shopInput(ctx, chat, w, text) {
 			return
 		}
 	}
@@ -769,6 +776,9 @@ func (b *Bot) onCallback(ctx context.Context, q *CallbackQuery) {
 		return
 	}
 	if b.repCallback(ctx, chat, q.Data) {
+		return
+	}
+	if b.shopCallback(ctx, chat, q.Data) {
 		return
 	}
 	verb, rest, _ := strings.Cut(q.Data, ":")

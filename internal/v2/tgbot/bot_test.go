@@ -653,3 +653,96 @@ func TestResellerButtons(t *testing.T) {
 	b.Handle(ctx, cb(9999, "R:new"))
 	find(t, api.take(), 9999, "فقط برای نماینده")
 }
+
+func TestShopButtons(t *testing.T) {
+	s, err := hubcore.Open(filepath.Join(t.TempDir(), "v2.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	ctx := context.Background()
+	_, _ = s.CreateNode(ctx, "n1", "N")
+	_ = s.PutInbound(ctx, "in1", "n1", []byte(`{"protocol":"vless","port":443,"settings":{}}`), true)
+	owner := hubcore.Principal{User: "o", Role: "owner"}
+	_ = s.PutRep(ctx, hubcore.Rep{ID: "ali", Name: "Ali", Enabled: true})
+	_ = s.AdjustCredit(ctx, "o", "ali", 100<<30, 0, "")
+	_ = s.PutProduct(ctx, owner, hubcore.Product{ID: "a30", Seller: "ali", Name: "30GB", Plan: "volume", GB: 30, Days: 30, Inbounds: []string{"in1"}, Price: 1, Status: "published"})
+	api := &fakeAPI{}
+	b := &Bot{Store: s, API: api, SubBase: "https://x", Logf: t.Logf, Seller: "ali"}
+	const repChat = int64(3100)
+	code, _ := s.NewTgLinkCode(ctx, "ali")
+	b.Handle(ctx, msg(repChat, "/start rep_"+code))
+	api.take()
+	b.Handle(ctx, msg(repChat, "🧾 محصولات"))
+	find(t, api.take(), repChat, "محصولات فروشگاه")
+	// A new product in a few steps; the price typed the Persian way.
+	b.Handle(ctx, cb(repChat, "S:n"))
+	b.Handle(ctx, msg(repChat, "۲۰ گیگ ویژه"))
+	b.Handle(ctx, cb(repChat, "S:ng:20"))
+	b.Handle(ctx, cb(repChat, "S:nd:30"))
+	b.Handle(ctx, cb(repChat, "S:ni:2"))
+	b.Handle(ctx, msg(repChat, "۱۵۰ هزار"))
+	find(t, api.take(), repChat, "150,000")
+	b.Handle(ctx, cb(repChat, "S:nm:pub"))
+	find(t, api.take(), repChat, "ساخته شد")
+	var made hubcore.Product
+	list, _ := s.Products(ctx, owner, false)
+	for _, p := range list {
+		if p.Name == "۲۰ گیگ ویژه" {
+			made = p
+		}
+	}
+	if made.ID == "" || made.Seller != "ali" || made.GB != 20 || made.Price != 150000 || made.Status != "published" || len(made.Inbounds) != 0 {
+		t.Fatalf("made: %+v", made)
+	}
+	// Change the price, switch it off and on.
+	b.Handle(ctx, cb(repChat, "S:e:"+made.ID+":price"))
+	b.Handle(ctx, msg(repChat, "200,000"))
+	find(t, api.take(), repChat, "ذخیره شد")
+	b.Handle(ctx, cb(repChat, "S:t:"+made.ID))
+	api.take()
+	if p, _ := s.ProductByID(ctx, owner, made.ID); p.Price != 200000 || p.Status != "draft" {
+		t.Fatalf("edited: %+v", p)
+	}
+	b.Handle(ctx, cb(repChat, "S:t:"+made.ID))
+	// Sold with no inbounds picked: the customer gets every allowed one.
+	rp := hubcore.Principal{User: "r", Role: "rep", RepID: "ali"}
+	id, err := s.CreateOrder(ctx, rp, made.ID, "x", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	email, err := s.FulfillOrder(ctx, rp, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c, _ := s.ClientByEmail(ctx, email); len(c.Inbounds) != 1 || c.Inbounds[0] != "in1" {
+		t.Fatalf("inbounds: %+v", c.Inbounds)
+	}
+	// Never sold: deleted for good; sold: only taken off the shop.
+	b.Handle(ctx, cb(repChat, "S:y:a30"))
+	find(t, api.take(), repChat, "حذف شد")
+	if _, err := s.ProductByID(ctx, owner, "a30"); err == nil {
+		t.Fatal("a30 deleted")
+	}
+	b.Handle(ctx, cb(repChat, "S:y:"+made.ID))
+	find(t, api.take(), repChat, "برداشته شد")
+	if p, _ := s.ProductByID(ctx, owner, made.ID); p.Status != "archived" {
+		t.Fatal("archived", p.Status)
+	}
+	// Restored from the card.
+	b.Handle(ctx, cb(repChat, "S:t:"+made.ID))
+	if p, _ := s.ProductByID(ctx, owner, made.ID); p.Status != "draft" {
+		t.Fatal("restored", p.Status)
+	}
+	// Without the grant nothing changes.
+	_ = s.SetManageProducts(ctx, "ali", false)
+	b.Handle(ctx, cb(repChat, "S:t:"+made.ID))
+	find(t, api.take(), repChat, "فعال نیست")
+	// The owner manages the main shop from the main bot.
+	ob := &Bot{Store: s, API: api, SubBase: "https://x", Logf: t.Logf, Owners: map[int64]bool{1: true}}
+	ob.Handle(ctx, cb(1, "S:h"))
+	find(t, api.take(), 1, "محصولات فروشگاه")
+	// A stranger is refused.
+	ob.Handle(ctx, cb(9999, "S:h"))
+	find(t, api.take(), 9999, "مجاز نیست")
+}

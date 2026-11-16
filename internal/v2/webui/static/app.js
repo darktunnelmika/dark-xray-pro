@@ -170,8 +170,35 @@ async function api(method, path, body) {
   });
   if (res.status === 401 && !path.startsWith("/api/v2/auth/login")) { location.hash = "#/login"; throw new Error("unauthorized"); }
   const text = await res.text();
-  if (!res.ok) throw new Error(text.trim() || res.statusText);
+  if (!res.ok) throw new Error(faErr(text.trim() || res.statusText));
   return text ? JSON.parse(text) : null;
+}
+
+// faErr: the server's English errors in plain Persian (numbers kept).
+const FA_ERRS = [
+  [/insufficient credit/i, "اعتبار کافی نیست"],
+  [/the longest term allowed is (\d+) days/i, "بیشترین مدت مجاز برای شما $1 روز است"],
+  [/the largest volume allowed is (\d+) GB/i, "بیشترین حجم مجاز برای شما $1 گیگ است"],
+  [/unlimited plans are not allowed/i, "فروش نامحدود برای شما فعال نیست"],
+  [/managing products is not allowed/i, "مدیریت محصولات برای شما فعال نیست؛ از مدیر بخواهید فعالش کند"],
+  [/inbound "?([^" ]+)"? is not allowed/i, "اینباند $1 برای شما مجاز نیست"],
+  [/unknown inbound "?([^" ]+)"?/i, "اینباند $1 دیگر وجود ندارد؛ از لیست اینباندها حذفش کنید"],
+  [/a volume product needs GB/i, "برای محصول حجمی، حجم را وارد کنید"],
+  [/that ID is taken/i, "این شناسه قبلاً استفاده شده"],
+  [/category names must be unique and short/i, "نام دسته‌ها باید تکراری نباشد و کوتاه باشد (حداکثر ۴۰ حرف)"],
+  [/at most 40 categories/i, "حداکثر ۴۰ دسته"],
+  [/unknown seller/i, "فروشنده پیدا نشد"],
+  [/product is gone/i, "این محصول حذف شده"],
+  [/only pending orders can be cancelled/i, "فقط سفارش‌های منتظر لغو می‌شوند"],
+  [/order changed meanwhile/i, "سفارش هم‌زمان تغییر کرد؛ صفحه را تازه کنید"],
+  [/^not found$/i, "پیدا نشد"],
+  [/^temporarily unavailable$/i, "سرور موقتاً در دسترس نیست؛ کمی بعد دوباره امتحان کنید"],
+  [/^invalid( input)?$/i, "اطلاعات واردشده درست نیست"],
+];
+function faErr(msg) {
+  if (typeof lang === "undefined" || lang !== "fa") return msg;
+  for (const [re, fa] of FA_ERRS) { const m = msg.match(re); if (m) return fa.replace(/\$(\d)/g, (_, i) => m[i] || ""); }
+  return msg;
 }
 
 function toast(msg) {
@@ -3895,9 +3922,12 @@ function productsView(products, inbounds, reps, sold, canEdit) {
   const move = async (list, i, d) => {
     const j = i + d; if (j < 0 || j >= list.length) return;
     const order = list.slice(); [order[i], order[j]] = [order[j], order[i]];
-    await guarded(async () => { for (let k = 0; k < order.length; k++) if (order[k].sort !== (k + 1) * 10) await api("PUT", `/api/v2/shop/products/${encodeURIComponent(order[k].id)}`, { ...order[k], sort: (k + 1) * 10 }); });
+    await guarded(() => api("PUT", "/api/v2/shop/products-order", { seller, ids: order.map((x) => x.id) }));
     route();
   };
+  const restore = async (p) => { await guarded(() => api("PUT", `/api/v2/shop/products/${encodeURIComponent(p.id)}`, { ...p, status: "draft" })); toast(fa ? "برگشت (پیش‌نویس)" : "Restored as draft"); route(); };
+  const hiddenN = mine.filter((p) => p.status === "archived").length;
+  let showHidden = false;
   const card = (p, list, i) => {
     const on = p.status === "published";
     const sw = h("input", { type: "checkbox", role: "switch", class: "switch", checked: on, disabled: !canEdit || p.status === "archived", "aria-label": fa ? "فعال در ربات" : "On sale" });
@@ -3918,13 +3948,15 @@ function productsView(products, inbounds, reps, sold, canEdit) {
       h("div", { class: "row tile-foot" },
         h("span", { class: "small muted" }, fa ? `${fmtNum(sold[p.id] || 0)} فروش` : `${sold[p.id] || 0} sold`),
         h("span", { class: "spacer" }),
-        canEdit && p.status !== "archived" ? h("button", { class: "ghost", onclick: () => productForm(p, inbounds, reps) }, t("edit")) : null,
-        canEdit ? h("button", { class: "ghost", onclick: () => productForm({ ...p, id: "", name: `${p.name} (${fa ? "کپی" : "copy"})`, status: "draft" }, inbounds, reps, { copy: true }) }, fa ? "کپی" : "Copy") : null));
+        canEdit && p.status === "archived" ? h("button", { class: "ghost", onclick: () => restore(p) }, fa ? "بازگرداندن" : "Restore") : null,
+        canEdit && p.status !== "archived" ? h("button", { class: "ghost", onclick: () => productForm(p, inbounds, reps, { sold: sold[p.id] || 0 }) }, t("edit")) : null,
+        canEdit ? h("button", { class: "ghost", onclick: () => productForm({ ...p, id: "", name: `${p.name} (${fa ? "کپی" : "copy"})`, status: "draft" }, inbounds, reps, { copy: true }) }, fa ? "کپی" : "Copy") : null,
+        canEdit && p.status !== "archived" ? iconBtn("trash", fa ? "حذف" : "Delete", () => deleteProduct(p, sold[p.id] || 0)) : null));
   };
   function draw(cats) {
     const groups = [];
     const byCat = {};
-    for (const p of mine) (byCat[p.category || ""] ||= []).push(p);
+    for (const p of mine) if (showHidden || p.status !== "archived") (byCat[p.category || ""] ||= []).push(p);
     const order = cats.map((c) => c.name).filter((n) => byCat[n]);
     for (const n of Object.keys(byCat)) if (n && !order.includes(n)) order.push(n);
     if (byCat[""]) order.push("");
@@ -3938,14 +3970,29 @@ function productsView(products, inbounds, reps, sold, canEdit) {
     return [
       h("div", { class: "row shop-bar" }, sellerSel,
         h("div", { class: "chips" }, cats.map((c) => h("span", { class: "chip" }, `${c.emoji || "📂"} ${c.name}`, h("span", { class: "count" }, fmtNum(c.count))))),
+        hiddenN ? h("button", { class: "ghost", "aria-pressed": String(showHidden), onclick: () => { showHidden = !showHidden; fill(box, ...draw(lastCats)); } }, fa ? `${showHidden ? "پنهان کردن" : "نمایش"} حذف‌شده‌ها (${fmtNum(hiddenN)})` : `${showHidden ? "Hide" : "Show"} removed (${hiddenN})`) : null,
         canEdit ? h("button", { class: "ghost spacer", onclick: () => categoriesForm(seller, cats) }, fa ? "مدیریت دسته‌ها" : "Categories") : null),
       groups.length ? groups : emptyState(fa ? "هنوز محصولی ندارید" : "No products yet", fa ? "یک بسته (حجم، مدت و قیمت) بسازید تا در ربات و فروشگاه فروخته شود." : "Create a plan (volume, days and price) to sell it in the bot and the store.",
         canEdit ? `${t("add")} · ${t("product")}` : "", () => productForm(null, inbounds, reps, { seller }))];
   }
-  const load = () => api("GET", `/api/v2/shop/categories${owner ? `?seller=${encodeURIComponent(seller)}` : ""}`).then((cats) => fill(box, ...draw(cats || []))).catch(() => fill(box, ...draw([])));
+  let lastCats = [];
+  const load = () => api("GET", `/api/v2/shop/categories${owner ? `?seller=${encodeURIComponent(seller)}` : ""}`).then((cats) => { lastCats = cats || []; fill(box, ...draw(lastCats)); }).catch(() => fill(box, ...draw([])));
   fill(box, ...draw([]));
   load();
   return box;
+}
+
+// deleteProduct: removes a never-sold product; a sold one is hidden (restorable).
+async function deleteProduct(p, sold) {
+  const fa = lang === "fa";
+  const msg = sold ? (fa ? `«${p.name}» ${fmtNum(sold)} بار فروخته شده؛ برای حفظ تاریخچهٔ سفارش‌ها از فروشگاه حذف و پنهان می‌شود (قابل بازگرداندن). ادامه؟` : `"${p.name}" was sold ${sold} times; it is removed from the shop and hidden (restorable). Continue?`)
+    : (fa ? `محصول «${p.name}» برای همیشه حذف شود؟` : `Delete "${p.name}" for good?`);
+  if (!(await confirmAction(msg))) return false;
+  let r;
+  try { r = await api("DELETE", `/api/v2/shop/products/${encodeURIComponent(p.id)}`); } catch (e) { toast(t("failed", { e: e.message })); return false; }
+  toast(r.deleted ? (fa ? "حذف شد" : "Deleted") : (fa ? "از فروشگاه حذف شد" : "Removed from the shop"));
+  route();
+  return true;
 }
 
 // categoriesForm: rename, emoji, order and remove the shop's categories.
@@ -4001,7 +4048,6 @@ function productForm(p, inbounds, reps, opt = {}) {
   const stars = h("input", { type: "number", min: "0", max: "100000", step: "1", value: v.price_stars || 0, dir: "ltr" });
   const first = h("input", { type: "checkbox", checked: v.first_use });
   const onSale = h("input", { type: "checkbox", checked: v.status !== "draft" && v.status !== "archived" });
-  const archived = h("input", { type: "checkbox", checked: v.status === "archived" });
   const renewable = h("input", { type: "checkbox", checked: !v.no_renew });
   const perBuyer = h("input", { type: "number", min: "0", max: "1000", value: v.per_buyer || 0, dir: "ltr" });
   const seller = owner ? h("select", {}, h("option", { value: "" }, t("ownerSelf")), (reps || []).map((r) => h("option", { value: r.ID, selected: (v.seller || "") === r.ID }, r.Name || r.ID))) : null;
@@ -4017,11 +4063,19 @@ function productForm(p, inbounds, reps, opt = {}) {
   if (seller) seller.addEventListener("change", () => loadCats(seller.value));
   catSel.addEventListener("change", () => { catNew.hidden = catSel.value !== "+"; if (!catNew.hidden) catNew.focus(); });
   const ibs = (inbounds || []).filter((ib) => !["socks", "http", "dokodemo-door", "tunnel", "mtproto"].includes(ib.protocol));
+  const picked = (v.inbounds || []).filter((x) => ibs.some((ib) => ib.tag === x));
+  const allIb = !picked.length || ibs.every((ib) => picked.includes(ib.tag));
+  const allChip = h("button", { type: "button", class: "chip", "aria-pressed": String(allIb) }, T("همه (سرورهای بعدی هم)", "All (new ones too)"));
   const ibChips = ibs.map((ib) => {
-    const b = h("button", { type: "button", class: "chip", "aria-pressed": String((v.inbounds || []).includes(ib.tag) || (isNew && !(v.inbounds || []).length)), "data-tag": ib.tag, dir: "ltr" }, ib.tag);
-    b.addEventListener("click", () => b.setAttribute("aria-pressed", String(b.getAttribute("aria-pressed") !== "true")));
+    const b = h("button", { type: "button", class: "chip", "aria-pressed": String(!allIb && picked.includes(ib.tag)), "data-tag": ib.tag, dir: "ltr" }, ib.tag);
+    b.addEventListener("click", () => {
+      b.setAttribute("aria-pressed", String(b.getAttribute("aria-pressed") !== "true"));
+      const any = ibChips.some((x) => x.getAttribute("aria-pressed") === "true");
+      allChip.setAttribute("aria-pressed", String(!any));
+    });
     return b;
   });
+  allChip.addEventListener("click", () => { allChip.setAttribute("aria-pressed", "true"); ibChips.forEach((x) => x.setAttribute("aria-pressed", "false")); });
   const chipRow = (inp, vals, fmt) => h("div", { class: "chips qp" }, vals.map((x) => h("button", { type: "button", class: "chip", onclick: () => { inp.value = x; calc(); } }, fmt(x))));
   const gbBox = h("div", {}, h("label", {}, h("span", {}, T("حجم (گیگ)", "Volume (GB)")), gb), chipRow(gb, [10, 20, 30, 50, 100, 200], (x) => `${fmtNum(x)} GB`));
   const preview = h("div", { class: "csum" });
@@ -4035,13 +4089,13 @@ function productForm(p, inbounds, reps, opt = {}) {
       h("div", { class: "small muted" }, T("در ربات این‌طور دیده می‌شود:", "Customers see in the bot:")),
       h("div", { class: "bot-btn" }, `📦 ${name.value || T("نام محصول", "Product name")} — ${pr ? `${fmtNum(pr)} ${T("تومان", "toman")}` : T("رایگان", "free")}`),
       h("div", { class: "small" }, [cat ? `📂 ${cat}` : null, size, T(`${fmtNum(+days.value || 0)} روز`, `${days.value} days`), +ips.value ? T(`${fmtNum(+ips.value)} کاربره`, `${ips.value} devices`) : null,
-        first.checked ? T("شروع از اولین اتصال", "starts on first use") : null, onSale.checked && !archived.checked ? T("در حال فروش", "on sale") : T("پیش‌نویس (در ربات دیده نمی‌شود)", "draft (hidden in the bot)")].filter(Boolean).join(" · ")));
+        first.checked ? T("شروع از اولین اتصال", "starts on first use") : null, onSale.checked ? T("در حال فروش", "on sale") : T("پیش‌نویس (در ربات دیده نمی‌شود)", "draft (hidden in the bot)")].filter(Boolean).join(" · ")));
   };
   for (const [k, l] of [["volume", T("حجمی", "Volume")], canUnl ? ["unlimited", T("نامحدود", "Unlimited")] : null].filter(Boolean)) {
     planSeg.append(h("button", { type: "button", role: "radio", "aria-checked": String(plan === k), onclick: (e) => { plan = k; for (const x of planSeg.children) x.setAttribute("aria-checked", String(x === e.currentTarget)); calc(); } }, l));
   }
   [name, gb, days, ips, price, catNew].forEach((x) => x.addEventListener("input", calc));
-  [first, onSale, archived, catSel].forEach((x) => x.addEventListener("change", calc));
+  [first, onSale, catSel].forEach((x) => x.addEventListener("change", calc));
   const err = h("div", { class: "error" });
   const save = h("button", { class: "primary", value: "save", onclick: async (e) => {
     e.preventDefault(); err.textContent = "";
@@ -4051,9 +4105,9 @@ function productForm(p, inbounds, reps, opt = {}) {
     try {
       await api("PUT", `/api/v2/shop/products/${encodeURIComponent(id)}`, {
         name: name.value.trim(), plan, gb: plan === "unlimited" ? 0 : +gb.value || 0, days: +days.value, max_ips: +ips.value || 0, price: Math.round(+price.value || 0), price_stars: Math.round(+stars.value || 0),
-        status: archived.checked ? "archived" : onSale.checked ? "published" : "draft", first_use: first.checked, seller: seller ? seller.value : "",
+        status: onSale.checked ? "published" : "draft", first_use: first.checked, seller: seller ? seller.value : "",
         category: cat, no_renew: !renewable.checked, per_buyer: +perBuyer.value || 0, sort: v.sort || 0,
-        inbounds: tags.length ? tags : ibs.map((ib) => ib.tag) });
+        inbounds: allChip.getAttribute("aria-pressed") === "true" ? [] : tags });
       document.getElementById("modal").close("save"); toast(t("saved")); route();
     } catch (x) { err.textContent = x.message; }
   } }, isNew ? T("ساخت محصول", "Create product") : t("save"));
@@ -4073,10 +4127,9 @@ function productForm(p, inbounds, reps, opt = {}) {
       h("label", {}, h("span", {}, T("سقف خرید هر مشتری (۰ = آزاد)", "Per-customer limit (0 = none)")), perBuyer),
       owner ? h("label", {}, h("span", {}, t("priceStars")), stars) : null,
       seller ? h("label", {}, h("span", {}, t("seller")), seller) : null,
-      ibs.length > 1 ? h("div", {}, h("span", { class: "lbl" }, T("اینباندها (خالی = همه)", "Inbounds (none = all)")), h("div", { class: "chips" }, ibChips)) : null,
-      !isNew ? h("label", { class: "check" }, archived, T("بایگانی (دیگر فروخته و ویرایش نمی‌شود)", "Archive (no longer sold or edited)")) : null,
+      ibs.length > 1 ? h("div", {}, h("span", { class: "lbl" }, T("اینباندها", "Inbounds")), h("div", { class: "chips" }, allChip, ibChips)) : null,
       h("p", { class: "small muted", dir: "ltr" }, `id: ${id}`))),
-    preview, err), [save]);
+    preview, err), [!isNew ? h("button", { class: "ghost danger", value: "del", onclick: async (e) => { e.preventDefault(); document.getElementById("modal").close(); await deleteProduct(v, opt.sold || 0); } }, T("حذف محصول", "Delete")) : null, save].filter(Boolean));
   d.classList.add("wide");
 }
 
