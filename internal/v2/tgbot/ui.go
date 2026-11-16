@@ -31,7 +31,7 @@ type screen struct {
 
 // onScreen marks ctx so the first send to this chat redraws msgID.
 func onScreen(ctx context.Context, q *CallbackQuery) context.Context {
-	if q.Message == nil || len(q.Message.Photo) > 0 || q.Message.Text == "" || q.Message.Chat.ID != q.From.ID {
+	if q.Message == nil || len(q.Message.Photo) > 0 || q.Message.Text == "" || (q.Message.Chat.ID != 0 && q.Message.Chat.ID != q.From.ID) {
 		return ctx // a group's message is not this user's screen
 	}
 	return context.WithValue(ctx, screenKey{}, &screen{chat: q.From.ID, msgID: q.Message.ID})

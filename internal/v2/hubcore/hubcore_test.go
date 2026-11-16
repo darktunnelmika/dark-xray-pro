@@ -875,7 +875,11 @@ func TestSubSellers(t *testing.T) {
 	if len(sel) != 1 || sel[0].VolumeCredit != 4<<30 || sel[0].UnlimitedUnits != 1 || sel[0].Policy.MaxDays != 30 {
 		t.Fatalf("%+v", sel)
 	}
-	// The sub-seller sells within its own credit and limits.
+	// The sub-seller sells within its own credit and limits, a plan its
+	// reseller defined.
+	if err := s.PutProduct(ctx, Principal{User: "ali", Role: "rep", RepID: "ali"}, Product{ID: "sub3", Seller: "ali-1", Name: "3GB", Plan: "volume", GB: 3, Days: 30, Status: "published"}); err != nil {
+		t.Fatal(err)
+	}
 	c := Client{Email: "sub-c", Enabled: true, VolumeBytes: 3 << 30, DurationSeconds: 30 * 86400, Inbounds: []string{"de-vless"}}
 	if err := s.RepPutClient(ctx, "sub1", "ali-1", c, "volume"); err != nil {
 		t.Fatal(err)

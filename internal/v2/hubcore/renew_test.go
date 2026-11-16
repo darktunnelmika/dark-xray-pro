@@ -106,6 +106,9 @@ func TestSubSellerBrandIsTheirOwn(t *testing.T) {
 	if err := s.PutRepBrand(ctx, "kid", RepBrand{Title: "Kid Shop", Telegram: "@kid_shop"}); err != nil {
 		t.Fatal(err)
 	}
+	if err := s.PutProduct(ctx, Principal{User: "boss", Role: "rep", RepID: "boss"}, Product{ID: "kid1", Seller: "kid", Name: "1GB", Plan: "volume", GB: 1, Days: 1, Status: "published"}); err != nil {
+		t.Fatal(err)
+	}
 	c := Client{Email: "k1", Enabled: true, VolumeBytes: 1 << 30, ExpiresUnix: 0, DurationSeconds: 86400, Inbounds: []string{"de-vless"}}
 	if err := s.RepPutClient(ctx, "kid", "kid", c, "volume"); err != nil {
 		t.Fatal(err)
