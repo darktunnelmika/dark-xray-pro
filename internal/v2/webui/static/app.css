@@ -1047,3 +1047,7 @@ dialog.wide:has(.cform) { inline-size: min(780px, calc(100vw - 20px)); }
 .tmsg.staff { align-self: flex-end; background: color-mix(in oklab, var(--ion) 12%, var(--surface-2)); border-color: color-mix(in oklab, var(--ion) 35%, transparent); }
 .tmsg .tbody { white-space: pre-wrap; overflow-wrap: anywhere; margin-block-start: 4px; }
 .tmsg .badge { margin-inline-start: 6px; }
+
+.drill-box { display: grid; gap: 6px; padding: 10px 12px; border: 1px solid var(--glass-line); border-radius: 10px; }
+.drill-box .good { color: var(--good); } .drill-box .bad { color: var(--bad); }
+.drill-box button { justify-self: start; }

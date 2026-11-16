@@ -1176,6 +1176,17 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 			log.Printf("backup download: %v", err)
 		}
 	}))
+	mux.HandleFunc("GET /api/v2/admin/backup/drill", guard(func(w http.ResponseWriter, r *http.Request) {
+		reply(w, map[string]any{"last": s.LastDrill(r.Context()), "has_password": s.Setting(r.Context(), "tg_backup_pass") != ""}, nil)
+	}))
+	mux.HandleFunc("POST /api/v2/admin/backup/drill", guard(func(w http.ResponseWriter, r *http.Request) {
+		pass := s.Setting(r.Context(), "tg_backup_pass")
+		if pass == "" {
+			reply(w, nil, fmt.Errorf("%w: set a backup password for the Telegram backups first", ErrInvalid))
+			return
+		}
+		reply(w, s.BackupDrill(r.Context(), pass), nil)
+	}))
 	mux.HandleFunc("POST /api/v2/admin/backup/full", guard(func(w http.ResponseWriter, r *http.Request) {
 		var in struct {
 			Password string `json:"password"`

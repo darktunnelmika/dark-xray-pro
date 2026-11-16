@@ -5520,8 +5520,27 @@ function fullBackupSection() {
     } catch (x) { err.textContent = x.message; }
     btn.disabled = false;
   } }, fa ? "دانلود بکاپ کامل" : "Download full backup");
+  const drill = h("div", { class: "drill-box small" });
+  const showDrill = (d) => {
+    const r = d.last || {};
+    const when = r.unix ? new Intl.DateTimeFormat(fa ? "fa-IR" : "en-GB", { dateStyle: "medium", timeStyle: "short" }).format(new Date(r.unix * 1000)) : "";
+    const run = h("button", { class: "ghost", disabled: !d.has_password, onclick: async () => {
+      run.disabled = true; run.textContent = fa ? "در حال آزمایش…" : "Testing…";
+      try { const x = await api("POST", "/api/v2/admin/backup/drill"); showDrill({ last: x, has_password: true }); } catch (e) { toast(e.message); run.disabled = false; }
+    } }, fa ? "آزمایش بازیابی الان" : "Test restore now");
+    fill(drill,
+      h("div", {}, h("b", {}, fa ? "آزمایش بازیابی: " : "Restore test: "),
+        !r.unix ? h("span", { class: "muted" }, fa ? "هنوز انجام نشده" : "never run")
+          : r.ok ? h("span", { class: "good" }, fa ? `✅ موفق · ${when} · ${fmtNum((r.counts?.clients || [0, 0])[1])} کاربر برگشت` : `✅ passed · ${when}`)
+          : h("span", { class: "bad" }, `🔴 ${fa ? "ناموفق" : "failed"} · ${when} · ${r.error || ""}`)),
+      h("div", { class: "muted" }, d.has_password ? (fa ? "هر هفته خودکار: بکاپ واقعی روی یک کپی جدا بازیابی و با پنل مقایسه می‌شود؛ به پنل اصلی دست نمی‌زند." : "Weekly: a real backup is restored into a throwaway copy and compared; the live panel is untouched.")
+        : (fa ? "برای آزمایش خودکار، رمز بکاپ تلگرام را تنظیم کنید." : "Set the Telegram backup password to enable it.")),
+      run);
+  };
+  api("GET", "/api/v2/admin/backup/drill").then(showDrill).catch(() => {});
   return h("div", { class: "form" },
     h("h2", { class: "section" }, fa ? "بکاپ کامل (برای سرور جدید)" : "Full backup (for a new server)"),
+    drill,
     h("p", { class: "small muted" }, fa ? "دیتابیس به‌همراه گواهی هاب، توکن‌ها و تنظیمات سرویس، رمزگذاری‌شده. اگر سرور هاب از دست برود، روی سرور جدید با «dark-hub2 restore -file … -new-ip …» برمی‌گردد و نودها بدون نصب دوباره وصل می‌شوند. رمز را جایی امن نگه دارید؛ بدون آن فایل باز نمی‌شود." : "The database plus the HUB certificate, tokens and service settings, encrypted. If the HUB server is lost, restore it on a new one with “dark-hub2 restore -file … -new-ip …” and nodes reconnect without a reinstall. Keep the password safe; the file cannot be opened without it."),
     h("div", { class: "row" }, pass, btn), err);
 }

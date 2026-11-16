@@ -166,6 +166,7 @@ func (b *Bot) Tick(ctx context.Context) {
 	b.watchNodes(ctx)
 	b.dailyReport(ctx)
 	b.scheduledBackup(ctx)
+	b.scheduledDrill(ctx)
 	b.notifyClients(ctx)
 	b.repAlerts(ctx)
 	b.runScheduled(ctx)
@@ -1411,4 +1412,26 @@ func firstOr(f []string, i int) string {
 		return f[i]
 	}
 	return ""
+}
+
+// scheduledDrill restores the backup into a throwaway copy once a week and
+// tells the owner whether it really comes back.
+func (b *Bot) scheduledDrill(ctx context.Context) {
+	if b.Seller != "" || b.Store.Setting(ctx, "tg_backup_pass") == "" {
+		return
+	}
+	if last := b.Store.LastDrill(ctx); b.now().Unix()-last.Unix < 7*86400 {
+		return
+	}
+	r := b.Store.BackupDrill(ctx, b.Store.Setting(ctx, "tg_backup_pass"))
+	b.notify(ctx, "backups", drillText(r), nil)
+}
+
+func drillText(r hubcore.DrillResult) string {
+	if !r.OK {
+		return "🔴 <b>آزمایش بازیابی بکاپ ناموفق بود</b>\n" + esc(r.Error) + "\n\nبکاپ فعلی ممکن است قابل بازیابی نباشد؛ از پنل ← تنظیمات ← بکاپ دوباره امتحان کنید."
+	}
+	c := r.Counts["clients"]
+	return fmt.Sprintf("✅ <b>آزمایش بازیابی بکاپ موفق بود</b>\nبکاپ کامل (%s) روی یک کپی جدا بازیابی شد: %s کاربر، %s نود و %s نماینده سالم برگشتند، کلیدهای هاب هم کامل بود (%s ثانیه).",
+		gb(int64(r.Bytes)), faInt(c[1]), faInt(r.Counts["nodes"][1]), faInt(r.Counts["reps"][1]), faInt((r.Millis+999)/1000))
 }
