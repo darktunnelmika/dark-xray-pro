@@ -439,7 +439,10 @@ func (b *Bot) menu(ctx context.Context, chat int64) {
 				lines = append(lines, st.icon+" <b>"+esc(c.Email)+"</b>"+left)
 			}
 		}
-		welcome += "\n\n📦 سرویس‌های شما:\n" + strings.Join(lines, "\n")
+		welcome += "\n\n📦 <b>سرویس‌های شما</b>\n<blockquote>" + strings.Join(lines, "\n") + "</blockquote>"
+	}
+	if bal := b.Store.TomanBalance(ctx, b.Seller, chat); bal > 0 {
+		welcome += "\n👛 کیف پول: <b>" + faMoney(bal) + " تومان</b>"
 	}
 	b.send(ctx, chat, welcome, b.menuKB(ctx, chat))
 }
@@ -455,7 +458,7 @@ func (b *Bot) menuKB(ctx context.Context, chat int64) *Keyboard {
 	if b.Store.TrialPolicy(ctx).Enabled && !b.Store.TrialUsed(ctx, chat) {
 		extra = append(extra, cbBtn("🎁 تست رایگان", "trial"))
 	}
-	if b.Store.WalletBalance(ctx, chat) > 0 {
+	if b.Store.WalletBalance(ctx, chat) > 0 || b.Store.TomanBalance(ctx, b.Seller, chat) > 0 {
 		extra = append(extra, cbBtn("👛 کیف پول", "wallet"))
 	}
 	if len(extra) > 0 {
