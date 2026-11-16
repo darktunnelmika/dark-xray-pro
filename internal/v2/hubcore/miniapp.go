@@ -95,15 +95,16 @@ func VerifyInitData(initData, botToken string, now time.Time, maxAge time.Durati
 
 // MiniAppService is one of the customer's services.
 type MiniAppService struct {
-	Email     string `json:"email"`
-	Enabled   bool   `json:"enabled"`
-	Status    string `json:"status"` // active | ended | expired | disabled
-	Used      int64  `json:"used"`
-	Total     int64  `json:"total"` // -1 = unlimited
-	Until     int64  `json:"until"` // 0 = no expiry yet
-	DaysOnUse int64  `json:"days_on_use"`
-	Online    bool   `json:"online"`
-	SubURL    string `json:"sub_url"`
+	Email     string  `json:"email"`
+	Enabled   bool    `json:"enabled"`
+	Status    string  `json:"status"` // active | ended | expired | disabled
+	Used      int64   `json:"used"`
+	Total     int64   `json:"total"` // -1 = unlimited
+	Until     int64   `json:"until"` // 0 = no expiry yet
+	DaysOnUse int64   `json:"days_on_use"`
+	Online    bool    `json:"online"`
+	SubURL    string  `json:"sub_url"`
+	Days      []int64 `json:"days"` // last 7 days of traffic, oldest first
 }
 
 type miniOrder struct {
@@ -131,6 +132,11 @@ func (s *Store) miniServices(ctx context.Context, chat int64, subBase string) ([
 			Until: c.EffectiveUntil, Online: c.Online, SubURL: strings.TrimRight(subBase, "/") + "/sub/" + c.SubToken, Status: "active"}
 		if c.EffectiveUntil == 0 {
 			sv.DaysOnUse = c.DurationSeconds / 86400
+		}
+		if d, err := s.ClientDailyUsage(ctx, c.Email, 7); err == nil {
+			for _, x := range d {
+				sv.Days = append(sv.Days, x.Up+x.Down)
+			}
 		}
 		switch {
 		case !c.Enabled:
@@ -242,7 +248,11 @@ func registerMiniApp(mux *http.ServeMux, s *Store) {
 		ss := s.SubSettings(r.Context())
 		out := map[string]any{"user": u, "services": services, "orders": orders, "products": products,
 			"pay_text": s.Setting(r.Context(), "tg_pay_text"), "support": ss.SupportURL, "title": ss.Title, "announce": ss.Announce,
-			"stars": invoiceLinker != nil, "wallet": s.WalletBalance(r.Context(), u.ID), "bot": s.Setting(r.Context(), "tg_username")}
+			"stars": invoiceLinker != nil, "wallet": s.WalletBalance(r.Context(), u.ID), "bot": s.Setting(r.Context(), "tg_username"),
+			"toman": s.TomanBalance(r.Context(), "", u.ID)}
+		if c := s.CardFor(r.Context(), ""); c.Number != "" {
+			out["card"] = c
+		}
 		if tp := s.TrialPolicy(r.Context()); tp.Enabled && !s.TrialUsed(r.Context(), u.ID) {
 			out["trial"] = map[string]int64{"gb": tp.GB, "hours": tp.Hours}
 		}
@@ -316,6 +326,11 @@ func registerMiniApp(mux *http.ServeMux, s *Store) {
 			reply(w, map[string]any{"email": email, "wallet": left}, err)
 			return
 		}
+		if in.Method == "toman" {
+			email, left, err := s.TomanPay(r.Context(), u.ID, in.Product, in.Renew)
+			reply(w, map[string]any{"email": email, "toman": left}, err)
+			return
+		}
 		if invoiceLinker == nil {
 			http.Error(w, "Stars payments are not available", http.StatusServiceUnavailable)
 			return
@@ -327,6 +342,25 @@ func registerMiniApp(mux *http.ServeMux, s *Store) {
 		}
 		link, err := invoiceLinker(r.Context(), title, "Dark VPN", "order:"+strconv.FormatInt(id, 10), stars)
 		reply(w, map[string]any{"invoice": link, "order": id}, err)
+	})
+	// A toman top-up: the customer then sends the receipt photo to the bot.
+	mux.HandleFunc("POST /app/api/topup", func(w http.ResponseWriter, r *http.Request) {
+		u, ok := user(w, r)
+		if !ok {
+			return
+		}
+		var in struct {
+			Amount int64 `json:"amount"`
+		}
+		if !decode(w, r, &in) {
+			return
+		}
+		if s.CardFor(r.Context(), "").Number == "" {
+			http.Error(w, "card payment is not set up", http.StatusServiceUnavailable)
+			return
+		}
+		id, err := s.CreateTopup(r.Context(), "", u.ID, in.Amount)
+		reply(w, map[string]any{"id": id}, err)
 	})
 	mux.HandleFunc("POST /app/api/trial", func(w http.ResponseWriter, r *http.Request) {
 		u, ok := user(w, r)
