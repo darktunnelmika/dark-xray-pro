@@ -235,7 +235,7 @@ function mark() {
   const svg = svgEl("svg", { viewBox: "0 0 32 32", "aria-hidden": "true" });
   const defs = svgEl("defs", {});
   const g = svgEl("linearGradient", { id, x1: "0", y1: "0", x2: "1", y2: "1" });
-  g.append(svgEl("stop", { offset: "0", "stop-color": "#4f8cff" }), svgEl("stop", { offset: "1", "stop-color": "#6f7dff" }));
+  g.append(svgEl("stop", { offset: "0", "stop-color": "#f5b73b" }), svgEl("stop", { offset: "1", "stop-color": "#36c2b4" }));
   defs.append(g);
   svg.append(defs,
     svgEl("path", { d: "M16 2.5 28 9.25v13.5L16 29.5 4 22.75V9.25z", fill: "none", stroke: `url(#${id})`, "stroke-width": 2.2, "stroke-linejoin": "round" }),
@@ -663,6 +663,94 @@ function gauge(label) {
   } };
 }
 
+// netMap is the dashboard's hero: the hub in the middle and each node on a
+// line whose flow speed and thickness follow its live traffic; a node that
+// is down sits on a broken red line. Phones get a vertical layout.
+function netMap(nodes0, si0) {
+  const fa = lang === "fa";
+  const box = h("div", {});
+  const sum = h("span", { class: "muted small" });
+  const el = h("section", { class: "card netmap", "aria-label": fa ? "نقشهٔ شبکه" : "Network map" },
+    h("div", { class: "nm-head" }, h("h2", {}, fa ? "نقشهٔ شبکه" : "Network map"), sum,
+      h("a", { class: "spacer small", href: "#/nodes" }, fa ? "مدیریت نودها ›" : "Manage nodes ›")), box);
+  const draw = (nodes, si) => {
+    const ns = (nodes || []).slice().sort((a, b) => (b.online - a.online) || String(a.Name || a.ID).localeCompare(String(b.Name || b.ID)));
+    const narrow = (el.clientWidth || window.innerWidth) < 640;
+    const n = ns.length, rows = Math.max(1, Math.ceil(n / 2));
+    const W = narrow ? 360 : 1000;
+    const BW = narrow ? 156 : 236, BH = 62;
+    const H = narrow ? 150 + rows * 80 : Math.max(250, rows * 86 + 40);
+    const hub = narrow ? { x: W / 2, y: 58 } : { x: W / 2, y: H / 2 };
+    const svg = svgEl("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": fa ? "هاب و نودها" : "HUB and nodes" });
+    for (let gx = 20; gx < W; gx += 40) svg.append(svgEl("line", { x1: gx, y1: 0, x2: gx, y2: H, class: "nm-grid", "stroke-dasharray": "1 39" }));
+    const links = svgEl("g", {}), boxes = svgEl("g", {});
+    svg.append(links, boxes);
+    let up = 0, users = 0;
+    ns.forEach((nd, i) => {
+      const host = nd.Host || {}, live = !!nd.online;
+      if (live) { up++; users += host.online_users || 0; }
+      let bx, by, ax, ay, d;
+      if (narrow) {
+        const col = i % 2, row = Math.floor(i / 2);
+        // A spine down the middle with a short branch to each card.
+        bx = col ? W - 10 - BW : 10; by = 130 + row * 80;
+        ax = col ? bx : bx + BW; ay = by + BH / 2;
+        d = `M${hub.x} ${hub.y + 30} L ${hub.x} ${ay - 14} Q ${hub.x} ${ay}, ${hub.x + (ax > hub.x ? 14 : -14)} ${ay} L ${ax} ${ay}`;
+      } else {
+        const side = i % 2, row = Math.floor(i / 2), rowsSide = side ? Math.floor(n / 2) : Math.ceil(n / 2);
+        const span = rowsSide * 86;
+        by = (H - span) / 2 + row * 86 + (86 - BH) / 2;
+        bx = side ? W - 24 - BW : 24;
+        ax = side ? bx : bx + BW; ay = by + BH / 2;
+        const mx = (hub.x + ax) / 2;
+        d = `M${hub.x} ${hub.y} C ${mx} ${hub.y}, ${mx} ${ay}, ${ax} ${ay}`;
+      }
+      const r = (host.rx_rate || 0) + (host.tx_rate || 0);
+      if (live) {
+        const lg = Math.log10(r + 1);
+        links.append(svgEl("path", { d, class: "nm-link base" }));
+        if (r > 0) {
+          const f = svgEl("path", { d, class: "nm-link flow", "stroke-width": (2 + Math.min(4, lg / 1.6)).toFixed(1) });
+          f.style.setProperty("animation-duration", `${Math.max(0.5, 4.2 - lg / 1.9).toFixed(2)}s`);
+          links.append(f);
+        }
+      } else links.append(svgEl("path", { d, class: "nm-link dead" }));
+      const a = svgEl("a", { href: "#/nodes", class: `nm-node ${live ? "up" : "down"}` });
+      // SVG text gets an explicit LTR base so anchors mean what they say;
+      // Persian runs are isolated (RLI…PDI) so "۶۱ آنلاین" still reads right.
+      const iso = (x) => (fa ? `\u2067${x}\u2069` : x);
+      const rtl = document.documentElement.dir === "rtl", pad = 14;
+      const onl = live ? iso(`${fmtNum(host.online_users || 0)} ${fa ? "آنلاین" : "online"}`) : iso(fa ? "قطع" : "down");
+      const txt = (x, y, anchor, cls, v) => { const e = svgEl("text", { x, y, "text-anchor": anchor, class: cls, direction: "ltr" }); e.textContent = v; return e; };
+      let parts;
+      if (narrow) {
+        parts = [txt(bx + BW / 2, by + 25, "middle", "nm-name", nd.Name || nd.ID),
+          txt(bx + BW / 2, by + 46, "middle", live ? "nm-users" : "nm-sub", onl)];
+      } else {
+        parts = [txt(rtl ? bx + BW - pad : bx + pad, by + 26, rtl ? "end" : "start", "nm-name", nd.Name || nd.ID),
+          txt(rtl ? bx + pad : bx + BW - pad, by + 26, rtl ? "start" : "end", "nm-users", onl),
+          txt(bx + BW / 2, by + 47, "middle", "nm-sub", live ? `↓ ${rate(host.rx_rate || 0)}   ↑ ${rate(host.tx_rate || 0)}` : (nd.PublicIP || nd.ID))];
+      }
+      const led = svgEl("circle", { cx: rtl ? bx + BW - 11 : bx + 11, cy: by + 11, r: 3, class: "led" });
+      a.append(svgEl("rect", { x: bx, y: by, width: BW, height: BH, rx: 14 }), led, ...parts);
+      boxes.append(a);
+    });
+    const g = svgEl("g", { class: "nm-hub" });
+    const hexPts = (r) => [0, 1, 2, 3, 4, 5].map((k) => { const a = Math.PI / 3 * k - Math.PI / 2; return `${(hub.x + r * Math.cos(a)).toFixed(1)},${(hub.y + r * Math.sin(a)).toFixed(1)}`; }).join(" ");
+    g.append(svgEl("circle", { cx: hub.x, cy: hub.y, r: 36, class: "halo" }), svgEl("circle", { cx: hub.x, cy: hub.y, r: 44, class: "orbit" }),
+      svgEl("polygon", { points: hexPts(33), class: "hex", "stroke-linejoin": "round" }));
+    const ht = svgEl("text", { x: hub.x, y: hub.y + 5, "text-anchor": "middle", "font-size": 15 }); ht.textContent = fa ? "هاب" : "HUB";
+    g.append(ht);
+    svg.append(g);
+    box.replaceChildren(svg);
+    sum.textContent = fa ? `${fmtNum(up)} از ${fmtNum(n)} نود روشن · ${fmtNum(users)} کاربر آنلاین` : `${fmtNum(up)} of ${fmtNum(n)} nodes up · ${fmtNum(users)} online`;
+  };
+  let last = [nodes0, si0];
+  requestAnimationFrame(() => draw(...last));
+  draw(nodes0, si0);
+  return { el, update: (nodes, si) => { last = [nodes, si]; draw(nodes, si); } };
+}
+
 function hubStrip(si) {
   const fa = lang === "fa";
   const cpu = gauge(t("cpu")), ram = gauge(t("ram")), disk = gauge(t("disk"));
@@ -710,12 +798,14 @@ async function viewDashboard() {
   const fmtTime = (u) => new Intl.DateTimeFormat(fa ? "fa-IR" : "en-GB", { dateStyle: "short", timeStyle: "short" }).format(new Date(u * 1000));
   const topMax = Math.max(1, ...ins.top.map((u) => u.bytes));
   const strip = si ? hubStrip(si) : null;
+  const map = (nodes || []).length ? netMap(nodes, si) : null;
   const rowsBox = h("div", {}, (nodes || []).map(nodeRow));
   const onlineK = h("span", {}, fmtNum(o.OnlineUsers));
   const nodesK = h("span", {}, frac(o.NodesOnline, o.Nodes));
   const view = h("div", {},
     h("h1", {}, t("dashboard")),
     si ? systemWarnings(si) : null,
+    map ? map.el : null,
     strip ? strip.el : null,
     h("div", { class: "kpis" },
       kpi("nodes", t("nodesOnline"), nodesK),
@@ -742,6 +832,7 @@ async function viewDashboard() {
     try {
       const [x, ns, ov] = await Promise.all([api("GET", "/api/v2/admin/system"), api("GET", "/api/v2/admin/nodes"), api("GET", "/api/v2/admin/overview")]);
       if (strip) strip.update(x);
+      if (map) map.update(ns, x);
       rowsBox.replaceChildren(...(ns || []).map(nodeRow));
       onlineK.textContent = fmtNum(ov.OnlineUsers);
       nodesK.replaceChildren(frac(ov.NodesOnline, ov.Nodes));

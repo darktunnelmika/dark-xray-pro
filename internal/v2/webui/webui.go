@@ -15,7 +15,10 @@ import (
 	"strings"
 )
 
-func init() { _ = mime.AddExtensionType(".webmanifest", "application/manifest+json") }
+func init() {
+	_ = mime.AddExtensionType(".webmanifest", "application/manifest+json")
+	_ = mime.AddExtensionType(".woff", "font/woff")
+}
 
 //go:embed static
 var files embed.FS

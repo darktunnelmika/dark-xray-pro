@@ -3,13 +3,13 @@
    One signal colour (ion blue) marks what you can act on and what is live;
    ember is the second data series (upload). The HUB strip on the dashboard
    is the one loud element; everything else stays quiet. */
-@font-face {
-  font-family: "Vazirmatn";
-  src: url("fonts/Vazirmatn-Variable.woff2") format("woff2");
-  font-weight: 100 900;
-  font-style: normal;
-  font-display: swap;
-}
+/* Type: Noto Kufi Arabic for Persian (angular, engineered), IBM Plex Sans
+   for Latin, JetBrains Mono for addresses, keys and versions. The Latin
+   faces come first so each script gets its own face. */
+@font-face { font-family: "Dark Latin"; src: url("fonts/PlexSans-Regular.woff") format("woff"); font-weight: 100 500; font-display: swap; }
+@font-face { font-family: "Dark Latin"; src: url("fonts/PlexSans-Bold.woff") format("woff"); font-weight: 600 900; font-display: swap; }
+@font-face { font-family: "Dark Kufi"; src: url("fonts/NotoKufiArabic.woff") format("woff"); font-weight: 100 900; font-display: swap; }
+@font-face { font-family: "Dark Mono"; src: url("fonts/JetBrainsMono.woff") format("woff"); font-weight: 100 900; font-display: swap; }
 :root {
   color-scheme: dark light;
   &:has(> head > meta[name="color-scheme"][content="dark"]) { color-scheme: dark; }
@@ -39,7 +39,7 @@
   --r-md: 10px;
   --gap: 14px;
   --blur: none;
-  font: 15px/1.6 "Vazirmatn", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font: 15px/1.7 "Dark Latin", "Dark Kufi", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   font-feature-settings: "tnum" 1;
   background: var(--bg);
   color: var(--text);
@@ -106,7 +106,7 @@ h1 { font-size: 28px; line-height: 1.2; letter-spacing: -.03em; font-weight: 800
 h2 { font-size: 16.5px; letter-spacing: -.01em; font-weight: 700; margin: 0 0 10px; }
 .muted { color: var(--muted); }
 .small { font-size: 12.5px; }
-code, .mono { font-family: ui-monospace, "SF Mono", "Cascadia Code", Menlo, monospace; font-size: 12.5px; overflow-wrap: anywhere; }
+code, .mono { font-family: "Dark Mono", ui-monospace, Menlo, monospace; font-size: 12.5px; overflow-wrap: anywhere; }
 code { background: var(--surface-2); padding: 7px 9px; border-radius: 10px; display: block; direction: ltr; text-align: start; border: 1px solid var(--glass-line); }
 
 /* ---------- Glass building blocks ---------- */
@@ -253,7 +253,7 @@ label.inline select { inline-size: auto; }
 .dash { display: grid; gap: var(--gap); margin-block-start: var(--gap); grid-template-columns: 1fr; }
 @media (min-width: 900px) { .dash { grid-template-columns: 1fr 1fr; } .dash .wide-col { grid-column: 1 / -1; } }
 
-textarea.code { font: 12.5px/1.5 ui-monospace, "SF Mono", Menlo, monospace; padding: 11px; resize: vertical; tab-size: 2; }
+textarea.code { font: 12.5px/1.5 "Dark Mono", ui-monospace, Menlo, monospace; padding: 11px; resize: vertical; tab-size: 2; }
 [hidden] { display: none !important; }
 
 /* ---------- Inbound editor ---------- */
@@ -372,7 +372,7 @@ code.keyout { display: block; padding: 10px 12px; border-radius: var(--r-md, 10p
 .logmodal { min-inline-size: min(92vw, 820px); }
 .logmodal .row > input[type=search] { flex: 1 1 220px; }
 pre.logview { margin: 0; max-block-size: 58vh; overflow: auto; padding: 12px 14px; border-radius: var(--r-md); background: color-mix(in oklab, var(--bg, #05070d) 85%, transparent); border: 1px solid var(--glass-line);
-  font: 12px/1.55 ui-monospace, "JetBrains Mono", Menlo, monospace; white-space: pre-wrap; word-break: break-all; text-align: left; }
+  font: 12px/1.55 "Dark Mono", ui-monospace, Menlo, monospace; white-space: pre-wrap; word-break: break-all; text-align: left; }
 pre.logview .bad { color: var(--bad); }
 pre.logview .warn { color: var(--warn); }
 pre.logview.loading { opacity: 0.55; }
@@ -416,7 +416,7 @@ header.top .searchbox {
 header.top .searchbox:hover { border-color: color-mix(in oklab, var(--cyan) 40%, transparent); color: var(--text); }
 header.top .searchbox svg { inline-size: 17px; block-size: 17px; }
 header.top .searchbox kbd { margin-inline-start: auto; }
-kbd { font: 11px/1 ui-monospace, monospace; padding: 4px 6px; border-radius: 6px; border: 1px solid var(--glass-line); background: var(--glass-2); color: var(--muted); direction: ltr; }
+kbd { font: 11px/1 "Dark Mono", ui-monospace, monospace; padding: 4px 6px; border-radius: 6px; border: 1px solid var(--glass-line); background: var(--glass-2); color: var(--muted); direction: ltr; }
 header.top .actions { display: flex; align-items: center; gap: 4px; }
 .iconbtn {
   position: relative; display: grid; place-items: center; inline-size: 38px; block-size: 38px; border-radius: 11px; border: 1px solid transparent;
@@ -830,3 +830,92 @@ a.kpi:hover { border-color: color-mix(in oklab, var(--ion) 45%, transparent); }
 .reps-table .name { font-weight: 700; }
 a.badge.credit { text-decoration: none; color: inherit; } a.badge.credit b { color: var(--ion); }
 header.top .brand > span { white-space: nowrap; }
+
+/* ===================================================================
+   DARK theme — "night network" (v2.20).
+   Ink-navy night, not black. One signal colour, amber, marks what is live
+   or actionable (online, current traffic, the primary button); teal is the
+   second data series. The network map on the dashboard is the one loud
+   element; everything else stays quiet.
+   =================================================================== */
+:root {
+  --ion: light-dark(#a86a00, #f5b73b);
+  --ember: light-dark(#0f8f84, #36c2b4);
+  --neon: var(--ion);
+  --bg: light-dark(#f2f3f7, #0a0f1d);
+  --glass: light-dark(#ffffff, #111a2d);
+  --glass-2: light-dark(#f5f6fa, #152036);
+  --glass-line: light-dark(#dfe2ea, #22304d);
+  --surface-2: light-dark(#eef0f5, #18243c);
+  --text: light-dark(#121a2c, #e9edf6);
+  --muted: light-dark(#5a6378, #8b97b4);
+  --good: light-dark(#0f8f84, #36c2b4);
+  --warn: light-dark(#c2620e, #ff9a4d);
+  --bad: light-dark(#cc3348, #f2616f);
+  --on-ion: light-dark(#ffffff, #1a1203);
+  --glow: 0 0 0 1px color-mix(in oklab, var(--ion) 35%, transparent), 0 8px 24px -12px color-mix(in oklab, var(--ion) 60%, transparent);
+}
+body::before { background: radial-gradient(70% 340px at 50% 0, color-mix(in oklab, var(--ion) 7%, transparent), transparent); }
+header.top { background: light-dark(rgb(242 243 247 / .85), rgb(10 15 29 / .82)); backdrop-filter: blur(10px); }
+nav.tabs { background: light-dark(rgb(242 243 247 / .9), rgb(10 15 29 / .9)); backdrop-filter: blur(10px); }
+input, select, textarea { background: light-dark(#fff, #0c1424); }
+select option, dialog { background: light-dark(#fff, #111a2d); }
+#toast { background: light-dark(#fff, #152036); }
+button.primary { background: var(--ion); color: var(--on-ion); text-shadow: none; }
+.brand svg { filter: drop-shadow(0 0 10px color-mix(in oklab, var(--ion) 45%, transparent)); }
+.brand b, .brand em { color: var(--ion); }
+
+/* Network map: the hub in the middle, every node on a line whose glow and
+   flow follow its live traffic. A dead node is a broken red line. */
+.netmap { padding: 18px 18px 10px; overflow: hidden; position: relative;
+  background:
+    radial-gradient(circle at 50% 50%, color-mix(in oklab, var(--ion) 10%, transparent), transparent 55%),
+    var(--glass); }
+.netmap .nm-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.netmap .nm-head h2 { margin: 0; }
+.netmap .nm-head .spacer { margin-inline-start: auto; }
+.netmap svg { display: block; inline-size: 100%; block-size: auto; margin-block-start: 6px; }
+.nm-grid { stroke: color-mix(in oklab, var(--muted) 14%, transparent); stroke-width: 1; }
+.nm-link { fill: none; stroke-linecap: round; }
+.nm-link.base { stroke: color-mix(in oklab, var(--ion) 22%, transparent); stroke-width: 6; }
+.nm-link.flow { stroke: var(--ion); stroke-dasharray: 2 14; animation: nm-flow linear infinite; }
+.nm-link.dead { stroke: var(--bad); stroke-width: 2; stroke-dasharray: 6 7; opacity: .75; }
+@keyframes nm-flow { to { stroke-dashoffset: -64; } }
+.nm-hub circle.core { fill: var(--ion); }
+.nm-hub circle.halo { fill: none; stroke: var(--ion); stroke-width: 1.5; opacity: .35; transform-origin: center; transform-box: fill-box; animation: nm-pulse 2.8s ease-out infinite; }
+@keyframes nm-pulse { from { transform: scale(.6); opacity: .55; } to { transform: scale(1.6); opacity: 0; } }
+.nm-hub text { fill: var(--on-ion); font-weight: 800; }
+.nm-node rect { fill: var(--glass-2); stroke: var(--glass-line); }
+.nm-node.up rect { stroke: color-mix(in oklab, var(--ion) 55%, var(--glass-line)); }
+.nm-node.down rect { stroke: color-mix(in oklab, var(--bad) 60%, var(--glass-line)); }
+.nm-node .dot { fill: var(--ion); } .nm-node.down .dot { fill: var(--bad); }
+.nm-node text { fill: var(--text); font-size: 13px; }
+.nm-node .nm-name { font-weight: 800; font-size: 14px; }
+.nm-node .nm-sub { fill: var(--muted); font-size: 11.5px; }
+.nm-node .nm-users { fill: var(--ion); font-weight: 800; }
+.nm-node.down .nm-users { fill: var(--bad); }
+.nm-hubstat { fill: var(--muted); font-size: 12px; }
+@media (prefers-reduced-motion: reduce) { .nm-link.flow, .nm-hub circle.halo { animation: none; } }
+
+/* ---------- Tech layer (balanced) ----------
+   A faint dot grid behind everything, HUD corner brackets on the two hero
+   panels, a hexagon hub with a turning orbit, and mono for machine text. */
+body { background-image: radial-gradient(color-mix(in oklab, var(--muted) 16%, transparent) 1px, transparent 1.4px); background-size: 22px 22px; background-attachment: fixed; }
+.netmap, .hub-strip { position: relative; isolation: isolate; }
+.netmap::before, .netmap::after, .hub-strip::before, .hub-strip::after {
+  content: ""; position: absolute; inline-size: 18px; block-size: 18px; pointer-events: none; z-index: 1;
+  border: 2px solid var(--ion); opacity: .85;
+}
+.netmap::before, .hub-strip::before { inset-block-start: 8px; inset-inline-start: 8px; border-inline-end: 0; border-block-end: 0; border-start-start-radius: 6px; }
+.netmap::after, .hub-strip::after { inset-block-end: 8px; inset-inline-end: 8px; border-inline-start: 0; border-block-start: 0; border-end-end-radius: 6px; }
+.hub-strip { background: linear-gradient(135deg, color-mix(in oklab, var(--ion) 7%, var(--glass)), var(--glass) 55%); }
+.nm-hub .hex { fill: var(--ion); }
+.nm-hub .orbit { fill: none; stroke: var(--ion); stroke-width: 1.2; stroke-dasharray: 3 7; opacity: .7; transform-origin: center; transform-box: fill-box; animation: nm-spin 14s linear infinite; }
+@keyframes nm-spin { to { transform: rotate(360deg); } }
+.nm-node .led { fill: var(--ion); } .nm-node.down .led { fill: var(--bad); }
+.nm-node.up .led { animation: nm-blink 2.4s ease-in-out infinite; }
+@keyframes nm-blink { 50% { opacity: .35; } }
+.nm-node .nm-sub, .nm-hubstat { font-family: "Dark Mono", "Dark Kufi", monospace; font-size: 11px; }
+.kpi .v { letter-spacing: -.01em; }
+h1 { letter-spacing: -.01em; }
+@media (prefers-reduced-motion: reduce) { .nm-hub .orbit, .nm-node.up .led { animation: none; } }
