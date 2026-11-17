@@ -301,7 +301,7 @@ func TestOwnerConsole(t *testing.T) {
 	find(t, api.take(), ownerID, "غیرفعال")
 	b.Handle(ctx, cb(ownerID, "a:find"))
 	api.take()
-	b.Handle(ctx, msg(ownerID, "p10"))
+	b.Handle(ctx, msg(ownerID, "p10-1"))
 	find(t, api.take(), ownerID, "p10-1")
 	// Broadcast needs a confirmation.
 	b.Handle(ctx, cb(ownerID, "a:bc"))

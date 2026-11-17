@@ -73,7 +73,9 @@ WHERE m.type='table' AND p.name IN ('email','client_email') ORDER BY m.name`)
 		return err
 	}
 	for _, tc := range cols {
-		if tc[0] == "clients" {
+		// The credit ledger is append-only: it keeps the name the client had
+		// at the time, and client_renames says who that is today.
+		if tc[0] == "clients" || tc[0] == "credit_ledger" {
 			continue
 		}
 		// A leftover row of a deleted client that once had this name gives way.
@@ -91,7 +93,6 @@ WHERE m.type='table' AND p.name IN ('email','client_email') ORDER BY m.name`)
 		`DELETE FROM client_renames WHERE old=?2`,
 		`UPDATE client_renames SET new=?2 WHERE new=?1`,
 		`INSERT OR REPLACE INTO client_renames(old,new,unix) VALUES(?1,?2,?3)`,
-		`DELETE FROM client_renames WHERE unix<?3-7*86400`,
 	} {
 		if _, err := tx.ExecContext(ctx, q, old, name, now); err != nil {
 			return err
@@ -99,6 +100,9 @@ WHERE m.type='table' AND p.name IN ('email','client_email') ORDER BY m.name`)
 	}
 	return tx.Commit()
 }
+
+// ledgerClient is the SQL for the current name of a ledger row's client.
+const ledgerClient = `COALESCE((SELECT new FROM client_renames WHERE old=l.client_email), l.client_email)`
 
 // renamedNow maps old client names to their current ones for names that no
 // live client uses, so late usage reports land on the renamed client.

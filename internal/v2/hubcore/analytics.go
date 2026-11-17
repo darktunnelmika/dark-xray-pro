@@ -135,7 +135,7 @@ func (s *Store) Analytics(ctx context.Context, by Principal, seller string) (Ana
 		_ = q(`SELECT COALESCE(SUM(o.amount),0) FROM orders o JOIN clients c ON c.email=o.client_email WHERE o.status='fulfilled' AND o.done_unix>=? AND o.done_unix<? AND `+cond, from, to).one(&m.Shop)
 		if by.Role == "owner" {
 			_ = q(`SELECT COALESCE(SUM(CAST(-l.volume_delta/1073741824.0*r.price_gb AS INTEGER) + -l.units_delta*r.price_unit),0)
-FROM credit_ledger l JOIN reps r ON r.id=l.rep_id LEFT JOIN clients c ON c.email=l.client_email
+FROM credit_ledger l JOIN reps r ON r.id=l.rep_id LEFT JOIN clients c ON c.email=`+ledgerClient+`
 WHERE l.kind IN ('charge','refund') AND l.unix>=? AND l.unix<? AND (c.email IS NULL AND ?='1=1' OR c.email IS NOT NULL AND `+cond+`)`, from, to, cond).one(&m.Resell)
 		}
 		_ = q(`SELECT COUNT(*) FROM clients c WHERE c.created_unix>=? AND c.created_unix<? AND `+cond, from, to).one(&m.New)
