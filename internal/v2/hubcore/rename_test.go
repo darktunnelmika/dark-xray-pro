@@ -56,7 +56,7 @@ func TestRenameClientCarriesEverything(t *testing.T) {
 		`SELECT COUNT(*) FROM usage_daily WHERE email='old1'`:                      0,
 		`SELECT COUNT(*) FROM tg_links WHERE email='new1'`:                         1,
 		`SELECT COUNT(*) FROM client_group_members WHERE email='new1'`:             1,
-		`SELECT COUNT(*) FROM credit_ledger WHERE client_email='new1'`:             1,
+		`SELECT COUNT(*) FROM credit_ledger l WHERE ` + ledgerClient + `='new1'`: 1,
 		`SELECT COUNT(*) FROM settings WHERE key='remind:new1'`:                    1,
 		`SELECT COUNT(*) FROM clients c JOIN client_inbounds i ON i.email=c.email`: 1,
 		`SELECT COUNT(*) FROM pragma_foreign_key_check`:                            0,
