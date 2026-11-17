@@ -1076,6 +1076,5 @@ dialog.wide:has(.cform) { inline-size: min(780px, calc(100vw - 20px)); }
 .risk-row button { flex: none; }
 
 /* Opening screen (splash.js) */
-#splash { position: fixed; inset: 0; inline-size: 100%; block-size: 100%; z-index: 9999; background: #dcdadd; object-fit: cover; transition: opacity .4s ease; }
-@media (orientation: landscape) { #splash { object-fit: contain; background: #0b0c0f; } }
+#splash { position: fixed; inset: 0; inline-size: 100%; block-size: 100%; z-index: 9999; background: #03050a; transition: opacity .4s ease; }
 #splash.out { opacity: 0; pointer-events: none; }

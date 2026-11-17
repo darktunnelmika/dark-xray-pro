@@ -1,23 +1,54 @@
-// Opening clip: plays once per browser session when the panel is opened,
-// then fades away. A tap skips it; if the browser cannot play it, it is
-// dropped at once so the panel is never held up.
+// Opening screen: a honeycomb with light pulsing out from the centre, shown
+// once per browser session while the panel loads, then faded away.
 (function () {
-  var v = document.getElementById("splash");
-  if (!v) return;
-  var seen = false, done = false;
+  var c = document.getElementById("splash");
+  if (!c) return;
+  var seen = false;
   try { seen = sessionStorage.getItem("splash") === "1"; sessionStorage.setItem("splash", "1"); } catch (e) {}
-  if (seen || !v.play || matchMedia("(prefers-reduced-motion: reduce)").matches) { v.remove(); return; }
+  if (seen || !c.getContext || matchMedia("(prefers-reduced-motion: reduce)").matches) { c.remove(); return; }
+  var x = c.getContext("2d"), TAU = Math.PI * 2, ION = "40,247,160", SKY = "75,185,255", W, H, D, s, cells, done = false, t0 = performance.now();
+  function glow(cx, cy, r, col, a) {
+    var g = x.createRadialGradient(cx, cy, 0, cx, cy, r);
+    g.addColorStop(0, "rgba(" + col + "," + a + ")"); g.addColorStop(1, "rgba(" + col + ",0)");
+    x.fillStyle = g; x.fillRect(cx - r, cy - r, 2 * r, 2 * r);
+  }
+  function resize() {
+    D = Math.min(window.devicePixelRatio || 1, 2); W = innerWidth; H = innerHeight;
+    c.width = W * D; c.height = H * D; x.setTransform(D, 0, 0, D, 0, 0);
+    s = Math.max(17, Math.min(26, Math.min(W, H) / 22));
+    var hx = s * 1.5, hy = s * Math.sqrt(3); cells = [];
+    for (var i = -1; i < W / hx + 1; i++) for (var j = -1; j < H / hy + 1; j++) {
+      var cx = i * hx, cy = j * hy + (i % 2 ? hy / 2 : 0);
+      cells.push([cx, cy, Math.hypot(cx - W / 2, cy - H / 2)]);
+    }
+  }
+  function draw(u) {
+    x.globalCompositeOperation = "source-over"; x.fillStyle = "#03050a"; x.fillRect(0, 0, W, H);
+    x.globalCompositeOperation = "lighter"; glow(W / 2, H / 2, Math.max(W, H) * 0.6, ION, 0.07);
+    var k = s / 17;
+    for (var n = 0; n < cells.length; n++) {
+      var p = cells[n], d = p[2] / k;
+      var w = Math.pow(0.5 + 0.5 * Math.cos(d / 38 - u * TAU * 2), 6), w2 = Math.pow(0.5 + 0.5 * Math.cos(d / 90 + u * TAU), 3);
+      x.strokeStyle = "rgba(" + (w > 0.5 ? ION : SKY) + "," + (0.07 + 0.8 * w + 0.12 * w2) + ")"; x.lineWidth = 0.8 + w * 1.2;
+      x.beginPath();
+      for (var q = 0; q <= 6; q++) { var an = q * TAU / 6, px = p[0] + Math.cos(an) * (s - 2), py = p[1] + Math.sin(an) * (s - 2); q ? x.lineTo(px, py) : x.moveTo(px, py); }
+      x.stroke();
+      if (w > 0.75) { x.fillStyle = "rgba(" + ION + "," + (w - 0.75) * 1.1 + ")"; x.fill(); }
+    }
+    glow(W / 2, H / 2, 46 * k, "255,255,255", 0.55);
+  }
   function finish() {
     if (done) return;
-    done = true; v.classList.add("out");
-    setTimeout(function () { v.pause(); v.remove(); }, 450);
+    done = true; c.classList.add("out");
+    setTimeout(function () { c.remove(); removeEventListener("resize", resize); }, 450);
   }
-  v.muted = true;
-  v.addEventListener("ended", finish);
-  v.addEventListener("error", finish);
-  v.addEventListener("click", finish);
-  var p = v.play();
-  if (p && p.catch) p.catch(finish);
-  setTimeout(function () { if (v.currentTime === 0) finish(); }, 2500); // never started
+  // Leave once the panel has drawn and the pulse has been seen (1.2 s), or
+  // after 6 s whatever happens.
+  var app = document.getElementById("app"), ready = false;
+  function check() { if (ready && performance.now() - t0 >= 1200) finish(); }
+  if (app) new MutationObserver(function () { if (app.childElementCount) { ready = true; check(); } }).observe(app, { childList: true });
+  setTimeout(function () { ready = true; check(); }, 1200);
   setTimeout(finish, 6000);
+  addEventListener("resize", resize); resize();
+  (function loop(t) { if (c.isConnected) { draw((t / 4000) % 1); if (!done) check(); requestAnimationFrame(loop); } })(0);
 })();
