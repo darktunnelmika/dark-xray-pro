@@ -196,3 +196,7 @@ input:focus-visible, .btn:focus-visible, .chip:focus-visible { outline: 2px soli
 
 /* night-network texture: a faint dot grid like the panel */
 body { background-image: radial-gradient(color-mix(in oklab, var(--muted) 14%, transparent) 1px, transparent 1.4px); background-size: 22px 22px; }
+
+/* Opening screen (splash.js) */
+#splash { position: fixed; inset: 0; inline-size: 100%; block-size: 100%; z-index: 9999; background: var(--bg); transition: opacity .3s ease; }
+#splash.out { opacity: 0; pointer-events: none; }
