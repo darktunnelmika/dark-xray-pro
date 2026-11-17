@@ -259,7 +259,7 @@ func (s *Store) serveSubPage(w http.ResponseWriter, r *http.Request, email, subU
 	d.Apps = suggestApps(d.Apps, r.UserAgent())
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
-	w.Header().Set("Content-Security-Policy", "default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; font-src 'self'; script-src 'nonce-"+d.Nonce+"'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
+	w.Header().Set("Content-Security-Policy", "default-src 'none'; img-src 'self' data:; media-src 'self'; style-src 'unsafe-inline'; font-src 'self'; script-src 'nonce-"+d.Nonce+"'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
 	w.Header().Set("Referrer-Policy", "no-referrer")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	_ = subPageTmpl.Execute(w, d)
@@ -312,20 +312,14 @@ button,.btn{appearance:none;border:1px solid var(--line);background:rgb(255 255 
 .rec{border-color:rgb(40 247 160/.55);box-shadow:0 0 18px -8px var(--cyan)}.lbl{font-size:12px;color:var(--muted);margin:12px 0 6px}
 .cqr{display:none;margin:8px auto 4px;width:200px;height:200px;border-radius:12px;background:#fff;padding:6px}.cfg.open .cqr{display:block}.cfg{flex-wrap:wrap}
 @media(max-width:400px){.hero{grid-template-columns:1fr;justify-items:center}.kv{width:100%}}
-#splash{position:fixed;inset:0;width:100%;height:100%;z-index:99;background:#03050a;transition:opacity .4s ease}#splash.out{opacity:0;pointer-events:none}
-</style></head><body><canvas id="splash" aria-hidden="true"></canvas><script nonce="{{.Nonce}}">
-(function(){var c=document.getElementById("splash"),seen=false;try{seen=sessionStorage.getItem("splash")==="1";sessionStorage.setItem("splash","1")}catch(e){}
-if(seen||!c.getContext||matchMedia("(prefers-reduced-motion: reduce)").matches){c.remove();return}
-var x=c.getContext("2d"),T=Math.PI*2,I="40,247,160",K="75,185,255",W,H,D,s,cells,done=false;
-function glow(a,b,r,col,o){var g=x.createRadialGradient(a,b,0,a,b,r);g.addColorStop(0,"rgba("+col+","+o+")");g.addColorStop(1,"rgba("+col+",0)");x.fillStyle=g;x.fillRect(a-r,b-r,2*r,2*r)}
-function rs(){D=Math.min(window.devicePixelRatio||1,2);W=innerWidth;H=innerHeight;c.width=W*D;c.height=H*D;x.setTransform(D,0,0,D,0,0);s=Math.max(17,Math.min(26,Math.min(W,H)/22));var hx=s*1.5,hy=s*Math.sqrt(3);cells=[];
-for(var i=-1;i<W/hx+1;i++)for(var j=-1;j<H/hy+1;j++){var a=i*hx,b=j*hy+(i%2?hy/2:0);cells.push([a,b,Math.hypot(a-W/2,b-H/2)])}}
-function draw(u){x.globalCompositeOperation="source-over";x.fillStyle="#03050a";x.fillRect(0,0,W,H);x.globalCompositeOperation="lighter";glow(W/2,H/2,Math.max(W,H)*.6,I,.07);var k=s/17;
-for(var n=0;n<cells.length;n++){var p=cells[n],d=p[2]/k,w=Math.pow(.5+.5*Math.cos(d/38-u*T*2),6),w2=Math.pow(.5+.5*Math.cos(d/90+u*T),3);
-x.strokeStyle="rgba("+(w>.5?I:K)+","+(.07+.8*w+.12*w2)+")";x.lineWidth=.8+w*1.2;x.beginPath();for(var q=0;q<=6;q++){var an=q*T/6,px=p[0]+Math.cos(an)*(s-2),py=p[1]+Math.sin(an)*(s-2);q?x.lineTo(px,py):x.moveTo(px,py)}x.stroke();
-if(w>.75){x.fillStyle="rgba("+I+","+(w-.75)*1.1+")";x.fill()}}glow(W/2,H/2,46*k,"255,255,255",.55)}
-function fin(){if(done)return;done=true;c.classList.add("out");setTimeout(function(){c.remove()},450)}
-addEventListener("resize",rs);rs();setTimeout(fin,1300);(function loop(t){if(c.isConnected){draw((t/4000)%1);requestAnimationFrame(loop)}})(0)})();
+#splash{position:fixed;inset:0;width:100%;height:100%;z-index:99;background:#dcdadd;object-fit:cover;transition:opacity .4s ease}#splash.out{opacity:0;pointer-events:none}
+@media(orientation:landscape){#splash{object-fit:contain;background:#0b0c0f}}
+</style></head><body><video id="splash" src="/app/splash.mp4" muted playsinline preload="auto" aria-hidden="true"></video><script nonce="{{.Nonce}}">
+(function(){var v=document.getElementById("splash"),seen=false,done=false;try{seen=sessionStorage.getItem("splash")==="1";sessionStorage.setItem("splash","1")}catch(e){}
+if(seen||!v.play||matchMedia("(prefers-reduced-motion: reduce)").matches){v.remove();return}
+function fin(){if(done)return;done=true;v.classList.add("out");setTimeout(function(){v.pause();v.remove()},450)}
+v.muted=true;v.addEventListener("ended",fin);v.addEventListener("error",fin);v.addEventListener("click",fin);var p=v.play();if(p&&p.catch)p.catch(fin);
+setTimeout(function(){if(v.currentTime===0)fin()},2500);setTimeout(fin,6000)})();
 </script><div class="wrap">
 <div class="row"><a class="lang" href="?lang={{.OtherLang}}">🌐 {{.OtherLangName}}</a></div>
 <div class="card"><div class="row">{{if .Logo}}<img class="logo" src="{{.Logo}}" alt="">{{end}}<h1>{{.Title}}</h1><span class="sp"></span><span class="badge {{.StatusClass}}">{{.Status}}</span></div>

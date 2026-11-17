@@ -18,6 +18,7 @@ import (
 func init() {
 	_ = mime.AddExtensionType(".webmanifest", "application/manifest+json")
 	_ = mime.AddExtensionType(".woff", "font/woff")
+	_ = mime.AddExtensionType(".mp4", "video/mp4")
 }
 
 //go:embed static
@@ -82,7 +83,7 @@ func Handler() http.Handler {
 			p = "index.html"
 		}
 		a, ok := assets[p]
-		if !ok || (r.Method != http.MethodGet && r.Method != http.MethodHead) || p == "index.html" && r.URL.Path != "/" && strings.HasSuffix(r.URL.Path, "index.html") {
+		if !ok || strings.HasSuffix(p, ".mp4") || (r.Method != http.MethodGet && r.Method != http.MethodHead) || p == "index.html" && r.URL.Path != "/" && strings.HasSuffix(r.URL.Path, "index.html") {
 			fileServer.ServeHTTP(w, r)
 			return
 		}

@@ -29,7 +29,10 @@ import (
 var miniappFS embed.FS
 
 // The store's fonts are WOFF; nosniff needs the right type.
-func init() { _ = mime.AddExtensionType(".woff", "font/woff") }
+func init() {
+	_ = mime.AddExtensionType(".woff", "font/woff")
+	_ = mime.AddExtensionType(".mp4", "video/mp4")
+}
 
 var tgToken, miniBase string
 
