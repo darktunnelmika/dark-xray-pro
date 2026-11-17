@@ -255,6 +255,27 @@ WHERE (?='owner' OR seller=? OR seller IN (SELECT id FROM reps WHERE parent_id=?
 // means a new client; otherwise it renews that client, which must belong to
 // the product's seller.
 func (s *Store) CreateOrder(ctx context.Context, by Principal, productID, buyer, clientEmail, note string) (int64, error) {
+	return s.createOrder(ctx, by, productID, buyer, clientEmail, note, clientEmail != "")
+}
+
+// CreateOrderNamed orders a new client under a name the seller chose. The
+// name must be free; if it is taken by the time the order is delivered, the
+// order number is added to it.
+func (s *Store) CreateOrderNamed(ctx context.Context, by Principal, productID, buyer, name, note string) (int64, error) {
+	if !emailRE.MatchString(name) {
+		return 0, fmt.Errorf("%w: the name may use only English letters, digits and . _ - @ +", ErrInvalid)
+	}
+	var n int
+	if err := s.ro.QueryRowContext(ctx, `SELECT COUNT(*) FROM clients WHERE email=? COLLATE NOCASE`, name).Scan(&n); err != nil {
+		return 0, err
+	}
+	if n != 0 {
+		return 0, fmt.Errorf("%w: client already exists", ErrInvalid)
+	}
+	return s.createOrder(ctx, by, productID, buyer, name, note, false)
+}
+
+func (s *Store) createOrder(ctx context.Context, by Principal, productID, buyer, clientEmail, note string, renew bool) (int64, error) {
 	p, err := scanProduct(s.ro.QueryRowContext(ctx, `SELECT `+productCols+` FROM products WHERE id=?`, productID))
 	if err != nil {
 		return 0, ErrNotFound
@@ -268,7 +289,6 @@ func (s *Store) CreateOrder(ctx context.Context, by Principal, productID, buyer,
 	if len(buyer) > 200 || len(note) > 1000 {
 		return 0, ErrInvalid
 	}
-	renew := clientEmail != ""
 	if renew && p.NoRenew {
 		return 0, fmt.Errorf("%w: this product is for new services only", ErrInvalid)
 	}
@@ -350,6 +370,13 @@ func (s *Store) FulfillOrder(ctx context.Context, by Principal, id int64) (strin
 	} else {
 		if email == "" {
 			email = fmt.Sprintf("%s-%d", p.ID, id)
+		} else {
+			// A chosen name that got taken meanwhile must never overwrite that client.
+			var n int
+			_ = s.ro.QueryRowContext(ctx, `SELECT COUNT(*) FROM clients WHERE email=? COLLATE NOCASE`, email).Scan(&n)
+			if n != 0 {
+				email = fmt.Sprintf("%s-%d", email, id)
+			}
 		}
 		ibs := p.Inbounds
 		if len(ibs) == 0 {

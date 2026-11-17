@@ -1337,6 +1337,19 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 		err := s.TransferClient(r.Context(), r.PathValue("email"), in.RepID)
 		reply(w, map[string]bool{"ok": err == nil}, err)
 	}))
+	mux.HandleFunc("POST /api/v2/admin/clients/{email}/rename", member(func(w http.ResponseWriter, r *http.Request) {
+		var in struct{ Name string }
+		if !decode(w, r, &in) {
+			return
+		}
+		p := who(r)
+		if p.Role == "rep" && !s.ownsClient(r.Context(), p.RepID, r.PathValue("email")) {
+			http.NotFound(w, r)
+			return
+		}
+		err := s.RenameClient(r.Context(), r.PathValue("email"), strings.TrimSpace(in.Name))
+		reply(w, map[string]any{"ok": err == nil, "email": strings.TrimSpace(in.Name)}, err)
+	}))
 	mux.HandleFunc("PUT /api/v2/admin/clients/{email}/note", member(func(w http.ResponseWriter, r *http.Request) {
 		var in struct{ Note string }
 		if !decode(w, r, &in) {

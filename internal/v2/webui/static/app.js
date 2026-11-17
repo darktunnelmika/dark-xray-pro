@@ -176,6 +176,8 @@ async function api(method, path, body) {
 
 // faErr: the server's English errors in plain Persian (numbers kept).
 const FA_ERRS = [
+  [/client already exists/i, "این نام قبلاً استفاده شده است"],
+  [/the name may use only/i, "نام فقط حروف انگلیسی، عدد و . _ - باشد (بدون فاصله)"],
   [/insufficient credit/i, "اعتبار کافی نیست"],
   [/the longest term allowed is (\d+) days/i, "بیشترین مدت مجاز برای شما $1 روز است"],
   [/the largest volume allowed is (\d+) GB/i, "بیشترین حجم مجاز برای شما $1 گیگ است"],
@@ -1929,7 +1931,7 @@ function clientForm(c, inbounds, ctx = { reps: [] }) {
   const rnd = () => { const a = "abcdefghjkmnpqrstuvwxyz23456789"; let r = ""; const b = crypto.getRandomValues(new Uint8Array(8)); for (const x of b) r += a[x % a.length]; return r; };
 
   // identity
-  const name = h("input", { required: true, pattern: "[A-Za-z0-9][A-Za-z0-9._@+\\-]{0,127}", value: v.Email, disabled: !isNew, dir: "ltr", autofocus: isNew, placeholder: "ali-30gb" });
+  const name = h("input", { required: true, pattern: "[A-Za-z0-9][A-Za-z0-9._@+\\-]{0,127}", value: v.Email, dir: "ltr", autofocus: isNew, placeholder: "ali-30gb" });
   const dice = isNew ? h("button", { type: "button", class: "ghost icon-only", title: T("نام تصادفی", "Random name"), onclick: () => { name.value = (tplPrefix || "") + rnd(); calc(); } }, "🎲") : null;
   let tplPrefix = "";
   const status = seg([["on", T("فعال", "Active")], owner ? ["hold", T("در انتظار", "On hold")] : null, ["off", T("غیرفعال", "Disabled")]].filter(Boolean),
@@ -2091,8 +2093,16 @@ function clientForm(c, inbounds, ctx = { reps: [] }) {
     if (owner && subTok.value && subTok.value !== v.SubToken) body.SubToken = subTok.value;
     if (!isNew && owner) { body.UUID ||= v.UUID; body.SubToken ||= v.SubToken; }
     save.disabled = true;
+    name.value = name.value.trim();
     const em = encodeURIComponent(name.value);
     try {
+      // A changed name is a rename: history, usage and the sub link stay with the client.
+      if (!isNew && name.value !== v.Email) {
+        await api("POST", `/api/v2/admin/clients/${encodeURIComponent(v.Email)}/rename`, { Name: name.value });
+        for (const g of groups || []) g.Members = (g.Members || []).map((m) => (m === v.Email ? name.value : m));
+        const was = v.Email; v.Email = name.value;
+        if (location.hash.includes(`e=${encodeURIComponent(was)}`)) history.replaceState(null, "", location.hash.replace(`e=${encodeURIComponent(was)}`, `e=${em}`));
+      }
       await api("PUT", `/api/v2/admin/clients/${em}`, body);
       const extra = [];
       if ((note.value || "") !== (v.Note || "")) extra.push(api("PUT", `/api/v2/admin/clients/${em}/note`, { Note: note.value }));

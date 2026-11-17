@@ -150,9 +150,13 @@ ON CONFLICT(email,node_id,day) DO UPDATE SET up=up+excluded.up, down=down+exclud
 		return wire.UsageAck{}, err
 	}
 	defer stDaily.Close()
+	renamed := renamedNow(ctx, tx)
 	for _, t := range b.Traffic {
 		if t.Up < 0 || t.Down < 0 || !emailRE.MatchString(t.Email) {
 			return wire.UsageAck{}, ErrInvalid
+		}
+		if to, ok := renamed[t.Email]; ok {
+			t.Email = to
 		}
 		if t.Up == 0 && t.Down == 0 {
 			continue
@@ -206,6 +210,9 @@ ON CONFLICT(email,ip,node_id) DO UPDATE SET last_unix=MAX(last_unix,excluded.las
 		}
 		defer stIP.Close()
 		for _, o := range b.Online {
+			if to, ok := renamed[o.Email]; ok {
+				o.Email = to
+			}
 			ips, _ := json.Marshal(o.IPs)
 			if _, err := stOnline.ExecContext(ctx, o.Email, nodeID, string(ips), ts); err != nil {
 				return wire.UsageAck{}, err

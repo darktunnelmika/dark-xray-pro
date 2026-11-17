@@ -160,18 +160,12 @@ func (b *Bot) ownerCallback(ctx context.Context, chat int64, data string) bool {
 		b.send(ctx, chat, "🗑 حذف شد.", &Keyboard{Rows: [][]Button{back("a:clients")}})
 	case "quick":
 		b.quickView(ctx, chat)
-	case "qs": // quick sale: a:qs:<product>
-		id, err := b.Store.CreateOrder(ctx, b.owner(), arg(1), "telegram:quick", "", "")
-		if err == nil {
-			var email string
-			if email, err = b.Store.FulfillOrder(ctx, b.owner(), id); err == nil {
-				b.Store.MarkOrderAnnounced(ctx, id, false)
-				b.send(ctx, chat, "✅ کلاینت ساخته شد: <code>"+esc(email)+"</code>\nلینک و QR را برای مشتری بفرستید:", nil)
-				b.sendSub(ctx, chat, email)
-				return true
-			}
-		}
-		b.send(ctx, chat, "ساخت ممکن نشد: "+esc(fmt.Sprint(err)), nil)
+	case "qs": // quick sale: a:qs:<product> — ask for the client's name first
+		b.setAwait(chat, "qsname:"+arg(1))
+		b.send(ctx, chat, "✍️ نام کلاینت را بفرستید (حروف انگلیسی و عدد، مثل ali-30gb) یا «نام خودکار» را بزنید:", quickNameKB(arg(1)))
+	case "qsgo": // a:qsgo:<product> — automatic name
+		b.takeAwait(chat)
+		b.quickSell(ctx, chat, arg(1), "")
 	case "reps":
 		b.repsView(ctx, chat)
 	case "rc": // a:rc:<rep>:<gb>:<units>
@@ -272,6 +266,8 @@ func orDash(s string) string {
 // ownerInput handles a typed answer the owner was asked for.
 func (b *Bot) ownerInput(ctx context.Context, chat int64, what, text string) bool {
 	switch {
+	case strings.HasPrefix(what, "qsname:"):
+		b.quickSell(ctx, chat, strings.TrimPrefix(what, "qsname:"), strings.TrimSpace(text))
 	case what == "find":
 		b.findClients(ctx, chat, text)
 	case what == "broadcast":
@@ -608,6 +604,42 @@ func (b *Bot) toggleClient(ctx context.Context, chat int64, email string) {
 		return
 	}
 	b.ownerClient(ctx, chat, email)
+}
+
+func quickNameKB(product string) *Keyboard {
+	return &Keyboard{Rows: [][]Button{{{Text: "🎲 نام خودکار", Data: "a:qsgo:" + product}}, back("a:quick")}}
+}
+
+// quickSell creates the client of a quick sale; name empty means automatic.
+func (b *Bot) quickSell(ctx context.Context, chat int64, product, name string) {
+	var id int64
+	var err error
+	if name == "" {
+		id, err = b.Store.CreateOrder(ctx, b.owner(), product, "telegram:quick", "", "")
+	} else {
+		id, err = b.Store.CreateOrderNamed(ctx, b.owner(), product, "telegram:quick", name, "")
+	}
+	if err != nil {
+		switch {
+		case strings.Contains(err.Error(), "already exists"):
+			b.setAwait(chat, "qsname:"+product)
+			b.send(ctx, chat, "این نام قبلاً استفاده شده؛ نام دیگری بفرستید:", quickNameKB(product))
+		case strings.Contains(err.Error(), "the name may use"):
+			b.setAwait(chat, "qsname:"+product)
+			b.send(ctx, chat, "نام فقط حروف انگلیسی، عدد و . _ - باشد (بدون فاصله). دوباره بفرستید:", quickNameKB(product))
+		default:
+			b.send(ctx, chat, "ساخت ممکن نشد: "+esc(err.Error()), nil)
+		}
+		return
+	}
+	email, err := b.Store.FulfillOrder(ctx, b.owner(), id)
+	if err != nil {
+		b.send(ctx, chat, "ساخت ممکن نشد: "+esc(err.Error()), nil)
+		return
+	}
+	b.Store.MarkOrderAnnounced(ctx, id, false)
+	b.send(ctx, chat, "✅ کلاینت ساخته شد: <code>"+esc(email)+"</code>\nلینک و QR را برای مشتری بفرستید:", nil)
+	b.sendSub(ctx, chat, email)
 }
 
 func (b *Bot) quickView(ctx context.Context, chat int64) {
