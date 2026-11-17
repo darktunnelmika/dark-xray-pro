@@ -39,6 +39,11 @@ func (s *Store) Sync(ctx context.Context, nodeID string, req wire.SyncRequest) (
 		rev++
 	}
 	lastErr := req.LastError
+	if req.XrayRunning && req.ConfigRevision == rev {
+		// The agent remembers its last failure for good; once Xray runs on the
+		// current config that failure is history, not the node's state.
+		lastErr = ""
+	}
 	if len(lastErr) > 500 {
 		lastErr = lastErr[:500]
 	}

@@ -164,6 +164,20 @@ func runSSHInstall(in SSHInstall, auth []ssh.AuthMethod, cmd string, j *sshJob) 
 			return nil
 		}}
 	cl, err := ssh.Dial("tcp", addr, cfg)
+	if err != nil && strings.Contains(err.Error(), "unable to authenticate") && in.Password != strings.TrimSpace(in.Password) {
+		// A pasted password often carries a space or a line break at its end:
+		// the exact text was refused, try it without them.
+		pw := strings.TrimSpace(in.Password)
+		cfg.Auth = []ssh.AuthMethod{ssh.Password(pw), ssh.KeyboardInteractive(func(_, _ string, qs []string, _ []bool) ([]string, error) {
+			out := make([]string, len(qs))
+			for i := range qs {
+				out[i] = pw
+			}
+			return out, nil
+		})}
+		in.Password = pw
+		cl, err = ssh.Dial("tcp", addr, cfg)
+	}
 	if err != nil {
 		return fmt.Errorf("cannot sign in: %v", err)
 	}

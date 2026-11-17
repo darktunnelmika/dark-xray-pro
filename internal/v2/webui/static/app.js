@@ -3580,13 +3580,23 @@ function nodeForm() {
       log.textContent = j.lines.join("\n"); log.scrollTop = log.scrollHeight;
       if (j.status === "running") { setTimeout(poll, 1500); return; }
       if (j.status === "done") { out.replaceChildren(h("p", { class: "small", style: "color:var(--good)" }, fa ? "✅ نود نصب شد؛ چند ثانیه دیگر در فهرست نودها آنلاین می‌شود." : "✅ Installed; the node comes online in a few seconds."), h("button", { type: "button", onclick: () => { document.getElementById("modal").close(); route(); } }, fa ? "رفتن به نودها" : "Go to nodes")); }
-      else { out.replaceChildren(h("p", { class: "error" }, (fa ? "نصب نشد: " : "Not installed: ") + (j.error || ""))); save.disabled = false; }
+      else { out.replaceChildren(h("p", { class: "error" }, (fa ? "نصب نشد: " : "Not installed: ") + sshErr(j.error || "", fa))); save.disabled = false; }
     };
     poll();
   });
   drawMode();
   openModal(t("addNode"), h("div", { class: "form" },
     h("div", { class: "two" }, h("label", {}, h("span", {}, t("nodeId")), id), h("label", {}, h("span", {}, t("name")), name)), seg, body, log, out), [save]);
+}
+
+// Why an SSH install failed, in words the owner can act on.
+function sshErr(e, fa) {
+  if (!fa) return e;
+  if (/unable to authenticate/i.test(e)) return "سرور نام کاربری یا رمز را قبول نکرد. رمز را دوباره (بدون فاصلهٔ اضافه) وارد کنید؛ اگر سرور فقط کلید می‌پذیرد، کلید خصوصی را بدهید.";
+  if (/connection refused/i.test(e)) return "پورت SSH روی سرور بسته است؛ شمارهٔ پورت را بررسی کنید.";
+  if (/i\/o timeout|timed out|no route/i.test(e)) return "هاب به سرور نرسید؛ IP، پورت و فایروال سرور را بررسی کنید.";
+  if (/exit status|Process exited/i.test(e)) return "ورود انجام شد ولی نصب‌کننده با خطا تمام شد؛ جزئیات در خروجی بالا است.";
+  return e;
 }
 
 // Owners manage resellers at /api/v2/admin/reps; a reseller manages its own
