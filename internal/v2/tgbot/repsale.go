@@ -81,7 +81,7 @@ func (b *Bot) repSaleCallback(ctx context.Context, q *CallbackQuery) bool {
 		b.repSaleDecide(ctx, chat, id, parts[0] == "ok")
 	case "cfg":
 		b.takeAwait(chat)
-		b.repSaleConfig(ctx, chat, arg(1), arg(2))
+		b.repSaleConfig(ctx, chat, parts[1:])
 	}
 	return true
 }
@@ -170,6 +170,13 @@ func (b *Bot) repSaleOpen(ctx context.Context, chat int64, buyer, rep, name, pkg
 	if c.Holder != "" || c.Bank != "" {
 		fmt.Fprintf(&sb, "%s\n", esc(strings.TrimSpace(c.Holder+" "+c.Bank)))
 	}
+	if o.Kind == "new" {
+		kind := "فقط فروش حجمی"
+		if o.Terms.AllowUnlimited {
+			kind = "فروش حجمی و نامحدود"
+		}
+		fmt.Fprintf(&sb, "\nنوع پنل: %s\n", kind)
+	}
 	sb.WriteString("\n📸 سپس <b>عکس رسید</b> را همین‌جا بفرستید. بعد از تأیید، پنل شما آماده می‌شود.")
 	b.setAwait(chat, "P:receipt:"+strconv.FormatInt(o.ID, 10))
 	b.send(ctx, chat, sb.String(), &Keyboard{Rows: [][]Button{row(cbBtn("« منوی اصلی", "home"))}})
@@ -200,6 +207,16 @@ func (b *Bot) repSaleInput(ctx context.Context, m *Message, what, text string) b
 			return false
 		}
 		b.repSaleAddPackage(ctx, chat, text)
+		return true
+	case strings.HasPrefix(rest, "pv:"):
+		if !b.Owners[chat] {
+			return false
+		}
+		f := strings.SplitN(strings.TrimPrefix(rest, "pv:"), ":", 2)
+		if len(f) != 2 {
+			return false
+		}
+		b.repSaleSetValue(ctx, chat, what, f[0], f[1], text)
 		return true
 	}
 	return false
@@ -270,9 +287,57 @@ func (b *Bot) repSaleDecide(ctx context.Context, chat, id int64, approve bool) {
 
 // ---- the owner's settings ----
 
-func (b *Bot) repSaleConfig(ctx context.Context, chat int64, act, id string) {
+// pkgTerms words what a panel bought with the package may do.
+func pkgTerms(p hubcore.RepPackage) string {
+	var l []string
+	if p.AllowUnlimited {
+		kind := "فروش حجمی و نامحدود"
+		if p.Units > 0 {
+			kind += fmt.Sprintf(" (%s واحد نامحدود)", faInt(p.Units))
+		}
+		l = append(l, kind)
+	} else {
+		l = append(l, "فقط فروش حجمی")
+	}
+	if len(p.Inbounds) > 0 {
+		l = append(l, "اینباندها: "+esc(strings.Join(p.Inbounds, "، ")))
+	} else {
+		l = append(l, "همهٔ اینباندها")
+	}
+	capOf := func(n int64, unit string) string {
+		if n == 0 {
+			return "بدون سقف"
+		}
+		return faInt(n) + unit
+	}
+	l = append(l, "حداکثر کاربر: "+capOf(p.MaxClients, ""), "حداکثر مدت هر کاربر: "+capOf(p.MaxDays, " روز"), "حداکثر حجم هر کاربر: "+capOf(p.MaxClientGB, " گیگ"))
+	yes := func(v bool) string {
+		if v {
+			return "بله"
+		}
+		return "خیر"
+	}
+	l = append(l, "حذف کاربر: "+yes(p.CanDelete), "برگشت حجم مصرف‌نشده هنگام حذف: "+yes(p.RefundUnused))
+	return "• " + strings.Join(l, "\n• ")
+}
+
+// repSaleConfig handles "P:cfg[:act[:id[:arg]]]".
+func (b *Bot) repSaleConfig(ctx context.Context, chat int64, args []string) {
+	arg := func(i int) string {
+		if i < len(args) {
+			return args[i]
+		}
+		return ""
+	}
+	act, id := arg(0), arg(1)
 	sale := b.Store.RepSale(ctx)
-	save := func() bool {
+	var pk *hubcore.RepPackage
+	for i := range sale.Packages {
+		if sale.Packages[i].ID == id {
+			pk = &sale.Packages[i]
+		}
+	}
+	save := func(backTo string) bool {
 		if err := b.Store.PutRepSale(ctx, sale); err != nil {
 			msg := esc(err.Error())
 			switch {
@@ -281,20 +346,24 @@ func (b *Bot) repSaleConfig(ctx context.Context, chat int64, act, id string) {
 			case strings.Contains(msg, "payment card"):
 				msg = "اول شماره کارت پرداخت را در پنل (فروشگاه تلگرام) ثبت کنید."
 			}
-			b.send(ctx, chat, "ذخیره نشد: "+msg, &Keyboard{Rows: [][]Button{back("P:cfg")}})
+			b.send(ctx, chat, "ذخیره نشد: "+msg, &Keyboard{Rows: [][]Button{back(backTo)}})
 			return false
 		}
 		return true
 	}
+	ask := func(field, prompt string) {
+		b.setAwait(chat, "P:pv:"+field+":"+id)
+		b.send(ctx, chat, prompt, &Keyboard{Rows: [][]Button{back("P:cfg:e:" + id)}})
+	}
 	switch act {
 	case "on", "off":
 		sale.Enabled = act == "on"
-		if !save() {
+		if !save("P:cfg") {
 			return
 		}
 	case "add":
 		b.setAwait(chat, "P:pkg")
-		b.send(ctx, chat, "بستهٔ جدید را در یک خط بفرستید: <b>حجم به گیگ</b> و <b>قیمت به تومان</b>.\nمثال: <code>500 1200000</code>", &Keyboard{Rows: [][]Button{back("P:cfg")}})
+		b.send(ctx, chat, "بستهٔ جدید را در یک خط بفرستید: <b>حجم به گیگ</b> و <b>قیمت به تومان</b>.\nمثال: <code>500 1200000</code>\n\nبعد از آن تنظیمات پنل همین بسته را می‌بینید.", &Keyboard{Rows: [][]Button{back("P:cfg")}})
 		return
 	case "del":
 		kept := sale.Packages[:0]
@@ -307,9 +376,64 @@ func (b *Bot) repSaleConfig(ctx context.Context, chat int64, act, id string) {
 		if len(sale.Packages) == 0 {
 			sale.Enabled = false
 		}
-		if !save() {
+		if !save("P:cfg") {
 			return
 		}
+	case "e", "tu", "td", "tr", "ib", "it", "ia", "gp", "un", "mc", "md", "mg":
+		if pk == nil {
+			b.send(ctx, chat, "این بسته دیگر وجود ندارد.", &Keyboard{Rows: [][]Button{back("P:cfg")}})
+			return
+		}
+		switch act {
+		case "tu":
+			pk.AllowUnlimited = !pk.AllowUnlimited
+		case "td":
+			pk.CanDelete = !pk.CanDelete
+		case "tr":
+			pk.RefundUnused = !pk.RefundUnused
+		case "ia":
+			pk.Inbounds = nil
+		case "it":
+			all := b.Store.SellerInbounds(ctx, "")
+			if n, err := strconv.Atoi(arg(2)); err == nil && n >= 0 && n < len(all) {
+				tag, kept, had := all[n], []string{}, false
+				for _, t := range pk.Inbounds {
+					if t == tag {
+						had = true
+					} else {
+						kept = append(kept, t)
+					}
+				}
+				if !had {
+					kept = append(kept, tag)
+				}
+				pk.Inbounds = kept
+			}
+		case "gp":
+			ask("gp", "حجم به گیگ و قیمت به تومان را در یک خط بفرستید. مثال: <code>500 1200000</code>")
+			return
+		case "un":
+			ask("un", "تعداد واحد نامحدودی که همراه این بسته داده می‌شود را بفرستید (۰ = هیچ):")
+			return
+		case "mc":
+			ask("mc", "حداکثر تعداد کاربر پنل را بفرستید (۰ = بدون سقف):")
+			return
+		case "md":
+			ask("md", "حداکثر مدت هر کاربر به روز را بفرستید (۰ = بدون سقف):")
+			return
+		case "mg":
+			ask("mg", "حداکثر حجم هر کاربر به گیگ را بفرستید (۰ = بدون سقف):")
+			return
+		}
+		if act != "e" && act != "ib" && !save("P:cfg:e:"+id) {
+			return
+		}
+		if act == "ib" || act == "it" || act == "ia" {
+			b.repSaleInbounds(ctx, chat, *pk)
+			return
+		}
+		b.repSalePackage(ctx, chat, *pk)
+		return
 	}
 	sale = b.Store.RepSale(ctx)
 	state, toggle := "🔴 خاموش", cbBtn("🟢 روشن کردن", "P:cfg:on")
@@ -317,39 +441,148 @@ func (b *Bot) repSaleConfig(ctx context.Context, chat int64, act, id string) {
 		state, toggle = "🟢 روشن", cbBtn("🔴 خاموش کردن", "P:cfg:off")
 	}
 	var sb strings.Builder
-	fmt.Fprintf(&sb, "🤝 <b>فروش پنل نمایندگی</b>\n\nوضعیت: <b>%s</b>\n\nمشتری از منوی ربات پنل می‌خرد و نماینده‌ها پنلشان را شارژ می‌کنند؛ هر دو با رسید کارت‌به‌کارت و تأیید شما.\n\n<b>بسته‌ها</b>\n", state)
+	fmt.Fprintf(&sb, "🤝 <b>فروش پنل نمایندگی</b>\n\nوضعیت: <b>%s</b>\n\nمشتری از منوی ربات پنل می‌خرد و نماینده‌ها پنلشان را شارژ می‌کنند؛ هر دو با رسید کارت‌به‌کارت و تأیید شما. پنل جدید با تنظیمات همان بسته ساخته می‌شود.\n\n<b>بسته‌ها</b> (برای دیدن و تغییر تنظیمات روی بسته بزنید)\n", state)
 	kb := &Keyboard{Rows: [][]Button{{toggle}}}
 	if len(sale.Packages) == 0 {
 		sb.WriteString("هنوز بسته‌ای تعریف نشده است.\n")
 	}
 	for _, p := range sale.Packages {
-		fmt.Fprintf(&sb, "• %s\n", pkgLine(p))
-		kb.Rows = append(kb.Rows, row(cbBtn("🗑 حذف "+gbWord(p.GB), "P:cfg:del:"+p.ID)))
+		kind := "فقط حجمی"
+		if p.AllowUnlimited {
+			kind = "حجمی + نامحدود"
+		}
+		fmt.Fprintf(&sb, "• %s — %s\n", pkgLine(p), kind)
+		kb.Rows = append(kb.Rows, row(cbBtn("⚙️ "+gbWord(p.GB), "P:cfg:e:"+p.ID)))
 	}
 	kb.Rows = append(kb.Rows, row(cbBtn("➕ بستهٔ جدید", "P:cfg:add")), back("a:settings"))
 	b.send(ctx, chat, sb.String(), kb)
 }
 
-func (b *Bot) repSaleAddPackage(ctx context.Context, chat int64, text string) {
-	f := strings.Fields(strings.NewReplacer(",", "", "٬", "", "،", " ").Replace(text))
-	var gbN, price int64
-	ok := len(f) == 2
-	if ok {
-		var a, c bool
-		gbN, a = parseNum(f[0])
-		price, c = parseNum(f[1])
-		ok = a && c && gbN > 0
+// repSalePackage is one package's settings: what a panel bought with it gets.
+func (b *Bot) repSalePackage(ctx context.Context, chat int64, p hubcore.RepPackage) {
+	on := func(v bool, yes, no string) string {
+		if v {
+			return yes
+		}
+		return no
 	}
+	c := "P:cfg:"
+	kb := &Keyboard{Rows: [][]Button{
+		row(cbBtn("📦 حجم و قیمت", c+"gp:"+p.ID)),
+		row(cbBtn(on(p.AllowUnlimited, "نوع فروش: حجمی + نامحدود", "نوع فروش: فقط حجمی"), c+"tu:"+p.ID)),
+	}}
+	if p.AllowUnlimited {
+		kb.Rows = append(kb.Rows, row(cbBtn(fmt.Sprintf("واحد نامحدود همراه بسته: %s", faInt(p.Units)), c+"un:"+p.ID)))
+	}
+	kb.Rows = append(kb.Rows,
+		row(cbBtn("🔌 اینباندها", c+"ib:"+p.ID)),
+		row(cbBtn("👥 حداکثر کاربر", c+"mc:"+p.ID), cbBtn("📅 حداکثر روز", c+"md:"+p.ID)),
+		row(cbBtn("📏 حداکثر حجم هر کاربر", c+"mg:"+p.ID)),
+		row(cbBtn(on(p.CanDelete, "حذف کاربر: مجاز", "حذف کاربر: غیرمجاز"), c+"td:"+p.ID)),
+		row(cbBtn(on(p.RefundUnused, "برگشت حجم هنگام حذف: بله", "برگشت حجم هنگام حذف: خیر"), c+"tr:"+p.ID)),
+		row(cbBtn("🗑 حذف بسته", c+"del:"+p.ID)), back("P:cfg"))
+	b.send(ctx, chat, fmt.Sprintf("⚙️ <b>بستهٔ %s</b> — %s تومان\n%s\nپنلی که با این بسته خریده شود با این تنظیمات ساخته می‌شود:\n\n%s\n\nشارژ پنل‌های موجود فقط اعتبار اضافه می‌کند و تنظیمات آن پنل را عوض نمی‌کند.",
+		gbWord(p.GB), faMoney(p.Price), line, pkgTerms(p)), kb)
+}
+
+func (b *Bot) repSaleInbounds(ctx context.Context, chat int64, p hubcore.RepPackage) {
+	has := map[string]bool{}
+	for _, t := range p.Inbounds {
+		has[t] = true
+	}
+	kb := &Keyboard{}
+	mark := "⚪️ "
+	if len(p.Inbounds) == 0 {
+		mark = "✅ "
+	}
+	kb.Rows = append(kb.Rows, row(cbBtn(mark+"همهٔ اینباندها (بعدی‌ها هم)", "P:cfg:ia:"+p.ID)))
+	for i, t := range b.Store.SellerInbounds(ctx, "") {
+		m := "⚪️ "
+		if has[t] {
+			m = "✅ "
+		}
+		kb.Rows = append(kb.Rows, row(cbBtn(m+t, fmt.Sprintf("P:cfg:it:%s:%d", p.ID, i))))
+	}
+	kb.Rows = append(kb.Rows, back("P:cfg:e:"+p.ID))
+	b.send(ctx, chat, "🔌 اینباندهایی که پنل این بسته می‌تواند بفروشد را انتخاب کنید:", kb)
+}
+
+// parseGBPrice reads "500 1200000".
+func parseGBPrice(text string) (gbN, price int64, ok bool) {
+	f := strings.Fields(strings.NewReplacer(",", "", "٬", "", "،", " ").Replace(text))
+	if len(f) != 2 {
+		return 0, 0, false
+	}
+	gbN, a := parseNum(f[0])
+	price, c := parseNum(f[1])
+	return gbN, price, a && c && gbN > 0
+}
+
+func (b *Bot) repSaleAddPackage(ctx context.Context, chat int64, text string) {
+	gbN, price, ok := parseGBPrice(text)
 	if !ok {
 		b.setAwait(chat, "P:pkg")
 		b.send(ctx, chat, "دو عدد بفرستید: حجم به گیگ و قیمت به تومان. مثال: <code>500 1200000</code>", &Keyboard{Rows: [][]Button{back("P:cfg")}})
 		return
 	}
 	sale := b.Store.RepSale(ctx)
-	sale.Packages = append(sale.Packages, hubcore.RepPackage{GB: gbN, Price: price})
+	// A new package starts strict: volume only, every inbound, no caps.
+	sale.Packages = append(sale.Packages, hubcore.RepPackage{GB: gbN, Price: price, CanDelete: true})
 	if err := b.Store.PutRepSale(ctx, sale); err != nil {
 		b.send(ctx, chat, "ذخیره نشد: "+esc(err.Error()), &Keyboard{Rows: [][]Button{back("P:cfg")}})
 		return
 	}
-	b.repSaleConfig(ctx, chat, "", "")
+	sale = b.Store.RepSale(ctx)
+	b.repSalePackage(ctx, chat, sale.Packages[len(sale.Packages)-1])
+}
+
+// repSaleSetValue takes a typed value for one field of a package
+// (awaited as "P:pv:<field>:<package>").
+func (b *Bot) repSaleSetValue(ctx context.Context, chat int64, what, field, id, text string) {
+	sale := b.Store.RepSale(ctx)
+	var pk *hubcore.RepPackage
+	for i := range sale.Packages {
+		if sale.Packages[i].ID == id {
+			pk = &sale.Packages[i]
+		}
+	}
+	if pk == nil {
+		b.send(ctx, chat, "این بسته دیگر وجود ندارد.", &Keyboard{Rows: [][]Button{back("P:cfg")}})
+		return
+	}
+	again := func(msg string) {
+		b.setAwait(chat, what)
+		b.send(ctx, chat, msg, &Keyboard{Rows: [][]Button{back("P:cfg:e:" + id)}})
+	}
+	if field == "gp" {
+		gbN, price, ok := parseGBPrice(text)
+		if !ok {
+			again("دو عدد بفرستید: حجم به گیگ و قیمت به تومان. مثال: <code>500 1200000</code>")
+			return
+		}
+		pk.GB, pk.Price, pk.Name = gbN, price, ""
+	} else {
+		n, ok := parseNum(text)
+		if !ok || n < 0 {
+			again("فقط یک عدد بفرستید (۰ = بدون سقف).")
+			return
+		}
+		switch field {
+		case "un":
+			pk.Units = n
+		case "mc":
+			pk.MaxClients = n
+		case "md":
+			pk.MaxDays = n
+		case "mg":
+			pk.MaxClientGB = n
+		default:
+			return
+		}
+	}
+	if err := b.Store.PutRepSale(ctx, sale); err != nil {
+		again("ذخیره نشد: " + esc(err.Error()))
+		return
+	}
+	b.repSalePackage(ctx, chat, *pk)
 }

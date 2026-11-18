@@ -32,16 +32,36 @@ const repSaleSchema = `CREATE TABLE IF NOT EXISTS rep_orders (
 CREATE INDEX IF NOT EXISTS rep_orders_chat ON rep_orders(chat_id, id);`
 
 func (s *Store) ensureRepSaleSchema() error {
-	_, err := s.db.Exec(repSaleSchema)
-	return err
+	if _, err := s.db.Exec(repSaleSchema); err != nil {
+		return err
+	}
+	// The package as it was when ordered: later edits do not change a paid order.
+	return s.addColumn("rep_orders", "terms", "TEXT NOT NULL DEFAULT ''")
 }
 
-// RepPackage is one thing on sale: GB of volume credit for a price in toman.
+// RepPackage is one thing on sale: GB of volume credit for a price in toman,
+// together with the settings a panel bought with it gets. The owner sets
+// them once, on the package; approving an order needs no further setup.
 type RepPackage struct {
 	ID    string `json:"id"`
 	Name  string `json:"name"`
 	GB    int64  `json:"gb"`
 	Price int64  `json:"price"`
+	// The new reseller's policy.
+	AllowUnlimited bool     `json:"allow_unlimited"` // may sell unlimited plans (off: volume only)
+	Units          int64    `json:"units"`           // unlimited units that come with the package
+	Inbounds       []string `json:"inbounds"`        // empty: every inbound
+	MaxClients     int64    `json:"max_clients"`     // 0: no cap
+	MaxDays        int64    `json:"max_days"`
+	MaxClientGB    int64    `json:"max_client_gb"`
+	CanDelete      bool     `json:"can_delete"`
+	RefundUnused   bool     `json:"refund_unused"`
+}
+
+// Policy is the reseller policy a panel bought with this package starts with.
+func (p RepPackage) Policy() RepPolicy {
+	return RepPolicy{MaxClients: p.MaxClients, MaxDays: p.MaxDays, MaxClientGB: p.MaxClientGB, AllowUnlimited: p.AllowUnlimited,
+		CanDelete: p.CanDelete, RefundUnused: p.RefundUnused, Inbounds: p.Inbounds}
 }
 
 // RepSale is the owner's setting; the sale is off until turned on.
@@ -66,6 +86,18 @@ func (s *Store) PutRepSale(ctx context.Context, v RepSale) error {
 		p.Name = strings.TrimSpace(p.Name)
 		if p.GB < 1 || p.GB > 1_000_000 || p.Price < 0 || p.Price > 100_000_000_000 {
 			return fmt.Errorf("%w: a package is 1 GB or more with a price", ErrInvalid)
+		}
+		if !p.AllowUnlimited {
+			p.Units = 0
+		}
+		if p.Units < 0 || p.Units > 100_000 || p.MaxClients < 0 || p.MaxDays < 0 || p.MaxClientGB < 0 {
+			return fmt.Errorf("%w: limits cannot be negative", ErrInvalid)
+		}
+		for _, t := range p.Inbounds {
+			var n int
+			if s.ro.QueryRowContext(ctx, `SELECT COUNT(*) FROM inbounds WHERE tag=?`, t).Scan(&n) != nil || n == 0 {
+				return fmt.Errorf("%w: unknown inbound %q", ErrInvalid, t)
+			}
 		}
 		if p.ID == "" {
 			p.ID = "p" + randomHex(3)
@@ -104,15 +136,21 @@ type RepOrder struct {
 	Price     int64  `json:"price"`
 	Status    string `json:"status"`
 	Receipt   string `json:"receipt,omitempty"`
+	Terms     RepPackage `json:"terms"` // the package as ordered
 }
 
-const repOrderCols = `id,unix,chat_id,buyer_name,kind,rep_id,package,gb,price,status,receipt`
+const repOrderCols = `id,unix,chat_id,buyer_name,kind,rep_id,package,gb,price,status,receipt,terms`
 
 func scanRepOrder(r interface{ Scan(...any) error }) (RepOrder, error) {
 	var o RepOrder
-	err := r.Scan(&o.ID, &o.Unix, &o.Chat, &o.BuyerName, &o.Kind, &o.RepID, &o.Package, &o.GB, &o.Price, &o.Status, &o.Receipt)
+	var terms string
+	err := r.Scan(&o.ID, &o.Unix, &o.Chat, &o.BuyerName, &o.Kind, &o.RepID, &o.Package, &o.GB, &o.Price, &o.Status, &o.Receipt, &terms)
 	if errors.Is(err, sql.ErrNoRows) {
 		return o, ErrNotFound
+	}
+	if json.Unmarshal([]byte(terms), &o.Terms) != nil || o.Terms.GB == 0 {
+		// An order from before packages carried settings: the old defaults.
+		o.Terms = RepPackage{Name: o.Package, GB: o.GB, Price: o.Price, AllowUnlimited: DefaultRepPolicy.AllowUnlimited, CanDelete: DefaultRepPolicy.CanDelete}
 	}
 	return o, err
 }
@@ -176,8 +214,9 @@ func (s *Store) CreateRepOrder(ctx context.Context, chat int64, buyerName, repID
 	if _, err := s.db.ExecContext(ctx, `UPDATE rep_orders SET status='cancelled', decided_unix=? WHERE chat_id=? AND status='await_receipt'`, now, chat); err != nil {
 		return RepOrder{}, err
 	}
-	r, err := s.db.ExecContext(ctx, `INSERT INTO rep_orders(unix,chat_id,buyer_name,kind,rep_id,package,gb,price) VALUES(?,?,?,?,?,?,?,?)`,
-		now, chat, buyerName, kind, repID, pkg.Name, pkg.GB, pkg.Price)
+	terms, _ := json.Marshal(pkg)
+	r, err := s.db.ExecContext(ctx, `INSERT INTO rep_orders(unix,chat_id,buyer_name,kind,rep_id,package,gb,price,terms) VALUES(?,?,?,?,?,?,?,?,?)`,
+		now, chat, buyerName, kind, repID, pkg.Name, pkg.GB, pkg.Price, string(terms))
 	if err != nil {
 		return RepOrder{}, err
 	}
@@ -212,6 +251,7 @@ func (s *Store) AttachRepReceipt(ctx context.Context, id, chat int64, fileID str
 type RepOrderResult struct {
 	Order    RepOrder
 	Password string
+	Units    int64 // unlimited units that were added
 }
 
 // ApproveRepOrder delivers a paid order once: a new reseller with a login,
@@ -259,7 +299,17 @@ func (s *Store) ApproveRepOrder(ctx context.Context, actor string, id int64) (Re
 			return undo(err)
 		}
 	}
-	if err := s.AdjustCredit(ctx, actor, o.RepID, o.GB<<30, 0, note); err != nil {
+	units := o.Terms.Units
+	if o.Kind == "new" {
+		// The package's settings are the new panel's settings.
+		if err := s.SetRepPolicy(ctx, o.RepID, o.Terms.Policy()); err != nil {
+			return res, fmt.Errorf("the panel %s was created but its settings were not applied: %w", o.RepID, err)
+		}
+	} else if pol, err := s.RepPolicyOf(ctx, o.RepID); err != nil || !pol.AllowUnlimited {
+		units = 0 // a top-up never changes what a panel may sell
+	}
+	res.Units = units
+	if err := s.AdjustCredit(ctx, actor, o.RepID, o.GB<<30, units, note); err != nil {
 		if o.Kind == "new" {
 			return res, fmt.Errorf("the panel %s was created but its credit was not added: %w", o.RepID, err)
 		}

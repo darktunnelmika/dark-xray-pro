@@ -54,13 +54,27 @@ func TestSellingResellerPanels(t *testing.T) {
 	b.Handle(ctx, msg(ownerID, "nonsense"))
 	find(t, api.take(), ownerID, "دو عدد")
 	b.Handle(ctx, msg(ownerID, "200 450,000"))
-	find(t, api.take(), ownerID, "۲۰۰ گیگ")
+	// The new package opens on its settings: strict by default, set here once.
+	if m := find(t, api.take(), ownerID, "فقط فروش حجمی"); !hasButton(m.kb, "حداکثر کاربر") {
+		t.Fatal("a new package shows its panel settings")
+	}
+	pkg := s.RepSale(ctx).Packages[0].ID
+	b.Handle(ctx, cb(ownerID, "P:cfg:mc:"+pkg))
+	api.take()
+	b.Handle(ctx, msg(ownerID, "50"))
+	find(t, api.take(), ownerID, "حداکثر کاربر: ۵۰")
+	b.Handle(ctx, cb(ownerID, "P:cfg:ib:"+pkg))
+	find(t, api.take(), ownerID, "اینباندهایی")
+	b.Handle(ctx, cb(ownerID, "P:cfg:it:"+pkg+":0"))
+	api.take()
+	if got := s.RepSale(ctx).Packages[0]; len(got.Inbounds) != 1 || got.Inbounds[0] != "in1" || got.AllowUnlimited || !got.CanDelete {
+		t.Fatalf("package settings: %+v", got)
+	}
 	b.Handle(ctx, cb(ownerID, "P:cfg:on"))
 	find(t, api.take(), ownerID, "شماره کارت")
 	_ = s.PutCard(ctx, hubcore.CardInfo{Number: "6037000011112222", Holder: "Owner"})
 	b.Handle(ctx, cb(ownerID, "P:cfg:on"))
 	find(t, api.take(), ownerID, "🟢 روشن")
-	pkg := s.RepSale(ctx).Packages[0].ID
 
 	// Nobody but the owner reaches the settings or the approval.
 	b.Handle(ctx, cb(cust, "P:cfg:off"))
@@ -113,6 +127,17 @@ func TestSellingResellerPanels(t *testing.T) {
 	if s.TgRep(ctx, cust) != "reza-shop" || s.RepCredit(ctx, "reza-shop") != 200<<30 {
 		t.Fatalf("panel, Telegram link and credit: %q %d", s.TgRep(ctx, cust), s.RepCredit(ctx, "reza-shop"))
 	}
+	// The panel starts with the package's settings: nothing left to set by hand.
+	if pol, err := s.RepPolicyOf(ctx, "reza-shop"); err != nil || pol.AllowUnlimited || pol.MaxClients != 50 || !pol.CanDelete || len(pol.Inbounds) != 1 || pol.Inbounds[0] != "in1" {
+		t.Fatalf("the new panel's policy: %+v %v", pol, err)
+	}
+	// Later the owner loosens the package; a top-up must not loosen a panel.
+	b.Handle(ctx, cb(ownerID, "P:cfg:tu:"+pkg))
+	find(t, api.take(), ownerID, "فروش حجمی و نامحدود")
+	b.Handle(ctx, cb(ownerID, "P:cfg:un:"+pkg))
+	api.take()
+	b.Handle(ctx, msg(ownerID, "3"))
+	find(t, api.take(), ownerID, "۳ واحد نامحدود")
 	// A second tap delivers nothing more.
 	b.Handle(ctx, cb(ownerID, "P:ok:1"))
 	find(t, api.take(), ownerID, "قبلاً بررسی")
@@ -141,6 +166,14 @@ func TestSellingResellerPanels(t *testing.T) {
 	find(t, api.take(), cust, "شارژ شد")
 	if s.RepCredit(ctx, "reza-shop") != 400<<30 {
 		t.Fatalf("top-up: %d", s.RepCredit(ctx, "reza-shop"))
+	}
+	if pol, _ := s.RepPolicyOf(ctx, "reza-shop"); pol.AllowUnlimited || pol.MaxClients != 50 {
+		t.Fatalf("a top-up changes only the credit: %+v", pol)
+	}
+	for _, r := range func() []hubcore.Rep { l, _ := s.Reps(ctx); return l }() {
+		if r.ID == "reza-shop" && r.UnlimitedUnits != 0 {
+			t.Fatalf("a volume-only panel gets no unlimited units: %d", r.UnlimitedUnits)
+		}
 	}
 	// A taken username is refused for the next buyer.
 	b.Handle(ctx, cb(cust+1, "P:pk:"+pkg))
