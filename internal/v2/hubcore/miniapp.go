@@ -283,7 +283,7 @@ func registerMiniApp(mux *http.ServeMux, s *Store) {
 		if c := s.CardFor(r.Context(), seller); c.Number != "" {
 			out["card"] = c
 		}
-		if tp := s.TrialPolicy(r.Context()); seller == "" && tp.Enabled && !s.TrialUsed(r.Context(), u.ID) {
+		if tp := s.TrialPolicyFor(r.Context(), seller); tp.Enabled && !s.TrialUsed(r.Context(), seller, u.ID) {
 			out["trial"] = map[string]int64{"gb": tp.GB, "hours": tp.Hours}
 		}
 		if rp := s.ReferralPolicy(r.Context()); seller == "" && rp.Enabled {
@@ -409,11 +409,11 @@ func registerMiniApp(mux *http.ServeMux, s *Store) {
 		if !ok {
 			return
 		}
-		if sellerOf(r) != "" {
+		email, err := s.ClaimTrial(r.Context(), sellerOf(r), u.ID)
+		if errors.Is(err, ErrNotFound) {
 			http.Error(w, "no free trial here", http.StatusForbidden)
 			return
 		}
-		email, err := s.ClaimTrial(r.Context(), u.ID)
 		if errors.Is(err, ErrTrialUsed) {
 			http.Error(w, "the free trial was already used", http.StatusConflict)
 			return

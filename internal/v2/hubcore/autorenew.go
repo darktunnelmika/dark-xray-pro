@@ -164,6 +164,7 @@ func (s *Store) RunAutoRenew(ctx context.Context) {
 	defer t.Stop()
 	for {
 		s.AutoRenewOnce(ctx)
+		s.PurgeTrials(ctx)
 		select {
 		case <-ctx.Done():
 			return

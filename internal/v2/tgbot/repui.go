@@ -167,6 +167,9 @@ func (b *Bot) repHome(ctx context.Context, chat int64, rep, role string) {
 	if len(r3) > 0 {
 		kb.Rows = append(kb.Rows, r3)
 	}
+	if repCan(role, "shop") && !b.Store.IsSubSeller(ctx, rep) {
+		kb.Rows = append(kb.Rows, []Button{repBtn("🎁 تست رایگان", "trial")})
+	}
 	kb.Rows = append(kb.Rows, []Button{repBtn("🛍 حالت مشتری", "cust")})
 	b.send(ctx, chat, text, kb)
 }
@@ -200,6 +203,12 @@ func (b *Bot) repCallback(ctx context.Context, chat int64, data string) bool {
 		b.takeAwait(chat)
 		b.setDraft(chat, nil)
 		b.repHome(ctx, chat, rep, role)
+	case "trial": // R:trial[:on|off|gb|h] — this reseller's free trial
+		if deny("shop") {
+			return true
+		}
+		b.takeAwait(chat)
+		b.trialCallback(ctx, chat, rep, "R:trial", "R:home", arg(1))
 	case "new":
 		if deny("new") {
 			return true
@@ -701,6 +710,10 @@ func (b *Bot) repAdmins(ctx context.Context, chat int64, rep string) {
 
 // repInput takes typed text the reseller UI asked for.
 func (b *Bot) repInput(ctx context.Context, chat int64, rep, role, what, text string) bool {
+	// A trial prompt belongs to this reseller only.
+	if strings.HasPrefix(what, "trialgb:"+rep+"|") || strings.HasPrefix(what, "trialh:"+rep+"|") {
+		return repCan(role, "shop") && b.trialInput(ctx, chat, what, text)
+	}
 	switch what {
 	case "r:name":
 		d := b.draftOf(chat)

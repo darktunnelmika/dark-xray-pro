@@ -1192,12 +1192,12 @@ function clientStatus(c) {
 }
 
 const CT = {
-  fa: { all: "همه", online: "آنلاین", active: "فعال", expiring: "رو به انقضا", bad: "تمام‌شده", disabled: "غیرفعال", user: "کاربر", usage: "مصرف", remain: "باقی‌مانده",
+  fa: { trial: "تست", all: "همه", online: "آنلاین", active: "فعال", expiring: "رو به انقضا", bad: "تمام‌شده", disabled: "غیرفعال", user: "کاربر", usage: "مصرف", remain: "باقی‌مانده",
     expiry: "انقضا", seen: "آخرین اتصال", actions: "", perPage: "در هر صفحه", page: "صفحهٔ {p} از {n}", prev: "قبلی", next: "بعدی", none: "کلاینتی با این فیلتر نیست.",
     reset: "صفر کردن مصرف", resetAsk: "مصرف {x} صفر شود؟ مقدار فعلی در سابقه می‌ماند.", resetDone: "مصرف {n} کلاینت صفر شد", enable: "فعال کردن", disable: "غیرفعال کردن",
     del: "حذف", delAsk: "{n} کلاینت حذف شوند؟", done: "{n} مورد انجام شد", never: "هرگز", now: "الان", ago: "{t} پیش", sub: "اشتراک", edit: "ویرایش", chart: "نمودار",
     sel: "{n} انتخاب‌شده", clear: "لغو انتخاب", allFilters: "همهٔ گروه‌ها و اینباندها", sortBy: "مرتب‌سازی" },
-  en: { all: "All", online: "Online", active: "Active", expiring: "Expiring", bad: "Ended", disabled: "Disabled", user: "Client", usage: "Usage", remain: "Remaining",
+  en: { trial: "Trial", all: "All", online: "Online", active: "Active", expiring: "Expiring", bad: "Ended", disabled: "Disabled", user: "Client", usage: "Usage", remain: "Remaining",
     expiry: "Expiry", seen: "Last seen", actions: "", perPage: "per page", page: "Page {p} of {n}", prev: "Prev", next: "Next", none: "No clients match.",
     reset: "Reset usage", resetAsk: "Reset {x}'s usage? The current total stays in the history.", resetDone: "Usage reset for {n}", enable: "Enable", disable: "Disable",
     del: "Delete", delAsk: "Delete {n} clients?", done: "{n} done", never: "never", now: "now", ago: "{t} ago", sub: "Subscription", edit: "Edit", chart: "Chart",
@@ -1244,8 +1244,8 @@ async function viewClients() {
   const remember = () => { try { localStorage.setItem("clients-view", JSON.stringify({ state: st.state, sort: st.sort, dir: st.dir, size: st.size })); } catch {} };
   const selected = new Set();
   const used = (c) => c.Usage.Up + c.Usage.Down;
-  const counts = { "": list.length, online: 0, active: 0, expiring: 0, bad: 0, disabled: 0 };
-  for (const c of list) { counts[clientState(c)]++; if (c.Online) counts.online++; }
+  const counts = { "": list.length, online: 0, active: 0, expiring: 0, bad: 0, disabled: 0, trial: 0 };
+  for (const c of list) { counts[clientState(c)]++; if (c.Online) counts.online++; if (c.trial) counts.trial++; }
   const keyOf = {
     created: (c, i) => i, email: (c) => c.Email.toLowerCase(), usage: (c) => used(c),
     remain: (c) => (c.Remaining < 0 ? Infinity : c.Remaining), expiry: (c) => c.EffectiveUntil || Infinity, seen: (c) => -(c.Usage.LastSeen || 0),
@@ -1253,7 +1253,8 @@ async function viewClients() {
   const match = (c) => {
     if (st.q && !(c.Email + " " + (c.Note || "")).toLowerCase().includes(st.q.toLowerCase())) return false;
     if (st.state === "online" && !c.Online) return false;
-    if (st.state && st.state !== "online" && clientState(c) !== st.state) return false;
+    if (st.state === "trial" && !c.trial) return false;
+    if (st.state && st.state !== "online" && st.state !== "trial" && clientState(c) !== st.state) return false;
     const f = st.extra;
     if (f.startsWith("g:") && !(ctx.groups.find((g) => g.ID === f.slice(2))?.Members || []).includes(c.Email)) return false;
     if (f.startsWith("i:") && !(c.Inbounds || []).includes(f.slice(2))) return false;
@@ -1305,7 +1306,8 @@ async function viewClients() {
       h("td", { class: "c-sel" }, cb),
       h("td", { class: "c-user", "data-label": L.user },
         h("div", { class: "row tight" }, h("span", { class: "av-wrap" }, avatar(c.Email, "sm"), h("span", { class: `dot ${c.Online ? "on" : ""}`, title: c.Online ? t("online") : t("offline") })),
-          h("a", { class: "name", href: `#/client?e=${encodeURIComponent(c.Email)}` }, c.Email)),
+          h("a", { class: "name", href: `#/client?e=${encodeURIComponent(c.Email)}` }, c.Email),
+          c.trial ? h("span", { class: "badge trial" }, L.trial) : null),
         me && me.role !== "rep" ? h("div", { class: "small muted" }, (lang === "fa" ? "سازنده: " : "by ") + (c.RepID ? (repNames[c.RepID] || c.RepID) : (lang === "fa" ? "مالک" : "owner"))) : null,
         c.Note ? h("div", { class: "small muted clip" }, c.Note) : null),
       h("td", { class: "c-usage", "data-label": L.usage },
@@ -1339,7 +1341,7 @@ async function viewClients() {
   }
 
   function draw() {
-    chips.replaceChildren(...["", "online", "active", "expiring", "bad", "disabled"].map((k) => {
+    chips.replaceChildren(...["", "online", "active", "expiring", "bad", "disabled", ...(counts.trial ? ["trial"] : [])].map((k) => {
       const b = h("button", { role: "tab", "aria-selected": st.state === k ? "true" : "false", class: `chip ${st.state === k ? "on" : ""} ${k}` },
         k ? L[k] : L.all, h("span", { class: "count" }, fmtNum(counts[k])));
       b.addEventListener("click", () => { st.state = k; st.page = 0; remember(); draw(); });
@@ -1642,6 +1644,7 @@ async function viewClient() {
       h("span", { class: "av-wrap" }, avatar(c.Email, "lg"), h("span", { class: `dot ${c.Online ? "on" : ""}` })),
       h("div", {}, h("h1", {}, c.Email),
         h("div", { class: "row tight" }, h("span", { class: `badge ${cls}` }, status), c.Online ? h("span", { class: "badge good" }, t("online")) : null,
+          c.trial ? h("span", { class: "badge trial" }, lang === "fa" ? "تست رایگان" : "Free trial") : null,
           c.RepID ? h("span", { class: "badge" }, c.RepID) : null, c.Note ? h("span", { class: "muted small" }, c.Note) : null))),
     h("div", { class: "hero-rings" },
       ring(volShare, c.VolumeBytes > 0 ? `${fmtNum(Math.round(volShare * 100))}%` : "∞", t("used"), c.VolumeBytes > 0 ? `${bytes(used)} ${fa ? "از" : "/"} ${bytes(c.VolumeBytes)}` : bytes(used)),

@@ -506,7 +506,7 @@ func (b *Bot) menuKB(ctx context.Context, chat int64) *Keyboard {
 	}
 	rows = append(rows, row(cbBtn("🛍 خرید اشتراک", "shop"), cbBtn("📦 سرویس‌های من", "mine")))
 	var extra []Button
-	if b.Store.TrialPolicy(ctx).Enabled && !b.Store.TrialUsed(ctx, chat) {
+	if b.Store.TrialPolicyFor(ctx, b.Seller).Enabled && !b.Store.TrialUsed(ctx, b.Seller, chat) {
 		extra = append(extra, cbBtn("🎁 تست رایگان", "trial"))
 	}
 	if b.Store.WalletBalance(ctx, chat) > 0 || b.Store.TomanBalance(ctx, b.Seller, chat) > 0 {

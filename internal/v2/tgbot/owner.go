@@ -246,7 +246,11 @@ func (b *Bot) ownerCallback(ctx context.Context, chat int64, data string) bool {
 		b.send(ctx, chat, fmt.Sprintf("⚙️ <b>تنظیمات ربات</b>\n\n💳 متن پرداخت:\n%s\n\n👋 متن خوش‌آمد:\n%s", orDash(esc(pay)), orDash(esc(wel))), &Keyboard{Rows: [][]Button{
 			{{Text: "ویرایش متن پرداخت", Data: "a:set:pay"}, {Text: "ویرایش خوش‌آمد", Data: "a:set:welcome"}},
 			{{Text: "ویرایش آموزش اتصال", Data: "a:set:guide"}, {Text: "🔐 رمز بکاپ", Data: "a:set:backup"}},
+			{{Text: "🎁 تست رایگان", Data: "a:trial"}},
 			back("a:home")}})
+	case "trial": // a:trial[:on|off|gb|h] — the owner's free trial
+		b.takeAwait(chat)
+		b.trialCallback(ctx, chat, "", "a:trial", "a:settings", arg(1))
 	case "set":
 		b.setAwait(chat, "set:"+arg(1))
 		b.send(ctx, chat, "متن جدید را بفرستید:", nil)
@@ -265,6 +269,9 @@ func orDash(s string) string {
 
 // ownerInput handles a typed answer the owner was asked for.
 func (b *Bot) ownerInput(ctx context.Context, chat int64, what, text string) bool {
+	if b.trialInput(ctx, chat, what, text) {
+		return true
+	}
 	switch {
 	case strings.HasPrefix(what, "qsname:"):
 		b.quickSell(ctx, chat, strings.TrimPrefix(what, "qsname:"), strings.TrimSpace(text))

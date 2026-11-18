@@ -109,20 +109,24 @@ func TestTelegramCommerce(t *testing.T) {
 		t.Fatalf("%+v", hist)
 	}
 	// Trial: once per account, needs inbounds.
-	if _, err := s.ClaimTrial(ctx, bob); !errors.Is(err, ErrNotFound) {
+	if s.TrialPolicy(ctx).Enabled {
+		t.Fatal("the trial is off until its seller turns it on")
+	}
+	if _, err := s.ClaimTrial(ctx, "", bob); !errors.Is(err, ErrNotFound) {
 		t.Fatal("trial while off")
 	}
-	if err := s.PutTrialPolicy(ctx, TrialPolicy{Enabled: true, GB: 1, Hours: 24}); !errors.Is(err, ErrInvalid) {
-		t.Fatal("trial without inbounds")
+	// Turned on without a choice of inbounds, the trial uses the seller's inbounds.
+	if err := s.PutTrialPolicy(ctx, TrialPolicy{Enabled: true, GB: 1, Hours: 24}); err != nil || len(s.TrialPolicy(ctx).Inbounds) == 0 {
+		t.Fatal("trial without chosen inbounds", err)
 	}
 	if err := s.PutTrialPolicy(ctx, TrialPolicy{Enabled: true, GB: 1, Hours: 24, MaxIPs: 1, Inbounds: []string{"de-vless"}}); err != nil {
 		t.Fatal(err)
 	}
-	te, err := s.ClaimTrial(ctx, bob)
-	if err != nil || te != "trial-222" || !s.TrialUsed(ctx, bob) {
+	te, err := s.ClaimTrial(ctx, "", bob)
+	if err != nil || te != "trial-222" || !s.TrialUsed(ctx, "", bob) {
 		t.Fatal(te, err)
 	}
-	if _, err := s.ClaimTrial(ctx, bob); !errors.Is(err, ErrTrialUsed) {
+	if _, err := s.ClaimTrial(ctx, "", bob); !errors.Is(err, ErrTrialUsed) {
 		t.Fatal("second trial")
 	}
 	mine, _ := s.TgClients(ctx, bob)

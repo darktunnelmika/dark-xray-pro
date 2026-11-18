@@ -97,6 +97,7 @@ func (s *Store) Analytics(ctx context.Context, by Principal, seller string) (Ana
 	if err != nil {
 		return Analytics{}, err
 	}
+	cond = "(" + cond + ") AND c.trial=0" // free trials are not customers
 	now := s.now().Unix()
 	a := Analytics{Scope: seller, RenewRate: -1, Months: []AMonth{}, Daily: []ADay{}, Products: []AProduct{}, AtRisk: []ARisk{}, Sellers: []ASellerRenewal{}}
 	if by.Role == "rep" {

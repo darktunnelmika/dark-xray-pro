@@ -143,7 +143,7 @@ func (b *Bot) payWallet(ctx context.Context, chat int64, productID, renew string
 }
 
 func (b *Bot) trial(ctx context.Context, chat int64) {
-	email, err := b.Store.ClaimTrial(ctx, chat)
+	email, err := b.Store.ClaimTrial(ctx, b.Seller, chat)
 	switch {
 	case errors.Is(err, hubcore.ErrTrialUsed):
 		b.send(ctx, chat, "تست رایگان قبلاً برای این حساب فعال شده است. برای ادامه یک پلن بخرید.", mainMenu)
@@ -152,7 +152,7 @@ func (b *Bot) trial(ctx context.Context, chat int64) {
 		b.send(ctx, chat, "تست رایگان فعلاً در دسترس نیست.", mainMenu)
 		return
 	}
-	p := b.Store.TrialPolicy(ctx)
+	p := b.Store.TrialPolicyFor(ctx, b.Seller)
 	size := "حجم نامحدود"
 	if p.GB > 0 {
 		size = fmt.Sprintf("%d گیگ", p.GB)

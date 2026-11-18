@@ -42,6 +42,13 @@ CREATE TABLE IF NOT EXISTS tg_trials (
   email TEXT NOT NULL,
   unix INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS trial_claims (
+  seller TEXT NOT NULL,
+  chat_id INTEGER NOT NULL,
+  email TEXT NOT NULL,
+  unix INTEGER NOT NULL,
+  PRIMARY KEY (seller, chat_id)
+);
 CREATE TABLE IF NOT EXISTS tg_referrals (
   chat_id INTEGER PRIMARY KEY,
   referrer INTEGER NOT NULL,
@@ -62,10 +69,15 @@ func (s *Store) ensureCommerceSchema() error {
 		{"orders", "method", "TEXT NOT NULL DEFAULT 'manual'"},
 		{"orders", "stars", "INTEGER NOT NULL DEFAULT 0"},
 		{"orders", "charge_id", "TEXT NOT NULL DEFAULT ''"},
+		{"clients", "trial", "INTEGER NOT NULL DEFAULT 0"},
 	} {
 		if err := s.addColumn(c.t, c.col, c.def); err != nil {
 			return err
 		}
+	}
+	// Trials taken before each seller had its own count belong to the owner.
+	if _, err := s.db.Exec(`INSERT OR IGNORE INTO trial_claims(seller,chat_id,email,unix) SELECT '',chat_id,email,unix FROM tg_trials`); err != nil {
+		return err
 	}
 	return nil
 }
@@ -88,18 +100,47 @@ type ReferralPolicy struct {
 	MaxReward int64 `json:"max_reward"` // per order, 0 = no cap
 }
 
-func (s *Store) TrialPolicy(ctx context.Context) TrialPolicy {
+func trialKey(seller string) string {
+	if seller == "" {
+		return "trial_policy"
+	}
+	return "trial_policy:" + seller
+}
+
+// TrialPolicy is the owner's free trial; TrialPolicyFor is a seller's ("" =
+// the owner). A trial is off until its seller turns it on.
+func (s *Store) TrialPolicy(ctx context.Context) TrialPolicy { return s.TrialPolicyFor(ctx, "") }
+
+func (s *Store) TrialPolicyFor(ctx context.Context, seller string) TrialPolicy {
 	p := TrialPolicy{GB: 1, Hours: 24, MaxIPs: 1}
-	_ = json.Unmarshal([]byte(s.Setting(ctx, "trial_policy")), &p)
+	_ = json.Unmarshal([]byte(s.Setting(ctx, trialKey(seller))), &p)
 	return p
 }
 
 func (s *Store) PutTrialPolicy(ctx context.Context, p TrialPolicy) error {
+	return s.PutTrialPolicyFor(ctx, "", p)
+}
+
+// PutTrialPolicyFor saves a seller's trial. A reseller's trial is a volume
+// client charged to the reseller's credit, so it has a volume and whole days;
+// sub-sellers sell only their reseller's plans and have no trial.
+func (s *Store) PutTrialPolicyFor(ctx context.Context, seller string, p TrialPolicy) error {
 	if p.GB < 0 || p.GB > 1000 || p.Hours < 1 || p.Hours > 24*30 || p.MaxIPs < 0 {
 		return fmt.Errorf("%w: trial is 0-1000 GB for 1-720 hours", ErrInvalid)
 	}
+	if seller != "" {
+		if s.IsSubSeller(ctx, seller) {
+			return fmt.Errorf("%w: sub-sellers have no free trial", ErrPolicy)
+		}
+		if p.GB < 1 {
+			return fmt.Errorf("%w: a reseller's trial needs a volume", ErrInvalid)
+		}
+	}
 	if p.Enabled && len(p.Inbounds) == 0 {
-		return fmt.Errorf("%w: choose the inbounds a trial uses", ErrInvalid)
+		p.Inbounds = s.SellerInbounds(ctx, seller)
+		if len(p.Inbounds) == 0 {
+			return fmt.Errorf("%w: choose the inbounds a trial uses", ErrInvalid)
+		}
 	}
 	for _, t := range p.Inbounds {
 		var n int
@@ -108,7 +149,7 @@ func (s *Store) PutTrialPolicy(ctx context.Context, p TrialPolicy) error {
 		}
 	}
 	b, _ := json.Marshal(p)
-	return s.SetSetting(ctx, "trial_policy", string(b))
+	return s.SetSetting(ctx, trialKey(seller), string(b))
 }
 
 func (s *Store) ReferralPolicy(ctx context.Context) ReferralPolicy {
@@ -473,49 +514,107 @@ func (s *Store) rewardReferral(ctx context.Context, orderID int64) (int64, int64
 
 var ErrTrialUsed = errors.New("the free trial was already used")
 
-// ClaimTrial creates the one free trial of a Telegram account.
-func (s *Store) ClaimTrial(ctx context.Context, chat int64) (string, error) {
-	p := s.TrialPolicy(ctx)
+// ClaimTrial creates the one free trial a Telegram account gets from a
+// seller ("" = the owner). A reseller's trial is that reseller's own client,
+// charged to their credit like any client they create.
+func (s *Store) ClaimTrial(ctx context.Context, seller string, chat int64) (string, error) {
+	p := s.TrialPolicyFor(ctx, seller)
 	if !p.Enabled {
 		return "", ErrNotFound
 	}
 	var used string
-	if err := s.ro.QueryRowContext(ctx, `SELECT email FROM tg_trials WHERE chat_id=?`, chat).Scan(&used); err == nil {
+	if err := s.ro.QueryRowContext(ctx, `SELECT email FROM trial_claims WHERE seller=? AND chat_id=?`, seller, chat).Scan(&used); err == nil {
 		return used, ErrTrialUsed
 	} else if !errors.Is(err, sql.ErrNoRows) {
 		return "", err
 	}
 	email := fmt.Sprintf("trial-%d", chat)
+	var n int
+	_ = s.ro.QueryRowContext(ctx, `SELECT COUNT(*) FROM clients WHERE email=? COLLATE NOCASE`, email).Scan(&n)
+	if n != 0 {
+		email += "-" + randomHex(2)
+	}
 	now := s.now().Unix()
 	c := Client{Email: email, Enabled: true, VolumeBytes: -1, MaxIPs: p.MaxIPs, Inbounds: p.Inbounds, ExpiresUnix: now + p.Hours*3600}
 	if p.GB > 0 {
 		c.VolumeBytes = p.GB << 30
+	}
+	mark := func(q interface {
+		ExecContext(context.Context, string, ...any) (sql.Result, error)
+	}) error {
+		if _, err := q.ExecContext(ctx, `UPDATE clients SET trial=1, note='free trial' WHERE email=?`, email); err != nil {
+			return err
+		}
+		_, err := q.ExecContext(ctx, `INSERT OR IGNORE INTO tg_links(chat_id,email) VALUES(?,?)`, chat, email)
+		return err
+	}
+	if seller != "" {
+		// The claim goes in first so two taps cannot charge the reseller twice.
+		if _, err := s.db.ExecContext(ctx, `INSERT INTO trial_claims(seller,chat_id,email,unix) VALUES(?,?,?,?)`, seller, chat, email, now); err != nil {
+			return "", ErrTrialUsed
+		}
+		if err := s.RepPutClient(ctx, "trial", seller, c, "volume"); err != nil {
+			_, _ = s.db.ExecContext(ctx, `DELETE FROM trial_claims WHERE seller=? AND chat_id=?`, seller, chat)
+			return "", err
+		}
+		return email, mark(s.db)
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return "", err
 	}
 	defer tx.Rollback()
-	if _, err := tx.ExecContext(ctx, `INSERT INTO tg_trials(chat_id,email,unix) VALUES(?,?,?)`, chat, email, now); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO trial_claims(seller,chat_id,email,unix) VALUES('',?,?,?)`, chat, email, now); err != nil {
 		return "", ErrTrialUsed
 	}
 	if err := putClientTx(ctx, tx, c, now); err != nil {
 		return "", err
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE clients SET note='free trial' WHERE email=?`, email); err != nil {
-		return "", err
-	}
-	if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO tg_links(chat_id,email) VALUES(?,?)`, chat, email); err != nil {
+	if err := mark(tx); err != nil {
 		return "", err
 	}
 	return email, tx.Commit()
 }
 
-// TrialUsed reports whether a chat already took its trial.
-func (s *Store) TrialUsed(ctx context.Context, chat int64) bool {
+// TrialUsed reports whether a chat already took this seller's trial.
+func (s *Store) TrialUsed(ctx context.Context, seller string, chat int64) bool {
 	var n int
-	_ = s.ro.QueryRowContext(ctx, `SELECT COUNT(*) FROM tg_trials WHERE chat_id=?`, chat).Scan(&n)
+	_ = s.ro.QueryRowContext(ctx, `SELECT COUNT(*) FROM trial_claims WHERE seller=? AND chat_id=?`, seller, chat).Scan(&n)
 	return n > 0
+}
+
+// trialKeepDays is how long an ended trial stays listed before it is removed.
+const trialKeepDays = 3
+
+// PurgeTrials deletes trial clients that ended more than trialKeepDays ago.
+// The claim stays, so the same Telegram account cannot take another one.
+func (s *Store) PurgeTrials(ctx context.Context) int {
+	rows, err := s.ro.QueryContext(ctx, `SELECT email, rep_id FROM clients WHERE trial=1 AND expires_unix>0 AND expires_unix<?`, s.now().Unix()-trialKeepDays*86400)
+	if err != nil {
+		return 0
+	}
+	var gone [][2]string
+	for rows.Next() {
+		var e, r string
+		if rows.Scan(&e, &r) == nil {
+			gone = append(gone, [2]string{e, r})
+		}
+	}
+	rows.Close()
+	n := 0
+	for _, g := range gone {
+		var err error
+		if g[1] != "" {
+			_, _, err = s.RepDeleteClient(ctx, "trial", g[1], g[0])
+		}
+		if g[1] == "" || err != nil {
+			err = s.DeleteClient(ctx, g[0])
+		}
+		if err == nil {
+			n++
+		}
+	}
+	return n
 }
 
 // ExpireStarsInvoices closes unpaid Stars invoices older than a day, quietly.
