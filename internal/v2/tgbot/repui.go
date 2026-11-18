@@ -170,6 +170,9 @@ func (b *Bot) repHome(ctx context.Context, chat int64, rep, role string) {
 	if repCan(role, "shop") && !b.Store.IsSubSeller(ctx, rep) {
 		kb.Rows = append(kb.Rows, []Button{repBtn("🎁 تست رایگان", "trial")})
 	}
+	if btn, ok := b.repSaleButton(ctx, chat); ok {
+		kb.Rows = append(kb.Rows, []Button{btn})
+	}
 	kb.Rows = append(kb.Rows, []Button{repBtn("🛍 حالت مشتری", "cust")})
 	b.send(ctx, chat, text, kb)
 }

@@ -257,7 +257,13 @@ func (b *Bot) onMessage(ctx context.Context, m *Message) {
 		}
 	}
 	if len(m.Photo) > 0 && !(b.Owners[chat] && b.peekAwait(chat) == "broadcast") {
-		if b.onReceipt(ctx, chat, name, m.Photo[len(m.Photo)-1].FileID, b.peekAwait(chat)) {
+		if w := b.peekAwait(chat); strings.HasPrefix(w, "P:receipt:") {
+			if b.repSaleReceipt(ctx, chat, name, m.Photo[len(m.Photo)-1].FileID, w) {
+				return
+			}
+		} else if b.onReceipt(ctx, chat, name, m.Photo[len(m.Photo)-1].FileID, w) {
+			return
+		} else if w == "" && b.repSaleReceipt(ctx, chat, name, m.Photo[len(m.Photo)-1].FileID, "") {
 			return
 		}
 	}
@@ -278,6 +284,12 @@ func (b *Bot) onMessage(ctx context.Context, m *Message) {
 	}
 	if b.ticketMessage(ctx, m, text) {
 		return
+	}
+	if w := b.peekAwait(chat); strings.HasPrefix(w, "P:") && text != "" && len(m.Photo) == 0 && !strings.HasPrefix(text, "/") && keyboardAction(text) == "" {
+		b.takeAwait(chat)
+		if b.repSaleInput(ctx, m, w, text) {
+			return
+		}
 	}
 	if w := b.peekAwait(chat); strings.HasPrefix(w, "S:") && text != "" && !strings.HasPrefix(text, "/") && keyboardAction(text) == "" {
 		b.takeAwait(chat)
@@ -514,6 +526,9 @@ func (b *Bot) menuKB(ctx context.Context, chat int64) *Keyboard {
 	}
 	if len(extra) > 0 {
 		rows = append(rows, extra)
+	}
+	if btn, ok := b.repSaleButton(ctx, chat); ok {
+		rows = append(rows, row(btn))
 	}
 	rows = append(rows, row(cbBtn("📚 آموزش اتصال", "guide"), cbBtn("🌐 وضعیت سرورها", "status")))
 	social := row(cbBtn("💬 پشتیبانی", "support"))
@@ -769,6 +784,9 @@ func (b *Bot) onCallback(ctx context.Context, q *CallbackQuery) {
 		return
 	}
 	if b.ticketCallback(ctx, chat, q.Data) {
+		return
+	}
+	if b.repSaleCallback(ctx, q) {
 		return
 	}
 	verb, rest, _ := strings.Cut(q.Data, ":")

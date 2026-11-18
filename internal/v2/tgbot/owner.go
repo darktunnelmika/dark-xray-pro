@@ -246,7 +246,7 @@ func (b *Bot) ownerCallback(ctx context.Context, chat int64, data string) bool {
 		b.send(ctx, chat, fmt.Sprintf("⚙️ <b>تنظیمات ربات</b>\n\n💳 متن پرداخت:\n%s\n\n👋 متن خوش‌آمد:\n%s", orDash(esc(pay)), orDash(esc(wel))), &Keyboard{Rows: [][]Button{
 			{{Text: "ویرایش متن پرداخت", Data: "a:set:pay"}, {Text: "ویرایش خوش‌آمد", Data: "a:set:welcome"}},
 			{{Text: "ویرایش آموزش اتصال", Data: "a:set:guide"}, {Text: "🔐 رمز بکاپ", Data: "a:set:backup"}},
-			{{Text: "🎁 تست رایگان", Data: "a:trial"}},
+			{{Text: "🎁 تست رایگان", Data: "a:trial"}, {Text: "🤝 فروش پنل نمایندگی", Data: "P:cfg"}},
 			back("a:home")}})
 	case "trial": // a:trial[:on|off|gb|h] — the owner's free trial
 		b.takeAwait(chat)
