@@ -52,7 +52,7 @@ func (b *Bot) trialCallback(ctx context.Context, chat int64, seller, cb, home, a
 			return
 		}
 	case "gb":
-		b.setAwait(chat, "trialgb:"+seller+"|"+cb+"|"+home)
+		b.setAwait(chat, trialAwait("trialgb", seller, cb, home))
 		hint := "حجم تست را به گیگ بفرستید (مثلاً 1). برای نامحدود 0 بفرستید."
 		if seller != "" {
 			hint = "حجم تست را به گیگ بفرستید (مثلاً 1)."
@@ -60,7 +60,7 @@ func (b *Bot) trialCallback(ctx context.Context, chat int64, seller, cb, home, a
 		b.send(ctx, chat, hint, &Keyboard{Rows: [][]Button{back(cb)}})
 		return
 	case "h":
-		b.setAwait(chat, "trialh:"+seller+"|"+cb+"|"+home)
+		b.setAwait(chat, trialAwait("trialh", seller, cb, home))
 		hint := "مدت تست را به ساعت بفرستید (مثلاً 24)."
 		if seller != "" {
 			hint = "مدت تست را به روز بفرستید (مثلاً 1)."
@@ -71,10 +71,20 @@ func (b *Bot) trialCallback(ctx context.Context, chat int64, seller, cb, home, a
 	b.trialScreen(ctx, chat, seller, cb, home)
 }
 
+// trialAwait names the prompt. A reseller's prompts start with "r:" like all
+// of the reseller UI's, so their typed answer is routed there.
+func trialAwait(kind, seller, cb, home string) string {
+	w := kind + ":" + seller + "|" + cb + "|" + home
+	if seller != "" {
+		w = "r:" + w
+	}
+	return w
+}
+
 // trialInput takes the typed volume or length. It reports whether what was
 // one of its prompts.
 func (b *Bot) trialInput(ctx context.Context, chat int64, what, text string) bool {
-	kind, rest, ok := strings.Cut(what, ":")
+	kind, rest, ok := strings.Cut(strings.TrimPrefix(what, "r:"), ":")
 	if !ok || (kind != "trialgb" && kind != "trialh") {
 		return false
 	}

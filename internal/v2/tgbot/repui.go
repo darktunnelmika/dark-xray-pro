@@ -711,7 +711,7 @@ func (b *Bot) repAdmins(ctx context.Context, chat int64, rep string) {
 // repInput takes typed text the reseller UI asked for.
 func (b *Bot) repInput(ctx context.Context, chat int64, rep, role, what, text string) bool {
 	// A trial prompt belongs to this reseller only.
-	if strings.HasPrefix(what, "trialgb:"+rep+"|") || strings.HasPrefix(what, "trialh:"+rep+"|") {
+	if strings.HasPrefix(what, "r:trialgb:"+rep+"|") || strings.HasPrefix(what, "r:trialh:"+rep+"|") {
 		return repCan(role, "shop") && b.trialInput(ctx, chat, what, text)
 	}
 	switch what {
