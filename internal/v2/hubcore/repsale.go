@@ -125,17 +125,17 @@ func (s *Store) PutRepSale(ctx context.Context, v RepSale) error {
 
 // RepOrder is one purchase of a panel or a top-up.
 type RepOrder struct {
-	ID        int64  `json:"id"`
-	Unix      int64  `json:"unix"`
-	Chat      int64  `json:"chat"`
-	BuyerName string `json:"buyer_name"`
-	Kind      string `json:"kind"`
-	RepID     string `json:"rep_id"`
-	Package   string `json:"package"`
-	GB        int64  `json:"gb"`
-	Price     int64  `json:"price"`
-	Status    string `json:"status"`
-	Receipt   string `json:"receipt,omitempty"`
+	ID        int64      `json:"id"`
+	Unix      int64      `json:"unix"`
+	Chat      int64      `json:"chat"`
+	BuyerName string     `json:"buyer_name"`
+	Kind      string     `json:"kind"`
+	RepID     string     `json:"rep_id"`
+	Package   string     `json:"package"`
+	GB        int64      `json:"gb"`
+	Price     int64      `json:"price"`
+	Status    string     `json:"status"`
+	Receipt   string     `json:"receipt,omitempty"`
 	Terms     RepPackage `json:"terms"` // the package as ordered
 }
 
