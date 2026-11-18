@@ -54,6 +54,19 @@ func TestTrialSettingsFromTheBot(t *testing.T) {
 	api.take()
 	b.Handle(ctx, msg(ownerID, "۲"))
 	find(t, api.take(), ownerID, "2 گیگ")
+	// Under one gigabyte too: megabytes with a unit, or a fraction of a gigabyte.
+	b.Handle(ctx, cb(ownerID, "a:trial:gb"))
+	api.take()
+	b.Handle(ctx, msg(ownerID, "0.5"))
+	find(t, api.take(), ownerID, "512 مگ")
+	b.Handle(ctx, cb(ownerID, "a:trial:gb"))
+	api.take()
+	b.Handle(ctx, msg(ownerID, "۵۰ مگ"))
+	find(t, api.take(), ownerID, "50 مگ")
+	b.Handle(ctx, cb(ownerID, "a:trial:gb"))
+	api.take()
+	b.Handle(ctx, msg(ownerID, "50m"))
+	find(t, api.take(), ownerID, "50 مگ")
 	b.Handle(ctx, cb(ownerID, "a:trial:h"))
 	api.take()
 	b.Handle(ctx, msg(ownerID, "abc"))
@@ -62,7 +75,7 @@ func TestTrialSettingsFromTheBot(t *testing.T) {
 	find(t, api.take(), ownerID, "2 روز")
 	b.Handle(ctx, cb(ownerID, "a:trial:on"))
 	find(t, api.take(), ownerID, "🟢 روشن")
-	if p := s.TrialPolicy(ctx); !p.Enabled || p.GB != 2 || p.Hours != 48 || len(p.Inbounds) != 1 {
+	if p := s.TrialPolicy(ctx); !p.Enabled || p.GB != 0 || p.MB != 50 || p.Hours != 48 || len(p.Inbounds) != 1 {
 		t.Fatalf("%+v", p)
 	}
 	// Now the customer sees it, takes it once, and it is marked.
@@ -75,9 +88,9 @@ func TestTrialSettingsFromTheBot(t *testing.T) {
 		t.Fatal("the trial button must show once it is on")
 	}
 	b.Handle(ctx, cb(cust, "trial"))
-	find(t, api.take(), cust, "فعال شد")
+	find(t, api.take(), cust, "50 مگ")
 	c, err := s.ClientByEmail(ctx, "trial-4242")
-	if err != nil || !c.Trial || c.VolumeBytes != 2<<30 {
+	if err != nil || !c.Trial || c.VolumeBytes != 50<<20 {
 		t.Fatalf("%+v %v", c, err)
 	}
 	b.Handle(ctx, cb(cust, "trial"))

@@ -153,9 +153,9 @@ func (b *Bot) trial(ctx context.Context, chat int64) {
 		return
 	}
 	p := b.Store.TrialPolicyFor(ctx, b.Seller)
-	size := "حجم نامحدود"
-	if p.GB > 0 {
-		size = fmt.Sprintf("%d گیگ", p.GB)
+	size := trialSize(p)
+	if size == "نامحدود" {
+		size = "حجم نامحدود"
 	}
 	b.send(ctx, chat, fmt.Sprintf("🎁 تست رایگان شما فعال شد: %s برای %d ساعت.", size, p.Hours), nil)
 	b.sendSub(ctx, chat, email)

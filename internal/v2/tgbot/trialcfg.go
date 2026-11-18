@@ -3,7 +3,10 @@ package tgbot
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
+
+	"github.com/darktunnelmika/dark-xray-pro/internal/v2/hubcore"
 )
 
 // The free trial's switch, volume and length, set from the bot: the owner
@@ -18,10 +21,7 @@ func (b *Bot) trialScreen(ctx context.Context, chat int64, seller, cb, home stri
 	if p.Enabled {
 		state, toggle = "🟢 روشن", Button{Text: "🔴 خاموش کردن", Data: cb + ":off"}
 	}
-	size := "نامحدود"
-	if p.GB > 0 {
-		size = fmt.Sprintf("%d گیگ", p.GB)
-	}
+	size := trialSize(p)
 	text := fmt.Sprintf("🎁 <b>تست رایگان</b>\n\nوضعیت: <b>%s</b>\nحجم: <b>%s</b>\nمدت: <b>%s</b>\nدستگاه هم‌زمان: <b>%d</b>\n\nهر حساب تلگرام فقط یک بار تست می‌گیرد. کانفیگ تست در پنل با برچسب «تست» دیده می‌شود و %d روز بعد از پایان خودکار حذف می‌شود.",
 		state, size, trialSpan(p.Hours), p.MaxIPs, 3)
 	if seller != "" {
@@ -31,6 +31,60 @@ func (b *Bot) trialScreen(ctx context.Context, chat int64, seller, cb, home stri
 		{toggle},
 		{{Text: "📦 تغییر حجم", Data: cb + ":gb"}, {Text: "⏱ تغییر مدت", Data: cb + ":h"}},
 		back(home)}})
+}
+
+// trialSize words the trial's volume: "50 مگ", "2 گیگ" or "نامحدود".
+func trialSize(p hubcore.TrialPolicy) string {
+	switch {
+	case p.MB > 0 && p.MB%1024 == 0:
+		return fmt.Sprintf("%d گیگ", p.MB/1024)
+	case p.MB > 0:
+		return fmt.Sprintf("%d مگ", p.MB)
+	case p.GB > 0:
+		return fmt.Sprintf("%d گیگ", p.GB)
+	}
+	return "نامحدود"
+}
+
+// parseTrialVolume reads "50m", "۵۰ مگ", "0.5" or "2": megabytes when a unit
+// says so, otherwise gigabytes (a fraction of one becomes megabytes).
+func parseTrialVolume(text string) (gb, mb int64, ok bool) {
+	var num strings.Builder
+	dot := false
+	for _, r := range strings.TrimSpace(text) {
+		switch {
+		case r >= '0' && r <= '9':
+			num.WriteRune(r)
+		case r >= '۰' && r <= '۹':
+			num.WriteRune('0' + (r - '۰'))
+		case r >= '٠' && r <= '٩':
+			num.WriteRune('0' + (r - '٠'))
+		case (r == '.' || r == '٫' || r == '/') && !dot && num.Len() > 0:
+			dot = true
+			num.WriteRune('.')
+		}
+	}
+	v, err := strconv.ParseFloat(num.String(), 64)
+	if err != nil || v < 0 {
+		return 0, 0, false
+	}
+	low := strings.ToLower(text)
+	isMB := strings.Contains(low, "m") || strings.Contains(text, "مگ") || strings.Contains(text, "مگا")
+	switch {
+	case isMB:
+		if v < 1 {
+			return 0, 0, false
+		}
+		return 0, int64(v + 0.5), true
+	case v == float64(int64(v)):
+		return int64(v), 0, true
+	default:
+		m := int64(v*1024 + 0.5)
+		if m < 1 {
+			return 0, 0, false
+		}
+		return 0, m, true
+	}
 }
 
 func trialSpan(hours int64) string {
@@ -53,9 +107,9 @@ func (b *Bot) trialCallback(ctx context.Context, chat int64, seller, cb, home, a
 		}
 	case "gb":
 		b.setAwait(chat, trialAwait("trialgb", seller, cb, home))
-		hint := "حجم تست را به گیگ بفرستید (مثلاً 1). برای نامحدود 0 بفرستید."
+		hint := "حجم تست را بفرستید: برای مگابایت با m (مثلاً 50m)، برای گیگ فقط عدد (مثلاً 1). برای نامحدود 0 بفرستید."
 		if seller != "" {
-			hint = "حجم تست را به گیگ بفرستید (مثلاً 1)."
+			hint = "حجم تست را بفرستید: برای مگابایت با m (مثلاً 50m)، برای گیگ فقط عدد (مثلاً 1)."
 		}
 		b.send(ctx, chat, hint, &Keyboard{Rows: [][]Button{back(cb)}})
 		return
@@ -95,10 +149,10 @@ func (b *Bot) trialInput(ctx context.Context, chat int64, what, text string) boo
 	seller, cb, home := f[0], f[1], f[2]
 	n, okNum := parseNum(text)
 	p := b.Store.TrialPolicyFor(ctx, seller)
-	if okNum {
+	if kind == "trialgb" {
+		p.GB, p.MB, okNum = parseTrialVolume(text)
+	} else if okNum {
 		switch {
-		case kind == "trialgb":
-			p.GB = n
 		case seller != "": // resellers sell whole days
 			p.Hours = n * 24
 		default:
@@ -125,7 +179,7 @@ func trialErr(err error) string {
 	case strings.Contains(s, "0-1000 GB"):
 		return "حجم باید بین ۰ تا ۱۰۰۰ گیگ و مدت بین ۱ ساعت تا ۳۰ روز باشد."
 	case strings.Contains(s, "needs a volume"):
-		return "تست نماینده باید حجم داشته باشد (حداقل ۱ گیگ)."
+		return "تست نماینده باید حجم داشته باشد."
 	case strings.Contains(s, "sub-sellers"):
 		return "زیرفروشنده‌ها تست رایگان ندارند."
 	case strings.Contains(s, "choose the inbounds"):

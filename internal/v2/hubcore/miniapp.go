@@ -284,7 +284,7 @@ func registerMiniApp(mux *http.ServeMux, s *Store) {
 			out["card"] = c
 		}
 		if tp := s.TrialPolicyFor(r.Context(), seller); tp.Enabled && !s.TrialUsed(r.Context(), seller, u.ID) {
-			out["trial"] = map[string]int64{"gb": tp.GB, "hours": tp.Hours}
+			out["trial"] = map[string]int64{"gb": tp.GB, "mb": tp.MB, "hours": tp.Hours}
 		}
 		if rp := s.ReferralPolicy(r.Context()); seller == "" && rp.Enabled {
 			if sum, err := s.ReferralSummary(r.Context(), u.ID); err == nil {

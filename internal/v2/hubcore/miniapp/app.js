@@ -292,7 +292,7 @@ function extras() {
   const out = [];
   if (state.trial) out.push(h("div", { class: "card promo" },
     h("div", { class: "promo-ic" }, icon(IC.gift)),
-    h("div", {}, h("h3", {}, "تست رایگان"), h("p", { class: "muted" }, `${state.trial.gb ? size(state.trial.gb * 2 ** 30) : "حجم نامحدود"} برای ${num(state.trial.hours)} ساعت — یک بار برای هر حساب.`)),
+    h("div", {}, h("h3", {}, "تست رایگان"), h("p", { class: "muted" }, `${state.trial.mb ? size(state.trial.mb * 2 ** 20) : state.trial.gb ? size(state.trial.gb * 2 ** 30) : "حجم نامحدود"} برای ${num(state.trial.hours)} ساعت — یک بار برای هر حساب.`)),
     btn("فعال کردن", "primary", async (e) => {
       e.currentTarget.disabled = true;
       try { await api("POST", "trial"); haptic("success"); celebrate("تست رایگان فعال شد"); await load(false); }

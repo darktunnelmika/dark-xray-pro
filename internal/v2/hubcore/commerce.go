@@ -86,7 +86,8 @@ func (s *Store) ensureCommerceSchema() error {
 
 type TrialPolicy struct {
 	Enabled  bool     `json:"enabled"`
-	GB       int64    `json:"gb"`    // 0 = unlimited
+	GB       int64    `json:"gb"`    // 0 = unlimited (unless MB is set)
+	MB       int64    `json:"mb"`    // a volume under one GB, e.g. 50; replaces GB when set
 	Hours    int64    `json:"hours"` // from creation
 	MaxIPs   int      `json:"max_ips"`
 	Inbounds []string `json:"inbounds"`
@@ -98,6 +99,17 @@ type ReferralPolicy struct {
 	Fixed     int64 `json:"fixed"`      // Stars per qualifying order
 	FirstOnly bool  `json:"first_only"` // only the invited customer's first purchase
 	MaxReward int64 `json:"max_reward"` // per order, 0 = no cap
+}
+
+// Bytes is the trial's volume; -1 means unlimited.
+func (p TrialPolicy) Bytes() int64 {
+	switch {
+	case p.MB > 0:
+		return p.MB << 20
+	case p.GB > 0:
+		return p.GB << 30
+	}
+	return -1
 }
 
 func trialKey(seller string) string {
@@ -125,14 +137,17 @@ func (s *Store) PutTrialPolicy(ctx context.Context, p TrialPolicy) error {
 // client charged to the reseller's credit, so it has a volume and whole days;
 // sub-sellers sell only their reseller's plans and have no trial.
 func (s *Store) PutTrialPolicyFor(ctx context.Context, seller string, p TrialPolicy) error {
-	if p.GB < 0 || p.GB > 1000 || p.Hours < 1 || p.Hours > 24*30 || p.MaxIPs < 0 {
+	if p.MB > 0 {
+		p.GB = 0 // one or the other
+	}
+	if p.GB < 0 || p.GB > 1000 || p.MB < 0 || p.MB > 1000*1024 || p.Hours < 1 || p.Hours > 24*30 || p.MaxIPs < 0 {
 		return fmt.Errorf("%w: trial is 0-1000 GB for 1-720 hours", ErrInvalid)
 	}
 	if seller != "" {
 		if s.IsSubSeller(ctx, seller) {
 			return fmt.Errorf("%w: sub-sellers have no free trial", ErrPolicy)
 		}
-		if p.GB < 1 {
+		if p.Bytes() < 0 {
 			return fmt.Errorf("%w: a reseller's trial needs a volume", ErrInvalid)
 		}
 	}
@@ -535,10 +550,7 @@ func (s *Store) ClaimTrial(ctx context.Context, seller string, chat int64) (stri
 		email += "-" + randomHex(2)
 	}
 	now := s.now().Unix()
-	c := Client{Email: email, Enabled: true, VolumeBytes: -1, MaxIPs: p.MaxIPs, Inbounds: p.Inbounds, ExpiresUnix: now + p.Hours*3600}
-	if p.GB > 0 {
-		c.VolumeBytes = p.GB << 30
-	}
+	c := Client{Email: email, Enabled: true, VolumeBytes: p.Bytes(), MaxIPs: p.MaxIPs, Inbounds: p.Inbounds, ExpiresUnix: now + p.Hours*3600}
 	mark := func(q interface {
 		ExecContext(context.Context, string, ...any) (sql.Result, error)
 	}) error {

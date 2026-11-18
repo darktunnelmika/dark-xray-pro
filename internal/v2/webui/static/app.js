@@ -5212,7 +5212,7 @@ function tgCommerceCard() {
   Promise.all([api("GET", "/api/v2/admin/tg/commerce"), api("GET", "/api/v2/admin/inbounds")]).then(([c, inbounds]) => {
     const tr = c.trial || {}, rf = c.referral || {};
     const num = (v, attrs = {}) => h("input", { type: "number", min: "0", value: String(v ?? 0), dir: "ltr", ...attrs });
-    const trOn = h("input", { type: "checkbox", checked: !!tr.enabled }), trGB = num(tr.gb), trH = num(tr.hours || 24, { min: "1" }), trIPs = num(tr.max_ips ?? 1);
+    const trOn = h("input", { type: "checkbox", checked: !!tr.enabled }), trGB = num(tr.mb ? +(tr.mb / 1024).toFixed(3) : tr.gb, { step: "any" }), trH = num(tr.hours || 24, { min: "1" }), trIPs = num(tr.max_ips ?? 1);
     const trIns = h("div", { class: "chips" }, (inbounds || []).map((i) => h("label", { class: "check" }, h("input", { type: "checkbox", value: i.tag, checked: (tr.inbounds || []).includes(i.tag) }), h("span", {}, i.tag))));
     const rfOn = h("input", { type: "checkbox", checked: !!rf.enabled }), rfPct = num(rf.percent ?? 10, { max: "100" }), rfFix = num(rf.fixed), rfMax = num(rf.max_reward);
     const rfFirst = h("input", { type: "checkbox", checked: !!rf.first_only });
@@ -5228,7 +5228,7 @@ function tgCommerceCard() {
       h("button", { class: "primary", onclick: async () => {
         err.textContent = "";
         try {
-          await api("PUT", "/api/v2/admin/tg/trial", { enabled: trOn.checked, gb: +trGB.value || 0, hours: +trH.value || 24, max_ips: +trIPs.value || 0, inbounds: [...trIns.querySelectorAll("input:checked")].map((x) => x.value) });
+          await api("PUT", "/api/v2/admin/tg/trial", { enabled: trOn.checked, ...(Number.isInteger(+trGB.value || 0) ? { gb: +trGB.value || 0, mb: 0 } : { gb: 0, mb: Math.max(1, Math.round(+trGB.value * 1024)) }), hours: +trH.value || 24, max_ips: +trIPs.value || 0, inbounds: [...trIns.querySelectorAll("input:checked")].map((x) => x.value) });
           await api("PUT", "/api/v2/admin/tg/referral", { enabled: rfOn.checked, percent: +rfPct.value || 0, fixed: +rfFix.value || 0, max_reward: +rfMax.value || 0, first_only: rfFirst.checked });
           toast(t("saved"));
         } catch (x) { err.textContent = x.message; }
