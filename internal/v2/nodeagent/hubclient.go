@@ -51,6 +51,11 @@ func NewHTTPHub(baseURL, nodeID, token, caFile, serverName string) (*HTTPHub, er
 		tc.RootCAs = pool
 	}
 	tr := &http.Transport{TLSClientConfig: tc, ForceAttemptHTTP2: true, IdleConnTimeout: 90 * time.Second, ResponseHeaderTimeout: 15 * time.Second}
+	// A long path can drop an established connection without a word; the
+	// agent then kept sending into it for minutes while new connections
+	// worked fine. Ping a quiet connection and give it up when the ping is
+	// not answered.
+	tr.HTTP2 = &http.HTTP2Config{SendPingTimeout: 10 * time.Second, PingTimeout: 8 * time.Second}
 	return &HTTPHub{BaseURL: strings.TrimRight(baseURL, "/"), NodeID: nodeID, Token: token, Client: &http.Client{Transport: tr, Timeout: 20 * time.Second}}, nil
 }
 
@@ -68,11 +73,13 @@ func (h *HTTPHub) post(ctx context.Context, path string, in, out any) error {
 	req.Header.Set(wire.HeaderNodeID, h.NodeID)
 	resp, err := h.Client.Do(req)
 	if err != nil {
+		h.dropConnections() // never reuse the connection a request just failed on
 		return err
 	}
 	defer resp.Body.Close()
 	data, err := io.ReadAll(io.LimitReader(resp.Body, 64<<20))
 	if err != nil {
+		h.dropConnections()
 		return err
 	}
 	if resp.StatusCode != http.StatusOK {
@@ -83,6 +90,14 @@ func (h *HTTPHub) post(ctx context.Context, path string, in, out any) error {
 		return fmt.Errorf("hub %s: %s: %s", path, resp.Status, msg)
 	}
 	return json.Unmarshal(data, out)
+}
+
+// dropConnections closes the kept connections to the hub, so the next
+// request dials a new one.
+func (h *HTTPHub) dropConnections() {
+	if t, ok := h.Client.Transport.(interface{ CloseIdleConnections() }); ok {
+		t.CloseIdleConnections()
+	}
 }
 
 func (h *HTTPHub) Sync(ctx context.Context, req wire.SyncRequest) (wire.SyncResponse, error) {
