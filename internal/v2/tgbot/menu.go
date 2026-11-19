@@ -30,6 +30,11 @@ type photoUploader interface {
 
 const menuCards = 3 // services shown as cards; the rest are counted
 
+// sizeShort is size without needless decimals: "۴۰ گیگ", not "۴۰٫۰۰ گیگ".
+func sizeShort(n int64) string {
+	return strings.NewReplacer("٫۰۰", "", ".00", "").Replace(size(n))
+}
+
 func usageBar(share float64) string {
 	if share < 0 {
 		share = 0
@@ -53,7 +58,7 @@ func (b *Bot) planTitle(ctx context.Context, c hubcore.ClientView) string {
 	var parts []string
 	switch {
 	case c.VolumeBytes > 0:
-		parts = append(parts, size(c.VolumeBytes))
+		parts = append(parts, sizeShort(c.VolumeBytes))
 	case c.VolumeBytes < 0:
 		parts = append(parts, "نامحدود")
 	}
@@ -94,7 +99,7 @@ func (b *Bot) menuCard(ctx context.Context, c hubcore.ClientView, showName bool)
 		if left < 0 {
 			left = 0
 		}
-		fmt.Fprintf(&sb, "%s %s٪\nحجم مانده: <b>%s</b> از %s\n", usageBar(share), faInt(int64(share*100+0.5)), size(left), size(c.VolumeBytes))
+		fmt.Fprintf(&sb, "%s %s٪\nحجم مانده: <b>%s</b> از %s\n", usageBar(share), faInt(int64(share*100+0.5)), sizeShort(left), sizeShort(c.VolumeBytes))
 	} else {
 		sb.WriteString("حجم: <b>نامحدود</b>\n")
 	}

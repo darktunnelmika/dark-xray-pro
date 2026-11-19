@@ -91,7 +91,7 @@ func (s *Store) TgName(ctx context.Context, chat int64) string {
 // renewed with ("" = it was not sold through the shop).
 func (s *Store) ClientPlanName(ctx context.Context, email string) string {
 	var name string
-	_ = s.ro.QueryRowContext(ctx, `SELECT product_name FROM orders WHERE client_email=? AND status='fulfilled' ORDER BY id DESC LIMIT 1`, email).Scan(&name)
+	_ = s.ro.QueryRowContext(ctx, `SELECT p.name FROM orders o JOIN products p ON p.id=o.product_id WHERE o.client_email=? AND o.status='fulfilled' ORDER BY o.id DESC LIMIT 1`, email).Scan(&name)
 	return name
 }
 
