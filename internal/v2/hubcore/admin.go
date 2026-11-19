@@ -892,6 +892,18 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 		err := s.PutTrustedIPs(r.Context(), in.IPs)
 		reply(w, map[string]bool{"ok": err == nil}, err)
 	}))
+	// Reseller panels sold in the main bot: the switch and the packages.
+	mux.HandleFunc("GET /api/v2/admin/rep-sale", guard(func(w http.ResponseWriter, r *http.Request) {
+		reply(w, s.RepSale(r.Context()), nil)
+	}))
+	mux.HandleFunc("PUT /api/v2/admin/rep-sale", guard(func(w http.ResponseWriter, r *http.Request) {
+		var in RepSale
+		if !decode(w, r, &in) {
+			return
+		}
+		err := s.PutRepSale(r.Context(), in)
+		reply(w, map[string]bool{"ok": err == nil}, err)
+	}))
 	mux.HandleFunc("GET /api/v2/admin/tg/commerce", guard(func(w http.ResponseWriter, r *http.Request) {
 		reply(w, map[string]any{"trial": s.TrialPolicy(r.Context()), "referral": s.ReferralPolicy(r.Context()), "card": s.Card(r.Context())}, nil)
 	}))
