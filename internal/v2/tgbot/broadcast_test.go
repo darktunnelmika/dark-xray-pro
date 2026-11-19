@@ -109,6 +109,19 @@ func TestBroadcastStaysInsideEachBot(t *testing.T) {
 	// The owner's bottom "main menu" opens management, not the customer menu.
 	main.Handle(ctx, msg(ownerID, "🏠 منوی اصلی"))
 	find(t, mainAPI.take(), ownerID, "پنل مدیریت")
+	// From the customer's view the owner gets back with one tap.
+	main.Handle(ctx, msg(ownerID, "🛍 نمای مشتری"))
+	if m := find(t, mainAPI.take(), ownerID, "سلام"); !hasButton(m.kb, "بازگشت به پنل مدیریت") {
+		t.Fatal("the owner's customer view must lead back to management")
+	}
+	main.Handle(ctx, msg(501, "/start"))
+	for _, m := range mainAPI.take() {
+		if hasButton(m.kb, "پنل مدیریت") {
+			t.Fatal("customers never see the way to management")
+		}
+	}
+	main.Handle(ctx, msg(ownerID, "🛡 پنل مدیریت"))
+	find(t, mainAPI.take(), ownerID, "پنل مدیریت Dark VPN")
 }
 
 func contains(s, sub string) bool {

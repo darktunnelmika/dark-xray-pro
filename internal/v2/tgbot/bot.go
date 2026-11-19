@@ -312,6 +312,7 @@ func (b *Bot) onMessage(ctx context.Context, m *Message) {
 	if b.Owners[chat] {
 		if text == "/start" || text == "/admin" || text == "/menu" {
 			b.ownerHome(ctx, chat)
+			b.ensureKeyboard(ctx, chat)
 			return
 		}
 		if b.ownerMessage(ctx, m, text) {
@@ -320,6 +321,9 @@ func (b *Bot) onMessage(ctx context.Context, m *Message) {
 		b.mu.Lock()
 		what := b.awaiting[chat]
 		b.mu.Unlock()
+		if act := keyboardAction(text); act == "admin" || act == "customer" {
+			what = "" // the owner's bottom keyboard always wins over a pending prompt
+		}
 		if what != "" && what != "support" && what != "link" && !strings.HasPrefix(text, "/") {
 			b.takeAwait(chat)
 			if b.ownerInput(ctx, chat, what, text) {

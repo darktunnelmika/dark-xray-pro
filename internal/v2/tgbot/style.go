@@ -279,6 +279,11 @@ func (b *Bot) celebrate(ctx context.Context, chat int64, text string, kb *Keyboa
 // the menu back from anywhere, so nobody has to type /start; everything else
 // lives in that menu, once. (The labels of the older, larger keyboard are
 // still understood by keyboardAction.)
+// ownerReplyRows is the owner's bottom keyboard.
+var ownerReplyRows = [][]string{
+	{"🛡 پنل مدیریت", "🛍 نمای مشتری"},
+}
+
 var replyRows = [][]string{
 	{"🏠 منوی اصلی", "💬 پشتیبانی"},
 }
@@ -302,6 +307,10 @@ func keyboardAction(text string) string {
 		return "guide"
 	case "منوی اصلی", "بیشتر", "منو":
 		return "home"
+	case "پنل مدیریت":
+		return "admin"
+	case "نمای مشتری":
+		return "customer"
 	case "داشبورد", "فروش", "گزارش‌ها", "مدیریت", "نمایندگان", "اعلان‌ها":
 		return "admin"
 	case "کاربران":
@@ -328,6 +337,10 @@ func (b *Bot) keyAction(ctx context.Context, chat int64, act string) {
 	case "shop", "mine", "wallet", "support", "guide", "home":
 		// A press on the older, larger keyboard swaps it for the current one.
 		defer b.ensureKeyboard(ctx, chat)
+	}
+	if act == "customer" {
+		b.menu(ctx, chat)
+		return
 	}
 	if act == "home" && b.Owners[chat] {
 		// The owner's main menu is the management panel; the customer's menu
@@ -383,6 +396,16 @@ func (b *Bot) ensureKeyboard(ctx context.Context, chat int64) {
 		SendReplyKeyboard(ctx context.Context, chat int64, text string, rows [][]string) error
 	})
 	if !ok {
+		return
+	}
+	if b.Owners[chat] {
+		// The owner's bottom row switches between managing and the customer's view.
+		key := fmt.Sprintf("tg_kbo1:%s:%d", b.Seller, chat)
+		if b.Store.Setting(ctx, key) != "1" {
+			if err := kb.SendReplyKeyboard(ctx, chat, "⌨️ «پنل مدیریت» و «نمای مشتری» همیشه پایین صفحه‌اند.", ownerReplyRows); err == nil {
+				_ = b.Store.SetSetting(ctx, key, "1")
+			}
+		}
 		return
 	}
 	if rep, _ := b.repOf(ctx, chat); rep != "" && b.repMode(ctx, chat) {

@@ -255,12 +255,20 @@ func (b *Bot) menuKB(ctx context.Context, chat int64, services int, ended []stri
 		small = append(small, btn)
 	}
 	small = append(small, cbBtn("🔗 افزودن با لینک", "link"))
+	back := []Button(nil)
+	if b.Owners[chat] {
+		// The owner is only looking at the customer's view: one tap back.
+		back = row(cbBtn("🛡 بازگشت به پنل مدیریت", "a:home"))
+	}
 	for i := 0; i < len(small); i += 2 {
 		if i+1 < len(small) {
 			rows = append(rows, row(small[i], small[i+1]))
 		} else {
 			rows = append(rows, row(small[i]))
 		}
+	}
+	if back != nil {
+		rows = append(rows, back)
 	}
 	return &Keyboard{Rows: rows}
 }
