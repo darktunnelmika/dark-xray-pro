@@ -40,7 +40,7 @@ func TestTelegramCommerce(t *testing.T) {
 		t.Fatal("invited twice")
 	}
 	var notified int64
-	SetRewardHook(func(r, stars int64) { notified = stars })
+	SetRewardHook(func(r, stars, _ int64) { notified = stars })
 	defer SetRewardHook(nil)
 	// Stars purchase by bob.
 	if _, _, _, err := s.StarsCheckout(ctx, bob, "cash", ""); !errors.Is(err, ErrNotForStars) {
