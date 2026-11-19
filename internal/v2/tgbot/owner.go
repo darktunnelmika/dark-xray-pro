@@ -247,7 +247,11 @@ func (b *Bot) ownerCallback(ctx context.Context, chat int64, data string) bool {
 			{{Text: "ویرایش متن پرداخت", Data: "a:set:pay"}, {Text: "ویرایش خوش‌آمد", Data: "a:set:welcome"}},
 			{{Text: "ویرایش آموزش اتصال", Data: "a:set:guide"}, {Text: "🔐 رمز بکاپ", Data: "a:set:backup"}},
 			{{Text: "🎁 تست رایگان", Data: "a:trial"}, {Text: "🤝 فروش پنل نمایندگی", Data: "P:cfg"}},
+			{{Text: "📢 عضویت اجباری در کانال", Data: "a:join"}},
 			back("a:home")}})
+	case "join": // a:join[:on|off|add|del:<n>] — required channels of the main bot
+		b.takeAwait(chat)
+		b.joinCallback(ctx, chat, "", "a:join", "a:settings", arg(1), arg(2))
 	case "trial": // a:trial[:on|off|gb|h] — the owner's free trial
 		b.takeAwait(chat)
 		b.trialCallback(ctx, chat, "", "a:trial", "a:settings", arg(1))
@@ -270,6 +274,9 @@ func orDash(s string) string {
 // ownerInput handles a typed answer the owner was asked for.
 func (b *Bot) ownerInput(ctx context.Context, chat int64, what, text string) bool {
 	if b.trialInput(ctx, chat, what, text) {
+		return true
+	}
+	if b.joinInput(ctx, chat, what, text) {
 		return true
 	}
 	switch {

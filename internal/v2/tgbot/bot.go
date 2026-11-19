@@ -41,6 +41,7 @@ type Bot struct {
 	pdraft     map[int64]*hubcore.Product // chat -> product being made with buttons
 	draft      map[int64]*bcDraft         // owner chat -> broadcast being prepared
 	bcStop     bool
+	joined     map[int64]time.Time // chats confirmed in the required channels, until when
 	lastNotify time.Time
 	nodeState  map[string]bool
 	tunState   map[string]bool // node|tunnel -> up (alerts on change)
@@ -391,6 +392,12 @@ func (b *Bot) onMessage(ctx context.Context, m *Message) {
 		if b.repMessage(ctx, chat, rep, role, text) {
 			return
 		}
+	}
+	// Required channels: everything but the customer's own services and
+	// support waits until they have joined.
+	if act := keyboardAction(text); act != "support" && act != "mine" && b.peekAwait(chat) != "support" &&
+		!strings.HasPrefix(text, "/support") && !strings.HasPrefix(text, "/my") && b.joinPrompt(ctx, chat) {
+		return
 	}
 	// Buttons of the bottom keyboard (ours, or the old panel's, still on
 	// some phones) arrive as plain text.
@@ -747,10 +754,23 @@ func (b *Bot) onCallback(ctx context.Context, q *CallbackQuery) {
 	if b.ticketCallback(ctx, chat, q.Data) {
 		return
 	}
+	verb, rest, _ := strings.Cut(q.Data, ":")
+	if verb == "join" { // "عضو شدم": look again, then go on to the menu
+		b.mu.Lock()
+		delete(b.joined, chat)
+		b.mu.Unlock()
+		if !b.joinPrompt(ctx, chat) {
+			b.menu(ctx, chat)
+			b.ensureKeyboard(ctx, chat)
+		}
+		return
+	}
+	if !joinFree(verb) && b.joinPrompt(ctx, chat) {
+		return
+	}
 	if b.repSaleCallback(ctx, q) {
 		return
 	}
-	verb, rest, _ := strings.Cut(q.Data, ":")
 	mine := func() bool { return b.ownsClient(ctx, chat, rest) || b.Owners[chat] }
 	switch verb {
 	case "home":

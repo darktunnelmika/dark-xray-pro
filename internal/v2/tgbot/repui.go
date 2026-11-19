@@ -174,8 +174,9 @@ func (b *Bot) repHome(ctx context.Context, chat int64, rep, role string) {
 		kb.Rows = append(kb.Rows, []Button{btn})
 	}
 	if repCan(role, "shop") && b.Seller == rep {
-		// In the reseller's own bot: a message to everyone who started it.
-		kb.Rows = append(kb.Rows, []Button{repBtn("📣 پیام همگانی", "bc")})
+		// In the reseller's own bot: a message to everyone who started it,
+		// and the channels its customers must join.
+		kb.Rows = append(kb.Rows, []Button{repBtn("📣 پیام همگانی", "bc"), repBtn("📢 عضویت اجباری", "join")})
 	}
 	kb.Rows = append(kb.Rows, []Button{repBtn("🛍 حالت مشتری", "cust")})
 	b.send(ctx, chat, text, kb)
@@ -219,6 +220,16 @@ func (b *Bot) repCallback(ctx context.Context, chat int64, data string) bool {
 			return true
 		}
 		b.repBroadcast(ctx, chat, parts[0], arg(1))
+	case "join": // R:join[:on|off|add|del:<n>] — required channels of the reseller's own bot
+		if deny("shop") {
+			return true
+		}
+		if b.Seller != rep {
+			b.send(ctx, chat, "عضویت اجباری فقط در ربات اختصاصی خودتان تنظیم می‌شود.", repBackKB)
+			return true
+		}
+		b.takeAwait(chat)
+		b.joinCallback(ctx, chat, rep, "R:join", "R:home", arg(1), arg(2))
 	case "trial": // R:trial[:on|off|gb|h] — this reseller's free trial
 		if deny("shop") {
 			return true
@@ -732,6 +743,9 @@ func (b *Bot) repInput(ctx context.Context, chat int64, rep, role, what, text st
 		}
 		b.prepareBroadcastFor(ctx, chat, text, "", "R:")
 		return true
+	}
+	if strings.HasPrefix(what, "r:joinadd:"+rep+"|") {
+		return b.Seller == rep && repCan(role, "shop") && b.joinInput(ctx, chat, what, text)
 	}
 	// A trial prompt belongs to this reseller only.
 	if strings.HasPrefix(what, "r:trialgb:"+rep+"|") || strings.HasPrefix(what, "r:trialh:"+rep+"|") {

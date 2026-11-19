@@ -3,7 +3,9 @@ package hubcore
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"strconv"
 	"strings"
 )
@@ -569,4 +571,69 @@ func (s *Store) TgRepChats(ctx context.Context, repID string) []int64 {
 		}
 	}
 	return out
+}
+
+// ---- required channel membership ----
+
+// JoinPolicy makes a bot's customers join channels before they can buy,
+// renew or try. Each seller sets their own ("" = the owner); off by default.
+type JoinPolicy struct {
+	Enabled  bool     `json:"enabled"`
+	Channels []string `json:"channels"` // public usernames, "@name"
+}
+
+func joinKey(seller string) string {
+	if seller == "" {
+		return "tg_join"
+	}
+	return "tg_join:" + seller
+}
+
+func (s *Store) JoinPolicy(ctx context.Context, seller string) JoinPolicy {
+	var p JoinPolicy
+	_ = json.Unmarshal([]byte(s.Setting(ctx, joinKey(seller))), &p)
+	return p
+}
+
+// NormalChannel turns "@name", "name" or a t.me link into "@name"; ok is
+// false for anything that is not a public channel username.
+func NormalChannel(v string) (string, bool) {
+	v = strings.TrimSpace(v)
+	for _, p := range []string{"https://t.me/", "http://t.me/", "t.me/", "@"} {
+		v = strings.TrimPrefix(v, p)
+	}
+	v = strings.TrimSuffix(v, "/")
+	if len(v) < 4 || len(v) > 32 {
+		return "", false
+	}
+	for _, r := range v {
+		if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '_') {
+			return "", false
+		}
+	}
+	return "@" + v, true
+}
+
+func (s *Store) PutJoinPolicy(ctx context.Context, seller string, p JoinPolicy) error {
+	seen := map[string]bool{}
+	var out []string
+	for _, c := range p.Channels {
+		n, ok := NormalChannel(c)
+		if !ok {
+			return fmt.Errorf("%w: a channel is a public username like @name", ErrInvalid)
+		}
+		if k := strings.ToLower(n); !seen[k] {
+			seen[k] = true
+			out = append(out, n)
+		}
+	}
+	if len(out) > 3 {
+		return fmt.Errorf("%w: at most three channels", ErrInvalid)
+	}
+	if p.Enabled && len(out) == 0 {
+		return fmt.Errorf("%w: add a channel first", ErrInvalid)
+	}
+	p.Channels = out
+	b, _ := json.Marshal(p)
+	return s.SetSetting(ctx, joinKey(seller), string(b))
 }

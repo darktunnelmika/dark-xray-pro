@@ -291,6 +291,22 @@ func (a *HTTPAPI) SendPhoto(ctx context.Context, chat int64, png []byte, caption
 	return a.call(ctx, "sendPhoto", &buf, w.FormDataContentType(), nil)
 }
 
+// ChatMember reports a user's status in a channel ("member", "left", ...).
+// The bot must be an administrator of the channel to ask.
+func (a *HTTPAPI) ChatMember(ctx context.Context, channel string, user int64) (string, error) {
+	var out struct {
+		Status   string `json:"status"`
+		IsMember bool   `json:"is_member"`
+	}
+	if err := a.callJSON(ctx, "getChatMember", map[string]any{"chat_id": channel, "user_id": user}, &out); err != nil {
+		return "", err
+	}
+	if out.Status == "restricted" && out.IsMember {
+		return "member", nil
+	}
+	return out.Status, nil
+}
+
 // UploadPhoto sends an image with a caption and buttons and returns the file
 // id Telegram gave it, so later sends can reuse it without uploading again.
 func (a *HTTPAPI) UploadPhoto(ctx context.Context, chat int64, name string, img []byte, caption string, kb *Keyboard) (string, error) {
