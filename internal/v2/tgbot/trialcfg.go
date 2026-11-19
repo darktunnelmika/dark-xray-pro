@@ -32,7 +32,7 @@ func (b *Bot) trialScreen(ctx context.Context, chat int64, seller, cb, home stri
 			faInt(int64(st.Taken)), faInt(int64(st.Running)), faInt(int64(st.Connected)), faInt(int64(st.Bought)))
 	}
 	if user := b.Store.BotUsernameFor(ctx, seller); user != "" {
-		text += "\n\n🔗 لینک مستقیم تست برای کانال:\n<code>https://t.me/" + esc(user) + "?start=trial</code>"
+		text += "\n\n🔗 لینک مستقیم تست برای کانال:\nhttps://t.me/" + esc(user) + "?start=trial"
 	}
 	b.send(ctx, chat, text, &Keyboard{Rows: [][]Button{
 		{toggle},
