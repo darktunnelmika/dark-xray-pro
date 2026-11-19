@@ -84,7 +84,7 @@ func TestSellingResellerPanels(t *testing.T) {
 	}
 
 	// A customer buys a panel: package, username, receipt.
-	if !menuHas(cust, "خرید پنل نمایندگی") {
+	if !menuHas(cust, "پنل نمایندگی") {
 		t.Fatal("the customer's menu must offer the panel")
 	}
 	b.Handle(ctx, cb(cust, "P:buy"))

@@ -77,6 +77,24 @@ ON CONFLICT(chat_id) DO UPDATE SET name=excluded.name, username=excluded.usernam
 	return err
 }
 
+// TgName is the first name a Telegram user last showed the bot ("" = unknown).
+func (s *Store) TgName(ctx context.Context, chat int64) string {
+	var name string
+	_ = s.ro.QueryRowContext(ctx, `SELECT name FROM tg_users WHERE chat_id=?`, chat).Scan(&name)
+	if f := strings.Fields(name); len(f) > 0 {
+		return f[0]
+	}
+	return ""
+}
+
+// ClientPlanName is the name of the product a client was last bought or
+// renewed with ("" = it was not sold through the shop).
+func (s *Store) ClientPlanName(ctx context.Context, email string) string {
+	var name string
+	_ = s.ro.QueryRowContext(ctx, `SELECT product_name FROM orders WHERE client_email=? AND status='fulfilled' ORDER BY id DESC LIMIT 1`, email).Scan(&name)
+	return name
+}
+
 // TgSetBlocked marks a chat that blocked the bot so broadcasts skip it.
 func (s *Store) TgSetBlocked(ctx context.Context, chat int64) {
 	_, _ = s.db.ExecContext(ctx, `UPDATE tg_users SET blocked=1 WHERE chat_id=?`, chat)

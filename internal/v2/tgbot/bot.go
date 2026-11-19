@@ -479,64 +479,6 @@ const defaultGuide = `📲 <b>آموزش اتصال</b>
 
 func isBlocked(err error) bool { return errors.Is(err, ErrBlocked) }
 
-func (b *Bot) menu(ctx context.Context, chat int64) {
-	welcome := b.Store.Setting(ctx, "tg_welcome")
-	if welcome == "" {
-		welcome = "✨ <b>به Dark VPN خوش آمدید</b>\n" + line + "\nاینترنت آزاد، سریع و پایدار روی چند سرور.\nاز دکمه‌های زیر شروع کنید 👇"
-	} else {
-		welcome = esc(welcome)
-	}
-	if emails, _ := b.clients(ctx, chat); len(emails) > 0 {
-		var lines []string
-		for _, e := range emails {
-			if c, err := b.Store.ClientByEmail(ctx, e); err == nil {
-				st := b.state(c)
-				left := ""
-				if c.VolumeBytes > 0 {
-					l := c.VolumeBytes - c.Usage.Up - c.Usage.Down
-					if l < 0 {
-						l = 0
-					}
-					left = " · " + size(l) + " مانده"
-				}
-				lines = append(lines, st.icon+" <b>"+esc(c.Email)+"</b>"+left)
-			}
-		}
-		welcome += "\n\n📦 <b>سرویس‌های شما</b>\n<blockquote>" + strings.Join(lines, "\n") + "</blockquote>"
-	}
-	if bal := b.Store.TomanBalance(ctx, b.Seller, chat); bal > 0 {
-		welcome += "\n👛 کیف پول: <b>" + faMoney(bal) + " تومان</b>"
-	}
-	b.send(ctx, chat, welcome, b.menuKB(ctx, chat))
-}
-
-// menuKB is the main menu. The Mini App store is not repeated here: its
-// button sits beside the message box whenever it is on.
-func (b *Bot) menuKB(ctx context.Context, chat int64) *Keyboard {
-	var rows [][]Button
-	rows = append(rows, row(cbBtn("🛍 خرید اشتراک", "shop"), cbBtn("📦 سرویس‌های من", "mine")))
-	var extra []Button
-	if b.Store.TrialPolicyFor(ctx, b.Seller).Enabled && !b.Store.TrialUsed(ctx, b.Seller, chat) {
-		extra = append(extra, cbBtn("🎁 تست رایگان", "trial"))
-	}
-	if b.Store.WalletBalance(ctx, chat) > 0 || b.Store.TomanBalance(ctx, b.Seller, chat) > 0 {
-		extra = append(extra, cbBtn("👛 کیف پول", "wallet"))
-	}
-	if len(extra) > 0 {
-		rows = append(rows, extra)
-	}
-	if btn, ok := b.repSaleButton(ctx, chat); ok {
-		rows = append(rows, row(btn))
-	}
-	rows = append(rows, row(cbBtn("📚 آموزش اتصال", "guide"), cbBtn("🌐 وضعیت سرورها", "status")))
-	social := row(cbBtn("💬 پشتیبانی", "support"))
-	if b.Store.ReferralPolicy(ctx).Enabled {
-		social = append([]Button{cbBtn("👥 دعوت دوستان", "invite")}, social...)
-	}
-	rows = append(rows, social, row(cbBtn("🔗 افزودن سرویس با لینک", "link")))
-	return &Keyboard{Rows: rows}
-}
-
 // syncMenuButton keeps the chat menu button in step with the Mini App setting.
 // miniURL is this bot's Mini App address ("" = off): a reseller's bot opens
 // the same app, which shows that reseller's store.

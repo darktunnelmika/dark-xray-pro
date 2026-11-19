@@ -291,6 +291,43 @@ func (a *HTTPAPI) SendPhoto(ctx context.Context, chat int64, png []byte, caption
 	return a.call(ctx, "sendPhoto", &buf, w.FormDataContentType(), nil)
 }
 
+// UploadPhoto sends an image with a caption and buttons and returns the file
+// id Telegram gave it, so later sends can reuse it without uploading again.
+func (a *HTTPAPI) UploadPhoto(ctx context.Context, chat int64, name string, img []byte, caption string, kb *Keyboard) (string, error) {
+	var buf bytes.Buffer
+	w := multipart.NewWriter(&buf)
+	_ = w.WriteField("chat_id", strconv.FormatInt(chat, 10))
+	_ = w.WriteField("caption", caption)
+	_ = w.WriteField("parse_mode", "HTML")
+	if kb != nil {
+		if m, err := json.Marshal(styleKeyboard(kb, nil)); err == nil {
+			_ = w.WriteField("reply_markup", string(m))
+		}
+	}
+	fw, err := w.CreateFormFile("photo", name)
+	if err != nil {
+		return "", err
+	}
+	if _, err := fw.Write(img); err != nil {
+		return "", err
+	}
+	if err := w.Close(); err != nil {
+		return "", err
+	}
+	var out struct {
+		Photo []struct {
+			FileID string `json:"file_id"`
+		} `json:"photo"`
+	}
+	if err := a.call(ctx, "sendPhoto", &buf, w.FormDataContentType(), &out); err != nil {
+		return "", err
+	}
+	if len(out.Photo) == 0 {
+		return "", nil
+	}
+	return out.Photo[len(out.Photo)-1].FileID, nil
+}
+
 // EditText redraws a message in place (one screen per chat).
 func (a *HTTPAPI) EditText(ctx context.Context, chat, msgID int64, text string, kb *Keyboard) error {
 	p := map[string]any{"chat_id": chat, "message_id": msgID, "text": text, "parse_mode": "HTML", "link_preview_options": map[string]bool{"is_disabled": true}}

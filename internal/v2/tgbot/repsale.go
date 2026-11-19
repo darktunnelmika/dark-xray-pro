@@ -47,9 +47,9 @@ func (b *Bot) repSaleButton(ctx context.Context, chat int64) (Button, bool) {
 		return Button{}, false
 	}
 	if rep != "" {
-		return cbBtn("💳 شارژ پنل نمایندگی", "P:buy"), true
+		return cbBtn("💳 شارژ پنل", "P:buy"), true
 	}
-	return cbBtn("🤝 خرید پنل نمایندگی", "P:buy"), true
+	return cbBtn("🤝 پنل نمایندگی", "P:buy"), true
 }
 
 func (b *Bot) repSaleCallback(ctx context.Context, q *CallbackQuery) bool {
