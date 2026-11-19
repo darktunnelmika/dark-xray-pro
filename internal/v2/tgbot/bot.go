@@ -93,8 +93,12 @@ func (b *Bot) init() {
 	defer b.mu.Unlock()
 	if b.awaiting == nil {
 		b.awaiting = map[int64]string{}
-		hubcore.SetRewardHook(func(referrer, stars int64) {
-			b.send(context.Background(), referrer, fmt.Sprintf("🎉 یکی از دوستانی که دعوت کردید خرید کرد: %d⭐ به کیف پول شما اضافه شد.", stars), nil)
+		hubcore.SetRewardHook(func(referrer, stars, toman int64) {
+			what := fmt.Sprintf("%d⭐", stars)
+			if toman > 0 {
+				what = faMoney(toman) + " تومان"
+			}
+			b.send(context.Background(), referrer, "🎉 یکی از دوستانی که دعوت کردید خرید کرد: "+what+" به کیف پول شما اضافه شد.", nil)
 		})
 	}
 }
@@ -316,6 +320,11 @@ func (b *Bot) onMessage(ctx context.Context, m *Message) {
 		}
 	}
 	if code, ok := strings.CutPrefix(text, "/start ref_"); ok {
+		// Invitations are the owner's shop's; a reseller's bot ignores the code.
+		if b.Seller != "" {
+			b.menu(ctx, chat)
+			return
+		}
 		if referrer, err := b.Store.AttributeReferral(ctx, chat, code); err == nil {
 			b.send(ctx, referrer, "👥 "+esc(name)+" با لینک دعوت شما وارد شد. با اولین خریدش اعتبار می‌گیرید.", nil)
 		}
@@ -779,6 +788,8 @@ func (b *Bot) onCallback(ctx context.Context, q *CallbackQuery) {
 		b.showProduct(ctx, chat, rest)
 	case "cpn":
 		b.askCoupon(ctx, chat, rest)
+	case "me":
+		b.account(ctx, chat)
 	case "rcpt":
 		b.setAwait(chat, "receipt:"+rest)
 		b.send(ctx, chat, "📸 عکس رسید واریز را همین‌جا بفرستید (اسکرین‌شات یا عکس).", homeKB)

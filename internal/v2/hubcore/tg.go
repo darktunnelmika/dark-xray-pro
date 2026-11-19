@@ -95,6 +95,34 @@ func (s *Store) ClientPlanName(ctx context.Context, email string) string {
 	return name
 }
 
+// BuyerOrder is one line of a customer's purchase history.
+type BuyerOrder struct {
+	ID     int64
+	Name   string
+	Amount int64
+	Status string
+	Unix   int64
+	Renew  bool
+}
+
+// TgOrdersOf lists a Telegram customer's latest orders in a seller's shop.
+func (s *Store) TgOrdersOf(ctx context.Context, chat int64, seller string, limit int) []BuyerOrder {
+	rows, err := s.ro.QueryContext(ctx, `SELECT o.id,COALESCE(p.name,''),o.amount,o.status,o.created_unix,o.renew FROM orders o
+LEFT JOIN products p ON p.id=o.product_id WHERE o.buyer=? AND o.seller=? ORDER BY o.id DESC LIMIT ?`, TgBuyer(chat), seller, limit)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	var out []BuyerOrder
+	for rows.Next() {
+		var o BuyerOrder
+		if rows.Scan(&o.ID, &o.Name, &o.Amount, &o.Status, &o.Unix, &o.Renew) == nil {
+			out = append(out, o)
+		}
+	}
+	return out
+}
+
 // TgSetBlocked marks a chat that blocked the bot so broadcasts skip it.
 func (s *Store) TgSetBlocked(ctx context.Context, chat int64) {
 	_, _ = s.db.ExecContext(ctx, `UPDATE tg_users SET blocked=1 WHERE chat_id=?`, chat)

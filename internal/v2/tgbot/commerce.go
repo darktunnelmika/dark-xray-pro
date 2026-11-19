@@ -162,26 +162,82 @@ func (b *Bot) trial(ctx context.Context, chat int64) {
 }
 
 func (b *Bot) invite(ctx context.Context, chat int64) {
+	pol := b.Store.ReferralPolicy(ctx)
+	if b.Seller != "" || !pol.Enabled {
+		b.send(ctx, chat, "دعوت دوستان در این ربات فعال نیست.", homeKB)
+		return
+	}
 	sum, err := b.Store.ReferralSummary(ctx, chat)
 	if err != nil {
 		return
 	}
 	user, _ := b.API.Me(ctx)
 	link := fmt.Sprintf("https://t.me/%s?start=ref_%s", user, sum.Code)
-	pol := b.Store.ReferralPolicy(ctx)
 	var how []string
 	if pol.Percent > 0 {
-		how = append(how, fmt.Sprintf("%d٪ مبلغ استارز هر خرید", pol.Percent))
+		how = append(how, fmt.Sprintf("%s٪ مبلغ هر خرید او", faInt(pol.Percent)))
 	}
 	if pol.Fixed > 0 {
-		how = append(how, fmt.Sprintf("%d⭐ برای هر خرید", pol.Fixed))
+		how = append(how, fmt.Sprintf("%d⭐ برای هر خرید استارزی", pol.Fixed))
 	}
 	first := ""
 	if pol.FirstOnly {
 		first = " (فقط اولین خرید هر دوست)"
 	}
-	b.send(ctx, chat, fmt.Sprintf("👥 <b>دعوت دوستان</b>\n\nهر دوستی که با لینک شما بیاید و خرید کند، %s%s به کیف پول شما اضافه می‌شود و می‌توانید با آن سرویس بخرید.\n\nلینک شما:\n<code>%s</code>\n\nدعوت‌شده‌ها: %d — کل اعتبار گرفته‌شده: %d⭐ — موجودی: %d⭐",
-		strings.Join(how, " + "), first, esc(link), sum.Invited, sum.Earned, sum.Balance), nil)
+	earned := faMoney(sum.EarnedToman) + " تومان"
+	if sum.Earned > 0 {
+		earned += fmt.Sprintf(" + %d⭐", sum.Earned)
+	}
+	b.send(ctx, chat, fmt.Sprintf("👥 <b>دعوت دوستان</b>\n%s\nهر دوستی که با لینک شما بیاید و خرید کند، %s%s به کیف پول شما اضافه می‌شود و می‌توانید با آن سرویس بخرید یا تمدید کنید.\n\nلینک شما (روی آن بزنید تا کپی شود):\n<code>%s</code>\n\nدعوت‌شده‌ها: <b>%s نفر</b>\nدرآمد تا امروز: <b>%s</b>",
+		line, strings.Join(how, " + "), first, esc(link), faInt(int64(sum.Invited)), earned), homeKB)
+}
+
+// account is "my account": who the customer is here and what they have.
+func (b *Bot) account(ctx context.Context, chat int64) {
+	var sb strings.Builder
+	name := b.Store.TgName(ctx, chat)
+	if name == "" {
+		name = "کاربر"
+	}
+	fmt.Fprintf(&sb, "👤 <b>حساب من</b>\n%s\nنام: <b>%s</b>\nشناسهٔ تلگرام: <code>%d</code>\n", line, esc(name), chat)
+	emails, _ := b.clients(ctx, chat)
+	active := 0
+	for _, e := range emails {
+		if c, err := b.Store.ClientByEmail(ctx, e); err == nil && b.state(c).active {
+			active++
+		}
+	}
+	fmt.Fprintf(&sb, "سرویس‌ها: <b>%s</b> (%s فعال)\n", faInt(int64(len(emails))), faInt(int64(active)))
+	fmt.Fprintf(&sb, "کیف پول: <b>%s تومان</b>\n", faMoney(b.Store.TomanBalance(ctx, b.Seller, chat)))
+	if b.Seller == "" {
+		if st := b.Store.WalletBalance(ctx, chat); st > 0 {
+			fmt.Fprintf(&sb, "اعتبار استارز: <b>%d⭐</b>\n", st)
+		}
+		if b.Store.ReferralPolicy(ctx).Enabled {
+			if sum, err := b.Store.ReferralSummary(ctx, chat); err == nil {
+				fmt.Fprintf(&sb, "دعوت‌شده‌ها: <b>%s نفر</b>\n", faInt(int64(sum.Invited)))
+			}
+		}
+	}
+	if orders := b.Store.TgOrdersOf(ctx, chat, b.Seller, 5); len(orders) > 0 {
+		sb.WriteString("\n🧾 <b>سفارش‌های اخیر</b>\n")
+		status := map[string]string{"pending": "⏳ در انتظار", "fulfilled": "✅ تحویل شد", "cancelled": "✖️ لغو شد"}
+		for _, o := range orders {
+			n := strings.TrimLeftFunc(o.Name, func(r rune) bool { return r > 0x2000 || r == ' ' || r == '️' })
+			if n == "" {
+				n = "سرویس"
+			}
+			kind := "خرید"
+			if o.Renew {
+				kind = "تمدید"
+			}
+			fmt.Fprintf(&sb, "#%s · %s %s · %s تومان · %s\n", faInt(o.ID), kind, esc(n), faMoney(o.Amount), status[o.Status])
+		}
+	} else {
+		sb.WriteString("\nهنوز سفارشی ثبت نکرده‌اید.\n")
+	}
+	b.send(ctx, chat, strings.TrimRight(sb.String(), "\n"), &Keyboard{Rows: [][]Button{
+		row(cbBtn("📦 سرویس‌های من", "mine"), cbBtn("👛 کیف پول", "wallet")), row(cbBtn("« منوی اصلی", "home"))}})
 }
 
 func (b *Bot) wallet(ctx context.Context, chat int64) {

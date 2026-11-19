@@ -411,16 +411,19 @@ func (s *Store) FulfillOrder(ctx context.Context, by Principal, id int64) (strin
 		return "", fmt.Errorf("%w: order changed meanwhile", ErrInvalid)
 	}
 	if referrer, reward := s.rewardReferral(ctx, id); reward > 0 && rewardHook != nil {
-		rewardHook(referrer, reward)
+		rewardHook(referrer, reward, 0)
+	} else if referrer, toman := s.rewardReferralToman(ctx, id); toman > 0 && rewardHook != nil {
+		rewardHook(referrer, 0, toman)
 	}
 	return email, nil
 }
 
-// rewardHook tells the bot about referral rewards (to notify the inviter).
-var rewardHook func(referrer, stars int64)
+// rewardHook tells the bot about referral rewards (to notify the inviter):
+// Stars or toman, whichever the order was paid in.
+var rewardHook func(referrer, stars, toman int64)
 
 // SetRewardHook registers the referral notification.
-func SetRewardHook(f func(referrer, stars int64)) { rewardHook = f }
+func SetRewardHook(f func(referrer, stars, toman int64)) { rewardHook = f }
 
 // CancelOrder closes a pending order without touching any client or credit.
 func (s *Store) CancelOrder(ctx context.Context, by Principal, id int64) error {

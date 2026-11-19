@@ -102,6 +102,10 @@ func receiptButtons(id int64) *Keyboard {
 // askCoupon waits for a discount code for a product.
 func (b *Bot) askCoupon(ctx context.Context, chat int64, productID string) {
 	b.setAwait(chat, "coupon:"+productID)
+	if productID == "" { // from the main menu: the code is kept for the next purchase
+		b.send(ctx, chat, "🎟 <b>کد تخفیف</b>\n"+line+"\nکد تخفیف خود را بفرستید؛ روی خرید بعدی شما اعمال می‌شود.", homeKB)
+		return
+	}
 	b.send(ctx, chat, "🎟 <b>کد تخفیف</b>\n"+line+"\nکد تخفیف خود را بفرستید:", backTo("prod:"+productID, "بسته"))
 }
 
@@ -123,12 +127,20 @@ func (b *Bot) takeCoupon(ctx context.Context, chat int64, productID, code string
 				why = t
 			}
 		}
+		if productID == "" {
+			b.send(ctx, chat, "❌ "+why, &Keyboard{Rows: [][]Button{row(cbBtn("🔁 کد دیگر", "cpn:"), cbBtn("« منوی اصلی", "home"))}})
+			return
+		}
 		b.send(ctx, chat, "❌ "+why, &Keyboard{Rows: [][]Button{row(cbBtn("🔁 کد دیگر", "cpn:"+productID), cbBtn("« بسته", "prod:"+productID))}})
 		return
 	}
 	off := faInt(d.Percent) + "٪"
 	if d.Percent == 0 {
 		off = faMoney(d.Amount) + " تومان"
+	}
+	if productID == "" {
+		b.send(ctx, chat, "🎉 کد <b>"+esc(d.Code)+"</b> ثبت شد: "+off+" تخفیف روی خرید بعدی شما (تا یک ساعت).", &Keyboard{Rows: [][]Button{row(cbBtn("🛍 خرید اشتراک", "shop")), row(cbBtn("« منوی اصلی", "home"))}})
+		return
 	}
 	b.send(ctx, chat, "🎉 کد <b>"+esc(d.Code)+"</b> اعمال شد: "+off+" تخفیف روی خرید بعدی شما.", nil)
 	b.showProduct(ctx, chat, productID)

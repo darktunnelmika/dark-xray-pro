@@ -470,6 +470,8 @@ type ReferralSummary struct {
 	Invited int    `json:"invited"`
 	Earned  int64  `json:"earned"`
 	Balance int64  `json:"balance"`
+	// EarnedToman is what invitations brought into the toman wallet.
+	EarnedToman int64 `json:"earned_toman"`
 }
 
 func (s *Store) ReferralSummary(ctx context.Context, chat int64) (ReferralSummary, error) {
@@ -480,6 +482,7 @@ func (s *Store) ReferralSummary(ctx context.Context, chat int64) (ReferralSummar
 	r := ReferralSummary{Code: code, Balance: s.WalletBalance(ctx, chat)}
 	_ = s.ro.QueryRowContext(ctx, `SELECT COUNT(*) FROM tg_referrals WHERE referrer=?`, chat).Scan(&r.Invited)
 	_ = s.ro.QueryRowContext(ctx, `SELECT COALESCE(SUM(delta),0) FROM tg_wallet WHERE chat_id=? AND kind='reward'`, chat).Scan(&r.Earned)
+	_ = s.ro.QueryRowContext(ctx, `SELECT COALESCE(SUM(delta),0) FROM toman_wallet WHERE seller='' AND chat_id=? AND kind='gift' AND note='invited customer bought'`, chat).Scan(&r.EarnedToman)
 	return r, nil
 }
 
@@ -490,10 +493,13 @@ func (s *Store) rewardReferral(ctx context.Context, orderID int64) (int64, int64
 	if !pol.Enabled {
 		return 0, 0
 	}
-	var buyer string
+	var buyer, seller string
 	var stars int64
-	if err := s.ro.QueryRowContext(ctx, `SELECT buyer,stars FROM orders WHERE id=? AND status='fulfilled'`, orderID).Scan(&buyer, &stars); err != nil {
+	if err := s.ro.QueryRowContext(ctx, `SELECT buyer,stars,seller FROM orders WHERE id=? AND status='fulfilled'`, orderID).Scan(&buyer, &stars, &seller); err != nil {
 		return 0, 0
+	}
+	if seller != "" {
+		return 0, 0 // invitations belong to the owner's shop; resellers' sales reward nobody
 	}
 	chat, ok := TgChatOfBuyer(buyer)
 	if !ok {
@@ -521,6 +527,53 @@ func (s *Store) rewardReferral(ctx context.Context, orderID int64) (int64, int64
 		referrer, s.now().Unix(), reward, "reward", orderID, "invited customer bought")
 	if err != nil {
 		return 0, 0 // the unique index makes a second reward for the same order impossible
+	}
+	return referrer, reward
+}
+
+// rewardReferralToman is the same reward for an order paid in toman (card or
+// toman wallet): the percentage of what was paid goes to the inviter's toman
+// wallet in the owner's shop. Once per order.
+func (s *Store) rewardReferralToman(ctx context.Context, orderID int64) (int64, int64) {
+	pol := s.ReferralPolicy(ctx)
+	if !pol.Enabled || pol.Percent <= 0 {
+		return 0, 0
+	}
+	var buyer, seller string
+	var stars, amount int64
+	if err := s.ro.QueryRowContext(ctx, `SELECT buyer,stars,seller,amount FROM orders WHERE id=? AND status='fulfilled'`, orderID).Scan(&buyer, &stars, &seller, &amount); err != nil {
+		return 0, 0
+	}
+	if seller != "" || stars > 0 || amount <= 0 {
+		return 0, 0
+	}
+	chat, ok := TgChatOfBuyer(buyer)
+	if !ok {
+		return 0, 0
+	}
+	var referrer int64
+	if err := s.ro.QueryRowContext(ctx, `SELECT referrer FROM tg_referrals WHERE chat_id=?`, chat).Scan(&referrer); err != nil || referrer == 0 {
+		return 0, 0
+	}
+	if pol.FirstOnly {
+		var earlier int
+		_ = s.ro.QueryRowContext(ctx, `SELECT COUNT(*) FROM orders WHERE buyer=? AND status='fulfilled' AND id<?`, buyer, orderID).Scan(&earlier)
+		if earlier > 0 {
+			return 0, 0
+		}
+	}
+	reward := amount * pol.Percent / 100
+	if reward <= 0 {
+		return 0, 0
+	}
+	r, err := s.db.ExecContext(ctx, `INSERT INTO toman_wallet(seller,chat_id,unix,delta,kind,order_id,note)
+SELECT '',?,?,?,'gift',?,'invited customer bought' WHERE NOT EXISTS (SELECT 1 FROM toman_wallet WHERE seller='' AND chat_id=? AND order_id=? AND kind='gift')`,
+		referrer, s.now().Unix(), reward, orderID, referrer, orderID)
+	if err != nil {
+		return 0, 0
+	}
+	if n, _ := r.RowsAffected(); n != 1 {
+		return 0, 0
 	}
 	return referrer, reward
 }

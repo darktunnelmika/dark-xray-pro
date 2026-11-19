@@ -240,16 +240,21 @@ func (b *Bot) menuKB(ctx context.Context, chat int64, services int, ended []stri
 			small = append(small, cbBtn("🎁 تست رایگان", "trial"))
 		}
 	}
-	small = append(small, cbBtn("📚 آموزش اتصال", "guide"), cbBtn("🌐 وضعیت سرورها", "status"), cbBtn("🔗 افزودن با لینک", "link"))
+	// The wallet is always there when it can be used (to top it up), not
+	// only once it holds something.
+	if b.Seller != "" || b.cardOn(ctx) || b.Store.WalletBalance(ctx, chat) > 0 || b.Store.TomanBalance(ctx, b.Seller, chat) > 0 {
+		small = append(small, cbBtn("👛 کیف پول", "wallet"))
+	}
+	small = append(small, cbBtn("📚 آموزش اتصال", "guide"), cbBtn("🌐 وضعیت سرورها", "status"))
+	// Inviting friends is the owner's shop's; resellers' bots do not have it.
+	if b.Seller == "" && b.Store.ReferralPolicy(ctx).Enabled {
+		small = append(small, cbBtn("👥 دعوت دوستان", "invite"))
+	}
+	small = append(small, cbBtn("🎟 کد تخفیف", "cpn:"), cbBtn("👤 حساب من", "me"))
 	if btn, ok := b.repSaleButton(ctx, chat); ok {
 		small = append(small, btn)
 	}
-	if b.Store.WalletBalance(ctx, chat) > 0 || b.Store.TomanBalance(ctx, b.Seller, chat) > 0 {
-		small = append(small, cbBtn("👛 کیف پول", "wallet"))
-	}
-	if b.Store.ReferralPolicy(ctx).Enabled {
-		small = append(small, cbBtn("👥 دعوت دوستان", "invite"))
-	}
+	small = append(small, cbBtn("🔗 افزودن با لینک", "link"))
 	for i := 0; i < len(small); i += 2 {
 		if i+1 < len(small) {
 			rows = append(rows, row(small[i], small[i+1]))
