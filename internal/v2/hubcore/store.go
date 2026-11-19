@@ -249,10 +249,6 @@ func Open(path string) (*Store, error) {
 		st.Close()
 		return nil, err
 	}
-	if err := st.ensureTgBotUsers(); err != nil {
-		st.Close()
-		return nil, err
-	}
 	if err := st.ensureRouteSchema(); err != nil {
 		st.Close()
 		return nil, err
@@ -290,6 +286,11 @@ func Open(path string) (*Store, error) {
 		return nil, err
 	}
 	if err := st.ensureCommerceSchema(); err != nil { // alters products and orders: after the shop schema
+		st.Close()
+		return nil, err
+	}
+	// Last: its first fill reads tables the steps above create.
+	if err := st.ensureTgBotUsers(); err != nil {
 		st.Close()
 		return nil, err
 	}
