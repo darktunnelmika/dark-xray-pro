@@ -242,6 +242,7 @@ func (b *Bot) onMessage(ctx context.Context, m *Message) {
 	chat := m.Chat.ID
 	name := strings.TrimSpace(m.From.FirstName + " " + m.From.LastName)
 	_ = b.Store.TgTouch(ctx, chat, name, m.From.Username)
+	b.Store.TgTouchBot(ctx, b.Seller, chat)
 	if m.Paid != nil {
 		b.onPaid(ctx, chat, name, m.Paid)
 		return
@@ -257,6 +258,13 @@ func (b *Bot) onMessage(ctx context.Context, m *Message) {
 		if what == "broadcast" {
 			b.takeAwait(chat)
 			b.prepareBroadcast(ctx, chat, text, m.Photo[len(m.Photo)-1].FileID)
+			return
+		}
+	}
+	if len(m.Photo) > 0 && b.peekAwait(chat) == "r:broadcast" {
+		if rep, role := b.repOf(ctx, chat); rep != "" && rep == b.Seller && repCan(role, "shop") {
+			b.takeAwait(chat)
+			b.prepareBroadcastFor(ctx, chat, text, m.Photo[len(m.Photo)-1].FileID, "R:")
 			return
 		}
 	}

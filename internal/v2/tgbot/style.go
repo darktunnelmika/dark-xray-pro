@@ -329,6 +329,12 @@ func (b *Bot) keyAction(ctx context.Context, chat int64, act string) {
 		// A press on the older, larger keyboard swaps it for the current one.
 		defer b.ensureKeyboard(ctx, chat)
 	}
+	if act == "home" && b.Owners[chat] {
+		// The owner's main menu is the management panel; the customer's menu
+		// is one tap away there ("نمای مشتری").
+		b.ownerHome(ctx, chat)
+		return
+	}
 	switch act {
 	case "shop":
 		b.shop(ctx, chat)

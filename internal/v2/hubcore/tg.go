@@ -123,6 +123,87 @@ LEFT JOIN products p ON p.id=o.product_id WHERE o.buyer=? AND o.seller=? ORDER B
 	return out
 }
 
+// ---- who started which bot (for broadcasts) ----
+
+const tgBotUsersSchema = `CREATE TABLE IF NOT EXISTS tg_bot_users (
+  seller TEXT NOT NULL,
+  chat_id INTEGER NOT NULL,
+  first_unix INTEGER NOT NULL,
+  last_unix INTEGER NOT NULL,
+  blocked INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (seller, chat_id)
+);`
+
+// ensureTgBotUsers creates the per-bot list and fills it once: the main bot
+// gets everyone known so far (as before), a reseller's bot the Telegram
+// accounts tied to that reseller's clients, orders and wallets.
+func (s *Store) ensureTgBotUsers() error {
+	if _, err := s.db.Exec(tgBotUsersSchema); err != nil {
+		return err
+	}
+	if s.Setting(context.Background(), "tg_bot_users_filled") == "1" {
+		return nil
+	}
+	for _, q := range []string{
+		`INSERT OR IGNORE INTO tg_bot_users(seller,chat_id,first_unix,last_unix,blocked) SELECT '',chat_id,first_unix,last_unix,blocked FROM tg_users`,
+		`INSERT OR IGNORE INTO tg_bot_users(seller,chat_id,first_unix,last_unix) SELECT c.rep_id,l.chat_id,0,0 FROM tg_links l JOIN clients c ON c.email=l.email WHERE c.rep_id<>'' AND l.chat_id<>0`,
+		`INSERT OR IGNORE INTO tg_bot_users(seller,chat_id,first_unix,last_unix) SELECT seller,CAST(substr(buyer,4) AS INTEGER),0,0 FROM orders WHERE seller<>'' AND buyer LIKE 'tg:%' AND CAST(substr(buyer,4) AS INTEGER)<>0`,
+		`INSERT OR IGNORE INTO tg_bot_users(seller,chat_id,first_unix,last_unix) SELECT DISTINCT seller,chat_id,0,0 FROM toman_wallet WHERE seller<>'' AND chat_id<>0`,
+	} {
+		if _, err := s.db.Exec(q); err != nil {
+			return err
+		}
+	}
+	return s.SetSetting(context.Background(), "tg_bot_users_filled", "1")
+}
+
+// TgTouchBot notes that a chat wrote to a seller's bot ("" = the main bot).
+func (s *Store) TgTouchBot(ctx context.Context, seller string, chat int64) {
+	now := s.now().Unix()
+	_, _ = s.db.ExecContext(ctx, `INSERT INTO tg_bot_users(seller,chat_id,first_unix,last_unix) VALUES(?,?,?,?)
+ON CONFLICT(seller,chat_id) DO UPDATE SET last_unix=excluded.last_unix, blocked=0`, seller, chat, now, now)
+}
+
+// TgBotChats lists the chats of one bot that can receive a broadcast.
+func (s *Store) TgBotChats(ctx context.Context, seller string) []int64 {
+	rows, err := s.ro.QueryContext(ctx, `SELECT chat_id FROM tg_bot_users WHERE seller=? AND blocked=0 ORDER BY chat_id`, seller)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	var out []int64
+	for rows.Next() {
+		var c int64
+		if rows.Scan(&c) == nil {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// TgSetBlockedBot marks a chat that blocked one bot so its broadcasts skip it.
+func (s *Store) TgSetBlockedBot(ctx context.Context, seller string, chat int64) {
+	_, _ = s.db.ExecContext(ctx, `UPDATE tg_bot_users SET blocked=1 WHERE seller=? AND chat_id=?`, seller, chat)
+}
+
+// TgAllRepChats lists the Telegram chats of every enabled reseller (the
+// owner's audience "resellers").
+func (s *Store) TgAllRepChats(ctx context.Context) []int64 {
+	rows, err := s.ro.QueryContext(ctx, `SELECT tg_chat FROM reps WHERE enabled=1 AND tg_chat<>0 ORDER BY tg_chat`)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	var out []int64
+	for rows.Next() {
+		var c int64
+		if rows.Scan(&c) == nil {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
 // TgSetBlocked marks a chat that blocked the bot so broadcasts skip it.
 func (s *Store) TgSetBlocked(ctx context.Context, chat int64) {
 	_, _ = s.db.ExecContext(ctx, `UPDATE tg_users SET blocked=1 WHERE chat_id=?`, chat)

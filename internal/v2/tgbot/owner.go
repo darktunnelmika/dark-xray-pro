@@ -315,16 +315,23 @@ type bcDraft struct {
 	audience    string
 	chats       []int64
 	at          int64               // scheduled time (unix), while scheduling
+	cb          string              // button prefix of who runs it: "a:" (owner) or "R:" (reseller)
 	title       string              // report heading; default "پیام همگانی"
 	done        func(result string) // scheduled runs record their outcome
 }
 
-var audienceName = map[string]string{"all": "همه", "active": "دارای سرویس فعال", "expiring": "رو به انقضا (۳ روز)", "expired": "منقضی یا حجم‌تمام", "none": "بدون سرویس"}
+var audienceName = map[string]string{"all": "همه", "active": "دارای سرویس فعال", "expiring": "رو به انقضا (۳ روز)", "expired": "منقضی یا حجم‌تمام", "none": "بدون سرویس", "reps": "نماینده‌ها"}
 
 var buttonRE = regexp.MustCompile(`\[([^\]]{1,60})\]\((https?://[^\s)]+)\)\s*$`)
 
 func (b *Bot) prepareBroadcast(ctx context.Context, chat int64, text, photo string) {
-	d := &bcDraft{text: text, photo: photo}
+	b.prepareBroadcastFor(ctx, chat, text, photo, "a:")
+}
+
+// prepareBroadcastFor starts a broadcast draft for the owner ("a:") or for a
+// reseller in their own bot ("R:").
+func (b *Bot) prepareBroadcastFor(ctx context.Context, chat int64, text, photo, cb string) {
+	d := &bcDraft{text: text, photo: photo, cb: cb}
 	if m := buttonRE.FindStringSubmatch(text); m != nil {
 		d.button = &Button{Text: m[1], URL: m[2]}
 		d.text = strings.TrimSpace(strings.TrimSuffix(text, m[0]))
@@ -343,17 +350,35 @@ func (b *Bot) prepareBroadcast(ctx context.Context, chat int64, text, photo stri
 }
 
 func (b *Bot) askAudience(ctx context.Context, chat int64) {
-	kb := &Keyboard{}
-	for _, k := range []string{"all", "active", "expiring", "expired", "none"} {
-		kb.Rows = append(kb.Rows, []Button{{Text: fmt.Sprintf("%s (%d)", audienceName[k], len(b.audience(ctx, k))), Data: "a:bca:" + k}})
+	b.mu.Lock()
+	d := b.draft[chat]
+	b.mu.Unlock()
+	cb := "a:"
+	if d != nil && d.cb != "" {
+		cb = d.cb
 	}
-	kb.Rows = append(kb.Rows, []Button{{Text: "✖️ لغو", Data: "a:bcno"}})
+	kinds := []string{"all", "active", "expiring", "expired", "none"}
+	if cb == "a:" && b.Seller == "" {
+		kinds = append(kinds, "reps") // the owner can also write to the resellers
+	}
+	kb := &Keyboard{}
+	for _, k := range kinds {
+		kb.Rows = append(kb.Rows, []Button{{Text: fmt.Sprintf("%s (%d)", audienceName[k], len(b.audience(ctx, k))), Data: cb + "bca:" + k}})
+	}
+	kb.Rows = append(kb.Rows, []Button{{Text: "✖️ لغو", Data: cb + "bcno"}})
 	b.send(ctx, chat, "👥 پیام برای چه کسانی ارسال شود؟", kb)
 }
 
 // audience resolves a target group to bot chats that have not blocked the bot.
 func (b *Bot) audience(ctx context.Context, kind string) []int64 {
-	chats, _ := b.Store.TgChats(ctx)
+	if kind == "reps" {
+		if b.Seller != "" {
+			return nil
+		}
+		return b.Store.TgAllRepChats(ctx)
+	}
+	// Only people who started this very bot can get a message from it.
+	chats := b.Store.TgBotChats(ctx, b.Seller)
 	if kind == "all" || kind == "" {
 		return chats
 	}
@@ -363,6 +388,9 @@ func (b *Bot) audience(ctx context.Context, kind string) []int64 {
 	state := map[int64]string{}
 	rank := map[string]int{"expired": 1, "expiring": 2, "active": 3}
 	for _, c := range clients {
+		if b.Seller != "" && c.RepID != b.Seller {
+			continue // a reseller's bot knows only that reseller's services
+		}
 		st := "active"
 		switch {
 		case !c.Enabled || c.Remaining == 0 || c.EffectiveUntil > 0 && c.EffectiveUntil <= now:
@@ -423,8 +451,8 @@ func (b *Bot) broadcast(ctx context.Context, owner int64, d *bcDraft) {
 			sent++
 		} else {
 			failed++
-			if isBlocked(err) {
-				b.Store.TgSetBlocked(ctx, c)
+			if isBlocked(err) && d.audience != "reps" {
+				b.Store.TgSetBlockedBot(ctx, b.Seller, c)
 			}
 		}
 		time.Sleep(40 * time.Millisecond) // under Telegram's 30 messages/second
@@ -444,7 +472,11 @@ func (b *Bot) broadcast(ctx context.Context, owner int64, d *bcDraft) {
 	if stopped > 0 {
 		msg += fmt.Sprintf(" %d نفر به‌خاطر توقف ارسال نشدند.", stopped)
 	}
-	b.send(ctx, owner, msg, &Keyboard{Rows: [][]Button{back("a:home")}})
+	home := "a:home"
+	if d.cb == "R:" {
+		home = "R:home"
+	}
+	b.send(ctx, owner, msg, &Keyboard{Rows: [][]Button{back(home)}})
 }
 
 func (b *Bot) nodesView(ctx context.Context, chat int64) {

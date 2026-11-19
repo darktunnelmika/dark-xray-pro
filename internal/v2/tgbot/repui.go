@@ -173,6 +173,10 @@ func (b *Bot) repHome(ctx context.Context, chat int64, rep, role string) {
 	if btn, ok := b.repSaleButton(ctx, chat); ok {
 		kb.Rows = append(kb.Rows, []Button{btn})
 	}
+	if repCan(role, "shop") && b.Seller == rep {
+		// In the reseller's own bot: a message to everyone who started it.
+		kb.Rows = append(kb.Rows, []Button{repBtn("📣 پیام همگانی", "bc")})
+	}
 	kb.Rows = append(kb.Rows, []Button{repBtn("🛍 حالت مشتری", "cust")})
 	b.send(ctx, chat, text, kb)
 }
@@ -206,6 +210,15 @@ func (b *Bot) repCallback(ctx context.Context, chat int64, data string) bool {
 		b.takeAwait(chat)
 		b.setDraft(chat, nil)
 		b.repHome(ctx, chat, rep, role)
+	case "bc", "bca", "bcok", "bcno", "bcstop", "bcaud": // a broadcast in the reseller's own bot
+		if deny("shop") {
+			return true
+		}
+		if b.Seller != rep {
+			b.send(ctx, chat, "پیام همگانی فقط از ربات اختصاصی خودتان ارسال می‌شود.", repBackKB)
+			return true
+		}
+		b.repBroadcast(ctx, chat, parts[0], arg(1))
 	case "trial": // R:trial[:on|off|gb|h] — this reseller's free trial
 		if deny("shop") {
 			return true
@@ -713,6 +726,13 @@ func (b *Bot) repAdmins(ctx context.Context, chat int64, rep string) {
 
 // repInput takes typed text the reseller UI asked for.
 func (b *Bot) repInput(ctx context.Context, chat int64, rep, role, what, text string) bool {
+	if what == "r:broadcast" {
+		if b.Seller != rep || !repCan(role, "shop") {
+			return false
+		}
+		b.prepareBroadcastFor(ctx, chat, text, "", "R:")
+		return true
+	}
 	// A trial prompt belongs to this reseller only.
 	if strings.HasPrefix(what, "r:trialgb:"+rep+"|") || strings.HasPrefix(what, "r:trialh:"+rep+"|") {
 		return repCan(role, "shop") && b.trialInput(ctx, chat, what, text)
@@ -829,4 +849,60 @@ func (b *Bot) ensureRepKeyboard(ctx context.Context, chat int64) {
 	}
 	b.setRepMode(ctx, chat, true)
 	_ = b.Store.SetSetting(ctx, key, "1")
+}
+
+// repBroadcast runs a reseller's broadcast in their own bot: text or photo,
+// a choice of audience among that bot's users, a preview, then sending.
+func (b *Bot) repBroadcast(ctx context.Context, chat int64, act, arg string) {
+	b.mu.Lock()
+	d := b.draft[chat]
+	b.mu.Unlock()
+	switch act {
+	case "bc":
+		b.setAwait(chat, "r:broadcast")
+		b.send(ctx, chat, "📣 متن پیام همگانی را بفرستید (یا یک عکس با کپشن).\nبرای دکمهٔ لینک، آخرین خط را این‌طور بنویسید:\n<code>[متن دکمه](https://example.com)</code>\n\nپیام برای کسانی می‌رود که همین ربات را استارت کرده‌اند.", repBackKB)
+	case "bcaud":
+		if d != nil {
+			b.askAudience(ctx, chat)
+		}
+	case "bca":
+		if d == nil || d.cb != "R:" {
+			b.send(ctx, chat, "پیش‌نویسی نیست.", repBackKB)
+			return
+		}
+		if _, ok := audienceName[arg]; !ok || arg == "reps" {
+			return
+		}
+		d.audience = arg
+		d.chats = b.audience(ctx, arg)
+		_ = b.sendDraft(ctx, chat, d)
+		b.send(ctx, chat, fmt.Sprintf("👆 پیش‌نمایش. برای «%s» یعنی %d نفر ارسال شود؟", audienceName[arg], len(d.chats)), &Keyboard{Rows: [][]Button{
+			{{Text: "✅ ارسال", Data: "R:bcok"}, {Text: "تغییر مخاطب", Data: "R:bcaud"}},
+			{{Text: "✖️ لغو", Data: "R:bcno"}}}})
+	case "bcok":
+		b.mu.Lock()
+		delete(b.draft, chat)
+		b.bcStop = false
+		b.mu.Unlock()
+		if d == nil || d.cb != "R:" || d.audience == "" {
+			b.send(ctx, chat, "پیش‌نویسی نیست.", repBackKB)
+			return
+		}
+		if len(d.chats) == 0 {
+			b.send(ctx, chat, "کسی در این گروه نیست.", repBackKB)
+			return
+		}
+		go b.broadcast(context.WithoutCancel(ctx), chat, d)
+		b.send(ctx, chat, "📣 ارسال شروع شد… گزارش پس از پایان می‌آید.", &Keyboard{Rows: [][]Button{{{Text: "⏹ توقف ارسال", Data: "R:bcstop"}}}})
+	case "bcstop":
+		b.mu.Lock()
+		b.bcStop = true
+		b.mu.Unlock()
+		b.send(ctx, chat, "⏹ ادامهٔ ارسال متوقف می‌شود.", repBackKB)
+	case "bcno":
+		b.mu.Lock()
+		delete(b.draft, chat)
+		b.mu.Unlock()
+		b.send(ctx, chat, "لغو شد.", repBackKB)
+	}
 }
