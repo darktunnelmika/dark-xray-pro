@@ -212,3 +212,22 @@ func (b *Bot) joinInput(ctx context.Context, chat int64, what, text string) bool
 	b.joinScreen(ctx, chat, seller, cb, home)
 	return true
 }
+
+// wantAfterJoin remembers what a customer was doing when asked to join, so
+// "عضو شدم" can carry on with it.
+func (b *Bot) wantAfterJoin(chat int64, what string) {
+	b.mu.Lock()
+	if b.want == nil {
+		b.want = map[int64]string{}
+	}
+	b.want[chat] = what
+	b.mu.Unlock()
+}
+
+func (b *Bot) takeWant(chat int64) string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	w := b.want[chat]
+	delete(b.want, chat)
+	return w
+}

@@ -157,8 +157,19 @@ func (b *Bot) trial(ctx context.Context, chat int64) {
 	if size == "نامحدود" {
 		size = "حجم نامحدود"
 	}
-	b.send(ctx, chat, fmt.Sprintf("🎁 تست رایگان شما فعال شد: %s برای %d ساعت.", size, p.Hours), nil)
+	b.send(ctx, chat, fmt.Sprintf("🎁 تست رایگان شما فعال شد: %s برای %s.", size, trialSpan(p.Hours)), nil)
 	b.sendSub(ctx, chat, email)
+}
+
+// remindTrials tells the owners of trials that end within a day, once, and
+// offers the shop.
+func (b *Bot) remindTrials(ctx context.Context) {
+	for _, e := range b.Store.TrialsEnding(ctx, b.Seller) {
+		b.Store.TrialReminded(ctx, b.Seller, e.Chat)
+		left := (e.Expires - b.now().Unix() + 3599) / 3600
+		b.send(ctx, e.Chat, fmt.Sprintf("⏳ <b>تست رایگان شما رو به پایان است</b>\n%s\nحدود <b>%s ساعت</b> دیگر تمام می‌شود. اگر از سرعت و کیفیت راضی بودید، با خرید اشتراک همین حالا بدون قطعی ادامه دهید.", line, faInt(left)),
+			&Keyboard{Rows: [][]Button{row(cbBtn("🛍 خرید اشتراک", "shop")), row(cbBtn("📦 سرویس‌های من", "mine"), cbBtn("« منوی اصلی", "home"))}})
+	}
 }
 
 func (b *Bot) invite(ctx context.Context, chat int64) {

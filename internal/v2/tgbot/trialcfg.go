@@ -27,6 +27,13 @@ func (b *Bot) trialScreen(ctx context.Context, chat int64, seller, cb, home stri
 	if seller != "" {
 		text += "\n\nحجم هر تست از اعتبار شما کم می‌شود."
 	}
+	if st := b.Store.TrialStats(ctx, seller); st.Taken > 0 {
+		text += fmt.Sprintf("\n\n📊 <b>تا امروز</b>\nگرفته‌اند: <b>%s نفر</b> (%s تست هنوز فعال)\nوصل شده‌اند: <b>%s نفر</b>\nبعدش خرید کرده‌اند: <b>%s نفر</b>",
+			faInt(int64(st.Taken)), faInt(int64(st.Running)), faInt(int64(st.Connected)), faInt(int64(st.Bought)))
+	}
+	if user := b.Store.BotUsernameFor(ctx, seller); user != "" {
+		text += "\n\n🔗 لینک مستقیم تست برای کانال:\n<code>https://t.me/" + esc(user) + "?start=trial</code>"
+	}
 	b.send(ctx, chat, text, &Keyboard{Rows: [][]Button{
 		{toggle},
 		{{Text: "📦 تغییر حجم", Data: cb + ":gb"}, {Text: "⏱ تغییر مدت", Data: cb + ":h"}},

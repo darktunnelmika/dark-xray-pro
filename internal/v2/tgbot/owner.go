@@ -64,6 +64,11 @@ func (b *Bot) ownerHome(ctx context.Context, chat int64) {
 	if len(pending) > 0 {
 		orders = fmt.Sprintf("\n🛒 سفارش در انتظار: <b>%s</b>", faInt(int64(len(pending))))
 	}
+	if b.Store.TrialPolicyFor(ctx, b.Seller).Enabled {
+		if st := b.Store.TrialStats(ctx, b.Seller); st.Taken > 0 {
+			orders += fmt.Sprintf("\n🎁 تست رایگان: <b>%s</b> گرفته · %s وصل · %s خرید", faInt(int64(st.Taken)), faInt(int64(st.Connected)), faInt(int64(st.Bought)))
+		}
+	}
 	b.send(ctx, chat, fmt.Sprintf("🛡 <b>پنل مدیریت Dark VPN</b>\n%s\n📡 نودها   <code>%s</code> %s/%s\n👥 فعال    <code>%s</code> %s/%s\n🟢 آنلاین الان: <b>%s</b>\n📶 ترافیک امروز: <b>%s</b>%s%s\n\n<i>%s</i>",
 		line, bar(share(o.NodesOnline, o.Nodes)), faInt(int64(o.NodesOnline)), faInt(int64(o.Nodes)),
 		bar(share(o.ClientsActive, o.Clients)), faInt(int64(o.ClientsActive)), faInt(int64(o.Clients)),

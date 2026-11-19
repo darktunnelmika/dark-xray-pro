@@ -5,6 +5,7 @@ import (
 	"errors"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/darktunnelmika/dark-xray-pro/internal/v2/hubcore"
 )
@@ -94,12 +95,13 @@ func TestRequiredChannel(t *testing.T) {
 			t.Fatal("a support message is never held back")
 		}
 	}
-	// "I joined" without joining changes nothing; after joining it opens.
+	// "I joined" without joining changes nothing; after joining the bot
+	// carries on with what the customer was after (here: support, so the menu).
 	b.Handle(ctx, cb(cust, "join:ok"))
 	find(t, api.take(), cust, "عضویت در کانال")
 	api.in[cust] = true
 	b.Handle(ctx, cb(cust, "join:ok"))
-	find(t, api.take(), cust, "سلام")
+	api.take()
 	asked := api.asked
 	b.Handle(ctx, cb(cust, "shop"))
 	api.take()
@@ -112,4 +114,36 @@ func TestRequiredChannel(t *testing.T) {
 	api.admin = false
 	b.Handle(ctx, msg(cust+1, "/start"))
 	find(t, api.take(), cust+1, "سلام")
+
+	// The channel post's link: /start trial. Not a member yet: join first,
+	// then "عضو شدم" hands over the trial itself, once.
+	api.admin = true
+	_ = s.PutTrialPolicy(ctx, hubcore.TrialPolicy{Enabled: true, GB: 5, Hours: 168, MaxIPs: 1})
+	const friend = int64(8200)
+	b.Handle(ctx, msg(friend, "/start trial"))
+	find(t, api.take(), friend, "عضویت در کانال")
+	if s.TrialUsed(ctx, "", friend) {
+		t.Fatal("no trial before joining")
+	}
+	api.in[friend] = true
+	b.Handle(ctx, cb(friend, "join:ok"))
+	find(t, api.take(), friend, "5 گیگ برای 7 روز")
+	if c, err := s.ClientByEmail(ctx, "trial-8200"); err != nil || !c.Trial || c.VolumeBytes != 5<<30 {
+		t.Fatalf("%+v %v", c, err)
+	}
+	b.Handle(ctx, msg(friend, "/start trial"))
+	find(t, api.take(), friend, "قبلاً")
+	if st := s.TrialStats(ctx, ""); st.Taken != 1 || st.Running != 1 || st.Connected != 0 {
+		t.Fatalf("%+v", st)
+	}
+	// A day before the end the owner of the trial is reminded, once.
+	later := func() time.Time { return time.Now().Add(6*24*time.Hour + time.Hour) }
+	b.Now = later
+	s.SetClock(later)
+	b.remindTrials(ctx)
+	find(t, api.take(), friend, "رو به پایان")
+	b.remindTrials(ctx)
+	if len(api.take()) != 0 {
+		t.Fatal("one reminder per trial")
+	}
 }

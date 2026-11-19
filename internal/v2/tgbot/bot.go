@@ -42,6 +42,7 @@ type Bot struct {
 	draft      map[int64]*bcDraft         // owner chat -> broadcast being prepared
 	bcStop     bool
 	joined     map[int64]time.Time // chats confirmed in the required channels, until when
+	want       map[int64]string    // what a chat was after when the channel gate stopped it
 	lastNotify time.Time
 	nodeState  map[string]bool
 	tunState   map[string]bool // node|tunnel -> up (alerts on change)
@@ -164,6 +165,7 @@ func (b *Bot) Tick(ctx context.Context) {
 		b.repAlerts(ctx)
 		b.deliverTickets(ctx)
 		b.deliverReminders(ctx)
+		b.remindTrials(ctx)
 		return
 	}
 	b.syncMenuButton(ctx)
@@ -178,6 +180,7 @@ func (b *Bot) Tick(ctx context.Context) {
 	b.runScheduled(ctx)
 	b.deliverTickets(ctx)
 	b.deliverReminders(ctx)
+	b.remindTrials(ctx)
 }
 
 func (b *Bot) send(ctx context.Context, chat int64, text string, kb *Keyboard) int64 {
@@ -397,6 +400,12 @@ func (b *Bot) onMessage(ctx context.Context, m *Message) {
 	// support waits until they have joined.
 	if act := keyboardAction(text); act != "support" && act != "mine" && b.peekAwait(chat) != "support" &&
 		!strings.HasPrefix(text, "/support") && !strings.HasPrefix(text, "/my") && b.joinPrompt(ctx, chat) {
+		switch {
+		case text == "/start trial":
+			b.wantAfterJoin(chat, "trial")
+		case act == "shop" || text == "/buy":
+			b.wantAfterJoin(chat, "shop")
+		}
 		return
 	}
 	// Buttons of the bottom keyboard (ours, or the old panel's, still on
@@ -409,6 +418,11 @@ func (b *Bot) onMessage(ctx context.Context, m *Message) {
 	cmd = strings.SplitN(cmd, "@", 2)[0]
 	switch cmd {
 	case "/start", "/menu":
+		if arg == "trial" { // deep link for a channel post: straight to the free trial
+			b.trial(ctx, chat)
+			b.ensureKeyboard(ctx, chat)
+			return
+		}
 		if arg != "" { // deep link: /start <sub token>
 			b.link(ctx, chat, arg)
 			return
@@ -760,12 +774,23 @@ func (b *Bot) onCallback(ctx context.Context, q *CallbackQuery) {
 		delete(b.joined, chat)
 		b.mu.Unlock()
 		if !b.joinPrompt(ctx, chat) {
-			b.menu(ctx, chat)
+			// Go on with what they came for, not back to the start.
+			switch b.takeWant(chat) {
+			case "trial":
+				b.trial(ctx, chat)
+			case "shop":
+				b.shop(ctx, chat)
+			case "P:buy":
+				b.repSaleList(ctx, chat)
+			default:
+				b.menu(ctx, chat)
+			}
 			b.ensureKeyboard(ctx, chat)
 		}
 		return
 	}
 	if !joinFree(verb) && b.joinPrompt(ctx, chat) {
+		b.wantAfterJoin(chat, q.Data)
 		return
 	}
 	if b.repSaleCallback(ctx, q) {

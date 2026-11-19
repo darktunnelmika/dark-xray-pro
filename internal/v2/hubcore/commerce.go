@@ -75,6 +75,12 @@ func (s *Store) ensureCommerceSchema() error {
 			return err
 		}
 	}
+	// What became of a trial: did its owner ever connect, were they reminded.
+	for _, c := range [][2]string{{"connected", "INTEGER NOT NULL DEFAULT 0"}, {"reminded", "INTEGER NOT NULL DEFAULT 0"}} {
+		if err := s.addColumn("trial_claims", c[0], c[1]); err != nil {
+			return err
+		}
+	}
 	// Trials taken before each seller had its own count belong to the owner.
 	if _, err := s.db.Exec(`INSERT OR IGNORE INTO trial_claims(seller,chat_id,email,unix) SELECT '',chat_id,email,unix FROM tg_trials`); err != nil {
 		return err
@@ -648,12 +654,69 @@ func (s *Store) TrialUsed(ctx context.Context, seller string, chat int64) bool {
 	return n > 0
 }
 
+// TrialStats is how a seller's trial campaign is going.
+type TrialStats struct {
+	Taken     int `json:"taken"`     // accounts that took a trial
+	Connected int `json:"connected"` // of those, how many ever used it
+	Bought    int `json:"bought"`    // of those, how many bought or renewed afterwards
+	Running   int `json:"running"`   // trials still valid now
+}
+
+// noteTrialUse records which trials were ever used, before the clients go.
+func (s *Store) noteTrialUse(ctx context.Context) {
+	_, _ = s.db.ExecContext(ctx, `UPDATE trial_claims SET connected=1 WHERE connected=0 AND email IN
+(SELECT email FROM client_usage WHERE up+down>0)`)
+}
+
+func (s *Store) TrialStats(ctx context.Context, seller string) TrialStats {
+	s.noteTrialUse(ctx)
+	var st TrialStats
+	_ = s.ro.QueryRowContext(ctx, `SELECT COUNT(*), COALESCE(SUM(connected),0) FROM trial_claims WHERE seller=?`, seller).Scan(&st.Taken, &st.Connected)
+	_ = s.ro.QueryRowContext(ctx, `SELECT COUNT(*) FROM trial_claims t WHERE t.seller=? AND EXISTS
+(SELECT 1 FROM orders o WHERE o.buyer='tg:'||t.chat_id AND o.seller=t.seller AND o.status='fulfilled' AND o.created_unix>=t.unix)`, seller).Scan(&st.Bought)
+	_ = s.ro.QueryRowContext(ctx, `SELECT COUNT(*) FROM trial_claims t JOIN clients c ON c.email=t.email WHERE t.seller=? AND c.trial=1 AND c.enabled=1 AND c.expires_unix>?`, seller, s.now().Unix()).Scan(&st.Running)
+	return st
+}
+
+// TrialEnding is a trial about to end whose owner has not been reminded.
+type TrialEnding struct {
+	Chat    int64
+	Email   string
+	Expires int64
+}
+
+// TrialsEnding lists a seller's trials that end within the next day and
+// were not reminded yet.
+func (s *Store) TrialsEnding(ctx context.Context, seller string) []TrialEnding {
+	now := s.now().Unix()
+	rows, err := s.ro.QueryContext(ctx, `SELECT t.chat_id,t.email,c.expires_unix FROM trial_claims t JOIN clients c ON c.email=t.email
+WHERE t.seller=? AND t.reminded=0 AND c.trial=1 AND c.enabled=1 AND c.expires_unix>? AND c.expires_unix<=?`, seller, now, now+86400)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	var out []TrialEnding
+	for rows.Next() {
+		var e TrialEnding
+		if rows.Scan(&e.Chat, &e.Email, &e.Expires) == nil {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+// TrialReminded marks a trial's reminder as sent.
+func (s *Store) TrialReminded(ctx context.Context, seller string, chat int64) {
+	_, _ = s.db.ExecContext(ctx, `UPDATE trial_claims SET reminded=1 WHERE seller=? AND chat_id=?`, seller, chat)
+}
+
 // trialKeepDays is how long an ended trial stays listed before it is removed.
 const trialKeepDays = 3
 
 // PurgeTrials deletes trial clients that ended more than trialKeepDays ago.
 // The claim stays, so the same Telegram account cannot take another one.
 func (s *Store) PurgeTrials(ctx context.Context) int {
+	s.noteTrialUse(ctx) // before the clients and their usage are gone
 	rows, err := s.ro.QueryContext(ctx, `SELECT email, rep_id FROM clients WHERE trial=1 AND expires_unix>0 AND expires_unix<?`, s.now().Unix()-trialKeepDays*86400)
 	if err != nil {
 		return 0
