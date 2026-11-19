@@ -28,8 +28,6 @@ type photoUploader interface {
 	UploadPhoto(ctx context.Context, chat int64, name string, img []byte, caption string, kb *Keyboard) (string, error)
 }
 
-const menuCards = 3 // services shown as cards; the rest are counted
-
 // sizeShort is size without needless decimals: "۴۰ گیگ", not "۴۰٫۰۰ گیگ".
 func sizeShort(n int64) string {
 	return strings.NewReplacer("٫۰۰", "", ".00", "").Replace(size(n))
@@ -76,11 +74,10 @@ func (b *Bot) planTitle(ctx context.Context, c hubcore.ClientView) string {
 func (b *Bot) menuCard(ctx context.Context, c hubcore.ClientView, showName bool) (card string, ended bool) {
 	now := b.now().Unix()
 	var sb strings.Builder
-	fmt.Fprintf(&sb, "<b>📦 %s</b>", esc(b.planTitle(ctx, c)))
-	if showName {
-		fmt.Fprintf(&sb, " — <code>%s</code>", esc(c.Email))
+	fmt.Fprintf(&sb, "<b>📦 %s</b>\n", esc(b.planTitle(ctx, c)))
+	if showName { // several services: the technical name tells them apart, on its own line
+		fmt.Fprintf(&sb, "<code>%s</code>\n", esc(shortName(c.Email)))
 	}
-	sb.WriteString("\n")
 	used := c.Usage.Up + c.Usage.Down
 	switch {
 	case !c.Enabled:
@@ -119,6 +116,53 @@ func (b *Bot) menuCard(ctx context.Context, c hubcore.ClientView, showName bool)
 	return sb.String(), false
 }
 
+// shortName keeps a long technical service name on one line.
+func shortName(email string) string {
+	r := []rune(email)
+	if len(r) <= 26 {
+		return email
+	}
+	return string(r[:25]) + "…"
+}
+
+// menuLine is one service in a single line, for customers with several:
+// state, plan, what is left.
+func (b *Bot) menuLine(ctx context.Context, c hubcore.ClientView) (line string, ended bool) {
+	now := b.now().Unix()
+	title := esc(b.planTitle(ctx, c))
+	switch {
+	case !c.Enabled:
+		return "⛔ " + title + " · غیرفعال", false
+	case c.Remaining == 0:
+		return "🔴 " + title + " · حجم تمام شد", true
+	case c.EffectiveUntil > 0 && c.EffectiveUntil <= now:
+		return "🔴 " + title + " · زمان تمام شد", true
+	}
+	parts := []string{title}
+	if c.VolumeBytes > 0 {
+		left := c.VolumeBytes - c.Usage.Up - c.Usage.Down
+		if left < 0 {
+			left = 0
+		}
+		parts = append(parts, "<b>"+sizeShort(left)+"</b> مانده")
+	}
+	icon := "🟢"
+	switch {
+	case c.EffectiveUntil > now:
+		if left := c.EffectiveUntil - now; left >= 86400 {
+			parts = append(parts, faInt((left+86399)/86400)+" روز")
+		} else {
+			parts = append(parts, faInt((left+3599)/3600)+" ساعت")
+		}
+	case c.DurationSeconds > 0 && c.Usage.FirstSeen == 0:
+		icon = "🆕"
+		parts = append(parts, "هنوز وصل نشده")
+	}
+	return icon + " " + strings.Join(parts, " · "), false
+}
+
+const menuLines = 6 // services listed one per line before the rest are counted
+
 func (b *Bot) menu(ctx context.Context, chat int64) {
 	var sb strings.Builder
 	if name := b.Store.TgName(ctx, chat); name != "" {
@@ -134,17 +178,37 @@ func (b *Bot) menu(ctx context.Context, chat int64) {
 		}
 	}
 	var ended []string
-	for i, c := range views {
-		card, end := b.menuCard(ctx, c, len(views) > 1)
-		if end {
-			ended = append(ended, c.Email)
-		}
-		if i < menuCards {
+	if len(views) <= 2 {
+		// One or two services: a full card each.
+		for _, c := range views {
+			card, end := b.menuCard(ctx, c, len(views) > 1)
+			if end {
+				ended = append(ended, c.Email)
+			}
 			sb.WriteString("<blockquote>" + card + "</blockquote>\n")
 		}
-	}
-	if n := len(views) - menuCards; n > 0 {
-		fmt.Fprintf(&sb, "و %s سرویس دیگر در «سرویس‌های من».\n", faInt(int64(n)))
+	} else {
+		// Several: one line each, the ones that need renewing first.
+		var done, live []string
+		for _, c := range views {
+			l, end := b.menuLine(ctx, c)
+			if end {
+				ended = append(ended, c.Email)
+				done = append(done, l)
+			} else {
+				live = append(live, l)
+			}
+		}
+		lines := append(done, live...)
+		more := 0
+		if len(lines) > menuLines {
+			more = len(lines) - menuLines
+			lines = lines[:menuLines]
+		}
+		fmt.Fprintf(&sb, "📦 <b>%s سرویس</b> (%s نیاز به تمدید)\n<blockquote>%s</blockquote>\n", faInt(int64(len(views))), faInt(int64(len(ended))), strings.Join(lines, "\n"))
+		if more > 0 {
+			fmt.Fprintf(&sb, "و %s سرویس دیگر در «سرویس‌های من».\n", faInt(int64(more)))
+		}
 	}
 	if len(views) == 0 {
 		if w := b.Store.Setting(ctx, "tg_welcome"); w != "" {

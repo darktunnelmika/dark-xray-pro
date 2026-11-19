@@ -75,4 +75,22 @@ func TestMenuLeadsWithWhatTheCustomerNeeds(t *testing.T) {
 	if first(m) != "🔄 تمدید سرویس" || m.kb.Rows[0][0].Data != "rnw:"+email || !strings.Contains(m.text, "تمام شد") {
 		t.Fatalf("ended service: %q %+v", m.text, m.kb.Rows)
 	}
+	// With several services the menu lists one line each, renewals first,
+	// instead of a wall of cards.
+	for i := 0; i < 2; i++ {
+		id, err := s.CreateOrder(ctx, hubcore.Principal{User: "o", Role: "owner"}, "p40", hubcore.TgBuyer(cust), "", "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.FulfillOrder(ctx, hubcore.Principal{User: "o", Role: "owner"}, id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	m = menu()
+	if !strings.Contains(m.text, "۳ سرویس") || !strings.Contains(m.text, "۱ نیاز به تمدید") || strings.Contains(m.text, "▰") || strings.Contains(m.text, "<code>") {
+		t.Fatalf("several services: %q", m.text)
+	}
+	if strings.Index(m.text, "🔴") > strings.Index(m.text, "🟢") && strings.Contains(m.text, "🟢") {
+		t.Fatalf("ended services come first: %q", m.text)
+	}
 }
