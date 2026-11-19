@@ -111,7 +111,9 @@ func TestBroadcastStaysInsideEachBot(t *testing.T) {
 	find(t, mainAPI.take(), ownerID, "پنل مدیریت")
 }
 
-func contains(s, sub string) bool { return len(sub) > 0 && len(s) >= len(sub) && (stringIndex(s, sub) >= 0) }
+func contains(s, sub string) bool {
+	return len(sub) > 0 && len(s) >= len(sub) && (stringIndex(s, sub) >= 0)
+}
 
 func stringIndex(s, sub string) int {
 	for i := 0; i+len(sub) <= len(s); i++ {
