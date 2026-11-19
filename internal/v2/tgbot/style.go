@@ -275,11 +275,12 @@ func (b *Bot) celebrate(ctx context.Context, chat int64, text string, kb *Keyboa
 	}
 }
 
-// The bottom keyboard: always-there shortcuts below the message box.
+// The bottom keyboard: one small row that is always there. "منوی اصلی" brings
+// the menu back from anywhere, so nobody has to type /start; everything else
+// lives in that menu, once. (The labels of the older, larger keyboard are
+// still understood by keyboardAction.)
 var replyRows = [][]string{
-	{"🛍 خرید اشتراک", "📦 سرویس‌های من"},
-	{"👛 کیف پول", "💬 پشتیبانی"},
-	{"📚 آموزش اتصال", "🏠 منوی اصلی"},
+	{"🏠 منوی اصلی", "💬 پشتیبانی"},
 }
 
 // keyboardAction maps a bottom-keyboard label (ours or the old panel's) to
@@ -323,6 +324,11 @@ func keyboardAction(text string) string {
 
 func (b *Bot) keyAction(ctx context.Context, chat int64, act string) {
 	b.takeAwait(chat) // a button press ends whatever the bot was waiting for
+	switch act {
+	case "shop", "mine", "wallet", "support", "guide", "home":
+		// A press on the older, larger keyboard swaps it for the current one.
+		defer b.ensureKeyboard(ctx, chat)
+	}
 	switch act {
 	case "shop":
 		b.shop(ctx, chat)
@@ -377,11 +383,11 @@ func (b *Bot) ensureKeyboard(ctx context.Context, chat int64) {
 		b.ensureRepKeyboard(ctx, chat)
 		return
 	}
-	key := fmt.Sprintf("tg_kb1:%s:%d", b.Seller, chat)
+	key := fmt.Sprintf("tg_kb2:%s:%d", b.Seller, chat) // kb2: the one-row keyboard
 	if b.Store.Setting(ctx, key) == "1" {
 		return
 	}
-	if err := kb.SendReplyKeyboard(ctx, chat, "⌨️ منوی سریع پایین صفحه آماده است.", replyRows); err == nil {
+	if err := kb.SendReplyKeyboard(ctx, chat, "⌨️ دکمهٔ «منوی اصلی» همیشه پایین صفحه است.", replyRows); err == nil {
 		_ = b.Store.SetSetting(ctx, key, "1")
 	}
 }

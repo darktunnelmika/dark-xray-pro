@@ -510,12 +510,10 @@ func (b *Bot) menu(ctx context.Context, chat int64) {
 	b.send(ctx, chat, welcome, b.menuKB(ctx, chat))
 }
 
-// menuKB is the main menu, led by the Mini App store when it is on.
+// menuKB is the main menu. The Mini App store is not repeated here: its
+// button sits beside the message box whenever it is on.
 func (b *Bot) menuKB(ctx context.Context, chat int64) *Keyboard {
 	var rows [][]Button
-	if u := b.miniURL(ctx); u != "" {
-		rows = append(rows, []Button{{Text: "🛍 فروشگاه و سرویس‌های من", WebApp: &WebApp{URL: u}}})
-	}
 	rows = append(rows, row(cbBtn("🛍 خرید اشتراک", "shop"), cbBtn("📦 سرویس‌های من", "mine")))
 	var extra []Button
 	if b.Store.TrialPolicyFor(ctx, b.Seller).Enabled && !b.Store.TrialUsed(ctx, b.Seller, chat) {
