@@ -1,0 +1,143 @@
+<!doctype html><html lang="fa" dir="rtl"><head><meta charset="utf-8"><style>
+@font-face{font-family:K;src:url(NotoKufiArabic.woff)}
+*{box-sizing:border-box}
+html,body{margin:0;background:#06080c;overflow:hidden}
+#st{width:1080px;height:1920px;position:relative;overflow:hidden;background:#06080c;font-family:K,"DejaVu Sans","Noto Color Emoji";color:#eef3f8}
+#bg{position:absolute;inset:-120px}
+.sc{position:absolute;inset:0;display:none;padding:120px 70px 0;text-align:center}
+.brand{position:absolute;top:44px;left:0;right:0;text-align:center;direction:ltr;font-family:"DejaVu Sans";font-weight:700;font-size:34px;letter-spacing:10px;color:#eef3f8aa}
+.brand span{color:#28f7a0}
+.cap{position:absolute;left:50px;right:50px;bottom:110px;text-align:center}
+.cap span{display:inline-block;background:#0b1118f0;border:2px solid #28f7a044;border-radius:24px;padding:16px 40px;font-size:42px;line-height:1.6;color:#dfe7ee}
+.cap b{color:#28f7a0}
+.step{display:inline-block;font-size:40px;font-weight:700;color:#04110c;background:linear-gradient(90deg,#28f7a0,#7fe9ff);border-radius:18px;padding:6px 36px}
+h1{font-size:76px;line-height:1.45;margin:18px 0 0;font-weight:700}
+h1 em{font-style:normal;color:#28f7a0}
+.mid{position:absolute;inset:0 0 200px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:0 70px}
+.w{direction:ltr;font-family:"DejaVu Sans";font-weight:700;font-size:118px;letter-spacing:26px;margin-right:-26px;text-shadow:0 0 90px #28f7a088}
+.w span{color:#28f7a0}
+.ph{width:660px;height:1130px;border:6px solid #2a3644;border-radius:70px;background:#0b1118;padding:40px 30px;margin:40px auto 0;position:relative;box-shadow:0 0 140px #28f7a022;text-align:right;overflow:hidden}
+.top{font-size:32px;color:#9fb0c0;text-align:center;border-bottom:1px solid #ffffff18;padding-bottom:16px;margin-bottom:26px}
+.top b{color:#eef3f8}
+.m{border-radius:26px;padding:16px 24px;font-size:31px;line-height:1.7;margin-bottom:18px;width:fit-content;max-width:94%;background:#141d28;border:1px solid #ffffff14}
+.m b{color:#28f7a0}
+.m code{display:block;direction:ltr;font-family:"DejaVu Sans Mono";font-size:23px;color:#7fe9ff;background:#0b1118;border-radius:12px;padding:10px 12px;margin-top:10px;word-break:break-all;text-align:left}
+.btn{background:#16212d;border:1px solid #7fe9ff55;color:#7fe9ff;border-radius:18px;text-align:center;font-size:31px;padding:13px;margin-bottom:12px;position:relative}
+.btn.hot{border-color:#28f7a0;color:#28f7a0;background:#12261f}
+.tap{position:absolute;left:50%;top:50%;width:120px;height:120px;margin:-60px 0 0 -60px;border-radius:50%;border:6px solid #ffd166;background:#ffd16633;opacity:0;pointer-events:none}
+.toast{position:absolute;left:50%;bottom:50px;transform:translateX(-50%);background:#28f7a0;color:#04110c;font-weight:700;font-size:32px;border-radius:40px;padding:10px 40px;white-space:nowrap}
+.os{background:#0b1118e6;border:2px solid #28f7a055;border-radius:36px;padding:34px 40px;margin-top:40px;text-align:right;display:flex;align-items:center;gap:34px}
+.os.b{border-color:#7fe9ff55}
+.os .ic{font-size:110px;line-height:1}
+.os h3{margin:0;font-size:40px;color:#9fb0c0;font-weight:400}
+.os .n{direction:ltr;text-align:right;font-family:"DejaVu Sans";font-weight:700;font-size:64px;color:#eef3f8}
+.os small{font-size:32px;color:#9fb0c0}
+.note{font-size:38px;color:#cfd9e3;margin-top:44px;line-height:1.7}
+.note b{color:#7fe9ff}
+.apph{display:flex;justify-content:space-between;align-items:center;font-size:36px;font-weight:700;border-bottom:1px solid #ffffff18;padding-bottom:18px;margin-bottom:24px;direction:ltr}
+.plus{width:70px;height:70px;border-radius:20px;background:#16212d;border:1px solid #7fe9ff55;color:#7fe9ff;font-size:54px;line-height:62px;text-align:center;position:relative}
+.empty{font-size:32px;color:#5d6b7a;text-align:center;margin-top:220px}
+.menu{position:absolute;right:30px;top:130px;width:470px;background:#1a2532;border:1px solid #ffffff22;border-radius:22px;padding:10px;direction:ltr;text-align:left;box-shadow:0 20px 60px #000a}
+.menu div{font-size:29px;padding:16px 20px;border-radius:14px;color:#cfd9e3;position:relative}
+.menu div.hot{background:#12261f;color:#28f7a0}
+.srv{display:flex;justify-content:space-between;align-items:center;font-size:32px;background:#141d28;border:1px solid #ffffff14;border-radius:20px;padding:16px 22px;margin-bottom:12px;direction:ltr;position:relative}
+.srv small{color:#28f7a0;font-size:26px}
+.srv.sel{border-color:#28f7a0;background:#12261f}
+.sub{direction:ltr;text-align:left;font-size:28px;color:#9fb0c0;margin:6px 4px 14px}
+.conn{width:230px;height:230px;border-radius:50%;margin:40px auto 0;border:8px solid #2a3644;display:flex;align-items:center;justify-content:center;font-size:36px;color:#9fb0c0;position:relative;text-align:center}
+.conn.on{border-color:#28f7a0;color:#28f7a0;box-shadow:0 0 80px #28f7a066;position:absolute;left:50%;margin-left:-115px}
+.dlg{position:absolute;left:40px;right:40px;top:330px;background:#1a2532;border:1px solid #ffffff22;border-radius:28px;padding:30px;box-shadow:0 30px 80px #000c;text-align:center}
+.dlg p{font-size:32px;margin:0 0 22px;line-height:1.7}
+.dlg .ok{display:inline-block;background:#28f7a0;color:#04110c;font-weight:700;font-size:32px;border-radius:16px;padding:8px 50px;position:relative}
+.tips{margin-top:50px;text-align:right}
+.tip{display:flex;gap:26px;align-items:center;background:#0b1118e6;border:2px solid #ffffff1c;border-radius:30px;padding:28px 34px;margin-bottom:26px;font-size:42px;line-height:1.6}
+.tip i{font-style:normal;flex:none;width:76px;height:76px;border-radius:50%;background:#28f7a022;color:#28f7a0;font-weight:700;font-size:42px;text-align:center;line-height:76px}
+.bot{direction:ltr;font-family:"DejaVu Sans";font-weight:700;font-size:68px;margin-top:50px}.bot i{font-style:normal;color:#28f7a0}
+#pg{position:absolute;left:0;bottom:0;height:10px;background:linear-gradient(90deg,#28f7a0,#7fe9ff)}
+</style></head><body><div id="st"><div id="bg"></div><div class="brand">DARK <span>VPN</span></div>
+
+<div class="sc" data-d="4.5"><div class="mid">
+ <div class="w a" data-t="0.2">DARK <span>VPN</span></div>
+ <h1 class="a" data-t="0.8" style="margin-top:50px">آموزش <em>اتصال</em></h1>
+ <p class="note a" data-t="1.4">🤖 اندروید &nbsp;•&nbsp; 🍎 آیفون</p></div>
+ <div class="cap a" data-t="1.6"><span>در <b>چهار قدم</b> ساده</span></div></div>
+
+<div class="sc" data-d="7.2">
+ <span class="step a" data-t="0.1">قدم اول</span>
+ <h1 class="a" data-t="0.3">لینک اشتراک را <em>کپی کن</em></h1>
+ <div class="ph a" data-t="0.5"><div class="top"><b>Dark VPN</b> · ربات</div>
+  <div class="btn hot a" data-t="0.9">📦 سرویس‌های من<span class="tap" data-t="1.6"></span></div>
+  <div class="m a" data-t="2.3">📦 <b>سرویس شما</b><br>۵ گیگ · ۷ روز مانده</div>
+  <div class="btn hot a" data-t="2.7">🔗 لینک اشتراک<span class="tap" data-t="3.5"></span></div>
+  <div class="btn a" data-t="2.9">📱 راهنمای اتصال</div>
+  <div class="m a" data-t="4.1">لینک اشتراک (روی آن بزنید تا کپی شود):<code>https://sub.example/s/8f3k2…x9</code><span class="tap" data-t="5.0" style="top:72%"></span></div>
+  <div class="toast a" data-t="5.5">✓ کپی شد</div></div>
+ <div class="cap a" data-t="0.4"><span>ربات ← سرویس‌های من ← <b>لینک اشتراک</b></span></div></div>
+
+<div class="sc" data-d="12.5">
+ <span class="step a" data-t="0.1">قدم دوم</span>
+ <h1 class="a" data-t="0.3">برنامه را <em>نصب کن</em></h1>
+ <div class="os a" data-t="2.2"><div class="ic">🤖</div><div><h3>اندروید</h3><div class="n">v2rayNG</div><small>یا Hiddify</small></div></div>
+ <div class="os b a" data-t="4.6"><div class="ic">🍎</div><div><h3>آیفون و آیپد</h3><div class="n">Streisand</div><small>یا V2Box (از اپ‌استور)</small></div></div>
+ <p class="note a" data-t="7.2">لینک دانلود هر دو داخل ربات هست:<br><b>📱 راهنمای اتصال</b></p>
+ <div class="cap a" data-t="0.4"><span>برنامه را فقط از <b>لینک‌های ربات</b> نصب کن</span></div></div>
+
+<div class="sc" data-d="9.6">
+ <span class="step a" data-t="0.1">قدم سوم</span>
+ <h1 class="a" data-t="0.3">لینک را <em>اضافه کن</em></h1>
+ <div class="ph a" data-t="0.5"><div class="apph"><span>برنامه‌ی اتصال</span><span class="plus">+<span class="tap" data-t="2.0"></span></span></div>
+  <div class="empty a" data-t="0.7" data-o="5.2">هنوز سروری اضافه نشده</div>
+  <div class="menu a" data-t="2.7" data-o="5.0"><div>Scan QR code</div><div class="hot">Import from clipboard<span class="tap" data-t="4.2"></span></div><div>Type manually</div></div>
+  <div style="position:absolute;left:30px;right:30px;top:150px">
+  <div class="sub a" data-t="5.5">Dark VPN · subscription</div>
+  <div class="srv a" data-t="5.7"><span>🇳🇱 Netherlands</span><small>✓</small></div>
+  <div class="srv a" data-t="5.9"><span>🇩🇪 Germany</span><small>✓</small></div>
+  <div class="srv a" data-t="6.1"><span>🇹🇷 Turkey</span><small>✓</small></div>
+  <div class="srv a" data-t="6.3"><span>🇫🇮 Finland</span><small>✓</small></div>
+  <div class="srv a" data-t="6.5"><span>🇬🇧 United Kingdom</span><small>✓</small></div></div></div>
+ <div class="cap a" data-t="0.4"><span>علامت <b>＋</b> ← افزودن از <b>کلیپ‌بورد</b></span></div></div>
+
+<div class="sc" data-d="9">
+ <span class="step a" data-t="0.1">قدم چهارم</span>
+ <h1 class="a" data-t="0.3">وصل <em>شو</em></h1>
+ <div class="ph a" data-t="0.5"><div class="apph"><span>برنامه‌ی اتصال</span><span class="plus">+</span></div>
+  <div class="sub">Dark VPN · subscription</div>
+  <div class="srv" id="s1"><span>🇳🇱 Netherlands</span><small>✓</small><span class="tap" data-t="1.5"></span></div>
+  <div class="srv"><span>🇩🇪 Germany</span><small>✓</small></div>
+  <div class="srv"><span>🇹🇷 Turkey</span><small>✓</small></div>
+  <div class="conn" id="c0">اتصال<span class="tap" data-t="3.0"></span></div>
+  <div class="conn on a" data-t="6.0" style="top:535px">✓ وصل شد</div>
+  <div class="dlg a" data-t="3.7" data-o="5.6"><p>این برنامه می‌خواهد یک اتصال VPN بسازد</p><span class="ok">اجازه می‌دهم<span class="tap" data-t="4.9"></span></span></div></div>
+ <div class="cap a" data-t="0.4"><span>انتخاب سرور ← <b>اتصال</b> ← تأیید اجازه</span></div></div>
+
+<div class="sc" data-d="9">
+ <h1 class="a" data-t="0.2" style="margin-top:60px">اگر <em>وصل نشد</em></h1>
+ <div class="tips">
+  <div class="tip a" data-t="1.3"><i>۱</i><span>اشتراک را داخل برنامه <b style="color:#28f7a0">به‌روزرسانی</b> کن</span></div>
+  <div class="tip a" data-t="3.0"><i>۲</i><span>یک <b style="color:#28f7a0">سرور دیگر</b> را امتحان کن</span></div>
+  <div class="tip a" data-t="5.0"><i>۳</i><span>به <b style="color:#28f7a0">پشتیبانی ربات</b> پیام بده</span></div></div>
+ <div class="cap a" data-t="0.4"><span>💬 پشتیبانی، <b>داخل همان ربات</b></span></div></div>
+
+<div class="sc" data-d="5"><div class="mid">
+ <div class="w a" data-t="0.2">DARK <span>VPN</span></div>
+ <p class="note a" data-t="0.9" style="font-size:46px">سؤالی بود؟ پشتیبانی داخل ربات</p>
+ <div class="bot a" data-t="1.4"><i>@</i>Darkvpncore_bot</div></div></div>
+
+<div id="pg"></div></div><script>
+const W=1320,H=2160,r=64,w=Math.sqrt(3)*r;let s='';
+for(let row=-1;row<24;row++)for(let c=-1;c<13;c++){const x=c*w+(row%2?w/2:0),y=row*r*1.5;const d=Math.hypot(x-W/2,(y-H/2)*.6);const o=Math.max(.06,.42-d/1500);let p='';for(let i=0;i<6;i++){const a=Math.PI/180*(60*i-30);p+=(i?'L':'M')+(x+r*Math.cos(a)).toFixed(1)+' '+(y+r*Math.sin(a)).toFixed(1)}s+=`<path d="${p}Z" fill="${(row*7+c*3)%11==0?'rgba(40,247,160,.04)':'none'}" stroke="${(row+c)%5==0?'#7fe9ff':'#28f7a0'}" stroke-opacity="${o.toFixed(2)}" stroke-width="2"/>`}
+bg.innerHTML=`<svg width="${W}" height="${H}"><defs><radialGradient id="g"><stop offset="0" stop-color="#28f7a0" stop-opacity=".14"/><stop offset="1" stop-color="#28f7a0" stop-opacity="0"/></radialGradient></defs>${s}<ellipse cx="${W/2}" cy="${H/2}" rx="640" ry="1000" fill="url(#g)"/></svg>`;
+const scs=[...document.querySelectorAll('.sc')];let acc=0;const T=scs.map(e=>{const a=acc;acc+=+e.dataset.d;return a});window.TOTAL=acc;window.STARTS=T;
+const ease=p=>1-Math.pow(1-p,3),cl=x=>Math.max(0,Math.min(1,x));
+window.render=t=>{
+ bg.style.transform=`translate(${(-30+Math.sin(t/6)*12).toFixed(2)}px,${(-40+t*1.2).toFixed(2)}px)`;
+ pg.style.width=(t/TOTAL*1080)+'px';
+ scs.forEach((e,i)=>{const lt=t-T[i],d=+e.dataset.d;if(lt<0||lt>=d){e.style.display='none';return}
+  e.style.display='block';e.style.opacity=Math.min(cl(lt/.35),i==scs.length-1?1:cl((d-lt)/.35));
+  e.querySelectorAll('.a').forEach(a=>{let p=ease(cl((lt-(+a.dataset.t))/.5));const fixed=a.classList.contains('cap')||a.classList.contains('toast')||a.classList.contains('menu')||a.classList.contains('dlg')||a.classList.contains('on');
+   if(a.dataset.o)p*=1-cl((lt-(+a.dataset.o))/.3);a.style.opacity=p;if(!fixed)a.style.transform=`translateY(${((1-p)*30).toFixed(1)}px)`});
+  e.querySelectorAll('.tap').forEach(a=>{const p=(lt-(+a.dataset.t))/.75;if(p<0||p>1){a.style.opacity=0;return}a.style.opacity=p<.25?p*4:(1-p)/.75;a.style.transform=`scale(${(.55+p*.7).toFixed(3)})`});
+  if(i==4){s1.classList.toggle('sel',lt>1.9);c0.style.opacity=lt>5.9?0:1}
+ })};
+render(0);
+</script></body></html>
