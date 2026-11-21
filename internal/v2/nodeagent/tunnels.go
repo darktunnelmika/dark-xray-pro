@@ -3,6 +3,8 @@ package nodeagent
 import (
 	"bufio"
 	"context"
+	"encoding/json"
+	"errors"
 	"net"
 	"os"
 	"os/exec"
@@ -20,18 +22,35 @@ import (
 // TunnelMonitor finds the tunnels that end on this node and pings the far
 // end of each through the tunnel every 30 seconds. It only reads: tunnel
 // configuration files and interface addresses; it never changes a tunnel.
-// Found: dark-gre tunnels (/etc/dark-gre/tunnels/*/meta.conf) and any other
-// interface holding a private /30 or /31 (the usual point-to-point link).
+// Found: dark-gre tunnels (/etc/dark-gre/tunnels/*/meta.conf), any other
+// interface holding a private /30 or /31 (the usual point-to-point link),
+// and Max Dark Tunnel tunnels that have no interface (from their status file).
 type TunnelMonitor struct {
 	Logf     func(string, ...any)
 	Interval time.Duration
 	GREDir   string
+	MDTRun   string // Max Dark Tunnel status files (/run/max-dark-tunnel)
+	MDTConf  string // Max Dark Tunnel tunnel files (/etc/max-dark-tunnel/tunnels)
 	SysNet   string // /sys/class/net
 	Ping     func(ctx context.Context, iface, peer string) (rttMS, loss float64, err error)
 
 	mu    sync.Mutex
 	state map[string]*tunState
+	mdt   map[string]mdtStatus // by tunnel name, as of the last discover
 }
+
+// mdtStatus is what Max Dark Tunnel writes about one tunnel every few
+// seconds. Its TCP and SSH tunnels have no interface to ping, so this file
+// is how such a tunnel is seen at all.
+type mdtStatus struct {
+	State     string  `json:"state"`
+	Peer      string  `json:"peer"`
+	Transport string  `json:"transport"`
+	Loss      float64 `json:"loss"` // percent, -1 = not measured
+	Updated   int64   `json:"updated"`
+}
+
+const mdtPrefix = "mdt:"
 
 type tunState struct {
 	t     wire.Tunnel
@@ -40,7 +59,7 @@ type tunState struct {
 
 // NewTunnelMonitor returns a monitor using the system ping.
 func NewTunnelMonitor(logf func(string, ...any)) *TunnelMonitor {
-	return &TunnelMonitor{Logf: logf, Interval: 30 * time.Second, GREDir: "/etc/dark-gre/tunnels", Ping: systemPing, state: map[string]*tunState{}}
+	return &TunnelMonitor{Logf: logf, Interval: 30 * time.Second, GREDir: "/etc/dark-gre/tunnels", MDTRun: "/run/max-dark-tunnel", MDTConf: "/etc/max-dark-tunnel/tunnels", Ping: systemPing, state: map[string]*tunState{}}
 }
 
 // Run probes until ctx ends.
@@ -71,6 +90,7 @@ func (m *TunnelMonitor) Snapshot() []wire.Tunnel {
 // after two probes in a row with no answer.
 func (m *TunnelMonitor) Probe(ctx context.Context) {
 	found := m.discover()
+	mdtNow := m.mdt
 	now := time.Now().Unix()
 	seen := map[string]bool{}
 	var wg sync.WaitGroup
@@ -88,6 +108,16 @@ func (m *TunnelMonitor) Probe(ctx context.Context) {
 			defer wg.Done()
 			pctx, cancel := context.WithTimeout(ctx, 8*time.Second)
 			defer cancel()
+			if name, ok := strings.CutPrefix(t.Iface, mdtPrefix); ok {
+				// No interface: the tunnel's own word on whether it is connected.
+				st := mdtNow[name]
+				if st.State != "connected" {
+					results <- res{key, 0, 100, errors.New("not connected")}
+					return
+				}
+				results <- res{key, 0, max(st.Loss, 0), nil}
+				return
+			}
 			rtt, loss, err := m.Ping(pctx, t.Iface, t.Peer)
 			results <- res{key, rtt, loss, err}
 		}(t, key)
@@ -156,6 +186,37 @@ func (m *TunnelMonitor) discover() []wire.Tunnel {
 		out = append(out, wire.Tunnel{Name: name, Iface: kv["IFNAME"], Peer: kv["REMOTE_TUN"], Remote: kv["REMOTE_PUBLIC"]})
 		have[kv["IFNAME"]] = true
 	}
+	// Max Dark Tunnel: a tunnel with an interface (tun mode) is pinged like
+	// any other and only takes its name from here; one without (tcp, ssh)
+	// is listed from its status file.
+	mdtIface := map[string]string{}
+	m.mdt = map[string]mdtStatus{}
+	runs, _ := filepath.Glob(filepath.Join(m.MDTRun, "*.json"))
+	sort.Strings(runs)
+	for _, f := range runs {
+		var st mdtStatus
+		b, err := os.ReadFile(f)
+		if err != nil || json.Unmarshal(b, &st) != nil || time.Now().Unix()-st.Updated > 30 {
+			continue // unreadable, or left behind by a tunnel that no longer runs
+		}
+		name := strings.TrimSuffix(filepath.Base(f), ".json")
+		if strings.HasPrefix(st.Transport, "tun") {
+			var c struct {
+				TunDev string `json:"tun_dev"`
+				Subnet int    `json:"subnet"`
+			}
+			if b, err := os.ReadFile(filepath.Join(m.MDTConf, name+".json")); err == nil {
+				_ = json.Unmarshal(b, &c)
+			}
+			if c.TunDev == "" {
+				c.TunDev = "mdt" + strconv.Itoa(c.Subnet)
+			}
+			mdtIface[c.TunDev] = name
+			continue
+		}
+		m.mdt[name] = st
+		out = append(out, wire.Tunnel{Name: name, Iface: mdtPrefix + name, Peer: st.Peer, Remote: st.Peer})
+	}
 	ifs, _ := net.Interfaces()
 	for _, ifc := range ifs {
 		if have[ifc.Name] || ifc.Flags&net.FlagLoopback != 0 || skipIface.MatchString(ifc.Name) {
@@ -170,7 +231,11 @@ func (m *TunnelMonitor) discover() []wire.Tunnel {
 				peer = tunPeer(a) // Dark Tunnel style TUN: a private /24, far end .1
 			}
 			if peer != "" {
-				out = append(out, wire.Tunnel{Name: ifc.Name, Iface: ifc.Name, Peer: peer})
+				name := ifc.Name
+				if n := mdtIface[ifc.Name]; n != "" {
+					name = n
+				}
+				out = append(out, wire.Tunnel{Name: name, Iface: ifc.Name, Peer: peer})
 				break
 			}
 		}

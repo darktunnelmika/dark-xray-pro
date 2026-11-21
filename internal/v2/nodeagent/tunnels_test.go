@@ -3,10 +3,15 @@ package nodeagent
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
+
+	"github.com/darktunnelmika/dark-xray-pro/internal/v2/wire"
 )
 
 func TestParsePing(t *testing.T) {
@@ -109,5 +114,57 @@ func TestTunnelFirstProbeDecides(t *testing.T) {
 		if x.Name == "x" && x.Up {
 			t.Fatalf("a tunnel down from the start shows up: %+v", x)
 		}
+	}
+}
+
+// A Max Dark Tunnel TCP tunnel has no interface: it is listed from its
+// status file, up while that says connected, gone once the file goes stale.
+func TestTunnelMonitorMDTStatus(t *testing.T) {
+	run, conf := t.TempDir(), t.TempDir()
+	write := func(name, state, transport string, age int64) {
+		_ = os.WriteFile(filepath.Join(run, name+".json"), []byte(fmt.Sprintf(
+			`{"loss":-1,"peer":"5.6.7.8","sessions":4,"state":%q,"transport":%q,"updated":%d}`, state, transport, time.Now().Unix()-age)), 0o600)
+	}
+	_ = os.WriteFile(filepath.Join(conf, "tu.json"), []byte(`{"name":"tu","psk":"x","transport":"tcp"}`), 0o600)
+	m := &TunnelMonitor{GREDir: t.TempDir(), MDTRun: run, MDTConf: conf, state: map[string]*tunState{},
+		Ping: func(ctx context.Context, iface, peer string) (float64, float64, error) {
+			if strings.HasPrefix(iface, "mdt:") {
+				t.Fatalf("a tunnel without an interface is never pinged: %s", iface)
+			}
+			return 1, 0, nil
+		}}
+	find := func(name string) (wire.Tunnel, bool) {
+		for _, x := range m.Snapshot() {
+			if x.Name == name {
+				return x, true
+			}
+		}
+		return wire.Tunnel{}, false
+	}
+	write("tu", "connected", "tcp", 2)
+	write("old", "connecting", "tun/icmp", 900) // its service was stopped long ago
+	m.Probe(context.Background())
+	x, ok := find("tu")
+	if !ok || !x.Up || x.Remote != "5.6.7.8" || x.Iface != "mdt:tu" || x.Loss != 0 {
+		t.Fatalf("%+v %v", x, ok)
+	}
+	if _, ok := find("old"); ok {
+		t.Fatal("a stale status file is not a tunnel")
+	}
+	write("tu", "connecting", "tcp", 1)
+	m.Probe(context.Background())
+	m.Probe(context.Background())
+	if x, _ := find("tu"); x.Up {
+		t.Fatal("not connected twice in a row = down")
+	}
+	write("tu", "connected", "tcp", 1)
+	m.Probe(context.Background())
+	if x, _ := find("tu"); !x.Up {
+		t.Fatal("back up")
+	}
+	write("tu", "connected", "tcp", 600)
+	m.Probe(context.Background())
+	if _, ok := find("tu"); ok {
+		t.Fatal("gone once its status stops being written")
 	}
 }

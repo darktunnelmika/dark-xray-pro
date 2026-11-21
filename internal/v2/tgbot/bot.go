@@ -1183,7 +1183,7 @@ func (b *Bot) watchNodes(ctx context.Context) {
 				}
 			case t.Up && b.tunState[key]:
 				delete(b.tunState, key)
-				changes = append(changes, fmt.Sprintf("🟢 تونل <b>%s</b> به نود <b>%s</b> دوباره وصل شد (%.0fms).", esc(t.Name), esc(n.ID), t.RTTms))
+				changes = append(changes, fmt.Sprintf("🟢 تونل <b>%s</b> به نود <b>%s</b> دوباره وصل شد%s.", esc(t.Name), esc(n.ID), tunRTT(" (%.0fms)", t.RTTms)))
 			}
 		}
 	}
@@ -1214,7 +1214,7 @@ func (b *Bot) statusText(ctx context.Context) string {
 		if n.Online(now) && n.Host != nil {
 			for _, t := range n.Host.Tunnels {
 				if t.Up {
-					lines = append(lines, fmt.Sprintf("   ⇄ تونل %s: 🟢 %.0fms", esc(t.Name), t.RTTms))
+					lines = append(lines, fmt.Sprintf("   ⇄ تونل %s: 🟢%s", esc(t.Name), tunRTT(" %.0fms", t.RTTms)))
 				} else {
 					lines = append(lines, fmt.Sprintf("   ⇄ تونل %s: 🔴 قطع", esc(t.Name)))
 				}
@@ -1462,4 +1462,13 @@ func drillText(r hubcore.DrillResult) string {
 	c := r.Counts["clients"]
 	return fmt.Sprintf("✅ <b>آزمایش بازیابی بکاپ موفق بود</b>\nبکاپ کامل (%s) روی یک کپی جدا بازیابی شد: %s کاربر، %s نود و %s نماینده سالم برگشتند، کلیدهای هاب هم کامل بود (%s ثانیه).",
 		gb(int64(r.Bytes)), faInt(c[1]), faInt(r.Counts["nodes"][1]), faInt(r.Counts["reps"][1]), faInt((r.Millis+999)/1000))
+}
+
+// tunRTT formats a tunnel's ping time; a tunnel with no interface to ping
+// (Max Dark Tunnel over TCP or SSH) has none to show.
+func tunRTT(format string, ms float64) string {
+	if ms <= 0 {
+		return ""
+	}
+	return fmt.Sprintf(format, ms)
 }

@@ -813,7 +813,7 @@ function tunnelStrip(nodes) {
     items.map(({ nd, tn }) => h("span", { class: `tun ${tn.up ? "up" : "down"}`, role: "listitem",
       title: [tn.iface, tn.peer, tn.remote].filter(Boolean).join(" · ") + (tn.since ? ` · ${fa ? "از" : "since"} ${ago(tn.since)}` : "") },
       h("span", { class: "dot" }), h("b", { dir: "ltr" }, tn.name), h("span", { class: "muted" }, "→ ", nd.Name || nd.ID),
-      h("span", { dir: "ltr", class: tn.up ? (tn.loss > 0 ? "warn" : "") : "bad" }, tn.up ? `${Math.round(tn.rtt_ms)}ms${tn.loss > 0 ? ` · ${Math.round(tn.loss)}%` : ""}` : (fa ? `قطع · ${ago(tn.since)}` : `down · ${ago(tn.since)}`)))));
+      h("span", { dir: "ltr", class: tn.up ? (tn.loss > 0 ? "warn" : "") : "bad" }, tn.up ? `${tn.rtt_ms > 0 ? `${Math.round(tn.rtt_ms)}ms` : (fa ? "وصل" : "up")}${tn.loss > 0 ? ` · ${Math.round(tn.loss)}%` : ""}` : (fa ? `قطع · ${ago(tn.since)}` : `down · ${ago(tn.since)}`)))));
 }
 
 function hubStrip(si) {
@@ -859,7 +859,7 @@ function nodeRow(n) {
         h("div", { class: "nr-sub" }, [n.ID, n.AgentVersion || "—", n.xray_version ? `xray ${n.xray_version}` : null].filter(Boolean).join(" · "), n.update_available ? (fa ? " · به‌روزرسانی" : " · update") : "",
           n.online && host.hub_rtt_ms ? h("span", { class: `tun-chip ${host.hub_fails_1h ? "down" : "up"}`, dir: "ltr", title: fa ? "ارتباط این نود با سرور اصلی؛ قطعی‌ها = همگام‌سازی‌های ناموفق در ساعت اخیر" : "Link to the HUB; failures = failed syncs in the last hour" },
             `⇆ hub ${Math.round(host.hub_rtt_ms)}ms${host.hub_fails_1h ? ` · ${host.hub_fails_1h}✕/1h` : ""}`) : null,
-          ...(n.online ? host.tunnels || [] : []).map((tn) => h("span", { class: `tun-chip ${tn.up ? "up" : "down"}`, dir: "ltr" }, `⇄ ${tn.name} ${tn.up ? `${Math.round(tn.rtt_ms)}ms` : "✕"}`))))),
+          ...(n.online ? host.tunnels || [] : []).map((tn) => h("span", { class: `tun-chip ${tn.up ? "up" : "down"}`, dir: "ltr" }, `⇄ ${tn.name} ${tn.up ? (tn.rtt_ms > 0 ? `${Math.round(tn.rtt_ms)}ms` : "✓") : "✕"}`))))),
     mini("CPU", host.cpu_percent || 0, p(host.cpu_percent)),
     mini(fa ? "رم" : "RAM", ramP, p(ramP)),
     mini(fa ? "دیسک" : "Disk", diskP, p(diskP)),
