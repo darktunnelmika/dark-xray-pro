@@ -2425,7 +2425,7 @@ async function viewRouting() {
   const [data, nodes] = await Promise.all([api("GET", "/api/v2/admin/routing"), api("GET", "/api/v2/admin/nodes")]);
   let r = data.routing;
   const paths = data.paths || {};
-  const MODES = [["", T("خروج عادی", "Normal exit")], ["sites", T("فقط سایت‌های تحریمی و هوش مصنوعی از WARP", "Only sanctioned and AI sites via WARP")], ["all", T("همهٔ ترافیک از WARP", "All traffic via WARP")]];
+  const MODES = [["", T("خاموش", "Off")], ["sites", T("سایت‌های تحریمی", "Sanctioned sites")], ["all", T("همهٔ ترافیک", "All traffic")]];
   const results = {}; // node id -> last WARP test result
   const errBox = h("div", { class: "error", role: "alert" });
   const say = (m) => { errBox.textContent = m || ""; };
@@ -2463,24 +2463,28 @@ async function viewRouting() {
     };
     testBtn.onclick = test;
     const pathRow = (path, label) => {
-      const sel = h("select", { disabled: !n.online, "aria-label": `${n.Name || n.ID} · ${label}` }, MODES.map(([v, l]) => h("option", { value: v, selected: v === (cur[path] || "") }, l)));
       const state = h("span", { class: "small muted", role: "status" });
-      sel.onchange = async () => {
-        const want = sel.value, before = cur[path] || "";
-        say(""); sel.disabled = true;
+      const btns = MODES.map(([v, l]) => h("button", { type: "button", class: "seg", disabled: !n.online, "aria-pressed": String(v === (cur[path] || "")), onclick: () => pick(v) }, l));
+      const mark = (v) => btns.forEach((b, i) => b.setAttribute("aria-pressed", String(MODES[i][0] === v)));
+      const lock = (on) => btns.forEach((b) => { b.disabled = on || !n.online; });
+      async function pick(want) {
+        const before = cur[path] || "";
+        if (want === before) return;
+        say(""); lock(true); mark(want);
         try {
           if (want) { // never send customers into a WARP that does not answer
             state.textContent = T("اول WARP این نود تست می‌شود…", "Testing this node's WARP first…");
             const res = await test();
-            if (!res.ok) { sel.value = before; state.textContent = ""; say(`${n.Name || n.ID}: ${warpFail(res.error)} ${T("تغییری ذخیره نشد.", "Nothing was changed.")}`); return; }
+            if (!res.ok) { mark(before); state.textContent = ""; say(`${n.Name || n.ID}: ${warpFail(res.error)} ${T("تغییری ذخیره نشد.", "Nothing was changed.")}`); return; }
           }
           state.textContent = T("در حال ذخیره…", "Saving…");
           r = (await api("PUT", "/api/v2/admin/routing/warp-mode", { node: n.ID, path, mode: want })).routing;
           cur[path] = want; state.textContent = T("✓ ذخیره و برای نود فرستاده شد", "✓ Saved and sent to the node");
-        } catch (x) { sel.value = before; state.textContent = ""; say(x.message); }
-        finally { sel.disabled = !n.online; }
-      };
-      return h("div", { class: "path-row" }, h("span", { class: `path-name ${path}` }, label), sel, state);
+        } catch (x) { mark(before); state.textContent = ""; say(x.message); }
+        finally { lock(false); }
+      }
+      return h("div", { class: "path-row" }, h("span", { class: `path-name ${path}` }, label, " — WARP"),
+        h("div", { class: "segs", role: "group", "aria-label": `${n.Name || n.ID} · ${label} · WARP` }, btns), state);
     };
     return h("section", { class: `card node-route ${n.online ? "" : "off"}` },
       h("div", { class: "head" }, h("span", { class: "name" }, n.Name || n.ID), h("span", { class: "badge", dir: "ltr" }, n.ID),
@@ -2532,7 +2536,7 @@ async function viewRouting() {
   const sorted = [...nodes].sort((a, b) => Number(b.online) - Number(a.online) || (a.Name || a.ID).localeCompare(b.Name || b.ID));
   fill(root,
     h("div", { class: "row" }, h("h1", {}, T("مسیریابی", "Routing"))),
-    h("p", { class: "small muted" }, T("برای هر نود انتخاب کنید ترافیک مسیر مستقیم و مسیر تانل از کجا خارج شود. هر تغییر همان لحظه ذخیره و برای نود فرستاده می‌شود.",
+    h("p", { class: "small muted" }, T("برای روشن کردن WARP روی هر نود، در ردیف «مستقیم» یا «تانل» یکی از دکمه‌های «سایت‌های تحریمی» یا «همهٔ ترافیک» را بزنید. همان لحظه ذخیره و برای نود فرستاده می‌شود.",
       "Choose, per node, where the traffic of its direct and of its tunnel path leaves. Every change is saved and sent to the node at once.")),
     errBox,
     h("div", { class: "node-routes" }, sorted.map(nodeCard)),

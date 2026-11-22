@@ -1131,3 +1131,9 @@ dialog.wide:has(.cform) { inline-size: min(780px, calc(100vw - 20px)); }
 .chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .chips .chip { display: inline-flex; align-items: center; gap: 4px; }
 .chips .chip button { min-inline-size: 28px; padding: 0 6px; }
+
+.segs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; }
+.segs .seg { padding: 9px 4px; font-size: 13px; border: 1px solid var(--line, #cfd6dd); background: transparent; color: inherit; border-radius: 8px; min-block-size: 40px; }
+.segs .seg[aria-pressed="true"] { background: #0a8f5b; border-color: #0a8f5b; color: #fff; font-weight: 700; }
+.segs .seg:first-child[aria-pressed="true"] { background: #5b6672; border-color: #5b6672; }
+.segs .seg { inline-size: 100%; min-inline-size: 0; justify-self: stretch; }
