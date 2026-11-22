@@ -3641,9 +3641,9 @@ function randomPassword(n = 14) {
 function passwordField() {
   const fa = lang === "fa";
   const inp = h("input", { type: "text", dir: "ltr", autocomplete: "off", autocapitalize: "off", spellcheck: "false", minlength: "10" });
-  const el = h("div", { class: "row tight" }, inp,
+  const el = h("div", { class: "pw-field" }, inp,
     h("button", { type: "button", class: "ghost", onclick: () => { inp.value = randomPassword(); inp.dispatchEvent(new Event("input")); } }, fa ? "🎲 رمز تصادفی" : "🎲 Random"),
-    h("button", { type: "button", class: "ghost", title: t("copy"), onclick: () => inp.value && copy(inp.value) }, "⧉"));
+    h("button", { type: "button", class: "ghost", onclick: () => inp.value && copy(inp.value) }, lang === "fa" ? "⧉ کپی" : "⧉ Copy"));
   return { el, inp, get: () => inp.value.trim() };
 }
 

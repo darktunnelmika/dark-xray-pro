@@ -1085,4 +1085,7 @@ dialog.wide:has(.cform) { inline-size: min(780px, calc(100vw - 20px)); }
 .id-list-wrap { display: grid; gap: 6px; }
 .id-list .row.tight > button, .id-add { flex: none; min-inline-size: 44px; min-block-size: 40px; }
 .id-add { inline-size: 100%; border-style: dashed; }
-.form .row.tight > input[minlength] { flex: 2; }
+/* Password box: the whole password stays readable, its buttons sit under it. */
+.pw-field { display: flex; flex-wrap: wrap; gap: 6px; }
+.pw-field > input { flex: 1 1 100%; min-inline-size: 0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.pw-field > button { flex: 1 1 0; }
