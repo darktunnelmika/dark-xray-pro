@@ -1144,3 +1144,6 @@ dialog.wide:has(.cform) { inline-size: min(780px, calc(100vw - 20px)); }
 .ref-tile b { font-size: 18px; }
 .ref-tile span { font-size: 12px; color: var(--muted, #6b7580); }
 .ref-top td, .ref-top th { white-space: nowrap; }
+
+.ref-stats { min-inline-size: 0; max-inline-size: 100%; }
+.ref-stats .table-wrap { max-inline-size: 100%; }
