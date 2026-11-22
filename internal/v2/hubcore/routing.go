@@ -250,6 +250,9 @@ func (s *Store) nodeRouting(ctx context.Context, nodeID string, swapTags []strin
 			continue
 		}
 		m["tag"] = o.Tag
+		if o.Kind == "warp" {
+			pinWARPEndpoint(m)
+		}
 		outbounds = append(outbounds, m)
 		present[o.Tag] = true
 	}

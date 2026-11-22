@@ -69,7 +69,7 @@ func RegisterWARP(ctx context.Context) (json.RawMessage, error) {
 	p := r.Config.Peers[0]
 	endpoint := p.Endpoint.Host
 	if endpoint == "" || strings.HasSuffix(endpoint, ":0") {
-		endpoint = "engage.cloudflareclient.com:2408"
+		endpoint = warpEndpointV4
 	}
 	addr := []string{}
 	if a := r.Config.Interface.Addresses.V4; a != "" {
@@ -84,4 +84,25 @@ func RegisterWARP(ctx context.Context) (json.RawMessage, error) {
 		settings["reserved"] = []int{int(id[0]), int(id[1]), int(id[2])}
 	}
 	return json.Marshal(map[string]any{"protocol": "wireguard", "settings": settings})
+}
+
+// warpEndpointV4 is Cloudflare's WARP endpoint by its IPv4 address. The
+// name engage.cloudflareclient.com also resolves to IPv6, and Xray then
+// picks either at random; on servers whose IPv6 path to it drops UDP the
+// tunnel comes up only some of the time (measured on a node: 8 of 8 over
+// IPv4, 7 of 8 over IPv6, 8 of 10 by name).
+const warpEndpointV4 = "162.159.192.1:2408"
+
+// pinWARPEndpoint rewrites a WARP outbound's endpoint from the name to the
+// IPv4 address, in place. Accounts saved before this keep working as saved;
+// only what the nodes are given changes.
+func pinWARPEndpoint(out map[string]any) {
+	set, _ := out["settings"].(map[string]any)
+	peers, _ := set["peers"].([]any)
+	for _, p := range peers {
+		peer, _ := p.(map[string]any)
+		if ep, _ := peer["endpoint"].(string); strings.HasPrefix(ep, "engage.cloudflareclient.com:") {
+			peer["endpoint"] = "162.159.192.1:" + strings.TrimPrefix(ep, "engage.cloudflareclient.com:")
+		}
+	}
 }

@@ -219,3 +219,17 @@ func TestBotLook(t *testing.T) {
 		t.Fatal("an empty look clears the setting", err)
 	}
 }
+
+// WARP reaches the nodes with its endpoint as an IPv4 address.
+func TestPinWARPEndpoint(t *testing.T) {
+	out := map[string]any{"settings": map[string]any{"peers": []any{
+		map[string]any{"endpoint": "engage.cloudflareclient.com:2408"},
+		map[string]any{"endpoint": "198.51.100.7:500"},
+	}}}
+	pinWARPEndpoint(out)
+	peers := out["settings"].(map[string]any)["peers"].([]any)
+	if a, b := peers[0].(map[string]any)["endpoint"], peers[1].(map[string]any)["endpoint"]; a != "162.159.192.1:2408" || b != "198.51.100.7:500" {
+		t.Fatal(a, b)
+	}
+	pinWARPEndpoint(map[string]any{}) // nothing to do, nothing to break
+}
