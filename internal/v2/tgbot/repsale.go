@@ -240,6 +240,9 @@ func (b *Bot) repSaleReceipt(ctx context.Context, chat int64, name, fileID, awai
 		return false
 	}
 	b.takeAwait(chat)
+	if !b.receiptOnce("p:" + strconv.FormatInt(o.ID, 10)) {
+		return true
+	}
 	b.send(ctx, chat, fmt.Sprintf("✅ رسید سفارش <b>#%s</b> دریافت شد.\nبعد از بررسی، نتیجه همین‌جا برایتان می‌آید.", faInt(o.ID)), homeKB)
 	kind := "🤝 <b>خرید پنل نمایندگی"
 	if o.Kind == "topup" {

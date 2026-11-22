@@ -52,6 +52,31 @@ type Bot struct {
 	menuSet    bool
 	// SyncSchedule sends scheduled broadcasts inside Tick (tests).
 	SyncSchedule bool
+
+	annMu    sync.Mutex           // one announceOrders at a time
+	rcptSeen map[string]time.Time // receipt already sent to the admins, until when
+}
+
+// receiptOnce tells whether admins should see this receipt: a customer often
+// sends the same payment as an album or twice in a row, and each photo used
+// to reach the admins again. Within 10 minutes only the first one does.
+func (b *Bot) receiptOnce(key string) bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	now := b.now()
+	if b.rcptSeen == nil {
+		b.rcptSeen = map[string]time.Time{}
+	}
+	for k, until := range b.rcptSeen {
+		if now.After(until) {
+			delete(b.rcptSeen, k)
+		}
+	}
+	if until, ok := b.rcptSeen[key]; ok && now.Before(until) {
+		return false
+	}
+	b.rcptSeen[key] = now.Add(10 * time.Minute)
+	return true
 }
 
 func (b *Bot) logf(f string, a ...any) {
@@ -1101,6 +1126,13 @@ func (b *Bot) orderCard(ctx context.Context, o hubcore.Order) string {
 }
 
 func (b *Bot) announceOrders(ctx context.Context) {
+	// Called from the ticker and right after payments and approvals; two
+	// runs at once (or two bots) must not tell the same order twice, so each
+	// order is claimed in the database before anything is sent.
+	if !b.annMu.TryLock() {
+		return
+	}
+	defer b.annMu.Unlock()
 	if news, err := b.Store.OrdersToAnnounce(ctx); err == nil {
 		cardOn := b.cardOn(ctx)
 		for _, o := range news {
@@ -1109,6 +1141,9 @@ func (b *Bot) announceOrders(ctx context.Context) {
 			}
 			if cardOn && o.Seller == b.Seller && !o.HasReceipt && o.Amount > 0 && strings.HasPrefix(o.Buyer, "tg:") {
 				continue // announced with the receipt photo
+			}
+			if !b.Store.ClaimOrderAnnounce(ctx, o.ID, false) {
+				continue // someone else announced it meanwhile
 			}
 			if o.Seller == b.Seller {
 				b.notify(ctx, "orders", b.orderCard(ctx, o), orderButtons(o.ID))
@@ -1119,12 +1154,14 @@ func (b *Bot) announceOrders(ctx context.Context) {
 					b.send(ctx, chat, b.orderCard(ctx, o), orderButtons(o.ID))
 				}
 			}
-			b.Store.MarkOrderAnnounced(ctx, o.ID, false)
 		}
 	}
 	if done, err := b.Store.DeliveriesToAnnounce(ctx); err == nil {
 		for _, o := range done {
 			if !b.handles(o.Seller) {
+				continue
+			}
+			if !b.Store.ClaimOrderAnnounce(ctx, o.ID, true) {
 				continue
 			}
 			chat, ok := hubcore.TgChatOfBuyer(o.Buyer)
@@ -1141,7 +1178,6 @@ func (b *Bot) announceOrders(ctx context.Context) {
 					b.send(ctx, chat, msg, &Keyboard{Rows: [][]Button{row(cbBtn("💬 پشتیبانی", "support"), cbBtn("« منو", "home"))}})
 				}
 			}
-			b.Store.MarkOrderAnnounced(ctx, o.ID, true)
 		}
 	}
 }
