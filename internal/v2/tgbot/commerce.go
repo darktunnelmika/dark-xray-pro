@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"strconv"
 	"strings"
 
@@ -184,23 +185,105 @@ func (b *Bot) invite(ctx context.Context, chat int64) {
 	}
 	user, _ := b.API.Me(ctx)
 	link := fmt.Sprintf("https://t.me/%s?start=ref_%s", user, sum.Code)
-	var how []string
+	var you []string
 	if pol.Percent > 0 {
-		how = append(how, fmt.Sprintf("%s٪ مبلغ هر خرید او", faInt(pol.Percent)))
+		you = append(you, fmt.Sprintf("%s٪ مبلغ خرید او به کیف پولتان", faInt(pol.Percent)))
 	}
 	if pol.Fixed > 0 {
-		how = append(how, fmt.Sprintf("%d⭐ برای هر خرید استارزی", pol.Fixed))
+		you = append(you, fmt.Sprintf("%d⭐ برای هر خرید استارزی", pol.Fixed))
 	}
-	first := ""
-	if pol.FirstOnly {
-		first = " (فقط اولین خرید هر دوست)"
+	if pol.BonusGB > 0 {
+		you = append(you, fmt.Sprintf("%s گیگ هدیه روی سرویس‌تان (با اولین خرید هر دوست)", faInt(pol.BonusGB)))
+	}
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "👥 <b>دعوت دوستان</b>\n%s\n", line)
+	if len(you) > 0 {
+		first := ""
+		if pol.FirstOnly && (pol.Percent > 0 || pol.Fixed > 0) {
+			first = "\n(پاداش پولی فقط برای اولین خرید هر دوست)"
+		}
+		fmt.Fprintf(&sb, "🎁 <b>سهم شما</b> از هر دوستی که با لینک شما بیاید و خرید کند:\n• %s%s\n", strings.Join(you, "\n• "), first)
+	}
+	if pol.InviteePercent > 0 {
+		fmt.Fprintf(&sb, "\n🎉 <b>سهم دوستتان:</b> %s٪ تخفیف روی اولین خرید\n", faInt(pol.InviteePercent))
+	}
+	fmt.Fprintf(&sb, "\nلینک شما (روی آن بزنید تا کپی شود):\n<code>%s</code>\n", esc(link))
+
+	list, _ := b.Store.Invitees(ctx, chat, 500)
+	bought := 0
+	var bytes int64
+	for _, v := range list {
+		if v.Bought > 0 {
+			bought++
+		}
+		bytes += v.Bytes
 	}
 	earned := faMoney(sum.EarnedToman) + " تومان"
 	if sum.Earned > 0 {
 		earned += fmt.Sprintf(" + %d⭐", sum.Earned)
 	}
-	b.send(ctx, chat, fmt.Sprintf("👥 <b>دعوت دوستان</b>\n%s\nهر دوستی که با لینک شما بیاید و خرید کند، %s%s به کیف پول شما اضافه می‌شود و می‌توانید با آن سرویس بخرید یا تمدید کنید.\n\nلینک شما (روی آن بزنید تا کپی شود):\n<code>%s</code>\n\nدعوت‌شده‌ها: <b>%s نفر</b>\nدرآمد تا امروز: <b>%s</b>",
-		line, strings.Join(how, " + "), first, esc(link), faInt(int64(sum.Invited)), earned), homeKB)
+	if bytes > 0 {
+		earned += " + " + faGB(bytes) + " گیگ"
+	}
+	fmt.Fprintf(&sb, "\n📊 دعوت‌شده‌ها: <b>%s نفر</b> · خرید کرده: <b>%s</b>\n💰 درآمد تا امروز: <b>%s</b>\n",
+		faInt(int64(len(list))), faInt(int64(bought)), earned)
+	if len(list) > 0 {
+		sb.WriteString("\n<b>آخرین دعوت‌شده‌ها</b>\n")
+		for i, v := range list {
+			if i == 10 {
+				fmt.Fprintf(&sb, "… و %s نفر دیگر\n", faInt(int64(len(list)-10)))
+				break
+			}
+			name := v.Name
+			if name == "" {
+				name = "کاربر"
+			}
+			if r := []rune(name); len(r) > 18 {
+				name = string(r[:18]) + "…"
+			}
+			state := "👋 عضو شد"
+			switch {
+			case v.Bought > 0:
+				state = "✅ خرید کرد"
+				var got []string
+				if v.Toman > 0 {
+					got = append(got, faMoney(v.Toman)+" ت")
+				}
+				if v.Stars > 0 {
+					got = append(got, fmt.Sprintf("%d⭐", v.Stars))
+				}
+				if v.Bytes > 0 {
+					got = append(got, faGB(v.Bytes)+" گیگ")
+				}
+				if len(got) > 0 {
+					state += " · +" + strings.Join(got, " + ")
+				}
+			case v.Trial:
+				state = "🧪 تست گرفت"
+			}
+			fmt.Fprintf(&sb, "• %s — %s\n", esc(name), state)
+		}
+	} else {
+		sb.WriteString("\nهنوز کسی با لینک شما نیامده. لینک را برای دوستانتان بفرستید 👇\n")
+	}
+	pitch := "🚀 من از دارک وی‌پی‌ان استفاده می‌کنم: سریع، پایدار و با تحویل خودکار."
+	if pol.InviteePercent > 0 {
+		pitch += fmt.Sprintf(" با این لینک وارد شوی، روی اولین خریدت %s٪ تخفیف می‌گیری 🎁", faInt(pol.InviteePercent))
+	}
+	share := "https://t.me/share/url?url=" + url.QueryEscape(link) + "&text=" + url.QueryEscape(pitch)
+	b.send(ctx, chat, strings.TrimRight(sb.String(), "\n"), &Keyboard{Rows: [][]Button{
+		row(urlBtn("📤 ارسال لینک برای دوستان", share)),
+		row(cbBtn("🔄 به‌روزرسانی", "invite"), cbBtn("« منوی اصلی", "home")),
+	}})
+}
+
+// faGB writes bytes as gigabytes for people: "۵" or "۰٫۵".
+func faGB(n int64) string {
+	g := float64(n) / (1 << 30)
+	if g == float64(int64(g)) {
+		return faInt(int64(g))
+	}
+	return strings.ReplaceAll(faNum(strconv.FormatFloat(g, 'f', 1, 64)), ".", "٫")
 }
 
 // account is "my account": who the customer is here and what they have.

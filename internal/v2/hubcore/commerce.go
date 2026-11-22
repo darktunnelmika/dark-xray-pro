@@ -85,6 +85,9 @@ func (s *Store) ensureCommerceSchema() error {
 	if _, err := s.db.Exec(`INSERT OR IGNORE INTO trial_claims(seller,chat_id,email,unix) SELECT '',chat_id,email,unix FROM tg_trials`); err != nil {
 		return err
 	}
+	if _, err := s.db.Exec(refBonusSchema); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -105,6 +108,12 @@ type ReferralPolicy struct {
 	Fixed     int64 `json:"fixed"`      // Stars per qualifying order
 	FirstOnly bool  `json:"first_only"` // only the invited customer's first purchase
 	MaxReward int64 `json:"max_reward"` // per order, 0 = no cap
+	// InviteePercent: the invited customer's discount on their first
+	// purchase (0 = none).
+	InviteePercent int64 `json:"invitee_percent"`
+	// BonusGB: gigabytes added to the inviter's service for each invited
+	// customer's first purchase (0 = none).
+	BonusGB int64 `json:"bonus_gb"`
 }
 
 // Bytes is the trial's volume; -1 means unlimited.
@@ -182,6 +191,9 @@ func (s *Store) ReferralPolicy(ctx context.Context) ReferralPolicy {
 func (s *Store) PutReferralPolicy(ctx context.Context, p ReferralPolicy) error {
 	if p.Percent < 0 || p.Percent > 100 || p.Fixed < 0 || p.Fixed > 100000 || p.MaxReward < 0 {
 		return fmt.Errorf("%w: percent 0-100, fixed 0-100000 Stars", ErrInvalid)
+	}
+	if p.InviteePercent < 0 || p.InviteePercent > 90 || p.BonusGB < 0 || p.BonusGB > 1000 {
+		return fmt.Errorf("%w: the invited customer's discount is 0-90%%, the bonus 0-1000 GB", ErrInvalid)
 	}
 	b, _ := json.Marshal(p)
 	return s.SetSetting(ctx, "referral_policy", string(b))

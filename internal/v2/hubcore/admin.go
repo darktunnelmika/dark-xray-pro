@@ -1187,6 +1187,10 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 		err := s.PutReferralPolicy(r.Context(), in)
 		reply(w, map[string]bool{"ok": err == nil}, err)
 	}))
+	mux.HandleFunc("GET /api/v2/admin/tg/referral/stats", guard(func(w http.ResponseWriter, r *http.Request) {
+		st, err := s.ReferralStatsAll(r.Context(), 10)
+		reply(w, st, err)
+	}))
 	mux.HandleFunc("GET /api/v2/admin/tg/wallet/{chat}", guard(func(w http.ResponseWriter, r *http.Request) {
 		chat, _ := strconv.ParseInt(r.PathValue("chat"), 10, 64)
 		hist, err := s.WalletHistory(r.Context(), chat, 50)

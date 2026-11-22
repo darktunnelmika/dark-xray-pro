@@ -347,8 +347,8 @@ WHERE (?='owner' OR (o.seller=? AND o.seller<>'')) AND (?='' OR o.status=?) ORDE
 // representative's credit; insufficient credit leaves the order pending.
 func (s *Store) FulfillOrder(ctx context.Context, by Principal, id int64) (string, error) {
 	var o Order
-	err := s.ro.QueryRowContext(ctx, `SELECT product_id,seller,client_email,renew,status FROM orders WHERE id=?`, id).
-		Scan(&o.ProductID, &o.Seller, &o.ClientEmail, &o.Renew, &o.Status)
+	err := s.ro.QueryRowContext(ctx, `SELECT product_id,seller,buyer,client_email,renew,status FROM orders WHERE id=?`, id).
+		Scan(&o.ProductID, &o.Seller, &o.Buyer, &o.ClientEmail, &o.Renew, &o.Status)
 	if err != nil || !canSell(by, o.Seller) {
 		return "", ErrNotFound
 	}
@@ -414,6 +414,16 @@ func (s *Store) FulfillOrder(ctx context.Context, by Principal, id int64) (strin
 		rewardHook(referrer, reward, 0)
 	} else if referrer, toman := s.rewardReferralToman(ctx, id); toman > 0 && rewardHook != nil {
 		rewardHook(referrer, 0, toman)
+	}
+	if referrer, bytes, to := s.rewardReferralBonus(ctx, id); bytes > 0 && bonusHook != nil {
+		bonusHook(referrer, bytes, to)
+	}
+	if o.Seller == "" && email != "" {
+		if chat, ok := TgChatOfBuyer(o.Buyer); ok {
+			if bytes := s.applyPendingRefBonus(ctx, chat, email); bytes > 0 && bonusHook != nil {
+				bonusHook(chat, bytes, email)
+			}
+		}
 	}
 	return email, nil
 }

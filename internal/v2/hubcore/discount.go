@@ -181,11 +181,12 @@ func (s *Store) HoldDiscount(ctx context.Context, buyer, code, productID string)
 // HeldDiscount is the code a buyer holds for productID, if it still works.
 func (s *Store) HeldDiscount(ctx context.Context, buyer, productID string) (Discount, bool) {
 	var code string
-	if s.ro.QueryRowContext(ctx, `SELECT code FROM discount_pending WHERE buyer=? AND unix>?`, buyer, s.now().Unix()-3600).Scan(&code) != nil {
-		return Discount{}, false
+	if s.ro.QueryRowContext(ctx, `SELECT code FROM discount_pending WHERE buyer=? AND unix>?`, buyer, s.now().Unix()-3600).Scan(&code) == nil {
+		if d, err := s.checkDiscount(ctx, s.ro, code, productID, buyer); err == nil {
+			return d, true // a code the customer typed wins over the invite gift
+		}
 	}
-	d, err := s.checkDiscount(ctx, s.ro, code, productID, buyer)
-	return d, err == nil
+	return s.inviteDiscount(ctx, buyer, productID)
 }
 
 // Discounted is the price after a code: toman and Stars.
@@ -207,6 +208,10 @@ func (s *Store) applyHeldDiscount(ctx context.Context, orderID int64, buyer, pro
 		return
 	}
 	after, _ := d.Discounted(price, 0)
+	if d.Code == InviteCode {
+		_, _ = s.db.ExecContext(ctx, `UPDATE orders SET discount_code=?, discount_percent=?, discount=?, amount=? WHERE id=?`, d.Code, d.Percent, price-after, after, orderID)
+		return
+	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return

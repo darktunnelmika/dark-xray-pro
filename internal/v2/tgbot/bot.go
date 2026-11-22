@@ -102,6 +102,13 @@ func (b *Bot) init() {
 			}
 			b.send(context.Background(), referrer, "🎉 یکی از دوستانی که دعوت کردید خرید کرد: "+what+" به کیف پول شما اضافه شد.", nil)
 		})
+		hubcore.SetRefBonusHook(func(chat, bytes int64, email string) {
+			if email == "" {
+				b.send(context.Background(), chat, "🎁 یکی از دوستانی که دعوت کردید خرید کرد: <b>"+faGB(bytes)+" گیگ</b> هدیه برای شما کنار گذاشته شد و روی خرید یا تمدید بعدی‌تان اضافه می‌شود.", nil)
+				return
+			}
+			b.send(context.Background(), chat, "🎁 <b>"+faGB(bytes)+" گیگ</b> هدیهٔ دعوت به سرویس <code>"+esc(email)+"</code> اضافه شد.", nil)
+		})
 	}
 }
 
@@ -342,7 +349,11 @@ func (b *Bot) onMessage(ctx context.Context, m *Message) {
 			return
 		}
 		if referrer, err := b.Store.AttributeReferral(ctx, chat, code); err == nil {
-			b.send(ctx, referrer, "👥 "+esc(name)+" با لینک دعوت شما وارد شد. با اولین خریدش اعتبار می‌گیرید.", nil)
+			b.send(ctx, referrer, "👥 "+esc(name)+" با لینک دعوت شما وارد شد. با اولین خریدش پاداش می‌گیرید.", &Keyboard{Rows: [][]Button{row(cbBtn("👥 دعوت‌شده‌های من", "invite"))}})
+			if pct := b.Store.InviteGift(ctx, chat); pct > 0 {
+				b.send(ctx, chat, fmt.Sprintf("🎁 <b>خوش آمدید!</b>\nچون با لینک دعوت یکی از دوستانتان آمده‌اید، روی <b>اولین خریدتان %s٪ تخفیف</b> دارید. تخفیف خودکار روی قیمت اعمال می‌شود.", faInt(pct)),
+					&Keyboard{Rows: [][]Button{row(cbBtn("🛍 خرید اشتراک", "shop"))}})
+			}
 		}
 		b.menu(ctx, chat)
 		return

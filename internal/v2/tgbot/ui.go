@@ -398,7 +398,11 @@ func (b *Bot) showProduct(ctx context.Context, chat int64, id string) {
 			if d.Percent == 0 {
 				q.PriceStars = p.PriceStars
 			}
-			price = "<s>" + productPrice(p) + "</s> ← <b>" + productPrice(q) + "</b> 🎟 " + esc(d.Code)
+			tag := "🎟 " + esc(d.Code)
+			if d.Code == hubcore.InviteCode {
+				tag = "🎁 هدیهٔ دعوت"
+			}
+			price = "<s>" + productPrice(p) + "</s> ← <b>" + productPrice(q) + "</b> " + tag
 		}
 		text := fmt.Sprintf("📦 <b>%s</b>\n%s\n📶 حجم: <b>%s</b>\n⏳ مدت: <b>%s روز</b>\n💳 قیمت: %s\n\n✅ همهٔ سرورها · ⚡ تحویل خودکار · 🔗 یک لینک برای همه",
 			esc(p.Name), line, map[bool]string{true: faInt(p.GB) + " گیگ", false: "نامحدود"}[p.Plan == "volume"], faInt(p.Days), price)

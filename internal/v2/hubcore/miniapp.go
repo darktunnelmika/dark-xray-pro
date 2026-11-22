@@ -288,7 +288,8 @@ func registerMiniApp(mux *http.ServeMux, s *Store) {
 		}
 		if rp := s.ReferralPolicy(r.Context()); seller == "" && rp.Enabled {
 			if sum, err := s.ReferralSummary(r.Context(), u.ID); err == nil {
-				out["referral"] = map[string]any{"code": sum.Code, "invited": sum.Invited, "earned": sum.Earned, "percent": rp.Percent, "fixed": rp.Fixed, "first_only": rp.FirstOnly}
+				out["referral"] = map[string]any{"code": sum.Code, "invited": sum.Invited, "earned": sum.Earned, "percent": rp.Percent, "fixed": rp.Fixed, "first_only": rp.FirstOnly,
+					"invitee_percent": rp.InviteePercent, "bonus_gb": rp.BonusGB, "gift": s.InviteGift(r.Context(), u.ID)}
 			}
 		}
 		reply(w, out, nil)
