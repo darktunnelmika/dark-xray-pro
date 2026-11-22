@@ -196,3 +196,71 @@ func (s *Store) SetSellerPolicy(ctx context.Context, parent, child string, p Rep
 	p.PriceGB, p.PriceUnit = 0, 0
 	return s.SetRepPolicy(ctx, child, p)
 }
+
+// CreateSeller makes a sub-seller of parent with its login, limits, a first
+// transfer of the parent's credit and its Telegram ids, all or nothing.
+func (s *Store) CreateSeller(ctx context.Context, actor, parent string, in RepCreate) error {
+	in.ID = strings.ToLower(strings.TrimSpace(in.ID))
+	in.Username = strings.ToLower(strings.TrimSpace(in.Username))
+	in.Password = strings.TrimSpace(in.Password)
+	if in.Username == "" {
+		in.Username = in.ID
+	}
+	if !idRE.MatchString(in.ID) {
+		return fmt.Errorf("%w: the id may only have lowercase letters, digits, dot, dash and underscore", ErrInvalid)
+	}
+	if !s.RepNameFree(ctx, in.ID) {
+		return fmt.Errorf("%w: a reseller or a sign-in name %q already exists", ErrInvalid, in.ID)
+	}
+	if !idRE.MatchString(in.Username) {
+		return fmt.Errorf("%w: the sign-in name may only have lowercase letters, digits, dot, dash and underscore", ErrInvalid)
+	}
+	var n int
+	if _ = s.ro.QueryRowContext(ctx, `SELECT COUNT(*) FROM admins WHERE username=?`, in.Username).Scan(&n); n != 0 {
+		return fmt.Errorf("%w: this sign-in name is already used by another account", ErrInvalid)
+	}
+	if len(in.Password) < 10 {
+		return fmt.Errorf("%w: the password needs at least 10 characters", ErrInvalid)
+	}
+	if in.CreditGB < 0 || in.Units < 0 {
+		return fmt.Errorf("%w: credit cannot be negative", ErrInvalid)
+	}
+	volume := int64(in.CreditGB * (1 << 30))
+	// Know before anything is made that the parent can afford the first credit.
+	var have, haveUnits int64
+	_ = s.ro.QueryRowContext(ctx, `SELECT volume_credit,unlimited_units FROM reps WHERE id=?`, parent).Scan(&have, &haveUnits)
+	if volume > have || in.Units > haveUnits {
+		return ErrCredit
+	}
+	if strings.TrimSpace(in.Name) == "" {
+		in.Name = in.ID
+	}
+	if err := s.PutSeller(ctx, parent, Rep{ID: in.ID, Name: strings.TrimSpace(in.Name), Enabled: true}, in.Username, in.Password); err != nil {
+		if s.IsSellerOf(ctx, parent, in.ID) { // made, then its login was refused
+			_, _ = s.db.ExecContext(ctx, `DELETE FROM admins WHERE role='rep' AND rep_id=?`, in.ID)
+			_, _ = s.DeleteRep(ctx, in.ID, false)
+		}
+		return err
+	}
+	undo := func(err error) error {
+		_, _ = s.db.ExecContext(ctx, `DELETE FROM admins WHERE role='rep' AND rep_id=?`, in.ID)
+		_, _ = s.DeleteRep(ctx, in.ID, false)
+		return err
+	}
+	if in.Policy != nil {
+		if err := s.SetSellerPolicy(ctx, parent, in.ID, *in.Policy); err != nil {
+			return undo(err)
+		}
+	}
+	if len(in.TgOwners) > 0 {
+		if err := s.SetTgRepOwners(ctx, in.ID, in.TgOwners); err != nil {
+			return undo(err)
+		}
+	}
+	if volume > 0 || in.Units > 0 {
+		if err := s.TransferCredit(ctx, actor, parent, in.ID, volume, in.Units, "first credit"); err != nil {
+			return undo(err)
+		}
+	}
+	return nil
+}

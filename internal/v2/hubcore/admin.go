@@ -570,6 +570,69 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 		}
 		reply(w, list, err)
 	}))
+	// What a reseller can hand to a new sub-seller: its own credit and limits.
+	mux.HandleFunc("GET /api/v2/rep/sellers-limits", repOnly(func(w http.ResponseWriter, r *http.Request) {
+		rep := who(r).RepID
+		pol, err := s.RepPolicyOf(r.Context(), rep)
+		pol.PriceGB, pol.PriceUnit = 0, 0
+		var units int64
+		_ = s.ro.QueryRowContext(r.Context(), `SELECT unlimited_units FROM reps WHERE id=?`, rep).Scan(&units)
+		reply(w, map[string]any{"VolumeCredit": s.RepCredit(r.Context(), rep), "UnlimitedUnits": units, "Policy": pol}, err)
+	}))
+	mux.HandleFunc("POST /api/v2/rep/sellers", repOnly(func(w http.ResponseWriter, r *http.Request) {
+		var in RepCreate
+		if !decode(w, r, &in) {
+			return
+		}
+		in.ManageProducts = nil // sub-sellers sell their reseller's plans
+		p := who(r)
+		err := s.CreateSeller(r.Context(), p.User, p.RepID, in)
+		reply(w, map[string]bool{"ok": err == nil}, err)
+	}))
+	mux.HandleFunc("GET /api/v2/rep/sellers/{id}/login", repOnly(func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		if !s.IsSellerOf(r.Context(), who(r).RepID, id) {
+			reply(w, nil, ErrNotFound)
+			return
+		}
+		reply(w, map[string]any{"usernames": s.RepLogins(r.Context(), id), "telegram": s.TgRepOwners(r.Context(), id)}, nil)
+	}))
+	mux.HandleFunc("PUT /api/v2/rep/sellers/{id}/login", repOnly(func(w http.ResponseWriter, r *http.Request) {
+		var in struct{ Username, Password string }
+		id := r.PathValue("id")
+		if !decode(w, r, &in) {
+			return
+		}
+		if !s.IsSellerOf(r.Context(), who(r).RepID, id) {
+			reply(w, nil, ErrNotFound)
+			return
+		}
+		user := strings.ToLower(strings.TrimSpace(in.Username))
+		if user == "" {
+			if l := s.RepLogins(r.Context(), id); len(l) > 0 {
+				user = l[0]
+			} else {
+				user = id
+			}
+		}
+		err := s.SetRepLogin(r.Context(), user, in.Password, id)
+		reply(w, map[string]any{"ok": err == nil, "username": user}, err)
+	}))
+	mux.HandleFunc("PUT /api/v2/rep/sellers/{id}/bot-owners", repOnly(func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Owners []int64 `json:"owners"`
+		}
+		id := r.PathValue("id")
+		if !decode(w, r, &in) {
+			return
+		}
+		if !s.IsSellerOf(r.Context(), who(r).RepID, id) {
+			reply(w, nil, ErrNotFound)
+			return
+		}
+		err := s.SetTgRepOwners(r.Context(), id, in.Owners)
+		reply(w, map[string]bool{"ok": err == nil}, err)
+	}))
 	mux.HandleFunc("PUT /api/v2/rep/sellers/{id}", repOnly(func(w http.ResponseWriter, r *http.Request) {
 		var in struct {
 			Name, Username, Password string

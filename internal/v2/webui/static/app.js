@@ -179,6 +179,11 @@ const FA_ERRS = [
   [/client already exists/i, "این نام قبلاً استفاده شده است"],
   [/the name may use only/i, "نام فقط حروف انگلیسی، عدد و . _ - باشد (بدون فاصله)"],
   [/insufficient credit/i, "اعتبار کافی نیست"],
+  [/password needs at least 10/i, "رمز باید حداقل ۱۰ نویسه باشد"],
+  [/already used by another account|that username is taken/i, "این نام کاربری را حساب دیگری دارد؛ نام دیگری انتخاب کنید"],
+  [/a reseller or a sign-in name .* already exists|that ID is taken/i, "این شناسه قبلاً گرفته شده است؛ شناسهٔ دیگری انتخاب کنید"],
+  [/may only have lowercase letters/i, "فقط حروف کوچک انگلیسی، عدد، نقطه، خط تیره و زیرخط مجاز است"],
+  [/at most (\d+) Telegram ids/i, "حداکثر $1 شناسهٔ تلگرام می‌شود وارد کرد"],
   [/the longest term allowed is (\d+) days/i, "بیشترین مدت مجاز برای شما $1 روز است"],
   [/the largest volume allowed is (\d+) GB/i, "بیشترین حجم مجاز برای شما $1 گیگ است"],
   [/unlimited plans are not allowed/i, "فروش نامحدود برای شما فعال نیست"],
@@ -3681,48 +3686,31 @@ function showRepLogin(title, user, pass, name) {
     box, h("div", { class: "row" }, h("button", { class: "primary", type: "button", onclick: () => copy(box.value) }, fa ? "کپی پیام" : "Copy message"))));
 }
 
-function repForm(r) {
-  if (me.role === "owner") return r ? repEditForm(r) : repCreateForm();
-  // A reseller's own sub-seller: name, on/off and its login.
-  const fa = lang === "fa";
-  const id = h("input", { required: true, pattern: "[a-z0-9][a-z0-9._\\-]{0,62}", value: r ? r.ID : "", disabled: !!r });
-  const name = h("input", { value: r ? r.Name : "" });
-  const en = h("input", { type: "checkbox", checked: r ? r.Enabled : true });
-  const user = h("input", { autocomplete: "off", dir: "ltr", pattern: "[a-z0-9][a-z0-9._\\-]{0,62}" });
-  const pass = passwordField();
-  const err = h("div", { class: "error" });
-  const save = h("button", { class: "primary", value: "save", onclick: async (e) => {
-    e.preventDefault(); err.textContent = "";
-    if (!id.reportValidity()) return;
-    const pw = pass.get();
-    if (!r && !pw) { err.textContent = fa ? "برای ورود زیرفروشنده یک رمز بگذارید (دکمهٔ رمز تصادفی)." : "Set a password for the sub-seller (use Random)."; return; }
-    if (pw && pw.length < 10) { err.textContent = fa ? "رمز باید حداقل ۱۰ نویسه باشد." : "The password needs at least 10 characters."; return; }
-    const u = (user.value.trim() || id.value).toLowerCase();
-    try {
-      await api("PUT", `${repBase()}/${encodeURIComponent(id.value)}`, { Name: name.value, Enabled: en.checked, Username: pw ? u : "", Password: pw });
-      document.getElementById("modal").close("save"); route();
-      if (pw) showRepLogin(fa ? "اطلاعات ورود" : "Sign-in details", u, pw, name.value || id.value);
-    } catch (x) { err.textContent = x.message; }
-  } }, t("save"));
-  openModal(r ? `${t("edit")} · ${r.ID}` : `${t("add")} · ${t("reps")}`, h("div", { class: "form" },
-    h("div", { class: "two" }, h("label", {}, h("span", {}, t("repId")), id), h("label", {}, h("span", {}, t("name")), name)),
-    h("label", { class: "check" }, en, t("enabled")),
-    h("label", {}, h("span", {}, t("loginUser")), user),
-    h("label", {}, h("span", {}, r ? (fa ? "رمز جدید (خالی = بدون تغییر)" : "New password (empty keeps it)") : t("loginPass")), pass.el), err), [save]);
-}
+function repForm(r) { return r ? repEditForm(r) : repCreateForm(); }
 
 // repCreateForm: everything a new reseller needs on one page, saved in one go.
 async function repCreateForm() {
   const fa = lang === "fa";
-  const [inbounds, sale] = await Promise.all([api("GET", "/api/v2/admin/inbounds").catch(() => []), api("GET", "/api/v2/admin/rep-sale").catch(() => ({ packages: [] }))]);
+  // A reseller opening a sub-seller hands out part of its own credit and
+  // never more rights than it has itself.
+  const sub = me.role === "rep";
+  const [inbounds, sale, mine] = await Promise.all([api("GET", sub ? "/api/v2/rep/inbounds" : "/api/v2/admin/inbounds").catch(() => []),
+    sub ? null : api("GET", "/api/v2/admin/rep-sale").catch(() => ({ packages: [] })), sub ? api("GET", "/api/v2/rep/sellers-limits").catch(() => null) : null]);
   const pkgs = (sale && sale.packages) || [];
+  const lim = (mine && mine.Policy) || null;
   const num = (v, step = "1") => h("input", { type: "number", min: "0", step, value: v || 0, dir: "ltr" });
   const box = (v) => h("input", { type: "checkbox", checked: !!v });
   const id = h("input", { required: true, dir: "ltr", autocapitalize: "off", pattern: "[a-z0-9][a-z0-9._\\-]{0,62}", placeholder: "arda" });
   const name = h("input", {});
   const user = h("input", { dir: "ltr", autocapitalize: "off", autocomplete: "off", pattern: "[a-z0-9][a-z0-9._\\-]{0,62}", placeholder: fa ? "خالی = همان شناسه" : "empty = the id" });
   const pass = passwordField(); pass.inp.value = randomPassword();
-  const f = { gb: num(0), units: num(0), mc: num(0), md: num(0), mg: num(0), au: box(true), cd: box(true), ru: box(false), mp: box(true) };
+  const f = { gb: num(0), units: num(0), mc: num(lim ? lim.MaxClients : 0), md: num(lim ? lim.MaxDays : 0), mg: num(lim ? lim.MaxClientGB : 0),
+    au: box(lim ? lim.AllowUnlimited : true), cd: box(lim ? lim.CanDelete : true), ru: box(lim ? lim.RefundUnused : false), mp: box(true) };
+  if (lim) { // what the reseller may not do, its sub-seller cannot either
+    for (const [el, ok] of [[f.au, lim.AllowUnlimited], [f.cd, lim.CanDelete], [f.ru, lim.RefundUnused]]) if (!ok) el.disabled = true;
+    for (const [el, max] of [[f.mc, lim.MaxClients], [f.md, lim.MaxDays], [f.mg, lim.MaxClientGB]]) if (max > 0) el.max = String(max);
+  }
+  const haveGB = mine ? Math.floor((mine.VolumeCredit || 0) / 2 ** 30) : 0;
   const tags = [...new Set((inbounds || []).map((ib) => ib.tag))];
   const ibBoxes = tags.map((tag) => h("label", { class: "check" }, h("input", { type: "checkbox", value: tag }), tag));
   const tg = idList([]);
@@ -3744,37 +3732,39 @@ async function repCreateForm() {
     const re = /^[a-z0-9][a-z0-9._-]{0,62}$/;
     const bad = !re.test(rid) ? (fa ? "شناسه فقط حروف کوچک انگلیسی، عدد، نقطه، خط تیره و زیرخط می‌پذیرد." : "The id takes lowercase letters, digits, dot, dash and underscore only.")
       : !re.test(u) ? (fa ? "نام کاربری فقط حروف کوچک انگلیسی، عدد، نقطه، خط تیره و زیرخط می‌پذیرد." : "The sign-in name takes lowercase letters, digits, dot, dash and underscore only.")
-      : pw.length < 10 ? (fa ? "رمز باید حداقل ۱۰ نویسه باشد. دکمهٔ «رمز تصادفی» یک رمز مناسب می‌سازد." : "The password needs at least 10 characters. “Random” makes a good one.") : "";
+      : pw.length < 10 ? (fa ? "رمز باید حداقل ۱۰ نویسه باشد. دکمهٔ «رمز تصادفی» یک رمز مناسب می‌سازد." : "The password needs at least 10 characters. “Random” makes a good one.")
+      : sub && (+f.gb.value || 0) > haveGB ? (fa ? `اعتبار شما ${fmtNum(haveGB)} گیگ است؛ بیشتر از آن نمی‌شود منتقل کرد.` : `You have ${haveGB} GB of credit; you cannot hand out more.`)
+      : sub && (+f.units.value || 0) > (mine ? mine.UnlimitedUnits || 0 : 0) ? (fa ? `شما ${fmtNum(mine ? mine.UnlimitedUnits || 0 : 0)} واحد نامحدود دارید.` : `You have ${mine ? mine.UnlimitedUnits || 0 : 0} unlimited units.`) : "";
     if (bad) { err.textContent = bad; return; }
     save.disabled = true;
     try {
-      await api("POST", "/api/v2/admin/reps", { ID: rid, Name: name.value.trim(), Username: u, Password: pw,
+      await api("POST", sub ? "/api/v2/rep/sellers" : "/api/v2/admin/reps", { ID: rid, Name: name.value.trim(), Username: u, Password: pw,
         Policy: { MaxClients: +f.mc.value || 0, MaxDays: +f.md.value || 0, MaxClientGB: +f.mg.value || 0, AllowUnlimited: f.au.checked, CanDelete: f.cd.checked, RefundUnused: f.ru.checked,
           Inbounds: ibBoxes.map((b) => b.querySelector("input")).filter((i) => i.checked).map((i) => i.value) },
-        ManageProducts: f.mp.checked, CreditGB: +f.gb.value || 0, Units: +f.units.value || 0, TgOwners: tg.get() });
+        ManageProducts: sub ? null : f.mp.checked, CreditGB: +f.gb.value || 0, Units: +f.units.value || 0, TgOwners: tg.get() });
       document.getElementById("modal").close("save"); route();
-      showRepLogin(fa ? `نماینده ساخته شد · ${rid}` : `Reseller created · ${rid}`, u, pw, name.value.trim() || rid);
+      showRepLogin(fa ? `${sub ? "زیرفروشنده" : "نماینده"} ساخته شد · ${rid}` : `${sub ? "Sub-seller" : "Reseller"} created · ${rid}`, u, pw, name.value.trim() || rid);
     } catch (x) {
-      const m = x.message || "";
-      err.textContent = !fa ? m : /already exists/.test(m) ? "نماینده یا نام کاربری‌ای با این شناسه از قبل وجود دارد."
-        : /already used/.test(m) ? "این نام کاربری را حساب دیگری دارد؛ نام دیگری انتخاب کنید."
-        : /at least 10/.test(m) ? "رمز باید حداقل ۱۰ نویسه باشد." : /at most/.test(m) ? "حداکثر ۱۰ شناسهٔ تلگرام می‌شود وارد کرد." : m;
+      err.textContent = x.message || "";
     } finally { save.disabled = false; }
-  } }, fa ? "ساخت نماینده" : "Create reseller");
-  const d = openModal(fa ? "نمایندهٔ جدید" : "New reseller", h("div", { class: "form" },
+  } }, fa ? (sub ? "ساخت زیرفروشنده" : "ساخت نماینده") : (sub ? "Create sub-seller" : "Create reseller"));
+  const d = openModal(fa ? (sub ? "زیرفروشندهٔ جدید" : "نمایندهٔ جدید") : (sub ? "New sub-seller" : "New reseller"), h("div", { class: "form" },
     h("h3", { class: "section" }, fa ? "مشخصات و ورود" : "Identity and sign-in"),
     h("div", { class: "two" }, lab(t("repId"), id), lab(t("name"), name)),
     lab(t("loginUser"), user),
     lab(t("loginPass"), pass.el, fa ? "حداقل ۱۰ نویسه. بعد از ساخت، در یک پیام آماده نشان داده می‌شود." : "At least 10 characters. Shown in a ready message after saving."),
     h("h3", { class: "section" }, fa ? "اعتبار و محدودیت‌ها" : "Credit and limits"),
     pkgs.length ? lab(fa ? "بسته" : "Package", pkgSel, fa ? "با انتخاب بسته، موارد پایین پر می‌شوند و می‌توانید تغییرشان دهید." : "Choosing a package fills the fields below; you can still change them.") : null,
-    h("div", { class: "two" }, lab(`${t("volumeCredit")} (GB)`, f.gb), lab(t("units"), f.units)),
+    sub ? h("p", { class: "small muted" }, fa ? `اعتبار اولیه از اعتبار خود شما کم می‌شود. اعتبار شما: ${fmtNum(haveGB)} گیگ و ${fmtNum(mine ? mine.UnlimitedUnits || 0 : 0)} واحد نامحدود.`
+      : `The first credit comes out of your own. You have ${haveGB} GB and ${mine ? mine.UnlimitedUnits || 0 : 0} unlimited units.`) : null,
+    h("div", { class: "two" }, lab(sub ? (fa ? "انتقال اعتبار اولیه (GB)" : "First credit to hand over (GB)") : `${t("volumeCredit")} (GB)`, f.gb), lab(t("units"), f.units)),
     h("div", { class: "two" }, lab(t("maxClients"), f.mc), lab(t("maxDays"), f.md)),
     lab(t("maxClientGB"), f.mg, fa ? "صفر یعنی بدون سقف." : "Zero means no limit."),
     h("label", { class: "check" }, f.au, t("allowUnlimited")),
     h("label", { class: "check" }, f.cd, t("canDelete")),
     h("label", { class: "check" }, f.ru, t("refundUnused")),
-    h("label", { class: "check" }, f.mp, t("manageProducts")),
+    sub ? null : h("label", { class: "check" }, f.mp, t("manageProducts")),
+    sub && lim ? h("p", { class: "small muted" }, fa ? "گزینه‌های خاموش را خود شما هم ندارید؛ زیرفروشنده بیشتر از شما اجازه نمی‌گیرد." : "Greyed-out options are ones you do not have yourself; a sub-seller never gets more than you.") : null,
     tags.length ? h("fieldset", { class: "form", style: "border:0;padding:0;margin:0" }, h("legend", { class: "small muted" }, t("allowedInbounds")), ibBoxes) : null,
     h("h3", { class: "section" }, fa ? "تلگرام" : "Telegram"),
     lab(fa ? "شناسهٔ عددی تلگرام مدیران این پنل (اختیاری)" : "Numeric Telegram ids that manage this panel (optional)", tg.el,
@@ -3793,20 +3783,20 @@ function repEditForm(r) {
   const tg = idList([]);
   const err = h("div", { class: "error", role: "alert" });
   let hadLogin = false;
-  api("GET", `/api/v2/admin/reps/${encodeURIComponent(r.ID)}/login`).then((x) => { hadLogin = !!(x.usernames || []).length; user.value = (x.usernames || [])[0] || r.ID; tg.set(x.telegram || []); }).catch(() => { user.value = r.ID; });
+  const base = `${repBase()}/${encodeURIComponent(r.ID)}`;
+  api("GET", `${base}/login`).then((x) => { hadLogin = !!(x.usernames || []).length; user.value = (x.usernames || [])[0] || r.ID; tg.set(x.telegram || []); }).catch(() => { user.value = r.ID; });
   const save = h("button", { class: "primary", value: "save", onclick: async (e) => {
     e.preventDefault(); err.textContent = "";
     const pw = pass.get(), u = (user.value.trim() || r.ID).toLowerCase();
     if (pw && pw.length < 10) { err.textContent = fa ? "رمز باید حداقل ۱۰ نویسه باشد." : "The password needs at least 10 characters."; return; }
     try {
-      await api("PUT", `/api/v2/admin/reps/${encodeURIComponent(r.ID)}`, { Name: name.value, Enabled: en.checked, Username: "", Password: "" });
-      await api("PUT", `/api/v2/admin/reps/${encodeURIComponent(r.ID)}/bot-owners`, { owners: tg.get() });
-      if (pw) await api("PUT", `/api/v2/admin/reps/${encodeURIComponent(r.ID)}/login`, { Username: u, Password: pw });
+      await api("PUT", base, { Name: name.value, Enabled: en.checked, Username: "", Password: "" });
+      await api("PUT", `${base}/bot-owners`, { owners: tg.get() });
+      if (pw) await api("PUT", `${base}/login`, { Username: u, Password: pw });
       document.getElementById("modal").close("save"); route();
       if (pw) showRepLogin(fa ? `رمز جدید · ${r.ID}` : `New password · ${r.ID}`, u, pw, name.value || r.ID); else toast(t("saved"));
     } catch (x) {
-      const m = x.message || "";
-      err.textContent = fa && /already used/.test(m) ? "این نام کاربری را حساب دیگری دارد؛ نام دیگری انتخاب کنید." : m;
+      err.textContent = x.message || "";
     }
   } }, t("save"));
   openModal(`${t("edit")} · ${r.ID}`, h("div", { class: "form" },

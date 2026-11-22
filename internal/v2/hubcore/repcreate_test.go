@@ -115,3 +115,53 @@ func TestCreateRepAndTelegramOwners(t *testing.T) {
 		t.Fatal("took over another reseller's login", err)
 	}
 }
+
+// A reseller opens a sub-seller in one go, paying its first credit from its own.
+func TestCreateSeller(t *testing.T) {
+	s, _ := newStore(t)
+	ctx := context.Background()
+	pol := RepPolicy{CanDelete: true, MaxDays: 60}
+	if err := s.CreateRep(ctx, "boss", RepCreate{ID: "parent", Password: "parent-pass-99", Policy: &pol, CreditGB: 100}); err != nil {
+		t.Fatal(err)
+	}
+	want := RepPolicy{CanDelete: true, RefundUnused: true, AllowUnlimited: true, MaxDays: 365}
+	in := RepCreate{ID: "kid", Password: "kid-password-1", Policy: &want, CreditGB: 500, TgOwners: []int64{71, 72}}
+	if err := s.CreateSeller(ctx, "parent", "parent", in); !errors.Is(err, ErrCredit) {
+		t.Fatal("more than the parent has", err)
+	}
+	if subs, _ := s.Sellers(ctx, "parent"); len(subs) != 0 || len(s.RepLogins(ctx, "kid")) != 0 {
+		t.Fatal("left behind", subs)
+	}
+	in.CreditGB = 30
+	bad := in
+	bad.Password = "short"
+	if err := s.CreateSeller(ctx, "parent", "parent", bad); !errors.Is(err, ErrInvalid) {
+		t.Fatal(err)
+	}
+	if subs, _ := s.Sellers(ctx, "parent"); len(subs) != 0 {
+		t.Fatal("left behind", subs)
+	}
+	if err := s.CreateSeller(ctx, "parent", "parent", in); err != nil {
+		t.Fatal(err)
+	}
+	subs, _ := s.Sellers(ctx, "parent")
+	if len(subs) != 1 || subs[0].VolumeCredit != 30<<30 {
+		t.Fatalf("%+v", subs)
+	}
+	// Never more than the parent may itself.
+	if p := subs[0].Policy; p.MaxDays != 60 || p.RefundUnused || p.AllowUnlimited || !p.CanDelete {
+		t.Fatalf("%+v", p)
+	}
+	if c := s.RepCredit(ctx, "parent"); c != 70<<30 {
+		t.Fatal(c)
+	}
+	if _, err := s.Login(ctx, "kid", "kid-password-1"); err != nil {
+		t.Fatal(err)
+	}
+	if rep, role := s.TgRepRole(ctx, 72); rep != "kid" || role != "owner" {
+		t.Fatal(rep, role)
+	}
+	if err := s.CreateSeller(ctx, "kid", "kid", RepCreate{ID: "grandkid", Password: "grand-pass-123"}); err == nil {
+		t.Fatal("a sub-seller cannot open sellers")
+	}
+}
