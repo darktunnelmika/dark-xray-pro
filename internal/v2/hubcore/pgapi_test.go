@@ -136,6 +136,11 @@ func TestPasarGuardAPI(t *testing.T) {
 		t.Fatal("the plain list of configs", err, resp.StatusCode)
 	}
 	resp.Body.Close()
+	if resp, err := http.Get(h.URL + su.Path + "/links"); err != nil || resp.StatusCode != 200 {
+		t.Fatal("the panel's own address serves the list too", err)
+	} else {
+		resp.Body.Close()
+	}
 	// Disable, as Mirza does: read, then PUT the status with proxy_settings.
 	if code, out := call("PUT", "/api/user/mz1", tok, map[string]any{"status": "disabled", "proxy_settings": map[string]any{}}); code != 200 || out["status"] != "disabled" {
 		t.Fatalf("disable %d %v", code, out)

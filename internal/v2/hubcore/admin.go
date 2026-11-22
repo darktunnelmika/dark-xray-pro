@@ -2030,6 +2030,7 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 	}))
 	sh := SubHandler(s)
 	mux.Handle("GET /sub/{token}", sh)
+	mux.Handle("GET /sub/{token}/links", sh)
 	mux.Handle("GET /api/v1/", sh) // old-panel subscription URLs
 	mux.Handle("GET /app/", sh)    // Telegram Mini App
 	mux.Handle("POST /app/", sh)

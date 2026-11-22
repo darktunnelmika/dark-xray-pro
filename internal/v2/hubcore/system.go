@@ -17,7 +17,7 @@ import (
 )
 
 // HubVersion is the panel's release; the commit comes from the build.
-const HubVersion = "v2.48.0"
+const HubVersion = "v2.48.1"
 
 var hubStarted = time.Now()
 
