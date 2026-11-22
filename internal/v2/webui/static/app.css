@@ -1079,3 +1079,9 @@ dialog.wide:has(.cform) { inline-size: min(780px, calc(100vw - 20px)); }
 /* Opening screen (splash.js) */
 #splash { position: fixed; inset: 0; inline-size: 100%; block-size: 100%; z-index: 9999; background: #03050a; transition: opacity .4s ease; }
 #splash.out { opacity: 0; pointer-events: none; }
+
+/* Numeric id list: one field per id, ＋ adds, ✕ removes. */
+.id-list { display: grid; gap: 6px; }
+.id-list-wrap { display: grid; gap: 6px; }
+.id-list .row.tight > button, .id-add { flex: none; min-inline-size: 44px; min-block-size: 40px; }
+.id-add { justify-self: start; font-size: 18px; line-height: 1; }

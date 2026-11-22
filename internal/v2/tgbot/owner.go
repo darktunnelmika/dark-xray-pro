@@ -173,6 +173,11 @@ func (b *Bot) ownerCallback(ctx context.Context, chat int64, data string) bool {
 		b.quickSell(ctx, chat, arg(1), "")
 	case "reps":
 		b.repsView(ctx, chat)
+	case "repnew":
+		b.setAwait(chat, "repnew")
+		b.send(ctx, chat, "➕ <b>نمایندهٔ جدید</b>\nنام کاربری پنل را بفرستید (حروف کوچک انگلیسی و عدد، مثل <code>arda</code>).\nرمز را خودم تصادفی می‌سازم.", &Keyboard{Rows: [][]Button{back("a:reps")}})
+	case "repnewp": // a:repnewp:<id>:<package or ->
+		b.repNewCreate(ctx, chat, arg(1), arg(2))
 	case "rc": // a:rc:<rep>:<gb>:<units>
 		g, _ := strconv.ParseFloat(arg(2), 64)
 		u, _ := strconv.ParseInt(arg(3), 10, 64)
@@ -287,6 +292,8 @@ func (b *Bot) ownerInput(ctx context.Context, chat int64, what, text string) boo
 	switch {
 	case strings.HasPrefix(what, "qsname:"):
 		b.quickSell(ctx, chat, strings.TrimPrefix(what, "qsname:"), strings.TrimSpace(text))
+	case what == "repnew":
+		b.repNewAsk(ctx, chat, text)
 	case what == "find":
 		b.findClients(ctx, chat, text)
 	case what == "broadcast":
@@ -715,8 +722,9 @@ func (b *Bot) quickView(ctx context.Context, chat int64) {
 
 func (b *Bot) repsView(ctx context.Context, chat int64) {
 	reps, _ := b.Store.Reps(ctx)
+	newRep := []Button{{Text: "➕ نمایندهٔ جدید", Data: "a:repnew"}}
 	if len(reps) == 0 {
-		b.send(ctx, chat, "نماینده‌ای نیست.", &Keyboard{Rows: [][]Button{back("a:home")}})
+		b.send(ctx, chat, "نماینده‌ای نیست.", &Keyboard{Rows: [][]Button{newRep, back("a:home")}})
 		return
 	}
 	var lines []string
@@ -729,8 +737,56 @@ func (b *Bot) repsView(ctx context.Context, chat int64) {
 		lines = append(lines, fmt.Sprintf("%s <b>%s</b> — اعتبار %s · %d واحد · %d کلاینت", state, esc(r.Name), gb(r.VolumeCredit), r.UnlimitedUnits, r.Clients))
 		kb.Rows = append(kb.Rows, []Button{{Text: r.Name + " +۵۰گ", Data: "a:rc:" + r.ID + ":50:0"}, {Text: "+۱ واحد", Data: "a:rc:" + r.ID + ":0:1"}})
 	}
-	kb.Rows = append(kb.Rows, back("a:home"))
+	kb.Rows = append(kb.Rows, newRep, back("a:home"))
 	b.send(ctx, chat, "💼 <b>نماینده‌ها</b>\n\n"+strings.Join(lines, "\n"), kb)
+}
+
+// repNewAsk shows the packages a new reseller can start with.
+func (b *Bot) repNewAsk(ctx context.Context, chat int64, id string) {
+	id = strings.ToLower(strings.TrimSpace(id))
+	if len(id) > 32 || !b.Store.RepNameFree(ctx, id) {
+		b.setAwait(chat, "repnew")
+		b.send(ctx, chat, "این نام را نمی‌شود گذاشت: یا قبلاً گرفته شده، یا چیزی جز حروف کوچک انگلیسی، عدد، نقطه و خط تیره دارد (حداکثر ۳۲ نویسه).\nیک نام دیگر بفرستید:", &Keyboard{Rows: [][]Button{back("a:reps")}})
+		return
+	}
+	kb := &Keyboard{}
+	for _, p := range b.Store.RepSale(ctx).Packages {
+		name := p.Name
+		if name == "" {
+			name = gbWord(p.GB)
+		}
+		kb.Rows = append(kb.Rows, []Button{{Text: "📦 " + name, Data: "a:repnewp:" + id + ":" + p.ID}})
+	}
+	kb.Rows = append(kb.Rows, []Button{{Text: "بدون بسته (اعتبار صفر، تنظیم پیش‌فرض)", Data: "a:repnewp:" + id + ":-"}}, back("a:reps"))
+	b.send(ctx, chat, fmt.Sprintf("نمایندهٔ <code>%s</code> با کدام بسته ساخته شود؟\nاعتبار و محدودیت‌های بسته همان لحظه روی پنل می‌نشیند.", esc(id)), kb)
+}
+
+// repNewCreate makes the reseller with a random password and shows the
+// message to pass on.
+func (b *Bot) repNewCreate(ctx context.Context, chat int64, id, pkgID string) {
+	in := hubcore.RepCreate{ID: id, Name: id, Password: hubcore.RandomPassword()}
+	credit := "بدون اعتبار"
+	if pkgID != "-" {
+		found := false
+		for _, p := range b.Store.RepSale(ctx).Packages {
+			if p.ID == pkgID {
+				pol := p.Policy()
+				in.Policy, in.CreditGB, in.Units, found = &pol, float64(p.GB), p.Units, true
+				credit = gbWord(p.GB)
+			}
+		}
+		if !found {
+			b.send(ctx, chat, "این بسته دیگر وجود ندارد.", &Keyboard{Rows: [][]Button{back("a:reps")}})
+			return
+		}
+	}
+	if err := b.Store.CreateRep(ctx, "telegram", in); err != nil {
+		b.send(ctx, chat, "ساخته نشد: "+esc(err.Error()), &Keyboard{Rows: [][]Button{back("a:reps")}})
+		return
+	}
+	b.send(ctx, chat, fmt.Sprintf("✅ نمایندهٔ <code>%s</code> ساخته شد (%s).\nپیام زیر را برایش بفرستید؛ رمز دیگر نمایش داده نمی‌شود.", esc(id), credit), nil)
+	b.send(ctx, chat, fmt.Sprintf("🎉 <b>پنل نمایندگی شما آماده است</b>\n\n🌐 آدرس: %s\n👤 نام کاربری: <code>%s</code>\n🔑 رمز: <code>%s</code>\n\nبعد از اولین ورود، رمز را از بخش تنظیمات عوض کنید.",
+		esc(strings.TrimRight(b.SubBase, "/")), esc(id), esc(in.Password)), &Keyboard{Rows: [][]Button{back("a:reps")}})
 }
 
 // backupToGroup posts the backup in the group's backup topic (false = no group).

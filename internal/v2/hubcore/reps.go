@@ -2,6 +2,7 @@ package hubcore
 
 import (
 	"context"
+	"crypto/rand"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -152,6 +153,11 @@ func (s *Store) AdjustCredit(ctx context.Context, actor, repID string, volume, u
 
 // SetRepLogin creates or resets a representative's panel login.
 func (s *Store) SetRepLogin(ctx context.Context, user, pass, repID string) error {
+	// Never take over somebody else's login (the owner's, another reseller's).
+	var role, rid string
+	if err := s.ro.QueryRowContext(ctx, `SELECT role,rep_id FROM admins WHERE username=?`, user).Scan(&role, &rid); err == nil && (role != "rep" || rid != repID) {
+		return fmt.Errorf("%w: this sign-in name is already used by another account", ErrInvalid)
+	}
 	if err := s.SetAdmin(ctx, user, pass); err != nil {
 		return err
 	}
@@ -306,4 +312,114 @@ func (s *Store) ChangePassword(ctx context.Context, user, oldPass, newPass strin
 	}
 	_, err := s.db.ExecContext(ctx, `UPDATE admins SET role=?, rep_id=? WHERE username=?`, role, rep, user)
 	return err
+}
+
+// RepLogins lists the sign-in names of a reseller's panel.
+func (s *Store) RepLogins(ctx context.Context, repID string) []string {
+	rows, err := s.ro.QueryContext(ctx, `SELECT username FROM admins WHERE role='rep' AND rep_id=? ORDER BY created_unix`, repID)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	out := []string{}
+	for rows.Next() {
+		var u string
+		if rows.Scan(&u) == nil {
+			out = append(out, u)
+		}
+	}
+	return out
+}
+
+// RepCreate is everything a new reseller needs, saved in one go.
+type RepCreate struct {
+	ID       string
+	Name     string
+	Username string // sign-in name; empty = the id
+	Password string
+	Policy   *RepPolicy // nil = the default policy
+	// ManageProducts: may define own products (nil = yes).
+	ManageProducts *bool
+	CreditGB       float64
+	Units          int64
+	TgOwners       []int64 // numeric Telegram ids that manage this panel in the bot
+}
+
+// CreateRep makes a reseller with its login, limits, credit and Telegram
+// ids. It is all or nothing: when a later step fails, nothing is left of it.
+func (s *Store) CreateRep(ctx context.Context, actor string, in RepCreate) error {
+	in.ID = strings.ToLower(strings.TrimSpace(in.ID))
+	in.Username = strings.ToLower(strings.TrimSpace(in.Username))
+	in.Password = strings.TrimSpace(in.Password)
+	if in.Username == "" {
+		in.Username = in.ID
+	}
+	if !idRE.MatchString(in.ID) {
+		return fmt.Errorf("%w: the id may only have lowercase letters, digits, dot, dash and underscore", ErrInvalid)
+	}
+	if !s.RepNameFree(ctx, in.ID) {
+		return fmt.Errorf("%w: a reseller or a sign-in name %q already exists", ErrInvalid, in.ID)
+	}
+	if !idRE.MatchString(in.Username) {
+		return fmt.Errorf("%w: the sign-in name may only have lowercase letters, digits, dot, dash and underscore", ErrInvalid)
+	}
+	var n int
+	if _ = s.ro.QueryRowContext(ctx, `SELECT COUNT(*) FROM admins WHERE username=?`, in.Username).Scan(&n); n != 0 {
+		return fmt.Errorf("%w: this sign-in name is already used by another account", ErrInvalid)
+	}
+	if len(in.Password) < 10 {
+		return fmt.Errorf("%w: the password needs at least 10 characters", ErrInvalid)
+	}
+	if in.CreditGB < 0 || in.Units < 0 {
+		return fmt.Errorf("%w: credit cannot be negative", ErrInvalid)
+	}
+	if strings.TrimSpace(in.Name) == "" {
+		in.Name = in.ID
+	}
+	if err := s.PutRep(ctx, Rep{ID: in.ID, Name: strings.TrimSpace(in.Name), Enabled: true}); err != nil {
+		return err
+	}
+	undo := func(err error) error {
+		_, _ = s.db.ExecContext(ctx, `DELETE FROM admins WHERE role='rep' AND rep_id=?`, in.ID)
+		_, _ = s.DeleteRep(ctx, in.ID, false)
+		return err
+	}
+	if err := s.SetRepLogin(ctx, in.Username, in.Password, in.ID); err != nil {
+		return undo(err)
+	}
+	pol := DefaultRepPolicy
+	if in.Policy != nil {
+		pol = *in.Policy
+	}
+	if err := s.SetRepPolicy(ctx, in.ID, pol); err != nil {
+		return undo(err)
+	}
+	if in.ManageProducts != nil && !*in.ManageProducts {
+		if err := s.SetManageProducts(ctx, in.ID, false); err != nil {
+			return undo(err)
+		}
+	}
+	if in.CreditGB > 0 || in.Units > 0 {
+		if err := s.AdjustCredit(ctx, actor, in.ID, int64(in.CreditGB*(1<<30)), in.Units, "first credit"); err != nil {
+			return undo(err)
+		}
+	}
+	if len(in.TgOwners) > 0 {
+		if err := s.SetTgRepOwners(ctx, in.ID, in.TgOwners); err != nil {
+			return undo(err)
+		}
+	}
+	return nil
+}
+
+// RandomPassword returns a 14-character password without look-alike
+// characters (no 0/O, 1/l/I), easy to read out and to type.
+func RandomPassword() string {
+	const abc = "abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+	b := make([]byte, 14)
+	_, _ = rand.Read(b)
+	for i := range b {
+		b[i] = abc[int(b[i])%len(abc)]
+	}
+	return string(b)
 }

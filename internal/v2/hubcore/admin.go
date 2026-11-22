@@ -315,6 +315,50 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 		}
 		reply(w, map[string]bool{"ok": err == nil}, err)
 	}))
+	mux.HandleFunc("POST /api/v2/admin/reps", guard(func(w http.ResponseWriter, r *http.Request) {
+		var in RepCreate
+		if !decode(w, r, &in) {
+			return
+		}
+		err := s.CreateRep(r.Context(), who(r).User, in)
+		reply(w, map[string]bool{"ok": err == nil}, err)
+	}))
+	mux.HandleFunc("GET /api/v2/admin/reps/{id}/login", guard(func(w http.ResponseWriter, r *http.Request) {
+		reply(w, map[string]any{"usernames": s.RepLogins(r.Context(), r.PathValue("id")), "telegram": s.TgRepOwners(r.Context(), r.PathValue("id"))}, nil)
+	}))
+	mux.HandleFunc("PUT /api/v2/admin/reps/{id}/bot-owners", guard(func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Owners []int64 `json:"owners"`
+		}
+		if !decode(w, r, &in) {
+			return
+		}
+		err := s.SetTgRepOwners(r.Context(), r.PathValue("id"), in.Owners)
+		reply(w, map[string]bool{"ok": err == nil}, err)
+	}))
+	mux.HandleFunc("PUT /api/v2/admin/reps/{id}/login", guard(func(w http.ResponseWriter, r *http.Request) {
+		var in struct{ Username, Password string }
+		if !decode(w, r, &in) {
+			return
+		}
+		id := r.PathValue("id")
+		var n int
+		_ = s.ro.QueryRowContext(r.Context(), `SELECT COUNT(*) FROM reps WHERE id=?`, id).Scan(&n)
+		if n == 0 {
+			reply(w, nil, ErrNotFound)
+			return
+		}
+		user := strings.ToLower(strings.TrimSpace(in.Username))
+		if user == "" {
+			if l := s.RepLogins(r.Context(), id); len(l) > 0 {
+				user = l[0]
+			} else {
+				user = id
+			}
+		}
+		err := s.SetRepLogin(r.Context(), user, in.Password, id)
+		reply(w, map[string]any{"ok": err == nil, "username": user}, err)
+	}))
 	mux.HandleFunc("DELETE /api/v2/admin/reps/{id}", guard(func(w http.ResponseWriter, r *http.Request) {
 		n, err := s.DeleteRep(r.Context(), r.PathValue("id"), r.URL.Query().Get("clients") == "1")
 		reply(w, map[string]any{"ok": err == nil, "clients": n}, err)

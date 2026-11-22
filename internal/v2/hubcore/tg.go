@@ -191,7 +191,8 @@ func (s *Store) TgSetBlockedBot(ctx context.Context, seller string, chat int64) 
 // TgAllRepChats lists the Telegram chats of every enabled reseller (the
 // owner's audience "resellers").
 func (s *Store) TgAllRepChats(ctx context.Context) []int64 {
-	rows, err := s.ro.QueryContext(ctx, `SELECT tg_chat FROM reps WHERE enabled=1 AND tg_chat<>0 ORDER BY tg_chat`)
+	rows, err := s.ro.QueryContext(ctx, `SELECT tg_chat FROM reps WHERE enabled=1 AND tg_chat<>0
+UNION SELECT o.chat_id FROM rep_tg_owners o JOIN reps r ON r.id=o.rep_id WHERE r.enabled=1 ORDER BY 1`)
 	if err != nil {
 		return nil
 	}
@@ -402,7 +403,89 @@ func (s *Store) ClientByEmail(ctx context.Context, email string) (ClientView, er
 // panel; the bot then sends them their own order cards and balances.
 
 func (s *Store) ensureTgRepSchema() error {
-	return s.addColumn("reps", "tg_chat", "INTEGER NOT NULL DEFAULT 0")
+	if err := s.addColumn("reps", "tg_chat", "INTEGER NOT NULL DEFAULT 0"); err != nil {
+		return err
+	}
+	// More Telegram accounts that are this reseller in the bot, on a par with
+	// reps.tg_chat (partners who share one panel). One account, one panel.
+	_, err := s.db.Exec(`CREATE TABLE IF NOT EXISTS rep_tg_owners (
+  chat_id INTEGER PRIMARY KEY,
+  rep_id TEXT NOT NULL REFERENCES reps(id) ON DELETE CASCADE,
+  added_unix INTEGER NOT NULL
+)`)
+	return err
+}
+
+// MaxTgRepOwners is how many Telegram accounts one panel takes.
+const MaxTgRepOwners = 10
+
+// TgRepOwners lists the Telegram accounts that are a reseller in the bot.
+func (s *Store) TgRepOwners(ctx context.Context, repID string) []int64 {
+	out := []int64{}
+	if c := s.TgRepChat(ctx, repID); c != 0 {
+		out = append(out, c)
+	}
+	rows, err := s.ro.QueryContext(ctx, `SELECT chat_id FROM rep_tg_owners WHERE rep_id=? ORDER BY added_unix, chat_id`, repID)
+	if err != nil {
+		return out
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var c int64
+		if rows.Scan(&c) == nil && (len(out) == 0 || c != out[0]) {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// SetTgRepOwners replaces a reseller's Telegram accounts. An account given
+// here stops being any other reseller's.
+func (s *Store) SetTgRepOwners(ctx context.Context, repID string, ids []int64) error {
+	seen := map[int64]bool{}
+	var list []int64
+	for _, id := range ids {
+		if id > 0 && !seen[id] {
+			seen[id] = true
+			list = append(list, id)
+		}
+	}
+	if len(list) > MaxTgRepOwners {
+		return fmt.Errorf("%w: at most %d Telegram ids", ErrInvalid, MaxTgRepOwners)
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var n int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM reps WHERE id=?`, repID).Scan(&n); err != nil || n == 0 {
+		return ErrNotFound
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM rep_tg_owners WHERE rep_id=?`, repID); err != nil {
+		return err
+	}
+	first := int64(0)
+	now := s.now().Unix()
+	for i, id := range list {
+		if _, err := tx.ExecContext(ctx, `UPDATE reps SET tg_chat=0 WHERE tg_chat=? AND id<>?`, id, repID); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `DELETE FROM rep_tg_owners WHERE chat_id=?`, id); err != nil {
+			return err
+		}
+		if i == 0 {
+			first = id
+			continue
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO rep_tg_owners(chat_id,rep_id,added_unix) VALUES(?,?,?)`, id, repID, now+int64(i)); err != nil {
+			return err
+		}
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE reps SET tg_chat=? WHERE id=?`, first, repID); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // NewTgLinkCode returns a code valid for 15 minutes.
@@ -421,15 +504,18 @@ func (s *Store) ClaimTgLinkCode(ctx context.Context, code string, chat int64) (s
 	if !ok || exp < s.now().Unix() {
 		return "", ErrNotFound
 	}
-	if _, err := s.db.ExecContext(ctx, `UPDATE reps SET tg_chat=0 WHERE tg_chat=?`, chat); err != nil {
-		return "", err
+	// A panel that already has a Telegram account keeps it: this one joins it.
+	owners := s.TgRepOwners(ctx, rep)
+	for _, o := range owners {
+		if o == chat {
+			return rep, nil
+		}
 	}
-	r, err := s.db.ExecContext(ctx, `UPDATE reps SET tg_chat=? WHERE id=?`, chat, rep)
-	if err != nil {
-		return "", err
+	if len(owners) >= MaxTgRepOwners {
+		return "", fmt.Errorf("%w: this panel already has %d Telegram accounts", ErrInvalid, MaxTgRepOwners)
 	}
-	if n, _ := r.RowsAffected(); n != 1 {
-		return "", ErrNotFound
+	if err := s.SetTgRepOwners(ctx, rep, append(owners, chat)); err != nil {
+		return "", err
 	}
 	return rep, nil
 }
@@ -438,6 +524,9 @@ func (s *Store) ClaimTgLinkCode(ctx context.Context, code string, chat int64) (s
 func (s *Store) TgRep(ctx context.Context, chat int64) string {
 	var id string
 	_ = s.ro.QueryRowContext(ctx, `SELECT id FROM reps WHERE tg_chat=? AND enabled=1`, chat).Scan(&id)
+	if id == "" {
+		_ = s.ro.QueryRowContext(ctx, `SELECT r.id FROM rep_tg_owners o JOIN reps r ON r.id=o.rep_id WHERE o.chat_id=? AND r.enabled=1`, chat).Scan(&id)
+	}
 	return id
 }
 
@@ -555,10 +644,7 @@ func (s *Store) TgRepRole(ctx context.Context, chat int64) (rep, role string) {
 
 // TgRepChats lists every chat that should see a reseller's order cards.
 func (s *Store) TgRepChats(ctx context.Context, repID string) []int64 {
-	var out []int64
-	if c := s.TgRepChat(ctx, repID); c != 0 {
-		out = append(out, c)
-	}
+	out := s.TgRepOwners(ctx, repID)
 	rows, err := s.ro.QueryContext(ctx, `SELECT chat_id FROM rep_tg_admins WHERE rep_id=? AND role IN ('manager','sales')`, repID)
 	if err != nil {
 		return out

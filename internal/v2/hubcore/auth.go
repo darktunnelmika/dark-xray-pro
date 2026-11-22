@@ -5,6 +5,7 @@ import (
 	"crypto/subtle"
 	"database/sql"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"sync"
@@ -40,8 +41,14 @@ func (s *Store) ensureAuthSchema() error {
 
 // SetAdmin creates or resets an owner login.
 func (s *Store) SetAdmin(ctx context.Context, user, pass string) error {
-	if !idRE.MatchString(user) || len(pass) < 10 {
-		return ErrInvalid
+	// A password pasted from a chat often carries a space or a line break at
+	// either end; nobody means that to be part of it.
+	pass = strings.TrimSpace(pass)
+	if !idRE.MatchString(user) {
+		return fmt.Errorf("%w: the sign-in name may only have lowercase letters, digits, dot, dash and underscore", ErrInvalid)
+	}
+	if len(pass) < 10 {
+		return fmt.Errorf("%w: the password needs at least 10 characters", ErrInvalid)
 	}
 	h, err := bcrypt.GenerateFromPassword([]byte(pass), 12)
 	if err != nil {
@@ -67,6 +74,10 @@ func (s *Store) Login(ctx context.Context, user, pass string) (string, error) {
 func (s *Store) LoginTOTP(ctx context.Context, user, pass, code string) (string, error) {
 	user = s.canonicalUser(ctx, user)
 	secret, last, err := s.verifyPassword(ctx, user, pass)
+	if t := strings.TrimSpace(pass); err != nil && t != pass && t != "" {
+		// Pasted with a stray space or line break around it.
+		secret, last, err = s.verifyPassword(ctx, user, t)
+	}
 	if err != nil {
 		return "", err
 	}

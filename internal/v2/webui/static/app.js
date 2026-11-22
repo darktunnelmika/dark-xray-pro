@@ -3604,6 +3604,44 @@ function sshErr(e, fa) {
 
 // Owners manage resellers at /api/v2/admin/reps; a reseller manages its own
 // sub-sellers at /api/v2/rep/sellers with the same forms.
+// idList: numeric Telegram ids, one field each, with ＋ to add another and
+// ✕ to take one out. get() returns the valid ids in order.
+function idList(values, max = 10) {
+  const fa = lang === "fa";
+  const rows = h("div", { class: "id-list" });
+  const add = h("button", { type: "button", class: "ghost id-add", title: fa ? "افزودن شناسهٔ دیگر" : "Add another id", "aria-label": fa ? "افزودن شناسهٔ دیگر" : "Add another id" }, "＋");
+  const sync = () => { add.hidden = rows.children.length >= max; };
+  const row = (v) => {
+    const inp = h("input", { dir: "ltr", inputmode: "numeric", pattern: "[0-9]{4,15}", placeholder: "1906987468", value: v ? String(v) : "" });
+    const line = h("div", { class: "row tight" }, inp, h("button", { type: "button", class: "ghost", title: fa ? "حذف" : "Remove", "aria-label": fa ? "حذف این شناسه" : "Remove this id",
+      onclick: () => { if (rows.children.length > 1) line.remove(); else inp.value = ""; sync(); } }, "✕"));
+    rows.append(line); sync();
+    return inp;
+  };
+  add.onclick = () => row("").focus();
+  const set = (list) => { rows.replaceChildren(); (list && list.length ? list : [""]).forEach(row); };
+  set(values);
+  return { el: h("div", { class: "id-list-wrap" }, rows, add), set,
+    get: () => [...new Set([...rows.querySelectorAll("input")].map((i) => parseInt(toLatinDigits(i.value.trim()), 10)).filter((x) => x > 0))] };
+}
+const toLatinDigits = (v) => String(v).replace(/[۰-۹]/g, (d) => "۰۱۲۳۴۵۶۷۸۹".indexOf(d)).replace(/[٠-٩]/g, (d) => "٠١٢٣٤٥٦٧٨٩".indexOf(d));
+
+// randomPassword: 14 characters without look-alikes (no 0/O, 1/l/I).
+function randomPassword(n = 14) {
+  const abc = "abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  const buf = crypto.getRandomValues(new Uint32Array(n));
+  return [...buf].map((x) => abc[x % abc.length]).join("");
+}
+// passwordField: a visible password box with a "random" button.
+function passwordField() {
+  const fa = lang === "fa";
+  const inp = h("input", { type: "text", dir: "ltr", autocomplete: "off", autocapitalize: "off", spellcheck: "false", minlength: "10" });
+  const el = h("div", { class: "row tight" }, inp,
+    h("button", { type: "button", class: "ghost", onclick: () => { inp.value = randomPassword(); inp.dispatchEvent(new Event("input")); } }, fa ? "🎲 رمز تصادفی" : "🎲 Random"),
+    h("button", { type: "button", class: "ghost", title: t("copy"), onclick: () => inp.value && copy(inp.value) }, "⧉"));
+  return { el, inp, get: () => inp.value.trim() };
+}
+
 const repBase = () => (me && me.role === "rep" ? "/api/v2/rep/sellers" : "/api/v2/admin/reps");
 
 async function viewSellers() {
@@ -3623,24 +3661,165 @@ async function viewSellers() {
     h("div", { class: "list" }, cards.length ? cards : h("p", { class: "muted" }, t("empty"))));
 }
 
+// repLoginMessage: what the owner sends the new reseller.
+function repLoginMessage(url, user, pass, name) {
+  return lang === "fa"
+    ? `پنل نمایندگی ${name || ""} آماده است ✅\n\n🌐 آدرس پنل:\n${url}\n\n👤 نام کاربری: ${user}\n🔑 رمز: ${pass}\n\nبعد از اولین ورود، رمز را از بخش تنظیمات عوض کنید.`
+    : `Your reseller panel ${name || ""} is ready ✅\n\n🌐 Panel:\n${url}\n\n👤 Username: ${user}\n🔑 Password: ${pass}\n\nChange the password in Settings after your first sign-in.`;
+}
+async function panelUrl() {
+  let path = "";
+  try { path = (await api("GET", "/api/v2/admin/panel-path")).path || ""; } catch {}
+  return path ? `${location.origin}/${path}/` : `${location.origin}/`;
+}
+function showRepLogin(title, user, pass, name) {
+  const fa = lang === "fa";
+  const box = h("textarea", { rows: "9", readonly: true, dir: "auto" });
+  panelUrl().then((u) => { box.value = repLoginMessage(u, user, pass, name); });
+  openModal(title, h("div", { class: "form" },
+    h("p", { class: "small muted" }, fa ? "این پیام را کپی کنید و برای نماینده بفرستید. رمز بعد از بستن این پنجره دیگر نمایش داده نمی‌شود." : "Copy this message and send it to the reseller. The password is not shown again after you close this."),
+    box, h("div", { class: "row" }, h("button", { class: "primary", type: "button", onclick: () => copy(box.value) }, fa ? "کپی پیام" : "Copy message"))));
+}
+
 function repForm(r) {
+  if (me.role === "owner") return r ? repEditForm(r) : repCreateForm();
+  // A reseller's own sub-seller: name, on/off and its login.
+  const fa = lang === "fa";
   const id = h("input", { required: true, pattern: "[a-z0-9][a-z0-9._\\-]{0,62}", value: r ? r.ID : "", disabled: !!r });
   const name = h("input", { value: r ? r.Name : "" });
   const en = h("input", { type: "checkbox", checked: r ? r.Enabled : true });
-  const user = h("input", { autocomplete: "off", pattern: "[a-z0-9][a-z0-9._\\-]{0,62}" });
-  const pass = h("input", { type: "password", autocomplete: "new-password", minlength: "10" });
+  const user = h("input", { autocomplete: "off", dir: "ltr", pattern: "[a-z0-9][a-z0-9._\\-]{0,62}" });
+  const pass = passwordField();
+  const err = h("div", { class: "error" });
   const save = h("button", { class: "primary", value: "save", onclick: async (e) => {
-    e.preventDefault();
+    e.preventDefault(); err.textContent = "";
     if (!id.reportValidity()) return;
+    const pw = pass.get();
+    if (!r && !pw) { err.textContent = fa ? "برای ورود زیرفروشنده یک رمز بگذارید (دکمهٔ رمز تصادفی)." : "Set a password for the sub-seller (use Random)."; return; }
+    if (pw && pw.length < 10) { err.textContent = fa ? "رمز باید حداقل ۱۰ نویسه باشد." : "The password needs at least 10 characters."; return; }
+    const u = (user.value.trim() || id.value).toLowerCase();
     try {
-      await guarded(() => api("PUT", `${repBase()}/${encodeURIComponent(id.value)}`, { Name: name.value, Enabled: en.checked, Username: user.value, Password: pass.value }));
+      await api("PUT", `${repBase()}/${encodeURIComponent(id.value)}`, { Name: name.value, Enabled: en.checked, Username: pw ? u : "", Password: pw });
       document.getElementById("modal").close("save"); route();
-    } catch {}
+      if (pw) showRepLogin(fa ? "اطلاعات ورود" : "Sign-in details", u, pw, name.value || id.value);
+    } catch (x) { err.textContent = x.message; }
   } }, t("save"));
   openModal(r ? `${t("edit")} · ${r.ID}` : `${t("add")} · ${t("reps")}`, h("div", { class: "form" },
     h("div", { class: "two" }, h("label", {}, h("span", {}, t("repId")), id), h("label", {}, h("span", {}, t("name")), name)),
     h("label", { class: "check" }, en, t("enabled")),
-    h("div", { class: "two" }, h("label", {}, h("span", {}, t("loginUser")), user), h("label", {}, h("span", {}, t("loginPass")), pass))), [save]);
+    h("label", {}, h("span", {}, t("loginUser")), user),
+    h("label", {}, h("span", {}, r ? (fa ? "رمز جدید (خالی = بدون تغییر)" : "New password (empty keeps it)") : t("loginPass")), pass.el), err), [save]);
+}
+
+// repCreateForm: everything a new reseller needs on one page, saved in one go.
+async function repCreateForm() {
+  const fa = lang === "fa";
+  const [inbounds, sale] = await Promise.all([api("GET", "/api/v2/admin/inbounds").catch(() => []), api("GET", "/api/v2/admin/rep-sale").catch(() => ({ packages: [] }))]);
+  const pkgs = (sale && sale.packages) || [];
+  const num = (v, step = "1") => h("input", { type: "number", min: "0", step, value: v || 0, dir: "ltr" });
+  const box = (v) => h("input", { type: "checkbox", checked: !!v });
+  const id = h("input", { required: true, dir: "ltr", autocapitalize: "off", pattern: "[a-z0-9][a-z0-9._\\-]{0,62}", placeholder: "arda" });
+  const name = h("input", {});
+  const user = h("input", { dir: "ltr", autocapitalize: "off", autocomplete: "off", pattern: "[a-z0-9][a-z0-9._\\-]{0,62}", placeholder: fa ? "خالی = همان شناسه" : "empty = the id" });
+  const pass = passwordField(); pass.inp.value = randomPassword();
+  const f = { gb: num(0), units: num(0), mc: num(0), md: num(0), mg: num(0), au: box(true), cd: box(true), ru: box(false), mp: box(true) };
+  const tags = [...new Set((inbounds || []).map((ib) => ib.tag))];
+  const ibBoxes = tags.map((tag) => h("label", { class: "check" }, h("input", { type: "checkbox", value: tag }), tag));
+  const tg = idList([]);
+  const pkgSel = h("select", {}, h("option", { value: "" }, fa ? "تنظیم دستی" : "Set by hand"),
+    ...pkgs.map((p) => h("option", { value: p.id }, `${p.name || p.id}${p.gb ? ` · ${fmtNum(p.gb)} GB` : ""}`)));
+  pkgSel.onchange = () => {
+    const p = pkgs.find((x) => x.id === pkgSel.value);
+    if (!p) return;
+    f.gb.value = p.gb || 0; f.units.value = p.units || 0; f.mc.value = p.max_clients || 0; f.md.value = p.max_days || 0; f.mg.value = p.max_client_gb || 0;
+    f.au.checked = !!p.allow_unlimited; f.cd.checked = !!p.can_delete; f.ru.checked = !!p.refund_unused;
+    const allow = new Set(p.inbounds || []);
+    ibBoxes.forEach((b) => { const i = b.querySelector("input"); i.checked = allow.has(i.value); });
+  };
+  const err = h("div", { class: "error", role: "alert" });
+  const lab = (text, el, hint) => h("label", {}, h("span", {}, text), el, hint ? h("span", { class: "small muted" }, hint) : null);
+  const save = h("button", { class: "primary", value: "save", onclick: async (e) => {
+    e.preventDefault(); err.textContent = "";
+    const rid = id.value.trim().toLowerCase(), u = (user.value.trim() || rid).toLowerCase(), pw = pass.get();
+    const re = /^[a-z0-9][a-z0-9._-]{0,62}$/;
+    const bad = !re.test(rid) ? (fa ? "شناسه فقط حروف کوچک انگلیسی، عدد، نقطه، خط تیره و زیرخط می‌پذیرد." : "The id takes lowercase letters, digits, dot, dash and underscore only.")
+      : !re.test(u) ? (fa ? "نام کاربری فقط حروف کوچک انگلیسی، عدد، نقطه، خط تیره و زیرخط می‌پذیرد." : "The sign-in name takes lowercase letters, digits, dot, dash and underscore only.")
+      : pw.length < 10 ? (fa ? "رمز باید حداقل ۱۰ نویسه باشد. دکمهٔ «رمز تصادفی» یک رمز مناسب می‌سازد." : "The password needs at least 10 characters. “Random” makes a good one.") : "";
+    if (bad) { err.textContent = bad; return; }
+    save.disabled = true;
+    try {
+      await api("POST", "/api/v2/admin/reps", { ID: rid, Name: name.value.trim(), Username: u, Password: pw,
+        Policy: { MaxClients: +f.mc.value || 0, MaxDays: +f.md.value || 0, MaxClientGB: +f.mg.value || 0, AllowUnlimited: f.au.checked, CanDelete: f.cd.checked, RefundUnused: f.ru.checked,
+          Inbounds: ibBoxes.map((b) => b.querySelector("input")).filter((i) => i.checked).map((i) => i.value) },
+        ManageProducts: f.mp.checked, CreditGB: +f.gb.value || 0, Units: +f.units.value || 0, TgOwners: tg.get() });
+      document.getElementById("modal").close("save"); route();
+      showRepLogin(fa ? `نماینده ساخته شد · ${rid}` : `Reseller created · ${rid}`, u, pw, name.value.trim() || rid);
+    } catch (x) {
+      const m = x.message || "";
+      err.textContent = !fa ? m : /already exists/.test(m) ? "نماینده یا نام کاربری‌ای با این شناسه از قبل وجود دارد."
+        : /already used/.test(m) ? "این نام کاربری را حساب دیگری دارد؛ نام دیگری انتخاب کنید."
+        : /at least 10/.test(m) ? "رمز باید حداقل ۱۰ نویسه باشد." : /at most/.test(m) ? "حداکثر ۱۰ شناسهٔ تلگرام می‌شود وارد کرد." : m;
+    } finally { save.disabled = false; }
+  } }, fa ? "ساخت نماینده" : "Create reseller");
+  const d = openModal(fa ? "نمایندهٔ جدید" : "New reseller", h("div", { class: "form" },
+    h("h3", { class: "section" }, fa ? "مشخصات و ورود" : "Identity and sign-in"),
+    h("div", { class: "two" }, lab(t("repId"), id), lab(t("name"), name)),
+    lab(t("loginUser"), user),
+    lab(t("loginPass"), pass.el, fa ? "حداقل ۱۰ نویسه. بعد از ساخت، در یک پیام آماده نشان داده می‌شود." : "At least 10 characters. Shown in a ready message after saving."),
+    h("h3", { class: "section" }, fa ? "اعتبار و محدودیت‌ها" : "Credit and limits"),
+    pkgs.length ? lab(fa ? "بسته" : "Package", pkgSel, fa ? "با انتخاب بسته، موارد پایین پر می‌شوند و می‌توانید تغییرشان دهید." : "Choosing a package fills the fields below; you can still change them.") : null,
+    h("div", { class: "two" }, lab(`${t("volumeCredit")} (GB)`, f.gb), lab(t("units"), f.units)),
+    h("div", { class: "two" }, lab(t("maxClients"), f.mc), lab(t("maxDays"), f.md)),
+    lab(t("maxClientGB"), f.mg, fa ? "صفر یعنی بدون سقف." : "Zero means no limit."),
+    h("label", { class: "check" }, f.au, t("allowUnlimited")),
+    h("label", { class: "check" }, f.cd, t("canDelete")),
+    h("label", { class: "check" }, f.ru, t("refundUnused")),
+    h("label", { class: "check" }, f.mp, t("manageProducts")),
+    tags.length ? h("fieldset", { class: "form", style: "border:0;padding:0;margin:0" }, h("legend", { class: "small muted" }, `${t("allowedInbounds")} ${fa ? "(هیچ‌کدام = همه)" : "(none = all)"}`), ibBoxes) : null,
+    h("h3", { class: "section" }, fa ? "تلگرام" : "Telegram"),
+    lab(fa ? "شناسهٔ عددی تلگرام مدیران این پنل (اختیاری)" : "Numeric Telegram ids that manage this panel (optional)", tg.el,
+      fa ? "هر شناسه در ربات همین پنل را مدیریت می‌کند؛ با ＋ شناسهٔ بعدی را اضافه کنید. شناسه را از @userinfobot بگیرید." : "Each id manages this panel in the bot; ＋ adds another. Get an id from @userinfobot."),
+    err), [save]);
+  d.classList.add("wide");
+}
+
+// repEditForm: name and on/off, a new password, and the Telegram ids.
+function repEditForm(r) {
+  const fa = lang === "fa";
+  const name = h("input", { value: r.Name || "" });
+  const en = h("input", { type: "checkbox", checked: r.Enabled });
+  const user = h("input", { dir: "ltr", autocapitalize: "off", autocomplete: "off", pattern: "[a-z0-9][a-z0-9._\\-]{0,62}" });
+  const pass = passwordField();
+  const tg = idList([]);
+  const err = h("div", { class: "error", role: "alert" });
+  let hadLogin = false;
+  api("GET", `/api/v2/admin/reps/${encodeURIComponent(r.ID)}/login`).then((x) => { hadLogin = !!(x.usernames || []).length; user.value = (x.usernames || [])[0] || r.ID; tg.set(x.telegram || []); }).catch(() => { user.value = r.ID; });
+  const save = h("button", { class: "primary", value: "save", onclick: async (e) => {
+    e.preventDefault(); err.textContent = "";
+    const pw = pass.get(), u = (user.value.trim() || r.ID).toLowerCase();
+    if (pw && pw.length < 10) { err.textContent = fa ? "رمز باید حداقل ۱۰ نویسه باشد." : "The password needs at least 10 characters."; return; }
+    try {
+      await api("PUT", `/api/v2/admin/reps/${encodeURIComponent(r.ID)}`, { Name: name.value, Enabled: en.checked, Username: "", Password: "" });
+      await api("PUT", `/api/v2/admin/reps/${encodeURIComponent(r.ID)}/bot-owners`, { owners: tg.get() });
+      if (pw) await api("PUT", `/api/v2/admin/reps/${encodeURIComponent(r.ID)}/login`, { Username: u, Password: pw });
+      document.getElementById("modal").close("save"); route();
+      if (pw) showRepLogin(fa ? `رمز جدید · ${r.ID}` : `New password · ${r.ID}`, u, pw, name.value || r.ID); else toast(t("saved"));
+    } catch (x) {
+      const m = x.message || "";
+      err.textContent = fa && /already used/.test(m) ? "این نام کاربری را حساب دیگری دارد؛ نام دیگری انتخاب کنید." : m;
+    }
+  } }, t("save"));
+  openModal(`${t("edit")} · ${r.ID}`, h("div", { class: "form" },
+    h("label", {}, h("span", {}, t("name")), name),
+    h("label", { class: "check" }, en, t("enabled")),
+    h("h3", { class: "section" }, fa ? "تغییر رمز ورود" : "Change the password"),
+    h("label", {}, h("span", {}, t("loginUser")), user),
+    h("label", {}, h("span", {}, fa ? "رمز جدید" : "New password"), pass.el,
+      h("span", { class: "small muted" }, fa ? "خالی بگذارید تا رمز فعلی بماند. با رمز جدید، نماینده از همهٔ دستگاه‌ها خارج می‌شود." : "Leave empty to keep the current one. A new password signs the reseller out everywhere.")),
+    h("h3", { class: "section" }, fa ? "تلگرام" : "Telegram"),
+    h("label", {}, h("span", {}, fa ? "شناسهٔ عددی تلگرام مدیران این پنل" : "Numeric Telegram ids that manage this panel"), tg.el,
+      h("span", { class: "small muted" }, fa ? "همهٔ این شناسه‌ها در ربات هم‌سطح‌اند. با ＋ شناسهٔ بعدی را اضافه کنید." : "All these ids are on a par in the bot. ＋ adds another.")),
+    err), [save]);
 }
 
 function creditForm(r) {
@@ -4012,7 +4191,9 @@ function repBotCard(path) {
   const en = h("input", { type: "checkbox" });
   const mini = h("input", { type: "checkbox", checked: true });
   const st = h("div", { class: "small" });
+  const owners = idList([]);
   const draw = (b) => {
+    owners.set(b.owners || []);
     en.checked = !!b.enabled;
     mini.checked = b.miniapp !== false;
     tok.placeholder = b.has_token ? (fa ? "توکن ثبت شده — برای تغییر، توکن جدید بزنید" : "token saved — type a new one to change") : "123456789:AA...";
@@ -4022,12 +4203,14 @@ function repBotCard(path) {
   api("GET", path).then(draw).catch(() => {});
   return h("form", { class: "card form", onsubmit: async (e) => {
     e.preventDefault();
-    const r = await guarded(() => api("PUT", path, { token: tok.value.trim(), enabled: en.checked, miniapp: mini.checked }));
+    const r = await guarded(() => api("PUT", path, { token: tok.value.trim(), enabled: en.checked, miniapp: mini.checked, owners: owners.get() }));
     tok.value = ""; draw(r); toast(fa ? "ذخیره شد؛ ربات تا چند ثانیه دیگر روشن می‌شود" : "Saved; the bot starts in a few seconds");
   } },
     h("h2", {}, "🤖 ", fa ? "ربات فروش اختصاصی" : "Own sales bot"),
     h("p", { class: "small muted" }, fa ? "از @BotFather یک ربات بسازید و توکنش را این‌جا بزنید. ربات فقط محصولات شما را می‌فروشد، پرداخت‌ها به کارت شما می‌آید، کیف پول مشتری‌ها مال شماست و فقط کلاینت‌های خودتان را نشان می‌دهد. رسیدها برای تلگرامی که به نمایندگی وصل کرده‌اید فرستاده می‌شود." : "Create a bot with @BotFather and paste its token. It sells only your products, payments go to your card, the customers' wallets are yours and it shows only your clients. Receipts go to the Telegram you linked to your reseller account."),
     st, h("label", {}, h("span", {}, fa ? "توکن ربات" : "Bot token"), tok),
+    h("label", {}, h("span", {}, fa ? "شناسهٔ عددی تلگرام مدیران" : "Managers' numeric Telegram ids"), owners.el,
+      h("span", { class: "small muted" }, fa ? "هر شناسه در ربات، این پنل را کامل مدیریت می‌کند (سفارش‌ها، رسیدها، هشدارها). با ＋ شناسهٔ بعدی را اضافه کنید؛ شناسه را از @userinfobot بگیرید." : "Each id fully manages this panel in the bot (orders, receipts, alerts). ＋ adds another; get an id from @userinfobot.")),
     h("label", { class: "check" }, en, fa ? "روشن باشد" : "Enabled"),
     h("label", { class: "check" }, mini, fa ? "دکمهٔ فروشگاه (مینی‌اپ) در ربات: پلن‌ها، کارت و کیف پول خودتان، با نام و لوگوی برندتان" : "Store button (Mini App) in the bot: your plans, card and wallet, with your brand"),
     h("div", { class: "row" }, h("button", { class: "primary", type: "submit" }, t("save"))));
@@ -5407,7 +5590,7 @@ function restoreSection() {
 // ---------- Telegram bot, backups to Telegram, sessions, login protection ----------
 const S2 = {
   fa: { botTitle: "ربات تلگرام", botHint: "ربات را از @BotFather بسازید، توکنش را این‌جا بگذارید و شناسهٔ عددی تلگرام مالک‌ها را اضافه کنید (شناسه را از @userinfobot بگیرید). توکن فقط در یک فایل محافظت‌شده روی هاب می‌ماند و در بکاپ‌ها نیست.",
-    botOn: "وصل است", botOff: "وصل نیست", botToken: "توکن ربات", botTokenKeep: "ذخیره شده ({x}) — خالی یعنی بدون تغییر", botOwners: "مالک‌ها (شناسهٔ عددی، هر خط یکی)",
+    botOn: "وصل است", botOff: "وصل نیست", botToken: "توکن ربات", botTokenKeep: "ذخیره شده ({x}) — خالی یعنی بدون تغییر", botOwners: "شناسهٔ عددی مالک‌ها (با ＋ شناسهٔ بعدی را اضافه کنید)",
     botSave: "ذخیره و اتصال", botTest: "پیام آزمایشی", botTestOK: "پیام آزمایشی برای مالک‌ها فرستاده شد", botOffBtn: "قطع ربات", botOffAsk: "ربات قطع و توکنش از هاب پاک شود؟ فروشگاه تلگرام و هشدارها تا اتصال دوباره کار نمی‌کنند.",
     botSaved: "ربات وصل شد: @{x}", botNA: "این هاب بدون پشتیبانی ربات اجرا شده.",
     bkTitle: "بکاپ خودکار به تلگرام", bkHint: "بکاپ کامل هاب با رمز شما رمزگذاری می‌شود و برای مالک‌ها در تلگرام فرستاده می‌شود. بدون این رمز بکاپ باز نمی‌شود؛ جایی امن نگهش دارید.",
@@ -5419,7 +5602,7 @@ const S2 = {
     lockTitle: "امنیت ورود", lockHint: "بعد از ۵ رمز اشتباه برای یک نام ورود، یا ۱۰ رمز اشتباه از یک آدرس در ۱۵ دقیقه، آن آدرس موقتاً بسته می‌شود (بار اول ۱۵ دقیقه، هر بار دو برابر تا ۲۴ ساعت). نام ورود برای بقیهٔ آدرس‌ها باز می‌ماند تا کسی نتواند شما را بیرون نگه دارد. با ربات وصل، به مالک‌ها هشدار داده می‌شود.",
     lockNone: "الان هیچ آدرسی بسته نیست.", lockUntil: "تا {d}", lockOpen: "باز کردن", lockOpenAll: "باز کردن همه", lockUser: "نام ورود: {x}", lockStrikes: "بار {n}" },
   en: { botTitle: "Telegram bot", botHint: "Create the bot with @BotFather, paste its token here and add the owners' numeric Telegram ids (get yours from @userinfobot). The token stays in a protected file on the HUB and is never in backups.",
-    botOn: "Connected", botOff: "Not connected", botToken: "Bot token", botTokenKeep: "saved ({x}) — empty keeps it", botOwners: "Owners (numeric ids, one per line)",
+    botOn: "Connected", botOff: "Not connected", botToken: "Bot token", botTokenKeep: "saved ({x}) — empty keeps it", botOwners: "Owners' numeric ids (＋ adds another)",
     botSave: "Save and connect", botTest: "Send a test", botTestOK: "Test message sent to the owners", botOffBtn: "Disconnect", botOffAsk: "Disconnect the bot and delete its token from the HUB? The Telegram store and alerts stop until it is connected again.",
     botSaved: "Bot connected: @{x}", botNA: "This HUB runs without bot support.",
     bkTitle: "Automatic backups to Telegram", bkHint: "A full HUB backup, encrypted with your password, is sent to the owners on Telegram. Without the password a backup cannot be opened — keep it somewhere safe.",
@@ -5445,11 +5628,11 @@ function telegramBotCard() {
   const draw = (st) => {
     if (!st.available) { card.replaceChildren(h("h2", {}, s2("botTitle")), h("p", { class: "muted small" }, s2("botNA"))); return; }
     const tok = h("input", { type: "password", autocomplete: "off", dir: "ltr", placeholder: st.token_set ? s2("botTokenKeep", { x: st.token_hint || "…" }) : "123456789:AA…" });
-    const owners = h("textarea", { rows: "2", dir: "ltr", inputmode: "numeric", placeholder: "1906987468" }, (st.owners || []).join("\n"));
+    const owners = idList(st.owners || []);
     const err = h("div", { class: "error" });
     const save = h("button", { class: "primary", onclick: async () => {
       err.textContent = "";
-      const ids = owners.value.split(/[\s,]+/).map((x) => parseInt(x, 10)).filter((x) => x > 0);
+      const ids = owners.get();
       try { const r = await api("PUT", "/api/v2/admin/telegram", { token: tok.value.trim(), owners: ids }); toast(s2("botSaved", { x: r.username || "?" })); draw(r); }
       catch (x) { err.textContent = x.message; }
     } }, s2("botSave"));
@@ -5461,7 +5644,7 @@ function telegramBotCard() {
       h("div", { class: "row" }, h("h2", {}, s2("botTitle")), h("span", { class: `badge ${st.running ? "good" : "bad"}` }, st.running ? s2("botOn") : s2("botOff")),
         st.running && st.username ? h("a", { class: "badge", dir: "ltr", href: `https://t.me/${st.username}`, target: "_blank", rel: "noopener" }, `@${st.username}`) : null),
       h("p", { class: "small muted" }, s2("botHint")),
-      h("label", {}, h("span", {}, s2("botToken")), tok), h("label", {}, h("span", {}, s2("botOwners")), owners), err,
+      h("label", {}, h("span", {}, s2("botToken")), tok), h("label", {}, h("span", {}, s2("botOwners")), owners.el), err,
       h("div", { class: "row" }, save,
         st.running ? h("button", { onclick: async () => { try { await api("POST", "/api/v2/admin/telegram/test"); toast(s2("botTestOK")); } catch (x) { err.textContent = x.message; } } }, s2("botTest")) : null,
         st.token_set ? h("button", { class: "ghost danger spacer", onclick: async () => {

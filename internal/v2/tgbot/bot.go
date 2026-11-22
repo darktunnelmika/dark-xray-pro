@@ -371,7 +371,7 @@ func (b *Bot) onMessage(ctx context.Context, m *Message) {
 			b.ensureRepKeyboard(ctx, chat)
 			b.repHome(ctx, chat, r, rl)
 		}
-		if c := b.Store.TgRepChat(ctx, rep); c != 0 {
+		for _, c := range b.Store.TgRepOwners(ctx, rep) {
 			b.send(ctx, c, fmt.Sprintf("👤 %s با نقش «%s» به ادمین‌های ربات شما اضافه شد.", esc(name), roleName(role)), nil)
 		}
 		return

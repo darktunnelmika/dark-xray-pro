@@ -374,6 +374,9 @@ type RepBot struct {
 	// MiniApp: the store (Mini App) button in this bot; nil on writes
 	// leaves it as it is. Stored apart from the token.
 	MiniApp *bool `json:"miniapp,omitempty"`
+	// Owners: the numeric Telegram ids that manage this panel in the bot,
+	// all on a par; nil on writes leaves them as they are.
+	Owners *[]int64 `json:"owners,omitempty"`
 }
 
 var botTokenRE = regexp.MustCompile(`^[0-9]{5,15}:[A-Za-z0-9_-]{30,64}$`)
@@ -395,6 +398,8 @@ func (s *Store) RepBotOf(ctx context.Context, rep string) RepBot {
 	}
 	on := s.Setting(ctx, "rep_miniapp:"+rep) != "0"
 	b.MiniApp = &on
+	owners := s.TgRepOwners(ctx, rep)
+	b.Owners = &owners
 	return b
 }
 
@@ -423,6 +428,11 @@ func (s *Store) PutRepBot(ctx context.Context, rep string, in RepBot) error {
 			return fmt.Errorf("%w: this is the panel's main bot", ErrInvalid)
 		}
 		cur.Token, cur.Username = tok, ""
+	}
+	if in.Owners != nil {
+		if err := s.SetTgRepOwners(ctx, rep, *in.Owners); err != nil {
+			return err
+		}
 	}
 	cur.Enabled = in.Enabled && cur.Token != ""
 	if in.MiniApp != nil {

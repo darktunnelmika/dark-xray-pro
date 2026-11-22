@@ -295,6 +295,9 @@ func (s *Store) ApproveRepOrder(ctx context.Context, actor string, id int64) (Re
 		if _, err := s.db.ExecContext(ctx, `UPDATE reps SET tg_chat=0 WHERE tg_chat=?`, o.Chat); err != nil {
 			return undo(err)
 		}
+		if _, err := s.db.ExecContext(ctx, `DELETE FROM rep_tg_owners WHERE chat_id=?`, o.Chat); err != nil {
+			return undo(err)
+		}
 		if _, err := s.db.ExecContext(ctx, `UPDATE reps SET tg_chat=? WHERE id=?`, o.Chat, o.RepID); err != nil {
 			return undo(err)
 		}

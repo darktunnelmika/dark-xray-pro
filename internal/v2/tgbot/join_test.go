@@ -147,3 +147,43 @@ func TestRequiredChannel(t *testing.T) {
 		t.Fatal("one reminder per trial")
 	}
 }
+
+// The owner makes a reseller from the bot: a name, a package, and the
+// message to pass on with a random password.
+func TestOwnerCreatesReseller(t *testing.T) {
+	ctx := context.Background()
+	s, err := hubcore.Open(filepath.Join(t.TempDir(), "h.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	api := &fakeAPI{}
+	const owner = int64(1)
+	b := &Bot{Store: s, API: api, Owners: map[int64]bool{owner: true}, SubBase: "https://panel.example", Logf: t.Logf}
+	b.Handle(ctx, cb(owner, "a:repnew"))
+	find(t, api.take(), owner, "نام کاربری پنل")
+	b.Handle(ctx, msg(owner, "Bad Name"))
+	find(t, api.take(), owner, "نمی‌شود گذاشت")
+	b.Handle(ctx, msg(owner, "arda"))
+	find(t, api.take(), owner, "کدام بسته")
+	b.Handle(ctx, cb(owner, "a:repnewp:arda:-"))
+	out := api.take()
+	find(t, out, owner, "https://panel.example")
+	find(t, out, owner, "🔑 رمز")
+	reps, _ := s.Reps(ctx)
+	if len(reps) != 1 || reps[0].ID != "arda" || !reps[0].Enabled {
+		t.Fatalf("%+v", reps)
+	}
+	if l := s.RepLogins(ctx, "arda"); len(l) != 1 || l[0] != "arda" {
+		t.Fatal(l)
+	}
+	// Two Telegram accounts of one panel are both its reseller in the bot.
+	if err := s.SetTgRepOwners(ctx, "arda", []int64{501, 502}); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []int64{501, 502} {
+		if rep, role := b.repOf(ctx, c); rep != "arda" || role != "owner" {
+			t.Fatal(c, rep, role)
+		}
+	}
+}
