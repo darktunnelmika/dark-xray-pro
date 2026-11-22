@@ -94,3 +94,52 @@ func TestMenuLeadsWithWhatTheCustomerNeeds(t *testing.T) {
 		t.Fatalf("ended services come first: %q", m.text)
 	}
 }
+
+// The seller's look reorders, renames, recolours, hides and widens the
+// menu's buttons; with nothing saved the built-in layout stays.
+func TestLayoutMenuLook(t *testing.T) {
+	list := []menuButton{
+		{"trial", cbBtn("🎁 تست رایگان", "trial"), true},
+		{"shop", cbBtn("🛍 خرید اشتراک", "shop"), true},
+		{"guide", cbBtn("📚 آموزش اتصال", "guide"), false},
+		{"status", cbBtn("🌐 وضعیت سرورها", "status"), false},
+		{"me", cbBtn("👤 حساب من", "me"), false},
+	}
+	shape := func(rows [][]Button) string {
+		var out []string
+		for _, r := range rows {
+			var x []string
+			for _, b := range r {
+				x = append(x, b.Data)
+			}
+			out = append(out, strings.Join(x, "+"))
+		}
+		return strings.Join(out, " | ")
+	}
+	if got := shape(layoutMenu(list, hubcore.BotLook{})); got != "trial | shop | guide+status | me" {
+		t.Fatal(got)
+	}
+	look := hubcore.BotLook{Buttons: []hubcore.BotLookButton{
+		{Key: "shop", Label: "⚡️ خرید سرویس", Style: "success", Wide: true},
+		{Key: "me"},
+		{Key: "renew", Wide: true}, // not offered to this customer: simply absent
+		{Key: "trial", Style: "plain"},
+		{Key: "status", Hidden: true},
+	}}
+	rows := layoutMenu(list, look)
+	if got := shape(rows); got != "shop | me+trial | guide" {
+		t.Fatal(got) // guide is not in the saved look: after the others
+	}
+	if b := rows[0][0]; b.Text != "⚡️ خرید سرویس" || b.Style != "success" {
+		t.Fatalf("%+v", b)
+	}
+	if b := rows[1][1]; b.Text != "🎁 تست رایگان" || b.Style != "plain" {
+		t.Fatalf("%+v", b)
+	}
+	// "plain" reaches Telegram as no colour at all, even for a word that
+	// would otherwise be coloured.
+	styled := styleKeyboard(&Keyboard{Rows: rows}, nil)
+	if styled.Rows[1][1].Style != "" || styled.Rows[0][0].Style != "success" {
+		t.Fatalf("%+v", styled.Rows)
+	}
+}

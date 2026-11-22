@@ -165,3 +165,57 @@ func TestCreateSeller(t *testing.T) {
 		t.Fatal("a sub-seller cannot open sellers")
 	}
 }
+
+// A look is checked before it is saved; a custom banner needs its picture.
+func TestBotLook(t *testing.T) {
+	s, _ := newStore(t)
+	ctx := context.Background()
+	for _, bad := range []BotLook{
+		{Buttons: []BotLookButton{{Key: "nope"}}},
+		{Buttons: []BotLookButton{{Key: "shop"}, {Key: "shop"}}},
+		{Buttons: []BotLookButton{{Key: "shop", Style: "pink"}}},
+		{Buttons: []BotLookButton{{Key: "shop", Hidden: true}}},
+		{Buttons: []BotLookButton{{Key: "shop", Label: "a\nb"}}},
+		{Banner: "custom"},
+	} {
+		if err := s.PutBotLook(ctx, "", bad); !errors.Is(err, ErrInvalid) {
+			t.Fatalf("%+v: %v", bad, err)
+		}
+	}
+	if err := s.PutBotBanner(ctx, "rep1", []byte("GIF89a....")); !errors.Is(err, ErrInvalid) {
+		t.Fatal(err)
+	}
+	png := append([]byte("\x89PNG\r\n\x1a\n"), make([]byte, 64)...)
+	if err := s.PutBotBanner(ctx, "rep1", png); err != nil {
+		t.Fatal(err)
+	}
+	look := BotLook{Buttons: []BotLookButton{{Key: "shop", Label: " خرید ", Style: "success", Wide: true}, {Key: "me", Hidden: true}}, Banner: "custom"}
+	if err := s.PutBotLook(ctx, "rep1", look); err != nil {
+		t.Fatal(err)
+	}
+	got := s.BotLook(ctx, "rep1")
+	if len(got.Buttons) != 2 || got.Buttons[0].Label != "خرید" || got.Banner != "custom" {
+		t.Fatalf("%+v", got)
+	}
+	if l := s.BotLook(ctx, ""); len(l.Buttons) != 0 || l.Banner != "" {
+		t.Fatal("each seller has its own look", l)
+	}
+	s.SetBotBannerFileID(ctx, "rep1", "file-1")
+	if _, id, ok := s.BotBanner(ctx, "rep1"); !ok || id != "file-1" {
+		t.Fatal(id, ok)
+	}
+	// A new picture forgets the old Telegram file; removing it ends "custom".
+	_ = s.PutBotBanner(ctx, "rep1", png)
+	if _, id, _ := s.BotBanner(ctx, "rep1"); id != "" {
+		t.Fatal(id)
+	}
+	if err := s.DeleteBotBanner(ctx, "rep1"); err != nil {
+		t.Fatal(err)
+	}
+	if l := s.BotLook(ctx, "rep1"); l.Banner != "" || len(l.Buttons) != 2 {
+		t.Fatalf("%+v", l)
+	}
+	if err := s.PutBotLook(ctx, "rep1", BotLook{}); err != nil || s.Setting(ctx, "tg_look:rep1") != "" {
+		t.Fatal("an empty look clears the setting", err)
+	}
+}

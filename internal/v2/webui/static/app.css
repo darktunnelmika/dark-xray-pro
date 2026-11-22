@@ -1089,3 +1089,28 @@ dialog.wide:has(.cform) { inline-size: min(780px, calc(100vw - 20px)); }
 .pw-field { display: flex; flex-wrap: wrap; gap: 6px; }
 .pw-field > input { flex: 1 1 100%; min-inline-size: 0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 .pw-field > button { flex: 1 1 0; }
+
+/* Bot menu look: the button list beside a Telegram-like preview. */
+.look-grid { display: grid; gap: 18px; grid-template-columns: minmax(0, 1fr) minmax(240px, 320px); align-items: start; }
+@media (max-width: 760px) { .look-grid { grid-template-columns: 1fr; } }
+.look-side { position: sticky; inset-block-start: 12px; display: grid; gap: 10px; }
+@media (max-width: 760px) { .look-side { position: static; order: -1; } }
+.look-list { display: grid; gap: 8px; }
+.look-row { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 8px; padding: 8px; border: 1px solid var(--glass-line); border-radius: 12px; }
+.look-row.off { opacity: .55; }
+.look-move { display: grid; gap: 4px; align-content: center; }
+.look-move button { min-inline-size: 40px; min-block-size: 34px; padding: 0; }
+.look-main { display: grid; gap: 6px; min-inline-size: 0; }
+.look-opts { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; }
+.look-opts select { inline-size: auto; min-inline-size: 96px; }
+.look-opts .check { margin: 0; }
+.tg-prev { background: #0e1621; color: #fff; border-radius: 16px; padding: 10px; display: grid; gap: 5px; font-size: 13px; }
+.tg-msg { background: #182533; border-radius: 12px; overflow: hidden; }
+.tg-text { padding: 8px 10px; line-height: 1.7; }
+.tg-banner { display: block; inline-size: 100%; aspect-ratio: 2 / 1; object-fit: cover; }
+.tg-banner-default { display: grid; place-items: center; background: linear-gradient(120deg, #0b2a22, #0a2230); color: #28f7a0; font-weight: 700; letter-spacing: .3em; direction: ltr; }
+.tg-row { display: grid; gap: 5px; grid-auto-flow: column; grid-auto-columns: 1fr; }
+.tg-btn { background: #2b3b4d; border-radius: 8px; padding: 8px 6px; text-align: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tg-btn.primary { background: #3390ec; }
+.tg-btn.success { background: #2fa84f; }
+.tg-btn.danger { background: #d9483b; }

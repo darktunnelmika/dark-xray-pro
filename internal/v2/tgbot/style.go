@@ -176,8 +176,11 @@ func styleKeyboard(kb *Keyboard, theme map[string]string) *Keyboard {
 	for i, row := range kb.Rows {
 		out.Rows[i] = make([]Button, len(row))
 		for j, b := range row {
-			if b.Style == "" {
+			switch b.Style {
+			case "":
 				b.Style = buttonStyle(b.Text, b.Data)
+			case "plain": // chosen by the seller: no colour, whatever the words say
+				b.Style = ""
 			}
 			if b.Icon == "" && len(theme) > 0 {
 				rs := []rune(b.Text)

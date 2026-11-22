@@ -248,31 +248,119 @@ func (b *Bot) countriesPhrase(ctx context.Context) string {
 	return " روی <b>" + faInt(int64(n)) + " کشور</b>"
 }
 
-// sendMenu sends the menu under the banner in the main bot; a reseller's bot
-// (its own brand) and anything the banner cannot carry get plain text.
+// sendMenu sends the menu under its banner: the seller's own picture when
+// one was chosen, the built-in one in the main bot, none in a reseller's
+// bot or when the seller turned it off. Anything a caption cannot carry
+// goes out as plain text.
 func (b *Bot) sendMenu(ctx context.Context, chat int64, text string, kb *Keyboard) {
 	up, ok := b.API.(photoUploader)
-	if !ok || b.Seller != "" || len(bannerJPG) == 0 || utf8.RuneCountInString(text) > 900 {
+	mode := b.Store.BotLook(ctx, b.Seller).Banner
+	if !ok || mode == "none" || utf8.RuneCountInString(text) > 900 {
 		b.send(ctx, chat, text, kb)
 		return
 	}
-	if id := b.Store.Setting(ctx, bannerKey); id != "" {
+	img, name := bannerJPG, "dark-vpn.jpg"
+	id := ""
+	save := func(id string) { _ = b.Store.SetSetting(ctx, bannerKey, id) }
+	if mode == "custom" {
+		var has bool
+		if img, id, has = b.Store.BotBanner(ctx, b.Seller); !has {
+			b.send(ctx, chat, text, kb)
+			return
+		}
+		name = "banner.jpg"
+		save = func(id string) { b.Store.SetBotBannerFileID(ctx, b.Seller, id) }
+	} else {
+		if b.Seller != "" || len(bannerJPG) == 0 {
+			b.send(ctx, chat, text, kb)
+			return
+		}
+		id = b.Store.Setting(ctx, bannerKey)
+	}
+	if id != "" {
 		if err := b.API.SendPhotoID(ctx, chat, id, text, kb); err == nil {
 			return
 		} else if isBlocked(err) {
 			return
 		}
-		_ = b.Store.SetSetting(ctx, bannerKey, "") // the stored id went stale: upload again
+		save("") // the stored id went stale: upload again
 	}
-	id, err := up.UploadPhoto(ctx, chat, "dark-vpn.jpg", bannerJPG, text, kb)
+	id, err := up.UploadPhoto(ctx, chat, name, img, text, kb)
 	if err != nil {
 		b.logf("tgbot banner: %v", err)
 		b.send(ctx, chat, text, kb)
 		return
 	}
 	if id != "" {
-		_ = b.Store.SetSetting(ctx, bannerKey, id)
+		save(id)
 	}
+}
+
+// menuButton is a button of the main menu with the key its seller can
+// restyle it under.
+type menuButton struct {
+	key  string
+	btn  Button
+	wide bool
+}
+
+// layoutMenu applies the seller's look (order, names, colours, hidden,
+// width) to the buttons this customer gets, and lays them out: a wide button
+// takes a row, the others go two to a row.
+func layoutMenu(list []menuButton, look hubcore.BotLook) [][]Button {
+	if len(look.Buttons) > 0 {
+		at := map[string]int{}
+		for i, lb := range look.Buttons {
+			at[lb.Key] = i
+		}
+		var first, rest []menuButton
+		slots := make([]*menuButton, len(look.Buttons))
+		for i := range list {
+			m := list[i]
+			n, ok := at[m.key]
+			if !ok {
+				rest = append(rest, m) // a button newer than the saved look: after the others
+				continue
+			}
+			lb := look.Buttons[n]
+			if lb.Hidden {
+				continue
+			}
+			if lb.Label != "" {
+				m.btn.Text = lb.Label
+			}
+			m.btn.Style, m.wide = lb.Style, lb.Wide
+			mm := m
+			slots[n] = &mm
+		}
+		for _, m := range slots {
+			if m != nil {
+				first = append(first, *m)
+			}
+		}
+		list = append(first, rest...)
+	}
+	var rows [][]Button
+	var pending []Button
+	flush := func() {
+		if len(pending) > 0 {
+			rows = append(rows, pending)
+			pending = nil
+		}
+	}
+	for _, m := range list {
+		if m.wide {
+			flush()
+			rows = append(rows, row(m.btn))
+			continue
+		}
+		pending = append(pending, m.btn)
+		if len(pending) == 2 {
+			flush()
+		}
+	}
+	flush()
+	return rows
 }
 
 // menuKB is the main menu's buttons. services is how many services the chat
@@ -280,59 +368,52 @@ func (b *Bot) sendMenu(ctx context.Context, chat int64, text string, kb *Keyboar
 // (its button sits beside the message box) and support lives on the bottom
 // keyboard.
 func (b *Bot) menuKB(ctx context.Context, chat int64, services int, ended []string) *Keyboard {
-	var rows [][]Button
+	var list []menuButton
+	add := func(key string, btn Button, wide bool) { list = append(list, menuButton{key, btn, wide}) }
 	trial := b.Store.TrialPolicyFor(ctx, b.Seller).Enabled && !b.Store.TrialUsed(ctx, b.Seller, chat)
-	var small []Button
 	switch {
 	case services == 0:
 		if trial {
-			rows = append(rows, row(cbBtn("🎁 تست رایگان", "trial")))
+			add("trial", cbBtn("🎁 تست رایگان", "trial"), true)
 		}
-		rows = append(rows, row(cbBtn("🛍 خرید اشتراک", "shop")))
+		add("shop", cbBtn("🛍 خرید اشتراک", "shop"), true)
 	default:
 		if len(ended) == 1 && len("rnw:"+ended[0]) <= 64 {
-			rows = append(rows, row(cbBtn("🔄 تمدید سرویس", "rnw:"+ended[0])))
+			add("renew", cbBtn("🔄 تمدید سرویس", "rnw:"+ended[0]), true)
 		} else if len(ended) > 0 {
-			rows = append(rows, row(cbBtn("🔄 تمدید سرویس‌ها", "mine")))
+			add("renew", cbBtn("🔄 تمدید سرویس‌ها", "mine"), true)
 		}
 		mine := "📦 سرویس من"
 		if services > 1 {
 			mine = "📦 سرویس‌های من"
 		}
-		rows = append(rows, row(cbBtn(mine, "mine"), cbBtn("🛍 خرید اشتراک", "shop")))
+		add("mine", cbBtn(mine, "mine"), false)
+		add("shop", cbBtn("🛍 خرید اشتراک", "shop"), false)
 		if trial {
-			small = append(small, cbBtn("🎁 تست رایگان", "trial"))
+			add("trial", cbBtn("🎁 تست رایگان", "trial"), false)
 		}
 	}
 	// The wallet is always there when it can be used (to top it up), not
 	// only once it holds something.
 	if b.Seller != "" || b.cardOn(ctx) || b.Store.WalletBalance(ctx, chat) > 0 || b.Store.TomanBalance(ctx, b.Seller, chat) > 0 {
-		small = append(small, cbBtn("👛 کیف پول", "wallet"))
+		add("wallet", cbBtn("👛 کیف پول", "wallet"), false)
 	}
-	small = append(small, cbBtn("📚 آموزش اتصال", "guide"), cbBtn("🌐 وضعیت سرورها", "status"))
+	add("guide", cbBtn("📚 آموزش اتصال", "guide"), false)
+	add("status", cbBtn("🌐 وضعیت سرورها", "status"), false)
 	// Inviting friends is the owner's shop's; resellers' bots do not have it.
 	if b.Seller == "" && b.Store.ReferralPolicy(ctx).Enabled {
-		small = append(small, cbBtn("👥 دعوت دوستان", "invite"))
+		add("invite", cbBtn("👥 دعوت دوستان", "invite"), false)
 	}
-	small = append(small, cbBtn("🎟 کد تخفیف", "cpn:"), cbBtn("👤 حساب من", "me"))
+	add("coupon", cbBtn("🎟 کد تخفیف", "cpn:"), false)
+	add("me", cbBtn("👤 حساب من", "me"), false)
 	if btn, ok := b.repSaleButton(ctx, chat); ok {
-		small = append(small, btn)
+		add("panel", btn, false)
 	}
-	small = append(small, cbBtn("🔗 افزودن با لینک", "link"))
-	back := []Button(nil)
+	add("link", cbBtn("🔗 افزودن با لینک", "link"), false)
+	rows := layoutMenu(list, b.Store.BotLook(ctx, b.Seller))
 	if b.Owners[chat] {
 		// The owner is only looking at the customer's view: one tap back.
-		back = row(cbBtn("🛡 بازگشت به پنل مدیریت", "a:home"))
-	}
-	for i := 0; i < len(small); i += 2 {
-		if i+1 < len(small) {
-			rows = append(rows, row(small[i], small[i+1]))
-		} else {
-			rows = append(rows, row(small[i]))
-		}
-	}
-	if back != nil {
-		rows = append(rows, back)
+		rows = append(rows, row(cbBtn("🛡 بازگشت به پنل مدیریت", "a:home")))
 	}
 	return &Keyboard{Rows: rows}
 }

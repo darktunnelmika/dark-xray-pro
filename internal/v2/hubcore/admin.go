@@ -1096,6 +1096,12 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 		list, err := s.TomanWallets(r.Context(), seller)
 		reply(w, list, err)
 	}))
+	// The look of the bots' main menu: the owner's main bot, a reseller's own.
+	botLookRoutes(s, mux, "/api/v2/admin/telegram", guard, func(*http.Request) (string, bool) { return "", true })
+	botLookRoutes(s, mux, "/api/v2/rep/bot", member, func(r *http.Request) (string, bool) {
+		p := who(r)
+		return p.RepID, p.Role == "rep" && p.RepID != ""
+	})
 	mux.HandleFunc("GET /api/v2/rep/bot", member(func(w http.ResponseWriter, r *http.Request) {
 		p := who(r)
 		if p.Role != "rep" {

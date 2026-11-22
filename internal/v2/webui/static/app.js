@@ -179,6 +179,11 @@ const FA_ERRS = [
   [/client already exists/i, "این نام قبلاً استفاده شده است"],
   [/the name may use only/i, "نام فقط حروف انگلیسی، عدد و . _ - باشد (بدون فاصله)"],
   [/insufficient credit/i, "اعتبار کافی نیست"],
+  [/picture must be a JPEG or a PNG/i, "عکس باید JPEG یا PNG باشد"],
+  [/picture must be under 2 MB/i, "عکس باید کمتر از ۲ مگابایت باشد"],
+  [/button name is one line of at most 40/i, "نام دکمه یک خط و حداکثر ۴۰ نویسه است"],
+  [/at least one button must stay visible/i, "دست‌کم یک دکمه باید نمایش داده شود"],
+  [/upload a picture first/i, "اول یک عکس بارگذاری کنید"],
   [/password needs at least 10/i, "رمز باید حداقل ۱۰ نویسه باشد"],
   [/already used by another account|that username is taken/i, "این نام کاربری را حساب دیگری دارد؛ نام دیگری انتخاب کنید"],
   [/a reseller or a sign-in name .* already exists|that ID is taken/i, "این شناسه قبلاً گرفته شده است؛ شناسهٔ دیگری انتخاب کنید"],
@@ -3666,6 +3671,103 @@ async function viewSellers() {
     h("div", { class: "list" }, cards.length ? cards : h("p", { class: "muted" }, t("empty"))));
 }
 
+// botLookCard: the look of a bot's main menu (order, names, colours and
+// width of its buttons, and the picture above it) with a live preview.
+// base is /api/v2/admin/telegram for the main bot, /api/v2/rep/bot for a
+// reseller's own.
+function botLookCard(base) {
+  const fa = lang === "fa";
+  const T = (f, e) => (fa ? f : e);
+  const card = h("div", { class: "card form" }, h("h2", {}, "🎨 ", T("ظاهر منوی ربات", "Bot menu look")), h("p", { class: "muted small" }, "…"));
+  const COLORS = [["", T("خودکار", "Auto")], ["plain", T("بی‌رنگ", "None")], ["primary", T("آبی", "Blue")], ["success", T("سبز", "Green")], ["danger", T("قرمز", "Red")]];
+  // Which buttons a customer sees depends on who they are; the preview shows both.
+  const WHO = { fresh: ["trial", "shop", "wallet", "guide", "status", "invite", "coupon", "me", "panel", "link"], has: ["renew", "mine", "shop", "wallet", "guide", "status", "invite", "coupon", "me", "panel", "link"] };
+  const draw = (st) => {
+    const defs = st.defaults || [];
+    const byKey = Object.fromEntries(defs.map((d) => [d.key, d]));
+    const saved = (st.look && st.look.buttons) || [];
+    let items = saved.length ? saved.filter((b) => byKey[b.key]).map((b) => ({ key: b.key, label: b.label || "", style: b.style || "", hidden: !!b.hidden, wide: !!b.wide })) : [];
+    for (const d of defs) if (!items.some((i) => i.key === d.key)) items.push({ key: d.key, label: "", style: "", hidden: false, wide: !!d.wide });
+    let banner = (st.look && st.look.banner) || "";
+    let hasBanner = !!st.has_banner, who = "fresh", bust = Date.now();
+    const list = h("div", { class: "look-list" }), prev = h("div", { class: "tg-prev", dir: "rtl", "aria-label": T("پیش‌نمایش منو", "Menu preview") });
+    const err = h("div", { class: "error", role: "alert" });
+    const paint = () => {
+      const shown = items.filter((i) => !i.hidden && WHO[who].includes(i.key) && (st.main || i.key !== "invite"));
+      const rows = []; let pend = [];
+      for (const i of shown) { if (i.wide) { if (pend.length) rows.push(pend); pend = []; rows.push([i]); } else { pend.push(i); if (pend.length === 2) { rows.push(pend); pend = []; } } }
+      if (pend.length) rows.push(pend);
+      const pic = banner === "custom" && hasBanner ? h("img", { class: "tg-banner", alt: "", src: `${base}/banner?v=${bust}` })
+        : banner === "" && st.main ? h("div", { class: "tg-banner tg-banner-default" }, "DARK VPN") : null;
+      prev.replaceChildren(
+        h("div", { class: "tg-msg" }, pic, h("div", { class: "tg-text" }, h("b", {}, T("سلام علی 👋", "Hi Ali 👋")), h("br"),
+          who === "fresh" ? T("خوش آمدید. اول رایگان امتحان کنید، بعد تصمیم بگیرید.", "Welcome. Try it free first, then decide.") : T("📦 ۴۰ گیگ · یک ماهه — ۲۸ گیگ مانده", "📦 40 GB · one month — 28 GB left"))),
+        ...rows.map((r) => h("div", { class: "tg-row" }, r.map((i) => h("span", { class: `tg-btn ${i.style || "auto"}` }, i.label || byKey[i.key].label)))));
+    };
+    const move = (n, d) => { const m = n + d; if (m < 0 || m >= items.length) return; [items[n], items[m]] = [items[m], items[n]]; rows(); };
+    const rows = () => {
+      list.replaceChildren(...items.map((it, n) => {
+        const d = byKey[it.key];
+        const label = h("input", { value: it.label, placeholder: d.label, maxlength: "40", "aria-label": T("نام دکمه", "Button name"), oninput: (e) => { it.label = e.target.value; paint(); } });
+        const color = h("select", { "aria-label": T("رنگ", "Colour"), onchange: (e) => { it.style = e.target.value; paint(); } }, COLORS.map(([v, l]) => h("option", { value: v, selected: v === it.style }, l)));
+        const wide = h("input", { type: "checkbox", checked: it.wide, onchange: (e) => { it.wide = e.target.checked; paint(); } });
+        const show = h("input", { type: "checkbox", checked: !it.hidden, onchange: (e) => { it.hidden = !e.target.checked; paint(); } });
+        return h("div", { class: `look-row ${it.hidden ? "off" : ""}` },
+          h("div", { class: "look-move" },
+            h("button", { type: "button", class: "ghost", disabled: n === 0, title: T("بالا", "Up"), "aria-label": T("یک ردیف بالاتر", "Move up"), onclick: () => move(n, -1) }, "▲"),
+            h("button", { type: "button", class: "ghost", disabled: n === items.length - 1, title: T("پایین", "Down"), "aria-label": T("یک ردیف پایین‌تر", "Move down"), onclick: () => move(n, 1) }, "▼")),
+          h("div", { class: "look-main" }, label,
+            h("div", { class: "look-opts" }, color, h("label", { class: "check" }, wide, T("ردیف کامل", "Full row")), h("label", { class: "check" }, show, T("نمایش", "Show"))),
+            d.note ? h("span", { class: "small muted" }, d.note) : null));
+      }));
+      paint();
+    };
+    const bannerSel = h("select", { onchange: (e) => { banner = e.target.value; paint(); } },
+      [["", st.main ? T("بنر پیش‌فرض", "Built-in banner") : T("پیش‌فرض (بدون عکس)", "Default (no picture)")], ["custom", T("عکس خودم", "My own picture")], ["none", T("بدون عکس", "No picture")]]
+        .map(([v, l]) => h("option", { value: v, selected: v === banner }, l)));
+    const file = h("input", { type: "file", accept: "image/jpeg,image/png", onchange: async () => {
+      const f = file.files[0]; err.textContent = "";
+      if (!f) return;
+      if (f.size > 2 * 1024 * 1024) { err.textContent = T("عکس باید کمتر از ۲ مگابایت باشد.", "The picture must be under 2 MB."); file.value = ""; return; }
+      try {
+        const res = await fetch(`${base}/banner`, { method: "PUT", credentials: "same-origin", body: f, headers: { "X-Dark-Request": "1", "Content-Type": "application/octet-stream" } });
+        if (!res.ok) throw new Error(faErr((await res.text()).trim() || res.statusText));
+        hasBanner = true; banner = "custom"; bannerSel.value = "custom"; bust = Date.now(); paint();
+        toast(T("عکس بارگذاری شد؛ برای اعمال، ذخیره را بزنید.", "Picture uploaded; press Save to apply it."));
+      } catch (x) { err.textContent = x.message; }
+    } });
+    const whoSeg = h("div", { class: "seg" }, [["fresh", T("مشتری جدید", "New customer")], ["has", T("مشتری دارای سرویس", "Customer with a service")]].map(([k, l]) =>
+      h("button", { type: "button", class: k === who ? "on" : "", "aria-pressed": String(k === who), onclick: (e) => {
+        who = k; [...whoSeg.children].forEach((b) => { b.classList.toggle("on", b === e.currentTarget); b.setAttribute("aria-pressed", String(b === e.currentTarget)); }); paint();
+      } }, l)));
+    const save = h("button", { class: "primary", type: "button", onclick: async () => {
+      err.textContent = "";
+      if (banner === "custom" && !hasBanner) { err.textContent = T("اول یک عکس انتخاب کنید.", "Choose a picture first."); return; }
+      if (!items.some((i) => !i.hidden)) { err.textContent = T("دست‌کم یک دکمه باید نمایش داده شود.", "At least one button must stay visible."); return; }
+      try { draw(await api("PUT", `${base}/look`, { buttons: items.map((i) => ({ key: i.key, label: i.label.trim(), style: i.style, hidden: i.hidden, wide: i.wide })), banner })); toast(t("saved")); }
+      catch (x) { err.textContent = x.message; }
+    } }, t("save"));
+    const reset = h("button", { class: "ghost", type: "button", onclick: async () => {
+      if (!(await confirmAction(T("چینش، نام و رنگ دکمه‌ها و بنر به حالت پیش‌فرض برگردد؟", "Put the buttons and the banner back to the built-in look?"), T("برگشت به پیش‌فرض", "Reset")))) return;
+      try { draw(await api("PUT", `${base}/look`, { buttons: [], banner: "" })); toast(t("saved")); } catch (x) { err.textContent = x.message; }
+    } }, T("برگشت به پیش‌فرض", "Reset to built-in"));
+    fill(card, h("h2", {}, "🎨 ", T("ظاهر منوی ربات", "Bot menu look")),
+      h("p", { class: "small muted" }, T("ترتیب، نام، رنگ و پهنای دکمه‌های منوی اصلی مشتری و عکس بالای آن. تلگرام فقط همین سه رنگ را می‌دهد. منوی مدیریت و مراحل خرید تغییر نمی‌کنند.",
+        "Order, names, colours and width of the customer's main-menu buttons, and the picture above it. Telegram offers only these three colours. The management menu and the purchase steps stay as they are.")),
+      h("div", { class: "look-grid" },
+        h("div", {}, h("h3", { class: "section" }, T("دکمه‌ها", "Buttons")), list,
+          h("h3", { class: "section" }, T("عکس بالای منو", "Picture above the menu")),
+          h("label", {}, h("span", {}, T("بنر", "Banner")), bannerSel),
+          h("label", {}, h("span", {}, T("عکس خودم (JPEG یا PNG، کمتر از ۲ مگابایت، بهتر است افقی باشد)", "My picture (JPEG or PNG, under 2 MB, landscape works best)")), file)),
+        h("div", { class: "look-side" }, h("h3", { class: "section" }, T("پیش‌نمایش", "Preview")), whoSeg, prev,
+          h("p", { class: "small muted" }, T("رنگ «خودکار» را ربات از روی معنی دکمه می‌گذارد و در پیش‌نمایش خاکستری دیده می‌شود.", "“Auto” is coloured by the bot from the button's meaning; the preview shows it grey.")))),
+      err, h("div", { class: "row" }, save, reset));
+    rows();
+  };
+  api("GET", `${base}/look`).then(draw).catch((x) => fill(card, h("h2", {}, "🎨 ", T("ظاهر منوی ربات", "Bot menu look")), h("p", { class: "error" }, x.message)));
+  return card;
+}
+
 // repLoginMessage: what the owner sends the new reseller.
 function repLoginMessage(url, user, pass, name) {
   return lang === "fa"
@@ -5908,9 +6010,9 @@ function viewSettings() {
     owner && ["sub", "link", fa ? "اشتراک مشتری" : "Customer subscription", fa ? "عنوان، نام کانفیگ‌ها و صفحهٔ مشتری" : "Title, config names, customer page", () => [subSettingsCard()]],
     (owner || fullOwner()) && ["panel", "globe", fa ? "آدرس و دسترسی پنل" : "Panel address and access", fa ? "HTTPS، مسیر مخفی، IPهای مجاز" : "HTTPS, secret path, trusted IPs", () => [fullOwner() ? panelHTTPSCard() : null, fullOwner() ? panelPathCard() : null, owner ? trustedCard() : null]],
     me.role === "rep" && ["repsub", "link", fa ? "صفحهٔ اشتراک من" : "My subscription page", fa ? "برند، لوگو و آدرس اختصاصی" : "Brand, logo and own address", () => [repBrandCard("/api/v2/rep/brand")]],
-    me.role === "rep" && ["repbot", "bell", fa ? "ربات فروش و کارت من" : "My sales bot and card", fa ? "ربات تلگرام اختصاصی، کارت به کارت" : "Own Telegram bot, card payment", () => [repBotCard("/api/v2/rep/bot"), sellerCardCard("/api/v2/shop/card")]],
+    me.role === "rep" && ["repbot", "bell", fa ? "ربات فروش و کارت من" : "My sales bot and card", fa ? "ربات تلگرام اختصاصی، کارت به کارت" : "Own Telegram bot, card payment", () => [repBotCard("/api/v2/rep/bot"), botLookCard("/api/v2/rep/bot"), sellerCardCard("/api/v2/shop/card")]],
     ["security", "staff", fa ? "امنیت حساب" : "Account security", fa ? "رمز، ورود دومرحله‌ای، نشست‌ها" : "Password, two-step sign-in, sessions", () => [pwForm, tfaCard(), sessionsCard()]],
-    (fullOwner() || owner || tgCard) && ["telegram", "bell", fa ? "تلگرام" : "Telegram", fa ? "ربات، هشدارها، فروش و دعوت" : "Bot, alerts, sales and referrals", () => [fullOwner() ? telegramBotCard() : null, owner ? tgCommerceCard() : null, tgCard]],
+    (fullOwner() || owner || tgCard) && ["telegram", "bell", fa ? "تلگرام" : "Telegram", fa ? "ربات، هشدارها، فروش و دعوت" : "Bot, alerts, sales and referrals", () => [fullOwner() ? telegramBotCard() : null, fullOwner() ? botLookCard("/api/v2/admin/telegram") : null, owner ? tgCommerceCard() : null, tgCard]],
     fullOwner() && ["backup", "traffic", fa ? "پشتیبان و انتقال" : "Backup and migration", fa ? "دانلود، بازگردانی، ورود از پنل‌های دیگر" : "Download, restore, import from other panels", () => [backupCard, migrateCard(), foreignCard()]],
     ["look", "moon", fa ? "زبان و ظاهر" : "Language and look", fa ? "زبان، تم، خروج" : "Language, theme, sign out", () => [lookCard]],
   ].filter(Boolean);
