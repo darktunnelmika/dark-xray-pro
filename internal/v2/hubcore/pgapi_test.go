@@ -92,9 +92,9 @@ func TestPasarGuardAPI(t *testing.T) {
 	}
 
 	exp := now.Add(30 * 24 * time.Hour).UTC().Format(time.RFC3339)
-	code, out = call("POST", "/api/user", tok, map[string]any{"username": "m1", "data_limit": 10 << 30, "expire": exp,
+	code, out = call("POST", "/api/user", tok, map[string]any{"username": "mz1", "data_limit": 10 << 30, "expire": exp,
 		"group_ids": []any{gid}, "note": "from mirza", "proxy_settings": map[string]any{}, "data_limit_reset_strategy": "no_reset"})
-	if code != 200 || out["username"] != "m1" || out["status"] != "active" || !strings.Contains(out["subscription_url"].(string), "/sub/") {
+	if code != 200 || out["username"] != "mz1" || out["status"] != "active" || !strings.Contains(out["subscription_url"].(string), "/sub/") {
 		t.Fatalf("create %d %v", code, out)
 	}
 	if credit() != 90<<30 {
@@ -103,7 +103,7 @@ func TestPasarGuardAPI(t *testing.T) {
 	if _, ok := out["links"].([]any); !ok {
 		t.Fatal("the new user's configs come back as a list")
 	}
-	if code, _ := call("POST", "/api/user", tok, map[string]any{"username": "m1", "data_limit": 1 << 30, "expire": exp}); code != 409 {
+	if code, _ := call("POST", "/api/user", tok, map[string]any{"username": "mz1", "data_limit": 1 << 30, "expire": exp}); code != 409 {
 		t.Fatal("a second user with the same name", code)
 	}
 	if code, out := call("GET", "/api/user/alice", tok, nil); code != 404 || out["detail"] != "User not found" {
@@ -111,20 +111,20 @@ func TestPasarGuardAPI(t *testing.T) {
 	}
 
 	// A renewal the way Mirza sends it: Unix expiry, groups under "inbounds".
-	code, out = call("PUT", "/api/user/m1", tok, map[string]any{"data_limit": 15 << 30, "expire": now.Add(60 * 24 * time.Hour).Unix(),
+	code, out = call("PUT", "/api/user/mz1", tok, map[string]any{"data_limit": 15 << 30, "expire": now.Add(60 * 24 * time.Hour).Unix(),
 		"inbounds": []any{gid}, "proxy_settings": map[string]any{"vless": map[string]any{"id": "x"}}})
 	if code != 200 || out["data_limit"].(float64) != float64(15<<30) || credit() != 85<<30 {
 		t.Fatalf("modify %d %v credit %d", code, out, credit())
 	}
 	// Reset: the used part is charged.
-	_, _ = s.db.Exec(`INSERT OR REPLACE INTO client_usage(email,up,down,first_seen_unix,last_seen_unix) VALUES('m1',?,0,?,?)`, int64(1<<30), now.Unix(), now.Unix())
-	code, out = call("POST", "/api/user/m1/reset", tok, nil)
+	_, _ = s.db.Exec(`INSERT OR REPLACE INTO client_usage(email,up,down,first_seen_unix,last_seen_unix) VALUES('mz1',?,0,?,?)`, int64(1<<30), now.Unix(), now.Unix())
+	code, out = call("POST", "/api/user/mz1/reset", tok, nil)
 	if code != 200 || out["used_traffic"].(float64) != 0 || credit() != 84<<30 {
 		t.Fatalf("reset %d %v credit %d", code, out, credit())
 	}
-	before, _ := s.clientView(ctx, "m1")
-	code, out = call("POST", "/api/user/m1/revoke_sub", tok, nil)
-	after, _ := s.clientView(ctx, "m1")
+	before, _ := s.clientView(ctx, "mz1")
+	code, out = call("POST", "/api/user/mz1/revoke_sub", tok, nil)
+	after, _ := s.clientView(ctx, "mz1")
 	if code != 200 || after.SubToken == before.SubToken {
 		t.Fatal("revoke_sub gives a new link", code)
 	}
@@ -134,11 +134,11 @@ func TestPasarGuardAPI(t *testing.T) {
 	}
 	resp.Body.Close()
 	// Disable, as Mirza does: read, then PUT the status with proxy_settings.
-	if code, out := call("PUT", "/api/user/m1", tok, map[string]any{"status": "disabled", "proxy_settings": map[string]any{}}); code != 200 || out["status"] != "disabled" {
+	if code, out := call("PUT", "/api/user/mz1", tok, map[string]any{"status": "disabled", "proxy_settings": map[string]any{}}); code != 200 || out["status"] != "disabled" {
 		t.Fatalf("disable %d %v", code, out)
 	}
 	// On hold: the term starts at the first connection.
-	code, out = call("POST", "/api/user", tok, map[string]any{"username": "m2", "data_limit": 5 << 30, "expire": 0, "status": "on_hold",
+	code, out = call("POST", "/api/user", tok, map[string]any{"username": "mz2", "data_limit": 5 << 30, "expire": 0, "status": "on_hold",
 		"on_hold_expire_duration": 7 * 86400, "group_ids": []any{gid}})
 	if code != 200 || out["status"] != "on_hold" || out["expire"] != nil {
 		t.Fatalf("on hold %d %v", code, out)
@@ -151,7 +151,7 @@ func TestPasarGuardAPI(t *testing.T) {
 	if code != 200 || out["total_user"].(float64) != 2 {
 		t.Fatalf("system %d %v", code, out)
 	}
-	if code, out := call("DELETE", "/api/user/m2", tok, nil); code != 200 || out["detail"] != "User successfully deleted" {
+	if code, out := call("DELETE", "/api/user/mz2", tok, nil); code != 200 || out["detail"] != "User successfully deleted" {
 		t.Fatalf("delete %d %v", code, out)
 	}
 	if code, _ := call("GET", "/api/users", "", nil); code != 401 {
@@ -171,7 +171,7 @@ func TestPasarGuardAPI(t *testing.T) {
 	if code, out := call("GET", "/api/user/alice", otok, nil); code != 200 || out["username"] != "alice" {
 		t.Fatalf("owner read %d %v", code, out)
 	}
-	if code, _ := call("GET", "/api/user/m1", otok, nil); code != 404 {
+	if code, _ := call("GET", "/api/user/mz1", otok, nil); code != 404 {
 		t.Fatal("a reseller's client is not the owner's", code)
 	}
 }
