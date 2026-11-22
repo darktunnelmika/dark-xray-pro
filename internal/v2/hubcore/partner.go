@@ -79,13 +79,13 @@ type PartnerKey struct {
 	Key string `json:"key,omitempty"`
 }
 
-const gib = float64(1 << 30)
+const gibF = float64(1 << 30)
 
 func (s *Store) scanPartner(row interface{ Scan(...any) error }) (PartnerKey, error) {
 	var k PartnerKey
 	var maxB, givenB int64
 	err := row.Scan(&k.ID, &k.Name, &k.Enabled, &maxB, &k.MaxUnits, &givenB, &k.GivenUnits, &k.Template, &k.Created, &k.LastUsed, &k.LastIP, &k.Panels)
-	k.MaxGB, k.GivenGB = float64(maxB)/gib, float64(givenB)/gib
+	k.MaxGB, k.GivenGB = float64(maxB)/gibF, float64(givenB)/gibF
 	return k, err
 }
 
@@ -150,7 +150,7 @@ func (s *Store) CreatePartnerKey(ctx context.Context, in PartnerKeyIn) (PartnerK
 	}
 	id, secret := randomHex(4), randomHex(24)
 	if _, err := s.db.ExecContext(ctx, `INSERT INTO partner_keys(id,name,secret_sha256,max_bytes,max_units,template,created_unix) VALUES(?,?,?,?,?,?,?)`,
-		id, in.Name, hashToken(secret), int64(in.MaxGB*gib), in.MaxUnits, in.Template, s.now().Unix()); err != nil {
+		id, in.Name, hashToken(secret), int64(in.MaxGB*gibF), in.MaxUnits, in.Template, s.now().Unix()); err != nil {
 		return PartnerKey{}, err
 	}
 	k, err := s.partnerKey(ctx, id)
@@ -168,7 +168,7 @@ func (s *Store) UpdatePartnerKey(ctx context.Context, id string, in PartnerKeyIn
 		on = *in.Enabled
 	}
 	r, err := s.db.ExecContext(ctx, `UPDATE partner_keys SET name=?,max_bytes=?,max_units=?,template=?,enabled=? WHERE id=?`,
-		in.Name, int64(in.MaxGB*gib), in.MaxUnits, in.Template, on, id)
+		in.Name, int64(in.MaxGB*gibF), in.MaxUnits, in.Template, on, id)
 	if err != nil {
 		return PartnerKey{}, err
 	}
@@ -277,7 +277,7 @@ func (s *Store) partnerPanels(ctx context.Context, keyID, id string) ([]PartnerP
 			user = l[0]
 		}
 		out = append(out, PartnerPanel{ID: r.ID, Name: r.Name, Username: user, Enabled: r.Enabled,
-			CreditGB: float64(r.VolumeCredit) / gib, Units: r.UnlimitedUnits, Clients: r.Clients, UsedGB: float64(r.UsedBytes) / gib})
+			CreditGB: float64(r.VolumeCredit) / gibF, Units: r.UnlimitedUnits, Clients: r.Clients, UsedGB: float64(r.UsedBytes) / gibF})
 	}
 	if id != "" && len(out) == 0 {
 		return nil, ErrNotFound
@@ -407,7 +407,7 @@ func partnerRoutes(s *Store, mux *http.ServeMux) {
 		if in.Password == "" {
 			in.Password = RandomPassword()
 		}
-		bytes := int64(in.CreditGB * gib)
+		bytes := int64(in.CreditGB * gibF)
 		if !s.partnerGive(r.Context(), k.ID, bytes, in.Units) {
 			pgErr(w, http.StatusForbidden, "this key's credit limit is used up")
 			return
@@ -447,7 +447,7 @@ func partnerRoutes(s *Store, mux *http.ServeMux) {
 			pgErr(w, http.StatusUnprocessableEntity, "credit_gb or units: more than 0 (credit can only be added)")
 			return
 		}
-		bytes := int64(in.CreditGB * gib)
+		bytes := int64(in.CreditGB * gibF)
 		if !s.partnerGive(r.Context(), k.ID, bytes, in.Units) {
 			pgErr(w, http.StatusForbidden, "this key's credit limit is used up")
 			return
