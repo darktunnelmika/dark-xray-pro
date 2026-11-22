@@ -3713,7 +3713,6 @@ async function repCreateForm() {
   const haveGB = mine ? Math.floor((mine.VolumeCredit || 0) / 2 ** 30) : 0;
   const tags = [...new Set((inbounds || []).map((ib) => ib.tag))];
   const ibBoxes = tags.map((tag) => h("label", { class: "check" }, h("input", { type: "checkbox", value: tag }), tag));
-  const tg = idList([]);
   const pkgSel = h("select", {}, h("option", { value: "" }, fa ? "تنظیم دستی" : "Set by hand"),
     ...pkgs.map((p) => h("option", { value: p.id }, `${p.name || p.id}${p.gb ? ` · ${fmtNum(p.gb)} GB` : ""}`)));
   pkgSel.onchange = () => {
@@ -3741,7 +3740,7 @@ async function repCreateForm() {
       await api("POST", sub ? "/api/v2/rep/sellers" : "/api/v2/admin/reps", { ID: rid, Name: name.value.trim(), Username: u, Password: pw,
         Policy: { MaxClients: +f.mc.value || 0, MaxDays: +f.md.value || 0, MaxClientGB: +f.mg.value || 0, AllowUnlimited: f.au.checked, CanDelete: f.cd.checked, RefundUnused: f.ru.checked,
           Inbounds: ibBoxes.map((b) => b.querySelector("input")).filter((i) => i.checked).map((i) => i.value) },
-        ManageProducts: sub ? null : f.mp.checked, CreditGB: +f.gb.value || 0, Units: +f.units.value || 0, TgOwners: tg.get() });
+        ManageProducts: sub ? null : f.mp.checked, CreditGB: +f.gb.value || 0, Units: +f.units.value || 0 });
       document.getElementById("modal").close("save"); route();
       showRepLogin(fa ? `${sub ? "زیرفروشنده" : "نماینده"} ساخته شد · ${rid}` : `${sub ? "Sub-seller" : "Reseller"} created · ${rid}`, u, pw, name.value.trim() || rid);
     } catch (x) {
@@ -3766,9 +3765,6 @@ async function repCreateForm() {
     sub ? null : h("label", { class: "check" }, f.mp, t("manageProducts")),
     sub && lim ? h("p", { class: "small muted" }, fa ? "گزینه‌های خاموش را خود شما هم ندارید؛ زیرفروشنده بیشتر از شما اجازه نمی‌گیرد." : "Greyed-out options are ones you do not have yourself; a sub-seller never gets more than you.") : null,
     tags.length ? h("fieldset", { class: "form", style: "border:0;padding:0;margin:0" }, h("legend", { class: "small muted" }, t("allowedInbounds")), ibBoxes) : null,
-    h("h3", { class: "section" }, fa ? "تلگرام" : "Telegram"),
-    lab(fa ? "شناسهٔ عددی تلگرام مدیران این پنل (اختیاری)" : "Numeric Telegram ids that manage this panel (optional)", tg.el,
-      fa ? "هر شناسه در ربات همین پنل را مدیریت می‌کند؛ با ＋ شناسهٔ بعدی را اضافه کنید. شناسه را از @userinfobot بگیرید." : "Each id manages this panel in the bot; ＋ adds another. Get an id from @userinfobot."),
     err), [save]);
   d.classList.add("wide");
 }
@@ -3780,18 +3776,15 @@ function repEditForm(r) {
   const en = h("input", { type: "checkbox", checked: r.Enabled });
   const user = h("input", { dir: "ltr", autocapitalize: "off", autocomplete: "off", pattern: "[a-z0-9][a-z0-9._\\-]{0,62}" });
   const pass = passwordField();
-  const tg = idList([]);
   const err = h("div", { class: "error", role: "alert" });
-  let hadLogin = false;
   const base = `${repBase()}/${encodeURIComponent(r.ID)}`;
-  api("GET", `${base}/login`).then((x) => { hadLogin = !!(x.usernames || []).length; user.value = (x.usernames || [])[0] || r.ID; tg.set(x.telegram || []); }).catch(() => { user.value = r.ID; });
+  api("GET", `${base}/login`).then((x) => { user.value = (x.usernames || [])[0] || r.ID; }).catch(() => { user.value = r.ID; });
   const save = h("button", { class: "primary", value: "save", onclick: async (e) => {
     e.preventDefault(); err.textContent = "";
     const pw = pass.get(), u = (user.value.trim() || r.ID).toLowerCase();
     if (pw && pw.length < 10) { err.textContent = fa ? "رمز باید حداقل ۱۰ نویسه باشد." : "The password needs at least 10 characters."; return; }
     try {
       await api("PUT", base, { Name: name.value, Enabled: en.checked, Username: "", Password: "" });
-      await api("PUT", `${base}/bot-owners`, { owners: tg.get() });
       if (pw) await api("PUT", `${base}/login`, { Username: u, Password: pw });
       document.getElementById("modal").close("save"); route();
       if (pw) showRepLogin(fa ? `رمز جدید · ${r.ID}` : `New password · ${r.ID}`, u, pw, name.value || r.ID); else toast(t("saved"));
@@ -3806,9 +3799,6 @@ function repEditForm(r) {
     h("label", {}, h("span", {}, t("loginUser")), user),
     h("label", {}, h("span", {}, fa ? "رمز جدید" : "New password"), pass.el,
       h("span", { class: "small muted" }, fa ? "خالی بگذارید تا رمز فعلی بماند. با رمز جدید، نماینده از همهٔ دستگاه‌ها خارج می‌شود." : "Leave empty to keep the current one. A new password signs the reseller out everywhere.")),
-    h("h3", { class: "section" }, fa ? "تلگرام" : "Telegram"),
-    h("label", {}, h("span", {}, fa ? "شناسهٔ عددی تلگرام مدیران این پنل" : "Numeric Telegram ids that manage this panel"), tg.el,
-      h("span", { class: "small muted" }, fa ? "همهٔ این شناسه‌ها در ربات هم‌سطح‌اند. با ＋ شناسهٔ بعدی را اضافه کنید." : "All these ids are on a par in the bot. ＋ adds another.")),
     err), [save]);
 }
 
@@ -4181,6 +4171,8 @@ function repBotCard(path) {
   const en = h("input", { type: "checkbox" });
   const mini = h("input", { type: "checkbox", checked: true });
   const st = h("div", { class: "small" });
+  // The numeric Telegram ids are the reseller's own to set, in its own panel.
+  const own = me.role === "rep";
   const owners = idList([]);
   const draw = (b) => {
     owners.set(b.owners || []);
@@ -4193,13 +4185,13 @@ function repBotCard(path) {
   api("GET", path).then(draw).catch(() => {});
   return h("form", { class: "card form", onsubmit: async (e) => {
     e.preventDefault();
-    const r = await guarded(() => api("PUT", path, { token: tok.value.trim(), enabled: en.checked, miniapp: mini.checked, owners: owners.get() }));
+    const r = await guarded(() => api("PUT", path, own ? { token: tok.value.trim(), enabled: en.checked, miniapp: mini.checked, owners: owners.get() } : { token: tok.value.trim(), enabled: en.checked, miniapp: mini.checked }));
     tok.value = ""; draw(r); toast(fa ? "ذخیره شد؛ ربات تا چند ثانیه دیگر روشن می‌شود" : "Saved; the bot starts in a few seconds");
   } },
     h("h2", {}, "🤖 ", fa ? "ربات فروش اختصاصی" : "Own sales bot"),
     h("p", { class: "small muted" }, fa ? "از @BotFather یک ربات بسازید و توکنش را این‌جا بزنید. ربات فقط محصولات شما را می‌فروشد، پرداخت‌ها به کارت شما می‌آید، کیف پول مشتری‌ها مال شماست و فقط کلاینت‌های خودتان را نشان می‌دهد. رسیدها برای تلگرامی که به نمایندگی وصل کرده‌اید فرستاده می‌شود." : "Create a bot with @BotFather and paste its token. It sells only your products, payments go to your card, the customers' wallets are yours and it shows only your clients. Receipts go to the Telegram you linked to your reseller account."),
     st, h("label", {}, h("span", {}, fa ? "توکن ربات" : "Bot token"), tok),
-    h("label", {}, h("span", {}, fa ? "شناسهٔ عددی تلگرام مدیران" : "Managers' numeric Telegram ids"), owners.el,
+    !own ? null : h("label", {}, h("span", {}, fa ? "شناسهٔ عددی تلگرام مدیران" : "Managers' numeric Telegram ids"), owners.el,
       h("span", { class: "small muted" }, fa ? "هر شناسه در ربات، این پنل را کامل مدیریت می‌کند (سفارش‌ها، رسیدها، هشدارها). با ＋ شناسهٔ بعدی را اضافه کنید؛ شناسه را از @userinfobot بگیرید." : "Each id fully manages this panel in the bot (orders, receipts, alerts). ＋ adds another; get an id from @userinfobot.")),
     h("label", { class: "check" }, en, fa ? "روشن باشد" : "Enabled"),
     h("label", { class: "check" }, mini, fa ? "دکمهٔ فروشگاه (مینی‌اپ) در ربات: پلن‌ها، کارت و کیف پول خودتان، با نام و لوگوی برندتان" : "Store button (Mini App) in the bot: your plans, card and wallet, with your brand"),
