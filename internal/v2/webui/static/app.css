@@ -1147,3 +1147,12 @@ dialog.wide:has(.cform) { inline-size: min(780px, calc(100vw - 20px)); }
 
 .ref-stats { min-inline-size: 0; max-inline-size: 100%; }
 .ref-stats .table-wrap { max-inline-size: 100%; }
+
+/* Mirza connection */
+.mz-field { display: grid; gap: 4px; }
+.mz-field code { flex: 1; min-inline-size: 0; overflow-wrap: anywhere; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-2); }
+.mz-steps { margin: 0; padding-inline-start: 20px; display: grid; gap: 4px; }
+.mz-mode { grid-template-columns: 1fr 1fr; }
+.mz-badges { display: flex; flex-wrap: wrap; gap: 6px; }
+.mz-copy { display: flex; gap: 6px; align-items: center; min-inline-size: 0; }
+.mz-steps li { overflow-wrap: anywhere; }

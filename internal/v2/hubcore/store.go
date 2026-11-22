@@ -237,6 +237,10 @@ func Open(path string) (*Store, error) {
 		st.Close()
 		return nil, err
 	}
+	if err := st.ensurePGSchema(); err != nil {
+		st.Close()
+		return nil, err
+	}
 	if err := st.ensureWARPSchema(); err != nil {
 		st.Close()
 		return nil, err
@@ -602,10 +606,34 @@ type ClientView struct {
 
 // Clients lists every client with usage, newest first.
 func (s *Store) Clients(ctx context.Context) ([]ClientView, error) {
-	rows, err := s.ro.QueryContext(ctx, `SELECT c.email,c.uuid,c.enabled,c.volume_bytes,c.expires_unix,c.duration_seconds,c.max_ips,c.sub_token,c.rep_id,c.plan,c.note,
+	return s.clientViews(ctx, "", "")
+}
+
+// clientView is one client, read on its own (not the whole list).
+func (s *Store) clientView(ctx context.Context, email string) (ClientView, error) {
+	list, err := s.clientViews(ctx, "c.email=?", email)
+	if err != nil {
+		return ClientView{}, err
+	}
+	if len(list) == 0 {
+		return ClientView{}, ErrNotFound
+	}
+	return list[0], nil
+}
+
+// clientViews reads clients; where (with one argument) narrows them to one
+// email ("c.email=?") or one seller ("c.rep_id=?").
+func (s *Store) clientViews(ctx context.Context, where, arg string) ([]ClientView, error) {
+	q := `SELECT c.email,c.uuid,c.enabled,c.volume_bytes,c.expires_unix,c.duration_seconds,c.max_ips,c.sub_token,c.rep_id,c.plan,c.note,
 COALESCE(u.up,0),COALESCE(u.down,0),COALESCE(u.first_seen_unix,0),COALESCE(u.last_seen_unix,0),
 EXISTS(SELECT 1 FROM online o WHERE o.email=c.email AND o.seen_unix>=?),c.reset_period,c.last_reset_unix,c.next_plan,c.hwid_limit,c.start_by_unix,c.trial
-FROM clients c LEFT JOIN client_usage u ON u.email=c.email ORDER BY c.created_unix DESC, c.email`, s.now().Unix()-120)
+FROM clients c LEFT JOIN client_usage u ON u.email=c.email`
+	args := []any{s.now().Unix() - 120}
+	if where != "" {
+		q += " WHERE " + where
+		args = append(args, arg)
+	}
+	rows, err := s.ro.QueryContext(ctx, q+` ORDER BY c.created_unix DESC, c.email`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -639,7 +667,14 @@ FROM clients c LEFT JOIN client_usage u ON u.email=c.email ORDER BY c.created_un
 	for i := range out {
 		at[out[i].Email] = i
 	}
-	tags, err := s.ro.QueryContext(ctx, `SELECT email,tag FROM client_inbounds ORDER BY email,tag`)
+	tq, targs := `SELECT email,tag FROM client_inbounds ORDER BY email,tag`, []any(nil)
+	switch where {
+	case "c.email=?":
+		tq, targs = `SELECT email,tag FROM client_inbounds WHERE email=? ORDER BY tag`, []any{arg}
+	case "c.rep_id=?":
+		tq, targs = `SELECT i.email,i.tag FROM client_inbounds i JOIN clients c ON c.email=i.email WHERE c.rep_id=? ORDER BY i.email,i.tag`, []any{arg}
+	}
+	tags, err := s.ro.QueryContext(ctx, tq, targs...)
 	if err != nil {
 		return nil, err
 	}

@@ -4410,6 +4410,65 @@ function walletsPane() {
 }
 
 // A reseller's own Telegram sales bot.
+// mirzaCard connects a sales bot made for PasarGuard (Mirza) to this panel.
+// For a reseller it is a choice of how it sells: the Dark bot or Mirza
+// (the Dark bot stays off meanwhile).
+function mirzaCard(path, isRep) {
+  const fa = lang === "fa";
+  const T = (f, e) => (fa ? f : e);
+  const body = h("div", { class: "form" });
+  const err = h("div", { class: "error", role: "alert" });
+  const ago = (u) => {
+    if (!u) return T("هنوز وصل نشده", "never connected");
+    const m = Math.max(0, Math.round((Date.now() / 1000 - u) / 60));
+    return m < 2 ? T("همین الان", "just now") : m < 60 ? T(`${fmtNum(m)} دقیقه پیش`, `${m} min ago`) : m < 1440 ? T(`${fmtNum(Math.round(m / 60))} ساعت پیش`, `${Math.round(m / 60)} h ago`) : new Date(u * 1000).toLocaleDateString(fa ? "fa-IR" : "en-GB");
+  };
+  const field = (label, value, secret) => h("div", { class: "mz-field" }, h("span", { class: "small muted" }, label),
+    h("div", { class: "mz-copy" }, h("code", { dir: "ltr", class: secret ? "mz-secret" : "" }, value), h("button", { type: "button", class: "ghost", onclick: () => copy(value) }, T("کپی", "Copy"))));
+  const turnOn = async () => {
+    err.textContent = "";
+    try { draw(await api("POST", path)); } catch (x) { err.textContent = x.message; }
+  };
+  const turnOff = async () => {
+    if (!confirm(isRep ? T("اتصال میرزا قطع و ربات دارک دوباره روشن شود؟", "Disconnect Mirza and turn the Dark bot back on?") : T("اتصال میرزا قطع شود؟", "Disconnect Mirza?"))) return;
+    err.textContent = "";
+    try { draw(await api("DELETE", path)); } catch (x) { err.textContent = x.message; }
+  };
+  function draw(a) {
+    const on = !!a.enabled;
+    const mode = isRep ? h("div", { class: "segs mz-mode", role: "group", "aria-label": T("روش فروش", "How you sell") },
+      h("button", { type: "button", class: "seg", "aria-pressed": String(!on), onclick: () => on && turnOff() }, "🤖 ", T("ربات دارک", "Dark bot")),
+      h("button", { type: "button", class: "seg", "aria-pressed": String(on), onclick: () => !on && turnOn() }, "🔗 ", T("ربات میرزا", "Mirza bot"))) : null;
+    if (!on) {
+      fill(body, mode,
+        h("p", { class: "small muted" }, isRep
+          ? T("اگر مشتری‌هایتان در ربات میرزا هستند، «ربات میرزا» را بزنید. پنل ما برای میرزا مثل یک پنل پاسارگاد کار می‌کند و ربات دارک شما خاموش می‌ماند.", "If your customers are in a Mirza bot, choose “Mirza bot”. This panel works for Mirza like a PasarGuard panel, and your Dark bot stays off.")
+          : T("ربات میرزا (یا هر ربات فروشی که پنل پاسارگاد را می‌شناسد) را به این پنل وصل کنید. ربات اصلی دارک روشن می‌ماند.", "Connect a Mirza bot (or any sales bot that speaks PasarGuard) to this panel. The main Dark bot stays on.")),
+        isRep ? null : h("button", { type: "button", class: "primary", onclick: turnOn }, T("ساخت اتصال میرزا", "Create the Mirza connection")), err);
+      return;
+    }
+    fill(body, mode,
+      h("div", { class: "mz-badges" }, h("span", { class: "badge good" }, "● ", T("فعال", "on")),
+        h("span", { class: "badge" }, T("آخرین اتصال: ", "last call: "), ago(a.last_used)),
+        h("span", { class: "badge" }, T(`${fmtNum(a.made)} کاربر ساخته شده با میرزا`, `${a.made} users made by Mirza`))),
+      h("ol", { class: "mz-steps small" },
+        h("li", {}, T("در پنل ادمین میرزا «🖥 اضافه کردن پنل» را بزنید و نوع پنل را «پاسارگارد» انتخاب کنید.", "In Mirza's admin menu tap “🖥 Add panel” and choose the PasarGuard type.")),
+        h("li", {}, T("آدرس، نام کاربری و رمز زیر را وارد کنید.", "Enter the address, username and password below.")),
+        h("li", {}, T("در «✏️ مدیریت پنل» دکمهٔ «🎛 تنظیم نام گروه» را بزنید و عبارت all-groups را بفرستید تا همهٔ اینباندهای مجاز شما برای کاربرهای جدید انتخاب شود (یا نام کاربری یکی از کاربرهایتان را بفرستید تا فقط اینباندهای او برداشته شود).", "In “✏️ Panel management” tap “🎛 Set group name” and send all-groups to give new users every inbound you may give (or send one of your users' names to copy just its inbounds)."))),
+      field(T("آدرس پنل", "Panel address"), location.origin),
+      field(T("نام کاربری", "Username"), a.username),
+      a.password ? field(T("رمز (فقط همین یک بار نشان داده می‌شود)", "Password (shown only this once)"), a.password, true)
+        : h("p", { class: "small muted" }, T("رمز فقط هنگام ساخت نشان داده می‌شود. اگر ندارید، رمز تازه بسازید و در میرزا عوض کنید.", "The password is shown only when made. If you lost it, make a new one and change it in Mirza.")),
+      isRep ? h("p", { class: "small muted" }, T("کاربرهایی که میرزا می‌سازد زیر حساب شما ثبت و از اعتبارتان کم می‌شود. ربات دارک شما تا وقتی این حالت روشن است خاموش است.", "Users Mirza makes are yours and use your credit. Your Dark bot is off while this is on.")) : null,
+      err,
+      h("div", { class: "row" },
+        h("button", { type: "button", onclick: () => confirm(T("رمز تازه ساخته شود؟ رمز قبلی دیگر کار نمی‌کند و باید در میرزا عوض شود.", "Make a new password? The old one stops working; change it in Mirza.")) && turnOn() }, T("رمز تازه", "New password")),
+        isRep ? null : h("button", { type: "button", class: "danger", onclick: turnOff }, T("قطع اتصال", "Disconnect"))));
+  }
+  api("GET", path).then(draw).catch((x) => fill(body, h("p", { class: "error" }, x.message)));
+  return h("section", { class: "card form" }, h("h2", {}, isRep ? T("روش فروش", "How you sell") : T("🔗 اتصال ربات میرزا", "🔗 Mirza bot connection")), body);
+}
+
 function repBotCard(path) {
   const fa = lang === "fa";
   const tok = h("input", { type: "password", dir: "ltr", autocomplete: "off", placeholder: "123456789:AA..." });
@@ -6182,9 +6241,9 @@ function viewSettings() {
     owner && ["sub", "link", fa ? "اشتراک مشتری" : "Customer subscription", fa ? "عنوان، نام کانفیگ‌ها و صفحهٔ مشتری" : "Title, config names, customer page", () => [subSettingsCard()]],
     (owner || fullOwner()) && ["panel", "globe", fa ? "آدرس و دسترسی پنل" : "Panel address and access", fa ? "HTTPS، مسیر مخفی، IPهای مجاز" : "HTTPS, secret path, trusted IPs", () => [fullOwner() ? panelHTTPSCard() : null, fullOwner() ? panelPathCard() : null, owner ? trustedCard() : null]],
     me.role === "rep" && ["repsub", "link", fa ? "صفحهٔ اشتراک من" : "My subscription page", fa ? "برند، لوگو و آدرس اختصاصی" : "Brand, logo and own address", () => [repBrandCard("/api/v2/rep/brand")]],
-    me.role === "rep" && ["repbot", "bell", fa ? "ربات فروش و کارت من" : "My sales bot and card", fa ? "ربات تلگرام اختصاصی، کارت به کارت" : "Own Telegram bot, card payment", () => [repBotCard("/api/v2/rep/bot"), botLookCard("/api/v2/rep/bot"), sellerCardCard("/api/v2/shop/card")]],
+    me.role === "rep" && ["repbot", "bell", fa ? "ربات فروش و کارت من" : "My sales bot and card", fa ? "ربات تلگرام اختصاصی، کارت به کارت" : "Own Telegram bot, card payment", () => [mirzaCard("/api/v2/rep/pg-api", true), repBotCard("/api/v2/rep/bot"), botLookCard("/api/v2/rep/bot"), sellerCardCard("/api/v2/shop/card")]],
     ["security", "staff", fa ? "امنیت حساب" : "Account security", fa ? "رمز، ورود دومرحله‌ای، نشست‌ها" : "Password, two-step sign-in, sessions", () => [pwForm, tfaCard(), sessionsCard()]],
-    (fullOwner() || owner || tgCard) && ["telegram", "bell", fa ? "تلگرام" : "Telegram", fa ? "ربات، هشدارها، فروش و دعوت" : "Bot, alerts, sales and referrals", () => [fullOwner() ? telegramBotCard() : null, fullOwner() ? botLookCard("/api/v2/admin/telegram") : null, owner ? tgCommerceCard() : null, tgCard]],
+    (fullOwner() || owner || tgCard) && ["telegram", "bell", fa ? "تلگرام" : "Telegram", fa ? "ربات، هشدارها، فروش و دعوت" : "Bot, alerts, sales and referrals", () => [fullOwner() ? telegramBotCard() : null, fullOwner() ? botLookCard("/api/v2/admin/telegram") : null, owner ? tgCommerceCard() : null, fullOwner() ? mirzaCard("/api/v2/admin/pg-api", false) : null, tgCard]],
     fullOwner() && ["backup", "traffic", fa ? "پشتیبان و انتقال" : "Backup and migration", fa ? "دانلود، بازگردانی، ورود از پنل‌های دیگر" : "Download, restore, import from other panels", () => [backupCard, migrateCard(), foreignCard()]],
     ["look", "moon", fa ? "زبان و ظاهر" : "Language and look", fa ? "زبان، تم، خروج" : "Language, theme, sign out", () => [lookCard]],
   ].filter(Boolean);

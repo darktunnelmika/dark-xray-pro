@@ -468,8 +468,9 @@ func (s *Store) RepBotsAll(ctx context.Context) []RepBotConf {
 			continue
 		}
 		var b RepBot
-		if json.Unmarshal([]byte(v), &b) == nil && b.Token != "" && b.Enabled {
-			out = append(out, RepBotConf{Rep: strings.TrimPrefix(k, "rep_bot:"), Token: b.Token})
+		rep := strings.TrimPrefix(k, "rep_bot:")
+		if json.Unmarshal([]byte(v), &b) == nil && b.Token != "" && b.Enabled && !s.MirzaMode(ctx, rep) {
+			out = append(out, RepBotConf{Rep: rep, Token: b.Token})
 		}
 	}
 	return out

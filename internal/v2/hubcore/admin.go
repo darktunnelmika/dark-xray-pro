@@ -38,6 +38,7 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 	if ui != nil {
 		mux.Handle("GET /", ui)
 	}
+	pgRoutes(s, mux.ServeMux, subBase) // PasarGuard-compatible API for sales bots (pgapi.go)
 	// member lets owners and representatives in; handlers read the caller
 	// with who(r). guard is owner-only and is the default for everything else.
 	member := func(h http.HandlerFunc) http.HandlerFunc {
@@ -1102,6 +1103,12 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 		p := who(r)
 		return p.RepID, p.Role == "rep" && p.RepID != ""
 	})
+	// Connecting a PasarGuard-made sales bot (Mirza): the owner's, a reseller's own.
+	pgAdminRoutes(s, mux, "/api/v2/admin/pg-api", guard, func(*http.Request) (string, bool) { return "", true })
+	pgAdminRoutes(s, mux, "/api/v2/rep/pg-api", member, func(r *http.Request) (string, bool) {
+		p := who(r)
+		return p.RepID, p.Role == "rep" && p.RepID != ""
+	})
 	mux.HandleFunc("GET /api/v2/rep/bot", member(func(w http.ResponseWriter, r *http.Request) {
 		p := who(r)
 		if p.Role != "rep" {
@@ -2125,6 +2132,23 @@ func SubHandler(s *Store) http.Handler {
 		_, _ = w.Write(body)
 	}
 	mux.HandleFunc("GET /sub/{token}", serveSub)
+	// PasarGuard's plain list of configs, which sales bots read after creating a user.
+	mux.HandleFunc("GET /sub/{token}/links", func(w http.ResponseWriter, r *http.Request) {
+		email, err := s.EmailBySubToken(r.Context(), r.PathValue("token"))
+		if err != nil {
+			http.NotFound(w, r)
+			return
+		}
+		links, info, err := s.Subscription(r.Context(), email)
+		if err != nil {
+			reply(w, nil, err)
+			return
+		}
+		w.Header().Set("Subscription-Userinfo", info)
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-store")
+		_, _ = w.Write([]byte(strings.Join(links, "\n")))
+	})
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Custom subscription paths of a 3x-ui panel moved here.
 		if r.Method == http.MethodGet && !strings.HasPrefix(r.URL.Path, "/sub/") && !strings.HasPrefix(r.URL.Path, "/app/") {
