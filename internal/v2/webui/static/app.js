@@ -3609,7 +3609,7 @@ function sshErr(e, fa) {
 function idList(values, max = 10) {
   const fa = lang === "fa";
   const rows = h("div", { class: "id-list" });
-  const add = h("button", { type: "button", class: "ghost id-add", title: fa ? "افزودن شناسهٔ دیگر" : "Add another id", "aria-label": fa ? "افزودن شناسهٔ دیگر" : "Add another id" }, "＋");
+  const add = h("button", { type: "button", class: "ghost id-add", title: fa ? "افزودن شناسهٔ دیگر" : "Add another id", "aria-label": fa ? "افزودن شناسهٔ دیگر" : "Add another id" }, fa ? "＋ افزودن شناسه" : "＋ Add an id");
   const sync = () => { add.hidden = rows.children.length >= max; };
   const row = (v) => {
     const inp = h("input", { dir: "ltr", inputmode: "numeric", pattern: "[0-9]{4,15}", placeholder: "1906987468", value: v ? String(v) : "" });
@@ -3775,7 +3775,7 @@ async function repCreateForm() {
     h("label", { class: "check" }, f.cd, t("canDelete")),
     h("label", { class: "check" }, f.ru, t("refundUnused")),
     h("label", { class: "check" }, f.mp, t("manageProducts")),
-    tags.length ? h("fieldset", { class: "form", style: "border:0;padding:0;margin:0" }, h("legend", { class: "small muted" }, `${t("allowedInbounds")} ${fa ? "(هیچ‌کدام = همه)" : "(none = all)"}`), ibBoxes) : null,
+    tags.length ? h("fieldset", { class: "form", style: "border:0;padding:0;margin:0" }, h("legend", { class: "small muted" }, t("allowedInbounds")), ibBoxes) : null,
     h("h3", { class: "section" }, fa ? "تلگرام" : "Telegram"),
     lab(fa ? "شناسهٔ عددی تلگرام مدیران این پنل (اختیاری)" : "Numeric Telegram ids that manage this panel (optional)", tg.el,
       fa ? "هر شناسه در ربات همین پنل را مدیریت می‌کند؛ با ＋ شناسهٔ بعدی را اضافه کنید. شناسه را از @userinfobot بگیرید." : "Each id manages this panel in the bot; ＋ adds another. Get an id from @userinfobot."),

@@ -1084,4 +1084,5 @@ dialog.wide:has(.cform) { inline-size: min(780px, calc(100vw - 20px)); }
 .id-list { display: grid; gap: 6px; }
 .id-list-wrap { display: grid; gap: 6px; }
 .id-list .row.tight > button, .id-add { flex: none; min-inline-size: 44px; min-block-size: 40px; }
-.id-add { justify-self: start; font-size: 18px; line-height: 1; }
+.id-add { inline-size: 100%; border-style: dashed; }
+.form .row.tight > input[minlength] { flex: 2; }
