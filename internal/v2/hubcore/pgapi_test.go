@@ -128,9 +128,12 @@ func TestPasarGuardAPI(t *testing.T) {
 	if code != 200 || after.SubToken == before.SubToken {
 		t.Fatal("revoke_sub gives a new link", code)
 	}
-	resp, err := http.Get(out["subscription_url"].(string) + "/links")
+	hs := httptest.NewServer(SubHandler(s))
+	defer hs.Close()
+	su, _ := url.Parse(out["subscription_url"].(string))
+	resp, err := http.Get(hs.URL + su.Path + "/links")
 	if err != nil || resp.StatusCode != 200 {
-		t.Fatal("the plain list of configs", err)
+		t.Fatal("the plain list of configs", err, resp.StatusCode)
 	}
 	resp.Body.Close()
 	// Disable, as Mirza does: read, then PUT the status with proxy_settings.
