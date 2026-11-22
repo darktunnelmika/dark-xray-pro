@@ -39,6 +39,7 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 		mux.Handle("GET /", ui)
 	}
 	pgRoutes(s, mux.ServeMux, subBase) // PasarGuard-compatible API for sales bots (pgapi.go)
+	partnerRoutes(s, mux.ServeMux)     // keys that make reseller panels (partner.go)
 	// member lets owners and representatives in; handlers read the caller
 	// with who(r). guard is owner-only and is the default for everything else.
 	member := func(h http.HandlerFunc) http.HandlerFunc {
@@ -1103,6 +1104,31 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 		p := who(r)
 		return p.RepID, p.Role == "rep" && p.RepID != ""
 	})
+	// Partner keys: other bots or sites making reseller panels (partner.go).
+	mux.HandleFunc("GET /api/v2/admin/partner-keys", guard(func(w http.ResponseWriter, r *http.Request) {
+		list, err := s.PartnerKeys(r.Context())
+		reply(w, list, err)
+	}))
+	mux.HandleFunc("POST /api/v2/admin/partner-keys", guard(func(w http.ResponseWriter, r *http.Request) {
+		var in PartnerKeyIn
+		if !decode(w, r, &in) {
+			return
+		}
+		k, err := s.CreatePartnerKey(r.Context(), in)
+		reply(w, k, err)
+	}))
+	mux.HandleFunc("PUT /api/v2/admin/partner-keys/{id}", guard(func(w http.ResponseWriter, r *http.Request) {
+		var in PartnerKeyIn
+		if !decode(w, r, &in) {
+			return
+		}
+		k, err := s.UpdatePartnerKey(r.Context(), r.PathValue("id"), in)
+		reply(w, k, err)
+	}))
+	mux.HandleFunc("DELETE /api/v2/admin/partner-keys/{id}", guard(func(w http.ResponseWriter, r *http.Request) {
+		err := s.DeletePartnerKey(r.Context(), r.PathValue("id"))
+		reply(w, map[string]bool{"ok": err == nil}, err)
+	}))
 	// Connecting a PasarGuard-made sales bot (Mirza): the owner's, a reseller's own.
 	pgAdminRoutes(s, mux, "/api/v2/admin/pg-api", guard, func(*http.Request) (string, bool) { return "", true })
 	pgAdminRoutes(s, mux, "/api/v2/rep/pg-api", member, func(r *http.Request) (string, bool) {

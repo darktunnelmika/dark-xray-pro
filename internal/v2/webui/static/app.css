@@ -1156,3 +1156,8 @@ dialog.wide:has(.cform) { inline-size: min(780px, calc(100vw - 20px)); }
 .mz-badges { display: flex; flex-wrap: wrap; gap: 6px; }
 .mz-copy { display: flex; gap: 6px; align-items: center; min-inline-size: 0; }
 .mz-steps li { overflow-wrap: anywhere; }
+
+/* Partner keys */
+.pk-list { display: grid; gap: 8px; }
+.pk-row { display: grid; gap: 8px; }
+.code-block { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; padding: 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-2); margin: 0; }

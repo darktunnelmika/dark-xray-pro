@@ -5228,6 +5228,80 @@ function renewForm(list) {
 }
 
 // Owner: resellers as a table with this month's numbers; actions in a menu.
+// partnerKeys: keys another bot or site uses to make reseller panels on its
+// own, with a credit limit and a template for the panels' rules.
+async function partnerKeys(reps) {
+  const fa = lang === "fa";
+  const T = (f, e) => (fa ? f : e);
+  const box = h("div", { class: "form" });
+  const err = h("div", { class: "error", role: "alert" });
+  const tops = (reps || []).filter((r) => !r.ParentID);
+  const gbTxt = (v) => `${fmtNum(+(+v).toFixed(1))} GB`;
+  const limit = (given, max, unit) => (max ? `${given} / ${max}${unit}` : `${given}${unit} · ${T("بدون سقف", "no limit")}`);
+  const showKey = (k) => {
+    const base = location.origin;
+    const curl = `curl -X POST ${base}/api/v2/partner/reps \\\n  -H "Authorization: Bearer ${k.key}" \\\n  -H "Content-Type: application/json" \\\n  -d '{"name":"Shop A","credit_gb":100}'`;
+    openModal(T("کلید ساخته شد", "Key created"), h("div", { class: "form" },
+      h("p", { class: "small" }, T("این کلید را همین حالا کپی کنید؛ دوباره نشان داده نمی‌شود.", "Copy this key now — it is not shown again.")),
+      h("div", { class: "mz-copy" }, h("code", { dir: "ltr" }, k.key), h("button", { type: "button", class: "ghost", onclick: () => copy(k.key) }, T("کپی", "Copy"))),
+      h("p", { class: "small muted" }, T("نمونهٔ ساخت پنل (جواب: آدرس پنل، نام کاربری، رمز و متن آمادهٔ ارسال برای مشتری):", "Example (the answer has the panel address, username, password and a ready-to-send message):")),
+      h("pre", { class: "code-block", dir: "ltr" }, curl),
+      h("button", { type: "button", class: "ghost", onclick: () => copy(curl) }, T("کپی نمونه", "Copy example")),
+      h("p", { class: "small muted" }, T("مسیرهای دیگر: GET /api/v2/partner/reps (فهرست)، POST …/reps/{id}/credit (افزودن اعتبار)، …/enable و …/disable (روشن/خاموش)، …/password (رمز تازه). کلید فقط پنل‌هایی را می‌بیند که خودش ساخته و نمی‌تواند حذف کند یا اعتبار پس بگیرد.",
+        "Other calls: GET /api/v2/partner/reps (list), POST …/reps/{id}/credit (add credit), …/enable and …/disable, …/password (new password). A key sees only the panels it made, and cannot delete one or take credit back."))));
+  };
+  async function draw() {
+    let list = [];
+    try { list = await api("GET", "/api/v2/admin/partner-keys"); } catch (x) { err.textContent = x.message; }
+    const name = h("input", { required: true, maxlength: "64", placeholder: T("مثلاً سایت فروش", "e.g. sales site") });
+    const maxGB = h("input", { type: "number", min: "0", step: "1", value: "0", dir: "ltr" });
+    const maxU = h("input", { type: "number", min: "0", step: "1", value: "0", dir: "ltr" });
+    const tpl = h("select", {}, h("option", { value: "" }, T("قوانین پیش‌فرض", "Default rules")), tops.map((r) => h("option", { value: r.ID }, `${r.Name || r.ID} (${r.ID})`)));
+    const rowFor = (k) => {
+      const on = h("input", { type: "checkbox", checked: !!k.enabled, "aria-label": T("فعال", "On") });
+      on.onchange = async () => {
+        try { await api("PUT", `/api/v2/admin/partner-keys/${encodeURIComponent(k.id)}`, { name: k.name, max_gb: k.max_gb, max_units: k.max_units, template: k.template, enabled: on.checked }); toast(t("saved")); }
+        catch (x) { on.checked = !on.checked; err.textContent = x.message; }
+      };
+      return h("div", { class: "card pk-row" },
+        h("div", { class: "row tight" }, h("b", {}, k.name), h("span", { class: "badge", dir: "ltr" }, `dp_${k.id}_…`), h("span", { class: "spacer" }),
+          h("label", { class: "check" }, on, h("span", {}, T("فعال", "On")))),
+        h("div", { class: "mz-badges" },
+          h("span", { class: "badge" }, T(`${fmtNum(k.panels)} پنل ساخته`, `${k.panels} panels`)),
+          h("span", { class: "badge", dir: "ltr" }, limit(fmtNum(+k.given_gb.toFixed(1)), k.max_gb ? fmtNum(k.max_gb) : 0, " GB")),
+          k.max_units || k.given_units ? h("span", { class: "badge", dir: "ltr" }, limit(fmtNum(k.given_units), k.max_units ? fmtNum(k.max_units) : 0, T(" واحد", " units"))) : null,
+          h("span", { class: "badge" }, T("قالب: ", "template: "), k.template || T("پیش‌فرض", "default")),
+          h("span", { class: "badge" }, T("آخرین استفاده: ", "last used: "), k.last_used ? fmtWhen(k.last_used) : T("هرگز", "never"))),
+        h("div", { class: "row" }, h("button", { type: "button", class: "danger", onclick: async () => {
+          if (!(await confirmAction(T(`کلید «${k.name}» حذف شود؟ هرچه از آن استفاده می‌کند از کار می‌افتد؛ پنل‌هایی که ساخته می‌مانند.`, `Delete the key “${k.name}”? Whatever uses it stops; the panels it made stay.`), t("delete")))) return;
+          await guarded(() => api("DELETE", `/api/v2/admin/partner-keys/${encodeURIComponent(k.id)}`)); draw();
+        } }, t("delete"))));
+    };
+    fill(box,
+      h("p", { class: "small muted" }, T("با این کلید یک ربات یا سایت دیگر می‌تواند خودکار پنل نمایندگی بسازد، اعتبار اضافه کند و آن را روشن یا خاموش کند. برای هر کلید سقف اعتبار بگذارید تا اگر لو رفت، بیشتر از آن خرج نشود.",
+        "With this key another bot or site makes reseller panels on its own, adds credit and turns them on or off. Give each key a credit limit so a leaked key cannot hand out more.")),
+      err,
+      list.length ? h("div", { class: "pk-list" }, list.map(rowFor)) : h("p", { class: "muted small" }, T("هنوز کلیدی ساخته نشده.", "No keys yet.")),
+      h("form", { class: "card form", onsubmit: async (e) => {
+        e.preventDefault(); err.textContent = "";
+        try {
+          const k = await api("POST", "/api/v2/admin/partner-keys", { name: name.value, max_gb: +maxGB.value || 0, max_units: +maxU.value || 0, template: tpl.value });
+          showKey(k);
+        } catch (x) { err.textContent = x.message; }
+      } },
+        h("h3", {}, T("کلید تازه", "New key")),
+        h("label", {}, h("span", {}, T("نام", "Name")), name),
+        h("div", { class: "two" },
+          h("label", {}, h("span", {}, T("سقف کل اعتبار حجمی (گیگ، ۰ = بدون سقف)", "Most volume credit in all (GB, 0 = no limit)")), maxGB),
+          h("label", {}, h("span", {}, T("سقف کل واحد نامحدود (۰ = بدون سقف)", "Most unlimited units in all (0 = no limit)")), maxU)),
+        h("label", {}, h("span", {}, T("قوانین پنل‌های جدید از روی نماینده", "New panels copy the rules of")), tpl,
+          h("span", { class: "small muted" }, T("محدودیت‌ها، اینباندها و قیمت‌های این نماینده برای هر پنل جدید کپی می‌شود.", "That reseller's limits, inbounds and prices are copied to every new panel."))),
+        h("button", { class: "primary" }, T("ساخت کلید", "Create key"))));
+  }
+  await draw();
+  openModal(T("API ساخت پنل نمایندگی", "Reseller panel API"), box);
+}
+
 async function viewReps() {
   const fa = lang === "fa";
   const [reps, inbounds, ov] = await Promise.all([api("GET", "/api/v2/admin/reps"), api("GET", "/api/v2/admin/inbounds"), api("GET", "/api/v2/admin/reps/overview").catch(() => [])]);
@@ -5268,7 +5342,9 @@ async function viewReps() {
   });
   const tot = (k) => (ov || []).reduce((a, o) => a + (o[k] || 0), 0);
   return h("div", {},
-    h("div", { class: "row" }, h("h1", {}, t("reps")), h("button", { class: "primary spacer", onclick: () => repForm(null) }, t("add"))),
+    h("div", { class: "row" }, h("h1", {}, t("reps")), h("span", { class: "spacer" }),
+      fullOwner() ? h("button", { onclick: () => partnerKeys(reps) }, "🔑 ", fa ? "API ساخت پنل" : "Panel API") : null,
+      h("button", { class: "primary", onclick: () => repForm(null) }, t("add"))),
     (reps || []).length ? h("div", { class: "kpis" },
       h("div", { class: "card kpi" }, h("div", { class: "k" }, icon("reps"), fa ? "نماینده" : "Resellers"), h("div", { class: "v" }, fmtNum(reps.length))),
       h("div", { class: "card kpi" }, h("div", { class: "k" }, icon("finance"), fa ? "اعتبار دست نماینده‌ها" : "Credit held"), h("div", { class: "v", dir: "ltr" }, gbs(reps.reduce((a, r) => a + r.VolumeCredit, 0)))),
