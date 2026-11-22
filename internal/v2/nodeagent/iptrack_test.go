@@ -15,7 +15,7 @@ func TestIPTrackerParsesAccessLog(t *testing.T) {
 	tr.Write([]byte("ted tcp:x.com:443 [r >> direct] email: alice\n[Warning] core: Xray started\nfrom 127.0.0.1:5 accepted tcp:127.0.0.1:10085 [api -> api]\n"))
 	tr.Write([]byte("from udp:198.51.100.2:9999 accepted udp:8.8.8.8:53 [hy >> direct] email: bob\n"))
 	on := tr.Online()
-	if len(on["alice"]) != 2 || on["alice"][0] != "2001:db8::5" || on["alice"][1] != "198.51.100.20" || len(on["bob"]) != 1 {
+	if len(on["alice"]) != 2 || on["alice"][0] != "198.51.100.20" || on["alice"][1] != "2001:db8::5" || len(on["bob"]) != 1 {
 		t.Fatalf("online %v", on)
 	}
 	now = now.Add(2 * time.Minute)
