@@ -309,8 +309,7 @@ cmd_status() {
   echo "  Panel:   $(panel_url)"
   echo "  Nodes:   port $(conf_get node_port)"
   if [ "$st" = active ] && command -v jq >/dev/null; then
-    local s n
-    s=$(api GET /api/v2/admin/system 2>/dev/null) && echo "  Clients: $(echo "$s" | jq -r '.clients // .Clients // "?"')"
+    local n
     n=$(api GET /api/v2/admin/nodes 2>/dev/null) && echo "  Nodes:   $(echo "$n" | jq '[.[]|select(.online)]|length') online of $(echo "$n" | jq length)"
   fi
   local c; c=$(conf_get cert)
