@@ -106,3 +106,97 @@ func pinWARPEndpoint(out map[string]any) {
 		}
 	}
 }
+
+func (s *Store) ensureWARPSchema() error {
+	_, err := s.db.Exec(`CREATE TABLE IF NOT EXISTS warp_accounts (
+  node_id TEXT PRIMARY KEY,
+  config TEXT NOT NULL,
+  created_unix INTEGER NOT NULL
+)`)
+	return err
+}
+
+// nodeWARP returns a node's own WARP outbound, or nil when it has none.
+func (s *Store) nodeWARP(ctx context.Context, nodeID string) map[string]any {
+	var raw string
+	if s.ro.QueryRowContext(ctx, `SELECT config FROM warp_accounts WHERE node_id=?`, nodeID).Scan(&raw) != nil {
+		return nil
+	}
+	var m map[string]any
+	if json.Unmarshal([]byte(raw), &m) != nil || m["protocol"] == nil {
+		return nil
+	}
+	return m
+}
+
+// registerWARP is replaceable in tests.
+var registerWARP = RegisterWARP
+
+// EnsureWARP makes sure the routing has a WARP outbound and that this node
+// has a WARP account of its own, registering what is missing. It returns
+// the outbound's tag.
+func (s *Store) EnsureWARP(ctx context.Context, nodeID string) (string, error) {
+	var n int
+	if err := s.ro.QueryRowContext(ctx, `SELECT COUNT(*) FROM nodes WHERE id=?`, nodeID).Scan(&n); err != nil || n == 0 {
+		return "", ErrNotFound
+	}
+	r := s.Routing(ctx)
+	tag := ""
+	for _, o := range r.Outbounds {
+		if o.Kind == "warp" && onNode(o.Nodes, nodeID) {
+			tag = o.Tag
+			break
+		}
+	}
+	if s.nodeWARP(ctx, nodeID) == nil {
+		cfg, err := registerWARP(ctx)
+		if err != nil {
+			return "", err
+		}
+		if _, err := s.db.ExecContext(ctx, `INSERT INTO warp_accounts(node_id,config,created_unix) VALUES(?,?,?)
+ON CONFLICT(node_id) DO UPDATE SET config=excluded.config, created_unix=excluded.created_unix`, nodeID, string(cfg), s.now().Unix()); err != nil {
+			return "", err
+		}
+		if tag == "" { // the first WARP anywhere: the same account serves as the shared one
+			tag = "warp"
+			for _, o := range r.Outbounds {
+				if o.Tag == tag {
+					tag = "warp-cf"
+				}
+			}
+			r.Outbounds = append(r.Outbounds, RouteOutbound{Tag: tag, Remark: "Cloudflare WARP", Kind: "warp", Config: cfg})
+			if err := s.PutRouting(ctx, r); err != nil {
+				return "", err
+			}
+		}
+	}
+	if tag == "" {
+		return "", fmt.Errorf("%w: the WARP outbound is limited to other nodes", ErrInvalid)
+	}
+	return tag, nil
+}
+
+// SetNodeWARP saves a node's WARP choice for one path ("direct" or
+// "tunnel"), giving the node a WARP account first when it turns it on.
+func (s *Store) SetNodeWARP(ctx context.Context, nodeID, path, mode string) error {
+	if path != "direct" && path != "tunnel" {
+		return fmt.Errorf("%w: unknown path %q", ErrInvalid, path)
+	}
+	if mode != "" {
+		if _, err := s.EnsureWARP(ctx, nodeID); err != nil {
+			return err
+		}
+	}
+	r := s.Routing(ctx)
+	if r.WARP == nil {
+		r.WARP = map[string]NodeWARP{}
+	}
+	w := r.WARP[nodeID]
+	if path == "direct" {
+		w.Direct = mode
+	} else {
+		w.Tunnel = mode
+	}
+	r.WARP[nodeID] = w
+	return s.PutRouting(ctx, r)
+}

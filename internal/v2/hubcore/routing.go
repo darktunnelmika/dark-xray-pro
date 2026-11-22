@@ -31,6 +31,62 @@ type Routing struct {
 	Outbounds        []RouteOutbound `json:"outbounds"`
 	Balancers        []RouteBalancer `json:"balancers"`
 	Rules            []RouteRule     `json:"rules"`
+	// The simple page's choices. WARP: per node, what leaves through
+	// Cloudflare WARP on its direct and on its tunnel path. WARPSites are the
+	// owner's own additions to the "only some sites" list; BlockSites are
+	// sites nobody reaches.
+	WARP       map[string]NodeWARP `json:"warp,omitempty"`
+	WARPSites  []string            `json:"warp_sites,omitempty"`
+	BlockSites []string            `json:"block_sites,omitempty"`
+}
+
+// NodeWARP is a node's WARP choice per path: "" (off), "all" (everything)
+// or "sites" (the sanctioned and AI sites, plus the owner's own).
+type NodeWARP struct {
+	Direct string `json:"direct,omitempty"`
+	Tunnel string `json:"tunnel,omitempty"`
+}
+
+// WARPDefaultSites are what "sites" mode sends through WARP: services that
+// refuse datacenter or sanctioned addresses.
+var WARPDefaultSites = []string{"openai.com", "chatgpt.com", "oaistatic.com", "oaiusercontent.com", "gemini.google.com", "aistudio.google.com",
+	"claude.ai", "anthropic.com", "copilot.microsoft.com", "perplexity.ai", "x.ai", "grok.com", "spotify.com", "netflix.com"}
+
+var siteRE = regexp.MustCompile(`^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,24}$`)
+
+// cleanSites turns what an owner types (a URL, www., capitals) into plain
+// host names, without repeats.
+func cleanSites(list []string) ([]string, error) {
+	seen := map[string]bool{}
+	var out []string
+	for _, v := range list {
+		v = strings.ToLower(strings.TrimSpace(v))
+		v = strings.TrimPrefix(strings.TrimPrefix(v, "https://"), "http://")
+		v = strings.TrimPrefix(strings.TrimPrefix(v, "domain:"), "www.")
+		if i := strings.IndexAny(v, "/:?"); i >= 0 {
+			v = v[:i]
+		}
+		if v == "" || seen[v] {
+			continue
+		}
+		if !siteRE.MatchString(v) {
+			return nil, fmt.Errorf("%w: %q is not a site name (like example.com)", ErrInvalid, v)
+		}
+		seen[v] = true
+		out = append(out, v)
+	}
+	if len(out) > 300 {
+		return nil, fmt.Errorf("%w: at most 300 sites", ErrInvalid)
+	}
+	return out, nil
+}
+
+func siteDomains(list []string) []string {
+	out := make([]string, len(list))
+	for i, v := range list {
+		out[i] = "domain:" + v
+	}
+	return out
 }
 
 // RouteOutbound is an extra Xray outbound (WARP, a chained server, ...).
@@ -89,6 +145,18 @@ var outTagRE = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,31}$`)
 // PutRouting validates and stores the policy. Every node's config is
 // rendered with it first, so a policy that cannot render is refused.
 func (s *Store) PutRouting(ctx context.Context, r Routing) error {
+	var err error
+	if r.WARPSites, err = cleanSites(r.WARPSites); err != nil {
+		return err
+	}
+	if r.BlockSites, err = cleanSites(r.BlockSites); err != nil {
+		return err
+	}
+	for id, w := range r.WARP {
+		if w == (NodeWARP{}) {
+			delete(r.WARP, id)
+		}
+	}
 	if err := validateRouting(r); err != nil {
 		return err
 	}
@@ -135,6 +203,13 @@ func validateRouting(r Routing) error {
 			return bad("balancer %s strategy", b.Tag)
 		}
 		tags[b.Tag] = true
+	}
+	for id, w := range r.WARP {
+		for _, m := range []string{w.Direct, w.Tunnel} {
+			if m != "" && m != "all" && m != "sites" {
+				return bad("node %s: unknown WARP choice %q", id, m)
+			}
+		}
 	}
 	if r.Iran != "" && r.Iran != "block" && !tags[r.Iran] {
 		return bad("iran: unknown outbound %s", r.Iran)
@@ -241,6 +316,7 @@ func (s *Store) nodeRouting(ctx context.Context, nodeID string, swapTags []strin
 	}
 	outbounds = []any{freedom, map[string]any{"tag": "block", "protocol": "blackhole"}}
 	present := map[string]bool{"direct": true, "block": true}
+	warpTag := ""
 	for _, o := range r.Outbounds {
 		if !onNode(o.Nodes, nodeID) {
 			continue
@@ -249,10 +325,19 @@ func (s *Store) nodeRouting(ctx context.Context, nodeID string, swapTags []strin
 		if json.Unmarshal(o.Config, &m) != nil {
 			continue
 		}
-		m["tag"] = o.Tag
 		if o.Kind == "warp" {
+			// Each node has its own WARP account: WireGuard keeps one peer
+			// address per key, so nodes sharing a key take the tunnel from
+			// each other. The saved one serves nodes that have none yet.
+			if own := s.nodeWARP(ctx, nodeID); own != nil {
+				m = own
+			}
 			pinWARPEndpoint(m)
+			if warpTag == "" {
+				warpTag = o.Tag
+			}
 		}
+		m["tag"] = o.Tag
 		outbounds = append(outbounds, m)
 		present[o.Tag] = true
 	}
@@ -310,6 +395,9 @@ func (s *Store) nodeRouting(ctx context.Context, nodeID string, swapTags []strin
 	if r.BlockTorrent {
 		add(map[string]any{"protocol": []string{"bittorrent"}}, "block")
 	}
+	if len(r.BlockSites) > 0 {
+		add(map[string]any{"domain": siteDomains(r.BlockSites)}, "block")
+	}
 	for _, ru := range r.Rules {
 		if !ru.Enabled || !onNode(ru.Nodes, nodeID) {
 			continue
@@ -345,6 +433,20 @@ func (s *Store) nodeRouting(ctx context.Context, nodeID string, swapTags []strin
 		}
 		add(m, ru.Outbound)
 	}
+	// The simple page's WARP choice for this node, per path. "Only some
+	// sites" goes before the ad and Iran rules (it names its sites), "all"
+	// after them, so what is blocked stays blocked.
+	choice := r.WARP[nodeID]
+	direct, tunnel := s.pathTags(ctx)
+	warpSites := siteDomains(append(append([]string{}, WARPDefaultSites...), r.WARPSites...))
+	if warpTag != "" {
+		if choice.Direct == "sites" && len(direct) > 0 {
+			add(map[string]any{"inboundTag": direct, "domain": warpSites}, warpTag)
+		}
+		if choice.Tunnel == "sites" && len(tunnel) > 0 {
+			add(map[string]any{"inboundTag": tunnel, "domain": warpSites}, warpTag)
+		}
+	}
 	if hasGeo && r.BlockAds {
 		add(map[string]any{"domain": []string{"geosite:category-ads-all"}}, "block")
 	}
@@ -352,6 +454,14 @@ func (s *Store) nodeRouting(ctx context.Context, nodeID string, swapTags []strin
 		to := r.Iran
 		add(map[string]any{"domain": []string{"geosite:ir"}}, to)
 		add(map[string]any{"ip": []string{"geoip:ir"}}, to)
+	}
+	if warpTag != "" {
+		if choice.Direct == "all" && len(direct) > 0 {
+			add(map[string]any{"inboundTag": direct, "network": "tcp,udp"}, warpTag)
+		}
+		if choice.Tunnel == "all" && len(tunnel) > 0 {
+			add(map[string]any{"inboundTag": tunnel, "network": "tcp,udp"}, warpTag)
+		}
 	}
 	routing = map[string]any{"domainStrategy": "AsIs", "rules": rules}
 	if needsIPMatch(rules) {
@@ -405,4 +515,39 @@ func (s *Store) RoutingStatus(ctx context.Context) RoutingStatus {
 	}
 	sort.Strings(st.NodesWithoutGeo)
 	return st
+}
+
+// pathTags lists the inbound tags of the direct and of the tunnel path.
+func (s *Store) pathTags(ctx context.Context) (direct, tunnel []string) {
+	rows, err := s.ro.QueryContext(ctx, `SELECT tag FROM inbounds ORDER BY tag`)
+	if err != nil {
+		return nil, nil
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var t string
+		if rows.Scan(&t) == nil {
+			direct = append(direct, t)
+			tunnel = append(tunnel, t+tunnelSuffix)
+		}
+	}
+	return direct, tunnel
+}
+
+// NodePaths tells which paths each node serves (a tunnel only where one is set up).
+func (s *Store) NodePaths(ctx context.Context) map[string]map[string]bool {
+	out := map[string]map[string]bool{}
+	rows, err := s.ro.QueryContext(ctx, `SELECT node_id, MAX(direct_port>0), MAX(tunnel_port>0) FROM inbound_routes GROUP BY node_id`)
+	if err != nil {
+		return out
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id string
+		var d, t bool
+		if rows.Scan(&id, &d, &t) == nil {
+			out[id] = map[string]bool{"direct": d, "tunnel": t}
+		}
+	}
+	return out
 }

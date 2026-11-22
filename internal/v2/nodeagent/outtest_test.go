@@ -69,3 +69,10 @@ func TestOutboundTestWireGuardHygiene(t *testing.T) {
 		t.Fatal(prefs) // 10230 still has routes; 9000 is not Xray's to touch
 	}
 }
+
+func TestParseTrace(t *testing.T) {
+	tr := parseTrace("fl=1\nip=104.28.204.181\nloc=US\ncolo=IAD\nwarp=on\n\ngarbage\n")
+	if tr["ip"] != "104.28.204.181" || tr["loc"] != "US" || tr["colo"] != "IAD" || tr["warp"] != "on" {
+		t.Fatal(tr)
+	}
+}

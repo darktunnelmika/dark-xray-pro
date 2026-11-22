@@ -1738,7 +1738,37 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 		reply(w, map[string]bool{"ok": true}, s.DeleteACMECert(r.Context(), r.PathValue("id")))
 	}))
 	mux.HandleFunc("GET /api/v2/admin/routing", guard(func(w http.ResponseWriter, r *http.Request) {
-		reply(w, map[string]any{"routing": s.Routing(r.Context()), "status": s.RoutingStatus(r.Context()), "geo": s.GeoInfo(r.Context())}, nil)
+		reply(w, map[string]any{"routing": s.Routing(r.Context()), "status": s.RoutingStatus(r.Context()), "geo": s.GeoInfo(r.Context()),
+			"paths": s.NodePaths(r.Context()), "warp_default_sites": WARPDefaultSites}, nil)
+	}))
+	// The simple page: one node, one path, one choice; saved at once.
+	mux.HandleFunc("PUT /api/v2/admin/routing/warp-mode", guard(func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Node string `json:"node"`
+			Path string `json:"path"`
+			Mode string `json:"mode"`
+		}
+		if !decode(w, r, &in) {
+			return
+		}
+		err := s.SetNodeWARP(r.Context(), in.Node, in.Path, in.Mode)
+		reply(w, map[string]any{"routing": s.Routing(r.Context())}, err)
+	}))
+	// A WARP test for one node; the node gets its own account first.
+	mux.HandleFunc("POST /api/v2/admin/routing/warp-test", guard(func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Node string `json:"node"`
+		}
+		if !decode(w, r, &in) {
+			return
+		}
+		tag, err := s.EnsureWARP(r.Context(), in.Node)
+		if err != nil {
+			reply(w, nil, err)
+			return
+		}
+		id, err := s.StartOutboundTest(r.Context(), in.Node, tag)
+		reply(w, map[string]string{"id": id}, err)
 	}))
 	mux.HandleFunc("PUT /api/v2/admin/routing", guard(func(w http.ResponseWriter, r *http.Request) {
 		var in Routing

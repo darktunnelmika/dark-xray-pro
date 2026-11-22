@@ -3,6 +3,8 @@ package hubcore
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -174,5 +176,97 @@ func TestRegisterWARP(t *testing.T) {
 		if !strings.Contains(s, want) {
 			t.Fatalf("%s missing in %s", want, s)
 		}
+	}
+}
+
+// The simple page: WARP per node and per path, with an account per node.
+func TestNodeWARPChoice(t *testing.T) {
+	s, _ := newStore(t)
+	seed(t, s)
+	ctx := context.Background()
+	if _, err := s.CreateNode(ctx, "fi-1", "Finland"); err != nil {
+		t.Fatal(err)
+	}
+	n := 0
+	old := registerWARP
+	registerWARP = func(context.Context) (json.RawMessage, error) {
+		n++
+		return json.RawMessage(fmt.Sprintf(`{"protocol":"wireguard","settings":{"secretKey":"key-%d","address":["172.16.0.2/32"],"peers":[{"publicKey":"y","endpoint":"engage.cloudflareclient.com:2408"}]}}`, n)), nil
+	}
+	defer func() { registerWARP = old }()
+
+	if err := s.SetNodeWARP(ctx, "de-1", "sideways", "all"); !errors.Is(err, ErrInvalid) {
+		t.Fatal(err)
+	}
+	if err := s.SetNodeWARP(ctx, "de-1", "direct", "some"); !errors.Is(err, ErrInvalid) {
+		t.Fatal(err)
+	}
+	if err := s.SetNodeWARP(ctx, "nope", "direct", "all"); !errors.Is(err, ErrNotFound) {
+		t.Fatal(err)
+	}
+	// The first WARP anywhere also becomes the shared outbound.
+	if err := s.SetNodeWARP(ctx, "de-1", "direct", "all"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetNodeWARP(ctx, "fi-1", "tunnel", "sites"); err != nil {
+		t.Fatal(err)
+	}
+	if n != 2 {
+		t.Fatalf("one account per node, got %d registrations", n)
+	}
+	r := s.Routing(ctx)
+	r.WARPSites = []string{"https://www.Example.com/path", "example.com", "domain:other.org"}
+	r.BlockSites = []string{"bad.example"}
+	if err := s.PutRouting(ctx, r); err != nil {
+		t.Fatal(err)
+	}
+	if got := s.Routing(ctx).WARPSites; len(got) != 2 || got[0] != "example.com" || got[1] != "other.org" {
+		t.Fatal(got)
+	}
+	bad := s.Routing(ctx)
+	bad.BlockSites = []string{"not a site"}
+	if err := s.PutRouting(ctx, bad); !errors.Is(err, ErrInvalid) {
+		t.Fatal(err)
+	}
+
+	key := func(c renderedCfg) string {
+		for _, o := range c.Outbounds {
+			if o["tag"] == "warp" {
+				b, _ := json.Marshal(o)
+				return string(b)
+			}
+		}
+		return ""
+	}
+	de, fi := renderFor(t, s, "de-1"), renderFor(t, s, "fi-1")
+	if !strings.Contains(key(de), "key-1") || !strings.Contains(key(fi), "key-2") {
+		t.Fatalf("each node its own account: de=%s fi=%s", key(de), key(fi))
+	}
+	if !strings.Contains(key(de), "162.159.192.1:2408") {
+		t.Fatal("the endpoint goes out as IPv4", key(de))
+	}
+	rd, rf := ruleText(de), ruleText(fi)
+	// de-1: everything on the direct path, nothing on the tunnel path.
+	if !strings.Contains(rd, `"network":"tcp,udp"`) || strings.Contains(rd, tunnelSuffix+`"],"network"`) {
+		t.Fatalf("de rules %s", rd)
+	}
+	// fi-1: only the listed sites, only on the tunnel path.
+	if strings.Contains(rf, `"network":"tcp,udp"`) || !strings.Contains(rf, "domain:chatgpt.com") || !strings.Contains(rf, "domain:example.com") || !strings.Contains(rf, tunnelSuffix) {
+		t.Fatalf("fi rules %s", rf)
+	}
+	for _, rt := range []string{rd, rf} {
+		if !strings.Contains(rt, "domain:bad.example") {
+			t.Fatalf("blocked sites on every node: %s", rt)
+		}
+	}
+	// Turning it off removes the rule; the account stays for next time.
+	if err := s.SetNodeWARP(ctx, "de-1", "direct", ""); err != nil {
+		t.Fatal(err)
+	}
+	if rt := ruleText(renderFor(t, s, "de-1")); strings.Contains(rt, `"network":"tcp,udp"`) || n != 2 {
+		t.Fatalf("off: %s (%d registrations)", rt, n)
+	}
+	if _, ok := s.Routing(ctx).WARP["de-1"]; ok {
+		t.Fatal("an all-off node is not kept in the list")
 	}
 }

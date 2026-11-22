@@ -30,7 +30,21 @@ type OutboundTestResult struct {
 	Ms     int64  `json:"ms"`     // best of two requests, connection included
 	Status int    `json:"status"` // HTTP status of the probe
 	IP     string `json:"ip,omitempty"`
+	Loc    string `json:"loc,omitempty"`  // country the traffic comes out in (two letters)
+	Colo   string `json:"colo,omitempty"` // Cloudflare's site that answered
+	Warp   string `json:"warp,omitempty"` // "on" / "plus" when the exit is Cloudflare WARP
 	Error  string `json:"error,omitempty"`
+}
+
+// parseTrace reads Cloudflare's /cdn-cgi/trace: key=value lines.
+func parseTrace(body string) map[string]string {
+	out := map[string]string{}
+	for _, l := range strings.Split(body, "\n") {
+		if k, v, ok := strings.Cut(strings.TrimSpace(l), "="); ok {
+			out[k] = v
+		}
+	}
+	return out
 }
 
 // OutboundTestTask runs a throwaway Xray with a local SOCKS port that sends
@@ -150,6 +164,25 @@ func runOutboundTest(ctx context.Context, bin, dir string, a OutboundTestArgs) O
 		return fail("%s", msg)
 	}
 	res.OK, res.Ms = res.Status > 0 && res.Status < 500, best
+	// Where the traffic comes out, as Cloudflare sees it.
+	if resp, err := client.Get("https://www.cloudflare.com/cdn-cgi/trace"); err == nil {
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		resp.Body.Close()
+		tr := parseTrace(string(b))
+		if net.ParseIP(tr["ip"]) != nil {
+			res.IP = tr["ip"]
+		}
+		if len(tr["loc"]) == 2 {
+			res.Loc = strings.ToUpper(tr["loc"])
+		}
+		res.Colo, res.Warp = tr["colo"], tr["warp"]
+		if len(res.Colo) > 8 || len(res.Warp) > 8 {
+			res.Colo, res.Warp = "", ""
+		}
+	}
+	if res.IP != "" {
+		return res
+	}
 	if resp, err := client.Get("https://api.ipify.org"); err == nil {
 		ip, _ := io.ReadAll(io.LimitReader(resp.Body, 64))
 		resp.Body.Close()

@@ -2408,7 +2408,146 @@ const RT = {
     unsaved: "Unsaved changes", adv: "Advanced Xray config", advHint: "Extra sections merged into every node's config: log, policy, dns, observatory, fakedns, reverse, metrics. Checked with Xray before it is saved.", advSave: "Save advanced config", view: "Node's final config", show: "Show" },
 };
 
+// flagOf turns a two-letter country code into its flag.
+const flagOf = (cc) => (/^[A-Za-z]{2}$/.test(cc || "") ? String.fromCodePoint(...[...cc.toUpperCase()].map((c) => 0x1f1e6 + c.charCodeAt(0) - 65)) : "🌐");
+function countryName(cc) {
+  try { return new Intl.DisplayNames([lang === "fa" ? "fa" : "en"], { type: "region" }).of(cc.toUpperCase()); } catch { return cc; }
+}
+
+// viewRouting: the everyday choices per node (WARP on its direct and tunnel
+// path, with a test that shows where WARP comes out), a few switches for
+// everyone, and the full editor folded away under "Advanced". Every change
+// here is saved at once.
 async function viewRouting() {
+  const fa = lang === "fa";
+  const T = (f, e) => (fa ? f : e);
+  const root = h("div", { class: "view routing-simple" });
+  const [data, nodes] = await Promise.all([api("GET", "/api/v2/admin/routing"), api("GET", "/api/v2/admin/nodes")]);
+  let r = data.routing;
+  const paths = data.paths || {};
+  const MODES = [["", T("خروج عادی", "Normal exit")], ["sites", T("فقط سایت‌های تحریمی و هوش مصنوعی از WARP", "Only sanctioned and AI sites via WARP")], ["all", T("همهٔ ترافیک از WARP", "All traffic via WARP")]];
+  const results = {}; // node id -> last WARP test result
+  const errBox = h("div", { class: "error", role: "alert" });
+  const say = (m) => { errBox.textContent = m || ""; };
+  const warpFail = (e) => /deadline|timeout|no answer|refused|unreachable/i.test(e || "") ? T("این سرور به WARP دسترسی ندارد (دیتاسنتر یا کلادفلر مسیر را بسته است).", "This server cannot reach WARP (the datacenter or Cloudflare blocks the path).") : (e || T("تست ناموفق بود.", "The test failed."));
+
+  // runTest asks the node to try WARP and waits for the answer.
+  async function runTest(id) {
+    const { id: task } = await api("POST", "/api/v2/admin/routing/warp-test", { node: id });
+    for (let i = 0; i < 30; i++) {
+      await new Promise((ok) => setTimeout(ok, 2000));
+      const tk = await api("GET", `/api/v2/admin/tasks/${task}`);
+      if (tk.status === "done" || tk.status === "failed") return tk.result || { ok: false, error: tk.error || "" };
+    }
+    return { ok: false, error: "timeout" };
+  }
+  const resultView = (res) => {
+    if (!res) return h("span", { class: "small muted" }, T("هنوز تست نشده", "Not tested yet"));
+    if (res.busy) return h("span", { class: "small muted" }, T("در حال تست… (تا یک دقیقه)", "Testing… (up to a minute)"));
+    if (!res.ok) return h("span", { class: "badge bad" }, "✕ ", warpFail(res.error));
+    return h("span", { class: "warp-ok" }, h("span", { class: "warp-flag", "aria-hidden": "true" }, flagOf(res.loc)),
+      h("b", {}, res.loc ? countryName(res.loc) : T("وصل", "Connected")), h("span", { class: "badge good" }, `${res.ms} ms`),
+      res.ip ? h("span", { class: "badge", dir: "ltr" }, res.ip) : null, res.warp && res.warp !== "off" ? h("span", { class: "badge good" }, "WARP") : null);
+  };
+
+  function nodeCard(n) {
+    const p = paths[n.ID] || { direct: true, tunnel: false };
+    const cur = (r.warp || {})[n.ID] || {};
+    const out = h("div", { class: "warp-result", role: "status" }, resultView(results[n.ID]));
+    const testBtn = h("button", { type: "button", class: "ghost", disabled: !n.online }, T("تست WARP", "Test WARP"));
+    const test = async () => {
+      testBtn.disabled = true; results[n.ID] = { busy: true }; fill(out, resultView(results[n.ID]));
+      try { results[n.ID] = await runTest(n.ID); } catch (x) { results[n.ID] = { ok: false, error: x.message }; }
+      fill(out, resultView(results[n.ID])); testBtn.disabled = !n.online;
+      return results[n.ID];
+    };
+    testBtn.onclick = test;
+    const pathRow = (path, label) => {
+      const sel = h("select", { disabled: !n.online, "aria-label": `${n.Name || n.ID} · ${label}` }, MODES.map(([v, l]) => h("option", { value: v, selected: v === (cur[path] || "") }, l)));
+      const state = h("span", { class: "small muted", role: "status" });
+      sel.onchange = async () => {
+        const want = sel.value, before = cur[path] || "";
+        say(""); sel.disabled = true;
+        try {
+          if (want) { // never send customers into a WARP that does not answer
+            state.textContent = T("اول WARP این نود تست می‌شود…", "Testing this node's WARP first…");
+            const res = await test();
+            if (!res.ok) { sel.value = before; state.textContent = ""; say(`${n.Name || n.ID}: ${warpFail(res.error)} ${T("تغییری ذخیره نشد.", "Nothing was changed.")}`); return; }
+          }
+          state.textContent = T("در حال ذخیره…", "Saving…");
+          r = (await api("PUT", "/api/v2/admin/routing/warp-mode", { node: n.ID, path, mode: want })).routing;
+          cur[path] = want; state.textContent = T("✓ ذخیره و برای نود فرستاده شد", "✓ Saved and sent to the node");
+        } catch (x) { sel.value = before; state.textContent = ""; say(x.message); }
+        finally { sel.disabled = !n.online; }
+      };
+      return h("div", { class: "path-row" }, h("span", { class: `path-name ${path}` }, label), sel, state);
+    };
+    return h("section", { class: `card node-route ${n.online ? "" : "off"}` },
+      h("div", { class: "head" }, h("span", { class: "name" }, n.Name || n.ID), h("span", { class: "badge", dir: "ltr" }, n.ID),
+        n.online ? null : h("span", { class: "badge bad" }, T("آفلاین", "Offline")), h("span", { class: "spacer" }), testBtn),
+      out,
+      p.direct ? pathRow("direct", T("مستقیم", "Direct")) : null,
+      p.tunnel ? pathRow("tunnel", T("تانل", "Tunnel")) : null,
+      !p.direct && !p.tunnel ? h("p", { class: "small muted" }, T("این نود هنوز در هیچ اینباندی نیست.", "This node is not in any inbound yet.")) : null);
+  }
+
+  // The switches for everyone: saved as a whole, at once.
+  const saveAll = async (note) => {
+    say("");
+    try { await api("PUT", "/api/v2/admin/routing", r); toast(note || t("saved")); return true; }
+    catch (x) { say(x.message); return false; }
+  };
+  const sw = (key, label, hint) => {
+    const c = h("input", { type: "checkbox", checked: !!r[key] });
+    c.onchange = async () => { const was = r[key]; r[key] = c.checked; if (!(await saveAll())) { r[key] = was; c.checked = !!was; } };
+    return h("label", { class: "check" }, c, h("span", {}, label, hint ? h("span", { class: "small muted" }, " — ", hint) : null));
+  };
+  const siteBox = (key, label, hint) => {
+    const list = h("div", { class: "chips" });
+    const inp = h("input", { dir: "ltr", placeholder: "example.com", autocapitalize: "off", spellcheck: "false", "aria-label": label });
+    const drawList = () => fill(list, (r[key] || []).map((d) => h("span", { class: "chip" }, h("span", { dir: "ltr" }, d),
+      h("button", { type: "button", class: "ghost", "aria-label": T(`حذف ${d}`, `Remove ${d}`), onclick: async () => { const was = r[key]; r[key] = was.filter((x) => x !== d); if (await saveAll()) drawList(); else r[key] = was; } }, "✕"))));
+    const add = async () => {
+      const v = inp.value.trim();
+      if (!v) return;
+      const was = r[key] || []; r[key] = [...was, v];
+      if (await saveAll()) { r = (await api("GET", "/api/v2/admin/routing")).routing; inp.value = ""; drawList(); } else r[key] = was;
+    };
+    inp.onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); add(); } };
+    drawList();
+    return h("div", { class: "form" }, h("label", {}, h("span", {}, label), h("div", { class: "row tight" }, inp, h("button", { type: "button", onclick: add }, T("افزودن", "Add"))),
+      hint ? h("span", { class: "small muted" }, hint) : null), list);
+  };
+  const iranSel = h("select", {}, [["", T("مثل بقیهٔ سایت‌ها", "Like any other site")], ["block", T("مسدود (پیشنهاد برای جلوگیری از شناسایی سرور)", "Blocked (hides the server from Iranian sites)")]]
+    .concat((r.outbounds || []).filter((o) => r.iran === o.tag).map((o) => [o.tag, o.tag])).map(([v, l]) => h("option", { value: v, selected: v === (r.iran || "") }, l)));
+  iranSel.onchange = async () => { const was = r.iran; r.iran = iranSel.value; if (!(await saveAll())) { r.iran = was; iranSel.value = was || ""; } };
+
+  const adv = h("details", { class: "card adv-routing" }, h("summary", {}, h("b", {}, T("⚙️ پیشرفته", "⚙️ Advanced")),
+    h("span", { class: "small muted" }, " — ", T("قانون‌های دستی، خروجی‌های دیگر، بالانسر، DNS و فایل‌های جغرافیایی", "hand-written rules, other outbounds, balancers, DNS and geo files"))));
+  adv.addEventListener("toggle", async () => {
+    if (!adv.open) { [...adv.children].slice(1).forEach((c) => c.remove()); route(); return; } // back from the editor: show what it saved
+    adv.append(h("p", { class: "small muted" }, T("تغییرهای این بخش با دکمهٔ «ذخیره»ی بالای آن اعمال می‌شوند.", "Changes in this part are applied with its own Save button.")), await viewRoutingAdvanced());
+  });
+
+  const sorted = [...nodes].sort((a, b) => Number(b.online) - Number(a.online) || (a.Name || a.ID).localeCompare(b.Name || b.ID));
+  fill(root,
+    h("div", { class: "row" }, h("h1", {}, T("مسیریابی", "Routing"))),
+    h("p", { class: "small muted" }, T("برای هر نود انتخاب کنید ترافیک مسیر مستقیم و مسیر تانل از کجا خارج شود. هر تغییر همان لحظه ذخیره و برای نود فرستاده می‌شود.",
+      "Choose, per node, where the traffic of its direct and of its tunnel path leaves. Every change is saved and sent to the node at once.")),
+    errBox,
+    h("div", { class: "node-routes" }, sorted.map(nodeCard)),
+    h("section", { class: "card form" }, h("h2", {}, T("برای همهٔ نودها", "For every node")),
+      sw("block_torrent", T("مسدود کردن تورنت", "Block BitTorrent"), T("جلوی شکایت دیتاسنتر و تعلیق سرور را می‌گیرد", "avoids abuse complaints")),
+      sw("block_ads", T("مسدود کردن تبلیغات", "Block ads")),
+      h("label", {}, h("span", {}, T("سایت‌های ایرانی", "Iranian sites")), iranSel),
+      siteBox("warp_sites", T("سایت‌های بیشتر برای «فقط سایت‌های تحریمی»", "More sites for “only sanctioned sites”"),
+        T(`از قبل در فهرست: ${(data.warp_default_sites || []).join("، ")}`, `Already listed: ${(data.warp_default_sites || []).join(", ")}`)),
+      siteBox("block_sites", T("سایت‌های مسدود", "Blocked sites"), T("هیچ مشتری‌ای به این سایت‌ها نمی‌رسد.", "No customer reaches these sites."))),
+    adv);
+  return root;
+}
+
+async function viewRoutingAdvanced() {
   const L = RT[lang] || RT.en;
   const [data, nodes, inbounds, overlay, traffic] = await Promise.all([api("GET", "/api/v2/admin/routing"), api("GET", "/api/v2/admin/nodes"), api("GET", "/api/v2/admin/inbounds"), api("GET", "/api/v2/admin/xray/overlay"),
     api("GET", "/api/v2/admin/routing/traffic?days=30").catch(() => [])]);

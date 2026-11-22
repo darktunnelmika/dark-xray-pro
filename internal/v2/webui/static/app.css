@@ -1114,3 +1114,20 @@ dialog.wide:has(.cform) { inline-size: min(780px, calc(100vw - 20px)); }
 .tg-btn.primary { background: #3390ec; }
 .tg-btn.success { background: #2fa84f; }
 .tg-btn.danger { background: #d9483b; }
+
+/* Routing, the simple page: a card per node with its paths. */
+.node-routes { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr)); margin-block: 12px; }
+.node-route { display: grid; gap: 10px; align-content: start; }
+.node-route.off { opacity: .6; }
+.node-route .head { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.path-row { display: grid; gap: 4px; }
+.path-name { font-weight: 700; font-size: 13px; }
+.path-name.tunnel::before { content: "⇄ "; }
+.path-name.direct::before { content: "→ "; }
+.warp-result { min-block-size: 30px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.warp-ok { display: inline-flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.warp-flag { font-size: 26px; line-height: 1; }
+.adv-routing > summary { cursor: pointer; padding: 4px 0; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chips .chip { display: inline-flex; align-items: center; gap: 4px; }
+.chips .chip button { min-inline-size: 28px; padding: 0 6px; }

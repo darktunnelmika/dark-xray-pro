@@ -237,6 +237,10 @@ func Open(path string) (*Store, error) {
 		st.Close()
 		return nil, err
 	}
+	if err := st.ensureWARPSchema(); err != nil {
+		st.Close()
+		return nil, err
+	}
 	if err := st.ensureTicketSchema(); err != nil {
 		st.Close()
 		return nil, err
