@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -678,7 +677,7 @@ func pgRoutes(s *Store, mux *http.ServeMux, subBase string) {
 			}
 			traffic += c.Usage.Up + c.Usage.Down
 		}
-		memTotal, memUsed := memInfo()
+		memUsed, memTotal := memInfo()
 		pgJSON(w, map[string]any{"version": "Dark Xray Pro " + HubVersion, "mem_total": memTotal, "mem_used": memUsed,
 			"cpu_cores": 0, "cpu_usage": 0, "total_user": len(list), "online_users": online,
 			"active_users": count["active"], "users_active": count["active"], "on_hold_users": count["on_hold"],
@@ -893,29 +892,6 @@ func pgRoutes(s *Store, mux *http.ServeMux, subBase string) {
 		}
 		pgJSON(w, map[string]any{"updates": ups, "count": len(ups)})
 	}))
-}
-
-// memInfo is the hub machine's memory in bytes (0, 0 when unknown).
-func memInfo() (total, used int64) {
-	b, err := os.ReadFile("/proc/meminfo")
-	if err != nil {
-		return 0, 0
-	}
-	var avail int64
-	for _, line := range strings.Split(string(b), "\n") {
-		f := strings.Fields(line)
-		if len(f) < 2 {
-			continue
-		}
-		n, _ := strconv.ParseInt(f[1], 10, 64)
-		switch f[0] {
-		case "MemTotal:":
-			total = n << 10
-		case "MemAvailable:":
-			avail = n << 10
-		}
-	}
-	return total, max(0, total-avail)
 }
 
 // pgAdminRoutes lets the panel show, turn on (with a fresh password) and
