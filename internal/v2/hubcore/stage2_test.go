@@ -369,12 +369,12 @@ func TestNodePublicIPPinAndTunnel(t *testing.T) {
 	if err := s.SetNodePublicIP(ctx, "de-1", "10.0.0.5"); !errors.Is(err, ErrInvalid) {
 		t.Fatal("private addresses are refused", err)
 	}
-	if err := s.SetNodePublicIP(ctx, "de-1", "167.233.192.101"); err != nil {
+	if err := s.SetNodePublicIP(ctx, "de-1", "203.0.113.10"); err != nil {
 		t.Fatal(err)
 	}
 	s.NodeAddress(ctx, "de-1", "198.51.100.7:4000") // pinned: not overwritten
 	_ = s.db.QueryRow(`SELECT public_ip FROM nodes WHERE id='de-1'`).Scan(&ip)
-	if ip != "167.233.192.101" {
+	if ip != "203.0.113.10" {
 		t.Fatal("pinned address changed", ip)
 	}
 	_ = s.SetNodePublicIP(ctx, "de-1", "")

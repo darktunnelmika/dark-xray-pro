@@ -10,12 +10,12 @@ import (
 func TestLinksRealityDirectAndTunnel(t *testing.T) {
 	in := Inbound{Tag: "de-vless", Template: []byte(`{"protocol":"vless","settings":{"flow":"xtls-rprx-vision"},
 "streamSettings":{"network":"tcp","security":"reality","realitySettings":{"serverNames":["akam.bing.com"],"shortIds":["ab12"]}}}`),
-		Meta: Meta{PublicKey: "PUB", Remark: "Dark VPN", Endpoints: []Endpoint{{Name: "Direct", Address: "167.233.192.101", Port: 18580}, {Name: "Tunnel", Address: "5.202.75.85", Port: 2400}}}}
+		Meta: Meta{PublicKey: "PUB", Remark: "Dark VPN", Endpoints: []Endpoint{{Name: "Direct", Address: "203.0.113.10", Port: 18580}, {Name: "Tunnel", Address: "5.202.75.85", Port: 2400}}}}
 	links, err := Links(Account{Email: "a", UUID: "u-1"}, []Inbound{in})
 	if err != nil || len(links) != 2 {
 		t.Fatalf("links %v %v", links, err)
 	}
-	for _, want := range []string{"vless://u-1@167.233.192.101:18580?", "pbk=PUB", "sid=ab12", "sni=akam.bing.com", "flow=xtls-rprx-vision", "security=reality", "#Dark%20VPN%20%7C%20Direct"} {
+	for _, want := range []string{"vless://u-1@203.0.113.10:18580?", "pbk=PUB", "sid=ab12", "sni=akam.bing.com", "flow=xtls-rprx-vision", "security=reality", "#Dark%20VPN%20%7C%20Direct"} {
 		if !strings.Contains(links[0], want) {
 			t.Fatalf("%s missing %q", links[0], want)
 		}

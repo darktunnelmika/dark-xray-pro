@@ -1,0 +1,24 @@
+Dark Xray Pro
+Copyright (c) 2026 Dark Xray Pro (github.com/darktunnelmika). All rights reserved.
+
+This repository is published so that anyone can read it and install the
+official releases. Except where a file says otherwise:
+
+1. You may download, install and run the official releases (the binaries
+   published at github.com/darktunnelmika/dark-xray-pro/releases and the
+   installer in this repository) on your own servers, for personal or
+   commercial use, including selling access to the service you run with them.
+
+2. You may not, without prior written permission from the copyright holder:
+   copy, modify, translate or adapt the source code; redistribute the source
+   code or binaries; publish a renamed, rebranded or modified copy; sell,
+   sublicense or rent the software itself; or remove this notice.
+
+3. The software is provided "as is", without warranty of any kind, express
+   or implied. In no event shall the copyright holder be liable for any claim,
+   damages or other liability arising from the use of the software.
+
+Third-party components keep their own licenses: see the third_party
+directory and the license files next to bundled code (for example
+internal/xraystats). Xray-core is not bundled; it is downloaded from the
+official XTLS releases and is licensed under the Mozilla Public License 2.0.

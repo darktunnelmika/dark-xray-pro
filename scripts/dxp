@@ -307,7 +307,7 @@ cmd_status() {
   local st; st=$(systemctl is-active dark-hub2)
   [ "$st" = active ] && echo "  HUB:     ${G}running${N} (since $(systemctl show dark-hub2 -p ActiveEnterTimestamp --value | cut -d' ' -f2-3))" || echo "  HUB:     ${R}${st}${N}"
   echo "  Panel:   $(panel_url)"
-  echo "  Nodes:   port $(conf_get node_port)"
+  echo "  Node port: $(conf_get node_port)"
   if [ "$st" = active ] && command -v jq >/dev/null; then
     local n
     n=$(api GET /api/v2/admin/nodes 2>/dev/null) && echo "  Nodes:   $(echo "$n" | jq '[.[]|select(.online)]|length') online of $(echo "$n" | jq length)"

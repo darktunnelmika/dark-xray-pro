@@ -208,7 +208,7 @@ func TestSubscriptionLinks(t *testing.T) {
 	if _, err := s.CreateNode(ctx, "de-1", "Germany"); err != nil {
 		t.Fatal(err)
 	}
-	meta := []byte(`{"public_key":"PUB","remark":"Dark VPN","endpoints":[{"name":"Direct","address":"167.233.192.101","port":18580}]}`)
+	meta := []byte(`{"public_key":"PUB","remark":"Dark VPN","endpoints":[{"name":"Direct","address":"203.0.113.10","port":18580}]}`)
 	if err := s.PutInboundMeta(ctx, "de-vless", "de-1", []byte(vlessTemplate), meta, true); err != nil {
 		t.Fatal(err)
 	}

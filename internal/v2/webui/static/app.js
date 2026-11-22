@@ -3785,7 +3785,7 @@ function idList(values, max = 10) {
   const add = h("button", { type: "button", class: "ghost id-add", title: fa ? "افزودن شناسهٔ دیگر" : "Add another id", "aria-label": fa ? "افزودن شناسهٔ دیگر" : "Add another id" }, fa ? "＋ افزودن شناسه" : "＋ Add an id");
   const sync = () => { add.hidden = rows.children.length >= max; };
   const row = (v) => {
-    const inp = h("input", { dir: "ltr", inputmode: "numeric", pattern: "[0-9]{4,15}", placeholder: "1906987468", value: v ? String(v) : "" });
+    const inp = h("input", { dir: "ltr", inputmode: "numeric", pattern: "[0-9]{4,15}", placeholder: "123456789", value: v ? String(v) : "" });
     const line = h("div", { class: "row tight" }, inp, h("button", { type: "button", class: "ghost", title: fa ? "حذف" : "Remove", "aria-label": fa ? "حذف این شناسه" : "Remove this id",
       onclick: () => { if (rows.children.length > 1) line.remove(); else inp.value = ""; sync(); } }, "✕"));
     rows.append(line); sync();

@@ -1,178 +1,140 @@
-# DARK XRAY PRO
+<div align="center">
 
-A clean-room Xray control-plane rewrite. **Work in progress — not production-ready.**
+# Dark Xray Pro
 
-This repository is separate from the existing DARK XRAY HUB. Do not connect legacy Node Agents, copy production credentials, or change customer traffic routes while PRO is under development.
+**A multi-server Xray panel with resellers, a Telegram store and a PasarGuard-compatible API.**
 
-## Target architecture
+One HUB manages any number of nodes. Customers, resellers and payments live in one place;
+nodes only run Xray and keep serving even while the panel is down.
 
-- **HUB and Node Agent:** Go, with explicit contracts and isolated telemetry/accounting/control paths.
-- **Web:** React + TypeScript; an original premium light/dark UI, no cyber-theme carryover.
-- **Data:** exact once-only *billable* per-user traffic, separate physical node/link telemetry, verified source-IP enforcement and immutable audit history.
-- **Node replacement:** self-service with fresh pairing, a route preview, validation and rollback; never silently inherit a retired tunnel.
-- **Inbound editor:** distinct Nodes & Deployment area, with Direct/Tunnel usage and minimal three-field Dark Swap.
-- **Backups:** streamed, encrypted, verifiable multi-gigabyte backup and selective historical migration; new Node identities only.
-- **Out of scope:** WARP and ad blocking are entirely excluded from PRO: no installation, UI/API settings, optional later phase, or migration of those features. Old Node installation identities are not reused.
-- **Telegram scope:** Existing bot/shop/Mini App functionality and the requested representative-bot admin/broadcast workflows remain part of the complete product. Development follows the Node/Inbound/runtime gates with separate synthetic/test identities; see the [recorded Telegram requirements](docs/telegram-representative-upgrade.fa.md).
+[فارسی](README.fa.md) · [Install](#install) · [Features](#features) · [dxp manager](#the-dxp-manager) · [Releases](https://github.com/darktunnelmika/dark-xray-pro/releases)
 
-## Current feature scope and status — 23 October 2026
+![Dashboard](docs/screenshots/dashboard-en.webp)
 
-The [source-linked feature audit](docs/release/feature-scope-and-status.fa.md)
-is the current cross-module reference, audited at `c740c48` after [N17 / PR #96](https://github.com/darktunnelmika/dark-xray-pro/pull/96)
-and extended by [N18 native LAB subscription delivery](docs/native-lab-subscriptions-n18.fa.md)
-and [N19 explicit consumer endpoint manifests](docs/consumer-endpoint-manifests-n19.fa.md).
-The [saved-plan first-Apply health extension](docs/inbound-initial-apply-health.fa.md)
-adds an independent one-Node v4 proof after explicit pre-Stage system-probe
-preparation. Its loopback LAB subscription is bound to the exact promoted Apply
-and original proof deadline; one typed delivery journal prevents fallback to
-an older snapshot across handover and initial-Apply scopes.
-It distinguishes implemented source, bounded LAB acceptance and remaining
-product work. Native customer/representative management, credit and usage
-ledgers, Node enrollment/metrics, Inbound lifecycle and isolated metered
-handover/health have substantial implementations. N17 verifies the complete
-inbound set derived from the exact applied destination candidate in a bounded
-loopback health round. N18 adds persistent revocable client tokens, immutable
-CAS-fenced snapshots, raw/base64 VLESS delivery and scoped browser controls.
-N19 binds complete immutable consumer endpoint manifests to explicit startup
-approval for each Node/installation/inbound. Its v3 proof and URI output use the
-same approved literal IPv4/port, with manifest replacement/revocation invalidating
-old evidence and snapshots. Every fetch rechecks the exact applied candidate,
-current approval and original health/lease deadline. Delivery is explicitly
-LAB-only, with at most the remaining eight-second round window. N19 proves the
-consumer tuple from the Node's vantage point; independent Internet reachability
-and production publication are not proven.
+</div>
 
-Still open: public subscription delivery and atomic route publication; complete
-Node lifecycle and real Tunnel/Dark Swap forwarding; verified IP/HWID and
-first-connection timing; strict shared multi-Node quota and operational recovery;
-Marketplace checkout and Telegram/Mini App; full Backup/Restore;
-release security, installer, load and disaster-recovery acceptance. WARP and ad
-blocking are excluded requirements, not missing release features.
+## Install
 
-Source completion is separate from the installed LAB version. Development and
-acceptance use synthetic/isolated data; operational legacy migration planning,
-real-data import and cutover remain frozen until the full product is accepted
-and the owner separately authorizes that phase. [Release gate #22](https://github.com/darktunnelmika/dark-xray-pro/issues/22).
+On a fresh Ubuntu 22.04+ or Debian 12+ server (amd64 or arm64), as root:
 
-## Safety rules
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/darktunnelmika/dark-xray-pro/main/scripts/install.sh)
+```
 
-1. Keep the existing HUB, clients, representatives, subscriptions and database untouched.
-2. Use entirely new Nodes for PRO; test with isolated or synthetic data only.
-3. Explicitly distinguish `unavailable` from `empty`; preserve customer and representative history.
-4. GitHub CI and real-browser, agent and disaster-recovery tests must pass before a public release.
-5. No production cutover without a verified rehearsal and explicit operator approval.
+The installer asks for a domain (optional), the panel port, a certificate (free Let's Encrypt, your own
+files, or none), the admin login and a secret panel path, then prints the panel address. It takes about
+two minutes. Afterwards, type `dxp` for the management menu.
 
-See [docs/architecture.md](docs/architecture.md) for the versioned acceptance contracts after the foundation is committed.
+To add a node, open **Nodes → Add node** in the panel and run the one-line command it shows on the node
+server. Nodes need nothing else.
 
-## Historical implementation checkpoints
+<details>
+<summary>Unattended install</summary>
 
-The notes below describe each increment when it was introduced. Statements such
-as "not yet implemented" are historical boundaries, not the current feature
-inventory. Use the dated audit above and its source references for current status.
+Every question has a variable; `DXP_YES=1` takes the default for anything not given.
 
-### Phase 1 LAB Node identity
+```bash
+DXP_YES=1 DXP_DOMAIN=panel.example.com DXP_CERT=1 DXP_ADMIN=admin DXP_PASS='a-long-password' \
+  bash <(curl -fsSL https://raw.githubusercontent.com/darktunnelmika/dark-xray-pro/main/scripts/install.sh)
+```
 
-New LAB Nodes can be enrolled with a one-time pairing ticket and private per-installation credentials; the HUB keeps Node registrations across restarts. The telemetry API rejects mismatched Node IDs, installations, tokens and replayed samples. **This is a same-host development protocol, not WAN TLS or complete Node Manager.** See [isolated LAB quickstart](docs/lab-quickstart.md) and [identity guarantees](docs/node-enrollment-phase1.md). Public installation, production users and Node replacement are not ready.
+| Variable | Meaning | Default |
+| --- | --- | --- |
+| `DXP_DOMAIN` | panel domain (must point at the server) | the server IP |
+| `DXP_PORT` | panel port | `2087` |
+| `DXP_CERT` | `1` Let's Encrypt, `2` own files, `3` none | `1` with a domain |
+| `DXP_CERT_FILE`, `DXP_KEY_FILE` | certificate files for `DXP_CERT=2` | |
+| `DXP_ADMIN`, `DXP_PASS` | admin login | `admin`, random |
+| `DXP_PATH` | secret panel path (empty = none) | random |
+| `DXP_NODE_PORT` | port nodes connect to | `28443` |
+| `DXP_NAME` | panel name | `Dark Xray Pro` |
 
-### Phase 2: opt-in Agent-only HTTPS for NEW lab machines
+</details>
 
-The Node Agent may connect over verified TLS 1.3 with a manually pinned certificate and per-installation credential to a **separate** Agent listener. The owner dashboard remains local-only. Remote transport is disabled by default and must be explicitly enabled for isolated machines. See [Node WAN TLS LAB contract](docs/node-remote-tls-lab-phase2.md). This is **not a production-ready remote Node Manager**.
+## Features
 
-### Phase 3: safe Node replacement preflight (not live)
+**Servers**
+- One HUB, many nodes; a node is added with one command and kept in sync automatically
+- Live network map, per-node CPU, RAM, traffic, online users and tunnel health
+- Nodes keep serving with their last configuration while the HUB is unreachable; usage is queued and delivered later
+- Xray version manager, node agent self-update, HUB update from the latest release
+- Move the HUB to a new server with a full backup; nodes follow a domain without being touched
 
-An operator-defined route plan can now be validated for a new Node, preserving Direct and Tunnel simultaneously and accepting the three-field Dark Swap. It refuses to mark routes activated before remote checks. See [Node replacement plan](docs/node-replacement-route-preflight.md). Actual replace/apply and subscription updates are not yet implemented.
+**Inbounds and routing**
+- VLESS, VMess, Trojan and Shadowsocks over TCP, WebSocket and gRPC with REALITY or TLS
+- Direct and tunnel paths per node in one subscription
+- Routing per node: WARP for all traffic or only sanctioned and AI sites, with a test that shows the exit country
+- Blocking for BitTorrent, ads and chosen sites; free certificates (Let's Encrypt, Cloudflare DNS)
 
-### Phase 4: durable replacement TCP preflight (no activation)
+**Customers**
+- Volume, time or unlimited plans; terms that start at the first connection; IP and device limits
+- Bulk create and renew, groups, next plan, scheduled usage resets
+- A branded subscription page with QR codes and links for every app
 
-The new HUB now stores replacement drafts and exact Agent-generated TCP reachability reports in a private durable journal. An explicitly opted-in *new* Agent polls only tasks for its paired installation, and the owner sees actual per-route evidence. **This is not Xray protocol validation, activation, or Subscription publication.** Read [Phase 4 boundary and API contract](docs/node-replacement-phase4-tcp-preflight.md).
+**Resellers**
+- Resellers and sub-sellers with GB or unlimited-plan credit, limits per reseller and refunds
+- Each reseller gets its own panel login, Telegram store bot, brand and card-to-card payments
+- A partner API so another bot or website can sell reseller panels on its own
 
-### Phase 5: typed Xray REALITY configuration with offline validation
+**Telegram store**
+- Shop, free trial, wallet, card-to-card receipts and Telegram Stars
+- Invite links with a discount for the friend and a volume gift for the inviter
+- Mini App, expiry and volume reminders, a menu you arrange and colour from the panel
 
-The new Go `internal/xrayconfig` package now renders deterministic, explicitly selected **VLESS+REALITY TCP/Vision or gRPC** candidates for fresh PRO Nodes. It preserves both Direct and Tunnel, enables native inbound/user counters, refuses duplicate Node ports, and explicitly marks shared-port route usage as **ambiguous** instead of inventing Direct/Tunnel totals. A pinned local Xray binary can run `run -test` against a temporary private config without any Xray restart or Subscription publication. Tests include 1000 synthetic clients. **Not an active config staging/deploy system and not production-ready.** [Phase 5 contract](docs/xray-render-phase5.md).
+**Integrations and security**
+- PasarGuard-compatible API: connect Mirza or any PasarGuard sales bot, for the owner or per reseller
+- Owner API keys, webhooks, change log of every action
+- Secret panel path, two-step sign-in, sign-in lockout, trusted IPs
+- Automatic backups and encrypted full backups
 
-### Phase 6 — AES-256-GCM Xray candidate staging (LAB ONLY)
+![Clients](docs/screenshots/clients.webp)
 
-The private Reality candidate can now be stored encrypted on the NEW HUB and delivered only to the newly paired Agent over verified TLS 1.3. The Agent validates exact config and inbound tags/ports with a separately pinned local Xray executable, then returns a bounded, secret-free validation receipt. This is **offline-only**: it never writes to a running Xray, activates Inbounds, charges traffic or publishes subscriptions. Explicit enable flags and a persistent external staging encryption key are required. [Phase 6 instructions](docs/xray-stage-phase6.md).
+| Resellers | Routing |
+| --- | --- |
+| ![Resellers](docs/screenshots/resellers.webp) | ![Routing](docs/screenshots/routing.webp) |
 
-### Phase 7 — real Xray lab-only loopback canary
+<p align="center">
+<img src="docs/screenshots/mobile-dashboard.webp" width="260" alt="Mobile dashboard">
+<img src="docs/screenshots/mobile-clients.webp" width="260" alt="Mobile clients">
+</p>
 
-After Phase 6's encrypted Reality staging and offline validation, a new unprivileged LAB Agent may additionally prove that a checksum-pinned **real Xray-core** process starts and binds *only ephemeral localhost listeners*. A disposable process is always stopped and private configs deleted before returning a separate `canary_loopback_bound` receipt. It **never** validates customer VLESS data-plane, applies a public Node config, changes users or publishes Subscription links. [Phase 7 runbook](docs/xray-canary-phase7.md).
+## The dxp manager
 
-### Phase 8 — private LAB revision selection + rollback journal
+`dxp` with no arguments opens a menu; every item is also a command:
 
-The new HUB can now hold multiple encrypted versions of an already Xray-syntax-verified, loopback-canary-verified Reality candidate. Owner-only API requests use compare-and-swap generation numbers to choose a **LAB rehearsal** version and reverse that choice without deleting the previous encrypted snapshot. AES-GCM protects confidential config and HMAC authenticates journal pointers, generations and audit events. **This is a reversible metadata/config selection, NOT live Xray apply or service rollback.** [Safety/runbook](docs/lab-revision-rollback-phase8.md).
+| Command | What it does |
+| --- | --- |
+| `dxp status` | version, state, panel address, nodes online, certificate expiry |
+| `dxp start` / `stop` / `restart` | control the HUB service |
+| `dxp logs` | follow the HUB log |
+| `dxp update` | update to the latest release (keeps a database copy, rolls back if it fails to start) |
+| `dxp port 8443` | change the panel port |
+| `dxp domain panel.example.com` | set the panel domain and get a certificate |
+| `dxp cert` | Let's Encrypt, your own certificate files, or renew now |
+| `dxp path` | change or turn off (`dxp path -`) the secret panel path |
+| `dxp admin` | reset the admin login (also clears two-step sign-in) |
+| `dxp backup` | encrypted full backup: database, keys and settings |
+| `dxp restore file.dkb` | restore a backup, also on a new server |
+| `dxp node` | how to add a node |
+| `dxp firewall` | open the needed ports with ufw |
+| `dxp bbr` | turn on TCP BBR |
+| `dxp uninstall` | remove the HUB (data is kept unless you ask) |
 
-### Phase 9 — isolated Linux amd64 LAB bundle (not a production installer)
+## Moving to a new server
 
-GitHub Actions can now compile the Go HUB/Node Agent, the React/TypeScript frontend and a guarded install script into a checksum-verified **LAB-only** archive. The installer refuses to operate without the exact independently verified NEW VPS public IPv4 and an explicit acknowledgement, and refuses existing production/Xray services or existing LAB installation paths. It starts a separate non-root localhost:2087 HUB service; **no Xray-core binary, production Node, user data, tunnel or Subscription is included or changed**. [LAB release and installation safety](docs/lab-bundle-phase9.md).
+1. In the panel, give nodes a domain for the HUB (**Settings → Backup and migration → HUB address for nodes**); nodes switch to it.
+2. `dxp backup` on the old server, copy the file, `dxp restore file.dkb` on the new one.
+3. Point the domains at the new server. Nodes reconnect by themselves; customers' links do not change.
 
-### Phase 10 — live cached Node Manager inspection (LAB ONLY)
+## Requirements
 
-The Nodes page now supports explicit per-Node selection by stable identity,
-refresh-safe inspection of real metrics, and correct Online/Offline/Stats-delayed
-distinctions. It cannot pair Nodes in the browser, issue credentials, publish
-Inbounds, or perform live Xray Apply/Rollback. See
-[Phase 10 Node Manager boundary](docs/node-manager-read-only-phase10.md).
+- HUB: 1 CPU, 1 GB RAM for a few hundred customers; Ubuntu 22.04+ or Debian 12+, systemd
+- Node: any small Ubuntu/Debian server; amd64 or arm64
+- Ports: the panel port (default 2087), 28443 for nodes, 80 while a certificate is issued
 
-### Phase 11 — Direct + Dark Swap Inbound draft (LAB ONLY)
+## License
 
-The Inbounds page now offers a browser-only, non-persistent preview for a
-**new paired Node**, combining an independently optional Direct port and
-Dark Swap's exactly three fields (tunnel port, Node port and tunnel host).
-Shared-port ambiguity is explicitly disclosed. No Apply button, privileged
-admin request or subscription publication is enabled. Read
-[Phase 11 safety boundary](docs/inbounds-direct-swap-draft-phase11.md).
-
-### Phase 12 — real isolated Xray process apply/rollback rehearsal (LAB ONLY)
-
-An opt-in, non-root Go sandbox now validates checksum-pinned Xray candidates,
-remaps every selected listener to ephemeral localhost ports and tests
-**real process-level Apply, previous-process Rollback, automatic fallback on
-process exit, and safe shutdown**. The previous process stays alive during
-a candidate trial. This is entirely in-memory and never manages systemd,
-public inbounds, customers or subscriptions. A live VLESS/REALITY handshake
-and crash-safe production rollout remain unavailable. See
-[Phase 12 controlled process runtime](docs/isolated-xray-sandbox-runtime-phase12.md).
-
-
-### P0 business identity and role-scoped workspace — experimental (not migration-ready)
-
-The new PRO-only SQLite business ledger now supports a forward-only identity
-schema migration, local unprivileged first-owner bootstrap, unique representative
-logins, salted Argon2id passwords, revocable secure cookie sessions and CSRF-
-protected owner/representative business APIs. A real bilingual mobile-friendly
-**Business** UI can create PRO-only representative accounts and pending clients
-and inspect their actual credit/audit state. Representatives cannot read/write
-other tenants, and Agent credentials cannot authenticate to the owner workspace.
-
-The feature is **OFF by default** on the installed LAB. Its private database
-does not read or migrate the legacy HUB. Active Xray subscriptions, Telegram
-bots, 2FA and the full old-to-PRO migration are separate release blockers.
-See [private owner and representative access](docs/owner-rep-auth-business-v1.md).
-
-### P0 client groups — durable, scoped, non-destructive (PRO-only)
-
-The new business workspace now includes persisted groups with representative ownership,
-Unicode names/colors, transactional bulk membership transfer, true member counts and
-safe group deletion that never deletes clients or credit/usage history. The SQLite
-schema upgrades forward to version 3 without discarding existing PRO sessions,
-accounts or financial events. [Native client group contract](docs/client-groups-v1.md).
-
-### Native Client lifecycle — idempotent renewal and non-destructive archive
-
-The owner and scoped representatives can now renew native PRO client duration,
-top up volume, disable, logically re-enable and archive client records without
-deleting UUIDs or historical balances. Renewals charge only the additional
-cumulative user-month capacity, and use immutable request IDs to avoid double
-charges. Re-enabling still marks the record **pending Xray Apply** rather than
-pretending to activate a Node. Historical group membership and audit are
-preserved. [Lifecycle v1 contract](docs/native-client-lifecycle-v1.md).
-
-This is **not** subscription or Telegram production cutover functionality.
-
-Legacy group migration, real Xray Apply, historical usage attribution, Telegram bots
-and full production parity remain pending. No old service or customer is changed.
-
-## Removed product scope
-
-Dark Restore was removed by owner decision on 2026-11-04. Do not resume its import, migration, promotion or activation roadmap. See [the removal boundary](docs/DARK-RESTORE-REMOVED.md). Native Clients, Groups, accounting, Backup/Restore and Dark Swap remain in scope.
+Copyright © 2026 Dark Xray Pro. All rights reserved — see [LICENSE](LICENSE).
+You may install and run the official releases. Copying, modifying, redistributing or reselling the
+code, or a renamed copy of it, needs written permission. Bundled third-party components keep their own
+licenses ([third_party](third_party)); Xray-core is downloaded from its official releases.

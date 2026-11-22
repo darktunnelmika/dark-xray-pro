@@ -44,7 +44,7 @@ func TestImport3xui(t *testing.T) {
 		`CREATE TABLE settings (id INTEGER PRIMARY KEY, key TEXT, value TEXT)`,
 		`INSERT INTO settings(key,value) VALUES('subPath','/mysub/'),('subJsonPath','/json/')`,
 		`INSERT INTO inbounds(remark,enable,listen,port,protocol,settings,stream_settings,tag,sniffing) VALUES('UK Reality',1,'',443,'vless',
-'{"clients":[{"id":"11111111-2222-3333-4444-555555555555","flow":"xtls-rprx-vision","email":"ali","limitIp":2,"totalGB":53687091200,"expiryTime":`+strconv.FormatInt(exp, 10)+`,"enable":true,"tgId":"1906987468","subId":"abcdefgh12345678","comment":"vip"},
+'{"clients":[{"id":"11111111-2222-3333-4444-555555555555","flow":"xtls-rprx-vision","email":"ali","limitIp":2,"totalGB":53687091200,"expiryTime":`+strconv.FormatInt(exp, 10)+`,"enable":true,"tgId":"111222333","subId":"abcdefgh12345678","comment":"vip"},
 {"id":"99999999-2222-3333-4444-555555555555","email":"sara","limitIp":0,"totalGB":0,"expiryTime":-2592000000,"enable":false,"subId":"zzzzzzzz12345678"}],"decryption":"none","fallbacks":[]}',
 '{"network":"tcp","security":"reality","realitySettings":{"show":false,"dest":"www.speedtest.net:443","serverNames":["www.speedtest.net"],"privateKey":"`+priv+`","shortIds":["ab12"],"settings":{"publicKey":"`+pub+`","fingerprint":"firefox","spiderX":"/"}}}',
 'inbound-443','{"enabled":true,"destOverride":["http","tls"]}')`,

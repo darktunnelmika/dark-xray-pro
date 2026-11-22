@@ -11,11 +11,11 @@ func TestIPTrackerParsesAccessLog(t *testing.T) {
 	now := time.Unix(1_800_000_000, 0)
 	tr.now = func() time.Time { return now }
 	// Split writes, IPv6, a non-access line and loopback.
-	tr.Write([]byte("2026/11/14 07:17:15.104437 from 213.142.156.117:47782 accepted tcp:api.ipify.org:443 [uk-reality >> direct] email: alice\n2026/11/14 from [2001:db8::5]:443 accep"))
+	tr.Write([]byte("2026/11/14 07:17:15.104437 from 198.51.100.20:47782 accepted tcp:api.ipify.org:443 [uk-reality >> direct] email: alice\n2026/11/14 from [2001:db8::5]:443 accep"))
 	tr.Write([]byte("ted tcp:x.com:443 [r >> direct] email: alice\n[Warning] core: Xray started\nfrom 127.0.0.1:5 accepted tcp:127.0.0.1:10085 [api -> api]\n"))
 	tr.Write([]byte("from udp:198.51.100.2:9999 accepted udp:8.8.8.8:53 [hy >> direct] email: bob\n"))
 	on := tr.Online()
-	if len(on["alice"]) != 2 || on["alice"][0] != "2001:db8::5" || on["alice"][1] != "213.142.156.117" || len(on["bob"]) != 1 {
+	if len(on["alice"]) != 2 || on["alice"][0] != "2001:db8::5" || on["alice"][1] != "198.51.100.20" || len(on["bob"]) != 1 {
 		t.Fatalf("online %v", on)
 	}
 	now = now.Add(2 * time.Minute)
