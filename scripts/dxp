@@ -1,0 +1,590 @@
+#!/usr/bin/env bash
+# dxp — install and manage a Dark Xray Pro HUB.
+#
+#   dxp            menu
+#   dxp install    install (asks a few questions; DXP_* variables answer them)
+#   dxp help       every command
+#
+# Copyright (c) Dark Xray Pro. All rights reserved.
+
+set -o pipefail
+
+DXP_VERSION="1.0.0"
+REPO="darktunnelmika/dark-xray-pro"
+RAW="https://raw.githubusercontent.com/${REPO}/main"
+BIN=/opt/dark-v2/dark-hub2
+DIST=/opt/dark-v2/dist
+ETC=/etc/dark-hub2
+ENVF=$ETC/env
+CONF=$ETC/dxp.conf
+DATA=/var/lib/dark-hub2
+DB=$DATA/v2.sqlite
+UNIT=/etc/systemd/system/dark-hub2.service
+API=http://127.0.0.1:2097
+BACKUPS=/root/dxp-backups
+
+# ---------- output ----------
+if [ -t 1 ]; then R=$'\e[31m'; G=$'\e[32m'; Y=$'\e[33m'; B=$'\e[36m'; W=$'\e[1m'; N=$'\e[0m'; else R='' G='' Y='' B='' W='' N=''; fi
+info() { echo "${B}›${N} $*"; }
+ok()   { echo "${G}✓${N} $*"; }
+warn() { echo "${Y}!${N} $*" >&2; }
+die()  { echo "${R}✗ $*${N}" >&2; exit 1; }
+line() { echo "${B}──────────────────────────────────────────────${N}"; }
+
+# ask VAR "question" "default" — DXP_YES=1 (or no terminal) takes the default.
+ask() {
+  local __var=$1 __q=$2 __def=$3 __ans
+  if [ -n "${!__var:-}" ]; then return; fi
+  if [ "${DXP_YES:-0}" = 1 ] || [ ! -t 0 ]; then printf -v "$__var" '%s' "$__def"; return; fi
+  if [ -n "$__def" ]; then read -r -p "$__q [${__def}]: " __ans; else read -r -p "$__q: " __ans; fi
+  printf -v "$__var" '%s' "${__ans:-$__def}"
+}
+confirm() { # confirm "question" [default y|n]
+  local a d=${2:-n}
+  if [ "${DXP_YES:-0}" = 1 ]; then [ "$d" = y ]; return; fi
+  read -r -p "$1 [$( [ "$d" = y ] && echo Y/n || echo y/N )]: " a
+  a=${a:-$d}; [[ $a =~ ^[Yy] ]]
+}
+randstr() { tr -dc 'A-Za-z0-9' </dev/urandom | head -c "${1:-16}"; }
+need_root() { [ "$(id -u)" = 0 ] || die "run as root (sudo -i)"; }
+installed() { [ -x "$BIN" ] && [ -f "$UNIT" ]; }
+need_installed() { installed || die "Dark Xray Pro is not installed here — run: dxp install"; }
+
+conf_get() { [ -f "$CONF" ] && sed -n "s/^$1=//p" "$CONF" | tail -1; }
+conf_set() {
+  touch "$CONF"; chmod 600 "$CONF"
+  if grep -q "^$1=" "$CONF"; then sed -i "s|^$1=.*|$1=$2|" "$CONF"; else echo "$1=$2" >> "$CONF"; fi
+}
+env_set() {
+  if grep -q "^$1=" "$ENVF"; then sed -i "s|^$1=.*|$1=$2|" "$ENVF"; else echo "$1=$2" >> "$ENVF"; fi
+}
+
+public_ip() {
+  local ip
+  for u in https://api.ipify.org https://ifconfig.me https://icanhazip.com; do
+    ip=$(curl -fsS4 -m 6 "$u" 2>/dev/null | tr -d '[:space:]') && [[ $ip =~ ^[0-9.]+$ ]] && { echo "$ip"; return; }
+  done
+  ip -4 route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="src"){print $(i+1); exit}}'
+}
+
+arch() {
+  case "$(uname -m)" in
+    x86_64|amd64) echo amd64 ;;
+    aarch64|arm64) echo arm64 ;;
+    *) die "unsupported CPU: $(uname -m) (amd64 and arm64 only)" ;;
+  esac
+}
+
+# api METHOD PATH [JSON] — the HUB's owner API on this server.
+api() {
+  local m=$1 p=$2 body=${3:-}
+  local tok; tok=$(cat "$ETC/admin-token" 2>/dev/null) || die "no admin token"
+  if [ -n "$body" ]; then
+    curl -fsS -m 30 -X "$m" -H "Authorization: Bearer $tok" -H "X-Dark-Request: 1" -H "Content-Type: application/json" --data "$body" "$API$p"
+  else
+    curl -fsS -m 30 -X "$m" -H "Authorization: Bearer $tok" -H "X-Dark-Request: 1" "$API$p"
+  fi
+}
+wait_hub() {
+  for _ in $(seq 1 40); do
+    curl -fsS -m 2 -o /dev/null -H "Authorization: Bearer $(cat "$ETC/admin-token")" "$API/api/v2/admin/system" 2>/dev/null && return 0
+    sleep 1
+  done
+  return 1
+}
+json() { jq -Rn --arg v "$1" '$v'; }
+
+panel_url() {
+  local host port path
+  host=$(conf_get domain); [ -n "$host" ] || host=$(conf_get ip)
+  port=$(conf_get port); path=$(conf_get path)
+  echo "https://${host}:${port}/${path:+$path/}"
+}
+
+open_ports() { # open_ports p1 p2 ... (only when ufw is active)
+  if command -v ufw >/dev/null && ufw status 2>/dev/null | grep -q "Status: active"; then
+    for p in "$@"; do ufw allow "$p"/tcp >/dev/null && ok "firewall: port $p open"; done
+  fi
+}
+
+# ---------- downloads ----------
+latest_tag() {
+  curl -fsS -m 20 "https://api.github.com/repos/${REPO}/releases/latest" | jq -r .tag_name
+}
+fetch_release() { # fetch_release TAG → installs hub + node binaries
+  local tag=$1 a; a=$(arch)
+  local t; t=$(mktemp -d)
+  local base="https://github.com/${REPO}/releases/download/${tag}"
+  info "downloading Dark Xray Pro ${tag} (${a})"
+  for f in "dark-hub2-linux-$a" "dark-node-linux-$a" SHA256SUMS; do
+    curl -fsSL -m 300 -o "$t/$f" "$base/$f" || { rm -rf "$t"; die "download failed: $f"; }
+  done
+  (cd "$t" && sha256sum -c --ignore-missing --quiet SHA256SUMS) || { rm -rf "$t"; die "checksum mismatch"; }
+  mkdir -p /opt/dark-v2 "$DIST"
+  [ -x "$BIN" ] && cp -f "$BIN" "$BIN.prev"
+  install -m 0755 "$t/dark-hub2-linux-$a" "$BIN"
+  install -m 0755 "$t/dark-node-linux-$a" "$DIST/dark-node"
+  rm -rf "$t"
+  ok "installed $("$BIN" version 2>/dev/null)"
+}
+fetch_xray() {
+  local a; a=$(arch)
+  local asset=Xray-linux-64.zip; [ "$a" = arm64 ] && asset=Xray-linux-arm64-v8a.zip
+  local tag; tag=$(curl -fsS -m 20 "https://api.github.com/repos/XTLS/Xray-core/releases/latest" | jq -r .tag_name)
+  [ -n "$tag" ] && [ "$tag" != null ] || die "cannot find the latest Xray release"
+  local t; t=$(mktemp -d)
+  info "downloading Xray ${tag} for the nodes"
+  curl -fsSL -m 300 -o "$t/x.zip" "https://github.com/XTLS/Xray-core/releases/download/${tag}/${asset}" || die "Xray download failed"
+  curl -fsSL -m 60 -o "$t/x.dgst" "https://github.com/XTLS/Xray-core/releases/download/${tag}/${asset}.dgst" || die "Xray checksum download failed"
+  local want; want=$(grep -i 'SHA2-256' "$t/x.dgst" | head -1 | awk -F'= ' '{print $2}' | tr -d '[:space:]')
+  [ "$(sha256sum "$t/x.zip" | awk '{print $1}')" = "$want" ] || { rm -rf "$t"; die "Xray checksum mismatch"; }
+  unzip -o -q "$t/x.zip" xray -d "$t" && install -m 0755 "$t/xray" "$DIST/xray"
+  rm -rf "$t"
+  ok "Xray ${tag} ready for node installs"
+}
+
+# ---------- certificates ----------
+cert_sync() { # upload the domain's Let's Encrypt (or given) certificate to the panel
+  local d; d=$(conf_get domain)
+  local c k
+  c=$(conf_get cert_file); k=$(conf_get key_file)
+  [ -n "$c" ] || { c=/etc/letsencrypt/live/$d/fullchain.pem; k=/etc/letsencrypt/live/$d/privkey.pem; }
+  [ -r "$c" ] && [ -r "$k" ] || { warn "certificate files not found ($c)"; return 1; }
+  api PUT /api/v2/admin/certs/panel "$(jq -n --rawfile c "$c" --rawfile k "$k" '{Cert:$c,Key:$k}')" >/dev/null \
+    && ok "panel certificate updated" || { warn "the panel refused the certificate"; return 1; }
+}
+issue_le() { # issue_le DOMAIN
+  local d=$1
+  command -v certbot >/dev/null || { info "installing certbot"; apt-get install -y -q certbot >/dev/null || die "certbot install failed"; }
+  local args=(certonly --standalone --non-interactive --agree-tos --register-unsafely-without-email
+    --preferred-challenges http -d "$d" --deploy-hook "/usr/local/bin/dxp cert-sync")
+  local svc
+  for svc in nginx apache2 caddy; do
+    if systemctl is-active --quiet "$svc" && ss -ltnp '( sport = :80 )' 2>/dev/null | grep -q "$svc"; then
+      warn "$svc holds port 80; it is stopped for a moment while the certificate is issued and renewed"
+      args+=(--pre-hook "systemctl stop $svc" --post-hook "systemctl start $svc")
+    fi
+  done
+  open_ports 80
+  info "asking Let's Encrypt for ${d} (the domain must point at this server)"
+  certbot "${args[@]}" || return 1
+  conf_set cert le
+  conf_set cert_file ""; conf_set key_file ""
+  ok "certificate issued; it renews by itself"
+}
+
+# ---------- install ----------
+write_unit() {
+  "$BIN" unit > "$UNIT" 2>/dev/null || cat > "$UNIT" <<'EOF'
+[Unit]
+Description=Dark Xray Pro HUB
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/opt/dark-v2/dark-hub2 serve -db /var/lib/dark-hub2/v2.sqlite -listen ${DARK_HUB2_LISTEN} -tls-dir /etc/dark-hub2 -hosts ${DARK_HUB2_HOSTS} -sub-listen ${DARK_HUB2_SUB_LISTEN} -sub-base ${DARK_HUB2_SUB_BASE} -tg-owners=${DARK_HUB2_TG_OWNERS}
+EnvironmentFile=/etc/dark-hub2/env
+Restart=always
+RestartSec=2
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths=/var/lib/dark-hub2 /etc/dark-hub2 /opt/dark-v2
+LimitNOFILE=65535
+
+[Install]
+WantedBy=multi-user.target
+EOF
+  systemctl daemon-reload
+}
+
+cmd_install() {
+  need_root
+  [ -d /run/systemd/system ] || die "systemd is required"
+  command -v apt-get >/dev/null || die "this installer supports Ubuntu and Debian"
+  if installed; then
+    warn "Dark Xray Pro is already installed here."
+    confirm "Update it to the latest release instead?" y && cmd_update
+    return
+  fi
+  line; echo "${W} Dark Xray Pro — HUB installer${N}"; line
+  local ip; ip=$(public_ip); [ -n "$ip" ] || die "cannot find this server's public IP"
+  info "server IP: $ip"
+
+  ask DXP_DOMAIN  "Domain for the panel (empty = use the IP)" ""
+  ask DXP_PORT    "Panel port" "2087"
+  [[ $DXP_PORT =~ ^[0-9]+$ ]] && [ "$DXP_PORT" -ge 1 ] && [ "$DXP_PORT" -le 65535 ] || die "bad port: $DXP_PORT"
+  if [ -n "$DXP_DOMAIN" ]; then
+    echo "Certificate:  1) Let's Encrypt (free, automatic)   2) my own files   3) none (browser warning)"
+    ask DXP_CERT "Choose" "1"
+  else
+    DXP_CERT=3
+  fi
+  if [ "$DXP_CERT" = 2 ]; then
+    ask DXP_CERT_FILE "Certificate file (fullchain .pem)" ""
+    ask DXP_KEY_FILE  "Private key file (.pem)" ""
+    [ -r "$DXP_CERT_FILE" ] && [ -r "$DXP_KEY_FILE" ] || die "cannot read the certificate files"
+  fi
+  ask DXP_ADMIN "Admin username" "admin"
+  [[ $DXP_ADMIN =~ ^[a-z0-9._-]{3,32}$ ]] || die "username: 3-32 lowercase letters, digits, . _ -"
+  local gen; gen=$(randstr 16)
+  ask DXP_PASS "Admin password (10+ characters)" "$gen"
+  [ ${#DXP_PASS} -ge 10 ] || die "the password needs at least 10 characters"
+  ask DXP_PATH "Secret panel path (empty = none)" "$(randstr 10 | tr 'A-Z' 'a-z')"
+  [ -z "$DXP_PATH" ] || [[ $DXP_PATH =~ ^[A-Za-z0-9_-]{6,64}$ ]] || die "path: 6-64 letters, digits, _ or -"
+  ask DXP_NODE_PORT "Port nodes connect to" "28443"
+  ask DXP_NAME "Panel name" "Dark Xray Pro"
+
+  line
+  info "installing packages"
+  export DEBIAN_FRONTEND=noninteractive
+  apt-get update -q >/dev/null && apt-get install -y -q curl jq unzip openssl ca-certificates >/dev/null || die "package install failed"
+
+  local tag="${DXP_RELEASE:-}"; [ -n "$tag" ] || tag=$(latest_tag)
+  [ -n "$tag" ] && [ "$tag" != null ] || die "cannot find the latest release"
+  fetch_release "$tag"
+  fetch_xray
+
+  mkdir -p "$ETC" "$DATA" && chmod 700 "$ETC"
+  umask 077
+  [ -f "$ETC/admin-token" ] || randstr 48 > "$ETC/admin-token"
+  local host=${DXP_DOMAIN:-$ip}
+  cat > "$ENVF" <<EOF
+DARK_HUB2_LISTEN=:${DXP_NODE_PORT}
+DARK_HUB2_HOSTS=${ip}${DXP_DOMAIN:+,$DXP_DOMAIN}
+DARK_HUB2_SUB_LISTEN=
+DARK_HUB2_SUB_BASE=https://${host}:${DXP_PORT}
+DARK_HUB2_TG_OWNERS=
+EOF
+  umask 022
+  conf_set ip "$ip"; conf_set domain "$DXP_DOMAIN"; conf_set port "$DXP_PORT"; conf_set path "$DXP_PATH"
+  conf_set node_port "$DXP_NODE_PORT"; conf_set admin "$DXP_ADMIN"
+
+  write_unit
+  printf '%s\n' "$DXP_PASS" | "$BIN" admin -db "$DB" -tls-dir "$ETC" -name "$DXP_ADMIN" >/dev/null 2>&1 || die "could not create the admin login"
+  systemctl enable --now dark-hub2 >/dev/null 2>&1
+  wait_hub || die "the HUB did not start — see: journalctl -u dark-hub2 -n 50"
+  ok "HUB running"
+
+  api PUT /api/v2/admin/panel-name "{\"name\":$(json "$DXP_NAME")}" >/dev/null || true
+  api PUT /api/v2/admin/panel-https "{\"port\":${DXP_PORT},\"domain\":$(json "$DXP_DOMAIN")}" >/dev/null || die "could not set the panel port"
+  case "$DXP_CERT" in
+    1) issue_le "$DXP_DOMAIN" && cert_sync || warn "Let's Encrypt failed — the panel works with a browser warning; fix DNS and run: dxp cert" ;;
+    2) conf_set cert file; conf_set cert_file "$DXP_CERT_FILE"; conf_set key_file "$DXP_KEY_FILE"; cert_sync ;;
+    *) conf_set cert none ;;
+  esac
+  if [ -n "$DXP_PATH" ]; then api PUT /api/v2/admin/panel-path "{\"path\":$(json "$DXP_PATH")}" >/dev/null || warn "could not set the secret path"; fi
+  open_ports 22 "$DXP_PORT" "$DXP_NODE_PORT"
+  systemctl restart dark-hub2 && wait_hub
+  install_self
+
+  line
+  echo "${G}${W} Dark Xray Pro is ready${N}"
+  echo "  Panel:     ${W}$(panel_url)${N}"
+  echo "  Username:  ${W}${DXP_ADMIN}${N}"
+  echo "  Password:  ${W}${DXP_PASS}${N}"
+  [ "$DXP_CERT" = 3 ] && echo "  ${Y}No trusted certificate: the browser warns once; add a domain later with: dxp domain${N}"
+  echo "  Manage:    ${W}dxp${N}"
+  line
+  echo "Keep these details; the password is not shown again."
+}
+
+install_self() {
+  local me; me=$(readlink -f "$0" 2>/dev/null)
+  if [ "$me" != /usr/local/bin/dxp ]; then
+    if [ -f "$me" ]; then install -m 0755 "$me" /usr/local/bin/dxp
+    else curl -fsSL -m 60 -o /usr/local/bin/dxp "$RAW/scripts/dxp" && chmod 0755 /usr/local/bin/dxp; fi
+  fi
+}
+
+# ---------- management ----------
+cmd_status() {
+  need_installed
+  line
+  echo "${W} Dark Xray Pro${N}  $("$BIN" version 2>/dev/null | awk '{print $2}')   dxp ${DXP_VERSION}"
+  local st; st=$(systemctl is-active dark-hub2)
+  [ "$st" = active ] && echo "  HUB:     ${G}running${N} (since $(systemctl show dark-hub2 -p ActiveEnterTimestamp --value | cut -d' ' -f2-3))" || echo "  HUB:     ${R}${st}${N}"
+  echo "  Panel:   $(panel_url)"
+  echo "  Nodes:   port $(conf_get node_port)"
+  if [ "$st" = active ] && command -v jq >/dev/null; then
+    local s n
+    s=$(api GET /api/v2/admin/system 2>/dev/null) && echo "  Clients: $(echo "$s" | jq -r '.clients // .Clients // "?"')"
+    n=$(api GET /api/v2/admin/nodes 2>/dev/null) && echo "  Nodes:   $(echo "$n" | jq '[.[]|select(.online)]|length') online of $(echo "$n" | jq length)"
+  fi
+  local c; c=$(conf_get cert)
+  if [ "$c" = le ]; then
+    local d; d=$(conf_get domain)
+    local end; end=$(openssl x509 -enddate -noout -in "/etc/letsencrypt/live/$d/fullchain.pem" 2>/dev/null | cut -d= -f2)
+    echo "  Cert:    Let's Encrypt, until ${end:-?}"
+  else
+    echo "  Cert:    ${c:-none}"
+  fi
+  line
+}
+
+cmd_update() {
+  need_root; need_installed
+  local cur new
+  cur=$("$BIN" version 2>/dev/null | awk '{print $2}')
+  new=${1:-$(latest_tag)}
+  [ -n "$new" ] && [ "$new" != null ] || die "cannot find the latest release"
+  if [ "$cur" = "$new" ] && [ -z "${1:-}" ]; then ok "already on the latest release ($cur)"; return; fi
+  confirm "Update $cur → $new? The panel restarts for a few seconds; nodes keep serving." y || return
+  cmd_backup_quiet
+  fetch_release "$new"
+  systemctl restart dark-hub2 && wait_hub && ok "updated to $new" || {
+    warn "the new version did not start — going back to $cur"
+    install -m 0755 "$BIN.prev" "$BIN"; systemctl restart dark-hub2; die "update failed"; }
+  install_self_update
+}
+install_self_update() {
+  curl -fsSL -m 60 -o /tmp/dxp.new "$RAW/scripts/dxp" && bash -n /tmp/dxp.new && install -m 0755 /tmp/dxp.new /usr/local/bin/dxp && rm -f /tmp/dxp.new
+}
+
+cmd_port() {
+  need_root; need_installed
+  local NEWPORT=${1:-}
+  ask NEWPORT "New panel port" "$(conf_get port)"
+  [[ $NEWPORT =~ ^[0-9]+$ ]] && [ "$NEWPORT" -ge 1 ] && [ "$NEWPORT" -le 65535 ] || die "bad port"
+  api PUT /api/v2/admin/panel-https "{\"port\":${NEWPORT},\"domain\":$(json "$(conf_get domain)")}" >/dev/null || die "the panel refused the port"
+  conf_set port "$NEWPORT"
+  local host; host=$(conf_get domain); host=${host:-$(conf_get ip)}
+  env_set DARK_HUB2_SUB_BASE "https://${host}:${NEWPORT}"
+  open_ports "$NEWPORT"
+  systemctl restart dark-hub2 && wait_hub && ok "panel now on $(panel_url)"
+  warn "subscription links now use port $NEWPORT; customers update their link once"
+}
+
+cmd_domain() {
+  need_root; need_installed
+  local D=${1:-}
+  ask D "Domain (must point at $(conf_get ip))" "$(conf_get domain)"
+  [ -n "$D" ] || die "a domain is required"
+  conf_set domain "$D"
+  local ip; ip=$(conf_get ip)
+  env_set DARK_HUB2_HOSTS "${ip},${D}"
+  env_set DARK_HUB2_SUB_BASE "https://${D}:$(conf_get port)"
+  api PUT /api/v2/admin/panel-https "{\"port\":$(conf_get port),\"domain\":$(json "$D")}" >/dev/null || die "the panel refused the domain"
+  cmd_cert le
+}
+
+cmd_cert() {
+  need_root; need_installed
+  local d; d=$(conf_get domain)
+  local how=${1:-}
+  if [ -z "$how" ]; then
+    echo "1) Let's Encrypt for ${d:-(no domain)}   2) my own files   3) renew now   4) upload again"
+    ask how "Choose" "1"
+  fi
+  case "$how" in
+    1|le) [ -n "$d" ] || die "set a domain first: dxp domain"; issue_le "$d" && cert_sync ;;
+    2|file) local C K; ask C "Certificate file (fullchain .pem)" ""; ask K "Private key file (.pem)" ""
+            [ -r "$C" ] && [ -r "$K" ] || die "cannot read the files"
+            conf_set cert file; conf_set cert_file "$C"; conf_set key_file "$K"; cert_sync ;;
+    3|renew) certbot renew --force-renewal --cert-name "$d" && cert_sync ;;
+    *) cert_sync ;;
+  esac
+  systemctl restart dark-hub2 && wait_hub
+}
+
+cmd_path() {
+  need_root; need_installed
+  local P=${1-__ask__}
+  if [ "$P" = __ask__ ]; then P=""; ask P "New secret path (6-64 letters/digits, - to turn it off)" "$(randstr 10 | tr 'A-Z' 'a-z')"; fi
+  [ "$P" = - ] && P=""
+  api PUT /api/v2/admin/panel-path "{\"path\":$(json "$P")}" >/dev/null || die "the panel refused the path"
+  conf_set path "$P"
+  ok "panel address: $(panel_url)"
+}
+
+cmd_admin() {
+  need_root; need_installed
+  local U=${1:-} PW=""
+  ask U "Admin username" "$(conf_get admin)"
+  local gen; gen=$(randstr 16)
+  ask PW "New password (10+ characters)" "$gen"
+  [ ${#PW} -ge 10 ] || die "the password needs at least 10 characters"
+  printf '%s\n' "$PW" | "$BIN" admin -db "$DB" -tls-dir "$ETC" -name "$U" >/dev/null || die "could not save the login"
+  conf_set admin "$U"; conf_set path ""
+  ok "login saved — username: $U  password: $PW"
+  warn "two-step login and the secret path were turned off for recovery; set a path again with: dxp path"
+}
+
+cmd_backup_quiet() {
+  mkdir -p "$BACKUPS" && chmod 700 "$BACKUPS"
+  local f="$BACKUPS/dark-xray-pro-$(date +%Y%m%d-%H%M%S).sqlite"
+  if command -v sqlite3 >/dev/null; then sqlite3 "$DB" ".backup '$f'" 2>/dev/null; else cp "$DB" "$f"; fi
+  gzip -f "$f" && ok "database saved: $f.gz"
+  ls -1t "$BACKUPS"/*.gz 2>/dev/null | tail -n +11 | xargs -r rm -f
+}
+cmd_backup() {
+  need_root; need_installed
+  local PW=""
+  ask PW "Password for the full backup (8+ characters)" "$(randstr 16)"
+  [ ${#PW} -ge 8 ] || die "the password needs at least 8 characters"
+  mkdir -p "$BACKUPS" && chmod 700 "$BACKUPS"
+  local f="$BACKUPS/dark-xray-pro-full-$(date +%Y%m%d-%H%M%S).dkb"
+  local tok; tok=$(cat "$ETC/admin-token")
+  curl -fsS -m 300 -o "$f" -X POST -H "Authorization: Bearer $tok" -H "X-Dark-Request: 1" -H "Content-Type: application/json" \
+    --data "{\"password\":$(json "$PW")}" "$API/api/v2/admin/backup/full" || die "backup failed"
+  chmod 600 "$f"
+  ok "full backup (database, keys and settings): $f"
+  echo "  password: ${W}${PW}${N} — keep it; without it the backup cannot be opened"
+  echo "  move it to a new server with:  dxp restore $f"
+}
+
+cmd_restore() {
+  need_root
+  local F=${1:-}
+  ask F "Backup file (.dkb or .sqlite.gz)" ""
+  [ -r "$F" ] || die "cannot read $F"
+  installed || { info "installing the HUB program first"; apt-get install -y -q curl jq unzip openssl >/dev/null; fetch_release "$(latest_tag)"; fetch_xray; write_unit; }
+  confirm "Replace this panel's data with the backup? The current database is kept as a copy." n || return
+  systemctl stop dark-hub2 2>/dev/null
+  [ -f "$DB" ] && cp -f "$DB" "$DB.before-restore-$(date +%s)"
+  local ip; ip=$(public_ip)
+  "$BIN" restore -db "$DB" -tls-dir "$ETC" -file "$F" -new-ip "$ip" || die "restore failed"
+  conf_set ip "$ip"
+  systemctl daemon-reload; systemctl enable --now dark-hub2 && wait_hub && ok "restored and running"
+  warn "if the domain moved with the panel, point it at $ip; nodes follow the HUB address set in the panel"
+  install_self
+}
+
+cmd_node() {
+  need_installed
+  line
+  echo "To add a node (any Ubuntu/Debian server):"
+  echo "  1. Panel → Nodes → Add node, give it a name."
+  echo "  2. Copy the one-line command the panel shows and run it on the node server as root."
+  echo "  3. The node appears online within a minute."
+  echo "Nodes reach this HUB on port $(conf_get node_port) — keep it open."
+  line
+}
+
+cmd_bbr() {
+  need_root
+  if sysctl net.ipv4.tcp_congestion_control 2>/dev/null | grep -q bbr; then ok "BBR is already on"; return; fi
+  cat > /etc/sysctl.d/99-dxp-bbr.conf <<'EOF'
+net.core.default_qdisc=fq
+net.ipv4.tcp_congestion_control=bbr
+EOF
+  sysctl --system >/dev/null && sysctl net.ipv4.tcp_congestion_control | grep -q bbr && ok "BBR on" || warn "this kernel has no BBR"
+}
+
+cmd_firewall() {
+  need_root
+  command -v ufw >/dev/null || { apt-get install -y -q ufw >/dev/null || die "ufw install failed"; }
+  local ports=(22 80 "$(conf_get port)" "$(conf_get node_port)")
+  for p in "${ports[@]}"; do [ -n "$p" ] && ufw allow "$p"/tcp >/dev/null; done
+  if ! ufw status | grep -q "Status: active"; then
+    confirm "Turn the firewall on (SSH 22 stays open)?" n && ufw --force enable >/dev/null && ok "firewall on"
+  fi
+  ufw status | sed -n '1,20p'
+}
+
+cmd_logs() { need_installed; journalctl -u dark-hub2 -n "${1:-100}" --no-pager -f; }
+
+cmd_uninstall() {
+  need_root; need_installed
+  warn "This removes Dark Xray Pro from this server. Nodes keep running but lose their panel."
+  confirm "Continue?" n || return
+  cmd_backup_quiet
+  systemctl disable --now dark-hub2 >/dev/null 2>&1
+  rm -f "$UNIT"; systemctl daemon-reload
+  rm -rf /opt/dark-v2
+  if confirm "Also delete the data (clients, keys, settings)? A copy is in $BACKUPS" n; then
+    rm -rf "$DATA" "$ETC"; ok "data deleted"
+  else
+    ok "data kept in $DATA and $ETC"
+  fi
+  rm -f /etc/letsencrypt/renewal-hooks/deploy/dxp* 2>/dev/null
+  ok "Dark Xray Pro removed (dxp stays; remove it with: rm /usr/local/bin/dxp)"
+}
+
+usage() {
+  cat <<EOF
+dxp ${DXP_VERSION} — Dark Xray Pro HUB manager
+
+  dxp                 menu
+  dxp install         install the HUB
+  dxp status          state, version, panel address
+  dxp start|stop|restart
+  dxp logs [n]        follow the HUB log
+  dxp update [tag]    update to the latest (or a given) release
+  dxp port [n]        change the panel port
+  dxp domain [name]   set the panel domain (and get a certificate)
+  dxp cert            certificate: Let's Encrypt, own files, renew
+  dxp path [p|-]      change or turn off the secret panel path
+  dxp admin [user]    reset the admin login
+  dxp backup          encrypted full backup
+  dxp restore <file>  restore a backup (also on a new server)
+  dxp node            how to add a node
+  dxp firewall        open the needed ports (ufw)
+  dxp bbr             turn on TCP BBR
+  dxp uninstall       remove the HUB
+EOF
+}
+
+menu() {
+  need_root
+  while true; do
+    clear 2>/dev/null
+    line
+    echo "${W}  Dark Xray Pro${N}   $(installed && "$BIN" version 2>/dev/null | awk '{print $2}' || echo 'not installed')"
+    installed && echo "  $(systemctl is-active --quiet dark-hub2 && echo "${G}● running${N}" || echo "${R}● stopped${N}")   $(panel_url)"
+    line
+    cat <<EOF
+  1) Install                 9) Change secret path
+  2) Status                 10) Reset admin login
+  3) Start                  11) Full backup
+  4) Stop                   12) Restore a backup
+  5) Restart                13) Add a node
+  6) Logs                   14) Firewall
+  7) Update                 15) BBR
+  8) Port / domain / cert   16) Uninstall
+  0) Exit
+EOF
+    local c; read -r -p "Choose: " c
+    case "$c" in
+      1) cmd_install ;; 2) cmd_status ;; 3) systemctl start dark-hub2 && ok started ;;
+      4) systemctl stop dark-hub2 && ok stopped ;; 5) systemctl restart dark-hub2 && ok restarted ;;
+      6) cmd_logs ;; 7) cmd_update ;;
+      8) echo "a) port  b) domain  c) certificate"; local s; read -r -p "Choose: " s
+         case "$s" in a) cmd_port ;; b) cmd_domain ;; c) cmd_cert ;; esac ;;
+      9) cmd_path ;; 10) cmd_admin ;; 11) cmd_backup ;; 12) cmd_restore ;; 13) cmd_node ;;
+      14) cmd_firewall ;; 15) cmd_bbr ;; 16) cmd_uninstall ;; 0|q|"") exit 0 ;;
+      *) warn "unknown choice" ;;
+    esac
+    read -r -p "Enter to continue…" _
+  done
+}
+
+main() {
+  local c=${1:-}; shift || true
+  case "$c" in
+    "") menu ;;
+    install) cmd_install "$@" ;;
+    status) cmd_status ;;
+    start|stop|restart) need_root; need_installed; systemctl "$c" dark-hub2 && ok "$c" ;;
+    logs) cmd_logs "$@" ;;
+    update) cmd_update "$@" ;;
+    port) cmd_port "$@" ;;
+    domain) cmd_domain "$@" ;;
+    cert) cmd_cert "$@" ;;
+    cert-sync) cert_sync ;;
+    path) cmd_path "$@" ;;
+    admin) cmd_admin "$@" ;;
+    backup) cmd_backup ;;
+    restore) cmd_restore "$@" ;;
+    node) cmd_node ;;
+    firewall) cmd_firewall ;;
+    bbr) cmd_bbr ;;
+    uninstall) cmd_uninstall ;;
+    version|-v|--version) echo "dxp $DXP_VERSION"; installed && "$BIN" version ;;
+    help|-h|--help) usage ;;
+    *) usage; exit 1 ;;
+  esac
+}
+main "$@"

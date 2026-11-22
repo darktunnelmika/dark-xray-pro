@@ -179,6 +179,21 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 		}
 		reply(w, map[string]any{"from": from, "to": to, "node_updated": nodeOK}, err)
 	}))
+	// The panel's own name: public (the sign-in page shows it), owner-set.
+	mux.HandleFunc("GET /api/v2/panel-name", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-cache")
+		reply(w, map[string]string{"name": s.PanelName(r.Context())}, nil)
+	})
+	mux.HandleFunc("PUT /api/v2/admin/panel-name", guard(func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Name string `json:"name"`
+		}
+		if !decode(w, r, &in) {
+			return
+		}
+		err := s.SetPanelName(r.Context(), in.Name)
+		reply(w, map[string]string{"name": s.PanelName(r.Context())}, err)
+	}))
 	mux.HandleFunc("GET /api/v2/admin/panel-path", guard(func(w http.ResponseWriter, r *http.Request) {
 		reply(w, map[string]string{"path": s.Setting(r.Context(), "panel_path")}, nil)
 	}))

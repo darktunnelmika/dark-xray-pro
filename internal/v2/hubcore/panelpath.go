@@ -101,3 +101,23 @@ func (s *Store) panelGate(next http.Handler) http.Handler {
 		next.ServeHTTP(w, r)
 	})
 }
+
+// DefaultPanelName is what the panel calls itself until the owner names it.
+const DefaultPanelName = "Dark Xray Pro"
+
+// PanelName is the panel's own name (header, sign-in page, browser title).
+func (s *Store) PanelName(ctx context.Context) string {
+	if n := strings.TrimSpace(s.Setting(ctx, "panel_name")); n != "" {
+		return n
+	}
+	return DefaultPanelName
+}
+
+// SetPanelName names the panel; empty goes back to the default.
+func (s *Store) SetPanelName(ctx context.Context, name string) error {
+	name = strings.Join(strings.Fields(name), " ")
+	if len([]rune(name)) > 40 || strings.ContainsAny(name, "<>") {
+		return fmt.Errorf("%w: the panel name is up to 40 characters, without < or >", ErrInvalid)
+	}
+	return s.SetSetting(ctx, "panel_name", name)
+}

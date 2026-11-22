@@ -1,6 +1,6 @@
 {
-  "name": "Dark VPN Panel",
-  "short_name": "Dark VPN",
+  "name": "Dark Xray Pro",
+  "short_name": "Dark Xray Pro",
   "start_url": "/#/dashboard",
   "scope": "/",
   "display": "standalone",

@@ -1,4 +1,4 @@
-// Dark VPN owner panel (v2). No framework, no build step.
+// Dark Xray Pro panel (v2). No framework, no build step.
 const I18N = {
   en: {
     dashboard: "Dashboard", clients: "Clients", inbounds: "Inbounds", nodes: "Nodes", routing: "Routing", settings: "Settings",
@@ -137,6 +137,26 @@ const fmtNum = (n) => new Intl.NumberFormat(lang === "fa" ? "fa-IR" : "en-US", {
 
 function safeGet(k) { try { return localStorage.getItem(k); } catch { return null; } }
 function safeSet(k, v) { try { v == null ? localStorage.removeItem(k) : localStorage.setItem(k, v); } catch {} }
+
+// The panel's own name (the owner can change it; customer pages keep their
+// own brand). Last known name first, then the server's.
+let panelName = safeGet("panelName") || "Dark Xray Pro";
+function brandText() {
+  const w = panelName.trim().split(/\s+/);
+  const last = w.pop();
+  return h("span", {}, w.length ? w.join(" ") + " " : "", h("b", { class: "neon-text" }, last));
+}
+async function loadPanelName() {
+  try {
+    const r = await fetch("/api/v2/panel-name", { credentials: "same-origin" });
+    if (!r.ok) return;
+    const n = ((await r.json()).name || "").trim() || "Dark Xray Pro";
+    document.title = n;
+    if (n !== panelName) { panelName = n; safeSet("panelName", n); document.querySelectorAll(".brand-text").forEach((el) => el.replaceChildren(brandText())); }
+  } catch {}
+}
+document.title = panelName;
+loadPanelName();
 
 // Tiny element builder: never uses innerHTML, so names from the API can't inject markup.
 function h(tag, attrs = {}, ...kids) {
@@ -473,7 +493,7 @@ function shell(active, content) {
     h("button", { class: "pm-item bad", onclick: async () => { await api("POST", "/api/v2/auth/logout"); location.hash = "#/login"; } }, icon("logout"), t("logout")))) },
     avatar(me.user), h("span", { class: "uname" }, me.user)) : null;
   return h("div", { class: "shell" },
-    h("header", { class: "top" }, h("a", { class: "brand", href: "#/dashboard" }, mark(), h("span", {}, "Dark ", h("b", { class: "neon-text" }, "VPN"))),
+    h("header", { class: "top" }, h("a", { class: "brand", href: "#/dashboard" }, mark(), h("span", { class: "brand-text" }, brandText())),
       me && me.role === "rep" ? h("a", { class: "badge credit", href: "#/credit", title: t("volumeCredit") }, h("span", { class: "lbl" }, `${t("volumeCredit")}: `), h("b", { dir: "ltr" }, gbs(me.volume_credit || 0)), me.unlimited_units ? ` · ${t("units")}: ${fmtNum(me.unlimited_units)}` : "") : null,
       h("button", { class: "searchbox", type: "button", onclick: openPalette }, icon("search"), h("span", {}, ux("search")), h("kbd", {}, "Ctrl K")),
       h("div", { class: "actions" }, iconBtn("search", ux("search"), openPalette), me && me.role !== "rep" ? bellBtn : null, themeBtn, langBtn, userBtn)),
@@ -504,7 +524,7 @@ function viewLogin() {
     h("label", {}, h("span", {}, t("password")), h("div", { class: "pw-wrap" }, pass, eye)), caps, codeRow, err, btn);
   const fa = lang === "fa";
   const langBtn = h("button", { type: "button", class: "ghost login-lang", onclick: () => { lang = fa ? "en" : "fa"; safeSet("lang", lang); applyLang(); route(); } }, fa ? "English" : "فارسی");
-  return h("div", { class: "login" }, langBtn, h("div", { class: "card" }, h("h1", {}, mark(), "Dark VPN"),
+  return h("div", { class: "login" }, langBtn, h("div", { class: "card" }, h("h1", {}, mark(), h("span", { class: "brand-text" }, brandText())),
     h("p", { class: "muted small login-sub" }, fa ? "ورود به پنل مدیریت" : "Sign in to the control panel"), form));
 }
 
@@ -5874,6 +5894,25 @@ function foreignCard() {
     h("div", { class: "row" }, preview, imp), out);
 }
 
+function panelNameCard() {
+  const fa = lang === "fa";
+  const input = h("input", { value: panelName, maxlength: "40", required: true });
+  const err = h("div", { class: "error", role: "alert" });
+  return h("form", { class: "card form", onsubmit: async (e) => {
+    e.preventDefault(); err.textContent = "";
+    try {
+      const r = await api("PUT", "/api/v2/admin/panel-name", { name: input.value.trim() });
+      panelName = r.name; safeSet("panelName", r.name); document.title = r.name;
+      document.querySelectorAll(".brand-text").forEach((el) => el.replaceChildren(brandText()));
+      toast(t("saved"));
+    } catch (x) { err.textContent = x.message; }
+  } },
+    h("h2", {}, fa ? "نام پنل" : "Panel name"),
+    h("p", { class: "small muted" }, fa ? "بالای پنل، صفحهٔ ورود و عنوان مرورگر نشان داده می‌شود. صفحهٔ اشتراک مشتری‌ها برند جداگانهٔ خودش را دارد." : "Shown at the top of the panel, on the sign-in page and as the browser title. Customers' subscription pages keep their own brand."),
+    h("label", {}, h("span", {}, fa ? "نام" : "Name"), input), err,
+    h("div", { class: "row" }, h("button", { class: "primary" }, t("save"))));
+}
+
 function panelPathCard() {
   const card = h("div", { class: "card form" });
   const draw = (cur) => {
@@ -6315,7 +6354,7 @@ function viewSettings() {
   // Settings are grouped; one group shows at a time so the page stays short.
   const groups = [
     owner && ["sub", "link", fa ? "اشتراک مشتری" : "Customer subscription", fa ? "عنوان، نام کانفیگ‌ها و صفحهٔ مشتری" : "Title, config names, customer page", () => [subSettingsCard()]],
-    (owner || fullOwner()) && ["panel", "globe", fa ? "آدرس و دسترسی پنل" : "Panel address and access", fa ? "HTTPS، مسیر مخفی، IPهای مجاز" : "HTTPS, secret path, trusted IPs", () => [fullOwner() ? panelHTTPSCard() : null, fullOwner() ? panelPathCard() : null, owner ? trustedCard() : null]],
+    (owner || fullOwner()) && ["panel", "globe", fa ? "آدرس و دسترسی پنل" : "Panel address and access", fa ? "HTTPS، مسیر مخفی، IPهای مجاز" : "HTTPS, secret path, trusted IPs", () => [fullOwner() ? panelNameCard() : null, fullOwner() ? panelHTTPSCard() : null, fullOwner() ? panelPathCard() : null, owner ? trustedCard() : null]],
     me.role === "rep" && ["repsub", "link", fa ? "صفحهٔ اشتراک من" : "My subscription page", fa ? "برند، لوگو و آدرس اختصاصی" : "Brand, logo and own address", () => [repBrandCard("/api/v2/rep/brand")]],
     me.role === "rep" && ["repbot", "bell", fa ? "ربات فروش و کارت من" : "My sales bot and card", fa ? "ربات تلگرام اختصاصی، کارت به کارت" : "Own Telegram bot, card payment", () => [mirzaCard("/api/v2/rep/pg-api", true), repBotCard("/api/v2/rep/bot"), botLookCard("/api/v2/rep/bot"), sellerCardCard("/api/v2/shop/card")]],
     ["security", "staff", fa ? "امنیت حساب" : "Account security", fa ? "رمز، ورود دومرحله‌ای، نشست‌ها" : "Password, two-step sign-in, sessions", () => [pwForm, tfaCard(), sessionsCard()]],
