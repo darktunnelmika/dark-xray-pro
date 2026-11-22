@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -63,6 +64,10 @@ func runOutboundTest(ctx context.Context, bin, dir string, a OutboundTestArgs) O
 	if err != nil {
 		return fail("no local port: %v", err)
 	}
+	// Rules an earlier, killed test left in the kernel would misroute this one.
+	sweepStaleTunRules(ctx)
+	defer sweepStaleTunRules(context.WithoutCancel(ctx))
+	a.Outbounds = userspaceWireGuard(a.Outbounds)
 	cfg := map[string]any{
 		"log": map[string]any{"loglevel": "warning"},
 		"inbounds": []any{map[string]any{"tag": "dark-test-in", "listen": "127.0.0.1", "port": port, "protocol": "socks",
@@ -89,7 +94,18 @@ func runOutboundTest(ctx context.Context, bin, dir string, a OutboundTestArgs) O
 	if err := cmd.Start(); err != nil {
 		return fail("start xray: %v", err)
 	}
-	defer func() { _ = cmd.Process.Kill(); _ = cmd.Wait() }()
+	defer func() {
+		// Ask first, so Xray can take down what it set up; kill only if it lingers.
+		_ = cmd.Process.Signal(syscall.SIGTERM)
+		done := make(chan struct{})
+		go func() { _ = cmd.Wait(); close(done) }()
+		select {
+		case <-done:
+		case <-time.After(3 * time.Second):
+			_ = cmd.Process.Kill()
+			<-done
+		}
+	}()
 	ready := false
 	for i := 0; i < 40 && !ready; i++ {
 		if c, err := net.DialTimeout("tcp", "127.0.0.1:"+strconv.Itoa(port), 200*time.Millisecond); err == nil {
@@ -142,4 +158,69 @@ func runOutboundTest(ctx context.Context, bin, dir string, a OutboundTestArgs) O
 		}
 	}
 	return res
+}
+
+// userspaceWireGuard makes every WireGuard outbound (WARP is one) run inside
+// the test's own Xray instead of a kernel TUN. The node's real Xray already
+// holds that TUN with the same addresses; a second one beside it adds
+// routing rules of its own, and a test that is killed leaves them behind,
+// which then breaks WARP for the real Xray too.
+func userspaceWireGuard(outs []json.RawMessage) []json.RawMessage {
+	res := make([]json.RawMessage, len(outs))
+	for i, o := range outs {
+		res[i] = o
+		var m map[string]any
+		if json.Unmarshal(o, &m) != nil || m["protocol"] != "wireguard" {
+			continue
+		}
+		set, _ := m["settings"].(map[string]any)
+		if set == nil {
+			continue
+		}
+		set["noKernelTun"] = true
+		if b, err := json.Marshal(m); err == nil {
+			res[i] = b
+		}
+	}
+	return res
+}
+
+// staleTunRules picks, from "ip rule" output, the priorities of rules that
+// point at one of Xray's WireGuard routing tables (10230 and up) which has
+// no routes left: what a killed Xray leaves behind.
+func staleTunRules(rules string, tableEmpty func(table string) bool) []string {
+	var prefs []string
+	for _, line := range strings.Split(rules, "\n") {
+		pref, rest, ok := strings.Cut(strings.TrimSpace(line), ":")
+		if !ok {
+			continue
+		}
+		f := strings.Fields(rest)
+		for i := 0; i+1 < len(f); i++ {
+			if f[i] != "lookup" {
+				continue
+			}
+			if n, err := strconv.Atoi(f[i+1]); err == nil && n >= 10230 && n < 11000 && tableEmpty(f[i+1]) {
+				prefs = append(prefs, strings.TrimSpace(pref))
+			}
+		}
+	}
+	return prefs
+}
+
+// sweepStaleTunRules removes those rules, for IPv4 and IPv6.
+func sweepStaleTunRules(ctx context.Context) {
+	for _, fam := range []string{"-4", "-6"} {
+		out, err := exec.CommandContext(ctx, "ip", fam, "rule", "show").Output()
+		if err != nil {
+			continue
+		}
+		empty := func(table string) bool {
+			r, err := exec.CommandContext(ctx, "ip", fam, "route", "show", "table", table).Output()
+			return err != nil || strings.TrimSpace(string(r)) == ""
+		}
+		for _, pref := range staleTunRules(string(out), empty) {
+			_ = exec.CommandContext(ctx, "ip", fam, "rule", "del", "pref", pref).Run()
+		}
+	}
 }
