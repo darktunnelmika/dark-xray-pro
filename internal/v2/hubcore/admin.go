@@ -266,6 +266,7 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 					_ = s.ro.QueryRowContext(r.Context(), `SELECT manage_products FROM reps WHERE id=?`, rp.ID).Scan(&mp)
 					out["manage_products"] = mp && rp.ParentID == ""
 					out["sub_seller"] = rp.ParentID != ""
+					out["legacy"] = rp.ParentID == "" && s.LegacyOf(r.Context(), rp.ID).Allowed
 				}
 			}
 		}
@@ -1146,6 +1147,8 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 	}))
 	// Panels a reseller sells in its own bot: wallet, bills, prices.
 	resaleRoutes(s, mux, guard, member)
+	// Old users brought by their subscription links (legacy.go).
+	legacyRoutes(s, mux, guard, member)
 	// Connecting a PasarGuard-made sales bot (Mirza): the owner's, a reseller's own.
 	pgAdminRoutes(s, mux, "/api/v2/admin/pg-api", guard, func(*http.Request) (string, bool) { return "", true })
 	pgAdminRoutes(s, mux, "/api/v2/rep/pg-api", member, func(r *http.Request) (string, bool) {

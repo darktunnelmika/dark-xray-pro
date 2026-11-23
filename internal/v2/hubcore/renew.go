@@ -41,6 +41,9 @@ func (s *Store) renewPeriod(ctx context.Context, actor, repID, email, plan strin
 	if days < 0 || days > 3650 || volBytes < 0 {
 		return res, ErrInvalid
 	}
+	if s.IsLegacy(ctx, email) {
+		return res, fmt.Errorf("%w: old users cannot be renewed; make a new client", ErrPolicy)
+	}
 	now := s.now().Unix()
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {

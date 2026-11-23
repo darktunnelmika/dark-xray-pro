@@ -269,6 +269,10 @@ func Open(path string) (*Store, error) {
 		st.Close()
 		return nil, err
 	}
+	if err := st.ensureLegacySchema(); err != nil {
+		st.Close()
+		return nil, err
+	}
 	if err := st.ensureRouteSchema(); err != nil {
 		st.Close()
 		return nil, err
@@ -610,6 +614,7 @@ type ClientView struct {
 	SpeedKbps      int       `json:"speed_kbps"`         // 0 = no limit
 	StartBy        int64     `json:"start_by,omitempty"` // on hold: the term starts by then even if unused
 	Trial          bool      `json:"trial,omitempty"`    // a free trial from a Telegram shop
+	Legacy         bool      `json:"legacy,omitempty"`   // an old user brought from another panel (legacy.go)
 }
 
 // Clients lists every client with usage, newest first.
@@ -634,7 +639,8 @@ func (s *Store) clientView(ctx context.Context, email string) (ClientView, error
 func (s *Store) clientViews(ctx context.Context, where, arg string) ([]ClientView, error) {
 	q := `SELECT c.email,c.uuid,c.enabled,c.volume_bytes,c.expires_unix,c.duration_seconds,c.max_ips,c.sub_token,c.rep_id,c.plan,c.note,
 COALESCE(u.up,0),COALESCE(u.down,0),COALESCE(u.first_seen_unix,0),COALESCE(u.last_seen_unix,0),
-EXISTS(SELECT 1 FROM online o WHERE o.email=c.email AND o.seen_unix>=?),c.reset_period,c.last_reset_unix,c.next_plan,c.hwid_limit,c.start_by_unix,c.trial
+EXISTS(SELECT 1 FROM online o WHERE o.email=c.email AND o.seen_unix>=?),c.reset_period,c.last_reset_unix,c.next_plan,c.hwid_limit,c.start_by_unix,c.trial,
+EXISTS(SELECT 1 FROM legacy_clients l WHERE l.email=c.email)
 FROM clients c LEFT JOIN client_usage u ON u.email=c.email`
 	args := []any{s.now().Unix() - 120}
 	if where != "" {
@@ -651,7 +657,7 @@ FROM clients c LEFT JOIN client_usage u ON u.email=c.email`
 		var v ClientView
 		var np string
 		if err := rows.Scan(&v.Email, &v.UUID, &v.Enabled, &v.VolumeBytes, &v.ExpiresUnix, &v.DurationSeconds, &v.MaxIPs, &v.SubToken, &v.RepID, &v.Plan, &v.Note,
-			&v.Usage.Up, &v.Usage.Down, &v.Usage.FirstSeen, &v.Usage.LastSeen, &v.Online, &v.ResetPeriod, &v.LastReset, &np, &v.HWIDLimit, &v.StartBy, &v.Trial); err != nil {
+			&v.Usage.Up, &v.Usage.Down, &v.Usage.FirstSeen, &v.Usage.LastSeen, &v.Online, &v.ResetPeriod, &v.LastReset, &np, &v.HWIDLimit, &v.StartBy, &v.Trial, &v.Legacy); err != nil {
 			return nil, err
 		}
 		if np != "" {

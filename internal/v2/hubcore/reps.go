@@ -196,6 +196,9 @@ func (s *Store) RepPutClient(ctx context.Context, actor, repID string, c Client,
 	} else if c.VolumeBytes < 0 {
 		return fmt.Errorf("%w: a volume plan needs a volume", ErrInvalid)
 	}
+	if s.IsLegacy(ctx, c.Email) {
+		return s.repPutLegacy(ctx, repID, c, plan)
+	}
 	if termDays(c, now) == 0 {
 		return fmt.Errorf("%w: representatives sell a fixed term", ErrInvalid)
 	}

@@ -185,7 +185,7 @@ COALESCE(u.up+u.down,0),COALESCE(u.first_seen_unix,0) FROM clients c LEFT JOIN c
 	if err != nil || owner != repID {
 		return 0, 0, ErrNotFound
 	}
-	if p.RefundUnused {
+	if p.RefundUnused && !isLegacyQ(ctx, tx, email) { // old users paid for their use only
 		expired := c.ExpiresUnix > 0 && c.ExpiresUnix <= now
 		switch {
 		case expired:

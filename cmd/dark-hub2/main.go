@@ -139,6 +139,8 @@ func main() {
 		go s.RunWebhooks(ctx)
 		go s.RunSystemWatch(ctx)
 		go s.RunInboundLimits(ctx)
+		hubcore.SetHubIPs(*hosts)
+		go s.RunLegacy(ctx, cert)
 		var cliOwners []int64
 		for _, f := range strings.Split(*tgOwners, ",") {
 			if n, err := strconv.ParseInt(strings.TrimSpace(f), 10, 64); err == nil {
