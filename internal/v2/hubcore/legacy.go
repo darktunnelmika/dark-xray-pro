@@ -658,8 +658,8 @@ func (s *Store) LegacyCheckDNS(ctx context.Context, rep string) (bool, string, e
 	if !lr.Allowed || lr.Step != 1 {
 		return false, "", ErrPolicy
 	}
-	ips, err := net.DefaultResolver.LookupHost(ctx, lr.Domain)
-	if err != nil {
+	ips, err := lookupFresh(ctx, lr.Domain)
+	if err != nil || len(ips) == 0 {
 		return false, "the domain does not resolve yet", nil
 	}
 	hub := HubIPs()
@@ -725,6 +725,63 @@ func intsToStr(p []int) []string {
 
 // chargeLegacy takes what old users used since the last look from their
 // reseller's credit, and switches them off (or back on) with the credit.
+// lookupFresh asks public resolvers directly, so a change the local cache
+// has not seen yet still counts (IPv4: what the old configs used).
+func lookupFresh(ctx context.Context, host string) ([]string, error) {
+	if ip := net.ParseIP(host); ip != nil {
+		return []string{ip.String()}, nil
+	}
+	for _, srv := range []string{"1.1.1.1:53", "8.8.8.8:53"} {
+		r := &net.Resolver{PreferGo: true, Dial: func(ctx context.Context, _, _ string) (net.Conn, error) {
+			d := net.Dialer{Timeout: 3 * time.Second}
+			return d.DialContext(ctx, "udp", srv)
+		}}
+		c, cancel := context.WithTimeout(ctx, 5*time.Second)
+		ips, err := r.LookupIP(c, "ip4", host)
+		cancel()
+		if err == nil && len(ips) > 0 {
+			out := make([]string, len(ips))
+			for i, ip := range ips {
+				out[i] = ip.String()
+			}
+			return out, nil
+		}
+	}
+	ips, err := net.DefaultResolver.LookupIP(ctx, "ip4", host)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]string, len(ips))
+	for i, ip := range ips {
+		out[i] = ip.String()
+	}
+	return out, nil
+}
+
+// retryLegacyCerts asks again for a moved domain's certificate that failed
+// (often only because a resolver still had the old address), every 10 minutes.
+func (s *Store) retryLegacyCerts(ctx context.Context) {
+	if !legacyACME {
+		return
+	}
+	rows, err := s.ro.QueryContext(ctx, `SELECT a.id FROM acme_certs a JOIN legacy_reps l ON a.id='legacy-'||l.rep_id
+WHERE l.step=2 AND a.status='failed' AND a.last_try < ?`, s.now().Unix()-600)
+	if err != nil {
+		return
+	}
+	var ids []string
+	for rows.Next() {
+		var id string
+		if rows.Scan(&id) == nil {
+			ids = append(ids, id)
+		}
+	}
+	rows.Close()
+	for _, id := range ids {
+		_ = s.RenewACMECert(ctx, id)
+	}
+}
+
 func (s *Store) chargeLegacy(ctx context.Context) {
 	_, _ = s.db.ExecContext(ctx, `DELETE FROM legacy_clients WHERE email NOT IN (SELECT email FROM clients)`)
 	rows, err := s.ro.QueryContext(ctx, `SELECT l.email,l.rep_id,l.last_used,COALESCE(u.up+u.down,0) FROM legacy_clients l LEFT JOIN client_usage u ON u.email=l.email`)
@@ -814,6 +871,7 @@ func (s *Store) RunLegacy(ctx context.Context, fallback tls.Certificate) {
 	defer t.Stop()
 	for {
 		s.chargeLegacy(ctx)
+		s.retryLegacyCerts(ctx)
 		want := s.legacyWanted(ctx)
 		for port, l := range open {
 			if want[port] != l.key {
