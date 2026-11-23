@@ -323,3 +323,92 @@ func TestPasarGuardFullUserAPI(t *testing.T) {
 		t.Fatal("the reseller sees the user it was given", code)
 	}
 }
+
+// TestPasarGuardReviewFixes holds the cases a review of the API found.
+func TestPasarGuardReviewFixes(t *testing.T) {
+	s, now := newStore(t)
+	ctx := context.Background()
+	seed(t, s)
+	if err := s.PutInbound(ctx, "de-two", "de-1", []byte(strings.Replace(vlessTemplate, "18580", "9000", 1)), true); err != nil {
+		t.Fatal(err)
+	}
+	_ = s.PutRep(ctx, Rep{ID: "ali", Name: "Ali", Enabled: true})
+	if err := s.AdjustCredit(ctx, "owner", "ali", 100<<30, 0, ""); err != nil {
+		t.Fatal(err)
+	}
+	h := httptest.NewServer(AdminHandlerWith(s, "admintok", "", nil))
+	defer h.Close()
+	c := pgClient{t, h.URL}
+	a, _ := s.EnablePGAPI(ctx, "ali")
+	tok := c.login("mirza_ali", a.Password)
+	_, g := c.obj("GET", "/api/groups", tok, nil)
+	groups := g["groups"].([]any)
+	if len(groups) != 2 {
+		t.Fatalf("groups %v", g)
+	}
+	g1, g2 := groups[0].(map[string]any)["id"], groups[1].(map[string]any)["id"]
+	exp := now.Add(30 * 24 * time.Hour).Unix()
+	for name, gid := range map[string]any{"one1": g1, "two2": g2} {
+		if code, out := c.obj("POST", "/api/user", tok, map[string]any{"username": name, "data_limit": 1 << 30, "expire": exp, "group_ids": []any{gid}}); code != 200 {
+			t.Fatalf("create %d %v", code, out)
+		}
+	}
+	vol := func(e string) int64 { v, _ := s.clientView(ctx, e); return v.VolumeBytes }
+
+	// group_ids narrows a bulk change to the users in those groups.
+	if code, out := c.obj("POST", "/api/users/bulk/data_limit", tok, map[string]any{"amount": 1 << 30, "group_ids": []any{g2}, "dry_run": true}); code != 200 || out["affected_users"].(float64) != 1 {
+		t.Fatalf("group filter dry run %d %v", code, out)
+	}
+	if code, _ := c.obj("POST", "/api/users/bulk/data_limit", tok, map[string]any{"amount": 1 << 30, "group_ids": []any{g2}}); code != 200 || vol("one1") != 1<<30 || vol("two2") != 2<<30 {
+		t.Fatalf("group filter %d one1=%d two2=%d", code, vol("one1"), vol("two2"))
+	}
+	// admins: another admin's id reaches none of this seller's users; its own id does.
+	var aliID int64
+	_ = s.db.QueryRow(`SELECT rowid FROM reps WHERE id='ali'`).Scan(&aliID)
+	if code, out := c.obj("POST", "/api/users/bulk/expire", tok, map[string]any{"amount": 86400, "admins": []any{aliID + 100}, "dry_run": true}); code != 200 || out["affected_users"].(float64) != 0 {
+		t.Fatalf("other admin %d %v", code, out)
+	}
+	if code, out := c.obj("POST", "/api/users/bulk/expire", tok, map[string]any{"amount": 86400, "admins": []any{aliID}, "dry_run": true}); code != 200 || out["affected_users"].(float64) != 2 {
+		t.Fatalf("own admin %d %v", code, out)
+	}
+
+	// A bot that reads a user and sends it back whole must not be refused
+	// for what the owner set on it.
+	_ = s.SetResetPeriod(ctx, "one1", "month")
+	_ = s.SetNextPlan(ctx, "one1", &NextPlan{GB: 1, Days: 30})
+	_, u := c.obj("GET", "/api/user/one1", tok, nil)
+	u["note"] = "echoed"
+	if code, out := c.obj("PUT", "/api/user/one1", tok, u); code != 200 || out["data_limit_reset_strategy"] != "month" || out["next_plan"] == nil || out["note"] != "echoed" {
+		t.Fatalf("echo back %d %v", code, out)
+	}
+	if code, _ := c.obj("PUT", "/api/user/one1", tok, map[string]any{"next_plan": map[string]any{"data_limit": 5 << 30}}); code != 403 {
+		t.Fatal("a changed next plan is still the owner's", code)
+	}
+
+	// The public client-type links keep the device limit.
+	_ = s.SetHWIDLimit(ctx, "one1", 1)
+	v, _ := s.clientView(ctx, "one1")
+	hs := httptest.NewServer(SubHandler(s))
+	defer hs.Close()
+	get := func(path, hwid string) int {
+		req, _ := http.NewRequest("GET", hs.URL+path, nil)
+		req.Header.Set("X-Hwid", hwid)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		return resp.StatusCode
+	}
+	if code := get("/sub/"+v.SubToken, "phone-1"); code != 200 {
+		t.Fatal("first device", code)
+	}
+	if code := get("/sub/"+v.SubToken+"/sing_box", "phone-2"); code != 403 {
+		t.Fatal("a second device must be refused on the client-type link too", code)
+	}
+
+	// A missing template is reported as a template.
+	if code, out := c.obj("PUT", "/api/user/from_template/one1", tok, map[string]any{"user_template_id": 999}); code != 404 || out["detail"] != "User Template not found" {
+		t.Fatalf("missing template %d %v", code, out)
+	}
+}

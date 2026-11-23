@@ -110,14 +110,16 @@ func pgStrategyOf(period string) string {
 }
 
 // pgCheckExtras refuses, before anything is saved or charged, what the
-// seller may not set.
-func (s *Store) pgCheckExtras(ctx context.Context, seller string, in pgIn) error {
+// seller may not set. cur is the client being changed (nil for a new one):
+// a reseller's bot that reads a user and sends it back whole may repeat what
+// the owner set on it.
+func (s *Store) pgCheckExtras(ctx context.Context, seller string, cur *ClientView, in pgIn) error {
 	if in.DataLimitResetStrategy != nil {
 		period, ok := pgStrategies[*in.DataLimitResetStrategy]
 		if !ok {
 			return fmt.Errorf("%w: data_limit_reset_strategy %q is not supported (no_reset, day, week, month)", ErrInvalid, *in.DataLimitResetStrategy)
 		}
-		if seller != "" && period != "" {
+		if seller != "" && period != "" && (cur == nil || cur.ResetPeriod != period) {
 			return fmt.Errorf("%w: a periodic usage reset is set by the panel owner", ErrPolicy)
 		}
 	}
@@ -125,17 +127,27 @@ func (s *Store) pgCheckExtras(ctx context.Context, seller string, in pgIn) error
 		return fmt.Errorf("%w: hwid_limit must be 0-100", ErrInvalid)
 	}
 	if n := strings.TrimSpace(string(in.NextPlan)); n != "" && n != "null" {
-		if seller != "" {
-			return fmt.Errorf("%w: a next plan is set by the panel owner", ErrPolicy)
-		}
-		if _, err := s.pgNextPlan(ctx, seller, in.NextPlan); err != nil {
+		np, err := s.pgNextPlan(ctx, seller, in.NextPlan)
+		if err != nil && seller == "" {
 			return err
+		}
+		if seller != "" && (err != nil || !sameNextPlan(cur, np)) {
+			return fmt.Errorf("%w: a next plan is set by the panel owner", ErrPolicy)
 		}
 	}
 	if _, _, err := pgExpire(in.OnHoldTimeout); err != nil {
 		return fmt.Errorf("%w: on_hold_timeout", ErrInvalid)
 	}
 	return nil
+}
+
+// sameNextPlan tells whether np repeats the client's own next plan (as the
+// user view shows it: volume and days).
+func sameNextPlan(cur *ClientView, np *NextPlan) bool {
+	if cur == nil || cur.NextPlan == nil || np == nil {
+		return false
+	}
+	return math.Abs(cur.NextPlan.GB-np.GB) < 1e-6 && cur.NextPlan.Days == np.Days
 }
 
 // pgNextPlan turns PasarGuard's next plan (bytes and seconds, or a template)
@@ -206,7 +218,7 @@ func (s *Store) pgSetExtras(ctx context.Context, seller, email string, in pgIn) 
 
 // pgModify applies a change (PUT) to one of the seller's clients.
 func (p *pgSrv) modify(ctx context.Context, seller string, cur ClientView, in pgIn) error {
-	if err := p.s.pgCheckExtras(ctx, seller, in); err != nil {
+	if err := p.s.pgCheckExtras(ctx, seller, &cur, in); err != nil {
 		return err
 	}
 	c := cur.Client
@@ -759,7 +771,12 @@ func pgSort(rows []pgRow, keys []string) {
 			x, y = max(a.c.VolumeBytes, 0), max(b.c.VolumeBytes, 0)
 		case "expire":
 			x, y = a.expire, b.expire
-		case "created_at", "edit_at", "id":
+		case "created_at", "edit_at":
+			x, y = a.created, b.created
+			if x == y {
+				x, y = a.id, b.id
+			}
+		case "id":
 			x, y = a.id, b.id
 		case "online_at":
 			x, y = a.c.Usage.LastSeen, b.c.Usage.LastSeen
@@ -1070,6 +1087,7 @@ func (p *pgSrv) bulkSelect(action string) pgAuthed {
 type pgBulkFilter struct {
 	Amount        int64           `json:"amount"`
 	DryRun        bool            `json:"dry_run"`
+	Admins        []int64         `json:"admins"`
 	GroupIDs      []int64         `json:"group_ids"`
 	HasGroupIDs   []int64         `json:"has_group_ids"`
 	HasNoGroup    bool            `json:"has_no_group"`
@@ -1082,6 +1100,21 @@ type pgBulkFilter struct {
 }
 
 func (p *pgSrv) bulkTargets(ctx context.Context, seller string, f pgBulkFilter, groupKey []int64) ([]pgRow, error) {
+	if len(f.Admins) > 0 {
+		// A token reaches only its own users: they belong to the seller's
+		// admin id (a reseller's row id; the owner has none).
+		var self int64
+		if seller != "" {
+			_ = p.s.ro.QueryRowContext(ctx, `SELECT rowid FROM reps WHERE id=?`, seller).Scan(&self)
+		}
+		mine := false
+		for _, id := range f.Admins {
+			mine = mine || (self > 0 && id == self)
+		}
+		if !mine {
+			return nil, nil
+		}
+	}
 	rows, err := p.s.pgRows(ctx, seller)
 	if err != nil {
 		return nil, err
@@ -1146,7 +1179,7 @@ func (p *pgSrv) bulkLimit(field string) pgAuthed {
 		if !pgDecode(w, r, &f) {
 			return
 		}
-		rows, err := p.bulkTargets(ctx, seller, f, nil)
+		rows, err := p.bulkTargets(ctx, seller, f, f.GroupIDs)
 		if err != nil {
 			pgFail(w, err)
 			return
@@ -1463,7 +1496,7 @@ func (p *pgSrv) renewFromTemplate(w http.ResponseWriter, r *http.Request, seller
 		return
 	}
 	if err := p.applyTemplate(ctx, seller, c.Email, in.UserTemplateID, in.Note); err != nil {
-		pgFail(w, err)
+		pgFailT(w, err)
 		return
 	}
 	p.view(w, r, seller, c.Email)
@@ -1994,6 +2027,12 @@ func pgSubRoutes(s *Store, mux *http.ServeMux, subBase string) {
 	find := func(w http.ResponseWriter, r *http.Request) (ClientView, bool) {
 		email, err := s.EmailBySubToken(r.Context(), r.PathValue("token"))
 		if err != nil {
+			// A link from a Marzban/PasarGuard panel moved here keeps working.
+			if tok, ferr := s.foreignSubToken(r.Context(), r.PathValue("token")); ferr == nil {
+				email, err = s.EmailBySubToken(r.Context(), tok)
+			}
+		}
+		if err != nil {
 			http.NotFound(w, r)
 			return ClientView{}, false
 		}
@@ -2030,6 +2069,16 @@ func pgSubRoutes(s *Store, mux *http.ServeMux, subBase string) {
 		if !ok {
 			return
 		}
+		// The same device limit as /sub/{token}: an app's configs count as a device.
+		if err := s.CheckDevice(r.Context(), c.Email, r.Header.Get("X-Hwid"), r.Header.Get("X-Device-Os"), r.Header.Get("X-Device-Model"), r.UserAgent()); err != nil {
+			if errors.Is(err, ErrDeviceLimit) {
+				http.Error(w, "device limit reached: remove a device in the panel or ask your seller", http.StatusForbidden)
+				return
+			}
+			pgFail(w, err)
+			return
+		}
+		w.Header().Set("Cache-Control", "no-store")
 		p.subscription(w, r, c.Email, r.PathValue("client_type"))
 	})
 }

@@ -729,7 +729,7 @@ func pgRoutes(s *Store, mux *http.ServeMux, subBase string) {
 			pgErr(w, http.StatusConflict, "User already exists")
 			return
 		}
-		if err := s.pgCheckExtras(r.Context(), seller, in); err != nil {
+		if err := s.pgCheckExtras(r.Context(), seller, nil, in); err != nil {
 			pgFail(w, err)
 			return
 		}
