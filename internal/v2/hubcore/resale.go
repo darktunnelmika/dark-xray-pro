@@ -10,7 +10,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"time"
 )
 
 // Panel resale: a reseller the owner allows sells panels (sub-sellers under
@@ -706,10 +705,6 @@ type ResaleStats struct {
 	MonthSales int   `json:"month_sales"`
 	MonthPaid  int64 `json:"month_paid"`
 	MonthCost  int64 `json:"month_cost"`
-}
-
-func monthStart(t time.Time) int64 {
-	return time.Date(t.Year(), t.Month(), 1, 0, 0, 0, 0, t.Location()).Unix()
 }
 
 // SoldPanels lists the panels a reseller sold (in its bot or its panel).
