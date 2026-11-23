@@ -171,16 +171,13 @@ FROM clients c LEFT JOIN client_usage cu ON cu.email=c.email WHERE c.email=?`, e
 	}
 	var seller string
 	_ = s.ro.QueryRowContext(ctx, `SELECT rep_id FROM clients WHERE email=?`, email).Scan(&seller)
+	// The seller's own bot when it runs one, else the panel's main bot, so a
+	// customer always has a bot for alerts and support. A sub-seller's
+	// customers are never sent to the reseller above (they are the
+	// sub-seller's, not its): its own bot, else the main bot.
 	bot := s.BotUsernameFor(ctx, seller)
 	if s.IsSubSeller(ctx, seller) {
-		// Sub-sellers' customers are not sent to the reseller's or the panel's
-		// bot; only to the sub-seller's own bot, if they run one. The page
-		// shows their Telegram contact instead (see brandFor).
-		bot = ""
-		if b := s.RepBotOf(ctx, seller); b.Enabled && b.Running && b.Username != "" {
-			bot = strings.TrimPrefix(b.Username, "@")
-		}
-		d.Seller = true
+		d.Seller = true // the support button reads "message the seller" (see brandFor)
 	}
 	if bot != "" && botNameRE.MatchString(bot) {
 		if i := strings.LastIndex(subURL, "/sub/"); i >= 0 {

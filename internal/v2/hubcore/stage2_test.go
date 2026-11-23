@@ -683,12 +683,28 @@ func TestRepBrand(t *testing.T) {
 		}
 	}
 	// A sub-seller's customer sees nothing of the reseller above or the
-	// panel (only the link address is inherited), and no bot button.
+	// panel's brand (only the link address is inherited). Its bot button is
+	// the sub-seller's own bot, else the panel's main bot, never the
+	// reseller's above.
 	if set, base := s.brandFor(ctx, "sub-cust"); set.Title != "" || set.SupportURL != "" || set.Accent != "" || base != "https://sub.ali.example" {
 		t.Fatalf("sub-cust: %+v %s", set, base)
 	}
-	if d, err := s.subPageData(ctx, "sub-cust", "https://sub.ali.example/sub/x", "fa"); err != nil || d.BotLink != "" || !d.Seller {
-		t.Fatalf("sub-cust page: %+v %v", d, err)
+	_ = s.SetSetting(ctx, "tg_username", "MainBot")
+	SetRepBotStatus("ali", true, "AliBot", "")
+	_, _ = s.db.ExecContext(ctx, `INSERT OR REPLACE INTO settings(key,value) VALUES('rep_bot:ali','{"token":"1:a","enabled":true}')`)
+	defer SetRepBotStatus("ali", false, "", "")
+	tok := "0123456789abcdef0123456789abcdef"
+	if d, err := s.subPageData(ctx, "sub-cust", "https://sub.ali.example/sub/"+tok, "fa"); err != nil || d.BotLink != "https://t.me/MainBot?start="+tok || !d.Seller {
+		t.Fatalf("sub-cust page without its own bot: %q %v", d.BotLink, err)
+	}
+	if d, _ := s.subPageData(ctx, "ali-cust", "https://sub.ali.example/sub/"+tok, "fa"); d.BotLink != "https://t.me/AliBot?start="+tok {
+		t.Fatalf("a reseller's customer goes to its running bot: %q", d.BotLink)
+	}
+	SetRepBotStatus("ali-sub", true, "SubBot", "")
+	_, _ = s.db.ExecContext(ctx, `INSERT OR REPLACE INTO settings(key,value) VALUES('rep_bot:ali-sub','{"token":"2:b","enabled":true}')`)
+	defer SetRepBotStatus("ali-sub", false, "", "")
+	if d, _ := s.subPageData(ctx, "sub-cust", "https://sub.ali.example/sub/"+tok, "fa"); d.BotLink != "https://t.me/SubBot?start="+tok {
+		t.Fatalf("sub-cust page with its own bot: %q", d.BotLink)
 	}
 	if set, base := s.brandFor(ctx, "alice"); set.Title != "Main VPN" || base != "" {
 		t.Fatalf("a direct customer must keep the panel's brand: %+v %q", set, base)
