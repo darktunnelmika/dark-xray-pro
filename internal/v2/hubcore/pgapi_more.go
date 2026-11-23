@@ -100,7 +100,7 @@ type pgNext struct {
 	AddRemainingTraffic bool   `json:"add_remaining_traffic"`
 }
 
-var pgStrategies = map[string]string{"no_reset": "", "day": "day", "week": "week", "month": "month"}
+var pgStrategies = map[string]string{"no_reset": "", "day": "day", "week": "week", "month": "month", "year": "year"}
 
 func pgStrategyOf(period string) string {
 	if period == "" {
@@ -117,11 +117,9 @@ func (s *Store) pgCheckExtras(ctx context.Context, seller string, cur *ClientVie
 	if in.DataLimitResetStrategy != nil {
 		period, ok := pgStrategies[*in.DataLimitResetStrategy]
 		if !ok {
-			return fmt.Errorf("%w: data_limit_reset_strategy %q is not supported (no_reset, day, week, month)", ErrInvalid, *in.DataLimitResetStrategy)
+			return fmt.Errorf("%w: data_limit_reset_strategy %q is not supported (no_reset, day, week, month, year)", ErrInvalid, *in.DataLimitResetStrategy)
 		}
-		if seller != "" && period != "" && (cur == nil || cur.ResetPeriod != period) {
-			return fmt.Errorf("%w: a periodic usage reset is set by the panel owner", ErrPolicy)
-		}
+		_ = period // a reseller's periodic value is ignored in pgSetExtras, not refused
 	}
 	if in.HWIDLimit != nil && (*in.HWIDLimit < 0 || *in.HWIDLimit > 100) {
 		return fmt.Errorf("%w: hwid_limit must be 0-100", ErrInvalid)
@@ -135,8 +133,23 @@ func (s *Store) pgCheckExtras(ctx context.Context, seller string, cur *ClientVie
 			return fmt.Errorf("%w: a next plan is set by the panel owner", ErrPolicy)
 		}
 	}
-	if _, _, err := pgExpire(in.OnHoldTimeout); err != nil {
+	if at, set, err := pgExpire(in.OnHoldTimeout); err != nil {
 		return fmt.Errorf("%w: on_hold_timeout", ErrInvalid)
+	} else if set && strings.TrimSpace(string(in.OnHoldTimeout)) != "null" {
+		// The panel lets the owner hold a term up to 365 days, and a
+		// reseller only with the right to change settings.
+		if at > s.now().Unix()+365*86400 {
+			return fmt.Errorf("%w: on_hold_timeout is at most 365 days away", ErrInvalid)
+		}
+		if seller != "" && (cur == nil || cur.StartBy != at) {
+			pol, err := s.RepPolicyOf(ctx, seller)
+			if err != nil {
+				return err
+			}
+			if pol.DenyEdit {
+				return fmt.Errorf("%w: changing client settings is not allowed for this representative", ErrPolicy)
+			}
+		}
 	}
 	return nil
 }
@@ -193,6 +206,9 @@ func (s *Store) pgNextPlan(ctx context.Context, seller string, raw json.RawMessa
 	if in.DataLimit != nil && *in.DataLimit > 0 {
 		np.GB = float64(*in.DataLimit) / (1 << 30)
 	}
+	if in.Expire != nil && *in.Expire > 3650*86400 {
+		return nil, fmt.Errorf("%w: next_plan expire is at most 3650 days", ErrInvalid)
+	}
 	if in.Expire != nil && *in.Expire > 0 {
 		np.Days = int((*in.Expire + 86399) / 86400)
 	}
@@ -209,7 +225,11 @@ func (s *Store) pgSetExtras(ctx context.Context, seller, email string, in pgIn) 
 			return err
 		}
 	}
-	if in.DataLimitResetStrategy != nil {
+	// A periodic reset gives volume nobody paid for, so the owner sets it: a
+	// reseller's bot may only turn it off. Its other values (a product made
+	// with a monthly reset in Mirza, say) are ignored rather than failing the
+	// sale.
+	if in.DataLimitResetStrategy != nil && (seller == "" || pgStrategies[*in.DataLimitResetStrategy] == "") {
 		if err := s.SetResetPeriod(ctx, email, pgStrategies[*in.DataLimitResetStrategy]); err != nil {
 			return err
 		}
@@ -232,7 +252,7 @@ func (s *Store) pgSetExtras(ctx context.Context, seller, email string, in pgIn) 
 			return err
 		}
 	}
-	if at, set, _ := pgExpire(in.OnHoldTimeout); set {
+	if at, set, _ := pgExpire(in.OnHoldTimeout); set && strings.TrimSpace(string(in.OnHoldTimeout)) != "null" {
 		if _, err := s.db.ExecContext(ctx, `UPDATE clients SET start_by_unix=? WHERE email=?`, max(at, 0), email); err != nil {
 			return err
 		}
@@ -428,6 +448,11 @@ func (p *pgSrv) user(w http.ResponseWriter, r *http.Request, seller string) {
 		}
 		p.view(w, r, seller, c.Email)
 	case "POST active_next":
+		// The panel applies a next plan only when the current plan runs out;
+		// applying it early is the owner's (the plan is the owner's gift).
+		if !pgOwnerOnly(w, seller) {
+			return
+		}
 		if c.NextPlan == nil {
 			pgErr(w, http.StatusNotFound, "User doesn't have next plan")
 			return
@@ -484,7 +509,14 @@ func (p *pgSrv) subUpdates(w http.ResponseWriter, r *http.Request, email string)
 		HWID      *string `json:"hwid"`
 	}
 	ups := []upd{}
-	rows, err := p.s.ro.QueryContext(r.Context(), `SELECT last_unix,agent,hwid FROM client_devices WHERE email=? ORDER BY last_unix DESC LIMIT 10`, email)
+	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
+	limit, err := strconv.Atoi(r.URL.Query().Get("limit"))
+	if err != nil || limit <= 0 || limit > 100 {
+		limit = 100
+	}
+	var total int
+	_ = p.s.ro.QueryRowContext(r.Context(), `SELECT COUNT(*) FROM client_devices WHERE email=?`, email).Scan(&total)
+	rows, err := p.s.ro.QueryContext(r.Context(), `SELECT last_unix,agent,hwid FROM client_devices WHERE email=? ORDER BY last_unix DESC LIMIT ? OFFSET ?`, email, limit, max(offset, 0))
 	if err == nil {
 		defer rows.Close()
 		for rows.Next() {
@@ -499,17 +531,19 @@ func (p *pgSrv) subUpdates(w http.ResponseWriter, r *http.Request, email string)
 			}
 		}
 	}
-	pgJSON(w, map[string]any{"updates": ups, "count": len(ups)})
+	pgJSON(w, map[string]any{"updates": ups, "count": total})
 }
 
 // pgClientTypes are PasarGuard's client types and Dark's formats for them
 // ("links" is the plain list).
-var pgClientTypes = map[string]string{"links": "", "links_base64": "base64", "xray": "xray", "sing_box": "singbox", "clash": "clash", "clash_meta": "clash"}
+var pgClientTypes = map[string]string{"links": "", "raw": "", "links_base64": "base64", "xray": "xray", "sing_box": "singbox", "clash": "clash", "clash_meta": "clash",
+	// Marzban's names, for links moved from a Marzban panel
+	"v2ray": "base64", "v2ray-json": "xray", "sing-box": "singbox", "clash-meta": "clash"}
 
 // subscription serves one of PasarGuard's client types.
 func (p *pgSrv) subscription(w http.ResponseWriter, r *http.Request, email, clientType string) {
 	ctx := r.Context()
-	if clientType == "links" {
+	if pgClientTypes[clientType] == "" && (clientType == "links" || clientType == "raw") {
 		links, info, err := p.s.Subscription(ctx, email)
 		if err != nil {
 			pgFail(w, err)
@@ -761,7 +795,7 @@ func pgFilter(r *http.Request, rows []pgRow, groups []pgGroup) ([]pgRow, error) 
 		name := strings.ToLower(c.Email)
 		switch {
 		case len(statuses) > 0 && !statuses[x.status],
-			len(names) > 0 && !names[name] && !(len(names) == 1 && q.Get("usernames") == "" && strings.Contains(name, pgFirst(names))),
+			len(names) > 0 && !names[name], // exact, as PasarGuard; "search" finds parts
 			len(ids) > 0 && !ids[strconv.FormatInt(x.id, 10)],
 			search != "" && !strings.Contains(name, search) && !strings.Contains(strings.ToLower(c.Note), search),
 			online && !c.Online,
@@ -790,16 +824,20 @@ func pgFilter(r *http.Request, rows []pgRow, groups []pgGroup) ([]pgRow, error) 
 	return out, nil
 }
 
-func pgFirst(m map[string]bool) string {
-	for k := range m {
-		return k
-	}
-	return ""
-}
-
 // pgSort orders rows by PasarGuard's sort keys ("-" = descending). With no
 // key the newest come first.
 func pgSort(rows []pgRow, keys []string) {
+	known := map[string]bool{"username": true, "name": true, "used_traffic": true, "data_limit": true, "expire": true,
+		"created_at": true, "edit_at": true, "id": true, "online_at": true, "hwid_count": true}
+	seen := map[string]bool{}
+	var use []string
+	for _, k := range keys {
+		if f := strings.TrimPrefix(k, "-"); known[f] && !seen[f] && len(use) < 8 {
+			seen[f] = true
+			use = append(use, k)
+		}
+	}
+	keys = use
 	if len(keys) == 0 {
 		return
 	}
@@ -854,7 +892,7 @@ func pgPage(r *http.Request, n int) (from, to int) {
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 	from = min(max(offset, 0), n)
 	to = n
-	if limit > 0 && from+limit < n {
+	if limit > 0 && limit < n-from {
 		to = from + limit
 	}
 	return from, to
@@ -1073,6 +1111,10 @@ func (s *Store) pgPick(ctx context.Context, seller string, ids []int64) ([]strin
 
 // bulkFail answers a bulk change stopped part way: what was done stays done.
 func bulkFail(w http.ResponseWriter, done int, err error) {
+	bulkFailN(w, done, "users", err)
+}
+
+func bulkFailN(w http.ResponseWriter, done int, noun string, err error) {
 	if done == 0 {
 		pgFail(w, err)
 		return
@@ -1081,7 +1123,7 @@ func bulkFail(w http.ResponseWriter, done int, err error) {
 	if errors.Is(err, ErrCredit) {
 		code = http.StatusBadRequest
 	}
-	pgErr(w, code, fmt.Sprintf("stopped after %d users: %v", done, err))
+	pgErr(w, code, fmt.Sprintf("stopped after %d %s: %v", done, noun, err))
 }
 
 func (p *pgSrv) bulkSelect(action string) pgAuthed {
@@ -1222,6 +1264,10 @@ func (p *pgSrv) bulkLimit(field string) pgAuthed {
 		if !pgDecode(w, r, &f) {
 			return
 		}
+		if bound := map[string]int64{"expire": 100 * 365 * 86400, "data_limit": 1 << 50}[field]; f.Amount > bound || f.Amount < -bound {
+			pgErr(w, http.StatusUnprocessableEntity, "amount is out of range")
+			return
+		}
 		rows, err := p.bulkTargets(ctx, seller, f, f.GroupIDs)
 		if err != nil {
 			pgFail(w, err)
@@ -1234,7 +1280,7 @@ func (p *pgSrv) bulkLimit(field string) pgAuthed {
 			c.UUID, c.Secret, c.SubToken = "", "", ""
 			switch {
 			case field == "expire" && c.ExpiresUnix > 0:
-				c.ExpiresUnix += f.Amount
+				c.ExpiresUnix = max(c.ExpiresUnix+f.Amount, 1) // ends, never wraps to "no expiry"
 			case field == "expire" && c.DurationSeconds > 0 && x.c.Usage.FirstSeen > 0:
 				c.DurationSeconds = max(c.DurationSeconds+f.Amount, 1)
 			case field == "data_limit" && c.VolumeBytes > 0 && c.VolumeBytes+f.Amount > 0:
@@ -2046,7 +2092,12 @@ func (p *pgSrv) routes(mux *http.ServeMux, auth func(func(http.ResponseWriter, *
 				return
 			}
 			var list []Product
+			seen := map[int64]bool{}
 			for _, n := range in.IDs {
+				if seen[n] {
+					continue
+				}
+				seen[n] = true
 				pr, err := s.pgProduct(r.Context(), seller, n)
 				if err != nil {
 					pgFailT(w, err)
@@ -2065,7 +2116,7 @@ func (p *pgSrv) routes(mux *http.ServeMux, auth func(func(http.ResponseWriter, *
 					_, err = s.pgTemplatePut(r.Context(), seller, pr, pgTemplateIn{IsDisabled: &off})
 				}
 				if err != nil {
-					bulkFail(w, i, err)
+					bulkFailN(w, i, "templates", err)
 					return
 				}
 				names = append(names, pr.Name)

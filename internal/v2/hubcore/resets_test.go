@@ -40,7 +40,7 @@ func TestResetsAndIPLog(t *testing.T) {
 		t.Fatalf("unknown client: %v", err)
 	}
 	// Periodic.
-	if err := s.SetResetPeriod(ctx, "alice", "year"); err == nil {
+	if err := s.SetResetPeriod(ctx, "alice", "fortnight"); err == nil {
 		t.Fatal("bad period accepted")
 	}
 	if err := s.SetResetPeriod(ctx, "alice", "week"); err != nil {

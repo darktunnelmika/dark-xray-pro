@@ -68,6 +68,8 @@ func (s *Store) DeleteRep(ctx context.Context, id string, withClients bool) (cli
 			`UPDATE products SET status='archived' WHERE seller=?`,
 			`DELETE FROM settings WHERE key IN ('rep_bot:'||?1,'pay_card_number:'||?1,'pay_card_holder:'||?1,'pay_card_bank:'||?1,'rep_brand:'||?1)`,
 			`DELETE FROM reps WHERE id=?`,
+			`DELETE FROM pg_api WHERE seller=?`,
+			`DELETE FROM pg_tokens WHERE seller=?`,
 		} {
 			if _, err := tx.ExecContext(ctx, q, r); err != nil {
 				return 0, err

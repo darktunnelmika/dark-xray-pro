@@ -96,7 +96,7 @@ func TestPasarGuardFullUserAPI(t *testing.T) {
 	mk := func(name string, gb int64) float64 {
 		t.Helper()
 		code, out := c.obj("POST", "/api/user", tok, map[string]any{"username": name, "data_limit": gb << 30, "expire": exp, "group_ids": []any{gid}})
-		if code != 200 {
+		if code != 201 {
 			t.Fatalf("create %s %d %v", name, code, out)
 		}
 		return out["id"].(float64)
@@ -138,8 +138,8 @@ func TestPasarGuardFullUserAPI(t *testing.T) {
 	}
 
 	// What a reseller may and may not set.
-	if code, _ := c.obj("PUT", "/api/user/usr1", tok, map[string]any{"data_limit_reset_strategy": "month"}); code != 403 {
-		t.Fatal("a periodic reset gives unpaid volume", code)
+	if code, out := c.obj("PUT", "/api/user/usr1", tok, map[string]any{"data_limit_reset_strategy": "month"}); code != 200 || out["data_limit_reset_strategy"] != "no_reset" {
+		t.Fatal("a reseller's periodic reset is ignored (it gives unpaid volume), not a failed sale", code, out["data_limit_reset_strategy"])
 	}
 	if code, _ := c.obj("PUT", "/api/user/usr1", tok, map[string]any{"next_plan": map[string]any{"data_limit": 1 << 30}}); code != 403 {
 		t.Fatal("a next plan gives unpaid service", code)
@@ -349,7 +349,7 @@ func TestPasarGuardReviewFixes(t *testing.T) {
 	g1, g2 := groups[0].(map[string]any)["id"], groups[1].(map[string]any)["id"]
 	exp := now.Add(30 * 24 * time.Hour).Unix()
 	for name, gid := range map[string]any{"one1": g1, "two2": g2} {
-		if code, out := c.obj("POST", "/api/user", tok, map[string]any{"username": name, "data_limit": 1 << 30, "expire": exp, "group_ids": []any{gid}}); code != 200 {
+		if code, out := c.obj("POST", "/api/user", tok, map[string]any{"username": name, "data_limit": 1 << 30, "expire": exp, "group_ids": []any{gid}}); code != 201 {
 			t.Fatalf("create %d %v", code, out)
 		}
 	}
@@ -443,7 +443,7 @@ func TestPasarGuardReviewTwo(t *testing.T) {
 	mk := func(name string) float64 {
 		t.Helper()
 		code, out := c.obj("POST", "/api/user", tok, map[string]any{"username": name, "data_limit": 1 << 30, "expire": exp, "group_ids": []any{g1}})
-		if code != 200 {
+		if code != 201 {
 			t.Fatalf("create %s %d %v", name, code, out)
 		}
 		return out["id"].(float64)
@@ -453,7 +453,7 @@ func TestPasarGuardReviewTwo(t *testing.T) {
 
 	// An empty next plan is no next plan.
 	if code, out := c.obj("POST", "/api/user", tok, map[string]any{"username": "empty1", "data_limit": 1 << 30, "expire": exp, "group_ids": []any{g1},
-		"next_plan": map[string]any{"user_template_id": nil, "data_limit": nil, "expire": nil, "add_remaining_traffic": false}}); code != 200 {
+		"next_plan": map[string]any{"user_template_id": nil, "data_limit": nil, "expire": nil, "add_remaining_traffic": false}}); code != 201 {
 		t.Fatalf("empty next plan %d %v", code, out)
 	}
 

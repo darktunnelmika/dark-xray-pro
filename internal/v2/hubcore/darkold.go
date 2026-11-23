@@ -926,8 +926,12 @@ FROM commerce_prices p JOIN commerce_products pr ON pr.id=p.product_id AND pr.ow
 			if cat == "General" || len(cat) > 40 {
 				cat = ""
 			}
-			if _, err := tx.ExecContext(ctx, `INSERT INTO products(id,seller,name,plan,gb,days,max_ips,inbounds,price,status,first_use,created_unix,category,no_renew,per_buyer) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-				id, sl, name, plan, gb, x.days, max(x.ips, 0), strings.Join(opt.Inbounds, ","), max(x.price, 0), status, x.mode == "first_connection", now,
+			rowid, err := newRowID(ctx, tx, "products")
+			if err != nil {
+				return err
+			}
+			if _, err := tx.ExecContext(ctx, `INSERT INTO products(rowid,id,seller,name,plan,gb,days,max_ips,inbounds,price,status,first_use,created_unix,category,no_renew,per_buyer) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+				rowid, id, sl, name, plan, gb, x.days, max(x.ips, 0), strings.Join(opt.Inbounds, ","), max(x.price, 0), status, x.mode == "first_connection", now,
 				cat, !x.renewable, max(min(x.limit, 1000), 0)); err != nil {
 				return fmt.Errorf("product %s: %w", x.id, err)
 			}
