@@ -35,7 +35,9 @@ func TestResellerSellsPanelsInItsBot(t *testing.T) {
 	}
 	_ = s.PutResaleOwner(ctx, "ali", true, false, 0)
 	rb.Handle(ctx, cb(cust, "P:buy"))
-	find(t, api.take(), cust, "۲٬۵۰۰٬۰۰۰")
+	if m := find(t, api.take(), cust, "خرید پنل نمایندگی"); !hasButton(m.kb, "۲٬۵۰۰٬۰۰۰") {
+		t.Fatal("the package at the reseller's price")
+	}
 	rb.Handle(ctx, cb(cust, "P:pk:tb"))
 	api.take()
 	rb.Handle(ctx, msg(cust, "shop-one"))

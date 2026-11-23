@@ -5322,6 +5322,141 @@ async function partnerKeys(reps) {
   openModal(T("API ساخت پنل نمایندگی", "Reseller panel API"), box);
 }
 
+// ---------- Panel resale: resellers selling panels in their own bot ----------
+// The owner sets the wholesale price per TB and, per reseller, whether it may
+// sell and owe a 24-hour bill; the reseller sets its prices and sees its
+// wallet at the main panel and its bills.
+const tomanTxt = (v) => `${fmtNum(v || 0)} ${lang === "fa" ? "تومان" : "toman"}`;
+
+function billRows(bills, actions) {
+  const fa = lang === "fa";
+  if (!bills || !bills.length) return h("p", { class: "muted small" }, fa ? "فاکتوری نیست." : "No bills.");
+  const st = (b) => b.status === "paid" ? (fa ? "پرداخت‌شده" : "paid") : b.status === "cancelled" ? (fa ? "بخشیده" : "forgiven") : b.overdue ? (fa ? "⛔️ مهلت گذشته" : "⛔️ overdue") : (fa ? "باز" : "open");
+  return h("div", { class: "table-wrap" }, h("table", {}, h("thead", {}, h("tr", {}, h("th", {}, "#"), h("th", {}, fa ? "مبلغ" : "Amount"), h("th", {}, fa ? "مهلت" : "Due"), h("th", {}, fa ? "وضعیت" : "Status"), h("th", {}, ""))),
+    h("tbody", {}, bills.map((b) => h("tr", {}, h("td", {}, fmtNum(b.id)), h("td", {}, tomanTxt(b.amount)), h("td", {}, fmtWhen(b.due_unix)),
+      h("td", {}, h("span", { class: `badge ${b.overdue ? "bad" : ""}` }, st(b))), h("td", {}, b.status === "open" ? actions(b) : null))))));
+}
+
+function walletHistory(list) {
+  const fa = lang === "fa";
+  if (!list || !list.length) return null;
+  return h("details", {}, h("summary", {}, fa ? "تراکنش‌های کیف پول" : "Wallet history"),
+    h("ul", { class: "small plain" }, list.map((e) => h("li", {}, h("b", { dir: "ltr" }, `${e.delta > 0 ? "+" : "−"}${fmtNum(Math.abs(e.delta))}`), " · ", fmtWhen(e.unix), e.note ? ` · ${e.note}` : ""))));
+}
+
+// resaleWholesaleCard: the general wholesale price per TB (owner settings).
+function resaleWholesaleCard() {
+  const fa = lang === "fa";
+  const inp = h("input", { type: "number", min: "0", step: "1000", dir: "ltr" });
+  let sale = null;
+  api("GET", "/api/v2/admin/rep-sale").then((v) => { sale = v; inp.value = v.wholesale_tb || 0; }).catch(() => {});
+  return h("form", { class: "card form", onsubmit: async (e) => {
+    e.preventDefault();
+    if (!sale) return;
+    await guarded(() => api("PUT", "/api/v2/admin/rep-sale", { ...sale, wholesale_tb: +inp.value || 0 }));
+    toast(t("saved"));
+  } },
+    h("h2", {}, "💼 ", fa ? "فروش پنل توسط نماینده‌ها" : "Panels sold by resellers"),
+    h("p", { class: "small muted" }, fa ? "نماینده‌هایی که اجازه بدهید، بسته‌های پنل نمایندگی شما را در ربات خودشان می‌فروشند. قیمت عمده از کیف پول آن‌ها در پنل اصلی کم می‌شود یا (اگر اجازه بدهید) فاکتور ۲۴ ساعته صادر می‌شود. اجازه برای هر نماینده: صفحهٔ نماینده‌ها ← ⋯ ← فروش پنل."
+      : "Resellers you allow sell your reseller-panel packages in their own bot. The wholesale price comes off their wallet at the main panel or, if you allow it, a 24-hour bill is opened. Per reseller: Resellers → ⋯ → Panel sale."),
+    h("label", {}, h("span", {}, fa ? "قیمت عمدهٔ هر ترابایت (تومان، ۰ = خاموش)" : "Wholesale price per TB (toman, 0 = off)"), inp),
+    h("div", { class: "row" }, h("button", { class: "primary", type: "submit" }, t("save"))));
+}
+
+// resaleOwner: one reseller's resale, wallet and bills (owner).
+async function resaleOwner(r) {
+  const fa = lang === "fa";
+  const T = (f, e) => (fa ? f : e);
+  const path = `/api/v2/admin/reps/${encodeURIComponent(r.ID)}`;
+  const box = h("div", { class: "form" });
+  const err = h("div", { class: "error", role: "alert" });
+  async function draw() {
+    let v;
+    try { v = await api("GET", `${path}/resale`); } catch (x) { err.textContent = x.message; return; }
+    const allowed = h("input", { type: "checkbox", checked: !!v.resale.allowed });
+    const credit = h("input", { type: "checkbox", checked: !!v.resale.credit });
+    const price = h("input", { type: "number", min: "0", step: "1000", dir: "ltr", value: v.resale.price_tb || 0 });
+    const amount = h("input", { type: "number", step: "1000", dir: "ltr", placeholder: "1300000" });
+    const note = h("input", { placeholder: T("توضیح (اختیاری)", "Note (optional)") });
+    const close = (b, paid) => h("button", { type: "button", class: paid ? "" : "ghost", onclick: async () => {
+      if (!(await confirmAction(paid ? T(`فاکتور #${b.id} پرداخت‌شده ثبت شود؟`, `Mark bill #${b.id} paid?`) : T(`فاکتور #${b.id} بخشیده شود؟`, `Forgive bill #${b.id}?`)))) return;
+      await guarded(() => api("POST", `/api/v2/admin/rep-bills/${b.id}/close`, { paid })); draw();
+    } }, paid ? T("پرداخت شد", "Paid") : T("بخشیدن", "Forgive"));
+    fill(box, err,
+      h("form", { class: "card form", onsubmit: async (e) => {
+        e.preventDefault(); err.textContent = "";
+        try { await api("PUT", `${path}/resale`, { allowed: allowed.checked, credit: credit.checked, price_tb: +price.value || 0 }); toast(t("saved")); draw(); }
+        catch (x) { err.textContent = x.message; }
+      } },
+        h("label", { class: "check" }, allowed, h("span", {}, T("اجازهٔ فروش پنل در ربات خودش", "May sell panels in its own bot"))),
+        h("label", { class: "check" }, credit, h("span", {}, T("اگر کیف پول کافی نبود، فاکتور ۲۴ ساعته (حداکثر یک فاکتور باز)", "If the wallet is short, a 24-hour bill (one open at most)"))),
+        h("label", {}, h("span", {}, T(`قیمت عمدهٔ اختصاصی هر ترابایت (۰ = قیمت کلی: ${tomanTxt(v.resale.price_tb ? 0 : v.wholesale_tb)})`, `Own wholesale per TB (0 = the general price)`)), price),
+        h("div", { class: "mz-badges" },
+          h("span", { class: `badge ${v.on ? "good" : ""}` }, v.on ? T("در رباتش فعال است", "on in its bot") : T("در رباتش فعال نیست", "not on in its bot")),
+          v.has_card ? null : h("span", { class: "badge" }, T("کارتش ثبت نشده", "no card set")),
+          v.locked ? h("span", { class: "badge bad" }, T("قفل: فاکتور پرداخت‌نشده", "locked: unpaid bill")) : null),
+        h("div", { class: "row" }, h("button", { class: "primary", type: "submit" }, t("save")))),
+      h("form", { class: "card form", onsubmit: async (e) => {
+        e.preventDefault(); err.textContent = "";
+        try {
+          const res = await api("POST", `${path}/wallet`, { delta: +amount.value || 0, note: note.value });
+          toast(T(`موجودی: ${tomanTxt(res.wallet)}`, `Balance: ${tomanTxt(res.wallet)}`)); draw();
+        } catch (x) { err.textContent = x.message; }
+      } },
+        h("h3", {}, T("کیف پول", "Wallet"), " · ", tomanTxt(v.wallet)),
+        h("p", { class: "small muted" }, T("نماینده خودش از ربات اصلی با رسید شارژ می‌کند. اینجا می‌توانید دستی اضافه یا کم کنید (عدد منفی = کسر). فاکتور باز با شارژ کافی خودکار پرداخت می‌شود.", "The reseller charges it in the main bot with a receipt. Here you can add or take by hand (negative = take). An open bill is paid automatically once covered.")),
+        h("div", { class: "two" }, h("label", {}, h("span", {}, T("مبلغ (تومان)", "Amount (toman)")), amount), h("label", {}, h("span", {}, T("توضیح", "Note")), note)),
+        h("div", { class: "row" }, h("button", { type: "submit" }, T("ثبت", "Apply"))),
+        walletHistory(v.history)),
+      h("div", { class: "card form" }, h("h3", {}, T("فاکتورها", "Bills")), billRows(v.bills, (b) => h("div", { class: "row tight" }, close(b, true), close(b, false)))));
+  }
+  await draw();
+  openModal(`${T("فروش پنل و کیف پول", "Panel sale and wallet")} · ${r.Name || r.ID}`, box);
+}
+
+// resaleRepCard: the reseller's own prices, wallet and bills.
+function resaleRepCard() {
+  const fa = lang === "fa";
+  const T = (f, e) => (fa ? f : e);
+  const card = h("div", { class: "card form" });
+  const draw = async () => {
+    let v;
+    try { v = await api("GET", "/api/v2/rep/resale"); } catch { card.hidden = true; return; }
+    if (!v.resale.allowed) { card.hidden = true; return; }
+    const on = h("input", { type: "checkbox", checked: !!v.resale.enabled });
+    const ins = {};
+    const err = h("div", { class: "error", role: "alert" });
+    const rows = v.packages.map((p) => {
+      ins[p.id] = h("input", { type: "number", min: String(p.cost), step: "1000", dir: "ltr", value: p.own || "", placeholder: String(p.owner > p.cost ? p.owner : p.cost) });
+      return h("tr", {}, h("td", {}, p.name || `${fmtNum(p.gb)} GB`), h("td", {}, tomanTxt(p.cost)), h("td", {}, ins[p.id]), h("td", { class: "small" }, tomanTxt(p.price - p.cost)));
+    });
+    const pay = (b) => v.wallet >= b.amount ? h("button", { type: "button", onclick: async () => { await guarded(() => api("POST", `/api/v2/rep/resale/bills/${b.id}/pay`)); toast(t("saved")); draw(); } }, T("پرداخت از کیف پول", "Pay from wallet")) : null;
+    fill(card,
+      h("h2", {}, "🏪 ", T("فروش پنل نمایندگی در ربات من", "Selling reseller panels in my bot")),
+      h("p", { class: "small muted" }, T(`مشتری در ربات شما پنل می‌خرد و به کارت شما واریز می‌کند. با تأیید رسید، قیمت عمده (هر ترابایت ${tomanTxt(v.wholesale_tb)}) از کیف پول شما در پنل اصلی کم می‌شود${v.resale.credit ? "؛ اگر کافی نباشد، فاکتور ۲۴ ساعته صادر می‌شود" : ""}. پنل فروخته‌شده زیرمجموعهٔ شما می‌شود.`,
+        `A customer buys a panel in your bot and pays your card. When you approve the receipt, the wholesale price (${tomanTxt(v.wholesale_tb)} per TB) comes off your wallet at the main panel${v.resale.credit ? "; if it is short, a 24-hour bill is opened" : ""}. The panel becomes your sub-seller.`)),
+      h("div", { class: "mz-badges" },
+        h("span", { class: "badge" }, T("کیف پول: ", "Wallet: "), tomanTxt(v.wallet)),
+        v.on ? h("span", { class: "badge good" }, T("در ربات شما فعال است", "on in your bot")) : null,
+        v.has_card ? null : h("span", { class: "badge bad" }, T("اول کارت خود را ثبت کنید", "set your card first")),
+        v.locked ? h("span", { class: "badge bad" }, T("قفل: فاکتور پرداخت‌نشده", "locked: unpaid bill")) : null),
+      v.main_bot ? h("a", { class: "btn", href: `https://t.me/${v.main_bot}?start=wallet`, target: "_blank", rel: "noopener" }, T("➕ شارژ کیف پول در ربات اصلی", "➕ Charge the wallet in the main bot")) : null,
+      h("label", { class: "check" }, on, h("span", {}, T("نمایش در ربات من", "Show in my bot"))),
+      h("div", { class: "table-wrap" }, h("table", {}, h("thead", {}, h("tr", {}, h("th", {}, T("بسته", "Package")), h("th", {}, T("قیمت عمده", "Wholesale")), h("th", {}, T("قیمت فروش شما", "Your price")), h("th", {}, T("سود", "Profit")))), h("tbody", {}, rows))),
+      h("p", { class: "small muted" }, T("قیمت خالی = قیمت فروش پنل اصلی. کمتر از قیمت عمده قبول نمی‌شود.", "Empty = the main panel's price. Below wholesale is refused.")),
+      err,
+      h("div", { class: "row" }, h("button", { class: "primary", type: "button", onclick: async () => {
+        err.textContent = "";
+        const prices = {};
+        for (const [id, el] of Object.entries(ins)) if (+el.value) prices[id] = +el.value;
+        try { await api("PUT", "/api/v2/rep/resale", { enabled: on.checked, prices }); toast(t("saved")); draw(); } catch (x) { err.textContent = x.message; }
+      } }, t("save"))),
+      h("h3", {}, T("فاکتورها", "Bills")), billRows(v.bills, pay), walletHistory(v.history));
+  };
+  draw();
+  return card;
+}
+
 async function viewReps() {
   const fa = lang === "fa";
   const [reps, inbounds, ov] = await Promise.all([api("GET", "/api/v2/admin/reps"), api("GET", "/api/v2/admin/inbounds"), api("GET", "/api/v2/admin/reps/overview").catch(() => [])]);
@@ -5341,6 +5476,7 @@ async function viewReps() {
       item(t("payment"), () => paymentForm(r)),
       item(fa ? "صفحهٔ اشتراک" : "Sub page", () => openModal(`${fa ? "برند و صفحهٔ اشتراک" : "Brand & subscription page"} · ${r.Name || r.ID}`, repBrandCard(`/api/v2/admin/reps/${encodeURIComponent(r.ID)}/brand`))),
       item(fa ? "ربات و کارت" : "Bot & card", () => openModal(`${fa ? "ربات و کارت" : "Bot & card"} · ${r.Name || r.ID}`, h("div", { class: "form" }, repBotCard(`/api/v2/admin/reps/${encodeURIComponent(r.ID)}/bot`), sellerCardCard(`/api/v2/shop/card?seller=${encodeURIComponent(r.ID)}`)))),
+      ...(r.ParentID ? [] : [item(fa ? "🏪 فروش پنل و کیف پول" : "🏪 Panel sale and wallet", () => resaleOwner(r))]),
       item(t("activity"), () => { location.hash = `#/activity?rep=${encodeURIComponent(r.ID)}`; }),
       item(t("edit"), () => repForm(r)),
       item(t("delete"), () => del(r), "bad"));
@@ -6356,9 +6492,9 @@ function viewSettings() {
     owner && ["sub", "link", fa ? "اشتراک مشتری" : "Customer subscription", fa ? "عنوان، نام کانفیگ‌ها و صفحهٔ مشتری" : "Title, config names, customer page", () => [subSettingsCard()]],
     (owner || fullOwner()) && ["panel", "globe", fa ? "آدرس و دسترسی پنل" : "Panel address and access", fa ? "HTTPS، مسیر مخفی، IPهای مجاز" : "HTTPS, secret path, trusted IPs", () => [fullOwner() ? panelNameCard() : null, fullOwner() ? panelHTTPSCard() : null, fullOwner() ? panelPathCard() : null, owner ? trustedCard() : null]],
     me.role === "rep" && ["repsub", "link", fa ? "صفحهٔ اشتراک من" : "My subscription page", fa ? "برند، لوگو و آدرس اختصاصی" : "Brand, logo and own address", () => [repBrandCard("/api/v2/rep/brand")]],
-    me.role === "rep" && ["repbot", "bell", fa ? "ربات فروش و کارت من" : "My sales bot and card", fa ? "ربات تلگرام اختصاصی، کارت به کارت" : "Own Telegram bot, card payment", () => [mirzaCard("/api/v2/rep/pg-api", true), repBotCard("/api/v2/rep/bot"), botLookCard("/api/v2/rep/bot"), sellerCardCard("/api/v2/shop/card")]],
+    me.role === "rep" && ["repbot", "bell", fa ? "ربات فروش و کارت من" : "My sales bot and card", fa ? "ربات تلگرام اختصاصی، کارت به کارت" : "Own Telegram bot, card payment", () => [mirzaCard("/api/v2/rep/pg-api", true), resaleRepCard(), repBotCard("/api/v2/rep/bot"), botLookCard("/api/v2/rep/bot"), sellerCardCard("/api/v2/shop/card")]],
     ["security", "staff", fa ? "امنیت حساب" : "Account security", fa ? "رمز، ورود دومرحله‌ای، نشست‌ها" : "Password, two-step sign-in, sessions", () => [pwForm, tfaCard(), sessionsCard()]],
-    (fullOwner() || owner || tgCard) && ["telegram", "bell", fa ? "تلگرام" : "Telegram", fa ? "ربات، هشدارها، فروش و دعوت" : "Bot, alerts, sales and referrals", () => [fullOwner() ? telegramBotCard() : null, fullOwner() ? botLookCard("/api/v2/admin/telegram") : null, owner ? tgCommerceCard() : null, fullOwner() ? mirzaCard("/api/v2/admin/pg-api", false) : null, tgCard]],
+    (fullOwner() || owner || tgCard) && ["telegram", "bell", fa ? "تلگرام" : "Telegram", fa ? "ربات، هشدارها، فروش و دعوت" : "Bot, alerts, sales and referrals", () => [fullOwner() ? telegramBotCard() : null, fullOwner() ? botLookCard("/api/v2/admin/telegram") : null, owner ? tgCommerceCard() : null, owner ? resaleWholesaleCard() : null, fullOwner() ? mirzaCard("/api/v2/admin/pg-api", false) : null, tgCard]],
     fullOwner() && ["backup", "traffic", fa ? "پشتیبان و انتقال" : "Backup and migration", fa ? "دانلود، بازگردانی، ورود از پنل‌های دیگر" : "Download, restore, import from other panels", () => [backupCard, migrateCard(), foreignCard()]],
     ["look", "moon", fa ? "زبان و ظاهر" : "Language and look", fa ? "زبان، تم، خروج" : "Language, theme, sign out", () => [lookCard]],
   ].filter(Boolean);
