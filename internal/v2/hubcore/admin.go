@@ -267,7 +267,9 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 					out["manage_products"] = mp && rp.ParentID == ""
 					out["sub_seller"] = rp.ParentID != ""
 					out["legacy"] = rp.ParentID == "" && s.LegacyOf(r.Context(), rp.ID).Allowed
-					out["resale"] = rp.ParentID == "" && s.ResaleOf(r.Context(), rp.ID).Allowed
+					// Taken back with a bill still open: the page stays, to pay it.
+					openBills, _ := s.RepBills(r.Context(), rp.ID, true, 1)
+					out["resale"] = rp.ParentID == "" && (s.ResaleOf(r.Context(), rp.ID).Allowed || len(openBills) > 0)
 				}
 			}
 		}

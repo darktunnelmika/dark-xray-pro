@@ -150,4 +150,12 @@ func TestLegacyUsersMoveAndPayForUse(t *testing.T) {
 	if err := s.StartLegacyImport(ctx, "ali", []string{link}); err == nil {
 		t.Fatal("no more links after the move")
 	}
+	// Taking the permission back does not cut users already moved.
+	_ = s.PutLegacyAllowed(ctx, "ali", false)
+	if want := s.legacyWanted(ctx); want[47249] == "" {
+		t.Fatal("a move done keeps its ports")
+	}
+	if !legacyReserved(22) || !legacyReserved(2097) || legacyReserved(47249) {
+		t.Fatal("reserved ports")
+	}
 }

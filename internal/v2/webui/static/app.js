@@ -5501,6 +5501,7 @@ async function viewLegacy() {
       h("div", { class: "mz-copy" }, h("code", { dir: "ltr" }, ip), h("button", { type: "button", class: "ghost", onclick: () => copy(ip) }, T("کپی", "Copy"))),
       h("p", { class: "small muted" }, T(`بعد از تغییر، «بررسی» را بزنید. از همان لحظه لینک‌های ساب قدیمی از این پنل جواب می‌دهند و کانفیگ‌های قدیمی (پورت‌های ${(v.fwd_ports || []).join("، ") || "—"}) تا ۳ روز به سرور قبلی رد می‌شوند تا کسی قطع نشود. سرور قبلی را تا آن موقع روشن نگه دارید.`,
         `After the change press “Check”. From then on the old links answer from here, and the old configs (ports ${(v.fwd_ports || []).join(", ") || "—"}) are passed to the old server for 3 days so nobody is cut. Keep the old server on until then.`)),
+      Object.keys(v.port_errors || {}).length ? h("p", { class: "error" }, T("این پورت‌ها روی این سرور قابل استفاده نیستند و کاربرهایشان تا آپدیت ساب قطع می‌شوند: ", "These ports cannot be used on this server; their users are cut until they update: "), Object.entries(v.port_errors).map(([p, e]) => `${p} (${e})`).join("، ")) : null,
       why, err,
       h("div", { class: "row" },
         h("button", { class: "primary", onclick: async () => {
@@ -5644,7 +5645,7 @@ async function viewResale() {
 async function viewResaleRep() {
   const fa = lang === "fa";
   const T = (f, e) => (fa ? f : e);
-  const [x, v] = await Promise.all([api("GET", "/api/v2/rep/resale/panels"), api("GET", "/api/v2/rep/resale")]);
+  const [x, v] = await Promise.all([api("GET", "/api/v2/rep/resale/panels").catch(() => ({ panels: [], stats: {} })), api("GET", "/api/v2/rep/resale")]);
   const panels = x.panels || [], st = x.stats || {};
   const creds = (res) => {
     const text = `${T("آدرس پنل", "Panel")}: ${res.address}\n${T("نام کاربری", "Username")}: ${res.username}\n${T("رمز", "Password")}: ${res.password}`;

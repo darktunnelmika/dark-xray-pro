@@ -561,6 +561,9 @@ func (s *Store) importLegacyLink(ctx context.Context, rep, link string, mu *sync
 				}
 			}
 		}
+		if !legacyLocalOK && !publicIP(net.ParseIP(ips[0])) {
+			return false, errors.New("the domain points to a private address")
+		}
 		lr.Domain, lr.SubPort, lr.SubTLS, lr.OldIP = ls.Host, ls.Port, ls.TLS, ips[0]
 	}
 	// Config ports on the same domain (or the old server's address) are
@@ -568,7 +571,7 @@ func (s *Store) importLegacyLink(ctx context.Context, rep, link string, mu *sync
 	ports := lr.FwdPorts
 	for _, c := range ls.Configs {
 		if c[0] == lr.Domain || c[0] == lr.OldIP {
-			if n, err := strconv.Atoi(c[1]); err == nil && n > 0 && n < 65536 && n != lr.SubPort {
+			if n, err := strconv.Atoi(c[1]); err == nil && n > 0 && n < 65536 && n != lr.SubPort && !contains(intsToStr(ports), c[1]) && len(ports) < legacyMaxPorts {
 				ports = append(ports, n)
 			}
 		}
@@ -703,6 +706,11 @@ func (s *Store) LegacyStatusOf(ctx context.Context, rep string) LegacyStatus {
 	_ = s.ro.QueryRowContext(ctx, `SELECT COUNT(*),COALESCE(SUM(fetched_unix>0),0),COALESCE(SUM(credit_off),0),COALESCE(SUM(billed),0) FROM legacy_clients WHERE rep_id=?`, rep).
 		Scan(&v.Clients, &v.Updated, &v.Off, &v.Billed)
 	_ = s.ro.QueryRowContext(ctx, `SELECT status,last_error FROM acme_certs WHERE id=?`, "legacy-"+rep).Scan(&v.Cert, &v.CertError)
+	for _, p := range append([]int{v.SubPort}, v.FwdPorts...) {
+		if p > 0 && legacyReserved(p) {
+			v.PortErr[strconv.Itoa(p)] = "this port is used by the panel server itself"
+		}
+	}
 	legacyNetMu.Lock()
 	for p, e := range legacyPortErr {
 		if p == v.SubPort || contains(intsToStr(v.FwdPorts), strconv.Itoa(p)) {
@@ -904,10 +912,24 @@ func (s *Store) RunLegacy(ctx context.Context, fallback tls.Certificate) {
 	}
 }
 
+// legacyMaxPorts caps the config ports one move passes through.
+const legacyMaxPorts = 10
+
+// legacyReserved are ports the HUB machine uses itself; an old panel's port
+// never takes one of them.
+func legacyReserved(p int) bool {
+	switch p {
+	case 22, 53, 80, 443, 2087, 2097, 28080, 28443:
+		return true
+	}
+	return p < 1024 && p != 443
+}
+
 // legacyWanted is port → what should listen there.
 func (s *Store) legacyWanted(ctx context.Context) map[int]string {
 	want := map[int]string{}
-	rows, err := s.ro.QueryContext(ctx, `SELECT sub_port,sub_tls,old_ip,fwd_ports,fwd_until FROM legacy_reps WHERE allowed=1 AND step=2 ORDER BY dns_unix`)
+	// Moves already done keep working even if the permission is taken back.
+	rows, err := s.ro.QueryContext(ctx, `SELECT sub_port,sub_tls,old_ip,fwd_ports,fwd_until FROM legacy_reps WHERE step=2 ORDER BY dns_unix`)
 	if err != nil {
 		return want
 	}
@@ -925,12 +947,12 @@ func (s *Store) legacyWanted(ctx context.Context) map[int]string {
 		if tlsOn {
 			k = "sub:tls"
 		}
-		if _, taken := want[port]; !taken && port > 0 {
+		if _, taken := want[port]; !taken && port > 0 && !legacyReserved(port) {
 			want[port] = k
 		}
-		if now < until && net.ParseIP(oldIP) != nil {
+		if ip := net.ParseIP(oldIP); now < until && ip != nil && (legacyLocalOK || publicIP(ip)) {
 			for _, p := range splitPorts(ports) {
-				if _, taken := want[p]; !taken {
+				if _, taken := want[p]; !taken && !legacyReserved(p) {
 					want[p] = "fwd:" + net.JoinHostPort(oldIP, strconv.Itoa(p))
 				}
 			}

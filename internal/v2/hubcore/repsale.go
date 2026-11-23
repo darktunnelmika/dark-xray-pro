@@ -193,6 +193,9 @@ func (s *Store) CreateRepOrder(ctx context.Context, seller string, chat int64, b
 // createRepOrder: manual is a reseller selling from its panel (resale.go
 // SellPanel): no bot, no card, no Telegram account; the order is paid.
 func (s *Store) createRepOrder(ctx context.Context, seller string, chat int64, buyerName, repID, name, pkgID string, manual bool) (RepOrder, error) {
+	if r := []rune(strings.TrimSpace(buyerName)); len(r) > 64 {
+		buyerName = string(r[:64])
+	}
 	sale := s.RepSale(ctx)
 	switch {
 	case manual:
@@ -314,6 +317,9 @@ func (s *Store) ApproveRepOrder(ctx context.Context, actor, seller string, id in
 		return RepOrderResult{}, e
 	}
 	res := RepOrderResult{Order: o}
+	if o.Seller != "" && !s.ResaleOf(ctx, o.Seller).Allowed {
+		return undo(fmt.Errorf("%w: panel sale is no longer allowed for this reseller", ErrPolicy))
+	}
 	if o.Kind == "wallet" {
 		bal, paid, err := s.RepWalletAdjust(ctx, actor, o.RepID, o.Price, fmt.Sprintf("top-up #%d", o.ID))
 		if err != nil {
