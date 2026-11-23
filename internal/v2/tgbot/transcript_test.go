@@ -114,3 +114,67 @@ func TestCustomerTranscript(t *testing.T) {
 	press(me, "آموزش")
 	_ = os.WriteFile(out, []byte(sb.String()), 0o644)
 }
+
+// TestResellerTranscript opens every button of a reseller's home in its own
+// bot and writes what each shows (review aid; DARK_TRANSCRIPT2).
+func TestResellerTranscript(t *testing.T) {
+	out := os.Getenv("DARK_TRANSCRIPT2")
+	if out == "" {
+		t.Skip()
+	}
+	s, err := hubcore.Open(filepath.Join(t.TempDir(), "v2.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	ctx := context.Background()
+	_, _ = s.CreateNode(ctx, "n1", "N")
+	_ = s.PutInbound(ctx, "in1", "n1", []byte(`{"protocol":"vless","port":443,"settings":{}}`), true)
+	_ = s.PutRep(ctx, hubcore.Rep{ID: "ali", Name: "Ali", Enabled: true})
+	_ = s.AdjustCredit(ctx, "o", "ali", 500<<30, 0, "")
+	const aliChat = int64(7001)
+	_ = s.SetTgRepOwners(ctx, "ali", []int64{aliChat})
+	_ = s.PutCardFor(ctx, "ali", hubcore.CardInfo{Number: "6037000033334444", Holder: "Ali"})
+	_ = s.PutRepSale(ctx, hubcore.RepSale{Packages: []hubcore.RepPackage{{ID: "tb", Name: "1 TB", GB: 1024, Price: 2_500_000, Inbounds: []string{"in1"}}}, WholesaleTB: 1_300_000})
+	_ = s.PutResaleOwner(ctx, "ali", true, true, 0)
+	api := &fakeAPI{}
+	b := &Bot{Store: s, API: api, Owners: map[int64]bool{}, Seller: "ali", SubBase: "https://panel.example", Now: time.Now, Logf: t.Logf}
+	var sb strings.Builder
+	dump := func(step string) []sent {
+		l := api.take()
+		fmt.Fprintf(&sb, "\n===== %s\n", step)
+		for _, m := range l {
+			fmt.Fprintf(&sb, "--> %d%s:\n%s\n", m.chat, map[bool]string{true: " [photo]"}[m.photo], m.text)
+			if m.kb != nil {
+				for _, r := range m.kb.Rows {
+					var bs []string
+					for _, x := range r {
+						bs = append(bs, fmt.Sprintf("[%s|%s]", x.Text, x.Data+x.URL))
+					}
+					fmt.Fprintf(&sb, "    %s\n", strings.Join(bs, " "))
+				}
+			}
+		}
+		return l
+	}
+	b.Handle(ctx, msg(aliChat, "/start"))
+	home := dump("reseller /start")
+	var btns []Button
+	for _, m := range home {
+		if m.kb != nil {
+			for _, r := range m.kb.Rows {
+				btns = append(btns, r...)
+			}
+		}
+	}
+	for _, x := range btns {
+		if x.Data == "" {
+			continue
+		}
+		b.Handle(ctx, cb(aliChat, x.Data))
+		dump("reseller presses «" + x.Text + "»")
+	}
+	b.Handle(ctx, msg(8001, "/start"))
+	dump("a customer of the reseller /start")
+	_ = os.WriteFile(out, []byte(sb.String()), 0o644)
+}
