@@ -28,7 +28,7 @@ func TestLegacyUsersMoveAndPayForUse(t *testing.T) {
 	_ = s.AdjustCredit(ctx, "o", "ali", 5<<30, 0, "")
 	const id = "11111111-2222-3333-4444-555555555555"
 	old := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/sub/abcdefgh123" {
+		if r.URL.Path != "/sub/abcdefgh12345678" {
 			http.NotFound(w, r)
 			return
 		}
@@ -37,7 +37,7 @@ func TestLegacyUsersMoveAndPayForUse(t *testing.T) {
 		fmt.Fprint(w, base64.StdEncoding.EncodeToString([]byte(body)))
 	}))
 	defer old.Close()
-	link := old.URL + "/sub/abcdefgh123"
+	link := old.URL + "/sub/abcdefgh12345678"
 	if err := s.StartLegacyImport(ctx, "ali", []string{link}); !errors.Is(err, ErrPolicy) {
 		t.Fatal("not allowed yet", err)
 	}
@@ -65,7 +65,7 @@ func TestLegacyUsersMoveAndPayForUse(t *testing.T) {
 			c = x
 		}
 	}
-	if c.RepID != "ali" || !c.Legacy || c.SubToken != "abcdefgh123" || c.UUID != id || c.VolumeBytes != 10<<30 || c.Usage.Up+c.Usage.Down != 3<<30 || c.ExpiresUnix == 0 {
+	if c.RepID != "ali" || !c.Legacy || c.SubToken != "abcdefgh12345678" || c.UUID != id || c.VolumeBytes != 10<<30 || c.Usage.Up+c.Usage.Down != 3<<30 || c.ExpiresUnix == 0 {
 		t.Fatalf("imported: %+v", c)
 	}
 	lr := s.LegacyOf(ctx, "ali")
@@ -119,20 +119,14 @@ func TestLegacyUsersMoveAndPayForUse(t *testing.T) {
 	// The old address answers with the subscription here.
 	h := s.legacySubHandler()
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest("GET", "https://127.0.0.1:2096/sub/abcdefgh123", nil)
+	req := httptest.NewRequest("GET", "https://127.0.0.1:2096/sub/abcdefgh12345678", nil)
 	req.Header.Set("User-Agent", "v2rayNG/1.9")
 	h.ServeHTTP(rec, req)
-	if rec.Code != 200 {
-		var em string
-		e1 := s.ro.QueryRow(`SELECT c.email FROM clients c JOIN legacy_clients l ON l.email=c.email JOIN legacy_reps lr ON lr.rep_id=l.rep_id WHERE c.sub_token=? AND lr.domain=?`, "abcdefgh123", "127.0.0.1").Scan(&em)
-		e2, e3 := s.EmailBySubToken(ctx, "abcdefgh123")
-		t.Log("diag", em, e1, e2, e3)
-	}
 	if rec.Code != 200 || s.LegacyStatusOf(ctx, "ali").Updated != 1 {
 		t.Fatal("old link", rec.Code, rec.Body.String())
 	}
 	rec = httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest("GET", "https://other.example:2096/sub/abcdefgh123", nil))
+	h.ServeHTTP(rec, httptest.NewRequest("GET", "https://other.example:2096/sub/abcdefgh12345678", nil))
 	if rec.Code != 404 {
 		t.Fatal("only on its own domain")
 	}

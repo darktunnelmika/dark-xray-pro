@@ -229,6 +229,9 @@ func parseLegacyLink(raw string) (*url.URL, string, error) {
 	if !subIDRE.MatchString(tok) {
 		return nil, "", errors.New("the address has no subscription id")
 	}
+	if len(tok) < 16 {
+		return nil, "", errors.New("the subscription id is shorter than 16 characters")
+	}
 	return u, tok, nil
 }
 
