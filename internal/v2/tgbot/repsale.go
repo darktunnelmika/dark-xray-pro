@@ -457,9 +457,9 @@ func (b *Bot) repSaleConfig(ctx context.Context, chat int64, args []string) {
 		if err := b.Store.PutRepSale(ctx, sale); err != nil {
 			msg := esc(faErr(err))
 			switch {
-			case strings.Contains(msg, "define a package first"):
+			case strings.Contains(err.Error(), "define a package first"):
 				msg = "اول یک بسته تعریف کنید."
-			case strings.Contains(msg, "payment card"):
+			case strings.Contains(err.Error(), "payment card"):
 				msg = "اول شماره کارت پرداخت را در پنل (فروشگاه تلگرام) ثبت کنید."
 			}
 			b.send(ctx, chat, "ذخیره نشد: "+msg, &Keyboard{Rows: [][]Button{back(backTo)}})
