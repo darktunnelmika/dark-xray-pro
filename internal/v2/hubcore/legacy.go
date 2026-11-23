@@ -218,7 +218,6 @@ var legacyClient = &http.Client{
 	CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 }
 
-
 // parseLegacyLink checks a subscription address and splits it.
 func parseLegacyLink(raw string) (*url.URL, string, error) {
 	u, err := url.Parse(strings.TrimSpace(raw))

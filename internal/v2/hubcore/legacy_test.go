@@ -122,6 +122,12 @@ func TestLegacyUsersMoveAndPayForUse(t *testing.T) {
 	req := httptest.NewRequest("GET", "https://127.0.0.1:2096/sub/abcdefgh123", nil)
 	req.Header.Set("User-Agent", "v2rayNG/1.9")
 	h.ServeHTTP(rec, req)
+	if rec.Code != 200 {
+		var em string
+		e1 := s.ro.QueryRow(`SELECT c.email FROM clients c JOIN legacy_clients l ON l.email=c.email JOIN legacy_reps lr ON lr.rep_id=l.rep_id WHERE c.sub_token=? AND lr.domain=?`, "abcdefgh123", "127.0.0.1").Scan(&em)
+		e2, e3 := s.EmailBySubToken(ctx, "abcdefgh123")
+		t.Log("diag", em, e1, e2, e3)
+	}
 	if rec.Code != 200 || s.LegacyStatusOf(ctx, "ali").Updated != 1 {
 		t.Fatal("old link", rec.Code, rec.Body.String())
 	}
