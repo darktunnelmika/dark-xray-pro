@@ -140,3 +140,46 @@ func TestResaleWalletBillsAndLock(t *testing.T) {
 		t.Fatal("forgiven bill", open)
 	}
 }
+
+func TestResellerSellsFromItsPanel(t *testing.T) {
+	s, err := Open(filepath.Join(t.TempDir(), "v2.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	ctx := context.Background()
+	_, _ = s.CreateNode(ctx, "n1", "N")
+	_ = s.PutInbound(ctx, "in1", "n1", []byte(`{"protocol":"vless","port":443,"settings":{}}`), true)
+	_ = s.PutRepSale(ctx, RepSale{Packages: []RepPackage{{ID: "tb", GB: 1024, Price: 2_500_000, Inbounds: []string{"in1"}}}, WholesaleTB: 1_300_000})
+	_ = s.PutRep(ctx, Rep{ID: "ali", Name: "Ali", Enabled: true})
+	if _, err := s.SellPanel(ctx, "ali", "ali", "", "shop-x", "Shop X", "tb"); err == nil {
+		t.Fatal("not allowed")
+	}
+	_ = s.PutResaleOwner(ctx, "ali", true, false, 0) // no card and no bot needed from the panel
+	if _, err := s.SellPanel(ctx, "ali", "ali", "", "shop-x", "Shop X", "tb"); !errors.Is(err, ErrFunds) {
+		t.Fatal("no wallet", err)
+	}
+	_, _, _ = s.RepWalletAdjust(ctx, "owner", "ali", 3_000_000, "")
+	res, err := s.SellPanel(ctx, "ali", "ali", "", "shop-x", "Shop X", "tb")
+	if err != nil || res.Password == "" || !s.IsSellerOf(ctx, "ali", "shop-x") || s.RepCredit(ctx, "shop-x") != 1024<<30 {
+		t.Fatal("sold", res, err)
+	}
+	if _, err := s.SellPanel(ctx, "ali", "ali", "shop-x", "", "", "tb"); err != nil || s.RepCredit(ctx, "shop-x") != 2048<<30 || s.RepWallet(ctx, "ali") != 400_000 {
+		t.Fatal("top-up", err, s.RepWallet(ctx, "ali"))
+	}
+	// An ordinary sub-seller is not a sold panel.
+	_ = s.PutSeller(ctx, "ali", Rep{ID: "sub-y", Name: "Y", Enabled: true}, "", "")
+	list, st, err := s.SoldPanels(ctx, "ali")
+	if err != nil || len(list) != 1 || list[0].ID != "shop-x" || list[0].TopUps != 1 || list[0].Paid != 5_000_000 || st.MonthSales != 2 || st.MonthCost != 2_600_000 {
+		t.Fatalf("sold panels %+v %+v %v", list, st, err)
+	}
+	if err := s.SetSoldPanelEnabled(ctx, "ali", "shop-x", false); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetSoldPanelEnabled(ctx, "bob", "shop-x", false); err == nil {
+		t.Fatal("another reseller's panel")
+	}
+	if l, _ := s.ResaleOverview(ctx); len(l) != 1 || l[0].Stats.Panels != 1 || l[0].Stats.Active != 0 {
+		t.Fatalf("overview %+v", l)
+	}
+}

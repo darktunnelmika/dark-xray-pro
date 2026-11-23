@@ -267,6 +267,7 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 					out["manage_products"] = mp && rp.ParentID == ""
 					out["sub_seller"] = rp.ParentID != ""
 					out["legacy"] = rp.ParentID == "" && s.LegacyOf(r.Context(), rp.ID).Allowed
+					out["resale"] = rp.ParentID == "" && s.ResaleOf(r.Context(), rp.ID).Allowed
 				}
 			}
 		}
@@ -1147,6 +1148,7 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 	}))
 	// Panels a reseller sells in its own bot: wallet, bills, prices.
 	resaleRoutes(s, mux, guard, member)
+	resalePageRoutes(s, mux, guard, member)
 	// Old users brought by their subscription links (legacy.go).
 	legacyRoutes(s, mux, guard, member)
 	// Connecting a PasarGuard-made sales bot (Mirza): the owner's, a reseller's own.

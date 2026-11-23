@@ -7,7 +7,10 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"sort"
 	"strconv"
+	"strings"
+	"time"
 )
 
 // Panel resale: a reseller the owner allows sells panels (sub-sellers under
@@ -657,4 +660,270 @@ func resaleRoutes(s *Store, mux *docMux, guard, member func(http.HandlerFunc) ht
 		err := s.PayRepBill(r.Context(), p.RepID, id)
 		reply(w, map[string]bool{"ok": err == nil}, err)
 	}))
+}
+
+// ---- the reseller's panel-sale page ----
+
+// SellPanel is a reseller selling from its panel (no bot): a new panel
+// (target "" and name) or a top-up of one of its panels, paid like a bot
+// sale from its wallet or a bill.
+func (s *Store) SellPanel(ctx context.Context, actor, rep, target, name, buyer, pkgID string) (RepOrderResult, error) {
+	o, err := s.createRepOrder(ctx, rep, 0, buyer, target, name, pkgID, true)
+	if err != nil {
+		return RepOrderResult{}, err
+	}
+	res, err := s.ApproveRepOrder(ctx, actor, rep, o.ID)
+	if err != nil {
+		_, _ = s.db.ExecContext(ctx, `UPDATE rep_orders SET status='cancelled', decided_unix=? WHERE id=?`, s.now().Unix(), o.ID)
+		return RepOrderResult{}, err
+	}
+	return res, nil
+}
+
+// SoldPanel is one panel a reseller sold, with what it holds.
+type SoldPanel struct {
+	ID      string `json:"id"`
+	Name    string `json:"name"`
+	Enabled bool   `json:"enabled"`
+	Credit  int64  `json:"credit"` // bytes
+	Units   int64  `json:"units"`
+	Clients int    `json:"clients"`
+	Active  int    `json:"active"`
+	Used    int64  `json:"used"`
+	Sold    int64  `json:"sold"`    // unix of the sale
+	TopUps  int    `json:"top_ups"` // packages bought after
+	Paid    int64  `json:"paid"`    // all its customer paid
+	Cost    int64  `json:"cost"`    // all the reseller paid the owner for it
+	Login   string `json:"login"`
+	LastUse int64  `json:"last_use"`
+}
+
+// ResaleStats sums a reseller's (or, rep "", everyone's) panel sales.
+type ResaleStats struct {
+	Panels     int   `json:"panels"`
+	Active     int   `json:"active"`
+	Credit     int64 `json:"credit"`
+	MonthSales int   `json:"month_sales"`
+	MonthPaid  int64 `json:"month_paid"`
+	MonthCost  int64 `json:"month_cost"`
+}
+
+func monthStart(t time.Time) int64 {
+	return time.Date(t.Year(), t.Month(), 1, 0, 0, 0, 0, t.Location()).Unix()
+}
+
+// SoldPanels lists the panels a reseller sold (in its bot or its panel).
+func (s *Store) SoldPanels(ctx context.Context, rep string) ([]SoldPanel, ResaleStats, error) {
+	var st ResaleStats
+	rows, err := s.ro.QueryContext(ctx, `SELECT o.rep_id, MIN(CASE WHEN o.kind='new' THEN o.decided_unix END), SUM(o.kind='topup'), SUM(o.price), SUM(o.cost)
+FROM rep_orders o WHERE o.seller=? AND o.status='approved' AND o.kind IN ('new','topup')
+GROUP BY o.rep_id HAVING SUM(o.kind='new')>0`, rep)
+	if err != nil {
+		return nil, st, err
+	}
+	sold := map[string]*SoldPanel{}
+	for rows.Next() {
+		var p SoldPanel
+		var at sql.NullInt64
+		if err := rows.Scan(&p.ID, &at, &p.TopUps, &p.Paid, &p.Cost); err != nil {
+			rows.Close()
+			return nil, st, err
+		}
+		p.Sold = at.Int64
+		sold[p.ID] = &p
+	}
+	rows.Close()
+	subs, err := s.Sellers(ctx, rep)
+	if err != nil {
+		return nil, st, err
+	}
+	out := []SoldPanel{}
+	for _, r := range subs {
+		p, ok := sold[r.ID]
+		if !ok {
+			continue
+		}
+		p.Name, p.Enabled, p.Credit, p.Units, p.Clients, p.Used = r.Name, r.Enabled, r.VolumeCredit, r.UnlimitedUnits, r.Clients, r.UsedBytes
+		_ = s.ro.QueryRowContext(ctx, `SELECT COUNT(*), COALESCE(MAX(u.last_seen_unix),0) FROM clients c LEFT JOIN client_usage u ON u.email=c.email WHERE c.rep_id=? AND c.enabled=1`, r.ID).Scan(&p.Active, &p.LastUse)
+		if l := s.RepLogins(ctx, r.ID); len(l) > 0 {
+			p.Login = l[0]
+		}
+		st.Panels++
+		if p.Enabled {
+			st.Active++
+		}
+		st.Credit += p.Credit
+		out = append(out, *p)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Sold > out[j].Sold })
+	_ = s.ro.QueryRowContext(ctx, `SELECT COUNT(*),COALESCE(SUM(price),0),COALESCE(SUM(cost),0) FROM rep_orders WHERE seller=? AND status='approved' AND kind IN ('new','topup') AND decided_unix>=?`,
+		rep, monthStart(s.now())).Scan(&st.MonthSales, &st.MonthPaid, &st.MonthCost)
+	return out, st, nil
+}
+
+// SetSoldPanelEnabled switches one of the reseller's panels on or off.
+func (s *Store) SetSoldPanelEnabled(ctx context.Context, rep, id string, on bool) error {
+	if !s.IsSellerOf(ctx, rep, id) {
+		return ErrNotFound
+	}
+	_, err := s.db.ExecContext(ctx, `UPDATE reps SET enabled=? WHERE id=?`, on, id)
+	return err
+}
+
+// ResaleRepRow is one reseller on the owner's panel-sale page.
+type ResaleRepRow struct {
+	ID       string      `json:"id"`
+	Name     string      `json:"name"`
+	Allowed  bool        `json:"allowed"`
+	On       bool        `json:"on"`
+	Credit   bool        `json:"credit"`
+	PriceTB  int64       `json:"price_tb"`
+	Wallet   int64       `json:"wallet"`
+	OpenBill int64       `json:"open_bill"`
+	Overdue  bool        `json:"overdue"`
+	Stats    ResaleStats `json:"stats"`
+}
+
+// ResaleOverview lists the resellers allowed to sell panels.
+func (s *Store) ResaleOverview(ctx context.Context) ([]ResaleRepRow, error) {
+	reps, err := s.Reps(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := []ResaleRepRow{}
+	for _, r := range reps {
+		rs := s.ResaleOf(ctx, r.ID)
+		if !rs.Allowed || r.ParentID != "" {
+			continue
+		}
+		row := ResaleRepRow{ID: r.ID, Name: r.Name, Allowed: true, On: s.ResaleOn(ctx, r.ID), Credit: rs.Credit, PriceTB: rs.PriceTB, Wallet: s.RepWallet(ctx, r.ID), Overdue: s.RepLocked(ctx, r.ID)}
+		_ = s.ro.QueryRowContext(ctx, `SELECT COALESCE(SUM(amount),0) FROM rep_bills WHERE rep_id=? AND status='open'`, r.ID).Scan(&row.OpenBill)
+		_, row.Stats, _ = s.SoldPanels(ctx, r.ID)
+		out = append(out, row)
+	}
+	return out, nil
+}
+
+// PendingWalletOrders are top-ups waiting for the owner.
+func (s *Store) PendingWalletOrders(ctx context.Context) ([]RepOrder, error) {
+	rows, err := s.ro.QueryContext(ctx, `SELECT `+repOrderCols+` FROM rep_orders WHERE kind='wallet' AND status='pending' ORDER BY id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []RepOrder{}
+	for rows.Next() {
+		o, err := scanRepOrder(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, o)
+	}
+	return out, rows.Err()
+}
+
+func resalePageRoutes(s *Store, mux *docMux, guard, member func(http.HandlerFunc) http.HandlerFunc) {
+	mux.HandleFunc("GET /api/v2/admin/resale", guard(func(w http.ResponseWriter, r *http.Request) {
+		reps, err := s.ResaleOverview(r.Context())
+		pend, _ := s.PendingWalletOrders(r.Context())
+		reply(w, map[string]any{"sale": s.RepSale(r.Context()), "reps": reps, "pending": pend}, err)
+	}))
+	mux.HandleFunc("GET /api/v2/admin/reps/{id}/panels", guard(func(w http.ResponseWriter, r *http.Request) {
+		list, st, err := s.SoldPanels(r.Context(), r.PathValue("id"))
+		reply(w, map[string]any{"panels": list, "stats": st}, err)
+	}))
+	mux.HandleFunc("POST /api/v2/admin/rep-orders/{oid}/{act}", guard(func(w http.ResponseWriter, r *http.Request) {
+		id, _ := strconv.ParseInt(r.PathValue("oid"), 10, 64)
+		o, err := s.RepOrderByID(r.Context(), id)
+		if err != nil || o.Kind != "wallet" {
+			reply(w, nil, ErrNotFound)
+			return
+		}
+		switch r.PathValue("act") {
+		case "approve":
+			res, err := s.ApproveRepOrder(r.Context(), who(r).User, "", id)
+			if err == nil {
+				s.tell(r.Context(), o.Chat, fmt.Sprintf("✅ کیف پول شما %s تومان شارژ شد. موجودی: %s تومان.", thousands(o.Price), thousands(res.Wallet)))
+			}
+			reply(w, map[string]any{"ok": err == nil, "wallet": res.Wallet}, err)
+		case "reject":
+			_, err := s.RejectRepOrder(r.Context(), who(r).User, id)
+			if err == nil {
+				s.tell(r.Context(), o.Chat, fmt.Sprintf("❌ رسید شارژ کیف پول #%d تأیید نشد. اگر اشتباهی شده، با پشتیبانی در تماس باشید.", id))
+			}
+			reply(w, map[string]bool{"ok": err == nil}, err)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	rep := func(f func(w http.ResponseWriter, r *http.Request, rep string)) http.HandlerFunc {
+		return member(func(w http.ResponseWriter, r *http.Request) {
+			p := who(r)
+			if p.Role != "rep" || s.IsSubSeller(r.Context(), p.RepID) || !s.ResaleOf(r.Context(), p.RepID).Allowed {
+				http.NotFound(w, r)
+				return
+			}
+			f(w, r, p.RepID)
+		})
+	}
+	mux.HandleFunc("GET /api/v2/rep/resale/panels", rep(func(w http.ResponseWriter, r *http.Request, id string) {
+		list, st, err := s.SoldPanels(r.Context(), id)
+		reply(w, map[string]any{"panels": list, "stats": st}, err)
+	}))
+	mux.HandleFunc("POST /api/v2/rep/resale/sell", rep(func(w http.ResponseWriter, r *http.Request, id string) {
+		var in struct {
+			Target  string `json:"target"`
+			Name    string `json:"name"`
+			Buyer   string `json:"buyer"`
+			Package string `json:"package"`
+		}
+		if !decode(w, r, &in) {
+			return
+		}
+		res, err := s.SellPanel(r.Context(), who(r).User, id, in.Target, in.Name, in.Buyer, in.Package)
+		reply(w, map[string]any{"ok": err == nil, "username": res.Order.RepID, "password": res.Password, "bill": res.Bill, "cost": res.Order.Cost, "address": miniBase}, err)
+	}))
+	mux.HandleFunc("POST /api/v2/rep/resale/panels/{pid}/enabled", rep(func(w http.ResponseWriter, r *http.Request, id string) {
+		var in struct {
+			Enabled bool `json:"enabled"`
+		}
+		if !decode(w, r, &in) {
+			return
+		}
+		err := s.SetSoldPanelEnabled(r.Context(), id, r.PathValue("pid"), in.Enabled)
+		reply(w, map[string]bool{"ok": err == nil}, err)
+	}))
+	mux.HandleFunc("POST /api/v2/rep/resale/panels/{pid}/password", rep(func(w http.ResponseWriter, r *http.Request, id string) {
+		pid := r.PathValue("pid")
+		if !s.IsSellerOf(r.Context(), id, pid) {
+			reply(w, nil, ErrNotFound)
+			return
+		}
+		user := pid
+		if l := s.RepLogins(r.Context(), pid); len(l) > 0 {
+			user = l[0]
+		}
+		pass := randomHex(6)
+		err := s.SetRepLogin(r.Context(), user, pass, pid)
+		reply(w, map[string]any{"ok": err == nil, "username": user, "password": pass}, err)
+	}))
+}
+
+func thousands(n int64) string {
+	neg := n < 0
+	if neg {
+		n = -n
+	}
+	d := strconv.FormatInt(n, 10)
+	var b strings.Builder
+	for i, c := range d {
+		if i > 0 && (len(d)-i)%3 == 0 {
+			b.WriteByte(',')
+		}
+		b.WriteRune(c)
+	}
+	if neg {
+		return "-" + b.String()
+	}
+	return b.String()
 }

@@ -187,8 +187,19 @@ func (s *Store) RepNameFree(ctx context.Context, name string) bool {
 // seller "" is the owner's sale; otherwise the reseller whose bot sells the
 // panel, as a sub-seller of its own, at its price.
 func (s *Store) CreateRepOrder(ctx context.Context, seller string, chat int64, buyerName, repID, name, pkgID string) (RepOrder, error) {
+	return s.createRepOrder(ctx, seller, chat, buyerName, repID, name, pkgID, false)
+}
+
+// createRepOrder: manual is a reseller selling from its panel (resale.go
+// SellPanel): no bot, no card, no Telegram account; the order is paid.
+func (s *Store) createRepOrder(ctx context.Context, seller string, chat int64, buyerName, repID, name, pkgID string, manual bool) (RepOrder, error) {
 	sale := s.RepSale(ctx)
-	if seller == "" && !sale.Enabled || seller != "" && !s.ResaleOn(ctx, seller) {
+	switch {
+	case manual:
+		if seller == "" || !s.ResaleOf(ctx, seller).Allowed || s.IsSubSeller(ctx, seller) || s.WholesaleTB(ctx, seller) <= 0 {
+			return RepOrder{}, fmt.Errorf("%w: panel sale is not allowed for this reseller", ErrPolicy)
+		}
+	case seller == "" && !sale.Enabled, seller != "" && !s.ResaleOn(ctx, seller):
 		return RepOrder{}, ErrNotFound
 	}
 	var pkg *RepPackage
@@ -211,7 +222,7 @@ func (s *Store) CreateRepOrder(ctx context.Context, seller string, chat int64, b
 		if !s.RepNameFree(ctx, repID) {
 			return RepOrder{}, fmt.Errorf("%w: this username is taken or not valid", ErrInvalid)
 		}
-		if s.TgRep(ctx, chat) != "" {
+		if !manual && s.TgRep(ctx, chat) != "" {
 			return RepOrder{}, fmt.Errorf("%w: this Telegram account already has a panel", ErrInvalid)
 		}
 		var held int
@@ -232,12 +243,15 @@ func (s *Store) CreateRepOrder(ctx context.Context, seller string, chat int64, b
 		}
 	}
 	now := s.now().Unix()
-	if _, err := s.db.ExecContext(ctx, `UPDATE rep_orders SET status='cancelled', decided_unix=? WHERE chat_id=? AND status='await_receipt'`, now, chat); err != nil {
+	status := "await_receipt"
+	if manual {
+		status = "pending"
+	} else if _, err := s.db.ExecContext(ctx, `UPDATE rep_orders SET status='cancelled', decided_unix=? WHERE chat_id=? AND status='await_receipt'`, now, chat); err != nil {
 		return RepOrder{}, err
 	}
 	terms, _ := json.Marshal(pkg)
-	r, err := s.db.ExecContext(ctx, `INSERT INTO rep_orders(unix,chat_id,buyer_name,kind,rep_id,package,gb,price,terms,seller,cost) VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
-		now, chat, buyerName, kind, repID, pkg.Name, pkg.GB, pkg.Price, string(terms), seller, cost)
+	r, err := s.db.ExecContext(ctx, `INSERT INTO rep_orders(unix,chat_id,buyer_name,kind,rep_id,package,gb,price,terms,seller,cost,status) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`,
+		now, chat, buyerName, kind, repID, pkg.Name, pkg.GB, pkg.Price, string(terms), seller, cost, status)
 	if err != nil {
 		return RepOrder{}, err
 	}
@@ -346,14 +360,16 @@ func (s *Store) ApproveRepOrder(ctx context.Context, actor, seller string, id in
 			return undo(err)
 		}
 		// This Telegram account is the reseller's from now on.
-		if _, err := s.db.ExecContext(ctx, `UPDATE reps SET tg_chat=0 WHERE tg_chat=?`, o.Chat); err != nil {
-			return undo(err)
-		}
-		if _, err := s.db.ExecContext(ctx, `DELETE FROM rep_tg_owners WHERE chat_id=?`, o.Chat); err != nil {
-			return undo(err)
-		}
-		if _, err := s.db.ExecContext(ctx, `UPDATE reps SET tg_chat=? WHERE id=?`, o.Chat, o.RepID); err != nil {
-			return undo(err)
+		if o.Chat != 0 {
+			if _, err := s.db.ExecContext(ctx, `UPDATE reps SET tg_chat=0 WHERE tg_chat=?`, o.Chat); err != nil {
+				return undo(err)
+			}
+			if _, err := s.db.ExecContext(ctx, `DELETE FROM rep_tg_owners WHERE chat_id=?`, o.Chat); err != nil {
+				return undo(err)
+			}
+			if _, err := s.db.ExecContext(ctx, `UPDATE reps SET tg_chat=? WHERE id=?`, o.Chat, o.RepID); err != nil {
+				return undo(err)
+			}
 		}
 	}
 	units := o.Terms.Units
