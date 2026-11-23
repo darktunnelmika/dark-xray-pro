@@ -4105,9 +4105,25 @@ function policyForm(r, inbounds) {
   const allowed = new Set(p.Inbounds || []);
   const boxes = (inbounds || []).map((ib) => h("label", { class: "check" }, h("input", { type: "checkbox", value: ib.tag, checked: allowed.has(ib.tag) }), `${ib.tag} · ${ib.node_id}`));
   const err = h("div", { class: "error" });
+  // Selling panels in its own bot (owner only, top-level resellers only).
+  const fa = lang === "fa";
+  const rsOn = me.role === "owner" && !r.ParentID;
+  const rs = { al: box(false), cr: box(false), pt: h("input", { type: "number", min: "0", step: "1000", dir: "ltr", value: 0 }), hint: h("span", { class: "small muted" }), loaded: null };
+  const rsBox = rsOn ? h("fieldset", { class: "form", style: "border:0;padding:0;margin:0" },
+    h("legend", { class: "small muted" }, "🏪 ", fa ? "فروش پنل نمایندگی در ربات خودش" : "Selling reseller panels in its own bot"),
+    h("label", { class: "check" }, rs.al, fa ? "اجازهٔ فروش پنل" : "May sell panels"),
+    h("label", { class: "check" }, rs.cr, fa ? "اگر کیف پول کافی نبود، فاکتور ۲۴ ساعته (حداکثر یک فاکتور باز)" : "If the wallet is short, a 24-hour bill (one open at most)"),
+    h("label", {}, h("span", {}, fa ? "قیمت عمدهٔ اختصاصی هر ترابایت (۰ = قیمت کلی)" : "Own wholesale price per TB (0 = the general price)"), rs.pt, rs.hint)) : null;
+  if (rsOn) api("GET", `/api/v2/admin/reps/${encodeURIComponent(r.ID)}/resale`).then((v) => {
+    rs.loaded = v.resale; rs.al.checked = !!v.resale.allowed; rs.cr.checked = !!v.resale.credit; rs.pt.value = v.resale.price_tb || 0;
+    rs.hint.textContent = fa ? `قیمت کلی: ${fmtNum(v.resale.price_tb ? 0 : v.wholesale_tb)} تومان` : `General price: ${fmtNum(v.wholesale_tb)} toman`;
+    if (v.resale.price_tb) rs.hint.textContent = "";
+  }).catch(() => {});
   const save = h("button", { class: "primary", value: "save", onclick: async (e) => {
     e.preventDefault();
     try {
+      if (rs.loaded && (rs.al.checked !== !!rs.loaded.allowed || rs.cr.checked !== !!rs.loaded.credit || (+rs.pt.value || 0) !== (rs.loaded.price_tb || 0)))
+        await api("PUT", `/api/v2/admin/reps/${encodeURIComponent(r.ID)}/resale`, { allowed: rs.al.checked, credit: rs.cr.checked, price_tb: +rs.pt.value || 0 });
       await guarded(() => api("PUT", `${repBase()}/${encodeURIComponent(r.ID)}/policy`, {
         MaxClients: +f.mc.value || 0, MaxDays: +f.md.value || 0, MaxClientGB: +f.mg.value || 0,
         AllowUnlimited: f.au.checked, CanDelete: f.cd.checked, RefundUnused: f.ru.checked,
@@ -4130,7 +4146,7 @@ function policyForm(r, inbounds) {
     h("label", { class: "check" }, f.ru, t("refundUnused")),
     me.role === "owner" ? h("label", { class: "check" }, f.mp, t("manageProducts")) : null,
     h("fieldset", { class: "form", style: "border:0;padding:0;margin:0" }, h("legend", { class: "small muted" }, t("allowedInbounds")), boxes),
-    me.role === "rep" ? null : h("div", { class: "two" }, lab("priceGB", f.pg), lab("priceUnit", f.pu)), err), [save]);
+    me.role === "rep" ? null : h("div", { class: "two" }, lab("priceGB", f.pg), lab("priceUnit", f.pu)), rsBox, err), [save]);
 }
 
 function paymentForm(r) {
@@ -5357,8 +5373,8 @@ function resaleWholesaleCard() {
     toast(t("saved"));
   } },
     h("h2", {}, "💼 ", fa ? "فروش پنل توسط نماینده‌ها" : "Panels sold by resellers"),
-    h("p", { class: "small muted" }, fa ? "نماینده‌هایی که اجازه بدهید، بسته‌های پنل نمایندگی شما را در ربات خودشان می‌فروشند. قیمت عمده از کیف پول آن‌ها در پنل اصلی کم می‌شود یا (اگر اجازه بدهید) فاکتور ۲۴ ساعته صادر می‌شود. اجازه برای هر نماینده: صفحهٔ نماینده‌ها ← ⋯ ← فروش پنل."
-      : "Resellers you allow sell your reseller-panel packages in their own bot. The wholesale price comes off their wallet at the main panel or, if you allow it, a 24-hour bill is opened. Per reseller: Resellers → ⋯ → Panel sale."),
+    h("p", { class: "small muted" }, fa ? "نماینده‌هایی که اجازه بدهید، بسته‌های پنل نمایندگی شما را در ربات خودشان می‌فروشند. قیمت عمده از کیف پول آن‌ها در پنل اصلی کم می‌شود یا (اگر اجازه بدهید) فاکتور ۲۴ ساعته صادر می‌شود. اجازه برای هر نماینده: صفحهٔ نماینده‌ها ← ⋯ ← محدودیت‌ها."
+      : "Resellers you allow sell your reseller-panel packages in their own bot. The wholesale price comes off their wallet at the main panel or, if you allow it, a 24-hour bill is opened. Per reseller: Resellers → ⋯ → Limits."),
     h("label", {}, h("span", {}, fa ? "قیمت عمدهٔ هر ترابایت (تومان، ۰ = خاموش)" : "Wholesale price per TB (toman, 0 = off)"), inp),
     h("div", { class: "row" }, h("button", { class: "primary", type: "submit" }, t("save"))));
 }
@@ -5373,9 +5389,6 @@ async function resaleOwner(r) {
   async function draw() {
     let v;
     try { v = await api("GET", `${path}/resale`); } catch (x) { err.textContent = x.message; return; }
-    const allowed = h("input", { type: "checkbox", checked: !!v.resale.allowed });
-    const credit = h("input", { type: "checkbox", checked: !!v.resale.credit });
-    const price = h("input", { type: "number", min: "0", step: "1000", dir: "ltr", value: v.resale.price_tb || 0 });
     const amount = h("input", { type: "number", step: "1000", dir: "ltr", placeholder: "1300000" });
     const note = h("input", { placeholder: T("توضیح (اختیاری)", "Note (optional)") });
     const close = (b, paid) => h("button", { type: "button", class: paid ? "" : "ghost", onclick: async () => {
@@ -5383,19 +5396,11 @@ async function resaleOwner(r) {
       await guarded(() => api("POST", `/api/v2/admin/rep-bills/${b.id}/close`, { paid })); draw();
     } }, paid ? T("پرداخت شد", "Paid") : T("بخشیدن", "Forgive"));
     fill(box, err,
-      h("form", { class: "card form", onsubmit: async (e) => {
-        e.preventDefault(); err.textContent = "";
-        try { await api("PUT", `${path}/resale`, { allowed: allowed.checked, credit: credit.checked, price_tb: +price.value || 0 }); toast(t("saved")); draw(); }
-        catch (x) { err.textContent = x.message; }
-      } },
-        h("label", { class: "check" }, allowed, h("span", {}, T("اجازهٔ فروش پنل در ربات خودش", "May sell panels in its own bot"))),
-        h("label", { class: "check" }, credit, h("span", {}, T("اگر کیف پول کافی نبود، فاکتور ۲۴ ساعته (حداکثر یک فاکتور باز)", "If the wallet is short, a 24-hour bill (one open at most)"))),
-        h("label", {}, h("span", {}, T(`قیمت عمدهٔ اختصاصی هر ترابایت (۰ = قیمت کلی: ${tomanTxt(v.resale.price_tb ? 0 : v.wholesale_tb)})`, `Own wholesale per TB (0 = the general price)`)), price),
-        h("div", { class: "mz-badges" },
-          h("span", { class: `badge ${v.on ? "good" : ""}` }, v.on ? T("در رباتش فعال است", "on in its bot") : T("در رباتش فعال نیست", "not on in its bot")),
-          v.has_card ? null : h("span", { class: "badge" }, T("کارتش ثبت نشده", "no card set")),
-          v.locked ? h("span", { class: "badge bad" }, T("قفل: فاکتور پرداخت‌نشده", "locked: unpaid bill")) : null),
-        h("div", { class: "row" }, h("button", { class: "primary", type: "submit" }, t("save")))),
+      h("div", { class: "mz-badges" },
+        h("span", { class: `badge ${v.on ? "good" : ""}` }, !v.resale.allowed ? T("اجازهٔ فروش پنل ندارد (محدودیت‌ها)", "not allowed to sell panels (Limits)") : v.on ? T("در رباتش فعال است", "on in its bot") : T("در رباتش فعال نیست", "not on in its bot")),
+        h("span", { class: "badge" }, T("قیمت عمده هر ترابایت: ", "Wholesale per TB: "), tomanTxt(v.wholesale_tb)),
+        v.resale.allowed && !v.has_card ? h("span", { class: "badge" }, T("کارتش ثبت نشده", "no card set")) : null,
+        v.locked ? h("span", { class: "badge bad" }, T("قفل: فاکتور پرداخت‌نشده", "locked: unpaid bill")) : null),
       h("form", { class: "card form", onsubmit: async (e) => {
         e.preventDefault(); err.textContent = "";
         try {
@@ -5411,7 +5416,7 @@ async function resaleOwner(r) {
       h("div", { class: "card form" }, h("h3", {}, T("فاکتورها", "Bills")), billRows(v.bills, (b) => h("div", { class: "row tight" }, close(b, true), close(b, false)))));
   }
   await draw();
-  openModal(`${T("فروش پنل و کیف پول", "Panel sale and wallet")} · ${r.Name || r.ID}`, box);
+  openModal(`${T("کیف پول و فاکتورها", "Wallet and bills")} · ${r.Name || r.ID}`, box);
 }
 
 // resaleRepCard: the reseller's own prices, wallet and bills.
@@ -5476,7 +5481,7 @@ async function viewReps() {
       item(t("payment"), () => paymentForm(r)),
       item(fa ? "صفحهٔ اشتراک" : "Sub page", () => openModal(`${fa ? "برند و صفحهٔ اشتراک" : "Brand & subscription page"} · ${r.Name || r.ID}`, repBrandCard(`/api/v2/admin/reps/${encodeURIComponent(r.ID)}/brand`))),
       item(fa ? "ربات و کارت" : "Bot & card", () => openModal(`${fa ? "ربات و کارت" : "Bot & card"} · ${r.Name || r.ID}`, h("div", { class: "form" }, repBotCard(`/api/v2/admin/reps/${encodeURIComponent(r.ID)}/bot`), sellerCardCard(`/api/v2/shop/card?seller=${encodeURIComponent(r.ID)}`)))),
-      ...(r.ParentID ? [] : [item(fa ? "🏪 فروش پنل و کیف پول" : "🏪 Panel sale and wallet", () => resaleOwner(r))]),
+      ...(r.ParentID ? [] : [item(fa ? "💼 کیف پول و فاکتورها" : "💼 Wallet and bills", () => resaleOwner(r))]),
       item(t("activity"), () => { location.hash = `#/activity?rep=${encodeURIComponent(r.ID)}`; }),
       item(t("edit"), () => repForm(r)),
       item(t("delete"), () => del(r), "bad"));
