@@ -733,3 +733,28 @@ func TestPGAPIKey(t *testing.T) {
 		t.Fatal("no key while the access is off")
 	}
 }
+
+// TestModeSwitchSharedBot: going back to the API way starts the reseller's
+// own bot again; not while another reseller has saved the same bot.
+func TestModeSwitchSharedBot(t *testing.T) {
+	s, _ := newStore(t)
+	ctx := context.Background()
+	seed(t, s)
+	_ = s.PutRep(ctx, Rep{ID: "ali", Name: "A", Enabled: true})
+	_ = s.PutRep(ctx, Rep{ID: "reza", Name: "B", Enabled: true})
+	_, _ = s.EnablePGAPI(ctx, "ali")
+	_, _ = s.db.Exec(`INSERT OR REPLACE INTO settings(key,value) VALUES('rep_bot:ali','{"token":"111:AAA","enabled":true}')`)
+	if err := s.SetPGAPIMode(ctx, "ali", "api"); err != nil {
+		t.Fatal("its own bot only", err)
+	}
+	_ = s.SetPGAPIMode(ctx, "ali", "mirza")
+	// Saved by another reseller while ali sold through Mirza (before v2.54.2
+	// a bot kept off by Mirza did not count as taken).
+	_, _ = s.db.Exec(`INSERT OR REPLACE INTO settings(key,value) VALUES('rep_bot:reza','{"token":"111:AAA","enabled":true}')`)
+	if err := s.SetPGAPIMode(ctx, "ali", "api"); err == nil {
+		t.Fatal("two resellers would poll one bot")
+	}
+	if !s.MirzaMode(ctx, "ali") {
+		t.Fatal("a refused switch changes nothing")
+	}
+}

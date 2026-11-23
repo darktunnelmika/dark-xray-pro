@@ -4491,7 +4491,10 @@ function mirzaCard(path, isRep) {
   // shown keeps a password made in this visit on screen while only the mode
   // changes (a mode switch keeps the password but does not send it again).
   const shown = { password: "", api_key: "" };
+  let busy = false; // one request at a time: a second click waits for the first
   const send = async (method, data, sub) => {
+    if (busy) return;
+    busy = true;
     err.textContent = "";
     try {
       const a = await api(method, path + (sub || ""), data);
@@ -4502,6 +4505,7 @@ function mirzaCard(path, isRep) {
       if (!a.enabled) shown.password = shown.api_key = "";
       draw(a);
     } catch (x) { err.textContent = x.message; }
+    finally { busy = false; }
   };
   const turnOff = (mode) => {
     const q = !isRep ? T("دسترسی API قطع شود؟ ربات‌ها و سایت‌هایی که با آن وصل‌اند دیگر کار نمی‌کنند.", "Turn the API access off? Bots and sites using it stop working.")
@@ -4515,10 +4519,9 @@ function mirzaCard(path, isRep) {
     if (want === cur) return;
     if (want === "dark") return turnOff(cur);
     if (cur === "dark") return send("POST", { mode: want });
-    const q = want === "mirza"
-      ? T("به ربات میرزا برود؟ ربات دارک شما خاموش می‌شود. نام کاربری و رمز همان می‌ماند.", "Switch to Mirza? Your Dark bot goes off. The username and password stay the same.")
-      : T("به API پاسارگاد برود؟ ربات دارک شما دوباره روشن می‌شود. نام کاربری و رمز همان می‌ماند.", "Switch to the PasarGuard API? Your Dark bot turns back on. The username and password stay the same.");
-    if (confirm(q)) send("PUT", { mode: want });
+    // Between Mirza and the API nothing breaks (the same username, password
+    // and API key) and it is undone with one click: no question.
+    send("PUT", { mode: want });
   };
 
   // The PasarGuard API in short: how to sign in, and the calls most bots
@@ -4569,17 +4572,17 @@ function mirzaCard(path, isRep) {
     const modes = isRep ? h("div", { class: "segs", role: "group", "aria-label": T("روش فروش", "How you sell") },
       seg("dark", "🤖", T("ربات دارک", "Dark bot")), seg("mirza", "🔗", T("ربات میرزا", "Mirza bot")), seg("api", "🔌", T("API پاسارگاد", "PasarGuard API"))) : null;
     if (!on) {
-      fill(body, modes,
+      fill(body, modes, err,
         h("p", { class: "small muted" }, isRep
           ? T("فروش با ربات دارک است. اگر مشتری‌هایتان در ربات میرزا هستند «ربات میرزا» را بزنید (ربات دارک خاموش می‌شود). برای وصل کردن ربات یا سایت دیگری که با پاسارگاد کار می‌کند «API پاسارگاد» را بزنید (ربات دارک روشن می‌ماند).",
             "You sell with the Dark bot. If your customers are in a Mirza bot, choose “Mirza bot” (the Dark bot goes off). To connect another bot or a website that works with PasarGuard, choose “PasarGuard API” (the Dark bot stays on).")
           : T("ربات میرزا یا هر ربات و سایتی که پنل پاسارگاد را می‌شناسد با این دسترسی به این پنل وصل می‌شود. ربات اصلی دارک روشن می‌ماند.",
             "Mirza, or any bot or site that knows the PasarGuard panel, connects to this panel with this access. The main Dark bot stays on.")),
-        isRep ? null : h("button", { type: "button", class: "primary", onclick: () => send("POST", { mode: "api" }) }, T("ساخت دسترسی API", "Create the API access")), err);
+        isRep ? null : h("button", { type: "button", class: "primary", onclick: () => send("POST", { mode: "api" }) }, T("ساخت دسترسی API", "Create the API access")));
       return;
     }
     const mirza = isRep ? cur === "mirza" : true;
-    fill(body, modes,
+    fill(body, modes, err,
       h("div", { class: "mz-badges" }, h("span", { class: "badge good" }, "● ", T("فعال", "on")),
         h("span", { class: "badge" }, T("آخرین اتصال: ", "last call: "), ago(a.last_used)),
         h("span", { class: "badge" }, T(`کاربر ساخته شده با API: ${fmtNum(a.made)}`, `users made through the API: ${a.made}`))),
@@ -4601,7 +4604,6 @@ function mirzaCard(path, isRep) {
         ? T("کاربرهایی که میرزا می‌سازد زیر حساب شما ثبت و از اعتبارتان کم می‌شود. ربات دارک شما تا وقتی این حالت روشن است خاموش است.", "Users Mirza makes are yours and use your credit. Your Dark bot is off while this is on.")
         : T("کاربرهایی که از راه API ساخته می‌شوند زیر حساب شما ثبت و از اعتبارتان کم می‌شود. ربات دارک شما روشن می‌ماند.", "Users made through the API are yours and use your credit. Your Dark bot stays on.")) : null,
       guide(a),
-      err,
       h("div", { class: "row" },
         h("button", { type: "button", onclick: () => confirm(T("رمز تازه ساخته شود؟ رمز قبلی دیگر کار نمی‌کند و باید در ربات یا سایتتان عوض شود. API Key عوض نمی‌شود.", "Make a new password? The old one stops working; change it in your bot or site. The API Key stays.")) && send("POST") }, T("رمز تازه", "New password")),
         h("button", { type: "button", onclick: () => (!a.has_key || confirm(T("API Key تازه ساخته شود؟ کلید قبلی دیگر کار نمی‌کند و باید در ربات یا سایتتان عوض شود. رمز عوض نمی‌شود.", "Make a new API Key? The old one stops working; change it in your bot or site. The password stays."))) && send("POST", undefined, "/key") }, T("API Key تازه", "New API Key")),

@@ -176,7 +176,7 @@ func (s *Store) SetPGAPIMode(ctx context.Context, seller, mode string) error {
 	// Back to the API way the reseller's own bot starts again: not while
 	// another reseller has taken the same bot meanwhile (both would poll it).
 	if mode == PGModeAPI {
-		if tok := s.RepBotOf(ctx, seller).Token; tok != "" {
+		if tok := s.repBotRaw(ctx, seller).Token; tok != "" { // RepBotOf hides the token
 			if other := s.repBotTokenUser(ctx, tok, seller); other != "" {
 				return fmt.Errorf("%w: your Telegram bot is now used by another reseller; set another bot first", ErrPolicy)
 			}
