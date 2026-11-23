@@ -741,10 +741,8 @@ func readMarzban(ctx context.Context, db *sql.DB, kind string, rep *ForeignRepor
 		}
 		c.created = parseMarzbanTime(u.created)
 		switch u.period {
-		case "day", "week", "month":
+		case "day", "week", "month", "year":
 			c.period = u.period
-		case "year":
-			rep.note("client %s: yearly reset is not offered here — reset it by hand", u.name)
 		}
 		if u.admin > 0 {
 			c.repID = strconv.FormatInt(u.admin, 10)

@@ -39,7 +39,15 @@ func (s *Store) ensurePlanSchema() error {
 	if err := s.addColumn("clients", "hwid_limit", "INTEGER NOT NULL DEFAULT 0"); err != nil {
 		return err
 	}
-	return s.addColumn("clients", "start_by_unix", "INTEGER NOT NULL DEFAULT 0")
+	if err := s.addColumn("clients", "start_by_unix", "INTEGER NOT NULL DEFAULT 0"); err != nil {
+		return err
+	}
+	// The part of a client's package that was a gift (the owner's next
+	// plan): a reseller is never refunded it as credit.
+	if err := s.addColumn("clients", "gift_bytes", "INTEGER NOT NULL DEFAULT 0"); err != nil {
+		return err
+	}
+	return s.addColumn("clients", "gift_units", "INTEGER NOT NULL DEFAULT 0")
 }
 
 // ---------- templates ----------
@@ -182,7 +190,15 @@ func (s *Store) applyNextPlan(ctx context.Context, email string, p NextPlan) err
 		return err
 	}
 	defer tx.Rollback()
-	if _, err := tx.ExecContext(ctx, `UPDATE clients SET volume_bytes=?, expires_unix=?, duration_seconds=?, next_plan='' WHERE email=?`, vol, exp, dur, email); err != nil {
+	// The new package is the owner's gift: its plan follows what it gives,
+	// and none of it can come back to a reseller as credit (a renewal, a
+	// delete or the expiry refund would otherwise pay it out).
+	plan, giftUnits := "volume", int64(0)
+	if vol < 0 {
+		plan, giftUnits = "unlimited", unitsFor(int64(p.Days))
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE clients SET volume_bytes=?, expires_unix=?, duration_seconds=?, next_plan='', plan=?, gift_bytes=?, gift_units=? WHERE email=?`,
+		vol, exp, dur, plan, max(vol, 0), giftUnits, email); err != nil {
 		return err
 	}
 	if p.FirstUse {

@@ -2081,8 +2081,10 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 	sh := SubHandler(s)
 	mux.Handle("GET /sub/{token}", sh)
 	mux.Handle("GET /sub/{token}/links", sh)
-	mux.Handle("GET /api/v1/", sh) // old-panel subscription URLs
-	mux.Handle("GET /app/", sh)    // Telegram Mini App
+	mux.Handle("GET /sub/{token}/{$}", sh)
+	mux.Handle("GET /sub/{token}/{client_type}", sh) // PasarGuard's info, usage and client types (pgapi_more.go)
+	mux.Handle("GET /api/v1/", sh)                   // old-panel subscription URLs
+	mux.Handle("GET /app/", sh)                      // Telegram Mini App
 	mux.Handle("POST /app/", sh)
 	routes := mux.apiRoutes()
 	mux.HandleFunc("GET /api/v2/admin/docs", member(func(w http.ResponseWriter, r *http.Request) {
@@ -2098,6 +2100,7 @@ func b64(s string) string { return sub.Base64([]string{s}) }
 func SubHandler(s *Store) http.Handler {
 	mux := http.NewServeMux()
 	registerMiniApp(mux, s)
+	pgSubRoutes(s, mux, "")
 	var serveSub http.HandlerFunc
 	// Subscription URLs from the old panel keep working after a migration:
 	// they answer with the same client's v2 subscription.
@@ -2183,9 +2186,16 @@ func SubHandler(s *Store) http.Handler {
 		_, _ = w.Write(body)
 	}
 	mux.HandleFunc("GET /sub/{token}", serveSub)
+	mux.HandleFunc("GET /sub/{token}/{$}", serveSub) // PasarGuard's own form of the link
 	// PasarGuard's plain list of configs, which sales bots read after creating a user.
 	mux.HandleFunc("GET /sub/{token}/links", func(w http.ResponseWriter, r *http.Request) {
 		email, err := s.EmailBySubToken(r.Context(), r.PathValue("token"))
+		if err != nil {
+			// A link from a Marzban/PasarGuard panel moved here keeps working.
+			if tok, ferr := s.foreignSubToken(r.Context(), r.PathValue("token")); ferr == nil {
+				email, err = s.EmailBySubToken(r.Context(), tok)
+			}
+		}
 		if err != nil {
 			http.NotFound(w, r)
 			return

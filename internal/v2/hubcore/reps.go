@@ -173,6 +173,21 @@ func unitsFor(days int64) int64 {
 	return (days + unitDays - 1) / unitDays
 }
 
+// termEnd is when a client's term ends: its expiry, or for a
+// first-connection term the first connection plus the term (from now if it
+// was never used). 0 means no term.
+func termEnd(c Client, firstSeen, now int64) int64 {
+	switch {
+	case c.ExpiresUnix > 0:
+		return c.ExpiresUnix
+	case c.DurationSeconds > 0 && firstSeen > 0:
+		return firstSeen + c.DurationSeconds
+	case c.DurationSeconds > 0:
+		return now + c.DurationSeconds
+	}
+	return 0
+}
+
 func termDays(c Client, now int64) int64 {
 	if c.DurationSeconds > 0 {
 		return (c.DurationSeconds + 86399) / 86400
@@ -199,7 +214,7 @@ func (s *Store) RepPutClient(ctx context.Context, actor, repID string, c Client,
 	if s.IsLegacy(ctx, c.Email) {
 		return s.repPutLegacy(ctx, repID, c, plan)
 	}
-	if termDays(c, now) == 0 {
+	if c.ExpiresUnix <= 0 && c.DurationSeconds <= 0 {
 		return fmt.Errorf("%w: representatives sell a fixed term", ErrInvalid)
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -222,6 +237,9 @@ func (s *Store) RepPutClient(ctx context.Context, actor, repID string, c Client,
 	if !isNew && existsRep != repID {
 		return ErrNotFound // another seller's (or the owner's) client is invisible
 	}
+	if isNew && termDays(c, now) == 0 {
+		return fmt.Errorf("%w: representatives sell a fixed term", ErrInvalid)
+	}
 	if err := checkPolicy(ctx, tx, repID, c, plan, isNew, now); err != nil {
 		return err
 	}
@@ -237,8 +255,19 @@ func (s *Store) RepPutClient(ctx context.Context, actor, repID string, c Client,
 		if err != nil {
 			return err
 		}
+		var oldTags []string
+		if rows, err := tx.QueryContext(ctx, `SELECT tag FROM client_inbounds WHERE email=?`, c.Email); err == nil {
+			for rows.Next() {
+				var t string
+				if rows.Scan(&t) == nil {
+					oldTags = append(oldTags, t)
+				}
+			}
+			rows.Close()
+		}
 		renewed := plan != oldPlan || c.VolumeBytes > old.VolumeBytes || termDays(c, now) > termDays(old, now)
-		edited := c.MaxIPs != old.MaxIPs || c.Enabled != old.Enabled
+		// DenyEdit covers the IP limit, the inbounds and on/off (see RepPolicy).
+		edited := c.MaxIPs != old.MaxIPs || c.Enabled != old.Enabled || !sameSet(oldTags, c.Inbounds)
 		if renewed && pol.DenyRenew {
 			return fmt.Errorf("%w: renewing clients is not allowed for this representative", ErrPolicy)
 		}
@@ -254,12 +283,17 @@ func (s *Store) RepPutClient(ctx context.Context, actor, repID string, c Client,
 		volCharge = max(0, c.VolumeBytes-old.VolumeBytes)
 	}
 	if plan == "unlimited" {
-		newUnits := unitsFor(termDays(c, now))
-		oldUnits := int64(0)
-		if !isNew && oldPlan == "unlimited" {
-			oldUnits = unitsFor(termDays(old, now))
+		if isNew || oldPlan != "unlimited" {
+			unitCharge = unitsFor(termDays(c, now))
+		} else {
+			// Only the days added past what is still paid are charged.
+			// Rounding the old and the new term up each would make any
+			// top-up before the end free (30 days left -> 30 days again).
+			var firstSeen int64
+			_ = tx.QueryRowContext(ctx, `SELECT first_seen_unix FROM client_usage WHERE email=?`, c.Email).Scan(&firstSeen)
+			added := termEnd(c, firstSeen, now) - max(termEnd(old, firstSeen, now), now)
+			unitCharge = unitsFor((added + 86399) / 86400)
 		}
-		unitCharge = max(0, newUnits-oldUnits)
 	}
 	if (volCharge > 0 || unitCharge > 0) && repLockedQ(ctx, tx, repID, now) {
 		// A panel bill past its due time (resale.go): no spending until paid.
@@ -283,6 +317,12 @@ WHERE id=? AND volume_credit>=? AND unlimited_units>=?`, volCharge, unitCharge, 
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE clients SET rep_id=?, plan=? WHERE email=?`, repID, plan, c.Email); err != nil {
+		return err
+	}
+	// A gift (the owner's next plan) shrinks with the package it is part of,
+	// so volume or days paid for on top of it stay refundable.
+	if _, err := tx.ExecContext(ctx, `UPDATE clients SET gift_bytes=MIN(gift_bytes,MAX(volume_bytes,0)), gift_units=MIN(gift_units,?) WHERE email=?`,
+		unitsFor(termDays(c, now)), c.Email); err != nil {
 		return err
 	}
 	return tx.Commit()

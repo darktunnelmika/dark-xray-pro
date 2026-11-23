@@ -36,7 +36,7 @@ CREATE TABLE IF NOT EXISTS ip_log (
 CREATE INDEX IF NOT EXISTS ip_log_last ON ip_log(last_unix);
 `
 
-var resetPeriods = map[string]bool{"": true, "day": true, "week": true, "month": true}
+var resetPeriods = map[string]bool{"": true, "day": true, "week": true, "month": true, "year": true}
 
 func (s *Store) ensureResetSchema() error {
 	if _, err := s.db.Exec(resetSchema); err != nil {
@@ -84,7 +84,7 @@ func (s *Store) ResetUsage(ctx context.Context, email, reason string) error {
 // starts now.
 func (s *Store) SetResetPeriod(ctx context.Context, email, period string) error {
 	if !resetPeriods[period] {
-		return fmt.Errorf("%w: period must be day, week, month or empty", ErrInvalid)
+		return fmt.Errorf("%w: period must be day, week, month, year or empty", ErrInvalid)
 	}
 	r, err := s.db.ExecContext(ctx, `UPDATE clients SET reset_period=?, last_reset_unix=CASE WHEN last_reset_unix=0 OR reset_period<>? THEN ? ELSE last_reset_unix END WHERE email=?`,
 		period, period, s.now().Unix(), email)
@@ -107,6 +107,8 @@ func nextReset(period string, last int64) int64 {
 		return t.AddDate(0, 0, 7).Unix()
 	case "month":
 		return t.AddDate(0, 1, 0).Unix()
+	case "year":
+		return t.AddDate(1, 0, 0).Unix()
 	}
 	return 0
 }

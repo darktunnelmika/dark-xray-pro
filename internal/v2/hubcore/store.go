@@ -333,6 +333,21 @@ func hashToken(tok string) string {
 	return hex.EncodeToString(sum[:])
 }
 
+// newRowID is the row id for a new row of table: past every id the table
+// ever gave out, so the id of a deleted row never goes to another one.
+// Sales bots keep users, templates and groups by these numbers.
+func newRowID(ctx context.Context, tx *sql.Tx, table string) (int64, error) {
+	key := "rowid_hw_" + table
+	var hw, top int64
+	_ = tx.QueryRowContext(ctx, `SELECT CAST(value AS INTEGER) FROM settings WHERE key=?`, key).Scan(&hw)
+	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(rowid),0) FROM `+table).Scan(&top); err != nil {
+		return 0, err
+	}
+	id := max(hw, top) + 1
+	_, err := tx.ExecContext(ctx, `INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value`, key, fmt.Sprint(id))
+	return id, err
+}
+
 func randomHex(n int) string {
 	b := make([]byte, n)
 	if _, err := rand.Read(b); err != nil {
@@ -427,15 +442,22 @@ func putClientTx(ctx context.Context, tx *sql.Tx, c Client, now int64) error {
 	// An update that omits credentials keeps the existing ones, so editing a
 	// client never breaks its connections or its subscription link.
 	var oldUUID, oldSecret, oldTok string
-	_ = tx.QueryRowContext(ctx, `SELECT uuid,secret,sub_token FROM clients WHERE email=?`, c.Email).Scan(&oldUUID, &oldSecret, &oldTok)
+	var rowid any // NULL keeps an existing row's id
+	if errors.Is(tx.QueryRowContext(ctx, `SELECT uuid,secret,sub_token FROM clients WHERE email=?`, c.Email).Scan(&oldUUID, &oldSecret, &oldTok), sql.ErrNoRows) {
+		id, err := newRowID(ctx, tx, "clients")
+		if err != nil {
+			return err
+		}
+		rowid = id
+	}
 	c.UUID = firstNonEmpty(c.UUID, oldUUID, RandomUUID())
 	c.Secret = firstNonEmpty(c.Secret, oldSecret, randomHex(16))
 	c.SubToken = firstNonEmpty(c.SubToken, oldTok, randomHex(16))
-	_, err := tx.ExecContext(ctx, `INSERT INTO clients(email,uuid,secret,enabled,volume_bytes,expires_unix,duration_seconds,max_ips,sub_token,created_unix)
-VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(email) DO UPDATE SET uuid=excluded.uuid, secret=excluded.secret, enabled=excluded.enabled,
+	_, err := tx.ExecContext(ctx, `INSERT INTO clients(rowid,email,uuid,secret,enabled,volume_bytes,expires_unix,duration_seconds,max_ips,sub_token,created_unix)
+VALUES(?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(email) DO UPDATE SET uuid=excluded.uuid, secret=excluded.secret, enabled=excluded.enabled,
 volume_bytes=excluded.volume_bytes, expires_unix=excluded.expires_unix, duration_seconds=excluded.duration_seconds, max_ips=excluded.max_ips,
 sub_token=excluded.sub_token`,
-		c.Email, c.UUID, c.Secret, c.Enabled, c.VolumeBytes, c.ExpiresUnix, c.DurationSeconds, c.MaxIPs, c.SubToken, now)
+		rowid, c.Email, c.UUID, c.Secret, c.Enabled, c.VolumeBytes, c.ExpiresUnix, c.DurationSeconds, c.MaxIPs, c.SubToken, now)
 	if err != nil {
 		return err
 	}
@@ -477,15 +499,22 @@ func (s *Store) PutInboundMeta(ctx context.Context, tag, nodeID string, template
 	}
 	defer tx.Rollback()
 	var cur string
+	var rowid any // NULL keeps an existing row's id
 	if tx.QueryRowContext(ctx, `SELECT node_id FROM inbounds WHERE tag=?`, tag).Scan(&cur) == nil {
 		var x int
 		if nodeID == "" || tx.QueryRowContext(ctx, `SELECT 1 FROM inbound_routes WHERE tag=?`, tag).Scan(&x) == nil {
 			nodeID = cur // a placed inbound keeps its routes; edit them with PutRoutes
 		}
+	} else {
+		id, err := newRowID(ctx, tx, "inbounds")
+		if err != nil {
+			return err
+		}
+		rowid = id
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO inbounds(tag,node_id,template,meta,enabled) VALUES(?,?,?,?,?)
+	if _, err := tx.ExecContext(ctx, `INSERT INTO inbounds(rowid,tag,node_id,template,meta,enabled) VALUES(?,?,?,?,?,?)
 ON CONFLICT(tag) DO UPDATE SET node_id=excluded.node_id, template=excluded.template, meta=excluded.meta, enabled=excluded.enabled`,
-		tag, nodeID, string(template), string(meta), enabled); err != nil {
+		rowid, tag, nodeID, string(template), string(meta), enabled); err != nil {
 		return err
 	}
 	if err := s.legacyRoute(ctx, tx, tag, nodeID, template, meta); err != nil {
