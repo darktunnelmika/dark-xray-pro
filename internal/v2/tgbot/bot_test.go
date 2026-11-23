@@ -697,7 +697,7 @@ func TestShopButtons(t *testing.T) {
 	b.Handle(ctx, cb(repChat, "S:nd:30"))
 	b.Handle(ctx, cb(repChat, "S:ni:2"))
 	b.Handle(ctx, msg(repChat, "۱۵۰ هزار"))
-	find(t, api.take(), repChat, "150,000")
+	find(t, api.take(), repChat, "۱۵۰٬۰۰۰")
 	b.Handle(ctx, cb(repChat, "S:nm:pub"))
 	find(t, api.take(), repChat, "ساخته شد")
 	var made hubcore.Product

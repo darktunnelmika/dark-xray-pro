@@ -75,6 +75,13 @@ func (b *Bot) ownerHome(ctx context.Context, chat int64) {
 		faInt(int64(o.OnlineUsers)), size(o.TrafficToday), orders, alert, faTime(b.now().Unix())), b.ownerMenuKB(len(pending)))
 }
 
+func orDash(s string) string {
+	if s == "" {
+		return "—"
+	}
+	return s
+}
+
 func back(data string) []Button { return []Button{{Text: "« بازگشت", Data: data}} }
 
 // ownerCallback handles "a:" buttons; false means not an owner action.
@@ -113,7 +120,7 @@ func (b *Bot) ownerCallback(ctx context.Context, chat int64, data string) bool {
 		b.clientsPage(ctx, chat, arg(1), page)
 	case "find":
 		b.setAwait(chat, "find")
-		b.send(ctx, chat, "🔎 نام کلاینت یا بخشی از آن (یا یادداشتش) را بفرستید:", nil)
+		b.send(ctx, chat, "🔎 نام کلاینت یا بخشی از آن (یا یادداشتش) را بفرستید:", &Keyboard{Rows: [][]Button{back("a:home")}})
 	case "c": // client card
 		b.ownerClient(ctx, chat, arg(1))
 	case "cfg":
@@ -188,7 +195,7 @@ func (b *Bot) ownerCallback(ctx context.Context, chat int64, data string) bool {
 		b.repsView(ctx, chat)
 	case "bc":
 		b.setAwait(chat, "broadcast")
-		b.send(ctx, chat, "📣 متن پیام همگانی را بفرستید (یا یک عکس با کپشن).\nبرای دکمهٔ لینک، آخرین خط را این‌طور بنویسید:\n<code>[متن دکمه](https://example.com)</code>\nبعد مخاطب را انتخاب می‌کنید و پیش‌نمایش می‌گیرید.", nil)
+		b.send(ctx, chat, "📣 متن پیام همگانی را بفرستید (یا یک عکس با کپشن).\nبرای دکمهٔ لینک، آخرین خط را این‌طور بنویسید:\n<code>[متن دکمه](https://example.com)</code>\nبعد مخاطب را انتخاب می‌کنید و پیش‌نمایش می‌گیرید.", &Keyboard{Rows: [][]Button{back("a:home")}})
 	case "bca": // audience chosen
 		b.mu.Lock()
 		d := b.draft[chat]
@@ -267,7 +274,16 @@ func (b *Bot) ownerCallback(ctx context.Context, chat int64, data string) bool {
 		b.trialCallback(ctx, chat, "", "a:trial", "a:settings", arg(1))
 	case "set":
 		b.setAwait(chat, "set:"+arg(1))
-		b.send(ctx, chat, "متن جدید را بفرستید:", nil)
+		prompt := map[string]string{
+			"pay":     "💳 <b>متن پرداخت</b> را بفرستید (زیر فاکتور به مشتری نشان داده می‌شود، مثلاً شرایط یا ساعت پاسخ‌گویی):",
+			"welcome": "👋 <b>متن خوش‌آمد</b> را بفرستید (بالای منوی مشتری‌های تازه):",
+			"guide":   "📚 <b>متن آموزش اتصال</b> را بفرستید:",
+			"backup":  "🔐 <b>رمز بکاپ</b> را بفرستید (حداقل ۸ کاراکتر). بکاپ‌ها با این رمز رمزگذاری می‌شوند؛ بدون آن باز نمی‌شوند، پس جایی نگهش دارید.",
+		}[arg(1)]
+		if prompt == "" {
+			prompt = "متن جدید را بفرستید:"
+		}
+		b.send(ctx, chat, prompt, &Keyboard{Rows: [][]Button{back("a:settings")}})
 	default:
 		return false
 	}
@@ -707,9 +723,9 @@ func (b *Bot) quickView(ctx context.Context, chat int64) {
 		if p.Seller == "" {
 			size := "نامحدود"
 			if p.Plan == "volume" {
-				size = fmt.Sprintf("%dگ", p.GB)
+				size = faInt(p.GB) + " گیگ"
 			}
-			kb.Rows = append(kb.Rows, []Button{{Text: fmt.Sprintf("⚡ %s — %s · %dر", p.Name, size, p.Days), Data: "a:qs:" + p.ID}})
+			kb.Rows = append(kb.Rows, []Button{{Text: fmt.Sprintf("⚡ %s — %s · %s روز", p.Name, size, faInt(p.Days)), Data: "a:qs:" + p.ID}})
 		}
 	}
 	kb.Rows = append(kb.Rows, back("a:home"))
@@ -734,7 +750,7 @@ func (b *Bot) repsView(ctx context.Context, chat int64) {
 		if !r.Enabled {
 			state = "⏸"
 		}
-		lines = append(lines, fmt.Sprintf("%s <b>%s</b> — اعتبار %s · %d واحد · %d کلاینت", state, esc(r.Name), gb(r.VolumeCredit), r.UnlimitedUnits, r.Clients))
+		lines = append(lines, fmt.Sprintf("%s <b>%s</b> — اعتبار %s · %s واحد · %s کلاینت", state, esc(r.Name), gb(r.VolumeCredit), faInt(r.UnlimitedUnits), faInt(int64(r.Clients))))
 		kb.Rows = append(kb.Rows, []Button{{Text: r.Name + " +۵۰گ", Data: "a:rc:" + r.ID + ":50:0"}, {Text: "+۱ واحد", Data: "a:rc:" + r.ID + ":0:1"}})
 	}
 	kb.Rows = append(kb.Rows, newRep, back("a:home"))
@@ -815,7 +831,7 @@ func (b *Bot) sendBackup(ctx context.Context, chat int64) error {
 	pass := b.Store.Setting(ctx, "tg_backup_pass")
 	if pass == "" {
 		b.setAwait(chat, "set:backup")
-		b.send(ctx, chat, "🔐 اول یک رمز بکاپ (حداقل ۸ کاراکتر) بفرستید. بکاپ‌ها با این رمز رمزگذاری می‌شوند.", nil)
+		b.send(ctx, chat, "🔐 اول یک رمز بکاپ (حداقل ۸ کاراکتر) بفرستید. بکاپ‌ها با این رمز رمزگذاری می‌شوند؛ بدون آن باز نمی‌شوند، پس جایی نگهش دارید.", &Keyboard{Rows: [][]Button{back("a:home")}})
 		return fmt.Errorf("no backup password")
 	}
 	// A full backup (database + the HUB's keys and settings) lets a new
@@ -935,7 +951,7 @@ func (b *Bot) nodeCard(ctx context.Context, chat int64, id string) {
 				fmt.Fprintf(&sb, "👥 آنلاین: <b>%s</b> · ⬇️ %s/s · ⬆️ %s/s\n", faInt(int64(h.OnlineUsers)), size(int64(h.RXRate)), size(int64(h.TXRate)))
 			}
 		}
-		fmt.Fprintf(&sb, "\n🔖 ایجنت %s · Xray %s", esc(n.AgentVersion), esc(n.XrayVersion))
+		fmt.Fprintf(&sb, "\n🔖 ایجنت %s · Xray %s", esc(orDash(n.AgentVersion)), esc(orDash(n.XrayVersion)))
 		if n.PublicIP != "" {
 			fmt.Fprintf(&sb, "\n🌍 <code>%s</code>", esc(n.PublicIP))
 		}

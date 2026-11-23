@@ -90,7 +90,7 @@ func size(n int64) string {
 func faInt(n int64) string { return faNum(strconv.FormatInt(n, 10)) }
 
 // faMoney: "۱۵۰٬۰۰۰".
-func faMoney(n int64) string { return strings.ReplaceAll(faNum(money(n)), ",", "٬") }
+func faMoney(n int64) string { return strings.ReplaceAll(faNum(groupLatin(n)), ",", "٬") }
 
 // faDate: "۱۴۰۵/۰۹/۱۵" (Tehran).
 func faDate(u int64) string {

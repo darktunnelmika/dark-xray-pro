@@ -107,7 +107,10 @@ func gb(n int64) string {
 	return strings.ReplaceAll(faNum(strings.TrimRight(strings.TrimRight(strconv.FormatFloat(g, 'f', 2, 64), "0"), ".")), ".", "٫") + " گیگ"
 }
 
-func money(n int64) string {
+// money is an amount for people: Persian digits, grouped.
+func money(n int64) string { return faMoney(n) }
+
+func groupLatin(n int64) string {
 	s := strconv.FormatInt(n, 10)
 	var out []byte
 	for i := 0; i < len(s); i++ {
@@ -1292,8 +1295,8 @@ func (b *Bot) statusText(ctx context.Context) string {
 			}
 		}
 	}
-	return fmt.Sprintf("📡 نودها %d/%d آنلاین\n%s\n\n👥 کلاینت فعال %d از %d — آنلاین الان %d\n📶 ترافیک امروز %s",
-		o.NodesOnline, o.Nodes, strings.Join(lines, "\n"), o.ClientsActive, o.Clients, o.OnlineUsers, gb(o.TrafficToday))
+	return fmt.Sprintf("📡 نودها %s/%s آنلاین\n%s\n\n👥 کلاینت فعال %s از %s — آنلاین الان %s\n📶 ترافیک امروز %s",
+		faInt(int64(o.NodesOnline)), faInt(int64(o.Nodes)), strings.Join(lines, "\n"), faInt(int64(o.ClientsActive)), faInt(int64(o.Clients)), faInt(int64(o.OnlineUsers)), gb(o.TrafficToday))
 }
 
 func (b *Bot) reportText(ctx context.Context) string {
@@ -1307,7 +1310,7 @@ func (b *Bot) reportText(ctx context.Context) string {
 			revenue += o.Amount
 		}
 	}
-	return fmt.Sprintf("📋 گزارش ۲۴ ساعت اخیر\n\n%s\n\n🛒 تحویل‌شده: %d سفارش — %s تومان\n⏳ در انتظار: %d", b.statusText(ctx), sold, money(revenue), len(pending))
+	return fmt.Sprintf("📋 گزارش ۲۴ ساعت اخیر\n\n%s\n\n🛒 تحویل‌شده: %s سفارش — %s تومان\n⏳ در انتظار: %s", b.statusText(ctx), faInt(int64(sold)), money(revenue), faInt(int64(len(pending))))
 }
 
 // dailyReport sends the report once a day at 09:00 Tehran time (05:30 UTC).

@@ -22,8 +22,8 @@ func (b *Bot) trialScreen(ctx context.Context, chat int64, seller, cb, home stri
 		state, toggle = "🟢 روشن", Button{Text: "🔴 خاموش کردن", Data: cb + ":off"}
 	}
 	size := trialSize(p)
-	text := fmt.Sprintf("🎁 <b>تست رایگان</b>\n\nوضعیت: <b>%s</b>\nحجم: <b>%s</b>\nمدت: <b>%s</b>\nدستگاه هم‌زمان: <b>%d</b>\n\nهر حساب تلگرام فقط یک بار تست می‌گیرد. کانفیگ تست در پنل با برچسب «تست» دیده می‌شود و %d روز بعد از پایان خودکار حذف می‌شود.",
-		state, size, trialSpan(p.Hours), p.MaxIPs, 3)
+	text := fmt.Sprintf("🎁 <b>تست رایگان</b>\n\nوضعیت: <b>%s</b>\nحجم: <b>%s</b>\nمدت: <b>%s</b>\nدستگاه هم‌زمان: <b>%s</b>\n\nهر حساب تلگرام فقط یک بار تست می‌گیرد. کانفیگ تست در پنل با برچسب «تست» دیده می‌شود و ۳ روز بعد از پایان خودکار حذف می‌شود.",
+		state, size, trialSpan(p.Hours), faInt(int64(p.MaxIPs)))
 	if seller != "" {
 		text += "\n\nحجم هر تست از اعتبار شما کم می‌شود."
 	}
