@@ -41,7 +41,7 @@ import (
 // the reseller's volume credit as it happens; when the credit runs out they
 // are switched off, and back on when credit comes.
 
-const legacySchema = `CREATE TABLE IF NOT EXISTS legacy_reps (
+const oldUsersSchema = `CREATE TABLE IF NOT EXISTS legacy_reps (
   rep_id TEXT PRIMARY KEY REFERENCES reps(id) ON DELETE CASCADE,
   allowed INTEGER NOT NULL DEFAULT 0,
   domain TEXT NOT NULL DEFAULT '',
@@ -67,8 +67,8 @@ CREATE INDEX IF NOT EXISTS legacy_clients_rep ON legacy_clients(rep_id);`
 // LegacyForward is how long the old config ports are passed through.
 const LegacyForward = 72 * 3600
 
-func (s *Store) ensureLegacySchema() error {
-	_, err := s.db.Exec(legacySchema)
+func (s *Store) ensureOldUsersSchema() error {
+	_, err := s.db.Exec(oldUsersSchema)
 	return err
 }
 
@@ -218,7 +218,6 @@ var legacyClient = &http.Client{
 	CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 }
 
-var uuidRE = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 
 // parseLegacyLink checks a subscription address and splits it.
 func parseLegacyLink(raw string) (*url.URL, string, error) {

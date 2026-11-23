@@ -1222,12 +1222,12 @@ function clientStatus(c) {
 }
 
 const CT = {
-  fa: { trial: "تست", all: "همه", online: "آنلاین", active: "فعال", expiring: "رو به انقضا", bad: "تمام‌شده", disabled: "غیرفعال", user: "کاربر", usage: "مصرف", remain: "باقی‌مانده",
+  fa: { legacy: "کاربران قدیمی", trial: "تست", all: "همه", online: "آنلاین", active: "فعال", expiring: "رو به انقضا", bad: "تمام‌شده", disabled: "غیرفعال", user: "کاربر", usage: "مصرف", remain: "باقی‌مانده",
     expiry: "انقضا", seen: "آخرین اتصال", actions: "", perPage: "در هر صفحه", page: "صفحهٔ {p} از {n}", prev: "قبلی", next: "بعدی", none: "کلاینتی با این فیلتر نیست.",
     reset: "صفر کردن مصرف", resetAsk: "مصرف {x} صفر شود؟ مقدار فعلی در سابقه می‌ماند.", resetDone: "مصرف {n} کلاینت صفر شد", enable: "فعال کردن", disable: "غیرفعال کردن",
     del: "حذف", delAsk: "{n} کلاینت حذف شوند؟", done: "{n} مورد انجام شد", never: "هرگز", now: "الان", ago: "{t} پیش", sub: "اشتراک", edit: "ویرایش", chart: "نمودار",
     sel: "{n} انتخاب‌شده", clear: "لغو انتخاب", allFilters: "همهٔ گروه‌ها و اینباندها", sortBy: "مرتب‌سازی" },
-  en: { trial: "Trial", all: "All", online: "Online", active: "Active", expiring: "Expiring", bad: "Ended", disabled: "Disabled", user: "Client", usage: "Usage", remain: "Remaining",
+  en: { legacy: "Old users", trial: "Trial", all: "All", online: "Online", active: "Active", expiring: "Expiring", bad: "Ended", disabled: "Disabled", user: "Client", usage: "Usage", remain: "Remaining",
     expiry: "Expiry", seen: "Last seen", actions: "", perPage: "per page", page: "Page {p} of {n}", prev: "Prev", next: "Next", none: "No clients match.",
     reset: "Reset usage", resetAsk: "Reset {x}'s usage? The current total stays in the history.", resetDone: "Usage reset for {n}", enable: "Enable", disable: "Disable",
     del: "Delete", delAsk: "Delete {n} clients?", done: "{n} done", never: "never", now: "now", ago: "{t} ago", sub: "Subscription", edit: "Edit", chart: "Chart",
@@ -1274,8 +1274,8 @@ async function viewClients() {
   const remember = () => { try { localStorage.setItem("clients-view", JSON.stringify({ state: st.state, sort: st.sort, dir: st.dir, size: st.size })); } catch {} };
   const selected = new Set();
   const used = (c) => c.Usage.Up + c.Usage.Down;
-  const counts = { "": list.length, online: 0, active: 0, expiring: 0, bad: 0, disabled: 0, trial: 0 };
-  for (const c of list) { counts[clientState(c)]++; if (c.Online) counts.online++; if (c.trial) counts.trial++; }
+  const counts = { "": list.length, online: 0, active: 0, expiring: 0, bad: 0, disabled: 0, trial: 0, legacy: 0 };
+  for (const c of list) { counts[clientState(c)]++; if (c.Online) counts.online++; if (c.trial) counts.trial++; if (c.legacy) counts.legacy++; }
   const keyOf = {
     created: (c, i) => i, email: (c) => c.Email.toLowerCase(), usage: (c) => used(c),
     remain: (c) => (c.Remaining < 0 ? Infinity : c.Remaining), expiry: (c) => c.EffectiveUntil || Infinity, seen: (c) => -(c.Usage.LastSeen || 0),
@@ -1284,7 +1284,8 @@ async function viewClients() {
     if (st.q && !(c.Email + " " + (c.Note || "")).toLowerCase().includes(st.q.toLowerCase())) return false;
     if (st.state === "online" && !c.Online) return false;
     if (st.state === "trial" && !c.trial) return false;
-    if (st.state && st.state !== "online" && st.state !== "trial" && clientState(c) !== st.state) return false;
+    if (st.state === "legacy" && !c.legacy) return false;
+    if (st.state && st.state !== "online" && st.state !== "trial" && st.state !== "legacy" && clientState(c) !== st.state) return false;
     const f = st.extra;
     if (f.startsWith("g:") && !(ctx.groups.find((g) => g.ID === f.slice(2))?.Members || []).includes(c.Email)) return false;
     if (f.startsWith("i:") && !(c.Inbounds || []).includes(f.slice(2))) return false;
@@ -1371,7 +1372,7 @@ async function viewClients() {
   }
 
   function draw() {
-    chips.replaceChildren(...["", "online", "active", "expiring", "bad", "disabled", ...(counts.trial ? ["trial"] : [])].map((k) => {
+    chips.replaceChildren(...["", "online", "active", "expiring", "bad", "disabled", ...(counts.trial ? ["trial"] : []), ...(counts.legacy ? ["legacy"] : [])].map((k) => {
       const b = h("button", { role: "tab", "aria-selected": st.state === k ? "true" : "false", class: `chip ${st.state === k ? "on" : ""} ${k}` },
         k ? L[k] : L.all, h("span", { class: "count" }, fmtNum(counts[k])));
       b.addEventListener("click", () => { st.state = k; st.page = 0; remember(); draw(); });
@@ -1424,6 +1425,7 @@ async function viewClients() {
       owner ? h("button", { class: "ghost", onclick: () => cleanupForm() }, lang === "fa" ? "پاک‌سازی" : "Clean up") : null,
       owner ? h("a", { class: "btn ghost", href: "/api/v2/admin/clients/export.csv", download: "", title: lang === "fa" ? "فهرست کاربرها برای اکسل" : "Client list for Excel" }, lang === "fa" ? "اکسل" : "Excel") : null,
       owner ? h("button", { onclick: () => bulkCreateForm(inbounds) }, t("bulkCreate")) : null,
+      me.legacy ? h("a", { class: "btn", href: "#/legacy" }, "📥 ", lang === "fa" ? "آوردن کاربران قدیمی" : "Bring old users") : null,
       me.role === "rep" && me.policy && me.policy.DenyCreate ? null : h("button", { class: "primary", onclick: () => clientForm(null, inbounds) }, t("add"))),
     todo, chips,
     h("div", { class: "row toolbar" }, q, extra),
@@ -4114,6 +4116,9 @@ function policyForm(r, inbounds) {
     h("label", { class: "check" }, rs.al, fa ? "اجازهٔ فروش پنل" : "May sell panels"),
     h("label", { class: "check" }, rs.cr, fa ? "اگر کیف پول کافی نبود، فاکتور ۲۴ ساعته (حداکثر یک فاکتور باز)" : "If the wallet is short, a 24-hour bill (one open at most)"),
     h("label", {}, h("span", {}, fa ? "قیمت عمدهٔ اختصاصی هر ترابایت (۰ = قیمت کلی)" : "Own wholesale price per TB (0 = the general price)"), rs.pt, rs.hint)) : null;
+  const lg = { al: box(false), loaded: null };
+  const lgBox = rsOn ? h("label", { class: "check" }, lg.al, fa ? "📥 اجازهٔ آوردن کاربران قدیمی از پنل دیگر (فقط مصرف واقعی از اعتبار کم می‌شود؛ قابل تمدید نیستند)" : "📥 May bring old users from another panel (only real use is charged; they cannot be renewed)") : null;
+  if (rsOn) api("GET", `/api/v2/admin/reps/${encodeURIComponent(r.ID)}/legacy`).then((v) => { lg.loaded = v; lg.al.checked = !!v.allowed; }).catch(() => {});
   if (rsOn) api("GET", `/api/v2/admin/reps/${encodeURIComponent(r.ID)}/resale`).then((v) => {
     rs.loaded = v.resale; rs.al.checked = !!v.resale.allowed; rs.cr.checked = !!v.resale.credit; rs.pt.value = v.resale.price_tb || 0;
     rs.hint.textContent = fa ? `قیمت کلی: ${fmtNum(v.resale.price_tb ? 0 : v.wholesale_tb)} تومان` : `General price: ${fmtNum(v.wholesale_tb)} toman`;
@@ -4124,6 +4129,7 @@ function policyForm(r, inbounds) {
     try {
       if (rs.loaded && (rs.al.checked !== !!rs.loaded.allowed || rs.cr.checked !== !!rs.loaded.credit || (+rs.pt.value || 0) !== (rs.loaded.price_tb || 0)))
         await api("PUT", `/api/v2/admin/reps/${encodeURIComponent(r.ID)}/resale`, { allowed: rs.al.checked, credit: rs.cr.checked, price_tb: +rs.pt.value || 0 });
+      if (lg.loaded && lg.al.checked !== !!lg.loaded.allowed) await api("PUT", `/api/v2/admin/reps/${encodeURIComponent(r.ID)}/legacy`, { allowed: lg.al.checked });
       await guarded(() => api("PUT", `${repBase()}/${encodeURIComponent(r.ID)}/policy`, {
         MaxClients: +f.mc.value || 0, MaxDays: +f.md.value || 0, MaxClientGB: +f.mg.value || 0,
         AllowUnlimited: f.au.checked, CanDelete: f.cd.checked, RefundUnused: f.ru.checked,
@@ -4146,7 +4152,7 @@ function policyForm(r, inbounds) {
     h("label", { class: "check" }, f.ru, t("refundUnused")),
     me.role === "owner" ? h("label", { class: "check" }, f.mp, t("manageProducts")) : null,
     h("fieldset", { class: "form", style: "border:0;padding:0;margin:0" }, h("legend", { class: "small muted" }, t("allowedInbounds")), boxes),
-    me.role === "rep" ? null : h("div", { class: "two" }, lab("priceGB", f.pg), lab("priceUnit", f.pu)), rsBox, err), [save]);
+    me.role === "rep" ? null : h("div", { class: "two" }, lab("priceGB", f.pg), lab("priceUnit", f.pu)), rsBox, lgBox, err), [save]);
 }
 
 function paymentForm(r) {
@@ -5462,6 +5468,82 @@ function resaleRepCard() {
   return card;
 }
 
+// ---------- Old users: a reseller brings its customers by their links ----------
+async function viewLegacy() {
+  const fa = lang === "fa";
+  const T = (f, e) => (fa ? f : e);
+  const v = await api("GET", "/api/v2/rep/legacy");
+  const err = h("div", { class: "error", role: "alert" });
+  const steps = [T("لینک‌های ساب", "Subscription links"), T("دامنه", "Domain"), T("پایان", "Done")];
+  const stepper = h("ol", { class: "lg-steps" }, steps.map((s, i) => h("li", { class: i === v.step ? "on" : i < v.step ? "done" : "" }, h("b", {}, fmtNum(i + 1)), " ", s)));
+  const gb = (b) => `${fmtNum(+(b / 2 ** 30).toFixed(1))} GB`;
+  const facts = h("div", { class: "mz-badges" },
+    h("span", { class: "badge" }, T("کاربر آمده: ", "Users brought: "), fmtNum(v.clients)),
+    v.domain ? h("span", { class: "badge", dir: "ltr" }, `${v.domain}:${v.sub_port}`) : null,
+    v.fwd_ports && v.fwd_ports.length ? h("span", { class: "badge", dir: "ltr" }, T("پورت کانفیگ‌ها: ", "Config ports: "), v.fwd_ports.join(", ")) : null);
+  let body;
+  if (v.step === 0) {
+    const ta = h("textarea", { rows: "10", dir: "ltr", placeholder: "https://sub.example.com:2096/sub/abc123\nhttps://sub.example.com:2096/sub/def456" });
+    const j = v.job || {};
+    const pct = j.total ? Math.round((j.done / j.total) * 100) : 0;
+    if (j.running) setTimeout(() => { if (location.hash.startsWith("#/legacy")) route(); }, 2000);
+    body = h("div", { class: "card form" },
+      h("h2", {}, T("۱. لینک ساب کاربرها", "1. The users' subscription links")),
+      h("p", { class: "small muted" }, T("لینک ساب هر کاربر را از پنل قبلی‌تان (ثنایی، مرزبان، پاسارگاد…) کپی کنید؛ هر خط یک لینک. پنل هر لینک را می‌خواند و کاربر را با همان مصرف، حجم، انقضا و همان لینک ساب در بخش شما می‌سازد. آوردن کاربرها رایگان است؛ از این به بعد فقط مصرف واقعی‌شان از اعتبار شما کم می‌شود. این کاربرها قابل تمدید نیستند.",
+        "Copy each user's subscription link from your old panel (3x-ui, Marzban, PasarGuard…), one per line. Each link is read and the user made under you with the same usage, volume, expiry and subscription link. Bringing them is free; from now on only what they use comes off your credit. Old users cannot be renewed.")),
+      ta, err,
+      j.running ? h("div", {}, h("progress", { max: "100", value: String(pct) }), h("p", { class: "small" }, T(`${fmtNum(j.done)} از ${fmtNum(j.total)} خوانده شد…`, `${j.done} of ${j.total} read…`))) : null,
+      j.total && !j.running ? h("div", { class: "mz-badges" },
+        h("span", { class: "badge good" }, T("آمد: ", "Added: "), fmtNum(j.added)),
+        j.already ? h("span", { class: "badge" }, T("از قبل بود: ", "Already here: "), fmtNum(j.already)) : null,
+        j.failed && j.failed.length ? h("span", { class: "badge bad" }, T("خطا: ", "Failed: "), fmtNum(j.failed.length)) : null) : null,
+      j.failed && j.failed.length && !j.running ? h("details", {}, h("summary", {}, T("لینک‌های خطادار", "Failed links")),
+        h("ul", { class: "small plain", dir: "ltr" }, j.failed.map((f) => h("li", {}, h("code", {}, f.link), " — ", f.reason)))) : null,
+      h("div", { class: "row" },
+        h("button", { class: "primary", disabled: j.running, onclick: async () => {
+          err.textContent = "";
+          try { await api("POST", "/api/v2/rep/legacy/import", { links: ta.value }); route(); } catch (x) { err.textContent = x.message; }
+        } }, T("خواندن و ثبت", "Read and add")),
+        h("span", { class: "spacer" }),
+        h("button", { disabled: j.running || !v.clients, onclick: async () => { await guarded(() => api("POST", "/api/v2/rep/legacy/step", { step: 1 })); route(); } }, T("مرحلهٔ بعد: دامنه", "Next: domain"))));
+  } else if (v.step === 1) {
+    const ip = (v.hub_ips || [])[0] || "";
+    const why = h("p", { class: "small", role: "status" });
+    body = h("div", { class: "card form" },
+      h("h2", {}, T("۲. دامنهٔ ساب را به این پنل بدهید", "2. Point your subscription domain here")),
+      h("p", {}, T(`در تنظیمات DNS دامنهٔ `, "In the DNS of "), h("b", { dir: "ltr" }, v.domain), T(` رکورد A را روی این IP بگذارید (اگر کلودفلر است، ابر نارنجی خاموش):`, ", set the A record to this IP (on Cloudflare, proxy off):")),
+      h("div", { class: "mz-copy" }, h("code", { dir: "ltr" }, ip), h("button", { type: "button", class: "ghost", onclick: () => copy(ip) }, T("کپی", "Copy"))),
+      h("p", { class: "small muted" }, T(`بعد از تغییر، «بررسی» را بزنید. از همان لحظه لینک‌های ساب قدیمی از این پنل جواب می‌دهند و کانفیگ‌های قدیمی (پورت‌های ${(v.fwd_ports || []).join("، ") || "—"}) تا ۳ روز به سرور قبلی رد می‌شوند تا کسی قطع نشود. سرور قبلی را تا آن موقع روشن نگه دارید.`,
+        `After the change press “Check”. From then on the old links answer from here, and the old configs (ports ${(v.fwd_ports || []).join(", ") || "—"}) are passed to the old server for 3 days so nobody is cut. Keep the old server on until then.`)),
+      why, err,
+      h("div", { class: "row" },
+        h("button", { class: "primary", onclick: async () => {
+          err.textContent = ""; why.textContent = T("در حال بررسی…", "Checking…");
+          try {
+            const r = await api("POST", "/api/v2/rep/legacy/check");
+            if (r.ok) route(); else why.textContent = T("هنوز نه: ", "Not yet: ") + (r.reason || "");
+          } catch (x) { why.textContent = ""; err.textContent = x.message; }
+        } }, T("بررسی", "Check")),
+        h("span", { class: "spacer" }),
+        h("button", { class: "ghost", onclick: async () => { await guarded(() => api("POST", "/api/v2/rep/legacy/step", { step: 0 })); route(); } }, T("بازگشت به لینک‌ها", "Back to links"))));
+  } else {
+    const left = v.fwd_until - Date.now() / 1000;
+    const cert = { ok: T("گواهی SSL آماده است", "certificate ready"), failed: T("گواهی SSL نگرفت: ", "certificate failed: ") + (v.cert_error || ""), issuing: T("در حال گرفتن گواهی SSL…", "getting the certificate…"), pending: T("در صف گرفتن گواهی SSL", "certificate queued") }[v.cert] || "";
+    body = h("div", { class: "card form" },
+      h("h2", {}, T("۳. انتقال انجام شد", "3. Moved")),
+      h("p", {}, T("کاربرها با بروزرسانی ساب در اپ، کانفیگ‌های جدید را می‌گیرند. کاربرهای جدیدی که می‌سازید با آدرس ساب این پنل ساخته می‌شوند.", "Users get the new configs when their app updates the subscription. New users you make use this panel's subscription address.")),
+      h("div", { class: "mz-badges" },
+        h("span", { class: "badge good" }, T("ساب را آپدیت کرده‌اند: ", "Updated: "), `${fmtNum(v.updated)} / ${fmtNum(v.clients)}`),
+        v.off ? h("span", { class: "badge bad" }, T("قطع به‌خاطر اعتبار: ", "Off for credit: "), fmtNum(v.off)) : null,
+        h("span", { class: "badge" }, T("مصرف کسرشده از اعتبار: ", "Use paid from credit: "), gb(v.billed)),
+        cert ? h("span", { class: `badge ${v.cert === "failed" ? "bad" : ""}` }, cert) : null,
+        left > 0 ? h("span", { class: "badge" }, T("عبور کانفیگ‌های قدیمی تا ", "Old configs passed through until "), fmtWhen(v.fwd_until)) : h("span", { class: "badge" }, T("عبور کانفیگ‌های قدیمی تمام شد", "Pass-through ended"))),
+      Object.keys(v.port_errors || {}).length ? h("p", { class: "error" }, T("این پورت‌ها روی سرور باز نشدند: ", "These ports could not open: "), Object.entries(v.port_errors).map(([p, e]) => `${p} (${e})`).join("، ")) : null,
+      h("a", { class: "btn", href: "#/clients" }, T("دیدن کاربران قدیمی", "See the old users")));
+  }
+  return h("div", {}, h("div", { class: "row" }, h("h1", {}, T("کاربران قدیمی", "Old users"))), stepper, facts, body);
+}
+
 async function viewReps() {
   const fa = lang === "fa";
   const [reps, inbounds, ov] = await Promise.all([api("GET", "/api/v2/admin/reps"), api("GET", "/api/v2/admin/inbounds"), api("GET", "/api/v2/admin/reps/overview").catch(() => [])]);
@@ -6534,7 +6616,7 @@ async function route() {
   } catch { return; }
   routes = routesFor(me);
   const first = Object.keys(routes)[0];
-  const hidden = { client: [viewClient, "clients"], repview: [viewRepDashboard, "reps"] };
+  const hidden = { client: [viewClient, "clients"], repview: [viewRepDashboard, "reps"], ...(me.legacy ? { legacy: [viewLegacy, "clients"] } : {}) };
   const view = hidden[name] ? hidden[name][0] : routes[name] || routes[first];
   try {
     const content = await view();
