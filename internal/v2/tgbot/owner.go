@@ -75,13 +75,6 @@ func (b *Bot) ownerHome(ctx context.Context, chat int64) {
 		faInt(int64(o.OnlineUsers)), size(o.TrafficToday), orders, alert, faTime(b.now().Unix())), b.ownerMenuKB(len(pending)))
 }
 
-func orDash(s string) string {
-	if s == "" {
-		return "—"
-	}
-	return s
-}
-
 func back(data string) []Button { return []Button{{Text: "« بازگشت", Data: data}} }
 
 // ownerCallback handles "a:" buttons; false means not an owner action.
