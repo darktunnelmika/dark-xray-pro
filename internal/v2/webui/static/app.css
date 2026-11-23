@@ -1152,7 +1152,19 @@ dialog.wide:has(.cform) { inline-size: min(780px, calc(100vw - 20px)); }
 .mz-field { display: grid; gap: 4px; }
 .mz-field code { flex: 1; min-inline-size: 0; overflow-wrap: anywhere; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-2); }
 .mz-steps { margin: 0; padding-inline-start: 20px; display: grid; gap: 4px; }
-.mz-mode { grid-template-columns: 1fr 1fr; }
+.mz-guide { display: grid; gap: 6px; }
+.mz-guide p { margin: 4px 0 0; }
+.mz-code-row { display: flex; gap: 6px; align-items: flex-start; min-inline-size: 0; }
+.mz-code { flex: 1; min-inline-size: 0; margin: 0; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-2); font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; text-align: left; }
+.mz-calls { display: grid; gap: 4px; }
+.mz-call { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 2px 8px; align-items: baseline; padding-block: 3px; border-block-end: 1px solid var(--line); }
+.mz-call > span { grid-column: 2; }
+.mz-calls .mz-call code { overflow-wrap: anywhere; font-size: 12px; background: none; border: 0; padding: 0; box-shadow: none; }
+.mz-method { font-weight: 700; font-size: 11px; }
+.mz-method.m-get { color: var(--good, #2bd07b); }
+.mz-method.m-post { color: var(--warn, #e3a32b); }
+.mz-method.m-put { color: #5aa9ff; }
+.mz-method.m-delete { color: var(--bad, #ff5d5d); }
 .mz-badges { display: flex; flex-wrap: wrap; gap: 6px; }
 .mz-copy { display: flex; gap: 6px; align-items: center; min-inline-size: 0; }
 .mz-steps li { overflow-wrap: anywhere; }

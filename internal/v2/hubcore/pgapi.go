@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"math"
 	"net/http"
 	"strconv"
@@ -70,9 +71,20 @@ const pgTokenTTL = 24 * time.Hour
 const PGAllGroups = "all-groups"
 
 func (s *Store) ensurePGSchema() error {
-	_, err := s.db.Exec(pgSchema)
-	return err
+	if _, err := s.db.Exec(pgSchema); err != nil {
+		return err
+	}
+	// bot_off: a reseller selling through Mirza has its own Dark bot off
+	// (both would serve the same customers); with the plain API (another
+	// bot, a website) it stays on. Accesses made before keep Mirza's way.
+	return s.addColumn("pg_api", "bot_off", "INTEGER NOT NULL DEFAULT 1")
 }
+
+// PG API modes: "mirza" turns the reseller's Dark bot off, "api" keeps it.
+const (
+	PGModeMirza = "mirza"
+	PGModeAPI   = "api"
+)
 
 // PGAPI is a seller's PasarGuard-compatible access, without the password.
 type PGAPI struct {
@@ -83,6 +95,9 @@ type PGAPI struct {
 	LastIP   string `json:"last_ip"`
 	Made     int64  `json:"made"`  // users created through it
 	Users    int    `json:"users"` // the seller's clients now
+	// Mode is PGModeMirza or PGModeAPI ("" while it was never made); the
+	// owner's is always PGModeAPI (the main bot never goes off).
+	Mode string `json:"mode"`
 	// Password is only set right after it was made.
 	Password string `json:"password,omitempty"`
 }
@@ -90,21 +105,44 @@ type PGAPI struct {
 // PGAPIOf is a seller's access ("" = the owner).
 func (s *Store) PGAPIOf(ctx context.Context, seller string) PGAPI {
 	var a PGAPI
-	_ = s.ro.QueryRowContext(ctx, `SELECT enabled,username,created_unix,last_used,last_ip,made FROM pg_api WHERE seller=?`, seller).
-		Scan(&a.Enabled, &a.Username, &a.Created, &a.LastUsed, &a.LastIP, &a.Made)
+	var botOff bool
+	if s.ro.QueryRowContext(ctx, `SELECT enabled,username,created_unix,last_used,last_ip,made,bot_off FROM pg_api WHERE seller=?`, seller).
+		Scan(&a.Enabled, &a.Username, &a.Created, &a.LastUsed, &a.LastIP, &a.Made, &botOff) == nil {
+		a.Mode = PGModeAPI
+		if seller != "" && botOff {
+			a.Mode = PGModeMirza
+		}
+	}
 	_ = s.ro.QueryRowContext(ctx, `SELECT COUNT(*) FROM clients WHERE rep_id=?`, seller).Scan(&a.Users)
 	return a
 }
 
-// MirzaMode tells whether a reseller sells through the PasarGuard API (and
-// so its own Dark bot stays off).
+// MirzaMode tells whether a reseller sells through Mirza (its access is on
+// in Mirza's mode), so its own Dark bot stays off.
 func (s *Store) MirzaMode(ctx context.Context, seller string) bool {
 	if seller == "" {
 		return false
 	}
 	var on bool
-	_ = s.ro.QueryRowContext(ctx, `SELECT enabled FROM pg_api WHERE seller=?`, seller).Scan(&on)
+	_ = s.ro.QueryRowContext(ctx, `SELECT enabled AND bot_off FROM pg_api WHERE seller=?`, seller).Scan(&on)
 	return on
+}
+
+// SetPGAPIMode chooses whether a reseller's access is for Mirza (its Dark
+// bot off) or for any PasarGuard client (its Dark bot on). The password and
+// sessions stay as they are.
+func (s *Store) SetPGAPIMode(ctx context.Context, seller, mode string) error {
+	if mode != PGModeMirza && mode != PGModeAPI {
+		return fmt.Errorf("%w: mode is mirza or api", ErrInvalid)
+	}
+	r, err := s.db.ExecContext(ctx, `UPDATE pg_api SET bot_off=? WHERE seller=?`, mode == PGModeMirza, seller)
+	if err != nil {
+		return err
+	}
+	if n, _ := r.RowsAffected(); n != 1 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 // EnablePGAPI turns a seller's access on with a fresh password (made the
@@ -861,14 +899,50 @@ func pgAdminRoutes(s *Store, mux *docMux, path string, wrap func(http.HandlerFun
 		}
 		reply(w, s.PGAPIOf(r.Context(), id), nil)
 	}))
+	// POST turns the access on with a fresh password; an optional
+	// {"mode": "mirza"|"api"} chooses the mode too (a new access is Mirza's).
 	mux.HandleFunc("POST "+path, wrap(func(w http.ResponseWriter, r *http.Request) {
 		id, ok := seller(r)
 		if !ok {
 			http.NotFound(w, r)
 			return
 		}
+		var in struct {
+			Mode string `json:"mode"`
+		}
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1024)).Decode(&in); err != nil && !errors.Is(err, io.EOF) {
+			reply(w, nil, fmt.Errorf("%w: invalid JSON", ErrInvalid))
+			return
+		}
+		if in.Mode != "" && in.Mode != PGModeMirza && in.Mode != PGModeAPI {
+			reply(w, nil, fmt.Errorf("%w: mode is mirza or api", ErrInvalid))
+			return
+		}
 		a, err := s.EnablePGAPI(r.Context(), id)
+		if err == nil && in.Mode != "" {
+			if err = s.SetPGAPIMode(r.Context(), id, in.Mode); err == nil {
+				pass := a.Password
+				a = s.PGAPIOf(r.Context(), id)
+				a.Password = pass
+			}
+		}
 		reply(w, a, err)
+	}))
+	// PUT {"mode": ...} switches the mode, keeping the password.
+	mux.HandleFunc("PUT "+path, wrap(func(w http.ResponseWriter, r *http.Request) {
+		id, ok := seller(r)
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+		var in struct {
+			Mode string `json:"mode"`
+		}
+		if !decode(w, r, &in) {
+			return
+		}
+		err := s.SetPGAPIMode(r.Context(), id, in.Mode)
+		reply(w, s.PGAPIOf(r.Context(), id), err)
 	}))
 	mux.HandleFunc("DELETE "+path, wrap(func(w http.ResponseWriter, r *http.Request) {
 		id, ok := seller(r)

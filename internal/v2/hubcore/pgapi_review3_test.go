@@ -4,7 +4,9 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -473,5 +475,81 @@ func TestOverdueBillStopsRenewAndReset(t *testing.T) {
 	}
 	if err := s.pgResetRep(ctx, "ali", "cust1"); err == nil {
 		t.Fatal("a reset gives the volume again")
+	}
+}
+
+// TestPGAPIModes: a reseller's access is for Mirza (its Dark bot off) or
+// for any PasarGuard client (its Dark bot on), switched from its panel
+// without a new password.
+func TestPGAPIModes(t *testing.T) {
+	s, _ := newStore(t)
+	ctx := context.Background()
+	seed(t, s)
+	_ = s.PutRep(ctx, Rep{ID: "ali", Name: "Ali", Enabled: true})
+	if err := s.SetRepLogin(ctx, "ali", "pass-12345678", "ali"); err != nil {
+		t.Fatal(err)
+	}
+	h := httptest.NewServer(AdminHandlerWith(s, "admintok", "", nil))
+	defer h.Close()
+	resp, err := http.Post(h.URL+"/api/v2/auth/login", "application/json", strings.NewReader(`{"Username":"ali","Password":"pass-12345678"}`))
+	if err != nil || resp.StatusCode != 200 {
+		t.Fatal("login", err)
+	}
+	cookie := resp.Cookies()[0]
+	resp.Body.Close()
+	panel := func(method, body string) (int, map[string]any) {
+		var rd io.Reader
+		if body != "" {
+			rd = strings.NewReader(body)
+		}
+		req, _ := http.NewRequest(method, h.URL+"/api/v2/rep/pg-api", rd)
+		req.AddCookie(cookie)
+		req.Header.Set("X-Dark-Request", "1")
+		req.Header.Set("Content-Type", "application/json")
+		r, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer r.Body.Close()
+		out := map[string]any{}
+		_ = json.NewDecoder(r.Body).Decode(&out)
+		return r.StatusCode, out
+	}
+	c := pgClient{t, h.URL}
+
+	// The plain API: the Dark bot stays on.
+	code, a := panel("POST", `{"mode":"api"}`)
+	if code != 200 || a["mode"] != "api" || a["password"] == "" || s.MirzaMode(ctx, "ali") {
+		t.Fatalf("api mode %d %v mirza=%v", code, a, s.MirzaMode(ctx, "ali"))
+	}
+	pass := a["password"].(string)
+	tok := c.login("mirza_ali", pass)
+	if code, _ := c.obj("GET", "/api/users", tok, nil); code != 200 {
+		t.Fatal("the API works", code)
+	}
+	// Switching to Mirza keeps the password and the sessions; the Dark bot goes off.
+	if code, a := panel("PUT", `{"mode":"mirza"}`); code != 200 || a["mode"] != "mirza" || a["password"] != nil || !s.MirzaMode(ctx, "ali") {
+		t.Fatalf("mirza mode %d %v", code, a)
+	}
+	if code, _ := c.obj("GET", "/api/users", tok, nil); code != 200 {
+		t.Fatal("the session survives a switch", code)
+	}
+	c.login("mirza_ali", pass)
+	if code, _ := panel("PUT", `{"mode":"other"}`); code != 400 {
+		t.Fatal("a bad mode", code)
+	}
+	// A new password without a mode keeps the mode; a new access is Mirza's.
+	if code, a := panel("POST", ""); code != 200 || a["mode"] != "mirza" {
+		t.Fatalf("new password %d %v", code, a)
+	}
+	if code, _ := panel("DELETE", ""); code != 200 || s.MirzaMode(ctx, "ali") {
+		t.Fatal("off", code)
+	}
+	if a := s.PGAPIOf(ctx, ""); a.Mode != "" {
+		t.Fatal("the owner's access was never made", a.Mode)
+	}
+	o, _ := s.EnablePGAPI(ctx, "")
+	if a := s.PGAPIOf(ctx, ""); a.Mode != "api" || o.Password == "" {
+		t.Fatal("the owner's access never turns a bot off", a.Mode)
 	}
 }

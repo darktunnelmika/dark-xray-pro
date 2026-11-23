@@ -4470,9 +4470,11 @@ function walletsPane() {
 }
 
 // A reseller's own Telegram sales bot.
-// mirzaCard connects a sales bot made for PasarGuard (Mirza) to this panel.
-// For a reseller it is a choice of how it sells: the Dark bot or Mirza
-// (the Dark bot stays off meanwhile).
+// mirzaCard connects a sales bot or a website made for PasarGuard to this
+// panel (Mirza above all). A reseller picks how it sells: its Dark bot,
+// Mirza (its Dark bot goes off: both would serve the same customers) or the
+// PasarGuard API for any other bot or site (its Dark bot stays on). The
+// owner's access never turns the main bot off.
 function mirzaCard(path, isRep) {
   const fa = lang === "fa";
   const T = (f, e) => (fa ? f : e);
@@ -4483,50 +4485,106 @@ function mirzaCard(path, isRep) {
     const m = Math.max(0, Math.round((Date.now() / 1000 - u) / 60));
     return m < 2 ? T("همین الان", "just now") : m < 60 ? T(`${fmtNum(m)} دقیقه پیش`, `${m} min ago`) : m < 1440 ? T(`${fmtNum(Math.round(m / 60))} ساعت پیش`, `${Math.round(m / 60)} h ago`) : new Date(u * 1000).toLocaleDateString(fa ? "fa-IR" : "en-GB");
   };
+  const copyBtn = (value) => h("button", { type: "button", class: "ghost", onclick: () => copy(value) }, T("کپی", "Copy"));
   const field = (label, value, secret) => h("div", { class: "mz-field" }, h("span", { class: "small muted" }, label),
-    h("div", { class: "mz-copy" }, h("code", { dir: "ltr", class: secret ? "mz-secret" : "" }, value), h("button", { type: "button", class: "ghost", onclick: () => copy(value) }, T("کپی", "Copy"))));
-  const turnOn = async () => {
+    h("div", { class: "mz-copy" }, h("code", { dir: "ltr", class: secret ? "mz-secret" : "" }, value), copyBtn(value)));
+  const send = async (method, data) => {
     err.textContent = "";
-    try { draw(await api("POST", path)); } catch (x) { err.textContent = x.message; }
+    try { draw(await api(method, path, data)); } catch (x) { err.textContent = x.message; }
   };
-  const turnOff = async () => {
-    if (!confirm(isRep ? T("اتصال میرزا قطع و ربات دارک دوباره روشن شود؟", "Disconnect Mirza and turn the Dark bot back on?") : T("اتصال میرزا قطع شود؟", "Disconnect Mirza?"))) return;
-    err.textContent = "";
-    try { draw(await api("DELETE", path)); } catch (x) { err.textContent = x.message; }
+  const turnOff = (mode) => {
+    const q = !isRep ? T("دسترسی API قطع شود؟ ربات‌ها و سایت‌هایی که با آن وصل‌اند دیگر کار نمی‌کنند.", "Turn the API access off? Bots and sites using it stop working.")
+      : mode === "mirza" ? T("اتصال میرزا قطع و ربات دارک دوباره روشن شود؟", "Disconnect Mirza and turn the Dark bot back on?")
+        : T("دسترسی API قطع شود؟ ربات‌ها و سایت‌هایی که با آن وصل‌اند دیگر کار نمی‌کنند.", "Turn the API access off? Bots and sites using it stop working.");
+    if (confirm(q)) send("DELETE");
   };
+  // choose moves a reseller to a way of selling: off, or on in a mode. A
+  // new access comes with a fresh password; switching keeps the password.
+  const choose = (want, cur) => {
+    if (want === cur) return;
+    if (want === "dark") return turnOff(cur);
+    if (cur === "dark") return send("POST", { mode: want });
+    send("PUT", { mode: want });
+  };
+
+  // The PasarGuard API in short: how to sign in, and the calls most bots
+  // and sites need. Same paths and fields as PasarGuard's own API.
+  function guide(a) {
+    const base = location.origin;
+    // In Persian text, Latin words (paths, field names) are isolated so the
+    // right-to-left line keeps its order and its brackets.
+    const bi = (text) => fa ? text.split(/(\/?[A-Za-z_][A-Za-z0-9_\/{}.\-]*)/).map((x, i) => i % 2 ? h("bdi", { dir: "ltr" }, x) : x) : text;
+    const login = `curl -X POST ${base}/api/admin/token \\\n  -d "username=${a.username}" -d "password=YOUR_PASSWORD"`;
+    const create = `curl -X POST ${base}/api/user \\\n  -H "Authorization: Bearer TOKEN" -H "Content-Type: application/json" \\\n  -d '{"username": "ali123", "data_limit": 32212254720, "expire": "2026-12-31T00:00:00Z", "group_ids": [1]}'`;
+    const calls = [
+      ["GET", "/api/users", T("فهرست کاربرها، با فیلتر وضعیت، جستجو و صفحه‌بندی", "list users, by status, search and page")],
+      ["POST", "/api/user", T("ساخت کاربر", "create a user")],
+      ["GET", "/api/user/{username}", T("یک کاربر: مصرف، انقضا، لینک‌ها", "one user: usage, expiry, links")],
+      ["PUT", "/api/user/{username}", T("تمدید یا تغییر (حجم، انقضا، روشن/خاموش)", "renew or change (volume, expiry, on/off)")],
+      ["POST", "/api/user/{username}/reset", T("صفر کردن مصرف", "reset usage")],
+      ["POST", "/api/user/{username}/revoke_sub", T("لینک و مشخصات تازه", "a new link and credentials")],
+      ["DELETE", "/api/user/{username}", T("حذف", "delete")],
+      ["GET", "/api/groups", T("اینباندهای مجاز شما، همان group_ids", "the inbounds you may give: the group_ids")],
+      ["GET", "/api/user_templates", T("پلن‌های شما", "your plans")],
+      ["POST", "/api/user/from_template", T("فروش یک پلن", "sell a plan")],
+      ["GET", "/api/users/usage", T("نمودار مصرف", "usage chart")],
+    ];
+    const code = (text) => h("div", { class: "mz-code-row" }, h("pre", { dir: "ltr", class: "mz-code" }, text), copyBtn(text.replace(/\\\n\s*/g, "")));
+    return h("details", { class: "adv-box mz-guide" }, h("summary", {}, T("📘 راهنمای API (مثل API پاسارگاد)", "📘 API guide (as PasarGuard's API)")),
+      h("p", { class: "small muted" }, T("هر ربات یا سایتی که برای پاسارگاد ساخته شده با همین آدرس‌ها و فیلدها کار می‌کند. کاربرهایی که می‌سازد مال شما هستند و از اعتبارتان کم می‌شود.",
+        "Any bot or site made for PasarGuard works with these same paths and fields. The users it makes are yours and use your credit.")),
+      h("p", { class: "small" }, T("۱. گرفتن توکن (۲۴ ساعت اعتبار دارد):", "1. Get a token (valid for 24 hours):")), code(login),
+      h("p", { class: "small" }, T("۲. توکن را در هر درخواست بفرستید:", "2. Send it with every call:")), code("Authorization: Bearer TOKEN"),
+      h("p", { class: "small" }, T("۳. درخواست‌های اصلی:", "3. The main calls:")),
+      h("div", { class: "mz-calls", dir: "ltr" }, calls.map(([m, p, what]) => h("div", { class: "mz-call" },
+        h("code", { class: `mz-method m-${m.toLowerCase()}` }, m), h("code", { class: "mz-path" }, p), h("span", { class: "small muted", dir: fa ? "rtl" : "ltr" }, bi(what))))),
+      h("p", { class: "small" }, T("نمونهٔ ساخت کاربر ۳۰ گیگ:", "Example: a 30 GB user:")), code(create),
+      h("p", { class: "small muted" }, bi(T("حجم یا data_limit به بایت است و ۰ یعنی نامحدود. انقضا یا expire زمان یونیکس یا تاریخ ISO است. group_ids را از /api/groups بگیرید. بقیهٔ مسیرهای پاسارگاد هم هستند: by-id، کارهای گروهی و قالب‌ها.",
+        "data_limit is in bytes (0 = unlimited), expire is a Unix time or an ISO date, and group_ids come from /api/groups. PasarGuard's other paths (by-id, bulk actions, templates) are here too."))));
+  }
+
   function draw(a) {
     const on = !!a.enabled;
-    const mode = isRep ? h("div", { class: "segs mz-mode", role: "group", "aria-label": T("روش فروش", "How you sell") },
-      h("button", { type: "button", class: "seg", "aria-pressed": String(!on), onclick: () => on && turnOff() }, "🤖 ", T("ربات دارک", "Dark bot")),
-      h("button", { type: "button", class: "seg", "aria-pressed": String(on), onclick: () => !on && turnOn() }, "🔗 ", T("ربات میرزا", "Mirza bot"))) : null;
+    const cur = !on ? "dark" : (a.mode || "mirza");
+    const seg = (key, icon, label) => h("button", { type: "button", class: "seg", "aria-pressed": String(cur === key), onclick: () => choose(key, cur) }, icon + " ", label);
+    const modes = isRep ? h("div", { class: "segs", role: "group", "aria-label": T("روش فروش", "How you sell") },
+      seg("dark", "🤖", T("ربات دارک", "Dark bot")), seg("mirza", "🔗", T("ربات میرزا", "Mirza bot")), seg("api", "🔌", T("API پاسارگاد", "PasarGuard API"))) : null;
     if (!on) {
-      fill(body, mode,
+      fill(body, modes,
         h("p", { class: "small muted" }, isRep
-          ? T("اگر مشتری‌هایتان در ربات میرزا هستند، «ربات میرزا» را بزنید. پنل ما برای میرزا مثل یک پنل پاسارگاد کار می‌کند و ربات دارک شما خاموش می‌ماند.", "If your customers are in a Mirza bot, choose “Mirza bot”. This panel works for Mirza like a PasarGuard panel, and your Dark bot stays off.")
-          : T("ربات میرزا (یا هر ربات فروشی که پنل پاسارگاد را می‌شناسد) را به این پنل وصل کنید. ربات اصلی دارک روشن می‌ماند.", "Connect a Mirza bot (or any sales bot that speaks PasarGuard) to this panel. The main Dark bot stays on.")),
-        isRep ? null : h("button", { type: "button", class: "primary", onclick: turnOn }, T("ساخت اتصال میرزا", "Create the Mirza connection")), err);
+          ? T("فروش با ربات دارک است. اگر مشتری‌هایتان در ربات میرزا هستند «ربات میرزا» را بزنید (ربات دارک خاموش می‌شود). برای وصل کردن ربات یا سایت دیگری که با پاسارگاد کار می‌کند «API پاسارگاد» را بزنید (ربات دارک روشن می‌ماند).",
+            "You sell with the Dark bot. If your customers are in a Mirza bot, choose “Mirza bot” (the Dark bot goes off). To connect another bot or a website that works with PasarGuard, choose “PasarGuard API” (the Dark bot stays on).")
+          : T("ربات میرزا یا هر ربات و سایتی که پنل پاسارگاد را می‌شناسد با این دسترسی به این پنل وصل می‌شود. ربات اصلی دارک روشن می‌ماند.",
+            "Mirza, or any bot or site that knows the PasarGuard panel, connects to this panel with this access. The main Dark bot stays on.")),
+        isRep ? null : h("button", { type: "button", class: "primary", onclick: () => send("POST", { mode: "api" }) }, T("ساخت دسترسی API", "Create the API access")), err);
       return;
     }
-    fill(body, mode,
+    const mirza = isRep ? cur === "mirza" : true;
+    fill(body, modes,
       h("div", { class: "mz-badges" }, h("span", { class: "badge good" }, "● ", T("فعال", "on")),
         h("span", { class: "badge" }, T("آخرین اتصال: ", "last call: "), ago(a.last_used)),
-        h("span", { class: "badge" }, T(`${fmtNum(a.made)} کاربر ساخته شده با میرزا`, `${a.made} users made by Mirza`))),
-      h("ol", { class: "mz-steps small" },
+        h("span", { class: "badge" }, T(`${fmtNum(a.made)} کاربر ساخته شده با API`, `${a.made} users made through the API`))),
+      mirza ? h("ol", { class: "mz-steps small" },
         h("li", {}, T("در پنل ادمین میرزا «🖥 اضافه کردن پنل» را بزنید و نوع پنل را «پاسارگارد» انتخاب کنید.", "In Mirza's admin menu tap “🖥 Add panel” and choose the PasarGuard type.")),
         h("li", {}, T("آدرس، نام کاربری و رمز زیر را وارد کنید.", "Enter the address, username and password below.")),
-        h("li", {}, T("در «✏️ مدیریت پنل» دکمهٔ «🎛 تنظیم نام گروه» را بزنید و عبارت all-groups را بفرستید تا همهٔ اینباندهای مجاز شما برای کاربرهای جدید انتخاب شود (یا نام کاربری یکی از کاربرهایتان را بفرستید تا فقط اینباندهای او برداشته شود).", "In “✏️ Panel management” tap “🎛 Set group name” and send all-groups to give new users every inbound you may give (or send one of your users' names to copy just its inbounds)."))),
-      field(T("آدرس پنل", "Panel address"), location.origin),
+        h("li", {}, T("در «✏️ مدیریت پنل» دکمهٔ «🎛 تنظیم نام گروه» را بزنید و عبارت all-groups را بفرستید تا همهٔ اینباندهای مجاز شما برای کاربرهای جدید انتخاب شود (یا نام کاربری یکی از کاربرهایتان را بفرستید تا فقط اینباندهای او برداشته شود).", "In “✏️ Panel management” tap “🎛 Set group name” and send all-groups to give new users every inbound you may give (or send one of your users' names to copy just its inbounds).")))
+        : h("p", { class: "small" }, T("ربات یا سایت شما با آدرس، نام کاربری و رمز زیر مثل یک پنل پاسارگاد وصل می‌شود. راهنمای API پایین همین کارت است.",
+          "Your bot or site connects with the address, username and password below, as to a PasarGuard panel. The API guide is at the bottom of this card.")),
+      field(T("آدرس پنل (API)", "Panel address (API)"), location.origin),
       field(T("نام کاربری", "Username"), a.username),
       a.password ? field(T("رمز (فقط همین یک بار نشان داده می‌شود)", "Password (shown only this once)"), a.password, true)
-        : h("p", { class: "small muted" }, T("رمز فقط هنگام ساخت نشان داده می‌شود. اگر ندارید، رمز تازه بسازید و در میرزا عوض کنید.", "The password is shown only when made. If you lost it, make a new one and change it in Mirza.")),
-      isRep ? h("p", { class: "small muted" }, T("کاربرهایی که میرزا می‌سازد زیر حساب شما ثبت و از اعتبارتان کم می‌شود. ربات دارک شما تا وقتی این حالت روشن است خاموش است.", "Users Mirza makes are yours and use your credit. Your Dark bot is off while this is on.")) : null,
+        : h("p", { class: "small muted" }, T("رمز فقط هنگام ساخت نشان داده می‌شود. اگر ندارید، رمز تازه بسازید و در ربات یا سایتتان عوض کنید.", "The password is shown only when made. If you lost it, make a new one and change it in your bot or site.")),
+      isRep ? h("p", { class: "small muted" }, cur === "mirza"
+        ? T("کاربرهایی که میرزا می‌سازد زیر حساب شما ثبت و از اعتبارتان کم می‌شود. ربات دارک شما تا وقتی این حالت روشن است خاموش است.", "Users Mirza makes are yours and use your credit. Your Dark bot is off while this is on.")
+        : T("کاربرهایی که از راه API ساخته می‌شوند زیر حساب شما ثبت و از اعتبارتان کم می‌شود. ربات دارک شما روشن می‌ماند.", "Users made through the API are yours and use your credit. Your Dark bot stays on.")) : null,
+      guide(a),
       err,
       h("div", { class: "row" },
-        h("button", { type: "button", onclick: () => confirm(T("رمز تازه ساخته شود؟ رمز قبلی دیگر کار نمی‌کند و باید در میرزا عوض شود.", "Make a new password? The old one stops working; change it in Mirza.")) && turnOn() }, T("رمز تازه", "New password")),
-        isRep ? null : h("button", { type: "button", class: "danger", onclick: turnOff }, T("قطع اتصال", "Disconnect"))));
+        h("button", { type: "button", onclick: () => confirm(T("رمز تازه ساخته شود؟ رمز قبلی دیگر کار نمی‌کند و باید در ربات یا سایتتان عوض شود.", "Make a new password? The old one stops working; change it in your bot or site.")) && send("POST") }, T("رمز تازه", "New password")),
+        isRep ? null : h("button", { type: "button", class: "danger", onclick: () => turnOff("api") }, T("قطع دسترسی", "Turn off"))));
   }
   api("GET", path).then(draw).catch((x) => fill(body, h("p", { class: "error" }, x.message)));
-  return h("section", { class: "card form" }, h("h2", {}, isRep ? T("روش فروش", "How you sell") : T("🔗 اتصال ربات میرزا", "🔗 Mirza bot connection")), body);
+  return h("section", { class: "card form" }, h("h2", {}, isRep ? T("روش فروش", "How you sell") : T("🔌 API پاسارگاد (میرزا و ربات‌های دیگر)", "🔌 PasarGuard API (Mirza and other bots)")), body);
 }
 
 function repBotCard(path) {
