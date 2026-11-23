@@ -178,3 +178,84 @@ func TestResellerTranscript(t *testing.T) {
 	dump("a customer of the reseller /start")
 	_ = os.WriteFile(out, []byte(sb.String()), 0o644)
 }
+
+// TestOwnerTranscript opens every button of the owner's console, and the
+// buttons of each screen it leads to (review aid; DARK_TRANSCRIPT3).
+func TestOwnerTranscript(t *testing.T) {
+	out := os.Getenv("DARK_TRANSCRIPT3")
+	if out == "" {
+		t.Skip()
+	}
+	s, err := hubcore.Open(filepath.Join(t.TempDir(), "v2.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	ctx := context.Background()
+	_, _ = s.CreateNode(ctx, "n1", "N")
+	_ = s.PutInbound(ctx, "in1", "n1", []byte(`{"protocol":"vless","port":443,"settings":{}}`), true)
+	owner := hubcore.Principal{User: "o", Role: "owner"}
+	_ = s.PutProduct(ctx, owner, hubcore.Product{ID: "p30", Name: "30GB", Plan: "volume", GB: 30, Days: 30, Inbounds: []string{"in1"}, Price: 200000, Status: "published"})
+	_ = s.PutCard(ctx, hubcore.CardInfo{Number: "6037-9911-2233-4455", Holder: "Ali"})
+	_ = s.PutRep(ctx, hubcore.Rep{ID: "ali", Name: "Ali", Enabled: true})
+	_ = s.PutClient(ctx, hubcore.Client{Email: "user1", Enabled: true, VolumeBytes: 10 << 30, Inbounds: []string{"in1"}})
+	api := &fakeAPI{}
+	b := &Bot{Store: s, API: api, Owners: map[int64]bool{ownerID: true}, SubBase: "https://sub.example", Now: time.Now, Logf: t.Logf}
+	var sb strings.Builder
+	dump := func(step string) []sent {
+		l := api.take()
+		fmt.Fprintf(&sb, "\n===== %s\n", step)
+		for _, m := range l {
+			if m.chat != ownerID {
+				continue
+			}
+			fmt.Fprintf(&sb, "%s%s\n", map[bool]string{true: "[photo] "}[m.photo], m.text)
+			if m.kb != nil {
+				for _, r := range m.kb.Rows {
+					var bs []string
+					for _, x := range r {
+						bs = append(bs, fmt.Sprintf("[%s|%s]", x.Text, x.Data+x.URL))
+					}
+					fmt.Fprintf(&sb, "    %s\n", strings.Join(bs, " "))
+				}
+			}
+		}
+		return l
+	}
+	buttons := func(l []sent) []Button {
+		var bs []Button
+		for _, m := range l {
+			if m.chat == ownerID && m.kb != nil {
+				for _, r := range m.kb.Rows {
+					for _, x := range r {
+						if x.Data != "" {
+							bs = append(bs, x)
+						}
+					}
+				}
+			}
+		}
+		return bs
+	}
+	seen := map[string]bool{"home": true, "a:home": true}
+	b.Handle(ctx, msg(ownerID, "/start"))
+	top := buttons(dump("owner /start"))
+	for _, x := range top {
+		if seen[x.Data] {
+			continue
+		}
+		seen[x.Data] = true
+		b.takeAwait(ownerID)
+		b.Handle(ctx, cb(ownerID, x.Data))
+		for _, y := range buttons(dump("presses «" + x.Text + "»")) {
+			if seen[y.Data] || strings.Contains(y.Data, "del") || strings.Contains(y.Data, "off") || strings.Contains(y.Data, "restart") {
+				continue
+			}
+			seen[y.Data] = true
+			b.takeAwait(ownerID)
+			b.Handle(ctx, cb(ownerID, y.Data))
+			dump("  then «" + y.Text + "»")
+		}
+	}
+	_ = os.WriteFile(out, []byte(sb.String()), 0o644)
+}
