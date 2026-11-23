@@ -16,17 +16,17 @@ import (
 )
 
 // A PasarGuard-compatible API, so sales bots made for PasarGuard (Mirza
-// above all) can use this panel as if it were one. Only what those bots
-// call is served, under PasarGuard's own paths and shapes:
+// above all) can use this panel as if it were one, under PasarGuard's own
+// paths and shapes. This file has the core; pgapi_more.go has the rest of
+// the user API (by id, bulk, templates, usage charts, cleanup):
 //
 //	POST   /api/admin/token                 username+password (form) -> bearer token
 //	GET    /api/admin                       who the token is
 //	GET    /api/system                      counts and memory
 //	GET    /api/groups                      inbounds, as PasarGuard groups
 //	GET    /api/nodes                       nodes (owner only; empty for a reseller)
-//	GET    /api/users                       users, ?status= &username= &offset= &limit=
 //	POST   /api/user                        create
-//	GET    /api/user/{username}             read
+//	GET    /api/user/{username}             read      (and by-username/, by-id/)
 //	PUT    /api/user/{username}             change
 //	DELETE /api/user/{username}             delete
 //	POST   /api/user/{username}/reset       reset usage
@@ -304,6 +304,9 @@ type pgUser struct {
 	Links                  []string       `json:"links"`
 	Admin                  map[string]any `json:"admin"`
 	NextPlan               any            `json:"next_plan"`
+	HWIDLimit              *int           `json:"hwid_limit"`
+	AutoDeleteInDays       *int           `json:"auto_delete_in_days"`
+	HWIDCount              *int           `json:"hwid_count,omitempty"` // lists only
 }
 
 func pgTime(unix int64) *string {
@@ -335,9 +338,22 @@ func pgStatus(c ClientView, now int64) string {
 func (s *Store) pgView(ctx context.Context, r *http.Request, base string, c ClientView, groups []pgGroup, links bool) pgUser {
 	now := s.now().Unix()
 	u := pgUser{Username: c.Email, Status: pgStatus(c, now), UsedTraffic: c.Usage.Up + c.Usage.Down,
-		DataLimitResetStrategy: "no_reset", Note: c.Note, GroupIDs: []int64{}, Links: []string{},
-		Admin: map[string]any{"username": or2(c.RepID, "owner")}, OnlineAt: pgTime(c.Usage.LastSeen),
-		SubscriptionURL: subURL(base, r, c.SubToken)}
+		DataLimitResetStrategy: pgStrategyOf(c.ResetPeriod), Note: c.Note, GroupIDs: []int64{}, Links: []string{},
+		Admin: map[string]any{"id": nil, "username": or2(c.RepID, "owner")}, OnlineAt: pgTime(c.Usage.LastSeen),
+		SubscriptionURL: subURL(base, r, c.SubToken), OnHoldTimeout: pgTime(c.StartBy)}
+	if c.RepID != "" {
+		var rid int64
+		if s.ro.QueryRowContext(ctx, `SELECT rowid FROM reps WHERE id=?`, c.RepID).Scan(&rid) == nil {
+			u.Admin["id"] = rid
+		}
+	}
+	if c.HWIDLimit > 0 {
+		n := c.HWIDLimit
+		u.HWIDLimit = &n
+	}
+	if np := c.NextPlan; np != nil {
+		u.NextPlan = map[string]any{"user_template_id": nil, "data_limit": int64(np.GB * (1 << 30)), "expire": int64(np.Days) * 86400, "add_remaining_traffic": false}
+	}
 	var created int64
 	_ = s.ro.QueryRowContext(ctx, `SELECT rowid,created_unix FROM clients WHERE email=?`, c.Email).Scan(&u.ID, &created)
 	if t := pgTime(created); t != nil {
@@ -401,6 +417,12 @@ type pgIn struct {
 	GroupIDs             json.RawMessage `json:"group_ids"`
 	Inbounds             json.RawMessage `json:"inbounds"` // Mirza sends the groups here on renewals
 	Note                 *string         `json:"note"`
+	// The rest of PasarGuard's fields (pgapi_more.go); proxy_settings and
+	// auto_delete_in_days are accepted and ignored.
+	DataLimitResetStrategy *string         `json:"data_limit_reset_strategy"`
+	HWIDLimit              *int            `json:"hwid_limit"`
+	OnHoldTimeout          json.RawMessage `json:"on_hold_timeout"`
+	NextPlan               json.RawMessage `json:"next_plan"`
 }
 
 // pgExpire reads an expiry given as a Unix time, an ISO time, 0 or null.
@@ -611,24 +633,6 @@ func pgRoutes(s *Store, mux *http.ServeMux, subBase string) {
 		}
 		return subBase
 	}
-	// mine reads one of the seller's clients.
-	mine := func(r *http.Request, seller string) (ClientView, error) {
-		c, err := s.clientView(r.Context(), r.PathValue("username"))
-		if err != nil || c.RepID != seller {
-			return ClientView{}, ErrNotFound
-		}
-		return c, nil
-	}
-	view := func(w http.ResponseWriter, r *http.Request, seller, email string) {
-		c, err := s.clientView(r.Context(), email)
-		if err != nil {
-			pgFail(w, err)
-			return
-		}
-		groups, _ := s.pgGroups(r.Context(), seller)
-		pgJSON(w, s.pgView(r.Context(), r, base(r, seller), c, groups, true))
-	}
-
 	mux.HandleFunc("POST /api/admin/token", func(w http.ResponseWriter, r *http.Request) {
 		user, pass := r.PostFormValue("username"), r.PostFormValue("password")
 		if user == "" && strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") {
@@ -709,39 +713,6 @@ func pgRoutes(s *Store, mux *http.ServeMux, subBase string) {
 		}
 		pgJSON(w, out)
 	}))
-	mux.HandleFunc("GET /api/users", auth(func(w http.ResponseWriter, r *http.Request, seller string) {
-		list, err := s.clientViews(r.Context(), "c.rep_id=?", seller)
-		if err != nil {
-			pgFail(w, err)
-			return
-		}
-		q := r.URL.Query()
-		status, name := q.Get("status"), strings.ToLower(q.Get("username"))
-		if name == "" {
-			name = strings.ToLower(q.Get("search"))
-		}
-		offset, _ := strconv.Atoi(q.Get("offset"))
-		limit, _ := strconv.Atoi(q.Get("limit"))
-		groups, _ := s.pgGroups(r.Context(), seller)
-		now := s.now().Unix()
-		b := base(r, seller)
-		users := []pgUser{}
-		total := 0
-		for _, c := range list {
-			if status != "" && pgStatus(c, now) != status {
-				continue
-			}
-			if name != "" && !strings.Contains(strings.ToLower(c.Email), name) {
-				continue
-			}
-			total++
-			if total <= offset || (limit > 0 && len(users) >= limit) {
-				continue
-			}
-			users = append(users, s.pgView(r.Context(), r, b, c, groups, false))
-		}
-		pgJSON(w, map[string]any{"users": users, "total": total})
-	}))
 	mux.HandleFunc("POST /api/user", auth(func(w http.ResponseWriter, r *http.Request, seller string) {
 		var in pgIn
 		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&in); err != nil {
@@ -758,6 +729,10 @@ func pgRoutes(s *Store, mux *http.ServeMux, subBase string) {
 			pgErr(w, http.StatusConflict, "User already exists")
 			return
 		}
+		if err := s.pgCheckExtras(r.Context(), seller, in); err != nil {
+			pgFail(w, err)
+			return
+		}
 		c := Client{Email: in.Username}
 		if err := s.pgApply(r.Context(), seller, &c, in, true); err != nil {
 			pgFail(w, err)
@@ -767,131 +742,14 @@ func pgRoutes(s *Store, mux *http.ServeMux, subBase string) {
 			pgFail(w, err)
 			return
 		}
-		if in.Note != nil {
-			_ = s.SetClientNote(r.Context(), c.Email, clip(*in.Note, 2000))
+		if err := s.pgSetExtras(r.Context(), seller, c.Email, in); err != nil {
+			pgFail(w, err)
+			return
 		}
 		_, _ = s.db.ExecContext(r.Context(), `UPDATE pg_api SET made=made+1 WHERE seller=?`, seller)
-		view(w, r, seller, c.Email)
+		(&pgSrv{s: s, base: base}).view(w, r, seller, c.Email)
 	}))
-	mux.HandleFunc("GET /api/user/{username}", auth(func(w http.ResponseWriter, r *http.Request, seller string) {
-		c, err := mine(r, seller)
-		if err != nil && r.PathValue("username") == PGAllGroups {
-			// Not a real user: every inbound the seller may give, for a bot
-			// that learns its groups by reading one user.
-			groups, _ := s.pgGroups(r.Context(), seller)
-			u := pgUser{Username: PGAllGroups, Status: "disabled", DataLimitResetStrategy: "no_reset", GroupIDs: []int64{}, Links: []string{},
-				ProxySettings: map[string]any{}, Admin: map[string]any{"username": or2(seller, "owner")}}
-			for _, g := range groups {
-				if !g.IsDisabled {
-					u.GroupIDs = append(u.GroupIDs, g.ID)
-				}
-			}
-			pgJSON(w, u)
-			return
-		}
-		if err != nil {
-			pgFail(w, err)
-			return
-		}
-		groups, _ := s.pgGroups(r.Context(), seller)
-		pgJSON(w, s.pgView(r.Context(), r, base(r, seller), c, groups, true))
-	}))
-	mux.HandleFunc("PUT /api/user/{username}", auth(func(w http.ResponseWriter, r *http.Request, seller string) {
-		cur, err := mine(r, seller)
-		if err != nil {
-			pgFail(w, err)
-			return
-		}
-		var in pgIn
-		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&in); err != nil {
-			pgErr(w, http.StatusUnprocessableEntity, "invalid JSON")
-			return
-		}
-		c := cur.Client
-		c.UUID, c.Secret, c.SubToken = "", "", "" // credentials stay as they are
-		if err := s.pgApply(r.Context(), seller, &c, in, false); err != nil {
-			pgFail(w, err)
-			return
-		}
-		if err := s.pgSave(r.Context(), seller, c); err != nil {
-			pgFail(w, err)
-			return
-		}
-		if in.Note != nil {
-			_ = s.SetClientNote(r.Context(), c.Email, clip(*in.Note, 2000))
-		}
-		view(w, r, seller, c.Email)
-	}))
-	mux.HandleFunc("DELETE /api/user/{username}", auth(func(w http.ResponseWriter, r *http.Request, seller string) {
-		c, err := mine(r, seller)
-		if err != nil {
-			pgFail(w, err)
-			return
-		}
-		if seller == "" {
-			err = s.DeleteClient(r.Context(), c.Email)
-		} else {
-			_, _, err = s.RepDeleteClient(r.Context(), "mirza", seller, c.Email)
-		}
-		if err != nil {
-			pgFail(w, err)
-			return
-		}
-		pgJSON(w, map[string]string{"detail": "User successfully deleted"})
-	}))
-	mux.HandleFunc("POST /api/user/{username}/reset", auth(func(w http.ResponseWriter, r *http.Request, seller string) {
-		c, err := mine(r, seller)
-		if err != nil {
-			pgFail(w, err)
-			return
-		}
-		if seller == "" {
-			err = s.ResetUsage(r.Context(), c.Email, "api")
-		} else {
-			err = s.pgResetRep(r.Context(), seller, c.Email)
-		}
-		if err != nil {
-			pgFail(w, err)
-			return
-		}
-		view(w, r, seller, c.Email)
-	}))
-	mux.HandleFunc("POST /api/user/{username}/revoke_sub", auth(func(w http.ResponseWriter, r *http.Request, seller string) {
-		c, err := mine(r, seller)
-		if err != nil {
-			pgFail(w, err)
-			return
-		}
-		if err := s.RotateClient(r.Context(), c.Email, true, true); err != nil {
-			pgFail(w, err)
-			return
-		}
-		view(w, r, seller, c.Email)
-	}))
-	mux.HandleFunc("GET /api/user/{username}/sub_update", auth(func(w http.ResponseWriter, r *http.Request, seller string) {
-		c, err := mine(r, seller)
-		if err != nil {
-			pgFail(w, err)
-			return
-		}
-		type upd struct {
-			CreatedAt string `json:"created_at"`
-			UserAgent string `json:"user_agent"`
-		}
-		ups := []upd{}
-		rows, err := s.ro.QueryContext(r.Context(), `SELECT last_unix,agent FROM client_devices WHERE email=? ORDER BY last_unix DESC LIMIT 10`, c.Email)
-		if err == nil {
-			defer rows.Close()
-			for rows.Next() {
-				var at int64
-				var agent string
-				if rows.Scan(&at, &agent) == nil {
-					ups = append(ups, upd{*pgTime(max(at, 1)), agent})
-				}
-			}
-		}
-		pgJSON(w, map[string]any{"updates": ups, "count": len(ups)})
-	}))
+	(&pgSrv{s: s, base: base}).routes(mux, auth)
 }
 
 // pgAdminRoutes lets the panel show, turn on (with a fresh password) and
