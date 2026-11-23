@@ -127,7 +127,7 @@ func TestRequiredChannel(t *testing.T) {
 	}
 	api.in[friend] = true
 	b.Handle(ctx, cb(friend, "join:ok"))
-	find(t, api.take(), friend, "5 گیگ برای 7 روز")
+	find(t, api.take(), friend, "۵ گیگ برای ۷ روز")
 	if c, err := s.ClientByEmail(ctx, "trial-8200"); err != nil || !c.Trial || c.VolumeBytes != 5<<30 {
 		t.Fatalf("%+v %v", c, err)
 	}
