@@ -1144,6 +1144,8 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 		err := s.DeletePartnerKey(r.Context(), r.PathValue("id"))
 		reply(w, map[string]bool{"ok": err == nil}, err)
 	}))
+	// Panels a reseller sells in its own bot: wallet, bills, prices.
+	resaleRoutes(s, mux, guard, member)
 	// Connecting a PasarGuard-made sales bot (Mirza): the owner's, a reseller's own.
 	pgAdminRoutes(s, mux, "/api/v2/admin/pg-api", guard, func(*http.Request) (string, bool) { return "", true })
 	pgAdminRoutes(s, mux, "/api/v2/rep/pg-api", member, func(r *http.Request) (string, bool) {

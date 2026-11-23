@@ -133,7 +133,7 @@ func TestResaleWalletBillsAndLock(t *testing.T) {
 		t.Fatal("paid: unlocked")
 	}
 	// The owner can close a bill by hand.
-	_, _ = s.RepWalletAdjust(ctx, "owner", "ali", -200_000, "")
+	_, _, _ = s.RepWalletAdjust(ctx, "owner", "ali", -200_000, "")
 	_, _ = s.ApproveRepOrder(ctx, "t", "ali", o2.ID)
 	open, _ := s.RepBills(ctx, "ali", true, 5)
 	if len(open) != 1 || s.CloseRepBill(ctx, "owner", open[0].ID, false) != nil || s.RepLocked(ctx, "ali") {

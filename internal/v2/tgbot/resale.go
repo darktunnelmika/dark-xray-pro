@@ -102,13 +102,6 @@ func (b *Bot) repWallet(ctx context.Context, chat int64) {
 	b.send(ctx, chat, sb.String(), kb)
 }
 
-func abs64(v int64) int64 {
-	if v < 0 {
-		return -v
-	}
-	return v
-}
-
 // repWalletAsk asks how much to charge (main bot only).
 func (b *Bot) repWalletAsk(ctx context.Context, chat int64) {
 	rep := b.walletOwner(ctx, chat)

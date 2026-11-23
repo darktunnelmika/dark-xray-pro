@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
+	"strconv"
 )
 
 // Panel resale: a reseller the owner allows sells panels (sub-sellers under
@@ -544,4 +546,115 @@ func (s *Store) CreateRepWalletOrder(ctx context.Context, chat int64, buyerName,
 	}
 	id, _ := r.LastInsertId()
 	return s.RepOrderByID(ctx, id)
+}
+
+// ResaleView is everything the panel shows about one reseller's resale.
+type ResaleView struct {
+	Resale      Resale           `json:"resale"`
+	WholesaleTB int64            `json:"wholesale_tb"`
+	On          bool             `json:"on"`
+	HasCard     bool             `json:"has_card"`
+	Wallet      int64            `json:"wallet"`
+	Locked      bool             `json:"locked"`
+	Packages    []ResalePkg      `json:"packages"`
+	Bills       []RepBill        `json:"bills"`
+	History     []RepWalletEntry `json:"history"`
+	MainBot     string           `json:"main_bot"`
+}
+
+// ResalePkg is one package as the reseller sees it.
+type ResalePkg struct {
+	ID    string `json:"id"`
+	Name  string `json:"name"`
+	GB    int64  `json:"gb"`
+	Cost  int64  `json:"cost"`  // wholesale
+	Price int64  `json:"price"` // what its customers pay
+	Own   int64  `json:"own"`   // its own price, 0 = the owner's
+	Owner int64  `json:"owner"` // the owner's price
+}
+
+func (s *Store) ResaleViewOf(ctx context.Context, rep string) ResaleView {
+	rs := s.ResaleOf(ctx, rep)
+	v := ResaleView{Resale: rs, WholesaleTB: s.WholesaleTB(ctx, rep), On: s.ResaleOn(ctx, rep), HasCard: s.CardFor(ctx, rep).Number != "",
+		Wallet: s.RepWallet(ctx, rep), Locked: s.RepLocked(ctx, rep), Packages: []ResalePkg{}, MainBot: s.BotUsernameFor(ctx, "")}
+	for _, p := range s.RepSale(ctx).Packages {
+		v.Packages = append(v.Packages, ResalePkg{ID: p.ID, Name: p.Name, GB: p.GB, Cost: s.Wholesale(ctx, rep, p), Price: s.Retail(ctx, rep, p), Own: rs.Prices[p.ID], Owner: p.Price})
+	}
+	v.Bills, _ = s.RepBills(ctx, rep, false, 20)
+	v.History, _ = s.RepWalletHistory(ctx, rep, 20)
+	return v
+}
+
+func resaleRoutes(s *Store, mux *docMux, guard, member func(http.HandlerFunc) http.HandlerFunc) {
+	mux.HandleFunc("GET /api/v2/admin/reps/{id}/resale", guard(func(w http.ResponseWriter, r *http.Request) {
+		reply(w, s.ResaleViewOf(r.Context(), r.PathValue("id")), nil)
+	}))
+	mux.HandleFunc("PUT /api/v2/admin/reps/{id}/resale", guard(func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Allowed bool  `json:"allowed"`
+			Credit  bool  `json:"credit"`
+			PriceTB int64 `json:"price_tb"`
+		}
+		if !decode(w, r, &in) {
+			return
+		}
+		err := s.PutResaleOwner(r.Context(), r.PathValue("id"), in.Allowed, in.Credit, in.PriceTB)
+		reply(w, map[string]bool{"ok": err == nil}, err)
+	}))
+	mux.HandleFunc("POST /api/v2/admin/reps/{id}/wallet", guard(func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Delta int64  `json:"delta"`
+			Note  string `json:"note"`
+		}
+		if !decode(w, r, &in) {
+			return
+		}
+		bal, paid, err := s.RepWalletAdjust(r.Context(), who(r).User, r.PathValue("id"), in.Delta, in.Note)
+		reply(w, map[string]any{"wallet": bal, "settled": paid}, err)
+	}))
+	mux.HandleFunc("POST /api/v2/admin/rep-bills/{bid}/close", guard(func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Paid bool `json:"paid"`
+		}
+		if !decode(w, r, &in) {
+			return
+		}
+		id, _ := strconv.ParseInt(r.PathValue("bid"), 10, 64)
+		err := s.CloseRepBill(r.Context(), who(r).User, id, in.Paid)
+		reply(w, map[string]bool{"ok": err == nil}, err)
+	}))
+	mux.HandleFunc("GET /api/v2/rep/resale", member(func(w http.ResponseWriter, r *http.Request) {
+		p := who(r)
+		if p.Role != "rep" || s.IsSubSeller(r.Context(), p.RepID) {
+			http.NotFound(w, r)
+			return
+		}
+		reply(w, s.ResaleViewOf(r.Context(), p.RepID), nil)
+	}))
+	mux.HandleFunc("PUT /api/v2/rep/resale", member(func(w http.ResponseWriter, r *http.Request) {
+		p := who(r)
+		if p.Role != "rep" {
+			http.NotFound(w, r)
+			return
+		}
+		var in struct {
+			Enabled bool             `json:"enabled"`
+			Prices  map[string]int64 `json:"prices"`
+		}
+		if !decode(w, r, &in) {
+			return
+		}
+		err := s.PutResaleRep(r.Context(), p.RepID, in.Enabled, in.Prices)
+		reply(w, map[string]bool{"ok": err == nil}, err)
+	}))
+	mux.HandleFunc("POST /api/v2/rep/resale/bills/{bid}/pay", member(func(w http.ResponseWriter, r *http.Request) {
+		p := who(r)
+		if p.Role != "rep" {
+			http.NotFound(w, r)
+			return
+		}
+		id, _ := strconv.ParseInt(r.PathValue("bid"), 10, 64)
+		err := s.PayRepBill(r.Context(), p.RepID, id)
+		reply(w, map[string]bool{"ok": err == nil}, err)
+	}))
 }
