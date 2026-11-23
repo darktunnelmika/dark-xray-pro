@@ -42,7 +42,7 @@ const I18N = {
     sellers: "Sub-sellers", transferCredit: "Transfer credit", subOf: "under", kind_transfer: "Transfer",
     sellersHint: "Open sellers under you and give them part of your credit. Their limits can only be tighter than yours.",
     transferHint: "Moves credit from your balance to this seller. Negative numbers take unused credit back.",
-    shop: "Shop", tickets: "Support", analytics: "Insights", products: "Products", orders: "Orders", newOrder: "New order", product: "Product", price: "Price", buyer: "Buyer (name, @telegram, phone)",
+    shop: "Shop", resale: "Panel sale", tickets: "Support", analytics: "Insights", products: "Products", orders: "Orders", newOrder: "New order", product: "Product", price: "Price", buyer: "Buyer (name, @telegram, phone)",
     renewClient: "Renew an existing client (optional)", fulfill: "Deliver", cancelOrder: "Cancel", status_pending: "Pending", status_fulfilled: "Delivered",
     status_cancelled: "Cancelled", status_draft: "Draft", status_published: "Published", status_archived: "Archived", statusLabel: "Status", seller: "Seller",
     delivered: "Delivered to {x}", manageProducts: "May create own shop products", shopHint: "Orders are recorded here; delivering one creates (or renews) the client in one step. A reseller's orders are paid from that reseller's credit.",
@@ -107,7 +107,7 @@ const I18N = {
     sellers: "زیرفروشنده‌ها", transferCredit: "انتقال اعتبار", subOf: "زیرمجموعهٔ", kind_transfer: "انتقال",
     sellersHint: "برای خودتان زیرفروشنده بسازید و بخشی از اعتبارتان را به او بدهید. محدودیت‌های او فقط می‌تواند سخت‌تر از شما باشد.",
     transferHint: "اعتبار را از موجودی شما به این فروشنده منتقل می‌کند. عدد منفی اعتبار مصرف‌نشده را برمی‌گرداند.",
-    shop: "فروشگاه", tickets: "پشتیبانی", analytics: "تحلیل", products: "محصولات", orders: "سفارش‌ها", newOrder: "سفارش جدید", product: "محصول", price: "قیمت", buyer: "خریدار (نام، آیدی تلگرام، تلفن)",
+    shop: "فروشگاه", resale: "فروش پنل", tickets: "پشتیبانی", analytics: "تحلیل", products: "محصولات", orders: "سفارش‌ها", newOrder: "سفارش جدید", product: "محصول", price: "قیمت", buyer: "خریدار (نام، آیدی تلگرام، تلفن)",
     renewClient: "تمدید کلاینت موجود (اختیاری)", fulfill: "تحویل", cancelOrder: "لغو", status_pending: "در انتظار", status_fulfilled: "تحویل شد",
     status_cancelled: "لغو شد", status_draft: "پیش‌نویس", status_published: "منتشر", status_archived: "حذف‌شده", statusLabel: "وضعیت", seller: "فروشنده",
     delivered: "تحویل شد: {x}", manageProducts: "اجازهٔ ساخت محصول فروشگاه", shopHint: "سفارش‌ها اینجا ثبت می‌شوند؛ با «تحویل» کلاینت یک‌جا ساخته (یا تمدید) می‌شود. سفارش‌های نماینده از اعتبار همان نماینده پرداخت می‌شود.",
@@ -269,7 +269,7 @@ function confirmAction(text, label) {
 }
 
 // ---------- Views ----------
-const allRoutes = { dashboard: viewDashboard, online: viewOnline, clients: viewClients, groups: viewGroups, inbounds: viewInbounds, nodes: viewNodes, routing: viewRouting, reps: viewReps, shop: viewShop, tickets: viewTickets, analytics: viewAnalytics, finance: viewFinance, activity: viewActivity, staff: viewStaff, settings: viewSettings };
+const allRoutes = { dashboard: viewDashboard, online: viewOnline, clients: viewClients, groups: viewGroups, inbounds: viewInbounds, nodes: viewNodes, routing: viewRouting, reps: viewReps, shop: viewShop, resale: viewResale, tickets: viewTickets, analytics: viewAnalytics, finance: viewFinance, activity: viewActivity, staff: viewStaff, settings: viewSettings };
 let me = null;
 let routes = allRoutes;
 function fullOwner() { return me && me.role === "owner" && !me.level; }
@@ -282,6 +282,7 @@ function routesFor(m) {
   if (m && m.role === "rep") {
     const r = { dashboard: viewRepDashboard, clients: viewClients, online: viewOnline, credit: viewCredit };
     if (m.can_sell) r.sellers = viewSellers;
+    if (m.resale) r.resale = viewResaleRep;
     r.shop = viewShop; r.tickets = viewTickets; r.analytics = viewAnalytics; r.settings = viewSettings;
     return r;
   }
@@ -319,6 +320,7 @@ const ICONS = {
   sellers: "M15 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M8.5 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM20 8v6M23 11h-6",
   analytics: "M4 20V10M10 20V4M16 20v-7M22 20H2",
   tickets: "M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2zM8 9h8M8 13h5",
+  resale: "M3 9l1.5-5h15L21 9M3 9h18v2a3 3 0 0 1-6 0 3 3 0 0 1-6 0 3 3 0 0 1-6 0V9zM5 13v8h14v-8M10 21v-5h4v5",
   shop: "M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4zM3 6h18M16 10a4 4 0 0 1-8 0",
   finance: "M3 3v18h18M7 15l4-4 3 3 6-6",
   activity: "M22 12h-4l-3 9L9 3l-3 9H2",
@@ -451,7 +453,7 @@ const NAV_GROUPS = [
   ["overview", ["dashboard", "analytics", "online"]],
   ["people", ["clients", "groups", "reps", "sellers"]],
   ["infra", ["inbounds", "nodes", "routing"]],
-  ["sales", ["shop", "tickets", "credit", "finance"]],
+  ["sales", ["shop", "resale", "tickets", "credit", "finance"]],
   ["system", ["activity", "staff", "settings"]],
 ];
 const NAV_LABELS = { fa: { overview: "نمای کلی", people: "کاربران و نماینده‌ها", infra: "زیرساخت", sales: "فروش", system: "سیستم" },
@@ -3820,7 +3822,10 @@ function passwordField() {
 const repBase = () => (me && me.role === "rep" ? "/api/v2/rep/sellers" : "/api/v2/admin/reps");
 
 async function viewSellers() {
-  const [reps, inbounds] = await Promise.all([api("GET", "/api/v2/rep/sellers"), api("GET", "/api/v2/rep/inbounds")]);
+  const [all, inbounds, sold] = await Promise.all([api("GET", "/api/v2/rep/sellers"), api("GET", "/api/v2/rep/inbounds"), me.resale ? api("GET", "/api/v2/rep/resale/panels").catch(() => null) : null]);
+  // Panels sold through "Panel sale" are managed there.
+  const soldIDs = new Set(((sold && sold.panels) || []).map((p) => p.id));
+  const reps = (all || []).filter((r) => !soldIDs.has(r.ID));
   const cards = (reps || []).map((r) => h("div", { class: "card item" },
     h("div", { class: "head" }, h("span", { class: "name" }, r.Name || r.ID), h("span", { class: "badge" }, r.ID),
       h("span", { class: `badge ${r.Enabled ? "good" : "bad"} spacer` }, t(r.Enabled ? "enabled" : "disabled"))),
@@ -5366,25 +5371,6 @@ function walletHistory(list) {
     h("ul", { class: "small plain" }, list.map((e) => h("li", {}, h("b", { dir: "ltr" }, `${e.delta > 0 ? "+" : "−"}${fmtNum(Math.abs(e.delta))}`), " · ", fmtWhen(e.unix), e.note ? ` · ${e.note}` : ""))));
 }
 
-// resaleWholesaleCard: the general wholesale price per TB (owner settings).
-function resaleWholesaleCard() {
-  const fa = lang === "fa";
-  const inp = h("input", { type: "number", min: "0", step: "1000", dir: "ltr" });
-  let sale = null;
-  api("GET", "/api/v2/admin/rep-sale").then((v) => { sale = v; inp.value = v.wholesale_tb || 0; }).catch(() => {});
-  return h("form", { class: "card form", onsubmit: async (e) => {
-    e.preventDefault();
-    if (!sale) return;
-    await guarded(() => api("PUT", "/api/v2/admin/rep-sale", { ...sale, wholesale_tb: +inp.value || 0 }));
-    toast(t("saved"));
-  } },
-    h("h2", {}, "💼 ", fa ? "فروش پنل توسط نماینده‌ها" : "Panels sold by resellers"),
-    h("p", { class: "small muted" }, fa ? "نماینده‌هایی که اجازه بدهید، بسته‌های پنل نمایندگی شما را در ربات خودشان می‌فروشند. قیمت عمده از کیف پول آن‌ها در پنل اصلی کم می‌شود یا (اگر اجازه بدهید) فاکتور ۲۴ ساعته صادر می‌شود. اجازه برای هر نماینده: صفحهٔ نماینده‌ها ← ⋯ ← محدودیت‌ها."
-      : "Resellers you allow sell your reseller-panel packages in their own bot. The wholesale price comes off their wallet at the main panel or, if you allow it, a 24-hour bill is opened. Per reseller: Resellers → ⋯ → Limits."),
-    h("label", {}, h("span", {}, fa ? "قیمت عمدهٔ هر ترابایت (تومان، ۰ = خاموش)" : "Wholesale price per TB (toman, 0 = off)"), inp),
-    h("div", { class: "row" }, h("button", { class: "primary", type: "submit" }, t("save"))));
-}
-
 // resaleOwner: one reseller's resale, wallet and bills (owner).
 async function resaleOwner(r) {
   const fa = lang === "fa";
@@ -5544,6 +5530,181 @@ async function viewLegacy() {
   return h("div", {}, h("div", { class: "row" }, h("h1", {}, T("کاربران قدیمی", "Old users"))), stepper, facts, body);
 }
 
+// ---------- Panel sale page: everything about resellers selling panels ----------
+function tabsView(tabs, key) {
+  let cur = (() => { try { return sessionStorage.getItem(key) || tabs[0][0]; } catch { return tabs[0][0]; } })();
+  if (!tabs.find((x) => x[0] === cur)) cur = tabs[0][0];
+  const bar = h("div", { class: "chips", role: "tablist" });
+  const pane = h("div", {});
+  const draw = () => {
+    bar.replaceChildren(...tabs.map(([k, label, , badge]) => {
+      const b = h("button", { role: "tab", "aria-selected": String(k === cur), class: `chip ${k === cur ? "on" : ""}` }, label, badge ? h("span", { class: "count" }, fmtNum(badge)) : null);
+      b.onclick = () => { cur = k; try { sessionStorage.setItem(key, k); } catch {} draw(); };
+      return b;
+    }));
+    const t = tabs.find((x) => x[0] === cur);
+    pane.replaceChildren(t[2]());
+  };
+  draw();
+  return h("div", {}, bar, pane);
+}
+
+function packageForm(p, inbounds, onSave) {
+  const fa = lang === "fa";
+  const T = (f, e) => (fa ? f : e);
+  p = p || { gb: 1024, price: 0, allow_unlimited: false, units: 0, inbounds: [], can_delete: true };
+  const inp = (v, attrs) => h("input", { type: "number", min: "0", dir: "ltr", value: v || 0, ...(attrs || {}) });
+  const f = { name: h("input", { value: p.name || "", placeholder: T("مثلاً ۱ ترابایت", "e.g. 1 TB") }), gb: inp(p.gb, { min: "1" }), price: inp(p.price, { step: "1000" }),
+    au: h("input", { type: "checkbox", checked: !!p.allow_unlimited }), units: inp(p.units), mc: inp(p.max_clients), md: inp(p.max_days), mg: inp(p.max_client_gb),
+    cd: h("input", { type: "checkbox", checked: !!p.can_delete }), ru: h("input", { type: "checkbox", checked: !!p.refund_unused }) };
+  const chosen = new Set(p.inbounds || []);
+  const ibs = (inbounds || []).map((ib) => h("label", { class: "check" }, h("input", { type: "checkbox", value: ib.tag, checked: chosen.has(ib.tag) }), h("span", {}, ib.tag)));
+  const lab = (l, el) => h("label", {}, h("span", {}, l), el);
+  openModal(p.id ? T("ویرایش بسته", "Edit package") : T("بستهٔ جدید", "New package"), h("div", { class: "form" },
+    lab(T("نام", "Name"), f.name),
+    h("div", { class: "two" }, lab(T("حجم (گیگ)", "Volume (GB)"), f.gb), lab(T("قیمت فروش شما (تومان)", "Your price (toman)"), f.price)),
+    h("label", { class: "check" }, f.au, T("اجازهٔ فروش نامحدود", "May sell unlimited")),
+    lab(T("واحد نامحدود همراه بسته", "Unlimited units included"), f.units),
+    h("div", { class: "two" }, lab(T("حداکثر کلاینت (۰ = بی‌سقف)", "Max clients (0 = none)"), f.mc), lab(T("حداکثر روز هر کلاینت", "Max days per client"), f.md)),
+    lab(T("حداکثر حجم هر کلاینت (گیگ)", "Max GB per client"), f.mg),
+    h("label", { class: "check" }, f.cd, T("اجازهٔ حذف کلاینت", "May delete clients")),
+    h("label", { class: "check" }, f.ru, T("برگشت حجم مصرف‌نشده هنگام حذف", "Refund unused on delete")),
+    h("fieldset", { class: "form", style: "border:0;padding:0;margin:0" }, h("legend", { class: "small muted" }, T("اینباندها (هیچ‌کدام = همه)", "Inbounds (none = all)")), h("div", { class: "chips" }, ibs))),
+    [h("button", { class: "primary", value: "save", onclick: async (e) => {
+      e.preventDefault();
+      const np = { ...p, name: f.name.value, gb: +f.gb.value || 0, price: +f.price.value || 0, allow_unlimited: f.au.checked, units: +f.units.value || 0, max_clients: +f.mc.value || 0, max_days: +f.md.value || 0,
+        max_client_gb: +f.mg.value || 0, can_delete: f.cd.checked, refund_unused: f.ru.checked, inbounds: ibs.map((l) => l.querySelector("input")).filter((i) => i.checked).map((i) => i.value) };
+      if (await onSave(np)) document.getElementById("modal").close("save");
+    } }, t("save"))]);
+}
+
+function soldPanelsList(panels, actions) {
+  const fa = lang === "fa";
+  const T = (f, e) => (fa ? f : e);
+  if (!panels.length) return h("p", { class: "muted" }, T("هنوز پنلی فروخته نشده.", "No panels sold yet."));
+  return h("div", { class: "list" }, panels.map((p) => h("div", { class: "card item" },
+    h("div", { class: "head" }, h("span", { class: "name" }, p.name || p.id), h("span", { class: "badge", dir: "ltr" }, p.login || p.id),
+      h("span", { class: `badge ${p.enabled ? "good" : "bad"} spacer` }, p.enabled ? T("روشن", "On") : T("خاموش", "Off"))),
+    h("div", { class: "muted small" }, `${T("اعتبار", "Credit")}: ${bytes(p.credit)}${p.units ? ` · ${T("واحد", "units")}: ${fmtNum(p.units)}` : ""} · ${T("کلاینت", "clients")}: ${fmtNum(p.active)} / ${fmtNum(p.clients)} · ${T("مصرف", "used")}: ${bytes(p.used)}`),
+    h("div", { class: "muted small" }, `${T("فروش", "Sold")}: ${p.sold ? fmtWhen(p.sold) : "—"} · ${T("شارژ", "top-ups")}: ${fmtNum(p.top_ups)} · ${T("پرداخت مشتری", "paid")}: ${tomanTxt(p.paid)}${p.last_use ? ` · ${T("آخرین استفاده", "last use")}: ${fmtWhen(p.last_use)}` : ""}`),
+    actions ? h("div", { class: "row" }, actions(p)) : null)));
+}
+
+async function viewResale() {
+  const fa = lang === "fa";
+  const T = (f, e) => (fa ? f : e);
+  const [v, inbounds] = await Promise.all([api("GET", "/api/v2/admin/resale"), api("GET", "/api/v2/admin/inbounds").catch(() => [])]);
+  const sale = v.sale || { packages: [] };
+  sale.packages = sale.packages || [];
+  const saveSale = async (ns) => { try { await api("PUT", "/api/v2/admin/rep-sale", ns); toast(t("saved")); route(); return true; } catch (x) { toast(x.message); return false; } };
+  const settings = () => {
+    const tb = h("input", { type: "number", min: "0", step: "1000", dir: "ltr", value: sale.wholesale_tb || 0 });
+    const on = h("input", { type: "checkbox", checked: !!sale.enabled });
+    return h("div", {},
+      h("form", { class: "card form", onsubmit: (e) => { e.preventDefault(); saveSale({ ...sale, wholesale_tb: +tb.value || 0, enabled: on.checked }); } },
+        h("h2", {}, T("قیمت و فروش", "Price and sale")),
+        h("label", {}, h("span", {}, T("قیمت عمدهٔ هر ترابایت برای نماینده‌ها (تومان، ۰ = خاموش)", "Wholesale per TB for resellers (toman, 0 = off)")), tb),
+        h("label", { class: "check" }, on, T("فروش پنل نمایندگی در ربات اصلی خودم هم روشن باشد", "Also sell reseller panels in my own main bot")),
+        h("p", { class: "small muted" }, T("اجازهٔ هر نماینده: نماینده‌ها ← ⋯ ← محدودیت‌ها.", "Per reseller: Resellers → ⋯ → Limits.")),
+        h("div", { class: "row" }, h("button", { class: "primary", type: "submit" }, t("save")))),
+      h("div", { class: "card form" },
+        h("div", { class: "row" }, h("h2", {}, T("بسته‌ها", "Packages")), h("button", { class: "primary spacer", onclick: () => packageForm(null, inbounds, (np) => saveSale({ ...sale, packages: [...sale.packages, np] })) }, t("add"))),
+        h("p", { class: "small muted" }, T("همین بسته‌ها در ربات اصلی، ربات نماینده‌ها و پنل نماینده‌ها فروخته می‌شوند. قیمت نماینده‌ها از قیمت عمدهٔ هر ترابایت حساب می‌شود.", "The same packages sell in your bot, the resellers' bots and their panels. A reseller's cost comes from the wholesale price per TB.")),
+        sale.packages.length ? h("div", { class: "list" }, sale.packages.map((p, i) => h("div", { class: "card item" },
+          h("div", { class: "head" }, h("span", { class: "name" }, p.name), h("span", { class: "badge" }, `${fmtNum(p.gb)} GB`), h("span", { class: "badge spacer" }, tomanTxt(p.price))),
+          h("div", { class: "muted small" }, `${T("عمده", "wholesale")}: ${tomanTxt(Math.ceil(Math.ceil((p.gb * (sale.wholesale_tb || 0)) / 1024) / 1000) * 1000)}${p.allow_unlimited ? ` · ${T("نامحدود", "unlimited")} (${fmtNum(p.units)})` : ""}`),
+          h("div", { class: "row" },
+            h("button", { onclick: () => packageForm(p, inbounds, (np) => saveSale({ ...sale, packages: sale.packages.map((x, j) => (j === i ? np : x)) })) }, t("edit")),
+            h("button", { class: "ghost danger", onclick: async () => { if (await confirmAction(T(`بستهٔ «${p.name}» حذف شود؟`, `Delete “${p.name}”?`))) saveSale({ ...sale, packages: sale.packages.filter((_, j) => j !== i) }); } }, t("delete")))))) : h("p", { class: "muted" }, T("هنوز بسته‌ای نیست.", "No packages yet."))));
+  };
+  const reps = () => (v.reps || []).length ? h("div", { class: "list" }, v.reps.map((r) => h("div", { class: "card item" },
+    h("div", { class: "head" }, h("span", { class: "name" }, r.name || r.id), h("span", { class: "badge" }, r.id),
+      h("span", { class: `badge ${r.on ? "good" : ""} spacer` }, r.on ? T("در رباتش فعال", "on in its bot") : T("در رباتش خاموش", "off in its bot"))),
+    h("div", { class: "mz-badges" },
+      h("span", { class: "badge" }, T("کیف پول: ", "Wallet: "), tomanTxt(r.wallet)),
+      r.open_bill ? h("span", { class: `badge ${r.overdue ? "bad" : ""}` }, T("فاکتور باز: ", "Open bill: "), tomanTxt(r.open_bill), r.overdue ? T(" (مهلت گذشته)", " (overdue)") : "") : null,
+      h("span", { class: "badge" }, T("پنل: ", "Panels: "), `${fmtNum(r.stats.active)} / ${fmtNum(r.stats.panels)}`),
+      h("span", { class: "badge" }, T("فروش این ماه: ", "This month: "), `${fmtNum(r.stats.month_sales)} · ${tomanTxt(r.stats.month_cost)}`)),
+    h("div", { class: "row" },
+      h("button", { onclick: () => resaleOwner({ ID: r.id, Name: r.name }) }, T("کیف پول و فاکتورها", "Wallet and bills")),
+      h("button", { class: "ghost", onclick: async () => {
+        const x = await api("GET", `/api/v2/admin/reps/${encodeURIComponent(r.id)}/panels`);
+        openModal(`${T("پنل‌های فروخته‌شده", "Sold panels")} · ${r.name || r.id}`, soldPanelsList(x.panels || []));
+      } }, T("پنل‌ها", "Panels")))))) : h("p", { class: "muted" }, T("هنوز به هیچ نماینده‌ای اجازهٔ فروش پنل نداده‌اید (نماینده‌ها ← ⋯ ← محدودیت‌ها).", "No reseller may sell panels yet (Resellers → ⋯ → Limits)."));
+  const receipts = () => (v.pending || []).length ? h("div", { class: "list" }, v.pending.map((o) => h("div", { class: "card item" },
+    h("div", { class: "head" }, h("span", { class: "name" }, T("شارژ کیف پول #", "Wallet top-up #"), fmtNum(o.id)), h("span", { class: "badge" }, o.rep_id), h("span", { class: "badge spacer" }, tomanTxt(o.price))),
+    h("div", { class: "muted small" }, `${o.buyer_name || ""} · ${fmtWhen(o.unix)} · ${T("عکس رسید در ربات اصلی آمده است", "the receipt photo is in the main bot")}`),
+    h("div", { class: "row" },
+      h("button", { class: "primary", onclick: async () => { await guarded(() => api("POST", `/api/v2/admin/rep-orders/${o.id}/approve`)); toast(t("saved")); route(); } }, T("تأیید و شارژ", "Approve")),
+      h("button", { class: "ghost danger", onclick: async () => { if (await confirmAction(T("این رسید رد شود؟", "Reject this receipt?"))) { await guarded(() => api("POST", `/api/v2/admin/rep-orders/${o.id}/reject`)); route(); } } }, T("رد", "Reject")))))) : h("p", { class: "muted" }, T("رسیدی منتظر نیست.", "No receipts waiting."));
+  return h("div", {}, h("div", { class: "row" }, h("h1", {}, T("فروش پنل", "Panel sale"))),
+    tabsView([["reps", T("نماینده‌ها", "Resellers"), reps], ["receipts", T("رسیدها", "Receipts"), receipts, (v.pending || []).length], ["settings", T("تنظیمات و بسته‌ها", "Settings and packages"), settings]], "resale-tab"));
+}
+
+async function viewResaleRep() {
+  const fa = lang === "fa";
+  const T = (f, e) => (fa ? f : e);
+  const [x, v] = await Promise.all([api("GET", "/api/v2/rep/resale/panels"), api("GET", "/api/v2/rep/resale")]);
+  const panels = x.panels || [], st = x.stats || {};
+  const creds = (res) => {
+    const text = `${T("آدرس پنل", "Panel")}: ${res.address}\n${T("نام کاربری", "Username")}: ${res.username}\n${T("رمز", "Password")}: ${res.password}`;
+    openModal(T("اطلاعات ورود", "Login"), h("div", { class: "form" },
+      h("pre", { class: "code-block", dir: "ltr" }, text),
+      h("button", { class: "primary", type: "button", onclick: () => copy(text) }, T("کپی برای ارسال به مشتری", "Copy for the customer"))));
+  };
+  const pkgSelect = () => h("select", {}, v.packages.map((p) => h("option", { value: p.id }, `${p.name || fmtNum(p.gb) + " GB"} · ${T("فروش", "price")} ${tomanTxt(p.price)} · ${T("عمده", "cost")} ${tomanTxt(p.cost)}`)));
+  const payNote = h("p", { class: "small muted" }, T(`قیمت عمده از کیف پول شما (موجودی ${tomanTxt(v.wallet)}) کم می‌شود${v.resale.credit ? "؛ اگر کافی نباشد، فاکتور ۲۴ ساعته صادر می‌شود" : ""}.`,
+    `The wholesale price comes off your wallet (balance ${tomanTxt(v.wallet)})${v.resale.credit ? "; if short, a 24-hour bill is opened" : ""}.`));
+  const sellNew = () => {
+    const user = h("input", { dir: "ltr", required: true, placeholder: "shop-ali", autocomplete: "off" });
+    const name = h("input", { placeholder: T("نام مشتری (اختیاری)", "Customer name (optional)") });
+    const pkg = pkgSelect();
+    const err = h("div", { class: "error", role: "alert" });
+    openModal(T("فروش پنل جدید", "Sell a new panel"), h("div", { class: "form" },
+      h("label", {}, h("span", {}, T("نام کاربری پنل", "Panel username")), user), h("label", {}, h("span", {}, T("نام", "Name")), name),
+      h("label", {}, h("span", {}, T("بسته", "Package")), pkg), payNote.cloneNode(true), err),
+      [h("button", { class: "primary", value: "save", onclick: async (e) => {
+        e.preventDefault(); err.textContent = "";
+        try {
+          const res = await api("POST", "/api/v2/rep/resale/sell", { name: user.value, buyer: name.value, package: pkg.value });
+          document.getElementById("modal").close("save");
+          creds(res);
+          if (res.bill) toast(T(`فاکتور #${res.bill} با مهلت ۲۴ ساعت صادر شد`, `Bill #${res.bill} opened, due in 24 hours`));
+          route();
+        } catch (x2) { err.textContent = x2.message; }
+      } }, T("فروش", "Sell"))]);
+  };
+  const topUp = (p) => {
+    const pkg = pkgSelect();
+    const err = h("div", { class: "error", role: "alert" });
+    openModal(`${T("شارژ پنل", "Top up")} · ${p.name || p.id}`, h("div", { class: "form" }, h("label", {}, h("span", {}, T("بسته", "Package")), pkg), payNote.cloneNode(true), err),
+      [h("button", { class: "primary", value: "save", onclick: async (e) => {
+        e.preventDefault(); err.textContent = "";
+        try {
+          const res = await api("POST", "/api/v2/rep/resale/sell", { target: p.id, package: pkg.value });
+          document.getElementById("modal").close("save");
+          toast(res.bill ? T(`شارژ شد؛ فاکتور #${res.bill} صادر شد`, `Done; bill #${res.bill} opened`) : T("شارژ شد", "Done"));
+          route();
+        } catch (x2) { err.textContent = x2.message; }
+      } }, T("شارژ", "Top up"))]);
+  };
+  const mine = () => h("div", {},
+    h("div", { class: "mz-badges" },
+      h("span", { class: "badge" }, T("پنل‌ها: ", "Panels: "), `${fmtNum(st.active)} / ${fmtNum(st.panels)}`),
+      h("span", { class: "badge" }, T("اعتبار باقی پنل‌ها: ", "Their credit: "), bytes(st.credit)),
+      h("span", { class: "badge" }, T("فروش این ماه: ", "This month: "), `${fmtNum(st.month_sales)} · ${tomanTxt(st.month_paid)}`),
+      h("span", { class: "badge good" }, T("سود این ماه: ", "Profit this month: "), tomanTxt(st.month_paid - st.month_cost)),
+      h("span", { class: "badge" }, T("کیف پول: ", "Wallet: "), tomanTxt(v.wallet)),
+      v.locked ? h("span", { class: "badge bad" }, T("قفل: فاکتور پرداخت‌نشده", "locked: unpaid bill")) : null),
+    h("div", { class: "row" }, h("button", { class: "primary", disabled: !v.packages.length || v.locked, onclick: sellNew }, T("➕ فروش پنل جدید", "➕ Sell a new panel"))),
+    soldPanelsList(panels, (p) => [
+      h("button", { disabled: v.locked, onclick: () => topUp(p) }, T("شارژ با بسته", "Top up")),
+      h("button", { class: "ghost", onclick: async () => { await guarded(() => api("POST", `/api/v2/rep/resale/panels/${encodeURIComponent(p.id)}/enabled`, { enabled: !p.enabled })); route(); } }, p.enabled ? T("خاموش کردن", "Turn off") : T("روشن کردن", "Turn on")),
+      h("button", { class: "ghost", onclick: async () => { if (await confirmAction(T("رمز تازه ساخته شود؟ رمز قبلی دیگر کار نمی‌کند.", "Make a new password? The old one stops working."))) { const res = await guarded(() => api("POST", `/api/v2/rep/resale/panels/${encodeURIComponent(p.id)}/password`)); creds({ ...res, address: location.origin }); } } }, T("رمز تازه", "New password"))]));
+  return h("div", {}, h("div", { class: "row" }, h("h1", {}, T("فروش پنل", "Panel sale"))),
+    tabsView([["mine", T("پنل‌های من", "My panels"), mine], ["prices", T("قیمت‌ها و کیف پول", "Prices and wallet"), resaleRepCard]], "resale-rep-tab"));
+}
+
 async function viewReps() {
   const fa = lang === "fa";
   const [reps, inbounds, ov] = await Promise.all([api("GET", "/api/v2/admin/reps"), api("GET", "/api/v2/admin/inbounds"), api("GET", "/api/v2/admin/reps/overview").catch(() => [])]);
@@ -5563,7 +5724,6 @@ async function viewReps() {
       item(t("payment"), () => paymentForm(r)),
       item(fa ? "صفحهٔ اشتراک" : "Sub page", () => openModal(`${fa ? "برند و صفحهٔ اشتراک" : "Brand & subscription page"} · ${r.Name || r.ID}`, repBrandCard(`/api/v2/admin/reps/${encodeURIComponent(r.ID)}/brand`))),
       item(fa ? "ربات و کارت" : "Bot & card", () => openModal(`${fa ? "ربات و کارت" : "Bot & card"} · ${r.Name || r.ID}`, h("div", { class: "form" }, repBotCard(`/api/v2/admin/reps/${encodeURIComponent(r.ID)}/bot`), sellerCardCard(`/api/v2/shop/card?seller=${encodeURIComponent(r.ID)}`)))),
-      ...(r.ParentID ? [] : [item(fa ? "💼 کیف پول و فاکتورها" : "💼 Wallet and bills", () => resaleOwner(r))]),
       item(t("activity"), () => { location.hash = `#/activity?rep=${encodeURIComponent(r.ID)}`; }),
       item(t("edit"), () => repForm(r)),
       item(t("delete"), () => del(r), "bad"));
@@ -6579,9 +6739,9 @@ function viewSettings() {
     owner && ["sub", "link", fa ? "اشتراک مشتری" : "Customer subscription", fa ? "عنوان، نام کانفیگ‌ها و صفحهٔ مشتری" : "Title, config names, customer page", () => [subSettingsCard()]],
     (owner || fullOwner()) && ["panel", "globe", fa ? "آدرس و دسترسی پنل" : "Panel address and access", fa ? "HTTPS، مسیر مخفی، IPهای مجاز" : "HTTPS, secret path, trusted IPs", () => [fullOwner() ? panelNameCard() : null, fullOwner() ? panelHTTPSCard() : null, fullOwner() ? panelPathCard() : null, owner ? trustedCard() : null]],
     me.role === "rep" && ["repsub", "link", fa ? "صفحهٔ اشتراک من" : "My subscription page", fa ? "برند، لوگو و آدرس اختصاصی" : "Brand, logo and own address", () => [repBrandCard("/api/v2/rep/brand")]],
-    me.role === "rep" && ["repbot", "bell", fa ? "ربات فروش و کارت من" : "My sales bot and card", fa ? "ربات تلگرام اختصاصی، کارت به کارت" : "Own Telegram bot, card payment", () => [mirzaCard("/api/v2/rep/pg-api", true), resaleRepCard(), repBotCard("/api/v2/rep/bot"), botLookCard("/api/v2/rep/bot"), sellerCardCard("/api/v2/shop/card")]],
+    me.role === "rep" && ["repbot", "bell", fa ? "ربات فروش و کارت من" : "My sales bot and card", fa ? "ربات تلگرام اختصاصی، کارت به کارت" : "Own Telegram bot, card payment", () => [mirzaCard("/api/v2/rep/pg-api", true), repBotCard("/api/v2/rep/bot"), botLookCard("/api/v2/rep/bot"), sellerCardCard("/api/v2/shop/card")]],
     ["security", "staff", fa ? "امنیت حساب" : "Account security", fa ? "رمز، ورود دومرحله‌ای، نشست‌ها" : "Password, two-step sign-in, sessions", () => [pwForm, tfaCard(), sessionsCard()]],
-    (fullOwner() || owner || tgCard) && ["telegram", "bell", fa ? "تلگرام" : "Telegram", fa ? "ربات، هشدارها، فروش و دعوت" : "Bot, alerts, sales and referrals", () => [fullOwner() ? telegramBotCard() : null, fullOwner() ? botLookCard("/api/v2/admin/telegram") : null, owner ? tgCommerceCard() : null, owner ? resaleWholesaleCard() : null, fullOwner() ? mirzaCard("/api/v2/admin/pg-api", false) : null, tgCard]],
+    (fullOwner() || owner || tgCard) && ["telegram", "bell", fa ? "تلگرام" : "Telegram", fa ? "ربات، هشدارها، فروش و دعوت" : "Bot, alerts, sales and referrals", () => [fullOwner() ? telegramBotCard() : null, fullOwner() ? botLookCard("/api/v2/admin/telegram") : null, owner ? tgCommerceCard() : null, fullOwner() ? mirzaCard("/api/v2/admin/pg-api", false) : null, tgCard]],
     fullOwner() && ["backup", "traffic", fa ? "پشتیبان و انتقال" : "Backup and migration", fa ? "دانلود، بازگردانی، ورود از پنل‌های دیگر" : "Download, restore, import from other panels", () => [backupCard, migrateCard(), foreignCard()]],
     ["look", "moon", fa ? "زبان و ظاهر" : "Language and look", fa ? "زبان، تم، خروج" : "Language, theme, sign out", () => [lookCard]],
   ].filter(Boolean);
