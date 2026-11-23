@@ -68,6 +68,9 @@ func (p RepPackage) Policy() RepPolicy {
 type RepSale struct {
 	Enabled  bool         `json:"enabled"`
 	Packages []RepPackage `json:"packages"`
+	// WholesaleTB is what a reseller selling these panels in its own bot
+	// pays per terabyte (resale.go); 0 = resale is off.
+	WholesaleTB int64 `json:"wholesale_tb"`
 }
 
 func (s *Store) RepSale(ctx context.Context) RepSale {
@@ -110,6 +113,9 @@ func (s *Store) PutRepSale(ctx context.Context, v RepSale) error {
 		}
 		seen[p.ID] = true
 	}
+	if v.WholesaleTB < 0 || v.WholesaleTB > 10_000_000_000 {
+		return fmt.Errorf("%w: the wholesale price is out of range", ErrInvalid)
+	}
 	if len(v.Packages) > 20 {
 		return fmt.Errorf("%w: at most 20 packages", ErrInvalid)
 	}
@@ -136,17 +142,22 @@ type RepOrder struct {
 	Price     int64      `json:"price"`
 	Status    string     `json:"status"`
 	Receipt   string     `json:"receipt,omitempty"`
-	Terms     RepPackage `json:"terms"` // the package as ordered
+	Terms     RepPackage `json:"terms"`  // the package as ordered
+	Seller    string     `json:"seller"` // "" = sold by the owner; else the reseller whose bot sold it
+	Cost      int64      `json:"cost"`   // what that reseller pays the owner
 }
 
-const repOrderCols = `id,unix,chat_id,buyer_name,kind,rep_id,package,gb,price,status,receipt,terms`
+const repOrderCols = `id,unix,chat_id,buyer_name,kind,rep_id,package,gb,price,status,receipt,terms,seller,cost`
 
 func scanRepOrder(r interface{ Scan(...any) error }) (RepOrder, error) {
 	var o RepOrder
 	var terms string
-	err := r.Scan(&o.ID, &o.Unix, &o.Chat, &o.BuyerName, &o.Kind, &o.RepID, &o.Package, &o.GB, &o.Price, &o.Status, &o.Receipt, &terms)
+	err := r.Scan(&o.ID, &o.Unix, &o.Chat, &o.BuyerName, &o.Kind, &o.RepID, &o.Package, &o.GB, &o.Price, &o.Status, &o.Receipt, &terms, &o.Seller, &o.Cost)
 	if errors.Is(err, sql.ErrNoRows) {
 		return o, ErrNotFound
+	}
+	if o.Kind == "wallet" {
+		return o, err
 	}
 	if json.Unmarshal([]byte(terms), &o.Terms) != nil || o.Terms.GB == 0 {
 		// An order from before packages carried settings: the old defaults.
@@ -173,9 +184,11 @@ func (s *Store) RepNameFree(ctx context.Context, name string) bool {
 // CreateRepOrder opens an order that waits for its receipt. repID "" means a
 // new panel under the username name; otherwise a top-up of that reseller.
 // An older order of the same chat that never got a receipt is dropped.
-func (s *Store) CreateRepOrder(ctx context.Context, chat int64, buyerName, repID, name, pkgID string) (RepOrder, error) {
+// seller "" is the owner's sale; otherwise the reseller whose bot sells the
+// panel, as a sub-seller of its own, at its price.
+func (s *Store) CreateRepOrder(ctx context.Context, seller string, chat int64, buyerName, repID, name, pkgID string) (RepOrder, error) {
 	sale := s.RepSale(ctx)
-	if !sale.Enabled {
+	if seller == "" && !sale.Enabled || seller != "" && !s.ResaleOn(ctx, seller) {
 		return RepOrder{}, ErrNotFound
 	}
 	var pkg *RepPackage
@@ -183,6 +196,11 @@ func (s *Store) CreateRepOrder(ctx context.Context, chat int64, buyerName, repID
 		if sale.Packages[i].ID == pkgID {
 			pkg = &sale.Packages[i]
 		}
+	}
+	var cost int64
+	if pkg != nil && seller != "" {
+		cost = s.Wholesale(ctx, seller, *pkg)
+		pkg.Price = s.Retail(ctx, seller, *pkg)
 	}
 	if pkg == nil {
 		return RepOrder{}, fmt.Errorf("%w: unknown package", ErrInvalid)
@@ -202,7 +220,10 @@ func (s *Store) CreateRepOrder(ctx context.Context, chat int64, buyerName, repID
 			return RepOrder{}, fmt.Errorf("%w: this username is taken or not valid", ErrInvalid)
 		}
 	} else {
-		if s.IsSubSeller(ctx, repID) {
+		if seller != "" && !s.IsSellerOf(ctx, seller, repID) {
+			return RepOrder{}, ErrNotFound
+		}
+		if seller == "" && s.IsSubSeller(ctx, repID) {
 			return RepOrder{}, fmt.Errorf("%w: sub-sellers are charged by their reseller", ErrPolicy)
 		}
 		var n int
@@ -215,8 +236,8 @@ func (s *Store) CreateRepOrder(ctx context.Context, chat int64, buyerName, repID
 		return RepOrder{}, err
 	}
 	terms, _ := json.Marshal(pkg)
-	r, err := s.db.ExecContext(ctx, `INSERT INTO rep_orders(unix,chat_id,buyer_name,kind,rep_id,package,gb,price,terms) VALUES(?,?,?,?,?,?,?,?,?)`,
-		now, chat, buyerName, kind, repID, pkg.Name, pkg.GB, pkg.Price, string(terms))
+	r, err := s.db.ExecContext(ctx, `INSERT INTO rep_orders(unix,chat_id,buyer_name,kind,rep_id,package,gb,price,terms,seller,cost) VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
+		now, chat, buyerName, kind, repID, pkg.Name, pkg.GB, pkg.Price, string(terms), seller, cost)
 	if err != nil {
 		return RepOrder{}, err
 	}
@@ -224,10 +245,11 @@ func (s *Store) CreateRepOrder(ctx context.Context, chat int64, buyerName, repID
 	return s.RepOrderByID(ctx, id)
 }
 
-// AwaitingRepReceipt is the chat's order that still needs its receipt.
-func (s *Store) AwaitingRepReceipt(ctx context.Context, chat int64) (int64, error) {
+// AwaitingRepReceipt is the chat's order in this seller's bot that still
+// needs its receipt.
+func (s *Store) AwaitingRepReceipt(ctx context.Context, seller string, chat int64) (int64, error) {
 	var id int64
-	err := s.ro.QueryRowContext(ctx, `SELECT id FROM rep_orders WHERE chat_id=? AND status='await_receipt' ORDER BY id DESC LIMIT 1`, chat).Scan(&id)
+	err := s.ro.QueryRowContext(ctx, `SELECT id FROM rep_orders WHERE chat_id=? AND seller=? AND status='await_receipt' ORDER BY id DESC LIMIT 1`, chat, seller).Scan(&id)
 	if err != nil {
 		return 0, ErrNotFound
 	}
@@ -251,14 +273,18 @@ func (s *Store) AttachRepReceipt(ctx context.Context, id, chat int64, fileID str
 type RepOrderResult struct {
 	Order    RepOrder
 	Password string
-	Units    int64 // unlimited units that were added
+	Units    int64   // unlimited units that were added
+	Bill     int64   // a resale paid by a bill: its id (0 = from the wallet)
+	Wallet   int64   // a wallet top-up: the balance after it
+	Settled  []int64 // a wallet top-up: bills it paid
 }
 
 // ApproveRepOrder delivers a paid order once: a new reseller with a login,
 // this Telegram account and the credit, or the credit added to the reseller.
-func (s *Store) ApproveRepOrder(ctx context.Context, actor string, id int64) (RepOrderResult, error) {
+// seller is the bot approving it; an order of another seller is refused.
+func (s *Store) ApproveRepOrder(ctx context.Context, actor, seller string, id int64) (RepOrderResult, error) {
 	// Claim the order first, so two taps cannot deliver it twice.
-	r, err := s.db.ExecContext(ctx, `UPDATE rep_orders SET status='approved', decided_unix=?, decided_by=? WHERE id=? AND status='pending'`, s.now().Unix(), actor, id)
+	r, err := s.db.ExecContext(ctx, `UPDATE rep_orders SET status='approved', decided_unix=?, decided_by=? WHERE id=? AND status='pending' AND seller=?`, s.now().Unix(), actor, id, seller)
 	if err != nil {
 		return RepOrderResult{}, err
 	}
@@ -274,7 +300,29 @@ func (s *Store) ApproveRepOrder(ctx context.Context, actor string, id int64) (Re
 		return RepOrderResult{}, e
 	}
 	res := RepOrderResult{Order: o}
+	if o.Kind == "wallet" {
+		bal, paid, err := s.RepWalletAdjust(ctx, actor, o.RepID, o.Price, fmt.Sprintf("top-up #%d", o.ID))
+		if err != nil {
+			return undo(err)
+		}
+		res.Wallet, res.Settled = bal, paid
+		return res, nil
+	}
 	note := fmt.Sprintf("telegram order #%d: %s", o.ID, o.Package)
+	if o.Seller != "" {
+		// The reseller pays the owner before anything is made.
+		bill, err := s.chargeResale(ctx, o.Seller, o.ID, o.Cost)
+		if err != nil {
+			return undo(err)
+		}
+		res.Bill = bill
+		undo = func(e error) (RepOrderResult, error) {
+			s.refundResale(ctx, o.Seller, o.ID, o.Cost, bill)
+			_, _ = s.db.ExecContext(ctx, `UPDATE rep_orders SET status='pending', decided_unix=0, decided_by='' WHERE id=?`, id)
+			return RepOrderResult{}, e
+		}
+		note = fmt.Sprintf("panel order #%d at %s's bot: %s", o.ID, o.Seller, o.Package)
+	}
 	if o.Kind == "new" {
 		if !s.RepNameFree(ctx, o.RepID) {
 			return undo(fmt.Errorf("%w: the username %s is taken now", ErrInvalid, o.RepID))
@@ -283,7 +331,13 @@ func (s *Store) ApproveRepOrder(ctx context.Context, actor string, id int64) (Re
 		if name == "" {
 			name = o.RepID
 		}
-		if err := s.PutRep(ctx, Rep{ID: o.RepID, Name: name, Enabled: true}); err != nil {
+		var err error
+		if o.Seller != "" {
+			err = s.PutSeller(ctx, o.Seller, Rep{ID: o.RepID, Name: name, Enabled: true}, "", "")
+		} else {
+			err = s.PutRep(ctx, Rep{ID: o.RepID, Name: name, Enabled: true})
+		}
+		if err != nil {
 			return undo(err)
 		}
 		res.Password = randomHex(6)
@@ -304,9 +358,19 @@ func (s *Store) ApproveRepOrder(ctx context.Context, actor string, id int64) (Re
 	}
 	units := o.Terms.Units
 	if o.Kind == "new" {
-		// The package's settings are the new panel's settings.
-		if err := s.SetRepPolicy(ctx, o.RepID, o.Terms.Policy()); err != nil {
+		// The package's settings are the new panel's settings (under a
+		// reseller: never looser than the reseller's own).
+		var err error
+		if o.Seller != "" {
+			err = s.SetSellerPolicy(ctx, o.Seller, o.RepID, o.Terms.Policy())
+		} else {
+			err = s.SetRepPolicy(ctx, o.RepID, o.Terms.Policy())
+		}
+		if err != nil {
 			return res, fmt.Errorf("the panel %s was created but its settings were not applied: %w", o.RepID, err)
+		}
+		if pol, err := s.RepPolicyOf(ctx, o.RepID); err == nil && !pol.AllowUnlimited {
+			units = 0
 		}
 	} else if pol, err := s.RepPolicyOf(ctx, o.RepID); err != nil || !pol.AllowUnlimited {
 		units = 0 // a top-up never changes what a panel may sell

@@ -265,6 +265,10 @@ func Open(path string) (*Store, error) {
 		st.Close()
 		return nil, err
 	}
+	if err := st.ensureResaleSchema(); err != nil {
+		st.Close()
+		return nil, err
+	}
 	if err := st.ensureRouteSchema(); err != nil {
 		st.Close()
 		return nil, err

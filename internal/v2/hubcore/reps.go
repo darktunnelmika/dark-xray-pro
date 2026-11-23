@@ -258,6 +258,10 @@ func (s *Store) RepPutClient(ctx context.Context, actor, repID string, c Client,
 		}
 		unitCharge = max(0, newUnits-oldUnits)
 	}
+	if (volCharge > 0 || unitCharge > 0) && repLockedQ(ctx, tx, repID, now) {
+		// A panel bill past its due time (resale.go): no spending until paid.
+		return fmt.Errorf("%w: an overdue bill is unpaid; pay it to sell again", ErrPolicy)
+	}
 	if volCharge > 0 || unitCharge > 0 {
 		r, err := tx.ExecContext(ctx, `UPDATE reps SET volume_credit=volume_credit-?, unlimited_units=unlimited_units-?
 WHERE id=? AND volume_credit>=? AND unlimited_units>=?`, volCharge, unitCharge, repID, volCharge, unitCharge)

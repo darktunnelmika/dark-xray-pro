@@ -198,6 +198,7 @@ func (b *Bot) Tick(ctx context.Context) {
 		b.deliverTickets(ctx)
 		b.deliverReminders(ctx)
 		b.remindTrials(ctx)
+		b.remindBills(ctx)
 		return
 	}
 	b.syncMenuButton(ctx)
@@ -213,6 +214,7 @@ func (b *Bot) Tick(ctx context.Context) {
 	b.deliverTickets(ctx)
 	b.deliverReminders(ctx)
 	b.remindTrials(ctx)
+	b.remindBills(ctx)
 }
 
 func (b *Bot) send(ctx context.Context, chat int64, text string, kb *Keyboard) int64 {
@@ -412,7 +414,7 @@ func (b *Bot) onMessage(ctx context.Context, m *Message) {
 		}
 		return
 	}
-	if rep, role := b.Store.TgRepRole(ctx, chat); rep != "" && (b.Seller == "" || rep == b.Seller) {
+	if rep, role := b.Store.TgRepRole(ctx, chat); rep != "" && b.repInScope(ctx, rep) {
 		if w := b.peekAwait(chat); strings.HasPrefix(w, "r:") && !strings.HasPrefix(text, "/") {
 			b.takeAwait(chat)
 			if b.repInput(ctx, chat, rep, role, w, text) {
@@ -421,6 +423,10 @@ func (b *Bot) onMessage(ctx context.Context, m *Message) {
 		}
 		if act := keyboardAction(text); strings.HasPrefix(act, "r") || act == "admin" || act == "repmode" {
 			b.repKey(ctx, chat, rep, role, act)
+			return
+		}
+		if text == "/start wallet" {
+			b.repWallet(ctx, chat)
 			return
 		}
 		if (text == "/start" || text == "/help" || text == "/admin" || text == "/panel") && b.repMode(ctx, chat) {

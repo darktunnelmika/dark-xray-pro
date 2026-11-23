@@ -95,7 +95,7 @@ func (b *Bot) setDraft(chat int64, d *repDraft) {
 // repOf is the reseller this chat manages in this bot ("" = none).
 func (b *Bot) repOf(ctx context.Context, chat int64) (rep, role string) {
 	rep, role = b.Store.TgRepRole(ctx, chat)
-	if rep == "" || (b.Seller != "" && rep != b.Seller) {
+	if rep == "" || !b.repInScope(ctx, rep) {
 		return "", ""
 	}
 	return rep, role
@@ -172,6 +172,9 @@ func (b *Bot) repHome(ctx context.Context, chat int64, rep, role string) {
 	}
 	if btn, ok := b.repSaleButton(ctx, chat); ok {
 		kb.Rows = append(kb.Rows, []Button{btn})
+	}
+	if role == "owner" && b.Store.ResaleOf(ctx, rep).Allowed && !b.Store.IsSubSeller(ctx, rep) {
+		kb.Rows = append(kb.Rows, []Button{cbBtn("💼 کیف پول و فاکتورها", "P:w")})
 	}
 	if repCan(role, "shop") && b.Seller == rep {
 		// In the reseller's own bot: a message to everyone who started it,
