@@ -1167,3 +1167,14 @@ dialog.wide:has(.cform) { inline-size: min(780px, calc(100vw - 20px)); }
 .lg-steps li.on { opacity: 1; border-color: var(--accent, #28f7a0); }
 .lg-steps li.done { opacity: .9; }
 .lg-steps li.done b::after { content: " ✓"; }
+/* Phones: the grid never grows wider than the screen (wide tables scroll in
+   their own box), and the header fits 360–430 px. */
+.shell > * { min-inline-size: 0; }
+@media (max-width: 430px) {
+  header.top { gap: 6px; padding: 10px 10px; }
+  header.top .iconbtn { inline-size: 34px; block-size: 34px; }
+  header.top .actions { gap: 2px; }
+  .brand { gap: 6px; font-size: 16px; min-inline-size: 0; }
+  .brand svg { inline-size: 28px; block-size: 28px; }
+  .brand-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+}

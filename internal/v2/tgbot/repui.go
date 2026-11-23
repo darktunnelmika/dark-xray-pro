@@ -359,7 +359,7 @@ func (b *Bot) repCallback(ctx context.Context, chat int64, data string) bool {
 			}
 		}
 		if err := b.Store.RepPutClient(ctx, "tg:"+strconv.FormatInt(chat, 10), rep, cl, plan); err != nil {
-			b.send(ctx, chat, "انجام نشد: "+esc(err.Error()), repBackKB)
+			b.send(ctx, chat, "انجام نشد: "+esc(faErr(err)), repBackKB)
 			return true
 		}
 		b.repClient(ctx, chat, rep, role, email)
@@ -377,7 +377,7 @@ func (b *Bot) repCallback(ctx context.Context, chat int64, data string) bool {
 		}
 		bytes, units, err := b.Store.RepDeleteClient(ctx, "tg:"+strconv.FormatInt(chat, 10), rep, email)
 		if err != nil {
-			b.send(ctx, chat, "حذف نشد: "+esc(err.Error()), repBackKB)
+			b.send(ctx, chat, "حذف نشد: "+esc(faErr(err)), repBackKB)
 			return true
 		}
 		msg := "🗑 <b>" + esc(email) + "</b> حذف شد."

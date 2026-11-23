@@ -253,7 +253,7 @@ func (b *Bot) decideTopup(ctx context.Context, chat int64, idText string, approv
 	id, _ := strconv.ParseInt(idText, 10, 64)
 	t, err := b.Store.DecideTopup(ctx, b.Seller, id, approve, "tg:"+strconv.FormatInt(chat, 10))
 	if err != nil {
-		b.send(ctx, chat, "انجام نشد: "+esc(err.Error()), nil)
+		b.send(ctx, chat, "انجام نشد: "+esc(faErr(err)), nil)
 		return
 	}
 	if approve {

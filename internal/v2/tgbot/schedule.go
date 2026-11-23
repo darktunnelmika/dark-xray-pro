@@ -227,7 +227,7 @@ func (b *Bot) saveScheduled(ctx context.Context, chat int64, repeat string) {
 	}
 	id, err := b.Store.TgSchedule(ctx, m)
 	if err != nil {
-		b.send(ctx, chat, "ذخیره نشد: "+esc(err.Error()), nil)
+		b.send(ctx, chat, "ذخیره نشد: "+esc(faErr(err)), nil)
 		return
 	}
 	b.send(ctx, chat, fmt.Sprintf("✅ زمان‌بندی شد (#%d)\n🗓 %s · %s\n👥 %s — فهرست مخاطب هنگام ارسال به‌روز می‌شود.", id, faTime(d.at), repeatName[repeat], audienceName[d.audience]),

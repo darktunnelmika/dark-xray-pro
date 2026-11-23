@@ -270,7 +270,7 @@ func (b *Bot) repSaleInput(ctx context.Context, m *Message, what, text string) b
 		}
 		sale.WholesaleTB = n
 		if err := b.Store.PutRepSale(ctx, sale); err != nil {
-			b.send(ctx, chat, "ذخیره نشد: "+esc(err.Error()), &Keyboard{Rows: [][]Button{back("P:cfg")}})
+			b.send(ctx, chat, "ذخیره نشد: "+esc(faErr(err)), &Keyboard{Rows: [][]Button{back("P:cfg")}})
 			return true
 		}
 		b.repSaleConfig(ctx, chat, nil)
@@ -354,7 +354,7 @@ func (b *Bot) repSaleDecide(ctx context.Context, chat, id int64, approve bool) {
 	}
 	res, err := b.Store.ApproveRepOrder(ctx, "telegram", b.Seller, id)
 	if err != nil {
-		msg := "تحویل نشد: " + esc(err.Error())
+		msg := "تحویل نشد: " + esc(faErr(err))
 		var kb *Keyboard
 		if errors.Is(err, hubcore.ErrFunds) {
 			o, _ := b.Store.RepOrderByID(ctx, id)
@@ -455,7 +455,7 @@ func (b *Bot) repSaleConfig(ctx context.Context, chat int64, args []string) {
 	}
 	save := func(backTo string) bool {
 		if err := b.Store.PutRepSale(ctx, sale); err != nil {
-			msg := esc(err.Error())
+			msg := esc(faErr(err))
 			switch {
 			case strings.Contains(msg, "define a package first"):
 				msg = "اول یک بسته تعریف کنید."
@@ -654,7 +654,7 @@ func (b *Bot) repSaleAddPackage(ctx context.Context, chat int64, text string) {
 	// A new package starts strict: volume only, every inbound, no caps.
 	sale.Packages = append(sale.Packages, hubcore.RepPackage{GB: gbN, Price: price, CanDelete: true})
 	if err := b.Store.PutRepSale(ctx, sale); err != nil {
-		b.send(ctx, chat, "ذخیره نشد: "+esc(err.Error()), &Keyboard{Rows: [][]Button{back("P:cfg")}})
+		b.send(ctx, chat, "ذخیره نشد: "+esc(faErr(err)), &Keyboard{Rows: [][]Button{back("P:cfg")}})
 		return
 	}
 	sale = b.Store.RepSale(ctx)
@@ -706,7 +706,7 @@ func (b *Bot) repSaleSetValue(ctx context.Context, chat int64, what, field, id, 
 		}
 	}
 	if err := b.Store.PutRepSale(ctx, sale); err != nil {
-		again("ذخیره نشد: " + esc(err.Error()))
+		again("ذخیره نشد: " + esc(faErr(err)))
 		return
 	}
 	b.repSalePackage(ctx, chat, *pk)

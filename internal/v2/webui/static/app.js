@@ -196,6 +196,19 @@ async function api(method, path, body) {
 
 // faErr: the server's English errors in plain Persian (numbers kept).
 const FA_ERRS = [
+  [/old users cannot be renewed/i, "کاربرهای قدیمی (منتقل‌شده از پنل قبلی) تمدید نمی‌شوند؛ برایشان کاربر جدید بسازید"],
+  [/overdue bill is unpaid/i, "یک فاکتور از مهلتش گذشته و پرداخت نشده؛ تا پرداخت آن فروش و ساخت کاربر قفل است"],
+  [/no volume credit left/i, "اعتبار حجمی تمام شده است"],
+  [/wallet does not cover the wholesale price/i, "موجودی کیف پول برای قیمت عمده کافی نیست؛ اول کیف پول را از ربات اصلی شارژ کنید"],
+  [/panel sale is (no longer )?(not )?allowed/i, "فروش پنل برای این نماینده مجاز نیست"],
+  [/this username is taken or not valid/i, "این نام کاربری گرفته شده یا معتبر نیست"],
+  [/the price of (.+) cannot be below the wholesale price (\d+)/i, "قیمت «$1» نمی‌تواند کمتر از قیمت عمده ($2 تومان) باشد"],
+  [/bringing old users is not allowed/i, "آوردن کاربران قدیمی برای شما فعال نیست"],
+  [/the domain is already moved/i, "دامنه منتقل شده؛ دیگر لینکی خوانده نمی‌شود"],
+  [/links are still being read/i, "لینک‌های قبلی هنوز در حال خواندن‌اند؛ کمی صبر کنید"],
+  [/bring at least one user first/i, "اول دست‌کم یک کاربر بیاورید"],
+  [/1 to 5000 links/i, "بین ۱ تا ۵۰۰۰ لینک بفرستید"],
+  [/the client limit \((\d+)\) is reached/i, "به سقف تعداد کاربر ($1) رسیده‌اید"],
   [/client already exists/i, "این نام قبلاً استفاده شده است"],
   [/the name may use only/i, "نام فقط حروف انگلیسی، عدد و . _ - باشد (بدون فاصله)"],
   [/insufficient credit/i, "اعتبار کافی نیست"],

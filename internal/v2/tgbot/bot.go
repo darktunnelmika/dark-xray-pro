@@ -321,7 +321,7 @@ func (b *Bot) onMessage(ctx context.Context, m *Message) {
 		if ce := m.CustomEmoji(); len(ce) > 0 {
 			n, err := b.Store.AddEmoji(ctx, ce, false)
 			if err != nil {
-				b.send(ctx, chat, "ذخیره نشد: "+esc(err.Error()), nil)
+				b.send(ctx, chat, "ذخیره نشد: "+esc(faErr(err)), nil)
 				return
 			}
 			var keys []string
@@ -879,7 +879,7 @@ func (b *Bot) onCallback(ctx context.Context, q *CallbackQuery) {
 			pid = ""
 		}
 		if err := b.Store.SetAutoRenew(ctx, chat, email, pid); err != nil {
-			b.send(ctx, chat, "این تنظیم انجام نشد: "+esc(err.Error()), homeKB)
+			b.send(ctx, chat, "این تنظیم انجام نشد: "+esc(faErr(err)), homeKB)
 			return
 		}
 		b.showAutoRenew(ctx, chat, email)
@@ -981,13 +981,13 @@ func (b *Bot) onCallback(ctx context.Context, q *CallbackQuery) {
 		if verb == "ok" {
 			email, err := b.Store.FulfillOrder(ctx, by, id)
 			if err != nil {
-				b.send(ctx, chat, fmt.Sprintf("تحویل سفارش #%d ممکن نشد: %s", id, esc(err.Error())), nil)
+				b.send(ctx, chat, fmt.Sprintf("تحویل سفارش #%d ممکن نشد: %s", id, esc(faErr(err))), nil)
 				return
 			}
 			b.send(ctx, chat, fmt.Sprintf("✅ سفارش #%d تحویل شد: <code>%s</code>", id, esc(email)), &Keyboard{Rows: [][]Button{{{Text: "لینک و QR", Data: "sub:" + email}}}})
 		} else {
 			if err := b.Store.CancelOrder(ctx, by, id); err != nil {
-				b.send(ctx, chat, fmt.Sprintf("لغو سفارش #%d ممکن نشد: %s", id, esc(err.Error())), nil)
+				b.send(ctx, chat, fmt.Sprintf("لغو سفارش #%d ممکن نشد: %s", id, esc(faErr(err))), nil)
 				return
 			}
 			b.send(ctx, chat, fmt.Sprintf("سفارش #%d لغو شد.", id), nil)
@@ -1048,7 +1048,7 @@ func (b *Bot) ownerMessage(ctx context.Context, m *Message, text string) bool {
 		}
 		bal, err := b.Store.WalletAdjust(ctx, chat, delta, strings.Join(f[2:], " "))
 		if err != nil {
-			b.send(ctx, m.Chat.ID, "انجام نشد: "+esc(err.Error()), nil)
+			b.send(ctx, m.Chat.ID, "انجام نشد: "+esc(faErr(err)), nil)
 			return true
 		}
 		b.send(ctx, m.Chat.ID, fmt.Sprintf("کیف پول %d: %+d⭐ — موجودی %d⭐", chat, delta, bal), nil)

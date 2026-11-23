@@ -125,7 +125,7 @@ func (b *Bot) ownerCallback(ctx context.Context, chat int64, data string) bool {
 			row(cbBtn("بله، صفر شود", "a:resetok:"+arg(1)), cbBtn("انصراف", "a:c:"+arg(1)))}})
 	case "resetok":
 		if err := b.Store.ResetUsage(ctx, arg(1), "telegram"); err != nil {
-			b.send(ctx, chat, "انجام نشد: "+esc(err.Error()), backTo("a:c:"+arg(1), "کلاینت"))
+			b.send(ctx, chat, "انجام نشد: "+esc(faErr(err)), backTo("a:c:"+arg(1), "کلاینت"))
 			return true
 		}
 		b.ownerClient(ctx, chat, arg(1))
@@ -134,7 +134,7 @@ func (b *Bot) ownerCallback(ctx context.Context, chat int64, data string) bool {
 			row(cbBtn("بله، لینک تازه", "a:rotok:"+arg(1)), cbBtn("انصراف", "a:c:"+arg(1)))}})
 	case "rotok":
 		if err := b.Store.RotateClient(ctx, arg(1), true, true); err != nil {
-			b.send(ctx, chat, "انجام نشد: "+esc(err.Error()), backTo("a:c:"+arg(1), "کلاینت"))
+			b.send(ctx, chat, "انجام نشد: "+esc(faErr(err)), backTo("a:c:"+arg(1), "کلاینت"))
 			return true
 		}
 		b.ownerClient(ctx, chat, arg(1))
@@ -182,7 +182,7 @@ func (b *Bot) ownerCallback(ctx context.Context, chat int64, data string) bool {
 		g, _ := strconv.ParseFloat(arg(2), 64)
 		u, _ := strconv.ParseInt(arg(3), 10, 64)
 		if err := b.Store.AdjustCredit(ctx, "telegram", arg(1), int64(g*(1<<30)), u, "telegram"); err != nil {
-			b.send(ctx, chat, "انجام نشد: "+esc(err.Error()), nil)
+			b.send(ctx, chat, "انجام نشد: "+esc(faErr(err)), nil)
 			return true
 		}
 		b.repsView(ctx, chat)
@@ -658,7 +658,7 @@ func (b *Bot) toggleClient(ctx context.Context, chat int64, email string) {
 	cl := c.Client
 	cl.Enabled = !cl.Enabled
 	if err := b.Store.PutClient(ctx, cl); err != nil {
-		b.send(ctx, chat, "انجام نشد: "+esc(err.Error()), nil)
+		b.send(ctx, chat, "انجام نشد: "+esc(faErr(err)), nil)
 		return
 	}
 	b.ownerClient(ctx, chat, email)
@@ -686,13 +686,13 @@ func (b *Bot) quickSell(ctx context.Context, chat int64, product, name string) {
 			b.setAwait(chat, "qsname:"+product)
 			b.send(ctx, chat, "نام فقط حروف انگلیسی، عدد و . _ - باشد (بدون فاصله). دوباره بفرستید:", quickNameKB(product))
 		default:
-			b.send(ctx, chat, "ساخت ممکن نشد: "+esc(err.Error()), nil)
+			b.send(ctx, chat, "ساخت ممکن نشد: "+esc(faErr(err)), nil)
 		}
 		return
 	}
 	email, err := b.Store.FulfillOrder(ctx, b.owner(), id)
 	if err != nil {
-		b.send(ctx, chat, "ساخت ممکن نشد: "+esc(err.Error()), nil)
+		b.send(ctx, chat, "ساخت ممکن نشد: "+esc(faErr(err)), nil)
 		return
 	}
 	b.Store.MarkOrderAnnounced(ctx, id, false)
@@ -781,7 +781,7 @@ func (b *Bot) repNewCreate(ctx context.Context, chat int64, id, pkgID string) {
 		}
 	}
 	if err := b.Store.CreateRep(ctx, "telegram", in); err != nil {
-		b.send(ctx, chat, "ساخته نشد: "+esc(err.Error()), &Keyboard{Rows: [][]Button{back("a:reps")}})
+		b.send(ctx, chat, "ساخته نشد: "+esc(faErr(err)), &Keyboard{Rows: [][]Button{back("a:reps")}})
 		return
 	}
 	b.send(ctx, chat, fmt.Sprintf("✅ نمایندهٔ <code>%s</code> ساخته شد (%s).\nپیام زیر را برایش بفرستید؛ رمز دیگر نمایش داده نمی‌شود.", esc(id), credit), nil)
@@ -825,7 +825,7 @@ func (b *Bot) sendBackup(ctx context.Context, chat int64) error {
 		data, err = b.Store.EncryptedBackup(ctx, pass)
 	}
 	if err != nil {
-		b.send(ctx, chat, "ساخت بکاپ ممکن نشد: "+esc(err.Error()), nil)
+		b.send(ctx, chat, "ساخت بکاپ ممکن نشد: "+esc(faErr(err)), nil)
 		return err
 	}
 	name := "dark-v2-" + b.now().UTC().Format("20060102-1504") + ".dkb"

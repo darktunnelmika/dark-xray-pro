@@ -223,7 +223,7 @@ func (b *Bot) setupForum(ctx context.Context, m *Message) {
 		}
 		id, err := f.CreateForumTopic(ctx, m.Chat.ID, t.name, t.color)
 		if err != nil {
-			b.groupSay(ctx, m, "ساخت تاپیک ممکن نشد. ربات باید ادمین گروه با دسترسی «مدیریت تاپیک‌ها» باشد.\n"+esc(err.Error()))
+			b.groupSay(ctx, m, "ساخت تاپیک ممکن نشد. ربات باید ادمین گروه با دسترسی «مدیریت تاپیک‌ها» باشد.\n"+esc(faErr(err)))
 			return
 		}
 		c.Topics[t.key] = id
