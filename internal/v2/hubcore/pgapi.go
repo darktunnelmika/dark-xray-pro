@@ -703,12 +703,27 @@ func pgRoutes(s *Store, mux *http.ServeMux, subBase string) {
 			}
 			if r.Method != http.MethodGet && r.Method != http.MethodHead {
 				sw := &statusWriter{ResponseWriter: w}
+				note := &pgAuditNote{}
+				r = r.WithContext(context.WithValue(r.Context(), pgAuditKey{}, note))
 				h(sw, r, seller)
 				p := Principal{User: "mirza", Role: "owner"}
 				if seller != "" {
 					p = Principal{User: "mirza", Role: "rep", RepID: seller}
 				}
-				s.Audit(r.Context(), p, r, sw.status)
+				if len(note.names) == 0 {
+					s.Audit(r.Context(), p, r, sw.status)
+					return
+				}
+				// One row per user touched, so a search by name finds a
+				// change made by id or in bulk.
+				for i, name := range note.names {
+					if i == 500 {
+						break
+					}
+					r2 := r.Clone(r.Context())
+					r2.URL.Path = r.URL.Path + " " + name
+					s.Audit(r.Context(), p, r2, sw.status)
+				}
 				return
 			}
 			h(w, r, seller)
@@ -788,28 +803,7 @@ func pgRoutes(s *Store, mux *http.ServeMux, subBase string) {
 	mux.HandleFunc("GET /api/nodes", auth(func(w http.ResponseWriter, r *http.Request, seller string) {
 		out := []map[string]any{}
 		if seller == "" {
-			nodes, _ := s.Nodes(r.Context())
-			num := map[string]int64{}
-			if rows, err := s.ro.QueryContext(r.Context(), `SELECT id,rowid FROM nodes`); err == nil {
-				for rows.Next() {
-					var id string
-					var n int64
-					if rows.Scan(&id, &n) == nil {
-						num[id] = n
-					}
-				}
-				rows.Close()
-			}
-			now := s.now().Unix()
-			for _, n := range nodes {
-				st, msg := "connected", ""
-				if now-n.LastSeen > 120 {
-					st, msg = "error", "not connected to the panel"
-				} else if !n.XrayRunning {
-					st, msg = "error", "xray is not running"
-				}
-				out = append(out, map[string]any{"id": num[n.ID], "name": or2(n.Name, n.ID), "address": n.PublicIP, "status": st, "message": msg, "xray_version": nil})
-			}
+			out = s.pgNodeViews(r.Context())
 		}
 		pgJSON(w, out)
 	}))
@@ -847,6 +841,7 @@ func pgRoutes(s *Store, mux *http.ServeMux, subBase string) {
 			return
 		}
 		_, _ = s.db.ExecContext(r.Context(), `UPDATE pg_api SET made=made+1 WHERE seller=?`, seller)
+		pgNote(r, c.Email)
 		(&pgSrv{s: s, base: base}).viewCode(w, r, seller, c.Email, http.StatusCreated)
 	}))
 	(&pgSrv{s: s, base: base}).routes(mux, auth)

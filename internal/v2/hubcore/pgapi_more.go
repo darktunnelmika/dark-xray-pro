@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/darktunnelmika/dark-xray-pro/internal/v2/wire"
 )
 
 // The rest of PasarGuard's user API, under its own paths and shapes, for a
@@ -367,6 +369,7 @@ func (p *pgSrv) user(w http.ResponseWriter, r *http.Request, seller string) {
 			pgFail(w, err)
 			return
 		}
+		pgNote(r, c.Email)
 		p.renewFromTemplate(w, r, seller, c)
 		return
 	}
@@ -414,6 +417,7 @@ func (p *pgSrv) user(w http.ResponseWriter, r *http.Request, seller string) {
 		pgFail(w, err)
 		return
 	}
+	pgNote(r, c.Email)
 	switch r.Method + " " + act {
 	case "GET ":
 		p.view(w, r, seller, c.Email)
@@ -1163,6 +1167,7 @@ func (p *pgSrv) bulkSelect(action string) pgAuthed {
 			}
 			done = append(done, e)
 		}
+		pgNote(r, done...)
 		pgJSON(w, map[string]any{"users": done, "count": len(done)})
 	}
 }
@@ -1273,7 +1278,6 @@ func (p *pgSrv) bulkLimit(field string) pgAuthed {
 			pgFail(w, err)
 			return
 		}
-		now := p.s.now().Unix()
 		var list []Client
 		for _, x := range rows {
 			c := x.c.Client
@@ -1288,9 +1292,6 @@ func (p *pgSrv) bulkLimit(field string) pgAuthed {
 			default:
 				continue
 			}
-			if seller != "" && termDays(c, now) == 0 {
-				continue // a reseller's user whose term is over is renewed, not changed
-			}
 			list = append(list, c)
 		}
 		if f.DryRun {
@@ -1302,6 +1303,7 @@ func (p *pgSrv) bulkLimit(field string) pgAuthed {
 				bulkFail(w, i, err)
 				return
 			}
+			pgNote(r, c.Email)
 		}
 		pgJSON(w, map[string]string{"detail": fmt.Sprintf("operation has been successfuly done on %d users", len(list))})
 	}
@@ -1325,7 +1327,6 @@ func (p *pgSrv) bulkGroups(add bool) pgAuthed {
 			pgFail(w, err)
 			return
 		}
-		now := p.s.now().Unix()
 		var list []Client
 		for _, x := range rows {
 			have := map[string]bool{}
@@ -1358,9 +1359,6 @@ func (p *pgSrv) bulkGroups(add bool) pgAuthed {
 			if len(c.Inbounds) == 0 {
 				continue // a user keeps at least one group
 			}
-			if seller != "" && termDays(c, now) == 0 {
-				continue // a reseller's user whose term is over is renewed, not changed
-			}
 			list = append(list, c)
 		}
 		if f.DryRun {
@@ -1372,6 +1370,7 @@ func (p *pgSrv) bulkGroups(add bool) pgAuthed {
 				bulkFail(w, i, err)
 				return
 			}
+			pgNote(r, c.Email)
 		}
 		pgJSON(w, map[string]string{"detail": fmt.Sprintf("operation has been successfuly done on %d users", len(list))})
 	}
@@ -1735,6 +1734,7 @@ func (p *pgSrv) routes(mux *http.ServeMux, auth func(func(http.ResponseWriter, *
 	for _, m := range []string{"GET", "PUT", "POST", "DELETE"} {
 		mux.HandleFunc(m+" /api/user/{rest...}", auth(p.user))
 	}
+	p.nodeRoutes(mux, auth)
 	mux.HandleFunc("GET /api/users", auth(p.users))
 	mux.HandleFunc("GET /api/users/simple", auth(p.usersSimple))
 	mux.HandleFunc("GET /api/users/usage", auth(func(w http.ResponseWriter, r *http.Request, seller string) {
@@ -1761,6 +1761,7 @@ func (p *pgSrv) routes(mux *http.ServeMux, auth func(func(http.ResponseWriter, *
 					bulkFail(w, i, err)
 					return
 				}
+				pgNote(r, e)
 			}
 		}
 		pgJSON(w, map[string]any{"users": names, "count": len(names)})
@@ -1813,6 +1814,7 @@ func (p *pgSrv) routes(mux *http.ServeMux, auth func(func(http.ResponseWriter, *
 				bulkFail(w, i, err)
 				return
 			}
+			pgNote(r, e)
 		}
 		pgJSON(w, map[string]any{"users": names, "count": len(names)})
 	}))
@@ -1832,6 +1834,7 @@ func (p *pgSrv) routes(mux *http.ServeMux, auth func(func(http.ResponseWriter, *
 			pgFailT(w, err)
 			return
 		}
+		pgNote(r, name)
 		p.viewCode(w, r, seller, name, http.StatusCreated)
 	}))
 	mux.HandleFunc("POST /api/users/bulk/from_template", auth(func(w http.ResponseWriter, r *http.Request, seller string) {
@@ -1900,6 +1903,7 @@ func (p *pgSrv) routes(mux *http.ServeMux, auth func(func(http.ResponseWriter, *
 			}
 			c, _ := s.clientView(r.Context(), name)
 			urls = append(urls, subURL(p.base(r, seller), r, c.SubToken))
+			pgNote(r, name)
 		}
 		pgJSON(w, map[string]any{"subscription_urls": urls, "created": len(urls)})
 	}))
@@ -1926,6 +1930,7 @@ func (p *pgSrv) routes(mux *http.ServeMux, auth func(func(http.ResponseWriter, *
 				bulkFail(w, i, err)
 				return
 			}
+			pgNote(r, e)
 		}
 		pgJSON(w, map[string]any{"users": names, "count": len(names)})
 	}))
@@ -2284,4 +2289,256 @@ func pgSubRoutes(s *Store, mux *http.ServeMux, subBase string) {
 		w.Header().Set("Cache-Control", "no-store")
 		p.subscription(w, r, c.Email, r.PathValue("client_type"))
 	})
+}
+
+// ---- nodes (owner only), as PasarGuard's node API ----
+//
+// Mirza's node screen reads a node and renames it, changes its address or
+// traffic multiplier, reconnects or deletes it. Dark's nodes connect out to
+// the hub, so port and api_port are 0; usage_coefficient is the node's
+// traffic percent / 100.
+
+// pgNodeNums numbers the nodes by row id (as the usage charts do).
+func (s *Store) pgNodeNums(ctx context.Context) map[string]int64 {
+	num := map[string]int64{}
+	if rows, err := s.ro.QueryContext(ctx, `SELECT id,rowid FROM nodes`); err == nil {
+		for rows.Next() {
+			var id string
+			var n int64
+			if rows.Scan(&id, &n) == nil {
+				num[id] = n
+			}
+		}
+		rows.Close()
+	}
+	return num
+}
+
+// pgNodeTraffic is each node's lifetime traffic (up, down).
+func (s *Store) pgNodeTraffic(ctx context.Context) map[string][2]int64 {
+	out := map[string][2]int64{}
+	if rows, err := s.ro.QueryContext(ctx, `SELECT node_id,COALESCE(SUM(up),0),COALESCE(SUM(down),0) FROM usage_daily GROUP BY node_id`); err == nil {
+		for rows.Next() {
+			var id string
+			var up, down int64
+			if rows.Scan(&id, &up, &down) == nil {
+				out[id] = [2]int64{up, down}
+			}
+		}
+		rows.Close()
+	}
+	return out
+}
+
+func (s *Store) pgNodeViews(ctx context.Context) []map[string]any {
+	out := []map[string]any{}
+	nodes, _ := s.Nodes(ctx)
+	num, traffic := s.pgNodeNums(ctx), s.pgNodeTraffic(ctx)
+	now := s.now().Unix()
+	for _, n := range nodes {
+		st, msg := "connected", ""
+		if now-n.LastSeen > 120 {
+			st, msg = "error", "not connected to the panel"
+		} else if !n.XrayRunning {
+			st, msg = "error", "xray is not running"
+		}
+		var xv any
+		if n.XrayVersion != "" {
+			xv = n.XrayVersion
+		}
+		var av any
+		if n.AgentVersion != "" {
+			av = n.AgentVersion
+		}
+		t := traffic[n.ID]
+		pct := n.TrafficPercent
+		if pct <= 0 {
+			pct = 100
+		}
+		out = append(out, map[string]any{"id": num[n.ID], "name": or2(n.Name, n.ID), "address": n.PublicIP, "port": 0, "api_port": 0,
+			"usage_coefficient": float64(pct) / 100, "status": st, "message": msg, "xray_version": xv, "core_version": xv, "node_version": av,
+			"uplink": t[0], "downlink": t[1], "lifetime_uplink": t[0], "lifetime_downlink": t[1],
+			"data_limit": 0, "data_limit_reset_strategy": "no_reset", "connection_type": "grpc", "sort_order": 0})
+	}
+	return out
+}
+
+// pgNode is the node with that number and its view.
+func (s *Store) pgNode(ctx context.Context, numText string) (string, map[string]any, error) {
+	n, err := strconv.ParseInt(numText, 10, 64)
+	if err != nil {
+		return "", nil, fmt.Errorf("%w: node", ErrNotFound)
+	}
+	var id string
+	if s.ro.QueryRowContext(ctx, `SELECT id FROM nodes WHERE rowid=?`, n).Scan(&id) != nil {
+		return "", nil, fmt.Errorf("%w: node", ErrNotFound)
+	}
+	for _, v := range s.pgNodeViews(ctx) {
+		if v["id"] == n {
+			return id, v, nil
+		}
+	}
+	return id, nil, fmt.Errorf("%w: node", ErrNotFound)
+}
+
+func pgFailNode(w http.ResponseWriter, err error) {
+	if errors.Is(err, ErrNotFound) {
+		pgErr(w, http.StatusNotFound, "Node not found")
+		return
+	}
+	pgFail(w, err)
+}
+
+func (p *pgSrv) nodeRoutes(mux *http.ServeMux, auth func(func(http.ResponseWriter, *http.Request, string)) http.HandlerFunc) {
+	s := p.s
+	mux.HandleFunc("GET /api/node/{id}", auth(func(w http.ResponseWriter, r *http.Request, seller string) {
+		if !pgOwnerOnly(w, seller) {
+			return
+		}
+		_, v, err := s.pgNode(r.Context(), r.PathValue("id"))
+		if err != nil {
+			pgFailNode(w, err)
+			return
+		}
+		pgJSON(w, v)
+	}))
+	mux.HandleFunc("PUT /api/node/{id}", auth(func(w http.ResponseWriter, r *http.Request, seller string) {
+		if !pgOwnerOnly(w, seller) {
+			return
+		}
+		id, _, err := s.pgNode(r.Context(), r.PathValue("id"))
+		if err != nil {
+			pgFailNode(w, err)
+			return
+		}
+		var in struct {
+			Name             *string  `json:"name"`
+			Address          *string  `json:"address"`
+			UsageCoefficient *float64 `json:"usage_coefficient"`
+			Status           *string  `json:"status"`
+		}
+		if !pgDecode(w, r, &in) {
+			return
+		}
+		// Check everything first, so a refused change leaves the node as it was.
+		if in.Name != nil && (strings.TrimSpace(*in.Name) == "" || len(*in.Name) > 64) {
+			pgErr(w, http.StatusUnprocessableEntity, "name: 1-64 characters")
+			return
+		}
+		if in.UsageCoefficient != nil && (*in.UsageCoefficient < 0.1 || *in.UsageCoefficient > 10) {
+			pgErr(w, http.StatusUnprocessableEntity, "usage_coefficient: 0.1-10")
+			return
+		}
+		if in.Status != nil && *in.Status != "connected" && *in.Status != "connecting" {
+			pgErr(w, http.StatusUnprocessableEntity, "a node cannot be turned off here; its inbounds can, in the panel")
+			return
+		}
+		ctx := r.Context()
+		if in.Address != nil {
+			if err := s.SetNodePublicIP(ctx, id, *in.Address); err != nil {
+				pgFailNode(w, err)
+				return
+			}
+		}
+		if in.Name != nil {
+			if err := s.RenameNode(ctx, id, strings.TrimSpace(*in.Name)); err != nil {
+				pgFailNode(w, err)
+				return
+			}
+		}
+		if in.UsageCoefficient != nil {
+			if err := s.SetNodeTrafficPercent(ctx, id, int(math.Round(*in.UsageCoefficient*100))); err != nil {
+				pgFailNode(w, err)
+				return
+			}
+		}
+		_, v, err := s.pgNode(ctx, r.PathValue("id"))
+		if err != nil {
+			pgFailNode(w, err)
+			return
+		}
+		pgJSON(w, v)
+	}))
+	mux.HandleFunc("DELETE /api/node/{id}", auth(func(w http.ResponseWriter, r *http.Request, seller string) {
+		if !pgOwnerOnly(w, seller) {
+			return
+		}
+		id, _, err := s.pgNode(r.Context(), r.PathValue("id"))
+		if err == nil {
+			err = s.DeleteNode(r.Context(), id)
+		}
+		if err != nil {
+			pgFailNode(w, err)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	mux.HandleFunc("POST /api/node/{id}/reconnect", auth(func(w http.ResponseWriter, r *http.Request, seller string) {
+		if !pgOwnerOnly(w, seller) {
+			return
+		}
+		id, _, err := s.pgNode(r.Context(), r.PathValue("id"))
+		if err == nil {
+			_, err = s.QueueTask(r.Context(), id, wire.TaskXrayRestart, nil)
+		}
+		if err != nil {
+			pgFailNode(w, err)
+			return
+		}
+		pgJSON(w, map[string]any{})
+	}))
+	// Marzban's node usage list, which Mirza reads.
+	mux.HandleFunc("GET /api/nodes/usage", auth(func(w http.ResponseWriter, r *http.Request, seller string) {
+		usages := []map[string]any{}
+		if seller == "" {
+			start, end, err := pgRange(r, s.now())
+			if err != nil {
+				pgFail(w, err)
+				return
+			}
+			names := map[string]string{}
+			nodes, _ := s.Nodes(r.Context())
+			for _, n := range nodes {
+				names[n.ID] = or2(n.Name, n.ID)
+			}
+			num := s.pgNodeNums(r.Context())
+			rows, err := s.ro.QueryContext(r.Context(), `SELECT node_id,COALESCE(SUM(up),0),COALESCE(SUM(down),0) FROM usage_daily WHERE day>=? AND day<=? GROUP BY node_id ORDER BY node_id`,
+				start.Format("2006-01-02"), end.Format("2006-01-02"))
+			if err != nil {
+				pgFail(w, err)
+				return
+			}
+			defer rows.Close()
+			for rows.Next() {
+				var id string
+				var up, down int64
+				if rows.Scan(&id, &up, &down) == nil {
+					var n any
+					if v, ok := num[id]; ok {
+						n = v
+					}
+					usages = append(usages, map[string]any{"node_id": n, "node_name": or2(names[id], id), "uplink": up, "downlink": down})
+				}
+			}
+		}
+		pgJSON(w, map[string]any{"usages": usages})
+	}))
+}
+
+// ---- audit: which users a change touched ----
+
+type pgAuditKey struct{}
+
+// pgAuditNote collects the users a request changed, so the audit log can
+// be searched by name even when the path has only an id or a bulk action.
+type pgAuditNote struct{ names []string }
+
+func pgNote(r *http.Request, names ...string) {
+	if n, ok := r.Context().Value(pgAuditKey{}).(*pgAuditNote); ok {
+		for _, x := range names {
+			if !strings.Contains(r.URL.Path, x) {
+				n.names = append(n.names, x)
+			}
+		}
+	}
 }

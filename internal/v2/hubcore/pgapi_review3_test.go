@@ -290,3 +290,163 @@ func TestRestoreKeepsRowIDMarks(t *testing.T) {
 		t.Fatalf("dave got id %d, carol had %d", dave, carol)
 	}
 }
+
+// TestPasarGuardReviewFour holds the four items left after the third
+// review: an expired reseller user, node management, the owner's gift and
+// names in the audit log.
+func TestPasarGuardReviewFour(t *testing.T) {
+	s, now := newStore(t)
+	ctx := context.Background()
+	seed(t, s)
+	_ = s.PutRep(ctx, Rep{ID: "ali", Name: "Ali", Enabled: true})
+	_ = s.SetRepPolicy(ctx, "ali", RepPolicy{AllowUnlimited: true, CanDelete: true, RefundUnused: true})
+	if err := s.AdjustCredit(ctx, "owner", "ali", 100<<30, 5, ""); err != nil {
+		t.Fatal(err)
+	}
+	h := httptest.NewServer(AdminHandlerWith(s, "admintok", "", nil))
+	defer h.Close()
+	c := pgClient{t, h.URL}
+	credit := func() (vol, units int64) {
+		_ = s.db.QueryRow(`SELECT volume_credit,unlimited_units FROM reps WHERE id='ali'`).Scan(&vol, &units)
+		return
+	}
+	a, _ := s.EnablePGAPI(ctx, "ali")
+	tok := c.login("mirza_ali", a.Password)
+	_, g := c.obj("GET", "/api/groups", tok, nil)
+	gid := g["groups"].([]any)[0].(map[string]any)["id"]
+	exp := now.Add(30 * 24 * time.Hour).Unix()
+	mk := func(name string, gb int64) float64 {
+		t.Helper()
+		code, out := c.obj("POST", "/api/user", tok, map[string]any{"username": name, "data_limit": gb << 30, "expire": exp, "group_ids": []any{gid}})
+		if code != 201 {
+			t.Fatalf("create %s %d %v", name, code, out)
+		}
+		return out["id"].(float64)
+	}
+
+	// 1. Extra volume on an expired user, the way Mirza sells it.
+	mk("old1", 10)
+	_, _ = s.db.Exec(`UPDATE clients SET expires_unix=? WHERE email='old1'`, now.Add(-time.Hour).Unix())
+	before, _ := credit()
+	if code, out := c.obj("PUT", "/api/user/old1", tok, map[string]any{"data_limit": 15 << 30, "proxy_settings": map[string]any{}}); code != 200 || out["data_limit"].(float64) != 15<<30 {
+		t.Fatalf("extra volume on an expired user %d %v", code, out)
+	}
+	if after, _ := credit(); before-after != 5<<30 {
+		t.Fatalf("the 5 GB added are charged: %d", before-after)
+	}
+	if code, _ := c.obj("POST", "/api/user", tok, map[string]any{"username": "past1", "data_limit": 1 << 30, "expire": now.Add(-time.Hour).Unix(), "group_ids": []any{gid}}); code != 422 {
+		t.Fatal("a new user already expired", code)
+	}
+	if code, _ := c.obj("PUT", "/api/user/old1", tok, map[string]any{"expire": 0}); code != 422 {
+		t.Fatal("a reseller's user without any term", code)
+	}
+
+	// 3. The owner's next plan is a gift: renewals, deletes and the expiry
+	// refund never pay it out.
+	mk("gift1", 10) // paid 10 GB
+	_ = s.SetNextPlan(ctx, "gift1", &NextPlan{GB: 50, Days: 30})
+	v, _ := s.clientView(ctx, "gift1")
+	if err := s.applyNextPlan(ctx, "gift1", *v.NextPlan); err != nil {
+		t.Fatal(err)
+	}
+	vol0, _ := credit()
+	if _, err := s.RenewClient(ctx, Principal{User: "ali", Role: "rep", RepID: "ali"}, "gift1", "volume", 1, 30); err != nil {
+		t.Fatal(err)
+	}
+	if vol1, _ := credit(); vol0-vol1 != 1<<30 {
+		t.Fatalf("a renewal of a gift pays 1 GB and gets nothing back: %d", vol0-vol1)
+	}
+	mk("gift2", 10)
+	_ = s.SetNextPlan(ctx, "gift2", &NextPlan{GB: 50, Days: 30})
+	v, _ = s.clientView(ctx, "gift2")
+	_ = s.applyNextPlan(ctx, "gift2", *v.NextPlan)
+	if code, _ := c.obj("PUT", "/api/user/gift2", tok, map[string]any{"data_limit": 60 << 30}); code != 200 {
+		t.Fatal("paid volume on top of a gift", code)
+	}
+	vol0, _ = credit()
+	if code, _ := c.obj("DELETE", "/api/user/gift2", tok, nil); code != 200 {
+		t.Fatal("delete", code)
+	}
+	if vol1, _ := credit(); vol1-vol0 != 10<<30 {
+		t.Fatalf("only the paid 10 GB comes back, not the gift: %d", vol1-vol0)
+	}
+	mk("gift3", 10)
+	_ = s.SetNextPlan(ctx, "gift3", &NextPlan{GB: 0, Days: 60}) // unlimited, two units
+	v, _ = s.clientView(ctx, "gift3")
+	_ = s.applyNextPlan(ctx, "gift3", *v.NextPlan)
+	_, u0 := credit()
+	if code, _ := c.obj("DELETE", "/api/user/gift3", tok, nil); code != 200 {
+		t.Fatal("delete", code)
+	}
+	if _, u1 := credit(); u1 != u0 {
+		t.Fatalf("a gifted unlimited term gives no units back: %d -> %d", u0, u1)
+	}
+	mk("gift4", 10)
+	_ = s.SetNextPlan(ctx, "gift4", &NextPlan{GB: 50, Days: 30})
+	v, _ = s.clientView(ctx, "gift4")
+	_ = s.applyNextPlan(ctx, "gift4", *v.NextPlan)
+	_, _ = s.db.Exec(`UPDATE clients SET expires_unix=? WHERE email='gift4'`, now.Add(-time.Hour).Unix())
+	s.runExpiryRefunds(ctx)
+	var giftBack, paidBack int64
+	_ = s.db.QueryRow(`SELECT COALESCE(SUM(volume_delta),0) FROM credit_ledger WHERE client_email='gift4' AND kind='refund'`).Scan(&giftBack)
+	_ = s.db.QueryRow(`SELECT COALESCE(SUM(volume_delta),0) FROM credit_ledger WHERE client_email='old1' AND kind='refund'`).Scan(&paidBack)
+	if giftBack != 0 || paidBack != 15<<30-1 {
+		t.Fatalf("the expiry refund pays no gift (%d) but does pay unused paid volume (%d)", giftBack, paidBack)
+	}
+
+	// 4. Changes by id or in bulk are found by the user's name in the audit log.
+	id1, id2 := mk("audit1", 1), mk("audit2", 1)
+	if code, _ := c.obj("PUT", fmt.Sprintf("/api/user/by-id/%d/disabled", int64(id1)), tok, map[string]any{"disabled": true}); code != 200 {
+		t.Fatal("disable", code)
+	}
+	if code, _ := c.obj("POST", "/api/users/bulk/revoke_sub", tok, map[string]any{"ids": []any{id1, id2}}); code != 200 {
+		t.Fatal("bulk", code)
+	}
+	for name, want := range map[string]int{"audit1": 3, "audit2": 2} { // create + changes
+		if list, _ := s.AuditLog(ctx, "", name, 0, 100); len(list) != want {
+			t.Fatalf("audit for %s: %d entries, want %d: %+v", name, len(list), want, list)
+		}
+	}
+
+	// 2. Node management, the owner's only.
+	if code, _ := c.obj("GET", "/api/node/1", tok, nil); code != 403 {
+		t.Fatal("a reseller does not manage nodes", code)
+	}
+	o, _ := s.EnablePGAPI(ctx, "")
+	otok := c.login("mirza", o.Password)
+	_, _ = s.db.Exec(`INSERT INTO usage_daily(email,node_id,day,up,down) VALUES('alice','de-1',?,100,300)`, now.UTC().Format("2006-01-02"))
+	code, node := c.obj("GET", "/api/node/1", otok, nil)
+	if code != 200 || node["name"] != "Germany" || node["uplink"].(float64) != 100 || node["downlink"].(float64) != 300 || node["usage_coefficient"].(float64) != 1 {
+		t.Fatalf("node %d %v", code, node)
+	}
+	code, node = c.obj("PUT", "/api/node/1", otok, map[string]any{"name": "Frankfurt", "usage_coefficient": 1.5, "address": "8.8.4.4"})
+	if code != 200 || node["name"] != "Frankfurt" || node["usage_coefficient"].(float64) != 1.5 || node["address"] != "8.8.4.4" {
+		t.Fatalf("modify node %d %v", code, node)
+	}
+	if code, _ := c.obj("PUT", "/api/node/1", otok, map[string]any{"name": "X", "usage_coefficient": 50}); code != 422 {
+		t.Fatal("a bad multiplier", code)
+	}
+	if _, nv := c.obj("GET", "/api/node/1", otok, nil); nv["name"] != "Frankfurt" {
+		t.Fatal("a refused change leaves the node as it was", nv["name"])
+	}
+	if code, _ := c.obj("POST", "/api/node/1/reconnect", otok, nil); code != 200 {
+		t.Fatal("reconnect", code)
+	}
+	var tasks int
+	_ = s.db.QueryRow(`SELECT COUNT(*) FROM node_tasks WHERE node_id='de-1'`).Scan(&tasks)
+	if tasks != 1 {
+		t.Fatal("reconnect restarts the node's Xray", tasks)
+	}
+	if _, us := c.obj("GET", "/api/nodes/usage", otok, nil); len(us["usages"].([]any)) != 1 || us["usages"].([]any)[0].(map[string]any)["node_id"].(float64) != 1 {
+		t.Fatalf("nodes usage %v", us)
+	}
+	if code, _ := c.obj("GET", "/api/node/99", otok, nil); code != 404 {
+		t.Fatal("unknown node", code)
+	}
+	if code, _ := c.call("DELETE", "/api/node/1", otok, nil); code != 204 {
+		t.Fatal("delete node", code)
+	}
+	if nodes, _ := s.Nodes(ctx); len(nodes) != 0 {
+		t.Fatal("the node is gone")
+	}
+}

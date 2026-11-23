@@ -60,8 +60,9 @@ func (s *Store) renewPeriod(ctx context.Context, actor, repID, email, plan strin
 	if repID != "" && owner != repID {
 		return res, ErrNotFound // another seller's (or the owner's) client is invisible
 	}
-	var used, firstSeen int64
+	var used, firstSeen, gift int64
 	_ = tx.QueryRowContext(ctx, `SELECT up+down,first_seen_unix FROM client_usage WHERE email=?`, email).Scan(&used, &firstSeen)
+	_ = tx.QueryRowContext(ctx, `SELECT gift_bytes FROM clients WHERE email=?`, email).Scan(&gift)
 
 	if plan == "" {
 		plan = "volume"
@@ -115,8 +116,9 @@ func (s *Store) renewPeriod(ctx context.Context, actor, repID, email, plan strin
 		}
 		// Volume left unused from the old package goes back (the expiry job
 		// has already returned it for services that ran out of time).
-		if oldPlan != "unlimited" && old.VolumeBytes > 0 && old.VolumeBytes > used {
-			res.RefundBytes = old.VolumeBytes - used
+		// The owner's gift (a next plan) never comes back as credit.
+		if oldPlan != "unlimited" && old.VolumeBytes > 0 && old.VolumeBytes-gift > used {
+			res.RefundBytes = old.VolumeBytes - gift - used
 		}
 		net := res.ChargedBytes - res.RefundBytes
 		r, err := tx.ExecContext(ctx, `UPDATE reps SET volume_credit=volume_credit-?, unlimited_units=unlimited_units-?
@@ -159,7 +161,7 @@ WHERE id=? AND volume_credit>=? AND unlimited_units>=?`, net, res.ChargedUnits, 
 	if _, err := tx.ExecContext(ctx, `UPDATE client_usage SET up=0, down=0 WHERE email=?`, email); err != nil {
 		return res, err
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE clients SET enabled=1, volume_bytes=?, expires_unix=?, duration_seconds=?, plan=?, last_reset_unix=?,
+	if _, err := tx.ExecContext(ctx, `UPDATE clients SET enabled=1, volume_bytes=?, expires_unix=?, duration_seconds=?, plan=?, last_reset_unix=?, gift_bytes=0, gift_units=0,
 start_by_unix=CASE WHEN ? THEN start_by_unix ELSE 0 END WHERE email=?`,
 		c.VolumeBytes, c.ExpiresUnix, c.DurationSeconds, plan, now, c.DurationSeconds > 0, email); err != nil {
 		return res, err

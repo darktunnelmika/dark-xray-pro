@@ -211,7 +211,7 @@ func (s *Store) RepPutClient(ctx context.Context, actor, repID string, c Client,
 	} else if c.VolumeBytes < 0 {
 		return fmt.Errorf("%w: a volume plan needs a volume", ErrInvalid)
 	}
-	if termDays(c, now) == 0 {
+	if c.ExpiresUnix <= 0 && c.DurationSeconds <= 0 {
 		return fmt.Errorf("%w: representatives sell a fixed term", ErrInvalid)
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -233,6 +233,9 @@ func (s *Store) RepPutClient(ctx context.Context, actor, repID string, c Client,
 	}
 	if !isNew && existsRep != repID {
 		return ErrNotFound // another seller's (or the owner's) client is invisible
+	}
+	if isNew && termDays(c, now) == 0 {
+		return fmt.Errorf("%w: representatives sell a fixed term", ErrInvalid)
 	}
 	if err := checkPolicy(ctx, tx, repID, c, plan, isNew, now); err != nil {
 		return err
@@ -307,6 +310,12 @@ WHERE id=? AND volume_credit>=? AND unlimited_units>=?`, volCharge, unitCharge, 
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE clients SET rep_id=?, plan=? WHERE email=?`, repID, plan, c.Email); err != nil {
+		return err
+	}
+	// A gift (the owner's next plan) shrinks with the package it is part of,
+	// so volume or days paid for on top of it stay refundable.
+	if _, err := tx.ExecContext(ctx, `UPDATE clients SET gift_bytes=MIN(gift_bytes,MAX(volume_bytes,0)), gift_units=MIN(gift_units,?) WHERE email=?`,
+		unitsFor(termDays(c, now)), c.Email); err != nil {
 		return err
 	}
 	return tx.Commit()
