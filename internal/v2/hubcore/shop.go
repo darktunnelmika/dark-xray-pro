@@ -188,9 +188,15 @@ func (s *Store) PutProduct(ctx context.Context, by Principal, p Product) error {
 	}
 	defer tx.Rollback()
 	var cur, curSeller string
+	var rowid any // NULL keeps an existing row's id
 	err = tx.QueryRowContext(ctx, `SELECT status,seller FROM products WHERE id=?`, p.ID).Scan(&cur, &curSeller)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
+		id, err := newRowID(ctx, tx, "products")
+		if err != nil {
+			return err
+		}
+		rowid = id
 	case err != nil:
 		return err
 	case !s.canStock(ctx, by, curSeller):
@@ -205,12 +211,12 @@ func (s *Store) PutProduct(ctx context.Context, by Principal, p Product) error {
 	if p.Seller != "" {
 		p.PriceStars = 0 // Stars go to the owner's bot only
 	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO products(id,seller,name,plan,gb,days,max_ips,inbounds,price,status,first_use,created_unix,price_stars,category,no_renew,per_buyer,sort)
-VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET seller=excluded.seller, name=excluded.name, plan=excluded.plan,
+	_, err = tx.ExecContext(ctx, `INSERT INTO products(rowid,id,seller,name,plan,gb,days,max_ips,inbounds,price,status,first_use,created_unix,price_stars,category,no_renew,per_buyer,sort)
+VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET seller=excluded.seller, name=excluded.name, plan=excluded.plan,
 gb=excluded.gb, days=excluded.days, max_ips=excluded.max_ips, inbounds=excluded.inbounds, price=excluded.price,
 status=excluded.status, first_use=excluded.first_use, price_stars=excluded.price_stars, category=excluded.category,
 no_renew=excluded.no_renew, per_buyer=excluded.per_buyer, sort=excluded.sort`,
-		p.ID, p.Seller, p.Name, p.Plan, p.GB, p.Days, p.MaxIPs, strings.Join(p.Inbounds, ","), p.Price, p.Status, p.FirstUse, s.now().Unix(), p.PriceStars,
+		rowid, p.ID, p.Seller, p.Name, p.Plan, p.GB, p.Days, p.MaxIPs, strings.Join(p.Inbounds, ","), p.Price, p.Status, p.FirstUse, s.now().Unix(), p.PriceStars,
 		p.Category, p.NoRenew, p.PerBuyer, p.Sort)
 	if err != nil {
 		return err

@@ -126,7 +126,7 @@ func (s *Store) pgCheckExtras(ctx context.Context, seller string, cur *ClientVie
 	if in.HWIDLimit != nil && (*in.HWIDLimit < 0 || *in.HWIDLimit > 100) {
 		return fmt.Errorf("%w: hwid_limit must be 0-100", ErrInvalid)
 	}
-	if n := strings.TrimSpace(string(in.NextPlan)); n != "" && n != "null" {
+	if pgNextGiven(in.NextPlan) == pgNextSet {
 		np, err := s.pgNextPlan(ctx, seller, in.NextPlan)
 		if err != nil && seller == "" {
 			return err
@@ -139,6 +139,30 @@ func (s *Store) pgCheckExtras(ctx context.Context, seller string, cur *ClientVie
 		return fmt.Errorf("%w: on_hold_timeout", ErrInvalid)
 	}
 	return nil
+}
+
+const (
+	pgNextAbsent = iota // not sent: no change
+	pgNextClear         // null, or an object with nothing in it
+	pgNextSet
+)
+
+// pgNextGiven reads what a request says about the next plan. PasarGuard's
+// next plan has every field optional; one with no template, volume or
+// expiry is no next plan.
+func pgNextGiven(raw json.RawMessage) int {
+	n := strings.TrimSpace(string(raw))
+	if n == "" {
+		return pgNextAbsent
+	}
+	if n == "null" {
+		return pgNextClear
+	}
+	var in pgNext
+	if json.Unmarshal(raw, &in) == nil && in.UserTemplateID == nil && (in.DataLimit == nil || *in.DataLimit <= 0) && (in.Expire == nil || *in.Expire <= 0) {
+		return pgNextClear
+	}
+	return pgNextSet
 }
 
 // sameNextPlan tells whether np repeats the client's own next plan (as the
@@ -195,11 +219,11 @@ func (s *Store) pgSetExtras(ctx context.Context, seller, email string, in pgIn) 
 			return err
 		}
 	}
-	if n := strings.TrimSpace(string(in.NextPlan)); n == "null" {
+	if given := pgNextGiven(in.NextPlan); given == pgNextClear {
 		if err := s.SetNextPlan(ctx, email, nil); err != nil {
 			return err
 		}
-	} else if n != "" && seller == "" {
+	} else if given == pgNextSet && seller == "" {
 		np, err := s.pgNextPlan(ctx, seller, in.NextPlan)
 		if err != nil {
 			return err
@@ -226,10 +250,24 @@ func (p *pgSrv) modify(ctx context.Context, seller string, cur ClientView, in pg
 	if err := p.s.pgApply(ctx, seller, &c, in, false); err != nil {
 		return err
 	}
-	if err := p.s.pgSave(ctx, seller, c); err != nil {
+	if seller != "" && sameService(cur.Client, c) {
+		// Nothing to charge: only on/off (or nothing) changes, which also
+		// works on an expired user, unlike a sale.
+		if c.Enabled != cur.Enabled {
+			if err := p.s.pgSetEnabled(ctx, seller, c.Email, c.Enabled); err != nil {
+				return err
+			}
+		}
+	} else if err := p.s.pgSave(ctx, seller, c); err != nil {
 		return err
 	}
 	return p.s.pgSetExtras(ctx, seller, c.Email, in)
+}
+
+// sameService tells whether b gives what a gives, on or off aside.
+func sameService(a, b Client) bool {
+	return a.VolumeBytes == b.VolumeBytes && a.ExpiresUnix == b.ExpiresUnix && a.DurationSeconds == b.DurationSeconds &&
+		a.MaxIPs == b.MaxIPs && sameSet(a.Inbounds, b.Inbounds)
 }
 
 // pgSetEnabled turns a client on or off. For a reseller it costs nothing but
@@ -464,6 +502,10 @@ func (p *pgSrv) subUpdates(w http.ResponseWriter, r *http.Request, email string)
 	pgJSON(w, map[string]any{"updates": ups, "count": len(ups)})
 }
 
+// pgClientTypes are PasarGuard's client types and Dark's formats for them
+// ("links" is the plain list).
+var pgClientTypes = map[string]string{"links": "", "links_base64": "base64", "xray": "xray", "sing_box": "singbox", "clash": "clash", "clash_meta": "clash"}
+
 // subscription serves one of PasarGuard's client types.
 func (p *pgSrv) subscription(w http.ResponseWriter, r *http.Request, email, clientType string) {
 	ctx := r.Context()
@@ -478,7 +520,7 @@ func (p *pgSrv) subscription(w http.ResponseWriter, r *http.Request, email, clie
 		_, _ = w.Write([]byte(strings.Join(links, "\n")))
 		return
 	}
-	format := map[string]string{"links_base64": "base64", "xray": "xray", "sing_box": "singbox", "clash": "clash", "clash_meta": "clash"}[clientType]
+	format := pgClientTypes[clientType]
 	if format == "" {
 		pgErr(w, http.StatusNotFound, "Not Found")
 		return
@@ -498,14 +540,15 @@ func (p *pgSrv) subscription(w http.ResponseWriter, r *http.Request, email, clie
 // pgRange reads start and end (default: the last 30 days).
 func pgRange(r *http.Request, now time.Time) (time.Time, time.Time, error) {
 	q := r.URL.Query()
-	end, start := now.UTC(), now.UTC().AddDate(0, 0, -30)
+	end := now.UTC()
 	if v := q.Get("end"); v != "" {
 		t, ok := pgParseTime(v)
 		if !ok {
-			return start, end, fmt.Errorf("%w: end", ErrInvalid)
+			return end, end, fmt.Errorf("%w: end", ErrInvalid)
 		}
 		end = t.UTC()
 	}
+	start := end.AddDate(0, 0, -30)
 	if v := q.Get("start"); v != "" {
 		t, ok := pgParseTime(v)
 		if !ok {
@@ -1184,6 +1227,7 @@ func (p *pgSrv) bulkLimit(field string) pgAuthed {
 			pgFail(w, err)
 			return
 		}
+		now := p.s.now().Unix()
 		var list []Client
 		for _, x := range rows {
 			c := x.c.Client
@@ -1197,6 +1241,9 @@ func (p *pgSrv) bulkLimit(field string) pgAuthed {
 				c.VolumeBytes += f.Amount
 			default:
 				continue
+			}
+			if seller != "" && termDays(c, now) == 0 {
+				continue // a reseller's user whose term is over is renewed, not changed
 			}
 			list = append(list, c)
 		}
@@ -1232,6 +1279,7 @@ func (p *pgSrv) bulkGroups(add bool) pgAuthed {
 			pgFail(w, err)
 			return
 		}
+		now := p.s.now().Unix()
 		var list []Client
 		for _, x := range rows {
 			have := map[string]bool{}
@@ -1263,6 +1311,9 @@ func (p *pgSrv) bulkGroups(add bool) pgAuthed {
 			}
 			if len(c.Inbounds) == 0 {
 				continue // a user keeps at least one group
+			}
+			if seller != "" && termDays(c, now) == 0 {
+				continue // a reseller's user whose term is over is renewed, not changed
 			}
 			list = append(list, c)
 		}
@@ -1345,9 +1396,25 @@ func (s *Store) pgProduct(ctx context.Context, seller string, n int64) (Product,
 	return s.ProductByID(ctx, pgPrincipal(seller), id)
 }
 
+// A template made through the API is a draft product (so the Telegram shop
+// never shows it) with its own on/off in pg_templates; a product made in the
+// panel is on while it is published.
+func (s *Store) pgAPIMade(ctx context.Context, productID string) (made, disabled bool) {
+	made = s.ro.QueryRowContext(ctx, `SELECT disabled FROM pg_templates WHERE product_id=?`, productID).Scan(&disabled) == nil
+	return made, disabled
+}
+
+// pgTemplateOn tells whether a template may be used.
+func (s *Store) pgTemplateOn(ctx context.Context, pr Product) bool {
+	if made, disabled := s.pgAPIMade(ctx, pr.ID); made {
+		return !disabled && pr.Status != "archived"
+	}
+	return pr.Status == "published"
+}
+
 func (s *Store) pgTemplateOf(ctx context.Context, seller string, pr Product, n int64, groups []pgGroup) pgTemplate {
 	t := pgTemplate{ID: n, Name: pr.Name, ExpireDuration: pr.Days * 86400, GroupIDs: []int64{}, Status: "active",
-		ResetUsages: true, DataLimitResetStrategy: "no_reset", IsDisabled: pr.Status != "published"}
+		ResetUsages: true, DataLimitResetStrategy: "no_reset", IsDisabled: !s.pgTemplateOn(ctx, pr)}
 	if pr.Plan == "volume" {
 		t.DataLimit = pr.GB << 30
 	}
@@ -1413,11 +1480,17 @@ func (s *Store) pgTemplatePut(ctx context.Context, seller string, pr Product, in
 			return pr, fmt.Errorf("%w: status: active or on_hold", ErrInvalid)
 		}
 	}
-	if in.IsDisabled != nil {
+	made, _ := s.pgAPIMade(ctx, pr.ID)
+	if in.IsDisabled != nil && !made {
 		pr.Status = map[bool]string{true: "draft", false: "published"}[*in.IsDisabled]
 	}
 	if err := s.PutProduct(ctx, pgPrincipal(seller), pr); err != nil {
 		return pr, err
+	}
+	if made && in.IsDisabled != nil {
+		if _, err := s.db.ExecContext(ctx, `UPDATE pg_templates SET disabled=? WHERE product_id=?`, *in.IsDisabled, pr.ID); err != nil {
+			return pr, err
+		}
 	}
 	return s.ProductByID(ctx, pgPrincipal(seller), pr.ID)
 }
@@ -1458,7 +1531,7 @@ func (p *pgSrv) createFromTemplate(ctx context.Context, seller, username string,
 	if err != nil {
 		return err
 	}
-	if pr.Status != "published" {
+	if !p.s.pgTemplateOn(ctx, pr) {
 		return fmt.Errorf("%w: this template is disabled", ErrPolicy)
 	}
 	if len(username) < 3 || !emailRE.MatchString(username) {
@@ -1484,6 +1557,37 @@ func (p *pgSrv) createFromTemplate(ctx context.Context, seller, username string,
 
 var errPGExists = errors.New("User already exists")
 
+// pgCanMake checks, before any is made, that a reseller's credit and client
+// limit cover count users of the product.
+func (s *Store) pgCanMake(ctx context.Context, seller string, pr Product, count int) error {
+	if seller == "" {
+		return nil
+	}
+	var vol, units int64
+	if err := s.ro.QueryRowContext(ctx, `SELECT volume_credit,unlimited_units FROM reps WHERE id=?`, seller).Scan(&vol, &units); err != nil {
+		return err
+	}
+	n := int64(count)
+	if pr.Plan == "volume" && vol < n*(pr.GB<<30) {
+		return ErrCredit
+	}
+	if pr.Plan == "unlimited" && units < n*unitsFor(pr.Days) {
+		return ErrCredit
+	}
+	pol, err := s.RepPolicyOf(ctx, seller)
+	if err != nil {
+		return err
+	}
+	if pol.MaxClients > 0 {
+		var have int64
+		_ = s.ro.QueryRowContext(ctx, `SELECT COUNT(*) FROM clients WHERE rep_id=?`, seller).Scan(&have)
+		if have+n > pol.MaxClients {
+			return fmt.Errorf("%w: this makes more users than the %d allowed", ErrPolicy, pol.MaxClients)
+		}
+	}
+	return nil
+}
+
 // renewFromTemplate gives an existing user a template's package: a new
 // period from today, usage back to zero, charged like a renewal.
 func (p *pgSrv) renewFromTemplate(w http.ResponseWriter, r *http.Request, seller string, c ClientView) {
@@ -1507,8 +1611,25 @@ func (p *pgSrv) applyTemplate(ctx context.Context, seller, email string, tmpl in
 	if err != nil {
 		return err
 	}
-	if pr.Status != "published" {
+	if !p.s.pgTemplateOn(ctx, pr) {
 		return fmt.Errorf("%w: this template is disabled", ErrPolicy)
+	}
+	// The groups are checked before anything is charged: once the renewal
+	// is paid, it stands.
+	if len(pr.Inbounds) > 0 {
+		groups, err := p.s.pgGroups(ctx, seller)
+		if err != nil {
+			return err
+		}
+		ok := map[string]bool{}
+		for _, g := range groups {
+			ok[g.Name] = !g.IsDisabled
+		}
+		for _, t := range pr.Inbounds {
+			if !ok[t] {
+				return fmt.Errorf("%w: this template's group %q may not be given", ErrPolicy, t)
+			}
+		}
 	}
 	gb := float64(0)
 	if pr.Plan == "volume" {
@@ -1523,9 +1644,8 @@ func (p *pgSrv) applyTemplate(ctx context.Context, seller, email string, tmpl in
 			c := cur.Client
 			c.UUID, c.Secret, c.SubToken = "", "", ""
 			c.Inbounds = pr.Inbounds
-			if err := p.s.pgSave(ctx, seller, c); err != nil {
-				return err
-			}
+			// The answer shows the user's real groups if this fails.
+			_ = p.s.pgSave(ctx, seller, c)
 		}
 	}
 	if note != nil {
@@ -1697,6 +1817,15 @@ func (p *pgSrv) routes(mux *http.ServeMux, auth func(func(http.ResponseWriter, *
 			pgErr(w, http.StatusUnprocessableEntity, "strategy: random or sequence")
 			return
 		}
+		pr, err := s.pgProduct(r.Context(), seller, in.UserTemplateID)
+		if err != nil {
+			pgFailT(w, err)
+			return
+		}
+		if err := s.pgCanMake(r.Context(), seller, pr, in.Count); err != nil {
+			pgFail(w, err)
+			return
+		}
 		next := 1
 		if in.StartNumber != nil {
 			next = *in.StartNumber
@@ -1845,14 +1974,20 @@ func (p *pgSrv) routes(mux *http.ServeMux, auth func(func(http.ResponseWriter, *
 			pgErr(w, http.StatusUnprocessableEntity, "name and group_ids are required")
 			return
 		}
-		pr := Product{ID: "pg-" + randomHex(4), Seller: seller, Status: "published", Plan: "unlimited"}
+		pr := Product{ID: "pg-" + randomHex(4), Seller: seller, Status: "draft", Plan: "unlimited"}
 		if in.Status == nil {
 			st := "active"
 			in.Status = &st
 		}
+		off := in.IsDisabled != nil && *in.IsDisabled
+		in.IsDisabled = nil
 		pr, err := s.pgTemplatePut(r.Context(), seller, pr, in)
 		if err != nil {
 			pgFailT(w, err)
+			return
+		}
+		if _, err := s.db.ExecContext(r.Context(), `INSERT INTO pg_templates(product_id,disabled) VALUES(?,?)`, pr.ID, off); err != nil {
+			pgFail(w, err)
 			return
 		}
 		groups, _ := s.pgGroups(r.Context(), seller)
@@ -1895,6 +2030,7 @@ func (p *pgSrv) routes(mux *http.ServeMux, auth func(func(http.ResponseWriter, *
 			pgFailT(w, err)
 			return
 		}
+		_, _ = s.db.ExecContext(r.Context(), `DELETE FROM pg_templates WHERE product_id=? AND NOT EXISTS(SELECT 1 FROM products WHERE id=?)`, pr.ID, pr.ID)
 		w.WriteHeader(http.StatusNoContent)
 	}))
 	for _, a := range []string{"delete", "disable", "enable"} {
@@ -1923,6 +2059,7 @@ func (p *pgSrv) routes(mux *http.ServeMux, auth func(func(http.ResponseWriter, *
 				var err error
 				if a == "delete" {
 					_, err = s.DeleteProduct(r.Context(), pgPrincipal(seller), pr.ID)
+					_, _ = s.db.ExecContext(r.Context(), `DELETE FROM pg_templates WHERE product_id=? AND NOT EXISTS(SELECT 1 FROM products WHERE id=?)`, pr.ID, pr.ID)
 				} else {
 					off := a == "disable"
 					_, err = s.pgTemplatePut(r.Context(), seller, pr, pgTemplateIn{IsDisabled: &off})
@@ -2069,6 +2206,10 @@ func pgSubRoutes(s *Store, mux *http.ServeMux, subBase string) {
 		if !ok {
 			return
 		}
+		if _, ok := pgClientTypes[r.PathValue("client_type")]; !ok {
+			pgErr(w, http.StatusNotFound, "Not Found")
+			return
+		}
 		// The same device limit as /sub/{token}: an app's configs count as a device.
 		if err := s.CheckDevice(r.Context(), c.Email, r.Header.Get("X-Hwid"), r.Header.Get("X-Device-Os"), r.Header.Get("X-Device-Model"), r.UserAgent()); err != nil {
 			if errors.Is(err, ErrDeviceLimit) {
@@ -2077,6 +2218,17 @@ func pgSubRoutes(s *Store, mux *http.ServeMux, subBase string) {
 			}
 			pgFail(w, err)
 			return
+		}
+		// The same profile headers as /sub/{token}.
+		set, _ := s.brandFor(r.Context(), c.Email)
+		w.Header().Set("Profile-Update-Interval", "12")
+		w.Header().Set("Profile-Title", "base64:"+b64(or2(set.Title, c.Email)))
+		w.Header().Set("Profile-Web-Page-Url", publicBase("", r)+"/sub/"+r.PathValue("token"))
+		if set.SupportURL != "" {
+			w.Header().Set("Support-Url", set.SupportURL)
+		}
+		if set.Announce != "" {
+			w.Header().Set("Announce", "base64:"+b64(set.Announce))
 		}
 		w.Header().Set("Cache-Control", "no-store")
 		p.subscription(w, r, c.Email, r.PathValue("client_type"))

@@ -412,3 +412,154 @@ func TestPasarGuardReviewFixes(t *testing.T) {
 		t.Fatalf("missing template %d %v", code, out)
 	}
 }
+
+// TestPasarGuardReviewTwo holds the cases the second review found.
+func TestPasarGuardReviewTwo(t *testing.T) {
+	s, now := newStore(t)
+	ctx := context.Background()
+	seed(t, s)
+	if err := s.PutInbound(ctx, "de-two", "de-1", []byte(strings.Replace(vlessTemplate, "18580", "9000", 1)), true); err != nil {
+		t.Fatal(err)
+	}
+	_ = s.PutRep(ctx, Rep{ID: "ali", Name: "Ali", Enabled: true})
+	_ = s.SetRepPolicy(ctx, "ali", RepPolicy{AllowUnlimited: true, CanDelete: true})
+	if err := s.AdjustCredit(ctx, "owner", "ali", 100<<30, 0, ""); err != nil {
+		t.Fatal(err)
+	}
+	h := httptest.NewServer(AdminHandlerWith(s, "admintok", "", nil))
+	defer h.Close()
+	c := pgClient{t, h.URL}
+	credit := func() int64 {
+		var v int64
+		_ = s.db.QueryRow(`SELECT volume_credit FROM reps WHERE id='ali'`).Scan(&v)
+		return v
+	}
+	a, _ := s.EnablePGAPI(ctx, "ali")
+	tok := c.login("mirza_ali", a.Password)
+	_, g := c.obj("GET", "/api/groups", tok, nil)
+	groups := g["groups"].([]any)
+	g1, g2 := groups[0].(map[string]any)["id"], groups[1].(map[string]any)["id"]
+	exp := now.Add(30 * 24 * time.Hour).Unix()
+	mk := func(name string) float64 {
+		t.Helper()
+		code, out := c.obj("POST", "/api/user", tok, map[string]any{"username": name, "data_limit": 1 << 30, "expire": exp, "group_ids": []any{g1}})
+		if code != 200 {
+			t.Fatalf("create %s %d %v", name, code, out)
+		}
+		return out["id"].(float64)
+	}
+	mk("live1")
+	mk("gone1")
+
+	// An empty next plan is no next plan.
+	if code, out := c.obj("POST", "/api/user", tok, map[string]any{"username": "empty1", "data_limit": 1 << 30, "expire": exp, "group_ids": []any{g1},
+		"next_plan": map[string]any{"user_template_id": nil, "data_limit": nil, "expire": nil, "add_remaining_traffic": false}}); code != 200 {
+		t.Fatalf("empty next plan %d %v", code, out)
+	}
+
+	// A deleted user's id is never given to the next one.
+	_, last := c.obj("GET", "/api/user/empty1", tok, nil)
+	lastID := last["id"].(float64)
+	if code, _ := c.obj("DELETE", "/api/user/empty1", tok, nil); code != 200 {
+		t.Fatal("delete", code)
+	}
+	if id := mk("fresh1"); id == lastID {
+		t.Fatalf("id %v was given again", id)
+	}
+
+	// Expired users are left out of a reseller's bulk change instead of stopping it.
+	_, _ = s.db.Exec(`UPDATE clients SET expires_unix=? WHERE email='gone1'`, now.Add(-time.Hour).Unix())
+	if code, out := c.obj("POST", "/api/users/bulk/data_limit", tok, map[string]any{"amount": 1 << 30}); code != 200 {
+		t.Fatalf("bulk with an expired user %d %v", code, out)
+	}
+	if v, _ := s.clientView(ctx, "live1"); v.VolumeBytes != 2<<30 {
+		t.Fatal("the live user is changed", v.VolumeBytes)
+	}
+	if code, out := c.obj("POST", "/api/groups/bulk/add", tok, map[string]any{"group_ids": []any{g2}}); code != 200 {
+		t.Fatalf("bulk groups with an expired user %d %v", code, out)
+	}
+	// Turning an expired user off the way Mirza does: PUT with the status.
+	if code, out := c.obj("PUT", "/api/user/gone1", tok, map[string]any{"status": "disabled", "proxy_settings": map[string]any{}}); code != 200 || out["status"] != "disabled" {
+		t.Fatalf("disable an expired user %d %v", code, out)
+	}
+	if code, out := c.obj("PUT", "/api/user/gone1", tok, map[string]any{"note": "just a note"}); code != 200 || out["note"] != "just a note" {
+		t.Fatalf("note on an expired user %d %v", code, out)
+	}
+
+	// Templates made through the API stay out of the Telegram shop.
+	code, out := c.obj("POST", "/api/user_template", tok, map[string]any{"name": "API 1G", "data_limit": 1 << 30, "expire_duration": 30 * 86400, "group_ids": []any{g2}})
+	if code != 201 || out["is_disabled"] != false {
+		t.Fatalf("template %d %v", code, out)
+	}
+	tid := out["id"]
+	shop, _ := s.Products(ctx, Principal{Role: "rep", RepID: "ali"}, true)
+	if len(shop) != 0 {
+		t.Fatalf("an API template is not a shop product: %+v", shop)
+	}
+	if code, out := c.obj("POST", "/api/user/from_template", tok, map[string]any{"user_template_id": tid, "username": "tmpl1"}); code != 201 {
+		t.Fatalf("from an API template %d %v", code, out)
+	}
+	if code, out := c.obj("PUT", fmt.Sprintf("/api/user_template/%v", tid), tok, map[string]any{"is_disabled": true}); code != 200 || out["is_disabled"] != true {
+		t.Fatalf("disable %d %v", code, out)
+	}
+	if code, _ := c.obj("POST", "/api/user/from_template", tok, map[string]any{"user_template_id": tid, "username": "tmpl2"}); code != 403 {
+		t.Fatal("a disabled API template sells nothing", code)
+	}
+	_, _ = c.obj("PUT", fmt.Sprintf("/api/user_template/%v", tid), tok, map[string]any{"is_disabled": false})
+	if shop, _ := s.Products(ctx, Principal{Role: "rep", RepID: "ali"}, true); len(shop) != 0 {
+		t.Fatal("enabling it does not publish it in the shop")
+	}
+
+	// A renewal from a template whose groups the seller may no longer give
+	// is refused before anything is charged.
+	_ = s.SetRepPolicy(ctx, "ali", RepPolicy{AllowUnlimited: true, CanDelete: true, Inbounds: []string{"de-vless"}})
+	before := credit()
+	if code, _ := c.obj("PUT", "/api/user/from_template/live1", tok, map[string]any{"user_template_id": tid}); code < 400 {
+		t.Fatal("the template's group is not allowed any more", code)
+	}
+	if credit() != before {
+		t.Fatalf("nothing is charged: %d -> %d", before, credit())
+	}
+	_ = s.SetRepPolicy(ctx, "ali", RepPolicy{AllowUnlimited: true, CanDelete: true})
+
+	// Bulk creation that the credit cannot pay makes nobody.
+	_ = s.AdjustCredit(ctx, "owner", "ali", -(credit() - 2<<30), 0, "")
+	code, out = c.obj("POST", "/api/users/bulk/from_template", tok, map[string]any{"user_template_id": tid, "count": 5})
+	if code != 400 {
+		t.Fatalf("not enough credit %d %v", code, out)
+	}
+	var n int
+	_ = s.db.QueryRow(`SELECT COUNT(*) FROM clients WHERE rep_id='ali'`).Scan(&n)
+	if n != 4 {
+		t.Fatalf("nobody is made: %d users", n)
+	}
+
+	// Client-type links: an unknown type takes no device slot; the brand headers come along.
+	live, _ := s.clientView(ctx, "live1")
+	_ = s.SetHWIDLimit(ctx, "live1", 1)
+	hs := httptest.NewServer(SubHandler(s))
+	defer hs.Close()
+	get := func(path, hwid string) *http.Response {
+		req, _ := http.NewRequest("GET", hs.URL+path, nil)
+		req.Header.Set("X-Hwid", hwid)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		return resp
+	}
+	if r := get("/sub/"+live.SubToken+"/nonsense", "probe"); r.StatusCode != 404 {
+		t.Fatal("unknown type", r.StatusCode)
+	}
+	r := get("/sub/"+live.SubToken+"/sing_box", "phone")
+	if r.StatusCode != 200 || r.Header.Get("Profile-Title") == "" || r.Header.Get("Profile-Update-Interval") == "" {
+		t.Fatalf("the real device after a probe %d %v", r.StatusCode, r.Header)
+	}
+
+	// A usage chart asked with only an old end date.
+	old := now.AddDate(0, -6, 0).UTC().Format(time.RFC3339)
+	if code, out := c.obj("GET", "/api/users/usage?end="+url.QueryEscape(old), tok, nil); code != 200 {
+		t.Fatalf("usage with an old end %d %v", code, out)
+	}
+}
