@@ -100,7 +100,11 @@ func gb(n int64) string {
 	if n < 0 {
 		return "نامحدود"
 	}
-	return strconv.FormatFloat(float64(n)/(1<<30), 'f', 2, 64) + " GB"
+	g := float64(n) / (1 << 30)
+	if g == float64(int64(g)) {
+		return faInt(int64(g)) + " گیگ"
+	}
+	return strings.ReplaceAll(faNum(strings.TrimRight(strings.TrimRight(strconv.FormatFloat(g, 'f', 2, 64), "0"), ".")), ".", "٫") + " گیگ"
 }
 
 func money(n int64) string {

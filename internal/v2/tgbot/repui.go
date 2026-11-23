@@ -141,7 +141,7 @@ func (b *Bot) repHome(ctx context.Context, chat int64, rep, role string) {
 	if units > 0 {
 		text += fmt.Sprintf(" · %d واحد نامحدود", units)
 	}
-	text += fmt.Sprintf("\n👥 کاربرها: <b>%d</b> (فعال %d · آنلاین %d)\n⏳ نیازمند تمدید: <b>%d</b>\n🛒 سفارش منتظر: <b>%d</b>", total, active, online, soon, len(pending))
+	text += fmt.Sprintf("\n👥 کاربرها: <b>%s</b> (فعال %s · آنلاین %s)\n⏳ نیازمند تمدید: <b>%s</b>\n🛒 سفارش منتظر: <b>%s</b>", faInt(int64(total)), faInt(int64(active)), faInt(int64(online)), faInt(int64(soon)), faInt(int64(len(pending))))
 	kb := &Keyboard{}
 	r1 := []Button{}
 	if repCan(role, "new") {
@@ -149,9 +149,9 @@ func (b *Bot) repHome(ctx context.Context, chat int64, rep, role string) {
 	}
 	r1 = append(r1, repBtn("👥 کاربران", "cl"))
 	kb.Rows = append(kb.Rows, r1)
-	r2 := []Button{repBtn(fmt.Sprintf("⏳ نیازمند تمدید (%d)", soon), "ct")}
+	r2 := []Button{repBtn(fmt.Sprintf("⏳ نیازمند تمدید (%s)", faInt(int64(soon))), "ct")}
 	if repCan(role, "orders") {
-		r2 = append(r2, repBtn(fmt.Sprintf("🛒 سفارش‌ها (%d)", len(pending)), "ord"))
+		r2 = append(r2, repBtn(fmt.Sprintf("🛒 سفارش‌ها (%s)", faInt(int64(len(pending)))), "ord"))
 	}
 	kb.Rows = append(kb.Rows, r2)
 	r3 := []Button{}

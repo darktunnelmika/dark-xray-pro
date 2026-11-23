@@ -256,7 +256,7 @@ func TestResellerTelegram(t *testing.T) {
 	b.Handle(ctx, cb(salesChat, "ok:"+strconv.FormatInt(id, 10)))
 	find(t, api.take(), salesChat, "تحویل شد")
 	b.Handle(ctx, msg(repChat, "/credit"))
-	find(t, api.take(), repChat, "5.00 GB")
+	find(t, api.take(), repChat, "۵ گیگ")
 }
 
 func TestOwnerConsole(t *testing.T) {
