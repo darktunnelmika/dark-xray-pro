@@ -543,6 +543,6 @@ func (b *Bot) showAutoRenew(ctx context.Context, chat int64, email string) {
 	} else {
 		text += "وضعیت: خاموش — یک پلن را انتخاب کنید تا روشن شود."
 	}
-	kb.Rows = append(kb.Rows, row(cbBtn("💰 کیف پول", "wallet"), cbBtn("« سرویس", "svc:"+email)))
+	kb.Rows = append(kb.Rows, row(cbBtn("👛 کیف پول", "wallet"), cbBtn("« سرویس", "svc:"+email)))
 	b.send(ctx, chat, text, kb)
 }

@@ -772,6 +772,20 @@ func (b *Bot) clientCardOld(c hubcore.ClientView) string {
 }
 
 func (b *Bot) sendSub(ctx context.Context, chat int64, email string) {
+	b.sendSubKB(ctx, chat, email, nil)
+}
+
+// sendSubToCustomer is the delivery a customer gets: the link, and where to
+// go next (how to connect, the service, the menu), so nobody is left at a
+// message without buttons.
+func (b *Bot) sendSubToCustomer(ctx context.Context, chat int64, email string) {
+	b.sendSubKB(ctx, chat, email, &Keyboard{Rows: [][]Button{
+		row(cbBtn("📚 آموزش اتصال", "guide"), cbBtn("📦 مشاهدهٔ سرویس", "svc:"+email)),
+		row(cbBtn("« منوی اصلی", "home")),
+	}})
+}
+
+func (b *Bot) sendSubKB(ctx context.Context, chat int64, email string, kb *Keyboard) {
 	c, err := b.Store.ClientByEmail(ctx, email)
 	if err != nil {
 		return
@@ -782,7 +796,7 @@ func (b *Bot) sendSub(ctx context.Context, chat int64, email string) {
 			b.logf("tgbot photo: %v", err)
 		}
 	}
-	b.send(ctx, chat, "لینک اشتراک (در v2rayNG، Hiddify یا Streisand وارد کنید):\n<code>"+esc(url)+"</code>", nil)
+	b.send(ctx, chat, "لینک اشتراک (در v2rayNG، Hiddify یا Streisand وارد کنید):\n<code>"+esc(url)+"</code>", kb)
 }
 
 func (b *Bot) link(ctx context.Context, chat int64, tokenOrURL string) {
@@ -984,7 +998,7 @@ func (b *Bot) onCallback(ctx context.Context, q *CallbackQuery) {
 				b.send(ctx, chat, fmt.Sprintf("تحویل سفارش #%d ممکن نشد: %s", id, esc(faErr(err))), nil)
 				return
 			}
-			b.send(ctx, chat, fmt.Sprintf("✅ سفارش #%d تحویل شد: <code>%s</code>", id, esc(email)), &Keyboard{Rows: [][]Button{{{Text: "لینک و QR", Data: "sub:" + email}}}})
+			b.send(ctx, chat, fmt.Sprintf("✅ سفارش #%s تحویل شد: <code>%s</code>", faInt(id), esc(email)), &Keyboard{Rows: [][]Button{{{Text: "لینک و QR", Data: "sub:" + email}}}})
 		} else {
 			if err := b.Store.CancelOrder(ctx, by, id); err != nil {
 				b.send(ctx, chat, fmt.Sprintf("لغو سفارش #%d ممکن نشد: %s", id, esc(faErr(err))), nil)
@@ -1175,7 +1189,7 @@ func (b *Bot) announceOrders(ctx context.Context) {
 				if o.Status == "fulfilled" {
 					b.typing(ctx, chat, "⏳ در حال آماده‌سازی سرویس شما…")
 					b.celebrate(ctx, chat, fmt.Sprintf("🎉 سفارش #%s آماده شد! سرویس شما فعال است.", faInt(o.ID)), nil, EffectParty)
-					b.sendSub(ctx, chat, o.ClientEmail)
+					b.sendSubToCustomer(ctx, chat, o.ClientEmail)
 				} else {
 					msg := fmt.Sprintf("❌ سفارش <b>#%s</b> لغو شد.", faInt(o.ID))
 					if o.HasReceipt {
@@ -1378,7 +1392,7 @@ func (b *Bot) Alert(ctx context.Context, text string) { b.toOwners(ctx, text, ni
 
 // Tell sends one customer a message (auto-renew notices and the like).
 func (b *Bot) Tell(ctx context.Context, chat int64, text string) {
-	_, _ = b.API.Send(ctx, chat, text, &Keyboard{Rows: [][]Button{row(cbBtn("📦 سرویس‌های من", "mine"), cbBtn("💰 کیف پول", "wallet"))}}, 0)
+	_, _ = b.API.Send(ctx, chat, text, &Keyboard{Rows: [][]Button{row(cbBtn("📦 سرویس‌های من", "mine"), cbBtn("👛 کیف پول", "wallet"))}}, 0)
 }
 
 const repHelp = `دستورهای نماینده:
