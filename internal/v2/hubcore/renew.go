@@ -168,9 +168,18 @@ WHERE id=? AND volume_credit>=? AND unlimited_units>=?`, net, res.ChargedUnits, 
 	if _, err := tx.ExecContext(ctx, `UPDATE client_usage SET up=0, down=0 WHERE email=?`, email); err != nil {
 		return res, err
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE clients SET enabled=1, volume_bytes=?, expires_unix=?, duration_seconds=?, plan=?, last_reset_unix=?, gift_bytes=0, gift_units=0,
+	// A paid renewal ends any gift; the owner renewing a reseller's client
+	// for free gives the whole package (never refunded as credit).
+	var giftBytes, giftUnits, giftUntil int64
+	if repID == "" && owner != "" {
+		giftBytes, giftUntil = max(c.VolumeBytes, 0), c.ExpiresUnix
+		if plan == "unlimited" {
+			giftUnits = unitsFor(days)
+		}
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE clients SET enabled=1, volume_bytes=?, expires_unix=?, duration_seconds=?, plan=?, last_reset_unix=?, gift_bytes=?, gift_units=?, gift_until=?,
 start_by_unix=CASE WHEN ? THEN start_by_unix ELSE 0 END WHERE email=?`,
-		c.VolumeBytes, c.ExpiresUnix, c.DurationSeconds, plan, now, c.DurationSeconds > 0, email); err != nil {
+		c.VolumeBytes, c.ExpiresUnix, c.DurationSeconds, plan, now, giftBytes, giftUnits, giftUntil, c.DurationSeconds > 0, email); err != nil {
 		return res, err
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO events(unix,node_id,email,kind) VALUES(?,?,?,?)`, now, "", email, "renew"); err != nil {

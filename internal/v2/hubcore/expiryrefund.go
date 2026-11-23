@@ -18,7 +18,8 @@ func (s *Store) runExpiryRefunds(ctx context.Context) int {
 	now := s.now().Unix()
 	rows, err := s.ro.QueryContext(ctx, `SELECT c.email,c.rep_id,c.volume_bytes,COALESCE(u.up+u.down,0)+c.gift_bytes
 FROM clients c LEFT JOIN client_usage u ON u.email=c.email
-WHERE c.rep_id<>'' AND c.plan='volume' AND c.volume_bytes>0 AND c.expires_unix>0 AND c.expires_unix<=? AND c.next_plan=''`, now-expiryRefundGrace)
+WHERE c.rep_id<>'' AND c.plan='volume' AND c.volume_bytes>0 AND c.expires_unix>0 AND c.expires_unix<=? AND c.next_plan=''
+AND c.email NOT IN (SELECT email FROM legacy_clients)`, now-expiryRefundGrace)
 	if err != nil {
 		return 0
 	}

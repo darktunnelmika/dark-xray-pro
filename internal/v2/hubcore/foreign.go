@@ -321,7 +321,8 @@ func (s *Store) ImportForeign(ctx context.Context, path string, opt ForeignOptio
 			return rep, err
 		}
 		if resetPeriods[c.period] && c.period != "" {
-			_, _ = tx.ExecContext(ctx, `UPDATE clients SET reset_period=?, last_reset_unix=? WHERE email=?`, c.period, now, c.name)
+			col, year := resetColumns(c.period)
+			_, _ = tx.ExecContext(ctx, `UPDATE clients SET reset_period=?, reset_year=?, last_reset_unix=? WHERE email=?`, col, year, now, c.name)
 		}
 		if c.up+c.down > 0 {
 			// A term that starts at the first connection must not start

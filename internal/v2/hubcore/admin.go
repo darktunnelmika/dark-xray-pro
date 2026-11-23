@@ -1165,7 +1165,11 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 			http.NotFound(w, r)
 			return
 		}
-		reply(w, s.RepBotOf(r.Context(), p.RepID), nil)
+		// Mirza: the bot is kept off while Mirza sells (the card says why).
+		reply(w, struct {
+			RepBot
+			Mirza bool `json:"mirza"`
+		}{s.RepBotOf(r.Context(), p.RepID), s.MirzaMode(r.Context(), p.RepID)}, nil)
 	}))
 	mux.HandleFunc("PUT /api/v2/rep/bot", member(func(w http.ResponseWriter, r *http.Request) {
 		p := who(r)
@@ -2199,6 +2203,18 @@ func SubHandler(s *Store) http.Handler {
 		if err != nil {
 			http.NotFound(w, r)
 			return
+		}
+		// An app that says which device it is counts against the device
+		// limit here too (a sales bot fetching the list sends no device id).
+		if hwid := r.Header.Get("X-Hwid"); hwid != "" {
+			if err := s.CheckDevice(r.Context(), email, hwid, r.Header.Get("X-Device-Os"), r.Header.Get("X-Device-Model"), r.UserAgent()); err != nil {
+				if errors.Is(err, ErrDeviceLimit) {
+					http.Error(w, "device limit reached: remove a device in the panel or ask your seller", http.StatusForbidden)
+					return
+				}
+				reply(w, nil, err)
+				return
+			}
 		}
 		links, info, err := s.Subscription(r.Context(), email)
 		if err != nil {

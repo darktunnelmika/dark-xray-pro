@@ -173,6 +173,18 @@ func unitsFor(days int64) int64 {
 	return (days + unitDays - 1) / unitDays
 }
 
+// maxTermSeconds bounds a first-connection term (100 years): beyond it the
+// day arithmetic would overflow into "free" and "never ends".
+const maxTermSeconds = 100 * 365 * 86400
+
+// checkTermBounds refuses a term no real plan has.
+func checkTermBounds(c Client) error {
+	if c.DurationSeconds < 0 || c.DurationSeconds > maxTermSeconds || c.ExpiresUnix < 0 || c.ExpiresUnix > pgMaxUnix {
+		return fmt.Errorf("%w: the term is out of range", ErrInvalid)
+	}
+	return nil
+}
+
 // termEnd is when a client's term ends: its expiry, or for a
 // first-connection term the first connection plus the term (from now if it
 // was never used). 0 means no term.
@@ -199,8 +211,11 @@ func termDays(c Client, now int64) int64 {
 }
 
 // RepPutClient creates or edits a representative's client and charges the
-// difference in the same transaction. Lowering a client never refunds
-// automatically; the owner can adjust credit by hand.
+// difference in the same transaction. Lowering a volume package returns its
+// unused paid part only as part of a renewal (the term moves later too: how
+// Mirza renews, by resetting and then setting the new package) or when the
+// reseller may get unused volume back on delete; otherwise the owner
+// adjusts credit by hand.
 func (s *Store) RepPutClient(ctx context.Context, actor, repID string, c Client, plan string) error {
 	if plan != "volume" && plan != "unlimited" {
 		return ErrInvalid
@@ -213,6 +228,14 @@ func (s *Store) RepPutClient(ctx context.Context, actor, repID string, c Client,
 	}
 	if s.IsLegacy(ctx, c.Email) {
 		return s.repPutLegacy(ctx, repID, c, plan)
+	}
+	if err := checkTermBounds(c); err != nil {
+		return err
+	}
+	// One term: the node serves the expiry when both are set, so the
+	// first-connection term would only price and police the wrong one.
+	if c.ExpiresUnix > 0 {
+		c.DurationSeconds = 0
 	}
 	if c.ExpiresUnix <= 0 && c.DurationSeconds <= 0 {
 		return fmt.Errorf("%w: representatives sell a fixed term", ErrInvalid)
@@ -237,6 +260,11 @@ func (s *Store) RepPutClient(ctx context.Context, actor, repID string, c Client,
 	if !isNew && existsRep != repID {
 		return ErrNotFound // another seller's (or the owner's) client is invisible
 	}
+	var firstSeen int64
+	_ = tx.QueryRowContext(ctx, `SELECT first_seen_unix FROM client_usage WHERE email=?`, c.Email).Scan(&firstSeen)
+	// longer: the change moves the end of the term past what is still paid
+	// (a used first-connection term counts from its first connection).
+	longer := !isNew && termEnd(c, firstSeen, now) > max(termEnd(old, firstSeen, now), now)
 	if isNew && termDays(c, now) == 0 {
 		return fmt.Errorf("%w: representatives sell a fixed term", ErrInvalid)
 	}
@@ -247,7 +275,7 @@ func (s *Store) RepPutClient(ctx context.Context, actor, repID string, c Client,
 		if err := s.subSellerPlan(ctx, repID, plan, c.VolumeBytes, termDays(c, now), c.MaxIPs, false); err != nil {
 			return err
 		}
-	} else if s.IsSubSeller(ctx, repID) && (plan != oldPlan || c.VolumeBytes != old.VolumeBytes || termDays(c, now) > termDays(old, now) || c.MaxIPs > old.MaxIPs) {
+	} else if s.IsSubSeller(ctx, repID) && (plan != oldPlan || c.VolumeBytes != old.VolumeBytes || longer || c.MaxIPs > old.MaxIPs) {
 		return fmt.Errorf("%w: sub-sellers renew with a plan their reseller defined", ErrPolicy)
 	}
 	if !isNew {
@@ -265,7 +293,7 @@ func (s *Store) RepPutClient(ctx context.Context, actor, repID string, c Client,
 			}
 			rows.Close()
 		}
-		renewed := plan != oldPlan || c.VolumeBytes > old.VolumeBytes || termDays(c, now) > termDays(old, now)
+		renewed := plan != oldPlan || c.VolumeBytes > old.VolumeBytes || longer
 		// DenyEdit covers the IP limit, the inbounds and on/off (see RepPolicy).
 		edited := c.MaxIPs != old.MaxIPs || c.Enabled != old.Enabled || !sameSet(oldTags, c.Inbounds)
 		if renewed && pol.DenyRenew {
@@ -289,8 +317,6 @@ func (s *Store) RepPutClient(ctx context.Context, actor, repID string, c Client,
 			// Only the days added past what is still paid are charged.
 			// Rounding the old and the new term up each would make any
 			// top-up before the end free (30 days left -> 30 days again).
-			var firstSeen int64
-			_ = tx.QueryRowContext(ctx, `SELECT first_seen_unix FROM client_usage WHERE email=?`, c.Email).Scan(&firstSeen)
 			added := termEnd(c, firstSeen, now) - max(termEnd(old, firstSeen, now), now)
 			unitCharge = unitsFor((added + 86399) / 86400)
 		}
@@ -298,6 +324,25 @@ func (s *Store) RepPutClient(ctx context.Context, actor, repID string, c Client,
 	if (volCharge > 0 || unitCharge > 0) && repLockedQ(ctx, tx, repID, now) {
 		// A panel bill past its due time (resale.go): no spending until paid.
 		return fmt.Errorf("%w: an overdue bill is unpaid; pay it to sell again", ErrPolicy)
+	}
+	if !isNew && plan == "volume" && oldPlan == "volume" && old.VolumeBytes > 0 && c.VolumeBytes < old.VolumeBytes {
+		var used, gift int64
+		var refundUnused bool
+		_ = tx.QueryRowContext(ctx, `SELECT COALESCE((SELECT up+down FROM client_usage WHERE email=?),0),gift_bytes FROM clients WHERE email=?`, c.Email, c.Email).Scan(&used, &gift)
+		_ = tx.QueryRowContext(ctx, `SELECT refund_unused FROM reps WHERE id=?`, repID).Scan(&refundUnused)
+		// A renewal: the term moves later, or the usage was just reset
+		// through the API (Mirza resets, then sets the new package).
+		var reset int
+		_ = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM usage_resets WHERE email=? AND reason='api' AND unix>=?`, c.Email, now-600).Scan(&reset)
+		if back := max(0, old.VolumeBytes-gift-max(c.VolumeBytes, used)); back > 0 && (longer || reset > 0 || refundUnused) {
+			if _, err := tx.ExecContext(ctx, `UPDATE reps SET volume_credit=volume_credit+? WHERE id=?`, back, repID); err != nil {
+				return err
+			}
+			if _, err := tx.ExecContext(ctx, `INSERT INTO credit_ledger(unix,rep_id,actor,kind,client_email,volume_delta,note) VALUES(?,?,?,?,?,?,?)`,
+				now, repID, actor, "refund", c.Email, back, "smaller package: unused volume"); err != nil {
+				return err
+			}
+		}
 	}
 	if volCharge > 0 || unitCharge > 0 {
 		r, err := tx.ExecContext(ctx, `UPDATE reps SET volume_credit=volume_credit-?, unlimited_units=unlimited_units-?
@@ -320,8 +365,13 @@ WHERE id=? AND volume_credit>=? AND unlimited_units>=?`, volCharge, unitCharge, 
 		return err
 	}
 	// A gift (the owner's next plan) shrinks with the package it is part of,
-	// so volume or days paid for on top of it stay refundable.
-	if _, err := tx.ExecContext(ctx, `UPDATE clients SET gift_bytes=MIN(gift_bytes,MAX(volume_bytes,0)), gift_units=MIN(gift_units,?) WHERE email=?`,
+	// so volume or days paid for on top of it stay refundable; a new plan
+	// (volume <-> unlimited) is paid in full and ends it.
+	if !isNew && plan != oldPlan {
+		if _, err := tx.ExecContext(ctx, `UPDATE clients SET gift_bytes=0, gift_units=0, gift_until=0 WHERE email=?`, c.Email); err != nil {
+			return err
+		}
+	} else if _, err := tx.ExecContext(ctx, `UPDATE clients SET gift_bytes=MIN(gift_bytes,MAX(volume_bytes,0)), gift_units=MIN(gift_units,?) WHERE email=?`,
 		unitsFor(termDays(c, now)), c.Email); err != nil {
 		return err
 	}

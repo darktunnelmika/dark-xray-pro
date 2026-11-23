@@ -135,11 +135,14 @@ func (s *Store) pgCheckExtras(ctx context.Context, seller string, cur *ClientVie
 			return fmt.Errorf("%w: a next plan is set by the panel owner", ErrPolicy)
 		}
 	}
-	if at, set, err := pgExpire(in.OnHoldTimeout); err != nil {
-		return fmt.Errorf("%w: on_hold_timeout", ErrInvalid)
-	} else if set && strings.TrimSpace(string(in.OnHoldTimeout)) != "null" {
+	if at, set, err := s.pgHoldUntil(in.OnHoldTimeout); err != nil {
+		return err
+	} else if set {
 		// The panel lets the owner hold a term up to 365 days, and a
 		// reseller only with the right to change settings.
+		if at != 0 && at <= s.now().Unix() && (cur == nil || cur.StartBy != at) {
+			return fmt.Errorf("%w: on_hold_timeout is in the past", ErrInvalid)
+		}
 		if at > s.now().Unix()+365*86400 {
 			return fmt.Errorf("%w: on_hold_timeout is at most 365 days away", ErrInvalid)
 		}
@@ -187,6 +190,30 @@ func sameNextPlan(cur *ClientView, np *NextPlan) bool {
 		return false
 	}
 	return math.Abs(cur.NextPlan.GB-np.GB) < 1e-6 && cur.NextPlan.Days == np.Days
+}
+
+// pgHoldUntil reads on_hold_timeout as PasarGuard does: a number is seconds
+// from now, a date is a date, 0 clears it; null or missing changes nothing.
+func (s *Store) pgHoldUntil(raw json.RawMessage) (int64, bool, error) {
+	v := strings.TrimSpace(string(raw))
+	if v == "" || v == "null" {
+		return 0, false, nil
+	}
+	var n float64
+	if json.Unmarshal(raw, &n) == nil {
+		if n < 0 || n > maxTermSeconds {
+			return 0, true, fmt.Errorf("%w: on_hold_timeout", ErrInvalid)
+		}
+		if n == 0 {
+			return 0, true, nil
+		}
+		return s.now().Unix() + int64(n), true, nil
+	}
+	at, set, err := pgExpire(raw)
+	if err != nil {
+		return 0, true, fmt.Errorf("%w: on_hold_timeout", ErrInvalid)
+	}
+	return at, set, nil
 }
 
 // pgNextPlan turns PasarGuard's next plan (bytes and seconds, or a template)
@@ -254,7 +281,7 @@ func (s *Store) pgSetExtras(ctx context.Context, seller, email string, in pgIn) 
 			return err
 		}
 	}
-	if at, set, _ := pgExpire(in.OnHoldTimeout); set && strings.TrimSpace(string(in.OnHoldTimeout)) != "null" {
+	if at, set, _ := s.pgHoldUntil(in.OnHoldTimeout); set {
 		if _, err := s.db.ExecContext(ctx, `UPDATE clients SET start_by_unix=? WHERE email=?`, max(at, 0), email); err != nil {
 			return err
 		}
@@ -271,6 +298,14 @@ func (p *pgSrv) modify(ctx context.Context, seller string, cur ClientView, in pg
 	c.UUID, c.Secret, c.SubToken = "", "", "" // credentials stay as they are
 	if err := p.s.pgApply(ctx, seller, &c, in, false); err != nil {
 		return err
+	}
+	now := p.s.now().Unix()
+	if seller != "" && cur.Plan == "volume" && cur.VolumeBytes > 0 && c.VolumeBytes == cur.VolumeBytes &&
+		cur.ExpiresUnix > 0 && cur.ExpiresUnix <= now && c.ExpiresUnix > now {
+		var back int64
+		_ = p.s.ro.QueryRowContext(ctx, `SELECT COALESCE(SUM(volume_delta),0) FROM credit_ledger WHERE client_email=? AND rep_id=? AND kind='refund'
+AND note='expired: unused volume' AND unix>=?`, cur.Email, seller, cur.ExpiresUnix).Scan(&back)
+		c.VolumeBytes += max(back, 0)
 	}
 	if seller != "" && sameService(cur.Client, c) {
 		// Nothing to charge: only on/off (or nothing) changes, which also
@@ -295,6 +330,16 @@ func sameService(a, b Client) bool {
 // pgSetEnabled turns a client on or off. For a reseller it costs nothing but
 // needs the right to change settings; it also works on an expired client.
 func (s *Store) pgSetEnabled(ctx context.Context, seller, email string, on bool) error {
+	if seller != "" && s.IsLegacy(ctx, email) {
+		cur, err := s.clientView(ctx, email)
+		if err != nil || cur.RepID != seller {
+			return ErrNotFound
+		}
+		c := cur.Client
+		c.UUID, c.Secret, c.SubToken = "", "", ""
+		c.Enabled = on
+		return s.RepPutClient(ctx, "mirza", seller, c, cur.Plan)
+	}
 	if seller != "" {
 		pol, err := s.RepPolicyOf(ctx, seller)
 		if err != nil {
@@ -1166,8 +1211,8 @@ func (p *pgSrv) bulkSelect(action string) pgAuthed {
 				return
 			}
 			done = append(done, e)
+			pgNote(r, e)
 		}
-		pgNote(r, done...)
 		pgJSON(w, map[string]any{"users": done, "count": len(done)})
 	}
 }
@@ -2464,10 +2509,21 @@ func (p *pgSrv) nodeRoutes(mux *http.ServeMux, auth func(func(http.ResponseWrite
 			return
 		}
 		id, _, err := s.pgNode(r.Context(), r.PathValue("id"))
-		if err == nil {
-			err = s.DeleteNode(r.Context(), id)
-		}
 		if err != nil {
+			pgFailNode(w, err)
+			return
+		}
+		// In PasarGuard a node holds no groups; here the inbounds living only
+		// on this node (the groups bots sell) would go with it, and every
+		// user would lose them. That is done in the panel, knowingly.
+		var only int
+		_ = s.ro.QueryRowContext(r.Context(), `SELECT COUNT(*) FROM inbounds i WHERE i.node_id=?
+AND NOT EXISTS (SELECT 1 FROM inbound_routes x WHERE x.tag=i.tag AND x.node_id<>?)`, id, id).Scan(&only)
+		if only > 0 {
+			pgErr(w, http.StatusConflict, fmt.Sprintf("this node holds %d inbounds (groups) that would be deleted with it, and every user would lose them; move or delete them in the panel first", only))
+			return
+		}
+		if err := s.DeleteNode(r.Context(), id); err != nil {
 			pgFailNode(w, err)
 			return
 		}

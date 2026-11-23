@@ -178,10 +178,10 @@ func (s *Store) RepDeleteClient(ctx context.Context, actor, repID, email string)
 	}
 	var owner, plan string
 	var c Client
-	var used, first, giftBytes, giftUnits int64
+	var used, first, giftBytes, giftUnits, giftUntil int64
 	err = tx.QueryRowContext(ctx, `SELECT c.rep_id,c.plan,c.volume_bytes,c.expires_unix,c.duration_seconds,
-COALESCE(u.up+u.down,0),COALESCE(u.first_seen_unix,0),c.gift_bytes,c.gift_units FROM clients c LEFT JOIN client_usage u ON u.email=c.email WHERE c.email=?`, email).
-		Scan(&owner, &plan, &c.VolumeBytes, &c.ExpiresUnix, &c.DurationSeconds, &used, &first, &giftBytes, &giftUnits)
+COALESCE(u.up+u.down,0),COALESCE(u.first_seen_unix,0),c.gift_bytes,c.gift_units,c.gift_until FROM clients c LEFT JOIN client_usage u ON u.email=c.email WHERE c.email=?`, email).
+		Scan(&owner, &plan, &c.VolumeBytes, &c.ExpiresUnix, &c.DurationSeconds, &used, &first, &giftBytes, &giftUnits, &giftUntil)
 	if err != nil || owner != repID {
 		return 0, 0, ErrNotFound
 	}
@@ -192,13 +192,11 @@ COALESCE(u.up+u.down,0),COALESCE(u.first_seen_unix,0),c.gift_bytes,c.gift_units 
 		case plan == "volume" && c.VolumeBytes > 0:
 			refundBytes = max(0, c.VolumeBytes-giftBytes-used) // the owner's gift is not refunded
 		case plan == "unlimited":
-			var left int64
-			if c.ExpiresUnix > now {
-				left = (c.ExpiresUnix - now) / 86400
-			} else if c.DurationSeconds > 0 && first == 0 {
-				left = c.DurationSeconds / 86400 // never connected: the whole term
-			}
-			refundUnits = max(0, left/unitDays-giftUnits)
+			// Whole units of the paid days left: the term left (a used
+			// first-connection term from its first connection, an unused one
+			// whole) less the days that are still the owner's gift.
+			left := max(0, termEnd(c, first, now)-now) / 86400
+			refundUnits = max(0, left-giftDaysLeft(giftUnits, giftUntil, first, now)) / unitDays
 		}
 	}
 	if refundBytes > 0 || refundUnits > 0 {

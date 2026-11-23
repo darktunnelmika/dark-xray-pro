@@ -500,7 +500,7 @@ func (b *Bot) repConfirm(ctx context.Context, chat int64, rep string) {
 	refund := int64(0)
 	if d.mode == "renew" {
 		if c, err := b.Store.ClientByEmail(ctx, d.target); err == nil && c.VolumeBytes > 0 {
-			if left := c.VolumeBytes - c.Usage.Up - c.Usage.Down; left > 0 {
+			if left := c.VolumeBytes - c.GiftBytes - c.Usage.Up - c.Usage.Down; left > 0 { // the owner's gift is not refunded
 				refund = left
 			}
 		}

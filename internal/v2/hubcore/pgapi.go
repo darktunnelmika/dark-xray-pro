@@ -77,7 +77,12 @@ func (s *Store) ensurePGSchema() error {
 	// bot_off: a reseller selling through Mirza has its own Dark bot off
 	// (both would serve the same customers); with the plain API (another
 	// bot, a website) it stays on. Accesses made before keep Mirza's way.
-	return s.addColumn("pg_api", "bot_off", "INTEGER NOT NULL DEFAULT 1")
+	if err := s.addColumn("pg_api", "bot_off", "INTEGER NOT NULL DEFAULT 1"); err != nil {
+		return err
+	}
+	// Node traffic (the node API) sums usage per node.
+	_, err := s.db.Exec(`CREATE INDEX IF NOT EXISTS usage_daily_node ON usage_daily(node_id, day)`)
+	return err
 }
 
 // PG API modes: "mirza" turns the reseller's Dark bot off, "api" keeps it.
@@ -112,6 +117,9 @@ func (s *Store) PGAPIOf(ctx context.Context, seller string) PGAPI {
 		if seller != "" && botOff {
 			a.Mode = PGModeMirza
 		}
+		if !s.pgAccessCurrent(ctx, seller, a.Created) {
+			a = PGAPI{} // left from a deleted reseller with this id: not this one's
+		}
 	}
 	_ = s.ro.QueryRowContext(ctx, `SELECT COUNT(*) FROM clients WHERE rep_id=?`, seller).Scan(&a.Users)
 	return a
@@ -124,8 +132,24 @@ func (s *Store) MirzaMode(ctx context.Context, seller string) bool {
 		return false
 	}
 	var on bool
-	_ = s.ro.QueryRowContext(ctx, `SELECT enabled AND bot_off FROM pg_api WHERE seller=?`, seller).Scan(&on)
-	return on
+	var made int64
+	_ = s.ro.QueryRowContext(ctx, `SELECT enabled AND bot_off,created_unix FROM pg_api WHERE seller=?`, seller).Scan(&on, &made)
+	return on && s.pgAccessCurrent(ctx, seller, made)
+}
+
+// pgAccessCurrent tells whether a reseller's access was made for this
+// reseller (not one deleted before it with the same id) and may exist (not
+// a sub-seller's).
+func (s *Store) pgAccessCurrent(ctx context.Context, seller string, accessMade int64) bool {
+	if seller == "" {
+		return true
+	}
+	var parent string
+	var created int64
+	if s.ro.QueryRowContext(ctx, `SELECT parent_id,created_unix FROM reps WHERE id=?`, seller).Scan(&parent, &created) != nil {
+		return false
+	}
+	return parent == "" && created <= accessMade
 }
 
 // SetPGAPIMode chooses whether a reseller's access is for Mirza (its Dark
@@ -134,6 +158,18 @@ func (s *Store) MirzaMode(ctx context.Context, seller string) bool {
 func (s *Store) SetPGAPIMode(ctx context.Context, seller, mode string) error {
 	if mode != PGModeMirza && mode != PGModeAPI {
 		return fmt.Errorf("%w: mode is mirza or api", ErrInvalid)
+	}
+	if seller == "" {
+		return fmt.Errorf("%w: the owner's access never turns the main bot off; it has no mode", ErrInvalid)
+	}
+	// Back to the API way the reseller's own bot starts again: not while
+	// another reseller has taken the same bot meanwhile (both would poll it).
+	if mode == PGModeAPI {
+		if tok := s.RepBotOf(ctx, seller).Token; tok != "" {
+			if other := s.repBotTokenUser(ctx, tok, seller); other != "" {
+				return fmt.Errorf("%w: your Telegram bot is now used by another reseller; set another bot first", ErrPolicy)
+			}
+		}
 	}
 	r, err := s.db.ExecContext(ctx, `UPDATE pg_api SET bot_off=? WHERE seller=?`, mode == PGModeMirza, seller)
 	if err != nil {
@@ -233,7 +269,7 @@ func (s *Store) pgSellerOK(ctx context.Context, seller string, accessMade int64)
 	if s.ro.QueryRowContext(ctx, `SELECT enabled,parent_id,created_unix FROM reps WHERE id=?`, seller).Scan(&on, &parent, &created) != nil {
 		return false
 	}
-	return on && parent == "" && created <= accessMade
+	return on && parent == "" && created <= accessMade // = enabled && pgAccessCurrent
 }
 
 // pgAuth is the seller behind a bearer token.
@@ -519,6 +555,9 @@ func pgExpire(raw json.RawMessage) (unix int64, set bool, err error) {
 	}
 	for _, f := range []string{time.RFC3339Nano, "2006-01-02T15:04:05", "2006-01-02 15:04:05", "2006-01-02"} {
 		if t, err := time.Parse(f, str); err == nil {
+			if t.Unix() < 0 || t.Unix() > pgMaxUnix {
+				return 0, true, fmt.Errorf("%w: expire is out of range", ErrInvalid)
+			}
 			return t.Unix(), true, nil
 		}
 	}
@@ -583,6 +622,9 @@ func (s *Store) pgApply(ctx context.Context, seller string, c *Client, in pgIn, 
 			return fmt.Errorf("%w: expire is in the past", ErrInvalid)
 		}
 		c.ExpiresUnix, c.DurationSeconds = max(exp, 0), 0
+	}
+	if !isNew && in.Status == "" && in.OnHoldExpireDuration != nil && *in.OnHoldExpireDuration > 0 && c.ExpiresUnix == 0 && c.DurationSeconds > 0 {
+		c.DurationSeconds = *in.OnHoldExpireDuration // PasarGuard takes it on its own
 	}
 	switch in.Status {
 	case "", "active":
@@ -654,23 +696,35 @@ func (s *Store) pgResetRep(ctx context.Context, seller, email string) error {
 	if tx.QueryRowContext(ctx, `SELECT enabled FROM reps WHERE id=?`, seller).Scan(&on) != nil || !on {
 		return ErrAuth
 	}
-	pol, err := scanPolicy(tx.QueryRowContext(ctx, `SELECT `+policyCols+` FROM reps WHERE id=?`, seller))
-	if err != nil {
-		return err
-	}
-	if pol.DenyRenew {
-		return fmt.Errorf("%w: resetting usage gives the volume again, and renewing is not allowed for this representative", ErrPolicy)
-	}
-	now := s.now().Unix()
-	if repLockedQ(ctx, tx, seller, now) {
-		return fmt.Errorf("%w: an overdue bill is unpaid; pay it to sell again", ErrPolicy)
-	}
 	var vol, up, down int64
-	if err := tx.QueryRowContext(ctx, `SELECT c.volume_bytes,COALESCE(u.up,0),COALESCE(u.down,0) FROM clients c LEFT JOIN client_usage u ON u.email=c.email WHERE c.email=? AND c.rep_id=?`,
-		email, seller).Scan(&vol, &up, &down); err != nil {
+	var legacy bool
+	if err := tx.QueryRowContext(ctx, `SELECT c.volume_bytes,COALESCE(u.up,0),COALESCE(u.down,0),EXISTS(SELECT 1 FROM legacy_clients l WHERE l.email=c.email)
+FROM clients c LEFT JOIN client_usage u ON u.email=c.email WHERE c.email=? AND c.rep_id=?`, email, seller).Scan(&vol, &up, &down, &legacy); err != nil {
 		return ErrNotFound
 	}
-	if used := up + down; vol > 0 && used > 0 {
+	if legacy {
+		return fmt.Errorf("%w: an old user is paid for by its use; there is nothing to reset", ErrPolicy)
+	}
+	now := s.now().Unix()
+	// The reset gives back the used volume, up to the volume itself: that is
+	// what is charged, and only a reset that gives volume is a sale.
+	charge := int64(0)
+	if vol > 0 {
+		charge = min(up+down, vol)
+	}
+	if charge > 0 {
+		pol, err := scanPolicy(tx.QueryRowContext(ctx, `SELECT `+policyCols+` FROM reps WHERE id=?`, seller))
+		if err != nil {
+			return err
+		}
+		if pol.DenyRenew {
+			return fmt.Errorf("%w: resetting usage gives the volume again, and renewing is not allowed for this representative", ErrPolicy)
+		}
+		if repLockedQ(ctx, tx, seller, now) {
+			return fmt.Errorf("%w: an overdue bill is unpaid; pay it to sell again", ErrPolicy)
+		}
+	}
+	if used := charge; used > 0 {
 		r, err := tx.ExecContext(ctx, `UPDATE reps SET volume_credit=volume_credit-? WHERE id=? AND volume_credit>=?`, used, seller, used)
 		if err != nil {
 			return err
@@ -749,7 +803,7 @@ func pgRoutes(s *Store, mux *http.ServeMux, subBase string) {
 				h(sw, r, seller)
 				p := Principal{User: "mirza", Role: "owner"}
 				if seller != "" {
-					p = Principal{User: "mirza", Role: "rep", RepID: seller}
+					p = Principal{User: "mirza_" + seller, Role: "rep", RepID: seller}
 				}
 				if len(note.names) == 0 {
 					s.Audit(r.Context(), p, r, sw.status)
@@ -919,7 +973,7 @@ func pgAdminRoutes(s *Store, mux *docMux, path string, wrap func(http.HandlerFun
 			return
 		}
 		a, err := s.EnablePGAPI(r.Context(), id)
-		if err == nil && in.Mode != "" {
+		if err == nil && in.Mode != "" && id != "" { // the owner's access has no mode
 			if err = s.SetPGAPIMode(r.Context(), id, in.Mode); err == nil {
 				pass := a.Password
 				a = s.PGAPIOf(r.Context(), id)

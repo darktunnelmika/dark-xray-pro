@@ -4488,9 +4488,18 @@ function mirzaCard(path, isRep) {
   const copyBtn = (value) => h("button", { type: "button", class: "ghost", onclick: () => copy(value) }, T("کپی", "Copy"));
   const field = (label, value, secret) => h("div", { class: "mz-field" }, h("span", { class: "small muted" }, label),
     h("div", { class: "mz-copy" }, h("code", { dir: "ltr", class: secret ? "mz-secret" : "" }, value), copyBtn(value)));
+  // shown keeps a password made in this visit on screen while only the mode
+  // changes (a mode switch keeps the password but does not send it again).
+  let shown = "";
   const send = async (method, data) => {
     err.textContent = "";
-    try { draw(await api(method, path, data)); } catch (x) { err.textContent = x.message; }
+    try {
+      const a = await api(method, path, data);
+      if (a.password) shown = a.password;
+      else if (method === "PUT" && a.enabled && shown) a.password = shown;
+      else shown = "";
+      draw(a);
+    } catch (x) { err.textContent = x.message; }
   };
   const turnOff = (mode) => {
     const q = !isRep ? T("دسترسی API قطع شود؟ ربات‌ها و سایت‌هایی که با آن وصل‌اند دیگر کار نمی‌کنند.", "Turn the API access off? Bots and sites using it stop working.")
@@ -4504,7 +4513,10 @@ function mirzaCard(path, isRep) {
     if (want === cur) return;
     if (want === "dark") return turnOff(cur);
     if (cur === "dark") return send("POST", { mode: want });
-    send("PUT", { mode: want });
+    const q = want === "mirza"
+      ? T("به ربات میرزا برود؟ ربات دارک شما خاموش می‌شود. نام کاربری و رمز همان می‌ماند.", "Switch to Mirza? Your Dark bot goes off. The username and password stay the same.")
+      : T("به API پاسارگاد برود؟ ربات دارک شما دوباره روشن می‌شود. نام کاربری و رمز همان می‌ماند.", "Switch to the PasarGuard API? Your Dark bot turns back on. The username and password stay the same.");
+    if (confirm(q)) send("PUT", { mode: want });
   };
 
   // The PasarGuard API in short: how to sign in, and the calls most bots
@@ -4515,7 +4527,8 @@ function mirzaCard(path, isRep) {
     // right-to-left line keeps its order and its brackets.
     const bi = (text) => fa ? text.split(/(\/?[A-Za-z_][A-Za-z0-9_\/{}.\-]*)/).map((x, i) => i % 2 ? h("bdi", { dir: "ltr" }, x) : x) : text;
     const login = `curl -X POST ${base}/api/admin/token \\\n  -d "username=${a.username}" -d "password=YOUR_PASSWORD"`;
-    const create = `curl -X POST ${base}/api/user \\\n  -H "Authorization: Bearer TOKEN" -H "Content-Type: application/json" \\\n  -d '{"username": "ali123", "data_limit": 32212254720, "expire": "2026-12-31T00:00:00Z", "group_ids": [1]}'`;
+    const until = new Date(Date.now() + 30 * 86400e3).toISOString().slice(0, 10) + "T00:00:00Z";
+    const create = `curl -X POST ${base}/api/user \\\n  -H "Authorization: Bearer TOKEN" -H "Content-Type: application/json" \\\n  -d '{"username": "ali123", "data_limit": 32212254720, "expire": "${until}"}'`;
     const calls = [
       ["GET", "/api/users", T("فهرست کاربرها، با فیلتر وضعیت، جستجو و صفحه‌بندی", "list users, by status, search and page")],
       ["POST", "/api/user", T("ساخت کاربر", "create a user")],
@@ -4531,16 +4544,19 @@ function mirzaCard(path, isRep) {
     ];
     const code = (text) => h("div", { class: "mz-code-row" }, h("pre", { dir: "ltr", class: "mz-code" }, text), copyBtn(text.replace(/\\\n\s*/g, "")));
     return h("details", { class: "adv-box mz-guide" }, h("summary", {}, T("📘 راهنمای API (مثل API پاسارگاد)", "📘 API guide (as PasarGuard's API)")),
-      h("p", { class: "small muted" }, T("هر ربات یا سایتی که برای پاسارگاد ساخته شده با همین آدرس‌ها و فیلدها کار می‌کند. کاربرهایی که می‌سازد مال شما هستند و از اعتبارتان کم می‌شود.",
-        "Any bot or site made for PasarGuard works with these same paths and fields. The users it makes are yours and use your credit.")),
+      h("p", { class: "small muted" }, isRep
+        ? T("هر ربات یا سایتی که برای پاسارگاد ساخته شده با همین آدرس‌ها و فیلدها کار می‌کند. کاربرهایی که می‌سازد مال شما هستند و از اعتبارتان کم می‌شود.",
+          "Any bot or site made for PasarGuard works with these same paths and fields. The users it makes are yours and use your credit.")
+        : T("هر ربات یا سایتی که برای پاسارگاد ساخته شده با همین آدرس‌ها و فیلدها کار می‌کند. کاربرهایی که می‌سازد مال پنل هستند (نه نماینده‌ها).",
+          "Any bot or site made for PasarGuard works with these same paths and fields. The users it makes are the panel's own (not a reseller's).")),
       h("p", { class: "small" }, T("۱. گرفتن توکن (۲۴ ساعت اعتبار دارد):", "1. Get a token (valid for 24 hours):")), code(login),
       h("p", { class: "small" }, T("۲. توکن را در هر درخواست بفرستید:", "2. Send it with every call:")), code("Authorization: Bearer TOKEN"),
       h("p", { class: "small" }, T("۳. درخواست‌های اصلی:", "3. The main calls:")),
       h("div", { class: "mz-calls", dir: "ltr" }, calls.map(([m, p, what]) => h("div", { class: "mz-call" },
         h("code", { class: `mz-method m-${m.toLowerCase()}` }, m), h("code", { class: "mz-path" }, p), h("span", { class: "small muted", dir: fa ? "rtl" : "ltr" }, bi(what))))),
-      h("p", { class: "small" }, T("نمونهٔ ساخت کاربر ۳۰ گیگ:", "Example: a 30 GB user:")), code(create),
-      h("p", { class: "small muted" }, bi(T("حجم یا data_limit به بایت است و ۰ یعنی نامحدود. انقضا یا expire زمان یونیکس یا تاریخ ISO است. group_ids را از /api/groups بگیرید. بقیهٔ مسیرهای پاسارگاد هم هستند: by-id، کارهای گروهی و قالب‌ها.",
-        "data_limit is in bytes (0 = unlimited), expire is a Unix time or an ISO date, and group_ids come from /api/groups. PasarGuard's other paths (by-id, bulk actions, templates) are here too."))));
+      h("p", { class: "small" }, T("نمونهٔ ساخت کاربر ۳۰ گیگ و ۳۰ روزه:", "Example: a 30 GB, 30-day user:")), code(create),
+      h("p", { class: "small muted" }, bi(T("حجم یا data_limit به بایت است و ۰ یعنی نامحدود. انقضا یا expire زمان یونیکس یا تاریخ ISO است. بدون group_ids کاربر همهٔ اینباندهایی را که می‌توانید بدهید می‌گیرد؛ برای انتخاب، شماره‌ها را از /api/groups بگیرید. بقیهٔ مسیرهای پاسارگاد هم هستند: by-id، کارهای گروهی و قالب‌ها.",
+        "data_limit is in bytes (0 = unlimited) and expire is a Unix time or an ISO date. Without group_ids the user gets every inbound you may give; to choose, take the numbers from /api/groups. PasarGuard's other paths (by-id, bulk actions, templates) are here too."))));
   }
 
   function draw(a) {
@@ -4563,7 +4579,7 @@ function mirzaCard(path, isRep) {
     fill(body, modes,
       h("div", { class: "mz-badges" }, h("span", { class: "badge good" }, "● ", T("فعال", "on")),
         h("span", { class: "badge" }, T("آخرین اتصال: ", "last call: "), ago(a.last_used)),
-        h("span", { class: "badge" }, T(`${fmtNum(a.made)} کاربر ساخته شده با API`, `${a.made} users made through the API`))),
+        h("span", { class: "badge" }, T(`کاربر ساخته شده با API: ${fmtNum(a.made)}`, `users made through the API: ${a.made}`))),
       mirza ? h("ol", { class: "mz-steps small" },
         h("li", {}, T("در پنل ادمین میرزا «🖥 اضافه کردن پنل» را بزنید و نوع پنل را «پاسارگارد» انتخاب کنید.", "In Mirza's admin menu tap “🖥 Add panel” and choose the PasarGuard type.")),
         h("li", {}, T("آدرس، نام کاربری و رمز زیر را وارد کنید.", "Enter the address, username and password below.")),
@@ -4602,7 +4618,8 @@ function repBotCard(path) {
     mini.checked = b.miniapp !== false;
     tok.placeholder = b.has_token ? (fa ? "توکن ثبت شده — برای تغییر، توکن جدید بزنید" : "token saved — type a new one to change") : "123456789:AA...";
     st.replaceChildren(b.running ? h("span", { class: "badge good" }, `● ${fa ? "روشن" : "running"} @${b.username || ""}`) :
-      b.error ? h("span", { class: "badge bad" }, (fa ? "خطا: " : "error: ") + b.error) : h("span", { class: "badge" }, fa ? "خاموش" : "off"));
+      b.error ? h("span", { class: "badge bad" }, (fa ? "خطا: " : "error: ") + b.error)
+        : h("span", { class: "badge" }, b.mirza ? (fa ? "خاموش: با ربات میرزا می‌فروشید (روش فروش)" : "off: you sell through Mirza (How you sell)") : (fa ? "خاموش" : "off")));
   };
   api("GET", path).then(draw).catch(() => {});
   return h("form", { class: "card form", onsubmit: async (e) => {
@@ -6811,7 +6828,7 @@ function viewSettings() {
     owner && ["sub", "link", fa ? "اشتراک مشتری" : "Customer subscription", fa ? "عنوان، نام کانفیگ‌ها و صفحهٔ مشتری" : "Title, config names, customer page", () => [subSettingsCard()]],
     (owner || fullOwner()) && ["panel", "globe", fa ? "آدرس و دسترسی پنل" : "Panel address and access", fa ? "HTTPS، مسیر مخفی، IPهای مجاز" : "HTTPS, secret path, trusted IPs", () => [fullOwner() ? panelNameCard() : null, fullOwner() ? panelHTTPSCard() : null, fullOwner() ? panelPathCard() : null, owner ? trustedCard() : null]],
     me.role === "rep" && ["repsub", "link", fa ? "صفحهٔ اشتراک من" : "My subscription page", fa ? "برند، لوگو و آدرس اختصاصی" : "Brand, logo and own address", () => [repBrandCard("/api/v2/rep/brand")]],
-    me.role === "rep" && ["repbot", "bell", fa ? "ربات فروش و کارت من" : "My sales bot and card", fa ? "ربات تلگرام اختصاصی، کارت به کارت" : "Own Telegram bot, card payment", () => [mirzaCard("/api/v2/rep/pg-api", true), repBotCard("/api/v2/rep/bot"), botLookCard("/api/v2/rep/bot"), sellerCardCard("/api/v2/shop/card")]],
+    me.role === "rep" && ["repbot", "bell", fa ? "ربات فروش و کارت من" : "My sales bot and card", fa ? "ربات تلگرام اختصاصی، کارت به کارت" : "Own Telegram bot, card payment", () => [me.sub_seller ? null : mirzaCard("/api/v2/rep/pg-api", true), repBotCard("/api/v2/rep/bot"), botLookCard("/api/v2/rep/bot"), sellerCardCard("/api/v2/shop/card")]],
     ["security", "staff", fa ? "امنیت حساب" : "Account security", fa ? "رمز، ورود دومرحله‌ای، نشست‌ها" : "Password, two-step sign-in, sessions", () => [pwForm, tfaCard(), sessionsCard()]],
     (fullOwner() || owner || tgCard) && ["telegram", "bell", fa ? "تلگرام" : "Telegram", fa ? "ربات، هشدارها، فروش و دعوت" : "Bot, alerts, sales and referrals", () => [fullOwner() ? telegramBotCard() : null, fullOwner() ? botLookCard("/api/v2/admin/telegram") : null, owner ? tgCommerceCard() : null, fullOwner() ? mirzaCard("/api/v2/admin/pg-api", false) : null, tgCard]],
     fullOwner() && ["backup", "traffic", fa ? "پشتیبان و انتقال" : "Backup and migration", fa ? "دانلود، بازگردانی، ورود از پنل‌های دیگر" : "Download, restore, import from other panels", () => [backupCard, migrateCard(), foreignCard()]],

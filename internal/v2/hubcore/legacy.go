@@ -1192,6 +1192,17 @@ func (s *Store) repPutLegacy(ctx context.Context, repID string, c Client, plan s
 	if c.MaxIPs < 0 || c.MaxIPs > 1000 {
 		return ErrInvalid
 	}
+	var oldIPs int
+	_ = s.ro.QueryRowContext(ctx, `SELECT max_ips FROM clients WHERE email=?`, c.Email).Scan(&oldIPs)
+	if c.Enabled != old.Enabled || c.MaxIPs != oldIPs {
+		pol, err := s.RepPolicyOf(ctx, repID)
+		if err != nil {
+			return err
+		}
+		if pol.DenyEdit {
+			return fmt.Errorf("%w: changing client settings is not allowed for this representative", ErrPolicy)
+		}
+	}
 	if c.Enabled && !old.Enabled {
 		var credit int64
 		_ = s.ro.QueryRowContext(ctx, `SELECT volume_credit FROM reps WHERE id=?`, repID).Scan(&credit)

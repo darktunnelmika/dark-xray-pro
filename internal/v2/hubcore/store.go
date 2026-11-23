@@ -374,9 +374,20 @@ func (s *Store) CreateNode(ctx context.Context, id, name string) (string, error)
 		return "", ErrInvalid
 	}
 	tok := randomHex(32)
-	_, err := s.db.ExecContext(ctx, `INSERT INTO nodes(id,name,token_sha256,created_unix) VALUES(?,?,?,?)`,
-		id, name, hashToken(tok), s.now().Unix())
-	return tok, err
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return "", err
+	}
+	defer tx.Rollback()
+	rowid, err := newRowID(ctx, tx, "nodes")
+	if err != nil {
+		return "", err
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO nodes(rowid,id,name,token_sha256,created_unix) VALUES(?,?,?,?,?)`,
+		rowid, id, name, hashToken(tok), s.now().Unix()); err != nil {
+		return "", err
+	}
+	return tok, tx.Commit()
 }
 
 // RotateNodeToken replaces a node token (the old one stops working).
@@ -438,6 +449,9 @@ func (s *Store) PutClient(ctx context.Context, c Client) error {
 func putClientTx(ctx context.Context, tx *sql.Tx, c Client, now int64) error {
 	if !emailRE.MatchString(c.Email) || c.MaxIPs < 0 || c.DurationSeconds < 0 {
 		return ErrInvalid
+	}
+	if err := checkTermBounds(c); err != nil {
+		return err
 	}
 	// An update that omits credentials keeps the existing ones, so editing a
 	// client never breaks its connections or its subscription link.
@@ -640,10 +654,11 @@ type ClientView struct {
 	NextReset      int64     `json:"next_reset,omitempty"`
 	NextPlan       *NextPlan `json:"next_plan,omitempty"`
 	HWIDLimit      int       `json:"hwid_limit"`
-	SpeedKbps      int       `json:"speed_kbps"`         // 0 = no limit
-	StartBy        int64     `json:"start_by,omitempty"` // on hold: the term starts by then even if unused
-	Trial          bool      `json:"trial,omitempty"`    // a free trial from a Telegram shop
-	Legacy         bool      `json:"legacy,omitempty"`   // an old user brought from another panel (legacy.go)
+	SpeedKbps      int       `json:"speed_kbps"`           // 0 = no limit
+	StartBy        int64     `json:"start_by,omitempty"`   // on hold: the term starts by then even if unused
+	Trial          bool      `json:"trial,omitempty"`      // a free trial from a Telegram shop
+	GiftBytes      int64     `json:"gift_bytes,omitempty"` // the owner's gift in the volume: never refunded as credit
+	Legacy         bool      `json:"legacy,omitempty"`     // an old user brought from another panel (legacy.go)
 }
 
 // Clients lists every client with usage, newest first.
@@ -668,8 +683,8 @@ func (s *Store) clientView(ctx context.Context, email string) (ClientView, error
 func (s *Store) clientViews(ctx context.Context, where, arg string) ([]ClientView, error) {
 	q := `SELECT c.email,c.uuid,c.enabled,c.volume_bytes,c.expires_unix,c.duration_seconds,c.max_ips,c.sub_token,c.rep_id,c.plan,c.note,
 COALESCE(u.up,0),COALESCE(u.down,0),COALESCE(u.first_seen_unix,0),COALESCE(u.last_seen_unix,0),
-EXISTS(SELECT 1 FROM online o WHERE o.email=c.email AND o.seen_unix>=?),c.reset_period,c.last_reset_unix,c.next_plan,c.hwid_limit,c.start_by_unix,c.trial,
-EXISTS(SELECT 1 FROM legacy_clients l WHERE l.email=c.email)
+EXISTS(SELECT 1 FROM online o WHERE o.email=c.email AND o.seen_unix>=?),CASE WHEN c.reset_year=1 THEN 'year' ELSE c.reset_period END,c.last_reset_unix,c.next_plan,c.hwid_limit,c.start_by_unix,c.trial,
+EXISTS(SELECT 1 FROM legacy_clients l WHERE l.email=c.email),c.gift_bytes
 FROM clients c LEFT JOIN client_usage u ON u.email=c.email`
 	args := []any{s.now().Unix() - 120}
 	if where != "" {
@@ -686,7 +701,7 @@ FROM clients c LEFT JOIN client_usage u ON u.email=c.email`
 		var v ClientView
 		var np string
 		if err := rows.Scan(&v.Email, &v.UUID, &v.Enabled, &v.VolumeBytes, &v.ExpiresUnix, &v.DurationSeconds, &v.MaxIPs, &v.SubToken, &v.RepID, &v.Plan, &v.Note,
-			&v.Usage.Up, &v.Usage.Down, &v.Usage.FirstSeen, &v.Usage.LastSeen, &v.Online, &v.ResetPeriod, &v.LastReset, &np, &v.HWIDLimit, &v.StartBy, &v.Trial, &v.Legacy); err != nil {
+			&v.Usage.Up, &v.Usage.Down, &v.Usage.FirstSeen, &v.Usage.LastSeen, &v.Online, &v.ResetPeriod, &v.LastReset, &np, &v.HWIDLimit, &v.StartBy, &v.Trial, &v.Legacy, &v.GiftBytes); err != nil {
 			return nil, err
 		}
 		if np != "" {

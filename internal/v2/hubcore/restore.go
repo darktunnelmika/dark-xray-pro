@@ -169,7 +169,7 @@ func ApplyPendingRestore(dbPath string) (ok bool, err error) {
 
 // rowIDTables are the tables whose row ids sales bots keep (users,
 // templates, groups); newRowID never gives one of their ids out twice.
-var rowIDTables = []string{"clients", "products", "inbounds"}
+var rowIDTables = []string{"clients", "products", "inbounds", "nodes"}
 
 // rowIDMarks reads, from the database about to be replaced, the highest id
 // each table has given out.

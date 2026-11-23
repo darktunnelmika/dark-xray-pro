@@ -70,6 +70,12 @@ func (s *Store) DeleteRep(ctx context.Context, id string, withClients bool) (cli
 			`DELETE FROM reps WHERE id=?`,
 			`DELETE FROM pg_api WHERE seller=?`,
 			`DELETE FROM pg_tokens WHERE seller=?`,
+			`DELETE FROM rep_wallet WHERE rep_id=?`,
+			`UPDATE rep_bills SET status='cancelled' WHERE rep_id=? AND status='open'`,
+			`DELETE FROM rep_resale WHERE rep_id=?`,
+			`DELETE FROM legacy_clients WHERE rep_id=?`,
+			`DELETE FROM toman_wallet WHERE seller=?`,
+			`DELETE FROM toman_topups WHERE seller=?`,
 		} {
 			if _, err := tx.ExecContext(ctx, q, r); err != nil {
 				return 0, err

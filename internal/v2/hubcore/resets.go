@@ -45,7 +45,28 @@ func (s *Store) ensureResetSchema() error {
 	if err := s.addColumn("clients", "reset_period", "TEXT NOT NULL DEFAULT ''"); err != nil {
 		return err
 	}
-	return s.addColumn("clients", "last_reset_unix", "INTEGER NOT NULL DEFAULT 0")
+	if err := s.addColumn("clients", "last_reset_unix", "INTEGER NOT NULL DEFAULT 0"); err != nil {
+		return err
+	}
+	// A yearly reset lives in its own column: a panel older than v2.54
+	// (after a rollback) reads an unknown reset_period as due every minute
+	// and would wipe the usage again and again; reset_period '' it ignores.
+	if err := s.addColumn("clients", "reset_year", "INTEGER NOT NULL DEFAULT 0"); err != nil {
+		return err
+	}
+	_, err := s.db.Exec(`UPDATE clients SET reset_year=1, reset_period='' WHERE reset_period='year'`)
+	return err
+}
+
+// resetPeriodSQL is a client's reset period as one value.
+const resetPeriodSQL = `CASE WHEN reset_year=1 THEN 'year' ELSE reset_period END`
+
+// resetColumns are what is stored for a period: reset_period and reset_year.
+func resetColumns(period string) (string, bool) {
+	if period == "year" {
+		return "", true
+	}
+	return period, false
 }
 
 // ResetUsage clears a client's metered total and logs what was cleared.
@@ -86,8 +107,9 @@ func (s *Store) SetResetPeriod(ctx context.Context, email, period string) error 
 	if !resetPeriods[period] {
 		return fmt.Errorf("%w: period must be day, week, month, year or empty", ErrInvalid)
 	}
-	r, err := s.db.ExecContext(ctx, `UPDATE clients SET reset_period=?, last_reset_unix=CASE WHEN last_reset_unix=0 OR reset_period<>? THEN ? ELSE last_reset_unix END WHERE email=?`,
-		period, period, s.now().Unix(), email)
+	col, year := resetColumns(period)
+	r, err := s.db.ExecContext(ctx, `UPDATE clients SET last_reset_unix=CASE WHEN last_reset_unix=0 OR `+resetPeriodSQL+`<>? THEN ? ELSE last_reset_unix END,
+reset_period=?, reset_year=? WHERE email=?`, period, s.now().Unix(), col, year, email)
 	if err != nil {
 		return err
 	}
@@ -115,7 +137,7 @@ func nextReset(period string, last int64) int64 {
 
 // runDueResets resets clients whose period has elapsed; returns how many.
 func (s *Store) runDueResets(ctx context.Context) int {
-	rows, err := s.ro.QueryContext(ctx, `SELECT email,reset_period,last_reset_unix FROM clients WHERE reset_period<>''`)
+	rows, err := s.ro.QueryContext(ctx, `SELECT email,`+resetPeriodSQL+`,last_reset_unix FROM clients WHERE reset_period<>'' OR reset_year=1`)
 	if err != nil {
 		return 0
 	}

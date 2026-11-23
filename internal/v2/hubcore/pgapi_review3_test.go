@@ -93,7 +93,7 @@ func TestPasarGuardReviewThreeMoney(t *testing.T) {
 
 	// DenyEdit covers the on-hold timeout and the groups.
 	_ = s.SetRepPolicy(ctx, "ali", RepPolicy{AllowUnlimited: true, CanDelete: true, DenyEdit: true})
-	if code, _ := c.obj("PUT", "/api/user/vol1", tok, map[string]any{"on_hold_timeout": now.Add(10 * 24 * time.Hour).Unix()}); code != 403 {
+	if code, _ := c.obj("PUT", "/api/user/vol1", tok, map[string]any{"on_hold_timeout": 10 * 86400}); code != 403 {
 		t.Fatal("on_hold_timeout under DenyEdit", code)
 	}
 	if code, _ := c.obj("POST", "/api/groups/bulk/add", tok, map[string]any{"group_ids": []any{g2}}); code != 403 {
@@ -103,7 +103,7 @@ func TestPasarGuardReviewThreeMoney(t *testing.T) {
 		t.Fatal("the groups stay", v.Inbounds)
 	}
 	_ = s.SetRepPolicy(ctx, "ali", RepPolicy{AllowUnlimited: true, CanDelete: true})
-	if code, _ := c.obj("PUT", "/api/user/vol1", tok, map[string]any{"on_hold_timeout": now.Add(400 * 24 * time.Hour).Unix()}); code != 422 {
+	if code, _ := c.obj("PUT", "/api/user/vol1", tok, map[string]any{"on_hold_timeout": 400 * 86400}); code != 422 {
 		t.Fatal("on_hold_timeout beyond 365 days", code)
 	}
 
@@ -390,7 +390,7 @@ func TestPasarGuardReviewFour(t *testing.T) {
 	_, _ = s.db.Exec(`UPDATE clients SET expires_unix=? WHERE email='gift4'`, now.Add(-time.Hour).Unix())
 	s.runExpiryRefunds(ctx)
 	var giftBack, paidBack int64
-	_ = s.db.QueryRow(`SELECT COALESCE(SUM(volume_delta),0) FROM credit_ledger WHERE client_email='gift4' AND kind='refund'`).Scan(&giftBack)
+	_ = s.db.QueryRow(`SELECT COALESCE(SUM(volume_delta),0) FROM credit_ledger WHERE client_email='gift4' AND kind='refund' AND note='expired: unused volume'`).Scan(&giftBack)
 	_ = s.db.QueryRow(`SELECT COALESCE(SUM(volume_delta),0) FROM credit_ledger WHERE client_email='old1' AND kind='refund'`).Scan(&paidBack)
 	if giftBack != 0 || paidBack != 15<<30-1 {
 		t.Fatalf("the expiry refund pays no gift (%d) but does pay unused paid volume (%d)", giftBack, paidBack)
@@ -445,11 +445,21 @@ func TestPasarGuardReviewFour(t *testing.T) {
 	if code, _ := c.obj("GET", "/api/node/99", otok, nil); code != 404 {
 		t.Fatal("unknown node", code)
 	}
-	if code, _ := c.call("DELETE", "/api/node/1", otok, nil); code != 204 {
-		t.Fatal("delete node", code)
+	// A node holding the only copy of inbounds (the groups bots sell) is not
+	// deleted through the API; an empty one is.
+	if code, _ := c.call("DELETE", "/api/node/1", otok, nil); code != 409 {
+		t.Fatal("delete a node with inbounds", code)
 	}
-	if nodes, _ := s.Nodes(ctx); len(nodes) != 0 {
-		t.Fatal("the node is gone")
+	if _, err := s.CreateNode(ctx, "spare", "Spare"); err != nil {
+		t.Fatal(err)
+	}
+	var spare int64
+	_ = s.db.QueryRow(`SELECT rowid FROM nodes WHERE id='spare'`).Scan(&spare)
+	if code, _ := c.call("DELETE", fmt.Sprintf("/api/node/%d", spare), otok, nil); code != 204 {
+		t.Fatal("delete an empty node", code)
+	}
+	if nodes, _ := s.Nodes(ctx); len(nodes) != 1 {
+		t.Fatal("only the empty node is gone", len(nodes))
 	}
 }
 
@@ -551,5 +561,91 @@ func TestPGAPIModes(t *testing.T) {
 	o, _ := s.EnablePGAPI(ctx, "")
 	if a := s.PGAPIOf(ctx, ""); a.Mode != "api" || o.Password == "" {
 		t.Fatal("the owner's access never turns a bot off", a.Mode)
+	}
+	if err := s.SetPGAPIMode(ctx, "", "mirza"); err == nil {
+		t.Fatal("the owner's access has no mode")
+	}
+	// The owner's card sends the API mode with "Create": it is accepted.
+	oh := httptest.NewServer(AdminHandlerWith(s, "admintok", "", nil))
+	defer oh.Close()
+	req, _ := http.NewRequest("POST", oh.URL+"/api/v2/admin/pg-api", strings.NewReader(`{"mode":"api"}`))
+	req.Header.Set("Authorization", "Bearer admintok")
+	req.Header.Set("Content-Type", "application/json")
+	if r, err := http.DefaultClient.Do(req); err != nil || r.StatusCode != 200 {
+		t.Fatal("owner create with a mode", err, r.StatusCode)
+	} else {
+		r.Body.Close()
+	}
+}
+
+// TestYearlyResetSafeForOlderPanels: a yearly reset is kept out of
+// reset_period, which a panel older than v2.54 (after a rollback) would read
+// as due every minute; values stored as "year" before move over.
+func TestYearlyResetSafeForOlderPanels(t *testing.T) {
+	s, now := newStore(t)
+	ctx := context.Background()
+	seed(t, s)
+	if err := s.SetResetPeriod(ctx, "alice", "year"); err != nil {
+		t.Fatal(err)
+	}
+	var col string
+	var year bool
+	_ = s.db.QueryRow(`SELECT reset_period,reset_year FROM clients WHERE email='alice'`).Scan(&col, &year)
+	if col != "" || !year {
+		t.Fatalf("stored as %q/%v", col, year)
+	}
+	if v, _ := s.clientView(ctx, "alice"); v.ResetPeriod != "year" {
+		t.Fatal("shown as", v.ResetPeriod)
+	}
+	_, _ = s.db.Exec(`INSERT OR REPLACE INTO client_usage(email,up,down,first_seen_unix,last_seen_unix) VALUES('alice',500,0,?,?)`, now.Unix(), now.Unix())
+	*now = now.Add(30 * 24 * time.Hour)
+	if n := s.runDueResets(ctx); n != 0 {
+		t.Fatal("not due within the year", n)
+	}
+	*now = now.Add(340 * 24 * time.Hour)
+	if n := s.runDueResets(ctx); n != 1 {
+		t.Fatal("due after a year", n)
+	}
+	if err := s.SetResetPeriod(ctx, "alice", "month"); err != nil {
+		t.Fatal(err)
+	}
+	_ = s.db.QueryRow(`SELECT reset_period,reset_year FROM clients WHERE email='alice'`).Scan(&col, &year)
+	if col != "month" || year {
+		t.Fatalf("back to monthly: %q/%v", col, year)
+	}
+	// A value written by v2.54.0/v2.54.1 moves at start.
+	_, _ = s.db.Exec(`UPDATE clients SET reset_period='year', reset_year=0 WHERE email='bob'`)
+	if err := s.ensureResetSchema(); err != nil {
+		t.Fatal(err)
+	}
+	_ = s.db.QueryRow(`SELECT reset_period,reset_year FROM clients WHERE email='bob'`).Scan(&col, &year)
+	if col != "" || !year {
+		t.Fatalf("moved: %q/%v", col, year)
+	}
+}
+
+// TestStaleAccessShownOff: an access left by a deleted reseller (before
+// v2.54.1 deleted it) is not shown as on and does not keep the new
+// reseller's Dark bot off.
+func TestStaleAccessShownOff(t *testing.T) {
+	s, now := newStore(t)
+	ctx := context.Background()
+	seed(t, s)
+	_ = s.PutRep(ctx, Rep{ID: "ali", Name: "Ali", Enabled: true})
+	if _, err := s.EnablePGAPI(ctx, "ali"); err != nil {
+		t.Fatal(err)
+	}
+	// As v2.53.3 left it: the reseller deleted (without the access) and made again.
+	_, _ = s.db.Exec(`DELETE FROM reps WHERE id='ali'`)
+	*now = now.Add(time.Hour)
+	_ = s.PutRep(ctx, Rep{ID: "ali", Name: "New Ali", Enabled: true})
+	if a := s.PGAPIOf(ctx, "ali"); a.Enabled || a.Mode != "" {
+		t.Fatalf("shown as %+v", a)
+	}
+	if s.MirzaMode(ctx, "ali") {
+		t.Fatal("the new reseller's Dark bot stays on")
+	}
+	if a, err := s.EnablePGAPI(ctx, "ali"); err != nil || !a.Enabled || a.Mode != "mirza" || a.Password == "" {
+		t.Fatalf("a fresh access %+v %v", a, err)
 	}
 }
