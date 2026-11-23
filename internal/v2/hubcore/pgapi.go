@@ -80,6 +80,14 @@ func (s *Store) ensurePGSchema() error {
 	if err := s.addColumn("pg_api", "bot_off", "INTEGER NOT NULL DEFAULT 1"); err != nil {
 		return err
 	}
+	// An API key, as PasarGuard's (pg_key_...): sent in X-Api-Key, or as
+	// "Authorization: ApiKey ..."; kept hashed, shown once.
+	if err := s.addColumn("pg_api", "key_sha", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if _, err := s.db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS pg_api_key ON pg_api(key_sha) WHERE key_sha<>''`); err != nil {
+		return err
+	}
 	// Node traffic (the node API) sums usage per node.
 	_, err := s.db.Exec(`CREATE INDEX IF NOT EXISTS usage_daily_node ON usage_daily(node_id, day)`)
 	return err
@@ -103,16 +111,19 @@ type PGAPI struct {
 	// Mode is PGModeMirza or PGModeAPI ("" while it was never made); the
 	// owner's is always PGModeAPI (the main bot never goes off).
 	Mode string `json:"mode"`
-	// Password is only set right after it was made.
+	// HasKey: an API key was made (it is shown only once).
+	HasKey bool `json:"has_key"`
+	// Password and APIKey are only set right after they were made.
 	Password string `json:"password,omitempty"`
+	APIKey   string `json:"api_key,omitempty"`
 }
 
 // PGAPIOf is a seller's access ("" = the owner).
 func (s *Store) PGAPIOf(ctx context.Context, seller string) PGAPI {
 	var a PGAPI
 	var botOff bool
-	if s.ro.QueryRowContext(ctx, `SELECT enabled,username,created_unix,last_used,last_ip,made,bot_off FROM pg_api WHERE seller=?`, seller).
-		Scan(&a.Enabled, &a.Username, &a.Created, &a.LastUsed, &a.LastIP, &a.Made, &botOff) == nil {
+	if s.ro.QueryRowContext(ctx, `SELECT enabled,username,created_unix,last_used,last_ip,made,bot_off,key_sha<>'' FROM pg_api WHERE seller=?`, seller).
+		Scan(&a.Enabled, &a.Username, &a.Created, &a.LastUsed, &a.LastIP, &a.Made, &botOff, &a.HasKey) == nil {
 		a.Mode = PGModeAPI
 		if seller != "" && botOff {
 			a.Mode = PGModeMirza
@@ -213,7 +224,33 @@ ON CONFLICT(seller) DO UPDATE SET pass_hash=excluded.pass_hash, enabled=1,
 	_, _ = s.db.ExecContext(ctx, `DELETE FROM pg_tokens WHERE seller=?`, seller) // the old password's sessions end
 	a := s.PGAPIOf(ctx, seller)
 	a.Password = pass
+	if !a.HasKey {
+		// The first time, an API key comes with the password; later a new
+		// password leaves the key alone (and the other way round).
+		if key, err := s.NewPGAPIKey(ctx, seller); err == nil {
+			a.HasKey, a.APIKey = true, key
+		}
+	}
 	return a, nil
+}
+
+func pgKeySHA(key string) string {
+	h := sha256.Sum256([]byte("pgkey|" + key))
+	return hex.EncodeToString(h[:])
+}
+
+// NewPGAPIKey makes a seller's API key anew (the old one stops at once)
+// and returns it; it is shown only this once.
+func (s *Store) NewPGAPIKey(ctx context.Context, seller string) (string, error) {
+	key := "pg_key_" + randomHex(24)
+	r, err := s.db.ExecContext(ctx, `UPDATE pg_api SET key_sha=? WHERE seller=? AND enabled=1`, pgKeySHA(key), seller)
+	if err != nil {
+		return "", err
+	}
+	if n, _ := r.RowsAffected(); n != 1 {
+		return "", fmt.Errorf("%w: turn the access on first", ErrNotFound)
+	}
+	return key, nil
 }
 
 // DisablePGAPI turns a seller's access off; its tokens stop at once.
@@ -274,15 +311,27 @@ func (s *Store) pgSellerOK(ctx context.Context, seller string, accessMade int64)
 
 // pgAuth is the seller behind a bearer token.
 func (s *Store) pgAuth(r *http.Request) (string, bool) {
-	tok, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
-	if !ok || tok == "" {
-		return "", false
-	}
 	ctx := r.Context()
 	var seller string
 	now := s.now().Unix()
-	if s.ro.QueryRowContext(ctx, `SELECT seller FROM pg_tokens WHERE sha=? AND expires_unix>?`, pgSHA(strings.TrimSpace(tok)), now).Scan(&seller) != nil {
-		return "", false
+	auth := r.Header.Get("Authorization")
+	scheme, cred, _ := strings.Cut(strings.TrimSpace(auth), " ")
+	if key := strings.TrimSpace(r.Header.Get("X-Api-Key")); key != "" || strings.EqualFold(scheme, "ApiKey") {
+		// An API key, as PasarGuard takes it: X-Api-Key, or Authorization: ApiKey.
+		if key == "" {
+			key = strings.TrimSpace(cred)
+		}
+		if !strings.HasPrefix(key, "pg_key_") || s.ro.QueryRowContext(ctx, `SELECT seller FROM pg_api WHERE key_sha=?`, pgKeySHA(key)).Scan(&seller) != nil {
+			return "", false
+		}
+	} else {
+		tok := strings.TrimSpace(cred)
+		if !strings.EqualFold(scheme, "Bearer") || tok == "" {
+			return "", false
+		}
+		if s.ro.QueryRowContext(ctx, `SELECT seller FROM pg_tokens WHERE sha=? AND expires_unix>?`, pgSHA(tok), now).Scan(&seller) != nil {
+			return "", false
+		}
 	}
 	var enabled bool
 	var last, made int64
@@ -975,11 +1024,23 @@ func pgAdminRoutes(s *Store, mux *docMux, path string, wrap func(http.HandlerFun
 		a, err := s.EnablePGAPI(r.Context(), id)
 		if err == nil && in.Mode != "" && id != "" { // the owner's access has no mode
 			if err = s.SetPGAPIMode(r.Context(), id, in.Mode); err == nil {
-				pass := a.Password
+				pass, key := a.Password, a.APIKey
 				a = s.PGAPIOf(r.Context(), id)
-				a.Password = pass
+				a.Password, a.APIKey = pass, key
 			}
 		}
+		reply(w, a, err)
+	}))
+	// POST .../key makes a new API key (the password stays).
+	mux.HandleFunc("POST "+path+"/key", wrap(func(w http.ResponseWriter, r *http.Request) {
+		id, ok := seller(r)
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+		key, err := s.NewPGAPIKey(r.Context(), id)
+		a := s.PGAPIOf(r.Context(), id)
+		a.APIKey = key
 		reply(w, a, err)
 	}))
 	// PUT {"mode": ...} switches the mode, keeping the password.

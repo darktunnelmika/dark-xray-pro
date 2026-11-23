@@ -4490,14 +4490,16 @@ function mirzaCard(path, isRep) {
     h("div", { class: "mz-copy" }, h("code", { dir: "ltr", class: secret ? "mz-secret" : "" }, value), copyBtn(value)));
   // shown keeps a password made in this visit on screen while only the mode
   // changes (a mode switch keeps the password but does not send it again).
-  let shown = "";
-  const send = async (method, data) => {
+  const shown = { password: "", api_key: "" };
+  const send = async (method, data, sub) => {
     err.textContent = "";
     try {
-      const a = await api(method, path, data);
-      if (a.password) shown = a.password;
-      else if (method === "PUT" && a.enabled && shown) a.password = shown;
-      else shown = "";
+      const a = await api(method, path + (sub || ""), data);
+      for (const k of ["password", "api_key"]) {
+        if (a[k]) shown[k] = a[k];
+        else if (a.enabled && shown[k]) a[k] = shown[k];
+      }
+      if (!a.enabled) shown.password = shown.api_key = "";
       draw(a);
     } catch (x) { err.textContent = x.message; }
   };
@@ -4551,6 +4553,7 @@ function mirzaCard(path, isRep) {
           "Any bot or site made for PasarGuard works with these same paths and fields. The users it makes are the panel's own (not a reseller's).")),
       h("p", { class: "small" }, T("۱. گرفتن توکن (۲۴ ساعت اعتبار دارد):", "1. Get a token (valid for 24 hours):")), code(login),
       h("p", { class: "small" }, T("۲. توکن را در هر درخواست بفرستید:", "2. Send it with every call:")), code("Authorization: Bearer TOKEN"),
+      h("p", { class: "small" }, T("یا به‌جای توکن، API Key را در هر درخواست بفرستید (مثل پاسارگاد):", "Or, instead of a token, send the API Key with every call (as in PasarGuard):")), code("X-Api-Key: pg_key_..."),
       h("p", { class: "small" }, T("۳. درخواست‌های اصلی:", "3. The main calls:")),
       h("div", { class: "mz-calls", dir: "ltr" }, calls.map(([m, p, what]) => h("div", { class: "mz-call" },
         h("code", { class: `mz-method m-${m.toLowerCase()}` }, m), h("code", { class: "mz-path" }, p), h("span", { class: "small muted", dir: fa ? "rtl" : "ltr" }, bi(what))))),
@@ -4582,21 +4585,26 @@ function mirzaCard(path, isRep) {
         h("span", { class: "badge" }, T(`کاربر ساخته شده با API: ${fmtNum(a.made)}`, `users made through the API: ${a.made}`))),
       mirza ? h("ol", { class: "mz-steps small" },
         h("li", {}, T("در پنل ادمین میرزا «🖥 اضافه کردن پنل» را بزنید و نوع پنل را «پاسارگارد» انتخاب کنید.", "In Mirza's admin menu tap “🖥 Add panel” and choose the PasarGuard type.")),
-        h("li", {}, T("آدرس، نام کاربری و رمز زیر را وارد کنید.", "Enter the address, username and password below.")),
+        h("li", {}, T("آدرس زیر را بفرستید؛ وقتی API Key خواست، API Key زیر را بفرستید (اگر میرزا نام کاربری و رمز خواست، همان‌ها را).", "Send the address below; when it asks for an API Key, send the API Key below (if Mirza asks for a username and password instead, send those).")),
         h("li", {}, T("در «✏️ مدیریت پنل» دکمهٔ «🎛 تنظیم نام گروه» را بزنید و عبارت all-groups را بفرستید تا همهٔ اینباندهای مجاز شما برای کاربرهای جدید انتخاب شود (یا نام کاربری یکی از کاربرهایتان را بفرستید تا فقط اینباندهای او برداشته شود).", "In “✏️ Panel management” tap “🎛 Set group name” and send all-groups to give new users every inbound you may give (or send one of your users' names to copy just its inbounds).")))
-        : h("p", { class: "small" }, T("ربات یا سایت شما با آدرس، نام کاربری و رمز زیر مثل یک پنل پاسارگاد وصل می‌شود. راهنمای API پایین همین کارت است.",
-          "Your bot or site connects with the address, username and password below, as to a PasarGuard panel. The API guide is at the bottom of this card.")),
+        : h("p", { class: "small" }, T("ربات یا سایت شما با آدرس و API Key زیر (یا نام کاربری و رمز) مثل یک پنل پاسارگاد وصل می‌شود. راهنمای API پایین همین کارت است.",
+          "Your bot or site connects with the address and API Key below (or the username and password), as to a PasarGuard panel. The API guide is at the bottom of this card.")),
       field(T("آدرس پنل (API)", "Panel address (API)"), location.origin),
       field(T("نام کاربری", "Username"), a.username),
       a.password ? field(T("رمز (فقط همین یک بار نشان داده می‌شود)", "Password (shown only this once)"), a.password, true)
         : h("p", { class: "small muted" }, T("رمز فقط هنگام ساخت نشان داده می‌شود. اگر ندارید، رمز تازه بسازید و در ربات یا سایتتان عوض کنید.", "The password is shown only when made. If you lost it, make a new one and change it in your bot or site.")),
+      a.api_key ? field(T("API Key (در هدر X-Api-Key؛ فقط همین یک بار نشان داده می‌شود)", "API Key (sent in X-Api-Key; shown only this once)"), a.api_key, true)
+        : h("p", { class: "small muted" }, a.has_key
+          ? T("API Key فقط هنگام ساخت نشان داده می‌شود. اگر ندارید، API Key تازه بسازید و در ربات یا سایتتان عوض کنید.", "The API Key is shown only when made. If you lost it, make a new one and change it in your bot or site.")
+          : T("هنوز API Key ساخته نشده؛ «API Key تازه» را بزنید.", "No API Key yet; tap “New API Key”.")),
       isRep ? h("p", { class: "small muted" }, cur === "mirza"
         ? T("کاربرهایی که میرزا می‌سازد زیر حساب شما ثبت و از اعتبارتان کم می‌شود. ربات دارک شما تا وقتی این حالت روشن است خاموش است.", "Users Mirza makes are yours and use your credit. Your Dark bot is off while this is on.")
         : T("کاربرهایی که از راه API ساخته می‌شوند زیر حساب شما ثبت و از اعتبارتان کم می‌شود. ربات دارک شما روشن می‌ماند.", "Users made through the API are yours and use your credit. Your Dark bot stays on.")) : null,
       guide(a),
       err,
       h("div", { class: "row" },
-        h("button", { type: "button", onclick: () => confirm(T("رمز تازه ساخته شود؟ رمز قبلی دیگر کار نمی‌کند و باید در ربات یا سایتتان عوض شود.", "Make a new password? The old one stops working; change it in your bot or site.")) && send("POST") }, T("رمز تازه", "New password")),
+        h("button", { type: "button", onclick: () => confirm(T("رمز تازه ساخته شود؟ رمز قبلی دیگر کار نمی‌کند و باید در ربات یا سایتتان عوض شود. API Key عوض نمی‌شود.", "Make a new password? The old one stops working; change it in your bot or site. The API Key stays.")) && send("POST") }, T("رمز تازه", "New password")),
+        h("button", { type: "button", onclick: () => (!a.has_key || confirm(T("API Key تازه ساخته شود؟ کلید قبلی دیگر کار نمی‌کند و باید در ربات یا سایتتان عوض شود. رمز عوض نمی‌شود.", "Make a new API Key? The old one stops working; change it in your bot or site. The password stays."))) && send("POST", undefined, "/key") }, T("API Key تازه", "New API Key")),
         isRep ? null : h("button", { type: "button", class: "danger", onclick: () => turnOff("api") }, T("قطع دسترسی", "Turn off"))));
   }
   api("GET", path).then(draw).catch((x) => fill(body, h("p", { class: "error" }, x.message)));

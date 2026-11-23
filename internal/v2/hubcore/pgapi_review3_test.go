@@ -649,3 +649,87 @@ func TestStaleAccessShownOff(t *testing.T) {
 		t.Fatalf("a fresh access %+v %v", a, err)
 	}
 }
+
+// TestPGAPIKey: an API key as PasarGuard's (pg_key_..., in X-Api-Key or
+// "Authorization: ApiKey"), shown once, renewed apart from the password.
+func TestPGAPIKey(t *testing.T) {
+	s, now := newStore(t)
+	ctx := context.Background()
+	seed(t, s)
+	_ = s.PutRep(ctx, Rep{ID: "ali", Name: "Ali", Enabled: true})
+	_ = s.AdjustCredit(ctx, "owner", "ali", 10<<30, 0, "")
+	h := httptest.NewServer(AdminHandlerWith(s, "admintok", "", nil))
+	defer h.Close()
+	get := func(header, value string) (int, map[string]any) {
+		req, _ := http.NewRequest("GET", h.URL+"/api/users", nil)
+		if header != "" {
+			req.Header.Set(header, value)
+		}
+		r, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer r.Body.Close()
+		out := map[string]any{}
+		_ = json.NewDecoder(r.Body).Decode(&out)
+		return r.StatusCode, out
+	}
+	a, err := s.EnablePGAPI(ctx, "ali")
+	if err != nil || !a.HasKey || !strings.HasPrefix(a.APIKey, "pg_key_") || a.Password == "" {
+		t.Fatalf("first access: %+v %v", a, err)
+	}
+	key := a.APIKey
+	if code, _ := get("X-Api-Key", key); code != 200 {
+		t.Fatal("X-Api-Key", code)
+	}
+	if code, _ := get("Authorization", "ApiKey "+key); code != 200 {
+		t.Fatal("Authorization: ApiKey", code)
+	}
+	if code, _ := get("X-Api-Key", "pg_key_wrong"); code != 401 {
+		t.Fatal("a wrong key", code)
+	}
+	if code, _ := get("Authorization", "Bearer "+key); code != 401 {
+		t.Fatal("a key is not a bearer token", code)
+	}
+	if a := s.PGAPIOf(ctx, "ali"); a.APIKey != "" || !a.HasKey {
+		t.Fatal("the key is shown only once", a)
+	}
+	// A reseller's key reaches only its users; it makes them on its credit.
+	pc := pgClient{t, h.URL}
+	req, _ := http.NewRequest("POST", h.URL+"/api/user", strings.NewReader(fmt.Sprintf(`{"username":"keyuser","data_limit":%d,"expire":%d}`, 1<<30, now.Add(24*time.Hour).Unix())))
+	req.Header.Set("X-Api-Key", key)
+	req.Header.Set("Content-Type", "application/json")
+	if r, err := http.DefaultClient.Do(req); err != nil || r.StatusCode != 201 {
+		t.Fatal("create with the key", err, r.StatusCode)
+	}
+	if _, out := get("X-Api-Key", key); out["total"].(float64) != 1 {
+		t.Fatal("only its own users", out["total"])
+	}
+	// A new password keeps the key; a new key ends the old one and keeps the password.
+	b, _ := s.EnablePGAPI(ctx, "ali")
+	if b.APIKey != "" {
+		t.Fatal("a new password does not make a new key")
+	}
+	if code, _ := get("X-Api-Key", key); code != 200 {
+		t.Fatal("the key outlives a new password", code)
+	}
+	key2, err := s.NewPGAPIKey(ctx, "ali")
+	if err != nil || key2 == key {
+		t.Fatal("new key", err)
+	}
+	if code, _ := get("X-Api-Key", key); code != 401 {
+		t.Fatal("the old key stops", code)
+	}
+	if code, _ := get("X-Api-Key", key2); code != 200 {
+		t.Fatal("the new key works", code)
+	}
+	pc.login("mirza_ali", b.Password)
+	// Off: the key stops; a deleted reseller's key never works for a new one.
+	_ = s.DisablePGAPI(ctx, "ali")
+	if code, _ := get("X-Api-Key", key2); code != 401 {
+		t.Fatal("off", code)
+	}
+	if _, err := s.NewPGAPIKey(ctx, "ali"); err == nil {
+		t.Fatal("no key while the access is off")
+	}
+}
