@@ -810,7 +810,7 @@ function nodeTrafficCard(nodes) {
   try { days = +sessionStorage.getItem("ntDays") || 14; mode = sessionStorage.getItem("ntMode") || "stack"; } catch {}
   const hidden = new Set();
   const color = nodeColorOf(nodes);
-  const nameOf = (id) => { const n = nodes.find((x) => x.ID === id); return n ? n.Name || n.ID : `${id} · ${fa ? "حذف‌شده" : "removed"}`; };
+  const nameOf = (id) => { const n = nodes.find((x) => x.ID === id); return n ? n.Name || n.ID : `${id} (${fa ? "حذف‌شده" : "removed"})`; };
   const render = () => {
     const dayList = utcDays(days), today = todayUTC();
     const by = {};
@@ -837,8 +837,8 @@ function nodeTrafficCard(nodes) {
       series.length ? chartKit({ xs: dayList, series, mode, partial: dayList.indexOf(today), height: 290, label: s3("ntTitle") })
         : h("p", { class: "muted small" }, fa ? "همهٔ نودها پنهان‌اند." : "Every node is hidden."),
       chartLegend(ids.map((id) => ({ id, name: nameOf(id), color: color(id), value: bytes(tot[id]) })), toggle, hidden),
-      h("div", { class: "table-wrap" }, h("table", { class: "dtable ctable" },
-        h("thead", {}, h("tr", {}, [fa ? "نود" : "Node", fa ? "مجموع" : "Total", fa ? "سهم" : "Share", fa ? "میانگین روزانه" : "Daily average", fa ? "امروز تا الان" : "Today so far", ""].map((x) => h("th", {}, x)))),
+      h("div", { class: "ctable-wrap" }, h("table", { class: "ctable" },
+        h("thead", {}, h("tr", {}, [[fa ? "نود" : "Node"], [fa ? "مجموع" : "Total", "num"], [fa ? "سهم" : "Share", "num"], [fa ? "میانگین روزانه" : "Daily average", "num avg"], [fa ? "امروز تا الان" : "Today so far", "num"], ["", "cshare"]].map(([x, c]) => h("th", { class: c }, x)))),
         h("tbody", {}, ids.map((id) => {
           const act = full.filter((d) => val(d, id)), a = act.length ? act.reduce((s, d) => s + val(d, id), 0) / act.length : 0, td = val(today, id);
           const sw = h("i", { class: "csw" }); sw.style.background = color(id);
@@ -847,7 +847,7 @@ function nodeTrafficCard(nodes) {
             h("td", {}, sw, nameOf(id), " ", h("span", { class: "muted small", dir: "ltr" }, id)),
             h("td", { "data-label": fa ? "مجموع" : "Total", class: "num" }, bytes(tot[id])),
             h("td", { "data-label": fa ? "سهم" : "Share", class: "num" }, `${fmtNum(Math.round((tot[id] / sum) * 1000) / 10)}%`),
-            h("td", { "data-label": fa ? "میانگین روزانه" : "Daily average", class: "num" }, a ? bytes(a) : "—"),
+            h("td", { "data-label": fa ? "میانگین روزانه" : "Daily average", class: "num avg" }, a ? bytes(a) : "—"),
             h("td", { "data-label": fa ? "امروز تا الان" : "Today so far", class: "num" }, td ? bytes(td) : "—"),
             h("td", { class: "cshare" }, bar));
         })))));

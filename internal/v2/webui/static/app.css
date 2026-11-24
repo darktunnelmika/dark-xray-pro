@@ -1230,10 +1230,16 @@ dialog.wide:has(.cform) { inline-size: min(780px, calc(100vw - 20px)); }
 .ckpi b { display: block; font-family: var(--mono); font-size: 17px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ckpi span { color: var(--muted); font-size: 12px; }
 @media (max-width: 700px) { .ckpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-.ctable td.num { font-family: var(--mono); white-space: nowrap; }
+.ctable-wrap { overflow-x: auto; }
+.ctable { inline-size: 100%; border-collapse: collapse; font-size: 12.5px; }
+.ctable th { color: var(--muted); font-weight: 600; text-align: start; padding: 6px 8px; border-block-end: 1px solid var(--glass-line); white-space: nowrap; }
+.ctable td { padding: 6px 8px; border-block-end: 1px solid color-mix(in oklab, var(--glass-line) 60%, transparent); white-space: nowrap; }
+.ctable tr:last-child td { border-block-end: 0; }
+.ctable .num { font-family: var(--mono); text-align: end; }
+@media (max-width: 520px) { .ctable .avg { display: none; } .ctable { font-size: 12px; } .ctable th, .ctable td { padding-inline: 5px; } }
 .ctable .csw { display: inline-block; inline-size: 9px; block-size: 9px; border-radius: 2px; margin-inline-end: 7px; }
 .ctable td.cshare { inline-size: 22%; }
 .ctable td.cshare > i { display: block; block-size: 6px; border-radius: 3px; }
-@media (max-width: 700px) { .ctable td.cshare { display: none; } }
-.health-modal { min-inline-size: min(640px, 82vw); }
+@media (max-width: 700px) { .ctable .cshare { display: none; } }
+.health-modal .row.small { flex-wrap: wrap; row-gap: 2px; }
 .row.cseg { gap: 4px; }
