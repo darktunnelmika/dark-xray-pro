@@ -7112,6 +7112,9 @@ async function route() {
   }
 }
 
+// A window (client, node health, confirm…) belongs to the page it was opened
+// on: going to another page, or Back, closes it instead of leaving it on top.
+window.addEventListener("hashchange", () => { const d = document.getElementById("modal"); if (d?.open) d.close("nav"); });
 window.addEventListener("hashchange", route);
 window.addEventListener("storage", (e) => {
   if (e.key === "color-scheme") document.querySelector('meta[name="color-scheme"]').content = e.newValue ?? "light dark";
