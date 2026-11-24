@@ -664,7 +664,9 @@ async function viewOnline() {
 // panel's strict CSP (style-src 'self') does not drop them.
 // o: { xs, series:[{id,name,color,values,area,dash}], mode: "lines"|"stack"|"share",
 //      fmt, bin (1024 units, default true), int, max, suffix, height, partial (index),
-//      xLabel(i), tipTitle(i), tipExtra(i), totals (numbers over bars), label }
+//      xLabel(i), tipTitle(i), tipExtra(i), totals (numbers over bars), label,
+//      overlay: [{name,color,values}] extra lines (null = gap) not counted in bars or the readout,
+//      ref: {value,label} a dashed level such as the average, noX: no day labels }
 const UNITS = ["B", "KB", "MB", "GB", "TB", "PB"];
 function niceTicks(max, bin = true, int = false, suffix = "") {
   let u = 1, k = 0;
@@ -698,11 +700,13 @@ function chartKit(o) {
     const W = fig.clientWidth, H = fig.clientHeight;
     if (!W || !H) return;
     const S = o.series, narrow = W < 520, part = o.partial ?? -1;
-    const L = narrow ? 46 : 62, R = 8, T = part >= 0 || o.totals ? 20 : 10, B = 22, iw = W - L - R, ih = H - T - B, bw = iw / Math.max(1, n);
+    const L = narrow ? 46 : 62, R = 8, T = part >= 0 || o.totals ? 20 : 10, B = o.noX ? 6 : 22, iw = W - L - R, ih = H - T - B, bw = iw / Math.max(1, n);
     const col = (i) => S.reduce((a, s) => a + (s.values[i] || 0), 0);
-    const peak = o.max || (mode === "lines" ? Math.max(0, ...S.flatMap((s) => s.values)) : Math.max(0, ...o.xs.map((_, i) => col(i))));
+    const over = o.overlay || [];
+    const peak = o.max || Math.max(mode === "lines" ? Math.max(0, ...S.flatMap((s) => s.values)) : Math.max(0, ...o.xs.map((_, i) => col(i))), ...over.flatMap((s) => s.values.map((v) => v || 0)));
     const tk = mode === "share" ? { top: 1, list: [0, 0.25, 0.5, 0.75, 1], f: (v) => `${fmtNum(v * 100)}%` } : niceTicks(peak, o.bin !== false, o.int, o.suffix || "");
     if (o.axis && mode !== "share") tk.f = o.axis;
+    if (ih < 90 && mode !== "share") tk.list = [0, tk.top]; // a strip: just zero and the top
     const y = (v) => T + ih - (Math.min(v, tk.top) / tk.top) * ih;
     svg.replaceChildren();
     svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
@@ -740,8 +744,15 @@ function chartKit(o) {
         else if (o.totals && mode === "stack" && bw >= 34) txt(x + w / 2, yy - 5, o.totals(t), "c-val");
       });
     }
+    for (const s of over) {
+      let seg = [];
+      const flush = () => { if (seg.length > 1) add("polyline", { points: seg.join(" "), class: "c-over" }, { stroke: s.color }); else if (seg.length) { const [cx, cy] = seg[0].split(","); add("circle", { cx, cy, r: 2.5 }, { fill: s.color }); } seg = []; };
+      s.values.forEach((v, i) => { if (v == null) flush(); else seg.push(`${xc(i).toFixed(1)},${y(v).toFixed(1)}`); });
+      flush();
+    }
+    if (o.ref?.value) { const yy = y(o.ref.value); add("line", { x1: L, x2: W - R, y1: yy, y2: yy, class: "c-ref" }); if (o.ref.label) txt(L + 6, yy - 5, o.ref.label, "c-refl", "start"); }
     const step = Math.max(1, Math.ceil(n / (narrow ? 5 : Math.max(6, Math.floor(iw / 72)))));
-    for (let i = 0; i < n; i++) if ((n - 1 - i) % step === 0) txt(xc(i), H - 6, o.xLabel ? o.xLabel(i) : dayLabel(o.xs[i]), "c-ax");
+    if (!o.noX) for (let i = 0; i < n; i++) if ((n - 1 - i) % step === 0) txt(xc(i), H - 6, o.xLabel ? o.xLabel(i) : dayLabel(o.xs[i]), "c-ax");
     g = { L, bw, hl };
   };
   const hide = () => { tip.hidden = true; g?.hl.classList.remove("on"); };
@@ -755,7 +766,7 @@ function chartKit(o) {
     const tot = rows.reduce((a, x) => a + x.v, 0), many = o.series.length > 2;
     fill(tip,
       h("b", {}, o.tipTitle ? o.tipTitle(i) : dayLong(o.xs[i]), i === o.partial ? (fa ? " · تا الان" : " · so far") : ""),
-      o.series.length > 1 && mode !== "lines" ? h("div", { class: "ct-row tot" }, h("span", {}, fa ? "مجموع" : "Total"), h("span", { class: "v" }, fmt(tot))) : null,
+      o.series.length > 1 && (mode !== "lines" || o.total) ? h("div", { class: "ct-row tot" }, h("span", {}, fa ? "مجموع" : "Total"), h("span", { class: "v" }, fmt(tot))) : null,
       list.length ? list.map((x) => { const sw = h("i", {}); sw.style.background = x.s.color;
         return h("div", { class: "ct-row" }, sw, h("span", {}, x.s.name), h("span", { class: "v" }, fmt(x.v)), many && tot && mode !== "lines" ? h("em", {}, `${fmtNum(Math.round((x.v / tot) * 100))}%`) : h("em", {})); })
         : h("div", { class: "muted" }, fa ? "چیزی ثبت نشده" : "Nothing recorded"),
@@ -784,6 +795,88 @@ function chartLegend(items, onToggle, hidden = new Set()) {
       ? h("button", { type: "button", class: off ? "off" : "", "aria-pressed": String(!off), onclick: () => onToggle(it.id) }, sw, it.name, it.value ? h("span", {}, it.value) : null)
       : h("span", {}, sw, it.name, it.value ? h("span", {}, it.value) : null);
   }), onToggle && hidden.size ? h("button", { type: "button", onclick: () => onToggle("*") }, fa ? "نمایش همه" : "Show all") : null);
+}
+
+// ---------- Dashboard: traffic per day ----------
+// Range 7–90 days, stacked download/upload (or lines), the period's average,
+// the period before it as a dotted line, four figures, and active users per
+// day. It asks the HUB for twice the range: the first half is the period before.
+function dashTrafficCard(ins0) {
+  const fa = lang === "fa";
+  let n = 14, view = "bars";
+  try { n = +localStorage.getItem("dashDays") || 14; view = localStorage.getItem("dashView") || "bars"; } catch {}
+  if (![7, 14, 30, 90].includes(n)) n = 14;
+  const title = h("h2", {});
+  const body = h("div", { class: "form" });
+  let all = n === 14 ? ins0?.daily || [] : [];
+  const render = () => {
+    const today = todayUTC();
+    const cur = all.slice(-n), prev = all.length >= 2 * n ? all.slice(-2 * n, -n) : [];
+    title.textContent = fa ? `ترافیک ${fmtNum(n)} روز اخیر` : `Traffic, last ${n} days`;
+    if (!cur.length) { fill(body, h("p", { class: "muted small" }, t("noData"))); return; }
+    const tot = (d) => (d ? d.Up + d.Down : 0);
+    const full = cur.filter((d) => d.Day !== today && tot(d) > 0);
+    const sum = cur.reduce((a, d) => a + tot(d), 0);
+    const prevFull = prev.length === n && prev.every((d) => tot(d) > 0), psum = prev.reduce((a, d) => a + tot(d), 0);
+    const avg = full.length ? full.reduce((a, d) => a + tot(d), 0) / full.length : 0;
+    const peak = full.reduce((a, d) => (tot(d) > tot(a) ? d : a), full[0]);
+    const todayRow = cur.find((d) => d.Day === today);
+    const pct = (a, b) => Math.round(((a - b) / b) * 100);
+    const chg = (p) => h("span", { class: `chg ${p >= 0 ? "up" : "down"}`, dir: "ltr" }, `${p > 0 ? "+" : p < 0 ? "−" : ""}${fmtNum(Math.abs(p))}%`);
+    const kpi = (v, k, extra) => h("div", { class: "ckpi" }, h("b", {}, v, extra || null), h("span", {}, k));
+    const xs = cur.map((d) => d.Day), part = xs.indexOf(today);
+    const series = [
+      { id: "d", name: `↓ ${t("inRate")}`, color: "var(--ion)", area: true, values: cur.map((d) => d.Down) },
+      { id: "u", name: `↑ ${t("outRate")}`, color: "var(--ember)", dash: true, values: cur.map((d) => d.Up) },
+    ];
+    const hasPrev = prev.some((d) => tot(d) > 0);
+    const extra = (i) => {
+      const d = cur[i], p = prev[i], v = tot(d), row = (k, val) => h("div", { class: "ct-row ex" }, h("span", {}, k), h("span", { class: "v" }, val));
+      return [
+        row(fa ? "کاربران فعال" : "Active users", fmtNum(d.Users || 0)),
+        avg && v && d.Day !== today ? row(fa ? "نسبت به میانگین" : "Of the average", `${fmtNum(Math.round((v / avg) * 100))}%`) : null,
+        p && v && d.Day !== today && tot(p) >= avg * 0.1 ? row(fa ? `در برابر ${dayLabel(p.Day)}` : `vs ${dayLabel(p.Day)}`, (() => { const x = pct(v, tot(p)); return `⁦${x > 0 ? "+" : x < 0 ? "−" : ""}${fmtNum(Math.abs(x))}%⁩`; })()) : null,
+      ];
+    };
+    const users = cur.map((d) => d.Users || 0), fullUsers = full.map((d) => d.Users || 0);
+    const leg = (cls, label) => h("span", { class: "legend-item" }, h("i", { class: cls }), label);
+    fill(body,
+      h("div", { class: "ckpis" },
+        kpi(bytes(sum), prevFull ? (fa ? "مجموع بازه، در برابر دورهٔ قبل" : "Total, against the period before") : (fa ? "مجموع بازه" : "Total"), prevFull && psum ? chg(pct(sum, psum)) : null),
+        kpi(bytes(avg), fa ? "میانگین هر روز کامل" : "Average full day"),
+        kpi(peak ? bytes(tot(peak)) : "—", peak ? (fa ? `پرترافیک‌ترین روز: ${dayLong(peak.Day)}` : `Busiest day: ${dayLong(peak.Day)}`) : (fa ? "پرترافیک‌ترین روز" : "Busiest day")),
+        kpi(bytes(tot(todayRow)), fa ? `امروز تا الان · ${fmtNum(todayRow?.Users || 0)} کاربر فعال` : `Today so far · ${todayRow?.Users || 0} active users`)),
+      h("div", { class: "row small dleg" },
+        leg("sw down", `↓ ${t("inRate")}`), leg("sw up", `↑ ${t("outRate")}`), leg("ln avg", fa ? "میانگین روزانه" : "Daily average"),
+        hasPrev ? leg("ln prev", fa ? "دورهٔ قبل" : "Period before") : null),
+      chartKit({ xs, series, mode: view === "lines" ? "lines" : "stack", partial: part, height: 270, label: title.textContent, tipExtra: extra, total: true,
+        overlay: hasPrev ? [{ name: "prev", color: "var(--muted)", values: prev.map((d) => (tot(d) > 0 ? tot(d) : null)) }] : [],
+        ref: avg ? { value: avg, label: `${fa ? "میانگین" : "avg"} ${bytes(avg)}` } : null }),
+      h("div", { class: "row small" }, h("strong", {}, fa ? "کاربران فعال هر روز" : "Active users per day"),
+        fullUsers.length ? h("span", { class: "muted spacer" }, fa ? `میانگین ${fmtNum(Math.round(fullUsers.reduce((a, b) => a + b, 0) / fullUsers.length))} · بیشترین ${fmtNum(Math.max(...fullUsers))}` : `avg ${Math.round(fullUsers.reduce((a, b) => a + b, 0) / fullUsers.length)} · peak ${Math.max(...fullUsers)}`) : null),
+      chartKit({ xs, mode: "lines", bin: false, int: true, height: 100, noX: true, partial: -1, label: fa ? "کاربران فعال هر روز" : "Active users per day",
+        series: [{ id: "n", name: fa ? "کاربران فعال" : "Active users", color: "var(--sky)", area: true, values: users }], fmt: (v) => fmtNum(v) }),
+      h("a", { class: "small", href: "#/nodes" }, fa ? "تفکیک بر اساس نود ›" : "By node ›"));
+  };
+  const load = async () => {
+    if (all.length < 2 * n) {
+      fill(body, h("p", { class: "muted small" }, "…"));
+      try { all = (await api("GET", `/api/v2/admin/insights?days=${2 * n}`)).daily || []; } catch { all = []; }
+    }
+    render();
+  };
+  const seg = (list, cur, set) => {
+    const box = h("div", { class: "row cseg" });
+    for (const [v, l] of list) box.append(h("button", { type: "button", class: v === cur ? "chip on" : "chip", "aria-pressed": String(v === cur), onclick: (e) => {
+      box.querySelectorAll("button").forEach((b) => { b.classList.toggle("on", b === e.currentTarget); b.setAttribute("aria-pressed", String(b === e.currentTarget)); });
+      set(v);
+    } }, l));
+    return box;
+  };
+  const views = seg([["bars", fa ? "ستونی" : "Bars"], ["lines", fa ? "خطی" : "Lines"]], view, (v) => { view = v; try { localStorage.setItem("dashView", v); } catch {} render(); });
+  const ranges = seg([7, 14, 30, 90].map((d) => [d, fa ? `${fmtNum(d)} روز` : `${d} days`]), n, (v) => { n = v; try { localStorage.setItem("dashDays", v); } catch {} all = []; load(); });
+  load();
+  return h("div", { class: "card form span2 dash-traffic" }, h("div", { class: "row" }, title, h("span", { class: "spacer" }), views, ranges), body);
 }
 
 // ---------- Traffic per node ----------
@@ -1090,7 +1183,7 @@ function nodeRow(n) {
 
 async function viewDashboard() {
   const fa = lang === "fa";
-  const [o, nodes, ins] = await Promise.all([api("GET", "/api/v2/admin/overview"), api("GET", "/api/v2/admin/nodes"), api("GET", "/api/v2/admin/insights?days=14")]);
+  const [o, nodes, ins] = await Promise.all([api("GET", "/api/v2/admin/overview"), api("GET", "/api/v2/admin/nodes"), api("GET", "/api/v2/admin/insights?days=28")]);
   const [si, cls] = await Promise.all([api("GET", "/api/v2/admin/system").catch(() => null), api("GET", "/api/v2/admin/clients").catch(() => [])]);
   const kpi = (ic, k, v) => h("div", { class: "card kpi" }, h("div", { class: "k" }, icon(ic), k), h("div", { class: "v" }, v));
   const frac = (a, b) => h("span", { dir: "ltr" }, fmtNum(a), h("small", {}, ` / ${fmtNum(b)}`));
@@ -1116,7 +1209,7 @@ async function viewDashboard() {
       h("div", { class: "nr-head" }, h("h2", { style: "margin:0" }, ux("nodesSection")), h("a", { class: "spacer small", href: "#/nodes" }, fa ? "مدیریت نودها ›" : "Manage nodes ›")),
       rowsBox) : null,
     h("div", { class: "dash2" },
-      h("div", { class: "card form span2" }, h("div", { class: "row" }, h("h2", {}, t("traffic14")), legend()), barsSvg(ins.daily, 1100)),
+      dashTrafficCard(ins),
       h("div", { class: "card form" }, h("h2", {}, t("topToday")),
         ins.top.length ? h("div", { class: "meters" }, ins.top.map((u) => meter(u.email, (100 * u.bytes) / topMax, bytes(u.bytes), true))) : h("p", { class: "muted small" }, t("noData"))),
       endingSoonCard(cls || []),

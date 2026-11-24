@@ -332,6 +332,8 @@ GROUP BY r.id ORDER BY r.id`, sinceUnix)
 type ClientDaily struct {
 	Day      string
 	Up, Down int64
+	// Users is how many clients had traffic that day (dashboard only).
+	Users int64 `json:",omitempty"`
 }
 
 // ClientDailyUsage returns the last days of traffic, oldest first, with
