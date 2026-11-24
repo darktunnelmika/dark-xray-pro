@@ -657,45 +657,220 @@ async function viewOnline() {
   return h("div", { class: "form" }, h("div", { class: "row" }, h("h1", {}, s3("online")), sum), h("p", { class: "small muted" }, s3("onlineHint")), q, box);
 }
 
-const NODE_COLORS = ["#28f7a0", "#b36cff", "#4bb9ff", "#ff7a59", "#ff415d", "#00e8c0", "#7d9bff", "#e070ff"];
-function nodeTrafficCard(nodes) {
-  const body = h("div", {});
-  let days = 14;
-  const load = async () => {
-    const rows = await api("GET", `/api/v2/admin/nodes/traffic?days=${days}`).catch(() => []);
-    const ids = [...new Set([...nodes.map((n) => n.ID), ...rows.map((r) => r.node_id)])];
-    const color = (id) => NODE_COLORS[ids.indexOf(id) % NODE_COLORS.length];
-    const dayList = [];
-    for (let i = days - 1; i >= 0; i--) dayList.push(new Date(Date.now() - i * 86400000).toISOString().slice(0, 10));
-    const by = {}; for (const r of rows) (by[r.day] ||= {})[r.node_id] = r.up + r.down;
-    const max = Math.max(1, ...dayList.map((d) => Object.values(by[d] || {}).reduce((a, b) => a + b, 0)));
-    const W = 1100, H = 180, bw = W / dayList.length;
-    const svg = svgEl("svg", { viewBox: `0 0 ${W} ${H + 20}`, class: "bars", role: "img", "aria-label": s3("ntTitle") });
-    for (let k = 0; k <= 4; k++) svg.append(svgEl("line", { x1: 0, x2: W, y1: 4 + ((H - 4) * k) / 4, y2: 4 + ((H - 4) * k) / 4, class: "grid-line" }));
-    const step = Math.max(1, Math.round(dayList.length / 7));
-    dayList.forEach((d, i) => {
-      let y = H;
-      const parts = [];
-      for (const id of ids) {
-        const v = (by[d] || {})[id] || 0;
-        if (!v) continue;
-        const hgt = ((H - 6) * v) / max;
-        y -= hgt;
-        svg.append(svgEl("rect", { x: i * bw + bw * 0.18, y, width: bw * 0.64, height: Math.max(1, hgt), rx: 3, fill: color(id), opacity: ".85" }));
-        parts.push(`${id}: ${bytes(v)}`);
+// ---------- Charts: one kit for every chart in the panel ----------
+// Drawn at the box's real pixel size (redrawn when it resizes), a numbered
+// axis, and a readout under the cursor or finger that also works on phones.
+// Colours go through the CSSOM (el.style), never a style attribute, so the
+// panel's strict CSP (style-src 'self') does not drop them.
+// o: { xs, series:[{id,name,color,values,area,dash}], mode: "lines"|"stack"|"share",
+//      fmt, bin (1024 units, default true), int, max, suffix, height, partial (index),
+//      xLabel(i), tipTitle(i), tipExtra(i), totals (numbers over bars), label }
+const UNITS = ["B", "KB", "MB", "GB", "TB", "PB"];
+function niceTicks(max, bin = true, int = false, suffix = "") {
+  let u = 1, k = 0;
+  if (bin) while (max / u >= 1024 && k < UNITS.length - 1) { u *= 1024; k++; }
+  const m = Math.max(max / u, int ? 1 : 1e-9), raw = m / 4, p = 10 ** Math.floor(Math.log10(raw)), q = raw / p;
+  let s = (q <= 1 ? 1 : q <= 2 ? 2 : q <= 2.5 ? 2.5 : q <= 5 ? 5 : 10) * p;
+  if (int) s = Math.max(1, Math.round(s));
+  const top = Math.ceil(m / s - 1e-9) * s, list = [];
+  for (let v = 0; v <= top + s / 2; v += s) list.push(v * u);
+  const f = bin ? (v) => `⁦${fmtNum(v / u)} ${UNITS[k]}${suffix}⁩` : (v) => `${fmtNum(v)}${suffix}`;
+  return { top: top * u || 1, list, f };
+}
+// "سه‌شنبه ۴ آذر" / "Tue 24 Nov": the readout's title for a day.
+function dayLong(day) {
+  return new Intl.DateTimeFormat(lang === "fa" ? "fa-IR-u-ca-persian" : "en-GB", { weekday: "long", month: "long", day: "numeric" }).format(new Date(day + "T12:00:00Z"));
+}
+const utcDays = (n) => { const out = [], now = Date.now(); for (let i = n - 1; i >= 0; i--) out.push(new Date(now - i * 86400000).toISOString().slice(0, 10)); return out; };
+const todayUTC = () => new Date().toISOString().slice(0, 10);
+
+function chartKit(o) {
+  const fa = lang === "fa";
+  const n = o.xs.length, mode = o.mode || "lines", fmt = o.fmt || bytes;
+  const fig = h("div", { class: "cfig" });
+  fig.style.blockSize = `${o.height || 230}px`;
+  const svg = svgEl("svg", { role: "img", "aria-label": o.label || "" });
+  const tip = h("div", { class: "ctip", hidden: true });
+  fig.append(svg, tip);
+  const pid = `cp${++markSeq}`;
+  let g = null;
+  const draw = () => {
+    const W = fig.clientWidth, H = fig.clientHeight;
+    if (!W || !H) return;
+    const S = o.series, narrow = W < 520, part = o.partial ?? -1;
+    const L = narrow ? 46 : 62, R = 8, T = part >= 0 || o.totals ? 20 : 10, B = 22, iw = W - L - R, ih = H - T - B, bw = iw / Math.max(1, n);
+    const col = (i) => S.reduce((a, s) => a + (s.values[i] || 0), 0);
+    const peak = o.max || (mode === "lines" ? Math.max(0, ...S.flatMap((s) => s.values)) : Math.max(0, ...o.xs.map((_, i) => col(i))));
+    const tk = mode === "share" ? { top: 1, list: [0, 0.25, 0.5, 0.75, 1], f: (v) => `${fmtNum(v * 100)}%` } : niceTicks(peak, o.bin !== false, o.int, o.suffix || "");
+    if (o.axis && mode !== "share") tk.f = o.axis;
+    const y = (v) => T + ih - (Math.min(v, tk.top) / tk.top) * ih;
+    svg.replaceChildren();
+    svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+    const add = (tag, a, style) => { const e = svgEl(tag, a); if (style) Object.assign(e.style, style); svg.append(e); return e; };
+    const txt = (x, yy, s, cls, anchor = "middle") => { add("text", { x, y: yy, "text-anchor": anchor, class: cls }).textContent = s; };
+    const defs = add("defs", {});
+    const pat = svgEl("pattern", { id: pid, width: 6, height: 6, patternUnits: "userSpaceOnUse", patternTransform: "rotate(45)" });
+    pat.append(svgEl("line", { x1: 0, y1: 0, x2: 0, y2: 6, class: "c-hatch" })); defs.append(pat);
+    const hl = add("rect", { x: 0, y: T, width: 0, height: ih, class: "c-hl" });
+    for (const v of tk.list) { const yy = y(v); add("line", { x1: L, x2: W - R, y1: yy, y2: yy, class: "c-grid" }); txt(L - 7, yy + 3.5, v ? tk.f(v) : fmtNum(0), "c-ax", "end"); }
+    const xc = (i) => L + i * bw + bw / 2;
+    if (mode === "lines") {
+      if (part >= 0 && part < n) { add("rect", { x: L + part * bw, y: T, width: bw, height: ih, fill: `url(#${pid})`, class: "c-part" }); txt(xc(part), T - 6, fa ? "تا الان" : "so far", "c-note"); }
+      for (const s of [...S].reverse()) {
+        const pts = s.values.map((v, i) => `${xc(i).toFixed(1)},${y(v || 0).toFixed(1)}`).join(" ");
+        if (s.area) add("polygon", { points: `${xc(0)},${T + ih} ${pts} ${xc(n - 1)},${T + ih}`, class: "c-area" }, { fill: s.color });
+        add("polyline", { points: pts, class: `c-line${s.dash ? " dash" : ""}` }, { stroke: s.color });
+        if (n <= 120) add("circle", { cx: xc(n - 1), cy: y(s.values[n - 1] || 0), r: 3 }, { fill: s.color });
       }
-      const hit = svgEl("rect", { x: i * bw, y: 0, width: bw, height: H, class: "bar-hit" });
-      const tt = svgEl("title", {}); tt.textContent = `${dayLabel(d, true)}\n${parts.join("\n") || "—"}`; hit.append(tt); svg.append(hit);
-      if ((dayList.length - 1 - i) % step === 0) { const lab = svgEl("text", { x: i * bw + bw / 2, y: H + 15, "text-anchor": "middle", class: "bar-label" }); lab.textContent = dayLabel(d); svg.append(lab); }
-    });
-    const total = (id) => rows.filter((r) => r.node_id === id).reduce((a, r) => a + r.up + r.down, 0);
-    fill(body, svg, h("div", { class: "row small" }, ids.map((id) => h("span", { class: "legend-item" }, h("i", { class: "sw", style: `background:${color(id)}` }), `${id} · ${bytes(total(id))}`))));
+    } else {
+      const multi = S.length > 1;
+      o.xs.forEach((_, i) => {
+        const t = col(i);
+        if (!t) return;
+        let yy = T + ih;
+        const x = L + i * bw + bw * 0.16, w = Math.max(2, bw * 0.68);
+        for (const s of S) {
+          const v = s.values[i] || 0;
+          if (!v) continue;
+          const hh = mode === "share" ? (v / t) * ih : (Math.min(v, tk.top) / tk.top) * ih;
+          yy -= hh;
+          add("rect", { x, y: yy, width: w, height: Math.max(hh - (multi ? 1 : 0), 0.8), rx: multi ? 0 : 2, class: "c-bar" }, { fill: s.color });
+        }
+        if (i === part) { add("rect", { x, y: yy, width: w, height: T + ih - yy, fill: `url(#${pid})` }); txt(x + w / 2, yy - 6, fa ? "تا الان" : "so far", "c-note"); }
+        else if (o.totals && mode === "stack" && bw >= 34) txt(x + w / 2, yy - 5, o.totals(t), "c-val");
+      });
+    }
+    const step = Math.max(1, Math.ceil(n / (narrow ? 5 : Math.max(6, Math.floor(iw / 72)))));
+    for (let i = 0; i < n; i++) if ((n - 1 - i) % step === 0) txt(xc(i), H - 6, o.xLabel ? o.xLabel(i) : dayLabel(o.xs[i]), "c-ax");
+    g = { L, bw, hl };
   };
-  const seg = h("div", { class: "row tight spacer" }, [7, 14, 30].map((n) => h("button", { type: "button", class: n === days ? "chip on" : "chip", onclick: (e) => {
-    days = n; seg.querySelectorAll("button").forEach((b) => b.classList.toggle("on", b === e.target)); load();
-  } }, s3("ntDays", { n: fmtNum(n) }))));
+  const hide = () => { tip.hidden = true; g?.hl.classList.remove("on"); };
+  const show = (e) => {
+    if (!g) return;
+    const r = svg.getBoundingClientRect(), x = e.clientX - r.left, i = Math.floor((x - g.L) / g.bw);
+    if (i < 0 || i >= n) return hide();
+    g.hl.setAttribute("x", g.L + i * g.bw); g.hl.setAttribute("width", g.bw); g.hl.classList.add("on");
+    const rows = o.series.map((s) => ({ s, v: s.values[i] || 0 }));
+    const list = mode === "lines" ? rows : rows.filter((x) => x.v).sort((a, b) => b.v - a.v);
+    const tot = rows.reduce((a, x) => a + x.v, 0), many = o.series.length > 2;
+    fill(tip,
+      h("b", {}, o.tipTitle ? o.tipTitle(i) : dayLong(o.xs[i]), i === o.partial ? (fa ? " · تا الان" : " · so far") : ""),
+      o.series.length > 1 && mode !== "lines" ? h("div", { class: "ct-row tot" }, h("span", {}, fa ? "مجموع" : "Total"), h("span", { class: "v" }, fmt(tot))) : null,
+      list.length ? list.map((x) => { const sw = h("i", {}); sw.style.background = x.s.color;
+        return h("div", { class: "ct-row" }, sw, h("span", {}, x.s.name), h("span", { class: "v" }, fmt(x.v)), many && tot && mode !== "lines" ? h("em", {}, `${fmtNum(Math.round((x.v / tot) * 100))}%`) : h("em", {})); })
+        : h("div", { class: "muted" }, fa ? "چیزی ثبت نشده" : "Nothing recorded"),
+      o.tipExtra ? o.tipExtra(i) : null);
+    tip.hidden = false;
+    const tw = tip.offsetWidth;
+    let left = x + 14;
+    if (left + tw > r.width) left = x - tw - 14;
+    tip.style.left = `${Math.max(0, left)}px`;
+    tip.style.top = "4px";
+  };
+  svg.addEventListener("pointermove", show);
+  svg.addEventListener("pointerdown", show);
+  svg.addEventListener("pointerleave", (e) => { if (e.pointerType === "mouse") hide(); });
+  new ResizeObserver(draw).observe(fig);
+  return fig;
+}
+
+// Swatch legend; with onToggle each entry hides or shows its series.
+function chartLegend(items, onToggle, hidden = new Set()) {
+  const fa = lang === "fa";
+  return h("div", { class: "clegend" }, items.map((it) => {
+    const sw = h("i", {}); sw.style.background = it.color;
+    const off = hidden.has(it.id);
+    return onToggle
+      ? h("button", { type: "button", class: off ? "off" : "", "aria-pressed": String(!off), onclick: () => onToggle(it.id) }, sw, it.name, it.value ? h("span", {}, it.value) : null)
+      : h("span", {}, sw, it.name, it.value ? h("span", {}, it.value) : null);
+  }), onToggle && hidden.size ? h("button", { type: "button", onclick: () => onToggle("*") }, fa ? "نمایش همه" : "Show all") : null);
+}
+
+// ---------- Traffic per node ----------
+// One colour per node, in the order of the node list, so a node keeps its
+// colour; none is yellow. Past the palette the hue is generated (skipping
+// yellow); a node that is gone is grey.
+const NODE_COLORS = ["#4f8cff", "#ff8a4c", "#2fd39b", "#b36cff", "#22d3ee", "#ff5470", "#f472b6", "#14b8a6", "#8fa2ff", "#e879f9", "#c08457", "#7dd3a8"];
+function nodeColorOf(nodes) {
+  const order = nodes.map((n) => n.ID);
+  return (id) => {
+    const i = order.indexOf(id);
+    if (i < 0) return "#6b7488";
+    if (i < NODE_COLORS.length) return NODE_COLORS[i];
+    let hue = (i * 137.5) % 360;
+    if (hue > 35 && hue < 85) hue += 60;
+    return `hsl(${hue.toFixed(0)} 70% 62%)`;
+  };
+}
+
+function nodeTrafficCard(nodes) {
+  const fa = lang === "fa";
+  const body = h("div", { class: "form" });
+  let days = 14, mode = "stack", rows = [];
+  try { days = +sessionStorage.getItem("ntDays") || 14; mode = sessionStorage.getItem("ntMode") || "stack"; } catch {}
+  const hidden = new Set();
+  const color = nodeColorOf(nodes);
+  const nameOf = (id) => { const n = nodes.find((x) => x.ID === id); return n ? n.Name || n.ID : `${id} · ${fa ? "حذف‌شده" : "removed"}`; };
+  const render = () => {
+    const dayList = utcDays(days), today = todayUTC();
+    const by = {};
+    for (const r of rows) (by[r.day] ||= {})[r.node_id] = (r.up || 0) + (r.down || 0);
+    const val = (d, id) => (by[d] || {})[id] || 0;
+    const tot = {};
+    for (const d of dayList) for (const [id, b] of Object.entries(by[d] || {})) tot[id] = (tot[id] || 0) + b;
+    const ids = Object.keys(tot).filter((id) => tot[id] > 0).sort((a, b) => tot[b] - tot[a]);
+    if (!ids.length) { fill(body, h("p", { class: "muted small" }, fa ? "در این بازه مصرفی ثبت نشده." : "No traffic in this range.")); return; }
+    const sum = ids.reduce((a, id) => a + tot[id], 0);
+    const full = dayList.filter((d) => d !== today && by[d]);
+    const dayTot = (d) => Object.values(by[d] || {}).reduce((a, b) => a + b, 0);
+    const avg = full.length ? full.reduce((a, d) => a + dayTot(d), 0) / full.length : 0;
+    const kpi = (v, k) => h("div", { class: "ckpi" }, h("b", {}, v), h("span", {}, k));
+    const series = ids.filter((id) => !hidden.has(id)).map((id) => ({ id, name: nameOf(id), color: color(id), values: dayList.map((d) => val(d, id)) }));
+    const toggle = (id) => { if (id === "*") hidden.clear(); else if (hidden.has(id)) hidden.delete(id); else hidden.add(id); render(); };
+    const top = ids[0], mx = tot[top];
+    fill(body,
+      h("div", { class: "ckpis" },
+        kpi(bytes(sum), fa ? `مجموع ${fmtNum(days)} روز` : `${days} days in all`),
+        kpi(bytes(avg), fa ? "میانگین هر روز کامل" : "Average full day"),
+        kpi(bytes(dayTot(today)), fa ? "امروز تا الان" : "Today so far"),
+        kpi(nameOf(top), fa ? `پرمصرف‌ترین · ${fmtNum(Math.round((tot[top] / sum) * 100))}%` : `Busiest · ${Math.round((tot[top] / sum) * 100)}%`)),
+      series.length ? chartKit({ xs: dayList, series, mode, partial: dayList.indexOf(today), height: 290, label: s3("ntTitle") })
+        : h("p", { class: "muted small" }, fa ? "همهٔ نودها پنهان‌اند." : "Every node is hidden."),
+      chartLegend(ids.map((id) => ({ id, name: nameOf(id), color: color(id), value: bytes(tot[id]) })), toggle, hidden),
+      h("div", { class: "table-wrap" }, h("table", { class: "dtable ctable" },
+        h("thead", {}, h("tr", {}, [fa ? "نود" : "Node", fa ? "مجموع" : "Total", fa ? "سهم" : "Share", fa ? "میانگین روزانه" : "Daily average", fa ? "امروز تا الان" : "Today so far", ""].map((x) => h("th", {}, x)))),
+        h("tbody", {}, ids.map((id) => {
+          const act = full.filter((d) => val(d, id)), a = act.length ? act.reduce((s, d) => s + val(d, id), 0) / act.length : 0, td = val(today, id);
+          const sw = h("i", { class: "csw" }); sw.style.background = color(id);
+          const bar = h("i", {}); bar.style.inlineSize = `${((tot[id] / mx) * 100).toFixed(1)}%`; bar.style.background = color(id);
+          return h("tr", {},
+            h("td", {}, sw, nameOf(id), " ", h("span", { class: "muted small", dir: "ltr" }, id)),
+            h("td", { "data-label": fa ? "مجموع" : "Total", class: "num" }, bytes(tot[id])),
+            h("td", { "data-label": fa ? "سهم" : "Share", class: "num" }, `${fmtNum(Math.round((tot[id] / sum) * 1000) / 10)}%`),
+            h("td", { "data-label": fa ? "میانگین روزانه" : "Daily average", class: "num" }, a ? bytes(a) : "—"),
+            h("td", { "data-label": fa ? "امروز تا الان" : "Today so far", class: "num" }, td ? bytes(td) : "—"),
+            h("td", { class: "cshare" }, bar));
+        })))));
+  };
+  const load = async () => {
+    rows = await api("GET", `/api/v2/admin/nodes/traffic?days=${days}`).catch(() => []);
+    render();
+  };
+  const seg = (list, cur, set) => {
+    const box = h("div", { class: "row cseg" });
+    for (const [v, l] of list) box.append(h("button", { type: "button", class: v === cur ? "chip on" : "chip", "aria-pressed": String(v === cur), onclick: (e) => {
+      box.querySelectorAll("button").forEach((b) => { b.classList.toggle("on", b === e.currentTarget); b.setAttribute("aria-pressed", String(b === e.currentTarget)); });
+      set(v);
+    } }, l));
+    return box;
+  };
+  const modes = seg([["stack", fa ? "انباشته" : "Stacked"], ["lines", fa ? "خطی" : "Lines"], ["share", fa ? "سهم ٪" : "Share %"]], mode, (v) => { mode = v; try { sessionStorage.setItem("ntMode", v); } catch {} render(); });
+  const ranges = seg([7, 14, 30].map((n) => [n, s3("ntDays", { n: fmtNum(n) })]), days, (v) => { days = v; try { sessionStorage.setItem("ntDays", v); } catch {} load(); });
   load();
-  return h("div", { class: "card form" }, h("div", { class: "row" }, h("h2", {}, s3("ntTitle")), seg), h("p", { class: "small muted" }, s3("ntHint")), body);
+  return h("div", { class: "card form" },
+    h("div", { class: "row" }, h("h2", {}, s3("ntTitle")), h("span", { class: "spacer" }), modes, ranges),
+    h("p", { class: "small muted" }, fa ? "مجموع مصرف کاربرها روی هر نود در هر روز. موس یا انگشت را روی هر روز ببرید تا عدد هر نود را ببینید؛ با زدن نام هر نود آن را پنهان کنید." : "Client traffic summed per node and day. Point or tap at a day for each node's figure; tap a name to hide or show it."),
+    body);
 }
 
 function updateAllButton(nodes) {
@@ -1043,32 +1218,33 @@ function eventBadge(kind) {
 // replaceChildren that skips empty slots (null/false), like h() does.
 function fill(el, ...kids) { el.replaceChildren(...kids.flat().filter((k) => k != null && k !== false)); return el; }
 
-// Sparkline as inline SVG (built with the DOM, never markup strings).
-function spark(values, max) {
-  const NS = "http://www.w3.org/2000/svg", W = 300, H = 48;
-  const svg = document.createElementNS(NS, "svg");
-  svg.setAttribute("viewBox", `0 0 ${W} ${H}`); svg.setAttribute("class", "spark"); svg.setAttribute("preserveAspectRatio", "none");
-  if (values.length < 2) return svg;
-  const top = max || Math.max(1, ...values);
-  const pts = values.map((v, i) => `${(i / (values.length - 1)) * W},${H - 2 - (Math.min(v, top) / top) * (H - 4)}`).join(" ");
-  const area = document.createElementNS(NS, "polygon");
-  area.setAttribute("points", `0,${H} ${pts} ${W},${H}`); area.setAttribute("class", "spark-area");
-  const line = document.createElementNS(NS, "polyline");
-  line.setAttribute("points", pts); line.setAttribute("class", "spark-line");
-  svg.append(area, line);
-  return svg;
-}
-
+// A node's last hours on the chart kit: CPU and memory together, network in
+// and out together, and online users; each with now / average / peak.
 async function nodeHealth(n) {
-  const pts = await api("GET", `/api/v2/admin/nodes/${encodeURIComponent(n.ID)}/history?hours=24`);
-  const block = (label, vals, max, fmt) => h("div", { class: "form" },
-    h("div", { class: "row small" }, h("strong", {}, label), h("span", { class: "muted spacer" }, vals.length ? fmt(vals.at(-1)) : "—")), spark(vals, max));
-  openModal(`${t("health")} · ${n.Name || n.ID}`, pts.length ? h("div", { class: "form" },
-    block(t("cpu"), pts.map((p) => p.cpu), 100, (v) => `${fmtNum(v)}%`),
-    block(t("ram"), pts.map((p) => p.ram), 100, (v) => `${fmtNum(v)}%`),
-    block(`${t("net")} · ${t("inRate")}`, pts.map((p) => p.rx), 0, rate),
-    block(`${t("net")} · ${t("outRate")}`, pts.map((p) => p.tx), 0, rate),
-    block(t("onlineUsers"), pts.map((p) => p.online), 0, (v) => fmtNum(v))) : h("p", { class: "muted" }, t("noData")));
+  const fa = lang === "fa";
+  const box = h("div", { class: "form" });
+  let hours = 24;
+  const fmtT = (u) => new Intl.DateTimeFormat(fa ? "fa-IR" : "en-GB", hours > 24 ? { weekday: "short", hour: "2-digit", minute: "2-digit" } : { hour: "2-digit", minute: "2-digit" }).format(new Date(u * 1000));
+  const load = async () => {
+    fill(box, h("p", { class: "muted small" }, "…"));
+    const pts = await api("GET", `/api/v2/admin/nodes/${encodeURIComponent(n.ID)}/history?hours=${hours}`).catch(() => []);
+    if (!pts.length) { fill(box, h("p", { class: "muted" }, t("noData"))); return; }
+    const xs = pts.map((p) => p.t);
+    const stats = (vals, f) => { const avg = vals.reduce((a, b) => a + b, 0) / vals.length;
+      return h("span", { class: "muted" }, `${fa ? "الان" : "now"} ${f(vals.at(-1))} · ${fa ? "میانگین" : "avg"} ${f(avg)} · ${fa ? "بیشترین" : "peak"} ${f(Math.max(...vals))}`); };
+    const pct = (v) => `${fmtNum(Math.round(v))}%`;
+    const block = (title, series, extra, f) => h("div", { class: "form" },
+      h("div", { class: "row small" }, h("strong", {}, title), ...series.map((s) => h("span", { class: "legend-item" }, (() => { const i = h("i", { class: "sw" }); i.style.background = s.color; return i; })(), s.name, " ", stats(s.values, f)))),
+      chartKit({ xs, series, mode: "lines", height: 150, xLabel: (i) => fmtT(xs[i]), tipTitle: (i) => fmtT(xs[i]), fmt: f, ...extra }));
+    fill(box,
+      block(`${t("cpu")} / ${t("ram")}`, [{ id: "c", name: t("cpu"), color: "var(--ion)", area: true, values: pts.map((p) => p.cpu) }, { id: "r", name: t("ram"), color: "var(--ember)", dash: true, values: pts.map((p) => p.ram) }], { bin: false, max: 100, suffix: "%" }, pct),
+      block(t("net"), [{ id: "i", name: `↓ ${t("inRate")}`, color: "var(--ion)", area: true, values: pts.map((p) => p.rx) }, { id: "o", name: `↑ ${t("outRate")}`, color: "var(--ember)", dash: true, values: pts.map((p) => p.tx) }], { suffix: "/s" }, rate),
+      block(t("onlineUsers"), [{ id: "u", name: t("onlineUsers"), color: "var(--good)", area: true, values: pts.map((p) => p.online) }], { bin: false, int: true }, (v) => fmtNum(Math.round(v))));
+  };
+  const chips = h("div", { class: "row cseg" }, [[6, fa ? "۶ ساعت" : "6 h"], [24, fa ? "۲۴ ساعت" : "24 h"], [168, fa ? "۷ روز" : "7 days"]].map(([v, l]) =>
+    h("button", { type: "button", class: v === hours ? "chip on" : "chip", onclick: (e) => { hours = v; e.currentTarget.parentElement.querySelectorAll("button").forEach((b) => b.classList.toggle("on", b === e.currentTarget)); load(); } }, l)));
+  openModal(`${t("health")} · ${n.Name || n.ID}`, h("div", { class: "form health-modal" }, chips, box));
+  load();
 }
 
 function nodeCard(n, actions = false) {
@@ -4409,38 +4585,13 @@ async function viewAnalytics() {
     const p = Math.round(((cur - prev) / prev) * 100);
     return h("span", { class: `chg ${p > 0 ? "up" : p < 0 ? "down" : ""}`, dir: "ltr" }, `${p > 0 ? "+" : ""}${fmtNum(p)}%`);
   };
-  const bars = (rows, keys, colors, label) => {
-    const W = 480, H = 170, P = 18, max = Math.max(1, ...rows.map((r) => keys.reduce((a, k) => a + (r[k] || 0), 0)));
-    const bw = (W - 2 * P) / rows.length;
-    const svg = svgEl("svg", { viewBox: `0 0 ${W} ${H + 24}`, class: "an-chart", direction: "ltr", role: "img", "aria-label": label });
-    svg.append(svgEl("line", { x1: P, x2: W - P, y1: H, y2: H, class: "axis" }));
-    rows.forEach((r, i) => {
-      let y = H;
-      keys.forEach((k, j) => {
-        const v = r[k] || 0, hh = (v / max) * (H - 20);
-        if (!hh) return;
-        y -= hh;
-        const rect = svgEl("rect", { x: P + i * bw + bw * 0.2, y, width: bw * 0.6, height: hh, rx: 2, fill: colors[j] });
-        const tt = svgEl("title", {}); tt.textContent = `${monthName(r.month)}: ${money(v)}`; rect.append(tt); svg.append(rect);
-      });
-      const tx = svgEl("text", { x: P + i * bw + bw / 2, y: H + 17, "text-anchor": "middle", class: "lbl" }); tx.textContent = fa ? `\u2067${monthName(r.month)}\u2069` : monthName(r.month); svg.append(tx);
-      const total = keys.reduce((a, k) => a + (r[k] || 0), 0);
-      if (total) { const tv = svgEl("text", { x: P + i * bw + bw / 2, y: y - 5, "text-anchor": "middle", class: "lbl val" }); tv.textContent = fmtNum(Math.round(total / 1e5) / 10); svg.append(tv); }
-    });
-    return svg;
-  };
-  const line = (daily) => {
-    const W = 480, H = 120, P = 12, max = Math.max(1, ...daily.map((d) => d.active)), min = Math.min(...daily.map((d) => d.active));
-    const lo = Math.max(0, Math.floor(min * 0.9)), span = Math.max(1, max - lo);
-    const x = (i) => P + (i * (W - 2 * P)) / Math.max(1, daily.length - 1), y = (v) => H - ((v - lo) / span) * (H - 28) - 4;
-    const svg = svgEl("svg", { viewBox: `0 0 ${W} ${H + 8}`, class: "an-chart", direction: "ltr", role: "img", "aria-label": fa ? "مشتری فعال روزانه" : "Active customers per day" });
-    svg.append(svgEl("path", { d: daily.map((d, i) => `${i ? "L" : "M"}${x(i)} ${y(d.active)}`).join(""), class: "an-line" }));
-    daily.forEach((d, i) => { const c = svgEl("circle", { cx: x(i), cy: y(d.active), r: 2.5, class: "an-dot" }); const tt = svgEl("title", {}); tt.textContent = `${d.day}: ${fmtNum(d.active)}`; c.append(tt); svg.append(c); });
-    const last = daily[daily.length - 1];
-    if (last) { const tv = svgEl("text", { x: x(daily.length - 1), y: y(last.active) - 9, "text-anchor": "end", class: "lbl val" }); tv.textContent = fa ? `\u2067${fmtNum(last.active)} امروز\u2069` : `${last.active} today`; svg.append(tv); }
-    const mx = svgEl("text", { x: P, y: 14, class: "lbl" }); mx.textContent = fa ? `\u2067بیشترین ${fmtNum(max)} · کمترین ${fmtNum(min)}\u2069` : `max ${max} · min ${min}`; svg.append(mx);
-    return svg;
-  };
+  const bars = (rows, keys, colors, names, label) => chartKit({ xs: rows.map((r) => r.month), mode: "stack", bin: false, height: 230, label,
+    series: keys.map((k, j) => ({ id: k, name: names[j], color: colors[j], values: rows.map((r) => r[k] || 0) })),
+    xLabel: (i) => monthName(rows[i].month), tipTitle: (i) => monthName(rows[i].month), fmt: (v) => `${money(v)} ${fa ? "تومان" : "toman"}`,
+    axis: (v) => fmtNum(v / 1e6), totals: (v) => fmtNum(Math.round(v / 1e5) / 10) });
+  const line = (daily) => chartKit({ xs: daily.map((d) => d.day), mode: "lines", bin: false, int: true, height: 190, label: fa ? "مشتری فعال روزانه" : "Active customers per day",
+    series: [{ id: "a", name: fa ? "مشتری فعال" : "Active customers", color: "var(--ion)", area: true, values: daily.map((d) => d.active) }],
+    fmt: (v) => fmtNum(v), partial: daily.at(-1)?.day === todayUTC() ? daily.length - 1 : -1 });
   const load = async () => {
     fill(body, h("p", { class: "muted small" }, fa ? "در حال محاسبه…" : "Working…"));
     let a;
@@ -4466,8 +4617,8 @@ async function viewAnalytics() {
         kpi(a.renew_rate < 0 ? "—" : pct(a.renew_rate), fa ? "نرخ تمدید (۳۰ روز)" : "Renewal rate (30d)", null, fa ? `${fmtNum(a.renewed_30d)} تمدید · ${fmtNum(a.lapsed_30d)} تمدید نکرده` : `${a.renewed_30d} renewed · ${a.lapsed_30d} lapsed`),
         kpi(fmtNum(a.expiring_7d), fa ? "پایان در ۷ روز آینده" : "Ending in 7 days")),
       h("section", { class: "card an-sec" }, h("h2", {}, fa ? "درآمد ماهانه (میلیون تومان)" : "Monthly revenue (million toman)"),
-        showResell ? h("div", { class: "an-legend small" }, h("span", { class: "sw a" }), fa ? "فروشگاه" : "Shop", h("span", { class: "sw b" }), fa ? "نماینده‌ها (به قیمت نماینده)" : "Resellers") : null,
-        bars(a.months, showResell ? ["shop", "resell"] : ["shop"], ["var(--ion)", "var(--sky)"], fa ? "درآمد ماهانه" : "Monthly revenue")),
+        showResell ? chartLegend([{ id: "a", name: fa ? "فروشگاه" : "Shop", color: "var(--ion)" }, { id: "b", name: fa ? "نماینده‌ها (به قیمت نماینده)" : "Resellers", color: "var(--sky)" }]) : null,
+        bars(a.months, showResell ? ["shop", "resell"] : ["shop"], ["var(--ion)", "var(--sky)"], [fa ? "فروشگاه" : "Shop", fa ? "نماینده‌ها" : "Resellers"], fa ? "درآمد ماهانه" : "Monthly revenue")),
       h("section", { class: "card an-sec" }, h("h2", {}, fa ? "مشتری‌ها ماه‌به‌ماه" : "Customers by month"),
         h("div", { class: "table-wrap" }, h("table", { class: "table" },
           h("thead", {}, h("tr", {}, [fa ? "ماه" : "Month", fa ? "جدید" : "New", fa ? "تمدید" : "Renewed", fa ? "ریزش" : "Churned"].map((x) => h("th", { scope: "col" }, x)))),
@@ -5145,22 +5296,10 @@ function salesReportCard() {
     const a = h("a", { href: URL.createObjectURL(blob), download: `sales-${days}d-${new Date().toISOString().slice(0, 10)}.csv` });
     document.body.append(a); a.click(); a.remove();
   };
-  const chart = (daily) => {
-    const W = 720, H = 150, P = 22, max = Math.max(1, ...daily.map((d) => d.bytes)), bw = (W - P * 2) / daily.length;
-    const svg = svgEl("svg", { viewBox: `0 0 ${W} ${H + 22}`, class: "sales-chart", role: "img", "aria-label": fa ? "فروش روزانه" : "Daily sales" });
-    svg.append(svgEl("line", { x1: P, x2: W - P, y1: H, y2: H, class: "axis" }));
-    daily.forEach((d, i) => {
-      const hgt = (d.bytes / max) * (H - 18), x = P + i * bw + bw * 0.15;
-      const r = svgEl("rect", { x, y: H - hgt, width: Math.max(2, bw * 0.7), height: Math.max(hgt, d.bytes ? 2 : 0), rx: 2, class: "sbar" });
-      const tt = svgEl("title", {}); tt.textContent = `${d.day}: ${gbs(d.bytes)} · ${fmtNum(d.count)}`; r.append(tt); svg.append(r);
-      if (daily.length <= 31 && i % Math.ceil(daily.length / 8) === 0) {
-        const tx = svgEl("text", { x: x + bw * 0.35, y: H + 16, "text-anchor": "middle", class: "lbl" });
-        tx.textContent = new Intl.DateTimeFormat(fa ? "fa-IR" : "en-GB", { month: "short", day: "numeric" }).format(new Date(d.day + "T12:00:00Z"));
-        svg.append(tx);
-      }
-    });
-    return svg;
-  };
+  const chart = (daily) => daily.length ? chartKit({ xs: daily.map((d) => d.day), mode: "stack", height: 200, label: fa ? "فروش روزانه" : "Daily sales",
+    series: [{ id: "s", name: fa ? "حجم فروخته‌شده" : "Volume sold", color: "var(--ion)", values: daily.map((d) => d.bytes) }],
+    fmt: gbs, partial: daily.at(-1).day === todayUTC() ? daily.length - 1 : -1,
+    tipExtra: (i) => h("div", { class: "ct-row tot" }, h("span", {}, fa ? "تعداد فروش" : "Orders"), h("span", { class: "v" }, fmtNum(daily[i].count || 0))) }) : null;
   const load = async () => {
     fill(box, h("p", { class: "muted small" }, fa ? "در حال آماده‌سازی گزارش…" : "Loading report…"));
     let r;
@@ -5975,50 +6114,20 @@ async function viewReps() {
       h("tbody", {}, ...rows))) : h("p", { class: "muted" }, t("empty")));
 }
 
-// Daily traffic as a neon line chart: grid, glowing lines, soft area fill.
+// Daily traffic (or any two daily series) on the chart kit: the first series
+// as a filled line, the second dashed. Missing days are filled with zero so
+// the x axis is real time; today's point is marked as not finished yet.
 function barsSvg(days, W = 600, opt = {}) {
-  const NS = "http://www.w3.org/2000/svg", H = 190, P = 8, L = 0;
-  const el = (n, a) => { const x = document.createElementNS(NS, n); for (const [k, v] of Object.entries(a)) x.setAttribute(k, v); return x; };
-  const svg = el("svg", { viewBox: `0 0 ${W} ${H + 20}`, class: "bars", role: "img", "aria-label": t("usageChart") });
-  const id = `c${++markSeq}`;
-  const defs = el("defs", {});
-  const glow = el("filter", { id: `${id}g`, x: "-10%", y: "-30%", width: "120%", height: "160%" });
-  glow.append(el("feGaussianBlur", { stdDeviation: "2.5", result: "b" }));
-  const merge = el("feMerge", {}); merge.append(el("feMergeNode", { in: "b" }), el("feMergeNode", { in: "SourceGraphic" })); glow.append(merge);
-  const area = (col, key) => { const g = el("linearGradient", { id: `${id}${key}`, x1: 0, y1: 0, x2: 0, y2: 1 });
-    g.append(el("stop", { offset: "0", style: `stop-color:${col};stop-opacity:.16` }), el("stop", { offset: "1", style: `stop-color:${col};stop-opacity:0` })); return g; };
-  defs.append(glow, area("var(--ion)", "d"), area("var(--ember)", "u"));
-  svg.append(defs);
-  if (!days.length) return svg;
-  const top = Math.max(1, ...days.map((d) => Math.max(d.Down, d.Up))) * 1.12;
-  const x = (i) => L + (days.length === 1 ? W / 2 : (i / (days.length - 1)) * (W - L - 2 * P) + P);
-  const y = (v) => H - (v / top) * (H - P);
-  for (let k = 0; k <= 4; k++) {
-    const yy = P + ((H - P) * k) / 4;
-    svg.append(el("line", { x1: 0, x2: W, y1: yy, y2: yy, class: "grid-line" }));
-  }
-  for (let i = 0; i < days.length; i++) svg.append(el("line", { x1: x(i), x2: x(i), y1: P, y2: H, class: "grid-v" }));
-  const series = (key, col) => {
-    const pts = days.map((d, i) => [x(i), y(d[key])]);
-    const line = pts.map(([a, b]) => `${a.toFixed(1)},${b.toFixed(1)}`).join(" ");
-    svg.append(el("polygon", { points: `${pts[0][0]},${H} ${line} ${pts.at(-1)[0]},${H}`, fill: `url(#${id}${key === "Down" ? "d" : "u"})` }));
-    svg.append(el("polyline", { points: line, fill: "none", style: `stroke:${col}`, "stroke-width": key === "Down" ? 2 : 1.6, "stroke-linejoin": "round", "stroke-linecap": "round",
-      "vector-effect": "non-scaling-stroke", filter: `url(#${id}g)`, ...(key === "Down" ? {} : { "stroke-dasharray": "5 5" }) }));
-    const [lx, ly] = pts.at(-1);
-    svg.append(el("circle", { cx: lx, cy: ly, r: 3, style: `fill:${col}`, filter: `url(#${id}g)` }));
-  };
-  if (!opt.single) series("Up", "var(--ember)");
-  series("Down", "var(--ion)");
-  const step = Math.max(1, Math.round(days.length / 6));
-  days.forEach((d, i) => {
-    const hit = el("rect", { x: x(i) - W / days.length / 2, y: 0, width: W / days.length, height: H, class: "bar-hit" });
-    const title = el("title", {}); title.textContent = opt.la ? `${dayLabel(d.Day, true)}: ${opt.la} ${bytes(d.Down)}${opt.single ? "" : ` · ${opt.lb} ${bytes(d.Up)}`}` : `${dayLabel(d.Day, true)}: ↓ ${bytes(d.Down)} · ↑ ${bytes(d.Up)}`;
-    hit.append(title); svg.append(hit);
-    if ((days.length - 1 - i) % step === 0) {
-      const lab = el("text", { x: x(i), y: H + 15, "text-anchor": "middle", class: "bar-label" }); lab.textContent = dayLabel(d.Day); svg.append(lab);
-    }
-  });
-  return svg;
+  const fa = lang === "fa";
+  if (!days.length) return h("p", { class: "muted small" }, t("noData"));
+  const by = Object.fromEntries(days.map((d) => [d.Day, d]));
+  const first = days.map((d) => d.Day).sort()[0], today = todayUTC();
+  const xs = [];
+  for (let d = Date.parse(first + "T00:00:00Z"); xs.length < 400; d += 86400000) { const k = new Date(d).toISOString().slice(0, 10); if (k > today && xs.length) break; xs.push(k); }
+  const series = [{ id: "d", name: opt.la || `↓ ${t("inRate")}`, color: "var(--ion)", area: true, values: xs.map((d) => by[d]?.Down || 0) }];
+  if (!opt.single) series.push({ id: "u", name: opt.lb || `↑ ${t("outRate")}`, color: "var(--ember)", dash: true, values: xs.map((d) => by[d]?.Up || 0) });
+  return chartKit({ xs, series, mode: "lines", partial: xs.at(-1) === today ? xs.length - 1 : -1, height: W >= 1000 ? 250 : 220, label: opt.la || t("usageChart"),
+    tipExtra: opt.single ? null : (i) => h("div", { class: "ct-row tot" }, h("span", {}, fa ? "مجموع" : "Total"), h("span", { class: "v" }, bytes(series[0].values[i] + series[1].values[i]))) });
 }
 
 function legend() {
