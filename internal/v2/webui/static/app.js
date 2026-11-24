@@ -3550,6 +3550,65 @@ function inboundFormKit(o) {
         const c = certList.find((x) => x.id === ids[0]); if (c?.domains?.[0] && !ts.serverName) ts.serverName = c.domains[0];
       };
       const fa = lang === "fa";
+      // Add a certificate right here: paste or upload the files (stored on
+      // the HUB, sent to every node), or point at files already on the node.
+      const addCertBox = () => {
+        const box = h("details", { class: "adv-box" }, h("summary", {}, fa ? "➕ افزودن گواهی" : "➕ Add a certificate"));
+        let how = "paste";
+        const pane = h("div", { class: "form" });
+        const tabs = h("div", { class: "chips" });
+        const err = h("div", { class: "error", role: "alert" });
+        const domain = h("input", { dir: "ltr", placeholder: "sub.example.com" });
+        const readFile = (ta) => { const f = h("input", { type: "file", accept: ".pem,.crt,.key,.cer,.txt" }); f.addEventListener("change", async () => { if (f.files[0]) ta.value = await f.files[0].text(); }); return f; };
+        const drawPane = () => {
+          tabs.replaceChildren(...[["paste", fa ? "فایل‌ها (fullchain و privkey)" : "Files (fullchain and privkey)"], ["path", fa ? "فایل روی سرور" : "File on the server"]].map(([k, l]) => {
+            const b2 = h("button", { type: "button", class: `chip ${how === k ? "on" : ""}` }, l); b2.onclick = () => { how = k; err.textContent = ""; drawPane(); }; return b2; }));
+          if (how === "paste") {
+            const cert = h("textarea", { class: "code", rows: "5", spellcheck: "false", dir: "ltr", placeholder: "-----BEGIN CERTIFICATE-----" });
+            const key = h("textarea", { class: "code", rows: "4", spellcheck: "false", dir: "ltr", placeholder: "-----BEGIN PRIVATE KEY-----" });
+            pane.replaceChildren(
+              h("label", {}, h("span", {}, fa ? "دامنه (نام گواهی)" : "Domain (certificate name)"), domain),
+              h("label", {}, h("span", {}, "fullchain.pem"), cert, readFile(cert)),
+              h("label", {}, h("span", {}, "privkey.pem"), key, readFile(key)),
+              h("p", { class: "small muted" }, fa ? "گواهی روی هاب ذخیره می‌شود و به همهٔ نودهای این اینباند می‌رسد." : "Stored on the HUB and sent to every node of this inbound."),
+              err,
+              h("button", { type: "button", class: "primary", onclick: async () => {
+                err.textContent = "";
+                const id = (domain.value.trim().toLowerCase().replace(/[^a-z0-9._-]/g, "-").replace(/^[^a-z0-9]+/, "") || "").slice(0, 63);
+                if (!id) { err.textContent = fa ? "دامنه را بنویسید." : "Enter the domain."; return; }
+                if (!cert.value.includes("BEGIN") || !key.value.includes("BEGIN")) { err.textContent = fa ? "هر دو فایل لازم است." : "Both files are needed."; return; }
+                try {
+                  await api("PUT", `/api/v2/admin/certs/${encodeURIComponent(id)}`, { Cert: cert.value, Key: key.value });
+                  const fresh = await api("GET", "/api/v2/admin/certs").catch(() => null);
+                  if (fresh) certList.splice(0, certList.length, ...fresh); else if (!certList.find((x) => x.id === id)) certList.push({ id, domains: [domain.value.trim()] });
+                  setPicked([...picked.filter((x) => x !== id), id]);
+                  if (!ts.serverName) ts.serverName = domain.value.trim();
+                  toast(fa ? "گواهی اضافه و انتخاب شد" : "Certificate added and selected"); draw();
+                } catch (x) { err.textContent = x.message; }
+              } }, fa ? "ذخیره و استفاده" : "Save and use"));
+          } else {
+            const cf = h("input", { dir: "ltr", placeholder: "/etc/letsencrypt/live/sub.example.com/fullchain.pem" });
+            const kf = h("input", { dir: "ltr", placeholder: "/etc/letsencrypt/live/sub.example.com/privkey.pem" });
+            domain.oninput = () => { const d = domain.value.trim(); if (d) { cf.value = `/etc/letsencrypt/live/${d}/fullchain.pem`; kf.value = `/etc/letsencrypt/live/${d}/privkey.pem`; } };
+            pane.replaceChildren(
+              h("label", {}, h("span", {}, fa ? "دامنه" : "Domain"), domain),
+              h("label", {}, h("span", {}, fa ? "مسیر fullchain روی نود" : "fullchain path on the node"), cf),
+              h("label", {}, h("span", {}, fa ? "مسیر privkey روی نود" : "privkey path on the node"), kf),
+              h("p", { class: "small muted" }, fa ? "Xray فایل‌ها را مستقیم از روی خود نود می‌خواند؛ روی هر نودی که این اینباند را دارد باید همین مسیرها وجود داشته باشند. تمدید گواهی هم با خود سرور است." : "Xray reads the files on the node itself; every node running this inbound needs them at these paths, and renews them itself."),
+              err,
+              h("button", { type: "button", class: "primary", onclick: () => {
+                err.textContent = "";
+                if (!cf.value.startsWith("/") || !kf.value.startsWith("/")) { err.textContent = fa ? "مسیر کامل هر دو فایل را بنویسید." : "Enter the full path of both files."; return; }
+                ts.certificates = [...(ts.certificates || []), { certificateFile: cf.value.trim(), keyFile: kf.value.trim() }];
+                if (!ts.serverName && domain.value.trim()) ts.serverName = domain.value.trim();
+                draw();
+              } }, fa ? "افزودن" : "Add"));
+          }
+        };
+        drawPane();
+        box.append(tabs, pane);
+        return box;
+      };
       const certField = oneCert
         ? field(ie("cert"), select([["", "—"], ...certList.map((c) => [c.id, `${c.id} · ${(c.domains || []).join(", ")}`])], () => curCert, (v) => setPicked(v ? [v] : []), draw))
         : field(fa ? "گواهی‌ها (چندتایی؛ اولی پیش‌فرض)" : "Certificates (several; the first is the default)",
@@ -3562,7 +3621,12 @@ function inboundFormKit(o) {
                 i === 0 && picked.length > 1 ? h("span", { class: "badge good" }, fa ? "پیش‌فرض" : "default") : null,
                 i > 0 ? h("button", { type: "button", class: "ghost small", title: fa ? "پیش‌فرض کن" : "Make default", onclick: () => { setPicked([c.id, ...picked.filter((x) => x !== c.id)]); draw(); } }, fa ? "پیش‌فرض کن" : "make default") : null);
             }) : h("span", { class: "muted small" }, fa ? "هنوز گواهی‌ای نیست (تنظیمات ← گواهی‌ها)." : "No certificates yet (Settings → Certificates)."),
-            picked.length > 1 ? h("p", { class: "small muted" }, fa ? "Xray گواهیِ هم‌نامِ SNI کلاینت را می‌دهد؛ اگر هیچ‌کدام نخورد، اولی (پیش‌فرض). لینک‌های اشتراک از فیلد SNI استفاده می‌کنند." : "Xray serves the certificate matching the client's SNI, else the first (default). Subscription links use the SNI field.") : null));
+            picked.length > 1 ? h("p", { class: "small muted" }, fa ? "Xray گواهیِ هم‌نامِ SNI کلاینت را می‌دهد؛ اگر هیچ‌کدام نخورد، اولی (پیش‌فرض). لینک‌های اشتراک از فیلد SNI استفاده می‌کنند." : "Xray serves the certificate matching the client's SNI, else the first (default). Subscription links use the SNI field.") : null,
+            // Certificates kept as files on the node itself.
+            ...others.filter((c) => c.certificateFile).map((c) => h("div", { class: "check" }, h("span", { class: "badge" }, fa ? "فایل روی سرور" : "file on server"),
+              h("span", { dir: "ltr", class: "small" }, c.certificateFile),
+              h("button", { type: "button", class: "ghost small", onclick: () => { ts.certificates = ts.certificates.filter((x) => x !== c); draw(); } }, fa ? "حذف" : "remove"))),
+            oneCert ? null : addCertBox()));
       kids.push(
         h("div", { class: "two" },
           certField,
