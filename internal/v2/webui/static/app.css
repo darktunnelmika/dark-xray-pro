@@ -1190,3 +1190,7 @@ dialog.wide:has(.cform) { inline-size: min(780px, calc(100vw - 20px)); }
   .brand svg { inline-size: 28px; block-size: 28px; }
   .brand-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 }
+/* Inbound editor: several TLS certificates */
+.cert-pick { display: grid; gap: 4px; }
+.cert-pick .check { flex-wrap: wrap; gap: 6px; }
+.cert-pick button.small { padding: 2px 8px; font-size: .8em; }

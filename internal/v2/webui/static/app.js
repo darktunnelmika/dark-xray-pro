@@ -3540,11 +3540,32 @@ function inboundFormKit(o) {
       const curCert = certs.find((c) => c.dark_cert)?.dark_cert || "";
       const alpnOpts = proto === "hysteria" ? ["h3"] : ["h3", "h2", "http/1.1"];
       const alpn = new Set(ts.alpn || []);
+      // Xray serves the certificate whose domain matches the client's SNI;
+      // the first one is the default. QUIC protocols use one certificate.
+      const oneCert = proto === "hysteria" || proto === "tuic";
+      const picked = certs.map((c) => c.dark_cert).filter(Boolean);
+      const others = certs.filter((c) => !c.dark_cert); // inline certificates stay as they are
+      const setPicked = (ids) => {
+        ts.certificates = [...ids.map((id) => ({ dark_cert: id })), ...others];
+        const c = certList.find((x) => x.id === ids[0]); if (c?.domains?.[0] && !ts.serverName) ts.serverName = c.domains[0];
+      };
+      const fa = lang === "fa";
+      const certField = oneCert
+        ? field(ie("cert"), select([["", "—"], ...certList.map((c) => [c.id, `${c.id} · ${(c.domains || []).join(", ")}`])], () => curCert, (v) => setPicked(v ? [v] : []), draw))
+        : field(fa ? "گواهی‌ها (چندتایی؛ اولی پیش‌فرض)" : "Certificates (several; the first is the default)",
+          h("div", { class: "cert-pick" },
+            certList.length ? certList.map((c) => {
+              const i = picked.indexOf(c.id);
+              const box = h("input", { type: "checkbox", checked: i >= 0 });
+              box.addEventListener("change", () => { setPicked(box.checked ? [...picked, c.id] : picked.filter((x) => x !== c.id)); draw(); });
+              return h("label", { class: "check" }, box, h("span", { dir: "ltr" }, `${c.id} · ${(c.domains || []).join(", ")}`),
+                i === 0 && picked.length > 1 ? h("span", { class: "badge good" }, fa ? "پیش‌فرض" : "default") : null,
+                i > 0 ? h("button", { type: "button", class: "ghost small", title: fa ? "پیش‌فرض کن" : "Make default", onclick: () => { setPicked([c.id, ...picked.filter((x) => x !== c.id)]); draw(); } }, fa ? "پیش‌فرض کن" : "make default") : null);
+            }) : h("span", { class: "muted small" }, fa ? "هنوز گواهی‌ای نیست (تنظیمات ← گواهی‌ها)." : "No certificates yet (Settings → Certificates)."),
+            picked.length > 1 ? h("p", { class: "small muted" }, fa ? "Xray گواهیِ هم‌نامِ SNI کلاینت را می‌دهد؛ اگر هیچ‌کدام نخورد، اولی (پیش‌فرض). لینک‌های اشتراک از فیلد SNI استفاده می‌کنند." : "Xray serves the certificate matching the client's SNI, else the first (default). Subscription links use the SNI field.") : null));
       kids.push(
         h("div", { class: "two" },
-          field(ie("cert"), select([["", "—"], ...certList.map((c) => [c.id, `${c.id} · ${(c.domains || []).join(", ")}`])], () => curCert, (v) => {
-            ts.certificates = v ? [{ dark_cert: v }] : []; const c = certList.find((x) => x.id === v); if (c?.domains?.[0] && !ts.serverName) ts.serverName = c.domains[0];
-          }, draw)),
+          certField,
           field(ie("sniName"), input(() => ts.serverName, (v) => { ts.serverName = v; }, { dir: "ltr" }))),
         h("div", { class: "row" }, h("span", { class: "muted small" }, ie("alpn")), ...alpnOpts.map((a) => check(() => alpn.has(a), (v) => { if (v) alpn.add(a); else alpn.delete(a); ts.alpn = alpnOpts.filter((x) => alpn.has(x)); if (!ts.alpn.length) delete ts.alpn; }, a))),
         h("div", { class: "three" },
