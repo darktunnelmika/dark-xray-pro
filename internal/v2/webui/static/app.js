@@ -844,7 +844,7 @@ function nodeTrafficCard(nodes) {
           const sw = h("i", { class: "csw" }); sw.style.background = color(id);
           const bar = h("i", {}); bar.style.inlineSize = `${((tot[id] / mx) * 100).toFixed(1)}%`; bar.style.background = color(id);
           return h("tr", {},
-            h("td", {}, sw, nameOf(id), " ", h("span", { class: "muted small", dir: "ltr" }, id)),
+            h("td", {}, sw, nameOf(id), " ", h("span", { class: "muted small cid", dir: "ltr" }, id)),
             h("td", { "data-label": fa ? "مجموع" : "Total", class: "num" }, bytes(tot[id])),
             h("td", { "data-label": fa ? "سهم" : "Share", class: "num" }, `${fmtNum(Math.round((tot[id] / sum) * 1000) / 10)}%`),
             h("td", { "data-label": fa ? "میانگین روزانه" : "Daily average", class: "num avg" }, a ? bytes(a) : "—"),

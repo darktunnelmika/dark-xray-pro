@@ -1236,7 +1236,7 @@ dialog.wide:has(.cform) { inline-size: min(780px, calc(100vw - 20px)); }
 .ctable td { padding: 6px 8px; border-block-end: 1px solid color-mix(in oklab, var(--glass-line) 60%, transparent); white-space: nowrap; }
 .ctable tr:last-child td { border-block-end: 0; }
 .ctable .num { font-family: var(--mono); text-align: end; }
-@media (max-width: 520px) { .ctable .avg { display: none; } .ctable { font-size: 12px; } .ctable th, .ctable td { padding-inline: 5px; } }
+@media (max-width: 520px) { .ctable .avg, .ctable .cid { display: none; } .ctable { font-size: 12px; } .ctable th, .ctable td { padding-inline: 5px; } }
 .ctable .csw { display: inline-block; inline-size: 9px; block-size: 9px; border-radius: 2px; margin-inline-end: 7px; }
 .ctable td.cshare { inline-size: 22%; }
 .ctable td.cshare > i { display: block; block-size: 6px; border-radius: 3px; }
