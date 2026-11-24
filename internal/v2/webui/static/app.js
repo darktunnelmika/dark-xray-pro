@@ -3627,10 +3627,34 @@ function inboundFormKit(o) {
               h("span", { dir: "ltr", class: "small" }, c.certificateFile),
               h("button", { type: "button", class: "ghost small", onclick: () => { ts.certificates = ts.certificates.filter((x) => x !== c); draw(); } }, fa ? "حذف" : "remove"))),
             oneCert ? null : addCertBox()));
+      // SNI per node: each node's links can carry its own domain (and Xray
+      // answers it with the matching certificate).
+      const sniPerNode = () => {
+        const rts = o.routes || [];
+        if (rts.length < 1) return null;
+        const domains = [...new Set(picked.flatMap((id) => (certList.find((c) => c.id === id)?.domains || [])).filter((d) => d && !d.startsWith("*")))];
+        const nodeName = (id) => { const n = (o.nodes || []).find((x) => x.ID === id || x.id === id); return n ? (n.Name || n.name || id) : id; };
+        return h("details", { class: "adv-box", open: Object.keys(o.routeSni).length > 0 || rts.some((r) => (r.hosts || []).some((x) => x.sni)) },
+          h("summary", {}, fa ? "SNI هر نود" : "SNI per node"),
+          h("p", { class: "small muted" }, fa ? "دامنه‌ای که لینک‌های هر نود با آن ساخته می‌شوند. خالی = همان فیلد SNI بالا. با چند گواهی، Xray روی هر نود گواهیِ همان دامنه را می‌دهد." : "The domain each node's links use. Empty = the SNI field above. With several certificates Xray answers each with the matching one."),
+          ...rts.map((r) => {
+            const cur = r.node_id in o.routeSni ? o.routeSni[r.node_id] : ((r.hosts || []).find((x) => x.sni)?.sni || "");
+            const custom = cur && !domains.includes(cur);
+            const inp = h("input", { dir: "ltr", value: custom ? cur : "", placeholder: "sub.example.com", hidden: !custom });
+            inp.addEventListener("input", () => { o.routeSni[r.node_id] = inp.value.trim(); });
+            const sel = h("select", {}, [["", fa ? `— همان SNI بالا (${ts.serverName || "—"})` : `— the SNI above (${ts.serverName || "—"})`], ...domains.map((d) => [d, d]), ["*custom", fa ? "دامنهٔ دیگر…" : "Other domain…"]]
+              .map(([v, l]) => h("option", { value: v, selected: custom ? v === "*custom" : v === cur }, l)));
+            sel.addEventListener("change", () => {
+              if (sel.value === "*custom") { inp.hidden = false; inp.focus(); o.routeSni[r.node_id] = inp.value.trim(); } else { inp.hidden = true; o.routeSni[r.node_id] = sel.value; }
+            });
+            return h("div", { class: "two" }, field(nodeName(r.node_id), sel), h("label", {}, h("span", {}, "\u00a0"), inp));
+          }));
+      };
       kids.push(
         h("div", { class: "two" },
           certField,
           field(ie("sniName"), input(() => ts.serverName, (v) => { ts.serverName = v; }, { dir: "ltr" }))),
+        sniPerNode(),
         h("div", { class: "row" }, h("span", { class: "muted small" }, ie("alpn")), ...alpnOpts.map((a) => check(() => alpn.has(a), (v) => { if (v) alpn.add(a); else alpn.delete(a); ts.alpn = alpnOpts.filter((x) => alpn.has(x)); if (!ts.alpn.length) delete ts.alpn; }, a))),
         h("div", { class: "three" },
           field(ie("minVer"), select([["", "—"], ["1.2", "1.2"], ["1.3", "1.3"]], () => ts.minVersion || "", (v) => { if (v) ts.minVersion = v; else delete ts.minVersion; })),
@@ -3709,7 +3733,8 @@ async function inboundEditor(tag, nodes, certs) {
   d.classList.add("wide");
   d.addEventListener("close", () => d.classList.remove("wide"), { once: true });
 
-  const kit = inboundFormKit({ tpl, meta, enabled, lim, view, routed, certList, err, draw: () => draw(), nodes: nodes || [], nodeId: (routes || [])[0]?.node_id || raw.node_id });
+  const routeSni = {}; // nodeID -> SNI chosen in the TLS section, saved into that node's hosts
+  const kit = inboundFormKit({ tpl, meta, enabled, lim, view, routed, certList, err, draw: () => draw(), nodes: nodes || [], nodeId: (routes || [])[0]?.node_id || raw.node_id, routes: routes || [], routeSni });
   function draw() {
     tabs.replaceChildren(...[["form", ie("form")], ["json", ie("json")]].map(([k, l]) => h("button", { type: "button", role: "tab", "aria-current": mode === k ? "step" : null, onclick: () => switchTo(k) }, l)));
     body.replaceChildren(...(mode === "form" ? kit.drawForm() : kit.drawJSON()));
@@ -3728,6 +3753,13 @@ async function inboundEditor(tag, nodes, certs) {
     if (st.security === "reality" && st.realitySettings) meta.short_id = (st.realitySettings.shortIds || [])[0] || meta.short_id;
     try {
       await guarded(() => api("PUT", `/api/v2/admin/inbounds/${encodeURIComponent(tag)}`, { node_id: raw.node_id, template: tpl, meta, enabled }));
+      if (Object.keys(routeSni).length) {
+        // Per-node SNI: read the routes again and change only the SNI of
+        // that node's hosts, so nothing else in the route layout moves.
+        const fresh = await api("GET", `/api/v2/admin/inbounds/${encodeURIComponent(tag)}/routes`);
+        for (const r of fresh) if (r.node_id in routeSni) for (const x of r.hosts || []) x.sni = routeSni[r.node_id];
+        await api("PUT", `/api/v2/admin/inbounds/${encodeURIComponent(tag)}/routes`, fresh);
+      }
       if (+lim.speed !== speed0) await api("PUT", `/api/v2/admin/inbounds/${encodeURIComponent(tag)}/speed`, { kbps: Math.round((+lim.speed || 0) * 1000) });
       if (JSON.stringify({ cap: lim.cap, ends: lim.ends }) !== lim0) {
         await api("PUT", `/api/v2/admin/inbounds/${encodeURIComponent(tag)}/limits`, { cap_gb: +lim.cap || 0, ends_unix: lim.ends ? Math.floor(new Date(lim.ends + "T23:59:59").getTime() / 1000) : 0 });
