@@ -174,6 +174,10 @@ function h(tag, attrs = {}, ...kids) {
   return el;
 }
 
+// movedHere: a reseller that came from another panel with its users' old
+// usage — its lifetime total and its traffic on this panel differ.
+function movedHere(total, here) { return (total || 0) - (here || 0) > 1073741824; }
+
 function bytes(n) {
   const u = ["B", "KB", "MB", "GB", "TB"];
   let i = 0;
@@ -4228,7 +4232,7 @@ async function viewSellers() {
   const cards = (reps || []).map((r) => h("div", { class: "card item" },
     h("div", { class: "head" }, h("span", { class: "name" }, r.Name || r.ID), h("span", { class: "badge" }, r.ID),
       h("span", { class: `badge ${r.Enabled ? "good" : "bad"} spacer` }, t(r.Enabled ? "enabled" : "disabled"))),
-    h("div", { class: "muted small" }, `${t("volumeCredit")}: ${bytes(r.VolumeCredit)} · ${t("units")}: ${fmtNum(r.UnlimitedUnits)} · ${t("clientsCount", { n: fmtNum(r.Clients) })} · ${lang === "fa" ? "مصرف کل" : "used"}: ${bytes(r.UsedBytes || 0)}`),
+    h("div", { class: "muted small" }, `${t("volumeCredit")}: ${bytes(r.VolumeCredit)} · ${t("units")}: ${fmtNum(r.UnlimitedUnits)} · ${t("clientsCount", { n: fmtNum(r.Clients) })} · ${lang === "fa" ? "مصرف کل" : "used"}: ${bytes(r.UsedBytes || 0)}${movedHere(r.UsedBytes, r.UsedHere) ? ` · ${lang === "fa" ? "در پنل ما" : "here"}: ${bytes(r.UsedHere || 0)}` : ""}`),
     h("div", { class: "muted small" }, policySummary(r.Policy)),
     h("div", { class: "row" }, h("button", { onclick: () => creditForm(r) }, t("transferCredit")),
       h("button", { class: "ghost", onclick: () => policyForm(r, inbounds) }, t("policy")),
@@ -5573,7 +5577,8 @@ async function viewRepDashboard() {
       kpi("activity", fa ? "رو به اتمام" : "Ending soon", fmtNum(o.expiring), owner ? null : "#/clients"),
       kpi("power", fa ? "تمام‌شده" : "Ended", fmtNum(o.ended), owner ? null : "#/clients"),
       kpi("online", fa ? "آنلاین" : "Online", fmtNum(o.online), owner ? null : "#/online"),
-      kpi("traffic", fa ? "مصرف کل کاربران" : "Users' total traffic", bytes(o.used_bytes))),
+      kpi("traffic", fa ? "مصرف کل کاربران" : "Users' total traffic", bytes(o.used_bytes)),
+      movedHere(o.used_bytes, o.used_here) ? kpi("traffic", fa ? "مصرف در این پنل" : "Traffic on this panel", bytes(o.used_here || 0)) : null),
     h("div", { class: "dash2" },
       h("div", { class: "card form span2" }, h("div", { class: "row" }, h("h2", {}, fa ? "فروش و برگشتی ۳۰ روز" : "Sold and returned, 30 days"),
         repLegend(fa ? "فروش" : "Sold", fa ? "برگشتی" : "Returned")), repChart(o.days || [], "sold", "back", fa ? "فروش" : "Sold", fa ? "برگشتی" : "Returned")),
@@ -6185,7 +6190,7 @@ async function viewReps() {
       h("td", { dir: "ltr" }, gbs(o.month_sold || 0), h("div", { class: "small muted" }, `${fmtNum(o.month_sales || 0)} ${fa ? "فروش" : "sales"}`)),
       h("td", {}, h("span", { dir: "ltr" }, `${fmtNum(o.active || 0)} / ${fmtNum(r.Clients)}`), o.expiring ? h("div", { class: "small" }, h("span", { class: "badge warn" }, `${fmtNum(o.expiring)} ${fa ? "رو به اتمام" : "ending"}`)) : null),
       h("td", {}, fmtNum(o.online || 0)),
-      h("td", { dir: "ltr" }, bytes(r.UsedBytes || 0)),
+      h("td", {}, h("span", { dir: "ltr" }, bytes(r.UsedBytes || 0)), movedHere(r.UsedBytes, r.UsedHere) ? h("div", { class: "small", title: fa ? "فقط مصرف روی سرورهای این پنل، از ساخته‌شدن یا کوچ نماینده به اینجا؛ مصرف پنل قبلی حساب نیست" : "Only traffic on this panel's servers, since the reseller was made or moved here; the old panel's usage is left out" }, h("span", { class: "badge" }, fa ? "در پنل ما: " : "here: ", h("b", { dir: "ltr" }, bytes(r.UsedHere || 0)))) : null),
       h("td", { class: "small muted" }, o.last_login ? fmtWhen(o.last_login) : (fa ? "هرگز" : "never")),
       h("td", {}, h("div", { class: "row tight" },
         h("button", { onclick: () => creditForm(r) }, t("addCredit")),

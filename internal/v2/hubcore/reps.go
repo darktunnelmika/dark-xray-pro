@@ -92,6 +92,7 @@ type Rep struct {
 	UnlimitedUnits int64
 	Clients        int
 	UsedBytes      int64 // lifetime: current clients plus deleted ones (and the old panel's)
+	UsedHere       int64 // on this panel only: since the reseller was made (or moved) here
 	Policy         RepPolicy
 	ParentID       string
 	ManageProducts bool
@@ -109,7 +110,7 @@ ON CONFLICT(id) DO UPDATE SET name=excluded.name, enabled=excluded.enabled`, r.I
 func (s *Store) Reps(ctx context.Context) ([]Rep, error) {
 	rows, err := s.ro.QueryContext(ctx, `SELECT r.id,r.name,r.enabled,r.volume_credit,r.unlimited_units,
 (SELECT COUNT(*) FROM clients c WHERE c.rep_id=r.id),
-r.used_base+COALESCE((SELECT SUM(u.up+u.down) FROM client_usage u JOIN clients c ON c.email=u.email WHERE c.rep_id=r.id),0),r.parent_id,r.manage_products,`+policyCols+` FROM reps r ORDER BY r.id`)
+r.used_base+COALESCE((SELECT SUM(u.up+u.down) FROM client_usage u JOIN clients c ON c.email=u.email WHERE c.rep_id=r.id),0),r.used_here,r.parent_id,r.manage_products,`+policyCols+` FROM reps r ORDER BY r.id`)
 	if err != nil {
 		return nil, err
 	}
@@ -117,7 +118,7 @@ r.used_base+COALESCE((SELECT SUM(u.up+u.down) FROM client_usage u JOIN clients c
 	var out []Rep
 	for rows.Next() {
 		var r Rep
-		p, err := scanPolicy(rows, &r.ID, &r.Name, &r.Enabled, &r.VolumeCredit, &r.UnlimitedUnits, &r.Clients, &r.UsedBytes, &r.ParentID, &r.ManageProducts)
+		p, err := scanPolicy(rows, &r.ID, &r.Name, &r.Enabled, &r.VolumeCredit, &r.UnlimitedUnits, &r.Clients, &r.UsedBytes, &r.UsedHere, &r.ParentID, &r.ManageProducts)
 		if err != nil {
 			return nil, err
 		}

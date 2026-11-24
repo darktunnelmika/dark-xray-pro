@@ -155,6 +155,11 @@ ON CONFLICT(email,node_id,day) DO UPDATE SET up=up+excluded.up, down=down+exclud
 		return wire.UsageAck{}, err
 	}
 	defer stDaily.Close()
+	stHere, err := prep(usedHereSQL)
+	if err != nil {
+		return wire.UsageAck{}, err
+	}
+	defer stHere.Close()
 	renamed := renamedNow(ctx, tx)
 	for _, t := range b.Traffic {
 		if t.Up < 0 || t.Down < 0 || !emailRE.MatchString(t.Email) {
@@ -173,6 +178,9 @@ ON CONFLICT(email,node_id,day) DO UPDATE SET up=up+excluded.up, down=down+exclud
 			return wire.UsageAck{}, err
 		}
 		if _, err := stDaily.ExecContext(ctx, t.Email, nodeID, day, t.Up, t.Down); err != nil {
+			return wire.UsageAck{}, err
+		}
+		if err := addUsedHere(ctx, stHere, t.Email, t.Up+t.Down); err != nil {
 			return wire.UsageAck{}, err
 		}
 	}

@@ -714,6 +714,9 @@ func (b *Bot) repCredit(ctx context.Context, chat int64, rep string) {
 	o := ov[0]
 	text := fmt.Sprintf("💳 <b>اعتبار و گزارش</b>\n%s\nاعتبار فعلی: <b>%s</b>\n\n<b>این ماه</b>\n🛒 فروش: %s (%d سفارش)\n↩️ برگشت: %s\n➕ شارژ: %s\n📶 مصرف کل کاربرها: %s",
 		line, gb(o.VolumeCredit), gb(o.MonthSold), o.MonthSales, gb(o.MonthBack), gb(o.MonthTopup), gb(o.UsedBytes))
+	if o.UsedBytes-o.UsedHere > 1<<30 { // moved here with usage from another panel
+		text += "\n🏠 مصرف در این پنل: " + gb(o.UsedHere)
+	}
 	b.send(ctx, chat, text, repBackKB)
 }
 

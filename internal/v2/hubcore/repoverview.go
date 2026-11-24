@@ -13,6 +13,7 @@ type RepOverview struct {
 	VolumeCredit   int64         `json:"volume_credit"`
 	UnlimitedUnits int64         `json:"unlimited_units"`
 	UsedBytes      int64         `json:"used_bytes"` // lifetime traffic of the reseller's users
+	UsedHere       int64         `json:"used_here"`  // the same, on this panel only
 	Clients        int           `json:"clients"`
 	Active         int           `json:"active"`
 	Expiring       int           `json:"expiring"` // ends within 3 days or under 10% volume left
@@ -71,7 +72,7 @@ func (s *Store) RepOverviews(ctx context.Context, repID string, detail bool) ([]
 		if repID != "" && r.ID != repID {
 			continue
 		}
-		o := RepOverview{RepID: r.ID, Name: r.Name, VolumeCredit: r.VolumeCredit, UnlimitedUnits: r.UnlimitedUnits, UsedBytes: r.UsedBytes}
+		o := RepOverview{RepID: r.ID, Name: r.Name, VolumeCredit: r.VolumeCredit, UnlimitedUnits: r.UnlimitedUnits, UsedBytes: r.UsedBytes, UsedHere: r.UsedHere}
 		for _, c := range clients {
 			if c.RepID != r.ID {
 				continue
