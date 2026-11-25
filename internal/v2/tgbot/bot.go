@@ -445,7 +445,9 @@ func (b *Bot) onMessage(ctx context.Context, m *Message) {
 			}
 			return
 		}
-		if b.repMessage(ctx, chat, rep, role, text) {
+		// In customer mode /start is the customer's menu (with the way back),
+		// not the reseller's command help.
+		if !(text == "/start" && !b.repMode(ctx, chat)) && b.repMessage(ctx, chat, rep, role, text) {
 			return
 		}
 	}
