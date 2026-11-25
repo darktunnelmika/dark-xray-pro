@@ -438,7 +438,11 @@ func (b *Bot) onMessage(ctx context.Context, m *Message) {
 		}
 		if (text == "/start" || text == "/help" || text == "/admin" || text == "/panel") && b.repMode(ctx, chat) {
 			b.repHome(ctx, chat, rep, role)
-			b.ensureRepKeyboard(ctx, chat)
+			if text == "/start" {
+				b.refreshRepKeyboard(ctx, chat)
+			} else {
+				b.ensureRepKeyboard(ctx, chat)
+			}
 			return
 		}
 		if b.repMessage(ctx, chat, rep, role, text) {
@@ -478,6 +482,7 @@ func (b *Bot) onMessage(ctx context.Context, m *Message) {
 		}
 		b.menu(ctx, chat)
 		b.ensureKeyboard(ctx, chat)
+		b.refreshRepKeyboard(ctx, chat)
 		return
 	case "/buy":
 		b.shop(ctx, chat)

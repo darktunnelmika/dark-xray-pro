@@ -76,3 +76,26 @@ func TestResellerSellsPanelsInItsBot(t *testing.T) {
 	rb.Handle(ctx, cb(aliChat, "P:w"))
 	find(t, api.take(), aliChat, "۲۰۰٬۰۰۰")
 }
+
+func TestResellerCanAlwaysSwitchBack(t *testing.T) {
+	s, err := hubcore.Open(filepath.Join(t.TempDir(), "v2.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	ctx := context.Background()
+	_ = s.PutRep(ctx, hubcore.Rep{ID: "ali", Name: "Ali", Enabled: true})
+	const aliChat = int64(7001)
+	_ = s.SetTgRepOwners(ctx, "ali", []int64{aliChat})
+	api := &fakeAPI{}
+	b := &Bot{Store: s, API: api, Owners: map[int64]bool{}, Seller: "ali", Logf: t.Logf}
+	b.Handle(ctx, cb(aliChat, "R:cust"))
+	api.take()
+	// In customer mode the menu itself offers the way back.
+	b.Handle(ctx, msg(aliChat, "/start"))
+	if m := find(t, api.take(), aliChat, "سلام"); !hasButton(m.kb, "حالت نماینده") {
+		t.Fatal("customer mode needs a way back to reseller mode")
+	}
+	b.Handle(ctx, cb(aliChat, "R:mode"))
+	find(t, api.take(), aliChat, "Ali")
+}

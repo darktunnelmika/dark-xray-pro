@@ -414,6 +414,10 @@ func (b *Bot) menuKB(ctx context.Context, chat int64, services int, ended []stri
 	if b.Owners[chat] {
 		// The owner is only looking at the customer's view: one tap back.
 		rows = append(rows, row(cbBtn("🛡 بازگشت به پنل مدیریت", "a:home")))
+	} else if rep, _ := b.repOf(ctx, chat); rep != "" {
+		// A reseller in customer mode: the way back never depends on the
+		// bottom keyboard, which Telegram drops when the chat is cleared.
+		rows = append(rows, row(repBtn("🧑‍💼 بازگشت به حالت نماینده", "mode")))
 	}
 	return &Keyboard{Rows: rows}
 }

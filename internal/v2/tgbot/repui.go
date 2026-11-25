@@ -860,6 +860,18 @@ func (b *Bot) repKey(ctx context.Context, chat int64, rep, role, act string) {
 	}
 }
 
+// refreshRepKeyboard puts a reseller's bottom keyboard (with the switch
+// between reseller and customer mode) back on /start: Telegram drops it
+// when the chat is cleared or the app reinstalled, and it was sent once.
+func (b *Bot) refreshRepKeyboard(ctx context.Context, chat int64) {
+	if b.Owners[chat] {
+		return
+	}
+	if rep, _ := b.repOf(ctx, chat); rep != "" {
+		b.setRepMode(ctx, chat, b.repMode(ctx, chat))
+	}
+}
+
 // ensureRepKeyboard puts the reseller keyboard on once (it replaces the
 // customer keyboard and the old panel's).
 func (b *Bot) ensureRepKeyboard(ctx context.Context, chat int64) {
