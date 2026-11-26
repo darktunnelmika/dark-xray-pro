@@ -2166,7 +2166,7 @@ func SubHandler(s *Store) http.Handler {
 		}
 		set, _ := s.brandFor(r.Context(), email)
 		w.Header().Set("Profile-Update-Interval", "12")
-		w.Header().Set("Profile-Title", "base64:"+b64(or2(set.Title, email)))
+		w.Header().Set("Profile-Title", "base64:"+b64(or2(set.Title, s.publicName(r.Context(), email))))
 		w.Header().Set("Profile-Web-Page-Url", pageURL)
 		if set.SupportURL != "" {
 			w.Header().Set("Support-Url", set.SupportURL)

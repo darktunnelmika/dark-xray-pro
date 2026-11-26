@@ -77,8 +77,13 @@ func TestTenantSubDomainOldLinks(t *testing.T) {
 	}
 	// A moved customer: its subscription here, on the old path.
 	w := get("/2fmg/" + u1.SubToken)
-	if w.Code != 200 || w.Body.Len() == 0 || w.Header().Get("Subscription-Userinfo") == "" || w.Header().Get("X-Dark-Fallback") != "" {
+	if w.Code != 200 || w.Header().Get("Subscription-Userinfo") == "" || w.Header().Get("X-Dark-Fallback") != "" {
 		t.Fatalf("moved customer %d %q %v", w.Code, w.Body.String(), w.Header())
+	}
+	// The customer sees the shop's name for itself, never the panel's
+	// internal one (tish+u1).
+	if pt := w.Header().Get("Profile-Title"); pt != "base64:"+b64("u1") {
+		t.Fatalf("profile title %q", pt)
 	}
 	first := w.Body.String()
 	if w := get("/2fmg/" + u1.SubToken); w.Code != 200 || w.Body.String() != first {
