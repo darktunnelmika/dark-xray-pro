@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/darktunnelmika/dark-xray-pro/internal/v2/wire"
 )
@@ -20,7 +21,8 @@ func TestUsageInboxResumesWithoutCountingTwice(t *testing.T) {
 	seed(t, s)
 	ctx := context.Background()
 	n := usageChunk*2 + 7
-	b := wire.UsageBatch{NodeID: "de-1", Seq: 1, FromUnix: 1, ToUnix: 2, Online: []wire.UserOnline{{Email: "alice", IPs: []string{"1.1.1.1"}}},
+	ts := time.Now().Unix()
+	b := wire.UsageBatch{NodeID: "de-1", Seq: 1, FromUnix: ts - 5, ToUnix: ts, Online: []wire.UserOnline{{Email: "alice", IPs: []string{"1.1.1.1"}}},
 		Disconnects: []wire.Disconnect{{Unix: 5, Email: "alice", Reason: "volume"}}}
 	for i := 0; i < n; i++ {
 		b.Traffic = append(b.Traffic, wire.UserTraffic{Email: fmt.Sprintf("x%05d", i), Up: 1, Down: 1})
@@ -30,7 +32,7 @@ func TestUsageInboxResumesWithoutCountingTwice(t *testing.T) {
 	if _, err := s.acceptUsage(ctx, "de-1", b); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := s.applyUsageChunk(ctx, "de-1", b, 2, 100, 0); err != nil {
+	if _, _, err := s.applyUsageChunk(ctx, "de-1", b, ts, 100, 0); err != nil {
 		t.Fatal(err)
 	}
 	resp, err := s.Sync(ctx, "de-1", wire.SyncRequest{NodeID: "de-1"})
