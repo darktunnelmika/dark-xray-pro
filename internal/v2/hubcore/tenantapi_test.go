@@ -401,3 +401,65 @@ func TestTenantWebhookGetsOnlyItsOwnEvents(t *testing.T) {
 		t.Fatalf("delivered %v", got)
 	}
 }
+
+func TestTenantBulkLinksAndVersion(t *testing.T) {
+	s, _, a, b := twoTenants(t)
+	code, res := a.do("POST", "/bulk/links", map[string]any{"names": []string{"u1", "nobody", "bad name!"}})
+	if code != 200 || res["ok"].(float64) != 1 || res["failed"].(float64) != 2 || res["links_version"] == "" {
+		t.Fatalf("bulk links %d %v", code, res)
+	}
+	list := res["clients"].([]any)
+	u1 := list[0].(map[string]any)
+	if u1["name"] != "u1" || u1["ok"] != true || u1["external_ref"] != "order-1" || !strings.HasPrefix(fmt.Sprint(u1["subscription_url"]), "https://sub.example.com/sub/") ||
+		!strings.Contains(fmt.Sprint(u1["userinfo"]), fmt.Sprintf("total=%d", 5<<30)) || u1["links"] == nil {
+		t.Fatalf("u1 %v", u1)
+	}
+	if one, two := list[1].(map[string]any), list[2].(map[string]any); one["error"] != "not_found" || two["error"] != "not_found" || one["ok"] == true {
+		t.Fatalf("unknown names %v %v", one, two)
+	}
+	// The same customer name in another shop is that shop's own client.
+	_, other := b.do("POST", "/bulk/links", map[string]any{"names": []string{"u1"}})
+	o1 := other["clients"].([]any)[0].(map[string]any)
+	if o1["ok"] != true || o1["sub_token"] == u1["sub_token"] || o1["external_ref"] == "order-1" {
+		t.Fatalf("isolation %v / %v", o1, u1)
+	}
+	big := make([]string, tenantLinksMax+1)
+	for i := range big {
+		big[i] = fmt.Sprintf("c%d", i)
+	}
+	if code, _ := a.do("POST", "/bulk/links", map[string]any{"names": big}); code != 422 {
+		t.Fatalf("over the limit: %d", code)
+	}
+	// links_version: the same until an inbound the shop's clients are on
+	// changes; a client's own change moves only its rev.
+	_, ch := a.do("GET", "/changes", nil)
+	v1 := fmt.Sprint(ch["links_version"])
+	if v1 == "" || v1 != fmt.Sprint(res["links_version"]) {
+		t.Fatalf("version %q vs %v", v1, res["links_version"])
+	}
+	if code, _ := a.do("PATCH", "/clients/u1", map[string]any{"note": "x"}); code != 200 {
+		t.Fatalf("patch %d", code)
+	}
+	clock := time.Unix(1_800_000_000, 0)
+	clock = clock.Add(time.Minute)
+	s.SetClock(func() time.Time { return clock })
+	if _, ch := a.do("GET", "/changes", nil); fmt.Sprint(ch["links_version"]) != v1 {
+		t.Fatalf("a client's own change moved links_version: %v", ch["links_version"])
+	}
+	if _, err := s.db.Exec(`UPDATE inbounds SET meta=json_set(meta,'$.remark_test','x') WHERE tag IN (SELECT tag FROM client_inbounds WHERE email='tish+u1')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, ch := a.do("GET", "/changes", nil); fmt.Sprint(ch["links_version"]) != v1 {
+		t.Fatal("cached for a few seconds")
+	}
+	clock = clock.Add(time.Minute)
+	if _, ch := a.do("GET", "/changes", nil); fmt.Sprint(ch["links_version"]) == v1 {
+		t.Fatal("an inbound change must move links_version")
+	}
+	// Reading configs is not a change: it stays out of the audit log.
+	var n int
+	_ = s.db.QueryRow(`SELECT COUNT(*) FROM audit_log WHERE path LIKE '%/bulk/links%'`).Scan(&n)
+	if n != 0 {
+		t.Fatalf("bulk/links audited %d times", n)
+	}
+}

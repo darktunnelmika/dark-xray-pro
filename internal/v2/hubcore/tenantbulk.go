@@ -414,6 +414,51 @@ func tenantBulkRoutes(s *Store, mux *docMux, auth func(func(http.ResponseWriter,
 			tenantFail(w, err)
 			return
 		}
-		tenantJSON(w, http.StatusOK, map[string]any{"changes": list, "cursor": next, "more": more})
+		ver, err := s.TenantLinksVersion(r.Context(), tenant)
+		if err != nil {
+			tenantFail(w, err)
+			return
+		}
+		tenantJSON(w, http.StatusOK, map[string]any{"changes": list, "cursor": next, "more": more, "links_version": ver})
+	}))
+	mux.HandleFunc("GET "+tenantAPI+"/sub-fetches", auth(func(w http.ResponseWriter, r *http.Request, tenant string) {
+		q := r.URL.Query()
+		since, _ := strconv.ParseInt(q.Get("since"), 10, 64)
+		limit, _ := strconv.Atoi(q.Get("limit"))
+		rep, err := s.TenantSubFetches(r.Context(), tenant, since, q.Get("list"), q.Get("after"), limit)
+		if err != nil {
+			tenantFail(w, err)
+			return
+		}
+		tenantJSON(w, http.StatusOK, rep)
+	}))
+	mux.HandleFunc("POST "+tenantAPI+"/bulk/links", auth(func(w http.ResponseWriter, r *http.Request, tenant string) {
+		var in struct {
+			Names []string `json:"names"`
+		}
+		if !tenantDecode(w, r, 1<<20, &in) {
+			return
+		}
+		// The version first: a change between the two reads makes the shop
+		// read again next time instead of keeping configs older than the
+		// version it saw.
+		ver, err := s.TenantLinksVersion(r.Context(), tenant)
+		if err != nil {
+			tenantFail(w, err)
+			return
+		}
+		list, err := s.TenantBulkLinks(r.Context(), tenant, in.Names)
+		if err != nil {
+			tenantFail(w, err)
+			return
+		}
+		ok := 0
+		for i := range list {
+			if list[i].OK {
+				ok++
+				list[i].SubURL = subURL(base(r, tenant), r, list[i].SubToken)
+			}
+		}
+		tenantJSON(w, http.StatusOK, map[string]any{"links_version": ver, "ok": ok, "failed": len(list) - ok, "clients": list})
 	}))
 }
