@@ -77,6 +77,43 @@ type TenantClient struct {
 
 // tenantClientView turns a client into the shop's view.
 func (s *Store) tenantClientView(ctx context.Context, tenant string, c ClientView) TenantClient {
+	return s.tenantClientViews(ctx, tenant, []ClientView{c})[0]
+}
+
+// tenantClientViews turns many clients into the shop's view, reading the
+// shop-only fields of all of them in one query.
+func (s *Store) tenantClientViews(ctx context.Context, tenant string, list []ClientView) []TenantClient {
+	type extra struct {
+		secret, ref     string
+		created, r1, r2 int64
+	}
+	more := map[string]extra{}
+	emails := make([]string, len(list))
+	for i, c := range list {
+		emails[i] = c.Email
+	}
+	if rows, err := s.ro.QueryContext(ctx, `SELECT c.email,c.secret,c.external_ref,c.created_unix,c.rev,COALESCE(u.rev,0)
+FROM clients c LEFT JOIN client_usage u ON u.email=c.email WHERE c.email IN (SELECT value FROM json_each(?))`, jsonList(emails)); err == nil {
+		for rows.Next() {
+			var e string
+			var x extra
+			if rows.Scan(&e, &x.secret, &x.ref, &x.created, &x.r1, &x.r2) == nil {
+				more[e] = x
+			}
+		}
+		rows.Close()
+	}
+	out := make([]TenantClient, len(list))
+	for i, c := range list {
+		tc := s.tenantClientBase(tenant, c)
+		x := more[c.Email]
+		tc.TrojanPassword, tc.ExternalRef, tc.CreatedUnix, tc.Rev = x.secret, x.ref, x.created, max(x.r1, x.r2)
+		out[i] = tc
+	}
+	return out
+}
+
+func (s *Store) tenantClientBase(tenant string, c ClientView) TenantClient {
 	tc := TenantClient{Name: tenantName(tenant, c.Email), Status: pgStatus(c, s.now().Unix()), Enabled: c.Enabled,
 		UUID: c.UUID, SubToken: c.SubToken, VolumeBytes: c.VolumeBytes, UsedBytes: c.Usage.Up + c.Usage.Down,
 		UpBytes: c.Usage.Up, DownBytes: c.Usage.Down, RemainingBytes: c.Remaining, ExpiresUnix: c.ExpiresUnix,
@@ -91,10 +128,6 @@ func (s *Store) tenantClientView(ctx context.Context, tenant string, c ClientVie
 	if tc.Inbounds == nil {
 		tc.Inbounds = []string{}
 	}
-	var urev int64
-	_ = s.ro.QueryRowContext(ctx, `SELECT c.secret,c.external_ref,c.created_unix,c.rev,COALESCE(u.rev,0) FROM clients c LEFT JOIN client_usage u ON u.email=c.email WHERE c.email=?`, c.Email).
-		Scan(&tc.TrojanPassword, &tc.ExternalRef, &tc.CreatedUnix, &tc.Rev, &urev)
-	tc.Rev = max(tc.Rev, urev)
 	return tc
 }
 
@@ -141,10 +174,7 @@ func (s *Store) TenantClientPage(ctx context.Context, tenant, after string, limi
 	if err != nil {
 		return nil, err
 	}
-	out := make([]TenantClient, 0, len(list))
-	for _, c := range list {
-		out = append(out, s.tenantClientView(ctx, tenant, c))
-	}
+	out := s.tenantClientViews(ctx, tenant, list)
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out, nil
 }

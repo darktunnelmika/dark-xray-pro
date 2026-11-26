@@ -124,6 +124,8 @@ type Store struct {
 	now  func() time.Time
 	path string
 
+	usageMu sync.Map // node id -> *sync.Mutex: one usage batch at a time per node (usageinbox.go)
+
 	distMu  sync.Mutex
 	distDir string // dark-node and xray for installs and self-update
 	distSHA string
@@ -312,8 +314,17 @@ func Open(path string) (*Store, error) {
 		st.Close()
 		return nil, err
 	}
+	if err := st.ensureUsageInboxSchema(); err != nil {
+		st.Close()
+		return nil, err
+	}
 	// Last: its first fill reads tables the steps above create.
 	if err := st.ensureTgBotUsers(); err != nil {
+		st.Close()
+		return nil, err
+	}
+	// Usage batches a stop left half-applied are finished first.
+	if err := st.drainAllUsage(context.Background()); err != nil {
 		st.Close()
 		return nil, err
 	}
