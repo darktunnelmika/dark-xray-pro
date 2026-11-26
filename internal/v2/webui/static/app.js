@@ -901,8 +901,11 @@ function nodeColorOf(nodes) {
   };
 }
 
-function nodeTrafficCard(nodes) {
+// opt.url(days) and opt.title/opt.hint let a connected shop show the same
+// chart for its own clients only (viewTenants).
+function nodeTrafficCard(nodes, opt = {}) {
   const fa = lang === "fa";
+  const url = opt.url || ((d) => `/api/v2/admin/nodes/traffic?days=${d}`);
   const body = h("div", { class: "form" });
   let days = 14, mode = "stack", rows = [];
   try { days = +sessionStorage.getItem("ntDays") || 14; mode = sessionStorage.getItem("ntMode") || "stack"; } catch {}
@@ -951,7 +954,7 @@ function nodeTrafficCard(nodes) {
         })))));
   };
   const load = async () => {
-    rows = await api("GET", `/api/v2/admin/nodes/traffic?days=${days}`).catch(() => []);
+    rows = await api("GET", url(days)).catch(() => []);
     render();
   };
   const seg = (list, cur, set) => {
@@ -966,8 +969,9 @@ function nodeTrafficCard(nodes) {
   const ranges = seg([7, 14, 30].map((n) => [n, s3("ntDays", { n: fmtNum(n) })]), days, (v) => { days = v; try { sessionStorage.setItem("ntDays", v); } catch {} load(); });
   load();
   return h("div", { class: "card form" },
-    h("div", { class: "row" }, h("h2", {}, s3("ntTitle")), h("span", { class: "spacer" }), modes, ranges),
-    h("p", { class: "small muted" }, fa ? "مجموع مصرف کاربرها روی هر نود در هر روز. موس یا انگشت را روی هر روز ببرید تا عدد هر نود را ببینید؛ با زدن نام هر نود آن را پنهان کنید." : "Client traffic summed per node and day. Point or tap at a day for each node's figure; tap a name to hide or show it."),
+    h("div", { class: "row" }, h("h2", {}, opt.title || s3("ntTitle")), h("span", { class: "spacer" }), modes, ranges),
+    opt.top || null,
+    h("p", { class: "small muted" }, opt.hint ? opt.hint : fa ? "مجموع مصرف کاربرها روی هر نود در هر روز. موس یا انگشت را روی هر روز ببرید تا عدد هر نود را ببینید؛ با زدن نام هر نود آن را پنهان کنید." : "Client traffic summed per node and day. Point or tap at a day for each node's figure; tap a name to hide or show it."),
     body);
 }
 
@@ -5804,9 +5808,32 @@ async function partnerKeys(reps) {
 
 // Connected shops: outside sales sites that keep their customers here. The
 // owner sees a summary per shop; details only where the shop allows it.
+// tenantTrafficCard: the node chart for one connected shop's clients, with a
+// chip per shop when there is more than one.
+function tenantTrafficCard(list, nodes) {
+  const fa = lang === "fa";
+  const box = h("div", {});
+  let cur = list[0].id;
+  try { const k = sessionStorage.getItem("ttShop"); if (list.some((x) => x.id === k)) cur = k; } catch {}
+  const draw = () => {
+    const x = list.find((y) => y.id === cur) || list[0];
+    const chips = list.length > 1 ? h("div", { class: "row cseg" }, list.map((y) => h("button", { type: "button", class: y.id === cur ? "chip on" : "chip", "aria-pressed": String(y.id === cur),
+      onclick: () => { cur = y.id; try { sessionStorage.setItem("ttShop", cur); } catch {} draw(); } }, y.name || y.id))) : null;
+    fill(box, nodeTrafficCard(nodes, {
+      url: (d) => `/api/v2/admin/tenants/${encodeURIComponent(x.id)}/traffic?days=${d}`,
+      title: fa ? `ترافیک هر نود · ${x.name || x.id}` : `Traffic per node · ${x.name || x.id}`,
+      top: chips,
+      hint: fa ? "مصرف کاربرهای همین فروشگاه روی هر نود در هر روز (کاربر حذف‌شده و مصرفی که سایت از پنل قبلی آورده حساب نمی‌شود). موس یا انگشت را روی هر روز ببرید؛ با زدن نام هر نود آن را پنهان کنید."
+        : "This shop's clients' traffic per node and day (deleted clients and use brought from an earlier panel are not counted). Point or tap at a day; tap a name to hide or show it.",
+    }));
+  };
+  draw();
+  return box;
+}
+
 async function viewTenants() {
   const fa = lang === "fa";
-  const [list, inbounds, reps] = await Promise.all([api("GET", "/api/v2/admin/tenants"), api("GET", "/api/v2/admin/inbounds").catch(() => []), api("GET", "/api/v2/admin/reps").catch(() => [])]);
+  const [list, inbounds, reps, nodes] = await Promise.all([api("GET", "/api/v2/admin/tenants"), api("GET", "/api/v2/admin/inbounds").catch(() => []), api("GET", "/api/v2/admin/reps").catch(() => []), api("GET", "/api/v2/admin/nodes").catch(() => [])]);
   const accessLabel = { summary: fa ? "فقط خلاصه" : "summary only", read: fa ? "دیدن جزئیات" : "may look", write: fa ? "دیدن و تغییر" : "may look and change" };
   const lab = (l, el, hint) => h("label", {}, h("span", {}, l), el, hint ? h("small", { class: "muted" }, hint) : null);
   const edit = (x) => {
@@ -5991,6 +6018,7 @@ async function viewTenants() {
       } }, t("delete"))));
   return h("div", {},
     h("div", { class: "row" }, h("h1", {}, t("tenants")), h("button", { class: "primary spacer", onclick: () => edit(null) }, t("add"))),
+    (list || []).length ? tenantTrafficCard(list, nodes || []) : null,
     h("p", { class: "small muted" }, fa ? "کاربرهای فروشگاه‌های متصل در لیست کاربرها، آمار فروش، یادآوری‌ها و ربات‌های پنل نمی‌آیند. سایت با API خودش (/api/tenant/v1) آن‌ها را می‌سازد و مدیریت می‌کند."
       : "Connected shops' clients are not in your client list, sales reports, reminders or the panel's bots. The site makes and manages them with its own API (/api/tenant/v1)."),
     h("div", { class: "list" }, (list || []).length ? list.map(card) : h("p", { class: "muted" }, t("empty"))));

@@ -454,3 +454,24 @@ func TestTenantSchemaUpgradesAnOlderDatabase(t *testing.T) {
 		s.Close()
 	}
 }
+
+func TestTenantNodeTrafficIsTheShopsOwn(t *testing.T) {
+	s, ctx := tenantStore(t)
+	day := s.now().UTC().Format("2006-01-02")
+	old := s.now().AddDate(0, 0, -20).UTC().Format("2006-01-02")
+	_, _ = s.db.Exec(`INSERT INTO usage_daily(email,node_id,day,up,down) VALUES('tish+u1','de-1',?,100,400),('tish+u1','nl-1',?,0,50),('tish+u1','de-1',?,9,9),('alice','de-1',?,7,7),('gone','de-1',?,1,1)`, day, day, old, day, day)
+	got, err := s.TenantNodeTraffic(ctx, "tish", 7)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sum := map[string]int64{}
+	for _, d := range got {
+		sum[d.NodeID] += d.Up + d.Down
+	}
+	if len(got) != 2 || sum["de-1"] != 500 || sum["nl-1"] != 50 {
+		t.Fatalf("shop traffic %+v", got)
+	}
+	if _, err := s.TenantNodeTraffic(ctx, "nope", 7); err == nil {
+		t.Fatal("an unknown shop must be an error")
+	}
+}

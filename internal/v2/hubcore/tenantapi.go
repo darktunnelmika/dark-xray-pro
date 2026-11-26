@@ -280,6 +280,11 @@ func tenantAdminRoutes(s *Store, mux *docMux, guard func(http.HandlerFunc) http.
 		err := s.DeleteTenant(r.Context(), r.PathValue("id"))
 		reply(w, map[string]bool{"ok": err == nil}, err)
 	}))
+	mux.HandleFunc("GET "+p+"/{id}/traffic", guard(func(w http.ResponseWriter, r *http.Request) {
+		days, _ := strconv.Atoi(r.URL.Query().Get("days"))
+		list, err := s.TenantNodeTraffic(r.Context(), r.PathValue("id"), days)
+		reply(w, list, err)
+	}))
 	mux.HandleFunc("GET "+p+"/{id}/keys", guard(func(w http.ResponseWriter, r *http.Request) {
 		list, err := s.TenantKeys(r.Context(), r.PathValue("id"))
 		reply(w, list, err)

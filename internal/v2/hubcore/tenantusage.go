@@ -88,3 +88,30 @@ func tenantUsageRoutes(s *Store, mux *docMux, auth func(func(http.ResponseWriter
 		tenantJSON(w, code, map[string]any{"committed": committed, "ok": ok, "failed": len(res) - ok, "results": res})
 	}))
 }
+
+// TenantNodeTraffic is NodeTraffic for one connected shop's clients. The
+// history is kept per client, so a deleted client's days leave with it.
+func (s *Store) TenantNodeTraffic(ctx context.Context, tenant string, days int) ([]NodeDay, error) {
+	if _, err := s.TenantByID(ctx, tenant); err != nil {
+		return nil, err
+	}
+	if days <= 0 || days > 400 {
+		days = 30
+	}
+	cut := s.now().AddDate(0, 0, -days+1).UTC().Format("2006-01-02")
+	rows, err := s.ro.QueryContext(ctx, `SELECT u.day,u.node_id,SUM(u.up),SUM(u.down) FROM clients c JOIN usage_daily u ON u.email=c.email
+WHERE c.rep_id=? AND u.day>=? GROUP BY u.day,u.node_id ORDER BY u.day,u.node_id`, "~"+tenant, cut)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []NodeDay{}
+	for rows.Next() {
+		var d NodeDay
+		if err := rows.Scan(&d.Day, &d.NodeID, &d.Up, &d.Down); err != nil {
+			return nil, err
+		}
+		out = append(out, d)
+	}
+	return out, rows.Err()
+}
