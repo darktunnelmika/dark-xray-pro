@@ -145,10 +145,13 @@ func TestSellingResellerPanels(t *testing.T) {
 		t.Fatal("an order is delivered once")
 	}
 
-	// The same person is now a reseller: the button charges the panel.
+	// The same person is now a reseller: the button lists the panel to
+	// charge, beside buying another one.
 	b.Handle(ctx, cb(cust, "P:buy"))
+	find(t, api.take(), cust, "پنل‌های نمایندگی شما")
+	b.Handle(ctx, cb(cust, "P:tp:reza-shop"))
 	find(t, api.take(), cust, "اعتبار فعلی")
-	b.Handle(ctx, cb(cust, "P:pk:"+pkg))
+	b.Handle(ctx, cb(cust, "P:tk:reza-shop:"+pkg))
 	find(t, api.take(), cust, "شارژ پنل نمایندگی #۲")
 	b.Handle(ctx, photoMsg(cust))
 	api.take()
@@ -158,7 +161,7 @@ func TestSellingResellerPanels(t *testing.T) {
 	if s.RepCredit(ctx, "reza-shop") != 200<<30 {
 		t.Fatal("a rejected top-up adds nothing")
 	}
-	b.Handle(ctx, cb(cust, "P:pk:"+pkg))
+	b.Handle(ctx, cb(cust, "P:tk:reza-shop:"+pkg))
 	api.take()
 	b.Handle(ctx, photoMsg(cust))
 	api.take()
@@ -175,6 +178,31 @@ func TestSellingResellerPanels(t *testing.T) {
 			t.Fatalf("a volume-only panel gets no unlimited units: %d", r.UnlimitedUnits)
 		}
 	}
+	// Nobody tops up a panel that is not theirs.
+	b.Handle(ctx, cb(cust+1, "P:tk:reza-shop:"+pkg))
+	if out := api.take(); len(out) != 0 {
+		t.Fatalf("a stranger's top-up must do nothing: %v", out)
+	}
+	// A second panel for the same account: the bot stays on the first.
+	b.Handle(ctx, cb(cust, "P:new"))
+	api.take()
+	b.Handle(ctx, cb(cust, "P:pk:"+pkg))
+	api.take()
+	b.Handle(ctx, msg(cust, "reza-two"))
+	find(t, api.take(), cust, "خرید پنل نمایندگی #۴")
+	b.Handle(ctx, photoMsg(cust))
+	api.take()
+	b.Handle(ctx, cb(ownerID, "P:ok:4"))
+	api.take()
+	if s.RepCredit(ctx, "reza-two") != 200<<30 || s.TgRep(ctx, cust) != "reza-shop" {
+		t.Fatalf("second panel: credit %d, bot on %q", s.RepCredit(ctx, "reza-two"), s.TgRep(ctx, cust))
+	}
+	if got := s.ChatPanels(ctx, cust); len(got) != 2 || got[0] != "reza-shop" || got[1] != "reza-two" {
+		t.Fatalf("panels %v", got)
+	}
+	b.Handle(ctx, cb(cust, "P:buy"))
+	out = api.take()
+	find(t, out, cust, "reza-two")
 	// A taken username is refused for the next buyer.
 	b.Handle(ctx, cb(cust+1, "P:pk:"+pkg))
 	api.take()

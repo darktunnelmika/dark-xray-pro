@@ -225,9 +225,6 @@ func (s *Store) createRepOrder(ctx context.Context, seller string, chat int64, b
 		if !s.RepNameFree(ctx, repID) {
 			return RepOrder{}, fmt.Errorf("%w: this username is taken or not valid", ErrInvalid)
 		}
-		if !manual && s.TgRep(ctx, chat) != "" {
-			return RepOrder{}, fmt.Errorf("%w: this Telegram account already has a panel", ErrInvalid)
-		}
 		var held int
 		_ = s.ro.QueryRowContext(ctx, `SELECT COUNT(*) FROM rep_orders WHERE kind='new' AND rep_id=? AND status IN ('await_receipt','pending') AND chat_id<>?`, repID, chat).Scan(&held)
 		if held != 0 {
@@ -365,8 +362,10 @@ func (s *Store) ApproveRepOrder(ctx context.Context, actor, seller string, id in
 			_, _ = s.DeleteRep(ctx, o.RepID, false)
 			return undo(err)
 		}
-		// This Telegram account is the reseller's from now on.
-		if o.Chat != 0 {
+		// This Telegram account is the reseller's from now on, unless it
+		// already runs a panel: the bot stays on that one, and the new
+		// panel is used from the web panel with its own login.
+		if o.Chat != 0 && s.TgRep(ctx, o.Chat) == "" {
 			if _, err := s.db.ExecContext(ctx, `UPDATE reps SET tg_chat=0 WHERE tg_chat=?`, o.Chat); err != nil {
 				return undo(err)
 			}
@@ -424,4 +423,34 @@ func (s *Store) RepCredit(ctx context.Context, repID string) int64 {
 	var v int64
 	_ = s.ro.QueryRowContext(ctx, `SELECT volume_credit FROM reps WHERE id=?`, repID).Scan(&v)
 	return v
+}
+
+// ChatPanels lists the panels a Telegram account owns: the one its bot
+// runs on first, then every other panel it bought, oldest first.
+func (s *Store) ChatPanels(ctx context.Context, chat int64) []string {
+	if chat == 0 {
+		return nil
+	}
+	var out []string
+	seen := map[string]bool{}
+	add := func(id string) {
+		if id != "" && !seen[id] {
+			seen[id] = true
+			out = append(out, id)
+		}
+	}
+	add(s.TgRep(ctx, chat))
+	rows, err := s.ro.QueryContext(ctx, `SELECT o.rep_id FROM rep_orders o JOIN reps r ON r.id=o.rep_id
+WHERE o.chat_id=? AND o.kind='new' AND o.status='approved' AND r.enabled=1 ORDER BY o.id`, chat)
+	if err != nil {
+		return out
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id string
+		if rows.Scan(&id) == nil {
+			add(id)
+		}
+	}
+	return out
 }

@@ -51,24 +51,31 @@ func (b *Bot) saleApprover(ctx context.Context, chat int64) bool {
 // buying a new panel). Bot admins of a reseller and sub-sellers buy nothing.
 func (b *Bot) repSaleBuyer(ctx context.Context, chat int64) (rep string, ok bool) {
 	rep = b.Store.TgRep(ctx, chat)
+	r, _ := b.Store.TgRepRole(ctx, chat)
 	if b.Seller != "" {
-		// A reseller's bot: new panels for its customers, top-ups for its
-		// own sub-sellers; the reseller and its bot admins buy nothing.
-		if rep != "" {
-			return rep, b.Store.IsSellerOf(ctx, b.Seller, rep)
+		// A reseller's bot: the reseller and its bot admins buy nothing here.
+		if rep == b.Seller || r == b.Seller {
+			return rep, false
 		}
-		if r, _ := b.Store.TgRepRole(ctx, chat); r != "" {
-			return "", false
-		}
-		return "", true
+		return rep, true
 	}
-	if rep == "" {
-		if r, _ := b.Store.TgRepRole(ctx, chat); r != "" {
-			return "", false
-		}
-		return "", true
+	// The main bot: a chat that only helps run someone else's panel buys nothing.
+	if rep == "" && r != "" {
+		return "", false
 	}
-	return rep, !b.Store.IsSubSeller(ctx, rep)
+	return rep, true
+}
+
+// salePanels are the chat's panels this bot can top up: in a reseller's bot
+// the ones bought under it, in the main bot the ones not under a reseller.
+func (b *Bot) salePanels(ctx context.Context, chat int64) []string {
+	var out []string
+	for _, p := range b.Store.ChatPanels(ctx, chat) {
+		if b.Seller != "" && b.Store.IsSellerOf(ctx, b.Seller, p) || b.Seller == "" && !b.Store.IsSubSeller(ctx, p) {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 // repSaleButton is the menu button for this chat, if the sale is on.
@@ -80,8 +87,8 @@ func (b *Bot) repSaleButton(ctx context.Context, chat int64) (Button, bool) {
 	if !ok {
 		return Button{}, false
 	}
-	if rep != "" {
-		return cbBtn("💳 شارژ پنل", "P:buy"), true
+	if rep != "" && len(b.salePanels(ctx, chat)) > 0 {
+		return cbBtn("🤝 پنل نمایندگی (خرید / شارژ)", "P:buy"), true
 	}
 	return cbBtn("🤝 پنل نمایندگی", "P:buy"), true
 }
@@ -112,8 +119,16 @@ func (b *Bot) repSaleCallback(ctx context.Context, q *CallbackQuery) bool {
 	case "buy":
 		b.takeAwait(chat)
 		b.repSaleList(ctx, chat)
+	case "new":
+		b.takeAwait(chat)
+		b.repSalePackages(ctx, chat, "")
+	case "tp":
+		b.takeAwait(chat)
+		b.repSalePackages(ctx, chat, arg(1))
 	case "pk":
 		b.repSalePick(ctx, chat, userName(&q.From), arg(1))
+	case "tk":
+		b.repSaleTopup(ctx, chat, userName(&q.From), arg(1), arg(2))
 	case "ok", "no":
 		id, _ := strconv.ParseInt(arg(1), 10, 64)
 		b.repSaleDecide(ctx, chat, id, parts[0] == "ok")
@@ -155,37 +170,91 @@ func (b *Bot) repSaleList(ctx context.Context, chat int64) {
 		b.send(ctx, chat, "فروش پنل نمایندگی فعلاً فعال نیست.", homeKB)
 		return
 	}
-	rep, ok := b.repSaleBuyer(ctx, chat)
-	if !ok {
-		b.send(ctx, chat, "اعتبار شما را نمایندهٔ بالادستتان شارژ می‌کند.", homeKB)
+	if _, ok := b.repSaleBuyer(ctx, chat); !ok {
+		b.send(ctx, chat, "خرید پنل از این ربات برای حساب‌های مدیریت همین ربات نیست.", homeKB)
 		return
 	}
+	panels := b.salePanels(ctx, chat)
+	if len(panels) == 0 {
+		b.repSalePackages(ctx, chat, "")
+		return
+	}
+	var sb strings.Builder
+	sb.WriteString("🤝 <b>پنل‌های نمایندگی شما</b>\n" + line + "\n")
+	kb := &Keyboard{Rows: [][]Button{row(cbBtn("➕ خرید پنل جدید", "P:new"))}}
+	for _, p := range panels {
+		fmt.Fprintf(&sb, "• <code>%s</code> — اعتبار: <b>%s</b>\n", esc(p), gb(b.Store.RepCredit(ctx, p)))
+		kb.Rows = append(kb.Rows, row(cbBtn("💳 شارژ "+p, "P:tp:"+p)))
+	}
+	sb.WriteString("\nیک پنل تازه بخرید یا یکی از پنل‌هایتان را شارژ کنید.")
+	kb.Rows = append(kb.Rows, row(cbBtn("« منوی اصلی", "home")))
+	b.send(ctx, chat, sb.String(), kb)
+}
+
+// repSalePackages lists the packages: for a new panel when rep is "",
+// otherwise to top up that panel of the chat's.
+func (b *Bot) repSalePackages(ctx context.Context, chat int64, rep string) {
+	if !b.repSaleOn(ctx) {
+		b.send(ctx, chat, "فروش پنل نمایندگی فعلاً فعال نیست.", homeKB)
+		return
+	}
+	if _, ok := b.repSaleBuyer(ctx, chat); !ok {
+		return
+	}
+	back := "home"
+	if len(b.salePanels(ctx, chat)) > 0 {
+		back = "P:buy"
+	}
 	var text string
+	kb := &Keyboard{}
 	if rep != "" {
+		if !b.ownsPanel(ctx, chat, rep) {
+			b.repSaleList(ctx, chat)
+			return
+		}
 		text = fmt.Sprintf("💳 <b>شارژ پنل نمایندگی</b>\n%s\nپنل: <code>%s</code>\nاعتبار فعلی: <b>%s</b>\n\nیک بسته را انتخاب کنید:", line, esc(rep), gb(b.Store.RepCredit(ctx, rep)))
+		for _, p := range b.salePackages(ctx) {
+			kb.Rows = append(kb.Rows, row(cbBtn(pkgLine(p), "P:tk:"+rep+":"+p.ID)))
+		}
 	} else {
 		text = "🤝 <b>خرید پنل نمایندگی</b>\n" + line + "\nبا پنل نمایندگی برای مشتری‌های خودتان سرویس می‌سازید و تمدید می‌کنید؛ هر سرویس از اعتبار حجمی پنل شما کم می‌شود.\n\nیک بسته را انتخاب کنید:"
+		for _, p := range b.salePackages(ctx) {
+			kb.Rows = append(kb.Rows, row(cbBtn(pkgLine(p), "P:pk:"+p.ID)))
+		}
 	}
-	kb := &Keyboard{}
-	for _, p := range b.salePackages(ctx) {
-		kb.Rows = append(kb.Rows, row(cbBtn(pkgLine(p), "P:pk:"+p.ID)))
-	}
-	kb.Rows = append(kb.Rows, row(cbBtn("« منوی اصلی", "home")))
+	kb.Rows = append(kb.Rows, row(cbBtn("« بازگشت", back)))
 	b.send(ctx, chat, text, kb)
 }
 
+func (b *Bot) ownsPanel(ctx context.Context, chat int64, rep string) bool {
+	for _, p := range b.salePanels(ctx, chat) {
+		if p == rep {
+			return true
+		}
+	}
+	return false
+}
+
+// repSalePick starts the order for a new panel: the username comes next.
 func (b *Bot) repSalePick(ctx context.Context, chat int64, name, pkg string) {
 	if !b.repSaleOn(ctx) {
 		b.send(ctx, chat, "فروش پنل نمایندگی فعلاً فعال نیست.", homeKB)
 		return
 	}
-	rep, ok := b.repSaleBuyer(ctx, chat)
-	if !ok {
+	if _, ok := b.repSaleBuyer(ctx, chat); !ok {
 		return
 	}
-	if rep == "" {
-		b.setAwait(chat, "P:name:"+pkg)
-		b.send(ctx, chat, "✍️ یک <b>نام کاربری</b> برای پنل خود بفرستید.\nحروف کوچک انگلیسی و عدد، ۳ تا ۲۴ حرف (مثلاً <code>ali-shop</code>).", &Keyboard{Rows: [][]Button{row(cbBtn("« بازگشت", "P:buy"))}})
+	b.setAwait(chat, "P:name:"+pkg)
+	b.send(ctx, chat, "✍️ یک <b>نام کاربری</b> برای پنل تازه بفرستید.\nحروف کوچک انگلیسی و عدد، ۳ تا ۲۴ حرف (مثلاً <code>ali-shop</code>).", &Keyboard{Rows: [][]Button{row(cbBtn("« بازگشت", "P:new"))}})
+}
+
+// repSaleTopup starts the order that tops up one of the chat's panels.
+func (b *Bot) repSaleTopup(ctx context.Context, chat int64, name, rep, pkg string) {
+	if !b.repSaleOn(ctx) {
+		b.send(ctx, chat, "فروش پنل نمایندگی فعلاً فعال نیست.", homeKB)
+		return
+	}
+	if _, ok := b.repSaleBuyer(ctx, chat); !ok || !b.ownsPanel(ctx, chat, rep) {
 		return
 	}
 	b.repSaleOpen(ctx, chat, name, rep, "", pkg)
@@ -199,8 +268,6 @@ func (b *Bot) repSaleOpen(ctx context.Context, chat int64, buyer, rep, name, pkg
 		if strings.Contains(err.Error(), "username is taken") {
 			b.setAwait(chat, "P:name:"+pkg)
 			msg = "این نام کاربری گرفته شده یا معتبر نیست. نام دیگری بفرستید:"
-		} else if strings.Contains(err.Error(), "already has a panel") {
-			msg = "این حساب تلگرام از قبل پنل دارد؛ از «شارژ پنل» استفاده کنید."
 		}
 		b.send(ctx, chat, msg, &Keyboard{Rows: [][]Button{row(cbBtn("« بازگشت", "P:buy"))}})
 		return
@@ -397,8 +464,12 @@ func (b *Bot) repSaleDecide(ctx context.Context, chat, id int64, approve bool) {
 		return
 	}
 	b.send(ctx, chat, fmt.Sprintf("✅ سفارش #%s تحویل شد: پنل <code>%s</code> با %s اعتبار ساخته شد.", faInt(o.ID), esc(o.RepID), gbWord(o.GB)), nil)
-	b.send(ctx, o.Chat, fmt.Sprintf("🎉 <b>پنل نمایندگی شما آماده است</b>\n%s\n🌐 آدرس: %s\n👤 نام کاربری: <code>%s</code>\n🔑 رمز موقت: <code>%s</code>\n💳 اعتبار: <b>%s</b>\n\nبعد از اولین ورود رمز را عوض کنید. همین ربات هم برای شما به حالت نمایندگی رفته است: /start را بزنید تا داشبورد، ساخت کاربر و تمدید را ببینید.",
-		line, esc(strings.TrimRight(b.SubBase, "/")), esc(o.RepID), esc(res.Password), gbWord(o.GB)), nil)
+	tail := "همین ربات هم برای شما به حالت نمایندگی رفته است: /start را بزنید تا داشبورد، ساخت کاربر و تمدید را ببینید."
+	if bot := b.Store.TgRep(ctx, o.Chat); bot != "" && bot != o.RepID {
+		tail = fmt.Sprintf("حالت نمایندگی همین ربات روی پنل قبلی شما (<code>%s</code>) می‌ماند؛ این پنل تازه را از پنل وب با همین نام کاربری و رمز مدیریت کنید. شارژ آن از دکمهٔ «🤝 پنل نمایندگی» است.", esc(bot))
+	}
+	b.send(ctx, o.Chat, fmt.Sprintf("🎉 <b>پنل نمایندگی شما آماده است</b>\n%s\n🌐 آدرس: %s\n👤 نام کاربری: <code>%s</code>\n🔑 رمز موقت: <code>%s</code>\n💳 اعتبار: <b>%s</b>\n\nبعد از اولین ورود رمز را عوض کنید. %s",
+		line, esc(strings.TrimRight(b.SubBase, "/")), esc(o.RepID), esc(res.Password), gbWord(o.GB), tail), nil)
 }
 
 // ---- the owner's settings ----
