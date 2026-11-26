@@ -520,7 +520,7 @@ func TestTenantLinksSeveralHosts(t *testing.T) {
 }
 
 func TestTenantUsedBytesAndAddUsage(t *testing.T) {
-	_, _, a, b := twoTenants(t)
+	s, _, a, b := twoTenants(t)
 	code, c := a.do("POST", "/clients", map[string]any{"name": "moved1", "volume_bytes": 10 << 30, "days": 30, "used_bytes": 3 << 30,
 		"uuid": "1b2c3d4e-0000-4000-8000-0000000000aa", "sub_token": "abcdefgh12345678xyz", "external_ref": "abcdefgh12345678xyz"})
 	if code != 201 || c["used_bytes"].(float64) != 3<<30 || c["remaining_bytes"].(float64) != 7<<30 || c["uuid"] != "1b2c3d4e-0000-4000-8000-0000000000aa" {
@@ -550,9 +550,34 @@ func TestTenantUsedBytesAndAddUsage(t *testing.T) {
 	if code, res := b.do("POST", "/bulk/add-usage", map[string]any{"clients": []map[string]any{{"name": "moved1", "add_bytes": 1}}}); code != 200 || res["ok"].(float64) != 0 {
 		t.Fatalf("other shop reached moved1: %d %v", code, res)
 	}
+	// Use brought over is not use on this panel.
+	if _, c := a.do("GET", "/clients/moved1", nil); c["used_here_bytes"].(float64) != 0 || c["imported_bytes"].(float64) != 4<<30 {
+		t.Fatalf("here/imported %v %v", c["used_here_bytes"], c["imported_bytes"])
+	}
+	if _, me := a.do("GET", "/me", nil); me["imported"].(float64) != 4<<30 || me["used"].(float64) != 0 {
+		t.Fatalf("me used %v imported %v", me["used"], me["imported"])
+	}
 	// Used up: limited.
 	a.do("POST", "/bulk/add-usage", map[string]any{"clients": []map[string]any{{"name": "moved1", "add_bytes": 7 << 30}}})
 	if _, c := a.do("GET", "/clients/moved1", nil); c["status"] != "limited" {
 		t.Fatalf("status %v", c["status"])
+	}
+	// What the nodes carry is use on this panel.
+	if _, err := s.ApplyUsage(context.Background(), "de-1", wire.UsageBatch{NodeID: "de-1", Seq: 1, FromUnix: 1, ToUnix: 2,
+		Traffic: []wire.UserTraffic{{Email: "tish+moved1", Up: 100, Down: 900}}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, c := a.do("GET", "/clients/moved1", nil); c["used_here_bytes"].(float64) != 1000 || c["imported_bytes"].(float64) != 11<<30 || c["used_bytes"].(float64) != 11<<30+1000 {
+		t.Fatalf("after node use %v %v %v", c["used_here_bytes"], c["imported_bytes"], c["used_bytes"])
+	}
+	if _, me := a.do("GET", "/me", nil); me["used"].(float64) != 1000 || me["imported"].(float64) != 11<<30 {
+		t.Fatalf("me after node use %v %v", me["used"], me["imported"])
+	}
+	// A reset clears both.
+	if code, _ := a.do("POST", "/clients/moved1/reset", nil); code != 200 {
+		t.Fatalf("reset %d", code)
+	}
+	if _, c := a.do("GET", "/clients/moved1", nil); c["used_bytes"].(float64) != 0 || c["imported_bytes"].(float64) != 0 || c["used_here_bytes"].(float64) != 0 {
+		t.Fatalf("after reset %v", c)
 	}
 }

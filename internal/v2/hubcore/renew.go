@@ -165,7 +165,7 @@ WHERE id=? AND volume_credit>=? AND unlimited_units>=?`, net, res.ChargedUnits, 
 	if _, err := tx.ExecContext(ctx, `UPDATE clients SET trial=0, note=CASE WHEN note='free trial' THEN '' ELSE note END WHERE email=? AND trial=1`, email); err != nil {
 		return res, err
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE client_usage SET up=0, down=0 WHERE email=?`, email); err != nil {
+	if _, err := tx.ExecContext(ctx, `UPDATE client_usage SET up=0, down=0, ext_bytes=0 WHERE email=?`, email); err != nil {
 		return res, err
 	}
 	// A paid renewal ends any gift; the owner renewing a reseller's client

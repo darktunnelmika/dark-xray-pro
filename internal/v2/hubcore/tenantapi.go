@@ -68,7 +68,8 @@ type TenantInfo struct {
 	MaxBytes   int64    `json:"max_bytes"`
 	Clients    int      `json:"clients"`
 	Volume     int64    `json:"volume"`
-	Used       int64    `json:"used"`
+	Used       int64    `json:"used"`     // carried by this panel since the clients came
+	Imported   int64    `json:"imported"` // brought from the panel they came from
 	Online     int      `json:"online"`
 	Rev        int64    `json:"rev"` // the panel's current revision (a starting cursor)
 }
@@ -81,7 +82,7 @@ func (s *Store) tenantInfo(ctx context.Context, id string) (TenantInfo, error) {
 	for _, t := range all {
 		if t.ID == id {
 			info := TenantInfo{ID: t.ID, Name: t.Name, Enabled: t.Enabled, Inbounds: s.TenantInbounds(ctx, t.Tenant),
-				MaxClients: t.MaxClients, MaxBytes: t.MaxBytes, Clients: t.Clients, Volume: t.Volume, Used: t.Used, Online: t.Online}
+				MaxClients: t.MaxClients, MaxBytes: t.MaxBytes, Clients: t.Clients, Volume: t.Volume, Used: t.Used, Imported: t.Imported, Online: t.Online}
 			_ = s.ro.QueryRowContext(ctx, `SELECT v FROM rev_seq WHERE id=1`).Scan(&info.Rev)
 			return info, nil
 		}

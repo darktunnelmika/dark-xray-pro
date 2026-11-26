@@ -792,7 +792,7 @@ FROM clients c LEFT JOIN client_usage u ON u.email=c.email WHERE c.email=? AND c
 	if err := keepRepUsage(ctx, tx, email); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE client_usage SET up=0, down=0 WHERE email=?`, email); err != nil {
+	if _, err := tx.ExecContext(ctx, `UPDATE client_usage SET up=0, down=0, ext_bytes=0 WHERE email=?`, email); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE clients SET last_reset_unix=? WHERE email=?`, now, email); err != nil {

@@ -97,7 +97,7 @@ func resetUsageTx(ctx context.Context, tx *sql.Tx, email, reason string, now int
 	if err := keepRepUsage(ctx, tx, email); err != nil { // the reseller's lifetime total keeps it
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE client_usage SET up=0, down=0 WHERE email=?`, email); err != nil {
+	if _, err := tx.ExecContext(ctx, `UPDATE client_usage SET up=0, down=0, ext_bytes=0 WHERE email=?`, email); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE clients SET last_reset_unix=? WHERE email=?`, now, email); err != nil {

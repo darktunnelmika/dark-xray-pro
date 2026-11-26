@@ -112,6 +112,11 @@ letter or digit. Two shops (or a shop and the owner) can use the same name.
 `status` is one of `active`, `disabled`, `expired`, `limited` (volume used up) and
 `on_hold` (the term starts at the first connection; `on_hold_seconds` is its
 length). `volume_bytes` and `remaining_bytes` are `-1` for unlimited.
+`used_bytes` is everything that counts against the volume: `used_here_bytes`
+(carried by this panel's nodes since the client came) plus `imported_bytes`
+(brought from the panel it moved from: `used_bytes` on create, `/bulk/add-usage`,
+or an import). `/me` and the owner's summary show `used` (this panel only) and
+`imported` apart. A reset clears both.
 `sub_fetched_unix` is the last time the client's app fetched its subscription here
 (0 = not since it came; written every 30 seconds).
 

@@ -154,6 +154,7 @@ func (s *Store) ensureTenantSchema() error {
 		{"clients", "external_ref", "TEXT NOT NULL DEFAULT ''"},
 		{"clients", "rev", "INTEGER NOT NULL DEFAULT 0"},
 		{"client_usage", "rev", "INTEGER NOT NULL DEFAULT 0"},
+		{"client_usage", "ext_bytes", "INTEGER NOT NULL DEFAULT 0"}, // use brought from another panel (in down; not carried here)
 		{"events", "tenant_id", "TEXT NOT NULL DEFAULT ''"},
 	} {
 		if err := s.addColumn(c.table, c.col, c.def); err != nil {
@@ -183,8 +184,9 @@ type TenantSummary struct {
 	Clients     int   `json:"clients"`
 	Active      int   `json:"active"`
 	Online      int   `json:"online"`
-	Volume      int64 `json:"volume"` // sum of the limited clients' volume
-	Used        int64 `json:"used"`
+	Volume      int64 `json:"volume"`   // sum of the limited clients' volume
+	Used        int64 `json:"used"`     // carried by this panel's nodes since the clients came here
+	Imported    int64 `json:"imported"` // use brought from the panel they came from (counts against volume only)
 	Keys        int   `json:"keys"`
 	WebhookOn   bool  `json:"webhook_on"`
 	WebhookLast int64 `json:"webhook_last_ok"`
@@ -295,9 +297,9 @@ func (s *Store) Tenants(ctx context.Context) ([]TenantSummary, error) {
 		rep := tenantRep(out[i].ID)
 		_ = s.ro.QueryRowContext(ctx, `SELECT COUNT(*),
 COALESCE(SUM(CASE WHEN c.enabled=1 AND (c.expires_unix=0 OR c.expires_unix>?) AND (c.volume_bytes<0 OR COALESCE(u.up+u.down,0)<c.volume_bytes) THEN 1 ELSE 0 END),0),
-COALESCE(SUM(CASE WHEN c.volume_bytes>0 THEN c.volume_bytes ELSE 0 END),0), COALESCE(SUM(u.up+u.down),0)
+COALESCE(SUM(CASE WHEN c.volume_bytes>0 THEN c.volume_bytes ELSE 0 END),0), COALESCE(SUM(MAX(0,u.up+u.down-u.ext_bytes)),0), COALESCE(SUM(u.ext_bytes),0)
 FROM clients c LEFT JOIN client_usage u ON u.email=c.email WHERE c.rep_id=?`, now, rep).
-			Scan(&out[i].Clients, &out[i].Active, &out[i].Volume, &out[i].Used)
+			Scan(&out[i].Clients, &out[i].Active, &out[i].Volume, &out[i].Used, &out[i].Imported)
 		_ = s.ro.QueryRowContext(ctx, `SELECT COUNT(DISTINCT o.email) FROM online o JOIN clients c ON c.email=o.email WHERE c.rep_id=? AND o.seen_unix>=?`, rep, now-120).Scan(&out[i].Online)
 		_ = s.ro.QueryRowContext(ctx, `SELECT COUNT(*) FROM tenant_keys WHERE tenant_id=?`, out[i].ID).Scan(&out[i].Keys)
 	}

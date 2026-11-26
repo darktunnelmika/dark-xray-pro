@@ -49,6 +49,8 @@ type TenantLinksItem struct {
 	TotalBytes  int64        `json:"total_bytes"` // 0 = unlimited, as in Subscription-Userinfo
 	ExpireUnix  int64        `json:"expire_unix"` // effective expiry, 0 = none
 	SubFetched  int64        `json:"sub_fetched_unix"`
+	UsedHere    int64        `json:"used_here_bytes"`
+	Imported    int64        `json:"imported_bytes"`
 	Links       []ClientLink `json:"links"` // empty when the client is off, expired or out of volume
 }
 
@@ -101,7 +103,7 @@ func (s *Store) TenantBulkLinks(ctx context.Context, tenant string, names []stri
 		}
 		out = append(out, TenantLinksItem{
 			Name: n, OK: true, ExternalRef: tc.ExternalRef, Status: tc.Status, Enabled: tc.Enabled, Rev: tc.Rev,
-			SubToken: tc.SubToken, SubFetched: tc.SubFetched, UpBytes: tc.UpBytes, DownBytes: tc.DownBytes, TotalBytes: total, ExpireUnix: tc.EffectiveExpiry,
+			SubToken: tc.SubToken, SubFetched: tc.SubFetched, UsedHere: tc.UsedHereBytes, Imported: tc.ImportedBytes, UpBytes: tc.UpBytes, DownBytes: tc.DownBytes, TotalBytes: total, ExpireUnix: tc.EffectiveExpiry,
 			Userinfo: sub.Userinfo(tc.UpBytes, tc.DownBytes, total, tc.EffectiveExpiry), Links: links,
 		})
 	}

@@ -28,8 +28,8 @@ func addTenantUsage(ctx context.Context, tx *sql.Tx, email string, n, rev int64)
 			return err
 		}
 	}
-	_, err := tx.ExecContext(ctx, `INSERT INTO client_usage(email,up,down,first_seen_unix,last_seen_unix,rev) VALUES(?,0,?,0,0,?)
-ON CONFLICT(email) DO UPDATE SET down=down+excluded.down, rev=excluded.rev`, email, n, rev)
+	_, err := tx.ExecContext(ctx, `INSERT INTO client_usage(email,up,down,first_seen_unix,last_seen_unix,rev,ext_bytes) VALUES(?,0,?,0,0,?,?)
+ON CONFLICT(email) DO UPDATE SET down=down+excluded.down, rev=excluded.rev, ext_bytes=ext_bytes+excluded.ext_bytes`, email, n, rev, n)
 	return err
 }
 

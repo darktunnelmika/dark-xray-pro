@@ -76,6 +76,8 @@ type TenantClient struct {
 	Note            string   `json:"note"`
 	Rev             int64    `json:"rev"`
 	SubFetched      int64    `json:"sub_fetched_unix"` // last subscription fetch (0 = never since it came here)
+	UsedHereBytes   int64    `json:"used_here_bytes"`  // of used_bytes, what this panel's nodes carried
+	ImportedBytes   int64    `json:"imported_bytes"`   // of used_bytes, what came from the panel it moved from
 	SubURL          string   `json:"subscription_url,omitempty"`
 }
 
@@ -88,20 +90,20 @@ func (s *Store) tenantClientView(ctx context.Context, tenant string, c ClientVie
 // shop-only fields of all of them in one query.
 func (s *Store) tenantClientViews(ctx context.Context, tenant string, list []ClientView) []TenantClient {
 	type extra struct {
-		secret, ref     string
-		created, r1, r2 int64
+		secret, ref          string
+		created, r1, r2, ext int64
 	}
 	more := map[string]extra{}
 	emails := make([]string, len(list))
 	for i, c := range list {
 		emails[i] = c.Email
 	}
-	if rows, err := s.ro.QueryContext(ctx, `SELECT c.email,c.secret,c.external_ref,c.created_unix,c.rev,COALESCE(u.rev,0)
+	if rows, err := s.ro.QueryContext(ctx, `SELECT c.email,c.secret,c.external_ref,c.created_unix,c.rev,COALESCE(u.rev,0),COALESCE(u.ext_bytes,0)
 FROM clients c LEFT JOIN client_usage u ON u.email=c.email WHERE c.email IN (SELECT value FROM json_each(?))`, jsonList(emails)); err == nil {
 		for rows.Next() {
 			var e string
 			var x extra
-			if rows.Scan(&e, &x.secret, &x.ref, &x.created, &x.r1, &x.r2) == nil {
+			if rows.Scan(&e, &x.secret, &x.ref, &x.created, &x.r1, &x.r2, &x.ext) == nil {
 				more[e] = x
 			}
 		}
@@ -114,6 +116,7 @@ FROM clients c LEFT JOIN client_usage u ON u.email=c.email WHERE c.email IN (SEL
 		x := more[c.Email]
 		tc.TrojanPassword, tc.ExternalRef, tc.CreatedUnix, tc.Rev = x.secret, x.ref, x.created, max(x.r1, x.r2)
 		tc.SubFetched = fetched[c.Email]
+		tc.ImportedBytes, tc.UsedHereBytes = x.ext, max(0, tc.UsedBytes-x.ext)
 		out[i] = tc
 	}
 	return out

@@ -385,7 +385,7 @@ func (s *Store) ImportForeign(ctx context.Context, path string, opt ForeignOptio
 			if c.duration > 0 {
 				first, last = 0, 0
 			}
-			if _, err := tx.ExecContext(ctx, `INSERT OR REPLACE INTO client_usage(email,up,down,first_seen_unix,last_seen_unix) VALUES(?,?,?,?,?)`, c.name, c.up, c.down, first, last); err != nil {
+			if _, err := tx.ExecContext(ctx, `INSERT OR REPLACE INTO client_usage(email,up,down,first_seen_unix,last_seen_unix,ext_bytes) VALUES(?,?,?,?,?,?)`, c.name, c.up, c.down, first, last, c.up+c.down); err != nil {
 				undo()
 				return rep, err
 			}
