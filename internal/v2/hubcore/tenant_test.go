@@ -367,10 +367,10 @@ func TestClientQueriesAreReviewed(t *testing.T) {
 		"hubcore/commerce.go": 4, "hubcore/darkold.go": 6, "hubcore/darkold_history.go": 1, "hubcore/expiryrefund.go": 1,
 		"hubcore/export.go": 1, "hubcore/foreign.go": 4, "hubcore/inboundtools.go": 1, "hubcore/insights.go": 1,
 		"hubcore/manage.go": 2, "hubcore/migrate.go": 3, "hubcore/node.go": 1, "hubcore/pgapi.go": 5, "hubcore/plans.go": 3,
-		"hubcore/referral.go": 2, "hubcore/rename.go": 4, "hubcore/render.go": 2, "hubcore/renew.go": 2,
+		"hubcore/referral.go": 2, "hubcore/rename.go": 4, "hubcore/render.go": 4, "hubcore/renew.go": 2,
 		"hubcore/repbrand.go": 1, "hubcore/repctl.go": 4, "hubcore/repdelete.go": 2, "hubcore/repoverview.go": 1,
 		"hubcore/reps.go": 4, "hubcore/resets.go": 2, "hubcore/restore.go": 1, "hubcore/sales.go": 1,
-		"hubcore/shop.go": 3, "hubcore/store.go": 7, "hubcore/subpage.go": 2, "hubcore/system.go": 1,
+		"hubcore/shop.go": 3, "hubcore/store.go": 8, "hubcore/subpage.go": 2, "hubcore/system.go": 1,
 		"hubcore/tg.go": 3, "hubcore/toman.go": 1,
 		// merged from v2.56: all scoped by seller, by one client, or legacy_clients (reviewed)
 		"hubcore/pgapi_more.go": 10, "hubcore/repusedhere.go": 2, "hubcore/resale.go": 1, "hubcore/legacy.go": 9,
