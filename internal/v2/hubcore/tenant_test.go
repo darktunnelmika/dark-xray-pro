@@ -14,7 +14,7 @@ import (
 	"github.com/darktunnelmika/dark-xray-pro/internal/v2/wire"
 )
 
-func i64(v int64) *int64 { return &v }
+func i64(v int64) *int64    { return &v }
 func strp(v string) *string { return &v }
 
 // tenantStore is a store with the seed clients (alice, bob — the owner's),
@@ -258,8 +258,11 @@ func TestTenantSubscriptionShowsTheShop(t *testing.T) {
 	b, _ := io.ReadAll(resp.Body)
 	resp.Body.Close()
 	page := string(b)
-	if resp.StatusCode != 200 || strings.Contains(page, "Dark Panel") || strings.Contains(page, "tish+u1") || strings.Contains(page, "t.me/darkpanel") || !strings.Contains(page, "Tishtar VPN") {
-		t.Fatalf("page %d shows the panel or the inner name", resp.StatusCode)
+	for bad, want := range map[string]bool{"Dark Panel": false, "tish+u1": false, "t.me/darkpanel": false, "Tishtar VPN": true} {
+		if strings.Contains(page, bad) != want {
+			i := max(strings.Index(page, bad)-200, 0)
+			t.Errorf("page %d: %q shown=%v, want %v; near: %s", resp.StatusCode, bad, !want, want, page[i:min(i+400, len(page))])
+		}
 	}
 }
 

@@ -148,7 +148,7 @@ func (s *Store) ensureTgBotUsers() error {
 	}
 	for _, q := range []string{
 		`INSERT OR IGNORE INTO tg_bot_users(seller,chat_id,first_unix,last_unix,blocked) SELECT '',chat_id,first_unix,last_unix,blocked FROM tg_users`,
-		`INSERT OR IGNORE INTO tg_bot_users(seller,chat_id,first_unix,last_unix) SELECT c.rep_id,l.chat_id,0,0 FROM tg_links l JOIN clients c ON c.email=l.email WHERE c.rep_id<>'' AND `+ownerWorld+` AND l.chat_id<>0`,
+		`INSERT OR IGNORE INTO tg_bot_users(seller,chat_id,first_unix,last_unix) SELECT c.rep_id,l.chat_id,0,0 FROM tg_links l JOIN clients c ON c.email=l.email WHERE c.rep_id<>'' AND ` + ownerWorld + ` AND l.chat_id<>0`,
 		`INSERT OR IGNORE INTO tg_bot_users(seller,chat_id,first_unix,last_unix) SELECT seller,CAST(substr(buyer,4) AS INTEGER),0,0 FROM orders WHERE seller<>'' AND buyer LIKE 'tg:%' AND CAST(substr(buyer,4) AS INTEGER)<>0`,
 		`INSERT OR IGNORE INTO tg_bot_users(seller,chat_id,first_unix,last_unix) SELECT DISTINCT seller,chat_id,0,0 FROM toman_wallet WHERE seller<>'' AND chat_id<>0`,
 	} {

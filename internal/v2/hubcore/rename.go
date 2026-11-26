@@ -1,10 +1,10 @@
 package hubcore
 
 import (
-	"strings"
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 )
 
 // Renaming a client. The name is the client's key everywhere (usage, history,

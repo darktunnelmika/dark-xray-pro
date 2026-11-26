@@ -1,8 +1,8 @@
 package hubcore
 
 import (
-	"database/sql"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log"

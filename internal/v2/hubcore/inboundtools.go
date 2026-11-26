@@ -314,6 +314,11 @@ func (s *Store) ClientLinks(ctx context.Context, email string) ([]ClientLink, er
 // canSeeClient tells whether the signed-in principal may see this client
 // (owners and staff see all, resellers only their own).
 func (s *Store) canSeeClient(r *http.Request, email string) bool {
+	if who(r).Role == "owner" && s.TenantOfClient(r.Context(), email) != "" {
+		// A connected shop's client: tenantGuard has already applied the
+		// shop's owner_access to this route's {email}.
+		return r.PathValue("email") == email
+	}
 	list, err := s.scopedClients(r.Context(), who(r))
 	if err != nil {
 		return false
