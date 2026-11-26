@@ -365,7 +365,7 @@ func TestClientQueriesAreReviewed(t *testing.T) {
 	reviewed := map[string]int{
 		"hubcore/admin.go": 1, "hubcore/analytics.go": 14, "hubcore/bulkcreate.go": 1, "hubcore/bulkops.go": 6,
 		"hubcore/commerce.go": 4, "hubcore/darkold.go": 6, "hubcore/darkold_history.go": 1, "hubcore/expiryrefund.go": 1,
-		"hubcore/export.go": 1, "hubcore/foreign.go": 3, "hubcore/inboundtools.go": 1, "hubcore/insights.go": 1,
+		"hubcore/export.go": 1, "hubcore/foreign.go": 4, "hubcore/inboundtools.go": 1, "hubcore/insights.go": 1,
 		"hubcore/manage.go": 2, "hubcore/migrate.go": 3, "hubcore/pgapi.go": 5, "hubcore/plans.go": 2,
 		"hubcore/referral.go": 2, "hubcore/rename.go": 4, "hubcore/render.go": 2, "hubcore/renew.go": 1,
 		"hubcore/repbrand.go": 1, "hubcore/repctl.go": 4, "hubcore/repdelete.go": 2, "hubcore/repoverview.go": 1,
