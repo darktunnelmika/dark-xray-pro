@@ -76,12 +76,20 @@ func scaleTenant(t *testing.T, s *Store, n int, timed func(string, func() error)
 	if err := s.PutTenant(ctx, Tenant{ID: "shop", Name: "Shop", Enabled: true}); err != nil {
 		t.Fatal(err)
 	}
+	// The shop's inbound has three addresses, like a bridge's: three configs
+	// per client.
+	if err := s.ComposeInbound(ctx, PresetRequest{Tag: "sv", Preset: "vless-ws"}, []Route{{NodeID: "de-1", DirectPort: 8443, Hosts: []Host{
+		{Path: "direct", Enabled: true, Remark: "a", Address: "a.example.org", Port: 8443},
+		{Path: "direct", Enabled: true, Remark: "b", Address: "b.example.org", Port: 25456},
+		{Path: "direct", Enabled: true, Remark: "c", Address: "192.0.2.10", Port: 443}}}}); err != nil {
+		t.Fatal(err)
+	}
 	var worst time.Duration
 	timed(fmt.Sprintf("tenant: bulk create %d (500 a call)", n), func() error {
 		for start := 0; start < n; start += 500 {
 			items := make([]TenantClientIn, 0, 500)
 			for i := start; i < min(start+500, n); i++ {
-				items = append(items, TenantClientIn{Name: fmt.Sprintf("c%06d", i), VolumeBytes: i64(50 << 30), Days: i64(30), ExternalRef: strp(fmt.Sprintf("o-%d", i))})
+				items = append(items, TenantClientIn{Name: fmt.Sprintf("c%06d", i), VolumeBytes: i64(50 << 30), Days: i64(30), ExternalRef: strp(fmt.Sprintf("o-%d", i)), Inbounds: []string{"sv"}})
 			}
 			t0 := time.Now()
 			res, ok, err := s.TenantBulkCreate(ctx, "shop", items, false)
@@ -278,11 +286,11 @@ func scaleTenantSubs(t *testing.T, s *Store, n int, timed func(string, func() er
 		}
 	}
 	h := SubHandler(s)
-	storm := func(label string) {
+	storm := func(label string, n int) {
 		lat := make([]time.Duration, n)
 		work := make(chan int)
 		var wg sync.WaitGroup
-		var bad atomic.Int64
+		var bad, empty atomic.Int64
 		t0 := time.Now()
 		for w := 0; w < 50; w++ {
 			wg.Add(1)
@@ -295,8 +303,11 @@ func scaleTenantSubs(t *testing.T, s *Store, n int, timed func(string, func() er
 					s1 := time.Now()
 					h.ServeHTTP(rec, r)
 					lat[i] = time.Since(s1)
-					if rec.Code != 200 || rec.Body.Len() == 0 {
+					switch {
+					case rec.Code != 200:
 						bad.Add(1)
+					case rec.Body.Len() == 0:
+						empty.Add(1)
 					}
 				}
 			}()
@@ -331,21 +342,26 @@ func scaleTenantSubs(t *testing.T, s *Store, n int, timed func(string, func() er
 		close(stop)
 		total := time.Since(t0)
 		sortDur(lat)
-		t.Logf("%-28s %8.1f ms total  p50 %5.1f  p99 %6.1f  max %6.1f ms (%d fetches, %d bad)", label, ms(total),
-			ms(lat[n/2]), ms(lat[n*99/100]), ms(lat[n-1]), n, bad.Load())
+		t.Logf("%-28s %8.1f ms total  p50 %5.1f  p99 %6.1f  max %6.1f ms (%d fetches, %d not 200, %d empty)", label, ms(total),
+			ms(lat[n/2]), ms(lat[n*99/100]), ms(lat[n-1]), n, bad.Load(), empty.Load())
 		wmu.Lock()
 		if len(writes) > 0 {
 			sortDur(writes)
 			t.Logf("%-28s p50 %6.1f ms  max %6.1f ms (%d renewals)", "  shop writes during it", ms(writes[len(writes)/2]), ms(writes[len(writes)-1]), len(writes))
 		}
 		wmu.Unlock()
-		if bad.Load() > 0 {
-			t.Errorf("%s: %d bad answers", label, bad.Load())
+		if bad.Load()+empty.Load() > 0 {
+			t.Errorf("%s: %d bad answers, %d empty", label, bad.Load(), empty.Load())
 		}
 	}
 	s.dropSubCache()
-	storm("subscriptions, cold")
-	storm("subscriptions, cached")
+	storm("subscriptions, cold", n)
+	// The same apps again within the cache's 30 seconds (a burst of
+	// retries): a slice small enough to come back in time.
+	s.dropSubCache()
+	k := min(n, 1000)
+	storm(fmt.Sprintf("first %d, cold", k), k)
+	storm(fmt.Sprintf("first %d, again", k), k)
 	timed(fmt.Sprintf("write %d fetch times", n), func() error { return s.flushSubFetches(ctx) })
 	timed("tenant: who fetched", func() error {
 		rep, err := s.TenantSubFetches(ctx, "shop", 1, "not_fetched", "", 1000)
