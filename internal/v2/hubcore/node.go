@@ -96,20 +96,27 @@ tx_rate=MAX(tx_rate,excluded.tx_rate), online=MAX(online,excluded.online)`,
 // between can only make RemainingBytes smaller, so the Node may at worst
 // count those bytes twice for one poll (stricter, never looser).
 func (s *Store) limits(ctx context.Context, nodeID string) ([]wire.UserLimit, error) {
-	clients, err := s.nodeClients(ctx, nodeID)
+	// One query for the clients and their usage (not one per client: a node
+	// can carry tens of thousands).
+	rows, err := s.ro.QueryContext(ctx, `SELECT c.email,c.enabled,c.volume_bytes,c.expires_unix,c.duration_seconds,c.max_ips,
+COALESCE(u.up,0),COALESCE(u.down,0),COALESCE(u.first_seen_unix,0),COALESCE(u.last_seen_unix,0)
+FROM clients c LEFT JOIN client_usage u ON u.email=c.email
+WHERE c.email IN (SELECT ci.email FROM client_inbounds ci JOIN inbound_routes r ON r.tag=ci.tag WHERE r.node_id=?) ORDER BY c.email`, nodeID)
 	if err != nil {
 		return nil, err
 	}
-	out := make([]wire.UserLimit, 0, len(clients))
-	for _, c := range clients {
-		u, err := s.ClientUsage(ctx, c.Email)
-		if err != nil {
+	defer rows.Close()
+	out := []wire.UserLimit{}
+	for rows.Next() {
+		var c Client
+		var u Usage
+		if err := rows.Scan(&c.Email, &c.Enabled, &c.VolumeBytes, &c.ExpiresUnix, &c.DurationSeconds, &c.MaxIPs, &u.Up, &u.Down, &u.FirstSeen, &u.LastSeen); err != nil {
 			return nil, err
 		}
 		out = append(out, wire.UserLimit{Email: c.Email, Enabled: c.Enabled, ExpiresUnix: EffectiveExpiry(c, u),
 			RemainingBytes: Remaining(c, u), MaxIPs: c.MaxIPs})
 	}
-	return out, nil
+	return out, rows.Err()
 }
 
 // ApplyUsage stores one batch exactly once. A batch with a sequence the
