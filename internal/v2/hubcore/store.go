@@ -305,6 +305,10 @@ func Open(path string) (*Store, error) {
 		st.Close()
 		return nil, err
 	}
+	if err := st.ensureTenantSchema(); err != nil { // after the columns it reads (rep_id, events)
+		st.Close()
+		return nil, err
+	}
 	// Last: its first fill reads tables the steps above create.
 	if err := st.ensureTgBotUsers(); err != nil {
 		st.Close()
@@ -418,8 +422,16 @@ func putClientTx(ctx context.Context, tx *sql.Tx, c Client, now int64) error {
 	}
 	// An update that omits credentials keeps the existing ones, so editing a
 	// client never breaks its connections or its subscription link.
-	var oldUUID, oldSecret, oldTok string
-	_ = tx.QueryRowContext(ctx, `SELECT uuid,secret,sub_token FROM clients WHERE email=?`, c.Email).Scan(&oldUUID, &oldSecret, &oldTok)
+	var oldUUID, oldSecret, oldTok, oldRep string
+	_ = tx.QueryRowContext(ctx, `SELECT uuid,secret,sub_token,rep_id FROM clients WHERE email=?`, c.Email).Scan(&oldUUID, &oldSecret, &oldTok, &oldRep)
+	// A connected shop's clients are written only by the shop (or the owner
+	// where the shop allows it), and its name space stays its own.
+	if t, ok := tenantOfRep(oldRep); ok && tenantAccess(ctx) != t {
+		return fmt.Errorf("%w: client already exists", ErrInvalid)
+	}
+	if oldUUID == "" && tenantAccess(ctx) == "" && reservedName(ctx, tx, c.Email) {
+		return fmt.Errorf("%w: names starting with a connected shop's id and + are reserved for that shop", ErrInvalid)
+	}
 	c.UUID = firstNonEmpty(c.UUID, oldUUID, RandomUUID())
 	c.Secret = firstNonEmpty(c.Secret, oldSecret, randomHex(16))
 	c.SubToken = firstNonEmpty(c.SubToken, oldTok, randomHex(16))
@@ -608,9 +620,18 @@ type ClientView struct {
 	Trial          bool      `json:"trial,omitempty"`    // a free trial from a Telegram shop
 }
 
-// Clients lists every client with usage, newest first.
+// Clients lists the panel's own clients (the owner's and the resellers')
+// with usage, newest first. Connected shops' clients are not in it: they
+// are listed by their tenant (TenantClients) and only summarised for the
+// owner (Tenants).
 func (s *Store) Clients(ctx context.Context) ([]ClientView, error) {
-	return s.clientViews(ctx, "", "")
+	return s.clientViews(ctx, ownerWorld)
+}
+
+// allClients is every client, connected shops' included. Only for work that
+// must cover every client (exports of the whole database, scale tests).
+func (s *Store) allClients(ctx context.Context) ([]ClientView, error) {
+	return s.clientViews(ctx, "")
 }
 
 // clientView is one client, read on its own (not the whole list).
@@ -625,19 +646,19 @@ func (s *Store) clientView(ctx context.Context, email string) (ClientView, error
 	return list[0], nil
 }
 
-// clientViews reads clients; where (with one argument) narrows them to one
-// email ("c.email=?") or one seller ("c.rep_id=?").
-func (s *Store) clientViews(ctx context.Context, where, arg string) ([]ClientView, error) {
+// clientViews reads clients; where (on clients alias c, with its arguments)
+// narrows them, e.g. to one email ("c.email=?") or one seller ("c.rep_id=?").
+func (s *Store) clientViews(ctx context.Context, where string, args ...any) ([]ClientView, error) {
 	q := `SELECT c.email,c.uuid,c.enabled,c.volume_bytes,c.expires_unix,c.duration_seconds,c.max_ips,c.sub_token,c.rep_id,c.plan,c.note,
 COALESCE(u.up,0),COALESCE(u.down,0),COALESCE(u.first_seen_unix,0),COALESCE(u.last_seen_unix,0),
 EXISTS(SELECT 1 FROM online o WHERE o.email=c.email AND o.seen_unix>=?),c.reset_period,c.last_reset_unix,c.next_plan,c.hwid_limit,c.start_by_unix,c.trial
 FROM clients c LEFT JOIN client_usage u ON u.email=c.email`
-	args := []any{s.now().Unix() - 120}
+	qargs := []any{s.now().Unix() - 120}
 	if where != "" {
 		q += " WHERE " + where
-		args = append(args, arg)
+		qargs = append(qargs, args...)
 	}
-	rows, err := s.ro.QueryContext(ctx, q+` ORDER BY c.created_unix DESC, c.email`, args...)
+	rows, err := s.ro.QueryContext(ctx, q+` ORDER BY c.created_unix DESC, c.email`, qargs...)
 	if err != nil {
 		return nil, err
 	}
@@ -672,11 +693,11 @@ FROM clients c LEFT JOIN client_usage u ON u.email=c.email`
 		at[out[i].Email] = i
 	}
 	tq, targs := `SELECT email,tag FROM client_inbounds ORDER BY email,tag`, []any(nil)
-	switch where {
-	case "c.email=?":
-		tq, targs = `SELECT email,tag FROM client_inbounds WHERE email=? ORDER BY tag`, []any{arg}
-	case "c.rep_id=?":
-		tq, targs = `SELECT i.email,i.tag FROM client_inbounds i JOIN clients c ON c.email=i.email WHERE c.rep_id=? ORDER BY i.email,i.tag`, []any{arg}
+	switch {
+	case where == "c.email=?":
+		tq, targs = `SELECT email,tag FROM client_inbounds WHERE email=? ORDER BY tag`, args
+	case where != "":
+		tq, targs = `SELECT i.email,i.tag FROM client_inbounds i JOIN clients c ON c.email=i.email WHERE `+where+` ORDER BY i.email,i.tag`, args
 	}
 	tags, err := s.ro.QueryContext(ctx, tq, targs...)
 	if err != nil {

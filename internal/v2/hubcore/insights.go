@@ -49,7 +49,7 @@ func (s *Store) Insights(ctx context.Context, days int) (Insights, error) {
 		d.Day = day
 		in.Daily = append(in.Daily, d)
 	}
-	rows, err = s.ro.QueryContext(ctx, `SELECT email,SUM(up+down) b FROM usage_daily WHERE day=? GROUP BY email ORDER BY b DESC LIMIT 8`, today.Format("2006-01-02"))
+	rows, err = s.ro.QueryContext(ctx, `SELECT email,SUM(up+down) b FROM usage_daily WHERE day=? AND email NOT IN (SELECT email FROM clients WHERE substr(rep_id,1,1)='~') GROUP BY email ORDER BY b DESC LIMIT 8`, today.Format("2006-01-02"))
 	if err != nil {
 		return in, err
 	}
@@ -63,7 +63,7 @@ func (s *Store) Insights(ctx context.Context, days int) (Insights, error) {
 		in.Top = append(in.Top, u)
 	}
 	rows.Close()
-	rows, err = s.ro.QueryContext(ctx, `SELECT unix,node_id,email,kind FROM events ORDER BY id DESC LIMIT 15`)
+	rows, err = s.ro.QueryContext(ctx, `SELECT unix,node_id,email,kind FROM events WHERE tenant_id='' ORDER BY id DESC LIMIT 15`)
 	if err != nil {
 		return in, err
 	}

@@ -1,6 +1,7 @@
 package hubcore
 
 import (
+	"database/sql"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -55,13 +56,20 @@ func (s *Store) ResetUsage(ctx context.Context, email, reason string) error {
 		return err
 	}
 	defer tx.Rollback()
+	if err := resetUsageTx(ctx, tx, email, reason, s.now().Unix()); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// resetUsageTx is ResetUsage inside the caller's transaction.
+func resetUsageTx(ctx context.Context, tx *sql.Tx, email, reason string, now int64) error {
 	var n int
 	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM clients WHERE email=?`, email).Scan(&n); err != nil || n == 0 {
 		return ErrNotFound
 	}
 	var up, down int64
 	_ = tx.QueryRowContext(ctx, `SELECT up,down FROM client_usage WHERE email=?`, email).Scan(&up, &down)
-	now := s.now().Unix()
 	if _, err := tx.ExecContext(ctx, `INSERT INTO usage_resets(email,unix,up,down,reason) VALUES(?,?,?,?,?)`, email, now, up, down, reason); err != nil {
 		return err
 	}
@@ -77,7 +85,7 @@ func (s *Store) ResetUsage(ctx context.Context, email, reason string) error {
 	if _, err := tx.ExecContext(ctx, `INSERT INTO events(unix,node_id,email,kind) VALUES(?,?,?,?)`, now, "", email, "reset:"+reason); err != nil {
 		return err
 	}
-	return tx.Commit()
+	return nil
 }
 
 // SetResetPeriod sets the periodic reset ("" turns it off). The period

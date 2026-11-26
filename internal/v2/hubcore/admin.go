@@ -56,6 +56,10 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 				}
 				return
 			}
+			r, ok = s.tenantGuard(w, r, p) // a connected shop's client (tenant.go)
+			if !ok {
+				return
+			}
 			if r.Method == http.MethodGet || r.Method == http.MethodHead {
 				h(w, r.WithContext(context.WithValue(r.Context(), principalKey{}, p)))
 				return

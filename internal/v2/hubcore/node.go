@@ -142,9 +142,15 @@ func (s *Store) ApplyUsage(ctx context.Context, nodeID string, b wire.UsageBatch
 	day := time.Unix(ts, 0).UTC().Format("2006-01-02")
 	// Statements reused for every row of the batch (thousands of users).
 	prep := func(q string) (*sql.Stmt, error) { return tx.PrepareContext(ctx, q) }
-	stUsage, err := prep(`INSERT INTO client_usage(email,up,down,first_seen_unix,last_seen_unix) VALUES(?,?,?,?,?)
+	// One revision for the whole batch: connected shops read "usage changed
+	// since my cursor" from it (tenantfeed.go).
+	var rev int64
+	if err := tx.QueryRowContext(ctx, `UPDATE rev_seq SET v=v+1 WHERE id=1 RETURNING v`).Scan(&rev); err != nil {
+		return wire.UsageAck{}, err
+	}
+	stUsage, err := prep(`INSERT INTO client_usage(email,up,down,first_seen_unix,last_seen_unix,rev) VALUES(?,?,?,?,?,?)
 ON CONFLICT(email) DO UPDATE SET up=up+excluded.up, down=down+excluded.down, last_seen_unix=excluded.last_seen_unix,
-first_seen_unix=CASE WHEN first_seen_unix=0 THEN excluded.first_seen_unix ELSE first_seen_unix END`)
+first_seen_unix=CASE WHEN first_seen_unix=0 THEN excluded.first_seen_unix ELSE first_seen_unix END, rev=excluded.rev`)
 	if err != nil {
 		return wire.UsageAck{}, err
 	}
@@ -169,7 +175,7 @@ ON CONFLICT(email,node_id,day) DO UPDATE SET up=up+excluded.up, down=down+exclud
 		if pct != 100 {
 			t.Up, t.Down = t.Up*pct/100, t.Down*pct/100
 		}
-		if _, err := stUsage.ExecContext(ctx, t.Email, t.Up, t.Down, ts, ts); err != nil {
+		if _, err := stUsage.ExecContext(ctx, t.Email, t.Up, t.Down, ts, ts, rev); err != nil {
 			return wire.UsageAck{}, err
 		}
 		if _, err := stDaily.ExecContext(ctx, t.Email, nodeID, day, t.Up, t.Down); err != nil {

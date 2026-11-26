@@ -125,7 +125,8 @@ func gbText(b int64) string {
 // subAccount adds the settings-driven naming to an account.
 func (s *Store) subAccount(ctx context.Context, c Client, u Usage) sub.Account {
 	set, _ := s.brandFor(ctx, c.Email)
-	acc := sub.Account{Email: c.Email, UUID: c.UUID, Secret: c.Secret, IranDirect: s.Routing(ctx).ClientIranDirect, RemarkTemplate: set.RemarkTemplate}
+	name := s.publicName(ctx, c.Email)
+	acc := sub.Account{Email: name, UUID: c.UUID, Secret: c.Secret, IranDirect: s.Routing(ctx).ClientIranDirect, RemarkTemplate: set.RemarkTemplate}
 	left := Remaining(c, u)
 	exp := EffectiveExpiry(c, u)
 	days := "∞"
@@ -140,7 +141,7 @@ func (s *Store) subAccount(ctx context.Context, c Client, u Usage) sub.Account {
 	if c.VolumeBytes >= 0 {
 		total = gbText(c.VolumeBytes)
 	}
-	acc.Vars = map[string]string{"email": c.Email, "used": gbText(u.Up + u.Down), "left": gbText(left), "total": total, "days": days}
+	acc.Vars = map[string]string{"email": name, "used": gbText(u.Up + u.Down), "left": gbText(left), "total": total, "days": days}
 	if set.Fragment {
 		acc.Fragment = &sub.Fragment{Length: set.FragmentLength, Interval: set.FragmentInterval, Noise: set.Noise}
 	}
@@ -164,7 +165,7 @@ func (s *Store) subAccount(ctx context.Context, c Client, u Usage) sub.Account {
 		default:
 			when = "⏳ بدون انقضا"
 		}
-		acc.InfoLines = []string{"👤 " + c.Email + " | " + vol + " | " + when}
+		acc.InfoLines = []string{"👤 " + name + " | " + vol + " | " + when}
 	}
 	return acc
 }

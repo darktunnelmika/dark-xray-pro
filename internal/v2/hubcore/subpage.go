@@ -86,7 +86,8 @@ FROM clients c LEFT JOIN client_usage cu ON cu.email=c.email WHERE c.email=?`, e
 	}
 	T := pageText[lang]
 	set, _ := s.brandFor(ctx, email)
-	d := pageData{Lang: lang, Dir: "rtl", Email: c.Email, Title: or2(set.Title, c.Email), SubURL: subURL, Announce: set.Announce, Support: set.SupportURL, T: T}
+	shown := s.publicName(ctx, c.Email)
+	d := pageData{Lang: lang, Dir: "rtl", Email: shown, Title: or2(set.Title, shown), SubURL: subURL, Announce: set.Announce, Support: set.SupportURL, T: T}
 	if accentRE.MatchString(set.Accent) {
 		d.Accent = template.CSS(set.Accent)
 	}
@@ -172,6 +173,9 @@ FROM clients c LEFT JOIN client_usage cu ON cu.email=c.email WHERE c.email=?`, e
 	var seller string
 	_ = s.ro.QueryRowContext(ctx, `SELECT rep_id FROM clients WHERE email=?`, email).Scan(&seller)
 	bot := s.BotUsernameFor(ctx, seller)
+	if _, ok := tenantOfRep(seller); ok {
+		bot = "" // a connected shop's customers are never sent to the panel's bots
+	}
 	if s.IsSubSeller(ctx, seller) {
 		// Sub-sellers' customers are not sent to the reseller's or the panel's
 		// bot; only to the sub-seller's own bot, if they run one. The page

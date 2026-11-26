@@ -176,7 +176,8 @@ func (s *Store) BulkExtend(ctx context.Context, req BulkRequest) (int, error) {
 		}
 		seen[e] = true
 		var exp, dur, vol int64
-		if err := tx.QueryRowContext(ctx, `SELECT expires_unix,duration_seconds,volume_bytes FROM clients WHERE email=?`, e).Scan(&exp, &dur, &vol); err != nil {
+		// Owner bulk work never reaches a connected shop's clients.
+		if err := tx.QueryRowContext(ctx, `SELECT expires_unix,duration_seconds,volume_bytes FROM clients c WHERE email=? AND `+ownerWorld, e).Scan(&exp, &dur, &vol); err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				continue
 			}
@@ -272,7 +273,7 @@ func (s *Store) PutGroup(ctx context.Context, g Group) error {
 		return err
 	}
 	for _, e := range g.Members {
-		if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO client_group_members(group_id,email) SELECT ?, email FROM clients WHERE email=?`, g.ID, e); err != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO client_group_members(group_id,email) SELECT ?, email FROM clients c WHERE email=? AND `+ownerWorld+``, g.ID, e); err != nil {
 			return err
 		}
 	}
