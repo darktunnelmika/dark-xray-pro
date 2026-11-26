@@ -124,7 +124,8 @@ type Store struct {
 	now  func() time.Time
 	path string
 
-	usageMu sync.Map // node id -> *sync.Mutex: one usage batch at a time per node (usageinbox.go)
+	usageMu sync.Map   // node id -> *sync.Mutex: one usage batch at a time per node (usageinbox.go)
+	applyMu sync.Mutex // one usage chunk at a time across nodes
 
 	distMu  sync.Mutex
 	distDir string // dark-node and xray for installs and self-update

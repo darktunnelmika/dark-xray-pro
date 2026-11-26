@@ -182,7 +182,11 @@ func (s *Store) drainUsage(ctx context.Context, nodeID string) error {
 		}
 		b.Seq = seq
 		for {
+			// One chunk of any node at a time: the panel's own writes then
+			// wait behind at most one chunk, not one per reporting node.
+			s.applyMu.Lock()
 			next, finished, err := s.applyUsageChunk(ctx, nodeID, b, ts, pct, done)
+			s.applyMu.Unlock()
 			if err != nil {
 				return err
 			}
