@@ -286,6 +286,7 @@ func (s *Store) webhookTick(ctx context.Context, nodes map[string]bool, fails *i
 
 // RunWebhooks delivers pending items every few seconds until ctx ends.
 func (s *Store) RunWebhooks(ctx context.Context) {
+	go s.RunTenantWebhooks(ctx) // connected shops' own webhooks (tenantwebhook.go)
 	var nodes map[string]bool
 	fails := 0
 	for {

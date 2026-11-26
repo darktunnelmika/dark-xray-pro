@@ -250,6 +250,7 @@ func tenantRoutes(s *Store, mux *docMux, subBase string) {
 			"base64": u, "singbox": u + "?format=singbox", "clash": u + "?format=clash", "xray": u + "?format=xray"}, "links": links})
 	}))
 	tenantBulkRoutes(s, mux, auth, base)
+	tenantWebhookRoutes(s, mux, auth)
 }
 
 // tenantAdminRoutes lets the owner manage tenants, their keys, look and

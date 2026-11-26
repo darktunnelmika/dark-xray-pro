@@ -78,6 +78,8 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 			h(w, r)
 		})
 	}
+	tenantRoutes(s, mux, subBase)    // connected shops' own API (tenantapi.go)
+	tenantAdminRoutes(s, mux, guard) // the owner's side of connected shops
 	mux.HandleFunc("POST /api/v2/auth/login", func(w http.ResponseWriter, r *http.Request) {
 		var in struct{ Username, Password, Code string }
 		if !decode(w, r, &in) {
