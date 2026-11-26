@@ -115,7 +115,7 @@ INSERT OR IGNORE INTO rev_seq(id,v) VALUES(1,0);
 // tenantTriggers run after the columns exist. The tombstone column is
 // "name", not "email": a rename moves every email column to the new name,
 // and a tombstone must keep the name that went away. There is no insert
-// trigger: a client is always inserted with rep_id '' and joins a tenant
+// trigger: a client is always inserted with rep_id ” and joins a tenant
 // with an update (every trigger is compiled into each statement that writes
 // the table, so fewer triggers keep all client writes cheaper).
 const tenantTriggers = `
