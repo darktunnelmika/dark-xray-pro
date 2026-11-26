@@ -249,7 +249,7 @@ ON CONFLICT(email,node_id,day) DO UPDATE SET up=up+excluded.up, down=down+exclud
 			if pct != 100 {
 				t.Up, t.Down = t.Up*pct/100, t.Down*pct/100
 			}
-			if _, err := stUsage.ExecContext(ctx, t.Email, t.Up, t.Down, ts, ts); err != nil {
+			if _, err := stUsage.ExecContext(ctx, t.Email, t.Up, t.Down, ts, ts, rev); err != nil {
 				return 0, false, err
 			}
 			if _, err := stDaily.ExecContext(ctx, t.Email, nodeID, day, t.Up, t.Down); err != nil {
