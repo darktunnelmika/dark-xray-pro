@@ -138,7 +138,10 @@ func Open(path string) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	q := "_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=synchronous(FULL)"
+	// cache_size: 32 MB for the writer (16 MB per reader) instead of SQLite's
+	// 2 MB, so tens of thousands of clients' index pages stay in memory; with
+	// the small default, bulk writes slowed down as the table grew.
+	q := "_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=synchronous(FULL)&_pragma=cache_size(-32000)"
 	u := url.URL{Scheme: "file", Path: path, RawQuery: q}
 	db, err := sql.Open("sqlite", u.String())
 	if err != nil {
@@ -149,7 +152,7 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("schema: %w", err)
 	}
-	ru := url.URL{Scheme: "file", Path: path, RawQuery: "mode=ro&_pragma=busy_timeout(5000)&_pragma=query_only(1)"}
+	ru := url.URL{Scheme: "file", Path: path, RawQuery: "mode=ro&_pragma=busy_timeout(5000)&_pragma=query_only(1)&_pragma=cache_size(-16000)"}
 	ro, err := sql.Open("sqlite", ru.String())
 	if err != nil {
 		db.Close()
