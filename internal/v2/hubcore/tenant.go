@@ -117,6 +117,9 @@ INSERT OR IGNORE INTO rev_seq(id,v) VALUES(1,0);
 // and a tombstone must keep the name that went away.
 const tenantTriggers = `
 CREATE INDEX IF NOT EXISTS clients_rep ON clients(rep_id);
+CREATE INDEX IF NOT EXISTS clients_email_nocase ON clients(email COLLATE NOCASE);
+CREATE INDEX IF NOT EXISTS clients_uuid ON clients(uuid);
+CREATE INDEX IF NOT EXISTS clients_secret ON clients(secret);
 CREATE UNIQUE INDEX IF NOT EXISTS clients_ext_ref ON clients(rep_id, external_ref) WHERE external_ref<>'';
 CREATE INDEX IF NOT EXISTS events_tenant ON events(tenant_id, id) WHERE tenant_id<>'';
 CREATE TRIGGER IF NOT EXISTS clients_tenant_ins AFTER INSERT ON clients

@@ -137,10 +137,10 @@ func TestTenantAPIClientLifecycle(t *testing.T) {
 	s, _, a, _ := twoTenants(t)
 	ctx := context.Background()
 	uuid := "1b2c3d4e-0000-4000-8000-0000000000aa"
-	code, c := a.do("POST", "/clients", map[string]any{"name": "moved", "uuid": uuid, "trojan_password": "oldpass123", "sub_token": "OldSubId123",
+	code, c := a.do("POST", "/clients", map[string]any{"name": "moved", "uuid": uuid, "trojan_password": "oldpass123", "sub_token": "OldSubId12345678",
 		"external_ref": "rep7/order9", "volume_bytes": 10 << 30, "days": 30, "max_ips": 2, "max_devices": 3, "note": "from 3x-ui"})
-	if code != 201 || c["uuid"] != uuid || c["trojan_password"] != "oldpass123" || c["sub_token"] != "OldSubId123" || c["max_devices"].(float64) != 3 ||
-		c["subscription_url"] != "https://sub.example.com/sub/OldSubId123" || c["name"] != "moved" {
+	if code != 201 || c["uuid"] != uuid || c["trojan_password"] != "oldpass123" || c["sub_token"] != "OldSubId12345678" || c["max_devices"].(float64) != 3 ||
+		c["subscription_url"] != "https://sub.example.com/sub/OldSubId12345678" || c["name"] != "moved" {
 		t.Fatalf("create %d %v", code, c)
 	}
 	if code, _ := a.do("POST", "/clients", map[string]any{"name": "moved"}); code != 409 {
@@ -174,7 +174,7 @@ func TestTenantAPIClientLifecycle(t *testing.T) {
 	if code, c := a.do("POST", "/clients/moved/renew", map[string]any{"add_bytes": 1 << 30, "add_days": 5}); code != 200 || c["volume_bytes"].(float64) != 21<<30 {
 		t.Fatalf("renew %d %v", code, c)
 	}
-	if code, c := a.do("POST", "/clients/moved/rotate", nil); code != 200 || c["sub_token"] == "OldSubId123" || c["uuid"] != uuid {
+	if code, c := a.do("POST", "/clients/moved/rotate", nil); code != 200 || c["sub_token"] == "OldSubId12345678" || c["uuid"] != uuid {
 		t.Fatalf("rotate link %d %v", code, c)
 	}
 	if code, l := a.do("GET", "/clients/moved/links", nil); code != 200 || !strings.HasPrefix(fmt.Sprint(l["subscription_url"]), "https://sub.example.com/sub/") || l["links"] == nil {

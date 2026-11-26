@@ -21,6 +21,9 @@ var tenantNameRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$`)
 // secretRE: a Trojan/Shadowsocks password a shop may bring along.
 var secretRE = regexp.MustCompile(`^[A-Za-z0-9._~+=-]{4,128}$`)
 
+// subTokenRE: a subscription token a shop may bring along (what /sub/ accepts).
+var subTokenRE = regexp.MustCompile(`^[A-Za-z0-9_-]{16,64}$`)
+
 // externalRefRE: the shop's own id for the client (an order, a reseller…).
 var externalRefRE = regexp.MustCompile(`^[\x21-\x7e]{1,128}$`)
 
@@ -254,8 +257,8 @@ func (s *Store) checkCredentials(ctx context.Context, q interface {
 		}
 	}
 	if in.SubToken != "" {
-		if !subIDRE.MatchString(in.SubToken) {
-			return fmt.Errorf("%w: sub_token is 8–64 letters, digits, _ or -", ErrInvalid)
+		if !subTokenRE.MatchString(in.SubToken) { // shorter tokens do not open /sub/<token>
+			return fmt.Errorf("%w: sub_token is 16–64 letters, digits, _ or -", ErrInvalid)
 		}
 		if q.QueryRowContext(ctx, `SELECT 1 FROM clients WHERE sub_token=?`, in.SubToken).Scan(&x) == nil {
 			return fmt.Errorf("%w: this sub_token is already in use", ErrConflict)

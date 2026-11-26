@@ -416,6 +416,7 @@ func TestTenantSchemaUpgradesAnOlderDatabase(t *testing.T) {
 	for _, q := range []string{
 		`DROP TRIGGER clients_tenant_ins`, `DROP TRIGGER clients_tenant_upd`, `DROP TRIGGER clients_tenant_del`, `DROP TRIGGER events_tenant_ins`,
 		`DROP INDEX clients_rep`, `DROP INDEX clients_ext_ref`, `DROP INDEX events_tenant`,
+		`DROP INDEX clients_email_nocase`, `DROP INDEX clients_uuid`, `DROP INDEX clients_secret`,
 		`DROP TABLE tenant_keys`, `DROP TABLE tenants`, `DROP TABLE tenant_tombstones`, `DROP TABLE rev_seq`,
 		`ALTER TABLE clients DROP COLUMN external_ref`, `ALTER TABLE clients DROP COLUMN rev`,
 		`ALTER TABLE client_usage DROP COLUMN rev`, `ALTER TABLE events DROP COLUMN tenant_id`,

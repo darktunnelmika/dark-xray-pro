@@ -158,6 +158,7 @@ Everything except `name` is optional:
 - `uuid`, `trojan_password`, `sub_token`: only when moving a customer from another
   panel, so their configs and subscription link keep working. Left out, new ones are
   made. They can only be set at creation; change them later with `rotate`.
+  `sub_token` is 16–64 letters, digits, `_` or `-` (what `/sub/<token>` opens).
 
 ### Change
 
