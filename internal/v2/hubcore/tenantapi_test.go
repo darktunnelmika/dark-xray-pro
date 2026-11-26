@@ -463,3 +463,58 @@ func TestTenantBulkLinksAndVersion(t *testing.T) {
 		t.Fatalf("bulk/links audited %d times", n)
 	}
 }
+
+// TestTenantLinksSeveralHosts: one inbound with several hosts gives a shop's
+// client one config per host (the bridge's addresses), and changing a host
+// moves links_version.
+func TestTenantLinksSeveralHosts(t *testing.T) {
+	s, _, a, _ := twoTenants(t)
+	ctx := context.Background()
+	hosts := []Host{
+		{Path: "direct", Enabled: true, Remark: "r2", Address: "r2.fllow.example", Port: 8443},
+		{Path: "direct", Enabled: true, Remark: "q9", Address: "q9.fllow.example", Port: 25456, SNI: "q9.fllow.example"},
+		{Path: "direct", Enabled: true, Remark: "ip", Address: "193.0.2.10", Port: 443},
+	}
+	if err := s.ComposeInbound(ctx, PresetRequest{Tag: "tv", Preset: "vless-ws"}, []Route{{NodeID: "de-1", DirectPort: 8443, Hosts: hosts}}); err != nil {
+		t.Fatal(err)
+	}
+	if code, res := a.do("PATCH", "/clients/u1", map[string]any{"inbounds": []string{"tv"}}); code != 200 {
+		t.Fatalf("inbounds %d %v", code, res)
+	}
+	_, res := a.do("POST", "/bulk/links", map[string]any{"names": []string{"u1"}})
+	links := res["clients"].([]any)[0].(map[string]any)["links"].([]any)
+	got := map[string]bool{}
+	for _, l := range links {
+		got[fmt.Sprint(l.(map[string]any)["link"])] = true
+	}
+	if len(links) != 3 {
+		t.Fatalf("want 3 configs, got %d: %v", len(links), got)
+	}
+	for _, want := range []string{"@r2.fllow.example:8443", "@q9.fllow.example:25456", "@193.0.2.10:443"} {
+		found := false
+		for l := range got {
+			found = found || strings.Contains(l, want)
+		}
+		if !found {
+			t.Fatalf("no config for %s: %v", want, got)
+		}
+	}
+	v1 := fmt.Sprint(res["links_version"])
+	routes, err := s.Routes(ctx, "tv")
+	if err != nil {
+		t.Fatal(err)
+	}
+	routes[0].Hosts[1].Port = 25457
+	if err := s.PutRoutes(ctx, "tv", routes); err != nil {
+		t.Fatal(err)
+	}
+	clock := time.Unix(1_800_000_000, 0).Add(time.Minute)
+	s.SetClock(func() time.Time { return clock })
+	_, res = a.do("POST", "/bulk/links", map[string]any{"names": []string{"u1"}})
+	if fmt.Sprint(res["links_version"]) == v1 {
+		t.Fatal("a host change must move links_version")
+	}
+	if !strings.Contains(fmt.Sprint(res["clients"]), "q9.fllow.example:25457") {
+		t.Fatalf("new port missing: %v", res["clients"])
+	}
+}
