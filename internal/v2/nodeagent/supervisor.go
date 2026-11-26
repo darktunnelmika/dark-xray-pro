@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -71,11 +72,7 @@ func (s *Supervisor) Test(ctx context.Context, cfg []byte) error {
 	cmd := exec.CommandContext(ctx, s.Binary, "run", "-test", "-c", s.candidatePath())
 	cmd.Stdout, cmd.Stderr = &out, &out
 	if err := cmd.Run(); err != nil {
-		msg := out.String()
-		if len(msg) > 600 {
-			msg = msg[len(msg)-600:]
-		}
-		return fmt.Errorf("xray rejected config: %v: %s", err, msg)
+		return fmt.Errorf("xray rejected config: %v: %s", err, testReason(out.String()))
 	}
 	return nil
 }
@@ -261,4 +258,18 @@ func (w *splitAccess) Write(p []byte) (int, error) {
 		w.buf = w.buf[:0]
 	}
 	return len(p), nil
+}
+
+// testReason picks the line that says why Xray refused a config; its
+// deprecation warnings come first and would otherwise crowd it out.
+func testReason(out string) string {
+	for _, l := range strings.Split(out, "\n") {
+		if strings.Contains(l, "Failed to start") {
+			return strings.TrimSpace(l)
+		}
+	}
+	if len(out) > 600 {
+		out = out[len(out)-600:]
+	}
+	return out
 }

@@ -47,11 +47,13 @@ type fakeXray struct {
 	mu      sync.Mutex
 	applied [][]byte
 	reject  bool
+	tries   int
 }
 
 func (f *fakeXray) Apply(_ context.Context, cfg []byte) (bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.tries++
 	if f.reject {
 		return false, errors.New("rejected")
 	}
@@ -103,12 +105,14 @@ type fakeHub struct {
 	received []wire.UsageBatch
 	acked    uint64
 	results  []wire.TaskResult
+	lastErr  string
 }
 
 func (h *fakeHub) Sync(_ context.Context, req wire.SyncRequest) (wire.SyncResponse, error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.results = append(h.results, req.Results...)
+	h.lastErr = req.LastError
 	if h.down {
 		return wire.SyncResponse{}, errors.New("hub down")
 	}
@@ -357,6 +361,35 @@ func TestRejectedConfigKeepsLastGood(t *testing.T) {
 	a.enforce(ctx)
 	if len(x.applied) != n {
 		t.Fatal("a rejected config must not replace the running one")
+	}
+	tries := x.tries
+	a.Exchange(ctx)
+	a.enforce(ctx)
+	a.Exchange(ctx)
+	if x.tries != tries {
+		t.Fatalf("the same refused config is not tried again every poll (%d → %d)", tries, x.tries)
+	}
+	hub.mu.Lock()
+	got := hub.lastErr
+	hub.mu.Unlock()
+	if !strings.Contains(got, "config 2 rejected, keeping last good") {
+		t.Fatalf("the HUB must hear that the config was refused, got %q", got)
+	}
+	now = now.Add(11 * time.Minute)
+	a.enforce(ctx)
+	if x.tries == tries {
+		t.Fatal("a refused config is tried again after a while")
+	}
+	x.reject = false
+	now = now.Add(11 * time.Minute)
+	a.enforce(ctx)
+	a.Exchange(ctx)
+	a.Exchange(ctx)
+	hub.mu.Lock()
+	got = hub.lastErr
+	hub.mu.Unlock()
+	if got != "" || len(x.applied) == n {
+		t.Fatalf("once applied the error clears (%q)", got)
 	}
 }
 

@@ -489,6 +489,15 @@ func putClientTx(ctx context.Context, tx *sql.Tx, c Client, now int64) error {
 	var oldUUID, oldSecret, oldTok, oldRep string
 	var rowid any // NULL keeps an existing row's id
 	if errors.Is(tx.QueryRowContext(ctx, `SELECT uuid,secret,sub_token,rep_id FROM clients WHERE email=?`, c.Email).Scan(&oldUUID, &oldSecret, &oldTok, &oldRep), sql.ErrNoRows) {
+		// Xray compares client names without letter case: "Ali" beside
+		// "ali" in one inbound makes it refuse the node's whole config.
+		var taken int
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM clients WHERE email=? COLLATE NOCASE`, c.Email).Scan(&taken); err != nil {
+			return err
+		}
+		if taken > 0 {
+			return fmt.Errorf("%w: client already exists (same name in other letter case)", ErrInvalid)
+		}
 		id, err := newRowID(ctx, tx, "clients")
 		if err != nil {
 			return err

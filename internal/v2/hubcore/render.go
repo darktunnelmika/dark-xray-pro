@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/darktunnelmika/dark-xray-pro/internal/v2/sub"
@@ -316,20 +317,65 @@ JOIN inbounds i ON i.tag=r.tag WHERE r.node_id=? AND i.enabled=1 ORDER BY i.tag`
 }
 
 func (s *Store) clientsByInbound(ctx context.Context, nodeID string) (map[string][]Client, error) {
+	// The oldest client of a name comes first, so it is the one kept below.
 	rows, err := s.ro.QueryContext(ctx, `SELECT ci.tag,c.email,c.uuid,c.secret FROM client_inbounds ci
-JOIN clients c ON c.email=ci.email JOIN inbound_routes r ON r.tag=ci.tag WHERE r.node_id=? ORDER BY ci.tag,c.email`, nodeID)
+JOIN clients c ON c.email=ci.email JOIN inbound_routes r ON r.tag=ci.tag WHERE r.node_id=?
+ORDER BY ci.tag, c.created_unix, c.rowid`, nodeID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	out := map[string][]Client{}
+	seen := map[string]bool{}
 	for rows.Next() {
 		var tag string
 		var c Client
 		if err := rows.Scan(&tag, &c.Email, &c.UUID, &c.Secret); err != nil {
 			return nil, err
 		}
+		// Xray refuses a whole config that holds one name twice in other
+		// letter case ("Ali" and "ali"), which would stop every change on
+		// the node. Older panels allowed such pairs; the newer one is left
+		// out here and CaseClashes reports it so it can be renamed.
+		k := tag + "\x00" + strings.ToLower(c.Email)
+		if seen[k] {
+			continue
+		}
+		seen[k] = true
 		out[tag] = append(out[tag], c)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	// The config keeps its usual order, so its hash only changes with its content.
+	for tag := range out {
+		sort.Slice(out[tag], func(i, j int) bool { return out[tag][i].Email < out[tag][j].Email })
+	}
+	return out, nil
+}
+
+// CaseClashes lists client names that differ only in letter case. Xray
+// treats them as one, so all but the oldest of each are left out of the
+// node configs until renamed.
+func (s *Store) CaseClashes(ctx context.Context) ([][]string, error) {
+	rows, err := s.ro.QueryContext(ctx, `SELECT email, lower(email) FROM clients WHERE lower(email) IN
+(SELECT lower(email) FROM clients GROUP BY lower(email) HAVING COUNT(*) > 1) ORDER BY lower(email), created_unix, rowid`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out [][]string
+	last := ""
+	for rows.Next() {
+		var e, k string
+		if err := rows.Scan(&e, &k); err != nil {
+			return nil, err
+		}
+		if k != last || len(out) == 0 {
+			out = append(out, nil)
+			last = k
+		}
+		out[len(out)-1] = append(out[len(out)-1], e)
 	}
 	return out, rows.Err()
 }

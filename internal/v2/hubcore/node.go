@@ -40,7 +40,7 @@ func (s *Store) Sync(ctx context.Context, nodeID string, req wire.SyncRequest) (
 		rev++
 	}
 	lastErr := req.LastError
-	if req.XrayRunning && int64(req.ConfigRevision) == rev {
+	if req.XrayRunning && int64(req.ConfigRevision) == rev && !configRejected(req.LastError) {
 		// The agent remembers its last failure for good; once Xray runs on the
 		// current config that failure is history, not the node's state.
 		lastErr = ""
@@ -284,4 +284,11 @@ func (s *Store) HideTunnel(ctx context.Context, node, iface string, hide bool) e
 	}
 	sort.Strings(keys)
 	return s.SetSetting(ctx, "tunnels_hidden", strings.Join(keys, ","))
+}
+
+// configRejected tells whether the agent's error says Xray refused the
+// current config: Xray then still runs, but on an older one, so the
+// error stays on the node until a config is applied (agent v2.13.7+).
+func configRejected(lastErr string) bool {
+	return strings.Contains(lastErr, "rejected, keeping last good")
 }

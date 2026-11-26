@@ -52,7 +52,7 @@ func (s *Store) BulkCreateClients(ctx context.Context, b BulkCreate) ([]string, 
 			return nil, fmt.Errorf("%w: %q is not a valid client name", ErrInvalid, email)
 		}
 		var x string
-		if err := tx.QueryRowContext(ctx, `SELECT email FROM clients WHERE email=?`, email).Scan(&x); err == nil {
+		if err := tx.QueryRowContext(ctx, `SELECT email FROM clients WHERE email=? COLLATE NOCASE`, email).Scan(&x); err == nil {
 			return nil, fmt.Errorf("%w: %s already exists", ErrInvalid, email)
 		} else if !errors.Is(err, sql.ErrNoRows) {
 			return nil, err

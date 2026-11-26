@@ -96,7 +96,7 @@ func (s *Store) CloneClient(ctx context.Context, from, to string) error {
 		return err
 	}
 	var n int
-	if s.ro.QueryRowContext(ctx, `SELECT COUNT(*) FROM clients WHERE email=?`, to).Scan(&n) == nil && n > 0 {
+	if s.ro.QueryRowContext(ctx, `SELECT COUNT(*) FROM clients WHERE email=? COLLATE NOCASE`, to).Scan(&n) == nil && n > 0 {
 		return fmt.Errorf("%w: %s already exists", ErrInvalid, to)
 	}
 	nc := c.Client

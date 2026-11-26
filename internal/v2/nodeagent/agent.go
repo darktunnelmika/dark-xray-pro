@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -17,7 +18,7 @@ import (
 )
 
 // Version is reported to the HUB.
-var Version = "v2.13.6"
+var Version = "v2.13.7"
 
 // Applier is the part of Supervisor the agent uses.
 type Applier interface {
@@ -63,6 +64,9 @@ type Agent struct {
 	stateAt      time.Time            // when state last came from the HUB
 	lastDecision Decision
 	appliedKey   string
+	rejectedKey  string // the desired state Xray last refused; not retried until it changes
+	rejectedErr  string // why, reported to the HUB until a config is applied
+	rejectedAt   time.Time
 	appliedSkel  string
 	appliedUsers InboundUsers
 	liveChanges  uint64
@@ -367,6 +371,9 @@ func (a *Agent) Exchange(ctx context.Context) time.Duration {
 	running, restarts, lastErr := a.xray.Status()
 	a.mu.Lock()
 	rev := a.state.ConfigRevision
+	if a.rejectedErr != "" {
+		lastErr = a.rejectedErr
+	}
 	a.mu.Unlock()
 	results := a.tasks.pending()
 	t0 := time.Now()
@@ -520,7 +527,9 @@ func (a *Agent) enforce(ctx context.Context) {
 	a.lastDecision = d
 	allowed := d.Allowed(state.Users)
 	key := strings.Join(allowed, "\n") + "\x00" + string(state.Config)
-	same := key == a.appliedKey
+	// A refused state is tried again only when it changes, or after a while
+	// in case the refusal was passing (a slow disk, a timeout).
+	same := key == a.appliedKey || key == a.rejectedKey && a.cfg.Now().Sub(a.rejectedAt) < 10*time.Minute
 	a.mu.Unlock()
 	if same {
 		return
@@ -545,6 +554,7 @@ func (a *Agent) enforce(ctx context.Context) {
 	if a.applyLive(ctx, hubXray, cfg) {
 		a.mu.Lock()
 		a.appliedKey = key
+		a.rejectedKey, a.rejectedErr = "", ""
 		a.mu.Unlock()
 		return
 	}
@@ -552,12 +562,16 @@ func (a *Agent) enforce(ctx context.Context) {
 	a.Collect(ctx)
 	if _, err := a.xray.Apply(ctx, cfg); err != nil {
 		a.cfg.Logf("config %d not applied, keeping last good: %v", state.ConfigRevision, err)
+		a.mu.Lock()
+		a.rejectedKey, a.rejectedAt, a.rejectedErr = key, a.cfg.Now(), fmt.Sprintf("config %d rejected, keeping last good: %v", state.ConfigRevision, err)
+		a.mu.Unlock()
 		return
 	}
 	skel, _ := Skeleton(hubXray)
 	users, _ := ParseUsers(cfg)
 	a.mu.Lock()
 	a.appliedKey, a.appliedSkel, a.appliedUsers = key, skel, users
+	a.rejectedKey, a.rejectedErr = "", ""
 	a.restarts++
 	a.mu.Unlock()
 }
