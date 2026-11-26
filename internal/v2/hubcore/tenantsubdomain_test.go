@@ -140,3 +140,24 @@ func TestTenantSubDomainOldLinks(t *testing.T) {
 	}
 	_ = io.Discard
 }
+
+// TestSubTokenLookupUsesIndex: the subscription token lookup must use the
+// partial index, or every fetch reads the whole clients table.
+func TestSubTokenLookupUsesIndex(t *testing.T) {
+	s, _ := tenantStore(t)
+	rows, err := s.db.Query(`EXPLAIN QUERY PLAN SELECT email FROM clients WHERE sub_token=? AND sub_token<>''`, "abcdefgh12345678")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	plan := ""
+	for rows.Next() {
+		var id, parent, nu int
+		var d string
+		_ = rows.Scan(&id, &parent, &nu, &d)
+		plan += d + "\n"
+	}
+	if !strings.Contains(plan, "clients_sub_token") {
+		t.Fatalf("plan:\n%s", plan)
+	}
+}

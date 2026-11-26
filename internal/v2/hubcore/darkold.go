@@ -513,7 +513,7 @@ FROM clients c JOIN managed_clients m ON m.email=c.id JOIN core_clients k ON k.e
 			cl.UUID = ""
 		}
 		var n int
-		_ = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM clients WHERE sub_token=?`, token).Scan(&n)
+		_ = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM clients WHERE sub_token=? AND sub_token<>''`, token).Scan(&n)
 		if n > 0 {
 			cl.SubToken = ""
 			rep.note("client %s: its subscription link is already used here; it gets a new one", email)

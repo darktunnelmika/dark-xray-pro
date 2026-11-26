@@ -293,7 +293,7 @@ func (s *Store) checkCredentials(ctx context.Context, q interface {
 		if !subTokenRE.MatchString(in.SubToken) { // shorter tokens do not open /sub/<token>
 			return fmt.Errorf("%w: sub_token is 16–64 letters, digits, _ or -", ErrInvalid)
 		}
-		if q.QueryRowContext(ctx, `SELECT 1 FROM clients WHERE sub_token=?`, in.SubToken).Scan(&x) == nil {
+		if q.QueryRowContext(ctx, `SELECT 1 FROM clients WHERE sub_token=? AND sub_token<>''`, in.SubToken).Scan(&x) == nil {
 			return fmt.Errorf("%w: this sub_token is already in use", ErrConflict)
 		}
 	}

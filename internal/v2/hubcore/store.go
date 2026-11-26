@@ -848,7 +848,9 @@ func (s *Store) EmailBySubToken(ctx context.Context, tok string) (string, error)
 		return "", ErrNotFound
 	}
 	var email string
-	err := s.ro.QueryRowContext(ctx, `SELECT email FROM clients WHERE sub_token=?`, tok).Scan(&email)
+	// "sub_token<>''" lets SQLite use the partial unique index on sub_token:
+	// without it every fetch read the whole clients table.
+	err := s.ro.QueryRowContext(ctx, `SELECT email FROM clients WHERE sub_token=? AND sub_token<>''`, tok).Scan(&email)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", ErrNotFound
 	}

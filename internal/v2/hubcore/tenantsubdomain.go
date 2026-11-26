@@ -273,7 +273,7 @@ func (s *Store) serveTenantSub(w http.ResponseWriter, r *http.Request, sub http.
 		return
 	}
 	var email string
-	if s.ro.QueryRowContext(r.Context(), `SELECT email FROM clients WHERE sub_token=? AND rep_id=?`, tok, tenantRep(tenant)).Scan(&email) != nil {
+	if s.ro.QueryRowContext(r.Context(), `SELECT email FROM clients WHERE sub_token=? AND sub_token<>'' AND rep_id=?`, tok, tenantRep(tenant)).Scan(&email) != nil {
 		s.tenantSubFallback(w, r, d)
 		return
 	}

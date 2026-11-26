@@ -349,7 +349,7 @@ func (s *Store) ImportForeign(ctx context.Context, path string, opt ForeignOptio
 		}
 		if c.subID != "" && subIDRE.MatchString(c.subID) {
 			var n int
-			_ = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM clients WHERE sub_token=?`, c.subID).Scan(&n)
+			_ = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM clients WHERE sub_token=? AND sub_token<>''`, c.subID).Scan(&n)
 			if n == 0 {
 				cl.SubToken = c.subID // the old 3x-ui link /sub/<subId> keeps working
 				links++

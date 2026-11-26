@@ -535,8 +535,8 @@ func (s *Store) importLegacyLink(ctx context.Context, rep, link string, mu *sync
 		return false, fmt.Errorf("another domain than %s", lr.Domain)
 	}
 	var owner string
-	if s.ro.QueryRowContext(ctx, `SELECT c.rep_id FROM clients c WHERE c.sub_token=?`, tok).Scan(&owner) == nil {
-		if owner == rep && s.ro.QueryRowContext(ctx, `SELECT 1 FROM legacy_clients l JOIN clients c ON c.email=l.email WHERE c.sub_token=?`, tok).Scan(new(int)) == nil {
+	if s.ro.QueryRowContext(ctx, `SELECT c.rep_id FROM clients c WHERE c.sub_token=? AND c.sub_token<>''`, tok).Scan(&owner) == nil {
+		if owner == rep && s.ro.QueryRowContext(ctx, `SELECT 1 FROM legacy_clients l JOIN clients c ON c.email=l.email WHERE c.sub_token=? AND c.sub_token<>''`, tok).Scan(new(int)) == nil {
 			return false, nil
 		}
 		return false, errors.New("this subscription id is already used here")
@@ -1045,7 +1045,7 @@ func (s *Store) legacySubHandler() http.Handler {
 		}
 		var email string
 		if !subIDRE.MatchString(tok) || s.ro.QueryRowContext(r.Context(), `SELECT c.email FROM clients c JOIN legacy_clients l ON l.email=c.email
-JOIN legacy_reps lr ON lr.rep_id=l.rep_id WHERE c.sub_token=? AND lr.domain=?`, tok, host).Scan(&email) != nil {
+JOIN legacy_reps lr ON lr.rep_id=l.rep_id WHERE c.sub_token=? AND c.sub_token<>'' AND lr.domain=?`, tok, host).Scan(&email) != nil {
 			http.NotFound(w, r)
 			return
 		}
