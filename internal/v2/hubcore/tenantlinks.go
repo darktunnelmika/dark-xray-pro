@@ -48,7 +48,8 @@ type TenantLinksItem struct {
 	DownBytes   int64        `json:"down_bytes"`
 	TotalBytes  int64        `json:"total_bytes"` // 0 = unlimited, as in Subscription-Userinfo
 	ExpireUnix  int64        `json:"expire_unix"` // effective expiry, 0 = none
-	Links       []ClientLink `json:"links"`       // empty when the client is off, expired or out of volume
+	SubFetched  int64        `json:"sub_fetched_unix"`
+	Links       []ClientLink `json:"links"` // empty when the client is off, expired or out of volume
 }
 
 // TenantBulkLinks reads up to 500 clients' configs. Unknown names come back

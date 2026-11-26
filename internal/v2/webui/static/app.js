@@ -5888,6 +5888,62 @@ async function viewTenants() {
       w.last_ok ? h("p", { class: "small muted" }, `${t("whLastOK")}: ${fmtDT(w.last_ok)}`) : null,
       w.last_error ? h("p", { class: "small error" }, `${t("whLastErr")}: ${w.last_error}`) : null, err), [test, save]);
   };
+  // The shop's own subscription domains: old links keep working here.
+  const domains = async (x) => {
+    const base = `/api/v2/admin/tenants/${encodeURIComponent(x.id)}`;
+    const box = h("div", { class: "form" });
+    const draw = async () => {
+      const [v, rep] = await Promise.all([api("GET", `${base}/sub-domains`), api("GET", `${base}/sub-fetches`).catch(() => null)]);
+      const dom = h("input", { dir: "ltr", placeholder: "sub.example.com" });
+      const port = h("input", { type: "number", min: "1", max: "65535", value: "2096", dir: "ltr" });
+      const prefix = h("input", { dir: "ltr", placeholder: "/2fmgkwhmfhyat8zr/" });
+      const fb = h("input", { dir: "ltr", placeholder: "https://203.0.113.5:2096" });
+      const tlsOn = h("input", { type: "checkbox", checked: true });
+      const err = h("div", { class: "error", role: "alert" });
+      const ip = (v.hub_ips || [])[0] || "";
+      const row = (d) => {
+        const msg = h("span", { class: "small", role: "status" });
+        return h("div", { class: "card item" },
+          h("div", { class: "head" }, h("span", { class: "name", dir: "ltr" }, `${d.domain}:${d.port}${d.prefix || "/…"}`),
+            h("span", { class: `badge ${d.dns_unix ? "good" : ""}` }, d.dns_unix ? (fa ? "به این پنل اشاره می‌کند" : "points here") : (fa ? "هنوز به این پنل اشاره نمی‌کند" : "not pointing here yet")),
+            d.tls ? h("span", { class: `badge ${d.cert_status === "ok" || d.cert_status === "issued" ? "good" : d.cert_status === "failed" ? "bad" : ""}` }, `${fa ? "گواهی" : "cert"}: ${d.cert_status || "—"}`) : null,
+            d.enabled ? null : h("span", { class: "badge bad" }, fa ? "خاموش" : "off")),
+          h("p", { class: "small muted", dir: "ltr" }, d.fallback ? `fallback → ${d.fallback}` : (fa ? "بدون fallback: شناسهٔ ناشناس = 404" : "no fallback: unknown ids get 404")),
+          d.port_error ? h("p", { class: "small error" }, `${fa ? "پورت" : "port"} ${d.port}: ${d.port_error}`) : null,
+          h("div", { class: "row" },
+            h("button", { onclick: async (e) => { e.preventDefault(); msg.textContent = "…";
+              try { const r = await api("POST", `${base}/sub-domains/${encodeURIComponent(d.domain)}/check`); msg.textContent = r.ok ? (r.reason || (fa ? "درست است؛ گواهی درخواست شد" : "OK; certificate ordered")) : r.reason; draw(); }
+              catch (y) { msg.textContent = y.message; } } }, fa ? "بررسی DNS و گواهی" : "Check DNS and certificate"),
+            h("button", { class: "ghost", onclick: async (e) => { e.preventDefault();
+              await guarded(() => api("PUT", `${base}/sub-domains/${encodeURIComponent(d.domain)}`, { ...d, enabled: !d.enabled })); draw(); } }, d.enabled ? (fa ? "خاموش" : "Turn off") : (fa ? "روشن" : "Turn on")),
+            h("button", { class: "ghost danger spacer", onclick: async (e) => { e.preventDefault();
+              if (await confirmAction(t("confirmDelete", { x: d.domain }))) await guarded(() => api("DELETE", `${base}/sub-domains/${encodeURIComponent(d.domain)}`)); domains(x); } }, t("delete")), msg));
+      };
+      fill(box,
+        h("p", { class: "small muted" }, fa ? `لینک‌های ساب قدیمی مشتری‌های این فروشگاه با همان دامنه، پورت و مسیر از این پنل جواب می‌گیرند. رکورد A دامنه را روی ${ip || "IP این سرور"} بگذارید و «بررسی» را بزنید. شناسه‌ای که اینجا نیست به پنل قدیمی (fallback) داده می‌شود و اگر آنجا هم نبود 404 می‌گیرد، هیچ‌وقت لیست خالی.`
+          : `Old subscription links of this shop's customers answer here on the same domain, port and path. Point the domain's A record at ${ip || "this server"} and press Check. An id not here goes to the old panel (fallback), and is a 404 if it is not there either — never an empty list.`),
+        rep ? h("div", { class: "chips" },
+          h("span", { class: "chip good" }, `${fa ? "ساب را آپدیت کرده‌اند" : "fetched"}: ${fmtNum(rep.fetched)}`),
+          h("span", { class: "chip" }, `${fa ? "هنوز نه" : "not yet"}: ${fmtNum(rep.not_fetched)}`),
+          h("span", { class: "chip muted" }, `${fa ? "از" : "since"} ${fmtDT(rep.since)}`)) : null,
+        ...(v.domains || []).map(row),
+        h("h3", {}, fa ? "دامنهٔ تازه" : "New domain"),
+        h("div", { class: "two" }, lab(fa ? "دامنه" : "Domain", dom), lab(fa ? "پورت" : "Port", port)),
+        lab(fa ? "پیشوند مسیر (خالی = هر مسیری که به شناسه ختم شود)" : "Path prefix (empty = any path ending in the id)", prefix),
+        lab(fa ? "پنل قدیمی برای شناسه‌های منتقل‌نشده (اختیاری)" : "Old panel for ids not moved yet (optional)", fb),
+        h("label", { class: "check" }, tlsOn, h("span", {}, "HTTPS")), err,
+        h("button", { class: "primary", onclick: async (e) => {
+          e.preventDefault(); err.textContent = "";
+          try {
+            await api("PUT", `${base}/sub-domains/${encodeURIComponent(dom.value.trim())}`, { port: +port.value || 0, tls: tlsOn.checked, prefix: prefix.value.trim(), fallback: fb.value.trim(), enabled: true });
+            toast(t("saved")); draw();
+          } catch (y) { err.textContent = y.message; }
+        } }, t("add")));
+    };
+    const d = openModal(`${fa ? "دامنه‌های ساب" : "Subscription domains"} · ${x.name}`, box);
+    d.classList.add("wide");
+    await draw();
+  };
   const move = (x) => {
     const sides = [["owner", "", fa ? "مالک" : "Owner"], ...(reps || []).map((r) => ["rep", r.ID, `${fa ? "نماینده" : "Reseller"}: ${r.Name || r.ID}`]), ...(list || []).map((tn) => ["tenant", tn.id, `${fa ? "فروشگاه" : "Shop"}: ${tn.name}`])];
     const sel = (pick) => h("select", {}, sides.map(([k, id, l]) => h("option", { value: `${k}:${id}`, selected: pick === `${k}:${id}` }, l)));
@@ -5927,6 +5983,7 @@ async function viewTenants() {
       h("button", { class: "ghost", onclick: () => keys(x) }, fa ? "کلیدهای API" : "API keys"),
       h("button", { class: "ghost", onclick: () => hook(x) }, t("whTitle")),
       h("button", { class: "ghost", onclick: () => { const d = openModal(x.name, repBrandCard(`/api/v2/admin/tenants/${encodeURIComponent(x.id)}/brand`, x.name)); d.classList.add("wide"); } }, fa ? "برند و صفحهٔ اشتراک" : "Brand and page"),
+      h("button", { class: "ghost", onclick: () => domains(x) }, fa ? "دامنه‌های ساب" : "Subscription domains"),
       h("button", { class: "ghost", onclick: () => move(x) }, fa ? "جابه‌جایی کاربرها" : "Move clients"),
       h("button", { class: "ghost danger spacer", onclick: async () => {
         if (await confirmAction(t("confirmDelete", { x: x.name }))) { await guarded(() => api("DELETE", `/api/v2/admin/tenants/${encodeURIComponent(x.id)}`)); route(); }
