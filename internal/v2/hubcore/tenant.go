@@ -114,7 +114,10 @@ INSERT OR IGNORE INTO rev_seq(id,v) VALUES(1,0);
 
 // tenantTriggers run after the columns exist. The tombstone column is
 // "name", not "email": a rename moves every email column to the new name,
-// and a tombstone must keep the name that went away.
+// and a tombstone must keep the name that went away. There is no insert
+// trigger: a client is always inserted with rep_id '' and joins a tenant
+// with an update (every trigger is compiled into each statement that writes
+// the table, so fewer triggers keep all client writes cheaper).
 const tenantTriggers = `
 CREATE INDEX IF NOT EXISTS clients_rep ON clients(rep_id);
 CREATE INDEX IF NOT EXISTS clients_email_nocase ON clients(email COLLATE NOCASE);
@@ -122,11 +125,7 @@ CREATE INDEX IF NOT EXISTS clients_uuid ON clients(uuid);
 CREATE INDEX IF NOT EXISTS clients_secret ON clients(secret);
 CREATE UNIQUE INDEX IF NOT EXISTS clients_ext_ref ON clients(rep_id, external_ref) WHERE external_ref<>'';
 CREATE INDEX IF NOT EXISTS events_tenant ON events(tenant_id, id) WHERE tenant_id<>'';
-CREATE TRIGGER IF NOT EXISTS clients_tenant_ins AFTER INSERT ON clients
-WHEN substr(NEW.rep_id,1,1)='~' BEGIN
-  UPDATE rev_seq SET v=v+1 WHERE id=1;
-  UPDATE clients SET rev=(SELECT v FROM rev_seq WHERE id=1) WHERE rowid=NEW.rowid;
-END;
+DROP TRIGGER IF EXISTS clients_tenant_ins;
 CREATE TRIGGER IF NOT EXISTS clients_tenant_upd AFTER UPDATE ON clients
 WHEN (substr(NEW.rep_id,1,1)='~' OR substr(OLD.rep_id,1,1)='~') AND NEW.rev=OLD.rev BEGIN
   UPDATE rev_seq SET v=v+1 WHERE id=1;
