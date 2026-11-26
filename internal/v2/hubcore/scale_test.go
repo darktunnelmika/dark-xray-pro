@@ -139,9 +139,10 @@ func scaleTenant(t *testing.T, s *Store, n int, timed func(string, func() error)
 			ms(lat[len(lat)/2]), ms(lat[len(lat)*99/100]), ms(lat[len(lat)-1]), len(lat))
 	}
 	single("tenant: single calls, idle", 100)
+	// Sequences after anything the nodes already delivered above.
 	batches := make([]wire.UsageBatch, len(nodes))
 	for i, id := range nodes {
-		batches[i] = batch(id, 1)
+		batches[i] = batch(id, 100)
 	}
 	done := make(chan time.Duration, len(nodes))
 	t0 := time.Now()
@@ -196,7 +197,7 @@ func scaleTenant(t *testing.T, s *Store, n int, timed func(string, func() error)
 		}
 		return nil
 	})
-	b := batch("de-1", 2)
+	b := batch("de-1", 101)
 	b.Traffic = b.Traffic[:n/10]
 	if _, err := s.ApplyUsage(ctx, "de-1", b); err != nil {
 		t.Fatal(err)
