@@ -3,8 +3,11 @@ package hubcore
 import (
 	"context"
 	"fmt"
+	"net/http/httptest"
 	"os"
 	"strconv"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -228,6 +231,129 @@ func scaleTenant(t *testing.T, s *Store, n int, timed func(string, func() error)
 	})
 	timed("owner: list clients", func() error { _, err := s.Clients(ctx); return err })
 	timed("tenant: summary", func() error { _, err := s.Tenants(ctx); return err })
+	scaleTenantSubs(t, s, n, timed)
+}
+
+// scaleTenantSubs times what a shop's bridge and its customers' apps do: the
+// configs version, every client's configs 500 at a time, and a refresh storm
+// of every subscription at once (50 at a time) while the shop writes.
+func scaleTenantSubs(t *testing.T, s *Store, n int, timed func(string, func() error) time.Duration) {
+	ctx := context.Background()
+	timed("tenant: links_version", func() error { _, err := s.tenantLinksVersion(ctx, "shop"); return err })
+	names := make([]string, n)
+	for i := range names {
+		names[i] = fmt.Sprintf("c%06d", i)
+	}
+	var worst time.Duration
+	timed(fmt.Sprintf("tenant: configs of %d (500 a call)", n), func() error {
+		for i := 0; i < n; i += 500 {
+			t0 := time.Now()
+			list, err := s.TenantBulkLinks(ctx, "shop", names[i:min(i+500, n)])
+			if err != nil {
+				return err
+			}
+			for _, c := range list {
+				if !c.OK {
+					return fmt.Errorf("%s: %s", c.Name, c.Error)
+				}
+			}
+			worst = max(worst, time.Since(t0))
+		}
+		return nil
+	})
+	t.Logf("%-28s %8.1f ms", "  slowest configs call", ms(worst))
+	toks := make([]string, n)
+	for i := 0; i < n; i += 500 {
+		page, err := s.TenantClientPage(ctx, "shop", func() string {
+			if i == 0 {
+				return ""
+			}
+			return names[i-1]
+		}(), 500)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for j, c := range page {
+			toks[i+j] = c.SubToken
+		}
+	}
+	h := SubHandler(s)
+	storm := func(label string) {
+		lat := make([]time.Duration, n)
+		work := make(chan int)
+		var wg sync.WaitGroup
+		var bad atomic.Int64
+		t0 := time.Now()
+		for w := 0; w < 50; w++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				for i := range work {
+					r := httptest.NewRequest("GET", "https://sub.example.org/sub/"+toks[i], nil)
+					r.Header.Set("User-Agent", "v2rayNG/1.9")
+					rec := httptest.NewRecorder()
+					s1 := time.Now()
+					h.ServeHTTP(rec, r)
+					lat[i] = time.Since(s1)
+					if rec.Code != 200 || rec.Body.Len() == 0 {
+						bad.Add(1)
+					}
+				}
+			}()
+		}
+		// The shop keeps writing during the storm.
+		stop := make(chan struct{})
+		var writes []time.Duration
+		var wmu sync.Mutex
+		go func() {
+			for k := 0; ; k++ {
+				select {
+				case <-stop:
+					return
+				default:
+				}
+				w0 := time.Now()
+				if _, err := s.TenantRenew(ctx, "shop", names[(k*7919)%n], TenantRenewIn{AddDays: 1}); err != nil {
+					t.Error(err)
+					return
+				}
+				wmu.Lock()
+				writes = append(writes, time.Since(w0))
+				wmu.Unlock()
+				time.Sleep(20 * time.Millisecond)
+			}
+		}()
+		for i := 0; i < n; i++ {
+			work <- i
+		}
+		close(work)
+		wg.Wait()
+		close(stop)
+		total := time.Since(t0)
+		sortDur(lat)
+		t.Logf("%-28s %8.1f ms total  p50 %5.1f  p99 %6.1f  max %6.1f ms (%d fetches, %d bad)", label, ms(total),
+			ms(lat[n/2]), ms(lat[n*99/100]), ms(lat[n-1]), n, bad.Load())
+		wmu.Lock()
+		if len(writes) > 0 {
+			sortDur(writes)
+			t.Logf("%-28s p50 %6.1f ms  max %6.1f ms (%d renewals)", "  shop writes during it", ms(writes[len(writes)/2]), ms(writes[len(writes)-1]), len(writes))
+		}
+		wmu.Unlock()
+		if bad.Load() > 0 {
+			t.Errorf("%s: %d bad answers", label, bad.Load())
+		}
+	}
+	s.dropSubCache()
+	storm("subscriptions, cold")
+	storm("subscriptions, cached")
+	timed(fmt.Sprintf("write %d fetch times", n), func() error { return s.flushSubFetches(ctx) })
+	timed("tenant: who fetched", func() error {
+		rep, err := s.TenantSubFetches(ctx, "shop", 1, "not_fetched", "", 1000)
+		if err == nil && rep.Fetched != n {
+			err = fmt.Errorf("fetched %d of %d", rep.Fetched, n)
+		}
+		return err
+	})
 }
 
 func ms(d time.Duration) float64 { return float64(d.Microseconds()) / 1000 }
