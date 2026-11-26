@@ -402,3 +402,51 @@ func TestClientQueriesAreReviewed(t *testing.T) {
 		}
 	}
 }
+
+// TestTenantSchemaUpgradesAnOlderDatabase opens a database made before the
+// tenant layer (no tenant tables, columns, indexes or triggers): the upgrade
+// adds them, keeps the data, and a second open changes nothing.
+func TestTenantSchemaUpgradesAnOlderDatabase(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "v2.sqlite")
+	s, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seed(t, s)
+	for _, q := range []string{
+		`DROP TRIGGER clients_tenant_ins`, `DROP TRIGGER clients_tenant_upd`, `DROP TRIGGER clients_tenant_del`, `DROP TRIGGER events_tenant_ins`,
+		`DROP INDEX clients_rep`, `DROP INDEX clients_ext_ref`, `DROP INDEX events_tenant`,
+		`DROP TABLE tenant_keys`, `DROP TABLE tenants`, `DROP TABLE tenant_tombstones`, `DROP TABLE rev_seq`,
+		`ALTER TABLE clients DROP COLUMN external_ref`, `ALTER TABLE clients DROP COLUMN rev`,
+		`ALTER TABLE client_usage DROP COLUMN rev`, `ALTER TABLE events DROP COLUMN tenant_id`,
+		`INSERT INTO client_usage(email,up,down) VALUES('alice',5,6)`,
+		`INSERT INTO events(unix,node_id,email,kind) VALUES(1,'de-1','alice','blocked:volume')`,
+	} {
+		if _, err := s.db.Exec(q); err != nil {
+			t.Fatal(q, err)
+		}
+	}
+	s.Close()
+	for i := 0; i < 2; i++ {
+		s, err = Open(path)
+		if err != nil {
+			t.Fatalf("open %d: %v", i, err)
+		}
+		ctx := context.Background()
+		if c, err := s.ClientByEmail(ctx, "alice"); err != nil || c.Usage.Up != 5 {
+			t.Fatalf("data lost: %+v %v", c, err)
+		}
+		if i == 0 {
+			if err := s.PutTenant(ctx, Tenant{ID: "tish", Name: "T", Enabled: true}); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := s.TenantCreate(ctx, "tish", TenantClientIn{Name: "u1"}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if c, err := s.TenantClient(ctx, "tish", "u1"); err != nil || c.Rev == 0 {
+			t.Fatalf("tenant after reopen: %+v %v", c, err)
+		}
+		s.Close()
+	}
+}

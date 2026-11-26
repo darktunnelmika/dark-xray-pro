@@ -16,7 +16,7 @@ const I18N = {
     addNode: "Add node", nodeId: "Node ID (e.g. de-1)", nodeToken: "Node token — shown once, keep it safe", online: "Online", offline: "Offline",
     restarts: "Xray starts", spooled: "Waiting batches", language: "Language", theme: "Theme", system: "System", light: "Light", dark: "Dark",
     logout: "Sign out", empty: "Nothing here yet.", saved: "Saved", failed: "Failed: {e}", clientsCount: "{n} clients", lastError: "Last error",
-    reps: "Resellers", changePassword: "Change password", oldPassword: "Current password", newPassword: "New password (10+ chars)",
+    reps: "Resellers", tenants: "Connected shops", acc_tenant: "shop key", changePassword: "Change password", oldPassword: "Current password", newPassword: "New password (10+ chars)",
     credit: "Credit", volumeCredit: "Volume credit", units: "Unlimited units", addCredit: "Add credit", unitsHint: "1 unit = 1 user × 30 days",
     plan: "Plan", planVolume: "Volume", planUnlimited: "Unlimited", repId: "Reseller ID", loginUser: "Login username", loginPass: "Login password",
     installCmd: "Run this on the new server as root (link works once, for 1 hour):", note: "Note", reinstall: "New install link",
@@ -81,7 +81,7 @@ const I18N = {
     addNode: "افزودن نود", nodeId: "شناسه نود (مثلاً de-1)", nodeToken: "توکن نود — فقط یک بار نشان داده می‌شود", online: "آنلاین", offline: "آفلاین",
     restarts: "دفعات اجرای Xray", spooled: "بستهٔ در انتظار", language: "زبان", theme: "پوسته", system: "سیستم", light: "روشن", dark: "تیره",
     logout: "خروج", empty: "هنوز چیزی نیست.", saved: "ذخیره شد", failed: "خطا: {e}", clientsCount: "{n} کلاینت", lastError: "آخرین خطا",
-    reps: "نماینده‌ها", changePassword: "تغییر رمز", oldPassword: "رمز فعلی", newPassword: "رمز جدید (حداقل ۱۰ کاراکتر)",
+    reps: "نماینده‌ها", tenants: "فروشگاه‌های متصل", acc_tenant: "کلید فروشگاه", changePassword: "تغییر رمز", oldPassword: "رمز فعلی", newPassword: "رمز جدید (حداقل ۱۰ کاراکتر)",
     credit: "اعتبار", volumeCredit: "اعتبار حجمی", units: "واحد نامحدود", addCredit: "افزودن اعتبار", unitsHint: "هر واحد = ۱ کاربر × ۳۰ روز",
     plan: "نوع پلن", planVolume: "حجمی", planUnlimited: "نامحدود", repId: "شناسه نماینده", loginUser: "نام کاربری ورود", loginPass: "رمز ورود",
     installCmd: "این دستور را روی سرور جدید با root اجرا کنید (یک‌بار مصرف، ۱ ساعت):", note: "توضیح", reinstall: "لینک نصب جدید",
@@ -269,14 +269,14 @@ function confirmAction(text, label) {
 }
 
 // ---------- Views ----------
-const allRoutes = { dashboard: viewDashboard, online: viewOnline, clients: viewClients, groups: viewGroups, inbounds: viewInbounds, nodes: viewNodes, routing: viewRouting, reps: viewReps, shop: viewShop, tickets: viewTickets, analytics: viewAnalytics, finance: viewFinance, activity: viewActivity, staff: viewStaff, settings: viewSettings };
+const allRoutes = { dashboard: viewDashboard, online: viewOnline, clients: viewClients, groups: viewGroups, inbounds: viewInbounds, nodes: viewNodes, routing: viewRouting, reps: viewReps, tenants: viewTenants, shop: viewShop, tickets: viewTickets, analytics: viewAnalytics, finance: viewFinance, activity: viewActivity, staff: viewStaff, settings: viewSettings };
 let me = null;
 let routes = allRoutes;
 function fullOwner() { return me && me.role === "owner" && !me.level; }
 function routesFor(m) {
   if (m && m.role === "owner" && m.level) {
     const r = { ...allRoutes };
-    delete r.finance; delete r.staff;
+    delete r.finance; delete r.staff; delete r.tenants;
     return r;
   }
   if (m && m.role === "rep") {
@@ -316,6 +316,7 @@ const ICONS = {
   inbounds: "M6 3v6M18 3v6M4 9h16v3a8 8 0 0 1-16 0zM12 20v2",
   nodes: "M3 4h18v6H3zM3 14h18v6H3zM7 7h.01M7 17h.01",
   reps: "M3 7h18v13H3zM8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M3 13h18",
+  tenants: "M3 9 5 3h14l2 6M3 9h18v12H3zM9 21v-6h6v6M7 9a2 2 0 0 0 4 0 2 2 0 0 0 4 0 2 2 0 0 0 4 0",
   sellers: "M15 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M8.5 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM20 8v6M23 11h-6",
   analytics: "M4 20V10M10 20V4M16 20v-7M22 20H2",
   tickets: "M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2zM8 9h8M8 13h5",
@@ -449,7 +450,7 @@ async function loadNotifs() {
 // Sidebar groups (desktop); phones keep the same order in the tab bar.
 const NAV_GROUPS = [
   ["overview", ["dashboard", "analytics", "online"]],
-  ["people", ["clients", "groups", "reps", "sellers"]],
+  ["people", ["clients", "groups", "reps", "sellers", "tenants"]],
   ["infra", ["inbounds", "nodes", "routing"]],
   ["sales", ["shop", "tickets", "credit", "finance"]],
   ["system", ["activity", "staff", "settings"]],
@@ -5322,6 +5323,142 @@ async function partnerKeys(reps) {
   openModal(T("API ساخت پنل نمایندگی", "Reseller panel API"), box);
 }
 
+// Connected shops: outside sales sites that keep their customers here. The
+// owner sees a summary per shop; details only where the shop allows it.
+async function viewTenants() {
+  const fa = lang === "fa";
+  const [list, inbounds, reps] = await Promise.all([api("GET", "/api/v2/admin/tenants"), api("GET", "/api/v2/admin/inbounds").catch(() => []), api("GET", "/api/v2/admin/reps").catch(() => [])]);
+  const accessLabel = { summary: fa ? "فقط خلاصه" : "summary only", read: fa ? "دیدن جزئیات" : "may look", write: fa ? "دیدن و تغییر" : "may look and change" };
+  const lab = (l, el, hint) => h("label", {}, h("span", {}, l), el, hint ? h("small", { class: "muted" }, hint) : null);
+  const edit = (x) => {
+    const id = h("input", { value: x ? x.id : "", disabled: !!x, required: true, dir: "ltr", pattern: "[a-z0-9][a-z0-9._\\-]{0,23}" });
+    const name = h("input", { value: x ? x.name : "", required: true });
+    const on = h("input", { type: "checkbox", checked: x ? x.enabled : true });
+    const maxC = h("input", { type: "number", min: "0", value: x ? x.max_clients : 0, dir: "ltr" });
+    const maxG = h("input", { type: "number", min: "0", step: "1", value: x ? Math.round(x.max_bytes / 2 ** 30) : 0, dir: "ltr" });
+    const acc = h("select", {}, ["summary", "read", "write"].map((a) => h("option", { value: a, selected: (x ? x.owner_access : "summary") === a }, accessLabel[a])));
+    const note = h("textarea", { rows: "2" }, x ? x.note : "");
+    const ins = h("div", { class: "chips" }, (inbounds || []).filter((i) => !["socks", "http", "dokodemo-door", "tunnel", "mtproto"].includes(i.protocol)).map((i) =>
+      h("label", { class: "check" }, h("input", { type: "checkbox", value: i.tag, checked: !!(x && x.inbounds.includes(i.tag)) }), h("span", {}, i.tag))));
+    const err = h("div", { class: "error", role: "alert" });
+    const save = h("button", { class: "primary", value: "save", onclick: async (e) => {
+      e.preventDefault(); err.textContent = "";
+      try {
+        await api("PUT", `/api/v2/admin/tenants/${encodeURIComponent(id.value.trim())}`, { name: name.value, enabled: on.checked, max_clients: +maxC.value || 0,
+          max_bytes: (+maxG.value || 0) * 2 ** 30, owner_access: acc.value, note: note.value, inbounds: [...ins.querySelectorAll("input:checked")].map((c) => c.value) });
+        document.getElementById("modal").close("save"); toast(t("saved")); route();
+      } catch (y) { err.textContent = y.message; }
+    } }, t("save"));
+    openModal(x ? x.name : (fa ? "فروشگاه متصل جدید" : "New connected shop"), h("div", { class: "form" },
+      h("p", { class: "small muted" }, fa ? "یک سایت فروش بیرونی که کاربرهایش را روی این پنل نگه می‌دارد. حساب مالی و نماینده‌هایش با خود سایت است؛ کاربرهایش با کاربرهای شما و نماینده‌ها قاطی نمی‌شوند و ربات و فروشگاه پنل به آن‌ها پیامی نمی‌دهند."
+        : "An outside sales site that keeps its customers on this panel. Its money and resellers stay with the site; its clients never mix with yours or your resellers', and the panel's bots and shop never message them."),
+      h("div", { class: "two" }, lab(fa ? "شناسه (ثابت، انگلیسی)" : "ID (fixed)", id, fa ? "پیشوند نام کاربرهایش هم همین است" : "also the prefix of its clients' names"), lab(t("name"), name)),
+      h("label", { class: "check" }, on, h("span", {}, fa ? "فعال (خاموش = فقط خواندن)" : "On (off = read only)")),
+      h("div", { class: "two" }, lab(fa ? "سقف تعداد کاربر (۰ = بدون سقف)" : "Most clients (0 = no cap)", maxC), lab(fa ? "سقف حجم همهٔ کاربرها (گیگ، ۰ = بدون سقف)" : "Volume cap of all clients (GB, 0 = none)", maxG)),
+      lab(fa ? "دسترسی مالک به جزئیات کاربرها" : "Owner access to client details", acc, fa ? "هر بار دیدن یا تغییر در گزارش تغییرات ثبت می‌شود" : "every look or change is logged"),
+      h("div", { class: "small muted" }, fa ? "اینباندهای مجاز (هیچ = همهٔ اینباندهای قابل فروش)" : "Allowed inbounds (none = every sellable inbound)"), ins,
+      lab(fa ? "یادداشت" : "Note", note), err), [save]);
+  };
+  const keys = async (x) => {
+    const box = h("div", { class: "form" });
+    const draw = async () => {
+      const ks = await api("GET", `/api/v2/admin/tenants/${encodeURIComponent(x.id)}/keys`);
+      const name = h("input", { placeholder: fa ? "مثلاً: سرور سایت" : "e.g. website server" });
+      const ips = h("input", { dir: "ltr", placeholder: "203.0.113.7, 10.0.0.0/8" });
+      const days = h("input", { type: "number", min: "0", max: "3650", value: "0", dir: "ltr" });
+      const out = h("div", {});
+      fill(box, h("p", { class: "small muted" }, fa ? "سایت با این کلید به /api/tenant/v1/ وصل می‌شود: Authorization: Bearer <کلید>. فقط کاربرهای همین فروشگاه را می‌بیند." : "The site uses this key on /api/tenant/v1/: Authorization: Bearer <key>. It only ever sees this shop's clients."),
+        ks.length ? h("div", { class: "table-wrap" }, h("table", { class: "dtable" }, h("tbody", {}, ks.map((k) => h("tr", {},
+          h("td", { class: "name" }, k.name), h("td", { class: "muted small", dir: "ltr" }, `dt_${k.id}_…`),
+          h("td", { class: "small", dir: "ltr" }, k.allow_ips.length ? k.allow_ips.join(", ") : (fa ? "همهٔ آدرس‌ها" : "any address")),
+          h("td", { class: "small muted" }, k.last_used ? fmtDT(k.last_used) : "—"),
+          h("td", { class: "small" }, k.expires_unix ? `${t("keyUntil")} ${fmtDT(k.expires_unix)}` : ""),
+          h("td", {}, h("button", { class: "small danger", onclick: async (e) => {
+            e.preventDefault();
+            await guarded(() => api("DELETE", `/api/v2/admin/tenants/${encodeURIComponent(x.id)}/keys/${encodeURIComponent(k.id)}`)); draw();
+          } }, t("delete")))))))) : h("p", { class: "muted small" }, t("keyNone")),
+        h("div", { class: "two" }, lab(t("keyName"), name), lab(t("keyDays"), days)),
+        lab(fa ? "فقط از این آدرس‌ها (خالی = همه)" : "Only from these addresses (empty = any)", ips),
+        h("button", { class: "primary", onclick: async (e) => {
+          e.preventDefault();
+          try {
+            const r = await api("POST", `/api/v2/admin/tenants/${encodeURIComponent(x.id)}/keys`, { name: name.value, days: +days.value || 0, allow_ips: ips.value.split(/[\s,]+/).filter(Boolean) });
+            fill(out, h("p", { class: "small" }, t("keyOnce")), h("code", { dir: "ltr", class: "tfakey keyout" }, r.key), h("button", { onclick: (ev) => { ev.preventDefault(); copy(r.key); } }, t("copy")));
+            box.append(out);
+          } catch (y) { fill(out, h("p", { class: "error" }, y.message)); box.append(out); }
+        } }, t("addKey")));
+    };
+    openModal(`${fa ? "کلیدهای API" : "API keys"} · ${x.name}`, box);
+    await draw();
+  };
+  const hook = async (x) => {
+    const w = await api("GET", `/api/v2/admin/tenants/${encodeURIComponent(x.id)}/webhook`);
+    const on = h("input", { type: "checkbox", checked: w.enabled });
+    const url = h("input", { dir: "ltr", value: w.url, placeholder: "https://shop.example.com/dark-webhook" });
+    const sec = h("input", { dir: "ltr", type: "password", placeholder: w.has_secret ? t("whSecretSaved") : "" });
+    const err = h("div", { class: "error", role: "alert" });
+    const save = h("button", { class: "primary", value: "save", onclick: async (e) => {
+      e.preventDefault(); err.textContent = "";
+      try { await api("PUT", `/api/v2/admin/tenants/${encodeURIComponent(x.id)}/webhook`, { enabled: on.checked, url: url.value, secret: sec.value }); document.getElementById("modal").close("save"); toast(t("saved")); }
+      catch (y) { err.textContent = y.message; }
+    } }, t("save"));
+    const test = h("button", { onclick: async (e) => { e.preventDefault(); err.textContent = ""; try { await api("POST", `/api/v2/admin/tenants/${encodeURIComponent(x.id)}/webhook/test`); toast(t("whTestOK")); } catch (y) { err.textContent = y.message; } } }, t("whTest"));
+    openModal(`${t("whTitle")} · ${x.name}`, h("div", { class: "form" },
+      h("p", { class: "small muted" }, fa ? "فقط رویدادهای کاربرهای همین فروشگاه (انقضا، اتمام حجم، IP زیاد، ریست، برنامهٔ بعدی، دستگاه ردشده) با امضای X-Dark-Signature فرستاده می‌شود." : "Only this shop's clients' events (expired, out of volume, too many IPs, resets, next plan, refused devices), signed in X-Dark-Signature."),
+      h("label", { class: "check" }, on, h("span", {}, t("whOn"))), lab(t("whURL"), url), lab(t("whSecret"), sec),
+      w.last_ok ? h("p", { class: "small muted" }, `${t("whLastOK")}: ${fmtDT(w.last_ok)}`) : null,
+      w.last_error ? h("p", { class: "small error" }, `${t("whLastErr")}: ${w.last_error}`) : null, err), [test, save]);
+  };
+  const move = (x) => {
+    const sides = [["owner", "", fa ? "مالک" : "Owner"], ...(reps || []).map((r) => ["rep", r.ID, `${fa ? "نماینده" : "Reseller"}: ${r.Name || r.ID}`]), ...(list || []).map((tn) => ["tenant", tn.id, `${fa ? "فروشگاه" : "Shop"}: ${tn.name}`])];
+    const sel = (pick) => h("select", {}, sides.map(([k, id, l]) => h("option", { value: `${k}:${id}`, selected: pick === `${k}:${id}` }, l)));
+    const from = sel("owner:"), to = sel(`tenant:${x.id}`);
+    const names = h("textarea", { rows: "4", dir: "ltr", placeholder: fa ? "یک نام در هر خط — خالی یعنی همهٔ کاربرهای مبدأ" : "one name per line — empty means every client of the source" });
+    const out = h("div", {});
+    const req = (dry) => { const [fk, fid] = from.value.split(":"); const [tk, tid] = to.value.split(":");
+      return { from: { kind: fk, id: fid }, to: { kind: tk, id: tid }, names: names.value.split(/\s+/).filter(Boolean), dry_run: dry }; };
+    const show = (r) => fill(out, h("p", { class: "small" }, h("b", {}, `${r.dry_run ? (fa ? "پیش‌نمایش" : "Preview") : (fa ? "انجام شد" : "Done")}: ${fmtNum(r.moved)} ${fa ? "کاربر" : "clients"}`)),
+      r.skipped.length ? h("details", {}, h("summary", { class: "small" }, `${t("migSkipped")} (${fmtNum(r.skipped.length)})`), h("ul", { class: "small muted", dir: "ltr" }, r.skipped.map((y) => h("li", {}, y)))) : null,
+      r.notes.length ? h("ul", { class: "small muted" }, r.notes.map((y) => h("li", {}, y))) : null);
+    const preview = h("button", { onclick: async (e) => { e.preventDefault(); try { show(await api("POST", "/api/v2/admin/clients/move", req(true))); } catch (y) { fill(out, h("p", { class: "error" }, y.message)); } } }, t("migPreview"));
+    const go = h("button", { class: "primary", onclick: async (e) => {
+      e.preventDefault();
+      if (!await confirmAction(fa ? "کاربرها جابه‌جا شوند؟ لینک و کانفیگ‌هایشان عوض نمی‌شود." : "Move the clients? Their links and configs stay the same.", fa ? "جابه‌جایی" : "Move")) return;
+      try { show(await api("POST", "/api/v2/admin/clients/move", req(false))); toast(t("saved")); } catch (y) { toast(t("failed", { e: y.message })); }
+    } }, fa ? "جابه‌جایی" : "Move");
+    openModal(fa ? "جابه‌جایی گروهی کاربرها" : "Move clients", h("div", { class: "form" },
+      h("p", { class: "small muted" }, fa ? "بین مالک، نماینده‌ها و فروشگاه‌های متصل. UUID، لینک اشتراک، مصرف و سابقه حفظ می‌شود؛ اعتبار نماینده خودکار عوض نمی‌شود." : "Between the owner, resellers and connected shops. UUID, subscription link, usage and history stay; reseller credit is not changed automatically."),
+      h("div", { class: "two" }, lab(fa ? "از" : "From", from), lab(fa ? "به" : "To", to)), lab(fa ? "نام‌ها" : "Names", names), out), [preview, go]);
+  };
+  const card = (x) => h("div", { class: "card item" },
+    h("div", { class: "head" }, h("span", { class: "name" }, x.name), h("span", { class: "badge", dir: "ltr" }, x.id),
+      h("span", { class: `badge ${x.enabled ? "good" : "bad"}` }, x.enabled ? (fa ? "فعال" : "on") : (fa ? "خاموش" : "off")),
+      h("span", { class: "badge spacer" }, accessLabel[x.owner_access])),
+    h("div", { class: "chips" },
+      h("span", { class: "chip" }, `${fmtNum(x.clients)} ${fa ? "کاربر" : "clients"}${x.max_clients ? ` / ${fmtNum(x.max_clients)}` : ""}`),
+      h("span", { class: "chip" }, `${fmtNum(x.active)} ${fa ? "فعال" : "active"}`),
+      h("span", { class: "chip" }, `${fmtNum(x.online)} ${fa ? "آنلاین" : "online"}`),
+      h("span", { class: "chip" }, `${fa ? "مصرف" : "used"} ${bytes(x.used)}`),
+      x.volume ? h("span", { class: "chip" }, `${fa ? "حجم فروخته‌شده" : "volume sold"} ${bytes(x.volume)}${x.max_bytes ? ` / ${bytes(x.max_bytes)}` : ""}`) : null,
+      h("span", { class: "chip" }, `${fmtNum(x.keys)} ${fa ? "کلید" : "keys"}`),
+      h("span", { class: `chip ${x.webhook_on ? "good" : ""}` }, `${t("whTitle")}: ${x.webhook_on ? (fa ? "روشن" : "on") : (fa ? "خاموش" : "off")}`)),
+    x.note ? h("p", { class: "small muted", style: "margin:0" }, x.note) : null,
+    h("div", { class: "row" },
+      h("button", { onclick: () => edit(x) }, t("edit")),
+      h("button", { class: "ghost", onclick: () => keys(x) }, fa ? "کلیدهای API" : "API keys"),
+      h("button", { class: "ghost", onclick: () => hook(x) }, t("whTitle")),
+      h("button", { class: "ghost", onclick: () => { const d = openModal(x.name, repBrandCard(`/api/v2/admin/tenants/${encodeURIComponent(x.id)}/brand`, x.name)); d.classList.add("wide"); } }, fa ? "برند و صفحهٔ اشتراک" : "Brand and page"),
+      h("button", { class: "ghost", onclick: () => move(x) }, fa ? "جابه‌جایی کاربرها" : "Move clients"),
+      h("button", { class: "ghost danger spacer", onclick: async () => {
+        if (await confirmAction(t("confirmDelete", { x: x.name }))) { await guarded(() => api("DELETE", `/api/v2/admin/tenants/${encodeURIComponent(x.id)}`)); route(); }
+      } }, t("delete"))));
+  return h("div", {},
+    h("div", { class: "row" }, h("h1", {}, t("tenants")), h("button", { class: "primary spacer", onclick: () => edit(null) }, t("add"))),
+    h("p", { class: "small muted" }, fa ? "کاربرهای فروشگاه‌های متصل در لیست کاربرها، آمار فروش، یادآوری‌ها و ربات‌های پنل نمی‌آیند. سایت با API خودش (/api/tenant/v1) آن‌ها را می‌سازد و مدیریت می‌کند."
+      : "Connected shops' clients are not in your client list, sales reports, reminders or the panel's bots. The site makes and manages them with its own API (/api/tenant/v1)."),
+    h("div", { class: "list" }, (list || []).length ? list.map(card) : h("p", { class: "muted" }, t("empty"))));
+}
+
 async function viewReps() {
   const fa = lang === "fa";
   const [reps, inbounds, ov] = await Promise.all([api("GET", "/api/v2/admin/reps"), api("GET", "/api/v2/admin/inbounds"), api("GET", "/api/v2/admin/reps/overview").catch(() => [])]);
@@ -5859,6 +5996,8 @@ function foreignCard() {
   const node = h("select", {}, h("option", { value: "" }, "—"));
   const addr = h("input", { dir: "ltr", placeholder: "vpn.example.com" });
   const ins = h("div", { class: "chips" }, h("span", { class: "muted small" }, "…"));
+  const dest = h("select", {}, h("option", { value: "" }, lang === "fa" ? "مالک (کاربرهای خود پنل)" : "Owner (the panel's own clients)"));
+  api("GET", "/api/v2/admin/tenants").then((list) => (list || []).forEach((x) => dest.append(h("option", { value: x.id }, `${lang === "fa" ? "فروشگاه متصل" : "Connected shop"}: ${x.name}`)))).catch(() => {});
   api("GET", "/api/v2/admin/nodes").then((list) => fill(node, (list || []).map((n, i) => h("option", { value: n.ID, selected: i === 0 }, `${n.Name || n.ID}${n.PublicIP ? ` · ${n.PublicIP}` : ""}`)))).catch(() => {});
   api("GET", "/api/v2/admin/inbounds").then((list) => fill(ins, (list || []).map((i) => h("label", { class: "check" }, h("input", { type: "checkbox", value: i.tag }), h("span", {}, i.tag))))).catch(() => {});
   const show = (r, dry) => {
@@ -5875,7 +6014,7 @@ function foreignCard() {
     if (!dry && !await confirmAction(s4("fAsk"), t("migImport"))) return;
     btn.disabled = true; fill(out, h("p", { class: "muted small" }, t("migWorking")));
     const q = new URLSearchParams({ dry_run: dry ? "1" : "0", node: node.value, address: addr.value.trim(),
-      inbounds: [...ins.querySelectorAll("input:checked")].map((x) => x.value).join(",") });
+      inbounds: [...ins.querySelectorAll("input:checked")].map((x) => x.value).join(","), tenant: dest.value });
     try {
       const res = await fetch(`/api/v2/admin/migrate/foreign?${q}`, { method: "POST", credentials: "same-origin", body: file.files[0], headers: { "X-Dark-Request": "1", "Content-Type": "application/octet-stream" } });
       const text = await res.text();
@@ -5891,6 +6030,7 @@ function foreignCard() {
     h("label", {}, h("span", {}, s4("fFile")), file),
     h("div", { class: "two" }, h("label", {}, h("span", {}, s4("fNode")), node), h("label", {}, h("span", {}, s4("fAddr")), addr)),
     h("div", { class: "small muted" }, s4("fExtra")), ins,
+    h("label", {}, h("span", {}, lang === "fa" ? "مقصد" : "Destination"), dest),
     h("div", { class: "row" }, preview, imp), out);
 }
 
