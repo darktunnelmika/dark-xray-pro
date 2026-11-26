@@ -544,7 +544,7 @@ func TestTenantUsedBytesAndAddUsage(t *testing.T) {
 	}
 	// The feed reports it, and only to this shop.
 	_, ch = a.do("GET", "/changes?cursor="+cur, nil)
-	if l := ch["changes"].([]any); len(l) != 1 || l[0].(map[string]any)["name"] != "moved1" {
+	if l := ch["changes"].([]any); len(l) != 1 || l[0].(map[string]any)["name"] != "moved1" || l[0].(map[string]any)["imported_bytes"].(float64) != 4<<30 || l[0].(map[string]any)["used_here_bytes"].(float64) != 0 {
 		t.Fatalf("feed %v", ch)
 	}
 	if code, res := b.do("POST", "/bulk/add-usage", map[string]any{"clients": []map[string]any{{"name": "moved1", "add_bytes": 1}}}); code != 200 || res["ok"].(float64) != 0 {

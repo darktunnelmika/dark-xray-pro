@@ -205,6 +205,8 @@ type TenantChange struct {
 	Enabled         bool   `json:"enabled"`
 	VolumeBytes     int64  `json:"volume_bytes"`
 	UsedBytes       int64  `json:"used_bytes"`
+	UsedHereBytes   int64  `json:"used_here_bytes"` // carried by this panel
+	ImportedBytes   int64  `json:"imported_bytes"`  // brought from the panel it moved from
 	UpBytes         int64  `json:"up_bytes"`
 	DownBytes       int64  `json:"down_bytes"`
 	RemainingBytes  int64  `json:"remaining_bytes"`
@@ -261,7 +263,7 @@ func (s *Store) TenantChanges(ctx context.Context, tenant, cursor string, limit 
 	rep := tenantRep(tenant)
 	const r = `MAX(c.rev, COALESCE(u.rev,0))`
 	rows, err := s.ro.QueryContext(ctx, `SELECT c.email, `+r+`, c.external_ref, c.enabled, c.volume_bytes, c.expires_unix, c.duration_seconds,
-COALESCE(u.up,0), COALESCE(u.down,0), COALESCE(u.first_seen_unix,0), COALESCE(u.last_seen_unix,0)
+COALESCE(u.up,0), COALESCE(u.down,0), COALESCE(u.first_seen_unix,0), COALESCE(u.last_seen_unix,0), COALESCE(u.ext_bytes,0)
 FROM clients c LEFT JOIN client_usage u ON u.email=c.email
 WHERE c.rep_id=? AND (`+r+`>? OR (`+r+`=? AND c.email>?)) ORDER BY 2, c.email LIMIT ?`, rep, rev, rev, after, limit+1)
 	if err != nil {
@@ -276,8 +278,9 @@ WHERE c.rep_id=? AND (`+r+`>? OR (`+r+`=? AND c.email>?)) ORDER BY 2, c.email LI
 	for rows.Next() {
 		var it item
 		var c ClientView
+		var ext int64
 		if err := rows.Scan(&it.email, &it.ch.Rev, &it.ch.ExternalRef, &c.Enabled, &c.VolumeBytes, &c.ExpiresUnix, &c.DurationSeconds,
-			&c.Usage.Up, &c.Usage.Down, &c.Usage.FirstSeen, &c.Usage.LastSeen); err != nil {
+			&c.Usage.Up, &c.Usage.Down, &c.Usage.FirstSeen, &c.Usage.LastSeen, &ext); err != nil {
 			rows.Close()
 			return nil, "", false, err
 		}
@@ -286,6 +289,7 @@ WHERE c.rep_id=? AND (`+r+`>? OR (`+r+`=? AND c.email>?)) ORDER BY 2, c.email LI
 		ch := &it.ch
 		ch.Status, ch.Enabled, ch.VolumeBytes = pgStatus(c, now), c.Enabled, c.VolumeBytes
 		ch.UpBytes, ch.DownBytes, ch.UsedBytes = c.Usage.Up, c.Usage.Down, c.Usage.Up+c.Usage.Down
+		ch.ImportedBytes, ch.UsedHereBytes = ext, max(0, ch.UsedBytes-ext)
 		ch.RemainingBytes, ch.ExpiresUnix, ch.EffectiveExpiry = c.Remaining, c.ExpiresUnix, c.EffectiveUntil
 		ch.FirstSeen, ch.LastSeen = c.Usage.FirstSeen, c.Usage.LastSeen
 		if ch.VolumeBytes < 0 {
