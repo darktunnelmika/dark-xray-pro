@@ -435,3 +435,24 @@ func renameAcross(ctx context.Context) bool {
 	v, _ := ctx.Value(renameAcrossKey{}).(bool)
 	return v
 }
+
+// tenantSafeName turns a client name from another panel into a name a shop
+// may use ("+" and anything else outside tenantNameRE become "-").
+func tenantSafeName(n string) string {
+	b := []byte(n)
+	for i, ch := range b {
+		ok := ch >= 'a' && ch <= 'z' || ch >= 'A' && ch <= 'Z' || ch >= '0' && ch <= '9' || ch == '.' || ch == '_' || ch == '@' || ch == '-'
+		if !ok {
+			b[i] = '-'
+		}
+	}
+	out := strings.TrimLeft(string(b), "._@-")
+	if len(out) > 100 {
+		out = out[:100]
+	}
+	if out == "" || !tenantNameRE.MatchString(out) {
+		h := hashToken(n)
+		out = "old-" + h[:8]
+	}
+	return out
+}

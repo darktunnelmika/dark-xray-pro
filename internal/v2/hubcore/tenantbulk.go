@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -197,6 +198,19 @@ type TenantChange struct {
 	EffectiveExpiry int64  `json:"effective_expiry_unix"`
 	FirstSeen       int64  `json:"first_seen_unix"`
 	LastSeen        int64  `json:"last_seen_unix"`
+}
+
+// MarshalJSON writes a deletion as just its name, revision and "deleted".
+func (c TenantChange) MarshalJSON() ([]byte, error) {
+	if c.Deleted {
+		return json.Marshal(struct {
+			Name    string `json:"name"`
+			Rev     int64  `json:"rev"`
+			Deleted bool   `json:"deleted"`
+		}{c.Name, c.Rev, true})
+	}
+	type plain TenantChange
+	return json.Marshal(plain(c))
 }
 
 // feedCursor is an opaque "after this change" mark: a revision and a name.

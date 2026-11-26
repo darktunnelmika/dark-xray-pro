@@ -239,11 +239,16 @@ func (s *Store) TransferClient(ctx context.Context, email, toRep string) error {
 			return ErrNotFound
 		}
 	}
-	r, err := s.db.ExecContext(ctx, `UPDATE clients SET rep_id=? WHERE email=?`, toRep, email)
+	// A connected shop's client changes worlds only with a move (its name
+	// changes too): see MoveClients.
+	r, err := s.db.ExecContext(ctx, `UPDATE clients SET rep_id=? WHERE email=? AND substr(rep_id,1,1)<>'~'`, toRep, email)
 	if err != nil {
 		return err
 	}
 	if n, _ := r.RowsAffected(); n != 1 {
+		if s.TenantOfClient(ctx, email) != "" {
+			return fmt.Errorf("%w: this client belongs to a connected shop; use “move clients” to take it out", ErrInvalid)
+		}
 		return ErrNotFound
 	}
 	return nil

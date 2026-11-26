@@ -1332,7 +1332,7 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 	mux.HandleFunc("POST /api/v2/admin/migrate/foreign", guard(func(w http.ResponseWriter, r *http.Request) {
 		// Body: the other panel's SQLite file (x-ui.db, db.sqlite3).
 		q := r.URL.Query()
-		opt := ForeignOptions{DryRun: q.Get("dry_run") != "0", Node: q.Get("node"), Address: q.Get("address"), Prefix: q.Get("prefix")}
+		opt := ForeignOptions{DryRun: q.Get("dry_run") != "0", Node: q.Get("node"), Address: q.Get("address"), Prefix: q.Get("prefix"), Tenant: q.Get("tenant")}
 		for _, t := range strings.Split(q.Get("inbounds"), ",") {
 			if t = strings.TrimSpace(t); t != "" {
 				opt.Inbounds = append(opt.Inbounds, t)

@@ -314,4 +314,5 @@ func tenantAdminRoutes(s *Store, mux *docMux, guard func(http.HandlerFunc) http.
 		reply(w, map[string]bool{"ok": err == nil}, err)
 	}))
 	tenantWebhookAdminRoutes(s, mux, guard)
+	tenantMoveRoutes(s, mux, guard)
 }
