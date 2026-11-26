@@ -880,6 +880,13 @@ func (s *Store) RunLegacy(ctx context.Context, fallback tls.Certificate) {
 	for {
 		s.chargeLegacy(ctx)
 		s.retryLegacyCerts(ctx)
+		s.retryTenantSubCerts(ctx)
+		if err := s.flushSubFetches(ctx); err != nil {
+			log.Printf("subscription fetches: %v", err)
+		}
+		if s.now().Minute() == 0 {
+			s.pruneSubFetches(ctx)
+		}
 		want := s.legacyWanted(ctx)
 		for port, l := range open {
 			if want[port] != l.key {
@@ -906,6 +913,7 @@ func (s *Store) RunLegacy(ctx context.Context, fallback tls.Certificate) {
 			for _, l := range open {
 				l.close()
 			}
+			_ = s.flushSubFetches(context.Background())
 			return
 		case <-t.C:
 		}
@@ -958,6 +966,8 @@ func (s *Store) legacyWanted(ctx context.Context) map[int]string {
 			}
 		}
 	}
+	rows.Close()
+	s.tenantSubWanted(ctx, want)
 	return want
 }
 
@@ -1028,6 +1038,10 @@ func (s *Store) legacySubHandler() http.Handler {
 		host := strings.ToLower(r.Host)
 		if h, _, err := net.SplitHostPort(host); err == nil {
 			host = h
+		}
+		if t, d, ok := s.tenantSubOf(r.Context(), host); ok {
+			s.serveTenantSub(w, r, sub, t, d)
+			return
 		}
 		var email string
 		if !subIDRE.MatchString(tok) || s.ro.QueryRowContext(r.Context(), `SELECT c.email FROM clients c JOIN legacy_clients l ON l.email=c.email

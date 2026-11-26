@@ -99,7 +99,7 @@ func tenantRoutes(s *Store, mux *docMux, subBase string) {
 				tenantErr(w, http.StatusUnauthorized, "unauthorized", why)
 				return
 			}
-			if r.Method == http.MethodGet || r.Method == http.MethodHead {
+			if r.Method == http.MethodGet || r.Method == http.MethodHead || r.URL.Path == tenantAPI+"/bulk/links" { // reads: not in the audit log
 				h(w, r, tenant)
 				return
 			}
@@ -315,4 +315,33 @@ func tenantAdminRoutes(s *Store, mux *docMux, guard func(http.HandlerFunc) http.
 	}))
 	tenantWebhookAdminRoutes(s, mux, guard)
 	tenantMoveRoutes(s, mux, guard)
+	// The shop's own subscription domains (tenantsubdomain.go).
+	mux.HandleFunc("GET "+p+"/{id}/sub-domains", guard(func(w http.ResponseWriter, r *http.Request) {
+		list, err := s.TenantSubDomains(r.Context(), r.PathValue("id"))
+		reply(w, map[string]any{"domains": list, "hub_ips": HubIPs()}, err)
+	}))
+	mux.HandleFunc("PUT "+p+"/{id}/sub-domains/{domain}", guard(func(w http.ResponseWriter, r *http.Request) {
+		var d TenantSubDomain
+		if !decode(w, r, &d) {
+			return
+		}
+		d.Domain = r.PathValue("domain")
+		err := s.PutTenantSubDomain(r.Context(), r.PathValue("id"), d)
+		reply(w, map[string]bool{"ok": err == nil}, err)
+	}))
+	mux.HandleFunc("DELETE "+p+"/{id}/sub-domains/{domain}", guard(func(w http.ResponseWriter, r *http.Request) {
+		err := s.DeleteTenantSubDomain(r.Context(), r.PathValue("id"), r.PathValue("domain"))
+		reply(w, map[string]bool{"ok": err == nil}, err)
+	}))
+	mux.HandleFunc("POST "+p+"/{id}/sub-domains/{domain}/check", guard(func(w http.ResponseWriter, r *http.Request) {
+		ok, why, err := s.CheckTenantSubDomain(r.Context(), r.PathValue("id"), r.PathValue("domain"))
+		reply(w, map[string]any{"ok": ok, "reason": why}, err)
+	}))
+	mux.HandleFunc("GET "+p+"/{id}/sub-fetches", guard(func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		since, _ := strconv.ParseInt(q.Get("since"), 10, 64)
+		limit, _ := strconv.Atoi(q.Get("limit"))
+		rep, err := s.TenantSubFetches(r.Context(), r.PathValue("id"), since, q.Get("list"), q.Get("after"), limit)
+		reply(w, rep, err)
+	}))
 }

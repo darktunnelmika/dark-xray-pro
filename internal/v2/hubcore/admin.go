@@ -2186,11 +2186,29 @@ func SubHandler(s *Store) http.Handler {
 			_, _ = w.Write([]byte(strings.Join(links, "\n")))
 			return
 		}
-		body, ctype, info, err := s.SubscriptionBody(r.Context(), email, sub.Format(r.URL.Query().Get("format"), r.UserAgent()))
+		f := sub.Format(r.URL.Query().Get("format"), r.UserAgent())
+		// A connected shop's client: the body is kept for a few seconds,
+		// keyed by its revision, so a refresh storm builds it once.
+		key := ""
+		if rev, ok := s.tenantSubRev(r.Context(), email); ok {
+			key = email + "\x00" + fmt.Sprint(f) + "\x00" + rev
+			if e, hit := s.subCacheGet(key); hit {
+				s.noteSubFetch(email, r.UserAgent())
+				w.Header().Set("Subscription-Userinfo", e.info)
+				w.Header().Set("Content-Type", e.ctype)
+				_, _ = w.Write(e.body)
+				return
+			}
+		}
+		body, ctype, info, err := s.SubscriptionBody(r.Context(), email, f)
 		if err != nil {
 			reply(w, nil, err)
 			return
 		}
+		if key != "" {
+			s.subCachePut(key, subCacheEntry{body: body, ctype: ctype, info: info})
+		}
+		s.noteSubFetch(email, r.UserAgent())
 		w.Header().Set("Subscription-Userinfo", info)
 		w.Header().Set("Content-Type", ctype)
 		_, _ = w.Write(body)

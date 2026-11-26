@@ -331,6 +331,14 @@ func Open(path string) (*Store, error) {
 		st.Close()
 		return nil, err
 	}
+	if err := st.ensureTenantSubSchema(); err != nil { // after tenants
+		st.Close()
+		return nil, err
+	}
+	if err := st.ensureSubFetchSchema(); err != nil {
+		st.Close()
+		return nil, err
+	}
 	// Last: its first fill reads tables the steps above create.
 	if err := st.ensureTgBotUsers(); err != nil {
 		st.Close()

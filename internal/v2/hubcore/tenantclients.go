@@ -72,6 +72,7 @@ type TenantClient struct {
 	CreatedUnix     int64    `json:"created_unix"`
 	Note            string   `json:"note"`
 	Rev             int64    `json:"rev"`
+	SubFetched      int64    `json:"sub_fetched_unix"` // last subscription fetch (0 = never since it came here)
 	SubURL          string   `json:"subscription_url,omitempty"`
 }
 
@@ -103,11 +104,13 @@ FROM clients c LEFT JOIN client_usage u ON u.email=c.email WHERE c.email IN (SEL
 		}
 		rows.Close()
 	}
+	fetched := s.subFetchedAt(ctx, emails)
 	out := make([]TenantClient, len(list))
 	for i, c := range list {
 		tc := s.tenantClientBase(tenant, c)
 		x := more[c.Email]
 		tc.TrojanPassword, tc.ExternalRef, tc.CreatedUnix, tc.Rev = x.secret, x.ref, x.created, max(x.r1, x.r2)
+		tc.SubFetched = fetched[c.Email]
 		out[i] = tc
 	}
 	return out
