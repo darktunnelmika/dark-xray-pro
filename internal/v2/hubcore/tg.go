@@ -362,6 +362,22 @@ func (s *Store) MarkOrderAnnounced(ctx context.Context, id int64, buyer bool) {
 	_, _ = s.db.ExecContext(ctx, `UPDATE orders SET `+col+`=1 WHERE id=?`, id)
 }
 
+// ClaimOrderAnnounce marks an order as told (to the admins, or with buyer
+// to the buyer) and reports whether this call did it: of two bots or two
+// runs, only the one that gets true sends the message.
+func (s *Store) ClaimOrderAnnounce(ctx context.Context, id int64, buyer bool) bool {
+	col := "tg_owner_notified"
+	if buyer {
+		col = "tg_buyer_notified"
+	}
+	r, err := s.db.ExecContext(ctx, `UPDATE orders SET `+col+`=1 WHERE id=? AND `+col+`=0`, id)
+	if err != nil {
+		return false
+	}
+	n, _ := r.RowsAffected()
+	return n == 1
+}
+
 // MarkAllOrdersAnnounced is used once when the bot starts for the first
 // time, so it does not replay history.
 func (s *Store) MarkAllOrdersAnnounced(ctx context.Context) {

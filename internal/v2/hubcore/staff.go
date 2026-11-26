@@ -27,6 +27,7 @@ var ownerOnly = []string{
 	"/api/v2/admin/finance", "/api/v2/admin/reports", "/api/v2/admin/xray/overlay", "/api/v2/admin/apikeys", "/api/v2/admin/webhook", "/api/v2/admin/panel-https", "/api/v2/admin/migrate",
 	"/api/v2/admin/security", "/api/v2/admin/telegram", "/api/v2/admin/panel-path", "/api/v2/admin/update-hub", "/api/v2/admin/pay",
 	"/api/v2/admin/tenants", "/api/v2/admin/clients/move", // connected shops: their keys and moving clients between worlds
+	"/api/v2/admin/pg-api", // the owner's PasarGuard password reaches everything, like an API key
 }
 
 func isOwnerOnly(path string) bool {

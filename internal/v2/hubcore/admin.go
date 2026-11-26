@@ -272,6 +272,10 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 					_ = s.ro.QueryRowContext(r.Context(), `SELECT manage_products FROM reps WHERE id=?`, rp.ID).Scan(&mp)
 					out["manage_products"] = mp && rp.ParentID == ""
 					out["sub_seller"] = rp.ParentID != ""
+					out["legacy"] = rp.ParentID == "" && s.LegacyOf(r.Context(), rp.ID).Allowed
+					// Taken back with a bill still open: the page stays, to pay it.
+					openBills, _ := s.RepBills(r.Context(), rp.ID, true, 1)
+					out["resale"] = rp.ParentID == "" && (s.ResaleOf(r.Context(), rp.ID).Allowed || len(openBills) > 0)
 				}
 			}
 		}
@@ -1150,6 +1154,11 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 		err := s.DeletePartnerKey(r.Context(), r.PathValue("id"))
 		reply(w, map[string]bool{"ok": err == nil}, err)
 	}))
+	// Panels a reseller sells in its own bot: wallet, bills, prices.
+	resaleRoutes(s, mux, guard, member)
+	resalePageRoutes(s, mux, guard, member)
+	// Old users brought by their subscription links (legacy.go).
+	legacyRoutes(s, mux, guard, member)
 	// Connecting a PasarGuard-made sales bot (Mirza): the owner's, a reseller's own.
 	pgAdminRoutes(s, mux, "/api/v2/admin/pg-api", guard, func(*http.Request) (string, bool) { return "", true })
 	pgAdminRoutes(s, mux, "/api/v2/rep/pg-api", member, func(r *http.Request) (string, bool) {
@@ -1162,7 +1171,11 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 			http.NotFound(w, r)
 			return
 		}
-		reply(w, s.RepBotOf(r.Context(), p.RepID), nil)
+		// Mirza: the bot is kept off while Mirza sells (the card says why).
+		reply(w, struct {
+			RepBot
+			Mirza bool `json:"mirza"`
+		}{s.RepBotOf(r.Context(), p.RepID), s.MirzaMode(r.Context(), p.RepID)}, nil)
 	}))
 	mux.HandleFunc("PUT /api/v2/rep/bot", member(func(w http.ResponseWriter, r *http.Request) {
 		p := who(r)
@@ -2078,8 +2091,10 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 	sh := SubHandler(s)
 	mux.Handle("GET /sub/{token}", sh)
 	mux.Handle("GET /sub/{token}/links", sh)
-	mux.Handle("GET /api/v1/", sh) // old-panel subscription URLs
-	mux.Handle("GET /app/", sh)    // Telegram Mini App
+	mux.Handle("GET /sub/{token}/{$}", sh)
+	mux.Handle("GET /sub/{token}/{client_type}", sh) // PasarGuard's info, usage and client types (pgapi_more.go)
+	mux.Handle("GET /api/v1/", sh)                   // old-panel subscription URLs
+	mux.Handle("GET /app/", sh)                      // Telegram Mini App
 	mux.Handle("POST /app/", sh)
 	routes := mux.apiRoutes()
 	mux.HandleFunc("GET /api/v2/admin/docs", member(func(w http.ResponseWriter, r *http.Request) {
@@ -2095,6 +2110,7 @@ func b64(s string) string { return sub.Base64([]string{s}) }
 func SubHandler(s *Store) http.Handler {
 	mux := http.NewServeMux()
 	registerMiniApp(mux, s)
+	pgSubRoutes(s, mux, "")
 	var serveSub http.HandlerFunc
 	// Subscription URLs from the old panel keep working after a migration:
 	// they answer with the same client's v2 subscription.
@@ -2180,12 +2196,31 @@ func SubHandler(s *Store) http.Handler {
 		_, _ = w.Write(body)
 	}
 	mux.HandleFunc("GET /sub/{token}", serveSub)
+	mux.HandleFunc("GET /sub/{token}/{$}", serveSub) // PasarGuard's own form of the link
 	// PasarGuard's plain list of configs, which sales bots read after creating a user.
 	mux.HandleFunc("GET /sub/{token}/links", func(w http.ResponseWriter, r *http.Request) {
 		email, err := s.EmailBySubToken(r.Context(), r.PathValue("token"))
 		if err != nil {
+			// A link from a Marzban/PasarGuard panel moved here keeps working.
+			if tok, ferr := s.foreignSubToken(r.Context(), r.PathValue("token")); ferr == nil {
+				email, err = s.EmailBySubToken(r.Context(), tok)
+			}
+		}
+		if err != nil {
 			http.NotFound(w, r)
 			return
+		}
+		// An app that says which device it is counts against the device
+		// limit here too (a sales bot fetching the list sends no device id).
+		if hwid := r.Header.Get("X-Hwid"); hwid != "" {
+			if err := s.CheckDevice(r.Context(), email, hwid, r.Header.Get("X-Device-Os"), r.Header.Get("X-Device-Model"), r.UserAgent()); err != nil {
+				if errors.Is(err, ErrDeviceLimit) {
+					http.Error(w, "device limit reached: remove a device in the panel or ask your seller", http.StatusForbidden)
+					return
+				}
+				reply(w, nil, err)
+				return
+			}
 		}
 		links, info, err := s.Subscription(r.Context(), email)
 		if err != nil {

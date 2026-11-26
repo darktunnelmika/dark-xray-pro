@@ -256,7 +256,7 @@ func TestResellerTelegram(t *testing.T) {
 	b.Handle(ctx, cb(salesChat, "ok:"+strconv.FormatInt(id, 10)))
 	find(t, api.take(), salesChat, "تحویل شد")
 	b.Handle(ctx, msg(repChat, "/credit"))
-	find(t, api.take(), repChat, "5.00 GB")
+	find(t, api.take(), repChat, "۵ گیگ")
 }
 
 func TestOwnerConsole(t *testing.T) {
@@ -697,7 +697,7 @@ func TestShopButtons(t *testing.T) {
 	b.Handle(ctx, cb(repChat, "S:nd:30"))
 	b.Handle(ctx, cb(repChat, "S:ni:2"))
 	b.Handle(ctx, msg(repChat, "۱۵۰ هزار"))
-	find(t, api.take(), repChat, "150,000")
+	find(t, api.take(), repChat, "۱۵۰٬۰۰۰")
 	b.Handle(ctx, cb(repChat, "S:nm:pub"))
 	find(t, api.take(), repChat, "ساخته شد")
 	var made hubcore.Product

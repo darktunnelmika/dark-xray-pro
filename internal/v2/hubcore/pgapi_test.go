@@ -94,7 +94,7 @@ func TestPasarGuardAPI(t *testing.T) {
 	exp := now.Add(30 * 24 * time.Hour).UTC().Format(time.RFC3339)
 	code, out = call("POST", "/api/user", tok, map[string]any{"username": "mz1", "data_limit": 10 << 30, "expire": exp,
 		"group_ids": []any{gid}, "note": "from mirza", "proxy_settings": map[string]any{}, "data_limit_reset_strategy": "no_reset"})
-	if code != 200 || out["username"] != "mz1" || out["status"] != "active" || !strings.Contains(out["subscription_url"].(string), "/sub/") {
+	if code != 201 || out["username"] != "mz1" || out["status"] != "active" || !strings.Contains(out["subscription_url"].(string), "/sub/") {
 		t.Fatalf("create %d %v", code, out)
 	}
 	if credit() != 90<<30 {
@@ -148,7 +148,7 @@ func TestPasarGuardAPI(t *testing.T) {
 	// On hold: the term starts at the first connection.
 	code, out = call("POST", "/api/user", tok, map[string]any{"username": "mz2", "data_limit": 5 << 30, "expire": 0, "status": "on_hold",
 		"on_hold_expire_duration": 7 * 86400, "group_ids": []any{gid}})
-	if code != 200 || out["status"] != "on_hold" || out["expire"] != nil {
+	if code != 201 || out["status"] != "on_hold" || out["expire"] != nil {
 		t.Fatalf("on hold %d %v", code, out)
 	}
 	code, out = call("GET", "/api/users?status=on_hold", tok, nil)

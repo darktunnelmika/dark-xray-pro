@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -16,17 +18,17 @@ import (
 )
 
 // A PasarGuard-compatible API, so sales bots made for PasarGuard (Mirza
-// above all) can use this panel as if it were one. Only what those bots
-// call is served, under PasarGuard's own paths and shapes:
+// above all) can use this panel as if it were one, under PasarGuard's own
+// paths and shapes. This file has the core; pgapi_more.go has the rest of
+// the user API (by id, bulk, templates, usage charts, cleanup):
 //
 //	POST   /api/admin/token                 username+password (form) -> bearer token
 //	GET    /api/admin                       who the token is
 //	GET    /api/system                      counts and memory
 //	GET    /api/groups                      inbounds, as PasarGuard groups
 //	GET    /api/nodes                       nodes (owner only; empty for a reseller)
-//	GET    /api/users                       users, ?status= &username= &offset= &limit=
 //	POST   /api/user                        create
-//	GET    /api/user/{username}             read
+//	GET    /api/user/{username}             read      (and by-username/, by-id/)
 //	PUT    /api/user/{username}             change
 //	DELETE /api/user/{username}             delete
 //	POST   /api/user/{username}/reset       reset usage
@@ -51,6 +53,10 @@ CREATE TABLE IF NOT EXISTS pg_api (
   last_ip TEXT NOT NULL DEFAULT '',
   made INTEGER NOT NULL DEFAULT 0
 );
+CREATE TABLE IF NOT EXISTS pg_templates (
+  product_id TEXT PRIMARY KEY,
+  disabled INTEGER NOT NULL DEFAULT 0
+);
 CREATE TABLE IF NOT EXISTS pg_tokens (
   sha TEXT PRIMARY KEY,
   seller TEXT NOT NULL,
@@ -65,9 +71,33 @@ const pgTokenTTL = 24 * time.Hour
 const PGAllGroups = "all-groups"
 
 func (s *Store) ensurePGSchema() error {
-	_, err := s.db.Exec(pgSchema)
+	if _, err := s.db.Exec(pgSchema); err != nil {
+		return err
+	}
+	// bot_off: a reseller selling through Mirza has its own Dark bot off
+	// (both would serve the same customers); with the plain API (another
+	// bot, a website) it stays on. Accesses made before keep Mirza's way.
+	if err := s.addColumn("pg_api", "bot_off", "INTEGER NOT NULL DEFAULT 1"); err != nil {
+		return err
+	}
+	// An API key, as PasarGuard's (pg_key_...): sent in X-Api-Key, or as
+	// "Authorization: ApiKey ..."; kept hashed, shown once.
+	if err := s.addColumn("pg_api", "key_sha", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if _, err := s.db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS pg_api_key ON pg_api(key_sha) WHERE key_sha<>''`); err != nil {
+		return err
+	}
+	// Node traffic (the node API) sums usage per node.
+	_, err := s.db.Exec(`CREATE INDEX IF NOT EXISTS usage_daily_node ON usage_daily(node_id, day)`)
 	return err
 }
+
+// PG API modes: "mirza" turns the reseller's Dark bot off, "api" keeps it.
+const (
+	PGModeMirza = "mirza"
+	PGModeAPI   = "api"
+)
 
 // PGAPI is a seller's PasarGuard-compatible access, without the password.
 type PGAPI struct {
@@ -78,28 +108,88 @@ type PGAPI struct {
 	LastIP   string `json:"last_ip"`
 	Made     int64  `json:"made"`  // users created through it
 	Users    int    `json:"users"` // the seller's clients now
-	// Password is only set right after it was made.
+	// Mode is PGModeMirza or PGModeAPI ("" while it was never made); the
+	// owner's is always PGModeAPI (the main bot never goes off).
+	Mode string `json:"mode"`
+	// HasKey: an API key was made (it is shown only once).
+	HasKey bool `json:"has_key"`
+	// Password and APIKey are only set right after they were made.
 	Password string `json:"password,omitempty"`
+	APIKey   string `json:"api_key,omitempty"`
 }
 
 // PGAPIOf is a seller's access ("" = the owner).
 func (s *Store) PGAPIOf(ctx context.Context, seller string) PGAPI {
 	var a PGAPI
-	_ = s.ro.QueryRowContext(ctx, `SELECT enabled,username,created_unix,last_used,last_ip,made FROM pg_api WHERE seller=?`, seller).
-		Scan(&a.Enabled, &a.Username, &a.Created, &a.LastUsed, &a.LastIP, &a.Made)
+	var botOff bool
+	if s.ro.QueryRowContext(ctx, `SELECT enabled,username,created_unix,last_used,last_ip,made,bot_off,key_sha<>'' FROM pg_api WHERE seller=?`, seller).
+		Scan(&a.Enabled, &a.Username, &a.Created, &a.LastUsed, &a.LastIP, &a.Made, &botOff, &a.HasKey) == nil {
+		a.Mode = PGModeAPI
+		if seller != "" && botOff {
+			a.Mode = PGModeMirza
+		}
+		if !s.pgAccessCurrent(ctx, seller, a.Created) {
+			a = PGAPI{} // left from a deleted reseller with this id: not this one's
+		}
+	}
 	_ = s.ro.QueryRowContext(ctx, `SELECT COUNT(*) FROM clients WHERE rep_id=?`, seller).Scan(&a.Users)
 	return a
 }
 
-// MirzaMode tells whether a reseller sells through the PasarGuard API (and
-// so its own Dark bot stays off).
+// MirzaMode tells whether a reseller sells through Mirza (its access is on
+// in Mirza's mode), so its own Dark bot stays off.
 func (s *Store) MirzaMode(ctx context.Context, seller string) bool {
 	if seller == "" {
 		return false
 	}
 	var on bool
-	_ = s.ro.QueryRowContext(ctx, `SELECT enabled FROM pg_api WHERE seller=?`, seller).Scan(&on)
-	return on
+	var made int64
+	_ = s.ro.QueryRowContext(ctx, `SELECT enabled AND bot_off,created_unix FROM pg_api WHERE seller=?`, seller).Scan(&on, &made)
+	return on && s.pgAccessCurrent(ctx, seller, made)
+}
+
+// pgAccessCurrent tells whether a reseller's access was made for this
+// reseller (not one deleted before it with the same id) and may exist (not
+// a sub-seller's).
+func (s *Store) pgAccessCurrent(ctx context.Context, seller string, accessMade int64) bool {
+	if seller == "" {
+		return true
+	}
+	var parent string
+	var created int64
+	if s.ro.QueryRowContext(ctx, `SELECT parent_id,created_unix FROM reps WHERE id=?`, seller).Scan(&parent, &created) != nil {
+		return false
+	}
+	return parent == "" && created <= accessMade
+}
+
+// SetPGAPIMode chooses whether a reseller's access is for Mirza (its Dark
+// bot off) or for any PasarGuard client (its Dark bot on). The password and
+// sessions stay as they are.
+func (s *Store) SetPGAPIMode(ctx context.Context, seller, mode string) error {
+	if mode != PGModeMirza && mode != PGModeAPI {
+		return fmt.Errorf("%w: mode is mirza or api", ErrInvalid)
+	}
+	if seller == "" {
+		return fmt.Errorf("%w: the owner's access never turns the main bot off; it has no mode", ErrInvalid)
+	}
+	// Back to the API way the reseller's own bot starts again: not while
+	// another reseller has taken the same bot meanwhile (both would poll it).
+	if mode == PGModeAPI {
+		if tok := s.repBotRaw(ctx, seller).Token; tok != "" { // RepBotOf hides the token
+			if other := s.repBotTokenUser(ctx, tok, seller); other != "" {
+				return fmt.Errorf("%w: your Telegram bot is now used by another reseller; set another bot first", ErrPolicy)
+			}
+		}
+	}
+	r, err := s.db.ExecContext(ctx, `UPDATE pg_api SET bot_off=? WHERE seller=?`, mode == PGModeMirza, seller)
+	if err != nil {
+		return err
+	}
+	if n, _ := r.RowsAffected(); n != 1 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 // EnablePGAPI turns a seller's access on with a fresh password (made the
@@ -125,13 +215,42 @@ func (s *Store) EnablePGAPI(ctx context.Context, seller string) (PGAPI, error) {
 	}
 	now := s.now().Unix()
 	if _, err := s.db.ExecContext(ctx, `INSERT INTO pg_api(seller,username,pass_hash,enabled,created_unix) VALUES(?,?,?,1,?)
-ON CONFLICT(seller) DO UPDATE SET pass_hash=excluded.pass_hash, enabled=1`, seller, user, string(h), now); err != nil {
+ON CONFLICT(seller) DO UPDATE SET pass_hash=excluded.pass_hash, enabled=1,
+  made=CASE WHEN created_unix<COALESCE((SELECT created_unix FROM reps WHERE id=excluded.seller),0) THEN 0 ELSE made END,
+  created_unix=CASE WHEN created_unix<COALESCE((SELECT created_unix FROM reps WHERE id=excluded.seller),0) THEN excluded.created_unix ELSE created_unix END`,
+		seller, user, string(h), now); err != nil {
 		return PGAPI{}, err
 	}
 	_, _ = s.db.ExecContext(ctx, `DELETE FROM pg_tokens WHERE seller=?`, seller) // the old password's sessions end
 	a := s.PGAPIOf(ctx, seller)
 	a.Password = pass
+	if !a.HasKey {
+		// The first time, an API key comes with the password; later a new
+		// password leaves the key alone (and the other way round).
+		if key, err := s.NewPGAPIKey(ctx, seller); err == nil {
+			a.HasKey, a.APIKey = true, key
+		}
+	}
 	return a, nil
+}
+
+func pgKeySHA(key string) string {
+	h := sha256.Sum256([]byte("pgkey|" + key))
+	return hex.EncodeToString(h[:])
+}
+
+// NewPGAPIKey makes a seller's API key anew (the old one stops at once)
+// and returns it; it is shown only this once.
+func (s *Store) NewPGAPIKey(ctx context.Context, seller string) (string, error) {
+	key := "pg_key_" + randomHex(24)
+	r, err := s.db.ExecContext(ctx, `UPDATE pg_api SET key_sha=? WHERE seller=? AND enabled=1`, pgKeySHA(key), seller)
+	if err != nil {
+		return "", err
+	}
+	if n, _ := r.RowsAffected(); n != 1 {
+		return "", fmt.Errorf("%w: turn the access on first", ErrNotFound)
+	}
+	return key, nil
 }
 
 // DisablePGAPI turns a seller's access off; its tokens stop at once.
@@ -152,7 +271,8 @@ func pgSHA(tok string) string {
 func (s *Store) pgLogin(ctx context.Context, user, pass string) (string, error) {
 	var seller, hash string
 	var enabled bool
-	err := s.ro.QueryRowContext(ctx, `SELECT seller,pass_hash,enabled FROM pg_api WHERE username=?`, user).Scan(&seller, &hash, &enabled)
+	var made int64
+	err := s.ro.QueryRowContext(ctx, `SELECT seller,pass_hash,enabled,created_unix FROM pg_api WHERE username=?`, user).Scan(&seller, &hash, &enabled, &made)
 	if err != nil || !enabled {
 		_ = bcrypt.CompareHashAndPassword(dummyHash(), []byte(pass)) // same time either way
 		return "", ErrAuth
@@ -160,11 +280,8 @@ func (s *Store) pgLogin(ctx context.Context, user, pass string) (string, error) 
 	if bcrypt.CompareHashAndPassword([]byte(hash), []byte(pass)) != nil {
 		return "", ErrAuth
 	}
-	if seller != "" {
-		var on bool
-		if s.ro.QueryRowContext(ctx, `SELECT enabled FROM reps WHERE id=?`, seller).Scan(&on) != nil || !on {
-			return "", ErrAuth
-		}
+	if !s.pgSellerOK(ctx, seller, made) {
+		return "", ErrAuth
 	}
 	tok := randomHex(32)
 	now := s.now().Unix()
@@ -175,28 +292,54 @@ func (s *Store) pgLogin(ctx context.Context, user, pass string) (string, error) 
 	return tok, nil
 }
 
+// pgSellerOK tells whether a seller's access may still be used: the owner's
+// always; a reseller's while it is enabled, is not a sub-seller and is the
+// same reseller the access was made for (a deleted reseller's id can be
+// given to a new one, which must not inherit the old bot).
+func (s *Store) pgSellerOK(ctx context.Context, seller string, accessMade int64) bool {
+	if seller == "" {
+		return true
+	}
+	var on bool
+	var parent string
+	var created int64
+	if s.ro.QueryRowContext(ctx, `SELECT enabled,parent_id,created_unix FROM reps WHERE id=?`, seller).Scan(&on, &parent, &created) != nil {
+		return false
+	}
+	return on && parent == "" && created <= accessMade // = enabled && pgAccessCurrent
+}
+
 // pgAuth is the seller behind a bearer token.
 func (s *Store) pgAuth(r *http.Request) (string, bool) {
-	tok, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
-	if !ok || tok == "" {
-		return "", false
-	}
 	ctx := r.Context()
 	var seller string
 	now := s.now().Unix()
-	if s.ro.QueryRowContext(ctx, `SELECT seller FROM pg_tokens WHERE sha=? AND expires_unix>?`, pgSHA(strings.TrimSpace(tok)), now).Scan(&seller) != nil {
-		return "", false
-	}
-	var enabled bool
-	var last int64
-	if s.ro.QueryRowContext(ctx, `SELECT enabled,last_used FROM pg_api WHERE seller=?`, seller).Scan(&enabled, &last) != nil || !enabled {
-		return "", false
-	}
-	if seller != "" {
-		var on bool
-		if s.ro.QueryRowContext(ctx, `SELECT enabled FROM reps WHERE id=?`, seller).Scan(&on) != nil || !on {
+	auth := r.Header.Get("Authorization")
+	scheme, cred, _ := strings.Cut(strings.TrimSpace(auth), " ")
+	if key := strings.TrimSpace(r.Header.Get("X-Api-Key")); key != "" || strings.EqualFold(scheme, "ApiKey") {
+		// An API key, as PasarGuard takes it: X-Api-Key, or Authorization: ApiKey.
+		if key == "" {
+			key = strings.TrimSpace(cred)
+		}
+		if !strings.HasPrefix(key, "pg_key_") || s.ro.QueryRowContext(ctx, `SELECT seller FROM pg_api WHERE key_sha=?`, pgKeySHA(key)).Scan(&seller) != nil {
 			return "", false
 		}
+	} else {
+		tok := strings.TrimSpace(cred)
+		if !strings.EqualFold(scheme, "Bearer") || tok == "" {
+			return "", false
+		}
+		if s.ro.QueryRowContext(ctx, `SELECT seller FROM pg_tokens WHERE sha=? AND expires_unix>?`, pgSHA(tok), now).Scan(&seller) != nil {
+			return "", false
+		}
+	}
+	var enabled bool
+	var last, made int64
+	if s.ro.QueryRowContext(ctx, `SELECT enabled,last_used,created_unix FROM pg_api WHERE seller=?`, seller).Scan(&enabled, &last, &made) != nil || !enabled {
+		return "", false
+	}
+	if !s.pgSellerOK(ctx, seller, made) {
+		return "", false
 	}
 	if now-last >= 60 { // "last seen" without a write per request
 		_, _ = s.db.ExecContext(ctx, `UPDATE pg_api SET last_used=?, last_ip=? WHERE seller=?`, now, realIP(r), seller)
@@ -304,6 +447,9 @@ type pgUser struct {
 	Links                  []string       `json:"links"`
 	Admin                  map[string]any `json:"admin"`
 	NextPlan               any            `json:"next_plan"`
+	HWIDLimit              *int           `json:"hwid_limit"`
+	AutoDeleteInDays       *int           `json:"auto_delete_in_days"`
+	HWIDCount              *int           `json:"hwid_count,omitempty"` // lists only
 }
 
 func pgTime(unix int64) *string {
@@ -335,9 +481,22 @@ func pgStatus(c ClientView, now int64) string {
 func (s *Store) pgView(ctx context.Context, r *http.Request, base string, c ClientView, groups []pgGroup, links bool) pgUser {
 	now := s.now().Unix()
 	u := pgUser{Username: c.Email, Status: pgStatus(c, now), UsedTraffic: c.Usage.Up + c.Usage.Down,
-		DataLimitResetStrategy: "no_reset", Note: c.Note, GroupIDs: []int64{}, Links: []string{},
-		Admin: map[string]any{"username": or2(c.RepID, "owner")}, OnlineAt: pgTime(c.Usage.LastSeen),
-		SubscriptionURL: subURL(base, r, c.SubToken)}
+		DataLimitResetStrategy: pgStrategyOf(c.ResetPeriod), Note: c.Note, GroupIDs: []int64{}, Links: []string{},
+		Admin: map[string]any{"id": nil, "username": or2(c.RepID, "owner")}, OnlineAt: pgTime(c.Usage.LastSeen),
+		SubscriptionURL: subURL(base, r, c.SubToken), OnHoldTimeout: pgTime(c.StartBy)}
+	if c.RepID != "" {
+		var rid int64
+		if s.ro.QueryRowContext(ctx, `SELECT rowid FROM reps WHERE id=?`, c.RepID).Scan(&rid) == nil {
+			u.Admin["id"] = rid
+		}
+	}
+	if c.HWIDLimit > 0 {
+		n := c.HWIDLimit
+		u.HWIDLimit = &n
+	}
+	if np := c.NextPlan; np != nil {
+		u.NextPlan = map[string]any{"user_template_id": nil, "data_limit": int64(np.GB * (1 << 30)), "expire": int64(np.Days) * 86400, "add_remaining_traffic": false}
+	}
 	var created int64
 	_ = s.ro.QueryRowContext(ctx, `SELECT rowid,created_unix FROM clients WHERE email=?`, c.Email).Scan(&u.ID, &created)
 	if t := pgTime(created); t != nil {
@@ -395,13 +554,26 @@ func (s *Store) pgView(ctx context.Context, r *http.Request, base string, c Clie
 type pgIn struct {
 	Username             string          `json:"username"`
 	Status               string          `json:"status"`
-	DataLimit            *int64          `json:"data_limit"`
+	DataLimit            json.RawMessage `json:"data_limit"`
 	Expire               json.RawMessage `json:"expire"`
 	OnHoldExpireDuration *int64          `json:"on_hold_expire_duration"`
 	GroupIDs             json.RawMessage `json:"group_ids"`
-	Inbounds             json.RawMessage `json:"inbounds"` // Mirza sends the groups here on renewals
-	Note                 *string         `json:"note"`
+	// Marzban's field. Mirza sends it on PUT (the panel's groups, on extra
+	// volume or time) and PasarGuard ignores it there, so only a create
+	// without group_ids reads it.
+	Inbounds json.RawMessage `json:"inbounds"`
+	Note     *string         `json:"note"`
+	// The rest of PasarGuard's fields (pgapi_more.go); proxy_settings and
+	// auto_delete_in_days are accepted and ignored.
+	DataLimitResetStrategy *string         `json:"data_limit_reset_strategy"`
+	HWIDLimit              *int            `json:"hwid_limit"`
+	OnHoldTimeout          json.RawMessage `json:"on_hold_timeout"`
+	NextPlan               json.RawMessage `json:"next_plan"`
 }
+
+// pgMaxUnix is the last second of year 9999: anything larger is not a Unix
+// time in seconds (a millisecond one, or garbage).
+const pgMaxUnix = 253402300799
 
 // pgExpire reads an expiry given as a Unix time, an ISO time, 0 or null.
 // set=false means the field was not sent.
@@ -415,6 +587,9 @@ func pgExpire(raw json.RawMessage) (unix int64, set bool, err error) {
 	}
 	var n float64
 	if json.Unmarshal(raw, &n) == nil {
+		if n < 0 || n > pgMaxUnix {
+			return 0, true, fmt.Errorf("%w: expire must be a Unix time in seconds", ErrInvalid)
+		}
 		return int64(n), true, nil
 	}
 	var str string
@@ -422,14 +597,35 @@ func pgExpire(raw json.RawMessage) (unix int64, set bool, err error) {
 		return 0, true, fmt.Errorf("%w: expire", ErrInvalid)
 	}
 	if n, err := strconv.ParseInt(str, 10, 64); err == nil {
+		if n < 0 || n > pgMaxUnix {
+			return 0, true, fmt.Errorf("%w: expire must be a Unix time in seconds", ErrInvalid)
+		}
 		return n, true, nil
 	}
 	for _, f := range []string{time.RFC3339Nano, "2006-01-02T15:04:05", "2006-01-02 15:04:05", "2006-01-02"} {
 		if t, err := time.Parse(f, str); err == nil {
+			if t.Unix() < 0 || t.Unix() > pgMaxUnix {
+				return 0, true, fmt.Errorf("%w: expire is out of range", ErrInvalid)
+			}
 			return t.Unix(), true, nil
 		}
 	}
 	return 0, true, fmt.Errorf("%w: expire %q is not a time", ErrInvalid, str)
+}
+
+// pgBytes reads a data limit: a whole number of bytes, 0 for unlimited,
+// null or missing for no change. A whole number written as a float is
+// accepted, a negative one is not.
+func pgBytes(raw json.RawMessage) (int64, bool, error) {
+	v := strings.TrimSpace(string(raw))
+	if v == "" || v == "null" {
+		return 0, false, nil
+	}
+	var f float64
+	if err := json.Unmarshal(raw, &f); err != nil || f < 0 || f != math.Trunc(f) || f > 1<<60 {
+		return 0, true, fmt.Errorf("%w: data_limit must be 0 or more bytes", ErrInvalid)
+	}
+	return int64(f), true, nil
 }
 
 // pgIDs reads a list of group numbers (anything else, such as Marzban's
@@ -453,24 +649,31 @@ func pgIDs(raw json.RawMessage) (ids []int64, set bool) {
 // pgApply changes c by what a bot sent.
 func (s *Store) pgApply(ctx context.Context, seller string, c *Client, in pgIn, isNew bool) error {
 	now := s.now().Unix()
-	if in.DataLimit != nil {
-		if *in.DataLimit > 0 {
-			c.VolumeBytes = *in.DataLimit
-		} else {
-			c.VolumeBytes = -1
-		}
-	} else if isNew {
-		c.VolumeBytes = -1
+	limit, lset, err := pgBytes(in.DataLimit)
+	if err != nil {
+		return err
+	}
+	switch {
+	case lset && limit > 0:
+		c.VolumeBytes = limit
+	case lset || isNew:
+		c.VolumeBytes = -1 // 0 is unlimited
 	}
 	exp, set, err := pgExpire(in.Expire)
 	if err != nil {
 		return err
+	}
+	if !isNew && strings.TrimSpace(string(in.Expire)) == "null" {
+		set = false // on a change, null leaves the expiry alone (0 removes it)
 	}
 	if set {
 		if exp > 0 && exp <= now && isNew {
 			return fmt.Errorf("%w: expire is in the past", ErrInvalid)
 		}
 		c.ExpiresUnix, c.DurationSeconds = max(exp, 0), 0
+	}
+	if !isNew && in.Status == "" && in.OnHoldExpireDuration != nil && *in.OnHoldExpireDuration > 0 && c.ExpiresUnix == 0 && c.DurationSeconds > 0 {
+		c.DurationSeconds = *in.OnHoldExpireDuration // PasarGuard takes it on its own
 	}
 	switch in.Status {
 	case "", "active":
@@ -489,8 +692,11 @@ func (s *Store) pgApply(ctx context.Context, seller string, c *Client, in pgIn, 
 		return fmt.Errorf("%w: status %q", ErrInvalid, in.Status)
 	}
 	ids, gset := pgIDs(in.GroupIDs)
-	if !gset {
+	if !gset && isNew {
 		ids, gset = pgIDs(in.Inbounds)
+	}
+	if !isNew && len(ids) == 0 {
+		gset = false // an empty list on a change leaves the groups alone
 	}
 	if gset || isNew {
 		tags, err := s.pgTags(ctx, seller, ids)
@@ -525,28 +731,77 @@ func (s *Store) pgSave(ctx context.Context, seller string, c Client) error {
 // pgResetRep resets a reseller's client's usage. The used part becomes
 // usable again, so a volume plan is charged what was used (the unused part
 // was paid when it was given).
+//
+// The charge, its ledger row and the reset are one transaction (so traffic
+// arriving in between is not reset for free), and since a reset gives the
+// volume again it needs the right to renew.
 func (s *Store) pgResetRep(ctx context.Context, seller, email string) error {
-	var plan string
-	var used int64
-	if err := s.ro.QueryRowContext(ctx, `SELECT c.plan,COALESCE(u.up+u.down,0) FROM clients c LEFT JOIN client_usage u ON u.email=c.email WHERE c.email=? AND c.rep_id=?`, email, seller).Scan(&plan, &used); err != nil {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var on bool
+	if tx.QueryRowContext(ctx, `SELECT enabled FROM reps WHERE id=?`, seller).Scan(&on) != nil || !on {
+		return ErrAuth
+	}
+	var vol, up, down int64
+	var legacy bool
+	if err := tx.QueryRowContext(ctx, `SELECT c.volume_bytes,COALESCE(u.up,0),COALESCE(u.down,0),EXISTS(SELECT 1 FROM legacy_clients l WHERE l.email=c.email)
+FROM clients c LEFT JOIN client_usage u ON u.email=c.email WHERE c.email=? AND c.rep_id=?`, email, seller).Scan(&vol, &up, &down, &legacy); err != nil {
 		return ErrNotFound
 	}
-	if plan == "volume" && used > 0 {
-		r, err := s.db.ExecContext(ctx, `UPDATE reps SET volume_credit=volume_credit-? WHERE id=? AND volume_credit>=?`, used, seller, used)
+	if legacy {
+		return fmt.Errorf("%w: an old user is paid for by its use; there is nothing to reset", ErrPolicy)
+	}
+	now := s.now().Unix()
+	// The reset gives back the used volume, up to the volume itself: that is
+	// what is charged, and only a reset that gives volume is a sale.
+	charge := int64(0)
+	if vol > 0 {
+		charge = min(up+down, vol)
+	}
+	if charge > 0 {
+		pol, err := scanPolicy(tx.QueryRowContext(ctx, `SELECT `+policyCols+` FROM reps WHERE id=?`, seller))
+		if err != nil {
+			return err
+		}
+		if pol.DenyRenew {
+			return fmt.Errorf("%w: resetting usage gives the volume again, and renewing is not allowed for this representative", ErrPolicy)
+		}
+		if repLockedQ(ctx, tx, seller, now) {
+			return fmt.Errorf("%w: an overdue bill is unpaid; pay it to sell again", ErrPolicy)
+		}
+	}
+	if used := charge; used > 0 {
+		r, err := tx.ExecContext(ctx, `UPDATE reps SET volume_credit=volume_credit-? WHERE id=? AND volume_credit>=?`, used, seller, used)
 		if err != nil {
 			return err
 		}
 		if n, _ := r.RowsAffected(); n != 1 {
 			return ErrCredit
 		}
-	}
-	if err := s.ResetUsage(ctx, email, "api"); err != nil {
-		if plan == "volume" && used > 0 {
-			_, _ = s.db.ExecContext(ctx, `UPDATE reps SET volume_credit=volume_credit+? WHERE id=?`, used, seller)
+		if _, err := tx.ExecContext(ctx, `INSERT INTO credit_ledger(unix,rep_id,actor,kind,client_email,volume_delta,units_delta,note) VALUES(?,?,?,?,?,?,?,?)`,
+			now, seller, "mirza", "charge", email, -used, 0, "reset: the used volume is given again"); err != nil {
+			return err
 		}
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO usage_resets(email,unix,up,down,reason) VALUES(?,?,?,?,?)`, email, now, up, down, "api"); err != nil {
 		return err
 	}
-	return nil
+	if err := keepRepUsage(ctx, tx, email); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE client_usage SET up=0, down=0 WHERE email=?`, email); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE clients SET last_reset_unix=? WHERE email=?`, now, email); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO events(unix,node_id,email,kind) VALUES(?,?,?,?)`, now, "", email, "reset:api"); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // ---- HTTP ----
@@ -590,14 +845,29 @@ func pgRoutes(s *Store, mux *http.ServeMux, subBase string) {
 				pgErr(w, http.StatusUnauthorized, "Could not validate credentials")
 				return
 			}
-			if r.Method != http.MethodGet {
+			if r.Method != http.MethodGet && r.Method != http.MethodHead {
 				sw := &statusWriter{ResponseWriter: w}
+				note := &pgAuditNote{}
+				r = r.WithContext(context.WithValue(r.Context(), pgAuditKey{}, note))
 				h(sw, r, seller)
 				p := Principal{User: "mirza", Role: "owner"}
 				if seller != "" {
-					p = Principal{User: "mirza", Role: "rep", RepID: seller}
+					p = Principal{User: "mirza_" + seller, Role: "rep", RepID: seller}
 				}
-				s.Audit(r.Context(), p, r, sw.status)
+				if len(note.names) == 0 {
+					s.Audit(r.Context(), p, r, sw.status)
+					return
+				}
+				// One row per user touched, so a search by name finds a
+				// change made by id or in bulk.
+				for i, name := range note.names {
+					if i == 500 {
+						break
+					}
+					r2 := r.Clone(r.Context())
+					r2.URL.Path = r.URL.Path + " " + name
+					s.Audit(r.Context(), p, r2, sw.status)
+				}
 				return
 			}
 			h(w, r, seller)
@@ -611,24 +881,6 @@ func pgRoutes(s *Store, mux *http.ServeMux, subBase string) {
 		}
 		return subBase
 	}
-	// mine reads one of the seller's clients.
-	mine := func(r *http.Request, seller string) (ClientView, error) {
-		c, err := s.clientView(r.Context(), r.PathValue("username"))
-		if err != nil || c.RepID != seller {
-			return ClientView{}, ErrNotFound
-		}
-		return c, nil
-	}
-	view := func(w http.ResponseWriter, r *http.Request, seller, email string) {
-		c, err := s.clientView(r.Context(), email)
-		if err != nil {
-			pgFail(w, err)
-			return
-		}
-		groups, _ := s.pgGroups(r.Context(), seller)
-		pgJSON(w, s.pgView(r.Context(), r, base(r, seller), c, groups, true))
-	}
-
 	mux.HandleFunc("POST /api/admin/token", func(w http.ResponseWriter, r *http.Request) {
 		user, pass := r.PostFormValue("username"), r.PostFormValue("password")
 		if user == "" && strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") {
@@ -695,52 +947,9 @@ func pgRoutes(s *Store, mux *http.ServeMux, subBase string) {
 	mux.HandleFunc("GET /api/nodes", auth(func(w http.ResponseWriter, r *http.Request, seller string) {
 		out := []map[string]any{}
 		if seller == "" {
-			nodes, _ := s.Nodes(r.Context())
-			now := s.now().Unix()
-			for i, n := range nodes {
-				st, msg := "connected", ""
-				if now-n.LastSeen > 120 {
-					st, msg = "error", "not connected to the panel"
-				} else if !n.XrayRunning {
-					st, msg = "error", "xray is not running"
-				}
-				out = append(out, map[string]any{"id": i + 1, "name": or2(n.Name, n.ID), "address": n.PublicIP, "status": st, "message": msg, "xray_version": nil})
-			}
+			out = s.pgNodeViews(r.Context())
 		}
 		pgJSON(w, out)
-	}))
-	mux.HandleFunc("GET /api/users", auth(func(w http.ResponseWriter, r *http.Request, seller string) {
-		list, err := s.clientViews(r.Context(), "c.rep_id=?", seller)
-		if err != nil {
-			pgFail(w, err)
-			return
-		}
-		q := r.URL.Query()
-		status, name := q.Get("status"), strings.ToLower(q.Get("username"))
-		if name == "" {
-			name = strings.ToLower(q.Get("search"))
-		}
-		offset, _ := strconv.Atoi(q.Get("offset"))
-		limit, _ := strconv.Atoi(q.Get("limit"))
-		groups, _ := s.pgGroups(r.Context(), seller)
-		now := s.now().Unix()
-		b := base(r, seller)
-		users := []pgUser{}
-		total := 0
-		for _, c := range list {
-			if status != "" && pgStatus(c, now) != status {
-				continue
-			}
-			if name != "" && !strings.Contains(strings.ToLower(c.Email), name) {
-				continue
-			}
-			total++
-			if total <= offset || (limit > 0 && len(users) >= limit) {
-				continue
-			}
-			users = append(users, s.pgView(r.Context(), r, b, c, groups, false))
-		}
-		pgJSON(w, map[string]any{"users": users, "total": total})
 	}))
 	mux.HandleFunc("POST /api/user", auth(func(w http.ResponseWriter, r *http.Request, seller string) {
 		var in pgIn
@@ -758,6 +967,10 @@ func pgRoutes(s *Store, mux *http.ServeMux, subBase string) {
 			pgErr(w, http.StatusConflict, "User already exists")
 			return
 		}
+		if err := s.pgCheckExtras(r.Context(), seller, nil, in); err != nil {
+			pgFail(w, err)
+			return
+		}
 		c := Client{Email: in.Username}
 		if err := s.pgApply(r.Context(), seller, &c, in, true); err != nil {
 			pgFail(w, err)
@@ -767,131 +980,15 @@ func pgRoutes(s *Store, mux *http.ServeMux, subBase string) {
 			pgFail(w, err)
 			return
 		}
-		if in.Note != nil {
-			_ = s.SetClientNote(r.Context(), c.Email, clip(*in.Note, 2000))
+		if err := s.pgSetExtras(r.Context(), seller, c.Email, in); err != nil {
+			pgFail(w, err)
+			return
 		}
 		_, _ = s.db.ExecContext(r.Context(), `UPDATE pg_api SET made=made+1 WHERE seller=?`, seller)
-		view(w, r, seller, c.Email)
+		pgNote(r, c.Email)
+		(&pgSrv{s: s, base: base}).viewCode(w, r, seller, c.Email, http.StatusCreated)
 	}))
-	mux.HandleFunc("GET /api/user/{username}", auth(func(w http.ResponseWriter, r *http.Request, seller string) {
-		c, err := mine(r, seller)
-		if err != nil && r.PathValue("username") == PGAllGroups {
-			// Not a real user: every inbound the seller may give, for a bot
-			// that learns its groups by reading one user.
-			groups, _ := s.pgGroups(r.Context(), seller)
-			u := pgUser{Username: PGAllGroups, Status: "disabled", DataLimitResetStrategy: "no_reset", GroupIDs: []int64{}, Links: []string{},
-				ProxySettings: map[string]any{}, Admin: map[string]any{"username": or2(seller, "owner")}}
-			for _, g := range groups {
-				if !g.IsDisabled {
-					u.GroupIDs = append(u.GroupIDs, g.ID)
-				}
-			}
-			pgJSON(w, u)
-			return
-		}
-		if err != nil {
-			pgFail(w, err)
-			return
-		}
-		groups, _ := s.pgGroups(r.Context(), seller)
-		pgJSON(w, s.pgView(r.Context(), r, base(r, seller), c, groups, true))
-	}))
-	mux.HandleFunc("PUT /api/user/{username}", auth(func(w http.ResponseWriter, r *http.Request, seller string) {
-		cur, err := mine(r, seller)
-		if err != nil {
-			pgFail(w, err)
-			return
-		}
-		var in pgIn
-		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&in); err != nil {
-			pgErr(w, http.StatusUnprocessableEntity, "invalid JSON")
-			return
-		}
-		c := cur.Client
-		c.UUID, c.Secret, c.SubToken = "", "", "" // credentials stay as they are
-		if err := s.pgApply(r.Context(), seller, &c, in, false); err != nil {
-			pgFail(w, err)
-			return
-		}
-		if err := s.pgSave(r.Context(), seller, c); err != nil {
-			pgFail(w, err)
-			return
-		}
-		if in.Note != nil {
-			_ = s.SetClientNote(r.Context(), c.Email, clip(*in.Note, 2000))
-		}
-		view(w, r, seller, c.Email)
-	}))
-	mux.HandleFunc("DELETE /api/user/{username}", auth(func(w http.ResponseWriter, r *http.Request, seller string) {
-		c, err := mine(r, seller)
-		if err != nil {
-			pgFail(w, err)
-			return
-		}
-		if seller == "" {
-			err = s.DeleteClient(r.Context(), c.Email)
-		} else {
-			_, _, err = s.RepDeleteClient(r.Context(), "mirza", seller, c.Email)
-		}
-		if err != nil {
-			pgFail(w, err)
-			return
-		}
-		pgJSON(w, map[string]string{"detail": "User successfully deleted"})
-	}))
-	mux.HandleFunc("POST /api/user/{username}/reset", auth(func(w http.ResponseWriter, r *http.Request, seller string) {
-		c, err := mine(r, seller)
-		if err != nil {
-			pgFail(w, err)
-			return
-		}
-		if seller == "" {
-			err = s.ResetUsage(r.Context(), c.Email, "api")
-		} else {
-			err = s.pgResetRep(r.Context(), seller, c.Email)
-		}
-		if err != nil {
-			pgFail(w, err)
-			return
-		}
-		view(w, r, seller, c.Email)
-	}))
-	mux.HandleFunc("POST /api/user/{username}/revoke_sub", auth(func(w http.ResponseWriter, r *http.Request, seller string) {
-		c, err := mine(r, seller)
-		if err != nil {
-			pgFail(w, err)
-			return
-		}
-		if err := s.RotateClient(r.Context(), c.Email, true, true); err != nil {
-			pgFail(w, err)
-			return
-		}
-		view(w, r, seller, c.Email)
-	}))
-	mux.HandleFunc("GET /api/user/{username}/sub_update", auth(func(w http.ResponseWriter, r *http.Request, seller string) {
-		c, err := mine(r, seller)
-		if err != nil {
-			pgFail(w, err)
-			return
-		}
-		type upd struct {
-			CreatedAt string `json:"created_at"`
-			UserAgent string `json:"user_agent"`
-		}
-		ups := []upd{}
-		rows, err := s.ro.QueryContext(r.Context(), `SELECT last_unix,agent FROM client_devices WHERE email=? ORDER BY last_unix DESC LIMIT 10`, c.Email)
-		if err == nil {
-			defer rows.Close()
-			for rows.Next() {
-				var at int64
-				var agent string
-				if rows.Scan(&at, &agent) == nil {
-					ups = append(ups, upd{*pgTime(max(at, 1)), agent})
-				}
-			}
-		}
-		pgJSON(w, map[string]any{"updates": ups, "count": len(ups)})
-	}))
+	(&pgSrv{s: s, base: base}).routes(mux, auth)
 }
 
 // pgAdminRoutes lets the panel show, turn on (with a fresh password) and
@@ -905,14 +1002,62 @@ func pgAdminRoutes(s *Store, mux *docMux, path string, wrap func(http.HandlerFun
 		}
 		reply(w, s.PGAPIOf(r.Context(), id), nil)
 	}))
+	// POST turns the access on with a fresh password; an optional
+	// {"mode": "mirza"|"api"} chooses the mode too (a new access is Mirza's).
 	mux.HandleFunc("POST "+path, wrap(func(w http.ResponseWriter, r *http.Request) {
 		id, ok := seller(r)
 		if !ok {
 			http.NotFound(w, r)
 			return
 		}
+		var in struct {
+			Mode string `json:"mode"`
+		}
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1024)).Decode(&in); err != nil && !errors.Is(err, io.EOF) {
+			reply(w, nil, fmt.Errorf("%w: invalid JSON", ErrInvalid))
+			return
+		}
+		if in.Mode != "" && in.Mode != PGModeMirza && in.Mode != PGModeAPI {
+			reply(w, nil, fmt.Errorf("%w: mode is mirza or api", ErrInvalid))
+			return
+		}
 		a, err := s.EnablePGAPI(r.Context(), id)
+		if err == nil && in.Mode != "" && id != "" { // the owner's access has no mode
+			if err = s.SetPGAPIMode(r.Context(), id, in.Mode); err == nil {
+				pass, key := a.Password, a.APIKey
+				a = s.PGAPIOf(r.Context(), id)
+				a.Password, a.APIKey = pass, key
+			}
+		}
 		reply(w, a, err)
+	}))
+	// POST .../key makes a new API key (the password stays).
+	mux.HandleFunc("POST "+path+"/key", wrap(func(w http.ResponseWriter, r *http.Request) {
+		id, ok := seller(r)
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+		key, err := s.NewPGAPIKey(r.Context(), id)
+		a := s.PGAPIOf(r.Context(), id)
+		a.APIKey = key
+		reply(w, a, err)
+	}))
+	// PUT {"mode": ...} switches the mode, keeping the password.
+	mux.HandleFunc("PUT "+path, wrap(func(w http.ResponseWriter, r *http.Request) {
+		id, ok := seller(r)
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+		var in struct {
+			Mode string `json:"mode"`
+		}
+		if !decode(w, r, &in) {
+			return
+		}
+		err := s.SetPGAPIMode(r.Context(), id, in.Mode)
+		reply(w, s.PGAPIOf(r.Context(), id), err)
 	}))
 	mux.HandleFunc("DELETE "+path, wrap(func(w http.ResponseWriter, r *http.Request) {
 		id, ok := seller(r)

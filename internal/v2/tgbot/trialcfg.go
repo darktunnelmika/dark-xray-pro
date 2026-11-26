@@ -22,8 +22,8 @@ func (b *Bot) trialScreen(ctx context.Context, chat int64, seller, cb, home stri
 		state, toggle = "🟢 روشن", Button{Text: "🔴 خاموش کردن", Data: cb + ":off"}
 	}
 	size := trialSize(p)
-	text := fmt.Sprintf("🎁 <b>تست رایگان</b>\n\nوضعیت: <b>%s</b>\nحجم: <b>%s</b>\nمدت: <b>%s</b>\nدستگاه هم‌زمان: <b>%d</b>\n\nهر حساب تلگرام فقط یک بار تست می‌گیرد. کانفیگ تست در پنل با برچسب «تست» دیده می‌شود و %d روز بعد از پایان خودکار حذف می‌شود.",
-		state, size, trialSpan(p.Hours), p.MaxIPs, 3)
+	text := fmt.Sprintf("🎁 <b>تست رایگان</b>\n\nوضعیت: <b>%s</b>\nحجم: <b>%s</b>\nمدت: <b>%s</b>\nدستگاه هم‌زمان: <b>%s</b>\n\nهر حساب تلگرام فقط یک بار تست می‌گیرد. کانفیگ تست در پنل با برچسب «تست» دیده می‌شود و ۳ روز بعد از پایان خودکار حذف می‌شود.",
+		state, size, trialSpan(p.Hours), faInt(int64(p.MaxIPs)))
 	if seller != "" {
 		text += "\n\nحجم هر تست از اعتبار شما کم می‌شود."
 	}
@@ -44,11 +44,11 @@ func (b *Bot) trialScreen(ctx context.Context, chat int64, seller, cb, home stri
 func trialSize(p hubcore.TrialPolicy) string {
 	switch {
 	case p.MB > 0 && p.MB%1024 == 0:
-		return fmt.Sprintf("%d گیگ", p.MB/1024)
+		return faInt(p.MB/1024) + " گیگ"
 	case p.MB > 0:
-		return fmt.Sprintf("%d مگ", p.MB)
+		return faInt(p.MB) + " مگ"
 	case p.GB > 0:
-		return fmt.Sprintf("%d گیگ", p.GB)
+		return faInt(p.GB) + " گیگ"
 	}
 	return "نامحدود"
 }
@@ -96,9 +96,9 @@ func parseTrialVolume(text string) (gb, mb int64, ok bool) {
 
 func trialSpan(hours int64) string {
 	if hours%24 == 0 {
-		return fmt.Sprintf("%d روز", hours/24)
+		return faInt(hours/24) + " روز"
 	}
-	return fmt.Sprintf("%d ساعت", hours)
+	return faInt(hours) + " ساعت"
 }
 
 // trialCallback handles the screen's buttons; act is what follows the prefix

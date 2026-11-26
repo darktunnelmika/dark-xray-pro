@@ -47,7 +47,7 @@ func TestNextPlanTemplatesNodeUsage(t *testing.T) {
 	if err := s.PutTemplate(ctx, ClientTemplate{ID: "t30", Name: "30 GB", GB: 30, Days: 30, FirstUse: true, Inbounds: []string{"de-vless"}, ResetPeriod: "month"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.PutTemplate(ctx, ClientTemplate{ID: "bad", Name: "x", ResetPeriod: "year"}); err == nil {
+	if err := s.PutTemplate(ctx, ClientTemplate{ID: "bad", Name: "x", ResetPeriod: "fortnight"}); err == nil {
 		t.Fatal("bad template accepted")
 	}
 	if tl, _ := s.Templates(ctx); len(tl) != 1 || tl[0].GB != 30 || !tl[0].FirstUse {

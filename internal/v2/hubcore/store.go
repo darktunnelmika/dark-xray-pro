@@ -195,7 +195,7 @@ func Open(path string) (*Store, error) {
 		st.Close()
 		return nil, err
 	}
-	if err := st.ensureLegacySchema(); err != nil {
+	if err := st.ensureOldUsersSchema(); err != nil {
 		st.Close()
 		return nil, err
 	}
@@ -204,6 +204,10 @@ func Open(path string) (*Store, error) {
 		return nil, err
 	}
 	if err := st.ensureSellerSchema(); err != nil {
+		st.Close()
+		return nil, err
+	}
+	if err := st.ensureUsedHereSchema(); err != nil {
 		st.Close()
 		return nil, err
 	}
@@ -268,6 +272,14 @@ func Open(path string) (*Store, error) {
 		return nil, err
 	}
 	if err := st.ensureRepSaleSchema(); err != nil {
+		st.Close()
+		return nil, err
+	}
+	if err := st.ensureResaleSchema(); err != nil {
+		st.Close()
+		return nil, err
+	}
+	if err := st.ensureLegacySchema(); err != nil {
 		st.Close()
 		return nil, err
 	}
@@ -344,6 +356,21 @@ func hashToken(tok string) string {
 	return hex.EncodeToString(sum[:])
 }
 
+// newRowID is the row id for a new row of table: past every id the table
+// ever gave out, so the id of a deleted row never goes to another one.
+// Sales bots keep users, templates and groups by these numbers.
+func newRowID(ctx context.Context, tx *sql.Tx, table string) (int64, error) {
+	key := "rowid_hw_" + table
+	var hw, top int64
+	_ = tx.QueryRowContext(ctx, `SELECT CAST(value AS INTEGER) FROM settings WHERE key=?`, key).Scan(&hw)
+	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(rowid),0) FROM `+table).Scan(&top); err != nil {
+		return 0, err
+	}
+	id := max(hw, top) + 1
+	_, err := tx.ExecContext(ctx, `INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value`, key, fmt.Sprint(id))
+	return id, err
+}
+
 func randomHex(n int) string {
 	b := make([]byte, n)
 	if _, err := rand.Read(b); err != nil {
@@ -370,9 +397,20 @@ func (s *Store) CreateNode(ctx context.Context, id, name string) (string, error)
 		return "", ErrInvalid
 	}
 	tok := randomHex(32)
-	_, err := s.db.ExecContext(ctx, `INSERT INTO nodes(id,name,token_sha256,created_unix) VALUES(?,?,?,?)`,
-		id, name, hashToken(tok), s.now().Unix())
-	return tok, err
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return "", err
+	}
+	defer tx.Rollback()
+	rowid, err := newRowID(ctx, tx, "nodes")
+	if err != nil {
+		return "", err
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO nodes(rowid,id,name,token_sha256,created_unix) VALUES(?,?,?,?,?)`,
+		rowid, id, name, hashToken(tok), s.now().Unix()); err != nil {
+		return "", err
+	}
+	return tok, tx.Commit()
 }
 
 // RotateNodeToken replaces a node token (the old one stops working).
@@ -435,10 +473,20 @@ func putClientTx(ctx context.Context, tx *sql.Tx, c Client, now int64) error {
 	if !emailRE.MatchString(c.Email) || c.MaxIPs < 0 || c.DurationSeconds < 0 {
 		return ErrInvalid
 	}
+	if err := checkTermBounds(c); err != nil {
+		return err
+	}
 	// An update that omits credentials keeps the existing ones, so editing a
 	// client never breaks its connections or its subscription link.
 	var oldUUID, oldSecret, oldTok, oldRep string
-	_ = tx.QueryRowContext(ctx, `SELECT uuid,secret,sub_token,rep_id FROM clients WHERE email=?`, c.Email).Scan(&oldUUID, &oldSecret, &oldTok, &oldRep)
+	var rowid any // NULL keeps an existing row's id
+	if errors.Is(tx.QueryRowContext(ctx, `SELECT uuid,secret,sub_token,rep_id FROM clients WHERE email=?`, c.Email).Scan(&oldUUID, &oldSecret, &oldTok, &oldRep), sql.ErrNoRows) {
+		id, err := newRowID(ctx, tx, "clients")
+		if err != nil {
+			return err
+		}
+		rowid = id
+	}
 	// A connected shop's clients are written only by the shop (or the owner
 	// where the shop allows it), and its name space stays its own.
 	if t, ok := tenantOfRep(oldRep); ok && tenantAccess(ctx) != t {
@@ -450,11 +498,11 @@ func putClientTx(ctx context.Context, tx *sql.Tx, c Client, now int64) error {
 	c.UUID = firstNonEmpty(c.UUID, oldUUID, RandomUUID())
 	c.Secret = firstNonEmpty(c.Secret, oldSecret, randomHex(16))
 	c.SubToken = firstNonEmpty(c.SubToken, oldTok, randomHex(16))
-	_, err := tx.ExecContext(ctx, `INSERT INTO clients(email,uuid,secret,enabled,volume_bytes,expires_unix,duration_seconds,max_ips,sub_token,created_unix)
-VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(email) DO UPDATE SET uuid=excluded.uuid, secret=excluded.secret, enabled=excluded.enabled,
+	_, err := tx.ExecContext(ctx, `INSERT INTO clients(rowid,email,uuid,secret,enabled,volume_bytes,expires_unix,duration_seconds,max_ips,sub_token,created_unix)
+VALUES(?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(email) DO UPDATE SET uuid=excluded.uuid, secret=excluded.secret, enabled=excluded.enabled,
 volume_bytes=excluded.volume_bytes, expires_unix=excluded.expires_unix, duration_seconds=excluded.duration_seconds, max_ips=excluded.max_ips,
 sub_token=excluded.sub_token`,
-		c.Email, c.UUID, c.Secret, c.Enabled, c.VolumeBytes, c.ExpiresUnix, c.DurationSeconds, c.MaxIPs, c.SubToken, now)
+		rowid, c.Email, c.UUID, c.Secret, c.Enabled, c.VolumeBytes, c.ExpiresUnix, c.DurationSeconds, c.MaxIPs, c.SubToken, now)
 	if err != nil {
 		return err
 	}
@@ -496,15 +544,22 @@ func (s *Store) PutInboundMeta(ctx context.Context, tag, nodeID string, template
 	}
 	defer tx.Rollback()
 	var cur string
+	var rowid any // NULL keeps an existing row's id
 	if tx.QueryRowContext(ctx, `SELECT node_id FROM inbounds WHERE tag=?`, tag).Scan(&cur) == nil {
 		var x int
 		if nodeID == "" || tx.QueryRowContext(ctx, `SELECT 1 FROM inbound_routes WHERE tag=?`, tag).Scan(&x) == nil {
 			nodeID = cur // a placed inbound keeps its routes; edit them with PutRoutes
 		}
+	} else {
+		id, err := newRowID(ctx, tx, "inbounds")
+		if err != nil {
+			return err
+		}
+		rowid = id
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO inbounds(tag,node_id,template,meta,enabled) VALUES(?,?,?,?,?)
+	if _, err := tx.ExecContext(ctx, `INSERT INTO inbounds(rowid,tag,node_id,template,meta,enabled) VALUES(?,?,?,?,?,?)
 ON CONFLICT(tag) DO UPDATE SET node_id=excluded.node_id, template=excluded.template, meta=excluded.meta, enabled=excluded.enabled`,
-		tag, nodeID, string(template), string(meta), enabled); err != nil {
+		rowid, tag, nodeID, string(template), string(meta), enabled); err != nil {
 		return err
 	}
 	if err := s.legacyRoute(ctx, tx, tag, nodeID, template, meta); err != nil {
@@ -630,9 +685,11 @@ type ClientView struct {
 	NextReset      int64     `json:"next_reset,omitempty"`
 	NextPlan       *NextPlan `json:"next_plan,omitempty"`
 	HWIDLimit      int       `json:"hwid_limit"`
-	SpeedKbps      int       `json:"speed_kbps"`         // 0 = no limit
-	StartBy        int64     `json:"start_by,omitempty"` // on hold: the term starts by then even if unused
-	Trial          bool      `json:"trial,omitempty"`    // a free trial from a Telegram shop
+	SpeedKbps      int       `json:"speed_kbps"`           // 0 = no limit
+	StartBy        int64     `json:"start_by,omitempty"`   // on hold: the term starts by then even if unused
+	Trial          bool      `json:"trial,omitempty"`      // a free trial from a Telegram shop
+	GiftBytes      int64     `json:"gift_bytes,omitempty"` // the owner's gift in the volume: never refunded as credit
+	Legacy         bool      `json:"legacy,omitempty"`     // an old user brought from another panel (legacy.go)
 }
 
 // Clients lists the panel's own clients (the owner's and the resellers')
@@ -666,7 +723,8 @@ func (s *Store) clientView(ctx context.Context, email string) (ClientView, error
 func (s *Store) clientViews(ctx context.Context, where string, args ...any) ([]ClientView, error) {
 	q := `SELECT c.email,c.uuid,c.enabled,c.volume_bytes,c.expires_unix,c.duration_seconds,c.max_ips,c.sub_token,c.rep_id,c.plan,c.note,
 COALESCE(u.up,0),COALESCE(u.down,0),COALESCE(u.first_seen_unix,0),COALESCE(u.last_seen_unix,0),
-EXISTS(SELECT 1 FROM online o WHERE o.email=c.email AND o.seen_unix>=?),c.reset_period,c.last_reset_unix,c.next_plan,c.hwid_limit,c.start_by_unix,c.trial
+EXISTS(SELECT 1 FROM online o WHERE o.email=c.email AND o.seen_unix>=?),CASE WHEN c.reset_year=1 THEN 'year' ELSE c.reset_period END,c.last_reset_unix,c.next_plan,c.hwid_limit,c.start_by_unix,c.trial,
+EXISTS(SELECT 1 FROM legacy_clients l WHERE l.email=c.email),c.gift_bytes
 FROM clients c LEFT JOIN client_usage u ON u.email=c.email`
 	qargs := []any{s.now().Unix() - 120}
 	if where != "" {
@@ -683,7 +741,7 @@ FROM clients c LEFT JOIN client_usage u ON u.email=c.email`
 		var v ClientView
 		var np string
 		if err := rows.Scan(&v.Email, &v.UUID, &v.Enabled, &v.VolumeBytes, &v.ExpiresUnix, &v.DurationSeconds, &v.MaxIPs, &v.SubToken, &v.RepID, &v.Plan, &v.Note,
-			&v.Usage.Up, &v.Usage.Down, &v.Usage.FirstSeen, &v.Usage.LastSeen, &v.Online, &v.ResetPeriod, &v.LastReset, &np, &v.HWIDLimit, &v.StartBy, &v.Trial); err != nil {
+			&v.Usage.Up, &v.Usage.Down, &v.Usage.FirstSeen, &v.Usage.LastSeen, &v.Online, &v.ResetPeriod, &v.LastReset, &np, &v.HWIDLimit, &v.StartBy, &v.Trial, &v.Legacy, &v.GiftBytes); err != nil {
 			return nil, err
 		}
 		if np != "" {

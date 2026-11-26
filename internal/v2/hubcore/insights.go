@@ -23,20 +23,22 @@ type Event struct {
 }
 
 func (s *Store) Insights(ctx context.Context, days int) (Insights, error) {
-	if days <= 0 || days > 90 {
+	// Up to 180 days: the dashboard asks for twice its range (90 at most)
+	// to set the period against the one before it.
+	if days <= 0 || days > 180 {
 		days = 14
 	}
 	var in Insights
 	today := s.now().UTC()
 	from := today.AddDate(0, 0, -(days - 1)).Format("2006-01-02")
-	rows, err := s.ro.QueryContext(ctx, `SELECT day,SUM(up),SUM(down) FROM usage_daily WHERE day>=? GROUP BY day`, from)
+	rows, err := s.ro.QueryContext(ctx, `SELECT day,SUM(up),SUM(down),COUNT(DISTINCT email) FROM usage_daily WHERE day>=? GROUP BY day`, from)
 	if err != nil {
 		return in, err
 	}
 	got := map[string]ClientDaily{}
 	for rows.Next() {
 		var d ClientDaily
-		if err := rows.Scan(&d.Day, &d.Up, &d.Down); err != nil {
+		if err := rows.Scan(&d.Day, &d.Up, &d.Down, &d.Users); err != nil {
 			rows.Close()
 			return in, err
 		}

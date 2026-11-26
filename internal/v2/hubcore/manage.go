@@ -251,7 +251,14 @@ func (s *Store) TransferClient(ctx context.Context, email, toRep string) error {
 		}
 		return ErrNotFound
 	}
-	return nil
+	// An old user is billed for its use to the seller it belongs to now (the
+	// owner has no credit: moved to the owner, it is no longer billed).
+	if toRep == "" {
+		_, err = s.db.ExecContext(ctx, `DELETE FROM legacy_clients WHERE email=?`, email)
+	} else {
+		_, err = s.db.ExecContext(ctx, `UPDATE legacy_clients SET rep_id=? WHERE email=?`, toRep, email)
+	}
+	return err
 }
 
 // Group is a named set of clients.

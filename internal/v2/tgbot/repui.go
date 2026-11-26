@@ -95,7 +95,7 @@ func (b *Bot) setDraft(chat int64, d *repDraft) {
 // repOf is the reseller this chat manages in this bot ("" = none).
 func (b *Bot) repOf(ctx context.Context, chat int64) (rep, role string) {
 	rep, role = b.Store.TgRepRole(ctx, chat)
-	if rep == "" || (b.Seller != "" && rep != b.Seller) {
+	if rep == "" || !b.repInScope(ctx, rep) {
 		return "", ""
 	}
 	return rep, role
@@ -141,7 +141,7 @@ func (b *Bot) repHome(ctx context.Context, chat int64, rep, role string) {
 	if units > 0 {
 		text += fmt.Sprintf(" · %d واحد نامحدود", units)
 	}
-	text += fmt.Sprintf("\n👥 کاربرها: <b>%d</b> (فعال %d · آنلاین %d)\n⏳ نیازمند تمدید: <b>%d</b>\n🛒 سفارش منتظر: <b>%d</b>", total, active, online, soon, len(pending))
+	text += fmt.Sprintf("\n👥 کاربرها: <b>%s</b> (فعال %s · آنلاین %s)\n⏳ نیازمند تمدید: <b>%s</b>\n🛒 سفارش منتظر: <b>%s</b>", faInt(int64(total)), faInt(int64(active)), faInt(int64(online)), faInt(int64(soon)), faInt(int64(len(pending))))
 	kb := &Keyboard{}
 	r1 := []Button{}
 	if repCan(role, "new") {
@@ -149,9 +149,9 @@ func (b *Bot) repHome(ctx context.Context, chat int64, rep, role string) {
 	}
 	r1 = append(r1, repBtn("👥 کاربران", "cl"))
 	kb.Rows = append(kb.Rows, r1)
-	r2 := []Button{repBtn(fmt.Sprintf("⏳ نیازمند تمدید (%d)", soon), "ct")}
+	r2 := []Button{repBtn(fmt.Sprintf("⏳ نیازمند تمدید (%s)", faInt(int64(soon))), "ct")}
 	if repCan(role, "orders") {
-		r2 = append(r2, repBtn(fmt.Sprintf("🛒 سفارش‌ها (%d)", len(pending)), "ord"))
+		r2 = append(r2, repBtn(fmt.Sprintf("🛒 سفارش‌ها (%s)", faInt(int64(len(pending)))), "ord"))
 	}
 	kb.Rows = append(kb.Rows, r2)
 	r3 := []Button{}
@@ -172,6 +172,9 @@ func (b *Bot) repHome(ctx context.Context, chat int64, rep, role string) {
 	}
 	if btn, ok := b.repSaleButton(ctx, chat); ok {
 		kb.Rows = append(kb.Rows, []Button{btn})
+	}
+	if role == "owner" && b.Store.ResaleOf(ctx, rep).Allowed && !b.Store.IsSubSeller(ctx, rep) {
+		kb.Rows = append(kb.Rows, []Button{cbBtn("💼 کیف پول و فاکتورها", "P:w")})
 	}
 	if repCan(role, "shop") && b.Seller == rep {
 		// In the reseller's own bot: a message to everyone who started it,
@@ -356,7 +359,7 @@ func (b *Bot) repCallback(ctx context.Context, chat int64, data string) bool {
 			}
 		}
 		if err := b.Store.RepPutClient(ctx, "tg:"+strconv.FormatInt(chat, 10), rep, cl, plan); err != nil {
-			b.send(ctx, chat, "انجام نشد: "+esc(err.Error()), repBackKB)
+			b.send(ctx, chat, "انجام نشد: "+esc(faErr(err)), repBackKB)
 			return true
 		}
 		b.repClient(ctx, chat, rep, role, email)
@@ -374,7 +377,7 @@ func (b *Bot) repCallback(ctx context.Context, chat int64, data string) bool {
 		}
 		bytes, units, err := b.Store.RepDeleteClient(ctx, "tg:"+strconv.FormatInt(chat, 10), rep, email)
 		if err != nil {
-			b.send(ctx, chat, "حذف نشد: "+esc(err.Error()), repBackKB)
+			b.send(ctx, chat, "حذف نشد: "+esc(faErr(err)), repBackKB)
 			return true
 		}
 		msg := "🗑 <b>" + esc(email) + "</b> حذف شد."
@@ -497,7 +500,7 @@ func (b *Bot) repConfirm(ctx context.Context, chat int64, rep string) {
 	refund := int64(0)
 	if d.mode == "renew" {
 		if c, err := b.Store.ClientByEmail(ctx, d.target); err == nil && c.VolumeBytes > 0 {
-			if left := c.VolumeBytes - c.Usage.Up - c.Usage.Down; left > 0 {
+			if left := c.VolumeBytes - c.GiftBytes - c.Usage.Up - c.Usage.Down; left > 0 { // the owner's gift is not refunded
 				refund = left
 			}
 		}
@@ -711,6 +714,9 @@ func (b *Bot) repCredit(ctx context.Context, chat int64, rep string) {
 	o := ov[0]
 	text := fmt.Sprintf("💳 <b>اعتبار و گزارش</b>\n%s\nاعتبار فعلی: <b>%s</b>\n\n<b>این ماه</b>\n🛒 فروش: %s (%d سفارش)\n↩️ برگشت: %s\n➕ شارژ: %s\n📶 مصرف کل کاربرها: %s",
 		line, gb(o.VolumeCredit), gb(o.MonthSold), o.MonthSales, gb(o.MonthBack), gb(o.MonthTopup), gb(o.UsedBytes))
+	if o.UsedBytes-o.UsedHere > 1<<30 { // moved here with usage from another panel
+		text += "\n🏠 مصرف در این پنل: " + gb(o.UsedHere)
+	}
 	b.send(ctx, chat, text, repBackKB)
 }
 
@@ -851,6 +857,18 @@ func (b *Bot) repKey(ctx context.Context, chat int64, rep, role, act string) {
 		b.repHome(ctx, chat, rep, role)
 	default:
 		b.repHome(ctx, chat, rep, role)
+	}
+}
+
+// refreshRepKeyboard puts a reseller's bottom keyboard (with the switch
+// between reseller and customer mode) back on /start: Telegram drops it
+// when the chat is cleared or the app reinstalled, and it was sent once.
+func (b *Bot) refreshRepKeyboard(ctx context.Context, chat int64) {
+	if b.Owners[chat] {
+		return
+	}
+	if rep, _ := b.repOf(ctx, chat); rep != "" {
+		b.setRepMode(ctx, chat, b.repMode(ctx, chat))
 	}
 }
 

@@ -39,7 +39,35 @@ func (s *Store) ensurePlanSchema() error {
 	if err := s.addColumn("clients", "hwid_limit", "INTEGER NOT NULL DEFAULT 0"); err != nil {
 		return err
 	}
-	return s.addColumn("clients", "start_by_unix", "INTEGER NOT NULL DEFAULT 0")
+	if err := s.addColumn("clients", "start_by_unix", "INTEGER NOT NULL DEFAULT 0"); err != nil {
+		return err
+	}
+	// The part of a client's package that was a gift (the owner's next
+	// plan): a reseller is never refunded it as credit.
+	if err := s.addColumn("clients", "gift_bytes", "INTEGER NOT NULL DEFAULT 0"); err != nil {
+		return err
+	}
+	if err := s.addColumn("clients", "gift_units", "INTEGER NOT NULL DEFAULT 0"); err != nil {
+		return err
+	}
+	return s.addColumn("clients", "gift_until", "INTEGER NOT NULL DEFAULT 0")
+}
+
+// giftDaysLeft is how many days of a client's term are still the owner's
+// gift: an expiry-based gift ends at gift_until, a first-connection one runs
+// from the first connection (all of it while never used).
+func giftDaysLeft(giftUnits, giftUntil, firstSeen, now int64) int64 {
+	if giftUnits <= 0 {
+		return 0
+	}
+	end := giftUntil
+	if end == 0 {
+		if firstSeen == 0 {
+			return giftUnits * unitDays
+		}
+		end = firstSeen + giftUnits*unitDays*86400
+	}
+	return max(0, end-now) / 86400
 }
 
 // ---------- templates ----------
@@ -162,6 +190,17 @@ FROM clients c LEFT JOIN client_usage u ON u.email=c.email WHERE c.next_plan<>''
 }
 
 func (s *Store) applyNextPlan(ctx context.Context, email string, p NextPlan) error {
+	// A reseller's volume left unused when the plan ends is returned, as the
+	// expiry refund would (it skips clients waiting for a next plan); the
+	// owner's own gift in it is not.
+	var rep, oldPlan string
+	var oldVol, gift, used int64
+	_ = s.ro.QueryRowContext(ctx, `SELECT c.rep_id,c.plan,c.volume_bytes,c.gift_bytes,COALESCE(u.up+u.down,0) FROM clients c LEFT JOIN client_usage u ON u.email=c.email WHERE c.email=?`,
+		email).Scan(&rep, &oldPlan, &oldVol, &gift, &used)
+	back := int64(0)
+	if rep != "" && oldPlan == "volume" && oldVol > 0 && !s.IsLegacy(ctx, email) {
+		back = max(0, oldVol-gift-used)
+	}
 	if err := s.ResetUsage(ctx, email, "next-plan"); err != nil {
 		return err
 	}
@@ -182,8 +221,25 @@ func (s *Store) applyNextPlan(ctx context.Context, email string, p NextPlan) err
 		return err
 	}
 	defer tx.Rollback()
-	if _, err := tx.ExecContext(ctx, `UPDATE clients SET volume_bytes=?, expires_unix=?, duration_seconds=?, next_plan='' WHERE email=?`, vol, exp, dur, email); err != nil {
+	// The new package is the owner's gift: its plan follows what it gives,
+	// and none of it can come back to a reseller as credit (a renewal, a
+	// delete or the expiry refund would otherwise pay it out).
+	newPlan, giftUnits := "volume", int64(0)
+	if vol < 0 {
+		newPlan, giftUnits = "unlimited", unitsFor(int64(p.Days))
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE clients SET volume_bytes=?, expires_unix=?, duration_seconds=?, next_plan='', plan=?, gift_bytes=?, gift_units=?, gift_until=? WHERE email=?`,
+		vol, exp, dur, newPlan, max(vol, 0), giftUnits, exp, email); err != nil {
 		return err
+	}
+	if back > 0 {
+		if _, err := tx.ExecContext(ctx, `UPDATE reps SET volume_credit=volume_credit+? WHERE id=?`, back, rep); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO credit_ledger(unix,rep_id,actor,kind,client_email,volume_delta,note) VALUES(?,?,?,?,?,?,?)`,
+			s.now().Unix(), rep, "system", "refund", email, back, "next plan: unused volume"); err != nil {
+			return err
+		}
 	}
 	if p.FirstUse {
 		// The new period starts at the next connection.

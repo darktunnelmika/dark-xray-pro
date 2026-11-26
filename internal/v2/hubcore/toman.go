@@ -418,11 +418,10 @@ func (s *Store) PutRepBot(ctx context.Context, rep string, in RepBot) error {
 		if !botTokenRE.MatchString(tok) {
 			return fmt.Errorf("%w: this does not look like a bot token from @BotFather", ErrInvalid)
 		}
-		// One bot, one seller: two sellers polling the same bot would fight.
-		for _, other := range s.RepBotsAll(ctx) {
-			if other.Rep != rep && other.Token == tok {
-				return fmt.Errorf("%w: this bot is already used by another reseller", ErrInvalid)
-			}
+		// One bot, one seller: two sellers polling the same bot would fight
+		// (a reseller selling through Mirza keeps its bot for when it is back).
+		if s.repBotTokenUser(ctx, tok, rep) != "" {
+			return fmt.Errorf("%w: this bot is already used by another reseller", ErrInvalid)
 		}
 		if tgToken == tok {
 			return fmt.Errorf("%w: this is the panel's main bot", ErrInvalid)
@@ -474,6 +473,26 @@ func (s *Store) RepBotsAll(ctx context.Context) []RepBotConf {
 		}
 	}
 	return out
+}
+
+// repBotTokenUser is another reseller whose bot settings hold this token,
+// running or not ("" = none).
+func (s *Store) repBotTokenUser(ctx context.Context, tok, except string) string {
+	rows, err := s.ro.QueryContext(ctx, `SELECT key,value FROM settings WHERE key LIKE 'rep_bot:%'`)
+	if err != nil {
+		return ""
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var k, v string
+		var b RepBot
+		if rows.Scan(&k, &v) == nil && json.Unmarshal([]byte(v), &b) == nil && b.Token == tok {
+			if rep := strings.TrimPrefix(k, "rep_bot:"); rep != except {
+				return rep
+			}
+		}
+	}
+	return ""
 }
 
 var repBotStatus sync.Map // rep id -> RepBot (live state)

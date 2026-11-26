@@ -79,6 +79,9 @@ func (b *Bot) onReceipt(ctx context.Context, chat int64, name, fileID string, aw
 		return false
 	}
 	b.takeAwait(chat)
+	if !b.receiptOnce("o:" + strconv.FormatInt(o.ID, 10)) {
+		return true // the same payment again (an album, a second shot): admins already have it
+	}
 	b.send(ctx, chat, fmt.Sprintf("✅ رسید سفارش <b>#%s</b> دریافت شد.\nبعد از بررسی (معمولاً چند دقیقه) سرویس همین‌جا برایتان ارسال می‌شود.", faInt(o.ID)), homeKB)
 	caption := b.orderCard(ctx, o) + "\n\n🧾 <b>رسید پرداخت</b> از " + esc(name) + "\nمبلغ را با حساب خود تطبیق دهید، بعد تأیید یا رد کنید."
 	if o.Seller == b.Seller {
@@ -215,6 +218,9 @@ func (b *Bot) onTopupReceipt(ctx context.Context, chat int64, name, fileID, awai
 		return false
 	}
 	b.takeAwait(chat)
+	if !b.receiptOnce("t:" + strconv.FormatInt(t.ID, 10)) {
+		return true
+	}
 	b.send(ctx, chat, fmt.Sprintf("✅ رسید شارژ <b>#%s</b> دریافت شد. بعد از بررسی، موجودی کیف پول شما زیاد می‌شود.", faInt(t.ID)), homeKB)
 	caption := fmt.Sprintf("➕ <b>شارژ کیف پول #%s</b>\n👤 %s (<code>%d</code>)\n💳 مبلغ: <b>%s تومان</b>\nمبلغ را با حساب خود تطبیق دهید.", faInt(t.ID), esc(name), chat, faMoney(t.Amount))
 	kb := &Keyboard{Rows: [][]Button{row(cbBtn("✅ تأیید شارژ", "tok:"+strconv.FormatInt(t.ID, 10)), cbBtn("❌ رد", "tno:"+strconv.FormatInt(t.ID, 10)))}}
@@ -247,12 +253,12 @@ func (b *Bot) decideTopup(ctx context.Context, chat int64, idText string, approv
 	id, _ := strconv.ParseInt(idText, 10, 64)
 	t, err := b.Store.DecideTopup(ctx, b.Seller, id, approve, "tg:"+strconv.FormatInt(chat, 10))
 	if err != nil {
-		b.send(ctx, chat, "انجام نشد: "+esc(err.Error()), nil)
+		b.send(ctx, chat, "انجام نشد: "+esc(faErr(err)), nil)
 		return
 	}
 	if approve {
 		b.send(ctx, chat, fmt.Sprintf("✅ شارژ #%s تأیید شد (%s تومان).", faInt(t.ID), faMoney(t.Amount)), nil)
-		b.celebrate(ctx, t.Chat, fmt.Sprintf("✅ کیف پول شما %s تومان شارژ شد.\n💰 موجودی: <b>%s تومان</b>", faMoney(t.Amount), faMoney(t.Balance)), &Keyboard{Rows: [][]Button{row(cbBtn("🛒 خرید سرویس", "shop"), cbBtn("💰 کیف پول", "wallet"))}}, EffectParty)
+		b.celebrate(ctx, t.Chat, fmt.Sprintf("✅ کیف پول شما %s تومان شارژ شد.\n👛 موجودی: <b>%s تومان</b>", faMoney(t.Amount), faMoney(t.Balance)), &Keyboard{Rows: [][]Button{row(cbBtn("🛒 خرید سرویس", "shop"), cbBtn("👛 کیف پول", "wallet"))}}, EffectParty)
 	} else {
 		b.send(ctx, chat, fmt.Sprintf("شارژ #%s رد شد.", faInt(t.ID)), nil)
 		b.send(ctx, t.Chat, "❌ رسید شارژ کیف پول تأیید نشد. اگر مبلغ را واریز کرده‌اید، با پشتیبانی در تماس باشید.", &Keyboard{Rows: [][]Button{row(cbBtn("💬 پشتیبانی", "support"), cbBtn("« منو", "home"))}})
