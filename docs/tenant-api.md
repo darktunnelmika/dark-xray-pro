@@ -132,6 +132,7 @@ length). `volume_bytes` and `remaining_bytes` are `-1` for unlimited.
 | POST | `/clients/{name}/rotate` | new subscription link (`{"link": true}`, the default) and/or new credentials (`{"credentials": true}`) |
 | GET | `/clients/{name}/links` | the subscription URL in every format, and each config link on its own |
 | POST | `/bulk/links` | configs and usage of up to 500 clients (see below) |
+| POST | `/bulk/add-usage` | add use from another panel to up to 500 clients (see below) |
 | GET | `/sub-fetches?since=<unix>&list=not_fetched` | who fetched the subscription since a time |
 
 ### Create
@@ -273,6 +274,21 @@ POST /api/tenant/v1/bulk/links
 expired or out of volume. `userinfo` is the `Subscription-Userinfo` header value
 (`total` 0 = unlimited). Unknown names never fail the call. This read is not
 written to the audit log.
+
+## Use from another panel
+
+`used_bytes` on create (only) is what the client already used on the panel it
+comes from; it counts against its volume. While customers' apps still reach the
+old servers, add what those report:
+
+```
+POST /api/tenant/v1/bulk/add-usage
+{"clients": [{"name": "ali", "add_bytes": 734003200}, …], "atomic": false}
+```
+
+Same answer shape as the other bulk calls. The client's `rev` moves, so the feed
+reports it. Added use is in the totals and the subscription's userinfo, not in
+the per-node or per-day history.
 
 ## Who updated the subscription
 

@@ -44,6 +44,9 @@ type TenantClientIn struct {
 	MaxDevices     *int     `json:"max_devices"`  // 0 = no limit
 	Inbounds       []string `json:"inbounds"`     // nil = every inbound the shop may give
 	Note           *string  `json:"note"`
+	// UsedBytes is traffic the client already used elsewhere (a panel it
+	// moves from): create only. It counts against its volume like use here.
+	UsedBytes *int64 `json:"used_bytes"`
 }
 
 // TenantClient is a client as its shop sees it.
@@ -406,11 +409,20 @@ func (s *Store) tenantCreateTx(ctx context.Context, tx *sql.Tx, t Tenant, in Ten
 	if err := s.checkCredentials(ctx, tx, in); err != nil {
 		return err
 	}
+	if in.UsedBytes != nil && (*in.UsedBytes < 0 || *in.UsedBytes > maxUsageAdd) {
+		return fmt.Errorf("%w: used_bytes", ErrInvalid)
+	}
 	c := Client{Email: email, UUID: strings.ToLower(in.UUID), Secret: in.TrojanPassword, SubToken: in.SubToken}
 	if err := s.tenantApply(ctx, t, &c, in, true); err != nil {
 		return err
 	}
-	return s.tenantWrite(ctx, tx, t, c, in, true)
+	if err := s.tenantWrite(ctx, tx, t, c, in, true); err != nil {
+		return err
+	}
+	if in.UsedBytes != nil && *in.UsedBytes > 0 {
+		return addTenantUsage(ctx, tx, email, *in.UsedBytes, 0)
+	}
+	return nil
 }
 
 // TenantUpdate changes one client; nil fields stay as they are.
@@ -436,6 +448,9 @@ func (s *Store) TenantUpdate(ctx context.Context, tenant, name string, in Tenant
 func (s *Store) tenantUpdateTx(ctx context.Context, tx *sql.Tx, t Tenant, name string, in TenantClientIn) error {
 	if in.UUID != "" || in.TrojanPassword != "" || in.SubToken != "" {
 		return fmt.Errorf("%w: credentials are set when a client is made; use the rotate actions to change them", ErrInvalid)
+	}
+	if in.UsedBytes != nil {
+		return fmt.Errorf("%w: used_bytes is set when a client is made; add later use with /bulk/add-usage", ErrInvalid)
 	}
 	cur, err := s.tenantOwnTx(ctx, tx, t.ID, name)
 	if err != nil {

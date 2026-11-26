@@ -518,3 +518,41 @@ func TestTenantLinksSeveralHosts(t *testing.T) {
 		t.Fatalf("new port missing: %v", res["clients"])
 	}
 }
+
+func TestTenantUsedBytesAndAddUsage(t *testing.T) {
+	_, _, a, b := twoTenants(t)
+	code, c := a.do("POST", "/clients", map[string]any{"name": "moved1", "volume_bytes": 10 << 30, "days": 30, "used_bytes": 3 << 30,
+		"uuid": "1b2c3d4e-0000-4000-8000-0000000000aa", "sub_token": "abcdefgh12345678xyz", "external_ref": "abcdefgh12345678xyz"})
+	if code != 201 || c["used_bytes"].(float64) != 3<<30 || c["remaining_bytes"].(float64) != 7<<30 || c["uuid"] != "1b2c3d4e-0000-4000-8000-0000000000aa" {
+		t.Fatalf("create with used %d %v", code, c)
+	}
+	if code, _ := a.do("PATCH", "/clients/moved1", map[string]any{"used_bytes": 1}); code != 422 {
+		t.Fatalf("used_bytes on update: %d", code)
+	}
+	if code, _ := a.do("POST", "/clients", map[string]any{"name": "neg", "used_bytes": -1}); code != 422 {
+		t.Fatalf("negative used: %d", code)
+	}
+	_, ch := a.do("GET", "/changes", nil)
+	cur := fmt.Sprint(ch["cursor"])
+	code, res := a.do("POST", "/bulk/add-usage", map[string]any{"clients": []map[string]any{
+		{"name": "moved1", "add_bytes": 1 << 30}, {"name": "nobody", "add_bytes": 5}, {"name": "u1", "add_bytes": -5}}})
+	if code != 200 || res["ok"].(float64) != 1 || res["failed"].(float64) != 2 {
+		t.Fatalf("add usage %d %v", code, res)
+	}
+	if _, c := a.do("GET", "/clients/moved1", nil); c["used_bytes"].(float64) != 4<<30 || c["remaining_bytes"].(float64) != 6<<30 {
+		t.Fatalf("after add %v", c)
+	}
+	// The feed reports it, and only to this shop.
+	_, ch = a.do("GET", "/changes?cursor="+cur, nil)
+	if l := ch["changes"].([]any); len(l) != 1 || l[0].(map[string]any)["name"] != "moved1" {
+		t.Fatalf("feed %v", ch)
+	}
+	if code, res := b.do("POST", "/bulk/add-usage", map[string]any{"clients": []map[string]any{{"name": "moved1", "add_bytes": 1}}}); code != 200 || res["ok"].(float64) != 0 {
+		t.Fatalf("other shop reached moved1: %d %v", code, res)
+	}
+	// Used up: limited.
+	a.do("POST", "/bulk/add-usage", map[string]any{"clients": []map[string]any{{"name": "moved1", "add_bytes": 7 << 30}}})
+	if _, c := a.do("GET", "/clients/moved1", nil); c["status"] != "limited" {
+		t.Fatalf("status %v", c["status"])
+	}
+}

@@ -250,6 +250,7 @@ func tenantRoutes(s *Store, mux *docMux, subBase string) {
 			"base64": u, "singbox": u + "?format=singbox", "clash": u + "?format=clash", "xray": u + "?format=xray"}, "links": links})
 	}))
 	tenantBulkRoutes(s, mux, auth, base)
+	tenantUsageRoutes(s, mux, auth)
 	tenantWebhookRoutes(s, mux, auth)
 }
 
