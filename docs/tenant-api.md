@@ -104,6 +104,7 @@ letter or digit. Two shops (or a shop and the owner) can use the same name.
   "created_unix": 1800000000,
   "note": "",
   "rev": 48211,
+  "sub_fetched_unix": 1800090100,
   "subscription_url": "https://sub.myshop.com/sub/abcdefgh12345678"
 }
 ```
@@ -111,6 +112,8 @@ letter or digit. Two shops (or a shop and the owner) can use the same name.
 `status` is one of `active`, `disabled`, `expired`, `limited` (volume used up) and
 `on_hold` (the term starts at the first connection; `on_hold_seconds` is its
 length). `volume_bytes` and `remaining_bytes` are `-1` for unlimited.
+`sub_fetched_unix` is the last time the client's app fetched its subscription here
+(0 = not since it came; written every 30 seconds).
 
 ### Endpoints
 
@@ -128,6 +131,8 @@ length). `volume_bytes` and `remaining_bytes` are `-1` for unlimited.
 | POST | `/clients/{name}/renew` | add volume and/or days |
 | POST | `/clients/{name}/rotate` | new subscription link (`{"link": true}`, the default) and/or new credentials (`{"credentials": true}`) |
 | GET | `/clients/{name}/links` | the subscription URL in every format, and each config link on its own |
+| POST | `/bulk/links` | configs and usage of up to 500 clients (see below) |
+| GET | `/sub-fetches?since=<unix>&list=not_fetched` | who fetched the subscription since a time |
 
 ### Create
 
@@ -233,6 +238,57 @@ to 1000 (500 by default). Usage arrives from the nodes every poll, and each repo
 changes the clients it covers once. Deletions are kept for 30 days; a shop that has
 not read its feed for longer should read its whole list again.
 
+Every answer also carries `"links_version": "3f9a0c1d2e4b5a69"`: a hash of what
+every config is made from besides the client itself — the inbounds the shop's
+clients are on, their hosts and routes, the shop's look and client routing. When
+the owner changes a host or a route, the configs of every client change and
+`links_version` moves (within 15 seconds). A shop that keeps configs (a bridge
+serving its own subscription) reads them all again with `/bulk/links` when the
+version differs from the one it has; a single client's change moves only that
+client's `rev`.
+
+## Configs of many clients
+
+```
+POST /api/tenant/v1/bulk/links
+{"names": ["ali", "sara", …]}          (up to 500)
+```
+
+```json
+{
+  "links_version": "3f9a0c1d2e4b5a69", "ok": 1, "failed": 1,
+  "clients": [
+    {"name": "ali", "ok": true, "external_ref": "order-5521", "status": "active", "enabled": true, "rev": 48212,
+     "sub_token": "abcdefgh12345678", "subscription_url": "https://sub.myshop.com/sub/abcdefgh12345678",
+     "userinfo": "upload=74000000; download=1000000000; total=53687091200; expire=1803000000",
+     "up_bytes": 74000000, "down_bytes": 1000000000, "total_bytes": 53687091200, "expire_unix": 1803000000,
+     "sub_fetched_unix": 1800090100,
+     "links": [{"name": "🇩🇪 Germany", "link": "vless://…", "kind": "vless"}]},
+    {"name": "nobody", "ok": false, "error": "not_found", "links": []}
+  ]
+}
+```
+
+`links` is what the client's subscription holds right now: empty when it is off,
+expired or out of volume. `userinfo` is the `Subscription-Userinfo` header value
+(`total` 0 = unlimited). Unknown names never fail the call. This read is not
+written to the audit log.
+
+## Who updated the subscription
+
+```
+GET /api/tenant/v1/sub-fetches?since=<unix>&list=not_fetched&after=<name>&limit=<n>
+```
+
+```json
+{"since": 1800000000, "clients": 5800, "fetched": 5210, "not_fetched": 590,
+ "list": "not_fetched", "names": ["ali", "…"], "next": "reza"}
+```
+
+Without `since`: since the shop's first subscription domain pointed here (else the
+last 24 hours). `list` is `fetched` or `not_fetched` (omit it for counts only);
+names come 500 (up to 1000) a page, `next` is the `after` of the next page.
+
 ## Webhook
 
 ```json
@@ -282,3 +338,32 @@ Between the owner, resellers and shops: **Connected shops → Move clients**, or
 
 An empty `names` list moves every client of the source. Credentials, links, usage
 and history stay; reseller credit is not changed.
+
+## The old subscription domain
+
+Customers keep their old links when the shop's old subscription domain points
+here. **Connected shops → Subscription domains** (owner), or
+`PUT /api/v2/admin/tenants/{id}/sub-domains/{domain}`:
+
+```json
+{"port": 2096, "tls": true, "prefix": "/2fmgkwhmfhyat8zr/", "fallback": "https://203.0.113.5:2096", "enabled": true}
+```
+
+- The domain answers on that port (several domains share one port: the
+  certificate is picked by name, the handler by `Host`). `prefix` is the old
+  path before the subscription id; empty accepts any path that ends in the id.
+  The old panel's JSON path, if the import found one, works too.
+- Only this shop's clients answer, with the same subscription as `/sub/<id>`
+  (same headers: `Subscription-Userinfo`, `Profile-Update-Interval`,
+  `Profile-Title`).
+- An id that is not here goes to `fallback` — the old panel, reached by that
+  address but asked with the domain's name, so its certificate for the domain is
+  checked. Its answer is passed on only if it is a non-empty 200; anything else is
+  a 404. **An unknown id never gets an empty list**, which some apps would take as
+  "delete every config". Without a fallback, unknown ids are a 404.
+- Point the domain's A record at the HUB, then press **Check** (`POST …/{domain}/check`):
+  once it resolves here the certificate is ordered (ACME, HTTP-01 on the HUB) and
+  retried every 10 minutes if it fails.
+- A shop client's subscription body is kept for 30 seconds (per client revision),
+  so a refresh storm builds each body once.
+- `GET /api/v2/admin/tenants/{id}/sub-fetches` is the owner's view of who fetched.
