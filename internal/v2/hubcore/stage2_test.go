@@ -819,7 +819,7 @@ func TestFullBackupAndRestore(t *testing.T) {
 	}
 	etc := t.TempDir()
 	os.WriteFile(filepath.Join(etc, "ca.pem"), []byte("CA"), 0o600)
-	os.WriteFile(filepath.Join(etc, "server.key"), []byte("KEY"), 0o600)
+	os.WriteFile(filepath.Join(etc, "server.key"), []byte(testKeyMark), 0o600)
 	os.WriteFile(filepath.Join(etc, "env"), []byte("DARK_HUB2_LISTEN=1.2.3.4:28443\nDARK_HUB2_HOSTS=1.2.3.4\nDARK_HUB2_SUB_BASE=https://1.2.3.4:28096\n"), 0o600)
 	SetHubFiles(etc, DefaultHubFiles...)
 	defer SetHubFiles("")
@@ -830,7 +830,7 @@ func TestFullBackupAndRestore(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if bytes.Contains(data, []byte("KEY")) {
+	if bytes.Contains(data, []byte(testKeyMark)) {
 		t.Fatal("the full backup must be encrypted")
 	}
 	dir := t.TempDir()
@@ -852,7 +852,7 @@ func TestFullBackupAndRestore(t *testing.T) {
 	if err != nil || len(done) != 3 {
 		t.Fatal(done, err)
 	}
-	if b, _ := os.ReadFile(filepath.Join(newEtc, "server.key")); string(b) != "KEY" {
+	if b, _ := os.ReadFile(filepath.Join(newEtc, "server.key")); string(b) != testKeyMark {
 		t.Fatal("the HUB key must come back")
 	}
 	env, _ := os.ReadFile(filepath.Join(newEtc, "env"))
@@ -900,3 +900,7 @@ func TestMoveNodes(t *testing.T) {
 		t.Fatalf("%+v", a)
 	}
 }
+
+// testKeyMark is long enough that encrypted bytes never contain it by chance
+// (a 3-byte "KEY" turned up in a few-MB ciphertext now and then).
+const testKeyMark = "KEY-7f3a9c1e5b2d4086-NOT-ENCRYPTED"
