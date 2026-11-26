@@ -251,6 +251,7 @@ func TestTenantSubscriptionShowsTheShop(t *testing.T) {
 	defer h.Close()
 	req, _ := http.NewRequest("GET", h.URL+"/sub/"+c.SubToken, nil)
 	req.Header.Set("Accept", "text/html")
+	req.Header.Set("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) Firefox/140.0")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
