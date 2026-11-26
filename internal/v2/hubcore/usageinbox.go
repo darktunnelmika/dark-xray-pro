@@ -19,7 +19,7 @@ import (
 //     moves the node's usage_seq. From here the batch is counted exactly
 //     once, whatever happens: a repeat of the same sequence is acknowledged
 //     without being stored again.
-//  2. apply: the batch is applied in chunks of usageChunk rows, each in its
+//  2. apply: the batch is applied in chunks of usageChunk rows (about 25 ms each for 500), each in its
 //     own short transaction that also records how far it got (a
 //     compare-and-set on usage_inbox.done), so other writers — the panel,
 //     the APIs — get their turn between chunks, and a crash in the middle
@@ -30,7 +30,7 @@ import (
 // locally, so limits are never looser than before. ApplyUsage returns after
 // both steps, so callers see the usage at once, as before.
 
-const usageChunk = 2000
+const usageChunk = 500
 
 const usageInboxSchema = `
 CREATE TABLE IF NOT EXISTS usage_inbox (
