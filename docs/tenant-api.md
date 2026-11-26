@@ -188,9 +188,10 @@ Days are added to the current expiry, or to now when it has passed; an unstarted
 | POST | `/bulk/renew` | `{"clients": [{"name": "ali", "add_bytes": …, "add_days": …}, …]}` |
 | POST | `/bulk/delete` | `{"names": ["ali", …]}` |
 
-A call runs in one transaction, each item on its own: by default a failed item is
-reported and the rest go ahead. With `"atomic": true` one failure undoes the whole
-call (HTTP 422, `"committed": false`).
+Each item runs on its own: by default a failed item is reported and the rest go
+ahead (the call is committed 50 items at a time, so it never keeps the panel
+waiting). With `"atomic": true` the call is one transaction and one failure undoes
+all of it (HTTP 422, `"committed": false`).
 
 ```json
 {

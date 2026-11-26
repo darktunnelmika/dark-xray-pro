@@ -15,9 +15,10 @@ import (
 
 // Bulk work and the change feed of the connected shop API.
 //
-// A bulk call takes up to 500 items and runs them in one transaction, each
-// item in its own savepoint: by default a failed item is reported and the
-// others go ahead; with "atomic": true one failure undoes the whole call.
+// A bulk call takes up to 500 items, each in its own savepoint: by default a
+// failed item is reported and the others go ahead (committed 50 at a time,
+// so other writers are not kept waiting); with "atomic": true the call is
+// one transaction and one failure undoes all of it.
 //
 // The change feed returns every client whose state or usage changed after a
 // cursor, oldest change first, plus the clients that were deleted (or moved
@@ -25,6 +26,9 @@ import (
 // says whether another page is ready right now.
 
 const tenantBulkMax = 500
+
+// tenantBulkCommit: a non-atomic bulk call commits after this many items.
+const tenantBulkCommit = 50
 
 // TenantBulkResult is one item's outcome.
 type TenantBulkResult struct {
@@ -71,7 +75,7 @@ func (s *Store) tenantBulk(ctx context.Context, tenant string, names []string, a
 	if err != nil {
 		return nil, false, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }() // whichever transaction is open at the end
 	out := make([]TenantBulkResult, len(names))
 	failed := false
 	for i, n := range names {
@@ -99,6 +103,16 @@ func (s *Store) tenantBulk(ctx context.Context, tenant string, names []string, a
 				out[j] = TenantBulkResult{Name: names[j], Code: "skipped", Error: "not tried: an earlier item failed and the call is atomic"}
 			}
 			return out, false, nil
+		}
+		if !atomic && i%tenantBulkCommit == tenantBulkCommit-1 && i < len(names)-1 {
+			// Commit as it goes, so a big call never holds the database for
+			// long; only an atomic call needs one transaction.
+			if err := tx.Commit(); err != nil {
+				return nil, false, err
+			}
+			if tx, err = s.db.BeginTx(ctx, nil); err != nil {
+				return nil, false, err
+			}
 		}
 	}
 	if err := tx.Commit(); err != nil {
