@@ -768,6 +768,7 @@ FROM clients c LEFT JOIN client_usage u ON u.email=c.email`
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
+	rows.Close() // before the next query: never two reader connections at once (see Nodes)
 	// Every client's inbounds in one query (not one per client).
 	at := make(map[string]int, len(out))
 	for i := range out {

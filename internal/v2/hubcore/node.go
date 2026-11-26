@@ -207,6 +207,12 @@ func (n NodeStatus) Online(now time.Time) bool {
 }
 
 func (s *Store) Nodes(ctx context.Context) ([]NodeStatus, error) {
+	// Read first, before the rows hold a connection: a second query while
+	// they are open waits for another one, and with every reader doing the
+	// same (a burst of subscription fetches ranks nodes in each) the pool
+	// runs dry and all of them wait for ever.
+	dist := s.DistSHA()
+	hidden := s.hiddenTunnels(ctx)
 	rows, err := s.ro.QueryContext(ctx, `SELECT id,name,agent_version,last_error,last_seen_unix,xray_running,xray_restarts,spooled,
 config_revision,reported_revision,usage_seq,host_json,public_ip,agent_sha,xray_version,agent_arch,traffic_percent,public_ip_fixed FROM nodes ORDER BY id`)
 	if err != nil {
@@ -214,8 +220,6 @@ config_revision,reported_revision,usage_seq,host_json,public_ip,agent_sha,xray_v
 	}
 	defer rows.Close()
 	var out []NodeStatus
-	dist := s.DistSHA()
-	hidden := s.hiddenTunnels(ctx)
 	for rows.Next() {
 		var n NodeStatus
 		var hj string
