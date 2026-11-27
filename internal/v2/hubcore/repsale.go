@@ -214,7 +214,11 @@ func (s *Store) createRepOrder(ctx context.Context, seller string, chat int64, b
 	var cost int64
 	if pkg != nil && seller != "" {
 		cost = s.Wholesale(ctx, seller, *pkg)
-		pkg.Price = s.Retail(ctx, seller, *pkg)
+	}
+	if pkg != nil && manual && seller != "" {
+		pkg.Price = s.Retail(ctx, seller, *pkg) // the reseller's own sale: no banner discount
+	} else if pkg != nil {
+		pkg.Price, _ = s.PanelPrice(ctx, seller, *pkg) // with the seller's discount, if any
 	}
 	if pkg == nil {
 		return RepOrder{}, fmt.Errorf("%w: unknown package", ErrInvalid)

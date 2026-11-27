@@ -480,6 +480,7 @@ function resaleView() {
     prices[p.id] = inp;
     return h("div", { class: "lrow" }, h("div", {}, h("b", {}, p.name), h("div", { class: "muted small" }, `${num(p.gb)} گیگ · عمده ${toman(p.cost)} تومان`)), h("div", { class: "pricein" }, inp));
   });
+  out.push(btn("🎉 بنر و تخفیف فروش پنل", "block", promoSheet));
   out.push(h("div", { class: "section-title" }, "قیمت فروش من"),
     h("div", { class: "card" }, onRow, h("p", { class: "muted small" }, "خالی = همان قیمت مدیر پنل. سود هر فروش = قیمت شما منهای قیمت عمده."), pk,
       btn("ذخیره", "primary block", async () => {
@@ -579,6 +580,7 @@ function ownerSaleView(d) {
   return [backHead("فروش پنل نمایندگی"),
     d.pending ? h("button", { class: "card alert", onclick: () => mSet("inbox") }, mic("inbox"), h("span", {}, `${num(d.pending)} سفارش پنل منتظر تأیید`), h("b", {}, "دیدن")) : null,
     !d.has_card ? h("div", { class: "card small bad" }, "اول کارت پرداخت را در «کارت‌ها» تعریف کنید.") : null,
+    btn("🎉 بنر و تخفیف فروش پنل", "block", promoSheet),
     h("div", { class: "card" }, onRow, h("p", { class: "muted small" }, "تنظیمات دقیق هر بسته (سقف‌ها، نامحدود، اینباندها) از پنل وب است؛ اینجا نام، حجم و قیمت را عوض کنید.")),
     box,
     rows.length < 20 ? btn("افزودن بسته", "block ghost", () => { rows.push({ id: "", name: "", gb: 100, price: 0 }); draw(); }, "plus") : null,
@@ -873,3 +875,50 @@ function permsSheet(a, all) {
 }
 
 const M2V = { sale: saleView, customers: customersView, admins: adminsView, settings: settingsView, discounts: discountsView, broadcast: broadcastView, more: moreView, resale: resaleView, wallet: walletView, sellers: sellersView, bot: botView, cards: cardsView, plans: plansView, tickets: ticketsView, report: reportView };
+
+// ---------- the panel-sale banner and discount ----------
+async function promoSheet() {
+  let d;
+  try { d = await api("GET", "m/panelpromo"); } catch (e) { toast(e.message); return; }
+  const [onRow, onBox] = check("بنر روی صفحهٔ «نمایندگی» نشان داده شود", d.on);
+  const title = h("input", { value: d.title || "", maxlength: "80", placeholder: "مثلاً: جشنوارهٔ پاییزه 🍂" });
+  const text = h("textarea", { rows: "3", maxlength: "300", placeholder: "مثلاً: فقط تا آخر هفته، همهٔ پنل‌ها با تخفیف ویژه" }, d.text || "");
+  const badge = h("input", { value: d.badge || "", maxlength: "24", placeholder: "مثلاً: فقط امروز" });
+  const pct = h("input", { type: "number", inputmode: "numeric", min: "0", max: "90", value: d.percent || "", placeholder: "۰ = بدون تخفیف" });
+  const days = h("input", { type: "number", inputmode: "numeric", min: "0", value: d.until ? Math.max(0, Math.ceil((d.until - Date.now() / 1000) / 3600)) : "", placeholder: "خالی = بدون پایان" });
+  let color = d.color || "violet", image = d.image || "";
+  const COLORS = [["violet", "بنفش", "#8b5cf6,#ec4899"], ["gold", "طلایی", "#f59e0b,#ef4444"], ["green", "سبز", "#10b981,#0ea5e9"], ["rose", "صورتی", "#f43f5e,#a855f7"], ["blue", "آبی", "#3b82f6,#06b6d4"]];
+  const sw = h("div", { class: "chips themes" });
+  const preview = h("div", {});
+  const drawPreview = () => {
+    const pr = { title: title.value, text: text.value, badge: badge.value, color, image, percent: Math.round(+pct.value || 0), until: +days.value > 0 ? Math.floor(Date.now() / 1000) + Math.round(+days.value) * 3600 : 0 };
+    preview.replaceChildren(promoBanner(pr));
+  };
+  const drawSw = () => sw.replaceChildren(...COLORS.map(([k, n, g]) => h("button", { class: `chip ${k === color ? "on" : ""}`, onclick: () => { color = k; drawSw(); drawPreview(); } },
+    h("i", { class: "swatch", style: `background:linear-gradient(135deg,${g})` }), n)));
+  drawSw();
+  const imgRow = h("div", { class: "row" });
+  const drawImg = () => imgRow.replaceChildren(
+    btn(image ? "عوض کردن عکس" : "گذاشتن عکس بنر", "", async () => {
+      try { const data = await pickImage(800); if (data.length > 195000) { toast("عکس خیلی بزرگ است؛ عکس کوچک‌تری بگذارید"); return; } image = data; drawImg(); drawPreview(); } catch {}
+    }, "gift"),
+    image ? btn("حذف عکس", "ghost", () => { image = ""; drawImg(); drawPreview(); }) : null);
+  drawImg();
+  for (const el of [title, text, badge, pct, days]) el.addEventListener("input", drawPreview);
+  drawPreview();
+  const go = btn("ذخیره", "primary block big", async () => {
+    go.disabled = true;
+    const hours = Math.round(+days.value || 0);
+    try {
+      await api("POST", "m/panelpromo", { on: onBox.checked, title: title.value, text: text.value, badge: badge.value, color, image,
+        percent: Math.round(+pct.value || 0), until: hours > 0 ? Math.floor(Date.now() / 1000) + hours * 3600 : 0 });
+      haptic("success"); toast("ذخیره شد"); close(); panelSale = undefined; loadPanels();
+    } catch (e) { go.disabled = false; haptic("error"); toast(e.message); }
+  }, "check");
+  const close = sheet(h("h2", {}, "بنر و تخفیف فروش پنل"),
+    h("p", { class: "muted small" }, "این بنر بالای صفحهٔ «نمایندگی» و در بخش خرید مینی‌اپ دیده می‌شود. اگر درصد تخفیف بگذارید، واقعاً روی قیمت همهٔ بسته‌ها اعمال می‌شود (در ربات هم)."),
+    h("div", { class: "section-title sub" }, "پیش‌نمایش"), preview,
+    onRow, field("عنوان", title), field("متن", text), h("div", { class: "two" }, field("برچسب کوچک", badge), field("درصد تخفیف", pct)),
+    field("مدت (ساعت)", days, "مثلاً ۴۸ = دو روز؛ بعدش بنر و تخفیف خودکار برداشته می‌شود"),
+    h("div", { class: "section-title sub" }, "رنگ"), sw, h("div", { class: "section-title sub" }, "عکس (اختیاری)"), imgRow, go);
+}

@@ -371,11 +371,15 @@ func registerMiniAdmin3(mux *http.ServeMux, s *Store,
 			pk = s.ResalePackages(ctx, seller)
 		}
 		list := []map[string]any{}
-		for _, p := range pk {
-			list = append(list, map[string]any{"id": p.ID, "name": p.Name, "gb": p.GB, "price": p.Price, "unlimited": p.AllowUnlimited, "units": p.Units,
+		for _, p := range s.RepSale(ctx).Packages {
+			if seller != "" && !hasPkg(pk, p.ID) {
+				continue
+			}
+			price, base := s.PanelPrice(ctx, seller, p)
+			list = append(list, map[string]any{"id": p.ID, "name": p.Name, "gb": p.GB, "price": price, "base": base, "unlimited": p.AllowUnlimited, "units": p.Units,
 				"max_clients": p.MaxClients, "max_days": p.MaxDays, "can_delete": p.CanDelete})
 		}
-		reply(w, map[string]any{"on": len(list) > 0, "packages": list}, nil)
+		reply(w, map[string]any{"on": len(list) > 0, "packages": list, "promo": s.promoView(ctx, seller)}, nil)
 	})
 	mux.HandleFunc("POST /app/api/panel", func(w http.ResponseWriter, r *http.Request) {
 		u, seller, okb := buyer(w, r)
@@ -405,6 +409,16 @@ func registerMiniAdmin3(mux *http.ServeMux, s *Store,
 			"card": map[string]string{"number": c.Number, "holder": c.Holder, "bank": c.Bank}, "bot": s.BotUsernameFor(ctx, seller)}, nil)
 	})
 	registerAppReceipt(mux, s)
+	registerPanelPromo(mux, s, mgr, deny)
 	registerMiniAdmin4(mux, s, mgr, deny, read)
 	registerMiniAdmin5(mux, s, mgr, deny, read)
+}
+
+func hasPkg(list []RepPackage, id string) bool {
+	for _, p := range list {
+		if p.ID == id {
+			return true
+		}
+	}
+	return false
 }

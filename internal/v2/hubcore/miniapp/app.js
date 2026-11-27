@@ -586,23 +586,81 @@ function customCard(renewEmail) {
     }, "bolt"));
 }
 
-// Reseller panels on sale in this bot (GET panels); loaded once.
+// ---------- reseller panels: the raised middle tab ----------
+// GET panels: the packages on sale in this bot, at this bot's prices, and the
+// seller's banner (promo). Loaded once at start; the tab shows only if on.
 let panelSale;
-function panelSection() {
-  if (panelSale === undefined) {
-    panelSale = null;
-    api("GET", "panels").then((r) => { panelSale = r; if (tab === "shop") render(); }).catch(() => { panelSale = { on: false }; });
-    return [];
+async function loadPanels() {
+  try { panelSale = await api("GET", "panels"); } catch { panelSale = { on: false }; }
+  layoutTabs();
+  if (tab === "shop" || tab === "panel") render();
+}
+const PROMO_C = { violet: ["#8b5cf6", "#ec4899"], gold: ["#f59e0b", "#ef4444"], green: ["#10b981", "#0ea5e9"], rose: ["#f43f5e", "#a855f7"], blue: ["#3b82f6", "#06b6d4"] };
+function left(until) {
+  const s = Math.max(0, until - Math.floor(Date.now() / 1000));
+  const d = Math.floor(s / 86400), hh = Math.floor((s % 86400) / 3600), mm = Math.floor((s % 3600) / 60), ss = s % 60;
+  return d ? `${num(d)} روز و ${num(hh)} ساعت` : `${num(hh)}:${String(mm).padStart(2, "0")}:${String(ss).padStart(2, "0")}`.replace(/\d/g, (c) => "۰۱۲۳۴۵۶۷۸۹"[c]);
+}
+// promoBanner: the seller's banner (picture, colour, badge, countdown).
+function promoBanner(pr, onclick) {
+  const c = PROMO_C[pr.color] || PROMO_C.violet;
+  const timer = pr.until ? h("span", { class: "offer-timer" }, "⏳ ", h("b", {}, left(pr.until)), " مانده") : null;
+  if (timer) {
+    const t = setInterval(() => { if (!timer.isConnected) { clearInterval(t); return; } timer.querySelector("b").textContent = left(pr.until); }, 1000);
   }
-  if (!panelSale || !panelSale.on) return [];
-  return [h("div", { class: "section-title" }, "🤝 پنل نمایندگی"),
-    h("p", { class: "muted small" }, "پنل فروش خودتان را بگیرید: کاربر بسازید، بفروشید و سود کنید. همه‌چیز از داخل همین ربات و مینی‌اپ."),
-    h("div", { class: "grid" }, panelSale.packages.map((p) => h("div", { class: "card product" },
-      h("h3", {}, p.name),
-      h("div", { class: "chips" }, h("span", { class: "chip" }, `📶 ${num(p.gb)} گیگ اعتبار`), p.unlimited ? h("span", { class: "chip" }, "♾ فروش نامحدود") : null,
-        p.max_clients ? h("span", { class: "chip" }, `حداکثر ${num(p.max_clients)} کاربر`) : null),
-      h("div", { class: "price" }, h("b", {}, toman(p.price)), h("small", {}, "تومان")),
-      btn("خرید پنل", "primary block", () => buyPanel(p), "card"))))];
+  return h(onclick ? "button" : "div", { class: `offer ${pr.image ? "has-img" : ""}`, style: `--p1:${c[0]};--p2:${c[1]}`, onclick: onclick || null },
+    pr.image && /^data:image\//.test(pr.image) ? h("img", { class: "offer-img", src: pr.image, alt: "" }) : null,
+    h("div", { class: "offer-body" },
+      h("div", { class: "offer-top" }, pr.badge ? h("span", { class: "offer-badge" }, pr.badge) : null, timer),
+      pr.title ? h("h2", {}, pr.title) : null,
+      pr.text ? h("p", {}, pr.text) : null,
+      pr.percent ? h("div", { class: "offer-pct" }, h("b", {}, `${num(pr.percent)}٪`), h("span", {}, "تخفیف روی همهٔ بسته‌ها")) : null),
+    h("i", { class: "offer-glow", "aria-hidden": "true" }));
+}
+// panelTeaser: the big entry to the panel page from the shop.
+function panelTeaser() {
+  if (!panelSale || !panelSale.on) return null;
+  const pr = panelSale.promo;
+  if (pr) return promoBanner(pr, () => setTab("panel"));
+  return h("button", { class: "teaser", onclick: () => setTab("panel") },
+    h("span", { class: "teaser-ic" }, icon(IC.users)),
+    h("span", { class: "teaser-t" }, h("b", {}, "پنل نمایندگی بگیر"), h("small", {}, "خودت بفروش و سود کن؛ همه‌چیز داخل همین ربات")),
+    h("span", { class: "teaser-go" }, "←"));
+}
+function panelView() {
+  if (!panelSale) return [h("div", { class: "card skel" })];
+  if (!panelSale.on) return [h("div", { class: "card empty" }, h("h2", {}, "فروش پنل فعلاً فعال نیست"), h("p", {}, "کمی بعد دوباره سر بزنید."))];
+  const out = [];
+  const pr = panelSale.promo;
+  out.push(pr ? promoBanner(pr) : h("div", { class: "offer", style: `--p1:${PROMO_C.violet[0]};--p2:${PROMO_C.violet[1]}` },
+    h("div", { class: "offer-body" }, h("div", { class: "offer-top" }, h("span", { class: "offer-badge" }, "🤝 نمایندگی")),
+      h("h2", {}, "پنل فروش خودت را داشته باش"),
+      h("p", {}, "کاربر بساز، تمدید کن، قیمت خودت را بگذار و سود ببر؛ همه از داخل همین ربات و مینی‌اپ.")),
+    h("i", { class: "offer-glow", "aria-hidden": "true" })));
+  out.push(h("div", { class: "perks" },
+    [["⚡", "ساخت کاربر در چند ثانیه"], ["📱", "مدیریت کامل از تلگرام"], ["💰", "قیمت فروش با خودت"], ["🔗", "یک لینک برای همهٔ سرورها"]]
+      .map(([e, t]) => h("div", { class: "perk" }, h("span", {}, e), h("b", {}, t)))));
+  const list = panelSale.packages;
+  const feat = list.length >= 3 ? list[Math.floor(list.length / 2)].id : "";
+  out.push(h("div", { class: "section-title" }, "بسته‌ها"),
+    h("div", { class: "grid" }, list.map((p) => {
+      const off = p.base > p.price;
+      return h("div", { class: `pkg ${p.id === feat ? "feat" : ""}` },
+        p.id === feat ? h("span", { class: "pkg-tag" }, "پیشنهاد ما") : off ? h("span", { class: "pkg-tag hot" }, `${num(Math.round((1 - p.price / p.base) * 100))}٪ تخفیف`) : null,
+        h("div", { class: "pkg-head" },
+          h("div", { class: "pkg-gb" }, h("b", {}, num(p.gb >= 1024 && p.gb % 1024 === 0 ? p.gb / 1024 : p.gb)), h("span", {}, p.gb >= 1024 && p.gb % 1024 === 0 ? "ترابایت" : "گیگ")),
+          h("div", { class: "pkg-name" }, h("b", {}, p.name), h("small", {}, "اعتبار حجمی پنل"))),
+        h("div", { class: "chips" }, p.unlimited ? h("span", { class: "chip" }, "♾ فروش نامحدود") : null,
+          p.max_clients ? h("span", { class: "chip" }, `تا ${num(p.max_clients)} کاربر`) : h("span", { class: "chip" }, "کاربر بی‌سقف"),
+          p.can_delete ? h("span", { class: "chip" }, "حذف کاربر") : null),
+        h("div", { class: "pkg-foot" },
+          h("div", { class: "price" }, off ? h("s", {}, toman(p.base)) : null, h("b", {}, toman(p.price)), h("small", {}, "تومان")),
+          btn("خرید", "primary", () => buyPanel(p), "card")));
+    })));
+  out.push(h("div", { class: "section-title" }, "چطور کار می‌کند؟"),
+    h("ol", { class: "steps card" }, h("li", {}, "یک بسته انتخاب کنید و نام کاربری پنل را بنویسید."), h("li", {}, "مبلغ را کارت‌به‌کارت کنید و رسید را همین‌جا بفرستید."),
+      h("li", {}, "بعد از تأیید، پنل فعال می‌شود و مدیریتش همین‌جا در تب «مدیریت» است.")));
+  return out;
 }
 
 function buyPanel(p) {
@@ -618,20 +676,74 @@ function buyPanel(p) {
     } catch (e) { go.disabled = false; haptic("error"); toast(e.message.includes("گرفته شده") ? "این نام کاربری گرفته شده؛ نام دیگری بنویسید." : e.message); }
   }, "card");
   const close = sheet(h("h2", {}, "خرید پنل نمایندگی"),
-    h("div", { class: "summary" }, h("div", {}, p.name), h("div", { class: "muted small" }, `${num(p.gb)} گیگ اعتبار · ${toman(p.price)} تومان`)),
+    h("div", { class: "summary" }, h("div", {}, p.name), h("div", { class: "muted small" }, `${num(p.gb)} گیگ اعتبار · `, p.base > p.price ? h("s", {}, toman(p.base)) : null, ` ${toman(p.price)} تومان`)),
     h("p", { class: "muted small" }, "یک نام کاربری انگلیسی برای پنل بنویسید (حروف کوچک و عدد، ۳ تا ۲۴ حرف)."),
     h("div", { class: "field" }, name), h("div", { class: "row" }, go, btn("انصراف", "", () => close())));
 }
 
+// ---------- guide: connecting, support and the tour ----------
+function guideView() {
+  let dev = guessDevice();
+  const box = h("div", {});
+  const open = (url) => { try { tg.openLink(url); } catch { location.href = url; } };
+  const draw = () => {
+    const g = GUIDE[dev];
+    box.replaceChildren(h("div", { class: "chips" }, Object.entries(GUIDE).map(([k, v]) => h("button", { class: `chip ${k === dev ? "on" : ""}`, onclick: () => { dev = k; draw(); } }, v.name))),
+      ...g.apps.map((a) => h("div", { class: "lrow2" }, h("b", {}, a.name), btn("دانلود", "", () => open(a.store), "link"))),
+      h("ol", { class: "steps" }, g.steps.map((t) => h("li", {}, t))));
+  };
+  draw();
+  const out = [h("div", { class: "section-title" }, "آموزش اتصال"), h("div", { class: "card" }, box)];
+  if (state.services.length) {
+    out.push(h("div", { class: "section-title" }, "اتصال یکی از سرویس‌ها"),
+      h("div", { class: "card" }, h("p", { class: "muted small" }, "با این دکمه‌ها لینک سرویس مستقیم به برنامه اضافه می‌شود:"),
+        ...state.services.slice(0, 6).map((sv) => h("div", { class: "lrow2" }, ltr(sv.email), btn("آموزش و اتصال", "primary", () => helpSheet(sv), "link")))));
+  }
+  out.push(h("div", { class: "section-title" }, "پشتیبانی"),
+    h("div", { class: "card" }, h("p", { class: "muted small" }, "سؤال یا مشکلی دارید؟ پیامتان مستقیم به پشتیبانی می‌رسد و جواب در ربات می‌آید."),
+      state.support ? btn("پیام به پشتیبانی", "primary block", () => open(state.support), "chat") : btn("پیام به پشتیبانی در ربات", "primary block", openBot, "chat"),
+      btn("راهنمای استفاده از مینی‌اپ", "ghost block", () => tour("shop", true), "gift")),
+    h("div", { class: "section-title" }, "سؤال‌های رایج"),
+    h("div", { class: "card faq" },
+      ...[["یک سرویس روی چند دستگاه کار می‌کند؟", "بله، تا سقفی که روی پلن نوشته شده. اگر سقف ندارد، محدودیتی نیست."],
+        ["حجم یا روزم تمام شد، چه کنم؟", "در «سرویس‌ها» روی سرویس بزنید و «تمدید» را انتخاب کنید؛ لینک عوض نمی‌شود."],
+        ["سرورها کار نمی‌کنند؟", "در برنامه اشتراک را به‌روز کنید و سرور دیگری را امتحان کنید. اگر درست نشد، از «آموزش و اتصال» به پشتیبانی خبر بدهید."]]
+        .map(([q, a]) => h("details", {}, h("summary", {}, q), h("p", { class: "muted" }, a)))));
+  return out;
+}
+
+// layoutTabs: [مدیریت] سرویس‌ها خرید (پنل) کیف‌پول [راهنما]; the panel tab is
+// the raised middle button and shows only while panels are on sale here.
+function layoutTabs() {
+  const have = {};
+  for (const b of tabs.querySelectorAll("button[data-tab]")) have[b.dataset.tab] = b;
+  const make = (id, label, d, cls) => have[id] || (have[id] = h("button", { "data-tab": id, class: cls || "" }, cls === "mid" ? h("span", { class: "mid-ic" }, icon(d)) : icon(d), h("span", {}, label)));
+  const order = [];
+  if (role.manage) order.push(make("manage", "مدیریت", "M3 3h7v9H3zM14 3h7v5h-7zM14 12h7v9h-7zM3 16h7v5H3z"));
+  order.push(have.services, have.shop, have.wallet);
+  if (!role.manage) order.push(make("guide", "راهنما", "M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3M12 17h.01"));
+  if (panelSale && panelSale.on) {
+    const mid = make("panel", "نمایندگی", IC.users, "mid");
+    const old = mid.querySelector(".mid-pct"); if (old) old.remove();
+    if (panelSale.promo && panelSale.promo.percent) mid.querySelector(".mid-ic").append(h("i", { class: "mid-pct" }, `${num(panelSale.promo.percent)}٪`));
+    order.splice(Math.floor(order.length / 2), 0, mid);
+  }
+  tabs.replaceChildren(...order.filter(Boolean));
+  tabs.classList.toggle("has-mid", !!(panelSale && panelSale.on));
+}
+
 function shop() {
+  const teaser = panelTeaser();
+  const promoTop = teaser && panelSale.promo; // a running offer goes first
   if (!state.products.length) {
     const cc = customCard();
-    if (cc) return [cc, ...panelSection()];
-    const ps = panelSection();
-    return ps.length ? ps : [h("div", { class: "card empty" }, h("h2", {}, "فعلاً پلنی برای فروش نیست"), h("p", {}, "کمی بعد دوباره سر بزنید."))];
+    const out = [teaser, cc].filter(Boolean);
+    return out.length ? out : [h("div", { class: "card empty" }, h("h2", {}, "فعلاً پلنی برای فروش نیست"), h("p", {}, "کمی بعد دوباره سر بزنید."))];
   }
   const cats = [...new Set(state.products.map((p) => p.category || ""))];
-  const out = [h("div", { class: "section-title" }, "پلن‌ها")];
+  const out = [];
+  if (promoTop) out.push(teaser);
+  out.push(h("div", { class: "section-title" }, "پلن‌ها"));
   if (state.shop_text) out.push(h("div", { class: "card shop-text" }, state.shop_text));
   const cc = customCard();
   if (cc) out.push(cc);
@@ -642,7 +754,7 @@ function shop() {
     if (cats.length > 1) out.push(h("div", { class: "section-title sub" }, c || "سایر"));
     out.push(h("div", { class: "grid" }, state.products.filter((p) => (p.category || "") === c).map((p) => productCard(p, "", p.id === feat))));
   }
-  out.push(...panelSection());
+  if (teaser && !promoTop) out.push(teaser);
   return out;
 }
 
@@ -772,7 +884,7 @@ function render() {
     h("div", { class: "hello-t" }, h("p", {}, name ? `سلام ${name} 👋` : "سلام 👋"),
       h("h1", {}, state.logo && /^data:image\//.test(state.logo) ? h("img", { class: "brand-logo", src: state.logo, alt: "" }) : null, state.title || "Dark VPN")),
     h("button", { class: "wallet-chip", onclick: () => { tap(); setTab("wallet"); } }, icon(IC.wallet), h("span", {}, `${toman(state.toman || 0)}`)));
-  const body = tab === "manage" && role.manage && typeof manageView === "function" ? manageView() : ({ services, shop, wallet }[tab] || services)();
+  const body = tab === "manage" && role.manage && typeof manageView === "function" ? manageView() : ({ services, shop, wallet, panel: panelView, guide: guideView }[tab] || services)();
   app.replaceChildren(head, state.announce ? h("div", { class: "announce" }, state.announce) : "", h("div", { class: "view" }, ...body));
   tabs.hidden = false;
   for (const b of tabs.querySelectorAll("button")) b.setAttribute("aria-current", b.dataset.tab === tab ? "page" : "false");
@@ -795,14 +907,12 @@ async function load(first = true) {
     try { role = await api("GET", "role"); } catch { role = { manage: false, store: true }; }
     if (role.manage) {
       await loadManage();
-      const b = h("button", { "data-tab": "manage" }, icon("M3 3h7v9H3zM14 3h7v5h-7zM14 12h7v9h-7zM3 16h7v5H3z"), h("span", {}, "مدیریت"));
-      tabs.prepend(b);
-      tabs.classList.add("five");
       if (new URLSearchParams(location.search).get("m") === "1" || !role.store) tab = "manage";
       if (!role.store) { state = null; render(); return; }
     }
   }
-  try { state = await api("GET", "me"); render(); setTimeout(() => tour(tab === "manage" ? "manage" : "shop"), 600); }
+  if (first) layoutTabs();
+  try { state = await api("GET", "me"); render(); if (first) loadPanels(); setTimeout(() => tour(tab === "manage" ? "manage" : "shop"), 600); }
   catch (e) {
     if (!first) { toast(e.message); return; }
     if (role.manage) { state = null; tab = "manage"; render(); return; }

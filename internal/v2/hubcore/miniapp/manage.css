@@ -1,7 +1,6 @@
 /* Management screens (manage.js), on top of app.css. */
-.tabs.five { grid-template-columns: repeat(4, 1fr); }
-.seg { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 4px; padding: 4px; margin-block-end: 12px; border-radius: 14px; background: var(--surface); border: 1px solid var(--line); position: sticky; inset-block-start: 6px; z-index: 3; }
-.seg button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 8px 6px; border: 0; border-radius: 11px; background: transparent; color: var(--muted); font-weight: 700; font-size: 13px; cursor: pointer; }
+.seg { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 4px; padding: 4px; margin-block-end: 12px; border-radius: 14px; background: var(--surface); border: 1px solid var(--line); position: sticky; inset-block-start: 6px; z-index: 3; }
+.seg button { min-inline-size: 0; white-space: nowrap; overflow: hidden; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 8px 6px; border: 0; border-radius: 11px; background: transparent; color: var(--muted); font-weight: 700; font-size: 13px; cursor: pointer; }
 .seg button.on { color: var(--on-ion); background: linear-gradient(135deg, var(--ion), var(--ion-2)); }
 .seg svg { inline-size: 16px; block-size: 16px; }
 .view > * + * { margin-block-start: 10px; }
@@ -14,7 +13,7 @@
 .fc { display: flex; align-items: flex-start; gap: 8px; margin-block-start: 10px; padding: 9px 11px; border-radius: 12px; font-size: 13px; background: color-mix(in oklab, var(--ion) 10%, var(--surface-2)); }
 .fc.bad { background: color-mix(in oklab, var(--bad) 14%, var(--surface-2)); }
 .fc svg { color: var(--ion); margin-block-start: 3px; } .fc.bad svg { color: var(--bad); }
-.kpis { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; }
+.kpis { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; }
 .kpi { display: grid; justify-items: center; gap: 0; padding: 10px 4px; border-radius: 13px; border: 1px solid var(--line); background: var(--surface); cursor: pointer; color: var(--text); }
 .kpi b { font-size: 18px; } .kpi span { font-size: 11px; color: var(--muted); }
 .kpi.good b { color: var(--good); } .kpi.warn b { color: var(--warn); } .kpi.bad b { color: var(--bad); }
@@ -22,7 +21,7 @@
 .card.alert span { flex: 1; } .card.alert svg { color: var(--warn); }
 .btn.big { min-block-size: 52px; font-size: 16px; font-weight: 800; }
 .btn.danger { color: var(--bad); border-color: color-mix(in oklab, var(--bad) 40%, var(--line)); }
-.qplans { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin-block-start: 8px; }
+.qplans { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-block-start: 8px; }
 .qplan { display: grid; gap: 2px; padding: 12px; border-radius: 13px; border: 1px solid var(--line); background: var(--surface); text-align: start; color: var(--text); cursor: pointer; }
 .qplan:active { transform: scale(.97); } .qplan span { color: var(--muted); font-size: 12px; }
 .card.manual { display: flex; align-items: center; gap: 12px; } .card.manual > div { flex: 1; } .card.manual p { margin: 2px 0 0; }
@@ -35,7 +34,7 @@
 .chip.on { color: var(--on-ion); border-color: transparent; background: var(--ion); }
 .listhead { padding-inline: 2px; }
 .linkbtn { border: 0; background: none; color: var(--ion); font-weight: 700; font-size: 12.5px; cursor: pointer; padding: 0; }
-.ulist { display: grid; gap: 8px; }
+.ulist { display: grid; gap: 8px; grid-template-columns: minmax(0, 1fr); }
 .urow { display: flex; align-items: center; gap: 10px; inline-size: 100%; padding: 12px; border-radius: 13px; border: 1px solid var(--line); background: var(--surface); text-align: start; color: var(--text); cursor: pointer; }
 .urow:active { transform: scale(.99); }
 .urow.bad { border-color: color-mix(in oklab, var(--bad) 30%, var(--line)); } .urow.warn { border-color: color-mix(in oklab, var(--warn) 30%, var(--line)); }
@@ -52,7 +51,7 @@
 img.qr { display: block; inline-size: min(220px, 70vw); margin: 10px auto; border-radius: 14px; background: #fff; padding: 8px; }
 img.receipt { display: block; inline-size: 100%; max-block-size: 60dvh; object-fit: contain; border-radius: 12px; margin-block: 10px; background: var(--surface-2); }
 .sublink { padding: 10px 12px; border-radius: 12px; background: var(--surface-2); font-size: 12px; word-break: break-all; margin-block: 8px; cursor: pointer; }
-.actions { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin-block-start: 12px; }
+.actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-block-start: 12px; }
 .actions .btn.primary { grid-column: 1 / -1; }
 .picker { display: grid; gap: 8px; margin-block: 10px; }
 .plist { display: grid; gap: 8px; }
@@ -60,14 +59,14 @@ img.receipt { display: block; inline-size: 100%; max-block-size: 60dvh; object-f
 .popt.on { border-color: var(--ion); background: color-mix(in oklab, var(--ion) 12%, var(--surface-2)); }
 .popt span { color: var(--muted); font-size: 12px; }
 .custom { display: grid; gap: 4px; }
-.two { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px; }
 label.field { flex-direction: column; gap: 4px; } label.field span { font-size: 12.5px; color: var(--muted); }
 label.check { display: flex; align-items: center; gap: 8px; margin-block-start: 8px; font-size: 14px; } label.check input { inline-size: 18px; block-size: 18px; accent-color: var(--ion); }
 details.more { margin-block-start: 6px; } details.more summary { cursor: pointer; color: var(--ion); font-weight: 700; font-size: 13px; }
 .card.inbox { display: grid; gap: 6px; }
 .boot { display: grid; place-items: center; padding: 40px 0; }
 /* Stage 2 (manage2.js): more, credit, sellers, bot, cards, plans, tickets, reports. */
-.tiles { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+.tiles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
 .tile { position: relative; display: grid; gap: 4px; justify-items: start; padding: 14px 12px; border-radius: 15px; border: 1px solid var(--line); background: var(--surface); color: var(--text); text-align: start; cursor: pointer; }
 .tile:active { transform: scale(.97); }
 .tile svg { inline-size: 22px; block-size: 22px; color: var(--ion); }
@@ -81,9 +80,9 @@ details.more { margin-block-start: 6px; } details.more summary { cursor: pointer
 .qplan .price { color: var(--text); font-weight: 700; font-size: 13px; }
 .qplan.hot { border-color: var(--ion); box-shadow: 0 0 0 1px var(--ion) inset; }
 .urow.off { opacity: .6; }
-.kpis.four { grid-template-columns: repeat(2, 1fr); }
+.kpis.four { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .kpis.four .kpi { cursor: default; } .kpis.four .kpi b { font-size: 16px; }
-.rbars { display: grid; grid-template-columns: repeat(var(--n), 1fr); align-items: end; gap: 2px; block-size: 120px; margin-block: 10px 6px; }
+.rbars { display: grid; grid-template-columns: repeat(var(--n), minmax(0, 1fr)); align-items: end; gap: 2px; block-size: 120px; margin-block: 10px 6px; }
 .rbars i { display: block; block-size: max(var(--h), 2px); border-radius: 4px 4px 1px 1px; background: linear-gradient(180deg, var(--ion), var(--ion-2)); }
 .clamp { overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 .thread { display: grid; gap: 8px; max-block-size: 45vh; overflow-y: auto; padding-block: 6px; }
@@ -118,7 +117,7 @@ details.more { margin-block-start: 6px; } details.more summary { cursor: pointer
 .card > input + input { margin-block-start: 8px; }
 input[type=color] { inline-size: 100%; block-size: 42px; padding: 2px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface-2); }
 .lrow select { padding: 7px 8px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface-2); color: var(--text); font: inherit; }
-.kpis.money { grid-template-columns: repeat(3, 1fr); }
+.kpis.money { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .kpis.money .kpi { cursor: default; } .kpis.money .kpi b { font-size: 15px; }
 .chips.quick { margin-block-start: 8px; }
 .bubble { cursor: copy; }

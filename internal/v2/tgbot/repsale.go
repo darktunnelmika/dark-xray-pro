@@ -30,12 +30,31 @@ func (b *Bot) repSaleOn(ctx context.Context) bool {
 	return b.Store.RepSale(ctx).Enabled
 }
 
-// salePackages are the packages on sale in this bot, at its prices.
+// salePackages are the packages on sale in this bot, at its prices (with
+// the seller's banner discount, if one runs).
 func (b *Bot) salePackages(ctx context.Context) []hubcore.RepPackage {
-	if b.Seller != "" {
-		return b.Store.ResalePackages(ctx, b.Seller)
+	out := []hubcore.RepPackage{}
+	for _, p := range b.Store.RepSale(ctx).Packages {
+		p.Price, _ = b.Store.PanelPrice(ctx, b.Seller, p)
+		out = append(out, p)
 	}
-	return b.Store.RepSale(ctx).Packages
+	return out
+}
+
+// promoLine is the seller's panel-sale banner as one line of the bot's text.
+func (b *Bot) promoLine(ctx context.Context) string {
+	p := b.Store.PanelPromoFor(ctx, b.Seller)
+	if !p.Live(b.now().Unix()) || (p.Title == "" && p.Percent == 0) {
+		return ""
+	}
+	t := "🎉 <b>" + esc(p.Title) + "</b>"
+	if p.Title == "" {
+		t = "🎉"
+	}
+	if p.Percent > 0 {
+		t += fmt.Sprintf(" — %s٪ تخفیف روی همهٔ بسته‌ها", faInt(p.Percent))
+	}
+	return t + "\n\n"
 }
 
 // saleApprover reports whether the chat approves this bot's panel orders.
@@ -217,7 +236,7 @@ func (b *Bot) repSalePackages(ctx context.Context, chat int64, rep string) {
 			kb.Rows = append(kb.Rows, row(cbBtn(pkgLine(p), "P:tk:"+rep+":"+p.ID)))
 		}
 	} else {
-		text = "🤝 <b>خرید پنل نمایندگی</b>\n" + line + "\nبا پنل نمایندگی برای مشتری‌های خودتان سرویس می‌سازید و تمدید می‌کنید؛ هر سرویس از اعتبار حجمی پنل شما کم می‌شود.\n\nیک بسته را انتخاب کنید:"
+		text = "🤝 <b>خرید پنل نمایندگی</b>\n" + line + "\n" + b.promoLine(ctx) + "با پنل نمایندگی برای مشتری‌های خودتان سرویس می‌سازید و تمدید می‌کنید؛ هر سرویس از اعتبار حجمی پنل شما کم می‌شود.\n\nیک بسته را انتخاب کنید:"
 		for _, p := range b.salePackages(ctx) {
 			kb.Rows = append(kb.Rows, row(cbBtn(pkgLine(p), "P:pk:"+p.ID)))
 		}
