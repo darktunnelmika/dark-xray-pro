@@ -165,7 +165,10 @@ function h(tag, attrs = {}, ...kids) {
     if (v == null || v === false) continue;
     if (k.startsWith("on")) el.addEventListener(k.slice(2), v);
     else if (k === "class") el.className = v;
-    else if (k === "style") el.style.cssText = v; // CSSOM: allowed under a strict style-src CSP
+    // Run-time values (bar widths, colours) arrive as CSS custom properties,
+    // set through CSSOM, which the CSP (style-src 'self') allows; the look
+    // itself lives in app.css. Never write a style="" attribute.
+    else if (k === "vars") for (const [name, x] of Object.entries(v)) el.style.setProperty(name, x);
     else el.setAttribute(k, v === true ? "" : v);
   }
   // In Persian a middle dot reads like the digit zero (۰): use the Persian comma.
@@ -361,7 +364,7 @@ function avatar(name, cls = "") {
   let hsh = 0;
   for (const ch of String(name)) hsh = (hsh * 31 + ch.codePointAt(0)) >>> 0;
   const hue = hsh % 360;
-  return h("span", { class: `avatar ${cls}`, style: `--h:${hue}`, "aria-hidden": "true" }, [...String(name).replace(/[^\p{L}\p{N}]/gu, "")].slice(0, 2).join("").toUpperCase() || "?");
+  return h("span", { class: `avatar ${cls}`, vars: { "--h": hue }, "aria-hidden": "true" }, [...String(name).replace(/[^\p{L}\p{N}]/gu, "")].slice(0, 2).join("").toUpperCase() || "?");
 }
 
 // A friendly empty screen with one clear next step.
@@ -398,7 +401,7 @@ function openPalette() {
       const btn = h("button", { type: "button", class: "hit", role: "option", "aria-selected": i === sel ? "true" : "false", onclick: () => go(it.href) },
         it.av ? avatar(it.av, "sm") : icon(it.ic), h("span", {}, it.label), it.sub ? h("span", { class: "muted small spacer" }, it.sub) : null);
       return head ? [head, btn] : [btn];
-    }) : [h("p", { class: "muted small", style: "padding:14px" }, ux("noHits"))]));
+    }) : [h("p", { class: "muted small pad14" }, ux("noHits"))]));
   };
   input.addEventListener("input", () => { sel = 0; draw(); });
   input.addEventListener("keydown", (e) => {
@@ -628,7 +631,7 @@ async function viewOnline() {
       h("tbody", {}, list.map((o) => h("tr", {},
         h("td", {}, h("span", { class: "dot on" }), " ", h("a", { href: `#/client?e=${encodeURIComponent(o.email)}` }, o.email)),
         h("td", { "data-label": s3("onNode") }, h("span", { class: "badge" }, o.node_id)),
-        h("td", { "data-label": s3("onIPs"), class: "small" }, o.ips.length ? h("span", { class: "row", style: "gap:4px" }, o.ips.map((ip) => ipView(ip, ""))) : "—"),
+        h("td", { "data-label": s3("onIPs"), class: "small" }, o.ips.length ? h("span", { class: "row gap4" }, o.ips.map((ip) => ipView(ip, ""))) : "—"),
         h("td", { "data-label": s3("onToday") }, bytes(o.today)), h("td", { "data-label": s3("onSeen"), class: "small muted" }, fmtTime(o.seen))))))) : h("p", { class: "muted" }, rows.length ? t("empty") : s3("onlineNone")));
   };
   q.addEventListener("input", draw);
@@ -674,7 +677,7 @@ function nodeTrafficCard(nodes) {
       if ((dayList.length - 1 - i) % step === 0) { const lab = svgEl("text", { x: i * bw + bw / 2, y: H + 15, "text-anchor": "middle", class: "bar-label" }); lab.textContent = dayLabel(d); svg.append(lab); }
     });
     const total = (id) => rows.filter((r) => r.node_id === id).reduce((a, r) => a + r.up + r.down, 0);
-    fill(body, svg, h("div", { class: "row small" }, ids.map((id) => h("span", { class: "legend-item" }, h("i", { class: "sw", style: `background:${color(id)}` }), `${id} · ${bytes(total(id))}`))));
+    fill(body, svg, h("div", { class: "row small" }, ids.map((id) => h("span", { class: "legend-item" }, h("i", { class: "sw tint", vars: { "--sw": color(id) } }), `${id} · ${bytes(total(id))}`))));
   };
   const seg = h("div", { class: "row tight spacer" }, [7, 14, 30].map((n) => h("button", { type: "button", class: n === days ? "chip on" : "chip", onclick: (e) => {
     days = n; seg.querySelectorAll("button").forEach((b) => b.classList.toggle("on", b === e.target)); load();
@@ -881,11 +884,11 @@ function nodeRow(n) {
   const pct = (u, t) => (t ? (100 * u) / t : 0);
   const ramP = pct(host.ram_used, host.ram_total), diskP = pct(host.disk_used, host.disk_total);
   const mini = (k, p, txt) => h("div", { class: "mini" }, h("div", {}, k, " ", h("b", {}, txt)),
-    h("div", { class: "bar" }, h("i", { class: p >= 90 ? "bad" : p >= 75 ? "warn" : "", style: `inline-size:${Math.round(Math.max(0, Math.min(100, p)))}%` })));
+    h("div", { class: "bar" }, h("i", { class: p >= 90 ? "bad" : p >= 75 ? "warn" : "", vars: { "--pct": `${Math.round(Math.max(0, Math.min(100, p)))}%` } })));
   const p = (v) => `\u2066${fmtNum(Math.round(v || 0))}%\u2069`;
   return h("a", { class: `node-row ${n.online ? "" : "off"}`, href: "#/nodes" },
     h("div", { class: "nr-name" }, h("span", { class: `dot ${n.online ? "on" : ""}` }),
-      h("div", { style: "min-inline-size:0" }, h("span", {}, n.Name || n.ID, n.PublicIP ? h("span", { class: "nr-ip" }, n.PublicIP) : null),
+      h("div", { class: "minw0" }, h("span", {}, n.Name || n.ID, n.PublicIP ? h("span", { class: "nr-ip" }, n.PublicIP) : null),
         h("div", { class: "nr-sub" }, [n.ID, n.AgentVersion || "—", n.xray_version ? `xray ${n.xray_version}` : null].filter(Boolean).join(" · "), n.update_available ? (fa ? " · به‌روزرسانی" : " · update") : "",
           n.online && host.hub_rtt_ms ? h("span", { class: `tun-chip ${host.hub_fails_1h ? "down" : "up"}`, dir: "ltr", title: fa ? "ارتباط این نود با سرور اصلی؛ قطعی‌ها = همگام‌سازی‌های ناموفق در ساعت اخیر" : "Link to the HUB; failures = failed syncs in the last hour" },
             `⇆ hub ${Math.round(host.hub_rtt_ms)}ms${host.hub_fails_1h ? ` · ${host.hub_fails_1h}✕/1h` : ""}`) : null,
@@ -923,7 +926,7 @@ async function viewDashboard() {
       kpi("traffic", t("trafficToday"), bytes(o.TrafficToday)),
       kpi("finance", t("trafficTotal"), bytes(o.TrafficTotal))),
     (nodes || []).length ? h("div", { class: "card node-rows" },
-      h("div", { class: "nr-head" }, h("h2", { style: "margin:0" }, ux("nodesSection")), h("a", { class: "spacer small", href: "#/nodes" }, fa ? "مدیریت نودها ›" : "Manage nodes ›")),
+      h("div", { class: "nr-head" }, h("h2", { class: "m0" }, ux("nodesSection")), h("a", { class: "spacer small", href: "#/nodes" }, fa ? "مدیریت نودها ›" : "Manage nodes ›")),
       rowsBox) : null,
     h("div", { class: "dash2" },
       h("div", { class: "card form span2" }, h("div", { class: "row" }, h("h2", {}, t("traffic14")), legend()), barsSvg(ins.daily, 1100)),
@@ -1071,7 +1074,7 @@ function nodeCard(n, actions = false) {
       return [c.el, r.el, host.disk_total ? d.el : null];
     })(),
       h("div", { class: "small muted full" }, `↓ ${rate(host.rx_rate)} · ↑ ${rate(host.tx_rate)} · ${t("onlineUsers")}: ${fmtNum(host.online_users)} · ${t("uptime")}: ${dur(host.uptime_sec)}`)) : null,
-    n.LastError ? h("div", { class: "small", style: "color:var(--bad)" }, `${t("lastError")}: ${n.LastError}`) : null,
+    n.LastError ? h("div", { class: "small bad-text" }, `${t("lastError")}: ${n.LastError}`) : null,
     actions ? h("div", { class: "row node-actions" },
       n.update_available ? h("button", { class: "primary", onclick: () => updateNode(n) }, t("updateNode")) : null,
       h("button", { onclick: () => nodeHealth(n) }, t("health")),
@@ -1190,7 +1193,7 @@ async function xrayPicker(n) {
 function meter(label, pct, text, neutral = false) {
   const p = Math.max(0, Math.min(100, pct || 0));
   return h("div", { class: "meter" }, h("div", { class: "row small" }, h("span", {}, label), h("span", { class: "muted spacer" }, text)),
-    h("div", { class: "bar" }, h("i", { class: neutral ? "" : p > 90 ? "bad" : p > 75 ? "warn" : "", style: `inline-size:${p}%` })));
+    h("div", { class: "bar" }, h("i", { class: neutral ? "" : p > 90 ? "bad" : p > 75 ? "warn" : "", vars: { "--pct": `${p}%` } })));
 }
 
 function renameNode(n) {
@@ -1342,7 +1345,7 @@ async function viewClients() {
         c.Note ? h("div", { class: "small muted clip" }, c.Note) : null),
       h("td", { class: "c-usage", "data-label": L.usage },
         h("div", { class: "small mono" }, `${bytes(u)} ${lang === "fa" ? "از" : "/"} ${c.VolumeBytes < 0 ? "∞" : bytes(c.VolumeBytes)}`),
-        c.VolumeBytes > 0 ? h("div", { class: "bar slim" }, h("i", { class: pct > 90 ? "bad" : pct > 75 ? "warn" : "", style: `inline-size:${pct}%` })) : null),
+        c.VolumeBytes > 0 ? h("div", { class: "bar slim" }, h("i", { class: pct > 90 ? "bad" : pct > 75 ? "warn" : "", vars: { "--pct": `${pct}%` } })) : null),
       h("td", { class: "c-remain mono small", "data-label": L.remain }, c.Remaining < 0 ? "∞" : bytes(c.Remaining)),
       h("td", { class: "c-exp", "data-label": L.expiry }, h("span", { class: `badge ${cls}` }, status),
         c.ResetPeriod ? h("span", { class: "badge", title: "reset" }, "↻ " + c.ResetPeriod) : null),
@@ -1542,7 +1545,7 @@ async function viewGroups() {
       h("span", { class: "badge spacer" }, t("clientsCount", { n: fmtNum(g.Members.length) }))),
     g.Members.length ? h("div", { class: "chips" }, g.Members.slice(0, 8).map((m) => h("a", { class: "chip", href: `#/client?e=${encodeURIComponent(m)}`, dir: "ltr" }, m)),
       g.Members.length > 8 ? h("span", { class: "chip" }, `+${fmtNum(g.Members.length - 8)}`) : null)
-      : h("p", { class: "small muted", style: "margin:0" }, fa ? "هنوز عضوی ندارد" : "No members yet"),
+      : h("p", { class: "small muted m0" }, fa ? "هنوز عضوی ندارد" : "No members yet"),
     h("div", { class: "row" },
       h("button", { onclick: () => renewGroup(g, clients) }, t("bulkRenew")),
       h("button", { class: "ghost", onclick: () => bulkGroup(g) }, lang === "fa" ? "افزودن روز / حجم" : "Add days / volume"),
@@ -1617,7 +1620,7 @@ function clientCard(c, ctx, selected, onSelect) {
   const [cls, status] = clientStatus(c);
   return h("div", { class: "card item" },
     h("div", { class: "head" },
-      selected ? h("input", { type: "checkbox", "aria-label": c.Email, checked: selected.has(c.Email), style: "inline-size:auto",
+      selected ? h("input", { type: "checkbox", "aria-label": c.Email, checked: selected.has(c.Email), class: "auto-w",
         onchange: (e) => { e.target.checked ? selected.add(c.Email) : selected.delete(c.Email); onSelect(); } }) : null,
       h("span", { class: `dot ${c.Online ? "on" : ""}`, title: c.Online ? t("online") : t("offline") }),
       h("a", { class: "name", href: `#/client?e=${encodeURIComponent(c.Email)}` }, c.Email), h("span", { class: `badge ${cls}` }, status)),
@@ -1626,7 +1629,7 @@ function clientCard(c, ctx, selected, onSelect) {
       c.MaxIPs ? h("span", {}, `· IP ≤ ${fmtNum(c.MaxIPs)}`) : null,
       h("span", {}, `· ${(c.Inbounds || []).join(", ")}`)),
     c.Note ? h("div", { class: "small muted" }, c.Note) : null,
-    c.VolumeBytes > 0 ? h("div", { class: "bar" }, h("i", { class: pct > 90 ? "bad" : pct > 75 ? "warn" : "", style: `inline-size:${pct}%` })) : null,
+    c.VolumeBytes > 0 ? h("div", { class: "bar" }, h("i", { class: pct > 90 ? "bad" : pct > 75 ? "warn" : "", vars: { "--pct": `${pct}%` } })) : null,
     h("div", { class: "row" },
       h("button", { onclick: () => showSub(c) }, t("subscription")),
       me.role === "rep" && me.policy && me.policy.DenyRenew ? null : h("button", { class: "ghost", onclick: () => renewForm([c]) }, lang === "fa" ? "تمدید" : "Renew"),
@@ -1661,7 +1664,7 @@ async function viewClient() {
   const left = c.EffectiveUntil ? Math.max(0, Math.ceil((c.EffectiveUntil - now) / 86400)) : null;
   const stat = (k, v, sub) => h("div", { class: "card stat" }, h("div", { class: "v" }, v), h("div", { class: "k" }, k), sub ? h("div", { class: "small muted" }, sub) : null);
   const url = c.SubURL || "";
-  const fmt = (label, u) => h("div", { class: "row" }, h("span", { class: "badge" }, label), h("code", { style: "flex:1" }, u), h("button", { type: "button", class: "ghost", onclick: () => copy(u) }, t("copy")));
+  const fmt = (label, u) => h("div", { class: "row" }, h("span", { class: "badge" }, label), h("code", { class: "grow" }, u), h("button", { type: "button", class: "ghost", onclick: () => copy(u) }, t("copy")));
   const sum30 = days.reduce((a, d) => a + d.Up + d.Down, 0);
   const fa = lang === "fa";
   const canQuick = me.role !== "rep";
@@ -1796,7 +1799,7 @@ function usageCard(email, days0) {
       h("div", { class: "small muted" }, L.byNode),
       total ? h("div", { class: "nodebars" }, nodes.map((n) => {
         const v = n.up + n.down, pct = (v / total) * 100;
-        return h("div", { class: "nodebar" }, h("span", { class: "name" }, n.node_id), h("div", { class: "bar slim" }, h("i", { style: `inline-size:${pct}%` })),
+        return h("div", { class: "nodebar" }, h("span", { class: "name" }, n.node_id), h("div", { class: "bar slim" }, h("i", { vars: { "--pct": `${pct}%` } })),
           h("span", { class: "mono small" }, `${bytes(v)} · ${fmtNum(Math.round(pct))}%`));
       })) : h("p", { class: "muted small" }, L.noData));
   }
@@ -1841,7 +1844,7 @@ function devicesCard(c) {
   }
   card.append(h("div", { class: "row" }, h("h2", {}, L.dev), c.hwid_limit ? h("span", { class: "badge spacer" }, `≤ ${fmtNum(c.hwid_limit)}`) : null),
     h("p", { class: "small muted" }, L.devHint),
-    h("div", { class: "row" }, h("label", { style: "flex:1" }, h("span", {}, L.devLimit), limit), saveLimit), list);
+    h("div", { class: "row" }, h("label", { class: "grow" }, h("span", {}, L.devLimit), limit), saveLimit), list);
   load();
   return card;
 }
@@ -2074,7 +2077,7 @@ function clientForm(c, inbounds, ctx = { reps: [] }) {
   const err = h("div", { class: "error" });
   const save = h("button", { class: "primary", value: "save" }, isNew ? T("ساخت کلاینت", "Create client") : t("save"));
   const holdRow = h("div", { class: "two" }, h("label", {}, h("span", {}, T("مهلت شروع (روز)", "Must start within (days)")), holdDays),
-    h("p", { class: "small muted", style: "align-self:end;margin:0 0 8px" }, T("اگر تا این مهلت وصل نشود، زمانش خودکار شروع می‌شود.", "If unused by then, the term starts anyway.")));
+    h("p", { class: "small muted note-end" }, T("اگر تا این مهلت وصل نشود، زمانش خودکار شروع می‌شود.", "If unused by then, the term starts anyway.")));
   const startRow = h("div", {}, h("span", { class: "lbl" }, T("شروع زمان", "Term starts")), start);
   const unitsFor = (d) => (d > 0 ? Math.ceil(d / 30) : 0);
   function calc() {
@@ -2100,7 +2103,7 @@ function clientForm(c, inbounds, ctx = { reps: [] }) {
         h("div", {}, T("مانده بعد از ساخت: ", "Left after: "), h("b", { dir: "ltr" }, gbs(Math.max(0, credit - costB))), units || costU ? ` · ${fmtNum(Math.max(0, units - costU))} ${t("units")}` : ""),
         short ? h("div", {}, T("اعتبار کافی نیست.", "Not enough credit.")) : null));
     }
-    if (!n) kids.push(h("div", { class: "small", style: "color:var(--warn)" }, T("هیچ اینباندی انتخاب نشده؛ کاربر کانفیگی نمی‌گیرد.", "No inbound selected; the user gets no configs.")));
+    if (!n) kids.push(h("div", { class: "small fg-warn" }, T("هیچ اینباندی انتخاب نشده؛ کاربر کانفیگی نمی‌گیرد.", "No inbound selected; the user gets no configs.")));
     save.disabled = short;
     sumBox.replaceChildren(...kids);
   }
@@ -2187,7 +2190,7 @@ function clientForm(c, inbounds, ctx = { reps: [] }) {
         owner ? h("label", {}, h("span", {}, T("ریست دوره‌ای حجم", "Periodic volume reset")), reset) : null),
       owner ? h("fieldset", { class: "np" }, h("label", { class: "check" }, npOn, T("تمدید خودکار با پلن بعدی وقتی حجم یا زمان تمام شد", "Auto-renew with a next plan when volume or time runs out")),
         h("div", { class: "three" }, h("label", {}, h("span", {}, T("حجم بعدی (گیگ، ۰ = نامحدود)", "Next volume (GB, 0 = ∞)")), npGB), h("label", {}, h("span", {}, T("روز بعدی", "Next days")), npDays),
-          h("label", { class: "check", style: "align-self:end" }, npFirst, T("از اولین اتصال", "From first use")))) : null,
+          h("label", { class: "check self-end" }, npFirst, T("از اولین اتصال", "From first use")))) : null,
       owner ? h("div", { class: "two" }, h("label", {}, h("span", {}, T("مالک (نماینده)", "Owner (reseller)")), repSel), h("label", {}, h("span", {}, T("آیدی عددی تلگرام کاربر", "User's Telegram ID")), tg)) : null,
       owner ? h("div", {}, h("span", { class: "lbl" }, T("گروه‌ها", "Groups")), groupBox) : null,
       h("label", {}, h("span", {}, t("contact")), note),
@@ -2199,10 +2202,10 @@ function clientForm(c, inbounds, ctx = { reps: [] }) {
     h("div", { class: "two" },
       h("label", {}, h("span", {}, t("name")), h("div", { class: "row nowrap" }, name, dice)),
       h("div", {}, h("span", { class: "lbl" }, T("وضعیت", "Status")), status)),
-    rep ? h("p", { class: "small muted", style: "margin:0" }, t("unitsHint")) : null,
+    rep ? h("p", { class: "small muted m0" }, t("unitsHint")) : null,
     h("div", { class: "two" },
       h("div", {}, h("label", {}, h("span", {}, T("حجم (گیگ) — ۰ یعنی نامحدود", "Volume (GB) — 0 = unlimited")), vol), volChips),
-      h("div", {}, h("div", { class: "row nowrap tight2" }, h("label", { style: "flex:1" }, h("span", {}, T("مدت (روز)", "Days")), days), h("label", { style: "flex:1.3" }, h("span", {}, T("یا تاریخ انقضا", "or expiry date")), date)), dateFa, dayChips)),
+      h("div", {}, h("div", { class: "row nowrap tight2" }, h("label", { class: "grow" }, h("span", {}, T("مدت (روز)", "Days")), days), h("label", { class: "grow13" }, h("span", {}, T("یا تاریخ انقضا", "or expiry date")), date)), dateFa, dayChips)),
     startRow, holdRow,
     h("div", {}, h("div", { class: "row" }, h("span", { class: "lbl" }, t("assignInbounds")), inbounds.length > 1 ? h("span", { class: "spacer" }, allIb) : null),
       h("div", { class: "chips" }, ibChips.length ? ibChips : h("span", { class: "muted small" }, T("اینباندی نیست", "No inbounds")))),
@@ -2305,7 +2308,7 @@ async function viewInbounds() {
         h("button", { class: "primary", onclick: () => acmeForm(nodes, acme.settings) }, t("freeCert"))),
       acme.certs.length ? acme.certs.map((c) => certRow(c,
         h("span", { class: "small muted" }, h("span", { class: `badge ${c.status === "ok" ? "good" : c.status === "failed" ? "bad" : "warn"}` }, t(`st_${c.status}`)), " ", c.method === "dns_cf" ? t("acmeDNS") : `${t("acmeHTTP")} · ${c.node_id}`,
-          c.last_error ? h("span", { style: "color:var(--bad);display:block" }, c.last_error) : null),
+          c.last_error ? h("span", { class: "bad-text block" }, c.last_error) : null),
         h("div", { class: "row" },
           h("button", { class: "ghost", disabled: c.status === "issuing", onclick: async () => { await guarded(() => api("POST", `/api/v2/admin/acme/certs/${encodeURIComponent(c.id)}/renew`)); setTimeout(route, 800); } }, t("renew")),
           iconBtn("trash", t("delete"), async () => { if (await confirmAction(t("confirmDelete", { x: c.id }))) { await guarded(() => api("DELETE", `/api/v2/admin/acme/certs/${encodeURIComponent(c.id)}`)); route(); } }))))
@@ -2317,7 +2320,7 @@ function plainLine(ib, meta, nodes) {
   if (meta.mtproto_secret) {
     const node = (nodes || []).find((n) => n.ID === (ib.nodes || [])[0]);
     const link = `https://t.me/proxy?server=${encodeURIComponent(node?.PublicIP || "SERVER-IP")}&port=${ib.port}&secret=${meta.mtproto_secret}`;
-    return h("div", { class: "row small" }, h("span", { class: "badge" }, "Telegram"), h("code", { dir: "ltr", style: "flex:1;overflow:hidden;text-overflow:ellipsis" }, link),
+    return h("div", { class: "row small" }, h("span", { class: "badge" }, "Telegram"), h("code", { dir: "ltr", class: "code-clip" }, link),
       h("button", { type: "button", class: "ghost", onclick: () => copy(link) }, t("copy")), h("button", { type: "button", class: "ghost", onclick: () => showQR(ib.tag, link) }, "QR"));
   }
   if (meta.target) return h("div", { class: "row small" }, h("span", { class: "badge" }, lang === "fa" ? "انتقال پورت" : "Port forward"), h("code", { dir: "ltr" }, `:${ib.port} → ${meta.target}`));
@@ -2325,14 +2328,14 @@ function plainLine(ib, meta, nodes) {
   const node = (nodes || []).find((n) => n.ID === (ib.nodes || [])[0]);
   const host = node?.PublicIP || "SERVER-IP";
   const link = `${ib.protocol}://${encodeURIComponent(meta.proxy_user)}:${encodeURIComponent(meta.proxy_pass)}@${host.includes(":") ? `[${host}]` : host}:${ib.port}`;
-  return h("div", { class: "row small" }, h("code", { dir: "ltr", style: "flex:1;overflow:hidden;text-overflow:ellipsis" }, link),
+  return h("div", { class: "row small" }, h("code", { dir: "ltr", class: "code-clip" }, link),
     h("button", { type: "button", class: "ghost", onclick: () => copy(link) }, t("copy")), h("button", { type: "button", class: "ghost", onclick: () => showQR(ib.tag, link) }, "QR"));
 }
 
 // Test one outbound from a node with a throwaway Xray (agent v2.5.0+).
 function outboundTester(tag, nodes) {
   const fa = lang === "fa";
-  const sel = h("select", { "aria-label": fa ? "نود" : "Node", style: "max-inline-size:220px;flex:none" }, nodes.map((n) => h("option", { value: n.ID }, `${n.Name || n.ID}${n.online ? "" : fa ? " (خاموش)" : " (offline)"}`)));
+  const sel = h("select", { "aria-label": fa ? "نود" : "Node", class: "tester-node" }, nodes.map((n) => h("option", { value: n.ID }, `${n.Name || n.ID}${n.online ? "" : fa ? " (خاموش)" : " (offline)"}`)));
   const out = h("span", { class: "small muted" }, fa ? "با تنظیمات ذخیره‌شده روی نود تست می‌شود" : "Tests the saved settings on the node");
   const btn = h("button", { type: "button", class: "ghost", onclick: async () => {
     btn.disabled = true; fill(out, h("span", { class: "muted" }, fa ? "در حال تست…" : "Testing…"));
@@ -2795,7 +2798,7 @@ function sniFinder({ nodes, node, onPick }) {
         h("thead", {}, h("tr", {}, h("th", {}, "SNI"), h("th", {}, t("score")), h("th", {}, t("latency")), h("th", {}, ""), h("th", {}, ""))),
         h("tbody", {}, good.slice(0, 25).map((c) => h("tr", {},
           h("td", { class: "mono", dir: "ltr" }, c.domain, c.neighbor ? h("span", { class: "badge good" }, t("neighbor")) : null),
-          h("td", {}, h("div", { class: "scorebar" }, h("i", { style: `width:${c.score}%` })), h("span", { class: "small" }, String(c.score))),
+          h("td", {}, h("div", { class: "scorebar" }, h("i", { vars: { "--pct": `${c.score}%` } })), h("span", { class: "small" }, String(c.score))),
           h("td", { class: "mono" }, `${c.latency_ms} ms`),
           h("td", { class: "small muted" }, c.issuer || ""),
           h("td", {}, h("button", { type: "button", onclick: () => { onPick(c.domain, c); toast(`SNI → ${c.domain}`); } }, t("sniUse"))))))) : null,
@@ -3019,7 +3022,7 @@ async function inboundStudio(tag, ctx) {
         h("label", { class: "check" }, (() => { const c = h("input", { type: "checkbox", checked: hst.allow_insecure }); c.addEventListener("change", () => { hst.allow_insecure = c.checked; }); return c; })(), "allowInsecure"),
         h("div", { class: "row small" },
           h("label", { class: "check" }, (() => { const c = h("input", { type: "checkbox", checked: !!hst.fragment }); c.addEventListener("change", () => { hst.fragment = c.checked; }); return c; })(), lang === "fa" ? "Fragment (فقط پروفایل Xray JSON)" : "Fragment (Xray JSON profile only)"),
-          h("label", {}, h("span", {}, lang === "fa" ? "Mux (همزمانی، ۰ = خاموش؛ نه با Vision)" : "Mux (concurrency, 0 = off; not with Vision)"), bind(hst, "mux", { type: "number", min: "0", max: "128", style: "max-inline-size:110px" }, true))),
+          h("label", {}, h("span", {}, lang === "fa" ? "Mux (همزمانی، ۰ = خاموش؛ نه با Vision)" : "Mux (concurrency, 0 = off; not with Vision)"), bind(hst, "mux", { type: "number", min: "0", max: "128", class: "maxw110" }, true))),
         h("div", { class: "row small" }, t("hideIn"), ...["links", "singbox", "clash"].map((f) => h("label", { class: "check" },
           (() => { const c = h("input", { type: "checkbox", checked: hst.exclude.includes(f) }); c.addEventListener("change", () => { hst.exclude = c.checked ? [...hst.exclude, f] : hst.exclude.filter((x) => x !== f); }); return c; })(), f)))));
     return h("div", { class: "hostrow" },
@@ -3755,7 +3758,7 @@ function nodeForm() {
       try { j = await api("GET", `/api/v2/admin/ssh-install/${job}`); } catch { setTimeout(poll, 2000); return; }
       log.textContent = j.lines.join("\n"); log.scrollTop = log.scrollHeight;
       if (j.status === "running") { setTimeout(poll, 1500); return; }
-      if (j.status === "done") { out.replaceChildren(h("p", { class: "small", style: "color:var(--good)" }, fa ? "✅ نود نصب شد؛ چند ثانیه دیگر در فهرست نودها آنلاین می‌شود." : "✅ Installed; the node comes online in a few seconds."), h("button", { type: "button", onclick: () => { document.getElementById("modal").close(); route(); } }, fa ? "رفتن به نودها" : "Go to nodes")); }
+      if (j.status === "done") { out.replaceChildren(h("p", { class: "small fg-good" }, fa ? "✅ نود نصب شد؛ چند ثانیه دیگر در فهرست نودها آنلاین می‌شود." : "✅ Installed; the node comes online in a few seconds."), h("button", { type: "button", onclick: () => { document.getElementById("modal").close(); route(); } }, fa ? "رفتن به نودها" : "Go to nodes")); }
       else { out.replaceChildren(h("p", { class: "error" }, (fa ? "نصب نشد: " : "Not installed: ") + sshErr(j.error || "", fa))); save.disabled = false; }
     };
     poll();
@@ -4029,7 +4032,7 @@ async function repCreateForm() {
     h("label", { class: "check" }, f.ru, t("refundUnused")),
     sub ? null : h("label", { class: "check" }, f.mp, t("manageProducts")),
     sub && lim ? h("p", { class: "small muted" }, fa ? "گزینه‌های خاموش را خود شما هم ندارید؛ زیرفروشنده بیشتر از شما اجازه نمی‌گیرد." : "Greyed-out options are ones you do not have yourself; a sub-seller never gets more than you.") : null,
-    tags.length ? h("fieldset", { class: "form", style: "border:0;padding:0;margin:0" }, h("legend", { class: "small muted" }, t("allowedInbounds")), ibBoxes) : null,
+    tags.length ? h("fieldset", { class: "form bare" }, h("legend", { class: "small muted" }, t("allowedInbounds")), ibBoxes) : null,
     err), [save]);
   d.classList.add("wide");
 }
@@ -4129,7 +4132,7 @@ function policyForm(r, inbounds) {
     h("label", { class: "check" }, f.cd, t("canDelete")),
     h("label", { class: "check" }, f.ru, t("refundUnused")),
     me.role === "owner" ? h("label", { class: "check" }, f.mp, t("manageProducts")) : null,
-    h("fieldset", { class: "form", style: "border:0;padding:0;margin:0" }, h("legend", { class: "small muted" }, t("allowedInbounds")), boxes),
+    h("fieldset", { class: "form bare" }, h("legend", { class: "small muted" }, t("allowedInbounds")), boxes),
     me.role === "rep" ? null : h("div", { class: "two" }, lab("priceGB", f.pg), lab("priceUnit", f.pu)), err), [save]);
 }
 
@@ -4206,7 +4209,7 @@ async function viewShop() {
       chips.replaceChildren(...Object.keys(counts).map((k) => h("button", { type: "button", role: "tab", class: `chip ${f === k ? "on" : ""}`, "aria-selected": String(f === k), onclick: () => { f = k; draw(); } },
         k === "all" ? (fa ? "همه" : "All") : t(`status_${k}`), h("span", { class: "count" }, fmtNum(counts[k])))));
       const l = orders.filter((o) => f === "all" || o.status === f);
-      list.replaceChildren(...(l.length ? l.map(orderRow) : [h("p", { class: "muted small", style: "padding:14px" }, f === "pending" ? (fa ? "سفارش منتظری ندارید." : "No orders waiting.") : t("empty"))]));
+      list.replaceChildren(...(l.length ? l.map(orderRow) : [h("p", { class: "muted small pad14" }, f === "pending" ? (fa ? "سفارش منتظری ندارید." : "No orders waiting.") : t("empty"))]));
     };
     draw();
     return h("div", {}, chips, list);
@@ -4359,7 +4362,7 @@ async function viewTickets() {
       h("div", { class: "o-main" }, h("b", {}, x.name || String(x.chat)), h("span", { class: "muted small" }, x.last)),
       h("div", { class: "o-amt" }, h("span", { class: "small muted" }, fa ? `${fmtNum(x.count)} پیام` : `${x.count} msgs`), owner && x.seller ? h("span", { class: "badge" }, x.seller) : null),
       h("div", { class: "o-st" }, h("span", { class: `badge ${stName[x.status][1]}` }, stName[x.status][0])))) :
-      [h("p", { class: "muted small", style: "padding:14px" }, f === "active" || f === "open" ? (fa ? "تیکت بازی ندارید." : "No open tickets.") : t("empty"))]));
+      [h("p", { class: "muted small pad14" }, f === "active" || f === "open" ? (fa ? "تیکت بازی ندارید." : "No open tickets.") : t("empty"))]));
   };
   const load = async () => { all = await api("GET", "/api/v2/tickets"); draw(); };
   const openTicket = async (id) => {
@@ -4415,14 +4418,14 @@ function walletsPane() {
     fill(box,
       h("div", { class: "card form" }, h("h2", {}, fa ? `شارژهای منتظر (${fmtNum(review.length)})` : `Top-ups to review (${review.length})`),
         h("p", { class: "small muted" }, fa ? "مشتری در ربات مبلغ را انتخاب می‌کند، به کارت شما واریز می‌کند و عکس رسید را می‌فرستد. رسید در تلگرام برای شما می‌آید؛ همان‌جا یا این‌جا تأیید کنید." : "In the bot the customer picks an amount, pays to your card and sends the receipt photo, which reaches you in Telegram; approve there or here."),
-        h("div", { class: "order-list" }, ...(tops.length ? tops.slice(0, 60).map(topRow) : [h("p", { class: "muted small", style: "padding:10px" }, fa ? "شارژی ثبت نشده." : "No top-ups yet.")]))),
+        h("div", { class: "order-list" }, ...(tops.length ? tops.slice(0, 60).map(topRow) : [h("p", { class: "muted small pad10" }, fa ? "شارژی ثبت نشده." : "No top-ups yet.")]))),
       h("div", { class: "card form" }, h("h2", {}, fa ? `کیف پول مشتری‌ها (${fmtNum(wals.length)})` : `Customer wallets (${wals.length})`),
         h("div", { class: "row" }, chat, delta, note, h("button", { onclick: async () => {
           const r = await guarded(() => api("POST", "/api/v2/shop/wallet", { chat: +chat.value || 0, delta: +delta.value || 0, note: note.value }));
           toast((fa ? "موجودی جدید: " : "New balance: ") + money(r.balance)); load();
         } }, fa ? "اعمال" : "Apply")),
         wals.length ? h("div", { class: "table-wrap" }, h("table", { class: "table" }, h("thead", {}, h("tr", {}, h("th", {}, fa ? "تلگرام" : "Telegram"), h("th", {}, fa ? "موجودی" : "Balance"), h("th", {}, fa ? "آخرین تراکنش" : "Last"))),
-          h("tbody", {}, ...wals.slice(0, 300).map((w) => h("tr", { onclick: () => { chat.value = w.chat; delta.focus(); }, style: "cursor:pointer" }, h("td", { dir: "ltr" }, String(w.chat)), h("td", {}, money(w.balance)), h("td", {}, fmtTime(w.last)))))))
+          h("tbody", {}, ...wals.slice(0, 300).map((w) => h("tr", { onclick: () => { chat.value = w.chat; delta.focus(); }, class: "clickable" }, h("td", { dir: "ltr" }, String(w.chat)), h("td", {}, money(w.balance)), h("td", {}, fmtTime(w.last)))))))
           : h("p", { class: "muted small" }, fa ? "هنوز کیف پولی ساخته نشده." : "No wallets yet.")));
   };
   load();
@@ -4580,7 +4583,7 @@ function discountsCard(products) {
         h("button", { type: "button", class: "ghost danger small", onclick: async () => { if (await confirmAction(pay("dcDelAsk", { x: d.code }))) { await guarded(() => api("DELETE", `/api/v2/admin/discounts/${encodeURIComponent(d.code)}`)); load(); } } }, t("delete")));
     }) : [h("p", { class: "muted small" }, pay("dcNone"))]));
   };
-  const code = h("input", { required: true, dir: "ltr", pattern: "[A-Za-z0-9_\\-]{3,32}", style: "text-transform:uppercase" });
+  const code = h("input", { required: true, dir: "ltr", pattern: "[A-Za-z0-9_\\-]{3,32}", class: "upper" });
   const rnd = h("button", { type: "button", class: "ghost", onclick: () => { code.value = Array.from(crypto.getRandomValues(new Uint8Array(6)), (b) => "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"[b % 32]).join(""); } }, pay("dcRandom"));
   const kind = h("select", {}, h("option", { value: "pct" }, pay("dcPct")), h("option", { value: "amt" }, pay("dcAmt")));
   const value = h("input", { type: "number", min: 1, required: true, value: 10 });
@@ -4634,7 +4637,7 @@ function productsView(products, inbounds, reps, sold, canEdit) {
     sw.addEventListener("change", () => toggle(p, sw.checked));
     return h("article", { class: `card price-tile ${p.status}` },
       h("div", { class: "row" }, sw, h("span", { class: "small muted" }, p.status === "archived" ? t("status_archived") : on ? (fa ? "در حال فروش" : "On sale") : (fa ? "پیش‌نویس" : "Draft")),
-        h("span", { class: "spacer" }), canEdit && list.length > 1 && p.status !== "archived" ? h("span", { class: "row", style: "gap:2px" },
+        h("span", { class: "spacer" }), canEdit && list.length > 1 && p.status !== "archived" ? h("span", { class: "row gap2" },
           h("button", { class: "ghost icon-only", title: fa ? "بالاتر" : "Up", disabled: i === 0, onclick: () => move(list, i, -1) }, "↑"),
           h("button", { class: "ghost icon-only", title: fa ? "پایین‌تر" : "Down", disabled: i === list.length - 1, onclick: () => move(list, i, 1) }, "↓")) : null),
       h("h3", {}, p.name),
@@ -4701,7 +4704,7 @@ function categoriesForm(seller, cats) {
   const rows = cats.map((c) => ({ name: c.name, emoji: c.emoji || "", old: c.name, count: c.count }));
   const list = h("div", { class: "form" });
   const draw = () => fill(list, rows.length ? rows.map((r, i) => {
-    const em = h("input", { value: r.emoji, maxlength: "4", placeholder: "📂", style: "inline-size:56px;text-align:center" });
+    const em = h("input", { value: r.emoji, maxlength: "4", placeholder: "📂", class: "emoji-in" });
     const nm = h("input", { value: r.name, maxlength: "40" });
     em.addEventListener("input", () => { r.emoji = em.value.trim(); });
     nm.addEventListener("input", () => { r.name = nm.value.trim(); });
@@ -5033,7 +5036,7 @@ async function viewRepDashboard() {
   const cls = (allCls || []).filter((c) => c.RepID === o.rep_id);
   const r = (reps || []).find((x) => x.ID === o.rep_id);
   // Low-credit warning threshold (GB, 0 = off).
-  const lowIn = h("input", { type: "number", min: 0, max: 1000000, step: 10, value: alert.low_gb ?? 50, dir: "ltr", style: "max-inline-size:140px" });
+  const lowIn = h("input", { type: "number", min: 0, max: 1000000, step: 10, value: alert.low_gb ?? 50, dir: "ltr", class: "maxw140" });
   const alertCard = h("div", { class: "card form" }, h("h2", {}, fa ? "هشدار کم شدن اعتبار" : "Low-credit warning"),
     h("p", { class: "small muted" }, owner
       ? (fa ? "وقتی اعتبار این نماینده از این مقدار کمتر شد، به خودش (در رباتش) و به شما در تلگرام خبر داده می‌شود. ۰ یعنی خاموش. هر روز ساعت ۹ صبح هم خلاصهٔ روزش برای نماینده فرستاده می‌شود." : "When this reseller's credit drops under this, they (in their bot) and you are told on Telegram. 0 = off. They also get a daily summary at 9:00.")
@@ -5386,9 +5389,9 @@ function barsSvg(days, W = 600, opt = {}) {
   const glow = el("filter", { id: `${id}g`, x: "-10%", y: "-30%", width: "120%", height: "160%" });
   glow.append(el("feGaussianBlur", { stdDeviation: "2.5", result: "b" }));
   const merge = el("feMerge", {}); merge.append(el("feMergeNode", { in: "b" }), el("feMergeNode", { in: "SourceGraphic" })); glow.append(merge);
-  const area = (col, key) => { const g = el("linearGradient", { id: `${id}${key}`, x1: 0, y1: 0, x2: 0, y2: 1 });
-    g.append(el("stop", { offset: "0", style: `stop-color:${col};stop-opacity:.16` }), el("stop", { offset: "1", style: `stop-color:${col};stop-opacity:0` })); return g; };
-  defs.append(glow, area("var(--ion)", "d"), area("var(--ember)", "u"));
+  const area = (tone, key) => { const g = el("linearGradient", { id: `${id}${key}`, x1: 0, y1: 0, x2: 0, y2: 1 });
+    g.append(el("stop", { offset: "0", class: tone, "stop-opacity": ".16" }), el("stop", { offset: "1", class: tone, "stop-opacity": "0" })); return g; };
+  defs.append(glow, area("ion", "d"), area("ember", "u"));
   svg.append(defs);
   if (!days.length) return svg;
   const top = Math.max(1, ...days.map((d) => Math.max(d.Down, d.Up))) * 1.12;
@@ -5399,17 +5402,17 @@ function barsSvg(days, W = 600, opt = {}) {
     svg.append(el("line", { x1: 0, x2: W, y1: yy, y2: yy, class: "grid-line" }));
   }
   for (let i = 0; i < days.length; i++) svg.append(el("line", { x1: x(i), x2: x(i), y1: P, y2: H, class: "grid-v" }));
-  const series = (key, col) => {
+  const series = (key, tone) => {
     const pts = days.map((d, i) => [x(i), y(d[key])]);
     const line = pts.map(([a, b]) => `${a.toFixed(1)},${b.toFixed(1)}`).join(" ");
     svg.append(el("polygon", { points: `${pts[0][0]},${H} ${line} ${pts.at(-1)[0]},${H}`, fill: `url(#${id}${key === "Down" ? "d" : "u"})` }));
-    svg.append(el("polyline", { points: line, fill: "none", style: `stroke:${col}`, "stroke-width": key === "Down" ? 2 : 1.6, "stroke-linejoin": "round", "stroke-linecap": "round",
+    svg.append(el("polyline", { points: line, fill: "none", class: tone, "stroke-width": key === "Down" ? 2 : 1.6, "stroke-linejoin": "round", "stroke-linecap": "round",
       "vector-effect": "non-scaling-stroke", filter: `url(#${id}g)`, ...(key === "Down" ? {} : { "stroke-dasharray": "5 5" }) }));
     const [lx, ly] = pts.at(-1);
-    svg.append(el("circle", { cx: lx, cy: ly, r: 3, style: `fill:${col}`, filter: `url(#${id}g)` }));
+    svg.append(el("circle", { cx: lx, cy: ly, r: 3, class: tone, filter: `url(#${id}g)` }));
   };
-  if (!opt.single) series("Up", "var(--ember)");
-  series("Down", "var(--ion)");
+  if (!opt.single) series("Up", "ember");
+  series("Down", "ion");
   const step = Math.max(1, Math.round(days.length / 6));
   days.forEach((d, i) => {
     const hit = el("rect", { x: x(i) - W / days.length / 2, y: 0, width: W / days.length, height: H, class: "bar-hit" });
@@ -5469,9 +5472,9 @@ function repBrandCard(path, repName) {
       } catch (x) { err.textContent = x.message; }
     } }, fa ? "ذخیره" : "Save");
     const lab = (l, el, hint) => h("label", {}, h("span", {}, l), el, hint ? h("small", { class: "muted" }, hint) : null);
-    fill(card, h("h2", {}, fa ? "صفحهٔ اشتراک اختصاصی" : "Own subscription page", repName ? h("span", { class: "badge", style: "margin-inline-start:8px" }, repName) : null),
+    fill(card, h("h2", {}, fa ? "صفحهٔ اشتراک اختصاصی" : "Own subscription page", repName ? h("span", { class: "badge ms8" }, repName) : null),
       h("p", { class: "small muted" }, fa ? "مشتری‌های این نماینده (و زیرفروشنده‌هایش) صفحهٔ اشتراک و نام کانفیگ‌ها را با برند خود او می‌بینند. فیلدهای خالی از تنظیمات اصلی پنل می‌آیند." : "This reseller's customers (and their sub-sellers') see the subscription page and config names with this brand. Empty fields come from the panel's settings."),
-      sub ? h("p", { class: "small", style: "color:var(--ion);margin:0" }, fa ? "مشتری‌های شما ربات نماینده یا پنل را نمی‌بینند؛ در صفحهٔ اشتراکشان دکمهٔ «پیام به فروشنده» با آیدی تلگرام شما و برند شما نشان داده می‌شود." : "Your customers never see the reseller's or the panel's bot; their subscription page shows a \"Message the seller\" button with your Telegram id and your brand.") : null,
+      sub ? h("p", { class: "small fg-ion m0" }, fa ? "مشتری‌های شما ربات نماینده یا پنل را نمی‌بینند؛ در صفحهٔ اشتراکشان دکمهٔ «پیام به فروشنده» با آیدی تلگرام شما و برند شما نشان داده می‌شود." : "Your customers never see the reseller's or the panel's bot; their subscription page shows a \"Message the seller\" button with your Telegram id and your brand.") : null,
       h("div", { class: "two" }, lab(fa ? "عنوان (نام برند)" : "Title (brand name)", title), lab(fa ? "آیدی تلگرام (پیوی شما)" : "Telegram id (your chat)", tgId, fa ? "مثلاً @myshop — مشتری با یک کلیک به پیوی شما می‌آید" : "e.g. @myshop — customers reach your chat in one tap")),
       lab(fa ? "لینک پشتیبانی دیگر (اگر آیدی تلگرام خالی است)" : "Other support link (when no Telegram id)", sup),
       lab(fa ? "اعلان (در صفحه و برنامه‌ها)" : "Announcement (page and apps)", ann),
@@ -6209,11 +6212,11 @@ function darkOldSection() {
       h("div", { class: "row" }, ...[[fa ? "نماینده" : "resellers", r.reps], [fa ? "ورود" : "logins", r.logins], [fa ? "کلاینت" : "clients", r.clients], ["Restore", r.restore], [fa ? "لینک ساب" : "links", r.links], [fa ? "مصرف" : "usage", r.usage], [fa ? "تلگرام" : "Telegram", r.telegram], [fa ? "غیرفعال" : "disabled", r.disabled], [fa ? "تمام‌شده (قابل تمدید)" : "ended (renewable)", r.ended], [fa ? "ربات نماینده" : "reseller bots", r.bots], [fa ? "کارت" : "cards", r.cards], [fa ? "کیف پول" : "wallets", r.wallets], [fa ? "پلن" : "plans", r.products], [fa ? "کلاینت جامانده" : "left behind", r.dropped], [fa ? "سفارش (سابقه)" : "orders (history)", r.orders], [fa ? "شارژ کیف پول (سابقه)" : "top-ups (history)", r.topups], [fa ? "ردیف کیف پول" : "wallet rows", r.wallet_rows], [fa ? "ردیف اعتبار" : "credit rows", r.ledger_rows]].map(([k, v]) => h("span", { class: "badge" }, `${k}: ${fmtNum(v || 0)}`))),
       (r.credit || []).length ? h("div", { class: "table-wrap" }, h("table", {}, h("thead", {}, h("tr", {}, ...(fa ? ["نماینده", "سقف", "در حال استفاده", "برگشتی منقضی‌ها", "اعتبار نهایی", "نامحدود قبلی (منتقل نمی‌شود)", "مصرف کل"] : ["Reseller", "Capacity", "In use", "Expired back", "Credit", "Old unlimited (not moved)", "Lifetime use"]).map((x) => h("th", {}, x)))),
         h("tbody", {}, ...r.credit.map((x) => h("tr", {}, h("td", {}, x.rep), h("td", {}, bytes(x.cap)), h("td", {}, bytes(x.in_use)), h("td", {}, bytes(x.expired_back)), h("td", {}, h("b", {}, bytes(x.credit))), h("td", {}, fmtNum(x.old_units)), h("td", {}, bytes(x.lifetime))))))) : null,
-      r.unsettled ? h("p", { class: "small", style: "color:var(--warn)" }, fa ? `${fmtNum(r.unsettled)} سفارش یا شارژِ بازمانده در پنل قبلی (دستی تسویه شده) منتقل نمی‌شود.` : `${fmtNum(r.unsettled)} orders or top-ups left open in the old panel (settled by hand) are not moved.`) : null,
+      r.unsettled ? h("p", { class: "small fg-warn" }, fa ? `${fmtNum(r.unsettled)} سفارش یا شارژِ بازمانده در پنل قبلی (دستی تسویه شده) منتقل نمی‌شود.` : `${fmtNum(r.unsettled)} orders or top-ups left open in the old panel (settled by hand) are not moved.`) : null,
       r.main_bot ? h("p", { class: "small" }, (fa ? "ربات اصلی: " : "Main bot: ") + r.main_bot) : null,
       (r.domains || []).length ? h("p", { class: "small" }, (fa ? "این دامنه‌ها را بعد از انتقال به IP همین هاب ببرید تا لینک‌های قدیمی کار کنند: " : "Point these domains here after the move so old links keep working: ") + r.domains.join("، ")) : null,
       ...(r.notes || []).slice(0, 20).map((n) => h("div", { class: "small muted" }, "• " + n)),
-      ...(r.skipped || []).slice(0, 20).map((n) => h("div", { class: "small", style: "color:var(--warn)" }, "• " + n)));
+      ...(r.skipped || []).slice(0, 20).map((n) => h("div", { class: "small fg-warn" }, "• " + n)));
     const run = async (dry) => {
       const body = { inbounds: tags(main), restore_inbounds: tags(rest), include_restore: withRestore.checked, owner_bot: ownerBot.checked, drop_reps: tags(dropBox), dry_run: dry };
       if (!body.inbounds.length) { toast(fa ? "حداقل یک اینباند انتخاب کنید." : "Pick at least one inbound."); return; }
@@ -6230,7 +6233,7 @@ function darkOldSection() {
       restLabel,
       (st.resellers || []).length ? h("label", {}, h("span", {}, fa ? "این نماینده‌ها با همهٔ کلاینت‌هایشان منتقل نشوند" : "Leave these resellers behind with all their clients"), dropBox) : null,
       h("label", { class: "check" }, ownerBot, fa ? "ربات خودِ مالک در پنل قبلی، ربات اصلی این پنل شود (ربات نماینده‌ها همیشه منتقل و روشن می‌شوند)" : "The owner's old bot becomes this panel's main bot (resellers' bots are always moved and turned on)"),
-      h("p", { class: "small", style: "color:var(--warn)" }, fa ? "⚠️ یک ربات هم‌زمان روی دو پنل کار نمی‌کند: قبل از «انتقال»، پنل قبلی را خاموش کنید." : "⚠️ A bot cannot run on two panels at once: stop the old panel before importing."),
+      h("p", { class: "small fg-warn" }, fa ? "⚠️ یک ربات هم‌زمان روی دو پنل کار نمی‌کند: قبل از «انتقال»، پنل قبلی را خاموش کنید." : "⚠️ A bot cannot run on two panels at once: stop the old panel before importing."),
       h("div", { class: "row" }, h("button", { onclick: () => run(true) }, fa ? "پیش‌نمایش" : "Preview"), h("button", { class: "primary", onclick: () => run(false) }, fa ? "انتقال" : "Import"),
         h("button", { class: "ghost danger", onclick: async () => { await guarded(() => api("DELETE", "/api/v2/admin/migrate/darkold")); draw(); } }, fa ? "حذف فایل خروجی" : "Discard the export")),
       rep);

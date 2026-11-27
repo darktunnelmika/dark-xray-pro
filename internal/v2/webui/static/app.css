@@ -1161,3 +1161,40 @@ dialog.wide:has(.cform) { inline-size: min(780px, calc(100vw - 20px)); }
 .pk-list { display: grid; gap: 8px; }
 .pk-row { display: grid; gap: 8px; }
 .code-block { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; padding: 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-2); margin: 0; }
+
+/* Classes that replace inline style="" attributes: the panel's CSP is
+   style-src 'self', so app.js never writes a style attribute. Values that
+   change at run time (bar widths, avatar hue, legend colour) are passed as
+   custom properties through h()'s vars (CSSOM, allowed by the CSP). */
+.m0 { margin: 0; }
+.ms8 { margin-inline-start: 8px; }
+.pad10 { padding: 10px; }
+.pad14 { padding: 14px; }
+.row.gap2 { gap: 2px; }
+.row.gap4 { gap: 4px; }
+.grow { flex: 1; }
+.grow13 { flex: 1.3; }
+.minw0 { min-inline-size: 0; }
+.maxw110 { max-inline-size: 110px; }
+.maxw140 { max-inline-size: 140px; }
+.self-end { align-self: end; }
+.note-end { align-self: end; margin: 0 0 8px; }
+.block { display: block; }
+.fg-warn { color: var(--warn); }
+.fg-good { color: var(--good); }
+.fg-ion { color: var(--ion); }
+.upper { text-transform: uppercase; }
+.clickable { cursor: pointer; }
+.code-clip { flex: 1; overflow: hidden; text-overflow: ellipsis; }
+.tester-node { max-inline-size: 220px; flex: none; }
+input.emoji-in { inline-size: 56px; text-align: center; }
+input[type="checkbox"].auto-w { inline-size: auto; }
+fieldset.bare { border: 0; padding: 0; margin: 0; }
+.bar > i, .scorebar > i { inline-size: var(--pct, auto); }
+.sw.tint { background: var(--sw); }
+svg.bars stop.ion { stop-color: var(--ion); }
+svg.bars stop.ember { stop-color: var(--ember); }
+svg.bars polyline.ion { stroke: var(--ion); }
+svg.bars polyline.ember { stroke: var(--ember); }
+svg.bars circle.ion { fill: var(--ion); }
+svg.bars circle.ember { fill: var(--ember); }
