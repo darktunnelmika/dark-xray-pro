@@ -103,6 +103,28 @@ func registerMiniAdmin6(mux *http.ServeMux, s *Store,
 		}
 		reply(w, map[string]bool{"ok": true}, nil)
 	})
+	mux.HandleFunc("GET /app/api/m/custom", func(w http.ResponseWriter, r *http.Request) {
+		m, okm := mgr(w, r)
+		if !okm || deny(w, m, "plans") {
+			return
+		}
+		reply(w, s.CustomPlanFor(r.Context(), m.Seller), nil)
+	})
+	mux.HandleFunc("POST /app/api/m/custom", func(w http.ResponseWriter, r *http.Request) {
+		m, okm := mgr(w, r)
+		if !okm || deny(w, m, "plans") {
+			return
+		}
+		var c CustomPlan
+		if !read(w, r, &c) {
+			return
+		}
+		if err := s.PutCustomPlanFor(r.Context(), m.Seller, c); err != nil {
+			miniErr(w, err)
+			return
+		}
+		reply(w, s.CustomPlanFor(r.Context(), m.Seller), nil)
+	})
 	// Quick replies are also read by whoever answers tickets.
 	mux.HandleFunc("GET /app/api/m/quick", func(w http.ResponseWriter, r *http.Request) {
 		m, okm := mgr(w, r)

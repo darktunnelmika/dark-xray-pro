@@ -218,3 +218,5 @@ body { background-image: radial-gradient(color-mix(in oklab, var(--muted) 14%, t
 .shop-text { white-space: pre-wrap; line-height: 1.8; }
 .guide-app { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .sheet textarea { inline-size: 100%; box-sizing: border-box; padding: 10px 12px; border-radius: 13px; border: 1px solid var(--line); background: var(--surface-2); color: var(--text); font: inherit; margin-block: 8px; }
+.custom-plan .slide { display: grid; gap: 6px; margin-block: 8px; }
+.custom-plan input[type=range] { inline-size: 100%; accent-color: var(--ion); }

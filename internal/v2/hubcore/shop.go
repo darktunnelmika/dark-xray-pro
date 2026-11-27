@@ -252,6 +252,9 @@ WHERE (?='owner' OR seller=? OR seller IN (SELECT id FROM reps WHERE parent_id=?
 		if by.Role != "owner" && p.Seller == "" {
 			continue
 		}
+		if isCustomProduct(p.ID) {
+			continue // a customer's own size (customplan.go): never in a list
+		}
 		out = append(out, p)
 	}
 	return out, rows.Err()

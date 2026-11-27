@@ -36,7 +36,7 @@ async function m2Fetch(view) {
     case "sellers": M2.sellers = await api("GET", "m/sellers"); break;
     case "bot": M2.bot = await api("GET", "m/bot"); break;
     case "cards": M2.cards = await api("GET", "m/cards"); break;
-    case "plans": M2.plans = await api("GET", "m/plans"); break;
+    case "plans": M2.plans = await api("GET", "m/plans"); M2.custom = M2.plans.edit ? await api("GET", "m/custom").catch(() => null) : null; break;
     case "tickets": M2.tickets = await api("GET", `m/tickets?s=${M2.tStatus}`); break;
     case "report": M2.report = await api("GET", `m/report?days=${M2.days}`); break;
     case "resale": M2.resale = await api("GET", "m/resale"); break;
@@ -311,12 +311,35 @@ function plansView() {
   const out = [backHead("پلن‌ها و قیمت‌ها", d.edit ? btnIcon("plus", "پلن جدید", () => planSheet({})) : null)];
   if (!d.edit) out.push(h("div", { class: "card small muted" }, "ساخت و ویرایش پلن برای شما فعال نیست؛ پلن‌ها را نمایندهٔ بالادست یا مدیر پنل تعیین می‌کند."));
   if (!d.plans.length) out.push(h("div", { class: "card empty" }, h("p", {}, "هنوز پلنی ندارید. پلن‌ها در فروشگاه ربات و ساخت سریع نشان داده می‌شوند.")));
+  if (M2.custom) out.push(customPlanCard(M2.custom));
   out.push(h("div", { class: "ulist" }, d.plans.map((p) => h("button", { class: `urow ${p.status === "published" ? "" : "off"}`, onclick: () => d.edit && planSheet(p) },
     h("div", { class: "u-main" },
       h("div", { class: "u-top" }, h("b", {}, p.name), h("span", { class: `pill ${p.status === "published" ? "good" : ""}` }, p.status === "published" ? "در فروشگاه" : "پیش‌نویس")),
       h("div", { class: "u-meta" }, h("span", {}, `${p.plan === "unlimited" ? "نامحدود" : num(p.gb) + " گیگ"} · ${num(p.days)} روز${p.max_ips ? ` · ${num(p.max_ips)} کاربر` : ""}`),
         h("b", {}, p.price ? `${toman(p.price)} تومان` : "بدون قیمت")))))));
   return out;
+}
+
+function customPlanCard(c) {
+  const n = (v, ph) => h("input", { type: "number", inputmode: "numeric", value: v || "", placeholder: ph || "" });
+  const [onRow, on] = check("مشتری حجم و روز را خودش انتخاب کند (نوار کشویی در فروشگاه)", c.enabled);
+  const pg = n(c.price_gb, "تومان"), p10 = n(c.price_10d, "تومان"), g1 = n(c.min_gb), g2 = n(c.max_gb), d1 = n(c.min_days), d2 = n(c.max_days), ips = n(c.ips, "۰ = بی‌سقف");
+  const ex = h("div", { class: "muted small" });
+  const draw = () => { ex.textContent = `مثال: ۵۰ گیگ ۳۰ روزه = ${toman(50 * (+pg.value || 0) + 3 * (+p10.value || 0))} تومان`; };
+  [pg, p10].forEach((i) => i.addEventListener("input", draw)); draw();
+  const save = btn("ذخیره", "primary block", async () => {
+    try {
+      M2.custom = await api("POST", "m/custom", { enabled: on.checked, price_gb: Math.round(+pg.value || 0), price_10d: Math.round(+p10.value || 0), min_gb: Math.round(+g1.value || 0),
+        max_gb: Math.round(+g2.value || 0), min_days: Math.round(+d1.value || 0), max_days: Math.round(+d2.value || 0), ips: Math.round(+ips.value || 0) });
+      haptic("success"); toast("ذخیره شد"); render();
+    } catch (e) { haptic("error"); toast(e.message); }
+  }, "check");
+  return h("div", {}, h("div", { class: "section-title" }, "🧩 حجم و زمان دلخواه"),
+    h("div", { class: "card" }, onRow,
+      h("div", { class: "two" }, field("قیمت هر گیگ", pg), field("قیمت هر ۱۰ روز", p10)),
+      h("div", { class: "two" }, field("کمترین گیگ", g1), field("بیشترین گیگ", g2)),
+      h("div", { class: "two" }, field("کمترین روز", d1), field("بیشترین روز", d2)),
+      field("کاربر هم‌زمان", ips), ex, save));
 }
 
 function planSheet(p) {

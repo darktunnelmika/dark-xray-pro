@@ -456,6 +456,41 @@ function extras() {
   return out;
 }
 
+// The customer's own volume and days (GET custom); loaded once.
+let customPlan;
+function customCard(renewEmail) {
+  if (customPlan === undefined) {
+    customPlan = null;
+    api("GET", "custom").then((r) => { customPlan = r; render(); }).catch(() => { customPlan = { enabled: false }; });
+    return null;
+  }
+  const c = customPlan;
+  if (!c || !c.enabled) return null;
+  const step = (lo, hi) => (hi - lo >= 100 ? 5 : 1);
+  const gb = h("input", { type: "range", min: c.min_gb, max: c.max_gb, step: step(c.min_gb, c.max_gb), value: Math.min(c.max_gb, Math.max(c.min_gb, 30)) });
+  const days = h("input", { type: "range", min: c.min_days, max: c.max_days, step: 1, value: Math.min(c.max_days, Math.max(c.min_days, 30)) });
+  const gbL = h("b", {}), dL = h("b", {}), price = h("div", { class: "price" });
+  const draw = () => {
+    const g = +gb.value, d = +days.value;
+    gbL.textContent = `${num(g)} گیگ`; dL.textContent = `${num(d)} روز`;
+    price.replaceChildren(h("b", {}, toman(g * c.price_gb + Math.ceil(d / 10) * c.price_10d)), h("small", {}, "تومان"));
+  };
+  gb.addEventListener("input", draw); days.addEventListener("input", draw); draw();
+  return h("div", { class: "card product custom-plan" },
+    h("h3", {}, "🧩 حجم و زمان دلخواه"),
+    h("div", { class: "slide" }, h("div", { class: "row between" }, h("span", {}, "حجم"), gbL), gb),
+    h("div", { class: "slide" }, h("div", { class: "row between" }, h("span", {}, "مدت"), dL), days),
+    c.ips ? h("div", { class: "muted small" }, `تا ${num(c.ips)} کاربر هم‌زمان`) : null,
+    price,
+    btn(renewEmail ? "تمدید با این حجم و زمان" : "ادامهٔ خرید", "primary block", async () => {
+      try {
+        const p = await api("POST", "custom", { gb: +gb.value, days: +days.value, renew: renewEmail || "", quote: true });
+        closeRenew();
+        const close = sheet(h("h2", {}, renewEmail ? "تمدید " : "خرید ", p.name), productCard(p, renewEmail || ""), btn("انصراف", "ghost block", () => close()));
+      } catch (e) { toast(e.message); }
+    }, "bolt"));
+}
+
 // Reseller panels on sale in this bot (GET panels); loaded once.
 let panelSale;
 function panelSection() {
@@ -495,12 +530,16 @@ function buyPanel(p) {
 
 function shop() {
   if (!state.products.length) {
+    const cc = customCard();
+    if (cc) return [cc, ...panelSection()];
     const ps = panelSection();
     return ps.length ? ps : [h("div", { class: "card empty" }, h("h2", {}, "فعلاً پلنی برای فروش نیست"), h("p", {}, "کمی بعد دوباره سر بزنید."))];
   }
   const cats = [...new Set(state.products.map((p) => p.category || ""))];
   const out = [h("div", { class: "section-title" }, "پلن‌ها")];
   if (state.shop_text) out.push(h("div", { class: "card shop-text" }, state.shop_text));
+  const cc = customCard();
+  if (cc) out.push(cc);
   // The middle-priced plan is the suggested one.
   const priced = state.products.filter((p) => p.price > 0).sort((a, b) => a.price - b.price);
   const feat = priced.length >= 3 ? priced[Math.floor(priced.length / 2)].id : "";
@@ -516,7 +555,7 @@ function closeRenew() { if (renew.close) { renew.close(); renew.close = null; } 
 function renew(sv) {
   const list = state.products.filter((p) => !p.no_renew);
   const close = sheet(h("h2", {}, "تمدید ", ltr(sv.email)), h("p", { class: "muted" }, "پلن تمدید را انتخاب کنید:"),
-    ...(list.length ? list : state.products).map((p) => productCard(p, sv.email)), btn("انصراف", "ghost block", () => close()));
+    ...(list.length ? list : state.products).map((p) => productCard(p, sv.email)), customCard(sv.email), btn("انصراف", "ghost block", () => close()));
   renew.close = close;
 }
 

@@ -198,6 +198,10 @@ func miniFa(err error) (string, int) {
 	switch {
 	case errors.Is(err, ErrFunds):
 		return "موجودی کیف پول شما در پنل اصلی برای قیمت عمده کافی نیست؛ اول کیف پول را شارژ کنید.", http.StatusBadRequest
+	case strings.Contains(msg, "custom plan ranges"):
+		return "بازه‌ها را درست کنید (کمترین از بیشترین بزرگ‌تر نباشد).", http.StatusBadRequest
+	case strings.Contains(msg, "price per GB"):
+		return "قیمت هر گیگ را بنویسید.", http.StatusBadRequest
 	case strings.Contains(msg, "code is taken"):
 		return "این کد قبلاً گرفته شده؛ کد دیگری بنویسید.", http.StatusBadRequest
 	case strings.Contains(msg, "code: 3 to 32"):

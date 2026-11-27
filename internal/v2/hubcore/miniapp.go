@@ -344,6 +344,66 @@ func registerMiniApp(mux *http.ServeMux, s *Store) {
 		}
 		reply(w, s.miniPayInfo(r.Context(), sellerOf(r), u.ID, id, map[string]any{"id": id}), nil)
 	})
+	// The customer's own volume and days (customplan.go).
+	mux.HandleFunc("GET /app/api/custom", func(w http.ResponseWriter, r *http.Request) {
+		if _, ok := user(w, r); !ok {
+			return
+		}
+		c := s.CustomPlanFor(r.Context(), sellerOf(r))
+		if !c.Enabled || (sellerOf(r) != "" && s.IsSubSeller(r.Context(), sellerOf(r))) {
+			reply(w, map[string]any{"enabled": false}, nil)
+			return
+		}
+		reply(w, c, nil)
+	})
+	mux.HandleFunc("POST /app/api/custom", func(w http.ResponseWriter, r *http.Request) {
+		u, ok := user(w, r)
+		if !ok {
+			return
+		}
+		var in struct {
+			GB    int64  `json:"gb"`
+			Days  int64  `json:"days"`
+			Renew string `json:"renew"`
+			Quote bool   `json:"quote"` // only the product: the app then pays it like any plan
+		}
+		if !decode(w, r, &in) {
+			return
+		}
+		if in.Renew != "" {
+			list, _ := mine(r, u.ID)
+			found := false
+			for _, e := range list {
+				found = found || e == in.Renew
+			}
+			if !found {
+				http.Error(w, "not your service", http.StatusForbidden)
+				return
+			}
+		}
+		p, err := s.CustomProduct(r.Context(), sellerOf(r), in.GB, in.Days)
+		if err != nil {
+			http.Error(w, "این حجم یا مدت مجاز نیست.", http.StatusBadRequest)
+			return
+		}
+		if in.Quote {
+			p.Inbounds = nil
+			reply(w, p, nil)
+			return
+		}
+		var open int64
+		_ = s.ro.QueryRowContext(r.Context(), `SELECT id FROM orders WHERE buyer=? AND product_id=? AND client_email=? AND status='pending' ORDER BY id DESC LIMIT 1`,
+			TgBuyer(u.ID), p.ID, in.Renew).Scan(&open)
+		if open == 0 {
+			if open, err = s.CreateOrder(r.Context(), owner, p.ID, TgBuyer(u.ID), in.Renew, "mini app (custom)"); err != nil {
+				reply(w, nil, err)
+				return
+			}
+		}
+		out := s.miniPayInfo(r.Context(), sellerOf(r), u.ID, open, map[string]any{"id": open})
+		out["product"] = p
+		reply(w, out, nil)
+	})
 	mux.HandleFunc("POST /app/api/pay", func(w http.ResponseWriter, r *http.Request) {
 		u, ok := user(w, r)
 		if !ok {
