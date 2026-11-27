@@ -46,8 +46,9 @@ func (s *Store) PanelSetup(ctx context.Context, m miniMgr) []SetupStep {
 	return out
 }
 
-// SuggestPlans gives a panel without plans the main store's plans (same
-// volume, term and price) to start from; it edits them afterwards.
+// SuggestPlans gives a panel without plans the main store's plans (a
+// sub-seller: its reseller's) with the same volume, term and price to start
+// from; it edits them afterwards.
 func (s *Store) SuggestPlans(ctx context.Context, m miniMgr) (int, error) {
 	var have int
 	if err := s.ro.QueryRowContext(ctx, `SELECT COUNT(*) FROM products WHERE seller=? AND status<>'archived'`, m.Seller).Scan(&have); err != nil {
@@ -60,13 +61,18 @@ func (s *Store) SuggestPlans(ctx context.Context, m miniMgr) (int, error) {
 	if err != nil {
 		return 0, err
 	}
+	// A sub-seller starts from its reseller's plans, at least at its floor.
+	from, floor := "", int64(0)
+	if parent, _ := s.parentOf(ctx, s.ro, m.Seller); parent != "" {
+		from, floor = parent, s.SubPlansOf(ctx, parent).MinGB
+	}
 	n := 0
 	for _, p := range all {
-		if p.Seller != "" || p.Plan != "volume" || p.Price <= 0 {
+		if p.Seller != from || p.Plan != "volume" || p.Price <= 0 {
 			continue
 		}
 		q := Product{ID: "m" + randomHex(4), Seller: m.Seller, Name: p.Name, Plan: p.Plan, GB: p.GB, Days: p.Days, MaxIPs: p.MaxIPs,
-			Price: p.Price, Status: "published", FirstUse: p.FirstUse, Sort: p.Sort}
+			Price: max(p.Price, p.GB*floor), Status: "published", FirstUse: p.FirstUse, Sort: p.Sort}
 		if err := s.PutProduct(ctx, m.P, q); err != nil {
 			return n, err
 		}

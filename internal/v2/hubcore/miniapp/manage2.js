@@ -168,6 +168,7 @@ function sellersView() {
       try { await api("POST", "m/sellers/requests", { on: reqBox.checked }); toast(reqBox.checked ? "روشن شد" : "خاموش شد"); } catch (e) { reqBox.checked = !reqBox.checked; toast(e.message); }
     });
     out.push(h("div", { class: "card" }, reqRow, h("p", { class: "muted small" }, "مشتری‌ها از ربات شما درخواست می‌دهند و شما با یک لمس تأیید می‌کنید.")));
+    out.push(subPlansCard());
   }
   if (!d.sellers.length) out.push(h("div", { class: "card empty" }, h("p", {}, owner ? "هنوز نماینده‌ای نیست." : "هنوز زیرمجموعه‌ای ندارید. با «لینک دعوت» یا دکمهٔ + بسازید.")));
   out.push(h("div", { class: "ulist" }, d.sellers.map((x) => h("button", { class: `urow ${x.enabled ? "" : "off"}`, onclick: () => sellerSheet(x) },
@@ -318,6 +319,8 @@ function plansView() {
   if (!d) return [backHead("پلن‌ها و قیمت‌ها"), spin()];
   const out = [backHead("پلن‌ها و قیمت‌ها", d.edit ? btnIcon("plus", "پلن جدید", () => planSheet({})) : null)];
   if (!d.edit) out.push(h("div", { class: "card small muted" }, "ساخت و ویرایش پلن برای شما فعال نیست؛ پلن‌ها را نمایندهٔ بالادست یا مدیر پنل تعیین می‌کند."));
+  if (d.edit && d.floor && (d.floor.gb || d.floor.month)) out.push(h("div", { class: "card small muted" }, "قیمت پلن‌ها را خودتان می‌گذارید؛ کمترین قیمت را نمایندهٔ بالادست تعیین کرده: ",
+    d.floor.gb ? h("b", {}, `گیگی ${toman(d.floor.gb)} تومان`) : null, d.floor.gb && d.floor.month ? "، " : null, d.floor.month ? h("b", {}, `نامحدود ماهی ${toman(d.floor.month)} تومان برای هر کاربر`) : null, "."));
   if (!d.plans.length) out.push(h("div", { class: "card empty" }, h("p", {}, "هنوز پلنی ندارید. پلن‌ها در فروشگاه ربات و ساخت سریع نشان داده می‌شوند.")));
   if (M2.custom) out.push(customPlanCard(M2.custom));
   out.push(h("div", { class: "ulist" }, d.plans.map((p) => h("button", { class: `urow ${p.status === "published" ? "" : "off"}`, onclick: () => d.edit && planSheet(p) },
@@ -350,6 +353,18 @@ function customPlanCard(c) {
       field("کاربر هم‌زمان", ips), ex, save));
 }
 
+// floorLine: the lowest price the reseller above allows, live as the plan changes.
+function floorLine(gb, days, ips, unl) {
+  const f = M2.plans && M2.plans.floor;
+  if (!f || (!f.gb && !f.month)) return null;
+  const line = h("p", { class: "muted small" });
+  const draw = () => {
+    const low = unl.checked ? Math.round((f.month * (+days.value || 0) * Math.max(1, +ips.value || 0)) / 30) : f.gb * (+gb.value || 0);
+    line.textContent = low ? `کمترین قیمت مجاز این پلن: ${toman(low)} تومان` : "";
+  };
+  [gb, days, ips, unl].forEach((i) => i.addEventListener("input", draw)); unl.addEventListener("change", draw); draw();
+  return line;
+}
 function planSheet(p) {
   const pol = M2.plans.policy || {};
   const name = h("input", { value: p.name || "", placeholder: "مثلاً ۳۰ گیگ یک‌ماهه" });
@@ -370,6 +385,7 @@ function planSheet(p) {
     h("div", { class: "two" }, field("حجم (گیگ)", gb), field("روز", days)),
     h("div", { class: "two" }, field("کاربر هم‌زمان (۰ = بی‌سقف)", ips), field("قیمت (تومان)", price)),
     pol.allow_unlimited !== false ? unlRow : null, fuRow, nrRow, pubRow,
+    floorLine(gb, days, ips, unl),
     pol.max_days || pol.max_client_gb ? h("p", { class: "muted small" }, `سقف شما: ${pol.max_days ? num(pol.max_days) + " روز" : ""}${pol.max_days && pol.max_client_gb ? " · " : ""}${pol.max_client_gb ? num(pol.max_client_gb) + " گیگ" : ""}`) : null,
     go,
     p.id ? btn("حذف پلن", "danger block ghost", async () => {
@@ -497,6 +513,7 @@ function resaleView() {
     return h("div", { class: "lrow" }, h("div", {}, h("b", {}, p.name), h("div", { class: "muted small" }, `${num(p.gb)} گیگ · عمده ${toman(p.cost)} تومان`)), h("div", { class: "pricein" }, inp));
   });
   out.push(btn("🎉 بنر و تخفیف فروش پنل", "block", promoSheet));
+  out.push(subPlansCard());
   out.push(h("div", { class: "section-title" }, "قیمت فروش من"),
     h("div", { class: "card" }, onRow, h("p", { class: "muted small" }, "خالی = همان قیمت مدیر پنل. سود هر فروش = قیمت شما منهای قیمت عمده."), pk,
       btn("ذخیره", "primary block", async () => {
@@ -1116,4 +1133,24 @@ function brandSheet(d, focusSupport) {
     field("اسم فروشگاه", title), logoBox, field("رنگ اصلی", accent),
     field("آیدی پشتیبانی", telegram, "آیدی تلگرامی که مشتری‌ها برای پشتیبانی به آن پیام می‌دهند."), save);
   setTimeout(() => (focusSupport ? telegram : title).focus(), 250);
+}
+
+// subPlansCard: whether the panels I sold (my sub-sellers) set their own
+// plans, and the lowest prices they may ask.
+function subPlansCard() {
+  const box = h("div", {}, h("div", { class: "section-title" }, "پلن و قیمت زیرمجموعه‌ها"), h("div", { class: "card skel" }));
+  api("GET", "m/subplans").then((d) => {
+    const [onRow, on] = check("پنل‌هایی که فروخته‌ام پلن و قیمت خودشان را بگذارند", d.allow);
+    const n = (v) => h("input", { type: "number", inputmode: "numeric", value: v || "", placeholder: "۰ = بدون حداقل" });
+    const gb = n(d.min_gb), mo = n(d.min_month);
+    box.replaceChildren(box.firstChild, h("div", { class: "card" }, onRow,
+      h("p", { class: "muted small" }, "خریدار پنل از داخل مینی‌اپ خودش پلن می‌سازد و قیمت می‌گذارد، ولی ارزان‌تر از حداقلی که اینجا می‌گذارید نمی‌تواند بفروشد. خاموش باشد، فقط پلن‌هایی را می‌فروشد که شما برایش می‌سازید."),
+      h("div", { class: "two" }, field("حداقل قیمت هر گیگ (تومان)", gb), field("حداقل نامحدود، ماهی هر کاربر (تومان)", mo)),
+      d.saved ? null : h("p", { class: "muted small" }, "هنوز ذخیره نکرده‌اید؛ عددها از ارزان‌ترین پلن خودتان آمده."),
+      btn("ذخیره", "primary block", async () => {
+        try { await api("POST", "m/subplans", { allow: on.checked, min_gb: Math.round(+gb.value || 0), min_month: Math.round(+mo.value || 0) }); haptic("success"); toast("ذخیره شد"); }
+        catch (e) { toast(e.message); }
+      }, "check")));
+  }).catch(() => box.remove());
+  return box;
 }

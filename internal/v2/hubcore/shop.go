@@ -170,6 +170,12 @@ func (s *Store) PutProduct(ctx context.Context, by Principal, p Product) error {
 		if pol.MaxClientGB > 0 && p.GB > pol.MaxClientGB {
 			return fmt.Errorf("%w: the largest volume allowed is %d GB", ErrPolicy, pol.MaxClientGB)
 		}
+		if by.Role == "rep" && by.RepID == p.Seller && p.Status == "published" {
+			// A sub-seller's own plan: never below its reseller's floor.
+			if err := s.subPlanFloor(ctx, p.Seller, p); err != nil {
+				return err
+			}
+		}
 		if len(pol.Inbounds) > 0 {
 			ok := map[string]bool{}
 			for _, t := range pol.Inbounds {
@@ -496,12 +502,16 @@ func (s *Store) canManageProducts(ctx context.Context, by Principal) error {
 	if by.Role == "owner" {
 		return nil
 	}
+	if by.Role == "rep" && s.IsSubSeller(ctx, by.RepID) {
+		// Its reseller decides (subplans.go).
+		if !s.subMayPlan(ctx, by.RepID) {
+			return fmt.Errorf("%w: your reseller sets your plans", ErrPolicy)
+		}
+		return nil
+	}
 	var manage bool
 	if by.Role != "rep" || s.ro.QueryRowContext(ctx, `SELECT manage_products FROM reps WHERE id=?`, by.RepID).Scan(&manage) != nil || !manage {
 		return fmt.Errorf("%w: managing products is not allowed", ErrPolicy)
-	}
-	if s.IsSubSeller(ctx, by.RepID) {
-		return fmt.Errorf("%w: sub-sellers sell the products their reseller defines", ErrPolicy)
 	}
 	return nil
 }
@@ -522,7 +532,11 @@ func (s *Store) canStock(ctx context.Context, by Principal, seller string) bool 
 // sub-sellers; a sub-seller makes none.
 func (s *Store) repMayStock(ctx context.Context, by Principal, seller string) error {
 	if s.IsSubSeller(ctx, by.RepID) {
-		return fmt.Errorf("%w: sub-sellers sell the products their reseller defines", ErrPolicy)
+		// Its own plans only, when its reseller lets it (subplans.go).
+		if seller != by.RepID || !s.subMayPlan(ctx, by.RepID) {
+			return fmt.Errorf("%w: your reseller sets your plans", ErrPolicy)
+		}
+		return nil
 	}
 	if seller != by.RepID && !s.childOf(ctx, seller, by.RepID) {
 		return fmt.Errorf("%w: unknown seller", ErrInvalid)

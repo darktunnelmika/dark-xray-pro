@@ -265,6 +265,10 @@ func miniFa(err error) (string, int) {
 		return "این ربات برای نمایندهٔ دیگری ثبت شده.", http.StatusBadRequest
 	case strings.Contains(msg, "main bot"):
 		return "این توکنِ ربات اصلی پنل است.", http.StatusBadRequest
+	case strings.Contains(msg, "the lowest price is"):
+		return "کمترین قیمت مجاز این پلن " + faDigits(firstNumber(msg)) + " تومان است (نمایندهٔ بالادست شما تعیین کرده).", http.StatusBadRequest
+	case strings.Contains(msg, "your reseller sets your plans"):
+		return "پلن‌های شما را نمایندهٔ بالادست تعیین می‌کند؛ ساخت پلن برایتان باز نیست.", http.StatusForbidden
 	case strings.Contains(msg, "managing products is not allowed"):
 		return "ساخت پلن برای شما فعال نیست؛ از مدیر پنل بخواهید.", http.StatusForbidden
 	case strings.Contains(msg, "sub-sellers"):
@@ -610,6 +614,10 @@ func registerMiniAdmin2(mux *http.ServeMux, s *Store, base func(*http.Request) s
 		if !m.Owner {
 			pol, _ := s.RepPolicyOf(ctx, m.Seller)
 			out["policy"] = map[string]any{"allow_unlimited": pol.AllowUnlimited, "max_days": pol.MaxDays, "max_client_gb": pol.MaxClientGB}
+			if parent, _ := s.parentOf(ctx, s.ro, m.Seller); parent != "" {
+				f := s.SubPlansOf(ctx, parent)
+				out["floor"] = map[string]int64{"gb": f.MinGB, "month": f.MinMonth}
+			}
 		}
 		reply(w, out, nil)
 	})
