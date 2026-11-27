@@ -3,34 +3,29 @@ package hubcore
 import (
 	"context"
 	"crypto/subtle"
-	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
 )
 
-// The partner API: a key that can make reseller panels and nothing else, so
-// another bot or a website can sell reseller panels on its own. The owner
-// makes the key in the panel and gives it limits:
+// The partner API: a key that makes and runs reseller panels and nothing
+// else, so another bot or a website can sell reseller panels on its own.
+// The owner makes the key in the panel and gives it limits:
 //
 //   - the most credit (GB and unlimited-plan units) it may ever hand out,
 //     counted over all panels it made;
 //   - a template reseller whose rules (limits, inbounds, prices) every new
-//     panel copies (none = the default rules).
+//     panel starts from (none = the default rules), and the packages of the
+//     reseller sale it may sell; a key can only tighten those rules;
+//   - scopes: deleting panels, taking credit back and reading the panels'
+//     customers are off unless the owner turns them on;
+//   - optionally the addresses it may be used from, an expiry and a rate.
 //
-// A key sees and changes only the panels it made itself. It cannot delete a
-// panel or take credit back: the owner does that in the panel. Format:
-// dp_<id>_<secret>; only the secret's hash is kept.
-//
-//	GET  /api/v2/partner                      the key: limits and what is used
-//	POST /api/v2/partner/reps                 make a panel {name, id?, username?, password?, credit_gb, units}
-//	GET  /api/v2/partner/reps                 its panels
-//	GET  /api/v2/partner/reps/{id}            one panel
-//	POST /api/v2/partner/reps/{id}/credit     add credit {credit_gb, units}
-//	POST /api/v2/partner/reps/{id}/enable     turn on
-//	POST /api/v2/partner/reps/{id}/disable    turn off
-//	POST /api/v2/partner/reps/{id}/password   a new random password
+// A key sees and changes only the panels it made itself. Format:
+// dp_<id>_<secret>; only the secret's hash is kept. The routes are listed
+// in partnerapi.go; the shared rules (errors, Idempotency-Key, rates,
+// events) in extapi.go.
 
 const partnerSchema = `
 CREATE TABLE IF NOT EXISTS partner_keys (
@@ -64,12 +59,24 @@ func (s *Store) ensurePartnerSchema() error {
 		{"allowed_ips", "TEXT NOT NULL DEFAULT ''"},
 		{"expires_unix", "INTEGER NOT NULL DEFAULT 0"},
 		{"rate_per_min", "INTEGER NOT NULL DEFAULT 0"},
+		{"packages", "TEXT NOT NULL DEFAULT ''"},
 	} {
 		if err := s.addColumn("partner_keys", c.col, c.def); err != nil {
 			return err
 		}
 	}
-	return nil
+	for _, c := range []struct{ col, def string }{
+		{"external_ref", "TEXT NOT NULL DEFAULT ''"},
+		{"note", "TEXT NOT NULL DEFAULT ''"},
+		{"package", "TEXT NOT NULL DEFAULT ''"},
+		{"ceiling", "TEXT NOT NULL DEFAULT ''"},
+	} {
+		if err := s.addColumn("partner_reps", c.col, c.def); err != nil {
+			return err
+		}
+	}
+	_, err := s.db.Exec(`CREATE INDEX IF NOT EXISTS partner_reps_ref ON partner_reps(key_id, external_ref)`)
+	return err
 }
 
 // Partner key scopes. A key made before scopes existed has the default set.
@@ -106,6 +113,10 @@ type PartnerKey struct {
 	AllowedIPs []string `json:"allowed_ips"`  // empty: any address
 	Expires    int64    `json:"expires_unix"` // 0: never
 	RatePerMin int      `json:"rate_per_min"` // 0: the default
+	Packages   []string `json:"packages"`     // reseller-sale packages it may sell; empty: all
+	// Left to hand out: -1 = no limit.
+	RemainingGB    float64 `json:"remaining_gb"`
+	RemainingUnits int64   `json:"remaining_units"`
 	// Key is only set right after it was made.
 	Key string `json:"key,omitempty"`
 }
@@ -115,16 +126,23 @@ const gibF = float64(1 << 30)
 func (s *Store) scanPartner(row interface{ Scan(...any) error }) (PartnerKey, error) {
 	var k PartnerKey
 	var maxB, givenB int64
-	var scopes, ips string
+	var scopes, ips, pkgs string
 	err := row.Scan(&k.ID, &k.Name, &k.Enabled, &maxB, &k.MaxUnits, &givenB, &k.GivenUnits, &k.Template, &k.Created, &k.LastUsed, &k.LastIP, &k.Panels,
-		&scopes, &ips, &k.Expires, &k.RatePerMin)
+		&scopes, &ips, &k.Expires, &k.RatePerMin, &pkgs)
 	k.MaxGB, k.GivenGB = float64(maxB)/gibF, float64(givenB)/gibF
-	k.Scopes, k.AllowedIPs = splitTags(scopes), splitTags(ips)
+	k.Scopes, k.AllowedIPs, k.Packages = splitTags(scopes), splitTags(ips), splitTags(pkgs)
+	k.RemainingGB, k.RemainingUnits = -1, -1
+	if maxB > 0 {
+		k.RemainingGB = float64(max(0, maxB-givenB)) / gibF
+	}
+	if k.MaxUnits > 0 {
+		k.RemainingUnits = max(0, k.MaxUnits-k.GivenUnits)
+	}
 	return k, err
 }
 
 const partnerCols = `k.id,k.name,k.enabled,k.max_bytes,k.max_units,k.given_bytes,k.given_units,k.template,k.created_unix,k.last_used,k.last_ip,
-(SELECT COUNT(*) FROM partner_reps p WHERE p.key_id=k.id),k.scopes,k.allowed_ips,k.expires_unix,k.rate_per_min`
+(SELECT COUNT(*) FROM partner_reps p WHERE p.key_id=k.id),k.scopes,k.allowed_ips,k.expires_unix,k.rate_per_min,k.packages`
 
 // PartnerKeys lists the keys.
 func (s *Store) PartnerKeys(ctx context.Context) ([]PartnerKey, error) {
@@ -164,6 +182,7 @@ type PartnerKeyIn struct {
 	AllowedIPs *[]string `json:"allowed_ips"`
 	Expires    *int64    `json:"expires_unix"`
 	RatePerMin *int      `json:"rate_per_min"`
+	Packages   *[]string `json:"packages"`
 }
 
 func (s *Store) checkPartnerIn(ctx context.Context, in *PartnerKeyIn) error {
@@ -201,6 +220,17 @@ func (s *Store) checkPartnerIn(ctx context.Context, in *PartnerKeyIn) error {
 			return err
 		}
 	}
+	if in.Packages != nil {
+		known := []string{}
+		for _, p := range s.RepSale(ctx).Packages {
+			known = append(known, p.ID)
+		}
+		pk, err := normScopes(*in.Packages, known)
+		if err != nil {
+			return err
+		}
+		in.Packages = &pk
+	}
 	return nil
 }
 
@@ -227,6 +257,11 @@ func (s *Store) partnerKeySettings(ctx context.Context, id string, in PartnerKey
 	}
 	if in.RatePerMin != nil {
 		if err := set("rate_per_min", *in.RatePerMin); err != nil {
+			return err
+		}
+	}
+	if in.Packages != nil {
+		if err := set("packages", strings.Join(*in.Packages, ",")); err != nil {
 			return err
 		}
 	}
@@ -327,57 +362,6 @@ func (s *Store) partnerUngive(ctx context.Context, keyID string, bytes, units in
 	_, _ = s.db.ExecContext(ctx, `UPDATE partner_keys SET given_bytes=MAX(0,given_bytes-?), given_units=MAX(0,given_units-?) WHERE id=?`, bytes, units, keyID)
 }
 
-// PartnerPanel is a reseller panel as the partner sees it.
-type PartnerPanel struct {
-	ID       string  `json:"id"`
-	Name     string  `json:"name"`
-	Username string  `json:"username"`
-	Enabled  bool    `json:"enabled"`
-	CreditGB float64 `json:"credit_gb"`
-	Units    int64   `json:"units"`
-	Clients  int     `json:"clients"`
-	UsedGB   float64 `json:"used_gb"`
-	PanelURL string  `json:"panel_url"`
-	Password string  `json:"password,omitempty"` // only when just made
-	Message  string  `json:"message,omitempty"`  // ready-to-send text, only when just made
-}
-
-// partnerPanels lists a key's panels (one when id is set).
-func (s *Store) partnerPanels(ctx context.Context, keyID, id string) ([]PartnerPanel, error) {
-	reps, err := s.Reps(ctx)
-	if err != nil {
-		return nil, err
-	}
-	mine := map[string]bool{}
-	rows, err := s.ro.QueryContext(ctx, `SELECT rep_id FROM partner_reps WHERE key_id=?`, keyID)
-	if err != nil {
-		return nil, err
-	}
-	for rows.Next() {
-		var r string
-		if rows.Scan(&r) == nil {
-			mine[r] = true
-		}
-	}
-	rows.Close()
-	out := []PartnerPanel{}
-	for _, r := range reps {
-		if !mine[r.ID] || (id != "" && r.ID != id) {
-			continue
-		}
-		user := ""
-		if l := s.RepLogins(ctx, r.ID); len(l) > 0 {
-			user = l[0]
-		}
-		out = append(out, PartnerPanel{ID: r.ID, Name: r.Name, Username: user, Enabled: r.Enabled,
-			CreditGB: float64(r.VolumeCredit) / gibF, Units: r.UnlimitedUnits, Clients: r.Clients, UsedGB: float64(r.UsedBytes) / gibF})
-	}
-	if id != "" && len(out) == 0 {
-		return nil, ErrNotFound
-	}
-	return out, nil
-}
-
 // panelAddress is where resellers sign in.
 func (s *Store) panelAddress(r *http.Request) string {
 	ctx := r.Context()
@@ -394,196 +378,3 @@ func (s *Store) panelAddress(r *http.Request) string {
 	}
 	return strings.TrimRight(publicBase("", r), "/") + "/" + path
 }
-
-func partnerMessage(url, user, pass, name string) string {
-	return fmt.Sprintf("پنل نمایندگی %s آماده است ✅\n\n🌐 آدرس پنل:\n%s\n\n👤 نام کاربری: %s\n🔑 رمز: %s\n\nبعد از اولین ورود، رمز را از تنظیمات عوض کنید.", name, url, user, pass)
-}
-
-func partnerRoutes(s *Store, mux *http.ServeMux) {
-	auth := s.partnerCaller
-	route := func(pattern, scope string, h extHandler) { mux.HandleFunc(pattern, s.ext(auth, scope, h)) }
-	fail := func(w http.ResponseWriter, err error) {
-		switch {
-		case errors.Is(err, ErrNotFound):
-			apiErr(w, http.StatusNotFound, codeNotFound, "panel not found")
-		case errors.Is(err, ErrInvalid):
-			apiErr(w, http.StatusUnprocessableEntity, codeValidation, errDetail(err))
-		case errors.Is(err, ErrPolicy):
-			apiErr(w, http.StatusUnprocessableEntity, codePolicy, errDetail(err))
-		default:
-			apiFail(w, err)
-		}
-	}
-	limitUsed := func(w http.ResponseWriter) {
-		apiErr(w, http.StatusForbidden, codeCreditLimit, "this key's credit limit is used up")
-	}
-	type creditIn struct {
-		CreditGB float64 `json:"credit_gb"`
-		Units    int64   `json:"units"`
-	}
-	one := func(w http.ResponseWriter, r *http.Request, c apiCaller) (PartnerPanel, bool) {
-		list, err := s.partnerPanels(r.Context(), c.KeyID, r.PathValue("id"))
-		if err != nil {
-			fail(w, err)
-			return PartnerPanel{}, false
-		}
-		list[0].PanelURL = s.panelAddress(r)
-		return list[0], true
-	}
-
-	route("GET /api/v2/partner", "", func(w http.ResponseWriter, r *http.Request, c apiCaller) {
-		k, err := s.partnerKey(r.Context(), c.KeyID)
-		if err != nil {
-			fail(w, err)
-			return
-		}
-		k.LastIP = ""
-		apiJSON(w, http.StatusOK, k)
-	})
-	route("GET /api/v2/partner/reps", scopePanelsRead, func(w http.ResponseWriter, r *http.Request, c apiCaller) {
-		list, err := s.partnerPanels(r.Context(), c.KeyID, "")
-		if err != nil {
-			fail(w, err)
-			return
-		}
-		u := s.panelAddress(r)
-		for i := range list {
-			list[i].PanelURL = u
-		}
-		apiJSON(w, http.StatusOK, list)
-	})
-	route("GET /api/v2/partner/reps/{id}", scopePanelsRead, func(w http.ResponseWriter, r *http.Request, c apiCaller) {
-		if p, ok := one(w, r, c); ok {
-			apiJSON(w, http.StatusOK, p)
-		}
-	})
-	route("POST /api/v2/partner/reps", scopePanelsWrite, func(w http.ResponseWriter, r *http.Request, c apiCaller) {
-		var in struct {
-			ID       string  `json:"id"`
-			Name     string  `json:"name"`
-			Username string  `json:"username"`
-			Password string  `json:"password"`
-			CreditGB float64 `json:"credit_gb"`
-			Units    int64   `json:"units"`
-		}
-		if !readJSON(w, r, &in) {
-			return
-		}
-		if in.CreditGB < 0 || in.Units < 0 || in.CreditGB > 1e6 {
-			apiErr(w, http.StatusUnprocessableEntity, codeValidation, "credit cannot be negative")
-			return
-		}
-		if (in.CreditGB > 0 || in.Units > 0) && !c.can(scopeCreditAdd) {
-			apiErr(w, http.StatusForbidden, codeScopeMissing, "this key does not have the "+scopeCreditAdd+" permission")
-			return
-		}
-		k, err := s.partnerKey(r.Context(), c.KeyID)
-		if err != nil {
-			fail(w, err)
-			return
-		}
-		in.ID = strings.ToLower(strings.TrimSpace(in.ID))
-		if in.ID == "" {
-			for range 5 {
-				if id := "p" + randomHex(3); s.RepNameFree(r.Context(), id) {
-					in.ID = id
-					break
-				}
-			}
-		}
-		if in.Password == "" {
-			in.Password = RandomPassword()
-		}
-		bytes := int64(in.CreditGB * gibF)
-		if !s.partnerGive(r.Context(), k.ID, bytes, in.Units) {
-			limitUsed(w)
-			return
-		}
-		rc := RepCreate{ID: in.ID, Name: in.Name, Username: in.Username, Password: in.Password, CreditGB: in.CreditGB, Units: in.Units}
-		if k.Template != "" {
-			if pol, err := s.RepPolicyOf(r.Context(), k.Template); err == nil {
-				rc.Policy = &pol
-			}
-		}
-		if err := s.CreateRep(r.Context(), "partner:"+k.Name, rc); err != nil {
-			s.partnerUngive(r.Context(), k.ID, bytes, in.Units)
-			fail(w, err)
-			return
-		}
-		_, _ = s.db.ExecContext(r.Context(), `INSERT OR REPLACE INTO partner_reps(rep_id,key_id,created_unix) VALUES(?,?,?)`, rc.ID, k.ID, s.now().Unix())
-		list, err := s.partnerPanels(r.Context(), k.ID, rc.ID)
-		if err != nil {
-			fail(w, err)
-			return
-		}
-		p := list[0]
-		p.PanelURL, p.Password = s.panelAddress(r), strings.TrimSpace(in.Password)
-		p.Message = partnerMessage(p.PanelURL, p.Username, p.Password, p.Name)
-		apiJSON(w, http.StatusOK, p)
-	})
-	route("POST /api/v2/partner/reps/{id}/credit", scopeCreditAdd, func(w http.ResponseWriter, r *http.Request, c apiCaller) {
-		p, ok := one(w, r, c)
-		if !ok {
-			return
-		}
-		var in creditIn
-		if !readJSON(w, r, &in) {
-			return
-		}
-		if in.CreditGB < 0 || in.Units < 0 || (in.CreditGB == 0 && in.Units == 0) || in.CreditGB > 1e6 {
-			apiErr(w, http.StatusUnprocessableEntity, codeValidation, "credit_gb or units: more than 0 (credit can only be added)")
-			return
-		}
-		bytes := int64(in.CreditGB * gibF)
-		if !s.partnerGive(r.Context(), c.KeyID, bytes, in.Units) {
-			limitUsed(w)
-			return
-		}
-		if err := s.AdjustCredit(r.Context(), "partner:"+c.Name, p.ID, bytes, in.Units, "partner API"); err != nil {
-			s.partnerUngive(r.Context(), c.KeyID, bytes, in.Units)
-			fail(w, err)
-			return
-		}
-		if p, ok := one(w, r, c); ok {
-			apiJSON(w, http.StatusOK, p)
-		}
-	})
-	for _, on := range []bool{true, false} {
-		verb := "disable"
-		if on {
-			verb = "enable"
-		}
-		route("POST /api/v2/partner/reps/{id}/"+verb, scopePanelsWrite, func(w http.ResponseWriter, r *http.Request, c apiCaller) {
-			p, ok := one(w, r, c)
-			if !ok {
-				return
-			}
-			if err := s.PutRep(r.Context(), Rep{ID: p.ID, Name: p.Name, Enabled: on}); err != nil {
-				fail(w, err)
-				return
-			}
-			if p, ok := one(w, r, c); ok {
-				apiJSON(w, http.StatusOK, p)
-			}
-		})
-	}
-	route("POST /api/v2/partner/reps/{id}/password", scopePanelsWrite, func(w http.ResponseWriter, r *http.Request, c apiCaller) {
-		p, ok := one(w, r, c)
-		if !ok {
-			return
-		}
-		pass := RandomPassword()
-		if err := s.SetRepLogin(r.Context(), p.Username, pass, p.ID); err != nil {
-			fail(w, err)
-			return
-		}
-		p.Password = pass
-		p.Message = partnerMessage(p.PanelURL, p.Username, pass, p.Name)
-		apiJSON(w, http.StatusOK, p)
-	})
-	s.eventRoutes(mux, "/api/v2/partner", auth, func(c apiCaller) string { return partnerTarget(c.KeyID) }, partnerEvents)
-}
-
-// Events a partner key receives (its webhook and GET /api/v2/partner/events).
-var partnerEvents = []string{"panel.created", "panel.updated", "panel.enabled", "panel.disabled", "panel.deleted",
-	"panel.credit_added", "panel.credit_revoked", "panel.credit_low", "panel.password_reset"}
