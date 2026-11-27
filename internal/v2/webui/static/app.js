@@ -2300,6 +2300,9 @@ function clientForm(c, inbounds, ctx = { reps: [] }) {
   // advanced
   const ips = h("input", { type: "number", min: "0", max: "1000", dir: "ltr", value: v.MaxIPs });
   const hwid = h("input", { type: "number", min: "0", max: "100", dir: "ltr", value: v.hwid_limit || 0 });
+  // Daily cap (GB a day, 0 = none): the rest of the day the config stops once it is used.
+  const dcap0 = v.daily_cap_bytes ? +(v.daily_cap_bytes / 2 ** 30).toFixed(2) : 0;
+  const dcap = h("input", { type: "number", min: "0", step: "0.5", dir: "ltr", value: dcap0 || 0 });
   const reset = h("select", {}, [["", T("بدون ریست", "Never")], ["day", T("روزانه", "Daily")], ["week", T("هفتگی", "Weekly")], ["month", T("ماهانه", "Monthly")]]
     .map(([k, l]) => h("option", { value: k, selected: (v.reset_period || "") === k }, l)));
   const np0 = v.next_plan || null;
@@ -2435,6 +2438,7 @@ function clientForm(c, inbounds, ctx = { reps: [] }) {
       const extra = [];
       if ((note.value || "") !== (v.Note || "")) extra.push(api("PUT", `/api/v2/admin/clients/${em}/note`, { Note: note.value }));
       if (+hwid.value !== (v.hwid_limit || 0)) extra.push(api("PUT", `/api/v2/admin/clients/${em}/hwid-limit`, { limit: +hwid.value || 0 }));
+      if ((+dcap.value || 0) !== dcap0) extra.push(api("PUT", `/api/v2/admin/clients/${em}/daily-cap`, { gb: Math.max(0, +dcap.value || 0) }));
       if (owner) {
         if (reset.value !== (v.reset_period || "")) extra.push(api("PUT", `/api/v2/admin/clients/${em}/reset-period`, { period: reset.value }));
         const np = npOn.checked ? { gb: +npGB.value || 0, days: +npDays.value || 0, first_use: npFirst.checked } : null;
@@ -2480,6 +2484,9 @@ function clientForm(c, inbounds, ctx = { reps: [] }) {
         h("label", {}, h("span", {}, T("حداکثر IP هم‌زمان", "Max concurrent IPs")), ips),
         h("label", {}, h("span", {}, T("حداکثر دستگاه (HWID)", "Max devices (HWID)")), hwid),
         owner ? h("label", {}, h("span", {}, T("ریست دوره‌ای حجم", "Periodic volume reset")), reset) : null),
+      h("label", {}, h("span", {}, T("سقف مصرف روزانه (گیگ، ۰ = بی‌سقف)", "Daily cap (GB, 0 = none)")), dcap,
+        h("span", { class: "small muted" }, v.daily_cap_bytes ? T(`امروز: ${bytes(v.daily_used || 0)} از ${bytes(v.daily_cap_bytes)}`, `Today: ${bytes(v.daily_used || 0)} of ${bytes(v.daily_cap_bytes)}`)
+          : T("با رسیدن به سقف، کانفیگ تا شروع روز بعد (۳:۳۰ بامداد) قطع می‌شود.", "When the cap is reached the config stops until the next day (03:30 Tehran)."))),
       owner ? h("fieldset", { class: "np" }, h("label", { class: "check" }, npOn, T("تمدید خودکار با پلن بعدی وقتی حجم یا زمان تمام شد", "Auto-renew with a next plan when volume or time runs out")),
         h("div", { class: "three" }, h("label", {}, h("span", {}, T("حجم بعدی (گیگ، ۰ = نامحدود)", "Next volume (GB, 0 = ∞)")), npGB), h("label", {}, h("span", {}, T("روز بعدی", "Next days")), npDays),
           h("label", { class: "check", style: "align-self:end" }, npFirst, T("از اولین اتصال", "From first use")))) : null,

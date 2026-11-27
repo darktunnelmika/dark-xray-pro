@@ -1102,6 +1102,25 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 		err := s.PutCardFor(r.Context(), seller, in)
 		reply(w, map[string]bool{"ok": err == nil}, err)
 	}))
+	// Automatic cleanup of dead configs (autoclean.go), per seller.
+	mux.HandleFunc("GET /api/v2/shop/autoclean", member(func(w http.ResponseWriter, r *http.Request) {
+		seller, ok := sellerOf(r)
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+		a := s.AutoCleanFor(r.Context(), seller)
+		dead, err := s.DeadClients(r.Context(), seller, a.Days)
+		reply(w, map[string]any{"settings": a, "due": len(dead)}, err)
+	}))
+	mux.HandleFunc("PUT /api/v2/shop/autoclean", member(func(w http.ResponseWriter, r *http.Request) {
+		seller, ok := sellerOf(r)
+		var in AutoClean
+		if !ok || !decode(w, r, &in) {
+			return
+		}
+		reply(w, map[string]bool{"ok": true}, s.PutAutoClean(r.Context(), seller, in))
+	}))
 	// Several cards and the safe-card options (paycards.go).
 	mux.HandleFunc("GET /api/v2/shop/cards", member(func(w http.ResponseWriter, r *http.Request) {
 		seller, ok := sellerOf(r)
