@@ -330,6 +330,8 @@ type Quote struct {
 	TermDays        int64   `json:"term_days"`
 	VolumeGB        float64 `json:"volume_gb"` // -1: unlimited
 	StartOnFirstUse bool    `json:"start_on_first_use"`
+	// The exact amounts in bytes; the GB fields are rounded for showing.
+	chargeBytes, refundBytes int64
 }
 
 // QuoteFor prices a create or renew without doing it.
@@ -358,6 +360,8 @@ func (s *Store) QuoteFor(ctx context.Context, repID string, in QuoteIn) (Quote, 
 			q.Code, q.Reason = codeValidation, errDetail(err)
 		case errors.Is(err, ErrNotFound):
 			q.Code, q.Reason = codeNotFound, "customer not found"
+		case errors.Is(err, errNameTaken):
+			q.Code, q.Reason = codeConflict, "this name is taken"
 		default:
 			return q, err
 		}
@@ -411,6 +415,12 @@ func (s *Store) QuoteFor(ctx context.Context, repID string, in QuoteIn) (Quote, 
 			return refuse(err)
 		}
 		q.fill(c, plan, in.Days, 0)
+		if c.Email != "" {
+			var x int
+			if s.ro.QueryRowContext(ctx, `SELECT 1 FROM clients WHERE email=?`, c.Email).Scan(&x) == nil {
+				return refuse(errNameTaken)
+			}
+		}
 		if err := s.subSellerPlan(ctx, repID, plan, c.VolumeBytes, in.Days, c.MaxIPs, false); err != nil {
 			return refuse(err)
 		}
@@ -418,7 +428,7 @@ func (s *Store) QuoteFor(ctx context.Context, repID string, in QuoteIn) (Quote, 
 			return refuse(err)
 		}
 	}
-	net := int64((q.ChargeGB - q.RefundGB) * gibF)
+	net := q.chargeBytes - q.refundBytes
 	q.CreditAfterGB, q.UnitsAfter = roundGB(float64(vol-net)/gibF), units-q.ChargeUnits
 	if vol-max(net, 0) < 0 || q.UnitsAfter < 0 {
 		return refuse(ErrCredit)
@@ -430,10 +440,12 @@ func (s *Store) QuoteFor(ctx context.Context, repID string, in QuoteIn) (Quote, 
 func (q *Quote) fill(c Client, plan string, days, refund int64) {
 	q.TermDays, q.ExpiresUnix, q.StartOnFirstUse = days, c.ExpiresUnix, c.DurationSeconds > 0
 	if plan == "volume" {
+		q.chargeBytes = c.VolumeBytes
 		q.ChargeGB, q.VolumeGB = roundGB(float64(c.VolumeBytes)/gibF), roundGB(float64(c.VolumeBytes)/gibF)
 	} else {
 		q.ChargeUnits, q.VolumeGB = unitsFor(days), -1
 	}
+	q.refundBytes = refund
 	q.RefundGB = roundGB(float64(refund) / gibF)
 }
 
@@ -779,13 +791,15 @@ func resellerRoutes(s *Store, mux routeMux, subBase string) {
 				status = http.StatusUnprocessableEntity
 			case codeNotFound:
 				status = http.StatusNotFound
+			case codeConflict:
+				status = http.StatusConflict
 			}
 			apiErr(w, status, q.Code, q.Reason)
 			return
 		}
 		var vol, units int64
 		_ = s.ro.QueryRowContext(ctx, `SELECT volume_credit,unlimited_units FROM reps WHERE id=?`, c.RepID).Scan(&vol, &units)
-		if int64(q.ChargeGB*gibF)*int64(in.Count) > vol || q.ChargeUnits*int64(in.Count) > units {
+		if q.chargeBytes*int64(in.Count) > vol || q.ChargeUnits*int64(in.Count) > units {
 			apiErr(w, http.StatusPaymentRequired, codeCredit, fmt.Sprintf("not enough credit for %d customers", in.Count))
 			return
 		}

@@ -85,24 +85,54 @@ func (in *APIPolicyIn) over(p RepPolicy) (RepPolicy, error) {
 
 // clampPolicy keeps p within ceiling: a cap is never raised or removed, a
 // permission never given, a ban never lifted, an inbound never added.
-// Prices come from the ceiling.
-func (s *Store) clampPolicy(ctx context.Context, p, ceiling RepPolicy) (RepPolicy, error) {
+// With sent nil (a new panel) every field is clamped and the prices come
+// from the ceiling. With sent set (a change) only the fields that were
+// sent are clamped and the prices stay, so whatever the owner changed on
+// the panel since is kept.
+func (s *Store) clampPolicy(ctx context.Context, p, ceiling RepPolicy, sent *APIPolicyIn) (RepPolicy, error) {
+	all := sent == nil
+	if all {
+		sent = &APIPolicyIn{}
+	}
 	clamp := func(v, limit int64) int64 {
 		if limit > 0 && (v == 0 || v > limit) {
 			return limit
 		}
 		return v
 	}
-	p.MaxClients = clamp(p.MaxClients, ceiling.MaxClients)
-	p.MaxDays = clamp(p.MaxDays, ceiling.MaxDays)
-	p.MaxClientGB = clamp(p.MaxClientGB, ceiling.MaxClientGB)
-	p.AllowUnlimited = p.AllowUnlimited && ceiling.AllowUnlimited
-	p.CanDelete = p.CanDelete && ceiling.CanDelete
-	p.RefundUnused = p.RefundUnused && ceiling.RefundUnused
-	p.DenyCreate = p.DenyCreate || ceiling.DenyCreate
-	p.DenyRenew = p.DenyRenew || ceiling.DenyRenew
-	p.DenyEdit = p.DenyEdit || ceiling.DenyEdit
-	p.PriceGB, p.PriceUnit = ceiling.PriceGB, ceiling.PriceUnit
+	if all || sent.MaxClients != nil {
+		p.MaxClients = clamp(p.MaxClients, ceiling.MaxClients)
+	}
+	if all || sent.MaxDays != nil {
+		p.MaxDays = clamp(p.MaxDays, ceiling.MaxDays)
+	}
+	if all || sent.MaxClientGB != nil {
+		p.MaxClientGB = clamp(p.MaxClientGB, ceiling.MaxClientGB)
+	}
+	if all || sent.AllowUnlimited != nil {
+		p.AllowUnlimited = p.AllowUnlimited && ceiling.AllowUnlimited
+	}
+	if all || sent.CanDelete != nil {
+		p.CanDelete = p.CanDelete && ceiling.CanDelete
+	}
+	if all || sent.RefundUnused != nil {
+		p.RefundUnused = p.RefundUnused && ceiling.RefundUnused
+	}
+	if all || sent.DenyCreate != nil {
+		p.DenyCreate = p.DenyCreate || ceiling.DenyCreate
+	}
+	if all || sent.DenyRenew != nil {
+		p.DenyRenew = p.DenyRenew || ceiling.DenyRenew
+	}
+	if all || sent.DenyEdit != nil {
+		p.DenyEdit = p.DenyEdit || ceiling.DenyEdit
+	}
+	if all {
+		p.PriceGB, p.PriceUnit = ceiling.PriceGB, ceiling.PriceUnit
+	}
+	if !all && sent.Inbounds == nil {
+		return p, nil
+	}
 	tags := []string{}
 	for _, t := range p.Inbounds {
 		if t = strings.TrimSpace(t); t != "" && !slices.Contains(tags, t) {

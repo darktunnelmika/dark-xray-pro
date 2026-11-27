@@ -44,9 +44,22 @@ var partnerEvents = []string{"panel.created", "panel.updated", "panel.enabled", 
 func init() { apiEventSources = append(apiEventSources, lowCreditEvents) }
 
 // lowCreditEvents tells a reseller (credit.low) and the partner that made
-// it (panel.credit_low) when its credit falls under its threshold.
+// it (panel.credit_low) when its credit falls under its threshold. The first
+// run only takes note of who is low already, so an update does not send an
+// old warning for every reseller; a reseller that never had volume credit
+// (it sells unlimited plans only) is not warned about volume.
 func lowCreditEvents(ctx context.Context, s *Store) {
-	for _, l := range s.DueLowCredit(ctx, "api", "") {
+	due := s.DueLowCredit(ctx, "api", "")
+	if s.Setting(ctx, "api_lowcredit_started") == "" {
+		_ = s.SetSetting(ctx, "api_lowcredit_started", "1")
+		return
+	}
+	for _, l := range due {
+		var hadVolume bool
+		_ = s.ro.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM credit_ledger WHERE rep_id=? AND volume_delta>0 AND kind IN ('adjust','transfer'))`, l.RepID).Scan(&hadVolume)
+		if !hadVolume {
+			continue
+		}
 		data := map[string]any{"id": l.RepID, "name": l.Name, "credit_gb": roundGB(float64(l.Credit) / gibF), "threshold_gb": l.Limit >> 30}
 		s.emitAPIEvent(ctx, repTarget(l.RepID), "credit.low", data)
 		var key, ref string
@@ -585,6 +598,10 @@ func partnerRoutes(s *Store, mux routeMux) {
 			apiErr(w, http.StatusUnprocessableEntity, codeValidation, "external_ref: up to 128 characters, note: up to 500")
 			return
 		}
+		if in.LowCreditGB != nil && (*in.LowCreditGB < 0 || *in.LowCreditGB > 1_000_000) {
+			apiErr(w, http.StatusUnprocessableEntity, codeValidation, "low_credit_gb is 0 (off) to 1000000")
+			return
+		}
 		k, ok := key(w, r, c)
 		if !ok {
 			return
@@ -610,17 +627,22 @@ func partnerRoutes(s *Store, mux routeMux) {
 		if (in.CreditGB > 0 || in.Units > 0) && !needScope(w, c, scopeCreditAdd) {
 			return
 		}
-		if in.ExternalRef != "" {
+		refConflict := func() {
 			var other string
-			if s.ro.QueryRowContext(ctx, `SELECT rep_id FROM partner_reps WHERE key_id=? AND external_ref=?`, k.ID, in.ExternalRef).Scan(&other) == nil {
-				apiErr(w, http.StatusConflict, codeConflict, "panel "+other+" already has this external_ref")
+			_ = s.db.QueryRowContext(ctx, `SELECT rep_id FROM partner_reps WHERE key_id=? AND external_ref=?`, k.ID, in.ExternalRef).Scan(&other)
+			apiErr(w, http.StatusConflict, codeConflict, "panel "+other+" already has this external_ref")
+		}
+		if in.ExternalRef != "" {
+			var x int
+			if s.db.QueryRowContext(ctx, `SELECT 1 FROM partner_reps p JOIN reps r ON r.id=p.rep_id WHERE p.key_id=? AND p.external_ref=?`, k.ID, in.ExternalRef).Scan(&x) == nil {
+				refConflict()
 				return
 			}
 		}
 		base := s.partnerBase(ctx, k, pkg)
 		pol, err := in.Policy.over(base)
 		if err == nil {
-			pol, err = s.clampPolicy(ctx, pol, base)
+			pol, err = s.clampPolicy(ctx, pol, base, nil)
 		}
 		if err != nil {
 			fail(w, err)
@@ -639,7 +661,34 @@ func partnerRoutes(s *Store, mux routeMux) {
 			in.Password = RandomPassword()
 		}
 		bytes := int64(in.CreditGB * gibF)
+		// The partner record is written first: it holds the external_ref, so
+		// two requests for one order cannot both make a panel.
+		ceiling, _ := json.Marshal(base)
+		pkgID := ""
+		if pkg != nil {
+			pkgID = pkg.ID
+		}
+		now := s.now().Unix()
+		_, _ = s.db.ExecContext(ctx, `DELETE FROM partner_reps WHERE (rep_id=? OR (key_id=? AND external_ref=? AND external_ref<>'')) AND created_unix<?
+AND rep_id NOT IN (SELECT id FROM reps)`, in.ID, k.ID, in.ExternalRef, now-300) // left by a create that never finished
+		if _, err := s.db.ExecContext(ctx, `INSERT INTO partner_reps(rep_id,key_id,created_unix,external_ref,note,package,ceiling,given_bytes,given_units) VALUES(?,?,?,?,?,?,?,?,?)`,
+			in.ID, k.ID, now, in.ExternalRef, in.Note, pkgID, string(ceiling), bytes, in.Units); err != nil {
+			if refTaken(err) {
+				refConflict()
+				return
+			}
+			if strings.Contains(err.Error(), "UNIQUE") {
+				apiErr(w, http.StatusUnprocessableEntity, codeValidation, fmt.Sprintf("a reseller or a sign-in name %q already exists", in.ID))
+				return
+			}
+			fail(w, err)
+			return
+		}
+		unreserve := func() {
+			_, _ = s.db.ExecContext(context.WithoutCancel(ctx), `DELETE FROM partner_reps WHERE rep_id=? AND key_id=? AND rep_id NOT IN (SELECT id FROM reps)`, in.ID, k.ID)
+		}
 		if !s.partnerGive(ctx, k.ID, bytes, in.Units) {
+			unreserve()
 			limitUsed(w)
 			return
 		}
@@ -647,16 +696,10 @@ func partnerRoutes(s *Store, mux routeMux) {
 			Policy: &pol, TgOwners: in.TelegramIDs}
 		if err := s.CreateRep(ctx, "partner:"+k.Name, rc); err != nil {
 			s.partnerUngive(ctx, k.ID, bytes, in.Units)
+			unreserve()
 			fail(w, err)
 			return
 		}
-		ceiling, _ := json.Marshal(base)
-		pkgID := ""
-		if pkg != nil {
-			pkgID = pkg.ID
-		}
-		_, _ = s.db.ExecContext(ctx, `INSERT OR REPLACE INTO partner_reps(rep_id,key_id,created_unix,external_ref,note,package,ceiling) VALUES(?,?,?,?,?,?,?)`,
-			rc.ID, k.ID, s.now().Unix(), in.ExternalRef, in.Note, pkgID, string(ceiling))
 		if in.LowCreditGB != nil {
 			_ = s.SetRepAlertGB(ctx, rc.ID, *in.LowCreditGB)
 		}
@@ -710,28 +753,52 @@ func partnerRoutes(s *Store, mux routeMux) {
 			apiErr(w, http.StatusUnprocessableEntity, codeValidation, "external_ref: up to 128 characters, note: up to 500")
 			return
 		}
-		if ref != "" && ref != p.ExternalRef {
+		refConflict := func() {
 			var other string
-			if s.ro.QueryRowContext(ctx, `SELECT rep_id FROM partner_reps WHERE key_id=? AND external_ref=? AND rep_id<>?`, k.ID, ref, p.ID).Scan(&other) == nil {
-				apiErr(w, http.StatusConflict, codeConflict, "panel "+other+" already has this external_ref")
+			_ = s.db.QueryRowContext(ctx, `SELECT rep_id FROM partner_reps WHERE key_id=? AND external_ref=? AND rep_id<>?`, k.ID, ref, p.ID).Scan(&other)
+			apiErr(w, http.StatusConflict, codeConflict, "panel "+other+" already has this external_ref")
+		}
+		if ref != "" && ref != p.ExternalRef {
+			var x int
+			if s.db.QueryRowContext(ctx, `SELECT 1 FROM partner_reps WHERE key_id=? AND external_ref=? AND rep_id<>?`, k.ID, ref, p.ID).Scan(&x) == nil {
+				refConflict()
 				return
 			}
 		}
 		if in.Enabled != nil {
 			enabled = *in.Enabled
 		}
+		// Everything is checked before anything is saved.
+		var pol RepPolicy
 		if in.Policy != nil {
-			cur, err := s.RepPolicyOf(ctx, p.ID)
+			var err error
+			pol, err = s.RepPolicyOf(ctx, p.ID)
 			if err == nil {
-				cur, err = in.Policy.over(cur)
+				pol, err = in.Policy.over(pol)
 			}
 			if err == nil {
-				cur, err = s.clampPolicy(ctx, cur, s.partnerCeiling(ctx, k, p.ID))
-			}
-			if err == nil {
-				err = s.SetRepPolicy(ctx, p.ID, cur)
+				pol, err = s.clampPolicy(ctx, pol, s.partnerCeiling(ctx, k, p.ID), in.Policy)
 			}
 			if err != nil {
+				fail(w, err)
+				return
+			}
+		}
+		if in.LowCreditGB != nil && (*in.LowCreditGB < 0 || *in.LowCreditGB > 1_000_000) {
+			apiErr(w, http.StatusUnprocessableEntity, codeValidation, "low_credit_gb is 0 (off) to 1000000")
+			return
+		}
+		// The partner record first: a taken external_ref stops the change here.
+		if _, err := s.db.ExecContext(ctx, `UPDATE partner_reps SET note=?, external_ref=? WHERE rep_id=? AND key_id=?`, note, ref, p.ID, k.ID); err != nil {
+			if refTaken(err) {
+				refConflict()
+				return
+			}
+			fail(w, err)
+			return
+		}
+		if in.Policy != nil {
+			if err := s.SetRepPolicy(ctx, p.ID, pol); err != nil {
 				fail(w, err)
 				return
 			}
@@ -753,10 +820,6 @@ func partnerRoutes(s *Store, mux routeMux) {
 				fail(w, err)
 				return
 			}
-		}
-		if _, err := s.db.ExecContext(ctx, `UPDATE partner_reps SET note=?, external_ref=? WHERE rep_id=? AND key_id=?`, note, ref, p.ID, k.ID); err != nil {
-			fail(w, err)
-			return
 		}
 		np, ok := one(w, r, c)
 		if !ok {
@@ -782,6 +845,10 @@ func partnerRoutes(s *Store, mux routeMux) {
 		var leftBytes, leftUnits int64
 		_ = s.ro.QueryRowContext(ctx, `SELECT COALESCE(SUM(volume_credit),0),COALESCE(SUM(unlimited_units),0) FROM reps WHERE id=? OR parent_id=?`, p.ID, p.ID).
 			Scan(&leftBytes, &leftUnits)
+		// Credit left goes back to what the key may hand out, but never more
+		// than the key gave this panel (credit the owner added is not the key's).
+		gaveBytes, gaveUnits := s.partnerGivenTo(ctx, c.KeyID, p.ID)
+		leftBytes, leftUnits = min(leftBytes, gaveBytes), min(leftUnits, gaveUnits)
 		n, err := s.DeleteRep(ctx, p.ID, withClients)
 		if err != nil {
 			if !withClients && errors.Is(err, ErrInvalid) && n > 0 {
@@ -792,7 +859,6 @@ func partnerRoutes(s *Store, mux routeMux) {
 			return
 		}
 		_, _ = s.db.ExecContext(ctx, `DELETE FROM partner_reps WHERE rep_id=?`, p.ID)
-		// Credit never used goes back to what the key may hand out.
 		s.partnerUngive(ctx, c.KeyID, leftBytes, leftUnits)
 		out := map[string]any{"ok": true, "id": p.ID, "clients_deleted": n, "released_gb": roundGB(float64(leftBytes) / gibF), "released_units": leftUnits}
 		s.emitAPIEvent(ctx, partnerTarget(c.KeyID), "panel.deleted", panelEvent(p, out))
@@ -823,6 +889,7 @@ func partnerRoutes(s *Store, mux routeMux) {
 			fail(w, err)
 			return
 		}
+		s.partnerGavePanel(ctx, c.KeyID, p.ID, bytes, in.Units)
 		np, ok := one(w, r, c)
 		if !ok {
 			return
@@ -854,7 +921,7 @@ func partnerRoutes(s *Store, mux routeMux) {
 			fail(w, err)
 			return
 		}
-		s.partnerUngive(ctx, c.KeyID, bytes, in.Units)
+		s.partnerRelease(ctx, c.KeyID, p.ID, bytes, in.Units)
 		np, ok := one(w, r, c)
 		if !ok {
 			return

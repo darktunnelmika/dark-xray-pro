@@ -5283,18 +5283,22 @@ function apiKeyFields(kind, k) {
   const days = h("input", { type: "number", min: "0", max: "3650", dir: "ltr", value: "0" });
   const rate = h("input", { type: "number", min: "0", max: "6000", dir: "ltr", value: String(k && k.rate_per_min || 0) });
   const exp = k && k.expires_unix ? h("span", { class: `badge ${k.expires_unix * 1000 < Date.now() ? "bad" : ""}` }, T("انقضا: ", "expires: "), fmtDT(k.expires_unix)) : null;
+  const never = h("input", { type: "checkbox" });
+  const neverBox = k && k.expires_unix ? h("label", { class: "check" }, never, h("span", {}, T("بدون انقضا (برداشتن تاریخ انقضا)", "Never expires (remove the expiry)"))) : null;
+  never.onchange = () => { days.disabled = never.checked; };
   const el = h("div", { class: "form" },
     h("fieldset", { class: "scopes" }, h("legend", {}, T("دسترسی‌ها", "Permissions")), ...boxes.map((b) => b.el)),
     h("label", {}, h("span", {}, T("فقط از این IPها (هر خط یک IP یا شبکه؛ خالی = همه)", "Only from these addresses (one IP or network per line; empty = any)")), ips),
     h("div", { class: "two" },
       h("label", {}, h("span", {}, k ? T("انقضای تازه از امروز (روز، ۰ = بدون تغییر)", "New expiry from today (days, 0 = keep)") : T("انقضا بعد از (روز، ۰ = هرگز)", "Expires after (days, 0 = never)")), days, exp),
-      h("label", {}, h("span", {}, T("سقف درخواست در دقیقه (۰ = پیش‌فرض ۱۲۰)", "Requests a minute (0 = default 120)")), rate)));
+      h("label", {}, h("span", {}, T("سقف درخواست در دقیقه (۰ = پیش‌فرض ۱۲۰)", "Requests a minute (0 = default 120)")), rate)),
+    neverBox);
   return {
     el,
     value() {
       const v = { scopes: boxes.filter((b) => b.c.checked).map((b) => b.s), allowed_ips: ips.value.split(/[\s,]+/).filter(Boolean), rate_per_min: +rate.value || 0 };
-      if (+days.value > 0) v.expires_unix = Math.floor(Date.now() / 1000) + Math.floor(+days.value) * 86400;
-      else if (!k) v.expires_unix = 0;
+      if (never.checked || (!k && !(+days.value > 0))) v.expires_unix = 0;
+      else if (+days.value > 0) v.expires_unix = Math.floor(Date.now() / 1000) + Math.floor(+days.value) * 86400;
       return v;
     },
   };

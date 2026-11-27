@@ -200,8 +200,9 @@ func TestExtAPIKeyLimits(t *testing.T) {
 		t.Fatal("an unknown scope must be refused")
 	}
 
-	// An address that keeps trying wrong keys is slowed down, even with a
-	// right key afterwards; X-Request-ID is echoed.
+	// An address that keeps trying wrong keys is slowed down; a right key
+	// from the same address (another partner behind the same CDN or NAT)
+	// still works. X-Request-ID is echoed.
 	refused := 0 // the expired key above counted as one already
 	for range badKeyRate {
 		r := apiCall(t, h.URL, "GET", "/api/v2/partner", "dp_bad_key", nil)
@@ -216,9 +217,12 @@ func TestExtAPIKeyLimits(t *testing.T) {
 	if refused != badKeyRate-1 {
 		t.Fatalf("wrong keys before the slowdown: %d", refused)
 	}
-	r = apiCall(t, h.URL, "GET", "/api/v2/partner", k4.Key, nil, "X-Request-ID", "req-12345678")
-	if r.Code != 429 || r.Header.Get("X-Request-ID") != "req-12345678" || r.str("request_id") != "req-12345678" {
-		t.Fatalf("after many wrong keys: %d %v %s", r.Code, r.Header, r.Raw)
+	r = apiCall(t, h.URL, "GET", "/api/v2/partner", "dp_bad_key2", nil, "X-Request-ID", "req-12345678")
+	if r.Code != 429 || r.str("code") != codeRateLimited || r.Header.Get("Retry-After") == "" || r.Header.Get("X-Request-ID") != "req-12345678" || r.str("request_id") != "req-12345678" {
+		t.Fatalf("another wrong key after many: %d %v %s", r.Code, r.Header, r.Raw)
+	}
+	if r := apiCall(t, h.URL, "GET", "/api/v2/partner", k4.Key, nil); r.Code != 200 {
+		t.Fatalf("a right key from the same address: %d %s", r.Code, r.Raw)
 	}
 }
 

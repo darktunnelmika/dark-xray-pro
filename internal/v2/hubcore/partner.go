@@ -65,18 +65,54 @@ func (s *Store) ensurePartnerSchema() error {
 			return err
 		}
 	}
+	hadGiven := s.hasColumn("partner_reps", "given_bytes")
 	for _, c := range []struct{ col, def string }{
 		{"external_ref", "TEXT NOT NULL DEFAULT ''"},
 		{"note", "TEXT NOT NULL DEFAULT ''"},
 		{"package", "TEXT NOT NULL DEFAULT ''"},
 		{"ceiling", "TEXT NOT NULL DEFAULT ''"},
+		{"given_bytes", "INTEGER NOT NULL DEFAULT 0"},
+		{"given_units", "INTEGER NOT NULL DEFAULT 0"},
 	} {
 		if err := s.addColumn("partner_reps", c.col, c.def); err != nil {
 			return err
 		}
 	}
-	_, err := s.db.Exec(`CREATE INDEX IF NOT EXISTS partner_reps_ref ON partner_reps(key_id, external_ref)`)
+	// Rows of resellers deleted before deleting a reseller cleaned them up.
+	if _, err := s.db.Exec(`DELETE FROM partner_reps WHERE rep_id NOT IN (SELECT id FROM reps)`); err != nil {
+		return err
+	}
+	if !hadGiven {
+		// What each key gave each panel so far, from the credit ledger.
+		if _, err := s.db.Exec(`UPDATE partner_reps SET
+given_bytes=MAX(0,COALESCE((SELECT SUM(l.volume_delta) FROM credit_ledger l WHERE l.rep_id=partner_reps.rep_id AND l.kind='adjust' AND l.actor LIKE 'partner:%'),0)),
+given_units=MAX(0,COALESCE((SELECT SUM(l.units_delta) FROM credit_ledger l WHERE l.rep_id=partner_reps.rep_id AND l.kind='adjust' AND l.actor LIKE 'partner:%'),0))`); err != nil {
+			return err
+		}
+	}
+	// external_ref is unique per key; should two panels share one, the
+	// older keeps it.
+	if _, err := s.db.Exec(`UPDATE partner_reps SET external_ref='' WHERE external_ref<>'' AND rowid NOT IN
+(SELECT MIN(rowid) FROM partner_reps WHERE external_ref<>'' GROUP BY key_id, external_ref)`); err != nil {
+		return err
+	}
+	if _, err := s.db.Exec(`DROP INDEX IF EXISTS partner_reps_ref`); err != nil {
+		return err
+	}
+	_, err := s.db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS partner_reps_ref_u ON partner_reps(key_id, external_ref) WHERE external_ref<>''`)
 	return err
+}
+
+// hasColumn tells whether a table has a column.
+func (s *Store) hasColumn(table, col string) bool {
+	var n int
+	_ = s.db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info(?) WHERE name=?`, table, col).Scan(&n)
+	return n > 0
+}
+
+// errRefTaken means another panel of the key has that external_ref.
+func refTaken(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "UNIQUE") && strings.Contains(err.Error(), "external_ref")
 }
 
 // Partner key scopes. A key made before scopes existed has the default set.
@@ -225,7 +261,7 @@ func (s *Store) checkPartnerIn(ctx context.Context, in *PartnerKeyIn) error {
 		for _, p := range s.RepSale(ctx).Packages {
 			known = append(known, p.ID)
 		}
-		pk, err := normScopes(*in.Packages, known)
+		pk, err := normNames(*in.Packages, known, false)
 		if err != nil {
 			return err
 		}
@@ -360,6 +396,30 @@ WHERE id=? AND (max_bytes=0 OR given_bytes+?<=max_bytes) AND (max_units=0 OR giv
 
 func (s *Store) partnerUngive(ctx context.Context, keyID string, bytes, units int64) {
 	_, _ = s.db.ExecContext(ctx, `UPDATE partner_keys SET given_bytes=MAX(0,given_bytes-?), given_units=MAX(0,given_units-?) WHERE id=?`, bytes, units, keyID)
+}
+
+// partnerGavePanel counts credit a key gave one of its panels.
+func (s *Store) partnerGavePanel(ctx context.Context, keyID, repID string, bytes, units int64) {
+	_, _ = s.db.ExecContext(ctx, `UPDATE partner_reps SET given_bytes=given_bytes+?, given_units=given_units+? WHERE rep_id=? AND key_id=?`, bytes, units, repID, keyID)
+}
+
+// partnerGivenTo is what a key has given a panel and not taken back.
+func (s *Store) partnerGivenTo(ctx context.Context, keyID, repID string) (bytes, units int64) {
+	_ = s.db.QueryRowContext(ctx, `SELECT given_bytes,given_units FROM partner_reps WHERE rep_id=? AND key_id=?`, repID, keyID).Scan(&bytes, &units)
+	return
+}
+
+// partnerRelease lets a key hand out again credit that came back from one
+// of its panels, but never more than the key gave that panel: credit the
+// owner added there is not the key's.
+func (s *Store) partnerRelease(ctx context.Context, keyID, repID string, bytes, units int64) {
+	gb, gu := s.partnerGivenTo(ctx, keyID, repID)
+	rb, ru := min(max(bytes, 0), gb), min(max(units, 0), gu)
+	if rb == 0 && ru == 0 {
+		return
+	}
+	_, _ = s.db.ExecContext(ctx, `UPDATE partner_reps SET given_bytes=given_bytes-?, given_units=given_units-? WHERE rep_id=? AND key_id=?`, rb, ru, repID, keyID)
+	s.partnerUngive(ctx, keyID, rb, ru)
 }
 
 // panelAddress is where resellers sign in.

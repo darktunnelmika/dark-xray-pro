@@ -283,7 +283,13 @@ func TestPartnerAPIFull(t *testing.T) {
 		t.Fatalf("events\n got %v\nwant %v", kinds, want)
 	}
 
-	// Low credit: told once to the reseller and to its partner.
+	// Low credit: the first run only notes who is low already (the 1 GB
+	// panels, under the default 50 GB); then a fall is told once to the
+	// reseller and to its partner.
+	lowCreditEvents(ctx, s)
+	if list, _ := s.APIEvents(ctx, partnerTarget(k.ID), 0, 500, []string{"panel.credit_low"}); len(list) != 0 {
+		t.Fatalf("no old warnings on the first run: %v", list)
+	}
 	if err := s.SetRepAlertGB(ctx, gid, 600); err != nil {
 		t.Fatal(err)
 	}
@@ -299,8 +305,16 @@ func TestPartnerAPIFull(t *testing.T) {
 			}
 		}
 	}
-	if low != 1 { // the 1 GB panels are under the default 50 GB threshold too
+	if low != 1 || len(ev.JSON["items"].([]any)) != 1 {
 		t.Fatalf("low credit %s", ev.Raw)
+	}
+	// A reseller that only ever had unlimited units is not warned about volume.
+	if err := s.CreateRep(ctx, "admin", RepCreate{ID: "units-only", Password: "units-only-pass", Units: 5}); err != nil {
+		t.Fatal(err)
+	}
+	lowCreditEvents(ctx, s)
+	if list, _ := s.APIEvents(ctx, repTarget("units-only"), 0, 10, []string{"credit.low"}); len(list) != 0 {
+		t.Fatalf("units-only reseller warned: %v", list)
 	}
 	if list, _ := s.APIEvents(ctx, repTarget(gid), 0, 10, []string{"credit.low"}); len(list) != 1 {
 		t.Fatalf("the reseller's own event %v", list)

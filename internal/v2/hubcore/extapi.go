@@ -130,8 +130,14 @@ var (
 // ---- key settings shared by partner and reseller keys ----
 
 // normScopes keeps known names (scopes, event types), sorted and without
-// repeats; an unknown one is an error.
+// repeats; an unknown one is an error. Letter case does not matter.
 func normScopes(in []string, known []string) ([]string, error) {
+	return normNames(in, known, true)
+}
+
+// normNames is normScopes for names whose letter case counts (ids the
+// owner typed, such as package ids) when lower is false.
+func normNames(in []string, known []string, lower bool) ([]string, error) {
 	ok := map[string]bool{}
 	for _, k := range known {
 		ok[k] = true
@@ -139,7 +145,10 @@ func normScopes(in []string, known []string) ([]string, error) {
 	seen := map[string]bool{}
 	out := []string{}
 	for _, sc := range in {
-		sc = strings.TrimSpace(strings.ToLower(sc))
+		sc = strings.TrimSpace(sc)
+		if lower {
+			sc = strings.ToLower(sc)
+		}
 		if sc == "" || seen[sc] {
 			continue
 		}
@@ -303,17 +312,6 @@ func (l *rateLimiter) take(name string, perMin int, now time.Time) (bool, int, t
 	return true, int(b.tokens), 0
 }
 
-// has tells whether a token is there without spending it.
-func (l *rateLimiter) has(name string, perMin int, now time.Time) (bool, time.Duration) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	b := l.bucket(name, perMin, now)
-	if b.tokens >= 1 {
-		return true, 0
-	}
-	return false, time.Duration((1 - b.tokens) * 60 / float64(perMin) * float64(time.Second))
-}
-
 // ---- answers ----
 
 var requestIDRE = regexp.MustCompile(`^[A-Za-z0-9._-]{8,64}$`)
@@ -443,26 +441,30 @@ type extAuthFunc func(r *http.Request) (apiCaller, error)
 // extHandler is an external API handler.
 type extHandler func(w http.ResponseWriter, r *http.Request, c apiCaller)
 
-// ext wraps an external API handler: request id, wrong-key slowdown, key,
-// address, rate, scope, then (for changes) idempotency and the change log.
-// scope "" needs no scope.
+// ext wraps an external API handler: request id, key (with a slowdown for
+// an address that keeps sending wrong ones), address, rate, scope, then (for
+// changes) idempotency and the change log. scope "" needs no scope.
+//
+// The slowdown only ever answers requests whose key is wrong: a right key
+// is served even from an address that also sends wrong ones, so partners
+// behind one CDN or NAT never lock each other out. Keys are long random
+// secrets checked by hash, so guessing gains nothing from the extra tries.
 func (s *Store) ext(auth extAuthFunc, scope string, h extHandler) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		requestID(w, r)
 		ip := realIP(r)
 		now := s.now()
-		if ok, wait := s.apiRates.has("bad:"+ip, badKeyRate, now); !ok {
-			w.Header().Set("Retry-After", strconv.Itoa(int(wait.Seconds())+1))
-			apiErr(w, http.StatusTooManyRequests, codeRateLimited, "too many wrong keys from this address; wait a minute")
-			return
-		}
 		c, err := auth(r)
 		if errors.Is(err, errAccountOff) {
 			apiErr(w, http.StatusForbidden, codeDisabled, err.Error())
 			return
 		}
 		if err != nil {
-			s.apiRates.take("bad:"+ip, badKeyRate, now)
+			if ok, _, wait := s.apiRates.take("bad:"+ip, badKeyRate, now); !ok {
+				w.Header().Set("Retry-After", strconv.Itoa(int(wait.Seconds())+1))
+				apiErr(w, http.StatusTooManyRequests, codeRateLimited, "too many wrong keys from this address; wait a minute")
+				return
+			}
 			w.Header().Set("WWW-Authenticate", "Bearer")
 			code := codeUnauthorized
 			if errors.Is(err, errKeyExpired) {
