@@ -459,9 +459,7 @@ func TestCardReceiptAndDiscount(t *testing.T) {
 	}
 	// The receipt photo goes to the owner with approve / refuse.
 	photo := msg(buyerID, "")
-	photo.Message.Photo = []struct {
-		FileID string `json:"file_id"`
-	}{{FileID: "small"}, {FileID: "big-photo-id"}}
+	photo.Message.Photo = []PhotoSize{{FileID: "small"}, {FileID: "big-photo-id"}}
 	b.Handle(ctx, photo)
 	out = api.take()
 	find(t, out, buyerID, "دریافت شد")
@@ -558,9 +556,7 @@ func TestResellerBotTomanWallet(t *testing.T) {
 		t.Fatal(inv.text)
 	}
 	photo := msg(buyerID, "")
-	photo.Message.Photo = []struct {
-		FileID string `json:"file_id"`
-	}{{FileID: "rcpt"}}
+	photo.Message.Photo = []PhotoSize{{FileID: "rcpt"}}
 	b.Handle(ctx, photo)
 	out = api.take()
 	find(t, out, buyerID, "دریافت شد")

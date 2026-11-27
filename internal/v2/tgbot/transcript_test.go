@@ -84,9 +84,7 @@ func TestCustomerTranscript(t *testing.T) {
 	}
 	photo := func(chat int64) {
 		p := msg(chat, "")
-		p.Message.Photo = []struct {
-			FileID string `json:"file_id"`
-		}{{FileID: "big"}}
+		p.Message.Photo = []PhotoSize{{FileID: "big"}}
 		b.Handle(ctx, p)
 		dump(fmt.Sprintf("%d sends a photo", chat))
 	}

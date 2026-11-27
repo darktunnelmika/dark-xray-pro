@@ -11,9 +11,7 @@ import (
 
 func photoMsg(chat int64) Update {
 	u := msg(chat, "")
-	u.Message.Photo = append(u.Message.Photo, struct {
-		FileID string `json:"file_id"`
-	}{FileID: "receipt-file"})
+	u.Message.Photo = append(u.Message.Photo, PhotoSize{FileID: "receipt-file"})
 	return u
 }
 
