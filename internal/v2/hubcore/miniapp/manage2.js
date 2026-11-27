@@ -460,6 +460,15 @@ function resaleView() {
   if (!d.allowed) return [backHead("فروش پنل نمایندگی"), h("div", { class: "card" }, h("p", {}, "فروش پنل برای شما فعال نیست. اگر می‌خواهید نمایندهٔ ویژه شوید و پنل بفروشید، از مدیر پنل بخواهید."))];
   const v = d.view, st = d.stats || {}, out = [backHead("فروش پنل نمایندگی", btnIcon("plus", "فروش پنل", () => sellPanelSheet()))];
   if (v.locked) out.push(h("div", { class: "card alert bad" }, "⛔️ یک صورتحساب از مهلتش گذشته؛ تا پرداخت آن، فروش پنل و ساخت کاربر قفل است."));
+  const capBox = h("div", {});
+  api("GET", "m/panellimits").then((c) => {
+    const max = c.limits.per_seller, sold = c.sold || 0, pct = Math.min(100, Math.round((sold / max) * 100));
+    capBox.replaceChildren(h("div", { class: `capbar ${sold >= max ? "bad" : pct >= 80 ? "warn" : ""}` },
+      h("div", { class: "row between" }, h("b", {}, "ظرفیت فروش پنل"), h("span", {}, `${num(sold)} از ${num(max)}`)),
+      h("div", { class: "capbar-bar" }, h("i", { style: `--w:${pct}%` })),
+      h("p", { class: "muted small" }, sold >= max ? "ظرفیت پر است؛ پنل تازه فروخته نمی‌شود (شارژ پنل‌های فروخته‌شده آزاد است)." : `هنوز ${num(max - sold)} پنل دیگر می‌توانید بفروشید. سفارش‌های در انتظار هم حساب می‌شوند.`)));
+  }).catch(() => {});
+  out.push(capBox);
   out.push(h("div", { class: "kpis four" },
     h("div", { class: "kpi" }, h("b", {}, num(st.panels || 0)), h("span", {}, "پنل فروخته")),
     h("div", { class: "kpi" }, h("b", {}, num(st.month_sales || 0)), h("span", {}, "فروش این ماه")),
@@ -579,6 +588,18 @@ function ownerSaleView(d) {
     h("div", { class: "two" }, field("حجم (گیگ)", h("input", { type: "number", inputmode: "numeric", value: p.gb || "", oninput: (e) => { p.gb = Math.round(+e.target.value || 0); } })),
       field("قیمت (تومان)", h("input", { type: "number", inputmode: "numeric", value: p.price || "", oninput: (e) => { p.price = Math.round(+e.target.value || 0); } }))))));
   draw();
+  const capsBox = h("div", {});
+  api("GET", "m/panellimits").then((c) => {
+    const pb = h("input", { type: "number", inputmode: "numeric", value: c.limits.per_buyer });
+    const ps = h("input", { type: "number", inputmode: "numeric", value: c.limits.per_seller });
+    capsBox.replaceChildren(h("div", { class: "section-title" }, "سقف پنل‌ها"),
+      h("div", { class: "card" }, h("div", { class: "two" }, field("حداکثر پنل هر خریدار", pb), field("ظرفیت فروش هر نمایندهٔ ویژه", ps)),
+        h("p", { class: "muted small" }, "هر حساب تلگرام بیشتر از این تعداد پنل نمی‌تواند بخرد؛ هر نمایندهٔ ویژه هم بیشتر از ظرفیتش پنل نمی‌فروشد. سفارش‌های در انتظار هم حساب می‌شوند. شارژ پنل‌های موجود همیشه آزاد است."),
+        btn("ذخیرهٔ سقف‌ها", "block", async () => {
+          try { await api("POST", "m/panellimits", { per_buyer: Math.round(+pb.value || 0), per_seller: Math.round(+ps.value || 0) }); haptic("success"); toast("ذخیره شد"); }
+          catch (e) { haptic("error"); toast(e.message); }
+        }, "check")));
+  }).catch(() => {});
   const trialBox = h("div", {});
   api("GET", "m/reptrial").then((t) => {
     const p = t.policy, st = t.stats || {};
@@ -603,7 +624,7 @@ function ownerSaleView(d) {
     rows.length < 20 ? btn("افزودن بسته", "block ghost", () => { rows.push({ id: "", name: "", gb: 100, price: 0 }); draw(); }, "plus") : null,
     btn("ذخیره", "primary block big", async () => {
       try { await api("POST", "m/resale/sale", { enabled: onBox.checked, packages: rows }); haptic("success"); toast("ذخیره شد"); m2Reload(); } catch (e) { haptic("error"); toast(e.message); }
-    }, "check"), trialBox];
+    }, "check"), capsBox, trialBox];
 }
 
 // ---------- bot settings ----------

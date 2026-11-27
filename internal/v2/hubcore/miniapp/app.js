@@ -831,6 +831,16 @@ function panelView() {
   }
   const list = panelSale.packages || [];
   const feat = list.length >= 3 ? list[Math.floor(list.length / 2)].id : "";
+  // The caps (panellimits.go): this account's panels, and the store's room.
+  const capped = panelSale.max && panelSale.owned >= panelSale.max;
+  const blocked = capped || panelSale.full;
+  if (panelSale.max && panelSale.owned > 0 || blocked) {
+    out.push(h("div", { class: `capbar ${blocked ? "bad" : ""}` },
+      h("div", { class: "row between" }, h("b", {}, capped ? "به سقف خرید پنل رسیده‌اید" : panelSale.full ? "ظرفیت فروش پنل پر شده" : "پنل‌های شما"),
+        panelSale.max ? h("span", {}, `${num(panelSale.owned || 0)} از ${num(panelSale.max)}`) : null),
+      panelSale.max ? h("div", { class: "capbar-bar" }, h("i", { style: `--w:${Math.min(100, Math.round(((panelSale.owned || 0) / panelSale.max) * 100))}%` })) : null,
+      blocked ? h("p", { class: "muted small" }, capped ? "پنل تازه نمی‌توانید بخرید؛ پنل‌های فعلی‌تان را از تب «مدیریت» یا ربات شارژ کنید." : "فعلاً پنل تازه فروخته نمی‌شود؛ با پشتیبانی در تماس باشید.") : null));
+  }
   if (list.length) out.push(h("div", { class: "section-title" }, "بسته‌ها"),
     h("div", { class: "grid" }, list.map((p) => {
       const off = p.base > p.price;
@@ -844,7 +854,7 @@ function panelView() {
           p.can_delete ? h("span", { class: "chip" }, "حذف کاربر") : null),
         h("div", { class: "pkg-foot" },
           h("div", { class: "price" }, off ? h("s", {}, toman(p.base)) : null, h("b", {}, toman(p.price)), h("small", {}, "تومان")),
-          btn("خرید", "primary", () => buyPanel(p), "card")));
+          blocked ? btn("پر شده", "", () => toast(capped ? `هر حساب حداکثر ${num(panelSale.max)} پنل` : "ظرفیت فروش پر شده است")) : btn("خرید", "primary", () => buyPanel(p), "card")));
     })));
   if (!list.length) return out;
   out.push(h("div", { class: "section-title" }, "چطور کار می‌کند؟"),

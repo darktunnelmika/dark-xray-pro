@@ -263,6 +263,10 @@ func (b *Bot) repSalePick(ctx context.Context, chat int64, name, pkg string) {
 	if _, ok := b.repSaleBuyer(ctx, chat); !ok {
 		return
 	}
+	if err := b.Store.CheckPanelCaps(ctx, b.Seller, chat); err != nil { // before asking for a name
+		b.send(ctx, chat, panelCapText(err), &Keyboard{Rows: [][]Button{row(cbBtn("« بازگشت", "P:buy"))}})
+		return
+	}
 	b.setAwait(chat, "P:name:"+pkg)
 	b.send(ctx, chat, "✍️ یک <b>نام کاربری</b> برای پنل تازه بفرستید.\nحروف کوچک انگلیسی و عدد، ۳ تا ۲۴ حرف (مثلاً <code>ali-shop</code>).", &Keyboard{Rows: [][]Button{row(cbBtn("« بازگشت", "P:new"))}})
 }
@@ -287,6 +291,8 @@ func (b *Bot) repSaleOpen(ctx context.Context, chat int64, buyer, rep, name, pkg
 		if strings.Contains(err.Error(), "username is taken") {
 			b.setAwait(chat, "P:name:"+pkg)
 			msg = "این نام کاربری گرفته شده یا معتبر نیست. نام دیگری بفرستید:"
+		} else if t := panelCapText(err); t != "" {
+			msg = t
 		}
 		b.send(ctx, chat, msg, &Keyboard{Rows: [][]Button{row(cbBtn("« بازگشت", "P:buy"))}})
 		return
@@ -804,4 +810,25 @@ func (b *Bot) repSaleSetValue(ctx context.Context, chat int64, what, field, id, 
 		return
 	}
 	b.repSalePackage(ctx, chat, *pk)
+}
+
+// panelCapText is the customer's message for a panel cap (hubcore/panellimits.go).
+func panelCapText(err error) string {
+	m := err.Error()
+	n := ""
+	for _, r := range m {
+		if r >= '0' && r <= '9' {
+			n += string(r)
+		} else if n != "" {
+			break
+		}
+	}
+	v, _ := strconv.ParseInt(n, 10, 64)
+	switch {
+	case strings.Contains(m, "may have at most"):
+		return fmt.Sprintf("⛔️ به سقف خرید پنل رسیده‌اید: هر حساب حداکثر <b>%s</b> پنل نمایندگی می‌تواند داشته باشد.\nمی‌توانید پنل‌های فعلی‌تان را شارژ کنید.", faInt(v))
+	case strings.Contains(m, "panel capacity"):
+		return fmt.Sprintf("⛔️ ظرفیت فروش پنل این ربات (<b>%s</b> پنل) پر شده است. لطفاً با پشتیبانی در تماس باشید.", faInt(v))
+	}
+	return ""
 }

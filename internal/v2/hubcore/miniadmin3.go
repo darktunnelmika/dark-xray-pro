@@ -399,7 +399,12 @@ func registerMiniAdmin3(mux *http.ServeMux, s *Store,
 			list = append(list, map[string]any{"id": p.ID, "name": p.Name, "gb": p.GB, "price": price, "base": base, "unlimited": p.AllowUnlimited, "units": p.Units,
 				"max_clients": p.MaxClients, "max_days": p.MaxDays, "can_delete": p.CanDelete})
 		}
-		out := map[string]any{"on": len(list) > 0, "packages": list, "promo": s.promoView(ctx, seller)}
+		lim := s.PanelLimitsOf(ctx)
+		out := map[string]any{"on": len(list) > 0, "packages": list, "promo": s.promoView(ctx, seller),
+			"owned": s.BuyerPanels(ctx, u.ID), "max": lim.PerBuyer}
+		if seller != "" && s.SellerPanels(ctx, seller) >= lim.PerSeller {
+			out["full"] = true // the reseller sold all it may: top-ups only
+		}
 		if t, ok := trialFor(ctx, seller, u.ID); ok {
 			out["trial"] = map[string]any{"gb": t.GB, "days": t.Days, "max_clients": t.MaxClients}
 			out["on"] = true
@@ -489,6 +494,7 @@ func registerMiniAdmin3(mux *http.ServeMux, s *Store,
 	})
 	registerAppReceipt(mux, s)
 	registerPanelPromo(mux, s, mgr, deny)
+	registerPanelLimits(mux, s, mgr, deny)
 	registerMiniAdmin4(mux, s, mgr, deny, read)
 	registerMiniAdmin5(mux, s, mgr, deny, read)
 }

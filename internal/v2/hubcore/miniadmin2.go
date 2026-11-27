@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -198,6 +199,10 @@ func miniFa(err error) (string, int) {
 	switch {
 	case errors.Is(err, ErrFunds):
 		return "موجودی کیف پول شما در پنل اصلی برای قیمت عمده کافی نیست؛ اول کیف پول را شارژ کنید.", http.StatusBadRequest
+	case strings.Contains(msg, "may have at most") && strings.Contains(msg, "panels"):
+		return "به سقف خرید پنل رسیده‌اید: هر حساب حداکثر " + faDigits(firstNumber(msg)) + " پنل نمایندگی می‌تواند داشته باشد.", http.StatusBadRequest
+	case strings.Contains(msg, "panel capacity"):
+		return "ظرفیت فروش پنل این فروشنده (" + faDigits(firstNumber(msg)) + " پنل) پر شده است.", http.StatusBadRequest
 	case strings.Contains(msg, "logo must be"):
 		return "لوگو باید عکس PNG یا JPG زیر ۱۵۰ کیلوبایت باشد.", http.StatusBadRequest
 	case strings.Contains(msg, "custom plan ranges"):
@@ -799,4 +804,13 @@ func registerMiniAdmin2(mux *http.ServeMux, s *Store, base func(*http.Request) s
 		w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s-%dd-%s.xlsx"`, name, tk.days, s.now().Format("20060102")))
 		_ = WriteXLSX(w, sheets)
 	})
+}
+
+var numRE = regexp.MustCompile(`\d+`)
+
+func firstNumber(s string) string { return numRE.FindString(s) }
+
+// faDigits writes Latin digits in Persian.
+func faDigits(s string) string {
+	return strings.NewReplacer("0", "۰", "1", "۱", "2", "۲", "3", "۳", "4", "۴", "5", "۵", "6", "۶", "7", "۷", "8", "۸", "9", "۹").Replace(s)
 }

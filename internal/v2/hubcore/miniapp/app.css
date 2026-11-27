@@ -428,3 +428,12 @@ button.tile > svg { box-sizing: content-box; padding: 8px; border-radius: 12px; 
 .btn.danger { color: var(--bad); border-color: color-mix(in oklab, var(--bad) 40%, var(--line)); }
 .paused-note { margin-block-start: 10px; padding: 10px 12px; border-radius: 12px; font-size: 13px; background: color-mix(in oklab, var(--warn) 12%, var(--surface-2)); border: 1px solid color-mix(in oklab, var(--warn) 35%, var(--line)); }
 .svc-row.off { opacity: .7; border-style: dashed; }
+
+/* ---------- panel caps ---------- */
+.capbar { display: grid; gap: 8px; padding: 14px; border-radius: 16px; background: var(--surface); border: 1px solid var(--line); }
+.capbar.warn { border-color: color-mix(in oklab, var(--warn) 45%, var(--line)); } .capbar.bad { border-color: color-mix(in oklab, var(--bad) 45%, var(--line)); background: color-mix(in oklab, var(--bad) 8%, var(--surface)); }
+.capbar p { margin: 0; }
+.capbar-bar { block-size: 8px; border-radius: 99px; background: var(--surface-2); overflow: hidden; }
+.capbar-bar i { display: block; block-size: 100%; inline-size: var(--w); border-radius: inherit; background: linear-gradient(90deg, var(--ion), var(--ion-2)); }
+.capbar.warn .capbar-bar i { background: var(--warn); } .capbar.bad .capbar-bar i { background: var(--bad); }
+.row.between { justify-content: space-between; align-items: center; }

@@ -237,6 +237,10 @@ func (s *Store) createRepOrder(ctx context.Context, seller string, chat int64, b
 	}
 	kind := "topup"
 	if repID == "" {
+		// The caps on panels (panellimits.go): per account and per special reseller.
+		if err := s.CheckPanelCaps(ctx, seller, chat); err != nil {
+			return RepOrder{}, err
+		}
 		kind, repID = "new", strings.ToLower(strings.TrimSpace(name))
 		if !s.RepNameFree(ctx, repID) {
 			return RepOrder{}, fmt.Errorf("%w: this username is taken or not valid", ErrInvalid)
