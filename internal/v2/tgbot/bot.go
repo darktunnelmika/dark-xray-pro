@@ -700,7 +700,11 @@ func (b *Bot) shopIn(ctx context.Context, chat int64, cat string) {
 		return
 	}
 	kb.Rows = append(kb.Rows, row(cbBtn("« منوی اصلی", "home")))
-	b.send(ctx, chat, "🛍 <b>بسته‌ها</b>\n"+line+"\nهمهٔ بسته‌ها روی همهٔ سرورها کار می‌کنند و با یک لینک تحویل می‌شوند.\nیک بسته را انتخاب کنید:", kb)
+	intro := "همهٔ بسته‌ها روی همهٔ سرورها کار می‌کنند و با یک لینک تحویل می‌شوند.\nیک بسته را انتخاب کنید:"
+	if t := b.Store.ShopText(ctx, b.Seller); t != "" {
+		intro = esc(t) // the seller's own text above its plans
+	}
+	b.send(ctx, chat, "🛍 <b>بسته‌ها</b>\n"+line+"\n"+intro, kb)
 }
 
 func (b *Bot) buy(ctx context.Context, chat int64, productID, renew string) {

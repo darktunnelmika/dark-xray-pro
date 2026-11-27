@@ -189,7 +189,7 @@ func (s *Store) mgrHome(ctx context.Context, m miniMgr) (map[string]any, error) 
 	}
 	out := map[string]any{"role": m.Role, "owner": m.Owner, "seller": m.Seller,
 		"can": map[string]bool{"new": m.can("new"), "renew": m.can("renew"), "edit": m.can("edit"), "delete": m.can("delete"), "orders": m.can("orders"), "credit": m.can("credit"),
-			"sellers": m.can("sellers"), "bot": m.can("bot") && !m.Owner, "cards": m.can("cards"), "plans": m.can("plans"), "tickets": m.can("tickets"), "reports": m.can("reports")},
+			"sellers": m.can("sellers"), "bot": m.can("bot") && !m.Owner, "cards": m.can("cards"), "plans": m.can("plans"), "tickets": m.can("tickets"), "reports": m.can("reports"), "settings": m.can("settings")},
 		"stats": map[string]int{"total": total, "active": active, "online": online, "soon": soon, "ended": ended},
 		"plans": s.mgrPlans(ctx, m)}
 	today := s.tehranToday()

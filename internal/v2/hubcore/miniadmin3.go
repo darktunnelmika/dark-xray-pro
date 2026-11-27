@@ -401,4 +401,5 @@ func registerMiniAdmin3(mux *http.ServeMux, s *Store,
 			"card": map[string]string{"number": c.Number, "holder": c.Holder, "bank": c.Bank}, "bot": s.BotUsernameFor(ctx, seller)}, nil)
 	})
 	registerAppReceipt(mux, s)
+	registerMiniAdmin4(mux, s, mgr, deny, read)
 }

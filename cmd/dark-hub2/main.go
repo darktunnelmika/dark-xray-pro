@@ -168,6 +168,33 @@ func main() {
 			}
 			return b.AppReceipt(ctx, chat, name, kind, id, img)
 		})
+		// The bot a seller's Mini App speaks through: its own, or the main bot.
+		sellerBot := func(seller string) *tgbot.Bot {
+			if seller == "" {
+				return tgc.current()
+			}
+			rbots.mu.Lock()
+			defer rbots.mu.Unlock()
+			if rb := rbots.running[seller]; rb != nil {
+				return rb.bot
+			}
+			return nil
+		}
+		hubcore.SetAppBot(hubcore.AppBot{
+			Audience: func(ctx context.Context, seller string) map[string]int {
+				if b := sellerBot(seller); b != nil {
+					return b.AppAudience(ctx)
+				}
+				return nil
+			},
+			Broadcast: func(ctx context.Context, seller string, chat int64, text, audience string) (int, error) {
+				b := sellerBot(seller)
+				if b == nil {
+					return 0, fmt.Errorf("bot is off")
+				}
+				return b.AppBroadcast(ctx, chat, text, audience), nil
+			},
+		})
 		go rbots.run(ctx)
 		if tok, err := os.ReadFile(*tgTokenFile); err == nil && strings.TrimSpace(string(tok)) != "" {
 			owners := s.TelegramOwners(ctx)

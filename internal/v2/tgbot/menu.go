@@ -211,7 +211,7 @@ func (b *Bot) menu(ctx context.Context, chat int64) {
 		}
 	}
 	if len(views) == 0 {
-		if w := b.Store.Setting(ctx, "tg_welcome"); w != "" {
+		if w := b.Store.Welcome(ctx, b.Seller); w != "" {
 			sb.WriteString(esc(w) + "\n")
 		} else {
 			brand := "به <b>Dark VPN</b> خوش آمدید."

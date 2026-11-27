@@ -198,6 +198,30 @@ func miniFa(err error) (string, int) {
 	switch {
 	case errors.Is(err, ErrFunds):
 		return "موجودی کیف پول شما در پنل اصلی برای قیمت عمده کافی نیست؛ اول کیف پول را شارژ کنید.", http.StatusBadRequest
+	case strings.Contains(msg, "code is taken"):
+		return "این کد قبلاً گرفته شده؛ کد دیگری بنویسید.", http.StatusBadRequest
+	case strings.Contains(msg, "code: 3 to 32"):
+		return "کد ۳ تا ۳۲ حرف انگلیسی، عدد، - یا _ باشد.", http.StatusBadRequest
+	case strings.Contains(msg, "either a percent"):
+		return "یا درصد (۱ تا ۱۰۰) بدهید یا مبلغ تخفیف.", http.StatusBadRequest
+	case strings.Contains(msg, "public username"):
+		return "کانال باید آیدی عمومی مثل @mychannel باشد.", http.StatusBadRequest
+	case strings.Contains(msg, "at most three channels"):
+		return "حداکثر سه کانال.", http.StatusBadRequest
+	case strings.Contains(msg, "add a channel first"):
+		return "اول یک کانال اضافه کنید.", http.StatusBadRequest
+	case strings.Contains(msg, "trial is 0-1000"), strings.Contains(msg, "trial needs a volume"):
+		return "تست رایگان: حجم (مثلاً ۲۰۰ مگ یا ۱ گیگ) و ۱ تا ۷۲۰ ساعت.", http.StatusBadRequest
+	case strings.Contains(msg, "inbounds a trial"):
+		return "اینباندی برای تست پیدا نشد؛ از پنل وب انتخاب کنید.", http.StatusBadRequest
+	case strings.Contains(msg, "Telegram id looks like"):
+		return "آیدی تلگرام باید مثل @myshop باشد.", http.StatusBadRequest
+	case strings.Contains(msg, "support link must"):
+		return "لینک پشتیبانی باید با https:// شروع شود.", http.StatusBadRequest
+	case strings.Contains(msg, "colour must"):
+		return "رنگ باید مثل #2de2e6 باشد.", http.StatusBadRequest
+	case strings.Contains(msg, "at most 1000 characters"), strings.Contains(msg, "too long"):
+		return "متن خیلی بلند است.", http.StatusBadRequest
 	case strings.Contains(msg, "below the wholesale price"):
 		return "قیمت فروش نمی‌تواند کمتر از قیمت عمده باشد.", http.StatusBadRequest
 	case strings.Contains(msg, "already decided"):

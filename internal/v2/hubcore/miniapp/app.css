@@ -215,3 +215,4 @@ body { background-image: radial-gradient(color-mix(in oklab, var(--muted) 14%, t
 .sr-copy { flex: none; inline-size: 40px; block-size: 40px; display: grid; place-items: center; border-radius: 12px; border: 1px solid var(--line); background: var(--surface-2); color: var(--text); cursor: pointer; }
 .sr-copy svg { inline-size: 18px; block-size: 18px; }
 .sheet .card.svc { border: 0; background: transparent; padding: 0; box-shadow: none; }
+.shop-text { white-space: pre-wrap; line-height: 1.8; }

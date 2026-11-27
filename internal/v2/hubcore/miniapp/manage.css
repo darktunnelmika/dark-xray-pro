@@ -112,3 +112,8 @@ details.more { margin-block-start: 6px; } details.more summary { cursor: pointer
 .pricein input { inline-size: 120px; padding: 8px 10px; border-radius: 11px; border: 1px solid var(--line); background: var(--surface-2); color: var(--text); font: inherit; }
 .sheet select { inline-size: 100%; padding: 10px 12px; border-radius: 13px; border: 1px solid var(--line); background: var(--surface-2); color: var(--text); font: inherit; }
 .card.alert.bad { border-color: color-mix(in oklab, var(--bad) 40%, var(--line)); }
+/* Bot settings (manage2.js). */
+.card textarea, .card input:not([type=checkbox]):not([type=color]) { inline-size: 100%; box-sizing: border-box; padding: 10px 12px; border-radius: 13px; border: 1px solid var(--line); background: var(--surface-2); color: var(--text); font: inherit; }
+.card textarea { resize: vertical; line-height: 1.7; }
+.card > input + input { margin-block-start: 8px; }
+input[type=color] { inline-size: 100%; block-size: 42px; padding: 2px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface-2); }

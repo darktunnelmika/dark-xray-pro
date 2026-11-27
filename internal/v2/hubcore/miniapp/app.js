@@ -438,6 +438,7 @@ function shop() {
   }
   const cats = [...new Set(state.products.map((p) => p.category || ""))];
   const out = [h("div", { class: "section-title" }, "پلن‌ها")];
+  if (state.shop_text) out.push(h("div", { class: "card shop-text" }, state.shop_text));
   // The middle-priced plan is the suggested one.
   const priced = state.products.filter((p) => p.price > 0).sort((a, b) => a.price - b.price);
   const feat = priced.length >= 3 ? priced[Math.floor(priced.length / 2)].id : "";

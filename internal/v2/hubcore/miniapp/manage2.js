@@ -11,6 +11,7 @@ Object.assign(IC, {
   back: "M9 18l6-6-6-6",
   down: "M12 3v12M6 11l6 6 6-6M4 21h16",
   shop: "M3 9l1.5-5h15L21 9M3 9h18v11H3zM9 13h6",
+  gear: "M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z",
 });
 
 const M2 = { wallet: null, ledger: [], ledgerEnd: false, sellers: null, bot: null, cards: null, plans: null, tickets: [], tStatus: "active", report: null, days: 7 };
@@ -39,6 +40,9 @@ async function m2Fetch(view) {
     case "tickets": M2.tickets = await api("GET", `m/tickets?s=${M2.tStatus}`); break;
     case "report": M2.report = await api("GET", `m/report?days=${M2.days}`); break;
     case "resale": M2.resale = await api("GET", "m/resale"); break;
+    case "settings": M2.settings = await api("GET", "m/settings"); break;
+    case "discounts": M2.discounts = await api("GET", "m/discounts"); break;
+    case "broadcast": M2.bc = await api("GET", "m/broadcast"); break;
   }
 }
 const m2Reload = () => m2Fetch(M.view).then(render).catch((e) => toast(e.message));
@@ -57,6 +61,9 @@ function moreView() {
     c.plans ? tile("plans", "پلن‌ها و قیمت‌ها", "tag", "فروشگاه ربات") : null,
     c.tickets ? tile("tickets", "تیکت‌ها", "chat", "پشتیبانی مشتری", d.tickets) : null,
     c.reports ? tile("report", "گزارش فروش", "chart", "نمودار و اکسل") : null,
+    c.settings ? tile("settings", "تنظیمات ربات", "gear", "خوش‌آمد، تست، کانال، ظاهر") : null,
+    c.settings && !d.sub_seller ? tile("discounts", "کد تخفیف", "tag", "درصد یا مبلغ، با سقف") : null,
+    c.settings ? tile("broadcast", "پیام همگانی", "send", "به همه یا یک گروه") : null,
   ].filter(Boolean);
   const out = [h("div", { class: "tiles" }, tiles)];
   if (d.role === "owner" || d.role === "manager") {
@@ -527,4 +534,131 @@ function ownerSaleView(d) {
     }, "check")];
 }
 
-const M2V = { more: moreView, resale: resaleView, wallet: walletView, sellers: sellersView, bot: botView, cards: cardsView, plans: plansView, tickets: ticketsView, report: reportView };
+// ---------- bot settings ----------
+function settingsView() {
+  const d = M2.settings;
+  if (!d) return [backHead("تنظیمات ربات"), spin()];
+  const ta = (v, ph) => h("textarea", { rows: "4", maxlength: "1000", placeholder: ph }, v || "");
+  const welcome = ta(d.welcome, "خالی = متن پیش‌فرض ربات");
+  const shopText = ta(d.shop_text, "مثلاً: همهٔ پلن‌ها با پشتیبانی ۲۴ ساعته · تحویل فوری");
+  const out = [backHead("تنظیمات ربات"),
+    h("div", { class: "section-title" }, "متن‌ها"),
+    h("div", { class: "card" }, field("خوش‌آمد (برای مشتری تازه)", welcome), field("متن بالای پلن‌ها (ربات و فروشگاه)", shopText))];
+  let brand = null;
+  if (d.brand) {
+    const b = d.brand;
+    brand = { title: h("input", { value: b.title || "", maxlength: "80", placeholder: "اسم فروشگاه" }),
+      accent: h("input", { type: "color", value: /^#[0-9a-f]{6}$/i.test(b.accent || "") ? b.accent : "#2de2e6" }),
+      announce: h("textarea", { rows: "2", maxlength: "1000", placeholder: "یک خبر کوتاه بالای فروشگاه (اختیاری)" }, b.announce || ""),
+      telegram: h("input", { class: "ltr", value: b.telegram ? "@" + b.telegram : "", placeholder: "@support_id" }) };
+    out.push(h("div", { class: "section-title" }, "ظاهر فروشگاه"),
+      h("div", { class: "card" }, field("اسم فروشگاه", brand.title), field("رنگ اصلی", brand.accent), field("خبر بالای فروشگاه", brand.announce), field("آیدی پشتیبانی", brand.telegram)));
+  }
+  let trial = null;
+  if (d.trial) {
+    const t = d.trial;
+    const [row, on] = check("تست رایگان روشن باشد (هر کاربر یک بار)", t.enabled);
+    const mb = h("input", { type: "number", inputmode: "numeric", value: t.mb || (t.gb ? t.gb * 1024 : 200) });
+    const hours = h("input", { type: "number", inputmode: "numeric", value: t.hours || 24 });
+    const ips = h("input", { type: "number", inputmode: "numeric", value: t.max_ips ?? 1 });
+    trial = { on, mb, hours, ips };
+    out.push(h("div", { class: "section-title" }, "تست رایگان"),
+      h("div", { class: "card" }, row, h("div", { class: "two" }, field("حجم (مگابایت)", mb), field("مدت (ساعت)", hours)), field("کاربر هم‌زمان", ips),
+        d.owner ? null : h("p", { class: "muted small" }, "حجم تست از اعتبار شما کم می‌شود.")));
+  }
+  const j = d.join || {};
+  const [jrow, jon] = check("قبل از خرید و تست، عضویت در کانال لازم باشد", j.enabled);
+  const chans = [0, 1, 2].map((i) => h("input", { class: "ltr", value: (j.channels || [])[i] || "", placeholder: i ? "کانال دوم یا سوم (اختیاری)" : "@mychannel" }));
+  out.push(h("div", { class: "section-title" }, "عضویت اجباری"),
+    h("div", { class: "card" }, jrow, chans, h("p", { class: "muted small" }, "ربات باید ادمین کانال باشد تا بتواند عضویت را بررسی کند.")));
+  const save = btn("ذخیرهٔ همه", "primary block big", async () => {
+    save.disabled = true;
+    const body = { welcome: welcome.value, shop_text: shopText.value, join: { enabled: jon.checked, channels: chans.map((c) => c.value.trim()).filter(Boolean) } };
+    if (trial) {
+      const mbv = Math.max(0, Math.round(+trial.mb.value || 0));
+      body.trial = { enabled: trial.on.checked, mb: mbv % 1024 === 0 ? 0 : mbv, gb: mbv % 1024 === 0 ? mbv / 1024 : 0, hours: Math.round(+trial.hours.value || 0), max_ips: Math.round(+trial.ips.value || 0) };
+    }
+    if (brand) body.brand = { title: brand.title.value, accent: brand.accent.value, announce: brand.announce.value, telegram: brand.telegram.value, support_url: d.brand.support_url || "" };
+    try { await api("POST", "m/settings", body); haptic("success"); toast("ذخیره شد"); m2Reload(); }
+    catch (e) { save.disabled = false; haptic("error"); toast(e.message); }
+  }, "check");
+  out.push(save);
+  return out;
+}
+
+// ---------- discount codes ----------
+function discountsView() {
+  const list = M2.discounts;
+  if (!list) return [backHead("کد تخفیف"), spin()];
+  const now = Date.now() / 1000;
+  const out = [backHead("کد تخفیف", btnIcon("plus", "کد تازه", () => discountSheet({ enabled: true, once_per_buyer: true })))];
+  if (!list.length) out.push(h("div", { class: "card empty" }, h("p", {}, "هنوز کدی نساخته‌اید. مشتری کد را در ربات وارد می‌کند و روی خریدش اعمال می‌شود.")));
+  out.push(h("div", { class: "ulist" }, list.map((d) => {
+    const dead = !d.enabled || (d.expires_unix && d.expires_unix <= now) || (d.max_uses && d.used >= d.max_uses);
+    return h("button", { class: `urow ${dead ? "off" : ""}`, onclick: () => discountSheet(d) },
+      h("div", { class: "u-main" },
+        h("div", { class: "u-top" }, h("b", { class: "ltr" }, d.code), h("span", { class: `pill ${dead ? "" : "good"}` }, d.percent ? `${num(d.percent)}٪` : `${toman(d.amount)} تومان`)),
+        h("div", { class: "u-meta" }, h("span", {}, `${num(d.used)}${d.max_uses ? " از " + num(d.max_uses) : ""} استفاده`), h("span", {}, d.expires_unix ? `تا ${date(d.expires_unix)}` : "بی‌مهلت"))));
+  })));
+  return out;
+}
+
+function discountSheet(d) {
+  const isNew = !d.code;
+  const code = h("input", { class: "ltr", value: d.code || "", placeholder: "مثلاً YALDA30", autocapitalize: "characters", disabled: isNew ? null : "" });
+  const pct = h("input", { type: "number", inputmode: "numeric", value: d.percent || "", placeholder: "درصد" });
+  const amt = h("input", { type: "number", inputmode: "numeric", value: d.amount || "", placeholder: "یا مبلغ (تومان)" });
+  const uses = h("input", { type: "number", inputmode: "numeric", value: d.max_uses || "", placeholder: "۰ = بی‌سقف" });
+  const days = h("input", { type: "number", inputmode: "numeric", value: d.expires_unix ? Math.max(1, Math.ceil((d.expires_unix - Date.now() / 1000) / 86400)) : "", placeholder: "۰ = بی‌مهلت" });
+  const [onceRow, once] = check("هر مشتری فقط یک بار", d.once_per_buyer);
+  const [onRow, on] = check("فعال", d.enabled);
+  const go = btn("ذخیره", "primary block big", async () => {
+    go.disabled = true;
+    const dd = Math.round(+days.value || 0);
+    try {
+      await api("POST", "m/discount", { code: code.value.trim().toUpperCase(), percent: Math.round(+pct.value || 0), amount: +pct.value ? 0 : Math.round(+amt.value || 0),
+        max_uses: Math.round(+uses.value || 0), expires_unix: dd ? Math.floor(Date.now() / 1000) + dd * 86400 : 0, once_per_buyer: once.checked, enabled: on.checked, note: d.note || "" });
+      close(); haptic("success"); toast("ذخیره شد"); m2Reload();
+    } catch (e) { go.disabled = false; haptic("error"); toast(e.message); }
+  }, "check");
+  const close = sheet(h("h2", {}, isNew ? "کد تخفیف تازه" : `کد ${d.code}`), field("کد", code),
+    h("div", { class: "two" }, field("درصد تخفیف", pct), field("یا مبلغ تخفیف", amt)),
+    h("div", { class: "two" }, field("سقف استفاده", uses), field("مهلت (روز)", days)), onceRow, onRow, go,
+    isNew ? null : btn("حذف کد", "danger block ghost", async () => {
+      try { await api("POST", "m/discount/delete", { code: d.code }); close(); toast("حذف شد"); m2Reload(); } catch (e) { toast(e.message); }
+    }, "trash"));
+}
+
+// ---------- a message to every customer ----------
+const audFa = { all: "همه", active: "سرویس فعال", expiring: "رو به اتمام", expired: "تمام‌شده", none: "بدون سرویس" };
+function broadcastView() {
+  const d = M2.bc;
+  if (!d) return [backHead("پیام همگانی"), spin()];
+  if (!d.on) return [backHead("پیام همگانی"), h("div", { class: "card" }, h("p", {}, "ربات شما روشن نیست. اول در «ربات من» روشنش کنید."))];
+  M2.aud = M2.aud || "all";
+  const txt = h("textarea", { rows: "6", maxlength: "3500", placeholder: "متن پیام…\nبرای دکمهٔ لینک، خط آخر: [متن دکمه](https://…)" }, M2.bcText || "");
+  txt.addEventListener("input", () => { M2.bcText = txt.value; });
+  const chip = (k) => h("button", { class: `chip ${M2.aud === k ? "on" : ""}`, onclick: () => { M2.aud = k; render(); } }, `${audFa[k]} (${num((d.audience || {})[k] || 0)})`);
+  const send = async (aud) => {
+    if (!txt.value.trim()) { toast("متن پیام را بنویسید"); return; }
+    try {
+      const r = await api("POST", "m/broadcast", { text: txt.value, audience: aud });
+      haptic("success");
+      if (aud === "test") toast("پیام آزمایشی در چت ربات برایتان رفت");
+      else { M2.bcText = ""; celebrate(`ارسال برای ${num(r.count)} نفر شروع شد؛ گزارشش در ربات می‌آید`); render(); }
+    } catch (e) { haptic("error"); toast(e.message); }
+  };
+  return [backHead("پیام همگانی"),
+    h("div", { class: "card" }, txt),
+    h("div", { class: "section-title" }, "گیرنده‌ها"),
+    h("div", { class: "chips" }, ["all", "active", "expiring", "expired", "none"].map(chip)),
+    h("div", { class: "row" }, btn("ارسال آزمایشی به خودم", "", () => send("test"), "send"),
+      btn("ارسال", "primary", () => {
+        const n = (d.audience || {})[M2.aud] || 0;
+        if (!n) { toast("کسی در این گروه نیست"); return; }
+        const close = sheet(h("h2", {}, `ارسال برای ${num(n)} نفر؟`), h("p", { class: "muted" }, "بعد از شروع، فقط از ربات می‌شود متوقفش کرد."),
+          h("div", { class: "row" }, btn("بله، بفرست", "primary", () => { close(); send(M2.aud); }, "send"), btn("انصراف", "", () => close())));
+      }, "check"))];
+}
+
+const M2V = { settings: settingsView, discounts: discountsView, broadcast: broadcastView, more: moreView, resale: resaleView, wallet: walletView, sellers: sellersView, bot: botView, cards: cardsView, plans: plansView, tickets: ticketsView, report: reportView };

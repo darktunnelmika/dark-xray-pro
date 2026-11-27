@@ -272,7 +272,7 @@ func registerMiniApp(mux *http.ServeMux, s *Store) {
 		out := map[string]any{"user": u, "services": services, "orders": orders, "products": products,
 			"pay_text": s.Setting(r.Context(), "tg_pay_text"), "support": ss.SupportURL, "title": ss.Title, "announce": ss.Announce,
 			"stars": invoiceLinker != nil && seller == "", "wallet": 0, "bot": s.Setting(r.Context(), "tg_username"),
-			"toman": s.TomanBalance(r.Context(), seller, u.ID), "accent": ss.Accent, "logo": ss.Logo}
+			"toman": s.TomanBalance(r.Context(), seller, u.ID), "accent": ss.Accent, "logo": ss.Logo, "shop_text": s.ShopText(r.Context(), seller)}
 		if seller == "" {
 			out["wallet"] = s.WalletBalance(r.Context(), u.ID)
 		} else {

@@ -51,6 +51,7 @@ type Discount struct {
 	Enabled      bool   `json:"enabled"`
 	Note         string `json:"note"`
 	CreatedUnix  int64  `json:"created_unix"`
+	Seller       string `json:"seller"` // "" = the owner's (works anywhere); else only on that reseller's products
 }
 
 var codeRE = regexp.MustCompile(`^[A-Z0-9_-]{3,32}$`)
@@ -67,14 +68,15 @@ func (s *Store) ensureDiscountSchema() error {
 			return err
 		}
 	}
-	return nil
+	// seller: a reseller's own code works only on its products ("" = the owner's, anywhere).
+	return s.addColumn("discounts", "seller", "TEXT NOT NULL DEFAULT ''")
 }
 
-const discountCols = `code,percent,amount,max_uses,used,expires_unix,product_id,once_per_buyer,enabled,note,created_unix`
+const discountCols = `code,percent,amount,max_uses,used,expires_unix,product_id,once_per_buyer,enabled,note,created_unix,seller`
 
 func scanDiscount(r scanner) (Discount, error) {
 	var d Discount
-	err := r.Scan(&d.Code, &d.Percent, &d.Amount, &d.MaxUses, &d.Used, &d.ExpiresUnix, &d.ProductID, &d.OncePerBuyer, &d.Enabled, &d.Note, &d.CreatedUnix)
+	err := r.Scan(&d.Code, &d.Percent, &d.Amount, &d.MaxUses, &d.Used, &d.ExpiresUnix, &d.ProductID, &d.OncePerBuyer, &d.Enabled, &d.Note, &d.CreatedUnix, &d.Seller)
 	return d, err
 }
 
@@ -98,6 +100,11 @@ func (s *Store) Discounts(ctx context.Context) ([]Discount, error) {
 
 // PutDiscount creates or edits a code (the use count is kept).
 func (s *Store) PutDiscount(ctx context.Context, d Discount) error {
+	return s.PutDiscountFor(ctx, "", d)
+}
+
+// PutDiscountFor saves a seller's code; a code another seller holds is taken.
+func (s *Store) PutDiscountFor(ctx context.Context, seller string, d Discount) error {
 	d.Code = normCode(d.Code)
 	if !codeRE.MatchString(d.Code) {
 		return fmt.Errorf("%w: code: 3 to 32 letters, digits, - or _", ErrInvalid)
@@ -106,16 +113,46 @@ func (s *Store) PutDiscount(ctx context.Context, d Discount) error {
 		return fmt.Errorf("%w: give either a percent (1-100) or an amount", ErrInvalid)
 	}
 	if d.ProductID != "" {
-		var x int
-		if err := s.ro.QueryRowContext(ctx, `SELECT 1 FROM products WHERE id=?`, d.ProductID).Scan(&x); err != nil {
+		var ps string
+		if err := s.ro.QueryRowContext(ctx, `SELECT seller FROM products WHERE id=?`, d.ProductID).Scan(&ps); err != nil || (seller != "" && ps != seller) {
 			return fmt.Errorf("%w: unknown product", ErrInvalid)
 		}
 	}
-	_, err := s.db.ExecContext(ctx, `INSERT INTO discounts(code,percent,amount,max_uses,expires_unix,product_id,once_per_buyer,enabled,note,created_unix) VALUES(?,?,?,?,?,?,?,?,?,?)
+	r, err := s.db.ExecContext(ctx, `INSERT INTO discounts(code,percent,amount,max_uses,expires_unix,product_id,once_per_buyer,enabled,note,created_unix,seller) VALUES(?,?,?,?,?,?,?,?,?,?,?)
 ON CONFLICT(code) DO UPDATE SET percent=excluded.percent, amount=excluded.amount, max_uses=excluded.max_uses, expires_unix=excluded.expires_unix,
-product_id=excluded.product_id, once_per_buyer=excluded.once_per_buyer, enabled=excluded.enabled, note=excluded.note`,
-		d.Code, d.Percent, d.Amount, d.MaxUses, d.ExpiresUnix, d.ProductID, d.OncePerBuyer, d.Enabled, d.Note, s.now().Unix())
-	return err
+product_id=excluded.product_id, once_per_buyer=excluded.once_per_buyer, enabled=excluded.enabled, note=excluded.note WHERE discounts.seller=excluded.seller`,
+		d.Code, d.Percent, d.Amount, d.MaxUses, d.ExpiresUnix, d.ProductID, d.OncePerBuyer, d.Enabled, d.Note, s.now().Unix(), seller)
+	if err != nil {
+		return err
+	}
+	if n, _ := r.RowsAffected(); n == 0 {
+		return fmt.Errorf("%w: this code is taken", ErrInvalid)
+	}
+	return nil
+}
+
+// DiscountsOf lists one seller's codes, newest first.
+func (s *Store) DiscountsOf(ctx context.Context, seller string) ([]Discount, error) {
+	all, err := s.Discounts(ctx)
+	out := []Discount{}
+	for _, d := range all {
+		if d.Seller == seller {
+			out = append(out, d)
+		}
+	}
+	return out, err
+}
+
+// DeleteDiscountFor removes one of the seller's own codes.
+func (s *Store) DeleteDiscountFor(ctx context.Context, seller, code string) error {
+	r, err := s.db.ExecContext(ctx, `DELETE FROM discounts WHERE code=? AND seller=?`, normCode(code), seller)
+	if err != nil {
+		return err
+	}
+	if n, _ := r.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 func (s *Store) DeleteDiscount(ctx context.Context, code string) error {
@@ -157,6 +194,12 @@ func (s *Store) checkDiscount(ctx context.Context, q queryer, code, productID, b
 		return d, ErrCodeUsedUp
 	case d.ProductID != "" && productID != "" && d.ProductID != productID:
 		return d, ErrCodeProduct
+	}
+	if d.Seller != "" && productID != "" {
+		var ps string
+		if q.QueryRowContext(ctx, `SELECT seller FROM products WHERE id=?`, productID).Scan(&ps) != nil || ps != d.Seller {
+			return d, ErrCodeProduct
+		}
 	}
 	if d.OncePerBuyer && buyer != "" {
 		var n int
