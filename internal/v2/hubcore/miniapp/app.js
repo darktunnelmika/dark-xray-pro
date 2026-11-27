@@ -280,8 +280,57 @@ function cardBox(amount, card) {
 function receiptSteps() {
   return h("ol", { class: "steps" },
     h("li", {}, "مبلغ را به کارت بالا واریز کنید."),
-    h("li", {}, "از رسید پرداخت عکس بگیرید."),
-    h("li", {}, "عکس رسید را در همین ربات بفرستید؛ بعد از تأیید، خودکار انجام می‌شود."));
+    h("li", {}, "از رسید پرداخت عکس بگیرید (یا اسکرین‌شات)."),
+    h("li", {}, "با دکمهٔ پایین عکس را همین‌جا بفرستید؛ بعد از تأیید، خودکار انجام می‌شود."));
+}
+
+// pickImage asks for a photo and returns it as a JPEG data URL, at most
+// 1600 px on its long side (receipts stay readable and small).
+function pickImage() {
+  return new Promise((res, rej) => {
+    const inp = h("input", { type: "file", accept: "image/*", style: "position:fixed;inset-inline-start:-999px" });
+    document.body.append(inp);
+    inp.addEventListener("change", () => {
+      const f = inp.files && inp.files[0];
+      inp.remove();
+      if (!f) { rej(new Error("عکسی انتخاب نشد")); return; }
+      const fr = new FileReader();
+      fr.onerror = () => rej(new Error("خواندن عکس ممکن نشد"));
+      fr.onload = () => {
+        const img = new Image();
+        img.onerror = () => res(fr.result);
+        img.onload = () => {
+          try {
+            const k = Math.min(1, 1600 / Math.max(img.width, img.height));
+            const c = document.createElement("canvas");
+            c.width = Math.max(1, Math.round(img.width * k)); c.height = Math.max(1, Math.round(img.height * k));
+            c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+            res(c.toDataURL("image/jpeg", 0.85));
+          } catch { res(fr.result); }
+        };
+        img.src = fr.result;
+      };
+      fr.readAsDataURL(f);
+    });
+    inp.click();
+  });
+}
+
+// receiptButton uploads the receipt photo of a payment from the app (kind:
+// order | topup | panel); the bot takes it as if it were sent in the chat.
+function receiptButton(kind, id, done, cls) {
+  const label = "فرستادن عکس رسید";
+  const b = btn(label, cls || "primary block big", async () => {
+    let data;
+    try { data = await pickImage(); } catch { return; }
+    b.disabled = true; b.querySelector("span").textContent = "در حال فرستادن…";
+    try {
+      await api("POST", "receipt", { kind, id, image: data });
+      haptic("success"); celebrate("رسید فرستاده شد ✅ بعد از بررسی خبرتان می‌کنیم");
+      if (done) done();
+    } catch (e) { haptic("error"); toast(e.message); b.disabled = false; b.querySelector("span").textContent = label; }
+  }, "card");
+  return b;
 }
 
 // showPay shows how to pay an order: its own card (several cards: each
@@ -308,10 +357,11 @@ function showPay(p, renewEmail, r) {
     sheet(title, h("div", { class: "pay" }, "امروز امکان پرداخت کارت‌به‌کارت نیست؛ کمی بعد دوباره امتحان کنید یا به پشتیبانی پیام دهید."), btn("رفتن به ربات", "primary block", openBot, "chat"));
     return;
   }
-  sheet(title,
+  const close = sheet(title,
     paid ? cardBox(p.price, r.card) : h("div", { class: "pay" }, state.pay_text || "پشتیبانی برای پرداخت با شما تماس می‌گیرد."),
     paid ? receiptSteps() : null,
-    btn("رفتن به ربات برای ارسال رسید", "primary block", openBot, "chat"));
+    paid ? receiptButton("order", r.id, () => { close(); load(false); }) : null,
+    btn("یا در ربات بفرستید", paid ? "ghost block" : "primary block", openBot, "chat"));
 }
 
 async function buy(p, renewEmail) {
@@ -370,9 +420,9 @@ function buyPanel(p) {
     try {
       const r = await api("POST", "panel", { package: p.id, name: name.value.trim().toLowerCase() });
       close(); haptic("success");
-      sheet(h("h2", {}, `سفارش پنل #${num(r.id)} ثبت شد`), h("p", { class: "muted small" }, "نام کاربری پنل: ", ltr(r.username)),
+      const done = sheet(h("h2", {}, `سفارش پنل #${num(r.id)} ثبت شد`), h("p", { class: "muted small" }, "نام کاربری پنل: ", ltr(r.username)),
         r.card && r.card.number ? cardBox(r.price, r.card) : h("div", { class: "pay" }, "پشتیبانی برای پرداخت با شما تماس می‌گیرد."),
-        receiptSteps(), btn("رفتن به ربات برای ارسال رسید", "primary block", openBot, "chat"));
+        receiptSteps(), receiptButton("panel", r.id, () => done()), btn("یا در ربات بفرستید", "ghost block", openBot, "chat"));
     } catch (e) { go.disabled = false; haptic("error"); toast(e.message.includes("گرفته شده") ? "این نام کاربری گرفته شده؛ نام دیگری بنویسید." : e.message); }
   }, "card");
   const close = sheet(h("h2", {}, "خرید پنل نمایندگی"),
@@ -447,8 +497,8 @@ async function topup(amount) {
   try {
     const r = await api("POST", "topup", { amount });
     haptic("success");
-    sheet(h("h2", {}, `شارژ #${num(r.id)} ثبت شد`), cardBox(amount, r.card), receiptSteps(),
-      btn("رفتن به ربات برای ارسال رسید", "primary block", openBot, "chat"));
+    const close = sheet(h("h2", {}, `شارژ #${num(r.id)} ثبت شد`), cardBox(amount, r.card), receiptSteps(),
+      receiptButton("topup", r.id, () => close()), btn("یا در ربات بفرستید", "ghost block", openBot, "chat"));
   } catch (e) { haptic("error"); toast(e.message); }
 }
 
@@ -461,6 +511,7 @@ function orders() {
       h("div", {}, h("div", { class: "what" }, `#${num(o.id)} · ${o.product}`),
         h("div", { class: "muted small" }, date(o.created), o.amount ? ` · ${toman(o.amount)} تومان` : "", o.renew ? [" · تمدید ", ltr(o.renew)] : "")),
       h("div", { class: "order-side" }, h("span", { class: "pill " + cls }, label),
+        o.needs_receipt ? receiptButton("order", o.id, () => load(false), "small") : null,
         o.status === "pending" ? btn("لغو", "ghost small", async () => {
           try { await api("POST", "cancel/" + o.id); toast("لغو شد"); await load(false); } catch (e) { toast(e.message); }
         }) : null));

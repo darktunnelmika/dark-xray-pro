@@ -400,4 +400,5 @@ func registerMiniAdmin3(mux *http.ServeMux, s *Store,
 		reply(w, map[string]any{"id": o.ID, "gb": o.GB, "price": o.Price, "username": o.RepID,
 			"card": map[string]string{"number": c.Number, "holder": c.Holder, "bank": c.Bank}, "bot": s.BotUsernameFor(ctx, seller)}, nil)
 	})
+	registerAppReceipt(mux, s)
 }

@@ -154,6 +154,20 @@ func main() {
 		hubcore.SetCustomerNotify(tgc.tell)
 		rbots := &repBots{store: s, subBase: *subBase, parent: ctx, running: map[string]*repBot{}}
 		hubcore.SetSellerNotify(rbots.tell)
+		hubcore.SetAppReceipt(func(ctx context.Context, seller string, chat int64, name, kind string, id int64, img []byte) error {
+			b := tgc.current()
+			if seller != "" {
+				rbots.mu.Lock()
+				if rb := rbots.running[seller]; rb != nil {
+					b = rb.bot
+				}
+				rbots.mu.Unlock()
+			}
+			if b == nil {
+				return fmt.Errorf("bot is off")
+			}
+			return b.AppReceipt(ctx, chat, name, kind, id, img)
+		})
 		go rbots.run(ctx)
 		if tok, err := os.ReadFile(*tgTokenFile); err == nil && strings.TrimSpace(string(tok)) != "" {
 			owners := s.TelegramOwners(ctx)

@@ -110,11 +110,12 @@ async function buyCredit(p) {
     const r = await api("POST", "m/topup", { package: p.id, buyer: (tg && tg.initDataUnsafe && tg.initDataUnsafe.user && tg.initDataUnsafe.user.first_name) || "" });
     haptic("success");
     const goBot = () => { try { tg.openTelegramLink(`https://t.me/${r.bot}`); tg.close(); } catch { location.href = `https://t.me/${r.bot}`; } };
-    sheet(h("h2", {}, `شارژ ${num(r.gb)} گیگ · سفارش #${num(r.id)}`),
+    const close = sheet(h("h2", {}, `شارژ ${num(r.gb)} گیگ · سفارش #${num(r.id)}`),
       r.card && r.card.number ? cardBox(r.price, r.card) : h("p", { class: "muted" }, "کارت پرداخت هنوز تعریف نشده؛ با مدیر پنل تماس بگیرید."),
-      h("ol", { class: "steps" }, h("li", {}, "مبلغ را به کارت بالا واریز کنید."), h("li", {}, r.bot ? `عکس رسید را در ربات @${r.bot} بفرستید.` : "عکس رسید را در ربات اصلی بفرستید."),
+      h("ol", { class: "steps" }, h("li", {}, "مبلغ را به کارت بالا واریز کنید."), h("li", {}, "عکس رسید را با دکمهٔ پایین همین‌جا بفرستید."),
         h("li", {}, "بعد از تأیید، اعتبار خودکار به پنل شما اضافه می‌شود.")),
-      r.bot ? btn("رفتن به ربات و ارسال رسید", "primary block big", goBot, "send") : null);
+      receiptButton("panel", r.id, () => close()),
+      r.bot ? btn(`یا در ربات @${r.bot} بفرستید`, "ghost block", goBot, "send") : null);
   } catch (e) { haptic("error"); toast(e.message); }
 }
 
@@ -499,9 +500,10 @@ function resaleWalletSheet() {
 
 function payToOwnerSheet(title, r) {
   const goBot = () => { try { tg.openTelegramLink(`https://t.me/${r.bot}`); tg.close(); } catch { location.href = `https://t.me/${r.bot}`; } };
-  sheet(h("h2", {}, title), r.card && r.card.number ? cardBox(r.price, r.card) : h("p", { class: "muted" }, "کارت پرداخت هنوز تعریف نشده."),
-    h("ol", { class: "steps" }, h("li", {}, "مبلغ را به کارت بالا واریز کنید."), h("li", {}, r.bot ? `عکس رسید را در ربات @${r.bot} بفرستید.` : "عکس رسید را در ربات اصلی بفرستید."), h("li", {}, "بعد از تأیید، خودکار انجام می‌شود.")),
-    r.bot ? btn("رفتن به ربات و ارسال رسید", "primary block big", goBot, "send") : null);
+  const close = sheet(h("h2", {}, title), r.card && r.card.number ? cardBox(r.price, r.card) : h("p", { class: "muted" }, "کارت پرداخت هنوز تعریف نشده."),
+    h("ol", { class: "steps" }, h("li", {}, "مبلغ را به کارت بالا واریز کنید."), h("li", {}, "عکس رسید را با دکمهٔ پایین همین‌جا بفرستید."), h("li", {}, "بعد از تأیید، خودکار انجام می‌شود.")),
+    receiptButton("panel", r.id, () => close()),
+    r.bot ? btn(`یا در ربات @${r.bot} بفرستید`, "ghost block", goBot, "send") : null);
 }
 
 function ownerSaleView(d) {

@@ -118,6 +118,8 @@ type miniOrder struct {
 	Status  string `json:"status"`
 	Renew   string `json:"renew"`
 	Created int64  `json:"created"`
+	// NeedsReceipt: a card order that still waits for its receipt photo.
+	NeedsReceipt bool `json:"needs_receipt"`
 }
 
 func (s *Store) miniServices(ctx context.Context, chat int64, subBase, seller string) ([]MiniAppService, error) {
@@ -159,7 +161,8 @@ func (s *Store) miniServices(ctx context.Context, chat int64, subBase, seller st
 }
 
 func (s *Store) miniOrders(ctx context.Context, chat int64) ([]miniOrder, error) {
-	rows, err := s.ro.QueryContext(ctx, `SELECT o.id,COALESCE(p.name,o.product_id),o.amount,o.status,CASE WHEN o.renew=1 THEN o.client_email ELSE '' END,o.created_unix
+	rows, err := s.ro.QueryContext(ctx, `SELECT o.id,COALESCE(p.name,o.product_id),o.amount,o.status,CASE WHEN o.renew=1 THEN o.client_email ELSE '' END,o.created_unix,
+o.status='pending' AND o.receipt='' AND o.method='manual' AND o.amount>0
 FROM orders o LEFT JOIN products p ON p.id=o.product_id WHERE o.buyer=? ORDER BY o.id DESC LIMIT 30`, TgBuyer(chat))
 	if err != nil {
 		return nil, err
@@ -168,7 +171,7 @@ FROM orders o LEFT JOIN products p ON p.id=o.product_id WHERE o.buyer=? ORDER BY
 	out := []miniOrder{}
 	for rows.Next() {
 		var o miniOrder
-		if err := rows.Scan(&o.ID, &o.Product, &o.Amount, &o.Status, &o.Renew, &o.Created); err != nil {
+		if err := rows.Scan(&o.ID, &o.Product, &o.Amount, &o.Status, &o.Renew, &o.Created, &o.NeedsReceipt); err != nil {
 			return nil, err
 		}
 		out = append(out, o)
