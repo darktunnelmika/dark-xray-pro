@@ -137,6 +137,7 @@ func main() {
 		go s.RunResets(ctx)
 		go s.RunAutoRenew(ctx)
 		go s.RunWebhooks(ctx)
+		go s.RunAPIWebhooks(ctx)
 		go s.RunSystemWatch(ctx)
 		go s.RunInboundLimits(ctx)
 		var cliOwners []int64

@@ -116,8 +116,9 @@ CREATE INDEX IF NOT EXISTS events_unix ON events(unix);
 // Store holds all v2 HUB state in one small SQLite file. A single writer
 // connection serialises short transactions; readers use their own pool.
 type Store struct {
-	logins loginGuard // wrong-password counters (security.go)
-	gate   gateState  // secret panel path (panelpath.go)
+	logins   loginGuard  // wrong-password counters (security.go)
+	apiRates rateLimiter // external API request rates (extapi.go)
+	gate     gateState   // secret panel path (panelpath.go)
 
 	db   *sql.DB
 	ro   *sql.DB
@@ -238,6 +239,10 @@ func Open(path string) (*Store, error) {
 		return nil, err
 	}
 	if err := st.ensurePartnerSchema(); err != nil {
+		st.Close()
+		return nil, err
+	}
+	if err := st.ensureExtAPISchema(); err != nil {
 		st.Close()
 		return nil, err
 	}

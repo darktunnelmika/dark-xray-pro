@@ -268,6 +268,9 @@ func (s *Store) Prune(ctx context.Context, keepDays int) error {
 	if _, err := s.db.ExecContext(ctx, `DELETE FROM discount_pending WHERE unix < ?`, s.now().Add(-2*time.Hour).Unix()); err != nil && !noTable(err) && !strings.Contains(err.Error(), "no such column") {
 		return err
 	}
+	if err := s.pruneExtAPI(ctx); err != nil {
+		return err
+	}
 	_, err := s.db.ExecContext(ctx, `DELETE FROM events WHERE unix < ?`, cut.Unix())
 	return err
 }
