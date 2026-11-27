@@ -222,7 +222,11 @@ COALESCE(u.up+u.down,0),COALESCE(u.first_seen_unix,0) FROM clients c LEFT JOIN c
 	if err := forgetClient(ctx, tx, email); err != nil {
 		return 0, 0, err
 	}
-	return refundBytes, refundUnits, tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return 0, 0, err
+	}
+	s.emitAPIEvent(ctx, repTarget(repID), "client.deleted", map[string]any{"name": email, "refund_gb": eventGB(refundBytes), "refund_units": refundUnits, "by": actor})
+	return refundBytes, refundUnits, nil
 }
 
 // LedgerEntry is one row of a representative's activity.

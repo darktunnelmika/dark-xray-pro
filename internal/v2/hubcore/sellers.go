@@ -152,7 +152,12 @@ WHERE id=? AND volume_credit+?>=0 AND unlimited_units+?>=0`, v, u, id, v, u)
 			return err
 		}
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	s.creditEvent(ctx, parent, -volume, -units, "transfer to "+child)
+	s.creditEvent(ctx, child, volume, units, "transfer from "+parent)
+	return nil
 }
 
 // SetSellerPolicy lets a parent tighten its seller's limits; anything looser

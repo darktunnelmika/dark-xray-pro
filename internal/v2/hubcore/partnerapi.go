@@ -33,6 +33,7 @@ import (
 //	POST   /api/v2/partner/reps/{id}/password      a new password, random or {password} [panels:write]
 //	POST   /api/v2/partner/reps/{id}/sessions/revoke  sign the panel out everywhere [panels:write]
 //	POST   /api/v2/partner/reps/{id}/login-link    a one-time sign-in link for 10 minutes [panels:write]
+//	GET    /api/v2/partner/reps/{id}/apikeys       its reseller API keys; POST makes one (shown once), DELETE …/{key} [panels:read / panels:write]
 //	GET    /api/v2/partner/events?after=&types=    its events [events]
 //	GET|PUT|DELETE /api/v2/partner/webhook, POST …/webhook/test, GET …/webhook/deliveries [events]
 
@@ -964,6 +965,50 @@ func partnerRoutes(s *Store, mux *http.ServeMux) {
 			return
 		}
 		apiJSON(w, http.StatusOK, map[string]any{"url": s.panelOrigin(r) + loginLinkPath + tok, "expires_unix": exp, "username": p.Username})
+	})
+	// Reseller API keys for its panels, so a panel can be sold with its API.
+	route("GET /api/v2/partner/reps/{id}/apikeys", scopePanelsRead, func(w http.ResponseWriter, r *http.Request, c apiCaller) {
+		p, ok := one(w, r, c)
+		if !ok {
+			return
+		}
+		list, err := s.ResKeys(r.Context(), p.ID)
+		if err != nil {
+			fail(w, err)
+			return
+		}
+		apiJSON(w, http.StatusOK, list)
+	})
+	route("POST /api/v2/partner/reps/{id}/apikeys", scopePanelsWrite, func(w http.ResponseWriter, r *http.Request, c apiCaller) {
+		p, ok := one(w, r, c)
+		if !ok {
+			return
+		}
+		var in ResKeyIn
+		if !readJSON(w, r, &in) {
+			return
+		}
+		k, err := s.CreateResKey(r.Context(), p.ID, "partner:"+c.Name, in)
+		if err != nil {
+			fail(w, err)
+			return
+		}
+		apiJSON(w, http.StatusCreated, k)
+	})
+	route("DELETE /api/v2/partner/reps/{id}/apikeys/{key}", scopePanelsWrite, func(w http.ResponseWriter, r *http.Request, c apiCaller) {
+		p, ok := one(w, r, c)
+		if !ok {
+			return
+		}
+		if err := s.DeleteResKey(r.Context(), p.ID, r.PathValue("key")); err != nil {
+			if errors.Is(err, ErrNotFound) {
+				apiErr(w, http.StatusNotFound, codeNotFound, "key not found")
+				return
+			}
+			fail(w, err)
+			return
+		}
+		apiJSON(w, http.StatusOK, map[string]bool{"ok": true})
 	})
 	s.eventRoutes(mux, "/api/v2/partner", auth, func(c apiCaller) string { return partnerTarget(c.KeyID) }, partnerEvents)
 	s.loginLinkRoute(mux)

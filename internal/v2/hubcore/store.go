@@ -250,6 +250,14 @@ func Open(path string) (*Store, error) {
 		st.Close()
 		return nil, err
 	}
+	if err := st.ensureResKeySchema(); err != nil {
+		st.Close()
+		return nil, err
+	}
+	if err := st.ensureClientStateSchema(); err != nil {
+		st.Close()
+		return nil, err
+	}
 	if err := st.ensurePGSchema(); err != nil {
 		st.Close()
 		return nil, err

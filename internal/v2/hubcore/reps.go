@@ -148,7 +148,11 @@ func (s *Store) AdjustCredit(ctx context.Context, actor, repID string, volume, u
 		s.now().Unix(), repID, actor, "adjust", volume, units, note); err != nil {
 		return err
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	s.creditEvent(ctx, repID, volume, units, note)
+	return nil
 }
 
 // SetRepLogin creates or resets a representative's panel login.
@@ -278,7 +282,17 @@ WHERE id=? AND volume_credit>=? AND unlimited_units>=?`, volCharge, unitCharge, 
 	if _, err := tx.ExecContext(ctx, `UPDATE clients SET rep_id=?, plan=? WHERE email=?`, repID, plan, c.Email); err != nil {
 		return err
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	if isNew {
+		days := termDays(c, now)
+		s.emitAPIEvent(ctx, repTarget(repID), "client.created", map[string]any{"name": c.Email, "plan": plan, "volume_gb": eventGB(c.VolumeBytes),
+			"term_days": days, "expires_unix": c.ExpiresUnix, "charged_gb": eventGB(volCharge), "charged_units": unitCharge, "by": actor})
+	} else {
+		s.emitAPIEvent(ctx, repTarget(repID), "client.updated", map[string]any{"name": c.Email, "charged_gb": eventGB(volCharge), "charged_units": unitCharge, "by": actor})
+	}
+	return nil
 }
 
 // Principal is who is calling the panel API.

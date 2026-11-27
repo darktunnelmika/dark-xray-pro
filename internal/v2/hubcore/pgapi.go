@@ -524,29 +524,10 @@ func (s *Store) pgSave(ctx context.Context, seller string, c Client) error {
 
 // pgResetRep resets a reseller's client's usage. The used part becomes
 // usable again, so a volume plan is charged what was used (the unused part
-// was paid when it was given).
+// was paid when it was given), on the credit ledger like every charge.
 func (s *Store) pgResetRep(ctx context.Context, seller, email string) error {
-	var plan string
-	var used int64
-	if err := s.ro.QueryRowContext(ctx, `SELECT c.plan,COALESCE(u.up+u.down,0) FROM clients c LEFT JOIN client_usage u ON u.email=c.email WHERE c.email=? AND c.rep_id=?`, email, seller).Scan(&plan, &used); err != nil {
-		return ErrNotFound
-	}
-	if plan == "volume" && used > 0 {
-		r, err := s.db.ExecContext(ctx, `UPDATE reps SET volume_credit=volume_credit-? WHERE id=? AND volume_credit>=?`, used, seller, used)
-		if err != nil {
-			return err
-		}
-		if n, _ := r.RowsAffected(); n != 1 {
-			return ErrCredit
-		}
-	}
-	if err := s.ResetUsage(ctx, email, "api"); err != nil {
-		if plan == "volume" && used > 0 {
-			_, _ = s.db.ExecContext(ctx, `UPDATE reps SET volume_credit=volume_credit+? WHERE id=?`, used, seller)
-		}
-		return err
-	}
-	return nil
+	_, err := s.repResetUsage(ctx, "mirza", seller, email)
+	return err
 }
 
 // ---- HTTP ----

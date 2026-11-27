@@ -38,8 +38,9 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 	if ui != nil {
 		mux.Handle("GET /", ui)
 	}
-	pgRoutes(s, mux.ServeMux, subBase) // PasarGuard-compatible API for sales bots (pgapi.go)
-	partnerRoutes(s, mux.ServeMux)     // keys that make reseller panels (partner.go)
+	pgRoutes(s, mux.ServeMux, subBase)       // PasarGuard-compatible API for sales bots (pgapi.go)
+	partnerRoutes(s, mux.ServeMux)           // keys that make reseller panels (partner.go)
+	resellerRoutes(s, mux.ServeMux, subBase) // resellers' own bots and sites (resapi.go)
 	// member lets owners and representatives in; handlers read the caller
 	// with who(r). guard is owner-only and is the default for everything else.
 	member := func(h http.HandlerFunc) http.HandlerFunc {
@@ -549,6 +550,13 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 			h(w, r)
 		})
 	}
+	// Reseller API keys: the reseller's own, and the owner's for any reseller.
+	s.resKeyRoutes(func(p string, h http.HandlerFunc) { mux.HandleFunc(p, repOnly(h)) }, "/api/v2/rep/apikeys",
+		func(r *http.Request) (string, string, bool) { return who(r).RepID, who(r).User, who(r).RepID != "" })
+	s.resKeyRoutes(func(p string, h http.HandlerFunc) { mux.HandleFunc(p, guard(h)) }, "/api/v2/admin/reps/{id}/apikeys",
+		func(r *http.Request) (string, string, bool) {
+			return r.PathValue("id"), who(r).User, r.PathValue("id") != ""
+		})
 	mux.HandleFunc("POST /api/v2/rep/telegram", repOnly(func(w http.ResponseWriter, r *http.Request) {
 		code, err := s.NewTgLinkCode(r.Context(), who(r).RepID)
 		bot := s.BotUsernameFor(r.Context(), who(r).RepID)

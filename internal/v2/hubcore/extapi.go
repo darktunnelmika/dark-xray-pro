@@ -124,6 +124,7 @@ const (
 var (
 	errKeyInvalid = errors.New("invalid or disabled key")
 	errKeyExpired = errors.New("this key has expired")
+	errAccountOff = errors.New("this account is turned off")
 )
 
 // ---- key settings shared by partner and reseller keys ----
@@ -450,6 +451,10 @@ func (s *Store) ext(auth extAuthFunc, scope string, h extHandler) http.HandlerFu
 			return
 		}
 		c, err := auth(r)
+		if errors.Is(err, errAccountOff) {
+			apiErr(w, http.StatusForbidden, codeDisabled, err.Error())
+			return
+		}
 		if err != nil {
 			s.apiRates.take("bad:"+ip, badKeyRate, now)
 			w.Header().Set("WWW-Authenticate", "Bearer")
@@ -488,7 +493,7 @@ func (s *Store) ext(auth extAuthFunc, scope string, h extHandler) http.HandlerFu
 		s.idempotent(sw, r, c.Kind+":"+c.KeyID, func(w http.ResponseWriter, r *http.Request) { h(w, r, c) })
 		p := Principal{User: c.Kind + ":" + c.Name, Role: "owner"}
 		if c.Kind == "reseller" {
-			p = Principal{User: "key:" + c.Name, Role: "rep", RepID: c.RepID}
+			p = Principal{User: "key:" + c.RepID + "/" + c.Name, Role: "rep", RepID: c.RepID}
 		}
 		s.Audit(r.Context(), p, r, sw.status)
 	}
