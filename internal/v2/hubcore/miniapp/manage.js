@@ -337,14 +337,25 @@ function renewSheet(names) {
 
 // ---------- inbox: orders and top-ups ----------
 function inboxView() {
-  if (!M.inbox.length) return [h("div", { class: "card empty" }, h("p", {}, "پرداخت منتظری نیست ✨"))];
-  return [h("div", { class: "ulist" }, M.inbox.map((it) => h("div", { class: "card inbox" },
+  // Payments with a receipt wait for this seller; orders without one wait
+  // for their buyer, so they sit folded away below.
+  const ready = M.inbox.filter((it) => it.receipt), waiting = M.inbox.filter((it) => !it.receipt);
+  const out = [];
+  if (!ready.length) out.push(h("div", { class: "card empty" }, h("p", {}, "رسیدی منتظر تأیید شما نیست ✨")));
+  out.push(inboxList(ready));
+  if (waiting.length) out.push(h("details", { class: "more" }, h("summary", {}, `منتظر رسید خریدار (${num(waiting.length)})`),
+    h("p", { class: "muted small" }, "این سفارش‌ها هنوز رسید ندارند. اگر خریدار پرداخت نکرده، با «رد» لغوشان کنید."), inboxList(waiting)));
+  return out;
+}
+
+function inboxList(items) {
+  return h("div", { class: "ulist" }, items.map((it) => h("div", { class: "card inbox" },
     h("div", { class: "row between" }, h("b", {}, `${it.kind === "topup" ? "➕ " : it.kind === "panel" ? "🤝 " : "🧾 "}${it.title} #${num(it.id)}`), h("b", {}, `${toman(it.amount)} تومان`)),
     h("div", { class: "muted small" }, `${it.buyer || ""} · ${date(it.unix)}${it.renew ? ` · تمدید ${it.renew}` : ""}`),
     it.card || it.last4 ? h("div", { class: "small" }, it.card ? `💳 به کارت …${it.card}` : "", it.last4 ? ` · ۴ رقم آخر واریزکننده: ${it.last4}` : "") : null,
     h("div", { class: "row" },
       it.receipt ? btn("رسید", "", () => showReceipt(it), "card") : h("span", { class: "muted small" }, "هنوز رسیدی نفرستاده"),
-      btn("تأیید", "primary", () => decide(it, true), "check"), btn("رد", "danger", () => decide(it, false), "x")))))];
+      btn("تأیید", "primary", () => decide(it, true), "check"), btn("رد", "danger", () => decide(it, false), "x")))));
 }
 
 async function showReceipt(it) {

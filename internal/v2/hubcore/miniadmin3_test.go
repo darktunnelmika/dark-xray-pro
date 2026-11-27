@@ -136,6 +136,17 @@ func TestMiniAdminStage25(t *testing.T) {
 	if !found {
 		t.Fatalf("inbox %s", rec.Body.String())
 	}
+	// The owner's inbox holds only the owner's own payments, never a reseller's.
+	orec := httptest.NewRecorder()
+	oreq := httptest.NewRequest("GET", "https://hub.example/app/api/m/inbox", nil)
+	oreq.Header.Set("X-Init-Data", signInitData(mainTok, `{"id":500,"first_name":"O"}`, *now))
+	h.ServeHTTP(orec, oreq)
+	if bytes.Contains(orec.Body.Bytes(), []byte("bot-shop")) {
+		t.Fatalf("owner inbox %s", orec.Body.String())
+	}
+	if code, _, _ := call(mainTok, "500", "POST", "/app/api/m/decide", map[string]any{"kind": "panel", "id": oid, "ok": true}); code == 200 {
+		t.Fatal("the owner approved a reseller's sale")
+	}
 	// One open bill at a time: the wallet now pays (and settles the first bill).
 	if code, _, body := call(aliTok, "600", "POST", "/app/api/m/decide", map[string]any{"kind": "panel", "id": oid, "ok": true}); code != 400 || !bytes.Contains([]byte(body), []byte("کیف پول")) {
 		t.Fatalf("no funds %d %s", code, body)

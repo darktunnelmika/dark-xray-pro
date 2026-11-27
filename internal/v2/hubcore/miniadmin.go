@@ -222,9 +222,9 @@ func (s *Store) mgrHome(ctx context.Context, m miniMgr) (map[string]any, error) 
 	_ = s.ro.QueryRowContext(ctx, ledger, args...).Scan(&sold, &sales)
 	out["today"] = map[string]int64{"sold": sold, "sales": sales}
 	orders, _ := s.Orders(ctx, m.P, "pending", 200)
-	pend := 0
+	pend := 0 // only what has a receipt waits for the seller; an order without one waits for its buyer
 	for _, o := range orders {
-		if o.Seller == m.Seller {
+		if o.Seller == m.Seller && o.Method == "manual" && o.HasReceipt {
 			pend++
 		}
 	}
