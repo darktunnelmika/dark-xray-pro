@@ -1003,6 +1003,8 @@ func (b *Bot) onCallback(ctx context.Context, q *CallbackQuery) {
 		}
 	case "trial":
 		b.trial(ctx, chat)
+	case "spin":
+		b.spin(ctx, chat)
 	case "invite":
 		b.invite(ctx, chat)
 	case "wallet":

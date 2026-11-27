@@ -94,6 +94,38 @@ func registerPanelPromo(mux *http.ServeMux, s *Store, mgr func(http.ResponseWrit
 		}
 		return m, true
 	}
+	// The wheel of fortune's settings (wheel.go).
+	mux.HandleFunc("GET /app/api/m/wheel", func(w http.ResponseWriter, r *http.Request) {
+		m, ok := mgr(w, r)
+		if !ok || deny(w, m, "settings") {
+			return
+		}
+		if !m.Owner && s.IsSubSeller(r.Context(), m.Seller) {
+			http.Error(w, "گردونه برای زیرمجموعه‌ها نیست.", http.StatusForbidden)
+			return
+		}
+		reply(w, map[string]any{"config": s.WheelFor(r.Context(), m.Seller), "today": s.WheelToday(r.Context(), m.Seller)}, nil)
+	})
+	mux.HandleFunc("POST /app/api/m/wheel", func(w http.ResponseWriter, r *http.Request) {
+		m, ok := mgr(w, r)
+		if !ok || deny(w, m, "settings") {
+			return
+		}
+		if !m.Owner && s.IsSubSeller(r.Context(), m.Seller) {
+			http.Error(w, "گردونه برای زیرمجموعه‌ها نیست.", http.StatusForbidden)
+			return
+		}
+		var in WheelConfig
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&in); err != nil {
+			http.Error(w, "bad request", http.StatusBadRequest)
+			return
+		}
+		if err := s.PutWheelFor(r.Context(), m.Seller, in); err != nil {
+			http.Error(w, "جایزه‌ها را بررسی کنید: ۲ تا ۱۲ جایزه؛ حجم ۱ تا ۱۰۰ گیگ، روز ۱ تا ۶۰، کیف پول ۱٬۰۰۰ تا ۵٬۰۰۰٬۰۰۰ تومان، تخفیف ۱ تا ۹۰٪.", http.StatusBadRequest)
+			return
+		}
+		reply(w, map[string]any{"ok": true}, nil)
+	})
 	mux.HandleFunc("GET /app/api/m/panelpromo", func(w http.ResponseWriter, r *http.Request) {
 		m, ok := may(w, r)
 		if !ok {

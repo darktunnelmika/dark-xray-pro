@@ -280,6 +280,96 @@ function serviceRow(sv) {
     h("button", { class: "sr-copy", "aria-label": "کپی لینک", onclick: (e) => { e.stopPropagation(); copy(sv.sub_url); } }, icon(IC.copy)));
 }
 
+// ---------- the daily wheel of fortune (GET wheel, POST wheel/spin) ----------
+let wheel;
+async function loadWheel() {
+  try { wheel = await api("GET", "wheel"); } catch { wheel = { on: false }; }
+  if (tab === "services") render();
+}
+const WHEEL_C = ["#28f7a0", "#4bb9ff", "#b36cff", "#f59e0b", "#f43f5e", "#22d3ee", "#a3e635", "#ec4899", "#818cf8", "#fb923c", "#2dd4bf", "#e879f9"];
+function shortMoney(v) { return v >= 1e6 ? `${num(v / 1e6)} میلیون` : v >= 1000 ? `${num(v / 1000)} هزار` : num(v); }
+function prizeShort(x) { return { gb: `${num(x.value)} گیگ`, days: `${num(x.value)} روز`, wallet: `${shortMoney(x.value)} ت`, discount: `${num(x.value)}٪ تخفیف`, none: "پوچ" }[x.kind] || ""; }
+function prizeLong(x) { return { gb: `${num(x.value)} گیگ حجم هدیه`, days: `${num(x.value)} روز اضافه`, wallet: `${toman(x.value)} تومان کیف پول`, discount: `کد ${num(x.value)}٪ تخفیف`, none: "پوچ" }[x.kind] || ""; }
+const PRIZE_E = { gb: "📶", days: "⏳", wallet: "💰", discount: "🎟", none: "🙃" };
+function clock(sec) { const hh = Math.floor(sec / 3600), mm = Math.floor((sec % 3600) / 60); return hh ? `${num(hh)} ساعت و ${num(mm)} دقیقه` : `${num(mm)} دقیقه`; }
+
+// wheelCard: the entry on the services page.
+function wheelCard() {
+  if (!wheel || !wheel.on) return null;
+  if (wheel.today) {
+    return h("div", { class: "wcard done" }, h("span", { class: "wcard-ic" }, PRIZE_E[wheel.today.kind] || "🎡"),
+      h("span", { class: "wcard-t" }, h("b", {}, wheel.today.kind === "none" ? "گردونهٔ امروز: پوچ" : `جایزهٔ امروز: ${prizeLong(wheel.today)}`),
+        h("small", {}, `گردونهٔ بعدی تا ${clock(wheel.next || 0)} دیگر`)));
+  }
+  return h("button", { class: "wcard", onclick: () => wheelSheet() }, h("span", { class: "wcard-ic spin" }, "🎡"),
+    h("span", { class: "wcard-t" }, h("b", {}, "گردونهٔ شانس امروز"), h("small", {}, wheel.need_service ? "با خرید اولین سرویس فعال می‌شود" : "روزی یک بار بچرخان و جایزه ببر")),
+    h("span", { class: "wcard-go" }, "بچرخان"));
+}
+
+function wheelSVG(slices) {
+  const n = slices.length, seg = 360 / n, R = 150, C = 160;
+  const pt = (a, r) => { const t = (a * Math.PI) / 180; return [C + r * Math.sin(t), C - r * Math.cos(t)]; };
+  const g = s("svg", { viewBox: "0 0 320 320", class: "wheel-svg", "aria-hidden": "true" });
+  const rot = s("g", { class: "wheel-rot" });
+  slices.forEach((x, i) => {
+    const [x1, y1] = pt(i * seg, R), [x2, y2] = pt((i + 1) * seg, R);
+    rot.append(s("path", { d: `M${C},${C} L${x1},${y1} A${R},${R} 0 ${seg > 180 ? 1 : 0} 1 ${x2},${y2} Z`, fill: WHEEL_C[i % WHEEL_C.length], "fill-opacity": i % 2 ? ".85" : "1", stroke: "#0b1033", "stroke-width": "2" }));
+    const mid = i * seg + seg / 2, [tx, ty] = pt(mid, R * 0.62);
+    const t = s("text", { x: tx, y: ty, transform: `rotate(${mid > 180 ? mid + 90 : mid - 90} ${tx} ${ty})`, "text-anchor": "middle", "dominant-baseline": "middle", class: "wheel-txt" });
+    t.textContent = `${PRIZE_E[x.kind] || ""} ${prizeShort(x)}`;
+    rot.append(t);
+  });
+  rot.append(s("circle", { cx: C, cy: C, r: R, fill: "none", stroke: "rgb(255 255 255 / .35)", "stroke-width": "4" }));
+  for (let i = 0; i < n * 2; i++) { const [bx, by] = pt(i * (seg / 2), R - 6); rot.append(s("circle", { cx: bx, cy: by, r: 3, fill: "#fff", "fill-opacity": i % 2 ? ".5" : ".95" })); }
+  g.append(rot);
+  return { svg: g, rot, seg };
+}
+
+function wheelSheet() {
+  const w = wheel;
+  if (!w || !w.on) return;
+  const { svg, rot, seg } = wheelSVG(w.slices);
+  const result = h("div", { class: "wheel-result", "aria-live": "polite" });
+  const hub = h("button", { class: "wheel-hub", "aria-label": "چرخاندن گردونه" }, "بچرخان");
+  const stage = h("div", { class: "wheel-stage" }, h("i", { class: "wheel-pin", "aria-hidden": "true" }), svg, hub);
+  let busy = false;
+  const go = async () => {
+    if (busy) return;
+    if (w.need_service) { toast("برای چرخاندن گردونه اول یک سرویس بخرید."); return; }
+    busy = true; hub.disabled = true; tap();
+    let r;
+    try { r = await api("POST", "wheel/spin"); }
+    catch (e) { busy = false; hub.disabled = false; haptic("error"); toast(e.message); return; }
+    const jitter = (Math.random() - 0.5) * seg * 0.6;
+    const to = 360 * 7 + (360 - (r.index * seg + seg / 2)) + jitter;
+    rot.style.transition = "transform 5.2s cubic-bezier(.12,.72,.08,1)";
+    rot.style.transform = `rotate(${to}deg)`;
+    const ticks = [80, 160, 260, 380, 520, 700, 920, 1200, 1550, 1950, 2450, 3050, 3750, 4500];
+    ticks.forEach((t) => setTimeout(() => { try { tg.HapticFeedback.selectionChanged(); } catch {} }, t));
+    setTimeout(() => {
+      wheel.today = r;
+      const x = w.slices[r.index] || r;
+      if (r.kind === "none") { haptic("warning"); result.replaceChildren(h("h3", {}, "این بار پوچ بود 😅"), h("p", { class: "muted" }, "فردا دوباره شانست را امتحان کن!")); }
+      else {
+        haptic("success"); celebrate(`🎉 ${prizeLong(x)}`);
+        result.replaceChildren(...[h("div", { class: "wheel-win" }, h("span", {}, PRIZE_E[r.kind]), h("b", {}, prizeLong(x))),
+          r.kind === "gb" || r.kind === "days" ? h("p", { class: "muted small" }, "به سرویس ", ltr(r.target || ""), " اضافه شد.") : null,
+          r.kind === "wallet" ? h("p", { class: "muted small" }, "به کیف پولت اضافه شد؛ برای خرید و تمدید استفاده کن.") : null,
+          r.kind === "discount" ? h("div", {}, h("p", { class: "muted small" }, "کد تخفیف تو (سه روز اعتبار، یک بار):"), h("button", { class: "code-chip", onclick: () => copy(r.code) }, ltr(r.code), icon(IC.copy))) : null,
+          r.kind === "wallet" ? btn("دیدن کیف پول", "primary block", () => { close(); setTab("wallet"); }, "wallet")
+            : r.kind === "discount" ? btn("استفاده در خرید", "primary block", () => { close(); setTab("shop"); }, "bolt") : null].filter(Boolean));
+      }
+      hub.textContent = "فردا";
+      load(false);
+    }, 5400);
+  };
+  hub.addEventListener("click", go);
+  const close = sheet(h("div", { class: "wheel-head" }, h("h2", {}, "🎡 گردونهٔ شانس"), h("p", { class: "muted small" }, "روزی یک بار؛ جایزه همان لحظه به حسابت اضافه می‌شود.")),
+    stage, result,
+    h("div", { class: "chips wheel-legend" }, w.slices.map((x, i) => h("span", { class: "chip" }, h("i", { class: "swatch", style: `background:${WHEEL_C[i % WHEEL_C.length]}` }), prizeShort(x)))),
+    btn("بستن", "ghost block", () => close()));
+}
+
 // skyCard: the "night sky" summary over the services — what is left in all
 // of them, the nearest end, and the two things people come for.
 function skyCard() {
@@ -319,11 +409,13 @@ function services() {
       btn("دیدن پلن‌ها", "primary block", () => setTab("shop"), "bolt"),
       h("div", { class: "field" }, input, btn("اتصال", "", () => link(input.value), "link"))));
     out.push(...ordersPart(true), ...ordersPart(false));
+    const wc0 = wheelCard(); if (wc0) out.push(wc0);
     out.push(...extras());
     return out;
   }
   // A short list; the rings, usage and actions open with a tap.
   out.push(skyCard());
+  const wc = wheelCard(); if (wc) out.push(wc);
   out.push(...ordersPart(true));
   out.push(h("div", { class: "section-title" }, "سرویس‌های من"), h("div", { class: "svc-list" }, state.services.map(serviceRow)));
   out.push(...ordersPart(false));
@@ -942,7 +1034,7 @@ async function load(first = true) {
     }
   }
   if (first) layoutTabs();
-  try { state = await api("GET", "me"); render(); if (first) loadPanels(); setTimeout(() => tour(tab === "manage" ? "manage" : "shop"), 600); }
+  try { state = await api("GET", "me"); render(); if (first) { loadPanels(); loadWheel(); } setTimeout(() => tour(tab === "manage" ? "manage" : "shop"), 600); }
   catch (e) {
     if (!first) { toast(e.message); return; }
     if (role.manage) { state = null; tab = "manage"; render(); return; }

@@ -404,6 +404,35 @@ func registerMiniApp(mux *http.ServeMux, s *Store) {
 		out["product"] = p
 		reply(w, out, nil)
 	})
+	// The daily wheel of fortune (wheel.go).
+	mux.HandleFunc("GET /app/api/wheel", func(w http.ResponseWriter, r *http.Request) {
+		u, ok := user(w, r)
+		if !ok {
+			return
+		}
+		reply(w, s.WheelStatus(r.Context(), sellerOf(r), u.ID), nil)
+	})
+	mux.HandleFunc("POST /app/api/wheel/spin", func(w http.ResponseWriter, r *http.Request) {
+		u, ok := user(w, r)
+		if !ok {
+			return
+		}
+		sp, err := s.SpinWheel(r.Context(), sellerOf(r), u.ID)
+		switch {
+		case err == nil:
+			reply(w, sp, nil)
+		case errors.Is(err, ErrSpun):
+			http.Error(w, "امروز گردونه را چرخانده‌اید؛ فردا دوباره سر بزنید.", http.StatusConflict)
+		case errors.Is(err, ErrNotFound):
+			http.Error(w, "گردونه فعلاً خاموش است.", http.StatusNotFound)
+		case strings.Contains(err.Error(), "buy a service"):
+			http.Error(w, "برای چرخاندن گردونه اول یک سرویس بخرید.", http.StatusForbidden)
+		case strings.Contains(err.Error(), "all given"):
+			http.Error(w, "جایزه‌های امروز تمام شد؛ فردا دوباره سر بزنید.", http.StatusForbidden)
+		default:
+			http.Error(w, "چرخاندن ممکن نشد؛ کمی بعد دوباره امتحان کنید.", http.StatusBadRequest)
+		}
+	})
 	// A discount code, checked and held for the buyer's next order of this plan.
 	mux.HandleFunc("POST /app/api/coupon", func(w http.ResponseWriter, r *http.Request) {
 		u, ok := user(w, r)

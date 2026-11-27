@@ -405,6 +405,9 @@ func (b *Bot) menuKB(ctx context.Context, chat int64, services int, ended []stri
 		add("invite", cbBtn("👥 دعوت دوستان", "invite"), false)
 	}
 	add("coupon", cbBtn("🎟 کد تخفیف", "cpn:"), false)
+	if b.wheelOn(ctx) {
+		add("wheel", cbBtn("🎡 گردونهٔ شانس", "spin"), false)
+	}
 	add("me", cbBtn("👤 حساب من", "me"), false)
 	if btn, ok := b.repSaleButton(ctx, chat); ok {
 		add("panel", btn, false)
