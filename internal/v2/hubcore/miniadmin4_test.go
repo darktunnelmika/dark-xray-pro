@@ -42,9 +42,9 @@ func TestMiniAdminSettings(t *testing.T) {
 	// Texts, channels, trial and look are the reseller's own.
 	code, body := call(aliTok, "600", "POST", "/app/api/m/settings", map[string]any{
 		"welcome": "به فروشگاه علی خوش آمدید", "shop_text": "همه با پشتیبانی",
-		"join":    map[string]any{"enabled": true, "channels": []string{"t.me/alichan"}},
-		"trial":   map[string]any{"enabled": true, "mb": 300, "hours": 12, "max_ips": 1},
-		"brand":   map[string]any{"title": "Ali Shop", "accent": "#FF0000", "telegram": "@ali_support"},
+		"join":  map[string]any{"enabled": true, "channels": []string{"t.me/alichan"}},
+		"trial": map[string]any{"enabled": true, "mb": 300, "hours": 12, "max_ips": 1},
+		"brand": map[string]any{"title": "Ali Shop", "accent": "#FF0000", "telegram": "@ali_support"},
 	})
 	if code != 200 {
 		t.Fatalf("settings %d %s", code, body)
