@@ -47,6 +47,8 @@ const IC = {
   users: "M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75",
   chat: "M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z",
   card: "M2 6h20v12H2zM2 10h20M6 15h4",
+  pause: "M8 5v14M16 5v14",
+  play: "M7 4l13 8-13 8z",
   globe: "M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM2 12h20M12 2a15 15 0 0 1 0 20M12 2a15 15 0 0 0 0 20",
   link: "M10 13a5 5 0 0 0 7.07 0l3-3a5 5 0 0 0-7.07-7.07l-1.5 1.5M14 11a5 5 0 0 0-7.07 0l-3 3a5 5 0 0 0 7.07 7.07l1.5-1.5",
 };
@@ -110,7 +112,7 @@ function spark(days) {
 }
 
 function statusPill(sv) {
-  const map = { active: ["good", sv.online ? "آنلاین" : "فعال"], ended: ["bad", "حجم تمام شد"], expired: ["bad", "منقضی"], disabled: ["warn", "غیرفعال"] };
+  const map = { active: ["good", sv.online ? "آنلاین" : "فعال"], ended: ["bad", "حجم تمام شد"], expired: ["bad", "منقضی"], disabled: ["warn", "غیرفعال"], paused: ["warn", "خاموش"] };
   const [cls, label] = map[sv.status] || ["", sv.status];
   return h("span", { class: "pill " + cls }, sv.status === "active" ? h("span", { class: sv.online ? "dot live" : "dot" }) : null, label);
 }
@@ -206,8 +208,27 @@ function serviceCard(sv) {
       btn("اتصال و QR", "primary", () => connect(sv), "qr"),
       btn("کپی لینک", "", () => copy(sv.sub_url), "copy"),
       state.products.length ? btn("تمدید", "", () => renew(sv), "renew") : null),
+    sv.paused ? h("div", { class: "paused-note" }, "🔌 این سرویس را خودتان خاموش کرده‌اید؛ با دکمهٔ زیر همان لحظه وصل می‌شود.") : null,
+    sv.enabled || sv.paused ? btn(sv.enabled ? "خاموش کردن موقت" : "روشن کردن دوباره", sv.enabled ? "ghost block danger" : "primary block", () => powerService(sv, !sv.enabled), sv.enabled ? "pause" : "play") : null,
     btn("انتخاب کشورها", "ghost block", () => serversSheet(sv), "globe"),
     btn("آموزش اتصال / وصل نمی‌شوم", "ghost block", () => helpSheet(sv), "chat"));
+}
+
+// powerService turns the customer's own service off (after asking) or back on.
+function powerService(sv, on) {
+  const go = async () => {
+    try {
+      await api("POST", "service/power", { service: sv.email, on });
+      haptic("success"); toast(on ? "سرویس روشن شد ✅" : "سرویس خاموش شد 🔌");
+      document.querySelectorAll(".sheet-back").forEach((e) => e.remove()); syncBack();
+      load(false);
+    } catch (e) { haptic("error"); toast(e.message); }
+  };
+  if (on) { go(); return; }
+  const close = sheet(h("h2", {}, "🔌 خاموش کردن موقت"),
+    h("p", {}, "سرویس ", ltr(sv.email), " خاموش می‌شود و تا وقتی خودتان روشنش نکنید وصل نمی‌شود."),
+    h("p", { class: "muted small" }, "⚠️ زمان سرویس در این مدت متوقف نمی‌شود؛ حجم مصرف نمی‌شود."),
+    h("div", { class: "row" }, btn("خاموش شود", "danger", () => { close(); go(); }, "pause"), btn("انصراف", "", () => close())));
 }
 
 // serversSheet: which countries this service's link lists (GET/POST servers).
@@ -310,7 +331,7 @@ function serviceRow(sv) {
   const pct = unl ? 100 : Math.round((left / Math.max(1, sv.total)) * 100);
   const days = sv.until > now ? `${num(Math.ceil((sv.until - now) / 86400))} روز` : sv.until === 0 && sv.days_on_use ? `${num(sv.days_on_use)} روز از اتصال` : sv.until > 0 ? "تمام شده" : "بی‌زمان";
   const tone = pct < 10 ? "bad" : pct < 25 ? "warn" : "";
-  return h("div", { class: `svc-row ${tone}`, role: "button", tabindex: "0", onclick: () => { const close = sheet(serviceCard(sv), btn("بستن", "ghost block", () => close())); } },
+  return h("div", { class: `svc-row ${tone} ${sv.paused ? "off" : ""}`, role: "button", tabindex: "0", onclick: () => { const close = sheet(serviceCard(sv), btn("بستن", "ghost block", () => close())); } },
     h("div", { class: "sr-main" },
       h("div", { class: "sr-top" }, ltr(sv.email), statusPill(sv)),
       h("div", { class: "sr-bar", "aria-hidden": "true" }, h("i", { style: `--w:${pct}%` })),

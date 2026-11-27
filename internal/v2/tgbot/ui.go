@@ -181,6 +181,14 @@ func (b *Bot) serviceKB(ctx context.Context, chat int64, c hubcore.ClientView, m
 	if len(b.renewProducts(ctx)) > 0 {
 		kb.Rows = append(kb.Rows, row(cbBtn("♻️ تمدید / افزایش حجم", "rnw:"+e)))
 	}
+	// The customer's own on/off (hubcore/custpause.go): off asks first; on
+	// only for a service the customer turned off itself.
+	switch {
+	case c.Enabled && len("pwx:"+e) <= 64:
+		kb.Rows = append(kb.Rows, row(Button{Text: "⏸ خاموش کردن موقت", Data: "pwx:" + e, Style: "danger"}))
+	case !c.Enabled && b.Store.CustomerPaused(ctx, e) && len("pwon:"+e) <= 64:
+		kb.Rows = append(kb.Rows, row(Button{Text: "▶️ روشن کردن دوباره", Data: "pwon:" + e, Style: "success"}))
+	}
 	if len(b.starsPlans(ctx)) > 0 {
 		label := "🔁 تمدید خودکار: خاموش"
 		if b.Store.AutoRenew(ctx, e) != "" {
@@ -216,7 +224,11 @@ func (b *Bot) showService(ctx context.Context, chat int64, email string) {
 		return
 	}
 	list, _ := b.clients(ctx, chat)
-	b.send(ctx, chat, b.serviceCard(c), b.serviceKB(ctx, chat, c, len(list) > 1))
+	card := b.serviceCard(c)
+	if !c.Enabled && b.Store.CustomerPaused(ctx, email) {
+		card = "⏸ <b>این سرویس را خودتان موقتاً خاموش کرده‌اید.</b>\nبا دکمهٔ «روشن کردن دوباره» همان لحظه وصل می‌شود.\n\n" + card
+	}
+	b.send(ctx, chat, card, b.serviceKB(ctx, chat, c, len(list) > 1))
 }
 
 var homeKB = &Keyboard{Rows: [][]Button{row(cbBtn("« منوی اصلی", "home"))}}

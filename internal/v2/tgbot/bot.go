@@ -1015,6 +1015,25 @@ func (b *Bot) onCallback(ctx context.Context, q *CallbackQuery) {
 		b.spin(ctx, chat)
 	case "more":
 		b.moreMenu(ctx, chat)
+	case "pwx": // confirm before turning a service off
+		if mine() {
+			b.send(ctx, chat, "⏸ <b>خاموش کردن موقت سرویس</b>\n"+line+"\nسرویس <code>"+esc(rest)+"</code> خاموش می‌شود و تا وقتی خودتان روشنش نکنید وصل نمی‌شود.\n\n⚠️ زمان سرویس در این مدت متوقف نمی‌شود؛ حجم مصرف نمی‌شود.",
+				&Keyboard{Rows: [][]Button{row(Button{Text: "⏸ بله، خاموش شود", Data: "pwoff:" + rest, Style: "danger"}, cbBtn("« انصراف", "svc:"+rest))}})
+		}
+	case "pwoff", "pwon":
+		if !mine() {
+			return
+		}
+		if err := b.Store.CustomerSetOn(ctx, rest, verb == "pwon"); err != nil {
+			b.send(ctx, chat, "این سرویس را پشتیبانی خاموش کرده است؛ برای روشن کردن با پشتیبانی در تماس باشید.", &Keyboard{Rows: [][]Button{row(cbBtn("💬 پشتیبانی", "support"), cbBtn("« سرویس", "svc:"+rest))}})
+			return
+		}
+		if verb == "pwon" {
+			b.send(ctx, chat, "▶️ سرویس روشن شد و همین حالا وصل می‌شود.", nil)
+		} else {
+			b.send(ctx, chat, "⏸ سرویس خاموش شد. هر وقت خواستید از همین صفحه روشنش کنید.", nil)
+		}
+		b.showService(ctx, chat, rest)
 	case "invite":
 		b.invite(ctx, chat)
 	case "wallet":

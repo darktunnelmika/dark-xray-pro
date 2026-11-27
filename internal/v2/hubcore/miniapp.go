@@ -109,7 +109,8 @@ type MiniAppService struct {
 	DaysOnUse int64   `json:"days_on_use"`
 	Online    bool    `json:"online"`
 	SubURL    string  `json:"sub_url"`
-	Days      []int64 `json:"days"` // last 7 days of traffic, oldest first
+	Days      []int64 `json:"days"`             // last 7 days of traffic, oldest first
+	Paused    bool    `json:"paused,omitempty"` // turned off by the customer (custpause.go)
 }
 
 type miniOrder struct {
@@ -151,6 +152,9 @@ func (s *Store) miniServices(ctx context.Context, chat int64, subBase, seller st
 		switch {
 		case !c.Enabled:
 			sv.Status = "disabled"
+			if s.CustomerPaused(ctx, c.Email) {
+				sv.Status, sv.Paused = "paused", true
+			}
 		case c.Remaining == 0:
 			sv.Status = "ended"
 		case c.EffectiveUntil > 0 && c.EffectiveUntil <= now:
@@ -445,6 +449,29 @@ func registerMiniApp(mux *http.ServeMux, s *Store) {
 		}
 		if err := s.PutSubHidden(r.Context(), in.Service, in.Hidden); err != nil {
 			http.Error(w, "حداقل یک کشور باید روشن بماند.", http.StatusBadRequest)
+			return
+		}
+		reply(w, map[string]any{"ok": true}, nil)
+	})
+	// The customer's own on/off for one service (custpause.go).
+	mux.HandleFunc("POST /app/api/service/power", func(w http.ResponseWriter, r *http.Request) {
+		u, ok := user(w, r)
+		if !ok {
+			return
+		}
+		var in struct {
+			Service string `json:"service"`
+			On      bool   `json:"on"`
+		}
+		if !decode(w, r, &in) {
+			return
+		}
+		if !owns(r, u.ID, in.Service) {
+			http.Error(w, "not your service", http.StatusForbidden)
+			return
+		}
+		if err := s.CustomerSetOn(r.Context(), in.Service, in.On); err != nil {
+			http.Error(w, "این سرویس را پشتیبانی خاموش کرده است؛ برای روشن کردن با پشتیبانی در تماس باشید.", http.StatusForbidden)
 			return
 		}
 		reply(w, map[string]any{"ok": true}, nil)

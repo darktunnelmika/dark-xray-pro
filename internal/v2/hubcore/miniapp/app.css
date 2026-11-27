@@ -425,3 +425,6 @@ button.tile > svg { box-sizing: content-box; padding: 8px; border-radius: 12px; 
 .tgl { position: relative; flex: none; inline-size: 42px; block-size: 24px; border-radius: 99px; background: var(--line); transition: background .2s; }
 .tgl::after { content: ""; position: absolute; inset-block-start: 3px; inset-inline-start: 3px; inline-size: 18px; block-size: 18px; border-radius: 50%; background: #fff; transition: inset-inline-start .2s; box-shadow: 0 1px 3px rgb(0 0 0 / .3); }
 .srv.on .tgl { background: linear-gradient(135deg, var(--ion), var(--ion-2)); } .srv.on .tgl::after { inset-inline-start: 21px; }
+.btn.danger { color: var(--bad); border-color: color-mix(in oklab, var(--bad) 40%, var(--line)); }
+.paused-note { margin-block-start: 10px; padding: 10px 12px; border-radius: 12px; font-size: 13px; background: color-mix(in oklab, var(--warn) 12%, var(--surface-2)); border: 1px solid color-mix(in oklab, var(--warn) 35%, var(--line)); }
+.svc-row.off { opacity: .7; border-style: dashed; }
