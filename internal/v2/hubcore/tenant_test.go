@@ -374,8 +374,9 @@ func TestClientQueriesAreReviewed(t *testing.T) {
 		"hubcore/tg.go": 3, "hubcore/toman.go": 1,
 		// merged from v2.56: all scoped by seller, by one client, or legacy_clients (reviewed)
 		"hubcore/pgapi_more.go": 10, "hubcore/repusedhere.go": 2, "hubcore/resale.go": 1, "hubcore/legacy.go": 9,
-		"hubcore/subfetch.go": 4, // prune (all), one shop client's rev, a shop's fetch report
-		"hubcore/dailycap.go": 1, // one client's daily cap, by name (any client may be capped)
+		"hubcore/subfetch.go":   4, // prune (all), one shop client's rev, a shop's fetch report
+		"hubcore/dailycap.go":   1, // one client's daily cap, by name (any client may be capped)
+		"hubcore/reportxlsx.go": 2, // traffic: one reseller's clients (rep_id=?) or all but connected shops'
 	}
 	re := regexp.MustCompile(`(FROM|JOIN) clients\b`)
 	got := map[string]int{}

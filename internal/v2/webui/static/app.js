@@ -1242,6 +1242,15 @@ async function viewDashboard() {
   return view;
 }
 
+// reportXlsxLinks: the Excel report (day by day, resellers, ledger,
+// clients) for 7, 30 or 90 days — the owner's whole panel, a reseller its own.
+function reportXlsxLinks(rep) {
+  const fa = lang === "fa";
+  const q = rep ? `&rep=${encodeURIComponent(rep)}` : "";
+  return h("span", { class: "row" }, h("span", { class: "small muted" }, fa ? "گزارش اکسل:" : "Excel report:"),
+    ...[7, 30, 90].map((d) => h("a", { class: "btn ghost", href: `/api/v2/shop/report.xlsx?days=${d}${q}`, download: "" }, fa ? `${fmtNum(d)} روز` : `${d} days`)));
+}
+
 // autoCleanBox switches the automatic cleanup of dead configs on or off
 // (the owner for its own clients, a reseller for its own).
 function autoCleanBox() {
@@ -1747,6 +1756,8 @@ async function viewClients() {
       owner ? h("button", { class: "ghost spacer", onclick: () => templatesModal(inbounds) }, lang === "fa" ? "پلن‌های آماده" : "Ready plans") : h("span", { class: "spacer" }),
       owner ? h("button", { class: "ghost", onclick: () => cleanupForm() }, lang === "fa" ? "پاک‌سازی" : "Clean up")
         : me.role === "rep" ? h("button", { class: "ghost", onclick: () => openModal(lang === "fa" ? "پاک‌سازی خودکار" : "Automatic cleanup", autoCleanBox()) }, lang === "fa" ? "پاک‌سازی خودکار" : "Auto cleanup") : null,
+      me.role === "rep" ? h("button", { class: "ghost", onclick: () => openModal(lang === "fa" ? "گزارش اکسل" : "Excel report", h("div", { class: "form" },
+        h("p", { class: "small muted" }, lang === "fa" ? "فروش و برگشتی روزانه، پرداخت‌های فروشگاه، دفتر اعتبار و فهرست کلاینت‌ها." : "Daily sales and refunds, shop payments, credit ledger and the client list."), reportXlsxLinks())) }, lang === "fa" ? "گزارش اکسل" : "Excel report") : null,
       owner ? h("a", { class: "btn ghost", href: "/api/v2/admin/clients/export.csv", download: "", title: lang === "fa" ? "فهرست کاربرها برای اکسل" : "Client list for Excel" }, lang === "fa" ? "اکسل" : "Excel") : null,
       owner ? h("button", { onclick: () => bulkCreateForm(inbounds) }, t("bulkCreate")) : null,
       me.legacy ? h("a", { class: "btn", href: "#/legacy" }, "📥 ", lang === "fa" ? "آوردن کاربران قدیمی" : "Bring old users") : null,
@@ -5505,7 +5516,8 @@ function salesReportCard() {
     const kpi = (v, l, extra) => h("div", { class: "card stat" }, h("div", { class: "v" }, v, " ", extra || null), h("div", { class: "k" }, l));
     fill(box,
       h("div", { class: "row" }, h("h2", {}, fa ? "گزارش فروش نماینده‌ها" : "Reseller sales"), h("span", { class: "spacer" }), chips,
-        h("button", { class: "ghost", onclick: () => csv(r) }, fa ? "خروجی اکسل (CSV)" : "Export CSV")),
+        h("button", { class: "ghost", onclick: () => csv(r) }, fa ? "خروجی CSV" : "Export CSV"),
+        reportXlsxLinks()),
       h("div", { class: "grid" },
         kpi(gbs(tot("net_bytes")), fa ? "فروش خالص" : "Net sold", delta(tot("net_bytes"), tot("prev_net_bytes"))),
         kpi(fmtNum(tot("new")), fa ? "سرویس جدید" : "New services"),

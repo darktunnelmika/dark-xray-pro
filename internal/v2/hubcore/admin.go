@@ -1102,6 +1102,31 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 		err := s.PutCardFor(r.Context(), seller, in)
 		reply(w, map[string]bool{"ok": err == nil}, err)
 	}))
+	// Excel report for 7, 30 or 90 days (reportxlsx.go): the owner's whole
+	// panel or one reseller's (?rep=), a reseller its own.
+	mux.HandleFunc("GET /api/v2/shop/report.xlsx", member(func(w http.ResponseWriter, r *http.Request) {
+		p := who(r)
+		rep := p.RepID
+		if p.Role != "rep" {
+			rep = r.URL.Query().Get("rep")
+		}
+		days, _ := strconv.Atoi(r.URL.Query().Get("days"))
+		if days != 7 && days != 90 {
+			days = 30
+		}
+		sheets, err := s.ReportWorkbook(r.Context(), rep, days)
+		if err != nil {
+			reply(w, nil, err)
+			return
+		}
+		name := "dark-report"
+		if rep != "" {
+			name += "-" + rep
+		}
+		w.Header().Set("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+		w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s-%dd-%s.xlsx"`, name, days, s.now().Format("20060102")))
+		_ = WriteXLSX(w, sheets)
+	}))
 	// A reseller's credit pace and the package that covers a month (repforecast.go).
 	mux.HandleFunc("GET /api/v2/shop/forecast", member(func(w http.ResponseWriter, r *http.Request) {
 		p := who(r)
