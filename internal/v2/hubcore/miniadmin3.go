@@ -379,6 +379,10 @@ func registerMiniAdmin3(mux *http.ServeMux, s *Store,
 		}
 		ctx := r.Context()
 		if !panelSaleOn(ctx, seller) || !mayBuy(ctx, seller, u.ID) {
+			if t, ok := trialFor(ctx, seller, u.ID); ok { // the free trial without the sale
+				reply(w, map[string]any{"on": true, "packages": []any{}, "trial": map[string]any{"gb": t.GB, "days": t.Days, "max_clients": t.MaxClients}}, nil)
+				return
+			}
 			reply(w, map[string]any{"on": false}, nil)
 			return
 		}
