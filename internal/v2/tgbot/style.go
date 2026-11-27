@@ -310,6 +310,16 @@ func keyboardAction(text string) string {
 		return "guide"
 	case "منوی اصلی", "بیشتر", "منو":
 		return "home"
+	case "تست رایگان":
+		return "trial"
+	case "گردونهٔ شانس", "گردونه شانس", "گردونه":
+		return "wheel"
+	case "حساب من":
+		return "me"
+	case "وضعیت سرورها":
+		return "status"
+	case "پنل نمایندگی":
+		return "panel"
 	case "پنل مدیریت":
 		return "admin"
 	case "نمای مشتری":
@@ -337,8 +347,9 @@ func keyboardAction(text string) string {
 func (b *Bot) keyAction(ctx context.Context, chat int64, act string) {
 	b.takeAwait(chat) // a button press ends whatever the bot was waiting for
 	switch act {
-	case "shop", "mine", "wallet", "support", "guide", "home":
-		// A press on the older, larger keyboard swaps it for the current one.
+	case "shop", "mine", "wallet", "support", "guide", "home", "trial", "wheel", "me", "status", "panel":
+		// A press on an older keyboard swaps it for the current one; a
+		// change (trial taken, wheel on) updates it.
 		defer b.ensureKeyboard(ctx, chat)
 	}
 	if act == "customer" {
@@ -363,6 +374,16 @@ func (b *Bot) keyAction(ctx context.Context, chat int64, act string) {
 		b.send(ctx, chat, "💬 <b>پشتیبانی</b>\n"+line+"\nپیام خود را بنویسید و بفرستید؛ مستقیم به پشتیبانی می‌رسد و پاسخ همین‌جا می‌آید.", homeKB)
 	case "guide":
 		b.showGuide(ctx, chat, "")
+	case "trial":
+		b.trial(ctx, chat)
+	case "wheel":
+		b.spin(ctx, chat)
+	case "me":
+		b.account(ctx, chat)
+	case "status":
+		b.showStatus(ctx, chat)
+	case "panel":
+		b.repSaleList(ctx, chat)
 	case "admin":
 		if b.Owners[chat] {
 			b.ownerHome(ctx, chat)
@@ -413,6 +434,9 @@ func (b *Bot) ensureKeyboard(ctx context.Context, chat int64) {
 	}
 	if rep, _ := b.repOf(ctx, chat); rep != "" && b.repMode(ctx, chat) {
 		b.ensureRepKeyboard(ctx, chat)
+		return
+	}
+	if b.ensureCustomerKeys(ctx, chat) { // the full menu keyboard (keys.go)
 		return
 	}
 	key := fmt.Sprintf("tg_kb2:%s:%d", b.Seller, chat) // kb2: the one-row keyboard
