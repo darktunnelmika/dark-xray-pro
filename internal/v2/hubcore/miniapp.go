@@ -227,6 +227,10 @@ func registerMiniApp(mux *http.ServeMux, s *Store) {
 			http.Error(w, "the store is closed", http.StatusServiceUnavailable)
 			return TgUser{}, false
 		}
+		if s.TgBanned(r.Context(), seller, u.ID) {
+			http.Error(w, "⛔️ دسترسی شما به این فروشگاه محدود شده است.", http.StatusForbidden)
+			return TgUser{}, false
+		}
 		_ = s.TgTouch(r.Context(), u.ID, u.FirstName, u.Username)
 		*r = *r.WithContext(context.WithValue(r.Context(), miniSellerKey{}, seller))
 		return u, true

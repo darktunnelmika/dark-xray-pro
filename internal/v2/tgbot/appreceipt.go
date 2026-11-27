@@ -79,3 +79,14 @@ func (b *Bot) AppBroadcast(ctx context.Context, chat int64, text, audience strin
 	go b.broadcast(context.WithoutCancel(ctx), chat, d)
 	return len(d.chats)
 }
+
+// banned: the seller banned this chat (staff never are).
+func (b *Bot) banned(ctx context.Context, chat int64) bool {
+	if b.Owners[chat] {
+		return false
+	}
+	if rep, _ := b.repOf(ctx, chat); rep != "" && rep == b.Seller {
+		return false
+	}
+	return b.Store.TgBanned(ctx, b.Seller, chat)
+}

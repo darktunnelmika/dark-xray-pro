@@ -288,6 +288,10 @@ func (b *Bot) onMessage(ctx context.Context, m *Message) {
 	name := strings.TrimSpace(m.From.FirstName + " " + m.From.LastName)
 	_ = b.Store.TgTouch(ctx, chat, name, m.From.Username)
 	b.Store.TgTouchBot(ctx, b.Seller, chat)
+	if b.banned(ctx, chat) {
+		b.send(ctx, chat, "⛔️ دسترسی شما به این ربات محدود شده است.", nil)
+		return
+	}
 	if m.Paid != nil {
 		b.onPaid(ctx, chat, name, m.Paid)
 		return
@@ -846,6 +850,9 @@ func (b *Bot) onCallback(ctx context.Context, q *CallbackQuery) {
 		return
 	}
 	if b.repCallback(ctx, chat, q.Data) {
+		return
+	}
+	if b.banned(ctx, chat) {
 		return
 	}
 	if b.shopCallback(ctx, chat, q.Data) {

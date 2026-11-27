@@ -43,6 +43,8 @@ async function m2Fetch(view) {
     case "settings": M2.settings = await api("GET", "m/settings"); break;
     case "discounts": M2.discounts = await api("GET", "m/discounts"); break;
     case "broadcast": M2.bc = await api("GET", "m/broadcast"); break;
+    case "customers": M2.cust = await api("GET", `m/customers?q=${encodeURIComponent(M2.cq || "")}`); break;
+    case "admins": M2.admins = await api("GET", "m/admins"); break;
   }
 }
 const m2Reload = () => m2Fetch(M.view).then(render).catch((e) => toast(e.message));
@@ -64,6 +66,8 @@ function moreView() {
     c.settings ? tile("settings", "تنظیمات ربات", "gear", "خوش‌آمد، تست، کانال، ظاهر") : null,
     c.settings && !d.sub_seller ? tile("discounts", "کد تخفیف", "tag", "درصد یا مبلغ، با سقف") : null,
     c.settings ? tile("broadcast", "پیام همگانی", "send", "به همه یا یک گروه") : null,
+    c.settings ? tile("customers", "مشتری‌ها", "users", "پیام، کیف پول، مسدود") : null,
+    d.role === "owner" && !d.owner ? tile("admins", "ادمین‌های ربات", "bot", "دعوت، نقش، حذف") : null,
   ].filter(Boolean);
   const out = [h("div", { class: "tiles" }, tiles)];
   if (d.role === "owner" || d.role === "manager") {
@@ -204,6 +208,7 @@ function sellerSheet(x) {
     h("div", { class: "section-title" }, owner ? "تغییر اعتبار" : "انتقال اعتبار"),
     h("div", { class: "two" }, field("حجم (گیگ)", gb), field("واحد نامحدود", units)), note,
     h("div", { class: "row" }, btn(owner ? "افزودن" : "بده", "primary", () => move(1), "plus"), btn(owner ? "کم کردن" : "پس بگیر", "", () => move(-1), "renew")),
+    h("div", { class: "row" }, btn("محدودیت‌ها", "", () => { close(); policySheet(x); }, "gauge"), btn("پیام", "", () => { close(); sellerMessageSheet(x); }, "send")),
     btn(x.enabled ? "خاموش کردن پنل" : "روشن کردن پنل", x.enabled ? "danger block" : "block", async () => {
       try { await api("POST", "m/sellers/enable", { id: x.id, on: !x.enabled }); close(); toast(x.enabled ? "خاموش شد" : "روشن شد"); m2Reload(); } catch (e) { toast(e.message); }
     }, "power"));
@@ -661,4 +666,103 @@ function broadcastView() {
       }, "check"))];
 }
 
-const M2V = { settings: settingsView, discounts: discountsView, broadcast: broadcastView, more: moreView, resale: resaleView, wallet: walletView, sellers: sellersView, bot: botView, cards: cardsView, plans: plansView, tickets: ticketsView, report: reportView };
+async function policySheet(x) {
+  let p;
+  try { p = await api("GET", `m/sellers/policy?id=${encodeURIComponent(x.id)}`); } catch (e) { toast(e.message); return; }
+  const n = (v) => h("input", { type: "number", inputmode: "numeric", value: v || "", placeholder: "۰ = بی‌سقف" });
+  const mc = n(p.max_clients), md = n(p.max_days), mg = n(p.max_client_gb);
+  const [uRow, u] = check("فروش نامحدود مجاز است", p.allow_unlimited);
+  const [dRow, dl] = check("حذف کاربر مجاز است", p.can_delete);
+  const [cRow, cr] = check("ساخت کاربر تازه بسته باشد", p.deny_create);
+  const [rRow, rn] = check("تمدید و افزودن حجم بسته باشد", p.deny_renew);
+  const go = btn("ذخیره", "primary block big", async () => {
+    go.disabled = true;
+    try {
+      await api("POST", "m/sellers/policy", { id: x.id, max_clients: Math.round(+mc.value || 0), max_days: Math.round(+md.value || 0), max_client_gb: Math.round(+mg.value || 0),
+        allow_unlimited: u.checked, can_delete: dl.checked, deny_create: cr.checked, deny_renew: rn.checked });
+      close(); haptic("success"); toast("ذخیره شد");
+    } catch (e) { go.disabled = false; haptic("error"); toast(e.message); }
+  }, "check");
+  const close = sheet(h("h2", {}, `محدودیت‌های ${x.name || x.id}`), field("حداکثر تعداد کاربر", mc),
+    h("div", { class: "two" }, field("حداکثر روز هر کاربر", md), field("حداکثر گیگ هر کاربر", mg)), uRow, dRow, cRow, rRow,
+    M.home.owner ? null : h("p", { class: "muted small" }, "از سقف‌های خودتان بیشتر نمی‌شود."), go);
+}
+
+function sellerMessageSheet(x) {
+  const t = h("textarea", { rows: "5", maxlength: "3000", placeholder: "متن پیام…" });
+  const go = btn("ارسال", "primary block big", async () => {
+    go.disabled = true;
+    try { await api("POST", "m/sellers/message", { id: x.id, text: t.value }); close(); haptic("success"); toast("فرستاده شد"); }
+    catch (e) { go.disabled = false; haptic("error"); toast(e.message); }
+  }, "send");
+  const close = sheet(h("h2", {}, `پیام به ${x.name || x.id}`), t, go);
+}
+
+// ---------- customers ----------
+function customersView() {
+  const d = M2.cust;
+  const q = h("input", { class: "search", type: "search", placeholder: "اسم، آیدی یا شمارهٔ تلگرام…", value: M2.cq || "", enterkeyhint: "search" });
+  let tmr;
+  q.addEventListener("input", () => { clearTimeout(tmr); tmr = setTimeout(() => { M2.cq = q.value; m2Reload(); }, 350); });
+  const out = [backHead("مشتری‌ها"), h("div", { class: "searchbar" }, q)];
+  if (!d) { out.push(spin()); return out; }
+  out.push(h("div", { class: "small muted listhead" }, `${num(d.total)} نفر ربات را استارت کرده‌اند${d.total > d.customers.length ? ` (${num(d.customers.length)} تای آخر)` : ""}`));
+  if (!d.customers.length) out.push(h("div", { class: "card empty" }, h("p", {}, "کسی پیدا نشد.")));
+  out.push(h("div", { class: "ulist" }, d.customers.map((c) => h("button", { class: `urow ${c.banned ? "bad" : ""} ${c.left ? "off" : ""}`, onclick: () => customerSheet(c) },
+    h("div", { class: "u-main" },
+      h("div", { class: "u-top" }, h("b", {}, c.name || `#${c.chat}`), c.username ? h("span", { class: "ltr muted small" }, "@" + c.username) : null,
+        c.banned ? h("span", { class: "pill bad" }, "مسدود") : c.left ? h("span", { class: "pill" }, "ربات را بسته") : null),
+      h("div", { class: "u-meta" }, h("span", {}, `${num(c.services)} سرویس${c.wallet ? ` · کیف پول ${toman(c.wallet)}` : ""}`), h("span", {}, date(c.last))))))));
+  return out;
+}
+
+function customerSheet(c) {
+  const msg = h("textarea", { rows: "3", maxlength: "3000", placeholder: "پیام مستقیم از ربات…" });
+  const amt = h("input", { type: "number", inputmode: "numeric", placeholder: "مبلغ (تومان)" });
+  const act = async (body, done) => {
+    try { const r = await api("POST", "m/customer", { chat: c.chat, ...body }); haptic("success"); toast(done(r)); close(); m2Reload(); }
+    catch (e) { haptic("error"); toast(e.message); }
+  };
+  const close = sheet(h("div", { class: "row between" }, h("h2", {}, c.name || `#${c.chat}`), c.username ? h("span", { class: "ltr muted" }, "@" + c.username) : null),
+    h("div", { class: "kv" }, h("span", {}, "شمارهٔ تلگرام"), h("b", { class: "ltr" }, String(c.chat))),
+    h("div", { class: "kv" }, h("span", {}, "سرویس‌ها"), h("b", {}, num(c.services))),
+    h("div", { class: "kv" }, h("span", {}, "کیف پول"), h("b", {}, `${toman(c.wallet)} تومان`)),
+    h("div", { class: "kv" }, h("span", {}, "اولین / آخرین بار"), h("b", {}, `${date(c.first)} / ${date(c.last)}`)),
+    c.username ? btn("باز کردن چت", "block ghost", () => { try { tg.openTelegramLink(`https://t.me/${c.username}`); } catch {} }, "chat") : null,
+    h("div", { class: "section-title" }, "پیام از ربات"), msg,
+    btn("ارسال پیام", "primary block", () => act({ action: "message", text: msg.value }, () => "فرستاده شد"), "send"),
+    h("div", { class: "section-title" }, "کیف پول"), amt,
+    h("div", { class: "row" }, btn("افزودن", "", () => act({ action: "wallet", delta: Math.round(+amt.value || 0), text: "از مینی‌اپ" }, (r) => `موجودی: ${toman(r.balance)} تومان`), "plus"),
+      btn("کم کردن", "", () => act({ action: "wallet", delta: -Math.round(+amt.value || 0), text: "از مینی‌اپ" }, (r) => `موجودی: ${toman(r.balance)} تومان`), "renew")),
+    btn(c.banned ? "رفع مسدودی" : "مسدود کردن", c.banned ? "block" : "danger block", () => act({ action: c.banned ? "unban" : "ban" }, () => (c.banned ? "رفع مسدودی شد" : "مسدود شد")), "power"));
+}
+
+// ---------- the bot's admins ----------
+const roleDesc = { manager: "مدیر: همهٔ کارها", sales: "فروش: ساخت، تمدید، سفارش‌ها، تیکت", support: "پشتیبانی: دیدن کاربرها و تیکت" };
+function adminsView() {
+  const d = M2.admins;
+  if (!d) return [backHead("ادمین‌های ربات"), spin()];
+  const invite = async (role) => {
+    try {
+      const r = await api("POST", "m/admins/invite", { role });
+      const share = () => { try { tg.openTelegramLink(`https://t.me/share/url?url=${encodeURIComponent(r.link)}`); } catch { copy(r.link); } };
+      sheet(h("h2", {}, `دعوت ${roleFa[role]}`), h("p", { class: "muted small" }, "یک‌بار مصرف، تا یک ساعت. برای آن شخص بفرستید؛ با باز کردنش ادمین ربات شما می‌شود."),
+        h("div", { class: "sublink ltr", onclick: () => copy(r.link) }, r.link), h("div", { class: "row" }, btn("کپی", "primary", () => copy(r.link), "copy"), btn("ارسال", "", share, "share")));
+    } catch (e) { toast(e.message); }
+  };
+  const out = [backHead("ادمین‌های ربات"),
+    h("div", { class: "card" }, h("b", {}, "دعوت ادمین تازه"), h("div", { class: "cfgs" }, ["manager", "sales", "support"].map((r) => h("button", { class: "cfg", onclick: () => invite(r) },
+      h("span", { class: "pill" }, roleFa[r]), h("span", {}, roleDesc[r]), mic("plus")))))];
+  if (!d.admins.length) out.push(h("div", { class: "card empty" }, h("p", {}, "هنوز ادمینی ندارید.")));
+  out.push(h("div", { class: "ulist" }, d.admins.map((a) => {
+    const sel = h("select", { "aria-label": "نقش" }, ["manager", "sales", "support"].map((r) => { const o = h("option", { value: r }, roleFa[r]); if (r === a.role) o.selected = true; return o; }));
+    sel.addEventListener("change", async () => { try { await api("POST", "m/admins/set", { chat: a.chat, role: sel.value }); toast("نقش عوض شد"); } catch (e) { toast(e.message); } });
+    return h("div", { class: "lrow" }, h("div", {}, h("b", {}, a.name || `#${a.chat}`), a.username ? h("div", { class: "ltr muted small" }, "@" + a.username) : null),
+      h("div", { class: "row" }, sel, h("button", { class: "iconbtn mini danger", "aria-label": "حذف", onclick: async () => {
+        try { await api("POST", "m/admins/set", { chat: a.chat, role: "" }); toast("حذف شد"); m2Reload(); } catch (e) { toast(e.message); }
+      } }, mic("trash"))));
+  })));
+  return out;
+}
+
+const M2V = { customers: customersView, admins: adminsView, settings: settingsView, discounts: discountsView, broadcast: broadcastView, more: moreView, resale: resaleView, wallet: walletView, sellers: sellersView, bot: botView, cards: cardsView, plans: plansView, tickets: ticketsView, report: reportView };

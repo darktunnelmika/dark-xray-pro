@@ -161,7 +161,7 @@ input:focus-visible, .btn:focus-visible, .chip:focus-visible { outline: 2px soli
 .error-page p { color: var(--muted); }
 
 /* tabs */
-.tabs { position: fixed; inset-inline: 10px; inset-block-end: calc(10px + env(safe-area-inset-bottom)); display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; padding: 6px;
+.tabs { position: fixed; inset-inline: 10px; inset-block-end: calc(10px + env(safe-area-inset-bottom)); display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; padding: 6px;
   border-radius: 20px; background: color-mix(in oklab, var(--surface) 88%, transparent); border: 1px solid var(--line); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); z-index: 5; }
 .tabs button { display: grid; justify-items: center; gap: 2px; padding: 7px 4px; border: 0; border-radius: 14px; background: transparent; color: var(--muted); font-size: 11.5px; font-weight: 700; cursor: pointer; }
 .tabs button[aria-current="page"] { color: var(--ion); background: color-mix(in oklab, var(--ion) 13%, transparent); }

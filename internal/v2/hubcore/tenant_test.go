@@ -377,6 +377,7 @@ func TestClientQueriesAreReviewed(t *testing.T) {
 		"hubcore/subfetch.go":   4, // prune (all), one shop client's rev, a shop's fetch report
 		"hubcore/dailycap.go":   1, // one client's daily cap, by name (any client may be capped)
 		"hubcore/reportxlsx.go": 2, // traffic: one reseller's clients (rep_id=?) or all but connected shops'
+		"hubcore/customers.go":  1, // a chat's services with this seller (rep_id = the bot's seller)
 	}
 	re := regexp.MustCompile(`(FROM|JOIN) clients\b`)
 	got := map[string]int{}

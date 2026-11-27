@@ -180,11 +180,14 @@ function services() {
       h("p", {}, "یک پلن بخرید یا اگر سرویس دارید، لینک اشتراکش را اینجا بگذارید."),
       btn("دیدن پلن‌ها", "primary block", () => setTab("shop"), "bolt"),
       h("div", { class: "field" }, input, btn("اتصال", "", () => link(input.value), "link"))));
+    out.push(...ordersPart(true), ...ordersPart(false));
     out.push(...extras());
     return out;
   }
   // A short list; the rings, usage and actions open with a tap.
-  out.push(h("div", { class: "svc-list" }, state.services.map(serviceRow)));
+  out.push(...ordersPart(true));
+  out.push(h("div", { class: "section-title" }, "سرویس‌های من"), h("div", { class: "svc-list" }, state.services.map(serviceRow)));
+  out.push(...ordersPart(false));
   out.push(...extras());
   const input = h("input", { placeholder: "https://…/sub/…", "aria-label": "لینک اشتراک دیگر", dir: "ltr" });
   out.push(h("div", { class: "section-title" }, "سرویس دیگری دارید؟"),
@@ -370,7 +373,7 @@ async function buy(p, renewEmail) {
     go.disabled = true;
     try {
       const r = await api("POST", "order", { product: p.id, renew: renewEmail });
-      haptic("success"); close(); await load(false); setTab("orders");
+      haptic("success"); close(); await load(false); setTab("services");
       showPay(p, renewEmail, r);
     } catch (e) { go.disabled = false; haptic("error"); toast(e.message); }
   }, "card");
@@ -504,9 +507,17 @@ async function topup(amount) {
 }
 
 const orderStatus = { pending: ["warn", "در انتظار پرداخت"], fulfilled: ["good", "تحویل شد"], cancelled: ["", "لغو شد"] };
-function orders() {
-  if (!state.orders.length) return [h("div", { class: "card empty" }, h("h2", {}, "سفارشی ندارید"), btn("خرید سرویس", "primary block", () => setTab("shop"), "bolt"))];
-  return [h("div", { class: "section-title" }, "سفارش‌های شما"), ...state.orders.map((o) => {
+// ordersPart: open orders (waiting for payment) go above the services;
+// past ones fold away below them.
+function ordersPart(open) {
+  const list = (state.orders || []).filter((o) => (o.status === "pending") === open);
+  if (!list.length) return [];
+  const cards = list.map(orderCard);
+  if (open) return [h("div", { class: "section-title" }, "⏳ سفارش‌های در انتظار پرداخت"), ...cards];
+  return [h("details", { class: "more past-orders" }, h("summary", {}, `سفارش‌های قبلی (${num(list.length)})`), ...cards)];
+}
+function orderCard(o) {
+  {
     const [cls, label] = orderStatus[o.status] || ["", o.status];
     return h("div", { class: "card order" },
       h("div", {}, h("div", { class: "what" }, `#${num(o.id)} · ${o.product}`),
@@ -516,7 +527,7 @@ function orders() {
         o.status === "pending" ? btn("لغو", "ghost small", async () => {
           try { await api("POST", "cancel/" + o.id); toast("لغو شد"); await load(false); } catch (e) { toast(e.message); }
         }) : null));
-  })];
+  }
 }
 
 async function link(value) {
@@ -553,7 +564,7 @@ function render() {
     state.logo && /^data:image\//.test(state.logo) ? h("img", { class: "av logo", src: state.logo, alt: "" }) : h("div", { class: "av" }, initials),
     h("div", { class: "hello-t" }, h("p", {}, name ? `سلام ${name} 👋` : "سلام 👋"), h("h1", {}, state.title || "Dark VPN")),
     h("button", { class: "wallet-chip", onclick: () => { tap(); setTab("wallet"); } }, icon(IC.wallet), h("span", {}, `${toman(state.toman || 0)}`)));
-  const body = tab === "manage" && role.manage && typeof manageView === "function" ? manageView() : { services, shop, wallet, orders }[tab]();
+  const body = tab === "manage" && role.manage && typeof manageView === "function" ? manageView() : ({ services, shop, wallet }[tab] || services)();
   app.replaceChildren(head, state.announce ? h("div", { class: "announce" }, state.announce) : "", h("div", { class: "view" }, ...body));
   tabs.hidden = false;
   for (const b of tabs.querySelectorAll("button")) b.setAttribute("aria-current", b.dataset.tab === tab ? "page" : "false");

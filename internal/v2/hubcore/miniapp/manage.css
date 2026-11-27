@@ -1,5 +1,5 @@
 /* Management screens (manage.js), on top of app.css. */
-.tabs.five { grid-template-columns: repeat(5, 1fr); }
+.tabs.five { grid-template-columns: repeat(4, 1fr); }
 .seg { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 4px; padding: 4px; margin-block-end: 12px; border-radius: 14px; background: var(--surface); border: 1px solid var(--line); position: sticky; inset-block-start: 6px; z-index: 3; }
 .seg button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 8px 6px; border: 0; border-radius: 11px; background: transparent; color: var(--muted); font-weight: 700; font-size: 13px; cursor: pointer; }
 .seg button.on { color: var(--on-ion); background: linear-gradient(135deg, var(--ion), var(--ion-2)); }
@@ -117,3 +117,4 @@ details.more { margin-block-start: 6px; } details.more summary { cursor: pointer
 .card textarea { resize: vertical; line-height: 1.7; }
 .card > input + input { margin-block-start: 8px; }
 input[type=color] { inline-size: 100%; block-size: 42px; padding: 2px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface-2); }
+.lrow select { padding: 7px 8px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface-2); color: var(--text); font: inherit; }

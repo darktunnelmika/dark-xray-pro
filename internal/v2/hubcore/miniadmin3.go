@@ -333,6 +333,10 @@ func registerMiniAdmin3(mux *http.ServeMux, s *Store,
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return u, "", false
 		}
+		if s.TgBanned(r.Context(), seller, u.ID) {
+			http.Error(w, "⛔️ دسترسی شما محدود شده است.", http.StatusForbidden)
+			return u, "", false
+		}
 		return u, seller, true
 	}
 	panelSaleOn := func(ctx context.Context, seller string) bool {
@@ -402,4 +406,5 @@ func registerMiniAdmin3(mux *http.ServeMux, s *Store,
 	})
 	registerAppReceipt(mux, s)
 	registerMiniAdmin4(mux, s, mgr, deny, read)
+	registerMiniAdmin5(mux, s, mgr, deny, read)
 }
