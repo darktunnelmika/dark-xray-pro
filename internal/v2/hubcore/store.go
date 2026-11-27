@@ -315,6 +315,10 @@ func Open(path string) (*Store, error) {
 		st.Close()
 		return nil, err
 	}
+	if err := st.ensureDailyCapSchema(); err != nil {
+		st.Close()
+		return nil, err
+	}
 	if err := st.ensureAutoRenewSchema(); err != nil {
 		st.Close()
 		return nil, err
@@ -706,11 +710,13 @@ type ClientView struct {
 	NextReset      int64     `json:"next_reset,omitempty"`
 	NextPlan       *NextPlan `json:"next_plan,omitempty"`
 	HWIDLimit      int       `json:"hwid_limit"`
-	SpeedKbps      int       `json:"speed_kbps"`           // 0 = no limit
-	StartBy        int64     `json:"start_by,omitempty"`   // on hold: the term starts by then even if unused
-	Trial          bool      `json:"trial,omitempty"`      // a free trial from a Telegram shop
-	GiftBytes      int64     `json:"gift_bytes,omitempty"` // the owner's gift in the volume: never refunded as credit
-	Legacy         bool      `json:"legacy,omitempty"`     // an old user brought from another panel (legacy.go)
+	SpeedKbps      int       `json:"speed_kbps"`                // 0 = no limit
+	StartBy        int64     `json:"start_by,omitempty"`        // on hold: the term starts by then even if unused
+	Trial          bool      `json:"trial,omitempty"`           // a free trial from a Telegram shop
+	GiftBytes      int64     `json:"gift_bytes,omitempty"`      // the owner's gift in the volume: never refunded as credit
+	Legacy         bool      `json:"legacy,omitempty"`          // an old user brought from another panel (legacy.go)
+	DailyCapBytes  int64     `json:"daily_cap_bytes,omitempty"` // dailycap.go: 0 = no daily cap
+	DailyUsed      int64     `json:"daily_used,omitempty"`      // today's usage (only for capped clients)
 }
 
 // Clients lists the panel's own clients (the owner's and the resellers')
@@ -745,9 +751,10 @@ func (s *Store) clientViews(ctx context.Context, where string, args ...any) ([]C
 	q := `SELECT c.email,c.uuid,c.enabled,c.volume_bytes,c.expires_unix,c.duration_seconds,c.max_ips,c.sub_token,c.rep_id,c.plan,c.note,
 COALESCE(u.up,0),COALESCE(u.down,0),COALESCE(u.first_seen_unix,0),COALESCE(u.last_seen_unix,0),
 EXISTS(SELECT 1 FROM online o WHERE o.email=c.email AND o.seen_unix>=?),CASE WHEN c.reset_year=1 THEN 'year' ELSE c.reset_period END,c.last_reset_unix,c.next_plan,c.hwid_limit,c.start_by_unix,c.trial,
-EXISTS(SELECT 1 FROM legacy_clients l WHERE l.email=c.email),c.gift_bytes
+EXISTS(SELECT 1 FROM legacy_clients l WHERE l.email=c.email),c.gift_bytes,c.daily_cap_bytes,
+CASE WHEN c.daily_cap_bytes>0 THEN COALESCE((SELECT SUM(d.up+d.down) FROM usage_daily d WHERE d.email=c.email AND d.day=?),0) ELSE 0 END
 FROM clients c LEFT JOIN client_usage u ON u.email=c.email`
-	qargs := []any{s.now().Unix() - 120}
+	qargs := []any{s.now().Unix() - 120, s.usageDay()}
 	if where != "" {
 		q += " WHERE " + where
 		qargs = append(qargs, args...)
@@ -762,7 +769,7 @@ FROM clients c LEFT JOIN client_usage u ON u.email=c.email`
 		var v ClientView
 		var np string
 		if err := rows.Scan(&v.Email, &v.UUID, &v.Enabled, &v.VolumeBytes, &v.ExpiresUnix, &v.DurationSeconds, &v.MaxIPs, &v.SubToken, &v.RepID, &v.Plan, &v.Note,
-			&v.Usage.Up, &v.Usage.Down, &v.Usage.FirstSeen, &v.Usage.LastSeen, &v.Online, &v.ResetPeriod, &v.LastReset, &np, &v.HWIDLimit, &v.StartBy, &v.Trial, &v.Legacy, &v.GiftBytes); err != nil {
+			&v.Usage.Up, &v.Usage.Down, &v.Usage.FirstSeen, &v.Usage.LastSeen, &v.Online, &v.ResetPeriod, &v.LastReset, &np, &v.HWIDLimit, &v.StartBy, &v.Trial, &v.Legacy, &v.GiftBytes, &v.DailyCapBytes, &v.DailyUsed); err != nil {
 			return nil, err
 		}
 		if np != "" {

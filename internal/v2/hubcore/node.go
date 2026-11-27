@@ -99,10 +99,12 @@ tx_rate=MAX(tx_rate,excluded.tx_rate), online=MAX(online,excluded.online)`,
 func (s *Store) limits(ctx context.Context, nodeID string) ([]wire.UserLimit, error) {
 	// One query for the clients and their usage (not one per client: a node
 	// can carry tens of thousands).
+	// A daily cap (dailycap.go) reads today's usage only for capped clients.
 	rows, err := s.ro.QueryContext(ctx, `SELECT c.email,c.enabled,c.volume_bytes,c.expires_unix,c.duration_seconds,c.max_ips,
-COALESCE(u.up,0),COALESCE(u.down,0),COALESCE(u.first_seen_unix,0),COALESCE(u.last_seen_unix,0)
+COALESCE(u.up,0),COALESCE(u.down,0),COALESCE(u.first_seen_unix,0),COALESCE(u.last_seen_unix,0),c.daily_cap_bytes,
+CASE WHEN c.daily_cap_bytes>0 THEN COALESCE((SELECT SUM(d.up+d.down) FROM usage_daily d WHERE d.email=c.email AND d.day=?),0) ELSE 0 END
 FROM clients c LEFT JOIN client_usage u ON u.email=c.email
-WHERE c.email IN (SELECT ci.email FROM client_inbounds ci JOIN inbound_routes r ON r.tag=ci.tag WHERE r.node_id=?) ORDER BY c.email`, nodeID)
+WHERE c.email IN (SELECT ci.email FROM client_inbounds ci JOIN inbound_routes r ON r.tag=ci.tag WHERE r.node_id=?) ORDER BY c.email`, s.usageDay(), nodeID)
 	if err != nil {
 		return nil, err
 	}
@@ -111,11 +113,12 @@ WHERE c.email IN (SELECT ci.email FROM client_inbounds ci JOIN inbound_routes r 
 	for rows.Next() {
 		var c Client
 		var u Usage
-		if err := rows.Scan(&c.Email, &c.Enabled, &c.VolumeBytes, &c.ExpiresUnix, &c.DurationSeconds, &c.MaxIPs, &u.Up, &u.Down, &u.FirstSeen, &u.LastSeen); err != nil {
+		var capBytes, today int64
+		if err := rows.Scan(&c.Email, &c.Enabled, &c.VolumeBytes, &c.ExpiresUnix, &c.DurationSeconds, &c.MaxIPs, &u.Up, &u.Down, &u.FirstSeen, &u.LastSeen, &capBytes, &today); err != nil {
 			return nil, err
 		}
 		out = append(out, wire.UserLimit{Email: c.Email, Enabled: c.Enabled, ExpiresUnix: EffectiveExpiry(c, u),
-			RemainingBytes: Remaining(c, u), MaxIPs: c.MaxIPs})
+			RemainingBytes: capRemaining(Remaining(c, u), capBytes, today), MaxIPs: c.MaxIPs})
 	}
 	return out, rows.Err()
 }

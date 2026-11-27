@@ -855,6 +855,34 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 		}
 		reply(w, map[string]bool{"ok": true}, s.SetHWIDLimit(r.Context(), r.PathValue("email"), in.Limit))
 	}))
+	// Daily cap (dailycap.go): the owner, or the reseller that owns the client.
+	mux.HandleFunc("GET /api/v2/admin/clients/{email}/daily-cap", member(func(w http.ResponseWriter, r *http.Request) {
+		p := who(r)
+		if p.Role == "rep" && !s.ownsClient(r.Context(), p.RepID, r.PathValue("email")) {
+			http.NotFound(w, r)
+			return
+		}
+		d, err := s.DailyCapOf(r.Context(), r.PathValue("email"))
+		reply(w, d, err)
+	}))
+	mux.HandleFunc("PUT /api/v2/admin/clients/{email}/daily-cap", member(func(w http.ResponseWriter, r *http.Request) {
+		p := who(r)
+		if p.Role == "rep" && !s.ownsClient(r.Context(), p.RepID, r.PathValue("email")) {
+			http.NotFound(w, r)
+			return
+		}
+		var in struct {
+			GB float64 `json:"gb"`
+		}
+		if !decode(w, r, &in) {
+			return
+		}
+		if in.GB < 0 || in.GB > MaxDailyCapGB {
+			reply(w, nil, fmt.Errorf("%w: daily cap: 0 to %d GB", ErrInvalid, MaxDailyCapGB))
+			return
+		}
+		reply(w, map[string]bool{"ok": true}, s.SetDailyCap(r.Context(), r.PathValue("email"), int64(in.GB*(1<<30))))
+	}))
 	mux.HandleFunc("PUT /api/v2/admin/clients/{email}/next-plan", guard(func(w http.ResponseWriter, r *http.Request) {
 		var in struct {
 			Plan *NextPlan `json:"plan"`
