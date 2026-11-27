@@ -19,6 +19,7 @@ const app = document.getElementById("app");
 const tabs = document.getElementById("tabs");
 let state = null;
 let tab = "services";
+let role = { manage: false, store: true }; // GET role: management (manage.js) and whether the store is open
 
 function h(tag, attrs, ...kids) {
   const el = document.createElement(tag);
@@ -428,6 +429,13 @@ function celebrate(msg) {
 }
 
 function render() {
+  if (!state) { // management only (the store is closed)
+    app.replaceChildren(h("header", { class: "hello" }, h("div", { class: "av" }, (role.first_name || "D").slice(0, 1)),
+      h("div", { class: "hello-t" }, h("p", {}, role.first_name ? `سلام ${role.first_name} 👋` : "سلام 👋"), h("h1", {}, "مدیریت"))),
+      h("div", { class: "view" }, ...manageView()));
+    tabs.hidden = true;
+    return;
+  }
   const u = state.user || {};
   const name = u.first_name || "";
   const initials = (name || "D").slice(0, 1);
@@ -437,7 +445,7 @@ function render() {
     state.logo && /^data:image\//.test(state.logo) ? h("img", { class: "av logo", src: state.logo, alt: "" }) : h("div", { class: "av" }, initials),
     h("div", { class: "hello-t" }, h("p", {}, name ? `سلام ${name} 👋` : "سلام 👋"), h("h1", {}, state.title || "Dark VPN")),
     h("button", { class: "wallet-chip", onclick: () => { tap(); setTab("wallet"); } }, icon(IC.wallet), h("span", {}, `${toman(state.toman || 0)}`)));
-  const body = { services, shop, wallet, orders }[tab]();
+  const body = tab === "manage" && role.manage && typeof manageView === "function" ? manageView() : { services, shop, wallet, orders }[tab]();
   app.replaceChildren(head, state.announce ? h("div", { class: "announce" }, state.announce) : "", h("div", { class: "view" }, ...body));
   tabs.hidden = false;
   for (const b of tabs.querySelectorAll("button")) b.setAttribute("aria-current", b.dataset.tab === tab ? "page" : "false");
@@ -446,10 +454,30 @@ function render() {
 function setTab(t) { tab = t; render(); window.scrollTo({ top: 0 }); }
 tabs.addEventListener("click", (e) => { const b = e.target.closest("button[data-tab]"); if (b) { try { tg.HapticFeedback.selectionChanged(); } catch {} setTab(b.dataset.tab); } });
 
+// loadManage brings in the management screens (managers only).
+function loadManage() {
+  return new Promise((res) => {
+    const css = document.createElement("link"); css.rel = "stylesheet"; css.href = "manage.css"; document.head.append(css);
+    const js = document.createElement("script"); js.src = "manage.js"; js.onload = res; js.onerror = res; document.head.append(js);
+  });
+}
+
 async function load(first = true) {
+  if (first) {
+    try { role = await api("GET", "role"); } catch { role = { manage: false, store: true }; }
+    if (role.manage) {
+      await loadManage();
+      const b = h("button", { "data-tab": "manage" }, icon("M3 3h7v9H3zM14 3h7v5h-7zM14 12h7v9h-7zM3 16h7v5H3z"), h("span", {}, "مدیریت"));
+      tabs.prepend(b);
+      tabs.classList.add("five");
+      if (new URLSearchParams(location.search).get("m") === "1" || !role.store) tab = "manage";
+      if (!role.store) { state = null; render(); return; }
+    }
+  }
   try { state = await api("GET", "me"); render(); }
   catch (e) {
     if (!first) { toast(e.message); return; }
+    if (role.manage) { state = null; tab = "manage"; render(); return; }
     const msg = e.status === 401 ? "این صفحه را از داخل ربات تلگرام باز کنید." : e.status === 503 ? "فروشگاه فعلاً بسته است." : e.message;
     app.replaceChildren(h("div", { class: "error-page" }, h("div", { class: "glow-mark" }, icon(IC.shield)), h("h1", {}, "Dark VPN"), h("p", {}, msg)));
   }

@@ -236,6 +236,7 @@ func registerMiniApp(mux *http.ServeMux, s *Store) {
 		return s.TgClients(r.Context(), chat)
 	}
 	owner := Principal{User: "miniapp", Role: "owner"}
+	registerMiniAdmin(mux, s, base) // management for resellers and the owner (miniadmin.go)
 	mux.HandleFunc("GET /app/api/me", func(w http.ResponseWriter, r *http.Request) {
 		u, ok := user(w, r)
 		if !ok {
