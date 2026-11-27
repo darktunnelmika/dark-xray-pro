@@ -91,6 +91,11 @@ function dashView() {
     h("div", {}, h("h2", {}, d.name || ""), h("span", { class: "pill" }, roleFa[d.role] || d.role)),
     h("div", { class: "muted small" }, `فروش امروز: ${size((d.today || {}).sold || 0)} · ${num((d.today || {}).sales || 0)} مورد`)));
   if (credit) out.push(credit);
+  const mo = d.month || {};
+  out.push(h("div", { class: "kpis money" },
+    h("div", { class: "kpi" }, h("b", {}, size(mo.sold || 0)), h("span", {}, `فروش ماه · ${num(mo.sales || 0)} مورد`)),
+    h("div", { class: "kpi" }, h("b", {}, toman(d.toman_today || 0)), h("span", {}, "درآمد امروز (تومان)")),
+    h("div", { class: "kpi" }, h("b", {}, toman(mo.toman || 0)), h("span", {}, `درآمد ماه · ${num(mo.orders || 0)} سفارش`))));
   const kpi = (label, n, filter, tone) => h("button", { class: `kpi ${tone || ""}`, onclick: () => mSet("users", filter) }, h("b", {}, num(n || 0)), h("span", {}, label));
   out.push(h("div", { class: "kpis" }, kpi("همه", st.total, ""), kpi("فعال", st.active, ""), kpi("آنلاین", st.online, "online", "good"),
     kpi("رو به اتمام", st.soon, "soon", "warn"), kpi("تمام‌شده", st.ended, "ended", "bad")));

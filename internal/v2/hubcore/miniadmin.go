@@ -221,6 +221,19 @@ func (s *Store) mgrHome(ctx context.Context, m miniMgr) (map[string]any, error) 
 	var sold, sales int64
 	_ = s.ro.QueryRowContext(ctx, ledger, args...).Scan(&sold, &sales)
 	out["today"] = map[string]int64{"sold": sold, "sales": sales}
+	tToday, tMonth, nMonth := s.mgrMoney(ctx, m.Seller)
+	var mSold, mSales int64
+	margs := []any{monthStart(s.now())}
+	mq := `SELECT COALESCE(SUM(CASE WHEN kind='charge' THEN -volume_delta END),0),COALESCE(SUM(CASE WHEN kind='charge' THEN 1 END),0) FROM credit_ledger WHERE unix>=?`
+	if m.Owner {
+		mq += ` AND substr(rep_id,1,1)<>'~'`
+	} else {
+		mq += ` AND rep_id=?`
+		margs = append(margs, m.Seller)
+	}
+	_ = s.ro.QueryRowContext(ctx, mq, margs...).Scan(&mSold, &mSales)
+	out["month"] = map[string]int64{"sold": mSold, "sales": mSales, "toman": tMonth, "orders": nMonth}
+	out["toman_today"] = tToday
 	orders, _ := s.Orders(ctx, m.P, "pending", 200)
 	pend := 0 // only what has a receipt waits for the seller; an order without one waits for its buyer
 	for _, o := range orders {
@@ -835,4 +848,5 @@ func registerMiniAdmin(mux *http.ServeMux, s *Store, base func(*http.Request) st
 	})
 	registerMiniAdmin2(mux, s, base, mgr, deny, read)
 	registerMiniAdmin3(mux, s, mgr, deny, read)
+	registerMiniAdmin6(mux, s, mgr, deny, read, base)
 }

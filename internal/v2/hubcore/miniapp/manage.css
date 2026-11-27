@@ -118,3 +118,7 @@ details.more { margin-block-start: 6px; } details.more summary { cursor: pointer
 .card > input + input { margin-block-start: 8px; }
 input[type=color] { inline-size: 100%; block-size: 42px; padding: 2px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface-2); }
 .lrow select { padding: 7px 8px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface-2); color: var(--text); font: inherit; }
+.kpis.money { grid-template-columns: repeat(3, 1fr); }
+.kpis.money .kpi { cursor: default; } .kpis.money .kpi b { font-size: 15px; }
+.chips.quick { margin-block-start: 8px; }
+.bubble { cursor: copy; }

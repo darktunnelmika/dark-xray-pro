@@ -153,7 +153,66 @@ function serviceCard(sv) {
     h("div", { class: "actions" },
       btn("اتصال و QR", "primary", () => connect(sv), "qr"),
       btn("کپی لینک", "", () => copy(sv.sub_url), "copy"),
-      state.products.length ? btn("تمدید", "", () => renew(sv), "renew") : null));
+      state.products.length ? btn("تمدید", "", () => renew(sv), "renew") : null),
+    btn("آموزش اتصال / وصل نمی‌شوم", "ghost block", () => helpSheet(sv), "chat"));
+}
+
+// ---------- connection help ----------
+const GUIDE = {
+  android: { name: "اندروید", apps: [
+    { name: "Hiddify", link: (u) => "hiddify://import/" + u, store: "https://play.google.com/store/apps/details?id=app.hiddify.com" },
+    { name: "v2rayNG", link: (u) => "v2rayng://install-config?url=" + encodeURIComponent(u), store: "https://play.google.com/store/apps/details?id=com.v2ray.ang" }],
+    steps: ["برنامه را نصب کنید.", "دکمهٔ «افزودن به برنامه» را بزنید (یا لینک را کپی و در برنامه از کلیپ‌بورد وارد کنید).", "در برنامه «به‌روزرسانی اشتراک» را بزنید.", "یکی از سرورها را انتخاب و وصل شوید."] },
+  ios: { name: "آیفون", apps: [
+    { name: "Streisand", link: (u) => "streisand://import/" + u, store: "https://apps.apple.com/app/streisand/id6450534064" },
+    { name: "V2Box", link: (u) => "v2box://install-sub?url=" + encodeURIComponent(u) + "&name=VPN", store: "https://apps.apple.com/app/v2box-v2ray-client/id6446814690" },
+    { name: "Hiddify", link: (u) => "hiddify://import/" + u, store: "https://apps.apple.com/app/hiddify-proxy-vpn/id6596777532" }],
+    steps: ["برنامه را از اپ‌استور نصب کنید.", "دکمهٔ «افزودن به برنامه» را بزنید یا لینک را کپی کنید و در برنامه با + وارد کنید.", "اجازهٔ افزودن VPN را بدهید.", "یکی از سرورها را انتخاب و وصل شوید."] },
+  windows: { name: "ویندوز", apps: [
+    { name: "Hiddify", link: (u) => "hiddify://import/" + u, store: "https://github.com/hiddify/hiddify-app/releases/latest" },
+    { name: "v2rayN", store: "https://github.com/2dust/v2rayN/releases/latest" }],
+    steps: ["برنامه را نصب و باز کنید.", "لینک را کپی کنید و در برنامه «افزودن از کلیپ‌بورد» را بزنید.", "اشتراک را به‌روز کنید.", "حالت VPN یا System Proxy را روشن کنید و وصل شوید."] },
+  mac: { name: "مک", apps: [
+    { name: "Hiddify", link: (u) => "hiddify://import/" + u, store: "https://github.com/hiddify/hiddify-app/releases/latest" },
+    { name: "V2Box", link: (u) => "v2box://install-sub?url=" + encodeURIComponent(u) + "&name=VPN", store: "https://apps.apple.com/app/v2box-v2ray-client/id6446814690" }],
+    steps: ["برنامه را نصب کنید.", "دکمهٔ «افزودن به برنامه» را بزنید یا لینک را کپی و در برنامه وارد کنید.", "اشتراک را به‌روز کنید.", "یکی از سرورها را انتخاب و وصل شوید."] },
+};
+const TIPS = ["اشتراک را در برنامه به‌روز کنید؛ سرورها گاهی عوض می‌شوند.", "یک سرور دیگر از فهرست را امتحان کنید.", "تاریخ و ساعت گوشی روی «خودکار» باشد.", "یک بار حالت هواپیما را روشن و خاموش کنید.", "اگر حجم یا روزتان تمام شده، اول تمدید کنید."];
+function guessDevice() {
+  const ua = navigator.userAgent || "";
+  return /iPhone|iPad|iPod/i.test(ua) ? "ios" : /Android/i.test(ua) ? "android" : /Mac/i.test(ua) ? "mac" : /Win/i.test(ua) ? "windows" : "android";
+}
+function helpSheet(sv) {
+  let dev = guessDevice(), app = "";
+  const box = h("div", {});
+  const open = (url) => { try { tg.openLink(url); } catch { location.href = url; } };
+  const draw = () => {
+    const g = GUIDE[dev];
+    box.replaceChildren(
+      h("div", { class: "chips" }, Object.entries(GUIDE).map(([k, v]) => h("button", { class: `chip ${k === dev ? "on" : ""}`, onclick: () => { dev = k; app = ""; draw(); } }, v.name))),
+      h("div", { class: "section-title" }, "۱. یکی از این برنامه‌ها"),
+      ...g.apps.map((a) => h("div", { class: "card guide-app" }, h("b", {}, a.name),
+        h("div", { class: "row" }, a.link ? btn("افزودن به برنامه", "primary", () => { app = a.name; open(a.link(sv.sub_url)); }, "link") : btn("کپی لینک", "primary", () => { app = a.name; copy(sv.sub_url); }, "copy"),
+          btn("دانلود", "", () => open(a.store))))),
+      h("div", { class: "section-title" }, "۲. قدم‌ها"),
+      h("ol", { class: "steps" }, g.steps.map((t) => h("li", {}, t))),
+      btn("کپی لینک اشتراک", "block ghost", () => copy(sv.sub_url), "copy"),
+      h("details", { class: "more" }, h("summary", {}, "وصل نمی‌شوم 😕"),
+        h("ol", { class: "steps" }, TIPS.map((t) => h("li", {}, t))),
+        (() => {
+          const note = h("textarea", { rows: "3", maxlength: "1000", placeholder: "اگر خطایی می‌بینید یا توضیحی دارید بنویسید (اختیاری)" });
+          const go = btn("باز هم وصل نمی‌شوم — به پشتیبانی بگو", "primary block", async () => {
+            go.disabled = true;
+            try {
+              const r = await api("POST", "help", { service: sv.email, device: g.name, app, note: note.value });
+              haptic("success"); celebrate(`تیکت #${num(r.ticket)} ثبت شد؛ جواب در ربات می‌آید`);
+            } catch (e) { go.disabled = false; haptic("error"); toast(e.message); }
+          }, "chat");
+          return h("div", {}, h("p", { class: "muted small" }, "وضعیت سرویس، دستگاه و برنامهٔ شما خودکار برای پشتیبانی فرستاده می‌شود."), note, go);
+        })()));
+  };
+  draw();
+  const close = sheet(h("h2", {}, "آموزش اتصال"), h("p", { class: "muted small ltr" }, sv.email), box, btn("بستن", "ghost block", () => close()));
 }
 
 function serviceRow(sv) {

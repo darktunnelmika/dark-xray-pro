@@ -45,6 +45,7 @@ async function m2Fetch(view) {
     case "broadcast": M2.bc = await api("GET", "m/broadcast"); break;
     case "customers": M2.cust = await api("GET", `m/customers?q=${encodeURIComponent(M2.cq || "")}`); break;
     case "admins": M2.admins = await api("GET", "m/admins"); break;
+    case "sale": M2.sale = await api("GET", "m/sale"); break;
   }
 }
 const m2Reload = () => m2Fetch(M.view).then(render).catch((e) => toast(e.message));
@@ -67,6 +68,7 @@ function moreView() {
     c.settings && !d.sub_seller ? tile("discounts", "کد تخفیف", "tag", "درصد یا مبلغ، با سقف") : null,
     c.settings ? tile("broadcast", "پیام همگانی", "send", "به همه یا یک گروه") : null,
     c.settings ? tile("customers", "مشتری‌ها", "users", "پیام، کیف پول، مسدود") : null,
+    c.settings ? tile("sale", "تنظیمات فروش", "gauge", "لینک ساب، پاک‌سازی، پاسخ آماده") : null,
     d.role === "owner" && !d.owner ? tile("admins", "ادمین‌های ربات", "bot", "دعوت، نقش، حذف") : null,
   ].filter(Boolean);
   const out = [h("div", { class: "tiles" }, tiles)];
@@ -96,6 +98,20 @@ function walletView() {
         h("b", {}, p.name), h("span", {}, `${num(p.gb)} گیگ${p.units ? ` + ${num(p.units)} واحد` : ""}`), h("span", { class: "price" }, `${toman(p.price)} تومان`)))));
   } else if (w.sub_seller) {
     out.push(h("div", { class: "card muted small" }, "اعتبار شما را نمایندهٔ بالادستتان شارژ می‌کند."));
+  }
+  if (pk.length) {
+    const per = Math.min(...pk.map((p) => p.price / Math.max(1, p.gb)));
+    const sell = h("input", { type: "number", inputmode: "numeric", placeholder: "هر گیگ را چند می‌فروشید؟ (تومان)", value: M2.sellGB || "" });
+    const res = h("div", { class: "small" });
+    const calc = () => {
+      M2.sellGB = +sell.value || 0;
+      if (!M2.sellGB) { res.replaceChildren(h("span", { class: "muted" }, `خرید شما: هر گیگ حدود ${toman(Math.round(per))} تومان (ارزان‌ترین بسته).`)); return; }
+      const p = M2.sellGB - per;
+      res.replaceChildren(h("div", { class: p < 0 ? "bad" : "" }, `سود هر گیگ: ${toman(Math.round(p))} تومان${p < 0 ? " (ضرر!)" : ""}`),
+        h("div", { class: "muted" }, `۵۰ گیگ: ${toman(Math.round(p * 50))} · ۱۰۰ گیگ: ${toman(Math.round(p * 100))} تومان سود`));
+    };
+    sell.addEventListener("input", calc); calc();
+    out.push(h("div", { class: "section-title" }, "ماشین‌حساب سود"), h("div", { class: "card" }, sell, res));
   }
   out.push(h("div", { class: "section-title" }, "تاریخچه"));
   if (!M2.ledger.length) out.push(h("div", { class: "card empty" }, h("p", {}, "هنوز تراکنشی نیست.")));
@@ -351,6 +367,8 @@ async function ticketSheet(id) {
   let t;
   try { t = await api("GET", `m/ticket?id=${id}`); } catch (e) { toast(e.message); return; }
   const txt = h("textarea", { rows: "3", placeholder: "جواب شما…", maxlength: "3000" });
+  if (!M2.quick) { try { M2.quick = await api("GET", "m/quick"); } catch { M2.quick = []; } }
+  const quick = M2.quick.length ? h("div", { class: "chips quick" }, M2.quick.map((q) => h("button", { class: "chip", onclick: () => { txt.value = txt.value ? txt.value + "\n" + q : q; } }, q.length > 28 ? q.slice(0, 28) + "…" : q))) : null;
   const send = async (closeIt) => {
     if (!txt.value.trim() && !closeIt) { toast("متن جواب را بنویسید"); return; }
     try {
@@ -360,8 +378,9 @@ async function ticketSheet(id) {
   };
   const close = sheet(h("div", { class: "row between" }, h("h2", {}, t.name || `#${t.chat}`), h("span", { class: "muted small" }, `#${num(t.id)}`)),
     t.clients && t.clients.length ? h("div", { class: "muted small ltr" }, t.clients.join(" · ")) : null,
-    h("div", { class: "thread" }, (t.msgs || []).map((m) => h("div", { class: `bubble ${m.staff ? "me" : ""}` },
+    h("div", { class: "thread" }, (t.msgs || []).map((m) => h("div", { class: `bubble ${m.staff ? "me" : ""}`, onclick: () => copy(m.text) },
       h("div", {}, m.text), h("small", {}, `${m.staff ? m.author || "پشتیبانی" : ""}${m.staff ? " · " : ""}${date(m.unix)}`)))),
+    t.status !== "closed" ? quick : null,
     t.status !== "closed" ? txt : null,
     t.status !== "closed" ? h("div", { class: "row" }, btn("ارسال", "primary", () => send(false), "send"), btn("ارسال و بستن", "", () => send(true), "check")) : h("p", { class: "muted small" }, "این تیکت بسته است."));
 }
@@ -765,4 +784,35 @@ function adminsView() {
   return out;
 }
 
-const M2V = { customers: customersView, admins: adminsView, settings: settingsView, discounts: discountsView, broadcast: broadcastView, more: moreView, resale: resaleView, wallet: walletView, sellers: sellersView, bot: botView, cards: cardsView, plans: plansView, tickets: ticketsView, report: reportView };
+// ---------- sale settings ----------
+function saleView() {
+  const d = M2.sale;
+  if (!d) return [backHead("تنظیمات فروش"), spin()];
+  const out = [backHead("تنظیمات فروش")];
+  let dom = null;
+  if (d.domains) {
+    dom = h("select", {}, h("option", { value: "" }, `پیش‌فرض (${(d.default_domain || "").replace(/^https?:\/\//, "")})`),
+      d.domains.map((x) => { const o = h("option", { value: x.url }, `${x.label || x.url.replace(/^https?:\/\//, "")}`); if (x.url === d.domain) o.selected = true; return o; }));
+    out.push(h("div", { class: "section-title" }, "آدرس لینک ساب مشتری‌ها"),
+      h("div", { class: "card" }, dom, h("p", { class: "muted small" }, "با عوض کردن، لینک همهٔ کاربرهای شما همان لحظه با آدرس تازه ساخته می‌شود؛ لینک‌های قبلی هم کار می‌کنند.")));
+  }
+  const ac = d.autoclean || {};
+  const [acRow, acOn] = check("کانفیگ‌های تمام‌شده و بی‌مصرف خودکار پاک شوند", ac.on);
+  const acDays = h("input", { type: "number", inputmode: "numeric", value: ac.days || 30 });
+  out.push(h("div", { class: "section-title" }, "پاک‌سازی خودکار"),
+    h("div", { class: "card" }, acRow, field("بعد از چند روز بی‌مصرفی (۷ تا ۳۶۵)", acDays),
+      h("p", { class: "muted small" }, `الان ${num(d.dead || 0)} کانفیگ این شرط را دارد. کانفیگ فعال هیچ‌وقت پاک نمی‌شود.`)));
+  const quick = h("textarea", { rows: "6", placeholder: "هر خط یک پاسخ آماده\nمثلاً: لطفاً اشتراک را در برنامه آپدیت کنید." }, (d.quick || []).join("\n"));
+  out.push(h("div", { class: "section-title" }, "پاسخ‌های آماده تیکت"), h("div", { class: "card" }, quick));
+  const save = btn("ذخیره", "primary block big", async () => {
+    save.disabled = true;
+    const body = { autoclean: { on: acOn.checked, days: Math.round(+acDays.value || 30) }, quick: quick.value.split("\n").map((x) => x.trim()).filter(Boolean) };
+    if (dom) body.domain = dom.value;
+    try { await api("POST", "m/sale", body); M2.quick = null; haptic("success"); toast("ذخیره شد"); m2Reload(); }
+    catch (e) { save.disabled = false; haptic("error"); toast(e.message); }
+  }, "check");
+  out.push(save);
+  return out;
+}
+
+const M2V = { sale: saleView, customers: customersView, admins: adminsView, settings: settingsView, discounts: discountsView, broadcast: broadcastView, more: moreView, resale: resaleView, wallet: walletView, sellers: sellersView, bot: botView, cards: cardsView, plans: plansView, tickets: ticketsView, report: reportView };
