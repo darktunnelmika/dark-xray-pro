@@ -240,6 +240,10 @@ func Open(path string) (*Store, error) {
 		st.Close()
 		return nil, err
 	}
+	if err := st.ensureWheelSchema(); err != nil {
+		st.Close()
+		return nil, err
+	}
 	if err := st.ensureTgBansSchema(); err != nil {
 		st.Close()
 		return nil, err

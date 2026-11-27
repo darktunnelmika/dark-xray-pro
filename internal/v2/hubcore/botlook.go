@@ -52,6 +52,7 @@ var BotMenuButtons = []BotMenuButton{
 	{Key: "status", Label: "🌐 وضعیت سرورها"},
 	{Key: "invite", Label: "👥 دعوت دوستان", Note: "فقط در ربات اصلی و وقتی دعوت دوستان روشن است"},
 	{Key: "coupon", Label: "🎟 کد تخفیف"},
+	{Key: "wheel", Label: "🎡 گردونهٔ شانس", Note: "وقتی گردونه روشن است"},
 	{Key: "me", Label: "👤 حساب من"},
 	{Key: "panel", Label: "💼 خرید پنل نمایندگی", Note: "فقط وقتی فروش پنل روشن است"},
 	{Key: "link", Label: "🔗 افزودن با لینک"},

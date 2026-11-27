@@ -372,3 +372,35 @@ button.tile > svg { box-sizing: content-box; padding: 8px; border-radius: 12px; 
 .sr-bar { block-size: 6px; }
 .sky-actions .btn, .order-side .btn, .pkg-foot .btn { white-space: nowrap; }
 .order-side .btn { padding-inline: 10px; font-size: 13px; }
+
+/* ---------- the wheel of fortune ---------- */
+.wcard { display: flex; align-items: center; gap: 12px; inline-size: 100%; padding: 13px 14px; border-radius: 18px; text-align: start; color: var(--text); cursor: pointer;
+  border: 1px solid color-mix(in oklab, #f59e0b 40%, var(--line)); background: linear-gradient(135deg, color-mix(in oklab, #f59e0b 16%, var(--surface)), color-mix(in oklab, #ec4899 10%, var(--surface))); }
+.wcard:active { transform: scale(.985); }
+.wcard.done { cursor: default; border-color: var(--line); background: var(--surface); }
+.wcard-ic { display: grid; place-items: center; inline-size: 46px; block-size: 46px; border-radius: 15px; font-size: 26px; flex: none; background: color-mix(in oklab, #f59e0b 20%, transparent); }
+.wcard-ic.spin { animation: wspin 6s linear infinite; }
+@keyframes wspin { to { transform: rotate(360deg); } }
+.wcard-t { flex: 1; min-inline-size: 0; display: grid; } .wcard-t b { font-size: 15px; } .wcard-t small { color: var(--muted); font-size: 12.5px; }
+.wcard-go { flex: none; padding: 7px 14px; border-radius: 12px; font-weight: 800; font-size: 13px; color: #1a1300; background: linear-gradient(135deg, #fde047, #f59e0b); box-shadow: 0 6px 16px rgb(245 158 11 / .35); }
+.wheel-head { text-align: center; } .wheel-head h2 { margin-block-end: 0; }
+.wheel-stage { position: relative; inline-size: min(84vw, 330px); aspect-ratio: 1; margin: 14px auto 10px; }
+.wheel-svg { position: absolute; inset: 0; inline-size: 100%; block-size: 100%; filter: drop-shadow(0 14px 30px rgb(0 0 0 / .45)); }
+.wheel-rot { transform-origin: 160px 160px; transform-box: view-box; }
+.wheel-txt { fill: #0b1033; font: 800 12.5px "Dark Kufi", system-ui, sans-serif; paint-order: stroke; stroke: rgb(255 255 255 / .35); stroke-width: 2px; }
+.wheel-pin { position: absolute; z-index: 2; top: -6px; left: 50%; translate: -50% 0; inline-size: 0; block-size: 0;
+  border-inline: 14px solid transparent; border-block-start: 26px solid #fff; filter: drop-shadow(0 3px 6px rgb(0 0 0 / .5)); }
+.wheel-hub { position: absolute; z-index: 2; inset: 50% auto auto 50%; translate: -50% -50%; inline-size: 78px; block-size: 78px; border-radius: 50%; border: 4px solid #fff; cursor: pointer;
+  font: 900 15px "Dark Kufi", system-ui, sans-serif; color: #1a1300; background: radial-gradient(circle at 35% 30%, #fff7c2, #fbbf24 55%, #d97706); box-shadow: 0 8px 22px rgb(0 0 0 / .45); }
+.wheel-hub:not(:disabled) { animation: hub 1.6s ease-in-out infinite; }
+@keyframes hub { 50% { box-shadow: 0 8px 22px rgb(0 0 0 / .45), 0 0 0 10px rgb(251 191 36 / .18); } }
+.wheel-hub:disabled { opacity: .9; cursor: default; }
+.wheel-result { text-align: center; min-block-size: 8px; } .wheel-result h3 { margin: 4px 0; }
+.wheel-win { display: inline-flex; align-items: center; gap: 10px; padding: 10px 18px; border-radius: 16px; font-size: 18px; animation: rise .4s both;
+  background: linear-gradient(135deg, color-mix(in oklab, var(--ion) 22%, var(--surface-2)), color-mix(in oklab, var(--ion-2) 18%, var(--surface-2))); }
+.wheel-win span { font-size: 26px; }
+.code-chip { display: inline-flex; align-items: center; gap: 8px; padding: 8px 14px; border-radius: 12px; border: 1px dashed var(--ion); background: var(--surface-2); color: var(--text); font-weight: 800; font-size: 17px; cursor: pointer; letter-spacing: .06em; }
+.wheel-legend { justify-content: center; } .wheel-legend .chip { display: inline-flex; align-items: center; gap: 6px; }
+.swatch { inline-size: 12px; block-size: 12px; border-radius: 50%; display: inline-block; vertical-align: -1px; }
+.ccard select { inline-size: 100%; padding: 10px 12px; border-radius: 13px; border: 1px solid var(--line); background: var(--surface-2); color: var(--text); font: inherit; }
+@media (prefers-reduced-motion: reduce) { .wcard-ic.spin, .wheel-hub { animation: none; } }

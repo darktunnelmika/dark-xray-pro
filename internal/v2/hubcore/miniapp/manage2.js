@@ -46,6 +46,7 @@ async function m2Fetch(view) {
     case "customers": M2.cust = await api("GET", `m/customers?q=${encodeURIComponent(M2.cq || "")}`); break;
     case "admins": M2.admins = await api("GET", "m/admins"); break;
     case "sale": M2.sale = await api("GET", "m/sale"); break;
+    case "wheel": M2.wheel = await api("GET", "m/wheel"); break;
   }
 }
 const m2Reload = () => m2Fetch(M.view).then(render).catch((e) => toast(e.message));
@@ -69,6 +70,7 @@ function moreView() {
     c.settings ? tile("broadcast", "پیام همگانی", "send", "به همه یا یک گروه") : null,
     c.settings ? tile("customers", "مشتری‌ها", "users", "پیام، کیف پول، مسدود") : null,
     c.settings ? tile("sale", "تنظیمات فروش", "gauge", "لینک ساب، پاک‌سازی، پاسخ آماده") : null,
+    c.settings && !d.sub_seller ? tile("wheel", "گردونهٔ شانس", "gift", "جایزهٔ روزانه برای مشتری") : null,
     d.role === "owner" && !d.owner ? tile("admins", "ادمین‌های ربات", "bot", "دعوت، نقش، حذف") : null,
   ].filter(Boolean);
   tiles.push(tile("guide", "راهنما", "chat", "معرفی بخش‌ها"));
@@ -874,7 +876,7 @@ function permsSheet(a, all) {
     h("div", { class: "card" }, boxes.map((x) => x.row)), go);
 }
 
-const M2V = { sale: saleView, customers: customersView, admins: adminsView, settings: settingsView, discounts: discountsView, broadcast: broadcastView, more: moreView, resale: resaleView, wallet: walletView, sellers: sellersView, bot: botView, cards: cardsView, plans: plansView, tickets: ticketsView, report: reportView };
+const M2V = { wheel: wheelView, sale: saleView, customers: customersView, admins: adminsView, settings: settingsView, discounts: discountsView, broadcast: broadcastView, more: moreView, resale: resaleView, wallet: walletView, sellers: sellersView, bot: botView, cards: cardsView, plans: plansView, tickets: ticketsView, report: reportView };
 
 // ---------- the panel-sale banner and discount ----------
 async function promoSheet() {
@@ -921,4 +923,45 @@ async function promoSheet() {
     onRow, field("عنوان", title), field("متن", text), h("div", { class: "two" }, field("برچسب کوچک", badge), field("درصد تخفیف", pct)),
     field("مدت (ساعت)", days, "مثلاً ۴۸ = دو روز؛ بعدش بنر و تخفیف خودکار برداشته می‌شود"),
     h("div", { class: "section-title sub" }, "رنگ"), sw, h("div", { class: "section-title sub" }, "عکس (اختیاری)"), imgRow, go);
+}
+
+// ---------- the wheel of fortune ----------
+function wheelView() {
+  const d = M2.wheel;
+  if (!d) return [backHead("گردونهٔ شانس"), spin()];
+  const cfg = d.config, t = d.today || {};
+  const rows = cfg.slices.map((x) => ({ ...x }));
+  const [onRow, onBox] = check("گردونه روشن باشد (در مینی‌اپ و منوی ربات)", cfg.on);
+  const [needRow, needBox] = check("فقط کسانی که سرویس دارند بچرخانند", cfg.need_service);
+  const cap = h("input", { type: "number", inputmode: "numeric", min: "0", value: cfg.daily_max || "", placeholder: "خالی = بی‌سقف" });
+  const KINDS = [["gb", "حجم (گیگ)"], ["days", "روز اضافه"], ["wallet", "کیف پول (تومان)"], ["discount", "کد تخفیف (٪)"], ["none", "پوچ"]];
+  const box = h("div", { class: "ulist" });
+  const total = () => rows.reduce((a, x) => a + (+x.weight || 0), 0) || 1;
+  const draw = () => box.replaceChildren(...rows.map((x, i) => {
+    const kind = h("select", { onchange: (e) => { x.kind = e.target.value; if (x.kind === "none") x.value = 0; draw(); } }, KINDS.map(([k, n]) => { const o = h("option", { value: k }, n); o.selected = k === x.kind; return o; }));
+    const val = h("input", { type: "number", inputmode: "numeric", value: x.kind === "none" ? "" : x.value, disabled: x.kind === "none", oninput: (e) => { x.value = Math.round(+e.target.value || 0); } });
+    const wt = h("input", { type: "number", inputmode: "numeric", value: x.weight, oninput: (e) => { x.weight = Math.round(+e.target.value || 0); pct.textContent = `شانس ${num(Math.round(((+x.weight || 0) / total()) * 100))}٪`; } });
+    const pct = h("small", { class: "muted" }, `شانس ${num(Math.round(((+x.weight || 0) / total()) * 100))}٪`);
+    return h("div", { class: "card ccard" },
+      h("div", { class: "row between" }, h("b", {}, h("i", { class: "swatch", style: `background:${WHEEL_C[i % WHEEL_C.length]}` }), ` جایزهٔ ${num(i + 1)}`), pct,
+        rows.length > 2 ? h("button", { class: "linkbtn bad", onclick: () => { rows.splice(i, 1); draw(); } }, "حذف") : null),
+      field("نوع", kind), h("div", { class: "two" }, field("مقدار", val), field("وزن شانس", wt)));
+  }));
+  draw();
+  return [backHead("گردونهٔ شانس"),
+    h("div", { class: "kpis four" },
+      h("div", { class: "kpi" }, h("b", {}, num(t.spins || 0)), h("span", {}, "چرخش امروز")),
+      h("div", { class: "kpi" }, h("b", {}, `${num(t.gb || 0)} گیگ`), h("span", {}, "حجم داده‌شده")),
+      h("div", { class: "kpi" }, h("b", {}, toman(t.wallet || 0)), h("span", {}, "کیف پول (تومان)")),
+      h("div", { class: "kpi" }, h("b", {}, num(t.discount || 0)), h("span", {}, "کد تخفیف"))),
+    h("div", { class: "card" }, onRow, needRow, field("سقف چرخش در روز (برای کل ربات)", cap),
+      h("p", { class: "muted small" }, "هر مشتری روزی یک بار (به وقت تهران) می‌چرخاند. حجم و روز به سرویس همان ربات اضافه می‌شود" + (M.home.owner ? "." : " و از اعتبار پنل شما کم می‌شود."))),
+    h("div", { class: "section-title" }, "جایزه‌ها"), box,
+    rows.length < 12 ? btn("افزودن جایزه", "block ghost", () => { rows.push({ kind: "gb", value: 1, weight: 10 }); draw(); }, "plus") : null,
+    btn("ذخیره", "primary block big", async () => {
+      try {
+        await api("POST", "m/wheel", { on: onBox.checked, need_service: needBox.checked, daily_max: Math.round(+cap.value || 0), slices: rows.map((x) => ({ kind: x.kind, value: x.kind === "none" ? 0 : Math.round(+x.value || 0), weight: Math.round(+x.weight || 0) })) });
+        haptic("success"); toast("ذخیره شد"); m2Reload(); wheel = undefined; loadWheel();
+      } catch (e) { haptic("error"); toast(e.message); }
+    }, "check")];
 }
