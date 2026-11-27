@@ -704,6 +704,7 @@ WHERE ci.email=? AND i.enabled=1 ORDER BY i.tag`, email)
 		ins[i].Meta.WGPrivateKey, _ = WGKeys(c.Secret)
 		ins[i].Meta.WGAddress = ip + "/32"
 	}
+	ins = hideNodes(ins, s.SubHidden(ctx, email)) // the customer's choice of countries (subnodes.go)
 	ins = sub.ExpandFallbacks(ins)
 	ins = s.rankInbounds(ctx, ins)
 	if !c.Enabled {

@@ -47,6 +47,7 @@ const IC = {
   users: "M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75",
   chat: "M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z",
   card: "M2 6h20v12H2zM2 10h20M6 15h4",
+  globe: "M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM2 12h20M12 2a15 15 0 0 1 0 20M12 2a15 15 0 0 0 0 20",
   link: "M10 13a5 5 0 0 0 7.07 0l3-3a5 5 0 0 0-7.07-7.07l-1.5 1.5M14 11a5 5 0 0 0-7.07 0l-3 3a5 5 0 0 0 7.07 7.07l1.5-1.5",
 };
 
@@ -205,7 +206,44 @@ function serviceCard(sv) {
       btn("اتصال و QR", "primary", () => connect(sv), "qr"),
       btn("کپی لینک", "", () => copy(sv.sub_url), "copy"),
       state.products.length ? btn("تمدید", "", () => renew(sv), "renew") : null),
+    btn("انتخاب کشورها", "ghost block", () => serversSheet(sv), "globe"),
     btn("آموزش اتصال / وصل نمی‌شوم", "ghost block", () => helpSheet(sv), "chat"));
+}
+
+// serversSheet: which countries this service's link lists (GET/POST servers).
+async function serversSheet(sv) {
+  let d;
+  try { d = await api("GET", `servers?service=${encodeURIComponent(sv.email)}`); } catch (e) { toast(e.message); return; }
+  const list = d.servers || [];
+  if (!list.length) { toast("برای این سرویس کشوری برای انتخاب نیست."); return; }
+  const on = Object.fromEntries(list.map((x) => [x.id, !x.hidden]));
+  const count = h("span", { class: "muted small" });
+  const box = h("div", { class: "srv-list" });
+  const draw = () => {
+    const n = Object.values(on).filter(Boolean).length;
+    count.textContent = `${num(n)} از ${num(list.length)} کشور روشن است`;
+    box.replaceChildren(...list.map((x) => h("button", { class: `srv ${on[x.id] ? "on" : ""}`, role: "switch", "aria-checked": String(on[x.id]),
+      onclick: () => {
+        if (on[x.id] && n === 1) { toast("حداقل یک کشور باید روشن بماند."); haptic("warning"); return; }
+        on[x.id] = !on[x.id]; tap(); draw();
+      } },
+      h("span", { class: "srv-flag" }, x.flag), h("span", { class: "srv-name" }, x.name),
+      h("span", { class: `srv-dot ${x.online ? "live" : ""}`, title: x.online ? "آنلاین" : "قطع" }),
+      h("i", { class: "tgl", "aria-hidden": "true" }))));
+  };
+  draw();
+  const save = btn("ذخیره", "primary block", async () => {
+    save.disabled = true;
+    try {
+      await api("POST", "servers", { service: sv.email, hidden: list.filter((x) => !on[x.id]).map((x) => x.id) });
+      haptic("success"); close();
+      const done = sheet(h("h2", {}, "✅ ذخیره شد"), h("p", {}, "حالا در برنامهٔ اتصال، اشتراک را به‌روز کنید (Update subscription) تا فقط همین کشورها بیایند."), btn("باشه", "primary block", () => done()));
+    } catch (e) { save.disabled = false; haptic("error"); toast(e.message); }
+  }, "check");
+  const close = sheet(h("h2", {}, "🌍 انتخاب کشورها"), h("p", { class: "muted small" }, "کشورهایی را که نمی‌خواهید خاموش کنید تا در لینک اشتراک نیایند. سرعت و حجم فرقی نمی‌کند."),
+    count, box,
+    h("div", { class: "row" }, btn("همه روشن", "", () => { for (const k in on) on[k] = true; draw(); }), btn("فقط آنلاین‌ها", "", () => { for (const x of list) on[x.id] = x.online || false; if (!Object.values(on).some(Boolean)) on[list[0].id] = true; draw(); })),
+    save);
 }
 
 // ---------- connection help ----------

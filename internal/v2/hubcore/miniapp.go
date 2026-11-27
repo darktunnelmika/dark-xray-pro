@@ -13,6 +13,7 @@ import (
 	"mime"
 	"net/http"
 	"net/url"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -403,6 +404,50 @@ func registerMiniApp(mux *http.ServeMux, s *Store) {
 		out := s.miniPayInfo(r.Context(), sellerOf(r), u.ID, open, map[string]any{"id": open})
 		out["product"] = p
 		reply(w, out, nil)
+	})
+	// The customer's choice of countries for one of its services (subnodes.go).
+	owns := func(r *http.Request, chat int64, email string) bool {
+		list, _ := mine(r, chat)
+		return email != "" && slices.Contains(list, email)
+	}
+	mux.HandleFunc("GET /app/api/servers", func(w http.ResponseWriter, r *http.Request) {
+		u, ok := user(w, r)
+		if !ok {
+			return
+		}
+		email := r.URL.Query().Get("service")
+		if !owns(r, u.ID, email) {
+			http.Error(w, "not your service", http.StatusForbidden)
+			return
+		}
+		nodes, err := s.SubNodes(r.Context(), email)
+		reply(w, map[string]any{"servers": nodes}, err)
+	})
+	mux.HandleFunc("POST /app/api/servers", func(w http.ResponseWriter, r *http.Request) {
+		u, ok := user(w, r)
+		if !ok {
+			return
+		}
+		var in struct {
+			Service string   `json:"service"`
+			Hidden  []string `json:"hidden"`
+		}
+		if !decode(w, r, &in) {
+			return
+		}
+		if !owns(r, u.ID, in.Service) {
+			http.Error(w, "not your service", http.StatusForbidden)
+			return
+		}
+		if len(in.Hidden) > 200 {
+			http.Error(w, "bad request", http.StatusBadRequest)
+			return
+		}
+		if err := s.PutSubHidden(r.Context(), in.Service, in.Hidden); err != nil {
+			http.Error(w, "حداقل یک کشور باید روشن بماند.", http.StatusBadRequest)
+			return
+		}
+		reply(w, map[string]any{"ok": true}, nil)
 	})
 	// The daily wheel of fortune (wheel.go).
 	mux.HandleFunc("GET /app/api/wheel", func(w http.ResponseWriter, r *http.Request) {

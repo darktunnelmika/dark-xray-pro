@@ -414,3 +414,14 @@ button.tile > svg { box-sizing: content-box; padding: 8px; border-radius: 12px; 
 .card.trialbar.warn { border-color: color-mix(in oklab, var(--warn) 50%, var(--line)); background: color-mix(in oklab, var(--warn) 10%, var(--surface)); }
 .card.trialbar.bad { border-color: color-mix(in oklab, var(--bad) 50%, var(--line)); background: color-mix(in oklab, var(--bad) 10%, var(--surface)); }
 .card.trialbar p { margin: 2px 0 0; } .card.trialbar .btn { white-space: nowrap; }
+
+/* ---------- the customer's countries ---------- */
+.srv-list { display: grid; gap: 8px; margin-block: 10px; }
+.srv { display: flex; align-items: center; gap: 10px; inline-size: 100%; padding: 11px 12px; border-radius: 14px; border: 1px solid var(--line); background: var(--surface-2); color: var(--muted); cursor: pointer; text-align: start; transition: border-color .15s, background .15s; }
+.srv.on { color: var(--text); border-color: color-mix(in oklab, var(--ion) 40%, var(--line)); background: color-mix(in oklab, var(--ion) 8%, var(--surface-2)); }
+.srv-flag { font-size: 22px; line-height: 1; filter: grayscale(1); opacity: .6; } .srv.on .srv-flag { filter: none; opacity: 1; }
+.srv-name { flex: 1; min-inline-size: 0; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.srv-dot { inline-size: 8px; block-size: 8px; border-radius: 50%; background: var(--muted); opacity: .5; } .srv-dot.live { background: var(--good); opacity: 1; box-shadow: 0 0 8px var(--good); }
+.tgl { position: relative; flex: none; inline-size: 42px; block-size: 24px; border-radius: 99px; background: var(--line); transition: background .2s; }
+.tgl::after { content: ""; position: absolute; inset-block-start: 3px; inset-inline-start: 3px; inline-size: 18px; block-size: 18px; border-radius: 50%; background: #fff; transition: inset-inline-start .2s; box-shadow: 0 1px 3px rgb(0 0 0 / .3); }
+.srv.on .tgl { background: linear-gradient(135deg, var(--ion), var(--ion-2)); } .srv.on .tgl::after { inset-inline-start: 21px; }
