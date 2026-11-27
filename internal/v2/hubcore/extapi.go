@@ -348,7 +348,7 @@ func apiJSON(w http.ResponseWriter, status int, v any) {
 // ("invalid: the id may …" → "the id may …").
 func errDetail(err error) string {
 	msg := err.Error()
-	for _, sentinel := range []error{ErrInvalid, ErrPolicy, ErrNotFound, ErrCredit, ErrAuth} {
+	for _, sentinel := range []error{ErrInvalid, ErrPolicy, ErrNotFound, ErrCredit, ErrAuth, errPartnerFunds} {
 		if p := sentinel.Error() + ": "; strings.HasPrefix(msg, p) {
 			return strings.TrimPrefix(msg, p)
 		}
@@ -363,6 +363,8 @@ func apiFail(w http.ResponseWriter, err error) {
 		apiErr(w, http.StatusNotFound, codeNotFound, "not found")
 	case errors.Is(err, ErrCredit):
 		apiErr(w, http.StatusPaymentRequired, codeCredit, "not enough credit")
+	case errors.Is(err, errPartnerFunds):
+		apiErr(w, http.StatusPaymentRequired, codeFunds, errDetail(err))
 	case errors.Is(err, ErrPolicy):
 		apiErr(w, http.StatusForbidden, codePolicy, errDetail(err))
 	case errors.Is(err, ErrAuth):

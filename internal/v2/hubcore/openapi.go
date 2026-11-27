@@ -263,6 +263,8 @@ func apiOps() []apiOp {
 	ops := []apiOp{
 		{API: "partner", Method: "GET", Path: pp, Summary: "The key: limits, what is used and left, scopes", Out: PartnerKey{}},
 		{API: "partner", Method: "GET", Path: pp + "/packages", Summary: "Packages this key may sell", Out: docPackage{}, Array: true},
+		{API: "partner", Method: "GET", Path: pp + "/wallet", Summary: "How the key pays (cap or wallet), its prices, balance and wallet history", Query: "before, limit", Out: PartnerWallet{}},
+		{API: "partner", Method: "POST", Path: pp + "/quote", Summary: "What making a panel, adding credit or renewing would cost, and whether it would pass; changes nothing", In: PartnerQuoteIn{}, Out: PartnerQuote{}},
 		{API: "partner", Method: "GET", Path: pp + "/stats", Scope: scopePanelsRead, Summary: "Numbers over all its panels", Query: "days: period in days (default 30)", Out: PartnerStats{}},
 		{API: "partner", Method: "GET", Path: pp + "/ledger", Scope: scopePanelsRead, Summary: "Credit added or taken back, every panel, newest first", Query: "before: an id from next_before, limit: 1-500", Out: docLedger{}},
 		{API: "partner", Method: "POST", Path: pp + "/reps", Scope: scopePanelsWrite, Summary: "Make a reseller panel (credit needs credit:add); the answer has the password and a ready-to-send message", In: docPanelCreate{}, Out: PartnerPanel{}},

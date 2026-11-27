@@ -571,7 +571,8 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 		func(r *http.Request) (string, string, bool) {
 			return r.PathValue("id"), who(r).User, r.PathValue("id") != ""
 		})
-	s.repTermRoutes(mux.ServeMux, guard) // reseller panel terms (repterm.go)
+	s.repTermRoutes(mux.ServeMux, guard)            // reseller panel terms (repterm.go)
+	s.partnerWalletAdminRoutes(mux.ServeMux, guard) // partner wallets (partnerwallet.go)
 	mux.HandleFunc("POST /api/v2/rep/telegram", repOnly(func(w http.ResponseWriter, r *http.Request) {
 		code, err := s.NewTgLinkCode(r.Context(), who(r).RepID)
 		bot := s.BotUsernameFor(r.Context(), who(r).RepID)

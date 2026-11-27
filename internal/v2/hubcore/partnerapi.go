@@ -17,6 +17,8 @@ import (
 //
 //	GET    /api/v2/partner                         the key: limits, used, left, scopes
 //	GET    /api/v2/partner/packages                packages it may sell
+//	GET    /api/v2/partner/wallet                  billing, prices, balance and wallet history (partnerwallet.go)
+//	POST   /api/v2/partner/quote                   what create / credit / renew would cost
 //	GET    /api/v2/partner/stats?days=30           numbers over all its panels [panels:read]
 //	GET    /api/v2/partner/ledger?before=&limit=   credit added or taken back, all panels [panels:read]
 //	POST   /api/v2/partner/reps                    make a panel [panels:write, credit:add for credit]
@@ -42,7 +44,7 @@ import (
 // partnerEvents are the events a partner key receives.
 var partnerEvents = []string{"panel.created", "panel.updated", "panel.enabled", "panel.disabled", "panel.deleted",
 	"panel.credit_added", "panel.credit_revoked", "panel.credit_low", "panel.password_reset",
-	"panel.expiring", "panel.expired", "panel.suspended", "panel.renewed"}
+	"panel.expiring", "panel.expired", "panel.suspended", "panel.renewed", "wallet.topped_up", "wallet.charged", "wallet.refunded"}
 
 func init() { apiEventSources = append(apiEventSources, lowCreditEvents) }
 
@@ -706,8 +708,21 @@ AND rep_id NOT IN (SELECT id FROM reps)`, in.ID, k.ID, in.ExternalRef, now-300) 
 			fail(w, err)
 			return
 		}
+		// A wallet key pays first (partnerwallet.go); anything failing after
+		// gives the money back.
+		charged := int64(0)
 		unreserve := func() {
 			_, _ = s.db.ExecContext(context.WithoutCancel(ctx), `DELETE FROM partner_reps WHERE rep_id=? AND key_id=? AND rep_id NOT IN (SELECT id FROM reps)`, in.ID, k.ID)
+			s.partnerRefund(ctx, k.ID, charged, in.ID, "panel not made")
+		}
+		cost, _, _, _, err := s.partnerCost(ctx, k, PartnerQuoteIn{Action: "create", Package: pkgID, CreditGB: in.CreditGB, Units: in.Units, Days: in.TermDays})
+		if err == nil {
+			charged, err = s.partnerCharge(ctx, k.ID, cost, in.ID, "new panel "+in.ID, "partner:"+k.Name)
+		}
+		if err != nil {
+			unreserve()
+			fail(w, err)
+			return
 		}
 		if !s.partnerGive(ctx, k.ID, bytes, in.Units) {
 			unreserve()
@@ -916,7 +931,13 @@ AND rep_id NOT IN (SELECT id FROM reps)`, in.ID, k.ID, in.ExternalRef, now-300) 
 		}
 		ctx := r.Context()
 		bytes := int64(in.CreditGB * gibF)
+		charged, err := s.partnerCharge(ctx, c.KeyID, s.partnerBilling(ctx, c.KeyID).creditCost(in.CreditGB, in.Units), p.ID, "credit for "+p.ID, "partner:"+c.Name)
+		if err != nil {
+			fail(w, err)
+			return
+		}
 		if !s.partnerGive(ctx, c.KeyID, bytes, in.Units) {
+			s.partnerRefund(ctx, c.KeyID, charged, p.ID, "credit not added")
 			limitUsed(w)
 			return
 		}
@@ -926,6 +947,7 @@ AND rep_id NOT IN (SELECT id FROM reps)`, in.ID, k.ID, in.ExternalRef, now-300) 
 		}
 		if err := s.AdjustCredit(ctx, "partner:"+c.Name, p.ID, bytes, in.Units, note); err != nil {
 			s.partnerUngive(ctx, c.KeyID, bytes, in.Units)
+			s.partnerRefund(ctx, c.KeyID, charged, p.ID, "credit not added")
 			fail(w, err)
 			return
 		}
@@ -985,28 +1007,42 @@ AND rep_id NOT IN (SELECT id FROM reps)`, in.ID, k.ID, in.ExternalRef, now-300) 
 			fail(w, err)
 			return
 		}
+		if pkg != nil && (pkg.GB > 0 || pkg.Units > 0) && !needScope(w, c, scopeCreditAdd) {
+			return
+		}
+		// A wallet key pays first; anything failing after gives it back.
+		cost, _, _, _, err := s.partnerCost(ctx, k, PartnerQuoteIn{Action: "renew", Package: in.Package, Days: in.Days})
+		charged := int64(0)
+		if err == nil {
+			charged, err = s.partnerCharge(ctx, k.ID, cost, p.ID, fmt.Sprintf("renew %s: %d days", p.ID, in.Days), "partner:"+k.Name)
+		}
+		if err != nil {
+			fail(w, err)
+			return
+		}
+		refund := func() { s.partnerRefund(ctx, k.ID, charged, p.ID, "not renewed") }
 		// A package also brings its credit, like buying it again.
 		var bytes, units int64
 		if pkg != nil && (pkg.GB > 0 || pkg.Units > 0) {
-			if !needScope(w, c, scopeCreditAdd) {
-				return
-			}
 			bytes, units = pkg.GB<<30, pkg.Units
 			if pol, err := s.RepPolicyOf(ctx, p.ID); err != nil || !pol.AllowUnlimited {
 				units = 0
 			}
 			if !s.partnerGive(ctx, k.ID, bytes, units) {
+				refund()
 				limitUsed(w)
 				return
 			}
 			if err := s.AdjustCredit(ctx, "partner:"+k.Name, p.ID, bytes, units, "partner API: package "+pkg.ID); err != nil {
 				s.partnerUngive(ctx, k.ID, bytes, units)
+				refund()
 				fail(w, err)
 				return
 			}
 			s.partnerGavePanel(ctx, k.ID, p.ID, bytes, units)
 		}
 		if _, err := s.ExtendRepTerm(ctx, "partner:"+k.Name, p.ID, in.Days, in.OnExpiry, grace); err != nil {
+			refund()
 			fail(w, err)
 			return
 		}
@@ -1208,6 +1244,32 @@ AND rep_id NOT IN (SELECT id FROM reps)`, in.ID, k.ID, in.ExternalRef, now-300) 
 			return
 		}
 		apiJSON(w, http.StatusOK, map[string]bool{"ok": true})
+	})
+	route("GET /api/v2/partner/wallet", "", func(w http.ResponseWriter, r *http.Request, c apiCaller) {
+		before, _ := strconv.ParseInt(r.URL.Query().Get("before"), 10, 64)
+		limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+		wl, err := s.PartnerWalletOf(r.Context(), c.KeyID, before, limit)
+		if err != nil {
+			fail(w, err)
+			return
+		}
+		apiJSON(w, http.StatusOK, wl)
+	})
+	route("POST /api/v2/partner/quote", "", func(w http.ResponseWriter, r *http.Request, c apiCaller) {
+		var in PartnerQuoteIn
+		if !readJSON(w, r, &in) {
+			return
+		}
+		k, ok := key(w, r, c)
+		if !ok {
+			return
+		}
+		q, err := s.PartnerQuoteFor(r.Context(), k, in)
+		if err != nil {
+			fail(w, err)
+			return
+		}
+		apiJSON(w, http.StatusOK, q)
 	})
 	s.eventRoutes(mux, "/api/v2/partner", auth, func(c apiCaller) string { return partnerTarget(c.KeyID) }, partnerEvents)
 	s.loginLinkRoute(mux)
