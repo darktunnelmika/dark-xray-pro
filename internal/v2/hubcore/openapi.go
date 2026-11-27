@@ -36,6 +36,15 @@ type (
 		ExternalRef string       `json:"external_ref"`
 		Note        string       `json:"note"`
 		LowCreditGB *int64       `json:"low_credit_gb"`
+		TermDays    int64        `json:"term_days"` // the panel runs this long (0: the package's, or no term)
+		OnExpiry    string       `json:"on_expiry"` // block (customers keep working) | suspend (switched off after grace_days)
+		GraceDays   int64        `json:"grace_days"`
+	}
+	docPanelRenew struct {
+		Days      int64  `json:"days"`    // added from the end of the term, or from now when it has ended
+		Package   string `json:"package"` // its days and its credit, like buying it again
+		OnExpiry  string `json:"on_expiry"`
+		GraceDays *int64 `json:"grace_days"`
 	}
 	docPanelPatch struct {
 		Name        *string      `json:"name"`
@@ -45,6 +54,8 @@ type (
 		Policy      *APIPolicyIn `json:"policy"`
 		TelegramIDs *[]int64     `json:"telegram_ids"`
 		LowCreditGB *int64       `json:"low_credit_gb"`
+		OnExpiry    string       `json:"on_expiry"`
+		GraceDays   *int64       `json:"grace_days"`
 	}
 	docPassword struct {
 		Password string `json:"password"` // empty: a random one
@@ -183,7 +194,8 @@ type (
 		Policy    APIPolicy  `json:"policy"`
 		SubSeller bool       `json:"sub_seller"`
 		SubBase   string     `json:"sub_base"`
-		Locked    bool       `json:"locked"` // an overdue bill stops sales and renewals until paid
+		Locked    bool       `json:"locked"` // an overdue bill or an ended term stops sales and renewals
+		Term      RepTerm    `json:"term"`
 		Key       docKeyInfo `json:"key"`
 	}
 	docInbound struct {
@@ -251,6 +263,8 @@ func apiOps() []apiOp {
 	ops := []apiOp{
 		{API: "partner", Method: "GET", Path: pp, Summary: "The key: limits, what is used and left, scopes", Out: PartnerKey{}},
 		{API: "partner", Method: "GET", Path: pp + "/packages", Summary: "Packages this key may sell", Out: docPackage{}, Array: true},
+		{API: "partner", Method: "GET", Path: pp + "/wallet", Summary: "How the key pays (cap or wallet), its prices, balance and wallet history", Query: "before, limit", Out: PartnerWallet{}},
+		{API: "partner", Method: "POST", Path: pp + "/quote", Summary: "What making a panel, adding credit or renewing would cost, and whether it would pass; changes nothing", In: PartnerQuoteIn{}, Out: PartnerQuote{}},
 		{API: "partner", Method: "GET", Path: pp + "/stats", Scope: scopePanelsRead, Summary: "Numbers over all its panels", Query: "days: period in days (default 30)", Out: PartnerStats{}},
 		{API: "partner", Method: "GET", Path: pp + "/ledger", Scope: scopePanelsRead, Summary: "Credit added or taken back, every panel, newest first", Query: "before: an id from next_before, limit: 1-500", Out: docLedger{}},
 		{API: "partner", Method: "POST", Path: pp + "/reps", Scope: scopePanelsWrite, Summary: "Make a reseller panel (credit needs credit:add); the answer has the password and a ready-to-send message", In: docPanelCreate{}, Out: PartnerPanel{}},
@@ -259,6 +273,7 @@ func apiOps() []apiOp {
 		{API: "partner", Method: "PATCH", Path: pp + "/reps/{id}", Scope: scopePanelsWrite, Summary: "Change a panel; rules can only get tighter than the key's template or package", In: docPanelPatch{}, Out: PartnerPanel{}},
 		{API: "partner", Method: "DELETE", Path: pp + "/reps/{id}", Scope: scopePanelsDelete, Summary: "Delete a panel; its unused credit can be handed out again", Query: "clients: 1 to delete its customers too (without it a panel with customers is refused, 409)", Out: docPanelDeleted{}},
 		{API: "partner", Method: "POST", Path: pp + "/reps/{id}/credit", Scope: scopeCreditAdd, Summary: "Add credit", In: docCredit{}, Out: PartnerPanel{}},
+		{API: "partner", Method: "POST", Path: pp + "/reps/{id}/renew", Scope: scopePanelsWrite, Summary: "Extend the panel's term by days, or by a package (its days and its credit); customers switched off at the end come back", In: docPanelRenew{}, Out: PartnerPanel{}},
 		{API: "partner", Method: "POST", Path: pp + "/reps/{id}/credit/revoke", Scope: scopeCreditRevoke, Summary: "Take unused credit back (402 when the panel has less)", In: docCredit{}, Out: PartnerPanel{}},
 		{API: "partner", Method: "GET", Path: pp + "/reps/{id}/ledger", Scope: scopePanelsRead, Summary: "A panel's credit history", Query: "before, limit", Out: docLedger{}},
 		{API: "partner", Method: "GET", Path: pp + "/reps/{id}/overview", Scope: scopePanelsRead, Summary: "A panel's dashboard numbers", Out: APIOverview{}},

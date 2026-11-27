@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // Partner API routes, all under /api/v2/partner with Bearer dp_<id>_<secret>
@@ -16,6 +17,8 @@ import (
 //
 //	GET    /api/v2/partner                         the key: limits, used, left, scopes
 //	GET    /api/v2/partner/packages                packages it may sell
+//	GET    /api/v2/partner/wallet                  billing, prices, balance and wallet history (partnerwallet.go)
+//	POST   /api/v2/partner/quote                   what create / credit / renew would cost
 //	GET    /api/v2/partner/stats?days=30           numbers over all its panels [panels:read]
 //	GET    /api/v2/partner/ledger?before=&limit=   credit added or taken back, all panels [panels:read]
 //	POST   /api/v2/partner/reps                    make a panel [panels:write, credit:add for credit]
@@ -24,6 +27,7 @@ import (
 //	PATCH  /api/v2/partner/reps/{id}               name, note, external_ref, policy, telegram_ids, low_credit_gb, enabled [panels:write]
 //	DELETE /api/v2/partner/reps/{id}?clients=1     delete, with its customers when clients=1 [panels:delete]
 //	POST   /api/v2/partner/reps/{id}/credit        add credit {credit_gb, units, note} [credit:add]
+//	POST   /api/v2/partner/reps/{id}/renew         extend the panel's term {days} or {package} (its credit too) [panels:write]
 //	POST   /api/v2/partner/reps/{id}/credit/revoke take unused credit back {credit_gb, units, note} [credit:revoke]
 //	GET    /api/v2/partner/reps/{id}/ledger        its credit history [panels:read]
 //	GET    /api/v2/partner/reps/{id}/overview      its dashboard numbers [panels:read]
@@ -39,7 +43,8 @@ import (
 
 // partnerEvents are the events a partner key receives.
 var partnerEvents = []string{"panel.created", "panel.updated", "panel.enabled", "panel.disabled", "panel.deleted",
-	"panel.credit_added", "panel.credit_revoked", "panel.credit_low", "panel.password_reset"}
+	"panel.credit_added", "panel.credit_revoked", "panel.credit_low", "panel.password_reset",
+	"panel.expiring", "panel.expired", "panel.suspended", "panel.renewed", "wallet.topped_up", "wallet.charged", "wallet.refunded"}
 
 func init() { apiEventSources = append(apiEventSources, lowCreditEvents) }
 
@@ -88,6 +93,7 @@ type PartnerPanel struct {
 	Policy      APIPolicy `json:"policy"`
 	TelegramIDs []int64   `json:"telegram_ids"`
 	LowCreditGB int64     `json:"low_credit_gb"`      // warn under this credit; 0 = off
+	Term        RepTerm   `json:"term"`               // the panel's term (repterm.go)
 	Password    string    `json:"password,omitempty"` // only when just made or reset
 	Message     string    `json:"message,omitempty"`  // ready-to-send text, only with a password
 }
@@ -160,6 +166,7 @@ COALESCE((SELECT a.username FROM admins a WHERE a.role='rep' AND a.rep_id=r.id O
 	for i := range out {
 		out[i].TelegramIDs = s.TgRepOwners(ctx, out[i].ID)
 		out[i].LowCreditGB = s.RepAlertGB(ctx, out[i].ID)
+		out[i].Term, _ = s.RepTermOf(ctx, out[i].ID)
 	}
 	return out, total, nil
 }
@@ -584,11 +591,22 @@ func partnerRoutes(s *Store, mux routeMux) {
 			ExternalRef string       `json:"external_ref"`
 			Note        string       `json:"note"`
 			LowCreditGB *int64       `json:"low_credit_gb"`
+			TermDays    int64        `json:"term_days"` // the panel runs this long (0: the package's, or no term)
+			OnExpiry    string       `json:"on_expiry"` // block (default) | suspend
+			GraceDays   int64        `json:"grace_days"`
 		}
 		if !readJSON(w, r, &in) {
 			return
 		}
 		ctx := r.Context()
+		if in.TermDays < 0 || in.TermDays > 3650 {
+			apiErr(w, http.StatusUnprocessableEntity, codeValidation, "term_days is 0 (none) to 3650")
+			return
+		}
+		if err := checkTermMode(in.OnExpiry, in.GraceDays); err != nil {
+			fail(w, err)
+			return
+		}
 		in.ExternalRef, in.Note, in.Package = strings.TrimSpace(in.ExternalRef), strings.TrimSpace(in.Note), strings.TrimSpace(in.Package)
 		if in.CreditGB < 0 || in.Units < 0 || in.CreditGB > 1e6 || in.Units > 1e6 {
 			apiErr(w, http.StatusUnprocessableEntity, codeValidation, "credit cannot be negative")
@@ -623,6 +641,12 @@ func partnerRoutes(s *Store, mux routeMux) {
 				return
 			}
 			in.CreditGB, in.Units = float64(pkg.GB), pkg.Units
+			if in.TermDays == 0 {
+				in.TermDays = pkg.Days
+			}
+			if in.OnExpiry == "" && in.GraceDays == 0 {
+				in.OnExpiry, in.GraceDays = pkg.OnExpiry, pkg.GraceDays
+			}
 		}
 		if (in.CreditGB > 0 || in.Units > 0) && !needScope(w, c, scopeCreditAdd) {
 			return
@@ -684,8 +708,21 @@ AND rep_id NOT IN (SELECT id FROM reps)`, in.ID, k.ID, in.ExternalRef, now-300) 
 			fail(w, err)
 			return
 		}
+		// A wallet key pays first (partnerwallet.go); anything failing after
+		// gives the money back.
+		charged := int64(0)
 		unreserve := func() {
 			_, _ = s.db.ExecContext(context.WithoutCancel(ctx), `DELETE FROM partner_reps WHERE rep_id=? AND key_id=? AND rep_id NOT IN (SELECT id FROM reps)`, in.ID, k.ID)
+			s.partnerRefund(ctx, k.ID, charged, in.ID, "panel not made")
+		}
+		cost, _, _, _, err := s.partnerCost(ctx, k, PartnerQuoteIn{Action: "create", Package: pkgID, CreditGB: in.CreditGB, Units: in.Units, Days: in.TermDays})
+		if err == nil {
+			charged, err = s.partnerCharge(ctx, k.ID, cost, in.ID, "new panel "+in.ID, "partner:"+k.Name)
+		}
+		if err != nil {
+			unreserve()
+			fail(w, err)
+			return
 		}
 		if !s.partnerGive(ctx, k.ID, bytes, in.Units) {
 			unreserve()
@@ -702,6 +739,12 @@ AND rep_id NOT IN (SELECT id FROM reps)`, in.ID, k.ID, in.ExternalRef, now-300) 
 		}
 		if in.LowCreditGB != nil {
 			_ = s.SetRepAlertGB(ctx, rc.ID, *in.LowCreditGB)
+		}
+		if in.TermDays > 0 {
+			if _, err := s.ExtendRepTerm(ctx, "partner:"+k.Name, rc.ID, in.TermDays, in.OnExpiry, in.GraceDays); err != nil {
+				fail(w, err)
+				return
+			}
 		}
 		p, err := s.partnerPanel(ctx, k.ID, rc.ID)
 		if err != nil {
@@ -727,11 +770,17 @@ AND rep_id NOT IN (SELECT id FROM reps)`, in.ID, k.ID, in.ExternalRef, now-300) 
 			Policy      *APIPolicyIn `json:"policy"`
 			TelegramIDs *[]int64     `json:"telegram_ids"`
 			LowCreditGB *int64       `json:"low_credit_gb"`
+			OnExpiry    string       `json:"on_expiry"`
+			GraceDays   *int64       `json:"grace_days"`
 		}
 		if !readJSON(w, r, &in) {
 			return
 		}
 		ctx := r.Context()
+		if in.GraceDays != nil && (*in.GraceDays < 0 || *in.GraceDays > 365) || checkTermMode(in.OnExpiry, 0) != nil {
+			apiErr(w, http.StatusUnprocessableEntity, codeValidation, "on_expiry is block or suspend, grace_days 0 to 365")
+			return
+		}
 		k, ok := key(w, r, c)
 		if !ok {
 			return
@@ -815,6 +864,12 @@ AND rep_id NOT IN (SELECT id FROM reps)`, in.ID, k.ID, in.ExternalRef, now-300) 
 				return
 			}
 		}
+		if in.OnExpiry != "" || in.GraceDays != nil {
+			if _, err := s.applyTermIn(ctx, "partner:"+k.Name, p.ID, RepTermIn{OnExpiry: in.OnExpiry, GraceDays: in.GraceDays}); err != nil {
+				fail(w, err)
+				return
+			}
+		}
 		if name != p.Name || enabled != p.Enabled {
 			if err := s.PutRep(ctx, Rep{ID: p.ID, Name: name, Enabled: enabled}); err != nil {
 				fail(w, err)
@@ -876,7 +931,13 @@ AND rep_id NOT IN (SELECT id FROM reps)`, in.ID, k.ID, in.ExternalRef, now-300) 
 		}
 		ctx := r.Context()
 		bytes := int64(in.CreditGB * gibF)
+		charged, err := s.partnerCharge(ctx, c.KeyID, s.partnerBilling(ctx, c.KeyID).creditCost(in.CreditGB, in.Units), p.ID, "credit for "+p.ID, "partner:"+c.Name)
+		if err != nil {
+			fail(w, err)
+			return
+		}
 		if !s.partnerGive(ctx, c.KeyID, bytes, in.Units) {
+			s.partnerRefund(ctx, c.KeyID, charged, p.ID, "credit not added")
 			limitUsed(w)
 			return
 		}
@@ -886,6 +947,7 @@ AND rep_id NOT IN (SELECT id FROM reps)`, in.ID, k.ID, in.ExternalRef, now-300) 
 		}
 		if err := s.AdjustCredit(ctx, "partner:"+c.Name, p.ID, bytes, in.Units, note); err != nil {
 			s.partnerUngive(ctx, c.KeyID, bytes, in.Units)
+			s.partnerRefund(ctx, c.KeyID, charged, p.ID, "credit not added")
 			fail(w, err)
 			return
 		}
@@ -896,6 +958,99 @@ AND rep_id NOT IN (SELECT id FROM reps)`, in.ID, k.ID, in.ExternalRef, now-300) 
 		}
 		s.emitAPIEvent(ctx, partnerTarget(c.KeyID), "panel.credit_added", panelEvent(np, map[string]any{"added_gb": in.CreditGB, "added_units": in.Units}))
 		s.partnerNotice(ctx, c.Name, fmt.Sprintf("💳 اعتبار به %s (%s): +%s گیگ · +%d واحد", np.Name, np.ID, fmtGB(in.CreditGB), in.Units))
+		apiJSON(w, http.StatusOK, np)
+	})
+	route("POST /api/v2/partner/reps/{id}/renew", scopePanelsWrite, func(w http.ResponseWriter, r *http.Request, c apiCaller) {
+		p, ok := one(w, r, c)
+		if !ok {
+			return
+		}
+		var in struct {
+			Days      int64  `json:"days"`
+			Package   string `json:"package"`
+			OnExpiry  string `json:"on_expiry"`
+			GraceDays *int64 `json:"grace_days"`
+		}
+		if !readJSON(w, r, &in) {
+			return
+		}
+		ctx := r.Context()
+		k, ok := key(w, r, c)
+		if !ok {
+			return
+		}
+		var pkg *RepPackage
+		if in.Package = strings.TrimSpace(in.Package); in.Package != "" {
+			for _, x := range s.partnerPackages(ctx, k) {
+				if x.ID == in.Package {
+					x := x
+					pkg = &x
+				}
+			}
+			if pkg == nil {
+				apiErr(w, http.StatusUnprocessableEntity, codeValidation, "unknown package "+strconv.Quote(in.Package))
+				return
+			}
+			if in.Days == 0 {
+				in.Days = pkg.Days
+			}
+		}
+		if in.Days < 1 || in.Days > 3650 {
+			apiErr(w, http.StatusUnprocessableEntity, codeValidation, "days is 1 to 3650 (or a package with a term)")
+			return
+		}
+		grace := int64(-1)
+		if in.GraceDays != nil {
+			grace = *in.GraceDays
+		}
+		if err := checkTermMode(in.OnExpiry, max(grace, 0)); err != nil {
+			fail(w, err)
+			return
+		}
+		if pkg != nil && (pkg.GB > 0 || pkg.Units > 0) && !needScope(w, c, scopeCreditAdd) {
+			return
+		}
+		// A wallet key pays first; anything failing after gives it back.
+		cost, _, _, _, err := s.partnerCost(ctx, k, PartnerQuoteIn{Action: "renew", Package: in.Package, Days: in.Days})
+		charged := int64(0)
+		if err == nil {
+			charged, err = s.partnerCharge(ctx, k.ID, cost, p.ID, fmt.Sprintf("renew %s: %d days", p.ID, in.Days), "partner:"+k.Name)
+		}
+		if err != nil {
+			fail(w, err)
+			return
+		}
+		refund := func() { s.partnerRefund(ctx, k.ID, charged, p.ID, "not renewed") }
+		// A package also brings its credit, like buying it again.
+		var bytes, units int64
+		if pkg != nil && (pkg.GB > 0 || pkg.Units > 0) {
+			bytes, units = pkg.GB<<30, pkg.Units
+			if pol, err := s.RepPolicyOf(ctx, p.ID); err != nil || !pol.AllowUnlimited {
+				units = 0
+			}
+			if !s.partnerGive(ctx, k.ID, bytes, units) {
+				refund()
+				limitUsed(w)
+				return
+			}
+			if err := s.AdjustCredit(ctx, "partner:"+k.Name, p.ID, bytes, units, "partner API: package "+pkg.ID); err != nil {
+				s.partnerUngive(ctx, k.ID, bytes, units)
+				refund()
+				fail(w, err)
+				return
+			}
+			s.partnerGavePanel(ctx, k.ID, p.ID, bytes, units)
+		}
+		if _, err := s.ExtendRepTerm(ctx, "partner:"+k.Name, p.ID, in.Days, in.OnExpiry, grace); err != nil {
+			refund()
+			fail(w, err)
+			return
+		}
+		np, ok := one(w, r, c)
+		if !ok {
+			return
+		}
+		s.partnerNotice(ctx, k.Name, fmt.Sprintf("🔁 دورهٔ پنل %s (%s) %d روز تمدید شد؛ تا %s", np.Name, np.ID, in.Days, time.Unix(np.Term.Until, 0).UTC().Format("2006-01-02")))
 		apiJSON(w, http.StatusOK, np)
 	})
 	route("POST /api/v2/partner/reps/{id}/credit/revoke", scopeCreditRevoke, func(w http.ResponseWriter, r *http.Request, c apiCaller) {
@@ -1089,6 +1244,32 @@ AND rep_id NOT IN (SELECT id FROM reps)`, in.ID, k.ID, in.ExternalRef, now-300) 
 			return
 		}
 		apiJSON(w, http.StatusOK, map[string]bool{"ok": true})
+	})
+	route("GET /api/v2/partner/wallet", "", func(w http.ResponseWriter, r *http.Request, c apiCaller) {
+		before, _ := strconv.ParseInt(r.URL.Query().Get("before"), 10, 64)
+		limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+		wl, err := s.PartnerWalletOf(r.Context(), c.KeyID, before, limit)
+		if err != nil {
+			fail(w, err)
+			return
+		}
+		apiJSON(w, http.StatusOK, wl)
+	})
+	route("POST /api/v2/partner/quote", "", func(w http.ResponseWriter, r *http.Request, c apiCaller) {
+		var in PartnerQuoteIn
+		if !readJSON(w, r, &in) {
+			return
+		}
+		k, ok := key(w, r, c)
+		if !ok {
+			return
+		}
+		q, err := s.PartnerQuoteFor(r.Context(), k, in)
+		if err != nil {
+			fail(w, err)
+			return
+		}
+		apiJSON(w, http.StatusOK, q)
 	})
 	s.eventRoutes(mux, "/api/v2/partner", auth, func(c apiCaller) string { return partnerTarget(c.KeyID) }, partnerEvents)
 	s.loginLinkRoute(mux)

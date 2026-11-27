@@ -150,6 +150,8 @@ type PartnerKey struct {
 	Expires    int64    `json:"expires_unix"` // 0: never
 	RatePerMin int      `json:"rate_per_min"` // 0: the default
 	Packages   []string `json:"packages"`     // reseller-sale packages it may sell; empty: all
+	PartnerBilling
+	Balance int64 `json:"balance"` // the wallet, toman (partnerwallet.go)
 	// Left to hand out: -1 = no limit.
 	RemainingGB    float64 `json:"remaining_gb"`
 	RemainingUnits int64   `json:"remaining_units"`
@@ -164,7 +166,7 @@ func (s *Store) scanPartner(row interface{ Scan(...any) error }) (PartnerKey, er
 	var maxB, givenB int64
 	var scopes, ips, pkgs string
 	err := row.Scan(&k.ID, &k.Name, &k.Enabled, &maxB, &k.MaxUnits, &givenB, &k.GivenUnits, &k.Template, &k.Created, &k.LastUsed, &k.LastIP, &k.Panels,
-		&scopes, &ips, &k.Expires, &k.RatePerMin, &pkgs)
+		&scopes, &ips, &k.Expires, &k.RatePerMin, &pkgs, &k.Billing, &k.PriceGB, &k.PriceUnit, &k.PriceMonth, &k.PackageDiscount, &k.Balance)
 	k.MaxGB, k.GivenGB = float64(maxB)/gibF, float64(givenB)/gibF
 	k.Scopes, k.AllowedIPs, k.Packages = splitTags(scopes), splitTags(ips), splitTags(pkgs)
 	k.RemainingGB, k.RemainingUnits = -1, -1
@@ -178,7 +180,8 @@ func (s *Store) scanPartner(row interface{ Scan(...any) error }) (PartnerKey, er
 }
 
 const partnerCols = `k.id,k.name,k.enabled,k.max_bytes,k.max_units,k.given_bytes,k.given_units,k.template,k.created_unix,k.last_used,k.last_ip,
-(SELECT COUNT(*) FROM partner_reps p WHERE p.key_id=k.id),k.scopes,k.allowed_ips,k.expires_unix,k.rate_per_min,k.packages`
+(SELECT COUNT(*) FROM partner_reps p WHERE p.key_id=k.id),k.scopes,k.allowed_ips,k.expires_unix,k.rate_per_min,k.packages,
+k.billing,k.price_gb,k.price_unit,k.price_month,k.package_discount,COALESCE((SELECT SUM(w.amount) FROM partner_wallet w WHERE w.key_id=k.id),0)`
 
 // PartnerKeys lists the keys.
 func (s *Store) PartnerKeys(ctx context.Context) ([]PartnerKey, error) {
@@ -219,6 +222,12 @@ type PartnerKeyIn struct {
 	Expires    *int64    `json:"expires_unix"`
 	RatePerMin *int      `json:"rate_per_min"`
 	Packages   *[]string `json:"packages"`
+	// Billing (partnerwallet.go); left out: kept.
+	Billing         *string `json:"billing"`
+	PriceGB         *int64  `json:"price_gb"`
+	PriceUnit       *int64  `json:"price_unit"`
+	PriceMonth      *int64  `json:"price_month"`
+	PackageDiscount *int    `json:"package_discount"`
 }
 
 func (s *Store) checkPartnerIn(ctx context.Context, in *PartnerKeyIn) error {
@@ -255,6 +264,21 @@ func (s *Store) checkPartnerIn(ctx context.Context, in *PartnerKeyIn) error {
 		if err := checkKeyRate(*in.RatePerMin); err != nil {
 			return err
 		}
+	}
+	b := PartnerBilling{Billing: "cap"}
+	if in.Billing != nil {
+		b.Billing = *in.Billing
+	}
+	for _, v := range []*int64{in.PriceGB, in.PriceUnit, in.PriceMonth} {
+		if v != nil && *v < 0 {
+			return fmt.Errorf("%w: prices cannot be negative", ErrInvalid)
+		}
+	}
+	if in.PackageDiscount != nil {
+		b.PackageDiscount = *in.PackageDiscount
+	}
+	if err := checkBilling(b); err != nil {
+		return err
 	}
 	if in.Packages != nil {
 		known := []string{}
@@ -299,6 +323,28 @@ func (s *Store) partnerKeySettings(ctx context.Context, id string, in PartnerKey
 	if in.Packages != nil {
 		if err := set("packages", strings.Join(*in.Packages, ",")); err != nil {
 			return err
+		}
+	}
+	for col, v := range map[string]any{"billing": in.Billing, "price_gb": in.PriceGB, "price_unit": in.PriceUnit, "price_month": in.PriceMonth, "package_discount": in.PackageDiscount} {
+		switch x := v.(type) {
+		case *string:
+			if x != nil {
+				if err := set(col, *x); err != nil {
+					return err
+				}
+			}
+		case *int64:
+			if x != nil {
+				if err := set(col, *x); err != nil {
+					return err
+				}
+			}
+		case *int:
+			if x != nil {
+				if err := set(col, *x); err != nil {
+					return err
+				}
+			}
 		}
 	}
 	return nil

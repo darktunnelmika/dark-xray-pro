@@ -149,8 +149,17 @@ class Partner(_Client):
     def ledger(self, before=0, limit=100):
         return self.request("GET", self.prefix + "/ledger", query={"before": before or None, "limit": limit})
 
+    def wallet(self, before=0, limit=100):
+        """Billing, prices, balance and the wallet's history (newest first)."""
+        return self.request("GET", self.prefix + "/wallet", query={"before": before or None, "limit": limit})
+
+    def quote(self, data):
+        """data: action (create|credit|renew), credit_gb, units, days, package. Answers cost, balance_after and allowed; changes nothing."""
+        return self.request("POST", self.prefix + "/quote", data)
+
     def create_panel(self, data, idempotency_key=None):
-        """data: name, id, username, password, credit_gb, units, package, policy, telegram_ids, external_ref, note, low_credit_gb"""
+        """data: name, id, username, password, credit_gb, units, package, policy, telegram_ids, external_ref, note, low_credit_gb,
+        term_days, on_expiry, grace_days"""
         return self.request("POST", self.prefix + "/reps", data, idempotency_key=idempotency_key)
 
     def panels(self, **query):
@@ -175,6 +184,10 @@ class Partner(_Client):
 
     def revoke_credit(self, rep_id, gb, units=0, note="", idempotency_key=None):
         return self.request("POST", self._rep(rep_id, "/credit/revoke"), {"credit_gb": gb, "units": units, "note": note}, idempotency_key=idempotency_key)
+
+    def renew_panel(self, rep_id, data, idempotency_key=None):
+        """data: days or package, and optionally on_expiry (block|suspend) and grace_days."""
+        return self.request("POST", self._rep(rep_id, "/renew"), data, idempotency_key=idempotency_key)
 
     def panel_ledger(self, rep_id, before=0, limit=100):
         return self.request("GET", self._rep(rep_id, "/ledger"), query={"before": before or None, "limit": limit})

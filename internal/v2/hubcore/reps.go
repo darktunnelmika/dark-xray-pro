@@ -326,9 +326,10 @@ func (s *Store) RepPutClient(ctx context.Context, actor, repID string, c Client,
 			unitCharge = unitsFor((added + 86399) / 86400)
 		}
 	}
-	if (volCharge > 0 || unitCharge > 0) && repLockedQ(ctx, tx, repID, now) {
-		// A panel bill past its due time (resale.go): no spending until paid.
-		return fmt.Errorf("%w: an overdue bill is unpaid; pay it to sell again", ErrPolicy)
+	if err := repStopQ(ctx, tx, repID, now); err != nil && (volCharge > 0 || unitCharge > 0) {
+		// A panel bill past its due time (resale.go) or an ended term
+		// (repterm.go): no spending until paid or renewed.
+		return err
 	}
 	if !isNew && plan == "volume" && oldPlan == "volume" && old.VolumeBytes > 0 && c.VolumeBytes < old.VolumeBytes {
 		var used, gift int64

@@ -515,6 +515,7 @@ function shell(active, content) {
   return h("div", { class: "shell" },
     h("header", { class: "top" }, h("a", { class: "brand", href: "#/dashboard" }, mark(), h("span", { class: "brand-text" }, brandText())),
       me && me.role === "rep" ? h("a", { class: "badge credit", href: "#/credit", title: t("volumeCredit") }, h("span", { class: "lbl" }, `${t("volumeCredit")}: `), h("b", { dir: "ltr" }, gbs(me.volume_credit || 0)), me.unlimited_units ? ` · ${t("units")}: ${fmtNum(me.unlimited_units)}` : "") : null,
+      me && me.role === "rep" && me.term && ["expiring", "expired", "suspended"].includes(me.term.state) ? termBadge(me.term) : null,
       h("button", { class: "searchbox", type: "button", onclick: openPalette }, icon("search"), h("span", {}, ux("search")), h("kbd", {}, "Ctrl K")),
       h("div", { class: "actions" }, iconBtn("search", ux("search"), openPalette), me && me.role !== "rep" ? bellBtn : null, themeBtn, langBtn, userBtn)),
     h("nav", { class: "tabs", "aria-label": "Main" }, tabs, keys.length > 5 ? moreBtn : null),
@@ -5952,11 +5953,24 @@ async function partnerKeys(reps) {
       tops.map((r) => h("option", { value: r.ID, selected: k && k.template === r.ID }, `${r.Name || r.ID} (${r.ID})`)));
     const pk = packages.map((p) => ({ id: p.id, c: h("input", { type: "checkbox", checked: !!(k && (k.packages || []).includes(p.id)) }), p }));
     const extra = apiKeyFields("partner", k);
+    // How the key pays: a credit limit only, or a toman wallet at these prices.
+    const billing = h("select", {}, h("option", { value: "cap", selected: !k || k.billing !== "wallet" }, T("فقط سقف اعتبار (تسویه بیرون از پنل)", "Credit limit only (settled outside the panel)")),
+      h("option", { value: "wallet", selected: !!k && k.billing === "wallet" }, T("کیف پول تومانی (پیش‌پرداخت)", "Toman wallet (prepaid)")));
+    const money = (v) => h("input", { type: "number", min: "0", step: "1000", dir: "ltr", value: String(v || 0) });
+    const pGB = money(k && k.price_gb), pUnit = money(k && k.price_unit), pMonth = money(k && k.price_month);
+    const disc = h("input", { type: "number", min: "0", max: "100", dir: "ltr", value: String((k && k.package_discount) || 0) });
+    const prices = h("div", { class: "form" },
+      h("div", { class: "two" }, h("label", {}, h("span", {}, T("قیمت هر گیگ (تومان)", "Per GB (toman)")), pGB), h("label", {}, h("span", {}, T("قیمت هر واحد نامحدود", "Per unlimited unit")), pUnit)),
+      h("div", { class: "two" }, h("label", {}, h("span", {}, T("قیمت هر ۳۰ روز دورهٔ پنل", "Per 30 days of a panel's term")), pMonth), h("label", {}, h("span", {}, T("تخفیف روی قیمت بسته‌ها (٪)", "Discount on package prices (%)")), disc)));
+    const syncBilling = () => { prices.hidden = billing.value !== "wallet"; };
+    billing.onchange = syncBilling;
+    syncBilling();
     const e2 = h("div", { class: "error", role: "alert" });
     const save = h("button", { class: "primary", value: "save", onclick: async (ev) => {
       ev.preventDefault(); e2.textContent = "";
       const body = { name: name.value, max_gb: +maxGB.value || 0, max_units: +maxU.value || 0, template: tpl.value,
-        packages: pk.filter((x) => x.c.checked).map((x) => x.id), ...extra.value() };
+        packages: pk.filter((x) => x.c.checked).map((x) => x.id), ...extra.value(),
+        billing: billing.value, price_gb: +pGB.value || 0, price_unit: +pUnit.value || 0, price_month: +pMonth.value || 0, package_discount: +disc.value || 0 };
       try {
         if (k) { await api("PUT", `/api/v2/admin/partner-keys/${encodeURIComponent(k.id)}`, { ...body, enabled: k.enabled }); toast(t("saved")); partnerKeys(reps); }
         else { const nk = await api("POST", "/api/v2/admin/partner-keys", body); showNewKey("partner", nk.key); }
@@ -5971,6 +5985,9 @@ async function partnerKeys(reps) {
         h("span", { class: "small muted" }, T("محدودیت‌ها، اینباندها و قیمت‌های این نماینده سقف هر پنل جدید است؛ کلید فقط می‌تواند سخت‌ترش کند.", "That reseller's limits, inbounds and prices cap every new panel; the key can only make them tighter."))),
       packages.length ? h("fieldset", { class: "scopes" }, h("legend", {}, T("پکیج‌های قابل فروش (هیچ‌کدام = همه)", "Packages it may sell (none = all)")),
         ...pk.map((x) => h("label", { class: "check" }, x.c, h("span", {}, `${x.p.name} · ${fmtNum(x.p.gb)} GB`)))) : null,
+      h("fieldset", { class: "scopes" }, h("legend", {}, T("پرداخت", "Billing")), billing, prices,
+        h("p", { class: "small muted" }, T("با کیف پول، ساخت پنل، افزودن اعتبار و تمدید دوره پیش از انجام از موجودی کلید کم می‌شود؛ پس گرفتن اعتبار یا حذف پنل پولی برنمی‌گرداند.",
+          "With a wallet, making panels, adding credit and renewing terms are paid from the key's balance first; taking credit back or deleting a panel pays nothing back."))),
       extra.el, e2), [save]);
   };
 
@@ -5993,12 +6010,14 @@ async function partnerKeys(reps) {
           k.max_units || k.given_units ? h("span", { class: "badge", dir: "ltr" }, limit(fmtNum(k.given_units), k.max_units ? fmtNum(k.max_units) : 0, T(" واحد", " units"))) : null,
           h("span", { class: "badge" }, T("سقف قوانین: ", "rules: "), k.template || T("پیش‌فرض", "default")),
           (k.packages || []).length ? h("span", { class: "badge" }, T("پکیج‌ها: ", "packages: "), k.packages.join("، ")) : null,
+          k.billing === "wallet" ? h("span", { class: `badge ${k.balance > 0 ? "good" : "warn"}` }, T("کیف پول: ", "wallet: "), tomanTxt(k.balance)) : null,
           (k.allowed_ips || []).length ? h("span", { class: "badge", dir: "ltr" }, `IP: ${k.allowed_ips.join(", ")}`) : null,
           k.expires_unix ? h("span", { class: `badge ${expired ? "bad" : ""}` }, T("انقضا: ", "expires: "), fmtDT(k.expires_unix)) : null,
           h("span", { class: "badge" }, T("آخرین استفاده: ", "last used: "), k.last_used ? fmtWhen(k.last_used) : T("هرگز", "never"))),
         h("div", { class: "mz-badges" }, (k.scopes || []).map((s) => h("span", { class: `badge ${["credit:revoke", "panels:delete", "clients:read"].includes(s) ? "warn" : ""}` }, scopeName(s)))),
         h("div", { class: "row" },
           h("button", { type: "button", onclick: () => keyForm(k) }, t("edit")),
+          k.billing === "wallet" ? h("button", { type: "button", onclick: () => partnerWallet(k, () => partnerKeys(reps)) }, "💰 ", T("کیف پول", "Wallet")) : null,
           h("button", { type: "button", class: "danger", onclick: async () => {
             if (!(await confirmAction(T(`کلید «${k.name}» حذف شود؟ هرچه از آن استفاده می‌کند از کار می‌افتد؛ پنل‌هایی که ساخته می‌مانند.`, `Delete the key “${k.name}”? Whatever uses it stops; the panels it made stay.`), t("delete")))) return;
             await guarded(() => api("DELETE", `/api/v2/admin/partner-keys/${encodeURIComponent(k.id)}`)); partnerKeys(reps);
@@ -6014,6 +6033,38 @@ async function partnerKeys(reps) {
   }
   await draw();
   openModal(T("API فروش پنل نمایندگی", "Reseller panel sales API"), box);
+}
+
+// partnerWallet: a wallet key's balance and history, with the owner's top-up.
+async function partnerWallet(k, done) {
+  const fa = lang === "fa";
+  const T = (f, e) => (fa ? f : e);
+  const box = h("div", { class: "form" });
+  const draw = async () => {
+    let wl;
+    try { wl = await api("GET", `/api/v2/admin/partner-keys/${encodeURIComponent(k.id)}/wallet`); } catch (x) { fill(box, h("p", { class: "error" }, x.message)); return; }
+    const amount = h("input", { type: "number", step: "1000", dir: "ltr", placeholder: "500000" });
+    const note = h("input", { maxlength: "120", placeholder: T("مثلاً شمارهٔ رسید", "e.g. receipt number") });
+    const err = h("div", { class: "error", role: "alert" });
+    const kindTxt = { topup: T("شارژ", "top-up"), charge: T("برداشت", "charge"), refund: T("برگشت", "refund"), adjust: T("اصلاح", "adjustment") };
+    fill(box,
+      h("div", { class: "kpis" }, h("div", { class: "card kpi" }, h("div", { class: "k" }, T("موجودی", "Balance")), h("div", { class: "v", dir: "ltr" }, tomanTxt(wl.balance)))),
+      h("p", { class: "small muted" }, T(`قیمت‌ها: هر گیگ ${tomanTxt(wl.price_gb)} · هر واحد ${tomanTxt(wl.price_unit)} · هر ۳۰ روز دوره ${tomanTxt(wl.price_month)} · تخفیف بسته ${fmtNum(wl.package_discount)}٪`,
+        `Prices: per GB ${tomanTxt(wl.price_gb)} · per unit ${tomanTxt(wl.price_unit)} · per 30 days ${tomanTxt(wl.price_month)} · package discount ${wl.package_discount}%`)),
+      h("form", { class: "card form", onsubmit: async (e) => {
+        e.preventDefault(); err.textContent = "";
+        try { await api("POST", `/api/v2/admin/partner-keys/${encodeURIComponent(k.id)}/wallet`, { amount: +amount.value || 0, note: note.value }); toast(t("saved")); draw(); }
+        catch (x) { err.textContent = x.message; }
+      } }, h("div", { class: "two" }, h("label", {}, h("span", {}, T("مبلغ (تومان؛ منفی = کسر)", "Amount (toman; negative takes)")), amount), h("label", {}, h("span", {}, T("یادداشت", "Note")), note)),
+        err, h("button", { class: "primary" }, T("ثبت", "Apply"))),
+      (wl.items || []).length ? h("div", { class: "table-wrap" }, h("table", { class: "dtable" }, h("tbody", {}, wl.items.map((it) => h("tr", {},
+        h("td", { class: "small muted" }, fmtWhen(it.unix)), h("td", {}, h("span", { class: `badge ${it.amount > 0 ? "good" : ""}` }, kindTxt[it.kind] || it.kind)),
+        h("td", { dir: "ltr" }, (it.amount > 0 ? "+" : "") + fmtNum(it.amount)), h("td", { class: "small" }, [it.panel, it.note].filter(Boolean).join(" · "))))))) :
+        h("p", { class: "muted small" }, T("هنوز گردشی ندارد.", "No movements yet.")));
+  };
+  await draw();
+  const d = openModal(`${T("کیف پول", "Wallet")} · ${k.name}`, box);
+  d.addEventListener("close", () => done && done(), { once: true });
 }
 
 // resKeysCard: reseller API keys at path (the reseller's own, or the
@@ -6424,9 +6475,13 @@ async function apiDocs(kind) {
       pre(`Idempotency-Key: order-1001`)),
     sec(T("۳. خطاها و محدودیت نرخ", "3. Errors and rate limits"),
       h("p", { class: "small" }, T("هر خطا این شکل را دارد و code برای برنامه ثابت است. سقف پیش‌فرض ۱۲۰ درخواست در دقیقه است؛ هدرهای X-RateLimit-Remaining و (در 429) Retry-After را ببینید.", "Every error looks like this and code is stable for programs. The default rate is 120 requests a minute; see X-RateLimit-Remaining and, on 429, Retry-After.")),
-      pre(`{"detail": "not enough credit", "code": "insufficient_credit", "request_id": "3f2a9c1b7d4e8a60"}\n\nunauthorized · key_expired · ip_not_allowed · scope_missing · rate_limited\ninvalid_json · validation_failed · not_found · conflict\ninsufficient_credit · credit_limit · policy_denied · account_disabled\nidempotency_key_reused · idempotency_in_progress · internal_error`)),
+      pre(`{"detail": "not enough credit", "code": "insufficient_credit", "request_id": "3f2a9c1b7d4e8a60"}\n\nunauthorized · key_expired · ip_not_allowed · scope_missing · rate_limited\ninvalid_json · validation_failed · not_found · conflict\ninsufficient_credit · insufficient_funds · credit_limit · policy_denied · account_disabled\nidempotency_key_reused · idempotency_in_progress · internal_error`)),
     sec(T("۴. نمونه با PHP", "4. PHP example"), pre(php)),
     sec(T("۵. نمونه با Python", "5. Python example"), pre(py)),
+    kind === "partner" ? sec(T("۵-ب. دورهٔ نمایندگی و کیف پول", "5b. Panel terms and the wallet"),
+      h("p", { class: "small" }, T("پنل را برای مدت مشخص بفروشید: term_days هنگام ساخت و ‎/reps/{id}/renew برای تمدید. با پایان دوره فروش پنل بسته می‌شود؛ on_expiry=block مشتری‌ها را وصل نگه می‌دارد و suspend آن‌ها را grace_days روز بعد قطع می‌کند و تمدید دوباره وصلشان می‌کند. اگر کلید روی کیف پول باشد، هر ساخت، افزودن اعتبار و تمدید پیش از انجام از موجودی تومانی کم می‌شود (402 insufficient_funds اگر نرسد)؛ قیمت را اول با ‎/quote بپرسید.",
+        "Sell a panel for a time: term_days when making it, /reps/{id}/renew to extend it. When the term ends the panel stops selling; on_expiry=block keeps its customers on, suspend switches them off grace_days later and a renewal switches them back on. On a wallet key every make, credit and renewal is paid from the toman balance first (402 insufficient_funds when short); ask the price with /quote.")),
+      pre(`POST ${P}/quote\n{"action": "create", "package": "gold", "days": 60}\n→ {"cost": 850000, "balance_after": 1150000, "allowed": true, …}\n\nPOST ${P}/reps/shop-a/renew\nIdempotency-Key: renew-2041\n{"days": 30, "on_expiry": "suspend", "grace_days": 3}\n\nGET ${P}/wallet`)) : null,
     sec(T("۶. رویدادها و وب‌هوک", "6. Events and webhook"),
       h("p", { class: "small" }, T(`رویدادها را می‌توانید با GET ${P}/events?after=<آخرین id> بخوانید، یا با PUT ${P}/webhook یک آدرس بدهید تا برایتان POST شوند (حداکثر ۵۰ رویداد در هر ارسال، به ترتیب، با تلاش دوباره تا یک ساعت فاصله). امضا را حتماً بررسی کنید:`,
         `Read events with GET ${P}/events?after=<last id>, or give an address with PUT ${P}/webhook to have them POSTed (up to 50 per POST, in order, retried with up to an hour between tries). Always check the signature:`)),
@@ -6543,6 +6598,60 @@ function tabsView(tabs, key) {
   return h("div", {}, bar, pane);
 }
 
+// termModeSelect: what happens to a reseller panel's customers when its term ends.
+function termModeSelect(v) {
+  const fa = lang === "fa";
+  return h("select", {},
+    h("option", { value: "block", selected: v !== "suspend" }, fa ? "فقط فروش بسته شود؛ مشتری‌ها وصل بمانند" : "Stop selling; customers keep working"),
+    h("option", { value: "suspend", selected: v === "suspend" }, fa ? "بعد از مهلت، مشتری‌ها هم قطع شوند (با تمدید برمی‌گردند)" : "After the grace, switch customers off too (back on renewal)"));
+}
+
+// termBadge: a reseller panel's term in a few words.
+function termBadge(tm) {
+  const fa = lang === "fa";
+  if (!tm || tm.state === "none" || !tm.state) return null;
+  const until = fmtDT(tm.expires_unix);
+  const txt = { active: fa ? `تا ${until}` : `until ${until}`, expiring: fa ? `${fmtNum(tm.days_left)} روز تا پایان دوره` : `${tm.days_left} days left`,
+    expired: fa ? "دوره تمام شده" : "term ended", suspended: fa ? "دوره تمام شده · مشتری‌ها قطع" : "term ended · customers off" }[tm.state] || tm.state;
+  return h("span", { class: `badge ${tm.state === "active" ? "" : tm.state === "expiring" ? "warn" : "bad"}` }, "⏳ ", txt);
+}
+
+// termForm: the owner sets or extends a reseller panel's term.
+async function termForm(r) {
+  const fa = lang === "fa";
+  const T = (f, e) => (fa ? f : e);
+  const tm = await guarded(() => api("GET", `/api/v2/admin/reps/${encodeURIComponent(r.ID)}/term`));
+  if (!tm) return;
+  const add = h("input", { type: "number", min: "0", max: "3650", dir: "ltr", value: "30" });
+  const date = h("input", { type: "date", dir: "ltr", value: tm.expires_unix ? new Date(tm.expires_unix * 1000).toISOString().slice(0, 10) : "" });
+  const how = h("select", {},
+    h("option", { value: "add" }, T("تمدید به اندازهٔ چند روز", "Extend by days")),
+    h("option", { value: "date" }, T("تا یک تاریخ مشخص", "Until a date")),
+    h("option", { value: "none" }, T("بدون دوره (همیشگی)", "No term (runs on)")));
+  const mode = termModeSelect(tm.on_expiry);
+  const grace = h("input", { type: "number", min: "0", max: "365", dir: "ltr", value: tm.grace_days || 0 });
+  const err = h("div", { class: "error", role: "alert" });
+  const sync = () => { add.closest("label").hidden = how.value !== "add"; date.closest("label").hidden = how.value !== "date"; };
+  how.onchange = sync;
+  const body = h("div", { class: "form" },
+    h("p", {}, T("وضعیت فعلی: ", "Now: "), termBadge(tm) || T("بدون دوره", "no term")),
+    h("label", {}, h("span", {}, T("تغییر", "Change")), how),
+    h("label", {}, h("span", {}, T("روز (از پایان دوره، یا از امروز اگر تمام شده)", "Days (from the end, or from today when it has ended)")), add),
+    h("label", {}, h("span", {}, T("تاریخ پایان", "End date")), date),
+    h("label", {}, h("span", {}, T("بعد از پایان دوره", "When the term ends")), mode),
+    h("label", {}, h("span", {}, T("مهلت قبل از قطع مشتری‌ها (روز)", "Grace before customers go off (days)")), grace), err);
+  openModal(`${T("دورهٔ نمایندگی", "Reseller term")} · ${r.Name || r.ID}`, body, [h("button", { class: "primary", value: "save", onclick: async (e) => {
+    e.preventDefault(); err.textContent = "";
+    const b = { on_expiry: mode.value, grace_days: +grace.value || 0 };
+    if (how.value === "add") b.add_days = +add.value || 0;
+    else if (how.value === "date") b.expires_unix = date.value ? Math.floor(new Date(date.value + "T23:59:59Z").getTime() / 1000) : 0;
+    else b.expires_unix = 0;
+    try { await api("PUT", `/api/v2/admin/reps/${encodeURIComponent(r.ID)}/term`, b); document.getElementById("modal").close("save"); toast(t("saved")); route(); }
+    catch (x) { err.textContent = x.message; }
+  } }, t("save"))]);
+  sync();
+}
+
 function packageForm(p, inbounds, onSave) {
   const fa = lang === "fa";
   const T = (f, e) => (fa ? f : e);
@@ -6550,7 +6659,8 @@ function packageForm(p, inbounds, onSave) {
   const inp = (v, attrs) => h("input", { type: "number", min: "0", dir: "ltr", value: v || 0, ...(attrs || {}) });
   const f = { name: h("input", { value: p.name || "", placeholder: T("مثلاً ۱ ترابایت", "e.g. 1 TB") }), gb: inp(p.gb, { min: "1" }), price: inp(p.price, { step: "1000" }),
     au: h("input", { type: "checkbox", checked: !!p.allow_unlimited }), units: inp(p.units), mc: inp(p.max_clients), md: inp(p.max_days), mg: inp(p.max_client_gb),
-    cd: h("input", { type: "checkbox", checked: !!p.can_delete }), ru: h("input", { type: "checkbox", checked: !!p.refund_unused }) };
+    cd: h("input", { type: "checkbox", checked: !!p.can_delete }), ru: h("input", { type: "checkbox", checked: !!p.refund_unused }),
+    days: inp(p.days), oe: termModeSelect(p.on_expiry), grace: inp(p.grace_days) };
   const chosen = new Set(p.inbounds || []);
   const ibs = (inbounds || []).map((ib) => h("label", { class: "check" }, h("input", { type: "checkbox", value: ib.tag, checked: chosen.has(ib.tag) }), h("span", {}, ib.tag)));
   const lab = (l, el) => h("label", {}, h("span", {}, l), el);
@@ -6563,11 +6673,15 @@ function packageForm(p, inbounds, onSave) {
     lab(T("حداکثر حجم هر کلاینت (گیگ)", "Max GB per client"), f.mg),
     h("label", { class: "check" }, f.cd, T("اجازهٔ حذف کلاینت", "May delete clients")),
     h("label", { class: "check" }, f.ru, T("برگشت حجم مصرف‌نشده هنگام حذف", "Refund unused on delete")),
+    h("div", { class: "two" }, lab(T("دورهٔ پنل (روز، ۰ = بدون انقضا)", "Panel term (days, 0 = none)"), f.days), lab(T("مهلت بعد از پایان (روز)", "Grace after the end (days)"), f.grace)),
+    lab(T("بعد از پایان دوره", "When the term ends"), f.oe),
+    h("p", { class: "small muted" }, T("با دوره، پنل فقط تا این تعداد روز می‌فروشد و خرید دوبارهٔ همین بسته (شارژ) دوره را تمدید می‌کند.", "With a term the panel sells only that many days; buying the package again (a top-up) extends it.")),
     h("fieldset", { class: "form", style: "border:0;padding:0;margin:0" }, h("legend", { class: "small muted" }, T("اینباندها (هیچ‌کدام = همه)", "Inbounds (none = all)")), h("div", { class: "chips" }, ibs))),
     [h("button", { class: "primary", value: "save", onclick: async (e) => {
       e.preventDefault();
       const np = { ...p, name: f.name.value, gb: +f.gb.value || 0, price: +f.price.value || 0, allow_unlimited: f.au.checked, units: +f.units.value || 0, max_clients: +f.mc.value || 0, max_days: +f.md.value || 0,
-        max_client_gb: +f.mg.value || 0, can_delete: f.cd.checked, refund_unused: f.ru.checked, inbounds: ibs.map((l) => l.querySelector("input")).filter((i) => i.checked).map((i) => i.value) };
+        max_client_gb: +f.mg.value || 0, can_delete: f.cd.checked, refund_unused: f.ru.checked,
+        days: +f.days.value || 0, on_expiry: f.oe.value, grace_days: +f.grace.value || 0, inbounds: ibs.map((l) => l.querySelector("input")).filter((i) => i.checked).map((i) => i.value) };
       if (await onSave(np)) document.getElementById("modal").close("save");
     } }, t("save"))]);
 }
@@ -6702,8 +6816,10 @@ async function viewResaleRep() {
 // Owner: resellers as a table with this month's numbers; actions in a menu.
 async function viewReps() {
   const fa = lang === "fa";
-  const [reps, inbounds, ov] = await Promise.all([api("GET", "/api/v2/admin/reps"), api("GET", "/api/v2/admin/inbounds"), api("GET", "/api/v2/admin/reps/overview").catch(() => [])]);
+  const [reps, inbounds, ov, terms] = await Promise.all([api("GET", "/api/v2/admin/reps"), api("GET", "/api/v2/admin/inbounds"), api("GET", "/api/v2/admin/reps/overview").catch(() => []),
+    api("GET", "/api/v2/admin/rep-terms").catch(() => [])]);
   const byID = Object.fromEntries((ov || []).map((o) => [o.rep_id, o]));
+  const termOf = Object.fromEntries((terms || []).map((x) => [x.rep_id, x]));
   const del = async (r) => {
     const msg = r.Clients
       ? (fa ? `نمایندهٔ ${r.Name || r.ID} همراه زیرفروشنده‌ها و ${fmtNum(r.Clients)} کلاینتش حذف شود؟ کلاینت‌ها قطع می‌شوند و این کار برگشت ندارد.` : `Delete ${r.Name || r.ID}, its sub-sellers and its ${r.Clients} clients? The clients stop working; this cannot be undone.`)
@@ -6720,6 +6836,7 @@ async function viewReps() {
       item(fa ? "صفحهٔ اشتراک" : "Sub page", () => openModal(`${fa ? "برند و صفحهٔ اشتراک" : "Brand & subscription page"} · ${r.Name || r.ID}`, repBrandCard(`/api/v2/admin/reps/${encodeURIComponent(r.ID)}/brand`))),
       item(fa ? "ربات و کارت" : "Bot & card", () => openModal(`${fa ? "ربات و کارت" : "Bot & card"} · ${r.Name || r.ID}`, h("div", { class: "form" }, repBotCard(`/api/v2/admin/reps/${encodeURIComponent(r.ID)}/bot`), sellerCardCard(`/api/v2/shop/card?seller=${encodeURIComponent(r.ID)}`)))),
       item(t("activity"), () => { location.hash = `#/activity?rep=${encodeURIComponent(r.ID)}`; }),
+      ...(r.ParentID ? [] : [item(fa ? "دورهٔ نمایندگی" : "Reseller term", () => termForm(r))]),
       ...(fullOwner() ? [item(fa ? "کلیدهای API نماینده" : "Reseller API keys", () => openModal(`${fa ? "کلیدهای API" : "API keys"} · ${r.Name || r.ID}`,
         resKeysCard(`/api/v2/admin/reps/${encodeURIComponent(r.ID)}/apikeys`)))] : []),
       item(t("edit"), () => repForm(r)),
@@ -6729,7 +6846,8 @@ async function viewReps() {
     const o = byID[r.ID] || {};
     return h("tr", {},
       h("td", {}, h("a", { class: "name", href: `#/repview?rep=${encodeURIComponent(r.ID)}` }, r.Name || r.ID),
-        h("div", { class: "small muted" }, r.ID, r.ParentID ? ` · ${t("subOf")} ${r.ParentID}` : "", r.Enabled ? "" : ` · ${t("disabled")}`)),
+        h("div", { class: "small muted" }, r.ID, r.ParentID ? ` · ${t("subOf")} ${r.ParentID}` : "", r.Enabled ? "" : ` · ${t("disabled")}`),
+        termOf[r.ID] ? h("div", { class: "small" }, termBadge(termOf[r.ID])) : null),
       h("td", { dir: "ltr" }, h("b", {}, gbs(r.VolumeCredit)), r.UnlimitedUnits ? h("div", { class: "small muted" }, `${fmtNum(r.UnlimitedUnits)} ${t("units")}`) : null),
       h("td", { dir: "ltr" }, gbs(o.month_sold || 0), h("div", { class: "small muted" }, `${fmtNum(o.month_sales || 0)} ${fa ? "فروش" : "sales"}`)),
       h("td", {}, h("span", { dir: "ltr" }, `${fmtNum(o.active || 0)} / ${fmtNum(r.Clients)}`), o.expiring ? h("div", { class: "small" }, h("span", { class: "badge warn" }, `${fmtNum(o.expiring)} ${fa ? "رو به اتمام" : "ending"}`)) : null),

@@ -48,7 +48,8 @@ import (
 // resellerEvents are the events a reseller receives.
 var resellerEvents = []string{"client.created", "client.updated", "client.enabled", "client.disabled", "client.deleted",
 	"client.renewed", "client.usage_reset", "client.revoked", "client.first_used", "client.expiring", "client.expired",
-	"client.volume_low", "client.volume_exhausted", "credit.added", "credit.removed", "credit.low"}
+	"client.volume_low", "client.volume_exhausted", "credit.added", "credit.removed", "credit.low",
+	"term.expiring", "term.expired", "term.suspended", "term.renewed"}
 
 // repClient reads one of a reseller's customers.
 func (s *Store) repClient(ctx context.Context, repID, name string) (ClientView, error) {
@@ -398,8 +399,10 @@ func (s *Store) QuoteFor(ctx context.Context, repID string, in QuoteIn) (Quote, 
 			return refuse(err)
 		}
 	}
-	if (q.chargeBytes > 0 || q.ChargeUnits > 0) && s.RepLocked(ctx, repID) {
-		return refuse(fmt.Errorf("%w: an overdue bill is unpaid; pay it to sell again", ErrPolicy))
+	if q.chargeBytes > 0 || q.ChargeUnits > 0 {
+		if err := repStopQ(ctx, s.ro, repID, s.now().Unix()); err != nil {
+			return refuse(err)
+		}
 	}
 	net := q.chargeBytes - q.refundBytes
 	q.CreditAfterGB, q.UnitsAfter = roundGB(float64(vol-net)/gibF), units-q.ChargeUnits
@@ -540,11 +543,13 @@ func resellerRoutes(s *Store, mux routeMux, subBase string) {
 			return
 		}
 		pol, _ := s.RepPolicyOf(ctx, c.RepID)
+		term, _ := s.RepTermOf(ctx, c.RepID)
 		var n int
 		_ = s.ro.QueryRowContext(ctx, `SELECT COUNT(*) FROM clients WHERE rep_id=?`, c.RepID).Scan(&n)
 		apiJSON(w, http.StatusOK, map[string]any{"id": c.RepID, "name": name, "credit_gb": gbOf(vol), "units": units, "clients": n,
 			"policy": apiPolicyOf(pol), "sub_seller": parent != "", "sub_base": publicBase(base(r, c.RepID), r) + "/sub/",
-			"locked": s.RepLocked(ctx, c.RepID), // an overdue bill stops new sales and renewals until it is paid
+			"locked": s.RepLocked(ctx, c.RepID), // an overdue bill or an ended term stops new sales and renewals
+			"term":   term,
 			"key":    map[string]any{"id": c.KeyID, "name": c.Name, "scopes": scopeList(c.Scopes), "expires_unix": c.Expires}})
 	})
 	route("GET "+P+"/inbounds", scopeAccountRead, func(w http.ResponseWriter, r *http.Request, c apiCaller) {

@@ -40,7 +40,7 @@ so a refused request can be fixed and sent again with the same key. The SDKs add
 | --- | --- | --- |
 | 400 | `invalid_json` | the body is not JSON |
 | 401 | `unauthorized`, `key_expired` | wrong, turned-off or expired key |
-| 402 | `insufficient_credit` | the reseller's (or panel's) credit does not cover it |
+| 402 | `insufficient_credit`, `insufficient_funds` | the reseller's (or panel's) credit does not cover it; the partner key's wallet does not cover the price |
 | 403 | `scope_missing`, `ip_not_allowed`, `policy_denied`, `credit_limit`, `account_disabled` | the key may not, the rules forbid it, the partner key's limit is used up, the reseller is turned off |
 | 404 | `not_found` | not there, or not yours |
 | 409 | `conflict` | a name or `external_ref` is taken, a panel still has customers |
@@ -66,16 +66,19 @@ a rate, and pick the reseller-sale packages it may sell.
 | Method | Path | Scope | |
 | --- | --- | --- | --- |
 | GET | `/api/v2/partner` | | the key: limits, `remaining_gb`, `remaining_units` (-1 = no limit), scopes |
-| GET | `/packages` | | packages it may sell (credit, units, rules) |
+| GET | `/packages` | | packages it may sell (credit, units, term days, rules) |
+| GET | `/wallet?before=&limit=` | | billing, prices, balance and the wallet's history (newest first) |
+| POST | `/quote` | | what `create`, `credit` or `renew` would cost and whether the wallet covers it; changes nothing |
 | GET | `/stats?days=30` | panels:read | panels, customers, credit, and what was added, taken back, sold and refunded in the period |
 | GET | `/ledger?before=&limit=` | panels:read | credit added or taken back, every panel |
 | POST | `/reps` | panels:write | make a panel |
 | GET | `/reps?q=&enabled=&external_ref=&limit=&offset=` | panels:read | its panels, newest first |
 | GET | `/reps/{id}` | panels:read | one panel |
-| PATCH | `/reps/{id}` | panels:write | name, note, external_ref, enabled, policy, telegram_ids, low_credit_gb |
+| PATCH | `/reps/{id}` | panels:write | name, note, external_ref, enabled, policy, telegram_ids, low_credit_gb, on_expiry, grace_days |
 | DELETE | `/reps/{id}?clients=1` | panels:delete | delete (with its customers when `clients=1`); its unused credit can be handed out again |
 | POST | `/reps/{id}/credit` | credit:add | `{credit_gb, units, note}` |
 | POST | `/reps/{id}/credit/revoke` | credit:revoke | take unused credit back |
+| POST | `/reps/{id}/renew` | panels:write | extend its term: `{days}` or `{package}` (the package's credit too, which needs credit:add) |
 | GET | `/reps/{id}/ledger` | panels:read | its credit history |
 | GET | `/reps/{id}/overview` | panels:read | customers by state, this month, the last 30 days |
 | GET | `/reps/{id}/clients?status=&q=` | clients:read | its customers (read only) |
@@ -108,13 +111,64 @@ given, an inbound never added. `id`, `username` and `password` are optional. The
 `panel_url` and `message`, a ready-to-send text with the address and the sign-in. `external_ref` is unique per key, so it
 also finds the panel again: `GET /reps?external_ref=order-1001`.
 
+### Panel terms
+
+A panel can be sold for a time: `term_days` when making it (or a package with days), `POST /reps/{id}/renew` to extend
+it. Every panel answers `term`:
+
+```json
+"term": {"expires_unix": 1769817600, "on_expiry": "suspend", "grace_days": 2, "state": "active", "days_left": 30}
+```
+
+`state` is `none` (no term), `active`, `expiring` (3 days or less), `expired` or `suspended`. When the term ends the
+panel stops selling: no new customers, renewals, resets or credit moved to its sub-sellers (`policy_denied`, and
+`locked` in its `/me`), for its sub-sellers too. What happens to its customers is `on_expiry`: `block` (default) keeps
+them working, `suspend` switches them off `grace_days` after the end. A renewal adds to the end (or starts from now once
+it has ended) and switches back on exactly the customers the term switched off. The reseller is told in its panel and
+Telegram 3 days and 1 day before, at the end and when its customers go off. Terms are on the ledger as kind `term`.
+
+```json
+POST /api/v2/partner/reps/shop-a/renew
+Idempotency-Key: renew-2041
+
+{"days": 30, "on_expiry": "suspend", "grace_days": 3}
+```
+
+### Wallet billing
+
+The owner sets per key how it pays. `cap` (default): only the GB and unit limits, settled outside the panel. `wallet`:
+the key is prepaid in toman and every change that hands something out is paid from it before it runs:
+
+| | cost |
+| --- | --- |
+| credit | `credit_gb × price_gb + units × price_unit` (rounded up) |
+| term | `price_month` for every started 30 days |
+| package | its price less `package_discount` %, plus term days beyond the package's own |
+
+Without enough balance nothing is made or changed (402, `insufficient_funds`). If the action then fails the charge
+comes back (`refund`). Taking credit back and deleting a panel pay nothing back. A retry with the same
+`Idempotency-Key` never pays twice. The owner tops the wallet up in the panel (Resellers → Panel sales API → Wallet).
+Ask first:
+
+```json
+POST /api/v2/partner/quote
+{"action": "create", "package": "gold", "days": 60}
+
+{"billing": "wallet", "cost": 850000, "balance": 2000000, "balance_after": 1150000, "credit_gb": 500, "units": 0,
+ "term_days": 60, "allowed": true}
+```
+
+`action` is `create` (`credit_gb`, `units`, `days` or `package`), `credit` (`credit_gb`, `units`) or `renew` (`days` or
+`package`). `GET /wallet` answers the prices, the balance and its rows: `topup`, `charge`, `refund`, `adjust`, each with
+`amount` (+ in, − out), `panel` and `note`.
+
 ## Reseller API
 
 Scopes: `account:read`, `clients:read`, `clients:write`, `clients:delete`, `events` (on by default); `sellers`.
 
 | Method | Path | Scope | |
 | --- | --- | --- | --- |
-| GET | `/api/v2/reseller/me` | account:read | credit, rules, the key, the subscription base address, `locked` (an overdue bill) |
+| GET | `/api/v2/reseller/me` | account:read | credit, rules, the key, the subscription base address, `locked` (an overdue bill or an ended term), `term` |
 | GET | `/inbounds` | account:read | inbounds it may give |
 | GET | `/plans` | account:read | its published plans (products) |
 | POST | `/quote` | account:read | what a create or renew costs and whether it passes; changes nothing |
@@ -197,6 +251,12 @@ $ok = hash_equals($want, $_SERVER["HTTP_X_DARK_SIGNATURE"]) && abs(time() - (int
 | `panel.credit_revoked` | `revoked_gb`, `revoked_units` |
 | `panel.credit_low` | `threshold_gb` (credit fell under the panel's `low_credit_gb`, told once each time) |
 | `panel.deleted` | `clients_deleted`, `released_gb`, `released_units` |
+| `panel.expiring` | `expires_unix`, `days_left` (3 days and 1 day before) |
+| `panel.expired` | `expires_unix`, `on_expiry` |
+| `panel.suspended` | `expires_unix`, `customers_off` (after the grace, with `on_expiry: suspend`) |
+| `panel.renewed` | `expires_unix`, `previous_unix`, `on_expiry`, `customers_back` |
+| `wallet.topped_up` | `amount`, `balance`, `note` (not panel data) |
+| `wallet.charged`, `wallet.refunded` | `amount`, `balance`, `panel`, `note` (not panel data) |
 
 **Reseller events** cover every customer however it was sold (panel, Telegram bot, shop or API):
 
@@ -212,6 +272,7 @@ $ok = hash_equals($want, $_SERVER["HTTP_X_DARK_SIGNATURE"]) && abs(time() - (int
 | `client.volume_low` | the same and `left_gb` (under 10% left, told once per period) |
 | `credit.added`, `credit.removed` | `volume_gb`, `units`, `credit_gb`, `credit_units`, `note` |
 | `credit.low` | `credit_gb`, `threshold_gb` |
+| `term.expiring`, `term.expired`, `term.suspended`, `term.renewed` | as the `panel.*` events of the same name |
 
 State events (`first_used`, `expired`, `volume_exhausted`, `expiring`, `volume_low`) are found by a check every five
 minutes.
@@ -224,7 +285,9 @@ Both add an `Idempotency-Key` to every change, retry network errors, 429 and 5xx
 
 ```php
 $partner = new DarkXrayPro\Partner("https://panel.example.com:2087", "dp_…");
+$q = $partner->quote(["action" => "create", "package" => "gold"]);   // the price, before paying
 $panel = $partner->createPanel(["name" => "Shop A", "package" => "gold", "external_ref" => "order-77"], "order-77");
+$partner->renewPanel($panel["id"], ["days" => 30], "renew-77");      // a month more
 $key = $partner->createApiKey($panel["id"], ["name" => "bot"]);      // sell the panel with its API
 
 $reseller = new DarkXrayPro\Reseller("https://panel.example.com:2087", $key["key"]);

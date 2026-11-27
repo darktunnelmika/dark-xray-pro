@@ -197,8 +197,12 @@ class Partner extends Client
     public function packages() { return $this->request('GET', '/api/v2/partner/packages'); }
     public function stats(int $days = 30) { return $this->request('GET', '/api/v2/partner/stats', null, ['days' => $days]); }
     public function ledger(int $before = 0, int $limit = 100) { return $this->request('GET', '/api/v2/partner/ledger', null, ['before' => $before ?: null, 'limit' => $limit]); }
+    /** Billing, prices, balance and the wallet's history (newest first). */
+    public function wallet(int $before = 0, int $limit = 100) { return $this->request('GET', '/api/v2/partner/wallet', null, ['before' => $before ?: null, 'limit' => $limit]); }
+    /** $data: action (create|credit|renew), credit_gb, units, days, package. Answers cost, balance_after and allowed; changes nothing. */
+    public function quote(array $data) { return $this->request('POST', '/api/v2/partner/quote', $data); }
 
-    /** $data: name, id, username, password, credit_gb, units, package, policy, telegram_ids, external_ref, note, low_credit_gb */
+    /** $data: name, id, username, password, credit_gb, units, package, policy, telegram_ids, external_ref, note, low_credit_gb, term_days, on_expiry, grace_days */
     public function createPanel(array $data, ?string $idempotencyKey = null) { return $this->request('POST', '/api/v2/partner/reps', $data, [], $idempotencyKey); }
 
     /** $query: q, enabled, external_ref, limit, offset. The total is in $this->lastHeaders['x-total-count']. */
@@ -213,6 +217,8 @@ class Partner extends Client
     public function deletePanel(string $id, bool $withClients = false) { return $this->request('DELETE', $this->rep($id), null, ['clients' => $withClients ? '1' : null]); }
     public function addCredit(string $id, float $gb, int $units = 0, string $note = '', ?string $idempotencyKey = null) { return $this->request('POST', $this->rep($id, '/credit'), ['credit_gb' => $gb, 'units' => $units, 'note' => $note], [], $idempotencyKey); }
     public function revokeCredit(string $id, float $gb, int $units = 0, string $note = '', ?string $idempotencyKey = null) { return $this->request('POST', $this->rep($id, '/credit/revoke'), ['credit_gb' => $gb, 'units' => $units, 'note' => $note], [], $idempotencyKey); }
+    /** $data: days or package, and optionally on_expiry (block|suspend) and grace_days. */
+    public function renewPanel(string $id, array $data, ?string $idempotencyKey = null) { return $this->request('POST', $this->rep($id, '/renew'), $data, [], $idempotencyKey); }
     public function panelLedger(string $id, int $before = 0, int $limit = 100) { return $this->request('GET', $this->rep($id, '/ledger'), null, ['before' => $before ?: null, 'limit' => $limit]); }
     public function overview(string $id) { return $this->request('GET', $this->rep($id, '/overview')); }
     public function panelClients(string $id, array $query = []) { return $this->request('GET', $this->rep($id, '/clients'), null, $query); }

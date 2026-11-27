@@ -56,6 +56,12 @@ type RepPackage struct {
 	MaxClientGB    int64    `json:"max_client_gb"`
 	CanDelete      bool     `json:"can_delete"`
 	RefundUnused   bool     `json:"refund_unused"`
+	// A term (repterm.go): the panel runs this many days; buying the package
+	// again extends it. 0: no term. OnExpiry and GraceDays: what happens to
+	// its customers when the term ends.
+	Days      int64  `json:"days"`
+	OnExpiry  string `json:"on_expiry"`
+	GraceDays int64  `json:"grace_days"`
 }
 
 // Policy is the reseller policy a panel bought with this package starts with.
@@ -95,6 +101,12 @@ func (s *Store) PutRepSale(ctx context.Context, v RepSale) error {
 		}
 		if p.Units < 0 || p.Units > 100_000 || p.MaxClients < 0 || p.MaxDays < 0 || p.MaxClientGB < 0 {
 			return fmt.Errorf("%w: limits cannot be negative", ErrInvalid)
+		}
+		if p.Days < 0 || p.Days > 3650 {
+			return fmt.Errorf("%w: a package's term is 0 (none) to 3650 days", ErrInvalid)
+		}
+		if err := checkTermMode(p.OnExpiry, p.GraceDays); err != nil {
+			return err
 		}
 		for _, t := range p.Inbounds {
 			var n int
@@ -415,6 +427,18 @@ func (s *Store) ApproveRepOrder(ctx context.Context, actor, seller string, id in
 			return res, fmt.Errorf("the panel %s was charged but is still a trial: %w", o.RepID, err)
 		}
 		res.Converted = true
+	}
+	// A package with a term runs the panel that long; buying it again
+	// (a top-up) extends it (repterm.go).
+	if o.Terms.Days > 0 {
+		grace := int64(-1)
+		mode := ""
+		if o.Kind == "new" {
+			mode, grace = o.Terms.OnExpiry, o.Terms.GraceDays
+		}
+		if _, err := s.ExtendRepTerm(ctx, actor, o.RepID, o.Terms.Days, mode, grace); err != nil {
+			return res, fmt.Errorf("the panel %s got its credit but its term was not extended: %w", o.RepID, err)
+		}
 	}
 	return res, nil
 }

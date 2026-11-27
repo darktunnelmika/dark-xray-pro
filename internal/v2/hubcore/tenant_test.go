@@ -383,6 +383,7 @@ func TestClientQueriesAreReviewed(t *testing.T) {
 		// reseller's clients; names checked across every client (one name space,
 		// any letter case); the event scan leaves connected shops out
 		"hubcore/partnerapi.go": 4, "hubcore/resapi.go": 7, "hubcore/resevents.go": 2,
+		"hubcore/repterm.go": 1, // a reseller's and its sub-sellers' clients (rep_id = a reseller id)
 	}
 	re := regexp.MustCompile(`(FROM|JOIN) clients\b`)
 	got := map[string]int{}

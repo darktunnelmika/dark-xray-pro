@@ -41,7 +41,7 @@
 | --- | --- | --- |
 | 400 | `invalid_json` | بدنه JSON نیست |
 | 401 | `unauthorized`، `key_expired` | کلید اشتباه، خاموش یا منقضی |
-| 402 | `insufficient_credit` | اعتبار نماینده (یا پنل) کافی نیست |
+| 402 | `insufficient_credit`، `insufficient_funds` | اعتبار نماینده (یا پنل) کافی نیست؛ موجودی کیف پول کلید پارتنر به قیمت نمی‌رسد |
 | 403 | `scope_missing`، `ip_not_allowed`، `policy_denied`، `credit_limit`، `account_disabled` | کلید این اجازه را ندارد، قوانین اجازه نمی‌دهد، سقف کلید پارتنر پر شده، نماینده خاموش است |
 | 404 | `not_found` | نیست، یا مال شما نیست |
 | 409 | `conflict` | نام یا `external_ref` تکراری است، پنل هنوز مشتری دارد |
@@ -65,16 +65,19 @@
 | متد | مسیر | دسترسی | |
 | --- | --- | --- | --- |
 | GET | `/api/v2/partner` | | خود کلید: سقف‌ها، `remaining_gb` و `remaining_units` (‎-1 = بدون سقف)، دسترسی‌ها |
-| GET | `/packages` | | پکیج‌های قابل فروش |
+| GET | `/packages` | | پکیج‌های قابل فروش (اعتبار، واحد، روزهای دوره، قوانین) |
+| GET | `/wallet` | | نوع پرداخت، قیمت‌ها، موجودی و گردش کیف پول |
+| POST | `/quote` | | قیمت ساخت، افزودن اعتبار یا تمدید و اینکه موجودی می‌رسد یا نه؛ چیزی تغییر نمی‌کند |
 | GET | `/stats?days=30` | panels:read | آمار پنل‌ها، مشتری‌ها، اعتبار، فروش و برگشت در دوره |
 | GET | `/ledger` | panels:read | اعتبار داده‌شده یا پس‌گرفته در همهٔ پنل‌ها |
 | POST | `/reps` | panels:write | ساخت پنل |
 | GET | `/reps?q=&enabled=&external_ref=` | panels:read | پنل‌ها، جدیدترین اول |
 | GET | `/reps/{id}` | panels:read | یک پنل |
-| PATCH | `/reps/{id}` | panels:write | نام، یادداشت، external_ref، روشن/خاموش، قوانین، آیدی تلگرام، هشدار کمبود اعتبار |
+| PATCH | `/reps/{id}` | panels:write | نام، یادداشت، external_ref، روشن/خاموش، قوانین، آیدی تلگرام، هشدار کمبود اعتبار، `on_expiry`، `grace_days` |
 | DELETE | `/reps/{id}?clients=1` | panels:delete | حذف (با مشتری‌ها وقتی `clients=1`)؛ اعتبار استفاده‌نشده به سقف کلید برمی‌گردد |
 | POST | `/reps/{id}/credit` | credit:add | افزودن اعتبار `{credit_gb, units, note}` |
 | POST | `/reps/{id}/credit/revoke` | credit:revoke | پس گرفتن اعتبار استفاده‌نشده |
+| POST | `/reps/{id}/renew` | panels:write | تمدید دورهٔ نمایندگی: `{days}` یا `{package}` (اعتبار پکیج هم اضافه می‌شود و credit:add لازم دارد) |
 | GET | `/reps/{id}/ledger` | panels:read | دفتر حساب پنل |
 | GET | `/reps/{id}/overview` | panels:read | داشبورد پنل |
 | GET | `/reps/{id}/clients` | clients:read | مشتری‌های پنل (فقط خواندن) |
@@ -98,13 +101,63 @@ Idempotency-Key: order-1001
 `policy` فقط می‌تواند قوانین را سخت‌تر کند. جواب، پنل است با `password`، `panel_url` و `message` (متن آمادهٔ ارسال با آدرس و
 نام کاربری و رمز). `external_ref` برای هر کلید یکتاست، پس با `GET /reps?external_ref=order-1001` دوباره پیدا می‌شود.
 
+### دورهٔ نمایندگی (فروش ماهانه)
+
+پنل را می‌شود برای مدت مشخص فروخت: `term_days` هنگام ساخت (یا پکیجی که روز دارد) و `POST /reps/{id}/renew` برای تمدید.
+هر پنل فیلد `term` دارد:
+
+```json
+"term": {"expires_unix": 1769817600, "on_expiry": "suspend", "grace_days": 2, "state": "active", "days_left": 30}
+```
+
+`state` یکی از `none` (بدون دوره)، `active`، `expiring` (۳ روز یا کمتر)، `expired` یا `suspended` است. با تمام شدن دوره
+فروش پنل بسته می‌شود: مشتری جدید، تمدید، ریست و انتقال اعتبار به زیرفروشنده‌ها ممکن نیست (`policy_denied` و `locked` در
+`/me`)، برای زیرفروشنده‌هایش هم. سرنوشت مشتری‌ها با `on_expiry` است: `block` (پیش‌فرض) مشتری‌ها را وصل نگه می‌دارد و
+`suspend` آن‌ها را `grace_days` روز بعد از پایان دوره قطع می‌کند. تمدید به انتهای دوره اضافه می‌شود (یا اگر تمام شده از
+امروز) و دقیقاً همان مشتری‌هایی را که دوره قطع کرده بود دوباره وصل می‌کند. نماینده ۳ روز و ۱ روز قبل، هنگام پایان و
+هنگام قطع مشتری‌ها در پنل و تلگرامش خبردار می‌شود. دوره‌ها با نوع `term` در دفتر حساب ثبت می‌شوند.
+
+```json
+POST /api/v2/partner/reps/shop-a/renew
+Idempotency-Key: renew-2041
+
+{"days": 30, "on_expiry": "suspend", "grace_days": 3}
+```
+
+### کیف پول تومانی
+
+مالک برای هر کلید نوع پرداخت را تعیین می‌کند. `cap` (پیش‌فرض): فقط سقف گیگ و واحد؛ تسویه بیرون از پنل. `wallet`: کلید
+پیش‌پرداخت تومانی دارد و هر کاری که چیزی می‌دهد پیش از انجام از موجودی کم می‌شود:
+
+| | هزینه |
+| --- | --- |
+| اعتبار | `credit_gb × price_gb + units × price_unit` (رو به بالا گرد می‌شود) |
+| دوره | `price_month` برای هر ۳۰ روزِ شروع‌شده |
+| پکیج | قیمت پکیج منهای `package_discount` درصد، به‌علاوهٔ روزهایی بیشتر از روزهای خود پکیج |
+
+اگر موجودی نرسد هیچ چیزی ساخته یا عوض نمی‌شود (402، `insufficient_funds`). اگر کار بعد از برداشت شکست بخورد مبلغ برمی‌گردد
+(`refund`). پس گرفتن اعتبار و حذف پنل پولی برنمی‌گرداند. تکرار با همان `Idempotency-Key` هیچ‌وقت دو بار برداشت نمی‌کند.
+شارژ کیف پول را مالک در پنل انجام می‌دهد (نماینده‌ها ← API فروش پنل ← کیف پول). اول قیمت را بپرسید:
+
+```json
+POST /api/v2/partner/quote
+{"action": "create", "package": "gold", "days": 60}
+
+{"billing": "wallet", "cost": 850000, "balance": 2000000, "balance_after": 1150000, "credit_gb": 500, "units": 0,
+ "term_days": 60, "allowed": true}
+```
+
+`action` یکی از `create` (`credit_gb`، `units`، `days` یا `package`)، `credit` (`credit_gb`، `units`) یا `renew` (`days` یا
+`package`) است. `GET /wallet` قیمت‌ها، موجودی و ردیف‌های گردش را می‌دهد: `topup`، `charge`، `refund`، `adjust`، هر کدام با
+`amount` (مثبت ورودی، منفی خروجی)، `panel` و `note`.
+
 ## API نماینده
 
 دسترسی‌ها: `account:read`، `clients:read`، `clients:write`، `clients:delete`، `events` (پیش‌فرض روشن)؛ `sellers`.
 
 | متد | مسیر | دسترسی | |
 | --- | --- | --- | --- |
-| GET | `/api/v2/reseller/me` | account:read | اعتبار، قوانین، کلید، `locked` (قبض سررسیدگذشته) |
+| GET | `/api/v2/reseller/me` | account:read | اعتبار، قوانین، کلید، `locked` (قبض سررسیدگذشته یا دورهٔ تمام‌شده)، `term` |
 | GET | `/inbounds`، `/plans` | account:read | اینباندهای مجاز، پلن‌های منتشرشده |
 | POST | `/quote` | account:read | قیمت ساخت یا تمدید و اینکه انجام می‌شود یا نه؛ چیزی تغییر نمی‌کند |
 | GET | `/overview`، `/ledger` | account:read | داشبورد، دفتر حساب |
@@ -156,12 +209,14 @@ $ok = hash_equals($want, $_SERVER["HTTP_X_DARK_SIGNATURE"]) && abs(time() - (int
 فرستاده می‌شود. آدرس وب‌هوک باید عمومی باشد.
 
 رویدادهای پارتنر: `panel.created`، `panel.updated`، `panel.enabled`، `panel.disabled`، `panel.password_reset`،
-`panel.credit_added`، `panel.credit_revoked`، `panel.credit_low`، `panel.deleted`.
+`panel.credit_added`، `panel.credit_revoked`، `panel.credit_low`، `panel.deleted`، `panel.expiring`، `panel.expired`،
+`panel.suspended`، `panel.renewed` (دورهٔ نمایندگی)، `wallet.topped_up`، `wallet.charged`، `wallet.refunded` (کیف پول).
 
 رویدادهای نماینده (برای هر مشتری، از هر راهی فروخته شده باشد: پنل، ربات، فروشگاه یا API): `client.created`،
 `client.updated`، `client.enabled`، `client.disabled`، `client.revoked`، `client.deleted`، `client.renewed`،
 `client.usage_reset`، `client.first_used`، `client.expired`، `client.volume_exhausted`، `client.expiring` (۳ روز یا کمتر
-مانده)، `client.volume_low` (کمتر از ۱۰٪ مانده)، `credit.added`، `credit.removed`، `credit.low`. جزئیات فیلدهای هر رویداد
+مانده)، `client.volume_low` (کمتر از ۱۰٪ مانده)، `credit.added`، `credit.removed`، `credit.low`، `term.expiring`،
+`term.expired`، `term.suspended`، `term.renewed`. جزئیات فیلدهای هر رویداد
 در [نسخهٔ انگلیسی](README.md#events-and-webhooks) است.
 
 ## SDK
@@ -174,6 +229,8 @@ $ok = hash_equals($want, $_SERVER["HTTP_X_DARK_SIGNATURE"]) && abs(time() - (int
 $partner = new DarkXrayPro\Partner("https://panel.example.com:2087", "dp_…");
 $panel = $partner->createPanel(["name" => "Shop A", "package" => "gold", "external_ref" => "order-77"], "order-77");
 echo $panel["message"];   // آدرس، نام کاربری و رمز، آمادهٔ ارسال برای مشتری
+$partner->renewPanel($panel["id"], ["days" => 30], "renew-77");   // یک ماه تمدید
+print_r($partner->wallet());                                      // موجودی و گردش کیف پول
 ```
 
 </div>
