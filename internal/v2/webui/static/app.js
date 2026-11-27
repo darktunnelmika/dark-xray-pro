@@ -5019,14 +5019,73 @@ function repBotCard(path) {
 
 // A seller's card for card-to-card payment (resellers: their own card).
 function sellerCardCard(path) {
+  // Several cards per seller (up to five) and the safe-card options.
+  return multiCardCard(path.replace("/api/v2/shop/card", "/api/v2/shop/cards"));
+}
+
+function multiCardCard(path) {
   const fa = lang === "fa";
-  const num = h("input", { dir: "ltr", inputmode: "numeric", placeholder: "6037 9911 2233 4455" }), holder = h("input", {}), bank = h("input", {});
-  api("GET", path).then((c) => { num.value = c.number || ""; holder.value = c.holder || ""; bank.value = c.bank || ""; }).catch(() => {});
-  return h("form", { class: "card form", onsubmit: async (e) => { e.preventDefault(); await guarded(() => api("PUT", path, { number: num.value, holder: holder.value, bank: bank.value })); toast(t("saved")); } },
-    h("h2", {}, "💳 ", fa ? "کارت من (کارت به کارت)" : "My card (card-to-card)"),
-    h("p", { class: "small muted" }, fa ? "مشتری‌های ربات شما برای خرید و شارژ کیف پول به این کارت واریز می‌کنند. خالی بگذارید تا پرداخت کارتی خاموش شود." : "Your bot's customers pay to this card for purchases and wallet top-ups. Leave empty to turn card payment off."),
-    h("label", {}, h("span", {}, fa ? "شماره کارت (یا شبا)" : "Card number (or IBAN)"), num),
-    h("div", { class: "two" }, h("label", {}, h("span", {}, fa ? "به نام" : "Holder"), holder), h("label", {}, h("span", {}, fa ? "بانک" : "Bank"), bank)),
+  const T = (a, b) => (fa ? a : b);
+  const list = h("div", { class: "form" });
+  const phone = h("input", { type: "checkbox" }), iran = h("input", { type: "checkbox" }), last4 = h("input", { type: "checkbox" });
+  let max = 5;
+  const rows = [];
+  const toLocal = (u) => { if (!u) return ""; const d = new Date(u * 1000); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0, 16); };
+  const addRow = (c) => {
+    c = c || { enabled: true };
+    const num = h("input", { dir: "ltr", inputmode: "numeric", placeholder: "6037 9911 2233 4455", value: c.number || "" });
+    const holder = h("input", { value: c.holder || "" }), bank = h("input", { value: c.bank || "" });
+    const on = h("input", { type: "checkbox", checked: c.enabled !== false });
+    const cap = h("input", { type: "number", min: "0", step: "100000", dir: "ltr", value: c.daily_cap || "" , placeholder: "0" });
+    const until = h("input", { type: "datetime-local", dir: "ltr", value: toLocal(c.until) });
+    const status = c.number ? h("span", { class: `badge ${c.live ? "good" : ""}` },
+      c.live ? T("فعال", "live") : T("غیرفعال", "off"), " · ", T("امروز: ", "today: "), tomanTxt(c.used_today || 0), c.daily_cap ? ` / ${tomanTxt(c.daily_cap)}` : "") : null;
+    const r = { id: c.id || 0, num, holder, bank, on, cap, until };
+    const box = h("div", { class: "card" },
+      h("div", { class: "row" }, h("strong", {}, "💳 ", T("کارت", "Card")), status,
+        h("button", { class: "ghost", type: "button", onclick: () => { rows.splice(rows.indexOf(r), 1); box.remove(); addBtn.disabled = rows.length >= max; } }, T("حذف", "Remove"))),
+      h("label", {}, h("span", {}, T("شماره کارت (یا شبا)", "Card number (or IBAN)")), num),
+      h("div", { class: "two" }, h("label", {}, h("span", {}, T("به نام", "Holder")), holder), h("label", {}, h("span", {}, T("بانک", "Bank")), bank)),
+      h("div", { class: "two" },
+        h("label", {}, h("span", {}, T("سقف روزانه (تومان، خالی = بی‌سقف)", "Daily cap (toman, empty = none)")), cap),
+        h("label", {}, h("span", {}, T("کارت موقت: تا این زمان (خالی = همیشه)", "Temporary: until (empty = always)")), until)),
+      h("label", { class: "check" }, on, h("span", {}, T("روشن", "On"))));
+    r.box = box;
+    rows.push(r);
+    list.append(box);
+    addBtn.disabled = rows.length >= max;
+  };
+  const addBtn = h("button", { class: "ghost", type: "button", onclick: () => addRow() }, T("+ کارت دیگر", "+ Another card"));
+  const load = async () => {
+    const r = await api("GET", path).catch(() => null);
+    list.replaceChildren(); rows.length = 0;
+    if (!r) return;
+    max = r.max || 5;
+    (r.cards || []).forEach(addRow);
+    if (!rows.length) addRow();
+    const sf = r.safety || {};
+    phone.checked = !!sf.require_phone; iran.checked = !!sf.iran_only; last4.checked = !!sf.ask_last4;
+    iran.disabled = !phone.checked;
+  };
+  phone.onchange = () => { iran.disabled = !phone.checked; if (!phone.checked) iran.checked = false; };
+  load();
+  return h("form", { class: "card form", onsubmit: async (e) => {
+    e.preventDefault();
+    const cards = rows.filter((r) => r.num.value.trim()).map((r) => ({ id: r.id, number: r.num.value, holder: r.holder.value, bank: r.bank.value, enabled: r.on.checked,
+      daily_cap: Math.max(0, Math.round(+r.cap.value || 0)), until: r.until.value ? Math.floor(new Date(r.until.value).getTime() / 1000) : 0 }));
+    await guarded(() => api("PUT", path, { cards, safety: { require_phone: phone.checked, iran_only: iran.checked, ask_last4: last4.checked } }));
+    toast(t("saved")); load();
+  } },
+    h("h2", {}, "💳 ", T("کارت‌های من (کارت به کارت)", "My cards (card-to-card)")),
+    h("p", { class: "small muted" }, T("تا ۵ کارت. هر سفارش یا شارژ یکی از کارت‌های روشن را می‌گیرد (کارتی که امروز جای بیشتری دارد) و همان کارت برایش می‌ماند. کارتی که به سقف روزانه برسد تا فردا نشان داده نمی‌شود؛ کارت موقت بعد از زمانش خودکار مخفی می‌شود. بدون کارت، پرداخت کارتی خاموش است.",
+      "Up to five cards. Each order or top-up gets one of the cards that are on (the one with the most room today) and keeps it. A card that reaches its daily cap is hidden until tomorrow; a temporary card hides itself after its time. No card = card payment off.")),
+    list,
+    h("div", { class: "row" }, addBtn),
+    h("h3", {}, "🛡 ", T("حالت امن کارت", "Safe card mode")),
+    h("label", { class: "check" }, phone, h("span", {}, T("قبل از دیدن کارت، مشتری شمارهٔ موبایلش را تأیید کند", "Customers verify their phone number before they see a card"))),
+    h("label", { class: "check" }, iran, h("span", {}, T("فقط شمارهٔ ایران (+98)", "Iranian numbers only (+98)"))),
+    h("label", { class: "check" }, last4, h("span", {}, T("بعد از رسید، ۴ رقم آخر کارت واریزکننده پرسیده شود", "Ask for the last four digits of the paying card after the receipt"))),
+    h("p", { class: "small muted" }, T("رسید تکراری همیشه بررسی می‌شود: اگر عکس رسیدی قبلاً برای پرداخت دیگری فرستاده شده باشد، روی رسید هشدار می‌آید.", "Duplicate receipts are always checked: a receipt photo sent before for another payment is flagged on the receipt.")),
     h("div", { class: "row" }, h("button", { class: "primary", type: "submit" }, t("save"))));
 }
 
@@ -5046,12 +5105,7 @@ const PAY = {
 const pay = (k, v) => { let x = (PAY[lang] || PAY.en)[k] ?? PAY.en[k] ?? k; for (const [a, b] of Object.entries(v || {})) x = x.replaceAll(`{${a}}`, b); return x; };
 
 function payCardCard() {
-  const num = h("input", { dir: "ltr", inputmode: "numeric", placeholder: "6037 9911 2233 4455" }), holder = h("input", {}), bank = h("input", {});
-  api("GET", "/api/v2/admin/tg/commerce").then((r) => { const c = (r && r.card) || {}; num.value = c.number || ""; holder.value = c.holder || ""; bank.value = c.bank || ""; }).catch(() => {});
-  return h("form", { class: "card form", onsubmit: async (e) => { e.preventDefault(); await guarded(() => api("PUT", "/api/v2/admin/pay/card", { number: num.value, holder: holder.value, bank: bank.value })); toast(t("saved")); } },
-    h("h2", {}, "💳 ", pay("cardTitle")), h("p", { class: "small muted" }, pay("cardHint")),
-    h("label", {}, h("span", {}, pay("cardNum")), num), h("div", { class: "two" }, h("label", {}, h("span", {}, pay("cardHolder")), holder), h("label", {}, h("span", {}, pay("cardBank")), bank)),
-    h("div", { class: "row" }, h("button", { class: "primary", type: "submit" }, pay("save"))));
+  return multiCardCard("/api/v2/shop/cards");
 }
 
 function discountsCard(products) {

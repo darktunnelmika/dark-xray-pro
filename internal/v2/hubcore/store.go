@@ -311,6 +311,10 @@ func Open(path string) (*Store, error) {
 		st.Close()
 		return nil, err
 	}
+	if err := st.ensurePayCardsSchema(); err != nil {
+		st.Close()
+		return nil, err
+	}
 	if err := st.ensureAutoRenewSchema(); err != nil {
 		st.Close()
 		return nil, err

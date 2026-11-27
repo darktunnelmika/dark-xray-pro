@@ -272,6 +272,7 @@ func (s *Store) AttachReceipt(ctx context.Context, orderID int64, buyer, fileID 
 	if n, _ := r.RowsAffected(); n == 0 {
 		return Order{}, ErrNotFound
 	}
+	s.markCardUse(ctx, OrderRef(orderID), "paid")
 	return s.OrderByID(ctx, orderID)
 }
 
@@ -299,6 +300,7 @@ func (s *Store) CancelOwnOrder(ctx context.Context, buyer string, id int64) erro
 		return ErrNotFound
 	}
 	s.releaseDiscount(ctx, id)
+	s.markCardUse(ctx, OrderRef(id), "void")
 	_, _ = s.db.ExecContext(ctx, `UPDATE orders SET tg_buyer_notified=1 WHERE id=?`, id)
 	return nil
 }
@@ -310,30 +312,6 @@ type CardInfo struct {
 	Bank   string `json:"bank"`
 }
 
-func (s *Store) Card(ctx context.Context) CardInfo {
-	return CardInfo{Number: s.Setting(ctx, "pay_card_number"), Holder: s.Setting(ctx, "pay_card_holder"), Bank: s.Setting(ctx, "pay_card_bank")}
-}
+func (s *Store) Card(ctx context.Context) CardInfo { return s.CardFor(ctx, "") }
 
-func (s *Store) PutCard(ctx context.Context, c CardInfo) error {
-	num := strings.Map(func(r rune) rune {
-		if r >= '0' && r <= '9' {
-			return r
-		}
-		if r >= '۰' && r <= '۹' {
-			return '0' + (r - '۰')
-		}
-		return -1
-	}, c.Number)
-	if num != "" && (len(num) < 16 || len(num) > 26) {
-		return fmt.Errorf("%w: card number: 16 digits (or a 24-digit IBAN)", ErrInvalid)
-	}
-	if len(c.Holder) > 80 || len(c.Bank) > 60 {
-		return ErrInvalid
-	}
-	for k, v := range map[string]string{"pay_card_number": num, "pay_card_holder": strings.TrimSpace(c.Holder), "pay_card_bank": strings.TrimSpace(c.Bank)} {
-		if err := s.SetSetting(ctx, k, v); err != nil {
-			return err
-		}
-	}
-	return nil
-}
+func (s *Store) PutCard(ctx context.Context, c CardInfo) error { return s.PutCardFor(ctx, "", c) }

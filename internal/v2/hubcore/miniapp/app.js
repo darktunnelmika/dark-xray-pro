@@ -250,8 +250,8 @@ async function payToman(p, renewEmail) {
     h("div", { class: "row" }, go, btn("انصراف", "", () => close())));
 }
 
-function cardBox(amount) {
-  const c = state.card;
+function cardBox(amount, card) {
+  const c = card || state.card;
   const digits = (c.number || "").replace(/\D/g, "");
   const pretty = digits.replace(/(\d{4})(?=\d)/g, "$1 ");
   return h("div", { class: "bank-card" },
@@ -268,6 +268,36 @@ function receiptSteps() {
     h("li", {}, "عکس رسید را در همین ربات بفرستید؛ بعد از تأیید، خودکار انجام می‌شود."));
 }
 
+// showPay shows how to pay an order: its own card (several cards: each
+// order keeps one), or the phone check first, or that no card is free today.
+function showPay(p, renewEmail, r) {
+  const paid = state.card && p.price;
+  const title = h("h2", {}, `سفارش #${num(r.id)} ${r.existing ? "از قبل ثبت شده" : "ثبت شد"}`);
+  if (paid && r.phone_needed) {
+    const close = sheet(title,
+      h("div", { class: "pay" }, "برای امنیت پرداخت، یک بار شمارهٔ موبایل این حساب تلگرام را تأیید کنید تا شمارهٔ کارت نمایش داده شود."),
+      btn("تأیید شمارهٔ من", "primary block", () => {
+        try {
+          tg.requestContact(async (ok) => {
+            if (!ok) return;
+            close();
+            await new Promise((res) => setTimeout(res, 1500)); // the bot keeps the number first
+            try { showPay(p, renewEmail, await api("POST", "order", { product: p.id, renew: renewEmail })); } catch (e) { toast(e.message); }
+          });
+        } catch { openBot(); }
+      }, "chat"));
+    return;
+  }
+  if (paid && r.no_card) {
+    sheet(title, h("div", { class: "pay" }, "امروز امکان پرداخت کارت‌به‌کارت نیست؛ کمی بعد دوباره امتحان کنید یا به پشتیبانی پیام دهید."), btn("رفتن به ربات", "primary block", openBot, "chat"));
+    return;
+  }
+  sheet(title,
+    paid ? cardBox(p.price, r.card) : h("div", { class: "pay" }, state.pay_text || "پشتیبانی برای پرداخت با شما تماس می‌گیرد."),
+    paid ? receiptSteps() : null,
+    btn("رفتن به ربات برای ارسال رسید", "primary block", openBot, "chat"));
+}
+
 async function buy(p, renewEmail) {
   closeRenew();
   const go = btn("ثبت سفارش", "primary", async () => {
@@ -275,10 +305,7 @@ async function buy(p, renewEmail) {
     try {
       const r = await api("POST", "order", { product: p.id, renew: renewEmail });
       haptic("success"); close(); await load(false); setTab("orders");
-      sheet(h("h2", {}, `سفارش #${num(r.id)} ${r.existing ? "از قبل ثبت شده" : "ثبت شد"}`),
-        state.card && p.price ? cardBox(p.price) : h("div", { class: "pay" }, state.pay_text || "پشتیبانی برای پرداخت با شما تماس می‌گیرد."),
-        state.card && p.price ? receiptSteps() : null,
-        btn("رفتن به ربات برای ارسال رسید", "primary block", openBot, "chat"));
+      showPay(p, renewEmail, r);
     } catch (e) { go.disabled = false; haptic("error"); toast(e.message); }
   }, "card");
   const close = sheet(
@@ -363,7 +390,7 @@ async function topup(amount) {
   try {
     const r = await api("POST", "topup", { amount });
     haptic("success");
-    sheet(h("h2", {}, `شارژ #${num(r.id)} ثبت شد`), cardBox(amount), receiptSteps(),
+    sheet(h("h2", {}, `شارژ #${num(r.id)} ثبت شد`), cardBox(amount, r.card), receiptSteps(),
       btn("رفتن به ربات برای ارسال رسید", "primary block", openBot, "chat"));
   } catch (e) { haptic("error"); toast(e.message); }
 }

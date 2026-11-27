@@ -32,7 +32,15 @@ func (b *Bot) invoice(ctx context.Context, chat, id int64) {
 	if err != nil {
 		return
 	}
-	c := b.Store.CardFor(ctx, b.Seller)
+	s := strconv.FormatInt(id, 10)
+	if !b.phoneGate(ctx, chat, "inv:"+s) {
+		return
+	}
+	c, err := b.Store.CardForPay(ctx, b.Seller, hubcore.OrderRef(id), o.Amount)
+	if err != nil {
+		b.send(ctx, chat, noCardText, &Keyboard{Rows: [][]Button{row(cbBtn("✖️ لغو سفارش", "ocx:"+s), cbBtn("💬 پشتیبانی", "support"))}})
+		return
+	}
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "🧾 <b>فاکتور #%s</b>\n%s\n📦 %s\n", faInt(o.ID), line, esc(o.ProductName))
 	if o.Renew {
@@ -50,7 +58,6 @@ func (b *Bot) invoice(ctx context.Context, chat, id int64) {
 	if extra := b.Store.Setting(ctx, "tg_pay_text"); extra != "" {
 		sb.WriteString("\n\nℹ️ " + esc(extra))
 	}
-	s := strconv.FormatInt(id, 10)
 	b.setAwait(chat, "receipt:"+s)
 	b.send(ctx, chat, sb.String(), &Keyboard{Rows: [][]Button{
 		row(cbBtn("📸 ارسال رسید", "rcpt:"+s), cbBtn("✖️ لغو سفارش", "ocx:"+s)),
@@ -59,8 +66,9 @@ func (b *Bot) invoice(ctx context.Context, chat, id int64) {
 }
 
 // onReceipt takes a photo from a buyer with an open card order.
-func (b *Bot) onReceipt(ctx context.Context, chat int64, name, fileID string, await string) bool {
-	if b.onTopupReceipt(ctx, chat, name, fileID, await) {
+func (b *Bot) onReceipt(ctx context.Context, chat int64, name string, ph photoRef, await string) bool {
+	fileID := ph.ID
+	if b.onTopupReceipt(ctx, chat, name, ph, await) {
 		return true
 	}
 	buyer := hubcore.TgBuyer(chat)
@@ -84,6 +92,10 @@ func (b *Bot) onReceipt(ctx context.Context, chat int64, name, fileID string, aw
 	}
 	b.send(ctx, chat, fmt.Sprintf("✅ رسید سفارش <b>#%s</b> دریافت شد.\nبعد از بررسی (معمولاً چند دقیقه) سرویس همین‌جا برایتان ارسال می‌شود.", faInt(o.ID)), homeKB)
 	caption := b.orderCard(ctx, o) + "\n\n🧾 <b>رسید پرداخت</b> از " + esc(name) + "\nمبلغ را با حساب خود تطبیق دهید، بعد تأیید یا رد کنید."
+	if notes := b.receiptNotes(ctx, o.Seller, hubcore.OrderRef(o.ID), chat, ph); notes != "" {
+		caption += "\n" + notes
+	}
+	defer b.askLast4(ctx, o.Seller, hubcore.OrderRef(o.ID), chat)
 	if o.Seller == b.Seller {
 		b.notifyPhoto(ctx, "orders", fileID, caption, receiptButtons(o.ID))
 	} else {
@@ -176,6 +188,9 @@ func (b *Bot) askTopup(ctx context.Context, chat int64) {
 		b.send(ctx, chat, "شارژ کیف پول فعلاً فعال نیست.", homeKB)
 		return
 	}
+	if !b.phoneGate(ctx, chat, "top") {
+		return
+	}
 	b.setAwait(chat, "topamt")
 	b.send(ctx, chat, "➕ <b>شارژ کیف پول</b>\n"+line+"\nمبلغ شارژ را به <b>تومان</b> بفرستید (مثلاً <code>200000</code>):",
 		&Keyboard{Rows: [][]Button{row(cbBtn("100,000", "tamt:100000"), cbBtn("200,000", "tamt:200000"), cbBtn("500,000", "tamt:500000")), row(cbBtn("« کیف پول", "wallet"))}})
@@ -184,12 +199,20 @@ func (b *Bot) askTopup(ctx context.Context, chat int64) {
 // startTopup opens a top-up and shows the card to pay to.
 func (b *Bot) startTopup(ctx context.Context, chat int64, text string) {
 	amount := parseToman(text)
+	if amount > 0 && !b.phoneGate(ctx, chat, "tamt:"+strconv.FormatInt(amount, 10)) {
+		return
+	}
 	id, err := b.Store.CreateTopup(ctx, b.Seller, chat, amount)
 	if err != nil {
 		b.send(ctx, chat, "❌ مبلغ معتبر نیست. یک عدد بین ۱٬۰۰۰ تا ۲۰۰٬۰۰۰٬۰۰۰ تومان بفرستید.", &Keyboard{Rows: [][]Button{row(cbBtn("🔁 دوباره", "topup"), cbBtn("« منو", "home"))}})
 		return
 	}
-	c := b.Store.CardFor(ctx, b.Seller)
+	c, err := b.Store.CardForPay(ctx, b.Seller, hubcore.TopupRef(id), amount)
+	if err != nil {
+		_, _ = b.Store.DecideTopup(ctx, b.Seller, id, false, "no card")
+		b.send(ctx, chat, noCardText, &Keyboard{Rows: [][]Button{row(cbBtn("💬 پشتیبانی", "support"), cbBtn("« منو", "home"))}})
+		return
+	}
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "➕ <b>شارژ کیف پول #%s</b>\n%s\n💳 مبلغ: <b>%s تومان</b>\n\n", faInt(id), line, faMoney(amount))
 	fmt.Fprintf(&sb, "مبلغ را به این کارت واریز کنید (روی شماره بزنید تا کپی شود):\n<code>%s</code>\n", groupCard(c.Number))
@@ -202,7 +225,8 @@ func (b *Bot) startTopup(ctx context.Context, chat int64, text string) {
 }
 
 // onTopupReceipt takes a receipt photo for an open top-up.
-func (b *Bot) onTopupReceipt(ctx context.Context, chat int64, name, fileID, await string) bool {
+func (b *Bot) onTopupReceipt(ctx context.Context, chat int64, name string, ph photoRef, await string) bool {
+	fileID := ph.ID
 	var id int64
 	if v, ok := strings.CutPrefix(await, "topup:"); ok {
 		id, _ = strconv.ParseInt(v, 10, 64)
@@ -223,6 +247,10 @@ func (b *Bot) onTopupReceipt(ctx context.Context, chat int64, name, fileID, awai
 	}
 	b.send(ctx, chat, fmt.Sprintf("✅ رسید شارژ <b>#%s</b> دریافت شد. بعد از بررسی، موجودی کیف پول شما زیاد می‌شود.", faInt(t.ID)), homeKB)
 	caption := fmt.Sprintf("➕ <b>شارژ کیف پول #%s</b>\n👤 %s (<code>%d</code>)\n💳 مبلغ: <b>%s تومان</b>\nمبلغ را با حساب خود تطبیق دهید.", faInt(t.ID), esc(name), chat, faMoney(t.Amount))
+	if notes := b.receiptNotes(ctx, t.Seller, hubcore.TopupRef(t.ID), chat, ph); notes != "" {
+		caption += "\n" + notes
+	}
+	defer b.askLast4(ctx, t.Seller, hubcore.TopupRef(t.ID), chat)
 	kb := &Keyboard{Rows: [][]Button{row(cbBtn("✅ تأیید شارژ", "tok:"+strconv.FormatInt(t.ID, 10)), cbBtn("❌ رد", "tno:"+strconv.FormatInt(t.ID, 10)))}}
 	b.notifyPhoto(ctx, "orders", fileID, caption, kb)
 	return true

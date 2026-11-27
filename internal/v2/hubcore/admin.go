@@ -1074,6 +1074,37 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 		err := s.PutCardFor(r.Context(), seller, in)
 		reply(w, map[string]bool{"ok": err == nil}, err)
 	}))
+	// Several cards and the safe-card options (paycards.go).
+	mux.HandleFunc("GET /api/v2/shop/cards", member(func(w http.ResponseWriter, r *http.Request) {
+		seller, ok := sellerOf(r)
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+		cards, err := s.PayCards(r.Context(), seller)
+		reply(w, map[string]any{"cards": cards, "safety": s.CardSafetyFor(r.Context(), seller), "max": MaxPayCards}, err)
+	}))
+	mux.HandleFunc("PUT /api/v2/shop/cards", member(func(w http.ResponseWriter, r *http.Request) {
+		seller, ok := sellerOf(r)
+		var in struct {
+			Cards  []PayCard   `json:"cards"`
+			Safety *CardSafety `json:"safety"`
+		}
+		if !ok || !decode(w, r, &in) {
+			return
+		}
+		if err := s.PutPayCards(r.Context(), seller, in.Cards); err != nil {
+			reply(w, nil, err)
+			return
+		}
+		if in.Safety != nil {
+			if err := s.PutCardSafety(r.Context(), seller, *in.Safety); err != nil {
+				reply(w, nil, err)
+				return
+			}
+		}
+		reply(w, map[string]bool{"ok": true}, nil)
+	}))
 	mux.HandleFunc("GET /api/v2/shop/topups", member(func(w http.ResponseWriter, r *http.Request) {
 		seller, ok := sellerOf(r)
 		if !ok {

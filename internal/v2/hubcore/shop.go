@@ -455,6 +455,7 @@ func (s *Store) CancelOrder(ctx context.Context, by Principal, id int64) error {
 		return fmt.Errorf("%w: only pending orders can be cancelled", ErrInvalid)
 	}
 	s.releaseDiscount(ctx, id)
+	s.markCardUse(ctx, OrderRef(id), "void")
 	return nil
 }
 

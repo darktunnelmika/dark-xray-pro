@@ -292,6 +292,9 @@ func (b *Bot) onMessage(ctx context.Context, m *Message) {
 		b.onPaid(ctx, chat, name, m.Paid)
 		return
 	}
+	if m.Contact != nil && b.onContact(ctx, chat, m) {
+		return
+	}
 	text := strings.TrimSpace(m.Text)
 	if text == "" {
 		text = strings.TrimSpace(m.Caption)
@@ -318,7 +321,7 @@ func (b *Bot) onMessage(ctx context.Context, m *Message) {
 			if b.repSaleReceipt(ctx, chat, name, m.Photo[len(m.Photo)-1].FileID, w) {
 				return
 			}
-		} else if b.onReceipt(ctx, chat, name, m.Photo[len(m.Photo)-1].FileID, w) {
+		} else if p := m.Photo[len(m.Photo)-1]; b.onReceipt(ctx, chat, name, photoRef{ID: p.FileID, Uniq: p.UniqueID}, w) {
 			return
 		} else if w == "" && b.repSaleReceipt(ctx, chat, name, m.Photo[len(m.Photo)-1].FileID, "") {
 			return
@@ -513,6 +516,11 @@ func (b *Bot) onMessage(ctx context.Context, m *Message) {
 			return
 		}
 		b.ticket(ctx, chat, name, m.From.Username, arg)
+		return
+	}
+	if what := b.peekAwait(chat); strings.HasPrefix(what, "last4:") && text != "" && !strings.HasPrefix(text, "/") {
+		b.takeAwait(chat)
+		b.takeLast4(ctx, chat, strings.TrimPrefix(what, "last4:"), text)
 		return
 	}
 	if what := b.peekAwait(chat); what == "topamt" && text != "" && !strings.HasPrefix(text, "/") {
