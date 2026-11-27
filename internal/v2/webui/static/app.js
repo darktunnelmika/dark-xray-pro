@@ -1242,6 +1242,25 @@ async function viewDashboard() {
   return view;
 }
 
+// repGrowthBox: the owner's "become a reseller" button and the free trial
+// panel in the main bot (repgrow.go).
+function repGrowthBox() {
+  const fa = lang === "fa";
+  const T = (a, b) => (fa ? a : b);
+  const req = h("input", { type: "checkbox" }), trial = h("input", { type: "checkbox" }), gb = h("input", { type: "number", min: 1, max: 100, value: 5, dir: "ltr" });
+  api("GET", "/api/v2/admin/rep-growth").then((r) => { req.checked = !!r.requests; trial.checked = !!(r.trial && r.trial.on); gb.value = (r.trial && r.trial.gb) || 5; }).catch(() => {});
+  return h("form", { class: "form", onsubmit: async (e) => {
+    e.preventDefault();
+    await guarded(() => api("PUT", "/api/v2/admin/rep-growth", { requests: req.checked, trial: { on: trial.checked, gb: +gb.value || 5 } }));
+    toast(t("saved"));
+  } },
+    h("label", { class: "check" }, req, h("span", {}, T("دکمهٔ «درخواست نمایندگی» در منوی ربات اصلی (درخواست با دکمهٔ قبول و رد برای شما می‌آید)", "\"Become a reseller\" button in the main bot (requests reach you with Accept / Refuse)"))),
+    h("label", { class: "check" }, trial, h("span", {}, T("پنل نمایندگی تستی: هر حساب تلگرام یک بار، با اعتبار رایگان", "Trial reseller panel: once per Telegram account, with free credit"))),
+    h("label", {}, h("span", {}, T("اعتبار پنل تستی (گیگ، ۱ تا ۱۰۰)", "Trial credit (GB, 1–100)")), gb),
+    h("p", { class: "small muted" }, T("نماینده‌ها هم در ربات خودشان «🧩 جذب نماینده» دارند: لینک دعوت زیرمجموعه و همین دکمهٔ درخواست.", "Resellers have \"Grow\" in their own bot too: a sub-seller invite link and the same request button.")),
+    h("div", { class: "row" }, h("button", { class: "primary", type: "submit" }, t("save"))));
+}
+
 // reportXlsxLinks: the Excel report (day by day, resellers, ledger,
 // clients) for 7, 30 or 90 days — the owner's whole panel, a reseller its own.
 function reportXlsxLinks(rep) {
@@ -6527,6 +6546,7 @@ async function viewReps() {
   return h("div", {},
     h("div", { class: "row" }, h("h1", {}, t("reps")), h("span", { class: "spacer" }),
       fullOwner() ? h("button", { onclick: () => partnerKeys(reps) }, "🔑 ", fa ? "API ساخت پنل" : "Panel API") : null,
+      fullOwner() ? h("button", { class: "ghost", onclick: () => openModal(fa ? "جذب نماینده از تلگرام" : "Resellers from Telegram", repGrowthBox()) }, "🧩 ", fa ? "جذب نماینده" : "Grow") : null,
       h("button", { class: "primary", onclick: () => repForm(null) }, t("add"))),
     (reps || []).length ? h("div", { class: "kpis" },
       h("div", { class: "card kpi" }, h("div", { class: "k" }, icon("reps"), fa ? "نماینده" : "Resellers"), h("div", { class: "v" }, fmtNum(reps.length))),

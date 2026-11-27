@@ -395,6 +395,10 @@ func (b *Bot) onMessage(ctx context.Context, m *Message) {
 		b.menu(ctx, chat)
 		return
 	}
+	if code, ok := strings.CutPrefix(text, "/start rsinv_"); ok {
+		b.claimInvite(ctx, chat, name, m.From.Username, code)
+		return
+	}
 	if code, ok := strings.CutPrefix(text, "/start rep_"); ok {
 		rep, err := b.Store.ClaimTgLinkCode(ctx, strings.TrimSpace(code), chat)
 		if err != nil {
@@ -872,6 +876,9 @@ func (b *Bot) onCallback(ctx context.Context, q *CallbackQuery) {
 		return
 	}
 	if b.repSaleCallback(ctx, q) {
+		return
+	}
+	if b.growCallback(ctx, q) {
 		return
 	}
 	mine := func() bool { return b.ownsClient(ctx, chat, rest) || b.Owners[chat] }

@@ -409,6 +409,7 @@ func (b *Bot) menuKB(ctx context.Context, chat int64, services int, ended []stri
 	if btn, ok := b.repSaleButton(ctx, chat); ok {
 		add("panel", btn, false)
 	}
+	list = append(list, b.growButtons(ctx, chat)...) // trial panel, reseller request (repgrow.go)
 	add("link", cbBtn("🔗 افزودن با لینک", "link"), false)
 	rows := layoutMenu(list, b.Store.BotLook(ctx, b.Seller))
 	if b.Owners[chat] {

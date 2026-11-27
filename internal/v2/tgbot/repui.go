@@ -181,6 +181,13 @@ func (b *Bot) repHome(ctx context.Context, chat int64, rep, role string) {
 		// and the channels its customers must join.
 		kb.Rows = append(kb.Rows, []Button{repBtn("📣 پیام همگانی", "bc"), repBtn("📢 عضویت اجباری", "join")})
 	}
+	if role == "owner" {
+		gr := []Button{repBtn("🤖 ربات من", "bot")}
+		if !b.Store.IsSubSeller(ctx, rep) {
+			gr = append(gr, repBtn("🧩 جذب نماینده", "grow"))
+		}
+		kb.Rows = append(kb.Rows, gr)
+	}
 	if r := b.panelAppRow(); r != nil && (role == "owner" || role == "manager") {
 		// The whole panel inside Telegram, signed in by this chat (tgpanel.go).
 		kb.Rows = append(kb.Rows, r)
@@ -214,6 +221,11 @@ func (b *Bot) repCallback(ctx context.Context, chat int64, data string) bool {
 		return true
 	}
 	switch parts[0] {
+	case "bot", "bottok", "boton", "botoff", "botdel", "botdelok": // the reseller's own bot (repgrow.go)
+		b.takeAwait(chat)
+		b.repBotCallback(ctx, chat, rep, role, parts[0])
+	case "grow", "inv", "reqon", "reqoff": // invite link and requests (repgrow.go)
+		b.repGrowMenu(ctx, chat, rep, role, parts[0])
 	case "home":
 		b.takeAwait(chat)
 		b.setDraft(chat, nil)
@@ -747,6 +759,13 @@ func (b *Bot) repAdmins(ctx context.Context, chat int64, rep string) {
 
 // repInput takes typed text the reseller UI asked for.
 func (b *Bot) repInput(ctx context.Context, chat int64, rep, role, what, text string) bool {
+	if what == "r:bottok" {
+		if role != "owner" {
+			return false
+		}
+		b.repBotToken(ctx, chat, rep, text)
+		return true
+	}
 	if what == "r:broadcast" {
 		if b.Seller != rep || !repCan(role, "shop") {
 			return false

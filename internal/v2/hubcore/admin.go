@@ -1102,6 +1102,37 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 		err := s.PutCardFor(r.Context(), seller, in)
 		reply(w, map[string]bool{"ok": err == nil}, err)
 	}))
+	// Growing the reseller tree from Telegram (repgrow.go): the owner's
+	// request button and trial panel; a reseller's own request button.
+	mux.HandleFunc("GET /api/v2/admin/rep-growth", guard(func(w http.ResponseWriter, r *http.Request) {
+		reply(w, map[string]any{"requests": s.RepRequestsOn(r.Context(), ""), "trial": s.RepTrialPolicy(r.Context())}, nil)
+	}))
+	mux.HandleFunc("PUT /api/v2/admin/rep-growth", guard(func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Requests bool     `json:"requests"`
+			Trial    RepTrial `json:"trial"`
+		}
+		if !decode(w, r, &in) {
+			return
+		}
+		if err := s.PutRepTrialPolicy(r.Context(), in.Trial); err != nil {
+			reply(w, nil, err)
+			return
+		}
+		reply(w, map[string]bool{"ok": true}, s.SetRepRequestsOn(r.Context(), "", in.Requests))
+	}))
+	mux.HandleFunc("GET /api/v2/shop/rep-requests", member(func(w http.ResponseWriter, r *http.Request) {
+		reply(w, map[string]bool{"on": s.RepRequestsOn(r.Context(), who(r).RepID)}, nil)
+	}))
+	mux.HandleFunc("PUT /api/v2/shop/rep-requests", member(func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			On bool `json:"on"`
+		}
+		if !decode(w, r, &in) {
+			return
+		}
+		reply(w, map[string]bool{"ok": true}, s.SetRepRequestsOn(r.Context(), who(r).RepID, in.On))
+	}))
 	// Subscription addresses (subdomains.go).
 	mux.HandleFunc("GET /api/v2/admin/sub-domains", guard(func(w http.ResponseWriter, r *http.Request) {
 		reply(w, map[string]any{"domains": s.SubDomains(r.Context()), "fallback": publicBase(subBase, r)}, nil)
