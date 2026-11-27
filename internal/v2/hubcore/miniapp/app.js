@@ -280,6 +280,34 @@ function serviceRow(sv) {
     h("button", { class: "sr-copy", "aria-label": "کپی لینک", onclick: (e) => { e.stopPropagation(); copy(sv.sub_url); } }, icon(IC.copy)));
 }
 
+// skyCard: the "night sky" summary over the services — what is left in all
+// of them, the nearest end, and the two things people come for.
+function skyCard() {
+  const now = Date.now() / 1000;
+  const live = state.services.filter((sv) => sv.status === "active");
+  const list = live.length ? live : state.services;
+  const unl = list.some((sv) => sv.total < 0);
+  const total = list.reduce((a, sv) => a + (sv.total > 0 ? sv.total : 0), 0);
+  const left = list.reduce((a, sv) => a + (sv.total > 0 ? Math.max(0, sv.total - sv.used) : 0), 0);
+  const pct = unl ? 100 : Math.round((left / Math.max(1, total)) * 100);
+  const ends = list.filter((sv) => sv.until > now).map((sv) => Math.ceil((sv.until - now) / 86400));
+  const soon = ends.length ? Math.min(...ends) : null;
+  const tone = !live.length || pct < 10 ? "bad" : pct < 25 || (soon !== null && soon <= 3) ? "warn" : "";
+  const [big, unit] = unl ? ["∞", "نامحدود"] : (() => { const t = size(left).split(" "); return [t[0], t.slice(1).join(" ")]; })();
+  const first = live[0] || state.services[0];
+  return h("div", { class: `sky ${tone}` },
+    h("i", { class: "sky-stars", "aria-hidden": "true" }), h("i", { class: "sky-aurora", "aria-hidden": "true" }),
+    h("div", { class: "sky-top" }, h("span", {}, live.length ? `${num(live.length)} سرویس فعال` : "سرویس فعالی ندارید"),
+      soon !== null ? h("span", { class: "sky-chip" }, soon <= 3 ? `⚠️ ${num(soon)} روز مانده` : `⏳ ${num(soon)} روز مانده`) : null),
+    h("div", { class: "sky-label" }, "حجم باقی‌مانده"),
+    h("div", { class: "sky-val" }, h("b", {}, big), h("span", {}, unit)),
+    unl ? null : h("div", { class: "sky-bar", role: "progressbar", "aria-valuenow": String(pct), "aria-valuemin": "0", "aria-valuemax": "100" }, h("i", { style: `--w:${pct}%` })),
+    unl ? null : h("div", { class: "sky-meta" }, h("span", {}, `${num(pct)}٪ مانده`), h("span", {}, `از ${size(total)}`)),
+    h("div", { class: "sky-actions" },
+      first ? btn("اتصال و QR", "glass", () => connect(first), "qr") : null,
+      state.products.length ? btn(tone ? "تمدید" : "خرید حجم", "light", () => setTab("shop"), "bolt") : null));
+}
+
 function services() {
   const out = [];
   if (!state.services.length) {
@@ -295,6 +323,7 @@ function services() {
     return out;
   }
   // A short list; the rings, usage and actions open with a tap.
+  out.push(skyCard());
   out.push(...ordersPart(true));
   out.push(h("div", { class: "section-title" }, "سرویس‌های من"), h("div", { class: "svc-list" }, state.services.map(serviceRow)));
   out.push(...ordersPart(false));
@@ -885,7 +914,8 @@ function render() {
       h("h1", {}, state.logo && /^data:image\//.test(state.logo) ? h("img", { class: "brand-logo", src: state.logo, alt: "" }) : null, state.title || "Dark VPN")),
     h("button", { class: "wallet-chip", onclick: () => { tap(); setTab("wallet"); } }, icon(IC.wallet), h("span", {}, `${toman(state.toman || 0)}`)));
   const body = tab === "manage" && role.manage && typeof manageView === "function" ? manageView() : ({ services, shop, wallet, panel: panelView, guide: guideView }[tab] || services)();
-  app.replaceChildren(head, state.announce ? h("div", { class: "announce" }, state.announce) : "", h("div", { class: "view" }, ...body));
+  const enter = render.last !== tab; render.last = tab; // a new tab slides in; a refresh of the same tab does not
+  app.replaceChildren(head, state.announce ? h("div", { class: "announce" }, state.announce) : "", h("div", { class: `view ${enter ? "enter" : ""}` }, ...body));
   tabs.hidden = false;
   for (const b of tabs.querySelectorAll("button")) b.setAttribute("aria-current", b.dataset.tab === tab ? "page" : "false");
 }

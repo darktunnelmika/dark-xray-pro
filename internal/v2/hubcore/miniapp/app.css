@@ -305,3 +305,70 @@ button.chip { cursor: pointer; font-weight: 700; color: var(--muted); }
 @keyframes skel { to { background-position: -200% 0; } }
 .svc-list { display: grid; gap: 8px; grid-template-columns: minmax(0, 1fr); } .svc-list > * { min-inline-size: 0; }
 @media (prefers-reduced-motion: reduce) { .offer-glow, .card.skel { animation: none; } }
+
+/* ---------- beauty pass ---------- */
+/* a new tab slides in */
+.view.enter > * { animation: rise .32s both cubic-bezier(.2, .8, .2, 1); }
+.view.enter > *:nth-child(2) { animation-delay: .03s; } .view.enter > *:nth-child(3) { animation-delay: .06s; }
+.view.enter > *:nth-child(4) { animation-delay: .09s; } .view.enter > *:nth-child(n+5) { animation-delay: .12s; }
+@keyframes rise { from { opacity: 0; transform: translateY(8px); } }
+
+/* cards get a soft top light */
+.card, .svc-row, .pkg, .lrow, .tile, .kpi { box-shadow: inset 0 1px 0 rgb(255 255 255 / .035), 0 1px 2px rgb(0 0 0 / .25); }
+:root.light .card, :root.light .svc-row, :root.light .pkg, :root.light .lrow, :root.light .tile, :root.light .kpi { box-shadow: 0 1px 2px rgb(20 30 70 / .06), 0 4px 14px rgb(20 30 70 / .05); border-color: rgb(30 40 90 / .08); }
+.section-title { display: flex; align-items: center; gap: 8px; }
+.section-title::before { content: ""; inline-size: 4px; block-size: 16px; border-radius: 4px; background: linear-gradient(var(--ion), var(--ion-2)); }
+.section-title.sub::before { display: none; }
+
+/* the night-sky summary card */
+.sky { position: relative; overflow: hidden; isolation: isolate; display: grid; gap: 4px; padding: 18px; border-radius: 24px; color: #fff;
+  background: radial-gradient(130% 120% at 100% 0%, #1b2a6b 0%, #0b1033 45%, #050716 100%); border: 1px solid rgb(255 255 255 / .08);
+  box-shadow: 0 18px 40px rgb(6 10 40 / .55), inset 0 1px 0 rgb(255 255 255 / .08); }
+.sky-stars { position: absolute; inset: 0; z-index: -1; opacity: .9;
+  background-image: radial-gradient(1.2px 1.2px at 12% 22%, #fff 50%, transparent 51%), radial-gradient(1px 1px at 30% 70%, #fff 50%, transparent 51%),
+    radial-gradient(1.4px 1.4px at 48% 18%, #cfe3ff 50%, transparent 51%), radial-gradient(1px 1px at 62% 58%, #fff 50%, transparent 51%),
+    radial-gradient(1.6px 1.6px at 78% 30%, #fff 50%, transparent 51%), radial-gradient(1px 1px at 88% 76%, #d8ccff 50%, transparent 51%),
+    radial-gradient(1px 1px at 20% 88%, #fff 50%, transparent 51%), radial-gradient(1.2px 1.2px at 92% 12%, #fff 50%, transparent 51%),
+    radial-gradient(1px 1px at 40% 42%, #fff 50%, transparent 51%), radial-gradient(1.3px 1.3px at 70% 90%, #fff 50%, transparent 51%);
+  animation: twinkle 4s ease-in-out infinite alternate; }
+@keyframes twinkle { to { opacity: .45; } }
+.sky-aurora { position: absolute; z-index: -1; inset-block-end: -60%; inset-inline-start: -20%; inline-size: 90%; aspect-ratio: 1; border-radius: 50%; filter: blur(40px); opacity: .55;
+  background: radial-gradient(circle, var(--ion), transparent 65%); animation: drift 9s ease-in-out infinite alternate; }
+.sky-aurora::after { content: ""; position: absolute; inset-block-start: -40%; inset-inline-start: 70%; inline-size: 80%; aspect-ratio: 1; border-radius: 50%; background: radial-gradient(circle, var(--ion-2), transparent 65%); }
+@keyframes drift { to { transform: translate(18%, -10%) scale(1.1); } }
+.sky.warn .sky-aurora { background: radial-gradient(circle, #f59e0b, transparent 65%); } .sky.bad .sky-aurora { background: radial-gradient(circle, #f43f5e, transparent 65%); }
+.sky-top { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 12.5px; color: rgb(255 255 255 / .75); }
+.sky-chip { padding: 3px 10px; border-radius: 99px; background: rgb(255 255 255 / .12); backdrop-filter: blur(6px); color: #fff; font-weight: 700; }
+.sky-label { margin-block-start: 8px; font-size: 13px; color: rgb(255 255 255 / .7); }
+.sky-val { display: flex; align-items: baseline; gap: 8px; }
+.sky-val b { font-size: 44px; line-height: 1.05; font-weight: 900; letter-spacing: -.03em; text-shadow: 0 4px 24px color-mix(in oklab, var(--ion) 45%, transparent); }
+.sky-val span { font-size: 16px; color: rgb(255 255 255 / .8); font-weight: 700; }
+.sky-bar { block-size: 8px; border-radius: 99px; background: rgb(255 255 255 / .12); overflow: hidden; margin-block-start: 8px; }
+.sky-bar i { display: block; block-size: 100%; inline-size: var(--w); border-radius: inherit; background: linear-gradient(90deg, var(--ion), var(--ion-2)); box-shadow: 0 0 14px var(--ion);
+  animation: fill 1s both cubic-bezier(.2, .8, .2, 1); transform-origin: right; }
+@keyframes fill { from { transform: scaleX(0); } }
+.sky.warn .sky-bar i { background: linear-gradient(90deg, #fbbf24, #f97316); box-shadow: 0 0 14px #f59e0b; } .sky.bad .sky-bar i { background: linear-gradient(90deg, #fb7185, #e11d48); box-shadow: 0 0 14px #f43f5e; }
+.sky-meta { display: flex; justify-content: space-between; font-size: 12px; color: rgb(255 255 255 / .65); }
+.sky-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-block-start: 12px; }
+.sky-actions .btn:only-child { grid-column: 1 / -1; }
+.btn.glass { color: #fff; border-color: rgb(255 255 255 / .18); background: rgb(255 255 255 / .1); backdrop-filter: blur(8px); }
+.btn.light { color: #0b1033; border-color: transparent; background: #fff; box-shadow: 0 8px 22px rgb(0 0 0 / .3); }
+
+/* wallet looks like a card you own */
+.wallet-hero { position: relative; overflow: hidden; color: #fff; border: 1px solid rgb(255 255 255 / .08);
+  background: radial-gradient(120% 140% at 0% 0%, color-mix(in oklab, var(--ion) 55%, #0b1033), transparent 55%), radial-gradient(120% 140% at 100% 100%, color-mix(in oklab, var(--ion-2) 60%, #0b1033), #0b1033 70%); }
+.wallet-hero .muted { color: rgb(255 255 255 / .72); }
+.wallet-hero .big { color: #fff; } .wallet-hero .big small { color: rgb(255 255 255 / .75); }
+.wallet-hero::after { content: ""; position: absolute; inset-block-start: -30px; inset-inline-start: -30px; inline-size: 120px; block-size: 120px; border-radius: 50%; border: 18px solid rgb(255 255 255 / .06); }
+
+/* management tiles: each with its own colour */
+button.tile > svg { box-sizing: content-box; padding: 8px; border-radius: 12px; color: var(--tc, var(--ion)) !important; background: color-mix(in oklab, var(--tc, var(--ion)) 15%, transparent); }
+.tile:nth-child(8n+1) { --tc: #28f7a0; } .tile:nth-child(8n+2) { --tc: #4bb9ff; } .tile:nth-child(8n+3) { --tc: #b36cff; } .tile:nth-child(8n+4) { --tc: #f59e0b; }
+.tile:nth-child(8n+5) { --tc: #f43f5e; } .tile:nth-child(8n+6) { --tc: #22d3ee; } .tile:nth-child(8n+7) { --tc: #a3e635; } .tile:nth-child(8n+8) { --tc: #ec4899; }
+.tile b { font-size: 14px; }
+
+/* service rows breathe a little more */
+.svc-row { padding: 13px 14px; border-radius: 17px; transition: transform .15s, border-color .2s; }
+.sr-bar { block-size: 6px; }
+.sky-actions .btn, .order-side .btn, .pkg-foot .btn { white-space: nowrap; }
+.order-side .btn { padding-inline: 10px; font-size: 13px; }
