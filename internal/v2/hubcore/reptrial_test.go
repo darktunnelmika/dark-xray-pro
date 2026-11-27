@@ -51,7 +51,7 @@ func TestRepTrialLifecycle(t *testing.T) {
 	if pol, _ := s.RepPolicyOf(ctx, rep); pol.MaxClients != 2 {
 		t.Fatalf("cap %+v", pol)
 	}
-	if err := s.RepPutClient(ctx, "t", rep, Client{Email: "t1", Enabled: true, VolumeBytes: 1 << 30, Inbounds: []string{"de-vless"}}, "volume"); err != nil {
+	if err := s.RepPutClient(ctx, "t", rep, Client{Email: "t1", Enabled: true, VolumeBytes: 1 << 30, ExpiresUnix: now.Unix() + 30*86400, Inbounds: []string{"de-vless"}}, "volume"); err != nil {
 		t.Fatal(err)
 	}
 	// A day before the end: reminded once.
