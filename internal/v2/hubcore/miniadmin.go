@@ -44,9 +44,9 @@ func (m miniMgr) can(what string) bool {
 	case "owner", "manager":
 		return true
 	case "sales":
-		return what == "new" || what == "renew" || what == "orders" || what == "credit" || what == "view" || what == "link"
+		return what == "new" || what == "renew" || what == "orders" || what == "credit" || what == "view" || what == "link" || what == "tickets"
 	case "support":
-		return what == "view" || what == "link"
+		return what == "view" || what == "link" || what == "tickets"
 	}
 	return false
 }
@@ -188,7 +188,8 @@ func (s *Store) mgrHome(ctx context.Context, m miniMgr) (map[string]any, error) 
 		}
 	}
 	out := map[string]any{"role": m.Role, "owner": m.Owner, "seller": m.Seller,
-		"can":   map[string]bool{"new": m.can("new"), "renew": m.can("renew"), "edit": m.can("edit"), "delete": m.can("delete"), "orders": m.can("orders"), "credit": m.can("credit")},
+		"can": map[string]bool{"new": m.can("new"), "renew": m.can("renew"), "edit": m.can("edit"), "delete": m.can("delete"), "orders": m.can("orders"), "credit": m.can("credit"),
+			"sellers": m.can("sellers"), "bot": m.can("bot") && !m.Owner, "cards": m.can("cards"), "plans": m.can("plans"), "tickets": m.can("tickets"), "reports": m.can("reports")},
 		"stats": map[string]int{"total": total, "active": active, "online": online, "soon": soon, "ended": ended},
 		"plans": s.mgrPlans(ctx, m)}
 	today := s.tehranToday()
@@ -229,6 +230,17 @@ func (s *Store) mgrHome(ctx context.Context, m miniMgr) (map[string]any, error) 
 	}
 	tops, _ := s.Topups(ctx, m.Seller, "review", 200)
 	out["pending"] = map[string]int{"orders": pend, "topups": len(tops)}
+	if m.can("tickets") {
+		open := 0
+		if ts, err := s.Tickets(ctx, m.P, "open", 200); err == nil {
+			for _, t := range ts {
+				if t.Seller == m.Seller {
+					open++
+				}
+			}
+		}
+		out["tickets"] = open
+	}
 	return out, nil
 }
 
@@ -787,4 +799,5 @@ func registerMiniAdmin(mux *http.ServeMux, s *Store, base func(*http.Request) st
 		}
 		reply(w, map[string]bool{"ok": true}, nil)
 	})
+	registerMiniAdmin2(mux, s, base, mgr, deny, read)
 }

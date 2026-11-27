@@ -458,7 +458,8 @@ tabs.addEventListener("click", (e) => { const b = e.target.closest("button[data-
 function loadManage() {
   return new Promise((res) => {
     const css = document.createElement("link"); css.rel = "stylesheet"; css.href = "manage.css"; document.head.append(css);
-    const js = document.createElement("script"); js.src = "manage.js"; js.onload = res; js.onerror = res; document.head.append(js);
+    const add = (src, next) => { const js = document.createElement("script"); js.src = src; js.onload = next; js.onerror = next; document.head.append(js); };
+    add("manage.js", () => add("manage2.js", res)); // manage2.js: credit, sellers, bot, cards, plans, tickets, reports
   });
 }
 

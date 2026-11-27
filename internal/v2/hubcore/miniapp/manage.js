@@ -18,6 +18,7 @@ const MIC = {
   x: "M18 6 6 18M6 6l12 12",
   gauge: "M12 14l4-4M3.34 19a10 10 0 1 1 17.32 0",
   note: "M4 4h16v16H4zM8 9h8M8 13h6",
+  grid: "M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3zM14 14h7v7h-7z",
 };
 Object.assign(IC, MIC); // btn() takes icon names from IC
 const mic = (k) => icon(IC[k]);
@@ -42,6 +43,8 @@ async function mRefresh() {
     M.list = r.clients || []; M.count = r.count || 0;
   } else if (M.view === "inbox" && can("orders")) {
     M.inbox = await api("GET", "m/inbox");
+  } else if (typeof m2Fetch === "function") {
+    await m2Fetch(M.view);
   }
   render();
 }
@@ -60,15 +63,18 @@ function manageView() {
   if (!M.home) { mLoad(); return [h("div", { class: "boot" }, h("span", { class: "spinner" }))]; }
   const p = M.home.pending || {};
   const inboxN = (p.orders || 0) + (p.topups || 0);
+  const more = typeof M2V === "object";
   const seg = h("div", { class: "seg", role: "tablist" },
     segBtn("dash", "داشبورد", "home"),
     segBtn("users", "کاربرها", "users"),
-    can("orders") ? segBtn("inbox", inboxN ? `صندوق (${num(inboxN)})` : "صندوق", "inbox") : null);
-  const body = M.view === "users" ? usersView() : M.view === "inbox" ? inboxView() : dashView();
+    can("orders") ? segBtn("inbox", inboxN ? `صندوق (${num(inboxN)})` : "صندوق", "inbox") : null,
+    more ? segBtn("more", M.home.tickets ? `بیشتر (${num(M.home.tickets)})` : "بیشتر", "grid", !["dash", "users", "inbox"].includes(M.view)) : null);
+  const body = M.view === "users" ? usersView() : M.view === "inbox" ? inboxView() : more && M2V[M.view] ? M2V[M.view]() : dashView();
   return [seg, ...body];
 }
-function segBtn(v, label, ic) {
-  return h("button", { class: M.view === v ? "on" : "", role: "tab", "aria-selected": M.view === v ? "true" : "false", onclick: () => mSet(v) }, mic(ic), h("span", {}, label));
+function segBtn(v, label, ic, on) {
+  on = on || M.view === v;
+  return h("button", { class: on ? "on" : "", role: "tab", "aria-selected": on ? "true" : "false", onclick: () => mSet(v) }, mic(ic), h("span", {}, label));
 }
 
 // ---------- dashboard ----------
@@ -92,6 +98,10 @@ function dashView() {
   if (can("orders") && (pend.orders || pend.topups)) {
     out.push(h("button", { class: "card alert", onclick: () => mSet("inbox") }, mic("inbox"),
       h("span", {}, `${num((pend.orders || 0) + (pend.topups || 0))} پرداخت منتظر تأیید شماست`), h("b", {}, "دیدن")));
+  }
+  if (d.tickets && typeof M2V === "object") {
+    out.push(h("button", { class: "card alert", onclick: () => mSet("tickets") }, mic("chat"),
+      h("span", {}, `${num(d.tickets)} تیکت مشتری منتظر جواب است`), h("b", {}, "دیدن")));
   }
   if (can("new")) {
     out.push(btn("ساخت کاربر", "primary block big", () => createSheet(), "plus"));
