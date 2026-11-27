@@ -1102,6 +1102,20 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 		err := s.PutCardFor(r.Context(), seller, in)
 		reply(w, map[string]bool{"ok": err == nil}, err)
 	}))
+	// A reseller's credit pace and the package that covers a month (repforecast.go).
+	mux.HandleFunc("GET /api/v2/shop/forecast", member(func(w http.ResponseWriter, r *http.Request) {
+		p := who(r)
+		rep := p.RepID
+		if p.Role != "rep" {
+			rep = r.URL.Query().Get("rep")
+		}
+		var credit int64
+		if s.ro.QueryRowContext(r.Context(), `SELECT volume_credit FROM reps WHERE id=?`, rep).Scan(&credit) != nil {
+			http.NotFound(w, r)
+			return
+		}
+		reply(w, s.RepForecast(r.Context(), rep, credit), nil)
+	}))
 	// Automatic cleanup of dead configs (autoclean.go), per seller.
 	mux.HandleFunc("GET /api/v2/shop/autoclean", member(func(w http.ResponseWriter, r *http.Request) {
 		seller, ok := sellerOf(r)

@@ -1242,6 +1242,35 @@ async function viewDashboard() {
   return view;
 }
 
+// autoCleanBox switches the automatic cleanup of dead configs on or off
+// (the owner for its own clients, a reseller for its own).
+function autoCleanBox() {
+  const fa = lang === "fa";
+  const T = (a, b) => (fa ? a : b);
+  const on = h("input", { type: "checkbox" }), days = h("input", { type: "number", min: 7, max: 365, value: 30, dir: "ltr" });
+  const info = h("p", { class: "small muted" });
+  const load = async () => {
+    const r = await api("GET", "/api/v2/shop/autoclean").catch(() => null);
+    if (!r) return;
+    on.checked = !!r.settings.on; days.value = r.settings.days || 30;
+    info.textContent = T(`الان ${fmtNum(r.due || 0)} کانفیگ مرده با این شرط هست.`, `${fmtNum(r.due || 0)} dead configs match now.`) +
+      (r.settings.total ? T(` تا حالا ${fmtNum(r.settings.total)} کانفیگ خودکار پاک شده.`, ` ${fmtNum(r.settings.total)} deleted so far.`) : "");
+  };
+  load();
+  return h("form", { class: "card form", onsubmit: async (e) => {
+    e.preventDefault();
+    await guarded(() => api("PUT", "/api/v2/shop/autoclean", { on: on.checked, days: +days.value || 30 }));
+    toast(t("saved")); load();
+  } },
+    h("h3", {}, "🧹 ", T("پاک‌سازی خودکار کانفیگ‌های مرده", "Automatic cleanup of dead configs")),
+    h("p", { class: "small muted" }, T("کانفیگی که زمانش تمام شده یا حجمش تمام شده و از آن به بعد مصرفی نداشته، بعد از این مدت خودکار پاک می‌شود. کانفیگی که تمام نشده (حتی اگر هنوز وصل نشده باشد) هیچ‌وقت پاک نمی‌شود.",
+      "A config whose term or volume ended and that has been quiet since is deleted after this many days. A config that has not ended (even one never connected) is never deleted.")),
+    h("label", { class: "check" }, on, h("span", {}, T("روشن", "On"))),
+    h("label", {}, h("span", {}, T("روز بی‌مصرفی بعد از تمام شدن (۷ تا ۳۶۵)", "Quiet days after the end (7–365)")), days),
+    info,
+    h("div", { class: "row" }, h("button", { class: "primary", type: "submit" }, t("save"))));
+}
+
 // cleanupForm previews and deletes expired, used-up or disabled clients.
 function cleanupForm() {
   const fa = lang === "fa";
@@ -1265,6 +1294,7 @@ function cleanupForm() {
   };
   [exp, vol, dis, days].forEach((x) => x.addEventListener("change", preview));
   openModal(fa ? "پاک‌سازی کاربرها" : "Clean up clients", h("div", { class: "form" },
+    autoCleanBox(),
     h("p", { class: "small muted" }, fa ? "کاربرهایی که دیگر استفاده نمی‌شوند را یک‌جا حذف کنید. اول فهرست را ببینید؛ تا «حذف» را نزنید چیزی پاک نمی‌شود." : "Delete clients nobody uses any more. You see the list first; nothing is deleted until you press Delete."),
     h("label", { class: "check" }, exp, fa ? "منقضی‌شده‌ها" : "Expired"), h("label", { class: "check" }, vol, fa ? "حجم‌تمام‌ها" : "Out of volume"), h("label", { class: "check" }, dis, fa ? "غیرفعال‌ها" : "Disabled"),
     h("label", {}, h("span", {}, fa ? "حداقل چند روز از انقضا یا آخرین اتصال گذشته باشد" : "At least this many days since expiry or last use"), days), out), [del]);
@@ -1715,7 +1745,8 @@ async function viewClients() {
   return h("div", {},
     h("div", { class: "row" }, h("h1", {}, t("clients")), h("span", { class: "muted small" }, t("clientsCount", { n: fmtNum(list.length) })),
       owner ? h("button", { class: "ghost spacer", onclick: () => templatesModal(inbounds) }, lang === "fa" ? "پلن‌های آماده" : "Ready plans") : h("span", { class: "spacer" }),
-      owner ? h("button", { class: "ghost", onclick: () => cleanupForm() }, lang === "fa" ? "پاک‌سازی" : "Clean up") : null,
+      owner ? h("button", { class: "ghost", onclick: () => cleanupForm() }, lang === "fa" ? "پاک‌سازی" : "Clean up")
+        : me.role === "rep" ? h("button", { class: "ghost", onclick: () => openModal(lang === "fa" ? "پاک‌سازی خودکار" : "Automatic cleanup", autoCleanBox()) }, lang === "fa" ? "پاک‌سازی خودکار" : "Auto cleanup") : null,
       owner ? h("a", { class: "btn ghost", href: "/api/v2/admin/clients/export.csv", download: "", title: lang === "fa" ? "فهرست کاربرها برای اکسل" : "Client list for Excel" }, lang === "fa" ? "اکسل" : "Excel") : null,
       owner ? h("button", { onclick: () => bulkCreateForm(inbounds) }, t("bulkCreate")) : null,
       me.legacy ? h("a", { class: "btn", href: "#/legacy" }, "📥 ", lang === "fa" ? "آوردن کاربران قدیمی" : "Bring old users") : null,

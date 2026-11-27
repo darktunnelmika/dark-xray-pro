@@ -35,15 +35,53 @@ func (b *Bot) repAlertsFor(ctx context.Context, rep string) {
 	if len(chats) == 0 {
 		return
 	}
+	warned := false
 	for _, l := range b.Store.DueLowCredit(ctx, "rep", rep) {
 		msg := fmt.Sprintf("⚠️ اعتبار حجمی شما رو به اتمام است: <b>%s</b> مانده.\nبرای ادامهٔ فروش و تمدید، اعتبار را شارژ کنید.", hubcore.GBText(l.Credit))
+		msg += forecastText(b.Store.RepForecast(ctx, rep, l.Credit))
+		b.repNotice(ctx, rep, chats, msg)
+		warned = true
+	}
+	// Above the GB threshold but spending fast: warn by days left too.
+	if o, ok := b.Store.DueRunningOut(ctx, rep); ok && !warned {
+		msg := fmt.Sprintf("⏳ با سرعت فروش فعلی، اعتبار شما (<b>%s</b>) فقط برای حدود <b>%s روز</b> دیگر کافی است.", hubcore.GBText(o.Credit), faDays(o.Forecast.DaysLeft))
+		msg += forecastText(o.Forecast)
 		b.repNotice(ctx, rep, chats, msg)
 	}
 	if s, ok := b.Store.DueRepSummary(ctx, rep); ok {
 		msg := fmt.Sprintf("📋 خلاصهٔ ۲۴ ساعت گذشته\n\n🛒 فروش: <b>%s</b> (%s مورد)\n♻️ برگشتی به اعتبار: <b>%s</b>\n💾 اعتبار فعلی: <b>%s</b>\n\n👥 کلاینت فعال: %s\n⏳ رو به اتمام: <b>%s</b>\n⛔ تمام‌شده: %s",
 			hubcore.GBText(s.Sold), faInt(int64(s.Sales)), hubcore.GBText(s.Back), hubcore.GBText(s.Credit), faInt(int64(s.Active)), faInt(int64(s.Expiring)), faInt(int64(s.Ended)))
+		msg += forecastText(b.Store.RepForecast(ctx, rep, s.Credit))
 		b.repNotice(ctx, rep, chats, msg)
 	}
+}
+
+// faDays is a day count for messages: "کمتر از یک" under one day.
+func faDays(d float64) string {
+	if d < 1 {
+		return "کمتر از یک"
+	}
+	return faInt(int64(d))
+}
+
+// forecastText is the pace line (and the package that covers a month) for
+// the reseller's messages; "" when it is not selling.
+func forecastText(f hubcore.CreditForecast) string {
+	if f.DaysLeft < 0 || f.DailyBytes <= 0 {
+		return ""
+	}
+	t := fmt.Sprintf("\n\n📈 میانگین فروش ۷ روز اخیر: <b>%s</b> در روز؛ اعتبار فعلی حدود <b>%s روز</b> کافی است.", hubcore.GBText(f.DailyBytes), faDays(f.DaysLeft))
+	if f.Package != nil {
+		name := f.Package.Name
+		if name == "" {
+			name = hubcore.GBText(f.Package.GB << 30)
+		}
+		t += fmt.Sprintf("\n💡 بستهٔ پیشنهادی برای حدود یک ماه: <b>%s</b> (%s)", esc(name), hubcore.GBText(f.Package.GB<<30))
+		if f.Package.Price > 0 {
+			t += fmt.Sprintf(" — %s تومان", faMoney(f.Package.Price))
+		}
+	}
+	return t
 }
 
 func firstNonEmpty(v ...string) string {
