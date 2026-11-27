@@ -49,6 +49,8 @@ CREATE TABLE IF NOT EXISTS acme_certs (
 const (
 	ACMEDNSCloudflare = "dns_cf"
 	ACMEHTTPNode      = "http_node"
+	// ACMEHTTPHub: the HUB itself answers on port 80 (old users' domains).
+	ACMEHTTPHub = "http_hub"
 
 	acmeDefaultDir = "https://acme-v02.api.letsencrypt.org/directory"
 	// Renew when fewer than this many days remain.
@@ -195,6 +197,8 @@ func (s *Store) PutACMECert(ctx context.Context, id string, domains []string, me
 		if n == 0 {
 			return fmt.Errorf("%w: pick the node %s points to", ErrInvalid, clean[0])
 		}
+	case ACMEHTTPHub:
+		nodeID = ""
 	default:
 		return fmt.Errorf("%w: method", ErrInvalid)
 	}
@@ -350,7 +354,7 @@ func (s *Store) obtain(ctx context.Context, id string, domains []string, method,
 			continue
 		}
 		want := "dns-01"
-		if method == ACMEHTTPNode {
+		if method == ACMEHTTPNode || method == ACMEHTTPHub {
 			want = "http-01"
 		}
 		var chal *acme.Challenge
@@ -384,6 +388,16 @@ func (s *Store) obtain(ctx context.Context, id string, domains []string, method,
 			if err := s.serveHTTP01(ctx, nodeID, name, c.HTTP01ChallengePath(chal.Token), body); err != nil {
 				return err
 			}
+		case ACMEHTTPHub:
+			body, err := c.HTTP01ChallengeResponse(chal.Token)
+			if err != nil {
+				return err
+			}
+			done, err := serveHTTP01Hub(ctx, name, c.HTTP01ChallengePath(chal.Token), body)
+			if err != nil {
+				return err
+			}
+			cleanup = append(cleanup, done)
 		}
 		if _, err := c.Accept(ctx, chal); err != nil {
 			return fmt.Errorf("%s: %w", name, err)

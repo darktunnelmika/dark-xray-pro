@@ -105,7 +105,7 @@ func (b *Bot) onPaid(ctx context.Context, chat int64, name string, p *Successful
 		// Charged but not delivered: tell the owners with a refund button.
 		b.logf("tgbot stars delivery %d: %v", id, err)
 		b.send(ctx, chat, "✅ پرداخت انجام شد، ولی فعال‌سازی با خطا روبه‌رو شد. پشتیبانی همین الان پیگیری می‌کند.", nil)
-		b.notify(ctx, "orders", fmt.Sprintf("⚠️ پرداخت %d⭐ سفارش #%d از %s انجام شد ولی تحویل نشد: %s", p.Total, id, esc(name), esc(err.Error())),
+		b.notify(ctx, "orders", fmt.Sprintf("⚠️ پرداخت %d⭐ سفارش #%d از %s انجام شد ولی تحویل نشد: %s", p.Total, id, esc(name), esc(faErr(err))),
 			&Keyboard{Rows: [][]Button{{{Text: "↩️ بازپرداخت استارز", Data: "srf:" + strconv.FormatInt(id, 10)}}}})
 		return
 	}
@@ -121,11 +121,11 @@ func (b *Bot) refundStars(ctx context.Context, owner, id int64) {
 	}
 	chat, charge, err := b.Store.StarsRefundInfo(ctx, id)
 	if err != nil {
-		b.send(ctx, owner, "بازپرداخت ممکن نیست: "+esc(err.Error()), nil)
+		b.send(ctx, owner, "بازپرداخت ممکن نیست: "+esc(faErr(err)), nil)
 		return
 	}
 	if err := api.RefundStars(ctx, chat, charge); err != nil {
-		b.send(ctx, owner, "تلگرام بازپرداخت را رد کرد: "+esc(err.Error()), nil)
+		b.send(ctx, owner, "تلگرام بازپرداخت را رد کرد: "+esc(faErr(err)), nil)
 		return
 	}
 	_ = b.Store.StarsRefunded(ctx, id)
@@ -159,7 +159,7 @@ func (b *Bot) trial(ctx context.Context, chat int64) {
 		size = "حجم نامحدود"
 	}
 	b.send(ctx, chat, fmt.Sprintf("🎁 تست رایگان شما فعال شد: %s برای %s.", size, trialSpan(p.Hours)), nil)
-	b.sendSub(ctx, chat, email)
+	b.sendSubToCustomer(ctx, chat, email)
 }
 
 // remindTrials tells the owners of trials that end within a day, once, and
@@ -347,7 +347,7 @@ func (b *Bot) wallet(ctx context.Context, chat int64) {
 			}
 			lines = append(lines, fmt.Sprintf("%s%s تومان — %s", sign, faMoney(abs64(e.Delta)), kinds[e.Kind]))
 		}
-		text := fmt.Sprintf("💰 <b>کیف پول</b>\nموجودی: <b>%s تومان</b>", faMoney(toman))
+		text := fmt.Sprintf("👛 <b>کیف پول</b>\nموجودی: <b>%s تومان</b>", faMoney(toman))
 		if b.Seller == "" {
 			if st := b.Store.WalletBalance(ctx, chat); st > 0 {
 				text += fmt.Sprintf("\nاعتبار استارز: %d⭐", st)
@@ -357,7 +357,7 @@ func (b *Bot) wallet(ctx context.Context, chat int64) {
 			text += "\n\n" + strings.Join(lines, "\n")
 		}
 		text += "\n\nبا موجودی کیف پول سرویس بخرید یا تمدید کنید؛ تمدید خودکار هم از همین موجودی انجام می‌شود."
-		kb := &Keyboard{Rows: [][]Button{row(cbBtn("🛒 خرید سرویس", "shop"))}}
+		kb := &Keyboard{Rows: [][]Button{row(cbBtn("🛒 خرید سرویس", "shop"), cbBtn("« منو", "home"))}}
 		if b.cardOn(ctx) {
 			kb.Rows = append([][]Button{row(cbBtn("➕ شارژ کیف پول", "topup"))}, kb.Rows...)
 		}

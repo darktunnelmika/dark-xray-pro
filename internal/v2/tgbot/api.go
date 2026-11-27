@@ -68,19 +68,30 @@ type Chat struct {
 }
 
 type Message struct {
-	ID      int64  `json:"message_id"`
-	From    *User  `json:"from"`
-	Chat    Chat   `json:"chat"`
-	Text    string `json:"text"`
-	Caption string `json:"caption"`
-	Photo   []struct {
-		FileID string `json:"file_id"`
-	} `json:"photo"`
+	ID              int64              `json:"message_id"`
+	From            *User              `json:"from"`
+	Chat            Chat               `json:"chat"`
+	Text            string             `json:"text"`
+	Caption         string             `json:"caption"`
+	Photo           []PhotoSize        `json:"photo"`
+	Contact         *Contact           `json:"contact"`
 	ReplyTo         *Message           `json:"reply_to_message"`
 	Thread          int64              `json:"message_thread_id"`
 	Paid            *SuccessfulPayment `json:"successful_payment"`
 	Entities        []MessageEntity    `json:"entities"`
 	CaptionEntities []MessageEntity    `json:"caption_entities"`
+}
+
+// PhotoSize is one size of a received photo.
+type PhotoSize struct {
+	FileID   string `json:"file_id"`
+	UniqueID string `json:"file_unique_id"`
+}
+
+// Contact is a shared phone number (request_contact button).
+type Contact struct {
+	PhoneNumber string `json:"phone_number"`
+	UserID      int64  `json:"user_id"`
 }
 
 // MessageEntity marks a span of text (offsets in UTF-16 units).

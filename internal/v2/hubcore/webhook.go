@@ -132,7 +132,12 @@ func (s *Store) webhookBatch(ctx context.Context, w WebhookSettings, nodes map[s
 	auFrom, _ := strconv.ParseInt(s.Setting(ctx, "webhook_cursor_audit"), 10, 64)
 	evTo, auTo = evFrom, auFrom
 	if wants(w, "client") {
-		rows, err := s.ro.QueryContext(ctx, `SELECT id,unix,node_id,email,kind FROM events WHERE id>? ORDER BY id LIMIT 50`, evFrom)
+		// Connected shops' client events go to their own webhooks only
+		// (tenantwebhook.go). Reading up to a fixed top lets the cursor pass
+		// over them when the page is not full.
+		var top int64
+		_ = s.ro.QueryRowContext(ctx, `SELECT COALESCE(MAX(id),0) FROM events`).Scan(&top)
+		rows, err := s.ro.QueryContext(ctx, `SELECT id,unix,node_id,email,kind FROM events WHERE id>? AND id<=? AND tenant_id='' ORDER BY id LIMIT 50`, evFrom, top)
 		if err != nil {
 			return nil, 0, 0, nil, err
 		}
@@ -147,9 +152,12 @@ func (s *Store) webhookBatch(ctx context.Context, w WebhookSettings, nodes map[s
 			items, evTo = append(items, it), id
 		}
 		rows.Close()
+		if len(items) < 50 && top > evTo {
+			evTo = top
+		}
 	}
 	if wants(w, "change") && len(items) < 50 {
-		rows, err := s.ro.QueryContext(ctx, `SELECT id,unix,actor,method,path FROM audit_log WHERE id>? AND status<400 AND path<>'/api/v2/auth/login' ORDER BY id LIMIT ?`, auFrom, 50-len(items))
+		rows, err := s.ro.QueryContext(ctx, `SELECT id,unix,actor,method,path FROM audit_log WHERE id>? AND status<400 AND path<>'/api/v2/auth/login' AND method NOT IN ('GET','HEAD') AND actor NOT LIKE 'tenant:%' ORDER BY id LIMIT ?`, auFrom, 50-len(items))
 		if err != nil {
 			return nil, 0, 0, nil, err
 		}
@@ -278,6 +286,7 @@ func (s *Store) webhookTick(ctx context.Context, nodes map[string]bool, fails *i
 
 // RunWebhooks delivers pending items every few seconds until ctx ends.
 func (s *Store) RunWebhooks(ctx context.Context) {
+	go s.RunTenantWebhooks(ctx) // connected shops' own webhooks (tenantwebhook.go)
 	var nodes map[string]bool
 	fails := 0
 	for {

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -155,7 +156,21 @@ func (s *Store) watchLoad(ctx context.Context) {
 			s.checkDown(ctx, "off:"+n.ID, "🔴 نود "+name+" قطع شد: بیش از چند دقیقه است که به هاب وصل نشده. کاربرهای این نود احتمالاً وصل نمی‌شوند.", "🟢 نود "+name+" دوباره وصل شد", !on)
 			if on {
 				s.checkDown(ctx, "xray:"+n.ID, "⚠️ Xray روی نود "+name+" اجرا نمی‌شود"+lastErr(n.LastError), "✅ Xray روی نود "+name+" دوباره کار می‌کند", !n.XrayRunning)
+				s.checkDown(ctx, "cfg:"+n.ID, "⚠️ نود "+name+" کانفیگ جدید را نپذیرفت و روی کانفیگ قبلی مانده؛ تغییر کاربرها روی این نود اعمال نمی‌شود"+lastErr(n.LastError),
+					"✅ نود "+name+" دوباره کانفیگ جدید را می‌پذیرد", n.XrayRunning && configRejected(n.LastError))
 			}
+		}
+		if cl, err := s.CaseClashes(ctx); err == nil {
+			var names []string
+			for i, g := range cl {
+				if i == 10 {
+					names = append(names, "…")
+					break
+				}
+				names = append(names, strings.Join(g, " / "))
+			}
+			s.checkDown(ctx, "caseclash", "⚠️ این کاربرها فقط در حروف بزرگ و کوچک فرق دارند و Xray آن‌ها را یکی می‌داند: "+strings.Join(names, "، ")+
+				"\nفقط قدیمی‌ترینِ هر دسته روی نودها فعال است؛ بقیه را تغییر نام بدهید.", "✅ کاربر هم‌نامی با حروف بزرگ و کوچک دیگر نمانده", len(cl) > 0)
 		}
 	}
 	if a.CPUPercent == 0 && a.RAMPercent == 0 {

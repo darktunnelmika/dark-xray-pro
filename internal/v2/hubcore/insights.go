@@ -23,20 +23,22 @@ type Event struct {
 }
 
 func (s *Store) Insights(ctx context.Context, days int) (Insights, error) {
-	if days <= 0 || days > 90 {
+	// Up to 180 days: the dashboard asks for twice its range (90 at most)
+	// to set the period against the one before it.
+	if days <= 0 || days > 180 {
 		days = 14
 	}
 	var in Insights
 	today := s.now().UTC()
 	from := today.AddDate(0, 0, -(days - 1)).Format("2006-01-02")
-	rows, err := s.ro.QueryContext(ctx, `SELECT day,SUM(up),SUM(down) FROM usage_daily WHERE day>=? GROUP BY day`, from)
+	rows, err := s.ro.QueryContext(ctx, `SELECT day,SUM(up),SUM(down),COUNT(DISTINCT email) FROM usage_daily WHERE day>=? GROUP BY day`, from)
 	if err != nil {
 		return in, err
 	}
 	got := map[string]ClientDaily{}
 	for rows.Next() {
 		var d ClientDaily
-		if err := rows.Scan(&d.Day, &d.Up, &d.Down); err != nil {
+		if err := rows.Scan(&d.Day, &d.Up, &d.Down, &d.Users); err != nil {
 			rows.Close()
 			return in, err
 		}
@@ -49,7 +51,7 @@ func (s *Store) Insights(ctx context.Context, days int) (Insights, error) {
 		d.Day = day
 		in.Daily = append(in.Daily, d)
 	}
-	rows, err = s.ro.QueryContext(ctx, `SELECT email,SUM(up+down) b FROM usage_daily WHERE day=? GROUP BY email ORDER BY b DESC LIMIT 8`, today.Format("2006-01-02"))
+	rows, err = s.ro.QueryContext(ctx, `SELECT email,SUM(up+down) b FROM usage_daily WHERE day=? AND email NOT IN (SELECT email FROM clients WHERE substr(rep_id,1,1)='~') GROUP BY email ORDER BY b DESC LIMIT 8`, today.Format("2006-01-02"))
 	if err != nil {
 		return in, err
 	}
@@ -63,7 +65,7 @@ func (s *Store) Insights(ctx context.Context, days int) (Insights, error) {
 		in.Top = append(in.Top, u)
 	}
 	rows.Close()
-	rows, err = s.ro.QueryContext(ctx, `SELECT unix,node_id,email,kind FROM events ORDER BY id DESC LIMIT 15`)
+	rows, err = s.ro.QueryContext(ctx, `SELECT unix,node_id,email,kind FROM events WHERE tenant_id='' ORDER BY id DESC LIMIT 15`)
 	if err != nil {
 		return in, err
 	}

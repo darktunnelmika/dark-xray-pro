@@ -118,6 +118,8 @@ type miniOrder struct {
 	Status  string `json:"status"`
 	Renew   string `json:"renew"`
 	Created int64  `json:"created"`
+	// NeedsReceipt: a card order that still waits for its receipt photo.
+	NeedsReceipt bool `json:"needs_receipt"`
 }
 
 func (s *Store) miniServices(ctx context.Context, chat int64, subBase, seller string) ([]MiniAppService, error) {
@@ -159,7 +161,8 @@ func (s *Store) miniServices(ctx context.Context, chat int64, subBase, seller st
 }
 
 func (s *Store) miniOrders(ctx context.Context, chat int64) ([]miniOrder, error) {
-	rows, err := s.ro.QueryContext(ctx, `SELECT o.id,COALESCE(p.name,o.product_id),o.amount,o.status,CASE WHEN o.renew=1 THEN o.client_email ELSE '' END,o.created_unix
+	rows, err := s.ro.QueryContext(ctx, `SELECT o.id,COALESCE(p.name,o.product_id),o.amount,o.status,CASE WHEN o.renew=1 THEN o.client_email ELSE '' END,o.created_unix,
+o.status='pending' AND o.receipt='' AND o.method='manual' AND o.amount>0
 FROM orders o LEFT JOIN products p ON p.id=o.product_id WHERE o.buyer=? ORDER BY o.id DESC LIMIT 30`, TgBuyer(chat))
 	if err != nil {
 		return nil, err
@@ -168,7 +171,7 @@ FROM orders o LEFT JOIN products p ON p.id=o.product_id WHERE o.buyer=? ORDER BY
 	out := []miniOrder{}
 	for rows.Next() {
 		var o miniOrder
-		if err := rows.Scan(&o.ID, &o.Product, &o.Amount, &o.Status, &o.Renew, &o.Created); err != nil {
+		if err := rows.Scan(&o.ID, &o.Product, &o.Amount, &o.Status, &o.Renew, &o.Created, &o.NeedsReceipt); err != nil {
 			return nil, err
 		}
 		out = append(out, o)
@@ -224,6 +227,10 @@ func registerMiniApp(mux *http.ServeMux, s *Store) {
 			http.Error(w, "the store is closed", http.StatusServiceUnavailable)
 			return TgUser{}, false
 		}
+		if s.TgBanned(r.Context(), seller, u.ID) {
+			http.Error(w, "⛔️ دسترسی شما به این فروشگاه محدود شده است.", http.StatusForbidden)
+			return TgUser{}, false
+		}
 		_ = s.TgTouch(r.Context(), u.ID, u.FirstName, u.Username)
 		*r = *r.WithContext(context.WithValue(r.Context(), miniSellerKey{}, seller))
 		return u, true
@@ -236,6 +243,7 @@ func registerMiniApp(mux *http.ServeMux, s *Store) {
 		return s.TgClients(r.Context(), chat)
 	}
 	owner := Principal{User: "miniapp", Role: "owner"}
+	registerMiniAdmin(mux, s, base) // management for resellers and the owner (miniadmin.go)
 	mux.HandleFunc("GET /app/api/me", func(w http.ResponseWriter, r *http.Request) {
 		u, ok := user(w, r)
 		if !ok {
@@ -268,7 +276,7 @@ func registerMiniApp(mux *http.ServeMux, s *Store) {
 		out := map[string]any{"user": u, "services": services, "orders": orders, "products": products,
 			"pay_text": s.Setting(r.Context(), "tg_pay_text"), "support": ss.SupportURL, "title": ss.Title, "announce": ss.Announce,
 			"stars": invoiceLinker != nil && seller == "", "wallet": 0, "bot": s.Setting(r.Context(), "tg_username"),
-			"toman": s.TomanBalance(r.Context(), seller, u.ID), "accent": ss.Accent, "logo": ss.Logo}
+			"toman": s.TomanBalance(r.Context(), seller, u.ID), "accent": ss.Accent, "logo": ss.Logo, "shop_text": s.ShopText(r.Context(), seller)}
 		if seller == "" {
 			out["wallet"] = s.WalletBalance(r.Context(), u.ID)
 		} else {
@@ -322,7 +330,7 @@ func registerMiniApp(mux *http.ServeMux, s *Store) {
 		_ = s.ro.QueryRowContext(r.Context(), `SELECT id FROM orders WHERE buyer=? AND product_id=? AND client_email=? AND status='pending' ORDER BY id DESC LIMIT 1`,
 			TgBuyer(u.ID), in.Product, in.Renew).Scan(&open)
 		if open > 0 {
-			reply(w, map[string]any{"id": open, "existing": true}, nil)
+			reply(w, s.miniPayInfo(r.Context(), sellerOf(r), u.ID, open, map[string]any{"id": open, "existing": true}), nil)
 			return
 		}
 		if !s.productOf(r.Context(), in.Product, sellerOf(r)) {
@@ -330,7 +338,11 @@ func registerMiniApp(mux *http.ServeMux, s *Store) {
 			return
 		}
 		id, err := s.CreateOrder(r.Context(), owner, in.Product, TgBuyer(u.ID), in.Renew, "mini app")
-		reply(w, map[string]any{"id": id}, err)
+		if err != nil {
+			reply(w, nil, err)
+			return
+		}
+		reply(w, s.miniPayInfo(r.Context(), sellerOf(r), u.ID, id, map[string]any{"id": id}), nil)
 	})
 	mux.HandleFunc("POST /app/api/pay", func(w http.ResponseWriter, r *http.Request) {
 		u, ok := user(w, r)
@@ -402,8 +414,24 @@ func registerMiniApp(mux *http.ServeMux, s *Store) {
 			http.Error(w, "card payment is not set up", http.StatusServiceUnavailable)
 			return
 		}
+		if !s.PhoneOK(r.Context(), sellerOf(r), u.ID) {
+			http.Error(w, "اول در ربات شمارهٔ موبایل خود را تأیید کنید (از «شارژ کیف پول» در ربات).", http.StatusForbidden)
+			return
+		}
 		id, err := s.CreateTopup(r.Context(), sellerOf(r), u.ID, in.Amount)
-		reply(w, map[string]any{"id": id}, err)
+		if err != nil {
+			reply(w, nil, err)
+			return
+		}
+		out := map[string]any{"id": id}
+		if c, err := s.CardForPay(r.Context(), sellerOf(r), TopupRef(id), in.Amount); err == nil {
+			out["card"] = c
+		} else {
+			_, _ = s.DecideTopup(r.Context(), sellerOf(r), id, false, "no card")
+			http.Error(w, "امروز امکان پرداخت کارت‌به‌کارت نیست؛ کمی بعد دوباره امتحان کنید.", http.StatusServiceUnavailable)
+			return
+		}
+		reply(w, out, nil)
 	})
 	mux.HandleFunc("POST /app/api/trial", func(w http.ResponseWriter, r *http.Request) {
 		u, ok := user(w, r)
@@ -492,4 +520,24 @@ func (s *Store) RepMiniAppURL(ctx context.Context, seller, subBase string) strin
 func (s *Store) productOf(ctx context.Context, id, seller string) bool {
 	var got string
 	return s.ro.QueryRowContext(ctx, `SELECT seller FROM products WHERE id=?`, id).Scan(&got) == nil && got == seller
+}
+
+// miniPayInfo adds to an order reply the card this order pays to (several
+// cards: each order keeps its own), or that the phone must be verified in
+// the bot first, or that no card can take it today.
+func (s *Store) miniPayInfo(ctx context.Context, seller string, chat, id int64, out map[string]any) map[string]any {
+	o, err := s.OrderByID(ctx, id)
+	if err != nil || o.Amount <= 0 || s.CardFor(ctx, seller).Number == "" {
+		return out
+	}
+	if !s.PhoneOK(ctx, seller, chat) {
+		out["phone_needed"] = true
+		return out
+	}
+	if c, err := s.CardForPay(ctx, seller, OrderRef(id), o.Amount); err == nil {
+		out["card"] = c
+	} else {
+		out["no_card"] = true
+	}
+	return out
 }

@@ -144,6 +144,19 @@ func (s *Store) repEditClient(ctx context.Context, repID, email string, e client
 	if e.Enabled == nil && e.MaxIPs == nil && e.Inbounds == nil {
 		return false, nil
 	}
+	// An old user (legacy.go) keeps its inbounds, and is switched on only
+	// while there is volume credit to pay for its use.
+	legacy := isLegacyQ(ctx, tx, email)
+	if legacy && e.Inbounds != nil {
+		return false, fmt.Errorf("%w: an old user's inbounds stay as they came; only on/off and the IP limit change", ErrPolicy)
+	}
+	if legacy && e.Enabled != nil && *e.Enabled {
+		var credit int64
+		_ = tx.QueryRowContext(ctx, `SELECT volume_credit FROM reps WHERE id=?`, repID).Scan(&credit)
+		if credit <= 0 {
+			return false, fmt.Errorf("%w: no volume credit left", ErrCredit)
+		}
+	}
 	if pol.DenyEdit {
 		return false, fmt.Errorf("%w: changing client settings is not allowed for this representative", ErrPolicy)
 	}
@@ -162,6 +175,11 @@ func (s *Store) repEditClient(ctx context.Context, repID, email string, e client
 		if _, err := tx.ExecContext(ctx, `UPDATE clients SET enabled=? WHERE email=?`, *e.Enabled, email); err != nil {
 			return false, err
 		}
+		if legacy { // switched by hand now, not for lack of credit
+			if _, err := tx.ExecContext(ctx, `UPDATE legacy_clients SET credit_off=0 WHERE email=?`, email); err != nil {
+				return false, err
+			}
+		}
 	}
 	if e.Inbounds != nil {
 		for _, t := range tags {
@@ -179,57 +197,6 @@ func (s *Store) repEditClient(ctx context.Context, repID, email string, e client
 		}
 	}
 	return true, tx.Commit()
-}
-
-// repResetUsage sets a reseller's customer's usage back to zero. The used
-// volume of a volume plan becomes usable again, so it is charged (with its
-// ledger row); a reseller that may not renew may not reset either.
-func (s *Store) repResetUsage(ctx context.Context, actor, repID, email string) (charged int64, err error) {
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return 0, err
-	}
-	defer tx.Rollback()
-	pol, err := scanPolicy(tx.QueryRowContext(ctx, `SELECT `+policyCols+` FROM reps WHERE id=? AND enabled=1`, repID))
-	if err != nil {
-		return 0, ErrAuth
-	}
-	var plan string
-	var used int64
-	if err := tx.QueryRowContext(ctx, `SELECT c.plan,COALESCE(u.up+u.down,0) FROM clients c LEFT JOIN client_usage u ON u.email=c.email WHERE c.email=? AND c.rep_id=?`,
-		email, repID).Scan(&plan, &used); err != nil {
-		return 0, ErrNotFound
-	}
-	if pol.DenyRenew {
-		return 0, fmt.Errorf("%w: renewing clients is not allowed for this representative", ErrPolicy)
-	}
-	now := s.now().Unix()
-	if plan == "volume" && used > 0 {
-		r, err := tx.ExecContext(ctx, `UPDATE reps SET volume_credit=volume_credit-? WHERE id=? AND volume_credit>=?`, used, repID, used)
-		if err != nil {
-			return 0, err
-		}
-		if n, _ := r.RowsAffected(); n != 1 {
-			return 0, ErrCredit
-		}
-		if _, err := tx.ExecContext(ctx, `INSERT INTO credit_ledger(unix,rep_id,actor,kind,client_email,volume_delta,note) VALUES(?,?,?,?,?,?,?)`,
-			now, repID, actor, "charge", email, -used, "usage reset"); err != nil {
-			return 0, err
-		}
-		charged = used
-	}
-	if err := tx.Commit(); err != nil {
-		return 0, err
-	}
-	if err := s.ResetUsage(ctx, email, "api"); err != nil {
-		if charged > 0 { // give it back, on the record
-			_, _ = s.db.ExecContext(ctx, `UPDATE reps SET volume_credit=volume_credit+? WHERE id=?`, charged, repID)
-			_, _ = s.db.ExecContext(ctx, `INSERT INTO credit_ledger(unix,rep_id,actor,kind,client_email,volume_delta,note) VALUES(?,?,?,?,?,?,?)`,
-				s.now().Unix(), repID, actor, "refund", email, charged, "usage reset failed")
-		}
-		return 0, err
-	}
-	return charged, nil
 }
 
 // resClientIn is a new customer, or a renewal (plan, gb, days, product).
@@ -373,6 +340,9 @@ func (s *Store) QuoteFor(ctx context.Context, repID string, in QuoteIn) (Quote, 
 			return refuse(err)
 		}
 		in.Name = cv.Email
+		if cv.Legacy {
+			return refuse(fmt.Errorf("%w: old users cannot be renewed; make a new client", ErrPolicy))
+		}
 		if in.Plan == "" {
 			in.Plan = cv.Plan
 		}
@@ -417,7 +387,7 @@ func (s *Store) QuoteFor(ctx context.Context, repID string, in QuoteIn) (Quote, 
 		q.fill(c, plan, in.Days, 0)
 		if c.Email != "" {
 			var x int
-			if s.ro.QueryRowContext(ctx, `SELECT 1 FROM clients WHERE email=?`, c.Email).Scan(&x) == nil {
+			if s.ro.QueryRowContext(ctx, `SELECT 1 FROM clients WHERE email=? COLLATE NOCASE`, c.Email).Scan(&x) == nil {
 				return refuse(errNameTaken)
 			}
 		}
@@ -427,6 +397,9 @@ func (s *Store) QuoteFor(ctx context.Context, repID string, in QuoteIn) (Quote, 
 		if err := s.quotePolicy(ctx, repID, c, plan, true); err != nil {
 			return refuse(err)
 		}
+	}
+	if (q.chargeBytes > 0 || q.ChargeUnits > 0) && s.RepLocked(ctx, repID) {
+		return refuse(fmt.Errorf("%w: an overdue bill is unpaid; pay it to sell again", ErrPolicy))
 	}
 	net := q.chargeBytes - q.refundBytes
 	q.CreditAfterGB, q.UnitsAfter = roundGB(float64(vol-net)/gibF), units-q.ChargeUnits
@@ -571,7 +544,8 @@ func resellerRoutes(s *Store, mux routeMux, subBase string) {
 		_ = s.ro.QueryRowContext(ctx, `SELECT COUNT(*) FROM clients WHERE rep_id=?`, c.RepID).Scan(&n)
 		apiJSON(w, http.StatusOK, map[string]any{"id": c.RepID, "name": name, "credit_gb": gbOf(vol), "units": units, "clients": n,
 			"policy": apiPolicyOf(pol), "sub_seller": parent != "", "sub_base": publicBase(base(r, c.RepID), r) + "/sub/",
-			"key": map[string]any{"id": c.KeyID, "name": c.Name, "scopes": scopeList(c.Scopes), "expires_unix": c.Expires}})
+			"locked": s.RepLocked(ctx, c.RepID), // an overdue bill stops new sales and renewals until it is paid
+			"key":    map[string]any{"id": c.KeyID, "name": c.Name, "scopes": scopeList(c.Scopes), "expires_unix": c.Expires}})
 	})
 	route("GET "+P+"/inbounds", scopeAccountRead, func(w http.ResponseWriter, r *http.Request, c apiCaller) {
 		ctx := r.Context()
@@ -697,7 +671,7 @@ func resellerRoutes(s *Store, mux routeMux, subBase string) {
 			for range 5 {
 				name := "u" + randomHex(4)
 				var x int
-				if s.ro.QueryRowContext(ctx, `SELECT 1 FROM clients WHERE email=?`, name).Scan(&x) != nil {
+				if s.ro.QueryRowContext(ctx, `SELECT 1 FROM clients WHERE email=? COLLATE NOCASE`, name).Scan(&x) != nil {
 					cl.Email = name
 					break
 				}
@@ -707,7 +681,7 @@ func resellerRoutes(s *Store, mux routeMux, subBase string) {
 			return "", 0, 0, fmt.Errorf("%w: name: letters, digits and . _ @ + - (up to 128)", ErrInvalid)
 		}
 		var x int
-		if s.db.QueryRowContext(ctx, `SELECT 1 FROM clients WHERE email=?`, cl.Email).Scan(&x) == nil {
+		if s.db.QueryRowContext(ctx, `SELECT 1 FROM clients WHERE email=? COLLATE NOCASE`, cl.Email).Scan(&x) == nil {
 			return cl.Email, 0, 0, errNameTaken
 		}
 		top := s.ledgerTop(ctx)
@@ -807,7 +781,7 @@ func resellerRoutes(s *Store, mux routeMux, subBase string) {
 		for i := range names {
 			names[i] = in.Prefix + "-" + strconv.Itoa(in.Start+i)
 			var x int
-			if s.ro.QueryRowContext(ctx, `SELECT 1 FROM clients WHERE email=?`, names[i]).Scan(&x) == nil {
+			if s.ro.QueryRowContext(ctx, `SELECT 1 FROM clients WHERE email=? COLLATE NOCASE`, names[i]).Scan(&x) == nil {
 				apiErr(w, http.StatusConflict, codeConflict, "the name "+names[i]+" is taken; pick another prefix or start")
 				return
 			}

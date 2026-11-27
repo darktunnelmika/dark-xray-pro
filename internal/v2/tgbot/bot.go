@@ -52,6 +52,31 @@ type Bot struct {
 	menuSet    bool
 	// SyncSchedule sends scheduled broadcasts inside Tick (tests).
 	SyncSchedule bool
+
+	annMu    sync.Mutex           // one announceOrders at a time
+	rcptSeen map[string]time.Time // receipt already sent to the admins, until when
+}
+
+// receiptOnce tells whether admins should see this receipt: a customer often
+// sends the same payment as an album or twice in a row, and each photo used
+// to reach the admins again. Within 10 minutes only the first one does.
+func (b *Bot) receiptOnce(key string) bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	now := b.now()
+	if b.rcptSeen == nil {
+		b.rcptSeen = map[string]time.Time{}
+	}
+	for k, until := range b.rcptSeen {
+		if now.After(until) {
+			delete(b.rcptSeen, k)
+		}
+	}
+	if until, ok := b.rcptSeen[key]; ok && now.Before(until) {
+		return false
+	}
+	b.rcptSeen[key] = now.Add(10 * time.Minute)
+	return true
 }
 
 func (b *Bot) logf(f string, a ...any) {
@@ -75,10 +100,17 @@ func gb(n int64) string {
 	if n < 0 {
 		return "نامحدود"
 	}
-	return strconv.FormatFloat(float64(n)/(1<<30), 'f', 2, 64) + " GB"
+	g := float64(n) / (1 << 30)
+	if g == float64(int64(g)) {
+		return faInt(int64(g)) + " گیگ"
+	}
+	return strings.ReplaceAll(faNum(strings.TrimRight(strings.TrimRight(strconv.FormatFloat(g, 'f', 2, 64), "0"), ".")), ".", "٫") + " گیگ"
 }
 
-func money(n int64) string {
+// money is an amount for people: Persian digits, grouped.
+func money(n int64) string { return faMoney(n) }
+
+func groupLatin(n int64) string {
 	s := strconv.FormatInt(n, 10)
 	var out []byte
 	for i := 0; i < len(s); i++ {
@@ -173,6 +205,7 @@ func (b *Bot) Tick(ctx context.Context) {
 		b.deliverTickets(ctx)
 		b.deliverReminders(ctx)
 		b.remindTrials(ctx)
+		b.remindBills(ctx)
 		return
 	}
 	b.syncMenuButton(ctx)
@@ -188,6 +221,7 @@ func (b *Bot) Tick(ctx context.Context) {
 	b.deliverTickets(ctx)
 	b.deliverReminders(ctx)
 	b.remindTrials(ctx)
+	b.remindBills(ctx)
 }
 
 func (b *Bot) send(ctx context.Context, chat int64, text string, kb *Keyboard) int64 {
@@ -254,8 +288,15 @@ func (b *Bot) onMessage(ctx context.Context, m *Message) {
 	name := strings.TrimSpace(m.From.FirstName + " " + m.From.LastName)
 	_ = b.Store.TgTouch(ctx, chat, name, m.From.Username)
 	b.Store.TgTouchBot(ctx, b.Seller, chat)
+	if b.banned(ctx, chat) {
+		b.send(ctx, chat, "⛔️ دسترسی شما به این ربات محدود شده است.", nil)
+		return
+	}
 	if m.Paid != nil {
 		b.onPaid(ctx, chat, name, m.Paid)
+		return
+	}
+	if m.Contact != nil && b.onContact(ctx, chat, m) {
 		return
 	}
 	text := strings.TrimSpace(m.Text)
@@ -284,7 +325,7 @@ func (b *Bot) onMessage(ctx context.Context, m *Message) {
 			if b.repSaleReceipt(ctx, chat, name, m.Photo[len(m.Photo)-1].FileID, w) {
 				return
 			}
-		} else if b.onReceipt(ctx, chat, name, m.Photo[len(m.Photo)-1].FileID, w) {
+		} else if p := m.Photo[len(m.Photo)-1]; b.onReceipt(ctx, chat, name, photoRef{ID: p.FileID, Uniq: p.UniqueID}, w) {
 			return
 		} else if w == "" && b.repSaleReceipt(ctx, chat, name, m.Photo[len(m.Photo)-1].FileID, "") {
 			return
@@ -294,7 +335,7 @@ func (b *Bot) onMessage(ctx context.Context, m *Message) {
 		if ce := m.CustomEmoji(); len(ce) > 0 {
 			n, err := b.Store.AddEmoji(ctx, ce, false)
 			if err != nil {
-				b.send(ctx, chat, "ذخیره نشد: "+esc(err.Error()), nil)
+				b.send(ctx, chat, "ذخیره نشد: "+esc(faErr(err)), nil)
 				return
 			}
 			var keys []string
@@ -358,6 +399,10 @@ func (b *Bot) onMessage(ctx context.Context, m *Message) {
 		b.menu(ctx, chat)
 		return
 	}
+	if code, ok := strings.CutPrefix(text, "/start rsinv_"); ok {
+		b.claimInvite(ctx, chat, name, m.From.Username, code)
+		return
+	}
 	if code, ok := strings.CutPrefix(text, "/start rep_"); ok {
 		rep, err := b.Store.ClaimTgLinkCode(ctx, strings.TrimSpace(code), chat)
 		if err != nil {
@@ -387,7 +432,7 @@ func (b *Bot) onMessage(ctx context.Context, m *Message) {
 		}
 		return
 	}
-	if rep, role := b.Store.TgRepRole(ctx, chat); rep != "" && (b.Seller == "" || rep == b.Seller) {
+	if rep, role := b.Store.TgRepRole(ctx, chat); rep != "" && b.repInScope(ctx, rep) {
 		if w := b.peekAwait(chat); strings.HasPrefix(w, "r:") && !strings.HasPrefix(text, "/") {
 			b.takeAwait(chat)
 			if b.repInput(ctx, chat, rep, role, w, text) {
@@ -398,12 +443,22 @@ func (b *Bot) onMessage(ctx context.Context, m *Message) {
 			b.repKey(ctx, chat, rep, role, act)
 			return
 		}
-		if (text == "/start" || text == "/help" || text == "/admin" || text == "/panel") && b.repMode(ctx, chat) {
-			b.repHome(ctx, chat, rep, role)
-			b.ensureRepKeyboard(ctx, chat)
+		if text == "/start wallet" {
+			b.repWallet(ctx, chat)
 			return
 		}
-		if b.repMessage(ctx, chat, rep, role, text) {
+		if (text == "/start" || text == "/help" || text == "/admin" || text == "/panel") && b.repMode(ctx, chat) {
+			b.repHome(ctx, chat, rep, role)
+			if text == "/start" {
+				b.refreshRepKeyboard(ctx, chat)
+			} else {
+				b.ensureRepKeyboard(ctx, chat)
+			}
+			return
+		}
+		// In customer mode /start is the customer's menu (with the way back),
+		// not the reseller's command help.
+		if !(text == "/start" && !b.repMode(ctx, chat)) && b.repMessage(ctx, chat, rep, role, text) {
 			return
 		}
 	}
@@ -440,6 +495,7 @@ func (b *Bot) onMessage(ctx context.Context, m *Message) {
 		}
 		b.menu(ctx, chat)
 		b.ensureKeyboard(ctx, chat)
+		b.refreshRepKeyboard(ctx, chat)
 		return
 	case "/buy":
 		b.shop(ctx, chat)
@@ -468,6 +524,11 @@ func (b *Bot) onMessage(ctx context.Context, m *Message) {
 			return
 		}
 		b.ticket(ctx, chat, name, m.From.Username, arg)
+		return
+	}
+	if what := b.peekAwait(chat); strings.HasPrefix(what, "last4:") && text != "" && !strings.HasPrefix(text, "/") {
+		b.takeAwait(chat)
+		b.takeLast4(ctx, chat, strings.TrimPrefix(what, "last4:"), text)
 		return
 	}
 	if what := b.peekAwait(chat); what == "topamt" && text != "" && !strings.HasPrefix(text, "/") {
@@ -643,7 +704,11 @@ func (b *Bot) shopIn(ctx context.Context, chat int64, cat string) {
 		return
 	}
 	kb.Rows = append(kb.Rows, row(cbBtn("« منوی اصلی", "home")))
-	b.send(ctx, chat, "🛍 <b>بسته‌ها</b>\n"+line+"\nهمهٔ بسته‌ها روی همهٔ سرورها کار می‌کنند و با یک لینک تحویل می‌شوند.\nیک بسته را انتخاب کنید:", kb)
+	intro := "همهٔ بسته‌ها روی همهٔ سرورها کار می‌کنند و با یک لینک تحویل می‌شوند.\nیک بسته را انتخاب کنید:"
+	if t := b.Store.ShopText(ctx, b.Seller); t != "" {
+		intro = esc(t) // the seller's own text above its plans
+	}
+	b.send(ctx, chat, "🛍 <b>بسته‌ها</b>\n"+line+"\n"+intro, kb)
 }
 
 func (b *Bot) buy(ctx context.Context, chat int64, productID, renew string) {
@@ -741,6 +806,20 @@ func (b *Bot) clientCardOld(c hubcore.ClientView) string {
 }
 
 func (b *Bot) sendSub(ctx context.Context, chat int64, email string) {
+	b.sendSubKB(ctx, chat, email, nil)
+}
+
+// sendSubToCustomer is the delivery a customer gets: the link, and where to
+// go next (how to connect, the service, the menu), so nobody is left at a
+// message without buttons.
+func (b *Bot) sendSubToCustomer(ctx context.Context, chat int64, email string) {
+	b.sendSubKB(ctx, chat, email, &Keyboard{Rows: [][]Button{
+		row(cbBtn("📚 آموزش اتصال", "guide"), cbBtn("📦 مشاهدهٔ سرویس", "svc:"+email)),
+		row(cbBtn("« منوی اصلی", "home")),
+	}})
+}
+
+func (b *Bot) sendSubKB(ctx context.Context, chat int64, email string, kb *Keyboard) {
 	c, err := b.Store.ClientByEmail(ctx, email)
 	if err != nil {
 		return
@@ -751,7 +830,7 @@ func (b *Bot) sendSub(ctx context.Context, chat int64, email string) {
 			b.logf("tgbot photo: %v", err)
 		}
 	}
-	b.send(ctx, chat, "لینک اشتراک (در v2rayNG، Hiddify یا Streisand وارد کنید):\n<code>"+esc(url)+"</code>", nil)
+	b.send(ctx, chat, "لینک اشتراک (در v2rayNG، Hiddify یا Streisand وارد کنید):\n<code>"+esc(url)+"</code>", kb)
 }
 
 func (b *Bot) link(ctx context.Context, chat int64, tokenOrURL string) {
@@ -771,6 +850,9 @@ func (b *Bot) onCallback(ctx context.Context, q *CallbackQuery) {
 		return
 	}
 	if b.repCallback(ctx, chat, q.Data) {
+		return
+	}
+	if b.banned(ctx, chat) {
 		return
 	}
 	if b.shopCallback(ctx, chat, q.Data) {
@@ -805,6 +887,9 @@ func (b *Bot) onCallback(ctx context.Context, q *CallbackQuery) {
 		return
 	}
 	if b.repSaleCallback(ctx, q) {
+		return
+	}
+	if b.growCallback(ctx, q) {
 		return
 	}
 	mine := func() bool { return b.ownsClient(ctx, chat, rest) || b.Owners[chat] }
@@ -848,7 +933,7 @@ func (b *Bot) onCallback(ctx context.Context, q *CallbackQuery) {
 			pid = ""
 		}
 		if err := b.Store.SetAutoRenew(ctx, chat, email, pid); err != nil {
-			b.send(ctx, chat, "این تنظیم انجام نشد: "+esc(err.Error()), homeKB)
+			b.send(ctx, chat, "این تنظیم انجام نشد: "+esc(faErr(err)), homeKB)
 			return
 		}
 		b.showAutoRenew(ctx, chat, email)
@@ -950,13 +1035,13 @@ func (b *Bot) onCallback(ctx context.Context, q *CallbackQuery) {
 		if verb == "ok" {
 			email, err := b.Store.FulfillOrder(ctx, by, id)
 			if err != nil {
-				b.send(ctx, chat, fmt.Sprintf("تحویل سفارش #%d ممکن نشد: %s", id, esc(err.Error())), nil)
+				b.send(ctx, chat, fmt.Sprintf("تحویل سفارش #%d ممکن نشد: %s", id, esc(faErr(err))), nil)
 				return
 			}
-			b.send(ctx, chat, fmt.Sprintf("✅ سفارش #%d تحویل شد: <code>%s</code>", id, esc(email)), &Keyboard{Rows: [][]Button{{{Text: "لینک و QR", Data: "sub:" + email}}}})
+			b.send(ctx, chat, fmt.Sprintf("✅ سفارش #%s تحویل شد: <code>%s</code>", faInt(id), esc(email)), &Keyboard{Rows: [][]Button{{{Text: "لینک و QR", Data: "sub:" + email}}}})
 		} else {
 			if err := b.Store.CancelOrder(ctx, by, id); err != nil {
-				b.send(ctx, chat, fmt.Sprintf("لغو سفارش #%d ممکن نشد: %s", id, esc(err.Error())), nil)
+				b.send(ctx, chat, fmt.Sprintf("لغو سفارش #%d ممکن نشد: %s", id, esc(faErr(err))), nil)
 				return
 			}
 			b.send(ctx, chat, fmt.Sprintf("سفارش #%d لغو شد.", id), nil)
@@ -1017,7 +1102,7 @@ func (b *Bot) ownerMessage(ctx context.Context, m *Message, text string) bool {
 		}
 		bal, err := b.Store.WalletAdjust(ctx, chat, delta, strings.Join(f[2:], " "))
 		if err != nil {
-			b.send(ctx, m.Chat.ID, "انجام نشد: "+esc(err.Error()), nil)
+			b.send(ctx, m.Chat.ID, "انجام نشد: "+esc(faErr(err)), nil)
 			return true
 		}
 		b.send(ctx, m.Chat.ID, fmt.Sprintf("کیف پول %d: %+d⭐ — موجودی %d⭐", chat, delta, bal), nil)
@@ -1101,6 +1186,13 @@ func (b *Bot) orderCard(ctx context.Context, o hubcore.Order) string {
 }
 
 func (b *Bot) announceOrders(ctx context.Context) {
+	// Called from the ticker and right after payments and approvals; two
+	// runs at once (or two bots) must not tell the same order twice, so each
+	// order is claimed in the database before anything is sent.
+	if !b.annMu.TryLock() {
+		return
+	}
+	defer b.annMu.Unlock()
 	if news, err := b.Store.OrdersToAnnounce(ctx); err == nil {
 		cardOn := b.cardOn(ctx)
 		for _, o := range news {
@@ -1109,6 +1201,9 @@ func (b *Bot) announceOrders(ctx context.Context) {
 			}
 			if cardOn && o.Seller == b.Seller && !o.HasReceipt && o.Amount > 0 && strings.HasPrefix(o.Buyer, "tg:") {
 				continue // announced with the receipt photo
+			}
+			if !b.Store.ClaimOrderAnnounce(ctx, o.ID, false) {
+				continue // someone else announced it meanwhile
 			}
 			if o.Seller == b.Seller {
 				b.notify(ctx, "orders", b.orderCard(ctx, o), orderButtons(o.ID))
@@ -1119,7 +1214,6 @@ func (b *Bot) announceOrders(ctx context.Context) {
 					b.send(ctx, chat, b.orderCard(ctx, o), orderButtons(o.ID))
 				}
 			}
-			b.Store.MarkOrderAnnounced(ctx, o.ID, false)
 		}
 	}
 	if done, err := b.Store.DeliveriesToAnnounce(ctx); err == nil {
@@ -1127,12 +1221,15 @@ func (b *Bot) announceOrders(ctx context.Context) {
 			if !b.handles(o.Seller) {
 				continue
 			}
+			if !b.Store.ClaimOrderAnnounce(ctx, o.ID, true) {
+				continue
+			}
 			chat, ok := hubcore.TgChatOfBuyer(o.Buyer)
 			if ok {
 				if o.Status == "fulfilled" {
 					b.typing(ctx, chat, "⏳ در حال آماده‌سازی سرویس شما…")
 					b.celebrate(ctx, chat, fmt.Sprintf("🎉 سفارش #%s آماده شد! سرویس شما فعال است.", faInt(o.ID)), nil, EffectParty)
-					b.sendSub(ctx, chat, o.ClientEmail)
+					b.sendSubToCustomer(ctx, chat, o.ClientEmail)
 				} else {
 					msg := fmt.Sprintf("❌ سفارش <b>#%s</b> لغو شد.", faInt(o.ID))
 					if o.HasReceipt {
@@ -1141,7 +1238,6 @@ func (b *Bot) announceOrders(ctx context.Context) {
 					b.send(ctx, chat, msg, &Keyboard{Rows: [][]Button{row(cbBtn("💬 پشتیبانی", "support"), cbBtn("« منو", "home"))}})
 				}
 			}
-			b.Store.MarkOrderAnnounced(ctx, o.ID, true)
 		}
 	}
 }
@@ -1232,8 +1328,8 @@ func (b *Bot) statusText(ctx context.Context) string {
 			}
 		}
 	}
-	return fmt.Sprintf("📡 نودها %d/%d آنلاین\n%s\n\n👥 کلاینت فعال %d از %d — آنلاین الان %d\n📶 ترافیک امروز %s",
-		o.NodesOnline, o.Nodes, strings.Join(lines, "\n"), o.ClientsActive, o.Clients, o.OnlineUsers, gb(o.TrafficToday))
+	return fmt.Sprintf("📡 نودها %s/%s آنلاین\n%s\n\n👥 کلاینت فعال %s از %s — آنلاین الان %s\n📶 ترافیک امروز %s",
+		faInt(int64(o.NodesOnline)), faInt(int64(o.Nodes)), strings.Join(lines, "\n"), faInt(int64(o.ClientsActive)), faInt(int64(o.Clients)), faInt(int64(o.OnlineUsers)), gb(o.TrafficToday))
 }
 
 func (b *Bot) reportText(ctx context.Context) string {
@@ -1247,7 +1343,7 @@ func (b *Bot) reportText(ctx context.Context) string {
 			revenue += o.Amount
 		}
 	}
-	return fmt.Sprintf("📋 گزارش ۲۴ ساعت اخیر\n\n%s\n\n🛒 تحویل‌شده: %d سفارش — %s تومان\n⏳ در انتظار: %d", b.statusText(ctx), sold, money(revenue), len(pending))
+	return fmt.Sprintf("📋 گزارش ۲۴ ساعت اخیر\n\n%s\n\n🛒 تحویل‌شده: %s سفارش — %s تومان\n⏳ در انتظار: %s", b.statusText(ctx), faInt(int64(sold)), money(revenue), faInt(int64(len(pending))))
 }
 
 // dailyReport sends the report once a day at 09:00 Tehran time (05:30 UTC).
@@ -1336,7 +1432,7 @@ func (b *Bot) Alert(ctx context.Context, text string) { b.toOwners(ctx, text, ni
 
 // Tell sends one customer a message (auto-renew notices and the like).
 func (b *Bot) Tell(ctx context.Context, chat int64, text string) {
-	_, _ = b.API.Send(ctx, chat, text, &Keyboard{Rows: [][]Button{row(cbBtn("📦 سرویس‌های من", "mine"), cbBtn("💰 کیف پول", "wallet"))}}, 0)
+	_, _ = b.API.Send(ctx, chat, text, &Keyboard{Rows: [][]Button{row(cbBtn("📦 سرویس‌های من", "mine"), cbBtn("👛 کیف پول", "wallet"))}}, 0)
 }
 
 const repHelp = `دستورهای نماینده:

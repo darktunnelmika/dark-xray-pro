@@ -96,7 +96,7 @@ func (s *Store) CloneClient(ctx context.Context, from, to string) error {
 		return err
 	}
 	var n int
-	if s.ro.QueryRowContext(ctx, `SELECT COUNT(*) FROM clients WHERE email=?`, to).Scan(&n) == nil && n > 0 {
+	if s.ro.QueryRowContext(ctx, `SELECT COUNT(*) FROM clients WHERE email=? COLLATE NOCASE`, to).Scan(&n) == nil && n > 0 {
 		return fmt.Errorf("%w: %s already exists", ErrInvalid, to)
 	}
 	nc := c.Client
@@ -108,8 +108,9 @@ func (s *Store) CloneClient(ctx context.Context, from, to string) error {
 		return err
 	}
 	_, _ = s.db.ExecContext(ctx, `UPDATE clients SET rep_id=(SELECT rep_id FROM clients WHERE email=?), plan=(SELECT plan FROM clients WHERE email=?),
-note=(SELECT note FROM clients WHERE email=?), reset_period=(SELECT reset_period FROM clients WHERE email=?), hwid_limit=(SELECT hwid_limit FROM clients WHERE email=?) WHERE email=?`,
-		from, from, from, from, from, to)
+note=(SELECT note FROM clients WHERE email=?), reset_period=(SELECT reset_period FROM clients WHERE email=?), reset_year=(SELECT reset_year FROM clients WHERE email=?),
+hwid_limit=(SELECT hwid_limit FROM clients WHERE email=?) WHERE email=?`,
+		from, from, from, from, from, from, to)
 	_, _ = s.db.ExecContext(ctx, `INSERT OR IGNORE INTO client_group_members(group_id,email) SELECT group_id,? FROM client_group_members WHERE email=?`, to, from)
 	return nil
 }

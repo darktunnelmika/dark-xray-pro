@@ -2,6 +2,7 @@ package hubcore
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -36,7 +37,7 @@ CREATE TABLE IF NOT EXISTS ip_log (
 CREATE INDEX IF NOT EXISTS ip_log_last ON ip_log(last_unix);
 `
 
-var resetPeriods = map[string]bool{"": true, "day": true, "week": true, "month": true}
+var resetPeriods = map[string]bool{"": true, "day": true, "week": true, "month": true, "year": true}
 
 func (s *Store) ensureResetSchema() error {
 	if _, err := s.db.Exec(resetSchema); err != nil {
@@ -45,7 +46,28 @@ func (s *Store) ensureResetSchema() error {
 	if err := s.addColumn("clients", "reset_period", "TEXT NOT NULL DEFAULT ''"); err != nil {
 		return err
 	}
-	return s.addColumn("clients", "last_reset_unix", "INTEGER NOT NULL DEFAULT 0")
+	if err := s.addColumn("clients", "last_reset_unix", "INTEGER NOT NULL DEFAULT 0"); err != nil {
+		return err
+	}
+	// A yearly reset lives in its own column: a panel older than v2.54
+	// (after a rollback) reads an unknown reset_period as due every minute
+	// and would wipe the usage again and again; reset_period '' it ignores.
+	if err := s.addColumn("clients", "reset_year", "INTEGER NOT NULL DEFAULT 0"); err != nil {
+		return err
+	}
+	_, err := s.db.Exec(`UPDATE clients SET reset_year=1, reset_period='' WHERE reset_period='year'`)
+	return err
+}
+
+// resetPeriodSQL is a client's reset period as one value.
+const resetPeriodSQL = `CASE WHEN reset_year=1 THEN 'year' ELSE reset_period END`
+
+// resetColumns are what is stored for a period: reset_period and reset_year.
+func resetColumns(period string) (string, bool) {
+	if period == "year" {
+		return "", true
+	}
+	return period, false
 }
 
 // ResetUsage clears a client's metered total and logs what was cleared.
@@ -55,20 +77,27 @@ func (s *Store) ResetUsage(ctx context.Context, email, reason string) error {
 		return err
 	}
 	defer tx.Rollback()
+	if err := resetUsageTx(ctx, tx, email, reason, s.now().Unix()); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// resetUsageTx is ResetUsage inside the caller's transaction.
+func resetUsageTx(ctx context.Context, tx *sql.Tx, email, reason string, now int64) error {
 	var n int
 	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM clients WHERE email=?`, email).Scan(&n); err != nil || n == 0 {
 		return ErrNotFound
 	}
 	var up, down int64
 	_ = tx.QueryRowContext(ctx, `SELECT up,down FROM client_usage WHERE email=?`, email).Scan(&up, &down)
-	now := s.now().Unix()
 	if _, err := tx.ExecContext(ctx, `INSERT INTO usage_resets(email,unix,up,down,reason) VALUES(?,?,?,?,?)`, email, now, up, down, reason); err != nil {
 		return err
 	}
 	if err := keepRepUsage(ctx, tx, email); err != nil { // the reseller's lifetime total keeps it
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE client_usage SET up=0, down=0 WHERE email=?`, email); err != nil {
+	if _, err := tx.ExecContext(ctx, `UPDATE client_usage SET up=0, down=0, ext_bytes=0 WHERE email=?`, email); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE clients SET last_reset_unix=? WHERE email=?`, now, email); err != nil {
@@ -77,17 +106,18 @@ func (s *Store) ResetUsage(ctx context.Context, email, reason string) error {
 	if _, err := tx.ExecContext(ctx, `INSERT INTO events(unix,node_id,email,kind) VALUES(?,?,?,?)`, now, "", email, "reset:"+reason); err != nil {
 		return err
 	}
-	return tx.Commit()
+	return nil
 }
 
 // SetResetPeriod sets the periodic reset ("" turns it off). The period
 // starts now.
 func (s *Store) SetResetPeriod(ctx context.Context, email, period string) error {
 	if !resetPeriods[period] {
-		return fmt.Errorf("%w: period must be day, week, month or empty", ErrInvalid)
+		return fmt.Errorf("%w: period must be day, week, month, year or empty", ErrInvalid)
 	}
-	r, err := s.db.ExecContext(ctx, `UPDATE clients SET reset_period=?, last_reset_unix=CASE WHEN last_reset_unix=0 OR reset_period<>? THEN ? ELSE last_reset_unix END WHERE email=?`,
-		period, period, s.now().Unix(), email)
+	col, year := resetColumns(period)
+	r, err := s.db.ExecContext(ctx, `UPDATE clients SET last_reset_unix=CASE WHEN last_reset_unix=0 OR `+resetPeriodSQL+`<>? THEN ? ELSE last_reset_unix END,
+reset_period=?, reset_year=? WHERE email=?`, period, s.now().Unix(), col, year, email)
 	if err != nil {
 		return err
 	}
@@ -107,13 +137,15 @@ func nextReset(period string, last int64) int64 {
 		return t.AddDate(0, 0, 7).Unix()
 	case "month":
 		return t.AddDate(0, 1, 0).Unix()
+	case "year":
+		return t.AddDate(1, 0, 0).Unix()
 	}
 	return 0
 }
 
 // runDueResets resets clients whose period has elapsed; returns how many.
 func (s *Store) runDueResets(ctx context.Context) int {
-	rows, err := s.ro.QueryContext(ctx, `SELECT email,reset_period,last_reset_unix FROM clients WHERE reset_period<>''`)
+	rows, err := s.ro.QueryContext(ctx, `SELECT email,`+resetPeriodSQL+`,last_reset_unix FROM clients WHERE reset_period<>'' OR reset_year=1`)
 	if err != nil {
 		return 0
 	}
@@ -143,6 +175,7 @@ func (s *Store) RunResets(ctx context.Context) {
 		s.runNextPlans(ctx)
 		s.runOnHold(ctx)
 		s.runExpiryRefunds(ctx)
+		s.runAutoClean(ctx)
 		select {
 		case <-ctx.Done():
 			return

@@ -125,6 +125,9 @@ type Store struct {
 	now  func() time.Time
 	path string
 
+	usageMu sync.Map   // node id -> *sync.Mutex: one usage batch at a time per node (usageinbox.go)
+	applyMu sync.Mutex // one usage chunk at a time across nodes
+
 	distMu  sync.Mutex
 	distDir string // dark-node and xray for installs and self-update
 	distSHA string
@@ -139,7 +142,10 @@ func Open(path string) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	q := "_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=synchronous(FULL)"
+	// cache_size: 32 MB for the writer (16 MB per reader) instead of SQLite's
+	// 2 MB, so tens of thousands of clients' index pages stay in memory; with
+	// the small default, bulk writes slowed down as the table grew.
+	q := "_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=synchronous(FULL)&_pragma=cache_size(-32000)"
 	u := url.URL{Scheme: "file", Path: path, RawQuery: q}
 	db, err := sql.Open("sqlite", u.String())
 	if err != nil {
@@ -150,7 +156,7 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("schema: %w", err)
 	}
-	ru := url.URL{Scheme: "file", Path: path, RawQuery: "mode=ro&_pragma=busy_timeout(5000)&_pragma=query_only(1)"}
+	ru := url.URL{Scheme: "file", Path: path, RawQuery: "mode=ro&_pragma=busy_timeout(5000)&_pragma=query_only(1)&_pragma=cache_size(-16000)"}
 	ro, err := sql.Open("sqlite", ru.String())
 	if err != nil {
 		db.Close()
@@ -190,7 +196,7 @@ func Open(path string) (*Store, error) {
 		st.Close()
 		return nil, err
 	}
-	if err := st.ensureLegacySchema(); err != nil {
+	if err := st.ensureOldUsersSchema(); err != nil {
 		st.Close()
 		return nil, err
 	}
@@ -199,6 +205,10 @@ func Open(path string) (*Store, error) {
 		return nil, err
 	}
 	if err := st.ensureSellerSchema(); err != nil {
+		st.Close()
+		return nil, err
+	}
+	if err := st.ensureUsedHereSchema(); err != nil {
 		st.Close()
 		return nil, err
 	}
@@ -227,6 +237,10 @@ func Open(path string) (*Store, error) {
 		return nil, err
 	}
 	if err := st.ensureTgRepSchema(); err != nil {
+		st.Close()
+		return nil, err
+	}
+	if err := st.ensureTgBansSchema(); err != nil {
 		st.Close()
 		return nil, err
 	}
@@ -282,6 +296,14 @@ func Open(path string) (*Store, error) {
 		st.Close()
 		return nil, err
 	}
+	if err := st.ensureResaleSchema(); err != nil {
+		st.Close()
+		return nil, err
+	}
+	if err := st.ensureLegacySchema(); err != nil {
+		st.Close()
+		return nil, err
+	}
 	if err := st.ensureRouteSchema(); err != nil {
 		st.Close()
 		return nil, err
@@ -310,6 +332,14 @@ func Open(path string) (*Store, error) {
 		st.Close()
 		return nil, err
 	}
+	if err := st.ensurePayCardsSchema(); err != nil {
+		st.Close()
+		return nil, err
+	}
+	if err := st.ensureDailyCapSchema(); err != nil {
+		st.Close()
+		return nil, err
+	}
 	if err := st.ensureAutoRenewSchema(); err != nil {
 		st.Close()
 		return nil, err
@@ -322,8 +352,29 @@ func Open(path string) (*Store, error) {
 		st.Close()
 		return nil, err
 	}
+	if err := st.ensureTenantSchema(); err != nil { // after the columns it reads (rep_id, events)
+		st.Close()
+		return nil, err
+	}
+	if err := st.ensureUsageInboxSchema(); err != nil {
+		st.Close()
+		return nil, err
+	}
+	if err := st.ensureTenantSubSchema(); err != nil { // after tenants
+		st.Close()
+		return nil, err
+	}
+	if err := st.ensureSubFetchSchema(); err != nil {
+		st.Close()
+		return nil, err
+	}
 	// Last: its first fill reads tables the steps above create.
 	if err := st.ensureTgBotUsers(); err != nil {
+		st.Close()
+		return nil, err
+	}
+	// Usage batches a stop left half-applied are finished first.
+	if err := st.drainAllUsage(context.Background()); err != nil {
 		st.Close()
 		return nil, err
 	}
@@ -340,6 +391,21 @@ func (s *Store) SetClock(now func() time.Time) { s.now = now }
 func hashToken(tok string) string {
 	sum := sha256.Sum256([]byte(tok))
 	return hex.EncodeToString(sum[:])
+}
+
+// newRowID is the row id for a new row of table: past every id the table
+// ever gave out, so the id of a deleted row never goes to another one.
+// Sales bots keep users, templates and groups by these numbers.
+func newRowID(ctx context.Context, tx *sql.Tx, table string) (int64, error) {
+	key := "rowid_hw_" + table
+	var hw, top int64
+	_ = tx.QueryRowContext(ctx, `SELECT CAST(value AS INTEGER) FROM settings WHERE key=?`, key).Scan(&hw)
+	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(rowid),0) FROM `+table).Scan(&top); err != nil {
+		return 0, err
+	}
+	id := max(hw, top) + 1
+	_, err := tx.ExecContext(ctx, `INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value`, key, fmt.Sprint(id))
+	return id, err
 }
 
 func randomHex(n int) string {
@@ -368,9 +434,20 @@ func (s *Store) CreateNode(ctx context.Context, id, name string) (string, error)
 		return "", ErrInvalid
 	}
 	tok := randomHex(32)
-	_, err := s.db.ExecContext(ctx, `INSERT INTO nodes(id,name,token_sha256,created_unix) VALUES(?,?,?,?)`,
-		id, name, hashToken(tok), s.now().Unix())
-	return tok, err
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return "", err
+	}
+	defer tx.Rollback()
+	rowid, err := newRowID(ctx, tx, "nodes")
+	if err != nil {
+		return "", err
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO nodes(rowid,id,name,token_sha256,created_unix) VALUES(?,?,?,?,?)`,
+		rowid, id, name, hashToken(tok), s.now().Unix()); err != nil {
+		return "", err
+	}
+	return tok, tx.Commit()
 }
 
 // RotateNodeToken replaces a node token (the old one stops working).
@@ -433,18 +510,45 @@ func putClientTx(ctx context.Context, tx *sql.Tx, c Client, now int64) error {
 	if !emailRE.MatchString(c.Email) || c.MaxIPs < 0 || c.DurationSeconds < 0 {
 		return ErrInvalid
 	}
+	if err := checkTermBounds(c); err != nil {
+		return err
+	}
 	// An update that omits credentials keeps the existing ones, so editing a
 	// client never breaks its connections or its subscription link.
-	var oldUUID, oldSecret, oldTok string
-	_ = tx.QueryRowContext(ctx, `SELECT uuid,secret,sub_token FROM clients WHERE email=?`, c.Email).Scan(&oldUUID, &oldSecret, &oldTok)
+	var oldUUID, oldSecret, oldTok, oldRep string
+	var rowid any // NULL keeps an existing row's id
+	if errors.Is(tx.QueryRowContext(ctx, `SELECT uuid,secret,sub_token,rep_id FROM clients WHERE email=?`, c.Email).Scan(&oldUUID, &oldSecret, &oldTok, &oldRep), sql.ErrNoRows) {
+		// Xray compares client names without letter case: "Ali" beside
+		// "ali" in one inbound makes it refuse the node's whole config.
+		var taken int
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM clients WHERE email=? COLLATE NOCASE`, c.Email).Scan(&taken); err != nil {
+			return err
+		}
+		if taken > 0 {
+			return fmt.Errorf("%w: client already exists (same name in other letter case)", ErrInvalid)
+		}
+		id, err := newRowID(ctx, tx, "clients")
+		if err != nil {
+			return err
+		}
+		rowid = id
+	}
+	// A connected shop's clients are written only by the shop (or the owner
+	// where the shop allows it), and its name space stays its own.
+	if t, ok := tenantOfRep(oldRep); ok && tenantAccess(ctx) != t {
+		return fmt.Errorf("%w: client already exists", ErrInvalid)
+	}
+	if oldUUID == "" && tenantAccess(ctx) == "" && reservedName(ctx, tx, c.Email) {
+		return fmt.Errorf("%w: names starting with a connected shop's id and + are reserved for that shop", ErrInvalid)
+	}
 	c.UUID = firstNonEmpty(c.UUID, oldUUID, RandomUUID())
 	c.Secret = firstNonEmpty(c.Secret, oldSecret, randomHex(16))
 	c.SubToken = firstNonEmpty(c.SubToken, oldTok, randomHex(16))
-	_, err := tx.ExecContext(ctx, `INSERT INTO clients(email,uuid,secret,enabled,volume_bytes,expires_unix,duration_seconds,max_ips,sub_token,created_unix)
-VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(email) DO UPDATE SET uuid=excluded.uuid, secret=excluded.secret, enabled=excluded.enabled,
+	_, err := tx.ExecContext(ctx, `INSERT INTO clients(rowid,email,uuid,secret,enabled,volume_bytes,expires_unix,duration_seconds,max_ips,sub_token,created_unix)
+VALUES(?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(email) DO UPDATE SET uuid=excluded.uuid, secret=excluded.secret, enabled=excluded.enabled,
 volume_bytes=excluded.volume_bytes, expires_unix=excluded.expires_unix, duration_seconds=excluded.duration_seconds, max_ips=excluded.max_ips,
 sub_token=excluded.sub_token`,
-		c.Email, c.UUID, c.Secret, c.Enabled, c.VolumeBytes, c.ExpiresUnix, c.DurationSeconds, c.MaxIPs, c.SubToken, now)
+		rowid, c.Email, c.UUID, c.Secret, c.Enabled, c.VolumeBytes, c.ExpiresUnix, c.DurationSeconds, c.MaxIPs, c.SubToken, now)
 	if err != nil {
 		return err
 	}
@@ -486,15 +590,22 @@ func (s *Store) PutInboundMeta(ctx context.Context, tag, nodeID string, template
 	}
 	defer tx.Rollback()
 	var cur string
+	var rowid any // NULL keeps an existing row's id
 	if tx.QueryRowContext(ctx, `SELECT node_id FROM inbounds WHERE tag=?`, tag).Scan(&cur) == nil {
 		var x int
 		if nodeID == "" || tx.QueryRowContext(ctx, `SELECT 1 FROM inbound_routes WHERE tag=?`, tag).Scan(&x) == nil {
 			nodeID = cur // a placed inbound keeps its routes; edit them with PutRoutes
 		}
+	} else {
+		id, err := newRowID(ctx, tx, "inbounds")
+		if err != nil {
+			return err
+		}
+		rowid = id
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO inbounds(tag,node_id,template,meta,enabled) VALUES(?,?,?,?,?)
+	if _, err := tx.ExecContext(ctx, `INSERT INTO inbounds(rowid,tag,node_id,template,meta,enabled) VALUES(?,?,?,?,?,?)
 ON CONFLICT(tag) DO UPDATE SET node_id=excluded.node_id, template=excluded.template, meta=excluded.meta, enabled=excluded.enabled`,
-		tag, nodeID, string(template), string(meta), enabled); err != nil {
+		rowid, tag, nodeID, string(template), string(meta), enabled); err != nil {
 		return err
 	}
 	if err := s.legacyRoute(ctx, tx, tag, nodeID, template, meta); err != nil {
@@ -620,14 +731,27 @@ type ClientView struct {
 	NextReset      int64     `json:"next_reset,omitempty"`
 	NextPlan       *NextPlan `json:"next_plan,omitempty"`
 	HWIDLimit      int       `json:"hwid_limit"`
-	SpeedKbps      int       `json:"speed_kbps"`         // 0 = no limit
-	StartBy        int64     `json:"start_by,omitempty"` // on hold: the term starts by then even if unused
-	Trial          bool      `json:"trial,omitempty"`    // a free trial from a Telegram shop
+	SpeedKbps      int       `json:"speed_kbps"`                // 0 = no limit
+	StartBy        int64     `json:"start_by,omitempty"`        // on hold: the term starts by then even if unused
+	Trial          bool      `json:"trial,omitempty"`           // a free trial from a Telegram shop
+	GiftBytes      int64     `json:"gift_bytes,omitempty"`      // the owner's gift in the volume: never refunded as credit
+	Legacy         bool      `json:"legacy,omitempty"`          // an old user brought from another panel (legacy.go)
+	DailyCapBytes  int64     `json:"daily_cap_bytes,omitempty"` // dailycap.go: 0 = no daily cap
+	DailyUsed      int64     `json:"daily_used,omitempty"`      // today's usage (only for capped clients)
 }
 
-// Clients lists every client with usage, newest first.
+// Clients lists the panel's own clients (the owner's and the resellers')
+// with usage, newest first. Connected shops' clients are not in it: they
+// are listed by their tenant (TenantClients) and only summarised for the
+// owner (Tenants).
 func (s *Store) Clients(ctx context.Context) ([]ClientView, error) {
-	return s.clientViews(ctx, "", "")
+	return s.clientViews(ctx, ownerWorld)
+}
+
+// allClients is every client, connected shops' included. Only for work that
+// must cover every client (exports of the whole database, scale tests).
+func (s *Store) allClients(ctx context.Context) ([]ClientView, error) {
+	return s.clientViews(ctx, "")
 }
 
 // clientView is one client, read on its own (not the whole list).
@@ -642,19 +766,21 @@ func (s *Store) clientView(ctx context.Context, email string) (ClientView, error
 	return list[0], nil
 }
 
-// clientViews reads clients; where (with one argument) narrows them to one
-// email ("c.email=?") or one seller ("c.rep_id=?").
-func (s *Store) clientViews(ctx context.Context, where, arg string) ([]ClientView, error) {
+// clientViews reads clients; where (on clients alias c, with its arguments)
+// narrows them, e.g. to one email ("c.email=?") or one seller ("c.rep_id=?").
+func (s *Store) clientViews(ctx context.Context, where string, args ...any) ([]ClientView, error) {
 	q := `SELECT c.email,c.uuid,c.enabled,c.volume_bytes,c.expires_unix,c.duration_seconds,c.max_ips,c.sub_token,c.rep_id,c.plan,c.note,
 COALESCE(u.up,0),COALESCE(u.down,0),COALESCE(u.first_seen_unix,0),COALESCE(u.last_seen_unix,0),
-EXISTS(SELECT 1 FROM online o WHERE o.email=c.email AND o.seen_unix>=?),c.reset_period,c.last_reset_unix,c.next_plan,c.hwid_limit,c.start_by_unix,c.trial
+EXISTS(SELECT 1 FROM online o WHERE o.email=c.email AND o.seen_unix>=?),CASE WHEN c.reset_year=1 THEN 'year' ELSE c.reset_period END,c.last_reset_unix,c.next_plan,c.hwid_limit,c.start_by_unix,c.trial,
+EXISTS(SELECT 1 FROM legacy_clients l WHERE l.email=c.email),c.gift_bytes,c.daily_cap_bytes,
+CASE WHEN c.daily_cap_bytes>0 THEN COALESCE((SELECT SUM(d.up+d.down) FROM usage_daily d WHERE d.email=c.email AND d.day=?),0) ELSE 0 END
 FROM clients c LEFT JOIN client_usage u ON u.email=c.email`
-	args := []any{s.now().Unix() - 120}
+	qargs := []any{s.now().Unix() - 120, s.usageDay()}
 	if where != "" {
 		q += " WHERE " + where
-		args = append(args, arg)
+		qargs = append(qargs, args...)
 	}
-	rows, err := s.ro.QueryContext(ctx, q+` ORDER BY c.created_unix DESC, c.email`, args...)
+	rows, err := s.ro.QueryContext(ctx, q+` ORDER BY c.created_unix DESC, c.email`, qargs...)
 	if err != nil {
 		return nil, err
 	}
@@ -664,7 +790,7 @@ FROM clients c LEFT JOIN client_usage u ON u.email=c.email`
 		var v ClientView
 		var np string
 		if err := rows.Scan(&v.Email, &v.UUID, &v.Enabled, &v.VolumeBytes, &v.ExpiresUnix, &v.DurationSeconds, &v.MaxIPs, &v.SubToken, &v.RepID, &v.Plan, &v.Note,
-			&v.Usage.Up, &v.Usage.Down, &v.Usage.FirstSeen, &v.Usage.LastSeen, &v.Online, &v.ResetPeriod, &v.LastReset, &np, &v.HWIDLimit, &v.StartBy, &v.Trial); err != nil {
+			&v.Usage.Up, &v.Usage.Down, &v.Usage.FirstSeen, &v.Usage.LastSeen, &v.Online, &v.ResetPeriod, &v.LastReset, &np, &v.HWIDLimit, &v.StartBy, &v.Trial, &v.Legacy, &v.GiftBytes, &v.DailyCapBytes, &v.DailyUsed); err != nil {
 			return nil, err
 		}
 		if np != "" {
@@ -683,17 +809,18 @@ FROM clients c LEFT JOIN client_usage u ON u.email=c.email`
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
+	rows.Close() // before the next query: never two reader connections at once (see Nodes)
 	// Every client's inbounds in one query (not one per client).
 	at := make(map[string]int, len(out))
 	for i := range out {
 		at[out[i].Email] = i
 	}
 	tq, targs := `SELECT email,tag FROM client_inbounds ORDER BY email,tag`, []any(nil)
-	switch where {
-	case "c.email=?":
-		tq, targs = `SELECT email,tag FROM client_inbounds WHERE email=? ORDER BY tag`, []any{arg}
-	case "c.rep_id=?":
-		tq, targs = `SELECT i.email,i.tag FROM client_inbounds i JOIN clients c ON c.email=i.email WHERE c.rep_id=? ORDER BY i.email,i.tag`, []any{arg}
+	switch {
+	case where == "c.email=?":
+		tq, targs = `SELECT email,tag FROM client_inbounds WHERE email=? ORDER BY tag`, args
+	case where != "":
+		tq, targs = `SELECT i.email,i.tag FROM client_inbounds i JOIN clients c ON c.email=i.email WHERE `+where+` ORDER BY i.email,i.tag`, args
 	}
 	tags, err := s.ro.QueryContext(ctx, tq, targs...)
 	if err != nil {
@@ -762,7 +889,9 @@ func (s *Store) EmailBySubToken(ctx context.Context, tok string) (string, error)
 		return "", ErrNotFound
 	}
 	var email string
-	err := s.ro.QueryRowContext(ctx, `SELECT email FROM clients WHERE sub_token=?`, tok).Scan(&email)
+	// "sub_token<>''" lets SQLite use the partial unique index on sub_token:
+	// without it every fetch read the whole clients table.
+	err := s.ro.QueryRowContext(ctx, `SELECT email FROM clients WHERE sub_token=? AND sub_token<>''`, tok).Scan(&email)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", ErrNotFound
 	}

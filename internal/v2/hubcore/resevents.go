@@ -110,7 +110,7 @@ WHERE e.id>? ORDER BY e.id LIMIT 2000`, cur)
 		return
 	}
 	for _, r := range list {
-		if r.rep == "" {
+		if r.rep == "" || strings.HasPrefix(r.rep, "~") { // the owner's, or a connected shop's (its own feed)
 			continue
 		}
 		switch {
@@ -130,7 +130,8 @@ WHERE e.id>? ORDER BY e.id LIMIT 2000`, cur)
 // last time and tells what changed. A customer seen for the first time is
 // only remembered.
 func clientStateEvents(ctx context.Context, s *Store) {
-	list, err := s.clientViews(ctx, "c.rep_id<>?", "")
+	// Resellers' customers only: not the owner's, not a connected shop's.
+	list, err := s.clientViews(ctx, "c.rep_id<>? AND substr(c.rep_id,1,1)<>'~'", "")
 	if err != nil {
 		return
 	}
@@ -196,5 +197,5 @@ ON CONFLICT(email) DO UPDATE SET rep_id=excluded.rep_id,status=excluded.status,e
 				c.Email, c.RepID, st.status, st.expMark, st.volMark)
 		}
 	}
-	_, _ = s.db.ExecContext(ctx, `DELETE FROM api_client_state WHERE email NOT IN (SELECT email FROM clients WHERE rep_id<>'')`)
+	_, _ = s.db.ExecContext(ctx, `DELETE FROM api_client_state WHERE email NOT IN (SELECT email FROM clients WHERE rep_id<>'' AND substr(rep_id,1,1)<>'~')`)
 }

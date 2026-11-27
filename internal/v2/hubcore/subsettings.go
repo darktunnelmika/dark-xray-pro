@@ -33,19 +33,47 @@ type SubSettings struct {
 }
 
 func (s *Store) SubSettings(ctx context.Context) SubSettings {
+	// One query for all of them: this runs several times in every
+	// subscription fetch.
+	v := s.settingsMany(ctx, "sub_remark", "sub_info", "sub_announce", "sub_support", "sub_title", "sub_frag", "sub_frag_len", "sub_frag_int",
+		"sub_noise", "miniapp", "miniapp_url", "sub_accent", "sub_logo", "sub_smart", "sub_hide_down")
 	return SubSettings{
-		RemarkTemplate: s.Setting(ctx, "sub_remark"),
-		InfoLines:      s.Setting(ctx, "sub_info") == "1",
-		Announce:       s.Setting(ctx, "sub_announce"),
-		SupportURL:     s.Setting(ctx, "sub_support"),
-		Title:          s.Setting(ctx, "sub_title"),
-		Fragment:       s.Setting(ctx, "sub_frag") == "1",
-		FragmentLength: s.Setting(ctx, "sub_frag_len"), FragmentInterval: s.Setting(ctx, "sub_frag_int"),
-		Noise:   s.Setting(ctx, "sub_noise") == "1",
-		MiniApp: s.Setting(ctx, "miniapp") == "1", MiniAppURL: s.Setting(ctx, "miniapp_url"),
-		Accent: s.Setting(ctx, "sub_accent"), Logo: s.Setting(ctx, "sub_logo"),
-		SmartOrder: s.Setting(ctx, "sub_smart") != "0", HideDown: s.Setting(ctx, "sub_hide_down") == "1",
+		RemarkTemplate: v["sub_remark"],
+		InfoLines:      v["sub_info"] == "1",
+		Announce:       v["sub_announce"],
+		SupportURL:     v["sub_support"],
+		Title:          v["sub_title"],
+		Fragment:       v["sub_frag"] == "1",
+		FragmentLength: v["sub_frag_len"], FragmentInterval: v["sub_frag_int"],
+		Noise:   v["sub_noise"] == "1",
+		MiniApp: v["miniapp"] == "1", MiniAppURL: v["miniapp_url"],
+		Accent: v["sub_accent"], Logo: v["sub_logo"],
+		SmartOrder: v["sub_smart"] != "0", HideDown: v["sub_hide_down"] == "1",
 	}
+}
+
+// settingsMany reads several settings in one query; missing keys are "".
+func (s *Store) settingsMany(ctx context.Context, keys ...string) map[string]string {
+	out := make(map[string]string, len(keys))
+	if len(keys) == 0 {
+		return out
+	}
+	args := make([]any, len(keys))
+	for i, k := range keys {
+		args[i] = k
+	}
+	rows, err := s.ro.QueryContext(ctx, `SELECT key,value FROM settings WHERE key IN (?`+strings.Repeat(",?", len(keys)-1)+`)`, args...)
+	if err != nil {
+		return out
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var k, v string
+		if rows.Scan(&k, &v) == nil {
+			out[k] = v
+		}
+	}
+	return out
 }
 
 func (s *Store) PutSubSettings(ctx context.Context, v SubSettings) error {
@@ -125,7 +153,8 @@ func gbText(b int64) string {
 // subAccount adds the settings-driven naming to an account.
 func (s *Store) subAccount(ctx context.Context, c Client, u Usage) sub.Account {
 	set, _ := s.brandFor(ctx, c.Email)
-	acc := sub.Account{Email: c.Email, UUID: c.UUID, Secret: c.Secret, IranDirect: s.Routing(ctx).ClientIranDirect, RemarkTemplate: set.RemarkTemplate}
+	name := s.publicName(ctx, c.Email)
+	acc := sub.Account{Email: name, UUID: c.UUID, Secret: c.Secret, IranDirect: s.Routing(ctx).ClientIranDirect, RemarkTemplate: set.RemarkTemplate}
 	left := Remaining(c, u)
 	exp := EffectiveExpiry(c, u)
 	days := "∞"
@@ -140,7 +169,7 @@ func (s *Store) subAccount(ctx context.Context, c Client, u Usage) sub.Account {
 	if c.VolumeBytes >= 0 {
 		total = gbText(c.VolumeBytes)
 	}
-	acc.Vars = map[string]string{"email": c.Email, "used": gbText(u.Up + u.Down), "left": gbText(left), "total": total, "days": days}
+	acc.Vars = map[string]string{"email": name, "used": gbText(u.Up + u.Down), "left": gbText(left), "total": total, "days": days}
 	if set.Fragment {
 		acc.Fragment = &sub.Fragment{Length: set.FragmentLength, Interval: set.FragmentInterval, Noise: set.Noise}
 	}
@@ -164,7 +193,7 @@ func (s *Store) subAccount(ctx context.Context, c Client, u Usage) sub.Account {
 		default:
 			when = "⏳ بدون انقضا"
 		}
-		acc.InfoLines = []string{"👤 " + c.Email + " | " + vol + " | " + when}
+		acc.InfoLines = []string{"👤 " + name + " | " + vol + " | " + when}
 	}
 	return acc
 }

@@ -192,3 +192,101 @@ func TestPartnerRepsUpgrade(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// Rules that came with v2.52–v2.65 hold for the reseller API too: an overdue
+// bill stops sales (and the quote says so), old users keep their inbounds and
+// switch on only with credit, connected shops' clients are not resellers'.
+func TestResellerAPIWithLaterRules(t *testing.T) {
+	s, clock := newStore(t)
+	ctx := context.Background()
+	seed(t, s)
+	h := httptest.NewServer(AdminHandlerWith(s, "admintok", "", nil))
+	defer h.Close()
+	call := func(method, path, key string, body any) apiResp {
+		t.Helper()
+		return apiCall(t, h.URL, method, path, key, body)
+	}
+	if err := s.CreateRep(ctx, "admin", RepCreate{ID: "res", Password: "res-password-1", CreditGB: 10}); err != nil {
+		t.Fatal(err)
+	}
+	k, _ := s.CreateResKey(ctx, "res", "test", ResKeyIn{Name: "bot"})
+
+	// An overdue bill.
+	if _, err := s.db.Exec(`INSERT INTO rep_bills(unix,rep_id,amount,due_unix) VALUES(?,?,?,?)`, clock.Unix(), "res", 1000, clock.Unix()-60); err != nil {
+		t.Fatal(err)
+	}
+	if me := call("GET", "/api/v2/reseller/me", k.Key, nil); me.JSON["locked"] != true {
+		t.Fatalf("me shows the lock: %s", me.Raw)
+	}
+	if q := call("POST", "/api/v2/reseller/quote", k.Key, map[string]any{"gb": 1, "days": 30}); q.JSON["allowed"] != false || q.str("code") != codePolicy {
+		t.Fatalf("quote under an overdue bill: %s", q.Raw)
+	}
+	if r := call("POST", "/api/v2/reseller/clients", k.Key, map[string]any{"gb": 1, "days": 30}); r.Code != 403 || r.str("code") != codePolicy {
+		t.Fatalf("create under an overdue bill: %d %s", r.Code, r.Raw)
+	}
+	if _, err := s.db.Exec(`UPDATE rep_bills SET status='paid' WHERE rep_id='res'`); err != nil {
+		t.Fatal(err)
+	}
+	if r := call("POST", "/api/v2/reseller/clients", k.Key, map[string]any{"name": "old1", "gb": 1, "days": 30}); r.Code != 201 {
+		t.Fatalf("create after paying: %d %s", r.Code, r.Raw)
+	}
+
+	// An old user: no renewal, no inbound change, on again only with credit.
+	if _, err := s.db.Exec(`INSERT INTO legacy_clients(email,rep_id,credit_off) VALUES('old1','res',1)`); err != nil {
+		t.Fatal(err)
+	}
+	if q := call("POST", "/api/v2/reseller/quote", k.Key, map[string]any{"action": "renew", "name": "old1", "gb": 1, "days": 30}); q.JSON["allowed"] != false || q.str("code") != codePolicy {
+		t.Fatalf("renew quote for an old user: %s", q.Raw)
+	}
+	if r := call("PATCH", "/api/v2/reseller/clients/old1", k.Key, map[string]any{"inbounds": []string{"de-vless", "nope"}}); r.Code != 403 {
+		t.Fatalf("old user's inbounds: %d %s", r.Code, r.Raw)
+	}
+	if r := call("POST", "/api/v2/reseller/clients/old1/disable", k.Key, nil); r.Code != 200 {
+		t.Fatalf("disable %d", r.Code)
+	}
+	if err := s.AdjustCredit(ctx, "admin", "res", -9<<30, 0, "spent"); err != nil {
+		t.Fatal(err)
+	}
+	if r := call("POST", "/api/v2/reseller/clients/old1/enable", k.Key, nil); r.Code != 402 || r.str("code") != codeCredit {
+		t.Fatalf("an old user on without credit: %d %s", r.Code, r.Raw)
+	}
+	if err := s.AdjustCredit(ctx, "admin", "res", 5<<30, 0, "top-up"); err != nil {
+		t.Fatal(err)
+	}
+	if r := call("POST", "/api/v2/reseller/clients/old1/enable", k.Key, nil); r.Code != 200 || r.JSON["enabled"] != true {
+		t.Fatalf("an old user on with credit: %d %s", r.Code, r.Raw)
+	}
+	var off int
+	_ = s.db.QueryRow(`SELECT credit_off FROM legacy_clients WHERE email='old1'`).Scan(&off)
+	if off != 0 {
+		t.Fatal("switched by hand, not for lack of credit")
+	}
+
+	// A connected shop's client is left to the shop's own feed.
+	clientStateEvents(ctx, s)
+	if _, err := s.db.Exec(`UPDATE clients SET rep_id='~shop1' WHERE email='alice'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.Exec(`INSERT INTO events(unix,node_id,email,kind) VALUES(?,?,?,?)`, clock.Unix(), "", "alice", "reset:manual"); err != nil {
+		t.Fatal(err)
+	}
+	hubLogEvents(ctx, s) // first run: starts at the end of the log
+	if _, err := s.db.Exec(`INSERT INTO events(unix,node_id,email,kind) VALUES(?,?,?,?)`, clock.Unix(), "", "alice", "reset:manual"); err != nil {
+		t.Fatal(err)
+	}
+	hubLogEvents(ctx, s)
+	clientStateEvents(ctx, s)
+	var n int
+	_ = s.db.QueryRow(`SELECT COUNT(*) FROM api_events WHERE target LIKE 'rep:~%'`).Scan(&n)
+	_ = s.db.QueryRow(`SELECT COUNT(*) FROM api_client_state WHERE rep_id LIKE '~%'`).Scan(&off)
+	if n != 0 || off != 0 {
+		t.Fatalf("connected shop's client in reseller events: %d events, %d states", n, off)
+	}
+	// Names are one space in any letter case.
+	if r := call("POST", "/api/v2/reseller/clients", k.Key, map[string]any{"name": "OLD1", "gb": 1, "days": 30}); r.Code != 409 {
+		t.Fatalf("a name differing only in letter case: %d %s", r.Code, r.Raw)
+	}
+	if q := call("POST", "/api/v2/reseller/quote", k.Key, map[string]any{"name": "Old1", "gb": 1, "days": 30}); q.str("code") != codeConflict {
+		t.Fatalf("quote for a name differing only in letter case: %s", q.Raw)
+	}
+}

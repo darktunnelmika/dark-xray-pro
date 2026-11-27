@@ -59,9 +59,14 @@ func cardKey(k, seller string) string {
 }
 
 // CardFor is the card a seller's customers pay to ("" = the owner).
+// With several cards (paycards.go) it is the first usable one: callers
+// use it to tell whether card payment is on; the card a payment shows
+// comes from CardForPay.
 func (s *Store) CardFor(ctx context.Context, seller string) CardInfo {
-	return CardInfo{Number: s.Setting(ctx, cardKey("pay_card_number", seller)), Holder: s.Setting(ctx, cardKey("pay_card_holder", seller)),
-		Bank: s.Setting(ctx, cardKey("pay_card_bank", seller))}
+	if s.cardsManaged(ctx, seller) {
+		return s.firstLiveCard(ctx, seller)
+	}
+	return s.legacyCard(ctx, seller)
 }
 
 // PutCardFor sets a seller's card (empty number turns card payment off).
@@ -80,6 +85,15 @@ func (s *Store) PutCardFor(ctx context.Context, seller string, c CardInfo) error
 	}
 	if len(c.Holder) > 80 || len(c.Bank) > 60 {
 		return ErrInvalid
+	}
+	if s.cardsManaged(ctx, seller) {
+		// Several cards are in use: the single-card form sets the list to
+		// this one card (or none).
+		var list []PayCard
+		if num != "" {
+			list = []PayCard{{Number: num, Holder: c.Holder, Bank: c.Bank, Enabled: true}}
+		}
+		return s.PutPayCards(ctx, seller, list)
 	}
 	for k, v := range map[string]string{"pay_card_number": num, "pay_card_holder": strings.TrimSpace(c.Holder), "pay_card_bank": strings.TrimSpace(c.Bank)} {
 		if err := s.SetSetting(ctx, cardKey(k, seller), v); err != nil {
@@ -209,6 +223,7 @@ func (s *Store) AttachTopupReceipt(ctx context.Context, id, chat int64, fileID s
 	if n, _ := r.RowsAffected(); n == 0 {
 		return Topup{}, ErrNotFound
 	}
+	s.markCardUse(ctx, TopupRef(id), "paid")
 	return s.TopupByID(ctx, id)
 }
 
@@ -294,6 +309,9 @@ func (s *Store) DecideTopup(ctx context.Context, seller string, id int64, approv
 	}
 	t.Status, t.Done, t.DoneBy = status, now, by
 	t.Balance = s.TomanBalance(ctx, t.Seller, t.Chat)
+	if !approve {
+		s.markCardUse(ctx, TopupRef(t.ID), "void")
+	}
 	return t, nil
 }
 
@@ -418,11 +436,10 @@ func (s *Store) PutRepBot(ctx context.Context, rep string, in RepBot) error {
 		if !botTokenRE.MatchString(tok) {
 			return fmt.Errorf("%w: this does not look like a bot token from @BotFather", ErrInvalid)
 		}
-		// One bot, one seller: two sellers polling the same bot would fight.
-		for _, other := range s.RepBotsAll(ctx) {
-			if other.Rep != rep && other.Token == tok {
-				return fmt.Errorf("%w: this bot is already used by another reseller", ErrInvalid)
-			}
+		// One bot, one seller: two sellers polling the same bot would fight
+		// (a reseller selling through Mirza keeps its bot for when it is back).
+		if s.repBotTokenUser(ctx, tok, rep) != "" {
+			return fmt.Errorf("%w: this bot is already used by another reseller", ErrInvalid)
 		}
 		if tgToken == tok {
 			return fmt.Errorf("%w: this is the panel's main bot", ErrInvalid)
@@ -474,6 +491,26 @@ func (s *Store) RepBotsAll(ctx context.Context) []RepBotConf {
 		}
 	}
 	return out
+}
+
+// repBotTokenUser is another reseller whose bot settings hold this token,
+// running or not ("" = none).
+func (s *Store) repBotTokenUser(ctx context.Context, tok, except string) string {
+	rows, err := s.ro.QueryContext(ctx, `SELECT key,value FROM settings WHERE key LIKE 'rep_bot:%'`)
+	if err != nil {
+		return ""
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var k, v string
+		var b RepBot
+		if rows.Scan(&k, &v) == nil && json.Unmarshal([]byte(v), &b) == nil && b.Token == tok {
+			if rep := strings.TrimPrefix(k, "rep_bot:"); rep != except {
+				return rep
+			}
+		}
+	}
+	return ""
 }
 
 var repBotStatus sync.Map // rep id -> RepBot (live state)

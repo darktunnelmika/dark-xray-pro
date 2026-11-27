@@ -295,20 +295,6 @@ func (s *Store) APIDeliveries(ctx context.Context, target string, limit int) ([]
 // webhookAllowPrivate lets tests post to a local server.
 var webhookAllowPrivate = false
 
-func publicIP(ip net.IP) bool {
-	if ip4 := ip.To4(); ip4 != nil {
-		ip = ip4
-		if ip4[0] == 100 && ip4[1]&0xc0 == 64 { // 100.64.0.0/10, carrier-grade NAT
-			return false
-		}
-		if ip4[0] == 0 {
-			return false
-		}
-	}
-	return !(ip.IsLoopback() || ip.IsPrivate() || ip.IsUnspecified() || ip.IsLinkLocalUnicast() ||
-		ip.IsLinkLocalMulticast() || ip.IsInterfaceLocalMulticast() || ip.IsMulticast())
-}
-
 var errPrivateAddr = errors.New("the webhook address resolves to a private network")
 
 // apiHookClient checks every address it connects to, so a name that

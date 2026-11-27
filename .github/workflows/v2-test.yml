@@ -1,0 +1,38 @@
+name: v2 test (feature branches)
+
+# Test-only: runs the v2 tests and builds the binaries on feature branches.
+# It never publishes a release (that is v2-release.yml on release/v2).
+on:
+  push:
+    branches:
+      - "feature/shop-**"
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Vet
+        run: go vet ./internal/v2/... ./cmd/...
+      - name: Test
+        run: go test -count=1 ./internal/v2/...
+      - name: Build
+        env:
+          CGO_ENABLED: "0"
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "-s -w" -o dist/dark-hub2-linux-amd64 ./cmd/dark-hub2
+          GOOS=linux GOARCH=amd64 go build -trimpath -buildvcs=false -ldflags "-s -w" -o dist/dark-node-linux-amd64 ./cmd/dark-node
+          (cd dist && sha256sum dark-* > SHA256SUMS)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dark-v2-${{ github.sha }}
+          path: dist/
+          retention-days: 14

@@ -183,6 +183,7 @@ type (
 		Policy    APIPolicy  `json:"policy"`
 		SubSeller bool       `json:"sub_seller"`
 		SubBase   string     `json:"sub_base"`
+		Locked    bool       `json:"locked"` // an overdue bill stops sales and renewals until paid
 		Key       docKeyInfo `json:"key"`
 	}
 	docInbound struct {

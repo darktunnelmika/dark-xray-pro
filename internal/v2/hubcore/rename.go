@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 )
 
 // Renaming a client. The name is the client's key everywhere (usage, history,
@@ -36,10 +37,19 @@ func (s *Store) RenameClient(ctx context.Context, old, name string) error {
 		return err
 	}
 	defer tx.Rollback()
-	var n int
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM clients WHERE email=?`, old).Scan(&n); err != nil || n != 1 {
+	var oldRep string
+	if err := tx.QueryRowContext(ctx, `SELECT rep_id FROM clients WHERE email=?`, old).Scan(&oldRep); err != nil {
 		return ErrNotFound
 	}
+	// A connected shop's client keeps its place in the shop's name space;
+	// only a move (tenantmove.go) renames across it.
+	if t, ok := tenantOfRep(oldRep); ok && (tenantAccess(ctx) != t || !strings.HasPrefix(name, t+tenantSep)) && !renameAcross(ctx) {
+		return fmt.Errorf("%w: this client belongs to a connected shop", ErrInvalid)
+	}
+	if !renameAcross(ctx) && reservedName(ctx, tx, name) && !strings.HasPrefix(name, tenantAccess(ctx)+tenantSep) {
+		return fmt.Errorf("%w: names starting with a connected shop's id and + are reserved for that shop", ErrInvalid)
+	}
+	var n int
 	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM clients WHERE email=? COLLATE NOCASE`, name).Scan(&n); err != nil {
 		return err
 	}

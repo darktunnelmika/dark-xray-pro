@@ -256,7 +256,7 @@ func TestResellerTelegram(t *testing.T) {
 	b.Handle(ctx, cb(salesChat, "ok:"+strconv.FormatInt(id, 10)))
 	find(t, api.take(), salesChat, "تحویل شد")
 	b.Handle(ctx, msg(repChat, "/credit"))
-	find(t, api.take(), repChat, "5.00 GB")
+	find(t, api.take(), repChat, "۵ گیگ")
 }
 
 func TestOwnerConsole(t *testing.T) {
@@ -459,9 +459,7 @@ func TestCardReceiptAndDiscount(t *testing.T) {
 	}
 	// The receipt photo goes to the owner with approve / refuse.
 	photo := msg(buyerID, "")
-	photo.Message.Photo = []struct {
-		FileID string `json:"file_id"`
-	}{{FileID: "small"}, {FileID: "big-photo-id"}}
+	photo.Message.Photo = []PhotoSize{{FileID: "small"}, {FileID: "big-photo-id"}}
 	b.Handle(ctx, photo)
 	out = api.take()
 	find(t, out, buyerID, "دریافت شد")
@@ -558,9 +556,7 @@ func TestResellerBotTomanWallet(t *testing.T) {
 		t.Fatal(inv.text)
 	}
 	photo := msg(buyerID, "")
-	photo.Message.Photo = []struct {
-		FileID string `json:"file_id"`
-	}{{FileID: "rcpt"}}
+	photo.Message.Photo = []PhotoSize{{FileID: "rcpt"}}
 	b.Handle(ctx, photo)
 	out = api.take()
 	find(t, out, buyerID, "دریافت شد")
@@ -697,7 +693,7 @@ func TestShopButtons(t *testing.T) {
 	b.Handle(ctx, cb(repChat, "S:nd:30"))
 	b.Handle(ctx, cb(repChat, "S:ni:2"))
 	b.Handle(ctx, msg(repChat, "۱۵۰ هزار"))
-	find(t, api.take(), repChat, "150,000")
+	find(t, api.take(), repChat, "۱۵۰٬۰۰۰")
 	b.Handle(ctx, cb(repChat, "S:nm:pub"))
 	find(t, api.take(), repChat, "ساخته شد")
 	var made hubcore.Product

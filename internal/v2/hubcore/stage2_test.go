@@ -683,12 +683,28 @@ func TestRepBrand(t *testing.T) {
 		}
 	}
 	// A sub-seller's customer sees nothing of the reseller above or the
-	// panel (only the link address is inherited), and no bot button.
+	// panel's brand (only the link address is inherited). Its bot button is
+	// the sub-seller's own bot, else the panel's main bot, never the
+	// reseller's above.
 	if set, base := s.brandFor(ctx, "sub-cust"); set.Title != "" || set.SupportURL != "" || set.Accent != "" || base != "https://sub.ali.example" {
 		t.Fatalf("sub-cust: %+v %s", set, base)
 	}
-	if d, err := s.subPageData(ctx, "sub-cust", "https://sub.ali.example/sub/x", "fa"); err != nil || d.BotLink != "" || !d.Seller {
-		t.Fatalf("sub-cust page: %+v %v", d, err)
+	_ = s.SetSetting(ctx, "tg_username", "MainBot")
+	SetRepBotStatus("ali", true, "AliBot", "")
+	_, _ = s.db.ExecContext(ctx, `INSERT OR REPLACE INTO settings(key,value) VALUES('rep_bot:ali','{"token":"1:a","enabled":true}')`)
+	defer SetRepBotStatus("ali", false, "", "")
+	tok := "0123456789abcdef0123456789abcdef"
+	if d, err := s.subPageData(ctx, "sub-cust", "https://sub.ali.example/sub/"+tok, "fa"); err != nil || d.BotLink != "https://t.me/MainBot?start="+tok || !d.Seller {
+		t.Fatalf("sub-cust page without its own bot: %q %v", d.BotLink, err)
+	}
+	if d, _ := s.subPageData(ctx, "ali-cust", "https://sub.ali.example/sub/"+tok, "fa"); d.BotLink != "https://t.me/AliBot?start="+tok {
+		t.Fatalf("a reseller's customer goes to its running bot: %q", d.BotLink)
+	}
+	SetRepBotStatus("ali-sub", true, "SubBot", "")
+	_, _ = s.db.ExecContext(ctx, `INSERT OR REPLACE INTO settings(key,value) VALUES('rep_bot:ali-sub','{"token":"2:b","enabled":true}')`)
+	defer SetRepBotStatus("ali-sub", false, "", "")
+	if d, _ := s.subPageData(ctx, "sub-cust", "https://sub.ali.example/sub/"+tok, "fa"); d.BotLink != "https://t.me/SubBot?start="+tok {
+		t.Fatalf("sub-cust page with its own bot: %q", d.BotLink)
 	}
 	if set, base := s.brandFor(ctx, "alice"); set.Title != "Main VPN" || base != "" {
 		t.Fatalf("a direct customer must keep the panel's brand: %+v %q", set, base)
@@ -803,7 +819,7 @@ func TestFullBackupAndRestore(t *testing.T) {
 	}
 	etc := t.TempDir()
 	os.WriteFile(filepath.Join(etc, "ca.pem"), []byte("CA"), 0o600)
-	os.WriteFile(filepath.Join(etc, "server.key"), []byte("KEY"), 0o600)
+	os.WriteFile(filepath.Join(etc, "server.key"), []byte(testKeyMark), 0o600)
 	os.WriteFile(filepath.Join(etc, "env"), []byte("DARK_HUB2_LISTEN=1.2.3.4:28443\nDARK_HUB2_HOSTS=1.2.3.4\nDARK_HUB2_SUB_BASE=https://1.2.3.4:28096\n"), 0o600)
 	SetHubFiles(etc, DefaultHubFiles...)
 	defer SetHubFiles("")
@@ -814,7 +830,7 @@ func TestFullBackupAndRestore(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if bytes.Contains(data, []byte("KEY")) {
+	if bytes.Contains(data, []byte(testKeyMark)) {
 		t.Fatal("the full backup must be encrypted")
 	}
 	dir := t.TempDir()
@@ -836,7 +852,7 @@ func TestFullBackupAndRestore(t *testing.T) {
 	if err != nil || len(done) != 3 {
 		t.Fatal(done, err)
 	}
-	if b, _ := os.ReadFile(filepath.Join(newEtc, "server.key")); string(b) != "KEY" {
+	if b, _ := os.ReadFile(filepath.Join(newEtc, "server.key")); string(b) != testKeyMark {
 		t.Fatal("the HUB key must come back")
 	}
 	env, _ := os.ReadFile(filepath.Join(newEtc, "env"))
@@ -884,3 +900,7 @@ func TestMoveNodes(t *testing.T) {
 		t.Fatalf("%+v", a)
 	}
 }
+
+// testKeyMark is long enough that encrypted bytes never contain it by chance
+// (a 3-byte "KEY" turned up in a few-MB ciphertext now and then).
+const testKeyMark = "KEY-7f3a9c1e5b2d4086-NOT-ENCRYPTED"

@@ -58,6 +58,10 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 				}
 				return
 			}
+			r, ok = s.tenantGuard(w, r, p) // a connected shop's client (tenant.go)
+			if !ok {
+				return
+			}
 			if r.Method == http.MethodGet || r.Method == http.MethodHead {
 				h(w, r.WithContext(context.WithValue(r.Context(), principalKey{}, p)))
 				return
@@ -76,6 +80,8 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 			h(w, r)
 		})
 	}
+	tenantRoutes(s, mux, subBase)    // connected shops' own API (tenantapi.go)
+	tenantAdminRoutes(s, mux, guard) // the owner's side of connected shops
 	mux.HandleFunc("POST /api/v2/auth/login", func(w http.ResponseWriter, r *http.Request) {
 		var in struct{ Username, Password, Code string }
 		if !decode(w, r, &in) {
@@ -268,6 +274,10 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 					_ = s.ro.QueryRowContext(r.Context(), `SELECT manage_products FROM reps WHERE id=?`, rp.ID).Scan(&mp)
 					out["manage_products"] = mp && rp.ParentID == ""
 					out["sub_seller"] = rp.ParentID != ""
+					out["legacy"] = rp.ParentID == "" && s.LegacyOf(r.Context(), rp.ID).Allowed
+					// Taken back with a bill still open: the page stays, to pay it.
+					openBills, _ := s.RepBills(r.Context(), rp.ID, true, 1)
+					out["resale"] = rp.ParentID == "" && (s.ResaleOf(r.Context(), rp.ID).Allowed || len(openBills) > 0)
 				}
 			}
 		}
@@ -854,6 +864,34 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 		}
 		reply(w, map[string]bool{"ok": true}, s.SetHWIDLimit(r.Context(), r.PathValue("email"), in.Limit))
 	}))
+	// Daily cap (dailycap.go): the owner, or the reseller that owns the client.
+	mux.HandleFunc("GET /api/v2/admin/clients/{email}/daily-cap", member(func(w http.ResponseWriter, r *http.Request) {
+		p := who(r)
+		if p.Role == "rep" && !s.ownsClient(r.Context(), p.RepID, r.PathValue("email")) {
+			http.NotFound(w, r)
+			return
+		}
+		d, err := s.DailyCapOf(r.Context(), r.PathValue("email"))
+		reply(w, d, err)
+	}))
+	mux.HandleFunc("PUT /api/v2/admin/clients/{email}/daily-cap", member(func(w http.ResponseWriter, r *http.Request) {
+		p := who(r)
+		if p.Role == "rep" && !s.ownsClient(r.Context(), p.RepID, r.PathValue("email")) {
+			http.NotFound(w, r)
+			return
+		}
+		var in struct {
+			GB float64 `json:"gb"`
+		}
+		if !decode(w, r, &in) {
+			return
+		}
+		if in.GB < 0 || in.GB > MaxDailyCapGB {
+			reply(w, nil, fmt.Errorf("%w: daily cap: 0 to %d GB", ErrInvalid, MaxDailyCapGB))
+			return
+		}
+		reply(w, map[string]bool{"ok": true}, s.SetDailyCap(r.Context(), r.PathValue("email"), int64(in.GB*(1<<30))))
+	}))
 	mux.HandleFunc("PUT /api/v2/admin/clients/{email}/next-plan", guard(func(w http.ResponseWriter, r *http.Request) {
 		var in struct {
 			Plan *NextPlan `json:"plan"`
@@ -1073,6 +1111,178 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 		err := s.PutCardFor(r.Context(), seller, in)
 		reply(w, map[string]bool{"ok": err == nil}, err)
 	}))
+	// Growing the reseller tree from Telegram (repgrow.go): the owner's
+	// request button and trial panel; a reseller's own request button.
+	mux.HandleFunc("GET /api/v2/admin/rep-growth", guard(func(w http.ResponseWriter, r *http.Request) {
+		reply(w, map[string]any{"requests": s.RepRequestsOn(r.Context(), ""), "trial": s.RepTrialPolicy(r.Context())}, nil)
+	}))
+	mux.HandleFunc("PUT /api/v2/admin/rep-growth", guard(func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Requests bool     `json:"requests"`
+			Trial    RepTrial `json:"trial"`
+		}
+		if !decode(w, r, &in) {
+			return
+		}
+		if err := s.PutRepTrialPolicy(r.Context(), in.Trial); err != nil {
+			reply(w, nil, err)
+			return
+		}
+		reply(w, map[string]bool{"ok": true}, s.SetRepRequestsOn(r.Context(), "", in.Requests))
+	}))
+	mux.HandleFunc("GET /api/v2/shop/rep-requests", member(func(w http.ResponseWriter, r *http.Request) {
+		reply(w, map[string]bool{"on": s.RepRequestsOn(r.Context(), who(r).RepID)}, nil)
+	}))
+	mux.HandleFunc("PUT /api/v2/shop/rep-requests", member(func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			On bool `json:"on"`
+		}
+		if !decode(w, r, &in) {
+			return
+		}
+		reply(w, map[string]bool{"ok": true}, s.SetRepRequestsOn(r.Context(), who(r).RepID, in.On))
+	}))
+	// Subscription addresses (subdomains.go).
+	mux.HandleFunc("GET /api/v2/admin/sub-domains", guard(func(w http.ResponseWriter, r *http.Request) {
+		reply(w, map[string]any{"domains": s.SubDomains(r.Context()), "fallback": publicBase(subBase, r)}, nil)
+	}))
+	mux.HandleFunc("PUT /api/v2/admin/sub-domains", guard(func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Domains []SubDomain `json:"domains"`
+		}
+		if !decode(w, r, &in) {
+			return
+		}
+		reply(w, map[string]bool{"ok": true}, s.PutSubDomains(r.Context(), in.Domains))
+	}))
+	mux.HandleFunc("POST /api/v2/admin/sub-domains/move", guard(func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			From string `json:"from"`
+			To   string `json:"to"`
+		}
+		if !decode(w, r, &in) {
+			return
+		}
+		n, err := s.MoveSubDomain(r.Context(), in.From, in.To)
+		reply(w, map[string]int{"moved": n}, err)
+	}))
+	// A reseller picks its link address from the owner's list (or the owner
+	// for a reseller with ?rep=).
+	mux.HandleFunc("GET /api/v2/shop/sub-domain", member(func(w http.ResponseWriter, r *http.Request) {
+		p := who(r)
+		rep := p.RepID
+		if p.Role != "rep" {
+			rep = r.URL.Query().Get("rep")
+		}
+		reply(w, map[string]any{"choices": s.SubDomainChoices(r.Context()), "current": s.RepBrand(r.Context(), rep).BaseURL,
+			"default": s.defaultBase(r.Context(), publicBase(subBase, r))}, nil)
+	}))
+	mux.HandleFunc("PUT /api/v2/shop/sub-domain", member(func(w http.ResponseWriter, r *http.Request) {
+		p := who(r)
+		rep := p.RepID
+		if p.Role != "rep" {
+			rep = r.URL.Query().Get("rep")
+		}
+		var in struct {
+			URL string `json:"url"`
+		}
+		if rep == "" || !decode(w, r, &in) {
+			if rep == "" {
+				http.NotFound(w, r)
+			}
+			return
+		}
+		reply(w, map[string]bool{"ok": true}, s.PickRepDomain(r.Context(), rep, in.URL))
+	}))
+	// Excel report for 7, 30 or 90 days (reportxlsx.go): the owner's whole
+	// panel or one reseller's (?rep=), a reseller its own.
+	mux.HandleFunc("GET /api/v2/shop/report.xlsx", member(func(w http.ResponseWriter, r *http.Request) {
+		p := who(r)
+		rep := p.RepID
+		if p.Role != "rep" {
+			rep = r.URL.Query().Get("rep")
+		}
+		days, _ := strconv.Atoi(r.URL.Query().Get("days"))
+		if days != 7 && days != 90 {
+			days = 30
+		}
+		sheets, err := s.ReportWorkbook(r.Context(), rep, days)
+		if err != nil {
+			reply(w, nil, err)
+			return
+		}
+		name := "dark-report"
+		if rep != "" {
+			name += "-" + rep
+		}
+		w.Header().Set("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+		w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s-%dd-%s.xlsx"`, name, days, s.now().Format("20060102")))
+		_ = WriteXLSX(w, sheets)
+	}))
+	// A reseller's credit pace and the package that covers a month (repforecast.go).
+	mux.HandleFunc("GET /api/v2/shop/forecast", member(func(w http.ResponseWriter, r *http.Request) {
+		p := who(r)
+		rep := p.RepID
+		if p.Role != "rep" {
+			rep = r.URL.Query().Get("rep")
+		}
+		var credit int64
+		if s.ro.QueryRowContext(r.Context(), `SELECT volume_credit FROM reps WHERE id=?`, rep).Scan(&credit) != nil {
+			http.NotFound(w, r)
+			return
+		}
+		reply(w, s.RepForecast(r.Context(), rep, credit), nil)
+	}))
+	// Automatic cleanup of dead configs (autoclean.go), per seller.
+	mux.HandleFunc("GET /api/v2/shop/autoclean", member(func(w http.ResponseWriter, r *http.Request) {
+		seller, ok := sellerOf(r)
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+		a := s.AutoCleanFor(r.Context(), seller)
+		dead, err := s.DeadClients(r.Context(), seller, a.Days)
+		reply(w, map[string]any{"settings": a, "due": len(dead)}, err)
+	}))
+	mux.HandleFunc("PUT /api/v2/shop/autoclean", member(func(w http.ResponseWriter, r *http.Request) {
+		seller, ok := sellerOf(r)
+		var in AutoClean
+		if !ok || !decode(w, r, &in) {
+			return
+		}
+		reply(w, map[string]bool{"ok": true}, s.PutAutoClean(r.Context(), seller, in))
+	}))
+	// Several cards and the safe-card options (paycards.go).
+	mux.HandleFunc("GET /api/v2/shop/cards", member(func(w http.ResponseWriter, r *http.Request) {
+		seller, ok := sellerOf(r)
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+		cards, err := s.PayCards(r.Context(), seller)
+		reply(w, map[string]any{"cards": cards, "safety": s.CardSafetyFor(r.Context(), seller), "max": MaxPayCards}, err)
+	}))
+	mux.HandleFunc("PUT /api/v2/shop/cards", member(func(w http.ResponseWriter, r *http.Request) {
+		seller, ok := sellerOf(r)
+		var in struct {
+			Cards  []PayCard   `json:"cards"`
+			Safety *CardSafety `json:"safety"`
+		}
+		if !ok || !decode(w, r, &in) {
+			return
+		}
+		if err := s.PutPayCards(r.Context(), seller, in.Cards); err != nil {
+			reply(w, nil, err)
+			return
+		}
+		if in.Safety != nil {
+			if err := s.PutCardSafety(r.Context(), seller, *in.Safety); err != nil {
+				reply(w, nil, err)
+				return
+			}
+		}
+		reply(w, map[string]bool{"ok": true}, nil)
+	}))
 	mux.HandleFunc("GET /api/v2/shop/topups", member(func(w http.ResponseWriter, r *http.Request) {
 		seller, ok := sellerOf(r)
 		if !ok {
@@ -1153,6 +1363,11 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 		err := s.DeletePartnerKey(r.Context(), r.PathValue("id"))
 		reply(w, map[string]bool{"ok": err == nil}, err)
 	}))
+	// Panels a reseller sells in its own bot: wallet, bills, prices.
+	resaleRoutes(s, mux, guard, member)
+	resalePageRoutes(s, mux, guard, member)
+	// Old users brought by their subscription links (legacy.go).
+	legacyRoutes(s, mux, guard, member)
 	// Connecting a PasarGuard-made sales bot (Mirza): the owner's, a reseller's own.
 	pgAdminRoutes(s, mux, "/api/v2/admin/pg-api", guard, func(*http.Request) (string, bool) { return "", true })
 	pgAdminRoutes(s, mux, "/api/v2/rep/pg-api", member, func(r *http.Request) (string, bool) {
@@ -1165,7 +1380,11 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 			http.NotFound(w, r)
 			return
 		}
-		reply(w, s.RepBotOf(r.Context(), p.RepID), nil)
+		// Mirza: the bot is kept off while Mirza sells (the card says why).
+		reply(w, struct {
+			RepBot
+			Mirza bool `json:"mirza"`
+		}{s.RepBotOf(r.Context(), p.RepID), s.MirzaMode(r.Context(), p.RepID)}, nil)
 	}))
 	mux.HandleFunc("PUT /api/v2/rep/bot", member(func(w http.ResponseWriter, r *http.Request) {
 		p := who(r)
@@ -1335,7 +1554,7 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 	mux.HandleFunc("POST /api/v2/admin/migrate/foreign", guard(func(w http.ResponseWriter, r *http.Request) {
 		// Body: the other panel's SQLite file (x-ui.db, db.sqlite3).
 		q := r.URL.Query()
-		opt := ForeignOptions{DryRun: q.Get("dry_run") != "0", Node: q.Get("node"), Address: q.Get("address"), Prefix: q.Get("prefix")}
+		opt := ForeignOptions{DryRun: q.Get("dry_run") != "0", Node: q.Get("node"), Address: q.Get("address"), Prefix: q.Get("prefix"), Tenant: q.Get("tenant")}
 		for _, t := range strings.Split(q.Get("inbounds"), ",") {
 			if t = strings.TrimSpace(t); t != "" {
 				opt.Inbounds = append(opt.Inbounds, t)
@@ -2011,8 +2230,9 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 		}
 		out := make([]view, 0, len(list))
 		bases := map[string]string{} // one lookup per reseller, not per client
+		def := s.defaultBase(r.Context(), subBase)
 		for _, c := range list {
-			base := subBase
+			base := def
 			if c.RepID != "" {
 				b, ok := bases[c.RepID]
 				if !ok {
@@ -2081,9 +2301,12 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 	sh := SubHandler(s)
 	mux.Handle("GET /sub/{token}", sh)
 	mux.Handle("GET /sub/{token}/links", sh)
-	mux.Handle("GET /api/v1/", sh) // old-panel subscription URLs
-	mux.Handle("GET /app/", sh)    // Telegram Mini App
+	mux.Handle("GET /sub/{token}/{$}", sh)
+	mux.Handle("GET /sub/{token}/{client_type}", sh) // PasarGuard's info, usage and client types (pgapi_more.go)
+	mux.Handle("GET /api/v1/", sh)                   // old-panel subscription URLs
+	mux.Handle("GET /app/", sh)                      // Telegram Mini App
 	mux.Handle("POST /app/", sh)
+	registerTgPanel(mux.ServeMux, s) // the panel as a Telegram Mini App (tgpanel.go)
 	routes := mux.apiRoutes()
 	mux.HandleFunc("GET /api/v2/admin/docs", member(func(w http.ResponseWriter, r *http.Request) {
 		reply(w, routes, nil)
@@ -2098,6 +2321,7 @@ func b64(s string) string { return sub.Base64([]string{s}) }
 func SubHandler(s *Store) http.Handler {
 	mux := http.NewServeMux()
 	registerMiniApp(mux, s)
+	pgSubRoutes(s, mux, "")
 	var serveSub http.HandlerFunc
 	// Subscription URLs from the old panel keep working after a migration:
 	// they answer with the same client's v2 subscription.
@@ -2153,7 +2377,7 @@ func SubHandler(s *Store) http.Handler {
 		}
 		set, _ := s.brandFor(r.Context(), email)
 		w.Header().Set("Profile-Update-Interval", "12")
-		w.Header().Set("Profile-Title", "base64:"+b64(or2(set.Title, email)))
+		w.Header().Set("Profile-Title", "base64:"+b64(or2(set.Title, s.publicName(r.Context(), email))))
 		w.Header().Set("Profile-Web-Page-Url", pageURL)
 		if set.SupportURL != "" {
 			w.Header().Set("Support-Url", set.SupportURL)
@@ -2173,22 +2397,59 @@ func SubHandler(s *Store) http.Handler {
 			_, _ = w.Write([]byte(strings.Join(links, "\n")))
 			return
 		}
-		body, ctype, info, err := s.SubscriptionBody(r.Context(), email, sub.Format(r.URL.Query().Get("format"), r.UserAgent()))
+		f := sub.Format(r.URL.Query().Get("format"), r.UserAgent())
+		// A connected shop's client: the body is kept for a few seconds,
+		// keyed by its revision, so a refresh storm builds it once.
+		key := ""
+		if rev, ok := s.tenantSubRev(r.Context(), email); ok {
+			key = email + "\x00" + fmt.Sprint(f) + "\x00" + rev
+			if e, hit := s.subCacheGet(key); hit {
+				s.noteSubFetch(email, r.UserAgent())
+				w.Header().Set("Subscription-Userinfo", e.info)
+				w.Header().Set("Content-Type", e.ctype)
+				_, _ = w.Write(e.body)
+				return
+			}
+		}
+		body, ctype, info, err := s.SubscriptionBody(r.Context(), email, f)
 		if err != nil {
 			reply(w, nil, err)
 			return
 		}
+		if key != "" {
+			s.subCachePut(key, subCacheEntry{body: body, ctype: ctype, info: info})
+		}
+		s.noteSubFetch(email, r.UserAgent())
 		w.Header().Set("Subscription-Userinfo", info)
 		w.Header().Set("Content-Type", ctype)
 		_, _ = w.Write(body)
 	}
 	mux.HandleFunc("GET /sub/{token}", serveSub)
+	mux.HandleFunc("GET /sub/{token}/{$}", serveSub) // PasarGuard's own form of the link
 	// PasarGuard's plain list of configs, which sales bots read after creating a user.
 	mux.HandleFunc("GET /sub/{token}/links", func(w http.ResponseWriter, r *http.Request) {
 		email, err := s.EmailBySubToken(r.Context(), r.PathValue("token"))
 		if err != nil {
+			// A link from a Marzban/PasarGuard panel moved here keeps working.
+			if tok, ferr := s.foreignSubToken(r.Context(), r.PathValue("token")); ferr == nil {
+				email, err = s.EmailBySubToken(r.Context(), tok)
+			}
+		}
+		if err != nil {
 			http.NotFound(w, r)
 			return
+		}
+		// An app that says which device it is counts against the device
+		// limit here too (a sales bot fetching the list sends no device id).
+		if hwid := r.Header.Get("X-Hwid"); hwid != "" {
+			if err := s.CheckDevice(r.Context(), email, hwid, r.Header.Get("X-Device-Os"), r.Header.Get("X-Device-Model"), r.UserAgent()); err != nil {
+				if errors.Is(err, ErrDeviceLimit) {
+					http.Error(w, "device limit reached: remove a device in the panel or ask your seller", http.StatusForbidden)
+					return
+				}
+				reply(w, nil, err)
+				return
+			}
 		}
 		links, info, err := s.Subscription(r.Context(), email)
 		if err != nil {

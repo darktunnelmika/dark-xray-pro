@@ -3,6 +3,7 @@ package hubcore
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"fmt"
 	"io"
 	"os"
@@ -138,11 +139,17 @@ func RestartHub() {
 }
 
 // ApplyPendingRestore swaps a staged backup in. Call it before Open.
-func ApplyPendingRestore(dbPath string) (bool, error) {
+func ApplyPendingRestore(dbPath string) (ok bool, err error) {
 	pending := dbPath + ".pending"
 	if _, err := os.Stat(pending); err != nil {
 		return false, nil
 	}
+	marks := rowIDMarks(dbPath)
+	defer func() {
+		if ok {
+			keepRowIDMarks(dbPath, marks)
+		}
+	}()
 	if _, err := os.Stat(dbPath); err == nil {
 		old := dbPath + ".before-restore-" + time.Now().UTC().Format("20060102-150405")
 		if err := os.Rename(dbPath, old); err != nil {
@@ -154,5 +161,53 @@ func ApplyPendingRestore(dbPath string) (bool, error) {
 			}
 		}
 	}
-	return true, os.Rename(pending, dbPath)
+	if err := os.Rename(pending, dbPath); err != nil {
+		return true, err
+	}
+	return true, nil
+}
+
+// rowIDTables are the tables whose row ids sales bots keep (users,
+// templates, groups); newRowID never gives one of their ids out twice.
+var rowIDTables = []string{"clients", "products", "inbounds", "nodes"}
+
+// rowIDMarks reads, from the database about to be replaced, the highest id
+// each table has given out.
+func rowIDMarks(path string) map[string]int64 {
+	marks := map[string]int64{}
+	if _, err := os.Stat(path); err != nil {
+		return marks
+	}
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		return marks
+	}
+	defer db.Close()
+	for _, t := range rowIDTables {
+		var hw, top int64
+		_ = db.QueryRow(`SELECT CAST(value AS INTEGER) FROM settings WHERE key=?`, "rowid_hw_"+t).Scan(&hw)
+		_ = db.QueryRow(`SELECT COALESCE(MAX(rowid),0) FROM ` + t).Scan(&top)
+		marks[t] = max(hw, top)
+	}
+	return marks
+}
+
+// keepRowIDMarks raises the restored database's marks to what the replaced
+// one had given out, so ids of users made after the backup are not reused.
+func keepRowIDMarks(path string, marks map[string]int64) {
+	if len(marks) == 0 {
+		return
+	}
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		return
+	}
+	defer db.Close()
+	for t, m := range marks {
+		var hw int64
+		_ = db.QueryRow(`SELECT CAST(value AS INTEGER) FROM settings WHERE key=?`, "rowid_hw_"+t).Scan(&hw)
+		if m > hw {
+			_, _ = db.Exec(`INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value`, "rowid_hw_"+t, fmt.Sprint(m))
+		}
+	}
 }

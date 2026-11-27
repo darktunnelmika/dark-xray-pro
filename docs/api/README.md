@@ -114,7 +114,7 @@ Scopes: `account:read`, `clients:read`, `clients:write`, `clients:delete`, `even
 
 | Method | Path | Scope | |
 | --- | --- | --- | --- |
-| GET | `/api/v2/reseller/me` | account:read | credit, rules, the key, the subscription base address |
+| GET | `/api/v2/reseller/me` | account:read | credit, rules, the key, the subscription base address, `locked` (an overdue bill) |
 | GET | `/inbounds` | account:read | inbounds it may give |
 | GET | `/plans` | account:read | its published plans (products) |
 | POST | `/quote` | account:read | what a create or renew costs and whether it passes; changes nothing |
@@ -153,6 +153,11 @@ Idempotency-Key: order-1001
 unless `start_on_first_use` is `false`. `inbounds` defaults to every inbound the reseller may give. `product` (a plan id
 from `/plans`) fills plan, gb, days, IP limit and inbounds from one of its plans; a sub-seller can only sell those. The
 answer is `{"client": {…, "sub_url": "…"}, "charge": {"gb": 30, "units": 0}, "balance": {"credit_gb": 170, "units": 5}}`.
+
+The panel's other rules hold here too. A reseller with an overdue bill (`locked` in `/me`) cannot sell, renew or
+reset until it is paid (`policy_denied`). An old user brought from another panel is never renewed; only its on/off and
+IP limit change, and switching it on needs volume credit. Names are one space in any letter case: `Ali` is taken when
+`ali` exists.
 
 Ask first when the price matters: `POST /quote {"action": "renew", "name": "ali", "gb": 50, "days": 30}` answers
 `allowed`, `charge_gb`, `refund_gb`, `credit_after_gb` and, when not allowed, `code` and `reason`.

@@ -211,7 +211,7 @@ func (b *Bot) menu(ctx context.Context, chat int64) {
 		}
 	}
 	if len(views) == 0 {
-		if w := b.Store.Setting(ctx, "tg_welcome"); w != "" {
+		if w := b.Store.Welcome(ctx, b.Seller); w != "" {
 			sb.WriteString(esc(w) + "\n")
 		} else {
 			brand := "به <b>Dark VPN</b> خوش آمدید."
@@ -409,11 +409,16 @@ func (b *Bot) menuKB(ctx context.Context, chat int64, services int, ended []stri
 	if btn, ok := b.repSaleButton(ctx, chat); ok {
 		add("panel", btn, false)
 	}
+	list = append(list, b.growButtons(ctx, chat)...) // trial panel, reseller request (repgrow.go)
 	add("link", cbBtn("🔗 افزودن با لینک", "link"), false)
 	rows := layoutMenu(list, b.Store.BotLook(ctx, b.Seller))
 	if b.Owners[chat] {
 		// The owner is only looking at the customer's view: one tap back.
 		rows = append(rows, row(cbBtn("🛡 بازگشت به پنل مدیریت", "a:home")))
+	} else if rep, _ := b.repOf(ctx, chat); rep != "" {
+		// A reseller in customer mode: the way back never depends on the
+		// bottom keyboard, which Telegram drops when the chat is cleared.
+		rows = append(rows, row(repBtn("🧑‍💼 بازگشت به حالت نماینده", "mode")))
 	}
 	return &Keyboard{Rows: rows}
 }

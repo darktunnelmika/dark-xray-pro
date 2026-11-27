@@ -245,7 +245,11 @@ func TestResellerAPI(t *testing.T) {
 		t.Fatalf("overview %s", ov.Raw)
 	}
 
-	// Policy: deny_edit and deny_renew hold for keys too.
+	// Policy: deny_edit and deny_renew hold for keys too (a reset that gives
+	// used volume again is a renewal).
+	if _, err := s.db.Exec(`UPDATE client_usage SET up=? WHERE email='c1'`, int64(1<<30)); err != nil {
+		t.Fatal(err)
+	}
 	pol.DenyEdit, pol.DenyRenew = true, true
 	if err := s.SetRepPolicy(ctx, "shop", pol); err != nil {
 		t.Fatal(err)

@@ -2,7 +2,6 @@ package hubcore
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"sort"
@@ -31,7 +30,9 @@ func (s *Store) Sync(ctx context.Context, nodeID string, req wire.SyncRequest) (
 	defer tx.Rollback()
 	var rev, usageSeq int64
 	var oldDigest string
-	if err := tx.QueryRowContext(ctx, `SELECT config_revision,config_sha256,usage_seq FROM nodes WHERE id=?`, nodeID).
+	// The node hears only of fully applied batches (usageinbox.go): it keeps
+	// counting the others itself, so its limits never get looser.
+	if err := tx.QueryRowContext(ctx, `SELECT config_revision,config_sha256,applied_seq FROM nodes WHERE id=?`, nodeID).
 		Scan(&rev, &oldDigest, &usageSeq); err != nil {
 		return wire.SyncResponse{}, ErrNotFound
 	}
@@ -39,7 +40,7 @@ func (s *Store) Sync(ctx context.Context, nodeID string, req wire.SyncRequest) (
 		rev++
 	}
 	lastErr := req.LastError
-	if req.XrayRunning && int64(req.ConfigRevision) == rev {
+	if req.XrayRunning && int64(req.ConfigRevision) == rev && !configRejected(req.LastError) {
 		// The agent remembers its last failure for good; once Xray runs on the
 		// current config that failure is history, not the node's state.
 		lastErr = ""
@@ -96,154 +97,30 @@ tx_rate=MAX(tx_rate,excluded.tx_rate), online=MAX(online,excluded.online)`,
 // between can only make RemainingBytes smaller, so the Node may at worst
 // count those bytes twice for one poll (stricter, never looser).
 func (s *Store) limits(ctx context.Context, nodeID string) ([]wire.UserLimit, error) {
-	clients, err := s.nodeClients(ctx, nodeID)
+	// One query for the clients and their usage (not one per client: a node
+	// can carry tens of thousands).
+	// A daily cap (dailycap.go) reads today's usage only for capped clients.
+	rows, err := s.ro.QueryContext(ctx, `SELECT c.email,c.enabled,c.volume_bytes,c.expires_unix,c.duration_seconds,c.max_ips,
+COALESCE(u.up,0),COALESCE(u.down,0),COALESCE(u.first_seen_unix,0),COALESCE(u.last_seen_unix,0),c.daily_cap_bytes,
+CASE WHEN c.daily_cap_bytes>0 THEN COALESCE((SELECT SUM(d.up+d.down) FROM usage_daily d WHERE d.email=c.email AND d.day=?),0) ELSE 0 END
+FROM clients c LEFT JOIN client_usage u ON u.email=c.email
+WHERE c.email IN (SELECT ci.email FROM client_inbounds ci JOIN inbound_routes r ON r.tag=ci.tag WHERE r.node_id=?) ORDER BY c.email`, s.usageDay(), nodeID)
 	if err != nil {
 		return nil, err
 	}
-	out := make([]wire.UserLimit, 0, len(clients))
-	for _, c := range clients {
-		u, err := s.ClientUsage(ctx, c.Email)
-		if err != nil {
+	defer rows.Close()
+	out := []wire.UserLimit{}
+	for rows.Next() {
+		var c Client
+		var u Usage
+		var capBytes, today int64
+		if err := rows.Scan(&c.Email, &c.Enabled, &c.VolumeBytes, &c.ExpiresUnix, &c.DurationSeconds, &c.MaxIPs, &u.Up, &u.Down, &u.FirstSeen, &u.LastSeen, &capBytes, &today); err != nil {
 			return nil, err
 		}
 		out = append(out, wire.UserLimit{Email: c.Email, Enabled: c.Enabled, ExpiresUnix: EffectiveExpiry(c, u),
-			RemainingBytes: Remaining(c, u), MaxIPs: c.MaxIPs})
+			RemainingBytes: capRemaining(Remaining(c, u), capBytes, today), MaxIPs: c.MaxIPs})
 	}
-	return out, nil
-}
-
-// ApplyUsage stores one batch exactly once. A batch with a sequence the
-// node already delivered is acknowledged without being counted again.
-func (s *Store) ApplyUsage(ctx context.Context, nodeID string, b wire.UsageBatch) (wire.UsageAck, error) {
-	if b.Seq == 0 {
-		return wire.UsageAck{}, ErrInvalid
-	}
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return wire.UsageAck{}, err
-	}
-	defer tx.Rollback()
-	var last uint64
-	var pct int64
-	if err := tx.QueryRowContext(ctx, `SELECT usage_seq,traffic_percent FROM nodes WHERE id=?`, nodeID).Scan(&last, &pct); err != nil {
-		return wire.UsageAck{}, ErrNotFound
-	}
-	if pct <= 0 {
-		pct = 100
-	}
-	if b.Seq <= last {
-		return wire.UsageAck{Seq: last}, nil
-	}
-	now := s.now()
-	ts := b.ToUnix
-	if ts <= 0 || ts > now.Unix()+300 {
-		ts = now.Unix()
-	}
-	day := time.Unix(ts, 0).UTC().Format("2006-01-02")
-	// Statements reused for every row of the batch (thousands of users).
-	prep := func(q string) (*sql.Stmt, error) { return tx.PrepareContext(ctx, q) }
-	stUsage, err := prep(`INSERT INTO client_usage(email,up,down,first_seen_unix,last_seen_unix) VALUES(?,?,?,?,?)
-ON CONFLICT(email) DO UPDATE SET up=up+excluded.up, down=down+excluded.down, last_seen_unix=excluded.last_seen_unix,
-first_seen_unix=CASE WHEN first_seen_unix=0 THEN excluded.first_seen_unix ELSE first_seen_unix END`)
-	if err != nil {
-		return wire.UsageAck{}, err
-	}
-	defer stUsage.Close()
-	stDaily, err := prep(`INSERT INTO usage_daily(email,node_id,day,up,down) VALUES(?,?,?,?,?)
-ON CONFLICT(email,node_id,day) DO UPDATE SET up=up+excluded.up, down=down+excluded.down`)
-	if err != nil {
-		return wire.UsageAck{}, err
-	}
-	defer stDaily.Close()
-	renamed := renamedNow(ctx, tx)
-	for _, t := range b.Traffic {
-		if t.Up < 0 || t.Down < 0 || !emailRE.MatchString(t.Email) {
-			return wire.UsageAck{}, ErrInvalid
-		}
-		if to, ok := renamed[t.Email]; ok {
-			t.Email = to
-		}
-		if t.Up == 0 && t.Down == 0 {
-			continue
-		}
-		if pct != 100 {
-			t.Up, t.Down = t.Up*pct/100, t.Down*pct/100
-		}
-		if _, err := stUsage.ExecContext(ctx, t.Email, t.Up, t.Down, ts, ts); err != nil {
-			return wire.UsageAck{}, err
-		}
-		if _, err := stDaily.ExecContext(ctx, t.Email, nodeID, day, t.Up, t.Down); err != nil {
-			return wire.UsageAck{}, err
-		}
-	}
-	for _, t := range b.Outbounds {
-		if t.Up < 0 || t.Down < 0 || !idRE.MatchString(t.Email) || t.Email == apiTag || t.Up+t.Down == 0 {
-			continue
-		}
-		if _, err := tx.ExecContext(ctx, `INSERT INTO outbound_traffic(tag,node_id,day,up,down) VALUES(?,?,?,?,?)
-ON CONFLICT(tag,node_id,day) DO UPDATE SET up=up+excluded.up, down=down+excluded.down`, t.Email, nodeID, day, t.Up, t.Down); err != nil {
-			return wire.UsageAck{}, err
-		}
-	}
-	for _, t := range b.Inbounds {
-		if t.Up < 0 || t.Down < 0 || !idRE.MatchString(t.Email) || t.Email == apiTag || t.Up+t.Down == 0 {
-			continue // informational: a bad entry never rejects the batch
-		}
-		t.Email = parentTag(t.Email)
-		if _, err := tx.ExecContext(ctx, `INSERT INTO inbound_traffic(tag,day,up,down) VALUES(?,?,?,?)
-ON CONFLICT(tag,day) DO UPDATE SET up=up+excluded.up, down=down+excluded.down`, t.Email, day, t.Up, t.Down); err != nil {
-			return wire.UsageAck{}, err
-		}
-		if _, err := tx.ExecContext(ctx, `INSERT INTO route_traffic(tag,node_id,day,up,down) VALUES(?,?,?,?,?)
-ON CONFLICT(tag,node_id,day) DO UPDATE SET up=up+excluded.up, down=down+excluded.down`, t.Email, nodeID, day, t.Up, t.Down); err != nil {
-			return wire.UsageAck{}, err
-		}
-	}
-	if b.Online != nil {
-		if _, err := tx.ExecContext(ctx, `DELETE FROM online WHERE node_id=?`, nodeID); err != nil {
-			return wire.UsageAck{}, err
-		}
-		stOnline, err := prep(`INSERT OR REPLACE INTO online(email,node_id,ips,seen_unix) VALUES(?,?,?,?)`)
-		if err != nil {
-			return wire.UsageAck{}, err
-		}
-		defer stOnline.Close()
-		stIP, err := prep(`INSERT INTO ip_log(email,ip,node_id,first_unix,last_unix) VALUES(?,?,?,?,?)
-ON CONFLICT(email,ip,node_id) DO UPDATE SET last_unix=MAX(last_unix,excluded.last_unix)`)
-		if err != nil {
-			return wire.UsageAck{}, err
-		}
-		defer stIP.Close()
-		for _, o := range b.Online {
-			if to, ok := renamed[o.Email]; ok {
-				o.Email = to
-			}
-			ips, _ := json.Marshal(o.IPs)
-			if _, err := stOnline.ExecContext(ctx, o.Email, nodeID, string(ips), ts); err != nil {
-				return wire.UsageAck{}, err
-			}
-			for i, ip := range o.IPs {
-				if i >= 32 || len(ip) > 64 {
-					break
-				}
-				if _, err := stIP.ExecContext(ctx, o.Email, ip, nodeID, ts, ts); err != nil {
-					return wire.UsageAck{}, err
-				}
-			}
-		}
-	}
-	for _, d := range b.Disconnects {
-		if _, err := tx.ExecContext(ctx, `INSERT INTO events(unix,node_id,email,kind) VALUES(?,?,?,?)`, d.Unix, nodeID, d.Email, "blocked:"+d.Reason); err != nil {
-			return wire.UsageAck{}, err
-		}
-	}
-	if _, err := tx.ExecContext(ctx, `UPDATE nodes SET usage_seq=?, last_seen_unix=? WHERE id=?`, b.Seq, now.Unix(), nodeID); err != nil {
-		return wire.UsageAck{}, err
-	}
-	if err := tx.Commit(); err != nil {
-		return wire.UsageAck{}, err
-	}
-	return wire.UsageAck{Seq: b.Seq}, nil
+	return out, rows.Err()
 }
 
 // Prune bounds history: daily rows older than keepDays and old events.
@@ -336,6 +213,12 @@ func (n NodeStatus) Online(now time.Time) bool {
 }
 
 func (s *Store) Nodes(ctx context.Context) ([]NodeStatus, error) {
+	// Read first, before the rows hold a connection: a second query while
+	// they are open waits for another one, and with every reader doing the
+	// same (a burst of subscription fetches ranks nodes in each) the pool
+	// runs dry and all of them wait for ever.
+	dist := s.DistSHA()
+	hidden := s.hiddenTunnels(ctx)
 	rows, err := s.ro.QueryContext(ctx, `SELECT id,name,agent_version,last_error,last_seen_unix,xray_running,xray_restarts,spooled,
 config_revision,reported_revision,usage_seq,host_json,public_ip,agent_sha,xray_version,agent_arch,traffic_percent,public_ip_fixed FROM nodes ORDER BY id`)
 	if err != nil {
@@ -343,8 +226,6 @@ config_revision,reported_revision,usage_seq,host_json,public_ip,agent_sha,xray_v
 	}
 	defer rows.Close()
 	var out []NodeStatus
-	dist := s.DistSHA()
-	hidden := s.hiddenTunnels(ctx)
 	for rows.Next() {
 		var n NodeStatus
 		var hj string
@@ -409,4 +290,11 @@ func (s *Store) HideTunnel(ctx context.Context, node, iface string, hide bool) e
 	}
 	sort.Strings(keys)
 	return s.SetSetting(ctx, "tunnels_hidden", strings.Join(keys, ","))
+}
+
+// configRejected tells whether the agent's error says Xray refused the
+// current config: Xray then still runs, but on an older one, so the
+// error stays on the node until a config is applied (agent v2.13.7+).
+func configRejected(lastErr string) bool {
+	return strings.Contains(lastErr, "rejected, keeping last good")
 }

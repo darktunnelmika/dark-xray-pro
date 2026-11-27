@@ -17,7 +17,7 @@ import (
 )
 
 // HubVersion is the panel's release; the commit comes from the build.
-const HubVersion = "v2.51.0"
+const HubVersion = "v2.68.0"
 
 var hubStarted = time.Now()
 
@@ -271,7 +271,7 @@ func (s *Store) Online(ctx context.Context) ([]OnlineClient, error) {
 	since := s.now().Unix() - 3*PollSeconds
 	day := s.now().UTC().Format("2006-01-02")
 	rows, err := s.ro.QueryContext(ctx, `SELECT o.email,o.node_id,o.ips,o.seen_unix,COALESCE(u.up+u.down,0) FROM online o
-LEFT JOIN usage_daily u ON u.email=o.email AND u.node_id=o.node_id AND u.day=? WHERE o.seen_unix>=? ORDER BY o.seen_unix DESC, o.email`, day, since)
+LEFT JOIN usage_daily u ON u.email=o.email AND u.node_id=o.node_id AND u.day=? WHERE o.seen_unix>=? AND o.email NOT IN (SELECT email FROM clients WHERE substr(rep_id,1,1)='~') ORDER BY o.seen_unix DESC, o.email`, day, since)
 	if err != nil {
 		return nil, err
 	}

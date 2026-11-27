@@ -48,6 +48,12 @@ func (s *Store) PutRepBrand(ctx context.Context, repID string, b RepBrand) error
 	if s.ro.QueryRowContext(ctx, `SELECT 1 FROM reps WHERE id=?`, repID).Scan(&x) != nil {
 		return ErrNotFound
 	}
+	return s.putBrand(ctx, repID, b)
+}
+
+// putBrand checks and stores a brand under a seller key (a reseller id, or
+// a tenant's "~id").
+func (s *Store) putBrand(ctx context.Context, repID string, b RepBrand) error {
 	b.Title, b.Announce, b.SupportURL = strings.TrimSpace(b.Title), strings.TrimSpace(b.Announce), strings.TrimSpace(b.SupportURL)
 	b.RemarkTemplate, b.BaseURL = strings.TrimSpace(b.RemarkTemplate), strings.TrimRight(strings.TrimSpace(b.BaseURL), "/")
 	b.Telegram = cleanTgUser(b.Telegram)
@@ -100,6 +106,13 @@ func (s *Store) brandFor(ctx context.Context, email string) (SubSettings, string
 	set := s.SubSettings(ctx)
 	base := ""
 	chain := s.repChain(ctx, email)
+	if len(chain) == 1 {
+		if _, ok := tenantOfRep(chain[0]); ok {
+			// A connected shop's customers see only the shop's own look:
+			// nothing of the panel's title, notice, support or style.
+			set.Title, set.Announce, set.SupportURL, set.Accent, set.Logo = "", "", "", "", ""
+		}
+	}
 	if len(chain) > 1 {
 		// A sub-seller's customers are their own: nothing of the reseller
 		// above or of the panel (title, notice, support, look) shows, only
@@ -162,5 +175,5 @@ func (s *Store) SubBaseFor(ctx context.Context, email, def string) string {
 	if _, b := s.brandFor(ctx, email); b != "" {
 		return b
 	}
-	return def
+	return s.defaultBase(ctx, def) // the default subscription address (subdomains.go)
 }

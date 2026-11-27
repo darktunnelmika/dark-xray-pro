@@ -16,7 +16,7 @@ const I18N = {
     addNode: "Add node", nodeId: "Node ID (e.g. de-1)", nodeToken: "Node token — shown once, keep it safe", online: "Online", offline: "Offline",
     restarts: "Xray starts", spooled: "Waiting batches", language: "Language", theme: "Theme", system: "System", light: "Light", dark: "Dark",
     logout: "Sign out", empty: "Nothing here yet.", saved: "Saved", failed: "Failed: {e}", clientsCount: "{n} clients", lastError: "Last error",
-    reps: "Resellers", changePassword: "Change password", oldPassword: "Current password", newPassword: "New password (10+ chars)",
+    reps: "Resellers", tenants: "Connected shops", acc_tenant: "shop key", changePassword: "Change password", oldPassword: "Current password", newPassword: "New password (10+ chars)",
     credit: "Credit", volumeCredit: "Volume credit", units: "Unlimited units", addCredit: "Add credit", unitsHint: "1 unit = 1 user × 30 days",
     plan: "Plan", planVolume: "Volume", planUnlimited: "Unlimited", repId: "Reseller ID", loginUser: "Login username", loginPass: "Login password",
     installCmd: "Run this on the new server as root (link works once, for 1 hour):", note: "Note", reinstall: "New install link",
@@ -42,7 +42,7 @@ const I18N = {
     sellers: "Sub-sellers", transferCredit: "Transfer credit", subOf: "under", kind_transfer: "Transfer",
     sellersHint: "Open sellers under you and give them part of your credit. Their limits can only be tighter than yours.",
     transferHint: "Moves credit from your balance to this seller. Negative numbers take unused credit back.",
-    shop: "Shop", tickets: "Support", analytics: "Insights", products: "Products", orders: "Orders", newOrder: "New order", product: "Product", price: "Price", buyer: "Buyer (name, @telegram, phone)",
+    shop: "Shop", resale: "Panel sale", tickets: "Support", analytics: "Insights", products: "Products", orders: "Orders", newOrder: "New order", product: "Product", price: "Price", buyer: "Buyer (name, @telegram, phone)",
     renewClient: "Renew an existing client (optional)", fulfill: "Deliver", cancelOrder: "Cancel", status_pending: "Pending", status_fulfilled: "Delivered",
     status_cancelled: "Cancelled", status_draft: "Draft", status_published: "Published", status_archived: "Archived", statusLabel: "Status", seller: "Seller",
     delivered: "Delivered to {x}", manageProducts: "May create own shop products", shopHint: "Orders are recorded here; delivering one creates (or renews) the client in one step. A reseller's orders are paid from that reseller's credit.",
@@ -81,7 +81,7 @@ const I18N = {
     addNode: "افزودن نود", nodeId: "شناسه نود (مثلاً de-1)", nodeToken: "توکن نود — فقط یک بار نشان داده می‌شود", online: "آنلاین", offline: "آفلاین",
     restarts: "دفعات اجرای Xray", spooled: "بستهٔ در انتظار", language: "زبان", theme: "پوسته", system: "سیستم", light: "روشن", dark: "تیره",
     logout: "خروج", empty: "هنوز چیزی نیست.", saved: "ذخیره شد", failed: "خطا: {e}", clientsCount: "{n} کلاینت", lastError: "آخرین خطا",
-    reps: "نماینده‌ها", changePassword: "تغییر رمز", oldPassword: "رمز فعلی", newPassword: "رمز جدید (حداقل ۱۰ کاراکتر)",
+    reps: "نماینده‌ها", tenants: "فروشگاه‌های متصل", acc_tenant: "کلید فروشگاه", changePassword: "تغییر رمز", oldPassword: "رمز فعلی", newPassword: "رمز جدید (حداقل ۱۰ کاراکتر)",
     credit: "اعتبار", volumeCredit: "اعتبار حجمی", units: "واحد نامحدود", addCredit: "افزودن اعتبار", unitsHint: "هر واحد = ۱ کاربر × ۳۰ روز",
     plan: "نوع پلن", planVolume: "حجمی", planUnlimited: "نامحدود", repId: "شناسه نماینده", loginUser: "نام کاربری ورود", loginPass: "رمز ورود",
     installCmd: "این دستور را روی سرور جدید با root اجرا کنید (یک‌بار مصرف، ۱ ساعت):", note: "توضیح", reinstall: "لینک نصب جدید",
@@ -107,7 +107,7 @@ const I18N = {
     sellers: "زیرفروشنده‌ها", transferCredit: "انتقال اعتبار", subOf: "زیرمجموعهٔ", kind_transfer: "انتقال",
     sellersHint: "برای خودتان زیرفروشنده بسازید و بخشی از اعتبارتان را به او بدهید. محدودیت‌های او فقط می‌تواند سخت‌تر از شما باشد.",
     transferHint: "اعتبار را از موجودی شما به این فروشنده منتقل می‌کند. عدد منفی اعتبار مصرف‌نشده را برمی‌گرداند.",
-    shop: "فروشگاه", tickets: "پشتیبانی", analytics: "تحلیل", products: "محصولات", orders: "سفارش‌ها", newOrder: "سفارش جدید", product: "محصول", price: "قیمت", buyer: "خریدار (نام، آیدی تلگرام، تلفن)",
+    shop: "فروشگاه", resale: "فروش پنل", tickets: "پشتیبانی", analytics: "تحلیل", products: "محصولات", orders: "سفارش‌ها", newOrder: "سفارش جدید", product: "محصول", price: "قیمت", buyer: "خریدار (نام، آیدی تلگرام، تلفن)",
     renewClient: "تمدید کلاینت موجود (اختیاری)", fulfill: "تحویل", cancelOrder: "لغو", status_pending: "در انتظار", status_fulfilled: "تحویل شد",
     status_cancelled: "لغو شد", status_draft: "پیش‌نویس", status_published: "منتشر", status_archived: "حذف‌شده", statusLabel: "وضعیت", seller: "فروشنده",
     delivered: "تحویل شد: {x}", manageProducts: "اجازهٔ ساخت محصول فروشگاه", shopHint: "سفارش‌ها اینجا ثبت می‌شوند؛ با «تحویل» کلاینت یک‌جا ساخته (یا تمدید) می‌شود. سفارش‌های نماینده از اعتبار همان نماینده پرداخت می‌شود.",
@@ -174,6 +174,10 @@ function h(tag, attrs = {}, ...kids) {
   return el;
 }
 
+// movedHere: a reseller that came from another panel with its users' old
+// usage — its lifetime total and its traffic on this panel differ.
+function movedHere(total, here) { return (total || 0) - (here || 0) > 1073741824; }
+
 function bytes(n) {
   const u = ["B", "KB", "MB", "GB", "TB"];
   let i = 0;
@@ -196,6 +200,19 @@ async function api(method, path, body) {
 
 // faErr: the server's English errors in plain Persian (numbers kept).
 const FA_ERRS = [
+  [/old users cannot be renewed/i, "کاربرهای قدیمی (منتقل‌شده از پنل قبلی) تمدید نمی‌شوند؛ برایشان کاربر جدید بسازید"],
+  [/overdue bill is unpaid/i, "یک فاکتور از مهلتش گذشته و پرداخت نشده؛ تا پرداخت آن فروش و ساخت کاربر قفل است"],
+  [/no volume credit left/i, "اعتبار حجمی تمام شده است"],
+  [/wallet does not cover the wholesale price/i, "موجودی کیف پول برای قیمت عمده کافی نیست؛ اول کیف پول را از ربات اصلی شارژ کنید"],
+  [/panel sale is (no longer )?(not )?allowed/i, "فروش پنل برای این نماینده مجاز نیست"],
+  [/this username is taken or not valid/i, "این نام کاربری گرفته شده یا معتبر نیست"],
+  [/the price of (.+) cannot be below the wholesale price (\d+)/i, "قیمت «$1» نمی‌تواند کمتر از قیمت عمده ($2 تومان) باشد"],
+  [/bringing old users is not allowed/i, "آوردن کاربران قدیمی برای شما فعال نیست"],
+  [/the domain is already moved/i, "دامنه منتقل شده؛ دیگر لینکی خوانده نمی‌شود"],
+  [/links are still being read/i, "لینک‌های قبلی هنوز در حال خواندن‌اند؛ کمی صبر کنید"],
+  [/bring at least one user first/i, "اول دست‌کم یک کاربر بیاورید"],
+  [/1 to 5000 links/i, "بین ۱ تا ۵۰۰۰ لینک بفرستید"],
+  [/the client limit \((\d+)\) is reached/i, "به سقف تعداد کاربر ($1) رسیده‌اید"],
   [/client already exists/i, "این نام قبلاً استفاده شده است"],
   [/the name may use only/i, "نام فقط حروف انگلیسی، عدد و . _ - باشد (بدون فاصله)"],
   [/insufficient credit/i, "اعتبار کافی نیست"],
@@ -269,19 +286,20 @@ function confirmAction(text, label) {
 }
 
 // ---------- Views ----------
-const allRoutes = { dashboard: viewDashboard, online: viewOnline, clients: viewClients, groups: viewGroups, inbounds: viewInbounds, nodes: viewNodes, routing: viewRouting, reps: viewReps, shop: viewShop, tickets: viewTickets, analytics: viewAnalytics, finance: viewFinance, activity: viewActivity, staff: viewStaff, settings: viewSettings };
+const allRoutes = { dashboard: viewDashboard, online: viewOnline, clients: viewClients, groups: viewGroups, inbounds: viewInbounds, nodes: viewNodes, routing: viewRouting, reps: viewReps, tenants: viewTenants, shop: viewShop, resale: viewResale, tickets: viewTickets, analytics: viewAnalytics, finance: viewFinance, activity: viewActivity, staff: viewStaff, settings: viewSettings };
 let me = null;
 let routes = allRoutes;
 function fullOwner() { return me && me.role === "owner" && !me.level; }
 function routesFor(m) {
   if (m && m.role === "owner" && m.level) {
     const r = { ...allRoutes };
-    delete r.finance; delete r.staff;
+    delete r.finance; delete r.staff; delete r.tenants;
     return r;
   }
   if (m && m.role === "rep") {
     const r = { dashboard: viewRepDashboard, clients: viewClients, online: viewOnline, credit: viewCredit };
     if (m.can_sell) r.sellers = viewSellers;
+    if (m.resale) r.resale = viewResaleRep;
     r.shop = viewShop; r.tickets = viewTickets; r.analytics = viewAnalytics; r.settings = viewSettings;
     return r;
   }
@@ -316,9 +334,11 @@ const ICONS = {
   inbounds: "M6 3v6M18 3v6M4 9h16v3a8 8 0 0 1-16 0zM12 20v2",
   nodes: "M3 4h18v6H3zM3 14h18v6H3zM7 7h.01M7 17h.01",
   reps: "M3 7h18v13H3zM8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M3 13h18",
+  tenants: "M3 9 5 3h14l2 6M3 9h18v12H3zM9 21v-6h6v6M7 9a2 2 0 0 0 4 0 2 2 0 0 0 4 0 2 2 0 0 0 4 0",
   sellers: "M15 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M8.5 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM20 8v6M23 11h-6",
   analytics: "M4 20V10M10 20V4M16 20v-7M22 20H2",
   tickets: "M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2zM8 9h8M8 13h5",
+  resale: "M3 9l1.5-5h15L21 9M3 9h18v2a3 3 0 0 1-6 0 3 3 0 0 1-6 0 3 3 0 0 1-6 0V9zM5 13v8h14v-8M10 21v-5h4v5",
   shop: "M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4zM3 6h18M16 10a4 4 0 0 1-8 0",
   finance: "M3 3v18h18M7 15l4-4 3 3 6-6",
   activity: "M22 12h-4l-3 9L9 3l-3 9H2",
@@ -449,9 +469,9 @@ async function loadNotifs() {
 // Sidebar groups (desktop); phones keep the same order in the tab bar.
 const NAV_GROUPS = [
   ["overview", ["dashboard", "analytics", "online"]],
-  ["people", ["clients", "groups", "reps", "sellers"]],
+  ["people", ["clients", "groups", "reps", "sellers", "tenants"]],
   ["infra", ["inbounds", "nodes", "routing"]],
-  ["sales", ["shop", "tickets", "credit", "finance"]],
+  ["sales", ["shop", "resale", "tickets", "credit", "finance"]],
   ["system", ["activity", "staff", "settings"]],
 ];
 const NAV_LABELS = { fa: { overview: "نمای کلی", people: "کاربران و نماینده‌ها", infra: "زیرساخت", sales: "فروش", system: "سیستم" },
@@ -642,45 +662,317 @@ async function viewOnline() {
   return h("div", { class: "form" }, h("div", { class: "row" }, h("h1", {}, s3("online")), sum), h("p", { class: "small muted" }, s3("onlineHint")), q, box);
 }
 
-const NODE_COLORS = ["#28f7a0", "#b36cff", "#4bb9ff", "#ff7a59", "#ff415d", "#00e8c0", "#7d9bff", "#e070ff"];
-function nodeTrafficCard(nodes) {
-  const body = h("div", {});
-  let days = 14;
-  const load = async () => {
-    const rows = await api("GET", `/api/v2/admin/nodes/traffic?days=${days}`).catch(() => []);
-    const ids = [...new Set([...nodes.map((n) => n.ID), ...rows.map((r) => r.node_id)])];
-    const color = (id) => NODE_COLORS[ids.indexOf(id) % NODE_COLORS.length];
-    const dayList = [];
-    for (let i = days - 1; i >= 0; i--) dayList.push(new Date(Date.now() - i * 86400000).toISOString().slice(0, 10));
-    const by = {}; for (const r of rows) (by[r.day] ||= {})[r.node_id] = r.up + r.down;
-    const max = Math.max(1, ...dayList.map((d) => Object.values(by[d] || {}).reduce((a, b) => a + b, 0)));
-    const W = 1100, H = 180, bw = W / dayList.length;
-    const svg = svgEl("svg", { viewBox: `0 0 ${W} ${H + 20}`, class: "bars", role: "img", "aria-label": s3("ntTitle") });
-    for (let k = 0; k <= 4; k++) svg.append(svgEl("line", { x1: 0, x2: W, y1: 4 + ((H - 4) * k) / 4, y2: 4 + ((H - 4) * k) / 4, class: "grid-line" }));
-    const step = Math.max(1, Math.round(dayList.length / 7));
-    dayList.forEach((d, i) => {
-      let y = H;
-      const parts = [];
-      for (const id of ids) {
-        const v = (by[d] || {})[id] || 0;
-        if (!v) continue;
-        const hgt = ((H - 6) * v) / max;
-        y -= hgt;
-        svg.append(svgEl("rect", { x: i * bw + bw * 0.18, y, width: bw * 0.64, height: Math.max(1, hgt), rx: 3, fill: color(id), opacity: ".85" }));
-        parts.push(`${id}: ${bytes(v)}`);
+// ---------- Charts: one kit for every chart in the panel ----------
+// Drawn at the box's real pixel size (redrawn when it resizes), a numbered
+// axis, and a readout under the cursor or finger that also works on phones.
+// Colours go through the CSSOM (el.style), never a style attribute, so the
+// panel's strict CSP (style-src 'self') does not drop them.
+// o: { xs, series:[{id,name,color,values,area,dash}], mode: "lines"|"stack"|"share",
+//      fmt, bin (1024 units, default true), int, max, suffix, height, partial (index),
+//      xLabel(i), tipTitle(i), tipExtra(i), totals (numbers over bars), label,
+//      overlay: [{name,color,values}] extra lines (null = gap) not counted in bars or the readout,
+//      ref: {value,label} a dashed level such as the average, noX: no day labels }
+const UNITS = ["B", "KB", "MB", "GB", "TB", "PB"];
+function niceTicks(max, bin = true, int = false, suffix = "") {
+  let u = 1, k = 0;
+  if (bin) while (max / u >= 1024 && k < UNITS.length - 1) { u *= 1024; k++; }
+  const m = Math.max(max / u, int ? 1 : 1e-9), raw = m / 4, p = 10 ** Math.floor(Math.log10(raw)), q = raw / p;
+  let s = (q <= 1 ? 1 : q <= 2 ? 2 : q <= 2.5 ? 2.5 : q <= 5 ? 5 : 10) * p;
+  if (int) s = Math.max(1, Math.round(s));
+  const top = Math.ceil(m / s - 1e-9) * s, list = [];
+  for (let v = 0; v <= top + s / 2; v += s) list.push(v * u);
+  const f = bin ? (v) => `⁦${fmtNum(v / u)} ${UNITS[k]}${suffix}⁩` : (v) => `${fmtNum(v)}${suffix}`;
+  return { top: top * u || 1, list, f };
+}
+// "سه‌شنبه ۴ آذر" / "Tue 24 Nov": the readout's title for a day.
+function dayLong(day) {
+  return new Intl.DateTimeFormat(lang === "fa" ? "fa-IR-u-ca-persian" : "en-GB", { weekday: "long", month: "long", day: "numeric" }).format(new Date(day + "T12:00:00Z"));
+}
+const utcDays = (n) => { const out = [], now = Date.now(); for (let i = n - 1; i >= 0; i--) out.push(new Date(now - i * 86400000).toISOString().slice(0, 10)); return out; };
+const todayUTC = () => new Date().toISOString().slice(0, 10);
+
+function chartKit(o) {
+  const fa = lang === "fa";
+  const n = o.xs.length, mode = o.mode || "lines", fmt = o.fmt || bytes;
+  const fig = h("div", { class: "cfig" });
+  fig.style.blockSize = `${o.height || 230}px`;
+  const svg = svgEl("svg", { role: "img", "aria-label": o.label || "" });
+  const tip = h("div", { class: "ctip", hidden: true });
+  fig.append(svg, tip);
+  const pid = `cp${++markSeq}`;
+  let g = null;
+  const draw = () => {
+    const W = fig.clientWidth, H = fig.clientHeight;
+    if (!W || !H) return;
+    const S = o.series, narrow = W < 520, part = o.partial ?? -1;
+    const L = narrow ? 46 : 62, R = 8, T = part >= 0 || o.totals ? 20 : 10, B = o.noX ? 6 : 22, iw = W - L - R, ih = H - T - B, bw = iw / Math.max(1, n);
+    const col = (i) => S.reduce((a, s) => a + (s.values[i] || 0), 0);
+    const over = o.overlay || [];
+    const peak = o.max || Math.max(mode === "lines" ? Math.max(0, ...S.flatMap((s) => s.values)) : Math.max(0, ...o.xs.map((_, i) => col(i))), ...over.flatMap((s) => s.values.map((v) => v || 0)));
+    const tk = mode === "share" ? { top: 1, list: [0, 0.25, 0.5, 0.75, 1], f: (v) => `${fmtNum(v * 100)}%` } : niceTicks(peak, o.bin !== false, o.int, o.suffix || "");
+    if (o.axis && mode !== "share") tk.f = o.axis;
+    if (ih < 90 && mode !== "share") tk.list = [0, tk.top]; // a strip: just zero and the top
+    const y = (v) => T + ih - (Math.min(v, tk.top) / tk.top) * ih;
+    svg.replaceChildren();
+    svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+    const add = (tag, a, style) => { const e = svgEl(tag, a); if (style) Object.assign(e.style, style); svg.append(e); return e; };
+    const txt = (x, yy, s, cls, anchor = "middle") => { add("text", { x, y: yy, "text-anchor": anchor, class: cls }).textContent = s; };
+    const defs = add("defs", {});
+    const pat = svgEl("pattern", { id: pid, width: 6, height: 6, patternUnits: "userSpaceOnUse", patternTransform: "rotate(45)" });
+    pat.append(svgEl("line", { x1: 0, y1: 0, x2: 0, y2: 6, class: "c-hatch" })); defs.append(pat);
+    const hl = add("rect", { x: 0, y: T, width: 0, height: ih, class: "c-hl" });
+    for (const v of tk.list) { const yy = y(v); add("line", { x1: L, x2: W - R, y1: yy, y2: yy, class: "c-grid" }); txt(L - 7, yy + 3.5, v ? tk.f(v) : fmtNum(0), "c-ax", "end"); }
+    const xc = (i) => L + i * bw + bw / 2;
+    if (mode === "lines") {
+      if (part >= 0 && part < n) { add("rect", { x: L + part * bw, y: T, width: bw, height: ih, fill: `url(#${pid})`, class: "c-part" }); txt(xc(part), T - 6, fa ? "تا الان" : "so far", "c-note"); }
+      for (const s of [...S].reverse()) {
+        const pts = s.values.map((v, i) => `${xc(i).toFixed(1)},${y(v || 0).toFixed(1)}`).join(" ");
+        if (s.area) add("polygon", { points: `${xc(0)},${T + ih} ${pts} ${xc(n - 1)},${T + ih}`, class: "c-area" }, { fill: s.color });
+        add("polyline", { points: pts, class: `c-line${s.dash ? " dash" : ""}` }, { stroke: s.color });
+        if (n <= 120) add("circle", { cx: xc(n - 1), cy: y(s.values[n - 1] || 0), r: 3 }, { fill: s.color });
       }
-      const hit = svgEl("rect", { x: i * bw, y: 0, width: bw, height: H, class: "bar-hit" });
-      const tt = svgEl("title", {}); tt.textContent = `${dayLabel(d, true)}\n${parts.join("\n") || "—"}`; hit.append(tt); svg.append(hit);
-      if ((dayList.length - 1 - i) % step === 0) { const lab = svgEl("text", { x: i * bw + bw / 2, y: H + 15, "text-anchor": "middle", class: "bar-label" }); lab.textContent = dayLabel(d); svg.append(lab); }
-    });
-    const total = (id) => rows.filter((r) => r.node_id === id).reduce((a, r) => a + r.up + r.down, 0);
-    fill(body, svg, h("div", { class: "row small" }, ids.map((id) => h("span", { class: "legend-item" }, h("i", { class: "sw", style: `background:${color(id)}` }), `${id} · ${bytes(total(id))}`))));
+    } else {
+      const multi = S.length > 1;
+      o.xs.forEach((_, i) => {
+        const t = col(i);
+        if (!t) return;
+        let yy = T + ih;
+        const x = L + i * bw + bw * 0.16, w = Math.max(2, bw * 0.68);
+        for (const s of S) {
+          const v = s.values[i] || 0;
+          if (!v) continue;
+          const hh = mode === "share" ? (v / t) * ih : (Math.min(v, tk.top) / tk.top) * ih;
+          yy -= hh;
+          add("rect", { x, y: yy, width: w, height: Math.max(hh - (multi ? 1 : 0), 0.8), rx: multi ? 0 : 2, class: "c-bar" }, { fill: s.color });
+        }
+        if (i === part) { add("rect", { x, y: yy, width: w, height: T + ih - yy, fill: `url(#${pid})` }); txt(x + w / 2, yy - 6, fa ? "تا الان" : "so far", "c-note"); }
+        else if (o.totals && mode === "stack" && bw >= 34) txt(x + w / 2, yy - 5, o.totals(t), "c-val");
+      });
+    }
+    for (const s of over) {
+      let seg = [];
+      const flush = () => { if (seg.length > 1) add("polyline", { points: seg.join(" "), class: "c-over" }, { stroke: s.color }); else if (seg.length) { const [cx, cy] = seg[0].split(","); add("circle", { cx, cy, r: 2.5 }, { fill: s.color }); } seg = []; };
+      s.values.forEach((v, i) => { if (v == null) flush(); else seg.push(`${xc(i).toFixed(1)},${y(v).toFixed(1)}`); });
+      flush();
+    }
+    if (o.ref?.value) { const yy = y(o.ref.value); add("line", { x1: L, x2: W - R, y1: yy, y2: yy, class: "c-ref" }); if (o.ref.label) txt(L + 6, yy - 5, o.ref.label, "c-refl", "start"); }
+    const step = Math.max(1, Math.ceil(n / (narrow ? 5 : Math.max(6, Math.floor(iw / 72)))));
+    if (!o.noX) for (let i = 0; i < n; i++) if ((n - 1 - i) % step === 0) txt(xc(i), H - 6, o.xLabel ? o.xLabel(i) : dayLabel(o.xs[i]), "c-ax");
+    g = { L, bw, hl };
   };
-  const seg = h("div", { class: "row tight spacer" }, [7, 14, 30].map((n) => h("button", { type: "button", class: n === days ? "chip on" : "chip", onclick: (e) => {
-    days = n; seg.querySelectorAll("button").forEach((b) => b.classList.toggle("on", b === e.target)); load();
-  } }, s3("ntDays", { n: fmtNum(n) }))));
+  const hide = () => { tip.hidden = true; g?.hl.classList.remove("on"); };
+  const show = (e) => {
+    if (!g) return;
+    const r = svg.getBoundingClientRect(), x = e.clientX - r.left, i = Math.floor((x - g.L) / g.bw);
+    if (i < 0 || i >= n) return hide();
+    g.hl.setAttribute("x", g.L + i * g.bw); g.hl.setAttribute("width", g.bw); g.hl.classList.add("on");
+    const rows = o.series.map((s) => ({ s, v: s.values[i] || 0 }));
+    const list = mode === "lines" ? rows : rows.filter((x) => x.v).sort((a, b) => b.v - a.v);
+    const tot = rows.reduce((a, x) => a + x.v, 0), many = o.series.length > 2;
+    fill(tip,
+      h("b", {}, o.tipTitle ? o.tipTitle(i) : dayLong(o.xs[i]), i === o.partial ? (fa ? " · تا الان" : " · so far") : ""),
+      o.series.length > 1 && (mode !== "lines" || o.total) ? h("div", { class: "ct-row tot" }, h("span", {}, fa ? "مجموع" : "Total"), h("span", { class: "v" }, fmt(tot))) : null,
+      list.length ? list.map((x) => { const sw = h("i", {}); sw.style.background = x.s.color;
+        return h("div", { class: "ct-row" }, sw, h("span", {}, x.s.name), h("span", { class: "v" }, fmt(x.v)), many && tot && mode !== "lines" ? h("em", {}, `${fmtNum(Math.round((x.v / tot) * 100))}%`) : h("em", {})); })
+        : h("div", { class: "muted" }, fa ? "چیزی ثبت نشده" : "Nothing recorded"),
+      o.tipExtra ? o.tipExtra(i) : null);
+    tip.hidden = false;
+    const tw = tip.offsetWidth;
+    let left = x + 14;
+    if (left + tw > r.width) left = x - tw - 14;
+    tip.style.left = `${Math.max(0, left)}px`;
+    tip.style.top = "4px";
+  };
+  svg.addEventListener("pointermove", show);
+  svg.addEventListener("pointerdown", show);
+  svg.addEventListener("pointerleave", (e) => { if (e.pointerType === "mouse") hide(); });
+  new ResizeObserver(draw).observe(fig);
+  return fig;
+}
+
+// Swatch legend; with onToggle each entry hides or shows its series.
+function chartLegend(items, onToggle, hidden = new Set()) {
+  const fa = lang === "fa";
+  return h("div", { class: "clegend" }, items.map((it) => {
+    const sw = h("i", {}); sw.style.background = it.color;
+    const off = hidden.has(it.id);
+    return onToggle
+      ? h("button", { type: "button", class: off ? "off" : "", "aria-pressed": String(!off), onclick: () => onToggle(it.id) }, sw, it.name, it.value ? h("span", {}, it.value) : null)
+      : h("span", {}, sw, it.name, it.value ? h("span", {}, it.value) : null);
+  }), onToggle && hidden.size ? h("button", { type: "button", onclick: () => onToggle("*") }, fa ? "نمایش همه" : "Show all") : null);
+}
+
+// ---------- Dashboard: traffic per day ----------
+// Range 7–90 days, stacked download/upload (or lines), the period's average,
+// the period before it as a dotted line, four figures, and active users per
+// day. It asks the HUB for twice the range: the first half is the period before.
+function dashTrafficCard(ins0) {
+  const fa = lang === "fa";
+  let n = 14, view = "bars";
+  try { n = +localStorage.getItem("dashDays") || 14; view = localStorage.getItem("dashView") || "bars"; } catch {}
+  if (![7, 14, 30, 90].includes(n)) n = 14;
+  const title = h("h2", {});
+  const body = h("div", { class: "form" });
+  let all = n === 14 ? ins0?.daily || [] : [];
+  const render = () => {
+    const today = todayUTC();
+    const cur = all.slice(-n), prev = all.length >= 2 * n ? all.slice(-2 * n, -n) : [];
+    title.textContent = fa ? `ترافیک ${fmtNum(n)} روز اخیر` : `Traffic, last ${n} days`;
+    if (!cur.length) { fill(body, h("p", { class: "muted small" }, t("noData"))); return; }
+    const tot = (d) => (d ? d.Up + d.Down : 0);
+    const full = cur.filter((d) => d.Day !== today && tot(d) > 0);
+    const sum = cur.reduce((a, d) => a + tot(d), 0);
+    const prevFull = prev.length === n && prev.every((d) => tot(d) > 0), psum = prev.reduce((a, d) => a + tot(d), 0);
+    const avg = full.length ? full.reduce((a, d) => a + tot(d), 0) / full.length : 0;
+    const peak = full.reduce((a, d) => (tot(d) > tot(a) ? d : a), full[0]);
+    const todayRow = cur.find((d) => d.Day === today);
+    const pct = (a, b) => Math.round(((a - b) / b) * 100);
+    const chg = (p) => h("span", { class: `chg ${p >= 0 ? "up" : "down"}`, dir: "ltr" }, `${p > 0 ? "+" : p < 0 ? "−" : ""}${fmtNum(Math.abs(p))}%`);
+    const kpi = (v, k, extra) => h("div", { class: "ckpi" }, h("b", {}, v, extra || null), h("span", {}, k));
+    const xs = cur.map((d) => d.Day), part = xs.indexOf(today);
+    const series = [
+      { id: "d", name: `↓ ${t("inRate")}`, color: "var(--ion)", area: true, values: cur.map((d) => d.Down) },
+      { id: "u", name: `↑ ${t("outRate")}`, color: "var(--ember)", dash: true, values: cur.map((d) => d.Up) },
+    ];
+    const hasPrev = prev.some((d) => tot(d) > 0);
+    const extra = (i) => {
+      const d = cur[i], p = prev[i], v = tot(d), row = (k, val) => h("div", { class: "ct-row ex" }, h("span", {}, k), h("span", { class: "v" }, val));
+      return [
+        row(fa ? "کاربران فعال" : "Active users", fmtNum(d.Users || 0)),
+        avg && v && d.Day !== today ? row(fa ? "نسبت به میانگین" : "Of the average", `${fmtNum(Math.round((v / avg) * 100))}%`) : null,
+        p && v && d.Day !== today && tot(p) >= avg * 0.1 ? row(fa ? `در برابر ${dayLabel(p.Day)}` : `vs ${dayLabel(p.Day)}`, (() => { const x = pct(v, tot(p)); return `⁦${x > 0 ? "+" : x < 0 ? "−" : ""}${fmtNum(Math.abs(x))}%⁩`; })()) : null,
+      ];
+    };
+    const users = cur.map((d) => d.Users || 0), fullUsers = full.map((d) => d.Users || 0);
+    const leg = (cls, label) => h("span", { class: "legend-item" }, h("i", { class: cls }), label);
+    fill(body,
+      h("div", { class: "ckpis" },
+        kpi(bytes(sum), prevFull ? (fa ? "مجموع بازه، در برابر دورهٔ قبل" : "Total, against the period before") : (fa ? "مجموع بازه" : "Total"), prevFull && psum ? chg(pct(sum, psum)) : null),
+        kpi(bytes(avg), fa ? "میانگین هر روز کامل" : "Average full day"),
+        kpi(peak ? bytes(tot(peak)) : "—", peak ? (fa ? `پرترافیک‌ترین روز: ${dayLong(peak.Day)}` : `Busiest day: ${dayLong(peak.Day)}`) : (fa ? "پرترافیک‌ترین روز" : "Busiest day")),
+        kpi(bytes(tot(todayRow)), fa ? `امروز تا الان · ${fmtNum(todayRow?.Users || 0)} کاربر فعال` : `Today so far · ${todayRow?.Users || 0} active users`)),
+      h("div", { class: "row small dleg" },
+        leg("sw down", `↓ ${t("inRate")}`), leg("sw up", `↑ ${t("outRate")}`), leg("ln avg", fa ? "میانگین روزانه" : "Daily average"),
+        hasPrev ? leg("ln prev", fa ? "دورهٔ قبل" : "Period before") : null),
+      chartKit({ xs, series, mode: view === "lines" ? "lines" : "stack", partial: part, height: 270, label: title.textContent, tipExtra: extra, total: true,
+        overlay: hasPrev ? [{ name: "prev", color: "var(--muted)", values: prev.map((d) => (tot(d) > 0 ? tot(d) : null)) }] : [],
+        ref: avg ? { value: avg, label: `${fa ? "میانگین" : "avg"} ${bytes(avg)}` } : null }),
+      h("div", { class: "row small" }, h("strong", {}, fa ? "کاربران فعال هر روز" : "Active users per day"),
+        fullUsers.length ? h("span", { class: "muted spacer" }, fa ? `میانگین ${fmtNum(Math.round(fullUsers.reduce((a, b) => a + b, 0) / fullUsers.length))} · بیشترین ${fmtNum(Math.max(...fullUsers))}` : `avg ${Math.round(fullUsers.reduce((a, b) => a + b, 0) / fullUsers.length)} · peak ${Math.max(...fullUsers)}`) : null),
+      chartKit({ xs, mode: "lines", bin: false, int: true, height: 100, noX: true, partial: -1, label: fa ? "کاربران فعال هر روز" : "Active users per day",
+        series: [{ id: "n", name: fa ? "کاربران فعال" : "Active users", color: "var(--sky)", area: true, values: users }], fmt: (v) => fmtNum(v) }),
+      h("a", { class: "small", href: "#/nodes" }, fa ? "تفکیک بر اساس نود ›" : "By node ›"));
+  };
+  const load = async () => {
+    if (all.length < 2 * n) {
+      fill(body, h("p", { class: "muted small" }, "…"));
+      try { all = (await api("GET", `/api/v2/admin/insights?days=${2 * n}`)).daily || []; } catch { all = []; }
+    }
+    render();
+  };
+  const seg = (list, cur, set) => {
+    const box = h("div", { class: "row cseg" });
+    for (const [v, l] of list) box.append(h("button", { type: "button", class: v === cur ? "chip on" : "chip", "aria-pressed": String(v === cur), onclick: (e) => {
+      box.querySelectorAll("button").forEach((b) => { b.classList.toggle("on", b === e.currentTarget); b.setAttribute("aria-pressed", String(b === e.currentTarget)); });
+      set(v);
+    } }, l));
+    return box;
+  };
+  const views = seg([["bars", fa ? "ستونی" : "Bars"], ["lines", fa ? "خطی" : "Lines"]], view, (v) => { view = v; try { localStorage.setItem("dashView", v); } catch {} render(); });
+  const ranges = seg([7, 14, 30, 90].map((d) => [d, fa ? `${fmtNum(d)} روز` : `${d} days`]), n, (v) => { n = v; try { localStorage.setItem("dashDays", v); } catch {} all = []; load(); });
   load();
-  return h("div", { class: "card form" }, h("div", { class: "row" }, h("h2", {}, s3("ntTitle")), seg), h("p", { class: "small muted" }, s3("ntHint")), body);
+  return h("div", { class: "card form span2 dash-traffic" }, h("div", { class: "row" }, title, h("span", { class: "spacer" }), views, ranges), body);
+}
+
+// ---------- Traffic per node ----------
+// One colour per node, in the order of the node list, so a node keeps its
+// colour; none is yellow. Past the palette the hue is generated (skipping
+// yellow); a node that is gone is grey.
+const NODE_COLORS = ["#4f8cff", "#ff8a4c", "#2fd39b", "#b36cff", "#22d3ee", "#ff5470", "#f472b6", "#14b8a6", "#8fa2ff", "#e879f9", "#c08457", "#7dd3a8"];
+function nodeColorOf(nodes) {
+  const order = nodes.map((n) => n.ID);
+  return (id) => {
+    const i = order.indexOf(id);
+    if (i < 0) return "#6b7488";
+    if (i < NODE_COLORS.length) return NODE_COLORS[i];
+    let hue = (i * 137.5) % 360;
+    if (hue > 35 && hue < 85) hue += 60;
+    return `hsl(${hue.toFixed(0)} 70% 62%)`;
+  };
+}
+
+// opt.url(days) and opt.title/opt.hint let a connected shop show the same
+// chart for its own clients only (viewTenants).
+function nodeTrafficCard(nodes, opt = {}) {
+  const fa = lang === "fa";
+  const url = opt.url || ((d) => `/api/v2/admin/nodes/traffic?days=${d}`);
+  const body = h("div", { class: "form" });
+  let days = 14, mode = "stack", rows = [];
+  try { days = +sessionStorage.getItem("ntDays") || 14; mode = sessionStorage.getItem("ntMode") || "stack"; } catch {}
+  const hidden = new Set();
+  const color = nodeColorOf(nodes);
+  const nameOf = (id) => { const n = nodes.find((x) => x.ID === id); return n ? n.Name || n.ID : `${id} (${fa ? "حذف‌شده" : "removed"})`; };
+  const render = () => {
+    const dayList = utcDays(days), today = todayUTC();
+    const by = {};
+    for (const r of rows) (by[r.day] ||= {})[r.node_id] = (r.up || 0) + (r.down || 0);
+    const val = (d, id) => (by[d] || {})[id] || 0;
+    const tot = {};
+    for (const d of dayList) for (const [id, b] of Object.entries(by[d] || {})) tot[id] = (tot[id] || 0) + b;
+    const ids = Object.keys(tot).filter((id) => tot[id] > 0).sort((a, b) => tot[b] - tot[a]);
+    if (!ids.length) { fill(body, h("p", { class: "muted small" }, fa ? "در این بازه مصرفی ثبت نشده." : "No traffic in this range.")); return; }
+    const sum = ids.reduce((a, id) => a + tot[id], 0);
+    const full = dayList.filter((d) => d !== today && by[d]);
+    const dayTot = (d) => Object.values(by[d] || {}).reduce((a, b) => a + b, 0);
+    const avg = full.length ? full.reduce((a, d) => a + dayTot(d), 0) / full.length : 0;
+    const kpi = (v, k) => h("div", { class: "ckpi" }, h("b", {}, v), h("span", {}, k));
+    const series = ids.filter((id) => !hidden.has(id)).map((id) => ({ id, name: nameOf(id), color: color(id), values: dayList.map((d) => val(d, id)) }));
+    const toggle = (id) => { if (id === "*") hidden.clear(); else if (hidden.has(id)) hidden.delete(id); else hidden.add(id); render(); };
+    const top = ids[0], mx = tot[top];
+    fill(body,
+      h("div", { class: "ckpis" },
+        kpi(bytes(sum), fa ? `مجموع ${fmtNum(days)} روز` : `${days} days in all`),
+        kpi(bytes(avg), fa ? "میانگین هر روز کامل" : "Average full day"),
+        kpi(bytes(dayTot(today)), fa ? "امروز تا الان" : "Today so far"),
+        kpi(nameOf(top), fa ? `پرمصرف‌ترین · ${fmtNum(Math.round((tot[top] / sum) * 100))}%` : `Busiest · ${Math.round((tot[top] / sum) * 100)}%`)),
+      series.length ? chartKit({ xs: dayList, series, mode, partial: dayList.indexOf(today), height: 290, label: s3("ntTitle") })
+        : h("p", { class: "muted small" }, fa ? "همهٔ نودها پنهان‌اند." : "Every node is hidden."),
+      chartLegend(ids.map((id) => ({ id, name: nameOf(id), color: color(id), value: bytes(tot[id]) })), toggle, hidden),
+      h("div", { class: "ctable-wrap" }, h("table", { class: "ctable" },
+        h("thead", {}, h("tr", {}, [[fa ? "نود" : "Node"], [fa ? "مجموع" : "Total", "num"], [fa ? "سهم" : "Share", "num"], [fa ? "میانگین روزانه" : "Daily average", "num avg"], [fa ? "امروز تا الان" : "Today so far", "num"], ["", "cshare"]].map(([x, c]) => h("th", { class: c }, x)))),
+        h("tbody", {}, ids.map((id) => {
+          const act = full.filter((d) => val(d, id)), a = act.length ? act.reduce((s, d) => s + val(d, id), 0) / act.length : 0, td = val(today, id);
+          const sw = h("i", { class: "csw" }); sw.style.background = color(id);
+          const bar = h("i", {}); bar.style.inlineSize = `${((tot[id] / mx) * 100).toFixed(1)}%`; bar.style.background = color(id);
+          return h("tr", {},
+            h("td", {}, sw, nameOf(id), " ", h("span", { class: "muted small cid", dir: "ltr" }, id)),
+            h("td", { "data-label": fa ? "مجموع" : "Total", class: "num" }, bytes(tot[id])),
+            h("td", { "data-label": fa ? "سهم" : "Share", class: "num" }, `${fmtNum(Math.round((tot[id] / sum) * 1000) / 10)}%`),
+            h("td", { "data-label": fa ? "میانگین روزانه" : "Daily average", class: "num avg" }, a ? bytes(a) : "—"),
+            h("td", { "data-label": fa ? "امروز تا الان" : "Today so far", class: "num" }, td ? bytes(td) : "—"),
+            h("td", { class: "cshare" }, bar));
+        })))));
+  };
+  const load = async () => {
+    rows = await api("GET", url(days)).catch(() => []);
+    render();
+  };
+  const seg = (list, cur, set) => {
+    const box = h("div", { class: "row cseg" });
+    for (const [v, l] of list) box.append(h("button", { type: "button", class: v === cur ? "chip on" : "chip", "aria-pressed": String(v === cur), onclick: (e) => {
+      box.querySelectorAll("button").forEach((b) => { b.classList.toggle("on", b === e.currentTarget); b.setAttribute("aria-pressed", String(b === e.currentTarget)); });
+      set(v);
+    } }, l));
+    return box;
+  };
+  const modes = seg([["stack", fa ? "انباشته" : "Stacked"], ["lines", fa ? "خطی" : "Lines"], ["share", fa ? "سهم ٪" : "Share %"]], mode, (v) => { mode = v; try { sessionStorage.setItem("ntMode", v); } catch {} render(); });
+  const ranges = seg([7, 14, 30].map((n) => [n, s3("ntDays", { n: fmtNum(n) })]), days, (v) => { days = v; try { sessionStorage.setItem("ntDays", v); } catch {} load(); });
+  load();
+  return h("div", { class: "card form" },
+    h("div", { class: "row" }, h("h2", {}, opt.title || s3("ntTitle")), h("span", { class: "spacer" }), modes, ranges),
+    opt.top || null,
+    h("p", { class: "small muted" }, opt.hint ? opt.hint : fa ? "مجموع مصرف کاربرها روی هر نود در هر روز. موس یا انگشت را روی هر روز ببرید تا عدد هر نود را ببینید؛ با زدن نام هر نود آن را پنهان کنید." : "Client traffic summed per node and day. Point or tap at a day for each node's figure; tap a name to hide or show it."),
+    body);
 }
 
 function updateAllButton(nodes) {
@@ -900,7 +1192,7 @@ function nodeRow(n) {
 
 async function viewDashboard() {
   const fa = lang === "fa";
-  const [o, nodes, ins] = await Promise.all([api("GET", "/api/v2/admin/overview"), api("GET", "/api/v2/admin/nodes"), api("GET", "/api/v2/admin/insights?days=14")]);
+  const [o, nodes, ins] = await Promise.all([api("GET", "/api/v2/admin/overview"), api("GET", "/api/v2/admin/nodes"), api("GET", "/api/v2/admin/insights?days=28")]);
   const [si, cls] = await Promise.all([api("GET", "/api/v2/admin/system").catch(() => null), api("GET", "/api/v2/admin/clients").catch(() => [])]);
   const kpi = (ic, k, v) => h("div", { class: "card kpi" }, h("div", { class: "k" }, icon(ic), k), h("div", { class: "v" }, v));
   const frac = (a, b) => h("span", { dir: "ltr" }, fmtNum(a), h("small", {}, ` / ${fmtNum(b)}`));
@@ -926,7 +1218,7 @@ async function viewDashboard() {
       h("div", { class: "nr-head" }, h("h2", { style: "margin:0" }, ux("nodesSection")), h("a", { class: "spacer small", href: "#/nodes" }, fa ? "مدیریت نودها ›" : "Manage nodes ›")),
       rowsBox) : null,
     h("div", { class: "dash2" },
-      h("div", { class: "card form span2" }, h("div", { class: "row" }, h("h2", {}, t("traffic14")), legend()), barsSvg(ins.daily, 1100)),
+      dashTrafficCard(ins),
       h("div", { class: "card form" }, h("h2", {}, t("topToday")),
         ins.top.length ? h("div", { class: "meters" }, ins.top.map((u) => meter(u.email, (100 * u.bytes) / topMax, bytes(u.bytes), true))) : h("p", { class: "muted small" }, t("noData"))),
       endingSoonCard(cls || []),
@@ -948,6 +1240,63 @@ async function viewDashboard() {
     } catch {}
   }, 5000);
   return view;
+}
+
+// repGrowthBox: the owner's "become a reseller" button and the free trial
+// panel in the main bot (repgrow.go).
+function repGrowthBox() {
+  const fa = lang === "fa";
+  const T = (a, b) => (fa ? a : b);
+  const req = h("input", { type: "checkbox" }), trial = h("input", { type: "checkbox" }), gb = h("input", { type: "number", min: 1, max: 100, value: 5, dir: "ltr" });
+  api("GET", "/api/v2/admin/rep-growth").then((r) => { req.checked = !!r.requests; trial.checked = !!(r.trial && r.trial.on); gb.value = (r.trial && r.trial.gb) || 5; }).catch(() => {});
+  return h("form", { class: "form", onsubmit: async (e) => {
+    e.preventDefault();
+    await guarded(() => api("PUT", "/api/v2/admin/rep-growth", { requests: req.checked, trial: { on: trial.checked, gb: +gb.value || 5 } }));
+    toast(t("saved"));
+  } },
+    h("label", { class: "check" }, req, h("span", {}, T("دکمهٔ «درخواست نمایندگی» در منوی ربات اصلی (درخواست با دکمهٔ قبول و رد برای شما می‌آید)", "\"Become a reseller\" button in the main bot (requests reach you with Accept / Refuse)"))),
+    h("label", { class: "check" }, trial, h("span", {}, T("پنل نمایندگی تستی: هر حساب تلگرام یک بار، با اعتبار رایگان", "Trial reseller panel: once per Telegram account, with free credit"))),
+    h("label", {}, h("span", {}, T("اعتبار پنل تستی (گیگ، ۱ تا ۱۰۰)", "Trial credit (GB, 1–100)")), gb),
+    h("p", { class: "small muted" }, T("نماینده‌ها هم در ربات خودشان «🧩 جذب نماینده» دارند: لینک دعوت زیرمجموعه و همین دکمهٔ درخواست.", "Resellers have \"Grow\" in their own bot too: a sub-seller invite link and the same request button.")),
+    h("div", { class: "row" }, h("button", { class: "primary", type: "submit" }, t("save"))));
+}
+
+// reportXlsxLinks: the Excel report (day by day, resellers, ledger,
+// clients) for 7, 30 or 90 days — the owner's whole panel, a reseller its own.
+function reportXlsxLinks(rep) {
+  const fa = lang === "fa";
+  const q = rep ? `&rep=${encodeURIComponent(rep)}` : "";
+  return h("span", { class: "row" }, h("span", { class: "small muted" }, fa ? "گزارش اکسل:" : "Excel report:"),
+    ...[7, 30, 90].map((d) => h("a", { class: "btn ghost", href: `/api/v2/shop/report.xlsx?days=${d}${q}`, download: "" }, fa ? `${fmtNum(d)} روز` : `${d} days`)));
+}
+
+// autoCleanBox switches the automatic cleanup of dead configs on or off
+// (the owner for its own clients, a reseller for its own).
+function autoCleanBox() {
+  const fa = lang === "fa";
+  const T = (a, b) => (fa ? a : b);
+  const on = h("input", { type: "checkbox" }), days = h("input", { type: "number", min: 7, max: 365, value: 30, dir: "ltr" });
+  const info = h("p", { class: "small muted" });
+  const load = async () => {
+    const r = await api("GET", "/api/v2/shop/autoclean").catch(() => null);
+    if (!r) return;
+    on.checked = !!r.settings.on; days.value = r.settings.days || 30;
+    info.textContent = T(`الان ${fmtNum(r.due || 0)} کانفیگ مرده با این شرط هست.`, `${fmtNum(r.due || 0)} dead configs match now.`) +
+      (r.settings.total ? T(` تا حالا ${fmtNum(r.settings.total)} کانفیگ خودکار پاک شده.`, ` ${fmtNum(r.settings.total)} deleted so far.`) : "");
+  };
+  load();
+  return h("form", { class: "card form", onsubmit: async (e) => {
+    e.preventDefault();
+    await guarded(() => api("PUT", "/api/v2/shop/autoclean", { on: on.checked, days: +days.value || 30 }));
+    toast(t("saved")); load();
+  } },
+    h("h3", {}, "🧹 ", T("پاک‌سازی خودکار کانفیگ‌های مرده", "Automatic cleanup of dead configs")),
+    h("p", { class: "small muted" }, T("کانفیگی که زمانش تمام شده یا حجمش تمام شده و از آن به بعد مصرفی نداشته، بعد از این مدت خودکار پاک می‌شود. کانفیگی که تمام نشده (حتی اگر هنوز وصل نشده باشد) هیچ‌وقت پاک نمی‌شود.",
+      "A config whose term or volume ended and that has been quiet since is deleted after this many days. A config that has not ended (even one never connected) is never deleted.")),
+    h("label", { class: "check" }, on, h("span", {}, T("روشن", "On"))),
+    h("label", {}, h("span", {}, T("روز بی‌مصرفی بعد از تمام شدن (۷ تا ۳۶۵)", "Quiet days after the end (7–365)")), days),
+    info,
+    h("div", { class: "row" }, h("button", { class: "primary", type: "submit" }, t("save"))));
 }
 
 // cleanupForm previews and deletes expired, used-up or disabled clients.
@@ -973,6 +1322,7 @@ function cleanupForm() {
   };
   [exp, vol, dis, days].forEach((x) => x.addEventListener("change", preview));
   openModal(fa ? "پاک‌سازی کاربرها" : "Clean up clients", h("div", { class: "form" },
+    autoCleanBox(),
     h("p", { class: "small muted" }, fa ? "کاربرهایی که دیگر استفاده نمی‌شوند را یک‌جا حذف کنید. اول فهرست را ببینید؛ تا «حذف» را نزنید چیزی پاک نمی‌شود." : "Delete clients nobody uses any more. You see the list first; nothing is deleted until you press Delete."),
     h("label", { class: "check" }, exp, fa ? "منقضی‌شده‌ها" : "Expired"), h("label", { class: "check" }, vol, fa ? "حجم‌تمام‌ها" : "Out of volume"), h("label", { class: "check" }, dis, fa ? "غیرفعال‌ها" : "Disabled"),
     h("label", {}, h("span", {}, fa ? "حداقل چند روز از انقضا یا آخرین اتصال گذشته باشد" : "At least this many days since expiry or last use"), days), out), [del]);
@@ -1028,32 +1378,33 @@ function eventBadge(kind) {
 // replaceChildren that skips empty slots (null/false), like h() does.
 function fill(el, ...kids) { el.replaceChildren(...kids.flat().filter((k) => k != null && k !== false)); return el; }
 
-// Sparkline as inline SVG (built with the DOM, never markup strings).
-function spark(values, max) {
-  const NS = "http://www.w3.org/2000/svg", W = 300, H = 48;
-  const svg = document.createElementNS(NS, "svg");
-  svg.setAttribute("viewBox", `0 0 ${W} ${H}`); svg.setAttribute("class", "spark"); svg.setAttribute("preserveAspectRatio", "none");
-  if (values.length < 2) return svg;
-  const top = max || Math.max(1, ...values);
-  const pts = values.map((v, i) => `${(i / (values.length - 1)) * W},${H - 2 - (Math.min(v, top) / top) * (H - 4)}`).join(" ");
-  const area = document.createElementNS(NS, "polygon");
-  area.setAttribute("points", `0,${H} ${pts} ${W},${H}`); area.setAttribute("class", "spark-area");
-  const line = document.createElementNS(NS, "polyline");
-  line.setAttribute("points", pts); line.setAttribute("class", "spark-line");
-  svg.append(area, line);
-  return svg;
-}
-
+// A node's last hours on the chart kit: CPU and memory together, network in
+// and out together, and online users; each with now / average / peak.
 async function nodeHealth(n) {
-  const pts = await api("GET", `/api/v2/admin/nodes/${encodeURIComponent(n.ID)}/history?hours=24`);
-  const block = (label, vals, max, fmt) => h("div", { class: "form" },
-    h("div", { class: "row small" }, h("strong", {}, label), h("span", { class: "muted spacer" }, vals.length ? fmt(vals.at(-1)) : "—")), spark(vals, max));
-  openModal(`${t("health")} · ${n.Name || n.ID}`, pts.length ? h("div", { class: "form" },
-    block(t("cpu"), pts.map((p) => p.cpu), 100, (v) => `${fmtNum(v)}%`),
-    block(t("ram"), pts.map((p) => p.ram), 100, (v) => `${fmtNum(v)}%`),
-    block(`${t("net")} · ${t("inRate")}`, pts.map((p) => p.rx), 0, rate),
-    block(`${t("net")} · ${t("outRate")}`, pts.map((p) => p.tx), 0, rate),
-    block(t("onlineUsers"), pts.map((p) => p.online), 0, (v) => fmtNum(v))) : h("p", { class: "muted" }, t("noData")));
+  const fa = lang === "fa";
+  const box = h("div", { class: "form" });
+  let hours = 24;
+  const fmtT = (u) => new Intl.DateTimeFormat(fa ? "fa-IR" : "en-GB", hours > 24 ? { weekday: "short", hour: "2-digit", minute: "2-digit" } : { hour: "2-digit", minute: "2-digit" }).format(new Date(u * 1000));
+  const load = async () => {
+    fill(box, h("p", { class: "muted small" }, "…"));
+    const pts = await api("GET", `/api/v2/admin/nodes/${encodeURIComponent(n.ID)}/history?hours=${hours}`).catch(() => []);
+    if (!pts.length) { fill(box, h("p", { class: "muted" }, t("noData"))); return; }
+    const xs = pts.map((p) => p.t);
+    const stats = (vals, f) => { const avg = vals.reduce((a, b) => a + b, 0) / vals.length;
+      return h("span", { class: "muted" }, `${fa ? "الان" : "now"} ${f(vals.at(-1))} · ${fa ? "میانگین" : "avg"} ${f(avg)} · ${fa ? "بیشترین" : "peak"} ${f(Math.max(...vals))}`); };
+    const pct = (v) => `${fmtNum(Math.round(v))}%`;
+    const block = (title, series, extra, f) => h("div", { class: "form" },
+      h("div", { class: "row small" }, h("strong", {}, title), ...series.map((s) => h("span", { class: "legend-item" }, (() => { const i = h("i", { class: "sw" }); i.style.background = s.color; return i; })(), s.name, " ", stats(s.values, f)))),
+      chartKit({ xs, series, mode: "lines", height: 150, xLabel: (i) => fmtT(xs[i]), tipTitle: (i) => fmtT(xs[i]), fmt: f, ...extra }));
+    fill(box,
+      block(`${t("cpu")} / ${t("ram")}`, [{ id: "c", name: t("cpu"), color: "var(--ion)", area: true, values: pts.map((p) => p.cpu) }, { id: "r", name: t("ram"), color: "var(--ember)", dash: true, values: pts.map((p) => p.ram) }], { bin: false, max: 100, suffix: "%" }, pct),
+      block(t("net"), [{ id: "i", name: `↓ ${t("inRate")}`, color: "var(--ion)", area: true, values: pts.map((p) => p.rx) }, { id: "o", name: `↑ ${t("outRate")}`, color: "var(--ember)", dash: true, values: pts.map((p) => p.tx) }], { suffix: "/s" }, rate),
+      block(t("onlineUsers"), [{ id: "u", name: t("onlineUsers"), color: "var(--good)", area: true, values: pts.map((p) => p.online) }], { bin: false, int: true }, (v) => fmtNum(Math.round(v))));
+  };
+  const chips = h("div", { class: "row cseg" }, [[6, fa ? "۶ ساعت" : "6 h"], [24, fa ? "۲۴ ساعت" : "24 h"], [168, fa ? "۷ روز" : "7 days"]].map(([v, l]) =>
+    h("button", { type: "button", class: v === hours ? "chip on" : "chip", onclick: (e) => { hours = v; e.currentTarget.parentElement.querySelectorAll("button").forEach((b) => b.classList.toggle("on", b === e.currentTarget)); load(); } }, l)));
+  openModal(`${t("health")} · ${n.Name || n.ID}`, h("div", { class: "form health-modal" }, chips, box));
+  load();
 }
 
 function nodeCard(n, actions = false) {
@@ -1222,12 +1573,12 @@ function clientStatus(c) {
 }
 
 const CT = {
-  fa: { trial: "تست", all: "همه", online: "آنلاین", active: "فعال", expiring: "رو به انقضا", bad: "تمام‌شده", disabled: "غیرفعال", user: "کاربر", usage: "مصرف", remain: "باقی‌مانده",
+  fa: { legacy: "کاربران قدیمی", trial: "تست", all: "همه", online: "آنلاین", active: "فعال", expiring: "رو به انقضا", bad: "تمام‌شده", disabled: "غیرفعال", user: "کاربر", usage: "مصرف", remain: "باقی‌مانده",
     expiry: "انقضا", seen: "آخرین اتصال", actions: "", perPage: "در هر صفحه", page: "صفحهٔ {p} از {n}", prev: "قبلی", next: "بعدی", none: "کلاینتی با این فیلتر نیست.",
     reset: "صفر کردن مصرف", resetAsk: "مصرف {x} صفر شود؟ مقدار فعلی در سابقه می‌ماند.", resetDone: "مصرف {n} کلاینت صفر شد", enable: "فعال کردن", disable: "غیرفعال کردن",
     del: "حذف", delAsk: "{n} کلاینت حذف شوند؟", done: "{n} مورد انجام شد", never: "هرگز", now: "الان", ago: "{t} پیش", sub: "اشتراک", edit: "ویرایش", chart: "نمودار",
     sel: "{n} انتخاب‌شده", clear: "لغو انتخاب", allFilters: "همهٔ گروه‌ها و اینباندها", sortBy: "مرتب‌سازی" },
-  en: { trial: "Trial", all: "All", online: "Online", active: "Active", expiring: "Expiring", bad: "Ended", disabled: "Disabled", user: "Client", usage: "Usage", remain: "Remaining",
+  en: { legacy: "Old users", trial: "Trial", all: "All", online: "Online", active: "Active", expiring: "Expiring", bad: "Ended", disabled: "Disabled", user: "Client", usage: "Usage", remain: "Remaining",
     expiry: "Expiry", seen: "Last seen", actions: "", perPage: "per page", page: "Page {p} of {n}", prev: "Prev", next: "Next", none: "No clients match.",
     reset: "Reset usage", resetAsk: "Reset {x}'s usage? The current total stays in the history.", resetDone: "Usage reset for {n}", enable: "Enable", disable: "Disable",
     del: "Delete", delAsk: "Delete {n} clients?", done: "{n} done", never: "never", now: "now", ago: "{t} ago", sub: "Subscription", edit: "Edit", chart: "Chart",
@@ -1274,8 +1625,8 @@ async function viewClients() {
   const remember = () => { try { localStorage.setItem("clients-view", JSON.stringify({ state: st.state, sort: st.sort, dir: st.dir, size: st.size })); } catch {} };
   const selected = new Set();
   const used = (c) => c.Usage.Up + c.Usage.Down;
-  const counts = { "": list.length, online: 0, active: 0, expiring: 0, bad: 0, disabled: 0, trial: 0 };
-  for (const c of list) { counts[clientState(c)]++; if (c.Online) counts.online++; if (c.trial) counts.trial++; }
+  const counts = { "": list.length, online: 0, active: 0, expiring: 0, bad: 0, disabled: 0, trial: 0, legacy: 0 };
+  for (const c of list) { counts[clientState(c)]++; if (c.Online) counts.online++; if (c.trial) counts.trial++; if (c.legacy) counts.legacy++; }
   const keyOf = {
     created: (c, i) => i, email: (c) => c.Email.toLowerCase(), usage: (c) => used(c),
     remain: (c) => (c.Remaining < 0 ? Infinity : c.Remaining), expiry: (c) => c.EffectiveUntil || Infinity, seen: (c) => -(c.Usage.LastSeen || 0),
@@ -1284,7 +1635,8 @@ async function viewClients() {
     if (st.q && !(c.Email + " " + (c.Note || "")).toLowerCase().includes(st.q.toLowerCase())) return false;
     if (st.state === "online" && !c.Online) return false;
     if (st.state === "trial" && !c.trial) return false;
-    if (st.state && st.state !== "online" && st.state !== "trial" && clientState(c) !== st.state) return false;
+    if (st.state === "legacy" && !c.legacy) return false;
+    if (st.state && st.state !== "online" && st.state !== "trial" && st.state !== "legacy" && clientState(c) !== st.state) return false;
     const f = st.extra;
     if (f.startsWith("g:") && !(ctx.groups.find((g) => g.ID === f.slice(2))?.Members || []).includes(c.Email)) return false;
     if (f.startsWith("i:") && !(c.Inbounds || []).includes(f.slice(2))) return false;
@@ -1371,7 +1723,7 @@ async function viewClients() {
   }
 
   function draw() {
-    chips.replaceChildren(...["", "online", "active", "expiring", "bad", "disabled", ...(counts.trial ? ["trial"] : [])].map((k) => {
+    chips.replaceChildren(...["", "online", "active", "expiring", "bad", "disabled", ...(counts.trial ? ["trial"] : []), ...(counts.legacy ? ["legacy"] : [])].map((k) => {
       const b = h("button", { role: "tab", "aria-selected": st.state === k ? "true" : "false", class: `chip ${st.state === k ? "on" : ""} ${k}` },
         k ? L[k] : L.all, h("span", { class: "count" }, fmtNum(counts[k])));
       b.addEventListener("click", () => { st.state = k; st.page = 0; remember(); draw(); });
@@ -1421,9 +1773,13 @@ async function viewClients() {
   return h("div", {},
     h("div", { class: "row" }, h("h1", {}, t("clients")), h("span", { class: "muted small" }, t("clientsCount", { n: fmtNum(list.length) })),
       owner ? h("button", { class: "ghost spacer", onclick: () => templatesModal(inbounds) }, lang === "fa" ? "پلن‌های آماده" : "Ready plans") : h("span", { class: "spacer" }),
-      owner ? h("button", { class: "ghost", onclick: () => cleanupForm() }, lang === "fa" ? "پاک‌سازی" : "Clean up") : null,
+      owner ? h("button", { class: "ghost", onclick: () => cleanupForm() }, lang === "fa" ? "پاک‌سازی" : "Clean up")
+        : me.role === "rep" ? h("button", { class: "ghost", onclick: () => openModal(lang === "fa" ? "پاک‌سازی خودکار" : "Automatic cleanup", autoCleanBox()) }, lang === "fa" ? "پاک‌سازی خودکار" : "Auto cleanup") : null,
+      me.role === "rep" ? h("button", { class: "ghost", onclick: () => openModal(lang === "fa" ? "گزارش اکسل" : "Excel report", h("div", { class: "form" },
+        h("p", { class: "small muted" }, lang === "fa" ? "فروش و برگشتی روزانه، پرداخت‌های فروشگاه، دفتر اعتبار و فهرست کلاینت‌ها." : "Daily sales and refunds, shop payments, credit ledger and the client list."), reportXlsxLinks())) }, lang === "fa" ? "گزارش اکسل" : "Excel report") : null,
       owner ? h("a", { class: "btn ghost", href: "/api/v2/admin/clients/export.csv", download: "", title: lang === "fa" ? "فهرست کاربرها برای اکسل" : "Client list for Excel" }, lang === "fa" ? "اکسل" : "Excel") : null,
       owner ? h("button", { onclick: () => bulkCreateForm(inbounds) }, t("bulkCreate")) : null,
+      me.legacy ? h("a", { class: "btn", href: "#/legacy" }, "📥 ", lang === "fa" ? "آوردن کاربران قدیمی" : "Bring old users") : null,
       me.role === "rep" && me.policy && me.policy.DenyCreate ? null : h("button", { class: "primary", onclick: () => clientForm(null, inbounds) }, t("add"))),
     todo, chips,
     h("div", { class: "row toolbar" }, q, extra),
@@ -1478,14 +1834,14 @@ async function bulkCreateForm(inbounds) {
 async function templatesModal(inbounds) {
   const fa = lang === "fa";
   const L = fa ? { title: "پلن‌های آماده", hint: "هر پلن آماده بالای فرم ساخت کلاینت یک دکمه می‌شود؛ با یک کلیک همهٔ فیلدها پر می‌شوند.", id: "شناسه", name: "نام", gb: "حجم (گیگ، ۰ = نامحدود)", days: "روز",
-      first: "زمان از اولین اتصال", ips: "حداکثر IP", dev: "حداکثر دستگاه", reset: "ریست دوره‌ای", prefix: "پیشوند نام", add: "افزودن پلن", del: "حذف", off: "خاموش", day: "روزانه", week: "هفتگی", month: "ماهانه", none: "هنوز پلن آماده‌ای نیست." }
+      first: "زمان از اولین اتصال", ips: "حداکثر IP", dev: "حداکثر دستگاه", reset: "ریست دوره‌ای", prefix: "پیشوند نام", add: "افزودن پلن", del: "حذف", off: "خاموش", day: "روزانه", week: "هفتگی", month: "ماهانه", year: "سالانه", none: "هنوز پلن آماده‌ای نیست." }
     : { title: "Ready plans", hint: "When adding a client, “From template” fills every field.", id: "ID", name: "Name", gb: "Volume (GB, 0 = unlimited)", days: "Days",
-      first: "Time from first connection", ips: "Max IPs", dev: "Max devices", reset: "Periodic reset", prefix: "Name prefix", add: "Add template", del: "Delete", off: "Off", day: "Daily", week: "Weekly", month: "Monthly", none: "No templates yet." };
+      first: "Time from first connection", ips: "Max IPs", dev: "Max devices", reset: "Periodic reset", prefix: "Name prefix", add: "Add template", del: "Delete", off: "Off", day: "Daily", week: "Weekly", month: "Monthly", year: "Yearly", none: "No templates yet." };
   const list = h("div", { class: "list" });
   const f = { id: h("input", { pattern: "[a-z0-9][a-z0-9._\\-]{0,62}", placeholder: "plan-30", dir: "ltr" }), name: h("input", { placeholder: "30 GB · 30 days" }),
     gb: h("input", { type: "number", min: "0", step: "0.5", value: "30" }), days: h("input", { type: "number", min: "0", value: "30" }),
     first: h("input", { type: "checkbox", checked: true }), ips: h("input", { type: "number", min: "0", value: "2" }), dev: h("input", { type: "number", min: "0", value: "0" }),
-    reset: h("select", {}, [["", L.off], ["day", L.day], ["week", L.week], ["month", L.month]].map(([v, l]) => h("option", { value: v }, l))), prefix: h("input", { dir: "ltr" }) };
+    reset: h("select", {}, [["", L.off], ["day", L.day], ["week", L.week], ["month", L.month], ["year", L.year]].map(([v, l]) => h("option", { value: v }, l))), prefix: h("input", { dir: "ltr" }) };
   const boxes = (inbounds || []).map((ib) => h("label", { class: "check" }, h("input", { type: "checkbox", value: ib.tag }), h("span", { dir: "ltr" }, ib.tag)));
   const err = h("div", { class: "error small" });
   async function load() {
@@ -1848,9 +2204,9 @@ function devicesCard(c) {
 
 const CD = {
   fa: { ips: "IPهای متصل", ipsHint: "آدرس‌هایی که نودها در ۳۰ روز اخیر برای این کلاینت دیده‌اند.", noIPs: "هنوز IPی دیده نشده.", onlineNow: "الان", reset: "صفر کردن مصرف", resetAsk: "مصرف {x} صفر شود؟ مقدار فعلی در سابقه می‌ماند.",
-    period: "ریست دوره‌ای", off: "خاموش", day: "روزانه", week: "هفتگی", month: "ماهانه", next: "ریست بعدی", history: "سابقهٔ ریست", resetDone: "مصرف صفر شد", noHistory: "هنوز ریستی نشده.", saved: "ذخیره شد" },
+    period: "ریست دوره‌ای", off: "خاموش", day: "روزانه", week: "هفتگی", month: "ماهانه", year: "سالانه", next: "ریست بعدی", history: "سابقهٔ ریست", resetDone: "مصرف صفر شد", noHistory: "هنوز ریستی نشده.", saved: "ذخیره شد" },
   en: { ips: "Connected IPs", ipsHint: "Addresses nodes saw for this client in the last 30 days.", noIPs: "No addresses seen yet.", onlineNow: "now", reset: "Reset usage", resetAsk: "Reset {x}'s usage? The current total stays in the history.",
-    period: "Periodic reset", off: "Off", day: "Daily", week: "Weekly", month: "Monthly", next: "Next reset", history: "Reset history", resetDone: "Usage reset", noHistory: "No resets yet.", saved: "Saved" },
+    period: "Periodic reset", off: "Off", day: "Daily", week: "Weekly", month: "Monthly", year: "Yearly", next: "Next reset", history: "Reset history", resetDone: "Usage reset", noHistory: "No resets yet.", saved: "Saved" },
 };
 const fmtDT = (u) => new Date(u * 1000).toLocaleString(lang === "fa" ? "fa-IR" : "en-GB", { dateStyle: "short", timeStyle: "short" });
 
@@ -1881,7 +2237,7 @@ function clientIPsCard(c, ips) {
 
 function clientResetCard(c, resets, owner) {
   const L = CD[lang] || CD.en;
-  const period = h("select", { disabled: !owner }, [["", L.off], ["day", L.day], ["week", L.week], ["month", L.month]].map(([v, l]) => h("option", { value: v, selected: (c.reset_period || "") === v }, l)));
+  const period = h("select", { disabled: !owner }, [["", L.off], ["day", L.day], ["week", L.week], ["month", L.month], ["year", L.year]].map(([v, l]) => h("option", { value: v, selected: (c.reset_period || "") === v }, l)));
   period.addEventListener("change", async () => { try { await guarded(() => api("PUT", `/api/v2/admin/clients/${encodeURIComponent(c.Email)}/reset-period`, { period: period.value })); toast(L.saved); route(); } catch {} });
   return h("div", { class: "card form" },
     h("div", { class: "row" }, h("h2", {}, L.reset),
@@ -2005,6 +2361,9 @@ function clientForm(c, inbounds, ctx = { reps: [] }) {
   // advanced
   const ips = h("input", { type: "number", min: "0", max: "1000", dir: "ltr", value: v.MaxIPs });
   const hwid = h("input", { type: "number", min: "0", max: "100", dir: "ltr", value: v.hwid_limit || 0 });
+  // Daily cap (GB a day, 0 = none): the rest of the day the config stops once it is used.
+  const dcap0 = v.daily_cap_bytes ? +(v.daily_cap_bytes / 2 ** 30).toFixed(2) : 0;
+  const dcap = h("input", { type: "number", min: "0", step: "0.5", dir: "ltr", value: dcap0 || 0 });
   const reset = h("select", {}, [["", T("بدون ریست", "Never")], ["day", T("روزانه", "Daily")], ["week", T("هفتگی", "Weekly")], ["month", T("ماهانه", "Monthly")]]
     .map(([k, l]) => h("option", { value: k, selected: (v.reset_period || "") === k }, l)));
   const np0 = v.next_plan || null;
@@ -2140,6 +2499,7 @@ function clientForm(c, inbounds, ctx = { reps: [] }) {
       const extra = [];
       if ((note.value || "") !== (v.Note || "")) extra.push(api("PUT", `/api/v2/admin/clients/${em}/note`, { Note: note.value }));
       if (+hwid.value !== (v.hwid_limit || 0)) extra.push(api("PUT", `/api/v2/admin/clients/${em}/hwid-limit`, { limit: +hwid.value || 0 }));
+      if ((+dcap.value || 0) !== dcap0) extra.push(api("PUT", `/api/v2/admin/clients/${em}/daily-cap`, { gb: Math.max(0, +dcap.value || 0) }));
       if (owner) {
         if (reset.value !== (v.reset_period || "")) extra.push(api("PUT", `/api/v2/admin/clients/${em}/reset-period`, { period: reset.value }));
         const np = npOn.checked ? { gb: +npGB.value || 0, days: +npDays.value || 0, first_use: npFirst.checked } : null;
@@ -2185,6 +2545,9 @@ function clientForm(c, inbounds, ctx = { reps: [] }) {
         h("label", {}, h("span", {}, T("حداکثر IP هم‌زمان", "Max concurrent IPs")), ips),
         h("label", {}, h("span", {}, T("حداکثر دستگاه (HWID)", "Max devices (HWID)")), hwid),
         owner ? h("label", {}, h("span", {}, T("ریست دوره‌ای حجم", "Periodic volume reset")), reset) : null),
+      h("label", {}, h("span", {}, T("سقف مصرف روزانه (گیگ، ۰ = بی‌سقف)", "Daily cap (GB, 0 = none)")), dcap,
+        h("span", { class: "small muted" }, v.daily_cap_bytes ? T(`امروز: ${bytes(v.daily_used || 0)} از ${bytes(v.daily_cap_bytes)}`, `Today: ${bytes(v.daily_used || 0)} of ${bytes(v.daily_cap_bytes)}`)
+          : T("با رسیدن به سقف، کانفیگ تا شروع روز بعد (۳:۳۰ بامداد) قطع می‌شود.", "When the cap is reached the config stops until the next day (03:30 Tehran)."))),
       owner ? h("fieldset", { class: "np" }, h("label", { class: "check" }, npOn, T("تمدید خودکار با پلن بعدی وقتی حجم یا زمان تمام شد", "Auto-renew with a next plan when volume or time runs out")),
         h("div", { class: "three" }, h("label", {}, h("span", {}, T("حجم بعدی (گیگ، ۰ = نامحدود)", "Next volume (GB, 0 = ∞)")), npGB), h("label", {}, h("span", {}, T("روز بعدی", "Next days")), npDays),
           h("label", { class: "check", style: "align-self:end" }, npFirst, T("از اولین اتصال", "From first use")))) : null,
@@ -3523,12 +3886,121 @@ function inboundFormKit(o) {
       const curCert = certs.find((c) => c.dark_cert)?.dark_cert || "";
       const alpnOpts = proto === "hysteria" ? ["h3"] : ["h3", "h2", "http/1.1"];
       const alpn = new Set(ts.alpn || []);
+      // Xray serves the certificate whose domain matches the client's SNI;
+      // the first one is the default. QUIC protocols use one certificate.
+      const oneCert = proto === "hysteria" || proto === "tuic";
+      const picked = certs.map((c) => c.dark_cert).filter(Boolean);
+      const others = certs.filter((c) => !c.dark_cert); // inline certificates stay as they are
+      const setPicked = (ids) => {
+        ts.certificates = [...ids.map((id) => ({ dark_cert: id })), ...others];
+        const c = certList.find((x) => x.id === ids[0]); if (c?.domains?.[0] && !ts.serverName) ts.serverName = c.domains[0];
+      };
+      const fa = lang === "fa";
+      // Add a certificate right here: paste or upload the files (stored on
+      // the HUB, sent to every node), or point at files already on the node.
+      const addCertBox = () => {
+        const box = h("details", { class: "adv-box" }, h("summary", {}, fa ? "➕ افزودن گواهی" : "➕ Add a certificate"));
+        let how = "paste";
+        const pane = h("div", { class: "form" });
+        const tabs = h("div", { class: "chips" });
+        const err = h("div", { class: "error", role: "alert" });
+        const domain = h("input", { dir: "ltr", placeholder: "sub.example.com" });
+        const readFile = (ta) => { const f = h("input", { type: "file", accept: ".pem,.crt,.key,.cer,.txt" }); f.addEventListener("change", async () => { if (f.files[0]) ta.value = await f.files[0].text(); }); return f; };
+        const drawPane = () => {
+          tabs.replaceChildren(...[["paste", fa ? "فایل‌ها (fullchain و privkey)" : "Files (fullchain and privkey)"], ["path", fa ? "فایل روی سرور" : "File on the server"]].map(([k, l]) => {
+            const b2 = h("button", { type: "button", class: `chip ${how === k ? "on" : ""}` }, l); b2.onclick = () => { how = k; err.textContent = ""; drawPane(); }; return b2; }));
+          if (how === "paste") {
+            const cert = h("textarea", { class: "code", rows: "5", spellcheck: "false", dir: "ltr", placeholder: "-----BEGIN CERTIFICATE-----" });
+            const key = h("textarea", { class: "code", rows: "4", spellcheck: "false", dir: "ltr", placeholder: "-----BEGIN PRIVATE KEY-----" });
+            pane.replaceChildren(
+              h("label", {}, h("span", {}, fa ? "دامنه (نام گواهی)" : "Domain (certificate name)"), domain),
+              h("label", {}, h("span", {}, "fullchain.pem"), cert, readFile(cert)),
+              h("label", {}, h("span", {}, "privkey.pem"), key, readFile(key)),
+              h("p", { class: "small muted" }, fa ? "گواهی روی هاب ذخیره می‌شود و به همهٔ نودهای این اینباند می‌رسد." : "Stored on the HUB and sent to every node of this inbound."),
+              err,
+              h("button", { type: "button", class: "primary", onclick: async () => {
+                err.textContent = "";
+                const id = (domain.value.trim().toLowerCase().replace(/[^a-z0-9._-]/g, "-").replace(/^[^a-z0-9]+/, "") || "").slice(0, 63);
+                if (!id) { err.textContent = fa ? "دامنه را بنویسید." : "Enter the domain."; return; }
+                if (!cert.value.includes("BEGIN") || !key.value.includes("BEGIN")) { err.textContent = fa ? "هر دو فایل لازم است." : "Both files are needed."; return; }
+                try {
+                  await api("PUT", `/api/v2/admin/certs/${encodeURIComponent(id)}`, { Cert: cert.value, Key: key.value });
+                  const fresh = await api("GET", "/api/v2/admin/certs").catch(() => null);
+                  if (fresh) certList.splice(0, certList.length, ...fresh); else if (!certList.find((x) => x.id === id)) certList.push({ id, domains: [domain.value.trim()] });
+                  setPicked([...picked.filter((x) => x !== id), id]);
+                  if (!ts.serverName) ts.serverName = domain.value.trim();
+                  toast(fa ? "گواهی اضافه و انتخاب شد" : "Certificate added and selected"); draw();
+                } catch (x) { err.textContent = x.message; }
+              } }, fa ? "ذخیره و استفاده" : "Save and use"));
+          } else {
+            const cf = h("input", { dir: "ltr", placeholder: "/etc/letsencrypt/live/sub.example.com/fullchain.pem" });
+            const kf = h("input", { dir: "ltr", placeholder: "/etc/letsencrypt/live/sub.example.com/privkey.pem" });
+            domain.oninput = () => { const d = domain.value.trim(); if (d) { cf.value = `/etc/letsencrypt/live/${d}/fullchain.pem`; kf.value = `/etc/letsencrypt/live/${d}/privkey.pem`; } };
+            pane.replaceChildren(
+              h("label", {}, h("span", {}, fa ? "دامنه" : "Domain"), domain),
+              h("label", {}, h("span", {}, fa ? "مسیر fullchain روی نود" : "fullchain path on the node"), cf),
+              h("label", {}, h("span", {}, fa ? "مسیر privkey روی نود" : "privkey path on the node"), kf),
+              h("p", { class: "small muted" }, fa ? "Xray فایل‌ها را مستقیم از روی خود نود می‌خواند؛ روی هر نودی که این اینباند را دارد باید همین مسیرها وجود داشته باشند. تمدید گواهی هم با خود سرور است." : "Xray reads the files on the node itself; every node running this inbound needs them at these paths, and renews them itself."),
+              err,
+              h("button", { type: "button", class: "primary", onclick: () => {
+                err.textContent = "";
+                if (!cf.value.startsWith("/") || !kf.value.startsWith("/")) { err.textContent = fa ? "مسیر کامل هر دو فایل را بنویسید." : "Enter the full path of both files."; return; }
+                ts.certificates = [...(ts.certificates || []), { certificateFile: cf.value.trim(), keyFile: kf.value.trim() }];
+                if (!ts.serverName && domain.value.trim()) ts.serverName = domain.value.trim();
+                draw();
+              } }, fa ? "افزودن" : "Add"));
+          }
+        };
+        drawPane();
+        box.append(tabs, pane);
+        return box;
+      };
+      const certField = oneCert
+        ? field(ie("cert"), select([["", "—"], ...certList.map((c) => [c.id, `${c.id} · ${(c.domains || []).join(", ")}`])], () => curCert, (v) => setPicked(v ? [v] : []), draw))
+        : field(fa ? "گواهی‌ها (چندتایی؛ اولی پیش‌فرض)" : "Certificates (several; the first is the default)",
+          h("div", { class: "cert-pick" },
+            certList.length ? certList.map((c) => {
+              const i = picked.indexOf(c.id);
+              const box = h("input", { type: "checkbox", checked: i >= 0 });
+              box.addEventListener("change", () => { setPicked(box.checked ? [...picked, c.id] : picked.filter((x) => x !== c.id)); draw(); });
+              return h("label", { class: "check" }, box, h("span", { dir: "ltr" }, `${c.id} · ${(c.domains || []).join(", ")}`),
+                i === 0 && picked.length > 1 ? h("span", { class: "badge good" }, fa ? "پیش‌فرض" : "default") : null,
+                i > 0 ? h("button", { type: "button", class: "ghost small", title: fa ? "پیش‌فرض کن" : "Make default", onclick: () => { setPicked([c.id, ...picked.filter((x) => x !== c.id)]); draw(); } }, fa ? "پیش‌فرض کن" : "make default") : null);
+            }) : h("span", { class: "muted small" }, fa ? "هنوز گواهی‌ای نیست (تنظیمات ← گواهی‌ها)." : "No certificates yet (Settings → Certificates)."),
+            picked.length > 1 ? h("p", { class: "small muted" }, fa ? "Xray گواهیِ هم‌نامِ SNI کلاینت را می‌دهد؛ اگر هیچ‌کدام نخورد، اولی (پیش‌فرض). لینک‌های اشتراک از فیلد SNI استفاده می‌کنند." : "Xray serves the certificate matching the client's SNI, else the first (default). Subscription links use the SNI field.") : null,
+            // Certificates kept as files on the node itself.
+            ...others.filter((c) => c.certificateFile).map((c) => h("div", { class: "check" }, h("span", { class: "badge" }, fa ? "فایل روی سرور" : "file on server"),
+              h("span", { dir: "ltr", class: "small" }, c.certificateFile),
+              h("button", { type: "button", class: "ghost small", onclick: () => { ts.certificates = ts.certificates.filter((x) => x !== c); draw(); } }, fa ? "حذف" : "remove"))),
+            oneCert ? null : addCertBox()));
+      // SNI per node: each node's links can carry its own domain (and Xray
+      // answers it with the matching certificate).
+      const sniPerNode = () => {
+        const rts = o.routes || [];
+        if (rts.length < 1) return null;
+        const domains = [...new Set(picked.flatMap((id) => (certList.find((c) => c.id === id)?.domains || [])).filter((d) => d && !d.startsWith("*")))];
+        const nodeName = (id) => { const n = (o.nodes || []).find((x) => x.ID === id || x.id === id); return n ? (n.Name || n.name || id) : id; };
+        return h("details", { class: "adv-box", open: Object.keys(o.routeSni).length > 0 || rts.some((r) => (r.hosts || []).some((x) => x.sni)) },
+          h("summary", {}, fa ? "SNI هر نود" : "SNI per node"),
+          h("p", { class: "small muted" }, fa ? "دامنه‌ای که لینک‌های هر نود با آن ساخته می‌شوند. خالی = همان فیلد SNI بالا. با چند گواهی، Xray روی هر نود گواهیِ همان دامنه را می‌دهد." : "The domain each node's links use. Empty = the SNI field above. With several certificates Xray answers each with the matching one."),
+          ...rts.map((r) => {
+            const cur = r.node_id in o.routeSni ? o.routeSni[r.node_id] : ((r.hosts || []).find((x) => x.sni)?.sni || "");
+            const custom = cur && !domains.includes(cur);
+            const inp = h("input", { dir: "ltr", value: custom ? cur : "", placeholder: "sub.example.com", hidden: !custom });
+            inp.addEventListener("input", () => { o.routeSni[r.node_id] = inp.value.trim(); });
+            const sel = h("select", {}, [["", fa ? `— همان SNI بالا (${ts.serverName || "—"})` : `— the SNI above (${ts.serverName || "—"})`], ...domains.map((d) => [d, d]), ["*custom", fa ? "دامنهٔ دیگر…" : "Other domain…"]]
+              .map(([v, l]) => h("option", { value: v, selected: custom ? v === "*custom" : v === cur }, l)));
+            sel.addEventListener("change", () => {
+              if (sel.value === "*custom") { inp.hidden = false; inp.focus(); o.routeSni[r.node_id] = inp.value.trim(); } else { inp.hidden = true; o.routeSni[r.node_id] = sel.value; }
+            });
+            return h("div", { class: "two" }, field(nodeName(r.node_id), sel), h("label", {}, h("span", {}, "\u00a0"), inp));
+          }));
+      };
       kids.push(
         h("div", { class: "two" },
-          field(ie("cert"), select([["", "—"], ...certList.map((c) => [c.id, `${c.id} · ${(c.domains || []).join(", ")}`])], () => curCert, (v) => {
-            ts.certificates = v ? [{ dark_cert: v }] : []; const c = certList.find((x) => x.id === v); if (c?.domains?.[0] && !ts.serverName) ts.serverName = c.domains[0];
-          }, draw)),
+          certField,
           field(ie("sniName"), input(() => ts.serverName, (v) => { ts.serverName = v; }, { dir: "ltr" }))),
+        sniPerNode(),
         h("div", { class: "row" }, h("span", { class: "muted small" }, ie("alpn")), ...alpnOpts.map((a) => check(() => alpn.has(a), (v) => { if (v) alpn.add(a); else alpn.delete(a); ts.alpn = alpnOpts.filter((x) => alpn.has(x)); if (!ts.alpn.length) delete ts.alpn; }, a))),
         h("div", { class: "three" },
           field(ie("minVer"), select([["", "—"], ["1.2", "1.2"], ["1.3", "1.3"]], () => ts.minVersion || "", (v) => { if (v) ts.minVersion = v; else delete ts.minVersion; })),
@@ -3607,7 +4079,8 @@ async function inboundEditor(tag, nodes, certs) {
   d.classList.add("wide");
   d.addEventListener("close", () => d.classList.remove("wide"), { once: true });
 
-  const kit = inboundFormKit({ tpl, meta, enabled, lim, view, routed, certList, err, draw: () => draw(), nodes: nodes || [], nodeId: (routes || [])[0]?.node_id || raw.node_id });
+  const routeSni = {}; // nodeID -> SNI chosen in the TLS section, saved into that node's hosts
+  const kit = inboundFormKit({ tpl, meta, enabled, lim, view, routed, certList, err, draw: () => draw(), nodes: nodes || [], nodeId: (routes || [])[0]?.node_id || raw.node_id, routes: routes || [], routeSni });
   function draw() {
     tabs.replaceChildren(...[["form", ie("form")], ["json", ie("json")]].map(([k, l]) => h("button", { type: "button", role: "tab", "aria-current": mode === k ? "step" : null, onclick: () => switchTo(k) }, l)));
     body.replaceChildren(...(mode === "form" ? kit.drawForm() : kit.drawJSON()));
@@ -3626,6 +4099,13 @@ async function inboundEditor(tag, nodes, certs) {
     if (st.security === "reality" && st.realitySettings) meta.short_id = (st.realitySettings.shortIds || [])[0] || meta.short_id;
     try {
       await guarded(() => api("PUT", `/api/v2/admin/inbounds/${encodeURIComponent(tag)}`, { node_id: raw.node_id, template: tpl, meta, enabled }));
+      if (Object.keys(routeSni).length) {
+        // Per-node SNI: read the routes again and change only the SNI of
+        // that node's hosts, so nothing else in the route layout moves.
+        const fresh = await api("GET", `/api/v2/admin/inbounds/${encodeURIComponent(tag)}/routes`);
+        for (const r of fresh) if (r.node_id in routeSni) for (const x of r.hosts || []) x.sni = routeSni[r.node_id];
+        await api("PUT", `/api/v2/admin/inbounds/${encodeURIComponent(tag)}/routes`, fresh);
+      }
       if (+lim.speed !== speed0) await api("PUT", `/api/v2/admin/inbounds/${encodeURIComponent(tag)}/speed`, { kbps: Math.round((+lim.speed || 0) * 1000) });
       if (JSON.stringify({ cap: lim.cap, ends: lim.ends }) !== lim0) {
         await api("PUT", `/api/v2/admin/inbounds/${encodeURIComponent(tag)}/limits`, { cap_gb: +lim.cap || 0, ends_unix: lim.ends ? Math.floor(new Date(lim.ends + "T23:59:59").getTime() / 1000) : 0 });
@@ -3818,11 +4298,14 @@ function passwordField() {
 const repBase = () => (me && me.role === "rep" ? "/api/v2/rep/sellers" : "/api/v2/admin/reps");
 
 async function viewSellers() {
-  const [reps, inbounds] = await Promise.all([api("GET", "/api/v2/rep/sellers"), api("GET", "/api/v2/rep/inbounds")]);
+  const [all, inbounds, sold] = await Promise.all([api("GET", "/api/v2/rep/sellers"), api("GET", "/api/v2/rep/inbounds"), me.resale ? api("GET", "/api/v2/rep/resale/panels").catch(() => null) : null]);
+  // Panels sold through "Panel sale" are managed there.
+  const soldIDs = new Set(((sold && sold.panels) || []).map((p) => p.id));
+  const reps = (all || []).filter((r) => !soldIDs.has(r.ID));
   const cards = (reps || []).map((r) => h("div", { class: "card item" },
     h("div", { class: "head" }, h("span", { class: "name" }, r.Name || r.ID), h("span", { class: "badge" }, r.ID),
       h("span", { class: `badge ${r.Enabled ? "good" : "bad"} spacer` }, t(r.Enabled ? "enabled" : "disabled"))),
-    h("div", { class: "muted small" }, `${t("volumeCredit")}: ${bytes(r.VolumeCredit)} · ${t("units")}: ${fmtNum(r.UnlimitedUnits)} · ${t("clientsCount", { n: fmtNum(r.Clients) })} · ${lang === "fa" ? "مصرف کل" : "used"}: ${bytes(r.UsedBytes || 0)}`),
+    h("div", { class: "muted small" }, `${t("volumeCredit")}: ${bytes(r.VolumeCredit)} · ${t("units")}: ${fmtNum(r.UnlimitedUnits)} · ${t("clientsCount", { n: fmtNum(r.Clients) })} · ${lang === "fa" ? "مصرف کل" : "used"}: ${bytes(r.UsedBytes || 0)}${movedHere(r.UsedBytes, r.UsedHere) ? ` · ${lang === "fa" ? "در پنل ما" : "here"}: ${bytes(r.UsedHere || 0)}` : ""}`),
     h("div", { class: "muted small" }, policySummary(r.Policy)),
     h("div", { class: "row" }, h("button", { onclick: () => creditForm(r) }, t("transferCredit")),
       h("button", { class: "ghost", onclick: () => policyForm(r, inbounds) }, t("policy")),
@@ -4105,9 +4588,29 @@ function policyForm(r, inbounds) {
   const allowed = new Set(p.Inbounds || []);
   const boxes = (inbounds || []).map((ib) => h("label", { class: "check" }, h("input", { type: "checkbox", value: ib.tag, checked: allowed.has(ib.tag) }), `${ib.tag} · ${ib.node_id}`));
   const err = h("div", { class: "error" });
+  // Selling panels in its own bot (owner only, top-level resellers only).
+  const fa = lang === "fa";
+  const rsOn = me.role === "owner" && !r.ParentID;
+  const rs = { al: box(false), cr: box(false), pt: h("input", { type: "number", min: "0", step: "1000", dir: "ltr", value: 0 }), hint: h("span", { class: "small muted" }), loaded: null };
+  const rsBox = rsOn ? h("fieldset", { class: "form", style: "border:0;padding:0;margin:0" },
+    h("legend", { class: "small muted" }, "🏪 ", fa ? "فروش پنل نمایندگی در ربات خودش" : "Selling reseller panels in its own bot"),
+    h("label", { class: "check" }, rs.al, fa ? "اجازهٔ فروش پنل" : "May sell panels"),
+    h("label", { class: "check" }, rs.cr, fa ? "اگر کیف پول کافی نبود، فاکتور ۲۴ ساعته (حداکثر یک فاکتور باز)" : "If the wallet is short, a 24-hour bill (one open at most)"),
+    h("label", {}, h("span", {}, fa ? "قیمت عمدهٔ اختصاصی هر ترابایت (۰ = قیمت کلی)" : "Own wholesale price per TB (0 = the general price)"), rs.pt, rs.hint)) : null;
+  const lg = { al: box(false), loaded: null };
+  const lgBox = rsOn ? h("label", { class: "check" }, lg.al, fa ? "📥 اجازهٔ آوردن کاربران قدیمی از پنل دیگر (فقط مصرف واقعی از اعتبار کم می‌شود؛ قابل تمدید نیستند)" : "📥 May bring old users from another panel (only real use is charged; they cannot be renewed)") : null;
+  if (rsOn) api("GET", `/api/v2/admin/reps/${encodeURIComponent(r.ID)}/legacy`).then((v) => { lg.loaded = v; lg.al.checked = !!v.allowed; }).catch(() => {});
+  if (rsOn) api("GET", `/api/v2/admin/reps/${encodeURIComponent(r.ID)}/resale`).then((v) => {
+    rs.loaded = v.resale; rs.al.checked = !!v.resale.allowed; rs.cr.checked = !!v.resale.credit; rs.pt.value = v.resale.price_tb || 0;
+    rs.hint.textContent = fa ? `قیمت کلی: ${fmtNum(v.resale.price_tb ? 0 : v.wholesale_tb)} تومان` : `General price: ${fmtNum(v.wholesale_tb)} toman`;
+    if (v.resale.price_tb) rs.hint.textContent = "";
+  }).catch(() => {});
   const save = h("button", { class: "primary", value: "save", onclick: async (e) => {
     e.preventDefault();
     try {
+      if (rs.loaded && (rs.al.checked !== !!rs.loaded.allowed || rs.cr.checked !== !!rs.loaded.credit || (+rs.pt.value || 0) !== (rs.loaded.price_tb || 0)))
+        await api("PUT", `/api/v2/admin/reps/${encodeURIComponent(r.ID)}/resale`, { allowed: rs.al.checked, credit: rs.cr.checked, price_tb: +rs.pt.value || 0 });
+      if (lg.loaded && lg.al.checked !== !!lg.loaded.allowed) await api("PUT", `/api/v2/admin/reps/${encodeURIComponent(r.ID)}/legacy`, { allowed: lg.al.checked });
       await guarded(() => api("PUT", `${repBase()}/${encodeURIComponent(r.ID)}/policy`, {
         MaxClients: +f.mc.value || 0, MaxDays: +f.md.value || 0, MaxClientGB: +f.mg.value || 0,
         AllowUnlimited: f.au.checked, CanDelete: f.cd.checked, RefundUnused: f.ru.checked,
@@ -4130,7 +4633,7 @@ function policyForm(r, inbounds) {
     h("label", { class: "check" }, f.ru, t("refundUnused")),
     me.role === "owner" ? h("label", { class: "check" }, f.mp, t("manageProducts")) : null,
     h("fieldset", { class: "form", style: "border:0;padding:0;margin:0" }, h("legend", { class: "small muted" }, t("allowedInbounds")), boxes),
-    me.role === "rep" ? null : h("div", { class: "two" }, lab("priceGB", f.pg), lab("priceUnit", f.pu)), err), [save]);
+    me.role === "rep" ? null : h("div", { class: "two" }, lab("priceGB", f.pg), lab("priceUnit", f.pu)), rsBox, lgBox, err), [save]);
 }
 
 function paymentForm(r) {
@@ -4252,38 +4755,13 @@ async function viewAnalytics() {
     const p = Math.round(((cur - prev) / prev) * 100);
     return h("span", { class: `chg ${p > 0 ? "up" : p < 0 ? "down" : ""}`, dir: "ltr" }, `${p > 0 ? "+" : ""}${fmtNum(p)}%`);
   };
-  const bars = (rows, keys, colors, label) => {
-    const W = 480, H = 170, P = 18, max = Math.max(1, ...rows.map((r) => keys.reduce((a, k) => a + (r[k] || 0), 0)));
-    const bw = (W - 2 * P) / rows.length;
-    const svg = svgEl("svg", { viewBox: `0 0 ${W} ${H + 24}`, class: "an-chart", direction: "ltr", role: "img", "aria-label": label });
-    svg.append(svgEl("line", { x1: P, x2: W - P, y1: H, y2: H, class: "axis" }));
-    rows.forEach((r, i) => {
-      let y = H;
-      keys.forEach((k, j) => {
-        const v = r[k] || 0, hh = (v / max) * (H - 20);
-        if (!hh) return;
-        y -= hh;
-        const rect = svgEl("rect", { x: P + i * bw + bw * 0.2, y, width: bw * 0.6, height: hh, rx: 2, fill: colors[j] });
-        const tt = svgEl("title", {}); tt.textContent = `${monthName(r.month)}: ${money(v)}`; rect.append(tt); svg.append(rect);
-      });
-      const tx = svgEl("text", { x: P + i * bw + bw / 2, y: H + 17, "text-anchor": "middle", class: "lbl" }); tx.textContent = fa ? `\u2067${monthName(r.month)}\u2069` : monthName(r.month); svg.append(tx);
-      const total = keys.reduce((a, k) => a + (r[k] || 0), 0);
-      if (total) { const tv = svgEl("text", { x: P + i * bw + bw / 2, y: y - 5, "text-anchor": "middle", class: "lbl val" }); tv.textContent = fmtNum(Math.round(total / 1e5) / 10); svg.append(tv); }
-    });
-    return svg;
-  };
-  const line = (daily) => {
-    const W = 480, H = 120, P = 12, max = Math.max(1, ...daily.map((d) => d.active)), min = Math.min(...daily.map((d) => d.active));
-    const lo = Math.max(0, Math.floor(min * 0.9)), span = Math.max(1, max - lo);
-    const x = (i) => P + (i * (W - 2 * P)) / Math.max(1, daily.length - 1), y = (v) => H - ((v - lo) / span) * (H - 28) - 4;
-    const svg = svgEl("svg", { viewBox: `0 0 ${W} ${H + 8}`, class: "an-chart", direction: "ltr", role: "img", "aria-label": fa ? "مشتری فعال روزانه" : "Active customers per day" });
-    svg.append(svgEl("path", { d: daily.map((d, i) => `${i ? "L" : "M"}${x(i)} ${y(d.active)}`).join(""), class: "an-line" }));
-    daily.forEach((d, i) => { const c = svgEl("circle", { cx: x(i), cy: y(d.active), r: 2.5, class: "an-dot" }); const tt = svgEl("title", {}); tt.textContent = `${d.day}: ${fmtNum(d.active)}`; c.append(tt); svg.append(c); });
-    const last = daily[daily.length - 1];
-    if (last) { const tv = svgEl("text", { x: x(daily.length - 1), y: y(last.active) - 9, "text-anchor": "end", class: "lbl val" }); tv.textContent = fa ? `\u2067${fmtNum(last.active)} امروز\u2069` : `${last.active} today`; svg.append(tv); }
-    const mx = svgEl("text", { x: P, y: 14, class: "lbl" }); mx.textContent = fa ? `\u2067بیشترین ${fmtNum(max)} · کمترین ${fmtNum(min)}\u2069` : `max ${max} · min ${min}`; svg.append(mx);
-    return svg;
-  };
+  const bars = (rows, keys, colors, names, label) => chartKit({ xs: rows.map((r) => r.month), mode: "stack", bin: false, height: 230, label,
+    series: keys.map((k, j) => ({ id: k, name: names[j], color: colors[j], values: rows.map((r) => r[k] || 0) })),
+    xLabel: (i) => monthName(rows[i].month), tipTitle: (i) => monthName(rows[i].month), fmt: (v) => `${money(v)} ${fa ? "تومان" : "toman"}`,
+    axis: (v) => fmtNum(v / 1e6), totals: (v) => fmtNum(Math.round(v / 1e5) / 10) });
+  const line = (daily) => chartKit({ xs: daily.map((d) => d.day), mode: "lines", bin: false, int: true, height: 190, label: fa ? "مشتری فعال روزانه" : "Active customers per day",
+    series: [{ id: "a", name: fa ? "مشتری فعال" : "Active customers", color: "var(--ion)", area: true, values: daily.map((d) => d.active) }],
+    fmt: (v) => fmtNum(v), partial: daily.at(-1)?.day === todayUTC() ? daily.length - 1 : -1 });
   const load = async () => {
     fill(body, h("p", { class: "muted small" }, fa ? "در حال محاسبه…" : "Working…"));
     let a;
@@ -4309,8 +4787,8 @@ async function viewAnalytics() {
         kpi(a.renew_rate < 0 ? "—" : pct(a.renew_rate), fa ? "نرخ تمدید (۳۰ روز)" : "Renewal rate (30d)", null, fa ? `${fmtNum(a.renewed_30d)} تمدید · ${fmtNum(a.lapsed_30d)} تمدید نکرده` : `${a.renewed_30d} renewed · ${a.lapsed_30d} lapsed`),
         kpi(fmtNum(a.expiring_7d), fa ? "پایان در ۷ روز آینده" : "Ending in 7 days")),
       h("section", { class: "card an-sec" }, h("h2", {}, fa ? "درآمد ماهانه (میلیون تومان)" : "Monthly revenue (million toman)"),
-        showResell ? h("div", { class: "an-legend small" }, h("span", { class: "sw a" }), fa ? "فروشگاه" : "Shop", h("span", { class: "sw b" }), fa ? "نماینده‌ها (به قیمت نماینده)" : "Resellers") : null,
-        bars(a.months, showResell ? ["shop", "resell"] : ["shop"], ["var(--ion)", "var(--sky)"], fa ? "درآمد ماهانه" : "Monthly revenue")),
+        showResell ? chartLegend([{ id: "a", name: fa ? "فروشگاه" : "Shop", color: "var(--ion)" }, { id: "b", name: fa ? "نماینده‌ها (به قیمت نماینده)" : "Resellers", color: "var(--sky)" }]) : null,
+        bars(a.months, showResell ? ["shop", "resell"] : ["shop"], ["var(--ion)", "var(--sky)"], [fa ? "فروشگاه" : "Shop", fa ? "نماینده‌ها" : "Resellers"], fa ? "درآمد ماهانه" : "Monthly revenue")),
       h("section", { class: "card an-sec" }, h("h2", {}, fa ? "مشتری‌ها ماه‌به‌ماه" : "Customers by month"),
         h("div", { class: "table-wrap" }, h("table", { class: "table" },
           h("thead", {}, h("tr", {}, [fa ? "ماه" : "Month", fa ? "جدید" : "New", fa ? "تمدید" : "Renewed", fa ? "ریزش" : "Churned"].map((x) => h("th", { scope: "col" }, x)))),
@@ -4430,9 +4908,11 @@ function walletsPane() {
 }
 
 // A reseller's own Telegram sales bot.
-// mirzaCard connects a sales bot made for PasarGuard (Mirza) to this panel.
-// For a reseller it is a choice of how it sells: the Dark bot or Mirza
-// (the Dark bot stays off meanwhile).
+// mirzaCard connects a sales bot or a website made for PasarGuard to this
+// panel (Mirza above all). A reseller picks how it sells: its Dark bot,
+// Mirza (its Dark bot goes off: both would serve the same customers) or the
+// PasarGuard API for any other bot or site (its Dark bot stays on). The
+// owner's access never turns the main bot off.
 function mirzaCard(path, isRep) {
   const fa = lang === "fa";
   const T = (f, e) => (fa ? f : e);
@@ -4443,50 +4923,132 @@ function mirzaCard(path, isRep) {
     const m = Math.max(0, Math.round((Date.now() / 1000 - u) / 60));
     return m < 2 ? T("همین الان", "just now") : m < 60 ? T(`${fmtNum(m)} دقیقه پیش`, `${m} min ago`) : m < 1440 ? T(`${fmtNum(Math.round(m / 60))} ساعت پیش`, `${Math.round(m / 60)} h ago`) : new Date(u * 1000).toLocaleDateString(fa ? "fa-IR" : "en-GB");
   };
+  const copyBtn = (value) => h("button", { type: "button", class: "ghost", onclick: () => copy(value) }, T("کپی", "Copy"));
   const field = (label, value, secret) => h("div", { class: "mz-field" }, h("span", { class: "small muted" }, label),
-    h("div", { class: "mz-copy" }, h("code", { dir: "ltr", class: secret ? "mz-secret" : "" }, value), h("button", { type: "button", class: "ghost", onclick: () => copy(value) }, T("کپی", "Copy"))));
-  const turnOn = async () => {
+    h("div", { class: "mz-copy" }, h("code", { dir: "ltr", class: secret ? "mz-secret" : "" }, value), copyBtn(value)));
+  // shown keeps a password made in this visit on screen while only the mode
+  // changes (a mode switch keeps the password but does not send it again).
+  const shown = { password: "", api_key: "" };
+  let busy = false; // one request at a time: a second click waits for the first
+  const send = async (method, data, sub) => {
+    if (busy) return;
+    busy = true;
     err.textContent = "";
-    try { draw(await api("POST", path)); } catch (x) { err.textContent = x.message; }
+    try {
+      const a = await api(method, path + (sub || ""), data);
+      for (const k of ["password", "api_key"]) {
+        if (a[k]) shown[k] = a[k];
+        else if (a.enabled && shown[k]) a[k] = shown[k];
+      }
+      if (!a.enabled) shown.password = shown.api_key = "";
+      draw(a);
+    } catch (x) { err.textContent = x.message; }
+    finally { busy = false; }
   };
-  const turnOff = async () => {
-    if (!confirm(isRep ? T("اتصال میرزا قطع و ربات دارک دوباره روشن شود؟", "Disconnect Mirza and turn the Dark bot back on?") : T("اتصال میرزا قطع شود؟", "Disconnect Mirza?"))) return;
-    err.textContent = "";
-    try { draw(await api("DELETE", path)); } catch (x) { err.textContent = x.message; }
+  const turnOff = (mode) => {
+    const q = !isRep ? T("دسترسی API قطع شود؟ ربات‌ها و سایت‌هایی که با آن وصل‌اند دیگر کار نمی‌کنند.", "Turn the API access off? Bots and sites using it stop working.")
+      : mode === "mirza" ? T("اتصال میرزا قطع و ربات دارک دوباره روشن شود؟", "Disconnect Mirza and turn the Dark bot back on?")
+        : T("دسترسی API قطع شود؟ ربات‌ها و سایت‌هایی که با آن وصل‌اند دیگر کار نمی‌کنند.", "Turn the API access off? Bots and sites using it stop working.");
+    if (confirm(q)) send("DELETE");
   };
+  // choose moves a reseller to a way of selling: off, or on in a mode. A
+  // new access comes with a fresh password; switching keeps the password.
+  const choose = (want, cur) => {
+    if (want === cur) return;
+    if (want === "dark") return turnOff(cur);
+    if (cur === "dark") return send("POST", { mode: want });
+    // Between Mirza and the API nothing breaks (the same username, password
+    // and API key) and it is undone with one click: no question.
+    send("PUT", { mode: want });
+  };
+
+  // The PasarGuard API in short: how to sign in, and the calls most bots
+  // and sites need. Same paths and fields as PasarGuard's own API.
+  function guide(a) {
+    const base = location.origin;
+    // In Persian text, Latin words (paths, field names) are isolated so the
+    // right-to-left line keeps its order and its brackets.
+    const bi = (text) => fa ? text.split(/(\/?[A-Za-z_][A-Za-z0-9_\/{}.\-]*)/).map((x, i) => i % 2 ? h("bdi", { dir: "ltr" }, x) : x) : text;
+    const login = `curl -X POST ${base}/api/admin/token \\\n  -d "username=${a.username}" -d "password=YOUR_PASSWORD"`;
+    const until = new Date(Date.now() + 30 * 86400e3).toISOString().slice(0, 10) + "T00:00:00Z";
+    const create = `curl -X POST ${base}/api/user \\\n  -H "Authorization: Bearer TOKEN" -H "Content-Type: application/json" \\\n  -d '{"username": "ali123", "data_limit": 32212254720, "expire": "${until}"}'`;
+    const calls = [
+      ["GET", "/api/users", T("فهرست کاربرها، با فیلتر وضعیت، جستجو و صفحه‌بندی", "list users, by status, search and page")],
+      ["POST", "/api/user", T("ساخت کاربر", "create a user")],
+      ["GET", "/api/user/{username}", T("یک کاربر: مصرف، انقضا، لینک‌ها", "one user: usage, expiry, links")],
+      ["PUT", "/api/user/{username}", T("تمدید یا تغییر (حجم، انقضا، روشن/خاموش)", "renew or change (volume, expiry, on/off)")],
+      ["POST", "/api/user/{username}/reset", T("صفر کردن مصرف", "reset usage")],
+      ["POST", "/api/user/{username}/revoke_sub", T("لینک و مشخصات تازه", "a new link and credentials")],
+      ["DELETE", "/api/user/{username}", T("حذف", "delete")],
+      ["GET", "/api/groups", T("اینباندهای مجاز شما، همان group_ids", "the inbounds you may give: the group_ids")],
+      ["GET", "/api/user_templates", T("پلن‌های شما", "your plans")],
+      ["POST", "/api/user/from_template", T("فروش یک پلن", "sell a plan")],
+      ["GET", "/api/users/usage", T("نمودار مصرف", "usage chart")],
+    ];
+    const code = (text) => h("div", { class: "mz-code-row" }, h("pre", { dir: "ltr", class: "mz-code" }, text), copyBtn(text.replace(/\\\n\s*/g, "")));
+    return h("details", { class: "adv-box mz-guide" }, h("summary", {}, T("📘 راهنمای API (مثل API پاسارگاد)", "📘 API guide (as PasarGuard's API)")),
+      h("p", { class: "small muted" }, isRep
+        ? T("هر ربات یا سایتی که برای پاسارگاد ساخته شده با همین آدرس‌ها و فیلدها کار می‌کند. کاربرهایی که می‌سازد مال شما هستند و از اعتبارتان کم می‌شود.",
+          "Any bot or site made for PasarGuard works with these same paths and fields. The users it makes are yours and use your credit.")
+        : T("هر ربات یا سایتی که برای پاسارگاد ساخته شده با همین آدرس‌ها و فیلدها کار می‌کند. کاربرهایی که می‌سازد مال پنل هستند (نه نماینده‌ها).",
+          "Any bot or site made for PasarGuard works with these same paths and fields. The users it makes are the panel's own (not a reseller's).")),
+      h("p", { class: "small" }, T("۱. گرفتن توکن (۲۴ ساعت اعتبار دارد):", "1. Get a token (valid for 24 hours):")), code(login),
+      h("p", { class: "small" }, T("۲. توکن را در هر درخواست بفرستید:", "2. Send it with every call:")), code("Authorization: Bearer TOKEN"),
+      h("p", { class: "small" }, T("یا به‌جای توکن، API Key را در هر درخواست بفرستید (مثل پاسارگاد):", "Or, instead of a token, send the API Key with every call (as in PasarGuard):")), code("X-Api-Key: pg_key_..."),
+      h("p", { class: "small" }, T("۳. درخواست‌های اصلی:", "3. The main calls:")),
+      h("div", { class: "mz-calls", dir: "ltr" }, calls.map(([m, p, what]) => h("div", { class: "mz-call" },
+        h("code", { class: `mz-method m-${m.toLowerCase()}` }, m), h("code", { class: "mz-path" }, p), h("span", { class: "small muted", dir: fa ? "rtl" : "ltr" }, bi(what))))),
+      h("p", { class: "small" }, T("نمونهٔ ساخت کاربر ۳۰ گیگ و ۳۰ روزه:", "Example: a 30 GB, 30-day user:")), code(create),
+      h("p", { class: "small muted" }, bi(T("حجم یا data_limit به بایت است و ۰ یعنی نامحدود. انقضا یا expire زمان یونیکس یا تاریخ ISO است. بدون group_ids کاربر همهٔ اینباندهایی را که می‌توانید بدهید می‌گیرد؛ برای انتخاب، شماره‌ها را از /api/groups بگیرید. بقیهٔ مسیرهای پاسارگاد هم هستند: by-id، کارهای گروهی و قالب‌ها.",
+        "data_limit is in bytes (0 = unlimited) and expire is a Unix time or an ISO date. Without group_ids the user gets every inbound you may give; to choose, take the numbers from /api/groups. PasarGuard's other paths (by-id, bulk actions, templates) are here too."))));
+  }
+
   function draw(a) {
     const on = !!a.enabled;
-    const mode = isRep ? h("div", { class: "segs mz-mode", role: "group", "aria-label": T("روش فروش", "How you sell") },
-      h("button", { type: "button", class: "seg", "aria-pressed": String(!on), onclick: () => on && turnOff() }, "🤖 ", T("ربات دارک", "Dark bot")),
-      h("button", { type: "button", class: "seg", "aria-pressed": String(on), onclick: () => !on && turnOn() }, "🔗 ", T("ربات میرزا", "Mirza bot"))) : null;
+    const cur = !on ? "dark" : (a.mode || "mirza");
+    const seg = (key, icon, label) => h("button", { type: "button", class: "seg", "aria-pressed": String(cur === key), onclick: () => choose(key, cur) }, icon + " ", label);
+    const modes = isRep ? h("div", { class: "segs", role: "group", "aria-label": T("روش فروش", "How you sell") },
+      seg("dark", "🤖", T("ربات دارک", "Dark bot")), seg("mirza", "🔗", T("ربات میرزا", "Mirza bot")), seg("api", "🔌", T("API پاسارگاد", "PasarGuard API"))) : null;
     if (!on) {
-      fill(body, mode,
+      fill(body, modes, err,
         h("p", { class: "small muted" }, isRep
-          ? T("اگر مشتری‌هایتان در ربات میرزا هستند، «ربات میرزا» را بزنید. پنل ما برای میرزا مثل یک پنل پاسارگاد کار می‌کند و ربات دارک شما خاموش می‌ماند.", "If your customers are in a Mirza bot, choose “Mirza bot”. This panel works for Mirza like a PasarGuard panel, and your Dark bot stays off.")
-          : T("ربات میرزا (یا هر ربات فروشی که پنل پاسارگاد را می‌شناسد) را به این پنل وصل کنید. ربات اصلی دارک روشن می‌ماند.", "Connect a Mirza bot (or any sales bot that speaks PasarGuard) to this panel. The main Dark bot stays on.")),
-        isRep ? null : h("button", { type: "button", class: "primary", onclick: turnOn }, T("ساخت اتصال میرزا", "Create the Mirza connection")), err);
+          ? T("فروش با ربات دارک است. اگر مشتری‌هایتان در ربات میرزا هستند «ربات میرزا» را بزنید (ربات دارک خاموش می‌شود). برای وصل کردن ربات یا سایت دیگری که با پاسارگاد کار می‌کند «API پاسارگاد» را بزنید (ربات دارک روشن می‌ماند).",
+            "You sell with the Dark bot. If your customers are in a Mirza bot, choose “Mirza bot” (the Dark bot goes off). To connect another bot or a website that works with PasarGuard, choose “PasarGuard API” (the Dark bot stays on).")
+          : T("ربات میرزا یا هر ربات و سایتی که پنل پاسارگاد را می‌شناسد با این دسترسی به این پنل وصل می‌شود. ربات اصلی دارک روشن می‌ماند.",
+            "Mirza, or any bot or site that knows the PasarGuard panel, connects to this panel with this access. The main Dark bot stays on.")),
+        isRep ? null : h("button", { type: "button", class: "primary", onclick: () => send("POST", { mode: "api" }) }, T("ساخت دسترسی API", "Create the API access")));
       return;
     }
-    fill(body, mode,
+    const mirza = isRep ? cur === "mirza" : true;
+    fill(body, modes, err,
       h("div", { class: "mz-badges" }, h("span", { class: "badge good" }, "● ", T("فعال", "on")),
         h("span", { class: "badge" }, T("آخرین اتصال: ", "last call: "), ago(a.last_used)),
-        h("span", { class: "badge" }, T(`${fmtNum(a.made)} کاربر ساخته شده با میرزا`, `${a.made} users made by Mirza`))),
-      h("ol", { class: "mz-steps small" },
+        h("span", { class: "badge" }, T(`کاربر ساخته شده با API: ${fmtNum(a.made)}`, `users made through the API: ${a.made}`))),
+      mirza ? h("ol", { class: "mz-steps small" },
         h("li", {}, T("در پنل ادمین میرزا «🖥 اضافه کردن پنل» را بزنید و نوع پنل را «پاسارگارد» انتخاب کنید.", "In Mirza's admin menu tap “🖥 Add panel” and choose the PasarGuard type.")),
-        h("li", {}, T("آدرس، نام کاربری و رمز زیر را وارد کنید.", "Enter the address, username and password below.")),
-        h("li", {}, T("در «✏️ مدیریت پنل» دکمهٔ «🎛 تنظیم نام گروه» را بزنید و عبارت all-groups را بفرستید تا همهٔ اینباندهای مجاز شما برای کاربرهای جدید انتخاب شود (یا نام کاربری یکی از کاربرهایتان را بفرستید تا فقط اینباندهای او برداشته شود).", "In “✏️ Panel management” tap “🎛 Set group name” and send all-groups to give new users every inbound you may give (or send one of your users' names to copy just its inbounds)."))),
-      field(T("آدرس پنل", "Panel address"), location.origin),
+        h("li", {}, T("آدرس زیر را بفرستید؛ وقتی API Key خواست، API Key زیر را بفرستید (اگر میرزا نام کاربری و رمز خواست، همان‌ها را).", "Send the address below; when it asks for an API Key, send the API Key below (if Mirza asks for a username and password instead, send those).")),
+        h("li", {}, T("در «✏️ مدیریت پنل» دکمهٔ «🎛 تنظیم نام گروه» را بزنید و عبارت all-groups را بفرستید تا همهٔ اینباندهای مجاز شما برای کاربرهای جدید انتخاب شود (یا نام کاربری یکی از کاربرهایتان را بفرستید تا فقط اینباندهای او برداشته شود).", "In “✏️ Panel management” tap “🎛 Set group name” and send all-groups to give new users every inbound you may give (or send one of your users' names to copy just its inbounds).")))
+        : h("p", { class: "small" }, T("ربات یا سایت شما با آدرس و API Key زیر (یا نام کاربری و رمز) مثل یک پنل پاسارگاد وصل می‌شود. راهنمای API پایین همین کارت است.",
+          "Your bot or site connects with the address and API Key below (or the username and password), as to a PasarGuard panel. The API guide is at the bottom of this card.")),
+      field(T("آدرس پنل (API)", "Panel address (API)"), location.origin),
       field(T("نام کاربری", "Username"), a.username),
       a.password ? field(T("رمز (فقط همین یک بار نشان داده می‌شود)", "Password (shown only this once)"), a.password, true)
-        : h("p", { class: "small muted" }, T("رمز فقط هنگام ساخت نشان داده می‌شود. اگر ندارید، رمز تازه بسازید و در میرزا عوض کنید.", "The password is shown only when made. If you lost it, make a new one and change it in Mirza.")),
-      isRep ? h("p", { class: "small muted" }, T("کاربرهایی که میرزا می‌سازد زیر حساب شما ثبت و از اعتبارتان کم می‌شود. ربات دارک شما تا وقتی این حالت روشن است خاموش است.", "Users Mirza makes are yours and use your credit. Your Dark bot is off while this is on.")) : null,
-      err,
+        : h("p", { class: "small muted" }, T("رمز فقط هنگام ساخت نشان داده می‌شود. اگر ندارید، رمز تازه بسازید و در ربات یا سایتتان عوض کنید.", "The password is shown only when made. If you lost it, make a new one and change it in your bot or site.")),
+      a.api_key ? field(T("API Key (در هدر X-Api-Key؛ فقط همین یک بار نشان داده می‌شود)", "API Key (sent in X-Api-Key; shown only this once)"), a.api_key, true)
+        : h("p", { class: "small muted" }, a.has_key
+          ? T("API Key فقط هنگام ساخت نشان داده می‌شود. اگر ندارید، API Key تازه بسازید و در ربات یا سایتتان عوض کنید.", "The API Key is shown only when made. If you lost it, make a new one and change it in your bot or site.")
+          : T("هنوز API Key ساخته نشده؛ «API Key تازه» را بزنید.", "No API Key yet; tap “New API Key”.")),
+      isRep ? h("p", { class: "small muted" }, cur === "mirza"
+        ? T("کاربرهایی که میرزا می‌سازد زیر حساب شما ثبت و از اعتبارتان کم می‌شود. ربات دارک شما تا وقتی این حالت روشن است خاموش است.", "Users Mirza makes are yours and use your credit. Your Dark bot is off while this is on.")
+        : T("کاربرهایی که از راه API ساخته می‌شوند زیر حساب شما ثبت و از اعتبارتان کم می‌شود. ربات دارک شما روشن می‌ماند.", "Users made through the API are yours and use your credit. Your Dark bot stays on.")) : null,
+      guide(a),
       h("div", { class: "row" },
-        h("button", { type: "button", onclick: () => confirm(T("رمز تازه ساخته شود؟ رمز قبلی دیگر کار نمی‌کند و باید در میرزا عوض شود.", "Make a new password? The old one stops working; change it in Mirza.")) && turnOn() }, T("رمز تازه", "New password")),
-        isRep ? null : h("button", { type: "button", class: "danger", onclick: turnOff }, T("قطع اتصال", "Disconnect"))));
+        h("button", { type: "button", onclick: () => confirm(T("رمز تازه ساخته شود؟ رمز قبلی دیگر کار نمی‌کند و باید در ربات یا سایتتان عوض شود. API Key عوض نمی‌شود.", "Make a new password? The old one stops working; change it in your bot or site. The API Key stays.")) && send("POST") }, T("رمز تازه", "New password")),
+        h("button", { type: "button", onclick: () => (!a.has_key || confirm(T("API Key تازه ساخته شود؟ کلید قبلی دیگر کار نمی‌کند و باید در ربات یا سایتتان عوض شود. رمز عوض نمی‌شود.", "Make a new API Key? The old one stops working; change it in your bot or site. The password stays."))) && send("POST", undefined, "/key") }, T("API Key تازه", "New API Key")),
+        isRep ? null : h("button", { type: "button", class: "danger", onclick: () => turnOff("api") }, T("قطع دسترسی", "Turn off"))));
   }
   api("GET", path).then(draw).catch((x) => fill(body, h("p", { class: "error" }, x.message)));
-  return h("section", { class: "card form" }, h("h2", {}, isRep ? T("روش فروش", "How you sell") : T("🔗 اتصال ربات میرزا", "🔗 Mirza bot connection")), body);
+  return h("section", { class: "card form" }, h("h2", {}, isRep ? T("روش فروش", "How you sell") : T("🔌 API پاسارگاد (میرزا و ربات‌های دیگر)", "🔌 PasarGuard API (Mirza and other bots)")), body);
 }
 
 function repBotCard(path) {
@@ -4504,7 +5066,8 @@ function repBotCard(path) {
     mini.checked = b.miniapp !== false;
     tok.placeholder = b.has_token ? (fa ? "توکن ثبت شده — برای تغییر، توکن جدید بزنید" : "token saved — type a new one to change") : "123456789:AA...";
     st.replaceChildren(b.running ? h("span", { class: "badge good" }, `● ${fa ? "روشن" : "running"} @${b.username || ""}`) :
-      b.error ? h("span", { class: "badge bad" }, (fa ? "خطا: " : "error: ") + b.error) : h("span", { class: "badge" }, fa ? "خاموش" : "off"));
+      b.error ? h("span", { class: "badge bad" }, (fa ? "خطا: " : "error: ") + b.error)
+        : h("span", { class: "badge" }, b.mirza ? (fa ? "خاموش: با ربات میرزا می‌فروشید (روش فروش)" : "off: you sell through Mirza (How you sell)") : (fa ? "خاموش" : "off")));
   };
   api("GET", path).then(draw).catch(() => {});
   return h("form", { class: "card form", onsubmit: async (e) => {
@@ -4524,14 +5087,73 @@ function repBotCard(path) {
 
 // A seller's card for card-to-card payment (resellers: their own card).
 function sellerCardCard(path) {
+  // Several cards per seller (up to five) and the safe-card options.
+  return multiCardCard(path.replace("/api/v2/shop/card", "/api/v2/shop/cards"));
+}
+
+function multiCardCard(path) {
   const fa = lang === "fa";
-  const num = h("input", { dir: "ltr", inputmode: "numeric", placeholder: "6037 9911 2233 4455" }), holder = h("input", {}), bank = h("input", {});
-  api("GET", path).then((c) => { num.value = c.number || ""; holder.value = c.holder || ""; bank.value = c.bank || ""; }).catch(() => {});
-  return h("form", { class: "card form", onsubmit: async (e) => { e.preventDefault(); await guarded(() => api("PUT", path, { number: num.value, holder: holder.value, bank: bank.value })); toast(t("saved")); } },
-    h("h2", {}, "💳 ", fa ? "کارت من (کارت به کارت)" : "My card (card-to-card)"),
-    h("p", { class: "small muted" }, fa ? "مشتری‌های ربات شما برای خرید و شارژ کیف پول به این کارت واریز می‌کنند. خالی بگذارید تا پرداخت کارتی خاموش شود." : "Your bot's customers pay to this card for purchases and wallet top-ups. Leave empty to turn card payment off."),
-    h("label", {}, h("span", {}, fa ? "شماره کارت (یا شبا)" : "Card number (or IBAN)"), num),
-    h("div", { class: "two" }, h("label", {}, h("span", {}, fa ? "به نام" : "Holder"), holder), h("label", {}, h("span", {}, fa ? "بانک" : "Bank"), bank)),
+  const T = (a, b) => (fa ? a : b);
+  const list = h("div", { class: "form" });
+  const phone = h("input", { type: "checkbox" }), iran = h("input", { type: "checkbox" }), last4 = h("input", { type: "checkbox" });
+  let max = 5;
+  const rows = [];
+  const toLocal = (u) => { if (!u) return ""; const d = new Date(u * 1000); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0, 16); };
+  const addRow = (c) => {
+    c = c || { enabled: true };
+    const num = h("input", { dir: "ltr", inputmode: "numeric", placeholder: "6037 9911 2233 4455", value: c.number || "" });
+    const holder = h("input", { value: c.holder || "" }), bank = h("input", { value: c.bank || "" });
+    const on = h("input", { type: "checkbox", checked: c.enabled !== false });
+    const cap = h("input", { type: "number", min: "0", step: "100000", dir: "ltr", value: c.daily_cap || "" , placeholder: "0" });
+    const until = h("input", { type: "datetime-local", dir: "ltr", value: toLocal(c.until) });
+    const status = c.number ? h("span", { class: `badge ${c.live ? "good" : ""}` },
+      c.live ? T("فعال", "live") : T("غیرفعال", "off"), " · ", T("امروز: ", "today: "), tomanTxt(c.used_today || 0), c.daily_cap ? ` / ${tomanTxt(c.daily_cap)}` : "") : null;
+    const r = { id: c.id || 0, num, holder, bank, on, cap, until };
+    const box = h("div", { class: "card" },
+      h("div", { class: "row" }, h("strong", {}, "💳 ", T("کارت", "Card")), status,
+        h("button", { class: "ghost", type: "button", onclick: () => { rows.splice(rows.indexOf(r), 1); box.remove(); addBtn.disabled = rows.length >= max; } }, T("حذف", "Remove"))),
+      h("label", {}, h("span", {}, T("شماره کارت (یا شبا)", "Card number (or IBAN)")), num),
+      h("div", { class: "two" }, h("label", {}, h("span", {}, T("به نام", "Holder")), holder), h("label", {}, h("span", {}, T("بانک", "Bank")), bank)),
+      h("div", { class: "two" },
+        h("label", {}, h("span", {}, T("سقف روزانه (تومان، خالی = بی‌سقف)", "Daily cap (toman, empty = none)")), cap),
+        h("label", {}, h("span", {}, T("کارت موقت: تا این زمان (خالی = همیشه)", "Temporary: until (empty = always)")), until)),
+      h("label", { class: "check" }, on, h("span", {}, T("روشن", "On"))));
+    r.box = box;
+    rows.push(r);
+    list.append(box);
+    addBtn.disabled = rows.length >= max;
+  };
+  const addBtn = h("button", { class: "ghost", type: "button", onclick: () => addRow() }, T("+ کارت دیگر", "+ Another card"));
+  const load = async () => {
+    const r = await api("GET", path).catch(() => null);
+    list.replaceChildren(); rows.length = 0;
+    if (!r) return;
+    max = r.max || 5;
+    (r.cards || []).forEach(addRow);
+    if (!rows.length) addRow();
+    const sf = r.safety || {};
+    phone.checked = !!sf.require_phone; iran.checked = !!sf.iran_only; last4.checked = !!sf.ask_last4;
+    iran.disabled = !phone.checked;
+  };
+  phone.onchange = () => { iran.disabled = !phone.checked; if (!phone.checked) iran.checked = false; };
+  load();
+  return h("form", { class: "card form", onsubmit: async (e) => {
+    e.preventDefault();
+    const cards = rows.filter((r) => r.num.value.trim()).map((r) => ({ id: r.id, number: r.num.value, holder: r.holder.value, bank: r.bank.value, enabled: r.on.checked,
+      daily_cap: Math.max(0, Math.round(+r.cap.value || 0)), until: r.until.value ? Math.floor(new Date(r.until.value).getTime() / 1000) : 0 }));
+    await guarded(() => api("PUT", path, { cards, safety: { require_phone: phone.checked, iran_only: iran.checked, ask_last4: last4.checked } }));
+    toast(t("saved")); load();
+  } },
+    h("h2", {}, "💳 ", T("کارت‌های من (کارت به کارت)", "My cards (card-to-card)")),
+    h("p", { class: "small muted" }, T("تا ۵ کارت. هر سفارش یا شارژ یکی از کارت‌های روشن را می‌گیرد (کارتی که امروز جای بیشتری دارد) و همان کارت برایش می‌ماند. کارتی که به سقف روزانه برسد تا فردا نشان داده نمی‌شود؛ کارت موقت بعد از زمانش خودکار مخفی می‌شود. بدون کارت، پرداخت کارتی خاموش است.",
+      "Up to five cards. Each order or top-up gets one of the cards that are on (the one with the most room today) and keeps it. A card that reaches its daily cap is hidden until tomorrow; a temporary card hides itself after its time. No card = card payment off.")),
+    list,
+    h("div", { class: "row" }, addBtn),
+    h("h3", {}, "🛡 ", T("حالت امن کارت", "Safe card mode")),
+    h("label", { class: "check" }, phone, h("span", {}, T("قبل از دیدن کارت، مشتری شمارهٔ موبایلش را تأیید کند", "Customers verify their phone number before they see a card"))),
+    h("label", { class: "check" }, iran, h("span", {}, T("فقط شمارهٔ ایران (+98)", "Iranian numbers only (+98)"))),
+    h("label", { class: "check" }, last4, h("span", {}, T("بعد از رسید، ۴ رقم آخر کارت واریزکننده پرسیده شود", "Ask for the last four digits of the paying card after the receipt"))),
+    h("p", { class: "small muted" }, T("رسید تکراری همیشه بررسی می‌شود: اگر عکس رسیدی قبلاً برای پرداخت دیگری فرستاده شده باشد، روی رسید هشدار می‌آید.", "Duplicate receipts are always checked: a receipt photo sent before for another payment is flagged on the receipt.")),
     h("div", { class: "row" }, h("button", { class: "primary", type: "submit" }, t("save"))));
 }
 
@@ -4551,12 +5173,7 @@ const PAY = {
 const pay = (k, v) => { let x = (PAY[lang] || PAY.en)[k] ?? PAY.en[k] ?? k; for (const [a, b] of Object.entries(v || {})) x = x.replaceAll(`{${a}}`, b); return x; };
 
 function payCardCard() {
-  const num = h("input", { dir: "ltr", inputmode: "numeric", placeholder: "6037 9911 2233 4455" }), holder = h("input", {}), bank = h("input", {});
-  api("GET", "/api/v2/admin/tg/commerce").then((r) => { const c = (r && r.card) || {}; num.value = c.number || ""; holder.value = c.holder || ""; bank.value = c.bank || ""; }).catch(() => {});
-  return h("form", { class: "card form", onsubmit: async (e) => { e.preventDefault(); await guarded(() => api("PUT", "/api/v2/admin/pay/card", { number: num.value, holder: holder.value, bank: bank.value })); toast(t("saved")); } },
-    h("h2", {}, "💳 ", pay("cardTitle")), h("p", { class: "small muted" }, pay("cardHint")),
-    h("label", {}, h("span", {}, pay("cardNum")), num), h("div", { class: "two" }, h("label", {}, h("span", {}, pay("cardHolder")), holder), h("label", {}, h("span", {}, pay("cardBank")), bank)),
-    h("div", { class: "row" }, h("button", { class: "primary", type: "submit" }, pay("save"))));
+  return multiCardCard("/api/v2/shop/cards");
 }
 
 function discountsCard(products) {
@@ -4903,22 +5520,10 @@ function salesReportCard() {
     const a = h("a", { href: URL.createObjectURL(blob), download: `sales-${days}d-${new Date().toISOString().slice(0, 10)}.csv` });
     document.body.append(a); a.click(); a.remove();
   };
-  const chart = (daily) => {
-    const W = 720, H = 150, P = 22, max = Math.max(1, ...daily.map((d) => d.bytes)), bw = (W - P * 2) / daily.length;
-    const svg = svgEl("svg", { viewBox: `0 0 ${W} ${H + 22}`, class: "sales-chart", role: "img", "aria-label": fa ? "فروش روزانه" : "Daily sales" });
-    svg.append(svgEl("line", { x1: P, x2: W - P, y1: H, y2: H, class: "axis" }));
-    daily.forEach((d, i) => {
-      const hgt = (d.bytes / max) * (H - 18), x = P + i * bw + bw * 0.15;
-      const r = svgEl("rect", { x, y: H - hgt, width: Math.max(2, bw * 0.7), height: Math.max(hgt, d.bytes ? 2 : 0), rx: 2, class: "sbar" });
-      const tt = svgEl("title", {}); tt.textContent = `${d.day}: ${gbs(d.bytes)} · ${fmtNum(d.count)}`; r.append(tt); svg.append(r);
-      if (daily.length <= 31 && i % Math.ceil(daily.length / 8) === 0) {
-        const tx = svgEl("text", { x: x + bw * 0.35, y: H + 16, "text-anchor": "middle", class: "lbl" });
-        tx.textContent = new Intl.DateTimeFormat(fa ? "fa-IR" : "en-GB", { month: "short", day: "numeric" }).format(new Date(d.day + "T12:00:00Z"));
-        svg.append(tx);
-      }
-    });
-    return svg;
-  };
+  const chart = (daily) => daily.length ? chartKit({ xs: daily.map((d) => d.day), mode: "stack", height: 200, label: fa ? "فروش روزانه" : "Daily sales",
+    series: [{ id: "s", name: fa ? "حجم فروخته‌شده" : "Volume sold", color: "var(--ion)", values: daily.map((d) => d.bytes) }],
+    fmt: gbs, partial: daily.at(-1).day === todayUTC() ? daily.length - 1 : -1,
+    tipExtra: (i) => h("div", { class: "ct-row tot" }, h("span", {}, fa ? "تعداد فروش" : "Orders"), h("span", { class: "v" }, fmtNum(daily[i].count || 0))) }) : null;
   const load = async () => {
     fill(box, h("p", { class: "muted small" }, fa ? "در حال آماده‌سازی گزارش…" : "Loading report…"));
     let r;
@@ -4930,7 +5535,8 @@ function salesReportCard() {
     const kpi = (v, l, extra) => h("div", { class: "card stat" }, h("div", { class: "v" }, v, " ", extra || null), h("div", { class: "k" }, l));
     fill(box,
       h("div", { class: "row" }, h("h2", {}, fa ? "گزارش فروش نماینده‌ها" : "Reseller sales"), h("span", { class: "spacer" }), chips,
-        h("button", { class: "ghost", onclick: () => csv(r) }, fa ? "خروجی اکسل (CSV)" : "Export CSV")),
+        h("button", { class: "ghost", onclick: () => csv(r) }, fa ? "خروجی CSV" : "Export CSV"),
+        reportXlsxLinks()),
       h("div", { class: "grid" },
         kpi(gbs(tot("net_bytes")), fa ? "فروش خالص" : "Net sold", delta(tot("net_bytes"), tot("prev_net_bytes"))),
         kpi(fmtNum(tot("new")), fa ? "سرویس جدید" : "New services"),
@@ -5099,7 +5705,8 @@ async function viewRepDashboard() {
       kpi("activity", fa ? "رو به اتمام" : "Ending soon", fmtNum(o.expiring), owner ? null : "#/clients"),
       kpi("power", fa ? "تمام‌شده" : "Ended", fmtNum(o.ended), owner ? null : "#/clients"),
       kpi("online", fa ? "آنلاین" : "Online", fmtNum(o.online), owner ? null : "#/online"),
-      kpi("traffic", fa ? "مصرف کل کاربران" : "Users' total traffic", bytes(o.used_bytes))),
+      kpi("traffic", fa ? "مصرف کل کاربران" : "Users' total traffic", bytes(o.used_bytes)),
+      movedHere(o.used_bytes, o.used_here) ? kpi("traffic", fa ? "مصرف در این پنل" : "Traffic on this panel", bytes(o.used_here || 0)) : null),
     h("div", { class: "dash2" },
       h("div", { class: "card form span2" }, h("div", { class: "row" }, h("h2", {}, fa ? "فروش و برگشتی ۳۰ روز" : "Sold and returned, 30 days"),
         repLegend(fa ? "فروش" : "Sold", fa ? "برگشتی" : "Returned")), repChart(o.days || [], "sold", "back", fa ? "فروش" : "Sold", fa ? "برگشتی" : "Returned")),
@@ -5460,6 +6067,329 @@ function resKeysCard(path, title) {
   return card;
 }
 
+// Connected shops: outside sales sites that keep their customers here. The
+// owner sees a summary per shop; details only where the shop allows it.
+// tenantTrafficCard: the node chart for one connected shop's clients, with a
+// chip per shop when there is more than one.
+function tenantTrafficCard(list, nodes) {
+  const fa = lang === "fa";
+  const box = h("div", {});
+  let cur = list[0].id;
+  try { const k = sessionStorage.getItem("ttShop"); if (list.some((x) => x.id === k)) cur = k; } catch {}
+  const draw = () => {
+    const x = list.find((y) => y.id === cur) || list[0];
+    const chips = list.length > 1 ? h("div", { class: "row cseg" }, list.map((y) => h("button", { type: "button", class: y.id === cur ? "chip on" : "chip", "aria-pressed": String(y.id === cur),
+      onclick: () => { cur = y.id; try { sessionStorage.setItem("ttShop", cur); } catch {} draw(); } }, y.name || y.id))) : null;
+    fill(box, nodeTrafficCard(nodes, {
+      url: (d) => `/api/v2/admin/tenants/${encodeURIComponent(x.id)}/traffic?days=${d}`,
+      title: fa ? `ترافیک هر نود · ${x.name || x.id}` : `Traffic per node · ${x.name || x.id}`,
+      top: chips,
+      hint: fa ? "مصرف کاربرهای همین فروشگاه روی هر نود در هر روز (کاربر حذف‌شده و مصرفی که سایت از پنل قبلی آورده حساب نمی‌شود). موس یا انگشت را روی هر روز ببرید؛ با زدن نام هر نود آن را پنهان کنید."
+        : "This shop's clients' traffic per node and day (deleted clients and use brought from an earlier panel are not counted). Point or tap at a day; tap a name to hide or show it.",
+    }));
+  };
+  draw();
+  return box;
+}
+
+async function viewTenants() {
+  const fa = lang === "fa";
+  const [list, inbounds, reps, nodes] = await Promise.all([api("GET", "/api/v2/admin/tenants"), api("GET", "/api/v2/admin/inbounds").catch(() => []), api("GET", "/api/v2/admin/reps").catch(() => []), api("GET", "/api/v2/admin/nodes").catch(() => [])]);
+  const accessLabel = { summary: fa ? "فقط خلاصه" : "summary only", read: fa ? "دیدن جزئیات" : "may look", write: fa ? "دیدن و تغییر" : "may look and change" };
+  const lab = (l, el, hint) => h("label", {}, h("span", {}, l), el, hint ? h("small", { class: "muted" }, hint) : null);
+  const edit = (x) => {
+    const id = h("input", { value: x ? x.id : "", disabled: !!x, required: true, dir: "ltr", pattern: "[a-z0-9][a-z0-9._\\-]{0,23}" });
+    const name = h("input", { value: x ? x.name : "", required: true });
+    const on = h("input", { type: "checkbox", checked: x ? x.enabled : true });
+    const maxC = h("input", { type: "number", min: "0", value: x ? x.max_clients : 0, dir: "ltr" });
+    const maxG = h("input", { type: "number", min: "0", step: "1", value: x ? Math.round(x.max_bytes / 2 ** 30) : 0, dir: "ltr" });
+    const acc = h("select", {}, ["summary", "read", "write"].map((a) => h("option", { value: a, selected: (x ? x.owner_access : "summary") === a }, accessLabel[a])));
+    const note = h("textarea", { rows: "2" }, x ? x.note : "");
+    const ins = h("div", { class: "chips" }, (inbounds || []).filter((i) => !["socks", "http", "dokodemo-door", "tunnel", "mtproto"].includes(i.protocol)).map((i) =>
+      h("label", { class: "check" }, h("input", { type: "checkbox", value: i.tag, checked: !!(x && x.inbounds.includes(i.tag)) }), h("span", {}, i.tag))));
+    const err = h("div", { class: "error", role: "alert" });
+    const save = h("button", { class: "primary", value: "save", onclick: async (e) => {
+      e.preventDefault(); err.textContent = "";
+      try {
+        await api("PUT", `/api/v2/admin/tenants/${encodeURIComponent(id.value.trim())}`, { name: name.value, enabled: on.checked, max_clients: +maxC.value || 0,
+          max_bytes: (+maxG.value || 0) * 2 ** 30, owner_access: acc.value, note: note.value, inbounds: [...ins.querySelectorAll("input:checked")].map((c) => c.value) });
+        document.getElementById("modal").close("save"); toast(t("saved")); route();
+      } catch (y) { err.textContent = y.message; }
+    } }, t("save"));
+    openModal(x ? x.name : (fa ? "فروشگاه متصل جدید" : "New connected shop"), h("div", { class: "form" },
+      h("p", { class: "small muted" }, fa ? "یک سایت فروش بیرونی که کاربرهایش را روی این پنل نگه می‌دارد. حساب مالی و نماینده‌هایش با خود سایت است؛ کاربرهایش با کاربرهای شما و نماینده‌ها قاطی نمی‌شوند و ربات و فروشگاه پنل به آن‌ها پیامی نمی‌دهند."
+        : "An outside sales site that keeps its customers on this panel. Its money and resellers stay with the site; its clients never mix with yours or your resellers', and the panel's bots and shop never message them."),
+      h("div", { class: "two" }, lab(fa ? "شناسه (ثابت، انگلیسی)" : "ID (fixed)", id, fa ? "پیشوند نام کاربرهایش هم همین است" : "also the prefix of its clients' names"), lab(t("name"), name)),
+      h("label", { class: "check" }, on, h("span", {}, fa ? "فعال (خاموش = فقط خواندن)" : "On (off = read only)")),
+      h("div", { class: "two" }, lab(fa ? "سقف تعداد کاربر (۰ = بدون سقف)" : "Most clients (0 = no cap)", maxC), lab(fa ? "سقف حجم همهٔ کاربرها (گیگ، ۰ = بدون سقف)" : "Volume cap of all clients (GB, 0 = none)", maxG)),
+      lab(fa ? "دسترسی مالک به جزئیات کاربرها" : "Owner access to client details", acc, fa ? "هر بار دیدن یا تغییر در گزارش تغییرات ثبت می‌شود" : "every look or change is logged"),
+      h("div", { class: "small muted" }, fa ? "اینباندهای مجاز (هیچ = همهٔ اینباندهای قابل فروش)" : "Allowed inbounds (none = every sellable inbound)"), ins,
+      lab(fa ? "یادداشت" : "Note", note), err), [save]);
+  };
+  const keys = async (x) => {
+    const box = h("div", { class: "form" });
+    const draw = async () => {
+      const ks = await api("GET", `/api/v2/admin/tenants/${encodeURIComponent(x.id)}/keys`);
+      const name = h("input", { placeholder: fa ? "مثلاً: سرور سایت" : "e.g. website server" });
+      const ips = h("input", { dir: "ltr", placeholder: "203.0.113.7, 10.0.0.0/8" });
+      const days = h("input", { type: "number", min: "0", max: "3650", value: "0", dir: "ltr" });
+      const out = h("div", {});
+      fill(box, h("p", { class: "small muted" }, fa ? "سایت با این کلید به /api/tenant/v1/ وصل می‌شود: Authorization: Bearer <کلید>. فقط کاربرهای همین فروشگاه را می‌بیند." : "The site uses this key on /api/tenant/v1/: Authorization: Bearer <key>. It only ever sees this shop's clients."),
+        ks.length ? h("div", { class: "table-wrap" }, h("table", { class: "dtable" }, h("tbody", {}, ks.map((k) => h("tr", {},
+          h("td", { class: "name" }, k.name), h("td", { class: "muted small", dir: "ltr" }, `dt_${k.id}_…`),
+          h("td", { class: "small", dir: "ltr" }, k.allow_ips.length ? k.allow_ips.join(", ") : (fa ? "همهٔ آدرس‌ها" : "any address")),
+          h("td", { class: "small muted" }, k.last_used ? fmtDT(k.last_used) : "—"),
+          h("td", { class: "small" }, k.expires_unix ? `${t("keyUntil")} ${fmtDT(k.expires_unix)}` : ""),
+          h("td", {}, h("button", { class: "small danger", onclick: async (e) => {
+            e.preventDefault();
+            await guarded(() => api("DELETE", `/api/v2/admin/tenants/${encodeURIComponent(x.id)}/keys/${encodeURIComponent(k.id)}`)); draw();
+          } }, t("delete")))))))) : h("p", { class: "muted small" }, t("keyNone")),
+        h("div", { class: "two" }, lab(t("keyName"), name), lab(t("keyDays"), days)),
+        lab(fa ? "فقط از این آدرس‌ها (خالی = همه)" : "Only from these addresses (empty = any)", ips),
+        h("button", { class: "primary", onclick: async (e) => {
+          e.preventDefault();
+          try {
+            const r = await api("POST", `/api/v2/admin/tenants/${encodeURIComponent(x.id)}/keys`, { name: name.value, days: +days.value || 0, allow_ips: ips.value.split(/[\s,]+/).filter(Boolean) });
+            fill(out, h("p", { class: "small" }, t("keyOnce")), h("code", { dir: "ltr", class: "tfakey keyout" }, r.key), h("button", { onclick: (ev) => { ev.preventDefault(); copy(r.key); } }, t("copy")));
+            box.append(out);
+          } catch (y) { fill(out, h("p", { class: "error" }, y.message)); box.append(out); }
+        } }, t("addKey")));
+    };
+    openModal(`${fa ? "کلیدهای API" : "API keys"} · ${x.name}`, box);
+    await draw();
+  };
+  const hook = async (x) => {
+    const w = await api("GET", `/api/v2/admin/tenants/${encodeURIComponent(x.id)}/webhook`);
+    const on = h("input", { type: "checkbox", checked: w.enabled });
+    const url = h("input", { dir: "ltr", value: w.url, placeholder: "https://shop.example.com/dark-webhook" });
+    const sec = h("input", { dir: "ltr", type: "password", placeholder: w.has_secret ? t("whSecretSaved") : "" });
+    const err = h("div", { class: "error", role: "alert" });
+    const save = h("button", { class: "primary", value: "save", onclick: async (e) => {
+      e.preventDefault(); err.textContent = "";
+      try { await api("PUT", `/api/v2/admin/tenants/${encodeURIComponent(x.id)}/webhook`, { enabled: on.checked, url: url.value, secret: sec.value }); document.getElementById("modal").close("save"); toast(t("saved")); }
+      catch (y) { err.textContent = y.message; }
+    } }, t("save"));
+    const test = h("button", { onclick: async (e) => { e.preventDefault(); err.textContent = ""; try { await api("POST", `/api/v2/admin/tenants/${encodeURIComponent(x.id)}/webhook/test`); toast(t("whTestOK")); } catch (y) { err.textContent = y.message; } } }, t("whTest"));
+    openModal(`${t("whTitle")} · ${x.name}`, h("div", { class: "form" },
+      h("p", { class: "small muted" }, fa ? "فقط رویدادهای کاربرهای همین فروشگاه (انقضا، اتمام حجم، IP زیاد، ریست، برنامهٔ بعدی، دستگاه ردشده) با امضای X-Dark-Signature فرستاده می‌شود." : "Only this shop's clients' events (expired, out of volume, too many IPs, resets, next plan, refused devices), signed in X-Dark-Signature."),
+      h("label", { class: "check" }, on, h("span", {}, t("whOn"))), lab(t("whURL"), url), lab(t("whSecret"), sec),
+      w.last_ok ? h("p", { class: "small muted" }, `${t("whLastOK")}: ${fmtDT(w.last_ok)}`) : null,
+      w.last_error ? h("p", { class: "small error" }, `${t("whLastErr")}: ${w.last_error}`) : null, err), [test, save]);
+  };
+  // The shop's own subscription domains: old links keep working here.
+  const domains = async (x) => {
+    const base = `/api/v2/admin/tenants/${encodeURIComponent(x.id)}`;
+    const box = h("div", { class: "form" });
+    const draw = async () => {
+      const [v, rep] = await Promise.all([api("GET", `${base}/sub-domains`), api("GET", `${base}/sub-fetches`).catch(() => null)]);
+      const dom = h("input", { dir: "ltr", placeholder: "sub.example.com" });
+      const port = h("input", { type: "number", min: "1", max: "65535", value: "2096", dir: "ltr" });
+      const prefix = h("input", { dir: "ltr", placeholder: "/2fmgkwhmfhyat8zr/" });
+      const fb = h("input", { dir: "ltr", placeholder: "https://203.0.113.5:2096" });
+      const tlsOn = h("input", { type: "checkbox", checked: true });
+      const err = h("div", { class: "error", role: "alert" });
+      const ip = (v.hub_ips || [])[0] || "";
+      const row = (d) => {
+        const msg = h("span", { class: "small", role: "status" });
+        return h("div", { class: "card item" },
+          h("div", { class: "head" }, h("span", { class: "name", dir: "ltr" }, `${d.domain}:${d.port}${d.prefix || "/…"}`),
+            h("span", { class: `badge ${d.dns_unix ? "good" : ""}` }, d.dns_unix ? (fa ? "به این پنل اشاره می‌کند" : "points here") : (fa ? "هنوز به این پنل اشاره نمی‌کند" : "not pointing here yet")),
+            d.tls ? h("span", { class: `badge ${d.cert_status === "ok" || d.cert_status === "issued" ? "good" : d.cert_status === "failed" ? "bad" : ""}` }, `${fa ? "گواهی" : "cert"}: ${d.cert_status || "—"}`) : null,
+            d.enabled ? null : h("span", { class: "badge bad" }, fa ? "خاموش" : "off")),
+          h("p", { class: "small muted", dir: "ltr" }, d.fallback ? `fallback → ${d.fallback}` : (fa ? "بدون fallback: شناسهٔ ناشناس = 404" : "no fallback: unknown ids get 404")),
+          d.port_error ? h("p", { class: "small error" }, `${fa ? "پورت" : "port"} ${d.port}: ${d.port_error}`) : null,
+          h("div", { class: "row" },
+            h("button", { onclick: async (e) => { e.preventDefault(); msg.textContent = "…";
+              try { const r = await api("POST", `${base}/sub-domains/${encodeURIComponent(d.domain)}/check`); msg.textContent = r.ok ? (r.reason || (fa ? "درست است؛ گواهی درخواست شد" : "OK; certificate ordered")) : r.reason; draw(); }
+              catch (y) { msg.textContent = y.message; } } }, fa ? "بررسی DNS و گواهی" : "Check DNS and certificate"),
+            h("button", { class: "ghost", onclick: async (e) => { e.preventDefault();
+              await guarded(() => api("PUT", `${base}/sub-domains/${encodeURIComponent(d.domain)}`, { ...d, enabled: !d.enabled })); draw(); } }, d.enabled ? (fa ? "خاموش" : "Turn off") : (fa ? "روشن" : "Turn on")),
+            h("button", { class: "ghost danger spacer", onclick: async (e) => { e.preventDefault();
+              if (await confirmAction(t("confirmDelete", { x: d.domain }))) await guarded(() => api("DELETE", `${base}/sub-domains/${encodeURIComponent(d.domain)}`)); domains(x); } }, t("delete")), msg));
+      };
+      fill(box,
+        h("p", { class: "small muted" }, fa ? `لینک‌های ساب قدیمی مشتری‌های این فروشگاه با همان دامنه، پورت و مسیر از این پنل جواب می‌گیرند. رکورد A دامنه را روی ${ip || "IP این سرور"} بگذارید و «بررسی» را بزنید. شناسه‌ای که اینجا نیست به پنل قدیمی (fallback) داده می‌شود و اگر آنجا هم نبود 404 می‌گیرد، هیچ‌وقت لیست خالی.`
+          : `Old subscription links of this shop's customers answer here on the same domain, port and path. Point the domain's A record at ${ip || "this server"} and press Check. An id not here goes to the old panel (fallback), and is a 404 if it is not there either — never an empty list.`),
+        rep ? h("div", { class: "chips" },
+          h("span", { class: "chip good" }, `${fa ? "ساب را آپدیت کرده‌اند" : "fetched"}: ${fmtNum(rep.fetched)}`),
+          h("span", { class: "chip" }, `${fa ? "هنوز نه" : "not yet"}: ${fmtNum(rep.not_fetched)}`),
+          h("span", { class: "chip muted" }, `${fa ? "از" : "since"} ${fmtDT(rep.since)}`)) : null,
+        ...(v.domains || []).map(row),
+        h("h3", {}, fa ? "دامنهٔ تازه" : "New domain"),
+        h("div", { class: "two" }, lab(fa ? "دامنه" : "Domain", dom), lab(fa ? "پورت" : "Port", port)),
+        lab(fa ? "پیشوند مسیر (خالی = هر مسیری که به شناسه ختم شود)" : "Path prefix (empty = any path ending in the id)", prefix),
+        lab(fa ? "پنل قدیمی برای شناسه‌های منتقل‌نشده (اختیاری)" : "Old panel for ids not moved yet (optional)", fb),
+        h("label", { class: "check" }, tlsOn, h("span", {}, "HTTPS")), err,
+        h("button", { class: "primary", onclick: async (e) => {
+          e.preventDefault(); err.textContent = "";
+          try {
+            await api("PUT", `${base}/sub-domains/${encodeURIComponent(dom.value.trim())}`, { port: +port.value || 0, tls: tlsOn.checked, prefix: prefix.value.trim(), fallback: fb.value.trim(), enabled: true });
+            toast(t("saved")); draw();
+          } catch (y) { err.textContent = y.message; }
+        } }, t("add")));
+    };
+    const d = openModal(`${fa ? "دامنه‌های ساب" : "Subscription domains"} · ${x.name}`, box);
+    d.classList.add("wide");
+    await draw();
+  };
+  const move = (x) => {
+    const sides = [["owner", "", fa ? "مالک" : "Owner"], ...(reps || []).map((r) => ["rep", r.ID, `${fa ? "نماینده" : "Reseller"}: ${r.Name || r.ID}`]), ...(list || []).map((tn) => ["tenant", tn.id, `${fa ? "فروشگاه" : "Shop"}: ${tn.name}`])];
+    const sel = (pick) => h("select", {}, sides.map(([k, id, l]) => h("option", { value: `${k}:${id}`, selected: pick === `${k}:${id}` }, l)));
+    const from = sel("owner:"), to = sel(`tenant:${x.id}`);
+    const names = h("textarea", { rows: "4", dir: "ltr", placeholder: fa ? "یک نام در هر خط — خالی یعنی همهٔ کاربرهای مبدأ" : "one name per line — empty means every client of the source" });
+    const out = h("div", {});
+    const req = (dry) => { const [fk, fid] = from.value.split(":"); const [tk, tid] = to.value.split(":");
+      return { from: { kind: fk, id: fid }, to: { kind: tk, id: tid }, names: names.value.split(/\s+/).filter(Boolean), dry_run: dry }; };
+    const show = (r) => fill(out, h("p", { class: "small" }, h("b", {}, `${r.dry_run ? (fa ? "پیش‌نمایش" : "Preview") : (fa ? "انجام شد" : "Done")}: ${fmtNum(r.moved)} ${fa ? "کاربر" : "clients"}`)),
+      r.skipped.length ? h("details", {}, h("summary", { class: "small" }, `${t("migSkipped")} (${fmtNum(r.skipped.length)})`), h("ul", { class: "small muted", dir: "ltr" }, r.skipped.map((y) => h("li", {}, y)))) : null,
+      r.notes.length ? h("ul", { class: "small muted" }, r.notes.map((y) => h("li", {}, y))) : null);
+    const preview = h("button", { onclick: async (e) => { e.preventDefault(); try { show(await api("POST", "/api/v2/admin/clients/move", req(true))); } catch (y) { fill(out, h("p", { class: "error" }, y.message)); } } }, t("migPreview"));
+    const go = h("button", { class: "primary", onclick: async (e) => {
+      e.preventDefault();
+      if (!await confirmAction(fa ? "کاربرها جابه‌جا شوند؟ لینک و کانفیگ‌هایشان عوض نمی‌شود." : "Move the clients? Their links and configs stay the same.", fa ? "جابه‌جایی" : "Move")) return;
+      try { show(await api("POST", "/api/v2/admin/clients/move", req(false))); toast(t("saved")); } catch (y) { toast(t("failed", { e: y.message })); }
+    } }, fa ? "جابه‌جایی" : "Move");
+    openModal(fa ? "جابه‌جایی گروهی کاربرها" : "Move clients", h("div", { class: "form" },
+      h("p", { class: "small muted" }, fa ? "بین مالک، نماینده‌ها و فروشگاه‌های متصل. UUID، لینک اشتراک، مصرف و سابقه حفظ می‌شود؛ اعتبار نماینده خودکار عوض نمی‌شود." : "Between the owner, resellers and connected shops. UUID, subscription link, usage and history stay; reseller credit is not changed automatically."),
+      h("div", { class: "two" }, lab(fa ? "از" : "From", from), lab(fa ? "به" : "To", to)), lab(fa ? "نام‌ها" : "Names", names), out), [preview, go]);
+  };
+  const card = (x) => h("div", { class: "card item" },
+    h("div", { class: "head" }, h("span", { class: "name" }, x.name), h("span", { class: "badge", dir: "ltr" }, x.id),
+      h("span", { class: `badge ${x.enabled ? "good" : "bad"}` }, x.enabled ? (fa ? "فعال" : "on") : (fa ? "خاموش" : "off")),
+      h("span", { class: "badge spacer" }, accessLabel[x.owner_access])),
+    h("div", { class: "chips" },
+      h("span", { class: "chip" }, `${fmtNum(x.clients)} ${fa ? "کاربر" : "clients"}${x.max_clients ? ` / ${fmtNum(x.max_clients)}` : ""}`),
+      h("span", { class: "chip" }, `${fmtNum(x.active)} ${fa ? "فعال" : "active"}`),
+      h("span", { class: "chip" }, `${fmtNum(x.online)} ${fa ? "آنلاین" : "online"}`),
+      h("span", { class: "chip" }, `${fa ? "مصرف روی این پنل" : "used on this panel"} ${bytes(x.used)}`),
+      x.imported ? h("span", { class: "chip muted", title: fa ? "مصرفی که کاربرها از پنل قبلی آوردند؛ فقط از حجمشان کم می‌شود" : "use brought from the previous panel; counts against their volume only" }, `${fa ? "منتقل‌شده از پنل قبلی" : "brought from the old panel"} ${bytes(x.imported)}`) : null,
+      x.volume ? h("span", { class: "chip" }, `${fa ? "حجم فروخته‌شده" : "volume sold"} ${bytes(x.volume)}${x.max_bytes ? ` / ${bytes(x.max_bytes)}` : ""}`) : null,
+      h("span", { class: "chip" }, `${fmtNum(x.keys)} ${fa ? "کلید" : "keys"}`),
+      h("span", { class: `chip ${x.webhook_on ? "good" : ""}` }, `${t("whTitle")}: ${x.webhook_on ? (fa ? "روشن" : "on") : (fa ? "خاموش" : "off")}`)),
+    x.note ? h("p", { class: "small muted", style: "margin:0" }, x.note) : null,
+    h("div", { class: "row" },
+      h("button", { onclick: () => edit(x) }, t("edit")),
+      h("button", { class: "ghost", onclick: () => keys(x) }, fa ? "کلیدهای API" : "API keys"),
+      h("button", { class: "ghost", onclick: () => hook(x) }, t("whTitle")),
+      h("button", { class: "ghost", onclick: () => { const d = openModal(x.name, repBrandCard(`/api/v2/admin/tenants/${encodeURIComponent(x.id)}/brand`, x.name)); d.classList.add("wide"); } }, fa ? "برند و صفحهٔ اشتراک" : "Brand and page"),
+      h("button", { class: "ghost", onclick: () => domains(x) }, fa ? "دامنه‌های ساب" : "Subscription domains"),
+      h("button", { class: "ghost", onclick: () => move(x) }, fa ? "جابه‌جایی کاربرها" : "Move clients"),
+      h("button", { class: "ghost danger spacer", onclick: async () => {
+        if (await confirmAction(t("confirmDelete", { x: x.name }))) { await guarded(() => api("DELETE", `/api/v2/admin/tenants/${encodeURIComponent(x.id)}`)); route(); }
+      } }, t("delete"))));
+  return h("div", {},
+    h("div", { class: "row" }, h("h1", {}, t("tenants")), h("button", { class: "primary spacer", onclick: () => edit(null) }, t("add"))),
+    (list || []).length ? tenantTrafficCard(list, nodes || []) : null,
+    h("p", { class: "small muted" }, fa ? "کاربرهای فروشگاه‌های متصل در لیست کاربرها، آمار فروش، یادآوری‌ها و ربات‌های پنل نمی‌آیند. سایت با API خودش (/api/tenant/v1) آن‌ها را می‌سازد و مدیریت می‌کند."
+      : "Connected shops' clients are not in your client list, sales reports, reminders or the panel's bots. The site makes and manages them with its own API (/api/tenant/v1)."),
+    h("div", { class: "list" }, (list || []).length ? list.map(card) : h("p", { class: "muted" }, t("empty"))));
+}
+
+// ---------- Panel resale: resellers selling panels in their own bot ----------
+// The owner sets the wholesale price per TB and, per reseller, whether it may
+// sell and owe a 24-hour bill; the reseller sets its prices and sees its
+// wallet at the main panel and its bills.
+const tomanTxt = (v) => `${fmtNum(v || 0)} ${lang === "fa" ? "تومان" : "toman"}`;
+
+function billRows(bills, actions) {
+  const fa = lang === "fa";
+  if (!bills || !bills.length) return h("p", { class: "muted small" }, fa ? "فاکتوری نیست." : "No bills.");
+  const st = (b) => b.status === "paid" ? (fa ? "پرداخت‌شده" : "paid") : b.status === "cancelled" ? (fa ? "بخشیده" : "forgiven") : b.overdue ? (fa ? "⛔️ مهلت گذشته" : "⛔️ overdue") : (fa ? "باز" : "open");
+  return h("div", { class: "table-wrap" }, h("table", {}, h("thead", {}, h("tr", {}, h("th", {}, "#"), h("th", {}, fa ? "مبلغ" : "Amount"), h("th", {}, fa ? "مهلت" : "Due"), h("th", {}, fa ? "وضعیت" : "Status"), h("th", {}, ""))),
+    h("tbody", {}, bills.map((b) => h("tr", {}, h("td", {}, fmtNum(b.id)), h("td", {}, tomanTxt(b.amount)), h("td", {}, fmtWhen(b.due_unix)),
+      h("td", {}, h("span", { class: `badge ${b.overdue ? "bad" : ""}` }, st(b))), h("td", {}, b.status === "open" ? actions(b) : null))))));
+}
+
+function walletHistory(list) {
+  const fa = lang === "fa";
+  if (!list || !list.length) return null;
+  return h("details", {}, h("summary", {}, fa ? "تراکنش‌های کیف پول" : "Wallet history"),
+    h("ul", { class: "small plain" }, list.map((e) => h("li", {}, h("b", { dir: "ltr" }, `${e.delta > 0 ? "+" : "−"}${fmtNum(Math.abs(e.delta))}`), " · ", fmtWhen(e.unix), e.note ? ` · ${e.note}` : ""))));
+}
+
+// resaleOwner: one reseller's resale, wallet and bills (owner).
+async function resaleOwner(r) {
+  const fa = lang === "fa";
+  const T = (f, e) => (fa ? f : e);
+  const path = `/api/v2/admin/reps/${encodeURIComponent(r.ID)}`;
+  const box = h("div", { class: "form" });
+  const err = h("div", { class: "error", role: "alert" });
+  async function draw() {
+    let v;
+    try { v = await api("GET", `${path}/resale`); } catch (x) { err.textContent = x.message; return; }
+    const amount = h("input", { type: "number", step: "1000", dir: "ltr", placeholder: "1300000" });
+    const note = h("input", { placeholder: T("توضیح (اختیاری)", "Note (optional)") });
+    const close = (b, paid) => h("button", { type: "button", class: paid ? "" : "ghost", onclick: async () => {
+      if (!(await confirmAction(paid ? T(`فاکتور #${b.id} پرداخت‌شده ثبت شود؟`, `Mark bill #${b.id} paid?`) : T(`فاکتور #${b.id} بخشیده شود؟`, `Forgive bill #${b.id}?`)))) return;
+      await guarded(() => api("POST", `/api/v2/admin/rep-bills/${b.id}/close`, { paid })); draw();
+    } }, paid ? T("پرداخت شد", "Paid") : T("بخشیدن", "Forgive"));
+    fill(box, err,
+      h("div", { class: "mz-badges" },
+        h("span", { class: `badge ${v.on ? "good" : ""}` }, !v.resale.allowed ? T("اجازهٔ فروش پنل ندارد (محدودیت‌ها)", "not allowed to sell panels (Limits)") : v.on ? T("در رباتش فعال است", "on in its bot") : T("در رباتش فعال نیست", "not on in its bot")),
+        h("span", { class: "badge" }, T("قیمت عمده هر ترابایت: ", "Wholesale per TB: "), tomanTxt(v.wholesale_tb)),
+        v.resale.allowed && !v.has_card ? h("span", { class: "badge" }, T("کارتش ثبت نشده", "no card set")) : null,
+        v.locked ? h("span", { class: "badge bad" }, T("قفل: فاکتور پرداخت‌نشده", "locked: unpaid bill")) : null),
+      h("form", { class: "card form", onsubmit: async (e) => {
+        e.preventDefault(); err.textContent = "";
+        try {
+          const res = await api("POST", `${path}/wallet`, { delta: +amount.value || 0, note: note.value });
+          toast(T(`موجودی: ${tomanTxt(res.wallet)}`, `Balance: ${tomanTxt(res.wallet)}`)); draw();
+        } catch (x) { err.textContent = x.message; }
+      } },
+        h("h3", {}, T("کیف پول", "Wallet"), " · ", tomanTxt(v.wallet)),
+        h("p", { class: "small muted" }, T("نماینده خودش از ربات اصلی با رسید شارژ می‌کند. اینجا می‌توانید دستی اضافه یا کم کنید (عدد منفی = کسر). فاکتور باز با شارژ کافی خودکار پرداخت می‌شود.", "The reseller charges it in the main bot with a receipt. Here you can add or take by hand (negative = take). An open bill is paid automatically once covered.")),
+        h("div", { class: "two" }, h("label", {}, h("span", {}, T("مبلغ (تومان)", "Amount (toman)")), amount), h("label", {}, h("span", {}, T("توضیح", "Note")), note)),
+        h("div", { class: "row" }, h("button", { type: "submit" }, T("ثبت", "Apply"))),
+        walletHistory(v.history)),
+      h("div", { class: "card form" }, h("h3", {}, T("فاکتورها", "Bills")), billRows(v.bills, (b) => h("div", { class: "row tight" }, close(b, true), close(b, false)))));
+  }
+  await draw();
+  openModal(`${T("کیف پول و فاکتورها", "Wallet and bills")} · ${r.Name || r.ID}`, box);
+}
+
+// resaleRepCard: the reseller's own prices, wallet and bills.
+function resaleRepCard() {
+  const fa = lang === "fa";
+  const T = (f, e) => (fa ? f : e);
+  const card = h("div", { class: "card form" });
+  const draw = async () => {
+    let v;
+    try { v = await api("GET", "/api/v2/rep/resale"); } catch { card.hidden = true; return; }
+    if (!v.resale.allowed) { card.hidden = true; return; }
+    const on = h("input", { type: "checkbox", checked: !!v.resale.enabled });
+    const ins = {};
+    const err = h("div", { class: "error", role: "alert" });
+    const rows = v.packages.map((p) => {
+      ins[p.id] = h("input", { type: "number", min: String(p.cost), step: "1000", dir: "ltr", value: p.own || "", placeholder: String(p.owner > p.cost ? p.owner : p.cost) });
+      return h("tr", {}, h("td", {}, p.name || `${fmtNum(p.gb)} GB`), h("td", {}, tomanTxt(p.cost)), h("td", {}, ins[p.id]), h("td", { class: "small" }, tomanTxt(p.price - p.cost)));
+    });
+    const pay = (b) => v.wallet >= b.amount ? h("button", { type: "button", onclick: async () => { await guarded(() => api("POST", `/api/v2/rep/resale/bills/${b.id}/pay`)); toast(t("saved")); draw(); } }, T("پرداخت از کیف پول", "Pay from wallet")) : null;
+    fill(card,
+      h("h2", {}, "🏪 ", T("فروش پنل نمایندگی در ربات من", "Selling reseller panels in my bot")),
+      h("p", { class: "small muted" }, T(`مشتری در ربات شما پنل می‌خرد و به کارت شما واریز می‌کند. با تأیید رسید، قیمت عمده (هر ترابایت ${tomanTxt(v.wholesale_tb)}) از کیف پول شما در پنل اصلی کم می‌شود${v.resale.credit ? "؛ اگر کافی نباشد، فاکتور ۲۴ ساعته صادر می‌شود" : ""}. پنل فروخته‌شده زیرمجموعهٔ شما می‌شود.`,
+        `A customer buys a panel in your bot and pays your card. When you approve the receipt, the wholesale price (${tomanTxt(v.wholesale_tb)} per TB) comes off your wallet at the main panel${v.resale.credit ? "; if it is short, a 24-hour bill is opened" : ""}. The panel becomes your sub-seller.`)),
+      h("div", { class: "mz-badges" },
+        h("span", { class: "badge" }, T("کیف پول: ", "Wallet: "), tomanTxt(v.wallet)),
+        v.on ? h("span", { class: "badge good" }, T("در ربات شما فعال است", "on in your bot")) : null,
+        v.has_card ? null : h("span", { class: "badge bad" }, T("اول کارت خود را ثبت کنید", "set your card first")),
+        v.locked ? h("span", { class: "badge bad" }, T("قفل: فاکتور پرداخت‌نشده", "locked: unpaid bill")) : null),
+      v.main_bot ? h("a", { class: "btn", href: `https://t.me/${v.main_bot}?start=wallet`, target: "_blank", rel: "noopener" }, T("➕ شارژ کیف پول در ربات اصلی", "➕ Charge the wallet in the main bot")) : null,
+      h("label", { class: "check" }, on, h("span", {}, T("نمایش در ربات من", "Show in my bot"))),
+      h("div", { class: "table-wrap" }, h("table", {}, h("thead", {}, h("tr", {}, h("th", {}, T("بسته", "Package")), h("th", {}, T("قیمت عمده", "Wholesale")), h("th", {}, T("قیمت فروش شما", "Your price")), h("th", {}, T("سود", "Profit")))), h("tbody", {}, rows))),
+      h("p", { class: "small muted" }, T("قیمت خالی = قیمت فروش پنل اصلی. کمتر از قیمت عمده قبول نمی‌شود.", "Empty = the main panel's price. Below wholesale is refused.")),
+      err,
+      h("div", { class: "row" }, h("button", { class: "primary", type: "button", onclick: async () => {
+        err.textContent = "";
+        const prices = {};
+        for (const [id, el] of Object.entries(ins)) if (+el.value) prices[id] = +el.value;
+        try { await api("PUT", "/api/v2/rep/resale", { enabled: on.checked, prices }); toast(t("saved")); draw(); } catch (x) { err.textContent = x.message; }
+      } }, t("save"))),
+      h("h3", {}, T("فاکتورها", "Bills")), billRows(v.bills, pay), walletHistory(v.history));
+  };
+  draw();
+  return card;
+}
+
 // apiDocs: a guide to the partner or reseller API, with the route list
 // from the panel's own OpenAPI description.
 async function apiDocs(kind) {
@@ -5517,6 +6447,258 @@ async function apiDocs(kind) {
   } catch (x) { fill(table, h("p", { class: "error" }, x.message)); }
 }
 
+// ---------- Old users: a reseller brings its customers by their links ----------
+async function viewLegacy() {
+  const fa = lang === "fa";
+  const T = (f, e) => (fa ? f : e);
+  const v = await api("GET", "/api/v2/rep/legacy");
+  const err = h("div", { class: "error", role: "alert" });
+  const steps = [T("لینک‌های ساب", "Subscription links"), T("دامنه", "Domain"), T("پایان", "Done")];
+  const stepper = h("ol", { class: "lg-steps" }, steps.map((s, i) => h("li", { class: i === v.step ? "on" : i < v.step ? "done" : "" }, h("b", {}, fmtNum(i + 1)), " ", s)));
+  const gb = (b) => `${fmtNum(+(b / 2 ** 30).toFixed(1))} GB`;
+  const facts = h("div", { class: "mz-badges" },
+    h("span", { class: "badge" }, T("کاربر آمده: ", "Users brought: "), fmtNum(v.clients)),
+    v.domain ? h("span", { class: "badge", dir: "ltr" }, `${v.domain}:${v.sub_port}`) : null,
+    v.fwd_ports && v.fwd_ports.length ? h("span", { class: "badge", dir: "ltr" }, T("پورت کانفیگ‌ها: ", "Config ports: "), v.fwd_ports.join(", ")) : null);
+  let body;
+  if (v.step === 0) {
+    const ta = h("textarea", { rows: "10", dir: "ltr", placeholder: "https://sub.example.com:2096/sub/abc123\nhttps://sub.example.com:2096/sub/def456" });
+    const j = v.job || {};
+    const pct = j.total ? Math.round((j.done / j.total) * 100) : 0;
+    if (j.running) setTimeout(() => { if (location.hash.startsWith("#/legacy")) route(); }, 2000);
+    body = h("div", { class: "card form" },
+      h("h2", {}, T("۱. لینک ساب کاربرها", "1. The users' subscription links")),
+      h("p", { class: "small muted" }, T("لینک ساب هر کاربر را از پنل قبلی‌تان (ثنایی، مرزبان، پاسارگاد…) کپی کنید؛ هر خط یک لینک. پنل هر لینک را می‌خواند و کاربر را با همان مصرف، حجم، انقضا و همان لینک ساب در بخش شما می‌سازد. آوردن کاربرها رایگان است؛ از این به بعد فقط مصرف واقعی‌شان از اعتبار شما کم می‌شود. این کاربرها قابل تمدید نیستند.",
+        "Copy each user's subscription link from your old panel (3x-ui, Marzban, PasarGuard…), one per line. Each link is read and the user made under you with the same usage, volume, expiry and subscription link. Bringing them is free; from now on only what they use comes off your credit. Old users cannot be renewed.")),
+      ta, err,
+      j.running ? h("div", {}, h("progress", { max: "100", value: String(pct) }), h("p", { class: "small" }, T(`${fmtNum(j.done)} از ${fmtNum(j.total)} خوانده شد…`, `${j.done} of ${j.total} read…`))) : null,
+      j.total && !j.running ? h("div", { class: "mz-badges" },
+        h("span", { class: "badge good" }, T("آمد: ", "Added: "), fmtNum(j.added)),
+        j.already ? h("span", { class: "badge" }, T("از قبل بود: ", "Already here: "), fmtNum(j.already)) : null,
+        j.failed && j.failed.length ? h("span", { class: "badge bad" }, T("خطا: ", "Failed: "), fmtNum(j.failed.length)) : null) : null,
+      j.failed && j.failed.length && !j.running ? h("details", {}, h("summary", {}, T("لینک‌های خطادار", "Failed links")),
+        h("ul", { class: "small plain", dir: "ltr" }, j.failed.map((f) => h("li", {}, h("code", {}, f.link), " — ", f.reason)))) : null,
+      h("div", { class: "row" },
+        h("button", { class: "primary", disabled: j.running, onclick: async () => {
+          err.textContent = "";
+          try { await api("POST", "/api/v2/rep/legacy/import", { links: ta.value }); route(); } catch (x) { err.textContent = x.message; }
+        } }, T("خواندن و ثبت", "Read and add")),
+        h("span", { class: "spacer" }),
+        h("button", { disabled: j.running || !v.clients, onclick: async () => { await guarded(() => api("POST", "/api/v2/rep/legacy/step", { step: 1 })); route(); } }, T("مرحلهٔ بعد: دامنه", "Next: domain"))));
+  } else if (v.step === 1) {
+    const ip = (v.hub_ips || [])[0] || "";
+    const why = h("p", { class: "small", role: "status" });
+    body = h("div", { class: "card form" },
+      h("h2", {}, T("۲. دامنهٔ ساب را به این پنل بدهید", "2. Point your subscription domain here")),
+      h("p", {}, T(`در تنظیمات DNS دامنهٔ `, "In the DNS of "), h("b", { dir: "ltr" }, v.domain), T(` رکورد A را روی این IP بگذارید (اگر کلودفلر است، ابر نارنجی خاموش):`, ", set the A record to this IP (on Cloudflare, proxy off):")),
+      h("div", { class: "mz-copy" }, h("code", { dir: "ltr" }, ip), h("button", { type: "button", class: "ghost", onclick: () => copy(ip) }, T("کپی", "Copy"))),
+      h("p", { class: "small muted" }, T(`بعد از تغییر، «بررسی» را بزنید. از همان لحظه لینک‌های ساب قدیمی از این پنل جواب می‌دهند و کانفیگ‌های قدیمی (پورت‌های ${(v.fwd_ports || []).join("، ") || "—"}) تا ۳ روز به سرور قبلی رد می‌شوند تا کسی قطع نشود. سرور قبلی را تا آن موقع روشن نگه دارید.`,
+        `After the change press “Check”. From then on the old links answer from here, and the old configs (ports ${(v.fwd_ports || []).join(", ") || "—"}) are passed to the old server for 3 days so nobody is cut. Keep the old server on until then.`)),
+      Object.keys(v.port_errors || {}).length ? h("p", { class: "error" }, T("این پورت‌ها روی این سرور قابل استفاده نیستند و کاربرهایشان تا آپدیت ساب قطع می‌شوند: ", "These ports cannot be used on this server; their users are cut until they update: "), Object.entries(v.port_errors).map(([p, e]) => `${p} (${e})`).join("، ")) : null,
+      why, err,
+      h("div", { class: "row" },
+        h("button", { class: "primary", onclick: async () => {
+          err.textContent = ""; why.textContent = T("در حال بررسی…", "Checking…");
+          try {
+            const r = await api("POST", "/api/v2/rep/legacy/check");
+            if (r.ok) route(); else why.textContent = T("هنوز نه: ", "Not yet: ") + (r.reason || "");
+          } catch (x) { why.textContent = ""; err.textContent = x.message; }
+        } }, T("بررسی", "Check")),
+        h("span", { class: "spacer" }),
+        h("button", { class: "ghost", onclick: async () => { await guarded(() => api("POST", "/api/v2/rep/legacy/step", { step: 0 })); route(); } }, T("بازگشت به لینک‌ها", "Back to links"))));
+  } else {
+    const left = v.fwd_until - Date.now() / 1000;
+    const cert = { ok: T("گواهی SSL آماده است", "certificate ready"), failed: T("گواهی SSL نگرفت: ", "certificate failed: ") + (v.cert_error || ""), issuing: T("در حال گرفتن گواهی SSL…", "getting the certificate…"), pending: T("در صف گرفتن گواهی SSL", "certificate queued") }[v.cert] || "";
+    body = h("div", { class: "card form" },
+      h("h2", {}, T("۳. انتقال انجام شد", "3. Moved")),
+      h("p", {}, T("کاربرها با بروزرسانی ساب در اپ، کانفیگ‌های جدید را می‌گیرند. کاربرهای جدیدی که می‌سازید با آدرس ساب این پنل ساخته می‌شوند.", "Users get the new configs when their app updates the subscription. New users you make use this panel's subscription address.")),
+      h("div", { class: "mz-badges" },
+        h("span", { class: "badge good" }, T("ساب را آپدیت کرده‌اند: ", "Updated: "), `${fmtNum(v.updated)} / ${fmtNum(v.clients)}`),
+        v.off ? h("span", { class: "badge bad" }, T("قطع به‌خاطر اعتبار: ", "Off for credit: "), fmtNum(v.off)) : null,
+        h("span", { class: "badge" }, T("مصرف کسرشده از اعتبار: ", "Use paid from credit: "), gb(v.billed)),
+        cert ? h("span", { class: `badge ${v.cert === "failed" ? "bad" : ""}` }, cert) : null,
+        left > 0 ? h("span", { class: "badge" }, T("عبور کانفیگ‌های قدیمی تا ", "Old configs passed through until "), fmtWhen(v.fwd_until)) : h("span", { class: "badge" }, T("عبور کانفیگ‌های قدیمی تمام شد", "Pass-through ended"))),
+      Object.keys(v.port_errors || {}).length ? h("p", { class: "error" }, T("این پورت‌ها روی سرور باز نشدند: ", "These ports could not open: "), Object.entries(v.port_errors).map(([p, e]) => `${p} (${e})`).join("، ")) : null,
+      h("a", { class: "btn", href: "#/clients" }, T("دیدن کاربران قدیمی", "See the old users")));
+  }
+  return h("div", {}, h("div", { class: "row" }, h("h1", {}, T("کاربران قدیمی", "Old users"))), stepper, facts, body);
+}
+
+// ---------- Panel sale page: everything about resellers selling panels ----------
+function tabsView(tabs, key) {
+  let cur = (() => { try { return sessionStorage.getItem(key) || tabs[0][0]; } catch { return tabs[0][0]; } })();
+  if (!tabs.find((x) => x[0] === cur)) cur = tabs[0][0];
+  const bar = h("div", { class: "chips", role: "tablist" });
+  const pane = h("div", {});
+  const draw = () => {
+    bar.replaceChildren(...tabs.map(([k, label, , badge]) => {
+      const b = h("button", { role: "tab", "aria-selected": String(k === cur), class: `chip ${k === cur ? "on" : ""}` }, label, badge ? h("span", { class: "count" }, fmtNum(badge)) : null);
+      b.onclick = () => { cur = k; try { sessionStorage.setItem(key, k); } catch {} draw(); };
+      return b;
+    }));
+    const t = tabs.find((x) => x[0] === cur);
+    pane.replaceChildren(t[2]());
+  };
+  draw();
+  return h("div", {}, bar, pane);
+}
+
+function packageForm(p, inbounds, onSave) {
+  const fa = lang === "fa";
+  const T = (f, e) => (fa ? f : e);
+  p = p || { gb: 1024, price: 0, allow_unlimited: false, units: 0, inbounds: [], can_delete: true };
+  const inp = (v, attrs) => h("input", { type: "number", min: "0", dir: "ltr", value: v || 0, ...(attrs || {}) });
+  const f = { name: h("input", { value: p.name || "", placeholder: T("مثلاً ۱ ترابایت", "e.g. 1 TB") }), gb: inp(p.gb, { min: "1" }), price: inp(p.price, { step: "1000" }),
+    au: h("input", { type: "checkbox", checked: !!p.allow_unlimited }), units: inp(p.units), mc: inp(p.max_clients), md: inp(p.max_days), mg: inp(p.max_client_gb),
+    cd: h("input", { type: "checkbox", checked: !!p.can_delete }), ru: h("input", { type: "checkbox", checked: !!p.refund_unused }) };
+  const chosen = new Set(p.inbounds || []);
+  const ibs = (inbounds || []).map((ib) => h("label", { class: "check" }, h("input", { type: "checkbox", value: ib.tag, checked: chosen.has(ib.tag) }), h("span", {}, ib.tag)));
+  const lab = (l, el) => h("label", {}, h("span", {}, l), el);
+  openModal(p.id ? T("ویرایش بسته", "Edit package") : T("بستهٔ جدید", "New package"), h("div", { class: "form" },
+    lab(T("نام", "Name"), f.name),
+    h("div", { class: "two" }, lab(T("حجم (گیگ)", "Volume (GB)"), f.gb), lab(T("قیمت فروش شما (تومان)", "Your price (toman)"), f.price)),
+    h("label", { class: "check" }, f.au, T("اجازهٔ فروش نامحدود", "May sell unlimited")),
+    lab(T("واحد نامحدود همراه بسته", "Unlimited units included"), f.units),
+    h("div", { class: "two" }, lab(T("حداکثر کلاینت (۰ = بی‌سقف)", "Max clients (0 = none)"), f.mc), lab(T("حداکثر روز هر کلاینت", "Max days per client"), f.md)),
+    lab(T("حداکثر حجم هر کلاینت (گیگ)", "Max GB per client"), f.mg),
+    h("label", { class: "check" }, f.cd, T("اجازهٔ حذف کلاینت", "May delete clients")),
+    h("label", { class: "check" }, f.ru, T("برگشت حجم مصرف‌نشده هنگام حذف", "Refund unused on delete")),
+    h("fieldset", { class: "form", style: "border:0;padding:0;margin:0" }, h("legend", { class: "small muted" }, T("اینباندها (هیچ‌کدام = همه)", "Inbounds (none = all)")), h("div", { class: "chips" }, ibs))),
+    [h("button", { class: "primary", value: "save", onclick: async (e) => {
+      e.preventDefault();
+      const np = { ...p, name: f.name.value, gb: +f.gb.value || 0, price: +f.price.value || 0, allow_unlimited: f.au.checked, units: +f.units.value || 0, max_clients: +f.mc.value || 0, max_days: +f.md.value || 0,
+        max_client_gb: +f.mg.value || 0, can_delete: f.cd.checked, refund_unused: f.ru.checked, inbounds: ibs.map((l) => l.querySelector("input")).filter((i) => i.checked).map((i) => i.value) };
+      if (await onSave(np)) document.getElementById("modal").close("save");
+    } }, t("save"))]);
+}
+
+function soldPanelsList(panels, actions) {
+  const fa = lang === "fa";
+  const T = (f, e) => (fa ? f : e);
+  if (!panels.length) return h("p", { class: "muted" }, T("هنوز پنلی فروخته نشده.", "No panels sold yet."));
+  return h("div", { class: "list" }, panels.map((p) => h("div", { class: "card item" },
+    h("div", { class: "head" }, h("span", { class: "name" }, p.name || p.id), h("span", { class: "badge", dir: "ltr" }, p.login || p.id),
+      h("span", { class: `badge ${p.enabled ? "good" : "bad"} spacer` }, p.enabled ? T("روشن", "On") : T("خاموش", "Off"))),
+    h("div", { class: "muted small" }, `${T("اعتبار", "Credit")}: ${bytes(p.credit)}${p.units ? ` · ${T("واحد", "units")}: ${fmtNum(p.units)}` : ""} · ${T("کلاینت", "clients")}: ${fmtNum(p.active)} / ${fmtNum(p.clients)} · ${T("مصرف", "used")}: ${bytes(p.used)}`),
+    h("div", { class: "muted small" }, `${T("فروش", "Sold")}: ${p.sold ? fmtWhen(p.sold) : "—"} · ${T("شارژ", "top-ups")}: ${fmtNum(p.top_ups)} · ${T("پرداخت مشتری", "paid")}: ${tomanTxt(p.paid)}${p.last_use ? ` · ${T("آخرین استفاده", "last use")}: ${fmtWhen(p.last_use)}` : ""}`),
+    actions ? h("div", { class: "row" }, actions(p)) : null)));
+}
+
+async function viewResale() {
+  const fa = lang === "fa";
+  const T = (f, e) => (fa ? f : e);
+  const [v, inbounds] = await Promise.all([api("GET", "/api/v2/admin/resale"), api("GET", "/api/v2/admin/inbounds").catch(() => [])]);
+  const sale = v.sale || { packages: [] };
+  sale.packages = sale.packages || [];
+  const saveSale = async (ns) => { try { await api("PUT", "/api/v2/admin/rep-sale", ns); toast(t("saved")); route(); return true; } catch (x) { toast(x.message); return false; } };
+  const settings = () => {
+    const tb = h("input", { type: "number", min: "0", step: "1000", dir: "ltr", value: sale.wholesale_tb || 0 });
+    const on = h("input", { type: "checkbox", checked: !!sale.enabled });
+    return h("div", {},
+      h("form", { class: "card form", onsubmit: (e) => { e.preventDefault(); saveSale({ ...sale, wholesale_tb: +tb.value || 0, enabled: on.checked }); } },
+        h("h2", {}, T("قیمت و فروش", "Price and sale")),
+        h("label", {}, h("span", {}, T("قیمت عمدهٔ هر ترابایت برای نماینده‌ها (تومان، ۰ = خاموش)", "Wholesale per TB for resellers (toman, 0 = off)")), tb),
+        h("label", { class: "check" }, on, T("فروش پنل نمایندگی در ربات اصلی خودم هم روشن باشد", "Also sell reseller panels in my own main bot")),
+        h("p", { class: "small muted" }, T("اجازهٔ هر نماینده: نماینده‌ها ← ⋯ ← محدودیت‌ها.", "Per reseller: Resellers → ⋯ → Limits.")),
+        h("div", { class: "row" }, h("button", { class: "primary", type: "submit" }, t("save")))),
+      h("div", { class: "card form" },
+        h("div", { class: "row" }, h("h2", {}, T("بسته‌ها", "Packages")), h("button", { class: "primary spacer", onclick: () => packageForm(null, inbounds, (np) => saveSale({ ...sale, packages: [...sale.packages, np] })) }, t("add"))),
+        h("p", { class: "small muted" }, T("همین بسته‌ها در ربات اصلی، ربات نماینده‌ها و پنل نماینده‌ها فروخته می‌شوند. قیمت نماینده‌ها از قیمت عمدهٔ هر ترابایت حساب می‌شود.", "The same packages sell in your bot, the resellers' bots and their panels. A reseller's cost comes from the wholesale price per TB.")),
+        sale.packages.length ? h("div", { class: "list" }, sale.packages.map((p, i) => h("div", { class: "card item" },
+          h("div", { class: "head" }, h("span", { class: "name" }, p.name), h("span", { class: "badge" }, `${fmtNum(p.gb)} GB`), h("span", { class: "badge spacer" }, tomanTxt(p.price))),
+          h("div", { class: "muted small" }, `${T("عمده", "wholesale")}: ${tomanTxt(Math.ceil(Math.ceil((p.gb * (sale.wholesale_tb || 0)) / 1024) / 1000) * 1000)}${p.allow_unlimited ? ` · ${T("نامحدود", "unlimited")} (${fmtNum(p.units)})` : ""}`),
+          h("div", { class: "row" },
+            h("button", { onclick: () => packageForm(p, inbounds, (np) => saveSale({ ...sale, packages: sale.packages.map((x, j) => (j === i ? np : x)) })) }, t("edit")),
+            h("button", { class: "ghost danger", onclick: async () => { if (await confirmAction(T(`بستهٔ «${p.name}» حذف شود؟`, `Delete “${p.name}”?`))) saveSale({ ...sale, packages: sale.packages.filter((_, j) => j !== i) }); } }, t("delete")))))) : h("p", { class: "muted" }, T("هنوز بسته‌ای نیست.", "No packages yet."))));
+  };
+  const reps = () => (v.reps || []).length ? h("div", { class: "list" }, v.reps.map((r) => h("div", { class: "card item" },
+    h("div", { class: "head" }, h("span", { class: "name" }, r.name || r.id), h("span", { class: "badge" }, r.id),
+      h("span", { class: `badge ${r.on ? "good" : ""} spacer` }, r.on ? T("در رباتش فعال", "on in its bot") : T("در رباتش خاموش", "off in its bot"))),
+    h("div", { class: "mz-badges" },
+      h("span", { class: "badge" }, T("کیف پول: ", "Wallet: "), tomanTxt(r.wallet)),
+      r.open_bill ? h("span", { class: `badge ${r.overdue ? "bad" : ""}` }, T("فاکتور باز: ", "Open bill: "), tomanTxt(r.open_bill), r.overdue ? T(" (مهلت گذشته)", " (overdue)") : "") : null,
+      h("span", { class: "badge" }, T("پنل: ", "Panels: "), `${fmtNum(r.stats.active)} / ${fmtNum(r.stats.panels)}`),
+      h("span", { class: "badge" }, T("فروش این ماه: ", "This month: "), `${fmtNum(r.stats.month_sales)} · ${tomanTxt(r.stats.month_cost)}`)),
+    h("div", { class: "row" },
+      h("button", { onclick: () => resaleOwner({ ID: r.id, Name: r.name }) }, T("کیف پول و فاکتورها", "Wallet and bills")),
+      h("button", { class: "ghost", onclick: async () => {
+        const x = await api("GET", `/api/v2/admin/reps/${encodeURIComponent(r.id)}/panels`);
+        openModal(`${T("پنل‌های فروخته‌شده", "Sold panels")} · ${r.name || r.id}`, soldPanelsList(x.panels || []));
+      } }, T("پنل‌ها", "Panels")))))) : h("p", { class: "muted" }, T("هنوز به هیچ نماینده‌ای اجازهٔ فروش پنل نداده‌اید (نماینده‌ها ← ⋯ ← محدودیت‌ها).", "No reseller may sell panels yet (Resellers → ⋯ → Limits)."));
+  const receipts = () => (v.pending || []).length ? h("div", { class: "list" }, v.pending.map((o) => h("div", { class: "card item" },
+    h("div", { class: "head" }, h("span", { class: "name" }, T("شارژ کیف پول #", "Wallet top-up #"), fmtNum(o.id)), h("span", { class: "badge" }, o.rep_id), h("span", { class: "badge spacer" }, tomanTxt(o.price))),
+    h("div", { class: "muted small" }, `${o.buyer_name || ""} · ${fmtWhen(o.unix)} · ${T("عکس رسید در ربات اصلی آمده است", "the receipt photo is in the main bot")}`),
+    h("div", { class: "row" },
+      h("button", { class: "primary", onclick: async () => { await guarded(() => api("POST", `/api/v2/admin/rep-orders/${o.id}/approve`)); toast(t("saved")); route(); } }, T("تأیید و شارژ", "Approve")),
+      h("button", { class: "ghost danger", onclick: async () => { if (await confirmAction(T("این رسید رد شود؟", "Reject this receipt?"))) { await guarded(() => api("POST", `/api/v2/admin/rep-orders/${o.id}/reject`)); route(); } } }, T("رد", "Reject")))))) : h("p", { class: "muted" }, T("رسیدی منتظر نیست.", "No receipts waiting."));
+  return h("div", {}, h("div", { class: "row" }, h("h1", {}, T("فروش پنل", "Panel sale"))),
+    tabsView([["reps", T("نماینده‌ها", "Resellers"), reps], ["receipts", T("رسیدها", "Receipts"), receipts, (v.pending || []).length], ["settings", T("تنظیمات و بسته‌ها", "Settings and packages"), settings]], "resale-tab"));
+}
+
+async function viewResaleRep() {
+  const fa = lang === "fa";
+  const T = (f, e) => (fa ? f : e);
+  const [x, v] = await Promise.all([api("GET", "/api/v2/rep/resale/panels").catch(() => ({ panels: [], stats: {} })), api("GET", "/api/v2/rep/resale")]);
+  const panels = x.panels || [], st = x.stats || {};
+  const creds = (res) => {
+    const text = `${T("آدرس پنل", "Panel")}: ${res.address}\n${T("نام کاربری", "Username")}: ${res.username}\n${T("رمز", "Password")}: ${res.password}`;
+    openModal(T("اطلاعات ورود", "Login"), h("div", { class: "form" },
+      h("pre", { class: "code-block", dir: "ltr" }, text),
+      h("button", { class: "primary", type: "button", onclick: () => copy(text) }, T("کپی برای ارسال به مشتری", "Copy for the customer"))));
+  };
+  const pkgSelect = () => h("select", {}, v.packages.map((p) => h("option", { value: p.id }, `${p.name || fmtNum(p.gb) + " GB"} · ${T("فروش", "price")} ${tomanTxt(p.price)} · ${T("عمده", "cost")} ${tomanTxt(p.cost)}`)));
+  const payNote = h("p", { class: "small muted" }, T(`قیمت عمده از کیف پول شما (موجودی ${tomanTxt(v.wallet)}) کم می‌شود${v.resale.credit ? "؛ اگر کافی نباشد، فاکتور ۲۴ ساعته صادر می‌شود" : ""}.`,
+    `The wholesale price comes off your wallet (balance ${tomanTxt(v.wallet)})${v.resale.credit ? "; if short, a 24-hour bill is opened" : ""}.`));
+  const sellNew = () => {
+    const user = h("input", { dir: "ltr", required: true, placeholder: "shop-ali", autocomplete: "off" });
+    const name = h("input", { placeholder: T("نام مشتری (اختیاری)", "Customer name (optional)") });
+    const pkg = pkgSelect();
+    const err = h("div", { class: "error", role: "alert" });
+    openModal(T("فروش پنل جدید", "Sell a new panel"), h("div", { class: "form" },
+      h("label", {}, h("span", {}, T("نام کاربری پنل", "Panel username")), user), h("label", {}, h("span", {}, T("نام", "Name")), name),
+      h("label", {}, h("span", {}, T("بسته", "Package")), pkg), payNote.cloneNode(true), err),
+      [h("button", { class: "primary", value: "save", onclick: async (e) => {
+        e.preventDefault(); err.textContent = "";
+        try {
+          const res = await api("POST", "/api/v2/rep/resale/sell", { name: user.value, buyer: name.value, package: pkg.value });
+          document.getElementById("modal").close("save");
+          creds(res);
+          if (res.bill) toast(T(`فاکتور #${res.bill} با مهلت ۲۴ ساعت صادر شد`, `Bill #${res.bill} opened, due in 24 hours`));
+          route();
+        } catch (x2) { err.textContent = x2.message; }
+      } }, T("فروش", "Sell"))]);
+  };
+  const topUp = (p) => {
+    const pkg = pkgSelect();
+    const err = h("div", { class: "error", role: "alert" });
+    openModal(`${T("شارژ پنل", "Top up")} · ${p.name || p.id}`, h("div", { class: "form" }, h("label", {}, h("span", {}, T("بسته", "Package")), pkg), payNote.cloneNode(true), err),
+      [h("button", { class: "primary", value: "save", onclick: async (e) => {
+        e.preventDefault(); err.textContent = "";
+        try {
+          const res = await api("POST", "/api/v2/rep/resale/sell", { target: p.id, package: pkg.value });
+          document.getElementById("modal").close("save");
+          toast(res.bill ? T(`شارژ شد؛ فاکتور #${res.bill} صادر شد`, `Done; bill #${res.bill} opened`) : T("شارژ شد", "Done"));
+          route();
+        } catch (x2) { err.textContent = x2.message; }
+      } }, T("شارژ", "Top up"))]);
+  };
+  const mine = () => h("div", {},
+    h("div", { class: "mz-badges" },
+      h("span", { class: "badge" }, T("پنل‌ها: ", "Panels: "), `${fmtNum(st.active)} / ${fmtNum(st.panels)}`),
+      h("span", { class: "badge" }, T("اعتبار باقی پنل‌ها: ", "Their credit: "), bytes(st.credit)),
+      h("span", { class: "badge" }, T("فروش این ماه: ", "This month: "), `${fmtNum(st.month_sales)} · ${tomanTxt(st.month_paid)}`),
+      h("span", { class: "badge good" }, T("سود این ماه: ", "Profit this month: "), tomanTxt(st.month_paid - st.month_cost)),
+      h("span", { class: "badge" }, T("کیف پول: ", "Wallet: "), tomanTxt(v.wallet)),
+      v.locked ? h("span", { class: "badge bad" }, T("قفل: فاکتور پرداخت‌نشده", "locked: unpaid bill")) : null),
+    h("div", { class: "row" }, h("button", { class: "primary", disabled: !v.packages.length || v.locked, onclick: sellNew }, T("➕ فروش پنل جدید", "➕ Sell a new panel"))),
+    soldPanelsList(panels, (p) => [
+      h("button", { disabled: v.locked, onclick: () => topUp(p) }, T("شارژ با بسته", "Top up")),
+      h("button", { class: "ghost", onclick: async () => { await guarded(() => api("POST", `/api/v2/rep/resale/panels/${encodeURIComponent(p.id)}/enabled`, { enabled: !p.enabled })); route(); } }, p.enabled ? T("خاموش کردن", "Turn off") : T("روشن کردن", "Turn on")),
+      h("button", { class: "ghost", onclick: async () => { if (await confirmAction(T("رمز تازه ساخته شود؟ رمز قبلی دیگر کار نمی‌کند.", "Make a new password? The old one stops working."))) { const res = await guarded(() => api("POST", `/api/v2/rep/resale/panels/${encodeURIComponent(p.id)}/password`)); creds({ ...res, address: location.origin }); } } }, T("رمز تازه", "New password"))]));
+  return h("div", {}, h("div", { class: "row" }, h("h1", {}, T("فروش پنل", "Panel sale"))),
+    tabsView([["mine", T("پنل‌های من", "My panels"), mine], ["prices", T("قیمت‌ها و کیف پول", "Prices and wallet"), resaleRepCard]], "resale-rep-tab"));
+}
+
 // Owner: resellers as a table with this month's numbers; actions in a menu.
 async function viewReps() {
   const fa = lang === "fa";
@@ -5552,7 +6734,7 @@ async function viewReps() {
       h("td", { dir: "ltr" }, gbs(o.month_sold || 0), h("div", { class: "small muted" }, `${fmtNum(o.month_sales || 0)} ${fa ? "فروش" : "sales"}`)),
       h("td", {}, h("span", { dir: "ltr" }, `${fmtNum(o.active || 0)} / ${fmtNum(r.Clients)}`), o.expiring ? h("div", { class: "small" }, h("span", { class: "badge warn" }, `${fmtNum(o.expiring)} ${fa ? "رو به اتمام" : "ending"}`)) : null),
       h("td", {}, fmtNum(o.online || 0)),
-      h("td", { dir: "ltr" }, bytes(r.UsedBytes || 0)),
+      h("td", {}, h("span", { dir: "ltr" }, bytes(r.UsedBytes || 0)), movedHere(r.UsedBytes, r.UsedHere) ? h("div", { class: "small", title: fa ? "فقط مصرف روی سرورهای این پنل، از ساخته‌شدن یا کوچ نماینده به اینجا؛ مصرف پنل قبلی حساب نیست" : "Only traffic on this panel's servers, since the reseller was made or moved here; the old panel's usage is left out" }, h("span", { class: "badge" }, fa ? "در پنل ما: " : "here: ", h("b", { dir: "ltr" }, bytes(r.UsedHere || 0)))) : null),
       h("td", { class: "small muted" }, o.last_login ? fmtWhen(o.last_login) : (fa ? "هرگز" : "never")),
       h("td", {}, h("div", { class: "row tight" },
         h("button", { onclick: () => creditForm(r) }, t("addCredit")),
@@ -5562,6 +6744,7 @@ async function viewReps() {
   return h("div", {},
     h("div", { class: "row" }, h("h1", {}, t("reps")), h("span", { class: "spacer" }),
       fullOwner() ? h("button", { onclick: () => partnerKeys(reps) }, "🔑 ", fa ? "API فروش پنل" : "Panel sales API") : null,
+      fullOwner() ? h("button", { class: "ghost", onclick: () => openModal(fa ? "جذب نماینده از تلگرام" : "Resellers from Telegram", repGrowthBox()) }, "🧩 ", fa ? "جذب نماینده" : "Grow") : null,
       h("button", { class: "primary", onclick: () => repForm(null) }, t("add"))),
     (reps || []).length ? h("div", { class: "kpis" },
       h("div", { class: "card kpi" }, h("div", { class: "k" }, icon("reps"), fa ? "نماینده" : "Resellers"), h("div", { class: "v" }, fmtNum(reps.length))),
@@ -5574,50 +6757,20 @@ async function viewReps() {
       h("tbody", {}, ...rows))) : h("p", { class: "muted" }, t("empty")));
 }
 
-// Daily traffic as a neon line chart: grid, glowing lines, soft area fill.
+// Daily traffic (or any two daily series) on the chart kit: the first series
+// as a filled line, the second dashed. Missing days are filled with zero so
+// the x axis is real time; today's point is marked as not finished yet.
 function barsSvg(days, W = 600, opt = {}) {
-  const NS = "http://www.w3.org/2000/svg", H = 190, P = 8, L = 0;
-  const el = (n, a) => { const x = document.createElementNS(NS, n); for (const [k, v] of Object.entries(a)) x.setAttribute(k, v); return x; };
-  const svg = el("svg", { viewBox: `0 0 ${W} ${H + 20}`, class: "bars", role: "img", "aria-label": t("usageChart") });
-  const id = `c${++markSeq}`;
-  const defs = el("defs", {});
-  const glow = el("filter", { id: `${id}g`, x: "-10%", y: "-30%", width: "120%", height: "160%" });
-  glow.append(el("feGaussianBlur", { stdDeviation: "2.5", result: "b" }));
-  const merge = el("feMerge", {}); merge.append(el("feMergeNode", { in: "b" }), el("feMergeNode", { in: "SourceGraphic" })); glow.append(merge);
-  const area = (col, key) => { const g = el("linearGradient", { id: `${id}${key}`, x1: 0, y1: 0, x2: 0, y2: 1 });
-    g.append(el("stop", { offset: "0", style: `stop-color:${col};stop-opacity:.16` }), el("stop", { offset: "1", style: `stop-color:${col};stop-opacity:0` })); return g; };
-  defs.append(glow, area("var(--ion)", "d"), area("var(--ember)", "u"));
-  svg.append(defs);
-  if (!days.length) return svg;
-  const top = Math.max(1, ...days.map((d) => Math.max(d.Down, d.Up))) * 1.12;
-  const x = (i) => L + (days.length === 1 ? W / 2 : (i / (days.length - 1)) * (W - L - 2 * P) + P);
-  const y = (v) => H - (v / top) * (H - P);
-  for (let k = 0; k <= 4; k++) {
-    const yy = P + ((H - P) * k) / 4;
-    svg.append(el("line", { x1: 0, x2: W, y1: yy, y2: yy, class: "grid-line" }));
-  }
-  for (let i = 0; i < days.length; i++) svg.append(el("line", { x1: x(i), x2: x(i), y1: P, y2: H, class: "grid-v" }));
-  const series = (key, col) => {
-    const pts = days.map((d, i) => [x(i), y(d[key])]);
-    const line = pts.map(([a, b]) => `${a.toFixed(1)},${b.toFixed(1)}`).join(" ");
-    svg.append(el("polygon", { points: `${pts[0][0]},${H} ${line} ${pts.at(-1)[0]},${H}`, fill: `url(#${id}${key === "Down" ? "d" : "u"})` }));
-    svg.append(el("polyline", { points: line, fill: "none", style: `stroke:${col}`, "stroke-width": key === "Down" ? 2 : 1.6, "stroke-linejoin": "round", "stroke-linecap": "round",
-      "vector-effect": "non-scaling-stroke", filter: `url(#${id}g)`, ...(key === "Down" ? {} : { "stroke-dasharray": "5 5" }) }));
-    const [lx, ly] = pts.at(-1);
-    svg.append(el("circle", { cx: lx, cy: ly, r: 3, style: `fill:${col}`, filter: `url(#${id}g)` }));
-  };
-  if (!opt.single) series("Up", "var(--ember)");
-  series("Down", "var(--ion)");
-  const step = Math.max(1, Math.round(days.length / 6));
-  days.forEach((d, i) => {
-    const hit = el("rect", { x: x(i) - W / days.length / 2, y: 0, width: W / days.length, height: H, class: "bar-hit" });
-    const title = el("title", {}); title.textContent = opt.la ? `${dayLabel(d.Day, true)}: ${opt.la} ${bytes(d.Down)}${opt.single ? "" : ` · ${opt.lb} ${bytes(d.Up)}`}` : `${dayLabel(d.Day, true)}: ↓ ${bytes(d.Down)} · ↑ ${bytes(d.Up)}`;
-    hit.append(title); svg.append(hit);
-    if ((days.length - 1 - i) % step === 0) {
-      const lab = el("text", { x: x(i), y: H + 15, "text-anchor": "middle", class: "bar-label" }); lab.textContent = dayLabel(d.Day); svg.append(lab);
-    }
-  });
-  return svg;
+  const fa = lang === "fa";
+  if (!days.length) return h("p", { class: "muted small" }, t("noData"));
+  const by = Object.fromEntries(days.map((d) => [d.Day, d]));
+  const first = days.map((d) => d.Day).sort()[0], today = todayUTC();
+  const xs = [];
+  for (let d = Date.parse(first + "T00:00:00Z"); xs.length < 400; d += 86400000) { const k = new Date(d).toISOString().slice(0, 10); if (k > today && xs.length) break; xs.push(k); }
+  const series = [{ id: "d", name: opt.la || `↓ ${t("inRate")}`, color: "var(--ion)", area: true, values: xs.map((d) => by[d]?.Down || 0) }];
+  if (!opt.single) series.push({ id: "u", name: opt.lb || `↑ ${t("outRate")}`, color: "var(--ember)", dash: true, values: xs.map((d) => by[d]?.Up || 0) });
+  return chartKit({ xs, series, mode: "lines", partial: xs.at(-1) === today ? xs.length - 1 : -1, height: W >= 1000 ? 250 : 220, label: opt.la || t("usageChart"),
+    tipExtra: opt.single ? null : (i) => h("div", { class: "ct-row tot" }, h("span", {}, fa ? "مجموع" : "Total"), h("span", { class: "v" }, bytes(series[0].values[i] + series[1].values[i]))) });
 }
 
 function legend() {
@@ -5644,7 +6797,12 @@ function repBrandCard(path, repName) {
     const tgId = inp("telegram", { dir: "ltr", placeholder: "@myshop" });
     const sub = me.role === "rep" && !me.can_sell; // a sub-seller
     const tpl = inp("remark_template", { dir: "ltr", placeholder: "{remark} · {left}" });
-    const base = inp("base_url", { dir: "ltr", placeholder: "https://sub.myshop.com" });
+    const base = inp("base_url", { dir: "ltr", placeholder: "https://sub.myshop.com", list: "subdomain-choices" });
+    // The panel's subscription addresses as suggestions (subdomains.go).
+    const choices = h("datalist", { id: "subdomain-choices" });
+    api("GET", "/api/v2/shop/sub-domain" + (path.includes("/reps/") ? `?rep=${encodeURIComponent(decodeURIComponent(path.split("/reps/")[1].split("/")[0]))}` : ""))
+      .then((r) => choices.replaceChildren(...(r.choices || []).map((d) => h("option", { value: d.url }, d.label || d.url)))).catch(() => {});
+    document.getElementById("subdomain-choices")?.remove(); document.body.append(choices);
     const ann = h("textarea", { rows: "2" }, v.announce || "");
     let logo = v.logo || "";
     const accentOn = h("input", { type: "checkbox", checked: !!v.accent });
@@ -5682,6 +6840,68 @@ function repBrandCard(path, repName) {
       err, h("div", { class: "row" }, save));
   }).catch((x) => fill(card, h("p", { class: "error" }, x.message)));
   return card;
+}
+
+// subDomainsCard: the subscription addresses (every one reaches the HUB's
+// subscription port), the default one for new links, and moving everyone off
+// a filtered address.
+function subDomainsCard() {
+  const fa = lang === "fa";
+  const T = (a, b) => (fa ? a : b);
+  const list = h("div", { class: "form" });
+  const rows = [];
+  let fallback = "";
+  const addRow = (d) => {
+    d = d || {};
+    const url = h("input", { dir: "ltr", placeholder: "https://sub.example.com:2096", value: d.url || "" });
+    const label = h("input", { placeholder: T("مثلاً: اصلی", "e.g. main"), value: d.label || "" });
+    const def = h("input", { type: "radio", name: "subdom-default", checked: !!d.default });
+    const ret = h("input", { type: "checkbox", checked: !!d.retired });
+    const r = { url, label, def, ret };
+    const box = h("div", { class: "card" },
+      h("div", { class: "two" }, h("label", {}, h("span", {}, T("آدرس", "Address")), url), h("label", {}, h("span", {}, T("نام", "Label")), label)),
+      h("div", { class: "row" },
+        h("label", { class: "check" }, def, h("span", {}, T("پیش‌فرض لینک‌های جدید", "Default for new links"))),
+        h("label", { class: "check" }, ret, h("span", {}, T("بازنشسته (کار می‌کند، ولی لینک جدید با آن ساخته نمی‌شود)", "Retired (still answers; no new links)"))),
+        d.reps ? h("span", { class: "badge" }, T(`${fmtNum(d.reps)} نماینده`, `${d.reps} resellers`)) : null,
+        h("button", { class: "ghost", type: "button", onclick: () => { rows.splice(rows.indexOf(r), 1); box.remove(); } }, T("حذف", "Remove"))));
+    rows.push(r); list.append(box);
+  };
+  const moveFrom = h("select", {}), moveTo = h("select", {});
+  const load = async () => {
+    const r = await api("GET", "/api/v2/admin/sub-domains").catch(() => null);
+    if (!r) return;
+    fallback = r.fallback || "";
+    list.replaceChildren(); rows.length = 0;
+    (r.domains || []).forEach(addRow);
+    if (!rows.length) addRow();
+    const opts = (r.domains || []).map((d) => d.url);
+    moveFrom.replaceChildren(...opts.map((u) => h("option", { value: u }, u)));
+    moveTo.replaceChildren(...(r.domains || []).filter((d) => !d.retired).map((d) => h("option", { value: d.url }, d.url)));
+    hint.textContent = T(`بدون آدرس پیش‌فرض، لینک‌ها با آدرس عمومی هاب ساخته می‌شوند: ${fallback}`, `Without a default, links use the HUB's public address: ${fallback}`);
+  };
+  const hint = h("p", { class: "small muted" });
+  load();
+  return h("div", { class: "card form" },
+    h("h2", {}, "🌐 ", T("دامنه‌های ساب", "Subscription addresses")),
+    h("p", { class: "small muted" }, T("همهٔ آدرس‌هایی که به پورت ساب هاب می‌رسند. لینک هر مشتری روی همهٔ آن‌ها کار می‌کند؛ لینک‌های جدید با آدرس پیش‌فرض ساخته می‌شوند و هر نماینده می‌تواند یکی را برای مشتری‌هایش انتخاب کند. فروشگاه‌های متصل آدرس خودشان را دارند و تغییری نمی‌کنند.",
+      "Every address that reaches the HUB's subscription port. A customer's link works on all of them; new links use the default, and each reseller may pick one for its customers. Connected shops keep their own addresses.")),
+    hint, list,
+    h("div", { class: "row" }, h("button", { class: "ghost", type: "button", onclick: () => rows.length < 20 && addRow() }, T("+ آدرس", "+ Address")),
+      h("button", { class: "primary", type: "button", onclick: async () => {
+        const domains = rows.filter((r) => r.url.value.trim()).map((r) => ({ url: r.url.value, label: r.label.value, default: r.def.checked, retired: r.ret.checked }));
+        await guarded(() => api("PUT", "/api/v2/admin/sub-domains", { domains })); toast(t("saved")); load();
+      } }, t("save"))),
+    h("h3", {}, T("آدرسی فیلتر شد؟", "An address got filtered?")),
+    h("p", { class: "small muted" }, T("همهٔ نماینده‌هایی که روی آن آدرس‌اند (و پیش‌فرض، اگر همان باشد) به آدرس دیگر می‌روند و آدرس قبلی بازنشسته می‌شود. توکن لینک‌ها عوض نمی‌شود.",
+      "Every reseller on that address (and the default, if it is that one) moves to another address, and the old one is retired. Link tokens do not change.")),
+    h("div", { class: "row" }, h("span", {}, T("از", "From")), moveFrom, h("span", {}, T("به", "to")), moveTo,
+      h("button", { class: "danger", type: "button", onclick: async () => {
+        if (!moveFrom.value || !moveTo.value || moveFrom.value === moveTo.value) return;
+        if (!(await confirmAction(T(`همه از ${moveFrom.value} به ${moveTo.value} منتقل شوند؟`, `Move everyone from ${moveFrom.value} to ${moveTo.value}?`)))) return;
+        const r = await guarded(() => api("POST", "/api/v2/admin/sub-domains/move", { from: moveFrom.value, to: moveTo.value }));
+        toast(T(`${fmtNum(r.moved)} نماینده منتقل شد`, `${r.moved} resellers moved`)); load();
+      } }, T("انتقال", "Move"))));
 }
 
 function subSettingsCard() {
@@ -6057,6 +7277,8 @@ function foreignCard() {
   const node = h("select", {}, h("option", { value: "" }, "—"));
   const addr = h("input", { dir: "ltr", placeholder: "vpn.example.com" });
   const ins = h("div", { class: "chips" }, h("span", { class: "muted small" }, "…"));
+  const dest = h("select", {}, h("option", { value: "" }, lang === "fa" ? "مالک (کاربرهای خود پنل)" : "Owner (the panel's own clients)"));
+  api("GET", "/api/v2/admin/tenants").then((list) => (list || []).forEach((x) => dest.append(h("option", { value: x.id }, `${lang === "fa" ? "فروشگاه متصل" : "Connected shop"}: ${x.name}`)))).catch(() => {});
   api("GET", "/api/v2/admin/nodes").then((list) => fill(node, (list || []).map((n, i) => h("option", { value: n.ID, selected: i === 0 }, `${n.Name || n.ID}${n.PublicIP ? ` · ${n.PublicIP}` : ""}`)))).catch(() => {});
   api("GET", "/api/v2/admin/inbounds").then((list) => fill(ins, (list || []).map((i) => h("label", { class: "check" }, h("input", { type: "checkbox", value: i.tag }), h("span", {}, i.tag))))).catch(() => {});
   const show = (r, dry) => {
@@ -6073,7 +7295,7 @@ function foreignCard() {
     if (!dry && !await confirmAction(s4("fAsk"), t("migImport"))) return;
     btn.disabled = true; fill(out, h("p", { class: "muted small" }, t("migWorking")));
     const q = new URLSearchParams({ dry_run: dry ? "1" : "0", node: node.value, address: addr.value.trim(),
-      inbounds: [...ins.querySelectorAll("input:checked")].map((x) => x.value).join(",") });
+      inbounds: [...ins.querySelectorAll("input:checked")].map((x) => x.value).join(","), tenant: dest.value });
     try {
       const res = await fetch(`/api/v2/admin/migrate/foreign?${q}`, { method: "POST", credentials: "same-origin", body: file.files[0], headers: { "X-Dark-Request": "1", "Content-Type": "application/octet-stream" } });
       const text = await res.text();
@@ -6089,6 +7311,7 @@ function foreignCard() {
     h("label", {}, h("span", {}, s4("fFile")), file),
     h("div", { class: "two" }, h("label", {}, h("span", {}, s4("fNode")), node), h("label", {}, h("span", {}, s4("fAddr")), addr)),
     h("div", { class: "small muted" }, s4("fExtra")), ins,
+    h("label", {}, h("span", {}, lang === "fa" ? "مقصد" : "Destination"), dest),
     h("div", { class: "row" }, preview, imp), out);
 }
 
@@ -6553,11 +7776,11 @@ function viewSettings() {
     h("div", { class: "row" }, h("button", { class: "danger", onclick: async () => { await api("POST", "/api/v2/auth/logout"); location.hash = "#/login"; } }, t("logout"))));
   // Settings are grouped; one group shows at a time so the page stays short.
   const groups = [
-    owner && ["sub", "link", fa ? "اشتراک مشتری" : "Customer subscription", fa ? "عنوان، نام کانفیگ‌ها و صفحهٔ مشتری" : "Title, config names, customer page", () => [subSettingsCard()]],
+    owner && ["sub", "link", fa ? "اشتراک مشتری" : "Customer subscription", fa ? "عنوان، نام کانفیگ‌ها و صفحهٔ مشتری" : "Title, config names, customer page", () => [subSettingsCard(), subDomainsCard()]],
     (owner || fullOwner()) && ["panel", "globe", fa ? "آدرس و دسترسی پنل" : "Panel address and access", fa ? "HTTPS، مسیر مخفی، IPهای مجاز" : "HTTPS, secret path, trusted IPs", () => [fullOwner() ? panelNameCard() : null, fullOwner() ? panelHTTPSCard() : null, fullOwner() ? panelPathCard() : null, owner ? trustedCard() : null]],
     me.role === "rep" && ["repsub", "link", fa ? "صفحهٔ اشتراک من" : "My subscription page", fa ? "برند، لوگو و آدرس اختصاصی" : "Brand, logo and own address", () => [repBrandCard("/api/v2/rep/brand")]],
     me.role === "rep" && ["repapi", "link", fa ? "API فروش من" : "My sales API", fa ? "کلید برای ربات و سایت خودتان" : "Keys for your own bot and site", () => [resKeysCard("/api/v2/rep/apikeys")]],
-    me.role === "rep" && ["repbot", "bell", fa ? "ربات فروش و کارت من" : "My sales bot and card", fa ? "ربات تلگرام اختصاصی، کارت به کارت" : "Own Telegram bot, card payment", () => [mirzaCard("/api/v2/rep/pg-api", true), repBotCard("/api/v2/rep/bot"), botLookCard("/api/v2/rep/bot"), sellerCardCard("/api/v2/shop/card")]],
+    me.role === "rep" && ["repbot", "bell", fa ? "ربات فروش و کارت من" : "My sales bot and card", fa ? "ربات تلگرام اختصاصی، کارت به کارت" : "Own Telegram bot, card payment", () => [me.sub_seller ? null : mirzaCard("/api/v2/rep/pg-api", true), repBotCard("/api/v2/rep/bot"), botLookCard("/api/v2/rep/bot"), sellerCardCard("/api/v2/shop/card")]],
     ["security", "staff", fa ? "امنیت حساب" : "Account security", fa ? "رمز، ورود دومرحله‌ای، نشست‌ها" : "Password, two-step sign-in, sessions", () => [pwForm, tfaCard(), sessionsCard()]],
     (fullOwner() || owner || tgCard) && ["telegram", "bell", fa ? "تلگرام" : "Telegram", fa ? "ربات، هشدارها، فروش و دعوت" : "Bot, alerts, sales and referrals", () => [fullOwner() ? telegramBotCard() : null, fullOwner() ? botLookCard("/api/v2/admin/telegram") : null, owner ? tgCommerceCard() : null, fullOwner() ? mirzaCard("/api/v2/admin/pg-api", false) : null, tgCard]],
     fullOwner() && ["backup", "traffic", fa ? "پشتیبان و انتقال" : "Backup and migration", fa ? "دانلود، بازگردانی، ورود از پنل‌های دیگر" : "Download, restore, import from other panels", () => [backupCard, migrateCard(), foreignCard()]],
@@ -6594,7 +7817,7 @@ async function route() {
   } catch { return; }
   routes = routesFor(me);
   const first = Object.keys(routes)[0];
-  const hidden = { client: [viewClient, "clients"], repview: [viewRepDashboard, "reps"] };
+  const hidden = { client: [viewClient, "clients"], repview: [viewRepDashboard, "reps"], ...(me.legacy ? { legacy: [viewLegacy, "clients"] } : {}) };
   const view = hidden[name] ? hidden[name][0] : routes[name] || routes[first];
   try {
     const content = await view();
@@ -6605,6 +7828,9 @@ async function route() {
   }
 }
 
+// A window (client, node health, confirm…) belongs to the page it was opened
+// on: going to another page, or Back, closes it instead of leaving it on top.
+window.addEventListener("hashchange", () => { const d = document.getElementById("modal"); if (d?.open) d.close("nav"); });
 window.addEventListener("hashchange", route);
 window.addEventListener("storage", (e) => {
   if (e.key === "color-scheme") document.querySelector('meta[name="color-scheme"]').content = e.newValue ?? "light dark";

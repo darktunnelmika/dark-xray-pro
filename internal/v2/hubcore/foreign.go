@@ -29,6 +29,11 @@ type ForeignOptions struct {
 	Inbounds []string `json:"inbounds"` // extra v2 inbounds every moved client gets (Marzban has no inbounds in its database)
 	Prefix   string   `json:"prefix"`   // tag prefix for imported inbounds, default the panel kind
 	DryRun   bool     `json:"dry_run"`
+	// Tenant puts every moved client under a connected shop (tenant.go)
+	// instead of the owner: names go into the shop's name space, the old
+	// panel's logins and resellers are not moved (the shop keeps its own),
+	// and no Telegram links are made.
+	Tenant string `json:"tenant"`
 }
 
 // ForeignReport tells what was (or would be) moved.
@@ -131,6 +136,16 @@ func (s *Store) ImportForeign(ctx context.Context, path string, opt ForeignOptio
 	if err != nil {
 		return rep, err
 	}
+	var ten Tenant
+	if opt.Tenant != "" {
+		if ten, err = s.TenantByID(ctx, opt.Tenant); err != nil {
+			return rep, fmt.Errorf("%w: connected shop %q does not exist", ErrInvalid, opt.Tenant)
+		}
+		if len(admins) > 0 {
+			rep.note("%d logins of the old panel were not moved: the connected shop keeps its own resellers", len(admins))
+			admins = nil
+		}
+	}
 	for _, tag := range opt.Inbounds {
 		var n int
 		if s.ro.QueryRowContext(ctx, `SELECT COUNT(*) FROM inbounds WHERE tag=?`, tag).Scan(&n); n == 0 {
@@ -193,12 +208,34 @@ func (s *Store) ImportForeign(ctx context.Context, path string, opt ForeignOptio
 	}
 	// Clients: names must be new here.
 	var moved []foreignClient
+	seenName := map[string]bool{}
 	for _, c := range clients {
 		c.name = v2Email(c.name)
+		shown := c.name
+		if opt.Tenant != "" {
+			// The shop's name space: its own name, under its prefix.
+			n := tenantSafeName(c.name)
+			if n != c.name {
+				rep.note("client %s is called %s in the shop (the name had characters a shop name cannot use)", c.name, n)
+			}
+			shown, c.name = n, tenantEmail(opt.Tenant, n)
+			if seenName[strings.ToLower(c.name)] {
+				rep.skip("client %s: two clients would get the same name", shown)
+				continue
+			}
+			seenName[strings.ToLower(c.name)] = true
+			if u := strings.ToLower(c.uuid); uuidRE.MatchString(u) {
+				var x int
+				if s.ro.QueryRowContext(ctx, `SELECT 1 FROM clients WHERE uuid=?`, u).Scan(&x) == nil {
+					rep.skip("client %s: its UUID is already used by another client of this panel", shown)
+					continue
+				}
+			}
+		}
 		var n int
-		_ = s.ro.QueryRowContext(ctx, `SELECT COUNT(*) FROM clients WHERE email=?`, c.name).Scan(&n)
+		_ = s.ro.QueryRowContext(ctx, `SELECT COUNT(*) FROM clients WHERE email=? COLLATE NOCASE`, c.name).Scan(&n)
 		if n > 0 {
-			rep.skip("client %s: already exists in this panel", c.name)
+			rep.skip("client %s: already exists in this panel", shown)
 			continue
 		}
 		var tags []string
@@ -231,8 +268,22 @@ func (s *Store) ImportForeign(ctx context.Context, path string, opt ForeignOptio
 			rep.Logins++
 		}
 	}
+	if opt.Tenant != "" && len(ten.Inbounds) > 0 {
+		var add []string
+		for _, t := range append(append([]string{}, rep.Inbounds...), opt.Inbounds...) {
+			if !contains(ten.Inbounds, t) && !contains(add, t) {
+				add = append(add, t)
+			}
+		}
+		if len(add) > 0 {
+			rep.note("the shop %s may now also give the inbounds %s", opt.Tenant, strings.Join(add, ", "))
+		}
+	}
 	if opt.DryRun {
 		return rep, nil
+	}
+	if opt.Tenant != "" {
+		ctx = withTenantAccess(ctx, opt.Tenant)
 	}
 
 	// 1. Inbounds (each in its own write, removed again if anything fails).
@@ -298,7 +349,7 @@ func (s *Store) ImportForeign(ctx context.Context, path string, opt ForeignOptio
 		}
 		if c.subID != "" && subIDRE.MatchString(c.subID) {
 			var n int
-			_ = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM clients WHERE sub_token=?`, c.subID).Scan(&n)
+			_ = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM clients WHERE sub_token=? AND sub_token<>''`, c.subID).Scan(&n)
 			if n == 0 {
 				cl.SubToken = c.subID // the old 3x-ui link /sub/<subId> keeps working
 				links++
@@ -309,6 +360,9 @@ func (s *Store) ImportForeign(ctx context.Context, path string, opt ForeignOptio
 			return rep, fmt.Errorf("client %s: %w", c.name, err)
 		}
 		repID := repOf[c.repID]
+		if opt.Tenant != "" {
+			repID, c.tg = tenantRep(opt.Tenant), 0
+		}
 		plan := "volume"
 		if cl.VolumeBytes < 0 {
 			plan = "unlimited"
@@ -321,7 +375,8 @@ func (s *Store) ImportForeign(ctx context.Context, path string, opt ForeignOptio
 			return rep, err
 		}
 		if resetPeriods[c.period] && c.period != "" {
-			_, _ = tx.ExecContext(ctx, `UPDATE clients SET reset_period=?, last_reset_unix=? WHERE email=?`, c.period, now, c.name)
+			col, year := resetColumns(c.period)
+			_, _ = tx.ExecContext(ctx, `UPDATE clients SET reset_period=?, reset_year=?, last_reset_unix=? WHERE email=?`, col, year, now, c.name)
 		}
 		if c.up+c.down > 0 {
 			// A term that starts at the first connection must not start
@@ -330,7 +385,7 @@ func (s *Store) ImportForeign(ctx context.Context, path string, opt ForeignOptio
 			if c.duration > 0 {
 				first, last = 0, 0
 			}
-			if _, err := tx.ExecContext(ctx, `INSERT OR REPLACE INTO client_usage(email,up,down,first_seen_unix,last_seen_unix) VALUES(?,?,?,?,?)`, c.name, c.up, c.down, first, last); err != nil {
+			if _, err := tx.ExecContext(ctx, `INSERT OR REPLACE INTO client_usage(email,up,down,first_seen_unix,last_seen_unix,ext_bytes) VALUES(?,?,?,?,?,?)`, c.name, c.up, c.down, first, last, c.up+c.down); err != nil {
 				undo()
 				return rep, err
 			}
@@ -344,6 +399,19 @@ func (s *Store) ImportForeign(ctx context.Context, path string, opt ForeignOptio
 				return rep, err
 			}
 			links++
+		}
+	}
+	if opt.Tenant != "" && len(ten.Inbounds) > 0 {
+		all := append([]string{}, ten.Inbounds...)
+		for _, t := range append(append([]string{}, rep.Inbounds...), opt.Inbounds...) {
+			if !contains(all, t) {
+				all = append(all, t)
+			}
+		}
+		raw, _ := json.Marshal(all)
+		if _, err := tx.ExecContext(ctx, `UPDATE tenants SET inbounds=? WHERE id=?`, string(raw), opt.Tenant); err != nil {
+			undo()
+			return rep, err
 		}
 	}
 	if err := tx.Commit(); err != nil {
@@ -741,10 +809,8 @@ func readMarzban(ctx context.Context, db *sql.DB, kind string, rep *ForeignRepor
 		}
 		c.created = parseMarzbanTime(u.created)
 		switch u.period {
-		case "day", "week", "month":
+		case "day", "week", "month", "year":
 			c.period = u.period
-		case "year":
-			rep.note("client %s: yearly reset is not offered here — reset it by hand", u.name)
 		}
 		if u.admin > 0 {
 			c.repID = strconv.FormatInt(u.admin, 10)

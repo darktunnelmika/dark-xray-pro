@@ -35,6 +35,8 @@ func (m *docMux) apiRoutes() []APIRoute {
 		switch {
 		case path == "/api/v2/auth/login" || path == "/api/v2/auth/logout":
 			acc = "public"
+		case strings.HasPrefix(path, "/api/tenant/"):
+			acc = "tenant" // a connected shop's key (tenantapi.go)
 		case strings.HasPrefix(path, "/api/v2/rep/"):
 			acc = "rep"
 		case isOwnerOnly(path):

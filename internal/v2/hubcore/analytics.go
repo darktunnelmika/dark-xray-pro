@@ -83,7 +83,7 @@ func (s *Store) analyticsScope(ctx context.Context, by Principal, seller string)
 	case by.Role != "owner":
 		return "", nil, ErrAuth
 	case seller == "":
-		return "1=1", nil, nil
+		return ownerWorld, nil, nil // connected shops are not the panel's sales
 	case seller == "-":
 		return "c.rep_id=''", nil, nil
 	default:

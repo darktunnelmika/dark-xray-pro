@@ -832,8 +832,12 @@ func TestInsights(t *testing.T) {
 	_, _ = s.db.Exec(`INSERT INTO usage_daily(email,node_id,day,up,down) VALUES('alice','de-1',?,1,9),('bob','de-1',?,50,50)`, day, day)
 	_, _ = s.db.Exec(`INSERT INTO events(unix,node_id,email,kind) VALUES(1,'de-1','bob','blocked:volume')`)
 	in, err := s.Insights(ctx, 7)
-	if err != nil || len(in.Daily) != 7 || in.Daily[6].Up != 51 || len(in.Top) != 2 || in.Top[0].Email != "bob" || len(in.Events) != 1 {
+	if err != nil || len(in.Daily) != 7 || in.Daily[6].Up != 51 || in.Daily[6].Users != 2 || in.Daily[5].Users != 0 || len(in.Top) != 2 || in.Top[0].Email != "bob" || len(in.Events) != 1 {
 		t.Fatalf("%v %+v", err, in)
+	}
+	// The dashboard asks for twice its 90-day range.
+	if in, err := s.Insights(ctx, 180); err != nil || len(in.Daily) != 180 {
+		t.Fatalf("180 days: %v %d", err, len(in.Daily))
 	}
 }
 

@@ -176,7 +176,8 @@ func (s *Store) BulkExtend(ctx context.Context, req BulkRequest) (int, error) {
 		}
 		seen[e] = true
 		var exp, dur, vol int64
-		if err := tx.QueryRowContext(ctx, `SELECT expires_unix,duration_seconds,volume_bytes FROM clients WHERE email=?`, e).Scan(&exp, &dur, &vol); err != nil {
+		// Owner bulk work never reaches a connected shop's clients.
+		if err := tx.QueryRowContext(ctx, `SELECT expires_unix,duration_seconds,volume_bytes FROM clients c WHERE email=? AND `+ownerWorld, e).Scan(&exp, &dur, &vol); err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				continue
 			}
@@ -238,14 +239,26 @@ func (s *Store) TransferClient(ctx context.Context, email, toRep string) error {
 			return ErrNotFound
 		}
 	}
-	r, err := s.db.ExecContext(ctx, `UPDATE clients SET rep_id=? WHERE email=?`, toRep, email)
+	// A connected shop's client changes worlds only with a move (its name
+	// changes too): see MoveClients.
+	r, err := s.db.ExecContext(ctx, `UPDATE clients SET rep_id=? WHERE email=? AND substr(rep_id,1,1)<>'~'`, toRep, email)
 	if err != nil {
 		return err
 	}
 	if n, _ := r.RowsAffected(); n != 1 {
+		if s.TenantOfClient(ctx, email) != "" {
+			return fmt.Errorf("%w: this client belongs to a connected shop; use “move clients” to take it out", ErrInvalid)
+		}
 		return ErrNotFound
 	}
-	return nil
+	// An old user is billed for its use to the seller it belongs to now (the
+	// owner has no credit: moved to the owner, it is no longer billed).
+	if toRep == "" {
+		_, err = s.db.ExecContext(ctx, `DELETE FROM legacy_clients WHERE email=?`, email)
+	} else {
+		_, err = s.db.ExecContext(ctx, `UPDATE legacy_clients SET rep_id=? WHERE email=?`, toRep, email)
+	}
+	return err
 }
 
 // Group is a named set of clients.
@@ -272,7 +285,7 @@ func (s *Store) PutGroup(ctx context.Context, g Group) error {
 		return err
 	}
 	for _, e := range g.Members {
-		if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO client_group_members(group_id,email) SELECT ?, email FROM clients WHERE email=?`, g.ID, e); err != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO client_group_members(group_id,email) SELECT ?, email FROM clients c WHERE email=? AND `+ownerWorld+``, g.ID, e); err != nil {
 			return err
 		}
 	}
