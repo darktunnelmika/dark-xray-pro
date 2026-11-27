@@ -35,11 +35,22 @@ func TestMenuLeadsWithWhatTheCustomerNeeds(t *testing.T) {
 	}
 	first := func(m sent) string { return m.kb.Rows[0][0].Text }
 
-	// A new customer: a greeting, the pitch, and buying first. Support is on
-	// the bottom keyboard, not repeated here.
+	// A new customer: a greeting, the pitch, and buying first; the less used
+	// buttons wait behind "more".
 	m := menu()
-	if !strings.Contains(m.text, "خوش آمدید") || first(m) != "🛍 خرید اشتراک" || hasButton(m.kb, "پشتیبانی") || hasButton(m.kb, "سرویس من") {
+	if !strings.Contains(m.text, "خوش آمدید") || !strings.Contains(m.text, "✨ <b>Dark VPN</b>") || first(m) != "🛍 خرید اشتراک" || hasButton(m.kb, "سرویس من") ||
+		!hasButton(m.kb, "بیشتر") || hasButton(m.kb, "وضعیت سرورها") || m.kb.Rows[0][0].Style != "success" {
 		t.Fatalf("new customer: %q %+v", m.text, m.kb.Rows)
+	}
+	// The Mini App, when on, is the first and widest button.
+	_ = s.SetSetting(ctx, "miniapp", "1")
+	if m = menu(); m.kb.Rows[0][0].WebApp == nil || m.kb.Rows[0][0].WebApp.URL != "https://x/app/" || len(m.kb.Rows[0]) != 1 {
+		t.Fatalf("app button: %+v", m.kb.Rows)
+	}
+	_ = s.SetSetting(ctx, "miniapp", "")
+	b.Handle(ctx, cb(cust, "more"))
+	if mm := find(t, api.take(), cust, "بیشتر"); !hasButton(mm.kb, "وضعیت سرورها") || !hasButton(mm.kb, "کد تخفیف") {
+		t.Fatalf("more: %+v", mm.kb)
 	}
 	_ = s.PutTrialPolicy(ctx, hubcore.TrialPolicy{Enabled: true, GB: 1, Hours: 24, MaxIPs: 1})
 	if m = menu(); first(m) != "🎁 تست رایگان" || !strings.Contains(m.text, "رایگان امتحان") {
@@ -58,7 +69,8 @@ func TestMenuLeadsWithWhatTheCustomerNeeds(t *testing.T) {
 		t.Fatal(err)
 	}
 	m = menu()
-	if !strings.Contains(m.text, "📦 ۴۰ گیگ · دو ماهه") || strings.Contains(m.text, "🔹") || !strings.Contains(m.text, "▱▱▱▱▱▱▱▱▱▱ ۰٪") || !strings.Contains(m.text, "حجم مانده") {
+	if !strings.Contains(m.text, "۴۰ گیگ · دو ماهه</b>") || strings.Contains(m.text, "🔹") || !strings.Contains(m.text, "🟩🟩🟩🟩🟩🟩🟩🟩  ۱۰۰٪") ||
+		!strings.Contains(m.text, "💾 <b>۴۰ گیگ</b> از ۴۰ گیگ") || !strings.Contains(m.text, "📊 <b>۱</b> سرویس فعال") {
 		t.Fatalf("service card: %q", m.text)
 	}
 	if strings.Contains(m.text, email) {

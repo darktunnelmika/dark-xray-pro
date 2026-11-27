@@ -33,15 +33,27 @@ func sizeShort(n int64) string {
 	return strings.NewReplacer("٫۰۰", "", ".00", "").Replace(size(n))
 }
 
-func usageBar(share float64) string {
-	if share < 0 {
-		share = 0
+// leftBar shows what is left in coloured squares: green, then yellow under
+// a quarter, red under a tenth.
+func leftBar(left float64) string {
+	if left < 0 {
+		left = 0
 	}
-	if share > 1 {
-		share = 1
+	if left > 1 {
+		left = 1
 	}
-	n := int(share*10 + 0.5)
-	return strings.Repeat("▰", n) + strings.Repeat("▱", 10-n)
+	n := int(left*8 + 0.5)
+	if n == 0 && left > 0 {
+		n = 1
+	}
+	sq := "🟩"
+	switch {
+	case left < 0.1:
+		sq = "🟥"
+	case left < 0.25:
+		sq = "🟨"
+	}
+	return strings.Repeat(sq, n) + strings.Repeat("⬜", 8-n)
 }
 
 // planTitle is a readable name for a service: the product it was bought
@@ -74,45 +86,45 @@ func (b *Bot) planTitle(ctx context.Context, c hubcore.ClientView) string {
 func (b *Bot) menuCard(ctx context.Context, c hubcore.ClientView, showName bool) (card string, ended bool) {
 	now := b.now().Unix()
 	var sb strings.Builder
-	fmt.Fprintf(&sb, "<b>📦 %s</b>\n", esc(b.planTitle(ctx, c)))
+	st := b.state(c)
+	fmt.Fprintf(&sb, "%s <b>%s</b>\n", st.icon, esc(b.planTitle(ctx, c)))
 	if showName { // several services: the technical name tells them apart, on its own line
 		fmt.Fprintf(&sb, "<code>%s</code>\n", esc(shortName(c.Email)))
 	}
 	used := c.Usage.Up + c.Usage.Down
 	switch {
 	case !c.Enabled:
-		sb.WriteString("⛔ این سرویس غیرفعال است.")
+		sb.WriteString("این سرویس غیرفعال است.")
 		return sb.String(), false
 	case c.Remaining == 0:
-		sb.WriteString(usageBar(1) + " تمام شد\nحجم این سرویس تمام شده است. با تمدید، همین لینک دوباره فعال می‌شود.")
+		sb.WriteString(leftBar(0) + "\n🔴 حجم تمام شد؛ با تمدید، همین لینک دوباره فعال می‌شود.")
 		return sb.String(), true
 	case c.EffectiveUntil > 0 && c.EffectiveUntil <= now:
-		sb.WriteString("⌛ زمان این سرویس تمام شده است. با تمدید، همین لینک دوباره فعال می‌شود.")
+		sb.WriteString("🔴 زمان تمام شد؛ با تمدید، همین لینک دوباره فعال می‌شود.")
 		return sb.String(), true
 	}
+	vol := "♾ <b>نامحدود</b>"
 	if c.VolumeBytes > 0 {
-		share := float64(used) / float64(c.VolumeBytes)
-		left := c.VolumeBytes - used
-		if left < 0 {
-			left = 0
-		}
-		fmt.Fprintf(&sb, "%s %s٪\nحجم مانده: <b>%s</b> از %s\n", usageBar(share), faInt(int64(share*100+0.5)), sizeShort(left), sizeShort(c.VolumeBytes))
-	} else {
-		sb.WriteString("حجم: <b>نامحدود</b>\n")
+		left := max(c.VolumeBytes-used, 0)
+		share := float64(left) / float64(c.VolumeBytes)
+		fmt.Fprintf(&sb, "%s  %s٪\n", leftBar(share), faInt(int64(share*100+0.5)))
+		vol = fmt.Sprintf("💾 <b>%s</b> از %s", sizeShort(left), sizeShort(c.VolumeBytes))
 	}
+	var when string
 	switch {
 	case c.EffectiveUntil > now:
 		left := c.EffectiveUntil - now
 		if left >= 86400 {
-			fmt.Fprintf(&sb, "زمان مانده: <b>%s روز</b>", faInt((left+86399)/86400))
+			when = "⏳ <b>" + faInt((left+86399)/86400) + " روز</b>"
 		} else {
-			fmt.Fprintf(&sb, "زمان مانده: <b>%s ساعت</b>", faInt((left+3599)/3600))
+			when = "⏳ <b>" + faInt((left+3599)/3600) + " ساعت</b>"
 		}
 	case c.DurationSeconds > 0 && c.Usage.FirstSeen == 0:
-		fmt.Fprintf(&sb, "🆕 آماده؛ %s روز از اولین اتصال", faInt(c.DurationSeconds/86400))
+		when = "🆕 " + faInt(c.DurationSeconds/86400) + " روز از اولین اتصال"
 	default:
-		sb.WriteString("زمان: <b>بدون محدودیت</b>")
+		when = "⏳ بی‌زمان"
 	}
+	sb.WriteString(vol + "  ·  " + when)
 	return sb.String(), false
 }
 
@@ -165,10 +177,8 @@ const menuLines = 6 // services listed one per line before the rest are counted
 
 func (b *Bot) menu(ctx context.Context, chat int64) {
 	var sb strings.Builder
-	if name := b.Store.TgName(ctx, chat); name != "" {
-		fmt.Fprintf(&sb, "<b>سلام %s 👋</b>\n", esc(name))
-	} else {
-		sb.WriteString("<b>سلام 👋</b>\n")
+	if brand := b.brandTitle(ctx); brand != "" {
+		sb.WriteString("✨ <b>" + esc(brand) + "</b>\n")
 	}
 	emails, _ := b.clients(ctx, chat)
 	var views []hubcore.ClientView
@@ -176,6 +186,18 @@ func (b *Bot) menu(ctx context.Context, chat int64) {
 		if c, err := b.Store.ClientByEmail(ctx, e); err == nil {
 			views = append(views, c)
 		}
+	}
+	hello := "سلام"
+	if name := b.Store.TgName(ctx, chat); name != "" {
+		hello += " <b>" + esc(name) + "</b>"
+	}
+	hello += " 👋"
+	if len(views) == 0 {
+		hello += " خوش آمدید!"
+	}
+	sb.WriteString(hello + "\n")
+	if len(views) > 0 {
+		sb.WriteString(line + "\n" + b.menuSummary(views) + "\n")
 	}
 	var ended []string
 	if len(views) <= 2 {
@@ -212,15 +234,12 @@ func (b *Bot) menu(ctx context.Context, chat int64) {
 	}
 	if len(views) == 0 {
 		if w := b.Store.Welcome(ctx, b.Seller); w != "" {
-			sb.WriteString(esc(w) + "\n")
+			sb.WriteString(line + "\n" + esc(w) + "\n")
 		} else {
-			brand := "به <b>Dark VPN</b> خوش آمدید."
-			if b.Seller != "" {
-				brand = "خوش آمدید."
-			}
-			sb.WriteString(brand + "\nاینترنت بدون قطعی" + b.countriesPhrase(ctx) + "، با یک لینک برای همهٔ دستگاه‌ها.\n")
+			sb.WriteString(line + "\n🚀 اینترنت آزاد و پرسرعت" + b.countriesPhrase(ctx) + "، با یک لینک برای همهٔ دستگاه‌ها.\n")
+			sb.WriteString("⚡️ تحویل خودکار  ·  🔄 تمدید بدون عوض شدن لینک  ·  💬 پشتیبانی\n")
 			if b.Store.TrialPolicyFor(ctx, b.Seller).Enabled && !b.Store.TrialUsed(ctx, b.Seller, chat) {
-				sb.WriteString("اول رایگان امتحان کنید، بعد تصمیم بگیرید.\n")
+				sb.WriteString("\n🎁 <b>اول رایگان امتحان کنید</b>، بعد تصمیم بگیرید.\n")
 			}
 		}
 	}
@@ -370,27 +389,34 @@ func layoutMenu(list []menuButton, look hubcore.BotLook) [][]Button {
 func (b *Bot) menuKB(ctx context.Context, chat int64, services int, ended []string) *Keyboard {
 	var list []menuButton
 	add := func(key string, btn Button, wide bool) { list = append(list, menuButton{key, btn, wide}) }
+	styled := func(btn Button, st string) Button { btn.Style = st; return btn }
+	look := b.Store.BotLook(ctx, b.Seller)
+	custom := len(look.Buttons) > 0 // the seller arranged the menu itself: every button stays where it put it
 	trial := b.Store.TrialPolicyFor(ctx, b.Seller).Enabled && !b.Store.TrialUsed(ctx, b.Seller, chat)
+	// The Mini App first, wide: the whole store and the services in one tap.
+	if u := b.miniURL(ctx); strings.HasPrefix(u, "https://") {
+		add("app", Button{Text: "📱 باز کردن اپ", WebApp: &WebApp{URL: u}, Style: "success"}, true)
+	}
 	switch {
 	case services == 0:
 		if trial {
-			add("trial", cbBtn("🎁 تست رایگان", "trial"), true)
+			add("trial", styled(cbBtn("🎁 تست رایگان", "trial"), "primary"), true)
 		}
-		add("shop", cbBtn("🛍 خرید اشتراک", "shop"), true)
+		add("shop", styled(cbBtn("🛍 خرید اشتراک", "shop"), "success"), true)
 	default:
 		if len(ended) == 1 && len("rnw:"+ended[0]) <= 64 {
-			add("renew", cbBtn("🔄 تمدید سرویس", "rnw:"+ended[0]), true)
+			add("renew", styled(cbBtn("🔄 تمدید سرویس", "rnw:"+ended[0]), "success"), true)
 		} else if len(ended) > 0 {
-			add("renew", cbBtn("🔄 تمدید سرویس‌ها", "mine"), true)
+			add("renew", styled(cbBtn("🔄 تمدید سرویس‌ها", "mine"), "success"), true)
 		}
 		mine := "📦 سرویس من"
 		if services > 1 {
 			mine = "📦 سرویس‌های من"
 		}
-		add("mine", cbBtn(mine, "mine"), false)
-		add("shop", cbBtn("🛍 خرید اشتراک", "shop"), false)
+		add("mine", styled(cbBtn(mine, "mine"), "primary"), false)
+		add("shop", styled(cbBtn("🛍 خرید اشتراک", "shop"), "success"), false)
 		if trial {
-			add("trial", cbBtn("🎁 تست رایگان", "trial"), false)
+			add("trial", styled(cbBtn("🎁 تست رایگان", "trial"), "primary"), false)
 		}
 	}
 	// The wallet is always there when it can be used (to top it up), not
@@ -398,23 +424,28 @@ func (b *Bot) menuKB(ctx context.Context, chat int64, services int, ended []stri
 	if b.Seller != "" || b.cardOn(ctx) || b.Store.WalletBalance(ctx, chat) > 0 || b.Store.TomanBalance(ctx, b.Seller, chat) > 0 {
 		add("wallet", cbBtn("👛 کیف پول", "wallet"), false)
 	}
-	add("guide", cbBtn("📚 آموزش اتصال", "guide"), false)
-	add("status", cbBtn("🌐 وضعیت سرورها", "status"), false)
-	// Inviting friends is the owner's shop's; resellers' bots do not have it.
-	if b.Seller == "" && b.Store.ReferralPolicy(ctx).Enabled {
-		add("invite", cbBtn("👥 دعوت دوستان", "invite"), false)
-	}
-	add("coupon", cbBtn("🎟 کد تخفیف", "cpn:"), false)
 	if b.wheelOn(ctx) {
-		add("wheel", cbBtn("🎡 گردونهٔ شانس", "spin"), false)
+		add("wheel", styled(cbBtn("🎡 گردونهٔ شانس", "spin"), "primary"), false)
 	}
+	add("guide", cbBtn("📚 آموزش اتصال", "guide"), false)
+	add("support", cbBtn("💬 پشتیبانی", "support"), false)
 	add("me", cbBtn("👤 حساب من", "me"), false)
 	if btn, ok := b.repSaleButton(ctx, chat); ok {
 		add("panel", btn, false)
 	}
 	list = append(list, b.growButtons(ctx, chat)...) // trial panel, reseller request (repgrow.go)
-	add("link", cbBtn("🔗 افزودن با لینک", "link"), false)
-	rows := layoutMenu(list, b.Store.BotLook(ctx, b.Seller))
+	if custom {
+		add("status", cbBtn("🌐 وضعیت سرورها", "status"), false)
+		if b.Seller == "" && b.Store.ReferralPolicy(ctx).Enabled {
+			add("invite", cbBtn("👥 دعوت دوستان", "invite"), false)
+		}
+		add("coupon", cbBtn("🎟 کد تخفیف", "cpn:"), false)
+		add("link", cbBtn("🔗 افزودن با لینک", "link"), false)
+	} else {
+		// The less used ones wait behind one button (moreMenu).
+		add("more", cbBtn("➕ بیشتر", "more"), false)
+	}
+	rows := layoutMenu(list, look)
 	if b.Owners[chat] {
 		// The owner is only looking at the customer's view: one tap back.
 		rows = append(rows, row(cbBtn("🛡 بازگشت به پنل مدیریت", "a:home")))
@@ -424,4 +455,72 @@ func (b *Bot) menuKB(ctx context.Context, chat int64, services int, ended []stri
 		rows = append(rows, row(repBtn("🧑‍💼 بازگشت به حالت نماینده", "mode")))
 	}
 	return &Keyboard{Rows: rows}
+}
+
+// brandTitle is the store's name over the menu: the reseller's brand in its
+// bot (nothing when it set none), else the panel's, else Dark VPN.
+func (b *Bot) brandTitle(ctx context.Context) string {
+	ss := b.Store.SubSettings(ctx)
+	if b.Seller != "" {
+		return b.Store.RepBrand(ctx, b.Seller).Title
+	}
+	if ss.Title != "" {
+		return ss.Title
+	}
+	return "Dark VPN"
+}
+
+// menuSummary is one line over the cards: how many services, what is left
+// in them and the nearest end.
+func (b *Bot) menuSummary(views []hubcore.ClientView) string {
+	now := b.now().Unix()
+	live, unl := 0, false
+	var left int64
+	soon := int64(-1)
+	for _, c := range views {
+		if !c.Enabled || c.Remaining == 0 || (c.EffectiveUntil > 0 && c.EffectiveUntil <= now) {
+			continue
+		}
+		live++
+		if c.VolumeBytes < 0 {
+			unl = true
+		} else if c.VolumeBytes > 0 {
+			left += max(c.VolumeBytes-c.Usage.Up-c.Usage.Down, 0)
+		}
+		if c.EffectiveUntil > now {
+			if d := (c.EffectiveUntil - now + 86399) / 86400; soon < 0 || d < soon {
+				soon = d
+			}
+		}
+	}
+	if live == 0 {
+		return "📊 سرویس فعالی ندارید؛ برای ادامه، تمدید یا خرید کنید."
+	}
+	parts := []string{fmt.Sprintf("📊 <b>%s</b> سرویس فعال", faInt(int64(live)))}
+	switch {
+	case unl:
+		parts = append(parts, "♾ حجم نامحدود")
+	case left > 0:
+		parts = append(parts, "<b>"+sizeShort(left)+"</b> مانده")
+	}
+	if soon >= 0 {
+		w := faInt(soon) + " روز"
+		if soon <= 3 {
+			w = "⚠️ " + w
+		}
+		parts = append(parts, "نزدیک‌ترین پایان: "+w)
+	}
+	return strings.Join(parts, "  ·  ")
+}
+
+// moreMenu holds the menu's less used buttons.
+func (b *Bot) moreMenu(ctx context.Context, chat int64) {
+	kb := &Keyboard{}
+	kb.Rows = append(kb.Rows, row(cbBtn("🌐 وضعیت سرورها", "status"), cbBtn("🎟 کد تخفیف", "cpn:")))
+	r := []Button{cbBtn("🔗 افزودن با لینک", "link")}
+	if b.Seller == "" && b.Store.ReferralPolicy(ctx).Enabled {
+		r = append(r, cbBtn("👥 دعوت دوستان", "invite"))
+	}
+	kb.Rows = append(kb.Rows, r, row(cbBtn("« منوی اصلی", "home")))
+	b.send(ctx, chat, "➕ <b>بیشتر</b>\n"+line+"\n🌐 وضعیت سرورها: کدام کشورها الان آنلاین‌اند\n🎟 کد تخفیف: اگر کد دارید، اینجا بزنید\n🔗 افزودن با لینک: سرویسی که از جای دیگر گرفته‌اید را به این حساب وصل کنید", kb)
 }

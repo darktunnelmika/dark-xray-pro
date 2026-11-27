@@ -43,6 +43,7 @@ type BotMenuButton struct {
 
 // BotMenuButtons lists the main menu's buttons in their built-in order.
 var BotMenuButtons = []BotMenuButton{
+	{Key: "app", Label: "📱 باز کردن اپ", Wide: true, Note: "مینی‌اپ فروشگاه؛ وقتی آدرس https دارد"},
 	{Key: "trial", Label: "🎁 تست رایگان", Wide: true, Note: "فقط وقتی تست رایگان روشن است و مشتری هنوز نگرفته"},
 	{Key: "renew", Label: "🔄 تمدید سرویس", Wide: true, Note: "فقط وقتی سرویسی تمام شده باشد"},
 	{Key: "mine", Label: "📦 سرویس‌های من", Note: "فقط برای مشتری‌ای که سرویس دارد"},
@@ -56,6 +57,8 @@ var BotMenuButtons = []BotMenuButton{
 	{Key: "me", Label: "👤 حساب من"},
 	{Key: "panel", Label: "💼 خرید پنل نمایندگی", Note: "فقط وقتی فروش پنل روشن است"},
 	{Key: "link", Label: "🔗 افزودن با لینک"},
+	{Key: "support", Label: "💬 پشتیبانی"},
+	{Key: "more", Label: "➕ بیشتر", Note: "وضعیت سرورها، کد تخفیف، افزودن با لینک و دعوت؛ فقط در چیدمان پیش‌فرض"},
 }
 
 func botLookKey(seller string) string {

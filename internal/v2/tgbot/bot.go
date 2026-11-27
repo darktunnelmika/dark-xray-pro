@@ -775,7 +775,14 @@ func (b *Bot) mine(ctx context.Context, chat int64) {
 			continue
 		}
 		st := b.state(c)
-		kb.Rows = append(kb.Rows, row(cbBtn(st.icon+" "+c.Email, "svc:"+e)))
+		label := st.icon + " " + b.planTitle(ctx, c)
+		if c.VolumeBytes > 0 && st.active {
+			label += " · " + sizeShort(max(c.VolumeBytes-c.Usage.Up-c.Usage.Down, 0)) + " مانده"
+		}
+		if len([]rune(label)) > 40 {
+			label = string([]rune(label)[:39]) + "…"
+		}
+		kb.Rows = append(kb.Rows, row(cbBtn(label, "svc:"+e)))
 	}
 	kb.Rows = append(kb.Rows, row(cbBtn("« منوی اصلی", "home")))
 	b.send(ctx, chat, "📦 <b>سرویس‌های شما</b>\n"+line+"\nیک سرویس را برای دیدن جزئیات انتخاب کنید:", kb)
@@ -1006,6 +1013,8 @@ func (b *Bot) onCallback(ctx context.Context, q *CallbackQuery) {
 		b.trial(ctx, chat)
 	case "spin":
 		b.spin(ctx, chat)
+	case "more":
+		b.moreMenu(ctx, chat)
 	case "invite":
 		b.invite(ctx, chat)
 	case "wallet":
