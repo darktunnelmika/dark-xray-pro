@@ -136,6 +136,13 @@ func TestMiniAdminStage25(t *testing.T) {
 	if !found {
 		t.Fatalf("inbox %s", rec.Body.String())
 	}
+	// One open bill at a time: the wallet now pays (and settles the first bill).
+	if code, _, body := call(aliTok, "600", "POST", "/app/api/m/decide", map[string]any{"kind": "panel", "id": oid, "ok": true}); code != 400 || !bytes.Contains([]byte(body), []byte("کیف پول")) {
+		t.Fatalf("no funds %d %s", code, body)
+	}
+	if _, _, err := s.RepWalletAdjust(ctx, "owner", "ali", 1_000_000, "paid"); err != nil {
+		t.Fatal(err)
+	}
 	if code, _, body := call(aliTok, "600", "POST", "/app/api/m/decide", map[string]any{"kind": "panel", "id": oid, "ok": true}); code != 200 {
 		t.Fatalf("decide %d %s", code, body)
 	}
