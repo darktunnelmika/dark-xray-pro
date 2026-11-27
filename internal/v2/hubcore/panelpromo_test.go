@@ -23,6 +23,9 @@ func TestPanelPromo(t *testing.T) {
 	if err := s.PutRepBot(ctx, "ali", RepBot{Token: aliTok, Enabled: true}); err != nil {
 		t.Fatal(err)
 	}
+	if err := s.PutCard(ctx, CardInfo{Number: "6037991234567890", Holder: "Owner"}); err != nil {
+		t.Fatal(err)
+	}
 	if err := s.PutRepSale(ctx, RepSale{Enabled: true, WholesaleTB: 1_024_000, Packages: []RepPackage{{ID: "p1", Name: "100", GB: 100, Price: 300000}}}); err != nil {
 		t.Fatal(err)
 	}
@@ -82,6 +85,9 @@ func TestPanelPromo(t *testing.T) {
 
 	// A reseller's discount never goes under what it pays wholesale (100 GB = 100,000).
 	if err := s.PutResaleOwner(ctx, "ali", true, true, 0); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.PutPayCards(ctx, "ali", []PayCard{{Number: "6219861000000001", Holder: "Ali", Enabled: true}}); err != nil {
 		t.Fatal(err)
 	}
 	if code, _, body := call(aliTok, "600", "POST", "/app/api/m/panelpromo", map[string]any{"on": true, "percent": 90}); code != 200 {
