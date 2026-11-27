@@ -62,7 +62,7 @@ function mSet(view, filter) {
 function manageView() {
   if (!M.home) { mLoad(); return [h("div", { class: "boot" }, h("span", { class: "spinner" }))]; }
   const p = M.home.pending || {};
-  const inboxN = (p.orders || 0) + (p.topups || 0);
+  const inboxN = (p.orders || 0) + (p.topups || 0) + (p.panels || 0);
   const more = typeof M2V === "object";
   const seg = h("div", { class: "seg", role: "tablist" },
     segBtn("dash", "داشبورد", "home"),
@@ -95,9 +95,10 @@ function dashView() {
   out.push(h("div", { class: "kpis" }, kpi("همه", st.total, ""), kpi("فعال", st.active, ""), kpi("آنلاین", st.online, "online", "good"),
     kpi("رو به اتمام", st.soon, "soon", "warn"), kpi("تمام‌شده", st.ended, "ended", "bad")));
   const pend = d.pending || {};
-  if (can("orders") && (pend.orders || pend.topups)) {
+  const pendN = (pend.orders || 0) + (pend.topups || 0) + (pend.panels || 0);
+  if (can("orders") && pendN) {
     out.push(h("button", { class: "card alert", onclick: () => mSet("inbox") }, mic("inbox"),
-      h("span", {}, `${num((pend.orders || 0) + (pend.topups || 0))} پرداخت منتظر تأیید شماست`), h("b", {}, "دیدن")));
+      h("span", {}, `${num(pendN)} پرداخت منتظر تأیید شماست`), h("b", {}, "دیدن")));
   }
   if (d.tickets && typeof M2V === "object") {
     out.push(h("button", { class: "card alert", onclick: () => mSet("tickets") }, mic("chat"),
@@ -154,22 +155,29 @@ function userRow(c) {
   const until = c.until ? `${num(daysLeft(c.until))} روز` : c.start_days ? `${num(c.start_days)} روز از اتصال` : "بی‌زمان";
   const picking = M.pick !== null;
   const box = picking ? h("input", { type: "checkbox", class: "pickbox", checked: M.pick.has(c.name), "aria-label": c.name }) : null;
-  const row = h("button", { class: `urow ${tone}`, onclick: () => {
+  const open = () => {
     if (picking) { M.pick.has(c.name) ? M.pick.delete(c.name) : M.pick.add(c.name); render(); return; }
     userSheet(c.name);
-  } },
+  };
+  const stop = (f) => (e) => { e.stopPropagation(); tap(); f(); };
+  const acts = picking ? null : h("div", { class: "u-acts" },
+    can("edit") ? h("button", { class: `sw ${c.enabled ? "on" : ""}`, role: "switch", "aria-checked": c.enabled ? "true" : "false", "aria-label": c.enabled ? "خاموش کردن" : "روشن کردن",
+      onclick: stop(() => setMany([c.name], c.enabled ? "off" : "on")) }, h("i")) : null,
+    can("delete") ? h("button", { class: "iconbtn mini danger", "aria-label": "حذف", onclick: stop(() => confirmDelete([c.name])) }, mic("trash")) : null);
+  return h("div", { class: `urow ${tone} ${c.enabled ? "" : "off"}`, role: "button", tabindex: "0", onclick: open },
     box,
     h("div", { class: "u-main" },
       h("div", { class: "u-top" }, c.online ? h("span", { class: "dot live" }) : null, h("b", { class: "ltr" }, c.name), h("span", { class: `pill ${tone}` }, label)),
       h("div", { class: "u-bar", "aria-hidden": "true" }, h("i", { style: `--w:${c.total < 0 ? 0 : pct}%` })),
-      h("div", { class: "u-meta" }, h("span", {}, `${size(c.used)} از ${c.total < 0 ? "نامحدود" : size(c.total)}`), h("span", {}, until))));
-  return row;
+      h("div", { class: "u-meta" }, h("span", {}, `${size(c.used)} از ${c.total < 0 ? "نامحدود" : size(c.total)}`), h("span", {}, until))),
+    acts);
 }
 
 function bulkBar() {
   const names = [...M.pick];
   return h("div", { class: "bulkbar" }, h("b", {}, `${num(names.length)} انتخاب`),
     can("renew") ? btn("تمدید", "primary", () => renewSheet(names), "renew") : null,
+    can("renew") ? btn("افزودن", "", () => addSheet(names), "plus") : null,
     can("edit") ? btn("خاموش", "", () => setMany(names, "off"), "power") : null,
     can("edit") ? btn("روشن", "", () => setMany(names, "on"), "power") : null,
     can("delete") ? btn("حذف", "danger", () => confirmDelete(names), "trash") : null);
@@ -203,8 +211,13 @@ async function userSheet(name) {
     h("div", { class: "kv" }, h("span", {}, "زمان"), h("b", {}, c.until ? `${num(daysLeft(c.until))} روز (تا ${date(c.until)})` : c.start_days ? `${num(c.start_days)} روز از اولین اتصال` : "بی‌زمان")),
     c.daily_cap ? h("div", { class: "kv" }, h("span", {}, "سقف روزانه"), h("b", {}, `${size(c.daily_used)} از ${size(c.daily_cap)} امروز`)) : null,
     c.note ? h("div", { class: "kv" }, h("span", {}, "یادداشت"), h("b", {}, c.note)) : null,
+    r.links && r.links.length ? h("details", { class: "more" }, h("summary", {}, `کانفیگ‌ها جدا (${num(r.links.length)})`),
+      h("div", { class: "cfgs" }, r.links.map((l) => h("button", { class: "cfg", onclick: () => copy(l.link) },
+        h("span", { class: "pill" }, l.kind), h("span", { class: "ltr" }, l.name || l.kind), mic("copy")))),
+      btn("کپی همه", "block ghost", () => copy(r.links.map((l) => l.link).join("\n")), "copy")) : null,
     h("div", { class: "actions" },
       can("renew") ? btn("تمدید", "primary", () => { close(); renewSheet([c.name]); }, "renew") : null,
+      can("renew") ? btn("افزودن حجم / روز", "", () => { close(); addSheet([c.name], c); }, "plus") : null,
       can("edit") ? btn(c.enabled ? "خاموش" : "روشن", "", () => { close(); setMany([c.name], c.enabled ? "off" : "on"); }, "power") : null,
       can("edit") ? btn("سقف روزانه", "", () => { close(); dailySheet(c); }, "gauge") : null,
       can("edit") ? btn("یادداشت", "", () => { close(); noteSheet(c); }, "note") : null,
@@ -221,6 +234,25 @@ function noteSheet(c) {
   const v = h("input", { value: c.note || "", maxlength: "200", placeholder: "مثلاً اسم یا شمارهٔ مشتری" });
   const close = sheet(h("h2", {}, "یادداشت"), h("label", { class: "field" }, v),
     btn("ذخیره", "primary block", () => { close(); setMany([c.name], "note", { note: v.value }); }, "check"));
+}
+
+// addSheet: more volume and/or days on the current term (no reset).
+function addSheet(names, c) {
+  const unl = c && c.total < 0;
+  const gb = h("input", { type: "number", min: "0", step: "1", inputmode: "decimal", placeholder: unl ? "نامحدود" : "۰", disabled: unl ? "" : null });
+  const days = h("input", { type: "number", min: "0", step: "1", inputmode: "numeric", placeholder: "۰" });
+  const quick = (g, d) => h("button", { class: "chip", onclick: () => { if (!unl) gb.value = g || ""; days.value = d || ""; } }, [g ? `${num(g)} گیگ` : "", d ? `${num(d)} روز` : ""].filter(Boolean).join(" + "));
+  const go = btn(names.length > 1 ? `افزودن به ${num(names.length)} کاربر` : "افزودن", "primary block big", async () => {
+    go.disabled = true;
+    try {
+      const r = await api("POST", "m/add", { emails: names, gb: +gb.value || 0, days: Math.round(+days.value || 0) });
+      close(); haptic("success"); celebrate(`به ${num(r.done)} کاربر اضافه شد`); M.pick = null; await mLoad();
+    } catch (e) { go.disabled = false; haptic("error"); toast(e.message); }
+  }, "plus");
+  const close = sheet(h("h2", {}, "افزودن حجم یا روز"),
+    h("p", { class: "muted small" }, "به همین دوره اضافه می‌شود؛ مصرف صفر نمی‌شود. فقط حجم اضافه از اعتبار کم می‌شود."),
+    h("div", { class: "chips" }, unl ? null : quick(10, 0), unl ? null : quick(20, 0), unl ? null : quick(50, 0), quick(0, 7), quick(0, 30)),
+    h("div", { class: "two" }, h("label", { class: "field" }, h("span", {}, "حجم (گیگ)"), gb), h("label", { class: "field" }, h("span", {}, "روز"), days)), go);
 }
 
 // planPicker: ready plans and (when allowed) a custom volume and term.
@@ -307,7 +339,7 @@ function renewSheet(names) {
 function inboxView() {
   if (!M.inbox.length) return [h("div", { class: "card empty" }, h("p", {}, "پرداخت منتظری نیست ✨"))];
   return [h("div", { class: "ulist" }, M.inbox.map((it) => h("div", { class: "card inbox" },
-    h("div", { class: "row between" }, h("b", {}, `${it.kind === "topup" ? "➕ " : "🧾 "}${it.title} #${num(it.id)}`), h("b", {}, `${toman(it.amount)} تومان`)),
+    h("div", { class: "row between" }, h("b", {}, `${it.kind === "topup" ? "➕ " : it.kind === "panel" ? "🤝 " : "🧾 "}${it.title} #${num(it.id)}`), h("b", {}, `${toman(it.amount)} تومان`)),
     h("div", { class: "muted small" }, `${it.buyer || ""} · ${date(it.unix)}${it.renew ? ` · تمدید ${it.renew}` : ""}`),
     it.card || it.last4 ? h("div", { class: "small" }, it.card ? `💳 به کارت …${it.card}` : "", it.last4 ? ` · ۴ رقم آخر واریزکننده: ${it.last4}` : "") : null,
     h("div", { class: "row" },

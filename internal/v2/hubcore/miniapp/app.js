@@ -156,6 +156,20 @@ function serviceCard(sv) {
       state.products.length ? btn("تمدید", "", () => renew(sv), "renew") : null));
 }
 
+function serviceRow(sv) {
+  const now = Date.now() / 1000, unl = sv.total < 0;
+  const left = unl ? -1 : Math.max(0, sv.total - sv.used);
+  const pct = unl ? 100 : Math.round((left / Math.max(1, sv.total)) * 100);
+  const days = sv.until > now ? `${num(Math.ceil((sv.until - now) / 86400))} روز` : sv.until === 0 && sv.days_on_use ? `${num(sv.days_on_use)} روز از اتصال` : sv.until > 0 ? "تمام شده" : "بی‌زمان";
+  const tone = pct < 10 ? "bad" : pct < 25 ? "warn" : "";
+  return h("div", { class: `svc-row ${tone}`, role: "button", tabindex: "0", onclick: () => { const close = sheet(serviceCard(sv), btn("بستن", "ghost block", () => close())); } },
+    h("div", { class: "sr-main" },
+      h("div", { class: "sr-top" }, ltr(sv.email), statusPill(sv)),
+      h("div", { class: "sr-bar", "aria-hidden": "true" }, h("i", { style: `--w:${pct}%` })),
+      h("div", { class: "sr-meta" }, h("span", {}, unl ? "حجم نامحدود" : `${size(left)} مانده از ${size(sv.total)}`), h("span", {}, days))),
+    h("button", { class: "sr-copy", "aria-label": "کپی لینک", onclick: (e) => { e.stopPropagation(); copy(sv.sub_url); } }, icon(IC.copy)));
+}
+
 function services() {
   const out = [];
   if (!state.services.length) {
@@ -169,7 +183,8 @@ function services() {
     out.push(...extras());
     return out;
   }
-  out.push(...state.services.map(serviceCard));
+  // A short list; the rings, usage and actions open with a tap.
+  out.push(h("div", { class: "svc-list" }, state.services.map(serviceRow)));
   out.push(...extras());
   const input = h("input", { placeholder: "https://…/sub/…", "aria-label": "لینک اشتراک دیگر", dir: "ltr" });
   out.push(h("div", { class: "section-title" }, "سرویس دیگری دارید؟"),
@@ -329,8 +344,48 @@ function extras() {
   return out;
 }
 
+// Reseller panels on sale in this bot (GET panels); loaded once.
+let panelSale;
+function panelSection() {
+  if (panelSale === undefined) {
+    panelSale = null;
+    api("GET", "panels").then((r) => { panelSale = r; if (tab === "shop") render(); }).catch(() => { panelSale = { on: false }; });
+    return [];
+  }
+  if (!panelSale || !panelSale.on) return [];
+  return [h("div", { class: "section-title" }, "🤝 پنل نمایندگی"),
+    h("p", { class: "muted small" }, "پنل فروش خودتان را بگیرید: کاربر بسازید، بفروشید و سود کنید. همه‌چیز از داخل همین ربات و مینی‌اپ."),
+    h("div", { class: "grid" }, panelSale.packages.map((p) => h("div", { class: "card product" },
+      h("h3", {}, p.name),
+      h("div", { class: "chips" }, h("span", { class: "chip" }, `📶 ${num(p.gb)} گیگ اعتبار`), p.unlimited ? h("span", { class: "chip" }, "♾ فروش نامحدود") : null,
+        p.max_clients ? h("span", { class: "chip" }, `حداکثر ${num(p.max_clients)} کاربر`) : null),
+      h("div", { class: "price" }, h("b", {}, toman(p.price)), h("small", {}, "تومان")),
+      btn("خرید پنل", "primary block", () => buyPanel(p), "card"))))];
+}
+
+function buyPanel(p) {
+  const name = h("input", { dir: "ltr", placeholder: "مثلاً ali-shop", autocapitalize: "off", autocomplete: "off", spellcheck: "false", "aria-label": "نام کاربری پنل" });
+  const go = btn("ثبت سفارش", "primary", async () => {
+    go.disabled = true;
+    try {
+      const r = await api("POST", "panel", { package: p.id, name: name.value.trim().toLowerCase() });
+      close(); haptic("success");
+      sheet(h("h2", {}, `سفارش پنل #${num(r.id)} ثبت شد`), h("p", { class: "muted small" }, "نام کاربری پنل: ", ltr(r.username)),
+        r.card && r.card.number ? cardBox(r.price, r.card) : h("div", { class: "pay" }, "پشتیبانی برای پرداخت با شما تماس می‌گیرد."),
+        receiptSteps(), btn("رفتن به ربات برای ارسال رسید", "primary block", openBot, "chat"));
+    } catch (e) { go.disabled = false; haptic("error"); toast(e.message.includes("گرفته شده") ? "این نام کاربری گرفته شده؛ نام دیگری بنویسید." : e.message); }
+  }, "card");
+  const close = sheet(h("h2", {}, "خرید پنل نمایندگی"),
+    h("div", { class: "summary" }, h("div", {}, p.name), h("div", { class: "muted small" }, `${num(p.gb)} گیگ اعتبار · ${toman(p.price)} تومان`)),
+    h("p", { class: "muted small" }, "یک نام کاربری انگلیسی برای پنل بنویسید (حروف کوچک و عدد، ۳ تا ۲۴ حرف)."),
+    h("div", { class: "field" }, name), h("div", { class: "row" }, go, btn("انصراف", "", () => close())));
+}
+
 function shop() {
-  if (!state.products.length) return [h("div", { class: "card empty" }, h("h2", {}, "فعلاً پلنی برای فروش نیست"), h("p", {}, "کمی بعد دوباره سر بزنید."))];
+  if (!state.products.length) {
+    const ps = panelSection();
+    return ps.length ? ps : [h("div", { class: "card empty" }, h("h2", {}, "فعلاً پلنی برای فروش نیست"), h("p", {}, "کمی بعد دوباره سر بزنید."))];
+  }
   const cats = [...new Set(state.products.map((p) => p.category || ""))];
   const out = [h("div", { class: "section-title" }, "پلن‌ها")];
   // The middle-priced plan is the suggested one.
@@ -340,6 +395,7 @@ function shop() {
     if (cats.length > 1) out.push(h("div", { class: "section-title sub" }, c || "سایر"));
     out.push(h("div", { class: "grid" }, state.products.filter((p) => (p.category || "") === c).map((p) => productCard(p, "", p.id === feat))));
   }
+  out.push(...panelSection());
   return out;
 }
 

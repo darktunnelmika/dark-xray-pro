@@ -196,6 +196,24 @@ func takeXLSXTicket(t string, now time.Time) (xlsxTicket, bool) {
 func miniFa(err error) (string, int) {
 	msg := err.Error()
 	switch {
+	case errors.Is(err, ErrFunds):
+		return "موجودی کیف پول شما در پنل اصلی برای قیمت عمده کافی نیست؛ اول کیف پول را شارژ کنید.", http.StatusBadRequest
+	case strings.Contains(msg, "below the wholesale price"):
+		return "قیمت فروش نمی‌تواند کمتر از قیمت عمده باشد.", http.StatusBadRequest
+	case strings.Contains(msg, "already decided"):
+		return "این سفارش قبلاً بررسی شده.", http.StatusBadRequest
+	case strings.Contains(msg, "amount is out of range"):
+		return "مبلغ باید بین ۱۰ هزار تا ۱۰ میلیارد تومان باشد.", http.StatusBadRequest
+	case strings.Contains(msg, "has no card set"), strings.Contains(msg, "set the payment card first"):
+		return "کارت پرداخت مدیر پنل هنوز تعریف نشده.", http.StatusBadRequest
+	case strings.Contains(msg, "panel sale is not allowed"):
+		return "فروش پنل برای شما فعال نیست.", http.StatusForbidden
+	case strings.Contains(msg, "define a package first"):
+		return "اول دست‌کم یک بسته تعریف کنید.", http.StatusBadRequest
+	case strings.Contains(msg, "a package is 1 GB"):
+		return "هر بسته دست‌کم ۱ گیگ و قیمت داشته باشد.", http.StatusBadRequest
+	case strings.Contains(msg, "unlimited client has no volume"):
+		return "کاربر نامحدود حجم ندارد که اضافه شود.", http.StatusBadRequest
 	case errors.Is(err, ErrCredit), strings.Contains(msg, "insufficient credit"):
 		return "اعتبار کافی نیست.", http.StatusBadRequest
 	case strings.Contains(msg, "overdue bill"):

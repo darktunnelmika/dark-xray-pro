@@ -10,6 +10,7 @@ Object.assign(IC, {
   send: "M22 2 11 13M22 2l-7 20-4-9-9-4z",
   back: "M9 18l6-6-6-6",
   down: "M12 3v12M6 11l6 6 6-6M4 21h16",
+  shop: "M3 9l1.5-5h15L21 9M3 9h18v11H3zM9 13h6",
 });
 
 const M2 = { wallet: null, ledger: [], ledgerEnd: false, sellers: null, bot: null, cards: null, plans: null, tickets: [], tStatus: "active", report: null, days: 7 };
@@ -37,6 +38,7 @@ async function m2Fetch(view) {
     case "plans": M2.plans = await api("GET", "m/plans"); break;
     case "tickets": M2.tickets = await api("GET", `m/tickets?s=${M2.tStatus}`); break;
     case "report": M2.report = await api("GET", `m/report?days=${M2.days}`); break;
+    case "resale": M2.resale = await api("GET", "m/resale"); break;
   }
 }
 const m2Reload = () => m2Fetch(M.view).then(render).catch((e) => toast(e.message));
@@ -49,6 +51,7 @@ function moreView() {
   const tiles = [
     !d.owner && c.credit ? tile("wallet", "اعتبار و شارژ", "wallet", d.credit !== undefined ? size(d.credit) : "") : null,
     c.sellers && !d.sub_seller ? tile("sellers", d.owner ? "نماینده‌ها" : "زیرمجموعه‌ها", "users", "ساخت، اعتبار، دعوت") : null,
+    d.resale ? tile("resale", "فروش پنل نمایندگی", "shop", d.owner ? "بسته‌ها و سفارش‌ها" : "پنل بفروش، سود ببر", (d.pending || {}).panels) : null,
     c.bot ? tile("bot", "ربات من", "bot", "توکن، روشن و خاموش") : null,
     c.cards ? tile("cards", "کارت‌های پرداخت", "card", "چند کارت، سقف روزانه") : null,
     c.plans ? tile("plans", "پلن‌ها و قیمت‌ها", "tag", "فروشگاه ربات") : null,
@@ -362,7 +365,7 @@ function reportView() {
   const days = r.days || [];
   const max = Math.max(1, ...days.map((d) => d.sold));
   out.push(h("div", { class: "card" }, h("div", { class: "muted small" }, "حجم فروخته در هر روز"),
-    h("div", { class: "bars", style: `--n:${days.length}` }, days.map((d) => h("i", { style: `--h:${Math.round((d.sold / max) * 100)}%`, title: `${d.day}: ${size(d.sold)} · ${num(d.sales)} فروش` }))),
+    h("div", { class: "rbars", style: `--n:${days.length}` }, days.map((d) => h("i", { style: `--h:${Math.round((d.sold / max) * 100)}%`, title: `${d.day}: ${size(d.sold)} · ${num(d.sales)} فروش` }))),
     h("div", { class: "row between muted small" }, h("span", {}, days.length ? days[0].day : ""), h("span", {}, days.length ? days[days.length - 1].day : ""))));
   const recent = days.slice().reverse().filter((d) => d.sales || d.toman || d.back).slice(0, 14);
   if (recent.length) {
@@ -386,4 +389,140 @@ async function downloadXLSX() {
 
 function spin() { return h("div", { class: "boot" }, h("span", { class: "spinner" })); }
 
-const M2V = { more: moreView, wallet: walletView, sellers: sellersView, bot: botView, cards: cardsView, plans: plansView, tickets: ticketsView, report: reportView };
+// ---------- panel sale ----------
+function resaleView() {
+  const d = M2.resale;
+  if (!d) return [backHead("فروش پنل نمایندگی"), spin()];
+  if (d.owner) return ownerSaleView(d);
+  if (!d.allowed) return [backHead("فروش پنل نمایندگی"), h("div", { class: "card" }, h("p", {}, "فروش پنل برای شما فعال نیست. اگر می‌خواهید نمایندهٔ ویژه شوید و پنل بفروشید، از مدیر پنل بخواهید."))];
+  const v = d.view, st = d.stats || {}, out = [backHead("فروش پنل نمایندگی", btnIcon("plus", "فروش پنل", () => sellPanelSheet()))];
+  if (v.locked) out.push(h("div", { class: "card alert bad" }, "⛔️ یک صورتحساب از مهلتش گذشته؛ تا پرداخت آن، فروش پنل و ساخت کاربر قفل است."));
+  out.push(h("div", { class: "kpis four" },
+    h("div", { class: "kpi" }, h("b", {}, num(st.panels || 0)), h("span", {}, "پنل فروخته")),
+    h("div", { class: "kpi" }, h("b", {}, num(st.month_sales || 0)), h("span", {}, "فروش این ماه")),
+    h("div", { class: "kpi" }, h("b", {}, toman(st.month_paid || 0)), h("span", {}, "درآمد ماه (تومان)")),
+    h("div", { class: "kpi" }, h("b", {}, toman((st.month_paid || 0) - (st.month_cost || 0))), h("span", {}, "سود ماه (تومان)"))));
+  const bills = (v.bills || []).filter((b) => b.status === "open");
+  out.push(h("div", { class: "card" },
+    h("div", { class: "row between" }, h("div", {}, h("div", { class: "muted small" }, "کیف پول نزد مدیر پنل"), h("b", { class: "big" }, `${toman(v.wallet || 0)} تومان`)),
+      btn("شارژ", "primary", resaleWalletSheet, "wallet")),
+    h("p", { class: "muted small" }, `هر فروش، قیمت عمده (هر ترابایت ${toman(v.wholesale_tb || 0)} تومان) را از این کیف پول کم می‌کند${v.resale && v.resale.credit ? "؛ اگر کافی نبود، صورتحساب ۲۴ ساعته صادر می‌شود" : ""}.`),
+    bills.map((b) => h("div", { class: "lrow" }, h("div", {}, h("b", {}, `صورتحساب #${num(b.id)}`), h("div", { class: `small ${b.overdue ? "bad" : "muted"}` }, b.overdue ? "سررسید گذشته" : `مهلت: ${date(b.due_unix)}`)),
+      h("div", { class: "end" }, h("b", {}, `${toman(b.amount)} تومان`), btn("پرداخت", "", async () => {
+        try { await api("POST", "m/resale/bill", { id: b.id }); toast("پرداخت شد"); m2Reload(); } catch (e) { toast(e.message); }
+      }))))));
+  // Selling in my bot and my prices.
+  const [onRow, onBox] = check("فروش پنل در ربات من (دکمهٔ «پنل نمایندگی» برای مشتری‌ها)", v.resale ? v.resale.enabled : true);
+  const prices = {};
+  const pk = (v.packages || []).map((p) => {
+    const inp = h("input", { type: "number", inputmode: "numeric", value: p.own || "", placeholder: toman(p.owner) });
+    prices[p.id] = inp;
+    return h("div", { class: "lrow" }, h("div", {}, h("b", {}, p.name), h("div", { class: "muted small" }, `${num(p.gb)} گیگ · عمده ${toman(p.cost)} تومان`)), h("div", { class: "pricein" }, inp));
+  });
+  out.push(h("div", { class: "section-title" }, "قیمت فروش من"),
+    h("div", { class: "card" }, onRow, h("p", { class: "muted small" }, "خالی = همان قیمت مدیر پنل. سود هر فروش = قیمت شما منهای قیمت عمده."), pk,
+      btn("ذخیره", "primary block", async () => {
+        const out_ = {};
+        for (const [id, inp] of Object.entries(prices)) if (+inp.value > 0) out_[id] = Math.round(+inp.value);
+        try { await api("POST", "m/resale/prices", { enabled: onBox.checked, prices: out_ }); haptic("success"); toast("ذخیره شد"); m2Reload(); } catch (e) { toast(e.message); }
+      }, "check")));
+  out.push(h("div", { class: "section-title" }, "پنل‌های فروخته"));
+  if (!d.panels.length) out.push(h("div", { class: "card empty" }, h("p", {}, "هنوز پنلی نفروخته‌اید. با دکمهٔ + بفروشید یا بگذارید مشتری‌ها از ربات‌تان بخرند.")));
+  out.push(h("div", { class: "ulist" }, d.panels.map((x) => h("button", { class: `urow ${x.enabled ? "" : "off"}`, onclick: () => soldPanelSheet(x) },
+    h("div", { class: "u-main" },
+      h("div", { class: "u-top" }, h("b", { class: "ltr" }, x.login || x.id), x.enabled ? null : h("span", { class: "pill" }, "خاموش")),
+      h("div", { class: "u-meta" }, h("span", {}, `اعتبار ${size(x.credit)} · ${num(x.clients)} کاربر`), h("span", {}, `${toman(x.paid)} تومان`)))))));
+  return out;
+}
+
+function pkgSelect(pkgs) {
+  const sel = h("select", {}, pkgs.map((p) => h("option", { value: p.id }, `${p.name} · ${num(p.gb)} گیگ · ${toman(p.price)} تومان`)));
+  return sel;
+}
+
+function sellPanelSheet(target) {
+  const v = M2.resale.view;
+  const pk = pkgSelect(v.packages || []);
+  const name = h("input", { class: "ltr", placeholder: "مثلاً reza-shop", autocapitalize: "off", autocomplete: "off", spellcheck: "false" });
+  const buyer = h("input", { placeholder: "اسم خریدار (اختیاری)" });
+  const go = btn(target ? "شارژ پنل" : "بفروش", "primary block big", async () => {
+    go.disabled = true;
+    try {
+      const r = await api("POST", "m/resale/sell", { target: target || "", name: name.value.trim().toLowerCase(), buyer: buyer.value, package: pk.value });
+      close(); haptic("success");
+      if (target) { celebrate("پنل شارژ شد"); m2Reload(); return; }
+      const txt = `🌐 ${r.address}\n👤 ${r.username}\n🔑 ${r.password}`;
+      sheet(h("h2", {}, "✅ پنل ساخته شد"),
+        r.bill ? h("p", { class: "small bad" }, `کیف پول کافی نبود؛ صورتحساب #${num(r.bill)} صادر شد و تا ۲۴ ساعت باید پرداخت شود.`) : h("p", { class: "muted small" }, `قیمت عمده (${toman(r.cost)} تومان) از کیف پول کم شد.`),
+        h("div", { class: "kv" }, h("span", {}, "آدرس"), h("b", { class: "ltr" }, r.address)),
+        h("div", { class: "kv" }, h("span", {}, "نام کاربری"), h("b", { class: "ltr" }, r.username)),
+        h("div", { class: "kv" }, h("span", {}, "رمز"), h("b", { class: "ltr" }, r.password)),
+        btn("کپی برای خریدار", "primary block", () => copy(txt), "copy"));
+      m2Reload();
+    } catch (e) { go.disabled = false; haptic("error"); toast(e.message); }
+  }, "check");
+  const close = sheet(h("h2", {}, target ? `شارژ پنل ${target}` : "فروش پنل نمایندگی"), field("بسته", pk),
+    target ? null : field("نام کاربری پنل (انگلیسی)", name), target ? null : field("خریدار", buyer), go);
+}
+
+function soldPanelSheet(x) {
+  const close = sheet(h("div", { class: "row between" }, h("h2", { class: "ltr" }, x.login || x.id), x.enabled ? h("span", { class: "pill good" }, "فعال") : h("span", { class: "pill" }, "خاموش")),
+    h("div", { class: "kv" }, h("span", {}, "اعتبار"), h("b", {}, size(x.credit))),
+    h("div", { class: "kv" }, h("span", {}, "کاربرها"), h("b", {}, `${num(x.clients)} (${num(x.active)} فعال)`)),
+    h("div", { class: "kv" }, h("span", {}, "فروخته در"), h("b", {}, x.sold ? date(x.sold) : "—")),
+    h("div", { class: "kv" }, h("span", {}, "پرداختی خریدار / عمدهٔ شما"), h("b", {}, `${toman(x.paid)} / ${toman(x.cost)}`)),
+    h("div", { class: "actions" },
+      btn("شارژ پنل", "primary", () => { close(); sellPanelSheet(x.id); }, "plus"),
+      btn(x.enabled ? "خاموش" : "روشن", "", async () => {
+        try { await api("POST", "m/resale/panel", { id: x.id, on: !x.enabled }); close(); toast("انجام شد"); m2Reload(); } catch (e) { toast(e.message); }
+      }, "power"),
+      btn("رمز تازه", "", async () => {
+        try {
+          const r = await api("POST", "m/resale/panel", { id: x.id, password: true });
+          close(); sheet(h("h2", {}, "🔑 رمز تازه"), h("div", { class: "kv" }, h("span", {}, "نام کاربری"), h("b", { class: "ltr" }, r.username)),
+            h("div", { class: "kv" }, h("span", {}, "رمز"), h("b", { class: "ltr" }, r.password)), btn("کپی", "primary block", () => copy(`${r.username}\n${r.password}`), "copy"));
+        } catch (e) { toast(e.message); }
+      }, "renew")));
+}
+
+function resaleWalletSheet() {
+  const amt = h("input", { type: "number", inputmode: "numeric", placeholder: "مثلاً ۵۰۰۰۰۰۰" });
+  const go = btn("ادامه", "primary block big", async () => {
+    go.disabled = true;
+    try {
+      const r = await api("POST", "m/resale/wallet", { amount: Math.round(+amt.value || 0) });
+      close(); payToOwnerSheet(`شارژ کیف پول · سفارش #${num(r.id)}`, r);
+    } catch (e) { go.disabled = false; toast(e.message); }
+  }, "check");
+  const close = sheet(h("h2", {}, "شارژ کیف پول فروش پنل"), field("مبلغ (تومان)", amt), go);
+}
+
+function payToOwnerSheet(title, r) {
+  const goBot = () => { try { tg.openTelegramLink(`https://t.me/${r.bot}`); tg.close(); } catch { location.href = `https://t.me/${r.bot}`; } };
+  sheet(h("h2", {}, title), r.card && r.card.number ? cardBox(r.price, r.card) : h("p", { class: "muted" }, "کارت پرداخت هنوز تعریف نشده."),
+    h("ol", { class: "steps" }, h("li", {}, "مبلغ را به کارت بالا واریز کنید."), h("li", {}, r.bot ? `عکس رسید را در ربات @${r.bot} بفرستید.` : "عکس رسید را در ربات اصلی بفرستید."), h("li", {}, "بعد از تأیید، خودکار انجام می‌شود.")),
+    r.bot ? btn("رفتن به ربات و ارسال رسید", "primary block big", goBot, "send") : null);
+}
+
+function ownerSaleView(d) {
+  const rows = (d.packages || []).map((p) => ({ id: p.id, name: p.name, gb: p.gb, price: p.price }));
+  const [onRow, onBox] = check("فروش پنل نمایندگی در ربات اصلی و مینی‌اپ", d.enabled);
+  const box = h("div", { class: "ulist" });
+  const draw = () => box.replaceChildren(...rows.map((p, i) => h("div", { class: "card ccard" },
+    h("div", { class: "row between" }, h("b", {}, `بسته ${num(i + 1)}`), h("button", { class: "linkbtn bad", onclick: () => { rows.splice(i, 1); draw(); } }, "حذف")),
+    h("input", { value: p.name || "", placeholder: "نام بسته", oninput: (e) => { p.name = e.target.value; } }),
+    h("div", { class: "two" }, field("حجم (گیگ)", h("input", { type: "number", inputmode: "numeric", value: p.gb || "", oninput: (e) => { p.gb = Math.round(+e.target.value || 0); } })),
+      field("قیمت (تومان)", h("input", { type: "number", inputmode: "numeric", value: p.price || "", oninput: (e) => { p.price = Math.round(+e.target.value || 0); } }))))));
+  draw();
+  return [backHead("فروش پنل نمایندگی"),
+    d.pending ? h("button", { class: "card alert", onclick: () => mSet("inbox") }, mic("inbox"), h("span", {}, `${num(d.pending)} سفارش پنل منتظر تأیید`), h("b", {}, "دیدن")) : null,
+    !d.has_card ? h("div", { class: "card small bad" }, "اول کارت پرداخت را در «کارت‌ها» تعریف کنید.") : null,
+    h("div", { class: "card" }, onRow, h("p", { class: "muted small" }, "تنظیمات دقیق هر بسته (سقف‌ها، نامحدود، اینباندها) از پنل وب است؛ اینجا نام، حجم و قیمت را عوض کنید.")),
+    box,
+    rows.length < 20 ? btn("افزودن بسته", "block ghost", () => { rows.push({ id: "", name: "", gb: 100, price: 0 }); draw(); }, "plus") : null,
+    btn("ذخیره", "primary block big", async () => {
+      try { await api("POST", "m/resale/sale", { enabled: onBox.checked, packages: rows }); haptic("success"); toast("ذخیره شد"); m2Reload(); } catch (e) { haptic("error"); toast(e.message); }
+    }, "check")];
+}
+
+const M2V = { more: moreView, resale: resaleView, wallet: walletView, sellers: sellersView, bot: botView, cards: cardsView, plans: plansView, tickets: ticketsView, report: reportView };

@@ -200,3 +200,18 @@ body { background-image: radial-gradient(color-mix(in oklab, var(--muted) 14%, t
 /* Opening screen (splash.js) */
 #splash { position: fixed; inset: 0; inline-size: 100%; block-size: 100%; z-index: 9999; background: var(--bg); transition: opacity .3s ease; }
 #splash.out { opacity: 0; pointer-events: none; }
+/* Services as a short list (the full card opens in a sheet). */
+.svc-list { display: grid; gap: 8px; }
+.svc-row { display: flex; align-items: center; gap: 10px; padding: 12px; border-radius: 15px; border: 1px solid var(--line); background: var(--surface); cursor: pointer; }
+.svc-row:active { transform: scale(.99); }
+.svc-row.warn { border-color: color-mix(in oklab, var(--warn) 35%, var(--line)); } .svc-row.bad { border-color: color-mix(in oklab, var(--bad) 35%, var(--line)); }
+.sr-main { flex: 1; min-inline-size: 0; display: grid; gap: 6px; }
+.sr-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-weight: 800; }
+.sr-top .ltr { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sr-bar { block-size: 5px; border-radius: 99px; background: var(--surface-2); overflow: hidden; }
+.sr-bar i { display: block; block-size: 100%; inline-size: var(--w); border-radius: inherit; background: linear-gradient(90deg, var(--ion), var(--ion-2)); }
+.svc-row.warn .sr-bar i { background: var(--warn); } .svc-row.bad .sr-bar i { background: var(--bad); }
+.sr-meta { display: flex; justify-content: space-between; gap: 8px; color: var(--muted); font-size: 12px; }
+.sr-copy { flex: none; inline-size: 40px; block-size: 40px; display: grid; place-items: center; border-radius: 12px; border: 1px solid var(--line); background: var(--surface-2); color: var(--text); cursor: pointer; }
+.sr-copy svg { inline-size: 18px; block-size: 18px; }
+.sheet .card.svc { border: 0; background: transparent; padding: 0; box-shadow: none; }

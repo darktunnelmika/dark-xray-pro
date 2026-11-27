@@ -229,7 +229,13 @@ func (s *Store) mgrHome(ctx context.Context, m miniMgr) (map[string]any, error) 
 		}
 	}
 	tops, _ := s.Topups(ctx, m.Seller, "review", 200)
-	out["pending"] = map[string]int{"orders": pend, "topups": len(tops)}
+	panels := 0
+	if m.can("sellers") {
+		po, _ := s.pendingRepOrders(ctx, m.Seller)
+		panels = len(po)
+	}
+	out["pending"] = map[string]int{"orders": pend, "topups": len(tops), "panels": panels}
+	out["resale"] = m.can("sellers") && (m.Owner || (!s.IsSubSeller(ctx, m.Seller) && s.ResaleOf(ctx, m.Seller).Allowed))
 	if m.can("tickets") {
 		open := 0
 		if ts, err := s.Tickets(ctx, m.P, "open", 200); err == nil {
@@ -507,7 +513,11 @@ func registerMiniAdmin(mux *http.ServeMux, s *Store, base func(*http.Request) st
 			return
 		}
 		sub := s.mgrSubURL(r.Context(), c, base(r))
-		reply(w, map[string]any{"client": miniClientOf(c, s.now().Unix()), "sub": sub, "qr": qrDataURL(sub)}, nil)
+		links, _ := s.ClientLinks(r.Context(), c.Email)
+		if len(links) > 40 {
+			links = links[:40]
+		}
+		reply(w, map[string]any{"client": miniClientOf(c, s.now().Unix()), "sub": sub, "qr": qrDataURL(sub), "links": links}, nil)
 	})
 	mux.HandleFunc("POST /app/api/m/create", func(w http.ResponseWriter, r *http.Request) {
 		m, ok := mgr(w, r)
@@ -716,6 +726,13 @@ func registerMiniAdmin(mux *http.ServeMux, s *Store, base func(*http.Request) st
 			}
 			out = append(out, it)
 		}
+		if m.can("sellers") {
+			pend, _ := s.pendingRepOrders(r.Context(), m.Seller)
+			for _, o := range pend {
+				out = append(out, item{Kind: "panel", ID: o.ID, Title: repOrderTitle(o), Amount: o.Price, Unix: o.Unix, Receipt: o.Receipt != "",
+					Buyer: firstNonEmpty(o.BuyerName, strconv.FormatInt(o.Chat, 10))})
+			}
+		}
 		sort.SliceStable(out, func(i, j int) bool {
 			if out[i].Receipt != out[j].Receipt {
 				return out[i].Receipt
@@ -731,7 +748,13 @@ func registerMiniAdmin(mux *http.ServeMux, s *Store, base func(*http.Request) st
 		}
 		id, _ := strconv.ParseInt(r.URL.Query().Get("id"), 10, 64)
 		var file, seller string
-		if r.URL.Query().Get("k") == "topup" {
+		if k := r.URL.Query().Get("k"); k == "panel" {
+			o, err := s.RepOrderByID(r.Context(), id)
+			file, seller = o.Receipt, o.Seller
+			if err != nil || !m.can("sellers") {
+				seller = "-"
+			}
+		} else if k == "topup" {
 			t, err := s.TopupByID(r.Context(), id)
 			file, seller = t.Receipt, t.Seller
 			if err != nil {
@@ -768,6 +791,17 @@ func registerMiniAdmin(mux *http.ServeMux, s *Store, base func(*http.Request) st
 		if !read(w, r, &in) {
 			return
 		}
+		if in.Kind == "panel" {
+			if deny(w, m, "sellers") {
+				return
+			}
+			if err := s.mgrDecidePanel(r.Context(), m, in.ID, in.OK); err != nil {
+				miniErr(w, err)
+				return
+			}
+			reply(w, map[string]bool{"ok": true}, nil)
+			return
+		}
 		if in.Kind == "topup" {
 			t, err := s.DecideTopup(r.Context(), m.Seller, in.ID, in.OK, m.P.User)
 			if err != nil {
@@ -800,4 +834,5 @@ func registerMiniAdmin(mux *http.ServeMux, s *Store, base func(*http.Request) st
 		reply(w, map[string]bool{"ok": true}, nil)
 	})
 	registerMiniAdmin2(mux, s, base, mgr, deny, read)
+	registerMiniAdmin3(mux, s, mgr, deny, read)
 }
