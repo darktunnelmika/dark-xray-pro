@@ -26,7 +26,11 @@ func TestSubSellerSellsOnlyDefinedPlans(t *testing.T) {
 	}
 	ali := Principal{User: "ali", Role: "rep", RepID: "ali"}
 	sub := Principal{User: "alisub", Role: "rep", RepID: "ali-sub"}
-	// The sub-seller makes no products, not even with the old grant.
+	// When its reseller closes its own plans (subplans.go), the sub-seller
+	// makes no products, not even with the old grant.
+	if err := s.PutSubPlans(ctx, "ali", SubPlans{Allow: false}); err != nil {
+		t.Fatal(err)
+	}
 	_ = s.SetManageProducts(ctx, "ali-sub", true)
 	if err := s.PutProduct(ctx, sub, Product{ID: "x1", Name: "mine", Plan: "volume", GB: 10, Days: 30, Status: "published"}); !errors.Is(err, ErrPolicy) {
 		t.Fatal("sub-seller made a product", err)
