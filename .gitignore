@@ -32,3 +32,6 @@ lab-state/
 # Build-only UI embedding: no generated assets in Git.
 /internal/webui/dist/*
 !/internal/webui/dist/README.txt
+
+# Python bytecode
+__pycache__/
