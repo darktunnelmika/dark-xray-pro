@@ -234,6 +234,7 @@ func registerMiniAdmin3(mux *http.ServeMux, s *Store,
 			ID       string `json:"id"`
 			On       bool   `json:"on"`
 			Password bool   `json:"password"` // a new password instead
+			Link     bool   `json:"link"`     // a link that gives a Telegram account this panel
 		}
 		if !read(w, r, &in) {
 			return
@@ -241,6 +242,21 @@ func registerMiniAdmin3(mux *http.ServeMux, s *Store,
 		ctx := r.Context()
 		if !s.IsSellerOf(ctx, m.Seller, in.ID) {
 			miniErr(w, ErrNotFound)
+			return
+		}
+		if in.Link {
+			// For the buyer (or whoever will run it): valid a week, used once.
+			code, err := s.newTgLinkCode(ctx, in.ID, 7*86400)
+			if err != nil {
+				miniErr(w, err)
+				return
+			}
+			bot := s.BotUsernameFor(ctx, m.Seller)
+			if bot == "" {
+				http.Error(w, "ربات تلگرام هنوز تنظیم نشده است.", http.StatusConflict)
+				return
+			}
+			reply(w, map[string]any{"link": "https://t.me/" + bot + "?start=rep_" + code, "owners": len(s.TgRepOwners(ctx, in.ID)) + len(s.chatPanelChats(ctx, in.ID))}, nil)
 			return
 		}
 		if !in.Password {
@@ -257,6 +273,44 @@ func registerMiniAdmin3(mux *http.ServeMux, s *Store,
 			return
 		}
 		reply(w, map[string]string{"username": user, "password": pass}, nil)
+	})
+	// The brand of a panel this reseller sold, set up for its buyer.
+	mux.HandleFunc("GET /app/api/m/resale/brand", func(w http.ResponseWriter, r *http.Request) {
+		m, okm := mgr(w, r)
+		if !okm || deny(w, m, "sellers") || !resaleRep(w, r, m) {
+			return
+		}
+		id := r.URL.Query().Get("id")
+		if !s.IsSellerOf(r.Context(), m.Seller, id) {
+			miniErr(w, ErrNotFound)
+			return
+		}
+		b := s.RepBrand(r.Context(), id)
+		reply(w, map[string]string{"title": b.Title, "accent": b.Accent, "telegram": b.Telegram, "logo": b.Logo}, nil)
+	})
+	mux.HandleFunc("POST /app/api/m/resale/brand", func(w http.ResponseWriter, r *http.Request) {
+		m, okm := mgr(w, r)
+		if !okm || deny(w, m, "sellers") || !resaleRep(w, r, m) {
+			return
+		}
+		var in struct {
+			ID       string `json:"id"`
+			Title    string `json:"title"`
+			Accent   string `json:"accent"`
+			Telegram string `json:"telegram"`
+			Logo     string `json:"logo"`
+		}
+		if !read(w, r, &in) {
+			return
+		}
+		ctx := r.Context()
+		if !s.IsSellerOf(ctx, m.Seller, in.ID) {
+			miniErr(w, ErrNotFound)
+			return
+		}
+		b := s.RepBrand(ctx, in.ID) // the notice, support link and address stay
+		b.Title, b.Accent, b.Telegram, b.Logo = in.Title, in.Accent, in.Telegram, in.Logo
+		ok(w, s.PutRepBrand(ctx, in.ID, b))
 	})
 	mux.HandleFunc("POST /app/api/m/resale/bill", func(w http.ResponseWriter, r *http.Request) {
 		m, okm := mgr(w, r)
@@ -496,6 +550,7 @@ func registerMiniAdmin3(mux *http.ServeMux, s *Store,
 	registerPanelPromo(mux, s, mgr, deny)
 	registerPanelLimits(mux, s, mgr, deny)
 	registerChatPanels(mux, s, mgr)
+	registerPanelSetup(mux, s, mgr, deny)
 	registerMiniAdmin4(mux, s, mgr, deny, read)
 	registerMiniAdmin5(mux, s, mgr, deny, read)
 }

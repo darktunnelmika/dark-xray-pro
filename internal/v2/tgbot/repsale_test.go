@@ -181,7 +181,8 @@ func TestSellingResellerPanels(t *testing.T) {
 	if out := api.take(); len(out) != 0 {
 		t.Fatalf("a stranger's top-up must do nothing: %v", out)
 	}
-	// A second panel for the same account: the bot stays on the first.
+	// A second panel for the same account: kept beside the first, and the
+	// bot and the Mini App move to it; the account switches back and forth.
 	b.Handle(ctx, cb(cust, "P:new"))
 	api.take()
 	b.Handle(ctx, cb(cust, "P:pk:"+pkg))
@@ -192,12 +193,21 @@ func TestSellingResellerPanels(t *testing.T) {
 	api.take()
 	b.Handle(ctx, cb(ownerID, "P:ok:4"))
 	api.take()
-	if s.RepCredit(ctx, "reza-two") != 200<<30 || s.TgRep(ctx, cust) != "reza-shop" {
+	if s.RepCredit(ctx, "reza-two") != 200<<30 || s.TgRep(ctx, cust) != "reza-two" {
 		t.Fatalf("second panel: credit %d, bot on %q", s.RepCredit(ctx, "reza-two"), s.TgRep(ctx, cust))
 	}
 	if got := s.ChatPanels(ctx, cust); len(got) != 2 || got[0] != "reza-shop" || got[1] != "reza-two" {
 		t.Fatalf("panels %v", got)
 	}
+	b.Handle(ctx, cb(cust, "R:sw"))
+	find(t, api.take(), cust, "پنل‌های من")
+	b.Handle(ctx, cb(cust, "R:sw:reza-shop"))
+	api.take()
+	if s.TgRep(ctx, cust) != "reza-shop" {
+		t.Fatalf("switched to %q", s.TgRep(ctx, cust))
+	}
+	b.Handle(ctx, cb(cust, "R:sw:someone-else"))
+	find(t, api.take(), cust, "در دسترس نیست")
 	b.Handle(ctx, cb(cust, "P:buy"))
 	out = api.take()
 	find(t, out, cust, "reza-two")

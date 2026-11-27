@@ -497,8 +497,14 @@ func (b *Bot) repSaleDecide(ctx context.Context, chat, id int64, approve bool) {
 	if n := len(b.Store.ChatRoles(ctx, o.Chat)); n > 1 {
 		tail = fmt.Sprintf("این پنل کنار پنل‌های قبلی شما اضافه شد (%s پنل) و ربات و مینی‌اپ الان روی همین پنل تازه‌اند. با دکمهٔ «🔁 پنل‌های من» بینشان جابه‌جا شوید.", faInt(int64(n)))
 	}
-	b.send(ctx, o.Chat, fmt.Sprintf("🎉 <b>پنل نمایندگی شما آماده است</b>\n%s\n🌐 آدرس: %s\n👤 نام کاربری: <code>%s</code>\n🔑 رمز موقت: <code>%s</code>\n💳 اعتبار: <b>%s</b>\n\nبعد از اولین ورود رمز را عوض کنید. %s",
-		line, esc(strings.TrimRight(b.SubBase, "/")), esc(o.RepID), esc(res.Password), gbWord(o.GB), tail), nil)
+	var kb *Keyboard
+	setup := ""
+	if u := b.panelAppURL(); u != "" {
+		kb = &Keyboard{Rows: [][]Button{{{Text: "🚀 راه‌اندازی پنل", WebApp: &WebApp{URL: u + "&v=setup"}, Style: "success"}}}}
+		setup = "\n\n🚀 با دکمهٔ «راه‌اندازی پنل» اسم و لوگو، پشتیبانی، کارت، پلن‌ها و ادمین‌های پنل را قدم‌به‌قدم داخل مینی‌اپ تنظیم کنید."
+	}
+	b.send(ctx, o.Chat, fmt.Sprintf("🎉 <b>پنل نمایندگی شما آماده است</b>\n%s\n🆔 پنل: <code>%s</code>\n💳 اعتبار: <b>%s</b>%s\n\n%s\n\n<i>ورود دستی به پنل وب (اختیاری): %s، نام کاربری: <code>%s</code>، رمز موقت: <code>%s</code>؛ بعد از اولین ورود رمز را عوض کنید.</i>",
+		line, esc(o.RepID), gbWord(o.GB), setup, tail, esc(strings.TrimRight(b.SubBase, "/")), esc(o.RepID), esc(res.Password)), kb)
 }
 
 // ---- the owner's settings ----

@@ -510,8 +510,12 @@ func (s *Store) SetTgRepOwners(ctx context.Context, repID string, ids []int64) e
 
 // NewTgLinkCode returns a code valid for 15 minutes.
 func (s *Store) NewTgLinkCode(ctx context.Context, repID string) (string, error) {
+	return s.newTgLinkCode(ctx, repID, 900)
+}
+
+func (s *Store) newTgLinkCode(ctx context.Context, repID string, ttl int64) (string, error) {
 	code := randomHex(8)
-	exp := s.now().Unix() + 900
+	exp := s.now().Unix() + ttl
 	return code, s.SetSetting(ctx, "tglink:"+code, repID+"|"+strconv.FormatInt(exp, 10))
 }
 
@@ -523,6 +527,14 @@ func (s *Store) ClaimTgLinkCode(ctx context.Context, code string, chat int64) (s
 	_, _ = s.db.ExecContext(ctx, `DELETE FROM settings WHERE key=?`, "tglink:"+code)
 	if !ok || exp < s.now().Unix() {
 		return "", ErrNotFound
+	}
+	// An account that already runs another panel keeps it as its main one
+	// and gets this one beside it, picked (chatpanels.go).
+	if main := s.tgRepMain(ctx, chat); main != "" && main != rep {
+		if err := s.AddChatPanel(ctx, chat, rep); err != nil {
+			return "", err
+		}
+		return rep, s.SetSetting(ctx, activeKey(chat), rep)
 	}
 	// A panel that already has a Telegram account keeps it: this one joins it.
 	owners := s.TgRepOwners(ctx, rep)

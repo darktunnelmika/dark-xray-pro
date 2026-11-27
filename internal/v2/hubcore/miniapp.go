@@ -285,10 +285,12 @@ func registerMiniApp(mux *http.ServeMux, s *Store) {
 		if seller == "" {
 			out["wallet"] = s.WalletBalance(r.Context(), u.ID)
 		} else {
-			// The reseller's own brand, bot and support; Stars, trials and
-			// referrals belong to the main store.
+			// The reseller's own brand, bot and support (never the panel's
+			// own name, as in the bot); Stars, trials and referrals belong
+			// to the main store.
 			b := s.RepBrand(r.Context(), seller)
-			out["title"] = firstNonEmpty(b.Title, ss.Title)
+			out["title"] = b.Title
+			out["reseller"] = true
 			out["announce"], out["support"], out["accent"], out["logo"] = b.Announce, b.SupportURL, b.Accent, b.Logo
 			out["bot"] = s.RepBotOf(r.Context(), seller).Username
 			out["pay_text"] = ""

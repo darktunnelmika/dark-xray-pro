@@ -1109,7 +1109,7 @@ function render() {
   const head = h("header", { class: "hello" },
     avatar(u, initials),
     h("div", { class: "hello-t" }, h("p", {}, name ? `سلام ${name} 👋` : "سلام 👋"),
-      h("h1", {}, state.logo && /^data:image\//.test(state.logo) ? h("img", { class: "brand-logo", src: state.logo, alt: "" }) : null, state.title || "Dark VPN")),
+      h("h1", {}, state.logo && /^data:image\//.test(state.logo) ? h("img", { class: "brand-logo", src: state.logo, alt: "" }) : null, state.title || (state.reseller ? "فروشگاه" : "Dark VPN"))),
     h("button", { class: "wallet-chip", onclick: () => { tap(); setTab("wallet"); } }, icon(IC.wallet), h("span", {}, `${toman(state.toman || 0)}`)));
   const body = tab === "manage" && role.manage && typeof manageView === "function" ? manageView() : ({ services, shop, wallet, panel: panelView, guide: guideView }[tab] || services)();
   const enter = render.last !== tab; render.last = tab; // a new tab slides in; a refresh of the same tab does not
@@ -1136,6 +1136,7 @@ async function load(first = true) {
     if (role.manage) {
       await loadManage();
       if (new URLSearchParams(location.search).get("m") === "1" || !role.store) tab = "manage";
+      if (new URLSearchParams(location.search).get("v") === "setup" && typeof M === "object") { tab = "manage"; M.view = "setup"; }
       if (!role.store) { state = null; render(); return; }
     }
   }

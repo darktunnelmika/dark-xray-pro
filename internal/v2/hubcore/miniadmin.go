@@ -252,6 +252,15 @@ func (s *Store) mgrHome(ctx context.Context, m miniMgr) (map[string]any, error) 
 			out["trial"] = st
 		}
 		out["panel"] = m.Seller
+		if m.Role == "owner" || m.Role == "manager" {
+			steps, done := s.PanelSetup(ctx, m), 0
+			for _, st := range steps {
+				if st.Done {
+					done++
+				}
+			}
+			out["setup"] = map[string]any{"done": done, "total": len(steps), "hidden": s.Setting(ctx, setupHideKey(m.Seller)) != ""}
+		}
 		if ps := s.mgrPanels(ctx, m); len(ps) > 1 {
 			out["panels"] = ps
 		}
@@ -457,8 +466,9 @@ func registerMiniAdmin(mux *http.ServeMux, s *Store, base func(*http.Request) st
 		}
 		http.Error(w, msg, http.StatusBadRequest)
 	}
+	// 256KB: a logo (data: URL) fits.
 	read := func(w http.ResponseWriter, r *http.Request, v any) bool {
-		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(v); err != nil {
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<18)).Decode(v); err != nil {
 			http.Error(w, "bad request", http.StatusBadRequest)
 			return false
 		}

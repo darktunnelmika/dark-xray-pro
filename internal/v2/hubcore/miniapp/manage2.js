@@ -44,6 +44,7 @@ async function m2Fetch(view) {
     case "report": M2.report = await api("GET", `m/report?days=${M2.days}`); break;
     case "resale": M2.resale = await api("GET", "m/resale"); break;
     case "settings": M2.settings = await api("GET", "m/settings"); break;
+    case "setup": M2.setup = await api("GET", "m/setup"); break;
     case "discounts": M2.discounts = await api("GET", "m/discounts"); break;
     case "broadcast": M2.bc = await api("GET", "m/broadcast"); break;
     case "customers": M2.cust = await api("GET", `m/customers?q=${encodeURIComponent(M2.cq || "")}`); break;
@@ -62,6 +63,7 @@ function moreView() {
   const tiles = [
     !d.owner && c.credit ? tile("wallet", "اعتبار و شارژ", "wallet", d.credit !== undefined ? size(d.credit) : "") : null,
     c.sellers && !d.sub_seller ? tile("sellers", d.owner ? "نماینده‌ها" : "زیرمجموعه‌ها", "users", "ساخت، اعتبار، دعوت") : null,
+    d.setup && d.setup.total ? tile("setup", "راه‌اندازی پنل", "gear", `${num(d.setup.done)} از ${num(d.setup.total)} قدم`) : null,
     d.resale ? tile("resale", "فروش پنل نمایندگی", "shop", d.owner ? "بسته‌ها و سفارش‌ها" : "پنل بفروش، سود ببر", (d.pending || {}).panels) : null,
     c.bot ? tile("bot", "ربات من", "bot", "توکن، روشن و خاموش") : null,
     c.cards ? tile("cards", "کارت‌های پرداخت", "card", "چند کارت، سقف روزانه") : null,
@@ -558,7 +560,46 @@ function soldPanelSheet(x) {
           close(); sheet(h("h2", {}, "🔑 رمز تازه"), h("div", { class: "kv" }, h("span", {}, "نام کاربری"), h("b", { class: "ltr" }, r.username)),
             h("div", { class: "kv" }, h("span", {}, "رمز"), h("b", { class: "ltr" }, r.password)), btn("کپی", "primary block", () => copy(`${r.username}\n${r.password}`), "copy"));
         } catch (e) { toast(e.message); }
-      }, "renew")));
+      }, "renew")),
+    h("div", { class: "section-title" }, "راه‌اندازی برای خریدار"),
+    h("div", { class: "actions" },
+      btn("برند پنل", "", () => { close(); soldBrandSheet(x); }, "shield"),
+      btn("لینک اتصال تلگرام", "", async () => {
+        try {
+          const r = await api("POST", "m/resale/panel", { id: x.id, link: true });
+          close();
+          sheet(h("h2", {}, "🔗 لینک اتصال تلگرام"),
+            h("p", { class: "muted small" }, "این لینک را برای خریدار (یا هر کسی که پنل را می‌گرداند) بفرستید. با زدنش، تلگرامش مالک همین پنل می‌شود و همه‌چیز را داخل ربات و مینی‌اپ مدیریت می‌کند. یک‌بارمصرف است و تا ۷ روز اعتبار دارد."),
+            r.owners ? h("p", { class: "muted small" }, `این پنل الان ${num(r.owners)} حساب تلگرام وصل دارد.`) : null,
+            h("div", { class: "kv" }, h("b", { class: "ltr small" }, r.link)),
+            btn("کپی لینک", "primary block", () => copy(r.link), "copy"),
+            btn("فرستادن در تلگرام", "ghost block", () => { const u = `https://t.me/share/url?url=${encodeURIComponent(r.link)}&text=${encodeURIComponent("لینک اتصال به پنل نمایندگی شما")}`; try { tg.openTelegramLink(u); } catch { location.href = u; } }, "send"));
+        } catch (e) { toast(e.message); }
+      }, "send")));
+}
+
+// soldBrandSheet: the reseller sets the brand of a panel it sold, for its buyer.
+async function soldBrandSheet(x) {
+  let b;
+  try { b = await api("GET", `m/resale/brand?id=${encodeURIComponent(x.id)}`); } catch (e) { toast(e.message); return; }
+  let logo = b.logo || "";
+  const title = h("input", { value: b.title || "", maxlength: "80", placeholder: "اسم فروشگاه خریدار" });
+  const accent = h("input", { type: "color", value: /^#[0-9a-f]{6}$/i.test(b.accent || "") ? b.accent : "#2de2e6" });
+  const telegram = h("input", { class: "ltr", value: b.telegram ? "@" + b.telegram : "", placeholder: "@support_id" });
+  const logoBox = h("div", { class: "row logo-row" });
+  const drawLogo = () => logoBox.replaceChildren(
+    logo ? h("img", { class: "brand-logo big", src: logo, alt: "" }) : h("span", { class: "muted small" }, "بدون لوگو"),
+    btn(logo ? "عوض کردن" : "گذاشتن لوگو", "", async () => {
+      try { const data = await pickImage(256); if (data.length > 190000) { toast("عکس خیلی بزرگ است"); return; } logo = data; drawLogo(); } catch {}
+    }, "card"),
+    logo ? btn("حذف", "ghost", () => { logo = ""; drawLogo(); }) : h("span"));
+  drawLogo();
+  const close = sheet(h("h2", {}, "برند پنل ", h("span", { class: "ltr" }, x.login || x.id)),
+    h("p", { class: "muted small" }, "مشتری‌های این پنل همین اسم و لوگو را در ربات، مینی‌اپ و لینک ساب می‌بینند. خریدار بعداً خودش هم می‌تواند عوضش کند."),
+    field("اسم فروشگاه", title), logoBox, field("رنگ اصلی", accent), field("آیدی پشتیبانی", telegram),
+    btn("ذخیره", "primary block", async () => {
+      try { await api("POST", "m/resale/brand", { id: x.id, title: title.value.trim(), accent: accent.value, telegram: telegram.value.trim(), logo }); close(); haptic("success"); toast("ذخیره شد"); } catch (e) { toast(e.message); }
+    }, "check"));
 }
 
 function resaleWalletSheet() {
@@ -915,7 +956,7 @@ function permsSheet(a, all) {
     h("div", { class: "card" }, boxes.map((x) => x.row)), go);
 }
 
-const M2V = { wheel: wheelView, sale: saleView, customers: customersView, admins: adminsView, settings: settingsView, discounts: discountsView, broadcast: broadcastView, more: moreView, resale: resaleView, wallet: walletView, sellers: sellersView, bot: botView, cards: cardsView, plans: plansView, tickets: ticketsView, report: reportView };
+const M2V = { setup: setupView, wheel: wheelView, sale: saleView, customers: customersView, admins: adminsView, settings: settingsView, discounts: discountsView, broadcast: broadcastView, more: moreView, resale: resaleView, wallet: walletView, sellers: sellersView, bot: botView, cards: cardsView, plans: plansView, tickets: ticketsView, report: reportView };
 
 // ---------- the panel-sale banner and discount ----------
 async function promoSheet() {
@@ -1003,4 +1044,76 @@ function wheelView() {
         haptic("success"); toast("ذخیره شد"); m2Reload(); wheel = undefined; loadWheel();
       } catch (e) { haptic("error"); toast(e.message); }
     }, "check")];
+}
+
+// ---------- a new panel's setup, step by step ----------
+const SETUP_STEPS = {
+  brand: ["اسم و لوگوی فروشگاه", "اسمی که مشتری‌ها در ربات، مینی‌اپ و لینک ساب می‌بینند.", "shield"],
+  support: ["آیدی پشتیبانی", "مشتری‌ها برای سؤال و مشکل به این آیدی پیام می‌دهند.", "chat"],
+  card: ["کارت پرداخت", "شماره کارتی که مشتری‌ها به آن کارت‌به‌کارت می‌کنند.", "card"],
+  plans: ["پلن‌ها و قیمت‌ها", "بسته‌هایی که مشتری‌ها از ربات و مینی‌اپ شما می‌خرند.", "tag"],
+  bot: ["ربات اختصاصی (اختیاری)", "ربات خودتان با برند خودتان؛ توکن را از BotFather بگیرید.", "bot"],
+  admins: ["ادمین‌ها (اختیاری)", "همکارهایتان را با لینک دعوت و دسترسی دلخواه اضافه کنید.", "users"],
+};
+function setupView() {
+  const d = M2.setup;
+  const head = h("div", { class: "m2head" },
+    h("button", { class: "iconbtn", "aria-label": "بازگشت", onclick: () => mSet("dash") }, mic("back")),
+    h("h2", {}, "راه‌اندازی پنل"), h("span"));
+  if (!d) return [head, h("div", { class: "card skel" })];
+  const steps = d.steps || [], done = steps.filter((x) => x.done).length;
+  const out = [head, h("div", { class: "card setuphead" },
+    h("div", { class: "row between" }, h("b", {}, done === steps.length ? "🎉 همه‌چیز آماده است" : "چند قدم تا شروع فروش"), h("span", { class: "pill" }, `${num(done)} از ${num(steps.length)}`)),
+    h("div", { class: "u-bar" }, h("i", { style: `--w:${steps.length ? Math.round((done / steps.length) * 100) : 0}%` })))];
+  const go = { card: () => mSet("cards"), plans: () => mSet("plans"), bot: () => mSet("bot"), admins: () => mSet("admins"), brand: () => brandSheet(d, false), support: () => brandSheet(d, true) };
+  out.push(h("div", { class: "steps" }, steps.map((st, i) => {
+    const [title, text, ic] = SETUP_STEPS[st.key] || [st.key, "", "gear"];
+    return h("div", { class: `stepc ${st.done ? "done" : ""}` },
+      h("span", { class: "stepn" }, st.done ? "✓" : num(i + 1)),
+      h("div", { class: "stepb" }, h("b", {}, title), h("p", { class: "muted small" }, text),
+        h("div", { class: "row wrap" },
+          btn(st.done ? "ویرایش" : "انجام", st.done ? "ghost" : "primary", go[st.key] || (() => {}), ic),
+          st.key === "plans" && !st.done ? btn("پلن‌های آماده بساز", "", suggestPlans, "plus") : null)));
+  })));
+  out.push(h("div", { class: "card manual" }, h("div", {}, h("b", {}, d.hidden ? "کارت راه‌اندازی پنهان است" : "پنهان کردن از داشبورد"),
+    h("p", { class: "muted small" }, "هر وقت خواستید از «بیشتر ← راه‌اندازی پنل» برگردید.")),
+    btn(d.hidden ? "نمایش" : "پنهان کن", "ghost", async () => {
+      try { await api("POST", "m/setup/hide", { hide: !d.hidden }); d.hidden = !d.hidden; if (M.home.setup) M.home.setup.hidden = d.hidden; render(); } catch (e) { toast(e.message); }
+    })));
+  return out;
+}
+async function suggestPlans() {
+  try {
+    const r = await api("POST", "m/setup/plans", {});
+    haptic("success"); toast(`${num(r.made || 0)} پلن ساخته شد؛ قیمت‌ها را از «پلن‌ها و قیمت‌ها» عوض کنید.`);
+    await mLoad("setup");
+  } catch (e) { toast(e.message); }
+}
+function brandSheet(d, focusSupport) {
+  const b = d.brand || {};
+  let logo = b.logo || "";
+  const title = h("input", { value: b.title || "", maxlength: "80", placeholder: "مثلاً: علی وی‌پی‌ان" });
+  const accent = h("input", { type: "color", value: /^#[0-9a-f]{6}$/i.test(b.accent || "") ? b.accent : "#2de2e6" });
+  const telegram = h("input", { class: "ltr", value: b.telegram ? "@" + b.telegram : "", placeholder: "@support_id" });
+  const logoBox = h("div", { class: "row logo-row" });
+  const drawLogo = () => logoBox.replaceChildren(
+    logo ? h("img", { class: "brand-logo big", src: logo, alt: "" }) : h("span", { class: "muted small" }, "بدون لوگو"),
+    btn(logo ? "عوض کردن" : "گذاشتن لوگو", "", async () => {
+      try { const data = await pickImage(256); if (data.length > 190000) { toast("عکس خیلی بزرگ است"); return; } logo = data; drawLogo(); } catch {}
+    }, "card"),
+    logo ? btn("حذف", "ghost", () => { logo = ""; drawLogo(); }) : h("span"));
+  drawLogo();
+  const save = btn("ذخیره", "primary block", async () => {
+    if (!title.value.trim()) { toast("اسم فروشگاه را بنویسید"); title.focus(); return; }
+    try {
+      await api("POST", "m/settings", { brand: { title: title.value.trim(), accent: accent.value, telegram: telegram.value.trim(), announce: b.announce || "", support_url: b.support_url || "", logo } });
+      close(); haptic("success"); toast("ذخیره شد");
+      await mLoad("setup");
+    } catch (e) { toast(e.message); }
+  }, "check");
+  const close = sheet(h("h2", {}, "برند فروشگاه"),
+    h("p", { class: "muted small" }, "مشتری‌های شما همین اسم و لوگو را می‌بینند، نه اسم ما."),
+    field("اسم فروشگاه", title), logoBox, field("رنگ اصلی", accent),
+    field("آیدی پشتیبانی", telegram, "آیدی تلگرامی که مشتری‌ها برای پشتیبانی به آن پیام می‌دهند."), save);
+  setTimeout(() => (focusSupport ? telegram : title).focus(), 250);
 }

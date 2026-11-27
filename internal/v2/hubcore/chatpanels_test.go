@@ -94,3 +94,65 @@ func TestChatPanels(t *testing.T) {
 		t.Fatalf("fallback %q", rep)
 	}
 }
+
+func TestPanelSetupAndLinks(t *testing.T) {
+	s, _ := newStore(t)
+	ctx := context.Background()
+	seed(t, s)
+	if err := s.PutRep(ctx, Rep{ID: "shop-a", Name: "A", Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetTgRepOwners(ctx, "shop-a", []int64{500}); err != nil {
+		t.Fatal(err)
+	}
+	m := miniMgr{P: Principal{User: "tg:500", Role: "rep", RepID: "shop-a"}, Seller: "shop-a", Role: "owner", Chat: 500}
+	steps := s.PanelSetup(ctx, m)
+	keys := map[string]bool{}
+	for _, st := range steps {
+		keys[st.Key] = st.Done
+	}
+	if _, ok := keys["brand"]; !ok || keys["brand"] || keys["support"] || keys["plans"] {
+		t.Fatalf("fresh panel %+v", steps)
+	}
+	if err := s.PutRepBrand(ctx, "shop-a", RepBrand{Title: "Ali Shop", Telegram: "@ali_support"}); err != nil {
+		t.Fatal(err)
+	}
+	// The main store's plans to start from.
+	if err := s.PutProduct(ctx, Principal{Role: "owner"}, Product{ID: "o60", Name: "60 GB", Plan: "volume", GB: 60, Days: 30, Price: 120000, Status: "published"}); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := s.SuggestPlans(ctx, m); err != nil || n != 1 {
+		t.Fatalf("suggested %d %v", n, err)
+	}
+	if _, err := s.SuggestPlans(ctx, m); !errors.Is(err, ErrConflict) {
+		t.Fatalf("twice: %v", err)
+	}
+	for _, st := range s.PanelSetup(ctx, m) {
+		if (st.Key == "brand" || st.Key == "support" || st.Key == "plans") && !st.Done {
+			t.Fatalf("after: %+v", st)
+		}
+	}
+	// A link to a second panel: the account keeps its main one and gets the
+	// new one beside it, picked.
+	if err := s.PutRep(ctx, Rep{ID: "shop-b", Name: "B", Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	code, err := s.newTgLinkCode(ctx, "shop-b", 7*86400)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep, err := s.ClaimTgLinkCode(ctx, code, 500); err != nil || rep != "shop-b" {
+		t.Fatalf("claim %q %v", rep, err)
+	}
+	if s.tgRepMain(ctx, 500) != "shop-a" || s.TgRep(ctx, 500) != "shop-b" || len(s.ChatRoles(ctx, 500)) != 2 {
+		t.Fatalf("main %q picked %q roles %+v", s.tgRepMain(ctx, 500), s.TgRep(ctx, 500), s.ChatRoles(ctx, 500))
+	}
+	if s.TgRepChat(ctx, "shop-a") != 500 {
+		t.Fatal("the main panel keeps its account")
+	}
+	// A fresh account takes the panel as its main one, as before.
+	code, _ = s.newTgLinkCode(ctx, "shop-b", 900)
+	if _, err := s.ClaimTgLinkCode(ctx, code, 600); err != nil || s.tgRepMain(ctx, 600) != "shop-b" {
+		t.Fatalf("fresh account: %v %q", err, s.tgRepMain(ctx, 600))
+	}
+}

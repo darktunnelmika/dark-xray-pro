@@ -132,3 +132,17 @@ input[type=color] { inline-size: 100%; block-size: 42px; padding: 2px; border-ra
 .pswitch-t b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pswitch-go { font-size: 13px; color: var(--ion); font-weight: 600; }
 .urow.on { border-color: var(--ion); }
+.setupcard { display: grid; gap: 8px; inline-size: 100%; text-align: start; color: var(--text); cursor: pointer; border-color: color-mix(in oklab, var(--ion) 45%, var(--line)); background: linear-gradient(135deg, color-mix(in oklab, var(--ion) 16%, var(--surface)), var(--surface)); }
+.setupcard p, .setuphead p { margin: 0; }
+.setupcard .u-bar, .setuphead .u-bar { block-size: 7px; }
+.setuphead { display: grid; gap: 10px; }
+.steps { display: grid; gap: 10px; grid-template-columns: minmax(0, 1fr); margin-block-end: 12px; }
+.stepc { display: flex; gap: 12px; padding: 14px; border-radius: 16px; border: 1px solid var(--line); background: var(--surface); }
+.stepc.done { border-color: color-mix(in oklab, var(--good) 35%, var(--line)); }
+.stepn { flex: none; inline-size: 30px; block-size: 30px; border-radius: 50%; display: grid; place-items: center; font-weight: 800; background: var(--surface-2); color: var(--muted); }
+.stepc.done .stepn { background: color-mix(in oklab, var(--good) 22%, var(--surface)); color: var(--good); }
+.stepb { flex: 1; min-inline-size: 0; display: grid; gap: 6px; }
+.stepb p { margin: 0; }
+.stepb .row { gap: 8px; }
+.stepb .btn { min-block-size: 38px; padding: 6px 14px; font-size: 13.5px; }
+.row.wrap { flex-wrap: wrap; }

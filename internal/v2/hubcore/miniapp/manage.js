@@ -119,6 +119,13 @@ function dashView() {
   out.push(h("div", { class: "card mhead" },
     h("div", {}, h("h2", {}, d.name || ""), h("span", { class: "pill" }, roleLabel(d.role))),
     h("div", { class: "muted small" }, `فروش امروز: ${size((d.today || {}).sold || 0)} · ${num((d.today || {}).sales || 0)} مورد`)));
+  const su = d.setup;
+  if (su && su.total && !su.hidden && su.done < su.total) {
+    out.push(h("button", { class: "card setupcard", onclick: () => mSet("setup") },
+      h("div", { class: "row between" }, h("b", {}, "🚀 راه‌اندازی پنل"), h("span", { class: "pill" }, `${num(su.done)} از ${num(su.total)}`)),
+      h("div", { class: "u-bar" }, h("i", { style: `--w:${Math.round((su.done / su.total) * 100)}%` })),
+      h("p", { class: "muted small" }, "اسم و لوگو، پشتیبانی، کارت، پلن‌ها و ادمین‌ها؛ همه در یک صفحه، قدم‌به‌قدم.")));
+  }
   if (d.trial) {
     const t = d.trial, left = t.end ? t.end - Date.now() / 1000 : 0;
     const when = !t.end ? "" : left < 86400 ? `${num(Math.max(1, Math.ceil(left / 3600)))} ساعت` : `${num(Math.ceil(left / 86400))} روز`;

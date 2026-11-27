@@ -489,7 +489,12 @@ func (s *Store) ChatPanels(ctx context.Context, chat int64) []string {
 			out = append(out, id)
 		}
 	}
-	add(s.TgRep(ctx, chat))
+	add(s.tgRepMain(ctx, chat))
+	for _, p := range s.ChatRoles(ctx, chat) {
+		if p.Role == "owner" {
+			add(p.Rep)
+		}
+	}
 	rows, err := s.ro.QueryContext(ctx, `SELECT o.rep_id FROM rep_orders o JOIN reps r ON r.id=o.rep_id
 WHERE o.chat_id=? AND o.kind='new' AND o.status='approved' AND r.enabled=1 ORDER BY o.id`, chat)
 	if err != nil {
