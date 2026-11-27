@@ -74,7 +74,8 @@ DXP_YES=1 DXP_DOMAIN=panel.example.com DXP_CERT=1 DXP_ADMIN=admin DXP_PASS='a-lo
 **Resellers**
 - Resellers and sub-sellers with GB or unlimited-plan credit, limits per reseller and refunds
 - Each reseller gets its own panel login, Telegram store bot, brand and card-to-card payments
-- A partner API so another bot or website can sell reseller panels on its own
+- A partner API so another bot or website sells and runs reseller panels on its own: packages, credit, rules, sign-in links, events ([API guide](docs/api/README.md))
+- A reseller API so each reseller's own bot or website sells to its customers under the panel's rules, with webhooks for every customer event
 
 **Telegram store**
 - Shop, free trial, wallet, card-to-card receipts and Telegram Stars
@@ -83,7 +84,7 @@ DXP_YES=1 DXP_DOMAIN=panel.example.com DXP_CERT=1 DXP_ADMIN=admin DXP_PASS='a-lo
 
 **Integrations and security**
 - PasarGuard-compatible API: connect Mirza or any PasarGuard sales bot, for the owner or per reseller
-- Owner API keys, webhooks, change log of every action
+- Owner API keys, webhooks, change log of every action; safe retries (Idempotency-Key), scoped keys, OpenAPI description, PHP and Python SDKs
 - Secret panel path, two-step sign-in, sign-in lockout, trusted IPs
 - Automatic backups and encrypted full backups
 
