@@ -122,3 +122,7 @@ input[type=color] { inline-size: 100%; block-size: 42px; padding: 2px; border-ra
 .kpis.money .kpi { cursor: default; } .kpis.money .kpi b { font-size: 15px; }
 .chips.quick { margin-block-start: 8px; }
 .bubble { cursor: copy; }
+.chips.themes .chip { display: inline-flex; align-items: center; gap: 6px; }
+.swatch { inline-size: 14px; block-size: 14px; border-radius: 50%; background: var(--sw); display: inline-block; }
+.logo-row { align-items: center; gap: 10px; margin-block: 10px; }
+.brand-logo.big { inline-size: 48px; block-size: 48px; border-radius: 12px; }

@@ -274,20 +274,55 @@ function chips(p) {
     p.first_use ? h("span", { class: "chip" }, "شروع از اولین اتصال") : null);
 }
 
+// payButtons are a plan's ways to pay (step 3 of the checkout).
+function payButtons(p, renewEmail) {
+  const stars = p.price_stars > 0 && state.stars;
+  const buttons = [];
+  if (p.price > 0 && state.toman >= p.price) buttons.push(btn(`پرداخت از کیف پول (${toman(state.toman)} تومان)`, "primary block", () => payToman(p, renewEmail), "wallet"));
+  if (p.price > 0 && state.card) buttons.push(btn(renewEmail ? "تمدید با کارت به کارت" : "خرید با کارت به کارت", buttons.length ? "block" : "primary block", () => buy(p, renewEmail, true), "card"));
+  if (stars) buttons.push(btn(`${renewEmail ? "تمدید" : "خرید"} با ${num(p.price_stars)} استارز`, buttons.length ? "ghost block" : "primary block", () => payStars(p, renewEmail)));
+  if (p.price_stars > 0 && state.wallet >= p.price_stars) buttons.push(btn(`از کیف پول استارز (${num(state.wallet)}⭐)`, "ghost block", () => payWallet(p, renewEmail)));
+  if (!buttons.length) buttons.push(btn(renewEmail ? "تمدید" : "ثبت سفارش", "primary block", () => buy(p, renewEmail, true)));
+  return buttons;
+}
+
 function productCard(p, renewEmail, featured) {
   const stars = p.price_stars > 0 && state.stars;
   const price = p.price ? [h("b", {}, toman(p.price)), h("small", {}, "تومان")] : stars ? [h("b", {}, `${num(p.price_stars)} ⭐`), h("small", {}, "استارز")] : [h("b", {}, "رایگان")];
-  const buttons = [];
-  if (p.price > 0 && state.toman >= p.price) buttons.push(btn(`پرداخت از کیف پول (${toman(state.toman)} تومان)`, "primary block", () => payToman(p, renewEmail), "wallet"));
-  if (p.price > 0 && state.card) buttons.push(btn(renewEmail ? "تمدید با کارت به کارت" : "خرید با کارت به کارت", buttons.length ? "block" : "primary block", () => buy(p, renewEmail), "card"));
-  if (stars) buttons.push(btn(`${renewEmail ? "تمدید" : "خرید"} با ${num(p.price_stars)} استارز`, buttons.length ? "ghost block" : "primary block", () => payStars(p, renewEmail)));
-  if (p.price_stars > 0 && state.wallet >= p.price_stars) buttons.push(btn(`از کیف پول استارز (${num(state.wallet)}⭐)`, "ghost block", () => payWallet(p, renewEmail)));
-  if (!buttons.length) buttons.push(btn(renewEmail ? "تمدید" : "خرید", "primary block", () => buy(p, renewEmail)));
   return h("div", { class: `card product ${featured ? "featured" : ""}` },
     featured ? h("span", { class: "ribbon" }, "پیشنهاد ویژه") : null,
     p.category ? h("div", { class: "cat" }, p.category) : null,
     h("h3", {}, p.name), chips(p),
-    h("div", { class: "price" }, ...price), ...buttons);
+    h("div", { class: "price" }, ...price),
+    btn(renewEmail ? "تمدید با این پلن" : "خرید", "primary block", () => checkout(p, renewEmail), "bolt"));
+}
+
+// checkout is the three-step purchase: the plan, a discount code, the payment.
+function checkout(p, renewEmail) {
+  closeRenew();
+  let step = 1, cur = p, code = "";
+  const body = h("div", {});
+  const dots = () => h("div", { class: "stepper" }, ["پلن", "تخفیف", "پرداخت"].map((t, i) => h("span", { class: i + 1 < step ? "done" : i + 1 === step ? "on" : "" }, h("i", {}, num(i + 1)), t)));
+  const priceRow = () => h("div", { class: "kv" }, h("span", {}, "مبلغ"), h("b", {}, cur.price ? `${toman(cur.price)} تومان` : cur.price_stars ? `${num(cur.price_stars)} ⭐` : "رایگان",
+    cur.price !== p.price ? h("s", { class: "muted small" }, ` ${toman(p.price)}`) : null));
+  const draw = () => {
+    const parts = [dots(), h("div", { class: "summary" }, h("div", {}, h("b", {}, p.name)), chips(p), renewEmail ? h("div", { class: "muted small" }, "برای: ", ltr(renewEmail)) : null), priceRow()];
+    if (step === 1) parts.push(btn("ادامه", "primary block big", () => { step = p.price > 0 ? 2 : 3; draw(); }, "bolt"));
+    if (step === 2) {
+      const inp = h("input", { dir: "ltr", placeholder: "کد تخفیف (اختیاری)", value: code, autocapitalize: "characters" });
+      parts.push(h("div", { class: "field" }, inp, btn("اعمال", "", async () => {
+        try {
+          const r = await api("POST", "coupon", { code: inp.value.trim(), product: p.id });
+          code = r.code; cur = { ...p, price: r.price, price_stars: r.price_stars }; haptic("success"); toast("کد اعمال شد"); draw();
+        } catch (e) { haptic("error"); toast(e.message); }
+      })), btn(code ? "ادامه با تخفیف" : "ادامه بدون کد", "primary block big", () => { step = 3; draw(); }, "bolt"), btn("قبلی", "ghost block", () => { step = 1; draw(); }));
+    }
+    if (step === 3) parts.push(h("div", { class: "section-title" }, "روش پرداخت"), ...payButtons(cur, renewEmail), btn("قبلی", "ghost block", () => { step = p.price > 0 ? 2 : 1; draw(); }));
+    body.replaceChildren(...parts);
+  };
+  draw();
+  const close = sheet(h("h2", {}, renewEmail ? "تمدید سرویس" : "خرید سرویس"), body);
+  renew.close = close; // a payment closes the checkout like the renew sheet
 }
 
 async function payStars(p, renewEmail) {
@@ -348,7 +383,8 @@ function receiptSteps() {
 
 // pickImage asks for a photo and returns it as a JPEG data URL, at most
 // 1600 px on its long side (receipts stay readable and small).
-function pickImage() {
+function pickImage(maxSide) {
+  const side = maxSide || 1600;
   return new Promise((res, rej) => {
     const inp = h("input", { type: "file", accept: "image/*", style: "position:fixed;inset-inline-start:-999px" });
     document.body.append(inp);
@@ -363,7 +399,7 @@ function pickImage() {
         img.onerror = () => res(fr.result);
         img.onload = () => {
           try {
-            const k = Math.min(1, 1600 / Math.max(img.width, img.height));
+            const k = Math.min(1, side / Math.max(img.width, img.height));
             const c = document.createElement("canvas");
             c.width = Math.max(1, Math.round(img.width * k)); c.height = Math.max(1, Math.round(img.height * k));
             c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
@@ -426,8 +462,15 @@ function showPay(p, renewEmail, r) {
     btn("یا در ربات بفرستید", paid ? "ghost block" : "primary block", openBot, "chat"));
 }
 
-async function buy(p, renewEmail) {
+async function buy(p, renewEmail, direct) {
   closeRenew();
+  if (direct) { // the checkout already showed the plan and the price
+    try {
+      const r = await api("POST", "order", { product: p.id, renew: renewEmail });
+      haptic("success"); await load(false); setTab("services"); showPay(p, renewEmail, r);
+    } catch (e) { haptic("error"); toast(e.message); }
+    return;
+  }
   const go = btn("ثبت سفارش", "primary", async () => {
     go.disabled = true;
     try {
@@ -486,7 +529,7 @@ function customCard(renewEmail) {
       try {
         const p = await api("POST", "custom", { gb: +gb.value, days: +days.value, renew: renewEmail || "", quote: true });
         closeRenew();
-        const close = sheet(h("h2", {}, renewEmail ? "تمدید " : "خرید ", p.name), productCard(p, renewEmail || ""), btn("انصراف", "ghost block", () => close()));
+        checkout(p, renewEmail || "");
       } catch (e) { toast(e.message); }
     }, "bolt"));
 }
@@ -645,6 +688,17 @@ function celebrate(msg) {
   setTimeout(() => box.remove(), 1600);
 }
 
+// avatar: the customer's Telegram photo, else a coloured initial.
+function avatar(u, initials) {
+  const url = (tg && tg.initDataUnsafe && tg.initDataUnsafe.user && tg.initDataUnsafe.user.photo_url) || u.photo_url || "";
+  if (/^https:\/\/t\.me\//.test(url)) {
+    const img = h("img", { class: "av photo", src: url, alt: "" });
+    img.addEventListener("error", () => img.replaceWith(h("div", { class: "av" }, initials)));
+    return img;
+  }
+  return h("div", { class: "av" }, initials);
+}
+
 function render() {
   if (!state) { // management only (the store is closed)
     app.replaceChildren(h("header", { class: "hello" }, h("div", { class: "av" }, (role.first_name || "D").slice(0, 1)),
@@ -656,11 +710,15 @@ function render() {
   const u = state.user || {};
   const name = u.first_name || "";
   const initials = (name || "D").slice(0, 1);
-  // A reseller's store wears its brand: accent colour and logo.
-  if (state.accent && /^#[0-9a-f]{6}$/i.test(state.accent)) { document.documentElement.style.setProperty("--ion", state.accent); document.documentElement.style.setProperty("--ion-2", state.accent); document.documentElement.style.setProperty("--on-ion", "#fff"); }
+  // A reseller's store wears its brand: a theme, else its accent colour, and its logo.
+  const THEMES = { teal: ["#22d3ee", "#3b82f6"], emerald: ["#34d399", "#059669"], rose: ["#fb7185", "#e11d48"], coral: ["#fb923c", "#f43f5e"] };
+  const root = document.documentElement.style;
+  if (THEMES[state.theme]) { root.setProperty("--ion", THEMES[state.theme][0]); root.setProperty("--ion-2", THEMES[state.theme][1]); root.setProperty("--on-ion", "#fff"); }
+  else if (state.accent && /^#[0-9a-f]{6}$/i.test(state.accent)) { root.setProperty("--ion", state.accent); root.setProperty("--ion-2", state.accent); root.setProperty("--on-ion", "#fff"); }
   const head = h("header", { class: "hello" },
-    state.logo && /^data:image\//.test(state.logo) ? h("img", { class: "av logo", src: state.logo, alt: "" }) : h("div", { class: "av" }, initials),
-    h("div", { class: "hello-t" }, h("p", {}, name ? `سلام ${name} 👋` : "سلام 👋"), h("h1", {}, state.title || "Dark VPN")),
+    avatar(u, initials),
+    h("div", { class: "hello-t" }, h("p", {}, name ? `سلام ${name} 👋` : "سلام 👋"),
+      h("h1", {}, state.logo && /^data:image\//.test(state.logo) ? h("img", { class: "brand-logo", src: state.logo, alt: "" }) : null, state.title || "Dark VPN")),
     h("button", { class: "wallet-chip", onclick: () => { tap(); setTab("wallet"); } }, icon(IC.wallet), h("span", {}, `${toman(state.toman || 0)}`)));
   const body = tab === "manage" && role.manage && typeof manageView === "function" ? manageView() : ({ services, shop, wallet }[tab] || services)();
   app.replaceChildren(head, state.announce ? h("div", { class: "announce" }, state.announce) : "", h("div", { class: "view" }, ...body));

@@ -209,7 +209,7 @@ func registerMiniApp(mux *http.ServeMux, s *Store) {
 	static, _ := fs.Sub(miniappFS, "miniapp")
 	files := http.FileServer(http.FS(static))
 	mux.Handle("GET /app/", http.StripPrefix("/app/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Security-Policy", "default-src 'none'; script-src 'self' https://telegram.org; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'")
+		w.Header().Set("Content-Security-Policy", "default-src 'none'; script-src 'self' https://telegram.org; style-src 'self'; img-src 'self' data: https://t.me; font-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Cache-Control", "no-cache")
 		files.ServeHTTP(w, r)
@@ -276,7 +276,7 @@ func registerMiniApp(mux *http.ServeMux, s *Store) {
 		out := map[string]any{"user": u, "services": services, "orders": orders, "products": products,
 			"pay_text": s.Setting(r.Context(), "tg_pay_text"), "support": ss.SupportURL, "title": ss.Title, "announce": ss.Announce,
 			"stars": invoiceLinker != nil && seller == "", "wallet": 0, "bot": s.Setting(r.Context(), "tg_username"),
-			"toman": s.TomanBalance(r.Context(), seller, u.ID), "accent": ss.Accent, "logo": ss.Logo, "shop_text": s.ShopText(r.Context(), seller)}
+			"toman": s.TomanBalance(r.Context(), seller, u.ID), "accent": ss.Accent, "logo": ss.Logo, "shop_text": s.ShopText(r.Context(), seller), "theme": s.Setting(r.Context(), "theme:"+seller)}
 		if seller == "" {
 			out["wallet"] = s.WalletBalance(r.Context(), u.ID)
 		} else {
@@ -403,6 +403,37 @@ func registerMiniApp(mux *http.ServeMux, s *Store) {
 		out := s.miniPayInfo(r.Context(), sellerOf(r), u.ID, open, map[string]any{"id": open})
 		out["product"] = p
 		reply(w, out, nil)
+	})
+	// A discount code, checked and held for the buyer's next order of this plan.
+	mux.HandleFunc("POST /app/api/coupon", func(w http.ResponseWriter, r *http.Request) {
+		u, ok := user(w, r)
+		if !ok {
+			return
+		}
+		var in struct {
+			Code    string `json:"code"`
+			Product string `json:"product"`
+		}
+		if !decode(w, r, &in) {
+			return
+		}
+		if !s.productOf(r.Context(), in.Product, sellerOf(r)) {
+			http.Error(w, "این پلن اینجا فروخته نمی‌شود.", http.StatusForbidden)
+			return
+		}
+		d, err := s.HoldDiscount(r.Context(), TgBuyer(u.ID), in.Code, in.Product)
+		if err != nil {
+			msg := map[error]string{ErrCodeUnknown: "این کد وجود ندارد.", ErrCodeExpired: "مهلت این کد تمام شده.", ErrCodeUsedUp: "ظرفیت این کد تمام شده.",
+				ErrCodeUsed: "این کد را قبلاً استفاده کرده‌اید.", ErrCodeProduct: "این کد برای این پلن نیست.", ErrCodeDisabled: "این کد فعال نیست."}[err]
+			if msg == "" {
+				msg = "این کد پذیرفته نشد."
+			}
+			http.Error(w, msg, http.StatusBadRequest)
+			return
+		}
+		p, _ := scanProduct(s.ro.QueryRowContext(r.Context(), `SELECT `+productCols+` FROM products WHERE id=?`, in.Product))
+		price, stars := d.Discounted(p.Price, p.PriceStars)
+		reply(w, map[string]any{"code": d.Code, "percent": d.Percent, "amount": d.Amount, "price": price, "price_stars": stars}, nil)
 	})
 	mux.HandleFunc("POST /app/api/pay", func(w http.ResponseWriter, r *http.Request) {
 		u, ok := user(w, r)

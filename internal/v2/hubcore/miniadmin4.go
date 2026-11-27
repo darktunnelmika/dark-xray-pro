@@ -27,13 +27,13 @@ func registerMiniAdmin4(mux *http.ServeMux, s *Store,
 		ctx := r.Context()
 		sub := !m.Owner && s.IsSubSeller(ctx, m.Seller)
 		out := map[string]any{"welcome": s.Welcome(ctx, m.Seller), "shop_text": s.ShopText(ctx, m.Seller), "join": s.JoinPolicy(ctx, m.Seller),
-			"owner": m.Owner, "sub_seller": sub}
+			"owner": m.Owner, "sub_seller": sub, "theme": s.Setting(ctx, "theme:"+m.Seller)}
 		if !sub {
 			out["trial"] = s.TrialPolicyFor(ctx, m.Seller)
 		}
 		if !m.Owner {
 			b := s.RepBrand(ctx, m.Seller)
-			out["brand"] = map[string]string{"title": b.Title, "announce": b.Announce, "accent": b.Accent, "telegram": b.Telegram, "support_url": b.SupportURL}
+			out["brand"] = map[string]string{"title": b.Title, "announce": b.Announce, "accent": b.Accent, "telegram": b.Telegram, "support_url": b.SupportURL, "logo": b.Logo}
 		}
 		reply(w, out, nil)
 	})
@@ -44,21 +44,35 @@ func registerMiniAdmin4(mux *http.ServeMux, s *Store,
 		}
 		var in struct {
 			Welcome  *string      `json:"welcome"`
+			Theme    *string      `json:"theme"`
 			ShopText *string      `json:"shop_text"`
 			Join     *JoinPolicy  `json:"join"`
 			Trial    *TrialPolicy `json:"trial"`
 			Brand    *struct {
-				Title      string `json:"title"`
-				Announce   string `json:"announce"`
-				Accent     string `json:"accent"`
-				Telegram   string `json:"telegram"`
-				SupportURL string `json:"support_url"`
+				Title      string  `json:"title"`
+				Announce   string  `json:"announce"`
+				Accent     string  `json:"accent"`
+				Telegram   string  `json:"telegram"`
+				SupportURL string  `json:"support_url"`
+				Logo       *string `json:"logo"` // nil = keep, "" = remove
 			} `json:"brand"`
 		}
 		if !read(w, r, &in) {
 			return
 		}
 		ctx := r.Context()
+		if in.Theme != nil {
+			switch *in.Theme {
+			case "", "teal", "emerald", "rose", "coral":
+			default:
+				http.Error(w, "تم نامعتبر است.", http.StatusBadRequest)
+				return
+			}
+			if err := s.SetSetting(ctx, "theme:"+m.Seller, *in.Theme); err != nil {
+				miniErr(w, err)
+				return
+			}
+		}
 		if in.Welcome != nil {
 			if err := s.PutWelcome(ctx, m.Seller, *in.Welcome); err != nil {
 				miniErr(w, err)
@@ -88,6 +102,9 @@ func registerMiniAdmin4(mux *http.ServeMux, s *Store,
 		if in.Brand != nil && !m.Owner {
 			b := s.RepBrand(ctx, m.Seller)
 			b.Title, b.Announce, b.Accent, b.Telegram, b.SupportURL = in.Brand.Title, in.Brand.Announce, strings.ToLower(strings.TrimSpace(in.Brand.Accent)), in.Brand.Telegram, in.Brand.SupportURL
+			if in.Brand.Logo != nil {
+				b.Logo = *in.Brand.Logo
+			}
 			if err := s.PutRepBrand(ctx, m.Seller, b); err != nil {
 				miniErr(w, err)
 				return

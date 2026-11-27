@@ -198,6 +198,8 @@ func miniFa(err error) (string, int) {
 	switch {
 	case errors.Is(err, ErrFunds):
 		return "موجودی کیف پول شما در پنل اصلی برای قیمت عمده کافی نیست؛ اول کیف پول را شارژ کنید.", http.StatusBadRequest
+	case strings.Contains(msg, "logo must be"):
+		return "لوگو باید عکس PNG یا JPG زیر ۱۵۰ کیلوبایت باشد.", http.StatusBadRequest
 	case strings.Contains(msg, "custom plan ranges"):
 		return "بازه‌ها را درست کنید (کمترین از بیشترین بزرگ‌تر نباشد).", http.StatusBadRequest
 	case strings.Contains(msg, "price per GB"):

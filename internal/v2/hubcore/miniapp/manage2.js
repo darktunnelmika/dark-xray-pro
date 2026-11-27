@@ -591,6 +591,10 @@ function settingsView() {
   const out = [backHead("تنظیمات ربات"),
     h("div", { class: "section-title" }, "متن‌ها"),
     h("div", { class: "card" }, field("خوش‌آمد (برای مشتری تازه)", welcome), field("متن بالای پلن‌ها (ربات و فروشگاه)", shopText))];
+  const THEMES = [["", "پیش‌فرض", "#2de2e6"], ["teal", "فیروزه‌ای", "#22d3ee"], ["emerald", "زمردی", "#34d399"], ["rose", "صورتی", "#fb7185"], ["coral", "نارنجی", "#fb923c"]];
+  M2.theme = M2.theme ?? d.theme ?? "";
+  const themeRow = h("div", { class: "chips themes" }, THEMES.map(([k, label, c]) => h("button", { class: `chip ${M2.theme === k ? "on" : ""}`, style: `--sw:${c}`, onclick: (e) => { M2.theme = k; themeRow.querySelectorAll(".chip").forEach((c) => c.classList.remove("on")); e.currentTarget.classList.add("on"); } }, h("i", { class: "swatch" }), label)));
+  out.push(h("div", { class: "section-title" }, "تم فروشگاه"), h("div", { class: "card" }, themeRow, h("p", { class: "muted small" }, "رنگ فروشگاه و دکمه‌ها برای مشتری‌های شما.")));
   let brand = null;
   if (d.brand) {
     const b = d.brand;
@@ -598,8 +602,15 @@ function settingsView() {
       accent: h("input", { type: "color", value: /^#[0-9a-f]{6}$/i.test(b.accent || "") ? b.accent : "#2de2e6" }),
       announce: h("textarea", { rows: "2", maxlength: "1000", placeholder: "یک خبر کوتاه بالای فروشگاه (اختیاری)" }, b.announce || ""),
       telegram: h("input", { class: "ltr", value: b.telegram ? "@" + b.telegram : "", placeholder: "@support_id" }) };
+    M2.logo = M2.logo ?? (b.logo || "");
+    brand.logoBox = h("div", { class: "row logo-row" },
+      M2.logo ? h("img", { class: "brand-logo big", src: M2.logo, alt: "" }) : h("span", { class: "muted small" }, "لوگویی نگذاشته‌اید"),
+      btn(M2.logo ? "عوض کردن لوگو" : "گذاشتن لوگو", "", async () => {
+        try { const data = await pickImage(256); if (data.length > 190000) { toast("عکس خیلی بزرگ است"); return; } M2.logo = data; const im = brand.logoBox.firstChild; im.replaceWith(h("img", { class: "brand-logo big", src: data, alt: "" })); toast("بعد از «ذخیرهٔ همه» اعمال می‌شود"); } catch {}
+      }, "card"),
+      M2.logo ? btn("حذف", "ghost", () => { M2.logo = ""; brand.logoBox.firstChild.replaceWith(h("span", { class: "muted small" }, "بعد از ذخیره حذف می‌شود")); }) : null);
     out.push(h("div", { class: "section-title" }, "ظاهر فروشگاه"),
-      h("div", { class: "card" }, field("اسم فروشگاه", brand.title), field("رنگ اصلی", brand.accent), field("خبر بالای فروشگاه", brand.announce), field("آیدی پشتیبانی", brand.telegram)));
+      h("div", { class: "card" }, field("اسم فروشگاه", brand.title), brand.logoBox, field("رنگ اصلی (وقتی تم پیش‌فرض است)", brand.accent), field("خبر بالای فروشگاه", brand.announce), field("آیدی پشتیبانی", brand.telegram)));
   }
   let trial = null;
   if (d.trial) {
@@ -620,13 +631,13 @@ function settingsView() {
     h("div", { class: "card" }, jrow, chans, h("p", { class: "muted small" }, "ربات باید ادمین کانال باشد تا بتواند عضویت را بررسی کند.")));
   const save = btn("ذخیرهٔ همه", "primary block big", async () => {
     save.disabled = true;
-    const body = { welcome: welcome.value, shop_text: shopText.value, join: { enabled: jon.checked, channels: chans.map((c) => c.value.trim()).filter(Boolean) } };
+    const body = { theme: M2.theme || "", welcome: welcome.value, shop_text: shopText.value, join: { enabled: jon.checked, channels: chans.map((c) => c.value.trim()).filter(Boolean) } };
     if (trial) {
       const mbv = Math.max(0, Math.round(+trial.mb.value || 0));
       body.trial = { enabled: trial.on.checked, mb: mbv % 1024 === 0 ? 0 : mbv, gb: mbv % 1024 === 0 ? mbv / 1024 : 0, hours: Math.round(+trial.hours.value || 0), max_ips: Math.round(+trial.ips.value || 0) };
     }
-    if (brand) body.brand = { title: brand.title.value, accent: brand.accent.value, announce: brand.announce.value, telegram: brand.telegram.value, support_url: d.brand.support_url || "" };
-    try { await api("POST", "m/settings", body); haptic("success"); toast("ذخیره شد"); m2Reload(); }
+    if (brand) body.brand = { title: brand.title.value, accent: brand.accent.value, announce: brand.announce.value, telegram: brand.telegram.value, support_url: d.brand.support_url || "", logo: M2.logo || "" };
+    try { await api("POST", "m/settings", body); M2.theme = undefined; M2.logo = undefined; haptic("success"); toast("ذخیره شد"); m2Reload(); }
     catch (e) { save.disabled = false; haptic("error"); toast(e.message); }
   }, "check");
   out.push(save);
