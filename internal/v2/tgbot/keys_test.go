@@ -48,9 +48,9 @@ func TestCustomerKeys(t *testing.T) {
 			t.Errorf("%q → %q, want %q", in, a, want)
 		}
 	}
-	// The keys work: the wheel answers (no service yet), the account opens.
+	// The keys work: the wheel spins (only "none" fits a chat without services), the account opens.
 	b.Handle(ctx, msg(buyerID, "🎡 گردونهٔ شانس"))
-	find(t, api.take(), buyerID, "اول یک سرویس بخرید")
+	find(t, api.take(), buyerID, "گردونهٔ شانس")
 	b.Handle(ctx, msg(buyerID, "👤 حساب من"))
 	if len(api.take()) == 0 {
 		t.Fatal("account")
