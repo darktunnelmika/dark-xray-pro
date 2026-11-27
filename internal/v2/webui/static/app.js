@@ -6579,7 +6579,12 @@ function repBrandCard(path, repName) {
     const tgId = inp("telegram", { dir: "ltr", placeholder: "@myshop" });
     const sub = me.role === "rep" && !me.can_sell; // a sub-seller
     const tpl = inp("remark_template", { dir: "ltr", placeholder: "{remark} · {left}" });
-    const base = inp("base_url", { dir: "ltr", placeholder: "https://sub.myshop.com" });
+    const base = inp("base_url", { dir: "ltr", placeholder: "https://sub.myshop.com", list: "subdomain-choices" });
+    // The panel's subscription addresses as suggestions (subdomains.go).
+    const choices = h("datalist", { id: "subdomain-choices" });
+    api("GET", "/api/v2/shop/sub-domain" + (path.includes("/reps/") ? `?rep=${encodeURIComponent(decodeURIComponent(path.split("/reps/")[1].split("/")[0]))}` : ""))
+      .then((r) => choices.replaceChildren(...(r.choices || []).map((d) => h("option", { value: d.url }, d.label || d.url)))).catch(() => {});
+    document.getElementById("subdomain-choices")?.remove(); document.body.append(choices);
     const ann = h("textarea", { rows: "2" }, v.announce || "");
     let logo = v.logo || "";
     const accentOn = h("input", { type: "checkbox", checked: !!v.accent });
@@ -6617,6 +6622,68 @@ function repBrandCard(path, repName) {
       err, h("div", { class: "row" }, save));
   }).catch((x) => fill(card, h("p", { class: "error" }, x.message)));
   return card;
+}
+
+// subDomainsCard: the subscription addresses (every one reaches the HUB's
+// subscription port), the default one for new links, and moving everyone off
+// a filtered address.
+function subDomainsCard() {
+  const fa = lang === "fa";
+  const T = (a, b) => (fa ? a : b);
+  const list = h("div", { class: "form" });
+  const rows = [];
+  let fallback = "";
+  const addRow = (d) => {
+    d = d || {};
+    const url = h("input", { dir: "ltr", placeholder: "https://sub.example.com:2096", value: d.url || "" });
+    const label = h("input", { placeholder: T("مثلاً: اصلی", "e.g. main"), value: d.label || "" });
+    const def = h("input", { type: "radio", name: "subdom-default", checked: !!d.default });
+    const ret = h("input", { type: "checkbox", checked: !!d.retired });
+    const r = { url, label, def, ret };
+    const box = h("div", { class: "card" },
+      h("div", { class: "two" }, h("label", {}, h("span", {}, T("آدرس", "Address")), url), h("label", {}, h("span", {}, T("نام", "Label")), label)),
+      h("div", { class: "row" },
+        h("label", { class: "check" }, def, h("span", {}, T("پیش‌فرض لینک‌های جدید", "Default for new links"))),
+        h("label", { class: "check" }, ret, h("span", {}, T("بازنشسته (کار می‌کند، ولی لینک جدید با آن ساخته نمی‌شود)", "Retired (still answers; no new links)"))),
+        d.reps ? h("span", { class: "badge" }, T(`${fmtNum(d.reps)} نماینده`, `${d.reps} resellers`)) : null,
+        h("button", { class: "ghost", type: "button", onclick: () => { rows.splice(rows.indexOf(r), 1); box.remove(); } }, T("حذف", "Remove"))));
+    rows.push(r); list.append(box);
+  };
+  const moveFrom = h("select", {}), moveTo = h("select", {});
+  const load = async () => {
+    const r = await api("GET", "/api/v2/admin/sub-domains").catch(() => null);
+    if (!r) return;
+    fallback = r.fallback || "";
+    list.replaceChildren(); rows.length = 0;
+    (r.domains || []).forEach(addRow);
+    if (!rows.length) addRow();
+    const opts = (r.domains || []).map((d) => d.url);
+    moveFrom.replaceChildren(...opts.map((u) => h("option", { value: u }, u)));
+    moveTo.replaceChildren(...(r.domains || []).filter((d) => !d.retired).map((d) => h("option", { value: d.url }, d.url)));
+    hint.textContent = T(`بدون آدرس پیش‌فرض، لینک‌ها با آدرس عمومی هاب ساخته می‌شوند: ${fallback}`, `Without a default, links use the HUB's public address: ${fallback}`);
+  };
+  const hint = h("p", { class: "small muted" });
+  load();
+  return h("div", { class: "card form" },
+    h("h2", {}, "🌐 ", T("دامنه‌های ساب", "Subscription addresses")),
+    h("p", { class: "small muted" }, T("همهٔ آدرس‌هایی که به پورت ساب هاب می‌رسند. لینک هر مشتری روی همهٔ آن‌ها کار می‌کند؛ لینک‌های جدید با آدرس پیش‌فرض ساخته می‌شوند و هر نماینده می‌تواند یکی را برای مشتری‌هایش انتخاب کند. فروشگاه‌های متصل آدرس خودشان را دارند و تغییری نمی‌کنند.",
+      "Every address that reaches the HUB's subscription port. A customer's link works on all of them; new links use the default, and each reseller may pick one for its customers. Connected shops keep their own addresses.")),
+    hint, list,
+    h("div", { class: "row" }, h("button", { class: "ghost", type: "button", onclick: () => rows.length < 20 && addRow() }, T("+ آدرس", "+ Address")),
+      h("button", { class: "primary", type: "button", onclick: async () => {
+        const domains = rows.filter((r) => r.url.value.trim()).map((r) => ({ url: r.url.value, label: r.label.value, default: r.def.checked, retired: r.ret.checked }));
+        await guarded(() => api("PUT", "/api/v2/admin/sub-domains", { domains })); toast(t("saved")); load();
+      } }, t("save"))),
+    h("h3", {}, T("آدرسی فیلتر شد؟", "An address got filtered?")),
+    h("p", { class: "small muted" }, T("همهٔ نماینده‌هایی که روی آن آدرس‌اند (و پیش‌فرض، اگر همان باشد) به آدرس دیگر می‌روند و آدرس قبلی بازنشسته می‌شود. توکن لینک‌ها عوض نمی‌شود.",
+      "Every reseller on that address (and the default, if it is that one) moves to another address, and the old one is retired. Link tokens do not change.")),
+    h("div", { class: "row" }, h("span", {}, T("از", "From")), moveFrom, h("span", {}, T("به", "to")), moveTo,
+      h("button", { class: "danger", type: "button", onclick: async () => {
+        if (!moveFrom.value || !moveTo.value || moveFrom.value === moveTo.value) return;
+        if (!(await confirmAction(T(`همه از ${moveFrom.value} به ${moveTo.value} منتقل شوند؟`, `Move everyone from ${moveFrom.value} to ${moveTo.value}?`)))) return;
+        const r = await guarded(() => api("POST", "/api/v2/admin/sub-domains/move", { from: moveFrom.value, to: moveTo.value }));
+        toast(T(`${fmtNum(r.moved)} نماینده منتقل شد`, `${r.moved} resellers moved`)); load();
+      } }, T("انتقال", "Move"))));
 }
 
 function subSettingsCard() {
@@ -7489,7 +7556,7 @@ function viewSettings() {
     h("div", { class: "row" }, h("button", { class: "danger", onclick: async () => { await api("POST", "/api/v2/auth/logout"); location.hash = "#/login"; } }, t("logout"))));
   // Settings are grouped; one group shows at a time so the page stays short.
   const groups = [
-    owner && ["sub", "link", fa ? "اشتراک مشتری" : "Customer subscription", fa ? "عنوان، نام کانفیگ‌ها و صفحهٔ مشتری" : "Title, config names, customer page", () => [subSettingsCard()]],
+    owner && ["sub", "link", fa ? "اشتراک مشتری" : "Customer subscription", fa ? "عنوان، نام کانفیگ‌ها و صفحهٔ مشتری" : "Title, config names, customer page", () => [subSettingsCard(), subDomainsCard()]],
     (owner || fullOwner()) && ["panel", "globe", fa ? "آدرس و دسترسی پنل" : "Panel address and access", fa ? "HTTPS، مسیر مخفی، IPهای مجاز" : "HTTPS, secret path, trusted IPs", () => [fullOwner() ? panelNameCard() : null, fullOwner() ? panelHTTPSCard() : null, fullOwner() ? panelPathCard() : null, owner ? trustedCard() : null]],
     me.role === "rep" && ["repsub", "link", fa ? "صفحهٔ اشتراک من" : "My subscription page", fa ? "برند، لوگو و آدرس اختصاصی" : "Brand, logo and own address", () => [repBrandCard("/api/v2/rep/brand")]],
     me.role === "rep" && ["repbot", "bell", fa ? "ربات فروش و کارت من" : "My sales bot and card", fa ? "ربات تلگرام اختصاصی، کارت به کارت" : "Own Telegram bot, card payment", () => [me.sub_seller ? null : mirzaCard("/api/v2/rep/pg-api", true), repBotCard("/api/v2/rep/bot"), botLookCard("/api/v2/rep/bot"), sellerCardCard("/api/v2/shop/card")]],

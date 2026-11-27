@@ -1102,6 +1102,58 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 		err := s.PutCardFor(r.Context(), seller, in)
 		reply(w, map[string]bool{"ok": err == nil}, err)
 	}))
+	// Subscription addresses (subdomains.go).
+	mux.HandleFunc("GET /api/v2/admin/sub-domains", guard(func(w http.ResponseWriter, r *http.Request) {
+		reply(w, map[string]any{"domains": s.SubDomains(r.Context()), "fallback": publicBase(subBase, r)}, nil)
+	}))
+	mux.HandleFunc("PUT /api/v2/admin/sub-domains", guard(func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Domains []SubDomain `json:"domains"`
+		}
+		if !decode(w, r, &in) {
+			return
+		}
+		reply(w, map[string]bool{"ok": true}, s.PutSubDomains(r.Context(), in.Domains))
+	}))
+	mux.HandleFunc("POST /api/v2/admin/sub-domains/move", guard(func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			From string `json:"from"`
+			To   string `json:"to"`
+		}
+		if !decode(w, r, &in) {
+			return
+		}
+		n, err := s.MoveSubDomain(r.Context(), in.From, in.To)
+		reply(w, map[string]int{"moved": n}, err)
+	}))
+	// A reseller picks its link address from the owner's list (or the owner
+	// for a reseller with ?rep=).
+	mux.HandleFunc("GET /api/v2/shop/sub-domain", member(func(w http.ResponseWriter, r *http.Request) {
+		p := who(r)
+		rep := p.RepID
+		if p.Role != "rep" {
+			rep = r.URL.Query().Get("rep")
+		}
+		reply(w, map[string]any{"choices": s.SubDomainChoices(r.Context()), "current": s.RepBrand(r.Context(), rep).BaseURL,
+			"default": s.defaultBase(r.Context(), publicBase(subBase, r))}, nil)
+	}))
+	mux.HandleFunc("PUT /api/v2/shop/sub-domain", member(func(w http.ResponseWriter, r *http.Request) {
+		p := who(r)
+		rep := p.RepID
+		if p.Role != "rep" {
+			rep = r.URL.Query().Get("rep")
+		}
+		var in struct {
+			URL string `json:"url"`
+		}
+		if rep == "" || !decode(w, r, &in) {
+			if rep == "" {
+				http.NotFound(w, r)
+			}
+			return
+		}
+		reply(w, map[string]bool{"ok": true}, s.PickRepDomain(r.Context(), rep, in.URL))
+	}))
 	// Excel report for 7, 30 or 90 days (reportxlsx.go): the owner's whole
 	// panel or one reseller's (?rep=), a reseller its own.
 	mux.HandleFunc("GET /api/v2/shop/report.xlsx", member(func(w http.ResponseWriter, r *http.Request) {
@@ -2138,8 +2190,9 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 		}
 		out := make([]view, 0, len(list))
 		bases := map[string]string{} // one lookup per reseller, not per client
+		def := s.defaultBase(r.Context(), subBase)
 		for _, c := range list {
-			base := subBase
+			base := def
 			if c.RepID != "" {
 				b, ok := bases[c.RepID]
 				if !ok {

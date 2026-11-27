@@ -879,7 +879,7 @@ func pgRoutes(s *Store, mux *http.ServeMux, subBase string) {
 				return b
 			}
 		}
-		return subBase
+		return s.defaultBase(r.Context(), subBase)
 	}
 	mux.HandleFunc("POST /api/admin/token", func(w http.ResponseWriter, r *http.Request) {
 		user, pass := r.PostFormValue("username"), r.PostFormValue("password")

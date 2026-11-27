@@ -175,5 +175,5 @@ func (s *Store) SubBaseFor(ctx context.Context, email, def string) string {
 	if _, b := s.brandFor(ctx, email); b != "" {
 		return b
 	}
-	return def
+	return s.defaultBase(ctx, def) // the default subscription address (subdomains.go)
 }
