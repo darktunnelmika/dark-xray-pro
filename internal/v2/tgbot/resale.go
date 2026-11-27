@@ -21,6 +21,36 @@ func (b *Bot) repInScope(ctx context.Context, rep string) bool {
 	return b.Seller == "" || rep == b.Seller || b.Store.IsSellerOf(ctx, b.Seller, rep)
 }
 
+// repRole is the panel this chat works on in this bot and its role there:
+// the panel it picked, else its first panel this bot manages.
+func (b *Bot) repRole(ctx context.Context, chat int64) (rep, role string) {
+	return b.Store.TgRepRoleIn(ctx, chat, "", func(r string) bool { return b.repInScope(ctx, r) })
+}
+
+// roleOn is the chat's role on one panel ("" = none), whichever it picked.
+func (b *Bot) roleOn(ctx context.Context, chat int64, rep string) string {
+	if rep == "" {
+		return ""
+	}
+	for _, p := range b.Store.ChatRoles(ctx, chat) {
+		if p.Rep == rep {
+			return p.Role
+		}
+	}
+	return ""
+}
+
+// scopePanels are the chat's panels this bot manages.
+func (b *Bot) scopePanels(ctx context.Context, chat int64) []hubcore.ChatPanel {
+	var out []hubcore.ChatPanel
+	for _, p := range b.Store.ChatRoles(ctx, chat) {
+		if b.repInScope(ctx, p.Rep) {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
 // walletOwner is the reseller whose wallet this chat may see ("" = none).
 func (b *Bot) walletOwner(ctx context.Context, chat int64) string {
 	rep, role := b.repOf(ctx, chat)

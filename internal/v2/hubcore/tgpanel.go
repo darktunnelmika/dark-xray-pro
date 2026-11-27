@@ -50,16 +50,10 @@ func (s *Store) TgPanelLogin(ctx context.Context, initData string) (string, stri
 		}
 	}
 	if user == "" {
-		rep, role := s.TgRepRole(ctx, u.ID)
+		// A reseller's bot also manages its sub-sellers.
+		rep, role := s.TgRepRoleIn(ctx, u.ID, "", s.inBotScope(ctx, seller))
 		if rep == "" || (role != "owner" && role != "manager") {
 			return "", "", ErrTgPanel
-		}
-		if seller != "" && rep != seller {
-			// A reseller's bot also manages its sub-sellers.
-			var parent string
-			if s.ro.QueryRowContext(ctx, `SELECT parent_id FROM reps WHERE id=?`, rep).Scan(&parent) != nil || parent != seller {
-				return "", "", ErrTgPanel
-			}
 		}
 		if user, err = s.repPanelLogin(ctx, rep); err != nil {
 			return "", "", err

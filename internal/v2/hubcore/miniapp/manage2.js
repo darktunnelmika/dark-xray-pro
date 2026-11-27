@@ -14,7 +14,10 @@ Object.assign(IC, {
   gear: "M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z",
 });
 
-const M2 = { wallet: null, ledger: [], ledgerEnd: false, sellers: null, bot: null, cards: null, plans: null, tickets: [], tStatus: "active", report: null, days: 7 };
+const M2_START = () => ({ wallet: null, ledger: [], ledgerEnd: false, sellers: null, bot: null, cards: null, plans: null, tickets: [], tStatus: "active", report: null, days: 7 });
+const M2 = M2_START();
+// m2Reset forgets what was loaded for the panel before a switch.
+function m2Reset() { Object.keys(M2).forEach((k) => delete M2[k]); Object.assign(M2, M2_START()); }
 
 const kindFa = { charge: "فروش", refund: "برگشت", adjust: "تنظیم مدیر", delete: "حذف کاربر", payment: "پرداخت", transfer: "انتقال اعتبار", topup: "شارژ" };
 const gbIn = (v, ph) => h("input", { type: "number", step: "any", inputmode: "decimal", value: v ?? "", placeholder: ph || "" });

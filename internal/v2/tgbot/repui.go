@@ -97,7 +97,7 @@ func (b *Bot) setDraft(chat int64, d *repDraft) {
 
 // repOf is the reseller this chat manages in this bot ("" = none).
 func (b *Bot) repOf(ctx context.Context, chat int64) (rep, role string) {
-	rep, role = b.Store.TgRepRole(ctx, chat)
+	rep, role = b.repRole(ctx, chat)
 	if rep == "" || !b.repInScope(ctx, rep) {
 		return "", ""
 	}
@@ -195,8 +195,40 @@ func (b *Bot) repHome(ctx context.Context, chat int64, rep, role string) {
 		// The whole panel inside Telegram, signed in by this chat (tgpanel.go).
 		kb.Rows = append(kb.Rows, r)
 	}
+	if ps := b.scopePanels(ctx, chat); len(ps) > 1 {
+		kb.Rows = append(kb.Rows, []Button{repBtn(fmt.Sprintf("🔁 پنل‌های من (%s)", faInt(int64(len(ps)))), "sw")})
+	}
 	kb.Rows = append(kb.Rows, []Button{repBtn("🛍 حالت مشتری", "cust")})
 	b.send(ctx, chat, text, kb)
+}
+
+// repSwitch lists the chat's panels in this bot, or picks one.
+func (b *Bot) repSwitch(ctx context.Context, chat int64, cur, pick string) {
+	if pick != "" {
+		if !b.repInScope(ctx, pick) || b.Store.SetActivePanel(ctx, chat, pick) != nil {
+			b.send(ctx, chat, "این پنل در دسترس نیست.", repBackKB)
+			return
+		}
+		rep, role := b.repOf(ctx, chat)
+		b.repHome(ctx, chat, rep, role)
+		return
+	}
+	kb := &Keyboard{}
+	for _, p := range b.scopePanels(ctx, chat) {
+		label := p.Rep
+		if p.Name != "" && p.Name != p.Rep {
+			label = p.Name + " (" + p.Rep + ")"
+		}
+		if p.Role != "owner" {
+			label += " · " + roleName(p.Role)
+		}
+		if p.Rep == cur {
+			label = "✅ " + label
+		}
+		kb.Rows = append(kb.Rows, []Button{repBtn(label, "sw:"+p.Rep)})
+	}
+	kb.Rows = append(kb.Rows, []Button{repBtn("🏠 داشبورد", "home")})
+	b.send(ctx, chat, "🔁 <b>پنل‌های من</b>\n"+line+"\nروی پنلی بزنید که می‌خواهید با آن کار کنید. ربات و مینی‌اپ هر دو روی همان پنل می‌روند.", kb)
 }
 
 // repCallback handles every "R:" button. It reports whether it handled one.
@@ -229,6 +261,9 @@ func (b *Bot) repCallback(ctx context.Context, chat int64, data string) bool {
 		b.repBotCallback(ctx, chat, rep, role, parts[0])
 	case "grow", "inv", "reqon", "reqoff": // invite link and requests (repgrow.go)
 		b.repGrowMenu(ctx, chat, rep, role, parts[0])
+	case "sw":
+		b.takeAwait(chat)
+		b.repSwitch(ctx, chat, rep, arg(1))
 	case "home":
 		b.takeAwait(chat)
 		b.setDraft(chat, nil)

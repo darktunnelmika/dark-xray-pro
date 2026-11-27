@@ -495,6 +495,7 @@ func registerMiniAdmin3(mux *http.ServeMux, s *Store,
 	registerAppReceipt(mux, s)
 	registerPanelPromo(mux, s, mgr, deny)
 	registerPanelLimits(mux, s, mgr, deny)
+	registerChatPanels(mux, s, mgr)
 	registerMiniAdmin4(mux, s, mgr, deny, read)
 	registerMiniAdmin5(mux, s, mgr, deny, read)
 }

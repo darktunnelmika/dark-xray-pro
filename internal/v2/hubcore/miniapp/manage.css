@@ -125,3 +125,10 @@ input[type=color] { inline-size: 100%; block-size: 42px; padding: 2px; border-ra
 .swatch { inline-size: 14px; block-size: 14px; border-radius: 50%; background: var(--sw); display: inline-block; }
 .logo-row { align-items: center; gap: 10px; margin-block: 10px; }
 .brand-logo.big { inline-size: 48px; block-size: 48px; border-radius: 12px; }
+.pswitch { display: flex; align-items: center; gap: 10px; inline-size: 100%; padding: 10px 14px; margin-block-end: 10px; border-radius: 14px; border: 1px solid var(--line); background: linear-gradient(135deg, color-mix(in oklab, var(--ion) 14%, var(--surface)), var(--surface)); color: inherit; font: inherit; text-align: start; cursor: pointer; }
+.pswitch svg { inline-size: 20px; block-size: 20px; flex: none; color: var(--ion); }
+.pswitch-t { display: grid; flex: 1; min-inline-size: 0; }
+.pswitch-t small { color: var(--muted); font-size: 12px; }
+.pswitch-t b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pswitch-go { font-size: 13px; color: var(--ion); font-weight: 600; }
+.urow.on { border-color: var(--ion); }

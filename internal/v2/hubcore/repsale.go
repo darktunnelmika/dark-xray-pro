@@ -384,10 +384,19 @@ func (s *Store) ApproveRepOrder(ctx context.Context, actor, seller string, id in
 			_, _ = s.DeleteRep(ctx, o.RepID, false)
 			return undo(err)
 		}
-		// This Telegram account is the reseller's from now on, unless it
-		// already runs a panel: the bot stays on that one, and the new
-		// panel is used from the web panel with its own login.
-		if o.Chat != 0 && s.TgRep(ctx, o.Chat) == "" {
+		// This Telegram account is the reseller's from now on. One that
+		// already runs a panel keeps that one as its main panel and gets
+		// this one beside it (chatpanels.go).
+		if o.Chat != 0 && s.TgRep(ctx, o.Chat) != "" {
+			// Another panel of the same account: kept with it, and picked,
+			// so the bot and the Mini App open on the new one.
+			if err := s.AddChatPanel(ctx, o.Chat, o.RepID); err != nil {
+				return undo(err)
+			}
+			if err := s.SetSetting(ctx, activeKey(o.Chat), o.RepID); err != nil {
+				return undo(err)
+			}
+		} else if o.Chat != 0 {
 			if _, err := s.db.ExecContext(ctx, `UPDATE reps SET tg_chat=0 WHERE tg_chat=?`, o.Chat); err != nil {
 				return undo(err)
 			}

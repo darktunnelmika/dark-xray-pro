@@ -62,8 +62,8 @@ func (b *Bot) saleApprover(ctx context.Context, chat int64) bool {
 	if b.Seller == "" {
 		return b.Owners[chat]
 	}
-	rep, role := b.Store.TgRepRole(ctx, chat)
-	return rep == b.Seller && repCan(role, "orders")
+	role := b.roleOn(ctx, chat, b.Seller)
+	return role != "" && repCan(role, "orders")
 }
 
 // repSaleBuyer is the reseller this chat buys a top-up for ("" = a customer
@@ -73,7 +73,7 @@ func (b *Bot) repSaleBuyer(ctx context.Context, chat int64) (rep string, ok bool
 	r, _ := b.Store.TgRepRole(ctx, chat)
 	if b.Seller != "" {
 		// A reseller's bot: the reseller and its bot admins buy nothing here.
-		if rep == b.Seller || r == b.Seller {
+		if b.roleOn(ctx, chat, b.Seller) != "" {
 			return rep, false
 		}
 		return rep, true
@@ -494,8 +494,8 @@ func (b *Bot) repSaleDecide(ctx context.Context, chat, id int64, approve bool) {
 	}
 	b.send(ctx, chat, fmt.Sprintf("✅ سفارش #%s تحویل شد: پنل <code>%s</code> با %s اعتبار ساخته شد.", faInt(o.ID), esc(o.RepID), gbWord(o.GB)), nil)
 	tail := "همین ربات هم برای شما به حالت نمایندگی رفته است: /start را بزنید تا داشبورد، ساخت کاربر و تمدید را ببینید."
-	if bot := b.Store.TgRep(ctx, o.Chat); bot != "" && bot != o.RepID {
-		tail = fmt.Sprintf("حالت نمایندگی همین ربات روی پنل قبلی شما (<code>%s</code>) می‌ماند؛ این پنل تازه را از پنل وب با همین نام کاربری و رمز مدیریت کنید. شارژ آن از دکمهٔ «🤝 پنل نمایندگی» است.", esc(bot))
+	if n := len(b.Store.ChatRoles(ctx, o.Chat)); n > 1 {
+		tail = fmt.Sprintf("این پنل کنار پنل‌های قبلی شما اضافه شد (%s پنل) و ربات و مینی‌اپ الان روی همین پنل تازه‌اند. با دکمهٔ «🔁 پنل‌های من» بینشان جابه‌جا شوید.", faInt(int64(n)))
 	}
 	b.send(ctx, o.Chat, fmt.Sprintf("🎉 <b>پنل نمایندگی شما آماده است</b>\n%s\n🌐 آدرس: %s\n👤 نام کاربری: <code>%s</code>\n🔑 رمز موقت: <code>%s</code>\n💳 اعتبار: <b>%s</b>\n\nبعد از اولین ورود رمز را عوض کنید. %s",
 		line, esc(strings.TrimRight(b.SubBase, "/")), esc(o.RepID), esc(res.Password), gbWord(o.GB), tail), nil)

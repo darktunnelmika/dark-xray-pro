@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -541,12 +542,20 @@ func (s *Store) ClaimTgLinkCode(ctx context.Context, code string, chat int64) (s
 
 // TgRep returns the representative bound to a chat ("" if none).
 func (s *Store) TgRep(ctx context.Context, chat int64) string {
-	var id string
-	_ = s.ro.QueryRowContext(ctx, `SELECT id FROM reps WHERE tg_chat=? AND enabled=1`, chat).Scan(&id)
-	if id == "" {
-		_ = s.ro.QueryRowContext(ctx, `SELECT r.id FROM rep_tg_owners o JOIN reps r ON r.id=o.rep_id WHERE o.chat_id=? AND r.enabled=1`, chat).Scan(&id)
+	list := s.ChatRoles(ctx, chat)
+	if a := s.ActivePanel(ctx, chat); a != "" {
+		for _, p := range list {
+			if p.Rep == a && p.Role == "owner" {
+				return a
+			}
+		}
 	}
-	return id
+	for _, p := range list {
+		if p.Role == "owner" {
+			return p.Rep
+		}
+	}
+	return ""
 }
 
 // TgRepChat returns a representative's chat (0 if not connected).
@@ -704,20 +713,12 @@ func CustomCan(role, what string) (can, custom bool) {
 // TgRepRole returns the reseller a chat works for and its role: "owner" for
 // the reseller's own chat, else the helper role ("" if none).
 func (s *Store) TgRepRole(ctx context.Context, chat int64) (rep, role string) {
-	if rep = s.TgRep(ctx, chat); rep != "" {
-		return rep, "owner"
-	}
-	var perms string
-	_ = s.ro.QueryRowContext(ctx, `SELECT a.rep_id,a.role,a.perms FROM rep_tg_admins a JOIN reps r ON r.id=a.rep_id WHERE a.chat_id=? AND r.enabled=1 ORDER BY a.added_unix LIMIT 1`, chat).Scan(&rep, &role, &perms)
-	if perms != "" {
-		role = "custom:" + perms // ticked rights (CustomCan) instead of the role's
-	}
-	return rep, role
+	return s.TgRepRoleIn(ctx, chat, "", nil)
 }
 
 // TgRepChats lists every chat that should see a reseller's order cards.
 func (s *Store) TgRepChats(ctx context.Context, repID string) []int64 {
-	out := s.TgRepOwners(ctx, repID)
+	out := append(s.TgRepOwners(ctx, repID), s.chatPanelChats(ctx, repID)...)
 	rows, err := s.ro.QueryContext(ctx, `SELECT chat_id FROM rep_tg_admins WHERE rep_id=? AND role IN ('manager','sales')`, repID)
 	if err != nil {
 		return out
@@ -729,7 +730,8 @@ func (s *Store) TgRepChats(ctx context.Context, repID string) []int64 {
 			out = append(out, c)
 		}
 	}
-	return out
+	slices.Sort(out)
+	return slices.Compact(out)
 }
 
 // ---- required channel membership ----

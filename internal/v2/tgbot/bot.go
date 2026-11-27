@@ -439,7 +439,7 @@ func (b *Bot) onMessage(ctx context.Context, m *Message) {
 		}
 		return
 	}
-	if rep, role := b.Store.TgRepRole(ctx, chat); rep != "" && b.repInScope(ctx, rep) {
+	if rep, role := b.repRole(ctx, chat); rep != "" && b.repInScope(ctx, rep) {
 		if w := b.peekAwait(chat); strings.HasPrefix(w, "r:") && !strings.HasPrefix(text, "/") {
 			b.takeAwait(chat)
 			if b.repInput(ctx, chat, rep, role, w, text) {
@@ -1068,7 +1068,7 @@ func (b *Bot) onCallback(ctx context.Context, q *CallbackQuery) {
 			b.sendQR(ctx, chat, rest)
 		}
 	case "radm":
-		if rep, role := b.Store.TgRepRole(ctx, chat); rep != "" && role == "owner" {
+		if rep, role := b.repRole(ctx, chat); rep != "" && role == "owner" {
 			id, _ := strconv.ParseInt(rest, 10, 64)
 			_ = b.Store.RemoveTgRepAdmin(ctx, rep, id)
 			b.send(ctx, chat, "حذف شد.", nil)
@@ -1077,7 +1077,7 @@ func (b *Bot) onCallback(ctx context.Context, q *CallbackQuery) {
 	case "ok", "no":
 		by := b.owner()
 		if !b.Owners[chat] {
-			rep, role := b.Store.TgRepRole(ctx, chat)
+			rep, role := b.repRole(ctx, chat)
 			if rep == "" || role == "support" {
 				return
 			}

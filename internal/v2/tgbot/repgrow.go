@@ -241,8 +241,7 @@ func (b *Bot) growCallback(ctx context.Context, q *CallbackQuery) bool {
 		who, _ := strconv.ParseInt(idS, 10, 64)
 		allowed := b.Owners[chat]
 		if b.Seller != "" {
-			rep, role := b.Store.TgRepRole(ctx, chat)
-			allowed = rep == b.Seller && role == "owner"
+			allowed = b.roleOn(ctx, chat, b.Seller) == "owner"
 		}
 		if !allowed || who == 0 {
 			return true

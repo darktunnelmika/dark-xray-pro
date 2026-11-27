@@ -36,7 +36,8 @@ type miniMgr struct {
 	Seller string // "" = the owner's world
 	Role   string // owner | manager | sales | support
 	Chat   int64
-	Owner  bool // the panel's owner
+	Owner  bool   // the panel's owner
+	Bot    string // the bot the Mini App was opened from ("" = main)
 }
 
 func (m miniMgr) can(what string) bool {
@@ -69,17 +70,11 @@ func (s *Store) miniManager(ctx context.Context, initData string) (miniMgr, TgUs
 			}
 		}
 	}
-	rep, role := s.TgRepRole(ctx, u.ID)
+	rep, role := s.TgRepRoleIn(ctx, u.ID, "", s.inBotScope(ctx, seller))
 	if rep == "" {
 		return miniMgr{}, u, ErrTgPanel
 	}
-	if seller != "" && rep != seller {
-		var parent string
-		if s.ro.QueryRowContext(ctx, `SELECT parent_id FROM reps WHERE id=?`, rep).Scan(&parent) != nil || parent != seller {
-			return miniMgr{}, u, ErrTgPanel
-		}
-	}
-	return miniMgr{P: Principal{User: actor, Role: "rep", RepID: rep}, Seller: rep, Role: role, Chat: u.ID}, u, nil
+	return miniMgr{P: Principal{User: actor, Role: "rep", RepID: rep}, Seller: rep, Role: role, Chat: u.ID, Bot: seller}, u, nil
 }
 
 // MiniClient is one client in the management list.
@@ -255,6 +250,10 @@ func (s *Store) mgrHome(ctx context.Context, m miniMgr) (map[string]any, error) 
 	if !m.Owner {
 		if st := s.RepTrialStateOf(ctx, m.Seller); st.Trial {
 			out["trial"] = st
+		}
+		out["panel"] = m.Seller
+		if ps := s.mgrPanels(ctx, m); len(ps) > 1 {
+			out["panels"] = ps
 		}
 	}
 	if m.can("tickets") {

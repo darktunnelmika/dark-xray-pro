@@ -72,7 +72,34 @@ function manageView() {
     can("orders") ? segBtn("inbox", inboxN ? `صندوق (${num(inboxN)})` : "صندوق", "inbox") : null,
     more ? segBtn("more", M.home.tickets ? `بیشتر (${num(M.home.tickets)})` : "بیشتر", "grid", !["dash", "users", "inbox"].includes(M.view)) : null);
   const body = M.view === "users" ? usersView() : M.view === "inbox" ? inboxView() : more && M2V[M.view] ? M2V[M.view]() : dashView();
-  return [seg, ...body];
+  return [panelSwitch(), seg, ...body].filter(Boolean);
+}
+
+// panelSwitch: an account with several panels picks the one it works on
+// (the bot follows the same pick).
+function panelSwitch() {
+  const ps = M.home.panels;
+  if (!ps || ps.length < 2) return null;
+  const cur = ps.find((p) => p.id === M.home.panel) || ps[0];
+  const label = (p) => (p.name && p.name !== p.id ? p.name : p.id);
+  return h("button", { class: "pswitch", onclick: () => panelSheet(ps, cur) },
+    mic("panel"), h("span", { class: "pswitch-t" }, h("small", {}, `پنل فعال (${num(ps.length)} پنل)`), h("b", {}, label(cur))), h("span", { class: "pswitch-go" }, "تعویض"));
+}
+function panelSheet(ps, cur) {
+  const close = sheet(h("h2", {}, "پنل‌های من"),
+    h("p", { class: "muted small" }, "پنلی را که می‌خواهید با آن کار کنید انتخاب کنید. ربات هم روی همان پنل می‌رود."),
+    h("div", { class: "ulist" }, ps.map((p) => h("button", { class: `urow ${p.id === cur.id ? "on" : ""}`, onclick: async () => {
+      if (p.id === cur.id) { close(); return; }
+      try {
+        await api("POST", "m/panel", { id: p.id });
+        close(); haptic("success");
+        M.home = null; M.view = "dash"; M.pick = null; M.list = []; M.inbox = [];
+        if (typeof m2Reset === "function") m2Reset();
+        render(); window.scrollTo({ top: 0 });
+      } catch (e) { toast(e.message); }
+    } },
+      h("div", { class: "u-main" }, h("b", {}, p.name && p.name !== p.id ? p.name : p.id), h("small", { class: "muted" }, `${p.id} · ${roleLabel(p.role)}`)),
+      p.id === cur.id ? h("span", { class: "pill good" }, "فعال") : h("span", { class: "muted" }, "←")))));
 }
 function segBtn(v, label, ic, on) {
   on = on || M.view === v;

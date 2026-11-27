@@ -274,7 +274,7 @@ func (b *Bot) sellerAdmins(ctx context.Context) map[int64]bool {
 // decideTopup is the approve/reject button on a top-up receipt.
 func (b *Bot) decideTopup(ctx context.Context, chat int64, idText string, approve bool) {
 	if !b.sellerAdmins(ctx)[chat] {
-		if rep, role := b.Store.TgRepRole(ctx, chat); rep == "" || rep != b.Seller || role == "support" {
+		if role := b.roleOn(ctx, chat, b.Seller); role == "" || role == "support" {
 			return
 		}
 	}
