@@ -22,6 +22,9 @@ jobs:
         run: go vet ./internal/v2/... ./cmd/...
       - name: Test
         run: go test -count=1 ./internal/v2/...
+      - name: Bot transcript (review aid)
+        run: |
+          DARK_TRANSCRIPT=/tmp/customer.txt go test -count=1 -run 'TestCustomerTranscript$' ./internal/v2/tgbot/ && cat /tmp/customer.txt || true
       - name: Build
         env:
           CGO_ENABLED: "0"
