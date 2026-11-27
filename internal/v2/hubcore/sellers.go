@@ -121,8 +121,10 @@ func (s *Store) TransferCredit(ctx context.Context, actor, parent, child string,
 	if err != nil || p != parent || parent == "" {
 		return ErrNotFound
 	}
-	if (volume > 0 || units > 0) && repLockedQ(ctx, tx, parent, s.now().Unix()) {
-		return fmt.Errorf("%w: an overdue bill is unpaid; pay it to sell again", ErrPolicy)
+	if volume > 0 || units > 0 {
+		if err := repStopQ(ctx, tx, parent, s.now().Unix()); err != nil {
+			return err
+		}
 	}
 	move := func(id string, v, u int64) error {
 		r, err := tx.ExecContext(ctx, `UPDATE reps SET volume_credit=volume_credit+?, unlimited_units=unlimited_units+?

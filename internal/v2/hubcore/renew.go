@@ -109,9 +109,10 @@ func (s *Store) renewPeriod(ctx context.Context, actor, repID, email, plan strin
 		if pol.DenyRenew {
 			return res, fmt.Errorf("%w: renewing clients is not allowed for this representative", ErrPolicy)
 		}
-		if repLockedQ(ctx, tx, repID, now) {
-			// A panel bill past its due time (resale.go): no selling until paid.
-			return res, fmt.Errorf("%w: an overdue bill is unpaid; pay it to sell again", ErrPolicy)
+		if err := repStopQ(ctx, tx, repID, now); err != nil {
+			// A panel bill past its due time (resale.go) or an ended term
+			// (repterm.go): no selling until paid or renewed.
+			return res, err
 		}
 		if err := checkPolicy(ctx, tx, repID, c, plan, false, now); err != nil {
 			return res, err

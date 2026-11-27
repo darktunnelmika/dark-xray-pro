@@ -355,7 +355,8 @@ func (s *Store) RepBillByID(ctx context.Context, id int64) (RepBill, error) {
 	return l[0], nil
 }
 
-// RepLocked reports whether the reseller has a bill past its due time.
+// RepLocked reports whether the reseller may not spend credit now: a bill
+// past its due time, or its term (repterm.go) has ended.
 func (s *Store) RepLocked(ctx context.Context, rep string) bool {
 	return repLockedQ(ctx, s.ro, rep, s.now().Unix())
 }
@@ -363,9 +364,7 @@ func (s *Store) RepLocked(ctx context.Context, rep string) bool {
 func repLockedQ(ctx context.Context, q interface {
 	QueryRowContext(context.Context, string, ...any) *sql.Row
 }, rep string, now int64) bool {
-	var n int
-	_ = q.QueryRowContext(ctx, `SELECT COUNT(*) FROM rep_bills WHERE rep_id=? AND status='open' AND due_unix<=?`, rep, now).Scan(&n)
-	return n > 0
+	return repStopQ(ctx, q, rep, now) != nil
 }
 
 // PayRepBill pays an open bill from the wallet.
@@ -492,8 +491,8 @@ func (s *Store) chargeResale(ctx context.Context, rep string, order, cost int64)
 	}
 	defer tx.Rollback()
 	now := s.now().Unix()
-	if repLockedQ(ctx, tx, rep, now) {
-		return 0, fmt.Errorf("%w: an overdue bill is unpaid", ErrPolicy)
+	if err := repStopQ(ctx, tx, rep, now); err != nil {
+		return 0, err
 	}
 	var bill int64
 	if walletTx(ctx, tx, rep) >= cost {

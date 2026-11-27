@@ -776,8 +776,8 @@ FROM clients c LEFT JOIN client_usage u ON u.email=c.email WHERE c.email=? AND c
 		if pol.DenyRenew {
 			return 0, fmt.Errorf("%w: resetting usage gives the volume again, and renewing is not allowed for this representative", ErrPolicy)
 		}
-		if repLockedQ(ctx, tx, seller, now) {
-			return 0, fmt.Errorf("%w: an overdue bill is unpaid; pay it to sell again", ErrPolicy)
+		if err := repStopQ(ctx, tx, seller, now); err != nil {
+			return 0, err
 		}
 	}
 	if used := charge; used > 0 {

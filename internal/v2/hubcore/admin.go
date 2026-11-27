@@ -274,6 +274,9 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 					_ = s.ro.QueryRowContext(r.Context(), `SELECT manage_products FROM reps WHERE id=?`, rp.ID).Scan(&mp)
 					out["manage_products"] = mp && rp.ParentID == ""
 					out["sub_seller"] = rp.ParentID != ""
+					if t, err := s.RepTermOf(r.Context(), rp.ID); err == nil {
+						out["term"] = t // repterm.go: the UI warns before and after the end
+					}
 					out["legacy"] = rp.ParentID == "" && s.LegacyOf(r.Context(), rp.ID).Allowed
 					// Taken back with a bill still open: the page stays, to pay it.
 					openBills, _ := s.RepBills(r.Context(), rp.ID, true, 1)
@@ -568,6 +571,7 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 		func(r *http.Request) (string, string, bool) {
 			return r.PathValue("id"), who(r).User, r.PathValue("id") != ""
 		})
+	s.repTermRoutes(mux.ServeMux, guard) // reseller panel terms (repterm.go)
 	mux.HandleFunc("POST /api/v2/rep/telegram", repOnly(func(w http.ResponseWriter, r *http.Request) {
 		code, err := s.NewTgLinkCode(r.Context(), who(r).RepID)
 		bot := s.BotUsernameFor(r.Context(), who(r).RepID)
