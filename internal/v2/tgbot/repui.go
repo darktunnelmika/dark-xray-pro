@@ -39,6 +39,9 @@ var repNameRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._@+-]{0,63}$`)
 
 // repCan says which buttons a bot admin role gets.
 func repCan(role, what string) bool {
+	if ok, custom := hubcore.CustomCan(role, what); custom {
+		return ok // a helper with ticked rights
+	}
 	switch role {
 	case "owner":
 		return true

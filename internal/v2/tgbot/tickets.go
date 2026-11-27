@@ -74,6 +74,30 @@ func (b *Bot) ticket(ctx context.Context, chat int64, name, username, text strin
 	}
 }
 
+// ticketPhoto adds a customer's picture to its ticket and shows it to staff.
+func (b *Bot) ticketPhoto(ctx context.Context, chat int64, name, username, caption, fileID string) {
+	id, isNew, err := b.Store.CustomerTicketPhoto(ctx, b.Seller, chat, name, caption, fileID)
+	if err != nil {
+		b.send(ctx, chat, "عکس ثبت نشد؛ دوباره بفرستید.", customerSupportKB)
+		return
+	}
+	who := esc(name)
+	if username != "" {
+		who += " (@" + esc(username) + ")"
+	}
+	head := "🆕 تیکت جدید (عکس)"
+	if !isNew {
+		head = "📷 عکس تازه در تیکت"
+	}
+	note := fmt.Sprintf("%s <b>#%d</b>\n👤 %s", head, id, who)
+	if strings.TrimSpace(caption) != "" {
+		note += "\n" + esc(caption)
+	}
+	b.notifyPhoto(ctx, "tickets", fileID, note, ticketKB(id))
+	b.send(ctx, chat, fmt.Sprintf("✅ عکس به تیکت #%d اضافه شد. می‌توانید توضیح هم بنویسید.", id), customerSupportKB)
+	b.setAwait(chat, "support")
+}
+
 // staffAnswer sends a staff answer to the customer and records it.
 func (b *Bot) staffAnswer(ctx context.Context, staff, id int64, text string) {
 	t, err := b.Store.TicketReply(ctx, b.ticketPrincipal(staff), id, "tg:"+strconv.FormatInt(staff, 10), text, true)

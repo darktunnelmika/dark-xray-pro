@@ -2,10 +2,12 @@ package hubcore
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"html"
 	"net/http"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 )
@@ -124,6 +126,25 @@ func registerMiniAdmin6(mux *http.ServeMux, s *Store,
 			return
 		}
 		reply(w, s.CustomPlanFor(r.Context(), m.Seller), nil)
+	})
+	// A picture a customer sent in a ticket, fetched with the seller's bot.
+	mux.HandleFunc("GET /app/api/m/ticket/photo", func(w http.ResponseWriter, r *http.Request) {
+		m, okm := mgr(w, r)
+		if !okm || deny(w, m, "tickets") {
+			return
+		}
+		id, _ := strconv.ParseInt(r.URL.Query().Get("msg"), 10, 64)
+		seller, file, err := s.TicketPhoto(r.Context(), id)
+		if err != nil || seller != m.Seller {
+			http.NotFound(w, r)
+			return
+		}
+		data, err := tgFile(r.Context(), s.tokenFor(r.Context(), seller), file)
+		if err != nil {
+			http.Error(w, "عکس در دسترس نیست.", http.StatusNotFound)
+			return
+		}
+		reply(w, map[string]string{"image": "data:" + http.DetectContentType(data) + ";base64," + base64.StdEncoding.EncodeToString(data)}, nil)
 	})
 	// Quick replies are also read by whoever answers tickets.
 	mux.HandleFunc("GET /app/api/m/quick", func(w http.ResponseWriter, r *http.Request) {

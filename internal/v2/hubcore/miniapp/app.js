@@ -114,13 +114,64 @@ function statusPill(sv) {
   return h("span", { class: "pill " + cls }, sv.status === "active" ? h("span", { class: sv.online ? "dot live" : "dot" }) : null, label);
 }
 
+// Telegram's back button closes the top sheet, then leaves a management
+// page for "more"; it hides when there is nothing to go back to.
+const sheets = [];
+function backTarget() {
+  for (let i = sheets.length - 1; i >= 0; i--) if (!sheets[i].el.isConnected) sheets.splice(i, 1);
+  return sheets.length || (tab === "manage" && typeof M === "object" && !["dash", "users", "inbox", "more"].includes(M.view));
+}
+function syncBack() { try { backTarget() ? tg.BackButton.show() : tg.BackButton.hide(); } catch {} }
+try {
+  tg.BackButton.onClick(() => {
+    backTarget();
+    const top = sheets.pop();
+    if (top) top.close();
+    else if (tab === "manage" && typeof mSet === "function") mSet("more");
+    syncBack();
+  });
+} catch {}
 function sheet(...content) {
   const back = h("div", { class: "sheet-back", onclick: (e) => { if (e.target === back) close(); } });
-  const close = () => { back.classList.add("out"); setTimeout(() => back.remove(), 180); try { tg && tg.BackButton.hide(); } catch {} };
+  const close = () => {
+    if (back.classList.contains("out")) return;
+    back.classList.add("out"); setTimeout(() => { back.remove(); syncBack(); }, 180);
+    const i = sheets.findIndex((x) => x.el === back);
+    if (i >= 0) sheets.splice(i, 1);
+  };
   back.append(h("div", { class: "sheet", role: "dialog", "aria-modal": "true" }, h("div", { class: "grip", "aria-hidden": "true" }), ...content));
   document.body.append(back);
-  try { tg.BackButton.show(); tg.BackButton.onClick(close); } catch {}
+  sheets.push({ el: back, close });
+  syncBack();
   return close;
+}
+
+// A short tour, once per app part (and again from its "راهنما" button).
+const TOURS = {
+  shop: [["سرویس‌ها", "سرویس‌ها و سفارش‌هایتان در یک صفحه است؛ روی هر سرویس بزنید تا مصرف، QR، تمدید و آموزش اتصال را ببینید."],
+    ["خرید", "پلن را انتخاب کنید، اگر کد تخفیف دارید بزنید و با کیف پول یا کارت‌به‌کارت بپردازید؛ رسید را همین‌جا بفرستید."],
+    ["کیف پول", "کیف پول را شارژ کنید تا خرید و تمدید فوری و بدون انتظار انجام شود."],
+    ["وصل نمی‌شوید؟", "روی سرویس، «آموزش اتصال / وصل نمی‌شوم» را بزنید؛ اگر درست نشد با یک دکمه به پشتیبانی خبر بدهید."]],
+  manage: [["داشبورد", "اعتبار، فروش و درآمد امروز و ماه، و ساخت کاربر با یک لمس."],
+    ["کاربرها", "جست‌وجو، روشن و خاموش با سوییچ، تمدید، افزودن حجم و روز، و کار گروهی."],
+    ["صندوق", "رسیدهای پرداخت را ببینید و با یک لمس تأیید کنید؛ پیام خودکار به مشتری می‌رود."],
+    ["بیشتر", "ربات، کارت‌ها، پلن‌ها، کد تخفیف، تیکت‌ها، مشتری‌ها، زیرمجموعه‌ها، گزارش و تنظیمات؛ همه همین‌جا."]],
+};
+function tour(name, force) {
+  const key = "tour_" + name + "_v1";
+  try { if (!force && localStorage.getItem(key)) return; localStorage.setItem(key, "1"); } catch { if (!force) return; }
+  const steps = TOURS[name];
+  let i = 0;
+  const box = h("div", {});
+  const draw = () => {
+    const [t, d] = steps[i];
+    box.replaceChildren(h("div", { class: "tour-dots" }, steps.map((_, k) => h("i", { class: k === i ? "on" : "" }))),
+      h("h2", {}, t), h("p", {}, d),
+      h("div", { class: "row" }, i ? btn("قبلی", "ghost", () => { i--; draw(); }) : null,
+        i < steps.length - 1 ? btn("بعدی", "primary", () => { i++; draw(); }) : btn("شروع کنیم", "primary", () => close(), "check")));
+  };
+  draw();
+  const close = sheet(h("div", { class: "tour" }, h("div", { class: "muted small" }, "راهنمای سریع"), box));
 }
 
 function btn(label, cls, onclick, ic) {
@@ -488,6 +539,7 @@ async function buy(p, renewEmail, direct) {
 
 function extras() {
   const out = [];
+  out.push(btn("راهنمای استفاده", "ghost block", () => tour("shop", true), "chat"));
   if (state.trial) out.push(h("div", { class: "card promo" },
     h("div", { class: "promo-ic" }, icon(IC.gift)),
     h("div", {}, h("h3", {}, "تست رایگان"), h("p", { class: "muted" }, `${state.trial.mb ? size(state.trial.mb * 2 ** 20) : state.trial.gb ? size(state.trial.gb * 2 ** 30) : "حجم نامحدود"} برای ${num(state.trial.hours)} ساعت — یک بار برای هر حساب.`)),
@@ -726,7 +778,7 @@ function render() {
   for (const b of tabs.querySelectorAll("button")) b.setAttribute("aria-current", b.dataset.tab === tab ? "page" : "false");
 }
 
-function setTab(t) { tab = t; render(); window.scrollTo({ top: 0 }); }
+function setTab(t) { tab = t; render(); window.scrollTo({ top: 0 }); syncBack(); if (t === "manage") setTimeout(() => tour("manage"), 400); }
 tabs.addEventListener("click", (e) => { const b = e.target.closest("button[data-tab]"); if (b) { try { tg.HapticFeedback.selectionChanged(); } catch {} setTab(b.dataset.tab); } });
 
 // loadManage brings in the management screens (managers only).
@@ -750,7 +802,7 @@ async function load(first = true) {
       if (!role.store) { state = null; render(); return; }
     }
   }
-  try { state = await api("GET", "me"); render(); }
+  try { state = await api("GET", "me"); render(); setTimeout(() => tour(tab === "manage" ? "manage" : "shop"), 600); }
   catch (e) {
     if (!first) { toast(e.message); return; }
     if (role.manage) { state = null; tab = "manage"; render(); return; }

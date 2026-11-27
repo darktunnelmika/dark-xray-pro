@@ -101,18 +101,19 @@ func registerMiniAdmin5(mux *http.ServeMux, s *Store,
 			return
 		}
 		type admin struct {
-			Chat     int64  `json:"chat"`
-			Role     string `json:"role"`
-			Name     string `json:"name"`
-			Username string `json:"username"`
+			Chat     int64    `json:"chat"`
+			Role     string   `json:"role"`
+			Name     string   `json:"name"`
+			Username string   `json:"username"`
+			Perms    []string `json:"perms"`
 		}
 		out := []admin{}
 		for _, a := range list {
 			var user string
 			_ = s.ro.QueryRowContext(ctx, `SELECT username FROM tg_users WHERE chat_id=?`, a.ChatID).Scan(&user)
-			out = append(out, admin{Chat: a.ChatID, Role: a.Role, Name: firstNonEmpty(a.Name, s.TgName(ctx, a.ChatID)), Username: user})
+			out = append(out, admin{Chat: a.ChatID, Role: a.Role, Name: firstNonEmpty(a.Name, s.TgName(ctx, a.ChatID)), Username: user, Perms: a.Perms})
 		}
-		reply(w, map[string]any{"admins": out, "bot": s.BotUsernameFor(ctx, m.Seller)}, nil)
+		reply(w, map[string]any{"admins": out, "bot": s.BotUsernameFor(ctx, m.Seller), "all_perms": AdminPerms}, nil)
 	})
 	mux.HandleFunc("POST /app/api/m/admins/invite", func(w http.ResponseWriter, r *http.Request) {
 		m, okm := mgr(w, r)
@@ -162,6 +163,21 @@ func registerMiniAdmin5(mux *http.ServeMux, s *Store,
 			}
 		}
 		ok(w, err)
+	})
+
+	mux.HandleFunc("POST /app/api/m/admins/perms", func(w http.ResponseWriter, r *http.Request) {
+		m, okm := mgr(w, r)
+		if !okm || !repOwner(w, m) {
+			return
+		}
+		var in struct {
+			Chat  int64    `json:"chat"`
+			Perms []string `json:"perms"`
+		}
+		if !read(w, r, &in) {
+			return
+		}
+		ok(w, s.SetTgRepAdminPerms(r.Context(), m.Seller, in.Chat, in.Perms))
 	})
 
 	// ---------- a sub-seller's limits, and a message to it ----------

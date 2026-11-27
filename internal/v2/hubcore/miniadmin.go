@@ -40,6 +40,9 @@ type miniMgr struct {
 }
 
 func (m miniMgr) can(what string) bool {
+	if ok, custom := CustomCan(m.Role, what); custom {
+		return ok
+	}
 	switch m.Role {
 	case "owner", "manager":
 		return true

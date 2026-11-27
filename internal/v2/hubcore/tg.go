@@ -593,7 +593,38 @@ func (s *Store) ensureTgAdminSchema() error {
   added_unix INTEGER NOT NULL,
   PRIMARY KEY(rep_id, chat_id)
 )`)
-	return err
+	if err != nil {
+		return err
+	}
+	// perms: a helper's own ticked rights (comma list); "" = its role's.
+	return s.addColumn("rep_tg_admins", "perms", "TEXT NOT NULL DEFAULT ''")
+}
+
+// AdminPerms are the rights a helper can be given one by one.
+var AdminPerms = []string{"view", "link", "new", "renew", "edit", "delete", "orders", "credit", "tickets", "plans", "cards", "settings", "reports", "sellers"}
+
+// SetTgRepAdminPerms ticks a helper's rights; none = back to its role's.
+func (s *Store) SetTgRepAdminPerms(ctx context.Context, repID string, chat int64, perms []string) error {
+	ok := map[string]bool{}
+	for _, p := range AdminPerms {
+		ok[p] = true
+	}
+	var keep []string
+	seen := map[string]bool{}
+	for _, p := range perms {
+		if ok[p] && !seen[p] {
+			seen[p] = true
+			keep = append(keep, p)
+		}
+	}
+	r, err := s.db.ExecContext(ctx, `UPDATE rep_tg_admins SET perms=? WHERE rep_id=? AND chat_id=?`, strings.Join(keep, ","), repID, chat)
+	if err != nil {
+		return err
+	}
+	if n, _ := r.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 // TgRepAdmin is one helper of a reseller.
@@ -601,6 +632,7 @@ type TgRepAdmin struct {
 	ChatID int64
 	Role   string
 	Name   string
+	Perms  []string // ticked rights; empty = the role's
 }
 
 func (s *Store) NewTgAdminInvite(ctx context.Context, repID, role string) (string, error) {
@@ -630,7 +662,7 @@ ON CONFLICT(rep_id,chat_id) DO UPDATE SET role=excluded.role, name=excluded.name
 }
 
 func (s *Store) TgRepAdmins(ctx context.Context, repID string) ([]TgRepAdmin, error) {
-	rows, err := s.ro.QueryContext(ctx, `SELECT chat_id,role,name FROM rep_tg_admins WHERE rep_id=? ORDER BY added_unix`, repID)
+	rows, err := s.ro.QueryContext(ctx, `SELECT chat_id,role,name,perms FROM rep_tg_admins WHERE rep_id=? ORDER BY added_unix`, repID)
 	if err != nil {
 		return nil, err
 	}
@@ -638,8 +670,12 @@ func (s *Store) TgRepAdmins(ctx context.Context, repID string) ([]TgRepAdmin, er
 	var out []TgRepAdmin
 	for rows.Next() {
 		var a TgRepAdmin
-		if err := rows.Scan(&a.ChatID, &a.Role, &a.Name); err != nil {
+		var perms string
+		if err := rows.Scan(&a.ChatID, &a.Role, &a.Name, &perms); err != nil {
 			return nil, err
+		}
+		if perms != "" {
+			a.Perms = strings.Split(perms, ",")
 		}
 		out = append(out, a)
 	}
@@ -651,13 +687,31 @@ func (s *Store) RemoveTgRepAdmin(ctx context.Context, repID string, chat int64) 
 	return err
 }
 
+// CustomCan reads a "custom:a,b,c" role: does it give what?
+func CustomCan(role, what string) (can, custom bool) {
+	list, ok := strings.CutPrefix(role, "custom:")
+	if !ok {
+		return false, false
+	}
+	for _, p := range strings.Split(list, ",") {
+		if p == what || (what == "shop" && p == "settings") {
+			return true, true
+		}
+	}
+	return false, true
+}
+
 // TgRepRole returns the reseller a chat works for and its role: "owner" for
 // the reseller's own chat, else the helper role ("" if none).
 func (s *Store) TgRepRole(ctx context.Context, chat int64) (rep, role string) {
 	if rep = s.TgRep(ctx, chat); rep != "" {
 		return rep, "owner"
 	}
-	_ = s.ro.QueryRowContext(ctx, `SELECT a.rep_id,a.role FROM rep_tg_admins a JOIN reps r ON r.id=a.rep_id WHERE a.chat_id=? AND r.enabled=1 ORDER BY a.added_unix LIMIT 1`, chat).Scan(&rep, &role)
+	var perms string
+	_ = s.ro.QueryRowContext(ctx, `SELECT a.rep_id,a.role,a.perms FROM rep_tg_admins a JOIN reps r ON r.id=a.rep_id WHERE a.chat_id=? AND r.enabled=1 ORDER BY a.added_unix LIMIT 1`, chat).Scan(&rep, &role, &perms)
+	if perms != "" {
+		role = "custom:" + perms // ticked rights (CustomCan) instead of the role's
+	}
 	return rep, role
 }
 

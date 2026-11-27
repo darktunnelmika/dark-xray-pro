@@ -27,6 +27,7 @@ const daysLeft = (u) => Math.max(0, Math.ceil((u - Date.now() / 1000) / 86400));
 const gbOf = (b) => (b < 0 ? "∞" : num(Math.round((b / 2 ** 30) * 10) / 10));
 const stLabel = { active: ["good", "فعال"], soon: ["warn", "رو به اتمام"], ended: ["bad", "تمام شده"], off: ["", "خاموش"], waiting: ["", "منتظر اتصال"] };
 const roleFa = { owner: "مالک", manager: "مدیر", sales: "فروش", support: "پشتیبانی" };
+const roleLabel = (r) => (String(r || "").startsWith("custom:") ? "دسترسی سفارشی" : roleFa[r] || r);
 const can = (k) => !!(M.home && M.home.can && M.home.can[k]);
 
 async function mLoad(view) {
@@ -56,6 +57,7 @@ function mSet(view, filter) {
   try { tg.HapticFeedback.selectionChanged(); } catch {}
   mRefresh().catch((e) => toast(e.message));
   window.scrollTo({ top: 0 });
+  if (typeof syncBack === "function") setTimeout(syncBack, 0);
 }
 
 // Manage is the tab's content (app.js calls it from render()).
@@ -88,7 +90,7 @@ function dashView() {
       h("span", {}, `با سرعت فروش این هفته (${size(f.daily_bytes)} در روز) حدود `, h("b", {}, f.days_left < 1 ? "کمتر از یک روز" : `${num(Math.floor(f.days_left))} روز`), " کافی است.")) : null,
     f && f.package ? h("div", { class: "muted small" }, `پیشنهاد شارژ برای یک ماه: ${f.package.name} (${num(f.package.gb)} گیگ)`) : null);
   out.push(h("div", { class: "card mhead" },
-    h("div", {}, h("h2", {}, d.name || ""), h("span", { class: "pill" }, roleFa[d.role] || d.role)),
+    h("div", {}, h("h2", {}, d.name || ""), h("span", { class: "pill" }, roleLabel(d.role))),
     h("div", { class: "muted small" }, `فروش امروز: ${size((d.today || {}).sold || 0)} · ${num((d.today || {}).sales || 0)} مورد`)));
   if (credit) out.push(credit);
   const mo = d.month || {};

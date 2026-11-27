@@ -53,7 +53,7 @@ const m2Reload = () => m2Fetch(M.view).then(render).catch((e) => toast(e.message
 // ---------- the "more" grid ----------
 function moreView() {
   const d = M.home, c = d.can || {};
-  const tile = (v, label, ic, sub, badge) => h("button", { class: "tile", onclick: () => mSet(v) }, mic(ic),
+  const tile = (v, label, ic, sub, badge) => h("button", { class: "tile", onclick: () => (v === "guide" ? tour("manage", true) : mSet(v)) }, mic(ic),
     h("b", {}, label), sub ? h("small", { class: "muted" }, sub) : null, badge ? h("i", { class: "badge" }, num(badge)) : null);
   const tiles = [
     !d.owner && c.credit ? tile("wallet", "اعتبار و شارژ", "wallet", d.credit !== undefined ? size(d.credit) : "") : null,
@@ -71,6 +71,7 @@ function moreView() {
     c.settings ? tile("sale", "تنظیمات فروش", "gauge", "لینک ساب، پاک‌سازی، پاسخ آماده") : null,
     d.role === "owner" && !d.owner ? tile("admins", "ادمین‌های ربات", "bot", "دعوت، نقش، حذف") : null,
   ].filter(Boolean);
+  tiles.push(tile("guide", "راهنما", "chat", "معرفی بخش‌ها"));
   const out = [h("div", { class: "tiles" }, tiles)];
   if (d.role === "owner" || d.role === "manager") {
     out.push(h("div", { class: "card manual" },
@@ -402,7 +403,12 @@ async function ticketSheet(id) {
   const close = sheet(h("div", { class: "row between" }, h("h2", {}, t.name || `#${t.chat}`), h("span", { class: "muted small" }, `#${num(t.id)}`)),
     t.clients && t.clients.length ? h("div", { class: "muted small ltr" }, t.clients.join(" · ")) : null,
     h("div", { class: "thread" }, (t.msgs || []).map((m) => h("div", { class: `bubble ${m.staff ? "me" : ""}`, onclick: () => copy(m.text) },
-      h("div", {}, m.text), h("small", {}, `${m.staff ? m.author || "پشتیبانی" : ""}${m.staff ? " · " : ""}${date(m.unix)}`)))),
+      h("div", {}, m.text),
+      m.photo ? h("button", { class: "linkbtn", onclick: async (e) => {
+        e.stopPropagation();
+        try { const r = await api("GET", `m/ticket/photo?msg=${m.id}`); sheet(h("img", { class: "receipt", src: r.image, alt: "عکس" })); } catch (x) { toast(x.message); }
+      } }, "📷 نمایش عکس") : null,
+      h("small", {}, `${m.staff ? m.author || "پشتیبانی" : ""}${m.staff ? " · " : ""}${date(m.unix)}`)))),
     t.status !== "closed" ? quick : null,
     t.status !== "closed" ? txt : null,
     t.status !== "closed" ? h("div", { class: "row" }, btn("ارسال", "primary", () => send(false), "send"), btn("ارسال و بستن", "", () => send(true), "check")) : h("p", { class: "muted small" }, "این تیکت بسته است."));
@@ -810,8 +816,9 @@ function adminsView() {
   out.push(h("div", { class: "ulist" }, d.admins.map((a) => {
     const sel = h("select", { "aria-label": "نقش" }, ["manager", "sales", "support"].map((r) => { const o = h("option", { value: r }, roleFa[r]); if (r === a.role) o.selected = true; return o; }));
     sel.addEventListener("change", async () => { try { await api("POST", "m/admins/set", { chat: a.chat, role: sel.value }); toast("نقش عوض شد"); } catch (e) { toast(e.message); } });
-    return h("div", { class: "lrow" }, h("div", {}, h("b", {}, a.name || `#${a.chat}`), a.username ? h("div", { class: "ltr muted small" }, "@" + a.username) : null),
-      h("div", { class: "row" }, sel, h("button", { class: "iconbtn mini danger", "aria-label": "حذف", onclick: async () => {
+    return h("div", { class: "lrow" }, h("div", {}, h("b", {}, a.name || `#${a.chat}`), a.username ? h("div", { class: "ltr muted small" }, "@" + a.username) : null,
+        a.perms && a.perms.length ? h("div", { class: "small muted" }, `دسترسی سفارشی: ${num(a.perms.length)} مورد`) : null),
+      h("div", { class: "row" }, sel, h("button", { class: "iconbtn mini", "aria-label": "دسترسی‌ها", onclick: () => permsSheet(a, d.all_perms || []) }, mic("gauge")), h("button", { class: "iconbtn mini danger", "aria-label": "حذف", onclick: async () => {
         try { await api("POST", "m/admins/set", { chat: a.chat, role: "" }); toast("حذف شد"); m2Reload(); } catch (e) { toast(e.message); }
       } }, mic("trash"))));
   })));
@@ -847,6 +854,22 @@ function saleView() {
   }, "check");
   out.push(save);
   return out;
+}
+
+const permFa = { view: "دیدن کاربرها", link: "لینک و QR", new: "ساخت کاربر", renew: "تمدید و افزودن حجم", edit: "روشن/خاموش و ویرایش", delete: "حذف کاربر",
+  orders: "تأیید پرداخت‌ها", credit: "اعتبار و شارژ", tickets: "تیکت‌ها", plans: "پلن‌ها و قیمت‌ها", cards: "کارت‌های پرداخت", settings: "تنظیمات ربات، مشتری‌ها، پیام همگانی",
+  reports: "گزارش فروش", sellers: "زیرمجموعه‌ها و فروش پنل" };
+function permsSheet(a, all) {
+  const boxes = all.map((p) => { const [row, box] = check(permFa[p] || p, (a.perms || []).includes(p)); box.dataset.p = p; return { row, box }; });
+  const go = btn("ذخیره", "primary block big", async () => {
+    try {
+      await api("POST", "m/admins/perms", { chat: a.chat, perms: boxes.filter((x) => x.box.checked).map((x) => x.box.dataset.p) });
+      close(); haptic("success"); toast("ذخیره شد"); m2Reload();
+    } catch (e) { toast(e.message); }
+  }, "check");
+  const close = sheet(h("h2", {}, `دسترسی‌های ${a.name || a.chat}`),
+    h("p", { class: "muted small" }, "هر چه تیک بزنید، همان را دارد (در ربات و مینی‌اپ). هیچ‌کدام = همان دسترسی‌های نقشش."),
+    h("div", { class: "card" }, boxes.map((x) => x.row)), go);
 }
 
 const M2V = { sale: saleView, customers: customersView, admins: adminsView, settings: settingsView, discounts: discountsView, broadcast: broadcastView, more: moreView, resale: resaleView, wallet: walletView, sellers: sellersView, bot: botView, cards: cardsView, plans: plansView, tickets: ticketsView, report: reportView };

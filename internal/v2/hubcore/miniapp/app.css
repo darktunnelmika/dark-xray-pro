@@ -229,3 +229,6 @@ body { background-image: radial-gradient(color-mix(in oklab, var(--muted) 14%, t
 .stepper .done i { color: var(--good); border-color: var(--good); }
 img.av.photo { object-fit: cover; padding: 0; }
 .brand-logo { inline-size: 22px; block-size: 22px; border-radius: 6px; object-fit: cover; vertical-align: -4px; margin-inline-end: 6px; }
+.tour h2 { margin: 10px 0 6px; } .tour p { line-height: 1.9; }
+.tour-dots { display: flex; gap: 6px; justify-content: center; margin-block: 6px; }
+.tour-dots i { inline-size: 8px; block-size: 8px; border-radius: 50%; background: var(--line); } .tour-dots i.on { background: var(--ion); inline-size: 20px; border-radius: 99px; }

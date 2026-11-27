@@ -39,6 +39,9 @@ func (s *Store) ensureTicketSchema() error {
 	if _, err := s.db.Exec(ticketSchema); err != nil {
 		return err
 	}
+	if err := s.addColumn("tg_ticket_msgs", "photo", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
 	// Tickets from before threads: their text becomes the first message;
 	// answered or older than a week ones start closed.
 	_, err := s.db.Exec(`INSERT INTO tg_ticket_msgs(ticket_id,staff,text,unix) SELECT t.id,0,t.text,t.unix FROM tg_tickets t
@@ -70,6 +73,7 @@ type TicketMsg struct {
 	Text      string `json:"text"`
 	Unix      int64  `json:"unix"`
 	Delivered bool   `json:"delivered"`
+	Photo     bool   `json:"photo"` // a picture the customer sent (its file id stays here)
 }
 
 // TicketOut is a panel answer a bot still has to send.
@@ -86,6 +90,28 @@ func canTicket(by Principal, seller string) bool {
 // CustomerTicket adds a customer's message to their open ticket with this
 // seller, or opens one. It reports the ticket and whether it is new.
 func (s *Store) CustomerTicket(ctx context.Context, seller string, chat int64, name, text string) (int64, bool, error) {
+	return s.customerTicket(ctx, seller, chat, name, text, "")
+}
+
+// CustomerTicketPhoto adds a picture (a Telegram file id of the seller's
+// bot) with its caption to the customer's ticket.
+func (s *Store) CustomerTicketPhoto(ctx context.Context, seller string, chat int64, name, caption, fileID string) (int64, bool, error) {
+	if strings.TrimSpace(caption) == "" {
+		caption = "📷 عکس"
+	}
+	return s.customerTicket(ctx, seller, chat, name, caption, fileID)
+}
+
+// TicketPhoto is the file id of a ticket message's picture and its seller.
+func (s *Store) TicketPhoto(ctx context.Context, msgID int64) (seller, fileID string, err error) {
+	err = s.ro.QueryRowContext(ctx, `SELECT t.seller,m.photo FROM tg_ticket_msgs m JOIN tg_tickets t ON t.id=m.ticket_id WHERE m.id=? AND m.photo<>''`, msgID).Scan(&seller, &fileID)
+	if err != nil {
+		return "", "", ErrNotFound
+	}
+	return seller, fileID, nil
+}
+
+func (s *Store) customerTicket(ctx context.Context, seller string, chat int64, name, text, photo string) (int64, bool, error) {
 	text = strings.TrimSpace(text)
 	if text == "" || utf8.RuneCountInString(text) > 4000 {
 		return 0, false, ErrInvalid
@@ -114,7 +140,7 @@ func (s *Store) CustomerTicket(ctx context.Context, seller string, chat int64, n
 			return 0, false, err
 		}
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO tg_ticket_msgs(ticket_id,staff,text,unix) VALUES(?,0,?,?)`, id, text, now); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO tg_ticket_msgs(ticket_id,staff,text,unix,photo) VALUES(?,0,?,?,?)`, id, text, now, photo); err != nil {
 		return 0, false, err
 	}
 	return id, isNew, tx.Commit()
@@ -166,14 +192,14 @@ func (s *Store) TicketByID(ctx context.Context, by Principal, id int64) (Ticket,
 	if err != nil || !canTicket(by, t.Seller) {
 		return Ticket{}, ErrNotFound
 	}
-	rows, err := s.ro.QueryContext(ctx, `SELECT id,staff,author,text,unix,delivered FROM tg_ticket_msgs WHERE ticket_id=? ORDER BY id`, id)
+	rows, err := s.ro.QueryContext(ctx, `SELECT id,staff,author,text,unix,delivered,photo<>'' FROM tg_ticket_msgs WHERE ticket_id=? ORDER BY id`, id)
 	if err != nil {
 		return t, err
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var m TicketMsg
-		if err := rows.Scan(&m.ID, &m.Staff, &m.Author, &m.Text, &m.Unix, &m.Delivered); err != nil {
+		if err := rows.Scan(&m.ID, &m.Staff, &m.Author, &m.Text, &m.Unix, &m.Delivered, &m.Photo); err != nil {
 			return t, err
 		}
 		t.Msgs = append(t.Msgs, m)

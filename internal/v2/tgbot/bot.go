@@ -320,6 +320,12 @@ func (b *Bot) onMessage(ctx context.Context, m *Message) {
 			return
 		}
 	}
+	if len(m.Photo) > 0 && b.peekAwait(chat) == "support" {
+		// A picture for support (a screenshot of an error), not a receipt.
+		b.takeAwait(chat)
+		b.ticketPhoto(ctx, chat, name, m.From.Username, text, m.Photo[len(m.Photo)-1].FileID)
+		return
+	}
 	if len(m.Photo) > 0 && !(b.Owners[chat] && b.peekAwait(chat) == "broadcast") {
 		if w := b.peekAwait(chat); strings.HasPrefix(w, "P:receipt:") {
 			if b.repSaleReceipt(ctx, chat, name, m.Photo[len(m.Photo)-1].FileID, w) {
@@ -1444,6 +1450,9 @@ const repHelp = `دستورهای نماینده:
 /invite manager|sales|support — دعوت ادمین جدید`
 
 func roleName(r string) string {
+	if strings.HasPrefix(r, "custom:") {
+		return "دسترسی سفارشی"
+	}
 	return map[string]string{"owner": "نماینده", "manager": "مدیر", "sales": "فروش", "support": "پشتیبانی"}[r]
 }
 
