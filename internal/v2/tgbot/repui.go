@@ -181,6 +181,10 @@ func (b *Bot) repHome(ctx context.Context, chat int64, rep, role string) {
 		// and the channels its customers must join.
 		kb.Rows = append(kb.Rows, []Button{repBtn("📣 پیام همگانی", "bc"), repBtn("📢 عضویت اجباری", "join")})
 	}
+	if r := b.panelAppRow(); r != nil && (role == "owner" || role == "manager") {
+		// The whole panel inside Telegram, signed in by this chat (tgpanel.go).
+		kb.Rows = append(kb.Rows, r)
+	}
 	kb.Rows = append(kb.Rows, []Button{repBtn("🛍 حالت مشتری", "cust")})
 	b.send(ctx, chat, text, kb)
 }

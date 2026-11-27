@@ -24,6 +24,9 @@ func (b *Bot) ownerMenuKB(pending int) *Keyboard {
 		orders = "🛒 سفارش‌ها (" + faInt(int64(pending)) + ")"
 	}
 	kb := &Keyboard{}
+	if r := b.panelAppRow(); r != nil {
+		kb.Rows = append(kb.Rows, r)
+	}
 	for _, r := range ownerMenu.Rows {
 		nr := append([]Button(nil), r...)
 		for i := range nr {

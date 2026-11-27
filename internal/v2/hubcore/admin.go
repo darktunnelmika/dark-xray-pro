@@ -2266,6 +2266,7 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 	mux.Handle("GET /api/v1/", sh)                   // old-panel subscription URLs
 	mux.Handle("GET /app/", sh)                      // Telegram Mini App
 	mux.Handle("POST /app/", sh)
+	registerTgPanel(mux.ServeMux, s) // the panel as a Telegram Mini App (tgpanel.go)
 	routes := mux.apiRoutes()
 	mux.HandleFunc("GET /api/v2/admin/docs", member(func(w http.ResponseWriter, r *http.Request) {
 		reply(w, routes, nil)
