@@ -547,6 +547,11 @@ func (b *Bot) onMessage(ctx context.Context, m *Message) {
 		b.takeCoupon(ctx, chat, strings.TrimPrefix(what, "coupon:"), text)
 		return
 	}
+	if what := b.peekAwait(chat); strings.HasPrefix(what, "cx:") && text != "" && !strings.HasPrefix(text, "/") {
+		b.takeAwait(chat)
+		b.customTyped(ctx, chat, strings.TrimPrefix(what, "cx:"), text)
+		return
+	}
 	switch b.takeAwait(chat) {
 	case "link":
 		b.link(ctx, chat, text)
@@ -674,6 +679,9 @@ func (b *Bot) shopIn(ctx context.Context, chat int64, cat string) {
 		if uncategorised {
 			kb.Rows = append(kb.Rows, row(cbBtn("📦 سایر بسته‌ها", "cat:-")))
 		}
+		if _, ok := b.customPlan(ctx); ok {
+			kb.Rows = append(kb.Rows, row(cbBtn("🎛 حجم و روز دلخواه", "cx:")))
+		}
 		kb.Rows = append(kb.Rows, row(cbBtn("« منوی اصلی", "home")))
 		b.send(ctx, chat, "🛍 <b>خرید سرویس</b>\n"+line+"\nیک دسته را انتخاب کنید:", kb)
 		return
@@ -705,9 +713,13 @@ func (b *Bot) shopIn(ctx context.Context, chat int64, cat string) {
 		lines = append(lines, p.ID)
 		kb.Rows = append(kb.Rows, row(cbBtn("📦 "+p.Name+" — "+productPrice(p), "prod:"+p.ID)))
 	}
-	if len(lines) == 0 {
+	_, custom := b.customPlan(ctx)
+	if len(lines) == 0 && !custom {
 		b.send(ctx, chat, "🛍 فعلاً بسته‌ای برای فروش نیست. کمی بعد سر بزنید.", homeKB)
 		return
+	}
+	if custom {
+		kb.Rows = append(kb.Rows, row(cbBtn("🎛 حجم و روز دلخواه", "cx:")))
 	}
 	kb.Rows = append(kb.Rows, row(cbBtn("« منوی اصلی", "home")))
 	intro := "همهٔ بسته‌ها روی همهٔ سرورها کار می‌کنند و با یک لینک تحویل می‌شوند.\nیک بسته را انتخاب کنید:"
@@ -893,6 +905,9 @@ func (b *Bot) onCallback(ctx context.Context, q *CallbackQuery) {
 		return
 	}
 	if b.repSaleCallback(ctx, q) {
+		return
+	}
+	if b.customCallback(ctx, chat, q.Data) {
 		return
 	}
 	if b.growCallback(ctx, q) {

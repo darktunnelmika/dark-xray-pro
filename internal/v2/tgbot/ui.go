@@ -357,6 +357,9 @@ func (b *Bot) showUsage(ctx context.Context, chat int64, email string) {
 // showRenew lists products for renewing one service.
 func (b *Bot) showRenew(ctx context.Context, chat int64, email string) {
 	kb := &Keyboard{Rows: b.renewButtons(ctx, chat, email)}
+	if _, ok := b.customPlan(ctx); ok && b.customFits(email) {
+		kb.Rows = append(kb.Rows, row(cbBtn("🎛 تمدید با حجم و روز دلخواه", "cx:"+email)))
+	}
 	kb.Rows = append(kb.Rows, row(cbBtn("« سرویس", "svc:"+email)))
 	b.send(ctx, chat, "♻️ <b>تمدید "+esc(email)+"</b>\n"+line+"\nیکی از بسته‌ها را انتخاب کنید؛ حجم و زمان به سرویس فعلی اضافه می‌شود و لینک عوض نمی‌شود.", kb)
 }
@@ -387,31 +390,52 @@ func productPrice(p hubcore.Product) string {
 
 func (b *Bot) showProduct(ctx context.Context, chat int64, id string) {
 	for _, p := range b.renewProducts(ctx) {
-		if p.ID != id {
-			continue
+		if p.ID == id {
+			b.productCard(ctx, chat, p, "")
+			return
 		}
-		price := "<b>" + productPrice(p) + "</b>"
-		if d, ok := b.Store.HeldDiscount(ctx, hubcore.TgBuyer(chat), p.ID); ok {
-			np, ns := d.Discounted(p.Price, p.PriceStars)
-			q := p
-			q.Price, q.PriceStars = np, ns
-			if d.Percent == 0 {
-				q.PriceStars = p.PriceStars
+	}
+	// A custom size (customplan.go) is hidden from the lists but still sold.
+	if strings.HasPrefix(id, "cx-") {
+		if p, err := b.Store.ProductByID(ctx, b.owner(), id); err == nil && b.sells(p) && p.Status == "published" {
+			if _, ok := b.customPlan(ctx); ok {
+				b.productCard(ctx, chat, p, "")
+				return
 			}
-			tag := "🎟 " + esc(d.Code)
-			if d.Code == hubcore.InviteCode {
-				tag = "🎁 هدیهٔ دعوت"
-			}
-			price = "<s>" + productPrice(p) + "</s> ← <b>" + productPrice(q) + "</b> " + tag
 		}
-		text := fmt.Sprintf("📦 <b>%s</b>\n%s\n📶 حجم: <b>%s</b>\n⏳ مدت: <b>%s روز</b>\n💳 قیمت: %s\n\n✅ همهٔ سرورها · ⚡ تحویل خودکار · 🔗 یک لینک برای همه",
-			esc(p.Name), line, map[bool]string{true: faInt(p.GB) + " گیگ", false: "نامحدود"}[p.Plan == "volume"], faInt(p.Days), price)
-		kb := &Keyboard{Rows: b.buyButtons(ctx, chat, p, "")}
-		kb.Rows = append(kb.Rows, row(cbBtn("🎟 کد تخفیف دارم", "cpn:"+p.ID), cbBtn("« بسته‌ها", "shop")))
-		b.send(ctx, chat, text, kb)
-		return
 	}
 	b.send(ctx, chat, "این بسته دیگر فروخته نمی‌شود.", backTo("shop", "بسته‌ها"))
+}
+
+// productCard shows one plan with its pay buttons; renew is the service a
+// renewal goes to ("" for a new service).
+func (b *Bot) productCard(ctx context.Context, chat int64, p hubcore.Product, renew string) {
+	price := "<b>" + productPrice(p) + "</b>"
+	if d, ok := b.Store.HeldDiscount(ctx, hubcore.TgBuyer(chat), p.ID); ok {
+		np, ns := d.Discounted(p.Price, p.PriceStars)
+		q := p
+		q.Price, q.PriceStars = np, ns
+		if d.Percent == 0 {
+			q.PriceStars = p.PriceStars
+		}
+		tag := "🎟 " + esc(d.Code)
+		if d.Code == hubcore.InviteCode {
+			tag = "🎁 هدیهٔ دعوت"
+		}
+		price = "<s>" + productPrice(p) + "</s> ← <b>" + productPrice(q) + "</b> " + tag
+	}
+	text := fmt.Sprintf("📦 <b>%s</b>\n%s\n📶 حجم: <b>%s</b>\n⏳ مدت: <b>%s روز</b>\n💳 قیمت: %s\n\n✅ همهٔ سرورها · ⚡ تحویل خودکار · 🔗 یک لینک برای همه",
+		esc(p.Name), line, map[bool]string{true: faInt(p.GB) + " گیگ", false: "نامحدود"}[p.Plan == "volume"], faInt(p.Days), price)
+	if renew != "" {
+		text += "\n\n♻️ تمدید <b>" + esc(renew) + "</b>: حجم و روز به سرویس فعلی اضافه می‌شود و لینک عوض نمی‌شود."
+	}
+	kb := &Keyboard{Rows: b.buyButtons(ctx, chat, p, renew)}
+	if renew != "" {
+		kb.Rows = append(kb.Rows, row(cbBtn("« سرویس", "svc:"+renew)))
+	} else {
+		kb.Rows = append(kb.Rows, row(cbBtn("🎟 کد تخفیف دارم", "cpn:"+p.ID), cbBtn("« بسته‌ها", "shop")))
+	}
+	b.send(ctx, chat, text, kb)
 }
 
 // ---------- guide ----------
