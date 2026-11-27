@@ -369,6 +369,18 @@ func (a *HTTPAPI) Answer(ctx context.Context, id, text string) error {
 	return a.callJSON(ctx, "answerCallbackQuery", map[string]any{"callback_query_id": id, "text": text}, nil)
 }
 
+// SetWebhook has Telegram post this bot's updates to url, with secret in
+// the X-Telegram-Bot-Api-Secret-Token header, one request at a time.
+func (a *HTTPAPI) SetWebhook(ctx context.Context, url, secret string) error {
+	return a.callJSON(ctx, "setWebhook", map[string]any{"url": url, "secret_token": secret, "max_connections": 1,
+		"allowed_updates": []string{"message", "callback_query", "pre_checkout_query"}}, nil)
+}
+
+// DeleteWebhook goes back to getUpdates (updates waiting are kept).
+func (a *HTTPAPI) DeleteWebhook(ctx context.Context) error {
+	return a.callJSON(ctx, "deleteWebhook", map[string]any{"drop_pending_updates": false}, nil)
+}
+
 func (a *HTTPAPI) Me(ctx context.Context) (string, error) {
 	var u User
 	err := a.callJSON(ctx, "getMe", map[string]any{}, &u)

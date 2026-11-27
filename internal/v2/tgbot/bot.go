@@ -146,6 +146,45 @@ func (b *Bot) init() {
 
 // Run long-polls until ctx ends, and runs the background announcers.
 func (b *Bot) Run(ctx context.Context) {
+	b.start(ctx)
+	// getUpdates refuses to work while a webhook is set (a bot that ran on
+	// one before): back to polling.
+	if d, ok := b.API.(interface{ DeleteWebhook(context.Context) error }); ok {
+		_ = d.DeleteWebhook(ctx)
+	}
+	var offset int64
+	for ctx.Err() == nil {
+		ups, err := b.API.Updates(ctx, offset)
+		if err != nil {
+			if ctx.Err() == nil {
+				b.logf("tgbot: %v", err)
+				time.Sleep(5 * time.Second)
+			}
+			continue
+		}
+		for _, u := range ups {
+			offset = u.ID + 1
+			b.Handle(ctx, u)
+		}
+	}
+}
+
+// RunHook handles updates a webhook delivers (one at a time, in order)
+// until ctx ends, and runs the background announcers.
+func (b *Bot) RunHook(ctx context.Context, ups <-chan Update) {
+	b.start(ctx)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case u := <-ups:
+			b.Handle(ctx, u)
+		}
+	}
+}
+
+// start prepares the bot and starts its background announcers.
+func (b *Bot) start(ctx context.Context) {
 	b.init()
 	if b.Seller == "" { // the panel's main bot keeps the shared state
 		b.Store.TgFinishInterrupted(ctx)
@@ -163,21 +202,6 @@ func (b *Bot) Run(ctx context.Context) {
 			{"report", "گزارش امروز"}, {"client", "اطلاعات یک کلاینت"}, {"broadcast", "پیام همگانی"}, {"help", "راهنما"}})
 	}
 	go b.background(ctx)
-	var offset int64
-	for ctx.Err() == nil {
-		ups, err := b.API.Updates(ctx, offset)
-		if err != nil {
-			if ctx.Err() == nil {
-				b.logf("tgbot: %v", err)
-				time.Sleep(5 * time.Second)
-			}
-			continue
-		}
-		for _, u := range ups {
-			offset = u.ID + 1
-			b.Handle(ctx, u)
-		}
-	}
 }
 
 func (b *Bot) background(ctx context.Context) {

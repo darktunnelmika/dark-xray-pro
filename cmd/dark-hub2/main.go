@@ -16,9 +16,12 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/sha256"
+	"crypto/subtle"
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
 	"flag"
@@ -209,6 +212,7 @@ func main() {
 			admin := &http.Server{Addr: *adminListen, Handler: hubcore.AdminHandlerWith(s, strings.TrimSpace(string(tok)), *subBase, webui.Handler(), func(m *http.ServeMux) {
 				inst := hubcore.InstallHandler(s, hubcore.InstallConfig{DistDir: *distDir, PublicURL: *subBase, HubURL: "https://" + *listen, CAFile: filepath.Join(*tlsDir, "ca.pem")})
 				m.Handle("GET /install/", inst)
+				m.HandleFunc("POST /tgwh/{rep}", rbots.webhook) // resellers' bots on a webhook
 				mig := hubcore.DarkOldHandler(s)
 				m.Handle("GET /migrate/", mig)
 				m.Handle("POST /migrate/", mig)
@@ -569,6 +573,54 @@ type repBot struct {
 	token  string
 	bot    *tgbot.Bot
 	cancel context.CancelFunc
+	api    *tgbot.HTTPAPI
+	// On a webhook (setting tg_webhook_base): updates arrive at
+	// /tgwh/<rep> and go through hook; nil = long polling.
+	hook   chan tgbot.Update
+	secret string
+	base   string // the webhook base it started with ("" = polling)
+}
+
+// webhookBase is where Telegram can reach this hub over HTTPS on a port it
+// accepts (443, 80, 88 or 8443), e.g. https://hub.example.com; "" = poll.
+func (r *repBots) webhookBase(ctx context.Context) string {
+	b := strings.TrimRight(strings.TrimSpace(r.store.Setting(ctx, "tg_webhook_base")), "/")
+	if !strings.HasPrefix(b, "https://") {
+		return ""
+	}
+	return b
+}
+
+// hookSecret is the header Telegram sends with a bot's updates.
+func hookSecret(token string) string {
+	h := sha256.Sum256([]byte("dark-hub2 webhook " + token))
+	return hex.EncodeToString(h[:16])
+}
+
+// webhook takes one update for a reseller's bot from Telegram.
+func (r *repBots) webhook(w http.ResponseWriter, req *http.Request) {
+	r.mu.Lock()
+	b := r.running[req.PathValue("rep")]
+	r.mu.Unlock()
+	if b == nil || b.hook == nil {
+		http.NotFound(w, req)
+		return
+	}
+	if subtle.ConstantTimeCompare([]byte(req.Header.Get("X-Telegram-Bot-Api-Secret-Token")), []byte(b.secret)) != 1 {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+	var u tgbot.Update
+	if err := json.NewDecoder(http.MaxBytesReader(w, req.Body, 1<<20)).Decode(&u); err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	select {
+	case b.hook <- u:
+		w.WriteHeader(http.StatusOK)
+	case <-time.After(5 * time.Second):
+		http.Error(w, "busy", http.StatusServiceUnavailable) // Telegram sends it again
+	}
 }
 
 func (r *repBots) run(ctx context.Context) {
@@ -589,13 +641,23 @@ func (r *repBots) reconcile(ctx context.Context) {
 	for _, c := range r.store.RepBotsAll(ctx) {
 		want[c.Rep] = c.Token
 	}
+	base := r.webhookBase(ctx)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for rep, b := range r.running {
-		if want[rep] != b.token {
+		// A changed token, or a switch between webhook and polling: restart.
+		if want[rep] != b.token || b.base != base {
 			b.cancel()
 			delete(r.running, rep)
 			hubcore.SetRepBotStatus(rep, false, "", "")
+			if b.hook != nil && want[rep] != b.token {
+				// A bot that leaves: Telegram stops posting to us.
+				go func(api *tgbot.HTTPAPI) {
+					c, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+					defer cancel()
+					_ = api.DeleteWebhook(c)
+				}(b.api)
+			}
 		}
 	}
 	for rep, tok := range want {
@@ -613,10 +675,27 @@ func (r *repBots) reconcile(ctx context.Context) {
 		}
 		bctx, bcancel := context.WithCancel(r.parent)
 		b := &tgbot.Bot{Store: r.store, API: api, Owners: map[int64]bool{}, SubBase: r.subBase, Seller: rep}
-		r.running[rep] = &repBot{token: tok, bot: b, cancel: bcancel}
+		rb := &repBot{token: tok, bot: b, cancel: bcancel, api: api, base: base}
+		if base != "" {
+			rb.secret = hookSecret(tok)
+			cctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+			err := api.SetWebhook(cctx, base+"/tgwh/"+rep, rb.secret)
+			cancel()
+			if err == nil {
+				rb.hook = make(chan tgbot.Update, 64)
+			} else {
+				log.Printf("reseller bot for %s: webhook: %v; polling instead", rep, err)
+			}
+		}
+		r.running[rep] = rb
 		hubcore.SetRepBotStatus(rep, true, user, "")
-		log.Printf("reseller bot for %s on (@%s)", rep, user)
-		go b.Run(bctx)
+		if rb.hook != nil {
+			log.Printf("reseller bot for %s on (@%s), webhook", rep, user)
+			go b.RunHook(bctx, rb.hook)
+		} else {
+			log.Printf("reseller bot for %s on (@%s)", rep, user)
+			go b.Run(bctx)
+		}
 	}
 }
 
