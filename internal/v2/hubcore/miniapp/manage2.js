@@ -579,6 +579,21 @@ function ownerSaleView(d) {
     h("div", { class: "two" }, field("حجم (گیگ)", h("input", { type: "number", inputmode: "numeric", value: p.gb || "", oninput: (e) => { p.gb = Math.round(+e.target.value || 0); } })),
       field("قیمت (تومان)", h("input", { type: "number", inputmode: "numeric", value: p.price || "", oninput: (e) => { p.price = Math.round(+e.target.value || 0); } }))))));
   draw();
+  const trialBox = h("div", {});
+  api("GET", "m/reptrial").then((t) => {
+    const p = t.policy, st = t.stats || {};
+    const [tOn, tBox] = check("هر حساب تلگرام یک پنل تستی رایگان بگیرد (ربات اصلی و مینی‌اپ)", p.on);
+    const gb = h("input", { type: "number", inputmode: "decimal", value: p.gb || 5 });
+    const days = h("input", { type: "number", inputmode: "numeric", value: p.days || "", placeholder: "۰ = بی‌پایان" });
+    const mc = h("input", { type: "number", inputmode: "numeric", value: p.max_clients || "", placeholder: "۰ = بی‌سقف" });
+    trialBox.replaceChildren(h("div", { class: "section-title" }, "🎁 پنل نمایندگی تستی"),
+      h("div", { class: "card" }, tOn, h("div", { class: "two" }, field("اعتبار رایگان (گیگ)", gb), field("مدت (روز)", days)), field("سقف کاربر", mc),
+        h("p", { class: "muted small" }, `در حال اجرا: ${num(st.running || 0)} · تمام‌شده و قفل: ${num(st.frozen || 0)}. یک روز قبل از پایان به صاحب پنل خبر می‌دهیم؛ سر مهلت کاربرهایش خاموش و پنل قفل می‌شود و با اولین شارژ پولی دائمی می‌شود.`),
+        btn("ذخیرهٔ پنل تستی", "block", async () => {
+          try { await api("POST", "m/reptrial", { on: tBox.checked, gb: +gb.value || 0, days: Math.round(+days.value || 0), max_clients: Math.round(+mc.value || 0) }); haptic("success"); toast("ذخیره شد"); }
+          catch (e) { haptic("error"); toast(e.message); }
+        }, "check")));
+  }).catch(() => {});
   return [backHead("فروش پنل نمایندگی"),
     d.pending ? h("button", { class: "card alert", onclick: () => mSet("inbox") }, mic("inbox"), h("span", {}, `${num(d.pending)} سفارش پنل منتظر تأیید`), h("b", {}, "دیدن")) : null,
     !d.has_card ? h("div", { class: "card small bad" }, "اول کارت پرداخت را در «کارت‌ها» تعریف کنید.") : null,
@@ -588,7 +603,7 @@ function ownerSaleView(d) {
     rows.length < 20 ? btn("افزودن بسته", "block ghost", () => { rows.push({ id: "", name: "", gb: 100, price: 0 }); draw(); }, "plus") : null,
     btn("ذخیره", "primary block big", async () => {
       try { await api("POST", "m/resale/sale", { enabled: onBox.checked, packages: rows }); haptic("success"); toast("ذخیره شد"); m2Reload(); } catch (e) { haptic("error"); toast(e.message); }
-    }, "check")];
+    }, "check"), trialBox];
 }
 
 // ---------- bot settings ----------

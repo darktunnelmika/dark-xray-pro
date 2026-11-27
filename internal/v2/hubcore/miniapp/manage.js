@@ -92,6 +92,14 @@ function dashView() {
   out.push(h("div", { class: "card mhead" },
     h("div", {}, h("h2", {}, d.name || ""), h("span", { class: "pill" }, roleLabel(d.role))),
     h("div", { class: "muted small" }, `فروش امروز: ${size((d.today || {}).sold || 0)} · ${num((d.today || {}).sales || 0)} مورد`)));
+  if (d.trial) {
+    const t = d.trial, left = t.end ? t.end - Date.now() / 1000 : 0;
+    const when = !t.end ? "" : left < 86400 ? `${num(Math.max(1, Math.ceil(left / 3600)))} ساعت` : `${num(Math.ceil(left / 86400))} روز`;
+    out.push(h("div", { class: `card trialbar ${t.frozen ? "bad" : left < 86400 && t.end ? "warn" : ""}` },
+      h("div", {}, h("b", {}, t.frozen ? "⛔️ مهلت پنل تستی تمام شد" : `🎁 پنل تستی${when ? `، ${when} مانده` : ""}`),
+        h("p", { class: "muted small" }, t.frozen ? "کاربرها خاموش‌اند و ساخت و تمدید قفل است. با یک شارژ، همه‌چیز همان لحظه برمی‌گردد." : "با اولین شارژ، همین پنل با همهٔ کاربرهایش دائمی می‌شود.")),
+      can("credit") ? btn("شارژ و دائمی کردن", "primary", () => mSet("wallet"), "wallet") : null));
+  }
   if (credit) out.push(credit);
   const mo = d.month || {};
   out.push(h("div", { class: "kpis money" },

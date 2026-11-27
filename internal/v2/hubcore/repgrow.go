@@ -191,8 +191,10 @@ func (s *Store) DecideRepRequest(ctx context.Context, seller string, chat int64,
 
 // RepTrial is the owner's free trial panel (main bot).
 type RepTrial struct {
-	On bool    `json:"on"`
-	GB float64 `json:"gb"` // free credit, 1–100 GB
+	On         bool    `json:"on"`
+	GB         float64 `json:"gb"`          // free credit, 1–100 GB
+	Days       int64   `json:"days"`        // the trial ends after this (0 = never); reptrial.go
+	MaxClients int64   `json:"max_clients"` // users a trial panel may make (0 = no cap)
 }
 
 func (s *Store) RepTrialPolicy(ctx context.Context) RepTrial {
@@ -207,6 +209,9 @@ func (s *Store) RepTrialPolicy(ctx context.Context) RepTrial {
 func (s *Store) PutRepTrialPolicy(ctx context.Context, t RepTrial) error {
 	if t.GB < 1 || t.GB > 100 {
 		return fmt.Errorf("%w: trial credit: 1 to 100 GB", ErrInvalid)
+	}
+	if t.Days < 0 || t.Days > 60 || t.MaxClients < 0 || t.MaxClients > 1000 {
+		return fmt.Errorf("%w: trial days 0 to 60, users 0 to 1000", ErrInvalid)
 	}
 	b, _ := json.Marshal(t)
 	return s.SetSetting(ctx, "rep_trial_panel", string(b))
@@ -232,6 +237,7 @@ func (s *Store) ClaimRepTrial(ctx context.Context, chat int64, name, username st
 	}
 	_ = s.SetSetting(ctx, "rep_trial_used:"+strconv.FormatInt(chat, 10), np.RepID)
 	_ = s.SetSetting(ctx, "rep_trial_of:"+np.RepID, strconv.FormatInt(s.now().Unix(), 10))
+	s.startRepTrial(ctx, np.RepID, t)
 	return np, nil
 }
 

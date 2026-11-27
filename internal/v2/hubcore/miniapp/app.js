@@ -741,11 +741,12 @@ function promoBanner(pr, onclick) {
 // panelTeaser: the big entry to the panel page from the shop.
 function panelTeaser() {
   if (!panelSale || !panelSale.on) return null;
-  const pr = panelSale.promo;
+  const pr = panelSale.promo, tr = panelSale.trial;
   if (pr) return promoBanner(pr, () => setTab("panel"));
   return h("button", { class: "teaser", onclick: () => setTab("panel") },
     h("span", { class: "teaser-ic" }, icon(IC.users)),
-    h("span", { class: "teaser-t" }, h("b", {}, "پنل نمایندگی بگیر"), h("small", {}, "خودت بفروش و سود کن؛ همه‌چیز داخل همین ربات")),
+    h("span", { class: "teaser-t" }, h("b", {}, tr ? "🎁 پنل نمایندگی تستی رایگان" : "پنل نمایندگی بگیر"),
+      h("small", {}, tr ? `${num(tr.gb)} گیگ اعتبار${tr.days ? ` برای ${num(tr.days)} روز` : ""}؛ بدون پرداخت امتحان کن` : "خودت بفروش و سود کن؛ همه‌چیز داخل همین ربات")),
     h("span", { class: "teaser-go" }, "←"));
 }
 function panelView() {
@@ -761,9 +762,17 @@ function panelView() {
   out.push(h("div", { class: "perks" },
     [["⚡", "ساخت کاربر در چند ثانیه"], ["📱", "مدیریت کامل از تلگرام"], ["💰", "قیمت فروش با خودت"], ["🔗", "یک لینک برای همهٔ سرورها"]]
       .map(([e, t]) => h("div", { class: "perk" }, h("span", {}, e), h("b", {}, t)))));
-  const list = panelSale.packages;
+  const tr = panelSale.trial;
+  if (tr) {
+    out.push(h("div", { class: "trialc" },
+      h("div", { class: "trialc-t" }, h("b", {}, "🎁 پنل تستی رایگان"),
+        h("span", {}, `${num(tr.gb)} گیگ اعتبار${tr.days ? `، ${num(tr.days)} روز` : ""}${tr.max_clients ? `، تا ${num(tr.max_clients)} کاربر` : ""}`),
+        h("small", {}, "همین الان، بدون پرداخت. اگر بعداً شارژ کنی، همین پنل با همهٔ کاربرهایش دائمی می‌شود.")),
+      btn("بگیر", "light", claimTrial, "gift")));
+  }
+  const list = panelSale.packages || [];
   const feat = list.length >= 3 ? list[Math.floor(list.length / 2)].id : "";
-  out.push(h("div", { class: "section-title" }, "بسته‌ها"),
+  if (list.length) out.push(h("div", { class: "section-title" }, "بسته‌ها"),
     h("div", { class: "grid" }, list.map((p) => {
       const off = p.base > p.price;
       return h("div", { class: `pkg ${p.id === feat ? "feat" : ""}` },
@@ -778,10 +787,37 @@ function panelView() {
           h("div", { class: "price" }, off ? h("s", {}, toman(p.base)) : null, h("b", {}, toman(p.price)), h("small", {}, "تومان")),
           btn("خرید", "primary", () => buyPanel(p), "card")));
     })));
+  if (!list.length) return out;
   out.push(h("div", { class: "section-title" }, "چطور کار می‌کند؟"),
     h("ol", { class: "steps card" }, h("li", {}, "یک بسته انتخاب کنید و نام کاربری پنل را بنویسید."), h("li", {}, "مبلغ را کارت‌به‌کارت کنید و رسید را همین‌جا بفرستید."),
       h("li", {}, "بعد از تأیید، پنل فعال می‌شود و مدیریتش همین‌جا در تب «مدیریت» است.")));
   return out;
+}
+
+// claimTrial opens the free trial panel (POST paneltrial) and shows its login.
+function claimTrial() {
+  const tr = panelSale.trial;
+  const go = btn("بساز", "primary", async () => {
+    go.disabled = true;
+    try {
+      const r = await api("POST", "paneltrial");
+      close(); haptic("success"); celebrate("🎉 پنل تستی تو آماده است");
+      const end = r.trial && r.trial.end ? h("p", { class: "muted small" }, `تا ${date(r.trial.end)} فعال است؛ با یک شارژ دائمی می‌شود.`) : null;
+      sheet(h("h2", {}, "🎉 پنل نمایندگی تو آماده است"),
+        h("div", { class: "summary" }, h("div", { class: "kv" }, h("span", {}, "نام کاربری"), ltr(r.username)), h("div", { class: "kv" }, h("span", {}, "رمز"), ltr(r.password)),
+          r.address ? h("div", { class: "kv" }, h("span", {}, "آدرس پنل وب"), ltr(r.address)) : null),
+        h("p", { class: "muted small" }, "رمز را جایی نگه دار؛ همین یک بار نشان داده می‌شود. لازم نیست وارد پنل وب شوی: همه‌چیز در تب «مدیریت» همین مینی‌اپ است."), end,
+        btn("کپی رمز", "", () => copy(r.password), "copy"),
+        btn("باز کردن مدیریت پنل", "primary block", () => { location.search = "?m=1"; }, "users"));
+      panelSale = undefined;
+    } catch (e) { go.disabled = false; haptic("error"); toast(e.message); }
+  }, "gift");
+  const close = sheet(h("h2", {}, "🎁 پنل نمایندگی تستی"),
+    h("p", {}, `یک پنل نمایندگی با ${num(tr.gb)} گیگ اعتبار رایگان می‌گیری تا کاربر بسازی و امتحان کنی.`),
+    h("ol", { class: "steps" }, tr.days ? h("li", {}, `${num(tr.days)} روز فرصت داری؛ یک روز قبل از پایان خبرت می‌کنیم.`) : null,
+      tr.max_clients ? h("li", {}, `تا ${num(tr.max_clients)} کاربر می‌توانی بسازی.`) : null,
+      h("li", {}, "با اولین شارژ، همین پنل با همهٔ کاربرهایش دائمی می‌شود."), h("li", {}, "هر حساب تلگرام فقط یک بار.")),
+    h("div", { class: "row" }, go, btn("انصراف", "", () => close())));
 }
 
 function buyPanel(p) {
@@ -847,6 +883,7 @@ function layoutTabs() {
     const mid = make("panel", "نمایندگی", IC.users, "mid");
     const old = mid.querySelector(".mid-pct"); if (old) old.remove();
     if (panelSale.promo && panelSale.promo.percent) mid.querySelector(".mid-ic").append(h("i", { class: "mid-pct" }, `${num(panelSale.promo.percent)}٪`));
+    else if (panelSale.trial) mid.querySelector(".mid-ic").append(h("i", { class: "mid-pct" }, "رایگان"));
     order.splice(Math.floor(order.length / 2), 0, mid);
   }
   tabs.replaceChildren(...order.filter(Boolean));
