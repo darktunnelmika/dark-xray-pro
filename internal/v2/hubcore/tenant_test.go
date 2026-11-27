@@ -378,6 +378,7 @@ func TestClientQueriesAreReviewed(t *testing.T) {
 		"hubcore/dailycap.go":   1, // one client's daily cap, by name (any client may be capped)
 		"hubcore/reportxlsx.go": 2, // traffic: one reseller's clients (rep_id=?) or all but connected shops'
 		"hubcore/customers.go":  1, // a chat's services with this seller (rep_id = the bot's seller)
+		"hubcore/reptrial.go":   1, // one trial reseller's enabled clients (rep_id=?), to freeze them
 		// the external API (v2.67): counts and usage by reseller (rep_id=r.id); one
 		// reseller's clients; names checked across every client (one name space,
 		// any letter case); the event scan leaves connected shops out

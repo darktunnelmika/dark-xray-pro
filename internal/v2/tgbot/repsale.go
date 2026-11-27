@@ -479,7 +479,11 @@ func (b *Bot) repSaleDecide(ctx context.Context, chat, id int64, approve bool) {
 	}
 	if o.Kind == "topup" {
 		b.send(ctx, chat, fmt.Sprintf("✅ سفارش #%s تحویل شد: %s به پنل <code>%s</code> اضافه شد.", faInt(o.ID), gbWord(o.GB), esc(o.RepID)), nil)
-		b.send(ctx, o.Chat, fmt.Sprintf("✅ <b>پنل شما شارژ شد</b>\n%s\n%s اضافه شد.\nاعتبار فعلی: <b>%s</b>", line, gbWord(o.GB), gb(b.Store.RepCredit(ctx, o.RepID))), homeKB)
+		extra := ""
+		if res.Converted {
+			extra = "\n\n🎉 پنل تستی شما <b>دائمی</b> شد و همهٔ کاربرهایش دوباره روشن شدند."
+		}
+		b.send(ctx, o.Chat, fmt.Sprintf("✅ <b>پنل شما شارژ شد</b>\n%s\n%s اضافه شد.\nاعتبار فعلی: <b>%s</b>%s", line, gbWord(o.GB), gb(b.Store.RepCredit(ctx, o.RepID)), extra), homeKB)
 		return
 	}
 	b.send(ctx, chat, fmt.Sprintf("✅ سفارش #%s تحویل شد: پنل <code>%s</code> با %s اعتبار ساخته شد.", faInt(o.ID), esc(o.RepID), gbWord(o.GB)), nil)

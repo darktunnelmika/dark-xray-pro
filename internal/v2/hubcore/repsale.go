@@ -295,6 +295,8 @@ type RepOrderResult struct {
 	Bill     int64   // a resale paid by a bill: its id (0 = from the wallet)
 	Wallet   int64   // a wallet top-up: the balance after it
 	Settled  []int64 // a wallet top-up: bills it paid
+	// Converted: the top-up made a trial panel a normal one (reptrial.go).
+	Converted bool
 }
 
 // ApproveRepOrder delivers a paid order once: a new reseller with a login,
@@ -406,6 +408,13 @@ func (s *Store) ApproveRepOrder(ctx context.Context, actor, seller string, id in
 			return res, fmt.Errorf("the panel %s was created but its credit was not added: %w", o.RepID, err)
 		}
 		return undo(err)
+	}
+	if o.Kind == "topup" && o.Price > 0 && s.IsTrialPanel(ctx, o.RepID) {
+		// A paid top-up makes a trial panel a normal one (reptrial.go).
+		if err := s.ConvertRepTrial(ctx, o.RepID); err != nil {
+			return res, fmt.Errorf("the panel %s was charged but is still a trial: %w", o.RepID, err)
+		}
+		res.Converted = true
 	}
 	return res, nil
 }

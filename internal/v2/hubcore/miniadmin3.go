@@ -2,8 +2,10 @@ package hubcore
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 )
 
@@ -95,7 +97,11 @@ func (s *Store) mgrDecidePanel(ctx context.Context, m miniMgr, id int64, ok bool
 	case "wallet":
 		s.tell(ctx, o.Chat, fmt.Sprintf("✅ کیف پول شما %s تومان شارژ شد. موجودی: %s تومان.", thousands(o.Price), thousands(res.Wallet)))
 	case "topup":
-		s.tellFrom(ctx, o.Seller, o.Chat, fmt.Sprintf("✅ پنل شما شارژ شد: %d گیگ اضافه شد.\nاعتبار فعلی: %d گیگ", o.GB, s.RepCredit(ctx, o.RepID)>>30))
+		msg := fmt.Sprintf("✅ پنل شما شارژ شد: %d گیگ اضافه شد.\nاعتبار فعلی: %d گیگ", o.GB, s.RepCredit(ctx, o.RepID)>>30)
+		if res.Converted {
+			msg += "\n\n🎉 پنل تستی شما دائمی شد و همهٔ کاربرهایش دوباره روشن شدند."
+		}
+		s.tellFrom(ctx, o.Seller, o.Chat, msg)
 	default:
 		s.tellFrom(ctx, o.Seller, o.Chat, fmt.Sprintf("🎉 پنل نمایندگی شما آماده است\n🌐 آدرس: %s\n👤 نام کاربری: %s\n🔑 رمز موقت: %s\n💳 اعتبار: %d گیگ\n\nهمین ربات هم برای شما به حالت نمایندگی رفته است: /start را بزنید و «📱 پنل مدیریت» را باز کنید.",
 			miniBase, o.RepID, res.Password, o.GB))
@@ -356,6 +362,16 @@ func registerMiniAdmin3(mux *http.ServeMux, s *Store,
 		}
 		return !(rep == "" && role != "")
 	}
+	// trialFor: the main bot's free trial panel, for a chat that runs or
+	// helps run no panel and has not had one.
+	trialFor := func(ctx context.Context, seller string, chat int64) (RepTrial, bool) {
+		t := s.RepTrialPolicy(ctx)
+		if seller != "" || !t.On || s.RepTrialUsed(ctx, chat) || slices.Contains(s.TelegramOwners(ctx), chat) {
+			return t, false
+		}
+		rep, role := s.TgRepRole(ctx, chat)
+		return t, rep == "" && role == "" && s.TgRep(ctx, chat) == ""
+	}
 	mux.HandleFunc("GET /app/api/panels", func(w http.ResponseWriter, r *http.Request) {
 		u, seller, okb := buyer(w, r)
 		if !okb {
@@ -379,7 +395,66 @@ func registerMiniAdmin3(mux *http.ServeMux, s *Store,
 			list = append(list, map[string]any{"id": p.ID, "name": p.Name, "gb": p.GB, "price": price, "base": base, "unlimited": p.AllowUnlimited, "units": p.Units,
 				"max_clients": p.MaxClients, "max_days": p.MaxDays, "can_delete": p.CanDelete})
 		}
-		reply(w, map[string]any{"on": len(list) > 0, "packages": list, "promo": s.promoView(ctx, seller)}, nil)
+		out := map[string]any{"on": len(list) > 0, "packages": list, "promo": s.promoView(ctx, seller)}
+		if t, ok := trialFor(ctx, seller, u.ID); ok {
+			out["trial"] = map[string]any{"gb": t.GB, "days": t.Days, "max_clients": t.MaxClients}
+			out["on"] = true
+		}
+		reply(w, out, nil)
+	})
+	// The free trial panel from the Mini App (main bot), as the bot's "tpn".
+	mux.HandleFunc("POST /app/api/paneltrial", func(w http.ResponseWriter, r *http.Request) {
+		u, seller, okb := buyer(w, r)
+		if !okb {
+			return
+		}
+		ctx := r.Context()
+		if _, ok := trialFor(ctx, seller, u.ID); !ok {
+			http.Error(w, "پنل تستی برای این حساب در دسترس نیست.", http.StatusForbidden)
+			return
+		}
+		np, err := s.ClaimRepTrial(ctx, u.ID, strings.TrimSpace(u.FirstName), u.Username)
+		if err != nil {
+			if errors.Is(err, ErrTrialUsed) {
+				http.Error(w, "شما قبلاً پنل تستی گرفته‌اید.", http.StatusConflict)
+				return
+			}
+			miniErr(w, err)
+			return
+		}
+		go notifyOwners(context.Background(), fmt.Sprintf("🎁 پنل تستی نمایندگی از مینی‌اپ برای %s ساخته شد (%s).", u.FirstName, np.RepID))
+		reply(w, map[string]any{"username": np.Username, "password": np.Password, "address": miniBase, "trial": s.RepTrialStateOf(ctx, np.RepID)}, nil)
+	})
+	// The owner's trial-panel settings.
+	mux.HandleFunc("GET /app/api/m/reptrial", func(w http.ResponseWriter, r *http.Request) {
+		m, okm := mgr(w, r)
+		if !okm || deny(w, m, "sellers") {
+			return
+		}
+		if !m.Owner {
+			http.Error(w, "فقط مدیر پنل.", http.StatusForbidden)
+			return
+		}
+		reply(w, map[string]any{"policy": s.RepTrialPolicy(r.Context()), "stats": s.RepTrialStats(r.Context())}, nil)
+	})
+	mux.HandleFunc("POST /app/api/m/reptrial", func(w http.ResponseWriter, r *http.Request) {
+		m, okm := mgr(w, r)
+		if !okm || deny(w, m, "sellers") {
+			return
+		}
+		if !m.Owner {
+			http.Error(w, "فقط مدیر پنل.", http.StatusForbidden)
+			return
+		}
+		var in RepTrial
+		if !read(w, r, &in) {
+			return
+		}
+		if err := s.PutRepTrialPolicy(r.Context(), in); err != nil {
+			http.Error(w, "اعتبار ۱ تا ۱۰۰ گیگ، مدت ۰ تا ۶۰ روز و سقف کاربر ۰ تا ۱۰۰۰.", http.StatusBadRequest)
+			return
+		}
+		reply(w, map[string]any{"ok": true}, nil)
 	})
 	mux.HandleFunc("POST /app/api/panel", func(w http.ResponseWriter, r *http.Request) {
 		u, seller, okb := buyer(w, r)

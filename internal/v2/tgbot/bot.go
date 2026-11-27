@@ -222,6 +222,7 @@ func (b *Bot) Tick(ctx context.Context) {
 	b.deliverReminders(ctx)
 	b.remindTrials(ctx)
 	b.remindBills(ctx)
+	b.repTrialPanels(ctx)
 }
 
 func (b *Bot) send(ctx context.Context, chat int64, text string, kb *Keyboard) int64 {

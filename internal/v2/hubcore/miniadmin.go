@@ -252,6 +252,11 @@ func (s *Store) mgrHome(ctx context.Context, m miniMgr) (map[string]any, error) 
 	}
 	out["pending"] = map[string]int{"orders": pend, "topups": len(tops), "panels": panels}
 	out["resale"] = m.can("sellers") && (m.Owner || (!s.IsSubSeller(ctx, m.Seller) && s.ResaleOf(ctx, m.Seller).Allowed))
+	if !m.Owner {
+		if st := s.RepTrialStateOf(ctx, m.Seller); st.Trial {
+			out["trial"] = st
+		}
+	}
 	if m.can("tickets") {
 		open := 0
 		if ts, err := s.Tickets(ctx, m.P, "open", 200); err == nil {

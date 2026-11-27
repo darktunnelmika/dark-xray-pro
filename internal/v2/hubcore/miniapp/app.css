@@ -404,3 +404,13 @@ button.tile > svg { box-sizing: content-box; padding: 8px; border-radius: 12px; 
 .swatch { inline-size: 12px; block-size: 12px; border-radius: 50%; display: inline-block; vertical-align: -1px; }
 .ccard select { inline-size: 100%; padding: 10px 12px; border-radius: 13px; border: 1px solid var(--line); background: var(--surface-2); color: var(--text); font: inherit; }
 @media (prefers-reduced-motion: reduce) { .wcard-ic.spin, .wheel-hub { animation: none; } }
+
+/* ---------- trial reseller panel ---------- */
+.trialc { position: relative; overflow: hidden; display: flex; align-items: center; gap: 12px; padding: 16px; border-radius: 20px; color: #fff;
+  background: radial-gradient(120% 140% at 100% 0%, #10b981, transparent 60%), linear-gradient(135deg, #059669, #0e7490); box-shadow: 0 12px 30px rgb(16 185 129 / .3); }
+.trialc-t { flex: 1; min-inline-size: 0; display: grid; gap: 2px; } .trialc-t b { font-size: 17px; } .trialc-t span { font-weight: 700; } .trialc-t small { opacity: .85; font-size: 12px; }
+.trialc .btn { flex: none; white-space: nowrap; }
+.card.trialbar { display: grid; gap: 10px; border-color: color-mix(in oklab, #10b981 45%, var(--line)); background: color-mix(in oklab, #10b981 10%, var(--surface)); }
+.card.trialbar.warn { border-color: color-mix(in oklab, var(--warn) 50%, var(--line)); background: color-mix(in oklab, var(--warn) 10%, var(--surface)); }
+.card.trialbar.bad { border-color: color-mix(in oklab, var(--bad) 50%, var(--line)); background: color-mix(in oklab, var(--bad) 10%, var(--surface)); }
+.card.trialbar p { margin: 2px 0 0; } .card.trialbar .btn { white-space: nowrap; }
