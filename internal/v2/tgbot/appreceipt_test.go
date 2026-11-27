@@ -52,9 +52,9 @@ func TestAppReceipt(t *testing.T) {
 	out := api.take()
 	find(t, out, buyerID, "مینی‌اپ")
 	find(t, out, ownerID, "شارژ کیف پول")
-	// The same payment again: nothing waits for it any more.
-	if err := b.AppReceipt(ctx, buyerID, "U", "topup", id, []byte("img")); !errors.Is(err, hubcore.ErrNotFound) {
-		t.Fatalf("second %v", err)
+	// A payment that does not exist.
+	if err := b.AppReceipt(ctx, buyerID, "U", "panel", 999, []byte("img")); !errors.Is(err, hubcore.ErrNotFound) {
+		t.Fatalf("unknown %v", err)
 	}
 	// A chat the bot cannot write to.
 	api.fail = ErrBlocked
