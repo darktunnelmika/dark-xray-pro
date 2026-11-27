@@ -533,7 +533,7 @@ func (s *Store) pruneAPIWebhooks(ctx context.Context) error {
 
 // eventRoutes serves a target's events and webhook under prefix
 // (/api/v2/partner, /api/v2/reseller), behind the "events" scope.
-func (s *Store) eventRoutes(mux *http.ServeMux, prefix string, auth extAuthFunc, target func(apiCaller) string, known []string) {
+func (s *Store) eventRoutes(mux routeMux, prefix string, auth extAuthFunc, target func(apiCaller) string, known []string) {
 	mux.HandleFunc("GET "+prefix+"/events", s.ext(auth, "events", func(w http.ResponseWriter, r *http.Request, c apiCaller) {
 		q := r.URL.Query()
 		after, _ := strconv.ParseInt(q.Get("after"), 10, 64)

@@ -431,6 +431,12 @@ func pageOf[T any](all []T, p listPage) listOut[T] {
 
 // ---- the request pipeline ----
 
+// routeMux is where routes are registered (an *http.ServeMux; a recorder
+// in tests).
+type routeMux interface {
+	HandleFunc(pattern string, handler func(http.ResponseWriter, *http.Request))
+}
+
 // extAuthFunc finds the key behind a request.
 type extAuthFunc func(r *http.Request) (apiCaller, error)
 

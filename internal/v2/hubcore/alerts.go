@@ -21,10 +21,11 @@ type AlertSettings struct {
 	RAMPercent  int  `json:"ram_percent"`  // 0 = off
 	ReportHours int  `json:"report_hours"` // the bot's report: every N hours (24 = daily)
 	Nodes       bool `json:"nodes"`        // a node or its Xray going down and coming back (on by default)
+	Partner     bool `json:"partner"`      // partner API keys making panels, adding or taking credit, deleting (on by default)
 }
 
 func (s *Store) Alerts(ctx context.Context) AlertSettings {
-	a := AlertSettings{Login: s.Setting(ctx, "alert_login") == "1", ReportHours: 24, Nodes: s.Setting(ctx, "alert_nodes") != "0"}
+	a := AlertSettings{Login: s.Setting(ctx, "alert_login") == "1", ReportHours: 24, Nodes: s.Setting(ctx, "alert_nodes") != "0", Partner: s.Setting(ctx, "alert_partner") != "0"}
 	a.CPUPercent, _ = strconv.Atoi(s.Setting(ctx, "alert_cpu"))
 	a.RAMPercent, _ = strconv.Atoi(s.Setting(ctx, "alert_ram"))
 	if h, err := strconv.Atoi(s.Setting(ctx, "tg_report_hours")); err == nil && h > 0 {
@@ -50,7 +51,11 @@ func (s *Store) PutAlerts(ctx context.Context, a AlertSettings) error {
 	if a.Nodes {
 		nodesOn = "1"
 	}
-	for k, v := range map[string]string{"alert_nodes": nodesOn, "alert_login": login, "alert_cpu": strconv.Itoa(a.CPUPercent), "alert_ram": strconv.Itoa(a.RAMPercent), "tg_report_hours": strconv.Itoa(a.ReportHours)} {
+	partner := "0"
+	if a.Partner {
+		partner = "1"
+	}
+	for k, v := range map[string]string{"alert_partner": partner, "alert_nodes": nodesOn, "alert_login": login, "alert_cpu": strconv.Itoa(a.CPUPercent), "alert_ram": strconv.Itoa(a.RAMPercent), "tg_report_hours": strconv.Itoa(a.ReportHours)} {
 		if err := s.SetSetting(ctx, k, v); err != nil {
 			return err
 		}

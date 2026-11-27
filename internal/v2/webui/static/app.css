@@ -1161,3 +1161,10 @@ dialog.wide:has(.cform) { inline-size: min(780px, calc(100vw - 20px)); }
 .pk-list { display: grid; gap: 8px; }
 .pk-row { display: grid; gap: 8px; }
 .code-block { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; padding: 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-2); margin: 0; }
+
+/* External API: permissions and the guide */
+fieldset.scopes { display: grid; gap: 6px; border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; margin: 0; min-inline-size: 0; }
+fieldset.scopes legend { padding: 0 4px; font-size: 13px; }
+.api-docs .api-sec { border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; }
+.api-docs .api-sec > summary { cursor: pointer; font-weight: 600; padding: 4px 0; }
+.api-docs .api-sec[open] > summary { margin-block-end: 6px; }

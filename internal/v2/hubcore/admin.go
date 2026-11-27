@@ -38,9 +38,10 @@ func AdminHandlerWith(s *Store, adminToken, subBase string, ui http.Handler, ext
 	if ui != nil {
 		mux.Handle("GET /", ui)
 	}
-	pgRoutes(s, mux.ServeMux, subBase)       // PasarGuard-compatible API for sales bots (pgapi.go)
-	partnerRoutes(s, mux.ServeMux)           // keys that make reseller panels (partner.go)
-	resellerRoutes(s, mux.ServeMux, subBase) // resellers' own bots and sites (resapi.go)
+	pgRoutes(s, mux.ServeMux, subBase)        // PasarGuard-compatible API for sales bots (pgapi.go)
+	partnerRoutes(s, mux.ServeMux)            // keys that make reseller panels (partner.go)
+	resellerRoutes(s, mux.ServeMux, subBase)  // resellers' own bots and sites (resapi.go)
+	openAPIRoute(s, mux.ServeMux, adminToken) // their description (openapi.go)
 	// member lets owners and representatives in; handlers read the caller
 	// with who(r). guard is owner-only and is the default for everything else.
 	member := func(h http.HandlerFunc) http.HandlerFunc {

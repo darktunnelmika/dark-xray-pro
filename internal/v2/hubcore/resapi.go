@@ -493,7 +493,7 @@ func (s *Store) apiSellers(ctx context.Context, parent, id string) ([]APISeller,
 	return out, nil
 }
 
-func resellerRoutes(s *Store, mux *http.ServeMux, subBase string) {
+func resellerRoutes(s *Store, mux routeMux, subBase string) {
 	auth := s.resellerCaller
 	route := func(pattern, scope string, h extHandler) { mux.HandleFunc(pattern, s.ext(auth, scope, h)) }
 	const P = "/api/v2/reseller"

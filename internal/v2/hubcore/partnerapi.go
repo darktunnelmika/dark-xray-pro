@@ -397,6 +397,15 @@ func (s *Store) endRepSessions(ctx context.Context, repID string) (int64, error)
 	return r.RowsAffected()
 }
 
+// partnerNotice tells the owners on Telegram what a partner key did,
+// unless they turned it off (Settings → Telegram → alerts).
+func (s *Store) partnerNotice(ctx context.Context, key, text string) {
+	if s.Setting(ctx, "alert_partner") == "0" {
+		return
+	}
+	notifyOwners(context.WithoutCancel(ctx), "🤝 API پارتنر «"+key+"»\n"+text)
+}
+
 func panelEvent(p PartnerPanel, extra map[string]any) map[string]any {
 	m := map[string]any{"id": p.ID, "name": p.Name, "username": p.Username, "external_ref": p.ExternalRef,
 		"credit_gb": p.CreditGB, "units": p.Units, "enabled": p.Enabled}
@@ -406,7 +415,7 @@ func panelEvent(p PartnerPanel, extra map[string]any) map[string]any {
 	return m
 }
 
-func partnerRoutes(s *Store, mux *http.ServeMux) {
+func partnerRoutes(s *Store, mux routeMux) {
 	auth := s.partnerCaller
 	route := func(pattern, scope string, h extHandler) { mux.HandleFunc(pattern, s.ext(auth, scope, h)) }
 	fail := func(w http.ResponseWriter, err error) {
@@ -659,6 +668,7 @@ func partnerRoutes(s *Store, mux *http.ServeMux) {
 		p.PanelURL, p.Password = s.panelAddress(r), strings.TrimSpace(in.Password)
 		p.Message = partnerMessage(p.PanelURL, p.Username, p.Password, p.Name)
 		s.emitAPIEvent(ctx, partnerTarget(k.ID), "panel.created", panelEvent(p, map[string]any{"package": p.Package}))
+		s.partnerNotice(ctx, k.Name, fmt.Sprintf("➕ پنل نمایندگی تازه: %s (%s)\n💾 %s گیگ · %d واحد", p.Name, p.ID, fmtGB(p.CreditGB), p.Units))
 		apiJSON(w, http.StatusOK, p)
 	})
 	route("PATCH /api/v2/partner/reps/{id}", scopePanelsWrite, func(w http.ResponseWriter, r *http.Request, c apiCaller) {
@@ -786,6 +796,7 @@ func partnerRoutes(s *Store, mux *http.ServeMux) {
 		s.partnerUngive(ctx, c.KeyID, leftBytes, leftUnits)
 		out := map[string]any{"ok": true, "id": p.ID, "clients_deleted": n, "released_gb": roundGB(float64(leftBytes) / gibF), "released_units": leftUnits}
 		s.emitAPIEvent(ctx, partnerTarget(c.KeyID), "panel.deleted", panelEvent(p, out))
+		s.partnerNotice(ctx, c.Name, fmt.Sprintf("🗑 پنل %s (%s) حذف شد · %d کاربر", p.Name, p.ID, n))
 		apiJSON(w, http.StatusOK, out)
 	})
 	route("POST /api/v2/partner/reps/{id}/credit", scopeCreditAdd, func(w http.ResponseWriter, r *http.Request, c apiCaller) {
@@ -817,6 +828,7 @@ func partnerRoutes(s *Store, mux *http.ServeMux) {
 			return
 		}
 		s.emitAPIEvent(ctx, partnerTarget(c.KeyID), "panel.credit_added", panelEvent(np, map[string]any{"added_gb": in.CreditGB, "added_units": in.Units}))
+		s.partnerNotice(ctx, c.Name, fmt.Sprintf("💳 اعتبار به %s (%s): +%s گیگ · +%d واحد", np.Name, np.ID, fmtGB(in.CreditGB), in.Units))
 		apiJSON(w, http.StatusOK, np)
 	})
 	route("POST /api/v2/partner/reps/{id}/credit/revoke", scopeCreditRevoke, func(w http.ResponseWriter, r *http.Request, c apiCaller) {
@@ -848,6 +860,7 @@ func partnerRoutes(s *Store, mux *http.ServeMux) {
 			return
 		}
 		s.emitAPIEvent(ctx, partnerTarget(c.KeyID), "panel.credit_revoked", panelEvent(np, map[string]any{"revoked_gb": in.CreditGB, "revoked_units": in.Units}))
+		s.partnerNotice(ctx, c.Name, fmt.Sprintf("↩️ اعتبار پس گرفته شد از %s (%s): −%s گیگ · −%d واحد", np.Name, np.ID, fmtGB(in.CreditGB), in.Units))
 		apiJSON(w, http.StatusOK, np)
 	})
 	route("GET /api/v2/partner/reps/{id}/ledger", scopePanelsRead, func(w http.ResponseWriter, r *http.Request, c apiCaller) {
@@ -1013,3 +1026,5 @@ func partnerRoutes(s *Store, mux *http.ServeMux) {
 	s.eventRoutes(mux, "/api/v2/partner", auth, func(c apiCaller) string { return partnerTarget(c.KeyID) }, partnerEvents)
 	s.loginLinkRoute(mux)
 }
+
+func fmtGB(v float64) string { return strconv.FormatFloat(roundGB(v), 'f', -1, 64) }

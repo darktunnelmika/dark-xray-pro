@@ -91,7 +91,7 @@ func (s *Store) useLoginLink(ctx context.Context, tok string) (user, session str
 	return user, session, nil
 }
 
-func (s *Store) loginLinkRoute(mux *http.ServeMux) {
+func (s *Store) loginLinkRoute(mux routeMux) {
 	mux.HandleFunc("GET "+loginLinkPath+"{token}", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
 		w.Header().Set("Referrer-Policy", "no-referrer")
